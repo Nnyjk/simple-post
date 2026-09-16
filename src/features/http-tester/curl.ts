@@ -5,28 +5,15 @@
  * string, env var replacement via `{{var}}`). Body handling is intentionally
  * minimal: any non-`none` body mode with content becomes `--data-raw` and a
  * matching Content-Type header is added for `json` if not already present.
- *
- * NOT handled (out of scope for UI-POLISH Task 3):
- *   - Auth (bearer / basic / apikey) — callers can add their own headers
- *   - Multipart / form-urlencoded boundary generation
- *   - Cookies, proxies, follow-redirects (cURL defaults are fine for pasting)
  */
 import type { Endpoint, Environment, HttpMethod } from '@/types/domain';
+import { resolveVars } from '@/lib/url';
 
 export interface EndpointOverrides {
   /** Override `endpoint.url` (e.g. user has an unsaved draft). */
   url?: string;
   /** Override `endpoint.method` (e.g. user picked a different verb in the bar). */
   method?: HttpMethod;
-}
-
-const VAR_PATTERN = /\{\{(\w+)\}\}/g;
-
-function resolveVars(input: string, env: Environment | undefined): string {
-  return input.replace(VAR_PATTERN, (_, key: string) => {
-    const v = env?.variables[key];
-    return v ?? `{{${key}}}`;
-  });
 }
 
 /** POSIX-shell single-quote escape: 'foo' → 'foo', it's → 'it'\''s'. */

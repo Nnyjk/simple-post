@@ -125,8 +125,8 @@ function BodyContent({ value, onChange, formatError }: BodyContentProps) {
         />
       </div>
       {formatError && (
-        <div className="mt-2 flex items-start gap-1.5 rounded-md border border-red-500/30 bg-red-500/5 px-2.5 py-1.5 text-xs text-red-400">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <div className="alert-error-inline">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span>格式化失败：{formatError}</span>
         </div>
       )}
@@ -135,8 +135,8 @@ function BodyContent({ value, onChange, formatError }: BodyContentProps) {
           className={cn(
             'mt-2 flex items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-xs',
             valid
-              ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400'
-              : 'border-amber-500/20 bg-amber-500/5 text-amber-400',
+              ? 'border-success/20 bg-success/5 text-success-foreground'
+              : 'border-warning/20 bg-warning/5 text-warning-foreground',
           )}
         >
           {valid ? (

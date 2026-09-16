@@ -187,12 +187,12 @@ export function TopBar() {
                     <Circle
                       className={cn(
                         'h-2 w-2',
-                        env.id === activeEnv?.id ? 'fill-emerald-400 text-emerald-400' : 'text-muted-foreground/40',
+                        env.id === activeEnv?.id ? 'fill-success text-success' : 'text-muted-foreground/40',
                       )}
                     />
                     <span className="font-mono text-xs">{env.name}</span>
                     {env.id === activeEnv?.id && (
-                      <span className="ml-auto text-[10px] text-emerald-400">active</span>
+                      <span className="ml-auto text-[10px] text-success">active</span>
                     )}
                   </button>
                 ))}

@@ -73,10 +73,9 @@ export interface Endpoint {
   auth: AuthConfig;
   docs?: string;
   /**
-   * Long-form markdown notes shown in the title-bar expansion. Kept
-   * separate from `docs` so the user can keep the existing
-   * full-page docs untouched while filling in a quick description
-   * inline. Both fields render markdown.
+   * Markdown notes for the endpoint. Kept separate from `docs` so the
+   * user can keep the full-page docs untouched while filling in a quick
+   * description inline.
    */
   notes?: string;
   tags: string[];
@@ -139,13 +138,7 @@ export interface Project {
   id: string;
   name: string;
   description?: string;
-  /**
-   * @deprecated The single legacy `baseUrl` field is gone. Use
-   * `baseUrlDefinitions` to declare which baseUrl names exist for
-   * this project, and `Environment.baseUrls[defId]` to hold the
-   * per-env URL. Kept here only for migration; new code should not
-   * reference it.
-   */
+  /** @deprecated Use `baseUrlDefinitions` and `Environment.baseUrls[defId]` instead. The `baseUrl` field is kept for backward compatibility; new code should not reference it. */
   baseUrl?: string;
   /**
    * The named baseUrl slots this project exposes. Each env maps each

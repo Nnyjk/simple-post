@@ -97,7 +97,7 @@ export function TreeContextMenu({ open, x, y, items, onClose }: TreeContextMenuP
               it.disabled
                 ? 'cursor-not-allowed text-muted-foreground/50'
                 : it.danger
-                  ? 'text-red-400 hover:bg-red-500/10'
+                  ? 'text-destructive hover:bg-destructive/10'
                   : 'text-foreground hover:bg-accent',
             )}
           >

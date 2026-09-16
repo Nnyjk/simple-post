@@ -20,6 +20,10 @@
     --secondary-foreground: 240 6% 10%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --success-foreground: 142 71% 30%;
+    --warning: 38 92% 45%;
+    --warning-foreground: 28 80% 35%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5% 64.9%;
@@ -46,6 +50,10 @@
     --secondary-foreground: 240 6% 10%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --success-foreground: 142 71% 30%;
+    --warning: 38 92% 45%;
+    --warning-foreground: 28 80% 35%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5% 64.9%;
@@ -62,6 +70,10 @@
     --muted-foreground: 240 5% 64.9%;
     --accent: 240 6% 14%;
     --accent-foreground: 0 0% 98%;
+    --success: 142 71% 45%;
+    --success-foreground: 142 71% 75%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 38 92% 75%;
     --border: 240 6% 16%;
     --input: 240 6% 14%;
     --ring: 240 5% 64.9%;
@@ -132,9 +144,7 @@
   }
 }
 
-/* Lightweight markdown styles for the inline notes panel + Docs tab.
-   Kept here (not via @tailwindcss/typography) so we don't add a dep
-   for a few headings and a code block. */
+/* Lightweight markdown styles for the Docs tab. Kept here (not via @tailwindcss/typography) to avoid an extra dependency for a few headings and a code block. */
 .markdown-prose {
   @apply text-foreground;
 }
@@ -176,4 +186,14 @@
 }
 .markdown-prose hr {
   @apply my-3 border-border;
+}
+
+@layer components {
+  /* Inline alert bar — auto-adapts to light/dark via semantic tokens. */
+  .alert-warning-inline {
+    @apply shrink-0 border-b bg-warning/5 px-2.5 py-1.5 text-xs text-warning-foreground;
+  }
+  .alert-error-inline {
+    @apply mt-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive-foreground;
+  }
 }

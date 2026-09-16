@@ -11,9 +11,9 @@ export function Badge({ variant = 'default', className, children, ...props }: Ba
     default: 'bg-primary/15 text-primary border-primary/20',
     outline: 'bg-transparent text-foreground border-border',
     muted: 'bg-muted text-muted-foreground border-transparent',
-    success: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
-    warning: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
-    destructive: 'bg-red-500/15 text-red-400 border-red-500/20',
+    success: 'bg-success/15 text-success-foreground border-success/20',
+    warning: 'bg-warning/15 text-warning-foreground border-warning/20',
+    destructive: 'bg-destructive/10 text-destructive-foreground border-destructive/20',
   }[variant];
 
   return (

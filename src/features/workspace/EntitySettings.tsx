@@ -1,28 +1,4 @@
 /**
- * `useLocalExpansion` — local-only expand/collapse state for sub-list
- * rows inside the right-side EntitySettings panel.
- *
- * We intentionally do NOT call `toggleModuleExpanded` / `toggleCollectionExpanded`
- * from the settings: that mutates `module.expanded` / `collection.expanded`,
- * which the left-side tree also reads. Sharing that field would couple
- * the two surfaces — collapsing a module in the right pane would silently
- * collapse it in the left tree, which is jarring. A per-tab local Set
- * keeps the right pane's expand state private to the right pane.
- */
-function useLocalExpansion() {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const isExpanded = (id: string) => expanded.has(id);
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  return { isExpanded, toggle };
-}
-
-/**
  * EntitySettings — config panels for project / module / collection tabs.
  *
  * These three entity kinds have no HTTP request of their own, so the
@@ -59,14 +35,16 @@ import { useAppStore, type TabKind } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import { Badge } from '@/components/ui/badge';
 import { cn, methodColorVar } from '@/lib/utils';
+import { useLocalExpansion } from '@/hooks/useLocalExpansion';
+import { Section, Field, EmptyHint, NotFound, ColorRow } from '@/components/ui/section';
+import { InlineEdit } from '@/components/ui/InlineEdit';
 
 interface EntitySettingsProps {
   kind: TabKind;
   entityId: string;
 }
-
-const PROJECT_COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f87171', '#a3a3a3'];
 
 // ----------------------------------------------------------------
 //  public component
@@ -213,20 +191,21 @@ function ProjectSettings({ projectId, editState }: { projectId: string; editStat
                       isDefault && 'border-primary/40',
                     )}
                   >
-                    <Globe className="h-3.5 w-3.5 shrink-0 text-blue-400/80" />
-                    <InlineEditableName
+                    <Globe className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+                    <InlineEdit
                       value={def.name}
-                      onCommit={(name) =>
+                      onSave={(name) =>
                         updateBaseUrlDefinition(project.id, def.id, { name })
                       }
-                      onEditStart={editState.onStart}
-                      onEditEnd={editState.onEnd}
                       className="flex-1 text-xs font-medium"
+                      display={() => (
+                        <span className="cursor-text rounded-sm px-1 py-0.5 hover:bg-accent/80">
+                          {def.name}
+                        </span>
+                      )}
                     />
                     {isDefault && (
-                      <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
-                        默认
-                      </span>
+                      <Badge variant="success">默认</Badge>
                     )}
                     <Tooltip
                       content={isDefault ? '已是默认 baseUrl' : '设为默认 baseUrl'}
@@ -237,8 +216,8 @@ function ProjectSettings({ projectId, editState }: { projectId: string; editStat
                         className={cn(
                           'h-6 w-6',
                           isDefault
-                            ? 'text-amber-400'
-                            : 'text-muted-foreground/60 hover:text-amber-400',
+                            ? 'text-warning-foreground'
+                            : 'text-muted-foreground/60 hover:text-warning-foreground',
                         )}
                         onClick={() =>
                           setDefaultBaseUrlDefinition(
@@ -254,7 +233,7 @@ function ProjectSettings({ projectId, editState }: { projectId: string; editStat
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 text-muted-foreground/70 hover:text-red-400"
+                      className="h-6 w-6 text-muted-foreground/70 hover:text-destructive"
                       onClick={() => {
                         if (
                           window.confirm(
@@ -426,7 +405,7 @@ function ModuleSettings({ moduleId, editState }: { moduleId: string; editState: 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SettingsHeader
-        icon={<FolderOpen className="h-4 w-4 text-amber-400" />}
+        icon={<FolderOpen className="h-4 w-4 text-warning" />}
         badge="模块"
         breadcrumb={project ? { label: project.name, onClick: () => openTab('project', project.id) } : undefined}
         title={mod.name}
@@ -515,7 +494,7 @@ function CollectionSettings({ collectionId, editState }: { collectionId: string;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SettingsHeader
-        icon={<FolderOpen className="h-4 w-4 text-blue-400" />}
+        icon={<FolderOpen className="h-4 w-4 text-primary" />}
         badge="集合"
         breadcrumbs={[
           ...(project
@@ -712,84 +691,6 @@ function DescriptionField({
   );
 }
 
-function Section({
-  title,
-  right,
-  children,
-}: {
-  title: string;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border-b border-border/60 px-5 py-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {title}
-        </h2>
-        {right}
-      </div>
-      <div className="space-y-3">{children}</div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block max-w-2xl space-y-1">
-      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
-      {children}
-      {hint && <span className="block text-[10px] text-muted-foreground/70">{hint}</span>}
-    </label>
-  );
-}
-
-function ColorRow({ value, onChange }: { value: string; onChange: (c: string) => void }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {PROJECT_COLORS.map((c) => (
-        <button
-          key={c}
-          type="button"
-          onClick={() => onChange(c)}
-          aria-label={`选择颜色 ${c}`}
-          className={cn(
-            'h-5 w-5 rounded-full transition-all',
-            value === c
-              ? 'ring-2 ring-ring ring-offset-2 ring-offset-card'
-              : 'opacity-70 hover:opacity-100',
-          )}
-          style={{ backgroundColor: c }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function EmptyHint({ text }: { text: string }) {
-  return (
-    <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-[11px] text-muted-foreground">
-      {text}
-    </div>
-  );
-}
-
-function NotFound({ label }: { label: string }) {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      {label}已被删除。
-    </div>
-  );
-}
-
 // ----------------------------------------------------------------
 //  Environment block — used inside project settings
 // ----------------------------------------------------------------
@@ -881,9 +782,7 @@ function EnvironmentBlock({
             </span>
           )}
           {isActive && (
-            <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
-              active
-            </span>
+            <Badge variant="success">active</Badge>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -895,7 +794,7 @@ function EnvironmentBlock({
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 text-muted-foreground/70 hover:text-red-400"
+            className="h-6 w-6 text-muted-foreground/70 hover:text-destructive"
             onClick={onDelete}
             aria-label={`删除环境 ${name}`}
             title="删除环境"
@@ -1043,16 +942,19 @@ function ModuleRow({
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </span>
         {expanded ? (
-          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-400/80" />
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-warning/80" />
         ) : (
-          <FolderClosed className="h-3.5 w-3.5 shrink-0 text-amber-400/80" />
+          <FolderClosed className="h-3.5 w-3.5 shrink-0 text-warning/80" />
         )}
-        <InlineEditableName
+        <InlineEdit
           value={module.name}
-          onCommit={onRename}
-          onEditStart={editState.onStart}
-          onEditEnd={editState.onEnd}
+          onSave={onRename}
           className="flex-1 font-medium"
+          display={() => (
+            <span className="cursor-text rounded-sm px-1 py-0.5 hover:bg-accent/80">
+              {module.name}
+            </span>
+          )}
         />
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {collectionCount} / {endpointCount}
@@ -1127,16 +1029,19 @@ function CollectionRow({
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </span>
         {expanded ? (
-          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-blue-400/80" />
+          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/80" />
         ) : (
-          <FolderClosed className="h-3.5 w-3.5 shrink-0 text-blue-400/80" />
+          <FolderClosed className="h-3.5 w-3.5 shrink-0 text-primary/80" />
         )}
-        <InlineEditableName
+        <InlineEdit
           value={collection.name}
-          onCommit={onRename}
-          onEditStart={editState.onStart}
-          onEditEnd={editState.onEnd}
+          onSave={onRename}
           className="flex-1 font-medium"
+          display={() => (
+            <span className="cursor-text rounded-sm px-1 py-0.5 hover:bg-accent/80">
+              {collection.name}
+            </span>
+          )}
         />
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {endpointCount} 个接口
@@ -1203,12 +1108,15 @@ function EndpointRow({
       {readOnlyName ? (
         <span className="flex-1 truncate text-muted-foreground">{endpoint.name}</span>
       ) : (
-        <InlineEditableName
+        <InlineEdit
           value={endpoint.name}
-          onCommit={onRename}
-          onEditStart={editState.onStart}
-          onEditEnd={editState.onEnd}
+          onSave={onRename}
           className="flex-1 truncate font-medium"
+          display={() => (
+            <span className="cursor-text truncate rounded-sm px-1 py-0.5 hover:bg-accent/80">
+              {endpoint.name}
+            </span>
+          )}
         />
       )}
       <span
@@ -1218,78 +1126,5 @@ function EndpointRow({
         {endpoint.url}
       </span>
     </li>
-  );
-}
-
-/**
- * Inline-editable name cell. Single click does nothing, double-click
- * swaps the text for an Input. Commits on Enter / blur, reverts on
- * Escape. The parent owns the persisted value.
- */
-function InlineEditableName({
-  value,
-  onCommit,
-  className,
-  onEditStart,
-  onEditEnd,
-}: {
-  value: string;
-  onCommit: (next: string) => void;
-  className?: string;
-  onEditStart?: () => void;
-  onEditEnd?: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  useEffect(() => {
-    if (!editing) setDraft(value);
-  }, [value, editing]);
-  // Fire onEditStart exactly once when we transition into edit mode
-  // (and onEditEnd when we leave). useEffect with the editing flag
-  // is the cleanest way to express "between renders" without races.
-  useEffect(() => {
-    if (editing) onEditStart?.();
-    else onEditEnd?.();
-    // We intentionally do not include onEditStart / onEditEnd in the
-    // dep array — they may be inline lambdas from the parent and we
-    // only want to fire on the editing transition.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing]);
-  if (editing) {
-    return (
-      <Input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          const next = draft.trim();
-          if (next && next !== value) onCommit(next);
-          else setDraft(value);
-          setEditing(false);
-        }}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          else if (e.key === 'Escape') {
-            setDraft(value);
-            setEditing(false);
-          }
-        }}
-        onClick={(e) => e.stopPropagation()}
-        className={cn('h-6 font-medium', className)}
-        autoFocus
-      />
-    );
-  }
-  return (
-    <span
-      onDoubleClick={(e) => {
-        e.stopPropagation();
-        setEditing(true);
-      }}
-      className={cn('cursor-text rounded-sm px-1 py-0.5 hover:bg-accent/80', className)}
-      title="双击重命名"
-    >
-      {value}
-    </span>
   );
 }

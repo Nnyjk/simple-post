@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Play,
   Save,
@@ -12,6 +12,7 @@ import { useAppStore, useActiveEndpoint, useActiveEnvironment } from '@/stores/a
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { InlineEdit } from '@/components/ui/InlineEdit';
 import { MethodPicker } from '@/components/ui/method-picker';
 import { BaseUrlPicker, type BaseUrlSelection } from '@/components/ui/base-url-picker';
 import { TagInput } from '@/components/ui/tag-input';
@@ -75,38 +76,10 @@ export function HttpTester() {
   const draft = useAppStore((s) =>
     endpoint ? s.endpointDrafts[endpoint.id] : undefined,
   );
-  // Whenever the active endpoint changes, drop any in-flight name/description
-  // edit so the user doesn't accidentally commit a draft into the *next*
-  // endpoint after switching tabs mid-rename.
-  const lastEndpointIdRef = useRef<string | null>(endpoint?.id ?? null);
-  useEffect(() => {
-    if (endpoint && endpoint.id !== lastEndpointIdRef.current) {
-      lastEndpointIdRef.current = endpoint.id;
-      setEditingName(false);
-      setEditingDescription(false);
-    } else if (!endpoint) {
-      lastEndpointIdRef.current = null;
-    }
-  }, [endpoint]);
-
-  // Name / description double-click → inline edit. Mirrors the
-  // SettingsHeader pattern: a boolean editing flag + a local draft,
-  // Enter / blur commits, Esc reverts. The persisted value lives on
-  // the endpoint itself, so we re-sync the draft whenever the active
-  // endpoint changes (or when an outside source — the tree, another
-  // tab — updates the name).
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState('');
-  const [editingDescription, setEditingDescription] = useState(false);
-  const [descriptionDraft, setDescriptionDraft] = useState('');
-  useEffect(() => {
-    if (endpoint && !editingName) setNameDraft(endpoint.name);
-  }, [endpoint, editingName]);
-  useEffect(() => {
-    if (endpoint && !editingDescription) {
-      setDescriptionDraft(endpoint.description ?? '');
-    }
-  }, [endpoint, editingDescription]);
+  // Name / description editing is owned by `<InlineEdit>` (keyed by
+  // `endpoint.id` so the editor unmounts and resets whenever the active
+  // endpoint changes — no manual "clear edit state on tab switch"
+  // bookkeeping needed here).
 
   // EnvVarPicker state — opens when the user types `{{` in the URL input.
   // The picker is presentational: HttpTester owns the selected index and the
@@ -279,8 +252,8 @@ export function HttpTester() {
     let badge: React.ReactNode = null;
     if (t.id === 'params' && enabledParams) badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledParams}</span>;
     if (t.id === 'headers' && enabledHeaders) badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledHeaders}</span>;
-    if (t.id === 'body' && hasBody) badge = <span className="rounded bg-blue-500/20 px-1 text-[10px] text-blue-300">●</span>;
-    if (t.id === 'auth' && hasAuth) badge = <span className="rounded bg-amber-500/20 px-1 text-[10px] text-amber-300">●</span>;
+    if (t.id === 'body' && hasBody) badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;
+    if (t.id === 'auth' && hasAuth) badge = <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>;
     return { id: t.id, label: t.label, badge, disabled: t.disabled };
   });
 
@@ -362,47 +335,21 @@ export function HttpTester() {
       <div className="flex shrink-0 items-start gap-2 border-b border-border px-4 py-2.5">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            {editingName ? (
-              <Input
-                value={nameDraft}
-                onChange={(e) => setNameDraft(e.target.value)}
-                onBlur={() => {
-                  const next = nameDraft.trim();
-                  if (next && next !== endpoint.name) {
-                    updateEndpoint(endpoint.id, { name: next });
-                  } else {
-                    setNameDraft(endpoint.name);
-                  }
-                  setEditingName(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    // Commit + stop the Enter from reaching the TagInput
-                    // sibling (which would otherwise interpret it as
-                    // "add current value as a tag").
-                    e.preventDefault();
-                    e.stopPropagation();
-                    (e.target as HTMLInputElement).blur();
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setNameDraft(endpoint.name);
-                    setEditingName(false);
-                  }
-                }}
-                className="h-7 max-w-md text-sm font-semibold"
-                autoFocus
-                data-testid="endpoint-name-input"
-              />
-            ) : (
-              <h1
-                onDoubleClick={() => setEditingName(true)}
-                className="cursor-text truncate rounded-sm px-1 py-0.5 text-sm font-semibold hover:bg-accent/60"
-                title="双击重命名"
-              >
-                {endpoint.name}
-              </h1>
-            )}
+            <InlineEdit
+              key={`name-${endpoint.id}`}
+              value={endpoint.name}
+              onSave={(next) => updateEndpoint(endpoint.id, { name: next })}
+              testId="endpoint-name-input"
+              className="max-w-md text-sm font-semibold"
+              display={() => (
+                <h1
+                  className="cursor-text truncate rounded-sm px-1 py-0.5 text-sm font-semibold hover:bg-accent/60"
+                  title="双击重命名"
+                >
+                  {endpoint.name}
+                </h1>
+              )}
+            />
             <TagInput
               value={endpoint.tags}
               onChange={(tags) => updateEndpoint(endpoint.id, { tags })}
@@ -410,53 +357,32 @@ export function HttpTester() {
               className="min-w-[140px] max-w-[320px] border-transparent bg-transparent px-1 py-0.5 focus-within:ring-0 focus-within:ring-offset-0"
             />
           </div>
-          {/* Description — always-visible single-line input. Double-click
-              also activates it; the same EditableDescriptionField shape
-              is used so a stray click doesn't accidentally eat focus. */}
-          {editingDescription ? (
-            <Input
-              value={descriptionDraft}
-              onChange={(e) => setDescriptionDraft(e.target.value)}
-              onBlur={() => {
-                const next = descriptionDraft.trim();
-                const current = endpoint.description ?? '';
-                if (next !== current) {
-                  updateEndpoint(endpoint.id, { description: next || undefined });
-                } else {
-                  setDescriptionDraft(current);
-                }
-                setEditingDescription(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  (e.target as HTMLInputElement).blur();
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setDescriptionDraft(endpoint.description ?? '');
-                  setEditingDescription(false);
-                }
-              }}
-              className="mt-0.5 h-6 max-w-2xl text-xs"
-              placeholder="一句话说明这个接口的用途…"
-              autoFocus
-              data-testid="endpoint-description-input"
-            />
-          ) : (
-            <p
-              onDoubleClick={() => setEditingDescription(true)}
-              className={cn(
-                'mt-0.5 cursor-text truncate rounded-sm px-1 text-xs text-muted-foreground',
-                'hover:bg-accent/60',
-                !endpoint.description && 'italic text-muted-foreground/50',
-              )}
-              title="双击编辑描述"
-            >
-              {endpoint.description || '双击添加描述…'}
-            </p>
-          )}
+          <InlineEdit
+            key={`desc-${endpoint.id}`}
+            value={endpoint.description ?? ''}
+            onSave={(next) =>
+              updateEndpoint(endpoint.id, { description: next || undefined })
+            }
+            // Description legitimately allows clearing — without this, an
+            // empty draft is treated as a cancel and the field keeps its old
+            // value instead of going back to "no description".
+            commitEmpty
+            testId="endpoint-description-input"
+            className="mt-0.5 h-6 max-w-2xl text-xs"
+            placeholder="一句话说明这个接口的用途…"
+            display={() => (
+              <p
+                className={cn(
+                  'mt-0.5 cursor-text truncate rounded-sm px-1 text-xs text-muted-foreground',
+                  'hover:bg-accent/60',
+                  !endpoint.description && 'italic text-muted-foreground/50',
+                )}
+                title="双击编辑描述"
+              >
+                {endpoint.description || '双击添加描述…'}
+              </p>
+            )}
+          />
         </div>
       </div>
 
@@ -530,7 +456,7 @@ export function HttpTester() {
             variant="outline"
             size="sm"
             onClick={handleCopyCurl}
-            className={cn('h-9 gap-1.5', curlFlash && 'text-emerald-400')}
+            className={cn('h-9 gap-1.5', curlFlash && 'text-success')}
             data-testid="copy-curl-btn"
           >
             {curlFlash ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}

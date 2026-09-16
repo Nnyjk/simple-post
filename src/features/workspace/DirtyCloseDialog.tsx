@@ -112,7 +112,7 @@ export function DirtyCloseDialog() {
       disableBackdropClose
       title={
         <span className="flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning-foreground" />
           <span>关闭未保存的{current.kindLabel}？</span>
         </span>
       }

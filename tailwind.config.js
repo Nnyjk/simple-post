@@ -35,6 +35,23 @@ export default {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
         },
+        // Semantic status colors — light/dark aware via the matching
+        // CSS variables in src/styles/globals.css. Components reach for
+        // `bg-success / text-warning-foreground / border-destructive/30`
+        // rather than hardcoded emerald-500/amber-500/red-500 hexes so
+        // dark-mode and future theme tweaks stay centralized.
+        success: {
+          DEFAULT: 'hsl(var(--success))',
+          foreground: 'hsl(var(--success-foreground))',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
         // HTTP method colors
         method: {
           GET: 'hsl(142 71% 45%)',

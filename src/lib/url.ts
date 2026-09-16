@@ -101,20 +101,38 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
 }
 
 /**
- * Resolve a string of the form `{{varName}}` against a `Record<string,string>`.
- * Unknown variables are left intact (e.g. `{{missing}}` stays as `{{missing}}`)
- * so the user can see what's missing in the request preview instead of
- * silently turning into `undefined`.
+ * Resolve a string of the form `{{varName}}` against a variable pool.
+ * Accepts either an `Environment` (in which case `env.variables` is used)
+ * or a raw `Record<string,string>`. Unknown variables are left intact
+ * (e.g. `{{missing}}` stays as `{{missing}}`) so the user can see what's
+ * missing in the request preview instead of silently turning into
+ * `undefined`.
  */
 export function resolveVars(
   input: string,
-  vars: Record<string, string> | undefined,
+  vars: Environment | Record<string, string> | undefined,
 ): string {
   if (!input) return '';
+  // `Environment` carries the variables under `.variables`; a raw record
+  // is the map itself. Discriminate via `Environment.baseUrls` (a nested
+  // object) — a plain Record<string,string> would yield `string` there.
+  const map: Record<string, string> | undefined =
+    isEnvironment(vars) ? vars.variables : vars;
   return input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-    const v = vars?.[key];
+    const v = map?.[key];
     return v ?? `{{${key}}}`;
   });
+}
+
+function isEnvironment(
+  v: Environment | Record<string, string> | undefined,
+): v is Environment {
+  return (
+    !!v &&
+    typeof v === 'object' &&
+    typeof (v as Environment).baseUrls === 'object' &&
+    !Array.isArray((v as Environment).baseUrls)
+  );
 }
 
 // Re-export the picker-facing types so callers don't need a second

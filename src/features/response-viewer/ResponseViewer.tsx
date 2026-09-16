@@ -80,7 +80,7 @@ export function ResponseViewer() {
             <Button
               variant="ghost"
               size="icon"
-              className={cn('h-7 w-7', savedFlash && 'text-emerald-400')}
+              className={cn('h-7 w-7', savedFlash && 'text-success')}
               onClick={handleSaveAsExample}
               disabled={!endpoint}
               data-testid="save-example-btn"
@@ -181,7 +181,7 @@ function PrettyView({ body, formatted }: { body: string; formatted: boolean }) {
     return (
       <div className="flex h-full flex-col">
         {showInvalidNotice && (
-          <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-400">
+          <div className="alert-warning-inline">
             响应不是合法 JSON，仅展示原文
           </div>
         )}
@@ -195,7 +195,7 @@ function PrettyView({ body, formatted }: { body: string; formatted: boolean }) {
   return (
     <div className="flex h-full flex-col">
       {showInvalidNotice && (
-        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-400">
+        <div className="alert-warning-inline">
           响应不是合法 JSON，仅展示原文
         </div>
       )}
@@ -225,7 +225,7 @@ function HeadersView({ headers }: { headers: Record<string, string> }) {
         <tbody>
           {Object.entries(headers).map(([k, v]) => (
             <tr key={k} className="border-b border-border/50 last:border-0">
-              <td className="w-1/3 py-1.5 pr-4 align-top font-mono text-xs text-blue-400">
+              <td className="w-1/3 py-1.5 pr-4 align-top font-mono text-xs text-muted-foreground">
                 {k}
               </td>
               <td className="py-1.5 align-top font-mono text-xs text-foreground/90 break-all">

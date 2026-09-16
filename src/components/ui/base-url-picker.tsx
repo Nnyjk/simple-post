@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from './input';
+import { Badge } from './badge';
 import type { BaseUrlDefinition } from '@/types/domain';
 
 /**
@@ -188,7 +189,7 @@ export function BaseUrlPicker({
                 icon={<span className="text-blue-400/80">●</span>}
                 primary={def.name}
                 secondary={def.id === defaultDefinitionId ? '项目默认' : ''}
-                trailing={def.id === defaultDefinitionId ? <span className="rounded bg-emerald-500/15 px-1 text-[9px] text-emerald-400">default</span> : null}
+                trailing={def.id === defaultDefinitionId ? <Badge variant="success">默认</Badge> : null}
               />
             ))}
             <li className="my-1 border-t border-border/60" />

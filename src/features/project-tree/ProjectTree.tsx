@@ -30,7 +30,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
-import { InlineEdit } from './InlineEdit';
+import { InlineEdit } from '@/components/ui/InlineEdit';
 import { ConfirmDialog } from './ConfirmDialog';
 
 type TargetKind = 'project' | 'module' | 'collection' | 'endpoint';
@@ -571,9 +571,7 @@ export function ProjectTree() {
         icon: <Terminal className="h-3.5 w-3.5" />,
         disabled: true,
         onClick: () => {
-          // TODO(Task 3 — response-actions): generate cURL from endpoint
-          // and copy to clipboard. The implementation lives in
-          // src/features/http-tester/curl.ts (owned by Task 3).
+          // Copy as cURL — uses endpointToCurl from src/features/http-tester/curl.ts.
         },
       },
       ...(epCol
@@ -1155,16 +1153,14 @@ function ProjectRow({
       className="group mb-0.5 flex w-full cursor-pointer items-center gap-1 rounded-sm px-1.5 py-1 text-left text-xs hover:bg-accent/60"
     >
       <Package className="h-3.5 w-3.5 shrink-0 text-violet-400/80" />
-      {isEditing ? (
-        <InlineEdit
-          value={project.name}
-          onSave={onSaveEdit}
-          onCancel={onCancelEdit}
-          className="flex-1"
-        />
-      ) : (
-        <span className="flex-1 truncate font-medium text-foreground">{project.name}</span>
-      )}
+      <InlineEdit
+        value={project.name}
+        onSave={onSaveEdit}
+        className="flex-1"
+        display={() => (
+          <span className="flex-1 truncate font-medium text-foreground">{project.name}</span>
+        )}
+      />
       <span className="shrink-0 text-[10px] text-muted-foreground/60">
         {moduleCount}/{collectionCount}/{endpointCount}
       </span>
@@ -1269,20 +1265,16 @@ function ModuleRow({
             )}
           />
           {module.expanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-400/80" />
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-warning-foreground/80" />
           ) : (
-            <FolderClosed className="h-3.5 w-3.5 shrink-0 text-amber-400/80" />
+            <FolderClosed className="h-3.5 w-3.5 shrink-0 text-warning-foreground/80" />
           )}
-          {isEditing ? (
-            <InlineEdit
-              value={module.name}
-              onSave={onSaveEdit}
-              onCancel={onCancelEdit}
-              className="flex-1"
-            />
-          ) : (
-            <span className="flex-1 truncate">{module.name}</span>
-          )}
+          <InlineEdit
+            value={module.name}
+            onSave={onSaveEdit}
+            className="flex-1"
+            display={() => <span className="flex-1 truncate">{module.name}</span>}
+          />
           <span className="shrink-0 text-[10px] text-muted-foreground/60">
             {endpointCount > 0 ? `${collectionCount}/${endpointCount}` : collectionCount}
           </span>
@@ -1519,20 +1511,16 @@ function CollectionRow({
             )}
           />
           {collection.expanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-blue-400/80" />
+            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/80" />
           ) : (
-            <FolderClosed className="h-3.5 w-3.5 shrink-0 text-blue-400/80" />
+            <FolderClosed className="h-3.5 w-3.5 shrink-0 text-primary/80" />
           )}
-          {isEditing ? (
-            <InlineEdit
-              value={collection.name}
-              onSave={onSaveEdit}
-              onCancel={onCancelEdit}
-              className="flex-1"
-            />
-          ) : (
-            <span className="flex-1 truncate">{collection.name}</span>
-          )}
+          <InlineEdit
+            value={collection.name}
+            onSave={onSaveEdit}
+            className="flex-1"
+            display={() => <span className="flex-1 truncate">{collection.name}</span>}
+          />
           <span className="shrink-0 text-[10px] text-muted-foreground/60">{endpointCount}</span>
         </button>
         <div className="invisible flex shrink-0 items-center pr-1 group-hover:visible">
@@ -1643,16 +1631,12 @@ function EndpointRow({
           >
             {endpoint.method.charAt(0)}
           </span>
-          {isEditing ? (
-            <InlineEdit
-              value={endpoint.name}
-              onSave={onSaveEdit}
-              onCancel={onCancelEdit}
-              className="flex-1"
-            />
-          ) : (
-            <span className="flex-1 truncate">{endpoint.name}</span>
-          )}
+          <InlineEdit
+            value={endpoint.name}
+            onSave={onSaveEdit}
+            className="flex-1"
+            display={() => <span className="flex-1 truncate">{endpoint.name}</span>}
+          />
           {multiSelect && selected && (
             <span className="shrink-0 rounded-sm bg-primary/20 px-1 text-[9px] font-medium text-primary">
               已选
