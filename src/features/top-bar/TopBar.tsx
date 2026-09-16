@@ -273,14 +273,14 @@ function McpStatus() {
           <span
             className={cn(
               'absolute inset-0 animate-ping rounded-full',
-              running ? 'bg-emerald-400' : 'bg-zinc-500',
+              running ? 'bg-success' : 'bg-zinc-500',
             )}
             style={{ opacity: 0.4 }}
           />
           <span
             className={cn(
               'relative inline-flex h-2 w-2 rounded-full',
-              running ? 'bg-emerald-400' : 'bg-zinc-500',
+              running ? 'bg-success' : 'bg-zinc-500',
             )}
           />
         </span>
