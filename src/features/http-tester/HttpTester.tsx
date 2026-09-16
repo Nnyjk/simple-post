@@ -7,14 +7,7 @@ import {
   Plus,
   Check,
   X,
-  ChevronDown,
-  ChevronRight,
-  NotebookPen,
-  Eye,
-  Pencil,
-  Columns2,
 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
 import { useAppStore, useActiveEndpoint, useActiveEnvironment } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -82,29 +75,19 @@ export function HttpTester() {
   const draft = useAppStore((s) =>
     endpoint ? s.endpointDrafts[endpoint.id] : undefined,
   );
-  // Whenever the active endpoint changes, also reset the local notes
-  // expansion so a long-form edit on endpoint A doesn't keep showing
-  // on endpoint B. The notes value itself is per-endpoint and follows
-  // the active endpoint. We also drop any in-flight name/description
-  // edit so the user doesn't accidentally commit a draft into the
-  // *next* endpoint after switching tabs mid-rename.
+  // Whenever the active endpoint changes, drop any in-flight name/description
+  // edit so the user doesn't accidentally commit a draft into the *next*
+  // endpoint after switching tabs mid-rename.
   const lastEndpointIdRef = useRef<string | null>(endpoint?.id ?? null);
   useEffect(() => {
     if (endpoint && endpoint.id !== lastEndpointIdRef.current) {
       lastEndpointIdRef.current = endpoint.id;
-      setNotesOpen(false);
       setEditingName(false);
       setEditingDescription(false);
     } else if (!endpoint) {
       lastEndpointIdRef.current = null;
     }
   }, [endpoint]);
-
-  // Inline notes expansion under the title bar. Local state — collapse on
-  // endpoint switch is fine; the value lives in `endpoint.notes` so it
-  // follows the user across tabs/sessions.
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [notesMode, setNotesMode] = useState<'edit' | 'preview' | 'split'>('split');
 
   // Name / description double-click → inline edit. Mirrors the
   // SettingsHeader pattern: a boolean editing flag + a local draft,
@@ -475,43 +458,7 @@ export function HttpTester() {
             </p>
           )}
         </div>
-        <Tooltip
-          content={notesOpen ? '收起详细说明' : '展开详细说明（Markdown）'}
-          side="bottom"
-        >
-          <button
-            type="button"
-            aria-label={notesOpen ? '收起详细说明' : '展开详细说明'}
-            aria-expanded={notesOpen}
-            onClick={() => setNotesOpen((v) => !v)}
-            className={cn(
-              'flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-medium transition-colors',
-              notesOpen
-                ? 'bg-primary/15 text-primary'
-                : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
-            )}
-          >
-            <NotebookPen className="h-3 w-3" />
-            <span>详细说明</span>
-            {notesOpen ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
-          </button>
-        </Tooltip>
       </div>
-
-      {/* Inline notes expansion. Sits between the header and the URL bar
-          so it doesn't push the request editor out of view when closed. */}
-      {notesOpen && (
-        <EndpointNotesPanel
-          value={endpoint.notes ?? ''}
-          onChange={(notes) => updateEndpoint(endpoint.id, { notes })}
-          mode={notesMode}
-          onModeChange={setNotesMode}
-        />
-      )}
 
       {/* URL bar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 py-2.5">
@@ -668,120 +615,5 @@ export function HttpTester() {
         envName={endpointEnv?.name}
       />
     </section>
-  );
-}
-
-// ----------------------------------------------------------------
-// EndpointNotesPanel — inline markdown editor for the title-bar expansion.
-//
-// Self-contained, so it can re-render independently from the request
-// tester above. The parent owns the open/close state and the persisted
-// `endpoint.notes` string; this component only handles the three
-// edit/preview/split view modes.
-// ----------------------------------------------------------------
-
-function EndpointNotesPanel({
-  value,
-  onChange,
-  mode,
-  onModeChange,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  mode: 'edit' | 'preview' | 'split';
-  onModeChange: (m: 'edit' | 'preview' | 'split') => void;
-}) {
-  // Track empty state separately so the placeholder copy can show.
-  const empty = value.trim().length === 0;
-  return (
-    <div className="flex shrink-0 flex-col border-b border-border bg-card/30">
-      <div className="flex items-center gap-1 px-4 py-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          详细说明
-        </span>
-        <span className="text-[10px] text-muted-foreground/60">
-          Markdown · 用于补充 description
-        </span>
-        <div className="ml-auto inline-flex items-center rounded-md border border-border bg-background/40 p-0.5 text-[10px]">
-          <ModeButton
-            active={mode === 'edit'}
-            onClick={() => onModeChange('edit')}
-            icon={<Pencil className="h-3 w-3" />}
-            label="编辑"
-          />
-          <ModeButton
-            active={mode === 'split'}
-            onClick={() => onModeChange('split')}
-            icon={<Columns2 className="h-3 w-3" />}
-            label="分屏"
-          />
-          <ModeButton
-            active={mode === 'preview'}
-            onClick={() => onModeChange('preview')}
-            icon={<Eye className="h-3 w-3" />}
-            label="预览"
-          />
-        </div>
-      </div>
-      <div
-        className={cn(
-          'grid min-h-[120px] max-h-[260px]',
-          mode === 'split' ? 'grid-cols-2' : 'grid-cols-1',
-        )}
-      >
-        {mode !== 'preview' && (
-          <textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={'# 用法说明\n\n这个接口做什么、什么时候调用、需要注意什么…\n\n```js\n示例代码\n```'}
-            spellCheck={false}
-            className={cn(
-              'min-h-[120px] max-h-[260px] resize-y bg-transparent px-4 py-2 font-mono text-[12px] leading-relaxed',
-              'placeholder:text-muted-foreground/40 focus:outline-none',
-              mode === 'split' && 'border-r border-border',
-            )}
-          />
-        )}
-        {mode !== 'edit' && (
-          <div className="min-h-[120px] max-h-[260px] overflow-auto bg-background/30 px-4 py-2 text-xs leading-relaxed">
-            {empty ? (
-              <p className="text-muted-foreground/50">（暂无内容 — 在左侧编辑）</p>
-            ) : (
-              <div className="markdown-prose">
-                <ReactMarkdown>{value}</ReactMarkdown>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ModeButton({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 transition-colors',
-        active
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:text-foreground',
-      )}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }

@@ -53,7 +53,7 @@ export function DocsEditor({ value, onChange }: Props) {
         {(mode === 'preview' || mode === 'split') && (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {value.trim() ? (
-              <article className="prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-headings:font-semibold prose-p:text-foreground/90 prose-a:text-blue-400 prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-popover prose-pre:border prose-pre:border-border">
+              <article className="markdown-prose">
                 <ReactMarkdown>{value}</ReactMarkdown>
               </article>
             ) : (

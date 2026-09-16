@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { formatBytes, formatDuration, statusColorVar, cn } from '@/lib/utils';
 import { tryFormatJson } from '@/lib/json-format';
+import { useIsDark } from '@/lib/theme';
+import { lightCodeTheme } from '@/lib/codemirror-themes';
 import { ResponseHistory } from './ResponseHistory';
 
 export function ResponseViewer() {
@@ -166,6 +168,7 @@ export function ResponseViewer() {
 function PrettyView({ body, formatted }: { body: string; formatted: boolean }) {
   const formatResult = useMemo(() => tryFormatJson(body), [body]);
   const isJson = formatResult.ok;
+  const isDark = useIsDark();
 
   const displayed = useMemo(() => {
     if (formatted && formatResult.ok) return formatResult.formatted;
@@ -200,7 +203,7 @@ function PrettyView({ body, formatted }: { body: string; formatted: boolean }) {
         <CodeMirror
           value={displayed}
           extensions={[json()]}
-          theme={oneDark}
+          theme={isDark ? oneDark : lightCodeTheme}
           editable={false}
           basicSetup={{
             lineNumbers: true,

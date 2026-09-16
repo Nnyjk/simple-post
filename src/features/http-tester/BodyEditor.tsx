@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import { AlertTriangle, CheckCircle2, Wand2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { tryFormatJson } from '@/lib/json-format';
+import { useIsDark } from '@/lib/theme';
+import { lightCodeTheme } from '@/lib/codemirror-themes';
 
 interface Props {
   value: RequestBody;
@@ -88,6 +90,7 @@ export function BodyEditor({ value, onChange }: Props) {
 
 function BodyContent({ value, onChange, formatError }: BodyContentProps) {
   const [touched, setTouched] = useState(false);
+  const isDark = useIsDark();
 
   const { valid, error } = useMemo(() => {
     if (value.mode !== 'json') return { valid: true, error: null as string | null };
@@ -110,7 +113,7 @@ function BodyContent({ value, onChange, formatError }: BodyContentProps) {
             onChange({ ...value, content: v });
           }}
           extensions={value.mode === 'json' ? [json()] : []}
-          theme={oneDark}
+          theme={isDark ? oneDark : lightCodeTheme}
           basicSetup={{
             lineNumbers: true,
             foldGutter: true,
