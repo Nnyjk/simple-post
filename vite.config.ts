@@ -22,4 +22,21 @@ export default defineConfig({
   },
   clearScreen: false,
   envPrefix: ['VITE_', 'TAURI_'],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // 把重型 vendor 拆出主 chunk,避免单文件 > 500kB 警告
+          react: ['react', 'react-dom'],
+          codemirror: [
+            '@uiw/react-codemirror',
+            '@codemirror/lang-json',
+            '@codemirror/theme-one-dark',
+          ],
+          markdown: ['react-markdown'],
+          state: ['zustand'],
+        },
+      },
+    },
+  },
 });
