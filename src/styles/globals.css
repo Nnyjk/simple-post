@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5% 64.9%;
+    --radius: 0.5rem;
+  }
+
+  /* Explicit `.light` block — identical to :root since light is the
+   * default (Tailwind darkMode: 'class' toggles `.dark` on <html>).
+   * Defined for clarity; consumers can also just leave the class off. */
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5% 64.9%;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 8% 7%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 5%;
+    --popover-foreground: 0 0% 98%;
+    --muted: 240 6% 11%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 6% 14%;
+    --accent-foreground: 0 0% 98%;
+    --border: 240 6% 16%;
+    --input: 240 6% 14%;
+    --ring: 240 5% 64.9%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-card border border-border rounded-lg;
+  }
+
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background;
+  }
+
+  .method-badge {
+    @apply inline-flex items-center justify-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white;
+  }
+
+  /* Single-letter method marker used in the work tree and tab strip.
+     A fixed square footprint keeps every row the same width regardless
+     of the underlying verb (POST vs DELETE etc.), and the colour does
+     all the heavy lifting. */
+  .method-letter {
+    @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[10px] font-semibold text-white;
+  }
+
+  .kbd {
+    @apply inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-mono rounded border border-border bg-muted text-muted-foreground;
+  }
+}
+
+/* Lightweight markdown styles for the inline notes panel + Docs tab.
+   Kept here (not via @tailwindcss/typography) so we don't add a dep
+   for a few headings and a code block. */
+.markdown-prose {
+  @apply text-foreground;
+}
+.markdown-prose h1,
+.markdown-prose h2,
+.markdown-prose h3,
+.markdown-prose h4 {
+  @apply mt-3 mb-1.5 font-semibold;
+}
+.markdown-prose h1 { @apply text-base; }
+.markdown-prose h2 { @apply text-sm; }
+.markdown-prose h3 { @apply text-[13px]; }
+.markdown-prose h4 { @apply text-xs uppercase tracking-wider text-muted-foreground; }
+.markdown-prose p { @apply my-1.5; }
+.markdown-prose ul { @apply my-1.5 list-disc pl-5; }
+.markdown-prose ol { @apply my-1.5 list-decimal pl-5; }
+.markdown-prose li { @apply my-0.5; }
+.markdown-prose code:not(pre code) {
+  @apply rounded bg-muted px-1 py-0.5 font-mono text-[11px];
+}
+.markdown-prose pre {
+  @apply my-2 overflow-x-auto rounded-md border border-border bg-muted/60 p-2 font-mono text-[11px] leading-relaxed;
+}
+.markdown-prose pre code {
+  @apply bg-transparent p-0 text-foreground;
+}
+.markdown-prose blockquote {
+  @apply my-2 border-l-2 border-border pl-3 italic text-muted-foreground;
+}
+.markdown-prose a {
+  @apply text-primary underline-offset-2 hover:underline;
+}
+.markdown-prose table {
+  @apply my-2 w-full border-collapse text-[11px];
+}
+.markdown-prose th,
+.markdown-prose td {
+  @apply border border-border px-2 py-1 text-left;
+}
+.markdown-prose hr {
+  @apply my-3 border-border;
+}
