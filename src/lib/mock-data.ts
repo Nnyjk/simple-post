@@ -22,7 +22,7 @@ export const mockProjects: Project[] = [
       { id: 'def_default', name: '默认' },
     ],
     defaultBaseUrlDefinitionId: 'def_default',
-    baseUrl: 'https://api.demo.dev',
+    baseUrl: 'http://localhost:4000/demo',
     color: '#60a5fa',
     createdAt: now - 30 * day,
     updatedAt: now - 1 * day,
@@ -35,7 +35,7 @@ export const mockProjects: Project[] = [
       { id: 'def_default', name: '默认' },
     ],
     defaultBaseUrlDefinitionId: 'def_default',
-    baseUrl: 'https://invoice.example.com',
+    baseUrl: 'http://localhost:4000/invoice',
     color: '#a855f7',
     createdAt: now - 14 * day,
     updatedAt: now - 2 * day,
@@ -48,7 +48,7 @@ export const mockProjects: Project[] = [
       { id: 'def_default', name: '默认' },
     ],
     defaultBaseUrlDefinitionId: 'def_default',
-    baseUrl: 'https://iot.internal/api/v2',
+    baseUrl: 'http://localhost:4000/iot',
     color: '#f97316',
     createdAt: now - 60 * day,
     updatedAt: now - 7 * day,
@@ -312,9 +312,9 @@ export const mockEnvironments: Environment[] = [
     // baseUrls is keyed by BaseUrlDefinition.id. The single-key
     // shape here matches the single default def on the project —
     // enough for the new picker's "项目默认 → env: dev" flow to
-    // resolve to https://api.demo.dev.
+    // resolve to http://localhost:4000/demo (the local demo server).
     baseUrls: {
-      def_default: 'https://api.demo.dev',
+      def_default: 'http://localhost:4000/demo',
     },
     variables: {
       token: 'eyJhbGciOiJIUzI1NiJ9.dev',
@@ -327,7 +327,7 @@ export const mockEnvironments: Environment[] = [
     projectId: 'p_demo',
     name: 'staging',
     baseUrls: {
-      def_default: 'https://api.staging.demo',
+      def_default: 'http://localhost:4000/demo',
     },
     variables: {
       token: 'eyJhbGciOiJIUzI1NiJ9.staging',
@@ -340,7 +340,7 @@ export const mockEnvironments: Environment[] = [
     projectId: 'p_demo',
     name: 'prod',
     baseUrls: {
-      def_default: 'https://api.demo.com',
+      def_default: 'http://localhost:4000/demo',
     },
     variables: {
       token: 'eyJhbGciOiJIUzI1NiJ9.prod',

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -21,7 +21,15 @@ export function ResponseViewer() {
   const [savedFlash, setSavedFlash] = useState(false);
 
   const [view, setView] = useState<'pretty' | 'raw' | 'headers'>('pretty');
-  const [formatted, setFormatted] = useState<boolean>(false);
+  // Pretty tab opens in formatted mode by default — that's the
+  // whole point of the tab. When a new response arrives we reset
+  // the toggle so a refresh / retry also re-renders pretty JSON
+  // (the user can still flip to "原文" mid-inspection).
+  const [formatted, setFormatted] = useState<boolean>(true);
+
+  useEffect(() => {
+    if (response) setFormatted(true);
+  }, [response]);
 
   const formatResult = useMemo(() => tryFormatJson(response?.body ?? ''), [response?.body]);
   const canFormat = formatResult.ok;
@@ -118,6 +126,21 @@ export function ResponseViewer() {
           </Tooltip>
         </div>
       </div>
+
+      {/* Inline error banner — only renders for aborted/timeout/network
+          responses (i.e. `status === 0`). Real HTTP error statuses
+          (4xx/5xx) still flow through the normal status pill above. */}
+      {response.status === 0 && response.error && (
+        <div className="flex shrink-0 items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+          <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium leading-tight">{response.statusText}</div>
+            <div className="mt-0.5 leading-snug opacity-80 break-all">
+              {response.error}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
@@ -247,7 +270,7 @@ function EmptyState() {
       </div>
       <p className="mt-3 text-sm text-muted-foreground">点击「Send」发起请求</p>
       <p className="mt-1 text-[11px] text-muted-foreground/70">
-        响应会显示在这里（当前为 mock 响应）
+        响应会显示在这里
       </p>
     </section>
   );

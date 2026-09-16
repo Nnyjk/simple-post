@@ -61,6 +61,9 @@ export function RequestSection() {
             className="h-7 font-mono text-xs"
           />
         </div>
+        <p className="pt-1 text-[11px] italic text-muted-foreground/70">
+          以下设置（超时 / 跟随重定向 / 最大响应体积）仅在真实请求模式下生效。
+        </p>
       </div>
     </SettingsCategory>
   );

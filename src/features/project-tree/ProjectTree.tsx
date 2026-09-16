@@ -149,11 +149,17 @@ export function ProjectTree() {
   };
   const openModuleTab = (id: string) => {
     openTab('module', id);
-    if (!modules.find((m) => m.id === id)?.expanded) toggleModule(id);
+    // Toggle the row's expanded state on every click. Earlier this
+    // only expanded (skipped the toggle when already open), which
+    // meant clicking an expanded module to a it open in the right pane
+    // also collapsed it on the tree — but the user couldn't tell why
+    // "收缩" never worked from the row click. Unconditional toggle
+    // makes the row behave like every other tree widget.
+    toggleModule(id);
   };
   const openCollectionTab = (id: string) => {
     openTab('collection', id);
-    if (!collections.find((c) => c.id === id)?.expanded) toggleCollection(id);
+    toggleCollection(id);
   };
   const openEndpointTab = (id: string) => {
     setActiveEndpoint(id);

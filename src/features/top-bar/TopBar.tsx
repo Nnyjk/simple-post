@@ -4,7 +4,6 @@ import {
   ChevronDown,
   Circle,
   Cpu,
-  Power,
   Plus,
   Search,
   Sparkles,
@@ -14,6 +13,25 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette';
 import { cn } from '@/lib/utils';
+import { WindowControls } from './WindowControls';
+
+/**
+ * Tauri 2 quirk: `data-tauri-drag-region="true"` on a container makes
+ * ANY mousedown inside it start a window-drag gesture. Interactive
+ * children (buttons / inputs) silently lose their click handlers unless
+ * they're explicitly opted out with `data-tauri-drag-region="false"`.
+ *
+ * Pattern used here:
+ *   - <header> = the whole row, drag-enabled.
+ *   - Every <button> inside = drag-disabled (we pass the prop through
+ *     the Button component, which spreads ...props onto the native
+ *     <button>).
+ *
+ * Permissions live in `src-tauri/capabilities/default.json` —
+ * `core:window:allow-start-dragging` must be listed or the drag
+ * gesture won't fire even with the attribute present.
+ */
+const NO_DRAG = { 'data-tauri-drag-region': 'false' } as const;
 
 export function TopBar() {
   const projects = useAppStore((s) => s.projects);
@@ -60,8 +78,11 @@ export function TopBar() {
   }, []);
 
   return (
-    <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-card/50 px-3">
-      {/* Logo */}
+    <header
+      data-tauri-drag-region="true"
+      className="flex h-11 shrink-0 select-none items-center gap-2 border-b border-border bg-card/50 px-3"
+    >
+      {/* Logo — pure decoration, sits inside the drag region. */}
       <div className="flex items-center gap-2 pr-2">
         <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-blue-500 to-purple-500">
           <Sparkles className="h-3.5 w-3.5 text-white" />
@@ -72,6 +93,7 @@ export function TopBar() {
       {/* Project switcher */}
       <div ref={projRef} className="relative">
         <Button
+          {...NO_DRAG}
           variant="ghost"
           size="sm"
           onClick={() => setProjOpen((v) => !v)}
@@ -91,6 +113,7 @@ export function TopBar() {
             </div>
             {projects.map((p) => (
               <button
+                {...NO_DRAG}
                 key={p.id}
                 onClick={() => {
                   setActiveProject(p.id);
@@ -117,6 +140,7 @@ export function TopBar() {
             ))}
             <div className="mt-1 border-t border-border pt-1">
               <button
+                {...NO_DRAG}
                 type="button"
                 onClick={() => {
                   setProjOpen(false);
@@ -135,6 +159,7 @@ export function TopBar() {
       {/* Environment switcher */}
       <div ref={envRef} className="relative">
         <Button
+          {...NO_DRAG}
           variant="ghost"
           size="sm"
           onClick={() => setEnvOpen((v) => !v)}
@@ -158,6 +183,7 @@ export function TopBar() {
                 </div>
                 <div className="mt-1 border-t border-border pt-1">
                   <button
+                    {...NO_DRAG}
                     type="button"
                     onClick={() => {
                       setEnvOpen(false);
@@ -174,6 +200,7 @@ export function TopBar() {
               <>
                 {envs.map((env) => (
                   <button
+                    {...NO_DRAG}
                     key={env.id}
                     onClick={() => {
                       setActiveEnvironment(env.id);
@@ -198,6 +225,7 @@ export function TopBar() {
                 ))}
                 <div className="mt-1 border-t border-border pt-1">
                   <button
+                    {...NO_DRAG}
                     type="button"
                     onClick={() => {
                       setEnvOpen(false);
@@ -215,9 +243,9 @@ export function TopBar() {
         )}
       </div>
 
-      {/* Search box — clicking opens the command palette. The visible kbd
-          hint (Ctrl K) is the affordance for the global hotkey. */}
+      {/* Search box — clicking opens the command palette. */}
       <button
+        {...NO_DRAG}
         type="button"
         onClick={() => setPaletteOpen(true)}
         className="ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
@@ -236,6 +264,7 @@ export function TopBar() {
         <McpStatus />
         <Tooltip content="设置" side="bottom">
           <Button
+            {...NO_DRAG}
             variant="ghost"
             size="icon"
             onClick={() => openSettingsTab()}
@@ -245,6 +274,10 @@ export function TopBar() {
           </Button>
         </Tooltip>
       </div>
+
+      {/* Minimize / maximize / close. Pinned to the right edge so the
+          window operations cluster where every desktop app puts them. */}
+      <WindowControls />
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </header>
@@ -268,7 +301,10 @@ function McpStatus() {
       }
       side="bottom"
     >
-      <button className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs hover:bg-accent">
+      <button
+        {...NO_DRAG}
+        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs hover:bg-accent"
+      >
         <span className="relative flex h-2 w-2">
           <span
             className={cn(

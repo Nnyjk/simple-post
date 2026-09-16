@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   Play,
   Save,
@@ -20,7 +20,9 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { type KeyValue, type HttpMethod, type Endpoint } from '@/types/domain';
 import { methodColorVar, uid, cn } from '@/lib/utils';
 import { joinBaseUrl, resolveEndpointBaseUrl, resolveVars } from '@/lib/url';
+import { sendRequest } from '@/lib/http';
 import { KeyValueEditor } from './KeyValueEditor';
+import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { BodyEditor } from './BodyEditor';
 import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor';
@@ -53,6 +55,10 @@ export function HttpTester() {
   const allModules = useAppStore((s) => s.modules);
   const allProjects = useAppStore((s) => s.projects);
   const allEnvironments = useAppStore((s) => s.environments);
+  // Pulled for the Header key autocomplete — we want the user's own
+  // recently-used header names to surface in the datalist alongside
+  // the built-in common list (see buildHeaderSuggestions).
+  const allEndpoints = useAppStore((s) => s.endpoints);
   const updateEndpoint = useAppStore((s) => s.updateEndpoint);
   const setRequestPending = useAppStore((s) => s.setRequestPending);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
@@ -60,6 +66,7 @@ export function HttpTester() {
   const setEndpointDraft = useAppStore((s) => s.setEndpointDraft);
   const clearEndpointDraft = useAppStore((s) => s.clearEndpointDraft);
   const requestPending = useAppStore((s) => s.requestPending);
+  const requestSettings = useAppStore((s) => s.requestSettings);
 
   const [tab, setTab] = useState<TabId>('params');
   const [curlFlash, setCurlFlash] = useState(false);
@@ -257,47 +264,50 @@ export function HttpTester() {
     return { id: t.id, label: t.label, badge, disabled: t.disabled };
   });
 
-  const handleSend = async () => {
-    setRequestPending(true);
-    // Mock request: synthesize a response after a short delay
-    await new Promise((r) => setTimeout(r, 350 + Math.random() * 400));
-    const ok = Math.random() > 0.2;
-    const body = ok
-      ? {
-          code: 0,
-          message: 'ok',
-          data: {
-            id: 'mock_' + Math.random().toString(36).slice(2, 8),
-            timestamp: Date.now(),
-            echo: { method, url: resolvedUrl },
-          },
-        }
-      : {
-          code: 1001,
-          message: 'invalid params',
-          errors: { phone: 'invalid format' },
-        };
-    const response = {
-      status: ok ? 200 : 400,
-      statusText: ok ? 'OK' : 'Bad Request',
-      durationMs: 80 + Math.random() * 200,
-      sizeBytes: JSON.stringify(body).length,
-      headers: {
-        'content-type': 'application/json; charset=utf-8',
-        'x-request-id': 'req_' + Math.random().toString(36).slice(2, 10),
-        'x-ratelimit-remaining': String(Math.floor(Math.random() * 500)),
-      },
-      body: JSON.stringify(body, null, 2),
-      bodyJson: body,
-      contentType: 'application/json',
-      // request context — keeps the response self-describing so the
-      // history strip and any future "replay" UI can show what was sent.
-      method,
-      url: resolvedUrl,
+  // Abort any in-flight send when this component unmounts (tab
+  // switch, project change, etc.) so the pending Promise can't
+  // outlive the UI that requested it. `handleSend` reuses the same
+  // ref so a second-click-while-pending becomes "cancel the previous
+  // and start over" instead of a no-op race.
+  const inFlightRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      inFlightRef.current?.abort();
+      inFlightRef.current = null;
     };
-    setLastResponse(response);
-    addResponseHistory(endpoint.id, response);
-    setRequestPending(false);
+  }, []);
+
+  const handleSend = async () => {
+    if (!endpoint) return;
+    // Cancel any in-flight send first.
+    inFlightRef.current?.abort();
+    const ctrl = new AbortController();
+    inFlightRef.current = ctrl;
+    setRequestPending(true);
+    try {
+      const resp = await sendRequest({
+        method,
+        url: resolvedUrl,
+        params: endpoint.params,
+        headers: endpoint.headers,
+        body: endpoint.body,
+        auth: endpoint.auth,
+        env: endpointEnv ?? undefined,
+        settings: requestSettings,
+        signal: ctrl.signal,
+      });
+      setLastResponse(resp);
+      addResponseHistory(endpoint.id, resp);
+    } catch (e) {
+      // sendRequest is documented to never throw — this catch is a
+      // defensive net in case buildFetchInit or similar misbehaves.
+      console.error('[HttpTester] sendRequest threw:', e);
+    } finally {
+      // Only clear if we're still the active controller (a newer
+      // send may have replaced us mid-flight).
+      if (inFlightRef.current === ctrl) inFlightRef.current = null;
+      setRequestPending(false);
+    }
   };
 
   const handleSave = () => {
@@ -500,6 +510,9 @@ export function HttpTester() {
             onChange={(items) => updateEndpoint(endpoint.id, { headers: items })}
             keyPlaceholder="Header 名"
             valuePlaceholder="值"
+            // Recent (project-wide harvest) merged with the built-in
+            // list — see common-headers.ts::buildHeaderSuggestions.
+            keySuggestions={buildHeaderSuggestions(allEndpoints)}
           />
         )}
         {tab === 'body' && (
