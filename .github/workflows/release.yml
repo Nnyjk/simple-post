@@ -1,0 +1,77 @@
+name: Release Tauri App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build & release (leave empty to use ref name)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target universal-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.platform }}
+
+      - name: Install Linux deps (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Build & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ inputs.tag || format('refs/tags/{0}', github.ref_name) }}
+          releaseName: 'Simple Post v__VERSION__'
+          releaseBody: |
+            ## Simple Post v__VERSION__
+
+            Desktop API client with built-in MCP for AI collaboration.
+
+            ### Install
+            - **macOS**: open the `.dmg`, drag to Applications
+            - **Ubuntu**: `sudo dpkg -i simple-post_*_amd64.deb` or run the `.AppImage`
+            - **Windows**: run the `Simple_Post_*_x64-setup.exe` NSIS installer
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
