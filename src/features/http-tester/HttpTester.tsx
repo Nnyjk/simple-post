@@ -28,6 +28,7 @@ import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor';
 import { endpointToCurl } from './curl';
 import { EnvVarPicker, extractPartialVar, shouldShowVarPicker } from './EnvVarPicker';
+import { gsap, useGSAP } from '@/lib/gsap';
 
 const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
   { id: 'params', label: 'Params' },
@@ -339,6 +340,66 @@ export function HttpTester() {
 
   const dirty = draft !== undefined;
 
+  // C2: Send button morph.
+  // `playIconRef` wraps the Play icon in an `inline-flex` span so we can
+  // rotate it in place without disturbing the button text width.
+  // `sendBtnRef` is the whole Button element — used for the micro-bounce
+  // after a pending request resolves.
+  const sendBtnRef = useRef<HTMLButtonElement>(null);
+  const playIconRef = useRef<HTMLSpanElement>(null);
+
+  useGSAP(() => {
+    if (!playIconRef.current || !sendBtnRef.current) return;
+
+    if (requestPending) {
+      // Kill any leftover rotation (e.g. from a previous cancel) before
+      // starting a fresh spin. gsap.fromTo with rotation +=360 +
+      // repeat:-1 gives a continuous linear spin.
+      gsap.killTweensOf(playIconRef.current);
+      gsap.fromTo(
+        playIconRef.current,
+        { rotation: 0 },
+        { rotation: '+=360', duration: 1, repeat: -1, ease: 'none' },
+      );
+    } else {
+      // Resolve path: kill the spin and snap the icon back upright so
+      // the next render starts at rotation 0. Then micro-bounce the
+      // button to confirm the response arrived.
+      gsap.killTweensOf(playIconRef.current);
+      gsap.set(playIconRef.current, { rotation: 0 });
+      gsap.killTweensOf(sendBtnRef.current);
+      gsap.fromTo(
+        sendBtnRef.current,
+        { scale: 1 },
+        {
+          keyframes: [
+            { scale: 1.05, duration: 0.125, ease: 'power2.out' },
+            { scale: 1, duration: 0.125, ease: 'power2.in' },
+          ],
+        },
+      );
+    }
+  }, [requestPending]);
+
+  // C3: Copy-as-cURL feedback bounce. Fires when curlFlash transitions
+  // false → true; the false transition is intentionally a no-op so the
+  // already-swapped "已复制" label doesn't get an extra blip on its way out.
+  const copyCurlBtnRef = useRef<HTMLButtonElement>(null);
+  useGSAP(() => {
+    if (!curlFlash || !copyCurlBtnRef.current) return;
+    gsap.killTweensOf(copyCurlBtnRef.current);
+    gsap.fromTo(
+      copyCurlBtnRef.current,
+      { scale: 1 },
+      {
+        keyframes: [
+          { scale: 1.06, duration: 0.1, ease: 'power2.out' },
+          { scale: 1, duration: 0.1, ease: 'power2.in' },
+        ],
+      },
+    );
+  }, [curlFlash]);
+
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
       {/* Endpoint header */}
@@ -452,17 +513,21 @@ export function HttpTester() {
           />
         </div>
         <Button
+          ref={sendBtnRef}
           onClick={handleSend}
           disabled={requestPending}
           className="h-9 gap-1.5 px-4"
           style={{ backgroundColor: methodColorVar(method) }}
           data-testid="send-btn"
         >
-          <Play className="h-3.5 w-3.5 fill-current" />
+          <span ref={playIconRef} className="inline-flex">
+            <Play className="h-3.5 w-3.5 fill-current" />
+          </span>
           {requestPending ? '发送中…' : 'Send'}
         </Button>
         <Tooltip content={curlFlash ? '已复制' : '复制为 cURL'} side="bottom">
           <Button
+            ref={copyCurlBtnRef}
             variant="outline"
             size="sm"
             onClick={handleCopyCurl}

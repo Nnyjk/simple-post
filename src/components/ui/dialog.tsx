@@ -1,7 +1,8 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { gsap, useGSAP } from '@/lib/gsap';
 import { Button } from './button';
 
 interface DialogProps {
@@ -59,11 +60,36 @@ export function Dialog({
     };
   }, [open]);
 
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Entrance animation — runs every time the dialog mounts (open flips to true).
+  // No exit animation: `open=false` unmounts the portal entirely, which is fine.
+  useGSAP(
+    () => {
+      if (backdropRef.current) {
+        gsap.fromTo(
+          backdropRef.current,
+          { opacity: 0 },
+          { opacity: 1, duration: 0.18, ease: 'none' },
+        );
+      }
+      if (panelRef.current) {
+        gsap.fromTo(
+          panelRef.current,
+          { opacity: 0, scale: 0.96 },
+          { opacity: 1, scale: 1, duration: 0.22, ease: 'power2.out' },
+        );
+      }
+    },
+    { scope: panelRef, dependencies: [open] },
+  );
+
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-fade-in"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       onClick={(e) => {
         // Backdrop click closes — but the inner backdrop div captures
         // the click, so target !== currentTarget. Use closest('[role="dialog"]')
@@ -73,8 +99,13 @@ export function Dialog({
         if (dialog && !dialog.contains(e.target as Node)) onOpenChange(false);
       }}
     >
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
       <div
+        ref={backdropRef}
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        aria-hidden="true"
+      />
+      <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}

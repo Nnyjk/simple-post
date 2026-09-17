@@ -29,6 +29,7 @@ import { methodColorVar, cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
+import { gsap, useGSAP } from '@/lib/gsap';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
 import { InlineEdit } from '@/components/ui/InlineEdit';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -1013,7 +1014,7 @@ export function ProjectTree() {
                 dropHint && dropHint.key === `module:${module.id}` ? dropHint.zone : null
               }
             />
-            {module.expanded && (
+            <TreeChildren expanded={!!module.expanded}>
               <CollectionBranch
                 branches={modCollections}
                 depth={1}
@@ -1048,7 +1049,7 @@ export function ProjectTree() {
                   dropHint,
                 }}
               />
-            )}
+            </TreeChildren>
           </div>
         ))}
       </div>
@@ -1304,6 +1305,87 @@ function ModuleRow({
   );
 }
 
+/**
+ * Wraps the children of a tree node (module → CollectionBranch, or
+ * CollectionRow → endpoints + sub-collections) so we can animate the
+ * expand/collapse with GSAP instead of a hard mount/unmount. The
+ * children stay in the DOM at all times; visual presence is driven by
+ * the container's `height` + `opacity`. On expand we also stagger-fade
+ * the direct row descendants so the new content reveals itself
+ * row-by-row rather than popping in all at once.
+ */
+function TreeChildren({
+  expanded,
+  children,
+}: {
+  expanded: boolean;
+  children: React.ReactNode;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  // `useGSAP` runs the callback once on mount in addition to every
+  // dependency change. Without a guard, an initially-expanded branch
+  // would tween from height: 0 → 'auto' on first paint and flash from
+  // collapsed. We sync to the current state on the first run and
+  // animate on every subsequent change.
+  const isFirstRun = useRef(true);
+
+  useGSAP(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (isFirstRun.current) {
+      isFirstRun.current = false;
+      gsap.set(
+        el,
+        expanded
+          ? { height: 'auto', opacity: 1 }
+          : { height: 0, opacity: 0 },
+      );
+      return;
+    }
+    if (expanded) {
+      gsap.fromTo(
+        el,
+        { height: 0, opacity: 0 },
+        {
+          height: 'auto',
+          opacity: 1,
+          duration: 0.25,
+          ease: 'power2.out',
+        },
+      );
+      gsap.from(
+        el.querySelectorAll<HTMLElement>(
+          ':scope > * > [data-tree-row]',
+        ),
+        {
+          opacity: 0,
+          y: 4,
+          duration: 0.2,
+          stagger: 0.025,
+          ease: 'power2.out',
+        },
+      );
+    } else {
+      gsap.to(el, {
+        height: 0,
+        opacity: 0,
+        duration: 0.2,
+        ease: 'power2.in',
+      });
+    }
+  }, { dependencies: [expanded], scope: containerRef });
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ overflow: 'hidden' }}
+      aria-hidden={!expanded}
+    >
+      {children}
+    </div>
+  );
+}
+
 interface CollectionBranchProps {
   branches: CollectionBranch[];
   depth: number;
@@ -1353,7 +1435,7 @@ function CollectionBranch(props: CollectionBranchProps) {
       style={{ marginLeft: depth === 1 ? '0.5rem' : 0 }}
     >
       {branches.map(({ collection, endpoints: colEndpoints, children: subCols }) => (
-        <div key={collection.id} className="mb-0.5">
+        <div key={collection.id} className="mb-0.5" data-tree-row>
           <CollectionRow
             collection={collection}
             endpointCount={colEndpoints.length}
@@ -1387,8 +1469,8 @@ function CollectionBranch(props: CollectionBranchProps) {
                 : null
             }
           />
-          {collection.expanded && (
-            <>
+          {(colEndpoints.length > 0 || subCols.length > 0) && (
+            <TreeChildren expanded={!!collection.expanded}>
               {colEndpoints.length > 0 && (
                 <div className="ml-3 border-l border-border/60 pl-1">
                   {colEndpoints.map((ep) => (
@@ -1441,7 +1523,7 @@ function CollectionBranch(props: CollectionBranchProps) {
               {subCols.length > 0 && (
                 <CollectionBranch {...props} branches={subCols} depth={depth + 1} />
               )}
-            </>
+            </TreeChildren>
           )}
         </div>
       ))}
@@ -1587,6 +1669,7 @@ function EndpointRow({
 }: EndpointRowProps) {
   return (
     <div
+      data-tree-row
       onContextMenu={onContextMenu}
       className={cn(
         'group mb-0.5 rounded-sm',

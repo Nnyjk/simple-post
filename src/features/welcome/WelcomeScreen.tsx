@@ -1,6 +1,8 @@
+import { useRef } from 'react';
 import { FilePlus, Settings as SettingsIcon, BookOpen, Sparkles } from 'lucide-react';
 import { useAppStore, type Theme } from '@/stores/app-store';
 import { cn } from '@/lib/utils';
+import { gsap, useGSAP } from '@/lib/gsap';
 
 const THEME_ICON: Record<Theme, string> = {
   dark: '🌙',
@@ -28,6 +30,27 @@ export function WelcomeScreen() {
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Hero stagger — runs once every time the welcome screen appears
+  // (i.e. when `activeEndpointId` flips back to null and the component
+  // re-mounts).
+  useGSAP(
+    () => {
+      const targets =
+        containerRef.current?.querySelectorAll<HTMLElement>('[data-welcome-stagger]');
+      if (!targets || targets.length === 0) return;
+      gsap.from(targets, {
+        opacity: 0,
+        y: 8,
+        duration: 0.32,
+        stagger: 0.06,
+        ease: 'power3.out',
+      });
+    },
+    { scope: containerRef, dependencies: [] },
+  );
+
   if (activeEndpointId !== null) return null;
 
   const handleDocs = () => {
@@ -37,19 +60,26 @@ export function WelcomeScreen() {
 
   return (
     <div
+      ref={containerRef}
       data-testid="welcome-screen"
-      className="flex h-full w-full items-center justify-center bg-background p-6 animate-fade-in"
+      className="flex h-full w-full items-center justify-center bg-background p-6"
     >
       <div className="w-full max-w-xl space-y-8 text-center">
         {/* Hero */}
         <div className="space-y-3">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 shadow-lg">
+          <div
+            data-welcome-stagger
+            className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 shadow-lg"
+          >
             <Sparkles className="h-6 w-6 text-white" />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 data-welcome-stagger className="text-2xl font-semibold tracking-tight">
             简单、强大的 API 调试工作台
           </h1>
-          <p className="mx-auto max-w-md text-sm text-muted-foreground">
+          <p
+            data-welcome-stagger
+            className="mx-auto max-w-md text-sm text-muted-foreground"
+          >
             组织项目 · 编排接口 · 发送请求 · 内置 MCP 让 AI 直接驱动你的工作区。
           </p>
         </div>
@@ -80,7 +110,10 @@ export function WelcomeScreen() {
         </div>
 
         {/* Footnote with current theme indicator */}
-        <div className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground/70">
+        <div
+          data-welcome-stagger
+          className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground/70"
+        >
           <span>当前主题：</span>
           <span className="font-mono">
             {theme}
@@ -110,6 +143,7 @@ function CtaCard({ icon, title, description, onClick, primary, children }: CtaCa
     <button
       type="button"
       onClick={onClick}
+      data-welcome-stagger
       className={cn(
         'group flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',

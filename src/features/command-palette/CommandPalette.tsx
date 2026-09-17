@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CornerDownLeft, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { buildCommands, type Command } from './command-registry';
 import { cn } from '@/lib/utils';
+import { gsap, useGSAP } from '@/lib/gsap';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -87,6 +88,31 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     if (el) el.scrollIntoView({ block: 'nearest' });
   }, [selected]);
 
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Entrance animation — runs every time the palette mounts (open flips to true).
+  // No exit animation: `open=false` unmounts the tree entirely, which is fine.
+  useGSAP(
+    () => {
+      if (backdropRef.current) {
+        gsap.fromTo(
+          backdropRef.current,
+          { opacity: 0 },
+          { opacity: 1, duration: 0.18, ease: 'none' },
+        );
+      }
+      if (panelRef.current) {
+        gsap.fromTo(
+          panelRef.current,
+          { opacity: 0, scale: 0.98, y: -8 },
+          { opacity: 1, scale: 1, y: 0, duration: 0.22, ease: 'power3.out' },
+        );
+      }
+    },
+    { scope: panelRef, dependencies: [open] },
+  );
+
   if (!open) return null;
 
   const run = (cmd: Command) => {
@@ -124,7 +150,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-[12vh] animate-fade-in"
+      className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-[12vh]"
       onMouseDown={(e) => {
         // Click outside the dialog panel closes.
         // Note: `e.target === e.currentTarget` does NOT work here because
@@ -137,8 +163,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         if (dialog && !dialog.contains(e.target as Node)) onClose();
       }}
     >
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div ref={backdropRef} className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="命令面板"

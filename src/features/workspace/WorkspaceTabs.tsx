@@ -12,6 +12,13 @@
  *     more tabs than fit in the available width — common in real projects.
  *   - Keyboard: middle-click closes, just like a browser tab.
  *   - Visual state: active tab uses the primary tint, others stay muted.
+ *   - Tab positions slide rather than snap when the tab set changes
+ *     (add / remove / reorder). This is implemented as a FLIP animation
+ *     via GSAP Flip — see the useGSAP block below.
+ *   - The 0.5px primary stripe under the active tab is a single
+ *     persistent element at the strip level; its x/width are tweened to
+ *     match the active tab on every render so the indicator smoothly
+ *     follows active-tab switches.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -30,6 +37,7 @@ import { useAppStore, type OpenTab, type TabKind } from '@/stores/app-store';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn, methodColorVar } from '@/lib/utils';
+import { Flip, gsap, useGSAP } from '@/lib/gsap';
 
 const KIND_LABEL: Record<TabKind, string> = {
   project: '项目',
@@ -78,6 +86,65 @@ export function WorkspaceTabs() {
 
   // Keep the active tab in view when the user adds many tabs.
   const stripRef = useRef<HTMLDivElement>(null);
+  // Persistent indicator bar (the 0.5px primary stripe under the active
+  // tab). It lives at the strip level instead of inside each tab so that
+  // we can tween it as a single element whenever the active tab changes.
+  const barRef = useRef<HTMLSpanElement>(null);
+  // First-run guard for the bar: snap into place on initial mount rather
+  // than running an entry tween from (0,0) to the first active tab.
+  const isFirstBarRun = useRef(true);
+
+  // ------------------------------------------------------------------
+  //  Tab position animation (GSAP Flip, FLIP pattern)
+  // ------------------------------------------------------------------
+  // useGSAP's `dependencies` + `revertOnUpdate: true` runs each callback
+  // *after* React commits, then registers a cleanup that's invoked the
+  // next time deps change. We capture tab positions in the callback and
+  // play them back in the cleanup — that order is what gives us FLIP:
+  // the new DOM has already been committed by the time the cleanup runs,
+  // so `Flip.from(state)` can tween from the previously-captured positions
+  // to the just-committed positions. `absolute: true` lets Flip take the
+  // tabs out of flow during the tween so neighbours don't reflow as each
+  // tab slides.
+  useGSAP(() => {
+    if (!stripRef.current) return;
+    const targets = stripRef.current.querySelectorAll<HTMLElement>('[data-tab-id]');
+    if (targets.length === 0) return;
+    const state = Flip.getState(targets);
+    return () => {
+      Flip.from(state, {
+        duration: 0.28,
+        ease: 'power2.out',
+        absolute: true,
+      });
+    };
+  }, { dependencies: [openTabs], scope: stripRef, revertOnUpdate: true });
+
+  // Active-bar tween: track whichever tab is currently active. Re-runs
+  // when either the active tab changes *or* the tab set changes (a tab
+  // inserted before the active one shifts its target offsetLeft).
+  useGSAP(() => {
+    if (!stripRef.current || !barRef.current || !activeTabId) return;
+    const activeEl = stripRef.current.querySelector<HTMLElement>(
+      `[data-tab-id="${activeTabId}"]`,
+    );
+    if (!activeEl) return;
+    const x = activeEl.offsetLeft;
+    const width = activeEl.offsetWidth;
+    if (isFirstBarRun.current) {
+      // Snap on the very first paint of the strip.
+      gsap.set(barRef.current, { x, width });
+      isFirstBarRun.current = false;
+      return;
+    }
+    gsap.to(barRef.current, {
+      x,
+      width,
+      duration: 0.28,
+      ease: 'power2.out',
+    });
+  }, { dependencies: [activeTabId, openTabs] });
+
   useEffect(() => {
     if (!activeTabId) return;
     const el = stripRef.current?.querySelector<HTMLElement>(
@@ -186,12 +253,20 @@ export function WorkspaceTabs() {
                 <X className="h-3 w-3" />
               </button>
             </Tooltip>
-            {active && (
-              <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded-t-md bg-primary" />
-            )}
+            {/* Active-tab indicator moved to a strip-level element below
+                so it can tween between tabs as a single persistent node. */}
           </div>
         );
       })}
+
+      {/* Persistent active-tab indicator. The bar's x/width are tweened
+          by the useGSAP block above to follow whichever tab is currently
+          active — see comment near `barRef`. */}
+      <span
+        ref={barRef}
+        aria-hidden
+        className="pointer-events-none absolute left-0 top-0 z-10 h-0.5 w-0 rounded-t-md bg-primary"
+      />
 
       <div className="ml-auto flex items-center pr-1">
         <Button

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -11,6 +11,7 @@ import { formatBytes, formatDuration, statusColorVar, cn } from '@/lib/utils';
 import { tryFormatJson } from '@/lib/json-format';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
+import { gsap, useGSAP } from '@/lib/gsap';
 import { ResponseHistory } from './ResponseHistory';
 
 export function ResponseViewer() {
@@ -34,12 +35,84 @@ export function ResponseViewer() {
   const formatResult = useMemo(() => tryFormatJson(response?.body ?? ''), [response?.body]);
   const canFormat = formatResult.ok;
 
+  // C1: status pill pulse + count-up wiring.
+  // `statusPillRef` targets the icon + status code + statusText row so
+  // the whole pill morphs in as one unit. The two mutable count-up
+  // objects live in refs (not state) so gsap can mutate `.val` on
+  // every frame without re-rendering for the value alone; we push
+  // rounded snapshots into `displayDuration` / `displaySize` state for
+  // React to render. Initial `.val` is 0 so the *first* response
+  // counts up from 0 → target; for subsequent responses the previous
+  // value is preserved across renders and the next animation glides
+  // from there to the new target — visible "ramp" only on the very
+  // first frame after the pill mounts.
+  const statusPillRef = useRef<HTMLDivElement>(null);
+  const durObjRef = useRef({ val: 0 });
+  const sizeObjRef = useRef({ val: 0 });
+  const [displayDuration, setDisplayDuration] = useState(0);
+  const [displaySize, setDisplaySize] = useState(0);
+
+  useGSAP(() => {
+    // PendingState hides the pill, so bail until the full response UI
+    // is mounted. `pending` is in the dep array so we re-fire when
+    // pending flips false (a response that arrived *during* a request
+    // hasn't been animated yet — handleSend sets lastResponse first,
+    // then clears pending, and the second transition is what surfaces
+    // the animation).
+    if (pending || !response || !statusPillRef.current) return;
+
+    // Pulse the status pill.
+    gsap.fromTo(
+      statusPillRef.current,
+      { scale: 0.92, opacity: 0 },
+      { scale: 1, opacity: 1, duration: 0.28, ease: 'power2.out' },
+    );
+
+    // Count-up duration (kill any in-flight tween first so back-to-back
+    // responses don't pile up overlapping tweens on the same object).
+    gsap.killTweensOf(durObjRef.current);
+    gsap.to(durObjRef.current, {
+      val: response.durationMs,
+      duration: 0.4,
+      ease: 'power2.out',
+      onUpdate: () => setDisplayDuration(Math.round(durObjRef.current.val)),
+    });
+
+    // Count-up size.
+    gsap.killTweensOf(sizeObjRef.current);
+    gsap.to(sizeObjRef.current, {
+      val: response.sizeBytes,
+      duration: 0.4,
+      ease: 'power2.out',
+      onUpdate: () => setDisplaySize(Math.round(sizeObjRef.current.val)),
+    });
+  }, [response?.status, response?.durationMs, response?.sizeBytes, pending]);
+
   const handleSaveAsExample = () => {
     if (!response || !endpoint) return;
     addResponseExample(endpoint.id, response);
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 1500);
   };
+
+  // C3: Save-as-example bounce. Fires only when savedFlash transitions
+  // false → true (the next state change to false intentionally no-ops,
+  // because the tooltip text has already swapped to "已保存" by then).
+  const saveExampleBtnRef = useRef<HTMLButtonElement>(null);
+  useGSAP(() => {
+    if (!savedFlash || !saveExampleBtnRef.current) return;
+    gsap.killTweensOf(saveExampleBtnRef.current);
+    gsap.fromTo(
+      saveExampleBtnRef.current,
+      { scale: 1 },
+      {
+        keyframes: [
+          { scale: 1.06, duration: 0.1, ease: 'power2.out' },
+          { scale: 1, duration: 0.1, ease: 'power2.in' },
+        ],
+      },
+    );
+  }, [savedFlash]);
 
   if (pending) {
     return <PendingState />;
@@ -61,7 +134,7 @@ export function ResponseViewer() {
     <section className="flex h-full min-h-0 flex-col border-t border-border bg-card/30">
       {/* Status bar */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2">
-        <div className="flex items-center gap-2">
+        <div ref={statusPillRef} className="flex items-center gap-2 will-change-transform">
           {isError ? (
             <XCircle className="h-4 w-4" style={{ color: statusColor }} />
           ) : (
@@ -77,15 +150,16 @@ export function ResponseViewer() {
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Clock className="h-3 w-3" />
-          {formatDuration(response.durationMs)}
+          {formatDuration(displayDuration)}
         </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <HardDrive className="h-3 w-3" />
-          {formatBytes(response.sizeBytes)}
+          {formatBytes(displaySize)}
         </div>
         <div className="ml-auto flex items-center gap-1">
           <Tooltip content={savedFlash ? '已保存' : '另存为示例'} side="bottom">
             <Button
+              ref={saveExampleBtnRef}
               variant="ghost"
               size="icon"
               className={cn('h-7 w-7', savedFlash && 'text-success')}

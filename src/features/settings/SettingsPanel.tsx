@@ -15,7 +15,7 @@
  *   - It frees the top edge for a section title + description.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { Cloud, Cpu, Palette, Send } from 'lucide-react';
 import { useAppStore, type SettingsCategoryId } from '@/stores/app-store';
 import { SettingsCategory } from './SettingsCategory';
@@ -24,6 +24,7 @@ import { ConnectionSection } from './sections/ConnectionSection';
 import { AppearanceSection } from './sections/AppearanceSection';
 import { RequestSection } from './sections/RequestSection';
 import { cn } from '@/lib/utils';
+import { gsap, useGSAP } from '@/lib/gsap';
 
 const CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'env',
@@ -86,6 +87,27 @@ export function SettingsPanel() {
     [allEnvironments, activeProjectId],
   );
 
+  const mainRef = useRef<HTMLElement>(null);
+
+  // Cross-fade the active section when `activeSection` changes. The outer
+  // wrapper carries `key={activeSection}` so React remounts the section on
+  // each switch, and we then animate the freshly mounted root from a
+  // faded-out + slightly-down state to its natural position.
+  useGSAP(
+    () => {
+      const root = mainRef.current?.querySelector<HTMLElement>(
+        '[data-settings-section]',
+      );
+      if (!root) return;
+      gsap.fromTo(
+        root,
+        { opacity: 0, y: 4 },
+        { opacity: 1, y: 0, duration: 0.2, ease: 'power2.out' },
+      );
+    },
+    { scope: mainRef, dependencies: [activeSection] },
+  );
+
   return (
     <div className="flex h-full min-h-0">
       {/* Left rail — vertical list of section entries. Mirrors the
@@ -143,12 +165,12 @@ export function SettingsPanel() {
           SettingsCategory, which draws a `border-b` divider under
           itself; together they form a single stacked column separated
           by thin horizontal lines. */}
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
         {CATEGORY_IDS.map((id) => {
           if (id !== activeSection) return null;
           if (id === 'env') {
             return (
-              <div key={id} className="pt-2">
+              <div key={activeSection} data-settings-section className="pt-2">
                 <EnvironmentSection
                   environments={environments}
                   projectId={activeProjectId}
@@ -170,13 +192,25 @@ export function SettingsPanel() {
             );
           }
           if (id === 'connection') {
-            return <ConnectionSection key={id} />;
+            return (
+              <div key={activeSection} data-settings-section>
+                <ConnectionSection />
+              </div>
+            );
           }
           if (id === 'appearance') {
-            return <AppearanceSection key={id} />;
+            return (
+              <div key={activeSection} data-settings-section>
+                <AppearanceSection />
+              </div>
+            );
           }
           // request
-          return <RequestSection key={id} />;
+          return (
+            <div key={activeSection} data-settings-section>
+              <RequestSection />
+            </div>
+          );
         })}
       </main>
     </div>
