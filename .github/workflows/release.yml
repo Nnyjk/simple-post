@@ -21,11 +21,11 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: '--target universal-apple-darwin'
+            args: '--target universal-apple-darwin --bundles app,dmg'
           - platform: ubuntu-22.04
-            args: ''
+            args: '--bundles deb,appimage'
           - platform: windows-latest
-            args: ''
+            args: ''  # tauri.conf.json targets=["nsis"] 已经够
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -75,8 +75,8 @@ jobs:
             Desktop API client with built-in MCP for AI collaboration.
 
             ### Install
-            - **macOS**: open the `.dmg`, drag to Applications
-            - **Ubuntu**: `sudo dpkg -i simple-post_*_amd64.deb` or run the `.AppImage`
+            - **macOS**: open the `.dmg`, drag `Simple Post.app` to Applications
+            - **Ubuntu**: `sudo dpkg -i simple-post_*_amd64.deb` or `chmod +x Simple_Post_*_amd64.AppImage && ./Simple_Post_*_amd64.AppImage`
             - **Windows**: run the `Simple_Post_*_x64-setup.exe` NSIS installer
           releaseDraft: true
           prerelease: false
