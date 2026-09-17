@@ -2,7 +2,7 @@
 
 一款面向 Windows 10/11 的现代化桌面 API 调试 / 管理工具，核心差异化：**自带 MCP Server**，让 AI（Claude Desktop、Cursor、Cline）能直接读写接口、生成文档、参与调试。
 
-> 当前阶段：**UI 功能完整**（2026-09-11）。Vite + React + TS 脚手架、Tailwind/shadcn 风格基线、完整数据层、四大主面板、所有 P0/P1 交互全部就位。下一步：Tauri Rust 壳 + 真实 HTTP / SQLite / MCP 子进程。
+> 当前阶段：**UI 先行已完成**（2026-09-11）。脚手架 + Tailwind/shadcn 基线 + 完整数据层 + 四大主面板 + 所有 P0/P1 交互全部就位。下一步：进入真实业务层（v0.1 MVP），详见下方「路线图」。
 
 ## 跑起来
 
@@ -77,14 +77,68 @@ npm test           # 单元测试（http-build + http，纯函数 + node:http �
 - 3 项目 / 7 模块 / 8 集合 / 12 接口 / 3 环境
 - 覆盖 SMS 登录、密码登录、用户资料、订单 CRUD、状态流转、收银台、抬头、开票、设备影子读/写
 
-## 下一步路线
+## 路线图
 
-1. **Tauri 壳**：`src-tauri/` 初始化、Cargo.toml、tauri.conf.json、图标
-2. **Rust 主进程**：SQLite (rusqlite)、HTTP (reqwest)、MCP 子进程桥
-3. **真实持久化**：把 Zustand store 切到 `tauri-plugin-sql`
-4. **真实请求**：渲染端 → Tauri command → reqwest → 返回结构化响应
-5. **MCP Server 子进程**：`src-mcp/index.ts` 用 `@modelcontextprotocol/sdk` 暴露工具
-6. **打包**：NSIS 安装包 + 自动更新
+UI 先行阶段的所有打磨项（P0/P1/P2）已落地。下面是接 v0.1 起的四阶段路线，叠加 MCP 工具集（核心差异化）的渐进暴露。
+
+### v0.1 MVP（约 4 周）
+
+- [ ] **Tauri 壳**：`src-tauri/` 初始化、Cargo.toml、tauri.conf.json、图标
+- [ ] **Rust 主进程**：SQLite（`rusqlite` + `r2d2`）、HTTP（`reqwest`）、MCP 子进程桥
+- [ ] **真实持久化**：Zustand store → `tauri-plugin-sql`
+- [ ] **真实请求**：渲染端 → Tauri command → `reqwest` → 返回结构化响应
+- [ ] **MCP Server 子进程**：`src-mcp/index.ts` 用 `@modelcontextprotocol/sdk` 暴露工具
+- [ ] **打包**：NSIS 安装包 + 便携 zip
+
+### v0.2（+2 周）
+
+- 鉴权扩展：Bearer / Basic / API Key / OAuth2 简化版
+- 响应历史 & 收藏（持久化到 SQLite）
+- 导入 Postman v2.1 / OpenAPI 3.0
+- 导出 OpenAPI 3.0
+- MCP 工具扩展：`api_create` / `api_update` / `api_search` / `api_delete`
+- MCP 进程可视化（设置页：PID、状态、tail 日志）
+
+### v0.3（+2 周）
+
+- AI 文档生成（端点 → Markdown 文档）
+- AI 测试用例生成（schema → 测试）
+- 请求脚本（pre-request / test 脚本，沙箱隔离）
+- 集合批量运行 + 简易报告
+- 团队协作（Git 同步 JSON 工作区，可选）
+
+### v1.0
+
+- WebSocket / SSE / GraphQL
+- Mock Server
+- 性能压测（简易）
+- 插件系统（允许第三方 MCP 工具注册）
+
+### MCP 工具清单（stdio 模式，给外部 AI 客户端）
+
+> App 启动时同时拉起一个 **stdio MCP Server** 子进程，Claude Desktop / Cursor / Cline 等通过 stdio 与之通信。Server 不暴露网络，可选 token 校验。
+
+| 工具 | 用途 |
+|---|---|
+| `api_list_projects` | 列出所有项目 |
+| `api_list_endpoints` | 按项目 / 模块 / 集合过滤 |
+| `api_search` | 按关键字、tag、method 搜索 |
+| `api_get_endpoint` | 取单个接口完整定义 |
+| `api_run_request` | 执行 HTTP 请求，返回结构化响应 |
+| `api_create_endpoint` | 创建接口 |
+| `api_update_endpoint` | 更新接口 |
+| `api_delete_endpoint` | 删除接口 |
+| `api_import_postman` | 导入 Postman collection JSON |
+| `api_export_openapi` | 导出 OpenAPI 3.0 |
+| `api_generate_docs` | AI 生成 / 补全接口文档 |
+| `api_generate_tests` | AI 生成测试用例 |
+
+Resources（AI 侧"读取"通道）：
+
+- `simple-post://projects`
+- `simple-post://projects/{id}`
+- `simple-post://endpoints/{id}`
+- `simple-post://environments/{projectId}`
 
 ## 协作方法（团队模式硬约束）
 
@@ -98,5 +152,3 @@ npm test           # 单元测试（http-build + http，纯函数 + node:http �
 - **MCP 模式**：stdio（仅本地 AI 客户端可连）
 - **UI 风格**：暗色为主，shadcn 变量层，可切亮色
 - **第一阶段**：UI 先行 ✓（已完成 2026-09-11）
-
-详见 `PLAN.md` / `UI-POLISH.md`。
