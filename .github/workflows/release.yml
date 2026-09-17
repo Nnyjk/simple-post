@@ -36,6 +36,12 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      # GitHub Actions 默认会设 NODE_ENV=production,导致 `npm ci` 跳过
+      # devDependencies,而 @tauri-apps/cli 在 devDependencies 里 —— 没有它,
+      # `npm run tauri build` 会 "tauri: command not found"。 显式装 devDeps。
+      - name: Install dependencies (with devDependencies for tauri CLI)
+        run: npm ci --include=dev
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
