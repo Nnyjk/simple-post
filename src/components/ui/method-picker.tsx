@@ -5,7 +5,12 @@
  * The native <select> cannot style its <option> children independently of
  * the trigger, so picking a colored method (e.g. POST → blue) would bleed
  * the color into every other option. This component renders each option as
- * a real <button>, so each one can be colored by its own `methodColorVar`.
+ * a real <button>, so each one can be tinted by `methodColorVar`.
+ *
+ * The trigger shows a **MethodPill** (solid flavour) so the chosen verb
+ * reads as the affordance rather than as plain coloured text. Dropdown
+ * rows use the same pill but in the **tinted** flavour so they don't
+ * out-shout the row content.
  *
  * Interaction:
  *  - Click trigger → toggle open / close
@@ -19,8 +24,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { cn, methodColorVar } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { HTTP_METHODS, type HttpMethod } from '@/types/domain';
+import { MethodPill } from './method-pill';
 
 export interface MethodPickerProps {
   value: HttpMethod;
@@ -123,12 +129,12 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          'flex h-9 w-28 items-center justify-between rounded-md border border-input bg-background px-2 font-mono text-xs font-semibold uppercase',
-          'transition-colors',
+          'flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-1.5 font-mono text-xs transition-colors',
+          'hover:bg-accent/40',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
         )}
       >
-        <span style={{ color: methodColorVar(value) }}>{value}</span>
+        <MethodPill method={value} size="sm" variant="solid" />
         <ChevronDown
           className={cn(
             'h-3.5 w-3.5 text-muted-foreground transition-transform',
@@ -140,7 +146,7 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
         <ul
           role="listbox"
           aria-label="HTTP method"
-          className="absolute top-full left-0 z-50 mt-1 w-28 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+          className="absolute top-full left-0 z-50 mt-1 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
         >
           {HTTP_METHODS.map((m, idx) => {
             const isSelected = m === value;
@@ -158,19 +164,22 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
                   onClick={() => handleSelect(m)}
                   onMouseEnter={() => setActiveIndex(idx)}
                   className={cn(
-                    'flex w-full items-center justify-center px-2 py-1 font-mono text-xs font-semibold uppercase outline-none',
-                    // hover/focus: tinted background, text reverts to
-                    // foreground (the inline `color` style on hover would
-                    // otherwise win — `!` important is required to surface
-                    // the foreground color through it).
-                    'hover:bg-accent hover:!text-foreground',
-                    'focus:bg-accent focus:!text-foreground',
-                    // selected / keyboard-active: subtle accent background
+                    'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs outline-none transition-colors',
+                    'hover:bg-accent',
+                    'focus:bg-accent',
+                    // Selected or keyboard-active row gets the same accent
+                    // bg to mirror the trigger affordance.
                     (isActive || isSelected) && 'bg-accent',
                   )}
-                  style={{ color: methodColorVar(m) }}
                 >
-                  {m}
+                  <MethodPill
+                    method={m}
+                    size="sm"
+                    // Selected row goes solid (mirrors the trigger);
+                    // other rows stay tinted so the dropdown doesn't
+                    // shout louder than the row content it accompanies.
+                    variant={isSelected ? 'solid' : 'tinted'}
+                  />
                 </button>
               </li>
             );

@@ -25,7 +25,8 @@ import {
 } from 'lucide-react';
 import { useAppStore, type NewType } from '@/stores/app-store';
 import type { Collection, Endpoint, Module, Project } from '@/types/domain';
-import { methodColorVar, cn } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { MethodPill } from '@/components/ui/method-pill';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -1157,9 +1158,17 @@ function ProjectRow({
         }
       }}
       onContextMenu={onContextMenu}
-      className="group mb-0.5 flex w-full cursor-pointer items-center gap-1 rounded-sm px-1.5 py-1 text-left text-xs hover:bg-accent/60"
+      className={cn(
+        'group mb-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors',
+        'hover:bg-accent/60',
+      )}
     >
-      <Package className="h-3.5 w-3.5 shrink-0 text-violet-400/80" />
+      <span
+        aria-hidden
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/15 text-violet-500"
+      >
+        <Package className="h-3 w-3" />
+      </span>
       <InlineEdit
         value={project.name}
         onSave={onSaveEdit}
@@ -1168,7 +1177,7 @@ function ProjectRow({
           <span className="flex-1 truncate font-medium text-foreground">{project.name}</span>
         )}
       />
-      <span className="shrink-0 text-[10px] text-muted-foreground/60">
+      <span className="shrink-0 rounded bg-muted/60 px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground">
         {moduleCount}/{collectionCount}/{endpointCount}
       </span>
       <div className="invisible flex shrink-0 items-center pr-1 group-hover:visible">
@@ -1263,26 +1272,34 @@ function ModuleRow({
               onStartEdit();
             }
           }}
-          className="flex min-w-0 flex-1 items-center gap-1 rounded-sm px-1.5 py-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-muted-foreground transition-colors',
+            'hover:bg-accent/60 hover:text-foreground',
+          )}
         >
           <ChevronRight
             className={cn(
-              'h-3 w-3 shrink-0 transition-transform',
-              module.expanded && 'rotate-90',
+              'h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform',
+              module.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          {module.expanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-warning-foreground/80" />
-          ) : (
-            <FolderClosed className="h-3.5 w-3.5 shrink-0 text-warning-foreground/80" />
-          )}
+          <span
+            aria-hidden
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-500"
+          >
+            {module.expanded ? (
+              <FolderOpen className="h-3 w-3" />
+            ) : (
+              <FolderClosed className="h-3 w-3" />
+            )}
+          </span>
           <InlineEdit
             value={module.name}
             onSave={onSaveEdit}
             className="flex-1"
             display={() => <span className="flex-1 truncate">{module.name}</span>}
           />
-          <span className="shrink-0 text-[10px] text-muted-foreground/60">
+          <span className="shrink-0 rounded bg-muted/60 px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground">
             {endpointCount > 0 ? `${collectionCount}/${endpointCount}` : collectionCount}
           </span>
         </button>
@@ -1590,26 +1607,36 @@ function CollectionRow({
               onStartEdit();
             }
           }}
-          className="flex min-w-0 flex-1 items-center gap-1 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground hover:text-foreground"
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors',
+            'hover:bg-accent/60 hover:text-foreground',
+          )}
         >
           <ChevronRight
             className={cn(
-              'h-3 w-3 shrink-0 transition-transform',
-              collection.expanded && 'rotate-90',
+              'h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform',
+              collection.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          {collection.expanded ? (
-            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-          ) : (
-            <FolderClosed className="h-3.5 w-3.5 shrink-0 text-primary/80" />
-          )}
+          <span
+            aria-hidden
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-sky-500/15 text-sky-500"
+          >
+            {collection.expanded ? (
+              <FolderOpen className="h-3 w-3" />
+            ) : (
+              <FolderClosed className="h-3 w-3" />
+            )}
+          </span>
           <InlineEdit
             value={collection.name}
             onSave={onSaveEdit}
             className="flex-1"
             display={() => <span className="flex-1 truncate">{collection.name}</span>}
           />
-          <span className="shrink-0 text-[10px] text-muted-foreground/60">{endpointCount}</span>
+          <span className="shrink-0 rounded bg-muted/60 px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+            {endpointCount}
+          </span>
         </button>
         <div className="invisible flex shrink-0 items-center pr-1 group-hover:visible">
           <Tooltip content="新建" side="top">
@@ -1703,23 +1730,24 @@ function EndpointRow({
             }
           }}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-xs',
-            active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors',
+            active
+              ? 'bg-primary/15 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.20)]'
+              : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
           )}
         >
-          <FileCode2
-            className={cn(
-              'h-3 w-3 shrink-0',
-              active ? 'text-foreground/80' : 'text-muted-foreground/60',
-            )}
-          />
           <span
-            className="method-letter"
-            title={endpoint.method}
-            style={{ backgroundColor: methodColorVar(endpoint.method) }}
+            aria-hidden
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-500"
           >
-            {endpoint.method.charAt(0)}
+            <FileCode2 className="h-3 w-3" />
           </span>
+          <MethodPill
+            method={endpoint.method}
+            size="xs"
+            variant="solid"
+            title={`HTTP ${endpoint.method}`}
+          />
           <InlineEdit
             value={endpoint.name}
             onSave={onSaveEdit}
@@ -1727,7 +1755,7 @@ function EndpointRow({
             display={() => <span className="flex-1 truncate">{endpoint.name}</span>}
           />
           {multiSelect && selected && (
-            <span className="shrink-0 rounded-sm bg-primary/20 px-1 text-[9px] font-medium text-primary">
+            <span className="shrink-0 rounded bg-primary/20 px-1.5 text-[10px] font-medium text-primary">
               已选
             </span>
           )}

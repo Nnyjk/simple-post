@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 export type McpRuntimeStatus = 'running' | 'restarting' | 'stopped';
@@ -21,17 +21,27 @@ const INITIAL_STATE: McpUiState = {
 const RESTART_DELAY_MS = 800;
 
 /**
- * Local mock panel that visualises the (not-yet-real) MCP server process.
+ * Restart control + status broadcasting for the MCP hero card.
  *
- * Clicking the restart button flips `status` to `restarting`, waits
- * `RESTART_DELAY_MS`, then settles back to `running` with PID+1 and
- * requestsHandled+1. The timeout is tracked in a ref so a fast unmount
- * (e.g. tab switch + drawer close) cannot leak a setState into a
- * stale component.
+ * Owns the mock runtime state (PID, request count, restart-in-flight)
+ * and broadcasts it via `onStateChange` so the parent card can render
+ * the status pill, the PID, and the request count without each of them
+ * needing its own useState hook. The timeout is tracked in a ref so a
+ * fast unmount (e.g. tab switch + drawer close) cannot leak a setState
+ * into a stale component.
  */
-export function McpStatusPanel() {
+export function McpStatusPanel({
+  onStateChange,
+}: {
+  onStateChange?: (state: McpUiState) => void;
+}) {
   const [state, setState] = useState<McpUiState>(INITIAL_STATE);
   const timerRef = useRef<number | null>(null);
+
+  // Push every state change up so the parent can render the hero card.
+  useEffect(() => {
+    onStateChange?.(state);
+  }, [state, onStateChange]);
 
   useEffect(() => {
     return () => {
@@ -56,37 +66,24 @@ export function McpStatusPanel() {
   };
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card/30 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge status={state.status} />
-        <span className="font-mono text-[11px] text-muted-foreground">
-          PID {state.pid}
-        </span>
-        <span className="text-muted-foreground/60">·</span>
-        <span className="text-[11px] text-muted-foreground">
-          已处理请求 <span className="font-mono text-foreground">{state.requestsHandled}</span>
-        </span>
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleRestart}
-        disabled={state.status === 'restarting'}
-        className="gap-1.5"
-      >
-        <RefreshCw
-          className={cn(
-            'h-3.5 w-3.5',
-            state.status === 'restarting' && 'animate-spin',
-          )}
-        />
-        重启 MCP
-      </Button>
-    </div>
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleRestart}
+      disabled={state.status === 'restarting'}
+      className="gap-1.5"
+    >
+      {state.status === 'restarting' ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <RefreshCw className="h-3.5 w-3.5" />
+      )}
+      {state.status === 'restarting' ? '重启中…' : '重启 MCP'}
+    </Button>
   );
 }
 
-function StatusBadge({ status }: { status: McpRuntimeStatus }) {
+export function StatusBadge({ status }: { status: McpRuntimeStatus }) {
   if (status === 'running') {
     return (
       <Badge variant="success">
@@ -104,4 +101,19 @@ function StatusBadge({ status }: { status: McpRuntimeStatus }) {
     );
   }
   return <Badge variant="muted">stopped</Badge>;
+}
+
+/** Re-export a tiny `<StateSummary>` helper that consumes the same state
+ *  object the panel broadcasts. The connection section composes both. */
+export function StateSummary({ state }: { state: McpUiState }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <StatusBadge status={state.status} />
+      <span className="font-mono text-foreground/80">PID {state.pid}</span>
+      <span className="text-muted-foreground/60">·</span>
+      <span className="text-muted-foreground">
+        已处理 <span className="font-mono text-foreground">{state.requestsHandled.toLocaleString()}</span> 次请求
+      </span>
+    </span>
+  );
 }

@@ -7,6 +7,7 @@ import {
   Plus,
   Check,
   X,
+  ChevronRight,
 } from 'lucide-react';
 import { useAppStore, useActiveEndpoint, useActiveEnvironment } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
@@ -114,6 +115,17 @@ export function HttpTester() {
     if (!m) return undefined;
     return allProjects.find((p) => p.id === m.projectId);
   }, [endpoint, allCollections, allModules, allProjects]);
+  // Module / collection are resolved alongside the project so we can
+  // show a `项目 › 模块 › 集合` breadcrumb at the top of the page —
+  // same anchoring pattern the Settings panel uses (`设置 › 连接`).
+  const moduleAndCollection = useMemo(() => {
+    if (!endpoint) return null;
+    const c = allCollections.find((c) => c.id === endpoint.collectionId);
+    if (!c) return null;
+    const m = allModules.find((m) => m.id === c.moduleId);
+    if (!m) return null;
+    return { module: m, collection: c };
+  }, [endpoint, allCollections, allModules]);
   const projectEnvs = useMemo(
     () => (project ? allEnvironments.filter((e) => e.projectId === project.id) : []),
     [allEnvironments, project],
@@ -402,8 +414,45 @@ export function HttpTester() {
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
+      {/* Breadcrumb — mirrors the `设置 › 连接` pattern in the Settings
+          panel. Gives the user a single-screen answer to "where am I in
+          the tree". */}
+      <nav
+        aria-label="接口所属路径"
+        className="flex shrink-0 items-center gap-1 px-4 pt-5 text-[11px] text-muted-foreground"
+      >
+        {project && moduleAndCollection ? (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                const id = useAppStore.getState().activeProjectId;
+                if (id) useAppStore.getState().setActiveProject(id);
+              }}
+              className="truncate hover:text-foreground"
+              title={project.name}
+            >
+              {project.name}
+            </button>
+            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+            <span className="truncate" title={moduleAndCollection.module.name}>
+              {moduleAndCollection.module.name}
+            </span>
+            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+            <span
+              className="truncate text-foreground"
+              title={moduleAndCollection.collection.name}
+            >
+              {moduleAndCollection.collection.name}
+            </span>
+          </>
+        ) : (
+          <span>接口</span>
+        )}
+      </nav>
+
       {/* Endpoint header */}
-      <div className="flex shrink-0 items-start gap-2 border-b border-border px-4 py-2.5">
+      <div className="flex shrink-0 items-start gap-2 border-b border-border px-4 pb-3 pt-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <InlineEdit

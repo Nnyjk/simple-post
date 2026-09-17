@@ -1,13 +1,12 @@
 /**
- * BaseUrlPicker — the small fixed-width dropdown that sits between
- * the method picker and the URL field in HttpTester.
+ * BaseUrlPicker — the dropdown that sits between the method picker and
+ * the URL field in HttpTester.
  *
- * The picker now drives a project-level *baseUrl definition* (named
- * slot like "鉴权服务" / "数据服务") plus an optional per-endpoint
- * override. The actual URL is looked up from
- * `env.baseUrls[defId]` at resolve time (see lib/url.ts), so flipping
- * the active env changes the URL automatically without touching the
- * endpoint's selection.
+ * The picker drives a project-level *baseUrl definition* (named slot
+ * like "鉴权服务" / "数据服务") plus an optional per-endpoint override.
+ * The actual URL is looked up from `env.baseUrls[defId]` at resolve time
+ * (see lib/url.ts), so flipping the active env changes the URL
+ * automatically without touching the endpoint's selection.
  *
  * The component is fully controlled. The parent owns:
  *   - `selection`  — which named slot is active (or "default" / "override")
@@ -15,9 +14,14 @@
  *
  * The parent also passes the resolved baseUrl for the trigger label;
  * we don't compute it here to keep the picker dumb.
+ *
+ * Visual style: card-style trigger (rounded-lg + accent icon container),
+ * SettingRow-style dropdown rows (icon container + label + sub-label +
+ * trailing badge), matching the new Settings category aesthetic.
  */
+
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Globe } from 'lucide-react';
+import { Check, ChevronDown, Globe, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from './input';
 import { Badge } from './badge';
@@ -51,7 +55,7 @@ export interface BaseUrlPickerProps {
   className?: string;
 }
 
-const TRIGGER_WIDTH = 'w-44';
+const TRIGGER_WIDTH = 'w-52';
 const POPOVER_WIDTH = 'w-80';
 
 export function BaseUrlPicker({
@@ -117,6 +121,13 @@ export function BaseUrlPicker({
     return `· ${hostOf(resolvedBaseUrl)}`;
   }, [resolvedBaseUrl]);
 
+  // The accent used for the icon container and the "selected" hint.
+  // Sky-blue matches the "项目" / baseUrl layer in the project-tree
+  // design language (project→module→collection→endpoint).
+  const accentBg = 'bg-sky-500/15';
+  const accentText = 'text-sky-500';
+  const accentBorder = 'border-sky-500/30';
+
   return (
     <div ref={rootRef} className={cn('relative inline-block', className)}>
       <button
@@ -126,26 +137,39 @@ export function BaseUrlPicker({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         data-testid="baseurl-trigger"
+        title={resolvedBaseUrl || '点击选择 baseUrl 来源'}
         className={cn(
-          'flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-2 font-mono text-[11px] transition-colors',
+          // Card-style trigger — matches the SettingsRow outline. We
+          // nest an icon container so the affordance reads as "this is
+          // the baseUrl selector", not "this is a chevron dropdown".
+          'flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-2 text-xs transition-colors',
+          'hover:bg-accent/40',
           TRIGGER_WIDTH,
           !defaultDef && selection.kind === 'default' && 'text-muted-foreground',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
         )}
-        title={resolvedBaseUrl || '点击选择 baseUrl 来源'}
       >
-        <Globe className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-left">
-          <span className="block truncate leading-tight">{triggerLabel}</span>
+        <span
+          className={cn(
+            'flex h-6 w-6 shrink-0 items-center justify-center rounded-md border',
+            accentBg,
+            accentBorder,
+            accentText,
+          )}
+        >
+          <Globe className="h-3 w-3" />
+        </span>
+        <span className="min-w-0 flex-1 text-left leading-tight">
+          <span className="block truncate font-medium">{triggerLabel}</span>
           {triggerSubLabel && (
-            <span className="block truncate text-[9px] text-muted-foreground/70 leading-tight">
+            <span className="block truncate font-mono text-[10px] text-muted-foreground/70 leading-tight">
               {triggerSubLabel}
             </span>
           )}
         </span>
         <ChevronDown
           className={cn(
-            'h-3 w-3 shrink-0 text-muted-foreground transition-transform',
+            'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
             open && 'rotate-180',
           )}
         />
@@ -156,23 +180,27 @@ export function BaseUrlPicker({
           role="listbox"
           aria-label="选择 baseUrl 来源"
           className={cn(
-            'absolute top-full left-0 z-50 mt-1 overflow-hidden rounded-md border border-border bg-popover shadow-lg',
+            'absolute top-full left-0 z-50 mt-1 overflow-hidden rounded-lg border border-border bg-popover shadow-lg',
             POPOVER_WIDTH,
           )}
         >
-          <ul className="max-h-72 overflow-auto py-1">
+          <ul className="max-h-80 overflow-auto p-1">
             <Row
               selected={selection.kind === 'default'}
               onSelect={() => {
                 onSelectionChange({ kind: 'default' });
                 setOpen(false);
               }}
-              icon={<span className="text-muted-foreground">·</span>}
+              iconContainerClass={cn(accentBg, accentBorder, accentText)}
+              icon={<Globe className="h-3.5 w-3.5" />}
               primary={defaultDef ? '项目默认' : '项目默认（无）'}
-              secondary={defaultDef ? `→ ${defaultDef.name}` : '该项目尚未设置默认 baseUrl'}
+              secondary={
+                defaultDef ? `→ ${defaultDef.name}` : '该项目尚未设置默认 baseUrl'
+              }
+              selectedHint={defaultDef ? '默认' : null}
             />
             {definitions.length > 0 && (
-              <li className="px-2 pt-1.5 pb-0.5 text-[9px] uppercase tracking-wider text-muted-foreground/60">
+              <li className="px-2 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
                 BaseUrl 定义
               </li>
             )}
@@ -186,13 +214,13 @@ export function BaseUrlPicker({
                   onSelectionChange({ kind: 'definition', definitionId: def.id });
                   setOpen(false);
                 }}
-                icon={<span className="text-blue-400/80">●</span>}
+                iconContainerClass={cn(accentBg, accentBorder, accentText)}
+                icon={<Globe className="h-3.5 w-3.5" />}
                 primary={def.name}
-                secondary={def.id === defaultDefinitionId ? '项目默认' : ''}
-                trailing={def.id === defaultDefinitionId ? <Badge variant="success">默认</Badge> : null}
+                secondary={def.description}
+                selectedHint={def.id === defaultDefinitionId ? '默认' : null}
               />
             ))}
-            <li className="my-1 border-t border-border/60" />
             <Row
               selected={selection.kind === 'override'}
               onSelect={() => {
@@ -200,9 +228,11 @@ export function BaseUrlPicker({
                 // Don't close — the custom input appears and the user
                 // needs to type something before the row is meaningful.
               }}
-              icon={<span className="text-amber-400/80">●</span>}
+              iconContainerClass="bg-amber-500/15 border-amber-500/30 text-amber-500"
+              icon={<Pencil className="h-3.5 w-3.5" />}
               primary="自定义"
               secondary={customValue || '在下方输入框填写'}
+              selectedHint={null}
             />
           </ul>
           {selection.kind === 'override' && (
@@ -211,7 +241,7 @@ export function BaseUrlPicker({
                 value={customValue}
                 onChange={(e) => onCustomValueChange(e.target.value)}
                 placeholder="https://my.custom.host"
-                className="h-7 font-mono text-[11px]"
+                className="h-8 font-mono text-[11px]"
                 autoFocus
                 data-testid="baseurl-custom-input"
               />
@@ -223,21 +253,26 @@ export function BaseUrlPicker({
   );
 }
 
-function Row({
-  selected,
-  onSelect,
-  icon,
-  primary,
-  secondary,
-  trailing,
-}: {
+interface RowProps {
   selected: boolean;
   onSelect: () => void;
+  iconContainerClass: string;
   icon: React.ReactNode;
   primary: string;
   secondary?: string;
-  trailing?: React.ReactNode;
-}) {
+  /** "默认" badge shown on the row that resolves to the project default. */
+  selectedHint?: string | null;
+}
+
+function Row({
+  selected,
+  onSelect,
+  iconContainerClass,
+  icon,
+  primary,
+  secondary,
+  selectedHint,
+}: RowProps) {
   return (
     <li>
       <button
@@ -246,22 +281,33 @@ function Row({
         aria-selected={selected}
         onClick={onSelect}
         className={cn(
-          'flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] transition-colors',
+          'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
           'hover:bg-accent hover:text-foreground',
-          selected && 'bg-accent/60',
+          selected && 'bg-accent text-foreground',
         )}
       >
-        <span className="w-3 shrink-0 text-center">{icon}</span>
+        <span
+          className={cn(
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border',
+            iconContainerClass,
+          )}
+        >
+          {icon}
+        </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium leading-tight">{primary}</span>
+          <span className="block truncate text-xs font-medium leading-tight">
+            {primary}
+          </span>
           {secondary && (
             <span className="block truncate font-mono text-[10px] text-muted-foreground/80 leading-tight">
               {secondary}
             </span>
           )}
         </span>
-        {trailing}
-        {selected && <Check className="h-3 w-3 shrink-0 text-primary" />}
+        {selectedHint && <Badge variant="success">{selectedHint}</Badge>}
+        {selected && (
+          <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+        )}
       </button>
     </li>
   );

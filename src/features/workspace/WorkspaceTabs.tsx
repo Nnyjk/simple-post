@@ -8,8 +8,18 @@
  *   - Tabs whose underlying entity was deleted (or whose parent was) are
  *     auto-pruned on every state change. The cleanup is also exposed as
  *     `pruneStaleTabs` for the rare case of out-of-band mutations.
- *   - The strip is horizontally scrollable (with the wheel) when there are
- *     more tabs than fit in the available width — common in real projects.
+ *   - When there are more tabs than fit in the available width, the strip
+ *     enters a **compact mode** instead of showing a horizontal scrollbar
+ *     (which would have clobbered the rest of the chrome). Both modes use
+ *     **fixed widths** (normal=160px, compact=92px) — every tab in the
+ *     strip is the same width regardless of what it shows, so the strip
+ *     reads as a clean grid. The title inside each tab truncates to
+ *     ≈ 5–6 Chinese characters in normal mode and ≈ 2 in compact; the
+ *     hint (e.g. "订单生命周期") is shown in normal mode but capped via
+ *     `max-w` and hidden in compact. Width transitions are CSS-driven so
+ *     neighbours reflow smoothly; tab *positions* still slide via GSAP
+ *     FLIP. Re-measured whenever the tab set, active tab, or window size
+ *     changes.
  *   - Keyboard: middle-click closes, just like a browser tab.
  *   - Visual state: active tab uses the primary tint, others stay muted.
  *   - Tab positions slide rather than snap when the tab set changes
@@ -21,7 +31,7 @@
  *     follows active-tab switches.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Package,
   FolderOpen,
@@ -36,7 +46,8 @@ import {
 import { useAppStore, type OpenTab, type TabKind } from '@/stores/app-store';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
-import { cn, methodColorVar } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { MethodPill } from '@/components/ui/method-pill';
 import { Flip, gsap, useGSAP } from '@/lib/gsap';
 
 const KIND_LABEL: Record<TabKind, string> = {
@@ -93,6 +104,41 @@ export function WorkspaceTabs() {
   // First-run guard for the bar: snap into place on initial mount rather
   // than running an entry tween from (0,0) to the first active tab.
   const isFirstBarRun = useRef(true);
+
+  // Compact-mode decision: when the strip cannot host every tab at its
+  // full width, we let each tab shrink to a smaller floor (icon + 4-5
+  // chars + close) instead of showing a horizontal scrollbar — which
+  // would clash with the rest of the chrome. The title inside the tab
+  // truncates with `max-w`; it is never hidden behind an icon-only
+  // treatment (the eye should always see *some* text in a tab).
+  //
+  // Both modes now use FIXED widths (normal=160px, compact=92px) so
+  // every tab in the strip looks the same — the user asked for uniform
+  // tab widths to keep the strip visually consistent. The compact mode
+  // threshold counts how many *normal* tabs would fit, then collapses
+  // everyone to the compact width if not.
+  //
+  // Re-measured whenever the tab set changes, the active tab switches,
+  // or the window resizes (we listen for resize rather than running a
+  // ResizeObserver because the only thing we need is the strip's
+  // own clientWidth, and resize fires at most once per frame).
+  const [isCompact, setIsCompact] = useState(false);
+  const measureCompact = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const NORMAL_TAB = 160;  // px, fixed width in normal mode
+    const TRAILING = 76;     // px reserved for the trailing "关闭其他" button + padding
+    const tabs = el.querySelectorAll<HTMLElement>('[data-tab-id]');
+    const minTotal = tabs.length * NORMAL_TAB;
+    setIsCompact(minTotal > el.clientWidth - TRAILING);
+  }, []);
+  useLayoutEffect(() => {
+    measureCompact();
+  }, [measureCompact, activeTabId, openTabs.length]);
+  useEffect(() => {
+    window.addEventListener('resize', measureCompact);
+    return () => window.removeEventListener('resize', measureCompact);
+  }, [measureCompact]);
 
   // ------------------------------------------------------------------
   //  Tab position animation (GSAP Flip, FLIP pattern)
@@ -175,7 +221,14 @@ export function WorkspaceTabs() {
       ref={stripRef}
       role="tablist"
       aria-label="工作区标签"
-      className="relative flex h-9 shrink-0 items-stretch gap-0.5 overflow-x-auto border-b border-border bg-card/40 pl-0 pr-1.5"
+      className={cn(
+        'relative flex h-9 shrink-0 items-stretch gap-0.5 overflow-hidden border-b border-border bg-card/40 pl-0 pr-1.5',
+        // Belt-and-braces: hide both the standard scrollbar and the
+        // webkit one. The strip itself is `overflow-hidden` so a scrollbar
+        // wouldn't actually appear here — but keeping the rules in case a
+        // future change ever reintroduces `overflow-x-auto`.
+        'scrollbar-none',
+      )}
     >
       {descriptors.map((d) => {
         const active = d.tab.id === activeTabId;
@@ -204,7 +257,21 @@ export function WorkspaceTabs() {
               setMenu({ tabId: d.tab.id, x: e.clientX, y: e.clientY });
             }}
             className={cn(
-              'group relative flex h-full min-w-[120px] max-w-[220px] cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs transition-colors',
+              // Width strategy (uniform across all tabs in a session):
+              //  - normal mode: every tab is exactly `w-[160px]` so the
+              //    strip reads as a clean grid of equal-width cells; the
+              //    user explicitly asked for "统一长度". Title fits 5–6
+              //    Chinese characters before truncating; long hints are
+              //    truncated with `...` inside the tab rather than
+              //    stretching the tab outward.
+              //  - compact mode (triggered when too many tabs to fit at
+              //    160px): every tab is exactly `w-[92px]`. The title
+              //    truncates to ≈ 2 Chinese characters so the active tab
+              //    is identifiable at a glance. The hint is hidden
+              //    (otherwise its `shrink-0` would visually break the
+              //    fixed 92px width).
+              'group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs transition-[width,gap,padding] duration-200 ease-out',
+              isCompact ? 'w-[92px]' : 'w-[160px]',
               active
                 ? 'border-border bg-background text-foreground'
                 : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
@@ -217,7 +284,20 @@ export function WorkspaceTabs() {
             >
               {d.icon}
             </span>
-            <span className="min-w-0 flex-1 truncate" title={d.title}>
+            <span
+              // Title is the main element that grows. It always truncates
+              // — but the *amount* of room it gets depends on mode:
+              //  - normal: ~84px (≈ 5 Chinese chars). The hint (e.g.
+              //    "订单生命周期") sits to the right of title.
+              //  - compact: ~36px (≈ 2 Chinese chars). Hint hidden.
+              // The full title remains available on hover via the
+              // `title` attribute.
+              className={cn(
+                'min-w-0 truncate',
+                isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
+              )}
+              title={d.title}
+            >
               {d.title}
             </span>
             {dirty && (
@@ -228,9 +308,9 @@ export function WorkspaceTabs() {
                 />
               </Tooltip>
             )}
-            {d.hint && (
+            {d.hint && !isCompact && (
               <Tooltip content={d.hint} side="bottom">
-                <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                <span className="max-w-[40px] truncate text-[10px] text-muted-foreground/70">
                   {d.hint}
                 </span>
               </Tooltip>
@@ -410,13 +490,13 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       tab: t,
       title: e.name,
       icon: (
-        <span
-          className="method-letter !h-3.5 !w-3.5 !text-[9px]"
-          title={e.method}
-          style={{ backgroundColor: methodColorVar(e.method) }}
-        >
-          {e.method.charAt(0)}
-        </span>
+        <MethodPill
+          method={e.method}
+          size="xs"
+          variant="solid"
+          title={`HTTP ${e.method}`}
+          className="!h-3.5 !w-3.5 !text-[9px]"
+        />
       ),
       iconColor: '#a3a3a3',
     });

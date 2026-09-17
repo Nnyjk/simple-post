@@ -16,12 +16,24 @@ interface TabsProps {
   size?: 'sm' | 'md';
 }
 
+/**
+ * Underline-style tab bar — the same visual idiom used by the workspace
+ * tab strip at the top of the app, but stripped of FLIP animation and
+ * the close affordance. We use a `border-b-2` underline on the active
+ * tab instead of a background pill so it reads as a navigation surface
+ * (rather than a segmented control) and so it lines up with the rest
+ * of the chrome at the bottom of the strip.
+ */
 export function Tabs({ items, value, onChange, className, size = 'sm' }: TabsProps) {
   return (
     <div
       role="tablist"
       className={cn(
-        'inline-flex items-center gap-0.5 rounded-md bg-muted/50 p-0.5',
+        // The strip itself carries a hairline separator at the bottom so
+        // an active tab's underline can sit *above* it (using -mb-px on
+        // the tab) and look like it's growing out of the surface — the
+        // pattern you see in VS Code, browsers, GitHub's file tabs.
+        'flex items-end gap-0 border-b border-border/60',
         className,
       )}
     >
@@ -35,13 +47,16 @@ export function Tabs({ items, value, onChange, className, size = 'sm' }: TabsPro
             disabled={item.disabled}
             onClick={() => onChange(item.id)}
             className={cn(
-              'inline-flex items-center gap-1.5 rounded-sm font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              'relative inline-flex items-center gap-1.5 border-b-2 px-3 font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
               'disabled:pointer-events-none disabled:opacity-50',
-              size === 'sm' ? 'h-6 px-2.5 text-xs' : 'h-8 px-3 text-sm',
+              size === 'sm' ? 'h-8 text-xs' : 'h-9 text-sm',
+              // The `-mb-px` lifts the underline onto the strip's border
+              // so the two lines collapse into one continuous stroke.
+              '-mb-px',
               active
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground',
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:border-border/60 hover:text-foreground',
             )}
           >
             {item.label}

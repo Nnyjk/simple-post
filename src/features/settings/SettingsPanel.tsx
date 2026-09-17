@@ -7,16 +7,15 @@
  * so this component is just the body — no drawer chrome, no header,
  * no X-to-close (use the tab's X).
  *
- * Why a left rail instead of the previous top tab strip?
- *   - Categories are stable (4 of them, not growing fast) so a vertical
- *     list fits without scrolling.
- *   - The left rail keeps a stable "where am I" cue while the right side
- *     scrolls long forms.
- *   - It frees the top edge for a section title + description.
+ * The right pane opens with a slim breadcrumb + section title so the
+ * user always has a "where am I" cue without us repeating the rail label
+ * twice on the same screen. Each sub-section renders its own header via
+ * `SettingsCategory`, which in turn wraps rows in a soft card shell.
  */
 
 import { useMemo, useRef } from 'react';
-import { Cloud, Cpu, Palette, Send } from 'lucide-react';
+import { ChevronRight, Cloud, Cpu, Palette } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { useAppStore, type SettingsCategoryId } from '@/stores/app-store';
 import { SettingsCategory } from './SettingsCategory';
 import { EnvironmentSection } from './sections/EnvironmentSection';
@@ -33,21 +32,46 @@ const CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'request',
 ];
 
-const RAIL_ITEMS: { id: SettingsCategoryId; label: string; icon: React.ReactNode; hint: string }[] = [
-  { id: 'env', label: '环境', icon: <Cloud className="h-4 w-4" />, hint: '环境变量 / baseUrl' },
-  { id: 'connection', label: '连接', icon: <Cpu className="h-4 w-4" />, hint: 'MCP 协议设置' },
-  { id: 'appearance', label: '外观与体验', icon: <Palette className="h-4 w-4" />, hint: '主题 / 快捷键' },
-  { id: 'request', label: '请求', icon: <Send className="h-4 w-4" />, hint: '超时 / 重定向 / 体积上限' },
+const RAIL_ITEMS: {
+  id: SettingsCategoryId;
+  label: string;
+  icon: React.ReactNode;
+  hint: string;
+  // A unique accent colour for the rail pill — matches the icon's tinted
+  // background when the row is active, so the eye can trace the rail →
+  // header mapping at a glance.
+  accent: string;
+}[] = [
+  { id: 'env', label: '环境', icon: <Cloud className="h-4 w-4" />, hint: '环境变量 / baseUrl', accent: 'text-sky-500 bg-sky-500/15' },
+  { id: 'connection', label: '连接', icon: <Cpu className="h-4 w-4" />, hint: 'MCP 协议设置', accent: 'text-violet-500 bg-violet-500/15' },
+  { id: 'appearance', label: '外观与体验', icon: <Palette className="h-4 w-4" />, hint: '主题 / 快捷键', accent: 'text-pink-500 bg-pink-500/15' },
+  { id: 'request', label: '请求', icon: <Send className="h-4 w-4" />, hint: '超时 / 重定向 / 体积上限', accent: 'text-emerald-500 bg-emerald-500/15' },
 ];
 
 const SECTION_META: Record<
   SettingsCategoryId,
-  { title: string; description: string }
+  { title: string; description: string; icon: React.ReactNode }
 > = {
-  env: { title: '环境', description: '使用 {{var}} 引用，支持 query / header / body / url' },
-  connection: { title: '连接', description: 'stdio 模式 · 供 Claude Desktop、Cursor 等调用' },
-  appearance: { title: '外观与体验', description: '主题、快捷键等全局偏好' },
-  request: { title: '请求', description: '应用到所有 HTTP 发送（v0.2 由 Rust 端消费）' },
+  env: {
+    title: '环境',
+    description: '使用 {{var}} 引用，支持 query / header / body / url',
+    icon: <Cloud className="h-3.5 w-3.5" />,
+  },
+  connection: {
+    title: '连接',
+    description: 'stdio 模式 · 供 Claude Desktop、Cursor 等调用',
+    icon: <Cpu className="h-3.5 w-3.5" />,
+  },
+  appearance: {
+    title: '外观与体验',
+    description: '主题、快捷键等全局偏好',
+    icon: <Palette className="h-3.5 w-3.5" />,
+  },
+  request: {
+    title: '请求',
+    description: '应用到所有 HTTP 发送（v0.2 由 Rust 端消费）',
+    icon: <Send className="h-3.5 w-3.5" />,
+  },
 };
 
 export function SettingsPanel() {
@@ -108,13 +132,15 @@ export function SettingsPanel() {
     { scope: mainRef, dependencies: [activeSection] },
   );
 
+  const meta = SECTION_META[activeSection];
+
   return (
     <div className="flex h-full min-h-0">
       {/* Left rail — vertical list of section entries. Mirrors the
           visual weight of the project tree so the settings tab feels
           like another navigation context, not a popup. */}
-      <aside className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-border bg-card/40 p-2">
-        <div className="px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <aside className="flex w-48 shrink-0 flex-col gap-0.5 border-r border-border bg-card/40 p-2">
+        <div className="px-2 pb-2 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
           分组
         </div>
         <nav className="flex flex-col gap-0.5" role="tablist" aria-label="设置分组">
@@ -129,15 +155,18 @@ export function SettingsPanel() {
                 className={cn(
                   'group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
                   active
-                    ? 'bg-primary/15 text-primary'
+                    ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border))]'
                     : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
                 )}
               >
                 <span
                   className={cn(
-                    'shrink-0',
-                    active ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground',
+                    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
+                    active
+                      ? item.accent
+                      : 'bg-muted/60 text-muted-foreground group-hover:text-foreground',
                   )}
+                  aria-hidden
                 >
                   {item.icon}
                 </span>
@@ -146,7 +175,9 @@ export function SettingsPanel() {
                   <span
                     className={cn(
                       'block truncate text-[10px]',
-                      active ? 'text-primary/70' : 'text-muted-foreground/70',
+                      active
+                        ? 'text-muted-foreground'
+                        : 'text-muted-foreground/70',
                     )}
                   >
                     {item.hint}
@@ -156,21 +187,31 @@ export function SettingsPanel() {
             );
           })}
         </nav>
+
+        {/* Bottom-pinned helper card — surfaces where to file feedback. */}
+        <div className="mt-auto rounded-md border border-dashed border-border/70 bg-background/30 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          设置改动会立即保存。重启 MCP 进程后部分项生效。
+        </div>
       </aside>
 
-      {/* Main content area. The page-level title is intentionally
-          omitted — the left rail already labels the section and
-          repeating it would just be visual noise. Each sub-section
-          (rendered by the section component below) uses
-          SettingsCategory, which draws a `border-b` divider under
-          itself; together they form a single stacked column separated
-          by thin horizontal lines. */}
-      <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
+      {/* Main content area. A slim breadcrumb + section title head the
+          scroll area so the user always has a stable "where am I" cue
+          even after the section body has scrolled. */}
+      <main
+        ref={mainRef}
+        className="min-w-0 flex-1 overflow-y-auto"
+        data-settings-active={activeSection}
+      >
+        <div className="flex items-center gap-1.5 px-12 pb-1 pt-5 text-[11px] text-muted-foreground">
+          <span>设置</span>
+          <ChevronRight className="h-3 w-3 text-muted-foreground/60" />
+          <span className="text-foreground">{meta.title}</span>
+        </div>
         {CATEGORY_IDS.map((id) => {
           if (id !== activeSection) return null;
           if (id === 'env') {
             return (
-              <div key={activeSection} data-settings-section className="pt-2">
+              <div key={activeSection} data-settings-section>
                 <EnvironmentSection
                   environments={environments}
                   projectId={activeProjectId}

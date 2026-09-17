@@ -116,6 +116,19 @@
     background-clip: padding-box;
     border: 2px solid transparent;
   }
+
+  /* Hide scrollbar entirely (e.g. compact tab strip). Use only when the
+     content has another way to be discovered — never as a substitute for
+     a proper overflow design. */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
 }
 
 @layer components {
@@ -127,17 +140,11 @@
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background;
   }
 
-  .method-badge {
-    @apply inline-flex items-center justify-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white;
-  }
-
-  /* Single-letter method marker used in the work tree and tab strip.
-     A fixed square footprint keeps every row the same width regardless
-     of the underlying verb (POST vs DELETE etc.), and the colour does
-     all the heavy lifting. */
-  .method-letter {
-    @apply inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[10px] font-semibold text-white;
-  }
+  /* HTTP-method colour swatches are no longer global utility classes
+     — they live in `<MethodPill />` (src/components/ui/method-pill.tsx)
+     so the colour mapping and sizing are co-located. Use MethodPill
+     anywhere you'd reach for the old `.method-badge` /
+     `.method-letter` selectors. */
 
   .kbd {
     @apply inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-mono rounded border border-border bg-muted text-muted-foreground;

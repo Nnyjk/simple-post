@@ -28,13 +28,11 @@ import { AlertTriangle } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { methodColorVar } from '@/lib/utils';
+import { MethodPill } from '@/components/ui/method-pill';
 
 interface TabDisplay {
   title: string;
   kindLabel: string;
-  /** When the tab is an endpoint, an accent for the method badge. */
-  accent?: string;
 }
 
 function tabDisplay(tabId: string): TabDisplay {
@@ -60,7 +58,6 @@ function tabDisplay(tabId: string): TabDisplay {
     return {
       title: e?.name ?? '（接口已删除）',
       kindLabel: '接口',
-      accent: e ? methodColorVar(e.method) : undefined,
     };
   }
   return { title: '设置', kindLabel: '' };
@@ -149,12 +146,7 @@ export function DirtyCloseDialog() {
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {currentEndpoint ? (
           <>
-            <span
-              className="method-badge !px-1.5 !text-[10px]"
-              style={{ backgroundColor: current.accent }}
-            >
-              {currentEndpoint.method}
-            </span>
+            <MethodPill method={currentEndpoint.method} size="sm" variant="solid" />
             <span>选择「保存」写入当前接口草稿,「直接关闭」丢弃。</span>
           </>
         ) : (

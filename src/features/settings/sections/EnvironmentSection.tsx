@@ -6,6 +6,9 @@ import {
   Braces,
   Star,
   Pencil,
+  Cloud,
+  Rocket,
+  TestTube,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,23 +50,32 @@ export interface EnvironmentSectionProps {
 const VAR_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * Per-environment configuration, Apifox-style:
+ * Per-environment configuration.
  *
- *   ┌── env tab bar ─────────────────────────────────────────┐
- *   │  本地环境   测试环境  正式环境  …  + 新建环境          │
+ * Layout:
+ *
+ *   ┌── env tab strip ─────────────────────────────────────────┐
+ *   │  ☁  dev  ⚡ staging  🚀 prod            + 新建环境       │
  *   ├────────────────────────────────────────────────────────┤
- *   │  前置 URL                          + 添加服务           │
- *   │  🌐  默认      http://localhost:4000/demo  ★ 默认       │
- *   │  🌐  数据服务  http://127.0.0.1:9100/api                 │
- *   ├────────────────────────────────────────────────────────┤
- *   │  环境变量                          + 添加变量           │
- *   │  {{ }}  token  eyJhbGciOi...                            │
- *   │  {{ }}  env    dev                                      │
+ *   │  dev                                              [active]
+ *   ├──────────── 前置 URL · BaseUrl 定义 ────────────────────┤
+ *   │  🌐  默认      http://localhost:4000/demo  [默认] [×]   │
+ *   │  🌐  数据服务  http://127.0.0.1:9100/api        [×]    │
+ *   │                  + 添加服务                            │
+ *   ├──────────── 环境变量 ───────────────────────────────────┤
+ *   │  { } token  eyJhbGciOi...                       [×]    │
+ *   │  { } env    dev                                 [×]    │
+ *   │                  + 添加变量                            │
  *   └────────────────────────────────────────────────────────┘
  *
- * Per-row inline edit (rename service / variable, edit URL /
- * value, delete, mark-as-default) works the same as before — only
- * the outer shell changed (cards collapsed into a tab strip).
+ * Visually it inherits the new SettingsCategory aesthetic — coloured
+ * icon containers, SettingRow-style padded rows, badge trailing
+ * controls, hover-revealed delete buttons — but adds an env switcher
+ * strip across the top because each env holds its own value overrides.
+ *
+ * Per-row inline edit (rename service/variable, edit URL/value,
+ * delete, mark-as-default) works as before; only the outer shell
+ * changed.
  */
 export function EnvironmentSection({
   environments,
@@ -83,11 +95,6 @@ export function EnvironmentSection({
   const [activeId, setActiveId] = useState<string | null>(null);
 
   // ---- modal state ----
-  // Browser-native `window.confirm` shows "localhost:5173 显示" as
-  // the title and can't be repositioned — the dialogs we render here
-  // go through `ConfirmDialog` for a consistent look. The "add baseUrl"
-  // flow no longer needs a prompt because we use an inline empty row
-  // (same UX as adding a variable).
   const [deletingBaseUrl, setDeletingBaseUrl] = useState<{
     id: string;
     name: string;
@@ -116,7 +123,6 @@ export function EnvironmentSection({
   );
 
   const handleNewEnv = () => {
-    // Append a fresh env; the auto-select useEffect picks it up.
     addEnvironment(projectId, 'new-env');
   };
 
@@ -128,14 +134,11 @@ export function EnvironmentSection({
 
   const handleAddBaseUrl = () => {
     if (!activeEnv) return;
-    // Match the variable UX: append an empty row immediately. The user
-    // can inline-rename the service name and fill the URL without any
-    // intermediate modal — same flow as `handleAddVar`.
+    // Match the variable UX: append an empty row immediately.
     const defId = addBaseUrlDefinition(projectId, '新服务');
     setEnvironmentBaseUrl(activeEnv.id, defId, '');
   };
 
-  // ---- dialog confirm handlers ----
   const confirmDeleteBaseUrl = () => {
     if (deletingBaseUrl) {
       deleteBaseUrlDefinition(projectId, deletingBaseUrl.id);
@@ -149,85 +152,34 @@ export function EnvironmentSection({
   };
 
   return (
-    <SettingsCategory hideDivider>
+    <SettingsCategory
+      hideDivider
+      // `stacked` so each panel (env switcher + per-env body) reads as
+      // its own self-contained surface — same as before, no extra card
+      // shell around everything.
+      variant="stacked"
+    >
       <div className="space-y-3">
         {environments.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border bg-card/30 px-3 py-6 text-center text-xs text-muted-foreground">
+          <div className="rounded-lg border border-dashed border-border bg-card/30 px-3 py-8 text-center text-xs text-muted-foreground">
             该项目还没有环境
           </div>
         ) : (
           <>
-            {/* Tab strip — Apifox-style top-row navigation. */}
-            <div
-              role="tablist"
-              aria-label="环境列表"
-              className="flex flex-wrap items-center gap-1 border-b border-border pb-px"
-            >
-              {environments.map((env) => {
-                const isActive = env.id === activeId;
-                return (
-                  <button
-                    key={env.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    onClick={() => setActiveId(env.id)}
-                    className={cn(
-                      'group relative flex h-8 items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-3 text-xs transition-colors',
-                      isActive
-                        ? 'border-border bg-card text-foreground'
-                        : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
-                    )}
-                  >
-                    <span className="font-mono font-medium">{env.name}</span>
-                    {/* Active state is owned by the top-bar ENV dropdown
-                        (the actual switcher). Showing it here would be
-                        a duplicate affordance — by the time you're on
-                        this settings page, the "active" decision is
-                        already visible elsewhere. */}
-                    {/* Active underline — pure decoration, drawn with
-                        border-b so it lines up exactly with the strip
-                        divider above. */}
-                    {isActive && (
-                      <span className="absolute inset-x-0 -bottom-px h-px bg-card" />
-                    )}
-                    {environments.length > 1 && (
-                      <Tooltip content="删除环境" side="bottom">
-                        <span
-                          role="button"
-                          aria-label={`删除环境 ${env.name}`}
-                          tabIndex={-1}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeletingEnv({ id: env.id, name: env.name });
-                          }}
-                          className={cn(
-                            'ml-1 inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded text-muted-foreground/60 opacity-0 hover:bg-destructive/20 hover:text-destructive',
-                            'group-hover:opacity-100',
-                            isActive && 'opacity-100',
-                          )}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </span>
-                      </Tooltip>
-                    )}
-                  </button>
-                );
-              })}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="ml-1 h-8 gap-1 text-xs"
-                onClick={handleNewEnv}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                新建环境
-              </Button>
-            </div>
+            {/* ----- Env switcher (top tab strip) ----------------- */}
+            <EnvSwitcher
+              environments={environments}
+              activeId={activeId}
+              onPick={setActiveId}
+              onRequestDelete={(env) =>
+                setDeletingEnv({ id: env.id, name: env.name })
+              }
+              onAdd={handleNewEnv}
+            />
 
-            {/* Active env body — tables. */}
+            {/* ----- Active env body ------------------------------ */}
             {activeEnv && (
-              <div className="rounded-md border border-border bg-card/30">
+              <div className="overflow-hidden rounded-lg border border-border/70 bg-card/40 shadow-[0_1px_0_0_rgba(255,255,255,0.02)_inset]">
                 <EnvBody
                   env={activeEnv}
                   projectId={projectId}
@@ -274,9 +226,116 @@ export function EnvironmentSection({
   );
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
+// EnvSwitcher — top-of-section env picker
+// ============================================================================
+
+function EnvSwitcher({
+  environments,
+  activeId,
+  onPick,
+  onRequestDelete,
+  onAdd,
+}: {
+  environments: Environment[];
+  activeId: string | null;
+  onPick: (id: string) => void;
+  onRequestDelete: (env: Environment) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {environments.map((env) => {
+        const isActive = env.id === activeId;
+        return (
+          <button
+            key={env.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => onPick(env.id)}
+            className={cn(
+              'group relative flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
+              // Coloured icon container matches the project's tier
+              // language (sky = base / data, amber = config / builds,
+              // violet = production-ish). Picked automatically from the
+              // env name so users don't have to tag each one.
+              isActive
+                ? 'border-primary/40 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.25)]'
+                : 'border-border bg-card/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border',
+                isActive
+                  ? 'border-primary/40 bg-primary/15 text-primary'
+                  : 'border-border bg-muted/60 text-muted-foreground',
+              )}
+            >
+              {envIcon(env.name)}
+            </span>
+            <span className="font-mono font-medium">{env.name}</span>
+            {environments.length > 1 && (
+              <Tooltip content="删除环境" side="bottom">
+                <span
+                  role="button"
+                  aria-label={`删除环境 ${env.name}`}
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRequestDelete(env);
+                  }}
+                  className={cn(
+                    'ml-0.5 inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded text-muted-foreground/60 opacity-0 hover:bg-destructive/20 hover:text-destructive',
+                    'group-hover:opacity-100',
+                    isActive && 'opacity-100',
+                  )}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </span>
+              </Tooltip>
+            )}
+          </button>
+        );
+      })}
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-8 gap-1 border-dashed text-xs text-muted-foreground hover:text-foreground"
+        onClick={onAdd}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        新建环境
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Pick an icon for the env tab based on its name. The mapping is loose
+ * by design — names that don't match anything get the neutral Cloud
+ * icon, which still differentiates the env visually without forcing the
+ * user to pick an icon manually.
+ */
+function envIcon(name: string) {
+  const n = name.toLowerCase();
+  if (n.includes('prod') || n.includes('release') || n.includes('正式') || n.includes('线上')) {
+    return <Rocket className="h-3.5 w-3.5" />;
+  }
+  if (n.includes('stag') || n.includes('pre') || n.includes('测试') || n.includes('预发')) {
+    return <TestTube className="h-3.5 w-3.5" />;
+  }
+  if (n.includes('dev') || n.includes('local') || n.includes('开发') || n.includes('本地')) {
+    return <TestTube className="h-3.5 w-3.5" />;
+  }
+  return <Cloud className="h-3.5 w-3.5" />;
+}
+
+// ============================================================================
 // EnvBody — one env's tables (URL rows + variable rows)
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 interface EnvBodyProps {
   env: Environment;
@@ -312,12 +371,22 @@ function EnvBody({
   onDeleteBaseUrl,
 }: EnvBodyProps) {
   return (
-    <div>
+    <div className="flex flex-col">
       <EnvHeader
         env={env}
         onRename={(name) => updateEnvironment(env.id, { name })}
       />
 
+      <GroupHeader
+        icon={<Globe className="h-3.5 w-3.5" />}
+        title="前置 URL"
+        description="项目级 BaseUrl 定义 + 当前环境的覆盖值"
+        meta={
+          baseUrlDefinitions.length > 0
+            ? `${baseUrlDefinitions.length} 个服务`
+            : undefined
+        }
+      />
       <BaseUrlTable
         env={env}
         projectId={projectId}
@@ -331,6 +400,16 @@ function EnvBody({
         onDeleteBaseUrl={onDeleteBaseUrl}
       />
 
+      <GroupHeader
+        icon={<Braces className="h-3.5 w-3.5" />}
+        title="环境变量"
+        description="在 URL/Headers/Body 中通过 {{key}} 引用"
+        meta={
+          Object.keys(env.variables).length > 0
+            ? `${Object.keys(env.variables).length} 个变量`
+            : undefined
+        }
+      />
       <VariableTable
         env={env}
         setEnvironmentVar={setEnvironmentVar}
@@ -340,9 +419,9 @@ function EnvBody({
   );
 }
 
-// ----------------------------------------------------------------------------
-// EnvHeader — env name (inline rename) + activate-now toggle
-// ----------------------------------------------------------------------------
+// ============================================================================
+// EnvHeader — env name (inline rename)
+// ============================================================================
 
 function EnvHeader({
   env,
@@ -351,26 +430,74 @@ function EnvHeader({
   env: Environment;
   onRename: (name: string) => void;
 }) {
-  // Activation happens through the ENV dropdown in the top bar — no
-  // "active" badge / "设为活动" button needed in this panel. Keeping
-  // the header to just the name + (optional) inline rename avoids
-  // duplicating state and the "active" affordance is already on every
-  // top-bar env picker row.
   return (
-    <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
-      <InlineNameCell
-        value={env.name}
-        placeholder="环境名"
-        onCommit={onRename}
-        className="font-mono text-sm font-semibold"
-      />
+    <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
+      <span
+        aria-hidden
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary/15 text-primary"
+      >
+        {envIcon(env.name)}
+      </span>
+      <div className="min-w-0">
+        <InlineNameCell
+          value={env.name}
+          placeholder="环境名"
+          onCommit={onRename}
+          className="text-sm font-semibold"
+        />
+      </div>
     </div>
   );
 }
 
-// ----------------------------------------------------------------------------
-// BaseUrlTable
-// ----------------------------------------------------------------------------
+// ============================================================================
+// GroupHeader — section sub-title inside the env body
+// ============================================================================
+
+function GroupHeader({
+  icon,
+  title,
+  description,
+  meta,
+}: {
+  icon?: React.ReactNode;
+  title: string;
+  description?: string;
+  meta?: string;
+}) {
+  return (
+    <div className="flex items-start gap-2 border-b border-border/60 bg-muted/20 px-4 py-2">
+      {icon && (
+        <span
+          aria-hidden
+          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground"
+        >
+          {icon}
+        </span>
+      )}
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground">
+          {title}
+        </div>
+        {description && (
+          <div className="mt-0.5 text-[10px] text-muted-foreground">
+            {description}
+            {meta ? (
+              <>
+                {' · '}
+                <span className="font-mono">{meta}</span>
+              </>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// BaseUrlTable — list of named BaseUrl defs for the active env
+// ============================================================================
 
 interface BaseUrlTableProps {
   env: Environment;
@@ -382,10 +509,6 @@ interface BaseUrlTableProps {
   deleteBaseUrlDefinition: EnvironmentSectionProps['deleteBaseUrlDefinition'];
   setDefaultBaseUrlDefinition: EnvironmentSectionProps['setDefaultBaseUrlDefinition'];
   onAddBaseUrl: () => void;
-  /**
-   * Trigger the parent confirm dialog with the def being deleted.
-   * The parent owns the modal state.
-   */
   onDeleteBaseUrl: (def: { id: string; name: string }) => void;
 }
 
@@ -400,99 +523,150 @@ function BaseUrlTable({
   onAddBaseUrl,
   onDeleteBaseUrl,
 }: BaseUrlTableProps) {
+  if (baseUrlDefinitions.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
+        <div className="text-[11px] text-muted-foreground">
+          项目还没有命名服务
+        </div>
+        <Button
+          variant="default"
+          size="sm"
+          className="h-7 gap-1 text-xs"
+          onClick={onAddBaseUrl}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          添加服务
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <SectionHeader
-        icon={<Globe className="h-3 w-3" />}
-        title="前置 URL"
-        right={
+    <div className="flex flex-col">
+      {baseUrlDefinitions.map((def, idx) => {
+        const url = env.baseUrls[def.id] ?? '';
+        const isDefault = def.id === defaultBaseUrlDefinitionId;
+        return (
+          <BaseUrlRow
+            key={def.id}
+            flush={idx === 0}
+            def={def}
+            envId={env.id}
+            url={url}
+            isDefault={isDefault}
+            projectId={projectId}
+            setEnvironmentBaseUrl={setEnvironmentBaseUrl}
+            updateBaseUrlDefinition={updateBaseUrlDefinition}
+            setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
+            onDelete={onDeleteBaseUrl}
+          />
+        );
+      })}
+      <button
+        type="button"
+        onClick={onAddBaseUrl}
+        className="flex items-center gap-2 border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        添加服务
+      </button>
+    </div>
+  );
+}
+
+interface BaseUrlRowProps {
+  flush: boolean;
+  def: BaseUrlDefinition;
+  envId: string;
+  url: string;
+  isDefault: boolean;
+  projectId: string;
+  setEnvironmentBaseUrl: BaseUrlTableProps['setEnvironmentBaseUrl'];
+  updateBaseUrlDefinition: BaseUrlTableProps['updateBaseUrlDefinition'];
+  setDefaultBaseUrlDefinition: BaseUrlTableProps['setDefaultBaseUrlDefinition'];
+  onDelete: (def: { id: string; name: string }) => void;
+}
+
+function BaseUrlRow({
+  flush,
+  def,
+  url,
+  isDefault,
+  envId,
+  projectId,
+  setEnvironmentBaseUrl,
+  updateBaseUrlDefinition,
+  setDefaultBaseUrlDefinition,
+  onDelete,
+}: BaseUrlRowProps) {
+  return (
+    <div
+      className={cn(
+        'group flex items-start gap-3 px-4 py-3',
+        !flush && 'border-t border-border/60',
+      )}
+    >
+      {/* Icon container — sky tones for base URLs */}
+      <span
+        aria-hidden
+        className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sky-500/30 bg-sky-500/15 text-sky-500"
+      >
+        <Globe className="h-4 w-4" />
+      </span>
+
+      {/* Label — inline-rename the service name */}
+      <div className="min-w-0 w-44 shrink-0">
+        <InlineNameCell
+          value={def.name}
+          placeholder="服务名"
+          onCommit={(v) =>
+            updateBaseUrlDefinition(projectId, def.id, { name: v })
+          }
+          className="text-xs font-medium"
+        />
+        {isDefault && (
+          <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+            项目默认
+          </div>
+        )}
+      </div>
+
+      {/* URL input — the full-width editor */}
+      <div className="min-w-0 flex-1">
+        <Input
+          value={url}
+          onChange={(e) =>
+            setEnvironmentBaseUrl(envId, def.id, e.target.value)
+          }
+          placeholder="http:// 或 https:// 起始的 URL"
+          className="h-8 font-mono text-xs"
+          spellCheck={false}
+        />
+      </div>
+
+      {/* Trailing actions */}
+      <div className="flex shrink-0 items-center gap-1">
+        <DefaultToggle
+          isDefault={isDefault}
+          onToggle={() =>
+            setDefaultBaseUrlDefinition(
+              projectId,
+              isDefault ? null : def.id,
+            )
+          }
+        />
+        <Tooltip content="删除服务" side="bottom">
           <Button
             variant="ghost"
-            size="sm"
-            className="h-6 gap-1 text-[10px] text-muted-foreground"
-            onClick={onAddBaseUrl}
+            size="icon"
+            className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
+            onClick={() => onDelete({ id: def.id, name: def.name })}
           >
-            <Plus className="h-3 w-3" />
-            添加服务
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
-        }
-      />
-      {baseUrlDefinitions.length === 0 ? (
-        <div className="px-3 pb-2 text-[11px] text-muted-foreground">
-          项目还没有命名服务,点击「添加服务」新建一个
-        </div>
-      ) : (
-        <table className="w-full text-[11px]">
-          <colgroup>
-            <col className="w-6" />
-            <col className="w-32" />
-            <col />
-            <col className="w-24" />
-            <col className="w-8" />
-          </colgroup>
-          <tbody>
-            {baseUrlDefinitions.map((def) => {
-              const url = env.baseUrls[def.id] ?? '';
-              const isDefault = def.id === defaultBaseUrlDefinitionId;
-              return (
-                <tr
-                  key={def.id}
-                  className="border-t border-border/40 first:border-t-0"
-                >
-                  <td className="py-1 pl-3 pr-1 align-middle text-muted-foreground">
-                    <Tooltip content="前置 URL" side="bottom">
-                      <Globe className="h-3 w-3" />
-                    </Tooltip>
-                  </td>
-                  <td className="py-1 pr-2 align-middle">
-                    <InlineNameCell
-                      value={def.name}
-                      placeholder="服务名"
-                      onCommit={(v) =>
-                        updateBaseUrlDefinition(projectId, def.id, { name: v })
-                      }
-                    />
-                  </td>
-                  <td className="py-1 pr-2 align-middle">
-                    <Input
-                      value={url}
-                      onChange={(e) =>
-                        setEnvironmentBaseUrl(env.id, def.id, e.target.value)
-                      }
-                      placeholder="http:// 或 https:// 起始的 URL"
-                      className="h-7 max-w-md font-mono text-[11px]"
-                      spellCheck={false}
-                    />
-                  </td>
-                  <td className="py-1 pr-2 align-middle">
-                    <DefaultToggle
-                      isDefault={isDefault}
-                      onToggle={() =>
-                        setDefaultBaseUrlDefinition(
-                          projectId,
-                          isDefault ? null : def.id,
-                        )
-                      }
-                    />
-                  </td>
-                  <td className="py-1 pr-3 text-right align-middle">
-                    <Tooltip content="删除服务" side="bottom">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                        onClick={() => onDeleteBaseUrl({ id: def.id, name: def.name })}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </Tooltip>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
+        </Tooltip>
+      </div>
     </div>
   );
 }
@@ -505,30 +679,35 @@ function DefaultToggle({
   onToggle: () => void;
 }) {
   return (
-    <Tooltip content={isDefault ? '项目默认服务' : '设为项目默认'} side="top">
+    <Tooltip
+      content={isDefault ? '项目默认服务' : '设为项目默认'}
+      side="top"
+    >
       <button
         type="button"
         onClick={onToggle}
         aria-pressed={isDefault}
         className={cn(
-          'inline-flex h-6 items-center gap-1 rounded px-1.5 text-[10px] transition-colors',
+          'inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors',
           isDefault
-            ? 'bg-primary/15 text-primary'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            ? 'border-amber-500/40 bg-amber-500/15 text-amber-500'
+            : 'border-border bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
         )}
       >
         <Star
-          className={cn('h-3 w-3', isDefault ? 'fill-current' : 'fill-transparent')}
+          className={cn(
+            'h-3.5 w-3.5',
+            isDefault ? 'fill-current' : 'fill-transparent',
+          )}
         />
-        <span>{isDefault ? '默认' : '设为默认'}</span>
       </button>
     </Tooltip>
   );
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // VariableTable
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 interface VariableTableProps {
   env: Environment;
@@ -539,122 +718,133 @@ interface VariableTableProps {
 function VariableTable({ env, setEnvironmentVar, onAddVar }: VariableTableProps) {
   const entries = Object.entries(env.variables);
 
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
+        <div className="text-[11px] text-muted-foreground">暂无变量</div>
+        <Button
+          variant="default"
+          size="sm"
+          className="h-7 gap-1 text-xs"
+          onClick={onAddVar}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          添加变量
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <div className="border-t border-border/40">
-      <SectionHeader
-        icon={<Braces className="h-3 w-3" />}
-        title="环境变量"
-        right={
+    <div className="flex flex-col">
+      {entries.map(([k, v], idx) => (
+        <VariableRow
+          key={k || `__empty_${idx}`}
+          flush={idx === 0}
+          name={k}
+          value={v}
+          envId={env.id}
+          setEnvironmentVar={setEnvironmentVar}
+        />
+      ))}
+      <button
+        type="button"
+        onClick={onAddVar}
+        className="flex items-center gap-2 border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        添加变量
+      </button>
+    </div>
+  );
+}
+
+interface VariableRowProps {
+  flush: boolean;
+  name: string;
+  value: string;
+  envId: string;
+  setEnvironmentVar: VariableTableProps['setEnvironmentVar'];
+}
+
+function VariableRow({
+  flush,
+  name,
+  value,
+  envId,
+  setEnvironmentVar,
+}: VariableRowProps) {
+  return (
+    <div
+      className={cn(
+        'group flex items-start gap-3 px-4 py-2.5',
+        !flush && 'border-t border-border/60',
+      )}
+    >
+      {/* Icon container — amber for "config"-shaped rows */}
+      <span
+        aria-hidden
+        className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-amber-500/30 bg-amber-500/15 text-amber-500"
+      >
+        <Braces className="h-4 w-4" />
+      </span>
+
+      {/* Variable key — inline rename */}
+      <div className="min-w-0 w-44 shrink-0">
+        <InlineNameCell
+          value={name}
+          placeholder="变量名"
+          validate={(v) =>
+            VAR_KEY_REGEX.test(v.trim())
+              ? null
+              : '变量名仅允许字母数字下划线,且不能以数字开头'
+          }
+          onCommit={(newKey) => {
+            if (!newKey || newKey === name) return;
+            // Rename: drop the old key, set the new one. We use
+            // setEnvironmentVar for both so the validation goes
+            // through the same code path.
+            setEnvironmentVar(envId, name, '');
+            setEnvironmentVar(envId, newKey, value);
+          }}
+          className="font-mono text-xs font-medium"
+        />
+        <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {`{{${name || '...'}}}`}
+        </div>
+      </div>
+
+      {/* Variable value */}
+      <div className="min-w-0 flex-1">
+        <Input
+          value={value}
+          onChange={(e) => setEnvironmentVar(envId, name, e.target.value)}
+          placeholder="值(支持 {{其它变量}} 引用)"
+          className="h-8 font-mono text-xs"
+          spellCheck={false}
+        />
+      </div>
+
+      {/* Trailing actions */}
+      <div className="flex shrink-0 items-center gap-1">
+        <Tooltip content="删除变量" side="bottom">
           <Button
             variant="ghost"
-            size="sm"
-            className="h-6 gap-1 text-[10px] text-muted-foreground"
-            onClick={onAddVar}
+            size="icon"
+            className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
+            onClick={() => setEnvironmentVar(envId, name, '')}
           >
-            <Plus className="h-3 w-3" />
-            添加变量
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
-        }
-      />
-      {entries.length === 0 ? (
-        <div className="px-3 pb-2 text-[11px] text-muted-foreground">
-          暂无变量
-        </div>
-      ) : (
-        <table className="w-full text-[11px]">
-          <colgroup>
-            <col className="w-6" />
-            <col className="w-32" />
-            <col />
-            <col className="w-8" />
-          </colgroup>
-          <tbody>
-            {entries.map(([k, v]) => (
-              <tr key={k} className="border-t border-border/40 first:border-t-0">
-                <td className="py-1 pl-3 pr-1 align-middle text-muted-foreground">
-                  <Tooltip content="环境变量" side="bottom">
-                    <Braces className="h-3 w-3" />
-                  </Tooltip>
-                </td>
-                <td className="py-1 pr-2 align-middle">
-                  <InlineNameCell
-                    value={k}
-                    placeholder="变量名"
-                    validate={(v) =>
-                      VAR_KEY_REGEX.test(v.trim())
-                        ? null
-                        : '变量名仅允许字母数字下划线,且不能以数字开头'
-                    }
-                    onCommit={(newKey) => {
-                      if (!newKey || newKey === k) return;
-                      // Rename: drop the old key, set the new one. We use
-                      // setEnvironmentVar for both so the validation goes
-                      // through the same code path.
-                      setEnvironmentVar(env.id, k, '');
-                      setEnvironmentVar(env.id, newKey, v);
-                    }}
-                  />
-                </td>
-                <td className="py-1 pr-2 align-middle">
-                  <Input
-                    value={v}
-                    onChange={(e) =>
-                      setEnvironmentVar(env.id, k, e.target.value)
-                    }
-                    placeholder="值(支持 {{其它变量}} 引用)"
-                    className="h-7 max-w-md font-mono text-[11px]"
-                    spellCheck={false}
-                  />
-                </td>
-                <td className="py-1 pr-3 text-right align-middle">
-                  <Tooltip content="删除变量" side="bottom">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        // "Deleting" an empty-key placeholder just
-                        // re-clears it (no-op). For real keys, blanking
-                        // it removes it from the dict.
-                        setEnvironmentVar(env.id, k, '');
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </Tooltip>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+        </Tooltip>
+      </div>
     </div>
   );
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // Shared bits
-// ----------------------------------------------------------------------------
-
-function SectionHeader({
-  icon,
-  title,
-  right,
-}: {
-  icon?: React.ReactNode;
-  title: string;
-  right?: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-2 px-3 py-1.5">
-      {icon && <span className="text-muted-foreground">{icon}</span>}
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {title}
-      </span>
-      <div className="ml-auto">{right}</div>
-    </div>
-  );
-}
+// ============================================================================
 
 /**
  * A compact click-to-edit text cell. Click the value to swap in an
@@ -707,20 +897,19 @@ function InlineNameCell({
         type="button"
         onClick={begin}
         className={cn(
-          'flex h-7 w-full items-center gap-1 rounded-md px-2 text-left text-[11px] transition-colors',
-          'hover:bg-accent/40',
-          !value && 'text-muted-foreground/60',
+          'group/cell flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left transition-colors hover:bg-accent/40',
+          !value && 'text-muted-foreground/60 italic',
           className,
         )}
       >
-        {value || placeholder}
-        <Pencil className="h-2.5 w-2.5 opacity-0 transition-opacity group-hover:opacity-100" />
+        <span className="min-w-0 truncate">{value || placeholder}</span>
+        <Pencil className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/cell:opacity-100" />
       </button>
     );
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-1">
       <Input
         autoFocus
         value={draft}
@@ -738,11 +927,10 @@ function InlineNameCell({
             cancel();
           }
         }}
-        placeholder={placeholder}
-        className="h-7 max-w-md font-mono text-[11px]"
+        className="h-7 font-mono text-xs"
       />
       {error && (
-        <span className="mt-0.5 text-[10px] text-destructive">{error}</span>
+        <div className="px-1 text-[10px] text-destructive">{error}</div>
       )}
     </div>
   );
