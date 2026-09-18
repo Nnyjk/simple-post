@@ -145,26 +145,39 @@ impl McpDaemonHandle {
                 // Lock contended — tool list unreachable without blocking,
                 // so surface none and let the next poll pick up the truth.
                 return crate::commands::McpStatusDto {
+                    status: DaemonStatus::Starting.as_str().to_string(),
                     running: false,
                     pid: None,
                     port: None,
                     uptime_ms: 0,
                     requests_handled: 0,
+                    current_connections: 0,
                     registered_tools: Vec::new(),
                     last_error: Some("supervisor busy".into()),
                 };
             }
         };
         let snap = state.metrics.snapshot();
+        let status_str = state.status.as_str().to_string();
+        // `running` is a derived view of `status` kept for back-compat
+        // with any caller that still reads the bool. Only the strict
+        // `"running"` state counts — `starting`/`restarting` are
+        // transient and the renderer can switch on the lifecycle
+        // string for those.
+        let running = status_str == "running";
         crate::commands::McpStatusDto {
-            running: matches!(
-                state.status,
-                DaemonStatus::Running | DaemonStatus::Starting | DaemonStatus::Restarting
-            ),
+            status: status_str,
+            running,
             pid: state.pid,
             port: state.port,
             uptime_ms: snap.uptime_ms,
             requests_handled: snap.requests_handled,
+            // `current_connections` is reserved for a future stderr
+            // metrics line; the daemon does not emit one yet, so we
+            // hard-code `0`. Surfacing a counter here now means the
+            // wire shape is forward-compatible — when the daemon
+            // starts emitting it the UI doesn't need a schema bump.
+            current_connections: 0,
             registered_tools: crate::mcp::registered_tool_names(),
             last_error: state.last_error.clone(),
         }
@@ -345,11 +358,13 @@ impl McpDaemonHandle {
     }
 
     /// Restart: kill the running child (if any), wait briefly for the
-    /// OS to free the port, then `ensure_started` again.
+    /// OS to free the port, then `ensure_started` again. Returns the
+    /// post-restart `McpStatusDto` so the Tauri command can echo the
+    /// new `pid` / `port` back to the renderer without an extra poll.
     pub async fn restart(
         &self,
         app_handle: &AppHandle,
-    ) -> Result<u16, crate::error::AppError> {
+    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
         {
             let mut g = self.inner.lock().await;
             g.status = DaemonStatus::Restarting;
@@ -363,7 +378,11 @@ impl McpDaemonHandle {
         // out of the bind queue.
         sleep(Duration::from_millis(200)).await;
         let _ = port_registry::release();
-        self.ensure_started(app_handle).await
+        // We deliberately ignore the inner `u16` return from
+        // `ensure_started` — the caller wants the full snapshot, and
+        // the snapshot already carries the new `port` field.
+        let _ = self.ensure_started(app_handle).await?;
+        Ok(self.snapshot())
     }
 
     /// Best-effort shutdown. Called from the GUI's exit hook (and from

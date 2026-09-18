@@ -28,6 +28,8 @@ export type McpRuntimeStatus =
  * UI projection of `mcp_status`. Fields the renderer cares about:
  *
  *   - `status` — drives the badge + the crashed dialog trigger
+ *   - `running` — derived boolean kept for back-compat with any older
+ *     consumer that still reads it; equals `status === 'running'`
  *   - `pid` / `port` — display only
  *   - `uptimeMs` — how long the daemon has been up
  *   - `requestsHandled` — cumulative counter
@@ -38,6 +40,7 @@ export type McpRuntimeStatus =
  */
 export interface McpUiState {
   status: McpRuntimeStatus;
+  running: boolean;
   pid: number | null;
   port: number | null;
   uptimeMs: number;
@@ -45,4 +48,17 @@ export interface McpUiState {
   currentConnections: number;
   registeredTools: string[];
   lastError?: string;
+}
+
+/**
+ * Wire shape returned by the `mcp_daemon_restart` Tauri command. The
+ * command swallows any underlying `AppError` and reports a uniform
+ * envelope so the renderer can keep using a simple `.then(result =>
+ * …)` instead of a try/catch at every call site. `pid` / `port` are
+ * the new daemon's identity after a successful restart.
+ */
+export interface RestartResult {
+  ok: boolean;
+  pid?: number;
+  port?: number;
 }

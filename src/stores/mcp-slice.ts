@@ -24,7 +24,7 @@
 import type { StateCreator } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { COMMANDS } from '@/lib/tauri-commands';
-import type { McpRuntimeStatus, McpUiState } from '@/lib/mcp-types';
+import type { McpRuntimeStatus, McpUiState, RestartResult } from '@/lib/mcp-types';
 import type { AppState } from './app-store';
 
 /**
@@ -187,7 +187,15 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
   },
   refreshMcpStatus: async () => {
     try {
-      const dto = await invoke<McpUiState>(COMMANDS.mcpStatus);
+      // The Rust `McpStatusDto` carries `#[serde(rename_all =
+      // "camelCase")]` plus the new `status` and
+      // `current_connections` fields, so the wire shape now matches
+      // `McpUiState` one-for-one. The single cast is the only
+      // escape hatch — the renderer trusts the daemon's lifecycle
+      // string and the badge falls back to `'stopped'` for any
+      // unknown value, so a runtime mismatch is impossible to
+      // surface as a TS error.
+      const dto = (await invoke<unknown>(COMMANDS.mcpStatus)) as McpUiState;
       set({ mcpStatus: dto });
     } catch (e) {
       // Daemon unreachable (cold start, dev mode without the daemon
@@ -211,6 +219,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
         ? { ...prev, status: 'restarting' }
         : {
             status: 'restarting',
+            running: false,
             pid: null,
             port: null,
             uptimeMs: 0,
@@ -220,7 +229,34 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
           },
     });
     try {
-      await invoke<void>(COMMANDS.mcpDaemonRestart);
+      const result: RestartResult = await invoke<RestartResult>(
+        COMMANDS.mcpDaemonRestart,
+      );
+      if (!result.ok) {
+        // Rust swallowed the underlying `AppError` and returned
+        // `{ ok: false, pid: null, port: null }`. Surface the same
+        // `crashed` badge the previous error path did so the dialog
+        // can pick it up; we don't have an error string from Rust so
+        // we leave `lastError` unset and let the next poll surface
+        // whatever the daemon itself reports.
+        console.warn('[store] mcp_daemon_restart returned ok=false');
+        const cur = get().mcpStatus;
+        set({
+          mcpStatus: cur
+            ? { ...cur, status: 'crashed' }
+            : {
+                status: 'crashed',
+                running: false,
+                pid: null,
+                port: null,
+                uptimeMs: 0,
+                requestsHandled: 0,
+                currentConnections: 0,
+                registeredTools: [],
+              },
+        });
+        return;
+      }
       await get().refreshMcpStatus();
     } catch (e) {
       console.error('[store] mcp_daemon_restart failed', e);
@@ -232,6 +268,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
           ? { ...cur, status: 'crashed', lastError }
           : {
               status: 'crashed',
+              running: false,
               pid: null,
               port: null,
               uptimeMs: 0,

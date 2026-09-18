@@ -4,6 +4,50 @@
 //! `simple-post-mcp-proxy` binary bridges stdio clients into HTTP for
 //! in-process use; this module is what that proxy hits, plus what a
 //! human curls when debugging.
+//!
+//! ---
+//!
+//! ## Why errors go in `result.is_error` (not the JSON-RPC `error` field)
+//!
+//! **JSON-RPC 2.0 recap.** The spec defines two error channels:
+//! `error` is for *transport / envelope* failures (parse error -32700,
+//! invalid request -32600, method not found -32601, invalid params
+//! -32602, internal error -32603). A successful `result` carries
+//! whatever the invoked method returned. The two are mutually exclusive
+//! in a single response.
+//!
+//! **MCP sits on top of JSON-RPC.** Per the MCP spec, `tools/call`
+//! responses use `result.content` for success and `result.isError: true`
+//! for tool-level failure — i.e. the tool *ran*, but its work reported
+//! an error. The LLM is still expected to read the body so it can
+//! surface the message to the user and / or recover.
+//!
+//! **Our choice.** Every tool-handler failure (both
+//! "the-tool-itself-failed" and "transport-of-the-tool blew up mid-way")
+//! is routed into a synthetic `result.isError: true` body. It never
+//! uses the JSON-RPC `error` field. Envelope-level failures (malformed
+//! JSON, missing `jsonrpc: "2.0"`, unknown method, missing
+//! `params.name`) DO still flow through `error` via the parsing arm
+//! above the dispatch site — those happen before any method body runs
+//! and have no tool body for the LLM to read, so the spec channel is
+//! the only honest one.
+//!
+//! **Reasoning.** LLM clients (Claude Desktop, Cursor, our own proxy)
+//! treat tool errors uniformly: show the message to the user, retry, or
+//! skip. They do not branch on transport-vs-tool to decide their UX.
+//! Collapsing both flavours into a single observable channel
+//! (`result.isError`) keeps the LLM's recovery loop simple — read
+//! `result.content`, decide.
+//!
+//! **Trade-off accepted.** Callers that *do* want to distinguish
+//! transport-level from tool-level failures (e.g. a future metrics
+//! dashboard that wants to alert on deserialization bugs separately
+//! from genuine tool crashes) lose that signal at the JSON-RPC
+//! boundary. We accept this because the metrics surface that actually
+//! needs the split lives one layer down on `GET /mcp/healthz`
+//! (`requests_handled` and the server-side counter for envelope
+//! failures), where the distinction is still observable. The JSON-RPC
+//! response body is not the right place to re-introduce it.
 
 use std::sync::Arc;
 
@@ -198,6 +242,10 @@ async fn handle_tools_call(
 
     match mcp::dispatch(&state, &name, args).await {
         Ok(result) => JsonRpcResponse::ok_with_result(id, result),
+        // Tool-handler failure → embed in `result.isError: true` rather
+        // than the JSON-RPC `error` field. See the module-level
+        // rationale "Why errors go in `result.is_error`" at the top of
+        // this file for the full reasoning.
         Err(e) => JsonRpcResponse::ok(
             id,
             json!({

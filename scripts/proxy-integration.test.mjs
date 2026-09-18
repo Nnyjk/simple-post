@@ -52,6 +52,21 @@ async function waitForHealthz(timeoutMs = 5000) {
   return false;
 }
 
+// Race-free reap helper. On Windows, attaching `proc.once("exit", ...)` AFTER
+// the kill has been issued can miss the emit entirely (the `exit` event has
+// already fired and won't re-fire). Polling `proc.exitCode` short-circuits the
+// common case and the listener catches the rest.
+async function waitForExit(proc) {
+  if (proc.exitCode !== null) return;
+  await new Promise((r) => {
+    if (proc.exitCode !== null) return r();
+    const t = setInterval(() => {
+      if (proc.exitCode !== null) { clearInterval(t); r(); }
+    }, 50);
+    proc.once("exit", () => { clearInterval(t); r(); });
+  });
+}
+
 let failures = 0;
 function assert(cond, msg) {
   if (!cond) { console.error(`✗ ${msg}`); failures++; }
@@ -137,18 +152,15 @@ try {
     // give proxy a moment to flush stderr (Windows signal handling is slower)
     await new Promise(r => setTimeout(r, 500));
     if (proxy.exitCode === null) proxy.kill("SIGKILL");
-    // ensure full exit before cleaning daemon data dir
-    if (proxy.exitCode === null) {
-      await new Promise(r => proxy.once("exit", r));
-    }
+    // ensure full exit before cleaning daemon data dir (polling fallback for
+    // the case where the exit event already fired before this listener).
+    await waitForExit(proxy);
   }
   if (daemon.exitCode === null) {
     daemon.kill(process.platform === "win32" ? undefined : "SIGTERM");
     await new Promise(r => setTimeout(r, 500));
     if (daemon.exitCode === null) daemon.kill("SIGKILL");
-    if (daemon.exitCode === null) {
-      await new Promise(r => daemon.once("exit", r));
-    }
+    await waitForExit(daemon);
   }
   try { rmSync(scratch, { recursive: true, force: true }); }
   catch (e) { console.error(`[test:proxy] failed to rm scratch ${scratch}: ${e.message}`); }

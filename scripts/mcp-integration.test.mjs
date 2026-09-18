@@ -53,7 +53,16 @@ const proc = spawn(exe, args, { env, stdio: ["ignore", "pipe", "pipe"] });
 
 let stderr = "";
 proc.stderr.on("data", (b) => { stderr += b.toString(); });
-proc.on("exit", (code, sig) => console.log(`[test:mcp] daemon exited code=${code} sig=${sig}`));
+// Polling watcher replaces the previous `proc.on("exit", ...)` listener.
+// On Windows, the `exit` event can fire in the same tick as the kill and
+// a future-attached `.on("exit")` listener never sees it. Watching
+// `exitCode` directly is race-free regardless of timing.
+const exitWatcher = setInterval(() => {
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    console.log(`[test:mcp] daemon exited code=${proc.exitCode} sig=${proc.signalCode}`);
+    clearInterval(exitWatcher);
+  }
+}, 50);
 
 // ----- Wait for daemon up via healthz ---------------------------------------
 async function waitForHealthz(timeoutMs = 5000) {

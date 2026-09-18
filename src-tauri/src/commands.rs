@@ -141,9 +141,23 @@ pub struct EndpointMoveTarget {
 
 /// Snapshot of the embedded MCP daemon. Returned by `mcp_status` and
 /// periodically polled by the UI to show "is the AI bridge running?".
+///
+/// The wire shape matches `src/lib/mcp-types.ts::McpUiState` exactly.
+/// `status` is the source-of-truth lifecycle string (mirrors the
+/// internal `DaemonStatus` enum via `as_str()`); `running` is kept
+/// as a derived boolean so any caller still consuming the old shape
+/// keeps working without a forced migration.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpStatusDto {
+    /// Lifecycle state, one of `"stopped" | "starting" | "running" |
+    /// "restarting" | "crashed" | "unhealthy"`. New field; consumers
+    /// that only read `running` continue to work because we set
+    /// `running = (status == "running")`.
+    pub status: String,
+    /// Back-compat boolean. `true` iff `status == "running"`. Older
+    /// callers can keep reading this without learning the lifecycle
+    /// enum; the badge/UI logic has migrated to `status`.
     pub running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -151,6 +165,11 @@ pub struct McpStatusDto {
     pub port: Option<u16>,
     pub uptime_ms: u64,
     pub requests_handled: u64,
+    /// Number of currently-active MCP client connections. The metrics
+    /// module does not expose a counter for this yet, so the
+    /// supervisor writes `0` until the daemon learns to emit it via
+    /// stderr; UI surfaces this as a "0 connections" line.
+    pub current_connections: u64,
     pub registered_tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
@@ -162,15 +181,32 @@ impl McpStatusDto {
     /// on the next poll after the daemon comes back up.
     pub fn stopped() -> Self {
         Self {
+            status: "stopped".to_string(),
             running: false,
             pid: None,
             port: None,
             uptime_ms: 0,
             requests_handled: 0,
+            current_connections: 0,
             registered_tools: Vec::new(),
             last_error: None,
         }
     }
+}
+
+/// Returned by the `mcp_daemon_restart` Tauri command. Distinct from
+/// `McpStatusDto` because the restart path is the one place we
+/// deliberately swallow the underlying `AppError` (so the UI can
+/// render a uniform `{ ok: false, ... }` envelope without an extra
+/// `.catch` on every call site).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestartResult {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
 }
 
 // ===========================================================================
@@ -751,6 +787,37 @@ pub fn mcp_daemon_proxy_path() -> String {
 
     path.map(|p| p.display().to_string())
         .unwrap_or_else(|| "<unresolved current_exe>".to_string())
+}
+
+/// Restart the embedded MCP daemon. Idempotent at the user-action
+/// level — the panel disables the button while a restart is in flight
+/// so two rapid clicks only result in one restart.
+///
+/// We swallow `AppError` into `{ ok: false, pid: null, port: null }`
+/// rather than propagating it. The renderer's restart action already
+/// has its own try/catch that flips the badge to `crashed` on
+/// failure, so a uniform `{ ok: bool }` envelope keeps the call site
+/// shape identical to the old `Promise<void>` style.
+#[tauri::command]
+pub async fn mcp_daemon_restart(
+    state: State<'_, crate::daemon_supervisor::McpDaemonHandle>,
+    app_handle: tauri::AppHandle,
+) -> Result<RestartResult, AppError> {
+    match state.restart(&app_handle).await {
+        Ok(snapshot) => Ok(RestartResult {
+            ok: true,
+            pid: snapshot.pid,
+            port: snapshot.port,
+        }),
+        Err(e) => {
+            eprintln!("[mcp_daemon_restart] failed: {e:?}");
+            Ok(RestartResult {
+                ok: false,
+                pid: None,
+                port: None,
+            })
+        }
+    }
 }
 
 // ===========================================================================
