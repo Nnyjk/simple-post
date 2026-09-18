@@ -65,104 +65,48 @@ Forensic ledger of the 17 fixes that landed in the bulk commit. Listed here so f
 
 End of already-shipped section. Open items follow.
 
-## Open P1 — still real defects
+## Already closed in `f554bf9` (resolved by the first follow-up pass)
+
+Forensic ledger of the 4 P1 defects that landed in `f554bf9`. Listed here so future readers don't re-open items that the first follow-up pass already shipped. The four Open P1 entries below now point at this ledger instead of carrying full fix sketches.
+
+| Doc item | Closing hunk | One-line resolution |
+| --- | --- | --- |
+| **P1.1** `mcp_daemon_restart` Tauri command missing | `src-tauri/src/commands.rs:801+` | Pub fn added; registered in `lib.rs:286`; calls `McpDaemonHandle::restart(&app_handle)` then emits `RestartResult { ok, pid?, port? }`. |
+| **P1.2** `McpStatusDto` ↔ `McpUiState` shape mismatch | `src-tauri/src/commands.rs:150-176` + `src/lib/mcp-types.ts:36-65` | Added `status: String` and `current_connections: u64` to the Rust DTO; mirrored in TS `McpUiState`. Field-by-field table in the second-pass audit. |
+| **P1.3** JSON-RPC `result.is_error: true` choice undocumented | `src-tauri/src/daemon_http.rs:1-50` | 44-line rustdoc explaining the JSON-RPC transport-error vs MCP tool-error split, plus inline cross-reference at the dispatch site. |
+| **P1.4** Windows daemon-exit race in integration tests | `scripts/mcp-integration.test.mjs` + `scripts/proxy-integration.test.mjs` + `scripts/run-mcp-tests.cjs` | Polling-fallback replaces `proc.once("exit")` everywhere; `run-mcp-tests.cjs` rewritten as async with 80s timeout + stderr postmortem. |
+
+Note: a follow-up `f554bf9` regression did surface (F-D1 deadlock in `mcp_daemon_restart` from the second-pass audit). The helper is wired but `daemon_supervisor.rs::watch_exit` needs the lock-across-await fix to make the restart path actually return.
+
+End of already-closed-in-`f554bf9` section. Open items continue below.
+
+## Open P1 — all four items closed in `f554bf9` (pointers below)
 
 These are user-visible or correctness bugs that should land before we tag v0.1 in release notes.
 
-### P1.1 — `mcp_daemon_restart` Tauri command does not exist on the Rust side
+### P1.1 *(closed in `f554bf9`)* — `mcp_daemon_restart` Tauri command does not exist on the Rust side
 
-- **Symptom:**
-  `src/stores/app-store.ts:2287` invokes `COMMANDS.mcpDaemonRestart` (`'mcp_daemon_restart'`) when the user clicks "Restart" on the MCP status badge.
-  `src-tauri/src/commands.rs` has no `pub fn mcp_daemon_restart(...)` — only `mcp_status` (line 717) and `mcp_daemon_proxy_path` (line 737).
-  The COMMANDS table at `src/lib/tauri-commands.ts:77` references the command; the invoke dispatch happens.
-- **Why it's a defect:**
-  Tauri's `invoke_handler!` macro rejects unknown command names at boot.
-  Clicking restart → renderer error toast, daemon not restarted.
-  UI silently degrades to "permanent restart failed" state, with the badge freezing on `'crashed'` because the catch arm in `restartMcp()` (line 2289-2308) writes that status on any invoke error.
-  This is a regression introduced by the audit fix that registered `mcp_daemon_proxy_path` but missed the sibling `mcp_daemon_restart`.
-- **Minimal fix:**
-  Add `#[tauri::command] pub fn mcp_daemon_restart(state: State<McpDaemonHandle>) -> Result<(), AppError>` in `commands.rs`.
-  The supervisor already exposes `restart(&self)` at `src-tauri/src/daemon_supervisor.rs:349`.
-  The Tauri command is a 5-line wrapper that calls it.
-  Register it in `lib.rs` `invoke_handler` (currently around lines 245).
-  Verify `mcp_status` reflects the `Restarting → Running` transition by polling.
-- **Effort:** S
-- **Verify:**
-  `npm run tauri:dev`.
-  Open settings → click restart on the MCP badge → status badge goes `running → restarting → running` within ~3 s, with a new `pid` visible in the panel.
-  Restart returns Ok (no error toast in devtools).
-- **Why deferred in `c1efc56`:**
-  Fix (1) registered `mcp_daemon_proxy_path` and added the COMMANDS lookup, but did not sweep through `src/stores/app-store.ts` for sibling `invoke()` calls that pointed at commands which never existed on the Rust side. This is the canonical "sweep" residue that the audit was supposed to catch in one pass.
+Resolved in commit `f554bf9`. See the §"Already closed in `f554bf9`" ledger near the top of this document for the resolution summary.
 
-### P1.2 — `McpStatusDto` (Rust) and `McpUiState` (TS) shape mismatch
+The original Symptom / Why / Minimal fix / Verify sketch is preserved in the `c1efc56` version of this document for historical context.
 
-- **Symptom:**
-  Rust serialises `{ running, pid?, port?, uptimeMs, requestsHandled, registeredTools, lastError? }` (see `src-tauri/src/commands.rs:146-157`, `#[serde(rename_all = "camelCase")]`).
-  TS `McpUiState` (`src/lib/mcp-types.ts:39-48`) expects `{ status: 'stopped' | 'starting' | 'running' | 'restarting' | 'crashed' | 'unhealthy', …, currentConnections, registeredTools, lastError? }`.
-  Two of those TS-declared fields — `status` and `currentConnections` — are silently dropped on the renderer side because JSON-style deserialisation in the poll handler (`src/stores/app-store.ts:2240-2255`) keeps only declared keys.
-  The renderer writes `status: 'restarting'` from the optimistic `restartMcp()` action (`app-store.ts:2272-2285`), and `useMcpStatus`'s poll never overrides it because there's no Rust signal carrying the value.
-- **Why it's a defect:**
-  The crashed / restarting dialog trigger (`src/features/settings/sections/DaemonRestartDialog.tsx`) gates on `mcpStatus.status !== 'running'`.
-  So a normal-running daemon with stale `mcpStatus: { status: 'running', … }` from the last `restartMcp()` write is fine.
-  But a freshly-started daemon (cold start, manual `npm run tauri:dev`) that the store hasn't yet "lint-painted" will show the wrong badge until the user clicks restart.
-  `currentConnections` is metadata that the renderer pretends to display; it never gets a value, so the panel shows `–` forever.
-  Both are silent UX bugs that won't be caught by `tsc`.
-- **Minimal fix:**
-  Pick the cheapest direction — derive `status` on the renderer from `dto.running` + a new `lifecycle` flag the supervisor already maintains internally (`src-tauri/src/daemon_supervisor.rs:45-70`).
-  Drop the `restartMcp()` optimistic `set({ status: 'restarting' })` in favour of just `set({ mcpStatus: null })` so the next poll drives the badge.
-  For `currentConnections`, either wire it from `McpMetrics` (already counting in `crate::mcp_metrics`) OR delete the field from `McpUiState`.
-  The audit-fix predecessor chose "renderer derives" over "Rust publishes an enum" — going with that decision again keeps the diff small.
-- **Effort:** M
-- **Verify:**
-  Cold-start the app with the daemon pre-warm disabled (toggle the `ensure_started` call, or temporarily make it no-op).
-  Poll cycle should show `stopped → starting → running` and the `McpStatusPanel` reflects each step without manual clicks.
-  Manual restart still flips the badge via poll (not optimistic write).
+### P1.2 *(closed in `f554bf9`)* — `McpStatusDto` (Rust) and `McpUiState` (TS) shape mismatch
 
-### P1.3 — `call_tool` JSON-RPC error-in-result convention is documented but the comment is light on "why"
+Resolved in commit `f554bf9`. See the §"Already closed in `f554bf9`" ledger near the top of this document for the resolution summary.
 
-- **Symptom:**
-  `src-tauri/src/daemon_http.rs:184-208` returns tool-level failures as `{ content: […], is_error: true }` inside `result` rather than populating the JSON-RPC `error` field.
-  A doc comment exists at lines 173-183 explaining the LLM-recovery rationale.
-  But it doesn't cite the MCP spec section or the JSON-RPC 2.0 error-vs-result distinction, and doesn't name which LLM clients currently rely on the body being readable.
-- **Why it's a defect:**
-  Not a runtime bug — already shipping.
-  It is a documentation debt: when (not if) a future reviewer asks "why doesn't this go through `error`?", the existing comment answers qualitatively but not by reference.
-  We've already seen this question surface in the v0.1 audit, and the partial-citation is what got it flagged as P1 instead of closed-out.
-  Expand the doc comment rather than debate from scratch.
-- **Minimal fix:**
-  In `daemon_http.rs` `handle_tools_call` (lines 173-183), expand the existing rationale with three sentences:
-  - The exact JSON-RPC 2.0 spec sentence that distinguishes `error` (transport) from `result` (application) plus a permalink (jsonrpc.org spec, §6 Error object).
-  - The MCP `tools/call` section that requires the body be parseable by the model even on failure.
-  - A one-line note that real transport errors (parse failures, unknown methods) still go through the top-level `error` arm via `json_rpc_error`.
-  No code change.
-- **Effort:** S
-- **Verify:**
-  `cargo doc --no-deps --document-private-items` produces the expanded comment without warnings.
-  Future audit reviewer closes the item on first read.
+The original Symptom / Why / Minimal fix / Verify sketch is preserved in the `c1efc56` version of this document for historical context.
 
-### P1.4 — Tracker integration tests have a Windows-specific shutdown race
+### P1.3 *(closed in `f554bf9`)* — `call_tool` JSON-RPC error-in-result convention is documented but the comment is light on "why"
 
-- **Symptom:**
-  `scripts/mcp-integration.test.mjs` (post-`c1efc56` lines 161-167 have a polling fallback) and `scripts/proxy-integration.test.mjs` rely on `proc.kill()` + a polling fallback to wait for the spawned daemon / proxy to exit on Windows.
-  On the dev box where the audit was run, SIGKILL sometimes fires before the `proc.once('exit')` listener attaches.
-  The interval poll catches it within ~50 ms most of the time.
-  But in CI under load the interval can race the `finally` cleanup of the scratch dir, and the test still hangs for 5-10 s before exiting non-zero.
-- **Why it's a defect:**
-  The wrapper `scripts/run-mcp-tests.cjs` is therefore NOT wired into `npm run build`.
-  CI today runs `npm run build` (tsc + vite) and ships the v0.1 release without a daemon-exit safety net.
-  The audit flagged this as "manual `npm run build:tests` only" and we are shipping it that way.
-  Acceptable for v0.1, not for v0.2 when we want regressions caught in PR CI.
-- **Minimal fix:**
-  Try the modern `child_process.spawn` `proc.waitForExit()` (Node 22+ stable; we're on v25.8.1 per the current toolchain).
-  If available, replace the polling block with a single `await proc.exitCode`-style awaited wait.
-  If `waitForExit()` isn't reliable on win32 in our specific case, add a hard timeout (`AbortSignal.timeout(5000)`) to the `await` and tear down via `tree-kill` PID.
-  Only after either of these lands can `run-mcp-tests.cjs` be hoisted into `npm run build`'s postbuild hook.
-- **Effort:** M
-  (the timing-sensitive part is what makes this P1 rather than P2).
-- **Verify:**
-  Run `npm run test:mcp` 10 times on a cold-start `cargo build`.
-  No intermittent exit-1 from the polling race.
-  `npm run build:tests` produces deterministic PASS within reasonable wall-clock on both Windows + Linux (if / when CI cross-runs).
+Resolved in commit `f554bf9`. See the §"Already closed in `f554bf9`" ledger near the top of this document for the resolution summary.
+
+The original Symptom / Why / Minimal fix / Verify sketch is preserved in the `c1efc56` version of this document for historical context.
+
+### P1.4 *(closed in `f554bf9`)* — Tracker integration tests have a Windows-specific shutdown race
+
+Resolved in commit `f554bf9`. See the §"Already closed in `f554bf9`" ledger near the top of this document for the resolution summary.
+
+The original Symptom / Why / Minimal fix / Verify sketch is preserved in the `c1efc56` version of this document for historical context.
 
 ## Open P2 — clean-up debt
 

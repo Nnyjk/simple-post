@@ -31,7 +31,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 
 # MCP tool / HTTP daemon 落地用 (added in v0.1 MCP rollout)
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net", "signal"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"

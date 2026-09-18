@@ -12,10 +12,9 @@
 //!
 //! Private helpers also live here because they're only used by these
 //! tools:
-//! - `endpoint_project_id`: walks `collection → module → project` so
-//!   `endpoint_*` tools (which don't see a `project_id` argument) can
-//!   still permission-gate themselves.
 //! - `parse_body_mode`, `build_auth`: input parsing for `endpoint_create`.
+//! - Permission gating uses the shared `crate::db::endpoints::project_id_of`
+//!   helper to walk `collection → module → project`.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -251,7 +250,7 @@ pub(super) async fn tool_endpoint_get(
     let ep = crate::db::with_conn(&state.pool, |c| {
         crate::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = endpoint_project_id(&state.pool, &ep.collection_id);
+    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_get").await?;
     Ok(CallToolResult::json(ep))
 }
@@ -338,7 +337,7 @@ pub(super) async fn tool_endpoint_update(
     let ep = crate::db::with_conn(&state.pool, |c| {
         crate::db::endpoints::get(c, &endpoint_id)
     })?;
-    let project_id = endpoint_project_id(&state.pool, &ep.collection_id);
+    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
 
     let patch_obj = args.get("patch").cloned().unwrap_or(Value::Null);
@@ -388,7 +387,7 @@ pub(super) async fn tool_endpoint_delete(
     let ep = crate::db::with_conn(&state.pool, |c| {
         crate::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = endpoint_project_id(&state.pool, &ep.collection_id);
+    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_delete").await?;
     crate::db::with_tx(&state.pool, |c| {
         crate::db::endpoints::delete(c, &a.endpoint_id)
@@ -405,7 +404,7 @@ pub(super) async fn tool_endpoint_duplicate(
     let ep = crate::db::with_conn(&state.pool, |c| {
         crate::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = endpoint_project_id(&state.pool, &ep.collection_id);
+    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_create").await?;
 
     let now = crate::domain::now_ms();
@@ -429,7 +428,7 @@ pub(super) async fn tool_endpoint_move(
     let ep = crate::db::with_conn(&state.pool, |c| {
         crate::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = endpoint_project_id(&state.pool, &ep.collection_id);
+    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
 
     // The DB layer's `endpoints::update` doesn't accept a new
@@ -456,25 +455,6 @@ pub(super) async fn tool_endpoint_move(
 // =========================================================================
 // Private helpers (only used by the endpoint_* tools above)
 // =========================================================================
-
-/// Resolve the project_id for an endpoint via `collection → module → project`.
-/// `Endpoint` itself doesn't denormalise project_id, so any tool that
-/// wants to permission-gate an endpoint must walk the chain. Returns the
-/// empty string if any step fails — callers should treat that as a
-/// "no project" sentinel the permission layer recognises (matches the
-/// behaviour in `mcp/http_ops.rs::endpoint_collection_project_id`).
-fn endpoint_project_id(pool: &crate::db::DbPool, collection_id: &str) -> String {
-    if let Ok(coll) = crate::db::with_conn(pool, |c| {
-        crate::db::collections::get(c, collection_id)
-    }) {
-        if let Ok(module) = crate::db::with_conn(pool, |c| {
-            crate::db::modules::get(c, &coll.module_id)
-        }) {
-            return module.project_id;
-        }
-    }
-    String::new()
-}
 
 fn parse_body_mode(s: &str) -> Result<crate::domain::BodyMode, AppError> {
     use crate::domain::BodyMode;

@@ -441,24 +441,30 @@ async fn watch_exit(
     app_handle: AppHandle,
     pid: u32,
 ) {
-    // We need the child handle to wait on it. Take a fresh one from
-    // the supervisor — the supervisor may have spawned another child
-    // by now (restart), so we use the PID to discriminate.
-    let exit_status = {
+    // F-D1 fix: take the Child OUT of state inside the lock, then drop
+    // the guard before awaiting `wait()`. The previous version held
+    // `inner.lock().await` across `child.wait().await`, which permanently
+    // deadlocked `mcp_daemon_restart` — restart()'s `self.inner.lock().await`
+    // would queue behind this watcher forever while a healthy daemon sat
+    // there. With the take-out pattern the guard drops at the end of the
+    // block, leaving wait() lock-free so other callers (restart, shutdown,
+    // snapshot) can proceed.
+    let mut child = {
         let mut g = inner.lock().await;
-        match g.child.as_mut() {
-            Some(child) => match child.wait().await {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!(target: "mcp_daemon", "wait() failed: {e}");
-                    return;
-                }
-            },
+        match g.child.take() {
+            Some(c) => c,
             None => {
-                // Supervisor tore down the child out from under us;
-                // nothing to do.
+                // Supervisor tore down the child out from under us
+                // (e.g. shutdown() called); nothing to do.
                 return;
             }
+        }
+    };
+    let exit_status = match child.wait().await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(target: "mcp_daemon", "wait() failed: {e}");
+            return;
         }
     };
 

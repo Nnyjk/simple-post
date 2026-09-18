@@ -55,6 +55,47 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Endpoint, AppError> {
     }
 }
 
+/// Walk `collection → module → project` so callers (typically MCP
+/// permission gating) can resolve the project_id for an endpoint
+/// without `Endpoint` carrying a denormalised `project_id`. Both legs
+/// use a single pooled connection.
+///
+/// `AppError::NotFound` surfaces when any link in the chain is missing —
+/// that's a "dangling reference" signal, not a soft "no project" case,
+/// so the caller should let the error propagate instead of substituting
+/// an empty string.
+pub fn project_id_of(
+    pool: &crate::db::DbPool,
+    collection_id: &str,
+) -> Result<String, AppError> {
+    let conn = pool.get()?;
+    let module_id: String = conn
+        .query_row(
+            "SELECT module_id FROM collections WHERE id = ?1",
+            rusqlite::params![collection_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("collection {collection_id}"))
+            }
+            other => AppError::Sqlite(other),
+        })?;
+    let project_id: String = conn
+        .query_row(
+            "SELECT project_id FROM modules WHERE id = ?1",
+            rusqlite::params![module_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("module {module_id}"))
+            }
+            other => AppError::Sqlite(other),
+        })?;
+    Ok(project_id)
+}
+
 /// Multi-criteria search. All criteria are AND-combined; passing `None`
 /// for a filter means "don't restrict on this dimension".
 ///

@@ -199,13 +199,16 @@ impl McpStatusDto {
 /// deliberately swallow the underlying `AppError` (so the UI can
 /// render a uniform `{ ok: false, ... }` envelope without an extra
 /// `.catch` on every call site).
+///
+/// F-D4 fix: `pid` and `port` deliberately serialize as JSON `null` on
+/// the failure path (rather than being skipped) so the response shape
+/// is stable: `{ ok, pid, port }` always. This lines up with the
+/// renderer's `RestartResult` type in `src/lib/mcp-types.ts`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestartResult {
     pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
 }
 

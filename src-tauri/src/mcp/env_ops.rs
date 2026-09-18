@@ -43,9 +43,6 @@ struct ProjectIdArgs {
 struct CreateEnvArgs {
     project_id: String,
     name: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,11 +50,6 @@ struct UpdateEnvArgs {
     env_id: String,
     #[serde(default)]
     patch: Option<Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EnvIdArgs {
-    env_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,8 +102,7 @@ pub fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "project_id": { "type": "string" },
-                    "name": { "type": "string" },
-                    "description": { "type": "string" }
+                    "name": { "type": "string" }
                 },
                 "required": ["project_id", "name"],
                 "additionalProperties": false,

@@ -87,7 +87,7 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。下面是接 v0.1 起
 - [ ] **Rust 主进程**：SQLite（`rusqlite` + `r2d2`）、HTTP（`reqwest`）、MCP 子进程桥
 - [ ] **真实持久化**：Zustand store → `tauri-plugin-sql`
 - [ ] **真实请求**：渲染端 → Tauri command → `reqwest` → 返回结构化响应
-- [ ] **MCP Server 子进程**：`src-mcp/index.ts` 用 `@modelcontextprotocol/sdk` 暴露工具
+- [ ] **MCP Server 子进程**：`src-tauri/src/daemon_http.rs` (axum JSON-RPC dispatcher, ~245 LOC) + `src-tauri/src/bin/mcp_proxy.rs` (stdio bridge, ~350 LOC) wired through the `src-tauri/src/mcp/` module — exposes 44+ MCP tools to AI clients (Claude Desktop, Cursor, …) over either transport.
 - [ ] **打包**：NSIS 安装包 + 便携 zip
 
 ### v0.2（+2 周）

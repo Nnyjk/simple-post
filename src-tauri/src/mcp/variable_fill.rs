@@ -47,11 +47,6 @@ struct ResolveEndpointArgs {
     overrides: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ValidateEndpointArgs {
-    endpoint_id: String,
-}
-
 // =========================================================================
 // Dispatch table
 // =========================================================================

@@ -184,7 +184,7 @@ async fn tool_api_call_endpoint(
     let endpoint: Endpoint = crate::db::with_conn(&state.pool, |c| {
         crate::db::endpoints::get(c, &endpoint_id)
     })?;
-    let project_id = endpoint_collection_project_id(&state.pool, endpoint.collection_id.clone());
+    let project_id = crate::db::endpoints::project_id_of(&state.pool, &endpoint.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint")
         .await
         .ok();
@@ -348,23 +348,6 @@ fn apply_base_url(url: &str, env: Option<&Environment>, def_id: Option<&str>) ->
         }
         None => (url.to_string(), String::new()),
     }
-}
-
-/// Resolve the project_id for an endpoint's collection. Two-level walk:
-/// collection → module → project. Used for permission gating.
-fn endpoint_collection_project_id(
-    pool: &crate::db::DbPool,
-    collection_id: String,
-) -> String {
-    if let Ok(coll) = crate::db::with_conn(pool, |c| crate::db::collections::get(c, &collection_id))
-    {
-        if let Ok(module) = crate::db::with_conn(pool, |c| {
-            crate::db::modules::get(c, &coll.module_id)
-        }) {
-            return module.project_id;
-        }
-    }
-    String::new()
 }
 
 /// Render an `HttpMethod` enum back to its wire string.

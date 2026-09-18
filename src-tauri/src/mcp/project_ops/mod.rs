@@ -25,7 +25,8 @@
 //!     project.rs    ← project_* (5 tools)
 //!     module.rs     ← module_* (5 tools)
 //!     collection.rs ← collection_* (5 tools)
-//!     endpoint.rs   ← endpoint_* (8 tools + endpoint_project_id helper)
+//!     endpoint.rs   ← endpoint_* (8 tools)
+//!                  (endpoint_project_id lookup moved to crate::db::endpoints::project_id_of)
 //!     base_url_def.rs ← base_url_def_* (5 tools)
 //! ```
 //!
