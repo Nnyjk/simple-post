@@ -3,5 +3,8 @@ target/
 WixTools/
 gen/schemas
 
+# Stray isolated cargo build dirs left by agent debug sessions
+_worker_e_isolated_test/
+
 # Local icons/experiments
 app-icon.png

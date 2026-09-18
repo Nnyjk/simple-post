@@ -148,6 +148,7 @@ export function SettingsPanel() {
             const active = item.id === activeSection;
             return (
               <button
+                type="button"
                 key={item.id}
                 role="tab"
                 aria-selected={active}

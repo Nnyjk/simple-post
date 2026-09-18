@@ -45,6 +45,12 @@ build-output.txt
 *.removed
 *.bak
 
+# Ad-hoc agent / human scratch dirs; lets future worker slices drop debug files locally
+# without polluting `git status`.
+.scratch/
+scripts/.scratch/
+.playwright-mcp/
+
 # Runtime data / local agent state
 .minimax/
 

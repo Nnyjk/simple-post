@@ -1,0 +1,658 @@
+//! Shared domain types — 1:1 mirror of `src/types/domain.ts`.
+//!
+//! These structs are the wire shape that crosses the Tauri IPC boundary
+//! (renderer ↔ Rust). Field naming follows `#[serde(rename_all = "camelCase")]`
+//! so the React code can keep using its existing `snake_case → camelCase`
+//! naming without translation.
+//!
+//! SQLite persistence layer (`crate::db`) serializes the more complex
+//! nested fields (KeyValue[], Body, Auth) into JSON TEXT columns;
+//! see `db/endpoints.rs` for the (de)serialization round-trip.
+
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+// ----- HTTP method ---------------------------------------------------------
+
+/// Mirrors `HttpMethod` on the TS side. Serializes to the upper-case verb
+/// string (`"GET"`, `"POST"`, …) the renderer already uses; an unknown
+/// verb falls through to `Custom(String)` so a forward-compat write from
+/// the UI doesn't blow up on the Rust side.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum HttpMethod {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+    Head,
+    Options,
+    /// Any verb not in the standard list (e.g. `PROPFIND`, `LOCK`).
+    #[serde(untagged)]
+    Custom(String),
+}
+
+impl HttpMethod {
+    pub fn as_str(&self) -> &str {
+        match self {
+            HttpMethod::Get => "GET",
+            HttpMethod::Post => "POST",
+            HttpMethod::Put => "PUT",
+            HttpMethod::Patch => "PATCH",
+            HttpMethod::Delete => "DELETE",
+            HttpMethod::Head => "HEAD",
+            HttpMethod::Options => "OPTIONS",
+            HttpMethod::Custom(v) => v.as_str(),
+        }
+    }
+}
+
+/// Canonical parser used by every MCP tool and the request-execution path.
+/// Empty / whitespace-only input is rejected with `AppError::Validation`
+/// (so the LLM sees a useful message); a known verb is mapped case-insensitively;
+/// any token-shape ASCII verb (e.g. `PROPFIND`) flows through as
+/// `HttpMethod::Custom` so future / niche HTTP verbs don't lose data.
+pub fn parse_http_method(m: &str) -> Result<HttpMethod, crate::error::AppError> {
+    use crate::error::AppError;
+    let trimmed = m.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Validation("method must not be empty".into()));
+    }
+    Ok(match trimmed.to_ascii_uppercase().as_str() {
+        "GET" => HttpMethod::Get,
+        "POST" => HttpMethod::Post,
+        "PUT" => HttpMethod::Put,
+        "PATCH" => HttpMethod::Patch,
+        "DELETE" => HttpMethod::Delete,
+        "HEAD" => HttpMethod::Head,
+        "OPTIONS" => HttpMethod::Options,
+        other => HttpMethod::Custom(other.into()),
+    })
+}
+
+impl Default for HttpMethod {
+    fn default() -> Self {
+        HttpMethod::Get
+    }
+}
+
+// ----- key / value ----------------------------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyValue {
+    pub id: String,
+    pub key: String,
+    pub value: String,
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+// ----- body ---------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BodyMode {
+    None,
+    Json,
+    Form,
+    Raw,
+}
+
+impl Default for BodyMode {
+    fn default() -> Self {
+        BodyMode::None
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestBody {
+    pub mode: BodyMode,
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+}
+
+// ----- auth ---------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthType {
+    None,
+    Bearer,
+    Basic,
+    Apikey,
+}
+
+impl Default for AuthType {
+    fn default() -> Self {
+        AuthType::None
+    }
+}
+
+/// Where the apikey is attached. The TS interface declares the field as
+/// `in_` because `in` is a Rust/JS reserved word; serde rename below keeps
+/// the JSON shape as `"in": "header" | "query"`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiKeyLocation {
+    #[default]
+    Header,
+    Query,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BasicAuth {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyAuth {
+    pub key: String,
+    pub value: String,
+    /// Field name on the wire is `"in"`. See [`ApiKeyLocation`].
+    #[serde(rename = "in")]
+    pub in_: ApiKeyLocation,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthConfig {
+    #[serde(rename = "type")]
+    pub kind: AuthType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bearer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub basic: Option<BasicAuth>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apikey: Option<ApiKeyAuth>,
+}
+
+// ----- endpoint -----------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Endpoint {
+    pub id: String,
+    pub collection_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub method: HttpMethod,
+    /// Path-only URL; the actual host is resolved at send time via
+    /// `Environment.baseUrls[baseUrlDefinitionId]`.
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url_definition_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url_override: Option<String>,
+    pub params: Vec<KeyValue>,
+    pub headers: Vec<KeyValue>,
+    pub body: RequestBody,
+    pub auth: AuthConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    pub tags: Vec<String>,
+    pub sort_order: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Partial-update payload. All fields are `Option<T>` so an unset
+/// `None` keeps the existing value. `Option<Option<T>>` (double Option)
+/// is used where the TS side distinguishes *absent* from *explicit null*
+/// — e.g. `docs: null` should clear the column, while `docs` not in the
+/// patch object should leave it alone.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<HttpMethod>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url_definition_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url_override: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<Vec<KeyValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<Vec<KeyValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<RequestBody>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<AuthConfig>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
+}
+
+impl EndpointPatch {
+    /// True if no field is being changed. Used by the partial-update
+    /// path to avoid a no-op SQL write.
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none()
+            && self.description.is_none()
+            && self.method.is_none()
+            && self.url.is_none()
+            && self.environment_id.is_none()
+            && self.base_url_definition_id.is_none()
+            && self.base_url_override.is_none()
+            && self.params.is_none()
+            && self.headers.is_none()
+            && self.body.is_none()
+            && self.auth.is_none()
+            && self.docs.is_none()
+            && self.notes.is_none()
+            && self.tags.is_none()
+            && self.sort_order.is_none()
+    }
+}
+
+// ----- base url -----------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseUrlDefinition {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+// ----- collection ---------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+    pub id: String,
+    pub module_id: String,
+    pub parent_collection_id: Option<String>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub sort_order: i64,
+    /// Derived in the tree on the renderer side. Persisted for round-trip
+    /// fidelity but never read back into the DB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_id: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_collection_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
+}
+
+// ----- module -------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Module {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub sort_order: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModulePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
+}
+
+// ----- project ------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    pub base_url_definitions: Vec<BaseUrlDefinition>,
+    pub default_base_url_definition_id: Option<String>,
+    pub color: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url_definitions: Option<Vec<BaseUrlDefinition>>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_base_url_definition_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+// ----- environment --------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Environment {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub base_urls: HashMap<String, String>,
+    pub variables: HashMap<String, String>,
+    pub is_active: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_urls: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variables: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_active: Option<bool>,
+}
+
+// ----- agent permission ---------------------------------------------------
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Permission {
+    Read,
+    ReadCall,
+    Full,
+}
+
+impl Default for Permission {
+    fn default() -> Self {
+        Permission::ReadCall
+    }
+}
+
+impl Permission {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Permission::Read => "read",
+            Permission::ReadCall => "read_call",
+            Permission::Full => "full",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "read" => Some(Permission::Read),
+            "read_call" => Some(Permission::ReadCall),
+            "full" => Some(Permission::Full),
+            _ => None,
+        }
+    }
+}
+
+// ----- request settings ---------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestSettings {
+    pub timeout_ms: u64,
+    pub follow_redirects: bool,
+    pub max_response_size_kb: u64,
+}
+
+impl Default for RequestSettings {
+    fn default() -> Self {
+        Self {
+            timeout_ms: 30_000,
+            follow_redirects: true,
+            max_response_size_kb: 5120,
+        }
+    }
+}
+
+// ----- api response (in-process; not persisted in the schema -------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiResponse {
+    pub status: u16,
+    pub status_text: String,
+    pub duration_ms: u64,
+    pub size_bytes: u64,
+    pub headers: Vec<[String; 2]>,
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_json: Option<serde_json::Value>,
+    pub content_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<HttpMethod>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+// -------------------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------------------
+
+/// Current wall-clock as unix-milliseconds. Single source of truth
+/// for `*_at` columns on the write paths so the values are
+/// self-consistent within a single transaction.
+///
+/// `SystemTime::now()` panics only on clock skew past the unix epoch;
+/// treat that as a programmer error rather than user-recoverable.
+pub fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_millis() as i64
+}
+
+/// Deserialize `null` and missing as *different* states on `Option<T>`:
+///   - JSON absent  → `None` outer (`patch.field` not set → don't touch column)
+///   - JSON `null`  → `Some(None)`             → write NULL to column
+///   - JSON `"foo"` → `Some(Some("foo"))`      → write "foo"
+///
+/// serde's built-in `Option<T>` collapses absent and `null`, which
+/// destroys the "clear column" vs "leave alone" distinction in patch
+/// structs. This wrapper restores it.
+pub fn double_option<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Deserialize::deserialize(de).map(Some)
+}
+
+// -------------------------------------------------------------------------
+// Tests — round-trip serialization for the shapes that cross IPC.
+// -------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn http_method_round_trips_known_verbs() {
+        for v in [
+            HttpMethod::Get,
+            HttpMethod::Post,
+            HttpMethod::Put,
+            HttpMethod::Patch,
+            HttpMethod::Delete,
+            HttpMethod::Head,
+            HttpMethod::Options,
+        ] {
+            let s = serde_json::to_string(&v).unwrap();
+            let back: HttpMethod = serde_json::from_str(&s).unwrap();
+            assert_eq!(v, back);
+        }
+    }
+
+    #[test]
+    fn http_method_serializes_uppercase_strings() {
+        assert_eq!(serde_json::to_string(&HttpMethod::Get).unwrap(), "\"GET\"");
+        assert_eq!(serde_json::to_string(&HttpMethod::Post).unwrap(), "\"POST\"");
+    }
+
+    #[test]
+    fn http_method_custom_verb_passes_through() {
+        let raw = "\"PROPFIND\"";
+        let m: HttpMethod = serde_json::from_str(raw).unwrap();
+        assert_eq!(m.as_str(), "PROPFIND");
+    }
+
+    #[test]
+    fn apikey_in_field_uses_unquoted_name() {
+        let v = json!({
+            "type": "apikey",
+            "apikey": { "key": "X-API-Key", "value": "abc", "in": "header" }
+        });
+        let auth: AuthConfig = serde_json::from_value(v).unwrap();
+        let apikey = auth.apikey.unwrap();
+        assert_eq!(apikey.in_, ApiKeyLocation::Header);
+    }
+
+    #[test]
+    fn endpoint_camel_case_field_names() {
+        let v = json!({
+            "id": "e1",
+            "collectionId": "c1",
+            "name": "foo",
+            "method": "GET",
+            "url": "/x",
+            "params": [],
+            "headers": [],
+            "body": { "mode": "none", "content": "" },
+            "auth": { "type": "none" },
+            "tags": [],
+            "sortOrder": 0,
+            "createdAt": 1,
+            "updatedAt": 2,
+        });
+        let ep: Endpoint = serde_json::from_value(v).unwrap();
+        assert_eq!(ep.collection_id, "c1");
+        assert_eq!(ep.created_at, 1);
+    }
+
+    #[test]
+    fn endpoint_patch_distinguishes_absent_from_null() {
+        // `description` field absent → None
+        let p: EndpointPatch = serde_json::from_value(json!({
+            "name": "renamed"
+        }))
+        .unwrap();
+        assert_eq!(p.name.as_deref(), Some("renamed"));
+        assert!(p.description.is_none());
+
+        // `description: null` → Some(None) (clear the column)
+        let p: EndpointPatch = serde_json::from_value(json!({
+            "description": null
+        }))
+        .unwrap();
+        assert_eq!(p.description, Some(None));
+
+        // `description: "x"` → Some(Some("x"))
+        let p: EndpointPatch = serde_json::from_value(json!({
+            "description": "x"
+        }))
+        .unwrap();
+        assert_eq!(p.description, Some(Some("x".into())));
+    }
+
+    #[test]
+    fn environment_base_urls_round_trip() {
+        let env = Environment {
+            id: "e1".into(),
+            project_id: "p1".into(),
+            name: "dev".into(),
+            base_urls: [("def_default".to_string(), "http://x".to_string())]
+                .into_iter()
+                .collect(),
+            variables: [("token".to_string(), "abc".to_string())]
+                .into_iter()
+                .collect(),
+            is_active: true,
+        };
+        let s = serde_json::to_string(&env).unwrap();
+        let back: Environment = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.base_urls.get("def_default").unwrap(), "http://x");
+        assert_eq!(back.variables.get("token").unwrap(), "abc");
+        assert!(back.is_active);
+    }
+
+    #[test]
+    fn permission_round_trip() {
+        for p in [Permission::Read, Permission::ReadCall, Permission::Full] {
+            let s = serde_json::to_string(&p).unwrap();
+            let back: Permission = serde_json::from_str(&s).unwrap();
+            assert_eq!(p, back);
+        }
+        assert_eq!(Permission::parse("read"), Some(Permission::Read));
+        assert_eq!(Permission::parse("read_call"), Some(Permission::ReadCall));
+        assert_eq!(Permission::parse("full"), Some(Permission::Full));
+        assert_eq!(Permission::parse("nope"), None);
+    }
+}

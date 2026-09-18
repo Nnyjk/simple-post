@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { COMMANDS } from '@/lib/tauri-commands';
 import type { Project } from '@/types/domain';
 
 export type AgentPermission = 'read' | 'read_call' | 'full';
@@ -20,8 +22,6 @@ const MODE_LABELS: Record<AgentPermission, { label: string; tools: string }> = {
   },
 };
 
-const DEFAULT_CYCLE: readonly AgentPermission[] = ['full', 'read_call', 'read'];
-
 interface AgentPermissionsTableProps {
   projects: Project[];
 }
@@ -29,30 +29,80 @@ interface AgentPermissionsTableProps {
 /**
  * Per-project AI agent permission picker.
  *
- * Local-state mock for v0.1; the comment below marks the v0.2 hook to lift
- * this into the app store once MCP startup actually consumes the values.
+ * Persists via `permissions_get` / `permissions_set` Tauri commands.
+ * The table also seeds an in-memory map of pending edits so the UI
+ * stays responsive while the invoke round-trips; on failure we revert
+ * to the persisted value.
  */
-// v0.2: persist to app-store
 export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) {
-  const [perms, setPerms] = useState<Record<string, AgentPermission>>(() => {
-    const next: Record<string, AgentPermission> = {};
-    projects.forEach((p, idx) => {
-      next[p.id] =
-        idx < DEFAULT_CYCLE.length
-          ? DEFAULT_CYCLE[idx]
-          : DEFAULT_CYCLE[idx % DEFAULT_CYCLE.length];
-    });
-    return next;
-  });
+  const [perms, setPerms] = useState<Record<string, AgentPermission>>({});
+  const [loaded, setLoaded] = useState(false);
 
-  const handleChange = (projectId: string, mode: AgentPermission) => {
-    setPerms((prev) => ({ ...prev, [projectId]: mode }));
+  // Fetch persisted permissions once on mount and whenever the
+  // project list changes (new project → new default row). Unknown
+  // permissions default to `read_call` — the safest middle tier.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const out: Record<string, AgentPermission> = {};
+      await Promise.all(
+        projects.map(async (p) => {
+          try {
+            const v = await invoke<string>(COMMANDS.permissionsGet, { projectId: p.id });
+            if (isPermission(v)) {
+              out[p.id] = v;
+            } else {
+              out[p.id] = 'read_call';
+            }
+          } catch (e) {
+            console.error('[permissions] permissions_get failed', e);
+            out[p.id] = 'read_call';
+          }
+        }),
+      );
+      if (!cancelled) {
+        setPerms(out);
+        setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Re-fetch when the project slice's *identity* changes. The
+    // original `[projects.length]` over-fired on single-field edits
+    // (the count didn't change but the effect re-ran anyway because
+    // `length` changed with add/remove) and missed reorders. The
+    // slice reference is stable until the array mutates, so this is
+    // both cheaper and more correct.
+  }, [projects]);
+
+  const handleChange = async (projectId: string, mode: AgentPermission) => {
+    const prev = perms[projectId] ?? 'read_call';
+    // Optimistic local update for snappy UX. Roll back on failure.
+    setPerms((p) => ({ ...p, [projectId]: mode }));
+    try {
+      // Rust `permissions_set` returns `()` on success, so type the
+      // invoke as `void`. Previous calls left the response untyped,
+      // which masked the desired shape and slipped through lint.
+      await invoke<void>(COMMANDS.permissionsSet, { projectId, permission: mode });
+    } catch (e) {
+      console.error('[permissions] permissions_set failed', e);
+      setPerms((p) => ({ ...p, [projectId]: prev }));
+    }
   };
+
+  if (!loaded) {
+    return (
+      <div className="space-y-2">
+        <p className="text-[11px] text-muted-foreground">读取 agent 权限…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-muted-foreground">
-        控制 AI agent 对每个项目可执行的操作范围。重启 MCP 后生效。
+        控制 AI agent 对每个项目可执行的操作范围。<span className="text-warning">修改权限后需重启 MCP daemon 生效</span>。
       </p>
       <div className="overflow-hidden rounded-md border border-border bg-card/30">
         {projects.map((project, idx) => {
@@ -88,7 +138,9 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
                         type="button"
                         role="radio"
                         aria-checked={active}
-                        onClick={() => handleChange(project.id, mode)}
+                        onClick={() => {
+                          void handleChange(project.id, mode);
+                        }}
                         className={cn(
                           'inline-flex h-6 items-center rounded-sm px-2 text-[11px] font-medium transition-colors',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -109,4 +161,13 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
       </div>
     </div>
   );
+}
+
+/**
+ * Narrow an arbitrary string (the union persisted by the Rust side)
+ * into the `AgentPermission` enum. Anything we don't recognise falls
+ * back to `read_call` so the UI never lands on a phantom mode.
+ */
+function isPermission(v: unknown): v is AgentPermission {
+  return v === 'read' || v === 'read_call' || v === 'full';
 }

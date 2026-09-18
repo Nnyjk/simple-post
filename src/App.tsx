@@ -53,8 +53,15 @@ function App() {
   // global hotkeys — Ctrl+Enter (send), Ctrl+S (save).
   // Ctrl+K (command palette) is handled inside <TopBar> so the palette can
   // share its open-state with the search box click.
+  //
+  // IME guard: `e.isComposing` is true while the IME composition
+  // session is open (e.g. Chinese Pinyin, Japanese kana). Browsers
+  // still dispatch `keydown` during composition; without skipping
+  // these, a user mid-IME would accidentally fire send/save shortcuts
+  // when their IME candidate window swallows the actual letter.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
       const target = e.target as HTMLElement;
       const inField =
         target.tagName === 'INPUT' ||

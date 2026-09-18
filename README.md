@@ -10,8 +10,8 @@
 npm install
 npm run dev        # 启动 Vite dev server → http://127.0.0.1:5173（LAN 可访问）
 npm run build      # 产物到 dist/
-npm run tsc        # 类型检查
-npm test           # 单元测试（http-build + http，纯函数 + node:http 集成）
+npm run build      # 类型检查 + 打包（已有 tsc 内嵌）
+npm run test       # 单元测试（http-build + http，纯函数 + node:http 集成）
 ```
 
 > Vite 已配置 `host: '0.0.0.0'` + `allowedHosts: true`，局域网其他设备可直接访问本机 IP:5173。

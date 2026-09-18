@@ -215,6 +215,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                 const active = idx === selected;
                 return (
                   <button
+                    type="button"
                     key={cmd.id}
                     data-idx={idx}
                     onMouseEnter={() => setSelected(idx)}

@@ -7,8 +7,10 @@ import {
   Plus,
   Search,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { useAppStore, useActiveProject, useActiveEnvironment } from '@/stores/app-store';
+import { useMcpStatus } from '@/lib/use-mcp-status';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette';
@@ -44,6 +46,15 @@ export function TopBar() {
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
 
+  // TopBar is the first mounted child of App.tsx, so it's the natural
+  // place to kick off `bootstrap()`. Doing it here (rather than
+  // module-load time) keeps the call inside React's effect lifecycle
+  // and avoids firing invoke during store creation.
+  const bootstrap = useAppStore((s) => s.bootstrap);
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
   const envs = useMemo(
     () => environments.filter((e) => e.projectId === activeProjectId),
     [environments, activeProjectId],
@@ -66,8 +77,16 @@ export function TopBar() {
 
   // Global Ctrl/Cmd + K opens the command palette. Works from any focus
   // target (including input/textarea) — the spec is explicit about this.
+  //
+  // `e.isComposing` guard: while the IME composition session is open
+  // (e.g. typing a Chinese character via Pinyin) Chrome/Firefox still
+  // dispatch a `keydown` for Ctrl-modifier keys. Without this guard,
+  // the palette would pop up over the IME candidate window and the
+  // user's `k` press would vanish into the palette. Skipping composition
+  // lets the IME commit happen first.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setPaletteOpen((v) => !v);
@@ -90,23 +109,33 @@ export function TopBar() {
         <span className="text-sm font-semibold tracking-tight">Simple Post</span>
       </div>
 
-      {/* Project switcher */}
+      {/* Project switcher — disabled until bootstrap populates projects. */}
       <div ref={projRef} className="relative">
         <Button
           {...NO_DRAG}
           variant="ghost"
           size="sm"
           onClick={() => setProjOpen((v) => !v)}
+          disabled={!activeProject}
           className="gap-1.5"
         >
-          <span
-            className="h-2 w-2 rounded-sm"
-            style={{ backgroundColor: activeProject.color }}
-          />
-          <span className="max-w-[160px] truncate">{activeProject.name}</span>
+          {activeProject ? (
+            <>
+              <span
+                className="h-2 w-2 rounded-sm"
+                style={{ backgroundColor: activeProject.color }}
+              />
+              <span className="max-w-[160px] truncate">{activeProject.name}</span>
+            </>
+          ) : (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span className="max-w-[160px] truncate">加载中…</span>
+            </>
+          )}
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </Button>
-        {projOpen && (
+        {projOpen && activeProject && (
           <div className="absolute left-0 top-full z-50 mt-1 w-64 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
             <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               项目
@@ -114,6 +143,7 @@ export function TopBar() {
             {projects.map((p) => (
               <button
                 {...NO_DRAG}
+                type="button"
                 key={p.id}
                 onClick={() => {
                   setActiveProject(p.id);
@@ -201,6 +231,7 @@ export function TopBar() {
                 {envs.map((env) => (
                   <button
                     {...NO_DRAG}
+                    type="button"
                     key={env.id}
                     onClick={() => {
                       setActiveEnvironment(env.id);
@@ -261,7 +292,7 @@ export function TopBar() {
       </button>
 
       <div className="ml-auto flex items-center gap-2">
-        <McpStatus />
+        <McpStatusPill />
         <Tooltip content="设置" side="bottom">
           <Button
             {...NO_DRAG}
@@ -284,39 +315,65 @@ export function TopBar() {
   );
 }
 
-function McpStatus() {
-  // mock: MCP "running" — this will be wired to Rust in next phase
-  const running = true;
+/**
+ * Top-right MCP status pill. Reads from the singleton daemon snapshot
+ * (see `useMcpStatus`) — the polling loop lives in the store, so this
+ * component is pure render: no `setInterval`, no `invoke`, no listener.
+ *
+ * Renamed from the prior `McpStatus` because the previous version
+ * hosted its own 3s poll and needed both React state and refs to
+ * coordinate cancellation. With the shared poll those are gone, and
+ * the shorter name is a clearer signal to future readers.
+ */
+function McpStatusPill() {
+  const mcp = useMcpStatus();
+
+  const status = mcp?.status ?? 'stopped';
+  const pid = mcp?.pid ?? null;
+  const requestsHandled = mcp?.requestsHandled ?? 0;
+
+  const running = status === 'running';
+  const unhealthy = status === 'crashed' || status === 'unhealthy';
+  const connecting = status === 'starting' || status === 'restarting';
+
+  const dotClass = running
+    ? 'bg-success'
+    : unhealthy
+      ? 'bg-destructive'
+      : 'bg-zinc-500';
+
   return (
     <Tooltip
       content={
-        running ? (
-          <div className="space-y-0.5 text-left">
-            <div className="font-medium">MCP Server · 运行中</div>
-            <div className="text-[10px] text-muted-foreground">stdio 模式 · PID 4720</div>
+        <div className="space-y-0.5 text-left">
+          <div className="font-medium">
+            MCP Server · {running ? '运行中' : connecting ? '启动中' : unhealthy ? '异常' : mcp ? '未启动' : '连接中…'}
           </div>
-        ) : (
-          <span>MCP Server 未启动</span>
-        )
+          <div className="text-[10px] text-muted-foreground">
+            stdio 模式{pid !== null ? ` · PID ${pid}` : ''}
+            {requestsHandled > 0 ? ` · ${requestsHandled} reqs` : ''}
+          </div>
+        </div>
       }
       side="bottom"
     >
       <button
         {...NO_DRAG}
+        type="button"
         className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs hover:bg-accent"
       >
         <span className="relative flex h-2 w-2">
           <span
             className={cn(
               'absolute inset-0 animate-ping rounded-full',
-              running ? 'bg-success' : 'bg-zinc-500',
+              running ? 'bg-success' : unhealthy ? 'bg-destructive' : 'bg-zinc-500',
             )}
             style={{ opacity: 0.4 }}
           />
           <span
             className={cn(
               'relative inline-flex h-2 w-2 rounded-full',
-              running ? 'bg-success' : 'bg-zinc-500',
+              dotClass,
             )}
           />
         </span>

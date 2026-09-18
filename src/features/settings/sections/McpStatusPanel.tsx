@@ -1,84 +1,145 @@
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/stores/app-store';
+import { useMcpStatus } from '@/lib/use-mcp-status';
+import type { McpRuntimeStatus, McpUiState } from '@/lib/mcp-types';
 
-export type McpRuntimeStatus = 'running' | 'restarting' | 'stopped';
-
-export interface McpUiState {
-  status: McpRuntimeStatus;
-  pid: number;
-  requestsHandled: number;
-}
-
-const INITIAL_STATE: McpUiState = {
-  status: 'running',
-  pid: 12345,
-  requestsHandled: 1247,
-};
-
-const RESTART_DELAY_MS = 800;
+// Re-export so existing callers (ConnectionSection, Settings tab etc.)
+// don't need to learn about the internal split between the panel and
+// the shared mcp-types module.
+export type { McpRuntimeStatus, McpUiState };
 
 /**
- * Restart control + status broadcasting for the MCP hero card.
- *
- * Owns the mock runtime state (PID, request count, restart-in-flight)
- * and broadcasts it via `onStateChange` so the parent card can render
- * the status pill, the PID, and the request count without each of them
- * needing its own useState hook. The timeout is tracked in a ref so a
- * fast unmount (e.g. tab switch + drawer close) cannot leak a setState
- * into a stale component.
+ * Grace period after a restart invoke before we re-enable the button.
+ * Keeps the UI from flashing "clickable" during a flaky round-trip.
  */
-export function McpStatusPanel({
-  onStateChange,
-}: {
-  onStateChange?: (state: McpUiState) => void;
-}) {
-  const [state, setState] = useState<McpUiState>(INITIAL_STATE);
-  const timerRef = useRef<number | null>(null);
+const RESTART_GRACE_MS = 2000;
 
-  // Push every state change up so the parent can render the hero card.
-  useEffect(() => {
-    onStateChange?.(state);
-  }, [state, onStateChange]);
+/**
+ * Restart control for the MCP daemon.
+ *
+ * Source-of-truth ownership:
+ *   - The 3-second polling loop lives in the Zustand store
+ *     (`useAppStore.startMcpPolling` / `refreshMcpStatus`). Any
+ *     component mounting `useMcpStatus` participates in the same
+ *     singleton loop, so there is no duplicate `setInterval` here.
+ *   - This panel keeps ONE piece of daemon-local logic: the
+ *     `daemon://crashed` event listener. When Rust emits the event
+ *     we eagerly call `refreshMcpStatus` so the badge flips to
+ *     `crashed` immediately (not on the next 3s tick).
+ *   - The button itself calls `useAppStore.getState().restartMcp()`
+ *     — the optimistic "restarting" flip lives in the store so a
+ *     concurrent restart from the dialog button produces the same
+ *     visible state.
+ *
+ * The local `restarting` state is purely cosmetic (keeps the button
+ * disabled while the invoke is in flight and during the grace
+ * period) — it does NOT shadow `mcpStatus.status === 'restarting'`
+ * from the daemon, which is what the badge renders.
+ */
+export function McpStatusPanel() {
+  const mcpStatus = useMcpStatus();
+  const restartMcp = useAppStore((s) => s.restartMcp);
 
+  // Cosmetic local state — debounces the button's click → disable
+  // transition so a flaky invoke doesn't cause flicker. Mirrors the
+  // grace window the original implementation used.
+  const [isRestartingLocal, setIsRestartingLocal] = useState(false);
+  const graceRef = useRef<number | null>(null);
+
+  // Event-driven refresh + grace-timer cleanup, hosted in a single
+  // effect. Subscribes to `daemon://crashed` once on mount and
+  // unsubscribes on unmount; the listener is idempotent — Rust
+  // publishes the event, we just call `refreshMcpStatus` to pick up
+  // the new (crashed) state without waiting for the next 3s tick.
   useEffect(() => {
+    let cancelled = false;
+    const unlistenRefs: UnlistenFn[] = [];
+
+    listen<{ lastError?: string }>('daemon://crashed', (e) => {
+      // Eager refresh — don't wait for the next 3s tick — and surface
+      // the daemon-supplied error string immediately so the
+      // crashed/restart dialog can show it without waiting for the
+      // next daemon poll. Falls back to the polled snapshot's
+      // `lastError` if the event payload omits one.
+      const lastError = e.payload?.lastError;
+      void useAppStore.getState().refreshMcpStatus().then(() => {
+        if (lastError) {
+          const cur = useAppStore.getState().mcpStatus;
+          if (cur && cur.lastError !== lastError) {
+            useAppStore.setState({ mcpStatus: { ...cur, lastError } });
+          }
+        }
+      });
+    })
+      .then((u) => {
+        if (cancelled) {
+          u();
+          return;
+        }
+        unlistenRefs.push(u);
+      })
+      .catch((e) => {
+        console.error('[MCP] listen(daemon://crashed) failed', e);
+      });
+
     return () => {
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-        timerRef.current = null;
+      cancelled = true;
+      for (const u of unlistenRefs) u();
+      // Clear any pending grace timer so an unmount mid-restart
+      // doesn't toggle the button state on a dead instance.
+      if (graceRef.current !== null) {
+        window.clearTimeout(graceRef.current);
+        graceRef.current = null;
       }
     };
   }, []);
 
-  const handleRestart = () => {
-    if (state.status === 'restarting') return;
-    setState((prev) => ({ ...prev, status: 'restarting' }));
-    timerRef.current = window.setTimeout(() => {
-      setState((prev) => ({
-        status: 'running',
-        pid: prev.pid + 1,
-        requestsHandled: prev.requestsHandled + 1,
-      }));
-      timerRef.current = null;
-    }, RESTART_DELAY_MS);
-  };
+  async function handleClick() {
+    if (isRestartingLocal) return;
+    setIsRestartingLocal(true);
+    try {
+      await restartMcp();
+    } catch {
+      // restartMcp already logged + flipped the badge to `crashed`.
+      // We just want the button to become clickable again so the
+      // user can retry from the same place.
+    } finally {
+      if (graceRef.current !== null) window.clearTimeout(graceRef.current);
+      graceRef.current = window.setTimeout(() => {
+        setIsRestartingLocal(false);
+        graceRef.current = null;
+      }, RESTART_GRACE_MS);
+    }
+  }
+
+  const status: McpRuntimeStatus = mcpStatus?.status ?? 'stopped';
+  const isStopped = status === 'stopped' || status === 'crashed' || status === 'unhealthy';
+  // Disable the button during the local grace period OR while the
+  // daemon itself says it is restarting.
+  const disabled = isRestartingLocal || status === 'restarting' || status === 'starting';
 
   return (
     <Button
+      type="button"
       variant="outline"
       size="sm"
-      onClick={handleRestart}
-      disabled={state.status === 'restarting'}
+      onClick={() => {
+        void handleClick();
+      }}
+      disabled={disabled}
       className="gap-1.5"
     >
-      {state.status === 'restarting' ? (
+      {disabled ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : (
-        <RefreshCw className="h-3.5 w-3.5" />
+        <RefreshCw className={cn('h-3.5 w-3.5', isStopped && 'text-destructive')} />
       )}
-      {state.status === 'restarting' ? '重启中…' : '重启 MCP'}
+      {disabled ? '重启中…' : '重启 MCP'}
     </Button>
   );
 }
@@ -92,7 +153,7 @@ export function StatusBadge({ status }: { status: McpRuntimeStatus }) {
       </Badge>
     );
   }
-  if (status === 'restarting') {
+  if (status === 'restarting' || status === 'starting') {
     return (
       <Badge variant="warning">
         <Loader2 className="h-3 w-3 animate-spin" />
@@ -100,17 +161,38 @@ export function StatusBadge({ status }: { status: McpRuntimeStatus }) {
       </Badge>
     );
   }
+  if (status === 'crashed' || status === 'unhealthy') {
+    return (
+      <Badge variant="destructive">
+        <span className="mr-1 h-1.5 w-1.5 rounded-full bg-destructive" />
+        {status}
+      </Badge>
+    );
+  }
   return <Badge variant="muted">stopped</Badge>;
 }
 
-/** Re-export a tiny `<StateSummary>` helper that consumes the same state
- *  object the panel broadcasts. The connection section composes both. */
-export function StateSummary({ state }: { state: McpUiState }) {
+/** Tiny `<StateSummary>` helper that consumes an `McpUiState` snapshot
+ *  directly. ConnectionSection passes the store-fed state. Tolerates
+ *  `null` for the brief window before the first daemon poll completes. */
+export function StateSummary({ state }: { state: McpUiState | null }) {
+  if (!state) {
+    return (
+      <span className="inline-flex items-center gap-2 text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full bg-zinc-500" />
+        <span className="text-[11px]">连接中…</span>
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-2">
       <StatusBadge status={state.status} />
-      <span className="font-mono text-foreground/80">PID {state.pid}</span>
-      <span className="text-muted-foreground/60">·</span>
+      {state.pid !== null && (
+        <>
+          <span className="font-mono text-foreground/80">PID {state.pid}</span>
+          <span className="text-muted-foreground/60">·</span>
+        </>
+      )}
       <span className="text-muted-foreground">
         已处理 <span className="font-mono text-foreground">{state.requestsHandled.toLocaleString()}</span> 次请求
       </span>

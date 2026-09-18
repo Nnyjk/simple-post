@@ -1,11 +1,12 @@
 /**
  * Real HTTP sender — dispatches between two transports:
  *
- *   1. Tauri (`invoke('http_request', …)`) when the app is running
- *      inside the desktop shell. This routes the request through a
- *      Rust `reqwest` client, which completely sidesteps the webview's
- *      CORS enforcement. This is the path that fixes the "Network
- *      Error" users saw when the app was served by plain Vite.
+ *   1. Tauri (`invoke(COMMANDS.httpRequest, …)`) when the app is
+ *      running inside the desktop shell. This routes the request
+ *      through a Rust `reqwest` client, which completely sidesteps
+ *      the webview's CORS enforcement. This is the path that fixes
+ *      the "Network Error" users saw when the app was served by
+ *      plain Vite.
  *   2. Native `fetch` otherwise (browser dev mode, future web build).
  *      Kept intact so the existing single-source-of-truth builder,
  *      timeout/abort, and response-truncation logic continue to apply.
@@ -41,6 +42,7 @@ import type {
   RequestBody,
 } from '@/types/domain';
 import type { RequestSettings } from '@/stores/app-store';
+import { COMMANDS } from './tauri-commands';
 import { buildFetchInit } from './http-build';
 
 export interface SendInput {
@@ -266,7 +268,7 @@ async function sendViaTauri(input: SendInput): Promise<ApiResponse> {
     // rejects this side — the Rust `reqwest` keeps running to
     // completion in the background but its result is discarded.
     const r = await invokeWithAbort<RustHttpResult>(
-      'http_request',
+      COMMANDS.httpRequest,
       {
         method: input.method,
         url: built.url,

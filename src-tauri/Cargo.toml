@@ -9,6 +9,10 @@ rust-version = "1.77.2"
 name = "simple_post_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "simple-post-mcp-proxy"
+path = "src/bin/mcp_proxy.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -25,6 +29,19 @@ reqwest = { version = "0.12", default-features = false, features = [
   "deflate",
   "http2",
 ] }
+
+# MCP tool / HTTP daemon 落地用 (added in v0.1 MCP rollout)
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "fs", "net", "signal"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
+serde_json_path = "0.1"
+axum = "0.7"
 
 [profile.release]
 panic = "abort"

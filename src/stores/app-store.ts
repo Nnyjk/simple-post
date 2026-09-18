@@ -24,6 +24,7 @@
  */
 
 import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
 import type {
   Project,
   Module,
@@ -34,14 +35,9 @@ import type {
   HttpMethod,
   BaseUrlDefinition,
 } from '@/types/domain';
-import {
-  mockProjects,
-  mockModules,
-  mockCollections,
-  mockEndpoints,
-  mockEnvironments,
-} from '@/lib/mock-data';
 import { uid } from '@/lib/utils';
+import { COMMANDS } from '@/lib/tauri-commands';
+import type { McpRuntimeStatus, McpUiState } from '@/lib/mcp-types';
 
 export type Theme = 'dark' | 'light' | 'system';
 
@@ -121,6 +117,28 @@ interface PersistedPrefs {
 const PREFS_KEY = 'simple-post:prefs';
 const MAX_HISTORY_PER_ENDPOINT = 10;
 
+/**
+ * Polling cadence for the shared MCP daemon snapshot. Single source of
+ * truth — both `startMcpPolling` (in the store) and the legacy
+ * `setInterval` it replaced used this value.
+ */
+const MCP_REFRESH_INTERVAL_MS = 3000;
+
+// Browser-only — holds the bound `visibilitychange` handler so the
+// store can detach it on `stopMcpPolling`. The store action is the
+// only consumer so a module-scoped variable (no React state) is fine.
+let _mcpVisibilityHandler: ((this: Document, ev: Event) => unknown) | null = null;
+function _setVisibilityHandler(
+  h: ((this: Document, ev: Event) => unknown) | null,
+): void {
+  _mcpVisibilityHandler = h;
+}
+function _getVisibilityHandler():
+  | ((this: Document, ev: Event) => unknown)
+  | null {
+  return _mcpVisibilityHandler;
+}
+
 function loadPrefs(): PersistedPrefs {
   if (typeof window === 'undefined') return {};
   try {
@@ -157,6 +175,8 @@ interface AppState {
   collections: Collection[];
   endpoints: Endpoint[];
   environments: Environment[];
+  /** True once bootstrap() has resolved at least once. */
+  loaded: boolean;
 
   // ui state
   activeProjectId: string;
@@ -228,6 +248,24 @@ interface AppState {
   // preferences (theme + request settings)
   theme: Theme;
   requestSettings: RequestSettings;
+
+  /**
+   * Shared MCP daemon snapshot, polled every 3s by exactly one
+   * `setInterval` regardless of how many components consume it.
+   * `null` until the first successful poll (renderers render a
+   * loading-style state for this).
+   */
+  mcpStatus: McpUiState | null;
+  /** Browser-only. The active 3s timer id, or `null` when idle. */
+  _mcpTimer: number | null;
+  /**
+   * Last `status` for which the ConnectionSection's auto-open restart
+   * dialog has already fired. Used to dedupe — when the daemon
+   * reports `crashed` (or `unhealthy`) twice in a row, the dialog
+   * should appear once, not twice. Lives on the store so the
+   * auto-open effect survives remounts of the settings tab.
+   */
+  restartDialogSeen: McpRuntimeStatus | null;
 
   // response history / saved examples — keyed by endpointId
   responseHistory: Record<string, ApiResponse[]>;
@@ -333,32 +371,40 @@ interface AppState {
    * Filter the given tab ids down to the ones currently flagged as
    * dirty. Internal helper shared by the request-close paths.
    */
-  _partitionDirty: (targetIds: string[]) => string[];
+  partitionDirty: (targetIds: string[]) => string[];
 
-  // actions: data — CRUD
-  addProject: (name: string, opts?: { description?: string; baseUrl?: string; color?: string }) => string;
-  updateProject: (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => void;
-  deleteProject: (id: string) => void;
+  // actions: data — CRUD (async — all hit Tauri commands, mirror to local state)
+  addProject: (name: string, opts?: { description?: string; baseUrl?: string; color?: string }) => Promise<string | null>;
+  updateProject: (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
 
-  addModule: (projectId: string, name: string, opts?: { description?: string }) => string;
-  updateModule: (id: string, patch: Partial<Omit<Module, 'id' | 'projectId'>>) => void;
-  deleteModule: (id: string) => void;
+  addModule: (projectId: string, name: string, opts?: { description?: string }) => Promise<string | null>;
+  updateModule: (id: string, patch: Partial<Omit<Module, 'id' | 'projectId'>>) => Promise<void>;
+  deleteModule: (id: string) => Promise<void>;
 
   addCollection: (
     moduleId: string,
     name: string,
     opts?: { description?: string; parentCollectionId?: string | null },
-  ) => string;
-  updateCollection: (id: string, patch: Partial<Omit<Collection, 'id' | 'moduleId' | 'parentCollectionId'>>) => void;
-  deleteCollection: (id: string) => void;
+  ) => Promise<string | null>;
+  updateCollection: (id: string, patch: Partial<Omit<Collection, 'id' | 'moduleId' | 'parentCollectionId'>>) => Promise<void>;
+  deleteCollection: (id: string) => Promise<void>;
 
   addEndpoint: (
     collectionId: string,
     name: string,
     opts?: { method?: HttpMethod; url?: string },
-  ) => string;
-  updateEndpoint: (id: string, patch: Partial<Endpoint>) => void;
-  deleteEndpoint: (id: string) => void;
+  ) => Promise<string | null>;
+  updateEndpoint: (id: string, patch: Partial<Endpoint>) => Promise<void>;
+  deleteEndpoint: (id: string) => Promise<void>;
+  /**
+   * Duplicate an endpoint. Returns the new id **synchronously** because
+   * the caller (ProjectTree) immediately activates the new tab — making
+   * this async would break the existing UX. Implementation: optimistic
+   * local copy first, then background invoke to persist; on invoke
+   * success the temp id is replaced with the persisted entity, on
+   * failure the optimistic copy is removed.
+   */
   duplicateEndpoint: (id: string) => string | null;
 
   // actions: data — move (drag-and-drop reorder + cross-container moves)
@@ -370,8 +416,10 @@ interface AppState {
    *
    * Children of the module (collections, recursively) are carried
    * automatically — the parent FKs are unchanged.
+   *
+   * Optimistic local reorder + background invoke; rolls back on failure.
    */
-  moveModule: (moduleId: string, targetIndex: number) => void;
+  moveModule: (moduleId: string, targetIndex: number) => Promise<void>;
   /**
    * Move one or more collections to a new parent + position.
    *
@@ -390,6 +438,8 @@ interface AppState {
    *     (cycle prevention).
    *   - The target parent must exist in the same project as the
    *     source collection.
+   *
+   * Optimistic local move + background invoke; rolls back on failure.
    */
   moveCollections: (
     collectionIds: string[],
@@ -398,7 +448,7 @@ interface AppState {
       parentId: string;
       index: number;
     },
-  ) => void;
+  ) => Promise<void>;
   /**
    * Move one or more endpoints to a new collection + position.
    * Supports multi-select (the "接口与接口形成集合" gesture: select
@@ -410,31 +460,47 @@ interface AppState {
    * collections, they all end up in the target — that's how multiple
    * endpoints "form a collection" without us having to create a new
    * collection node.
+   *
+   * Optimistic local move + background invoke; rolls back on failure.
    */
   moveEndpoints: (
     endpointIds: string[],
     target: { collectionId: string; index: number },
-  ) => void;
+  ) => Promise<void>;
 
-  // actions: environment
-  setEnvironmentVar: (envId: string, key: string, value: string) => void;
-  addEnvironment: (projectId: string, name: string) => void;
-  updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => void;
+  // actions: environment (async — Tauri commands)
+  setEnvironmentVar: (envId: string, key: string, value: string) => Promise<void>;
+  addEnvironment: (projectId: string, name: string) => Promise<string | null>;
+  updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => Promise<void>;
   /**
    * Set the URL of a single baseUrl definition inside an env. The
    * baseUrl is stored as `env.baseUrls[defId]`, not as a top-level
    * `Environment.baseUrl` string — that's how multiple named
    * baseUrls (e.g. "鉴权服务" / "数据服务") coexist per env.
    */
-  setEnvironmentBaseUrl: (envId: string, defId: string, url: string) => void;
-  deleteEnvironment: (envId: string) => void;
-  setEnvironmentActive: (envId: string) => void;
+  setEnvironmentBaseUrl: (envId: string, defId: string, url: string) => Promise<void>;
+  deleteEnvironment: (envId: string) => Promise<void>;
+  setEnvironmentActive: (envId: string) => Promise<void>;
 
   // actions: baseUrl definitions (project-scoped)
+  /**
+   * Add a project-scoped baseUrl definition. Returns the new id
+   * **synchronously** because the caller (EnvironmentSection) passes
+   * it straight into `setEnvironmentBaseUrl` to seed an empty row.
+   * Optimistic local add + background invoke; rolls back on failure.
+   */
   addBaseUrlDefinition: (projectId: string, name: string) => string;
-  updateBaseUrlDefinition: (projectId: string, defId: string, patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>) => void;
-  deleteBaseUrlDefinition: (projectId: string, defId: string) => void;
-  setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => void;
+  updateBaseUrlDefinition: (projectId: string, defId: string, patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>) => Promise<void>;
+  deleteBaseUrlDefinition: (projectId: string, defId: string) => Promise<void>;
+  setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => Promise<void>;
+
+  // actions: bootstrap (one-shot at app start)
+  /**
+   * Fetch all persistent data from the SQLite daemon and mirror into
+   * the store. Idempotent — a second call after the first is a no-op.
+   * Triggered from TopBar's useEffect on mount.
+   */
+  bootstrap: () => Promise<void>;
 
   // actions: response history & examples
   addResponseHistory: (endpointId: string, response: ApiResponse) => void;
@@ -459,8 +525,55 @@ interface AppState {
   setNewItemColor: (c: string) => void;
   setNewItemParentModule: (id: string) => void;
   setNewItemParentCollection: (id: string) => void;
-  submitNewItem: () => string | null;
+  /**
+   * Commit the in-memory `newItem` draft by calling the corresponding
+   * store action. Now async because the underlying add* calls hit the
+   * Tauri daemon. The NewItemModal calls this fire-and-forget — it
+   * doesn't need the id synchronously.
+   */
+  submitNewItem: () => Promise<string | null>;
   clearLastCreated: () => void;
+
+  // actions: MCP daemon polling
+  /**
+   * Begin the 3-second MCP polling loop if it isn't already running.
+   * Idempotent — calling this from N components still results in exactly
+   * one `setInterval` and one IPC round-trip per tick.
+   *
+   * Also installs a `document.visibilitychange` listener that pauses
+   * the timer while the tab is hidden (no point polling for users
+   * who can't see the badge). The listener is removed by
+   * `stopMcpPolling`.
+   */
+  startMcpPolling: () => void;
+  /**
+   * Stop the polling loop and detach the visibility listener. Pair
+   * every `startMcpPolling` (typically from a `useMcpStatus` effect
+   * mount) with a `stopMcpPolling` cleanup so we don't leak.
+   */
+  stopMcpPolling: () => void;
+  /**
+   * Force a single refresh from the daemon and push the result into
+   * `mcpStatus`. On failure we only log (so the UI keeps rendering
+   * the last-known good state) — the bootstrap path's silent
+   * `return []` behaviour was the wrong default here.
+   */
+  refreshMcpStatus: () => Promise<void>;
+  /**
+   * Trigger the daemon restart command. The action is idempotent at
+   * the *UI* level (the component is the caller, so the button is
+   * disabled while a restart is already in flight). On failure we
+   * flip `mcpStatus.lastError` so the crashed dialog can show the
+   * underlying cause.
+   */
+  restartMcp: () => Promise<void>;
+  /**
+   * Record that the auto-open restart dialog has been shown for the
+   * given status. Idempotent — the ConnectionSection effect's dedupe
+   * logic calls this when the user dismisses the dialog so the next
+   * occurrence of the same status doesn't immediately reopen it.
+   */
+  markRestartDialogSeen: (status: McpRuntimeStatus) => void;
 }
 
 // ---------- helpers (pure, used inside set callbacks) ----------
@@ -619,21 +732,27 @@ function filterTabsAfterRemoval(
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  projects: mockProjects,
-  modules: mockModules,
-  collections: mockCollections,
-  endpoints: mockEndpoints,
-  environments: mockEnvironments,
+  // v0.1 MCP rollout — empty at boot; `bootstrap()` populates from the
+  // daemon (which reads SQLite). The selectors and consumers all tolerate
+  // an empty list because `loaded: false` triggers a loading state in the
+  // UI rather than rendering the (now-empty) tree.
+  projects: [],
+  modules: [],
+  collections: [],
+  endpoints: [],
+  environments: [],
+  /** True once bootstrap() has resolved at least once. Idempotent. */
+  loaded: false,
 
-  activeProjectId: mockProjects[0].id,
-  activeEnvironmentId: mockEnvironments.find((e) => e.projectId === mockProjects[0].id && e.isActive)!.id,
-  activeEndpointId: mockEndpoints[0].id,
+  activeProjectId: '',
+  activeEnvironmentId: '',
+  activeEndpointId: null,
   loading: false,
 
-  // Workspace starts with the first endpoint open. The array preserves the
-  // open order so tab strip / keyboard nav can rely on it.
-  openTabs: [{ id: mockEndpoints[0].id, kind: 'endpoint' }],
-  activeTabId: mockEndpoints[0].id,
+  // Workspace starts with no tabs — the bootstrap sequence activates the
+  // first endpoint (if any) once the daemon returns data.
+  openTabs: [],
+  activeTabId: null,
   // Seeded empty — the first endpoint has nothing unsaved, so the strip
   // should not show a dirty dot on it. Children push into this set as
   // drafts are created (e.g. URL bar edits, inline title rename).
@@ -654,6 +773,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   theme: initialTheme,
   requestSettings: initialRequestSettings,
+
+  // MCP daemon state — populated lazily by `startMcpPolling()`. The
+  // initial `null` lets consumers render a "loading" affordance until
+  // the first `refreshMcpStatus()` round-trip completes.
+  mcpStatus: null,
+  _mcpTimer: null,
+  restartDialogSeen: null,
 
   responseHistory: {},
   responseExamples: {},
@@ -725,7 +851,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeTab: (tabId) =>
     set((s) => {
       const idx = s.openTabs.findIndex((t) => t.id === tabId);
-      if (idx < 0) return s;
+      if (idx < 0) return {};
       const nextTabs = s.openTabs.filter((t) => t.id !== tabId);
       let nextActive = s.activeTabId;
       if (s.activeTabId === tabId) {
@@ -757,7 +883,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { activeTabId: null };
       }
       // Reject unknown ids — don't let the UI land on a dangling tab.
-      if (!s.openTabs.some((t) => t.id === tabId)) return s;
+      if (!s.openTabs.some((t) => t.id === tabId)) return {};
       return { activeTabId: tabId };
     }),
   markTabDirty: (tabId, dirty) =>
@@ -773,7 +899,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         next.delete(tabId);
         return { dirtyTabIds: next };
       }
-      return s;
+      return {};
     }),
   setEndpointDraft: (endpointId, draft) =>
     set((s) => {
@@ -789,14 +915,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         const hasAny = merged.url !== undefined || merged.method !== undefined;
         next = hasAny ? merged : undefined;
       }
-      // No-op when the new draft matches the existing one.
-      if (next === undefined && !(endpointId in s.endpointDrafts)) return s;
+      // No-op when the new draft matches the existing one. Returning
+      // `{}` (instead of the raw `s` reference) keeps Zustand's shallow
+      // equality stable — returning `s` is fine semantically but trips
+      // the strict-mode ref-equality checks that some consumers rely on.
+      if (next === undefined && !(endpointId in s.endpointDrafts)) return {};
       if (
         next !== undefined &&
         s.endpointDrafts[endpointId]?.url === next.url &&
         s.endpointDrafts[endpointId]?.method === next.method
       ) {
-        return s;
+        return {};
       }
       // Mirror into dirtyTabIds so the tab strip + "Close Saved" see it.
       const nextDirty = new Set(s.dirtyTabIds);
@@ -810,7 +939,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   clearEndpointDraft: (endpointId) =>
     set((s) => {
-      if (!(endpointId in s.endpointDrafts)) return s;
+      if (!(endpointId in s.endpointDrafts)) return {};
       const nextDrafts: Record<string, EndpointDraft | undefined> = { ...s.endpointDrafts };
       delete nextDrafts[endpointId];
       const nextDirty = new Set(s.dirtyTabIds);
@@ -826,7 +955,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (t.kind === 'collection') return s.collections.some((c) => c.id === t.id);
         return s.endpoints.some((e) => e.id === t.id);
       });
-      if (valid.length === s.openTabs.length) return s;
+      if (valid.length === s.openTabs.length) return {};
       let nextActive = s.activeTabId;
       if (nextActive !== null && !valid.some((t) => t.id === nextActive)) {
         nextActive = valid[valid.length - 1]?.id ?? null;
@@ -902,7 +1031,7 @@ export const useAppStore = create<AppState>((set, get) => ({
    * subset; the caller is responsible for closing the clean ones
    * via the existing closeTab primitive.
    */
-  _partitionDirty: (targetIds: string[]) => {
+  partitionDirty: (targetIds: string[]) => {
     const state = get();
     const dirtySet = state.dirtyTabIds;
     return targetIds.filter((id) => dirtySet.has(id));
@@ -926,7 +1055,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       .filter((t) => t.id !== state.activeTabId)
       .map((t) => t.id);
     if (targetIds.length === 0) return;
-    const dirty = get()._partitionDirty(targetIds);
+    const dirty = get().partitionDirty(targetIds);
     // Close the clean ones right away; queue the dirty for the dialog.
     for (const id of targetIds) {
       if (!dirty.includes(id)) get().closeTab(id);
@@ -940,7 +1069,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     const targetIds = state.openTabs.map((t) => t.id);
     if (targetIds.length === 0) return;
-    const dirty = get()._partitionDirty(targetIds);
+    const dirty = get().partitionDirty(targetIds);
     for (const id of targetIds) {
       if (!dirty.includes(id)) get().closeTab(id);
     }
@@ -1027,35 +1156,111 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setActiveSettingsSection: (section) => set({ activeSettingsSection: section }),
 
-  // ---------- project CRUD ----------
+  // ---------- bootstrap (one-shot, called from TopBar mount) ----------
 
-  addProject: (name, opts) => {
-    const id = uid();
-    set((s) => ({
-      projects: [
-        ...s.projects,
-        {
-          id,
-          name,
-          description: opts?.description,
-          baseUrl: opts?.baseUrl,
-          baseUrlDefinitions: [],
-          defaultBaseUrlDefinitionId: null,
-          color: opts?.color ?? '#60a5fa',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
-      ],
-    }));
-    return id;
+  bootstrap: async () => {
+    if (get().loaded) return;
+    // Fetch all top-level slices in parallel. List commands take no
+    // filter args in this revision (Worker C's `commands.rs`); the
+    // inner `catch`es degrade gracefully when the daemon isn't
+    // reachable yet (e.g. dev without `tauri dev`) so the UI doesn't
+    // crash — `loaded` simply stays false and the user sees the empty
+    // state until the daemon comes online.
+    const [projects, modules, collections, endpoints, environments] = await Promise.all([
+      invoke<Project[]>(COMMANDS.projectsList).catch((e) => {
+        console.error('[store] projects_list failed', e);
+        return [] as Project[];
+      }),
+      invoke<Module[]>(COMMANDS.modulesList).catch((e) => {
+        console.error('[store] modules_list failed', e);
+        return [] as Module[];
+      }),
+      invoke<Collection[]>(COMMANDS.collectionsList).catch((e) => {
+        console.error('[store] collections_list failed', e);
+        return [] as Collection[];
+      }),
+      invoke<Endpoint[]>(COMMANDS.endpointsList, {}).catch((e) => {
+        console.error('[store] endpoints_list failed', e);
+        return [] as Endpoint[];
+      }),
+      invoke<Environment[]>(COMMANDS.environmentsList).catch((e) => {
+        console.error('[store] environments_list failed', e);
+        return [] as Environment[];
+      }),
+    ]);
+
+    // Pick a sensible default selection now that the data is in.
+    const firstProject = projects[0];
+    const firstProjectEnv =
+      firstProject
+        ? environments.find((e) => e.projectId === firstProject.id && e.isActive) ??
+          environments.find((e) => e.projectId === firstProject.id)
+        : undefined;
+    const firstEndpoint = endpoints[0];
+
+    set({
+      projects,
+      modules,
+      collections,
+      endpoints,
+      environments,
+      loaded: true,
+      activeProjectId: firstProject?.id ?? '',
+      activeEnvironmentId: firstProjectEnv?.id ?? '',
+      activeEndpointId: firstEndpoint?.id ?? null,
+      // Open the first endpoint by default, mirroring the old mock seed.
+      openTabs: firstEndpoint ? [{ id: firstEndpoint.id, kind: 'endpoint' as const }] : [],
+      activeTabId: firstEndpoint?.id ?? null,
+    });
   },
-  updateProject: (id, patch) =>
+
+  // ---------- project CRUD (async — Tauri commands) ----------
+
+  addProject: async (name, opts) => {
+    try {
+      const project = await invoke<Project>(COMMANDS.projectsCreate, {
+        name,
+        opts: opts ?? null,
+      });
+      set((s) => ({ projects: [...s.projects, project] }));
+      return project.id;
+    } catch (e) {
+      console.error('[store] projects_create failed', e);
+      return null;
+    }
+  },
+  updateProject: async (id, patch) => {
+    // Optimistic local update + background invoke; rollback on failure.
+    const prev = get().projects.find((p) => p.id === id);
+    if (!prev) return;
+    const optimistic: Project = { ...prev, ...patch, updatedAt: Date.now() };
     set((s) => ({
-      projects: s.projects.map((p) =>
-        p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p,
-      ),
-    })),
-  deleteProject: (id) =>
+      projects: s.projects.map((p) => (p.id === id ? optimistic : p)),
+    }));
+    try {
+      await invoke<Project>(COMMANDS.projectsUpdate, { id, patch });
+    } catch (e) {
+      console.error('[store] projects_update failed', e);
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? prev : p)),
+      }));
+    }
+  },
+  deleteProject: async (id) => {
+    // Snapshot for rollback.
+    const snapshot = {
+      projects: get().projects,
+      modules: get().modules,
+      collections: get().collections,
+      endpoints: get().endpoints,
+      environments: get().environments,
+      responseHistory: get().responseHistory,
+      responseExamples: get().responseExamples,
+      openTabs: get().openTabs,
+      activeTabId: get().activeTabId,
+      activeProjectId: get().activeProjectId,
+      activeEndpointId: get().activeEndpointId,
+    };
     set((s) => {
       const moduleIds = s.modules.filter((m) => m.projectId === id).map((m) => m.id);
       const collectionIds = s.collections
@@ -1092,37 +1297,58 @@ export const useAppStore = create<AppState>((set, get) => ({
         openTabs: tabs.tabs,
         activeTabId: tabs.activeId,
       };
-    }),
-
-  // ---------- module CRUD ----------
-
-  addModule: (projectId, name, opts) => {
-    const id = uid();
-    set((s) => {
-      const maxOrder = s.modules
-        .filter((m) => m.projectId === projectId)
-        .reduce((acc, m) => Math.max(acc, m.sortOrder), -1);
-      return {
-        modules: [
-          ...s.modules,
-          {
-            id,
-            projectId,
-            name,
-            description: opts?.description,
-            sortOrder: maxOrder + 1,
-            expanded: true,
-          },
-        ],
-      };
     });
-    return id;
+    try {
+      await invoke<void>(COMMANDS.projectsDelete, { id });
+    } catch (e) {
+      console.error('[store] projects_delete failed', e);
+      set(snapshot);
+    }
   },
-  updateModule: (id, patch) =>
+
+  // ---------- module CRUD (async — Tauri commands) ----------
+
+  addModule: async (projectId, name, opts) => {
+    try {
+      const mod = await invoke<Module>(COMMANDS.modulesCreate, {
+        projectId,
+        name,
+        opts: opts ?? null,
+      });
+      set((s) => ({ modules: [...s.modules, mod] }));
+      return mod.id;
+    } catch (e) {
+      console.error('[store] modules_create failed', e);
+      return null;
+    }
+  },
+  updateModule: async (id, patch) => {
+    const prev = get().modules.find((m) => m.id === id);
+    if (!prev) return;
+    const optimistic: Module = { ...prev, ...patch };
     set((s) => ({
-      modules: s.modules.map((m) => (m.id === id ? { ...m, ...patch } : m)),
-    })),
-  deleteModule: (id) =>
+      modules: s.modules.map((m) => (m.id === id ? optimistic : m)),
+    }));
+    try {
+      await invoke<Module>(COMMANDS.modulesUpdate, { id, patch });
+    } catch (e) {
+      console.error('[store] modules_update failed', e);
+      set((s) => ({
+        modules: s.modules.map((m) => (m.id === id ? prev : m)),
+      }));
+    }
+  },
+  deleteModule: async (id) => {
+    const snapshot = {
+      modules: get().modules,
+      collections: get().collections,
+      endpoints: get().endpoints,
+      responseHistory: get().responseHistory,
+      responseExamples: get().responseExamples,
+      openTabs: get().openTabs,
+      activeTabId: get().activeTabId,
+      activeEndpointId: get().activeEndpointId,
+    };
     set((s) => {
       const collectionIds = s.collections.filter((c) => c.moduleId === id).map((c) => c.id);
       const droppedEndpointIds = s.endpoints
@@ -1153,44 +1379,57 @@ export const useAppStore = create<AppState>((set, get) => ({
         openTabs: tabs.tabs,
         activeTabId: tabs.activeId,
       };
-    }),
+    });
+    try {
+      await invoke<void>(COMMANDS.modulesDelete, { id });
+    } catch (e) {
+      console.error('[store] modules_delete failed', e);
+      set(snapshot);
+    }
+  },
 
   // ---------- collection CRUD ----------
 
-  addCollection: (moduleId, name, opts) => {
-    const id = uid();
-    set((s) => {
-      // Siblings share the same `moduleId` AND `parentCollectionId`.
-      // We sort by sortOrder within both, so the new row's `maxOrder`
-      // is the max among siblings in its destination.
-      const parentCollectionId = opts?.parentCollectionId ?? null;
-      const maxOrder = s.collections
-        .filter(
-          (c) => c.moduleId === moduleId && c.parentCollectionId === parentCollectionId,
-        )
-        .reduce((acc, c) => Math.max(acc, c.sortOrder), -1);
-      return {
-        collections: [
-          ...s.collections,
-          {
-            id,
-            moduleId,
-            parentCollectionId,
-            name,
-            description: opts?.description,
-            sortOrder: maxOrder + 1,
-            expanded: true,
-          },
-        ],
-      };
-    });
-    return id;
+  addCollection: async (moduleId, name, opts) => {
+    try {
+      const collection = await invoke<Collection>(COMMANDS.collectionsCreate, {
+        moduleId,
+        name,
+        opts: opts ?? null,
+      });
+      set((s) => ({ collections: [...s.collections, collection] }));
+      return collection.id;
+    } catch (e) {
+      console.error('[store] collections_create failed', e);
+      return null;
+    }
   },
-  updateCollection: (id, patch) =>
+  updateCollection: async (id, patch) => {
+    const prev = get().collections.find((c) => c.id === id);
+    if (!prev) return;
+    const optimistic: Collection = { ...prev, ...patch };
     set((s) => ({
-      collections: s.collections.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    })),
-  deleteCollection: (id) =>
+      collections: s.collections.map((c) => (c.id === id ? optimistic : c)),
+    }));
+    try {
+      await invoke<Collection>(COMMANDS.collectionsUpdate, { id, patch });
+    } catch (e) {
+      console.error('[store] collections_update failed', e);
+      set((s) => ({
+        collections: s.collections.map((c) => (c.id === id ? prev : c)),
+      }));
+    }
+  },
+  deleteCollection: async (id) => {
+    const snapshot = {
+      collections: get().collections,
+      endpoints: get().endpoints,
+      responseHistory: get().responseHistory,
+      responseExamples: get().responseExamples,
+      openTabs: get().openTabs,
+      activeTabId: get().activeTabId,
+      activeEndpointId: get().activeEndpointId,
+    };
     set((s) => {
       const droppedEndpointIds = s.endpoints
         .filter((e) => e.collectionId === id)
@@ -1219,47 +1458,56 @@ export const useAppStore = create<AppState>((set, get) => ({
         openTabs: tabs.tabs,
         activeTabId: tabs.activeId,
       };
-    }),
+    });
+    try {
+      await invoke<void>(COMMANDS.collectionsDelete, { id });
+    } catch (e) {
+      console.error('[store] collections_delete failed', e);
+      set(snapshot);
+    }
+  },
 
   // ---------- endpoint CRUD ----------
 
-  addEndpoint: (collectionId, name, opts) => {
-    const id = uid();
-    set((s) => {
-      const maxOrder = s.endpoints
-        .filter((e) => e.collectionId === collectionId)
-        .reduce((acc, e) => Math.max(acc, e.sortOrder), -1);
-      const now = Date.now();
-      return {
-        endpoints: [
-          ...s.endpoints,
-          {
-            id,
-            collectionId,
-            name,
-            method: opts?.method ?? 'GET',
-            url: opts?.url ?? '',
-            params: [],
-            headers: [],
-            body: { mode: 'none', content: '' },
-            auth: { type: 'none' },
-            tags: [],
-            sortOrder: maxOrder + 1,
-            createdAt: now,
-            updatedAt: now,
-          },
-        ],
-      };
-    });
-    return id;
+  addEndpoint: async (collectionId, name, opts) => {
+    try {
+      const endpoint = await invoke<Endpoint>(COMMANDS.endpointsCreate, {
+        collectionId,
+        name,
+        opts: opts ?? null,
+      });
+      set((s) => ({ endpoints: [...s.endpoints, endpoint] }));
+      return endpoint.id;
+    } catch (e) {
+      console.error('[store] endpoints_create failed', e);
+      return null;
+    }
   },
-  updateEndpoint: (id, patch) =>
+  updateEndpoint: async (id, patch) => {
+    const prev = get().endpoints.find((e) => e.id === id);
+    if (!prev) return;
+    const optimistic: Endpoint = { ...prev, ...patch, updatedAt: Date.now() };
     set((s) => ({
-      endpoints: s.endpoints.map((e) =>
-        e.id === id ? { ...e, ...patch, updatedAt: Date.now() } : e,
-      ),
-    })),
-  deleteEndpoint: (id) =>
+      endpoints: s.endpoints.map((e) => (e.id === id ? optimistic : e)),
+    }));
+    try {
+      await invoke<Endpoint>(COMMANDS.endpointsUpdate, { id, patch });
+    } catch (e) {
+      console.error('[store] endpoints_update failed', e);
+      set((s) => ({
+        endpoints: s.endpoints.map((e) => (e.id === id ? prev : e)),
+      }));
+    }
+  },
+  deleteEndpoint: async (id) => {
+    const snapshot = {
+      endpoints: get().endpoints,
+      responseHistory: get().responseHistory,
+      responseExamples: get().responseExamples,
+      openTabs: get().openTabs,
+      activeTabId: get().activeTabId,
+      activeEndpointId: get().activeEndpointId,
+    };
     set((s) => {
       const nextHistory = { ...s.responseHistory };
       const nextExamples = { ...s.responseExamples };
@@ -1278,7 +1526,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         openTabs: tabs.tabs,
         activeTabId: tabs.activeId,
       };
-    }),
+    });
+    try {
+      await invoke<void>(COMMANDS.endpointsDelete, { id });
+    } catch (e) {
+      console.error('[store] endpoints_delete failed', e);
+      set(snapshot);
+    }
+  },
+  /**
+   * Optimistic duplicate + background invoke. Returns the temp id
+   * synchronously so the caller (ProjectTree) can activate the new
+   * tab immediately. On invoke success the temp row is replaced by
+   * the persisted entity; on failure it's removed and we log.
+   */
   duplicateEndpoint: (id) => {
     const original = get().endpoints.find((e) => e.id === id);
     if (!original) return null;
@@ -1302,43 +1563,66 @@ export const useAppStore = create<AppState>((set, get) => ({
         ],
       };
     });
+    invoke<Endpoint>(COMMANDS.endpointsDuplicate, { id })
+      .then((persisted) => {
+        // Swap the temp row with the persisted one (server may assign
+        // a different id or normalize fields).
+        set((s) => ({
+          endpoints: s.endpoints.map((e) => (e.id === newId ? persisted : e)),
+        }));
+      })
+      .catch((e) => {
+        console.error('[store] endpoints_duplicate failed', e);
+        set((s) => ({
+          endpoints: s.endpoints.filter((e) => e.id !== newId),
+        }));
+      });
     return newId;
   },
 
   // ---------- move (drag-and-drop) ----------
 
-  moveModule: (moduleId, targetIndex) =>
+  moveModule: async (moduleId, targetIndex) => {
+    const prevModules = get().modules;
     set((s) => {
       const mod = s.modules.find((m) => m.id === moduleId);
-      if (!mod) return s;
+      if (!mod) return {};
       const inScope = s.modules
         .filter((m) => m.projectId === mod.projectId)
         .sort((a, b) => a.sortOrder - b.sortOrder);
       const fromIndex = inScope.findIndex((m) => m.id === moduleId);
-      if (fromIndex < 0) return s;
+      if (fromIndex < 0) return {};
       const reordered = reorderByIndex(inScope, fromIndex, targetIndex);
       const outOfScope = s.modules.filter((m) => m.projectId !== mod.projectId);
       return { modules: [...outOfScope, ...reordered] };
-    }),
+    });
+    try {
+      await invoke<void>(COMMANDS.modulesMove, { moduleId, targetIndex });
+    } catch (e) {
+      console.error('[store] modules_move failed', e);
+      set({ modules: prevModules });
+    }
+  },
 
-  moveCollections: (collectionIds, target) =>
+  moveCollections: async (collectionIds, target) => {
+    const prevCollections = get().collections;
     set((s) => {
-      if (collectionIds.length === 0) return s;
+      if (collectionIds.length === 0) return {};
       // Dedup + drop unknowns up-front so the rest of the logic can
       // assume every id is a real collection.
       const idSet = new Set(collectionIds);
       const sources = s.collections.filter((c) => idSet.has(c.id));
-      if (sources.length === 0) return s;
+      if (sources.length === 0) return {};
 
       // Resolve the target parent + its owning module.
       let targetModuleId: string;
       if (target.parentKind === 'module') {
         const targetMod = s.modules.find((m) => m.id === target.parentId);
-        if (!targetMod) return s;
+        if (!targetMod) return {};
         targetModuleId = targetMod.id;
       } else {
         const targetCol = s.collections.find((c) => c.id === target.parentId);
-        if (!targetCol) return s;
+        if (!targetCol) return {};
         targetModuleId = targetCol.moduleId;
       }
       const targetParentId =
@@ -1357,17 +1641,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Target is inside one of the moved subtrees — would create a
         // cycle. Silently no-op; the UI is expected to disable this
         // drop target, but we double-check here for safety.
-        return s;
+        return {};
       }
 
       // Project-boundary guard: every source must belong to the same
       // project as the target. Since `moduleId` is denormalized on
       // collections, we just compare source.moduleId's project.
       const targetProjectId = s.modules.find((m) => m.id === targetModuleId)?.projectId;
-      if (!targetProjectId) return s;
+      if (!targetProjectId) return {};
       for (const src of sources) {
         const srcMod = s.modules.find((m) => m.id === src.moduleId);
-        if (!srcMod || srcMod.projectId !== targetProjectId) return s;
+        if (!srcMod || srcMod.projectId !== targetProjectId) return {};
       }
 
       // Siblings inside the new parent, with sources removed (we
@@ -1426,27 +1710,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
 
       return { collections: next };
-    }),
+    });
+    try {
+      await invoke<void>(COMMANDS.collectionsMove, { collectionIds, target });
+    } catch (e) {
+      console.error('[store] collections_move failed', e);
+      set({ collections: prevCollections });
+    }
+  },
 
-  moveEndpoints: (endpointIds, target) =>
+  moveEndpoints: async (endpointIds, target) => {
+    const prevEndpoints = get().endpoints;
     set((s) => {
-      if (endpointIds.length === 0) return s;
+      if (endpointIds.length === 0) return {};
       const idSet = new Set(endpointIds);
       const targetCol = s.collections.find((c) => c.id === target.collectionId);
-      if (!targetCol) return s;
+      if (!targetCol) return {};
 
       // Project-boundary guard: every source endpoint must be in a
       // collection whose module is in the same project as the target.
       const targetProjectId = s.modules.find((m) => m.id === targetCol.moduleId)
         ?.projectId;
-      if (!targetProjectId) return s;
+      if (!targetProjectId) return {};
       for (const eid of endpointIds) {
         const src = s.endpoints.find((e) => e.id === eid);
-        if (!src) return s;
+        if (!src) return {};
         const srcCol = s.collections.find((c) => c.id === src.collectionId);
-        if (!srcCol) return s;
+        if (!srcCol) return {};
         const srcProjectId = s.modules.find((m) => m.id === srcCol.moduleId)?.projectId;
-        if (srcProjectId !== targetProjectId) return s;
+        if (srcProjectId !== targetProjectId) return {};
       }
 
       // The destination siblings: everything in targetCol except
@@ -1482,49 +1774,87 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
 
       return { endpoints: next };
-    }),
+    });
+    try {
+      await invoke<void>(COMMANDS.endpointsMove, { endpointIds, target });
+    } catch (e) {
+      console.error('[store] endpoints_move failed', e);
+      set({ endpoints: prevEndpoints });
+    }
+  },
 
-  // ---------- environment ----------
+  // ---------- environment (async — Tauri commands) ----------
 
-  setEnvironmentVar: (envId, key, value) =>
+  setEnvironmentVar: async (envId, key, value) => {
+    const prev = get().environments.find((e) => e.id === envId);
+    if (!prev) return;
+    const optimistic: Environment = {
+      ...prev,
+      variables: { ...prev.variables, [key]: value },
+    };
     set((s) => ({
-      environments: s.environments.map((env) =>
-        env.id === envId ? { ...env, variables: { ...env.variables, [key]: value } } : env,
-      ),
-    })),
-  addEnvironment: (projectId, name) =>
+      environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
+    }));
+    try {
+      await invoke<Environment>(COMMANDS.environmentsSetVar, { envId, key, value });
+    } catch (e) {
+      console.error('[store] environments_set_var failed', e);
+      set((s) => ({
+        environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+      }));
+    }
+  },
+  addEnvironment: async (projectId, name) => {
+    try {
+      const env = await invoke<Environment>(COMMANDS.environmentsCreate, { projectId, name });
+      set((s) => ({ environments: [...s.environments, env] }));
+      return env.id;
+    } catch (e) {
+      console.error('[store] environments_create failed', e);
+      return null;
+    }
+  },
+  updateEnvironment: async (envId, patch) => {
+    const prev = get().environments.find((e) => e.id === envId);
+    if (!prev) return;
+    const optimistic: Environment = { ...prev, ...patch };
     set((s) => ({
-      environments: [
-        ...s.environments,
-        {
-          id: uid(),
-          projectId,
-          name,
-          baseUrls: {},
-          variables: {},
-          isActive: false,
-        },
-      ],
-    })),
-  updateEnvironment: (envId, patch) =>
+      environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
+    }));
+    try {
+      await invoke<Environment>(COMMANDS.environmentsUpdate, { envId, patch });
+    } catch (e) {
+      console.error('[store] environments_update failed', e);
+      set((s) => ({
+        environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+      }));
+    }
+  },
+  setEnvironmentBaseUrl: async (envId, defId, url) => {
+    const prev = get().environments.find((e) => e.id === envId);
+    if (!prev) return;
+    const nextBaseUrls = { ...prev.baseUrls };
+    if (url) nextBaseUrls[defId] = url;
+    else delete nextBaseUrls[defId];
+    const optimistic: Environment = { ...prev, baseUrls: nextBaseUrls };
     set((s) => ({
-      environments: s.environments.map((env) =>
-        env.id === envId ? { ...env, ...patch } : env,
-      ),
-    })),
-  setEnvironmentBaseUrl: (envId, defId, url) =>
-    set((s) => ({
-      environments: s.environments.map((env) => {
-        if (env.id !== envId) return env;
-        // Treat an empty string as "remove this entry" — keeps the
-        // map tidy when the user clears the input.
-        const nextBaseUrls = { ...env.baseUrls };
-        if (url) nextBaseUrls[defId] = url;
-        else delete nextBaseUrls[defId];
-        return { ...env, baseUrls: nextBaseUrls };
-      }),
-    })),
-  deleteEnvironment: (envId) =>
+      environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
+    }));
+    try {
+      await invoke<Environment>(COMMANDS.environmentsSetBaseurl, { envId, defId, url });
+    } catch (e) {
+      console.error('[store] environments_set_baseurl failed', e);
+      set((s) => ({
+        environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+      }));
+    }
+  },
+  deleteEnvironment: async (envId) => {
+    const snapshot = {
+      environments: get().environments,
+      endpoints: get().endpoints,
+      activeEnvironmentId: get().activeEnvironmentId,
+    };
     set((s) => {
       // Clear `environmentId` on any endpoint that pointed at the deleted
       // env so it falls back to the project default. We don't have a
@@ -1540,11 +1870,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeEnvironmentId:
           s.activeEnvironmentId === envId ? '' : s.activeEnvironmentId,
       };
-    }),
-  setEnvironmentActive: (envId) =>
+    });
+    try {
+      await invoke<void>(COMMANDS.environmentsDelete, { envId });
+    } catch (e) {
+      console.error('[store] environments_delete failed', e);
+      set(snapshot);
+    }
+  },
+  setEnvironmentActive: async (envId) => {
+    const prev = get().environments;
     set((s) => {
       const target = s.environments.find((env) => env.id === envId);
-      if (!target) return s;
+      if (!target) return {};
       return {
         activeEnvironmentId: envId,
         environments: s.environments.map((env) => {
@@ -1552,9 +1890,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           return { ...env, isActive: env.id === envId };
         }),
       };
-    }),
+    });
+    try {
+      await invoke<Environment>(COMMANDS.environmentsSetActive, { envId });
+    } catch (e) {
+      console.error('[store] environments_set_active failed', e);
+      set({ environments: prev });
+    }
+  },
 
   // ---------- baseUrl definitions (project-scoped) ----------
+  /**
+   * Optimistic local add + background invoke. Returns the temp id
+   * synchronously because EnvironmentSection passes it directly into
+   * `setEnvironmentBaseUrl` to seed an empty row. On invoke success
+   * the temp row is replaced with the persisted entity (server may
+   * assign a different id); on failure the local row is removed.
+   */
   addBaseUrlDefinition: (projectId, name) => {
     const defId = uid();
     set((s) => ({
@@ -1576,21 +1928,61 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
       }),
     }));
+    invoke<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, { projectId, name: name.trim() || '未命名' })
+      .then((persisted) => {
+        set((s) => ({
+          projects: s.projects.map((p) => {
+            if (p.id !== projectId) return p;
+            return {
+              ...p,
+              baseUrlDefinitions: p.baseUrlDefinitions.map((d) =>
+                d.id === defId ? persisted : d,
+              ),
+            };
+          }),
+        }));
+      })
+      .catch((e) => {
+        console.error('[store] base_url_defs_create failed', e);
+        set((s) => ({
+          projects: s.projects.map((p) => {
+            if (p.id !== projectId) return p;
+            return {
+              ...p,
+              baseUrlDefinitions: p.baseUrlDefinitions.filter((d) => d.id !== defId),
+            };
+          }),
+        }));
+      });
     return defId;
   },
-  updateBaseUrlDefinition: (projectId, defId, patch) =>
+  updateBaseUrlDefinition: async (projectId, defId, patch) => {
+    const prevProject = get().projects.find((p) => p.id === projectId);
+    const prevDef = prevProject?.baseUrlDefinitions.find((d) => d.id === defId);
+    if (!prevProject || !prevDef) return;
+    const optimistic: Project = {
+      ...prevProject,
+      baseUrlDefinitions: prevProject.baseUrlDefinitions.map((d) =>
+        d.id === defId ? { ...d, ...patch } : d,
+      ),
+    };
     set((s) => ({
-      projects: s.projects.map((p) => {
-        if (p.id !== projectId) return p;
-        return {
-          ...p,
-          baseUrlDefinitions: p.baseUrlDefinitions.map((d) =>
-            d.id === defId ? { ...d, ...patch } : d,
-          ),
-        };
-      }),
-    })),
-  deleteBaseUrlDefinition: (projectId, defId) =>
+      projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),
+    }));
+    try {
+      await invoke<BaseUrlDefinition>(COMMANDS.baseUrlDefsUpdate, { projectId, defId, patch });
+    } catch (e) {
+      console.error('[store] base_url_defs_update failed', e);
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === projectId ? prevProject : p)),
+      }));
+    }
+  },
+  deleteBaseUrlDefinition: async (projectId, defId) => {
+    const snapshot = {
+      projects: get().projects,
+      endpoints: get().endpoints,
+    };
     set((s) => {
       // Cascade: any endpoint that pointed at this def falls back to
       // the project default. We don't bother removing the now-orphan
@@ -1616,15 +2008,30 @@ export const useAppStore = create<AppState>((set, get) => ({
           return e;
         }),
       };
-    }),
-  setDefaultBaseUrlDefinition: (projectId, defId) =>
+    });
+    try {
+      await invoke<void>(COMMANDS.baseUrlDefsDelete, { projectId, defId });
+    } catch (e) {
+      console.error('[store] base_url_defs_delete failed', e);
+      set(snapshot);
+    }
+  },
+  setDefaultBaseUrlDefinition: async (projectId, defId) => {
+    const prevProject = get().projects.find((p) => p.id === projectId);
+    if (!prevProject) return;
+    const optimistic: Project = { ...prevProject, defaultBaseUrlDefinitionId: defId };
     set((s) => ({
-      projects: s.projects.map((p) =>
-        p.id === projectId
-          ? { ...p, defaultBaseUrlDefinitionId: defId }
-          : p,
-      ),
-    })),
+      projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),
+    }));
+    try {
+      await invoke<Project>(COMMANDS.baseUrlDefsSetDefault, { projectId, defId });
+    } catch (e) {
+      console.error('[store] base_url_defs_set_default failed', e);
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === projectId ? prevProject : p)),
+      }));
+    }
+  },
 
   // ---------- response history & examples ----------
 
@@ -1653,9 +2060,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteResponseExample: (endpointId, exampleId) =>
     set((s) => {
       const prev = s.responseExamples[endpointId];
-      if (!prev) return s;
+      if (!prev) return {};
       const next = prev.filter((ex) => ex.id !== exampleId);
-      if (next.length === prev.length) return s;
+      if (next.length === prev.length) return {};
       return {
         responseExamples: { ...s.responseExamples, [endpointId]: next },
       };
@@ -1724,7 +2131,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     })),
   setNewItemParentCollection: (id) =>
     set((s) => ({ newItem: { ...s.newItem, parentCollectionId: id } })),
-  submitNewItem: () => {
+  submitNewItem: async () => {
     const state = get();
     const draft = state.newItem;
     if (!draft.type) return null;
@@ -1738,19 +2145,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     const name = draft.name.trim() || defaultName[draft.type];
 
     if (draft.type === 'project') {
-      const id = state.addProject(name, {
+      const id = await state.addProject(name, {
         description: draft.description,
         baseUrl: draft.baseUrl,
         color: draft.color,
       });
-      state.setActiveProject(id);
+      if (id) state.setActiveProject(id);
       state.setActiveEndpoint(null);
       set({ lastCreatedId: id });
       return id;
     }
 
     if (draft.type === 'module') {
-      const id = state.addModule(state.activeProjectId, name, {
+      const id = await state.addModule(state.activeProjectId, name, {
         description: draft.description,
       });
       set({ lastCreatedId: id });
@@ -1761,7 +2168,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!draft.parentModuleId) return null;
       const mod = state.modules.find((m) => m.id === draft.parentModuleId);
       if (mod && !mod.expanded) state.toggleModuleExpanded(mod.id);
-      const id = state.addCollection(draft.parentModuleId, name, {
+      const id = await state.addCollection(draft.parentModuleId, name, {
         description: draft.description,
       });
       set({ lastCreatedId: id });
@@ -1776,20 +2183,148 @@ export const useAppStore = create<AppState>((set, get) => ({
       const mod = state.modules.find((m) => m.id === col.moduleId);
       if (mod && !mod.expanded) state.toggleModuleExpanded(mod.id);
     }
-    const id = state.addEndpoint(draft.parentCollectionId, name);
-    state.setActiveEndpoint(id);
+    const id = await state.addEndpoint(draft.parentCollectionId, name);
+    if (id) state.setActiveEndpoint(id);
     set({ lastCreatedId: id });
     return id;
   },
   clearLastCreated: () => set({ lastCreatedId: null }),
+
+  // ---------- MCP daemon polling ----------
+  // Three collaborators participate in the singleton 3s tick:
+  //   - `useMcpStatus` calls start()/stop() in its mount/cleanup
+  //   - `McpStatusPanel` owns the `daemon://crashed` event listener,
+  //     which force-refreshes via `refreshMcpStatus` on a crash.
+  //   - `ConnectionSection` calls `refreshMcpStatus` after a manual
+  //     restart so the badge flips back to `running` immediately.
+  startMcpPolling: () => {
+    const state = get();
+    if (state._mcpTimer !== null) return; // idempotent — only one timer ever
+    const tick = () => {
+      void state.refreshMcpStatus();
+    };
+    const timer = window.setInterval(tick, MCP_REFRESH_INTERVAL_MS);
+    set({ _mcpTimer: timer });
+    // Kick off the first read immediately so the UI doesn't sit on
+    // `mcpStatus: null` for up to 3s after the panel mounts.
+    tick();
+
+    // Pause while the tab is hidden — there's nothing to display and
+    // the daemon doesn't change between wake-ups. The listener is
+    // owned by the store (module-scoped handler ref) so every call to
+    // start() doesn't add a new one and stop() can detach cleanly.
+    if (typeof document !== 'undefined' && _getVisibilityHandler() === null) {
+      const handler = () => {
+        if (document.visibilityState === 'hidden') {
+          // Pause: clear but keep the handler ref so start() can
+          // resume from the visibilitychange→'visible' branch.
+          const cur = get();
+          if (cur._mcpTimer !== null) {
+            window.clearInterval(cur._mcpTimer);
+            set({ _mcpTimer: null });
+          }
+        } else if (document.visibilityState === 'visible') {
+          // Resume — start() is idempotent so we can call it freely.
+          get().startMcpPolling();
+        }
+      };
+      document.addEventListener('visibilitychange', handler);
+      _setVisibilityHandler(handler);
+    }
+  },
+  stopMcpPolling: () => {
+    const state = get();
+    if (state._mcpTimer !== null) {
+      window.clearInterval(state._mcpTimer);
+    }
+    // Detach visibility listener — only the last unmounted consumer
+    // should tear it down, but it's idempotent so calling it here
+    // is safe.
+    if (typeof document !== 'undefined') {
+      const handler = _getVisibilityHandler();
+      if (handler) {
+        document.removeEventListener('visibilitychange', handler);
+        _setVisibilityHandler(null);
+      }
+    }
+    set({ _mcpTimer: null });
+  },
+  refreshMcpStatus: async () => {
+    try {
+      const dto = await invoke<McpUiState>(COMMANDS.mcpStatus);
+      set({ mcpStatus: dto });
+    } catch (e) {
+      // Daemon unreachable (cold start, dev mode without the daemon
+      // supervisor, or an IPC race) — log and keep whatever the last
+      // good state was. We deliberately do NOT clobber `mcpStatus`
+      // with a "stopped" snapshot, because that would mask a real
+      // daemon crash with a transient IPC failure.
+      console.warn('[store] mcp_status poll failed', e);
+    }
+  },
+  restartMcp: async () => {
+    // The renderer's role here is to flip the badge to "restarting"
+    // immediately, fire the command, then refresh so the new PID /
+    // status is visible. The UI button's `disabled` state is the
+    // caller's job (it tracks in-flight via local state because the
+    // round-trip can be 100ms–2s and we want to disable the moment
+    // the user clicks).
+    const prev = get().mcpStatus;
+    set({
+      mcpStatus: prev
+        ? { ...prev, status: 'restarting' }
+        : {
+            status: 'restarting',
+            pid: null,
+            port: null,
+            uptimeMs: 0,
+            requestsHandled: 0,
+            currentConnections: 0,
+            registeredTools: [],
+          },
+    });
+    try {
+      await invoke<void>(COMMANDS.mcpDaemonRestart);
+      await get().refreshMcpStatus();
+    } catch (e) {
+      console.error('[store] mcp_daemon_restart failed', e);
+      // Surface the failure on the badge — the dialog reads lastError.
+      const cur = get().mcpStatus;
+      const lastError = e instanceof Error ? e.message : String(e);
+      set({
+        mcpStatus: cur
+          ? { ...cur, status: 'crashed', lastError }
+          : {
+              status: 'crashed',
+              pid: null,
+              port: null,
+              uptimeMs: 0,
+              requestsHandled: 0,
+              currentConnections: 0,
+              registeredTools: [],
+              lastError,
+            },
+      });
+      throw e;
+    }
+  },
+  markRestartDialogSeen: (status) => {
+    set({ restartDialogSeen: status });
+  },
 }));
 
 // ---------- selectors ----------
 // IMPORTANT: every selector below returns a raw state reference (or a single
 // `.find()` result). Do not add selectors that allocate new arrays/objects —
 // that will trigger infinite re-renders under Zustand v5.
+
+/**
+ * Currently active project, or `undefined` if `bootstrap()` hasn't run yet
+ * (e.g. the very first render before the daemon data arrives). Callers
+ * must tolerate `undefined` and render a loading state.
+ */
 export const useActiveProject = () =>
-  useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId)!);
+  useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
 
 /**
  * The currently active workspace tab (raw reference), or `null` when no

@@ -1,3 +1,16 @@
+/**
+ * NOTE — fixture source only.
+ *
+ * As of the v0.1 MCP rollout, the global app store no longer reads these
+ * arrays directly. `app-store.bootstrap()` calls `projects_list` /
+ * `modules_list` / `collections_list` / `endpoints_list` /
+ * `environments_list` Tauri commands and mirrors the SQLite response into
+ * Zustand.
+ *
+ * The named exports below are kept as the seed for the first-boot SQLite
+ * migration and as fixtures for unit tests. They MUST NOT be imported by
+ * production code paths that expect live data.
+ */
 import type {
   Project,
   Module,

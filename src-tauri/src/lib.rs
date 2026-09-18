@@ -1,6 +1,6 @@
 //! Tauri 2 backend for Simple Post.
 //!
-//! Responsibilities (this slice):
+//! Responsibilities:
 //!   - Expose the `http_request` command so the React app can issue
 //!     real network calls through `reqwest` instead of the browser's
 //!     `fetch`. The webview doesn't enforce CORS when the call exits
@@ -10,104 +10,157 @@
 //!   - Match the contract of `src/lib/http.ts::sendRequest` so the
 //!     frontend can swap one transport for the other without changing
 //!     call sites.
-//!
-//! Future slices (not in this file yet): SQLite storage via
-//! `tauri-plugin-sql`, MCP server subprocess, native dialogs.
+//!   - Boot the embedded MCP HTTP daemon as a child process
+//!     (`daemon_supervisor::McpDaemonHandle`), so the React UI can
+//!     surface live daemon status via the `mcp_status` command.
+//!   - Dispatch the `mcp` CLI subcommand (used when the binary is
+//!     launched directly as a daemon) through `run_mcp`, and route the
+//!     `mcp-proxy` subcommand to a hard refusal so users get a clean
+//!     error pointing them at the dedicated proxy binary.
 
-use serde::Serialize;
-use std::time::{Duration, Instant};
+use tauri::Manager;
 
-/// Successful HTTP response, mirrors `ApiResponse` on the TS side.
-#[derive(Debug, Serialize)]
-pub struct HttpResponse {
-    pub status: u16,
-    pub status_text: String,
-    pub duration_ms: u128,
-    pub size_bytes: u64,
-    /// Flattened headers as `[name, value]` pairs (matches the
-    /// `headersToObject` shape on the JS side).
-    pub headers: Vec<[String; 2]>,
-    pub body: String,
-    pub content_type: String,
-    pub method: String,
-    pub url: String,
-    /// True when the response body was clamped to `max_bytes` server-side.
-    pub truncated: bool,
-}
+pub mod commands;
+pub mod daemon_supervisor;
+pub mod mcp_metrics;
+pub mod port_registry;
 
-/// Transport-level failure. Distinct from `HttpResponse.status == 0`,
-/// which the frontend uses for HTTP-level non-2xx. This is "the request
-/// never reached the application layer".
-#[derive(Debug, Serialize)]
-pub struct HttpError {
-    /// `timeout` | `network` (DNS / connect / TLS / reset / aborted)
-    pub kind: String,
-    pub message: String,
-}
+pub mod db;
+pub mod domain;
+pub mod error;
+pub mod permissions;
 
-/// Discriminated union — easier to consume from TS than a bare enum
-/// because the field shape is stable regardless of variant.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HttpResult {
-    pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub response: Option<HttpResponse>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<HttpError>,
-}
+pub mod http_executor;
+pub mod response_parse;
+pub mod variable_fill;
 
-impl HttpResult {
-    fn ok(r: HttpResponse) -> Self {
-        Self { ok: true, response: Some(r), error: None }
-    }
-    fn err(kind: &str, msg: impl Into<String>) -> Self {
-        Self {
-            ok: false,
-            response: None,
-            error: Some(HttpError { kind: kind.into(), message: msg.into() }),
+pub mod daemon_http;
+pub mod mcp;
+
+/// CLI subcommand `mcp` entry. Owns data-dir resolution, DB init, axum serve,
+/// port-record write, and SIGINT/SIGTERM shutdown.
+pub fn run_mcp(transport: String, port: u16, bind: String) {
+    init_tracing();
+
+    // Resolve data dir *the same way* `port_registry` does so the SQLite
+    // file the daemon reads/writes is alongside the `mcp.port` file
+    // the proxy discovers. Both honor `SIMPLE_POST_DATA_DIR` together.
+    let data_dir = match crate::port_registry::data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[mcp] cannot resolve data dir: {e:?}");
+            std::process::exit(1);
         }
-    }
+    };
+
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[mcp] failed to create tokio runtime: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let bind_for_log = bind.clone();
+    runtime.block_on(async move {
+        // Open the SQLite pool first so the daemon's tools can read/write
+        // immediately on first request — no first-call warm-up cost.
+        let pool = match crate::db::init(&data_dir) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[mcp] db::init({}) failed: {e:?}", data_dir.display());
+                std::process::exit(1);
+            }
+        };
+
+        // Honor `--stdio` for parity with the `--http` documented form, but
+        // route everything through the same axum router so we only have one
+        // set of handlers to maintain. (The proxy binary is the recommended
+        // stdio path; this fallback is mostly here so the CLI argument
+        // exists and can be added back if AI clients ever support direct
+        // HTTP MCP connections.)
+        let _ = transport; // accepted for forward-compat; not yet branched on.
+
+        let actual_port = match crate::mcp::serve_http(pool, port, &bind).await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[mcp] serve_http({bind_for_log}:{port}) failed: {e:?}");
+                std::process::exit(1);
+            }
+        };
+        eprintln!(
+            "[mcp] daemon listening on http://{bind_for_log}:{actual_port}/mcp \
+             (data dir: {})",
+            data_dir.display()
+        );
+
+        // Publish the live port so `simple-post-mcp-proxy` and any
+        // other AI client can discover us. The CLI mode is the
+        // canonical way to run the daemon for tests and headless
+        // automation; without this write the proxy would refuse to
+        // start ("daemon not running").
+        let port_record = crate::port_registry::PortRecord {
+            pid: std::process::id(),
+            port: actual_port,
+            bind: bind_for_log.clone(),
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            data_dir: data_dir.display().to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        if let Err(e) = crate::port_registry::write(&port_record) {
+            let path_label = crate::port_registry::port_file_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "<unresolved>".to_string());
+            eprintln!("[mcp] WARN: failed to write {path_label}: {e:?}");
+        }
+
+        // Block until SIGINT/SIGTERM. `tokio::signal` returns the
+        // Ctrl-C/SIGINT future and a separate SIGTERM handler for
+        // non-Windows; on Windows only Ctrl-C is meaningfully delivered.
+        let shutdown = async {
+            let ctrl_c = tokio::signal::ctrl_c();
+            #[cfg(unix)]
+            {
+                let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("install SIGTERM handler");
+                tokio::select! {
+                    _ = ctrl_c => {},
+                    _ = sigterm.recv() => {},
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = ctrl_c.await;
+            }
+        };
+        shutdown.await;
+        eprintln!("[mcp] shutdown signal received, exiting");
+        // Best-effort: drop the port file so the next `simple-post.exe mcp`
+        // (or the GUI supervisor) doesn't see a stale record.
+        let _ = crate::port_registry::release();
+    });
 }
 
-/// Parse the textual HTTP method into a `reqwest::Method`, defaulting
-/// to GET on unknown verbs (the frontend already gates on a known list).
-fn parse_method(method: &str) -> reqwest::Method {
-    match method.to_ascii_uppercase().as_str() {
-        "GET" => reqwest::Method::GET,
-        "POST" => reqwest::Method::POST,
-        "PUT" => reqwest::Method::PUT,
-        "DELETE" => reqwest::Method::DELETE,
-        "PATCH" => reqwest::Method::PATCH,
-        "HEAD" => reqwest::Method::HEAD,
-        "OPTIONS" => reqwest::Method::OPTIONS,
-        other => reqwest::Method::from_bytes(other.as_bytes())
-            .unwrap_or(reqwest::Method::GET),
-    }
+/// CLI subcommand `mcp-proxy` entry. The proxy is a separate binary
+/// (`simple-post-mcp-proxy[.exe]`); running it via the main binary is
+/// almost certainly a user mistake (wrong PATH, wrong shortcut), so
+/// point them at the right binary and exit non-zero so a CI script
+/// would catch it.
+pub fn run_mcp_proxy() {
+    eprintln!(
+        "mcp-proxy is a separate binary — please run `simple-post-mcp-proxy` instead."
+    );
+    std::process::exit(2);
 }
 
-/// Cap a body string to at most `max_bytes` bytes (UTF-8 safe char
-/// boundary). Adds a marker when truncated. Matches the truncation
-/// contract from the original fetch path.
-fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
-    if max_bytes == 0 {
-        return (body, false);
-    }
-    if body.len() as u64 <= max_bytes {
-        return (body, false);
-    }
-    let cap = (max_bytes as usize).min(body.len());
-    // Walk back to the nearest char boundary so we don't slice a
-    // multi-byte rune in half.
-    let mut cut = cap;
-    while cut > 0 && !body.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    let mut out = String::with_capacity(cut + 96);
-    out.push_str(&body[..cut]);
-    out.push_str(&format!("\n\n[truncated at {} bytes by Tauri HTTP layer]", max_bytes));
-    (out, true)
-}
+// ----- HTTP request command ------------------------------------------------
+//
+// The actual I/O lives in `crate::http_executor::execute`. The Tauri
+// command body is a thin pass-through so the `generate_handler!` macro
+// can still find the `http_request` symbol in `lib.rs`.
 
 /// Issue a real HTTP request through `reqwest`, bypassing browser CORS.
 ///
@@ -132,90 +185,137 @@ async fn http_request(
     timeout_ms: u64,
     follow_redirects: bool,
     max_response_size_kb: u64,
-) -> HttpResult {
-    let start = Instant::now();
-
-    // Per-call Client to keep the API request-scoped; future slices
-    // can hoist this into tauri::State if we want connection pooling
-    // across calls.
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_millis(timeout_ms))
-        .redirect(if follow_redirects {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => return HttpResult::err("network", format!("client build: {e}")),
-    };
-
-    let mut req = client.request(parse_method(&method), &url);
-    for (k, v) in headers {
-        if !k.is_empty() {
-            req = req.header(&k, &v);
-        }
-    }
-    if let Some(b) = body {
-        req = req.body(b);
-    }
-
-    let res = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            let kind = if e.is_timeout() { "timeout" } else { "network" };
-            return HttpResult::err(kind, e.to_string());
-        }
-    };
-
-    let status = res.status();
-    let status_text = status.canonical_reason().unwrap_or("").to_string();
-    let content_type = res
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-
-    let header_pairs: Vec<[String; 2]> = res
-        .headers()
-        .iter()
-        .map(|(k, v)| {
-            [k.to_string(), v.to_str().unwrap_or("").to_string()]
-        })
-        .collect();
-
-    let body_text = match res.text().await {
-        Ok(t) => t,
-        Err(e) => {
-            let kind = if e.is_timeout() { "timeout" } else { "network" };
-            return HttpResult::err(kind, format!("read body: {e}"));
-        }
-    };
-
-    let elapsed = start.elapsed().as_millis();
-    let max_bytes = max_response_size_kb.saturating_mul(1024);
-    let (final_body, truncated) = truncate_body(body_text, max_bytes);
-
-    HttpResult::ok(HttpResponse {
-        status: status.as_u16(),
-        status_text,
-        duration_ms: elapsed,
-        size_bytes: final_body.len() as u64,
-        headers: header_pairs,
-        body: final_body,
-        content_type,
+) -> crate::http_executor::HttpResult {
+    let input = crate::http_executor::HttpRequestInput {
         method,
         url,
-        truncated,
-    })
+        headers,
+        body,
+        timeout_ms,
+        follow_redirects,
+        max_response_size_kb,
+    };
+    crate::http_executor::execute(&input).await
 }
 
+// ----- Tauri entry point ----------------------------------------------------
+
+/// Tauri GUI entry. Wires:
+///   * `McpDaemonHandle` into managed state so the `mcp_status` command
+///     reads it via `State<McpDaemonHandle>`.
+///   * All DB / permissions commands into the invoke handler.
+///   * A `.setup()` block that asynchronously spawns the daemon child
+///     the moment the GUI finishes its own boot.
+///
+/// The daemon supervisor is launched in `tokio::spawn` rather than
+/// awaited inline so the GUI window can render immediately and the
+/// supervisor's 5-second healthz wait doesn't sit on the main run-loop.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    init_tracing();
+
+    use crate::daemon_supervisor::McpDaemonHandle;
+
+    // Open the GUI's own DB pool before launching the webview so every
+    // `#[tauri::command]` that takes `State<DbPool>` resolves on the
+    // very first invoke. Same data-dir convention as the daemon —
+    // SQLite WAL keeps both processes consistent on the shared file.
+    let data_dir = match crate::port_registry::data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("[gui] cannot resolve data dir: {e:?}");
+            std::process::exit(1);
+        }
+    };
+    let pool = match crate::db::init(&data_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[gui] db::init({}) failed: {e:?}", data_dir.display());
+            std::process::exit(1);
+        }
+    };
+
+    let daemon_handle = McpDaemonHandle::new();
+
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![http_request])
+        .manage(pool)
+        .manage(daemon_handle)
+        .invoke_handler(tauri::generate_handler![
+            // Local HTTP request command (kept here from pre-MCP days).
+            http_request,
+            crate::commands::projects_list,
+            crate::commands::projects_get,
+            crate::commands::projects_create,
+            crate::commands::projects_update,
+            crate::commands::projects_delete,
+            crate::commands::modules_list,
+            crate::commands::modules_create,
+            crate::commands::modules_update,
+            crate::commands::modules_delete,
+            crate::commands::modules_move,
+            crate::commands::collections_list,
+            crate::commands::collections_create,
+            crate::commands::collections_update,
+            crate::commands::collections_delete,
+            crate::commands::collections_move,
+            crate::commands::endpoints_list,
+            crate::commands::endpoints_get,
+            crate::commands::endpoints_search,
+            crate::commands::endpoints_create,
+            crate::commands::endpoints_update,
+            crate::commands::endpoints_delete,
+            crate::commands::endpoints_duplicate,
+            crate::commands::endpoints_move,
+            crate::commands::environments_list,
+            crate::commands::environments_create,
+            crate::commands::environments_update,
+            crate::commands::environments_delete,
+            crate::commands::environments_set_var,
+            crate::commands::environments_set_baseurl,
+            crate::commands::environments_set_active,
+            crate::commands::base_url_defs_list,
+            crate::commands::base_url_defs_create,
+            crate::commands::base_url_defs_update,
+            crate::commands::base_url_defs_delete,
+            crate::commands::base_url_defs_set_default,
+            crate::commands::request_settings_get,
+            crate::commands::request_settings_update,
+            crate::commands::permissions_get,
+            crate::commands::permissions_set,
+            crate::commands::mcp_status,
+            crate::commands::mcp_daemon_proxy_path,
+        ])
+        .setup(|app| {
+            // `app.state::<McpDaemonHandle>()` borrows the managed
+            // value; we clone the (cheap, Arc-backed) handle and move
+            // it into the spawn.
+            let handle = app.state::<McpDaemonHandle>().inner().clone();
+            let app_handle = app.handle().clone();
+            tokio::spawn(async move {
+                if let Err(e) = handle.ensure_started(&app_handle).await {
+                    // Don't panic the GUI on daemon-spawn failure — the
+                    // supervisor already flipped its status to Crashed
+                    // and the renderer will show the message via
+                    // `mcp_status` (or the toast from
+                    // `daemon://crashed`).
+                    eprintln!("[daemon] ensure_started failed: {e:?}");
+                }
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Initialize the global `tracing` subscriber so the `tracing::info!` /
+/// `tracing::warn!` / `tracing::error!` macros across the crate actually
+/// emit output.
+///
+/// Honors `RUST_LOG` (via `EnvFilter`); defaults to `info` if unset.
+/// Uses `try_init` so a duplicate init (tests + GUI + CLI) silently no-ops
+/// instead of panicking.
+pub fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }

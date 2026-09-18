@@ -7,9 +7,13 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:tests": "node scripts/run-mcp-tests.cjs",
     "preview": "vite preview",
     "lint": "eslint .",
     "tauri": "tauri",
+    "mcp:repl": "node scripts/mcp-repl.mjs",
+    "test:mcp": "node scripts/mcp-integration.test.mjs",
+    "test:proxy": "node scripts/proxy-integration.test.mjs",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
