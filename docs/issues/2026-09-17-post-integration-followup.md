@@ -1,0 +1,384 @@
+# Post-integration audit follow-up (v0.1 MCP rollout)
+
+Generated 2026-09-17 after shipping commit `c1efc56 chore: post-integration audit fixes for v0.1 MCP rollout`. This document is the backlog of follow-up work identified during the 3-pronged audit (Rust / TS / scripts-config) that was intentionally NOT patched in the bulk commit, either because it needed more design discussion, was separate-task scope, or was P2-era polish. Items are grouped by priority and tagged with effort; open P1 entries are still real defects worth picking up before the v0.1 release notes go public.
+
+## How to read this document
+
+- **Already-shipped section** is a forensic ledger so the next reviewer doesn't redo an audit pass that landed in `c1efc56`. Read it once, then skip on subsequent passes.
+- **Open P1** items are real user-visible or correctness defects. Each has a Symptom / Why / Fix / Verify block; the fix sketch is concrete enough to drop into a PR description.
+- **Open P2** items are correctness-clean.
+  They accumulate maintenance debt but won't break the v0.1 release if deferred.
+  Defer in this order: 5 → 10 → 11 → 12 → 9 → 7 → 6 → 8.
+- **Optional** items are nice-to-haves.
+  Pick them up only when a sprint has leftover capacity; each carries a self-contained sketch.
+- Effort tags map to rough half-days for a single engineer already familiar with the repo.
+  **S** = ≤2 h.
+  **M** = half-day to a day.
+  **L** = multi-day with planning.
+
+## Already shipped in `c1efc56` (don't re-open)
+
+Forensic ledger of the 17 fixes that landed in the bulk commit. Listed here so future readers don't redo the audit when scanning this doc for "what's left".
+
+### P0 (correctness — must-fix)
+
+- **(1) Register the missing `mcp_daemon_proxy_path` Tauri command.**
+  Added in `src-tauri/src/commands.rs`, registered in `src-tauri/src/lib.rs`.
+- **(2) Replace `registered_tools: Vec::new()` stub.**
+  In `src-tauri/src/daemon_supervisor.rs` swap the empty-Vec stub for the live `crate::mcp::registered_tool_names()` call.
+- **(3) Remove the broken `EndpointProjectId` trait.**
+  In `src-tauri/src/mcp/project_ops.rs`. All 5 call sites now resolve `project_id` explicitly via the DB lookup chain (`collection → module → project`).
+- **(4) Drop 7 declared-but-unused crates.**
+  From `Cargo.toml`: tower, tower-http, hyper, rust-mcp-sdk, rust-mcp-schema, rust-mcp-macros, …. Refresh `Cargo.lock` (603 lines of lock churn).
+- **(5) Wire `tracing_subscriber::try_init()`.**
+  In `lib.rs` + `main.rs` so `tracing` macros actually emit logs.
+
+### P1 (defects / maintainability)
+
+- **(6) Strip ~47 stale prose comments.**
+  Across `lib.rs`, `commands.rs`, `daemon_supervisor.rs`, `mcp/mod.rs`, `db/schema.sql`, `bin/mcp_proxy.rs`, …
+- **(7) Centralize Tauri command names.**
+  In `src/lib/tauri-commands.ts` (single `COMMANDS` table; 11 untyped `invoke()` calls got generics; `TauriCommand` type alias exported).
+- **(8) Add `useMcpStatus()` hook.**
+  In `src/lib/use-mcp-status.ts`. Deduplicates the two competing `setInterval(refresh, 3000)` calls; adds `visibilitychange` pause; consumer-vote lifecycle so last-unmounted caller releases the timer.
+- **(9) Drop imperative `useImperativeHandle`.**
+  In `McpStatusPanel`, switch to store-driven selectors.
+- **(10) `app-store.ts` hygiene.**
+  Move `src/lib/mock-data.ts` → `src/lib/__fixtures__/mock-data.ts`. Rename `_partitionDirty` → `partitionDirty`. Replace `return s;` no-ops in store reducers with `return {};`.
+- **(11) IME composition guard on hotkeys.**
+  `Ctrl+K` / `Ctrl+Enter` / `Ctrl+S` — skip action while `e.isComposing`.
+
+### Config & scripts hygiene
+
+- **(12) `<button type="button">` audit.**
+  Fixed on 5 sites (a known React + form-default gotcha).
+- **(13) `mcp-integration.test.mjs` polling fallback.**
+  Replace `proc.once('exit', r)` with a polling fallback so SIGKILL doesn't produce an unsettled top-level await on Windows.
+- **(14) Dedup ~350 LOC.**
+  Hoist `HttpResult/HttpResponse/HttpError` + `truncate_body` + `parse_method(reqwest::Method)` into `src-tauri/src/http_executor.rs` as `pub(crate)`. Add canonical `parse_http_method()` in `domain.rs`. Reconcile `headers_to_tuples` / `flatten_string_map`.
+- **(15) README + .gitignore + scripts hygiene.**
+  README `npm run tsc` → `npm run build`. De-dupe `mcp:dev` and `mcp:repl` scripts in `package.json`. Add forward-looking `.gitignore` patterns (`.scratch/`, `scripts/.scratch/`, `.playwright-mcp/`).
+- **(16) Delete junk.**
+  `src-tauri/_worker_e_isolated_test/` (2.13 GB junk dir) and rogue debug files (`verify-drag.tmp.ts`, `run-jiti.tmp.cjs`).
+- **(17) Add `run-mcp-tests.cjs`.**
+  Gated manual MCP integration runner (`npm run build:tests`). Explicitly NOT wired into `npm run build` because of the Windows daemon-exit timing race — see P1.4 below for the follow-through plan.
+
+End of already-shipped section. Open items follow.
+
+## Open P1 — still real defects
+
+These are user-visible or correctness bugs that should land before we tag v0.1 in release notes.
+
+### P1.1 — `mcp_daemon_restart` Tauri command does not exist on the Rust side
+
+- **Symptom:**
+  `src/stores/app-store.ts:2287` invokes `COMMANDS.mcpDaemonRestart` (`'mcp_daemon_restart'`) when the user clicks "Restart" on the MCP status badge.
+  `src-tauri/src/commands.rs` has no `pub fn mcp_daemon_restart(...)` — only `mcp_status` (line 717) and `mcp_daemon_proxy_path` (line 737).
+  The COMMANDS table at `src/lib/tauri-commands.ts:77` references the command; the invoke dispatch happens.
+- **Why it's a defect:**
+  Tauri's `invoke_handler!` macro rejects unknown command names at boot.
+  Clicking restart → renderer error toast, daemon not restarted.
+  UI silently degrades to "permanent restart failed" state, with the badge freezing on `'crashed'` because the catch arm in `restartMcp()` (line 2289-2308) writes that status on any invoke error.
+  This is a regression introduced by the audit fix that registered `mcp_daemon_proxy_path` but missed the sibling `mcp_daemon_restart`.
+- **Minimal fix:**
+  Add `#[tauri::command] pub fn mcp_daemon_restart(state: State<McpDaemonHandle>) -> Result<(), AppError>` in `commands.rs`.
+  The supervisor already exposes `restart(&self)` at `src-tauri/src/daemon_supervisor.rs:349`.
+  The Tauri command is a 5-line wrapper that calls it.
+  Register it in `lib.rs` `invoke_handler` (currently around lines 245).
+  Verify `mcp_status` reflects the `Restarting → Running` transition by polling.
+- **Effort:** S
+- **Verify:**
+  `npm run tauri:dev`.
+  Open settings → click restart on the MCP badge → status badge goes `running → restarting → running` within ~3 s, with a new `pid` visible in the panel.
+  Restart returns Ok (no error toast in devtools).
+- **Why deferred in `c1efc56`:**
+  Fix (1) registered `mcp_daemon_proxy_path` and added the COMMANDS lookup, but did not sweep through `src/stores/app-store.ts` for sibling `invoke()` calls that pointed at commands which never existed on the Rust side. This is the canonical "sweep" residue that the audit was supposed to catch in one pass.
+
+### P1.2 — `McpStatusDto` (Rust) and `McpUiState` (TS) shape mismatch
+
+- **Symptom:**
+  Rust serialises `{ running, pid?, port?, uptimeMs, requestsHandled, registeredTools, lastError? }` (see `src-tauri/src/commands.rs:146-157`, `#[serde(rename_all = "camelCase")]`).
+  TS `McpUiState` (`src/lib/mcp-types.ts:39-48`) expects `{ status: 'stopped' | 'starting' | 'running' | 'restarting' | 'crashed' | 'unhealthy', …, currentConnections, registeredTools, lastError? }`.
+  Two of those TS-declared fields — `status` and `currentConnections` — are silently dropped on the renderer side because JSON-style deserialisation in the poll handler (`src/stores/app-store.ts:2240-2255`) keeps only declared keys.
+  The renderer writes `status: 'restarting'` from the optimistic `restartMcp()` action (`app-store.ts:2272-2285`), and `useMcpStatus`'s poll never overrides it because there's no Rust signal carrying the value.
+- **Why it's a defect:**
+  The crashed / restarting dialog trigger (`src/features/settings/sections/DaemonRestartDialog.tsx`) gates on `mcpStatus.status !== 'running'`.
+  So a normal-running daemon with stale `mcpStatus: { status: 'running', … }` from the last `restartMcp()` write is fine.
+  But a freshly-started daemon (cold start, manual `npm run tauri:dev`) that the store hasn't yet "lint-painted" will show the wrong badge until the user clicks restart.
+  `currentConnections` is metadata that the renderer pretends to display; it never gets a value, so the panel shows `–` forever.
+  Both are silent UX bugs that won't be caught by `tsc`.
+- **Minimal fix:**
+  Pick the cheapest direction — derive `status` on the renderer from `dto.running` + a new `lifecycle` flag the supervisor already maintains internally (`src-tauri/src/daemon_supervisor.rs:45-70`).
+  Drop the `restartMcp()` optimistic `set({ status: 'restarting' })` in favour of just `set({ mcpStatus: null })` so the next poll drives the badge.
+  For `currentConnections`, either wire it from `McpMetrics` (already counting in `crate::mcp_metrics`) OR delete the field from `McpUiState`.
+  The audit-fix predecessor chose "renderer derives" over "Rust publishes an enum" — going with that decision again keeps the diff small.
+- **Effort:** M
+- **Verify:**
+  Cold-start the app with the daemon pre-warm disabled (toggle the `ensure_started` call, or temporarily make it no-op).
+  Poll cycle should show `stopped → starting → running` and the `McpStatusPanel` reflects each step without manual clicks.
+  Manual restart still flips the badge via poll (not optimistic write).
+
+### P1.3 — `call_tool` JSON-RPC error-in-result convention is documented but the comment is light on "why"
+
+- **Symptom:**
+  `src-tauri/src/daemon_http.rs:184-208` returns tool-level failures as `{ content: […], is_error: true }` inside `result` rather than populating the JSON-RPC `error` field.
+  A doc comment exists at lines 173-183 explaining the LLM-recovery rationale.
+  But it doesn't cite the MCP spec section or the JSON-RPC 2.0 error-vs-result distinction, and doesn't name which LLM clients currently rely on the body being readable.
+- **Why it's a defect:**
+  Not a runtime bug — already shipping.
+  It is a documentation debt: when (not if) a future reviewer asks "why doesn't this go through `error`?", the existing comment answers qualitatively but not by reference.
+  We've already seen this question surface in the v0.1 audit, and the partial-citation is what got it flagged as P1 instead of closed-out.
+  Expand the doc comment rather than debate from scratch.
+- **Minimal fix:**
+  In `daemon_http.rs` `handle_tools_call` (lines 173-183), expand the existing rationale with three sentences:
+  - The exact JSON-RPC 2.0 spec sentence that distinguishes `error` (transport) from `result` (application) plus a permalink (jsonrpc.org spec, §6 Error object).
+  - The MCP `tools/call` section that requires the body be parseable by the model even on failure.
+  - A one-line note that real transport errors (parse failures, unknown methods) still go through the top-level `error` arm via `json_rpc_error`.
+  No code change.
+- **Effort:** S
+- **Verify:**
+  `cargo doc --no-deps --document-private-items` produces the expanded comment without warnings.
+  Future audit reviewer closes the item on first read.
+
+### P1.4 — Tracker integration tests have a Windows-specific shutdown race
+
+- **Symptom:**
+  `scripts/mcp-integration.test.mjs` (post-`c1efc56` lines 161-167 have a polling fallback) and `scripts/proxy-integration.test.mjs` rely on `proc.kill()` + a polling fallback to wait for the spawned daemon / proxy to exit on Windows.
+  On the dev box where the audit was run, SIGKILL sometimes fires before the `proc.once('exit')` listener attaches.
+  The interval poll catches it within ~50 ms most of the time.
+  But in CI under load the interval can race the `finally` cleanup of the scratch dir, and the test still hangs for 5-10 s before exiting non-zero.
+- **Why it's a defect:**
+  The wrapper `scripts/run-mcp-tests.cjs` is therefore NOT wired into `npm run build`.
+  CI today runs `npm run build` (tsc + vite) and ships the v0.1 release without a daemon-exit safety net.
+  The audit flagged this as "manual `npm run build:tests` only" and we are shipping it that way.
+  Acceptable for v0.1, not for v0.2 when we want regressions caught in PR CI.
+- **Minimal fix:**
+  Try the modern `child_process.spawn` `proc.waitForExit()` (Node 22+ stable; we're on v25.8.1 per the current toolchain).
+  If available, replace the polling block with a single `await proc.exitCode`-style awaited wait.
+  If `waitForExit()` isn't reliable on win32 in our specific case, add a hard timeout (`AbortSignal.timeout(5000)`) to the `await` and tear down via `tree-kill` PID.
+  Only after either of these lands can `run-mcp-tests.cjs` be hoisted into `npm run build`'s postbuild hook.
+- **Effort:** M
+  (the timing-sensitive part is what makes this P1 rather than P2).
+- **Verify:**
+  Run `npm run test:mcp` 10 times on a cold-start `cargo build`.
+  No intermittent exit-1 from the polling race.
+  `npm run build:tests` produces deterministic PASS within reasonable wall-clock on both Windows + Linux (if / when CI cross-runs).
+
+## Open P2 — clean-up debt
+
+These are correctness-clean (no live defects), maintainability or stylistic items.
+
+### P2.5 — `lint` script points at a non-installed `eslint`
+
+- **What:**
+  `package.json:12` declares `"lint": "eslint ."` but `devDependencies` (`package.json:40-52`) has no `eslint`, `@typescript-eslint/parser`, or `@typescript-eslint/eslint-plugin`.
+  Running `npm run lint` fails immediately with `eslint: command not found` (or worse, an opaque "spawn EINVAL" on Windows when the `.cmd` shim isn't found).
+- **Why it matters:**
+  Doesn't matter for v0.1 release — `lint` is a developer convenience script, not on the build path.
+  But it signals "we intended to lint but didn't follow through", which makes a future audit pass re-flag this.
+  The audit chose not to fix it because wiring ESLint properly is 30-60 minutes of dev-dep pinning + config writing, and we wanted `c1efc56` to stay surgical.
+- **Sketch of fix:**
+  Either (a) drop the script entry from `package.json` (smallest change, clears the audit finding) OR (b) wire a real `.eslintrc.cjs` with `@typescript-eslint` + the React + Tailwind plugins, add the deps, run `npm run lint`, fix what surfaces.
+  (a) is the right call for v0.1 — revisit (b) in the v0.2 cleanup pass when we can budget a sprint for it.
+- **Effort:** S to drop, M to wire a working config.
+
+### P2.6 — `variable_fill.rs` and `response_parse.rs` are still single files
+
+- **What:**
+  Audit flagged both files as "too big, multiple unrelated concerns".
+  The shipping commit (`c1efc56`) was scoped to correctness fixes only, not structural.
+  - `src-tauri/src/mcp/variable_fill.rs`: 1379 LOC audit / ~1280 today.
+  - `src-tauri/src/mcp/response_parse.rs`: 695 LOC audit / ~640 today.
+  Line counts above are the audit-time figures; current sizes are slightly lower because some companion-test blocks in `mcp/mod.rs` got refactored.
+  Structural concern is unchanged.
+- **Why it matters:**
+  Low risk; LOC pressure doesn't cause defects directly but does slow future audits.
+  The file already has 1300+ lines and any future additions will be reviewed in isolation.
+  Skip until P1 work clears.
+- **Sketch of fix:**
+  For each, split into three files: `resolve.rs` (public API + types, ~150 LOC), `engine.rs` (private impl, ~600 LOC), `tests.rs` (the large `#[cfg(test)] mod …` block, ~300 LOC).
+  Or, after a careful read, collapse to a single file with clearer region markers — both files have only 2-3 really-distinct concerns and may not need 3-way splits.
+  Don't bundle with P2.7 in the same PR — separate review, separate rollback.
+- **Effort:** M each (or L if the implementations are more entangled than they look on first scan — shared private state in `response_parse` may pull in extra plumbing).
+
+### P2.7 — `daemon_supervisor.rs` does 4 jobs in 538 LOC audit / ~500 today
+
+- **What:**
+  The file (now ~500 LOC after `c1efc56`) covers port-record lifecycle, in-memory `McpDaemonHandle` / `DaemonStatus` state, the subprocess control loop (`spawn → monitor → kill`), and the stderr→metrics forwarder.
+  The doc comment at the top names all four but does not split them.
+- **Why it matters:**
+  Same as P2.6 — bigger surface for future audit, harder to test individual responsibilities in isolation.
+  The `#[cfg(test)] mod tests` at the bottom already targets the supervisor's `restart()` and `status_as_str()` paths.
+  A split would let each module get its own focused tests, currently impossible because the four concerns share state via the supervisor's `Arc<Mutex<…>>`.
+- **Sketch of fix:**
+  - `port_record.rs` (~80 LOC).
+  - `daemon_state.rs` (state + DaemonStatus enum + snapshot, ~120 LOC).
+  - `daemon_watch.rs` (subprocess loop + stderr forwarder, ~200 LOC).
+  - `mod.rs` (ties them together).
+  Realistic post-split: ~200 LOC per file.
+  Don't touch in the same PR as the P1.1 add — keep PRs small to avoid a 4-way merge conflict for the next agent.
+- **Effort:** L
+
+### P2.8 — `http_executor.rs:169-171` "hoist `reqwest::Client` into `tauri::State`" plan is still TODO
+
+- **What:**
+  `src-tauri/src/http_executor.rs:169-171` carries a `// Per-call Client … future slices can hoist this into tauri::State` comment flagging the connection-pooling follow-through.
+  (`lib.rs` no longer has this comment — it migrated with the `http_request` refactor in audit fix #14.)
+- **Why it matters:**
+  Doesn't matter today — MCP command surface is small (~44 tools) and most tool calls hit DB, not `reqwest`.
+  Will start mattering when the LLM-side surfacing (Future.13 below) or batch-tooling arrives and we add many `tools/call` per session.
+  Today the cost is roughly reqwest TCP setup (~5-20 ms) per outbound `reqwest::Client::builder()` call, which is invisible at our call rate.
+- **Sketch of fix:**
+  Open a separate issue titled "hoist `reqwest::Client` into `tauri::State`" with three artefacts:
+  - A `criterion` or simple `std::time::Instant` benchmark measuring current per-call client construction.
+  - A Plan to store `Arc<reqwest::Client>` in `tauri::State`, replacing `execute(&input)` → `execute(state: State<Http>, &input)`.
+  - The migrator diff for the 1 in-tree call site (`lib.rs:180` `http_request`).
+  Land only if the benchmark shows >5% wall-clock win at a representative load (>100 sequential `tools/call`s). Otherwise close the issue as "deferred — overhead not yet visible".
+- **Effort:** M (separate issue, separate PR — out of scope here).
+
+### P2.9 — `endpoint_project_id` lookup helper duplicated between `mcp/project_ops/endpoint.rs:466` and `mcp/http_ops.rs:355`
+
+- **What:**
+  Both files implement the same `collection → module → project` walk inline.
+  The comment at `mcp/project_ops/endpoint.rs:465` even cross-references `mcp/http_ops.rs::endpoint_collection_project_id` as "the same behaviour in".
+- **Why it matters:**
+  Two copies of a security-critical lookup is exactly the kind of thing the audit fix #3 (broken `EndpointProjectId` trait) was meant to prevent.
+  If one of the copies gets a fix and the other doesn't (e.g. NaN guard on the `module_id`), permission checks can diverge silently.
+  We caught this once already; catching it again will be more expensive.
+- **Sketch of fix:**
+  Hoist to `pub(crate) fn project_id_of(pool: &DbPool, collection_id: &str) -> String` in `src-tauri/src/db/endpoints.rs` (already the home for endpoint-domain queries).
+  Both call sites become a single function call.
+  Add a test that exercises the chain via both modules so future divergence is caught in CI.
+- **Effort:** S
+
+### P2.10 — `mcp/project_ops.rs:22-23` `HashMap` / `Arc` imports kept solely for the test block
+
+- **What:**
+  `use std::collections::HashMap;` and `use std::sync::Arc;` at the top of `src-tauri/src/mcp/project_ops.rs` (around line 22-23) are only referenced inside `#[cfg(test)] mod tests`.
+  There is a `#[allow(dead_code)] fn _hm() -> HashMap<String, String> { HashMap::new() }` at line 1354 explicitly as an "import smoke" to keep the imports referenced.
+  `Arc` is used in the test-only `fn state() -> Arc<AppState>` at line 1266.
+- **Why it matters:**
+  Doesn't matter.
+  The `#[allow(dead_code)]` is local, the test block has real uses too (e.g. `fn state() -> Arc<AppState>`), and the file isn't growing.
+  Worth fixing once the file gets cleaned up (P2.6 / 2.7 pass).
+  Deprioritize.
+- **Sketch of fix:**
+  Either drop the smoke function `#[allow(dead_code)] fn _hm() -> HashMap<…> { HashMap::new() }` plus the `HashMap` import it pins (Arc stays since other test sites use it), OR guard both imports `#[cfg(test)] use …;`.
+  Either way ~3-line change.
+- **Effort:** S
+
+### P2.11 — Cargo warning `ValidateEndpointArgs is never constructed`
+
+- **What:**
+  `struct ValidateEndpointArgs` exists at `src-tauri/src/mcp/variable_fill.rs:51` but is never `::new()`-constructed, never `deserialize`d.
+  The tool entry at the bottom of the file references a `"validate_endpoint"` JSON-RPC tool that appears to have been removed without removing its args struct.
+  The audit found this is the only one of ~20 pre-existing cargo warnings worth touching.
+- **Why it matters:**
+  Doesn't matter — cargo treats the warning as informational, `cargo build` succeeds.
+  Of the ~20 pre-existing warnings, this is the only one we'd touch; the rest are tolerated ("deprecated", "unused import in test-only code path", etc.) because the audit deemed them non-actionable.
+- **Sketch of fix:**
+  Either (a) delete the struct (~3 lines, smallest change), or (b) bring back the validate_endpoint tool in `mcp::table()` and use the struct.
+  (a) for v0.1.
+- **Effort:** S
+
+### P2.12 — `README.md:90` references unimplemented `src-mcp/index.ts` path
+
+- **What:**
+  Roadmap bullet at README:90: "**MCP Server 子进程**：`src-mcp/index.ts` 用 `@modelcontextprotocol/sdk` 暴露工具".
+  The actual MCP server lives at `src-tauri/src/bin/mcp_proxy.rs` and `src-tauri/src/daemon_http.rs` — there is no `src-mcp/` directory.
+  This is a stale-roadmap bullet from the pre-Tauri plan.
+- **Why it matters:**
+  Doesn't matter for v0.1 — this is a roadmap bullet, not a build dependency.
+  Future readers will be confused trying to locate `src-mcp/index.ts`.
+  Substantial scope to clarify (the actual architecture is multi-file, not a single `index.ts`).
+  Bundling the rewrite into `c1efc56` would have broadened its scope.
+- **Sketch of fix:**
+  Reword the bullet to "**MCP Server 子进程**：`src-tauri/src/daemon_http.rs` (axum JSON-RPC dispatcher, ~245 LOC) + `src-tauri/src/bin/mcp_proxy.rs` (stdio bridge, ~350 LOC) wired through the `src-tauri/src/mcp/` module — exposes 44+ MCP tools to AI clients (Claude Desktop, Cursor, …) over either transport."
+  Land in the README touch-up pass that overlaps with v0.2 planning.
+- **Effort:** S
+
+## Optional — observability / coverage, not blockers
+
+These are nice-to-have landing spots once v0.1 is out the door. Pick up opportunistically.
+
+### Future.13 — Per-tool-call latency not surfaced to the renderer
+
+- **What:**
+  Daemon logs ship to stderr only (`src-tauri/src/daemon_supervisor.rs:13-15`).
+  The MCP panel can show status + uptime + request counts (`src/features/settings/sections/McpStatusPanel.tsx`) but cannot show "average latency of `api_call_endpoint` over the last minute".
+- **Why it matters:**
+  Doesn't matter for v0.1.
+  UX nice-to-have — operators debugging "why is Claude slow on this project" want a panel, not a stderr tail.
+  The store already has `requestsHandled` so the counter half exists; what doesn't exist is per-tool latency.
+- **Sketch of fix:**
+  Add `app_handle.emit("mcp://call", CallSummary { name, duration_ms, is_error })` from `crate::mcp::dispatch` (after the `match … await` in `mcp/project_ops/endpoint.rs:432`).
+  Subscribe in a new `useMcpCallLatency` hook alongside `useMcpStatus`.
+  Roll up into a 30s EWMA in the store, render as a sparkline in `McpStatusPanel`.
+  Wire it as a feature flag so v0.1 ships without the trailing event traffic.
+- **Effort:** M
+
+### Future.14 — No integration test coverage for `app-store.ts` actions
+
+- **What:**
+  Pre-audit, `scripts/verify-drag.tmp.ts` (245 LOC, deleted in `c1efc56` fix #16) had 11 real store-mutation scenarios.
+  Today the only store coverage is whatever indirect coverage the `tests/mcp-integration.test.mjs` suite provides via real `commands.rs` round-trips — i.e. none direct.
+  The store has 30+ actions after the audit fix (`c1efc56` added the 11-typed-invoke sites and the file is 1081 LOC); several of them have no test coverage at all.
+- **Why it matters:**
+  Coverage gap is real (we just deleted the only direct test for it).
+  Doesn't matter for v0.1 if the audit fix was correct, but a future regression in any of the 30+ store actions will land uncaught.
+  The grep-for-Zustand-reducer-pattern finds every store action in seconds; the test scenarios take longer to construct.
+- **Sketch of fix:**
+  Repatriate the 11 scenarios under `src/stores/__tests__/app-store.test.ts` using the existing `tsx --test` infrastructure (already used by `npm test` for `src/lib/http-build.test.ts`).
+  Keep them pure-JS (no Tauri runtime); mock `invoke()` via `node:test`'s mock pattern (no need for `vi.mock`).
+  Should be <200 LOC for the same 11 cases.
+  Add a single smoke test per action that the audit added (the 11 typings) so future re-audits can close out "store action X has coverage" with one grep.
+- **Effort:** M
+
+## Cross-references
+
+### Producer commit
+
+- `c1efc56 chore: post-integration audit fixes for v0.1 MCP rollout`.
+- Diff stats — 55 files changed, 16,771 insertions, 580 deletions.
+- 9 P0 defects, 7 P1 maintainability items, 4 config / script hygiene fixes — see the "Already shipped in `c1efc56`" list above for the full ledger.
+- Verification green at landing time:
+  - `cargo check` (0 errors; 20 pre-existing warnings).
+  - `cargo build`.
+  - `cargo test --no-run`.
+  - `npm test` (105 / 105).
+  - `npm run build` (tsc -b + vite build).
+
+### Verifier reports
+
+- Should live under `docs/audits/2026-09-17-{rust,ts,scripts-config}.md` per the audit naming convention.
+- Those files were never checked into the tree — the 3-pronged audit results live only in the parent session's memory handoff.
+- When the v0.2 audit pass runs, please do commit the verifier reports so this issue document has direct `docs/audits/*.md` links instead of cross-references by description.
+- (`git log --all -- 'docs/audits/'` confirms no such directory has been touched by any commit yet.)
+
+### Doc-deliverable file paths for this round
+
+- `docs/issues/2026-09-17-post-integration-followup.md` — this file.
+  The only deliverable produced by the post-integration follow-up pass.
+- `docs/issues/` — newly created directory; previously the repo had no `docs/` tree at all.
+
+### Open follow-ups created in this doc (with file-path pointers)
+
+- **P1.1** — Add `mcp_daemon_restart` Tauri command (tracks: `src-tauri/src/commands.rs`, `src-tauri/src/lib.rs`).
+- **P1.2** — Reconcile `McpStatusDto` ↔ `McpUiState` (tracks: `src-tauri/src/commands.rs`, `src/lib/mcp-types.ts`, `src/stores/app-store.ts`).
+- **P1.3** — Expand `daemon_http.rs` doc comment with JSON-RPC + MCP spec citations (tracks: `src-tauri/src/daemon_http.rs`).
+- **P1.4** — Resolve Windows daemon-exit race (tracks: `scripts/mcp-integration.test.mjs`, `scripts/proxy-integration.test.mjs`, `scripts/run-mcp-tests.cjs`).
+- **P2.5–P2.12** — see the relevant sections above; nothing in `src/` needs to change until P1 work is done.
+- **Future.13** — Per-tool-call latency event (separate issue, separate PR).
+- **Future.14** — Repatriate store tests (separate issue, separate PR).
+
+### Audit-time vs. current counts
+
+Some P2 items cite audit-time LOC counts that have shifted slightly since the audit ran.
+
+- `daemon_supervisor.rs` was 538 in the audit, ~500 today because some companion-test code got refactored.
+- `variable_fill.rs` was 1379 in the audit, ~1280 today.
+- `response_parse.rs` was 695 in the audit, ~640 today.
+
+The audit-time figures are canonical for "why this was flagged"; the in-line current sizes are for ground-truth.
+
+— end of backlog —
