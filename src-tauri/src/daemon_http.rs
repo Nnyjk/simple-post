@@ -141,6 +141,14 @@ async fn handle_mcp_post(
     State(state): State<Arc<AppState>>,
     body: String,
 ) -> Response {
+    dispatch_mcp_request(state, body).await
+}
+
+/// Core of `handle_mcp_post` — exposed so the `serve-web` shape can
+/// reuse the exact same JSON-RPC dispatch under the same `/mcp`
+/// route, without re-mounting the daemon router (which would
+/// double-prefix `/mcp`).
+pub async fn dispatch_mcp_request(state: Arc<AppState>, body: String) -> Response {
     state
         .metrics
         .requests_handled

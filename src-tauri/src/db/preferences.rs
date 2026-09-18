@@ -82,6 +82,35 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<(String, String)>, AppError
 }
 
 // -------------------------------------------------------------------------
+// Well-known keys.
+// -------------------------------------------------------------------------
+
+/// Preference keys shared across the app. Stored as JSON values to
+/// match the rest of `preferences` (see `set` for the encoding). Add
+/// new entries here when a new persisted setting is needed so callers
+/// don't string-literal the key.
+pub mod keys {
+    /// `"ui.theme"` → string. Allowed: "light" | "dark" | "system".
+    pub const THEME: &str = "ui.theme";
+
+    /// `"mcp.auto_start"` → bool. **Default: `false`.** When `false`
+    /// the Tauri / Web shapes both leave the MCP daemon stopped at
+    /// launch; the user opts in from the settings panel or via the
+    /// `--mcp-auto-start` CLI flag. See
+    /// `docs/distribution-modes-2026-09-18.md` §5 for the rationale
+    /// and the three-shape matrix.
+    pub const MCP_AUTO_START: &str = "mcp.auto_start";
+}
+
+/// Read the `mcp.auto_start` preference with the documented default
+/// (`false`). Used by both the Tauri `.setup()` block and the web
+/// server's startup path so the two shapes agree on the same row.
+pub fn mcp_auto_start(conn: &mut Connection) -> Result<bool, AppError> {
+    let raw: Option<bool> = get(conn, keys::MCP_AUTO_START)?;
+    Ok(raw.unwrap_or(false))
+}
+
+// -------------------------------------------------------------------------
 // Tests.
 // -------------------------------------------------------------------------
 
@@ -181,5 +210,21 @@ mod tests {
         db::with_tx(&pool, |c| set(c, "x", &42_i64)).unwrap();
         let err: Result<Option<Theme>, _> = db::with_conn(&pool, |c| get(c, "x"));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn mcp_auto_start_defaults_to_false_when_missing() {
+        let pool = fresh_pool();
+        let v = db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap();
+        assert!(!v, "default must be false — see docs/distribution-modes §5");
+    }
+
+    #[test]
+    fn mcp_auto_start_round_trips() {
+        let pool = fresh_pool();
+        db::with_tx(&pool, |c| set(c, keys::MCP_AUTO_START, &true)).unwrap();
+        assert!(db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap());
+        db::with_tx(&pool, |c| set(c, keys::MCP_AUTO_START, &false)).unwrap();
+        assert!(!db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap());
     }
 }

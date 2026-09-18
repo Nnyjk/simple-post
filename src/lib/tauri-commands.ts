@@ -82,6 +82,13 @@ export const COMMANDS = {
    * placeholder with a real value instead of the literal hint.
    */
   mcpDaemonProxyPath: 'mcp_daemon_proxy_path',
+  /**
+   * Persisted `mcp.auto_start` preference — see
+   * `docs/distribution-modes-2026-09-18.md` §5. Defaults to `false`;
+   * both Tauri and `serve-web` shapes honour this row.
+   */
+  mcpAutoStartGet: 'mcp_auto_start_get',
+  mcpAutoStartSet: 'mcp_auto_start_set',
 
   // ----- low-level HTTP executor (Tauri side) -----
   httpRequest: 'http_request',
@@ -99,10 +106,130 @@ export type TauriCommand = (typeof COMMANDS)[keyof typeof COMMANDS];
  *
  * For abortable calls (Tauri 2 doesn't accept an AbortSignal yet), wrap
  * the inner `invoke` yourself as `src/lib/http.ts` does.
+ *
+ * Distribution shapes — see `docs/distribution-modes-2026-09-18.md` §3:
+ *   - Tauri shell  → `__TAURI_INTERNALS__` is present, calls `invoke`.
+ *   - Web / Dev    → falls through to `webInvokeCmd` which hits the
+ *                    axum `serve-web` host's `/api/*` REST surface.
+ *
+ * Module-load detection is intentional: flipping shapes within a
+ * session requires a reload (the runtime is fixed when the page loads).
  */
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
+
+export const IS_TAURI_SHELL: boolean =
+  typeof window !== 'undefined' &&
+  Boolean(
+    (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ ||
+      (window as { __TAURI__?: unknown }).__TAURI__,
+  );
+
 export function invokeCmd<T>(
   cmd: TauriCommand,
   args?: Record<string, unknown>,
 ): Promise<T> {
-  return invoke<T>(cmd, args ?? {});
+  if (IS_TAURI_SHELL) {
+    return tauriInvoke<T>(cmd, args ?? {});
+  }
+  return webInvokeCmd<T>(cmd, args ?? {});
+}
+
+// -------------------------------------------------------------------------
+// Web-shape REST bridge.
+//
+// The route table mirrors the axum router in `src-tauri/src/web_api.rs`.
+// We don't share the source — the two endpoints are kept in sync by the
+// integration tests in `scripts/mcp-integration.test.mjs` and a manual
+// review pass at PR time. Adding a new invoke command requires adding
+// the matching REST entry in BOTH places.
+// -------------------------------------------------------------------------
+
+interface RouteSpec {
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT';
+  /** Path template; `{key}` segments get substituted from `args`. */
+  path: (args: Record<string, unknown>) => string;
+}
+
+/**
+ * REST mapping for commands that have a browser-facing counterpart.
+ * Commands without an entry here throw if invoked in the web shape —
+ * that's deliberate, because surfacing a "not implemented" is much
+ * less confusing than silently 404'ing.
+ */
+const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
+  // projects
+  [COMMANDS.projectsList]: { method: 'GET', path: () => '/api/projects' },
+  [COMMANDS.projectsGet]: {
+    method: 'GET',
+    path: (a) => `/api/projects/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.projectsCreate]: { method: 'POST', path: () => '/api/projects' },
+  [COMMANDS.projectsUpdate]: {
+    method: 'PATCH',
+    path: (a) => `/api/projects/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.projectsDelete]: {
+    method: 'DELETE',
+    path: (a) => `/api/projects/${encodeURIComponent(String(a.id))}`,
+  },
+  // MCP daemon
+  [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },
+  [COMMANDS.mcpAutoStartGet]: { method: 'GET', path: () => '/api/preferences' },
+  [COMMANDS.mcpAutoStartSet]: {
+    method: 'PUT',
+    path: () => '/api/preferences',
+  },
+};
+
+async function webInvokeCmd<T>(
+  cmd: TauriCommand,
+  args: Record<string, unknown>,
+): Promise<T> {
+  const spec = WEB_ROUTES[cmd];
+  if (!spec) {
+    throw new Error(
+      `Command "${cmd}" is not exposed in the web shape. Add a REST entry in src/lib/tauri-commands.ts + src-tauri/src/web_api.rs to enable it.`,
+    );
+  }
+  // mcp_auto_start_set uses PUT /api/preferences with a body shape that
+  // is unrelated to the Tauri command's `value: bool` arg. Translate it
+  // here so the call site stays identical between shapes.
+  let body: unknown = args;
+  if (cmd === COMMANDS.mcpAutoStartSet) {
+    body = { key: 'mcp.auto_start', value: args.value };
+  } else if (cmd === COMMANDS.mcpAutoStartGet) {
+    // GET /api/preferences returns the whole object; pick the key out.
+    const map = await webFetch<Record<string, unknown>>('GET', spec.path(args), null);
+    return (map['mcp.auto_start'] === true) as unknown as T;
+  }
+
+  return webFetch<T>(spec.method, spec.path(args), body);
+}
+
+async function webFetch<T>(
+  method: RouteSpec['method'],
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const init: RequestInit = {
+    method,
+    headers: { 'content-type': 'application/json' },
+  };
+  if (body !== null && method !== 'GET' && method !== 'DELETE') {
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, init);
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const j = (await res.json()) as { code?: string; message?: string };
+      detail = ` [${j.code ?? '?'}] ${j.message ?? ''}`;
+    } catch {
+      detail = ` ${await res.text().catch(() => '')}`;
+    }
+    throw new Error(`HTTP ${res.status} ${method} ${path}${detail}`);
+  }
+  // 204 No Content (DELETE, PUT-pref) → return undefined cast to T.
+  if (res.status === 204) return undefined as unknown as T;
+  return (await res.json()) as T;
 }

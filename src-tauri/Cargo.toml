@@ -42,6 +42,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1"
 serde_json_path = "0.1"
 axum = "0.7"
+# Static-file serving for the `serve-web` shape. `ServeDir` powers
+# `GET /` and `GET /assets/*` so the SPA can be hosted by the same
+# axum process that fronts `/api/*` and `/mcp`.
+tower-http = { version = "0.5", features = ["fs", "trace"] }
+mime_guess = "2"
 
 [profile.release]
 panic = "abort"

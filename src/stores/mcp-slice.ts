@@ -144,6 +144,26 @@ export interface McpSliceActions {
    * would bypass every invariant the slice doc-comment promises.
    */
   recordLastError: (lastError: string | null) => void;
+  /**
+   * Read the persisted `mcp.auto_start` preference. `null` until the
+   * first read lands; the panel renders a disabled switch in that
+   * window. See `docs/distribution-modes-2026-09-18.md` §5.
+   */
+  mcpAutoStart: boolean | null;
+  /**
+   * Persist `mcp.auto_start`. When the user enables the toggle we
+   * also ask the daemon to start (idempotent) so they don't have to
+   * take a second action. When they disable it we leave the running
+   * daemon alone — auto_start is about whether the daemon starts on
+   * launch, not a runtime kill switch.
+   */
+  setMcpAutoStart: (value: boolean) => Promise<void>;
+  /**
+   * Re-read the `mcp.auto_start` preference from the backend. The
+   * ConnectionSection calls this on mount so the toggle reflects the
+   * persisted value (defaults to `false` when the row is absent).
+   */
+  refreshMcpAutoStart: () => Promise<void>;
 }
 
 export type McpSlice = McpSliceState & McpSliceActions;
@@ -158,6 +178,13 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
   mcpStatus: null,
   _mcpTimer: null,
   restartDialogSeen: null,
+  /**
+   * Persisted `mcp.auto_start` preference. Populated by the
+   * `ConnectionSection` effect via `refreshMcpAutoStart`; null until
+   * the first IPC. Defaults to `false` server-side, so users who
+   * haven't touched the toggle yet will see `false` after one read.
+   */
+  mcpAutoStart: null,
 
   // ---------- MCP daemon polling ----------
   // Three collaborators participate in the singleton 3s tick:
@@ -300,5 +327,38 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
       if (s.mcpStatus.lastError === next) return {};
       return { mcpStatus: { ...s.mcpStatus, lastError: next } };
     });
+  },
+  /**
+   * Read the persisted auto-start preference. Silent on failure — the
+   * connection panel tolerates the row being unreadable by leaving
+   * the switch in its indeterminate `null` state.
+   */
+  refreshMcpAutoStart: async () => {
+    try {
+      const v = await invoke<boolean>(COMMANDS.mcpAutoStartGet);
+      set({ mcpAutoStart: v });
+    } catch (e) {
+      console.warn('[store] mcp_auto_start_get failed', e);
+    }
+  },
+  setMcpAutoStart: async (value) => {
+    // Optimistic flip — the panel disables the switch during the
+    // round-trip and we want it to reflect the user's intent
+    // immediately. The setter throws on failure so the panel can
+    // roll the switch back and surface the error.
+    set({ mcpAutoStart: value });
+    try {
+      await invoke<boolean>(COMMANDS.mcpAutoStartSet, { value });
+      // If we just turned auto-start on, the daemon may have started
+      // — refresh the snapshot so the badge updates without waiting
+      // for the next 3s tick.
+      if (value) {
+        await get().refreshMcpStatus();
+      }
+    } catch (e) {
+      // Roll back + re-throw so the panel can show a toast.
+      set({ mcpAutoStart: !value });
+      throw e;
+    }
   },
 });

@@ -37,6 +37,8 @@ pub mod variable_fill;
 pub mod daemon_http;
 pub mod mcp;
 
+pub mod web_api;
+
 /// CLI subcommand `mcp` entry. Owns data-dir resolution, DB init, axum serve,
 /// port-record write, and SIGINT/SIGTERM shutdown.
 pub fn run_mcp(transport: String, port: u16, bind: String) {
@@ -285,14 +287,41 @@ pub fn run() {
             crate::commands::mcp_status,
             crate::commands::mcp_daemon_restart,
             crate::commands::mcp_daemon_proxy_path,
+            crate::commands::mcp_auto_start_get,
+            crate::commands::mcp_auto_start_set,
         ])
         .setup(|app| {
+            // Read the persisted MCP auto-start preference **before**
+            // spawning the supervisor so we honour the user's choice.
+            // `mcp.auto_start` defaults to `false` — the user opts in
+            // from the settings panel. See
+            // `docs/distribution-modes-2026-09-18.md` §5.
+            let pool: tauri::State<crate::db::DbPool> = app.state();
+            let auto_start = match crate::db::with_conn(pool.inner(), |c| {
+                crate::db::preferences::mcp_auto_start(c)
+            }) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "[gui] failed to read mcp.auto_start, defaulting to off: {e:?}"
+                    );
+                    false
+                }
+            };
+
             // `app.state::<McpDaemonHandle>()` borrows the managed
             // value; we clone the (cheap, Arc-backed) handle and move
             // it into the spawn.
             let handle = app.state::<McpDaemonHandle>().inner().clone();
             let app_handle = app.handle().clone();
             tokio::spawn(async move {
+                if !auto_start {
+                    eprintln!(
+                        "[gui] mcp.auto_start is off — leaving daemon stopped; \
+                         toggle it in Settings → Connection to start."
+                    );
+                    return;
+                }
                 if let Err(e) = handle.ensure_started(&app_handle).await {
                     // Don't panic the GUI on daemon-spawn failure — the
                     // supervisor already flipped its status to Crashed
@@ -306,6 +335,34 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// CLI subcommand `serve-web` entry. Boots an axum HTTP server that:
+///
+///   * serves the bundled SPA from `<project>/dist/`,
+///   * exposes `/api/*` REST routes for browser CRUD + HTTP send + prefs,
+///   * keeps the existing `/mcp` JSON-RPC router untouched so MCP
+///     clients (Claude Desktop, Cursor, …) keep working unchanged.
+///
+/// The browser never spawns a daemon — it talks to `127.0.0.1:<port>`
+/// directly. The daemon child (if `mcp.auto_start == true`) runs on
+/// this host, behind the `simple-post` process tree, and is reachable
+/// only via the REST bridge; AI clients continue to use the
+/// `simple-post-mcp-proxy` binary on their own machine as before.
+///
+/// See `docs/distribution-modes-2026-09-18.md` §3 + §6 for the
+/// architecture and route table.
+pub async fn run_serve_web(
+    bind_addr: std::net::SocketAddr,
+    spa_dir: std::path::PathBuf,
+    data_dir: std::path::PathBuf,
+    auto_start_daemon: bool,
+) {
+    init_tracing();
+    if let Err(e) = web_api::serve(bind_addr, data_dir, spa_dir, auto_start_daemon).await {
+        eprintln!("[serve-web] fatal: {e:?}");
+        std::process::exit(1);
+    }
 }
 
 /// Initialize the global `tracing` subscriber so the `tracing::info!` /

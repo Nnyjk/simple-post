@@ -406,10 +406,134 @@ async function sendViaFetch(input: SendInput): Promise<ApiResponse> {
 /**
  * Send the request described by `input` via `fetch` (browser) or the
  * Tauri `http_request` command (desktop shell). See module header.
+ *
+ * Three transports, picked at module load:
+ *   - Tauri shell: `sendViaTauri`  → `http_request` Tauri command (reqwest,
+ *     bypasses browser CORS)
+ *   - `serve-web` host reachable: `sendViaServer` → POST `/api/http/send`,
+ *     same reqwest path on the server side, same response shape
+ *   - Vite dev / standalone browser: `sendViaFetch` → raw browser fetch
+ *     (subject to CORS; useful for dev iteration on UI)
+ *
+ * The "is the server reachable" probe is intentionally cheap (a single
+ * `GET /api/healthz` with a 1s timeout). If it fails we fall through
+ * to the browser-fetch path so dev mode stays useful.
  */
 export async function sendRequest(input: SendInput): Promise<ApiResponse> {
   if (isTauri) {
     return sendViaTauri(input);
   }
+  if (await isServeWebReachable()) {
+    return sendViaServer(input);
+  }
   return sendViaFetch(input);
+}
+
+let _serverReachableCache: { value: boolean; at: number } | null = null;
+async function isServeWebReachable(): Promise<boolean> {
+  // Cache the probe for 5 s so a busy request loop doesn't hit
+  // /api/healthz on every call.
+  const now = Date.now();
+  if (_serverReachableCache && now - _serverReachableCache.at < 5_000) {
+    return _serverReachableCache.value;
+  }
+  try {
+    const ctrl = new AbortController();
+    const t = window.setTimeout(() => ctrl.abort(), 1_000);
+    const res = await fetch('/api/healthz', { signal: ctrl.signal });
+    window.clearTimeout(t);
+    const ok = res.ok;
+    _serverReachableCache = { value: ok, at: now };
+    return ok;
+  } catch {
+    _serverReachableCache = { value: false, at: now };
+    return false;
+  }
+}
+
+async function sendViaServer(input: SendInput): Promise<ApiResponse> {
+  const start = performance.now();
+  const built = buildFetchInit(input);
+  // Server-side reqwest mirrors the browser path: timeout, redirect,
+  // max body size all live in `RequestSettings`. Pull the current
+  // values from the persisted settings rather than re-deriving them
+  // — keeps the web shape behaviourally identical to the Tauri shape.
+  try {
+    const res = await fetch('/api/http/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        method: input.method,
+        url: built.url,
+        headers: serializeHeaders(built.init.headers ?? {}),
+        body: input.body,
+        timeoutMs: input.settings.timeoutMs,
+        followRedirects: input.settings.followRedirects,
+        maxResponseSizeKb: input.settings.maxResponseSizeKb,
+      }),
+    });
+    const durationMs = performance.now() - start;
+    if (!res.ok) {
+      // Server replied with an error envelope (validation / 5xx).
+      const errText = await res.text().catch(() => '');
+      return networkErrorResponse(input, built.url, durationMs, `HTTP ${res.status}: ${errText}`);
+    }
+    // The Rust `HttpResult` mirrors `ApiResponse` shape-for-shape, so
+    // we can pass it through verbatim. See `http_executor.rs::HttpResult`.
+    const result = (await res.json()) as ServerHttpResult;
+    return {
+      status: result.status,
+      statusText: result.statusText,
+      durationMs,
+      sizeBytes: result.sizeBytes,
+      headers: tupleArrayToObject(result.headers),
+      body: result.body,
+      bodyJson: tryParseJson(result.body),
+      contentType: result.contentType,
+      method: input.method,
+      url: result.url,
+    };
+  } catch (err) {
+    const durationMs = performance.now() - start;
+    const msg = (err as Error)?.message ?? String(err);
+    return networkErrorResponse(input, built.url, durationMs, msg);
+  }
+}
+
+/**
+ * Wire shape returned by the server's `POST /api/http/send` endpoint.
+ * Matches `crate::http_executor::HttpResult` field-for-field.
+ */
+interface ServerHttpResult {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  durationMs: number;
+  sizeBytes: number;
+  headers: Array<[string, string]>;
+  body: string;
+  contentType: string;
+  method: string;
+  url: string;
+  truncated: boolean;
+}
+
+function serializeHeaders(init: HeadersInit): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  if (Array.isArray(init)) {
+    for (const [k, v] of init) out.push([k, v]);
+  } else if (typeof (init as Headers).entries === 'function') {
+    for (const [k, v] of (init as Headers).entries()) out.push([k, v]);
+  } else {
+    for (const [k, v] of Object.entries(init as Record<string, string>)) {
+      out.push([k, v]);
+    }
+  }
+  return out;
+}
+
+function tupleArrayToObject(pairs: ReadonlyArray<readonly [string, string]>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of pairs) out[k] = v;
+  return out;
 }

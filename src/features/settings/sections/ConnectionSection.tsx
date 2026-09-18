@@ -1,9 +1,10 @@
-import { Cpu, FileJson, Bot, Server, Activity, Copy, RefreshCw } from 'lucide-react';
+import { Cpu, FileJson, Bot, Server, Activity, Copy, RefreshCw, Power } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { SettingsCategory } from '../SettingsCategory';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import {
   McpStatusPanel,
   StateSummary,
@@ -49,6 +50,29 @@ export function ConnectionSection() {
   // the *only* place polling is started — any other consumer (TopBar
   // pill, etc.) just reads `mcpStatus` and gets the same payload.
   const mcpStatus = useAppStore((s) => s.mcpStatus);
+
+  // MCP auto-start preference — drives the "启动配置" Switch below.
+  // The slice hydrates this on the first read; the panel renders an
+  // indeterminate state until then. See
+  // `docs/distribution-modes-2026-09-18.md` §5 for the default
+  // (`false` at first launch).
+  const mcpAutoStart = useAppStore((s) => s.mcpAutoStart);
+  const setMcpAutoStart = useAppStore((s) => s.setMcpAutoStart);
+  const refreshMcpAutoStart = useAppStore((s) => s.refreshMcpAutoStart);
+  const [autoStartBusy, setAutoStartBusy] = useState(false);
+  useEffect(() => {
+    void refreshMcpAutoStart();
+  }, [refreshMcpAutoStart]);
+  const handleAutoStartToggle = async (next: boolean) => {
+    setAutoStartBusy(true);
+    try {
+      await setMcpAutoStart(next);
+    } catch (e) {
+      console.error('[settings] mcp.auto_start toggle failed', e);
+    } finally {
+      setAutoStartBusy(false);
+    }
+  };
 
   // Auto-open the restart dialog when the daemon crashes or goes
   // unhealthy. Dedup by `status` so two consecutive `crashed` polls
@@ -182,6 +206,35 @@ export function ConnectionSection() {
             </div>
             <Badge variant="muted" className="shrink-0 font-mono">JSON-RPC 2.0</Badge>
           </div>
+        </div>
+      </SettingsCategory>
+
+      {/* ----- MCP auto-start (前/后台分布 -- 默认 off) ----------- */}
+      {/* §6 docs/distribution-modes-2026-09-18.md：新增一项渲染面板，
+           默认目标为 false。Tauri 形态 + serve-web 形态都尊重这个键。 */}
+      <SettingsCategory
+        title="启动配置"
+        description="决定 simple-post 启动时是否自动拉起 MCP 子进程；关闭后由用户手动开启"
+        icon={<Power className="h-3.5 w-3.5" />}
+        meta={mcpAutoStart === null ? '加载中…' : mcpAutoStart ? '已开启' : '已关闭'}
+        hideDivider
+      >
+        <div className="flex items-center justify-between gap-3 p-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+              启动时自动拉起 MCP 子进程
+            </div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              关闭后 MCP 不会随应用启动；可在下方「MCP 进程」卡片里点击「立即启动」手起。
+              适用于需要按需启动 daemon 的场景（例如调试、CI、限制后台进程）。
+            </div>
+          </div>
+          <Switch
+            checked={mcpAutoStart === true}
+            disabled={mcpAutoStart === null || autoStartBusy}
+            onCheckedChange={handleAutoStartToggle}
+            aria-label="启动时自动拉起 MCP 子进程"
+          />
         </div>
       </SettingsCategory>
 

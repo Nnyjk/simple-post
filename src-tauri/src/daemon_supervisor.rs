@@ -385,6 +385,127 @@ impl McpDaemonHandle {
         Ok(self.snapshot())
     }
 
+    /// Variant of [`Self::restart`] for non-Tauri hosts (the
+    /// `simple-post serve-web` shape). `ensure_started` accepts
+    /// `&AppHandle` but the body never actually uses it (it derives
+    /// the data dir from `dirs::data_dir()`), so we just thread the
+    /// data dir through explicitly and skip the `AppHandle` argument
+    /// entirely.
+    ///
+    /// Implementation: duplicates the spawn portion of `ensure_started`
+    /// rather than refactoring into a shared helper, so the audited
+    /// Tauri path stays byte-for-byte identical to its
+    /// pre-distribution state. The duplicated block is small (≈50 LOC)
+    /// and is the same code that the `mcp` subcommand would emit if
+    /// we ever needed to launch it standalone.
+    pub async fn restart_without_app_handle(
+        &self,
+        data_dir: &std::path::Path,
+    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+        {
+            let mut g = self.inner.lock().await;
+            g.status = DaemonStatus::Restarting;
+            if let Some(mut child) = g.child.take() {
+                let _ = child.start_kill();
+            }
+        }
+        sleep(Duration::from_millis(200)).await;
+        let _ = port_registry::release();
+
+        // ----- Reuse path (mirrors ensure_started lines 202-227) ----
+        if let Some(rec) = port_registry::read() {
+            if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
+                let mut g = self.inner.lock().await;
+                g.pid = Some(rec.pid);
+                g.port = Some(rec.port);
+                g.port_record = Some(rec.clone());
+                g.status = DaemonStatus::Running;
+                g.started_at = Some(Instant::now());
+                return Ok(self.snapshot());
+            }
+        }
+        let mut g = self.inner.lock().await;
+        if let Some(rec) = port_registry::read() {
+            if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
+                g.pid = Some(rec.pid);
+                g.port = Some(rec.port);
+                g.port_record = Some(rec.clone());
+                g.status = DaemonStatus::Running;
+                g.started_at = Some(Instant::now());
+                return Ok(self.snapshot());
+            }
+        }
+        g.status = DaemonStatus::Starting;
+        g.last_error = None;
+        drop(g);
+
+        let _ = port_registry::release();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(crate::error::AppError::Io)?;
+        let port = listener
+            .local_addr()
+            .map(|a| a.port())
+            .map_err(crate::error::AppError::Io)?;
+        drop(listener);
+
+        let exe = std::env::current_exe().map_err(crate::error::AppError::Io)?;
+        let mut cmd = tokio::process::Command::new(exe);
+        cmd.arg("mcp")
+            .arg("--http")
+            .arg(format!("--port={port}"))
+            .arg("--bind=127.0.0.1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                let mut g = self.inner.lock().await;
+                g.status = DaemonStatus::Crashed { exit_code: None };
+                g.last_error = Some(format!("spawn failed: {e}"));
+                return Err(crate::error::AppError::Io(e));
+            }
+        };
+        let pid = child.id().unwrap_or(0);
+        let stderr = child.stderr.take();
+        let rec = PortRecord::new(
+            pid,
+            port,
+            "127.0.0.1",
+            data_dir.display().to_string(),
+        );
+        if let Err(e) = port_registry::write(&rec) {
+            let _ = child.kill().await;
+            let mut g = self.inner.lock().await;
+            g.status = DaemonStatus::Crashed { exit_code: None };
+            g.last_error = Some(format!("port registry: {e:?}"));
+            return Err(e);
+        }
+        let metrics = {
+            let g = self.inner.lock().await;
+            Arc::clone(&g.metrics)
+        };
+        if let Some(stderr) = stderr {
+            tokio::spawn(forward_stderr_and_parse_metrics(stderr, metrics));
+        }
+        let inner = self.inner.clone();
+        // NOTE: web shape has no `AppHandle`, so `watch_exit` would
+        // need a no-app variant for daemon://crashed events. For v1
+        // we accept that the web UI won't get Tauri events — the
+        // `/api/mcp/status` poll is enough to reflect state changes.
+        tokio::spawn(async move {
+            watch_exit_no_app(inner, pid).await;
+        });
+        let mut g = self.inner.lock().await;
+        g.status = DaemonStatus::Running;
+        g.child = Some(child);
+        drop(g);
+
+        Ok(self.snapshot())
+    }
+
     /// Best-effort shutdown. Called from the GUI's exit hook (and from
     /// tests). We do NOT block on `child.wait()` — the watcher task
     /// will reap the child asynchronously and the GUI is on its way
@@ -499,6 +620,44 @@ async fn watch_exit(
     // poll even if the event bus is closed for some reason.
     if let Err(e) = app_handle.emit("daemon://crashed", &payload) {
         eprintln!("[daemon] emit daemon://crashed failed: {e}");
+    }
+}
+
+/// Web-shape counterpart of [`Self::watch_exit`]. Same F-D1 fix (take
+/// the Child out of state under the lock, drop the guard, then await
+/// `wait()`); the only difference is the missing `AppHandle` event
+/// emission — the web shape has no Tauri bus, and the `/api/mcp/status`
+/// poll covers the same surface.
+async fn watch_exit_no_app(inner: Arc<Mutex<DaemonState>>, pid: u32) {
+    let mut child = {
+        let mut g = inner.lock().await;
+        match g.child.take() {
+            Some(c) => c,
+            None => return,
+        }
+    };
+    let exit_status = match child.wait().await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(target: "mcp_daemon", "wait() failed: {e}");
+            return;
+        }
+    };
+    let exit_code = exit_status.code();
+    let message = if let Some(code) = exit_code {
+        format!("daemon exited with code {code}")
+    } else {
+        "daemon terminated by signal".to_string()
+    };
+    {
+        let mut g = inner.lock().await;
+        if g.pid == Some(pid) {
+            g.status = DaemonStatus::Crashed { exit_code };
+            g.last_error = Some(message);
+            g.pid = None;
+            g.port = None;
+            g.port_record = None;
+        }
     }
 }
 
