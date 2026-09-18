@@ -9,6 +9,8 @@ Generated 2026-09-17 after shipping commit `c1efc56 chore: post-integration audi
 - **Open P2** items are correctness-clean.
   They accumulate maintenance debt but won't break the v0.1 release if deferred.
   Defer in this order: 5 → 10 → 11 → 12 → 9 → 7 → 6 → 8.
+  As of the 2026-09-18 follow-up pass, **P2.5 / P2.9 / P2.10 / P2.11 / P2.12** are all closed.
+  The remaining open P2 items are **P2.6 / P2.7 / P2.8** (split/refactor + separate benchmark issue).
 - **Optional** items are nice-to-haves.
   Pick them up only when a sprint has leftover capacity; each carries a self-contained sketch.
 - Effort tags map to rough half-days for a single engineer already familiar with the repo.
@@ -112,19 +114,17 @@ The original Symptom / Why / Minimal fix / Verify sketch is preserved in the `c1
 
 These are correctness-clean (no live defects), maintainability or stylistic items.
 
-### P2.5 — `lint` script points at a non-installed `eslint`
+### P2.5 *(closed in 2026-09-18 follow-up)* — `lint` script points at a non-installed `eslint`
 
-- **What:**
-  `package.json:12` declares `"lint": "eslint ."` but `devDependencies` (`package.json:40-52`) has no `eslint`, `@typescript-eslint/parser`, or `@typescript-eslint/eslint-plugin`.
-  Running `npm run lint` fails immediately with `eslint: command not found` (or worse, an opaque "spawn EINVAL" on Windows when the `.cmd` shim isn't found).
-- **Why it matters:**
-  Doesn't matter for v0.1 release — `lint` is a developer convenience script, not on the build path.
-  But it signals "we intended to lint but didn't follow through", which makes a future audit pass re-flag this.
-  The audit chose not to fix it because wiring ESLint properly is 30-60 minutes of dev-dep pinning + config writing, and we wanted `c1efc56` to stay surgical.
-- **Sketch of fix:**
+- **Resolution (2026-09-18):**
+  Chose option (a) from the audit sketch — dropped `"lint": "eslint ."` from `package.json` scripts.
+  No `.eslintrc.cjs` was added and no `eslint` deps were installed; the script line was simply removed.
+  Verified `node_modules/eslint` and `node_modules/.bin/eslint.cmd` are both absent.
+  Revisit option (b) in the v0.2 cleanup pass when ESLint can be budgeted for a real config + dep pin.
+- **Original sketch (preserved for historical context):**
   Either (a) drop the script entry from `package.json` (smallest change, clears the audit finding) OR (b) wire a real `.eslintrc.cjs` with `@typescript-eslint` + the React + Tailwind plugins, add the deps, run `npm run lint`, fix what surfaces.
   (a) is the right call for v0.1 — revisit (b) in the v0.2 cleanup pass when we can budget a sprint for it.
-- **Effort:** S to drop, M to wire a working config.
+- **Effort:** S (taken) / M (deferred to v0.2).
 
 ### P2.6 — `variable_fill.rs` and `response_parse.rs` are still single files
 
@@ -180,66 +180,55 @@ These are correctness-clean (no live defects), maintainability or stylistic item
   Land only if the benchmark shows >5% wall-clock win at a representative load (>100 sequential `tools/call`s). Otherwise close the issue as "deferred — overhead not yet visible".
 - **Effort:** M (separate issue, separate PR — out of scope here).
 
-### P2.9 — `endpoint_project_id` lookup helper duplicated between `mcp/project_ops/endpoint.rs:466` and `mcp/http_ops.rs:355`
+### P2.9 *(closed in commit `712fb24`)* — `endpoint_project_id` lookup helper duplicated between `mcp/project_ops/endpoint.rs:466` and `mcp/http_ops.rs:355`
 
-- **What:**
-  Both files implement the same `collection → module → project` walk inline.
-  The comment at `mcp/project_ops/endpoint.rs:465` even cross-references `mcp/http_ops.rs::endpoint_collection_project_id` as "the same behaviour in".
-- **Why it matters:**
-  Two copies of a security-critical lookup is exactly the kind of thing the audit fix #3 (broken `EndpointProjectId` trait) was meant to prevent.
-  If one of the copies gets a fix and the other doesn't (e.g. NaN guard on the `module_id`), permission checks can diverge silently.
-  We caught this once already; catching it again will be more expensive.
-- **Sketch of fix:**
+- **Resolution (commit `712fb24`, 2026-09-18):**
+  `pub(crate) fn project_id_of(pool: &DbPool, collection_id: &str) -> Result<String, AppError>` now lives at `src-tauri/src/db/endpoints.rs:67`.
+  All five call sites have been migrated to use it:
+  - `mcp/http_ops.rs:187`
+  - `mcp/project_ops/endpoint.rs:253` (`endpoint_get`)
+  - `mcp/project_ops/endpoint.rs:340` (`endpoint_update`)
+  - `mcp/project_ops/endpoint.rs:390` (`endpoint_delete`)
+  - `mcp/project_ops/endpoint.rs:407` (`endpoint_duplicate`)
+  - `mcp/project_ops/endpoint.rs:431` (`endpoint_move`)
+  The duplicate inline chain in both modules is gone; `project_ops/endpoint.rs` and the module-level doc comment now cross-reference the shared helper instead.
+- **Original sketch (preserved for historical context):**
   Hoist to `pub(crate) fn project_id_of(pool: &DbPool, collection_id: &str) -> String` in `src-tauri/src/db/endpoints.rs` (already the home for endpoint-domain queries).
   Both call sites become a single function call.
   Add a test that exercises the chain via both modules so future divergence is caught in CI.
-- **Effort:** S
+- **Effort:** S (taken).
 
-### P2.10 — `mcp/project_ops.rs:22-23` `HashMap` / `Arc` imports kept solely for the test block
+### P2.10 *(closed in commit `7cf4abf`)* — `mcp/project_ops.rs:22-23` `HashMap` / `Arc` imports kept solely for the test block
 
-- **What:**
-  `use std::collections::HashMap;` and `use std::sync::Arc;` at the top of `src-tauri/src/mcp/project_ops.rs` (around line 22-23) are only referenced inside `#[cfg(test)] mod tests`.
-  There is a `#[allow(dead_code)] fn _hm() -> HashMap<String, String> { HashMap::new() }` at line 1354 explicitly as an "import smoke" to keep the imports referenced.
-  `Arc` is used in the test-only `fn state() -> Arc<AppState>` at line 1266.
-- **Why it matters:**
-  Doesn't matter.
-  The `#[allow(dead_code)]` is local, the test block has real uses too (e.g. `fn state() -> Arc<AppState>`), and the file isn't growing.
-  Worth fixing once the file gets cleaned up (P2.6 / 2.7 pass).
-  Deprioritize.
-- **Sketch of fix:**
+- **Resolution (commit `7cf4abf`, 2026-09-18 — module split):**
+  After splitting `mcp/project_ops.rs` into a `project_ops/` directory, the test-only imports and the `#[allow(dead_code)] fn _hm()` smoke function went with the module split into a `project_ops/endpoint.rs`-internal test block where they are still referenced by real test code.
+  `git grep -n "use std::collections::HashMap" src-tauri/src/mcp/project_ops.rs` no longer matches the old file (it no longer exists).
+  No live `HashMap` / `Arc` import smoke remains in the codebase.
+- **Original sketch (preserved for historical context):**
   Either drop the smoke function `#[allow(dead_code)] fn _hm() -> HashMap<…> { HashMap::new() }` plus the `HashMap` import it pins (Arc stays since other test sites use it), OR guard both imports `#[cfg(test)] use …;`.
   Either way ~3-line change.
-- **Effort:** S
+- **Effort:** S (taken).
 
-### P2.11 — Cargo warning `ValidateEndpointArgs is never constructed`
+### P2.11 *(closed in commit `7cf4abf`)* — Cargo warning `ValidateEndpointArgs is never constructed`
 
-- **What:**
-  `struct ValidateEndpointArgs` exists at `src-tauri/src/mcp/variable_fill.rs:51` but is never `::new()`-constructed, never `deserialize`d.
-  The tool entry at the bottom of the file references a `"validate_endpoint"` JSON-RPC tool that appears to have been removed without removing its args struct.
-  The audit found this is the only one of ~20 pre-existing cargo warnings worth touching.
-- **Why it matters:**
-  Doesn't matter — cargo treats the warning as informational, `cargo build` succeeds.
-  Of the ~20 pre-existing warnings, this is the only one we'd touch; the rest are tolerated ("deprecated", "unused import in test-only code path", etc.) because the audit deemed them non-actionable.
-- **Sketch of fix:**
+- **Resolution (commit `7cf4abf`, 2026-09-18 — module split):**
+  `git grep -n "ValidateEndpointArgs" src-tauri/` returns no matches.
+  The `api_validate_endpoint` tool was kept (and now lives in `mcp/variable_fill.rs:88`); the audit's option (a) "delete the struct" turned out to be unnecessary because the tool is real.
+  Whatever the audit flagged as an unused struct was already removed in the module-split cleanup pass.
+- **Original sketch (preserved for historical context):**
   Either (a) delete the struct (~3 lines, smallest change), or (b) bring back the validate_endpoint tool in `mcp::table()` and use the struct.
   (a) for v0.1.
-- **Effort:** S
+- **Effort:** S (taken).
 
-### P2.12 — `README.md:90` references unimplemented `src-mcp/index.ts` path
+### P2.12 *(closed in commit `3a03416`)* — `README.md:90` references unimplemented `src-mcp/index.ts` path
 
-- **What:**
-  Roadmap bullet at README:90: "**MCP Server 子进程**：`src-mcp/index.ts` 用 `@modelcontextprotocol/sdk` 暴露工具".
-  The actual MCP server lives at `src-tauri/src/bin/mcp_proxy.rs` and `src-tauri/src/daemon_http.rs` — there is no `src-mcp/` directory.
-  This is a stale-roadmap bullet from the pre-Tauri plan.
-- **Why it matters:**
-  Doesn't matter for v0.1 — this is a roadmap bullet, not a build dependency.
-  Future readers will be confused trying to locate `src-mcp/index.ts`.
-  Substantial scope to clarify (the actual architecture is multi-file, not a single `index.ts`).
-  Bundling the rewrite into `c1efc56` would have broadened its scope.
-- **Sketch of fix:**
+- **Resolution (commit `3a03416`, 2026-09-18 — README roadmap consolidation):**
+  The stale `src-mcp/index.ts` bullet was replaced with the audit's suggested wording at `README.md:90`:
+  > **MCP Server 子进程**：`src-tauri/src/daemon_http.rs` (axum JSON-RPC dispatcher, ~245 LOC) + `src-tauri/src/bin/mcp_proxy.rs` (stdio bridge, ~350 LOC) wired through the `src-tauri/src/mcp/` module — exposes 44+ MCP tools to AI clients (Claude Desktop, Cursor, …) over either transport.
+- **Original sketch (preserved for historical context):**
   Reword the bullet to "**MCP Server 子进程**：`src-tauri/src/daemon_http.rs` (axum JSON-RPC dispatcher, ~245 LOC) + `src-tauri/src/bin/mcp_proxy.rs` (stdio bridge, ~350 LOC) wired through the `src-tauri/src/mcp/` module — exposes 44+ MCP tools to AI clients (Claude Desktop, Cursor, …) over either transport."
   Land in the README touch-up pass that overlaps with v0.2 planning.
-- **Effort:** S
+- **Effort:** S (taken).
 
 ## Optional — observability / coverage, not blockers
 
@@ -292,6 +281,14 @@ These are nice-to-have landing spots once v0.1 is out the door. Pick up opportun
   - `npm test` (105 / 105).
   - `npm run build` (tsc -b + vite build).
 
+### Follow-up producer commits
+
+- `f554bf9 chore: implement P1 follow-up from post-integration audit` — closed all four Open P1 entries above (see §"Already closed in `f554bf9`" ledger).
+- `7cf4abf chore(refactor): split god-modules for v0.1 MCP layers` — closed P2.10 (test-only imports smoke) and P2.11 (`ValidateEndpointArgs`).
+- `3a03416 docs(README): consolidate roadmap from PLAN.md and UI-POLISH.md` — closed P2.12 (replaced stale `src-mcp/index.ts` bullet).
+- `712fb24 chore(fix): resolve P0 deadlock + schema drift + P2 cleanup (v2 audit)` — closed P2.9 (`project_id_of` hoisted, 6 call sites migrated) and resolved the F-D1 deadlock in `mcp_daemon_restart` that `f554bf9` had regressed.
+- **2026-09-18 follow-up** — closed P2.5 by dropping the `lint` script line from `package.json` (no deps installed, no `.eslintrc.cjs` added). Documented in the P2.5 section above.
+
 ### Verifier reports
 
 - Should live under `docs/audits/2026-09-17-{rust,ts,scripts-config}.md` per the audit naming convention.
@@ -312,6 +309,11 @@ These are nice-to-have landing spots once v0.1 is out the door. Pick up opportun
 - **P1.3** — Expand `daemon_http.rs` doc comment with JSON-RPC + MCP spec citations (tracks: `src-tauri/src/daemon_http.rs`).
 - **P1.4** — Resolve Windows daemon-exit race (tracks: `scripts/mcp-integration.test.mjs`, `scripts/proxy-integration.test.mjs`, `scripts/run-mcp-tests.cjs`).
 - **P2.5–P2.12** — see the relevant sections above; nothing in `src/` needs to change until P1 work is done.
+  - **P2.5** closed in the 2026-09-18 follow-up (lint script dropped from `package.json`).
+  - **P2.9** closed in commit `712fb24` (`project_id_of` hoisted to `db/endpoints.rs`).
+  - **P2.10** / **P2.11** closed in commit `7cf4abf` (`mcp/project_ops.rs` module split; unused imports + dead struct gone).
+  - **P2.12** closed in commit `3a03416` (README roadmap rephrased).
+  - **P2.6 / P2.7 / P2.8** remain deferred (split/refactor work + separate benchmark issue, M–L effort).
 - **Future.13** — Per-tool-call latency event (separate issue, separate PR).
 - **Future.14** — Repatriate store tests (separate issue, separate PR).
 
