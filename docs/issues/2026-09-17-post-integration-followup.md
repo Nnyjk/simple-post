@@ -1,6 +1,6 @@
 # Post-integration audit follow-up (v0.1 MCP rollout)
 
-Generated 2026-09-17 after shipping commit `c1efc56 chore: post-integration audit fixes for v0.1 MCP rollout`. This document is the backlog of follow-up work identified during the 3-pronged audit (Rust / TS / scripts-config) that was intentionally NOT patched in the bulk commit, either because it needed more design discussion, was separate-task scope, or was P2-era polish. Items are grouped by priority and tagged with effort; open P1 entries are still real defects worth picking up before the v0.1 release notes go public.
+Generated 2026-09-17 after shipping commit `c1efc56 chore: post-integration audit fixes for v0.1 MCP rollout`. This document is the backlog of follow-up work identified during the 3-pronged audit (Rust / TS / scripts-config) that was intentionally NOT patched in the bulk commit, either because it needed more design discussion, was separate-task scope, or was P2-era polish. Items are grouped by priority and tagged with effort. All four P1 entries were closed by the follow-up commit `f554bf9` (see §"Already closed in f554bf9" ledger); this document now tracks remaining P2 cleanup debt and forward-looking items.
 
 ## How to read this document
 

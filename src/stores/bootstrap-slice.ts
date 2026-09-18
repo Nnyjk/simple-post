@@ -103,21 +103,19 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       };
     }),
   setActiveEnvironment: (id) => set({ activeEnvironmentId: id }),
-  setActiveEndpoint: (id) =>
-    set((s) => ({
-      // If a tab for this endpoint is already open, just activate it. If
-      // not, create one. Then keep `activeEndpointId` in sync so legacy
-      // selectors (useActiveEndpoint) keep returning the right thing.
-      activeEndpointId: id,
-      lastResponse: null,
-      openTabs:
-        id === null
-          ? s.openTabs
-          : s.openTabs.some((t) => t.kind === 'endpoint' && t.id === id)
-            ? s.openTabs
-            : [...s.openTabs, { id, kind: 'endpoint' }],
-      activeTabId: id === null ? s.activeTabId : id,
-    })),
+  setActiveEndpoint: (id) => {
+    // `activeEndpointId` is owned by this slice; the workspace-tab side
+    // effects (openTabs / activeTabId) belong to ui-slice — route them
+    // through the canonical actions instead of writing across slice
+    // boundaries here. `lastResponse: null` likewise is owned by
+    // ui-slice (it's the last HTTP response, not the active-selection
+    // cache), so it goes through `setLastResponse`.
+    set({ activeEndpointId: id });
+    if (id !== null) {
+      get().openTab('endpoint', id);
+    }
+    get().setLastResponse(null);
+  },
   toggleModuleExpanded: (id) =>
     set((s) => ({
       modules: s.modules.map((m) => (m.id === id ? { ...m, expanded: !m.expanded } : m)),
@@ -179,9 +177,15 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       activeProjectId: firstProject?.id ?? '',
       activeEnvironmentId: firstProjectEnv?.id ?? '',
       activeEndpointId: firstEndpoint?.id ?? null,
-      // Open the first endpoint by default, mirroring the old mock seed.
-      openTabs: firstEndpoint ? [{ id: firstEndpoint.id, kind: 'endpoint' as const }] : [],
-      activeTabId: firstEndpoint?.id ?? null,
     });
+    // Open the first endpoint by default, mirroring the old mock seed.
+    // Routed through ui-slice's `openTab` action so the workspace-tab
+    // invariants (idempotent re-open, single-source `activeTabId`) live
+    // in one place. On a fresh install with no endpoints yet, the
+    // initial `openTabs: []` / `activeTabId: null` from the slice
+    // factory is already correct, so we skip the call.
+    if (firstEndpoint) {
+      get().openTab('endpoint', firstEndpoint.id);
+    }
   },
 });

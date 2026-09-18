@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Modern desktop API tool with built-in MCP for AI collaboration",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -18,8 +21,8 @@
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
     "tauri:check": "cargo check --manifest-path src-tauri/Cargo.toml",
-    "test": "tsx --test src/lib/http-build.test.ts src/lib/http.test.ts",
-    "test:watch": "tsx --watch --test src/lib/http-build.test.ts src/lib/http.test.ts"
+    "test": "tsx --test src/lib/http-build.test.ts src/lib/http.test.ts src/stores/__tests__/mcp-slice.test.ts src/stores/__tests__/crud-slice.test.ts",
+    "test:watch": "tsx --watch --test src/lib/http-build.test.ts src/lib/http.test.ts src/stores/__tests__/mcp-slice.test.ts src/stores/__tests__/crud-slice.test.ts"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.1",

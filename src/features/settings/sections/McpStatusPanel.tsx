@@ -64,16 +64,14 @@ export function McpStatusPanel() {
       // Eager refresh — don't wait for the next 3s tick — and surface
       // the daemon-supplied error string immediately so the
       // crashed/restart dialog can show it without waiting for the
-      // next daemon poll. Falls back to the polled snapshot's
-      // `lastError` if the event payload omits one.
-      const lastError = e.payload?.lastError;
+      // next daemon poll. The `lastError` write goes through the
+      // slice's `recordLastError` action (no direct `setState`), which
+      // keeps the renderer from bypassing the slice invariants the
+      // mcp-slice doc-comment promises (no-op when no snapshot yet,
+      // short-circuit when the value hasn't changed).
+      const lastError = e.payload?.lastError ?? null;
       void useAppStore.getState().refreshMcpStatus().then(() => {
-        if (lastError) {
-          const cur = useAppStore.getState().mcpStatus;
-          if (cur && cur.lastError !== lastError) {
-            useAppStore.setState({ mcpStatus: { ...cur, lastError } });
-          }
-        }
+        useAppStore.getState().recordLastError(lastError);
       });
     })
       .then((u) => {

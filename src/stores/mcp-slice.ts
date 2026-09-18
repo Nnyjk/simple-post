@@ -49,6 +49,27 @@ function _getVisibilityHandler():
   return _mcpVisibilityHandler;
 }
 
+/**
+ * Canonical "not running" snapshot for the MCP daemon. Every fallback
+ * branch in `restartMcp` that constructs a fresh `McpUiState` (because
+ * the polled snapshot hasn't landed yet) spreads this constant and
+ * overrides `status` (and `lastError` on the failure path). Keeping
+ * the field list in one place is what stops the previous audit's
+ * finding F-E3 from regressing — adding a new `McpUiState` field
+ * should only touch this constant plus its type declaration in
+ * `@/lib/mcp-types`, not three action bodies scattered below.
+ */
+const EMPTY_MCP_STATE: McpUiState = {
+  status: 'stopped',
+  running: false,
+  pid: null,
+  port: null,
+  uptimeMs: 0,
+  requestsHandled: 0,
+  currentConnections: 0,
+  registeredTools: [],
+};
+
 /** State portion owned by the MCP slice. */
 export interface McpSliceState {
   /**
@@ -111,6 +132,18 @@ export interface McpSliceActions {
    * occurrence of the same status doesn't immediately reopen it.
    */
   markRestartDialogSeen: (status: McpRuntimeStatus) => void;
+  /**
+   * Record the most recent daemon-reported error on
+   * `mcpStatus.lastError`. Used by the `daemon://crashed` event
+   * listener in McpStatusPanel to surface the daemon-supplied error
+   * string immediately instead of waiting for the next 3-second poll
+   * to land. Passing `null` clears the field (e.g. after a successful
+   * restart). No-op when there is no `mcpStatus` snapshot yet — the
+   * panel tolerates the loading gap. Centralising this keeps the
+   * renderer from calling `setState` directly on `mcpStatus`, which
+   * would bypass every invariant the slice doc-comment promises.
+   */
+  recordLastError: (lastError: string | null) => void;
 }
 
 export type McpSlice = McpSliceState & McpSliceActions;
@@ -217,16 +250,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
     set({
       mcpStatus: prev
         ? { ...prev, status: 'restarting' }
-        : {
-            status: 'restarting',
-            running: false,
-            pid: null,
-            port: null,
-            uptimeMs: 0,
-            requestsHandled: 0,
-            currentConnections: 0,
-            registeredTools: [],
-          },
+        : { ...EMPTY_MCP_STATE, status: 'restarting' },
     });
     try {
       const result: RestartResult = await invoke<RestartResult>(
@@ -244,16 +268,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
         set({
           mcpStatus: cur
             ? { ...cur, status: 'crashed' }
-            : {
-                status: 'crashed',
-                running: false,
-                pid: null,
-                port: null,
-                uptimeMs: 0,
-                requestsHandled: 0,
-                currentConnections: 0,
-                registeredTools: [],
-              },
+            : { ...EMPTY_MCP_STATE, status: 'crashed' },
         });
         return;
       }
@@ -266,22 +281,24 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
       set({
         mcpStatus: cur
           ? { ...cur, status: 'crashed', lastError }
-          : {
-              status: 'crashed',
-              running: false,
-              pid: null,
-              port: null,
-              uptimeMs: 0,
-              requestsHandled: 0,
-              currentConnections: 0,
-              registeredTools: [],
-              lastError,
-            },
+          : { ...EMPTY_MCP_STATE, status: 'crashed', lastError },
       });
       throw e;
     }
   },
   markRestartDialogSeen: (status) => {
     set({ restartDialogSeen: status });
+  },
+  recordLastError: (lastError) => {
+    set((s) => {
+      if (!s.mcpStatus) return {};
+      // `McpUiState.lastError` is optional (`string | undefined`),
+      // not `string | null`. Coerce the explicit `null` "clear"
+      // sentinel from the panel's listener into `undefined` so the
+      // spread type-checks under strict mode.
+      const next: string | undefined = lastError ?? undefined;
+      if (s.mcpStatus.lastError === next) return {};
+      return { mcpStatus: { ...s.mcpStatus, lastError: next } };
+    });
   },
 });
