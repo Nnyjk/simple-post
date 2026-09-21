@@ -71,3 +71,10 @@ coverage/
 # Tauri
 src-tauri/target/
 src-tauri/gen/
+
+# Cargo workspace (commit 3: src-tauri became a member of the workspace
+# rooted at this directory, so cargo now drops build artifacts into
+# `<repo-root>/target/` instead of `src-tauri/target/`. Keep both
+# rules so historical `src-tauri/target/` artifacts don't accidentally
+# surface again if the workspace is ever rolled back).
+/target/
