@@ -15,7 +15,6 @@
  * This slice is read-only besides the expansion toggles.
  */
 import type { StateCreator } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
 import type {
   Project,
   Module,
@@ -23,7 +22,7 @@ import type {
   Endpoint,
   Environment,
 } from '@/types/domain';
-import { COMMANDS } from '@/lib/tauri-commands';
+import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from './app-store';
 
 /** State portion owned by the bootstrap slice. */
@@ -136,23 +135,23 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     // crash — `loaded` simply stays false and the user sees the empty
     // state until the daemon comes online.
     const [projects, modules, collections, endpoints, environments] = await Promise.all([
-      invoke<Project[]>(COMMANDS.projectsList).catch((e) => {
+      invokeCmd<Project[]>(COMMANDS.projectsList).catch((e) => {
         console.error('[store] projects_list failed', e);
         return [] as Project[];
       }),
-      invoke<Module[]>(COMMANDS.modulesList).catch((e) => {
+      invokeCmd<Module[]>(COMMANDS.modulesList).catch((e) => {
         console.error('[store] modules_list failed', e);
         return [] as Module[];
       }),
-      invoke<Collection[]>(COMMANDS.collectionsList).catch((e) => {
+      invokeCmd<Collection[]>(COMMANDS.collectionsList).catch((e) => {
         console.error('[store] collections_list failed', e);
         return [] as Collection[];
       }),
-      invoke<Endpoint[]>(COMMANDS.endpointsList, {}).catch((e) => {
+      invokeCmd<Endpoint[]>(COMMANDS.endpointsList, {}).catch((e) => {
         console.error('[store] endpoints_list failed', e);
         return [] as Endpoint[];
       }),
-      invoke<Environment[]>(COMMANDS.environmentsList).catch((e) => {
+      invokeCmd<Environment[]>(COMMANDS.environmentsList).catch((e) => {
         console.error('[store] environments_list failed', e);
         return [] as Environment[];
       }),

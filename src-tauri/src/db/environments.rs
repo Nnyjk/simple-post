@@ -38,6 +38,22 @@ pub fn list_by_project(
     Ok(out)
 }
 
+/// All environments across every project — used by the REST
+/// `GET /api/environments` when no `projectId` filter is supplied.
+pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, name, is_active, base_urls_json, variables_json \
+         FROM environments \
+         ORDER BY project_id ASC, name ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![], row_to_env)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(AppError::Sqlite)?);
+    }
+    Ok(out)
+}
+
 /// The single active env for the project, or `None` if none is
 /// active. The schema doesn't enforce a single-active-row invariant
 /// (the UI does), so this returns whatever row has `is_active = 1`.

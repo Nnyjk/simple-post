@@ -30,6 +30,20 @@
 
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
 
+// ---------------------------------------------------------------------------
+// Module-load bootstrap — installed BEFORE any store slice (and therefore
+// before `@/lib/tauri-commands.ts`) is imported, so the renderer-side
+// `IS_TAURI_SHELL` constant — captured at module evaluation — resolves to
+// `true` for the entire test run.
+//
+// Without this bootstrap `IS_TAURI_SHELL` would be `false` and the slices
+// would route through `webInvokeCmd` (fetch → /api/*), which has no
+// matching REST endpoint in the Node test environment.
+// ---------------------------------------------------------------------------
+const g: any = globalThis;
+if (!g.window) g.window = g;
+if (!g.window.__TAURI_INTERNALS__) g.window.__TAURI_INTERNALS__ = {};
+
 type EventListener = (event: any) => unknown;
 
 export interface ShimGlobals {

@@ -33,6 +33,22 @@ pub fn list_by_project(
     Ok(out)
 }
 
+/// All modules across every project — used by the REST `GET /api/modules`
+/// when no `projectId` filter is supplied (SPA bootstrap path).
+pub fn list_all(conn: &mut Connection) -> Result<Vec<Module>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, name, description, sort_order \
+         FROM modules \
+         ORDER BY project_id ASC, sort_order ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![], row_to_module)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(AppError::Sqlite)?);
+    }
+    Ok(out)
+}
+
 /// Single module lookup. Returns `NotFound` if absent.
 pub fn get(conn: &mut Connection, id: &str) -> Result<Module, AppError> {
     let mut stmt = conn.prepare(

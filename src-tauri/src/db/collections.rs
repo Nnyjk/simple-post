@@ -38,6 +38,22 @@ pub fn list_by_module(
     Ok(out)
 }
 
+/// All collections across every module — used by the REST
+/// `GET /api/collections` when no `moduleId` filter is supplied.
+pub fn list_all(conn: &mut Connection) -> Result<Vec<Collection>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, module_id, parent_collection_id, name, description, sort_order \
+         FROM collections \
+         ORDER BY module_id ASC, sort_order ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![], row_to_collection)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(AppError::Sqlite)?);
+    }
+    Ok(out)
+}
+
 pub fn get(conn: &mut Connection, id: &str) -> Result<Collection, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, module_id, parent_collection_id, name, description, sort_order \

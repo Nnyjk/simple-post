@@ -205,7 +205,13 @@ pub struct Endpoint {
     pub notes: Option<String>,
     pub tags: Vec<String>,
     pub sort_order: i64,
+    /// Server-side timestamp; defaults to `now_ms()` when the caller
+    /// (e.g. the REST `POST /api/endpoints` handler) doesn't supply one.
+    /// Tauri commands always set this explicitly so the default is inert
+    /// for them.
+    #[serde(default = "now_ms")]
     pub created_at: i64,
+    #[serde(default = "now_ms")]
     pub updated_at: i64,
 }
 
@@ -361,10 +367,19 @@ pub struct Project {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    #[serde(default)]
     pub base_url_definitions: Vec<BaseUrlDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_base_url_definition_id: Option<String>,
+    #[serde(default = "default_project_color")]
     pub color: String,
+    /// Server-side timestamp; defaults to `now_ms()` when the caller
+    /// (e.g. the REST `POST /api/projects` handler) doesn't supply one.
+    /// Tauri commands always set this explicitly so the default is inert
+    /// for them.
+    #[serde(default = "now_ms")]
     pub created_at: i64,
+    #[serde(default = "now_ms")]
     pub updated_at: i64,
 }
 
@@ -396,8 +411,11 @@ pub struct Environment {
     pub id: String,
     pub project_id: String,
     pub name: String,
+    #[serde(default)]
     pub base_urls: HashMap<String, String>,
+    #[serde(default)]
     pub variables: HashMap<String, String>,
+    #[serde(default)]
     pub is_active: bool,
 }
 
@@ -501,6 +519,31 @@ pub struct ApiResponse {
 ///
 /// `SystemTime::now()` panics only on clock skew past the unix epoch;
 /// treat that as a programmer error rather than user-recoverable.
+/// Default project color when a caller doesn't supply one. Mirrors
+/// `commands::default_color` so REST and Tauri paths agree. The two
+/// live in different modules to avoid a circular dep (commands already
+/// depends on domain).
+pub fn default_project_color() -> String {
+    "#3b82f6".to_string()
+}
+
+/// Generate a unique opaque id. Mirrors `commands::uid` so REST and
+/// Tauri paths agree. Both functions live here because `commands` already
+/// depends on `domain`; pulling the inverse into commands.rs would cycle.
+/// The per-process monotonic counter guarantees uniqueness inside the
+/// running process even when the wall clock hasn't advanced.
+pub fn uid() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("sp_{:x}{:x}", nanos, n)
+}
+
 pub fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

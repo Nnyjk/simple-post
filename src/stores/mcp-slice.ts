@@ -22,8 +22,7 @@
  * to the rest of the store is the shared `AppState` type.
  */
 import type { StateCreator } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { COMMANDS } from '@/lib/tauri-commands';
+import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { McpRuntimeStatus, McpUiState, RestartResult } from '@/lib/mcp-types';
 import type { AppState } from './app-store';
 
@@ -255,7 +254,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
       // string and the badge falls back to `'stopped'` for any
       // unknown value, so a runtime mismatch is impossible to
       // surface as a TS error.
-      const dto = (await invoke<unknown>(COMMANDS.mcpStatus)) as McpUiState;
+      const dto = (await invokeCmd<unknown>(COMMANDS.mcpStatus)) as McpUiState;
       set({ mcpStatus: dto });
     } catch (e) {
       // Daemon unreachable (cold start, dev mode without the daemon
@@ -280,7 +279,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
         : { ...EMPTY_MCP_STATE, status: 'restarting' },
     });
     try {
-      const result: RestartResult = await invoke<RestartResult>(
+      const result: RestartResult = await invokeCmd<RestartResult>(
         COMMANDS.mcpDaemonRestart,
       );
       if (!result.ok) {
@@ -335,7 +334,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
    */
   refreshMcpAutoStart: async () => {
     try {
-      const v = await invoke<boolean>(COMMANDS.mcpAutoStartGet);
+      const v = await invokeCmd<boolean>(COMMANDS.mcpAutoStartGet);
       set({ mcpAutoStart: v });
     } catch (e) {
       console.warn('[store] mcp_auto_start_get failed', e);
@@ -348,7 +347,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
     // roll the switch back and surface the error.
     set({ mcpAutoStart: value });
     try {
-      await invoke<boolean>(COMMANDS.mcpAutoStartSet, { value });
+      await invokeCmd<boolean>(COMMANDS.mcpAutoStartSet, { value });
       // If we just turned auto-start on, the daemon may have started
       // — refresh the snapshot so the badge updates without waiting
       // for the next 3s tick.

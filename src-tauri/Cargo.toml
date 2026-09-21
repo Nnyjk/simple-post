@@ -4,6 +4,14 @@ version = "0.1.0"
 description = "Modern desktop API tool with built-in MCP"
 edition = "2021"
 rust-version = "1.77.2"
+# Two binaries coexist in this crate: the main Tauri app
+# (`src/main.rs`, name derived from `name = "simple-post"`) and the
+# stdio bridge for MCP clients (`src/bin/mcp_proxy.rs`, named
+# `simple-post-mcp-proxy`). Tauri CLI's `tauri dev` / `tauri build`
+# shells out to plain `cargo run` / `cargo build` and doesn't pass
+# `--bin`, so we pick the main app by default. Build the proxy
+# explicitly with `cargo build --bin simple-post-mcp-proxy`.
+default-run = "simple-post"
 
 [lib]
 name = "simple_post_lib"

@@ -1,38 +1,35 @@
 /**
- * Real HTTP sender — dispatches between two transports:
+ * Real HTTP sender — single transport, two distribution shapes:
  *
- *   1. Tauri (`invoke(COMMANDS.httpRequest, …)`) when the app is
- *      running inside the desktop shell. This routes the request
- *      through a Rust `reqwest` client, which completely sidesteps
- *      the webview's CORS enforcement. This is the path that fixes
- *      the "Network Error" users saw when the app was served by
- *      plain Vite.
- *   2. Native `fetch` otherwise (browser dev mode, future web build).
- *      Kept intact so the existing single-source-of-truth builder,
- *      timeout/abort, and response-truncation logic continue to apply.
+ *   1. Tauri shell  → `invokeCmd(COMMANDS.httpRequest, …)` hits the
+ *                     `http_request` Rust command, which delegates to
+ *                     `http_executor::execute` (reqwest). Bypasses the
+ *                     webview's CORS enforcement entirely.
+ *   2. Web / Dev    → `invokeCmd` falls through to `webInvokeCmd` →
+ *                     `POST /api/http/send` on the axum `serve-web`
+ *                     host, which calls the same `http_executor::execute`.
+ *                     Same Rust path, same response shape.
  *
- * Both transports return the same `ApiResponse` shape; the rest of the
- * app (HttpTester, ResponseViewer, the cURL exporter) doesn't care
- * which one ran.
+ * Both shapes return the same `RustHttpResult` envelope; the rest of
+ * the app (HttpTester, ResponseViewer, the cURL exporter) doesn't
+ * care which one ran.
  *
  * Contract:
  *   - Builds URL + init via `buildFetchInit` (single source of truth
- *     shared with the cURL exporter). For Tauri, only the URL,
- *     headers, and body *string* are sent — the rest is JSON-friendly
- *     payload.
+ *     shared with the cURL exporter). Only the URL, headers (as a
+ *     tuple array) and body *string* are sent — the rest is a
+ *     JSON-friendly payload.
  *   - Composes a per-call AbortController from the caller's `signal`
- *     and arms `settings.timeoutMs`.
- *   - Reads the response body up to `settings.maxResponseSizeKb` KB.
- *     Larger responses are truncated and annotated — Tauri does the
- *     truncation on the Rust side before the body crosses the IPC
- *     boundary; fetch path truncates in-process.
+ *     and arms `settings.timeoutMs`. The signal is forwarded to
+ *     `invokeCmd` which passes it to native `fetch` in the web
+ *     shape; the Tauri shape rejects the JS promise but lets the
+ *     Rust `reqwest` keep running to completion.
  *   - Returns an `ApiResponse`. Network failures, timeouts, and aborts
  *     surface as `status: 0` with distinguishing `statusText` so the
  *     UI can render the right banner.
  *   - Never throws — `HttpTester` just dispatches the returned
  *     `ApiResponse` into the store.
  */
-import { invoke } from '@tauri-apps/api/core';
 import type {
   ApiResponse,
   AuthConfig,
@@ -42,7 +39,7 @@ import type {
   RequestBody,
 } from '@/types/domain';
 import type { RequestSettings } from '@/stores/app-store';
-import { COMMANDS } from './tauri-commands';
+import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
 import { buildFetchInit } from './http-build';
 
 export interface SendInput {
@@ -59,74 +56,12 @@ export interface SendInput {
   signal?: AbortSignal;
 }
 
-/**
- * Are we running inside the Tauri desktop shell?
- *
- * Tauri 2 sets `window.__TAURI_INTERNALS__` for any window that the
- * webview driver bootstraps. The legacy `window.__TAURI__` global is
- * kept alive by `withGlobalTauri: true` in `tauri.conf.json`, so we
- * check both for forward/backward compatibility.
- *
- * Detection happens at module load — flipping between modes within a
- * session would require a reload either way.
- */
-const isTauri: boolean =
-  typeof window !== 'undefined' &&
-  (Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
-    Boolean((window as { __TAURI__?: unknown }).__TAURI__));
-
 // ---------------------------------------------------------------------------
 // shared helpers
 // ---------------------------------------------------------------------------
 
-/**
- * `invoke` wrapper that rejects with an AbortError when the caller's
- * `signal` fires. The underlying IPC call is NOT cancelled in Rust
- * (would need a future tauri release with native signal support),
- * but the JS-side promise rejects and the response is discarded by
- * `HttpTester` (whose `inFlightRef` mid-flight replacement prevents
- * the late response from clobbering the new one).
- */
-async function invokeWithAbort<T>(
-  cmd: string,
-  args: Record<string, unknown>,
-  signal: AbortSignal | undefined,
-): Promise<T> {
-  if (!signal) return invoke<T>(cmd, args);
-  return new Promise<T>((resolve, reject) => {
-    if (signal.aborted) {
-      reject(new DOMException('aborted', 'AbortError'));
-      return;
-    }
-    const onAbort = () => reject(new DOMException('aborted', 'AbortError'));
-    signal.addEventListener('abort', onAbort, { once: true });
-    invoke<T>(cmd, args)
-      .then(
-        (v) => {
-          signal.removeEventListener('abort', onAbort);
-          resolve(v);
-        },
-        (e) => {
-          signal.removeEventListener('abort', onAbort);
-          reject(e);
-        },
-      );
-  });
-}
-
-/** Flatten a `Headers` object into a plain `Record<string, string>`.
- *  Multiple values for the same key (e.g. `Set-Cookie`) are joined
- *  with `, ` — the standard HTTP convention. */
-function headersToObject(headers: Headers): Record<string, string> {
-  const out: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    if (out[key] === undefined) out[key] = value;
-    else out[key] = `${out[key]}, ${value}`;
-  });
-  return out;
-}
-
-/** Same flattening but starting from `Array<[name, value]>` (Tauri). */
+/** Same flattening but starting from `Array<[name, value]>` (Rust
+ *  serialises headers as a tuple list across both shapes). */
 function tuplesToRecord(pairs: ReadonlyArray<readonly [string, string]>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of pairs) {
@@ -134,24 +69,6 @@ function tuplesToRecord(pairs: ReadonlyArray<readonly [string, string]>): Record
     else out[k] = `${out[k]}, ${v}`;
   }
   return out;
-}
-
-/** Convert a `HeadersInit` into a list of `[name, value]` tuples.
- *  Used by the Tauri path so we can serialize headers as JSON. */
-function headersInitToTuples(h: HeadersInit): Array<[string, string]> {
-  if (Array.isArray(h)) return h as Array<[string, string]>;
-  if (typeof Headers !== 'undefined' && h instanceof Headers) {
-    const out: Array<[string, string]> = [];
-    h.forEach((v, k) => out.push([k, v]));
-    return out;
-  }
-  if (h && typeof h === 'object') return Object.entries(h as Record<string, string>);
-  return [];
-}
-
-/** UTF-8 byte length (matches what `Blob([s]).size` returns). */
-function byteLength(s: string): number {
-  return new Blob([s]).size;
 }
 
 /** Best-effort JSON parse — leave `bodyJson` undefined on failure
@@ -165,8 +82,8 @@ function tryParseJson(text: string): unknown | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// error shape builders — shared between transports so the UI sees the same
-// banner regardless of which path ran.
+// error shape builders — shared so the UI sees the same banner regardless
+// of which underlying transport (Tauri IPC vs. serve-web HTTP) ran.
 // ---------------------------------------------------------------------------
 
 function timeoutResponse(
@@ -228,7 +145,10 @@ function networkErrorResponse(
 }
 
 // ---------------------------------------------------------------------------
-// Tauri path
+// Backend result envelope — matches `crate::http_executor::HttpResult`
+// (camelCase fields, see `#[serde(rename_all = "camelCase")]` on the
+// Rust struct). Both the Tauri command and the axum `/api/http/send`
+// route return this exact shape so we can deserialise with one type.
 // ---------------------------------------------------------------------------
 
 interface RustHttpOk {
@@ -253,21 +173,27 @@ interface RustHttpResult {
   error?: RustHttpErr;
 }
 
-async function sendViaTauri(input: SendInput): Promise<ApiResponse> {
+// ---------------------------------------------------------------------------
+// Single transport — both shapes share this body. `invokeCmd` does the
+// runtime dispatch: Tauri shell → Tauri IPC; web → `POST /api/http/send`.
+// ---------------------------------------------------------------------------
+
+async function sendViaBackend(input: SendInput): Promise<ApiResponse> {
   const built = buildFetchInit(input);
-  const headers = headersInitToTuples(built.init.headers ?? {});
+  // `buildFetchInit` returns a `RequestInit` with `Headers | [][]
+  // | Record`. Normalise to a tuple list — Rust deserialises
+  // `Vec<(String, String)>` and the web bridge JSON-encodes a tuple
+  // list verbatim, so this is the only shape that works on both sides.
+  const headers = initHeadersToTuples(built.init.headers ?? {});
   const body =
     typeof built.init.body === 'string' && built.init.body.length > 0
       ? built.init.body
       : null;
 
+  const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
+
   try {
-    // Tauri 2 `invoke` doesn't expose `signal` on its InvokeOptions
-    // shape in this version (added later in 2.x). Wrap the call in a
-    // tiny Promise.race-ish helper so the caller's AbortSignal still
-    // rejects this side — the Rust `reqwest` keeps running to
-    // completion in the background but its result is discarded.
-    const r = await invokeWithAbort<RustHttpResult>(
+    const r = await invokeCmd<RustHttpResult>(
       COMMANDS.httpRequest,
       {
         method: input.method,
@@ -278,7 +204,7 @@ async function sendViaTauri(input: SendInput): Promise<ApiResponse> {
         followRedirects: input.settings.followRedirects,
         maxResponseSizeKb: input.settings.maxResponseSizeKb,
       },
-      input.signal,
+      options,
     );
 
     if (!r.ok || !r.response) {
@@ -307,233 +233,60 @@ async function sendViaTauri(input: SendInput): Promise<ApiResponse> {
       url: built.url,
     };
   } catch (err) {
-    // invoke() rejects on: Tauri not actually wired (IPC failure),
-    // deserialization mismatch, or the caller's AbortSignal aborting.
-    // We surface abort distinctly; everything else falls back to the
-    // generic Network Error banner so the UI stays informative.
+    // `invokeCmd` rejects on:
+    //   - Tauri IPC failure (e.g. devtools not wired)
+    //   - serve-web HTTP non-2xx / network unreachable
+    //   - WEB_ROUTES missing the command (would only happen if
+    //     someone added a COMMANDS entry without a matching route)
+    //   - the caller's AbortSignal aborting (Tauri shape rejects,
+    //     web shape throws DOMException)
+    // We surface abort distinctly; everything else falls back to
+    // the generic Network Error banner so the UI stays informative.
     const name = (err as { name?: string })?.name;
     const msg = (err as Error)?.message ?? String(err);
     if (name === 'AbortError' || /abort/i.test(msg)) {
       return abortedResponse(input, built.url, 0);
     }
-    console.error('[http.ts] tauri invoke failed:', err);
+    console.error('[http.ts] backend invoke failed:', err);
     return networkErrorResponse(input, built.url, 0, msg);
   }
 }
 
-// ---------------------------------------------------------------------------
-// browser fetch path (original behavior, kept for the Vite-only dev mode)
-// ---------------------------------------------------------------------------
-
-async function sendViaFetch(input: SendInput): Promise<ApiResponse> {
-  const built = buildFetchInit(input);
-  const start = performance.now();
-
-  // ----- AbortController composition -----
-  const ctrl = new AbortController();
-  let externalListener: (() => void) | undefined;
-  if (input.signal) {
-    if (input.signal.aborted) {
-      ctrl.abort(input.signal.reason);
-    } else {
-      const onExternalAbort = () => ctrl.abort(input.signal!.reason);
-      externalListener = onExternalAbort;
-      input.signal.addEventListener('abort', onExternalAbort, { once: true });
-    }
+/** Convert any `HeadersInit` shape into a list of `[name, value]`
+ *  tuples. Mirrors the helper the old `sendViaTauri` carried. */
+function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
+  if (Array.isArray(h)) return h as Array<[string, string]>;
+  if (typeof Headers !== 'undefined' && h instanceof Headers) {
+    const out: Array<[string, string]> = [];
+    h.forEach((v, k) => out.push([k, v]));
+    return out;
   }
-
-  // ----- Timeout -----
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    ctrl.abort();
-  }, input.settings.timeoutMs);
-
-  const init: RequestInit = built.init;
-  init.signal = ctrl.signal;
-  init.redirect = input.settings.followRedirects ? 'follow' : 'manual';
-
-  try {
-    const res = await fetch(built.url, init);
-    const durationMs = performance.now() - start;
-
-    const maxBytes = Math.max(1024, input.settings.maxResponseSizeKb * 1024);
-    const fullText = await res.text();
-    const truncated = fullText.length > maxBytes;
-    const text = truncated
-      ? `${fullText.slice(0, maxBytes)}\n\n[truncated at ${input.settings.maxResponseSizeKb} KB]`
-      : fullText;
-
-    return {
-      status: res.status,
-      statusText: res.statusText || (res.ok ? 'OK' : 'Error'),
-      durationMs,
-      sizeBytes: byteLength(text),
-      headers: headersToObject(res.headers),
-      body: text,
-      bodyJson: tryParseJson(text),
-      contentType: res.headers.get('content-type') ?? '',
-      method: input.method,
-      url: built.url,
-    };
-  } catch (err) {
-    const durationMs = performance.now() - start;
-    const name = (err as { name?: string })?.name;
-    if (name === 'AbortError') {
-      if (timedOut) {
-        return timeoutResponse(input, built.url, durationMs);
-      }
-      return abortedResponse(input, built.url, durationMs);
-    }
-    return networkErrorResponse(
-      input,
-      built.url,
-      durationMs,
-      (err as Error)?.message ?? String(err),
-    );
-  } finally {
-    clearTimeout(timer);
-    if (externalListener && input.signal) {
-      input.signal.removeEventListener('abort', externalListener);
-    }
-  }
+  if (h && typeof h === 'object') return Object.entries(h as Record<string, string>);
+  return [];
 }
 
 // ---------------------------------------------------------------------------
-// public entry — picks the transport once based on the runtime context.
+// public entry — single transport, one call site.
 // ---------------------------------------------------------------------------
 
 /**
- * Send the request described by `input` via `fetch` (browser) or the
- * Tauri `http_request` command (desktop shell). See module header.
+ * Send the request described by `input` via the backend transport
+ * (`invokeCmd(COMMANDS.httpRequest, …)`). See module header.
  *
- * Three transports, picked at module load:
- *   - Tauri shell: `sendViaTauri`  → `http_request` Tauri command (reqwest,
- *     bypasses browser CORS)
- *   - `serve-web` host reachable: `sendViaServer` → POST `/api/http/send`,
- *     same reqwest path on the server side, same response shape
- *   - Vite dev / standalone browser: `sendViaFetch` → raw browser fetch
- *     (subject to CORS; useful for dev iteration on UI)
+ * The transport is picked once at module load:
+ *   - Tauri shell → `invoke()` IPC → Rust `http_executor::execute`
+ *   - serve-web   → `POST /api/http/send` → same Rust executor
  *
- * The "is the server reachable" probe is intentionally cheap (a single
- * `GET /api/healthz` with a 1s timeout). If it fails we fall through
- * to the browser-fetch path so dev mode stays useful.
+ * Both shapes hit the same `reqwest`-based executor so we get
+ * identical behaviour: timeout, redirect, max body, body truncation
+ * all happen server-side and the result crosses the boundary as a
+ * JSON envelope.
+ *
+ * Note: there is no "raw browser fetch" fallback. In every supported
+ * distribution shape there's a real backend in front of `reqwest`,
+ * so a direct browser fetch would only ever be relevant for a
+ * hypothetical Vite-only / no-server mode that we don't ship.
  */
 export async function sendRequest(input: SendInput): Promise<ApiResponse> {
-  if (isTauri) {
-    return sendViaTauri(input);
-  }
-  if (await isServeWebReachable()) {
-    return sendViaServer(input);
-  }
-  return sendViaFetch(input);
-}
-
-let _serverReachableCache: { value: boolean; at: number } | null = null;
-async function isServeWebReachable(): Promise<boolean> {
-  // Cache the probe for 5 s so a busy request loop doesn't hit
-  // /api/healthz on every call.
-  const now = Date.now();
-  if (_serverReachableCache && now - _serverReachableCache.at < 5_000) {
-    return _serverReachableCache.value;
-  }
-  try {
-    const ctrl = new AbortController();
-    const t = window.setTimeout(() => ctrl.abort(), 1_000);
-    const res = await fetch('/api/healthz', { signal: ctrl.signal });
-    window.clearTimeout(t);
-    const ok = res.ok;
-    _serverReachableCache = { value: ok, at: now };
-    return ok;
-  } catch {
-    _serverReachableCache = { value: false, at: now };
-    return false;
-  }
-}
-
-async function sendViaServer(input: SendInput): Promise<ApiResponse> {
-  const start = performance.now();
-  const built = buildFetchInit(input);
-  // Server-side reqwest mirrors the browser path: timeout, redirect,
-  // max body size all live in `RequestSettings`. Pull the current
-  // values from the persisted settings rather than re-deriving them
-  // — keeps the web shape behaviourally identical to the Tauri shape.
-  try {
-    const res = await fetch('/api/http/send', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        method: input.method,
-        url: built.url,
-        headers: serializeHeaders(built.init.headers ?? {}),
-        body: input.body,
-        timeoutMs: input.settings.timeoutMs,
-        followRedirects: input.settings.followRedirects,
-        maxResponseSizeKb: input.settings.maxResponseSizeKb,
-      }),
-    });
-    const durationMs = performance.now() - start;
-    if (!res.ok) {
-      // Server replied with an error envelope (validation / 5xx).
-      const errText = await res.text().catch(() => '');
-      return networkErrorResponse(input, built.url, durationMs, `HTTP ${res.status}: ${errText}`);
-    }
-    // The Rust `HttpResult` mirrors `ApiResponse` shape-for-shape, so
-    // we can pass it through verbatim. See `http_executor.rs::HttpResult`.
-    const result = (await res.json()) as ServerHttpResult;
-    return {
-      status: result.status,
-      statusText: result.statusText,
-      durationMs,
-      sizeBytes: result.sizeBytes,
-      headers: tupleArrayToObject(result.headers),
-      body: result.body,
-      bodyJson: tryParseJson(result.body),
-      contentType: result.contentType,
-      method: input.method,
-      url: result.url,
-    };
-  } catch (err) {
-    const durationMs = performance.now() - start;
-    const msg = (err as Error)?.message ?? String(err);
-    return networkErrorResponse(input, built.url, durationMs, msg);
-  }
-}
-
-/**
- * Wire shape returned by the server's `POST /api/http/send` endpoint.
- * Matches `crate::http_executor::HttpResult` field-for-field.
- */
-interface ServerHttpResult {
-  ok: boolean;
-  status: number;
-  statusText: string;
-  durationMs: number;
-  sizeBytes: number;
-  headers: Array<[string, string]>;
-  body: string;
-  contentType: string;
-  method: string;
-  url: string;
-  truncated: boolean;
-}
-
-function serializeHeaders(init: HeadersInit): Array<[string, string]> {
-  const out: Array<[string, string]> = [];
-  if (Array.isArray(init)) {
-    for (const [k, v] of init) out.push([k, v]);
-  } else if (typeof (init as Headers).entries === 'function') {
-    for (const [k, v] of (init as Headers).entries()) out.push([k, v]);
-  } else {
-    for (const [k, v] of Object.entries(init as Record<string, string>)) {
-      out.push([k, v]);
-    }
-  }
-  return out;
-}
-
-function tupleArrayToObject(pairs: ReadonlyArray<readonly [string, string]>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of pairs) out[k] = v;
-  return out;
+  return sendViaBackend(input);
 }

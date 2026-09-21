@@ -6,7 +6,7 @@
  * All write actions follow the same shape:
  *   1. Optimistic local mutation via `set()` so the UI updates
  *      immediately.
- *   2. Fire-and-forget (or awaited) `invoke<...>(COMMANDS.*)`.
+ *   2. Fire-and-forget (or awaited) `invokeCmd<...>(COMMANDS.*)`.
  *   3. On failure, snapshot+rollback the local state and log.
  *
  * The slice also owns the small pure helpers that the move/delete
@@ -22,7 +22,6 @@
  * module directly (the `AppState` type is the only coupling).
  */
 import type { StateCreator } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
 import type {
   Project,
   Module,
@@ -32,7 +31,7 @@ import type {
   HttpMethod,
   BaseUrlDefinition,
 } from '@/types/domain';
-import { COMMANDS } from '@/lib/tauri-commands';
+import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { uid } from '@/lib/utils';
 import type { OpenTab } from './store-types';
 import type { AppState } from './app-store';
@@ -272,7 +271,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
 
   addProject: async (name, opts) => {
     try {
-      const project = await invoke<Project>(COMMANDS.projectsCreate, {
+      const project = await invokeCmd<Project>(COMMANDS.projectsCreate, {
         name,
         opts: opts ?? null,
       });
@@ -292,7 +291,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       projects: s.projects.map((p) => (p.id === id ? optimistic : p)),
     }));
     try {
-      await invoke<Project>(COMMANDS.projectsUpdate, { id, patch });
+      await invokeCmd<Project>(COMMANDS.projectsUpdate, { id, patch });
     } catch (e) {
       console.error('[store] projects_update failed', e);
       set((s) => ({
@@ -353,7 +352,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invoke<void>(COMMANDS.projectsDelete, { id });
+      await invokeCmd<void>(COMMANDS.projectsDelete, { id });
     } catch (e) {
       console.error('[store] projects_delete failed', e);
       set(snapshot);
@@ -364,7 +363,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
 
   addModule: async (projectId, name, opts) => {
     try {
-      const mod = await invoke<Module>(COMMANDS.modulesCreate, {
+      const mod = await invokeCmd<Module>(COMMANDS.modulesCreate, {
         projectId,
         name,
         opts: opts ?? null,
@@ -384,7 +383,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       modules: s.modules.map((m) => (m.id === id ? optimistic : m)),
     }));
     try {
-      await invoke<Module>(COMMANDS.modulesUpdate, { id, patch });
+      await invokeCmd<Module>(COMMANDS.modulesUpdate, { id, patch });
     } catch (e) {
       console.error('[store] modules_update failed', e);
       set((s) => ({
@@ -435,7 +434,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invoke<void>(COMMANDS.modulesDelete, { id });
+      await invokeCmd<void>(COMMANDS.modulesDelete, { id });
     } catch (e) {
       console.error('[store] modules_delete failed', e);
       set(snapshot);
@@ -446,7 +445,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
 
   addCollection: async (moduleId, name, opts) => {
     try {
-      const collection = await invoke<Collection>(COMMANDS.collectionsCreate, {
+      const collection = await invokeCmd<Collection>(COMMANDS.collectionsCreate, {
         moduleId,
         name,
         opts: opts ?? null,
@@ -466,7 +465,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       collections: s.collections.map((c) => (c.id === id ? optimistic : c)),
     }));
     try {
-      await invoke<Collection>(COMMANDS.collectionsUpdate, { id, patch });
+      await invokeCmd<Collection>(COMMANDS.collectionsUpdate, { id, patch });
     } catch (e) {
       console.error('[store] collections_update failed', e);
       set((s) => ({
@@ -514,7 +513,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invoke<void>(COMMANDS.collectionsDelete, { id });
+      await invokeCmd<void>(COMMANDS.collectionsDelete, { id });
     } catch (e) {
       console.error('[store] collections_delete failed', e);
       set(snapshot);
@@ -525,7 +524,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
 
   addEndpoint: async (collectionId, name, opts) => {
     try {
-      const endpoint = await invoke<Endpoint>(COMMANDS.endpointsCreate, {
+      const endpoint = await invokeCmd<Endpoint>(COMMANDS.endpointsCreate, {
         collectionId,
         name,
         opts: opts ?? null,
@@ -545,7 +544,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       endpoints: s.endpoints.map((e) => (e.id === id ? optimistic : e)),
     }));
     try {
-      await invoke<Endpoint>(COMMANDS.endpointsUpdate, { id, patch });
+      await invokeCmd<Endpoint>(COMMANDS.endpointsUpdate, { id, patch });
     } catch (e) {
       console.error('[store] endpoints_update failed', e);
       set((s) => ({
@@ -582,7 +581,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invoke<void>(COMMANDS.endpointsDelete, { id });
+      await invokeCmd<void>(COMMANDS.endpointsDelete, { id });
     } catch (e) {
       console.error('[store] endpoints_delete failed', e);
       set(snapshot);
@@ -617,7 +616,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
         ],
       };
     });
-    invoke<Endpoint>(COMMANDS.endpointsDuplicate, { id })
+    invokeCmd<Endpoint>(COMMANDS.endpointsDuplicate, { id })
       .then((persisted) => {
         // Swap the temp row with the persisted one (server may assign
         // a different id or normalize fields).
@@ -651,7 +650,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       return { modules: [...outOfScope, ...reordered] };
     });
     try {
-      await invoke<void>(COMMANDS.modulesMove, { moduleId, targetIndex });
+      await invokeCmd<void>(COMMANDS.modulesMove, { moduleId, targetIndex });
     } catch (e) {
       console.error('[store] modules_move failed', e);
       set({ modules: prevModules });
@@ -766,7 +765,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       return { collections: next };
     });
     try {
-      await invoke<void>(COMMANDS.collectionsMove, { collectionIds, target });
+      await invokeCmd<void>(COMMANDS.collectionsMove, { collectionIds, target });
     } catch (e) {
       console.error('[store] collections_move failed', e);
       set({ collections: prevCollections });
@@ -830,7 +829,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       return { endpoints: next };
     });
     try {
-      await invoke<void>(COMMANDS.endpointsMove, { endpointIds, target });
+      await invokeCmd<void>(COMMANDS.endpointsMove, { endpointIds, target });
     } catch (e) {
       console.error('[store] endpoints_move failed', e);
       set({ endpoints: prevEndpoints });
@@ -850,7 +849,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
     try {
-      await invoke<Environment>(COMMANDS.environmentsSetVar, { envId, key, value });
+      await invokeCmd<Environment>(COMMANDS.environmentsSetVar, { envId, key, value });
     } catch (e) {
       console.error('[store] environments_set_var failed', e);
       set((s) => ({
@@ -860,7 +859,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
   },
   addEnvironment: async (projectId, name) => {
     try {
-      const env = await invoke<Environment>(COMMANDS.environmentsCreate, { projectId, name });
+      const env = await invokeCmd<Environment>(COMMANDS.environmentsCreate, { projectId, name });
       set((s) => ({ environments: [...s.environments, env] }));
       return env.id;
     } catch (e) {
@@ -876,7 +875,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
     try {
-      await invoke<Environment>(COMMANDS.environmentsUpdate, { envId, patch });
+      await invokeCmd<Environment>(COMMANDS.environmentsUpdate, { envId, patch });
     } catch (e) {
       console.error('[store] environments_update failed', e);
       set((s) => ({
@@ -895,7 +894,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
     try {
-      await invoke<Environment>(COMMANDS.environmentsSetBaseurl, { envId, defId, url });
+      await invokeCmd<Environment>(COMMANDS.environmentsSetBaseurl, { envId, defId, url });
     } catch (e) {
       console.error('[store] environments_set_baseurl failed', e);
       set((s) => ({
@@ -926,7 +925,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invoke<void>(COMMANDS.environmentsDelete, { envId });
+      await invokeCmd<void>(COMMANDS.environmentsDelete, { envId });
     } catch (e) {
       console.error('[store] environments_delete failed', e);
       set(snapshot);
@@ -946,7 +945,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invoke<Environment>(COMMANDS.environmentsSetActive, { envId });
+      await invokeCmd<Environment>(COMMANDS.environmentsSetActive, { envId });
     } catch (e) {
       console.error('[store] environments_set_active failed', e);
       set({ environments: prev });
@@ -982,7 +981,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
         };
       }),
     }));
-    invoke<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, { projectId, name: name.trim() || '未命名' })
+    invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, { projectId, name: name.trim() || '未命名' })
       .then((persisted) => {
         set((s) => ({
           projects: s.projects.map((p) => {
@@ -1024,7 +1023,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),
     }));
     try {
-      await invoke<BaseUrlDefinition>(COMMANDS.baseUrlDefsUpdate, { projectId, defId, patch });
+      await invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsUpdate, { projectId, defId, patch });
     } catch (e) {
       console.error('[store] base_url_defs_update failed', e);
       set((s) => ({
@@ -1064,7 +1063,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invoke<void>(COMMANDS.baseUrlDefsDelete, { projectId, defId });
+      await invokeCmd<void>(COMMANDS.baseUrlDefsDelete, { projectId, defId });
     } catch (e) {
       console.error('[store] base_url_defs_delete failed', e);
       set(snapshot);
@@ -1078,7 +1077,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),
     }));
     try {
-      await invoke<Project>(COMMANDS.baseUrlDefsSetDefault, { projectId, defId });
+      await invokeCmd<Project>(COMMANDS.baseUrlDefsSetDefault, { projectId, defId });
     } catch (e) {
       console.error('[store] base_url_defs_set_default failed', e);
       set((s) => ({

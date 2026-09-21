@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { COMMANDS } from '@/lib/tauri-commands';
+import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { Project } from '@/types/domain';
 
 export type AgentPermission = 'read' | 'read_call' | 'full';
@@ -48,7 +47,7 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
       await Promise.all(
         projects.map(async (p) => {
           try {
-            const v = await invoke<string>(COMMANDS.permissionsGet, { projectId: p.id });
+            const v = await invokeCmd<string>(COMMANDS.permissionsGet, { projectId: p.id });
             if (isPermission(v)) {
               out[p.id] = v;
             } else {
@@ -84,7 +83,7 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
       // Rust `permissions_set` returns `()` on success, so type the
       // invoke as `void`. Previous calls left the response untyped,
       // which masked the desired shape and slipped through lint.
-      await invoke<void>(COMMANDS.permissionsSet, { projectId, permission: mode });
+      await invokeCmd<void>(COMMANDS.permissionsSet, { projectId, permission: mode });
     } catch (e) {
       console.error('[permissions] permissions_set failed', e);
       setPerms((p) => ({ ...p, [projectId]: prev }));

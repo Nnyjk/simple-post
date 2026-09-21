@@ -8,12 +8,13 @@
 //! See `docs/distribution-modes-2026-09-18.md` §6 for the route
 //! table and the rationale behind the REST choice over JSON-RPC.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{header, Method, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, patch, post, put},
@@ -163,6 +164,169 @@ pub struct PreferencesPutBody {
 }
 
 // -------------------------------------------------------------------------
+// Wire helpers — kept tiny, but server-injected fields all flow through
+// here so the SPA vs REST contract stays 1:1 with the Tauri command path.
+// -------------------------------------------------------------------------
+
+/// Fill in a server-generated `id` when the caller (SPA) omits one.
+/// Mirrors what every `commands.rs::*_create` does: take the user-facing
+/// fields, then stamp `id = uid()`. Without this, every REST create
+/// fails with `[validation] missing field 'id'` because the domain
+/// structs all require `id` while the SPA only ships name / description
+/// / color / etc.
+fn ensure_server_id(body: &mut Value) {
+    let needs_fill = match body.get("id") {
+        None | Some(Value::Null) => true,
+        Some(Value::String(s)) => s.is_empty(),
+        _ => false,
+    };
+    if needs_fill {
+        body["id"] = json!(crate::domain::uid());
+    }
+}
+
+// -------------------------------------------------------------------------
+// Wire DTOs for the resource CRUD surface. Keep this block small —
+// every shape that's already in `domain::*` is reused directly so
+// the wire contract stays 1:1 with the TS side.
+// -------------------------------------------------------------------------
+
+/// Body for `POST /api/endpoints`. Mirrors [`domain::Endpoint`] but
+/// omits the timestamps — the server fills them with `now_ms()` so
+/// callers don't have to know the millisecond-clock invariant.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointWrite {
+    /// Optional — server fills via `ensure_server_id` when omitted.
+    #[serde(default)]
+    pub id: String,
+    pub collection_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub method: crate::domain::HttpMethod,
+    pub url: String,
+    #[serde(default)]
+    pub environment_id: Option<String>,
+    #[serde(default)]
+    pub base_url_definition_id: Option<String>,
+    #[serde(default)]
+    pub base_url_override: Option<String>,
+    #[serde(default)]
+    pub params: Vec<crate::domain::KeyValue>,
+    #[serde(default)]
+    pub headers: Vec<crate::domain::KeyValue>,
+    #[serde(default)]
+    pub body: crate::domain::RequestBody,
+    #[serde(default)]
+    pub auth: crate::domain::AuthConfig,
+    #[serde(default)]
+    pub docs: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub sort_order: i64,
+}
+
+/// Body for `POST /api/endpoints/search`. All fields optional —
+/// omitted filters don't constrain the result. Mirrors the args of
+/// `db::endpoints::search` (q, method, tags) so the same SQL runs.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointsSearchBody {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+}
+
+/// Body for `POST /api/endpoints/move`. `endpoint_ids` is the
+/// caller-ordered list (drag-and-drop preserves selection order).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointMoveBody {
+    pub endpoint_ids: Vec<String>,
+    pub collection_id: String,
+    pub index: i32,
+}
+
+/// Body for `POST /api/collections/move`. `parent_kind` is one of
+/// `"module"` (reparent to top-level under a module) or
+/// `"collection"` (reparent to be a child of a sibling collection).
+/// Unknown values surface as `AppError::Validation` from the DB
+/// layer.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectionMoveBody {
+    pub collection_ids: Vec<String>,
+    pub parent_kind: String,
+    pub parent_id: String,
+    pub index: i32,
+}
+
+/// Body for `POST /api/modules/move`. `target_index` is the zero-based
+/// slot the moved module lands at; clamping happens in the DB layer.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleMoveBody {
+    pub module_id: String,
+    pub target_index: i32,
+}
+
+/// Body for `POST /api/environments/:envId/vars`. `value = null`
+/// deletes the variable (mirrors `db::environments::set_var`'s
+/// "None removes the key" semantics).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvSetVarBody {
+    pub key: String,
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+/// Body for `POST /api/environments/:envId/baseurls`. `url = null`
+/// removes the slot.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvSetBaseUrlBody {
+    pub def_id: String,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// Body for `POST /api/environments/active`. `envId` lives in the
+/// body (not the URL) so the literal route `/active` can act as the
+/// "set the active environment" verb without colliding with
+/// `/api/environments/:envId`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetActiveEnvBody {
+    pub env_id: String,
+}
+
+/// Body for `PUT /api/permissions/:projectId`. The `permission`
+/// string is parsed via [`domain::Permission::parse`] — a typo at the
+/// call site fails with `AppError::Validation` instead of writing a
+/// bogus row.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionPutBody {
+    pub permission: String,
+}
+
+/// Body for `POST /api/projects/:projectId/baseurls/default`.
+/// `def_id = null` clears the project's default pointer.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseUrlDefSetDefaultBody {
+    #[serde(default)]
+    pub def_id: Option<String>,
+}
+
+// -------------------------------------------------------------------------
 // Handlers.
 // -------------------------------------------------------------------------
 
@@ -191,13 +355,14 @@ async fn projects_get(
 
 async fn projects_create(
     State(s): State<Arc<WebState>>,
-    Json(body): Json<Value>,
+    Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    ensure_server_id(&mut body);
     let project: crate::domain::Project =
         serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
     db::with_tx(&s.pool, |c| db::projects::create(c, &project))
         .map_err(map_app_error)?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(project).unwrap_or(Value::Null))))
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(&project).unwrap_or(Value::Null))))
 }
 
 async fn projects_update(
@@ -307,6 +472,511 @@ async fn preferences_put(
 }
 
 // -------------------------------------------------------------------------
+// Resource CRUD handlers — one block per resource, mirrors the
+// `region:` sections in `commands.rs`. Bodies come in three flavours:
+//   1. List  — GET with `?projectId=` / `?moduleId=` / `?collectionId=`
+//   2. Write — POST (full create) or PATCH (partial update) or DELETE
+//   3. Action — POST to a sub-resource (`/move`, `/:id/duplicate`,
+//              `/:envId/vars`, …) — body carries the args.
+// -------------------------------------------------------------------------
+
+// ----- modules ------------------------------------------------------------
+
+async fn modules_list(
+    State(s): State<Arc<WebState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // Filter by project when given; otherwise fall back to `list_all`
+    // so the SPA bootstrap path (no active project yet) still gets a
+    // useful dataset to filter client-side.
+    let rows = match params.get("projectId") {
+        Some(project_id) => db::with_conn(&s.pool, |c| db::modules::list_by_project(c, project_id))
+            .map_err(map_app_error)?,
+        None => db::with_conn(&s.pool, db::modules::list_all).map_err(map_app_error)?,
+    };
+    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+}
+
+async fn modules_create(
+    State(s): State<Arc<WebState>>,
+    Json(mut body): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    ensure_server_id(&mut body);
+    // Accept the full `Module` struct. `Module` has no server-side
+    // timestamp fields so `#[serde(default)]` on those isn't needed —
+    // but `id` is server-stamped via `ensure_server_id` so the SPA can
+    // ship name/description/sortOrder/etc. without a hand-rolled id.
+    let module: crate::domain::Module =
+        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    db::with_tx(&s.pool, |c| db::modules::create(c, &module)).map_err(map_app_error)?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(&module).unwrap_or(Value::Null))))
+}
+
+async fn modules_update(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+    Json(patch): Json<crate::domain::ModulePatch>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // `db::with_tx` takes an `Fn` closure (not `FnOnce`), so we can't
+    // move `patch` in — clone it. Same idiom as `projects_update`.
+    let row = db::with_tx(&s.pool, |c| db::modules::update(c, &id, patch.clone()))
+        .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn modules_delete(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| db::modules::delete(c, &id)).map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn modules_move(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<ModuleMoveBody>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| {
+        // `r#move` is the raw identifier (`move` is a Rust keyword).
+        db::modules::r#move(c, &body.module_id, body.target_index)
+    })
+    .map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ----- collections --------------------------------------------------------
+
+async fn collections_list(
+    State(s): State<Arc<WebState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let rows = match params.get("moduleId") {
+        Some(module_id) => db::with_conn(&s.pool, |c| db::collections::list_by_module(c, module_id))
+            .map_err(map_app_error)?,
+        None => db::with_conn(&s.pool, db::collections::list_all).map_err(map_app_error)?,
+    };
+    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+}
+
+async fn collections_create(
+    State(s): State<Arc<WebState>>,
+    Json(mut body): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    ensure_server_id(&mut body);
+    let collection: crate::domain::Collection =
+        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    db::with_tx(&s.pool, |c| db::collections::create(c, &collection)).map_err(map_app_error)?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(&collection).unwrap_or(Value::Null))))
+}
+
+async fn collections_update(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+    Json(patch): Json<crate::domain::CollectionPatch>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| db::collections::update(c, &id, patch.clone()))
+        .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn collections_delete(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| db::collections::delete(c, &id)).map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn collections_move(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<CollectionMoveBody>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| {
+        db::collections::move_many(
+            c,
+            &body.collection_ids,
+            &body.parent_kind,
+            &body.parent_id,
+            body.index,
+        )
+    })
+    .map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ----- endpoints ----------------------------------------------------------
+
+async fn endpoints_list(
+    State(s): State<Arc<WebState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // Filter by collection when given; otherwise `list_all`. We don't
+    // honour `projectId`/`moduleId` here — those would need additional
+    // db overloads; callers that want project- or module-scoped walks
+    // can filter the unfiltered list client-side until a richer db
+    // function lands.
+    let rows = match params.get("collectionId") {
+        Some(collection_id) => {
+            db::with_conn(&s.pool, |c| db::endpoints::list_by_collection(c, collection_id))
+                .map_err(map_app_error)?
+        }
+        None => db::with_conn(&s.pool, db::endpoints::list_all).map_err(map_app_error)?,
+    };
+    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+}
+
+async fn endpoints_get(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_conn(&s.pool, |c| db::endpoints::get(c, &id)).map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn endpoints_search(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<EndpointsSearchBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // `tags.as_deref()` lets the DB layer accept `&[String]` without
+    // moving the `Vec` out of the body.
+    let tags_slice = body.tags.as_deref();
+    let rows = db::with_conn(&s.pool, |c| {
+        db::endpoints::search(c, body.query.as_deref(), body.method.as_deref(), tags_slice)
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(rows).unwrap_or_else(|_| json!([]))))
+}
+
+async fn endpoints_create(
+    State(s): State<Arc<WebState>>,
+    Json(mut body): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    // `EndpointWrite` covers the caller-side fields; the server fills
+    // `id` (when omitted), `created_at`, and `updated_at`. We deserialize
+    // as `EndpointWrite` for typed safety of nested structs (params,
+    // headers, body, auth) and then promote to the full `Endpoint` to
+    // hand off to the db layer.
+    ensure_server_id(&mut body);
+    let write: EndpointWrite = serde_json::from_value(body)
+        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    let now = crate::domain::now_ms();
+    let endpoint = crate::domain::Endpoint {
+        id: write.id,
+        collection_id: write.collection_id,
+        name: write.name,
+        description: write.description,
+        method: write.method,
+        url: write.url,
+        environment_id: write.environment_id,
+        base_url_definition_id: write.base_url_definition_id,
+        base_url_override: write.base_url_override,
+        params: write.params,
+        headers: write.headers,
+        body: write.body,
+        auth: write.auth,
+        docs: write.docs,
+        notes: write.notes,
+        tags: write.tags,
+        sort_order: write.sort_order,
+        created_at: now,
+        updated_at: now,
+    };
+    db::with_tx(&s.pool, |c| db::endpoints::create(c, &endpoint)).map_err(map_app_error)?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(&endpoint).unwrap_or(Value::Null))))
+}
+
+async fn endpoints_update(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+    Json(patch): Json<crate::domain::EndpointPatch>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| db::endpoints::update(c, &id, patch.clone()))
+        .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn endpoints_delete(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| db::endpoints::delete(c, &id)).map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn endpoints_duplicate(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+) -> Result<Json<String>, HttpErrorResponse> {
+    let new_id = db::with_tx(&s.pool, |c| db::endpoints::duplicate(c, &id))
+        .map_err(map_app_error)?;
+    Ok(Json(new_id))
+}
+
+async fn endpoints_move(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<EndpointMoveBody>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| {
+        db::endpoints::move_many(c, &body.endpoint_ids, &body.collection_id, body.index)
+    })
+    .map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ----- environments -------------------------------------------------------
+
+async fn environments_list(
+    State(s): State<Arc<WebState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let rows = match params.get("projectId") {
+        Some(project_id) => {
+            db::with_conn(&s.pool, |c| db::environments::list_by_project(c, project_id))
+                .map_err(map_app_error)?
+        }
+        None => db::with_conn(&s.pool, db::environments::list_all).map_err(map_app_error)?,
+    };
+    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+}
+
+async fn environments_create(
+    State(s): State<Arc<WebState>>,
+    Json(mut body): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    ensure_server_id(&mut body);
+    let env: crate::domain::Environment =
+        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    db::with_tx(&s.pool, |c| db::environments::create(c, &env)).map_err(map_app_error)?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(&env).unwrap_or(Value::Null))))
+}
+
+async fn environments_update(
+    State(s): State<Arc<WebState>>,
+    Path(env_id): Path<String>,
+    Json(patch): Json<crate::domain::EnvironmentPatch>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| db::environments::update(c, &env_id, patch.clone()))
+        .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn environments_delete(
+    State(s): State<Arc<WebState>>,
+    Path(env_id): Path<String>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| db::environments::delete(c, &env_id)).map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn environments_set_var(
+    State(s): State<Arc<WebState>>,
+    Path(env_id): Path<String>,
+    Json(body): Json<EnvSetVarBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| {
+        db::environments::set_var(c, &env_id, &body.key, body.value.as_deref())
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn environments_set_baseurl(
+    State(s): State<Arc<WebState>>,
+    Path(env_id): Path<String>,
+    Json(body): Json<EnvSetBaseUrlBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| {
+        db::environments::set_base_url(c, &env_id, &body.def_id, body.url.as_deref())
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn environments_set_active(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<SetActiveEnvBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| db::environments::set_active(c, &body.env_id))
+        .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+// ----- baseUrlDefs --------------------------------------------------------
+//
+// `base_url_defs` live in their own table; we keep them reachable via
+// two route families:
+//   - `/api/projects/:projectId/baseurls[/default]` for project-scoped
+//     creates and "set as project default" actions
+//   - `/api/baseurl-defs/:defId` for id-scoped updates / deletes
+//
+// This mirrors the path the resource lives on in the renderer (a def
+// "belongs to" a project) without forcing the TS caller to remember
+// which table a delete hits.
+
+async fn base_url_defs_create(
+    State(s): State<Arc<WebState>>,
+    Path(project_id): Path<String>,
+    Json(mut body): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    ensure_server_id(&mut body);
+    let def: crate::domain::BaseUrlDefinition =
+        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    db::with_tx(&s.pool, |c| db::base_url_defs::create(c, &def, &project_id))
+        .map_err(map_app_error)?;
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(&def).unwrap_or(Value::Null))))
+}
+
+async fn base_url_defs_update(
+    State(s): State<Arc<WebState>>,
+    Path(def_id): Path<String>,
+    Json(patch): Json<crate::commands::BaseUrlDefPatch>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // `BaseUrlDefPatch` lives in `commands.rs` (not `domain`) because
+    // it has no other callers. Reusing it here keeps the wire shape
+    // identical to the IPC path.
+    let row = db::with_tx(&s.pool, |c| {
+        db::base_url_defs::update(c, &def_id, patch.name.clone(), patch.description.clone())
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+async fn base_url_defs_delete(
+    State(s): State<Arc<WebState>>,
+    Path(def_id): Path<String>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    db::with_tx(&s.pool, |c| db::base_url_defs::delete(c, &def_id)).map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn base_url_defs_set_default(
+    State(s): State<Arc<WebState>>,
+    Path(project_id): Path<String>,
+    Json(body): Json<BaseUrlDefSetDefaultBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // Echo back the post-update project so the renderer can replace
+    // its in-memory copy without an extra round-trip.
+    let row = db::with_tx(&s.pool, |c| {
+        db::base_url_defs::set_default(c, &project_id, body.def_id.as_deref())?;
+        crate::db::projects::get(c, &project_id)
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
+// ----- request settings (singleton row in preferences KV) -----------------
+
+/// Preference key under which the singleton `RequestSettings` is
+/// stored. Same key as the Tauri command — the two shapes share the
+/// row.
+const REQUEST_SETTINGS_KEY: &str = "request_settings";
+
+async fn request_settings_get(
+    State(s): State<Arc<WebState>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // Missing row → `unwrap_or_default()`. Matches the Tauri command's
+    // "always returns a value" contract so the renderer can call this
+    // unconditionally.
+    let stored: Option<crate::domain::RequestSettings> = db::with_conn(&s.pool, |c| {
+        db::preferences::get(c, REQUEST_SETTINGS_KEY)
+    })
+    .map_err(map_app_error)?;
+    let settings = stored.unwrap_or_default();
+    Ok(Json(serde_json::to_value(&settings).unwrap_or(Value::Null)))
+}
+
+async fn request_settings_put(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<crate::domain::RequestSettings>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    // PUT semantics: full replace. Unlike the Tauri command's
+    // `RequestSettingsPatch`, we accept the entire struct and write
+    // it back verbatim. Callers wanting partial updates can fall
+    // back to `/api/preferences` (`{"key": "request_settings", "value": ...}`).
+    db::with_tx(&s.pool, |c| db::preferences::set(c, REQUEST_SETTINGS_KEY, &body))
+        .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&body).unwrap_or(Value::Null)))
+}
+
+// ----- permissions --------------------------------------------------------
+
+async fn permissions_get(
+    State(s): State<Arc<WebState>>,
+    Path(project_id): Path<String>,
+) -> Result<Json<String>, HttpErrorResponse> {
+    // Mirror the Tauri command: return the bare `Permission` (which
+    // serializes to a lowercase string via
+    // `#[serde(rename_all = "lowercase")]`). The TS caller already
+    // has this contract on the IPC side.
+    let perm = db::with_conn(&s.pool, |c| db::permissions::get(c, &project_id))
+        .map_err(map_app_error)?;
+    Ok(Json(perm.as_str().to_string()))
+}
+
+async fn permissions_set(
+    State(s): State<Arc<WebState>>,
+    Path(project_id): Path<String>,
+    Json(body): Json<PermissionPutBody>,
+) -> Result<StatusCode, HttpErrorResponse> {
+    // `Permission::parse` is the single source of truth for the
+    // accepted values — a typo at the call site fails loudly with
+    // 400 instead of writing a bogus row.
+    let perm = crate::domain::Permission::parse(&body.permission).ok_or_else(|| {
+        map_app_error(AppError::Validation(format!(
+            "unknown permission: {}",
+            body.permission
+        )))
+    })?;
+    db::with_tx(&s.pool, |c| db::permissions::set(c, &project_id, perm))
+        .map_err(map_app_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ----- mcp daemon (additional verbs) --------------------------------------
+
+async fn mcp_restart(
+    State(s): State<Arc<WebState>>,
+) -> Result<Json<crate::commands::RestartResult>, HttpErrorResponse> {
+    // Same swallow-error envelope as the Tauri command
+    // (`mcp_daemon_restart`). Errors surface as `{ ok: false, pid:
+    // null, port: null }` rather than as a 5xx, so the web UI's
+    // restart action keeps a uniform `{ ok: bool }` contract.
+    let result = match s.daemon.restart_without_app_handle(&s.data_dir).await {
+        Ok(snapshot) => crate::commands::RestartResult {
+            ok: true,
+            pid: snapshot.pid,
+            port: snapshot.port,
+        },
+        Err(_) => crate::commands::RestartResult {
+            ok: false,
+            pid: None,
+            port: None,
+        },
+    };
+    Ok(Json(result))
+}
+
+async fn mcp_proxy_path() -> String {
+    // Inline the same logic as `commands::mcp_daemon_proxy_path` so
+    // we don't take a dependency on the `#[tauri::command]` macro
+    // glue (which would force a `tauri::AppHandle` parameter).
+    fn build(exe_name: &str, proxy_name: &str) -> Option<std::path::PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        let parent = exe.parent()?;
+        Some(parent.join(proxy_name))
+    }
+
+    let path = if cfg!(windows) {
+        build("simple-post.exe", "simple-post-mcp-proxy.exe")
+    } else {
+        build("simple-post", "simple-post-mcp-proxy")
+    };
+
+    path.map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unresolved current_exe>".to_string())
+}
+
+// -------------------------------------------------------------------------
 // Static SPA. Falls back to `index.html` so client-side routing works.
 // -------------------------------------------------------------------------
 
@@ -385,15 +1055,91 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
 
     let api = Router::new()
         .route("/api/healthz", get(healthz))
+        // ---- projects (already existed) ----
         .route("/api/projects", get(projects_list).post(projects_create))
         .route(
-            "/api/projects/{id}",
+            "/api/projects/:id",
             get(projects_get).patch(projects_update).delete(projects_delete),
         )
         .route("/api/http/send", post(http_send))
+        // ---- modules ----
+        .route("/api/modules", get(modules_list).post(modules_create))
+        // `/move` is registered before `/:id` so the literal path
+        // takes precedence in the router's radix tree.
+        .route("/api/modules/move", post(modules_move))
+        .route(
+            "/api/modules/:id",
+            patch(modules_update).delete(modules_delete),
+        )
+        // ---- collections ----
+        .route("/api/collections", get(collections_list).post(collections_create))
+        .route("/api/collections/move", post(collections_move))
+        .route(
+            "/api/collections/:id",
+            patch(collections_update).delete(collections_delete),
+        )
+        // ---- endpoints ----
+        .route("/api/endpoints", get(endpoints_list).post(endpoints_create))
+        // Action verbs (`/search`, `/move`) are registered before
+        // `/:id` so the literals win over the parameter.
+        .route("/api/endpoints/search", post(endpoints_search))
+        .route("/api/endpoints/move", post(endpoints_move))
+        .route(
+            "/api/endpoints/:id",
+            get(endpoints_get).patch(endpoints_update).delete(endpoints_delete),
+        )
+        .route("/api/endpoints/:id/duplicate", post(endpoints_duplicate))
+        // ---- environments ----
+        .route("/api/environments", get(environments_list).post(environments_create))
+        // `/active` (literal) before `/:envId` (param) for the same
+        // radix-tree precedence reason.
+        .route("/api/environments/active", post(environments_set_active))
+        .route(
+            "/api/environments/:envId",
+            patch(environments_update).delete(environments_delete),
+        )
+        .route(
+            "/api/environments/:envId/vars",
+            post(environments_set_var),
+        )
+        .route(
+            "/api/environments/:envId/baseurls",
+            post(environments_set_baseurl),
+        )
+        // ---- baseUrlDefs ----
+        // Project-scoped create lives under the project; id-scoped
+        // update/delete uses a separate `/baseurl-defs/:defId`
+        // namespace so a future cross-project lookup doesn't have to
+        // re-key on `projectId`.
+        .route(
+            "/api/projects/:projectId/baseurls",
+            post(base_url_defs_create),
+        )
+        .route(
+            "/api/projects/:projectId/baseurls/default",
+            post(base_url_defs_set_default),
+        )
+        .route(
+            "/api/baseurl-defs/:defId",
+            patch(base_url_defs_update).delete(base_url_defs_delete),
+        )
+        // ---- request settings (singleton) ----
+        .route(
+            "/api/request-settings",
+            get(request_settings_get).put(request_settings_put),
+        )
+        // ---- permissions (per project) ----
+        .route(
+            "/api/permissions/:projectId",
+            get(permissions_get).put(permissions_set),
+        )
+        // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))
         .route("/api/mcp/start", post(mcp_start))
         .route("/api/mcp/stop", post(mcp_stop))
+        .route("/api/mcp/restart", post(mcp_restart))
+        .route("/api/mcp/proxy-path", get(mcp_proxy_path))
+        // ---- preferences ----
         .route("/api/preferences", get(preferences_get).put(preferences_put))
         .with_state(state_arc.clone());
 

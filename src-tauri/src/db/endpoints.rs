@@ -40,6 +40,27 @@ pub fn list_by_collection(
     Ok(out)
 }
 
+/// All endpoints across every collection — used by the REST
+/// `GET /api/endpoints` when no `collectionId` filter is supplied.
+/// Sort is collection-scoped-then-sort_order so callers building the
+/// tree get a deterministic walk.
+pub fn list_all(conn: &mut Connection) -> Result<Vec<Endpoint>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, collection_id, name, description, method, url, \
+                environment_id, base_url_definition_id, base_url_override, \
+                params_json, headers_json, body_json, auth_json, \
+                docs, notes, tags_json, sort_order, created_at, updated_at \
+         FROM endpoints \
+         ORDER BY collection_id ASC, sort_order ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![], row_to_endpoint)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(AppError::Sqlite)?);
+    }
+    Ok(out)
+}
+
 pub fn get(conn: &mut Connection, id: &str) -> Result<Endpoint, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, collection_id, name, description, method, url, \

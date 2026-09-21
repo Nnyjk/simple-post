@@ -104,8 +104,12 @@ export type TauriCommand = (typeof COMMANDS)[keyof typeof COMMANDS];
  * Usage:
  *   const project = await invokeCmd<Project>(COMMANDS.projectsGet, { id });
  *
- * For abortable calls (Tauri 2 doesn't accept an AbortSignal yet), wrap
- * the inner `invoke` yourself as `src/lib/http.ts` does.
+ * For abortable calls, pass an `AbortSignal` via the `options.signal`
+ * field. The Tauri shape drops it on the floor (Tauri 2 IPC has no
+ * native signal yet) — the JS-side promise still rejects on abort,
+ * and the late Rust response is discarded by the caller's
+ * `inFlightRef`. The web shape forwards the signal to `fetch` so the
+ * browser actually cancels the network request.
  *
  * Distribution shapes — see `docs/distribution-modes-2026-09-18.md` §3:
  *   - Tauri shell  → `__TAURI_INTERNALS__` is present, calls `invoke`.
@@ -124,14 +128,30 @@ export const IS_TAURI_SHELL: boolean =
       (window as { __TAURI__?: unknown }).__TAURI__,
   );
 
+/**
+ * Optional per-call options for `invokeCmd`. Currently just an abort
+ * signal; structured as an object so future flags (e.g. timeout, retry
+ * policy) can be added without breaking call sites.
+ */
+export interface CallApiOptions {
+  /** Cancel the in-flight IPC call. Tauri shape: promise rejects but
+   *  Rust keeps running; web shape: native fetch abort. */
+  signal?: AbortSignal;
+}
+
 export function invokeCmd<T>(
   cmd: TauriCommand,
   args?: Record<string, unknown>,
+  options?: CallApiOptions,
 ): Promise<T> {
   if (IS_TAURI_SHELL) {
+    // Tauri 2's `invoke` doesn't accept an AbortSignal — drop it here
+    // so the call site doesn't have to branch on shape. Callers that
+    // need abortable behaviour in Tauri should wrap the promise
+    // themselves (or pass `options.signal` and listen for `abort`).
     return tauriInvoke<T>(cmd, args ?? {});
   }
-  return webInvokeCmd<T>(cmd, args ?? {});
+  return webInvokeCmd<T>(cmd, args ?? {}, options);
 }
 
 // -------------------------------------------------------------------------
@@ -148,6 +168,29 @@ interface RouteSpec {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT';
   /** Path template; `{key}` segments get substituted from `args`. */
   path: (args: Record<string, unknown>) => string;
+  /**
+   * Build the request body. Default: `args` itself. Override when path
+   * params must be stripped out of the body — e.g. an update where
+   * `args` is `{ id, patch }` but the wire body should be `{ patch }`.
+   */
+  body?: (args: Record<string, unknown>) => unknown;
+}
+
+/**
+ * Build a stable, deterministic `?key=value&…` query string from a
+ * record. Drops `undefined` / `null` / empty-string values, sorts
+ * keys, and runs both halves through `encodeURIComponent`.
+ */
+function buildQuery(params: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const key of Object.keys(params).sort()) {
+    const raw = params[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    parts.push(
+      `${encodeURIComponent(key)}=${encodeURIComponent(String(raw))}`,
+    );
+  }
+  return parts.length === 0 ? '' : `?${parts.join('&')}`;
 }
 
 /**
@@ -155,9 +198,25 @@ interface RouteSpec {
  * Commands without an entry here throw if invoked in the web shape —
  * that's deliberate, because surfacing a "not implemented" is much
  * less confusing than silently 404'ing.
+ *
+ * Conventions:
+ *   - GET    /api/{resource}            list with optional query filter
+ *                                       (e.g. `?projectId=p1`).
+ *   - GET    /api/{resource}/{id}       single-item read.
+ *   - POST   /api/{resource}            create; the parent id travels
+ *                                       in the body so the renderer
+ *                                       call site stays identical
+ *                                       between shapes.
+ *   - PATCH  /api/{resource}/{id}       partial update; body is
+ *                                       `{ patch: … }`.
+ *   - DELETE /api/{resource}/{id}       remove.
+ *   - POST   /api/{resource}/move       reorder (action verb that
+ *                                       doesn't fit noun CRUD).
+ *   - POST   /api/{resource}/{id}/…     sub-resource action
+ *                                       (duplicate, activate, …).
  */
 const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
-  // projects
+  // ----- projects -----
   [COMMANDS.projectsList]: { method: 'GET', path: () => '/api/projects' },
   [COMMANDS.projectsGet]: {
     method: 'GET',
@@ -167,23 +226,259 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.projectsUpdate]: {
     method: 'PATCH',
     path: (a) => `/api/projects/${encodeURIComponent(String(a.id))}`,
+    body: (a) => a.patch,
   },
   [COMMANDS.projectsDelete]: {
     method: 'DELETE',
     path: (a) => `/api/projects/${encodeURIComponent(String(a.id))}`,
   },
-  // MCP daemon
+
+  // ----- modules -----
+  [COMMANDS.modulesList]: {
+    method: 'GET',
+    path: (a) => `/api/modules${buildQuery({ projectId: a.projectId })}`,
+  },
+  [COMMANDS.modulesCreate]: { method: 'POST', path: () => '/api/modules' },
+  [COMMANDS.modulesUpdate]: {
+    method: 'PATCH',
+    path: (a) => `/api/modules/${encodeURIComponent(String(a.id))}`,
+    body: (a) => a.patch,
+  },
+  [COMMANDS.modulesDelete]: {
+    method: 'DELETE',
+    path: (a) => `/api/modules/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.modulesMove]: { method: 'POST', path: () => '/api/modules/move' },
+
+  // ----- collections -----
+  [COMMANDS.collectionsList]: {
+    method: 'GET',
+    path: (a) => `/api/collections${buildQuery({ moduleId: a.moduleId })}`,
+  },
+  [COMMANDS.collectionsCreate]: {
+    method: 'POST',
+    path: () => '/api/collections',
+  },
+  [COMMANDS.collectionsUpdate]: {
+    method: 'PATCH',
+    path: (a) => `/api/collections/${encodeURIComponent(String(a.id))}`,
+    body: (a) => a.patch,
+  },
+  [COMMANDS.collectionsDelete]: {
+    method: 'DELETE',
+    path: (a) => `/api/collections/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.collectionsMove]: {
+    method: 'POST',
+    path: () => '/api/collections/move',
+    // Rust `CollectionMoveBody` takes flat `parent_kind` / `parent_id` /
+    // `index`; the renderer's `target` is a nested object keyed on the
+    // destination kind (`moduleId` vs `collectionId`). Translate here
+    // so the call site stays identical between shapes.
+    body: (a) => {
+      const target = a.target as
+        | { parentKind: 'module' | 'collection'; moduleId?: string; collectionId?: string; index: number }
+        | undefined;
+      const parentId = target?.moduleId ?? target?.collectionId ?? '';
+      return {
+        collectionIds: a.collectionIds,
+        parentKind: target?.parentKind,
+        parentId,
+        index: target?.index ?? 0,
+      };
+    },
+  },
+
+  // ----- endpoints -----
+  [COMMANDS.endpointsList]: {
+    method: 'GET',
+    path: (a) =>
+      `/api/endpoints${buildQuery({
+        collectionId: a.collectionId,
+        projectId: a.projectId,
+        moduleId: a.moduleId,
+      })}`,
+  },
+  [COMMANDS.endpointsGet]: {
+    method: 'GET',
+    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.endpointsSearch]: {
+    method: 'POST',
+    path: () => '/api/endpoints/search',
+    body: (a) => ({ query: a.query, method: a.method, tags: a.tags }),
+  },
+  [COMMANDS.endpointsCreate]: {
+    method: 'POST',
+    path: () => '/api/endpoints',
+  },
+  [COMMANDS.endpointsUpdate]: {
+    method: 'PATCH',
+    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}`,
+    body: (a) => a.patch,
+  },
+  [COMMANDS.endpointsDelete]: {
+    method: 'DELETE',
+    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.endpointsDuplicate]: {
+    method: 'POST',
+    path: (a) =>
+      `/api/endpoints/${encodeURIComponent(String(a.id))}/duplicate`,
+    // The path consumes `id`; the Rust handler takes no body, so we
+    // explicitly hand back an empty object rather than letting the
+    // default `body = args` projection leak `{ id }` into the wire.
+    body: () => ({}),
+  },
+  [COMMANDS.endpointsMove]: {
+    method: 'POST',
+    path: () => '/api/endpoints/move',
+    // Rust `EndpointMoveBody` is `{ endpoint_ids, collection_id, index }`;
+    // the Tauri side nests the destination in `target.collectionId`.
+    body: (a) => ({
+      endpointIds: a.endpointIds,
+      collectionId: (a.target as { collectionId: string } | undefined)?.collectionId,
+      index: (a.target as { index: number } | undefined)?.index ?? 0,
+    }),
+  },
+
+  // ----- environments -----
+  [COMMANDS.environmentsList]: {
+    method: 'GET',
+    path: (a) =>
+      `/api/environments${buildQuery({ projectId: a.projectId })}`,
+  },
+  [COMMANDS.environmentsCreate]: {
+    method: 'POST',
+    path: () => '/api/environments',
+  },
+  [COMMANDS.environmentsUpdate]: {
+    method: 'PATCH',
+    path: (a) =>
+      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
+    body: (a) => a.patch,
+  },
+  [COMMANDS.environmentsDelete]: {
+    method: 'DELETE',
+    path: (a) =>
+      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
+  },
+  [COMMANDS.environmentsSetVar]: {
+    method: 'POST',
+    path: (a) =>
+      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/vars`,
+    body: (a) => ({
+      envId: a.envId ?? a.id,
+      key: a.key,
+      value: a.value,
+    }),
+  },
+  [COMMANDS.environmentsSetBaseurl]: {
+    method: 'POST',
+    path: (a) =>
+      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/baseurls`,
+    body: (a) => ({ defId: a.defId, url: a.url }),
+  },
+  [COMMANDS.environmentsSetActive]: {
+    method: 'POST',
+    // The literal `/active` lives below `/api/environments/{envId}` in
+    // the axum router; we use the literal here so the renderer doesn't
+    // have to know about axum radix-tree precedence.
+    path: () => '/api/environments/active',
+    body: (a) => ({ envId: a.envId ?? a.id }),
+  },
+
+  // ----- baseUrl definitions -----
+  // Two namespaces (project-scoped vs id-scoped) per the `web_api.rs`
+  // comment block above the handlers.
+  [COMMANDS.baseUrlDefsCreate]: {
+    method: 'POST',
+    path: (a) =>
+      `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
+  },
+  [COMMANDS.baseUrlDefsUpdate]: {
+    method: 'PATCH',
+    path: (a) =>
+      `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
+    body: (a) => a.patch,
+  },
+  [COMMANDS.baseUrlDefsDelete]: {
+    method: 'DELETE',
+    path: (a) =>
+      `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
+  },
+  [COMMANDS.baseUrlDefsSetDefault]: {
+    method: 'POST',
+    path: (a) =>
+      `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls/default`,
+    body: (a) => ({ defId: a.defId }),
+  },
+
+  // ----- request settings -----
+  // The web shape exposes a dedicated `/api/request-settings` endpoint
+  // (full replace semantics on PUT). The Tauri command takes a
+  // `patch`; see the `assumptions` section of the deliverable for the
+  // caller-side merge requirement.
+  [COMMANDS.requestSettingsGet]: {
+    method: 'GET',
+    path: () => '/api/request-settings',
+  },
+  [COMMANDS.requestSettingsUpdate]: {
+    method: 'PUT',
+    path: () => '/api/request-settings',
+    body: (a) => (a as { patch?: unknown }).patch ?? a,
+  },
+
+  // ----- agent permissions -----
+  [COMMANDS.permissionsGet]: {
+    method: 'GET',
+    path: (a) =>
+      `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
+  },
+  [COMMANDS.permissionsSet]: {
+    method: 'PUT',
+    path: (a) =>
+      `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
+    body: (a) => ({ permission: a.permission }),
+  },
+
+  // ----- low-level HTTP executor -----
+  // Same arg shape on both sides (camelCase); the Rust `HttpSendBody`
+  // struct deserialises directly from `args` so no translation is
+  // needed here.
+  [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
+
+  // ----- MCP daemon -----
   [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },
-  [COMMANDS.mcpAutoStartGet]: { method: 'GET', path: () => '/api/preferences' },
+  // Worker 1b added a dedicated `/api/mcp/restart` route on the
+  // `web_api.rs` side; the Tauri-side restart function returns the
+  // same `{ ok, pid, port }` envelope as `/start`, so reusing the
+  // restart route keeps the renderer's discriminated-union handling
+  // simple.
+  [COMMANDS.mcpDaemonRestart]: {
+    method: 'POST',
+    path: () => '/api/mcp/restart',
+  },
+  [COMMANDS.mcpDaemonProxyPath]: {
+    method: 'GET',
+    path: () => '/api/mcp/proxy-path',
+  },
+  // Pref-backed, like `request_settings_*` above.
+  [COMMANDS.mcpAutoStartGet]: {
+    method: 'GET',
+    path: () => '/api/preferences',
+  },
   [COMMANDS.mcpAutoStartSet]: {
     method: 'PUT',
     path: () => '/api/preferences',
+    body: (a) => ({ key: 'mcp.auto_start', value: a.value }),
   },
 };
 
 async function webInvokeCmd<T>(
   cmd: TauriCommand,
   args: Record<string, unknown>,
+  options?: CallApiOptions,
 ): Promise<T> {
   const spec = WEB_ROUTES[cmd];
   if (!spec) {
@@ -191,25 +486,30 @@ async function webInvokeCmd<T>(
       `Command "${cmd}" is not exposed in the web shape. Add a REST entry in src/lib/tauri-commands.ts + src-tauri/src/web_api.rs to enable it.`,
     );
   }
-  // mcp_auto_start_set uses PUT /api/preferences with a body shape that
-  // is unrelated to the Tauri command's `value: bool` arg. Translate it
-  // here so the call site stays identical between shapes.
-  let body: unknown = args;
-  if (cmd === COMMANDS.mcpAutoStartSet) {
-    body = { key: 'mcp.auto_start', value: args.value };
-  } else if (cmd === COMMANDS.mcpAutoStartGet) {
-    // GET /api/preferences returns the whole object; pick the key out.
-    const map = await webFetch<Record<string, unknown>>('GET', spec.path(args), null);
+  // `mcpAutoStartGet` keeps its old GET-then-pick shape because the
+  // web endpoint still returns the full preferences map and the
+  // renderer only wants the `mcp.auto_start` row. `requestSettingsGet`
+  // gets a dedicated endpoint now (`/api/request-settings`), so no
+  // special handling is needed for it.
+  if (cmd === COMMANDS.mcpAutoStartGet) {
+    const map = await webFetch<Record<string, unknown>>(
+      'GET',
+      spec.path(args),
+      null,
+      options,
+    );
     return (map['mcp.auto_start'] === true) as unknown as T;
   }
 
-  return webFetch<T>(spec.method, spec.path(args), body);
+  const body = spec.body ? spec.body(args) : args;
+  return webFetch<T>(spec.method, spec.path(args), body, options);
 }
 
 async function webFetch<T>(
   method: RouteSpec['method'],
   path: string,
   body: unknown,
+  options?: CallApiOptions,
 ): Promise<T> {
   const init: RequestInit = {
     method,
@@ -217,6 +517,9 @@ async function webFetch<T>(
   };
   if (body !== null && method !== 'GET' && method !== 'DELETE') {
     init.body = JSON.stringify(body);
+  }
+  if (options?.signal) {
+    init.signal = options.signal;
   }
   const res = await fetch(path, init);
   if (!res.ok) {

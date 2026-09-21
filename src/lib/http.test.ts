@@ -61,6 +61,177 @@ let nextResponse: ScriptedResponse = {
 let server: Server;
 let baseUrl: string;
 
+/** Body shape of `POST /api/http/send` (camelCase, mirrors Rust
+ *  `HttpSendBody`). Kept here so the fetch mock can parse what the
+ *  http.ts sends. */
+interface SendBody {
+  method: string;
+  url: string;
+  headers: Array<[string, string]>;
+  body: string | null;
+  timeoutMs: number;
+  followRedirects: boolean;
+  maxResponseSizeKb: number;
+}
+
+/** Original `globalThis.fetch` — used by the mock to proxy the real
+ *  HTTP request to the test server after unwrapping the bridge
+ *  envelope. */
+const originalFetch: typeof fetch = globalThis.fetch.bind(globalThis);
+
+/**
+ * Test stub for the serve-web `/api/http/send` bridge.
+ *
+ * Production runs the bridge via the real axum `http_send` handler
+ * (`src-tauri/src/web_api.rs`) which deserialises the
+ * `HttpSendBody`, runs `http_executor::execute`, and returns the
+ * `HttpResult` envelope. To exercise the new http.ts → invokeCmd →
+ * webFetch path inside Node tests we have to intercept
+ * `globalThis.fetch`, recognise the relative `/api/http/send` URL,
+ * and reply with an equivalent envelope around whatever the real
+ * upstream server returns.
+ *
+ * Mirrors production semantics:
+ *   - timeoutMs → AbortController that fires at the deadline; the
+ *     returned envelope has `ok:false, error:{kind:'timeout'}`, the
+ *     same shape Rust returns on a reqwest timeout.
+ *   - followRedirects=false → native fetch `redirect:'manual'`,
+ *     preserving 3xx bodies in the captured request.
+ *   - caller AbortSignal → propagated to the upstream fetch; if it
+ *     fires we re-throw so http.ts maps it to `abortedResponse`.
+ *   - transport failure (ECONNREFUSED, DNS, etc.) → envelope with
+ *     `ok:false, error:{kind:'network'}`, the same envelope Rust
+ *     returns on `reqwest::Error`.
+ */
+async function mockBridgeFetch(
+  input: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> {
+  const urlStr =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
+  if (urlStr !== '/api/http/send') {
+    // Anything else (shouldn't happen in this suite) — passthrough.
+    return originalFetch(input as Request | string | URL, init);
+  }
+
+  const rawBody = typeof init?.body === 'string' ? init.body : '{}';
+  const sendBody = JSON.parse(rawBody) as SendBody;
+
+  // Combine timeout + caller signal into one controller so either
+  // source aborts the upstream fetch.
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, sendBody.timeoutMs);
+  const callerSignal = init?.signal;
+  if (callerSignal) {
+    if (callerSignal.aborted) {
+      clearTimeout(timer);
+      throw callerSignal.reason ?? new DOMException('aborted', 'AbortError');
+    }
+    const onCallerAbort = () => ctrl.abort();
+    callerSignal.addEventListener('abort', onCallerAbort, { once: true });
+  }
+
+  const upstreamInit: RequestInit = {
+    method: sendBody.method,
+    headers: Object.fromEntries(sendBody.headers),
+    redirect: sendBody.followRedirects ? 'follow' : 'manual',
+    signal: ctrl.signal,
+  };
+  if (sendBody.body != null) upstreamInit.body = sendBody.body;
+
+  try {
+    const upstream = await originalFetch(sendBody.url, upstreamInit);
+    const rawText = await upstream.text();
+    // Mirror Rust `http_executor::truncate_body`: cap bytes on a
+    // UTF-8 char boundary and append the marker the production
+    // server returns. Default cap is 0 = no truncation (matches
+    // the Rust `if max_bytes == 0 { return (body, false); }`
+    // branch).
+    const maxBytes = sendBody.maxResponseSizeKb * 1024;
+    let text = rawText;
+    let truncated = false;
+    if (maxBytes > 0 && rawText.length > maxBytes) {
+      let cut = maxBytes;
+      // Walk back to a UTF-8 lead byte (or ASCII byte) so the
+      // slice doesn't split a multi-byte codepoint. Mirrors the
+      // `while cut > 0 && !body.is_char_boundary(cut)` loop in
+      // Rust without depending on `String.prototype.isCharBoundary`
+      // (not available in Node).
+      while (cut > 0) {
+        const code = rawText.charCodeAt(cut - 1);
+        if (code < 0x80 || code >= 0xc0) break;
+        cut -= 1;
+      }
+      text = `${rawText.slice(0, cut)}\n\n[truncated at ${maxBytes} bytes by Tauri HTTP layer]`;
+      truncated = true;
+    }
+    const result = {
+      ok: true,
+      response: {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        durationMs: 0,
+        sizeBytes: new Blob([text]).size,
+        headers: [...upstream.headers.entries()],
+        body: text,
+        contentType: upstream.headers.get('content-type') ?? '',
+        method: sendBody.method,
+        url: upstream.url,
+        truncated,
+      },
+    };
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch (err) {
+    if (timedOut) {
+      // Rust returns ok:false / error.kind=timeout on reqwest timeout.
+      const result = {
+        ok: false,
+        error: {
+          kind: 'timeout',
+          message: `Request timeout after ${sendBody.timeoutMs}ms`,
+        },
+      };
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const name = (err as { name?: string })?.name;
+    if (name === 'AbortError' || /abort/i.test((err as Error).message ?? '')) {
+      // Caller-initiated abort — re-throw so http.ts maps it.
+      throw err;
+    }
+    // Transport failure — envelope with kind=network (mirrors Rust).
+    const result = {
+      ok: false,
+      error: {
+        kind: 'network',
+        message: (err as Error)?.message ?? String(err),
+      },
+    };
+    return new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  } finally {
+    clearTimeout(timer);
+    if (callerSignal) {
+      callerSignal.removeEventListener('abort', () => ctrl.abort());
+    }
+  }
+}
+
 function reply(res: ServerResponse, r: ScriptedResponse) {
   res.statusCode = r.status ?? 200;
   for (const [k, v] of Object.entries(r.headers ?? {})) res.setHeader(k, v);
@@ -98,9 +269,13 @@ before(async () => {
   );
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;
+  // Install the bridge stub AFTER server listen so the upstream
+  // fetcher inside the stub has a real port to dial.
+  globalThis.fetch = mockBridgeFetch as unknown as typeof fetch;
 });
 
 after(async () => {
+  globalThis.fetch = originalFetch;
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -517,7 +692,10 @@ describe('sendRequest: size cap', () => {
       settings: settings({ maxResponseSizeKb: 1 }), // 1 KB cap
     });
     assert.ok(resp.body.length <= 1024 + 64, `body too large: ${resp.body.length}`);
-    assert.match(resp.body, /\[truncated at 1 KB\]$/);
+    // Truncation is enforced server-side by `http_executor::truncate_body`
+    // (the same Rust function both shapes call). The marker text is
+    // therefore the Rust one, not the old client-side `[truncated at N KB]`.
+    assert.match(resp.body, /\[truncated at 1024 bytes by Tauri HTTP layer\]$/);
   });
 
   it('passes through when response is within cap', async () => {
