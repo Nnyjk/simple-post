@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 // scripts/run-mcp-tests.cjs — gated MCP integration test runner used as
-// `npm run build:tests`. Exits 0 if the daemon/proxy binaries are present
-// and all integration tests pass; warns and exits 0 if the binaries are
-// missing so `npm run build` keeps working on a fresh checkout (cargo
-// hasn't been run yet). This keeps `npm run build` green on first CI run
-// while still surfacing regressions once the binary is in place.
+// `npm run build:tests`. Exits 0 if the daemon binary is present and
+// `scripts/mcp-integration.test.mjs` passes; warns and exits 0 if the
+// binary is missing so `npm run build` keeps working on a fresh
+// checkout (cargo hasn't been run yet). This keeps `npm run build`
+// green on first CI run while still surfacing regressions once the
+// binary is in place.
+//
+// As of commit 3 the standalone `simple-post-mcp-proxy.exe` binary is
+// gone (replaced by the placeholder `simple-post-mcp` in
+// `crates/simple-post-mcp/`, with the real CLI shipping in commit 4),
+// so the previous "spawn proxy + verify stdio loop" path is no longer
+// wired up here — it will return as `test:mcp-proxy` once commit 4
+// lands.
 
 const fs = require("fs");
 const path = require("path");
@@ -13,17 +21,11 @@ const { spawn } = require("node:child_process");
 const ROOT = path.resolve(__dirname, "..");
 const DEBUG_DIR = path.join(ROOT, "src-tauri", "target", "debug");
 const exeName = process.platform === "win32" ? "simple-post.exe" : "simple-post";
-const proxyName = process.platform === "win32" ? "simple-post-mcp-proxy.exe" : "simple-post-mcp-proxy";
 const daemonBin = path.join(DEBUG_DIR, exeName);
-const proxyBin = path.join(DEBUG_DIR, proxyName);
 
-const haveDaemon = fs.existsSync(daemonBin);
-const haveProxy = fs.existsSync(proxyBin);
-
-if (!haveDaemon || !haveProxy) {
+if (!fs.existsSync(daemonBin)) {
   console.warn("[build:tests] MCP integration tests skipped:");
-  if (!haveDaemon) console.warn(`[build:tests]   missing ${daemonBin}`);
-  if (!haveProxy)  console.warn(`[build:tests]   missing ${proxyBin}`);
+  console.warn(`[build:tests]   missing ${daemonBin}`);
   console.warn("[build:tests] run `cargo build --manifest-path src-tauri/Cargo.toml --bins` to enable them.");
   process.exit(0);
 }
@@ -36,11 +38,8 @@ const WALL_MS = 80_000;
 // Run one integration test as an async spawn, piping its output live AND
 // retaining the last `ctx.stderrTail` lines for the post-mortem on exit. Resolves
 // to { status, signal, stderr, timedOut }.
-const run = (label) => new Promise((resolveRun) => {
+const run = (script, label) => new Promise((resolveRun) => {
   console.log(`\n[build:tests] === ${label} ===`);
-  const script = label === "mcp"
-    ? path.join(ROOT, "scripts", "mcp-integration.test.mjs")
-    : path.join(ROOT, "scripts", "proxy-integration.test.mjs");
   const child = spawn(process.execPath, [script], {
     // We deliberately do NOT use `stdio: "inherit"` here: the previous
     // wrapper inherited the parent's stdio, so on Windows the spawnSync
@@ -82,23 +81,23 @@ const run = (label) => new Promise((resolveRun) => {
 });
 
 (async () => {
-  for (const label of ["mcp", "proxy"]) {
-    const res = await run(label);
-    if (res.status === 0) continue;
-    console.error(`[build:tests] ${label} integration test FAILED (exit ${res.status}${res.timedOut ? ' — wall-clock timeout' : ''})`);
-    if (res.stderr) {
-      const lines = res.stderr.split(/\r?\n/);
-      const tail = lines.slice(Math.max(0, lines.length - 21), lines.length - 1);
-      if (tail.length > 0) {
-        console.error(`[build:tests] --- last ${tail.length} line(s) of ${label} stderr ---`);
-        for (const line of tail) console.error(line);
-        console.error(`[build:tests] --- end ${label} stderr tail ---`);
-      }
-    }
-    process.exit(res.status ?? 1);
+  const script = path.join(ROOT, "scripts", "mcp-integration.test.mjs");
+  const res = await run(script, "mcp");
+  if (res.status === 0) {
+    console.log("\n[build:tests] MCP integration test passed");
+    process.exit(0);
   }
-  console.log("\n[build:tests] all MCP integration tests passed");
-  process.exit(0);
+  console.error(`[build:tests] mcp integration test FAILED (exit ${res.status}${res.timedOut ? ' — wall-clock timeout' : ''})`);
+  if (res.stderr) {
+    const lines = res.stderr.split(/\r?\n/);
+    const tail = lines.slice(Math.max(0, lines.length - 21), lines.length - 1);
+    if (tail.length > 0) {
+      console.error(`[build:tests] --- last ${tail.length} line(s) of mcp stderr ---`);
+      for (const line of tail) console.error(line);
+      console.error(`[build:tests] --- end mcp stderr tail ---`);
+    }
+  }
+  process.exit(res.status ?? 1);
 })().catch((e) => {
   console.error(`[build:tests] wrapper crashed: ${e && e.stack ? e.stack : e}`);
   process.exit(1);

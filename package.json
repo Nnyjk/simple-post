@@ -16,7 +16,6 @@
     "tauri": "tauri",
     "mcp:repl": "node scripts/mcp-repl.mjs",
     "test:mcp": "node scripts/mcp-integration.test.mjs",
-    "test:proxy": "node scripts/proxy-integration.test.mjs",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
