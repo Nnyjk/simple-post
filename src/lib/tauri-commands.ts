@@ -90,6 +90,13 @@ export const COMMANDS = {
   mcpAutoStartGet: 'mcp_auto_start_get',
   mcpAutoStartSet: 'mcp_auto_start_set',
 
+  // ----- MCP capability policy (commit 1) -----
+  // Three-tier global capability that filters `tools/list` for AI
+  // clients. Default `read_only` — see `docs/mcp-permission-policy.md`.
+  mcpCapabilityGet: 'mcp_capability_get',
+  mcpCapabilitySet: 'mcp_capability_set',
+  mcpCapabilityListTools: 'mcp_capability_list_tools',
+
   // ----- low-level HTTP executor (Tauri side) -----
   httpRequest: 'http_request',
 } as const;
@@ -472,6 +479,22 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'PUT',
     path: () => '/api/preferences',
     body: (a) => ({ key: 'mcp.auto_start', value: a.value }),
+  },
+  // ----- MCP capability policy (commit 1) -----
+  // Dedicated endpoints — returns the policy directly (no need to dig
+  // through the full preferences map, unlike `mcpAutoStart*`).
+  [COMMANDS.mcpCapabilityGet]: {
+    method: 'GET',
+    path: () => '/api/mcp/capability',
+  },
+  [COMMANDS.mcpCapabilitySet]: {
+    method: 'PUT',
+    path: () => '/api/mcp/capability',
+    body: (a) => ({ policy: a.policy }),
+  },
+  [COMMANDS.mcpCapabilityListTools]: {
+    method: 'GET',
+    path: () => '/api/mcp/capability/tools',
   },
 };
 

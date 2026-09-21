@@ -24,7 +24,7 @@ use tauri::State;
 use crate::db::DbPool;
 use crate::domain::*;
 use crate::error::AppError;
-use crate::permissions::Permission;
+use crate::permissions::{CapabilityPolicy, Permission};
 
 // ---------------------------------------------------------------------------
 // Create-options and move-target DTOs. Patch types live in `crate::domain`
@@ -890,4 +890,49 @@ pub(crate) fn uid() -> String {
 
 pub(crate) fn default_color() -> String {
     "#3b82f6".to_string()
+}
+
+// =========================================================================
+// MCP capability policy (commit 1: feat(mcp): three-tier capability policy)
+// =========================================================================
+//
+// Three Tauri commands + matching REST endpoints (see `web_api.rs`).
+// The capability policy is the **global** lever that filters `tools/list`
+// for the AI; per-project permissions in the `permissions` table still
+// gate individual mutations. The two layers compose — see
+// `docs/mcp-permission-policy.md`.
+
+/// Return the current global capability policy. Frontend reads this on
+/// settings hydration and on every reconnect so the UI always reflects
+/// the source of truth (sqlite `preferences.mcp.policy`).
+#[tauri::command]
+pub async fn mcp_capability_get(pool: tauri::State<'_, DbPool>) -> Result<CapabilityPolicy, AppError> {
+    crate::db::with_conn(pool.inner(), |c| crate::db::preferences::mcp_policy(c))
+}
+
+/// Set the global capability policy. The frontend sends the wire form
+/// (`"read_only"` / `"safe_write"` / `"full_access"`) for symmetry with
+/// the REST `PUT /api/mcp/capability` endpoint.
+#[tauri::command]
+pub async fn mcp_capability_set(policy: String, pool: tauri::State<'_, DbPool>) -> Result<CapabilityPolicy, AppError> {
+    let parsed = CapabilityPolicy::parse(&policy)
+        .ok_or_else(|| AppError::Validation(format!("unknown mcp policy '{policy}' (expected read_only | safe_write | full_access)")))?;
+    crate::db::with_conn(pool.inner(), |c| crate::db::preferences::set_mcp_policy(c, parsed))?;
+    Ok(parsed)
+}
+
+/// Return the tool names visible under the **current** capability
+/// policy. The frontend uses it to render the inventory list; the
+/// capability-aware `tools/list` over JSON-RPC uses the same code path
+/// via `mcp::tool_descriptors`.
+#[tauri::command]
+pub async fn mcp_capability_list_tools(pool: tauri::State<'_, DbPool>) -> Result<Vec<String>, AppError> {
+    use std::sync::Arc;
+    use std::time::Instant;
+    let state = crate::mcp::AppState {
+        pool: pool.inner().clone(),
+        started_at: Instant::now(),
+        metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
+    };
+    Ok(crate::mcp::tool_descriptors(&state).await.into_iter().map(|t| t.name).collect())
 }

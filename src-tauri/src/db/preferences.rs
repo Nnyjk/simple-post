@@ -100,6 +100,14 @@ pub mod keys {
     /// `docs/distribution-modes-2026-09-18.md` §5 for the rationale
     /// and the three-shape matrix.
     pub const MCP_AUTO_START: &str = "mcp.auto_start";
+
+    /// `"mcp.policy"` → string. **Default: `read_only`.** The global
+    /// MCP capability tier (`"read_only"` / `"safe_write"` /
+    /// `"full_access"`) the user has selected from the settings panel.
+    /// Read by `permissions::resolve_capability` and the Tauri command
+    /// `mcp_capability_get`; written by `mcp_capability_set`. See
+    /// `docs/mcp-permission-policy.md`.
+    pub const MCP_POLICY: &str = "mcp.policy";
 }
 
 /// Read the `mcp.auto_start` preference with the documented default
@@ -108,6 +116,34 @@ pub mod keys {
 pub fn mcp_auto_start(conn: &mut Connection) -> Result<bool, AppError> {
     let raw: Option<bool> = get(conn, keys::MCP_AUTO_START)?;
     Ok(raw.unwrap_or(false))
+}
+
+/// Read the `mcp.policy` preference as a [`CapabilityPolicy`]. Falls
+/// back to [`CapabilityPolicy::ReadOnly`] when the row is missing or
+/// carries an unrecognised string (forward-compat — a future release
+/// can ship a new tier without breaking older clients).
+///
+/// `pick` is the appropriate verb here — we are decoding a wire form
+/// that the user can tamper with via the preferences table directly.
+pub fn mcp_policy(conn: &mut Connection) -> Result<crate::permissions::CapabilityPolicy, AppError> {
+    let raw: Option<String> = get(conn, keys::MCP_POLICY)?;
+    Ok(match raw.as_deref() {
+        Some("safe_write") => crate::permissions::CapabilityPolicy::SafeWrite,
+        Some("full_access") => crate::permissions::CapabilityPolicy::FullAccess,
+        // Default: ReadOnly. Includes the missing-row case AND the
+        // forward-compat unknown-value case — see doc-comment.
+        _ => crate::permissions::CapabilityPolicy::default(),
+    })
+}
+
+/// Persist the global MCP capability tier. Encoded as the wire form
+/// (`"read_only"` / `"safe_write"` / `"full_access"`) — see
+/// [`crate::permissions::CapabilityPolicy::as_str`].
+pub fn set_mcp_policy(
+    conn: &mut Connection,
+    p: crate::permissions::CapabilityPolicy,
+) -> Result<(), AppError> {
+    set(conn, keys::MCP_POLICY, &p.as_str())
 }
 
 // -------------------------------------------------------------------------
@@ -226,5 +262,42 @@ mod tests {
         assert!(db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap());
         db::with_tx(&pool, |c| set(c, keys::MCP_AUTO_START, &false)).unwrap();
         assert!(!db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap());
+    }
+
+    #[test]
+    fn mcp_policy_defaults_to_read_only_when_missing() {
+        let pool = fresh_pool();
+        let p = db::with_conn(&pool, |c| mcp_policy(c)).unwrap();
+        assert_eq!(
+            p,
+            crate::permissions::CapabilityPolicy::ReadOnly,
+            "missing row must yield ReadOnly — see docs/mcp-permission-policy.md"
+        );
+    }
+
+    #[test]
+    fn mcp_policy_round_trips() {
+        use crate::permissions::CapabilityPolicy;
+        let pool = fresh_pool();
+        for policy in [
+            CapabilityPolicy::ReadOnly,
+            CapabilityPolicy::SafeWrite,
+            CapabilityPolicy::FullAccess,
+        ] {
+            db::with_tx(&pool, |c| set_mcp_policy(c, policy)).unwrap();
+            let back = db::with_conn(&pool, |c| mcp_policy(c)).unwrap();
+            assert_eq!(back, policy);
+        }
+    }
+
+    #[test]
+    fn mcp_policy_tolerates_garbage_value() {
+        // Forward-compat: a future release can ship a new tier;
+        // older clients that can't parse it must still boot, just at
+        // the safe ReadOnly default.
+        let pool = fresh_pool();
+        db::with_tx(&pool, |c| set(c, keys::MCP_POLICY, &"nuclear".to_string())).unwrap();
+        let p = db::with_conn(&pool, |c| mcp_policy(c)).unwrap();
+        assert_eq!(p, crate::permissions::CapabilityPolicy::ReadOnly);
     }
 }

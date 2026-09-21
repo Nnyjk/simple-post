@@ -29,6 +29,7 @@ use crate::db::{self, DbPool};
 use crate::error::AppError;
 use crate::http_executor::{self, HttpRequestInput, HttpResult};
 use crate::mcp::{self, AppState as McpAppState};
+use crate::permissions::CapabilityPolicy;
 use crate::port_registry;
 
 // -------------------------------------------------------------------------
@@ -407,6 +408,78 @@ async fn mcp_status(
     State(s): State<Arc<WebState>>,
 ) -> Json<McpStatusDto> {
     Json(s.daemon.snapshot().into())
+}
+
+// =========================================================================
+// MCP capability policy (commit 1: feat(mcp): three-tier capability policy)
+// =========================================================================
+//
+// Three REST endpoints mirroring the Tauri commands in `commands.rs`:
+//   GET  /api/mcp/capability       — read current policy
+//   PUT  /api/mcp/capability       — set policy (body: { policy: "..." })
+//   GET  /api/mcp/capability/tools — list tools visible under current policy
+
+#[derive(Debug, Serialize)]
+struct CapabilityResponse {
+    policy: CapabilityPolicy,
+}
+
+/// `GET /api/mcp/capability` — read the global capability policy. The
+/// web-mode renderer calls this on every page load so the UI badge
+/// always reflects the sqlite source of truth.
+async fn mcp_capability_get(
+    State(s): State<Arc<WebState>>,
+) -> Result<Json<CapabilityResponse>, HttpErrorResponse> {
+    let pool = s.pool.clone();
+    let policy = match crate::db::with_conn(&pool, |c| crate::db::preferences::mcp_policy(c)) {
+        Ok(p) => p,
+        Err(e) => return Err(map_app_error(e)),
+    };
+    Ok(Json(CapabilityResponse { policy }))
+}
+
+#[derive(Debug, Deserialize)]
+struct CapabilitySetBody {
+    policy: String,
+}
+
+/// `PUT /api/mcp/capability` — update the global policy. Persisted via
+/// `db::preferences::set_mcp_policy`, returns the new policy echoed back.
+async fn mcp_capability_put(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<CapabilitySetBody>,
+) -> Result<Json<CapabilityResponse>, HttpErrorResponse> {
+    let pool = s.pool.clone();
+    let parsed = match CapabilityPolicy::parse(&body.policy) {
+        Some(p) => p,
+        None => {
+            return Err(map_app_error(AppError::Validation(format!(
+                "unknown mcp policy '{}' (expected read_only | safe_write | full_access)",
+                body.policy
+            ))))
+        }
+    };
+    if let Err(e) = crate::db::with_conn(&pool, |c| crate::db::preferences::set_mcp_policy(c, parsed)) {
+        return Err(map_app_error(e));
+    }
+    Ok(Json(CapabilityResponse { policy: parsed }))
+}
+
+/// `GET /api/mcp/capability/tools` — list tools visible under the
+/// current policy. Reuses the same `mcp::tool_descriptors` filter the
+/// JSON-RPC `tools/list` path uses, so the wire output is identical.
+async fn mcp_capability_list_tools(
+    State(s): State<Arc<WebState>>,
+) -> Result<Json<Vec<String>>, HttpErrorResponse> {
+    let pool = s.pool.clone();
+    let state = crate::mcp::AppState {
+        pool,
+        started_at: std::time::Instant::now(),
+        metrics: std::sync::Arc::new(crate::mcp_metrics::McpMetrics::new()),
+    };
+    Ok(Json(
+        crate::mcp::tool_descriptors(&state).await.into_iter().map(|t| t.name).collect(),
+    ))
 }
 
 async fn mcp_start(
@@ -1139,6 +1212,9 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/mcp/stop", post(mcp_stop))
         .route("/api/mcp/restart", post(mcp_restart))
         .route("/api/mcp/proxy-path", get(mcp_proxy_path))
+        // ---- mcp capability policy (commit 1) ----
+        .route("/api/mcp/capability", get(mcp_capability_get).put(mcp_capability_put))
+        .route("/api/mcp/capability/tools", get(mcp_capability_list_tools))
         // ---- preferences ----
         .route("/api/preferences", get(preferences_get).put(preferences_put))
         .with_state(state_arc.clone());

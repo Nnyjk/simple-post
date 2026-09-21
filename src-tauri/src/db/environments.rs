@@ -87,6 +87,35 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
     }
 }
 
+/// Look up the `project_id` owning `env_id`. Returns `NotFound` when
+/// the env id is unknown — the caller (a mutating MCP tool) needs that
+/// resolution to apply the per-project permission check; treating an
+/// unknown id as a silent "global" would be a permission bypass.
+///
+/// The five `env_*` mutating tools (update / delete / set_var / set_baseurl
+/// / set_active) used to call `check_permission(.., "global", ..)`
+/// with the literal `"global"` as a stand-in for "any project". That
+/// was a permission-bypass waiting to happen: any project whose agent
+/// permission row was absent defaulted to `Permission::ReadCall`
+/// (see `db::permissions::get`), so the "global" lookup would silently
+/// succeed for `env_update` / `env_set_var` / `env_set_baseurl` and
+/// `env_set_active` (which check `ReadCall`), and for `env_delete`
+/// (which checked `Full` and so still got denied — but only by
+/// accident). This helper is the missing piece that closes that gap:
+///
+///   tool_env_update(env_id="e_unknown") ⇒ lookup_project_id fails
+///   ⇒ NotFound ⇒ handler returns NotFound before touching anything.
+pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, AppError> {
+    let pid: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM environments WHERE id = ?1",
+            params![env_id],
+            |r| r.get(0),
+        )
+        .ok();
+    pid.ok_or_else(|| AppError::NotFound(format!("environment {env_id}")))
+}
+
 // -------------------------------------------------------------------------
 // Writes.
 // -------------------------------------------------------------------------
@@ -412,5 +441,31 @@ mod tests {
         .unwrap();
         let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
         assert_eq!(got.base_urls.get("def_default").unwrap(), "http://new");
+    }
+
+    #[test]
+    fn lookup_project_id_returns_owner_of_seeded_env() {
+        let pool = fresh_pool();
+        let pid = db::with_conn(&pool, |c| lookup_project_id(c, "env_dev")).unwrap();
+        assert_eq!(pid, "p_demo");
+    }
+
+    #[test]
+    fn lookup_project_id_returns_not_found_for_unknown_env() {
+        // Critical for closing the "global" permission-bypass: a tool
+        // calling lookup_project_id on a forged env_id must NOT get
+        // back any project (and thus any permission grant).
+        let pool = fresh_pool();
+        let err = db::with_conn(&pool, |c| lookup_project_id(c, "env_ghost")).unwrap_err();
+        assert_eq!(err.code(), "not_found");
+    }
+
+    #[test]
+    fn lookup_project_id_does_not_match_empty_string() {
+        // An empty env_id is the easiest bypass attempt — make sure
+        // we don't accidentally accept it.
+        let pool = fresh_pool();
+        let err = db::with_conn(&pool, |c| lookup_project_id(c, "")).unwrap_err();
+        assert_eq!(err.code(), "not_found");
     }
 }

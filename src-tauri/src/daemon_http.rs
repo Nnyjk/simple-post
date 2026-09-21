@@ -122,9 +122,8 @@ pub struct HealthzResponse {
 // =========================================================================
 
 async fn handle_tools(State(state): State<Arc<AppState>>) -> Json<ToolsListResponse> {
-    let _ = state;
     Json(ToolsListResponse {
-        tools: mcp::tool_descriptors(),
+        tools: mcp::tool_descriptors(&state).await,
     })
 }
 
@@ -178,7 +177,7 @@ pub async fn dispatch_mcp_request(state: Arc<AppState>, body: String) -> Respons
     let response = match request.method.as_str() {
         "initialize" => handle_initialize(request.id, request.params),
         "ping" => JsonRpcResponse::ok(request.id, json!({})),
-        "tools/list" => handle_tools_list(state.clone(), request.id),
+        "tools/list" => handle_tools_list(state.clone(), request.id).await,
         "tools/call" => handle_tools_call(state, request.id, request.params).await,
         "notifications/initialized" | "notifications/cancelled" => {
             return StatusCode::NO_CONTENT.into_response();
@@ -216,9 +215,8 @@ fn handle_initialize(id: Option<Value>, _params: Option<Value>) -> JsonRpcRespon
     )
 }
 
-fn handle_tools_list(state: Arc<AppState>, id: Option<Value>) -> JsonRpcResponse {
-    let _ = state;
-    let tools = mcp::tool_descriptors();
+async fn handle_tools_list(state: Arc<AppState>, id: Option<Value>) -> JsonRpcResponse {
+    let tools = mcp::tool_descriptors(&state).await;
     JsonRpcResponse::ok(id, json!({ "tools": tools }))
 }
 

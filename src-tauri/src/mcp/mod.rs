@@ -43,6 +43,8 @@ pub mod project_ops;
 pub mod response_parse;
 pub mod variable_fill;
 
+use crate::permissions::{resolve_capability, Capability, CapabilityPolicy};
+
 // =========================================================================
 // Public entry: serve_http
 // =========================================================================
@@ -322,14 +324,110 @@ fn tool_table() -> &'static [ToolEntry] {
 }
 
 /// Snapshot of all tool names (for `/mcp/healthz` + sanity checks).
+///
+/// **NOTE:** This returns the full unfiltered registry (every tool the
+/// crate ships), not the user-visible filtered set. Callers that want
+/// the visibility-after-policy set should use [`tool_descriptors`]
+/// instead. Used by healthz + metrics — neither needs the user's view.
 pub fn registered_tool_names() -> Vec<String> {
     tool_table().iter().map(|e| e.name.to_string()).collect()
 }
 
-/// Snapshot of every tool's full descriptor (for `tools/list` + `/mcp/tools`).
-pub fn tool_descriptors() -> Vec<ToolDescriptor> {
+/// Map a tool name to the global [`Capability`] class it requires.
+///
+/// Anything **not** listed defaults to [`Capability::Delete`] (the
+/// strictest tier). Same safe-by-default direction the per-project
+/// [`crate::permissions::required_permission`] uses — a new mutating
+/// tool added without an entry here will be denied until the user
+/// opts in to `full_access`.
+pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
+    // env
+    ("env_list", Capability::Read),
+    ("env_get_active", Capability::Read),
+    ("env_create", Capability::Create),
+    ("env_update", Capability::Update),
+    ("env_delete", Capability::Delete),
+    ("env_set_var", Capability::Update),
+    ("env_set_baseurl", Capability::Update),
+    ("env_set_active", Capability::Update),
+    // project
+    ("project_list", Capability::Read),
+    ("project_get", Capability::Read),
+    ("project_create", Capability::Create),
+    ("project_update", Capability::Update),
+    ("project_delete", Capability::Delete),
+    // module
+    ("module_list", Capability::Read),
+    ("module_create", Capability::Create),
+    ("module_update", Capability::Update),
+    ("module_delete", Capability::Delete),
+    // collection
+    ("collection_list", Capability::Read),
+    ("collection_create", Capability::Create),
+    ("collection_update", Capability::Update),
+    ("collection_delete", Capability::Delete),
+    // endpoint
+    ("endpoint_list", Capability::Read),
+    ("endpoint_get", Capability::Read),
+    ("endpoint_search", Capability::Read),
+    ("endpoint_create", Capability::Create),
+    ("endpoint_update", Capability::Update),
+    ("endpoint_delete", Capability::Delete),
+    ("endpoint_duplicate", Capability::Create),
+    ("endpoint_move", Capability::Update),
+    // baseUrl definitions
+    ("base_url_def_list", Capability::Read),
+    ("base_url_def_create", Capability::Create),
+    ("base_url_def_update", Capability::Update),
+    ("base_url_def_delete", Capability::Delete),
+    ("base_url_def_set_default", Capability::Update),
+    // HTTP execution — outbound network calls. Highest trust.
+    ("api_run_request", Capability::Send),
+    ("api_call_endpoint", Capability::Send),
+    // Read-side variable / endpoint helpers
+    ("api_resolve_template", Capability::Read),
+    ("api_resolve_endpoint", Capability::Read),
+    ("api_validate_endpoint", Capability::Read),
+    ("api_parse_response", Capability::Read),
+    ("api_diff_responses", Capability::Read),
+    ("api_extract_jsonpath", Capability::Read),
+];
+
+/// O(n) lookup over the small `REQUIRED_CAPABILITY` table. Returns
+/// `None` for unrecognised names — callers must handle the conservative
+/// "deny" path themselves. The dispatcher uses this on every
+/// `tools/call`; the table is intentionally linear (44 entries) so a
+/// hash map would be premature optimisation.
+pub fn required_capability(name: &str) -> Option<Capability> {
+    REQUIRED_CAPABILITY
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, c)| *c)
+}
+
+/// Snapshot of every tool's full descriptor (for `tools/list` +
+/// `/mcp/tools`). Filters out tools whose required [`Capability`] is
+/// not covered by the **current** [`CapabilityPolicy`] — this is the
+/// single source of truth for the LLM-visible inventory. A misconfigured
+/// policy should never leak a write tool to the AI.
+///
+/// The default policy when none is set is [`CapabilityPolicy::ReadOnly`]
+/// (safe-by-default). A user who hasn't visited the settings panel yet
+/// sees only the read-only inventory.
+pub async fn tool_descriptors(state: &AppState) -> Vec<ToolDescriptor> {
+    let policy = resolve_capability(&state.pool, None)
+        .await
+        .unwrap_or(CapabilityPolicy::default());
     tool_table()
         .iter()
+        .filter(|e| match required_capability(e.name) {
+            Some(req) => policy.satisfies(req),
+            // Unknown tool — keep unfiltered so a forward-compat
+            // tool name can still be called; the dispatcher will
+            // apply the second-gate capability check using the
+            // same table.
+            None => true,
+        })
         .map(|e| ToolDescriptor {
             name: e.name.to_string(),
             description: e.description.to_string(),
@@ -341,11 +439,30 @@ pub fn tool_descriptors() -> Vec<ToolDescriptor> {
 /// Dispatch a `tools/call` by name. Unknown name → `AppError::NotFound`
 /// (mapped to `is_error: true` by the JSON-RPC handler so the LLM sees
 /// the missing tool name).
+///
+/// Applies the global capability gate as a **second** check (the first
+/// is `tool_descriptors` for `tools/list`). A direct `tools/call` to
+/// a write tool while the policy is `ReadOnly` returns
+/// `AppError::PermissionDenied` — the LLM never reaches the handler.
 pub async fn dispatch(
     state: &AppState,
     name: &str,
     args: Value,
 ) -> Result<CallToolResult, crate::error::AppError> {
+    // Capability pre-flight: deny before we look up the handler, so
+    // a misconfigured LLM that calls `tools/call` directly without
+    // re-reading `tools/list` still cannot mutate. Resolves the
+    // effective policy the same way `tool_descriptors` does — global
+    // preference + (no project here) = just the preference.
+    if let Some(req) = required_capability(name) {
+        let policy = resolve_capability(&state.pool, None).await?;
+        if !policy.satisfies(req) {
+            return Err(crate::error::AppError::PermissionDenied(format!(
+                "tool '{name}' requires {:?}, current policy is {:?}",
+                req, policy
+            )));
+        }
+    }
     let entry = tool_table()
         .iter()
         .find(|e| e.name == name)

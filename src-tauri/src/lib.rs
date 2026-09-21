@@ -289,6 +289,9 @@ pub fn run() {
             crate::commands::mcp_daemon_proxy_path,
             crate::commands::mcp_auto_start_get,
             crate::commands::mcp_auto_start_set,
+            crate::commands::mcp_capability_get,
+            crate::commands::mcp_capability_set,
+            crate::commands::mcp_capability_list_tools,
         ])
         .setup(|app| {
             // Read the persisted MCP auto-start preference **before**

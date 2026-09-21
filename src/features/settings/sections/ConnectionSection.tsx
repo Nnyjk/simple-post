@@ -63,6 +63,50 @@ export function ConnectionSection() {
   useEffect(() => {
     void refreshMcpAutoStart();
   }, [refreshMcpAutoStart]);
+
+  // ----- MCP capability policy (commit 1) -------------------------
+  // Three-tier global capability that filters `tools/list` for AI
+  // clients. Default `read_only` — see
+  // `docs/mcp-permission-policy.md`. Stored in sqlite
+  // `preferences.mcp.policy`; UI hydrates on mount, persists on change.
+  type CapabilityPolicy = 'read_only' | 'safe_write' | 'full_access';
+  const [capability, setCapability] = useState<CapabilityPolicy | null>(null);
+  const [capabilityBusy, setCapabilityBusy] = useState(false);
+  const [capabilityTools, setCapabilityTools] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const policy = await invokeCmd<{ policy: CapabilityPolicy }>(
+          COMMANDS.mcpCapabilityGet,
+        );
+        if (cancelled) return;
+        setCapability(policy.policy);
+        const tools = await invokeCmd<string[]>(COMMANDS.mcpCapabilityListTools);
+        if (cancelled) return;
+        setCapabilityTools(tools);
+      } catch (e) {
+        console.error('[mcp capability] hydrate failed', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const handleCapabilityChange = async (next: CapabilityPolicy) => {
+    if (next === capability) return;
+    setCapabilityBusy(true);
+    try {
+      await invokeCmd(COMMANDS.mcpCapabilitySet, { policy: next });
+      setCapability(next);
+      const tools = await invokeCmd<string[]>(COMMANDS.mcpCapabilityListTools);
+      setCapabilityTools(tools);
+    } catch (e) {
+      console.error('[mcp capability] set failed', e);
+    } finally {
+      setCapabilityBusy(false);
+    }
+  };
   const handleAutoStartToggle = async (next: boolean) => {
     setAutoStartBusy(true);
     try {
@@ -206,6 +250,42 @@ export function ConnectionSection() {
             </div>
             <Badge variant="muted" className="shrink-0 font-mono">JSON-RPC 2.0</Badge>
           </div>
+        </div>
+      </SettingsCategory>
+
+      {/* ----- MCP capability policy (commit 1) ------------------- */}
+      {/* Three-tier global capability that filters `tools/list` for AI
+          clients. Default `read_only` — see
+          `docs/mcp-permission-policy.md`. Persisted to
+          `preferences.mcp.policy`. */}
+      <SettingsCategory
+        title="AI 写入权限"
+        description="控制 AI 客户端可见的工具集。切换后立刻生效，无需重启 daemon。"
+        icon={<Bot className="h-3.5 w-3.5" />}
+        meta={
+          capability === null
+            ? '加载中…'
+            : capability === 'read_only'
+              ? '只读'
+              : capability === 'safe_write'
+                ? '读写'
+                : '全部'
+        }
+      >
+        <div className="space-y-3 p-3">
+          <CapabilityRadioGroup
+            value={capability}
+            disabled={capabilityBusy || capability === null}
+            onChange={handleCapabilityChange}
+          />
+          {capability !== null && (
+            <div className="text-[11px] text-muted-foreground">
+              当前可见 {capabilityTools.length} 个工具
+              {capabilityTools.length > 0 ? '：' : ''}
+              {capabilityTools.slice(0, 8).join('、')}
+              {capabilityTools.length > 8 ? '…' : ''}
+            </div>
+          )}
         </div>
       </SettingsCategory>
 
@@ -358,5 +438,65 @@ export function ConnectionSection() {
         lastError={mcpStatus?.lastError}
       />
     </>
+  );
+}
+
+// ----- Capability radio group (commit 1) -------------------------
+// Three-way switch wired directly to the Tauri command. Plain radio
+// inputs keep this independent of the project's `SettingsCategory` and
+// store plumbing — the slice-level integration can be added later
+// (commit 1a TODO).
+type CapabilityPolicy = 'read_only' | 'safe_write' | 'full_access';
+const CAPABILITY_OPTIONS: ReadonlyArray<{
+  value: CapabilityPolicy;
+  label: string;
+  hint: string;
+}> = [
+  { value: 'read_only', label: '只读', hint: 'AI 仅能 list / get，不能修改任何数据。默认。' },
+  { value: 'safe_write', label: '读写', hint: '允许创建 / 修改 / 复制，但不发 http_send、不删。' },
+  { value: 'full_access', label: '全部', hint: '包括删除与外发 HTTP 请求。AI 可以做任何事。' },
+];
+function CapabilityRadioGroup({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: CapabilityPolicy | null;
+  disabled: boolean;
+  onChange: (next: CapabilityPolicy) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {CAPABILITY_OPTIONS.map((opt) => {
+        const checked = value === opt.value;
+        const id = `mcp-cap-${opt.value}`;
+        return (
+          <label
+            key={opt.value}
+            htmlFor={id}
+            className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 transition-colors ${
+              checked
+                ? 'border-primary bg-primary/5'
+                : 'border-border bg-background hover:border-primary/40'
+            } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+          >
+            <input
+              id={id}
+              type="radio"
+              name="mcp-capability"
+              value={opt.value}
+              checked={checked}
+              disabled={disabled}
+              onChange={() => onChange(opt.value)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[var(--color-primary,#3b82f6)]"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-foreground">{opt.label}</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">{opt.hint}</div>
+            </div>
+          </label>
+        );
+      })}
+    </div>
   );
 }
