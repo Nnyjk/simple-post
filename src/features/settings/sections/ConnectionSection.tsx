@@ -30,10 +30,25 @@ const GENERIC_CONFIG = JSON.stringify(
         },
       },
       'simple-post-stdio': {
-        command: 'simple-post-mcp-proxy',
+        // plan commit 4: `simple-post-mcp-proxy` was removed in
+        // commit 3; the standalone bridge binary is now
+        // `simple-post-mcp`. For one-step install users should
+        // prefer the npm wrapper (`npx -y @simple-post/mcp-server`).
+        command: 'simple-post-mcp',
         args: ['stdio'],
         env: {
           SIMPLE_POST_DATA_DIR: '%APPDATA%\\\\simple-post',
+        },
+      },
+      'simple-post-npm': {
+        command: 'npx',
+        args: ['-y', '@simple-post/mcp-server'],
+        env: {
+          SIMPLE_POST_DATA_DIR: '%APPDATA%\\\\simple-post',
+        },
+        metadata: {
+          description:
+            'npm wrapper around the standalone simple-post-mcp bridge — no native install needed',
         },
       },
     },

@@ -31,8 +31,8 @@ use crate::http_executor::{self, HttpRequestInput, HttpResult};
 use crate::mcp::{self, AppState as McpAppState};
 use crate::permissions::CapabilityPolicy;
 use crate::port_registry;
-// daemon_http and ariable_fill / esponse_parse moved into the
-// simple-post-mcp crate in commit 3 (MCP layer extraction).
+// `daemon_http` and `variable_fill` / `response_parse` moved into the
+// `simple-post-mcp` crate in commit 3 (MCP layer extraction).
 use simple_post_mcp::daemon_http;
 
 // -------------------------------------------------------------------------
@@ -1043,9 +1043,9 @@ async fn mcp_proxy_path() -> String {
     }
 
     let path = if cfg!(windows) {
-        build("simple-post.exe", "simple-post-mcp-proxy.exe")
+        build("simple-post.exe", "simple-post-mcp.exe")
     } else {
-        build("simple-post", "simple-post-mcp-proxy")
+        build("simple-post", "simple-post-mcp")
     };
 
     path.map(|p| p.display().to_string())

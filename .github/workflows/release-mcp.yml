@@ -1,0 +1,176 @@
+# .github/workflows/release-mcp.yml
+#
+# Build the `simple-post-mcp` native binary for every supported
+# (platform, arch), bundle each into the npm tarball under
+# `native/<platform>-<arch>/`, then publish
+# `@simple-post/mcp-server` to npmjs. Triggered by pushing a tag of
+# the form `v0.1.0-mcp` so MCP-specific releases stay decoupled from
+# the desktop app's release cadence (plan commit 4).
+#
+# Local sanity check: `cargo run -p simple-post-mcp -- --help`.
+
+name: Release simple-post-mcp
+
+on:
+  push:
+    tags:
+      - 'v*-mcp'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create GitHub release
+  id-token: write     # npm provenance via OIDC
+
+jobs:
+  build-matrix:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # target triple → npm native/ subdir → binary name suffix
+          - target: x86_64-unknown-linux-gnu
+            platform: linux
+            arch: x64
+            npm_dir: linux-x64
+            binary: simple-post-mcp
+            musl: false
+          - target: aarch64-unknown-linux-gnu
+            platform: linux
+            arch: arm64
+            npm_dir: linux-arm64
+            binary: simple-post-mcp
+            musl: false
+          - target: x86_64-apple-darwin
+            platform: darwin
+            arch: x64
+            npm_dir: darwin-x64
+            binary: simple-post-mcp
+            musl: false
+          - target: aarch64-apple-darwin
+            platform: darwin
+            arch: arm64
+            npm_dir: darwin-arm64
+            binary: simple-post-mcp
+            musl: false
+          - target: x86_64-pc-windows-msvc
+            platform: windows
+            arch: x64
+            npm_dir: windows-x64
+            binary: simple-post-mcp.exe
+            musl: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry / target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: >-
+            simple-post-core ->
+            simple-post-mcp
+          shared-key: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild (Linux/macOS cross-compile)
+        if: matrix.musl
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Build release binary
+        working-directory: src-tauri
+        run: |
+          cargo build --release --target ${{ matrix.target }} -p simple-post-mcp \
+            --bin simple-post-mcp
+          ls -la ../target/${{ matrix.target }}/release/${{ matrix.binary }}
+
+      - name: Smoke-test the binary
+        working-directory: src-tauri
+        run: |
+          ../target/${{ matrix.target }}/release/${{ matrix.binary }} --help
+
+      - name: Strip + upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: simple-post-mcp-${{ matrix.npm_dir }}
+          path: src-tauri/target/${{ matrix.target }}/release/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble-npm-package:
+    name: Assemble + publish npm package
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: checkout
+
+      - name: Download all native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/native
+          pattern: simple-post-mcp-*
+          merge-multiple: true
+
+      - name: Stage npm package contents
+        working-directory: checkout/packages/simple-post-mcp
+        run: |
+          set -euo pipefail
+          mkdir -p native
+          # Each artifact directory holds one `simple-post-mcp[.exe]`.
+          # Lay them out under `native/<platform>-<arch>/` matching
+          # the layout postinstall.mjs reads.
+          for d in ../../dist/native/*; do
+            if [[ -d "$d" ]]; then
+              name=$(basename "$d")
+              # strip the `simple-post-mcp-` prefix to get the npm_dir
+              npm_dir="${name#simple-post-mcp-}"
+              mkdir -p "native/$npm_dir"
+              cp -v "$d"/* "native/$npm_dir/"
+            fi
+          done
+          # Sanity check: every npm_dir we expect must have a binary.
+          for platform_arch in linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64; do
+            if ! ls native/$platform_arch >/dev/null 2>&1; then
+              echo "::error::missing native binary for $platform_arch"
+              exit 1
+            fi
+          done
+          echo "staged native/:"
+          find native -type f
+
+      - name: Publish to npm
+        working-directory: checkout/packages/simple-post-mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # `prepublishOnly` is gated by `bin/check-native.mjs` so we
+          # only need `npm publish --provenance --access public`.
+          npm publish --provenance --access public
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+      - name: Tarball fallback (workflow_dispatch smoke)
+        working-directory: checkout/packages/simple-post-mcp
+        run: |
+          npm pack --dry-run
+        if: github.event_name == 'workflow_dispatch'
+
+  github-release:
+    name: GitHub release (post binary check)
+    needs: assemble-npm-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            packages/simple-post-mcp/bin/simple-post-mcp
+            packages/simple-post-mcp/bin/simple-post-mcp.cmd
+            packages/simple-post-mcp/bin/postinstall.mjs
+            packages/simple-post-mcp/bin/check-native.mjs
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

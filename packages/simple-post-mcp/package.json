@@ -1,0 +1,45 @@
+{
+  "name": "@simple-post/mcp-server",
+  "version": "0.1.0",
+  "description": "Standalone stdio↔HTTP bridge for Simple Post — wraps the cargo-compiled native binary, no Rust toolchain required.",
+  "private": false,
+  "license": "MIT",
+  "bin": {
+    "simple-post-mcp": "./bin/simple-post-mcp"
+  },
+  "files": [
+    "bin/",
+    "native/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node ./bin/postinstall.mjs",
+    "prepublishOnly": "node ./bin/check-native.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "simple-post",
+    "api-client"
+  ],
+  "homepage": "https://github.com/YOUR_ORG/simple-post#readme",
+  "bugs": "https://github.com/YOUR_ORG/simple-post/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_ORG/simple-post.git",
+    "directory": "packages/simple-post-mcp"
+  }
+}

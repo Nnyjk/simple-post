@@ -76,10 +76,12 @@ export const COMMANDS = {
   mcpStatus: 'mcp_status',
   mcpDaemonRestart: 'mcp_daemon_restart',
   /**
-   * Resolves the absolute on-disk path of the stdio proxy binary
-   * (`simple-post-mcp-proxy.exe` / `simple-post-mcp-proxy`). The
+   * Resolves the absolute on-disk path of the stdio bridge binary
+   * (`simple-post-mcp.exe` / `simple-post-mcp`). The
    * ConnectionSection uses this to fill the "代理二进制路径"
    * placeholder with a real value instead of the literal hint.
+   * The legacy `simple-post-mcp-proxy` binary was removed in
+   * commit 3 — see plan 工作流 4 (commit 4).
    */
   mcpDaemonProxyPath: 'mcp_daemon_proxy_path',
   /**

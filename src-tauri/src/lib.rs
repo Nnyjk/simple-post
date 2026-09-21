@@ -95,7 +95,7 @@ pub fn run_mcp(transport: String, port: u16, bind: String) {
             data_dir.display()
         );
 
-        // Publish the live port so `simple-post-mcp-proxy` and any
+        // Publish the live port so `simple-post-mcp` and any
         // other AI client can discover us. The CLI mode is the
         // canonical way to run the daemon for tests and headless
         // automation; without this write the proxy would refuse to
@@ -146,13 +146,14 @@ pub fn run_mcp(transport: String, port: u16, bind: String) {
 }
 
 /// CLI subcommand `mcp-proxy` entry. The proxy is a separate binary
-/// (`simple-post-mcp-proxy[.exe]`); running it via the main binary is
+/// (`simple-post-mcp[.exe]`); running it via the main binary is
 /// almost certainly a user mistake (wrong PATH, wrong shortcut), so
 /// point them at the right binary and exit non-zero so a CI script
 /// would catch it.
 pub fn run_mcp_proxy() {
     eprintln!(
-        "mcp-proxy is a separate binary — please run `simple-post-mcp-proxy` instead."
+        "mcp-proxy is a separate binary — please run `simple-post-mcp` instead \
+         (or `npx -y @simple-post/mcp-server`)."
     );
     std::process::exit(2);
 }
@@ -350,7 +351,8 @@ pub fn run() {
 /// directly. The daemon child (if `mcp.auto_start == true`) runs on
 /// this host, behind the `simple-post` process tree, and is reachable
 /// only via the REST bridge; AI clients continue to use the
-/// `simple-post-mcp-proxy` binary on their own machine as before.
+/// `simple-post-mcp` binary on their own machine (or
+/// `npx -y @simple-post/mcp-server`) as before.
 ///
 /// See `docs/distribution-modes-2026-09-18.md` §3 + §6 for the
 /// architecture and route table.

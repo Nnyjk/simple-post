@@ -41,7 +41,8 @@ enum Cmd {
     },
 
     /// Run as stdio→HTTP proxy. This is a separate binary
-    /// (`simple-post-mcp-proxy.exe`); the main binary prints an error and exits.
+    /// (`simple-post-mcp.exe`); the main binary prints an error and exits.
+    /// Use the dedicated binary directly or `npx -y @simple-post/mcp-server`.
     #[command(name = "mcp-proxy")]
     McpProxy,
 
@@ -98,7 +99,11 @@ fn main() {
 
         // mcp-proxy is a separate binary; refuse to start here.
         Some(Cmd::McpProxy) => {
-            eprintln!("mcp-proxy is a separate binary: simple-post-mcp-proxy.exe");
+            eprintln!(
+                "mcp-proxy is a separate binary:\n  \
+                 - cargo-installed: cargo install simple-post-mcp\n  \
+                 - npm: npx -y @simple-post/mcp-server"
+            );
             std::process::exit(2);
         }
 

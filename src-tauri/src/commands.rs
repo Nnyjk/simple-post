@@ -759,15 +759,25 @@ pub fn mcp_status(
     Ok(state.snapshot())
 }
 
-/// Absolute path of the `simple-post-mcp-proxy` binary that AI clients
+/// Absolute path of the `simple-post-mcp` binary that AI clients
 /// (Claude Desktop, Cursor, …) launch in their `mcpServers` config.
 ///
 /// The renderer surfaces this string verbatim in the Connection panel's
 /// "copy proxy path" button so the user can paste it into their client.
 /// We resolve from `current_exe()` (the running Tauri process) and
 /// substitute the trailing `simple-post(.exe)` segment with
-/// `simple-post-mcp-proxy(.exe)` — the two binaries always ship in the
-/// same directory.
+/// `simple-post-mcp(.exe)` — the two binaries ship in the same
+/// workspace `target/<profile>/` directory after `cargo build
+/// --workspace`.
+///
+/// In a development checkout the simple-post Tauri binary lives at
+/// `src-tauri/target/<profile>/simple-post(.exe)` while simple-post-mcp
+/// is at the workspace root `target/<profile>/simple-post-mcp(.exe)`;
+/// this command returns the same directory as `current_exe` so the
+/// hint is correct for installed / packaged builds. Commit 5 will
+/// revisit this when the npm-wrapped path becomes the canonical
+/// install (it should point users at `npx -y @simple-post/mcp-server`
+/// in that case).
 ///
 /// Returns `"<unresolved current_exe>"` when the lookup fails for any
 /// reason; the renderer treats that string as a non-actionable
@@ -783,9 +793,9 @@ pub fn mcp_daemon_proxy_path() -> String {
     }
 
     let path = if cfg!(windows) {
-        build("simple-post.exe", "simple-post-mcp-proxy.exe")
+        build("simple-post.exe", "simple-post-mcp.exe")
     } else {
-        build("simple-post", "simple-post-mcp-proxy")
+        build("simple-post", "simple-post-mcp")
     };
 
     path.map(|p| p.display().to_string())
