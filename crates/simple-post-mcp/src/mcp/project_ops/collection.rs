@@ -13,8 +13,8 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::domain::{Collection, CollectionPatch};
-use crate::error::AppError;
+use simple_post_core::domain::{Collection, CollectionPatch};
+use simple_post_core::error::AppError;
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
 
@@ -128,8 +128,8 @@ pub(super) async fn tool_collection_list(
     let a: super::ModuleIdArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("collection_list args: {e}")))?;
     crate::mcp::check_permission(&state.pool, "global", "collection_list").await?;
-    let cols = crate::db::with_conn(&state.pool, |c| {
-        crate::db::collections::list_by_module(c, &a.module_id)
+    let cols = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::collections::list_by_module(c, &a.module_id)
     })?;
     Ok(CallToolResult::json(cols))
 }
@@ -145,7 +145,7 @@ pub(super) async fn tool_collection_create(
     }
     crate::mcp::check_permission(&state.pool, "global", "collection_create").await?;
     let c = Collection {
-        id: format!("col_{}", crate::domain::now_ms()),
+        id: format!("col_{}", simple_post_core::domain::now_ms()),
         module_id: a.module_id,
         parent_collection_id: a.parent_collection_id,
         name: a.name,
@@ -154,8 +154,8 @@ pub(super) async fn tool_collection_create(
         expanded: None,
     };
     let id = c.id.clone();
-    crate::db::with_tx(&state.pool, |c2| crate::db::collections::create(c2, &c))?;
-    let stored = crate::db::with_conn(&state.pool, |c2| crate::db::collections::get(c2, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c2| simple_post_core::db::collections::create(c2, &c))?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c2| simple_post_core::db::collections::get(c2, &id))?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -181,8 +181,8 @@ pub(super) async fn tool_collection_update(
             .map(|v| v.as_str().map(String::from)),
         sort_order: None,
     };
-    let c = crate::db::with_conn(&state.pool, |c2| {
-        crate::db::collections::update(c2, &a.collection_id, patch)
+    let c = simple_post_core::db::with_conn(&state.pool, |c2| {
+        simple_post_core::db::collections::update(c2, &a.collection_id, patch)
     })?;
     Ok(CallToolResult::json(c))
 }
@@ -193,7 +193,7 @@ pub(super) async fn tool_collection_delete(
 ) -> Result<CallToolResult, AppError> {
     let collection_id = arg_str(&args, "collection_id")?.to_string();
     crate::mcp::check_permission(&state.pool, "global", "collection_delete").await?;
-    crate::db::with_tx(&state.pool, |c| crate::db::collections::delete(c, &collection_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::collections::delete(c, &collection_id))?;
     Ok(CallToolResult::json(json!({ "deleted": collection_id })))
 }
 
@@ -209,8 +209,8 @@ pub(super) async fn tool_collection_move(
         parent_collection_id: a.new_parent_collection_id.map(|s| Some(s)),
         ..Default::default()
     };
-    crate::db::with_conn(&state.pool, |c| {
-        crate::db::collections::update(c, &a.collection_id, patch)
+    simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::collections::update(c, &a.collection_id, patch)
     })?;
     Ok(CallToolResult::json(json!({
         "collection_id": a.collection_id,

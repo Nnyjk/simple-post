@@ -13,8 +13,8 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::domain::{Module, ModulePatch};
-use crate::error::AppError;
+use simple_post_core::domain::{Module, ModulePatch};
+use simple_post_core::error::AppError;
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
 
@@ -114,8 +114,8 @@ pub(super) async fn tool_module_list(
     let a: super::ProjectIdArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("module_list args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "module_list").await?;
-    let mods = crate::db::with_conn(&state.pool, |c| {
-        crate::db::modules::list_by_project(c, &a.project_id)
+    let mods = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::modules::list_by_project(c, &a.project_id)
     })?;
     Ok(CallToolResult::json(mods))
 }
@@ -131,7 +131,7 @@ pub(super) async fn tool_module_create(
     }
     crate::mcp::check_permission(&state.pool, &a.project_id, "module_create").await?;
     let m = Module {
-        id: format!("mod_{}", crate::domain::now_ms()),
+        id: format!("mod_{}", simple_post_core::domain::now_ms()),
         project_id: a.project_id.clone(),
         name: a.name,
         description: None,
@@ -139,8 +139,8 @@ pub(super) async fn tool_module_create(
         expanded: None,
     };
     let id = m.id.clone();
-    crate::db::with_tx(&state.pool, |c| crate::db::modules::create(c, &m))?;
-    let stored = crate::db::with_conn(&state.pool, |c| crate::db::modules::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::create(c, &m))?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::modules::get(c, &id))?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -156,8 +156,8 @@ pub(super) async fn tool_module_update(
         description: None,
         sort_order: None,
     };
-    let m = crate::db::with_conn(&state.pool, |c| {
-        crate::db::modules::update(c, &a.module_id, patch)
+    let m = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::modules::update(c, &a.module_id, patch)
     })?;
     Ok(CallToolResult::json(m))
 }
@@ -168,7 +168,7 @@ pub(super) async fn tool_module_delete(
 ) -> Result<CallToolResult, AppError> {
     let module_id = arg_str(&args, "module_id")?.to_string();
     crate::mcp::check_permission(&state.pool, "global", "module_delete").await?;
-    crate::db::with_tx(&state.pool, |c| crate::db::modules::delete(c, &module_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::delete(c, &module_id))?;
     Ok(CallToolResult::json(json!({ "deleted": module_id })))
 }
 
@@ -183,9 +183,9 @@ pub(super) async fn tool_module_move(
     // `modules::update` doesn't expose a `project_id` field on
     // ModulePatch — moving a module between projects isn't a first-class
     // operation. Implement as delete-then-create to keep the FK happy.
-    let module = crate::db::with_conn(&state.pool, |c| crate::db::modules::get(c, &a.module_id))?;
-    crate::db::with_tx(&state.pool, |c| crate::db::modules::delete(c, &a.module_id))?;
-    let new_id = format!("mod_{}", crate::domain::now_ms());
+    let module = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::modules::get(c, &a.module_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::delete(c, &a.module_id))?;
+    let new_id = format!("mod_{}", simple_post_core::domain::now_ms());
     let new_mod = Module {
         id: new_id.clone(),
         project_id: a.new_project_id.clone(),
@@ -194,7 +194,7 @@ pub(super) async fn tool_module_move(
         sort_order: a.new_sort_order.unwrap_or(0),
         expanded: None,
     };
-    crate::db::with_tx(&state.pool, |c| crate::db::modules::create(c, &new_mod))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::create(c, &new_mod))?;
     Ok(CallToolResult::json(json!({
         "module_id": new_id,
         "new_project_id": a.new_project_id,

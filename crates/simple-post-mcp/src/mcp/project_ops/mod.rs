@@ -4,7 +4,7 @@
 //!
 //! ## Permission naming
 //!
-//! [`crate::permissions::required_permission`] maps tool names
+//! [`simple_post_core::permissions::required_permission`] maps tool names
 //! to a `Permission` rank (`Read` < `ReadCall` < `Full`). The map is
 //! keyed by the *tool* name, so call sites use e.g. `endpoint_get` and
 //! `endpoint_execute` (the latter is `api_call_endpoint` here, since it
@@ -13,7 +13,7 @@
 //! ## Permission gating strategy
 //!
 //! For tools that take `project_id` directly we pass it to
-//! [`crate::permissions::require`]. For `endpoint_*` tools that don't
+//! [`simple_post_core::permissions::require`]. For `endpoint_*` tools that don't
 //! (get / delete / duplicate / move / search), we look up the endpoint
 //! first to find its `project_id`, then gate.
 //!
@@ -26,7 +26,7 @@
 //!     module.rs     ← module_* (5 tools)
 //!     collection.rs ← collection_* (5 tools)
 //!     endpoint.rs   ← endpoint_* (8 tools)
-//!                  (endpoint_project_id lookup moved to crate::db::endpoints::project_id_of)
+//!                  (endpoint_project_id lookup moved to simple_post_core::db::endpoints::project_id_of)
 //!     base_url_def.rs ← base_url_def_* (5 tools)
 //! ```
 //!
@@ -102,7 +102,7 @@ pub fn table() -> Vec<ToolEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::AppError;
+    use simple_post_core::error::AppError;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Instant;
 
@@ -116,14 +116,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "simple-post-mcp-project-ops-test-{}-{}-{}",
             std::process::id(),
-            crate::domain::now_ms(),
+            simple_post_core::domain::now_ms(),
             id
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::sync::Arc::new(crate::mcp::AppState {
-            pool: crate::db::init(&dir).unwrap(),
+            pool: simple_post_core::db::init(&dir).unwrap(),
             started_at: Instant::now(),
-            metrics: std::sync::Arc::new(crate::mcp_metrics::McpMetrics::new()),
+            metrics: std::sync::Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
         })
     }
 
@@ -195,10 +195,10 @@ mod tests {
     #[test]
     fn build_auth_handles_each_kind() {
         let none = super::endpoint::__test_build_auth(Some("none"), None).unwrap();
-        assert_eq!(none.kind, crate::domain::AuthType::None);
+        assert_eq!(none.kind, simple_post_core::domain::AuthType::None);
 
         let bearer = super::endpoint::__test_build_auth(Some("bearer"), Some(serde_json::json!({"bearer": "tok"}))).unwrap();
-        assert_eq!(bearer.kind, crate::domain::AuthType::Bearer);
+        assert_eq!(bearer.kind, simple_post_core::domain::AuthType::Bearer);
 
         let unknown = super::endpoint::__test_build_auth(Some("magic"), None);
         assert!(unknown.is_err());

@@ -13,14 +13,14 @@
 //! Private helpers also live here because they're only used by these
 //! tools:
 //! - `parse_body_mode`, `build_auth`: input parsing for `endpoint_create`.
-//! - Permission gating uses the shared `crate::db::endpoints::project_id_of`
+//! - Permission gating uses the shared `simple_post_core::db::endpoints::project_id_of`
 //!   helper to walk `collection → module → project`.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::domain::{Endpoint, EndpointPatch, RequestBody};
-use crate::error::AppError;
+use simple_post_core::domain::{Endpoint, EndpointPatch, RequestBody};
+use simple_post_core::error::AppError;
 use crate::mcp::{arg_str, arg_str_opt, AppState, CallToolResult};
 use crate::tool_fn;
 
@@ -31,9 +31,9 @@ pub(super) struct EndpointCreateArgs {
     pub method: String,
     pub url: String,
     #[serde(default)]
-    pub headers: Option<Vec<crate::domain::KeyValue>>,
+    pub headers: Option<Vec<simple_post_core::domain::KeyValue>>,
     #[serde(default)]
-    pub params: Option<Vec<crate::domain::KeyValue>>,
+    pub params: Option<Vec<simple_post_core::domain::KeyValue>>,
     #[serde(default)]
     pub body_mode: Option<String>,
     #[serde(default)]
@@ -225,8 +225,8 @@ pub(super) async fn tool_endpoint_list(
     .await?;
 
     if let Some(cid) = collection_id.as_deref() {
-        let eps = crate::db::with_conn(&state.pool, |c| {
-            crate::db::endpoints::list_by_collection(c, cid)
+        let eps = simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::endpoints::list_by_collection(c, cid)
         })?;
         return Ok(CallToolResult::json(eps));
     }
@@ -235,8 +235,8 @@ pub(super) async fn tool_endpoint_list(
     // filter). The DB layer doesn't ship a "list all endpoints for a
     // project" function; search with all filters blank does the same
     // thing in practice.
-    let eps = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::search(c, None, None, None)
+    let eps = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::search(c, None, None, None)
     })?;
     Ok(CallToolResult::json(eps))
 }
@@ -247,10 +247,10 @@ pub(super) async fn tool_endpoint_get(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointGetArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_get args: {e}")))?;
-    let ep = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &a.endpoint_id)
+    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_get").await?;
     Ok(CallToolResult::json(ep))
 }
@@ -268,8 +268,8 @@ pub(super) async fn tool_endpoint_search(
     )
     .await?;
     let tags_ref = a.tags.as_deref();
-    let eps = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::search(c, a.q.as_deref(), a.method.as_deref(), tags_ref)
+    let eps = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::search(c, a.q.as_deref(), a.method.as_deref(), tags_ref)
     })?;
     Ok(CallToolResult::json(eps))
 }
@@ -289,7 +289,7 @@ pub(super) async fn tool_endpoint_create(
     // Validate the HTTP verb *before* touching the permission table:
     // input-level errors are cheap and shouldn't masquerade as
     // permission denials.
-    let method = crate::domain::parse_http_method(&a.method)?;
+    let method = simple_post_core::domain::parse_http_method(&a.method)?;
     crate::mcp::check_permission(&state.pool, "global", "endpoint_create").await?;
 
     let body_mode_str = a.body_mode.clone().unwrap_or_else(|| "none".into());
@@ -301,7 +301,7 @@ pub(super) async fn tool_endpoint_create(
     };
     let auth = build_auth(a.auth_type.as_deref(), a.auth_config.clone())?;
 
-    let now = crate::domain::now_ms();
+    let now = simple_post_core::domain::now_ms();
     let ep = Endpoint {
         id: format!("ep_{now}"),
         collection_id: a.collection_id,
@@ -324,8 +324,8 @@ pub(super) async fn tool_endpoint_create(
         updated_at: now,
     };
     let id = ep.id.clone();
-    crate::db::with_tx(&state.pool, |c| crate::db::endpoints::create(c, &ep))?;
-    let stored = crate::db::with_conn(&state.pool, |c| crate::db::endpoints::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::create(c, &ep))?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::endpoints::get(c, &id))?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -334,10 +334,10 @@ pub(super) async fn tool_endpoint_update(
     args: Value,
 ) -> Result<CallToolResult, AppError> {
     let endpoint_id = arg_str(&args, "endpoint_id")?.to_string();
-    let ep = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &endpoint_id)
+    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &endpoint_id)
     })?;
-    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
 
     let patch_obj = args.get("patch").cloned().unwrap_or(Value::Null);
@@ -349,7 +349,7 @@ pub(super) async fn tool_endpoint_update(
         method: patch_obj
             .get("method")
             .and_then(Value::as_str)
-            .and_then(|m| crate::domain::parse_http_method(m).ok()),
+            .and_then(|m| simple_post_core::domain::parse_http_method(m).ok()),
         url: patch_obj.get("url").and_then(Value::as_str).map(String::from),
         environment_id: patch_obj
             .get("environment_id")
@@ -372,8 +372,8 @@ pub(super) async fn tool_endpoint_update(
             .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect()),
         sort_order: patch_obj.get("sort_order").and_then(Value::as_i64),
     };
-    let updated = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::update(c, &endpoint_id, patch)
+    let updated = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::update(c, &endpoint_id, patch)
     })?;
     Ok(CallToolResult::json(updated))
 }
@@ -384,13 +384,13 @@ pub(super) async fn tool_endpoint_delete(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointDeleteArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_delete args: {e}")))?;
-    let ep = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &a.endpoint_id)
+    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_delete").await?;
-    crate::db::with_tx(&state.pool, |c| {
-        crate::db::endpoints::delete(c, &a.endpoint_id)
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::endpoints::delete(c, &a.endpoint_id)
     })?;
     Ok(CallToolResult::json(json!({ "deleted": a.endpoint_id })))
 }
@@ -401,21 +401,21 @@ pub(super) async fn tool_endpoint_duplicate(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointDuplicateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_duplicate args: {e}")))?;
-    let ep = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &a.endpoint_id)
+    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_create").await?;
 
-    let now = crate::domain::now_ms();
+    let now = simple_post_core::domain::now_ms();
     let mut dup = ep.clone();
     dup.id = format!("ep_{now}");
     dup.name = a.name.unwrap_or_else(|| ep.name.clone());
     dup.created_at = now;
     dup.updated_at = now;
     let id = dup.id.clone();
-    crate::db::with_tx(&state.pool, |c| crate::db::endpoints::create(c, &dup))?;
-    let stored = crate::db::with_conn(&state.pool, |c| crate::db::endpoints::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::create(c, &dup))?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::endpoints::get(c, &id))?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -425,10 +425,10 @@ pub(super) async fn tool_endpoint_move(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointMoveArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_move args: {e}")))?;
-    let ep = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &a.endpoint_id)
+    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = crate::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
 
     // The DB layer's `endpoints::update` doesn't accept a new
@@ -437,15 +437,15 @@ pub(super) async fn tool_endpoint_move(
     // collection so we don't fight the FK cascade in the wrong
     // direction.
     let mut moved = ep.clone();
-    moved.id = format!("ep_{}", crate::domain::now_ms());
+    moved.id = format!("ep_{}", simple_post_core::domain::now_ms());
     moved.collection_id = a.new_collection_id.clone();
     moved.sort_order = a.new_sort_order.unwrap_or(0);
-    let now = crate::domain::now_ms();
+    let now = simple_post_core::domain::now_ms();
     moved.created_at = now;
     moved.updated_at = now;
     let new_id = moved.id.clone();
-    crate::db::with_tx(&state.pool, |c| crate::db::endpoints::delete(c, &a.endpoint_id))?;
-    crate::db::with_tx(&state.pool, |c| crate::db::endpoints::create(c, &moved))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::delete(c, &a.endpoint_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::create(c, &moved))?;
     Ok(CallToolResult::json(json!({
         "endpoint_id": new_id,
         "new_collection_id": a.new_collection_id,
@@ -456,8 +456,8 @@ pub(super) async fn tool_endpoint_move(
 // Private helpers (only used by the endpoint_* tools above)
 // =========================================================================
 
-fn parse_body_mode(s: &str) -> Result<crate::domain::BodyMode, AppError> {
-    use crate::domain::BodyMode;
+fn parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyMode, AppError> {
+    use simple_post_core::domain::BodyMode;
     Ok(match s.to_ascii_lowercase().as_str() {
         "none" => BodyMode::None,
         "json" => BodyMode::Json,
@@ -470,8 +470,8 @@ fn parse_body_mode(s: &str) -> Result<crate::domain::BodyMode, AppError> {
 fn build_auth(
     auth_type: Option<&str>,
     auth_config: Option<Value>,
-) -> Result<crate::domain::AuthConfig, AppError> {
-    use crate::domain::{AuthConfig, AuthType};
+) -> Result<simple_post_core::domain::AuthConfig, AppError> {
+    use simple_post_core::domain::{AuthConfig, AuthType};
     let kind = match auth_type.unwrap_or("none").to_ascii_lowercase().as_str() {
         "none" => AuthType::None,
         "bearer" => AuthType::Bearer,
@@ -496,7 +496,7 @@ fn build_auth(
 // them with `#[cfg(test)]` so production callers can't see them.
 
 #[cfg(test)]
-pub(super) fn __test_parse_body_mode(s: &str) -> Result<crate::domain::BodyMode, AppError> {
+pub(super) fn __test_parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyMode, AppError> {
     parse_body_mode(s)
 }
 
@@ -504,6 +504,6 @@ pub(super) fn __test_parse_body_mode(s: &str) -> Result<crate::domain::BodyMode,
 pub(super) fn __test_build_auth(
     auth_type: Option<&str>,
     auth_config: Option<Value>,
-) -> Result<crate::domain::AuthConfig, AppError> {
+) -> Result<simple_post_core::domain::AuthConfig, AppError> {
     build_auth(auth_type, auth_config)
 }

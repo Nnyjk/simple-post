@@ -1,0 +1,37 @@
+[package]
+name = "simple-post-mcp"
+description = "MCP server module (axum-based JSON-RPC tool dispatcher) + standalone CLI binary for Simple Post"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "simple_post_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simple-post-mcp"
+path = "src/main.rs"
+
+[dependencies]
+simple-post-core = { path = "../simple-post-core" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_json_path = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+dirs = { workspace = true }
+# `daemon_http` runs the axum MCP router that the Tauri shell and `serve-web`
+# both consume. Lives here (not in core) because the router directly uses
+# `mcp::dispatch` / `mcp::AppState`.
+axum = { workspace = true }
+tower-http = { workspace = true }

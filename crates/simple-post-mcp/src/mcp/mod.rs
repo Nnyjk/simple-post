@@ -19,14 +19,14 @@
 //!
 //! | concern            | module                                    |
 //! |--------------------|-------------------------------------------|
-//! | domain types       | `crate::domain::*`                        |
-//! | storage            | `crate::db::*`                            |
-//! | HTTP execution     | `crate::http_executor::*`                 |
+//! | domain types       | `simple_post_core::domain::*`                        |
+//! | storage            | `simple_post_core::db::*`                            |
+//! | HTTP execution     | `simple_post_core::http_executor::*`                 |
 //! | var + baseUrl fill | `crate::variable_fill::*`                 |
 //! | response parse     | `crate::response_parse::*`                |
-//! | permission         | `crate::permissions::*`                   |
-//! | metrics            | `crate::mcp_metrics::*`                   |
-//! | errors             | `crate::error::AppError`                  |
+//! | permission         | `simple_post_core::permissions::*`                   |
+//! | metrics            | `simple_post_core::mcp_metrics::*`                   |
+//! | errors             | `simple_post_core::error::AppError`                  |
 //!
 //! This module is the glue — nothing domain-shaped is defined here, only
 //! the dispatch wiring and the JSON-RPC envelope types.
@@ -43,7 +43,7 @@ pub mod project_ops;
 pub mod response_parse;
 pub mod variable_fill;
 
-use crate::permissions::{resolve_capability, Capability, CapabilityPolicy};
+use simple_post_core::permissions::{resolve_capability, Capability, CapabilityPolicy};
 
 // =========================================================================
 // Public entry: serve_http
@@ -58,22 +58,22 @@ use crate::permissions::{resolve_capability, Capability, CapabilityPolicy};
 ///
 /// This is the single entry point `lib.rs::run_mcp` calls.
 pub async fn serve_http(
-    pool: crate::db::DbPool,
+    pool: simple_post_core::db::DbPool,
     port: u16,
     bind: &str,
-) -> Result<u16, crate::error::AppError> {
+) -> Result<u16, simple_post_core::error::AppError> {
     let listener = tokio::net::TcpListener::bind((bind, port))
         .await
-        .map_err(|e| crate::error::AppError::Http(format!("bind {bind}:{port}: {e}")))?;
+        .map_err(|e| simple_post_core::error::AppError::Http(format!("bind {bind}:{port}: {e}")))?;
     let actual_port = listener
         .local_addr()
         .map(|a| a.port())
-        .map_err(|e| crate::error::AppError::Http(format!("local_addr: {e}")))?;
+        .map_err(|e| simple_post_core::error::AppError::Http(format!("local_addr: {e}")))?;
 
     let state = Arc::new(AppState {
         pool,
         started_at: Instant::now(),
-        metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
+        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     });
 
     tokio::spawn(async move {
@@ -95,12 +95,12 @@ pub struct AppState {
     /// is also wrapped in an Arc, and the router hands out a clone of
     /// *that* to each handler; we clone the pool again when actually
     /// touching it.
-    pub pool: crate::db::DbPool,
+    pub pool: simple_post_core::db::DbPool,
     /// Wall-clock anchor for uptime reporting.
     pub started_at: Instant,
     /// Live counters — bumped on every handled request so
     /// `/mcp/healthz` and the `mcp_status` Tauri command can show them.
-    pub metrics: Arc<crate::mcp_metrics::McpMetrics>,
+    pub metrics: Arc<simple_post_core::mcp_metrics::McpMetrics>,
 }
 
 // =========================================================================
@@ -238,7 +238,7 @@ pub type ToolFn = for<'a> fn(
     args: Value,
 ) -> std::pin::Pin<
     Box<
-        dyn std::future::Future<Output = Result<CallToolResult, crate::error::AppError>>
+        dyn std::future::Future<Output = Result<CallToolResult, simple_post_core::error::AppError>>
             + Send
             + 'a,
     >,
@@ -255,7 +255,7 @@ pub type ToolFn = for<'a> fn(
 ///
 /// `#[macro_export]` puts it at the crate root, so call sites just write
 /// `crate::tool_fn!(...)`. The macro body uses `$crate::mcp::AppState` /
-/// `CallToolResult` and `crate::error::AppError` so it doesn't depend on
+/// `CallToolResult` and `simple_post_core::error::AppError` so it doesn't depend on
 /// any `use` imports at the call site. `serde_json::Value` is the one
 /// unqualified path — every submodule already imports it.
 #[macro_export]
@@ -269,7 +269,7 @@ macro_rules! tool_fn {
                 dyn ::std::future::Future<
                         Output = ::std::result::Result<
                             $crate::mcp::CallToolResult,
-                            $crate::error::AppError,
+                            ::simple_post_core::error::AppError,
                         >,
                     > + ::std::marker::Send
                     + 'a,
@@ -337,7 +337,7 @@ pub fn registered_tool_names() -> Vec<String> {
 ///
 /// Anything **not** listed defaults to [`Capability::Delete`] (the
 /// strictest tier). Same safe-by-default direction the per-project
-/// [`crate::permissions::required_permission`] uses — a new mutating
+/// [`simple_post_core::permissions::required_permission`] uses — a new mutating
 /// tool added without an entry here will be denied until the user
 /// opts in to `full_access`.
 pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
@@ -448,7 +448,7 @@ pub async fn dispatch(
     state: &AppState,
     name: &str,
     args: Value,
-) -> Result<CallToolResult, crate::error::AppError> {
+) -> Result<CallToolResult, simple_post_core::error::AppError> {
     // Capability pre-flight: deny before we look up the handler, so
     // a misconfigured LLM that calls `tools/call` directly without
     // re-reading `tools/list` still cannot mutate. Resolves the
@@ -457,7 +457,7 @@ pub async fn dispatch(
     if let Some(req) = required_capability(name) {
         let policy = resolve_capability(&state.pool, None).await?;
         if !policy.satisfies(req) {
-            return Err(crate::error::AppError::PermissionDenied(format!(
+            return Err(simple_post_core::error::AppError::PermissionDenied(format!(
                 "tool '{name}' requires {:?}, current policy is {:?}",
                 req, policy
             )));
@@ -467,7 +467,7 @@ pub async fn dispatch(
         .iter()
         .find(|e| e.name == name)
         .ok_or_else(|| {
-            crate::error::AppError::NotFound(format!("tool '{name}' not registered"))
+            simple_post_core::error::AppError::NotFound(format!("tool '{name}' not registered"))
         })?;
     (entry.func)(state, args).await
 }
@@ -477,10 +477,10 @@ pub async fn dispatch(
 // =========================================================================
 
 /// Pull a required string field out of `args`. Missing or wrong-typed → error.
-pub fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, crate::error::AppError> {
+pub fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, simple_post_core::error::AppError> {
     args.get(key)
         .and_then(Value::as_str)
-        .ok_or_else(|| crate::error::AppError::Validation(format!("missing or non-string '{key}'")))
+        .ok_or_else(|| simple_post_core::error::AppError::Validation(format!("missing or non-string '{key}'")))
 }
 
 /// Pull an optional string field. Returns `None` if missing or null.
@@ -489,10 +489,10 @@ pub fn arg_str_opt(args: &Value, key: &str) -> Option<String> {
 }
 
 /// Pull a required u64 field.
-pub fn arg_u64(args: &Value, key: &str) -> Result<u64, crate::error::AppError> {
+pub fn arg_u64(args: &Value, key: &str) -> Result<u64, simple_post_core::error::AppError> {
     args.get(key)
         .and_then(Value::as_u64)
-        .ok_or_else(|| crate::error::AppError::Validation(format!("missing or non-u64 '{key}'")))
+        .ok_or_else(|| simple_post_core::error::AppError::Validation(format!("missing or non-u64 '{key}'")))
 }
 
 /// Pull an optional u64 field.
@@ -501,10 +501,10 @@ pub fn arg_u64_opt(args: &Value, key: &str) -> Option<u64> {
 }
 
 /// Pull a required boolean field.
-pub fn arg_bool(args: &Value, key: &str) -> Result<bool, crate::error::AppError> {
+pub fn arg_bool(args: &Value, key: &str) -> Result<bool, simple_post_core::error::AppError> {
     args.get(key)
         .and_then(Value::as_bool)
-        .ok_or_else(|| crate::error::AppError::Validation(format!("missing or non-bool '{key}'")))
+        .ok_or_else(|| simple_post_core::error::AppError::Validation(format!("missing or non-bool '{key}'")))
 }
 
 /// Pull an optional boolean field. Defaults to `false` if missing.
@@ -513,20 +513,20 @@ pub fn arg_bool_opt(args: &Value, key: &str) -> bool {
 }
 
 // =========================================================================
-// Permission helper — thin wrapper over crate::permissions so call sites
+// Permission helper — thin wrapper over simple_post_core::permissions so call sites
 // don't need to import it directly.
 // =========================================================================
 
 /// Look up the project's stored permission level and compare against the
 /// level required by `tool_name`. On deny, returns `AppError::PermissionDenied`.
 pub async fn check_permission(
-    pool: &crate::db::DbPool,
+    pool: &simple_post_core::db::DbPool,
     project_id: &str,
     tool_name: &str,
-) -> Result<(), crate::error::AppError> {
-    let required = crate::permissions::required_permission(tool_name);
-    crate::db::with_conn(pool, |conn| {
-        crate::permissions::require(conn, project_id, required)
+) -> Result<(), simple_post_core::error::AppError> {
+    let required = simple_post_core::permissions::required_permission(tool_name);
+    simple_post_core::db::with_conn(pool, |conn| {
+        simple_post_core::permissions::require(conn, project_id, required)
     })
 }
 
@@ -545,9 +545,9 @@ mod tests {
     /// smoke tests that only exercise dispatch + arg parsing, a dummy is fine.
     fn test_state() -> Arc<AppState> {
         Arc::new(AppState {
-            pool: crate::db::init(&std::env::temp_dir().join("simple-post-mcp-test")).unwrap(),
+            pool: simple_post_core::db::init(&std::env::temp_dir().join("simple-post-mcp-test")).unwrap(),
             started_at: Instant::now(),
-            metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
+            metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
         })
     }
 
@@ -594,7 +594,7 @@ mod tests {
         let res = dispatch(&state, "does_not_exist", json!({})).await;
         assert!(matches!(
             res,
-            Err(crate::error::AppError::NotFound(_))
+            Err(simple_post_core::error::AppError::NotFound(_))
         ));
     }
 

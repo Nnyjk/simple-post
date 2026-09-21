@@ -20,11 +20,11 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::domain::{
+use simple_post_core::domain::{
     ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, Endpoint, Environment,
     HttpMethod, Project, RequestBody,
 };
-use crate::error::AppError;
+use simple_post_core::error::AppError;
 
 // -------------------------------------------------------------------------
 // Public types
@@ -47,14 +47,14 @@ pub struct ResolvedTemplate {
 pub struct EndpointOverrides {
     pub url: Option<String>,
     pub method: Option<HttpMethod>,
-    pub headers: Option<Vec<crate::domain::KeyValue>>,
-    pub params: Option<Vec<crate::domain::KeyValue>>,
+    pub headers: Option<Vec<simple_post_core::domain::KeyValue>>,
+    pub params: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub body: Option<RequestBody>,
 }
 
 /// What `resolve_endpoint` produces. Already has every `{{var}}`
 /// substituted, the baseUrl joined in, and the auth config reduced
-/// to its post-resolve form. The HTTP sender (`crate::http_executor`)
+/// to its post-resolve form. The HTTP sender (`simple_post_core::http_executor`)
 /// consumes this directly.
 #[derive(Debug, Clone)]
 pub struct ResolvedEndpoint {
@@ -406,8 +406,8 @@ fn resolve_auth(auth: &AuthConfig, vars: &HashMap<String, String>) -> (AuthConfi
 /// `apikey.in_ == Query` is NOT emitted as a header here — the
 /// caller appends it to the URL via `append_apikey_query`.
 fn build_headers(
-    endpoint_headers: &[crate::domain::KeyValue],
-    body_mode: &crate::domain::BodyMode,
+    endpoint_headers: &[simple_post_core::domain::KeyValue],
+    body_mode: &simple_post_core::domain::BodyMode,
     auth: &AuthConfig,
     vars: &HashMap<String, String>,
     missing: &mut Vec<String>,
@@ -476,8 +476,8 @@ fn build_headers(
     out
 }
 
-fn auto_content_type(mode: &crate::domain::BodyMode) -> Option<&'static str> {
-    use crate::domain::BodyMode;
+fn auto_content_type(mode: &simple_post_core::domain::BodyMode) -> Option<&'static str> {
+    use simple_post_core::domain::BodyMode;
     match mode {
         BodyMode::Json => Some("application/json"),
         BodyMode::Form => Some("application/x-www-form-urlencoded"),
@@ -688,7 +688,7 @@ pub fn resolve_endpoint(
 
     // ---- body inclusion + substitution --------------------------------
     let body = match &eff_body.mode {
-        crate::domain::BodyMode::None => None,
+        simple_post_core::domain::BodyMode::None => None,
         _ if eff_body.content.is_empty() => None,
         _ => {
             let b = resolve_template(&eff_body.content, &vars);
@@ -720,7 +720,7 @@ pub fn resolve_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{
+    use simple_post_core::domain::{
         ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, KeyValue,
         RequestBody,
     };
@@ -743,12 +743,12 @@ mod tests {
             description: None,
             base_url: None,
             base_url_definitions: vec![
-                crate::domain::BaseUrlDefinition {
+                simple_post_core::domain::BaseUrlDefinition {
                     id: "auth".into(),
                     name: "auth".into(),
                     description: None,
                 },
-                crate::domain::BaseUrlDefinition {
+                simple_post_core::domain::BaseUrlDefinition {
                     id: "data".into(),
                     name: "data".into(),
                     description: None,

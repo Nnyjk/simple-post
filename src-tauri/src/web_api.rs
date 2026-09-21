@@ -31,6 +31,9 @@ use crate::http_executor::{self, HttpRequestInput, HttpResult};
 use crate::mcp::{self, AppState as McpAppState};
 use crate::permissions::CapabilityPolicy;
 use crate::port_registry;
+// daemon_http and ariable_fill / esponse_parse moved into the
+// simple-post-mcp crate in commit 3 (MCP layer extraction).
+use simple_post_mcp::daemon_http;
 
 // -------------------------------------------------------------------------
 // Shared state.
@@ -1266,11 +1269,11 @@ async fn mcp_json_rpc_post(
     state: Arc<McpAppState>,
     body: String,
 ) -> axum::response::Response {
-    crate::daemon_http::dispatch_mcp_request(state, body).await
+    daemon_http::dispatch_mcp_request(state, body).await
 }
 
 async fn mcp_healthz(state: Arc<McpAppState>) -> axum::Json<serde_json::Value> {
-    use crate::daemon_http::HealthzResponse;
+    use daemon_http::HealthzResponse;
     let uptime_ms = state.started_at.elapsed().as_millis() as u64;
     let requests_handled = state.metrics.requests_handled.load(std::sync::atomic::Ordering::Relaxed);
     let registered_tools = crate::mcp::registered_tool_names();

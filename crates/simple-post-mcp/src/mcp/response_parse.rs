@@ -13,8 +13,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::domain::{ApiResponse, HttpMethod};
-use crate::error::AppError;
+use simple_post_core::domain::{ApiResponse, HttpMethod};
+use simple_post_core::error::AppError;
 use crate::mcp::{
     arg_str, AppState, CallToolResult, ToolEntry,
 };
@@ -179,7 +179,7 @@ async fn tool_api_parse_response(
         method: a
             .method
             .as_deref()
-            .and_then(|m| crate::domain::parse_http_method(m).ok()),
+            .and_then(|m| simple_post_core::domain::parse_http_method(m).ok()),
         url: a.url,
     };
 
@@ -277,7 +277,7 @@ fn build_api(input: &ResponseInput) -> Result<ApiResponse, AppError> {
     let method = input
         .method
         .as_deref()
-        .and_then(|m| crate::domain::parse_http_method(m).ok());
+        .and_then(|m| simple_post_core::domain::parse_http_method(m).ok());
     Ok(ApiResponse {
         status: input.status,
         status_text: crate::response_parse::status_reason(input.status).to_string(),
@@ -339,14 +339,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "simple-post-mcp-resp-parse-test-{}-{}-{}",
             std::process::id(),
-            crate::domain::now_ms(),
+            simple_post_core::domain::now_ms(),
             id
         ));
         let _ = std::fs::remove_dir_all(&dir);
         Arc::new(crate::mcp::AppState {
-            pool: crate::db::init(&dir).unwrap(),
+            pool: simple_post_core::db::init(&dir).unwrap(),
             started_at: Instant::now(),
-            metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
+            metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
         })
     }
 

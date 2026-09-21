@@ -13,8 +13,8 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::domain::BaseUrlDefinition;
-use crate::error::AppError;
+use simple_post_core::domain::BaseUrlDefinition;
+use simple_post_core::error::AppError;
 use crate::mcp::{AppState, CallToolResult};
 use crate::tool_fn;
 
@@ -122,8 +122,8 @@ pub(super) async fn tool_base_url_def_list(
     let a: super::ProjectIdArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_list args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_list").await?;
-    let defs = crate::db::with_conn(&state.pool, |c| {
-        crate::db::base_url_defs::list_by_project(c, &a.project_id)
+    let defs = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::base_url_defs::list_by_project(c, &a.project_id)
     })?;
     Ok(CallToolResult::json(defs))
 }
@@ -139,15 +139,15 @@ pub(super) async fn tool_base_url_def_create(
     }
     crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_create").await?;
     let def = BaseUrlDefinition {
-        id: format!("def_{}", crate::domain::now_ms()),
+        id: format!("def_{}", simple_post_core::domain::now_ms()),
         name: a.name,
         description: a.description,
     };
     let id = def.id.clone();
     let pid = a.project_id.clone();
-    crate::db::with_tx(&state.pool, |c| crate::db::base_url_defs::create(c, &def, &pid))?;
-    let stored = crate::db::with_conn(&state.pool, |c| {
-        crate::db::base_url_defs::get(c, &id)
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::base_url_defs::create(c, &def, &pid))?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::base_url_defs::get(c, &id)
     })?;
     Ok(CallToolResult::json(stored))
 }
@@ -163,8 +163,8 @@ pub(super) async fn tool_base_url_def_update(
         .description
         .as_ref()
         .map(|d| d.as_ref().map(String::from));
-    let d = crate::db::with_conn(&state.pool, |c| {
-        crate::db::base_url_defs::update(c, &a.definition_id, a.name.clone(), desc)
+    let d = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::base_url_defs::update(c, &a.definition_id, a.name.clone(), desc)
     })?;
     Ok(CallToolResult::json(d))
 }
@@ -176,8 +176,8 @@ pub(super) async fn tool_base_url_def_delete(
     let a: BaseUrlDefDeleteArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_delete args: {e}")))?;
     crate::mcp::check_permission(&state.pool, "global", "base_url_def_delete").await?;
-    crate::db::with_tx(&state.pool, |c| {
-        crate::db::base_url_defs::delete(c, &a.definition_id)
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::base_url_defs::delete(c, &a.definition_id)
     })?;
     Ok(CallToolResult::json(json!({ "deleted": a.definition_id })))
 }
@@ -189,8 +189,8 @@ pub(super) async fn tool_base_url_def_set_default(
     let a: BaseUrlDefSetDefaultArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_set_default args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_update").await?;
-    crate::db::with_tx(&state.pool, |c| {
-        crate::db::base_url_defs::set_default(c, &a.project_id, Some(&a.definition_id))
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::base_url_defs::set_default(c, &a.project_id, Some(&a.definition_id))
     })?;
     Ok(CallToolResult::json(json!({
         "project_id": a.project_id,

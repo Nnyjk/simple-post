@@ -22,7 +22,7 @@
 use serde_json::Value;
 use serde_json_path::JsonPathExt;
 
-use crate::domain::ApiResponse;
+use simple_post_core::domain::ApiResponse;
 use serde::Serialize;
 
 // -------------------------------------------------------------------------

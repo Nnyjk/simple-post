@@ -2,8 +2,8 @@
 //!
 //! Every tool in this file:
 //!   1. Parses its `arguments` (small typed structs via serde).
-//!   2. Calls `crate::permissions::require`.
-//!   3. Delegates to `crate::db::environments::*`.
+//!   2. Calls `simple_post_core::permissions::require`.
+//!   3. Delegates to `simple_post_core::db::environments::*`.
 //!   4. Wraps the result in a `CallToolResult::json` so it goes back to
 //!      the LLM as a single text-content block.
 //!
@@ -23,8 +23,8 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::domain::{Environment, EnvironmentPatch};
-use crate::error::AppError;
+use simple_post_core::domain::{Environment, EnvironmentPatch};
+use simple_post_core::error::AppError;
 use crate::mcp::{
     arg_str, AppState, CallToolResult, ToolEntry,
 };
@@ -195,7 +195,7 @@ async fn tool_env_list(state: &AppState, args: Value) -> Result<CallToolResult, 
         .map_err(|e| AppError::Validation(format!("env_list args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "env_list").await?;
     let envs =
-        crate::db::with_conn(&state.pool, |c| crate::db::environments::list_by_project(c, &a.project_id))?;
+        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::list_by_project(c, &a.project_id))?;
     Ok(CallToolResult::json(envs))
 }
 
@@ -203,8 +203,8 @@ async fn tool_env_get_active(state: &AppState, args: Value) -> Result<CallToolRe
     let a: ProjectIdArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("env_get_active args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "env_get_active").await?;
-    let env = crate::db::with_conn(&state.pool, |c| {
-        crate::db::environments::get_active(c, &a.project_id)
+    let env = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::environments::get_active(c, &a.project_id)
     })?;
     Ok(CallToolResult::json(env))
 }
@@ -218,7 +218,7 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
     crate::mcp::check_permission(&state.pool, &a.project_id, "env_create").await?;
 
     let env = Environment {
-        id: crate::domain::now_ms().to_string(),
+        id: simple_post_core::domain::now_ms().to_string(),
         project_id: a.project_id.clone(),
         name: a.name,
         base_urls: std::collections::HashMap::new(),
@@ -226,8 +226,8 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
         is_active: false,
     };
     let id = env.id.clone();
-    crate::db::with_tx(&state.pool, |c| crate::db::environments::create(c, &env))?;
-    let stored = crate::db::with_conn(&state.pool, |c| crate::db::environments::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::environments::create(c, &env))?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::get(c, &id))?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -239,8 +239,8 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
     // the magic string `"global"`, which combined with the default
     // `ReadCall` project permission silently rejected every write. Fixed
     // in commit 1 (MCP permission policy + env_ops project_id fix).
-    let project_id = crate::db::with_conn(&state.pool, |c| {
-        crate::db::environments::lookup_project_id(c, &a.env_id)
+    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::environments::lookup_project_id(c, &a.env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
@@ -269,8 +269,8 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .and_then(Value::as_bool),
     };
 
-    let env = crate::db::with_conn(&state.pool, |c| {
-        crate::db::environments::update(c, &a.env_id, patch)
+    let env = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::environments::update(c, &a.env_id, patch)
     })?;
     Ok(CallToolResult::json(env))
 }
@@ -279,11 +279,11 @@ async fn tool_env_delete(state: &AppState, args: Value) -> Result<CallToolResult
     let env_id = arg_str(&args, "env_id")?.to_string();
     // See tool_env_update for the rationale — look up the owning
     // project before checking per-project permission.
-    let project_id = crate::db::with_conn(&state.pool, |c| {
-        crate::db::environments::lookup_project_id(c, &env_id)
+    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::environments::lookup_project_id(c, &env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_delete").await?;
-    crate::db::with_tx(&state.pool, |c| crate::db::environments::delete(c, &env_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::environments::delete(c, &env_id))?;
     Ok(CallToolResult::json(json!({ "deleted": env_id })))
 }
 
@@ -292,19 +292,19 @@ async fn tool_env_set_var(state: &AppState, args: Value) -> Result<CallToolResul
         .map_err(|e| AppError::Validation(format!("env_set_var args: {e}")))?;
     // Look up the owning project so the per-project permission gate
     // is enforced against the right key.
-    let project_id = crate::db::with_conn(&state.pool, |c| {
-        crate::db::environments::lookup_project_id(c, &a.env_id)
+    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::environments::lookup_project_id(c, &a.env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
     // env_set_var is implemented as "read, merge into variables, write".
-    let mut env = crate::db::with_conn(&state.pool, |c| crate::db::environments::get(c, &a.env_id))?;
+    let mut env = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::get(c, &a.env_id))?;
     env.variables.insert(a.key.clone(), a.value.clone());
     let patch = EnvironmentPatch {
         variables: Some(env.variables.clone()),
         ..Default::default()
     };
-    crate::db::with_conn(&state.pool, |c| crate::db::environments::update(c, &a.env_id, patch))?;
+    simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::update(c, &a.env_id, patch))?;
 
     Ok(CallToolResult::json(json!({
         "env_id": a.env_id,
@@ -321,18 +321,18 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
     }
     // Look up the owning project so the per-project permission gate
     // is enforced against the right key.
-    let project_id = crate::db::with_conn(&state.pool, |c| {
-        crate::db::environments::lookup_project_id(c, &a.env_id)
+    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::environments::lookup_project_id(c, &a.env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    let mut env = crate::db::with_conn(&state.pool, |c| crate::db::environments::get(c, &a.env_id))?;
+    let mut env = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::get(c, &a.env_id))?;
     env.base_urls.insert(a.definition_id.clone(), a.url.clone());
     let patch = EnvironmentPatch {
         base_urls: Some(env.base_urls.clone()),
         ..Default::default()
     };
-    crate::db::with_conn(&state.pool, |c| crate::db::environments::update(c, &a.env_id, patch))?;
+    simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::update(c, &a.env_id, patch))?;
 
     Ok(CallToolResult::json(json!({
         "env_id": a.env_id,
@@ -345,10 +345,10 @@ async fn tool_env_set_active(state: &AppState, args: Value) -> Result<CallToolRe
     let env_id = arg_str(&args, "env_id")?.to_string();
     // Look up the owning project so the per-project permission gate
     // is enforced against the right key.
-    let project_id = crate::db::with_conn(&state.pool, |c| {
-        crate::db::environments::lookup_project_id(c, &env_id)
+    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::environments::lookup_project_id(c, &env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
-    let env = crate::db::with_tx(&state.pool, |c| crate::db::environments::set_active(c, &env_id))?;
+    let env = simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::environments::set_active(c, &env_id))?;
     Ok(CallToolResult::json(env))
 }

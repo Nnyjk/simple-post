@@ -22,22 +22,21 @@ use tauri::Manager;
 
 pub mod commands;
 pub mod daemon_supervisor;
-pub mod mcp_metrics;
 pub mod port_registry;
-
-pub mod db;
-pub mod domain;
-pub mod error;
-pub mod permissions;
-
-pub mod http_executor;
-pub mod response_parse;
-pub mod variable_fill;
-
-pub mod daemon_http;
-pub mod mcp;
-
 pub mod web_api;
+
+// Re-export the shared low-level layer so call sites can keep using
+// `crate::db::*` / `crate::domain::*` / `crate::error::*` /
+// `crate::permissions::*` / `crate::http_executor::*` /
+// `crate::mcp_metrics::*` after the workspace extraction (commit 3).
+pub use simple_post_core::{
+    db, domain, error, http_executor, mcp_metrics, permissions,
+};
+
+// Re-export the MCP module from the standalone `simple-post-mcp` crate.
+// The main crate only hosts the embedded daemon + `serve-web` glue;
+// the actual JSON-RPC dispatcher lives there.
+pub use simple_post_mcp::mcp;
 
 /// CLI subcommand `mcp` entry. Owns data-dir resolution, DB init, axum serve,
 /// port-record write, and SIGINT/SIGTERM shutdown.

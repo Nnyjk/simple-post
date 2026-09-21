@@ -20,8 +20,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::domain::Endpoint;
-use crate::error::AppError;
+use simple_post_core::domain::Endpoint;
+use simple_post_core::error::AppError;
 use crate::mcp::{
     arg_str, arg_str_opt, AppState, CallToolResult, ToolEntry,
 };
@@ -122,8 +122,8 @@ async fn tool_api_resolve_template(
 
     // Pull variables from the named env (if any), else empty.
     let vars = if let Some(env_id) = a.env_id.as_deref() {
-        crate::db::with_conn(&state.pool, |c| {
-            crate::db::environments::get(c, env_id)
+        simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::environments::get(c, env_id)
         })
         .map(|e| e.variables)
         .unwrap_or_default()
@@ -148,8 +148,8 @@ async fn tool_api_resolve_endpoint(
         .map_err(|e| AppError::Validation(format!("api_resolve_endpoint args: {e}")))?;
     let endpoint_id = a.endpoint_id.clone();
 
-    let endpoint: Endpoint = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &endpoint_id)
+    let endpoint: Endpoint = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &endpoint_id)
     })?;
     let project_id = collection_project_id(&state.pool, &endpoint.collection_id);
     crate::mcp::check_permission(&state.pool, &project_id, "api_resolve_endpoint")
@@ -157,12 +157,12 @@ async fn tool_api_resolve_endpoint(
         .ok();
 
     let env = if let Some(env_id) = endpoint.environment_id.as_deref() {
-        crate::db::with_conn(&state.pool, |c| crate::db::environments::get(c, env_id)).ok()
+        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::get(c, env_id)).ok()
     } else {
         None
     };
     let project = if !project_id.is_empty() {
-        crate::db::with_conn(&state.pool, |c| crate::db::projects::get(c, &project_id)).ok()
+        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::projects::get(c, &project_id)).ok()
     } else {
         None
     };
@@ -193,8 +193,8 @@ async fn tool_api_validate_endpoint(
     args: Value,
 ) -> Result<CallToolResult, AppError> {
     let endpoint_id = arg_str(&args, "endpoint_id")?.to_string();
-    let endpoint: Endpoint = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &endpoint_id)
+    let endpoint: Endpoint = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &endpoint_id)
     })?;
     let project_id = collection_project_id(&state.pool, &endpoint.collection_id);
     crate::mcp::check_permission(&state.pool, &project_id, "api_validate_endpoint")
@@ -216,11 +216,11 @@ async fn tool_api_validate_endpoint(
 /// Resolve an endpoint's collection → module → project id so we can gate
 /// the call. Falls back to an empty string (which the permission layer
 /// treats as "global-ish").
-fn collection_project_id(pool: &crate::db::DbPool, collection_id: &str) -> String {
-    if let Ok(coll) = crate::db::with_conn(pool, |c| crate::db::collections::get(c, collection_id))
+fn collection_project_id(pool: &simple_post_core::db::DbPool, collection_id: &str) -> String {
+    if let Ok(coll) = simple_post_core::db::with_conn(pool, |c| simple_post_core::db::collections::get(c, collection_id))
     {
-        if let Ok(module) = crate::db::with_conn(pool, |c| {
-            crate::db::modules::get(c, &coll.module_id)
+        if let Ok(module) = simple_post_core::db::with_conn(pool, |c| {
+            simple_post_core::db::modules::get(c, &coll.module_id)
         }) {
             return module.project_id;
         }
@@ -231,7 +231,7 @@ fn collection_project_id(pool: &crate::db::DbPool, collection_id: &str) -> Strin
 /// Static validation — does this endpoint look like it'll run without
 /// immediate failure? Returns a list of `{field, message}` issues.
 fn validate(endpoint: &Endpoint) -> Vec<Value> {
-    use crate::domain::{AuthType, BodyMode};
+    use simple_post_core::domain::{AuthType, BodyMode};
     let mut issues = Vec::new();
 
     if endpoint.url.trim().is_empty() {
@@ -326,7 +326,7 @@ fn validate(endpoint: &Endpoint) -> Vec<Value> {
 // `static` (not `const`) so `&EMPTY_PROJECT` is `&'static Project` — taking a
 // reference to a `const` creates a temporary that's freed at end of statement,
 // which trips E0716 when the resulting `&Project` outlives the statement.
-static EMPTY_PROJECT: crate::domain::Project = crate::domain::Project {
+static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::domain::Project {
     id: String::new(),
     name: String::new(),
     description: None,
@@ -345,7 +345,7 @@ static EMPTY_PROJECT: crate::domain::Project = crate::domain::Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{
+    use simple_post_core::domain::{
         ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, HttpMethod,
         KeyValue, RequestBody,
     };
@@ -362,14 +362,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "simple-post-mcp-var-fill-test-{}-{}-{}",
             std::process::id(),
-            crate::domain::now_ms(),
+            simple_post_core::domain::now_ms(),
             id
         ));
         let _ = std::fs::remove_dir_all(&dir);
         Arc::new(crate::mcp::AppState {
-            pool: crate::db::init(&dir).unwrap(),
+            pool: simple_post_core::db::init(&dir).unwrap(),
             started_at: Instant::now(),
-            metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
+            metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
         })
     }
 

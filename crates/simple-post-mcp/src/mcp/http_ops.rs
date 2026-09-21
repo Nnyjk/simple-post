@@ -11,9 +11,9 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::domain::{ApiResponse, Endpoint, Environment, HttpMethod};
-use crate::error::AppError;
-use crate::http_executor::{self, HttpRequestInput, HttpResponse, HttpResult};
+use simple_post_core::domain::{ApiResponse, Endpoint, Environment, HttpMethod};
+use simple_post_core::error::AppError;
+use simple_post_core::http_executor::{self, HttpRequestInput, HttpResponse, HttpResult};
 use crate::mcp::{
     arg_bool_opt, arg_str, arg_str_opt, arg_u64_opt, AppState, CallToolResult, ToolEntry,
 };
@@ -128,8 +128,8 @@ async fn tool_api_run_request(
     // substitution runs whether the call comes from the Tauri command
     // or this MCP tool.
     let env: Option<Environment> = if let Some(env_id) = a.env_id.as_deref() {
-        Some(crate::db::with_conn(&state.pool, |c| {
-            crate::db::environments::get(c, env_id)
+        Some(simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::environments::get(c, env_id)
         })?)
     } else {
         None
@@ -181,10 +181,10 @@ async fn tool_api_call_endpoint(
         .map_err(|e| AppError::Validation(format!("api_call_endpoint args: {e}")))?;
     let endpoint_id = a.endpoint_id.clone();
 
-    let endpoint: Endpoint = crate::db::with_conn(&state.pool, |c| {
-        crate::db::endpoints::get(c, &endpoint_id)
+    let endpoint: Endpoint = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &endpoint_id)
     })?;
-    let project_id = crate::db::endpoints::project_id_of(&state.pool, &endpoint.collection_id)?;
+    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &endpoint.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint")
         .await
         .ok();
@@ -193,13 +193,13 @@ async fn tool_api_call_endpoint(
     // was deleted) is tolerated — the request just runs without env
     // variable substitution.
     let env: Option<Environment> = if let Some(env_id) = endpoint.environment_id.as_deref() {
-        crate::db::with_conn(&state.pool, |c| crate::db::environments::get(c, env_id)).ok()
+        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::get(c, env_id)).ok()
     } else {
         None
     };
     let project = if !project_id.is_empty() {
-        crate::db::with_conn(&state.pool, |c| {
-            crate::db::projects::get(c, &project_id)
+        simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::projects::get(c, &project_id)
         })
         .ok()
     } else {
@@ -212,7 +212,7 @@ async fn tool_api_call_endpoint(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    let project_ref: &crate::domain::Project = project.as_ref().unwrap_or(&EMPTY_PROJECT);
+    let project_ref: &simple_post_core::domain::Project = project.as_ref().unwrap_or(&EMPTY_PROJECT);
     let resolved = crate::variable_fill::resolve_endpoint(
         &endpoint,
         env.as_ref(),
@@ -406,7 +406,7 @@ fn build_result_envelope(
             CallToolResult::json(val)
         }
         None => {
-            let err = result.error.as_ref().cloned().unwrap_or(crate::http_executor::HttpError {
+            let err = result.error.as_ref().cloned().unwrap_or(simple_post_core::http_executor::HttpError {
                 kind: "unknown".into(),
                 message: "no response and no error".into(),
             });
@@ -437,7 +437,7 @@ fn http_response_to_api(resp: &HttpResponse, method: &str, url: &str) -> ApiResp
         body_json: None,
         content_type: resp.content_type.clone(),
         error: None,
-        method: crate::domain::parse_http_method(method).ok(),
+        method: simple_post_core::domain::parse_http_method(method).ok(),
         url: Some(url.to_string()),
     }
 }
@@ -459,7 +459,7 @@ fn header_pairs_to_tuples(pairs: &[[String; 2]]) -> Vec<(String, String)> {
 // `static` (not `const`) so `&EMPTY_PROJECT` is `&'static Project` — taking a
 // reference to a `const` creates a temporary that's freed at end of statement,
 // which trips E0716 when the resulting `&Project` outlives the statement.
-static EMPTY_PROJECT: crate::domain::Project = crate::domain::Project {
+static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::domain::Project {
     id: String::new(),
     name: String::new(),
     description: None,
@@ -478,7 +478,7 @@ static EMPTY_PROJECT: crate::domain::Project = crate::domain::Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Environment;
+    use simple_post_core::domain::Environment;
     use std::collections::HashMap;
 
     #[test]
@@ -569,15 +569,15 @@ mod tests {
     #[test]
     fn parse_method_known_and_custom() {
         assert_eq!(
-            crate::domain::parse_http_method("get").unwrap(),
+            simple_post_core::domain::parse_http_method("get").unwrap(),
             HttpMethod::Get
         );
         assert_eq!(
-            crate::domain::parse_http_method("POST").unwrap(),
+            simple_post_core::domain::parse_http_method("POST").unwrap(),
             HttpMethod::Post
         );
         assert!(matches!(
-            crate::domain::parse_http_method("FROBNICATE").unwrap(),
+            simple_post_core::domain::parse_http_method("FROBNICATE").unwrap(),
             HttpMethod::Custom(_)
         ));
     }

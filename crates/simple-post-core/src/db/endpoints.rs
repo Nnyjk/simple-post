@@ -340,7 +340,7 @@ pub fn duplicate(conn: &mut Connection, id: &str) -> Result<String, AppError> {
     let mut ep = get(conn, id)?;
 
     // Fresh id, fresh timestamps, fresh sort_order at the tail.
-    ep.id = crate::commands::uid();
+    ep.id = crate::domain::uid();
     let now = crate::domain::now_ms();
     ep.created_at = now;
     ep.updated_at = now;

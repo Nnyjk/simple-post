@@ -241,7 +241,7 @@ pub fn projects_create(
         base_url: None,
         base_url_definitions: Vec::new(),
         default_base_url_definition_id: None,
-        color: opts.color.unwrap_or_else(default_color),
+        color: opts.color.unwrap_or_else(crate::domain::default_project_color),
         created_at: now,
         updated_at: now,
     };
@@ -873,24 +873,12 @@ pub async fn mcp_auto_start_set(
 // ===========================================================================
 // Helpers
 // ===========================================================================
-
-pub(crate) fn uid() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    // Per-process monotonic counter — guarantees uniqueness within the
-    // running process even when the wall clock hasn't advanced.
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("sp_{:x}{:x}", nanos, n)
-}
-
-pub(crate) fn default_color() -> String {
-    "#3b82f6".to_string()
-}
+//
+// `uid` and the default project color live in `crate::domain` (re-exported
+// from `simple-post-core::domain`). The `db` crate also re-uses them, so
+// keeping a single definition avoids drift between REST, Tauri command,
+// and SQLite test paths. The local helpers below used to live here before
+// commit 3 extracted the shared low-level layer.
 
 // =========================================================================
 // MCP capability policy (commit 1: feat(mcp): three-tier capability policy)

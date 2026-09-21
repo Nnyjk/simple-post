@@ -1,60 +1,55 @@
 [package]
 name = "simple-post"
-version = "0.1.0"
+version.workspace = true
 description = "Modern desktop API tool with built-in MCP"
-edition = "2021"
-rust-version = "1.77.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 # Two binaries coexist in this crate: the main Tauri app
 # (`src/main.rs`, name derived from `name = "simple-post"`) and the
-# stdio bridge for MCP clients (`src/bin/mcp_proxy.rs`, named
-# `simple-post-mcp-proxy`). Tauri CLI's `tauri dev` / `tauri build`
-# shells out to plain `cargo run` / `cargo build` and doesn't pass
-# `--bin`, so we pick the main app by default. Build the proxy
-# explicitly with `cargo build --bin simple-post-mcp-proxy`.
+# stdio bridge for MCP clients (`src/main.rs::run_mcp`). The MCP-only
+# CLI now lives in the `simple-post-mcp` workspace member (commit 3),
+# which removed the previous `simple-post-mcp-proxy` binary that was
+# built from `src/bin/mcp_proxy.rs`. Tauri CLI's `tauri dev` /
+# `tauri build` shells out to plain `cargo run` / `cargo build` and
+# doesn't pass `--bin`, so we pick the main app by default.
 default-run = "simple-post"
 
 [lib]
 name = "simple_post_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[[bin]]
-name = "simple-post-mcp-proxy"
-path = "src/bin/mcp_proxy.rs"
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-# RustTLS avoids native-tls/OpenSSL dependency on Windows; brotli/deflate match
-# what the browser fetch path supports.
-reqwest = { version = "0.12", default-features = false, features = [
-  "rustls-tls",
-  "gzip",
-  "brotli",
-  "deflate",
-  "http2",
-] }
+# Workspace members
+simple-post-core = { path = "../crates/simple-post-core" }
+simple-post-mcp = { path = "../crates/simple-post-mcp" }
 
-# MCP tool / HTTP daemon 落地用 (added in v0.1 MCP rollout)
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net", "signal"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.24"
-clap = { version = "4", features = ["derive"] }
-dirs = "5"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-thiserror = "1"
-serde_json_path = "0.1"
-axum = "0.7"
-# Static-file serving for the `serve-web` shape. `ServeDir` powers
-# `GET /` and `GET /assets/*` so the SPA can be hosted by the same
-# axum process that fronts `/api/*` and `/mcp`.
-tower-http = { version = "0.5", features = ["fs", "trace"] }
-mime_guess = "2"
+# Tauri shell
+tauri = { version = "2", features = [] }
+
+# Shared workspace deps (resolved to the versions pinned at the root)
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_json_path = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+clap = { workspace = true }
+dirs = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+
+# HTTP server (`serve-web` shape). `ServeDir` serves the SPA while
+# the same axum process fronts `/api/*` and `/mcp`.
+axum = { workspace = true }
+tower-http = { workspace = true }
+mime_guess = { workspace = true }
 
 [profile.release]
 panic = "abort"
