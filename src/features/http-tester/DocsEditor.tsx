@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { useMemo, useState } from 'react';
+import { marked } from 'marked';
 import { FileText, Sparkles } from 'lucide-react';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,14 @@ interface Props {
 
 export function DocsEditor({ value, onChange }: Props) {
   const [mode, setMode] = useState<'edit' | 'preview' | 'split'>('split');
+
+  // `marked` is synchronous and escaping-safe for our use case: the
+  // markdown source is whatever the user typed in the editor above the
+  // preview (or restored from the endpoint's `docs` field that *they*
+  // wrote). We don't pass `dangerouslyAllow` flags, so inline HTML in
+  // the source is rendered as escaped text — exactly the posture we
+  // had with `react-markdown` defaults.
+  const html = useMemo(() => marked.parse(value, { async: false }) as string, [value]);
 
   return (
     <div className="flex h-full flex-col">
@@ -53,9 +61,12 @@ export function DocsEditor({ value, onChange }: Props) {
         {(mode === 'preview' || mode === 'split') && (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {value.trim() ? (
-              <article className="markdown-prose">
-                <ReactMarkdown>{value}</ReactMarkdown>
-              </article>
+              <article
+                className="markdown-prose"
+                // Output of `marked.parse` for trusted (user-authored) input
+                // — see the useMemo above for the threat-model note.
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                 <FileText className="h-8 w-8 opacity-40" />

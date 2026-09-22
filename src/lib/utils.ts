@@ -1,6 +1,9 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+/** Conditional className joiner — `clsx` first to combine truthy
+ *  inputs, then `tailwind-merge` so later utilities win over earlier
+ *  ones (e.g. `cn('px-4', false && 'px-2')` → `'px-4'`). */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -55,4 +58,29 @@ export function statusColorVar(status: number): string {
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+// ---------------------------------------------------------------------------
+// JSON pretty-printer — used by the response viewer and the body editor's
+// "format" button. Returns a tagged result so callers can distinguish
+// success from parse errors without try/catch noise.
+//
+// Kept in `utils.ts` because `tryFormatJson` is pure and dependency-free
+// (unlike `useIsDark`, which imports `useAppStore` and lives in
+// `theme.ts` to avoid closing a `crud-slice → utils → app-store` cycle).
+// ---------------------------------------------------------------------------
+
+export type FormatResult =
+  | { ok: true; formatted: string }
+  | { ok: false; error: string };
+
+export function tryFormatJson(input: string, indent = 2): FormatResult {
+  const s = input.trim();
+  if (!s) return { ok: false, error: '内容为空' };
+  try {
+    const parsed = JSON.parse(s);
+    return { ok: true, formatted: JSON.stringify(parsed, null, indent) };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }

@@ -6,8 +6,7 @@ import type { BodyMode, RequestBody } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, CheckCircle2, Wand2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { tryFormatJson } from '@/lib/json-format';
+import { cn, tryFormatJson } from '@/lib/utils';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
 

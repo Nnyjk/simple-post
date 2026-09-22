@@ -9,6 +9,13 @@ import { useAppStore } from '@/stores/app-store';
  * inside components that need to swap a hard-coded theme prop (e.g. CodeMirror)
  * — for plain styling, prefer the Tailwind `dark:` variant which already
  * follows the `.dark` class on `<html>`.
+ *
+ * Lives in its own module (instead of `utils.ts`) because the
+ * `useAppStore` import closes a runtime circular dependency
+ * `app-store → crud-slice → utils → app-store` that breaks TDZ
+ * initialization in store tests. Keeping this hook off the
+ * `utils.ts` import surface that slices transitively depend on
+ * preserves the store's load order.
  */
 export function useIsDark(): boolean {
   const theme = useAppStore((s) => s.theme);
