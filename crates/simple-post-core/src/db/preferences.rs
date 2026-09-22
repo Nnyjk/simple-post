@@ -224,7 +224,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let pairs = db::with_conn(&pool, |c| list_all(c)).unwrap();
+        let pairs = db::with_conn(&pool, list_all).unwrap();
         let keys: Vec<_> = pairs.iter().map(|(k, _)| k.clone()).collect();
         assert!(keys.contains(&"a".to_string()));
         assert!(keys.contains(&"b".to_string()));
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn mcp_auto_start_defaults_to_false_when_missing() {
         let pool = fresh_pool();
-        let v = db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap();
+        let v = db::with_conn(&pool, mcp_auto_start).unwrap();
         assert!(!v, "default must be false — see docs/distribution-modes §5");
     }
 
@@ -259,15 +259,15 @@ mod tests {
     fn mcp_auto_start_round_trips() {
         let pool = fresh_pool();
         db::with_tx(&pool, |c| set(c, keys::MCP_AUTO_START, &true)).unwrap();
-        assert!(db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap());
+        assert!(db::with_conn(&pool, mcp_auto_start).unwrap());
         db::with_tx(&pool, |c| set(c, keys::MCP_AUTO_START, &false)).unwrap();
-        assert!(!db::with_conn(&pool, |c| mcp_auto_start(c)).unwrap());
+        assert!(!db::with_conn(&pool, mcp_auto_start).unwrap());
     }
 
     #[test]
     fn mcp_policy_defaults_to_read_only_when_missing() {
         let pool = fresh_pool();
-        let p = db::with_conn(&pool, |c| mcp_policy(c)).unwrap();
+        let p = db::with_conn(&pool, mcp_policy).unwrap();
         assert_eq!(
             p,
             crate::permissions::CapabilityPolicy::ReadOnly,
@@ -285,7 +285,7 @@ mod tests {
             CapabilityPolicy::FullAccess,
         ] {
             db::with_tx(&pool, |c| set_mcp_policy(c, policy)).unwrap();
-            let back = db::with_conn(&pool, |c| mcp_policy(c)).unwrap();
+            let back = db::with_conn(&pool, mcp_policy).unwrap();
             assert_eq!(back, policy);
         }
     }
@@ -297,7 +297,7 @@ mod tests {
         // the safe ReadOnly default.
         let pool = fresh_pool();
         db::with_tx(&pool, |c| set(c, keys::MCP_POLICY, &"nuclear".to_string())).unwrap();
-        let p = db::with_conn(&pool, |c| mcp_policy(c)).unwrap();
+        let p = db::with_conn(&pool, mcp_policy).unwrap();
         assert_eq!(p, crate::permissions::CapabilityPolicy::ReadOnly);
     }
 }

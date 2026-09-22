@@ -40,6 +40,7 @@ pub(super) struct CollectionMoveArgs {
     #[serde(default)]
     pub new_parent_collection_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)] // reserved for future sort-order API
     pub new_sort_order: Option<i64>,
 }
 
@@ -206,7 +207,7 @@ pub(super) async fn tool_collection_move(
     crate::mcp::check_permission(&state.pool, "global", "collection_move").await?;
     let patch = CollectionPatch {
         module_id: Some(a.new_module_id.clone()),
-        parent_collection_id: a.new_parent_collection_id.map(|s| Some(s)),
+        parent_collection_id: a.new_parent_collection_id.map(Some),
         ..Default::default()
     };
     simple_post_core::db::with_conn(&state.pool, |c| {

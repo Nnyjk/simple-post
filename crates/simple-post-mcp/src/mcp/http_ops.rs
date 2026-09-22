@@ -14,9 +14,7 @@ use serde_json::{json, Value};
 use simple_post_core::domain::{ApiResponse, Endpoint, Environment, HttpMethod};
 use simple_post_core::error::AppError;
 use simple_post_core::http_executor::{self, HttpRequestInput, HttpResponse, HttpResult};
-use crate::mcp::{
-    arg_bool_opt, arg_str, arg_str_opt, arg_u64_opt, AppState, CallToolResult, ToolEntry,
-};
+use crate::mcp::{AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
 
 // =========================================================================
@@ -28,12 +26,15 @@ struct RunRequestArgs {
     method: String,
     url: String,
     #[serde(default)]
+    #[allow(dead_code)] // accepted by JSON Schema for forward compatibility
     headers: Option<Value>,
     #[serde(default)]
+    #[allow(dead_code)] // accepted by JSON Schema for forward compatibility
     params: Option<Value>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)] // accepted by JSON Schema for forward compatibility
     auth: Option<Value>,
     #[serde(default)]
     env_id: Option<String>,
@@ -62,7 +63,7 @@ struct CallEndpointArgs {
 // Dispatch table
 // =========================================================================
 
-pub fn table() -> Vec<ToolEntry> {
+pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "api_run_request",
@@ -478,6 +479,7 @@ static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::doma
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::{arg_bool_opt, arg_str, arg_str_opt, arg_u64_opt};
     use simple_post_core::domain::Environment;
     use std::collections::HashMap;
 
@@ -542,7 +544,7 @@ mod tests {
         assert_eq!(arg_str(&v, "method").unwrap(), "GET");
         assert_eq!(arg_str(&v, "url").unwrap(), "/x");
         assert_eq!(arg_u64_opt(&v, "n"), Some(7));
-        assert_eq!(arg_bool_opt(&v, "missing"), false);
+        assert!(!arg_bool_opt(&v, "missing"));
         assert_eq!(arg_str_opt(&v, "missing"), None);
     }
 

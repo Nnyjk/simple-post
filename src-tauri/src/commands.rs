@@ -218,7 +218,7 @@ pub struct RestartResult {
 
 #[tauri::command]
 pub fn projects_list(state: State<DbPool>) -> Result<Vec<Project>, AppError> {
-    crate::db::with_conn(&state, |c| crate::db::projects::list(c))
+    crate::db::with_conn(&state, crate::db::projects::list)
 }
 
 #[tauri::command]
@@ -849,7 +849,7 @@ pub async fn mcp_daemon_restart(
 pub fn mcp_auto_start_get(
     state: State<'_, DbPool>,
 ) -> Result<bool, AppError> {
-    crate::db::with_conn(&state, |c| crate::db::preferences::mcp_auto_start(c))
+    crate::db::with_conn(&state, crate::db::preferences::mcp_auto_start)
 }
 
 /// Persist the `mcp.auto_start` preference and immediately try to act
@@ -905,7 +905,7 @@ pub async fn mcp_auto_start_set(
 /// the source of truth (sqlite `preferences.mcp.policy`).
 #[tauri::command]
 pub async fn mcp_capability_get(pool: tauri::State<'_, DbPool>) -> Result<CapabilityPolicy, AppError> {
-    crate::db::with_conn(pool.inner(), |c| crate::db::preferences::mcp_policy(c))
+    crate::db::with_conn(pool.inner(), crate::db::preferences::mcp_policy)
 }
 
 /// Set the global capability policy. The frontend sends the wire form

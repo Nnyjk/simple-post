@@ -706,7 +706,7 @@ mod tests {
         // Wire shape sanity check — the renderer cares about
         // `{ "crashed": { "exit_code": 1 } }`.
         let s = DaemonStatus::Crashed { exit_code: Some(1) };
-        let v = serde_json::to_value(&s).unwrap();
+        let v = serde_json::to_value(s).unwrap();
         let obj = v.as_object().expect("struct variant serializes to object");
         assert!(obj.contains_key("crashed"), "got: {v}");
         let inner = &obj["crashed"];
@@ -716,7 +716,7 @@ mod tests {
     #[test]
     fn crashed_with_no_exit_code_uses_null() {
         let s = DaemonStatus::Crashed { exit_code: None };
-        let v = serde_json::to_value(&s).unwrap();
+        let v = serde_json::to_value(s).unwrap();
         let obj = v.as_object().unwrap();
         assert!(obj["crashed"]["exit_code"].is_null());
     }

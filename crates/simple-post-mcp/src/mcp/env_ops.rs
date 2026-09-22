@@ -71,7 +71,7 @@ struct SetBaseUrlArgs {
 // =========================================================================
 
 /// Return the 8 env_* rows. Called once by `mcp::mod::tool_table`.
-pub fn table() -> Vec<ToolEntry> {
+pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "env_list",

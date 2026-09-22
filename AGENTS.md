@@ -54,6 +54,9 @@ npm run tauri:check    # cargo check --manifest-path src-tauri/Cargo.toml
 npm test               # frontend unit tests (hardcoded file list — see Testing)
 npm run test:watch     # same, watch mode
 npm run test:mcp       # MCP end-to-end (requires compiled binary)
+npm run test:web:auth      # serve-web bearer auth flow integration (needs binary)
+npm run test:web:basepath  # serve-web reverse-proxy base path integration (needs binary)
+npm run perf:bench         # serve-web p50/p95/p99 latency (--assert enforces 200ms p95 budget)
 npm run build:tests    # gated MCP test; exits 0 if binary missing
 npm run mcp:repl       # interactive JSON-RPC REPL against a running daemon
 
@@ -129,6 +132,9 @@ No `npm run lint` — ESLint was deliberately removed and is deferred to v0.2. R
 | Frontend unit/slice | `npm test` / `npm run test:watch` | `src/lib/*.test.ts`, `src/stores/__tests__/*.test.ts` |
 | Rust | `cargo test --workspace` / `-p <crate>` | inline `#[cfg(test)]` modules |
 | MCP end-to-end | `npm run test:mcp` | `scripts/mcp-integration.test.mjs` (needs compiled `simple-post` binary) |
+| Web auth integration | `npm run test:web:auth` | `scripts/test-web-auth.mjs` (needs compiled binary; spawns two phases — open + locked) |
+| Web base-path integration | `npm run test:web:basepath` | `scripts/test-web-basepath.mjs` (needs compiled binary; `--public-base-path /sp`) |
+| Web perf bench | `npm run perf:bench` | `scripts/perf-bench.mjs` (p50/p95/p99 over N hits; `--assert` gates 200ms p95) |
 | Gated CI variant | `npm run build:tests` | `scripts/run-mcp-tests.cjs` (exits 0 if binary absent) |
 | Store invariant check | `npx tsx scripts/_verify_store.mjs` | selector stability, cascade delete, prefs persistence |
 
@@ -141,3 +147,4 @@ Key facts:
 - Store custom hooks (`useActiveProject`, …) throw outside a React render; in Node, read state with `useAppStore.getState()`.
 - No React component/DOM tests; no coverage tooling configured (c8/nyc/tarpaulin absent).
 - Integration test needs a built binary — `npm run test:mcp` exits code 2 without it; use `npm run build:tests` when a soft gate is wanted.
+- The same applies to `npm run test:web:auth`, `npm run test:web:basepath`, and `npm run perf:bench` — all three require `target/debug/simple-post.exe` (or `--release`) on disk. Plan verification of commit 5's auth/base-path landed in commit 7 (this commit) per the deferred-to-commit-7-hygiene note in commit 5's message.

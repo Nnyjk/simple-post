@@ -38,7 +38,7 @@
 
 use serde::Deserialize;
 
-use crate::mcp::{AppState, ToolEntry};
+use crate::mcp::ToolEntry;
 
 pub(super) mod base_url_def;
 pub(super) mod collection;
@@ -74,7 +74,7 @@ pub(super) struct ModuleIdArgs {
 /// base_url_defs (5). Each submodule's `register()` only pushes its
 /// own slice; this function concatenates them so callers see one
 /// `table()` with all 28 entries.
-pub fn table() -> Vec<ToolEntry> {
+pub(crate) fn table() -> Vec<ToolEntry> {
     let mut v = Vec::with_capacity(32);
 
     // ---- projects (5) ----
@@ -102,6 +102,7 @@ pub fn table() -> Vec<ToolEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::AppState;
     use simple_post_core::error::AppError;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Instant;

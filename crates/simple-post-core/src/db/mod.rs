@@ -104,7 +104,7 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     // Smoke-test the pool: the first checkout from a freshly built pool
     // forces the manager to actually open a connection, which is where
     // a locked file / bad path would surface.
-    let _ = ping(&pool)?;
+    ping(&pool)?;
 
     Ok(pool)
 }
@@ -149,14 +149,11 @@ where
         match run_immediate_tx(&mut conn, &f) {
             Ok(v) => return Ok(v),
             Err(e) => {
-                let busy = match &e {
+                let busy = matches!(
+                    &e,
                     AppError::Sqlite(rusqlite::Error::SqliteFailure(err, _))
-                        if err.code == rusqlite::ErrorCode::DatabaseBusy =>
-                    {
-                        true
-                    }
-                    _ => false,
-                };
+                        if err.code == rusqlite::ErrorCode::DatabaseBusy
+                );
                 if !busy {
                     return Err(e);
                 }
@@ -200,7 +197,7 @@ pub fn migrate_and_seed(conn: &mut Connection) -> Result<(), AppError> {
 /// Liveness probe. `SELECT 1` round-trips a connection from the pool.
 /// Useful at startup and from a Tauri command for the health badge.
 pub fn ping(pool: &DbPool) -> Result<(), AppError> {
-    let mut conn = pool.get()?;
+    let conn = pool.get()?;
     conn.execute_batch("SELECT 1")?;
     Ok(())
 }
@@ -555,7 +552,7 @@ mod tests {
         let (pool, _dir) = fresh_pool();
         // Second call on the same DB: schema is IF NOT EXISTS, and the
         // seed step sees a non-empty `projects` table and bails out.
-        with_conn(&pool, |c| migrate_and_seed(c)).expect("second migrate");
+        with_conn(&pool, migrate_and_seed).expect("second migrate");
         let count: i64 =
             with_conn(&pool, |c| Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?))
                 .unwrap();

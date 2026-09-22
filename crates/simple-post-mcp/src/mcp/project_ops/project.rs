@@ -113,7 +113,7 @@ pub(super) async fn tool_project_list(
     _args: Value,
 ) -> Result<CallToolResult, AppError> {
     crate::mcp::check_permission(&state.pool, "global", "project_list").await?;
-    let projects = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::projects::list(c))?;
+    let projects = simple_post_core::db::with_conn(&state.pool, simple_post_core::db::projects::list)?;
     Ok(CallToolResult::json(projects))
 }
 

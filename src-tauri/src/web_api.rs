@@ -14,7 +14,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, Method, StatusCode},
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, post, put},
+    routing::{get, patch, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,7 @@ use crate::daemon_supervisor::McpDaemonHandle;
 use crate::db::{self, DbPool};
 use crate::error::AppError;
 use crate::http_executor::{self, HttpRequestInput, HttpResult};
-use crate::mcp::{self, AppState as McpAppState};
+use crate::mcp::AppState as McpAppState;
 use crate::permissions::CapabilityPolicy;
 use crate::port_registry;
 // `daemon_http` and `variable_fill` / `response_parse` moved into the
@@ -354,7 +354,7 @@ async fn healthz() -> Json<HealthDto> {
 async fn projects_list(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let rows = db::with_conn(&s.pool, |c| db::projects::list(c)).map_err(map_app_error)?;
+    let rows = db::with_conn(&s.pool, db::projects::list).map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(rows).unwrap_or_else(|_| json!([]))))
 }
 
@@ -399,7 +399,7 @@ async fn projects_delete(
 }
 
 async fn http_send(
-    State(s): State<Arc<WebState>>,
+    State(_s): State<Arc<WebState>>,
     Json(body): Json<HttpSendBody>,
 ) -> Result<Json<HttpResult>, HttpErrorResponse> {
     let input = HttpRequestInput {
@@ -443,7 +443,7 @@ async fn mcp_capability_get(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<CapabilityResponse>, HttpErrorResponse> {
     let pool = s.pool.clone();
-    let policy = match crate::db::with_conn(&pool, |c| crate::db::preferences::mcp_policy(c)) {
+    let policy = match crate::db::with_conn(&pool, crate::db::preferences::mcp_policy) {
         Ok(p) => p,
         Err(e) => return Err(map_app_error(e)),
     };
@@ -523,14 +523,14 @@ async fn mcp_start(
 async fn mcp_stop(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<&'static str>, HttpErrorResponse> {
-    s.daemon.shutdown().await;
+    let _ = s.daemon.shutdown().await;
     Ok(Json("stopped"))
 }
 
 async fn preferences_get(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let pairs = db::with_conn(&s.pool, |c| db::preferences::list_all(c)).map_err(map_app_error)?;
+    let pairs = db::with_conn(&s.pool, db::preferences::list_all).map_err(map_app_error)?;
     let mut out = serde_json::Map::new();
     for (k, v) in pairs {
         // Try to parse as JSON; fall back to string. This mirrors the
@@ -1045,7 +1045,7 @@ async fn mcp_proxy_path() -> String {
     // Inline the same logic as `commands::mcp_daemon_proxy_path` so
     // we don't take a dependency on the `#[tauri::command]` macro
     // glue (which would force a `tauri::AppHandle` parameter).
-    fn build(exe_name: &str, proxy_name: &str) -> Option<std::path::PathBuf> {
+    fn build(_exe_name: &str, proxy_name: &str) -> Option<std::path::PathBuf> {
         let exe = std::env::current_exe().ok()?;
         let parent = exe.parent()?;
         Some(parent.join(proxy_name))
@@ -1072,6 +1072,7 @@ async fn spa_index(spa_dir: PathBuf) -> Response {
     serve_file_or_index(spa_dir, "index.html").await
 }
 
+#[allow(dead_code)] // reserved for future asset-serve route; not yet wired in build_router
 async fn spa_assets(
     axum::extract::State(spa_dir): axum::extract::State<PathBuf>,
     Path(rel): Path<String>,
@@ -1357,7 +1358,7 @@ pub async fn serve(
     if auto_start_daemon {
         // Read the persisted `mcp.auto_start` row. The CLI flag can
         // override the persisted value, but defaults to honouring it.
-        let want = db::with_conn(&pool, |c| db::preferences::mcp_auto_start(c))?;
+        let want = db::with_conn(&pool, db::preferences::mcp_auto_start)?;
         if want {
             if let Err(e) = daemon
                 .restart_without_app_handle(&data_dir)

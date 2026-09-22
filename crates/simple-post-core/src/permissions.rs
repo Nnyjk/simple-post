@@ -46,12 +46,13 @@ pub use crate::domain::Permission;
 /// The wire format is snake_case (`"read_only"` / `"safe_write"` /
 /// `"full_access"`) — matches the UI copy and the persistence layer
 /// in `preferences::mcp_policy`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityPolicy {
     /// AI can read state. `tools/list` exposes only Read-class tools;
     /// `tools/call` for anything else returns
     /// `AppError::PermissionDenied` BEFORE invoking the handler.
+    #[default]
     ReadOnly,
     /// AI can read + create/update non-deletable resources. `Draft`
     /// suffix omitted on purpose — keeps wire form short.
@@ -59,14 +60,6 @@ pub enum CapabilityPolicy {
     /// AI can do anything the `permissions` table allows (including
     /// destructive delete).
     FullAccess,
-}
-
-impl Default for CapabilityPolicy {
-    fn default() -> Self {
-        // Safe-by-default. Until the user explicitly opts in, the AI
-        // can only observe. See `docs/mcp-permission-policy.md`.
-        Self::ReadOnly
-    }
 }
 
 impl CapabilityPolicy {
@@ -253,7 +246,7 @@ pub async fn resolve_capability(
     //    launch, in which case default = ReadOnly).
     let pool_clone = pool.clone();
     let global = tokio::task::spawn_blocking(move || {
-        crate::db::with_conn(&pool_clone, |c| crate::db::preferences::mcp_policy(c))
+        crate::db::with_conn(&pool_clone, crate::db::preferences::mcp_policy)
     })
     .await
     .map_err(|e| crate::error::AppError::Db(format!("preferences task: {e}")))??;

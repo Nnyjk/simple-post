@@ -17,7 +17,7 @@
 //!   * Windows: `%APPDATA%\simple-post\mcp.port`
 //!   * macOS:   `~/Library/Application Support/simple-post/mcp.port`
 //!   * Linux:   `$XDG_DATA_HOME/simple-post/mcp.port` (or
-//!              `~/.local/share/simple-post/mcp.port`)
+//!     `~/.local/share/simple-post/mcp.port`)
 //!
 //! For tests we honor `SIMPLE_POST_DATA_DIR` as the base directory so
 //! the unit tests can avoid clobbering a real user's port file.
@@ -217,7 +217,7 @@ pub fn is_pid_alive(pid: u32) -> bool {
 /// Try one create_new write. Returns:
 ///   * `Ok(true)`  — wrote successfully.
 ///   * `Ok(false)` — file already existed (`AlreadyExists`), caller should
-///                   inspect the existing record.
+///     inspect the existing record.
 ///   * `Err(_)`    — actual IO failure.
 fn try_create_new(path: &Path, json: &[u8]) -> Result<bool, crate::error::AppError> {
     match std::fs::OpenOptions::new()

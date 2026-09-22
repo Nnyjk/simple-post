@@ -66,7 +66,7 @@ pub async fn run(
         // response written — matching JSON-RPC 2.0.
         let id = frame.get("id").cloned();
         let method = frame.get("method").cloned().unwrap_or(Value::Null);
-        let params = frame.get("params").cloned().unwrap_or(Value::Null);
+        let _params = frame.get("params").cloned().unwrap_or(Value::Null);
 
         // For `tools/list`, fetch the full set and apply our local
         // capability filter on top of whatever the backend returned.

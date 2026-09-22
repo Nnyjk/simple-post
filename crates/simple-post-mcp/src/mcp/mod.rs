@@ -287,7 +287,7 @@ macro_rules! tool_fn {
 
 /// One row of the dispatch table. Hand-rolled instead of a `HashMap` so the
 /// lookup is branchless and the order of `tools/list` is stable.
-struct ToolEntry {
+pub(crate) struct ToolEntry {
     name: &'static str,
     description: &'static str,
     /// JSON Schema for the `arguments` object. Kept as a `Value` literal so
@@ -607,12 +607,12 @@ mod tests {
         assert!(arg_str(&v, "missing").is_err());
         assert!(arg_str(&v, "count").is_err());
         assert_eq!(arg_u64(&v, "count").unwrap(), 7);
-        assert_eq!(arg_bool(&v, "flag").unwrap(), true);
+        assert!(arg_bool(&v, "flag").unwrap());
 
         let v2 = json!({});
         assert_eq!(arg_str_opt(&v2, "x"), None);
         assert_eq!(arg_u64_opt(&v2, "x"), None);
-        assert_eq!(arg_bool_opt(&v2, "x"), false);
+        assert!(!arg_bool_opt(&v2, "x"));
     }
 
     /// `JsonRpcResponse::ok` produces a valid response envelope.

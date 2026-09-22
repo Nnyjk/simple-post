@@ -12,7 +12,23 @@ npm run dev        # 启动 Vite dev server → http://127.0.0.1:5173（LAN 可�
 npm run build      # 产物到 dist/
 npm run build      # 类型检查 + 打包（已有 tsc 内嵌）
 npm run test       # 单元测试（http-build + http，纯函数 + node:http 集成）
+npm run test:mcp   # MCP 端到端（需要编译后的 simple-post binary）
+npm run test:web:auth    # serve-web bearer auth 流程集成测试（需要 binary）
+npm run test:web:basepath# serve-web reverse-proxy base path 集成测试
+npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert 卡 200ms）
 ```
+
+### 反向代理（nginx / Caddy）
+
+如果要把 `simple-post serve-web` 部署在 `https://host/sp/`，需要：
+
+1. 用 `--public-base-path /sp`（或 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`）启动 binary —— commit 5
+2. 反代转发 `/sp/*` → `http://127.0.0.1:4173/`，并把 `/sp` 前缀剥离
+
+完整示例见：
+
+- [`docs/reverse-proxy-nginx.conf`](docs/reverse-proxy-nginx.conf) — nginx 1.24+，含健康探针 + `/sp` → `/sp/` 重定向 + WS 升级
+- [`docs/reverse-proxy-caddyfile`](docs/reverse-proxy-caddyfile) — Caddy 2.7+，含 ACME 自动 TLS + `uri_strip_prefix` 模式
 
 > Vite 已配置 `host: '0.0.0.0'` + `allowedHosts: true`，局域网其他设备可直接访问本机 IP:5173。
 

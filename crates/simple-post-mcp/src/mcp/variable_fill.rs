@@ -18,13 +18,10 @@
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
 
 use simple_post_core::domain::Endpoint;
 use simple_post_core::error::AppError;
-use crate::mcp::{
-    arg_str, arg_str_opt, AppState, CallToolResult, ToolEntry,
-};
+use crate::mcp::{arg_str, AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
 
 // =========================================================================
@@ -51,7 +48,7 @@ struct ResolveEndpointArgs {
 // Dispatch table
 // =========================================================================
 
-pub fn table() -> Vec<ToolEntry> {
+pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "api_resolve_template",
@@ -345,6 +342,8 @@ static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::doma
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::arg_str_opt;
+    use std::sync::Arc;
     use simple_post_core::domain::{
         ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, HttpMethod,
         KeyValue, RequestBody,

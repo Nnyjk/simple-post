@@ -10,8 +10,8 @@ use clap::{Parser, Subcommand};
 ///   - `mcp`           → run as MCP daemon (HTTP transport by default)
 ///   - `mcp-proxy`     → run as stdio↔HTTP proxy (separate binary; refused)
 ///   - `serve-web`     → run the browser-facing REST + SPA host on a
-///                       LAN-reachable port (the data lives on this
-///                       host; the browser only sees the HTTP surface).
+///     LAN-reachable port (the data lives on this host; the browser
+///     only sees the HTTP surface).
 #[derive(Parser, Debug)]
 #[command(name = "simple-post", version, about = "Modern desktop API tool with built-in MCP")]
 struct Cli {

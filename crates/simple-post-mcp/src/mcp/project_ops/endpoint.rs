@@ -59,8 +59,10 @@ pub(super) struct EndpointSearchArgs {
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)] // accepted by JSON Schema; filtering happens at the SQL layer
     pub module_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)] // accepted by JSON Schema; filtering happens at the SQL layer
     pub collection_id: Option<String>,
     #[serde(default)]
     pub q: Option<String>,

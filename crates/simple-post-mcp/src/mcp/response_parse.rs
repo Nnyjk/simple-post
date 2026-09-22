@@ -11,13 +11,10 @@
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
 
-use simple_post_core::domain::{ApiResponse, HttpMethod};
+use simple_post_core::domain::ApiResponse;
 use simple_post_core::error::AppError;
-use crate::mcp::{
-    arg_str, AppState, CallToolResult, ToolEntry,
-};
+use crate::mcp::{AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
 
 // =========================================================================
@@ -71,7 +68,7 @@ struct ExtractJsonPathArgs {
 // Dispatch table
 // =========================================================================
 
-pub fn table() -> Vec<ToolEntry> {
+pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "api_parse_response",
@@ -326,7 +323,7 @@ fn header_diff(a: &ApiResponse, b: &ApiResponse) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::mcp::arg_str_opt;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{atomic::{AtomicU32, Ordering}, Arc};
     use std::time::Instant;
 
     /// Per-call counter that disambiguates temp dirs when several tests

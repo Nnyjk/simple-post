@@ -177,10 +177,8 @@ pub fn list_missing_vars(s: &str) -> Vec<String> {
         if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
             if let Some(end_rel) = find_close(s, i + 2) {
                 let inner = &s[i + 2..i + 2 + end_rel];
-                if is_word(inner) {
-                    if seen.insert(inner.to_string(), ()).is_none() {
-                        out.push(inner.to_string());
-                    }
+                if is_word(inner) && seen.insert(inner.to_string(), ()).is_none() {
+                    out.push(inner.to_string());
                 }
                 i += 2 + end_rel + 2;
                 continue;
@@ -460,13 +458,10 @@ fn build_headers(
         }
         (AuthType::Apikey, _) => {
             if let Some(a) = &auth.apikey {
-                if a.in_ == ApiKeyLocation::Header {
-                    if !out
-                        .iter()
-                        .any(|(k, _)| k.eq_ignore_ascii_case(&a.key))
-                    {
-                        out.push((a.key.clone(), a.value.clone()));
-                    }
+                if a.in_ == ApiKeyLocation::Header
+                    && !out.iter().any(|(k, _)| k.eq_ignore_ascii_case(&a.key))
+                {
+                    out.push((a.key.clone(), a.value.clone()));
                 }
             }
         }
@@ -553,7 +548,7 @@ fn b64_basic(user: &str, pass: &str) -> String {
 fn base64_encode(input: &[u8]) -> String {
     const ALPHA: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(((input.len() + 2) / 3) * 4);
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     let mut i = 0;
     while i + 3 <= input.len() {
         let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8) | (input[i + 2] as u32);

@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn list_returns_seeded_projects() {
         let pool = fresh_pool();
-        let ps = db::with_conn(&pool, |c| list(c)).unwrap();
+        let ps = db::with_conn(&pool, list).unwrap();
         // fixtures.json seeds 3 projects
         assert_eq!(ps.len(), 3);
         assert_eq!(ps[0].id, "p_demo");
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn list_populates_base_url_definitions_from_join() {
         let pool = fresh_pool();
-        let ps = db::with_conn(&pool, |c| list(c)).unwrap();
+        let ps = db::with_conn(&pool, list).unwrap();
         let demo = ps.iter().find(|p| p.id == "p_demo").unwrap();
         // fixtures seed 1 default base_url_def for p_demo
         assert_eq!(demo.base_url_definitions.len(), 1);

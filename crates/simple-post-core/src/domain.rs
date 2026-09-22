@@ -19,9 +19,10 @@ use serde::{Deserialize, Serialize};
 /// string (`"GET"`, `"POST"`, …) the renderer already uses; an unknown
 /// verb falls through to `Custom(String)` so a forward-compat write from
 /// the UI doesn't blow up on the Rust side.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
+    #[default]
     Get,
     Post,
     Put,
@@ -72,11 +73,7 @@ pub fn parse_http_method(m: &str) -> Result<HttpMethod, crate::error::AppError> 
     })
 }
 
-impl Default for HttpMethod {
-    fn default() -> Self {
-        HttpMethod::Get
-    }
-}
+
 
 // ----- key / value ----------------------------------------------------------
 
@@ -93,20 +90,17 @@ pub struct KeyValue {
 
 // ----- body ---------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BodyMode {
+    #[default]
     None,
     Json,
     Form,
     Raw,
 }
 
-impl Default for BodyMode {
-    fn default() -> Self {
-        BodyMode::None
-    }
-}
+
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -119,20 +113,17 @@ pub struct RequestBody {
 
 // ----- auth ---------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthType {
+    #[default]
     None,
     Bearer,
     Basic,
     Apikey,
 }
 
-impl Default for AuthType {
-    fn default() -> Self {
-        AuthType::None
-    }
-}
+
 
 /// Where the apikey is attached. The TS interface declares the field as
 /// `in_` because `in` is a Rust/JS reserved word; serde rename below keeps
@@ -434,18 +425,13 @@ pub struct EnvironmentPatch {
 
 // ----- agent permission ---------------------------------------------------
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Permission {
     Read,
+    #[default]
     ReadCall,
     Full,
-}
-
-impl Default for Permission {
-    fn default() -> Self {
-        Permission::ReadCall
-    }
 }
 
 impl Permission {

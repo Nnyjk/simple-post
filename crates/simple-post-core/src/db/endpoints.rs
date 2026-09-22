@@ -617,7 +617,7 @@ mod tests {
         let pool = fresh_pool();
         let tag = "登录".to_string();
         let rows =
-            db::with_conn(&pool, |c| search(c, None, None, Some(&[tag.clone()]))).unwrap();
+            db::with_conn(&pool, |c| search(c, None, None, Some(std::slice::from_ref(&tag)))).unwrap();
         let all_have_tag = rows
             .iter()
             .all(|e| e.tags.iter().any(|t| t == &tag));
@@ -629,7 +629,7 @@ mod tests {
         let pool = fresh_pool();
         let tag = "登录".to_string();
         let rows = db::with_conn(&pool, |c| {
-            search(c, None, Some("POST"), Some(&[tag.clone()]))
+            search(c, None, Some("POST"), Some(std::slice::from_ref(&tag)))
         })
         .unwrap();
         assert!(rows
