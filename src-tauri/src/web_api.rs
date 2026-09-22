@@ -4,9 +4,6 @@
 //! data the Tauri shell reads. The daemon JSON-RPC entry (`/mcp`)
 //! stays untouched so MCP clients (Claude Desktop, Cursor, …) keep
 //! working unchanged.
-//!
-//! See `docs/distribution-modes-2026-09-18.md` §6 for the route
-//! table and the rationale behind the REST choice over JSON-RPC.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -53,6 +50,18 @@ pub struct WebState {
     /// Claude Desktop pointing at `http://server:4173/mcp` lands on
     /// the same database as the browser SPA.
     pub mcp_state: Arc<crate::mcp::AppState>,
+    /// Optional bearer password. `None` keeps the route tree
+    /// unauthenticated (commit-5 backwards-compatible default).
+    /// `Some(_)` enforces the `auth_middleware` on every `/api/*`
+    /// and `/mcp` request. The frontend caches the bearer in
+    /// `localStorage` and attaches it via `webFetch()`; see
+    /// `docs/http-api-reference.md` for the contract.
+    pub password: Option<String>,
+    /// Optional reverse-proxy base path (e.g. `"/sp"` for an
+    /// nginx-prefixed deployment). When set, the entire router is
+    /// `nest`ed under this prefix; `curl /api/projects` returns 404
+    /// and `curl /sp/api/projects` returns 200.
+    pub base_path: Option<String>,
 }
 
 // -------------------------------------------------------------------------
@@ -1126,7 +1135,19 @@ async fn serve_file_or_index(spa_dir: PathBuf, rel: &str) -> Response {
 /// Assemble the axum router. `spa_dir` is the **absolute** path to
 /// the `dist/` directory (typically `<project_root>/dist/`); the
 /// caller resolves it once and passes it in.
+///
+/// `state.password` (when `Some`) installs the bearer middleware
+/// over every route except the documented public bypass list (see
+/// `auth::is_public_path`). `state.base_path` (when `Some`) `nest`s
+/// the entire router under that prefix so a reverse proxy can mount
+/// the SPA at e.g. `https://host/sp/`. Both fields are `None` by
+/// default — same behaviour as before commit 5.
 pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
+    // Pull the auth fields before `Arc::new` consumes the struct —
+    // commit 5 split them out so a future `auth_middleware` consumer
+    // can read them without holding the heavy state.
+    let password = state.password.clone();
+    let base_path = state.base_path.clone();
     let state_arc = Arc::new(state);
 
     let api = Router::new()
@@ -1254,11 +1275,32 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     let serve_dir = ServeDir::new(assets_dir)
         .fallback(tower_http::services::fs::ServeFile::new(spa_dir.join("index.html")));
 
-    Router::new()
+    // Pull base_path before the auth layer consumes `state` (the layer
+    // takes ownership of a clone of `state.password`).
+    let auth_state = crate::auth::AuthState::new(password.as_deref());
+    let inner = Router::new()
         .merge(api)
         .merge(mcp_routes)
         .fallback_service(serve_dir)
         .route("/", get(move || spa_index(spa_clone)))
+        .layer(axum::middleware::from_fn_with_state(
+            auth_state,
+            crate::auth::auth_middleware,
+        ));
+
+    // Optionally nest under `base_path` so a reverse proxy (nginx,
+    // Caddy, Cloudflare) can host Simple Post at e.g.
+    // `https://server/sp/`. When set, the entire router (including
+    // the SPA fallback) is mounted under the prefix and `MatchedPath`
+    // inside handlers reflects the strip-prefix path. When unset the
+    // router is served at root.
+    match base_path.as_deref() {
+        Some(p) if !p.is_empty() => {
+            eprintln!("[serve-web] base_path: {p}");
+            Router::new().nest(p, inner)
+        }
+        _ => inner,
+    }
 }
 
 /// Dispatch a JSON-RPC request to the MCP dispatcher. Wraps
@@ -1306,6 +1348,8 @@ pub async fn serve(
     data_dir: PathBuf,
     spa_dir: PathBuf,
     auto_start_daemon: bool,
+    password: Option<String>,
+    base_path: Option<String>,
 ) -> Result<(), AppError> {
     let pool = db::init(&data_dir)?;
     let daemon = McpDaemonHandle::new();
@@ -1343,6 +1387,8 @@ pub async fn serve(
         daemon,
         data_dir: data_dir.clone(),
         mcp_state,
+        password,
+        base_path,
     };
     let router = build_router(state, spa_dir);
 

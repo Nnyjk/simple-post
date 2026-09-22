@@ -1,7 +1,15 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { ingestBearerFromUrl } from './lib/tauri-commands';
 import './styles/globals.css';
+
+// commit 5: when the reverse-proxy (or a hand-shared link) points at
+// `?token=<x>`, persist the bearer before the React tree mounts so
+// the very first `webFetch()` already carries the header. `ingest`
+// also strips the query from `window.history` so the token doesn't
+// end up in browser history / Referer headers / bookmarks.
+ingestBearerFromUrl();
 
 // ---------------------------------------------------------------------------
 // Apply the persisted theme to <html> before React mounts. The store loads

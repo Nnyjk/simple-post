@@ -20,6 +20,7 @@
 
 use tauri::Manager;
 
+pub mod auth;
 pub mod commands;
 pub mod daemon_supervisor;
 pub mod port_registry;
@@ -297,8 +298,7 @@ pub fn run() {
             // Read the persisted MCP auto-start preference **before**
             // spawning the supervisor so we honour the user's choice.
             // `mcp.auto_start` defaults to `false` — the user opts in
-            // from the settings panel. See
-            // `docs/distribution-modes-2026-09-18.md` §5.
+            // from the settings panel.
             let pool: tauri::State<crate::db::DbPool> = app.state();
             let auto_start = match crate::db::with_conn(pool.inner(), |c| {
                 crate::db::preferences::mcp_auto_start(c)
@@ -354,16 +354,25 @@ pub fn run() {
 /// `simple-post-mcp` binary on their own machine (or
 /// `npx -y @simple-post/mcp-server`) as before.
 ///
-/// See `docs/distribution-modes-2026-09-18.md` §3 + §6 for the
-/// architecture and route table.
 pub async fn run_serve_web(
     bind_addr: std::net::SocketAddr,
     spa_dir: std::path::PathBuf,
     data_dir: std::path::PathBuf,
     auto_start_daemon: bool,
+    password: Option<String>,
+    base_path: Option<String>,
 ) {
     init_tracing();
-    if let Err(e) = web_api::serve(bind_addr, data_dir, spa_dir, auto_start_daemon).await {
+    if let Err(e) = web_api::serve(
+        bind_addr,
+        data_dir,
+        spa_dir,
+        auto_start_daemon,
+        password,
+        base_path,
+    )
+    .await
+    {
         eprintln!("[serve-web] fatal: {e:?}");
         std::process::exit(1);
     }

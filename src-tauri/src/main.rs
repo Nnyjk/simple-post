@@ -12,7 +12,6 @@ use clap::{Parser, Subcommand};
 ///   - `serve-web`     → run the browser-facing REST + SPA host on a
 ///                       LAN-reachable port (the data lives on this
 ///                       host; the browser only sees the HTTP surface).
-///                       See `docs/distribution-modes-2026-09-18.md` §3.
 #[derive(Parser, Debug)]
 #[command(name = "simple-post", version, about = "Modern desktop API tool with built-in MCP")]
 struct Cli {
@@ -77,6 +76,26 @@ enum Cmd {
         /// honoured.
         #[arg(long)]
         mcp_auto_start: Option<bool>,
+
+        /// Bearer password for `/api/*` + `/mcp` requests (commit 5).
+        /// When omitted (or empty) the route tree stays open — same
+        /// backwards-compatible behaviour as commit 4. When set,
+        /// every `/api/*` and `/mcp` request must carry
+        /// `Authorization: Bearer <token>`; `/api/healthz`,
+        /// `/mcp/healthz`, `/healthz`, and the SPA shell stay open
+        /// so probes and the SPA bootstrap keep functioning.
+        /// Also accepted from `SIMPLE_POST_WEB_PASSWORD`; the flag
+        /// wins when both are set.
+        #[arg(long, env = "SIMPLE_POST_WEB_PASSWORD")]
+        web_password: Option<String>,
+
+        /// Reverse-proxy base path (commit 5). When set, the entire
+        /// router is `nest`ed under this prefix so the SPA + REST +
+        /// `/mcp` can live behind e.g. nginx at
+        /// `https://host/sp/`. Must start with `/`. Also accepted
+        /// from `SIMPLE_POST_PUBLIC_BASE_PATH`; the flag wins.
+        #[arg(long, env = "SIMPLE_POST_PUBLIC_BASE_PATH")]
+        public_base_path: Option<String>,
     },
 }
 
@@ -115,6 +134,8 @@ fn main() {
             spa_dir,
             data_dir,
             mcp_auto_start,
+            web_password,
+            public_base_path,
         }) => {
             let bind_addr: std::net::SocketAddr = match format!("{bind}:{port}").parse() {
                 Ok(a) => a,
@@ -171,6 +192,8 @@ fn main() {
                 spa_path,
                 data_path,
                 auto_start,
+                web_password,
+                public_base_path,
             ));
         }
 

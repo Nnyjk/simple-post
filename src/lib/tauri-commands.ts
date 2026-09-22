@@ -85,8 +85,7 @@ export const COMMANDS = {
    */
   mcpDaemonProxyPath: 'mcp_daemon_proxy_path',
   /**
-   * Persisted `mcp.auto_start` preference — see
-   * `docs/distribution-modes-2026-09-18.md` §5. Defaults to `false`;
+   * Persisted `mcp.auto_start` preference. Defaults to `false`;
    * both Tauri and `serve-web` shapes honour this row.
    */
   mcpAutoStartGet: 'mcp_auto_start_get',
@@ -120,7 +119,7 @@ export type TauriCommand = (typeof COMMANDS)[keyof typeof COMMANDS];
  * `inFlightRef`. The web shape forwards the signal to `fetch` so the
  * browser actually cancels the network request.
  *
- * Distribution shapes — see `docs/distribution-modes-2026-09-18.md` §3:
+ * Distribution shapes:
  *   - Tauri shell  → `__TAURI_INTERNALS__` is present, calls `invoke`.
  *   - Web / Dev    → falls through to `webInvokeCmd` which hits the
  *                    axum `serve-web` host's `/api/*` REST surface.
@@ -224,6 +223,73 @@ function buildQuery(params: Record<string, unknown>): string {
  *   - POST   /api/{resource}/{id}/…     sub-resource action
  *                                       (duplicate, activate, …).
  */
+// ----- bearer-token cache (commit 5) -----
+//
+// `serve-web` may be launched with `--password=<token>` /
+// `SIMPLE_POST_WEB_PASSWORD`. The renderer has to attach
+// `Authorization: Bearer <token>` to every `/api/*` and `/mcp`
+// request it makes. We store the bearer in `localStorage` so it
+// survives reloads, and let the SPA bootstrap pick it up from the
+// URL query string on first paint:
+//
+//   https://host/sp/?token=<x>     ← reverse-proxy auth hand-off
+//   https://host/                   ← subsequent visits; reads
+//                                    localStorage
+//
+// Security trade-off: `localStorage` is readable by any same-origin
+// XSS. This is the same exposure Postman / Insomnia / dbx accept for
+// standalone clients (no per-user session). Documented for the
+// commit-5 review checklist.
+export const WEB_BEARER_STORAGE_KEY = 'simple-post.web.bearer';
+
+export function writeBearerToStorage(token: string): void {
+  try {
+    window.localStorage.setItem(WEB_BEARER_STORAGE_KEY, token);
+  } catch {
+    /* private mode / quota — fall back to URL-only auth */
+  }
+}
+
+export function clearBearerFromStorage(): void {
+  try {
+    window.localStorage.removeItem(WEB_BEARER_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Read the bearer out of localStorage. Returns `null` when running
+ * in Node-side tests (`window` undefined) or when the user has not
+ * logged in yet.
+ */
+export function readBearerFromStorage(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(WEB_BEARER_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One-shot bootstrap: if the URL has `?token=<x>`, persist it
+ * (overwriting any existing value — the user just rotated creds)
+ * and strip the query so the bearer doesn't end up in browser
+ * history / Referer headers. Returns the token (or null).
+ */
+export function ingestBearerFromUrl(search: string = window.location.search): string | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(search);
+  const candidate = params.get('token');
+  if (!candidate) return null;
+  writeBearerToStorage(candidate);
+  // Strip the query so the bearer doesn't leak into history / referrer.
+  const clean = window.location.pathname + window.location.hash;
+  window.history.replaceState(null, '', clean);
+  return candidate;
+}
+
 const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // ----- projects -----
   [COMMANDS.projectsList]: { method: 'GET', path: () => '/api/projects' },
@@ -536,9 +602,23 @@ async function webFetch<T>(
   body: unknown,
   options?: CallApiOptions,
 ): Promise<T> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  // commit 5: when the server is launched with `--password=…` /
+  // `SIMPLE_POST_WEB_PASSWORD`, the renderer's `webFetch` must
+  // attach `Authorization: Bearer <token>` on every API call.
+  // The bearer is cached in `localStorage` (see comment block on
+  // `WEB_BEARER_STORAGE_KEY`); on a fresh page load, the SPA shell
+  // looks for `?token=<x>` in the URL and writes it to localStorage
+  // before any fetch fires. We accept the XSS surface as a known
+  // trade-off — same posture as Postman / Insomnia / dbx, all of
+  // which read tokens from localStorage or extension storage.
+  const bearer = readBearerFromStorage();
+  if (bearer) {
+    headers['authorization'] = `Bearer ${bearer}`;
+  }
   const init: RequestInit = {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers,
   };
   if (body !== null && method !== 'GET' && method !== 'DELETE') {
     init.body = JSON.stringify(body);
