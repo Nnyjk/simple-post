@@ -140,6 +140,56 @@ Resources（AI 侧"读取"通道）：
 - `simple-post://endpoints/{id}`
 - `simple-post://environments/{projectId}`
 
+## Docker（web shape 一键部署）
+
+`simple-post` 的 `serve-web` shape 可以容器化部署到任何带 Docker 的 Linux 主机（amd64 / arm64）。
+
+```bash
+# 1. 准备构建产物（Dockerfile.web 把 dist/ 拷进镜像）
+npm install && npm run build
+
+# 2. 构建镜像（约 50MB 运行时镜像，alpine + musl）
+docker build -f Dockerfile.web -t simple-post:web .
+
+# 3. 启动容器
+docker run -d --name simple-post \
+  -p 4173:4173 \
+  -e SIMPLE_POST_WEB_PASSWORD=changeme \
+  -v simple-post-data:/data \
+  simple-post:web
+
+# 4. 验证
+curl http://localhost:4173/api/healthz
+# {"status":"ok","version":"…","shape":"server"}
+
+# 5. 接 MCP 客户端：Claude Desktop / Cursor / Cline 的 mcpServers 里配
+#    url=http://host:4173/mcp  + Authorization: Bearer changeme
+```
+
+或者用 compose 拉现成镜像：
+
+```bash
+cp .env.example .env && $EDITOR .env   # 至少填 SP_WEB_PASSWORD
+docker compose up -d
+docker compose ps                       # STATUS=healthy
+```
+
+镜像发布到 GHCR：推 `v*` tag 触发 `.github/workflows/docker-build.yml`，输出 `ghcr.io/nnyjk/simple-post:web-v<version>`（多架构 manifest）。
+
+安全提示：
+
+- `SIMPLE_POST_WEB_PASSWORD` **必须**设，否则 `/api/*` 和 `/mcp` 全开放（commit 5 的 `auth_middleware` 在 password 为空时是 no-op）。
+- 健康检查路径 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便容器探针。
+- 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，commit 5 的 `build_router` 会把整个 router nest 在 `/sp` 下；nginx 侧记得把 `/sp/assets/*` 转到 `/assets/*`（SPA shell 的 `<base href>` 仍是 `/`，**不**重写）。
+- 数据持久化：把 `/data` 挂到 named volume。SQLite 在 WAL 模式下也能安全落盘，但 `docker stop` 走 `tini` 转发 SIGTERM 才会触发优雅 checkpoint。
+
+详见：
+
+- `Dockerfile.web` — Alpine 多阶段 musl 构建
+- `docker/healthcheck.sh` — 容器内健康检查
+- `docker-compose.yml` — 参考部署（强制要求 `SP_WEB_PASSWORD`）
+- `.github/workflows/docker-build.yml` — buildx 多架构 + GHCR 发布
+
 ## 协作方法（团队模式硬约束）
 
 - **多 worker 并行只交付代码，禁止自行浏览器 / dev server 验证**——所有端到端验证、截图、流程跑通由**主会话统一做一次**。

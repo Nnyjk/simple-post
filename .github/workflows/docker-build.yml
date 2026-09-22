@@ -1,0 +1,112 @@
+# .github/workflows/docker-build.yml
+#
+# Build the `simple-post:web` container with docker buildx, push to
+# GitHub Container Registry (GHCR). Triggered by pushing a tag of the
+# form `v0.2.0` (i.e. plain `v*`, *not* `v*-mcp` which is reserved for
+# the standalone MCP binary — see release-mcp.yml).
+#
+# Workflow outputs:
+#   - ghcr.io/nnyjk/simple-post:web-<sha>   (commit-pinned)
+#   - ghcr.io/nnyjk/simple-post:web         (tag-pinned, mutable)
+#
+# The GitHub Release that `release.yml` (Tauri) creates for `v*` tags
+# gets the binary installers; this workflow contributes the container
+# image as a separate artefact. Both can target the same tag.
+#
+# Why buildx + QEMU for cross-arch instead of native runners:
+#   - amd64 (x86_64-unknown-linux-musl) is the primary platform
+#   - arm64 (aarch64-unknown-linux-musl) lets Apple-Silicon and
+#     Graviton hosts run the same image without emulation
+#   - GHCR stores them as a multi-arch manifest; `docker pull` selects
+#     the right one at runtime automatically
+#
+# Local sanity check before tagging:
+#   docker buildx build --platform linux/amd64,linux/arm64 \
+#     -f Dockerfile.web --tag simple-post:web-test --load .
+
+name: Build & push simple-post:web container
+
+on:
+  push:
+    tags:
+      # Plain v* tags (NOT v*-mcp — that's the standalone MCP binary).
+      - 'v*'
+    # Don't trigger on plain main pushes — keeps CI cheap. Tag-based
+    # pushes get a fresh build from the tag's tree.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (leave empty for "test")'
+        required: false
+        default: 'test'
+
+permissions:
+  contents: read
+  packages: write   # push to GHCR
+
+jobs:
+  buildx:
+    name: buildx (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            # Rust target triple used inside the Dockerfile.
+            rust_target: x86_64-unknown-linux-musl
+          - platform: linux/arm64
+            rust_target: aarch64-unknown-linux-musl
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (cross-arch emulation)
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/nnyjk/simple-post
+          # Default tag for `v*` pushes is the tag itself (e.g. v0.2.0).
+          # The `web-` prefix separates this image from any other image
+          # the same repo might publish in the future.
+          tags: |
+            type=matchpattern,pattern=v(.*),format= web-{{ version }}
+            type=matchpattern,pattern=v(.*),format= {{ version }}-web
+            type=sha,format=web-{{short}}
+          flavor: |
+            latest=auto
+          bake-target: simple-post-web
+
+      - name: Build & push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          # Build both arches; --push lands them as a manifest list.
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name != 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Caching: GitHub Actions cache backend keyed on the
+          # Dockerfile + Cargo manifests. Speeds up subsequent builds
+          # from ~15 min cold to ~3 min warm.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # secrets not needed — the Dockerfile is hermetic.
+          provenance: true
+          sbom: false   # v0.3 — out of scope per plan §Non-goals
