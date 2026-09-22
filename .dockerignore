@@ -55,9 +55,12 @@ logs/
 coverage/
 *.lcov
 
-# Build-time before dev feature is wired: Cargo workspace members that
-# aren't needed for the web shape (commit 3 split these out; the web
-# binary only depends on simple-post + simple-post-core + transitive deps)
+# The standalone MCP server crate ships as a workspace member, but
+# the web binary statically links it as a path dependency and `cargo`
+# compiles its source inside the builder stage. Excluding the source
+# directory from the build context just keeps the context small —
+# cargo path resolution still works because the build context is the
+# repo root.
 crates/simple-post-mcp/
 
 # Bash history / dotenv files (security)
