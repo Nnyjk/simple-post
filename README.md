@@ -97,14 +97,14 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 
 UI 先行阶段的所有打磨项（P0/P1/P2）已落地。下面是接 v0.1 起的四阶段路线，叠加 MCP 工具集（核心差异化）的渐进暴露。
 
-### v0.1 MVP（约 4 周）
+### v0.1 MVP（约 4 周）— 已在 commit 7 (b99151b) 全部交付
 
-- [ ] **Tauri 壳**：`src-tauri/` 初始化、Cargo.toml、tauri.conf.json、图标
-- [ ] **Rust 主进程**：SQLite（`rusqlite` + `r2d2`）、HTTP（`reqwest`）、MCP 子进程桥
-- [ ] **真实持久化**：Zustand store → `tauri-plugin-sql`
-- [ ] **真实请求**：渲染端 → Tauri command → `reqwest` → 返回结构化响应
-- [ ] **MCP Server 子进程**：`src-tauri/src/daemon_http.rs` (axum JSON-RPC dispatcher, ~245 LOC) + `src-tauri/src/bin/mcp_proxy.rs` (stdio bridge, ~350 LOC) wired through the `src-tauri/src/mcp/` module — exposes 44+ MCP tools to AI clients (Claude Desktop, Cursor, …) over either transport.
-- [ ] **打包**：NSIS 安装包 + 便携 zip
+- [x] **Tauri 壳**：`src-tauri/` 初始化、Cargo.toml、tauri.conf.json、图标
+- [x] **Rust 主进程**：SQLite（`rusqlite` + `r2d2`）、HTTP（`reqwest`）、MCP 子进程桥
+- [x] **真实持久化**：Zustand store → Tauri command → `simple-post-core`（SQLite via `rusqlite`）
+- [x] **真实请求**：渲染端 → Tauri command → `reqwest` → 返回结构化响应
+- [x] **MCP Server**：拆到独立 `crates/simple-post-mcp/` workspace member，`daemon_http.rs`（axum HTTP daemon）+ `stdio_loop.rs`（stdio bridge）+ `mcp/mod.rs`（JSON-RPC dispatcher）— 暴露 44+ 个 MCP 工具给 AI 客户端（Claude Desktop / Cursor / Cline）。同一 crate 也以独立 `simple-post-mcp` 二进制 + `@simple-post/mcp-server` npm 包分发（commit 4）。
+- [x] **打包**：NSIS 安装包 + 便携 zip
 
 ### v0.2（+2 周）
 
@@ -130,26 +130,19 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。下面是接 v0.1 起
 - 性能压测（简易）
 - 插件系统（允许第三方 MCP 工具注册）
 
-### MCP 工具清单（stdio 模式，给外部 AI 客户端）
+### MCP 工具清单（stdio + HTTP 模式，给外部 AI 客户端）
 
-> App 启动时同时拉起一个 **stdio MCP Server** 子进程，Claude Desktop / Cursor / Cline 等通过 stdio 与之通信。Server 不暴露网络，可选 token 校验。
+> App 启动时同时拉起一个 **stdio MCP Server** 子进程（Claude Desktop / Cursor / Cline 通过 stdio 通信），并通过 `serve-web` 子命令的 `/mcp` 端点暴露 HTTP MCP（外部 AI 客户端、远程调试器）。Server 默认不暴露网络，鉴权可选；详见 [`docs/mcp-permission-policy.md`](docs/mcp-permission-policy.md)。
 
-| 工具 | 用途 |
-|---|---|
-| `api_list_projects` | 列出所有项目 |
-| `api_list_endpoints` | 按项目 / 模块 / 集合过滤 |
-| `api_search` | 按关键字、tag、method 搜索 |
-| `api_get_endpoint` | 取单个接口完整定义 |
-| `api_run_request` | 执行 HTTP 请求，返回结构化响应 |
-| `api_create_endpoint` | 创建接口 |
-| `api_update_endpoint` | 更新接口 |
-| `api_delete_endpoint` | 删除接口 |
-| `api_import_postman` | 导入 Postman collection JSON |
-| `api_export_openapi` | 导出 OpenAPI 3.0 |
-| `api_generate_docs` | AI 生成 / 补全接口文档 |
-| `api_generate_tests` | AI 生成测试用例 |
+实际暴露的工具集（44 个）按 capability tier 分组（`REQUIRED_CAPABILITY` 见 `crates/simple-post-mcp/src/mcp/mod.rs`）：
 
-Resources（AI 侧"读取"通道）：
+- **read_only（默认）**：`project_list` / `project_get` / `module_*` / `collection_*` / `endpoint_get` / `endpoint_search` / `env_list` / `env_get` 等
+- **safe_write**：`project_*_create` / `project_*_update` / `module_*` / `collection_*` / `endpoint_create` / `endpoint_update` / `env_create` / `env_update` 等
+- **full_access**：`endpoint_delete` / `env_delete` / `http_send` 等会改变外部状态的操作
+
+完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口见 [`docs/http-api-reference.md`](docs/http-api-reference.md)（`scripts/dump-openapi.mjs` 重新生成 `docs/openapi.yaml`）。
+
+Resources（AI 侧"读取"通道，HTTP MCP 模式下暴露）：
 
 - `simple-post://projects`
 - `simple-post://projects/{id}`
@@ -213,8 +206,9 @@ docker compose ps                       # STATUS=healthy
 
 ## 决策记录
 
-- **技术栈**：Tauri 2 + React 18 + TypeScript
-- **存储**：SQLite（Rust 端 `rusqlite` / `tauri-plugin-sql`，MCP 端 `better-sqlite3`）
-- **MCP 模式**：stdio（仅本地 AI 客户端可连）
+- **技术栈**：Tauri 2 + React 18 + TypeScript（前端） + Cargo workspace（后端：`simple-post` Tauri shell / `simple-post-core` 共享层 / `simple-post-mcp` 独立 MCP 服务）
+- **存储**：SQLite（`rusqlite` + `r2d2`，整个 workspace 通过 `simple-post-core::db` 共享连接池；WAL + `foreign_keys=ON` + `busy_timeout=3000`）
+- **MCP 模式**：stdio 子进程桥（本地 AI 客户端）+ HTTP `POST /mcp`（`serve-web` 子命令，支持远程 / Bearer 鉴权 / 反代 base path）
 - **UI 风格**：暗色为主，shadcn 变量层，可切亮色
 - **第一阶段**：UI 先行 ✓（已完成 2026-09-11）
+- **当前阶段**：v0.1 MVP 已交付（commit 7，2026-09-21），后续规划见 commit 5+ 的 distribution 决策 + `docs/distribution-modes-2026-09-18.md`
