@@ -1,0 +1,34 @@
+# Normalize line endings: LF in the repository for all text files.
+# `.editorconfig` mirrors this for editors; `core.autocrlf` local config
+# is overridden by these attributes, killing the recurring
+# "LF will be replaced by CRLF" warnings on Windows.
+* text=auto eol=lf
+
+# Windows-native scripts must keep CRLF to run under cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.svg text
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.db binary
+*.sqlite binary
+Cargo.lock linguist-generated=true
+package-lock.json linguist-generated=true
