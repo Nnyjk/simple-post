@@ -317,7 +317,13 @@ pub fn run() {
             // it into the spawn.
             let handle = app.state::<McpDaemonHandle>().inner().clone();
             let app_handle = app.handle().clone();
-            tokio::spawn(async move {
+            // `tauri::async_runtime::spawn`, NOT `tokio::spawn` —
+            // Tauri runs `.setup()` synchronously outside the tokio
+            // runtime, so a raw `tokio::spawn` panics with
+            // "there is no reactor running". Tauri's async_runtime
+            // module has direct access to its tokio handle and spawns
+            // tasks correctly from this context.
+            tauri::async_runtime::spawn(async move {
                 if !auto_start {
                     eprintln!(
                         "[gui] mcp.auto_start is off — leaving daemon stopped; \

@@ -117,7 +117,7 @@ No `npm run lint` — ESLint was deliberately removed and is deferred to v0.2. R
 
 - **Node `>=20 <23`** (root `package.json` engines); package manager is **npm** (lockfile v3). No pnpm/yarn/bun — do not add their lockfiles.
 - Root `package.json` declares **no workspaces**; `packages/simple-post-mcp` is an independently published package (`@simple-post/mcp-server`).
-- **Rust**: edition 2021, MSRV 1.77.2, toolchain **pinned to 1.82.0** with `rustfmt` + `clippy` (`src-tauri/rust-toolchain.toml`).
+- **Rust**: edition 2021, MSRV 1.77.2, toolchain channel **`stable`** with `rustfmt` + `clippy` (`src-tauri/rust-toolchain.toml`). Track `stable` so edition-2024 transitive deps (clap 4.6+, etc.) compile; if you need a pinned baseline, set `channel = "1.85.0"` (edition2024 stable release) or newer and run `rustup toolchain install` first.
 - TypeScript path alias `@/*` → `src/*`; `moduleResolution: bundler`, `noEmit` (type checks run via `tsc -b` inside `npm run build`).
 - Workspace builds output to `<repo>/target/`, not `src-tauri/target/`.
 - Windows-first: PowerShell helpers in `scripts/*.ps1`. When writing UTF-8 files from PowerShell, specify `-Encoding utf8NoBOM` — 5.1's default ANSI encoding corrupts UTF-8 and can break `rustc`.
