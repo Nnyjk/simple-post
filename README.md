@@ -8,15 +8,18 @@
 
 ```bash
 npm install
-npm run dev        # 启动 Vite dev server → http://127.0.0.1:5173（LAN 可访问）
-npm run build      # 产物到 dist/
-npm run build      # 类型检查 + 打包（已有 tsc 内嵌）
-npm run test       # 单元测试（http-build + http，纯函数 + node:http 集成）
-npm run test:mcp   # MCP 端到端（需要编译后的 simple-post binary）
-npm run test:web:auth    # serve-web bearer auth 流程集成测试（需要 binary）
-npm run test:web:basepath# serve-web reverse-proxy base path 集成测试
+npm run dev            # 启动 Vite dev server → http://127.0.0.1:5173（LAN 可访问）
+npm run build          # 类型检查 + 打包 → dist/
+npm run check          # 一键质量门禁：Prettier + ESLint + tsc + 单测 + cargo fmt + clippy
+npm run lint[:fix]     # 只跑 ESLint；npm run format 只跑 Prettier
+npm run test           # 单元测试（自动发现 src/**/*.test.ts）
+npm run test:mcp       # MCP 端到端（需要编译后的 simple-post binary）
+npm run test:web:auth      # serve-web bearer auth 流程集成测试（需要 binary）
+npm run test:web:basepath  # serve-web reverse-proxy base path 集成测试
 npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert 卡 200ms）
 ```
+
+> 推送到 `main` 或提 PR 时，`.github/workflows/ci.yml` 会自动跑同一套门禁（web：格式/lint/类型/单测/构建；Rust：fmt/clippy/测试）。
 
 ### 反向代理（nginx / Caddy）
 
