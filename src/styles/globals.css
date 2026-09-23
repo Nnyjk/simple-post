@@ -92,7 +92,10 @@
 
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1,
+      'ss01' 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -161,14 +164,30 @@
 .markdown-prose h4 {
   @apply mt-3 mb-1.5 font-semibold;
 }
-.markdown-prose h1 { @apply text-base; }
-.markdown-prose h2 { @apply text-sm; }
-.markdown-prose h3 { @apply text-[13px]; }
-.markdown-prose h4 { @apply text-xs uppercase tracking-wider text-muted-foreground; }
-.markdown-prose p { @apply my-1.5; }
-.markdown-prose ul { @apply my-1.5 list-disc pl-5; }
-.markdown-prose ol { @apply my-1.5 list-decimal pl-5; }
-.markdown-prose li { @apply my-0.5; }
+.markdown-prose h1 {
+  @apply text-base;
+}
+.markdown-prose h2 {
+  @apply text-sm;
+}
+.markdown-prose h3 {
+  @apply text-[13px];
+}
+.markdown-prose h4 {
+  @apply text-xs uppercase tracking-wider text-muted-foreground;
+}
+.markdown-prose p {
+  @apply my-1.5;
+}
+.markdown-prose ul {
+  @apply my-1.5 list-disc pl-5;
+}
+.markdown-prose ol {
+  @apply my-1.5 list-decimal pl-5;
+}
+.markdown-prose li {
+  @apply my-0.5;
+}
 .markdown-prose code:not(pre code) {
   @apply rounded bg-muted px-1 py-0.5 font-mono text-[11px];
 }

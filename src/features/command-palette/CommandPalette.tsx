@@ -157,9 +157,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         // there is an inner backdrop div that captures the mousedown.
         // Use closest('[role="dialog"]') so any future DOM nesting still
         // resolves correctly.
-        const dialog = (e.currentTarget as HTMLElement).querySelector(
-          '[role="dialog"]',
-        );
+        const dialog = (e.currentTarget as HTMLElement).querySelector('[role="dialog"]');
         if (dialog && !dialog.contains(e.target as Node)) onClose();
       }}
     >
@@ -222,7 +220,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     onClick={() => run(cmd)}
                     className={cn(
                       'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm',
-                      active ? 'bg-primary/15 text-foreground' : 'text-foreground/90 hover:bg-accent/60',
+                      active
+                        ? 'bg-primary/15 text-foreground'
+                        : 'text-foreground/90 hover:bg-accent/60',
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">{cmd.title}</span>

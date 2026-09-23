@@ -10,15 +10,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClass: Record<ButtonVariant, string> = {
-  default:
-    'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm',
+  default: 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm',
   ghost: 'hover:bg-accent hover:text-accent-foreground',
-  outline:
-    'border border-border bg-transparent hover:bg-accent hover:text-accent-foreground',
-  secondary:
-    'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-  destructive:
-    'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+  outline: 'border border-border bg-transparent hover:bg-accent hover:text-accent-foreground',
+  secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+  destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
 };
 
 const sizeClass: Record<ButtonSize, string> = {

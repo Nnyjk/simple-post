@@ -42,7 +42,7 @@ on:
 
 permissions:
   contents: read
-  packages: write   # push to GHCR
+  packages: write # push to GHCR
 
 jobs:
   buildx:
@@ -109,4 +109,4 @@ jobs:
           cache-to: type=gha,mode=max
           # secrets not needed — the Dockerfile is hermetic.
           provenance: true
-          sbom: false   # v0.3 — out of scope per plan §Non-goals
+          sbom: false # v0.3 — out of scope per plan §Non-goals

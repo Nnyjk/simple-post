@@ -37,7 +37,12 @@ const THEME_OPTIONS: ThemeOption[] = [
     label: '跟随系统',
     value: 'system',
     hint: 'Windows 主题切换时自动跟随',
-    preview: { bg: 'linear-gradient(135deg,#0f1115_50%,#ffffff_50%)', panel: '#9ca3af', text: '#e5e7eb', accent: '#3b82f6' },
+    preview: {
+      bg: 'linear-gradient(135deg,#0f1115_50%,#ffffff_50%)',
+      panel: '#9ca3af',
+      text: '#e5e7eb',
+      accent: '#3b82f6',
+    },
   },
 ];
 
@@ -66,9 +71,9 @@ export function AppearanceSection() {
   const filteredShortcuts = useMemo(() => {
     const q = shortcutQuery.trim().toLowerCase();
     if (!q) return KEYBOARD_SHORTCUTS;
-    return KEYBOARD_SHORTCUTS.filter(([label, keys]) =>
-      label.toLowerCase().includes(q) ||
-      keys.join(' ').toLowerCase().includes(q),
+    return KEYBOARD_SHORTCUTS.filter(
+      ([label, keys]) =>
+        label.toLowerCase().includes(q) || keys.join(' ').toLowerCase().includes(q),
     );
   }, [shortcutQuery]);
 
@@ -113,9 +118,7 @@ export function AppearanceSection() {
                     >
                       {opt.icon}
                     </span>
-                    <span className="text-xs font-medium text-foreground">
-                      {opt.label}
-                    </span>
+                    <span className="text-xs font-medium text-foreground">{opt.label}</span>
                   </div>
                   {active && (
                     <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -173,14 +176,13 @@ export function AppearanceSection() {
         ) : (
           <div className="divide-y divide-border/60">
             {filteredShortcuts.map(([label, keys]) => (
-              <div
-                key={label}
-                className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-2.5"
-              >
+              <div key={label} className="grid grid-cols-[1fr_auto] items-center gap-4 px-4 py-2.5">
                 <span className="text-xs text-foreground">{label}</span>
                 <span className="flex items-center gap-1">
                   {keys.map((k, i) => (
-                    <span key={i} className="kbd">{k}</span>
+                    <span key={i} className="kbd">
+                      {k}
+                    </span>
                   ))}
                 </span>
               </div>

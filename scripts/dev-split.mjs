@@ -23,13 +23,13 @@
 //
 // Pure stdlib. No concurrently, no cross-spawn — keeps the dev deps lean.
 
-import { spawn } from "node:child_process";
-import process from "node:process";
-import { join } from "node:path";
+import { spawn } from 'node:child_process';
+import process from 'node:process';
+import { join } from 'node:path';
 
-const REPO = join(import.meta.dirname, "..");
-const VITE_PREFIX = "[vite] ";
-const SERVE_PREFIX = "[serve-web] ";
+const REPO = join(import.meta.dirname, '..');
+const VITE_PREFIX = '[vite] ';
+const SERVE_PREFIX = '[serve-web] ';
 const SHUTDOWN_GRACE_MS = 3000;
 
 // Track every child we spawn so the signal handler / exit handler can
@@ -48,30 +48,30 @@ function prefixWrite(stream, chunk, prefix) {
 }
 
 function spawnChild(label, cmd, args) {
-  const prefix = label === "vite" ? VITE_PREFIX : SERVE_PREFIX;
-  console.error(`[dev-split] starting ${label}: ${cmd} ${args.join(" ")}`);
+  const prefix = label === 'vite' ? VITE_PREFIX : SERVE_PREFIX;
+  console.error(`[dev-split] starting ${label}: ${cmd} ${args.join(' ')}`);
   // Node 20+ (post-CVE-2024-27980) refuses to spawn .cmd/.bat without
   // shell: true. cargo and vite (when run directly) don't have that
   // problem; npm on Windows IS a .cmd, so we need the shell. Safe here:
   // all args are hardcoded, no user input flows through.
-  const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(cmd);
+  const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd);
   const child = spawn(cmd, args, {
     cwd: REPO,
     env: process.env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     shell: needsShell,
   });
   const handle = { label, child, prefix };
   children.push(handle);
 
-  child.stdout.on("data", (b) => prefixWrite(process.stdout, b, prefix));
-  child.stderr.on("data", (b) => prefixWrite(process.stderr, b, prefix));
+  child.stdout.on('data', (b) => prefixWrite(process.stdout, b, prefix));
+  child.stderr.on('data', (b) => prefixWrite(process.stderr, b, prefix));
 
-  child.on("exit", (code, signal) => {
+  child.on('exit', (code, signal) => {
     if (shuttingDown) return; // we triggered the exit; ignore
     shuttingDown = true;
-    if (code === 0 || signal === "SIGTERM" || signal === "SIGINT") {
+    if (code === 0 || signal === 'SIGTERM' || signal === 'SIGINT') {
       console.error(`[dev-split] ${label} exited cleanly (code=${code} signal=${signal})`);
     } else {
       console.error(`[dev-split] ${label} exited with code=${code} signal=${signal}`);
@@ -80,7 +80,7 @@ function spawnChild(label, cmd, args) {
     shutdownAll();
   });
 
-  child.on("error", (err) => {
+  child.on('error', (err) => {
     // ENOENT etc. — surface immediately, don't silently hang.
     console.error(`[dev-split] ${label} failed to spawn: ${err.message}`);
     if (!shuttingDown) {
@@ -116,35 +116,41 @@ function shutdownAll() {
 // Cross-platform "kill this process and all of its children".
 function killTree(child, force) {
   if (!child || child.exitCode !== null) return;
-  if (process.platform === "win32") {
+  if (process.platform === 'win32') {
     // /T = walk tree (kill grandchildren too — cargo→simple-post.exe,
     // npm.cmd→node.exe→vite). /F = force. No graceful variant on
     // Windows; /T /F is the closest equivalent to SIGKILL.
     try {
-      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-        stdio: "ignore",
+      const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore',
         windowsHide: true,
       });
-      killer.on("error", () => { /* already dead */ });
-    } catch { /* already dead */ }
+      killer.on('error', () => {
+        /* already dead */
+      });
+    } catch {
+      /* already dead */
+    }
     return;
   }
   try {
-    child.kill(force ? "SIGKILL" : "SIGTERM");
-  } catch { /* already dead */ }
+    child.kill(force ? 'SIGKILL' : 'SIGTERM');
+  } catch {
+    /* already dead */
+  }
 }
 
-process.on("SIGINT", () => {
+process.on('SIGINT', () => {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.error("\n[dev-split] SIGINT received — shutting down children");
+  console.error('\n[dev-split] SIGINT received — shutting down children');
   shutdownAll();
 });
 
-process.on("SIGTERM", () => {
+process.on('SIGTERM', () => {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.error("\n[dev-split] SIGTERM received — shutting down children");
+  console.error('\n[dev-split] SIGTERM received — shutting down children');
   shutdownAll();
 });
 
@@ -154,23 +160,24 @@ process.on("SIGTERM", () => {
 //    first /api or /mcp hit. We don't block the Vite spawn on readiness
 //    — Vite comes up instantly and proxies will reconnect once axum
 //    binds.
-console.error("[dev-split] hint: first cargo build of serve-web can take 10–60s");
-spawnChild(
-  "serve-web",
-  "cargo",
-  [
-    "run",
-    "--manifest-path", "src-tauri/Cargo.toml",
-    "--bin", "simple-post",
-    "--",
-    "serve-web",
-    "--bind", "127.0.0.1",
-    "--port", "4173",
-    "--spa-dir", "./dist",
-  ],
-);
+console.error('[dev-split] hint: first cargo build of serve-web can take 10–60s');
+spawnChild('serve-web', 'cargo', [
+  'run',
+  '--manifest-path',
+  'src-tauri/Cargo.toml',
+  '--bin',
+  'simple-post',
+  '--',
+  'serve-web',
+  '--bind',
+  '127.0.0.1',
+  '--port',
+  '4173',
+  '--spa-dir',
+  './dist',
+]);
 
 // 2. Vite. `npm` resolves to `npm.cmd` on Windows automatically since
 //    Node 16, but we name it explicitly to be safe across CI runners.
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-spawnChild("vite", npmCmd, ["run", "dev"]);
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+spawnChild('vite', npmCmd, ['run', 'dev']);

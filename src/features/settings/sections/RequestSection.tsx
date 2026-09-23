@@ -1,11 +1,5 @@
 import { useMemo } from 'react';
-import {
-  Hourglass,
-  Repeat,
-  Database,
-  RotateCcw,
-  Send,
-} from 'lucide-react';
+import { Hourglass, Repeat, Database, RotateCcw, Send } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -127,10 +121,10 @@ export function RequestSection() {
           shown here only matter in the (current) mock pipeline. Keeps the
           user oriented without forcing them to scroll the doc. */}
       <div className="flex items-center gap-2 border-t border-border/60 bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
-        <Badge variant="muted" className="font-mono">v0.2</Badge>
-        <span>
-          以下设置（超时 / 跟随重定向 / 最大响应体积）仅在真实请求模式下生效。
-        </span>
+        <Badge variant="muted" className="font-mono">
+          v0.2
+        </Badge>
+        <span>以下设置（超时 / 跟随重定向 / 最大响应体积）仅在真实请求模式下生效。</span>
       </div>
     </SettingsCategory>
   );

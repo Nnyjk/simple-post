@@ -20,13 +20,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildFetchInit, buildCurlCommand, type BuildInput } from './http-build';
-import type {
-  AuthConfig,
-  Environment,
-  HttpMethod,
-  KeyValue,
-  RequestBody,
-} from '../types/domain';
+import type { AuthConfig, Environment, HttpMethod, KeyValue, RequestBody } from '../types/domain';
 
 // ---------- shared fixtures ----------
 
@@ -71,9 +65,7 @@ describe('http-build: query string', () => {
   });
 
   it('appends a single param with ?', () => {
-    const { url } = buildFetchInit(
-      input({ params: [kv('page', '1')] }),
-    );
+    const { url } = buildFetchInit(input({ params: [kv('page', '1')] }));
     assert.equal(url, 'http://api.example.com/x?page=1');
   });
 
@@ -99,38 +91,28 @@ describe('http-build: query string', () => {
   });
 
   it('skips disabled params', () => {
-    const { url } = buildFetchInit(
-      input({ params: [kv('a', '1'), kv('b', '2', false)] }),
-    );
+    const { url } = buildFetchInit(input({ params: [kv('a', '1'), kv('b', '2', false)] }));
     assert.equal(url, 'http://api.example.com/x?a=1');
   });
 
   it('skips params with empty key', () => {
-    const { url } = buildFetchInit(
-      input({ params: [kv('', 'orphan'), kv('kept', 'yes')] }),
-    );
+    const { url } = buildFetchInit(input({ params: [kv('', 'orphan'), kv('kept', 'yes')] }));
     assert.equal(url, 'http://api.example.com/x?kept=yes');
   });
 
   it('skips params with empty value', () => {
-    const { url } = buildFetchInit(
-      input({ params: [kv('a', ''), kv('b', '2')] }),
-    );
+    const { url } = buildFetchInit(input({ params: [kv('a', ''), kv('b', '2')] }));
     assert.equal(url, 'http://api.example.com/x?b=2');
   });
 
   it('URL-encodes special characters in key and value', () => {
-    const { url } = buildFetchInit(
-      input({ params: [kv('a b', 'x&y=z+1')] }),
-    );
+    const { url } = buildFetchInit(input({ params: [kv('a b', 'x&y=z+1')] }));
     // encodeURIComponent: ' ' -> '%20', '&' -> '%26', '=' -> '%3D', '+' -> '%2B'
     assert.equal(url, 'http://api.example.com/x?a%20b=x%26y%3Dz%2B1');
   });
 
   it('URL-encodes unicode in value', () => {
-    const { url } = buildFetchInit(
-      input({ params: [kv('q', '中文')] }),
-    );
+    const { url } = buildFetchInit(input({ params: [kv('q', '中文')] }));
     // '中' -> %E4%B8%AD, '文' -> %E6%96%87
     assert.equal(url, 'http://api.example.com/x?q=%E4%B8%AD%E6%96%87');
   });
@@ -142,9 +124,7 @@ describe('http-build: query string', () => {
 
 describe('http-build: headers', () => {
   it('emits a user header alongside the auto-injected Accept', () => {
-    const { init } = buildFetchInit(
-      input({ headers: [kv('X-Trace', 'abc')] }),
-    );
+    const { init } = buildFetchInit(input({ headers: [kv('X-Trace', 'abc')] }));
     assert.deepEqual(init.headers, {
       'X-Trace': 'abc',
       Accept: 'application/json',
@@ -152,16 +132,12 @@ describe('http-build: headers', () => {
   });
 
   it('skips disabled headers', () => {
-    const { init } = buildFetchInit(
-      input({ headers: [kv('A', '1', false), kv('B', '2')] }),
-    );
+    const { init } = buildFetchInit(input({ headers: [kv('A', '1', false), kv('B', '2')] }));
     assert.deepEqual(init.headers, { B: '2', Accept: 'application/json' });
   });
 
   it('skips headers with empty key', () => {
-    const { init } = buildFetchInit(
-      input({ headers: [kv('', 'orphan'), kv('B', '2')] }),
-    );
+    const { init } = buildFetchInit(input({ headers: [kv('', 'orphan'), kv('B', '2')] }));
     assert.deepEqual(init.headers, { B: '2', Accept: 'application/json' });
   });
 
@@ -173,28 +149,28 @@ describe('http-build: headers', () => {
       }),
     );
     // User value wins; auto-application/json must NOT clobber.
-    assert.equal((init.headers as Record<string, string>)['content-type'], 'application/vnd.custom+json');
+    assert.equal(
+      (init.headers as Record<string, string>)['content-type'],
+      'application/vnd.custom+json',
+    );
     assert.equal((init.headers as Record<string, string>)['Content-Type'], undefined);
   });
 
   it('auto-adds Content-Type for json mode when user has none', () => {
-    const { init } = buildFetchInit(
-      input({ body: { mode: 'json', content: '{}' } }),
-    );
+    const { init } = buildFetchInit(input({ body: { mode: 'json', content: '{}' } }));
     assert.equal((init.headers as Record<string, string>)['Content-Type'], 'application/json');
   });
 
   it('auto-adds Content-Type for form mode', () => {
-    const { init } = buildFetchInit(
-      input({ body: { mode: 'form', content: 'a=1' } }),
+    const { init } = buildFetchInit(input({ body: { mode: 'form', content: 'a=1' } }));
+    assert.equal(
+      (init.headers as Record<string, string>)['Content-Type'],
+      'application/x-www-form-urlencoded',
     );
-    assert.equal((init.headers as Record<string, string>)['Content-Type'], 'application/x-www-form-urlencoded');
   });
 
   it('auto-adds Content-Type for raw mode', () => {
-    const { init } = buildFetchInit(
-      input({ body: { mode: 'raw', content: 'hello' } }),
-    );
+    const { init } = buildFetchInit(input({ body: { mode: 'raw', content: 'hello' } }));
     assert.equal((init.headers as Record<string, string>)['Content-Type'], 'text/plain');
   });
 
@@ -204,9 +180,7 @@ describe('http-build: headers', () => {
   });
 
   it('auto-adds Content-Type even when json content is empty (mode implies a body shape)', () => {
-    const { init } = buildFetchInit(
-      input({ body: { mode: 'json', content: '' } }),
-    );
+    const { init } = buildFetchInit(input({ body: { mode: 'json', content: '' } }));
     assert.equal((init.headers as Record<string, string>)['Content-Type'], 'application/json');
   });
 
@@ -216,9 +190,7 @@ describe('http-build: headers', () => {
   });
 
   it('respects user-set Accept (case-insensitive)', () => {
-    const { init } = buildFetchInit(
-      input({ headers: [kv('accept', 'text/html')] }),
-    );
+    const { init } = buildFetchInit(input({ headers: [kv('accept', 'text/html')] }));
     assert.equal((init.headers as Record<string, string>)['accept'], 'text/html');
     assert.equal((init.headers as Record<string, string>)['Accept'], undefined);
   });
@@ -347,10 +319,7 @@ describe('http-build: auth (Basic)', () => {
         } as AuthConfig,
       }),
     );
-    assert.equal(
-      (init.headers as Record<string, string>)['Authorization'],
-      'Bearer override',
-    );
+    assert.equal((init.headers as Record<string, string>)['Authorization'], 'Bearer override');
   });
 });
 
@@ -452,16 +421,12 @@ describe('http-build: {{var}} template resolution', () => {
   });
 
   it('resolves {{var}} in header value', () => {
-    const { init } = buildFetchInit(
-      input({ headers: [kv('X-Region', '{{site}}')], env: ENV }),
-    );
+    const { init } = buildFetchInit(input({ headers: [kv('X-Region', '{{site}}')], env: ENV }));
     assert.equal((init.headers as Record<string, string>)['X-Region'], 'cn');
   });
 
   it('leaves missing var literal (no env at all)', () => {
-    const { url } = buildFetchInit(
-      input({ url: 'http://api.example.com/{{missing}}/x' }),
-    );
+    const { url } = buildFetchInit(input({ url: 'http://api.example.com/{{missing}}/x' }));
     assert.equal(url, 'http://api.example.com/{{missing}}/x');
   });
 
@@ -498,23 +463,17 @@ describe('http-build: body inclusion', () => {
   });
 
   it('mode=json with content → body is the raw string', () => {
-    const { init } = buildFetchInit(
-      input({ body: { mode: 'json', content: '{"a":1}' } }),
-    );
+    const { init } = buildFetchInit(input({ body: { mode: 'json', content: '{"a":1}' } }));
     assert.equal(init.body, '{"a":1}');
   });
 
   it('mode=form with content → body is the raw string', () => {
-    const { init } = buildFetchInit(
-      input({ body: { mode: 'form', content: 'a=1&b=2' } }),
-    );
+    const { init } = buildFetchInit(input({ body: { mode: 'form', content: 'a=1&b=2' } }));
     assert.equal(init.body, 'a=1&b=2');
   });
 
   it('mode=raw with content → body is the raw string', () => {
-    const { init } = buildFetchInit(
-      input({ body: { mode: 'raw', content: 'hello world' } }),
-    );
+    const { init } = buildFetchInit(input({ body: { mode: 'raw', content: 'hello world' } }));
     assert.equal(init.body, 'hello world');
   });
 

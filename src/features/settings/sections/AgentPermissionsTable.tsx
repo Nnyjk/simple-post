@@ -101,7 +101,8 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-muted-foreground">
-        控制 AI agent 对每个项目可执行的操作范围。<span className="text-warning">修改权限后需重启 MCP daemon 生效</span>。
+        控制 AI agent 对每个项目可执行的操作范围。
+        <span className="text-warning">修改权限后需重启 MCP daemon 生效</span>。
       </p>
       <div className="overflow-hidden rounded-md border border-border bg-card/30">
         {projects.map((project, idx) => {
@@ -120,9 +121,7 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
                   style={{ backgroundColor: project.color }}
                   aria-hidden
                 />
-                <span className="truncate font-mono text-xs text-foreground">
-                  {project.name}
-                </span>
+                <span className="truncate font-mono text-xs text-foreground">{project.name}</span>
               </div>
               <div
                 role="radiogroup"

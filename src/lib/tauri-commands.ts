@@ -15,7 +15,6 @@
  *   - Sort entries alphabetically within a region so a missing command
  *     shows up the moment you scan the table.
  */
-import { invoke } from '@tauri-apps/api/core';
 
 export const COMMANDS = {
   // ----- projects -----
@@ -133,7 +132,7 @@ export const IS_TAURI_SHELL: boolean =
   typeof window !== 'undefined' &&
   Boolean(
     (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ ||
-      (window as { __TAURI__?: unknown }).__TAURI__,
+    (window as { __TAURI__?: unknown }).__TAURI__,
   );
 
 /**
@@ -194,9 +193,7 @@ function buildQuery(params: Record<string, unknown>): string {
   for (const key of Object.keys(params).sort()) {
     const raw = params[key];
     if (raw === undefined || raw === null || raw === '') continue;
-    parts.push(
-      `${encodeURIComponent(key)}=${encodeURIComponent(String(raw))}`,
-    );
+    parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(raw))}`);
   }
   return parts.length === 0 ? '' : `?${parts.join('&')}`;
 }
@@ -352,7 +349,12 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     // so the call site stays identical between shapes.
     body: (a) => {
       const target = a.target as
-        | { parentKind: 'module' | 'collection'; moduleId?: string; collectionId?: string; index: number }
+        | {
+            parentKind: 'module' | 'collection';
+            moduleId?: string;
+            collectionId?: string;
+            index: number;
+          }
         | undefined;
       const parentId = target?.moduleId ?? target?.collectionId ?? '';
       return {
@@ -398,8 +400,7 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.endpointsDuplicate]: {
     method: 'POST',
-    path: (a) =>
-      `/api/endpoints/${encodeURIComponent(String(a.id))}/duplicate`,
+    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}/duplicate`,
     // The path consumes `id`; the Rust handler takes no body, so we
     // explicitly hand back an empty object rather than letting the
     // default `body = args` projection leak `{ id }` into the wire.
@@ -420,8 +421,7 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // ----- environments -----
   [COMMANDS.environmentsList]: {
     method: 'GET',
-    path: (a) =>
-      `/api/environments${buildQuery({ projectId: a.projectId })}`,
+    path: (a) => `/api/environments${buildQuery({ projectId: a.projectId })}`,
   },
   [COMMANDS.environmentsCreate]: {
     method: 'POST',
@@ -429,19 +429,16 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.environmentsUpdate]: {
     method: 'PATCH',
-    path: (a) =>
-      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
     body: (a) => a.patch,
   },
   [COMMANDS.environmentsDelete]: {
     method: 'DELETE',
-    path: (a) =>
-      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
   },
   [COMMANDS.environmentsSetVar]: {
     method: 'POST',
-    path: (a) =>
-      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/vars`,
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/vars`,
     body: (a) => ({
       envId: a.envId ?? a.id,
       key: a.key,
@@ -450,8 +447,7 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.environmentsSetBaseurl]: {
     method: 'POST',
-    path: (a) =>
-      `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/baseurls`,
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/baseurls`,
     body: (a) => ({ defId: a.defId, url: a.url }),
   },
   [COMMANDS.environmentsSetActive]: {
@@ -468,24 +464,20 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // comment block above the handlers.
   [COMMANDS.baseUrlDefsCreate]: {
     method: 'POST',
-    path: (a) =>
-      `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
+    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
   },
   [COMMANDS.baseUrlDefsUpdate]: {
     method: 'PATCH',
-    path: (a) =>
-      `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
+    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
     body: (a) => a.patch,
   },
   [COMMANDS.baseUrlDefsDelete]: {
     method: 'DELETE',
-    path: (a) =>
-      `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
+    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
   },
   [COMMANDS.baseUrlDefsSetDefault]: {
     method: 'POST',
-    path: (a) =>
-      `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls/default`,
+    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls/default`,
     body: (a) => ({ defId: a.defId }),
   },
 
@@ -507,13 +499,11 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // ----- agent permissions -----
   [COMMANDS.permissionsGet]: {
     method: 'GET',
-    path: (a) =>
-      `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
+    path: (a) => `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
   },
   [COMMANDS.permissionsSet]: {
     method: 'PUT',
-    path: (a) =>
-      `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
+    path: (a) => `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
     body: (a) => ({ permission: a.permission }),
   },
 
@@ -583,12 +573,7 @@ async function webInvokeCmd<T>(
   // gets a dedicated endpoint now (`/api/request-settings`), so no
   // special handling is needed for it.
   if (cmd === COMMANDS.mcpAutoStartGet) {
-    const map = await webFetch<Record<string, unknown>>(
-      'GET',
-      spec.path(args),
-      null,
-      options,
-    );
+    const map = await webFetch<Record<string, unknown>>('GET', spec.path(args), null, options);
     return (map['mcp.auto_start'] === true) as unknown as T;
   }
 
@@ -628,7 +613,9 @@ async function webFetch<T>(
   }
   const res = await fetch(path, init);
   if (!res.ok) {
-    let detail = '';
+    // Both branches assign before use — declare without an initializer
+    // so `no-useless-assignment` stays happy.
+    let detail: string;
     try {
       const j = (await res.json()) as { code?: string; message?: string };
       detail = ` [${j.code ?? '?'}] ${j.message ?? ''}`;

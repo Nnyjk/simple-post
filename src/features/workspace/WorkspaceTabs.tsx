@@ -72,7 +72,6 @@ export function WorkspaceTabs() {
   const activeTabId = useAppStore((s) => s.activeTabId);
   const dirtyTabIds = useAppStore((s) => s.dirtyTabIds);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
-  const closeTab = useAppStore((s) => s.closeTab);
   const requestCloseTab = useAppStore((s) => s.requestCloseTab);
   const requestCloseOthers = useAppStore((s) => s.requestCloseOthers);
   const requestCloseAllTabs = useAppStore((s) => s.requestCloseAllTabs);
@@ -126,8 +125,8 @@ export function WorkspaceTabs() {
   const measureCompact = useCallback(() => {
     const el = stripRef.current;
     if (!el) return;
-    const NORMAL_TAB = 160;  // px, fixed width in normal mode
-    const TRAILING = 76;     // px reserved for the trailing "关闭其他" button + padding
+    const NORMAL_TAB = 160; // px, fixed width in normal mode
+    const TRAILING = 76; // px reserved for the trailing "关闭其他" button + padding
     const tabs = el.querySelectorAll<HTMLElement>('[data-tab-id]');
     const minTotal = tabs.length * NORMAL_TAB;
     setIsCompact(minTotal > el.clientWidth - TRAILING);
@@ -152,50 +151,54 @@ export function WorkspaceTabs() {
   // to the just-committed positions. `absolute: true` lets Flip take the
   // tabs out of flow during the tween so neighbours don't reflow as each
   // tab slides.
-  useGSAP(() => {
-    if (!stripRef.current) return;
-    const targets = stripRef.current.querySelectorAll<HTMLElement>('[data-tab-id]');
-    if (targets.length === 0) return;
-    const state = Flip.getState(targets);
-    return () => {
-      Flip.from(state, {
-        duration: 0.28,
-        ease: 'power2.out',
-        absolute: true,
-      });
-    };
-  }, { dependencies: [openTabs], scope: stripRef, revertOnUpdate: true });
+  useGSAP(
+    () => {
+      if (!stripRef.current) return;
+      const targets = stripRef.current.querySelectorAll<HTMLElement>('[data-tab-id]');
+      if (targets.length === 0) return;
+      const state = Flip.getState(targets);
+      return () => {
+        Flip.from(state, {
+          duration: 0.28,
+          ease: 'power2.out',
+          absolute: true,
+        });
+      };
+    },
+    { dependencies: [openTabs], scope: stripRef, revertOnUpdate: true },
+  );
 
   // Active-bar tween: track whichever tab is currently active. Re-runs
   // when either the active tab changes *or* the tab set changes (a tab
   // inserted before the active one shifts its target offsetLeft).
-  useGSAP(() => {
-    if (!stripRef.current || !barRef.current || !activeTabId) return;
-    const activeEl = stripRef.current.querySelector<HTMLElement>(
-      `[data-tab-id="${activeTabId}"]`,
-    );
-    if (!activeEl) return;
-    const x = activeEl.offsetLeft;
-    const width = activeEl.offsetWidth;
-    if (isFirstBarRun.current) {
-      // Snap on the very first paint of the strip.
-      gsap.set(barRef.current, { x, width });
-      isFirstBarRun.current = false;
-      return;
-    }
-    gsap.to(barRef.current, {
-      x,
-      width,
-      duration: 0.28,
-      ease: 'power2.out',
-    });
-  }, { dependencies: [activeTabId, openTabs] });
+  useGSAP(
+    () => {
+      if (!stripRef.current || !barRef.current || !activeTabId) return;
+      const activeEl = stripRef.current.querySelector<HTMLElement>(
+        `[data-tab-id="${activeTabId}"]`,
+      );
+      if (!activeEl) return;
+      const x = activeEl.offsetLeft;
+      const width = activeEl.offsetWidth;
+      if (isFirstBarRun.current) {
+        // Snap on the very first paint of the strip.
+        gsap.set(barRef.current, { x, width });
+        isFirstBarRun.current = false;
+        return;
+      }
+      gsap.to(barRef.current, {
+        x,
+        width,
+        duration: 0.28,
+        ease: 'power2.out',
+      });
+    },
+    { dependencies: [activeTabId, openTabs] },
+  );
 
   useEffect(() => {
     if (!activeTabId) return;
-    const el = stripRef.current?.querySelector<HTMLElement>(
-      `[data-tab-id="${activeTabId}"]`,
-    );
+    const el = stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`);
     if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [activeTabId, openTabs.length]);
 
@@ -278,10 +281,7 @@ export function WorkspaceTabs() {
             )}
             onClick={() => setActiveTab(d.tab.id)}
           >
-            <span
-              className="shrink-0"
-              style={{ color: active ? d.iconColor : undefined }}
-            >
+            <span className="shrink-0" style={{ color: active ? d.iconColor : undefined }}>
               {d.icon}
             </span>
             <span
@@ -292,10 +292,7 @@ export function WorkspaceTabs() {
               //  - compact: ~36px (≈ 2 Chinese chars). Hint hidden.
               // The full title remains available on hover via the
               // `title` attribute.
-              className={cn(
-                'min-w-0 truncate',
-                isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
-              )}
+              className={cn('min-w-0 truncate', isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1')}
               title={d.title}
             >
               {d.title}
@@ -633,7 +630,8 @@ function MenuItem({
         'flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors',
         'hover:bg-accent hover:text-foreground',
         'focus:bg-accent focus:text-foreground focus:outline-none',
-        disabled && 'cursor-not-allowed text-muted-foreground/50 hover:bg-transparent hover:text-muted-foreground/50',
+        disabled &&
+          'cursor-not-allowed text-muted-foreground/50 hover:bg-transparent hover:text-muted-foreground/50',
       )}
     >
       <span className="shrink-0 text-muted-foreground">{icon}</span>

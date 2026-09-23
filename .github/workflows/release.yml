@@ -25,7 +25,7 @@ jobs:
           - platform: ubuntu-22.04
             args: '--bundles deb,appimage'
           - platform: windows-latest
-            args: ''  # tauri.conf.json targets=["nsis"] 已经够
+            args: '' # tauri.conf.json targets=["nsis"] 已经够
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4

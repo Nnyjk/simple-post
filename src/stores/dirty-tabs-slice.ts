@@ -92,10 +92,7 @@ export interface DirtyTabsSliceActions {
 
 export type DirtyTabsSlice = DirtyTabsSliceState & DirtyTabsSliceActions;
 
-export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice> = (
-  set,
-  get,
-) => ({
+export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice> = (set, get) => ({
   // No pending close batch at boot. The DirtyCloseDialog component
   // only mounts when this becomes non-null.
   pendingDirtyClose: null,
@@ -137,9 +134,7 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
 
   requestCloseOthers: () => {
     const state = get();
-    const targetIds = state.openTabs
-      .filter((t) => t.id !== state.activeTabId)
-      .map((t) => t.id);
+    const targetIds = state.openTabs.filter((t) => t.id !== state.activeTabId).map((t) => t.id);
     if (targetIds.length === 0) return;
     const dirty = get().partitionDirty(targetIds);
     // Close the clean ones right away; queue the dirty for the dialog.

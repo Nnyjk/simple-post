@@ -22,17 +22,12 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { sendRequest, type SendInput } from './http';
 import type { RequestSettings } from '../stores/app-store';
-import type { AuthConfig, Environment, HttpMethod, RequestBody } from '../types/domain';
+import type { AuthConfig, Environment, HttpMethod } from '../types/domain';
 
 // ---------- server scaffolding ----------
 
@@ -108,11 +103,7 @@ async function mockBridgeFetch(
   init?: RequestInit,
 ): Promise<Response> {
   const urlStr =
-    typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.toString()
-        : input.url;
+    typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
   if (urlStr !== '/api/http/send') {
     // Anything else (shouldn't happen in this suite) — passthrough.
     return originalFetch(input as Request | string | URL, init);
@@ -264,9 +255,7 @@ before(async () => {
       else doReply();
     });
   });
-  await new Promise<void>((resolve) =>
-    server.listen(0, '127.0.0.1', () => resolve()),
-  );
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;
   // Install the bridge stub AFTER server listen so the upstream
@@ -299,7 +288,9 @@ function settings(overrides: Partial<RequestSettings> = {}): RequestSettings {
   };
 }
 
-function send(overrides: Partial<SendInput> = {}): Promise<Awaited<ReturnType<typeof sendRequest>>> {
+function send(
+  overrides: Partial<SendInput> = {},
+): Promise<Awaited<ReturnType<typeof sendRequest>>> {
   return sendRequest({
     method: 'GET',
     url: `${baseUrl}/api/x`,
@@ -745,7 +736,11 @@ describe('sendRequest: redirect', () => {
           headers: req.headers as Record<string, string>,
           body,
         });
-        reply(res, { status: 200, body: '{"followed":true}', headers: { 'content-type': 'application/json' } });
+        reply(res, {
+          status: 200,
+          body: '{"followed":true}',
+          headers: { 'content-type': 'application/json' },
+        });
       });
     }) as ReqListener);
 

@@ -1,18 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Plus,
-  Trash2,
-  Globe,
-  Braces,
-  Star,
-  Pencil,
-  Cloud,
-  Rocket,
-  TestTube,
-} from 'lucide-react';
+import { Plus, Trash2, Globe, Braces, Star, Pencil, Cloud, Rocket, TestTube } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn } from '@/lib/utils';
@@ -41,10 +30,7 @@ export interface EnvironmentSectionProps {
     patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>,
   ) => void;
   deleteBaseUrlDefinition: (projectId: string, defId: string) => void;
-  setDefaultBaseUrlDefinition: (
-    projectId: string,
-    defId: string | null,
-  ) => void;
+  setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => void;
 }
 
 const VAR_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -171,9 +157,7 @@ export function EnvironmentSection({
               environments={environments}
               activeId={activeId}
               onPick={setActiveId}
-              onRequestDelete={(env) =>
-                setDeletingEnv({ id: env.id, name: env.name })
-              }
+              onRequestDelete={(env) => setDeletingEnv({ id: env.id, name: env.name })}
               onAdd={handleNewEnv}
             />
 
@@ -372,20 +356,13 @@ function EnvBody({
 }: EnvBodyProps) {
   return (
     <div className="flex flex-col">
-      <EnvHeader
-        env={env}
-        onRename={(name) => updateEnvironment(env.id, { name })}
-      />
+      <EnvHeader env={env} onRename={(name) => updateEnvironment(env.id, { name })} />
 
       <GroupHeader
         icon={<Globe className="h-3.5 w-3.5" />}
         title="前置 URL"
         description="项目级 BaseUrl 定义 + 当前环境的覆盖值"
-        meta={
-          baseUrlDefinitions.length > 0
-            ? `${baseUrlDefinitions.length} 个服务`
-            : undefined
-        }
+        meta={baseUrlDefinitions.length > 0 ? `${baseUrlDefinitions.length} 个服务` : undefined}
       />
       <BaseUrlTable
         env={env}
@@ -410,11 +387,7 @@ function EnvBody({
             : undefined
         }
       />
-      <VariableTable
-        env={env}
-        setEnvironmentVar={setEnvironmentVar}
-        onAddVar={onAddVar}
-      />
+      <VariableTable env={env} setEnvironmentVar={setEnvironmentVar} onAddVar={onAddVar} />
     </div>
   );
 }
@@ -423,13 +396,7 @@ function EnvBody({
 // EnvHeader — env name (inline rename)
 // ============================================================================
 
-function EnvHeader({
-  env,
-  onRename,
-}: {
-  env: Environment;
-  onRename: (name: string) => void;
-}) {
+function EnvHeader({ env, onRename }: { env: Environment; onRename: (name: string) => void }) {
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
       <span
@@ -526,15 +493,8 @@ function BaseUrlTable({
   if (baseUrlDefinitions.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
-        <div className="text-[11px] text-muted-foreground">
-          项目还没有命名服务
-        </div>
-        <Button
-          variant="default"
-          size="sm"
-          className="h-7 gap-1 text-xs"
-          onClick={onAddBaseUrl}
-        >
+        <div className="text-[11px] text-muted-foreground">项目还没有命名服务</div>
+        <Button variant="default" size="sm" className="h-7 gap-1 text-xs" onClick={onAddBaseUrl}>
           <Plus className="h-3.5 w-3.5" />
           添加服务
         </Button>
@@ -620,9 +580,7 @@ function BaseUrlRow({
         <InlineNameCell
           value={def.name}
           placeholder="服务名"
-          onCommit={(v) =>
-            updateBaseUrlDefinition(projectId, def.id, { name: v })
-          }
+          onCommit={(v) => updateBaseUrlDefinition(projectId, def.id, { name: v })}
           className="text-xs font-medium"
         />
         {isDefault && (
@@ -636,9 +594,7 @@ function BaseUrlRow({
       <div className="min-w-0 flex-1">
         <Input
           value={url}
-          onChange={(e) =>
-            setEnvironmentBaseUrl(envId, def.id, e.target.value)
-          }
+          onChange={(e) => setEnvironmentBaseUrl(envId, def.id, e.target.value)}
           placeholder="http:// 或 https:// 起始的 URL"
           className="h-8 font-mono text-xs"
           spellCheck={false}
@@ -649,12 +605,7 @@ function BaseUrlRow({
       <div className="flex shrink-0 items-center gap-1">
         <DefaultToggle
           isDefault={isDefault}
-          onToggle={() =>
-            setDefaultBaseUrlDefinition(
-              projectId,
-              isDefault ? null : def.id,
-            )
-          }
+          onToggle={() => setDefaultBaseUrlDefinition(projectId, isDefault ? null : def.id)}
         />
         <Tooltip content="删除服务" side="bottom">
           <Button
@@ -671,18 +622,9 @@ function BaseUrlRow({
   );
 }
 
-function DefaultToggle({
-  isDefault,
-  onToggle,
-}: {
-  isDefault: boolean;
-  onToggle: () => void;
-}) {
+function DefaultToggle({ isDefault, onToggle }: { isDefault: boolean; onToggle: () => void }) {
   return (
-    <Tooltip
-      content={isDefault ? '项目默认服务' : '设为项目默认'}
-      side="top"
-    >
+    <Tooltip content={isDefault ? '项目默认服务' : '设为项目默认'} side="top">
       <button
         type="button"
         onClick={onToggle}
@@ -694,12 +636,7 @@ function DefaultToggle({
             : 'border-border bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
         )}
       >
-        <Star
-          className={cn(
-            'h-3.5 w-3.5',
-            isDefault ? 'fill-current' : 'fill-transparent',
-          )}
-        />
+        <Star className={cn('h-3.5 w-3.5', isDefault ? 'fill-current' : 'fill-transparent')} />
       </button>
     </Tooltip>
   );
@@ -722,12 +659,7 @@ function VariableTable({ env, setEnvironmentVar, onAddVar }: VariableTableProps)
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
         <div className="text-[11px] text-muted-foreground">暂无变量</div>
-        <Button
-          variant="default"
-          size="sm"
-          className="h-7 gap-1 text-xs"
-          onClick={onAddVar}
-        >
+        <Button variant="default" size="sm" className="h-7 gap-1 text-xs" onClick={onAddVar}>
           <Plus className="h-3.5 w-3.5" />
           添加变量
         </Button>
@@ -767,13 +699,7 @@ interface VariableRowProps {
   setEnvironmentVar: VariableTableProps['setEnvironmentVar'];
 }
 
-function VariableRow({
-  flush,
-  name,
-  value,
-  envId,
-  setEnvironmentVar,
-}: VariableRowProps) {
+function VariableRow({ flush, name, value, envId, setEnvironmentVar }: VariableRowProps) {
   return (
     <div
       className={cn(
@@ -795,9 +721,7 @@ function VariableRow({
           value={name}
           placeholder="变量名"
           validate={(v) =>
-            VAR_KEY_REGEX.test(v.trim())
-              ? null
-              : '变量名仅允许字母数字下划线,且不能以数字开头'
+            VAR_KEY_REGEX.test(v.trim()) ? null : '变量名仅允许字母数字下划线,且不能以数字开头'
           }
           onCommit={(newKey) => {
             if (!newKey || newKey === name) return;
@@ -929,9 +853,7 @@ function InlineNameCell({
         }}
         className="h-7 font-mono text-xs"
       />
-      {error && (
-        <div className="px-1 text-[10px] text-destructive">{error}</div>
-      )}
+      {error && <div className="px-1 text-[10px] text-destructive">{error}</div>}
     </div>
   );
 }

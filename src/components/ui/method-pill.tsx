@@ -64,8 +64,7 @@ export function MethodPill({
   label,
   title,
 }: MethodPillProps) {
-  const text =
-    label ?? (size === 'xs' ? method.charAt(0).toUpperCase() : method);
+  const text = label ?? (size === 'xs' ? method.charAt(0).toUpperCase() : method);
 
   // The solid variant uses the colour directly as background with white
   // text. The tinted variant uses the colour at 15% alpha as backdrop

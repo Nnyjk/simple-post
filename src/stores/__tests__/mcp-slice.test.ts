@@ -30,10 +30,7 @@ import {
   type ShimGlobals,
 } from './_browser-shim';
 
-import {
-  createMcpSlice,
-  type McpSlice,
-} from '../mcp-slice';
+import { createMcpSlice, type McpSlice } from '../mcp-slice';
 import type { McpUiState, RestartResult } from '@/lib/mcp-types';
 
 // ---------- harness ----------
@@ -134,11 +131,7 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
       // fresh timer id.
       shim.setVisibility('visible');
       assert.notEqual(mcp._mcpTimer, null, 'timer restarted on visible');
-      assert.notEqual(
-        mcp._mcpTimer,
-        initialTimer,
-        'visible branch allocates a new timer id',
-      );
+      assert.notEqual(mcp._mcpTimer, initialTimer, 'visible branch allocates a new timer id');
       // Across the round-trip (start → hidden → visible) we should
       // have allocated exactly two timers.
       assert.equal(counter.count, 2, 'two setInterval calls total');
@@ -172,11 +165,7 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
     });
     await mcp.refreshMcpStatus();
     assert.equal(mcp.mcpStatus.pid, previousPid, 'pid unchanged on failure');
-    assert.equal(
-      mcp.mcpStatus.uptimeMs,
-      previousUptime,
-      'uptime unchanged on failure',
-    );
+    assert.equal(mcp.mcpStatus.uptimeMs, previousUptime, 'uptime unchanged on failure');
   });
 });
 
@@ -203,11 +192,7 @@ describe('mcp-slice: restartMcp — T-9 failure recovery', () => {
     const inflight = mcp.restartMcp();
     // The optimistic update is applied synchronously, before the
     // IPC round-trip resolves.
-    assert.equal(
-      mcp.mcpStatus!.status,
-      'restarting',
-      'status optimistically flipped before await',
-    );
+    assert.equal(mcp.mcpStatus!.status, 'restarting', 'status optimistically flipped before await');
     await inflight;
     // After the daemon-restart succeeds and refreshMcpStatus pulls the
     // fresh snapshot, status should be the polled `running`.
@@ -230,15 +215,7 @@ describe('mcp-slice: restartMcp — T-9 failure recovery', () => {
       /daemon down/,
       'restartMcp should re-throw the original error',
     );
-    assert.equal(
-      mcp.mcpStatus!.status,
-      'crashed',
-      'failure path flips status back to crashed',
-    );
-    assert.equal(
-      mcp.mcpStatus!.lastError,
-      'daemon down',
-      'lastError captures the thrown message',
-    );
+    assert.equal(mcp.mcpStatus!.status, 'crashed', 'failure path flips status back to crashed');
+    assert.equal(mcp.mcpStatus!.lastError, 'daemon down', 'lastError captures the thrown message');
   });
 });

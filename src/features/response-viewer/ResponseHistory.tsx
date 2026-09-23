@@ -45,10 +45,7 @@ export function ResponseHistory() {
         data-testid="response-history-toggle"
       >
         <ChevronDown
-          className={cn(
-            'h-3.5 w-3.5 transition-transform',
-            open ? 'rotate-0' : '-rotate-90',
-          )}
+          className={cn('h-3.5 w-3.5 transition-transform', open ? 'rotate-0' : '-rotate-90')}
         />
         <History className="h-3.5 w-3.5" />
         <span className="font-medium">历史</span>

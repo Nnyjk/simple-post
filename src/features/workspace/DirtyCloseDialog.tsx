@@ -84,9 +84,7 @@ export function DirtyCloseDialog() {
   // (the title already names the tab). Keeps the body visually useful
   // without being repetitive.
   const currentEndpoint =
-    current.kindLabel === '接口'
-      ? endpoints.find((e) => e.id === current.id) ?? null
-      : null;
+    current.kindLabel === '接口' ? (endpoints.find((e) => e.id === current.id) ?? null) : null;
 
   return (
     <Dialog
@@ -150,9 +148,7 @@ export function DirtyCloseDialog() {
             <span>选择「保存」写入当前接口草稿,「直接关闭」丢弃。</span>
           </>
         ) : (
-          <span>
-            选择「保存」写入当前{current.kindLabel}修改,「直接关闭」丢弃。
-          </span>
+          <span>选择「保存」写入当前{current.kindLabel}修改,「直接关闭」丢弃。</span>
         )}
       </div>
     </Dialog>

@@ -70,9 +70,12 @@ export function McpStatusPanel() {
       // mcp-slice doc-comment promises (no-op when no snapshot yet,
       // short-circuit when the value hasn't changed).
       const lastError = e.payload?.lastError ?? null;
-      void useAppStore.getState().refreshMcpStatus().then(() => {
-        useAppStore.getState().recordLastError(lastError);
-      });
+      void useAppStore
+        .getState()
+        .refreshMcpStatus()
+        .then(() => {
+          useAppStore.getState().recordLastError(lastError);
+        });
     })
       .then((u) => {
         if (cancelled) {
@@ -192,7 +195,9 @@ export function StateSummary({ state }: { state: McpUiState | null }) {
         </>
       )}
       <span className="text-muted-foreground">
-        已处理 <span className="font-mono text-foreground">{state.requestsHandled.toLocaleString()}</span> 次请求
+        已处理{' '}
+        <span className="font-mono text-foreground">{state.requestsHandled.toLocaleString()}</span>{' '}
+        次请求
       </span>
     </span>
   );

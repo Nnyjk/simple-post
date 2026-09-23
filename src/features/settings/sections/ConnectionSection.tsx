@@ -5,10 +5,7 @@ import { SettingsCategory } from '../SettingsCategory';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import {
-  McpStatusPanel,
-  StateSummary,
-} from './McpStatusPanel';
+import { McpStatusPanel, StateSummary } from './McpStatusPanel';
 import { CopyConfigTile } from './CopyConfigTile';
 import { AgentPermissionsTable } from './AgentPermissionsTable';
 import { DaemonRestartDialog } from './DaemonRestartDialog';
@@ -92,9 +89,7 @@ export function ConnectionSection() {
     let cancelled = false;
     (async () => {
       try {
-        const policy = await invokeCmd<{ policy: CapabilityPolicy }>(
-          COMMANDS.mcpCapabilityGet,
-        );
+        const policy = await invokeCmd<{ policy: CapabilityPolicy }>(COMMANDS.mcpCapabilityGet);
         if (cancelled) return;
         setCapability(policy.policy);
         const tools = await invokeCmd<string[]>(COMMANDS.mcpCapabilityListTools);
@@ -226,10 +221,10 @@ export function ConnectionSection() {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">
-                  simple-post-mcp
-                </span>
-                <Badge variant="muted" className="font-mono">stdio</Badge>
+                <span className="text-sm font-medium text-foreground">simple-post-mcp</span>
+                <Badge variant="muted" className="font-mono">
+                  stdio
+                </Badge>
               </div>
               <div className="mt-1 text-[11px]">
                 <StateSummary state={mcpStatus} />
@@ -263,7 +258,9 @@ export function ConnectionSection() {
                 默认 stdio，无网络监听面 — 进程级安全
               </div>
             </div>
-            <Badge variant="muted" className="shrink-0 font-mono">JSON-RPC 2.0</Badge>
+            <Badge variant="muted" className="shrink-0 font-mono">
+              JSON-RPC 2.0
+            </Badge>
           </div>
         </div>
       </SettingsCategory>
@@ -346,7 +343,7 @@ export function ConnectionSection() {
         hideDivider
       >
         <pre className="m-3 max-h-40 overflow-auto rounded-md border border-border/70 bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-foreground/90">
-{tools.length > 0 ? tools.join('\n') : '(empty — daemon 未就绪)'}
+          {tools.length > 0 ? tools.join('\n') : '(empty — daemon 未就绪)'}
         </pre>
         <div className="m-3 mt-0 flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">

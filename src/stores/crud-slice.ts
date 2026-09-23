@@ -46,11 +46,18 @@ export interface CrudSliceState {
 /** Action portion owned by the CRUD slice. */
 export interface CrudSliceActions {
   // actions: data — CRUD (async — all hit Tauri commands, mirror to local state)
-  addProject: (name: string, opts?: { description?: string; baseUrl?: string; color?: string }) => Promise<string | null>;
+  addProject: (
+    name: string,
+    opts?: { description?: string; baseUrl?: string; color?: string },
+  ) => Promise<string | null>;
   updateProject: (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
 
-  addModule: (projectId: string, name: string, opts?: { description?: string }) => Promise<string | null>;
+  addModule: (
+    projectId: string,
+    name: string,
+    opts?: { description?: string },
+  ) => Promise<string | null>;
   updateModule: (id: string, patch: Partial<Omit<Module, 'id' | 'projectId'>>) => Promise<void>;
   deleteModule: (id: string) => Promise<void>;
 
@@ -59,7 +66,10 @@ export interface CrudSliceActions {
     name: string,
     opts?: { description?: string; parentCollectionId?: string | null },
   ) => Promise<string | null>;
-  updateCollection: (id: string, patch: Partial<Omit<Collection, 'id' | 'moduleId' | 'parentCollectionId'>>) => Promise<void>;
+  updateCollection: (
+    id: string,
+    patch: Partial<Omit<Collection, 'id' | 'moduleId' | 'parentCollectionId'>>,
+  ) => Promise<void>;
   deleteCollection: (id: string) => Promise<void>;
 
   addEndpoint: (
@@ -104,7 +114,11 @@ export interface CrudSliceActions {
 
   // actions: baseUrl definitions (project-scoped)
   addBaseUrlDefinition: (projectId: string, name: string) => string;
-  updateBaseUrlDefinition: (projectId: string, defId: string, patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>) => Promise<void>;
+  updateBaseUrlDefinition: (
+    projectId: string,
+    defId: string,
+    patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>,
+  ) => Promise<void>;
   deleteBaseUrlDefinition: (projectId: string, defId: string) => Promise<void>;
   setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => Promise<void>;
 }
@@ -138,7 +152,9 @@ function reorderByIndex<T extends { sortOrder: number }>(
  * `sortOrder`. Used by both the renderer (to flatten the tree) and the
  * store (to find siblings when a move happens).
  */
-function indexCollectionChildren(collections: readonly Collection[]): Map<string | null, Collection[]> {
+function indexCollectionChildren(
+  collections: readonly Collection[],
+): Map<string | null, Collection[]> {
   const byParent = new Map<string | null, Collection[]>();
   for (const c of collections) {
     const key = c.parentCollectionId;
@@ -203,7 +219,12 @@ function idsToCloseForDelete(
     endpointIds.push(
       ...state.endpoints.filter((e) => collectionIds.includes(e.collectionId)).map((e) => e.id),
     );
-    return { project: [targetId], module: moduleIds, collection: collectionIds, endpoint: endpointIds };
+    return {
+      project: [targetId],
+      module: moduleIds,
+      collection: collectionIds,
+      endpoint: endpointIds,
+    };
   }
 
   if (scope === 'module') {
@@ -259,8 +280,7 @@ function filterTabsAfterRemoval(
   if (activeId !== null && !nextTabs.some((t) => t.id === activeId)) {
     const oldIdx = tabs.findIndex((t) => t.id === activeId);
     // Prefer the previous tab (left neighbor), fall back to next, then null.
-    const fallback =
-      tabs[oldIdx - 1] ?? tabs[oldIdx + 1] ?? nextTabs[nextTabs.length - 1] ?? null;
+    const fallback = tabs[oldIdx - 1] ?? tabs[oldIdx + 1] ?? nextTabs[nextTabs.length - 1] ?? null;
     nextActive = fallback ? fallback.id : null;
   }
   return { tabs: nextTabs, activeId: nextActive, changed: true };
@@ -345,7 +365,10 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
         environments: s.environments.filter((env) => env.projectId !== id),
         responseHistory: nextHistory,
         responseExamples: nextExamples,
-        activeProjectId: s.activeProjectId === id ? (s.projects.find((p) => p.id !== id)?.id ?? s.activeProjectId) : s.activeProjectId,
+        activeProjectId:
+          s.activeProjectId === id
+            ? (s.projects.find((p) => p.id !== id)?.id ?? s.activeProjectId)
+            : s.activeProjectId,
         activeEndpointId: nextActiveEndpointId,
         openTabs: tabs.tabs,
         activeTabId: tabs.activeId,
@@ -484,9 +507,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       activeEndpointId: get().activeEndpointId,
     };
     set((s) => {
-      const droppedEndpointIds = s.endpoints
-        .filter((e) => e.collectionId === id)
-        .map((e) => e.id);
+      const droppedEndpointIds = s.endpoints.filter((e) => e.collectionId === id).map((e) => e.id);
       const nextHistory = { ...s.responseHistory };
       const nextExamples = { ...s.responseExamples };
       for (const eid of droppedEndpointIds) {
@@ -678,8 +699,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
         if (!targetCol) return {};
         targetModuleId = targetCol.moduleId;
       }
-      const targetParentId =
-        target.parentKind === 'module' ? null : target.parentId;
+      const targetParentId = target.parentKind === 'module' ? null : target.parentId;
 
       // Cycle guard: a collection cannot be moved under itself or any
       // descendant. Build the descendant set for every source once.
@@ -782,8 +802,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
 
       // Project-boundary guard: every source endpoint must be in a
       // collection whose module is in the same project as the target.
-      const targetProjectId = s.modules.find((m) => m.id === targetCol.moduleId)
-        ?.projectId;
+      const targetProjectId = s.modules.find((m) => m.id === targetCol.moduleId)?.projectId;
       if (!targetProjectId) return {};
       for (const eid of endpointIds) {
         const src = s.endpoints.find((e) => e.id === eid);
@@ -797,9 +816,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       // The destination siblings: everything in targetCol except
       // the moved ones.
       const destSiblings = s.endpoints
-        .filter(
-          (e) => e.collectionId === target.collectionId && !idSet.has(e.id),
-        )
+        .filter((e) => e.collectionId === target.collectionId && !idSet.has(e.id))
         .sort((a, b) => a.sortOrder - b.sortOrder);
 
       const movedRows = endpointIds
@@ -920,8 +937,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
         ),
         // If the active environment was the one we just deleted, fall
         // back to the next sibling (or the project default).
-        activeEnvironmentId:
-          s.activeEnvironmentId === envId ? '' : s.activeEnvironmentId,
+        activeEnvironmentId: s.activeEnvironmentId === envId ? '' : s.activeEnvironmentId,
       };
     });
     try {
@@ -975,22 +991,21 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
           // Convenience: when the project had no defs yet, the newly
           // added one becomes the default — otherwise the picker
           // would have nothing to show as "项目默认".
-          defaultBaseUrlDefinitionId: wasEmpty
-            ? defId
-            : p.defaultBaseUrlDefinitionId,
+          defaultBaseUrlDefinitionId: wasEmpty ? defId : p.defaultBaseUrlDefinitionId,
         };
       }),
     }));
-    invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, { projectId, name: name.trim() || '未命名' })
+    invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, {
+      projectId,
+      name: name.trim() || '未命名',
+    })
       .then((persisted) => {
         set((s) => ({
           projects: s.projects.map((p) => {
             if (p.id !== projectId) return p;
             return {
               ...p,
-              baseUrlDefinitions: p.baseUrlDefinitions.map((d) =>
-                d.id === defId ? persisted : d,
-              ),
+              baseUrlDefinitions: p.baseUrlDefinitions.map((d) => (d.id === defId ? persisted : d)),
             };
           }),
         }));
@@ -1049,9 +1064,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
             ...p,
             baseUrlDefinitions: p.baseUrlDefinitions.filter((d) => d.id !== defId),
             defaultBaseUrlDefinitionId:
-              p.defaultBaseUrlDefinitionId === defId
-                ? null
-                : p.defaultBaseUrlDefinitionId,
+              p.defaultBaseUrlDefinitionId === defId ? null : p.defaultBaseUrlDefinitionId,
           };
         }),
         endpoints: s.endpoints.map((e) => {

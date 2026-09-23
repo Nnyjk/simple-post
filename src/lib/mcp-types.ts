@@ -17,12 +17,7 @@
  * driven from `mcp_status`. Unknown values fall back to `'stopped'`.
  */
 export type McpRuntimeStatus =
-  | 'stopped'
-  | 'starting'
-  | 'running'
-  | 'restarting'
-  | 'crashed'
-  | 'unhealthy';
+  'stopped' | 'starting' | 'running' | 'restarting' | 'crashed' | 'unhealthy';
 
 /**
  * UI projection of `mcp_status`. Fields the renderer cares about:

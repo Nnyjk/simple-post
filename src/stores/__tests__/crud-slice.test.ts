@@ -163,8 +163,8 @@ describe('crud-slice: updateEndpoint — T-2 optimistic + rollback', () => {
     // failure. We accept either channel since the slice uses both
     // `console.warn` (for 'poll' style) and `console.error` (for
     // writes) — see CRUD slice header.
-    const seenFailure = warnings.some((w) =>
-      /sqlite.*disk I.O. error/i.test(w) || /Error: sqlite: disk I\/O error/i.test(w),
+    const seenFailure = warnings.some(
+      (w) => /sqlite.*disk I.O. error/i.test(w) || /Error: sqlite: disk I\/O error/i.test(w),
     );
     assert.ok(
       seenFailure,
@@ -177,9 +177,13 @@ describe('crud-slice: updateEndpoint — T-2 optimistic + rollback', () => {
     // would be too strong because the slice stores the optimistic
     // object back into the array, then replaces it with `prev` on
     // rollback — so what we should see IS `prev`.
-    assert.strictEqual(after, beforeUpdate, 'rolled-back endpoint reuses the prev snapshot reference');
+    assert.strictEqual(
+      after,
+      beforeUpdate,
+      'rolled-back endpoint reuses the prev snapshot reference',
+    );
     void before; // (kept for documentation; tested implicitly via the
-                 // reference equality above — the rollback puts the
-                 // original `prev` straight back into the array.)
+    // reference equality above — the rollback puts the
+    // original `prev` straight back into the array.)
   });
 });

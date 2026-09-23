@@ -37,14 +37,9 @@ export interface ResolvedBaseUrl {
  * variables) — when no env is selected, baseUrl resolves to ''.
  */
 export function resolveEndpointBaseUrl(
-  endpoint: Pick<
-    Endpoint,
-    'environmentId' | 'baseUrlDefinitionId' | 'baseUrlOverride'
-  >,
+  endpoint: Pick<Endpoint, 'environmentId' | 'baseUrlDefinitionId' | 'baseUrlOverride'>,
   env: Pick<Environment, 'baseUrls'> | undefined,
-  project:
-    | Pick<Project, 'baseUrlDefinitions' | 'defaultBaseUrlDefinitionId'>
-    | undefined,
+  project: Pick<Project, 'baseUrlDefinitions' | 'defaultBaseUrlDefinitionId'> | undefined,
 ): ResolvedBaseUrl {
   if (endpoint.baseUrlOverride && endpoint.baseUrlOverride.length > 0) {
     return {
@@ -54,8 +49,7 @@ export function resolveEndpointBaseUrl(
       definitionName: null,
     };
   }
-  const defId =
-    endpoint.baseUrlDefinitionId ?? project?.defaultBaseUrlDefinitionId ?? null;
+  const defId = endpoint.baseUrlDefinitionId ?? project?.defaultBaseUrlDefinitionId ?? null;
   if (defId && project) {
     const def = project.baseUrlDefinitions.find((d) => d.id === defId);
     if (def) {
@@ -63,10 +57,7 @@ export function resolveEndpointBaseUrl(
       if (url) {
         return {
           baseUrl: url,
-          source:
-            endpoint.baseUrlDefinitionId === defId
-              ? 'definition'
-              : 'default',
+          source: endpoint.baseUrlDefinitionId === defId ? 'definition' : 'default',
           definitionId: def.id,
           definitionName: def.name,
         };
@@ -116,17 +107,14 @@ export function resolveVars(
   // `Environment` carries the variables under `.variables`; a raw record
   // is the map itself. Discriminate via `Environment.baseUrls` (a nested
   // object) — a plain Record<string,string> would yield `string` there.
-  const map: Record<string, string> | undefined =
-    isEnvironment(vars) ? vars.variables : vars;
+  const map: Record<string, string> | undefined = isEnvironment(vars) ? vars.variables : vars;
   return input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     const v = map?.[key];
     return v ?? `{{${key}}}`;
   });
 }
 
-function isEnvironment(
-  v: Environment | Record<string, string> | undefined,
-): v is Environment {
+function isEnvironment(v: Environment | Record<string, string> | undefined): v is Environment {
   return (
     !!v &&
     typeof v === 'object' &&

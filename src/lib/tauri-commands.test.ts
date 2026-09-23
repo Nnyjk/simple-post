@@ -42,12 +42,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-import {
-  COMMANDS,
-  IS_TAURI_SHELL,
-  TauriCommand,
-  invokeCmd,
-} from './tauri-commands';
+import { COMMANDS, IS_TAURI_SHELL, TauriCommand, invokeCmd } from './tauri-commands';
 
 // ---------------------------------------------------------------------------
 // Fetch mock plumbing.
@@ -65,21 +60,16 @@ interface CapturedCall {
 let calls: CapturedCall[] = [];
 const originalFetch = globalThis.fetch;
 
-function installFetchMock(
-  respondWith: { json?: unknown; status?: number } = {},
-): void {
+function installFetchMock(respondWith: { json?: unknown; status?: number } = {}): void {
   calls = [];
   const status = respondWith.status ?? 200;
   const json = respondWith.json;
-  globalThis.fetch = (async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ): Promise<Response> => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
     let bodyStr: string | undefined;
     if (typeof init?.body === 'string') bodyStr = init.body;
     const contentType = init?.headers
-      ? new Headers(init.headers).get('content-type') ?? undefined
+      ? (new Headers(init.headers).get('content-type') ?? undefined)
       : undefined;
     calls.push({
       url,
@@ -112,9 +102,10 @@ function restoreFetchMock(): void {
  * on `globalThis` before the module is imported so the module-load-time
  * detection sees the right shape.
  */
-function readIsTauriShellInChild(
-  windowShim?: Record<string, unknown>,
-): { value: boolean; stderr: string } {
+function readIsTauriShellInChild(windowShim?: Record<string, unknown>): {
+  value: boolean;
+  stderr: string;
+} {
   const setup = windowShim
     ? `globalThis.window = ${JSON.stringify(windowShim)};`
     : `delete globalThis.window;`;
@@ -140,9 +131,7 @@ function readIsTauriShellInChild(
     { encoding: 'utf-8' },
   );
   if (result.status !== 0) {
-    throw new Error(
-      `child failed (status=${result.status}): ${result.stderr}`,
-    );
+    throw new Error(`child failed (status=${result.status}): ${result.stderr}`);
   }
   return { value: JSON.parse(result.stdout.trim()), stderr: result.stderr };
 }
@@ -503,7 +492,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
 
   it('mcpAutoStartGet performs GET and plucks mcp.auto_start from the bulk response', async () => {
     installFetchMock({
-      json: { 'mcp.auto_start': true, 'request_settings': { timeoutMs: 1 } },
+      json: { 'mcp.auto_start': true, request_settings: { timeoutMs: 1 } },
       status: 200,
     });
     const v = await invokeCmd<boolean>(COMMANDS.mcpAutoStartGet);
@@ -563,14 +552,8 @@ describe('invokeCmd (web shape) — error path', () => {
     // unmapped command (TypeScript would otherwise flag it at the
     // call site).
     const fakeCmd = 'this_command_does_not_exist' as unknown as TauriCommand;
-    await assert.rejects(
-      () => invokeCmd(fakeCmd),
-      /src\/lib\/tauri-commands\.ts/,
-    );
-    await assert.rejects(
-      () => invokeCmd(fakeCmd),
-      /src-tauri\/src\/web_api\.rs/,
-    );
+    await assert.rejects(() => invokeCmd(fakeCmd), /src\/lib\/tauri-commands\.ts/);
+    await assert.rejects(() => invokeCmd(fakeCmd), /src-tauri\/src\/web_api\.rs/);
     // Fetch must NOT have been called — the throw must short-circuit
     // before any network activity, otherwise the error from a 404
     // would be misleading.

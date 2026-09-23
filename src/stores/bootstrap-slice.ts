@@ -15,13 +15,7 @@
  * This slice is read-only besides the expansion toggles.
  */
 import type { StateCreator } from 'zustand';
-import type {
-  Project,
-  Module,
-  Collection,
-  Endpoint,
-  Environment,
-} from '@/types/domain';
+import type { Project, Module, Collection, Endpoint, Environment } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from './app-store';
 
@@ -65,10 +59,7 @@ export interface BootstrapSliceActions {
 
 export type BootstrapSlice = BootstrapSliceState & BootstrapSliceActions;
 
-export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice> = (
-  set,
-  get,
-) => ({
+export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice> = (set, get) => ({
   // v0.1 MCP rollout — empty at boot; `bootstrap()` populates from the
   // daemon (which reads SQLite). The selectors and consumers all tolerate
   // an empty list because `loaded: false` triggers a loading state in the
@@ -159,11 +150,10 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
 
     // Pick a sensible default selection now that the data is in.
     const firstProject = projects[0];
-    const firstProjectEnv =
-      firstProject
-        ? environments.find((e) => e.projectId === firstProject.id && e.isActive) ??
-          environments.find((e) => e.projectId === firstProject.id)
-        : undefined;
+    const firstProjectEnv = firstProject
+      ? (environments.find((e) => e.projectId === firstProject.id && e.isActive) ??
+        environments.find((e) => e.projectId === firstProject.id))
+      : undefined;
     const firstEndpoint = endpoints[0];
 
     set({

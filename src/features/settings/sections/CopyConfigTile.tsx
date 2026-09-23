@@ -20,12 +20,7 @@ export interface CopyConfigTileProps {
  * button swaps to a success / error state for `RESET_DELAY_MS`, tracked in a
  * ref so unmount during the window won't leak.
  */
-export function CopyConfigTile({
-  icon,
-  name,
-  description,
-  configJson,
-}: CopyConfigTileProps) {
+export function CopyConfigTile({ icon, name, description, configJson }: CopyConfigTileProps) {
   const [copyState, setCopyState] = useState<CopyState>('idle');
   const timerRef = useRef<number | null>(null);
 
@@ -82,13 +77,16 @@ export function CopyConfigTile({
       </div>
       <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
       <pre className="mt-2 max-h-32 overflow-auto rounded bg-muted/50 p-2 font-mono text-[10px] leading-relaxed text-foreground/90">
-{configJson}
+        {configJson}
       </pre>
       <Button
         variant={copyState === 'success' ? 'secondary' : 'outline'}
         size="sm"
         onClick={handleCopy}
-        className={cn('mt-2 w-full gap-1.5', copyState === 'error' && 'border-destructive text-destructive')}
+        className={cn(
+          'mt-2 w-full gap-1.5',
+          copyState === 'error' && 'border-destructive text-destructive',
+        )}
       >
         {copyState === 'success' ? (
           <>

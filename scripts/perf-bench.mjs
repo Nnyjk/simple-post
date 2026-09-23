@@ -15,13 +15,13 @@
 // A second mode `--route /api/projects` lets you bench the CRUD path;
 // supply SIMPLE_POST_WEB_PASSWORD if your binary is locked.
 
-import { performance } from "node:perf_hooks";
-import process from "node:process";
+import { performance } from 'node:perf_hooks';
+import process from 'node:process';
 
 const args = parseArgs(process.argv.slice(2));
-const TARGET = (args.target ?? "http://127.0.0.1:4173").replace(/\/+$/, "");
-const ROUTE = args.route ?? "/api/healthz";
-const N = Number.parseInt(args.n ?? "200", 10);
+const TARGET = (args.target ?? 'http://127.0.0.1:4173').replace(/\/+$/, '');
+const ROUTE = args.route ?? '/api/healthz';
+const N = Number.parseInt(args.n ?? '200', 10);
 const ASSERT = Boolean(args.assert);
 const PASSWORD = args.password ?? process.env.SIMPLE_POST_WEB_PASSWORD;
 
@@ -36,7 +36,9 @@ console.log(`[perf-bench] target=${TARGET} route=${ROUTE} n=${N} assert=${ASSERT
 for (let i = 0; i < 3; i++) {
   try {
     await fetch(`${TARGET}${ROUTE}`, { headers });
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ----- Main loop ------------------------------------------------------------
@@ -50,7 +52,9 @@ for (let i = 0; i < N; i++) {
     status = r.status;
     // Drain body so connection can be pooled / reused.
     await r.arrayBuffer();
-  } catch { /* transport error */ }
+  } catch {
+    /* transport error */
+  }
   const t1 = performance.now();
   samples.push(t1 - t0);
   if (status === 0 || status >= 500) failures++;
@@ -72,7 +76,9 @@ const max = samples[samples.length - 1];
 const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
 
 const fmt = (ms) => ms.toFixed(2).padStart(7);
-console.log(`[perf-bench] min=${fmt(min)}ms  p50=${fmt(p50)}ms  p95=${fmt(p95)}ms  p99=${fmt(p99)}ms  max=${fmt(max)}ms  mean=${fmt(mean)}ms`);
+console.log(
+  `[perf-bench] min=${fmt(min)}ms  p50=${fmt(p50)}ms  p95=${fmt(p95)}ms  p99=${fmt(p99)}ms  max=${fmt(max)}ms  mean=${fmt(mean)}ms`,
+);
 
 if (ASSERT) {
   const BUDGET_P95_MS = 200;
@@ -88,14 +94,14 @@ function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a.startsWith("--")) {
+    if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next && !next.startsWith("--")) {
+      if (next && !next.startsWith('--')) {
         out[key] = next;
         i++;
       } else {
-        out[key] = "true";
+        out[key] = 'true';
       }
     }
   }

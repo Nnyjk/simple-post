@@ -37,8 +37,7 @@ export function WelcomeScreen() {
   // re-mounts).
   useGSAP(
     () => {
-      const targets =
-        containerRef.current?.querySelectorAll<HTMLElement>('[data-welcome-stagger]');
+      const targets = containerRef.current?.querySelectorAll<HTMLElement>('[data-welcome-stagger]');
       if (!targets || targets.length === 0) return;
       gsap.from(targets, {
         opacity: 0,
@@ -76,10 +75,7 @@ export function WelcomeScreen() {
           <h1 data-welcome-stagger className="text-2xl font-semibold tracking-tight">
             简单、强大的 API 调试工作台
           </h1>
-          <p
-            data-welcome-stagger
-            className="mx-auto max-w-md text-sm text-muted-foreground"
-          >
+          <p data-welcome-stagger className="mx-auto max-w-md text-sm text-muted-foreground">
             组织项目 · 编排接口 · 发送请求 · 内置 MCP 让 AI 直接驱动你的工作区。
           </p>
         </div>

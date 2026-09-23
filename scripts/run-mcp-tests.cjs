@@ -14,19 +14,21 @@
 // wired up here — it will return as `test:mcp-proxy` once commit 4
 // lands.
 
-const fs = require("fs");
-const path = require("path");
-const { spawn } = require("node:child_process");
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('node:child_process');
 
-const ROOT = path.resolve(__dirname, "..");
-const DEBUG_DIR = path.join(ROOT, "src-tauri", "target", "debug");
-const exeName = process.platform === "win32" ? "simple-post.exe" : "simple-post";
+const ROOT = path.resolve(__dirname, '..');
+const DEBUG_DIR = path.join(ROOT, 'src-tauri', 'target', 'debug');
+const exeName = process.platform === 'win32' ? 'simple-post.exe' : 'simple-post';
 const daemonBin = path.join(DEBUG_DIR, exeName);
 
 if (!fs.existsSync(daemonBin)) {
-  console.warn("[build:tests] MCP integration tests skipped:");
+  console.warn('[build:tests] MCP integration tests skipped:');
   console.warn(`[build:tests]   missing ${daemonBin}`);
-  console.warn("[build:tests] run `cargo build --manifest-path src-tauri/Cargo.toml --bins` to enable them.");
+  console.warn(
+    '[build:tests] run `cargo build --manifest-path src-tauri/Cargo.toml --bins` to enable them.',
+  );
   process.exit(0);
 }
 
@@ -38,56 +40,69 @@ const WALL_MS = 80_000;
 // Run one integration test as an async spawn, piping its output live AND
 // retaining the last `ctx.stderrTail` lines for the post-mortem on exit. Resolves
 // to { status, signal, stderr, timedOut }.
-const run = (script, label) => new Promise((resolveRun) => {
-  console.log(`\n[build:tests] === ${label} ===`);
-  const child = spawn(process.execPath, [script], {
-    // We deliberately do NOT use `stdio: "inherit"` here: the previous
-    // wrapper inherited the parent's stdio, so on Windows the spawnSync
-    // return could race ahead of buffered stderr writes — losing the
-    // signal needed to diagnose failures. Pipe both streams instead, mirror
-    // them live, and keep the last 20 lines for the post-mortem.
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stderr = "";
-  let out = "";
-  child.stdout.on("data", (b) => { out += b.toString(); process.stdout.write(b); });
-  child.stderr.on("data", (b) => { stderr += b.toString(); process.stderr.write(b); });
+const run = (script, label) =>
+  new Promise((resolveRun) => {
+    console.log(`\n[build:tests] === ${label} ===`);
+    const child = spawn(process.execPath, [script], {
+      // We deliberately do NOT use `stdio: "inherit"` here: the previous
+      // wrapper inherited the parent's stdio, so on Windows the spawnSync
+      // return could race ahead of buffered stderr writes — losing the
+      // signal needed to diagnose failures. Pipe both streams instead, mirror
+      // them live, and keep the last 20 lines for the post-mortem.
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stdout.on('data', (b) => {
+      process.stdout.write(b);
+    });
+    child.stderr.on('data', (b) => {
+      stderr += b.toString();
+      process.stderr.write(b);
+    });
 
-  let settled = false;
-  const finish = (payload) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(wallClock);
-    resolveRun(payload);
-  };
+    let settled = false;
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(wallClock);
+      resolveRun(payload);
+    };
 
-  const wallClock = setTimeout(() => {
-    try { child.kill("SIGKILL"); } catch { /* already dead */ }
-    console.error(`[build:tests] ${label} exceeded ${WALL_MS / 1000}s wall-clock; sending SIGKILL`);
-    // Give the kill a brief grace window for the OS to settle, then resolve
-    // with status 124 (the conventional `timeout` exit code) regardless of
-    // whether the child has actually exited yet — the wrapper must never
-    // hang forever.
-    setTimeout(() => finish({ status: 124, signal: null, stderr, timedOut: true }), 1_000);
-  }, WALL_MS);
+    const wallClock = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* already dead */
+      }
+      console.error(
+        `[build:tests] ${label} exceeded ${WALL_MS / 1000}s wall-clock; sending SIGKILL`,
+      );
+      // Give the kill a brief grace window for the OS to settle, then resolve
+      // with status 124 (the conventional `timeout` exit code) regardless of
+      // whether the child has actually exited yet — the wrapper must never
+      // hang forever.
+      setTimeout(() => finish({ status: 124, signal: null, stderr, timedOut: true }), 1_000);
+    }, WALL_MS);
 
-  child.on("exit", (code, signal) => {
-    finish({ status: code, signal, stderr, timedOut: false });
+    child.on('exit', (code, signal) => {
+      finish({ status: code, signal, stderr, timedOut: false });
+    });
+    child.on('error', (err) => {
+      console.error(`[build:tests] ${label} spawn error: ${err.message}`);
+      finish({ status: 1, signal: null, stderr: stderr + `\n${err.message}\n`, timedOut: false });
+    });
   });
-  child.on("error", (err) => {
-    console.error(`[build:tests] ${label} spawn error: ${err.message}`);
-    finish({ status: 1, signal: null, stderr: stderr + `\n${err.message}\n`, timedOut: false });
-  });
-});
 
 (async () => {
-  const script = path.join(ROOT, "scripts", "mcp-integration.test.mjs");
-  const res = await run(script, "mcp");
+  const script = path.join(ROOT, 'scripts', 'mcp-integration.test.mjs');
+  const res = await run(script, 'mcp');
   if (res.status === 0) {
-    console.log("\n[build:tests] MCP integration test passed");
+    console.log('\n[build:tests] MCP integration test passed');
     process.exit(0);
   }
-  console.error(`[build:tests] mcp integration test FAILED (exit ${res.status}${res.timedOut ? ' — wall-clock timeout' : ''})`);
+  console.error(
+    `[build:tests] mcp integration test FAILED (exit ${res.status}${res.timedOut ? ' — wall-clock timeout' : ''})`,
+  );
   if (res.stderr) {
     const lines = res.stderr.split(/\r?\n/);
     const tail = lines.slice(Math.max(0, lines.length - 21), lines.length - 1);

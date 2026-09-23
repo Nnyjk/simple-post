@@ -70,9 +70,7 @@ export function uid(): string {
 // `theme.ts` to avoid closing a `crud-slice → utils → app-store` cycle).
 // ---------------------------------------------------------------------------
 
-export type FormatResult =
-  | { ok: true; formatted: string }
-  | { ok: false; error: string };
+export type FormatResult = { ok: true; formatted: string } | { ok: false; error: string };
 
 export function tryFormatJson(input: string, indent = 2): FormatResult {
   const s = input.trim();

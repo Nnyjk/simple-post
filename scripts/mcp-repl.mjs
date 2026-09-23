@@ -10,26 +10,27 @@
 //
 // Useful while developing new tools or debugging the proxy.
 
-import process from "node:process";
-import { createInterface } from "node:readline";
-import { readFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import process from 'node:process';
+import { createInterface } from 'node:readline';
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // ----- Resolve port ---------------------------------------------------------
 function portFilePath() {
-  const base = process.env.SIMPLE_POST_DATA_DIR
-    || (process.platform === "win32"
-      ? join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "simple-post")
-      : join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "simple-post"));
-  return join(base, "mcp.port");
+  const base =
+    process.env.SIMPLE_POST_DATA_DIR ||
+    (process.platform === 'win32'
+      ? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'simple-post')
+      : join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'simple-post'));
+  return join(base, 'mcp.port');
 }
 
 let port = null;
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i];
-  if (arg.startsWith("--port=")) {
-    port = Number(arg.slice("--port=".length));
+  if (arg.startsWith('--port=')) {
+    port = Number(arg.slice('--port='.length));
   }
 }
 if (port === null) {
@@ -37,11 +38,11 @@ if (port === null) {
   if (!existsSync(file)) {
     console.error(
       `mcp.port file not found at ${file}.\n` +
-      `Launch the GUI first (it writes the file), or pass --port=PORT.`,
+        `Launch the GUI first (it writes the file), or pass --port=PORT.`,
     );
     process.exit(2);
   }
-  const rec = JSON.parse(readFileSync(file, "utf8"));
+  const rec = JSON.parse(readFileSync(file, 'utf8'));
   port = rec.port;
 }
 
@@ -50,19 +51,19 @@ console.error(`[mcp-repl] POSTing to ${url} — type JSON-RPC frames, Ctrl-C to 
 
 // ----- Stream stdin → HTTP → stdout -----------------------------------------
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-rl.on("line", async (line) => {
+rl.on('line', async (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
   try {
     const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: trimmed,
     });
     const text = await res.text();
-    process.stdout.write(text + "\n");
+    process.stdout.write(text + '\n');
   } catch (e) {
     console.error(`[mcp-repl] request failed: ${e.message}`);
   }
 });
-rl.on("close", () => process.exit(0));
+rl.on('close', () => process.exit(0));

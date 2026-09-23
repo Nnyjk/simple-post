@@ -18,8 +18,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # create GitHub release
-  id-token: write     # npm provenance via OIDC
+  contents: write # create GitHub release
+  id-token: write # npm provenance via OIDC
 
 jobs:
   build-matrix:

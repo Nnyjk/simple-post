@@ -65,9 +65,9 @@ export function buildHeaderSuggestions(
     }
   }
 
-  const builtinTail = COMMON_HEADERS.filter(
-    (h) => !seenLower.has(h.name.toLowerCase()),
-  ).map((h) => ({ ...h, source: 'builtin' as const }));
+  const builtinTail = COMMON_HEADERS.filter((h) => !seenLower.has(h.name.toLowerCase())).map(
+    (h) => ({ ...h, source: 'builtin' as const }),
+  );
 
   return [...recent, ...builtinTail];
 }

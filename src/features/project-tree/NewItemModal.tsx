@@ -66,7 +66,10 @@ export function NewItemModal() {
 
   // ---- derived (useMemo; never inside a selector) ----
   const projectModules = useMemo(
-    () => modules.filter((m) => m.projectId === activeProjectId).sort((a, b) => a.sortOrder - b.sortOrder),
+    () =>
+      modules
+        .filter((m) => m.projectId === activeProjectId)
+        .sort((a, b) => a.sortOrder - b.sortOrder),
     [modules, activeProjectId],
   );
   const moduleCollections = useMemo(
@@ -266,9 +269,7 @@ export function NewItemModal() {
         )}
 
         {newItem.type === 'collection' && projectModules.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            当前项目还没有模块，请先新建一个模块。
-          </p>
+          <p className="text-xs text-muted-foreground">当前项目还没有模块，请先新建一个模块。</p>
         )}
         {newItem.type === 'endpoint' && projectModules.length === 0 && (
           <p className="text-xs text-muted-foreground">
@@ -293,7 +294,12 @@ interface NewItemNameProps {
   nameInputRef: React.RefObject<HTMLInputElement>;
 }
 
-function NameField({ newItem, onNameChange, nameInputRef, autoFocus }: NewItemNameProps & { autoFocus?: boolean }) {
+function NameField({
+  newItem,
+  onNameChange,
+  nameInputRef,
+  autoFocus,
+}: NewItemNameProps & { autoFocus?: boolean }) {
   return (
     <Field label="名称" required>
       <Input
@@ -426,7 +432,15 @@ function EndpointFields(props: {
 
 // ---------- tiny field wrapper ----------
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <label className="block space-y-1">
       <span className="text-xs font-medium text-muted-foreground">

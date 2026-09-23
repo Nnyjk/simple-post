@@ -86,11 +86,7 @@ function tryParseJson(text: string): unknown | undefined {
 // of which underlying transport (Tauri IPC vs. serve-web HTTP) ran.
 // ---------------------------------------------------------------------------
 
-function timeoutResponse(
-  input: SendInput,
-  url: string,
-  durationMs: number,
-): ApiResponse {
+function timeoutResponse(input: SendInput, url: string, durationMs: number): ApiResponse {
   return {
     status: 0,
     statusText: 'Timeout',
@@ -105,11 +101,7 @@ function timeoutResponse(
   };
 }
 
-function abortedResponse(
-  input: SendInput,
-  url: string,
-  durationMs: number,
-): ApiResponse {
+function abortedResponse(input: SendInput, url: string, durationMs: number): ApiResponse {
   return {
     status: 0,
     statusText: 'Aborted',
@@ -186,9 +178,7 @@ async function sendViaBackend(input: SendInput): Promise<ApiResponse> {
   // list verbatim, so this is the only shape that works on both sides.
   const headers = initHeadersToTuples(built.init.headers ?? {});
   const body =
-    typeof built.init.body === 'string' && built.init.body.length > 0
-      ? built.init.body
-      : null;
+    typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
 
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
 
@@ -220,9 +210,7 @@ async function sendViaBackend(input: SendInput): Promise<ApiResponse> {
     const resp = r.response;
     return {
       status: resp.status,
-      statusText:
-        resp.statusText ||
-        (resp.status >= 200 && resp.status < 300 ? 'OK' : 'Error'),
+      statusText: resp.statusText || (resp.status >= 200 && resp.status < 300 ? 'OK' : 'Error'),
       durationMs: resp.durationMs,
       sizeBytes: resp.sizeBytes,
       headers: tuplesToRecord(resp.headers),

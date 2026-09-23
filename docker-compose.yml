@@ -29,7 +29,7 @@ services:
     ports:
       # Bind 4173 on the host (matches the CLI default). If you
       # already have something on 4173, change the host side.
-      - "${SP_WEB_BIND:-4173}:4173"
+      - '${SP_WEB_BIND:-4173}:4173'
 
     volumes:
       # Persistent SQLite store. Survives `docker compose down` (the
@@ -41,16 +41,16 @@ services:
       # Auth: REQUIRED. Without it the route tree is open (commit 5's
       # auth_middleware is a no-op when SIMPLE_POST_WEB_PASSWORD is
       # unset). Docker compose refuses to start when this is empty.
-      SIMPLE_POST_WEB_PASSWORD: "${SP_WEB_PASSWORD:?set SP_WEB_PASSWORD in .env}"
+      SIMPLE_POST_WEB_PASSWORD: '${SP_WEB_PASSWORD:?set SP_WEB_PASSWORD in .env}'
 
       # Optional: bind to 0.0.0.0 inside the container (default; the
       # Dockerfile already sets this, but we re-declare for clarity).
-      SIMPLE_POST_WEB_BIND: "0.0.0.0:4173"
+      SIMPLE_POST_WEB_BIND: '0.0.0.0:4173'
 
       # Optional: when serving behind nginx at https://host/sp/, set
       # this to "/sp" so the router nests everything under that prefix
       # (commit 5). Leave empty for the default bare-host deployment.
-      SIMPLE_POST_PUBLIC_BASE_PATH: "${SP_PUBLIC_BASE_PATH:-}"
+      SIMPLE_POST_PUBLIC_BASE_PATH: '${SP_PUBLIC_BASE_PATH:-}'
 
       # SQLite lives in /data inside the container; SIMPLE_POST_DATA_DIR
       # is already baked into the Dockerfile, but we re-declare it
@@ -59,13 +59,13 @@ services:
 
       # Data is persistent — let's not pollute the host. RUST_LOG is
       # unfiltered by default; tighten it for production.
-      RUST_LOG: "${SP_RUST_LOG:-info,simple_post=info,tower_http=info}"
+      RUST_LOG: '${SP_RUST_LOG:-info,simple_post=info,tower_http=info}'
 
     healthcheck:
       # The Dockerfile already has a HEALTHCHECK directive, but
       # declaring it here lets `docker compose ps` show health
       # status without re-deriving from the image.
-      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      test: ['CMD', '/usr/local/bin/healthcheck.sh']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -74,7 +74,7 @@ services:
     # Tini is the container's PID 1 (set by the Dockerfile's
     # ENTRYPOINT), so SIGTERM from `docker compose down` reaches the
     # binary cleanly and SQLite can flush + release the WAL file.
-    init: false  # already handled by tini in the image
+    init: false # already handled by tini in the image
 
 volumes:
   simple-post-data:

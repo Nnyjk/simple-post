@@ -2,7 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { Copy, Download, AlertTriangle, Clock, HardDrive, CheckCircle2, XCircle, BookmarkPlus, Check, Wand2 } from 'lucide-react';
+import {
+  Copy,
+  Download,
+  Clock,
+  HardDrive,
+  CheckCircle2,
+  XCircle,
+  BookmarkPlus,
+  Check,
+  Wand2,
+} from 'lucide-react';
 import { useAppStore, useActiveEndpoint } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -139,10 +149,7 @@ export function ResponseViewer() {
           ) : (
             <CheckCircle2 className="h-4 w-4" style={{ color: statusColor }} />
           )}
-          <span
-            className="text-sm font-semibold"
-            style={{ color: statusColor }}
-          >
+          <span className="text-sm font-semibold" style={{ color: statusColor }}>
             {response.status}
           </span>
           <span className="text-sm text-muted-foreground">{response.statusText}</span>
@@ -166,7 +173,11 @@ export function ResponseViewer() {
               disabled={!endpoint}
               data-testid="save-example-btn"
             >
-              {savedFlash ? <Check className="h-3.5 w-3.5" /> : <BookmarkPlus className="h-3.5 w-3.5" />}
+              {savedFlash ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <BookmarkPlus className="h-3.5 w-3.5" />
+              )}
             </Button>
           </Tooltip>
           <Tooltip content="复制响应体" side="bottom">
@@ -208,9 +219,7 @@ export function ResponseViewer() {
           <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="font-medium leading-tight">{response.statusText}</div>
-            <div className="mt-0.5 leading-snug opacity-80 break-all">
-              {response.error}
-            </div>
+            <div className="mt-0.5 leading-snug opacity-80 break-all">{response.error}</div>
           </div>
         </div>
       )}
@@ -221,7 +230,15 @@ export function ResponseViewer() {
           items={[
             { id: 'pretty', label: 'Pretty' },
             { id: 'raw', label: 'Raw' },
-            { id: 'headers', label: 'Headers', badge: <span className="rounded bg-muted px-1 text-[10px]">{Object.keys(response.headers).length}</span> },
+            {
+              id: 'headers',
+              label: 'Headers',
+              badge: (
+                <span className="rounded bg-muted px-1 text-[10px]">
+                  {Object.keys(response.headers).length}
+                </span>
+              ),
+            },
           ]}
           value={view}
           onChange={(id) => setView(id as typeof view)}
@@ -277,9 +294,7 @@ function PrettyView({ body, formatted }: { body: string; formatted: boolean }) {
     return (
       <div className="flex h-full flex-col">
         {showInvalidNotice && (
-          <div className="alert-warning-inline">
-            响应不是合法 JSON，仅展示原文
-          </div>
+          <div className="alert-warning-inline">响应不是合法 JSON，仅展示原文</div>
         )}
         <pre className="m-0 min-h-0 flex-1 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
           {body}
@@ -291,9 +306,7 @@ function PrettyView({ body, formatted }: { body: string; formatted: boolean }) {
   return (
     <div className="flex h-full flex-col">
       {showInvalidNotice && (
-        <div className="alert-warning-inline">
-          响应不是合法 JSON，仅展示原文
-        </div>
+        <div className="alert-warning-inline">响应不是合法 JSON，仅展示原文</div>
       )}
       <div className="min-h-0 flex-1">
         <CodeMirror
@@ -342,9 +355,7 @@ function EmptyState() {
         <CheckCircle2 className="h-6 w-6 text-muted-foreground/50" />
       </div>
       <p className="mt-3 text-sm text-muted-foreground">点击「Send」发起请求</p>
-      <p className="mt-1 text-[11px] text-muted-foreground/70">
-        响应会显示在这里
-      </p>
+      <p className="mt-1 text-[11px] text-muted-foreground/70">响应会显示在这里</p>
     </section>
   );
 }

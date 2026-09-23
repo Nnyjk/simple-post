@@ -1,0 +1,23 @@
+# Build outputs & vendored trees
+dist
+target
+node_modules
+.scratch
+src-tauri/gen
+packages/simple-post-mcp/dist
+coverage
+
+# Generated / vendored artifacts
+package-lock.json
+Cargo.lock
+docs/openapi.yaml
+tsconfig.tsbuildinfo
+
+# Binary-ish public assets
+public
+*.min.js
+*.min.css
+
+# Hand-maintained Chinese docs: keep byte-stable so prose diffs stay
+# reviewable (the OpenAPI reference is generated instead).
+*.md

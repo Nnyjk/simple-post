@@ -86,14 +86,7 @@ export function NotFound({ label }: { label: string }) {
  * light and dark card backgrounds and to avoid clashing with the
  * method colors used elsewhere in the tree.
  */
-const DEFAULT_PROJECT_COLORS = [
-  '#60a5fa',
-  '#a78bfa',
-  '#34d399',
-  '#fbbf24',
-  '#f87171',
-  '#a3a3a3',
-];
+const DEFAULT_PROJECT_COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f87171', '#a3a3a3'];
 
 /**
  * Round color swatch row for picking a single accent color. The

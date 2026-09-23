@@ -19,9 +19,9 @@ import { useAppStore } from '@/stores/app-store';
  */
 export function useIsDark(): boolean {
   const theme = useAppStore((s) => s.theme);
-  const [systemDark, setSystemDark] = useState(() =>
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches,
+  const [systemDark, setSystemDark] = useState(
+    () =>
+      typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches,
   );
 
   useEffect(() => {

@@ -17,7 +17,6 @@ import { useMemo, useRef } from 'react';
 import { ChevronRight, Cloud, Cpu, Palette } from 'lucide-react';
 import { Send } from 'lucide-react';
 import { useAppStore, type SettingsCategoryId } from '@/stores/app-store';
-import { SettingsCategory } from './SettingsCategory';
 import { EnvironmentSection } from './sections/EnvironmentSection';
 import { ConnectionSection } from './sections/ConnectionSection';
 import { AppearanceSection } from './sections/AppearanceSection';
@@ -25,12 +24,7 @@ import { RequestSection } from './sections/RequestSection';
 import { cn } from '@/lib/utils';
 import { gsap, useGSAP } from '@/lib/gsap';
 
-const CATEGORY_IDS: readonly SettingsCategoryId[] = [
-  'env',
-  'connection',
-  'appearance',
-  'request',
-];
+const CATEGORY_IDS: readonly SettingsCategoryId[] = ['env', 'connection', 'appearance', 'request'];
 
 const RAIL_ITEMS: {
   id: SettingsCategoryId;
@@ -42,10 +36,34 @@ const RAIL_ITEMS: {
   // header mapping at a glance.
   accent: string;
 }[] = [
-  { id: 'env', label: '环境', icon: <Cloud className="h-4 w-4" />, hint: '环境变量 / baseUrl', accent: 'text-sky-500 bg-sky-500/15' },
-  { id: 'connection', label: '连接', icon: <Cpu className="h-4 w-4" />, hint: 'MCP 协议设置', accent: 'text-violet-500 bg-violet-500/15' },
-  { id: 'appearance', label: '外观与体验', icon: <Palette className="h-4 w-4" />, hint: '主题 / 快捷键', accent: 'text-pink-500 bg-pink-500/15' },
-  { id: 'request', label: '请求', icon: <Send className="h-4 w-4" />, hint: '超时 / 重定向 / 体积上限', accent: 'text-emerald-500 bg-emerald-500/15' },
+  {
+    id: 'env',
+    label: '环境',
+    icon: <Cloud className="h-4 w-4" />,
+    hint: '环境变量 / baseUrl',
+    accent: 'text-sky-500 bg-sky-500/15',
+  },
+  {
+    id: 'connection',
+    label: '连接',
+    icon: <Cpu className="h-4 w-4" />,
+    hint: 'MCP 协议设置',
+    accent: 'text-violet-500 bg-violet-500/15',
+  },
+  {
+    id: 'appearance',
+    label: '外观与体验',
+    icon: <Palette className="h-4 w-4" />,
+    hint: '主题 / 快捷键',
+    accent: 'text-pink-500 bg-pink-500/15',
+  },
+  {
+    id: 'request',
+    label: '请求',
+    icon: <Send className="h-4 w-4" />,
+    hint: '超时 / 重定向 / 体积上限',
+    accent: 'text-emerald-500 bg-emerald-500/15',
+  },
 ];
 
 const SECTION_META: Record<
@@ -98,9 +116,7 @@ export function SettingsPanel() {
   const addBaseUrlDefinition = useAppStore((s) => s.addBaseUrlDefinition);
   const updateBaseUrlDefinition = useAppStore((s) => s.updateBaseUrlDefinition);
   const deleteBaseUrlDefinition = useAppStore((s) => s.deleteBaseUrlDefinition);
-  const setDefaultBaseUrlDefinition = useAppStore(
-    (s) => s.setDefaultBaseUrlDefinition,
-  );
+  const setDefaultBaseUrlDefinition = useAppStore((s) => s.setDefaultBaseUrlDefinition);
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeProjectId) ?? null,
     [projects, activeProjectId],
@@ -119,9 +135,7 @@ export function SettingsPanel() {
   // faded-out + slightly-down state to its natural position.
   useGSAP(
     () => {
-      const root = mainRef.current?.querySelector<HTMLElement>(
-        '[data-settings-section]',
-      );
+      const root = mainRef.current?.querySelector<HTMLElement>('[data-settings-section]');
       if (!root) return;
       gsap.fromTo(
         root,
@@ -176,9 +190,7 @@ export function SettingsPanel() {
                   <span
                     className={cn(
                       'block truncate text-[10px]',
-                      active
-                        ? 'text-muted-foreground'
-                        : 'text-muted-foreground/70',
+                      active ? 'text-muted-foreground' : 'text-muted-foreground/70',
                     )}
                   >
                     {item.hint}
@@ -222,9 +234,7 @@ export function SettingsPanel() {
                   updateEnvironment={updateEnvironment}
                   addEnvironment={addEnvironment}
                   baseUrlDefinitions={activeProject?.baseUrlDefinitions ?? []}
-                  defaultBaseUrlDefinitionId={
-                    activeProject?.defaultBaseUrlDefinitionId ?? null
-                  }
+                  defaultBaseUrlDefinitionId={activeProject?.defaultBaseUrlDefinitionId ?? null}
                   addBaseUrlDefinition={addBaseUrlDefinition}
                   updateBaseUrlDefinition={updateBaseUrlDefinition}
                   deleteBaseUrlDefinition={deleteBaseUrlDefinition}

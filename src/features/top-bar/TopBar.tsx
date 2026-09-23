@@ -1,14 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import {
-  Settings2,
-  ChevronDown,
-  Circle,
-  Cpu,
-  Plus,
-  Search,
-  Sparkles,
-  Loader2,
-} from 'lucide-react';
+import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Sparkles, Loader2 } from 'lucide-react';
 import { useAppStore, useActiveProject, useActiveEnvironment } from '@/stores/app-store';
 import { useMcpStatus } from '@/lib/use-mcp-status';
 import { Button } from '@/components/ui/button';
@@ -154,10 +145,7 @@ export function TopBar() {
                   p.id === activeProject.id && 'bg-accent',
                 )}
               >
-                <span
-                  className="h-2 w-2 rounded-sm"
-                  style={{ backgroundColor: p.color }}
-                />
+                <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.color }} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate">{p.name}</div>
                   {p.description && (
@@ -196,9 +184,7 @@ export function TopBar() {
           className="gap-1.5"
         >
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">env</span>
-          <span className="max-w-[80px] truncate font-mono text-xs">
-            {activeEnv?.name ?? '—'}
-          </span>
+          <span className="max-w-[80px] truncate font-mono text-xs">{activeEnv?.name ?? '—'}</span>
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </Button>
         {envOpen && (
@@ -245,7 +231,9 @@ export function TopBar() {
                     <Circle
                       className={cn(
                         'h-2 w-2',
-                        env.id === activeEnv?.id ? 'fill-success text-success' : 'text-muted-foreground/40',
+                        env.id === activeEnv?.id
+                          ? 'fill-success text-success'
+                          : 'text-muted-foreground/40',
                       )}
                     />
                     <span className="font-mono text-xs">{env.name}</span>
@@ -336,18 +324,23 @@ function McpStatusPill() {
   const unhealthy = status === 'crashed' || status === 'unhealthy';
   const connecting = status === 'starting' || status === 'restarting';
 
-  const dotClass = running
-    ? 'bg-success'
-    : unhealthy
-      ? 'bg-destructive'
-      : 'bg-zinc-500';
+  const dotClass = running ? 'bg-success' : unhealthy ? 'bg-destructive' : 'bg-zinc-500';
 
   return (
     <Tooltip
       content={
         <div className="space-y-0.5 text-left">
           <div className="font-medium">
-            MCP Server · {running ? '运行中' : connecting ? '启动中' : unhealthy ? '异常' : mcp ? '未启动' : '连接中…'}
+            MCP Server ·{' '}
+            {running
+              ? '运行中'
+              : connecting
+                ? '启动中'
+                : unhealthy
+                  ? '异常'
+                  : mcp
+                    ? '未启动'
+                    : '连接中…'}
           </div>
           <div className="text-[10px] text-muted-foreground">
             stdio 模式{pid !== null ? ` · PID ${pid}` : ''}
@@ -370,12 +363,7 @@ function McpStatusPill() {
             )}
             style={{ opacity: 0.4 }}
           />
-          <span
-            className={cn(
-              'relative inline-flex h-2 w-2 rounded-full',
-              dotClass,
-            )}
-          />
+          <span className={cn('relative inline-flex h-2 w-2 rounded-full', dotClass)} />
         </span>
         <Cpu className="h-3 w-3" />
         <span>MCP</span>

@@ -1,14 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import {
-  Play,
-  Save,
-  Copy,
-  Trash2,
-  Plus,
-  Check,
-  X,
-  ChevronRight,
-} from 'lucide-react';
+import { Play, Save, Copy, Check, ChevronRight } from 'lucide-react';
 import { useAppStore, useActiveEndpoint, useActiveEnvironment } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -18,8 +9,8 @@ import { MethodPicker } from '@/components/ui/method-picker';
 import { BaseUrlPicker, type BaseUrlSelection } from '@/components/ui/base-url-picker';
 import { TagInput } from '@/components/ui/tag-input';
 import { Tooltip } from '@/components/ui/tooltip';
-import { type KeyValue, type HttpMethod, type Endpoint } from '@/types/domain';
-import { methodColorVar, uid, cn } from '@/lib/utils';
+import { type HttpMethod, type Endpoint } from '@/types/domain';
+import { methodColorVar, cn } from '@/lib/utils';
 import { joinBaseUrl, resolveEndpointBaseUrl, resolveVars } from '@/lib/url';
 import { sendRequest } from '@/lib/http';
 import { KeyValueEditor } from './KeyValueEditor';
@@ -82,9 +73,7 @@ export function HttpTester() {
   // We read the draft with a dedicated selector so HttpTester only
   // re-renders when *its own* endpoint's draft changes (a draft on
   // endpoint B while endpoint A is active should be invisible to us).
-  const draft = useAppStore((s) =>
-    endpoint ? s.endpointDrafts[endpoint.id] : undefined,
-  );
+  const draft = useAppStore((s) => (endpoint ? s.endpointDrafts[endpoint.id] : undefined));
   // Name / description editing is owned by `<InlineEdit>` (keyed by
   // `endpoint.id` so the editor unmounts and resets whenever the active
   // endpoint changes — no manual "clear edit state on tab switch"
@@ -126,10 +115,6 @@ export function HttpTester() {
     if (!m) return null;
     return { module: m, collection: c };
   }, [endpoint, allCollections, allModules]);
-  const projectEnvs = useMemo(
-    () => (project ? allEnvironments.filter((e) => e.projectId === project.id) : []),
-    [allEnvironments, project],
-  );
   // The env that owns the baseUrl for this endpoint. Honors the
   // endpoint's `environmentId` if set; otherwise falls back to the
   // workspace-wide active env (the "ENV dev" pill in the top bar) so
@@ -184,9 +169,7 @@ export function HttpTester() {
   const filteredEntries = useMemo(() => {
     const q = (partialVar ?? '').toLowerCase();
     if (!q) return allEnvEntries;
-    return allEnvEntries.filter((e) =>
-      (e.key ?? '').toLowerCase().includes(q),
-    );
+    return allEnvEntries.filter((e) => (e.key ?? '').toLowerCase().includes(q));
   }, [allEnvEntries, partialVar]);
 
   const handleUrlChange = (next: string) => {
@@ -255,6 +238,87 @@ export function HttpTester() {
     return resolveVars(joined, endpointEnv?.variables);
   }, [liveUrl, endpointEnv, endpoint, resolved.baseUrl]);
 
+  // ---------------------------------------------------------------------------
+  // Hooks that MUST run unconditionally. They used to sit after the
+  // `if (!endpoint)` early return below, which is a rules-of-hooks
+  // violation: switching away from an endpoint re-rendered this
+  // component with fewer hooks and React threw "Rendered fewer hooks
+  // than expected". Keep every hook above any early return.
+  // ---------------------------------------------------------------------------
+
+  // Abort any in-flight send when this component unmounts (tab
+  // switch, project change, etc.) so the pending Promise can't
+  // outlive the UI that requested it. `handleSend` reuses the same
+  // ref so a second-click-while-pending becomes "cancel the previous
+  // and start over" instead of a no-op race.
+  const inFlightRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      inFlightRef.current?.abort();
+      inFlightRef.current = null;
+    };
+  }, []);
+
+  // C2: Send button morph.
+  // `playIconRef` wraps the Play icon in an `inline-flex` span so we can
+  // rotate it in place without disturbing the button text width.
+  // `sendBtnRef` is the whole Button element — used for the micro-bounce
+  // after a pending request resolves.
+  const sendBtnRef = useRef<HTMLButtonElement>(null);
+  const playIconRef = useRef<HTMLSpanElement>(null);
+
+  useGSAP(() => {
+    if (!playIconRef.current || !sendBtnRef.current) return;
+
+    if (requestPending) {
+      // Kill any leftover rotation (e.g. from a previous cancel) before
+      // starting a fresh spin. gsap.fromTo with rotation +=360 +
+      // repeat:-1 gives a continuous linear spin.
+      gsap.killTweensOf(playIconRef.current);
+      gsap.fromTo(
+        playIconRef.current,
+        { rotation: 0 },
+        { rotation: '+=360', duration: 1, repeat: -1, ease: 'none' },
+      );
+    } else {
+      // Resolve path: kill the spin and snap the icon back upright so
+      // the next render starts at rotation 0. Then micro-bounce the
+      // button to confirm the response arrived.
+      gsap.killTweensOf(playIconRef.current);
+      gsap.set(playIconRef.current, { rotation: 0 });
+      gsap.killTweensOf(sendBtnRef.current);
+      gsap.fromTo(
+        sendBtnRef.current,
+        { scale: 1 },
+        {
+          keyframes: [
+            { scale: 1.05, duration: 0.125, ease: 'power2.out' },
+            { scale: 1, duration: 0.125, ease: 'power2.in' },
+          ],
+        },
+      );
+    }
+  }, [requestPending]);
+
+  // C3: Copy-as-cURL feedback bounce. Fires when curlFlash transitions
+  // false → true; the false transition is intentionally a no-op so the
+  // already-swapped "已复制" label doesn't get an extra blip on its way out.
+  const copyCurlBtnRef = useRef<HTMLButtonElement>(null);
+  useGSAP(() => {
+    if (!curlFlash || !copyCurlBtnRef.current) return;
+    gsap.killTweensOf(copyCurlBtnRef.current);
+    gsap.fromTo(
+      copyCurlBtnRef.current,
+      { scale: 1 },
+      {
+        keyframes: [
+          { scale: 1.06, duration: 0.1, ease: 'power2.out' },
+          { scale: 1, duration: 0.1, ease: 'power2.in' },
+        ],
+      },
+    );
+  }, [curlFlash]);
+
   if (!endpoint) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -270,25 +334,18 @@ export function HttpTester() {
 
   const tabItems = TABS.map((t) => {
     let badge: React.ReactNode = null;
-    if (t.id === 'params' && enabledParams) badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledParams}</span>;
-    if (t.id === 'headers' && enabledHeaders) badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledHeaders}</span>;
-    if (t.id === 'body' && hasBody) badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;
-    if (t.id === 'auth' && hasAuth) badge = <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>;
+    if (t.id === 'params' && enabledParams)
+      badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledParams}</span>;
+    if (t.id === 'headers' && enabledHeaders)
+      badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledHeaders}</span>;
+    if (t.id === 'body' && hasBody)
+      badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;
+    if (t.id === 'auth' && hasAuth)
+      badge = (
+        <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>
+      );
     return { id: t.id, label: t.label, badge, disabled: t.disabled };
   });
-
-  // Abort any in-flight send when this component unmounts (tab
-  // switch, project change, etc.) so the pending Promise can't
-  // outlive the UI that requested it. `handleSend` reuses the same
-  // ref so a second-click-while-pending becomes "cancel the previous
-  // and start over" instead of a no-op race.
-  const inFlightRef = useRef<AbortController | null>(null);
-  useEffect(() => {
-    return () => {
-      inFlightRef.current?.abort();
-      inFlightRef.current = null;
-    };
-  }, []);
 
   const handleSend = async () => {
     if (!endpoint) return;
@@ -352,66 +409,6 @@ export function HttpTester() {
 
   const dirty = draft !== undefined;
 
-  // C2: Send button morph.
-  // `playIconRef` wraps the Play icon in an `inline-flex` span so we can
-  // rotate it in place without disturbing the button text width.
-  // `sendBtnRef` is the whole Button element — used for the micro-bounce
-  // after a pending request resolves.
-  const sendBtnRef = useRef<HTMLButtonElement>(null);
-  const playIconRef = useRef<HTMLSpanElement>(null);
-
-  useGSAP(() => {
-    if (!playIconRef.current || !sendBtnRef.current) return;
-
-    if (requestPending) {
-      // Kill any leftover rotation (e.g. from a previous cancel) before
-      // starting a fresh spin. gsap.fromTo with rotation +=360 +
-      // repeat:-1 gives a continuous linear spin.
-      gsap.killTweensOf(playIconRef.current);
-      gsap.fromTo(
-        playIconRef.current,
-        { rotation: 0 },
-        { rotation: '+=360', duration: 1, repeat: -1, ease: 'none' },
-      );
-    } else {
-      // Resolve path: kill the spin and snap the icon back upright so
-      // the next render starts at rotation 0. Then micro-bounce the
-      // button to confirm the response arrived.
-      gsap.killTweensOf(playIconRef.current);
-      gsap.set(playIconRef.current, { rotation: 0 });
-      gsap.killTweensOf(sendBtnRef.current);
-      gsap.fromTo(
-        sendBtnRef.current,
-        { scale: 1 },
-        {
-          keyframes: [
-            { scale: 1.05, duration: 0.125, ease: 'power2.out' },
-            { scale: 1, duration: 0.125, ease: 'power2.in' },
-          ],
-        },
-      );
-    }
-  }, [requestPending]);
-
-  // C3: Copy-as-cURL feedback bounce. Fires when curlFlash transitions
-  // false → true; the false transition is intentionally a no-op so the
-  // already-swapped "已复制" label doesn't get an extra blip on its way out.
-  const copyCurlBtnRef = useRef<HTMLButtonElement>(null);
-  useGSAP(() => {
-    if (!curlFlash || !copyCurlBtnRef.current) return;
-    gsap.killTweensOf(copyCurlBtnRef.current);
-    gsap.fromTo(
-      copyCurlBtnRef.current,
-      { scale: 1 },
-      {
-        keyframes: [
-          { scale: 1.06, duration: 0.1, ease: 'power2.out' },
-          { scale: 1, duration: 0.1, ease: 'power2.in' },
-        ],
-      },
-    );
-  }, [curlFlash]);
-
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
       {/* Breadcrumb — mirrors the `设置 › 连接` pattern in the Settings
@@ -439,10 +436,7 @@ export function HttpTester() {
               {moduleAndCollection.module.name}
             </span>
             <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-            <span
-              className="truncate text-foreground"
-              title={moduleAndCollection.collection.name}
-            >
+            <span className="truncate text-foreground" title={moduleAndCollection.collection.name}>
               {moduleAndCollection.collection.name}
             </span>
           </>
@@ -480,9 +474,7 @@ export function HttpTester() {
           <InlineEdit
             key={`desc-${endpoint.id}`}
             value={endpoint.description ?? ''}
-            onSave={(next) =>
-              updateEndpoint(endpoint.id, { description: next || undefined })
-            }
+            onSave={(next) => updateEndpoint(endpoint.id, { description: next || undefined })}
             // Description legitimately allows clearing — without this, an
             // empty draft is treated as a cancel and the field keeps its old
             // value instead of going back to "no description".

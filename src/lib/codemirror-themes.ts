@@ -68,7 +68,4 @@ const lightJsonHighlight = HighlightStyle.define([
  * CodeMirror extension bundle to use in light mode. Pass as the `theme`
  * prop on `<CodeMirror>` (it accepts `string | Extension | Extension[]`).
  */
-export const lightCodeTheme = [
-  lightEditorTheme,
-  syntaxHighlighting(lightJsonHighlight),
-];
+export const lightCodeTheme = [lightEditorTheme, syntaxHighlighting(lightJsonHighlight)];

@@ -63,9 +63,7 @@ function ModuleSettings({ moduleId }: { moduleId: string }) {
 }
 
 function CollectionSettings({ collectionId }: { collectionId: string }) {
-  const col = useAppStore(
-    (s) => s.collections.find((c) => c.id === collectionId),
-  );
+  const col = useAppStore((s) => s.collections.find((c) => c.id === collectionId));
   if (!col) return <NotFound label="集合" />;
   return (
     <EntityCard
@@ -80,15 +78,7 @@ function CollectionSettings({ collectionId }: { collectionId: string }) {
 //  Shared display
 // ----------------------------------------------------------------------------
 
-function EntityCard({
-  icon,
-  badge,
-  name,
-}: {
-  icon: React.ReactNode;
-  badge: string;
-  name: string;
-}) {
+function EntityCard({ icon, badge, name }: { icon: React.ReactNode; badge: string; name: string }) {
   return (
     <div className="flex h-full min-h-0 items-center justify-center bg-card/30 p-8">
       <div className="w-full max-w-sm text-center">

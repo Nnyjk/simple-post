@@ -29,15 +29,14 @@ async function safeCall(fn: () => Promise<void>) {
   // `__TAURI_INTERNALS__` is set on every Tauri 2 webview window.
   // Cheap guard so dev-in-browser doesn't hit an "ipc not available"
   // error every time you click a button.
-  const tauriInternals = (window as { __TAURI_INTERNALS__?: unknown })
-    .__TAURI_INTERNALS__;
+  const tauriInternals = (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   if (!tauriInternals) return;
   try {
     await fn();
   } catch (e) {
     // Surface unexpected errors in devtools but don't disrupt the UI —
     // a broken minimize shouldn't take down the whole TopBar.
-    // eslint-disable-next-line no-console
+
     console.warn('[WindowControls] tauri call failed:', e);
   }
 }
@@ -72,7 +71,6 @@ export function WindowControls() {
           setIsMaximized(await win.isMaximized());
         });
       } catch (e) {
-        // eslint-disable-next-line no-console
         console.warn('[WindowControls] onResized subscribe failed:', e);
       }
     })();
@@ -145,11 +143,7 @@ export function WindowControls() {
             Switch between them live so the affordance always matches
             the action a click will perform.
           */}
-          {isMaximized ? (
-            <Copy className="h-3 w-3" />
-          ) : (
-            <Square className="h-3 w-3" />
-          )}
+          {isMaximized ? <Copy className="h-3 w-3" /> : <Square className="h-3 w-3" />}
         </button>
       </Tooltip>
 

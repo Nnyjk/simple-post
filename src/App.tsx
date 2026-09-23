@@ -13,12 +13,7 @@ import { Splitter } from '@/components/ui/splitter';
 import { useAppStore } from '@/stores/app-store';
 
 function App() {
-  const activeTab = useAppStore((s) =>
-    s.openTabs.find((t) => t.id === s.activeTabId) ?? null,
-  );
-  const setRequestPending = useAppStore((s) => s.setRequestPending);
-  const requestPending = useAppStore((s) => s.requestPending);
-  const lastResponse = useAppStore((s) => s.lastResponse);
+  const activeTab = useAppStore((s) => s.openTabs.find((t) => t.id === s.activeTabId) ?? null);
   const theme = useAppStore((s) => s.theme);
 
   // Local splitter state — HttpTester (top) / ResponseViewer (bottom) ratio.
@@ -62,11 +57,6 @@ function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
-      const target = e.target as HTMLElement;
-      const inField =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable;
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();

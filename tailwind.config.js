@@ -79,13 +79,7 @@ export default {
           'Microsoft YaHei',
           'sans-serif',
         ],
-        mono: [
-          'JetBrains Mono',
-          'Fira Code',
-          'Cascadia Code',
-          'Consolas',
-          'monospace',
-        ],
+        mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'monospace'],
       },
       keyframes: {
         'fade-in': {

@@ -26,8 +26,6 @@
  * across files).
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
 
 // ---------------------------------------------------------------------------
@@ -99,12 +97,11 @@ export function installBrowserShim(): ShimGlobals {
     };
   }
 
-  // Timer functions — use a counter shim so tests can assert
-  // `setInterval` is called once even though the slice stacks a
-  // single shared timer across visibility transitions.
-  let intervalCalls = 0;
+  // Timer functions — the slice stacks a single shared timer across
+  // visibility transitions. Per-test interval counting lives in the
+  // exported `SetIntervalCounter` below; here we only make sure the
+  // window-aliased globals resolve.
   g.setInterval = ((handler: any, ms?: number, ...rest: any[]) => {
-    intervalCalls++;
     return (prevSetInterval as any)(handler, ms, ...rest);
   }) as any;
   g.clearInterval = ((id: any) => {
@@ -155,7 +152,6 @@ export function installBrowserShim(): ShimGlobals {
     else delete g.setInterval;
     if (hadClearInterval) g.clearInterval = prevClearInterval;
     else delete g.clearInterval;
-    intervalCalls = 0;
   };
 
   return { setVisibility, document: documentShim, teardown };
@@ -191,10 +187,11 @@ export class SetIntervalCounter {
   install() {
     const g: any = globalThis;
     this.prev = g.setInterval;
-    const that = this;
+    // Arrow callback: `this` stays bound to the instance, so no
+    // `const that = this` alias is needed.
     g.setInterval = ((handler: any, ms?: number, ...rest: any[]) => {
-      that.calls++;
-      return that.prev(handler, ms, ...rest);
+      this.calls++;
+      return this.prev(handler, ms, ...rest);
     }) as any;
   }
 

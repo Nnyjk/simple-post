@@ -37,16 +37,20 @@ interface RegistryState {
   activeProjectId: string;
   activeEnvironmentId: string;
   environments: { id: string; projectId: string; name: string }[];
-  endpoints: { id: string; name: string; url: string; method: string; tags: string[]; collectionId: string }[];
+  endpoints: {
+    id: string;
+    name: string;
+    url: string;
+    method: string;
+    tags: string[];
+    collectionId: string;
+  }[];
   collections: { id: string; moduleId: string; name: string }[];
   modules: { id: string; projectId: string; name: string }[];
 }
 
 /** Pick a representative project for an endpoint (deepest ancestor). */
-function endpointProjectId(
-  endpointId: string,
-  s: RegistryState,
-): string | null {
+function endpointProjectId(endpointId: string, s: RegistryState): string | null {
   const ep = s.endpoints.find((e) => e.id === endpointId);
   if (!ep) return null;
   const col = s.collections.find((c) => c.id === ep.collectionId);
@@ -166,9 +170,11 @@ export function buildCommands(): Command[] {
       section: '命令',
       keywords: ['new', 'create', 'add', 'collection', '集合', '新建'],
       run: () =>
-        useAppStore.getState().openNewItem(
-          firstMod ? { type: 'collection', parentModuleId: firstMod.id } : { type: 'collection' },
-        ),
+        useAppStore
+          .getState()
+          .openNewItem(
+            firstMod ? { type: 'collection', parentModuleId: firstMod.id } : { type: 'collection' },
+          ),
     });
   }
 
@@ -188,7 +194,11 @@ export function buildCommands(): Command[] {
       run: () =>
         useAppStore.getState().openNewItem(
           firstCol
-            ? { type: 'endpoint', parentCollectionId: firstCol.id, parentModuleId: firstCol.moduleId }
+            ? {
+                type: 'endpoint',
+                parentCollectionId: firstCol.id,
+                parentModuleId: firstCol.moduleId,
+              }
             : firstMod
               ? { type: 'endpoint', parentModuleId: firstMod.id }
               : { type: 'endpoint' },

@@ -104,9 +104,7 @@ export function PromptDialog({
         aria-invalid={!!liveError || undefined}
       />
       {(liveError || error) && (
-        <p className="mt-1.5 text-[11px] text-destructive">
-          {liveError ?? error}
-        </p>
+        <p className="mt-1.5 text-[11px] text-destructive">{liveError ?? error}</p>
       )}
     </Dialog>
   );

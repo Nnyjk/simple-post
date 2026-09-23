@@ -60,9 +60,7 @@ function appendQueryString(url: string, params: readonly KeyValue[]): string {
   for (const p of params) {
     if (!p.enabled) continue;
     if (!p.key || p.value === '') continue; // spec: skip empty keys/values
-    parts.push(
-      `${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`,
-    );
+    parts.push(`${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`);
   }
   if (parts.length === 0) return url;
   return `${url}${url.includes('?') ? '&' : '?'}${parts.join('&')}`;
@@ -78,10 +76,7 @@ function resolveTemplate(input: string, env: Environment | undefined): string {
  * env. The returned config is a new object so the caller's input is
  * never mutated.
  */
-function resolveAuth(
-  auth: AuthConfig,
-  env: Environment | undefined,
-): AuthConfig {
+function resolveAuth(auth: AuthConfig, env: Environment | undefined): AuthConfig {
   if (auth.type === 'bearer') {
     return { ...auth, bearer: resolveTemplate(auth.bearer ?? '', env) };
   }
@@ -135,10 +130,7 @@ interface OrderedHeader {
  * `apikey.in_ === 'query'` is NOT emitted as a header — the caller
  * appends it to the URL via `appendApikeyToQuery`.
  */
-function buildOrderedHeaders(
-  input: BuildInput,
-  auth: AuthConfig,
-): OrderedHeader[] {
+function buildOrderedHeaders(input: BuildInput, auth: AuthConfig): OrderedHeader[] {
   const out: OrderedHeader[] = [];
   for (const h of input.headers) {
     if (!h.enabled || !h.key) continue;
@@ -263,9 +255,7 @@ export function buildCurlCommand(input: BuildInput): string {
   const finalUrl = appendApikeyToQuery(urlWithParams, auth);
   const orderedHeaders = buildOrderedHeaders(input, auth);
 
-  const lines: string[] = [
-    `curl -X ${input.method.toUpperCase()} ${shellQuote(finalUrl)}`,
-  ];
+  const lines: string[] = [`curl -X ${input.method.toUpperCase()} ${shellQuote(finalUrl)}`];
   for (const h of orderedHeaders) {
     lines.push(`  -H ${shellQuote(`${h.key}: ${h.value}`)}`);
   }

@@ -40,12 +40,7 @@ export function DocsEditor({ value, onChange }: Props) {
           </Button>
         </div>
       </div>
-      <div
-        className={cn(
-          'flex min-h-0 flex-1',
-          mode === 'split' && 'divide-x divide-border',
-        )}
-      >
+      <div className={cn('flex min-h-0 flex-1', mode === 'split' && 'divide-x divide-border')}>
         {(mode === 'edit' || mode === 'split') && (
           <textarea
             value={value}

@@ -77,9 +77,7 @@ if (!g.window.__TAURI_INTERNALS__) g.window.__TAURI_INTERNALS__ = {};
 mockIPC(async () => null);
 
 // ---------- import the store ----------
-const { useAppStore, useActiveProject } = await import(
-  '../src/stores/app-store.ts'
-);
+const { useAppStore, useActiveProject } = await import('../src/stores/app-store.ts');
 
 // ---------- helpers ----------
 let pass = 0;
@@ -153,12 +151,10 @@ useAppStore.setState({
   activeProjectId: 'p1',
 });
 
-let hookOkOrUntestable = null;
 try {
   const a = useActiveProject();
   const b = useActiveProject();
   line('useActiveProject same reference on consecutive calls', a === b, `a.name=${a?.name}`);
-  hookOkOrUntestable = true;
 } catch (e) {
   // Zustand 5 wraps `useSyncExternalStore`, which throws outside
   // React render. The spec explicitly permits a code-review fallback
@@ -166,25 +162,19 @@ try {
   console.log(
     `[INFO] useActiveProject() unavailable outside React (Zustand 5): ${e?.message ?? e}`,
   );
-  hookOkOrUntestable = false;
 }
 
 // Source-shape review. Look at the four `useActive*` selectors and
 // confirm each one is a `s.x.find(...)` or a raw field reference —
 // never `.map`, `.filter`, `.sort`, or a spread.
 const { readFileSync } = await import('node:fs');
-const selSrc = readFileSync(
-  new URL('../src/stores/app-store.ts', import.meta.url),
-  'utf8',
-);
+const selSrc = readFileSync(new URL('../src/stores/app-store.ts', import.meta.url), 'utf8');
 {
   // Pull every `useAppStore((s) => …)` occurrence together with its
   // closing parenthesis, ignoring strings + comments. The selector
   // bodies are short (≤ 5 lines each).
   const lines = selSrc.split('\n');
-  const startIdx = lines
-    .map((l, i) => ({ l, i }))
-    .filter(({ l }) => /useAppStore\(\(s\)/.test(l));
+  const startIdx = lines.map((l, i) => ({ l, i })).filter(({ l }) => /useAppStore\(\(s\)/.test(l));
   let allClean = startIdx.length > 0;
   for (const { l, i } of startIdx) {
     // assemble body up to the first standalone `)` line.
@@ -261,7 +251,9 @@ const KEY = 'simple-post:prefs';
   let parsed = null;
   try {
     parsed = raw ? JSON.parse(raw) : null;
-  } catch {/* ignore */}
+  } catch {
+    /* ignore */
+  }
   line(
     'setTheme("light") writes {theme:"light", requestSettings:{…}} to localStorage',
     parsed?.theme === 'light' && parsed?.requestSettings?.timeoutMs === 30000,
@@ -275,7 +267,9 @@ const KEY = 'simple-post:prefs';
   let parsed = null;
   try {
     parsed = raw ? JSON.parse(raw) : null;
-  } catch {/* ignore */}
+  } catch {
+    /* ignore */
+  }
   line(
     'setTheme("dark") writes {theme:"dark"} to localStorage',
     parsed?.theme === 'dark',
@@ -289,7 +283,9 @@ const KEY = 'simple-post:prefs';
   let parsed = null;
   try {
     parsed = raw ? JSON.parse(raw) : null;
-  } catch {/* ignore */}
+  } catch {
+    /* ignore */
+  }
   line(
     'updateRequestSettings({ timeoutMs: 60000 }) persists',
     parsed?.requestSettings?.timeoutMs === 60000,
@@ -299,18 +295,21 @@ const KEY = 'simple-post:prefs';
 
 // ---------- (D) persistence init (code review) ----------
 console.log('\n=== (D) Persistence init (code review) ===');
-const uiSrc = readFileSync(
-  new URL('../src/stores/ui-slice.ts', import.meta.url),
-  'utf8',
-);
+const uiSrc = readFileSync(new URL('../src/stores/ui-slice.ts', import.meta.url), 'utf8');
 const hasLoadPrefs = /function loadPrefs\(\)/.test(uiSrc);
 const readsKeyConst = /const PREFS_KEY = 'simple-post:prefs'/.test(uiSrc);
 const readsKey = /window\.localStorage\.getItem\(PREFS_KEY\)/.test(uiSrc);
 const initialThemeUses = /const initialTheme: Theme = initialPrefs\.theme/.test(uiSrc);
-const initialReqUses = /const initialRequestSettings: RequestSettings = \{[^]*?initialPrefs\.requestSettings/m.test(uiSrc);
-const initialRequestSettingsDefault = /timeoutMs: initialPrefs\.requestSettings\?\.timeoutMs\s*\?\?\s*30000/.test(uiSrc);
-const followRedirectsDefault = /followRedirects: initialPrefs\.requestSettings\?\.followRedirects\s*\?\?\s*true/.test(uiSrc);
-const maxSizeDefault = /maxResponseSizeKb: initialPrefs\.requestSettings\?\.maxResponseSizeKb\s*\?\?\s*5120/.test(uiSrc);
+const initialReqUses =
+  /const initialRequestSettings: RequestSettings = \{[^]*?initialPrefs\.requestSettings/m.test(
+    uiSrc,
+  );
+const initialRequestSettingsDefault =
+  /timeoutMs: initialPrefs\.requestSettings\?\.timeoutMs\s*\?\?\s*30000/.test(uiSrc);
+const followRedirectsDefault =
+  /followRedirects: initialPrefs\.requestSettings\?\.followRedirects\s*\?\?\s*true/.test(uiSrc);
+const maxSizeDefault =
+  /maxResponseSizeKb: initialPrefs\.requestSettings\?\.maxResponseSizeKb\s*\?\?\s*5120/.test(uiSrc);
 
 const allInitOk =
   hasLoadPrefs &&

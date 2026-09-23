@@ -90,9 +90,7 @@ export function SettingsCategory({
           )}
           <div className="min-w-0 flex-1">
             {title && (
-              <h2 className="text-sm font-semibold tracking-tight text-foreground">
-                {title}
-              </h2>
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
             )}
             {(description || meta) && (
               <p className="mt-0.5 text-[11px] text-muted-foreground">

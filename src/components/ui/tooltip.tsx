@@ -12,9 +12,12 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
   const [visible, setVisible] = useState(false);
   const timeoutRef = useRef<number | null>(null);
 
-  useEffect(() => () => {
-    if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
 
   return (
     <span

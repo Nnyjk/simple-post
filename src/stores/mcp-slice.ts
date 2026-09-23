@@ -37,14 +37,10 @@ export const MCP_REFRESH_INTERVAL_MS = 3000;
 // store can detach it on `stopMcpPolling`. The store action is the
 // only consumer so a module-scoped variable (no React state) is fine.
 let _mcpVisibilityHandler: ((this: Document, ev: Event) => unknown) | null = null;
-function _setVisibilityHandler(
-  h: ((this: Document, ev: Event) => unknown) | null,
-): void {
+function _setVisibilityHandler(h: ((this: Document, ev: Event) => unknown) | null): void {
   _mcpVisibilityHandler = h;
 }
-function _getVisibilityHandler():
-  | ((this: Document, ev: Event) => unknown)
-  | null {
+function _getVisibilityHandler(): ((this: Document, ev: Event) => unknown) | null {
   return _mcpVisibilityHandler;
 }
 
@@ -167,10 +163,7 @@ export interface McpSliceActions {
 
 export type McpSlice = McpSliceState & McpSliceActions;
 
-export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
-  set,
-  get,
-) => ({
+export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, get) => ({
   // MCP daemon state — populated lazily by `startMcpPolling()`. The
   // initial `null` lets consumers render a "loading" affordance until
   // the first `refreshMcpStatus()` round-trip completes.
@@ -279,9 +272,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (
         : { ...EMPTY_MCP_STATE, status: 'restarting' },
     });
     try {
-      const result: RestartResult = await invokeCmd<RestartResult>(
-        COMMANDS.mcpDaemonRestart,
-      );
+      const result: RestartResult = await invokeCmd<RestartResult>(COMMANDS.mcpDaemonRestart);
       if (!result.ok) {
         // Rust swallowed the underlying `AppError` and returned
         // `{ ok: false, pid: null, port: null }`. Surface the same

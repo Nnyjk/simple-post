@@ -210,7 +210,11 @@ export interface UiSliceActions {
   updateRequestSettings: (patch: Partial<RequestSettings>) => void;
 
   // actions: new-item modal
-  openNewItem: (opts?: { type?: NewType; parentModuleId?: string; parentCollectionId?: string }) => void;
+  openNewItem: (opts?: {
+    type?: NewType;
+    parentModuleId?: string;
+    parentCollectionId?: string;
+  }) => void;
   closeNewItem: () => void;
   setNewItemType: (type: NewType) => void;
   setNewItemName: (n: string) => void;
@@ -450,9 +454,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
   openSettingsTab: (section) => {
     const state = get();
     if (section) set({ activeSettingsSection: section });
-    const existing = state.openTabs.find(
-      (t) => t.kind === 'settings' && t.id === SETTINGS_TAB_ID,
-    );
+    const existing = state.openTabs.find((t) => t.kind === 'settings' && t.id === SETTINGS_TAB_ID);
     if (existing) {
       set({ activeTabId: SETTINGS_TAB_ID });
       return;
@@ -471,9 +473,10 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
     set((s) => {
       const prev = s.responseHistory[endpointId] ?? [];
       // FIFO cap: drop the oldest entry when over the limit.
-      const next = prev.length >= MAX_HISTORY_PER_ENDPOINT
-        ? [...prev.slice(prev.length - (MAX_HISTORY_PER_ENDPOINT - 1)), response]
-        : [...prev, response];
+      const next =
+        prev.length >= MAX_HISTORY_PER_ENDPOINT
+          ? [...prev.slice(prev.length - (MAX_HISTORY_PER_ENDPOINT - 1)), response]
+          : [...prev, response];
       return {
         responseHistory: { ...s.responseHistory, [endpointId]: next },
       };

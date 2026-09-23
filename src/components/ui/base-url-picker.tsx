@@ -33,9 +33,7 @@ import type { BaseUrlDefinition } from '@/types/domain';
  * named slot; `override` is the per-endpoint custom URL.
  */
 export type BaseUrlSelection =
-  | { kind: 'default' }
-  | { kind: 'definition'; definitionId: string }
-  | { kind: 'override' };
+  { kind: 'default' } | { kind: 'definition'; definitionId: string } | { kind: 'override' };
 
 export interface BaseUrlPickerProps {
   /** The project's baseUrl definitions — drives the dropdown rows. */
@@ -194,9 +192,7 @@ export function BaseUrlPicker({
               iconContainerClass={cn(accentBg, accentBorder, accentText)}
               icon={<Globe className="h-3.5 w-3.5" />}
               primary={defaultDef ? '项目默认' : '项目默认（无）'}
-              secondary={
-                defaultDef ? `→ ${defaultDef.name}` : '该项目尚未设置默认 baseUrl'
-              }
+              secondary={defaultDef ? `→ ${defaultDef.name}` : '该项目尚未设置默认 baseUrl'}
               selectedHint={defaultDef ? '默认' : null}
             />
             {definitions.length > 0 && (
@@ -207,9 +203,7 @@ export function BaseUrlPicker({
             {definitions.map((def) => (
               <Row
                 key={def.id}
-                selected={
-                  selection.kind === 'definition' && selection.definitionId === def.id
-                }
+                selected={selection.kind === 'definition' && selection.definitionId === def.id}
                 onSelect={() => {
                   onSelectionChange({ kind: 'definition', definitionId: def.id });
                   setOpen(false);
@@ -295,9 +289,7 @@ function Row({
           {icon}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-medium leading-tight">
-            {primary}
-          </span>
+          <span className="block truncate text-xs font-medium leading-tight">{primary}</span>
           {secondary && (
             <span className="block truncate font-mono text-[10px] text-muted-foreground/80 leading-tight">
               {secondary}
@@ -305,9 +297,7 @@ function Row({
           )}
         </span>
         {selectedHint && <Badge variant="success">{selectedHint}</Badge>}
-        {selected && (
-          <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
-        )}
+        {selected && <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />}
       </button>
     </li>
   );
