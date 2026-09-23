@@ -11,6 +11,11 @@
     "dev": "vite",
     "dev:split": "node scripts/dev-split.mjs",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "fmt": "cargo fmt --all",
+    "fmt:check": "cargo fmt --all --check",
+    "clippy": "cargo clippy --workspace --all-targets -- -D warnings",
+    "check": "npm run typecheck && npm test && npm run fmt:check && npm run clippy",
     "build:tests": "node scripts/run-mcp-tests.cjs",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -23,8 +28,8 @@
     "tauri:build": "tauri build",
     "tauri:build:debug": "tauri build --debug",
     "tauri:check": "cargo check --manifest-path src-tauri/Cargo.toml",
-    "test": "tsx --test src/lib/tauri-commands.test.ts src/lib/http-build.test.ts src/lib/http.test.ts src/stores/__tests__/mcp-slice.test.ts src/stores/__tests__/crud-slice.test.ts",
-    "test:watch": "tsx --watch --test src/lib/tauri-commands.test.ts src/lib/http-build.test.ts src/lib/http.test.ts src/stores/__tests__/mcp-slice.test.ts src/stores/__tests__/crud-slice.test.ts"
+    "test": "node scripts/run-tests.mjs",
+    "test:watch": "node scripts/run-tests.mjs --watch"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.1",
