@@ -53,7 +53,9 @@ export default defineConfig({
             '@codemirror/lang-json',
             '@codemirror/theme-one-dark',
           ],
-          markdown: ['react-markdown'],
+          // `react-markdown` was swapped for `marked` in the dep audit
+          // (30a0ce5); keep this chunk pointed at what's actually bundled.
+          markdown: ['marked'],
           state: ['zustand'],
         },
       },
