@@ -101,11 +101,8 @@ pub async fn auth_middleware(
     } else {
         // Add `WWW-Authenticate` so well-behaved clients prompt for a token
         // instead of looping on a blank 401.
-        let mut response = (
-            StatusCode::UNAUTHORIZED,
-            "missing or invalid bearer token",
-        )
-            .into_response();
+        let mut response =
+            (StatusCode::UNAUTHORIZED, "missing or invalid bearer token").into_response();
         response.headers_mut().insert(
             header::WWW_AUTHENTICATE,
             axum::http::HeaderValue::from_static("Bearer realm=\"simple-post\""),
@@ -115,10 +112,7 @@ pub async fn auth_middleware(
 }
 
 fn is_public_path(path: &str) -> bool {
-    matches!(
-        path,
-        "/healthz" | "/api/healthz" | "/mcp/healthz" | "/"
-    )
+    matches!(path, "/healthz" | "/api/healthz" | "/mcp/healthz" | "/")
 }
 
 /// Constant-time byte slice equality. From the `subtle` crate's docs

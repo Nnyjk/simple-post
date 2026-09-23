@@ -149,7 +149,11 @@ mod tests {
             AppError::Sqlite(rusqlite::Error::InvalidQuery).code(),
         ];
         let unique: std::collections::HashSet<_> = codes.iter().copied().collect();
-        assert_eq!(unique.len(), codes.len(), "codes must be distinct: {codes:?}");
+        assert_eq!(
+            unique.len(),
+            codes.len(),
+            "codes must be distinct: {codes:?}"
+        );
     }
 
     /// `r2d2::Error` can only be produced by the crate itself, so obtain a

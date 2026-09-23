@@ -263,9 +263,7 @@ pub async fn resolve_capability(
             let pid = pid.to_string();
             let pool_clone = pool.clone();
             let perm = tokio::task::spawn_blocking(move || {
-                crate::db::with_conn(&pool_clone, |c| {
-                    crate::db::permissions::get(c, &pid)
-                })
+                crate::db::with_conn(&pool_clone, |c| crate::db::permissions::get(c, &pid))
             })
             .await
             .map_err(|e| crate::error::AppError::Db(format!("permissions task: {e}")))??;
@@ -315,7 +313,10 @@ mod tests {
     #[test]
     fn at_least_self_always_holds() {
         assert!(permission_at_least(Permission::Read, Permission::Read));
-        assert!(permission_at_least(Permission::ReadCall, Permission::ReadCall));
+        assert!(permission_at_least(
+            Permission::ReadCall,
+            Permission::ReadCall
+        ));
         assert!(permission_at_least(Permission::Full, Permission::Full));
     }
 
@@ -367,10 +368,7 @@ mod tests {
 
     #[test]
     fn required_permission_read_call_class() {
-        assert_eq!(
-            required_permission("api_run_request"),
-            Permission::ReadCall
-        );
+        assert_eq!(required_permission("api_run_request"), Permission::ReadCall);
         assert_eq!(
             required_permission("api_call_endpoint"),
             Permission::ReadCall
@@ -390,13 +388,9 @@ mod tests {
 
     #[test]
     fn permission_string_roundtrip() {
-        for p in [
-            Permission::Read,
-            Permission::ReadCall,
-            Permission::Full,
-        ]
-        .iter()
-        .copied()
+        for p in [Permission::Read, Permission::ReadCall, Permission::Full]
+            .iter()
+            .copied()
         {
             assert_eq!(Permission::parse(p.as_str()), Some(p));
         }
@@ -528,7 +522,11 @@ mod tests {
     async fn resolve_capability_global_preference_takes_when_no_project() {
         let pool = fresh_pool();
         crate::db::with_tx(&pool, |c| {
-            crate::db::preferences::set(c, crate::db::preferences::keys::MCP_POLICY, &"full_access".to_string())
+            crate::db::preferences::set(
+                c,
+                crate::db::preferences::keys::MCP_POLICY,
+                &"full_access".to_string(),
+            )
         })
         .unwrap();
         let cap = resolve_capability(&pool, None).await.unwrap();
@@ -560,7 +558,11 @@ mod tests {
         })
         .unwrap();
         crate::db::with_tx(&pool, |c| {
-            crate::db::preferences::set(c, crate::db::preferences::keys::MCP_POLICY, &"read_only".to_string())
+            crate::db::preferences::set(
+                c,
+                crate::db::preferences::keys::MCP_POLICY,
+                &"read_only".to_string(),
+            )
         })
         .unwrap();
         crate::db::with_tx(&pool, |c| {
@@ -596,7 +598,11 @@ mod tests {
         })
         .unwrap();
         crate::db::with_tx(&pool, |c| {
-            crate::db::preferences::set(c, crate::db::preferences::keys::MCP_POLICY, &"full_access".to_string())
+            crate::db::preferences::set(
+                c,
+                crate::db::preferences::keys::MCP_POLICY,
+                &"full_access".to_string(),
+            )
         })
         .unwrap();
         crate::db::with_tx(&pool, |c| {
@@ -631,7 +637,11 @@ mod tests {
         })
         .unwrap();
         crate::db::with_tx(&pool, |c| {
-            crate::db::preferences::set(c, crate::db::preferences::keys::MCP_POLICY, &"safe_write".to_string())
+            crate::db::preferences::set(
+                c,
+                crate::db::preferences::keys::MCP_POLICY,
+                &"safe_write".to_string(),
+            )
         })
         .unwrap();
         crate::db::with_tx(&pool, |c| {
@@ -649,10 +659,16 @@ mod tests {
         // global=FullAccess + missing project ⇒ effective: SafeWrite.
         let pool = fresh_pool();
         crate::db::with_tx(&pool, |c| {
-            crate::db::preferences::set(c, crate::db::preferences::keys::MCP_POLICY, &"full_access".to_string())
+            crate::db::preferences::set(
+                c,
+                crate::db::preferences::keys::MCP_POLICY,
+                &"full_access".to_string(),
+            )
         })
         .unwrap();
-        let cap = resolve_capability(&pool, Some("nonexistent")).await.unwrap();
+        let cap = resolve_capability(&pool, Some("nonexistent"))
+            .await
+            .unwrap();
         assert_eq!(cap, CapabilityPolicy::SafeWrite);
     }
 }

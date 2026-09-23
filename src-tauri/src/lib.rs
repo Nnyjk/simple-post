@@ -30,9 +30,7 @@ pub mod web_api;
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /
 // `crate::permissions::*` / `crate::http_executor::*` /
 // `crate::mcp_metrics::*` after the workspace extraction (commit 3).
-pub use simple_post_core::{
-    db, domain, error, http_executor, mcp_metrics, permissions,
-};
+pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, permissions};
 
 // Re-export the MCP module from the standalone `simple-post-mcp` crate.
 // The main crate only hosts the embedded daemon + `serve-web` glue;
@@ -126,8 +124,9 @@ pub fn run_mcp(transport: String, port: u16, bind: String) {
             let ctrl_c = tokio::signal::ctrl_c();
             #[cfg(unix)]
             {
-                let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("install SIGTERM handler");
+                let mut sigterm =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("install SIGTERM handler");
                 tokio::select! {
                     _ = ctrl_c => {},
                     _ = sigterm.recv() => {},
@@ -305,9 +304,7 @@ pub fn run() {
             }) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!(
-                        "[gui] failed to read mcp.auto_start, defaulting to off: {e:?}"
-                    );
+                    eprintln!("[gui] failed to read mcp.auto_start, defaulting to off: {e:?}");
                     false
                 }
             };

@@ -14,10 +14,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use simple_post_core::domain::{Project, ProjectPatch};
-use simple_post_core::error::AppError;
 use crate::mcp::{AppState, CallToolResult};
 use crate::tool_fn;
+use simple_post_core::domain::{Project, ProjectPatch};
+use simple_post_core::error::AppError;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ProjectCreateArgs {
@@ -113,7 +113,8 @@ pub(super) async fn tool_project_list(
     _args: Value,
 ) -> Result<CallToolResult, AppError> {
     crate::mcp::check_permission(&state.pool, "global", "project_list").await?;
-    let projects = simple_post_core::db::with_conn(&state.pool, simple_post_core::db::projects::list)?;
+    let projects =
+        simple_post_core::db::with_conn(&state.pool, simple_post_core::db::projects::list)?;
     Ok(CallToolResult::json(projects))
 }
 
@@ -124,7 +125,9 @@ pub(super) async fn tool_project_get(
     let a: super::ProjectIdArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("project_get args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "project_get").await?;
-    let p = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::projects::get(c, &a.project_id))?;
+    let p = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::projects::get(c, &a.project_id)
+    })?;
     Ok(CallToolResult::json(p))
 }
 
@@ -151,8 +154,12 @@ pub(super) async fn tool_project_create(
         updated_at: now,
     };
     let id = p.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::projects::create(c, &p))?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::projects::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::projects::create(c, &p)
+    })?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::projects::get(c, &id)
+    })?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -165,7 +172,12 @@ pub(super) async fn tool_project_update(
     crate::mcp::check_permission(&state.pool, &a.project_id, "project_update").await?;
 
     let patch = ProjectPatch {
-        name: a.patch.as_ref().and_then(|p| p.get("name")).and_then(Value::as_str).map(String::from),
+        name: a
+            .patch
+            .as_ref()
+            .and_then(|p| p.get("name"))
+            .and_then(Value::as_str)
+            .map(String::from),
         description: a
             .patch
             .as_ref()
@@ -174,7 +186,12 @@ pub(super) async fn tool_project_update(
         base_url: None,
         base_url_definitions: None,
         default_base_url_definition_id: None,
-        color: a.patch.as_ref().and_then(|p| p.get("color")).and_then(Value::as_str).map(String::from),
+        color: a
+            .patch
+            .as_ref()
+            .and_then(|p| p.get("color"))
+            .and_then(Value::as_str)
+            .map(String::from),
     };
     let p = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::projects::update(c, &a.project_id, patch)
@@ -189,6 +206,8 @@ pub(super) async fn tool_project_delete(
     let a: ProjectDeleteArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("project_delete args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "project_delete").await?;
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::projects::delete(c, &a.project_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::projects::delete(c, &a.project_id)
+    })?;
     Ok(CallToolResult::json(json!({ "deleted": a.project_id })))
 }

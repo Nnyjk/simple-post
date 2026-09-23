@@ -73,8 +73,6 @@ pub fn parse_http_method(m: &str) -> Result<HttpMethod, crate::error::AppError> 
     })
 }
 
-
-
 // ----- key / value ----------------------------------------------------------
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -100,8 +98,6 @@ pub enum BodyMode {
     Raw,
 }
 
-
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestBody {
@@ -122,8 +118,6 @@ pub enum AuthType {
     Basic,
     Apikey,
 }
-
-
 
 /// Where the apikey is attached. The TS interface declares the field as
 /// `in_` because `in` is a Rust/JS reserved word; serde rename below keeps
@@ -583,7 +577,10 @@ mod tests {
     #[test]
     fn http_method_serializes_uppercase_strings() {
         assert_eq!(serde_json::to_string(&HttpMethod::Get).unwrap(), "\"GET\"");
-        assert_eq!(serde_json::to_string(&HttpMethod::Post).unwrap(), "\"POST\"");
+        assert_eq!(
+            serde_json::to_string(&HttpMethod::Post).unwrap(),
+            "\"POST\""
+        );
     }
 
     #[test]

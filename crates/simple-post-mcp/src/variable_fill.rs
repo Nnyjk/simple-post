@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use simple_post_core::domain::{
-    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, Endpoint, Environment,
-    HttpMethod, Project, RequestBody,
+    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, Endpoint, Environment, HttpMethod,
+    Project, RequestBody,
 };
 use simple_post_core::error::AppError;
 
@@ -91,15 +91,13 @@ pub fn resolve_template(template: &str, vars: &HashMap<String, String>) -> Resol
     let mut missing: Vec<String> = Vec::new();
     let mut seen_missing: HashMap<String, ()> = HashMap::new();
 
-    let resolved = template_replace(template, |key| {
-        match vars.get(key) {
-            Some(v) => v.clone(),
-            None => {
-                if seen_missing.insert(key.to_string(), ()).is_none() {
-                    missing.push(key.to_string());
-                }
-                format!("{{{{{key}}}}}")
+    let resolved = template_replace(template, |key| match vars.get(key) {
+        Some(v) => v.clone(),
+        None => {
+            if seen_missing.insert(key.to_string(), ()).is_none() {
+                missing.push(key.to_string());
             }
+            format!("{{{{{key}}}}}")
         }
     });
 
@@ -245,10 +243,7 @@ pub fn resolve_base_url(
         Some(d) => d,
         None => return (String::new(), BaseUrlSource::None, None),
     };
-    let def = project
-        .base_url_definitions
-        .iter()
-        .find(|d| d.id == def_id);
+    let def = project.base_url_definitions.iter().find(|d| d.id == def_id);
     let url = env.and_then(|e| e.base_urls.get(&def_id));
     if let (Some(_def), Some(u)) = (def, url) {
         if !u.is_empty() {
@@ -431,7 +426,10 @@ fn build_headers(
     }
 
     if let Some(ct) = auto_content_type(body_mode) {
-        if !out.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+        if !out
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        {
             out.push(("Content-Type".to_string(), ct.to_string()));
         }
     }
@@ -441,7 +439,10 @@ fn build_headers(
 
     match (&auth.kind, auth.bearer.as_deref()) {
         (AuthType::Bearer, Some(b)) if !b.is_empty() => {
-            if !out.iter().any(|(k, _)| k.eq_ignore_ascii_case("authorization")) {
+            if !out
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+            {
                 out.push(("Authorization".to_string(), format!("Bearer {b}")));
             }
         }
@@ -490,11 +491,7 @@ fn append_apikey_query(url: String, auth: &AuthConfig) -> String {
     {
         if a.in_ == ApiKeyLocation::Query && !a.key.is_empty() {
             let glue = if url.contains('?') { '&' } else { '?' };
-            return format!(
-                "{url}{glue}{}={}",
-                url_encode(&a.key),
-                url_encode(&a.value)
-            );
+            return format!("{url}{glue}{}={}", url_encode(&a.key), url_encode(&a.value));
         }
     }
     url
@@ -523,7 +520,9 @@ fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{:02X}", b)),
         }
@@ -546,8 +545,7 @@ fn b64_basic(user: &str, pass: &str) -> String {
 /// Basic` so a hand-rolled 30-line encoder beats pulling in the
 /// `base64` crate just for this.
 fn base64_encode(input: &[u8]) -> String {
-    const ALPHA: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     let mut i = 0;
     while i + 3 <= input.len() {
@@ -610,11 +608,12 @@ pub fn resolve_endpoint(
 ) -> Result<ResolvedEndpoint, AppError> {
     let mut missing: Vec<String> = Vec::new();
     let mut seen: HashMap<String, ()> = HashMap::new();
-    let record_missing = |missing: &mut Vec<String>, seen: &mut HashMap<String, ()>, var: String| {
-        if seen.insert(var.clone(), ()).is_none() {
-            missing.push(var);
-        }
-    };
+    let record_missing =
+        |missing: &mut Vec<String>, seen: &mut HashMap<String, ()>, var: String| {
+            if seen.insert(var.clone(), ()).is_none() {
+                missing.push(var);
+            }
+        };
 
     // ---- apply overrides (cheap copy of the relevant fields) ---------
     let mut eff_url = endpoint.url.clone();
@@ -642,9 +641,7 @@ pub fn resolve_endpoint(
     }
 
     // ---- variable pool ------------------------------------------------
-    let vars: HashMap<String, String> = env
-        .map(|e| e.variables.clone())
-        .unwrap_or_default();
+    let vars: HashMap<String, String> = env.map(|e| e.variables.clone()).unwrap_or_default();
 
     // ---- params: substitute vars first, then build the URL append.
     // Doing this in two steps means missing-var tracking and the
@@ -695,7 +692,13 @@ pub fn resolve_endpoint(
     };
 
     // ---- header ordering ---------------------------------------------
-    let headers = build_headers(&eff_headers, &eff_body.mode, &resolved_auth, &vars, &mut missing);
+    let headers = build_headers(
+        &eff_headers,
+        &eff_body.mode,
+        &resolved_auth,
+        &vars,
+        &mut missing,
+    );
 
     Ok(ResolvedEndpoint {
         url: final_url,
@@ -892,7 +895,8 @@ mod tests {
     #[test]
     fn resolve_base_url_override_wins() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://data.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://data.example.com".into());
         let mut ep = minimal_endpoint();
         ep.base_url_override = Some("https://custom.example.com".into());
         ep.base_url_definition_id = Some("data".into());
@@ -905,7 +909,8 @@ mod tests {
     #[test]
     fn resolve_base_url_definition_chosen() {
         let mut env = empty_env();
-        env.base_urls.insert("auth".into(), "https://auth.example.com".into());
+        env.base_urls
+            .insert("auth".into(), "https://auth.example.com".into());
         let mut ep = minimal_endpoint();
         ep.base_url_definition_id = Some("auth".into());
         let project = project_with_defs();
@@ -917,7 +922,8 @@ mod tests {
     #[test]
     fn resolve_base_url_falls_back_to_project_default() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://data.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://data.example.com".into());
         let ep = minimal_endpoint(); // base_url_definition_id = None
         let project = project_with_defs(); // default = "data"
         let (url, src, _) = resolve_base_url(&ep, Some(&env), &project);
@@ -983,7 +989,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_picks_override_over_definition() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://data.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://data.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/users".into();
         ep.base_url_definition_id = Some("data".into());
@@ -996,7 +1003,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_substitutes_vars_in_url_path() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         env.variables.insert("id".into(), "42".into());
         let mut ep = minimal_endpoint();
         ep.url = "/users/{{id}}".into();
@@ -1010,7 +1018,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_collects_missing_vars_across_url_headers_body_auth() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/users/{{user_id}}".into();
         ep.base_url_definition_id = Some("data".into());
@@ -1051,7 +1060,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_bearer_auth_injects_authorization_header() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         env.variables.insert("token".into(), "secret-xyz".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
@@ -1075,7 +1085,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_basic_auth_injects_authorization_header() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         env.variables.insert("u".into(), "alice".into());
         env.variables.insert("p".into(), "wonder".into());
         let mut ep = minimal_endpoint();
@@ -1105,7 +1116,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_apikey_header_injects_custom_header() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         env.variables.insert("k".into(), "ABC123".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
@@ -1135,7 +1147,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_apikey_query_appends_to_url() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         env.variables.insert("k".into(), "Q-VAL".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
@@ -1172,7 +1185,8 @@ mod tests {
         // TS behavior — fetch keeps the last value of a record key,
         // cURL would otherwise emit two `-H` lines for the same name).
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         env.variables.insert("token".into(), "from-env".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
@@ -1206,7 +1220,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_skips_empty_body() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
         ep.base_url_definition_id = Some("data".into());
@@ -1223,7 +1238,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_skips_none_mode() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
         ep.base_url_definition_id = Some("data".into());
@@ -1240,7 +1256,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_auto_content_type_added() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
         ep.base_url_definition_id = Some("data".into());
@@ -1269,7 +1286,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_user_content_type_wins() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/me".into();
         ep.base_url_definition_id = Some("data".into());
@@ -1301,7 +1319,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_appends_enabled_params_to_url() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/search".into();
         ep.base_url_definition_id = Some("data".into());
@@ -1340,7 +1359,8 @@ mod tests {
         // URL already has a query string; params should be appended
         // with `&`, not `?`.
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let mut ep = minimal_endpoint();
         ep.url = "/search?existing=1".into();
         ep.base_url_definition_id = Some("data".into());
@@ -1361,7 +1381,8 @@ mod tests {
     #[test]
     fn resolve_endpoint_applies_url_override() {
         let mut env = empty_env();
-        env.base_urls.insert("data".into(), "https://api.example.com".into());
+        env.base_urls
+            .insert("data".into(), "https://api.example.com".into());
         let ep = minimal_endpoint();
         let project = project_with_defs();
         let overrides = EndpointOverrides {

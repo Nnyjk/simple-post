@@ -180,9 +180,8 @@ pub enum CallToolContent {
 impl CallToolResult {
     /// Convenience: success result wrapping a JSON value (serialized as text).
     pub fn json(value: impl Serialize) -> Self {
-        let text = serde_json::to_string(&value).unwrap_or_else(|e| {
-            format!("{{\"__serialize_error\":\"{}\"}}", e)
-        });
+        let text = serde_json::to_string(&value)
+            .unwrap_or_else(|e| format!("{{\"__serialize_error\":\"{}\"}}", e));
         Self {
             content: vec![CallToolContent::Text { text }],
             is_error: false,
@@ -457,10 +456,12 @@ pub async fn dispatch(
     if let Some(req) = required_capability(name) {
         let policy = resolve_capability(&state.pool, None).await?;
         if !policy.satisfies(req) {
-            return Err(simple_post_core::error::AppError::PermissionDenied(format!(
-                "tool '{name}' requires {:?}, current policy is {:?}",
-                req, policy
-            )));
+            return Err(simple_post_core::error::AppError::PermissionDenied(
+                format!(
+                    "tool '{name}' requires {:?}, current policy is {:?}",
+                    req, policy
+                ),
+            ));
         }
     }
     let entry = tool_table()
@@ -477,10 +478,13 @@ pub async fn dispatch(
 // =========================================================================
 
 /// Pull a required string field out of `args`. Missing or wrong-typed → error.
-pub fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, simple_post_core::error::AppError> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .ok_or_else(|| simple_post_core::error::AppError::Validation(format!("missing or non-string '{key}'")))
+pub fn arg_str<'a>(
+    args: &'a Value,
+    key: &str,
+) -> Result<&'a str, simple_post_core::error::AppError> {
+    args.get(key).and_then(Value::as_str).ok_or_else(|| {
+        simple_post_core::error::AppError::Validation(format!("missing or non-string '{key}'"))
+    })
 }
 
 /// Pull an optional string field. Returns `None` if missing or null.
@@ -490,9 +494,9 @@ pub fn arg_str_opt(args: &Value, key: &str) -> Option<String> {
 
 /// Pull a required u64 field.
 pub fn arg_u64(args: &Value, key: &str) -> Result<u64, simple_post_core::error::AppError> {
-    args.get(key)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| simple_post_core::error::AppError::Validation(format!("missing or non-u64 '{key}'")))
+    args.get(key).and_then(Value::as_u64).ok_or_else(|| {
+        simple_post_core::error::AppError::Validation(format!("missing or non-u64 '{key}'"))
+    })
 }
 
 /// Pull an optional u64 field.
@@ -502,9 +506,9 @@ pub fn arg_u64_opt(args: &Value, key: &str) -> Option<u64> {
 
 /// Pull a required boolean field.
 pub fn arg_bool(args: &Value, key: &str) -> Result<bool, simple_post_core::error::AppError> {
-    args.get(key)
-        .and_then(Value::as_bool)
-        .ok_or_else(|| simple_post_core::error::AppError::Validation(format!("missing or non-bool '{key}'")))
+    args.get(key).and_then(Value::as_bool).ok_or_else(|| {
+        simple_post_core::error::AppError::Validation(format!("missing or non-bool '{key}'"))
+    })
 }
 
 /// Pull an optional boolean field. Defaults to `false` if missing.
@@ -545,7 +549,8 @@ mod tests {
     /// smoke tests that only exercise dispatch + arg parsing, a dummy is fine.
     fn test_state() -> Arc<AppState> {
         Arc::new(AppState {
-            pool: simple_post_core::db::init(&std::env::temp_dir().join("simple-post-mcp-test")).unwrap(),
+            pool: simple_post_core::db::init(&std::env::temp_dir().join("simple-post-mcp-test"))
+                .unwrap(),
             started_at: Instant::now(),
             metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
         })

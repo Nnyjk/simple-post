@@ -35,9 +35,8 @@ pub fn list_by_project(
 }
 
 pub fn get(conn: &mut Connection, id: &str) -> Result<BaseUrlDefinition, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, description FROM base_url_definitions WHERE id = ?1",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, description FROM base_url_definitions WHERE id = ?1")?;
     let mut rows = stmt.query(params![id])?;
     match rows.next()? {
         Some(row) => row_to_def(row).map_err(AppError::Sqlite),
@@ -49,7 +48,11 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<BaseUrlDefinition, AppErro
 // Writes.
 // -------------------------------------------------------------------------
 
-pub fn create(conn: &mut Connection, def: &BaseUrlDefinition, project_id: &str) -> Result<(), AppError> {
+pub fn create(
+    conn: &mut Connection,
+    def: &BaseUrlDefinition,
+    project_id: &str,
+) -> Result<(), AppError> {
     // `sort_order` defaults to 0 on insert (per the schema). Re-numbers
     // can be applied with `reorder` if the renderer asks for it.
     conn.execute(
@@ -98,7 +101,10 @@ pub fn update(
 }
 
 pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
-    let rows = conn.execute("DELETE FROM base_url_definitions WHERE id = ?1", params![id])?;
+    let rows = conn.execute(
+        "DELETE FROM base_url_definitions WHERE id = ?1",
+        params![id],
+    )?;
     if rows == 0 {
         return Err(AppError::NotFound(format!("base_url_definition {id}")));
     }
@@ -237,7 +243,10 @@ mod tests {
         })
         .unwrap();
         let proj = db::with_conn(&pool, |c| db::projects::get(c, "p_demo")).unwrap();
-        assert_eq!(proj.default_base_url_definition_id.as_deref(), Some("def_alt"));
+        assert_eq!(
+            proj.default_base_url_definition_id.as_deref(),
+            Some("def_alt")
+        );
     }
 
     #[test]
@@ -255,7 +264,8 @@ mod tests {
     #[test]
     fn set_default_unknown_project_returns_not_found() {
         let pool = fresh_pool();
-        let err = db::with_tx(&pool, |c| set_default(c, "p_ghost", Some("def_default"))).unwrap_err();
+        let err =
+            db::with_tx(&pool, |c| set_default(c, "p_ghost", Some("def_default"))).unwrap_err();
         assert_eq!(err.code(), "not_found");
     }
 }

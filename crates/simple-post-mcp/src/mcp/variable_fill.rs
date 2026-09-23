@@ -19,10 +19,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use simple_post_core::domain::Endpoint;
-use simple_post_core::error::AppError;
 use crate::mcp::{arg_str, AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
+use simple_post_core::domain::Endpoint;
+use simple_post_core::error::AppError;
 
 // =========================================================================
 // Args shapes
@@ -154,12 +154,18 @@ async fn tool_api_resolve_endpoint(
         .ok();
 
     let env = if let Some(env_id) = endpoint.environment_id.as_deref() {
-        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::get(c, env_id)).ok()
+        simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::environments::get(c, env_id)
+        })
+        .ok()
     } else {
         None
     };
     let project = if !project_id.is_empty() {
-        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::projects::get(c, &project_id)).ok()
+        simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::projects::get(c, &project_id)
+        })
+        .ok()
     } else {
         None
     };
@@ -171,8 +177,12 @@ async fn tool_api_resolve_endpoint(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    let resolved =
-        crate::variable_fill::resolve_endpoint(&endpoint, env.as_ref(), project_ref, Some(&overrides))?;
+    let resolved = crate::variable_fill::resolve_endpoint(
+        &endpoint,
+        env.as_ref(),
+        project_ref,
+        Some(&overrides),
+    )?;
 
     Ok(CallToolResult::json(json!({
         "method": resolved.method,
@@ -214,8 +224,9 @@ async fn tool_api_validate_endpoint(
 /// the call. Falls back to an empty string (which the permission layer
 /// treats as "global-ish").
 fn collection_project_id(pool: &simple_post_core::db::DbPool, collection_id: &str) -> String {
-    if let Ok(coll) = simple_post_core::db::with_conn(pool, |c| simple_post_core::db::collections::get(c, collection_id))
-    {
+    if let Ok(coll) = simple_post_core::db::with_conn(pool, |c| {
+        simple_post_core::db::collections::get(c, collection_id)
+    }) {
         if let Ok(module) = simple_post_core::db::with_conn(pool, |c| {
             simple_post_core::db::modules::get(c, &coll.module_id)
         }) {
@@ -343,12 +354,12 @@ static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::doma
 mod tests {
     use super::*;
     use crate::mcp::arg_str_opt;
-    use std::sync::Arc;
     use simple_post_core::domain::{
         ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, HttpMethod,
         KeyValue, RequestBody,
     };
     use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
     use std::time::Instant;
 
     /// Per-call counter that disambiguates temp dirs when several tests
@@ -427,7 +438,12 @@ mod tests {
 
     #[test]
     fn validate_endpoint_passes_for_well_formed_endpoint() {
-        let endpoint = ep("https://api.example.com/users", AuthConfig::default(), BodyMode::None, "");
+        let endpoint = ep(
+            "https://api.example.com/users",
+            AuthConfig::default(),
+            BodyMode::None,
+            "",
+        );
         let issues = validate(&endpoint);
         assert!(issues.is_empty(), "expected no issues, got {issues:?}");
     }

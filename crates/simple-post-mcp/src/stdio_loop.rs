@@ -56,7 +56,11 @@ pub async fn run(
             Ok(v) => v,
             Err(e) => {
                 let (code, msg) = to_rpc_error(ClientError::BadFrame(e.to_string()));
-                writeln!(out, "{}", json!({"jsonrpc":"2.0","id":null,"error":{"code":code,"message":msg}}))?;
+                writeln!(
+                    out,
+                    "{}",
+                    json!({"jsonrpc":"2.0","id":null,"error":{"code":code,"message":msg}})
+                )?;
                 out.flush()?;
                 continue;
             }
@@ -80,10 +84,7 @@ pub async fn run(
                             if let Some(arr) = tools.as_array_mut() {
                                 let before = arr.len();
                                 arr.retain(|t| {
-                                    let name = t
-                                        .get("name")
-                                        .and_then(|n| n.as_str())
-                                        .unwrap_or("");
+                                    let name = t.get("name").and_then(|n| n.as_str()).unwrap_or("");
                                     filter_tools(name, cap_override)
                                 });
                                 let after = arr.len();
@@ -101,7 +102,9 @@ pub async fn run(
                 }
                 Err(e) => {
                     let (code, msg) = to_rpc_error(e);
-                    Some(json!({"jsonrpc":"2.0","id":id.clone().unwrap_or(Value::Null),"error":{"code":code,"message":msg}}))
+                    Some(
+                        json!({"jsonrpc":"2.0","id":id.clone().unwrap_or(Value::Null),"error":{"code":code,"message":msg}}),
+                    )
                 }
             }
         } else {
@@ -109,7 +112,9 @@ pub async fn run(
                 Ok(v) => Some(v),
                 Err(e) => {
                     let (code, msg) = to_rpc_error(e);
-                    Some(json!({"jsonrpc":"2.0","id":id.clone().unwrap_or(Value::Null),"error":{"code":code,"message":msg}}))
+                    Some(
+                        json!({"jsonrpc":"2.0","id":id.clone().unwrap_or(Value::Null),"error":{"code":code,"message":msg}}),
+                    )
                 }
             }
         };

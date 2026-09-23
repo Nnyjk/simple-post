@@ -19,10 +19,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use simple_post_core::domain::{Endpoint, EndpointPatch, RequestBody};
-use simple_post_core::error::AppError;
 use crate::mcp::{arg_str, arg_str_opt, AppState, CallToolResult};
 use crate::tool_fn;
+use simple_post_core::domain::{Endpoint, EndpointPatch, RequestBody};
+use simple_post_core::error::AppError;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct EndpointCreateArgs {
@@ -252,7 +252,8 @@ pub(super) async fn tool_endpoint_get(
     let ep = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id =
+        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_get").await?;
     Ok(CallToolResult::json(ep))
 }
@@ -326,8 +327,12 @@ pub(super) async fn tool_endpoint_create(
         updated_at: now,
     };
     let id = ep.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::create(c, &ep))?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::endpoints::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::endpoints::create(c, &ep)
+    })?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &id)
+    })?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -339,12 +344,16 @@ pub(super) async fn tool_endpoint_update(
     let ep = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoints::get(c, &endpoint_id)
     })?;
-    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id =
+        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
 
     let patch_obj = args.get("patch").cloned().unwrap_or(Value::Null);
     let patch = EndpointPatch {
-        name: patch_obj.get("name").and_then(Value::as_str).map(String::from),
+        name: patch_obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(String::from),
         description: patch_obj
             .get("description")
             .map(|v| v.as_str().map(String::from)),
@@ -352,7 +361,10 @@ pub(super) async fn tool_endpoint_update(
             .get("method")
             .and_then(Value::as_str)
             .and_then(|m| simple_post_core::domain::parse_http_method(m).ok()),
-        url: patch_obj.get("url").and_then(Value::as_str).map(String::from),
+        url: patch_obj
+            .get("url")
+            .and_then(Value::as_str)
+            .map(String::from),
         environment_id: patch_obj
             .get("environment_id")
             .map(|v| v.as_str().map(String::from)),
@@ -362,16 +374,26 @@ pub(super) async fn tool_endpoint_update(
         base_url_override: patch_obj
             .get("base_url_override")
             .map(|v| v.as_str().map(String::from)),
-        params: patch_obj.get("params").and_then(|v| serde_json::from_value(v.clone()).ok()),
-        headers: patch_obj.get("headers").and_then(|v| serde_json::from_value(v.clone()).ok()),
-        body: patch_obj.get("body").and_then(|v| serde_json::from_value(v.clone()).ok()),
-        auth: patch_obj.get("auth").and_then(|v| serde_json::from_value(v.clone()).ok()),
+        params: patch_obj
+            .get("params")
+            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+        headers: patch_obj
+            .get("headers")
+            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+        body: patch_obj
+            .get("body")
+            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+        auth: patch_obj
+            .get("auth")
+            .and_then(|v| serde_json::from_value(v.clone()).ok()),
         docs: None,
         notes: None,
-        tags: patch_obj
-            .get("tags")
-            .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(Value::as_str).map(String::from).collect()),
+        tags: patch_obj.get("tags").and_then(Value::as_array).map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(String::from)
+                .collect()
+        }),
         sort_order: patch_obj.get("sort_order").and_then(Value::as_i64),
     };
     let updated = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -389,7 +411,8 @@ pub(super) async fn tool_endpoint_delete(
     let ep = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id =
+        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_delete").await?;
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::endpoints::delete(c, &a.endpoint_id)
@@ -406,7 +429,8 @@ pub(super) async fn tool_endpoint_duplicate(
     let ep = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id =
+        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_create").await?;
 
     let now = simple_post_core::domain::now_ms();
@@ -416,8 +440,12 @@ pub(super) async fn tool_endpoint_duplicate(
     dup.created_at = now;
     dup.updated_at = now;
     let id = dup.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::create(c, &dup))?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::endpoints::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::endpoints::create(c, &dup)
+    })?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoints::get(c, &id)
+    })?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -430,7 +458,8 @@ pub(super) async fn tool_endpoint_move(
     let ep = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoints::get(c, &a.endpoint_id)
     })?;
-    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
+    let project_id =
+        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
 
     // The DB layer's `endpoints::update` doesn't accept a new
@@ -446,8 +475,12 @@ pub(super) async fn tool_endpoint_move(
     moved.created_at = now;
     moved.updated_at = now;
     let new_id = moved.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::delete(c, &a.endpoint_id))?;
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::endpoints::create(c, &moved))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::endpoints::delete(c, &a.endpoint_id)
+    })?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::endpoints::create(c, &moved)
+    })?;
     Ok(CallToolResult::json(json!({
         "endpoint_id": new_id,
         "new_collection_id": a.new_collection_id,
@@ -498,7 +531,9 @@ fn build_auth(
 // them with `#[cfg(test)]` so production callers can't see them.
 
 #[cfg(test)]
-pub(super) fn __test_parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyMode, AppError> {
+pub(super) fn __test_parse_body_mode(
+    s: &str,
+) -> Result<simple_post_core::domain::BodyMode, AppError> {
     parse_body_mode(s)
 }
 

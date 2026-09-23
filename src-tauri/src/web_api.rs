@@ -351,11 +351,11 @@ async fn healthz() -> Json<HealthDto> {
     })
 }
 
-async fn projects_list(
-    State(s): State<Arc<WebState>>,
-) -> Result<Json<Value>, HttpErrorResponse> {
+async fn projects_list(State(s): State<Arc<WebState>>) -> Result<Json<Value>, HttpErrorResponse> {
     let rows = db::with_conn(&s.pool, db::projects::list).map_err(map_app_error)?;
-    Ok(Json(serde_json::to_value(rows).unwrap_or_else(|_| json!([]))))
+    Ok(Json(
+        serde_json::to_value(rows).unwrap_or_else(|_| json!([])),
+    ))
 }
 
 async fn projects_get(
@@ -371,11 +371,13 @@ async fn projects_create(
     Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     ensure_server_id(&mut body);
-    let project: crate::domain::Project =
-        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
-    db::with_tx(&s.pool, |c| db::projects::create(c, &project))
-        .map_err(map_app_error)?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(&project).unwrap_or(Value::Null))))
+    let project: crate::domain::Project = serde_json::from_value(body)
+        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    db::with_tx(&s.pool, |c| db::projects::create(c, &project)).map_err(map_app_error)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(&project).unwrap_or(Value::Null)),
+    ))
 }
 
 async fn projects_update(
@@ -416,9 +418,7 @@ async fn http_send(
     Ok(Json(http_executor::execute(&input).await))
 }
 
-async fn mcp_status(
-    State(s): State<Arc<WebState>>,
-) -> Json<McpStatusDto> {
+async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<McpStatusDto> {
     Json(s.daemon.snapshot().into())
 }
 
@@ -471,7 +471,9 @@ async fn mcp_capability_put(
             ))))
         }
     };
-    if let Err(e) = crate::db::with_conn(&pool, |c| crate::db::preferences::set_mcp_policy(c, parsed)) {
+    if let Err(e) =
+        crate::db::with_conn(&pool, |c| crate::db::preferences::set_mcp_policy(c, parsed))
+    {
         return Err(map_app_error(e));
     }
     Ok(Json(CapabilityResponse { policy: parsed }))
@@ -490,7 +492,11 @@ async fn mcp_capability_list_tools(
         metrics: std::sync::Arc::new(crate::mcp_metrics::McpMetrics::new()),
     };
     Ok(Json(
-        crate::mcp::tool_descriptors(&state).await.into_iter().map(|t| t.name).collect(),
+        crate::mcp::tool_descriptors(&state)
+            .await
+            .into_iter()
+            .map(|t| t.name)
+            .collect(),
     ))
 }
 
@@ -520,16 +526,12 @@ async fn mcp_start(
     }
 }
 
-async fn mcp_stop(
-    State(s): State<Arc<WebState>>,
-) -> Result<Json<&'static str>, HttpErrorResponse> {
+async fn mcp_stop(State(s): State<Arc<WebState>>) -> Result<Json<&'static str>, HttpErrorResponse> {
     let _ = s.daemon.shutdown().await;
     Ok(Json("stopped"))
 }
 
-async fn preferences_get(
-    State(s): State<Arc<WebState>>,
-) -> Result<Json<Value>, HttpErrorResponse> {
+async fn preferences_get(State(s): State<Arc<WebState>>) -> Result<Json<Value>, HttpErrorResponse> {
     let pairs = db::with_conn(&s.pool, db::preferences::list_all).map_err(map_app_error)?;
     let mut out = serde_json::Map::new();
     for (k, v) in pairs {
@@ -551,8 +553,7 @@ async fn preferences_put(
     // typed values consistently.
     let raw = serde_json::to_string(&body.value)
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
-    db::with_tx(&s.pool, |c| db::preferences::set(c, &body.key, &raw))
-        .map_err(map_app_error)?;
+    db::with_tx(&s.pool, |c| db::preferences::set(c, &body.key, &raw)).map_err(map_app_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -579,7 +580,9 @@ async fn modules_list(
             .map_err(map_app_error)?,
         None => db::with_conn(&s.pool, db::modules::list_all).map_err(map_app_error)?,
     };
-    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+    Ok(Json(
+        serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
+    ))
 }
 
 async fn modules_create(
@@ -591,10 +594,13 @@ async fn modules_create(
     // timestamp fields so `#[serde(default)]` on those isn't needed —
     // but `id` is server-stamped via `ensure_server_id` so the SPA can
     // ship name/description/sortOrder/etc. without a hand-rolled id.
-    let module: crate::domain::Module =
-        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    let module: crate::domain::Module = serde_json::from_value(body)
+        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
     db::with_tx(&s.pool, |c| db::modules::create(c, &module)).map_err(map_app_error)?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(&module).unwrap_or(Value::Null))))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(&module).unwrap_or(Value::Null)),
+    ))
 }
 
 async fn modules_update(
@@ -636,11 +642,15 @@ async fn collections_list(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
     let rows = match params.get("moduleId") {
-        Some(module_id) => db::with_conn(&s.pool, |c| db::collections::list_by_module(c, module_id))
-            .map_err(map_app_error)?,
+        Some(module_id) => {
+            db::with_conn(&s.pool, |c| db::collections::list_by_module(c, module_id))
+                .map_err(map_app_error)?
+        }
         None => db::with_conn(&s.pool, db::collections::list_all).map_err(map_app_error)?,
     };
-    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+    Ok(Json(
+        serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
+    ))
 }
 
 async fn collections_create(
@@ -648,10 +658,13 @@ async fn collections_create(
     Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     ensure_server_id(&mut body);
-    let collection: crate::domain::Collection =
-        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    let collection: crate::domain::Collection = serde_json::from_value(body)
+        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
     db::with_tx(&s.pool, |c| db::collections::create(c, &collection)).map_err(map_app_error)?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(&collection).unwrap_or(Value::Null))))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(&collection).unwrap_or(Value::Null)),
+    ))
 }
 
 async fn collections_update(
@@ -701,13 +714,15 @@ async fn endpoints_list(
     // can filter the unfiltered list client-side until a richer db
     // function lands.
     let rows = match params.get("collectionId") {
-        Some(collection_id) => {
-            db::with_conn(&s.pool, |c| db::endpoints::list_by_collection(c, collection_id))
-                .map_err(map_app_error)?
-        }
+        Some(collection_id) => db::with_conn(&s.pool, |c| {
+            db::endpoints::list_by_collection(c, collection_id)
+        })
+        .map_err(map_app_error)?,
         None => db::with_conn(&s.pool, db::endpoints::list_all).map_err(map_app_error)?,
     };
-    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+    Ok(Json(
+        serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
+    ))
 }
 
 async fn endpoints_get(
@@ -729,7 +744,9 @@ async fn endpoints_search(
         db::endpoints::search(c, body.query.as_deref(), body.method.as_deref(), tags_slice)
     })
     .map_err(map_app_error)?;
-    Ok(Json(serde_json::to_value(rows).unwrap_or_else(|_| json!([]))))
+    Ok(Json(
+        serde_json::to_value(rows).unwrap_or_else(|_| json!([])),
+    ))
 }
 
 async fn endpoints_create(
@@ -767,7 +784,10 @@ async fn endpoints_create(
         updated_at: now,
     };
     db::with_tx(&s.pool, |c| db::endpoints::create(c, &endpoint)).map_err(map_app_error)?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(&endpoint).unwrap_or(Value::Null))))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(&endpoint).unwrap_or(Value::Null)),
+    ))
 }
 
 async fn endpoints_update(
@@ -792,8 +812,8 @@ async fn endpoints_duplicate(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
 ) -> Result<Json<String>, HttpErrorResponse> {
-    let new_id = db::with_tx(&s.pool, |c| db::endpoints::duplicate(c, &id))
-        .map_err(map_app_error)?;
+    let new_id =
+        db::with_tx(&s.pool, |c| db::endpoints::duplicate(c, &id)).map_err(map_app_error)?;
     Ok(Json(new_id))
 }
 
@@ -815,13 +835,15 @@ async fn environments_list(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
     let rows = match params.get("projectId") {
-        Some(project_id) => {
-            db::with_conn(&s.pool, |c| db::environments::list_by_project(c, project_id))
-                .map_err(map_app_error)?
-        }
+        Some(project_id) => db::with_conn(&s.pool, |c| {
+            db::environments::list_by_project(c, project_id)
+        })
+        .map_err(map_app_error)?,
         None => db::with_conn(&s.pool, db::environments::list_all).map_err(map_app_error)?,
     };
-    Ok(Json(serde_json::to_value(&rows).unwrap_or_else(|_| json!([]))))
+    Ok(Json(
+        serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
+    ))
 }
 
 async fn environments_create(
@@ -829,10 +851,13 @@ async fn environments_create(
     Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     ensure_server_id(&mut body);
-    let env: crate::domain::Environment =
-        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    let env: crate::domain::Environment = serde_json::from_value(body)
+        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
     db::with_tx(&s.pool, |c| db::environments::create(c, &env)).map_err(map_app_error)?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(&env).unwrap_or(Value::Null))))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(&env).unwrap_or(Value::Null)),
+    ))
 }
 
 async fn environments_update(
@@ -840,8 +865,10 @@ async fn environments_update(
     Path(env_id): Path<String>,
     Json(patch): Json<crate::domain::EnvironmentPatch>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let row = db::with_tx(&s.pool, |c| db::environments::update(c, &env_id, patch.clone()))
-        .map_err(map_app_error)?;
+    let row = db::with_tx(&s.pool, |c| {
+        db::environments::update(c, &env_id, patch.clone())
+    })
+    .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 
@@ -904,11 +931,14 @@ async fn base_url_defs_create(
     Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     ensure_server_id(&mut body);
-    let def: crate::domain::BaseUrlDefinition =
-        serde_json::from_value(body).map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    let def: crate::domain::BaseUrlDefinition = serde_json::from_value(body)
+        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
     db::with_tx(&s.pool, |c| db::base_url_defs::create(c, &def, &project_id))
         .map_err(map_app_error)?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(&def).unwrap_or(Value::Null))))
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::to_value(&def).unwrap_or(Value::Null)),
+    ))
 }
 
 async fn base_url_defs_update(
@@ -962,10 +992,9 @@ async fn request_settings_get(
     // Missing row → `unwrap_or_default()`. Matches the Tauri command's
     // "always returns a value" contract so the renderer can call this
     // unconditionally.
-    let stored: Option<crate::domain::RequestSettings> = db::with_conn(&s.pool, |c| {
-        db::preferences::get(c, REQUEST_SETTINGS_KEY)
-    })
-    .map_err(map_app_error)?;
+    let stored: Option<crate::domain::RequestSettings> =
+        db::with_conn(&s.pool, |c| db::preferences::get(c, REQUEST_SETTINGS_KEY))
+            .map_err(map_app_error)?;
     let settings = stored.unwrap_or_default();
     Ok(Json(serde_json::to_value(&settings).unwrap_or(Value::Null)))
 }
@@ -978,8 +1007,10 @@ async fn request_settings_put(
     // `RequestSettingsPatch`, we accept the entire struct and write
     // it back verbatim. Callers wanting partial updates can fall
     // back to `/api/preferences` (`{"key": "request_settings", "value": ...}`).
-    db::with_tx(&s.pool, |c| db::preferences::set(c, REQUEST_SETTINGS_KEY, &body))
-        .map_err(map_app_error)?;
+    db::with_tx(&s.pool, |c| {
+        db::preferences::set(c, REQUEST_SETTINGS_KEY, &body)
+    })
+    .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&body).unwrap_or(Value::Null)))
 }
 
@@ -993,8 +1024,8 @@ async fn permissions_get(
     // serializes to a lowercase string via
     // `#[serde(rename_all = "lowercase")]`). The TS caller already
     // has this contract on the IPC side.
-    let perm = db::with_conn(&s.pool, |c| db::permissions::get(c, &project_id))
-        .map_err(map_app_error)?;
+    let perm =
+        db::with_conn(&s.pool, |c| db::permissions::get(c, &project_id)).map_err(map_app_error)?;
     Ok(Json(perm.as_str().to_string()))
 }
 
@@ -1012,8 +1043,7 @@ async fn permissions_set(
             body.permission
         )))
     })?;
-    db::with_tx(&s.pool, |c| db::permissions::set(c, &project_id, perm))
-        .map_err(map_app_error)?;
+    db::with_tx(&s.pool, |c| db::permissions::set(c, &project_id, perm)).map_err(map_app_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1101,7 +1131,10 @@ async fn serve_file_or_index(spa_dir: PathBuf, rel: &str) -> Response {
         }
         Err(_) => {
             if rel == "index.html" {
-                (StatusCode::NOT_FOUND, "index.html missing — run `npm run build`")
+                (
+                    StatusCode::NOT_FOUND,
+                    "index.html missing — run `npm run build`",
+                )
                     .into_response()
             } else {
                 // SPA fallback: serve the shell. Same async fn, but
@@ -1157,7 +1190,9 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/projects", get(projects_list).post(projects_create))
         .route(
             "/api/projects/:id",
-            get(projects_get).patch(projects_update).delete(projects_delete),
+            get(projects_get)
+                .patch(projects_update)
+                .delete(projects_delete),
         )
         .route("/api/http/send", post(http_send))
         // ---- modules ----
@@ -1170,7 +1205,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             patch(modules_update).delete(modules_delete),
         )
         // ---- collections ----
-        .route("/api/collections", get(collections_list).post(collections_create))
+        .route(
+            "/api/collections",
+            get(collections_list).post(collections_create),
+        )
         .route("/api/collections/move", post(collections_move))
         .route(
             "/api/collections/:id",
@@ -1184,11 +1222,16 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/endpoints/move", post(endpoints_move))
         .route(
             "/api/endpoints/:id",
-            get(endpoints_get).patch(endpoints_update).delete(endpoints_delete),
+            get(endpoints_get)
+                .patch(endpoints_update)
+                .delete(endpoints_delete),
         )
         .route("/api/endpoints/:id/duplicate", post(endpoints_duplicate))
         // ---- environments ----
-        .route("/api/environments", get(environments_list).post(environments_create))
+        .route(
+            "/api/environments",
+            get(environments_list).post(environments_create),
+        )
         // `/active` (literal) before `/:envId` (param) for the same
         // radix-tree precedence reason.
         .route("/api/environments/active", post(environments_set_active))
@@ -1196,10 +1239,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/environments/:envId",
             patch(environments_update).delete(environments_delete),
         )
-        .route(
-            "/api/environments/:envId/vars",
-            post(environments_set_var),
-        )
+        .route("/api/environments/:envId/vars", post(environments_set_var))
         .route(
             "/api/environments/:envId/baseurls",
             post(environments_set_baseurl),
@@ -1238,10 +1278,16 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/mcp/restart", post(mcp_restart))
         .route("/api/mcp/proxy-path", get(mcp_proxy_path))
         // ---- mcp capability policy (commit 1) ----
-        .route("/api/mcp/capability", get(mcp_capability_get).put(mcp_capability_put))
+        .route(
+            "/api/mcp/capability",
+            get(mcp_capability_get).put(mcp_capability_put),
+        )
         .route("/api/mcp/capability/tools", get(mcp_capability_list_tools))
         // ---- preferences ----
-        .route("/api/preferences", get(preferences_get).put(preferences_put))
+        .route(
+            "/api/preferences",
+            get(preferences_get).put(preferences_put),
+        )
         .with_state(state_arc.clone());
 
     // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools` — the AI client
@@ -1259,22 +1305,17 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/mcp",
             post(move |body: String| mcp_json_rpc_post(mcp_app_state, body)),
         )
-        .route(
-            "/mcp/healthz",
-            get(move || mcp_healthz(mcp_app_state_2)),
-        )
-        .route(
-            "/mcp/tools",
-            get(move || mcp_tools(mcp_app_state_3)),
-        );
+        .route("/mcp/healthz", get(move || mcp_healthz(mcp_app_state_2)))
+        .route("/mcp/tools", get(move || mcp_tools(mcp_app_state_3)));
 
     // Static SPA. `ServeDir` handles `/assets/*` with proper Range /
     // ETag / Last-Modified headers; its fallback returns `index.html`
     // for client-side routing.
     let assets_dir = spa_dir.join("assets");
     let spa_clone = spa_dir.clone();
-    let serve_dir = ServeDir::new(assets_dir)
-        .fallback(tower_http::services::fs::ServeFile::new(spa_dir.join("index.html")));
+    let serve_dir = ServeDir::new(assets_dir).fallback(tower_http::services::fs::ServeFile::new(
+        spa_dir.join("index.html"),
+    ));
 
     // Pull base_path before the auth layer consumes `state` (the layer
     // takes ownership of a clone of `state.password`).
@@ -1308,17 +1349,17 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
 /// `daemon_http::dispatch_mcp_request` (the core of the daemon's
 /// `/mcp` handler) so the `serve-web` shape can serve AI clients on
 /// the same port without spawning a daemon child.
-async fn mcp_json_rpc_post(
-    state: Arc<McpAppState>,
-    body: String,
-) -> axum::response::Response {
+async fn mcp_json_rpc_post(state: Arc<McpAppState>, body: String) -> axum::response::Response {
     daemon_http::dispatch_mcp_request(state, body).await
 }
 
 async fn mcp_healthz(state: Arc<McpAppState>) -> axum::Json<serde_json::Value> {
     use daemon_http::HealthzResponse;
     let uptime_ms = state.started_at.elapsed().as_millis() as u64;
-    let requests_handled = state.metrics.requests_handled.load(std::sync::atomic::Ordering::Relaxed);
+    let requests_handled = state
+        .metrics
+        .requests_handled
+        .load(std::sync::atomic::Ordering::Relaxed);
     let registered_tools = crate::mcp::registered_tool_names();
     axum::Json(serde_json::json!(HealthzResponse {
         status: "ok",
@@ -1360,10 +1401,7 @@ pub async fn serve(
         // override the persisted value, but defaults to honouring it.
         let want = db::with_conn(&pool, db::preferences::mcp_auto_start)?;
         if want {
-            if let Err(e) = daemon
-                .restart_without_app_handle(&data_dir)
-                .await
-            {
+            if let Err(e) = daemon.restart_without_app_handle(&data_dir).await {
                 eprintln!("[serve-web] ensure_started failed: {e:?}");
             }
         } else {
@@ -1489,39 +1527,228 @@ pub struct RouteSpec {
 pub fn public_route_specs() -> Vec<RouteSpec> {
     vec![
         // ---- health -----------------------------------------------------
-        RouteSpec { method: "GET",    path: "/api/healthz",      summary: "Liveness probe (no auth)",              stability: "public",   request: None,                 response: Some("HealthzResponse") },
+        RouteSpec {
+            method: "GET",
+            path: "/api/healthz",
+            summary: "Liveness probe (no auth)",
+            stability: "public",
+            request: None,
+            response: Some("HealthzResponse"),
+        },
         // ---- projects ---------------------------------------------------
-        RouteSpec { method: "GET",    path: "/api/projects",     summary: "List projects",                          stability: "public",   request: None,                 response: Some("Project[]") },
-        RouteSpec { method: "POST",   path: "/api/projects",     summary: "Create a project",                       stability: "public",   request: Some("CreateProject"),   response: Some("Project") },
-        RouteSpec { method: "GET",    path: "/api/projects/:id", summary: "Get one project",                        stability: "public",   request: None,                 response: Some("Project") },
-        RouteSpec { method: "PATCH",  path: "/api/projects/:id", summary: "Patch a project",                        stability: "public",   request: Some("ProjectPatch"),   response: Some("Project") },
-        RouteSpec { method: "DELETE", path: "/api/projects/:id", summary: "Delete a project",                       stability: "public",   request: None,                 response: Some("DeleteAck") },
+        RouteSpec {
+            method: "GET",
+            path: "/api/projects",
+            summary: "List projects",
+            stability: "public",
+            request: None,
+            response: Some("Project[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/projects",
+            summary: "Create a project",
+            stability: "public",
+            request: Some("CreateProject"),
+            response: Some("Project"),
+        },
+        RouteSpec {
+            method: "GET",
+            path: "/api/projects/:id",
+            summary: "Get one project",
+            stability: "public",
+            request: None,
+            response: Some("Project"),
+        },
+        RouteSpec {
+            method: "PATCH",
+            path: "/api/projects/:id",
+            summary: "Patch a project",
+            stability: "public",
+            request: Some("ProjectPatch"),
+            response: Some("Project"),
+        },
+        RouteSpec {
+            method: "DELETE",
+            path: "/api/projects/:id",
+            summary: "Delete a project",
+            stability: "public",
+            request: None,
+            response: Some("DeleteAck"),
+        },
         // ---- modules ----------------------------------------------------
-        RouteSpec { method: "GET",    path: "/api/modules",      summary: "List modules in a project",              stability: "public",   request: None,                 response: Some("Module[]") },
-        RouteSpec { method: "POST",   path: "/api/modules",      summary: "Create a module",                        stability: "public",   request: Some("CreateModule"),    response: Some("Module") },
-        RouteSpec { method: "PATCH",  path: "/api/modules/:id",  summary: "Patch a module",                         stability: "public",   request: Some("ModulePatch"),    response: Some("Module") },
-        RouteSpec { method: "DELETE", path: "/api/modules/:id",  summary: "Delete a module",                        stability: "public",   request: None,                 response: Some("DeleteAck") },
-        RouteSpec { method: "POST",   path: "/api/modules/move", summary: "Move a module within a project",         stability: "public",   request: Some("MoveTarget"),     response: Some("Module") },
+        RouteSpec {
+            method: "GET",
+            path: "/api/modules",
+            summary: "List modules in a project",
+            stability: "public",
+            request: None,
+            response: Some("Module[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/modules",
+            summary: "Create a module",
+            stability: "public",
+            request: Some("CreateModule"),
+            response: Some("Module"),
+        },
+        RouteSpec {
+            method: "PATCH",
+            path: "/api/modules/:id",
+            summary: "Patch a module",
+            stability: "public",
+            request: Some("ModulePatch"),
+            response: Some("Module"),
+        },
+        RouteSpec {
+            method: "DELETE",
+            path: "/api/modules/:id",
+            summary: "Delete a module",
+            stability: "public",
+            request: None,
+            response: Some("DeleteAck"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/modules/move",
+            summary: "Move a module within a project",
+            stability: "public",
+            request: Some("MoveTarget"),
+            response: Some("Module"),
+        },
         // ---- collections ------------------------------------------------
-        RouteSpec { method: "GET",    path: "/api/collections",      summary: "List collections",                  stability: "public",   request: None,                 response: Some("Collection[]") },
-        RouteSpec { method: "POST",   path: "/api/collections",      summary: "Create a collection",               stability: "public",   request: Some("CreateCollection"), response: Some("Collection") },
-        RouteSpec { method: "PATCH",  path: "/api/collections/:id",  summary: "Patch a collection",                stability: "public",   request: Some("CollectionPatch"),  response: Some("Collection") },
-        RouteSpec { method: "DELETE", path: "/api/collections/:id",  summary: "Delete a collection",               stability: "public",   request: None,                 response: Some("DeleteAck") },
-        RouteSpec { method: "POST",   path: "/api/collections/move", summary: "Move a collection",                 stability: "public",   request: Some("MoveTarget"),     response: Some("Collection") },
+        RouteSpec {
+            method: "GET",
+            path: "/api/collections",
+            summary: "List collections",
+            stability: "public",
+            request: None,
+            response: Some("Collection[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/collections",
+            summary: "Create a collection",
+            stability: "public",
+            request: Some("CreateCollection"),
+            response: Some("Collection"),
+        },
+        RouteSpec {
+            method: "PATCH",
+            path: "/api/collections/:id",
+            summary: "Patch a collection",
+            stability: "public",
+            request: Some("CollectionPatch"),
+            response: Some("Collection"),
+        },
+        RouteSpec {
+            method: "DELETE",
+            path: "/api/collections/:id",
+            summary: "Delete a collection",
+            stability: "public",
+            request: None,
+            response: Some("DeleteAck"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/collections/move",
+            summary: "Move a collection",
+            stability: "public",
+            request: Some("MoveTarget"),
+            response: Some("Collection"),
+        },
         // ---- endpoints --------------------------------------------------
-        RouteSpec { method: "GET",    path: "/api/endpoints",                summary: "List endpoints",        stability: "public",   request: None,                 response: Some("Endpoint[]") },
-        RouteSpec { method: "POST",   path: "/api/endpoints",                summary: "Create an endpoint",    stability: "public",   request: Some("CreateEndpoint"),   response: Some("Endpoint") },
-        RouteSpec { method: "GET",    path: "/api/endpoints/:id",            summary: "Get one endpoint",      stability: "public",   request: None,                 response: Some("Endpoint") },
-        RouteSpec { method: "PATCH",  path: "/api/endpoints/:id",            summary: "Patch an endpoint",     stability: "public",   request: Some("EndpointPatch"),    response: Some("Endpoint") },
-        RouteSpec { method: "DELETE", path: "/api/endpoints/:id",            summary: "Delete an endpoint",    stability: "public",   request: None,                 response: Some("DeleteAck") },
-        RouteSpec { method: "POST",   path: "/api/endpoints/search",         summary: "Search endpoints by name/method/url", stability: "public",   request: Some("SearchQuery"),    response: Some("Endpoint[]") },
-        RouteSpec { method: "POST",   path: "/api/endpoints/move",           summary: "Move an endpoint",      stability: "public",   request: Some("MoveTarget"),     response: Some("Endpoint") },
-        RouteSpec { method: "POST",   path: "/api/endpoints/:id/duplicate",  summary: "Duplicate an endpoint", stability: "public",   request: None,                 response: Some("Endpoint") },
+        RouteSpec {
+            method: "GET",
+            path: "/api/endpoints",
+            summary: "List endpoints",
+            stability: "public",
+            request: None,
+            response: Some("Endpoint[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/endpoints",
+            summary: "Create an endpoint",
+            stability: "public",
+            request: Some("CreateEndpoint"),
+            response: Some("Endpoint"),
+        },
+        RouteSpec {
+            method: "GET",
+            path: "/api/endpoints/:id",
+            summary: "Get one endpoint",
+            stability: "public",
+            request: None,
+            response: Some("Endpoint"),
+        },
+        RouteSpec {
+            method: "PATCH",
+            path: "/api/endpoints/:id",
+            summary: "Patch an endpoint",
+            stability: "public",
+            request: Some("EndpointPatch"),
+            response: Some("Endpoint"),
+        },
+        RouteSpec {
+            method: "DELETE",
+            path: "/api/endpoints/:id",
+            summary: "Delete an endpoint",
+            stability: "public",
+            request: None,
+            response: Some("DeleteAck"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/endpoints/search",
+            summary: "Search endpoints by name/method/url",
+            stability: "public",
+            request: Some("SearchQuery"),
+            response: Some("Endpoint[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/endpoints/move",
+            summary: "Move an endpoint",
+            stability: "public",
+            request: Some("MoveTarget"),
+            response: Some("Endpoint"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/endpoints/:id/duplicate",
+            summary: "Duplicate an endpoint",
+            stability: "public",
+            request: None,
+            response: Some("Endpoint"),
+        },
         // ---- environments -----------------------------------------------
-        RouteSpec { method: "GET",    path: "/api/environments",         summary: "List environments in a project",   stability: "public",   request: None,                 response: Some("Environment[]") },
-        RouteSpec { method: "POST",   path: "/api/environments",         summary: "Create an environment",           stability: "public",   request: Some("CreateEnvironment"), response: Some("Environment") },
+        RouteSpec {
+            method: "GET",
+            path: "/api/environments",
+            summary: "List environments in a project",
+            stability: "public",
+            request: None,
+            response: Some("Environment[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/environments",
+            summary: "Create an environment",
+            stability: "public",
+            request: Some("CreateEnvironment"),
+            response: Some("Environment"),
+        },
         // ---- http send --------------------------------------------------
-        RouteSpec { method: "POST",   path: "/api/http/send",            summary: "Execute an HTTP request (bypasses webview CORS)", stability: "public",   request: Some("HttpRequestInput"), response: Some("HttpResult") },
+        RouteSpec {
+            method: "POST",
+            path: "/api/http/send",
+            summary: "Execute an HTTP request (bypasses webview CORS)",
+            stability: "public",
+            request: Some("HttpRequestInput"),
+            response: Some("HttpResult"),
+        },
         // ---- internal (not in OpenAPI v1) -------------------------------
         // The following endpoints are intentionally NOT listed above —
         // they are supervisor / UI projections and have no version

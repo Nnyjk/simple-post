@@ -12,10 +12,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use simple_post_core::domain::ApiResponse;
-use simple_post_core::error::AppError;
 use crate::mcp::{AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
+use simple_post_core::domain::ApiResponse;
+use simple_post_core::error::AppError;
 
 // =========================================================================
 // Args shapes
@@ -157,8 +157,7 @@ async fn tool_api_parse_response(
     let _ = state; // No project gate — pure transform.
 
     let headers = crate::mcp::http_ops::flatten_string_map(a.headers.as_ref(), "headers")?;
-    let parsed =
-        crate::response_parse::parse(&a.body, &a.content_type, a.status, &headers);
+    let parsed = crate::response_parse::parse(&a.body, &a.content_type, a.status, &headers);
 
     let api = ApiResponse {
         status: a.status,
@@ -242,7 +241,11 @@ async fn tool_api_extract_jsonpath(
         None => {
             // Lenient: "no match" is not an error. Surface as found=false
             // so the LLM can branch without parsing an error message.
-            if !a.content_type.to_ascii_lowercase().contains("application/json") {
+            if !a
+                .content_type
+                .to_ascii_lowercase()
+                .contains("application/json")
+            {
                 Ok(CallToolResult::err(
                     "extract_jsonpath requires application/json content_type",
                 ))
@@ -323,7 +326,10 @@ fn header_diff(a: &ApiResponse, b: &ApiResponse) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::mcp::arg_str_opt;
-    use std::sync::{atomic::{AtomicU32, Ordering}, Arc};
+    use std::sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    };
     use std::time::Instant;
 
     /// Per-call counter that disambiguates temp dirs when several tests
@@ -497,21 +503,21 @@ mod tests {
     #[test]
     fn headers_from_value_handles_object_and_array() {
         let obj = json!({ "X-A": "1", "X-B": "2" });
-        let pairs =
-            crate::mcp::http_ops::flatten_string_map(Some(&obj), "h").unwrap();
+        let pairs = crate::mcp::http_ops::flatten_string_map(Some(&obj), "h").unwrap();
         assert_eq!(pairs.len(), 2);
 
         let arr = json!([["X-A", "1"]]);
-        let pairs =
-            crate::mcp::http_ops::flatten_string_map(Some(&arr), "h").unwrap();
+        let pairs = crate::mcp::http_ops::flatten_string_map(Some(&arr), "h").unwrap();
         assert_eq!(pairs.len(), 1);
 
         assert!(crate::mcp::http_ops::flatten_string_map(None, "h")
             .unwrap()
             .is_empty());
-        assert!(crate::mcp::http_ops::flatten_string_map(Some(&Value::Null), "h")
-            .unwrap()
-            .is_empty());
+        assert!(
+            crate::mcp::http_ops::flatten_string_map(Some(&Value::Null), "h")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

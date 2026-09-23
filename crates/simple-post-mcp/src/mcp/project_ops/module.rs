@@ -13,10 +13,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use simple_post_core::domain::{Module, ModulePatch};
-use simple_post_core::error::AppError;
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
+use simple_post_core::domain::{Module, ModulePatch};
+use simple_post_core::error::AppError;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ModuleCreateArgs {
@@ -139,8 +139,12 @@ pub(super) async fn tool_module_create(
         expanded: None,
     };
     let id = m.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::create(c, &m))?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::modules::get(c, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::modules::create(c, &m)
+    })?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::modules::get(c, &id)
+    })?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -168,7 +172,9 @@ pub(super) async fn tool_module_delete(
 ) -> Result<CallToolResult, AppError> {
     let module_id = arg_str(&args, "module_id")?.to_string();
     crate::mcp::check_permission(&state.pool, "global", "module_delete").await?;
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::delete(c, &module_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::modules::delete(c, &module_id)
+    })?;
     Ok(CallToolResult::json(json!({ "deleted": module_id })))
 }
 
@@ -183,8 +189,12 @@ pub(super) async fn tool_module_move(
     // `modules::update` doesn't expose a `project_id` field on
     // ModulePatch — moving a module between projects isn't a first-class
     // operation. Implement as delete-then-create to keep the FK happy.
-    let module = simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::modules::get(c, &a.module_id))?;
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::delete(c, &a.module_id))?;
+    let module = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::modules::get(c, &a.module_id)
+    })?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::modules::delete(c, &a.module_id)
+    })?;
     let new_id = format!("mod_{}", simple_post_core::domain::now_ms());
     let new_mod = Module {
         id: new_id.clone(),
@@ -194,7 +204,9 @@ pub(super) async fn tool_module_move(
         sort_order: a.new_sort_order.unwrap_or(0),
         expanded: None,
     };
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::modules::create(c, &new_mod))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::modules::create(c, &new_mod)
+    })?;
     Ok(CallToolResult::json(json!({
         "module_id": new_id,
         "new_project_id": a.new_project_id,

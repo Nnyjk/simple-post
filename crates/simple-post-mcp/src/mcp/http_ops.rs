@@ -11,11 +11,11 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::mcp::{AppState, CallToolResult, ToolEntry};
+use crate::tool_fn;
 use simple_post_core::domain::{ApiResponse, Endpoint, Environment, HttpMethod};
 use simple_post_core::error::AppError;
 use simple_post_core::http_executor::{self, HttpRequestInput, HttpResponse, HttpResult};
-use crate::mcp::{AppState, CallToolResult, ToolEntry};
-use crate::tool_fn;
 
 // =========================================================================
 // Args shapes
@@ -113,10 +113,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 // Tool impls
 // =========================================================================
 
-async fn tool_api_run_request(
-    state: &AppState,
-    args: Value,
-) -> Result<CallToolResult, AppError> {
+async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: RunRequestArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("api_run_request args: {e}")))?;
     if a.url.trim().is_empty() {
@@ -150,8 +147,7 @@ async fn tool_api_run_request(
     let headers = flatten_string_map(a.headers.as_ref(), "headers")?;
     let body = a.body.clone();
 
-    let (timeout_ms, follow_redirects, max_kb) =
-        extract_settings(&a.settings_override, &a);
+    let (timeout_ms, follow_redirects, max_kb) = extract_settings(&a.settings_override, &a);
 
     let input = HttpRequestInput {
         method: a.method.to_ascii_uppercase(),
@@ -174,10 +170,7 @@ async fn tool_api_run_request(
     ))
 }
 
-async fn tool_api_call_endpoint(
-    state: &AppState,
-    args: Value,
-) -> Result<CallToolResult, AppError> {
+async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: CallEndpointArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("api_call_endpoint args: {e}")))?;
     let endpoint_id = a.endpoint_id.clone();
@@ -185,7 +178,8 @@ async fn tool_api_call_endpoint(
     let endpoint: Endpoint = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoints::get(c, &endpoint_id)
     })?;
-    let project_id = simple_post_core::db::endpoints::project_id_of(&state.pool, &endpoint.collection_id)?;
+    let project_id =
+        simple_post_core::db::endpoints::project_id_of(&state.pool, &endpoint.collection_id)?;
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint")
         .await
         .ok();
@@ -194,7 +188,10 @@ async fn tool_api_call_endpoint(
     // was deleted) is tolerated — the request just runs without env
     // variable substitution.
     let env: Option<Environment> = if let Some(env_id) = endpoint.environment_id.as_deref() {
-        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::environments::get(c, env_id)).ok()
+        simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::environments::get(c, env_id)
+        })
+        .ok()
     } else {
         None
     };
@@ -213,7 +210,8 @@ async fn tool_api_call_endpoint(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    let project_ref: &simple_post_core::domain::Project = project.as_ref().unwrap_or(&EMPTY_PROJECT);
+    let project_ref: &simple_post_core::domain::Project =
+        project.as_ref().unwrap_or(&EMPTY_PROJECT);
     let resolved = crate::variable_fill::resolve_endpoint(
         &endpoint,
         env.as_ref(),
@@ -222,8 +220,7 @@ async fn tool_api_call_endpoint(
     )?;
 
     let method_str = format_method(&endpoint.method);
-    let (timeout_ms, follow_redirects, max_kb) =
-        extract_endpoint_settings(&a.settings_override);
+    let (timeout_ms, follow_redirects, max_kb) = extract_endpoint_settings(&a.settings_override);
 
     let input = HttpRequestInput {
         method: method_str.clone(),
@@ -259,7 +256,10 @@ async fn tool_api_call_endpoint(
 /// Validation message; the other version in `response_parse.rs`
 /// silently dropped bad shapes, which is the wrong default for
 /// user-driven input.
-pub(crate) fn flatten_string_map(v: Option<&Value>, label: &str) -> Result<Vec<(String, String)>, AppError> {
+pub(crate) fn flatten_string_map(
+    v: Option<&Value>,
+    label: &str,
+) -> Result<Vec<(String, String)>, AppError> {
     let Some(v) = v else { return Ok(Vec::new()) };
     if v.is_null() {
         return Ok(Vec::new());
@@ -400,17 +400,22 @@ fn build_result_envelope(
             if let Some(m) = missing {
                 if !m.is_empty() {
                     if let Value::Object(map) = &mut val {
-                        map.insert("_missing_vars".into(), serde_json::to_value(m).unwrap_or(Value::Null));
+                        map.insert(
+                            "_missing_vars".into(),
+                            serde_json::to_value(m).unwrap_or(Value::Null),
+                        );
                     }
                 }
             }
             CallToolResult::json(val)
         }
         None => {
-            let err = result.error.as_ref().cloned().unwrap_or(simple_post_core::http_executor::HttpError {
-                kind: "unknown".into(),
-                message: "no response and no error".into(),
-            });
+            let err = result.error.as_ref().cloned().unwrap_or(
+                simple_post_core::http_executor::HttpError {
+                    kind: "unknown".into(),
+                    message: "no response and no error".into(),
+                },
+            );
             state_metrics_err();
             CallToolResult::err(format!("{}: {}", err.kind, err.message))
         }
@@ -444,10 +449,7 @@ fn http_response_to_api(resp: &HttpResponse, method: &str, url: &str) -> ApiResp
 }
 
 fn header_pairs_to_tuples(pairs: &[[String; 2]]) -> Vec<(String, String)> {
-    pairs
-        .iter()
-        .map(|p| (p[0].clone(), p[1].clone()))
-        .collect()
+    pairs.iter().map(|p| (p[0].clone(), p[1].clone())).collect()
 }
 
 // =========================================================================
@@ -494,7 +496,10 @@ mod tests {
         let pairs = flatten_string_map(Some(&v), "h").unwrap();
         assert_eq!(
             pairs,
-            vec![("X-Foo".into(), "bar".into()), ("X-Num".into(), "42".into())]
+            vec![
+                ("X-Foo".into(), "bar".into()),
+                ("X-Num".into(), "42".into())
+            ]
         );
     }
 

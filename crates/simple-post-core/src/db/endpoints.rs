@@ -85,10 +85,7 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Endpoint, AppError> {
 /// that's a "dangling reference" signal, not a soft "no project" case,
 /// so the caller should let the error propagate instead of substituting
 /// an empty string.
-pub fn project_id_of(
-    pool: &crate::db::DbPool,
-    collection_id: &str,
-) -> Result<String, AppError> {
+pub fn project_id_of(pool: &crate::db::DbPool, collection_id: &str) -> Result<String, AppError> {
     let conn = pool.get()?;
     let module_id: String = conn
         .query_row(
@@ -214,11 +211,7 @@ pub fn create(conn: &mut Connection, e: &Endpoint) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn update(
-    conn: &mut Connection,
-    id: &str,
-    patch: EndpointPatch,
-) -> Result<Endpoint, AppError> {
+pub fn update(conn: &mut Connection, id: &str, patch: EndpointPatch) -> Result<Endpoint, AppError> {
     if patch.is_empty() {
         return get(conn, id);
     }
@@ -396,7 +389,11 @@ pub fn move_many(
     current.retain(|id| !endpoint_ids.iter().any(|m| m == id));
 
     // 3. Clamp target_index.
-    let mut idx = if target_index < 0 { 0 } else { target_index as usize };
+    let mut idx = if target_index < 0 {
+        0
+    } else {
+        target_index as usize
+    };
     if idx > current.len() {
         idx = current.len();
     }
@@ -447,16 +444,16 @@ fn row_to_endpoint(row: &Row<'_>) -> Result<Endpoint, rusqlite::Error> {
         )
     };
 
-    let params: Vec<crate::domain::KeyValue> = serde_json::from_str(&params_json)
-        .map_err(|e| parse_err(e, "params_json"))?;
-    let headers: Vec<crate::domain::KeyValue> = serde_json::from_str(&headers_json)
-        .map_err(|e| parse_err(e, "headers_json"))?;
-    let body: crate::domain::RequestBody = serde_json::from_str(&body_json)
-        .map_err(|e| parse_err(e, "body_json"))?;
-    let auth: crate::domain::AuthConfig = serde_json::from_str(&auth_json)
-        .map_err(|e| parse_err(e, "auth_json"))?;
-    let tags: Vec<String> = serde_json::from_str(&tags_json)
-        .map_err(|e| parse_err(e, "tags_json"))?;
+    let params: Vec<crate::domain::KeyValue> =
+        serde_json::from_str(&params_json).map_err(|e| parse_err(e, "params_json"))?;
+    let headers: Vec<crate::domain::KeyValue> =
+        serde_json::from_str(&headers_json).map_err(|e| parse_err(e, "headers_json"))?;
+    let body: crate::domain::RequestBody =
+        serde_json::from_str(&body_json).map_err(|e| parse_err(e, "body_json"))?;
+    let auth: crate::domain::AuthConfig =
+        serde_json::from_str(&auth_json).map_err(|e| parse_err(e, "auth_json"))?;
+    let tags: Vec<String> =
+        serde_json::from_str(&tags_json).map_err(|e| parse_err(e, "tags_json"))?;
 
     let method = match method_str.as_str() {
         "GET" => crate::domain::HttpMethod::Get,
@@ -543,8 +540,17 @@ mod tests {
             base_url_override: None,
             params: vec![],
             headers: vec![],
-            body: RequestBody { mode: BodyMode::None, content: String::new(), schema: None },
-            auth: AuthConfig { kind: AuthType::None, bearer: None, basic: None, apikey: None },
+            body: RequestBody {
+                mode: BodyMode::None,
+                content: String::new(),
+                schema: None,
+            },
+            auth: AuthConfig {
+                kind: AuthType::None,
+                bearer: None,
+                basic: None,
+                apikey: None,
+            },
             docs: None,
             notes: None,
             tags: vec!["smoke".into()],
@@ -616,11 +622,11 @@ mod tests {
     fn search_by_tag_uses_like_match() {
         let pool = fresh_pool();
         let tag = "登录".to_string();
-        let rows =
-            db::with_conn(&pool, |c| search(c, None, None, Some(std::slice::from_ref(&tag)))).unwrap();
-        let all_have_tag = rows
-            .iter()
-            .all(|e| e.tags.iter().any(|t| t == &tag));
+        let rows = db::with_conn(&pool, |c| {
+            search(c, None, None, Some(std::slice::from_ref(&tag)))
+        })
+        .unwrap();
+        let all_have_tag = rows.iter().all(|e| e.tags.iter().any(|t| t == &tag));
         assert!(all_have_tag, "every result must carry the requested tag");
     }
 

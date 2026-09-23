@@ -241,7 +241,9 @@ pub fn projects_create(
         base_url: None,
         base_url_definitions: Vec::new(),
         default_base_url_definition_id: None,
-        color: opts.color.unwrap_or_else(crate::domain::default_project_color),
+        color: opts
+            .color
+            .unwrap_or_else(crate::domain::default_project_color),
         created_at: now,
         updated_at: now,
     };
@@ -257,7 +259,9 @@ pub fn projects_update(
     id: String,
     patch: ProjectPatch,
 ) -> Result<Project, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::projects::update(c, &id, patch.clone()))
+    crate::db::with_tx(&state, |c| {
+        crate::db::projects::update(c, &id, patch.clone())
+    })
 }
 
 #[tauri::command]
@@ -270,11 +274,10 @@ pub fn projects_delete(state: State<DbPool>, id: String) -> Result<(), AppError>
 // ===========================================================================
 
 #[tauri::command]
-pub fn modules_list(
-    state: State<DbPool>,
-    project_id: String,
-) -> Result<Vec<Module>, AppError> {
-    crate::db::with_conn(&state, |c| crate::db::modules::list_by_project(c, &project_id))
+pub fn modules_list(state: State<DbPool>, project_id: String) -> Result<Vec<Module>, AppError> {
+    crate::db::with_conn(&state, |c| {
+        crate::db::modules::list_by_project(c, &project_id)
+    })
 }
 
 #[tauri::command]
@@ -305,7 +308,9 @@ pub fn modules_update(
     id: String,
     patch: ModulePatch,
 ) -> Result<Module, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::modules::update(c, &id, patch.clone()))
+    crate::db::with_tx(&state, |c| {
+        crate::db::modules::update(c, &id, patch.clone())
+    })
 }
 
 #[tauri::command]
@@ -374,14 +379,13 @@ pub fn collections_update(
     id: String,
     patch: CollectionPatch,
 ) -> Result<Collection, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::collections::update(c, &id, patch.clone()))
+    crate::db::with_tx(&state, |c| {
+        crate::db::collections::update(c, &id, patch.clone())
+    })
 }
 
 #[tauri::command]
-pub fn collections_delete(
-    state: State<DbPool>,
-    id: String,
-) -> Result<(), AppError> {
+pub fn collections_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| crate::db::collections::delete(c, &id))
 }
 
@@ -424,10 +428,7 @@ pub fn endpoints_list(
 }
 
 #[tauri::command]
-pub fn endpoints_get(
-    state: State<DbPool>,
-    id: String,
-) -> Result<Endpoint, AppError> {
+pub fn endpoints_get(state: State<DbPool>, id: String) -> Result<Endpoint, AppError> {
     crate::db::with_conn(&state, |c| crate::db::endpoints::get(c, &id))
 }
 
@@ -436,10 +437,7 @@ pub fn endpoints_get(
 /// (also accepts method / tags filters) — the Tauri surface exposes
 /// just the substring filter the UI needs.
 #[tauri::command]
-pub fn endpoints_search(
-    state: State<DbPool>,
-    query: String,
-) -> Result<Vec<Endpoint>, AppError> {
+pub fn endpoints_search(state: State<DbPool>, query: String) -> Result<Vec<Endpoint>, AppError> {
     crate::db::with_conn(&state, |c| {
         crate::db::endpoints::search(c, Some(&query), None, None)
     })
@@ -487,24 +485,20 @@ pub fn endpoints_update(
     id: String,
     patch: EndpointPatch,
 ) -> Result<Endpoint, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::endpoints::update(c, &id, patch.clone()))
+    crate::db::with_tx(&state, |c| {
+        crate::db::endpoints::update(c, &id, patch.clone())
+    })
 }
 
 #[tauri::command]
-pub fn endpoints_delete(
-    state: State<DbPool>,
-    id: String,
-) -> Result<(), AppError> {
+pub fn endpoints_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| crate::db::endpoints::delete(c, &id))
 }
 
 /// Duplicate an endpoint, returning the new id. The copy lands at the
 /// end of the same `collection` (caller reorders if needed).
 #[tauri::command]
-pub fn endpoints_duplicate(
-    state: State<DbPool>,
-    id: String,
-) -> Result<String, AppError> {
+pub fn endpoints_duplicate(state: State<DbPool>, id: String) -> Result<String, AppError> {
     crate::db::with_tx(&state, |c| crate::db::endpoints::duplicate(c, &id))
 }
 
@@ -515,12 +509,7 @@ pub fn endpoints_move(
     target: EndpointMoveTarget,
 ) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| {
-        crate::db::endpoints::move_many(
-            c,
-            &endpoint_ids,
-            &target.collection_id,
-            target.index,
-        )
+        crate::db::endpoints::move_many(c, &endpoint_ids, &target.collection_id, target.index)
     })
 }
 
@@ -566,14 +555,13 @@ pub fn environments_update(
     id: String,
     patch: EnvironmentPatch,
 ) -> Result<Environment, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::environments::update(c, &id, patch.clone()))
+    crate::db::with_tx(&state, |c| {
+        crate::db::environments::update(c, &id, patch.clone())
+    })
 }
 
 #[tauri::command]
-pub fn environments_delete(
-    state: State<DbPool>,
-    id: String,
-) -> Result<(), AppError> {
+pub fn environments_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| crate::db::environments::delete(c, &id))
 }
 
@@ -593,12 +581,7 @@ pub fn environments_set_baseurl(
     args: EnvSetBaseUrlArgs,
 ) -> Result<Environment, AppError> {
     crate::db::with_tx(&state, |c| {
-        crate::db::environments::set_base_url(
-            c,
-            &args.env_id,
-            &args.def_id,
-            args.url.as_deref(),
-        )
+        crate::db::environments::set_base_url(c, &args.env_id, &args.def_id, args.url.as_deref())
     })
 }
 
@@ -607,9 +590,7 @@ pub fn environments_set_active(
     state: State<DbPool>,
     env_id: String,
 ) -> Result<Environment, AppError> {
-    crate::db::with_tx(&state, |c| {
-        crate::db::environments::set_active(c, &env_id)
-    })
+    crate::db::with_tx(&state, |c| crate::db::environments::set_active(c, &env_id))
 }
 
 // ===========================================================================
@@ -657,10 +638,7 @@ pub fn base_url_defs_update(
 }
 
 #[tauri::command]
-pub fn base_url_defs_delete(
-    state: State<DbPool>,
-    id: String,
-) -> Result<(), AppError> {
+pub fn base_url_defs_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| crate::db::base_url_defs::delete(c, &id))
 }
 
@@ -690,13 +668,10 @@ const REQUEST_SETTINGS_KEY: &str = "request_settings";
 /// returns a row, falling back to `RequestSettings::default()` if the
 /// row is missing.
 #[tauri::command]
-pub fn request_settings_get(
-    state: State<DbPool>,
-) -> Result<RequestSettings, AppError> {
-    let stored: Option<RequestSettings> =
-        crate::db::with_conn(&state, |c| {
-            crate::db::preferences::get(c, REQUEST_SETTINGS_KEY)
-        })?;
+pub fn request_settings_get(state: State<DbPool>) -> Result<RequestSettings, AppError> {
+    let stored: Option<RequestSettings> = crate::db::with_conn(&state, |c| {
+        crate::db::preferences::get(c, REQUEST_SETTINGS_KEY)
+    })?;
     Ok(stored.unwrap_or_default())
 }
 
@@ -706,8 +681,8 @@ pub fn request_settings_update(
     patch: RequestSettingsPatch,
 ) -> Result<RequestSettings, AppError> {
     crate::db::with_tx(&state, |c| {
-        let mut settings: RequestSettings = crate::db::preferences::get(c, REQUEST_SETTINGS_KEY)?
-            .unwrap_or_default();
+        let mut settings: RequestSettings =
+            crate::db::preferences::get(c, REQUEST_SETTINGS_KEY)?.unwrap_or_default();
         if let Some(t) = patch.timeout_ms {
             settings.timeout_ms = t;
         }
@@ -727,10 +702,7 @@ pub fn request_settings_update(
 // ===========================================================================
 
 #[tauri::command]
-pub fn permissions_get(
-    state: State<DbPool>,
-    project_id: String,
-) -> Result<Permission, AppError> {
+pub fn permissions_get(state: State<DbPool>, project_id: String) -> Result<Permission, AppError> {
     crate::db::with_conn(&state, |c| crate::db::permissions::get(c, &project_id))
 }
 
@@ -846,9 +818,7 @@ pub async fn mcp_daemon_restart(
 /// the value is always the persisted truth even if the user toggled it
 /// in another window since the app booted.
 #[tauri::command]
-pub fn mcp_auto_start_get(
-    state: State<'_, DbPool>,
-) -> Result<bool, AppError> {
+pub fn mcp_auto_start_get(state: State<'_, DbPool>) -> Result<bool, AppError> {
     crate::db::with_conn(&state, crate::db::preferences::mcp_auto_start)
 }
 
@@ -904,7 +874,9 @@ pub async fn mcp_auto_start_set(
 /// settings hydration and on every reconnect so the UI always reflects
 /// the source of truth (sqlite `preferences.mcp.policy`).
 #[tauri::command]
-pub async fn mcp_capability_get(pool: tauri::State<'_, DbPool>) -> Result<CapabilityPolicy, AppError> {
+pub async fn mcp_capability_get(
+    pool: tauri::State<'_, DbPool>,
+) -> Result<CapabilityPolicy, AppError> {
     crate::db::with_conn(pool.inner(), crate::db::preferences::mcp_policy)
 }
 
@@ -912,10 +884,18 @@ pub async fn mcp_capability_get(pool: tauri::State<'_, DbPool>) -> Result<Capabi
 /// (`"read_only"` / `"safe_write"` / `"full_access"`) for symmetry with
 /// the REST `PUT /api/mcp/capability` endpoint.
 #[tauri::command]
-pub async fn mcp_capability_set(policy: String, pool: tauri::State<'_, DbPool>) -> Result<CapabilityPolicy, AppError> {
-    let parsed = CapabilityPolicy::parse(&policy)
-        .ok_or_else(|| AppError::Validation(format!("unknown mcp policy '{policy}' (expected read_only | safe_write | full_access)")))?;
-    crate::db::with_conn(pool.inner(), |c| crate::db::preferences::set_mcp_policy(c, parsed))?;
+pub async fn mcp_capability_set(
+    policy: String,
+    pool: tauri::State<'_, DbPool>,
+) -> Result<CapabilityPolicy, AppError> {
+    let parsed = CapabilityPolicy::parse(&policy).ok_or_else(|| {
+        AppError::Validation(format!(
+            "unknown mcp policy '{policy}' (expected read_only | safe_write | full_access)"
+        ))
+    })?;
+    crate::db::with_conn(pool.inner(), |c| {
+        crate::db::preferences::set_mcp_policy(c, parsed)
+    })?;
     Ok(parsed)
 }
 
@@ -924,7 +904,9 @@ pub async fn mcp_capability_set(policy: String, pool: tauri::State<'_, DbPool>) 
 /// capability-aware `tools/list` over JSON-RPC uses the same code path
 /// via `mcp::tool_descriptors`.
 #[tauri::command]
-pub async fn mcp_capability_list_tools(pool: tauri::State<'_, DbPool>) -> Result<Vec<String>, AppError> {
+pub async fn mcp_capability_list_tools(
+    pool: tauri::State<'_, DbPool>,
+) -> Result<Vec<String>, AppError> {
     use std::sync::Arc;
     use std::time::Instant;
     let state = crate::mcp::AppState {
@@ -932,5 +914,9 @@ pub async fn mcp_capability_list_tools(pool: tauri::State<'_, DbPool>) -> Result
         started_at: Instant::now(),
         metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
     };
-    Ok(crate::mcp::tool_descriptors(&state).await.into_iter().map(|t| t.name).collect())
+    Ok(crate::mcp::tool_descriptors(&state)
+        .await
+        .into_iter()
+        .map(|t| t.name)
+        .collect())
 }

@@ -13,10 +13,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use simple_post_core::domain::BaseUrlDefinition;
-use simple_post_core::error::AppError;
 use crate::mcp::{AppState, CallToolResult};
 use crate::tool_fn;
+use simple_post_core::domain::BaseUrlDefinition;
+use simple_post_core::error::AppError;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct BaseUrlDefCreateArgs {
@@ -145,7 +145,9 @@ pub(super) async fn tool_base_url_def_create(
     };
     let id = def.id.clone();
     let pid = a.project_id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::base_url_defs::create(c, &def, &pid))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::base_url_defs::create(c, &def, &pid)
+    })?;
     let stored = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::base_url_defs::get(c, &id)
     })?;
@@ -159,10 +161,7 @@ pub(super) async fn tool_base_url_def_update(
     let a: BaseUrlDefUpdateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_update args: {e}")))?;
     crate::mcp::check_permission(&state.pool, "global", "base_url_def_update").await?;
-    let desc = a
-        .description
-        .as_ref()
-        .map(|d| d.as_ref().map(String::from));
+    let desc = a.description.as_ref().map(|d| d.as_ref().map(String::from));
     let d = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::base_url_defs::update(c, &a.definition_id, a.name.clone(), desc)
     })?;

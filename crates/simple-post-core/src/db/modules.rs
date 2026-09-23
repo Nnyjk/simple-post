@@ -15,10 +15,7 @@ use crate::error::AppError;
 
 /// All modules belonging to a project, ordered by `sort_order` then by
 /// `id` (so a fresh import is deterministic).
-pub fn list_by_project(
-    conn: &mut Connection,
-    project_id: &str,
-) -> Result<Vec<Module>, AppError> {
+pub fn list_by_project(conn: &mut Connection, project_id: &str) -> Result<Vec<Module>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, project_id, name, description, sort_order \
          FROM modules \
@@ -75,11 +72,7 @@ pub fn create(conn: &mut Connection, m: &Module) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn update(
-    conn: &mut Connection,
-    id: &str,
-    patch: ModulePatch,
-) -> Result<Module, AppError> {
+pub fn update(conn: &mut Connection, id: &str, patch: ModulePatch) -> Result<Module, AppError> {
     let mut sets: Vec<String> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -140,11 +133,7 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
 /// the caller wants a consistent list for the renderer.
 ///
 /// Returns `NotFound` if the module id doesn't exist.
-pub fn r#move(
-    conn: &mut Connection,
-    module_id: &str,
-    target_index: i32,
-) -> Result<(), AppError> {
+pub fn r#move(conn: &mut Connection, module_id: &str, target_index: i32) -> Result<(), AppError> {
     // 1. Find the moving module's project. Short-circuit on missing id.
     let project_id: Option<String> = conn
         .query_row(
@@ -176,7 +165,11 @@ pub fn r#move(
     // 4. Clamp target_index into `[0, ids.len()]` so a too-large
     //    value lands at the end and a negative value lands at the
     //    front — same semantics as the renderer's drop target.
-    let mut idx = if target_index < 0 { 0 } else { target_index as usize };
+    let mut idx = if target_index < 0 {
+        0
+    } else {
+        target_index as usize
+    };
     if idx > ids.len() {
         idx = ids.len();
     }
@@ -187,9 +180,7 @@ pub fn r#move(
     // 6. Renumber sort_order contiguously. One UPDATE per row keeps
     //    the SQL trivially obvious; a single CASE-WHEN rewrite would
     //    be slightly faster but harder to reason about.
-    let mut update = conn.prepare(
-        "UPDATE modules SET sort_order = ?1 WHERE id = ?2",
-    )?;
+    let mut update = conn.prepare("UPDATE modules SET sort_order = ?1 WHERE id = ?2")?;
     for (i, id) in ids.iter().enumerate() {
         update.execute(params![i as i64, id])?;
     }

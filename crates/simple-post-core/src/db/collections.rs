@@ -20,10 +20,7 @@ use crate::error::AppError;
 /// All collections under a module (including nested children), ordered
 /// by `sort_order` then `id`. Use this when building the tree — the
 /// caller walks the parent links to construct the hierarchy.
-pub fn list_by_module(
-    conn: &mut Connection,
-    module_id: &str,
-) -> Result<Vec<Collection>, AppError> {
+pub fn list_by_module(conn: &mut Connection, module_id: &str) -> Result<Vec<Collection>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, module_id, parent_collection_id, name, description, sort_order \
          FROM collections \
@@ -175,10 +172,7 @@ pub fn move_many(
 ) -> Result<(), AppError> {
     // 1. Filter siblings: depends on parent_kind.
     let (where_clause, top_level) = match parent_kind {
-        "module" => (
-            "module_id = ?1 AND parent_collection_id IS NULL",
-            true,
-        ),
+        "module" => ("module_id = ?1 AND parent_collection_id IS NULL", true),
         "collection" => ("parent_collection_id = ?1", false),
         other => {
             return Err(AppError::Validation(format!(
@@ -201,7 +195,11 @@ pub fn move_many(
     current.retain(|id| !collection_ids.iter().any(|m| m == id));
 
     // 3. Clamp target_index.
-    let mut idx = if target_index < 0 { 0 } else { target_index as usize };
+    let mut idx = if target_index < 0 {
+        0
+    } else {
+        target_index as usize
+    };
     if idx > current.len() {
         idx = current.len();
     }
@@ -332,7 +330,11 @@ mod tests {
         // c_login holds 2 endpoints (e_login_sms, e_login_pwd) seeded.
         db::with_tx(&pool, |c| delete(c, "c_login")).unwrap();
         let n: i64 = db::with_conn(&pool, |c| {
-            Ok(c.query_row("SELECT COUNT(*) FROM endpoints WHERE collection_id = 'c_login'", [], |r| r.get(0))?)
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM endpoints WHERE collection_id = 'c_login'",
+                [],
+                |r| r.get(0),
+            )?)
         })
         .unwrap();
         assert_eq!(n, 0);

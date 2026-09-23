@@ -470,12 +470,7 @@ impl McpDaemonHandle {
         };
         let pid = child.id().unwrap_or(0);
         let stderr = child.stderr.take();
-        let rec = PortRecord::new(
-            pid,
-            port,
-            "127.0.0.1",
-            data_dir.display().to_string(),
-        );
+        let rec = PortRecord::new(pid, port, "127.0.0.1", data_dir.display().to_string());
         if let Err(e) = port_registry::write(&rec) {
             let _ = child.kill().await;
             let mut g = self.inner.lock().await;
@@ -557,11 +552,7 @@ async fn forward_stderr_and_parse_metrics(
 /// Awaits the child's exit; updates state and emits the Tauri event.
 /// Holds its own Arc clone of the supervisor's mutex so this task
 /// survives any intermediate restarts cleanly.
-async fn watch_exit(
-    inner: Arc<Mutex<DaemonState>>,
-    app_handle: AppHandle,
-    pid: u32,
-) {
+async fn watch_exit(inner: Arc<Mutex<DaemonState>>, app_handle: AppHandle, pid: u32) {
     // F-D1 fix: take the Child OUT of state inside the lock, then drop
     // the guard before awaiting `wait()`. The previous version held
     // `inner.lock().await` across `child.wait().await`, which permanently

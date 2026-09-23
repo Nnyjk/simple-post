@@ -541,9 +541,10 @@ mod tests {
     #[test]
     fn init_seeds_fixtures_on_empty_db() {
         let (pool, _dir) = fresh_pool();
-        let count: i64 =
-            with_conn(&pool, |c| Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?))
-                .unwrap();
+        let count: i64 = with_conn(&pool, |c| {
+            Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+        })
+        .unwrap();
         assert_eq!(count, 3, "3 fixture projects should be seeded");
     }
 
@@ -553,9 +554,10 @@ mod tests {
         // Second call on the same DB: schema is IF NOT EXISTS, and the
         // seed step sees a non-empty `projects` table and bails out.
         with_conn(&pool, migrate_and_seed).expect("second migrate");
-        let count: i64 =
-            with_conn(&pool, |c| Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?))
-                .unwrap();
+        let count: i64 = with_conn(&pool, |c| {
+            Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+        })
+        .unwrap();
         assert_eq!(count, 3, "second seed should not duplicate");
     }
 
@@ -569,9 +571,10 @@ mod tests {
             Err(AppError::Validation("nope".into()))
         });
         assert!(res.is_err());
-        let count: i64 =
-            with_conn(&pool, |c| Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?))
-                .unwrap();
+        let count: i64 = with_conn(&pool, |c| {
+            Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+        })
+        .unwrap();
         assert_eq!(count, 3, "rollback should leave projects intact");
     }
 
@@ -587,9 +590,10 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let count: i64 =
-            with_conn(&pool, |c| Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?))
-                .unwrap();
+        let count: i64 = with_conn(&pool, |c| {
+            Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+        })
+        .unwrap();
         assert_eq!(count, 4);
     }
 

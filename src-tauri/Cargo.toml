@@ -51,9 +51,6 @@ axum = { workspace = true }
 tower-http = { workspace = true }
 mime_guess = { workspace = true }
 
-[profile.release]
-panic = "abort"
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true
+# NOTE: release profile lives at the workspace root (Cargo.toml) —
+# cargo warns "profiles for the non root package will be ignored"
+# if [profile.*] is declared here.

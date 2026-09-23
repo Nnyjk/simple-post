@@ -68,12 +68,7 @@ impl PortRecord {
     /// Build a record from the daemon's own metadata. `pid == 0` is fine
     /// for the first write; `ensure_started` rewrites once `child.id()`
     /// is known.
-    pub fn new(
-        pid: u32,
-        port: u16,
-        bind: impl Into<String>,
-        data_dir: impl Into<String>,
-    ) -> Self {
+    pub fn new(pid: u32, port: u16, bind: impl Into<String>, data_dir: impl Into<String>) -> Self {
         Self {
             pid,
             port,
@@ -426,7 +421,12 @@ mod tests {
     }
 
     fn sample(port: u16, pid: u32) -> PortRecord {
-        PortRecord::new(pid, port, "127.0.0.1", std::env::temp_dir().display().to_string())
+        PortRecord::new(
+            pid,
+            port,
+            "127.0.0.1",
+            std::env::temp_dir().display().to_string(),
+        )
     }
 
     #[test]
@@ -463,10 +463,7 @@ mod tests {
         match err {
             crate::error::AppError::Validation(msg) => {
                 assert!(msg.contains("live pid"), "msg: {msg}");
-                assert!(
-                    msg.contains(&std::process::id().to_string()),
-                    "msg: {msg}"
-                );
+                assert!(msg.contains(&std::process::id().to_string()), "msg: {msg}");
             }
             other => panic!("expected Validation, got {other:?}"),
         }

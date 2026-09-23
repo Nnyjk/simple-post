@@ -101,11 +101,7 @@ pub fn create(conn: &mut Connection, p: &Project) -> Result<(), AppError> {
 ///
 /// Returns the post-update row so the caller can echo it back to
 /// the renderer without an extra `get`.
-pub fn update(
-    conn: &mut Connection,
-    id: &str,
-    patch: ProjectPatch,
-) -> Result<Project, AppError> {
+pub fn update(conn: &mut Connection, id: &str, patch: ProjectPatch) -> Result<Project, AppError> {
     // Collect owned bindings (so we can hold them in a Vec past the
     // point where `patch` borrows them) and a parallel list of the
     // SET clauses. The actual SQL is assembled at the end.
@@ -131,7 +127,10 @@ pub fn update(
         });
     }
     if let Some(d) = &patch.default_base_url_definition_id {
-        sets.push(format!("default_base_url_definition_id = ?{}", binds.len() + 1));
+        sets.push(format!(
+            "default_base_url_definition_id = ?{}",
+            binds.len() + 1
+        ));
         binds.push(match d {
             Some(v) => rusqlite::types::Value::Text(v.clone()),
             None => rusqlite::types::Value::Null,
@@ -212,7 +211,14 @@ fn populate_defs(conn: &mut Connection, projects: &mut [Project]) -> Result<(), 
         let project_id: String = row.get(1)?;
         let name: String = row.get(2)?;
         let description: Option<String> = row.get(3)?;
-        Ok((project_id, crate::domain::BaseUrlDefinition { id, name, description }))
+        Ok((
+            project_id,
+            crate::domain::BaseUrlDefinition {
+                id,
+                name,
+                description,
+            },
+        ))
     })?;
     for r in rows {
         let (pid, def) = r?;
@@ -307,10 +313,14 @@ mod tests {
         let pool = fresh_pool();
         db::with_tx(&pool, |c| {
             create(c, &sample_project("p1", "Original"))?;
-            update(c, "p1", ProjectPatch {
-                name: Some("Renamed".into()),
-                ..Default::default()
-            })?;
+            update(
+                c,
+                "p1",
+                ProjectPatch {
+                    name: Some("Renamed".into()),
+                    ..Default::default()
+                },
+            )?;
             Ok(())
         })
         .unwrap();
@@ -347,17 +357,17 @@ mod tests {
             update(
                 c,
                 "p1",
-                serde_json::from_str(
-                    r#"{"defaultBaseUrlDefinitionId": "def_new"}"#,
-                )
-                .unwrap(),
+                serde_json::from_str(r#"{"defaultBaseUrlDefinitionId": "def_new"}"#).unwrap(),
             )?;
             Ok(())
         })
         .unwrap();
 
         let got = db::with_conn(&pool, |c| get(c, "p1")).unwrap();
-        assert_eq!(got.default_base_url_definition_id.as_deref(), Some("def_new"));
+        assert_eq!(
+            got.default_base_url_definition_id.as_deref(),
+            Some("def_new")
+        );
     }
 
     #[test]
@@ -409,7 +419,10 @@ mod tests {
     fn get_returns_default_def_id_from_row() {
         let pool = fresh_pool();
         let got = db::with_conn(&pool, |c| get(c, "p_demo")).unwrap();
-        assert_eq!(got.default_base_url_definition_id.as_deref(), Some("def_default"));
+        assert_eq!(
+            got.default_base_url_definition_id.as_deref(),
+            Some("def_default")
+        );
     }
 
     #[test]

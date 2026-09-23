@@ -23,10 +23,7 @@ use crate::error::AppError;
 /// Returns `AppError::Db` if the stored value isn't valid JSON for
 /// `T` — the renderer is expected to bump a schema version if it
 /// reshapes a preference key.
-pub fn get<T: DeserializeOwned>(
-    conn: &mut Connection,
-    key: &str,
-) -> Result<Option<T>, AppError> {
+pub fn get<T: DeserializeOwned>(conn: &mut Connection, key: &str) -> Result<Option<T>, AppError> {
     let raw: Option<String> = conn
         .query_row(
             "SELECT value FROM preferences WHERE key = ?1",
@@ -46,11 +43,7 @@ pub fn get<T: DeserializeOwned>(
 
 /// Upsert a preference. The value is JSON-encoded via serde so any
 /// `Serialize` type can be stored.
-pub fn set<T: Serialize>(
-    conn: &mut Connection,
-    key: &str,
-    value: &T,
-) -> Result<(), AppError> {
+pub fn set<T: Serialize>(conn: &mut Connection, key: &str, value: &T) -> Result<(), AppError> {
     let raw = serde_json::to_string(value)?;
     conn.execute(
         "INSERT INTO preferences (key, value) VALUES (?1, ?2) \
@@ -182,7 +175,10 @@ mod tests {
     #[test]
     fn set_then_get_round_trips_struct() {
         let pool = fresh_pool();
-        let theme = Theme { mode: "dark".into(), accent: "#fff".into() };
+        let theme = Theme {
+            mode: "dark".into(),
+            accent: "#fff".into(),
+        };
         db::with_tx(&pool, |c| set(c, "theme", &theme)).unwrap();
         let back: Theme = db::with_conn(&pool, |c| get(c, "theme"))
             .unwrap()
@@ -194,14 +190,26 @@ mod tests {
     fn set_overwrites_existing_value() {
         let pool = fresh_pool();
         db::with_tx(&pool, |c| {
-            set(c, "theme", &Theme { mode: "dark".into(), accent: "#000".into() })?;
-            set(c, "theme", &Theme { mode: "light".into(), accent: "#fff".into() })?;
+            set(
+                c,
+                "theme",
+                &Theme {
+                    mode: "dark".into(),
+                    accent: "#000".into(),
+                },
+            )?;
+            set(
+                c,
+                "theme",
+                &Theme {
+                    mode: "light".into(),
+                    accent: "#fff".into(),
+                },
+            )?;
             Ok(())
         })
         .unwrap();
-        let back: Theme = db::with_conn(&pool, |c| get(c, "theme"))
-            .unwrap()
-            .unwrap();
+        let back: Theme = db::with_conn(&pool, |c| get(c, "theme")).unwrap().unwrap();
         assert_eq!(back.mode, "light");
     }
 

@@ -32,7 +32,11 @@ use simple_post_mcp::http_client::WebClient;
 struct Cli {
     /// URL of the running `simple-post serve-web` instance.
     /// Env override: `SIMPLE_POST_WEB_URL`.
-    #[arg(long, env = "SIMPLE_POST_WEB_URL", default_value = "http://localhost:4224")]
+    #[arg(
+        long,
+        env = "SIMPLE_POST_WEB_URL",
+        default_value = "http://localhost:4224"
+    )]
     url: String,
 
     /// Optional bearer password for password-protected web backends.
@@ -127,22 +131,19 @@ async fn main() -> ExitCode {
 
 fn init_tracing(level: &str) {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(match level {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(match level {
             "debug" => "simple_post_mcp=debug,info",
             _ => "simple_post_mcp=info,warn",
-        }));
+        })
+    });
     let _ = tracing_subscriber::registry()
         .with(fmt::layer().with_writer(std::io::stderr))
         .with(filter)
         .try_init();
 }
 
-async fn run_http_transport(
-    client: WebClient,
-    _cap: CapabilityOverride,
-    port: u16,
-) -> ExitCode {
+async fn run_http_transport(client: WebClient, _cap: CapabilityOverride, port: u16) -> ExitCode {
     use axum::{routing::get, routing::post, Json, Router};
     use serde_json::Value;
 
@@ -165,12 +166,10 @@ async fn run_http_transport(
         }
     }
 
-    async fn healthz(
-        axum::extract::State(client): axum::extract::State<WebClient>,
-    ) -> Json<Value> {
+    async fn healthz(axum::extract::State(client): axum::extract::State<WebClient>) -> Json<Value> {
         match client.healthz().await {
             Ok(v) => Json(v),
-            Err(e) => Json(serde_json::json!({ "status": "down", "error": e.to_string() }))
+            Err(e) => Json(serde_json::json!({ "status": "down", "error": e.to_string() })),
         }
     }
 

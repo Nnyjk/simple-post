@@ -26,9 +26,8 @@ pub fn get(conn: &mut Connection, project_id: &str) -> Result<Permission, AppErr
         )
         .ok();
     match perm {
-        Some(s) => Permission::parse(&s).ok_or_else(|| {
-            AppError::Db(format!("unknown permission value in DB: {s:?}"))
-        }),
+        Some(s) => Permission::parse(&s)
+            .ok_or_else(|| AppError::Db(format!("unknown permission value in DB: {s:?}"))),
         None => Ok(Permission::default()),
     }
 }

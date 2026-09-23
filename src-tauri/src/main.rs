@@ -13,7 +13,11 @@ use clap::{Parser, Subcommand};
 ///     LAN-reachable port (the data lives on this host; the browser
 ///     only sees the HTTP surface).
 #[derive(Parser, Debug)]
-#[command(name = "simple-post", version, about = "Modern desktop API tool with built-in MCP")]
+#[command(
+    name = "simple-post",
+    version,
+    about = "Modern desktop API tool with built-in MCP"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,

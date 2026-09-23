@@ -13,10 +13,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use simple_post_core::domain::{Collection, CollectionPatch};
-use simple_post_core::error::AppError;
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
+use simple_post_core::domain::{Collection, CollectionPatch};
+use simple_post_core::error::AppError;
 
 #[derive(Debug, Deserialize)]
 pub(super) struct CollectionCreateArgs {
@@ -155,8 +155,12 @@ pub(super) async fn tool_collection_create(
         expanded: None,
     };
     let id = c.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c2| simple_post_core::db::collections::create(c2, &c))?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c2| simple_post_core::db::collections::get(c2, &id))?;
+    simple_post_core::db::with_tx(&state.pool, |c2| {
+        simple_post_core::db::collections::create(c2, &c)
+    })?;
+    let stored = simple_post_core::db::with_conn(&state.pool, |c2| {
+        simple_post_core::db::collections::get(c2, &id)
+    })?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -174,7 +178,12 @@ pub(super) async fn tool_collection_update(
             .as_ref()
             .and_then(|p| p.get("parentCollectionId"))
             .map(|v| v.as_str().map(String::from)),
-        name: a.patch.as_ref().and_then(|p| p.get("name")).and_then(Value::as_str).map(String::from),
+        name: a
+            .patch
+            .as_ref()
+            .and_then(|p| p.get("name"))
+            .and_then(Value::as_str)
+            .map(String::from),
         description: a
             .patch
             .as_ref()
@@ -194,7 +203,9 @@ pub(super) async fn tool_collection_delete(
 ) -> Result<CallToolResult, AppError> {
     let collection_id = arg_str(&args, "collection_id")?.to_string();
     crate::mcp::check_permission(&state.pool, "global", "collection_delete").await?;
-    simple_post_core::db::with_tx(&state.pool, |c| simple_post_core::db::collections::delete(c, &collection_id))?;
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::collections::delete(c, &collection_id)
+    })?;
     Ok(CallToolResult::json(json!({ "deleted": collection_id })))
 }
 

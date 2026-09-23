@@ -62,9 +62,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
-use crate::mcp::{
-    self, AppState, CallToolResult, JsonRpcError, JsonRpcResponse,
-};
+use crate::mcp::{self, AppState, CallToolResult, JsonRpcError, JsonRpcResponse};
 
 // =========================================================================
 // Public router + entry
@@ -99,9 +97,10 @@ async fn handle_healthz(State(state): State<Arc<AppState>>) -> Json<HealthzRespo
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
         uptime_ms,
-        requests_handled: state.metrics.requests_handled.load(
-            std::sync::atomic::Ordering::Relaxed,
-        ),
+        requests_handled: state
+            .metrics
+            .requests_handled
+            .load(std::sync::atomic::Ordering::Relaxed),
         current_connections: 0, // axum 0.7 doesn't surface this cheaply
         registered_tools: mcp::registered_tool_names(),
     })
@@ -136,10 +135,7 @@ pub struct ToolsListResponse {
 // `POST /mcp` — JSON-RPC 2.0 entry point
 // =========================================================================
 
-async fn handle_mcp_post(
-    State(state): State<Arc<AppState>>,
-    body: String,
-) -> Response {
+async fn handle_mcp_post(State(state): State<Arc<AppState>>, body: String) -> Response {
     dispatch_mcp_request(state, body).await
 }
 
@@ -156,12 +152,7 @@ pub async fn dispatch_mcp_request(state: Arc<AppState>, body: String) -> Respons
     let request: JsonRpcRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(e) => {
-            return Json(json_rpc_error(
-                None,
-                -32700,
-                format!("parse error: {e}"),
-            ))
-            .into_response();
+            return Json(json_rpc_error(None, -32700, format!("parse error: {e}"))).into_response();
         }
     };
 
@@ -291,9 +282,6 @@ pub trait JsonRpcResponseExt {
 
 impl JsonRpcResponseExt for JsonRpcResponse {
     fn ok_with_result(id: Option<Value>, result: CallToolResult) -> Self {
-        JsonRpcResponse::ok(
-            id,
-            serde_json::to_value(result).unwrap_or(Value::Null),
-        )
+        JsonRpcResponse::ok(id, serde_json::to_value(result).unwrap_or(Value::Null))
     }
 }

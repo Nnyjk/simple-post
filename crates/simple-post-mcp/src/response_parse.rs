@@ -22,8 +22,8 @@
 use serde_json::Value;
 use serde_json_path::JsonPathExt;
 
-use simple_post_core::domain::ApiResponse;
 use serde::Serialize;
+use simple_post_core::domain::ApiResponse;
 
 // -------------------------------------------------------------------------
 // Public types
@@ -90,7 +90,10 @@ pub fn parse(
     status: u16,
     _headers: &[(String, String)],
 ) -> ParsedResponse {
-    let body_json = if content_type.to_ascii_lowercase().contains("application/json") {
+    let body_json = if content_type
+        .to_ascii_lowercase()
+        .contains("application/json")
+    {
         serde_json::from_str(body).ok()
     } else {
         None
@@ -374,12 +377,11 @@ fn collect_paths(v: &Value, prefix: &str, out: &mut Vec<String>) {
 /// This deliberately mirrors the lenient semantics of the existing
 /// MCP `extract_jsonpath_stub` — callers want "first match" or
 /// "nothing", not a typed error.
-pub fn extract_jsonpath(
-    body: &str,
-    content_type: &str,
-    path: &str,
-) -> Option<Value> {
-    if !content_type.to_ascii_lowercase().contains("application/json") {
+pub fn extract_jsonpath(body: &str, content_type: &str, path: &str) -> Option<Value> {
+    if !content_type
+        .to_ascii_lowercase()
+        .contains("application/json")
+    {
         return None;
     }
     // Guard against `serde_json_path` 0.1's lenient parser, which
@@ -650,11 +652,7 @@ mod tests {
 
     #[test]
     fn extract_jsonpath_wildcard_returns_first_match() {
-        let v = extract_jsonpath(
-            r#"{"xs":[10,20,30]}"#,
-            "application/json",
-            "$.xs[*]",
-        );
+        let v = extract_jsonpath(r#"{"xs":[10,20,30]}"#, "application/json", "$.xs[*]");
         // Wildcard is supported by serde_json_path; we return the
         // first match.
         assert_eq!(v, Some(json!(10)));

@@ -93,9 +93,7 @@ impl WebClient {
 /// 4xx/5xx → -32000; everything else → -32603 (internal).
 pub fn to_rpc_error(err: ClientError) -> (i64, String) {
     match &err {
-        ClientError::Backend { status, body } => {
-            (http_status_to_rpc_code(*status), body.clone())
-        }
+        ClientError::Backend { status, body } => (http_status_to_rpc_code(*status), body.clone()),
         ClientError::Http(msg) => (-32603, format!("transport: {msg}")),
         ClientError::Stdio(msg) => (-32603, format!("stdio: {msg}")),
         ClientError::BadFrame(msg) => (-32700, format!("parse error: {msg}")),

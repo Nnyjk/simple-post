@@ -198,7 +198,11 @@ mod tests {
         let none = super::endpoint::__test_build_auth(Some("none"), None).unwrap();
         assert_eq!(none.kind, simple_post_core::domain::AuthType::None);
 
-        let bearer = super::endpoint::__test_build_auth(Some("bearer"), Some(serde_json::json!({"bearer": "tok"}))).unwrap();
+        let bearer = super::endpoint::__test_build_auth(
+            Some("bearer"),
+            Some(serde_json::json!({"bearer": "tok"})),
+        )
+        .unwrap();
         assert_eq!(bearer.kind, simple_post_core::domain::AuthType::Bearer);
 
         let unknown = super::endpoint::__test_build_auth(Some("magic"), None);

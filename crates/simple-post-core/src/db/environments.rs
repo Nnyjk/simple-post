@@ -314,10 +314,10 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
             Box::new(JsonColError(format!("{col}: {e}"))),
         )
     };
-    let base_urls: HashMap<String, String> = serde_json::from_str(&base_urls_json)
-        .map_err(|e| parse_err(e, "base_urls_json"))?;
-    let variables: HashMap<String, String> = serde_json::from_str(&variables_json)
-        .map_err(|e| parse_err(e, "variables_json"))?;
+    let base_urls: HashMap<String, String> =
+        serde_json::from_str(&base_urls_json).map_err(|e| parse_err(e, "base_urls_json"))?;
+    let variables: HashMap<String, String> =
+        serde_json::from_str(&variables_json).map_err(|e| parse_err(e, "variables_json"))?;
     Ok(Environment {
         id: row.get(0)?,
         project_id: row.get(1)?,
