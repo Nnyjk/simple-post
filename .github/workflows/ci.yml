@@ -1,0 +1,78 @@
+name: CI
+
+# Quality gate — every push to main and every PR must clear the same
+# six checks `npm run check` runs locally, plus a production build.
+# Release/docker workflows stay independent of this one.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Web — format, lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 'Setup Node (engines: >=20 <23; ESLint 10 wants >=22.13)'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Actions defaults NODE_ENV=production, which would skip
+      # devDependencies — @tauri-apps/cli, eslint, prettier, tsx all
+      # live there. Mirror release.yml.
+      - name: Install dependencies (with devDependencies)
+        run: npm ci --include=dev
+
+      - name: Prettier (format check)
+        run: npm run format:check
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript (tsc -b)
+        run: npm run typecheck
+
+      - name: Unit tests (auto-discovered *.test.ts)
+        run: npm test
+
+      - name: Production build (vite)
+        run: npm run build
+
+  rust:
+    # Windows-first project: windows-latest avoids installing the
+    # webkit2gtk/GTK toolchain that the src-tauri member needs on
+    # Linux, and matches the dev environment the fmt/clippy output
+    # was normalized in.
+    name: Rust — fmt, clippy, test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable + rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+
+      - name: cargo fmt (check only)
+        run: cargo fmt --all --check
+
+      - name: cargo clippy (-D warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
