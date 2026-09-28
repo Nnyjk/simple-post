@@ -563,6 +563,25 @@ pub fn environments_set_var(
     })
 }
 
+/// Rename an environment variable in one transaction.
+///
+/// The renderer used to model a rename as `set_var(old, None)` followed
+/// by `set_var(new, value)` — two commands, two transactions, with a
+/// window in between where the variable does not exist. Anything
+/// interrupting that window (crash, or the second command failing)
+/// destroyed the variable. One call, one `BEGIN IMMEDIATE`, no window.
+#[tauri::command]
+pub fn environments_rename_var(
+    state: State<DbPool>,
+    env_id: String,
+    from_key: String,
+    to_key: String,
+) -> Result<Environment, AppError> {
+    crate::db::with_tx(&state, |c| {
+        crate::db::environments::rename_var(c, &env_id, &from_key, &to_key)
+    })
+}
+
 #[tauri::command]
 pub fn environments_set_baseurl(
     state: State<DbPool>,

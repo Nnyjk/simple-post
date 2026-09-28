@@ -54,6 +54,7 @@ export const COMMANDS = {
   environmentsUpdate: 'environments_update',
   environmentsDelete: 'environments_delete',
   environmentsSetVar: 'environments_set_var',
+  environmentsRenameVar: 'environments_rename_var',
   environmentsSetBaseurl: 'environments_set_baseurl',
   environmentsSetActive: 'environments_set_active',
 
@@ -438,6 +439,11 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'POST',
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars`,
     body: (a) => ({ key: a.key, value: a.value }),
+  },
+  [COMMANDS.environmentsRenameVar]: {
+    method: 'POST',
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars/rename`,
+    body: (a) => ({ fromKey: a.fromKey, toKey: a.toKey }),
   },
   [COMMANDS.environmentsSetBaseurl]: {
     method: 'POST',

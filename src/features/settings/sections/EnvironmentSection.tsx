@@ -15,6 +15,7 @@ export interface EnvironmentSectionProps {
 
   // ---- env-scoped actions ----
   setEnvironmentVar: (envId: string, key: string, value: string | null) => void;
+  renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
   setEnvironmentBaseUrl: (envId: string, defId: string, url: string | null) => void;
   addEnvironment: (projectId: string, name: string) => void;
   deleteEnvironment: (envId: string) => void;
@@ -67,6 +68,7 @@ export function EnvironmentSection({
   environments,
   projectId,
   setEnvironmentVar,
+  renameEnvironmentVar,
   setEnvironmentBaseUrl,
   addEnvironment,
   deleteEnvironment,
@@ -168,6 +170,7 @@ export function EnvironmentSection({
                   env={activeEnv}
                   projectId={projectId}
                   setEnvironmentVar={setEnvironmentVar}
+                  renameEnvironmentVar={renameEnvironmentVar}
                   setEnvironmentBaseUrl={setEnvironmentBaseUrl}
                   updateEnvironment={updateEnvironment}
                   onAddVar={handleAddVar}
@@ -326,6 +329,7 @@ interface EnvBodyProps {
   projectId: string;
 
   setEnvironmentVar: EnvironmentSectionProps['setEnvironmentVar'];
+  renameEnvironmentVar: EnvironmentSectionProps['renameEnvironmentVar'];
   setEnvironmentBaseUrl: EnvironmentSectionProps['setEnvironmentBaseUrl'];
   updateEnvironment: EnvironmentSectionProps['updateEnvironment'];
   onAddVar: () => void;
@@ -343,6 +347,7 @@ function EnvBody({
   env,
   projectId,
   setEnvironmentVar,
+  renameEnvironmentVar,
   setEnvironmentBaseUrl,
   updateEnvironment,
   onAddVar,
@@ -387,7 +392,12 @@ function EnvBody({
             : undefined
         }
       />
-      <VariableTable env={env} setEnvironmentVar={setEnvironmentVar} onAddVar={onAddVar} />
+      <VariableTable
+        env={env}
+        setEnvironmentVar={setEnvironmentVar}
+        renameEnvironmentVar={renameEnvironmentVar}
+        onAddVar={onAddVar}
+      />
     </div>
   );
 }
@@ -649,10 +659,16 @@ function DefaultToggle({ isDefault, onToggle }: { isDefault: boolean; onToggle: 
 interface VariableTableProps {
   env: Environment;
   setEnvironmentVar: EnvironmentSectionProps['setEnvironmentVar'];
+  renameEnvironmentVar: EnvironmentSectionProps['renameEnvironmentVar'];
   onAddVar: () => void;
 }
 
-function VariableTable({ env, setEnvironmentVar, onAddVar }: VariableTableProps) {
+function VariableTable({
+  env,
+  setEnvironmentVar,
+  renameEnvironmentVar,
+  onAddVar,
+}: VariableTableProps) {
   const entries = Object.entries(env.variables);
 
   if (entries.length === 0) {
@@ -677,6 +693,7 @@ function VariableTable({ env, setEnvironmentVar, onAddVar }: VariableTableProps)
           value={v}
           envId={env.id}
           setEnvironmentVar={setEnvironmentVar}
+          renameEnvironmentVar={renameEnvironmentVar}
         />
       ))}
       <button
@@ -697,9 +714,17 @@ interface VariableRowProps {
   value: string;
   envId: string;
   setEnvironmentVar: VariableTableProps['setEnvironmentVar'];
+  renameEnvironmentVar: VariableTableProps['renameEnvironmentVar'];
 }
 
-function VariableRow({ flush, name, value, envId, setEnvironmentVar }: VariableRowProps) {
+function VariableRow({
+  flush,
+  name,
+  value,
+  envId,
+  setEnvironmentVar,
+  renameEnvironmentVar,
+}: VariableRowProps) {
   return (
     <div
       className={cn(
@@ -725,9 +750,11 @@ function VariableRow({ flush, name, value, envId, setEnvironmentVar }: VariableR
           }
           onCommit={(newKey) => {
             if (!newKey || newKey === name) return;
-            // 重命名时先删除旧 key，再写入新 key；两次 action 保持现有顺序语义。
-            setEnvironmentVar(envId, name, null);
-            setEnvironmentVar(envId, newKey, value);
+            // 一个命令完成重命名。之前这里是「先删旧 key，再写新 key」
+            // 两次 setEnvironmentVar，两次事务之间变量是消失的——进程
+            // 中断或第二次调用失败就会把变量删掉。改成单次原子调用后
+            // 不存在这个窗口。
+            renameEnvironmentVar(envId, name, newKey);
           }}
           className="font-mono text-xs font-medium"
         />

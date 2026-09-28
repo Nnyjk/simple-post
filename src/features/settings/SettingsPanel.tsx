@@ -105,6 +105,7 @@ export function SettingsPanel() {
   const allEnvironments = useAppStore((s) => s.environments);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setEnvironmentVar = useAppStore((s) => s.setEnvironmentVar);
+  const renameEnvironmentVar = useAppStore((s) => s.renameEnvironmentVar);
   const setEnvironmentBaseUrl = useAppStore((s) => s.setEnvironmentBaseUrl);
   const deleteEnvironment = useAppStore((s) => s.deleteEnvironment);
   const updateEnvironment = useAppStore((s) => s.updateEnvironment);
@@ -229,6 +230,7 @@ export function SettingsPanel() {
                   environments={environments}
                   projectId={activeProjectId}
                   setEnvironmentVar={setEnvironmentVar}
+                  renameEnvironmentVar={renameEnvironmentVar}
                   setEnvironmentBaseUrl={setEnvironmentBaseUrl}
                   deleteEnvironment={deleteEnvironment}
                   updateEnvironment={updateEnvironment}

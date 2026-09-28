@@ -28,6 +28,17 @@ tokio = { version = "1", features = [
     "net",
     "signal",
 ] }
+# Pinned to 0.12 on purpose — do not "unify" this to 0.13 to match Tauri.
+#
+# `Cargo.lock` does list reqwest 0.13.5, but Tauri 2.11.6 declares reqwest only
+# under a mobile-target cfg, so 0.13 is never compiled on Windows and costs
+# nothing. The two are not actually building duplicate HTTP stacks here.
+#
+# The blocker is TLS: reqwest 0.13 removed every webpki-roots feature, so
+# `rustls` and `rustls-no-provider` both force `rustls-platform-verifier`
+# (the OS cert store) as the only root source. As an API client that hits
+# arbitrary HTTPS endpoints, we want the deterministic, bundled Mozilla root
+# set that 0.12's `rustls-tls` provides. 0.13 also needs rust-version >= 1.85.
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "gzip",
@@ -58,6 +69,17 @@ dirs = "5"
 axum = "0.7"
 tower-http = { version = "0.5", features = ["fs", "trace"] }
 mime_guess = "2"
+
+# Dev profile: keep `target/debug` from ballooning to tens of GB.
+# Debug info is the dominant cost here (rlib / pdb / rmeta all carry it), and
+# stepping into a third-party crate is not a workflow we rely on.
+[profile.dev]
+# Own crates keep line numbers, so panics and backtraces stay line-accurate.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# All 288 transitive dependencies ship without debug info entirely.
+debug = false
 
 [profile.release]
 panic = "abort"

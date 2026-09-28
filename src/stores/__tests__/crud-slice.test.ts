@@ -310,27 +310,35 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     assert.strictEqual(harness.bag.environments[0], original);
   });
 
-  it('重命名按删除旧 key 后写入新 key 的顺序发送 null 与新值', async () => {
+  it('重命名只发一次 environments_rename_var，不再拆成删除+写入两次调用', async () => {
+    // The previous shape sent `environments_set_var(old, null)` followed
+    // by `environments_set_var(new, value)` — two transactions with a
+    // window in between where the variable did not exist. The rename is
+    // now one atomic backend call.
     const original = makeEnvironment({ variables: { old: 'value', keep: 'yes' } });
     const harness = makeCrudHarness([], [original]);
     const calls: CapturedInvoke[] = [];
+    const echoed = makeEnvironment({ variables: { renamed: 'value', keep: 'yes' } });
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });
-      return null;
+      return echoed;
     });
 
-    const removeOld = harness.slice.setEnvironmentVar('env-1', 'old', null);
-    const writeNew = harness.slice.setEnvironmentVar('env-1', 'renamed', 'value');
-    await Promise.all([removeOld, writeNew]);
+    const action = harness.slice.renameEnvironmentVar('env-1', 'old', 'renamed');
+
+    // Optimistic: the swap is visible immediately, with no intermediate
+    // state in which the variable is missing.
+    assert.deepEqual(harness.bag.environments[0].variables, {
+      renamed: 'value',
+      keep: 'yes',
+    });
+
+    await action;
 
     assert.deepEqual(calls, [
       {
-        cmd: 'environments_set_var',
-        args: { envId: 'env-1', key: 'old', value: null },
-      },
-      {
-        cmd: 'environments_set_var',
-        args: { envId: 'env-1', key: 'renamed', value: 'value' },
+        cmd: 'environments_rename_var',
+        args: { envId: 'env-1', fromKey: 'old', toKey: 'renamed' },
       },
     ]);
     assert.deepEqual(harness.bag.environments[0].variables, {
@@ -339,34 +347,43 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     });
   });
 
-  it('重命名中的删除 action 失败时恢复删除前的快照，不宣称 rename 原子性', async () => {
+  it('重命名失败时恢复完整快照 — 后端从未进入过删除状态', async () => {
     const original = makeEnvironment({ variables: { old: 'value', keep: 'yes' } });
     const harness = makeCrudHarness([], [original]);
     const calls: CapturedInvoke[] = [];
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });
-      if (args?.value === null) throw new Error('rename delete failed');
-      return null;
+      throw new Error('rename failed');
     });
 
-    const removeOld = harness.slice.setEnvironmentVar('env-1', 'old', null);
-    const writeNew = harness.slice.setEnvironmentVar('env-1', 'renamed', 'value');
-    await Promise.all([removeOld, writeNew]);
+    await harness.slice.renameEnvironmentVar('env-1', 'old', 'renamed');
 
     assert.deepEqual(calls, [
       {
-        cmd: 'environments_set_var',
-        args: { envId: 'env-1', key: 'old', value: null },
-      },
-      {
-        cmd: 'environments_set_var',
-        args: { envId: 'env-1', key: 'renamed', value: 'value' },
+        cmd: 'environments_rename_var',
+        args: { envId: 'env-1', fromKey: 'old', toKey: 'renamed' },
       },
     ]);
     assert.deepEqual(
       harness.bag.environments[0].variables,
       original.variables,
-      '当前两次 action 的删除失败分支应恢复删除前快照',
+      '单次事务失败时变量必须完好，不存在“已删除未重建”的中间态',
     );
+    assert.strictEqual(harness.bag.environments[0], original);
+  });
+
+  it('重命名的 key 不存在时不发 IPC', async () => {
+    const original = makeEnvironment({ variables: { keep: 'yes' } });
+    const harness = makeCrudHarness([], [original]);
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    await harness.slice.renameEnvironmentVar('env-1', 'ghost', 'renamed');
+
+    assert.deepEqual(calls, [], '源 key 不存在时不应打扰后端');
+    assert.deepEqual(harness.bag.environments[0].variables, { keep: 'yes' });
   });
 });

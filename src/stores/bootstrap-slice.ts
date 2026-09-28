@@ -56,6 +56,21 @@ export interface BootstrapSliceActions {
    * Triggered from TopBar's useEffect on mount.
    */
   bootstrap: () => Promise<void>;
+
+  /**
+   * Dismiss the startup-load error banner without retrying.
+   *
+   * `bootstrapError` used to be write-only state: `bootstrap()` set it on
+   * failure and nothing ever read it, so a failed startup looked
+   * identical to an empty database — every list rendered blank with no
+   * indication that the backend was unreachable. The banner in
+   * `features/top-bar/BootstrapErrorBanner` is the reader; this action is
+   * its dismiss affordance.
+   *
+   * Only clears the message — `loaded` / `loading` are untouched, so a
+   * subsequent `bootstrap()` retry still runs.
+   */
+  clearBootstrapError: () => void;
 }
 
 export type BootstrapSlice = BootstrapSliceState & BootstrapSliceActions;
@@ -165,4 +180,6 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       set({ loading: false, bootstrapError: message });
     }
   },
+
+  clearBootstrapError: () => set({ bootstrapError: null }),
 });

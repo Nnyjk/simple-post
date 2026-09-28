@@ -294,6 +294,7 @@ pub fn run() {
             crate::commands::environments_update,
             crate::commands::environments_delete,
             crate::commands::environments_set_var,
+            crate::commands::environments_rename_var,
             crate::commands::environments_set_baseurl,
             crate::commands::environments_set_active,
             crate::commands::base_url_defs_list,

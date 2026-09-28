@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { TopBar } from '@/features/top-bar/TopBar';
+import { BootstrapErrorBanner } from '@/features/top-bar/BootstrapErrorBanner';
 import { ProjectTree } from '@/features/project-tree/ProjectTree';
 import { HttpTester } from '@/features/http-tester/HttpTester';
 import { ResponseViewer } from '@/features/response-viewer/ResponseViewer';
@@ -115,6 +116,9 @@ function App() {
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
       <TopBar />
+      {/* Sits between the header and the workspace so a failed startup
+          load is visible without covering the tree it made incomplete. */}
+      <BootstrapErrorBanner />
       <main className="flex min-h-0 flex-1">
         <ProjectTree />
         <div ref={containerRef} className="flex min-w-0 flex-1 flex-col">

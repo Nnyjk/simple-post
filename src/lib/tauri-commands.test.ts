@@ -388,6 +388,20 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'Renamed' });
   });
 
+  it('environmentsRenameVar → POST /api/environments/{envId}/vars/rename with flat body', async () => {
+    await invokeCmd(COMMANDS.environmentsRenameVar, {
+      envId: 'env 1',
+      fromKey: 'old',
+      toKey: 'new',
+    });
+    const c = last();
+    assert.equal(c.method, 'POST');
+    // The env id is path-encoded; the rename needs one round-trip, not
+    // a delete followed by a set.
+    assert.equal(c.url, '/api/environments/env%201/vars/rename');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { fromKey: 'old', toKey: 'new' });
+  });
+
   it('baseUrlDefsCreate → 只投影 Web body 字段', async () => {
     await invokeCmd(COMMANDS.baseUrlDefsCreate, {
       projectId: 'p-1',

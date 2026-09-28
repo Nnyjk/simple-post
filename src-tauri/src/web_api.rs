@@ -308,6 +308,17 @@ pub struct EnvSetVarBody {
     pub value: Option<String>,
 }
 
+/// Body for `POST /api/environments/:envId/vars/rename`. Carries both
+/// halves of the rename so the backend can do it in one transaction —
+/// a client must NOT compose this as a delete followed by a set, which
+/// leaves a window where the variable does not exist.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvRenameVarBody {
+    pub from_key: String,
+    pub to_key: String,
+}
+
 /// Body for `POST /api/environments/:envId/baseurls`. `url = null`
 /// removes the slot.
 #[derive(Debug, Deserialize)]
@@ -953,6 +964,18 @@ async fn environments_set_var(
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 
+async fn environments_rename_var(
+    State(s): State<Arc<WebState>>,
+    Path(env_id): Path<String>,
+    Json(body): Json<EnvRenameVarBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| {
+        db::environments::rename_var(c, &env_id, &body.from_key, &body.to_key)
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
 async fn environments_set_baseurl(
     State(s): State<Arc<WebState>>,
     Path(env_id): Path<String>,
@@ -1323,6 +1346,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             patch(environments_update).delete(environments_delete),
         )
         .route("/api/environments/:envId/vars", post(environments_set_var))
+        .route(
+            "/api/environments/:envId/vars/rename",
+            post(environments_rename_var),
+        )
         .route(
             "/api/environments/:envId/baseurls",
             post(environments_set_baseurl),

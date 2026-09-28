@@ -106,6 +106,7 @@ export interface CrudSliceActions {
 
   // actions: environment (async — Tauri commands)
   setEnvironmentVar: (envId: string, key: string, value: string | null) => Promise<void>;
+  renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => Promise<void>;
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => Promise<void>;
   setEnvironmentBaseUrl: (envId: string, defId: string, url: string | null) => Promise<void>;
@@ -872,6 +873,48 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       await invokeCmd<Environment>(COMMANDS.environmentsSetVar, { envId, key, value });
     } catch (e) {
       console.error('[store] environments_set_var failed', e);
+      set((s) => ({
+        environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+      }));
+    }
+  },
+  renameEnvironmentVar: async (envId, fromKey, toKey) => {
+    const prev = get().environments.find((e) => e.id === envId);
+    if (!prev) return;
+    if (fromKey === toKey) return;
+
+    // Optimistic single-step swap: the old key disappears and the new
+    // one appears in the same state write, so no intermediate render
+    // ever shows the variable missing. The value moves with the key.
+    const { [fromKey]: value, ...rest } = prev.variables;
+    if (value === undefined) return;
+    const optimistic: Environment = {
+      ...prev,
+      variables: { ...rest, [toKey]: value },
+    };
+    set((s) => ({
+      environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
+    }));
+
+    try {
+      // One command, one transaction. The previous shape — two
+      // `environments_set_var` calls — left the variable deleted for
+      // the window between them, and if the second call failed the
+      // rollback below restored only the UI while the backend had
+      // already committed the delete.
+      const updated = await invokeCmd<Environment>(COMMANDS.environmentsRenameVar, {
+        envId,
+        fromKey,
+        toKey,
+      });
+      // The backend echoes the authoritative post-rename env, so a
+      // concurrent edit from another window isn't clobbered by the
+      // optimistic guess.
+      set((s) => ({
+        environments: s.environments.map((env) => (env.id === envId ? updated : env)),
+      }));
+    } catch (e) {
+      console.error('[store] environments_rename_var failed', e);
       set((s) => ({
         environments: s.environments.map((env) => (env.id === envId ? prev : env)),
       }));
