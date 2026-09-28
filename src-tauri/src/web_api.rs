@@ -442,9 +442,18 @@ async fn endpoint_send(
         }
     }
 
-    let mut body = body;
-    body["endpointId"] = Value::String(id);
-    let args: crate::commands::EndpointSendArgs = serde_json::from_value(body)
+    // `Json<Value>` accepts any JSON value, but `body["k"] = v` panics on a
+    // non-object (serde_json's `index_or_insert` has `_ => panic!`). With
+    // `panic = "abort"` in the release profile that turns a malformed
+    // request body into a process abort for every other user, so the shape
+    // is checked before the insert.
+    let Value::Object(mut map) = body else {
+        return Err(map_app_error(AppError::Validation(
+            "request body must be a JSON object".into(),
+        )));
+    };
+    map.insert("endpointId".to_string(), Value::String(id));
+    let args: crate::commands::EndpointSendArgs = serde_json::from_value(Value::Object(map))
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
     let result = crate::commands::send_endpoint_by_id(&s.pool, &args)
         .await

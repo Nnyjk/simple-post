@@ -335,13 +335,39 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     // Per-call Client to keep the API request-scoped; future slices
     // can hoist this into tauri::State if we want connection pooling
     // across calls.
+    //
+    // The redirect policy re-runs `check_url` on **every hop**. Checking
+    // only the initial URL leaves the whole guard cosmetic: with
+    // `follow_redirects` on (the default), an attacker-controlled URL
+    // that answers `302 Location: http://169.254.169.254/…` reaches the
+    // metadata service in one hop, and `Policy::limited(10)` happily
+    // follows it. `custom` gives per-hop control; the hop budget is
+    // counted here because `custom` replaces `limited` rather than
+    // composing with it.
+    const MAX_REDIRECTS: usize = 10;
+    let redirect = if input.follow_redirects {
+        let hops = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        reqwest::redirect::Policy::custom(move |attempt| {
+            let n = hops.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n >= MAX_REDIRECTS {
+                return attempt.error("too many redirects");
+            }
+            match check_url(attempt.url().as_str(), policy) {
+                UrlVerdict::Allowed => attempt.follow(),
+                UrlVerdict::Refused(reason) => attempt.error(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    reason,
+                ))
+                    as Box<dyn std::error::Error + Send + Sync>),
+            }
+        })
+    } else {
+        reqwest::redirect::Policy::none()
+    };
+
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_millis(input.timeout_ms))
-        .redirect(if input.follow_redirects {
-            reqwest::redirect::Policy::limited(10)
-        } else {
-            reqwest::redirect::Policy::none()
-        })
+        .redirect(redirect)
         .build()
     {
         Ok(c) => c,
@@ -604,6 +630,69 @@ mod tests {
         let err = out.error.expect("refusal envelope");
         assert_eq!(err.kind, "network");
         assert!(err.message.contains("scheme"), "got: {}", err.message);
+    }
+
+    /// The policy must survive a redirect.
+    ///
+    /// Regression net for a guard that was purely cosmetic: `check_url`
+    /// ran on the initial URL only, while the client was built with
+    /// `Policy::limited(10)`. One `302` to a forbidden address therefore
+    /// reached it — exactly the threat the policy exists to stop. Spins a
+    /// real loopback server that answers `302` toward the metadata
+    /// address and asserts the hop is refused.
+    #[tokio::test]
+    async fn redirect_hop_is_re_checked_against_the_policy() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = [0u8; 1024];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock
+                        .write_all(
+                            b"HTTP/1.1 302 Found\r\n\
+                              Location: http://169.254.169.254/latest/meta-data/\r\n\
+                              Content-Length: 0\r\n\r\n",
+                        )
+                        .await;
+                });
+            }
+        });
+
+        let input = HttpRequestInput {
+            method: "GET".into(),
+            // `localhost` on purpose: the policy checks IP literals and
+            // deliberately does not resolve names, so the *first* hop is
+            // allowed and only the redirect target can be refused. Using
+            // `127.0.0.1` here would be stopped at the initial check and
+            // would prove nothing about redirects.
+            url: format!("http://localhost:{port}/bounce"),
+            headers: vec![],
+            body: None,
+            timeout_ms: 5_000,
+            follow_redirects: true,
+            max_response_size_kb: 16,
+        };
+
+        let out = execute_with_policy(
+            &input,
+            OutboundPolicy {
+                block_private_net: true,
+            },
+        )
+        .await;
+        let err = out.error.expect("redirect must be refused");
+        // reqwest surfaces a refused hop as "error following redirect";
+        // a *followed* hop to an unreachable metadata address would instead
+        // time out and read "error sending request". The distinction is
+        // what makes this a real test of the per-hop re-check.
+        assert!(
+            err.message.contains("error following redirect"),
+            "expected the redirect to be refused rather than followed, got: {}",
+            err.message
+        );
     }
 
     // ---- parse_method -----------------------------------------------------

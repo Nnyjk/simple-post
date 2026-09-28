@@ -341,7 +341,15 @@ export async function sendEndpoint(input: SendEndpointInput): Promise<ApiRespons
       COMMANDS.endpointSend,
       {
         endpointId: input.endpointId,
-        ...(input.urlOverride !== undefined ? { overrides: { url: input.urlOverride } } : {}),
+        overrides: {
+          // Both fields travel. The method is not redundant: the renderer's
+          // method picker writes to the store draft, so a user can switch a
+          // stored GET to POST without saving. Omitting it made the wire
+          // carry the stored method while the response bar reported the
+          // draft one — the UI claimed `POST 200` over a real GET.
+          url: input.urlOverride,
+          method: input.method,
+        },
         settings: {
           timeoutMs: input.settings.timeoutMs,
           followRedirects: input.settings.followRedirects,
@@ -350,8 +358,9 @@ export async function sendEndpoint(input: SendEndpointInput): Promise<ApiRespons
       },
       options,
     );
-    const mapped = envelopeToApiResponse(r, shape, r.response?.url ?? '');
-    return mapped;
+    // `shape.method` is the draft method, which is now also what travels in
+    // `overrides.method`, so the badge cannot disagree with the request.
+    return envelopeToApiResponse(r, shape, r.response?.url ?? '');
   } catch (err) {
     const name = (err as { name?: string })?.name;
     const msg = (err as Error)?.message ?? String(err);
