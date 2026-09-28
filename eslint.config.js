@@ -15,7 +15,6 @@ export default [
       'node_modules/**',
       '.scratch/**',
       'src-tauri/gen/**',
-      'packages/simple-post-mcp/dist/**',
       'docs/**',
       'public/**',
     ],
@@ -63,7 +62,7 @@ export default [
 
   // Node globals for build/test scripts (ESM).
   {
-    files: ['scripts/**/*.mjs', 'packages/**/*.{mjs,js}', '*.js'],
+    files: ['scripts/**/*.mjs', '*.js'],
     languageOptions: {
       sourceType: 'module',
       globals: { ...globals.node },

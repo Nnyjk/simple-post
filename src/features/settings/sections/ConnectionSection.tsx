@@ -27,25 +27,15 @@ const GENERIC_CONFIG = JSON.stringify(
         },
       },
       'simple-post-stdio': {
-        // plan commit 4: `simple-post-mcp-proxy` was removed in
-        // commit 3; the standalone bridge binary is now
-        // `simple-post-mcp`. For one-step install users should
-        // prefer the npm wrapper (`npx -y @simple-post/mcp-server`).
+        // `simple-post-mcp-proxy` was removed in commit 3; the standalone
+        // bridge binary is now `simple-post-mcp`. There is deliberately
+        // no npm wrapper — an AI client that cannot run a Rust binary
+        // should point at the daemon over HTTP (`serve-web` + /mcp)
+        // instead, which needs no local install on the client machine.
         command: 'simple-post-mcp',
         args: ['stdio'],
         env: {
           SIMPLE_POST_DATA_DIR: '%APPDATA%\\\\simple-post',
-        },
-      },
-      'simple-post-npm': {
-        command: 'npx',
-        args: ['-y', '@simple-post/mcp-server'],
-        env: {
-          SIMPLE_POST_DATA_DIR: '%APPDATA%\\\\simple-post',
-        },
-        metadata: {
-          description:
-            'npm wrapper around the standalone simple-post-mcp bridge — no native install needed',
         },
       },
     },

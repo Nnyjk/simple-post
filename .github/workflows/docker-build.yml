@@ -3,7 +3,7 @@
 # Build the `simple-post:web` container with docker buildx, push to
 # GitHub Container Registry (GHCR). Triggered by pushing a tag of the
 # form `v0.2.0` (i.e. plain `v*`, *not* `v*-mcp` which is reserved for
-# the standalone MCP binary — see release-mcp.yml).
+# the standalone MCP binary — see release.yml).
 #
 # Workflow outputs:
 #   - ghcr.io/nnyjk/simple-post:web-<sha>   (commit-pinned)

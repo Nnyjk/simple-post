@@ -45,7 +45,8 @@ enum Cmd {
 
     /// Run as stdio→HTTP proxy. This is a separate binary
     /// (`simple-post-mcp.exe`); the main binary prints an error and exits.
-    /// Use the dedicated binary directly or `npx -y @simple-post/mcp-server`.
+    /// Use the dedicated binary directly, or point the client at the
+    /// daemon over HTTP (no local install needed on the client machine).
     #[command(name = "mcp-proxy")]
     McpProxy,
 
@@ -126,7 +127,7 @@ fn main() {
             eprintln!(
                 "mcp-proxy is a separate binary:\n  \
                  - cargo-installed: cargo install simple-post-mcp\n  \
-                 - npm: npx -y @simple-post/mcp-server"
+                 - or connect the client to the daemon over HTTP instead"
             );
             std::process::exit(2);
         }

@@ -4,7 +4,6 @@ target
 node_modules
 .scratch
 src-tauri/gen
-packages/simple-post-mcp/dist
 coverage
 
 # Generated / vendored artifacts

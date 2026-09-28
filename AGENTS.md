@@ -37,8 +37,7 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 - `crates/simple-post-core/src/db/` — per-entity SQL modules + `schema.sql` + `fixtures.json`
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
 - `src-tauri/src/` — `commands.rs`, `web_api.rs`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
-- `packages/simple-post-mcp/` — independent npm package wrapping prebuilt native binaries
-- `scripts/` — dev/test/build utilities (see below); `docs/` — HTTP reference, OpenAPI, MCP permission policy
+- `scripts/` — dev/test/build utilities (see below); `docs/` — HTTP reference, OpenAPI, refactor plan
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
 ## Development Commands
@@ -73,7 +72,7 @@ node scripts/dump-openapi.mjs > docs/openapi.yaml   # regenerate OpenAPI after w
 
 Lint/format tooling: **ESLint 10 (flat config) + Prettier 3**. ESLint owns correctness (`rules-of-hooks`, unused vars, …); style belongs to Prettier (`eslint-config-prettier` sits last in the config). Rust side: `cargo fmt`, `cargo clippy` with `-D warnings`.
 
-**CI quality gate** — `.github/workflows/ci.yml` runs on every push to `main` and every PR (release / release-mcp / docker workflows only publish):
+**CI quality gate** — `.github/workflows/ci.yml` runs on every push to `main` and every PR (release / docker workflows only publish):
 - `web` (ubuntu, Node 22): `format:check` → `lint` → `typecheck` → `npm test` → `vite build`
 - `rust` (windows-latest): `cargo fmt --check` → `clippy -D warnings` → `cargo test --workspace`
 
@@ -128,13 +127,13 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 - `tsconfig.json`, `package.json`, `tailwind.config.js`
 - `eslint.config.js`, `.prettierrc`, `.prettierignore` — lint/format rules and scope
 - `.editorconfig`, `.gitattributes` — LF-everywhere policy (only `*.bat`/`*.cmd` are CRLF)
-- `.github/workflows/ci.yml` — push/PR quality gate; `release.yml` / `release-mcp.yml` / `docker-build.yml` only publish
+- `.github/workflows/ci.yml` — push/PR quality gate; `release.yml` / `docker-build.yml` only publish
 - `scripts/run-tests.mjs` — test discovery runner behind `npm test`
 
 ## Runtime/Tooling Preferences
 
 - **Node `>=20 <23`** (root `package.json` engines); package manager is **npm** (lockfile v3). No pnpm/yarn/bun — do not add their lockfiles.
-- Root `package.json` declares **no workspaces**; `packages/simple-post-mcp` is an independently published package (`@simple-post/mcp-server`).
+- Root `package.json` declares **no workspaces**, and there is no second npm package: the `simple-post-mcp` bridge ships only as a compiled binary (release artefact / `cargo install`). Anything an AI client needs is reachable over the daemon's HTTP endpoint, so no registry publish path exists.
 - **Rust**: edition 2021, MSRV 1.77.2, toolchain channel **`stable`** with `rustfmt` + `clippy` (`src-tauri/rust-toolchain.toml`). Track `stable` so edition-2024 transitive deps (clap 4.6+, etc.) compile; if you need a pinned baseline, set `channel = "1.85.0"` (edition2024 stable release) or newer and run `rustup toolchain install` first.
 - TypeScript path alias `@/*` → `src/*`; `moduleResolution: bundler`, `noEmit` (type checks run via `npm run typecheck` / `tsc -b`, also embedded in `npm run build`).
 - Workspace builds output to `<repo>/target/`, not `src-tauri/target/`.

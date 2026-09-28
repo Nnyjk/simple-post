@@ -107,7 +107,7 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 - [x] **Rust 主进程**：SQLite（`rusqlite` + `r2d2`）、HTTP（`reqwest`）、MCP 子进程桥
 - [x] **真实持久化**：Zustand store → Tauri command → `simple-post-core`（SQLite via `rusqlite`）
 - [x] **真实请求**：渲染端 → Tauri command → `reqwest` → 返回结构化响应
-- [x] **MCP Server**：拆到独立 `crates/simple-post-mcp/` workspace member，`daemon_http.rs`（axum HTTP daemon）+ `stdio_loop.rs`（stdio bridge）+ `mcp/mod.rs`（JSON-RPC dispatcher）— 向 AI 客户端（Claude Desktop / Cursor / Cline）暴露 44 个 MCP 工具。同一 crate 也以独立 `simple-post-mcp` 二进制 + `@simple-post/mcp-server` npm 包分发。
+- [x] **MCP Server**：拆到独立 `crates/simple-post-mcp/` workspace member，`daemon_http.rs`（axum HTTP daemon）+ `stdio_loop.rs`（stdio bridge）+ `mcp/mod.rs`（JSON-RPC dispatcher）— 向 AI 客户端（Claude Desktop / Cursor / Cline）暴露 44 个 MCP 工具。同一 crate 以独立 `simple-post-mcp` 二进制分发；不发布到 npm，AI 客户端也可直连 daemon 的 HTTP 端点。
 - [x] **打包**：NSIS 安装包 + 便携 zip
 
 ### v0.2（+2 周）

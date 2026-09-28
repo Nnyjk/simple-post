@@ -16,10 +16,6 @@ src/
 src-tauri/gen/
 src-tauri/target/
 
-# npm package caches / lockfiles (npm wrapper builds separately)
-packages/**/node_modules/
-packages/**/bin/
-
 # VCS / scratch / IDE noise
 .git/
 .gitattributes
@@ -68,7 +64,3 @@ crates/simple-post-mcp/
 .env
 .env.*
 !.env.example
-
-# The `packages/simple-post-mcp/` dir has node_modules + npm tarballs
-# that bloat the context (the Dockerfile doesn't need them).
-packages/

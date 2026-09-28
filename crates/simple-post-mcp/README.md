@@ -5,8 +5,12 @@ MCP server module + standalone CLI binary for Simple Post.
 Extracted from `src-tauri/src/mcp/` and `src-tauri/src/bin/mcp_proxy.rs`
 in commit 3 of the v0.2+ workspace refactor. Commit 4 fills the
 standalone binary's CLI surface (`--url` / `--password` /
-`--transport=stdio|http` / `--capability` / `--log-level`) and adds the
-npm wrapper package `@simple-post/mcp-server`.
+`--transport=stdio|http` / `--capability` / `--log-level`).
+
+The binary is the only distribution form — there is no npm wrapper. An AI
+client that cannot run a Rust binary should connect to the daemon's HTTP
+endpoint instead (start `simple-post serve-web`, point the client at
+`http://<host>:<port>/mcp`), which needs nothing installed client-side.
 
 The shared low-level layer (`db`, `domain`, `error`, `http_executor`,
 `permissions`, `mcp_metrics`) lives in the sibling `simple-post-core`
@@ -53,23 +57,25 @@ Every flag also accepts an env-var override (`SIMPLE_POST_WEB_URL` /
 `SIMPLE_POST_WEB_PASSWORD` / `SIMPLE_POST_MCP_CAPABILITY`); the flag
 wins when both are set.
 
-## npm wrapper
+## Clients with no native binary
 
-The same binary ships inside the npm package
-[`@simple-post/mcp-server`](../../packages/simple-post-mcp/). The
-release pipeline is in `.github/workflows/release-mcp.yml` and produces
-one binary per (platform, arch); `bin/postinstall.mjs` symlinks the
-right one into `native/current/`. Users get it with:
+There is no npm wrapper. A client machine that cannot run `simple-post-mcp`
+connects straight to the daemon over HTTP instead — start
+`simple-post serve-web` on the host and point the client at the endpoint:
 
-```bash
-npx -y @simple-post/mcp-server --url=http://localhost:4224
+```json
+{
+  "mcpServers": {
+    "simple-post": {
+      "type": "http",
+      "url": "http://<host>:4224/mcp"
+    }
+  }
+}
 ```
 
-…or, for a persistent install:
-
-```bash
-npm install -g @simple-post/mcp-server
-```
+Nothing is installed on the client, and the transport is the same
+JSON-RPC the stdio bridge speaks — it just replaces stdin/stdout with HTTP.
 
 ## Migration from `simple-post-mcp-proxy`
 
@@ -86,22 +92,9 @@ The `simple-post-mcp-proxy` binary that lived at
 + }
 ```
 
-Or, for one-shot installs with no native binary on disk:
-
-```diff
-- {
--   "command": "simple-post-mcp-proxy"
-- }
-+ {
-+   "command": "npx",
-+   "args": ["-y", "@simple-post/mcp-server"]
-+ }
-```
-
 ## See also
 
 - `crates/simple-post-core/README.md` — the shared layer this crate
   builds on.
-- `packages/simple-post-mcp/README.md` — the npm wrapper.
 - `AGENTS.md` — the two-gate permission model (global capability policy + per-project permission)
   applied by `mcp::dispatch` / `mcp::tool_descriptors`.

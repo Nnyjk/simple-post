@@ -755,10 +755,8 @@ pub fn mcp_status(
 /// `src-tauri/target/<profile>/simple-post(.exe)` while simple-post-mcp
 /// is at the workspace root `target/<profile>/simple-post-mcp(.exe)`;
 /// this command returns the same directory as `current_exe` so the
-/// hint is correct for installed / packaged builds. Commit 5 will
-/// revisit this when the npm-wrapped path becomes the canonical
-/// install (it should point users at `npx -y @simple-post/mcp-server`
-/// in that case).
+/// hint is correct for installed / packaged builds. There is no
+/// npm-wrapped path, so this directory is the only one to point at.
 ///
 /// Returns `"<unresolved current_exe>"` when the lookup fails for any
 /// reason; the renderer treats that string as a non-actionable

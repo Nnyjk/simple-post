@@ -153,7 +153,7 @@ pub fn run_mcp(transport: String, port: u16, bind: String) {
 pub fn run_mcp_proxy() {
     eprintln!(
         "mcp-proxy is a separate binary — please run `simple-post-mcp` instead \
-         (or `npx -y @simple-post/mcp-server`)."
+         (or connect the client to the daemon over HTTP)."
     );
     std::process::exit(2);
 }
@@ -375,9 +375,9 @@ pub fn run() {
 /// The browser never spawns a daemon — it talks to `127.0.0.1:<port>`
 /// directly. The daemon child (if `mcp.auto_start == true`) runs on
 /// this host, behind the `simple-post` process tree, and is reachable
-/// only via the REST bridge; AI clients continue to use the
-/// `simple-post-mcp` binary on their own machine (or
-/// `npx -y @simple-post/mcp-server`) as before.
+/// only via the REST bridge; AI clients connect either to the
+/// `simple-post-mcp` binary on their own machine, or straight to this
+/// host's HTTP endpoint.
 ///
 pub async fn run_serve_web(
     bind_addr: std::net::SocketAddr,
