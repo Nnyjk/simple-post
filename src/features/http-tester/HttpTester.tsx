@@ -360,6 +360,9 @@ export function HttpTester() {
         // The input holds only the path; the backend joins the base URL,
         // substitutes `{{var}}` and reduces auth from the stored rows.
         urlOverride: liveUrl,
+        // The ENV pill is Zustand-only, so the database's `is_active` does
+        // not follow the user's selection. Send what is on screen.
+        environmentId: endpointEnv?.id,
         method,
         settings: requestSettings,
         signal: ctrl.signal,

@@ -1,7 +1,7 @@
 # 项目状态总览（单一事实源）
 
-> 最后核对：2026-09-28 · 对应 HEAD `9328d89` + 本文所述的未提交修复
-> 本文的数字全部由代码实测得出，**不是**估算。若本文与代码冲突，以代码为准并请修正本文。
+> 最后核对：2026-09-28 · 审计分支，基线 `9328d89`
+> 行数统计口径写在「四个运行时」一节，任何人重跑都能复现。若本文与代码冲突，以代码为准并请修正本文。
 
 ## 一句话定位
 
@@ -11,12 +11,19 @@
 
 | 运行时 | 路径 | 行数 | 职责 |
 |---|---|---|---|
-| 前端 | `src/` | 18.9k | React 18 + TS，Zustand 状态，Vite 5 |
-| Tauri 壳 | `src-tauri/src/` | 4.7k | GUI、`serve-web`、daemon 监管、端口注册 |
-| 共享核心 | `crates/simple-post-core/src/` | 5.8k | 域模型、SQLite、HTTP 执行器、权限、错误 |
-| MCP 服务 | `crates/simple-post-mcp/src/` | 7.5k | 44 工具 JSON-RPC dispatcher + axum daemon + stdio 桥 |
+| 前端 | `src/` | 19,138 | React 18 + TS，Zustand 状态，Vite 5 |
+| Tauri 壳 | `src-tauri/src/` | 5,311 | GUI、`serve-web`、daemon 监管、端口注册 |
+| 共享核心 | `crates/simple-post-core/src/` | 6,235 | 域模型、SQLite、HTTP 执行器、权限、错误 |
+| MCP 服务 | `crates/simple-post-mcp/src/` | 7,655 | 44 工具 JSON-RPC dispatcher + axum daemon + stdio 桥 |
 
-合计约 **36.9k 行**。测试分布：前端 7 个文件 / 161 例，Rust 23 个模块 / 244 例。
+合计 **38,339 行**（物理行，含空行与注释）。
+
+> 行数统计口径：对该目录下所有 `.ts` / `.tsx` / `.rs` 文件统计 `LF` 字节个数，
+> 即"物理行数"，包含空行与注释。这样任何人重跑都能得到同一个数字。
+> 需要可执行版本：
+> `Get-ChildItem -Recurse <dir> -Include *.ts,*.tsx,*.rs | % { (Get-Content $_.FullName).Count } | Measure-Object -Sum`
+
+测试分布：前端 7 个 `*.test.ts` 文件；Rust 单元测试分布在 core / mcp / src-tauri 三个 crate。
 
 ## 四种分发形态
 
@@ -35,7 +42,7 @@
         ├─ 闸 A：全局 capability 策略  ← 用户在设置页选的 read_only/safe_write/full_access
         │     REQUIRED_CAPABILITY 表必须「穷尽」，缺行 = 拒绝
         │
-        └─ 闸 B：按项目 Permission   ← Read < ReadCall < Full，默认 read_call
+        └─ 闸 B：按项目 Permission   ← Read < ReadCall < Full，默认 ReadCall
               required_permission()，未知工具 = Full
 ```
 
@@ -51,11 +58,11 @@
 
 | 项 | 位置 | 说明 |
 |---|---|---|
-| 巨型文件 | `ProjectTree.tsx` 1792 行 | 单组件承担整个树，建议拆虚拟滚动 + 节点子组件 |
-| 巨型文件 | `web_api.rs` 1765 行 | REST 路由集中，可按资源拆模块 |
-| 死命令 | `base_url_defs_list` | `lib.rs:278` 注册、`commands.rs:592` 实现，但无 `COMMANDS` 键、无 REST 路由 → 两种形态都调不到 |
-| 缺 REST 路由 | `/api/permissions*`、`/api/request_settings*` | 仅 Tauri IPC 可用，OpenAPI 有意不收录 |
-| 跨层 move | `module_move` 语义不对称 | MCP 走真 UPDATE（跨项目）；前端 `modulesMove` 只在项目内重排 |
+| 巨型文件 | `ProjectTree.tsx` 1870 行 | 单组件承担整个树；拆解方案见 `REFACTOR-PLAN.md` |
+| 巨型文件 | `web_api.rs` 1960 行 | REST 路由集中；拆解方案见 `REFACTOR-PLAN.md` |
+| 空接线命令 | `base_url_defs_list` | 已在五处联动中接好（`COMMANDS` + `WEB_ROUTES` + REST 路由），但**前端没有任何调用点**——渲染端的 base URL 定义随 `Project` 一起回来，不需要单独拉 |
+| 未进 OpenAPI | `/api/permissions/:projectId`、`/api/request-settings` | 路由都存在且可用，只是没写进 `public_route_specs()`，因此不生成到 `docs/openapi.yaml` |
+| 跨层 move | `module_move` 语义不对称 | MCP 走真 UPDATE（跨项目改 `project_id`）；前端 `modulesMove` 只在项目内重排 |
 
 ## 质量门禁
 

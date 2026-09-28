@@ -919,9 +919,22 @@ pub async fn mcp_capability_list_tools(
 pub struct EndpointSendOverrides {
     pub url: Option<String>,
     pub method: Option<HttpMethod>,
+    /// Which environment supplies the `{{var}}` pool and `base_urls`.
+    ///
+    /// The renderer's "ENV" pill writes `activeEnvironmentId` in Zustand
+    /// only — `setEnvironmentActive`, which would persist `is_active`,
+    /// has no caller anywhere in `src/`. So the database's active flag
+    /// stays whatever the seed set (`env_dev` for the shipped fixtures)
+    /// and never follows the user. Without this field, picking `staging`
+    /// and pressing Send would show staging's variables in the URL bar
+    /// while the request went out carrying the dev token.
+    pub environment_id: Option<String>,
     pub headers: Option<Vec<KeyValue>>,
     pub params: Option<Vec<KeyValue>>,
     pub body: Option<RequestBody>,
+    /// Which base-URL definition to resolve against, instead of the one
+    /// persisted on the endpoint. `None` keeps the endpoint's own value;
+    /// `Some("")` means "no base URL".
     pub base_url_definition_id: Option<String>,
 }
 
@@ -992,17 +1005,30 @@ pub fn resolve_send_input(
     let project_id = crate::db::endpoints::project_id_of(pool, &endpoint.collection_id)?;
 
     // Env selection must mirror the renderer's rule exactly, or Send
-    // silently produces a base-less URL.
+    // silently produces a base-less URL or — worse — the wrong
+    // credentials.
     //
-    //   `HttpTester.endpointEnv`: the endpoint's own `environment_id` if
-    //   set, otherwise the project's active env (the "ENV dev" pill).
+    //   1. what the caller is looking at, sent as `overrides.environmentId`
+    //   2. the endpoint's own `environment_id`
+    //   3. the project's active env, else its first env
     //
-    // Reading only `endpoint.environment_id` broke every endpoint with no
-    // explicit env — which is all of the seeded fixtures — and produced
-    // `invalid URL '/users/{{userId}}': relative URL without a base`.
+    // Step 1 is load-bearing and is NOT redundant with step 3: the "ENV"
+    // pill is a pure Zustand write (`setActiveEnvironment`), and
+    // `setEnvironmentActive` — the only thing that would flip `is_active`
+    // in the database — has no caller in `src/`. Relying on step 3 alone
+    // means the user picks `staging`, the URL bar shows staging's
+    // variables, and the request goes out with the dev token.
+    //
     // A dangling env id (deleted while the tab was open) is still
     // tolerated: the request just runs without variable substitution.
-    let env: Option<Environment> = match endpoint.environment_id.as_deref() {
+    let requested_env = args
+        .overrides
+        .as_ref()
+        .and_then(|o| o.environment_id.clone())
+        .filter(|id| !id.is_empty())
+        .or_else(|| endpoint.environment_id.clone())
+        .filter(|id| !id.is_empty());
+    let env: Option<Environment> = match requested_env.as_deref() {
         Some(env_id) => {
             crate::db::with_conn(pool, |c| crate::db::environments::get(c, env_id)).ok()
         }
@@ -1174,6 +1200,78 @@ mod endpoint_send_tests {
         assert_eq!(input.timeout_ms, 30_000);
         assert!(input.follow_redirects);
         assert_eq!(input.max_response_size_kb, 10_240);
+    }
+
+    /// The caller's environment selection wins over the database's
+    /// `is_active` flag.
+    ///
+    /// Regression net for a silent wrong-credential request. The "ENV"
+    /// pill writes `activeEnvironmentId` in Zustand only —
+    /// `setEnvironmentActive`, the only thing that would flip `is_active`,
+    /// has no caller in `src/`. So the DB always says `env_dev` while the
+    /// user may be looking at `env_staging`.
+    ///
+    /// The three seeded environments deliberately share one base URL and
+    /// differ only in `variables`, so the assertion is on the resolved
+    /// bearer token, not the URL — that is the credential that would have
+    /// gone out wrong.
+    #[test]
+    fn caller_environment_selection_wins_over_the_active_flag() {
+        let (pool, _dir) = seeded_pool("caller-env");
+
+        let token_of = |input: &crate::http_executor::HttpRequestInput| -> String {
+            input
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+
+        // Sanity: the seed really does have env_dev active.
+        let envs = crate::db::with_conn(&pool, |c| {
+            crate::db::environments::list_by_project(c, "p_demo")
+        })
+        .unwrap();
+        assert_eq!(
+            envs.iter().find(|e| e.is_active).map(|e| e.id.as_str()),
+            Some("env_dev")
+        );
+
+        // No override: falls back to the project's active env, i.e. dev.
+        let default = resolve_send_input(
+            &pool,
+            &EndpointSendArgs {
+                endpoint_id: "e_user_get".into(),
+                overrides: None,
+                settings: None,
+            },
+        )
+        .unwrap();
+        assert!(
+            token_of(&default).ends_with(".dev"),
+            "unselected should use the active env (dev), got {:?}",
+            token_of(&default)
+        );
+
+        // Override with staging: its token must win.
+        let staging = resolve_send_input(
+            &pool,
+            &EndpointSendArgs {
+                endpoint_id: "e_user_get".into(),
+                overrides: Some(EndpointSendOverrides {
+                    environment_id: Some("env_staging".into()),
+                    ..Default::default()
+                }),
+                settings: None,
+            },
+        )
+        .unwrap();
+        assert!(
+            token_of(&staging).ends_with(".staging"),
+            "the selected environment must supply the credential, got {:?}",
+            token_of(&staging)
+        );
     }
 
     /// An unknown endpoint fails before any network I/O.

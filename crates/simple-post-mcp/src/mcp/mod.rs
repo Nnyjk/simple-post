@@ -639,6 +639,26 @@ mod tests {
         );
     }
 
+    /// The exact tool count, asserted where the docs can point at it.
+    ///
+    /// `AGENTS.md`, `README.md` and `docs/PROJECT-STATUS.md` all state
+    /// "44 tools". The bijection test above stays green when a tool is
+    /// added or removed *with* its capability row, so on its own it
+    /// cannot keep those numbers honest. Bump this constant in the same
+    /// commit that changes the registry, and the same commit should
+    /// update the three documents.
+    const EXPECTED_TOOL_COUNT: usize = 44;
+
+    #[test]
+    fn registered_tool_count_matches_the_documented_figure() {
+        assert_eq!(
+            tool_table().len(),
+            EXPECTED_TOOL_COUNT,
+            "tool count changed; update EXPECTED_TOOL_COUNT and the '44 tools' \
+             claims in AGENTS.md, README.md and docs/PROJECT-STATUS.md"
+        );
+    }
+
     /// The reverse direction: a capability row for a tool that no longer
     /// exists is dead configuration that hides a registry rename.
     #[test]

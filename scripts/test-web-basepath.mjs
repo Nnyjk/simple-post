@@ -137,6 +137,9 @@ try {
 
 if (failures > 0) {
   console.error(`\n[test:web-basepath] FAILED with ${failures} assertion failure(s)`);
-  process.exit(1);
+  // See `test-web-auth.mjs`: `process.exit()` after `fetch` calls aborts in
+  // libuv on Windows and masks the failure output. Set the code and let the
+  // process drain instead.
+  process.exitCode = 1;
 }
 console.log('\n[test:web-basepath] all assertions passed');

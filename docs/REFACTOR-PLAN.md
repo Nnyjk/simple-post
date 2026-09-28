@@ -6,12 +6,12 @@
 ## 为什么要拆
 
 两个文件已经大到"改动风险 > 收益"的程度：review 时无法一眼看出影响面，
-新人不敢动，agent 改���容易踩到无关区域。
+新人不敢动，agent 改代码容易踩到无关区域。
 
 | 文件 | 行数 | 问题 |
 |---|---|---|
 | `src/features/project-tree/ProjectTree.tsx` | 1870 | 单个组件函数占 966 行 |
-| `src-tauri/src/web_api.rs` | 1833 | 57 个 handler + router + OpenAPI 声明混在一起 |
+| `src-tauri/src/web_api.rs` | 1960 | 58 个 handler + router + OpenAPI 声明混在一起 |
 
 两者都有好的消息：**内部已经有清晰的分节注释**，拆解是"顺着缝剪"，不是"重新设计"。
 
@@ -82,7 +82,7 @@ src/features/project-tree/
 
 ### 必须遵守的约束
 
-- **`App.tsx:3` 是唯一外部 import**（`import { ProjectTree }`），保持具名导出不��，外部零改动。
+- **`App.tsx:3` 是唯一外部 import**（`import { ProjectTree }`），保持具名导出即可，外部零改动。
 - **`DragContextValue`(1734) 与 DnD 代码同进同出**，否则会留下悬空 context。
 - **Zustand selector 纪律**（AGENTS.md 已标为无限重渲染风险）：搬进 hook 时
   **不得**新增返回新数组/新对象的 selector。现有代码已经是 `.find()` 形态，
@@ -103,13 +103,13 @@ npm run lint
 
 ---
 
-## B. `web_api.rs`（1833 行）
+## B. `web_api.rs`（1960 行）
 
 ### 现状结构（实测）
 
 ```
     1- 424  前置：WebState / HttpErrorResponse / map_app_error / DTO 结构体
-  425-1206  57 个 handler，按资源分节
+  425-1206  handler 区，按资源分节（共 58 个 sync fn）
       569- 638  modules        ( 69 行,  5 handler)
       638- 705  collections    ( 67 行,  5 handler)
       705- 831  endpoints      (126 行,  8 handler)
@@ -118,8 +118,8 @@ npm run lint
      1000-1035  request-settings( 35 行,  2 handler)
      1035-1068  permissions    ( 33 行,  2 handler)
      1068-1207  mcp daemon     (139 行,  5 handler)
-  1207-1310  build_router（链式 .route 调用）
-  1504-1833  RouteSpec + public_route_specs()（OpenAPI 单一真相源）
+  1266-1385  build_router（链式 .route 调用）
+  1934-1960  RouteSpec + public_route_specs()（OpenAPI 单一真相源）
 ```
 
 ### 目标结构
@@ -164,7 +164,7 @@ baseUrlDefs → modules → collections → environments → endpoints → mcp �
 
 | 风险 | 对策 |
 |---|---|
-| `WebState` 被 57 个 handler 引用 | 放 `mod.rs` 并 `pub(crate) re-export`，各 `routes/*` 用 `super::WebState` |
+| `WebState` 被全部 handler 引用 | 放 `mod.rs` 并 `pub(crate) re-export`，各 `routes/*` 用 `super::WebState` |
 | 反代 base path 嵌套 | `build_router` 留在 `mod.rs`，auth 中间件同样留在 `mod.rs`，只搬 handler 与 route 片段 |
 | axum 0.7 路径参数是 `:id` 不是 `{id}` | 搬迁时不要"修正"成 OpenAPI 风格 |
 | 忘记某个 `.route()` | **`public_route_specs()` 就是回归网**——见下 |
@@ -211,3 +211,5 @@ npm run perf:bench             # 确认没引入性能回退
 - 不动 `NewItemModal.tsx` / `TreeContextMenu.tsx`（已是独立文件）
 - 不引入新依赖（虚拟滚动库、router 宏等）——**另开议题**。真要虚拟滚动，
   `ProjectTree` 拆完之后再评估，那时才知道渲染瓶颈到底在哪。
+
+

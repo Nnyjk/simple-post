@@ -59,8 +59,12 @@ async function waitForHealthz(timeoutMs = 5_000) {
       const response = await fetch(`http://127.0.0.1:${port}/mcp/healthz`);
       if (response.ok) return response.json();
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Server not listening yet; fall through to the sleep below.
     }
+    // Sleep unconditionally, not only on throw. If the port is bound by
+    // something else that answers 4xx/5xx, sleeping only in the `catch`
+    // turns the poll into a tight fetch loop for the whole deadline.
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`daemon did not become healthy; stderr:\n${stderr}`);
 }

@@ -222,6 +222,11 @@ await runPhase('phase 2', scratch2, proc2, async () => {
 
 if (failures > 0) {
   console.error(`\n[test:web-auth] FAILED with ${failures} assertion failure(s)`);
-  process.exit(1);
+  // Set the code and fall through to a natural exit. `process.exit(1)`
+  // tears the event loop down while undici's keep-alive sockets are still
+  // registered, which on Windows aborts the process inside libuv
+  // (`src\win\async.c:76`, 0xC0000409) *after* the failure message has
+  // printed — burying the real diagnostics under a crash dump.
+  process.exitCode = 1;
 }
 console.log('\n[test:web-auth] all assertions passed');

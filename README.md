@@ -153,7 +153,7 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 - **Delete**：`project_delete` / `module_delete` / `collection_delete` / `endpoint_delete` / `env_delete` / `base_url_def_delete`
 - **Send**（仅 `full_access`）：`api_run_request` / `api_call_endpoint`
 
-> 全局策略之外还有一道**按项目**的权限闸（`simple_post_core::permissions`，`Read < ReadCall < Full`，默认 `Full`）。两道闸是「与」关系，取更严格者。
+> 全局策略之外还有一道**按项目**的权限闸（`simple_post_core::permissions`，`Read < ReadCall < Full`，数据库未显式设置时默认 `ReadCall`，未知工具按 `Full`）。两道闸是「与」关系，取更严格者。
 
 完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口见 [`docs/http-api-reference.md`](docs/http-api-reference.md)（`scripts/dump-openapi.mjs` 重新生成 `docs/openapi.yaml`）。
 

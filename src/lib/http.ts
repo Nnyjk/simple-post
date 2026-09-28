@@ -305,6 +305,10 @@ export interface SendEndpointInput {
    *  use the stored one. The input box only ever holds the path, so this
    *  is what the user sees; the backend joins it onto the base URL. */
   urlOverride?: string;
+  /** The environment whose variables and base URLs the user is looking
+   *  at right now. Required in practice: the ENV pill is Zustand-only, so
+   *  the database's `is_active` does not follow the selection. */
+  environmentId?: string;
   method: HttpMethod;
   settings: RequestSettings;
   signal?: AbortSignal;
@@ -342,13 +346,15 @@ export async function sendEndpoint(input: SendEndpointInput): Promise<ApiRespons
       {
         endpointId: input.endpointId,
         overrides: {
-          // Both fields travel. The method is not redundant: the renderer's
-          // method picker writes to the store draft, so a user can switch a
-          // stored GET to POST without saving. Omitting it made the wire
-          // carry the stored method while the response bar reported the
-          // draft one — the UI claimed `POST 200` over a real GET.
+          // All three travel. `url` and `method` are the renderer's
+          // unsaved draft; `environmentId` is the ENV pill's selection.
+          // None is redundant: the method picker and URL box write to the
+          // store draft rather than the endpoint row, and the ENV pill is
+          // Zustand-only, so omitting any of them makes the wire disagree
+          // with what the user sees.
           url: input.urlOverride,
           method: input.method,
+          environmentId: input.environmentId,
         },
         settings: {
           timeoutMs: input.settings.timeoutMs,
