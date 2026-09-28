@@ -1357,7 +1357,21 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     match base_path.as_deref() {
         Some(p) if !p.is_empty() => {
             eprintln!("[serve-web] base_path: {p}");
-            Router::new().nest(p, inner)
+            // axum's `nest` matches the *bare* prefix (`/sp`) but never
+            // forwards the trailing-slash spelling (`/sp/`) to the inner
+            // router's `/` route — that request 404s. The shipped reverse
+            // proxy examples redirect `/sp` → `/sp/`, so the documented
+            // deployment landed users on a 404 at the app root.
+            //
+            // Serve the SPA shell for the trailing-slash form as well.
+            // Deliberately no auth layer: this is the same public static
+            // asset that `/sp` already serves (see `auth::is_public_path`,
+            // which lists `/`), and the API underneath stays protected.
+            let prefix = p.trim_end_matches('/');
+            let spa_shell = spa_dir.clone();
+            Router::new()
+                .nest(prefix, inner)
+                .route(&format!("{prefix}/"), get(move || spa_index(spa_shell)))
         }
         _ => inner,
     }
