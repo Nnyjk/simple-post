@@ -73,8 +73,8 @@ pub fn run_mcp(transport: String, port: u16, bind: String) {
             }
         };
 
-        // Honor `--stdio` for parity with the `--http` documented form, but
-        // route everything through the same axum router so we only have one
+        // Honor `--transport=stdio` as well as the default `--transport=http`,
+        // but route everything through the same axum router so we only have one
         // set of handlers to maintain. (The proxy binary is the recommended
         // stdio path; this fallback is mostly here so the CLI argument
         // exists and can be added back if AI clients ever support direct

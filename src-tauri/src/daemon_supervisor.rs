@@ -108,6 +108,15 @@ impl DaemonState {
         }
     }
 }
+/// 构造守护进程的真实 CLI 参数，桌面端与 Web 端共享同一份契约。
+fn daemon_cli_args(port: u16) -> Vec<String> {
+    vec![
+        "mcp".to_string(),
+        "--transport=http".to_string(),
+        format!("--port={port}"),
+        "--bind=127.0.0.1".to_string(),
+    ]
+}
 
 /// Public handle held in Tauri state. Cloning is cheap (Arc-like) so
 /// we can hand copies into spawned tasks.
@@ -253,10 +262,7 @@ impl McpDaemonHandle {
         // ----- Spawn the child -------------------------------------------
         let exe = std::env::current_exe().map_err(crate::error::AppError::Io)?;
         let mut cmd = tokio::process::Command::new(exe);
-        cmd.arg("mcp")
-            .arg("--http")
-            .arg(format!("--port={port}"))
-            .arg("--bind=127.0.0.1")
+        cmd.args(daemon_cli_args(port))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -451,10 +457,7 @@ impl McpDaemonHandle {
 
         let exe = std::env::current_exe().map_err(crate::error::AppError::Io)?;
         let mut cmd = tokio::process::Command::new(exe);
-        cmd.arg("mcp")
-            .arg("--http")
-            .arg(format!("--port={port}"))
-            .arg("--bind=127.0.0.1")
+        cmd.args(daemon_cli_args(port))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -659,6 +662,19 @@ async fn watch_exit_no_app(inner: Arc<Mutex<DaemonState>>, pid: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn daemon_cli_args_use_real_http_transport_flag() {
+        assert_eq!(
+            daemon_cli_args(43123),
+            vec![
+                "mcp",
+                "--transport=http",
+                "--port=43123",
+                "--bind=127.0.0.1",
+            ]
+        );
+    }
 
     #[test]
     fn new_handle_snapshot_is_stopped() {
