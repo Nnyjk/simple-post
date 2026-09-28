@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`simple-post` is a desktop API client/debugger (Postman-like, Windows-first) whose core differentiator is a **built-in MCP server**: external AI clients (Claude Desktop, Cursor, Cline) can list/search/run/mutate endpoints through 44+ MCP tools. Stack: **Tauri 2 + React 18 + TypeScript** frontend over a **Cargo workspace** (SQLite via `rusqlite`, `reqwest`, `axum`), shipping both a desktop app and a standalone npm-distributed MCP binary.
+`simple-post` is a desktop API client/debugger (Postman-like, Windows-first) whose core differentiator is a **built-in MCP server**: external AI clients (Claude Desktop, Cursor, Cline) can list/search/run/mutate endpoints through 44 MCP tools. Stack: **Tauri 2 + React 18 + TypeScript** frontend over a **Cargo workspace** (SQLite via `rusqlite`, `reqwest`, `axum`), shipping both a desktop app and a standalone npm-distributed MCP binary.
 
 Docs are partly Chinese (`README.md`, crate READMEs); code/identifiers are English.
 
@@ -105,6 +105,8 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **MCP permissions.** Default policy is `read_only` — mutating tools (`env_create`, `endpoint_update`, …) return `is_error: true` until the user raises the tier. Consult `docs/mcp-permission-policy.md` before touching dispatch/permissions.
 
+**Adding an MCP tool requires TWO registry edits, not one.** A tool added to `tool_table()` without a matching `REQUIRED_CAPABILITY` row **escapes the global capability gate entirely** — both the `tools/list` filter and the `dispatch` pre-flight treat a missing row as unclassified and now fail *closed* (deny), but the tool becomes invisible/unusable rather than policy-compliant. This actually shipped once: `module_move` and `collection_move` were registered without rows and bypassed the user's `read_only` choice. `every_registered_tool_has_a_capability` (and its inverse `every_capability_row_names_a_registered_tool`) in `crates/simple-post-mcp/src/mcp/mod.rs` is the regression net — if you add a tool and those tests fail, add the row with the correct `Capability` (`Read < Create < Update < Delete < Send`; `Send` means outbound HTTP and is `full_access`-only).
+
 **IME guard.** Global shortcuts in `src/App.tsx` must check `e.isComposing`, else CJK IME Enter fires requests.
 
 **OpenAPI.** `public_route_specs()` in `src-tauri/src/web_api.rs` is the single source of truth; internal routes (`/api/mcp/*`, `/api/preferences`) are intentionally undocumented.
@@ -161,7 +163,7 @@ Key facts:
 - **`npm test` auto-discovers `src/**/*.test.ts`** through `scripts/run-tests.mjs` — no hardcoded list, new test files are picked up automatically. In `--watch` mode the list is captured at spawn time: restart `npm run test:watch` after adding/renaming a test file. Single file: `npx tsx --test path/to/foo.test.ts`.
 - ESLint scoping decisions (in `eslint.config.js`): `no-explicit-any` off under `**/*.test.ts` and `**/__tests__/` (deliberately loose mocks); `no-require-imports` off for `.mjs`/`.cjs` tooling; names starting with `_` are sanctioned unused placeholders; `react-hooks/rules-of-hooks` is **error** — `HttpTester`'s hooks were hoisted above its `if (!endpoint)` early return to satisfy it (never put hooks after an early return).
 - Headless store tests need `src/stores/__tests__/_browser-shim.ts`: installs Map-backed `localStorage` (Node 22 ships a methodless native `localStorage` that crashes otherwise), `document.visibilityState` emitter, timers, and `mockIPC`, and sets `window.__TAURI_INTERNALS__ = {}` *before* module eval so `IS_TAURI_SHELL === true`.
-- Fixtures: `src/lib/__fixtures__/mock-data.ts` (TS), `crates/simple-post-core/src/db/fixtures.json` (SQLite seed — also used at DB init).
+- Fixture: `crates/simple-post-core/src/db/fixtures.json` — the SQLite seed (also used at DB init). There is **no** TS mock-data module; store tests build their own fixtures inline.
 - Rust DB tests isolate via `fresh_pool()` → temp-dir SQLite keyed by atomic counter + PID (`crates/simple-post-core/src/db/mod.rs`).
 - Store custom hooks (`useActiveProject`, …) throw outside a React render; in Node, read state with `useAppStore.getState()`.
 - No React component/DOM tests; no coverage tooling configured (c8/nyc/tarpaulin absent).

@@ -2,7 +2,7 @@
 
 一款面向 Windows 10/11 的现代化桌面 API 调试 / 管理工具，核心差异化：**自带 MCP Server**，让 AI（Claude Desktop、Cursor、Cline）能直接读写接口、生成文档、参与调试。
 
-> 当前阶段：**UI 先行已完成**（2026-09-11）。脚手架 + Tailwind/shadcn 基线 + 完整数据层 + 四大主面板 + 所有 P0/P1 交互全部就位。下一步：进入真实业务层（v0.1 MVP），详见下方「路线图」。
+> 当前阶段：**v0.1 MVP 已交付**（详见下方「路线图」）。四种分发形态均可运行：Tauri 桌面应用、`serve-web` 无头 REST + SPA、Docker web 镜像、以及独立的 `simple-post-mcp` npm 包。数据层已从早期内存 mock 迁移为 SQLite 持久化。
 
 ## 跑起来
 
@@ -37,8 +37,9 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 
 ## 已实现
 
-### 数据层（Zustand + 内存 mock）
+### 数据层（SQLite + Zustand 状态缓存）
 - 4 级层级：Project → Module → Collection → Endpoint，外加 Environment / Response
+- 持久化：Zustand slice → `invokeCmd()` → Tauri IPC 或 `/api/*` → `simple-post-core` → SQLite（WAL 模式）
 - 完整 CRUD：项目 / 模块 / 集合 / 接口的增删改查 + 复制接口 + 级联清理
 - 排序：模块 / 集合 / 接口的上下移
 - 响应：每个 endpoint 最多 10 条历史（FIFO）+ 用户保存的示例
@@ -82,7 +83,7 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 
 ### 设置抽屉
 - 环境变量：3 个环境 × 3 个变量，`{{var}}` 实时编辑
-- MCP Server 状态：running 指示 + 已注册 4 个工具列表
+- MCP Server 状态：running 指示 + daemon 实时上报的已注册工具列表（数量动态显示，取决于当前 capability 策略下的可见工具集）
 - 主题：dark / light / system 切换，立即生效并持久化
 - 请求设置：超时 / 跟随重定向 / 最大响应体积
 - 快捷键速查
@@ -93,30 +94,31 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 全局 html class 切换，无白屏闪烁
 
 ### Mock 数据
-- 3 项目 / 7 模块 / 8 集合 / 12 接口 / 3 环境
+- 3 项目 / 6 模块 / 8 集合 / 12 接口 / 3 环境
 - 覆盖 SMS 登录、密码登录、用户资料、订单 CRUD、状态流转、收银台、抬头、开票、设备影子读/写
 
 ## 路线图
 
-UI 先行阶段的所有打磨项（P0/P1/P2）已落地。下面是接 v0.1 起的四阶段路线，叠加 MCP 工具集（核心差异化）的渐进暴露。
+UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下面是后续阶段。**注意**：v0.2 最初列的部分条目在实现过程中已提前完成（下方已勾选），勾选状态以代码为准。
 
-### v0.1 MVP（约 4 周）— 已在 commit 7 (b99151b) 全部交付
+### v0.1 MVP — 已全部交付
 
 - [x] **Tauri 壳**：`src-tauri/` 初始化、Cargo.toml、tauri.conf.json、图标
 - [x] **Rust 主进程**：SQLite（`rusqlite` + `r2d2`）、HTTP（`reqwest`）、MCP 子进程桥
 - [x] **真实持久化**：Zustand store → Tauri command → `simple-post-core`（SQLite via `rusqlite`）
 - [x] **真实请求**：渲染端 → Tauri command → `reqwest` → 返回结构化响应
-- [x] **MCP Server**：拆到独立 `crates/simple-post-mcp/` workspace member，`daemon_http.rs`（axum HTTP daemon）+ `stdio_loop.rs`（stdio bridge）+ `mcp/mod.rs`（JSON-RPC dispatcher）— 暴露 44+ 个 MCP 工具给 AI 客户端（Claude Desktop / Cursor / Cline）。同一 crate 也以独立 `simple-post-mcp` 二进制 + `@simple-post/mcp-server` npm 包分发（commit 4）。
+- [x] **MCP Server**：拆到独立 `crates/simple-post-mcp/` workspace member，`daemon_http.rs`（axum HTTP daemon）+ `stdio_loop.rs`（stdio bridge）+ `mcp/mod.rs`（JSON-RPC dispatcher）— 向 AI 客户端（Claude Desktop / Cursor / Cline）暴露 44 个 MCP 工具。同一 crate 也以独立 `simple-post-mcp` 二进制 + `@simple-post/mcp-server` npm 包分发。
 - [x] **打包**：NSIS 安装包 + 便携 zip
 
 ### v0.2（+2 周）
 
-- 鉴权扩展：Bearer / Basic / API Key / OAuth2 简化版
-- 响应历史 & 收藏（持久化到 SQLite）
-- 导入 Postman v2.1 / OpenAPI 3.0
-- 导出 OpenAPI 3.0
-- MCP 工具扩展：`api_create` / `api_update` / `api_search` / `api_delete`
-- MCP 进程可视化（设置页：PID、状态、tail 日志）
+- [x] 鉴权扩展：Bearer / Basic / API Key（`AuthType` 四变体已落地，含 apikey 的 header/query 注入）
+- [ ] 鉴权扩展：OAuth2 简化版
+- [ ] 响应历史 & 收藏（持久化到 SQLite）
+- [ ] 导入 Postman v2.1 / OpenAPI 3.0
+- [ ] 导出 OpenAPI 3.0
+- [x] MCP 写工具：以 `endpoint_create` / `endpoint_update` / `endpoint_search` / `endpoint_delete` 交付（v0.2 原计划的 `api_*` 命名未采用，见 44 工具清单）
+- [ ] MCP 进程可视化（设置页：PID、状态、tail 日志）
 
 ### v0.3（+2 周）
 
@@ -137,11 +139,21 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。下面是接 v0.1 起
 
 > App 启动时同时拉起一个 **stdio MCP Server** 子进程（Claude Desktop / Cursor / Cline 通过 stdio 通信），并通过 `serve-web` 子命令的 `/mcp` 端点暴露 HTTP MCP（外部 AI 客户端、远程调试器）。Server 默认不暴露网络，鉴权可选；详见 [`docs/mcp-permission-policy.md`](docs/mcp-permission-policy.md)。
 
-实际暴露的工具集（44 个）按 capability tier 分组（`REQUIRED_CAPABILITY` 见 `crates/simple-post-mcp/src/mcp/mod.rs`）：
+实际注册 **44 个** MCP 工具（精确值由 `every_registered_tool_has_a_capability` 测试守护）。每个工具在 `REQUIRED_CAPABILITY`（`crates/simple-post-mcp/src/mcp/mod.rs`）中声明一个 `Capability`，总序为 `Read < Create < Update < Delete < Send`；用户的全局策略 `CapabilityPolicy` 决定可见集：
 
-- **read_only（默认）**：`project_list` / `project_get` / `module_*` / `collection_*` / `endpoint_get` / `endpoint_search` / `env_list` / `env_get` 等
-- **safe_write**：`project_*_create` / `project_*_update` / `module_*` / `collection_*` / `endpoint_create` / `endpoint_update` / `env_create` / `env_update` 等
-- **full_access**：`endpoint_delete` / `env_delete` / `http_send` 等会改变外部状态的操作
+| 策略 | 覆盖的 Capability | 含义 |
+|---|---|---|
+| `read_only`（默认） | `Read` | 只读观察，不发网络请求、不改状态 |
+| `safe_write` | `Read` `Create` `Update` | 允许增删改，但**不含** `Send` |
+| `full_access` | 全部（含 `Delete` `Send`） | 允许出站 HTTP 调用与破坏性操作 |
+
+- **Read**：`project_list` / `project_get` / `module_list` / `collection_list` / `endpoint_get` / `endpoint_search` / `base_url_def_list` / `env_list` / `env_get_active` / `api_resolve_*` / `api_parse_response` / `api_diff_responses` / `api_extract_jsonpath`
+- **Create**：`project_create` / `module_create` / `collection_create` / `endpoint_create` / `endpoint_duplicate`
+- **Update**：`project_update` / `module_update` / `module_move` / `collection_update` / `collection_move` / `endpoint_update` / `endpoint_move` / `env_update` / `env_set_var` / `env_set_baseurl` / `env_set_active` / `base_url_def_update` / `base_url_def_set_default`
+- **Delete**：`project_delete` / `module_delete` / `collection_delete` / `endpoint_delete` / `env_delete` / `base_url_def_delete`
+- **Send**（仅 `full_access`）：`api_run_request` / `api_call_endpoint`
+
+> 全局策略之外还有一道**按项目**的权限闸（`simple_post_core::permissions`，`Read < ReadCall < Full`，默认 `Full`）。两道闸是「与」关系，取更严格者。
 
 完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口见 [`docs/http-api-reference.md`](docs/http-api-reference.md)（`scripts/dump-openapi.mjs` 重新生成 `docs/openapi.yaml`）。
 
@@ -190,9 +202,9 @@ docker compose ps                       # STATUS=healthy
 
 安全提示：
 
-- `SIMPLE_POST_WEB_PASSWORD` **必须**设，否则 `/api/*` 和 `/mcp` 全开放（commit 5 的 `auth_middleware` 在 password 为空时是 no-op）。
+- `SIMPLE_POST_WEB_PASSWORD` **必须**设，否则 `/api/*` 和 `/mcp` 全开放（`auth_middleware` 在 password 为空时是 no-op）。
 - 健康检查路径 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便容器探针。
-- 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，commit 5 的 `build_router` 会把整个 router nest 在 `/sp` 下；nginx 侧记得把 `/sp/assets/*` 转到 `/assets/*`（SPA shell 的 `<base href>` 仍是 `/`，**不**重写）。
+- 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，`build_router` 会把整个 router nest 在 `/sp` 下；nginx 侧记得把 `/sp/assets/*` 转到 `/assets/*`（SPA shell 的 `<base href>` 仍是 `/`，**不**重写）。
 - 数据持久化：把 `/data` 挂到 named volume。SQLite 在 WAL 模式下也能安全落盘，但 `docker stop` 走 `tini` 转发 SIGTERM 才会触发优雅 checkpoint。
 
 详见：
@@ -202,11 +214,6 @@ docker compose ps                       # STATUS=healthy
 - `docker-compose.yml` — 参考部署（强制要求 `SP_WEB_PASSWORD`）
 - `.github/workflows/docker-build.yml` — buildx 多架构 + GHCR 发布
 
-## 协作方法（团队模式硬约束）
-
-- **多 worker 并行只交付代码，禁止自行浏览器 / dev server 验证**——所有端到端验证、截图、流程跑通由**主会话统一做一次**。
-- 详见 user memory 中的"多 worker 并行：只交付代码，不做端到端验证"条目。
-
 ## 决策记录
 
 - **技术栈**：Tauri 2 + React 18 + TypeScript（前端） + Cargo workspace（后端：`simple-post` Tauri shell / `simple-post-core` 共享层 / `simple-post-mcp` 独立 MCP 服务）
@@ -214,4 +221,4 @@ docker compose ps                       # STATUS=healthy
 - **MCP 模式**：stdio 子进程桥（本地 AI 客户端）+ HTTP `POST /mcp`（`serve-web` 子命令，支持远程 / Bearer 鉴权 / 反代 base path）
 - **UI 风格**：暗色为主，shadcn 变量层，可切亮色
 - **第一阶段**：UI 先行 ✓（已完成 2026-09-11）
-- **当前阶段**：v0.1 MVP 已交付（commit 7，2026-09-21），后续规划见 commit 5+ 的 distribution 决策 + `docs/distribution-modes-2026-09-18.md`
+- **当前阶段**：v0.1 MVP 已交付，分发形态决策见 `docs/distribution-modes-2026-09-18.md`

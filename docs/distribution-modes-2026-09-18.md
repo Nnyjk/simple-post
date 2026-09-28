@@ -11,7 +11,7 @@
 | **Tauri 桌面**（Win/Linux/macOS） | `simple-post`（无子命令） | `invoke()` → `#[tauri::command]` | 尊重 `mcp.auto_start` 偏好；默认不启动 |
 | **Web server**（浏览器跨设备访问） | `simple-post serve-web --bind=0.0.0.0 --port=4173 --data-dir=...` | `fetch('/api/<verb>')` | 尊重 `mcp.auto_start` 偏好；默认不启动 |
 | **Dev 浏览器**（Vite） | `npm run dev` | `invoke()` 失败 → 回退 fetch；无 server 端 | 不可达（每 3s 报一次 warn，预期） |
-| **MCP daemon headless** | `simple-post mcp --http --port=0` | n/a | 这就是 daemon 本身 |
+| **MCP daemon headless** | `simple-post mcp --transport=http --port=0` | n/a | 这就是 daemon 本身（`--transport` 默认即 `http`） |
 
 三种"用户能看到的"形态（Tauri / Web / Dev）共享同一份 SQLite、同一份偏好（`db/preferences.rs`）、同一份 MCP 配置。
 
