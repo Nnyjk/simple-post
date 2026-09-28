@@ -925,6 +925,24 @@ async fn environments_set_active(
 // "belongs to" a project) without forcing the TS caller to remember
 // which table a delete hits.
 
+/// Read the project's base-URL definitions.
+///
+/// The renderer does not normally call this: `Project` nests its
+/// `baseUrlDefinitions`, so the store already has them after bootstrap.
+/// It exists so a REST client that just created or patched a definition
+/// can read the family back — previously the family offered POST / PATCH
+/// / DELETE / set-default but no way to list.
+async fn base_url_defs_list(
+    State(s): State<Arc<WebState>>,
+    Path(project_id): Path<String>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let rows = db::with_conn(&s.pool, |c| {
+        db::base_url_defs::list_by_project(c, &project_id)
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&rows).unwrap_or(Value::Null)))
+}
+
 async fn base_url_defs_create(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
@@ -1251,7 +1269,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // re-key on `projectId`.
         .route(
             "/api/projects/:projectId/baseurls",
-            post(base_url_defs_create),
+            get(base_url_defs_list).post(base_url_defs_create),
         )
         .route(
             "/api/projects/:projectId/baseurls/default",
@@ -1723,6 +1741,50 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             request: None,
             response: Some("Endpoint"),
         },
+        // ---- baseUrl definitions ----------------------------------------
+        // All five were live but undocumented. They are project-scoped
+        // for reads / creates / set-default and id-scoped for mutations,
+        // matching the two route families the handlers comment describes.
+        RouteSpec {
+            method: "GET",
+            path: "/api/projects/:projectId/baseurls",
+            summary: "List a project's base URL definitions",
+            stability: "public",
+            request: None,
+            response: Some("BaseUrlDefinition[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/projects/:projectId/baseurls",
+            summary: "Create a base URL definition in a project",
+            stability: "public",
+            request: Some("BaseUrlDefinition"),
+            response: Some("BaseUrlDefinition"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/projects/:projectId/baseurls/default",
+            summary: "Set (or clear) the project's default base URL definition",
+            stability: "public",
+            request: Some("BaseUrlDefSetDefault"),
+            response: Some("Project"),
+        },
+        RouteSpec {
+            method: "PATCH",
+            path: "/api/baseurl-defs/:defId",
+            summary: "Rename or re-describe a base URL definition",
+            stability: "public",
+            request: Some("BaseUrlDefPatch"),
+            response: Some("BaseUrlDefinition"),
+        },
+        RouteSpec {
+            method: "DELETE",
+            path: "/api/baseurl-defs/:defId",
+            summary: "Delete a base URL definition",
+            stability: "public",
+            request: None,
+            response: Some("DeleteAck"),
+        },
         // ---- environments -----------------------------------------------
         RouteSpec {
             method: "GET",
@@ -1764,10 +1826,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         //   GET  /api/mcp/capability/tools   - visible tools under current policy
         //   GET  /api/preferences            - raw preferences dump (UI)
         //   PUT  /api/preferences            - raw preferences patch
-        // /api/base_url_defs*, /api/permissions* and /api/request_settings*
-        // are intentionally absent from the public contract. Note that
-        // `base_url_defs_list` is registered as a Tauri command but has no
-        // `COMMANDS` entry and no REST route, so it is currently
-        // unreachable from both the desktop and web frontends.
+        // /api/permissions* and /api/request_settings* are intentionally
+        // absent from the public contract. The baseUrl-def family is now
+        // documented above.
     ]
 }

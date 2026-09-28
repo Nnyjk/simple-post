@@ -58,6 +58,7 @@ export const COMMANDS = {
   environmentsSetActive: 'environments_set_active',
 
   // ----- baseUrl definitions -----
+  baseUrlDefsList: 'base_url_defs_list',
   baseUrlDefsCreate: 'base_url_defs_create',
   baseUrlDefsUpdate: 'base_url_defs_update',
   baseUrlDefsDelete: 'base_url_defs_delete',
@@ -444,6 +445,10 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
 
   // ----- baseUrl definitions -----
+  [COMMANDS.baseUrlDefsList]: {
+    method: 'GET',
+    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
+  },
   [COMMANDS.baseUrlDefsCreate]: {
     method: 'POST',
     path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
