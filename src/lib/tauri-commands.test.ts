@@ -249,10 +249,10 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.equal(c.url, '/api/collections?moduleId=mod-1');
   });
 
-  it('collectionsMove → POST /api/collections/move translates nested target into flat fields', async () => {
+  it('collectionsMove → POST /api/collections/move projects the real store target', async () => {
     await invokeCmd(COMMANDS.collectionsMove, {
       collectionIds: ['c1', 'c2'],
-      target: { parentKind: 'module', moduleId: 'm1', index: 1 },
+      target: { parentKind: 'module', parentId: 'm1', index: 1 },
     });
     const c = last();
     assert.equal(c.method, 'POST');
@@ -265,10 +265,10 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     });
   });
 
-  it('collectionsMove → uses collectionId as parentId when reparenting under a sibling collection', async () => {
+  it('collectionsMove → keeps a collection parent as parentId', async () => {
     await invokeCmd(COMMANDS.collectionsMove, {
       collectionIds: ['c1'],
-      target: { parentKind: 'collection', collectionId: 'c-sib', index: 0 },
+      target: { parentKind: 'collection', parentId: 'c-sib', index: 0 },
     });
     const c = last();
     assert.deepEqual(JSON.parse(c.body ?? 'null'), {
@@ -279,11 +279,24 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     });
   });
 
-  it('endpointsList → GET /api/endpoints with collectionId query', async () => {
-    await invokeCmd(COMMANDS.endpointsList, { collectionId: 'col-1' });
+  it('endpointsList → 只投影 canonical collectionId 过滤条件', async () => {
+    await invokeCmd(COMMANDS.endpointsList, {
+      collectionId: 'col-1',
+      // Tauri/store 可能携带这些上下文字段，但 REST canonical 只支持
+      // collectionId；它们不能泄漏到 Web query。
+      projectId: 'project-1',
+      moduleId: 'module-1',
+    });
     const c = last();
     assert.equal(c.method, 'GET');
     assert.equal(c.url, '/api/endpoints?collectionId=col-1');
+    assert.equal(c.body, undefined);
+  });
+
+  it('endpointsList → 无 collectionId 时不生成不支持的过滤 query', async () => {
+    await invokeCmd(COMMANDS.endpointsList, { projectId: 'project-1', moduleId: 'module-1' });
+    const c = last();
+    assert.equal(c.url, '/api/endpoints');
   });
 
   it('endpointsSearch → POST /api/endpoints/search with { query } body', async () => {
@@ -338,11 +351,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/environments/env%201/vars');
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
-      envId: 'env 1',
-      key: 'token',
-      value: 'abc',
-    });
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { key: 'token', value: 'abc' });
   });
 
   it('environmentsSetBaseurl → POST /api/environments/{envId}/baseurls', async () => {
@@ -368,9 +377,9 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { envId: 'env-1' });
   });
 
-  it('environmentsUpdate → PATCH /api/environments/{envId} with body = patch only', async () => {
+  it('environmentsUpdate → PATCH /api/environments/{id} with body = patch only', async () => {
     await invokeCmd(COMMANDS.environmentsUpdate, {
-      envId: 'env-1',
+      id: 'env-1',
       patch: { name: 'Renamed' },
     });
     const c = last();
@@ -379,25 +388,26 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'Renamed' });
   });
 
-  it('baseUrlDefsCreate → POST /api/projects/{projectId}/baseurls with full args body', async () => {
+  it('baseUrlDefsCreate → 只投影 Web body 字段', async () => {
     await invokeCmd(COMMANDS.baseUrlDefsCreate, {
       projectId: 'p-1',
+      // id 与 projectId 都由路径/服务端负责，不能随默认 args 泄漏。
       id: 'def-1',
       name: 'Local',
+      opts: { description: '本地服务' },
     });
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/projects/p-1/baseurls');
     assert.deepEqual(JSON.parse(c.body ?? 'null'), {
-      projectId: 'p-1',
-      id: 'def-1',
       name: 'Local',
+      description: '本地服务',
     });
   });
 
-  it('baseUrlDefsUpdate → PATCH /api/baseurl-defs/{defId}', async () => {
+  it('baseUrlDefsUpdate → PATCH /api/baseurl-defs/{id}', async () => {
     await invokeCmd(COMMANDS.baseUrlDefsUpdate, {
-      defId: 'def-1',
+      id: 'def-1',
       patch: { name: 'Renamed' },
     });
     const c = last();
@@ -406,8 +416,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'Renamed' });
   });
 
-  it('baseUrlDefsDelete → DELETE /api/baseurl-defs/{defId}', async () => {
-    await invokeCmd(COMMANDS.baseUrlDefsDelete, { defId: 'def-1' });
+  it('baseUrlDefsDelete → DELETE /api/baseurl-defs/{id}', async () => {
+    await invokeCmd(COMMANDS.baseUrlDefsDelete, { id: 'def-1' });
     const c = last();
     assert.equal(c.method, 'DELETE');
     assert.equal(c.url, '/api/baseurl-defs/def-1');
@@ -510,7 +520,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
 
   it('every invoke call sets content-type: application/json', async () => {
     await invokeCmd(COMMANDS.environmentsSetBaseurl, {
-      id: 'env1',
+      envId: 'env1',
       defId: 'def1',
       url: 'https://api.example.com',
     });

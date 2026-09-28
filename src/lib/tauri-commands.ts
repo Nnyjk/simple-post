@@ -343,25 +343,18 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.collectionsMove]: {
     method: 'POST',
     path: () => '/api/collections/move',
-    // Rust `CollectionMoveBody` takes flat `parent_kind` / `parent_id` /
-    // `index`; the renderer's `target` is a nested object keyed on the
-    // destination kind (`moduleId` vs `collectionId`). Translate here
-    // so the call site stays identical between shapes.
+    // Tauri 与 Web 使用同一个扁平目标对象；只投影 REST 所需的字段。
     body: (a) => {
-      const target = a.target as
-        | {
-            parentKind: 'module' | 'collection';
-            moduleId?: string;
-            collectionId?: string;
-            index: number;
-          }
-        | undefined;
-      const parentId = target?.moduleId ?? target?.collectionId ?? '';
+      const target = a.target as {
+        parentKind: 'module' | 'collection';
+        parentId: string;
+        index: number;
+      };
       return {
         collectionIds: a.collectionIds,
-        parentKind: target?.parentKind,
-        parentId,
-        index: target?.index ?? 0,
+        parentKind: target.parentKind,
+        parentId: target.parentId,
+        index: target.index,
       };
     },
   },
@@ -369,12 +362,9 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // ----- endpoints -----
   [COMMANDS.endpointsList]: {
     method: 'GET',
-    path: (a) =>
-      `/api/endpoints${buildQuery({
-        collectionId: a.collectionId,
-        projectId: a.projectId,
-        moduleId: a.moduleId,
-      })}`,
+    // canonical endpoint 列表只按 collectionId 过滤；projectId/moduleId
+    // 不是 REST 端支持的筛选条件，必须在 Web 投影层丢弃，不能静默透传。
+    path: (a) => `/api/endpoints${buildQuery({ collectionId: a.collectionId })}`,
   },
   [COMMANDS.endpointsGet]: {
     method: 'GET',
@@ -429,51 +419,52 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.environmentsUpdate]: {
     method: 'PATCH',
-    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.id))}`,
     body: (a) => a.patch,
   },
   [COMMANDS.environmentsDelete]: {
     method: 'DELETE',
-    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}`,
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.id))}`,
   },
   [COMMANDS.environmentsSetVar]: {
     method: 'POST',
-    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/vars`,
-    body: (a) => ({
-      envId: a.envId ?? a.id,
-      key: a.key,
-      value: a.value,
-    }),
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars`,
+    body: (a) => ({ key: a.key, value: a.value }),
   },
   [COMMANDS.environmentsSetBaseurl]: {
     method: 'POST',
-    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId ?? a.id))}/baseurls`,
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/baseurls`,
     body: (a) => ({ defId: a.defId, url: a.url }),
   },
   [COMMANDS.environmentsSetActive]: {
     method: 'POST',
-    // The literal `/active` lives below `/api/environments/{envId}` in
-    // the axum router; we use the literal here so the renderer doesn't
-    // have to know about axum radix-tree precedence.
+    // 使用字面量 active 路径，避免与参数路由发生匹配歧义。
     path: () => '/api/environments/active',
-    body: (a) => ({ envId: a.envId ?? a.id }),
+    body: (a) => ({ envId: a.envId }),
   },
 
   // ----- baseUrl definitions -----
-  // Two namespaces (project-scoped vs id-scoped) per the `web_api.rs`
-  // comment block above the handlers.
   [COMMANDS.baseUrlDefsCreate]: {
     method: 'POST',
     path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
+    // projectId 只存在于路径，id 由 Web 服务端生成；显式投影可避免两者
+    // 随默认 args 泄漏到请求体。
+    body: (a) => {
+      const opts = a.opts as { description?: unknown } | undefined;
+      return {
+        name: a.name,
+        ...(opts ? { description: opts.description } : {}),
+      };
+    },
   },
   [COMMANDS.baseUrlDefsUpdate]: {
     method: 'PATCH',
-    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
+    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.id))}`,
     body: (a) => a.patch,
   },
   [COMMANDS.baseUrlDefsDelete]: {
     method: 'DELETE',
-    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.defId))}`,
+    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.id))}`,
   },
   [COMMANDS.baseUrlDefsSetDefault]: {
     method: 'POST',

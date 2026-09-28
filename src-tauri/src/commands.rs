@@ -38,6 +38,12 @@ pub struct CreateProjectOpts {
     pub color: Option<String>,
 }
 
+/// Tauri 与 Web 共用的能力策略返回形状。
+#[derive(Debug, Clone, Serialize)]
+pub struct McpCapabilityDto {
+    pub policy: CapabilityPolicy,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateModuleOpts {
@@ -72,25 +78,6 @@ pub struct CreateEnvironmentOpts {
     pub base_urls: Option<std::collections::HashMap<String, String>>,
     pub variables: Option<std::collections::HashMap<String, String>>,
     pub make_active: Option<bool>,
-}
-
-/// Set / clear a single variable on an environment. `value = None`
-/// removes the key.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EnvSetVarArgs {
-    pub env_id: String,
-    pub key: String,
-    pub value: Option<String>,
-}
-
-/// Set / clear a single baseUrl slot on an environment.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EnvSetBaseUrlArgs {
-    pub env_id: String,
-    pub def_id: String,
-    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -274,9 +261,13 @@ pub fn projects_delete(state: State<DbPool>, id: String) -> Result<(), AppError>
 // ===========================================================================
 
 #[tauri::command]
-pub fn modules_list(state: State<DbPool>, project_id: String) -> Result<Vec<Module>, AppError> {
-    crate::db::with_conn(&state, |c| {
-        crate::db::modules::list_by_project(c, &project_id)
+pub fn modules_list(
+    state: State<DbPool>,
+    project_id: Option<String>,
+) -> Result<Vec<Module>, AppError> {
+    crate::db::with_conn(&state, |c| match project_id.as_deref() {
+        Some(project_id) => crate::db::modules::list_by_project(c, project_id),
+        None => crate::db::modules::list_all(c),
     })
 }
 
@@ -341,12 +332,8 @@ pub fn collections_list(
     module_id: Option<String>,
 ) -> Result<Vec<Collection>, AppError> {
     crate::db::with_conn(&state, |c| match module_id.as_deref() {
-        Some(mid) => crate::db::collections::list_by_module(c, mid),
-        // No `list_all` overload in the current db module — when the
-        // caller doesn't pin a module, return empty rather than
-        // inventing a new SQL path here. The renderer normally knows
-        // which module it's rendering.
-        None => Ok(Vec::new()),
+        Some(module_id) => crate::db::collections::list_by_module(c, module_id),
+        None => crate::db::collections::list_all(c),
     })
 }
 
@@ -420,10 +407,8 @@ pub fn endpoints_list(
     collection_id: Option<String>,
 ) -> Result<Vec<Endpoint>, AppError> {
     crate::db::with_conn(&state, |c| match collection_id.as_deref() {
-        Some(cid) => crate::db::endpoints::list_by_collection(c, cid),
-        // No `list_all` overload in the current db module — see the
-        // matching note on `collections_list` above.
-        None => Ok(Vec::new()),
+        Some(collection_id) => crate::db::endpoints::list_by_collection(c, collection_id),
+        None => crate::db::endpoints::list_all(c),
     })
 }
 
@@ -520,10 +505,11 @@ pub fn endpoints_move(
 #[tauri::command]
 pub fn environments_list(
     state: State<DbPool>,
-    project_id: String,
+    project_id: Option<String>,
 ) -> Result<Vec<Environment>, AppError> {
-    crate::db::with_conn(&state, |c| {
-        crate::db::environments::list_by_project(c, &project_id)
+    crate::db::with_conn(&state, |c| match project_id.as_deref() {
+        Some(project_id) => crate::db::environments::list_by_project(c, project_id),
+        None => crate::db::environments::list_all(c),
     })
 }
 
@@ -568,20 +554,24 @@ pub fn environments_delete(state: State<DbPool>, id: String) -> Result<(), AppEr
 #[tauri::command]
 pub fn environments_set_var(
     state: State<DbPool>,
-    args: EnvSetVarArgs,
+    env_id: String,
+    key: String,
+    value: Option<String>,
 ) -> Result<Environment, AppError> {
     crate::db::with_tx(&state, |c| {
-        crate::db::environments::set_var(c, &args.env_id, &args.key, args.value.as_deref())
+        crate::db::environments::set_var(c, &env_id, &key, value.as_deref())
     })
 }
 
 #[tauri::command]
 pub fn environments_set_baseurl(
     state: State<DbPool>,
-    args: EnvSetBaseUrlArgs,
+    env_id: String,
+    def_id: String,
+    url: Option<String>,
 ) -> Result<Environment, AppError> {
     crate::db::with_tx(&state, |c| {
-        crate::db::environments::set_base_url(c, &args.env_id, &args.def_id, args.url.as_deref())
+        crate::db::environments::set_base_url(c, &env_id, &def_id, url.as_deref())
     })
 }
 
@@ -870,24 +860,21 @@ pub async fn mcp_auto_start_set(
 // gate individual mutations. The two layers compose — see
 // `docs/mcp-permission-policy.md`.
 
-/// Return the current global capability policy. Frontend reads this on
-/// settings hydration and on every reconnect so the UI always reflects
-/// the source of truth (sqlite `preferences.mcp.policy`).
+/// 返回当前全局能力策略，形状与 Web REST 完全一致。
 #[tauri::command]
 pub async fn mcp_capability_get(
     pool: tauri::State<'_, DbPool>,
-) -> Result<CapabilityPolicy, AppError> {
-    crate::db::with_conn(pool.inner(), crate::db::preferences::mcp_policy)
+) -> Result<McpCapabilityDto, AppError> {
+    let policy = crate::db::with_conn(pool.inner(), crate::db::preferences::mcp_policy)?;
+    Ok(McpCapabilityDto { policy })
 }
 
-/// Set the global capability policy. The frontend sends the wire form
-/// (`"read_only"` / `"safe_write"` / `"full_access"`) for symmetry with
-/// the REST `PUT /api/mcp/capability` endpoint.
+/// 更新全局能力策略并返回与 Web REST 相同的对象。
 #[tauri::command]
 pub async fn mcp_capability_set(
     policy: String,
     pool: tauri::State<'_, DbPool>,
-) -> Result<CapabilityPolicy, AppError> {
+) -> Result<McpCapabilityDto, AppError> {
     let parsed = CapabilityPolicy::parse(&policy).ok_or_else(|| {
         AppError::Validation(format!(
             "unknown mcp policy '{policy}' (expected read_only | safe_write | full_access)"
@@ -896,13 +883,9 @@ pub async fn mcp_capability_set(
     crate::db::with_conn(pool.inner(), |c| {
         crate::db::preferences::set_mcp_policy(c, parsed)
     })?;
-    Ok(parsed)
+    Ok(McpCapabilityDto { policy: parsed })
 }
-
-/// Return the tool names visible under the **current** capability
-/// policy. The frontend uses it to render the inventory list; the
-/// capability-aware `tools/list` over JSON-RPC uses the same code path
-/// via `mcp::tool_descriptors`.
+/// 返回当前能力策略下可见的工具名称。
 #[tauri::command]
 pub async fn mcp_capability_list_tools(
     pool: tauri::State<'_, DbPool>,
