@@ -1,218 +1,185 @@
 #!/usr/bin/env node
-// scripts/test-web-auth.mjs — verify commit 5's bearer auth flow.
-//
-//   node scripts/test-web-auth.mjs
-//
-// Asserts:
-//   - with no SIMPLE_POST_WEB_PASSWORD set, /api/projects is open
-//     (backward-compatible default — same as commit 4)
-//   - with SIMPLE_POST_WEB_PASSWORD=secret:
-//       GET /api/projects       → 401 (no token)
-//       GET /api/projects + bad → 401
-//       GET /api/projects + OK  → 200 (token = constant-time compare)
-//       GET /api/healthz        → 200 always (probes stay open)
-//       GET /                   → 200 always (SPA shell stays open)
-//       401 response carries `WWW-Authenticate: Bearer realm="simple-post"`
-//
-// The script spawns the binary twice (once without password, once with)
-// because there is no in-process toggle to flip the password at runtime —
-// the env var is read once at boot. A 2-process lifecycle is the same
-// pattern mcp-integration.test.mjs uses (commit 4).
+// Web 鉴权集成测试：验证开放模式、密码模式、健康检查和 MCP 探针。
+// 子进程输出由统一生命周期工具消费，退出与临时目录清理均有时间上限。
 
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-
-const REPO = join(import.meta.dirname, '..');
-const EXE_DEBUG = join(
-  REPO,
-  'src-tauri',
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'simple-post.exe' : 'simple-post',
-);
-const EXE_RELEASE = join(
-  REPO,
-  'src-tauri',
-  'target',
-  'release',
-  process.platform === 'win32' ? 'simple-post.exe' : 'simple-post',
-);
+import { requireWorkspaceBinary } from './e2e/artifact-resolver.mjs';
+import { cleanupScratch, spawnTracked } from './e2e/process-lifecycle.mjs';
 
 let exe;
-for (const candidate of [EXE_DEBUG, EXE_RELEASE]) {
-  if (existsSync(candidate)) {
-    exe = candidate;
-    break;
-  }
-}
-if (!exe) {
-  console.error(
-    `[test:web-auth] simple-post binary not found (looked for debug + release builds).`,
-  );
-  console.error(`[test:web-auth] run \`cargo build\` (in src-tauri/) first.`);
+try {
+  const artifact = await requireWorkspaceBinary('simple-post', {
+    profiles: ['debug', 'release'],
+  });
+  exe = artifact.path;
+} catch (error) {
+  console.error(`[test:web-auth] E2E 产物预检失败：${error.message}`);
   process.exit(2);
 }
 
 const PASSWORD = 'shh-this-is-secret-9c8a';
 const BASE = 'http://127.0.0.1:4173';
-
 let failures = 0;
-function assert(cond, msg) {
-  if (!cond) {
-    console.error(`✗ ${msg}`);
-    failures++;
+
+function assert(condition, message) {
+  if (condition) {
+    console.log(`✓ ${message}`);
   } else {
-    console.log(`✓ ${msg}`);
+    console.error(`✗ ${message}`);
+    failures++;
   }
 }
 
 function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForHttp(timeoutMs = 5000) {
+async function waitForHttp(tracked, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (tracked.spawnError) {
+      throw new Error(`server spawn failed: ${tracked.spawnError.message}`);
+    }
     try {
-      const r = await fetch(`${BASE}/api/healthz`);
-      if (r.ok) return;
+      const response = await fetch(`${BASE}/api/healthz`);
+      if (response.ok) return;
     } catch {
-      /* keep polling */
+      // 服务尚未监听，继续轮询。
     }
     await sleep(100);
   }
   throw new Error(`simple-post serve-web did not come up at ${BASE}`);
 }
 
-async function killGracefully(proc, label) {
-  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
-  proc.kill('SIGTERM');
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (proc.exitCode !== null || proc.signalCode !== null) {
-      console.log(`[test:web-auth] ${label} exited code=${proc.exitCode} sig=${proc.signalCode}`);
-      return;
-    }
-    await sleep(50);
+async function stopTracked(tracked, label) {
+  const exit = await tracked.terminate({ gracefulMs: 2_000, forceMs: 2_000 });
+  if (exit.timedOut) {
+    failures++;
+    console.error(`✗ ${label} did not exit within cleanup deadline`);
   }
-  proc.kill('SIGKILL');
+  if (exit.spawnError) {
+    failures++;
+    console.error(`✗ ${label} spawn error: ${exit.spawnError.message}`);
+  }
+  if (exit.exitResult) {
+    console.log(
+      `[test:web-auth] ${label} exited code=${exit.exitResult.code} sig=${exit.exitResult.signal}`,
+    );
+  }
 }
 
-// ----- Phase 1: no password (backward-compat) ------------------------------
+function cleanScratch(directory, label) {
+  if (!cleanupScratch(directory)) {
+    failures++;
+    console.error(`✗ failed to clean ${label} temporary directory ${directory}`);
+  }
+}
+
+async function runPhase(label, scratch, tracked, testBody) {
+  try {
+    await testBody();
+  } catch (error) {
+    failures++;
+    console.error(`✗ ${label} failed: ${error.message}`);
+  } finally {
+    await stopTracked(tracked, label);
+    cleanScratch(scratch, label);
+  }
+}
+
+// ----- 阶段一：无密码 ---------------------------------------------------
 const scratch1 = mkdtempSync(join(tmpdir(), 'web-auth-open-'));
 console.log(`[test:web-auth] phase 1 scratch = ${scratch1}`);
-const proc1 = spawn(exe, ['serve-web', '--bind=127.0.0.1', '--port=4173'], {
-  env: { ...process.env, SIMPLE_POST_DATA_DIR: scratch1, RUST_LOG: 'warn' },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
-// Drain child stderr so a chatty server can't fill the pipe buffer
-// and block; server logs are not asserted by this test.
-proc1.stderr.resume();
-
-try {
-  await waitForHttp();
+const proc1 = spawnTracked(
+  exe,
+  ['serve-web', '--bind=127.0.0.1', '--port=4173'],
+  {
+    env: { ...process.env, SIMPLE_POST_DATA_DIR: scratch1, RUST_LOG: 'warn' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  },
+  { label: 'phase 1' },
+);
+await runPhase('phase 1', scratch1, proc1, async () => {
+  await waitForHttp(proc1);
   console.log('[test:web-auth] phase 1: server up (no password)');
 
-  const r = await fetch(`${BASE}/api/projects`);
-  assert(r.status === 200, `phase 1: GET /api/projects returns 200 (got ${r.status})`);
+  const projects = await fetch(`${BASE}/api/projects`);
+  assert(
+    projects.status === 200,
+    `phase 1: GET /api/projects returns 200 (got ${projects.status})`,
+  );
 
-  // healthz + SPA shell are always public, no matter the auth tier.
-  const h = await fetch(`${BASE}/api/healthz`);
-  assert(h.status === 200, `phase 1: /api/healthz is 200 (got ${h.status})`);
-  const body = await h.json();
+  const health = await fetch(`${BASE}/api/healthz`);
+  assert(health.status === 200, `phase 1: /api/healthz is 200 (got ${health.status})`);
+  const body = await health.json();
   assert(
     body?.status === 'ok',
     `phase 1: /api/healthz body.status === "ok" (got ${JSON.stringify(body)})`,
   );
-} finally {
-  await killGracefully(proc1, 'phase 1');
-  rmSync(scratch1, { recursive: true, force: true });
-}
+});
 
-// ----- Phase 2: SIMPLE_POST_WEB_PASSWORD set --------------------------------
+// ----- 阶段二：设置密码 -------------------------------------------------
 const scratch2 = mkdtempSync(join(tmpdir(), 'web-auth-locked-'));
 console.log(`[test:web-auth] phase 2 scratch = ${scratch2}`);
-const proc2 = spawn(exe, ['serve-web', '--bind=127.0.0.1', '--port=4173'], {
-  env: {
-    ...process.env,
-    SIMPLE_POST_DATA_DIR: scratch2,
-    SIMPLE_POST_WEB_PASSWORD: PASSWORD,
-    RUST_LOG: 'warn',
+const proc2 = spawnTracked(
+  exe,
+  ['serve-web', '--bind=127.0.0.1', '--port=4173'],
+  {
+    env: {
+      ...process.env,
+      SIMPLE_POST_DATA_DIR: scratch2,
+      SIMPLE_POST_WEB_PASSWORD: PASSWORD,
+      RUST_LOG: 'warn',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
   },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
-// Drain child stderr (see phase 1) — logs are not asserted here either.
-proc2.stderr.resume();
+  { label: 'phase 2' },
+);
+await runPhase('phase 2', scratch2, proc2, async () => {
+  await waitForHttp(proc2);
+  console.log('[test:web-auth] phase 2: server up (password set)');
 
-try {
-  await waitForHttp();
-  console.log(`[test:web-auth] phase 2: server up (password set)`);
-
-  // 2a — no token → 401
-  const r401 = await fetch(`${BASE}/api/projects`);
+  const noToken = await fetch(`${BASE}/api/projects`);
+  assert(noToken.status === 401, `phase 2: no token returns 401 (got ${noToken.status})`);
+  const authHeader = noToken.headers.get('www-authenticate') ?? '';
   assert(
-    r401.status === 401,
-    `phase 2: GET /api/projects (no token) returns 401 (got ${r401.status})`,
-  );
-  const wwwAuth = r401.headers.get('www-authenticate') ?? '';
-  assert(
-    wwwAuth.toLowerCase().includes('bearer'),
-    `phase 2: 401 carries WWW-Authenticate: Bearer (got ${JSON.stringify(wwwAuth)})`,
+    authHeader.toLowerCase().includes('bearer'),
+    `phase 2: 401 carries Bearer challenge (got ${JSON.stringify(authHeader)})`,
   );
 
-  // 2b — wrong token → 401 (constant-time compare must reject mismatches)
-  const rWrong = await fetch(`${BASE}/api/projects`, {
+  const wrongToken = await fetch(`${BASE}/api/projects`, {
     headers: { authorization: 'Bearer wrong-password' },
   });
-  assert(
-    rWrong.status === 401,
-    `phase 2: GET /api/projects (wrong token) returns 401 (got ${rWrong.status})`,
-  );
+  assert(wrongToken.status === 401, `phase 2: wrong token returns 401 (got ${wrongToken.status})`);
 
-  // 2c — right token → 200
-  const rOk = await fetch(`${BASE}/api/projects`, {
+  const correctToken = await fetch(`${BASE}/api/projects`, {
     headers: { authorization: `Bearer ${PASSWORD}` },
   });
   assert(
-    rOk.status === 200,
-    `phase 2: GET /api/projects (correct token) returns 200 (got ${rOk.status})`,
+    correctToken.status === 200,
+    `phase 2: correct token returns 200 (got ${correctToken.status})`,
   );
 
-  // 2d — healthz stays open under password
-  const rHealthz = await fetch(`${BASE}/api/healthz`);
+  const health = await fetch(`${BASE}/api/healthz`);
+  assert(health.status === 200, `phase 2: /api/healthz stays 200 (got ${health.status})`);
+
+  const spa = await fetch(`${BASE}/`);
+  assert(spa.status === 200, `phase 2: GET / stays 200 (got ${spa.status})`);
+  const contentType = spa.headers.get('content-type') ?? '';
   assert(
-    rHealthz.status === 200,
-    `phase 2: /api/healthz stays 200 under password (got ${rHealthz.status})`,
+    contentType.toLowerCase().includes('text/html'),
+    `phase 2: GET / returns text/html (got ${JSON.stringify(contentType)})`,
   );
 
-  // 2e — SPA shell stays open under password
-  const rSpa = await fetch(`${BASE}/`);
-  assert(
-    rSpa.status === 200,
-    `phase 2: GET / (SPA shell) stays 200 under password (got ${rSpa.status})`,
-  );
-  const ctype = rSpa.headers.get('content-type') ?? '';
-  assert(
-    ctype.toLowerCase().includes('text/html'),
-    `phase 2: GET / returns text/html (got ${JSON.stringify(ctype)})`,
-  );
-
-  // 2f — /mcp healthz also stays open (MCP probes need it)
-  const rMcpH = await fetch(`${BASE}/mcp/healthz`);
-  assert(
-    rMcpH.status === 200,
-    `phase 2: /mcp/healthz stays 200 under password (got ${rMcpH.status})`,
-  );
-} finally {
-  await killGracefully(proc2, 'phase 2');
-  rmSync(scratch2, { recursive: true, force: true });
-}
+  const mcpHealth = await fetch(`${BASE}/mcp/healthz`);
+  assert(mcpHealth.status === 200, `phase 2: /mcp/healthz stays 200 (got ${mcpHealth.status})`);
+});
 
 if (failures > 0) {
   console.error(`\n[test:web-auth] FAILED with ${failures} assertion failure(s)`);
   process.exit(1);
 }
-console.log(`\n[test:web-auth] all assertions passed`);
+console.log('\n[test:web-auth] all assertions passed');

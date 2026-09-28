@@ -1,181 +1,142 @@
 #!/usr/bin/env node
-// scripts/test-web-basepath.mjs — verify commit 5's reverse-proxy base path.
-//
-//   node scripts/test-web-basepath.mjs
-//
-// Asserts:
-//   - with --public-base-path /sp:
-//       GET /sp/api/projects        → 200 (route reachable under prefix)
-//       GET /api/projects            → 404 (route NOT mounted at bare path)
-//       GET /sp/api/healthz         → 200 (probe under prefix works)
-//       GET /sp/healthz             → 200 (legacy probe under prefix works)
-//       GET /sp/mcp/healthz         → 200 (mcp probe under prefix works)
-//       GET /sp/                    → 200 (SPA fallback under prefix works,
-//                                          returns text/html)
-//       GET /sp/<unknown>           → 200 + text/html (SPA fallback catches
-//                                          client-side routes; same shape as
-//                                          the bare /<unknown> case)
-//
-// Mirrors test-web-auth.mjs (same spawn / wait / kill pattern, commit 4).
-// The script uses --public-base-path (CLI flag) instead of the
-// SIMPLE_POST_PUBLIC_BASE_PATH env var to exercise both code paths.
+// Web base path 集成测试：验证前缀路由、探针和 SPA fallback。
+// 子进程输出由统一生命周期工具消费，退出与临时目录清理均有时间上限。
 
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-
-const REPO = join(import.meta.dirname, '..');
-const EXE_DEBUG = join(
-  REPO,
-  'src-tauri',
-  'target',
-  'debug',
-  process.platform === 'win32' ? 'simple-post.exe' : 'simple-post',
-);
-const EXE_RELEASE = join(
-  REPO,
-  'src-tauri',
-  'target',
-  'release',
-  process.platform === 'win32' ? 'simple-post.exe' : 'simple-post',
-);
+import { requireWorkspaceBinary } from './e2e/artifact-resolver.mjs';
+import { cleanupScratch, spawnTracked } from './e2e/process-lifecycle.mjs';
 
 let exe;
-for (const candidate of [EXE_DEBUG, EXE_RELEASE]) {
-  if (existsSync(candidate)) {
-    exe = candidate;
-    break;
-  }
-}
-if (!exe) {
-  console.error(`[test:web-basepath] simple-post binary not found.`);
-  console.error(`[test:web-basepath] run \`cargo build\` first.`);
+try {
+  const artifact = await requireWorkspaceBinary('simple-post', {
+    profiles: ['debug', 'release'],
+  });
+  exe = artifact.path;
+} catch (error) {
+  console.error(`[test:web-basepath] E2E 产物预检失败：${error.message}`);
   process.exit(2);
 }
 
 const PREFIX = '/sp';
 const BASE = 'http://127.0.0.1:4173';
-
 let failures = 0;
-function assert(cond, msg) {
-  if (!cond) {
-    console.error(`✗ ${msg}`);
-    failures++;
+
+function assert(condition, message) {
+  if (condition) {
+    console.log(`✓ ${message}`);
   } else {
-    console.log(`✓ ${msg}`);
+    console.error(`✗ ${message}`);
+    failures++;
   }
 }
 
 function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForHttp(timeoutMs = 5000) {
+async function waitForHttp(tracked, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    // Probe the prefix; if the binary isn't up yet this 404s. Once it
-    // responds 200/404 we know the listener is bound.
+    if (tracked.spawnError) {
+      throw new Error(`server spawn failed: ${tracked.spawnError.message}`);
+    }
     try {
-      await fetch(`${BASE}${PREFIX}/api/healthz`);
-      return;
+      const response = await fetch(`${BASE}${PREFIX}/api/healthz`);
+      if (response.ok) return;
     } catch {
-      /* keep polling */
+      // 服务尚未监听，继续轮询。
     }
     await sleep(100);
   }
   throw new Error(`simple-post serve-web did not come up at ${BASE}${PREFIX}`);
 }
 
-async function killGracefully(proc, label) {
-  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
-  proc.kill('SIGTERM');
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (proc.exitCode !== null || proc.signalCode !== null) {
-      console.log(
-        `[test:web-basepath] ${label} exited code=${proc.exitCode} sig=${proc.signalCode}`,
-      );
-      return;
-    }
-    await sleep(50);
+async function stopTracked(tracked, label) {
+  const exit = await tracked.terminate({ gracefulMs: 2_000, forceMs: 2_000 });
+  if (exit.timedOut) {
+    failures++;
+    console.error(`✗ ${label} did not exit within cleanup deadline`);
   }
-  proc.kill('SIGKILL');
+  if (exit.spawnError) {
+    failures++;
+    console.error(`✗ ${label} spawn error: ${exit.spawnError.message}`);
+  }
+  if (exit.exitResult) {
+    console.log(
+      `[test:web-basepath] ${label} exited code=${exit.exitResult.code} sig=${exit.exitResult.signal}`,
+    );
+  }
+}
+
+function cleanScratch(directory) {
+  if (!cleanupScratch(directory)) {
+    failures++;
+    console.error(`✗ failed to clean basepath temporary directory ${directory}`);
+  }
 }
 
 const scratch = mkdtempSync(join(tmpdir(), 'web-basepath-'));
 console.log(`[test:web-basepath] scratch = ${scratch}`);
-const proc = spawn(
+const proc = spawnTracked(
   exe,
   ['serve-web', '--bind=127.0.0.1', '--port=4173', '--public-base-path', PREFIX],
   {
     env: { ...process.env, SIMPLE_POST_DATA_DIR: scratch, RUST_LOG: 'warn' },
     stdio: ['ignore', 'pipe', 'pipe'],
   },
+  { label: 'basepath' },
 );
-// Drain child stderr so a chatty server can't fill the pipe buffer
-// and block; server logs are not asserted by this test.
-proc.stderr.resume();
 
 try {
-  await waitForHttp();
+  await waitForHttp(proc);
   console.log(`[test:web-basepath] server up with base path ${PREFIX}`);
 
-  // 1 — /sp/api/projects returns 200 (auth open in this run, no password)
-  const okProjects = await fetch(`${BASE}${PREFIX}/api/projects`);
-  assert(
-    okProjects.status === 200,
-    `${PREFIX}/api/projects returns 200 (got ${okProjects.status})`,
-  );
+  const projects = await fetch(`${BASE}${PREFIX}/api/projects`);
+  assert(projects.status === 200, `${PREFIX}/api/projects returns 200 (got ${projects.status})`);
 
-  // 2 — /api/projects (bare) returns 404 — the router is NOT mounted at root
   const bareProjects = await fetch(`${BASE}/api/projects`);
   assert(
     bareProjects.status === 404,
-    `bare /api/projects returns 404 under prefix mode (got ${bareProjects.status})`,
+    `bare /api/projects returns 404 (got ${bareProjects.status})`,
   );
 
-  // 3 — healthz works under prefix
-  const okH = await fetch(`${BASE}${PREFIX}/api/healthz`);
-  assert(okH.status === 200, `${PREFIX}/api/healthz returns 200 (got ${okH.status})`);
+  const health = await fetch(`${BASE}${PREFIX}/api/healthz`);
+  assert(health.status === 200, `${PREFIX}/api/healthz returns 200 (got ${health.status})`);
 
-  // 4 — bare /healthz returns 404 under prefix mode
-  const bareH = await fetch(`${BASE}/healthz`);
-  assert(bareH.status === 404, `bare /healthz returns 404 under prefix mode (got ${bareH.status})`);
+  const bareHealth = await fetch(`${BASE}/healthz`);
+  assert(bareHealth.status === 404, `bare /healthz returns 404 (got ${bareHealth.status})`);
 
-  // 5 — /sp/mcp/healthz returns 200
-  const okMcpH = await fetch(`${BASE}${PREFIX}/mcp/healthz`);
-  assert(okMcpH.status === 200, `${PREFIX}/mcp/healthz returns 200 (got ${okMcpH.status})`);
+  const mcpHealth = await fetch(`${BASE}${PREFIX}/mcp/healthz`);
+  assert(mcpHealth.status === 200, `${PREFIX}/mcp/healthz returns 200 (got ${mcpHealth.status})`);
 
-  // 6 — SPA fallback under prefix: /sp/ returns text/html
-  const okSpa = await fetch(`${BASE}${PREFIX}/`);
-  assert(okSpa.status === 200, `${PREFIX}/ returns 200 (got ${okSpa.status})`);
-  const ctype = okSpa.headers.get('content-type') ?? '';
+  const spa = await fetch(`${BASE}${PREFIX}/`);
+  assert(spa.status === 200, `${PREFIX}/ returns 200 (got ${spa.status})`);
+  const spaType = spa.headers.get('content-type') ?? '';
   assert(
-    ctype.toLowerCase().includes('text/html'),
-    `${PREFIX}/ returns text/html (got ${JSON.stringify(ctype)})`,
+    spaType.toLowerCase().includes('text/html'),
+    `${PREFIX}/ returns text/html (got ${JSON.stringify(spaType)})`,
   );
 
-  // 7 — SPA fallback under prefix: /sp/<unknown-route> returns text/html
-  //     so client-side routes reload cleanly behind nginx/Caddy
-  const okUnknown = await fetch(`${BASE}${PREFIX}/some/spa/route`);
+  const unknown = await fetch(`${BASE}${PREFIX}/some/spa/route`);
+  assert(unknown.status === 200, `${PREFIX}/some/spa/route returns 200 (got ${unknown.status})`);
+  const unknownType = unknown.headers.get('content-type') ?? '';
   assert(
-    okUnknown.status === 200,
-    `${PREFIX}/some/spa/route (SPA fallback) returns 200 (got ${okUnknown.status})`,
+    unknownType.toLowerCase().includes('text/html'),
+    `${PREFIX}/some/spa/route returns text/html (got ${JSON.stringify(unknownType)})`,
   );
-  const ctype2 = okUnknown.headers.get('content-type') ?? '';
-  assert(
-    ctype2.toLowerCase().includes('text/html'),
-    `${PREFIX}/some/spa/route returns text/html (got ${JSON.stringify(ctype2)})`,
-  );
+} catch (error) {
+  failures++;
+  console.error(`✗ test failed: ${error.message}`);
 } finally {
-  await killGracefully(proc, 'basepath');
-  rmSync(scratch, { recursive: true, force: true });
+  await stopTracked(proc, 'basepath');
+  cleanScratch(scratch);
 }
 
 if (failures > 0) {
   console.error(`\n[test:web-basepath] FAILED with ${failures} assertion failure(s)`);
   process.exit(1);
 }
-console.log(`\n[test:web-basepath] all assertions passed`);
+console.log('\n[test:web-basepath] all assertions passed');
