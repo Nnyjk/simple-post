@@ -14,8 +14,8 @@ export interface EnvironmentSectionProps {
   projectId: string;
 
   // ---- env-scoped actions ----
-  setEnvironmentVar: (envId: string, key: string, value: string) => void;
-  setEnvironmentBaseUrl: (envId: string, defId: string, url: string) => void;
+  setEnvironmentVar: (envId: string, key: string, value: string | null) => void;
+  setEnvironmentBaseUrl: (envId: string, defId: string, url: string | null) => void;
   addEnvironment: (projectId: string, name: string) => void;
   deleteEnvironment: (envId: string) => void;
   updateEnvironment: (envId: string, patch: Partial<Environment>) => void;
@@ -725,10 +725,8 @@ function VariableRow({ flush, name, value, envId, setEnvironmentVar }: VariableR
           }
           onCommit={(newKey) => {
             if (!newKey || newKey === name) return;
-            // Rename: drop the old key, set the new one. We use
-            // setEnvironmentVar for both so the validation goes
-            // through the same code path.
-            setEnvironmentVar(envId, name, '');
+            // 重命名时先删除旧 key，再写入新 key；两次 action 保持现有顺序语义。
+            setEnvironmentVar(envId, name, null);
             setEnvironmentVar(envId, newKey, value);
           }}
           className="font-mono text-xs font-medium"
@@ -756,7 +754,7 @@ function VariableRow({ flush, name, value, envId, setEnvironmentVar }: VariableR
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-            onClick={() => setEnvironmentVar(envId, name, '')}
+            onClick={() => setEnvironmentVar(envId, name, null)}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>

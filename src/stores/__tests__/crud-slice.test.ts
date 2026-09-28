@@ -26,7 +26,7 @@ import assert from 'node:assert/strict';
 import { installBrowserShim, clearIpcMock, installIpcMock } from './_browser-shim';
 
 import { createCrudSlice } from '../crud-slice';
-import type { Endpoint } from '@/types/domain';
+import type { Endpoint, Environment } from '@/types/domain';
 
 /** A minimal but domain-shaped `Endpoint`. */
 function makeEndpoint(overrides: Partial<Endpoint> = {}): Endpoint {
@@ -48,29 +48,48 @@ function makeEndpoint(overrides: Partial<Endpoint> = {}): Endpoint {
   };
 }
 
+/** 用于环境值增删 action 的最小环境数据。 */
+function makeEnvironment(overrides: Partial<Environment> = {}): Environment {
+  return {
+    id: 'env-1',
+    projectId: 'project-1',
+    name: 'dev',
+    baseUrls: {},
+    variables: {},
+    isActive: true,
+    ...overrides,
+  };
+}
+
 /**
- * Build a "store" for the CRUD slice. The endpoint family only reads
- * `endpoints` out of state and writes back, so the harness can be
- * slimmer than for mcp-slice — we don't need other slice methods to
- * be present on the state object.
+ * 构造 CRUD slice 所需的最小 store；环境 action 读取 environments，
+ * endpoint action 读取 endpoints，二者共用 Zustand 风格的 setter。
  */
-function makeCrudHarness(initialEndpoints: Endpoint[]) {
-  const bag: Record<string, any> = {
+type CrudHarnessState = {
+  endpoints: Endpoint[];
+  environments: Environment[];
+  openTabs: never[];
+  activeTabId: null;
+  activeEndpointId: null;
+};
+
+function makeCrudHarness(initialEndpoints: Endpoint[], initialEnvironments: Environment[] = []) {
+  const bag: CrudHarnessState = {
     endpoints: initialEndpoints,
+    environments: initialEnvironments,
     openTabs: [],
     activeTabId: null,
     activeEndpointId: null,
   };
-  const set = (partial: any) => {
-    const updater = typeof partial === 'function' ? partial(bag) : partial;
-    if (updater) Object.assign(bag, updater);
+  const set = (partial: unknown) => {
+    const updater =
+      typeof partial === 'function'
+        ? (partial as (state: CrudHarnessState) => unknown)(bag)
+        : partial;
+    if (updater && typeof updater === 'object') Object.assign(bag, updater);
   };
   const get = () => bag;
-  const slice = createCrudSlice(set as any, get as any, {} as any);
-  // The slice method `updateEndpoint` only reads `endpoints` out of
-  // state; the slice itself doesn't call into other slice methods,
-  // so a flat attachment isn't strictly needed. We still expose all
-  // action methods for completeness.
+  const slice = createCrudSlice(set as never, get as never, {} as never);
   return { bag, slice };
 }
 
@@ -185,5 +204,169 @@ describe('crud-slice: updateEndpoint — T-2 optimistic + rollback', () => {
     void before; // (kept for documentation; tested implicitly via the
     // reference equality above — the rollback puts the
     // original `prev` straight back into the array.)
+  });
+});
+
+type CapturedInvoke = { cmd: string; args: Record<string, unknown> };
+
+describe('crud-slice: 环境值的 null 删除契约', () => {
+  it('变量删除立即移除本地键，发送 null，并在成功路径保留空字符串值', async () => {
+    const original = makeEnvironment({
+      variables: { token: 'secret', empty: '' },
+    });
+    const harness = makeCrudHarness([], [original]);
+    const calls: CapturedInvoke[] = [];
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      await pending;
+      return null;
+    });
+
+    const action = harness.slice.setEnvironmentVar('env-1', 'token', null);
+    assert.deepEqual(
+      harness.bag.environments[0].variables,
+      { empty: '' },
+      'null 应在 IPC 完成前从乐观状态移除变量',
+    );
+
+    release();
+    await action;
+    assert.deepEqual(calls, [
+      {
+        cmd: 'environments_set_var',
+        args: { envId: 'env-1', key: 'token', value: null },
+      },
+    ]);
+
+    await harness.slice.setEnvironmentVar('env-1', '', '');
+    assert.deepEqual(
+      harness.bag.environments[0].variables,
+      { empty: '', '': '' },
+      '空字符串是真实变量值，不应被当作删除',
+    );
+  });
+
+  it('变量删除失败时恢复原变量和值', async () => {
+    const original = makeEnvironment({ variables: { token: 'secret', keep: 'yes' } });
+    const harness = makeCrudHarness([], [original]);
+    installIpcMock(async () => {
+      throw new Error('variable delete failed');
+    });
+
+    await harness.slice.setEnvironmentVar('env-1', 'token', null);
+
+    assert.deepEqual(harness.bag.environments[0].variables, original.variables);
+    assert.strictEqual(harness.bag.environments[0], original);
+  });
+
+  it('BaseUrl null 删除槽位并发送 null，空 URL 仍作为真实值保留', async () => {
+    const original = makeEnvironment({
+      baseUrls: { api: 'https://api.example.test', empty: '' },
+    });
+    const harness = makeCrudHarness([], [original]);
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    await harness.slice.setEnvironmentBaseUrl('env-1', 'api', null);
+    assert.equal(
+      Object.hasOwn(harness.bag.environments[0].baseUrls, 'api'),
+      false,
+      'null 应从乐观状态移除 BaseUrl 槽位',
+    );
+    assert.equal(harness.bag.environments[0].baseUrls.empty, '');
+
+    await harness.slice.setEnvironmentBaseUrl('env-1', 'empty', '');
+    assert.equal(harness.bag.environments[0].baseUrls.empty, '');
+    assert.deepEqual(calls, [
+      {
+        cmd: 'environments_set_baseurl',
+        args: { envId: 'env-1', defId: 'api', url: null },
+      },
+      {
+        cmd: 'environments_set_baseurl',
+        args: { envId: 'env-1', defId: 'empty', url: '' },
+      },
+    ]);
+  });
+
+  it('BaseUrl 删除失败时恢复原槽位和值', async () => {
+    const original = makeEnvironment({ baseUrls: { api: 'https://api.example.test' } });
+    const harness = makeCrudHarness([], [original]);
+    installIpcMock(async () => {
+      throw new Error('base URL delete failed');
+    });
+
+    await harness.slice.setEnvironmentBaseUrl('env-1', 'api', null);
+
+    assert.deepEqual(harness.bag.environments[0].baseUrls, original.baseUrls);
+    assert.strictEqual(harness.bag.environments[0], original);
+  });
+
+  it('重命名按删除旧 key 后写入新 key 的顺序发送 null 与新值', async () => {
+    const original = makeEnvironment({ variables: { old: 'value', keep: 'yes' } });
+    const harness = makeCrudHarness([], [original]);
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    const removeOld = harness.slice.setEnvironmentVar('env-1', 'old', null);
+    const writeNew = harness.slice.setEnvironmentVar('env-1', 'renamed', 'value');
+    await Promise.all([removeOld, writeNew]);
+
+    assert.deepEqual(calls, [
+      {
+        cmd: 'environments_set_var',
+        args: { envId: 'env-1', key: 'old', value: null },
+      },
+      {
+        cmd: 'environments_set_var',
+        args: { envId: 'env-1', key: 'renamed', value: 'value' },
+      },
+    ]);
+    assert.deepEqual(harness.bag.environments[0].variables, {
+      renamed: 'value',
+      keep: 'yes',
+    });
+  });
+
+  it('重命名中的删除 action 失败时恢复删除前的快照，不宣称 rename 原子性', async () => {
+    const original = makeEnvironment({ variables: { old: 'value', keep: 'yes' } });
+    const harness = makeCrudHarness([], [original]);
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      if (args?.value === null) throw new Error('rename delete failed');
+      return null;
+    });
+
+    const removeOld = harness.slice.setEnvironmentVar('env-1', 'old', null);
+    const writeNew = harness.slice.setEnvironmentVar('env-1', 'renamed', 'value');
+    await Promise.all([removeOld, writeNew]);
+
+    assert.deepEqual(calls, [
+      {
+        cmd: 'environments_set_var',
+        args: { envId: 'env-1', key: 'old', value: null },
+      },
+      {
+        cmd: 'environments_set_var',
+        args: { envId: 'env-1', key: 'renamed', value: 'value' },
+      },
+    ]);
+    assert.deepEqual(
+      harness.bag.environments[0].variables,
+      original.variables,
+      '当前两次 action 的删除失败分支应恢复删除前快照',
+    );
   });
 });

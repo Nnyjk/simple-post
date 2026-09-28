@@ -27,16 +27,17 @@ export interface BootstrapSliceState {
   collections: Collection[];
   endpoints: Endpoint[];
   environments: Environment[];
-  /** True once bootstrap() has resolved at least once. */
+  /** bootstrap 成功完成后为 true。 */
   loaded: boolean;
 
-  // active selection (kept here because it's tightly coupled to the
-  // data arrays — setActiveProject chooses a default env from
-  // `environments`, setActiveEndpoint opens a tab in ui-slice state).
+  // 当前选择与 bootstrap 数据紧密耦合，保留在此切片内。
   activeProjectId: string;
   activeEnvironmentId: string;
   activeEndpointId: string | null;
+  /** bootstrap 请求进行中。 */
   loading: boolean;
+  /** 最近一次启动加载错误；成功后清空。 */
+  bootstrapError: string | null;
 }
 
 /** Action portion owned by the bootstrap slice. */
@@ -64,18 +65,20 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
   // daemon (which reads SQLite). The selectors and consumers all tolerate
   // an empty list because `loaded: false` triggers a loading state in the
   // UI rather than rendering the (now-empty) tree.
+  // 启动时为空；bootstrap() 成功后会一次性填入 SQLite 中的数据。
   projects: [],
   modules: [],
   collections: [],
   endpoints: [],
   environments: [],
-  /** True once bootstrap() has resolved at least once. Idempotent. */
+  /** bootstrap 成功完成后为 true。 */
   loaded: false,
 
   activeProjectId: '',
   activeEnvironmentId: '',
   activeEndpointId: null,
   loading: false,
+  bootstrapError: null,
 
   // ---------- selection / expansion ----------
 
@@ -118,63 +121,48 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
   // ---------- bootstrap (one-shot, called from TopBar mount) ----------
 
   bootstrap: async () => {
-    if (get().loaded) return;
-    // Fetch all top-level slices in parallel. List commands take no
-    // filter args in this revision (Worker C's `commands.rs`); the
-    // inner `catch`es degrade gracefully when the daemon isn't
-    // reachable yet (e.g. dev without `tauri dev`) so the UI doesn't
-    // crash — `loaded` simply stays false and the user sees the empty
-    // state until the daemon comes online.
-    const [projects, modules, collections, endpoints, environments] = await Promise.all([
-      invokeCmd<Project[]>(COMMANDS.projectsList).catch((e) => {
-        console.error('[store] projects_list failed', e);
-        return [] as Project[];
-      }),
-      invokeCmd<Module[]>(COMMANDS.modulesList).catch((e) => {
-        console.error('[store] modules_list failed', e);
-        return [] as Module[];
-      }),
-      invokeCmd<Collection[]>(COMMANDS.collectionsList).catch((e) => {
-        console.error('[store] collections_list failed', e);
-        return [] as Collection[];
-      }),
-      invokeCmd<Endpoint[]>(COMMANDS.endpointsList, {}).catch((e) => {
-        console.error('[store] endpoints_list failed', e);
-        return [] as Endpoint[];
-      }),
-      invokeCmd<Environment[]>(COMMANDS.environmentsList).catch((e) => {
-        console.error('[store] environments_list failed', e);
-        return [] as Environment[];
-      }),
-    ]);
+    if (get().loaded || get().loading) return;
+    set({ loading: true, bootstrapError: null });
 
-    // Pick a sensible default selection now that the data is in.
-    const firstProject = projects[0];
-    const firstProjectEnv = firstProject
-      ? (environments.find((e) => e.projectId === firstProject.id && e.isActive) ??
-        environments.find((e) => e.projectId === firstProject.id))
-      : undefined;
-    const firstEndpoint = endpoints[0];
+    try {
+      // 列表命令在没有过滤条件时返回全量数据，避免把 project_id 误传为空。
+      const [projects, modules, collections, endpoints, environments] = await Promise.all([
+        invokeCmd<Project[]>(COMMANDS.projectsList),
+        invokeCmd<Module[]>(COMMANDS.modulesList),
+        invokeCmd<Collection[]>(COMMANDS.collectionsList),
+        invokeCmd<Endpoint[]>(COMMANDS.endpointsList),
+        invokeCmd<Environment[]>(COMMANDS.environmentsList),
+      ]);
 
-    set({
-      projects,
-      modules,
-      collections,
-      endpoints,
-      environments,
-      loaded: true,
-      activeProjectId: firstProject?.id ?? '',
-      activeEnvironmentId: firstProjectEnv?.id ?? '',
-      activeEndpointId: firstEndpoint?.id ?? null,
-    });
-    // Open the first endpoint by default, mirroring the old mock seed.
-    // Routed through ui-slice's `openTab` action so the workspace-tab
-    // invariants (idempotent re-open, single-source `activeTabId`) live
-    // in one place. On a fresh install with no endpoints yet, the
-    // initial `openTabs: []` / `activeTabId: null` from the slice
-    // factory is already correct, so we skip the call.
-    if (firstEndpoint) {
-      get().openTab('endpoint', firstEndpoint.id);
+      const firstProject = projects[0];
+      const firstProjectEnv = firstProject
+        ? (environments.find((e) => e.projectId === firstProject.id && e.isActive) ??
+          environments.find((e) => e.projectId === firstProject.id))
+        : undefined;
+      const firstEndpoint = endpoints[0];
+
+      set({
+        projects,
+        modules,
+        collections,
+        endpoints,
+        environments,
+        loaded: true,
+        bootstrapError: null,
+        loading: false,
+        activeProjectId: firstProject?.id ?? '',
+        activeEnvironmentId: firstProjectEnv?.id ?? '',
+        activeEndpointId: firstEndpoint?.id ?? null,
+      });
+
+      if (firstEndpoint) {
+        get().openTab('endpoint', firstEndpoint.id);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[store] bootstrap failed', error);
+      // 保留已有数据并暴露错误状态，不把任何列表失败伪装成空数组。
+      set({ loading: false, bootstrapError: message });
     }
   },
 });

@@ -105,10 +105,10 @@ export interface CrudSliceActions {
   ) => Promise<void>;
 
   // actions: environment (async — Tauri commands)
-  setEnvironmentVar: (envId: string, key: string, value: string) => Promise<void>;
+  setEnvironmentVar: (envId: string, key: string, value: string | null) => Promise<void>;
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => Promise<void>;
-  setEnvironmentBaseUrl: (envId: string, defId: string, url: string) => Promise<void>;
+  setEnvironmentBaseUrl: (envId: string, defId: string, url: string | null) => Promise<void>;
   deleteEnvironment: (envId: string) => Promise<void>;
   setEnvironmentActive: (envId: string) => Promise<void>;
 
@@ -858,9 +858,12 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
   setEnvironmentVar: async (envId, key, value) => {
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return;
+    const variables = { ...prev.variables };
+    if (value === null) delete variables[key];
+    else variables[key] = value;
     const optimistic: Environment = {
       ...prev,
-      variables: { ...prev.variables, [key]: value },
+      variables,
     };
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
@@ -892,7 +895,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
     try {
-      await invokeCmd<Environment>(COMMANDS.environmentsUpdate, { envId, patch });
+      await invokeCmd<Environment>(COMMANDS.environmentsUpdate, { id: envId, patch });
     } catch (e) {
       console.error('[store] environments_update failed', e);
       set((s) => ({
@@ -904,8 +907,8 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return;
     const nextBaseUrls = { ...prev.baseUrls };
-    if (url) nextBaseUrls[defId] = url;
-    else delete nextBaseUrls[defId];
+    if (url === null) delete nextBaseUrls[defId];
+    else nextBaseUrls[defId] = url;
     const optimistic: Environment = { ...prev, baseUrls: nextBaseUrls };
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
@@ -941,7 +944,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invokeCmd<void>(COMMANDS.environmentsDelete, { envId });
+      await invokeCmd<void>(COMMANDS.environmentsDelete, { id: envId });
     } catch (e) {
       console.error('[store] environments_delete failed', e);
       set(snapshot);
@@ -1038,7 +1041,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),
     }));
     try {
-      await invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsUpdate, { projectId, defId, patch });
+      await invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsUpdate, { id: defId, patch });
     } catch (e) {
       console.error('[store] base_url_defs_update failed', e);
       set((s) => ({
@@ -1076,7 +1079,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       };
     });
     try {
-      await invokeCmd<void>(COMMANDS.baseUrlDefsDelete, { projectId, defId });
+      await invokeCmd<void>(COMMANDS.baseUrlDefsDelete, { id: defId });
     } catch (e) {
       console.error('[store] base_url_defs_delete failed', e);
       set(snapshot);
