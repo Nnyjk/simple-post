@@ -24,7 +24,16 @@ use serde::Serialize;
 /// Successful HTTP response. Field names match `ApiResponse` so the
 /// React side can reuse its existing response-view code without a
 /// translation layer.
+///
+/// `rename_all = "camelCase"` is load-bearing, not cosmetic: without it
+/// serde emits `status_text` / `duration_ms` / `size_bytes` /
+/// `content_type` while `src/lib/http.ts` reads `statusText` /
+/// `durationMs` / `sizeBytes` / `contentType`. Every one of those came
+/// back `undefined`, so the response bar rendered `NaN s` and `0 B` for
+/// every request, and the content type never reached the viewer.
+/// `HttpResult` below already had the attribute; this type was missed.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HttpResponse {
     pub status: u16,
     pub status_text: String,
@@ -45,7 +54,11 @@ pub struct HttpResponse {
 /// which the frontend uses for HTTP-level non-2xx. This is "the
 /// request never reached the application layer" — DNS, connect,
 /// TLS, reset, aborted, timeout.
+///
+/// `rename_all` is a no-op today (both fields are single words) but keeps
+/// this type from re-introducing the mismatch [`HttpResponse`] had.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HttpError {
     /// `timeout` | `network` (DNS / connect / TLS / reset / aborted)
     pub kind: String,
@@ -153,6 +166,148 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
 }
 
 // -------------------------------------------------------------------------
+// Outbound URL policy.
+// -------------------------------------------------------------------------
+
+/// How permissive [`execute`] is about where it is allowed to connect.
+///
+/// Two independent knobs, because the right answer differs per shape:
+///
+/// * **Desktop (Tauri)** — the local user *is* the operator. Calling
+///   `http://localhost:3000` is the single most common thing an API client
+///   does, so blocking private ranges by default would break the product.
+///   Only the scheme allowlist applies.
+/// * **Web / Docker** — the server is network-reachable and every caller
+///   shares one static bearer password. Here the server becomes an open
+///   proxy unless private ranges are refused, so operators should set
+///   `SIMPLE_POST_BLOCK_PRIVATE_NET=1`.
+///
+/// `execute` refuses a non-`http(s)` URL under both policies: `file:`,
+/// `gopher:` and friends turn a debug tool into a local file reader, and
+/// no API client has a legitimate use for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutboundPolicy {
+    /// Refuse loopback / private / link-local / unique-local addresses.
+    /// Driven by `SIMPLE_POST_BLOCK_PRIVATE_NET`.
+    pub block_private_net: bool,
+}
+
+impl Default for OutboundPolicy {
+    /// Desktop-friendly default: scheme allowlist only.
+    fn default() -> Self {
+        Self {
+            block_private_net: false,
+        }
+    }
+}
+
+impl OutboundPolicy {
+    /// Read the policy from the environment. Kept here (rather than at
+    /// the call sites) so the desktop and web shapes cannot disagree.
+    pub fn from_env() -> Self {
+        let flag = std::env::var("SIMPLE_POST_BLOCK_PRIVATE_NET")
+            .map(|v| {
+                let v = v.trim().to_ascii_lowercase();
+                v == "1" || v == "true" || v == "yes" || v == "on"
+            })
+            .unwrap_or(false);
+        Self {
+            block_private_net: flag,
+        }
+    }
+}
+
+/// Outcome of checking a target URL against [`OutboundPolicy`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UrlVerdict {
+    Allowed,
+    /// Human-readable reason the request was refused. Rendered into the
+    /// same `HttpResult` envelope as a transport failure, so the UI shows
+    /// it with the normal error banner.
+    Refused(String),
+}
+
+/// True for IPs that must never be reachable through the server-side
+/// proxy: loopback, RFC1918, link-local (incl. cloud metadata at
+/// 169.254.169.254), carrier-grade NAT, and IPv6 unique-local.
+///
+/// Hostnames are not resolved here. Resolving would introduce a DNS
+/// rebinding window between the check and the dial; a caller that needs
+/// name-based policy should be explicit about that tradeoff rather than
+/// have a half-measure applied silently.
+fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                // 100.64.0.0/10 — carrier-grade NAT, common in k8s.
+                || (v4.octets()[0] == 100
+                    && (64..=127).contains(&v4.octets()[1]))
+                // 0.0.0.0/8 — "this network", resolves to localhost.
+                || v4.octets()[0] == 0
+                // 240.0.0.0/4 — reserved, incl. 255.255.255.255.
+                || v4.octets()[0] >= 240
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                // fc00::/7 — unique local.
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // fe80::/10 — link local.
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+                // ::ffff:a.b.c.d — IPv4-mapped; check the embedded v4.
+                || v6
+                    .to_ipv4_mapped()
+                    .map(|v| is_forbidden_ip(std::net::IpAddr::V4(v)))
+                    .unwrap_or(false)
+        }
+    }
+}
+
+/// Apply [`OutboundPolicy`] to a target URL string.
+pub fn check_url(url: &str, policy: OutboundPolicy) -> UrlVerdict {
+    // `reqwest::Url` is a re-export of the `url` crate, so this needs no
+    // extra dependency in the workspace.
+    let parsed = match reqwest::Url::parse(url) {
+        Ok(u) => u,
+        Err(e) => return UrlVerdict::Refused(format!("invalid URL `{url}`: {e}")),
+    };
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => {
+            return UrlVerdict::Refused(format!(
+                "scheme `{other}://` is not allowed — only http and https are"
+            ))
+        }
+    }
+
+    if !policy.block_private_net {
+        return UrlVerdict::Allowed;
+    }
+
+    // `host_str()` keeps IPv6 in `[::1]` form, so strip the brackets
+    // before parsing. A name that is not a literal IP is left alone: a
+    // hostname is deliberately not resolved here, because resolving would
+    // open a DNS-rebinding window between this check and the dial.
+    let host_forbidden = parsed
+        .host_str()
+        .map(|h| h.trim_start_matches('[').trim_end_matches(']'))
+        .and_then(|h| h.parse::<std::net::IpAddr>().ok())
+        .map(is_forbidden_ip)
+        .unwrap_or(false);
+
+    if host_forbidden {
+        UrlVerdict::Refused(format!(
+            "`{url}` resolves to a private, loopback or link-local address, \
+             and SIMPLE_POST_BLOCK_PRIVATE_NET is enabled"
+        ))
+    } else {
+        UrlVerdict::Allowed
+    }
+}
+
+// -------------------------------------------------------------------------
 // Public entry — the actual HTTP call.
 // -------------------------------------------------------------------------
 
@@ -164,7 +319,18 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
 /// requests through its own `execute_http` shim today and will
 /// eventually call this directly when its compat layer is retired.
 pub async fn execute(input: &HttpRequestInput) -> HttpResult {
+    execute_with_policy(input, OutboundPolicy::from_env()).await
+}
+
+/// [`execute`] with an explicit policy. Tests use this directly; the
+/// env-driven [`execute`] is the production entry point.
+pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolicy) -> HttpResult {
     let start = Instant::now();
+
+    // Refuse before building a client or touching the network.
+    if let UrlVerdict::Refused(reason) = check_url(&input.url, policy) {
+        return HttpResult::err("network", reason);
+    }
 
     // Per-call Client to keep the API request-scoped; future slices
     // can hoist this into tauri::State if we want connection pooling
@@ -248,6 +414,197 @@ pub async fn execute(input: &HttpRequestInput) -> HttpResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- wire shape -------------------------------------------------------
+
+    /// `HttpResponse` must serialise in camelCase.
+    ///
+    /// Regression net for a real UI defect: the type had no
+    /// `rename_all`, so serde emitted `duration_ms` / `size_bytes` /
+    /// `content_type` / `status_text` while `src/lib/http.ts` read
+    /// `durationMs` / `sizeBytes` / `contentType` / `statusText`. Every
+    /// field came back `undefined`, so the response bar showed
+    /// `NaN s` and `0 B` for every single request. The mismatch is
+    /// invisible to a status-code assertion and to a live-looking page,
+    /// which is why it survived; only a browser read showed it.
+    #[test]
+    fn http_response_serialises_camel_case() {
+        let r = HttpResponse {
+            status: 200,
+            status_text: "OK".into(),
+            duration_ms: 42,
+            size_bytes: 7,
+            headers: vec![],
+            body: "{}".into(),
+            content_type: "application/json".into(),
+            method: "GET".into(),
+            url: "http://x/y".into(),
+            truncated: false,
+        };
+        let v: serde_json::Value = serde_json::to_value(HttpResult::ok(r)).unwrap();
+        let resp = &v["response"];
+        for key in [
+            "status",
+            "statusText",
+            "durationMs",
+            "sizeBytes",
+            "headers",
+            "body",
+            "contentType",
+            "method",
+            "url",
+            "truncated",
+        ] {
+            assert!(
+                !resp[key].is_null(),
+                "`{key}` is missing — the TS side reads camelCase, not snake_case"
+            );
+        }
+        // And the snake_case spellings must be gone.
+        for key in ["status_text", "duration_ms", "size_bytes", "content_type"] {
+            assert!(
+                resp[key].is_null(),
+                "`{key}` should not be emitted; it is what the TS side never reads"
+            );
+        }
+    }
+
+    // ---- outbound URL policy ----------------------------------------------
+    /// The default policy must not break the most common thing an API
+    /// client does: calling a dev server on loopback.
+    #[test]
+    fn default_policy_allows_loopback_and_private() {
+        for url in [
+            "http://localhost:3000/api",
+            "http://127.0.0.1:8080/healthz",
+            "http://192.168.1.10:9000/orders",
+            "http://10.0.0.5/internal",
+        ] {
+            assert_eq!(
+                check_url(url, OutboundPolicy::default()),
+                UrlVerdict::Allowed,
+                "{url} must be allowed under the desktop default"
+            );
+        }
+    }
+
+    /// Scheme allowlist applies under BOTH policies. `file://` turns a
+    /// debug tool into a local file reader; no API client needs it.
+    #[test]
+    fn non_http_schemes_are_always_refused() {
+        for url in [
+            "file:///C:/Windows/win.ini",
+            "gopher://127.0.0.1:11211/",
+            "ftp://example.com/x",
+            "data:text/plain,hello",
+        ] {
+            assert!(
+                matches!(
+                    check_url(url, OutboundPolicy::default()),
+                    UrlVerdict::Refused(_)
+                ),
+                "{url} must be refused even under the permissive default"
+            );
+            assert!(
+                matches!(
+                    check_url(
+                        url,
+                        OutboundPolicy {
+                            block_private_net: true
+                        }
+                    ),
+                    UrlVerdict::Refused(_)
+                ),
+                "{url} must be refused under the strict policy"
+            );
+        }
+    }
+
+    /// The web-deployment policy refuses exactly the ranges that make the
+    /// server an SSRF pivot. `169.254.169.254` is the cloud metadata
+    /// endpoint and was a live open proxy before this check existed.
+    #[test]
+    fn strict_policy_refuses_metadata_and_private_ranges() {
+        let strict = OutboundPolicy {
+            block_private_net: true,
+        };
+        for url in [
+            "http://169.254.169.254/latest/meta-data/",
+            "http://127.0.0.1:9999/admin",
+            "http://10.0.0.1/",
+            "http://192.168.1.1/",
+            "http://0.0.0.0/",
+            "http://100.64.0.1/",
+            "http://[::1]/",
+            "http://[fd00::1]/",
+            "http://[fe80::1]/",
+        ] {
+            assert!(
+                matches!(check_url(url, strict), UrlVerdict::Refused(_)),
+                "{url} must be refused when private ranges are blocked"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_policy_still_allows_public_addresses() {
+        let strict = OutboundPolicy {
+            block_private_net: true,
+        };
+        for url in [
+            "https://api.github.com/user",
+            "http://93.184.216.34/",
+            "https://8.8.8.8/resolve",
+        ] {
+            assert_eq!(
+                check_url(url, strict),
+                UrlVerdict::Allowed,
+                "{url} is public and must stay reachable"
+            );
+        }
+    }
+
+    /// A hostname is not resolved, so a public-looking name is allowed
+    /// even under the strict policy. Documented limitation, not an
+    /// oversight — see the comment on `check_url`.
+    #[test]
+    fn hostname_is_not_resolved_under_strict_policy() {
+        let strict = OutboundPolicy {
+            block_private_net: true,
+        };
+        assert_eq!(
+            check_url("http://intranet.example.com/api", strict),
+            UrlVerdict::Allowed
+        );
+    }
+
+    #[test]
+    fn malformed_url_is_refused() {
+        assert!(matches!(
+            check_url("not a url", OutboundPolicy::default()),
+            UrlVerdict::Refused(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn execute_refuses_before_dialing() {
+        // Must not attempt the connection: the result is a refusal
+        // envelope, not a timeout.
+        let input = HttpRequestInput {
+            method: "GET".into(),
+            url: "file:///C:/Windows/win.ini".into(),
+            headers: vec![],
+            body: None,
+            timeout_ms: 5_000,
+            follow_redirects: true,
+            max_response_size_kb: 16,
+        };
+        let out = execute_with_policy(&input, OutboundPolicy::default()).await;
+        assert!(!out.ok);
+        let err = out.error.expect("refusal envelope");
+        assert_eq!(err.kind, "network");
+        assert!(err.message.contains("scheme"), "got: {}", err.message);
+    }
 
     // ---- parse_method -----------------------------------------------------
 

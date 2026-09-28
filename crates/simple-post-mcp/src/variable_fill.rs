@@ -50,6 +50,20 @@ pub struct EndpointOverrides {
     pub headers: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub params: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub body: Option<RequestBody>,
+    /// Which base-URL definition to resolve against, instead of the one
+    /// persisted on the endpoint.
+    ///
+    /// The renderer's base-URL picker is ephemeral: a user can switch
+    /// definitions without saving the endpoint, so the stored
+    /// `endpoint.base_url_definition_id` is not authoritative at send
+    /// time. Without this field the browser would have to pre-join the
+    /// base URL and the whole point of moving URL composition server-side
+    /// would be lost.
+    ///
+    /// `None` keeps the endpoint's own value. `Some(id)` overrides it;
+    /// an empty string means "no base URL", which is how the renderer
+    /// represents an endpoint being sent against a bare path.
+    pub base_url_definition_id: Option<String>,
 }
 
 /// What `resolve_endpoint` produces. Already has every `{{var}}`
@@ -230,14 +244,32 @@ pub fn resolve_base_url(
     env: Option<&Environment>,
     project: &Project,
 ) -> (String, BaseUrlSource, Option<String>) {
+    resolve_base_url_with(endpoint, env, project, None)
+}
+
+/// [`resolve_base_url`] with a caller-supplied definition choice.
+///
+/// `forced_def_id` takes precedence over `endpoint.base_url_definition_id`
+/// but still yields to `endpoint.base_url_override`, which is a per-endpoint
+/// hard host and was always the strongest signal. `Some("")` means "no base
+/// URL" — the renderer sends that when the user cleared the picker.
+pub fn resolve_base_url_with(
+    endpoint: &Endpoint,
+    env: Option<&Environment>,
+    project: &Project,
+    forced_def_id: Option<&str>,
+) -> (String, BaseUrlSource, Option<String>) {
     if let Some(ovr) = endpoint.base_url_override.as_deref() {
         if !ovr.is_empty() {
             return (ovr.to_string(), BaseUrlSource::Override, None);
         }
     }
-    let def_id = endpoint
-        .base_url_definition_id
-        .clone()
+    let forced = forced_def_id.map(|s| s.to_string());
+    if matches!(forced.as_deref(), Some("")) {
+        return (String::new(), BaseUrlSource::None, None);
+    }
+    let def_id = forced
+        .or_else(|| endpoint.base_url_definition_id.clone())
         .or_else(|| project.default_base_url_definition_id.clone());
     let def_id = match def_id {
         Some(d) => d,
@@ -247,7 +279,15 @@ pub fn resolve_base_url(
     let url = env.and_then(|e| e.base_urls.get(&def_id));
     if let (Some(_def), Some(u)) = (def, url) {
         if !u.is_empty() {
-            let source = if endpoint.base_url_definition_id.as_deref() == Some(def_id.as_str()) {
+            // A definition was named explicitly — either the caller's
+            // forced choice or the endpoint's own — so report
+            // `Definition`. Only the project default is `Default`.
+            // Classifying off `endpoint.base_url_definition_id` alone
+            // mislabelled a forced choice as `Default`, which
+            // `api_resolve_endpoint` hands straight to an AI client.
+            let explicitly_chosen = forced_def_id.map(|f| !f.is_empty()).unwrap_or(false)
+                || endpoint.base_url_definition_id.is_some();
+            let source = if explicitly_chosen {
                 BaseUrlSource::Definition
             } else {
                 BaseUrlSource::Default
@@ -622,6 +662,9 @@ pub fn resolve_endpoint(
     let mut eff_params = endpoint.params.clone();
     let mut eff_body = endpoint.body.clone();
     let eff_auth = endpoint.auth.clone();
+    // The caller's pick wins over the endpoint's own definition; this is
+    // what lets the renderer's unsaved base-URL selection take effect.
+    let eff_def_id = overrides.and_then(|o| o.base_url_definition_id.clone());
     if let Some(o) = overrides {
         if let Some(u) = o.url.clone() {
             eff_url = u;
@@ -659,7 +702,8 @@ pub fn resolve_endpoint(
     }
 
     // ---- baseUrl resolution + URL substitution ------------------------
-    let (base_url, _src, _def_id) = resolve_base_url(endpoint, env, project);
+    let (base_url, _src, _def_id) =
+        resolve_base_url_with(endpoint, env, project, eff_def_id.as_deref());
     let joined = join_base_url(&base_url, &eff_url);
     let url_r = resolve_template(&joined, &vars);
     for m in url_r.missing {
@@ -891,6 +935,59 @@ mod tests {
     }
 
     // ---- resolve_base_url --------------------------------------------
+
+    /// The renderer's base-URL picker is ephemeral: it commits to the DB
+    /// on change, but `resolve_endpoint` may still be handed a different
+    /// choice (a draft, or a caller that resolved a default itself). The
+    /// override has to win over the stored definition.
+    #[test]
+    fn resolve_base_url_forced_definition_wins() {
+        let mut env = empty_env();
+        env.base_urls
+            .insert("data".into(), "https://data.example.com".into());
+        env.base_urls
+            .insert("auth".into(), "https://auth.example.com".into());
+        let mut ep = minimal_endpoint();
+        ep.base_url_definition_id = Some("data".into());
+        let project = project_with_defs();
+        let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, Some("auth"));
+        assert_eq!(url, "https://auth.example.com");
+        assert_eq!(src, BaseUrlSource::Definition);
+    }
+
+    /// An empty string means "no base URL" — the renderer sends that when
+    /// the user cleared the picker. It must NOT silently fall back to the
+    /// project default, or clearing the picker would do nothing.
+    #[test]
+    fn resolve_base_url_empty_forced_id_means_none() {
+        let mut env = empty_env();
+        env.base_urls
+            .insert("data".into(), "https://data.example.com".into());
+        let project = project_with_defs(); // default = "data"
+        let ep = minimal_endpoint();
+        let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, Some(""));
+        assert_eq!(url, "");
+        assert_eq!(src, BaseUrlSource::None);
+        // Sanity: without the override the default does apply.
+        let (url2, src2, _) = resolve_base_url_with(&ep, Some(&env), &project, None);
+        assert_eq!(url2, "https://data.example.com");
+        assert_eq!(src2, BaseUrlSource::Default);
+    }
+
+    /// A per-endpoint hard host stays the strongest signal even when the
+    /// caller also names a definition.
+    #[test]
+    fn resolve_base_url_endpoint_host_still_wins_over_forced() {
+        let mut env = empty_env();
+        env.base_urls
+            .insert("data".into(), "https://data.example.com".into());
+        let mut ep = minimal_endpoint();
+        ep.base_url_override = Some("https://custom.example.com".into());
+        let project = project_with_defs();
+        let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, Some("data"));
+        assert_eq!(url, "https://custom.example.com");
+        assert_eq!(src, BaseUrlSource::Override);
+    }
 
     #[test]
     fn resolve_base_url_override_wins() {
