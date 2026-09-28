@@ -90,6 +90,46 @@ async function runPhase(label, scratch, tracked, testBody) {
   }
 }
 
+/**
+ * Assert the SPA's own JS/CSS actually load as their real MIME types.
+ *
+ * Regression net for a bug that every status-code assertion missed: the
+ * router mounted `ServeDir` rooted at `dist/assets` while request paths
+ * already carry the `/assets/` prefix, so every asset resolved to
+ * `dist/assets/assets/<file>`, missed, and fell through to the
+ * `index.html` fallback. Each request still returned **200** — with
+ * `text/html` and the 839-byte shell. A browser then refused to execute
+ * it and `#root` stayed empty, so `serve-web` never booted.
+ *
+ * The tell is the content type and the byte count, never the status.
+ */
+async function assertSpaAssetsLoad(label) {
+  const shell = await fetch(`${BASE}/`);
+  const html = await shell.text();
+  const src = html.match(/<script[^>]+src="(\/assets\/[^"]+\.js)"/)?.[1];
+  const href = html.match(/<link[^>]+rel="stylesheet"[^>]+href="(\/assets\/[^"]+\.css)"/)?.[1];
+  if (!src) {
+    assert(false, `${label}: could not find a hashed /assets/*.js in the SPA shell`);
+    return;
+  }
+  for (const [kind, url, expected] of [
+    ['script', src, 'text/javascript'],
+    ['stylesheet', href, 'text/css'],
+  ]) {
+    if (!url) {
+      assert(false, `${label}: could not find an /assets/*.css in the SPA shell`);
+      continue;
+    }
+    const response = await fetch(`${BASE}${url}`);
+    const type = response.headers.get('content-type') ?? '';
+    const bytes = (await response.arrayBuffer()).byteLength;
+    assert(
+      response.status === 200 && type.includes(expected) && bytes > 1024,
+      `${label}: ${kind} ${url} serves ${expected} (got ${response.status} ${type} ${bytes}B)`,
+    );
+  }
+}
+
 // ----- 阶段一：无密码 ---------------------------------------------------
 const scratch1 = mkdtempSync(join(tmpdir(), 'web-auth-open-'));
 console.log(`[test:web-auth] phase 1 scratch = ${scratch1}`);
@@ -119,6 +159,8 @@ await runPhase('phase 1', scratch1, proc1, async () => {
     body?.status === 'ok',
     `phase 1: /api/healthz body.status === "ok" (got ${JSON.stringify(body)})`,
   );
+
+  await assertSpaAssetsLoad('phase 1');
 });
 
 // ----- 阶段二：设置密码 -------------------------------------------------

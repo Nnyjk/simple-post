@@ -1329,11 +1329,19 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // Static SPA. `ServeDir` handles `/assets/*` with proper Range /
     // ETag / Last-Modified headers; its fallback returns `index.html`
     // for client-side routing.
-    let assets_dir = spa_dir.join("assets");
+    //
+    // The root is `spa_dir` itself, NOT `spa_dir/assets`. This is the
+    // whole `dist/` tree, because request paths already carry the
+    // `/assets/` prefix (`<script src="/assets/index-<hash>.js">`).
+    // Rooting at `spa_dir/assets` made ServeDir look for
+    // `dist/assets/assets/index-<hash>.js`, miss, and fall through to the
+    // `index.html` fallback — so every JS/CSS request returned 200 with
+    // `text/html`, the SPA never booted, and the app was blank. Status-code
+    // assertions cannot see this; the body content-type is the tell.
     let spa_clone = spa_dir.clone();
-    let serve_dir = ServeDir::new(assets_dir).fallback(tower_http::services::fs::ServeFile::new(
-        spa_dir.join("index.html"),
-    ));
+    let serve_dir = ServeDir::new(spa_dir.clone()).fallback(
+        tower_http::services::fs::ServeFile::new(spa_dir.join("index.html")),
+    );
 
     // Pull base_path before the auth layer consumes `state` (the layer
     // takes ownership of a clone of `state.password`).
