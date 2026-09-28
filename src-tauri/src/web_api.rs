@@ -1764,8 +1764,10 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         //   GET  /api/mcp/capability/tools   - visible tools under current policy
         //   GET  /api/preferences            - raw preferences dump (UI)
         //   PUT  /api/preferences            - raw preferences patch
-        // /api/base_url_defs* and /api/permissions* and /api/request_settings
-        // are also intentionally deferred — they will be added to
-        // `public_route_specs()` in commit 7 once their wire shapes settle.
+        // /api/base_url_defs*, /api/permissions* and /api/request_settings*
+        // are intentionally absent from the public contract. Note that
+        // `base_url_defs_list` is registered as a Tauri command but has no
+        // `COMMANDS` entry and no REST route, so it is currently
+        // unreachable from both the desktop and web frontends.
     ]
 }

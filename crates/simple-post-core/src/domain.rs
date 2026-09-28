@@ -339,6 +339,16 @@ pub struct ModulePatch {
     pub description: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort_order: Option<i64>,
+    /// Re-parent the module to a different project.
+    ///
+    /// The renderer deliberately never sends this (`updateModule` in
+    /// `crud-slice.ts` is typed `Partial<Omit<Module, 'id' | 'projectId'>>`),
+    /// so the only caller is the MCP `module_move` tool. It exists because
+    /// a cross-project move must be a real `UPDATE`: the previous
+    /// delete-then-create approach destroyed every collection and endpoint
+    /// under the module via `ON DELETE CASCADE`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
 }
 
 // ----- project ------------------------------------------------------------

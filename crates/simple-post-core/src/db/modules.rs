@@ -91,6 +91,13 @@ pub fn update(conn: &mut Connection, id: &str, patch: ModulePatch) -> Result<Mod
         sets.push(format!("sort_order = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Integer(s));
     }
+    if let Some(p) = &patch.project_id {
+        // Cross-project re-parent. This is an UPDATE rather than a
+        // delete/re-create so that `collections` and `endpoints` rows — which
+        // cascade on `modules.id` — survive the move intact.
+        sets.push(format!("project_id = ?{}", binds.len() + 1));
+        binds.push(rusqlite::types::Value::Text(p.clone()));
+    }
 
     if sets.is_empty() {
         // No-op patch: just re-read.

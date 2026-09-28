@@ -159,6 +159,8 @@ pub(super) async fn tool_module_update(
         name: a.name.clone(),
         description: None,
         sort_order: None,
+        // `module_update` never re-parents; that is `module_move`'s job.
+        project_id: None,
     };
     let m = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::modules::update(c, &a.module_id, patch)
@@ -186,29 +188,41 @@ pub(super) async fn tool_module_move(
         .map_err(|e| AppError::Validation(format!("module_move args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.new_project_id, "module_move").await?;
 
-    // `modules::update` doesn't expose a `project_id` field on
-    // ModulePatch — moving a module between projects isn't a first-class
-    // operation. Implement as delete-then-create to keep the FK happy.
+    // A cross-project move is a real `UPDATE` of `modules.project_id`.
+    //
+    // This used to be implemented as delete-then-recreate, which was a data
+    // loss bug: `collections.module_id` and `endpoints.collection_id` are
+    // both `ON DELETE CASCADE`, so deleting the module destroyed every
+    // collection under it and every endpoint under those collections. Only
+    // `name` / `description` / `sort_order` were carried over, and even the
+    // module id changed, breaking every caller holding a reference.
     let module = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::modules::get(c, &a.module_id)
     })?;
-    simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::modules::delete(c, &a.module_id)
+
+    if module.project_id == a.new_project_id && a.new_sort_order.is_none() {
+        return Ok(CallToolResult::json(json!({
+            "module_id": a.module_id,
+            "new_project_id": a.new_project_id,
+            "moved": false,
+        })));
+    }
+
+    let moved = simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::modules::update(
+            c,
+            &a.module_id,
+            ModulePatch {
+                project_id: Some(a.new_project_id.clone()),
+                sort_order: a.new_sort_order,
+                ..Default::default()
+            },
+        )
     })?;
-    let new_id = format!("mod_{}", simple_post_core::domain::now_ms());
-    let new_mod = Module {
-        id: new_id.clone(),
-        project_id: a.new_project_id.clone(),
-        name: module.name,
-        description: module.description,
-        sort_order: a.new_sort_order.unwrap_or(0),
-        expanded: None,
-    };
-    simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::modules::create(c, &new_mod)
-    })?;
+
     Ok(CallToolResult::json(json!({
-        "module_id": new_id,
-        "new_project_id": a.new_project_id,
+        "module_id": moved.id,
+        "new_project_id": moved.project_id,
+        "moved": true,
     })))
 }

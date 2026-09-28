@@ -334,11 +334,17 @@ pub fn registered_tool_names() -> Vec<String> {
 
 /// Map a tool name to the global [`Capability`] class it requires.
 ///
-/// Anything **not** listed defaults to [`Capability::Delete`] (the
-/// strictest tier). Same safe-by-default direction the per-project
-/// [`simple_post_core::permissions::required_permission`] uses — a new mutating
-/// tool added without an entry here will be denied until the user
-/// opts in to `full_access`.
+/// This table is **exhaustive**: every entry in [`tool_table`] must appear
+/// here. Both capability gates fail *closed* on a missing entry, so a tool
+/// added to the registry without a capability row is denied rather than
+/// silently exempted. `every_registered_tool_has_a_capability` is the
+/// regression net that keeps the two sets in sync.
+///
+/// (The per-project [`simple_post_core::permissions::required_permission`]
+/// table is a separate, coarser gate — it defaults unknown tools to
+/// `Permission::Full`. This table is what enforces the user's global
+/// `read_only` / `safe_write` / `full_access` choice, so it cannot afford
+/// a default.)
 pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     // env
     ("env_list", Capability::Read),
@@ -360,11 +366,13 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("module_create", Capability::Create),
     ("module_update", Capability::Update),
     ("module_delete", Capability::Delete),
+    ("module_move", Capability::Update),
     // collection
     ("collection_list", Capability::Read),
     ("collection_create", Capability::Create),
     ("collection_update", Capability::Update),
     ("collection_delete", Capability::Delete),
+    ("collection_move", Capability::Update),
     // endpoint
     ("endpoint_list", Capability::Read),
     ("endpoint_get", Capability::Read),
@@ -395,8 +403,8 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
 /// O(n) lookup over the small `REQUIRED_CAPABILITY` table. Returns
 /// `None` for unrecognised names — callers must handle the conservative
 /// "deny" path themselves. The dispatcher uses this on every
-/// `tools/call`; the table is intentionally linear (44 entries) so a
-/// hash map would be premature optimisation.
+/// `tools/call`; the table is intentionally linear (one row per
+/// registered tool) so a hash map would be premature optimisation.
 pub fn required_capability(name: &str) -> Option<Capability> {
     REQUIRED_CAPABILITY
         .iter()
@@ -419,13 +427,13 @@ pub async fn tool_descriptors(state: &AppState) -> Vec<ToolDescriptor> {
         .unwrap_or(CapabilityPolicy::default());
     tool_table()
         .iter()
-        .filter(|e| match required_capability(e.name) {
-            Some(req) => policy.satisfies(req),
-            // Unknown tool — keep unfiltered so a forward-compat
-            // tool name can still be called; the dispatcher will
-            // apply the second-gate capability check using the
-            // same table.
-            None => true,
+        .filter(|e| {
+            // Fail **closed**: a registered tool with no capability row is a
+            // registry bug, and hiding it is safer than exposing a write
+            // tool to an AI client that the user's policy never approved.
+            required_capability(e.name)
+                .map(|req| policy.satisfies(req))
+                .unwrap_or(false)
         })
         .map(|e| ToolDescriptor {
             name: e.name.to_string(),
@@ -448,28 +456,45 @@ pub async fn dispatch(
     name: &str,
     args: Value,
 ) -> Result<CallToolResult, simple_post_core::error::AppError> {
-    // Capability pre-flight: deny before we look up the handler, so
-    // a misconfigured LLM that calls `tools/call` directly without
-    // re-reading `tools/list` still cannot mutate. Resolves the
-    // effective policy the same way `tool_descriptors` does — global
-    // preference + (no project here) = just the preference.
-    if let Some(req) = required_capability(name) {
-        let policy = resolve_capability(&state.pool, None).await?;
-        if !policy.satisfies(req) {
-            return Err(simple_post_core::error::AppError::PermissionDenied(
-                format!(
-                    "tool '{name}' requires {:?}, current policy is {:?}",
-                    req, policy
-                ),
-            ));
-        }
-    }
+    // Resolve the handler *first* so an unregistered name still returns
+    // `NotFound` rather than being masked by the capability gate.
     let entry = tool_table()
         .iter()
         .find(|e| e.name == name)
         .ok_or_else(|| {
             simple_post_core::error::AppError::NotFound(format!("tool '{name}' not registered"))
         })?;
+
+    // Capability pre-flight: deny before the handler runs, so a
+    // misconfigured LLM that calls `tools/call` directly without
+    // re-reading `tools/list` still cannot mutate. Resolves the
+    // effective policy the same way `tool_descriptors` does — global
+    // preference + (no project here) = just the preference.
+    //
+    // Fails **closed**: a registered tool with no `REQUIRED_CAPABILITY`
+    // row is denied. See that table's docs — the omission is always a
+    // registry bug, never an implicit "allow".
+    match required_capability(name) {
+        Some(req) => {
+            let policy = resolve_capability(&state.pool, None).await?;
+            if !policy.satisfies(req) {
+                return Err(simple_post_core::error::AppError::PermissionDenied(
+                    format!(
+                        "tool '{name}' requires {:?}, current policy is {:?}",
+                        req, policy
+                    ),
+                ));
+            }
+        }
+        None => {
+            return Err(simple_post_core::error::AppError::PermissionDenied(
+                format!(
+                    "tool '{name}' has no capability classification; \
+                     refusing to execute (registry bug — add it to REQUIRED_CAPABILITY)"
+                ),
+            ));
+        }
+    }
     (entry.func)(state, args).await
 }
 
@@ -588,6 +613,45 @@ mod tests {
             names.len() >= 30,
             "tool count too low: {} — did a category get dropped?",
             names.len()
+        );
+    }
+
+    /// `REQUIRED_CAPABILITY` must stay **exhaustive** over the registry.
+    ///
+    /// Regression net for a real defect: `module_move` and
+    /// `collection_move` were registered as tools but had no capability
+    /// row. Both gates treat a missing row as "unclassified" — the
+    /// `tools/list` filter used to keep such tools *visible* and the
+    /// dispatcher used to *skip* its check, so a `read_only` global
+    /// policy never gated them. Both now fail closed; this test is what
+    /// stops the next tool from silently escaping its policy.
+    #[test]
+    fn every_registered_tool_has_a_capability() {
+        let missing: Vec<&str> = tool_table()
+            .iter()
+            .filter(|e| required_capability(e.name).is_none())
+            .map(|e| e.name)
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "tools missing a REQUIRED_CAPABILITY row (they bypass the global \
+             policy gate): {missing:?}"
+        );
+    }
+
+    /// The reverse direction: a capability row for a tool that no longer
+    /// exists is dead configuration that hides a registry rename.
+    #[test]
+    fn every_capability_row_names_a_registered_tool() {
+        let registered = registered_tool_names();
+        let stale: Vec<&str> = REQUIRED_CAPABILITY
+            .iter()
+            .map(|(n, _)| *n)
+            .filter(|n| !registered.iter().any(|r| r == n))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "REQUIRED_CAPABILITY rows with no matching tool: {stale:?}"
         );
     }
 
