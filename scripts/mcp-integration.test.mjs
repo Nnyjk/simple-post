@@ -168,4 +168,16 @@ try {
   }
 }
 
-process.exit(failures === 0 ? 0 : 1);
+// Set the code and let Node exit on its own — do NOT call
+// `process.exit()` here.
+//
+// This test `fetch`es the daemon, so undici holds a keep-alive socket.
+// `process.exit()` tears the loop down while that handle is still
+// registered, and on Windows libuv then aborts with
+//   `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)
+//    (src\win\async.c:76)` — exit code 0xC0000409 — *after* every
+// assertion already printed "all assertions passed". A green run then
+// reports as a crash and CI cannot tell pass from fail. Confirmed by an
+// isolated repro: identical script, only difference is `process.exit()`
+// vs. falling off the end (exit 0 both times, the former aborts).
+process.exitCode = failures === 0 ? 0 : 1;

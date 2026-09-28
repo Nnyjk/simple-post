@@ -108,6 +108,34 @@ export function trackChild(child, { label = 'child', onStdout, onStderr } = {}) 
   tracked.waitForClose = (timeoutMs = 1_000) =>
     waitFor(tracked.closeWaiters, () => hasClosed(tracked), timeoutMs);
 
+  /**
+   * Release the pipes and the process handle once the child is done.
+   *
+   * Without this, Node's Windows teardown aborts with
+   *   `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)
+   *    (src\win\async.c:76)` — exit code 0xC0000409 — *after* every
+   * assertion has already printed "all assertions passed". The child
+   * process objects stay reachable through the stream handles, so libuv
+   * tries to close a handle it already closed on the way out. `process.exit`
+   * does not avoid it.
+   */
+  const releaseHandles = () => {
+    for (const stream of [child.stdin, child.stdout, child.stderr]) {
+      if (!stream || stream.destroyed) continue;
+      try {
+        stream.destroy();
+      } catch {
+        // 管道可能已被 Node 关闭，忽略。
+      }
+    }
+    try {
+      child.removeAllListeners();
+      child.unref();
+    } catch {
+      // 子进程已完全回收，忽略。
+    }
+  };
+
   tracked.terminate = async ({ gracefulMs = 1_500, forceMs = 2_000, closeMs = 2_000 } = {}) => {
     if (!hasExited(tracked)) {
       try {
@@ -127,6 +155,7 @@ export function trackChild(child, { label = 'child', onStdout, onStderr } = {}) 
     }
 
     const close = await tracked.waitForClose(closeMs);
+    releaseHandles();
     return snapshot(close.timedOut);
   };
 
