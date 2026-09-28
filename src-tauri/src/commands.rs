@@ -903,3 +903,291 @@ pub async fn mcp_capability_list_tools(
         .map(|t| t.name)
         .collect())
 }
+
+// ===========================================================================
+// Endpoint-scoped send — the one place a configured endpoint becomes an
+// outbound HTTP request.
+// ===========================================================================
+
+/// Per-call overrides the renderer may have on screen but not yet saved.
+///
+/// Mirrors `simple_post_mcp::variable_fill::EndpointOverrides`; the UI's
+/// base-URL picker is ephemeral, so the selection has to travel with the
+/// request rather than being read back off the stored endpoint.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointSendOverrides {
+    pub url: Option<String>,
+    pub method: Option<HttpMethod>,
+    pub headers: Option<Vec<KeyValue>>,
+    pub params: Option<Vec<KeyValue>>,
+    pub body: Option<RequestBody>,
+    pub base_url_definition_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointSendSettings {
+    pub timeout_ms: Option<u64>,
+    pub follow_redirects: Option<bool>,
+    pub max_response_size_kb: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointSendArgs {
+    pub endpoint_id: String,
+    #[serde(default)]
+    pub overrides: Option<EndpointSendOverrides>,
+    #[serde(default)]
+    pub settings: Option<EndpointSendSettings>,
+}
+
+impl From<EndpointSendOverrides> for simple_post_mcp::variable_fill::EndpointOverrides {
+    fn from(o: EndpointSendOverrides) -> Self {
+        Self {
+            url: o.url,
+            method: o.method,
+            headers: o.headers,
+            params: o.params,
+            body: o.body,
+            base_url_definition_id: o.base_url_definition_id,
+        }
+    }
+}
+
+/// Resolve a stored endpoint and execute it, without the caller ever
+/// naming a URL.
+///
+/// This is the counterpart of the old `/api/http/send` shape, where the
+/// browser posted a finished URL. There, any authenticated caller could
+/// name any target, which made the `serve-web` / Docker deployment an
+/// open proxy (cloud metadata at 169.254.169.254 included). Here the URL
+/// is derived from rows the user themselves configured, so the request
+/// surface collapses to "send endpoint X".
+///
+/// Both distribution shapes call this, so URL composition lives in Rust
+/// exactly once: the TS `buildFetchInit` path is now only used for the
+/// cURL preview and the on-screen resolved URL.
+pub async fn send_endpoint_by_id(
+    pool: &DbPool,
+    args: &EndpointSendArgs,
+) -> Result<crate::http_executor::HttpResult, AppError> {
+    let input = resolve_send_input(pool, args)?;
+    Ok(crate::http_executor::execute(&input).await)
+}
+
+/// The non-I/O half of [`send_endpoint_by_id`]: turn stored rows plus the
+/// caller's unsaved draft into a concrete request.
+///
+/// Split out so the URL composition can be asserted without dialling
+/// anything, mirroring the "http_executor is pure I/O" split the rest of
+/// the crate uses. Returns the request the backend will actually issue.
+pub fn resolve_send_input(
+    pool: &DbPool,
+    args: &EndpointSendArgs,
+) -> Result<crate::http_executor::HttpRequestInput, AppError> {
+    let endpoint: Endpoint =
+        crate::db::with_conn(pool, |c| crate::db::endpoints::get(c, &args.endpoint_id))?;
+    let project_id = crate::db::endpoints::project_id_of(pool, &endpoint.collection_id)?;
+
+    // Env selection must mirror the renderer's rule exactly, or Send
+    // silently produces a base-less URL.
+    //
+    //   `HttpTester.endpointEnv`: the endpoint's own `environment_id` if
+    //   set, otherwise the project's active env (the "ENV dev" pill).
+    //
+    // Reading only `endpoint.environment_id` broke every endpoint with no
+    // explicit env — which is all of the seeded fixtures — and produced
+    // `invalid URL '/users/{{userId}}': relative URL without a base`.
+    // A dangling env id (deleted while the tab was open) is still
+    // tolerated: the request just runs without variable substitution.
+    let env: Option<Environment> = match endpoint.environment_id.as_deref() {
+        Some(env_id) => {
+            crate::db::with_conn(pool, |c| crate::db::environments::get(c, env_id)).ok()
+        }
+        None => {
+            // Active env of the project, else its first env — the same
+            // fallback `bootstrap-slice` uses to seed `activeEnvironmentId`.
+            let candidates = crate::db::with_conn(pool, |c| {
+                crate::db::environments::list_by_project(c, &project_id)
+            })
+            .unwrap_or_default();
+            candidates
+                .iter()
+                .find(|e| e.is_active)
+                .or_else(|| candidates.first())
+                .cloned()
+        }
+    };
+    let project: Option<Project> = if project_id.is_empty() {
+        None
+    } else {
+        crate::db::with_conn(pool, |c| crate::db::projects::get(c, &project_id)).ok()
+    };
+
+    // A missing project means the endpoint has no definition list and no
+    // default, which is exactly what an empty `Project` encodes. Built as
+    // a local rather than a `const` so the borrow outlives this call.
+    let empty_project = Project {
+        id: String::new(),
+        name: String::new(),
+        description: None,
+        base_url: None,
+        base_url_definitions: Vec::new(),
+        default_base_url_definition_id: None,
+        color: String::new(),
+        created_at: 0,
+        updated_at: 0,
+    };
+    let project_ref: &Project = project.as_ref().unwrap_or(&empty_project);
+
+    let overrides = args.overrides.clone().map(Into::into);
+    let resolved = simple_post_mcp::variable_fill::resolve_endpoint(
+        &endpoint,
+        env.as_ref(),
+        project_ref,
+        overrides.as_ref(),
+    )?;
+
+    let s = args.settings.clone().unwrap_or_default();
+    Ok(crate::http_executor::HttpRequestInput {
+        method: resolved.method.clone(),
+        url: resolved.url.clone(),
+        headers: resolved.headers.clone(),
+        body: resolved.body.clone(),
+        timeout_ms: s.timeout_ms.unwrap_or(30_000),
+        follow_redirects: s.follow_redirects.unwrap_or(true),
+        max_response_size_kb: s.max_response_size_kb.unwrap_or(10_240),
+    })
+}
+
+#[cfg(test)]
+mod endpoint_send_tests {
+    use super::*;
+
+    /// Seeded DB in a temp dir, isolated per test. The atomic counter
+    /// disambiguates when several tests construct their pool inside the
+    /// same millisecond (cargo runs tests in parallel).
+    fn seeded_pool(tag: &str) -> (DbPool, std::path::PathBuf) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "simple-post-endpoint-send-{}-{}-{}",
+            std::process::id(),
+            tag,
+            id
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        (crate::db::init(&dir).unwrap(), dir)
+    }
+
+    /// Regression net for a real bug: `resolve_send_input` read only
+    /// `endpoint.environment_id`, so every seeded endpoint — all of which
+    /// have none — resolved to a base-less path and Send failed with
+    /// `invalid URL '/users/{{userId}}': relative URL without a base`.
+    /// The renderer's rule is "endpoint's env, else the project's active
+    /// env"; this pins the second half of that rule.
+    ///
+    /// `e_user_get` carries an enabled `include` param, which
+    /// `resolve_endpoint` appends — so the expected URL is base + path +
+    /// query.
+    #[test]
+    fn resolves_base_url_from_the_projects_active_env() {
+        let (pool, _dir) = seeded_pool("active-env");
+
+        let args = EndpointSendArgs {
+            endpoint_id: "e_user_get".into(),
+            overrides: None,
+            settings: None,
+        };
+        let input = resolve_send_input(&pool, &args).expect("must resolve");
+
+        // env_dev is the active env and its baseUrls["def_default"] is
+        // http://localhost:4000/demo in the fixture.
+        assert_eq!(
+            input.url, "http://localhost:4000/demo/users/{{userId}}?include=profile%2Cpermissions",
+            "base URL + path + params must be composed server-side"
+        );
+        assert_eq!(input.method, "GET");
+    }
+
+    /// The draft path from the URL input travels as `overrides.url` and
+    /// replaces the stored path, while the base URL and params still come
+    /// from the database.
+    #[test]
+    fn draft_path_override_keeps_the_stored_base_url() {
+        let (pool, _dir) = seeded_pool("draft");
+        let args = EndpointSendArgs {
+            endpoint_id: "e_user_get".into(),
+            overrides: Some(EndpointSendOverrides {
+                url: Some("/users/42".into()),
+                ..Default::default()
+            }),
+            settings: Some(EndpointSendSettings {
+                timeout_ms: Some(1234),
+                follow_redirects: Some(false),
+                max_response_size_kb: Some(7),
+            }),
+        };
+        let input = resolve_send_input(&pool, &args).expect("must resolve");
+        assert_eq!(
+            input.url,
+            "http://localhost:4000/demo/users/42?include=profile%2Cpermissions"
+        );
+        assert_eq!(input.timeout_ms, 1234);
+        assert!(!input.follow_redirects);
+        assert_eq!(input.max_response_size_kb, 7);
+    }
+
+    /// A draft that already carries a scheme wins outright — the join
+    /// helper treats an absolute path as self-contained.
+    #[test]
+    fn absolute_draft_url_wins_over_the_base_url() {
+        let (pool, _dir) = seeded_pool("absolute");
+        let args = EndpointSendArgs {
+            endpoint_id: "e_user_get".into(),
+            overrides: Some(EndpointSendOverrides {
+                url: Some("https://other.example.com/x".into()),
+                ..Default::default()
+            }),
+            settings: None,
+        };
+        let input = resolve_send_input(&pool, &args).expect("must resolve");
+        assert_eq!(
+            input.url,
+            "https://other.example.com/x?include=profile%2Cpermissions"
+        );
+    }
+
+    /// Settings default sanely when the renderer omits them.
+    #[test]
+    fn settings_have_documented_defaults() {
+        let (pool, _dir) = seeded_pool("defaults");
+        let args = EndpointSendArgs {
+            endpoint_id: "e_user_get".into(),
+            overrides: None,
+            settings: None,
+        };
+        let input = resolve_send_input(&pool, &args).expect("must resolve");
+        assert_eq!(input.timeout_ms, 30_000);
+        assert!(input.follow_redirects);
+        assert_eq!(input.max_response_size_kb, 10_240);
+    }
+
+    /// An unknown endpoint fails before any network I/O.
+    #[test]
+    fn unknown_endpoint_is_not_found() {
+        let (pool, _dir) = seeded_pool("missing");
+        let args = EndpointSendArgs {
+            endpoint_id: "e_nope".into(),
+            overrides: None,
+            settings: None,
+        };
+        assert!(matches!(
+            resolve_send_input(&pool, &args),
+            Err(AppError::NotFound(_))
+        ));
+    }
+}

@@ -12,7 +12,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { type HttpMethod, type Endpoint } from '@/types/domain';
 import { methodColorVar, cn } from '@/lib/utils';
 import { joinBaseUrl, resolveEndpointBaseUrl, resolveVars } from '@/lib/url';
-import { sendRequest } from '@/lib/http';
+import { sendEndpoint } from '@/lib/http';
 import { KeyValueEditor } from './KeyValueEditor';
 import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { BodyEditor } from './BodyEditor';
@@ -355,14 +355,12 @@ export function HttpTester() {
     inFlightRef.current = ctrl;
     setRequestPending(true);
     try {
-      const resp = await sendRequest({
+      const resp = await sendEndpoint({
+        endpointId: endpoint.id,
+        // The input holds only the path; the backend joins the base URL,
+        // substitutes `{{var}}` and reduces auth from the stored rows.
+        urlOverride: liveUrl,
         method,
-        url: resolvedUrl,
-        params: endpoint.params,
-        headers: endpoint.headers,
-        body: endpoint.body,
-        auth: endpoint.auth,
-        env: endpointEnv ?? undefined,
         settings: requestSettings,
         signal: ctrl.signal,
       });
@@ -392,8 +390,15 @@ export function HttpTester() {
   const handleCopyCurl = async () => {
     // Synthesize a "current" endpoint by overlaying any unsaved draft on top
     // of the stored one — this matches what Send would actually transmit.
+    //
+    // The URL override is `resolvedUrl` (base URL + path + `{{var}}`), not
+    // the raw path. `buildCurlCommand` only runs `resolveTemplate` over
+    // whatever it is given; it does not join a base URL, so passing
+    // `draft.url` produced `curl -X POST '/cashier'` — not runnable. Send
+    // no longer composes the URL on this side at all, so `resolvedUrl` is
+    // now the only place the joined form is still needed, for the preview.
     const overrides: { url?: string; method?: HttpMethod } = {};
-    if (draft?.url !== undefined) overrides.url = draft.url;
+    overrides.url = resolvedUrl;
     if (draft?.method !== undefined) overrides.method = draft.method;
     const curl = endpointToCurl(endpoint, endpointEnv, overrides);
     try {

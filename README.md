@@ -203,7 +203,11 @@ docker compose ps                       # STATUS=healthy
 安全提示：
 
 - `SIMPLE_POST_WEB_PASSWORD` **必须**设，否则 `/api/*` 和 `/mcp` 全开放（`auth_middleware` 在 password 为空时是 no-op）。
-- 健康检查路径 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便容器探针。
+- 健康检查路径 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便容器探针。静态资源 `/assets/*` 与 SPA 外壳同样免认证——浏览器无法给 `<script type="module">` 挂 `Authorization` 头，若对它们鉴权，带密码的部署会直接白屏。
+- **出站 URL 策略**：`serve-web` 会代替浏览器发请求，所以有两条出口，权限不同。
+  - `POST /api/endpoints/:id/send`（**UI 的 Send 按钮走这条**）：只接受 endpoint id + 相对路径，base URL、路径、`{{var}}`、鉴权全部由服务端按数据库里的配置拼装。**浏览器无法指定目标地址**，因此这条路由没有 SSRF 面；传入绝对 URL 会被 400 拒绝。
+  - `POST /api/http/send`：**原始 URL 逃生舱**，调用方可以指定任意地址。仅 `http` / `https` 允许（`file:` / `gopher:` 等一律拒绝）。默认**不**拦截私网地址——桌面端用户常常就是要打 `localhost:3000`，默认拦会直接砸掉产品的主要用途。
+  - 公网 / 共享部署请设 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段。
 - 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，`build_router` 会把整个 router nest 在 `/sp` 下；nginx 侧记得把 `/sp/assets/*` 转到 `/assets/*`（SPA shell 的 `<base href>` 仍是 `/`，**不**重写）。
 - 数据持久化：把 `/data` 挂到 named volume。SQLite 在 WAL 模式下也能安全落盘，但 `docker stop` 走 `tini` 转发 SIGTERM 才会触发优雅 checkpoint。
 

@@ -94,12 +94,20 @@ impl IntoResponse for HttpErrorResponse {
 fn map_app_error(e: AppError) -> HttpErrorResponse {
     // Use the existing `code()` / `Display` so we don't duplicate the
     // string-table here.
+    //
+    // These keys must match `AppError::code()` in
+    // `simple-post-core::error`. It previously matched `"invalid_input"`,
+    // which no variant ever returns — so every validation error and every
+    // permission denial fell through to 500 instead of 400 / 403, and
+    // clients could not tell "you sent something wrong" from "the server
+    // broke".
     HttpErrorResponse::new(
         match e.code() {
             "not_found" => StatusCode::NOT_FOUND,
             "conflict" => StatusCode::CONFLICT,
-            "invalid_input" => StatusCode::BAD_REQUEST,
+            "validation" => StatusCode::BAD_REQUEST,
             "unauthorized" => StatusCode::UNAUTHORIZED,
+            "permission_denied" => StatusCode::FORBIDDEN,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         },
         e.code(),
@@ -398,6 +406,50 @@ async fn projects_delete(
 ) -> Result<StatusCode, HttpErrorResponse> {
     db::with_tx(&s.pool, |c| db::projects::delete(c, &id)).map_err(map_app_error)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Send a stored endpoint by id.
+///
+/// The browser names the endpoint, not a URL. This is the fix for the
+/// previous `POST /api/http/send` shape, where any authenticated caller
+/// could hand the server an arbitrary target — the cloud metadata address
+/// `169.254.169.254` included, which made every `serve-web` / Docker
+/// deployment an open proxy. `/api/http/send` still exists for ad-hoc
+/// raw-URL pokes, but it is no longer what the UI uses.
+async fn endpoint_send(
+    State(s): State<Arc<WebState>>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<HttpResult>, HttpErrorResponse> {
+    // The renderer's URL input only ever holds a path; the base URL is
+    // composed from the endpoint + environment rows. An absolute URL in
+    // the draft is therefore either a client bug or someone aiming the
+    // server at a host of their choosing — which is precisely the SSRF
+    // this route exists to remove. `join_base_url` would happily accept
+    // it (a path carrying a scheme wins), so it is refused here, at the
+    // shape boundary where the caller is an untrusted remote client.
+    //
+    // The Tauri command allows it: there the local user is the operator
+    // and the absolute form is a legitimate thing to type. A caller who
+    // genuinely wants an arbitrary target on this deployment can still
+    // use `POST /api/http/send`, which is gated by the outbound policy.
+    if let Some(u) = body.pointer("/overrides/url").and_then(|v| v.as_str()) {
+        if reqwest::Url::parse(u).is_ok() {
+            return Err(map_app_error(AppError::Validation(format!(
+                "overrides.url must be a path relative to the endpoint's base URL, \
+                 got an absolute URL `{u}`. Use POST /api/http/send for ad-hoc targets."
+            ))));
+        }
+    }
+
+    let mut body = body;
+    body["endpointId"] = Value::String(id);
+    let args: crate::commands::EndpointSendArgs = serde_json::from_value(body)
+        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    let result = crate::commands::send_endpoint_by_id(&s.pool, &args)
+        .await
+        .map_err(map_app_error)?;
+    Ok(Json(result))
 }
 
 async fn http_send(
@@ -1213,6 +1265,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
                 .delete(projects_delete),
         )
         .route("/api/http/send", post(http_send))
+        // Endpoint-scoped send. The client names an endpoint, never a URL, so
+        // this route has no SSRF surface; the raw `/api/http/send` above is the
+        // deliberate escape hatch and is governed by the outbound URL policy.
+        .route("/api/endpoints/:id/send", post(endpoint_send))
         // ---- modules ----
         .route("/api/modules", get(modules_list).post(modules_create))
         // `/move` is registered before `/:id` so the literal path
@@ -1858,9 +1914,19 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/http/send",
-            summary: "Execute an HTTP request (bypasses webview CORS)",
+            summary: "Execute an arbitrary HTTP request (raw-URL escape hatch; \
+                      honours the outbound URL policy)",
             stability: "public",
             request: Some("HttpRequestInput"),
+            response: Some("HttpResult"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/endpoints/:id/send",
+            summary: "Send a stored endpoint by id; the server resolves the \
+                      base URL, path, variables and auth",
+            stability: "public",
+            request: Some("EndpointSendArgs"),
             response: Some("HttpResult"),
         },
         // ---- internal (not in OpenAPI v1) -------------------------------

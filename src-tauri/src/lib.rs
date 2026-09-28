@@ -200,6 +200,24 @@ async fn http_request(
     crate::http_executor::execute(&input).await
 }
 
+/// Send a stored endpoint by id. The renderer names the endpoint, never a
+/// URL — the base URL, path, `{{var}}` substitution and auth are all
+/// resolved server-side by `commands::send_endpoint_by_id`, which is the
+/// same function `serve-web`'s `POST /api/endpoints/:id/send` calls.
+///
+/// See that function for why the browser is not allowed to supply a URL.
+///
+/// NOTE: like `http_request`, this must stay non-`pub` — Tauri's command
+/// and `generate_handler!` macros both emit a `__cmd__<name>` macro and
+/// `pub` collides on the macro namespace (E0255).
+#[tauri::command]
+async fn endpoint_send(
+    state: tauri::State<'_, crate::db::DbPool>,
+    args: crate::commands::EndpointSendArgs,
+) -> Result<crate::http_executor::HttpResult, crate::error::AppError> {
+    crate::commands::send_endpoint_by_id(state.inner(), &args).await
+}
+
 // ----- Tauri entry point ----------------------------------------------------
 
 /// Tauri GUI entry. Wires:
@@ -245,6 +263,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Local HTTP request command (kept here from pre-MCP days).
             http_request,
+            // Endpoint-scoped send: the renderer names an endpoint, the
+            // backend owns URL composition.
+            endpoint_send,
             crate::commands::projects_list,
             crate::commands::projects_get,
             crate::commands::projects_create,

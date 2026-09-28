@@ -100,6 +100,13 @@ export const COMMANDS = {
 
   // ----- low-level HTTP executor (Tauri side) -----
   httpRequest: 'http_request',
+
+  // ----- endpoint-scoped send -----
+  // The renderer names an endpoint, never a URL. The server resolves the
+  // base URL + path + `{{var}}` substitution + auth, so the browser
+  // cannot point the server at an arbitrary target. `httpRequest` above
+  // stays as the explicit raw-URL escape hatch.
+  endpointSend: 'endpoint_send',
 } as const;
 
 export type TauriCommand = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -508,6 +515,14 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // struct deserialises directly from `args` so no translation is
   // needed here.
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
+
+  // Endpoint-scoped send. `endpointId` is the path segment; the Rust
+  // handler folds the body back onto it before deserialising
+  // `EndpointSendArgs`, so the two shapes take the same argument object.
+  [COMMANDS.endpointSend]: {
+    method: 'POST',
+    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.endpointId))}/send`,
+  },
 
   // ----- MCP daemon -----
   [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },

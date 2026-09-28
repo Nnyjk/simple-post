@@ -518,6 +518,22 @@ describe('http-build: cURL parity with fetch', () => {
     assert.ok(curl.includes("'http://api.example.com/x?page=1&k=v'"));
   });
 
+  it('emits the caller-joined URL when the input is a path', () => {
+    // Regression net. `buildCurlCommand` only runs `resolveTemplate` over
+    // the url it is given — it does NOT join a base URL. Every other test
+    // in this file passes a full URL, so the path-only shape the renderer
+    // actually produces (the URL input holds just the path) was never
+    // covered, and "Copy as cURL" emitted `curl -X POST '/cashier'`,
+    // which cannot run. HttpTester now hands the joined URL in; this test
+    // pins the contract that whatever URL arrives is what gets emitted.
+    const i = input({ method: 'POST', url: 'https://api.example.com/cashier' });
+    const curl = buildCurlCommand(i);
+    assert.ok(
+      curl.startsWith("curl -X POST 'https://api.example.com/cashier'"),
+      `expected a runnable absolute URL, got: ${curl}`,
+    );
+  });
+
   it('includes Content-Type, Accept, and Authorization headers', () => {
     const i = input({
       method: 'POST',

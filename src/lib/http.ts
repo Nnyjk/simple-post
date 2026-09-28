@@ -165,81 +165,6 @@ interface RustHttpResult {
   error?: RustHttpErr;
 }
 
-// ---------------------------------------------------------------------------
-// Single transport — both shapes share this body. `invokeCmd` does the
-// runtime dispatch: Tauri shell → Tauri IPC; web → `POST /api/http/send`.
-// ---------------------------------------------------------------------------
-
-async function sendViaBackend(input: SendInput): Promise<ApiResponse> {
-  const built = buildFetchInit(input);
-  // `buildFetchInit` returns a `RequestInit` with `Headers | [][]
-  // | Record`. Normalise to a tuple list — Rust deserialises
-  // `Vec<(String, String)>` and the web bridge JSON-encodes a tuple
-  // list verbatim, so this is the only shape that works on both sides.
-  const headers = initHeadersToTuples(built.init.headers ?? {});
-  const body =
-    typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
-
-  const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
-
-  try {
-    const r = await invokeCmd<RustHttpResult>(
-      COMMANDS.httpRequest,
-      {
-        method: input.method,
-        url: built.url,
-        headers,
-        body,
-        timeoutMs: input.settings.timeoutMs,
-        followRedirects: input.settings.followRedirects,
-        maxResponseSizeKb: input.settings.maxResponseSizeKb,
-      },
-      options,
-    );
-
-    if (!r.ok || !r.response) {
-      // Round-trip succeeded; the server-side request itself failed.
-      const kind = r.error?.kind ?? 'network';
-      const msg = r.error?.message ?? 'unknown';
-      if (kind === 'timeout') {
-        return timeoutResponse(input, built.url, 0);
-      }
-      return networkErrorResponse(input, built.url, 0, msg);
-    }
-
-    const resp = r.response;
-    return {
-      status: resp.status,
-      statusText: resp.statusText || (resp.status >= 200 && resp.status < 300 ? 'OK' : 'Error'),
-      durationMs: resp.durationMs,
-      sizeBytes: resp.sizeBytes,
-      headers: tuplesToRecord(resp.headers),
-      body: resp.body,
-      bodyJson: tryParseJson(resp.body),
-      contentType: resp.contentType,
-      method: input.method,
-      url: built.url,
-    };
-  } catch (err) {
-    // `invokeCmd` rejects on:
-    //   - Tauri IPC failure (e.g. devtools not wired)
-    //   - serve-web HTTP non-2xx / network unreachable
-    //   - WEB_ROUTES missing the command (would only happen if
-    //     someone added a COMMANDS entry without a matching route)
-    //   - the caller's AbortSignal aborting (Tauri shape rejects,
-    //     web shape throws DOMException)
-    // We surface abort distinctly; everything else falls back to
-    // the generic Network Error banner so the UI stays informative.
-    const name = (err as { name?: string })?.name;
-    const msg = (err as Error)?.message ?? String(err);
-    if (name === 'AbortError' || /abort/i.test(msg)) {
-      return abortedResponse(input, built.url, 0);
-    }
-    console.error('[http.ts] backend invoke failed:', err);
-    return networkErrorResponse(input, built.url, 0, msg);
-  }
-}
-
 /** Convert any `HeadersInit` shape into a list of `[name, value]`
  *  tuples. Mirrors the helper the old `sendViaTauri` carried. */
 function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
@@ -258,6 +183,68 @@ function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Convert the backend `HttpResult` envelope into the renderer's
+ * `ApiResponse`. Shared by the raw-URL path and the endpoint-scoped path
+ * so both surfaces produce byte-identical UI state.
+ */
+function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string): ApiResponse {
+  if (!r.ok || !r.response) {
+    // Round-trip succeeded; the server-side request itself failed.
+    const kind = r.error?.kind ?? 'network';
+    const msg = r.error?.message ?? 'unknown';
+    if (kind === 'timeout') {
+      return timeoutResponse(input, url, 0);
+    }
+    return networkErrorResponse(input, url, 0, msg);
+  }
+
+  const resp = r.response;
+  return {
+    status: resp.status,
+    statusText: resp.statusText || (resp.status >= 200 && resp.status < 300 ? 'OK' : 'Error'),
+    durationMs: resp.durationMs,
+    sizeBytes: resp.sizeBytes,
+    headers: tuplesToRecord(resp.headers),
+    body: resp.body,
+    bodyJson: tryParseJson(resp.body),
+    contentType: resp.contentType,
+    method: input.method,
+    url,
+  };
+}
+
+/** Dispatch an `invokeCmd` call and fold the result into an
+ *  `ApiResponse`, never throwing. */
+async function invokeAndMap(
+  args: Record<string, unknown>,
+  input: SendInput,
+  url: string,
+  options: CallApiOptions,
+): Promise<ApiResponse> {
+  try {
+    const r = await invokeCmd<RustHttpResult>(COMMANDS.httpRequest, args, options);
+    return envelopeToApiResponse(r, input, url);
+  } catch (err) {
+    // `invokeCmd` rejects on:
+    //   - Tauri IPC failure (e.g. devtools not wired)
+    //   - serve-web HTTP non-2xx / network unreachable
+    //   - WEB_ROUTES missing the command (would only happen if
+    //     someone added a COMMANDS entry without a matching route)
+    //   - the caller's AbortSignal aborting (Tauri shape rejects,
+    //     web shape throws DOMException)
+    // We surface abort distinctly; everything else falls back to
+    // the generic Network Error banner so the UI stays informative.
+    const name = (err as { name?: string })?.name;
+    const msg = (err as Error)?.message ?? String(err);
+    if (name === 'AbortError' || /abort/i.test(msg)) {
+      return abortedResponse(input, url, 0);
+    }
+    console.error('[http.ts] backend invoke failed:', err);
+    return networkErrorResponse(input, url, 0, msg);
+  }
+}
+
+/**
  * Send the request described by `input` via the backend transport
  * (`invokeCmd(COMMANDS.httpRequest, …)`). See module header.
  *
@@ -270,11 +257,108 @@ function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
  * all happen server-side and the result crosses the boundary as a
  * JSON envelope.
  *
+ * ⚠️ This path lets the caller name an arbitrary URL, so the server
+ * becomes a proxy. It stays for the explicit "raw URL" case; the UI's
+ * Send button uses [`sendEndpoint`] instead, which cannot.
+ *
  * Note: there is no "raw browser fetch" fallback. In every supported
  * distribution shape there's a real backend in front of `reqwest`,
  * so a direct browser fetch would only ever be relevant for a
  * hypothetical Vite-only / no-server mode that we don't ship.
  */
 export async function sendRequest(input: SendInput): Promise<ApiResponse> {
-  return sendViaBackend(input);
+  const built = buildFetchInit(input);
+  // `buildFetchInit` returns a `RequestInit` with `Headers | [][]
+  // | Record`. Normalise to a tuple list — Rust deserialises
+  // `Vec<(String, String)>` and the web bridge JSON-encodes a tuple
+  // list verbatim, so this is the only shape that works on both sides.
+  const headers = initHeadersToTuples(built.init.headers ?? {});
+  const body =
+    typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
+  const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
+
+  return invokeAndMap(
+    {
+      method: input.method,
+      url: built.url,
+      headers,
+      body,
+      timeoutMs: input.settings.timeoutMs,
+      followRedirects: input.settings.followRedirects,
+      maxResponseSizeKb: input.settings.maxResponseSizeKb,
+    },
+    input,
+    built.url,
+    options,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint-scoped send — what the UI's Send button uses.
+// ---------------------------------------------------------------------------
+
+export interface SendEndpointInput {
+  /** Stored endpoint to send. The backend reads method, params,
+   *  headers, body, auth and the base-URL definition from the database. */
+  endpointId: string;
+  /** Draft URL **path** (no base URL) from the URL input, or omitted to
+   *  use the stored one. The input box only ever holds the path, so this
+   *  is what the user sees; the backend joins it onto the base URL. */
+  urlOverride?: string;
+  method: HttpMethod;
+  settings: RequestSettings;
+  signal?: AbortSignal;
+}
+
+/**
+ * Send a stored endpoint by id.
+ *
+ * The renderer never supplies a finished URL, so this route has no SSRF
+ * surface: the target is derived from rows the user configured. URL
+ * composition — base URL precedence, `{{var}}` substitution, auth
+ * reduction — happens once, in Rust, by
+ * `simple_post_mcp::variable_fill::resolve_endpoint`.
+ *
+ * `url` in the returned `ApiResponse` is filled from the response
+ * envelope, which carries the URL the backend actually dialled.
+ */
+export async function sendEndpoint(input: SendEndpointInput): Promise<ApiResponse> {
+  // The envelope mapper wants a `SendInput` only for the method and the
+  // synthetic URL shown on a failure; the real URL arrives in the result.
+  const shape: SendInput = {
+    method: input.method,
+    url: '',
+    params: [],
+    headers: [],
+    body: { mode: 'none', content: '' },
+    auth: { type: 'none' },
+    settings: input.settings,
+  };
+  const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
+
+  try {
+    const r = await invokeCmd<RustHttpResult>(
+      COMMANDS.endpointSend,
+      {
+        endpointId: input.endpointId,
+        ...(input.urlOverride !== undefined ? { overrides: { url: input.urlOverride } } : {}),
+        settings: {
+          timeoutMs: input.settings.timeoutMs,
+          followRedirects: input.settings.followRedirects,
+          maxResponseSizeKb: input.settings.maxResponseSizeKb,
+        },
+      },
+      options,
+    );
+    const mapped = envelopeToApiResponse(r, shape, r.response?.url ?? '');
+    return mapped;
+  } catch (err) {
+    const name = (err as { name?: string })?.name;
+    const msg = (err as Error)?.message ?? String(err);
+    if (name === 'AbortError' || /abort/i.test(msg)) {
+      return abortedResponse(shape, '', 0);
+    }
+    console.error('[http.ts] endpoint_send failed:', err);
+    return networkErrorResponse(shape, '', 0, msg);
+  }
 }
