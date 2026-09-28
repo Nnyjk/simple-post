@@ -2,7 +2,8 @@
 // scripts/dump-openapi.mjs
 //
 // Generate `docs/openapi.yaml` (OpenAPI 3.1) from the canonical
-// `public_route_specs()` table in `src-tauri/src/web_api.rs`.
+// `public_route_specs()` table in `src-tauri/src/web_api/` (the
+// `web_api.rs` flat file is still accepted as a fallback).
 //
 // Why parse Rust source instead of calling the binary?
 //   - The OpenAPI doc should stay valid even when the Rust crate fails
@@ -11,8 +12,9 @@
 //   - It keeps the dumper free of any Rust toolchain dependency.
 //
 // The dumper:
-//   1. Greps `web_api.rs` for the `RouteSpec { ... }` literal rows in
-//      `public_route_specs()`.
+//   1. Locates the `public_route_specs()` table anywhere under
+//      `src-tauri/src/web_api{,/**.rs}` and greps the `RouteSpec { ... }`
+//      literal rows in it.
 //   2. Groups rows by path (one path may have multiple methods).
 //   3. Emits an OpenAPI 3.1 yaml document with `paths` keyed by path.
 //   4. Tags internal / omitted routes via a top-level note.
@@ -29,23 +31,60 @@
 //     schema synthesis. See `docs/http-api-reference.md` for request /
 //     response examples.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
-const WEB_API = join(ROOT, 'src-tauri', 'src', 'web_api.rs');
+const SRC_DIR = join(ROOT, 'src-tauri', 'src');
+const WEB_API_FILE = join(SRC_DIR, 'web_api.rs');
+const WEB_API_DIR = join(SRC_DIR, 'web_api');
+
+const SPEC_FN = 'pub fn public_route_specs() -> Vec<RouteSpec>';
+
+/**
+ * Resolve the Rust source that owns `public_route_specs()`.
+ *
+ * The spec table has lived in two layouts: the single-file
+ * `web_api.rs` and the split `web_api/` module directory. Search the
+ * module tree first, fall back to the flat file, so the dumper keeps
+ * working across the refactor either way.
+ */
+function findSpecSource() {
+  const candidates = [];
+  if (existsSync(WEB_API_DIR)) {
+    const walk = (dir) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, entry.name);
+        if (entry.isDirectory()) walk(p);
+        else if (entry.name.endsWith('.rs')) candidates.push(p);
+      }
+    };
+    walk(WEB_API_DIR);
+  }
+  if (existsSync(WEB_API_FILE)) candidates.push(WEB_API_FILE);
+
+  for (const path of candidates) {
+    const text = readFileSync(path, 'utf8');
+    if (text.includes(SPEC_FN)) return text;
+  }
+  throw new Error(
+    'public_route_specs() not found in src-tauri/src/web_api{.rs,/} — has the function been renamed?',
+  );
+}
 
 // ---------------------------------------------------------------------------
-// 1. Parse `public_route_specs()` from web_api.rs.
+// 1. Parse `public_route_specs()` from the web_api module.
 // ---------------------------------------------------------------------------
-const src = readFileSync(WEB_API, 'utf8');
+const src = findSpecSource();
 
 // Find the start of `pub fn public_route_specs() -> Vec<RouteSpec> {`
-const fnStart = src.indexOf('pub fn public_route_specs() -> Vec<RouteSpec>');
+const fnStart = src.indexOf(SPEC_FN);
 if (fnStart === -1) {
-  throw new Error('public_route_specs() not found in web_api.rs — has the function been renamed?');
+  throw new Error(
+    'public_route_specs() not found in the web_api source — has the function been renamed?',
+  );
 }
 
 // Match balanced `{ ... }` from the function start.
