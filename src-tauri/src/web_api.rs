@@ -1346,15 +1346,32 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // Pull base_path before the auth layer consumes `state` (the layer
     // takes ownership of a clone of `state.password`).
     let auth_state = crate::auth::AuthState::new(password.as_deref());
-    let inner = Router::new()
+
+    // The API + MCP surface, behind the bearer middleware.
+    //
+    // Only this router is layered. The SPA shell and the static tree are
+    // mounted *outside* it, because a browser cannot attach an
+    // `Authorization: Bearer` header to a `<script type="module">` or a
+    // stylesheet request. Gating `/assets/*` behind auth meant a
+    // password-protected `serve-web` — which the README calls mandatory —
+    // returned the shell at `/` but 401 for every JS/CSS file, so the app
+    // rendered blank in the exact deployment the docs push.
+    let guarded = Router::new()
         .merge(api)
         .merge(mcp_routes)
-        .fallback_service(serve_dir)
         .route("/", get(move || spa_index(spa_clone)))
         .layer(axum::middleware::from_fn_with_state(
             auth_state,
             crate::auth::auth_middleware,
         ));
+
+    // Everything not matched above is static: `/assets/*` (hashed JS/CSS),
+    // `/favicon.svg`, and any client-side route, which falls back to the
+    // shell. Public by construction, same as the shell at `/`.
+    //
+    // The fallback lives on the outer router because only one router in a
+    // merge chain may own a fallback.
+    let inner = Router::new().merge(guarded).fallback_service(serve_dir);
 
     // Optionally nest under `base_path` so a reverse proxy (nginx,
     // Caddy, Cloudflare) can host Simple Post at e.g.
@@ -1379,6 +1396,19 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             let spa_shell = spa_dir.clone();
             Router::new()
                 .nest(prefix, inner)
+                // The SPA shell references its bundle with **absolute**
+                // URLs (`<script src="/assets/index-<hash>.js">`), so
+                // nesting the router under `/sp` alone is not enough: the
+                // browser would ask for `/assets/...`, which the nested
+                // router never sees. Re-publish the static tree at the bare
+                // `/assets` prefix so the documented deployment works
+                // without requiring a hand-written rewrite in nginx.
+                //
+                // `nest_service` strips `/assets` before handing the
+                // request to ServeDir, so it resolves
+                // `dist/assets/<file>` — the same files `/sp/assets/*`
+                // serves through the nested fallback.
+                .nest_service("/assets", ServeDir::new(spa_dir.join("assets")))
                 .route(&format!("{prefix}/"), get(move || spa_index(spa_shell)))
         }
         _ => inner,
