@@ -65,9 +65,8 @@ export function ConnectionSection() {
 
   // MCP auto-start preference — drives the "启动配置" Switch below.
   // The slice hydrates this on the first read; the panel renders an
-  // indeterminate state until then. See
-  // `docs/distribution-modes-2026-09-18.md` §5 for the default
-  // (`false` at first launch).
+  // indeterminate state until then. Default is `false` at first
+  // launch: an MCP server running is explicit user intent.
   const mcpAutoStart = useAppStore((s) => s.mcpAutoStart);
   const setMcpAutoStart = useAppStore((s) => s.setMcpAutoStart);
   const refreshMcpAutoStart = useAppStore((s) => s.refreshMcpAutoStart);
@@ -76,11 +75,11 @@ export function ConnectionSection() {
     void refreshMcpAutoStart();
   }, [refreshMcpAutoStart]);
 
-  // ----- MCP capability policy (commit 1) -------------------------
+  // ----- MCP capability policy -------------------------------
   // Three-tier global capability that filters `tools/list` for AI
-  // clients. Default `read_only` — see
-  // `docs/mcp-permission-policy.md`. Stored in sqlite
-  // `preferences.mcp.policy`; UI hydrates on mount, persists on change.
+  // clients. Stored in sqlite `preferences.mcp.policy`; UI hydrates
+  // on mount, persists on change. An absent key resolves to
+  // `read_only`, so a fresh install cannot be written to.
   type CapabilityPolicy = 'read_only' | 'safe_write' | 'full_access';
   const [capability, setCapability] = useState<CapabilityPolicy | null>(null);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
@@ -265,11 +264,11 @@ export function ConnectionSection() {
         </div>
       </SettingsCategory>
 
-      {/* ----- MCP capability policy (commit 1) ------------------- */}
+      {/* ----- MCP capability policy --------------------------- */}
       {/* Three-tier global capability that filters `tools/list` for AI
-          clients. Default `read_only` — see
-          `docs/mcp-permission-policy.md`. Persisted to
-          `preferences.mcp.policy`. */}
+          clients. Persisted to `preferences.mcp.policy`; it is the
+          global lever, while the per-project `permissions` table
+          still gates individual mutations. */}
       <SettingsCategory
         title="AI 写入权限"
         description="控制 AI 客户端可见的工具集。切换后立刻生效，无需重启 daemon。"
@@ -302,8 +301,8 @@ export function ConnectionSection() {
       </SettingsCategory>
 
       {/* ----- MCP auto-start (前/后台分布 -- 默认 off) ----------- */}
-      {/* §6 docs/distribution-modes-2026-09-18.md：新增一项渲染面板，
-           默认目标为 false。Tauri 形态 + serve-web 形态都尊重这个键。 */}
+      {/* 渲染面板，默认目标为 false。Tauri 形态 + serve-web 形态都尊重这个键，
+          所以一处开关覆盖两种形态。 */}
       <SettingsCategory
         title="启动配置"
         description="决定 simple-post 启动时是否自动拉起 MCP 子进程；关闭后由用户手动开启"

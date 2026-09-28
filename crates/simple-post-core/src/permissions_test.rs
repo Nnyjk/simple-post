@@ -110,7 +110,8 @@ fn ranks_form_total_order() {
 
 #[test]
 fn capability_policy_default_is_read_only() {
-    // Safe-by-default. See docs/mcp-permission-policy.md.
+    // Safe-by-default: an unclassified or unknown tool must never be
+    // treated as permitted.
     assert_eq!(CapabilityPolicy::default(), CapabilityPolicy::ReadOnly);
 }
 

@@ -42,7 +42,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-import { COMMANDS, IS_TAURI_SHELL, TauriCommand, invokeCmd } from './tauri-commands';
+import { COMMANDS, IS_TAURI_SHELL, TauriCommand, invokeCmd } from '../tauri-commands';
 
 // ---------------------------------------------------------------------------
 // Fetch mock plumbing.
@@ -113,7 +113,8 @@ function readIsTauriShellInChild(windowShim?: Record<string, unknown>): {
   // bare absolute path gets parsed as a URL and rejected.
   // `new URL(rel, import.meta.url).href` returns the file URL as a
   // string, which is the shape dynamic `import()` requires.
-  const moduleUrl = new URL('./tauri-commands.ts', import.meta.url).href;
+  // Relative to *this* file, so it needs the `../` hop out of `__tests__`.
+  const moduleUrl = new URL('../tauri-commands.ts', import.meta.url).href;
   const code = [
     setup,
     `import('${moduleUrl}')`,

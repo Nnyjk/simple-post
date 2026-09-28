@@ -25,9 +25,9 @@ import assert from 'node:assert/strict';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { sendRequest, type SendInput } from './http';
-import type { RequestSettings } from '../stores/app-store';
-import type { AuthConfig, Environment, HttpMethod } from '../types/domain';
+import { sendRequest, type SendInput } from '../http';
+import type { RequestSettings } from '../../stores/app-store';
+import type { AuthConfig, Environment, HttpMethod } from '../../types/domain';
 
 // ---------- server scaffolding ----------
 

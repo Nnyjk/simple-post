@@ -137,7 +137,7 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 
 ### MCP 工具清单（stdio + HTTP 模式，给外部 AI 客户端）
 
-> App 启动时同时拉起一个 **stdio MCP Server** 子进程（Claude Desktop / Cursor / Cline 通过 stdio 通信），并通过 `serve-web` 子命令的 `/mcp` 端点暴露 HTTP MCP（外部 AI 客户端、远程调试器）。Server 默认不暴露网络，鉴权可选；详见 [`docs/mcp-permission-policy.md`](docs/mcp-permission-policy.md)。
+> App 启动时同时拉起一个 **stdio MCP Server** 子进程（Claude Desktop / Cursor / Cline 通过 stdio 通信），并通过 `serve-web` 子命令的 `/mcp` 端点暴露 HTTP MCP（外部 AI 客户端、远程调试器）。Server 默认不暴露网络，鉴权可选。**AI 写入默认关闭**：能力策略 `read_only` 是默认值，需要在「AI 写入权限」面板调档才能写入；`Capability` 为全序 `Read < Create < Update < Delete < Send`，`Send`（出站 HTTP）只有 `full_access` 覆盖。项目级 `permissions` 表是第二道闸，两者取严。完整机制见 [`AGENTS.md`](AGENTS.md) 的 *MCP permissions — two gates* 一节。
 
 实际注册 **44 个** MCP 工具（精确值由 `every_registered_tool_has_a_capability` 测试守护）。每个工具在 `REQUIRED_CAPABILITY`（`crates/simple-post-mcp/src/mcp/mod.rs`）中声明一个 `Capability`，总序为 `Read < Create < Update < Delete < Send`；用户的全局策略 `CapabilityPolicy` 决定可见集：
 
@@ -155,7 +155,7 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 
 > 全局策略之外还有一道**按项目**的权限闸（`simple_post_core::permissions`，`Read < ReadCall < Full`，数据库未显式设置时默认 `ReadCall`，未知工具按 `Full`）。两道闸是「与」关系，取更严格者。
 
-完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口见 [`docs/http-api-reference.md`](docs/http-api-reference.md)（`scripts/dump-openapi.mjs` 重新生成 `docs/openapi.yaml`）。
+完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口见 [`docs/openapi.yaml`](docs/openapi.yaml)（由 `scripts/dump-openapi.mjs` 从 `public_route_specs()` 生成）；[`docs/http-api-reference.md`](docs/http-api-reference.md) 只记录 yaml 表达不了的坑，不重复端点清单。
 
 Resources（AI 侧"读取"通道，HTTP MCP 模式下暴露）：
 
@@ -225,4 +225,4 @@ docker compose ps                       # STATUS=healthy
 - **MCP 模式**：stdio 子进程桥（本地 AI 客户端）+ HTTP `POST /mcp`（`serve-web` 子命令，支持远程 / Bearer 鉴权 / 反代 base path）
 - **UI 风格**：暗色为主，shadcn 变量层，可切亮色
 - **第一阶段**：UI 先行 ✓（已完成 2026-09-11）
-- **当前阶段**：v0.1 MVP 已交付，分发形态决策见 `docs/distribution-modes-2026-09-18.md`
+- **当前阶段**：v0.1 MVP 已交付。四种分发形态（Tauri 桌面 / `serve-web` 无头 Web / Docker web 镜像 / 独立 MCP 二进制）共用一套 Rust 核心，`SIMPLE_POST_DATA_DIR`（或 `%APPDATA%/simple-post`）是唯一数据位置。

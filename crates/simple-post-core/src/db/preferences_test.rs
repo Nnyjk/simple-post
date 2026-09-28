@@ -113,7 +113,7 @@ fn get_with_wrong_type_errors() {
 fn mcp_auto_start_defaults_to_false_when_missing() {
     let pool = fresh_pool();
     let v = db::with_conn(&pool, mcp_auto_start).unwrap();
-    assert!(!v, "default must be false — see docs/distribution-modes §5");
+    assert!(!v, "default must be false — the daemon must not auto-start");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn mcp_policy_defaults_to_read_only_when_missing() {
     assert_eq!(
         p,
         crate::permissions::CapabilityPolicy::ReadOnly,
-        "missing row must yield ReadOnly — see docs/mcp-permission-policy.md"
+        "missing row must yield ReadOnly — an absent key is not consent"
     );
 }
 

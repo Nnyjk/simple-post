@@ -70,8 +70,10 @@ instance, not just `localhost`. Point `--url` at a remote host:
 }
 ```
 
-This is the dbx-style "MCP on A, web backend on B" deployment. See
-[`docs/distribution-modes-2026-09-18.md`] for the architecture overview.
+This is the dbx-style "MCP on A, web backend on B" deployment. The desktop app
+serves the REST API (`simple-post serve-web`) while this package exposes the MCP
+daemon to the AI client; both read the same `SIMPLE_POST_DATA_DIR`. See the
+root `README.md` for the four distribution shapes.
 
 | Flag          | Default                  | Notes |
 | ------------- | ----------------------- | ----- |

@@ -14,8 +14,9 @@
 //! The standalone CLI binary in `main.rs` (entry point of this crate)
 //! uses the same `mcp` module over HTTP: it doesn't speak JSON-RPC
 //! itself, it proxies stdin/stdout frames to a running `serve-web`
-//! instance. See `docs/mcp-permission-policy.md` for the three-tier
-//! capability policy applied by both sides.
+//! instance. The same capability policy applies on both sides: the
+//! global tier is persisted in `preferences.mcp.policy` and the
+//! per-project `permissions` table gates individual mutations.
 //!
 //! Commit 4: real CLI replaces the placeholder stub that commit 3
 //! shipped. See `crates/simple-post-mcp/README.md` for the migration

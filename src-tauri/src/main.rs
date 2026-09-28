@@ -51,7 +51,8 @@ enum Cmd {
 
     /// Run the browser-facing web server (REST + SPA). The browser
     /// never spawns an MCP daemon in this shape — all tool calls are
-    /// delegated to this host. See `docs/distribution-modes-2026-09-18.md`.
+    /// delegated to this host, which serves the same SQLite file and
+    /// the same preferences as the desktop app.
     #[command(name = "serve-web")]
     ServeWeb {
         /// Bind address. `127.0.0.1` keeps the server local-only;

@@ -86,20 +86,24 @@ pub mod keys {
     /// `"ui.theme"` → string. Allowed: "light" | "dark" | "system".
     pub const THEME: &str = "ui.theme";
 
-    /// `"mcp.auto_start"` → bool. **Default: `false`.** When `false`
-    /// the Tauri / Web shapes both leave the MCP daemon stopped at
-    /// launch; the user opts in from the settings panel or via the
-    /// `--mcp-auto-start` CLI flag. See
-    /// `docs/distribution-modes-2026-09-18.md` §5 for the rationale
-    /// and the three-shape matrix.
+    /// `"mcp.auto_start"` → bool. **Default: `false`.**
+    ///
+    /// Why `false`: the daemon is a long-lived background process, and
+    /// the desktop app's Tauri `.setup()` would otherwise spawn one on
+    /// every launch with no user intent behind it. Defaulting to stopped
+    /// keeps "an MCP server is running" an explicit opt-in — the settings
+    /// toggle or `--mcp-auto-start` both flip it, and the key is shared
+    /// by the desktop and `serve-web` shapes so one switch covers both.
+    /// When `false` both shapes report `stopped` until something starts it.
     pub const MCP_AUTO_START: &str = "mcp.auto_start";
 
     /// `"mcp.policy"` → string. **Default: `read_only`.** The global
     /// MCP capability tier (`"read_only"` / `"safe_write"` /
     /// `"full_access"`) the user has selected from the settings panel.
     /// Read by `permissions::resolve_capability` and the Tauri command
-    /// `mcp_capability_get`; written by `mcp_capability_set`. See
-    /// `docs/mcp-permission-policy.md`.
+    /// `mcp_capability_get`; written by `mcp_capability_set`. A missing
+    /// row resolves to `read_only`, so an AI client can list and get but
+    /// cannot change anything until the user raises the tier.
     pub const MCP_POLICY: &str = "mcp.policy";
 }
 

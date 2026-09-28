@@ -5,7 +5,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { clearIpcMock, installBrowserShim, installIpcMock } from '@/stores/__tests__/_browser-shim';
-import { COMMANDS, invokeCmd, type TauriCommand } from './tauri-commands';
+import { COMMANDS, invokeCmd, type TauriCommand } from '../tauri-commands';
 
 interface CapturedCall {
   cmd: string;

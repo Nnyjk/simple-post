@@ -103,13 +103,13 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **MCP stdout discipline.** In `simple-post-mcp`, stdout carries *only* JSON-RPC frames; all logging, panics, and `__mcp_metrics__{…}` telemetry go to **stderr**. Non-JSON on stdout crashes AI clients.
 
-**MCP permissions.** Default policy is `read_only` — mutating tools (`env_create`, `endpoint_update`, …) return `is_error: true` until the user raises the tier. Consult `docs/mcp-permission-policy.md` before touching dispatch/permissions.
+**MCP permissions — two gates, both fail-closed.** Default policy is `read_only`; mutating tools (`env_create`, `endpoint_update`, …) return `is_error: true` until the user raises the tier. **Gate A (global):** `mcp::tool_descriptors` filters `tools/list` by `REQUIRED_CAPABILITY` under the policy the user picked in Settings, and `mcp::dispatch` re-checks before the handler — so an AI client cannot bypass it by calling `tools/call` directly, it just gets `AppError::PermissionDenied`. A tool with **no** capability row is treated as unclassified and denied, not allowed. `Capability` is a total order `Read < Create < Update < Delete < Send`; `Send` means outbound HTTP and is `full_access`-only — that is the deliberate "safe write ≠ free outbound" boundary. **Gate B (per-project):** `required_permission()` over the `permissions` table (`Read < ReadCall < Full`, default `ReadCall`); an unknown tool name is treated as `Full`. Handlers must resolve the real owning project with `db::environments::lookup_project_id` / equivalent and pass it to `check_permission` — passing the literal string `"global"` makes every write silently fail the `ReadCall < Full` check, which is how five `env_*` tools shipped broken once. The policy itself persists in `preferences` under key `mcp.policy`.
 
 **Adding an MCP tool requires TWO registry edits, not one.** A tool added to `tool_table()` without a matching `REQUIRED_CAPABILITY` row **escapes the global capability gate entirely** — both the `tools/list` filter and the `dispatch` pre-flight treat a missing row as unclassified and now fail *closed* (deny), but the tool becomes invisible/unusable rather than policy-compliant. This actually shipped once: `module_move` and `collection_move` were registered without rows and bypassed the user's `read_only` choice. `every_registered_tool_has_a_capability` (and its inverse `every_capability_row_names_a_registered_tool`) in `crates/simple-post-mcp/src/mcp/mod.rs` is the regression net — if you add a tool and those tests fail, add the row with the correct `Capability` (`Read < Create < Update < Delete < Send`; `Send` means outbound HTTP and is `full_access`-only).
 
 **IME guard.** Global shortcuts in `src/App.tsx` must check `e.isComposing`, else CJK IME Enter fires requests.
 
-**OpenAPI.** `public_route_specs()` in `src-tauri/src/web_api.rs` is the single source of truth; internal routes (`/api/mcp/*`, `/api/preferences`) are intentionally undocumented.
+**OpenAPI.** `public_route_specs()` in `src-tauri/src/web_api.rs` is the single source of truth; internal routes (`/api/mcp/*`, `/api/preferences`) are intentionally undocumented. Regenerate with `node scripts/dump-openapi.mjs > docs/openapi.yaml` after any route change. `docs/http-api-reference.md` deliberately does **not** restate the endpoint list — it holds only the traps the yaml cannot express (axum 0.7 wants `:id` not `{id}`, and copying `{id}` out of the OpenAPI spec silently routes into the SPA fallback; the stable error envelope; the auth matrix; the openapi-diff regression guard for splitting `web_api.rs`).
 
 ## Important Files
 
@@ -149,8 +149,8 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 | Layer | Command | Location |
 |---|---|---|
-| Frontend unit/slice | `npm test` / `npm run test:watch` | `src/lib/*.test.ts`, `src/stores/__tests__/*.test.ts` |
-| Rust | `cargo test --workspace` / `-p <crate>` | inline `#[cfg(test)]` modules |
+| Frontend unit/slice | `npm test` / `npm run test:watch` | `src/*/__tests__/*.test.ts` |
+| Rust | `cargo test --workspace` / `-p <crate>` | sibling `#[path]` test modules — see below |
 | MCP end-to-end | `npm run test:mcp` | `scripts/mcp-integration.test.mjs` (needs compiled `simple-post` binary) |
 | Web auth integration | `npm run test:web:auth` | `scripts/test-web-auth.mjs` (needs compiled binary; spawns two phases — open + locked) |
 | Web base-path integration | `npm run test:web:basepath` | `scripts/test-web-basepath.mjs` (needs compiled binary; `--public-base-path /sp`) |
@@ -160,11 +160,20 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 Key facts:
 
+- **Test file placement — frontend.** Every test lives in a `__tests__/` directory beside the code it covers: `src/lib/__tests__/*.test.ts` and `src/stores/__tests__/*.test.ts`. The file is still named after the module (`http.test.ts` for `http.ts`), not after the folder. `__tests__` is a recognised convention (Create React App / Angular lineage) rather than *the* standard — co-location is the more common modern React default — but it is a legitimate one, and consistency inside this repo is what matters. The double underscore marks the directory as non-shippable without relying on a bundler honouring any name.
+- **Test file placement — Rust.** There is no `__tests__` equivalent and no way to add one: Rust's module system resolves a file's location from the module path, so a test-only directory is not discoverable. The two options are the inline `#[cfg(test)] mod tests { … }` and a sibling file reached through `#[path]`. This repo uses the sibling form for all 22 of them:
+  ```rust
+  #[cfg(test)]
+  #[path = "projects_test.rs"]
+  mod tests;
+  ```
+  `super` resolves identically from a `#[path]` module, so the extracted body keeps its `use super::*;` unchanged and `cargo fmt --all` re-indents it. `#[path]` rather than the Rust 2018 `projects/tests.rs` submodule directory, so the pairing stays visible in directories that are otherwise flat `*.rs` files. When splitting one, **match the braces — do not assume the block's closing brace is the last line**: `db/mod.rs` has `pub mod test_counter` *after* its `mod tests`, and swallowing that tail would compile a `#[cfg(test)]` test helper into the library.
 - **`npm test` auto-discovers `src/**/*.test.ts`** through `scripts/run-tests.mjs` — no hardcoded list, new test files are picked up automatically. In `--watch` mode the list is captured at spawn time: restart `npm run test:watch` after adding/renaming a test file. Single file: `npx tsx --test path/to/foo.test.ts`.
+- **A test that resolves the module under test at runtime survives neither a move nor a rename.** `tauri-commands.test.ts` probes `IS_TAURI_SHELL` in a `spawnSync` child because that flag is frozen at module-eval time, and resolves the module with `new URL('./tauri-commands.ts', import.meta.url).href`. That URL is relative to the *test file*, so moving the test into `__tests__/` silently broke it until the path gained its `../`. Typecheck and lint both passed on the broken version — only the child process failed. Grep for `import.meta.url` and `__dirname` whenever a test file changes directory.
 - ESLint scoping decisions (in `eslint.config.js`): `no-explicit-any` off under `**/*.test.ts` and `**/__tests__/` (deliberately loose mocks); `no-require-imports` off for `.mjs`/`.cjs` tooling; names starting with `_` are sanctioned unused placeholders; `react-hooks/rules-of-hooks` is **error** — `HttpTester`'s hooks were hoisted above its `if (!endpoint)` early return to satisfy it (never put hooks after an early return).
 - Headless store tests need `src/stores/__tests__/_browser-shim.ts`: installs Map-backed `localStorage` (Node 22 ships a methodless native `localStorage` that crashes otherwise), `document.visibilityState` emitter, timers, and `mockIPC`, and sets `window.__TAURI_INTERNALS__ = {}` *before* module eval so `IS_TAURI_SHELL === true`.
 - Fixture: `crates/simple-post-core/src/db/fixtures.json` — the SQLite seed (also used at DB init). There is **no** TS mock-data module; store tests build their own fixtures inline.
-- Rust DB tests isolate via `fresh_pool()` → temp-dir SQLite keyed by atomic counter + PID (`crates/simple-post-core/src/db/mod.rs`).
+- Rust DB tests isolate via `fresh_pool()` → temp-dir SQLite keyed by atomic counter + PID (`crates/simple-post-core/src/db/mod_test.rs`, the `#[path]` module of `db/mod.rs`).
 - Store custom hooks (`useActiveProject`, …) throw outside a React render; in Node, read state with `useAppStore.getState()`.
 - No React component/DOM tests; no coverage tooling configured (c8/nyc/tarpaulin absent).
 - Integration tests need a built binary — `npm run test:mcp` exits code 2 without it; use `npm run build:tests` (same preflight, exits 2 as well) when a gated variant is wanted.

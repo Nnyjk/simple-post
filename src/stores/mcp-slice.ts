@@ -142,7 +142,7 @@ export interface McpSliceActions {
   /**
    * Read the persisted `mcp.auto_start` preference. `null` until the
    * first read lands; the panel renders a disabled switch in that
-   * window. See `docs/distribution-modes-2026-09-18.md` §5.
+   * window, so the user never sees "off" for a value we have not read.
    */
   mcpAutoStart: boolean | null;
   /**

@@ -103,5 +103,5 @@ Or, for one-shot installs with no native binary on disk:
 - `crates/simple-post-core/README.md` — the shared layer this crate
   builds on.
 - `packages/simple-post-mcp/README.md` — the npm wrapper.
-- `docs/mcp-permission-policy.md` — the three-tier capability policy
+- `AGENTS.md` — the two-gate permission model (global capability policy + per-project permission)
   applied by `mcp::dispatch` / `mcp::tool_descriptors`.

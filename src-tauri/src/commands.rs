@@ -815,13 +815,12 @@ pub async fn mcp_daemon_restart(
 }
 
 // ===========================================================================
-// region: mcp_auto_start (preference flag, see distribution-modes §5)
+// region: mcp_auto_start (preference flag)
 // ===========================================================================
 
 /// Read the persisted `mcp.auto_start` preference. The value defaults
-/// to `false` (MCP daemon does NOT auto-start at launch) — see
-/// `db::preferences::keys::MCP_AUTO_START` and
-/// `docs/distribution-modes-2026-09-18.md` §5 for the rationale.
+/// to `false` (MCP daemon does NOT auto-start at launch) — the
+/// rationale lives on `db::preferences::keys::MCP_AUTO_START`.
 ///
 /// Read directly from the DB rather than via the in-memory store, so
 /// the value is always the persisted truth even if the user toggled it
@@ -876,8 +875,8 @@ pub async fn mcp_auto_start_set(
 // Three Tauri commands + matching REST endpoints (see `web_api.rs`).
 // The capability policy is the **global** lever that filters `tools/list`
 // for the AI; per-project permissions in the `permissions` table still
-// gate individual mutations. The two layers compose — see
-// `docs/mcp-permission-policy.md`.
+// gate individual mutations. Both layers fail closed, and an unregistered
+// tool is treated as unclassified rather than permitted.
 
 /// 返回当前全局能力策略，形状与 Web REST 完全一致。
 #[tauri::command]

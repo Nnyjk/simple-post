@@ -19,8 +19,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildFetchInit, buildCurlCommand, type BuildInput } from './http-build';
-import type { AuthConfig, Environment, HttpMethod, KeyValue, RequestBody } from '../types/domain';
+import { buildFetchInit, buildCurlCommand, type BuildInput } from '../http-build';
+import type {
+  AuthConfig,
+  Environment,
+  HttpMethod,
+  KeyValue,
+  RequestBody,
+} from '../../types/domain';
 
 // ---------- shared fixtures ----------
 

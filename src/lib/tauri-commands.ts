@@ -94,7 +94,8 @@ export const COMMANDS = {
 
   // ----- MCP capability policy (commit 1) -----
   // Three-tier global capability that filters `tools/list` for AI
-  // clients. Default `read_only` — see `docs/mcp-permission-policy.md`.
+  // clients. Default `read_only` — the key is absent until the user picks a
+  // tier in Settings, and an absent key resolves to the read-only tier.
   mcpCapabilityGet: 'mcp_capability_get',
   mcpCapabilitySet: 'mcp_capability_set',
   mcpCapabilityListTools: 'mcp_capability_list_tools',
