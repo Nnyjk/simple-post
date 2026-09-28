@@ -124,6 +124,37 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Move a module to a different project, optionally pinning its `sort_order`.
+///
+/// MUST be called inside `db::with_tx`: the move and the re-read that produces
+/// the return value have to see one consistent snapshot.
+///
+/// This is deliberately a single `UPDATE` of `modules.project_id`, never a
+/// delete-then-re-create. `collections.module_id` and `endpoints.collection_id`
+/// both `ON DELETE CASCADE`, so re-creating would silently destroy every
+/// collection under the module and every endpoint under those collections — and
+/// would change the module id, breaking every caller holding a reference.
+/// `update` carries the same guarantee, so this delegates to it.
+///
+/// `new_sort_order` of `None` leaves the existing `sort_order` untouched.
+/// Returns the re-read module, or `NotFound` if `module_id` doesn't exist.
+pub fn reparent(
+    conn: &mut Connection,
+    module_id: &str,
+    new_project_id: &str,
+    new_sort_order: Option<i64>,
+) -> Result<Module, AppError> {
+    update(
+        conn,
+        module_id,
+        ModulePatch {
+            project_id: Some(new_project_id.to_string()),
+            sort_order: new_sort_order,
+            ..Default::default()
+        },
+    )
+}
+
 /// Reorder a module within its project. `target_index` is the
 /// zero-based position in the post-move list.
 ///
@@ -216,82 +247,5 @@ fn row_to_module(row: &Row<'_>) -> Result<Module, rusqlite::Error> {
 // -------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db;
-
-    fn fresh_pool() -> db::DbPool {
-        let dir = std::env::temp_dir().join(format!(
-            "simple-post-modules-test-{}-{}",
-            std::process::id(),
-            crate::db::test_counter::next()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        db::init(&dir).expect("init")
-    }
-
-    fn sample_module(id: &str, project_id: &str, name: &str) -> Module {
-        Module {
-            id: id.into(),
-            project_id: project_id.into(),
-            name: name.into(),
-            description: None,
-            sort_order: 0,
-            expanded: None,
-        }
-    }
-
-    #[test]
-    fn create_and_list() {
-        let pool = fresh_pool();
-        db::with_tx(&pool, |c| {
-            create(c, &sample_module("m_new", "p_demo", "New"))?;
-            Ok(())
-        })
-        .unwrap();
-        let ms = db::with_conn(&pool, |c| list_by_project(c, "p_demo")).unwrap();
-        // 3 seeded modules (m_auth, m_order, m_pay) under p_demo + new
-        assert!(ms.iter().any(|m| m.id == "m_new"));
-        assert!(ms.iter().any(|m| m.id == "m_auth"));
-    }
-
-    #[test]
-    fn update_renames_a_module() {
-        let pool = fresh_pool();
-        db::with_tx(&pool, |c| {
-            create(c, &sample_module("m1", "p_demo", "Old"))?;
-            update(
-                c,
-                "m1",
-                ModulePatch {
-                    name: Some("New".into()),
-                    ..Default::default()
-                },
-            )?;
-            Ok(())
-        })
-        .unwrap();
-        let m = db::with_conn(&pool, |c| get(c, "m1")).unwrap();
-        assert_eq!(m.name, "New");
-    }
-
-    #[test]
-    fn delete_cascades_to_collections_and_endpoints() {
-        let pool = fresh_pool();
-        // p_demo → m_auth → c_login → e_login_sms is the seed chain.
-        let before: i64 = db::with_conn(&pool, |c| {
-            Ok(c.query_row("SELECT COUNT(*) FROM endpoints", [], |r| r.get(0))?)
-        })
-        .unwrap();
-        assert!(before > 0);
-
-        db::with_tx(&pool, |c| delete(c, "m_auth")).unwrap();
-
-        let after: i64 = db::with_conn(&pool, |c| {
-            Ok(c.query_row("SELECT COUNT(*) FROM endpoints", [], |r| r.get(0))?)
-        })
-        .unwrap();
-        // 4 endpoints lived under m_auth: e_login_sms, e_login_pwd, e_user_get, e_user_update
-        assert_eq!(after, before - 4);
-    }
-}
+#[path = "modules_test.rs"]
+mod tests;

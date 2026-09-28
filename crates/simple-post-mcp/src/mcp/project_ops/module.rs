@@ -159,7 +159,9 @@ pub(super) async fn tool_module_update(
         name: a.name.clone(),
         description: None,
         sort_order: None,
-        // `module_update` never re-parents; that is `module_move`'s job.
+        // `module_update` must never re-parent: that is `module_move`'s job,
+        // and it is gated separately. `Some(None)` would mean "clear the
+        // project", so the absent-key form is the correct "leave it alone".
         project_id: None,
     };
     let m = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -209,14 +211,11 @@ pub(super) async fn tool_module_move(
     }
 
     let moved = simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::modules::update(
+        simple_post_core::db::modules::reparent(
             c,
             &a.module_id,
-            ModulePatch {
-                project_id: Some(a.new_project_id.clone()),
-                sort_order: a.new_sort_order,
-                ..Default::default()
-            },
+            &a.new_project_id,
+            a.new_sort_order,
         )
     })?;
 

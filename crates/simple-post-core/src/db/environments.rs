@@ -263,6 +263,64 @@ pub fn set_var(
     Ok(env)
 }
 
+/// Rename a single environment variable in one shot: `from_key` becomes
+/// `to_key`, keeping its value.
+///
+/// The renderer used to model a rename as `set_var(from_key, None)` followed
+/// by `set_var(to_key, value)` — two transactions with a window in between
+/// where the variable does not exist. Anything interrupting that window
+/// (crash, or the second call failing) destroyed the variable. This is one
+/// `UPDATE` of the JSON column, so the key is never observably missing.
+///
+/// MUST be called inside `db::with_tx`.
+///
+/// Errors:
+///   - [`AppError::NotFound`] if the environment doesn't exist
+///   - [`AppError::Validation`] if `from_key` is absent (nothing to rename),
+///     if `to_key` already exists (refusing to clobber another variable), or
+///     if `from_key == to_key` (a no-op rename is almost always a UI bug)
+///
+/// Returns the post-update [`Environment`] so the caller echoes the
+/// authoritative row rather than an optimistic guess.
+pub fn rename_var(
+    conn: &mut Connection,
+    env_id: &str,
+    from_key: &str,
+    to_key: &str,
+) -> Result<Environment, AppError> {
+    if from_key == to_key {
+        return Err(AppError::Validation(format!(
+            "rename_var: from_key and to_key are both {from_key:?}"
+        )));
+    }
+    let mut env = get(conn, env_id)?;
+    let value = env.variables.remove(from_key).ok_or_else(|| {
+        AppError::Validation(format!(
+            "rename_var: environment {env_id} has no variable {from_key:?}"
+        ))
+    })?;
+    if env.variables.contains_key(to_key) {
+        // Restore the key we just removed so an abort leaves the map untouched.
+        env.variables.insert(from_key.to_string(), value);
+        return Err(AppError::Validation(format!(
+            "rename_var: environment {env_id} already has a variable {to_key:?}"
+        )));
+    }
+    env.variables.insert(to_key.to_string(), value);
+
+    // Same single-UPDATE shape as `set_var`: the `variables_json` column is
+    // written whole, which is atomic, so the rename has no intermediate state.
+    let variables_json = serde_json::to_string(&env.variables)?;
+    let rows = conn.execute(
+        "UPDATE environments SET variables_json = ?1 WHERE id = ?2",
+        params![variables_json, env_id],
+    )?;
+    if rows == 0 {
+        return Err(AppError::NotFound(format!("environment {env_id}")));
+    }
+    Ok(env)
+}
+
 /// Set or clear a single `baseUrls[def_id]` slot on an environment.
 /// `url = None` removes the slot (so a `def` without a configured URL
 /// on this env resolves to ""). `url = Some(u)` upserts `def_id → u`.
@@ -347,125 +405,5 @@ impl std::error::Error for JsonColError {}
 // -------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db;
-
-    fn fresh_pool() -> db::DbPool {
-        let dir = std::env::temp_dir().join(format!(
-            "simple-post-envs-test-{}-{}",
-            std::process::id(),
-            crate::db::test_counter::next()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        db::init(&dir).expect("init")
-    }
-
-    fn sample_env(id: &str, project_id: &str, name: &str) -> Environment {
-        Environment {
-            id: id.into(),
-            project_id: project_id.into(),
-            name: name.into(),
-            base_urls: HashMap::new(),
-            variables: HashMap::new(),
-            is_active: false,
-        }
-    }
-
-    #[test]
-    fn list_by_project_returns_seeded_envs() {
-        let pool = fresh_pool();
-        let envs = db::with_conn(&pool, |c| list_by_project(c, "p_demo")).unwrap();
-        // fixtures seed 3 envs (dev/staging/prod) under p_demo
-        assert_eq!(envs.len(), 3);
-    }
-
-    #[test]
-    fn get_active_returns_dev_from_seeds() {
-        let pool = fresh_pool();
-        let active = db::with_conn(&pool, |c| get_active(c, "p_demo")).unwrap();
-        let env = active.expect("fixtures seed env_dev with is_active=true");
-        assert_eq!(env.id, "env_dev");
-    }
-
-    #[test]
-    fn set_active_demotes_others_atomically() {
-        let pool = fresh_pool();
-        // Initially env_dev is active. Promote env_staging.
-        db::with_tx(&pool, |c| set_active(c, "env_staging")).unwrap();
-        let active = db::with_conn(&pool, |c| get_active(c, "p_demo")).unwrap();
-        assert_eq!(active.unwrap().id, "env_staging");
-
-        // env_dev must be inactive now
-        let envs = db::with_conn(&pool, |c| list_by_project(c, "p_demo")).unwrap();
-        let dev = envs.iter().find(|e| e.id == "env_dev").unwrap();
-        let staging = envs.iter().find(|e| e.id == "env_staging").unwrap();
-        let prod = envs.iter().find(|e| e.id == "env_prod").unwrap();
-        assert!(!dev.is_active);
-        assert!(staging.is_active);
-        assert!(!prod.is_active);
-    }
-
-    #[test]
-    fn set_active_missing_returns_not_found() {
-        let pool = fresh_pool();
-        let err = db::with_tx(&pool, |c| set_active(c, "env_ghost")).unwrap_err();
-        assert_eq!(err.code(), "not_found");
-    }
-
-    #[test]
-    fn round_trip_preserves_hashmap() {
-        let pool = fresh_pool();
-        let mut env = sample_env("env1", "p_demo", "qa");
-        env.base_urls
-            .insert("def_default".into(), "http://qa".into());
-        env.variables.insert("token".into(), "abc".into());
-        env.is_active = false;
-        db::with_tx(&pool, |c| create(c, &env)).unwrap();
-        let got = db::with_conn(&pool, |c| get(c, "env1")).unwrap();
-        assert_eq!(got.base_urls.get("def_default").unwrap(), "http://qa");
-        assert_eq!(got.variables.get("token").unwrap(), "abc");
-    }
-
-    #[test]
-    fn update_can_replace_base_urls() {
-        let pool = fresh_pool();
-        db::with_tx(&pool, |c| {
-            let mut patch = EnvironmentPatch::default();
-            let mut new_map = HashMap::new();
-            new_map.insert("def_default".into(), "http://new".into());
-            patch.base_urls = Some(new_map);
-            update(c, "env_dev", patch)?;
-            Ok(())
-        })
-        .unwrap();
-        let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
-        assert_eq!(got.base_urls.get("def_default").unwrap(), "http://new");
-    }
-
-    #[test]
-    fn lookup_project_id_returns_owner_of_seeded_env() {
-        let pool = fresh_pool();
-        let pid = db::with_conn(&pool, |c| lookup_project_id(c, "env_dev")).unwrap();
-        assert_eq!(pid, "p_demo");
-    }
-
-    #[test]
-    fn lookup_project_id_returns_not_found_for_unknown_env() {
-        // Critical for closing the "global" permission-bypass: a tool
-        // calling lookup_project_id on a forged env_id must NOT get
-        // back any project (and thus any permission grant).
-        let pool = fresh_pool();
-        let err = db::with_conn(&pool, |c| lookup_project_id(c, "env_ghost")).unwrap_err();
-        assert_eq!(err.code(), "not_found");
-    }
-
-    #[test]
-    fn lookup_project_id_does_not_match_empty_string() {
-        // An empty env_id is the easiest bypass attempt — make sure
-        // we don't accidentally accept it.
-        let pool = fresh_pool();
-        let err = db::with_conn(&pool, |c| lookup_project_id(c, "")).unwrap_err();
-        assert_eq!(err.code(), "not_found");
-    }
-}
+#[path = "environments_test.rs"]
+mod tests;
