@@ -15,22 +15,31 @@
 >   条目保留是为了说明当时为什么那样改，不是待办。
 > - 那些「yaml 表达不了的坑」已迁入 `AGENTS.md` 的 *OpenAPI* 一节。
 > - **`docs/TODO.md` 自身是否也该删除，尚未决定**——它现在是一份没有归属目录的孤儿文档。
+>
+> **2026-09-29 附记：R1 / R2 / R3 三项结构性热点已全部完成**（拆分为
+> `refactor/split-oversized-files` 分支上的三个提交）。三项记载的行数与
+> handler 数当时均已失准，条目内已按实测订正并附上验收证据。
+> **D5 是当前唯一剩余的未完成项。**
+>
+> **如何读本文档**：✅ 标记的条目**不是待办**，而是「当时为什么那样改」的
+> 决策记录与证据留档。改动相关目录前值得一读，但不需要重做。
+> 只有「待办」标记的条目需要动手。
 
 ## 快速索引
 
 | # | 条目 | 类型 | 优先级 | 状态 |
 |---|---|---|---|---|
 | [D1](#d1-统一树结构的描述) | 统一树结构的描述 | 文档 + 代码 | P0 | ✅ 已完成（C1/C2/C3 + 文档层全部落地） |
-| [D2](#d2-agentsmd-引用了已删除的文件路径) | AGENTS.md 引用已删除路径 | 文档 | P0 | ✅ 已完成 |
-| [D3](#d3-readme-自相矛盾已删除的-npm-包) | README 自相矛盾 | 文档 | P0 | ✅ 已完成 |
-| [D4](#d4-refactor-planmd-状态过期) | REFACTOR-PLAN 状态过期 | 文档 | P1 | ✅ 已完成 |
+| [D2](#d2-agentsmd-引用了已删除的文件路径--已完成) | AGENTS.md 引用已删除路径 | 文档 | P0 | ✅ 已完成 |
+| [D3](#d3-readme-自相矛盾已删除的-npm-包--已完成) | README 自相矛盾 | 文档 | P0 | ✅ 已完成 |
+| [D4](#d4-refactor-planmd-状态过期--已完成) | REFACTOR-PLAN 状态过期 | 文档 | P1 | ✅ 已完成 |
 | [D5](#d5-scriptse2e-完全未记载) | `scripts/e2e/` 未记载 | 文档 + 工程 | P2 | 待办 |
-| [D6](#d6-readme-mcp-工具清单漏列-endpoint_list) | 工具清单漏列 | 文档 | P2 | ✅ 已完成 |
-| [D7](#d7-readme-宣称了根本不存在的-mcp-resources) | README 宣称不存在的 MCP Resources | 文档 | P1 | ✅ 已完成（已删除该节） |
-| [D8](#d8-agentsmd-自相矛盾且计数失准的-rust-测试布局) | AGENTS.md Rust 测试布局自相矛盾 | 文档 | P2 | ✅ 已完成 |
-| [R1](#r1-commandsrs1196-行--50-个-handler) | `commands.rs` 过大 | 重构 | P1 | 待办 |
-| [R2](#r2-crud-slicets-1094-行) | `crud-slice.ts` 过大 | 重构 | P2 | 待办 |
-| [R3](#r3-environmentsectiontsx-812-行) | `EnvironmentSection` 过大 | 重构 | P2 | 待办 |
+| [D6](#d6-readme-mcp-工具清单漏列-endpoint_list--已完成) | 工具清单漏列 | 文档 | P2 | ✅ 已完成 |
+| [D7](#d7-readme-宣称了根本不存在的-mcp-resources--已完成已删除该节) | README 宣称不存在的 MCP Resources | 文档 | P1 | ✅ 已完成（已删除该节） |
+| [D8](#d8-agentsmd-自相矛盾且计数失准的-rust-测试布局--已完成) | AGENTS.md Rust 测试布局自相矛盾 | 文档 | P2 | ✅ 已完成 |
+| [R1](#r1-commandsrs-过大已拆分) | `commands.rs` 过大 | 重构 | P1 | ✅ 已完成（拆为 `commands/` 模块树） |
+| [R2](#r2-crud-slicets-过大已拆分) | `crud-slice.ts` 过大 | 重构 | P2 | ✅ 已完成（拆为 6 个子工厂） |
+| [R3](#r3-environmentsectiontsx-过大已拆分) | `EnvironmentSection` 过大 | 重构 | P2 | ✅ 已完成（拆为 `rows/` + `hooks/`） |
 
 ---
 
@@ -134,6 +143,10 @@ endpoint 只能挂 collection，SQLite trigger 与应用层双防线。
 项目过滤作为可选参数（省略 = 全工作区）。两处调用点都改为调用它，
 `crud-slice` 的私有副本已删除。`collectSubtree` 留在 store——它只有 store
 这一个消费者（渲染器是自顶向下递归，不是 BFS），搬进共享模块只会撑大公共面。
+
+> 2026-09-29 补记（R2 拆分后）：`collectSubtree` 现位于
+> `src/stores/slices/crud-helpers.ts`，`indexByParent` 仍从 `@/lib/tree-index`
+> 导入。R2 刻意没有动这两者的归属，理由与上面一致。
 
 > 实际动手时发现的是**三份**而不是两份：第三份在 `NewItemModal.tsx`
 > 的 `collectionsUnderModule`（本次重构新写的）。合流方式是把类型过滤
@@ -466,42 +479,155 @@ AGENTS.md 中不再出现 "tests inline"，且两段说法一致。
 > **先让文档可信，再动代码**；搬迁只做移动，逻辑改动单独开 PR。
 > 排在文档类之后——**先让文档可信，再动代码。**
 
-## R1 `commands.rs` 1196 行 / 50 个 handler
+## R1 `commands.rs` 过大（已拆分）✅
 
-**类型：重构** ｜ **优先级：P1**
+**类型：重构** ｜ **优先级：P1** ｜ **完成于 2026-09-29**
 
-`web_api.rs` 已拆分完成后，这是最后一个同量级的遗留文件。
+> 原文记载「1196 行 / 50 个 handler」，**两个数字都失准**：动手前实测为
+> **1406 行 / 41 个 `#[tauri::command]`**。行数与 handler 数都被高估。
 
-它特殊的地方在于：它同时是**双通道不变量五处编辑里的两处**（Rust handler +
-`lib.rs` 注册）。拆分时必须保证两者的对应关系不被破坏。
+`web_api.rs` 拆分完成后遗留的最后一个同量级文件。它特殊的地方在于：它同时是
+**双通道不变量五处编辑里的两处**（Rust handler + `lib.rs` 注册），
+拆分时必须保证两者的对应关系不被破坏。
 
-已有可利用的分节注释，且 handler 天然按资源分组（projects / modules /
-collections / endpoints / environments / base_url_defs / request_settings /
-permissions / mcp），拆分风险低于行数给人的直觉。
+**做法**：`commands.rs` → `src-tauri/src/commands/`，14 个文件
+（每个资源一个 + `dto.rs` / `send.rs` / 兄弟测试模块），结构与
+`web_api/routes/` 对称。总计 1388 行，最大单文件 `nodes.rs` 188 行。
 
-建议目标结构与 `web_api/routes/` 对称。
+**核心是让 `lib.rs` 一行都不改**：`mod.rs` 再导出整个子树，使 41 条
+`crate::commands::<name>` 路径在 `generate_handler!` 中照常解析，
+`web_api/routes/nodes.rs` 对 `send_endpoint_by_id` / `EndpointSendArgs`
+的跨模块引用也照常解析。漏注册是**静默**失败——能编译，只在桌面
+IPC 路径的 `invoke()` 上炸。
 
-**护栏**：与 web_api 拆分一样，跑一次 REST 冒烟测试
-（`npm run test:web:auth`、`npm run test:web:basepath`）确认没有漏注册。
+### 护栏与实测
 
-## R2 `crud-slice.ts` 1094 行
+| 项 | 结果 |
+|---|---|
+| command 定义 ↔ `generate_handler!` 注册 | **41 ↔ 41**，双向差集皆空 |
+| `git diff src-tauri/src/lib.rs` / `web_api/` | **空**（逐字节与 HEAD 相同） |
+| `AppError` 变体 / `with_conn` / `with_tx` / `permissions::get`,`set` 调用直方图 | **完全一致** |
+| `node scripts/dump-openapi.mjs` 输出 | **逐字节不变**（6836 B，sha256 `9b8da161d11fe8ea`） |
+| `cargo check` / `clippy -D warnings` / `fmt --check` / `test` | 全绿（26 tests） |
 
-**类型：重构** ｜ **优先级：P2**
+### 三个后来人必须知道的坑
 
-文件内部已有 8 个 `// ---------- xxx ----------` 分节注释（CRUD / move /
-environment / baseUrl / helpers），拆分是「顺着缝剪」。
+1. **`mod.rs` 必须用 glob 再导出，不能用 item list。**
+   `#[tauri::command]` 除函数体外还生成 `__cmd__<name>` 与
+   `__tauri_command_name_<name>` 两个宏，而 `generate_handler!` 会把
+   `crate::commands::<name>` 改写成 `crate::commands::__cmd__<name>(...)`。
+   item list 只再导出函数、不带上宏，编译直接失败 **82 × E0433**。
+   这条已写进 `AGENTS.md` 的 dual-transport 不变量段。
+2. **`http_request` / `endpoint_send` 必须留在 `lib.rs`。**
+   上述宏仅对 `pub` 项 `#[macro_export]`，私有 command 不产生 `__cmd__` 宏，
+   因而不会与 `generate_handler!` 产生的同名宏冲突（E0255）。
+   把它们搬进 `commands/` 反而会让「非 `pub`」这条承重约束失效。
+3. **内联测试模块要落成 `#[path]` 兄弟文件**，与本仓 21/24 的主流形式一致。
+   切分时**匹配花括号**，别假设闭合括号是末行。
 
-与 [D1-C2](#c2--合并两处集合分桶实现) 有交集——树相关 helper 应当在拆分时
-一并收敛，避免重复实现随文件搬家继续存活。
+### 顺带修正
 
-**护栏**：Zustand selector 纪律（见 AGENTS.md）；搬进 hook 时不得新增
-返回新数组 / 新对象的 selector。`npx tsx scripts/_verify_store.mjs` 可验证。
+拆分使 `commands.rs` 这个路径失效，共 11 处引用需要跟着改
+（`daemon_supervisor.rs`、`web_api/dto.rs`、`web_api/routes/{mcp,base_url_defs}.rs`、
+`simple-post-core` 两处 doc 注释、`src/lib/` 两处文件头、`AGENTS.md` 四处）。
+**这类引用修正必须与拆分同一个提交**——拆开提交会产生一个文档指向
+不存在文件的中间状态。
 
-## R3 `EnvironmentSection.tsx` 812 行
+---
 
-**类型：重构** ｜ **优先级：P2**
+## R2 `crud-slice.ts` 过大（已拆分）✅
 
-当前最大的单组件。位于设置面板的环境变量编辑区。
+**类型：重构** ｜ **优先级：P2** ｜ **完成于 2026-09-29**
+
+> 原文记载「1094 行 / 8 个分节」，**两个数字都失准**：实测为
+> **902 行 / 6 个分节**（分节为 helpers / project CRUD / resource tree /
+> move / environment / baseUrl definitions）。
+
+**做法**：902 行的单文件拆为 `src/stores/slices/` 下 6 个子工厂
++ 99 行 barrel，合计 1054 行，最大单文件 `crud-tree.ts` 253 行。
+barrel 继续导出 `createCrudSlice` / `CrudSlice` / `CrudSliceState` /
+`CrudSliceActions` / `NewNodeInput`，导出名不变，因此
+**`app-store.ts` 与测试文件零改动**。
+
+**为什么没拆成多个独立 Zustand slice**（这是本条最关键的设计判断）：
+若拆成独立 slice，那些**有意跨 slice 写 key** 的 action 会被迫改写。
+`deleteProject` 写 `openTabs` / `activeTabId` / `activeProjectId` /
+`activeEndpointId`；`deleteNode` 写 `openTabs` / `activeTabId` /
+`activeEndpointId`；`setEnvironmentActive` 写 `activeEnvironmentId`；
+`deleteEnvironment` 写 `activeEnvironmentId` / `endpointDetails`；
+`deleteBaseUrlDefinition` 写 `endpointDetails`。
+把它们换成 `get().closeTab()` 之类的多次调用，会把**一次原子 `set()` 变成多次**，
+改变 IPC 失败回滚路径的语义——那是行为改动，不是搬迁。
+
+顺带把 `CrudSliceActions` 从扁平字面量改为 `extends` 组合：
+解析后的成员集不变（20 个 action，无重复无多余），但同名 action 在两个
+子工厂里签名不一致时，现在是 `tsc` 报错而非**静默的 last-spread-wins**。
+
+`collectSubtree` **留在 store 侧**，不进 `@/lib/tree-index`：
+它只有一个消费者，搬进去只会撑大共享模块的公共面。
+
+### 护栏与实测
+
+| 项 | 结果 |
+|---|---|
+| 20 个 action 体 | **逐字节一致**（含内联注释） |
+| 5 个 helper | 仅差 `export` 关键字 |
+| 跨 slice `set()` 调用 | 仍为单次原子调用 |
+| `app-store.ts` / `store-types.ts` / `__tests__/**` / `src/lib/**` | **零改动** |
+| import 拓扑 | 仍为星型，无环 |
+| `npm test` | 188/188（9 个 crud-slice 测试仍经 barrel 入口） |
+| `npx tsx scripts/_verify_store.mjs` | 29/29 |
+
+> **Zustand selector 护栏在 R2 实际风险很低**：该文件不导出任何 selector
+> 或自定义 hook，4 个 `useActive*` 全在 `app-store.ts`。原护栏是防御性的。
+
+---
+
+## R3 `EnvironmentSection.tsx` 过大（已拆分）✅
+
+**类型：重构** ｜ **优先级：P2** ｜ **完成于 2026-09-29**
+
+> 原文记载「812 行」，实测为 **884 行**（`Get-Content -Line` 口径 812，
+> 差异来自 CRLF——该文件含 CRLF 而 `.gitattributes` 规定 LF，统计时需注意口径）。
+
+全仓最大的单组件（第二名 `HttpTester.tsx` 695 行），拆为 205 行壳
++ `rows/` 下 7 个子组件 + `hooks/useEnvDialogs.ts`，照 `project-tree/`
+的既有约定：父组件持有全部 `useState`，子组件纯 props，无 `index.ts` barrel。
+合计 906 行。
+
+该组件本来就是**完全 props-driven、零 `useAppStore` 调用**
+（store 访问全在父组件 `SettingsPanel.tsx`），所以拆分不涉及 store selector；
+文件内**无 CodeMirror 实例**，不存在「两个 editor 挂进同一棵树」的风险。
+`SettingsPanel.tsx` **零改动**。
+
+### 顺带收敛（已完成）
+
+`InlineNameCell`（~81 行）与既有 `@/components/ui/InlineEdit` 功能重叠。
+**审核结论：暂不收敛，原样搬走。** 三条理由：
+
+1. `InlineEdit` **没有 `validate` 也不渲染内联错误**，而 `VariableRow`
+   依赖这两者来阻止非法变量名（`VAR_KEY_REGEX`）提交——换过去会静默丢掉这个守卫
+2. `InlineEdit` 是**双击**打开，`InlineNameCell` 是单击
+3. `InlineEdit` 的裸 `<input>` 只有 `focus:outline-none`，而仓库的 `Input`
+   带 `focus-visible:ring-2` 焦点环——换过去还会额外丢掉 a11y 焦点环
+
+三条行为差异 + 零自动化覆盖，与「纯搬迁」的定位不符。
+**若将来要收敛，应先给 `InlineEdit` 加 `validate` prop，再单开一条。**
+
+### 护栏与实测
+
+| 项 | 结果 |
+|---|---|
+| `className` 字面量 / `cn()` 参数 / CJK 字符串 | 64 / 22 / 26 条，**多集合逐条一致** |
+| 11 个组件 | 各存在且仅存在一次 |
+| `SettingsPanel.tsx` | **零改动** |
+| 新增 `useAppStore` 调用 | **0**（全部 props-driven） |
+| `rules-of-hooks` / `no-unused-vars` | 均配为 error，跑通 |
+
+> ⚠️ **R3 未经运行时验证。** 本仓没有 React 组件测试（无 Vitest/RTL），
+> `npm test` 的 188/188 **完全覆盖不到这个文件**。渲染一致性、行内编辑
+> 的进入/取消/保存/空值行为、两个删除确认弹窗，仍需手测一次。
+> 重点：提交非法变量名（如 `1abc`）确认红色报错出现并阻止提交。
 
 ---
 
