@@ -1,4 +1,4 @@
-//! `endpoint_*` MCP tools — endpoint CRUD, search, duplicate, and movement.
+﻿//! `endpoint_*` MCP tools — endpoint CRUD, search, duplicate, and movement.
 //!
 //! 8 tools:
 //! - `endpoint_list`
@@ -13,16 +13,63 @@
 //! Private helpers also live here because they're only used by these
 //! tools:
 //! - `parse_body_mode`, `build_auth`: input parsing for `endpoint_create`.
-//! - Permission gating uses the shared `simple_post_core::db::endpoints::project_id_of`
-//!   helper to walk `collection → module → project`.
+//! - Permission gating resolves the owning project with
+//!   `simple_post_core::db::nodes::root_id_of` — one indexed read, where
+//!   the old `endpoints::project_id_of` walked `collection → module →
+//!   project`.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, arg_str_opt, AppState, CallToolResult};
 use crate::tool_fn;
-use simple_post_core::domain::{Endpoint, EndpointPatch, RequestBody};
+use simple_post_core::domain::{
+    EndpointDetail, EndpointDetailPatch, EndpointResource, RequestBody, ResourceNode,
+    ResourceNodeType,
+};
 use simple_post_core::error::AppError;
+
+/// Load a node plus its request configuration as one object.
+///
+/// An AI client asking "show me this endpoint" wants the method and the
+/// url, and those live in `endpoint_details` now. Returning the bare
+/// node would answer with a name and a type, which is not what the tool
+/// is for.
+fn endpoint_resource(
+    pool: &simple_post_core::db::DbPool,
+    node_id: &str,
+) -> Result<EndpointResource, AppError> {
+    simple_post_core::db::with_conn(pool, |c| {
+        let node = simple_post_core::db::nodes::get(c, node_id)?;
+        let detail = simple_post_core::db::endpoint_details::get(c, node_id)?;
+        Ok(EndpointResource { node, detail })
+    })
+}
+
+/// Pair a list of endpoint nodes with their configurations, preserving
+/// the node order the caller asked for.
+fn endpoint_resources(
+    pool: &simple_post_core::db::DbPool,
+    nodes: Vec<ResourceNode>,
+) -> Result<Vec<EndpointResource>, AppError> {
+    let ids = nodes.iter().map(|n| n.id.clone()).collect::<Vec<String>>();
+    let details = simple_post_core::db::with_conn(pool, |c| {
+        simple_post_core::db::endpoint_details::list_by_node_ids(c, &ids)
+    })?;
+    let by_id = details
+        .into_iter()
+        .map(|d| (d.node_id.clone(), d))
+        .collect::<std::collections::HashMap<_, _>>();
+    Ok(nodes
+        .into_iter()
+        .filter_map(|node| {
+            by_id.get(&node.id).map(|detail| EndpointResource {
+                node,
+                detail: detail.clone(),
+            })
+        })
+        .collect())
+}
 
 #[derive(Debug, Deserialize)]
 pub(super) struct EndpointCreateArgs {
@@ -226,21 +273,57 @@ pub(super) async fn tool_endpoint_list(
     )
     .await?;
 
-    if let Some(cid) = collection_id.as_deref() {
-        let eps = simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::endpoints::list_by_collection(c, cid)
-        })?;
-        return Ok(CallToolResult::json(eps));
-    }
+    // `module_id` narrows to a module's whole subtree, because an
+    // endpoint's ancestor chain is now uniform — every node except a
+    // module has a node parent.
+    let scope = collection_id
+        .as_deref()
+        .map(|c| ("collection", c.to_string()))
+        .or_else(|| arg_str_opt(&args, "module_id").map(|m| ("module", m.to_string())))
+        .or_else(|| project_id.clone().map(|p| ("project", p)));
 
-    // No collection_id → fall back to the project-wide search (no
-    // filter). The DB layer doesn't ship a "list all endpoints for a
-    // project" function; search with all filters blank does the same
-    // thing in practice.
-    let eps = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::search(c, None, None, None)
-    })?;
-    Ok(CallToolResult::json(eps))
+    let rows = match scope {
+        Some(("collection", cid)) => simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::nodes::list_children(c, &cid, Some(ResourceNodeType::Endpoint))
+        })?,
+        Some(("module", mid)) => {
+            let subtree = simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::nodes::subtree_ids(c, std::slice::from_ref(&mid))
+            })?;
+            let project = simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::nodes::root_id_of(c, &mid)
+            })?;
+            let in_subtree: std::collections::HashSet<&String> = subtree.iter().collect();
+            let nodes = simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::nodes::list_by_root_and_type(
+                    c,
+                    &project,
+                    ResourceNodeType::Endpoint,
+                )
+            })?;
+            nodes
+                .into_iter()
+                .filter(|n| in_subtree.contains(&n.id))
+                .collect()
+        }
+        Some((_, pid)) => simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::nodes::list_by_root_and_type(c, &pid, ResourceNodeType::Endpoint)
+        })?,
+        // Nothing named: the whole database, as the old unfiltered
+        // `endpoints::search` did.
+        None => simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::nodes::list_all(c)
+        })?,
+    };
+
+    let endpoints: Vec<ResourceNode> = rows
+        .into_iter()
+        .filter(|n| n.kind == ResourceNodeType::Endpoint)
+        .collect();
+    Ok(CallToolResult::json(endpoint_resources(
+        &state.pool,
+        endpoints,
+    )?))
 }
 
 pub(super) async fn tool_endpoint_get(
@@ -249,12 +332,8 @@ pub(super) async fn tool_endpoint_get(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointGetArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_get args: {e}")))?;
-    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
-    })?;
-    let project_id =
-        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
-    crate::mcp::check_permission(&state.pool, &project_id, "endpoint_get").await?;
+    let ep = endpoint_resource(&state.pool, &a.endpoint_id)?;
+    crate::mcp::check_permission(&state.pool, &ep.node.root_id, "endpoint_get").await?;
     Ok(CallToolResult::json(ep))
 }
 
@@ -270,11 +349,34 @@ pub(super) async fn tool_endpoint_search(
         "endpoint_list",
     )
     .await?;
-    let tags_ref = a.tags.as_deref();
-    let eps = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::search(c, a.q.as_deref(), a.method.as_deref(), tags_ref)
-    })?;
-    Ok(CallToolResult::json(eps))
+    // `method` and `tags` live in `endpoint_details`, so the free-text
+    // match and those two filters are applied after narrowing to
+    // endpoint nodes — the SQL layer matches name / url / description
+    // only.
+    let mut nodes = match a.q.as_deref().filter(|q| !q.is_empty()) {
+        Some(q) => simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::nodes::search(c, q)
+        })?,
+        None => match a.project_id.as_deref() {
+            Some(p) => simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::nodes::list_by_root_and_type(c, p, ResourceNodeType::Endpoint)
+            })?,
+            None => simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::nodes::list_all(c)
+            })?,
+        },
+    };
+    nodes.retain(|n| n.kind == ResourceNodeType::Endpoint);
+    let mut out = endpoint_resources(&state.pool, nodes)?;
+
+    if let Some(m) = a.method.as_deref() {
+        let want = simple_post_core::domain::parse_http_method(m)?;
+        out.retain(|r| r.detail.method == want);
+    }
+    if let Some(tags) = a.tags.as_deref() {
+        out.retain(|r| tags.iter().all(|t| r.detail.tags.contains(t)));
+    }
+    Ok(CallToolResult::json(out))
 }
 
 pub(super) async fn tool_endpoint_create(
@@ -293,23 +395,38 @@ pub(super) async fn tool_endpoint_create(
     // input-level errors are cheap and shouldn't masquerade as
     // permission denials.
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
-    crate::mcp::check_permission(&state.pool, "global", "endpoint_create").await?;
+    // Gate against the collection's real project. The old handler passed
+    // the literal `"global"`, which is not a project id — `check_permission`
+    // then compared the default `ReadCall` against the `Full` a creating
+    // tool requires and denied every call.
+    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::root_id_of(c, &a.collection_id)
+    })?;
+    crate::mcp::check_permission(&state.pool, &project_id, "endpoint_create").await?;
 
     let body_mode_str = a.body_mode.clone().unwrap_or_else(|| "none".into());
-    let body_mode = parse_body_mode(&body_mode_str)?;
     let body = RequestBody {
-        mode: body_mode,
+        mode: parse_body_mode(&body_mode_str)?,
         content: a.body_content.clone().unwrap_or_default(),
         schema: None,
     };
     let auth = build_auth(a.auth_type.as_deref(), a.auth_config.clone())?;
 
     let now = simple_post_core::domain::now_ms();
-    let ep = Endpoint {
-        id: format!("ep_{now}"),
-        collection_id: a.collection_id,
+    let id = format!("ep_{now}");
+    let node = ResourceNode {
+        id: id.clone(),
+        root_id: project_id,
+        parent_id: Some(a.collection_id),
+        kind: ResourceNodeType::Endpoint,
         name: a.name,
         description: None,
+        sort_order: 0,
+        created_at: now,
+        updated_at: now,
+    };
+    let detail = EndpointDetail {
+        node_id: id,
         method,
         url: a.url,
         environment_id: None,
@@ -322,17 +439,13 @@ pub(super) async fn tool_endpoint_create(
         docs: None,
         notes: None,
         tags: a.tags.unwrap_or_default(),
-        sort_order: 0,
-        created_at: now,
-        updated_at: now,
     };
-    let id = ep.id.clone();
+    // Node and detail land together: an endpoint with no configuration
+    // row is a tree the reader cannot open.
     simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::endpoints::create(c, &ep)
+        simple_post_core::db::nodes::create(c, &node, Some(&detail))
     })?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &id)
-    })?;
+    let stored = endpoint_resource(&state.pool, &node.id)?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -341,15 +454,20 @@ pub(super) async fn tool_endpoint_update(
     args: Value,
 ) -> Result<CallToolResult, AppError> {
     let endpoint_id = arg_str(&args, "endpoint_id")?.to_string();
-    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &endpoint_id)
+    let node = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::get(c, &endpoint_id)
     })?;
-    let project_id =
-        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
-    crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
+    crate::mcp::check_permission(&state.pool, &node.root_id, "endpoint_update").await?;
 
     let patch_obj = args.get("patch").cloned().unwrap_or(Value::Null);
-    let patch = EndpointPatch {
+
+    // `name` is structural and everything else is configuration, so one
+    // call now writes two tables. The patch is split on the way in
+    // rather than by the caller so `endpoint_update` keeps meaning
+    // "patch whatever you named" — which is what every existing client
+    // assumes.
+    let node_patch = simple_post_core::domain::ResourceNodePatch {
+        parent_id: None,
         name: patch_obj
             .get("name")
             .and_then(Value::as_str)
@@ -357,6 +475,9 @@ pub(super) async fn tool_endpoint_update(
         description: patch_obj
             .get("description")
             .map(|v| v.as_str().map(String::from)),
+        sort_order: patch_obj.get("sort_order").and_then(Value::as_i64),
+    };
+    let detail_patch = EndpointDetailPatch {
         method: patch_obj
             .get("method")
             .and_then(Value::as_str)
@@ -394,11 +515,19 @@ pub(super) async fn tool_endpoint_update(
                 .map(String::from)
                 .collect()
         }),
-        sort_order: patch_obj.get("sort_order").and_then(Value::as_i64),
     };
-    let updated = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::update(c, &endpoint_id, patch)
+    // One transaction: a rename that succeeds while its url edit does not
+    // is a half-applied patch the caller cannot detect.
+    simple_post_core::db::with_tx(&state.pool, |c| {
+        if !node_patch.is_empty() {
+            simple_post_core::db::nodes::update(c, &endpoint_id, node_patch.clone())?;
+        }
+        if !detail_patch.is_empty() {
+            simple_post_core::db::endpoint_details::update(c, &endpoint_id, detail_patch.clone())?;
+        }
+        Ok(())
     })?;
+    let updated = endpoint_resource(&state.pool, &endpoint_id)?;
     Ok(CallToolResult::json(updated))
 }
 
@@ -408,14 +537,12 @@ pub(super) async fn tool_endpoint_delete(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointDeleteArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_delete args: {e}")))?;
-    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
+    let node = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::get(c, &a.endpoint_id)
     })?;
-    let project_id =
-        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
-    crate::mcp::check_permission(&state.pool, &project_id, "endpoint_delete").await?;
+    crate::mcp::check_permission(&state.pool, &node.root_id, "endpoint_delete").await?;
     simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::endpoints::delete(c, &a.endpoint_id)
+        simple_post_core::db::nodes::delete(c, &a.endpoint_id)
     })?;
     Ok(CallToolResult::json(json!({ "deleted": a.endpoint_id })))
 }
@@ -426,26 +553,29 @@ pub(super) async fn tool_endpoint_duplicate(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointDuplicateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_duplicate args: {e}")))?;
-    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
-    })?;
-    let project_id =
-        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
-    crate::mcp::check_permission(&state.pool, &project_id, "endpoint_create").await?;
+    let ep = endpoint_resource(&state.pool, &a.endpoint_id)?;
+    crate::mcp::check_permission(&state.pool, &ep.node.root_id, "endpoint_create").await?;
 
-    let now = simple_post_core::domain::now_ms();
-    let mut dup = ep.clone();
-    dup.id = format!("ep_{now}");
-    dup.name = a.name.unwrap_or_else(|| ep.name.clone());
-    dup.created_at = now;
-    dup.updated_at = now;
-    let id = dup.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::endpoints::create(c, &dup)
+    // The copy lands immediately after the original, not at the end of
+    // the collection — a duplicate the user cannot see next to what they
+    // duplicated is easy to miss.
+    let created = simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::nodes::duplicate(c, &a.endpoint_id)
     })?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &id)
-    })?;
+    let created = match a.name {
+        Some(name) => simple_post_core::db::with_tx(&state.pool, |c| {
+            simple_post_core::db::nodes::update(
+                c,
+                &created.id,
+                simple_post_core::domain::ResourceNodePatch {
+                    name: Some(name.clone()),
+                    ..Default::default()
+                },
+            )
+        })?,
+        None => created,
+    };
+    let stored = endpoint_resource(&state.pool, &created.id)?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -455,34 +585,28 @@ pub(super) async fn tool_endpoint_move(
 ) -> Result<CallToolResult, AppError> {
     let a: EndpointMoveArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_move args: {e}")))?;
-    let ep = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &a.endpoint_id)
+    let node = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::get(c, &a.endpoint_id)
     })?;
-    let project_id =
-        simple_post_core::db::endpoints::project_id_of(&state.pool, &ep.collection_id)?;
-    crate::mcp::check_permission(&state.pool, &project_id, "endpoint_update").await?;
+    crate::mcp::check_permission(&state.pool, &node.root_id, "endpoint_update").await?;
 
-    // The DB layer's `endpoints::update` doesn't accept a new
-    // collection_id / sort_order in EndpointPatch (only domain-field
-    // patches). Implement move as delete + create under the new
-    // collection so we don't fight the FK cascade in the wrong
-    // direction.
-    let mut moved = ep.clone();
-    moved.id = format!("ep_{}", simple_post_core::domain::now_ms());
-    moved.collection_id = a.new_collection_id.clone();
-    moved.sort_order = a.new_sort_order.unwrap_or(0);
-    let now = simple_post_core::domain::now_ms();
-    moved.created_at = now;
-    moved.updated_at = now;
-    let new_id = moved.id.clone();
+    // One transaction, one row, id preserved.
+    //
+    // The old handler deleted the endpoint and re-created it under a
+    // freshly minted id, in two separate transactions. A crash between
+    // them lost the endpoint outright, and even on the happy path the
+    // caller's `endpoint_id` dangled — the response had to tell them the
+    // new one. `nodes::move_many` re-parents in place.
     simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::endpoints::delete(c, &a.endpoint_id)
-    })?;
-    simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::endpoints::create(c, &moved)
+        simple_post_core::db::nodes::move_many(
+            c,
+            std::slice::from_ref(&a.endpoint_id),
+            Some(&a.new_collection_id),
+            a.new_sort_order.unwrap_or(0) as i32,
+        )
     })?;
     Ok(CallToolResult::json(json!({
-        "endpoint_id": new_id,
+        "endpoint_id": a.endpoint_id,
         "new_collection_id": a.new_collection_id,
     })))
 }

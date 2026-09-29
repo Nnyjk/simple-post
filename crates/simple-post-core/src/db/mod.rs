@@ -46,11 +46,8 @@ use crate::error::AppError;
 // -------------------------------------------------------------------------
 
 pub mod base_url_defs;
-pub mod collections;
 pub mod endpoint_details;
-pub mod endpoints;
 pub mod environments;
-pub mod modules;
 pub mod nodes;
 pub mod permissions;
 pub mod preferences;
@@ -366,6 +363,7 @@ const SCHEMA_SQL: &str = include_str!("schema.sql");
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
+    use crate::domain::{ResourceNode, ResourceNodeType};
     use rusqlite::params;
     use serde::Deserialize;
 
@@ -405,6 +403,10 @@ pub(crate) mod test_support {
     /// breaking older binaries (provided they have defaults).
     #[derive(Debug, Deserialize)]
     struct Fixtures {
+        /// Fixed clock the fixture set is stamped with. Deterministic, so
+        /// a seeded database is byte-identical between runs.
+        #[serde(default)]
+        now: i64,
         #[serde(default)]
         projects: Vec<FixtureProject>,
         #[serde(default)]
@@ -453,7 +455,10 @@ pub(crate) mod test_support {
         #[serde(default)]
         description: Option<String>,
         sort_order: i64,
+        /// UI-only expand state. Carried in the fixture so a future
+        /// renderer test can read a realistic tree, never persisted.
         #[serde(default)]
+        #[allow(dead_code)]
         expanded: Option<bool>,
     }
 
@@ -468,7 +473,9 @@ pub(crate) mod test_support {
         #[serde(default)]
         description: Option<String>,
         sort_order: i64,
+        /// UI-only expand state; see [`FixtureModule::expanded`].
         #[serde(default)]
+        #[allow(dead_code)]
         expanded: Option<bool>,
     }
 
@@ -518,6 +525,33 @@ pub(crate) mod test_support {
         is_active: bool,
     }
 
+    /// Insert one row of the tree.
+    ///
+    /// The three fixture sections collapse onto this one shape — the
+    /// only thing that varies is `kind` and whether `parent_id` is set.
+    /// Takes a real [`ResourceNode`] rather than a loose column list so
+    /// the fixture's translation stays a handful of struct literals
+    /// instead of a call with ten positional arguments.
+    fn insert_node(tx: &rusqlite::Transaction<'_>, n: &ResourceNode) -> Result<(), AppError> {
+        tx.execute(
+            "INSERT INTO nodes \
+         (id, root_id, parent_id, type, name, description, sort_order, created_at, updated_at) \
+         VALUES (?,?,?,?,?,?,?,?,?)",
+            params![
+                n.id,
+                n.root_id,
+                n.parent_id,
+                n.kind.as_str(),
+                n.name,
+                n.description,
+                n.sort_order,
+                n.created_at,
+                n.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Insert all rows from the fixtures file. Walks the dependency graph
     /// in topological order: projects → base_url_defs + modules + envs →
     /// collections → endpoints. Foreign keys stay satisfied without
@@ -557,66 +591,115 @@ pub(crate) mod test_support {
             let _ = p.base_url.as_ref();
         }
 
+        // The fixture file keeps its three-section shape (modules /
+        // collections / endpoints) because that is how a human reads a
+        // sample tree. The tables those sections used to map onto are
+        // gone, so this is where the translation happens: one `nodes`
+        // row per entry, plus an `endpoint_details` row for each
+        // endpoint.
+        //
+        // `root_id` is the one value the fixture does not carry — it was
+        // implied by the module each collection hung off. Derived here
+        // and memoised per owner so the lookup is a map read, not a
+        // re-walk for every descendant.
+        let mut owner: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+
         for m in &fx.modules {
-            tx.execute(
-                "INSERT INTO modules \
-             (id, project_id, name, description, sort_order) \
-             VALUES (?,?,?,?,?)",
-                params![m.id, m.project_id, m.name, m.description, m.sort_order],
+            insert_node(
+                &tx,
+                &ResourceNode {
+                    id: m.id.clone(),
+                    root_id: m.project_id.clone(),
+                    // A module's parent is the project, not another node.
+                    parent_id: None,
+                    kind: ResourceNodeType::Module,
+                    name: m.name.clone(),
+                    description: m.description.clone(),
+                    sort_order: m.sort_order,
+                    created_at: fx.now,
+                    updated_at: fx.now,
+                },
             )?;
-            let _ = m.expanded; // UI-only, not persisted
+            owner.insert(&m.id, &m.project_id);
         }
 
         for c in &fx.collections {
-            tx.execute(
-                "INSERT INTO collections \
-             (id, module_id, parent_collection_id, name, description, sort_order) \
-             VALUES (?,?,?,?,?,?)",
-                params![
-                    c.id,
-                    c.module_id,
-                    c.parent_collection_id,
-                    c.name,
-                    c.description,
-                    c.sort_order,
-                ],
+            let root_id = owner.get(c.module_id.as_str()).copied().ok_or_else(|| {
+                AppError::Validation(format!(
+                    "fixture collection {} names unknown module {}",
+                    c.id, c.module_id
+                ))
+            })?;
+            // A nested collection's `parent_id` is the collection, not
+            // the module — the type matrix allows either, and the fixture
+            // says which by naming a `parentCollectionId`.
+            let parent = c
+                .parent_collection_id
+                .as_deref()
+                .unwrap_or(c.module_id.as_str());
+            insert_node(
+                &tx,
+                &ResourceNode {
+                    id: c.id.clone(),
+                    root_id: root_id.to_string(),
+                    parent_id: Some(parent.to_string()),
+                    kind: ResourceNodeType::Collection,
+                    name: c.name.clone(),
+                    description: c.description.clone(),
+                    sort_order: c.sort_order,
+                    created_at: fx.now,
+                    updated_at: fx.now,
+                },
             )?;
-            let _ = c.expanded;
+            owner.insert(&c.id, root_id);
         }
 
         for e in &fx.endpoints {
-            let params_json = serde_json::to_string(&e.params)?;
-            let headers_json = serde_json::to_string(&e.headers)?;
-            let body_json = serde_json::to_string(&e.body)?;
-            let auth_json = serde_json::to_string(&e.auth)?;
-            let tags_json = serde_json::to_string(&e.tags)?;
+            let root_id = owner
+                .get(e.collection_id.as_str())
+                .copied()
+                .ok_or_else(|| {
+                    AppError::Validation(format!(
+                        "fixture endpoint {} names unknown collection {}",
+                        e.id, e.collection_id
+                    ))
+                })?;
+            insert_node(
+                &tx,
+                &ResourceNode {
+                    id: e.id.clone(),
+                    root_id: root_id.to_string(),
+                    parent_id: Some(e.collection_id.clone()),
+                    kind: ResourceNodeType::Endpoint,
+                    name: e.name.clone(),
+                    description: e.description.clone(),
+                    sort_order: e.sort_order,
+                    created_at: e.created_at,
+                    updated_at: e.updated_at,
+                },
+            )?;
+            // The node and its configuration land together: an endpoint
+            // with no detail row is a tree the reader cannot open.
             tx.execute(
-                "INSERT INTO endpoints \
-             (id, collection_id, name, description, method, url, \
-              environment_id, base_url_definition_id, base_url_override, \
-              params_json, headers_json, body_json, auth_json, \
-              docs, notes, tags_json, sort_order, created_at, updated_at) \
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO endpoint_details \
+             (node_id, method, url, environment_id, base_url_definition_id, \
+              base_url_override, params_json, headers_json, body_json, \
+              auth_json, docs, notes, tags_json) \
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 params![
                     e.id,
-                    e.collection_id,
-                    e.name,
-                    e.description,
                     e.method,
                     e.url,
                     e.environment_id,
                     e.base_url_definition_id,
                     e.base_url_override,
-                    params_json,
-                    headers_json,
-                    body_json,
-                    auth_json,
+                    serde_json::to_string(&e.params)?,
+                    serde_json::to_string(&e.headers)?,
+                    serde_json::to_string(&e.body)?,
+                    serde_json::to_string(&e.auth)?,
                     e.docs,
                     e.notes,
-                    tags_json,
-                    e.sort_order,
-                    e.created_at,
-                    e.updated_at,
+                    serde_json::to_string(&e.tags)?,
                 ],
             )?;
         }

@@ -405,6 +405,174 @@ fn a_within_project_move_leaves_the_rest_of_the_tree_untouched() {
     );
 }
 
+// -------------------------------------------------------------------------
+// `move_to_root` — the one move `move_many` cannot express, because with
+// no parent node there is nothing to read a new `root_id` from.
+// -------------------------------------------------------------------------
+
+/// Top-level modules of a project, as `(id, sort_order)` in display order.
+fn top_level(pool: &db::DbPool, root: &str) -> Vec<(String, i64)> {
+    db::with_conn(pool, |c| {
+        list_by_root_and_type(c, root, ResourceNodeType::Module)
+    })
+    .unwrap()
+    .into_iter()
+    .map(|n| (n.id, n.sort_order))
+    .collect()
+}
+
+#[test]
+fn move_to_root_reassigns_the_whole_subtree() {
+    // The bug this shape invites: updating only the named row would file
+    // the collection and the endpoint under the old project, where
+    // `list_by_root` would never show them again — the same class of
+    // drift as the collection `module_id` bug the old layout had.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &module("p2", "m2", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+
+    db::with_tx(&pool, |c| move_to_root(c, "m1", "p2", None)).unwrap();
+
+    for id in ["m1", "c1", "e1"] {
+        assert_eq!(
+            db::with_conn(&pool, |c| get(c, id)).unwrap().root_id,
+            "p2",
+            "{id} must follow the module across the project boundary"
+        );
+    }
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "e1"))
+            .unwrap()
+            .parent_id
+            .as_deref(),
+        Some("c1")
+    );
+    // The endpoint's configuration is a separate table; it must not be
+    // left behind.
+    assert_eq!(
+        db::with_conn(&pool, |c| super::super::endpoint_details::get(c, "e1"))
+            .unwrap()
+            .url,
+        "/e1"
+    );
+}
+
+#[test]
+fn move_to_root_closes_the_gap_it_leaves_behind() {
+    // Regression net. The compaction pass runs while the departing module
+    // is *still* filed under the old root, so counting it would leave its
+    // vacated slot occupied and shift nothing up.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "a", 0), None);
+    put(&pool, &module("p1", "b", 1), None);
+    put(&pool, &module("p1", "c", 2), None);
+    put(&pool, &module("p2", "x", 0), None);
+
+    db::with_tx(&pool, |c| move_to_root(c, "a", "p2", None)).unwrap();
+
+    assert_eq!(
+        top_level(&pool, "p1"),
+        vec![("b".into(), 0), ("c".into(), 1)],
+        "the project being left must not keep a gap in its sort_order"
+    );
+    assert_eq!(
+        top_level(&pool, "p2"),
+        vec![("x".into(), 0), ("a".into(), 1)]
+    );
+}
+
+#[test]
+fn move_to_root_splices_into_the_destination_at_the_requested_slot() {
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "a", 0), None);
+    put(&pool, &module("p2", "x", 0), None);
+    put(&pool, &module("p2", "y", 1), None);
+    put(&pool, &module("p2", "z", 2), None);
+
+    db::with_tx(&pool, |c| move_to_root(c, "a", "p2", Some(1))).unwrap();
+
+    assert_eq!(
+        top_level(&pool, "p2"),
+        vec![
+            ("x".into(), 0),
+            ("a".into(), 1),
+            ("y".into(), 2),
+            ("z".into(), 3)
+        ],
+        "the destination's modules must close around the inserted one"
+    );
+}
+
+#[test]
+fn move_to_root_clamps_an_index_past_the_end() {
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "a", 0), None);
+    put(&pool, &module("p2", "x", 0), None);
+
+    db::with_tx(&pool, |c| move_to_root(c, "a", "p2", Some(99))).unwrap();
+
+    assert_eq!(
+        top_level(&pool, "p2"),
+        vec![("x".into(), 0), ("a".into(), 1)]
+    );
+}
+
+#[test]
+fn move_to_root_rejects_a_non_module() {
+    // A collection or an endpoint changing project is a *move*, not a
+    // transfer: its parent chain decides the project, and silently
+    // re-rooting it would detach it from its siblings.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+
+    let err = db::with_tx(&pool, |c| move_to_root(c, "c1", "p2", None)).unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
+}
+
+#[test]
+fn move_to_root_rejects_an_unknown_project() {
+    // Otherwise the subtree would be filed under a root no project row
+    // backs, where nothing can ever list it.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+
+    let err = db::with_tx(&pool, |c| move_to_root(c, "m1", "ghost", None)).unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "m1")).unwrap().root_id,
+        "p1",
+        "a rejected transfer must not have moved anything"
+    );
+}
+
+#[test]
+fn list_children_returns_direct_children_only() {
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    put(&pool, &collection("p1", "c2", "m1", 1), None);
+    put(&pool, &collection("p1", "c1a", "c1", 0), None);
+
+    let direct = db::with_conn(&pool, |c| list_children(c, "m1", None)).unwrap();
+    let mut ids = direct.iter().map(|n| n.id.as_str()).collect::<Vec<_>>();
+    ids.sort();
+    assert_eq!(ids, vec!["c1", "c2"], "c1a is a grandchild, not a child");
+
+    let only_collections = db::with_conn(&pool, |c| {
+        list_children(c, "m1", Some(ResourceNodeType::Collection))
+    })
+    .unwrap();
+    assert_eq!(only_collections.len(), 2);
+
+    let leaf = db::with_conn(&pool, |c| list_children(c, "c1", None)).unwrap();
+    assert_eq!(leaf.len(), 1);
+    assert_eq!(leaf[0].id, "c1a");
+}
+
 #[test]
 fn multi_select_keeps_caller_order() {
     let (pool, _dir) = fresh_pool();

@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
-use simple_post_core::domain::{ApiResponse, Endpoint, Environment, HttpMethod};
+use simple_post_core::domain::{ApiResponse, EndpointDetail, Environment, HttpMethod};
 use simple_post_core::error::AppError;
 use simple_post_core::http_executor::{self, HttpRequestInput, HttpResponse, HttpResult};
 
@@ -175,11 +175,12 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         .map_err(|e| AppError::Validation(format!("api_call_endpoint args: {e}")))?;
     let endpoint_id = a.endpoint_id.clone();
 
-    let endpoint: Endpoint = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &endpoint_id)
+    let endpoint: EndpointDetail = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoint_details::get(c, &endpoint_id)
     })?;
-    let project_id =
-        simple_post_core::db::endpoints::project_id_of(&state.pool, &endpoint.collection_id)?;
+    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::root_id_of(c, &endpoint.node_id)
+    })?;
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint")
         .await
         .ok();

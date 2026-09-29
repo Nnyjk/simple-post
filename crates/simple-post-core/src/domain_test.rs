@@ -47,10 +47,27 @@ fn apikey_in_field_uses_unquoted_name() {
 
 #[test]
 fn endpoint_camel_case_field_names() {
+    // The structural half and the configuration half are separate types
+    // now, so this checks both deserialize from the camelCase wire shape
+    // their TS mirrors expect.
     let v = json!({
         "id": "e1",
-        "collectionId": "c1",
+        "rootId": "p1",
+        "parentId": "c1",
+        "type": "endpoint",
         "name": "foo",
+        "sortOrder": 0,
+        "createdAt": 1,
+        "updatedAt": 2,
+    });
+    let n: ResourceNode = serde_json::from_value(v).unwrap();
+    assert_eq!(n.parent_id.as_deref(), Some("c1"));
+    assert_eq!(n.root_id, "p1");
+    assert_eq!(n.kind, ResourceNodeType::Endpoint);
+    assert_eq!(n.created_at, 1);
+
+    let v = json!({
+        "nodeId": "e1",
         "method": "GET",
         "url": "/x",
         "params": [],
@@ -58,38 +75,50 @@ fn endpoint_camel_case_field_names() {
         "body": { "mode": "none", "content": "" },
         "auth": { "type": "none" },
         "tags": [],
-        "sortOrder": 0,
-        "createdAt": 1,
-        "updatedAt": 2,
     });
-    let ep: Endpoint = serde_json::from_value(v).unwrap();
-    assert_eq!(ep.collection_id, "c1");
-    assert_eq!(ep.created_at, 1);
+    let d: EndpointDetail = serde_json::from_value(v).unwrap();
+    assert_eq!(d.node_id, "e1");
+    assert_eq!(d.method, HttpMethod::Get);
+    assert_eq!(d.url, "/x");
 }
 
 #[test]
 fn endpoint_patch_distinguishes_absent_from_null() {
     // `description` field absent → None
-    let p: EndpointPatch = serde_json::from_value(json!({
-        "name": "renamed"
+    let p: EndpointDetailPatch = serde_json::from_value(json!({
+        "url": "/renamed"
     }))
     .unwrap();
+    assert_eq!(p.url.as_deref(), Some("/renamed"));
+    assert!(p.environment_id.is_none());
+
+    // `environmentId: null` → Some(None) (clear the column)
+    let p: EndpointDetailPatch = serde_json::from_value(json!({
+        "environmentId": null
+    }))
+    .unwrap();
+    assert_eq!(p.environment_id, Some(None));
+
+    // `environmentId: "e1"` → Some(Some("e1"))
+    let p: EndpointDetailPatch = serde_json::from_value(json!({
+        "environmentId": "e1"
+    }))
+    .unwrap();
+    assert_eq!(p.environment_id, Some(Some("e1".into())));
+}
+
+#[test]
+fn node_patch_distinguishes_absent_from_null() {
+    // `parentId` absent → leave the node where it is
+    let p: ResourceNodePatch = serde_json::from_value(json!({ "name": "renamed" })).unwrap();
     assert_eq!(p.name.as_deref(), Some("renamed"));
-    assert!(p.description.is_none());
+    assert!(p.parent_id.is_none());
 
-    // `description: null` → Some(None) (clear the column)
-    let p: EndpointPatch = serde_json::from_value(json!({
-        "description": null
-    }))
-    .unwrap();
-    assert_eq!(p.description, Some(None));
-
-    // `description: "x"` → Some(Some("x"))
-    let p: EndpointPatch = serde_json::from_value(json!({
-        "description": "x"
-    }))
-    .unwrap();
-    assert_eq!(p.description, Some(Some("x".into())));
+    // `parentId: null` → promote to the top of the project. Only legal
+    // for a module, but the domain layer carries the intent and the DB
+    // layer is what enforces the type matrix.
+    let p: ResourceNodePatch = serde_json::from_value(json!({ "parentId": null })).unwrap();
+    assert_eq!(p.parent_id, Some(None));
 }
 
 #[test]

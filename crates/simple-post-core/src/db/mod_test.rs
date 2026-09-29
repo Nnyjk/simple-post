@@ -54,9 +54,8 @@ fn init_leaves_a_fresh_database_empty() {
     let (pool, _dir) = fresh_empty_pool();
     for table in [
         "projects",
-        "modules",
-        "collections",
-        "endpoints",
+        "nodes",
+        "endpoint_details",
         "environments",
         "base_url_definitions",
     ] {

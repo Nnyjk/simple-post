@@ -44,23 +44,15 @@ pub struct McpCapabilityDto {
     pub policy: CapabilityPolicy,
 }
 
+/// The endpoint request configuration a `nodes_create` call carries
+/// alongside its structural node.
+///
+/// One optional block, all fields optional: an endpoint created from the
+/// tree's "new request" action starts empty and is filled in afterwards,
+/// and every column here has a sensible default for that case.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CreateModuleOpts {
-    pub description: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateCollectionOpts {
-    pub description: Option<String>,
-    pub parent_collection_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateEndpointOpts {
-    pub description: Option<String>,
+pub struct CreateEndpointDetailOpts {
     pub method: Option<HttpMethod>,
     pub url: Option<String>,
     pub environment_id: Option<String>,
@@ -70,6 +62,31 @@ pub struct CreateEndpointOpts {
     pub tags: Option<Vec<String>>,
     pub headers: Option<Vec<KeyValue>>,
     pub params: Option<Vec<KeyValue>>,
+    pub docs: Option<String>,
+    pub notes: Option<String>,
+}
+
+impl CreateEndpointDetailOpts {
+    /// Expand into the row `db::nodes::create` writes. `node_id` is
+    /// threaded in rather than left to the caller so the detail cannot
+    /// be built pointing at a node that was never inserted.
+    fn into_detail(self, node_id: &str) -> EndpointDetail {
+        EndpointDetail {
+            node_id: node_id.to_string(),
+            method: self.method.unwrap_or_default(),
+            url: self.url.unwrap_or_default(),
+            environment_id: self.environment_id,
+            base_url_definition_id: self.base_url_definition_id,
+            base_url_override: None,
+            params: self.params.unwrap_or_default(),
+            headers: self.headers.unwrap_or_default(),
+            body: self.body.unwrap_or_default(),
+            auth: self.auth.unwrap_or_default(),
+            docs: self.docs,
+            notes: self.notes,
+            tags: self.tags.unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -99,25 +116,6 @@ pub struct RequestSettingsPatch {
     pub timeout_ms: Option<u64>,
     pub follow_redirects: Option<bool>,
     pub max_response_size_kb: Option<u64>,
-}
-
-/// Target for moving a collection between siblings / parents. `parentKind`
-/// is one of `"module"` (top-level under a module) or `"collection"`
-/// (nested under another collection).
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CollectionMoveTarget {
-    /// `"module"` | `"collection"`
-    pub parent_kind: String,
-    pub parent_id: String,
-    pub index: i32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EndpointMoveTarget {
-    pub collection_id: String,
-    pub index: i32,
 }
 
 // ---------------------------------------------------------------------------
@@ -257,244 +255,170 @@ pub fn projects_delete(state: State<DbPool>, id: String) -> Result<(), AppError>
 }
 
 // ===========================================================================
-// region: modules
+// region: nodes
 // ===========================================================================
+//
+// Replaces `modules_*`, `collections_*` and `endpoints_*` — nineteen Tauri
+// commands that existed only because the tree was three tables. The
+// handlers below are the Tauri half of the same surface `web_api/routes/
+// nodes.rs` serves over REST; both go through `crate::db::nodes` so the
+// two transports cannot diverge.
+//
+// Two commands are not about structure and keep their own handlers:
+// `nodes_duplicate` and the endpoint-detail pair.
 
+/// Every node under one project, or the whole database when no root is
+/// named.
+///
+/// `kind` narrows to a single type and `query` runs the substring search
+/// (which joins `endpoint_details`, since `url` lives there). `query`
+/// wins over `kind` — a search across one type is a filter the caller
+/// can apply, and a backend that guessed between them would be guessing.
 #[tauri::command]
-pub fn modules_list(
+pub fn nodes_list(
     state: State<DbPool>,
-    project_id: Option<String>,
-) -> Result<Vec<Module>, AppError> {
-    crate::db::with_conn(&state, |c| match project_id.as_deref() {
-        Some(project_id) => crate::db::modules::list_by_project(c, project_id),
-        None => crate::db::modules::list_all(c),
-    })
-}
-
-#[tauri::command]
-pub fn modules_create(
-    state: State<DbPool>,
-    project_id: String,
-    name: String,
-    opts: Option<CreateModuleOpts>,
-) -> Result<Module, AppError> {
-    let opts = opts.unwrap_or_default();
-    let module = Module {
-        id: uid(),
-        project_id,
-        name,
-        description: opts.description,
-        sort_order: 0,
-        expanded: None,
+    root_id: Option<String>,
+    kind: Option<String>,
+    query: Option<String>,
+) -> Result<Vec<ResourceNode>, AppError> {
+    if let Some(q) = query.filter(|q| !q.is_empty()) {
+        return crate::db::with_conn(&state, |c| crate::db::nodes::search(c, &q));
+    }
+    let kind = match kind.filter(|k| !k.is_empty()) {
+        Some(k) => Some(
+            ResourceNodeType::parse(&k)
+                .ok_or_else(|| AppError::Validation(format!("unknown node type {k:?}")))?,
+        ),
+        None => None,
     };
-    crate::db::with_tx(&state, |c| {
-        crate::db::modules::create(c, &module)?;
-        Ok(module.clone())
+    // A type filter without a root would scan the whole database and
+    // throw most of it away. Say so rather than quietly returning the
+    // tree for a different project than the caller has active.
+    if kind.is_some() && root_id.is_none() {
+        return Err(AppError::Validation("type filter requires rootId".into()));
+    }
+    crate::db::with_conn(&state, |c| match (kind, root_id.as_deref()) {
+        (Some(k), Some(root)) => crate::db::nodes::list_by_root_and_type(c, root, k),
+        (None, Some(root)) => crate::db::nodes::list_by_root(c, root),
+        (None, None) => crate::db::nodes::list_all(c),
+        // Unreachable: guarded above.
+        (Some(_), None) => Ok(Vec::new()),
     })
 }
 
 #[tauri::command]
-pub fn modules_update(
-    state: State<DbPool>,
-    id: String,
-    patch: ModulePatch,
-) -> Result<Module, AppError> {
-    crate::db::with_tx(&state, |c| {
-        crate::db::modules::update(c, &id, patch.clone())
-    })
+pub fn nodes_get(state: State<DbPool>, id: String) -> Result<ResourceNode, AppError> {
+    crate::db::with_conn(&state, |c| crate::db::nodes::get(c, &id))
 }
 
+/// Create a node. An endpoint arrives as one call carrying both halves —
+/// the structural node and its request configuration — because they are
+/// written in a single transaction and a tree where either can be missing
+/// is a tree the reader cannot open.
+///
+/// `root_id` is only required for a module. For a collection or an
+/// endpoint it is derived from the parent, so the two can never disagree.
 #[tauri::command]
-pub fn modules_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
-    crate::db::with_tx(&state, |c| crate::db::modules::delete(c, &id))
-}
-
-/// Reorder a module within its project. `target_index` is the
-/// zero-based position in the post-move list.
-#[tauri::command]
-pub fn modules_move(
+pub fn nodes_create(
     state: State<DbPool>,
-    module_id: String,
-    target_index: i32,
-) -> Result<(), AppError> {
-    crate::db::with_tx(&state, |c| {
-        crate::db::modules::r#move(c, &module_id, target_index)
-    })
-}
-
-// ===========================================================================
-// region: collections
-// ===========================================================================
-
-#[tauri::command]
-pub fn collections_list(
-    state: State<DbPool>,
-    module_id: Option<String>,
-) -> Result<Vec<Collection>, AppError> {
-    crate::db::with_conn(&state, |c| match module_id.as_deref() {
-        Some(module_id) => crate::db::collections::list_by_module(c, module_id),
-        None => crate::db::collections::list_all(c),
-    })
-}
-
-#[tauri::command]
-pub fn collections_create(
-    state: State<DbPool>,
-    module_id: String,
+    root_id: Option<String>,
+    parent_id: Option<String>,
+    kind: String,
     name: String,
-    opts: Option<CreateCollectionOpts>,
-) -> Result<Collection, AppError> {
-    let opts = opts.unwrap_or_default();
-    let collection = Collection {
-        id: uid(),
-        module_id,
-        parent_collection_id: opts.parent_collection_id,
-        name,
-        description: opts.description,
-        sort_order: 0,
-        expanded: None,
-    };
-    crate::db::with_tx(&state, |c| {
-        crate::db::collections::create(c, &collection)?;
-        Ok(collection.clone())
-    })
-}
-
-#[tauri::command]
-pub fn collections_update(
-    state: State<DbPool>,
-    id: String,
-    patch: CollectionPatch,
-) -> Result<Collection, AppError> {
-    crate::db::with_tx(&state, |c| {
-        crate::db::collections::update(c, &id, patch.clone())
-    })
-}
-
-#[tauri::command]
-pub fn collections_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
-    crate::db::with_tx(&state, |c| crate::db::collections::delete(c, &id))
-}
-
-/// Move one or many collections to a new sibling position. The store
-/// uses this for both single drags and multi-select reorders; we
-/// delegate ordering entirely to `db::collections::move_many` so the
-/// DB keeps a contiguous `sort_order`.
-#[tauri::command]
-pub fn collections_move(
-    state: State<DbPool>,
-    collection_ids: Vec<String>,
-    target: CollectionMoveTarget,
-) -> Result<(), AppError> {
-    crate::db::with_tx(&state, |c| {
-        crate::db::collections::move_many(
-            c,
-            &collection_ids,
-            &target.parent_kind,
-            &target.parent_id,
-            target.index,
-        )
-    })
-}
-
-// ===========================================================================
-// region: endpoints
-// ===========================================================================
-
-#[tauri::command]
-pub fn endpoints_list(
-    state: State<DbPool>,
-    collection_id: Option<String>,
-) -> Result<Vec<Endpoint>, AppError> {
-    crate::db::with_conn(&state, |c| match collection_id.as_deref() {
-        Some(collection_id) => crate::db::endpoints::list_by_collection(c, collection_id),
-        None => crate::db::endpoints::list_all(c),
-    })
-}
-
-#[tauri::command]
-pub fn endpoints_get(state: State<DbPool>, id: String) -> Result<Endpoint, AppError> {
-    crate::db::with_conn(&state, |c| crate::db::endpoints::get(c, &id))
-}
-
-/// Substring search. `query` is the user's text; matches against
-/// name / url / description. The DB-layer `search` is more general
-/// (also accepts method / tags filters) — the Tauri surface exposes
-/// just the substring filter the UI needs.
-#[tauri::command]
-pub fn endpoints_search(state: State<DbPool>, query: String) -> Result<Vec<Endpoint>, AppError> {
-    crate::db::with_conn(&state, |c| {
-        crate::db::endpoints::search(c, Some(&query), None, None)
-    })
-}
-
-#[tauri::command]
-pub fn endpoints_create(
-    state: State<DbPool>,
-    collection_id: String,
-    name: String,
-    opts: Option<CreateEndpointOpts>,
-) -> Result<Endpoint, AppError> {
-    let opts = opts.unwrap_or_default();
+    description: Option<String>,
+    detail: Option<CreateEndpointDetailOpts>,
+) -> Result<ResourceNode, AppError> {
+    let kind = ResourceNodeType::parse(&kind)
+        .ok_or_else(|| AppError::Validation(format!("unknown node type {kind:?}")))?;
     let now = crate::domain::now_ms();
-    let endpoint = Endpoint {
+    let mut node = ResourceNode {
         id: uid(),
-        collection_id,
+        root_id: root_id.unwrap_or_default(),
+        parent_id,
+        kind,
         name,
-        description: opts.description,
-        method: opts.method.unwrap_or_default(),
-        url: opts.url.unwrap_or_default(),
-        environment_id: opts.environment_id,
-        base_url_definition_id: opts.base_url_definition_id,
-        base_url_override: None,
-        params: opts.params.unwrap_or_default(),
-        headers: opts.headers.unwrap_or_default(),
-        body: opts.body.unwrap_or_default(),
-        auth: opts.auth.unwrap_or_default(),
-        docs: None,
-        notes: None,
-        tags: opts.tags.unwrap_or_default(),
+        description,
         sort_order: 0,
         created_at: now,
         updated_at: now,
     };
+    if node.root_id.is_empty() {
+        if let Some(parent) = node.parent_id.clone() {
+            node.root_id =
+                crate::db::with_conn(&state, |c| crate::db::nodes::root_id_of(c, &parent))?;
+        }
+    }
+    let detail = detail.map(|d| d.into_detail(&node.id));
     crate::db::with_tx(&state, |c| {
-        crate::db::endpoints::create(c, &endpoint)?;
-        Ok(endpoint.clone())
+        crate::db::nodes::create(c, &node, detail.as_ref())
     })
 }
 
+/// Rename / re-describe / re-order one node. Moving is a separate command
+/// — see [`nodes_move`] — because it has to keep the type matrix and the
+/// subtree's `root_id` honest.
 #[tauri::command]
-pub fn endpoints_update(
+pub fn nodes_update(
     state: State<DbPool>,
     id: String,
-    patch: EndpointPatch,
-) -> Result<Endpoint, AppError> {
+    patch: ResourceNodePatch,
+) -> Result<ResourceNode, AppError> {
+    crate::db::with_tx(&state, |c| crate::db::nodes::update(c, &id, patch.clone()))
+}
+
+/// Delete a node and its whole subtree.
+#[tauri::command]
+pub fn nodes_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
+    crate::db::with_tx(&state, |c| crate::db::nodes::delete(c, &id))
+}
+
+/// Move one or many nodes under a new parent at a new sibling position.
+///
+/// `parent_id` of `None` means "top of the project" and is only legal for
+/// a module — the old `parentKind` field is gone because the destination
+/// parent's own type answers the question. `node_ids` is in the order the
+/// nodes should land, so a multi-select drag keeps the user's pick order.
+#[tauri::command]
+pub fn nodes_move(
+    state: State<DbPool>,
+    node_ids: Vec<String>,
+    parent_id: Option<String>,
+    index: i32,
+) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| {
-        crate::db::endpoints::update(c, &id, patch.clone())
+        crate::db::nodes::move_many(c, &node_ids, parent_id.as_deref(), index)
     })
 }
 
+/// Copy an endpoint under the same parent, immediately after it.
+///
+/// Endpoints only: a "copy" of a module or collection would be an empty
+/// shell, and copying a subtree is a different feature, not a duplicate.
 #[tauri::command]
-pub fn endpoints_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
-    crate::db::with_tx(&state, |c| crate::db::endpoints::delete(c, &id))
+pub fn nodes_duplicate(state: State<DbPool>, id: String) -> Result<ResourceNode, AppError> {
+    crate::db::with_tx(&state, |c| crate::db::nodes::duplicate(c, &id))
 }
 
-/// Duplicate an endpoint, returning the new id. The copy lands at the
-/// end of the same `collection` (caller reorders if needed).
+/// The request configuration of one endpoint node.
 #[tauri::command]
-pub fn endpoints_duplicate(state: State<DbPool>, id: String) -> Result<String, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::endpoints::duplicate(c, &id))
-}
-
-#[tauri::command]
-pub fn endpoints_move(
+pub fn endpoint_detail_get(
     state: State<DbPool>,
-    endpoint_ids: Vec<String>,
-    target: EndpointMoveTarget,
-) -> Result<(), AppError> {
+    node_id: String,
+) -> Result<EndpointDetail, AppError> {
+    crate::db::with_conn(&state, |c| crate::db::endpoint_details::get(c, &node_id))
+}
+
+/// Patch an endpoint's request configuration. Separate from
+/// [`nodes_update`] so renaming an endpoint does not rewrite the JSON
+/// columns that did not change.
+#[tauri::command]
+pub fn endpoint_detail_update(
+    state: State<DbPool>,
+    node_id: String,
+    patch: EndpointDetailPatch,
+) -> Result<EndpointDetail, AppError> {
     crate::db::with_tx(&state, |c| {
-        crate::db::endpoints::move_many(c, &endpoint_ids, &target.collection_id, target.index)
+        crate::db::endpoint_details::update(c, &node_id, patch.clone())
     })
 }
 
@@ -1039,9 +963,15 @@ pub fn resolve_send_input(
     pool: &DbPool,
     args: &EndpointSendArgs,
 ) -> Result<crate::http_executor::HttpRequestInput, AppError> {
-    let endpoint: Endpoint =
-        crate::db::with_conn(pool, |c| crate::db::endpoints::get(c, &args.endpoint_id))?;
-    let project_id = crate::db::endpoints::project_id_of(pool, &endpoint.collection_id)?;
+    let endpoint: EndpointDetail = crate::db::with_conn(pool, |c| {
+        crate::db::endpoint_details::get(c, &args.endpoint_id)
+    })?;
+    // One lookup. The old layout walked endpoint → collection → module →
+    // project; `root_id` is denormalised onto every node precisely so
+    // resolving the owning project — the first step of the per-project
+    // permission gate — is a primary-key hit.
+    let project_id =
+        crate::db::with_conn(pool, |c| crate::db::nodes::root_id_of(c, &endpoint.node_id))?;
 
     // Env selection must mirror the renderer's rule exactly, or Send
     // silently produces a base-less URL or — worse — the wrong
@@ -1157,8 +1087,20 @@ mod endpoint_send_tests {
         let pool = crate::db::init(&dir).unwrap();
 
         use crate::domain::{
-            AuthConfig, AuthType, BaseUrlDefinition, Collection, Endpoint, Environment, HttpMethod,
-            KeyValue, Module, Project, RequestBody,
+            AuthConfig, AuthType, BaseUrlDefinition, EndpointDetail, Environment, HttpMethod,
+            KeyValue, Project, RequestBody, ResourceNode, ResourceNodeType,
+        };
+
+        let node = |id: &str, kind: ResourceNodeType, parent: Option<&str>| ResourceNode {
+            id: id.into(),
+            root_id: "p_demo".into(),
+            parent_id: parent.map(String::from),
+            kind,
+            name: "n".into(),
+            description: None,
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
         };
 
         crate::db::with_tx(&pool, |c| {
@@ -1185,36 +1127,19 @@ mod endpoint_send_tests {
                 },
                 "p_demo",
             )?;
-            crate::db::modules::create(
+            crate::db::nodes::create(c, &node("m_auth", ResourceNodeType::Module, None), None)?;
+            crate::db::nodes::create(
                 c,
-                &Module {
-                    id: "m_auth".into(),
-                    project_id: "p_demo".into(),
-                    name: "Auth".into(),
-                    description: None,
-                    sort_order: 0,
-                    expanded: None,
-                },
+                &node("c_profile", ResourceNodeType::Collection, Some("m_auth")),
+                None,
             )?;
-            crate::db::collections::create(
+            // The endpoint's two halves land together — a node without
+            // its detail row is a tree the reader cannot open.
+            crate::db::nodes::create(
                 c,
-                &Collection {
-                    id: "c_profile".into(),
-                    module_id: "m_auth".into(),
-                    parent_collection_id: None,
-                    name: "Profile".into(),
-                    description: None,
-                    sort_order: 0,
-                    expanded: None,
-                },
-            )?;
-            crate::db::endpoints::create(
-                c,
-                &Endpoint {
-                    id: "e_user_get".into(),
-                    collection_id: "c_profile".into(),
-                    name: "Get user".into(),
-                    description: None,
+                &node("e_user_get", ResourceNodeType::Endpoint, Some("c_profile")),
+                Some(&EndpointDetail {
+                    node_id: "e_user_get".into(),
                     method: HttpMethod::Get,
                     url: "/users/{{userId}}".into(),
                     environment_id: None,
@@ -1238,10 +1163,7 @@ mod endpoint_send_tests {
                     docs: None,
                     notes: None,
                     tags: vec![],
-                    sort_order: 0,
-                    created_at: 1,
-                    updated_at: 1,
-                },
+                }),
             )?;
 
             // Both environments deliberately share one base URL and differ

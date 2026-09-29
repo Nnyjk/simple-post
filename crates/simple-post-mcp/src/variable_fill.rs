@@ -11,7 +11,7 @@
 //!
 //!   * [`resolve_template`] — `{{var}}` substitution against a
 //!     variable map. The low-level building block.
-//!   * [`resolve_endpoint`] — combine an `Endpoint` + active
+//!   * [`resolve_endpoint`] — combine an [`EndpointDetail`] + active
 //!     `Environment` + `Project` + optional [`EndpointOverrides`]
 //!     into a fully-formed [`ResolvedEndpoint`] ready for the HTTP
 //!     sender.
@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use simple_post_core::domain::{
-    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, Endpoint, Environment, HttpMethod,
-    Project, RequestBody,
+    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, EndpointDetail, Environment,
+    HttpMethod, Project, RequestBody,
 };
 use simple_post_core::error::AppError;
 
@@ -55,7 +55,7 @@ pub struct EndpointOverrides {
     ///
     /// The renderer's base-URL picker is ephemeral: a user can switch
     /// definitions without saving the endpoint, so the stored
-    /// `endpoint.base_url_definition_id` is not authoritative at send
+    /// `detail.base_url_definition_id` is not authoritative at send
     /// time. Without this field the browser would have to pre-join the
     /// base URL and the whole point of moving URL composition server-side
     /// would be lost.
@@ -211,9 +211,9 @@ pub fn list_missing_vars(s: &str) -> Vec<String> {
 /// explain its choice back to the renderer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BaseUrlSource {
-    /// `endpoint.baseUrlOverride` won.
+    /// `detail.baseUrlOverride` won.
     Override,
-    /// `endpoint.baseUrlDefinitionId` won (and pointed at a real def).
+    /// `detail.baseUrlDefinitionId` won (and pointed at a real def).
     Definition,
     /// Project default won.
     Default,
@@ -228,7 +228,7 @@ pub enum BaseUrlSource {
 ///
 /// Precedence (highest first):
 ///   1. `endpoint.baseUrl_override`  — per-endpoint custom host
-///   2. `endpoint.base_url_definition_id` — the def the endpoint
+///   2. `detail.base_url_definition_id` — the def the endpoint
 ///      points at (must exist in `project.base_url_definitions`);
 ///      URL is then `env.base_urls[def_id]`.
 ///   3. `project.default_base_url_definition_id` → `env.base_urls[def_id]`
@@ -237,29 +237,29 @@ pub enum BaseUrlSource {
 /// `env.base_urls` is keyed by `BaseUrlDefinition.id`, NOT by name.
 /// That keeps rename operations cheap and the resolution deterministic
 /// even if two defs ever share a name. The env is taken from
-/// `endpoint.environment_id` — when no env is selected (None) the
+/// `detail.environment_id` — when no env is selected (None) the
 /// lookup short-circuits to "".
 pub fn resolve_base_url(
-    endpoint: &Endpoint,
+    detail: &EndpointDetail,
     env: Option<&Environment>,
     project: &Project,
 ) -> (String, BaseUrlSource, Option<String>) {
-    resolve_base_url_with(endpoint, env, project, None)
+    resolve_base_url_with(detail, env, project, None)
 }
 
 /// [`resolve_base_url`] with a caller-supplied definition choice.
 ///
-/// `forced_def_id` takes precedence over `endpoint.base_url_definition_id`
-/// but still yields to `endpoint.base_url_override`, which is a per-endpoint
+/// `forced_def_id` takes precedence over `detail.base_url_definition_id`
+/// but still yields to `detail.base_url_override`, which is a per-endpoint
 /// hard host and was always the strongest signal. `Some("")` means "no base
 /// URL" — the renderer sends that when the user cleared the picker.
 pub fn resolve_base_url_with(
-    endpoint: &Endpoint,
+    detail: &EndpointDetail,
     env: Option<&Environment>,
     project: &Project,
     forced_def_id: Option<&str>,
 ) -> (String, BaseUrlSource, Option<String>) {
-    if let Some(ovr) = endpoint.base_url_override.as_deref() {
+    if let Some(ovr) = detail.base_url_override.as_deref() {
         if !ovr.is_empty() {
             return (ovr.to_string(), BaseUrlSource::Override, None);
         }
@@ -269,7 +269,7 @@ pub fn resolve_base_url_with(
         return (String::new(), BaseUrlSource::None, None);
     }
     let def_id = forced
-        .or_else(|| endpoint.base_url_definition_id.clone())
+        .or_else(|| detail.base_url_definition_id.clone())
         .or_else(|| project.default_base_url_definition_id.clone());
     let def_id = match def_id {
         Some(d) => d,
@@ -282,11 +282,11 @@ pub fn resolve_base_url_with(
             // A definition was named explicitly — either the caller's
             // forced choice or the endpoint's own — so report
             // `Definition`. Only the project default is `Default`.
-            // Classifying off `endpoint.base_url_definition_id` alone
+            // Classifying off `detail.base_url_definition_id` alone
             // mislabelled a forced choice as `Default`, which
             // `api_resolve_endpoint` hands straight to an AI client.
             let explicitly_chosen = forced_def_id.map(|f| !f.is_empty()).unwrap_or(false)
-                || endpoint.base_url_definition_id.is_some();
+                || detail.base_url_definition_id.is_some();
             let source = if explicitly_chosen {
                 BaseUrlSource::Definition
             } else {
@@ -641,7 +641,7 @@ fn base64_encode(input: &[u8]) -> String {
 /// path, no validation rules are enforced — the HTTP sender will
 /// surface its own errors when it tries to use the result.
 pub fn resolve_endpoint(
-    endpoint: &Endpoint,
+    detail: &EndpointDetail,
     env: Option<&Environment>,
     project: &Project,
     overrides: Option<&EndpointOverrides>,
@@ -656,12 +656,12 @@ pub fn resolve_endpoint(
         };
 
     // ---- apply overrides (cheap copy of the relevant fields) ---------
-    let mut eff_url = endpoint.url.clone();
-    let mut eff_method = endpoint.method.clone();
-    let mut eff_headers = endpoint.headers.clone();
-    let mut eff_params = endpoint.params.clone();
-    let mut eff_body = endpoint.body.clone();
-    let eff_auth = endpoint.auth.clone();
+    let mut eff_url = detail.url.clone();
+    let mut eff_method = detail.method.clone();
+    let mut eff_headers = detail.headers.clone();
+    let mut eff_params = detail.params.clone();
+    let mut eff_body = detail.body.clone();
+    let eff_auth = detail.auth.clone();
     // The caller's pick wins over the endpoint's own definition; this is
     // what lets the renderer's unsaved base-URL selection take effect.
     let eff_def_id = overrides.and_then(|o| o.base_url_definition_id.clone());
@@ -703,7 +703,7 @@ pub fn resolve_endpoint(
 
     // ---- baseUrl resolution + URL substitution ------------------------
     let (base_url, _src, _def_id) =
-        resolve_base_url_with(endpoint, env, project, eff_def_id.as_deref());
+        resolve_base_url_with(detail, env, project, eff_def_id.as_deref());
     let joined = join_base_url(&base_url, &eff_url);
     let url_r = resolve_template(&joined, &vars);
     for m in url_r.missing {

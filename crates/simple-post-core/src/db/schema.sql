@@ -29,47 +29,9 @@ CREATE TABLE IF NOT EXISTS base_url_definitions (
 CREATE INDEX IF NOT EXISTS idx_base_url_defs_project
   ON base_url_definitions(project_id);
 
-CREATE TABLE IF NOT EXISTS modules (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  sort_order INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_modules_project ON modules(project_id);
-
-CREATE TABLE IF NOT EXISTS collections (
-  id TEXT PRIMARY KEY,
-  module_id TEXT NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
-  parent_collection_id TEXT REFERENCES collections(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  sort_order INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_collections_module ON collections(module_id);
-
-CREATE TABLE IF NOT EXISTS endpoints (
-  id TEXT PRIMARY KEY,
-  collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  method TEXT NOT NULL,
-  url TEXT NOT NULL,
-  environment_id TEXT,
-  base_url_definition_id TEXT,
-  base_url_override TEXT,
-  params_json TEXT NOT NULL DEFAULT '[]',
-  headers_json TEXT NOT NULL DEFAULT '[]',
-  body_json    TEXT NOT NULL DEFAULT '{}',
-  auth_json    TEXT NOT NULL DEFAULT '{}',
-  docs TEXT,
-  notes TEXT,
-  tags_json TEXT NOT NULL DEFAULT '[]',
-  sort_order INTEGER NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_endpoints_collection ON endpoints(collection_id);
+-- The `modules` / `collections` / `endpoints` tables that used to live
+-- here are gone; `nodes` + `endpoint_details` below replaced them. See
+-- the section header there for why the split is two tables and not one.
 
 CREATE TABLE IF NOT EXISTS environments (
   id TEXT PRIMARY KEY,

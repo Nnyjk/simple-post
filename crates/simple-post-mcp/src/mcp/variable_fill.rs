@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
-use simple_post_core::domain::Endpoint;
+use simple_post_core::domain::EndpointDetail;
 use simple_post_core::error::AppError;
 
 // =========================================================================
@@ -145,10 +145,10 @@ async fn tool_api_resolve_endpoint(
         .map_err(|e| AppError::Validation(format!("api_resolve_endpoint args: {e}")))?;
     let endpoint_id = a.endpoint_id.clone();
 
-    let endpoint: Endpoint = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &endpoint_id)
+    let endpoint: EndpointDetail = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoint_details::get(c, &endpoint_id)
     })?;
-    let project_id = collection_project_id(&state.pool, &endpoint.collection_id);
+    let project_id = endpoint_project_id(&state.pool, &endpoint.node_id);
     crate::mcp::check_permission(&state.pool, &project_id, "api_resolve_endpoint")
         .await
         .ok();
@@ -200,10 +200,10 @@ async fn tool_api_validate_endpoint(
     args: Value,
 ) -> Result<CallToolResult, AppError> {
     let endpoint_id = arg_str(&args, "endpoint_id")?.to_string();
-    let endpoint: Endpoint = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::endpoints::get(c, &endpoint_id)
+    let endpoint: EndpointDetail = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::endpoint_details::get(c, &endpoint_id)
     })?;
-    let project_id = collection_project_id(&state.pool, &endpoint.collection_id);
+    let project_id = endpoint_project_id(&state.pool, &endpoint.node_id);
     crate::mcp::check_permission(&state.pool, &project_id, "api_validate_endpoint")
         .await
         .ok();
@@ -220,25 +220,20 @@ async fn tool_api_validate_endpoint(
 // Local helpers
 // =========================================================================
 
-/// Resolve an endpoint's collection → module → project id so we can gate
-/// the call. Falls back to an empty string (which the permission layer
-/// treats as "global-ish").
-fn collection_project_id(pool: &simple_post_core::db::DbPool, collection_id: &str) -> String {
-    if let Ok(coll) = simple_post_core::db::with_conn(pool, |c| {
-        simple_post_core::db::collections::get(c, collection_id)
-    }) {
-        if let Ok(module) = simple_post_core::db::with_conn(pool, |c| {
-            simple_post_core::db::modules::get(c, &coll.module_id)
-        }) {
-            return module.project_id;
-        }
-    }
-    String::new()
+/// Resolve an endpoint node → project id so we can gate the call.
+/// Falls back to an empty string (which the permission layer treats as
+/// "global-ish"). One indexed lookup: `root_id` is denormalised onto
+/// every node precisely so this does not have to walk the parent chain.
+fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> String {
+    simple_post_core::db::with_conn(pool, |c| {
+        simple_post_core::db::nodes::root_id_of(c, node_id)
+    })
+    .unwrap_or_default()
 }
 
 /// Static validation — does this endpoint look like it'll run without
 /// immediate failure? Returns a list of `{field, message}` issues.
-fn validate(endpoint: &Endpoint) -> Vec<Value> {
+fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
     use simple_post_core::domain::{AuthType, BodyMode};
     let mut issues = Vec::new();
 

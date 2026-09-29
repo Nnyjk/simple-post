@@ -131,41 +131,77 @@ fn update_sets_default_base_url_definition_id() {
 }
 
 #[test]
-fn delete_removes_project_and_cascades_to_modules() {
+fn delete_removes_project_and_cascades_to_the_whole_tree() {
     let pool = fresh_pool();
+    // One module, one nested collection, one endpoint under it, plus the
+    // endpoint's configuration row. Deleting the project has to take all
+    // four: `nodes.root_id` cascades from `projects`, `nodes.parent_id`
+    // cascades down the tree, and `endpoint_details` cascades from its
+    // node. Asserting only the module would pass even if the deeper
+    // levels leaked.
     db::with_tx(&pool, |c| {
         c.execute(
-            "INSERT INTO modules (id, project_id, name, sort_order) \
-                 VALUES ('m_extra', 'p_demo', 'extra', 99)",
+            "INSERT INTO nodes \
+                 (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
+                 VALUES ('m_extra', 'p_demo', NULL, 'module', 'extra', 99, 0, 0)",
+            [],
+        )?;
+        c.execute(
+            "INSERT INTO nodes \
+                 (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
+                 VALUES ('c_extra', 'p_demo', 'm_extra', 'collection', 'c', 0, 0, 0)",
+            [],
+        )?;
+        c.execute(
+            "INSERT INTO nodes \
+                 (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
+                 VALUES ('e_extra', 'p_demo', 'c_extra', 'endpoint', 'e', 0, 0, 0)",
+            [],
+        )?;
+        c.execute(
+            "INSERT INTO endpoint_details (node_id, method, url) \
+                 VALUES ('e_extra', 'GET', '/x')",
             [],
         )?;
         Ok(())
     })
     .unwrap();
 
-    let before = db::with_conn(&pool, |c| {
-        let n: i64 = c.query_row(
-            "SELECT COUNT(*) FROM modules WHERE id = 'm_extra'",
-            [],
-            |r| r.get(0),
-        )?;
-        Ok(n)
-    })
-    .unwrap();
-    assert_eq!(before, 1);
+    // `endpoint_details` keys on `node_id`; `nodes` on `id`. Same shape
+    // of question — "is this row still here?" — for both tables.
+    let count = |table: &str, col: &str, id: &str| {
+        db::with_conn(&pool, |c| {
+            let n: i64 = c.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE {col} = ?1"),
+                [id],
+                |r| r.get(0),
+            )?;
+            Ok(n)
+        })
+        .unwrap()
+    };
+    let node = |id: &str| count("nodes", "id", id);
+    let detail = |id: &str| count("endpoint_details", "node_id", id);
+
+    assert_eq!(node("m_extra"), 1);
+    assert_eq!(node("c_extra"), 1);
+    assert_eq!(node("e_extra"), 1);
+    assert_eq!(detail("e_extra"), 1);
 
     db::with_tx(&pool, |c| delete(c, "p_demo")).unwrap();
 
-    let after = db::with_conn(&pool, |c| {
-        let n: i64 = c.query_row(
-            "SELECT COUNT(*) FROM modules WHERE id = 'm_extra'",
-            [],
-            |r| r.get(0),
-        )?;
-        Ok(n)
-    })
-    .unwrap();
-    assert_eq!(after, 0, "ON DELETE CASCADE should drop child rows");
+    assert_eq!(
+        node("m_extra"),
+        0,
+        "ON DELETE CASCADE should drop child rows"
+    );
+    assert_eq!(node("c_extra"), 0);
+    assert_eq!(node("e_extra"), 0);
+    assert_eq!(
+        detail("e_extra"),
+        0,
+        "the endpoint's configuration must not outlive its node"
+    );
 }
 
 #[test]

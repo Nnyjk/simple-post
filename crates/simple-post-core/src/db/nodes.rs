@@ -525,6 +525,153 @@ pub fn move_many(
     Ok(())
 }
 
+/// Transfer a module to a different project, at a given top-level slot.
+///
+/// The one move [`move_many`] cannot express. With `new_parent_id` of
+/// `None` it has no parent row to read a root from, so it keeps the
+/// module's current `root_id` — correct for "reorder my modules", wrong
+/// for "move this module to another project", which is what the MCP
+/// `module_move` tool has always meant.
+///
+/// Separate rather than an extra argument on `move_many` because the two
+/// differ in more than a parameter value: a boundary crossing has to
+/// renumber the *old* project's top-level siblings too, or that project
+/// is left with a gap in its `sort_order` run.
+///
+/// `target_index` of `None` appends. MUST be called inside `db::with_tx`
+/// — both projects' orderings have to land together.
+pub fn move_to_root(
+    conn: &mut Connection,
+    id: &str,
+    new_root_id: &str,
+    target_index: Option<i32>,
+) -> Result<ResourceNode, AppError> {
+    let node = get(conn, id)?;
+    if node.kind != ResourceNodeType::Module {
+        return Err(AppError::Validation(format!(
+            "only a module can move between projects; node {id} is a {}",
+            node.kind.as_str()
+        )));
+    }
+    // A typo'd project id would otherwise file the subtree under a root
+    // no project row backs, where nothing can ever list it again.
+    let dest_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
+            params![new_root_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    if !dest_exists {
+        return Err(AppError::NotFound(format!("project {new_root_id}")));
+    }
+    if node.root_id == new_root_id && target_index.is_none() {
+        return Ok(node);
+    }
+
+    let moved_subtrees = subtree_ids(conn, &[id.to_string()])?;
+
+    // Close the gap in the project being left, unless that is also the
+    // destination — in which case the insert below renumbers anyway and
+    // running the compaction first would only churn the same rows.
+    //
+    // The departing module is excluded: at this point it is still filed
+    // under the old root, so counting it would leave its old slot
+    // occupied and shift nothing up.
+    if node.root_id != new_root_id {
+        renumber_top_level(conn, &node.root_id, Some(id))?;
+    }
+
+    // Slot the module into the destination, pulling the rest of that
+    // project's top level up around it.
+    let mut order = top_level_ids(conn, new_root_id)?
+        .into_iter()
+        .filter(|existing| existing != id)
+        .collect::<Vec<_>>();
+    let idx = match target_index {
+        Some(i) => (i.max(0) as usize).min(order.len()),
+        None => order.len(),
+    };
+    order.insert(idx, id.to_string());
+    write_order(conn, &order)?;
+
+    // Re-derive `root_id` across the subtree, for the same reason
+    // `move_many` does: the named row alone would leave every descendant
+    // filed under the old project and invisible to `list_by_root`.
+    let mut update_root = conn.prepare("UPDATE nodes SET root_id = ?1 WHERE id = ?2")?;
+    for sid in &moved_subtrees {
+        update_root.execute(params![new_root_id, sid])?;
+    }
+    drop(update_root);
+
+    get(conn, id)
+}
+
+/// Direct children of one node, in display order.
+///
+/// `kind` narrows to a single type. With the unified tree this is the
+/// only query a "list the endpoints in this collection" needs — the old
+/// `endpoints::list_by_collection` existed because an endpoint's parent
+/// could only ever be a collection, which is no longer true.
+///
+/// Not recursive: for a whole subtree use [`subtree_ids`] with
+/// [`list_by_root_and_type`], or walk parents from the root.
+pub fn list_children(
+    conn: &mut Connection,
+    parent_id: &str,
+    kind: Option<ResourceNodeType>,
+) -> Result<Vec<ResourceNode>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, root_id, parent_id, type, name, description, sort_order, created_at, updated_at \
+         FROM nodes WHERE parent_id = ?1 ORDER BY sort_order ASC, id ASC",
+    )?;
+    let rows = stmt
+        .query_map(params![parent_id], row_to_node)?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    Ok(match kind {
+        Some(k) => rows.into_iter().filter(|n| n.kind == k).collect(),
+        None => rows,
+    })
+}
+
+/// Ids of a project's top-level nodes, in display order.
+fn top_level_ids(conn: &mut Connection, root_id: &str) -> Result<Vec<String>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id FROM nodes WHERE root_id = ?1 AND parent_id IS NULL \
+         ORDER BY sort_order ASC, id ASC",
+    )?;
+    let ids = stmt
+        .query_map(params![root_id], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
+
+/// Write `0..N` into `sort_order` for the given ids, in the given order.
+fn write_order(conn: &mut Connection, ids: &[String]) -> Result<(), AppError> {
+    let mut update = conn.prepare("UPDATE nodes SET sort_order = ?1 WHERE id = ?2")?;
+    for (i, id) in ids.iter().enumerate() {
+        update.execute(params![i as i64, id])?;
+    }
+    Ok(())
+}
+
+/// Collapse a project's top-level ordering back to a contiguous `0..N`
+/// run after a member left it. `exclude` is the member that left — it is
+/// still filed under this root at the moment this runs, so leaving it in
+/// would keep its vacated slot occupied.
+fn renumber_top_level(
+    conn: &mut Connection,
+    root_id: &str,
+    exclude: Option<&str>,
+) -> Result<(), AppError> {
+    let ids = top_level_ids(conn, root_id)?
+        .into_iter()
+        .filter(|id| Some(id.as_str()) != exclude)
+        .collect::<Vec<_>>();
+    write_order(conn, &ids)
+}
+
 // -------------------------------------------------------------------------
 // Internals.
 // -------------------------------------------------------------------------
