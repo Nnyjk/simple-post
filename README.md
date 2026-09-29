@@ -93,9 +93,10 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 切换瞬时生效，刷新保留
 - 全局 html class 切换，无白屏闪烁
 
-### Mock 数据
-- 3 项目 / 6 模块 / 8 集合 / 12 接口 / 3 环境
-- 覆盖 SMS 登录、密码登录、用户资料、订单 CRUD、状态流转、收银台、抬头、开票、设备影子读/写
+### 首次启动
+- **不注入任何演示数据**。首次启动只建表，项目树是空的，从欢迎页新建第一个项目开始
+- `crates/simple-post-core/src/db/fixtures.json` 仅作为 Rust 测试夹具保留，
+  编译进生产构建的路径不存在（`#[cfg(test)] pub(crate) mod test_support`）
 
 ## 路线图
 

@@ -122,19 +122,28 @@ try {
     assert(!names.has(name), `read_only policy hides ${name}`);
   }
 
+  // Simple Post ships no seed data, so a fresh daemon has an empty
+  // database. `env_list` against an unknown project must resolve to `[]`
+  // — not a 404, not a transport error, and not a permission failure
+  // (the per-project gate defaults to ReadCall, which covers Read).
+  //
+  // This transport cannot create data to assert against: `simple-post
+  // mcp` mounts only /mcp, /mcp/healthz and /mcp/tools. There is no
+  // /api/mcp/capability to lift the default read_only policy, and
+  // `dispatch` refuses env_create under it, so no fixture can be built
+  // from here. Covering the populated path needs a `serve-web` host;
+  // db-level coverage of that lives in simple-post-core's environment
+  // tests.
   const envList = await rpc(3, 'tools/call', {
     name: 'env_list',
     arguments: { project_id: 'p_demo' },
   });
+  assert(envList?.result?.is_error !== true, 'env_list succeeds against an empty database');
   const envText = envList?.result?.content?.[0]?.text ?? '';
   const envs = JSON.parse(envText);
   assert(
-    Array.isArray(envs) && envs.length === 3,
-    'env_list returns the three seeded environments',
-  );
-  assert(
-    envs.some((env) => env.name === 'dev' && env.isActive === true),
-    'env_list includes active dev',
+    Array.isArray(envs) && envs.length === 0,
+    'env_list returns an empty array when the app ships no seed data',
   );
 
   const create = await rpc(4, 'tools/call', {

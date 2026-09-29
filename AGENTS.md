@@ -34,7 +34,7 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 - `src/lib/` — `tauri-commands.ts` (dual-transport IPC + `COMMANDS` registry), `http.ts`, `http-build.ts`, `mcp-types.ts`, `use-mcp-status.ts`
 - `src/components/ui/` — shared primitives (`method-picker`, `tabs`, `dialog`, …)
 - `src/types/domain.ts` — TS mirrors of Rust domain types
-- `crates/simple-post-core/src/db/` — per-entity SQL modules + `schema.sql` + `fixtures.json`
+- `crates/simple-post-core/src/db/` — per-entity SQL modules + `schema.sql` (`fixtures.json` is test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
 - `src-tauri/src/` — `commands.rs`, `web_api.rs`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
 - `scripts/` — dev/test/build utilities (see below); `docs/` — HTTP reference, OpenAPI, refactor plan
@@ -171,7 +171,7 @@ Key facts:
 - **A test that resolves the module under test at runtime survives neither a move nor a rename.** `tauri-commands.test.ts` probes `IS_TAURI_SHELL` in a `spawnSync` child because that flag is frozen at module-eval time, and resolves the module with `new URL('./tauri-commands.ts', import.meta.url).href`. That URL is relative to the *test file*, so moving the test into `__tests__/` silently broke it until the path gained its `../`. Typecheck and lint both passed on the broken version — only the child process failed. Grep for `import.meta.url` and `__dirname` whenever a test file changes directory.
 - ESLint scoping decisions (in `eslint.config.js`): `no-explicit-any` off under `**/*.test.ts` and `**/__tests__/` (deliberately loose mocks); `no-require-imports` off for `.mjs`/`.cjs` tooling; names starting with `_` are sanctioned unused placeholders; `react-hooks/rules-of-hooks` is **error** — `HttpTester`'s hooks were hoisted above its `if (!endpoint)` early return to satisfy it (never put hooks after an early return).
 - Headless store tests need `src/stores/__tests__/_browser-shim.ts`: installs Map-backed `localStorage` (Node 22 ships a methodless native `localStorage` that crashes otherwise), `document.visibilityState` emitter, timers, and `mockIPC`, and sets `window.__TAURI_INTERNALS__ = {}` *before* module eval so `IS_TAURI_SHELL === true`.
-- Fixture: `crates/simple-post-core/src/db/fixtures.json` — the SQLite seed (also used at DB init). There is **no** TS mock-data module; store tests build their own fixtures inline.
+- **No seed data ships with the app.** `db::init` runs `schema.sql` and stops — a fresh install is empty. `crates/simple-post-core/src/db/fixtures.json` is **test-only**: it is reachable solely through `#[cfg(test)] pub(crate) mod test_support` (`init_seeded` / `seed`), which does not exist in a production build. Because `test_support` is `pub(crate)`, sibling crates cannot use it — the `endpoint_send_tests` module in `src-tauri/src/commands.rs` builds its own rows through the public CRUD API instead. There is **no** TS mock-data module; store tests build their own fixtures inline.
 - Rust DB tests isolate via `fresh_pool()` → temp-dir SQLite keyed by atomic counter + PID (`crates/simple-post-core/src/db/mod_test.rs`, the `#[path]` module of `db/mod.rs`).
 - Store custom hooks (`useActiveProject`, …) throw outside a React render; in Node, read state with `useAppStore.getState()`.
 - No React component/DOM tests; no coverage tooling configured (c8/nyc/tarpaulin absent).

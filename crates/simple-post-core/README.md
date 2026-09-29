@@ -11,9 +11,9 @@ crates/simple-post-core/
     ├── lib.rs                 # re-exports db / domain / error /
     │                          # http_executor / mcp_metrics / permissions
     ├── db/                    # SQLite + CRUD modules
-    │   ├── mod.rs             # init, with_conn, with_tx, schema, fixtures
-    │   ├── schema.sql         # CREATE TABLE statements
-    │   ├── fixtures.json      # seed data for fresh DBs
+    │   ├── mod.rs             # init, with_conn, with_tx, schema
+    │   ├── schema.sql         # CREATE TABLE statements (no rows)
+    │   ├── fixtures.json      # test-only fixture data (#[cfg(test)])
     │   ├── base_url_defs.rs
     │   ├── collections.rs
     │   ├── endpoints.rs

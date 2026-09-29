@@ -1,9 +1,13 @@
 -- Simple Post schema.
--- Executed once at boot from `db/mod.rs::migrate_and_seed`. Idempotent:
+-- Executed once at boot from `db/mod.rs::migrate`. Idempotent:
 -- every `CREATE` uses `IF NOT EXISTS` so a re-run on an already-migrated
 -- database is a no-op.  Foreign keys are enforced; ON DELETE CASCADE
 -- keeps project / module / collection deletion cheap (one DELETE on the
 -- root removes the whole subtree).
+--
+-- Migrations create tables and insert **no rows**. A fresh install is
+-- empty by design — test fixtures live in `fixtures.json` behind
+-- `#[cfg(test)]`, not here.
 --
 -- Timestamp convention: every `*_at` column is a unix-ms integer
 -- (what JS / TS `Date.now()` returns). Easier to compare, sort, and
