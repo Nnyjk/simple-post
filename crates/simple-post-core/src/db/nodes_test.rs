@@ -538,6 +538,89 @@ fn the_check_constraint_holds_the_type_set_closed() {
 }
 
 // -------------------------------------------------------------------------
+// Search and duplicate. Both are needed by the read path that replaces
+// `/api/endpoints/search` and `/api/endpoints/:id/duplicate`.
+// -------------------------------------------------------------------------
+
+#[test]
+fn search_matches_node_name() {
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m_auth", 0), None);
+    put(&pool, &collection("p1", "c_login", "m_auth", 0), None);
+
+    let got = db::with_conn(&pool, |c| search(c, "login")).unwrap();
+    let ids: Vec<&str> = got.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(ids, vec!["c_login"]);
+}
+
+#[test]
+fn search_reaches_into_endpoint_url() {
+    // `url` lives in endpoint_details, which is exactly why the search
+    // has to join rather than match on the node alone.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (mut e, d) = endpoint("p1", "e1", "c1", 0);
+    e.name = "Fetch one".into();
+    let mut d = d;
+    d.url = "/users/:id/profile".into();
+    put(&pool, &e, Some(&d));
+
+    let got = db::with_conn(&pool, |c| search(c, "profile")).unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].id, "e1");
+}
+
+#[test]
+fn search_does_not_match_a_null_url_on_a_non_endpoint() {
+    // Without the `n.type = 'endpoint'` guard, every module and
+    // collection would match a LIKE against its own NULL url column.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    assert!(db::with_conn(&pool, |c| search(c, "e")).unwrap().is_empty());
+}
+
+#[test]
+fn duplicate_copies_the_endpoint_and_its_configuration() {
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (mut e, d) = endpoint("p1", "e1", "c1", 0);
+    e.name = "Fetch one".into();
+    let mut d = d;
+    d.url = "/users".into();
+    d.tags = vec!["a".into()];
+    put(&pool, &e, Some(&d));
+
+    let copy = db::with_tx(&pool, |c| duplicate(c, "e1")).unwrap();
+    assert_ne!(copy.id, "e1", "a copy needs its own id");
+    assert_eq!(copy.parent_id.as_deref(), Some("c1"), "same parent");
+    assert_eq!(copy.name, "Fetch one (copy)");
+    assert_eq!(
+        copy.sort_order,
+        e.sort_order + 1,
+        "the copy lands next to the original, not at the tail"
+    );
+
+    let detail = db::with_conn(&pool, |c| crate::db::endpoint_details::get(c, &copy.id)).unwrap();
+    assert_eq!(detail.node_id, copy.id);
+    assert_eq!(detail.url, "/users");
+    assert_eq!(detail.tags, vec!["a".to_string()]);
+}
+
+#[test]
+fn duplicate_refuses_a_non_endpoint() {
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    for id in ["m1", "c1"] {
+        let err = db::with_tx(&pool, |c| duplicate(c, id)).unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)), "{id}: {err:?}");
+    }
+}
+
+// -------------------------------------------------------------------------
 // Cascade delete.
 // -------------------------------------------------------------------------
 

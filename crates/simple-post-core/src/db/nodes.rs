@@ -37,6 +37,10 @@ use crate::error::AppError;
 const COLUMNS: &str = "id, root_id, parent_id, type, name, description, sort_order, \
                        created_at, updated_at";
 
+/// Same list, qualified for the queries that join a second table.
+const COLUMNS_N: &str = "n.id, n.root_id, n.parent_id, n.type, n.name, n.description, \
+                         n.sort_order, n.created_at, n.updated_at";
+
 // -------------------------------------------------------------------------
 // Reads.
 // -------------------------------------------------------------------------
@@ -94,6 +98,74 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<ResourceNode>, AppError> {
         out.push(r.map_err(AppError::Sqlite)?);
     }
     Ok(out)
+}
+
+/// Substring search over the tree.
+///
+/// Endpoint `url` lives in `endpoint_details`, so this joins to reach
+/// it — the same reason the config was split out. A module or
+/// collection has no url, which the `n.type = 'endpoint'` guard keeps
+/// from matching a null column.
+///
+/// Must be called inside `db::with_tx` if the caller also wants the
+/// matching endpoints' details; the join is read-only, so `with_conn`
+/// is enough on its own.
+pub fn search(conn: &mut Connection, q: &str) -> Result<Vec<ResourceNode>, AppError> {
+    let pattern = format!("%{q}%");
+    let sql = format!(
+        "SELECT {COLUMNS_N} FROM nodes n \
+         LEFT JOIN endpoint_details e ON e.node_id = n.id \
+         WHERE n.name LIKE ?1 OR n.description LIKE ?1 \
+            OR (n.type = 'endpoint' AND e.url LIKE ?1) \
+         ORDER BY n.root_id ASC, n.sort_order ASC, n.id ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![pattern], row_to_node)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(AppError::Sqlite)?);
+    }
+    Ok(out)
+}
+
+/// Copy an endpoint and its configuration under the same parent.
+///
+/// Endpoints only — the same shape as the old `db::endpoints::duplicate`
+/// this replaces, and for the same reason: a "copy" of a module or a
+/// collection would be an empty shell, and the old UI has no way to
+/// express that. A subtree copy is a different feature, not a
+/// duplicate.
+///
+/// MUST be called inside `db::with_tx` — the node and its detail row
+/// have to land together or the copy cannot be opened.
+pub fn duplicate(conn: &mut Connection, id: &str) -> Result<ResourceNode, AppError> {
+    let node = get(conn, id)?;
+    if node.kind != ResourceNodeType::Endpoint {
+        return Err(AppError::Validation(format!(
+            "only an endpoint can be duplicated; node {id} is a {}",
+            node.kind.as_str()
+        )));
+    }
+    let detail = super::endpoint_details::get(conn, id)?;
+    let now = crate::domain::now_ms();
+    let copy = ResourceNode {
+        id: crate::domain::uid(),
+        name: format!("{} (copy)", node.name),
+        // Straight after the original. Not `MAX + 1` — the old
+        // implementation pushed copies to the tail, which meant
+        // duplicating an endpoint you were looking at moved it out from
+        // under the cursor.
+        sort_order: node.sort_order + 1,
+        created_at: now,
+        updated_at: now,
+        ..node
+    };
+    let copied_detail = EndpointDetail {
+        node_id: copy.id.clone(),
+        ..detail
+    };
+    create(conn, &copy, Some(&copied_detail))?;
+    get(conn, &copy.id)
 }
 
 pub fn get(conn: &mut Connection, id: &str) -> Result<ResourceNode, AppError> {
