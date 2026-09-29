@@ -37,3 +37,22 @@ pub(crate) async fn preferences_put(
     db::with_tx(&s.pool, |c| db::preferences::set(c, &body.key, &raw)).map_err(map_app_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Unix-ms timestamp of the last destructive schema rebuild, or `null`.
+///
+/// Mirrors the `db_recreated_at` Tauri command. It is a dedicated route
+/// rather than a key inside `GET /api/preferences` because the renderer
+/// needs it on every boot and the full preferences map is an internal
+/// surface the browser has no other reason to read.
+pub(crate) async fn db_recreated_at(
+    State(s): State<Arc<WebState>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let at: Option<i64> = db::with_conn(&s.pool, |c| {
+        db::preferences::get(c, db::preferences::keys::DB_RECREATED_AT)
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(match at {
+        Some(ms) => Value::Number(ms.into()),
+        None => Value::Null,
+    }))
+}

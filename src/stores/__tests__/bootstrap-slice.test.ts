@@ -23,6 +23,7 @@ function makeBootstrapHarness() {
     activeEndpointId: null,
     loading: false,
     bootstrapError: null,
+    dbRecreatedAt: null,
     openTab: () => undefined,
     setLastResponse: () => undefined,
   };
@@ -105,16 +106,62 @@ describe('bootstrap-slice 聚合加载契约', () => {
       { cmd: 'collections_list', args: {} },
       { cmd: 'endpoints_list', args: {} },
       { cmd: 'environments_list', args: {} },
+      // Boot-time notice check, issued after the lists resolve and
+      // tolerant of failure — see the reset-announcement tests below.
+      { cmd: 'db_recreated_at', args: {} },
     ]);
     assert.equal(bag.loaded, true);
     assert.equal(bag.loading, false);
     assert.equal(bag.bootstrapError, null);
+    assert.equal(bag.dbRecreatedAt, null);
     assert.deepEqual(bag.projects, [project]);
     assert.deepEqual(bag.modules, [module]);
     assert.deepEqual(bag.collections, [collection]);
     assert.deepEqual(bag.environments, [environment]);
     assert.equal(bag.activeProjectId, 'p1');
     assert.equal(bag.activeEnvironmentId, 'env1');
+  });
+
+  it('后端报告 schema 重建时把时间戳交给 UI 展示', async () => {
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => {
+      if (cmd === 'db_recreated_at') return 1789623874000;
+      return [];
+    });
+
+    await bag.bootstrap();
+
+    assert.equal(bag.loaded, true);
+    assert.equal(bag.bootstrapError, null, 'a reset workspace loaded fine');
+    assert.equal(bag.dbRecreatedAt, 1789623874000);
+  });
+
+  it('读取重建时间戳失败不影响加载结果', async () => {
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => {
+      // Losing the data because we could not read a notice about
+      // losing the data would be absurd.
+      if (cmd === 'db_recreated_at') throw new Error('recreated_at unavailable');
+      return [];
+    });
+
+    await bag.bootstrap();
+
+    assert.equal(bag.loaded, true, 'the lists still loaded');
+    assert.equal(bag.bootstrapError, null);
+    assert.equal(bag.dbRecreatedAt, null);
+  });
+
+  it('用户可以关闭重建提示而不影响已加载数据', async () => {
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => (cmd === 'db_recreated_at' ? 1789623874000 : []));
+    await bag.bootstrap();
+    assert.equal(bag.dbRecreatedAt, 1789623874000);
+
+    bag.dismissDbRecreated();
+
+    assert.equal(bag.dbRecreatedAt, null);
+    assert.equal(bag.loaded, true, 'dismissing is not a reload');
   });
 
   it('任一必选列表失败时保留错误且不伪装成成功空数据', async () => {

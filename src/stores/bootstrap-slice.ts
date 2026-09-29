@@ -38,6 +38,20 @@ export interface BootstrapSliceState {
   loading: boolean;
   /** 最近一次启动加载错误；成功后清空。 */
   bootstrapError: string | null;
+  /**
+   * Unix-ms of the last destructive schema rebuild, or `null`.
+   *
+   * There is no database migration path: when `db::init` meets a
+   * `store.db` written by an older layout it replaces the file. That is
+   * data loss, and an empty tree on its own says nothing — it looks
+   * exactly like a workspace that was always empty. The backend records
+   * the event and the renderer announces it here.
+   *
+   * Separate from `bootstrapError` on purpose: a reset workspace loaded
+   * perfectly well, so it must not render as a startup failure with a
+   * pointless retry button.
+   */
+  dbRecreatedAt: number | null;
 }
 
 /** Action portion owned by the bootstrap slice. */
@@ -71,6 +85,13 @@ export interface BootstrapSliceActions {
    * subsequent `bootstrap()` retry still runs.
    */
   clearBootstrapError: () => void;
+
+  /**
+   * Dismiss the "your workspace was reset" notice without touching the
+   * loaded data. Keeps the announcement a one-time event rather than
+   * something that reappears on every navigation.
+   */
+  dismissDbRecreated: () => void;
 }
 
 export type BootstrapSlice = BootstrapSliceState & BootstrapSliceActions;
@@ -94,6 +115,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
   activeEndpointId: null,
   loading: false,
   bootstrapError: null,
+  dbRecreatedAt: null,
 
   // ---------- selection / expansion ----------
 
@@ -156,6 +178,15 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         : undefined;
       const firstEndpoint = endpoints[0];
 
+      // Tolerant on purpose: a failure here must not fail the load. The
+      // workspace may simply predate the version stamp, and losing the
+      // data because we could not read a notice about losing the data
+      // would be absurd. `?? null` normalises a backend that answers
+      // with no body, so the banner tests a strict `!== null`.
+      const recreatedAt = await invokeCmd<number | null>(COMMANDS.dbRecreatedAt)
+        .then((at) => at ?? null)
+        .catch(() => null);
+
       set({
         projects,
         modules,
@@ -164,6 +195,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         environments,
         loaded: true,
         bootstrapError: null,
+        dbRecreatedAt: recreatedAt,
         loading: false,
         activeProjectId: firstProject?.id ?? '',
         activeEnvironmentId: firstProjectEnv?.id ?? '',
@@ -182,4 +214,5 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
   },
 
   clearBootstrapError: () => set({ bootstrapError: null }),
+  dismissDbRecreated: () => set({ dbRecreatedAt: null }),
 });

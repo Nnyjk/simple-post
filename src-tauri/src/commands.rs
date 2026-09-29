@@ -707,6 +707,29 @@ pub fn request_settings_update(
 }
 
 // ===========================================================================
+// region: db status
+// ===========================================================================
+
+/// Unix-ms timestamp of the last destructive schema rebuild, or `None`
+/// when this workspace has never been reset.
+///
+/// Written by [`crate::db::init`] only when it had to replace a
+/// `store.db` written by an older layout — there is no migration path,
+/// so the previous file is dropped rather than upgraded. The renderer
+/// reads this once during bootstrap and announces the reset.
+///
+/// Without it the user opens the app to an empty tree with no
+/// explanation, which is indistinguishable from never having had any
+/// projects — and they have no way to tell data loss from an empty
+/// workspace.
+#[tauri::command]
+pub fn db_recreated_at(state: State<DbPool>) -> Result<Option<i64>, AppError> {
+    crate::db::with_conn(&state, |c| {
+        crate::db::preferences::get(c, crate::db::preferences::keys::DB_RECREATED_AT)
+    })
+}
+
+// ===========================================================================
 // region: permissions
 // ===========================================================================
 
@@ -1108,9 +1131,18 @@ pub fn resolve_send_input(
 mod endpoint_send_tests {
     use super::*;
 
-    /// Seeded DB in a temp dir, isolated per test. The atomic counter
-    /// disambiguates when several tests construct their pool inside the
-    /// same millisecond (cargo runs tests in parallel).
+    /// DB in a temp dir, isolated per test, carrying the minimal fixture
+    /// chain the send path exercises:
+    /// `p_demo → m_auth → c_profile → e_user_get`, plus the `def_default`
+    /// base URL definition and the dev/staging environments. The atomic
+    /// counter disambiguates when several tests construct their pool
+    /// inside the same millisecond (cargo runs tests in parallel).
+    ///
+    /// These rows are built here through the public CRUD API rather than
+    /// a seed file: Simple Post ships no seed data, and
+    /// `simple_post_core::db::test_support` is `pub(crate)`, so a
+    /// dependent crate has no way to reach it. Each test therefore states
+    /// exactly the rows it depends on.
     fn seeded_pool(tag: &str) -> (DbPool, std::path::PathBuf) {
         use std::sync::atomic::{AtomicU32, Ordering};
         static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -1122,19 +1154,144 @@ mod endpoint_send_tests {
             id
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        (crate::db::init(&dir).unwrap(), dir)
+        let pool = crate::db::init(&dir).unwrap();
+
+        use crate::domain::{
+            AuthConfig, AuthType, BaseUrlDefinition, Collection, Endpoint, Environment, HttpMethod,
+            KeyValue, Module, Project, RequestBody,
+        };
+
+        crate::db::with_tx(&pool, |c| {
+            crate::db::projects::create(
+                c,
+                &Project {
+                    id: "p_demo".into(),
+                    name: "Demo API".into(),
+                    description: None,
+                    default_base_url_definition_id: Some("def_default".into()),
+                    base_url_definitions: vec![],
+                    base_url: None,
+                    color: "#60a5fa".into(),
+                    created_at: 1,
+                    updated_at: 1,
+                },
+            )?;
+            crate::db::base_url_defs::create(
+                c,
+                &BaseUrlDefinition {
+                    id: "def_default".into(),
+                    name: "default".into(),
+                    description: None,
+                },
+                "p_demo",
+            )?;
+            crate::db::modules::create(
+                c,
+                &Module {
+                    id: "m_auth".into(),
+                    project_id: "p_demo".into(),
+                    name: "Auth".into(),
+                    description: None,
+                    sort_order: 0,
+                    expanded: None,
+                },
+            )?;
+            crate::db::collections::create(
+                c,
+                &Collection {
+                    id: "c_profile".into(),
+                    module_id: "m_auth".into(),
+                    parent_collection_id: None,
+                    name: "Profile".into(),
+                    description: None,
+                    sort_order: 0,
+                    expanded: None,
+                },
+            )?;
+            crate::db::endpoints::create(
+                c,
+                &Endpoint {
+                    id: "e_user_get".into(),
+                    collection_id: "c_profile".into(),
+                    name: "Get user".into(),
+                    description: None,
+                    method: HttpMethod::Get,
+                    url: "/users/{{userId}}".into(),
+                    environment_id: None,
+                    base_url_definition_id: None,
+                    base_url_override: None,
+                    params: vec![KeyValue {
+                        id: "p1".into(),
+                        key: "include".into(),
+                        value: "profile,permissions".into(),
+                        enabled: true,
+                        description: None,
+                    }],
+                    headers: vec![],
+                    body: RequestBody::default(),
+                    auth: AuthConfig {
+                        kind: AuthType::Bearer,
+                        bearer: Some("{{token}}".into()),
+                        basic: None,
+                        apikey: None,
+                    },
+                    docs: None,
+                    notes: None,
+                    tags: vec![],
+                    sort_order: 0,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+            )?;
+
+            // Both environments deliberately share one base URL and differ
+            // only in `variables`, so an assertion on the resolved bearer
+            // token is really testing *which* environment was selected.
+            let base_urls = || -> std::collections::HashMap<String, String> {
+                [(
+                    "def_default".to_string(),
+                    "http://localhost:4000/demo".to_string(),
+                )]
+                .into()
+            };
+            for (env_id, name, token, is_active) in [
+                ("env_dev", "dev", "eyJhbGciOiJIUzI1NiJ9.dev", true),
+                (
+                    "env_staging",
+                    "staging",
+                    "eyJhbGciOiJIUzI1NiJ9.staging",
+                    false,
+                ),
+            ] {
+                crate::db::environments::create(
+                    c,
+                    &Environment {
+                        id: env_id.into(),
+                        project_id: "p_demo".into(),
+                        name: name.into(),
+                        base_urls: base_urls(),
+                        variables: [("token".to_string(), token.to_string())].into(),
+                        is_active,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .expect("seed fixture chain");
+
+        (pool, dir)
     }
 
     /// Regression net for a real bug: `resolve_send_input` read only
-    /// `endpoint.environment_id`, so every seeded endpoint — all of which
-    /// have none — resolved to a base-less path and Send failed with
+    /// `endpoint.environment_id`, so an endpoint without one resolved to a
+    /// base-less path and Send failed with
     /// `invalid URL '/users/{{userId}}': relative URL without a base`.
     /// The renderer's rule is "endpoint's env, else the project's active
     /// env"; this pins the second half of that rule.
     ///
     /// `e_user_get` carries an enabled `include` param, which
     /// `resolve_endpoint` appends — so the expected URL is base + path +
-    /// query.
+    /// query. It deliberately has no `environment_id` of its own.
     #[test]
     fn resolves_base_url_from_the_projects_active_env() {
         let (pool, _dir) = seeded_pool("active-env");
@@ -1147,7 +1304,7 @@ mod endpoint_send_tests {
         let input = resolve_send_input(&pool, &args).expect("must resolve");
 
         // env_dev is the active env and its baseUrls["def_default"] is
-        // http://localhost:4000/demo in the fixture.
+        // http://localhost:4000/demo by construction above.
         assert_eq!(
             input.url, "http://localhost:4000/demo/users/{{userId}}?include=profile%2Cpermissions",
             "base URL + path + params must be composed server-side"
@@ -1227,10 +1384,10 @@ mod endpoint_send_tests {
     /// has no caller in `src/`. So the DB always says `env_dev` while the
     /// user may be looking at `env_staging`.
     ///
-    /// The three seeded environments deliberately share one base URL and
-    /// differ only in `variables`, so the assertion is on the resolved
-    /// bearer token, not the URL — that is the credential that would have
-    /// gone out wrong.
+    /// The dev and staging environments deliberately share one base URL
+    /// and differ only in `variables`, so the assertion is on the
+    /// resolved bearer token, not the URL — that is the credential which
+    /// would have gone out wrong.
     #[test]
     fn caller_environment_selection_wins_over_the_active_flag() {
         let (pool, _dir) = seeded_pool("caller-env");
@@ -1244,7 +1401,7 @@ mod endpoint_send_tests {
                 .unwrap_or_default()
         };
 
-        // Sanity: the seed really does have env_dev active.
+        // Sanity: the fixture chain really does have env_dev active.
         let envs = crate::db::with_conn(&pool, |c| {
             crate::db::environments::list_by_project(c, "p_demo")
         })

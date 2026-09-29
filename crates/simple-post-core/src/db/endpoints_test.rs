@@ -11,7 +11,7 @@ fn fresh_pool() -> db::DbPool {
         crate::db::test_counter::next()
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    db::init(&dir).expect("init")
+    db::test_support::init_seeded(&dir)
 }
 
 fn sample_endpoint(id: &str) -> Endpoint {

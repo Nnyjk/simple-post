@@ -73,6 +73,13 @@ export const COMMANDS = {
   permissionsGet: 'permissions_get',
   permissionsSet: 'permissions_set',
 
+  // ----- db status -----
+  // Unix-ms timestamp of the last destructive schema rebuild, or null.
+  // Read once during bootstrap so a reset workspace announces itself —
+  // an empty tree with no explanation is indistinguishable from never
+  // having had any projects.
+  dbRecreatedAt: 'db_recreated_at',
+
   // ----- MCP daemon -----
   mcpStatus: 'mcp_status',
   mcpDaemonRestart: 'mcp_daemon_restart',
@@ -510,6 +517,10 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.permissionsGet]: {
     method: 'GET',
     path: (a) => `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
+  },
+  [COMMANDS.dbRecreatedAt]: {
+    method: 'GET',
+    path: () => '/api/db/recreated-at',
   },
   [COMMANDS.permissionsSet]: {
     method: 'PUT',

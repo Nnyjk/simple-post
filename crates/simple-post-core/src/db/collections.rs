@@ -209,7 +209,37 @@ pub fn move_many(
         current.insert(idx + offset, id.clone());
     }
 
-    // 5. Rewrite sort_order AND reparent each row. Two flavours
+    // 5. Resolve the module that owns the destination. `parent_kind ==
+    //    "module"` names it directly; `"collection"` means we inherit
+    //    it from the target collection's denormalised `module_id`.
+    let new_module_id: String = if top_level {
+        parent_id.to_string()
+    } else {
+        conn.query_row(
+            "SELECT module_id FROM collections WHERE id = ?1",
+            params![parent_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::NotFound(format!("collection {parent_id}")))?
+    };
+
+    // 6. Which of the moved rows change owner? Captured *before* step 7
+    //    rewrites them — afterwards the comparison is always false.
+    let mut moved_across_modules: Vec<String> = Vec::new();
+    for id in collection_ids {
+        let current_module: String = conn
+            .query_row(
+                "SELECT module_id FROM collections WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .map_err(|_| AppError::NotFound(format!("collection {id}")))?;
+        if current_module != new_module_id {
+            moved_across_modules.push(id.clone());
+        }
+    }
+
+    // 7. Rewrite sort_order AND reparent each row. Two flavours
     //    because moving under a module clears parent_collection_id
     //    while moving under a collection sets it.
     if top_level {
@@ -232,6 +262,61 @@ pub fn move_many(
         drop(update);
     }
 
+    // 8. Re-derive `module_id` across the moved subtrees. `module_id`
+    //    is denormalised onto every collection so that
+    //    `list_by_module` can return a whole subtree in one indexed
+    //    read — which makes it a *derived* value. A cross-module move
+    //    therefore has to re-derive it for the entire subtree, not
+    //    just the rows the caller named. Skipping this leaves the
+    //    store's optimistic `moduleId` fixup correct on screen and
+    //    wrong on reload, and `list_by_module` stops returning the
+    //    moved subtree at all.
+    reassign_subtree_module(conn, &moved_across_modules, &new_module_id)?;
+
+    Ok(())
+}
+
+/// Rewrite `module_id` for `roots` and every descendant of `roots`.
+///
+/// The walk uses `UNION` rather than `UNION ALL` so a pre-existing
+/// cycle in the data terminates the recursion instead of looping
+/// forever — a collection is allowed to be nested arbitrarily deep, and
+/// nothing above this function defends against a cycle at write time.
+///
+/// MUST be called inside `db::with_tx` — one UPDATE per subtree node.
+fn reassign_subtree_module(
+    conn: &mut Connection,
+    roots: &[String],
+    new_module_id: &str,
+) -> Result<(), AppError> {
+    if roots.is_empty() {
+        return Ok(());
+    }
+    let mut sql = String::from("WITH RECURSIVE sub(id) AS (");
+    for (i, _) in roots.iter().enumerate() {
+        if i > 0 {
+            sql.push_str(" UNION ");
+        }
+        sql.push_str(&format!("SELECT id FROM collections WHERE id = ?{}", i + 1));
+    }
+    sql.push_str(
+        " UNION SELECT c.id FROM collections c \
+         JOIN sub ON c.parent_collection_id = sub.id) \
+         SELECT id FROM sub",
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let subtree: Vec<String> = stmt
+        .query_map(rusqlite::params_from_iter(roots.iter()), |r| {
+            r.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    let mut update = conn.prepare("UPDATE collections SET module_id = ?1 WHERE id = ?2")?;
+    for id in &subtree {
+        update.execute(params![new_module_id, id])?;
+    }
     Ok(())
 }
 

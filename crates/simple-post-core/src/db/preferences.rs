@@ -105,6 +105,17 @@ pub mod keys {
     /// row resolves to `read_only`, so an AI client can list and get but
     /// cannot change anything until the user raises the tier.
     pub const MCP_POLICY: &str = "mcp.policy";
+
+    /// `"db.recreated_at"` → integer (unix ms). **Absent on a normal
+    /// boot.**
+    ///
+    /// Written by [`crate::db::init`] only when it had to replace a
+    /// `store.db` written by an older schema version (see
+    /// [`crate::db::SCHEMA_VERSION`]). The renderer reads it once at
+    /// bootstrap to show "your previous workspace was reset", because
+    /// the alternative — a silently empty tree — reads as "you never
+    /// had any projects" rather than "we deleted them".
+    pub const DB_RECREATED_AT: &str = "db.recreated_at";
 }
 
 /// Read the `mcp.auto_start` preference with the documented default

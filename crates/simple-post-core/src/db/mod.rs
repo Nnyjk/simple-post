@@ -1,8 +1,8 @@
 //! Persistence layer for Simple Post.
 //!
 //! Layout:
-//!   - `db::init` opens (or creates) the SQLite file, runs `schema.sql`,
-//!     and seeds fixtures on a brand-new DB.
+//!   - `db::init` opens (or creates) the SQLite file and runs `schema.sql`.
+//!     A brand-new database is left **empty** — this crate seeds nothing.
 //!   - `db::with_conn` / `db::with_tx` are the only sanctioned ways to
 //!     touch a connection — every CRUD module goes through one of them.
 //!   - `db::ping` is a cheap liveness probe.
@@ -18,21 +18,25 @@
 //! File location:
 //!   - On Windows: `%APPDATA%\com.simple-post\store.db`
 //!     (`dirs::data_dir()/com.simple-post/store.db`)
-//!   - The directory is created if missing; the DB file is created
-//!     if missing. First boot seeds from `db/fixtures.json`.
+//!   - The directory is created if missing; the DB file is created if
+//!     missing. First boot creates the tables and stops there — rows
+//!     only ever come from the user or from an MCP client.
+//!
+//! `db/fixtures.json` still ships in-tree, but it is **test-only** data:
+//! it lives behind `#[cfg(test)] pub(crate) mod test_support` and is
+//! unreachable from a production build. See `test_support::init_seeded`.
 //!
 //! Per-table CRUD lives in the sibling `db/*.rs` modules. They all
 //! take a `&mut rusqlite::Connection` so the caller controls whether
 //! the call is in a transaction.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use r2d2::ManageConnection;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{params, Connection, OpenFlags};
-use serde::Deserialize;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::error::AppError;
 
@@ -61,17 +65,45 @@ pub mod projects;
 pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
 
 // -------------------------------------------------------------------------
+// Schema versioning.
+// -------------------------------------------------------------------------
+
+/// The layout this build reads and writes, stamped into
+/// `PRAGMA user_version` by the tail of `schema.sql`.
+///
+/// **Bump this whenever `schema.sql` changes shape in a way an older
+/// build's file cannot satisfy** — dropping or renaming a column, or
+/// splitting one table into several. Purely additive changes (a new
+/// table, a new nullable column with a default) do not need a bump:
+/// `CREATE TABLE IF NOT EXISTS` already handles them, and old files keep
+/// working because readers tolerate the missing column.
+///
+/// Keep the history comment at the bottom of `schema.sql` in sync.
+pub const SCHEMA_VERSION: i64 = 2;
+
+// -------------------------------------------------------------------------
 // Public API.
 // -------------------------------------------------------------------------
 
-/// Open (or create) the DB at `<data_dir>/store.db`, run migrations,
-/// seed if empty, return the pool.
+/// Open (or create) the DB at `<data_dir>/store.db`, bring it up to
+/// [`SCHEMA_VERSION`], and return the pool.
 ///
 /// `data_dir` is typically `dirs::data_dir().unwrap().join("com.simple-post")`.
 /// The directory is created if it doesn't exist.
+///
+/// A file written by an older layout is **replaced, not upgraded** —
+/// see [`ensure_current_schema`]. When that happens the rebuild is
+/// recorded under `preferences["db.recreated_at"]` so the UI can tell
+/// the user their previous data is gone instead of silently rendering
+/// an empty tree.
 pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir.join("store.db");
+
+    // Before any connection is handed out — a pool opened on a stale
+    // file would let reads succeed against tables this build no longer
+    // understands.
+    let rebuilt = ensure_current_schema(&db_path)?;
 
     let manager = SqliteConnectionManager::file(&db_path)
         .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)
@@ -93,7 +125,7 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     // Eagerly probe the file so a corrupt / read-only DB fails fast
     // before the caller has wired up the rest of the app.
     let mut probe = manager.connect()?;
-    migrate_and_seed(&mut probe)?;
+    migrate(&mut probe)?;
     drop(probe);
 
     let pool = r2d2::Pool::builder()
@@ -105,6 +137,21 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     // forces the manager to actually open a connection, which is where
     // a locked file / bad path would surface.
     ping(&pool)?;
+
+    if rebuilt {
+        with_tx(&pool, |c| {
+            preferences::set(
+                c,
+                preferences::keys::DB_RECREATED_AT,
+                &crate::domain::now_ms(),
+            )
+        })?;
+        tracing::warn!(
+            "database schema v{SCHEMA_VERSION}: replaced an older store.db at {} — \
+             its contents are gone",
+            db_path.display()
+        );
+    }
 
     Ok(pool)
 }
@@ -170,27 +217,93 @@ where
     })
 }
 
-/// Run the embedded `schema.sql` and, if the projects table is empty,
-/// insert the bundled fixtures. Idempotent — safe to call on every
+/// Run the embedded `schema.sql`. Idempotent — safe to call on every
 /// boot.
 ///
-/// The schema uses `IF NOT EXISTS` so re-running on a migrated DB is
-/// a no-op. The seed step checks `projects` first so a partially-seeded
-/// DB (which shouldn't happen in practice) also gets treated as
-/// already-seeded on retry.
-pub fn migrate_and_seed(conn: &mut Connection) -> Result<(), AppError> {
-    conn.execute_batch(SCHEMA_SQL)?;
+/// Every `CREATE` in the schema is `IF NOT EXISTS`, so re-running against
+/// an already-migrated database is a no-op. **No rows are inserted**:
+/// a fresh install starts empty and is populated by the user or by an
+/// MCP client. Test-only seed data lives in `test_support`.
+pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
+    Ok(conn.execute_batch(SCHEMA_SQL)?)
+}
 
-    // Already seeded? Skip.
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM projects", [], |row| {
-        row.get::<_, i64>(0)
-    })?;
-    if count > 0 {
-        return Ok(());
+/// Bring the on-disk database up to [`SCHEMA_VERSION`], replacing it
+/// when it predates this build's layout.
+///
+/// Returns `true` when the file was deleted and will be recreated, so
+/// the caller can surface the data loss.
+///
+/// **There is no migration path.** v0.1 has never shipped to real
+/// users, so a data-migration framework would be speculative weight
+/// guarding a population of one. A pre-versioned file (the original
+/// `modules` / `collections` / `endpoints` three-table layout) is
+/// replaced instead of upgraded. When that stops being true, this
+/// function is the one place that has to change.
+fn ensure_current_schema(db_path: &Path) -> Result<bool, AppError> {
+    if !db_path.exists() {
+        // Fresh install — `migrate` creates the file and stamps it.
+        return Ok(false);
     }
+    let found = read_user_version(db_path)?;
+    if found == SCHEMA_VERSION {
+        return Ok(false);
+    }
+    if found > SCHEMA_VERSION {
+        // The file was written by a *newer* build. Recreating it would
+        // destroy data this build has no excuse destroying.
+        return Err(AppError::Validation(format!(
+            "database at {} is schema v{found}, but this build only understands \
+             v{SCHEMA_VERSION}. Update Simple Post, or point \
+             SIMPLE_POST_DATA_DIR somewhere else to start a separate workspace.",
+            db_path.display()
+        )));
+    }
+    remove_db_files(db_path)?;
+    Ok(true)
+}
 
-    let fixtures: Fixtures = serde_json::from_str(FIXTURES_JSON)?;
-    seed_fixtures(conn, &fixtures)?;
+/// Read `PRAGMA user_version` without taking a write lock.
+///
+/// Opened read-only on purpose: `init` calls this before the pool
+/// exists, and a read-write handle would create the file we're about
+/// to decide whether to delete.
+fn read_user_version(db_path: &Path) -> Result<i64, AppError> {
+    let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+}
+
+/// Delete the database and its WAL sidecars.
+///
+/// The sidecars are not optional cleanup. Leaving `store.db-wal` behind
+/// while `migrate` creates a fresh `store.db` lets SQLite replay the
+/// old write-ahead log into the new file — which is how a "clean"
+/// rebuild comes back still holding the data it was supposed to drop.
+fn remove_db_files(db_path: &Path) -> Result<(), AppError> {
+    for suffix in ["", "-wal", "-shm"] {
+        let path = if suffix.is_empty() {
+            db_path.to_path_buf()
+        } else {
+            let mut name = db_path.as_os_str().to_os_string();
+            name.push(suffix);
+            PathBuf::from(name)
+        };
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            // Another process may have cleaned up first, or a failed
+            // open may have left the sidecar absent. Both are fine.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            // On Windows this is the shape a file held open by another
+            // process takes — a second `serve-web` or a stray daemon
+            // owns the handle. Failing loudly beats half-rebuilding.
+            Err(e) => {
+                return Err(AppError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("cannot remove {}: {e}", path.display()),
+                )))
+            }
+        }
+    }
     Ok(())
 }
 
@@ -231,135 +344,187 @@ where
     }
 }
 
-// ----- fixtures ---------------------------------------------------------
+// -------------------------------------------------------------------------
+// Embedded static asset — kept in-tree so the binary doesn't need a
+// filesystem lookup at runtime. `include_str!` makes the asset
+// participate in `cargo build` rebuilds when it changes.
+// -------------------------------------------------------------------------
 
-/// Top-level shape of `fixtures.json`. We only deserialize the fields
-/// the seeder actually needs; the file can grow extra sections without
-/// breaking older binaries (provided they have defaults).
-#[derive(Debug, Deserialize)]
-struct Fixtures {
-    #[serde(default)]
-    projects: Vec<FixtureProject>,
-    #[serde(default)]
-    modules: Vec<FixtureModule>,
-    #[serde(default)]
-    collections: Vec<FixtureCollection>,
-    #[serde(default)]
-    endpoints: Vec<FixtureEndpoint>,
-    #[serde(default)]
-    environments: Vec<FixtureEnvironment>,
-}
+const SCHEMA_SQL: &str = include_str!("schema.sql");
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureProject {
-    id: String,
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    base_url_definitions: Vec<FixtureBaseUrlDef>,
-    #[serde(default)]
-    default_base_url_definition_id: Option<String>,
-    #[serde(default)]
-    base_url: Option<String>,
-    color: String,
-    created_at: i64,
-    updated_at: i64,
-}
+// -------------------------------------------------------------------------
+// Test-only fixture loading.
+//
+// Everything in this module is `#[cfg(test)]`: it compiles into
+// `cargo test` and nowhere else. `db::init` has no path in here, so a
+// production build can never insert seed rows — a fresh install starts
+// empty. `fixtures.json` remains in-tree purely as test data.
+// -------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureBaseUrlDef {
-    id: String,
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-}
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use rusqlite::params;
+    use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureModule {
-    id: String,
-    project_id: String,
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-    sort_order: i64,
-    #[serde(default)]
-    expanded: Option<bool>,
-}
+    /// The bundled fixture file. Test data only — never read by `db::init`.
+    const FIXTURES_JSON: &str = include_str!("fixtures.json");
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureCollection {
-    id: String,
-    module_id: String,
-    #[serde(default)]
-    parent_collection_id: Option<String>,
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-    sort_order: i64,
-    #[serde(default)]
-    expanded: Option<bool>,
-}
+    /// Parse the bundled fixtures. Panicking here is correct: a malformed
+    /// `fixtures.json` is a repository defect, not a runtime condition.
+    fn fixtures() -> Fixtures {
+        serde_json::from_str(FIXTURES_JSON).expect("fixtures.json must parse")
+    }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureEndpoint {
-    id: String,
-    collection_id: String,
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
-    method: String,
-    url: String,
-    #[serde(default)]
-    environment_id: Option<String>,
-    #[serde(default)]
-    base_url_definition_id: Option<String>,
-    #[serde(default)]
-    base_url_override: Option<String>,
-    #[serde(default)]
-    params: Vec<serde_json::Value>,
-    #[serde(default)]
-    headers: Vec<serde_json::Value>,
-    body: serde_json::Value,
-    auth: serde_json::Value,
-    #[serde(default)]
-    docs: Option<String>,
-    #[serde(default)]
-    notes: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    sort_order: i64,
-    created_at: i64,
-    updated_at: i64,
-}
+    /// Open a database at `dir` and load the bundled fixture set into it.
+    ///
+    /// This is what the `#[path]`-mounted test modules use in place of the
+    /// old implicit seeding: `init` used to seed on every call, so the
+    /// per-module `fresh_pool()` helpers relied on that side effect. Seeding
+    /// is now an explicit, visible step rather than a `db::init` surprise.
+    pub(crate) fn init_seeded(dir: &Path) -> DbPool {
+        let pool = init(dir).expect("init");
+        seed(&pool);
+        pool
+    }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureEnvironment {
-    id: String,
-    project_id: String,
-    name: String,
-    #[serde(default)]
-    base_urls: serde_json::Value,
-    #[serde(default)]
-    variables: serde_json::Value,
-    is_active: bool,
-}
+    /// Load the bundled fixture set into an already-initialised database.
+    ///
+    /// `with_conn`, not `with_tx`: `seed_fixtures` opens its own transaction
+    /// so the whole fixture set lands atomically, and nesting a `BEGIN
+    /// IMMEDIATE` around it fails with "cannot start a transaction within a
+    /// transaction".
+    pub(crate) fn seed(pool: &DbPool) {
+        with_conn(pool, |c| seed_fixtures(c, &fixtures())).expect("seed fixtures");
+    }
 
-/// Insert all rows from the fixtures file. Walks the dependency graph
-/// in topological order: projects → base_url_defs + modules + envs →
-/// collections → endpoints. Foreign keys stay satisfied without
-/// `PRAGMA defer_foreign_keys`.
-fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
-    let tx = conn.transaction()?;
+    /// Top-level shape of `fixtures.json`. We only deserialize the fields
+    /// the seeder actually needs; the file can grow extra sections without
+    /// breaking older binaries (provided they have defaults).
+    #[derive(Debug, Deserialize)]
+    struct Fixtures {
+        #[serde(default)]
+        projects: Vec<FixtureProject>,
+        #[serde(default)]
+        modules: Vec<FixtureModule>,
+        #[serde(default)]
+        collections: Vec<FixtureCollection>,
+        #[serde(default)]
+        endpoints: Vec<FixtureEndpoint>,
+        #[serde(default)]
+        environments: Vec<FixtureEnvironment>,
+    }
 
-    for p in &fx.projects {
-        tx.execute(
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FixtureProject {
+        id: String,
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+        #[serde(default)]
+        base_url_definitions: Vec<FixtureBaseUrlDef>,
+        #[serde(default)]
+        default_base_url_definition_id: Option<String>,
+        #[serde(default)]
+        base_url: Option<String>,
+        color: String,
+        created_at: i64,
+        updated_at: i64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FixtureBaseUrlDef {
+        id: String,
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FixtureModule {
+        id: String,
+        project_id: String,
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+        sort_order: i64,
+        #[serde(default)]
+        expanded: Option<bool>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FixtureCollection {
+        id: String,
+        module_id: String,
+        #[serde(default)]
+        parent_collection_id: Option<String>,
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+        sort_order: i64,
+        #[serde(default)]
+        expanded: Option<bool>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FixtureEndpoint {
+        id: String,
+        collection_id: String,
+        name: String,
+        #[serde(default)]
+        description: Option<String>,
+        method: String,
+        url: String,
+        #[serde(default)]
+        environment_id: Option<String>,
+        #[serde(default)]
+        base_url_definition_id: Option<String>,
+        #[serde(default)]
+        base_url_override: Option<String>,
+        #[serde(default)]
+        params: Vec<serde_json::Value>,
+        #[serde(default)]
+        headers: Vec<serde_json::Value>,
+        body: serde_json::Value,
+        auth: serde_json::Value,
+        #[serde(default)]
+        docs: Option<String>,
+        #[serde(default)]
+        notes: Option<String>,
+        #[serde(default)]
+        tags: Vec<String>,
+        sort_order: i64,
+        created_at: i64,
+        updated_at: i64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct FixtureEnvironment {
+        id: String,
+        project_id: String,
+        name: String,
+        #[serde(default)]
+        base_urls: serde_json::Value,
+        #[serde(default)]
+        variables: serde_json::Value,
+        is_active: bool,
+    }
+
+    /// Insert all rows from the fixtures file. Walks the dependency graph
+    /// in topological order: projects → base_url_defs + modules + envs →
+    /// collections → endpoints. Foreign keys stay satisfied without
+    /// `PRAGMA defer_foreign_keys`.
+    fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
+        let tx = conn.transaction()?;
+
+        for p in &fx.projects {
+            tx.execute(
             "INSERT INTO projects \
              (id, name, description, default_base_url_definition_id, color, created_at, updated_at) \
              VALUES (?,?,?,?,?,?,?)",
@@ -373,118 +538,109 @@ fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
                 p.updated_at,
             ],
         )?;
-        // baseUrlDefinitions are stored as a JSON-ish blob on the project
-        // row (no schema column) — actually we *do* persist each def into
-        // its own table so the foreign-key chain into endpoints works.
-        for (i, d) in p.base_url_definitions.iter().enumerate() {
-            tx.execute(
-                "INSERT INTO base_url_definitions \
+            // baseUrlDefinitions are stored as a JSON-ish blob on the project
+            // row (no schema column) — actually we *do* persist each def into
+            // its own table so the foreign-key chain into endpoints works.
+            for (i, d) in p.base_url_definitions.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO base_url_definitions \
                  (id, project_id, name, description, sort_order) \
                  VALUES (?,?,?,?,?)",
-                params![d.id, p.id, d.name, d.description, i as i64],
-            )?;
+                    params![d.id, p.id, d.name, d.description, i as i64],
+                )?;
+            }
+            // `baseUrl` is the legacy field on Project; we don't persist
+            // it into its own column (the schema has none). The runtime
+            // migrates legacy data into env.baseUrls[defId] at boot.
+            let _ = p.base_url.as_ref();
         }
-        // `baseUrl` is the legacy field on Project; we don't persist
-        // it into its own column (the schema has none). The runtime
-        // migrates legacy data into env.baseUrls[defId] at boot.
-        let _ = p.base_url.as_ref();
-    }
 
-    for m in &fx.modules {
-        tx.execute(
-            "INSERT INTO modules \
+        for m in &fx.modules {
+            tx.execute(
+                "INSERT INTO modules \
              (id, project_id, name, description, sort_order) \
              VALUES (?,?,?,?,?)",
-            params![m.id, m.project_id, m.name, m.description, m.sort_order],
-        )?;
-        let _ = m.expanded; // UI-only, not persisted
-    }
+                params![m.id, m.project_id, m.name, m.description, m.sort_order],
+            )?;
+            let _ = m.expanded; // UI-only, not persisted
+        }
 
-    for c in &fx.collections {
-        tx.execute(
-            "INSERT INTO collections \
+        for c in &fx.collections {
+            tx.execute(
+                "INSERT INTO collections \
              (id, module_id, parent_collection_id, name, description, sort_order) \
              VALUES (?,?,?,?,?,?)",
-            params![
-                c.id,
-                c.module_id,
-                c.parent_collection_id,
-                c.name,
-                c.description,
-                c.sort_order,
-            ],
-        )?;
-        let _ = c.expanded;
-    }
+                params![
+                    c.id,
+                    c.module_id,
+                    c.parent_collection_id,
+                    c.name,
+                    c.description,
+                    c.sort_order,
+                ],
+            )?;
+            let _ = c.expanded;
+        }
 
-    for e in &fx.endpoints {
-        let params_json = serde_json::to_string(&e.params)?;
-        let headers_json = serde_json::to_string(&e.headers)?;
-        let body_json = serde_json::to_string(&e.body)?;
-        let auth_json = serde_json::to_string(&e.auth)?;
-        let tags_json = serde_json::to_string(&e.tags)?;
-        tx.execute(
-            "INSERT INTO endpoints \
+        for e in &fx.endpoints {
+            let params_json = serde_json::to_string(&e.params)?;
+            let headers_json = serde_json::to_string(&e.headers)?;
+            let body_json = serde_json::to_string(&e.body)?;
+            let auth_json = serde_json::to_string(&e.auth)?;
+            let tags_json = serde_json::to_string(&e.tags)?;
+            tx.execute(
+                "INSERT INTO endpoints \
              (id, collection_id, name, description, method, url, \
               environment_id, base_url_definition_id, base_url_override, \
               params_json, headers_json, body_json, auth_json, \
               docs, notes, tags_json, sort_order, created_at, updated_at) \
              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            params![
-                e.id,
-                e.collection_id,
-                e.name,
-                e.description,
-                e.method,
-                e.url,
-                e.environment_id,
-                e.base_url_definition_id,
-                e.base_url_override,
-                params_json,
-                headers_json,
-                body_json,
-                auth_json,
-                e.docs,
-                e.notes,
-                tags_json,
-                e.sort_order,
-                e.created_at,
-                e.updated_at,
-            ],
-        )?;
-    }
+                params![
+                    e.id,
+                    e.collection_id,
+                    e.name,
+                    e.description,
+                    e.method,
+                    e.url,
+                    e.environment_id,
+                    e.base_url_definition_id,
+                    e.base_url_override,
+                    params_json,
+                    headers_json,
+                    body_json,
+                    auth_json,
+                    e.docs,
+                    e.notes,
+                    tags_json,
+                    e.sort_order,
+                    e.created_at,
+                    e.updated_at,
+                ],
+            )?;
+        }
 
-    for env in &fx.environments {
-        let base_urls_json = serde_json::to_string(&env.base_urls)?;
-        let variables_json = serde_json::to_string(&env.variables)?;
-        tx.execute(
-            "INSERT INTO environments \
+        for env in &fx.environments {
+            let base_urls_json = serde_json::to_string(&env.base_urls)?;
+            let variables_json = serde_json::to_string(&env.variables)?;
+            tx.execute(
+                "INSERT INTO environments \
              (id, project_id, name, is_active, base_urls_json, variables_json) \
              VALUES (?,?,?,?,?,?)",
-            params![
-                env.id,
-                env.project_id,
-                env.name,
-                env.is_active as i64,
-                base_urls_json,
-                variables_json,
-            ],
-        )?;
+                params![
+                    env.id,
+                    env.project_id,
+                    env.name,
+                    env.is_active as i64,
+                    base_urls_json,
+                    variables_json,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
     }
-
-    tx.commit()?;
-    Ok(())
 }
-
-// -------------------------------------------------------------------------
-// Embedded static assets — kept in-tree so the binary doesn't need a
-// filesystem lookup at runtime. `include_str!` / `include_str!`-style
-// embedding makes the assets participate in `cargo build` rebuilds
-// when they change.
-// -------------------------------------------------------------------------
-
-const SCHEMA_SQL: &str = include_str!("schema.sql");
-const FIXTURES_JSON: &str = include_str!("fixtures.json");
 
 // -------------------------------------------------------------------------
 // Shared helper macros / functions for the CRUD modules.

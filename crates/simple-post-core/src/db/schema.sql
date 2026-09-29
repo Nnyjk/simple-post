@@ -102,3 +102,18 @@ CREATE TABLE IF NOT EXISTS preferences (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Schema version marker, read back by `db::ensure_current_schema` before
+-- any connection is handed out. Keep in sync with
+-- `db::SCHEMA_VERSION` — a mismatch there is caught by
+-- `schema_version_matches_the_constant`.
+--
+-- Version history:
+--   0  pre-versioning (the original modules/collections/endpoints
+--      three-table layout). Any file stamped 0 is not readable by a
+--      current build and is rebuilt from scratch.
+--   2  current.
+--
+-- 1 was never shipped: the nodes merge landed before any build could
+--      stamp a version of its own, so it has no database anywhere.
+PRAGMA user_version = 2;
