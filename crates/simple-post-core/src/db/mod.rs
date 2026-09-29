@@ -47,9 +47,11 @@ use crate::error::AppError;
 
 pub mod base_url_defs;
 pub mod collections;
+pub mod endpoint_details;
 pub mod endpoints;
 pub mod environments;
 pub mod modules;
+pub mod nodes;
 pub mod permissions;
 pub mod preferences;
 pub mod projects;
@@ -651,6 +653,37 @@ pub(crate) mod test_support {
 #[allow(dead_code)]
 pub(crate) fn arc_str(s: impl Into<String>) -> Arc<str> {
     Arc::from(s.into())
+}
+
+/// Error type for a JSON-in-TEXT column that failed to decode.
+///
+/// `rusqlite`'s `FromSqlConversionFailure` wants
+/// `Box<dyn StdError + Send + Sync + 'static>`, so the message is
+/// parked in this tiny string-backed type.
+#[derive(Debug)]
+pub(crate) struct JsonColError(pub String);
+
+impl std::fmt::Display for JsonColError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for JsonColError {}
+
+/// Map a serde failure on a JSON column to rusqlite's conversion error,
+/// tagged with the column name.
+///
+/// Shaped this way so the rest of the row still loads and the caller
+/// sees *which* column was malformed rather than an opaque decode
+/// failure. Shared by every module that keeps structured data in a TEXT
+/// column.
+pub(crate) fn json_col_err(col: &str, e: serde_json::Error) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(JsonColError(format!("{col}: {e}"))),
+    )
 }
 
 // -------------------------------------------------------------------------
