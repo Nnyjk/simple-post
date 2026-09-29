@@ -13,13 +13,13 @@
 | # | 条目 | 类型 | 优先级 | 状态 |
 |---|---|---|---|---|
 | [D1](#d1-统一树结构的描述) | 统一树结构的描述 | 文档 + 代码 | P0 | ✅ 已完成（C1/C2/C3 + 文档层全部落地） |
-| [D2](#d2-agentsmd-引用了已删除的文件路径) | AGENTS.md 引用已删除路径 | 文档 | P0 | 待办 |
-| [D3](#d3-readme-自相矛盾已删除的-npm-包) | README 自相矛盾 | 文档 | P0 | 待办 |
-| [D4](#d4-refactor-planmd-状态过期) | REFACTOR-PLAN 状态过期 | 文档 | P1 | 待办 |
+| [D2](#d2-agentsmd-引用了已删除的文件路径) | AGENTS.md 引用已删除路径 | 文档 | P0 | ✅ 已完成 |
+| [D3](#d3-readme-自相矛盾已删除的-npm-包) | README 自相矛盾 | 文档 | P0 | ✅ 已完成 |
+| [D4](#d4-refactor-planmd-状态过期) | REFACTOR-PLAN 状态过期 | 文档 | P1 | ✅ 已完成 |
 | [D5](#d5-scriptse2e-完全未记载) | `scripts/e2e/` 未记载 | 文档 + 工程 | P2 | 待办 |
-| [D6](#d6-readme-mcp-工具清单漏列-endpoint_list) | 工具清单漏列 | 文档 | P2 | 待办 |
-| [D7](#d7-readme-宣称了根本不存在的-mcp-resources) | README 宣称不存在的 MCP Resources | 文档 | P1 | 待办 |
-| [D8](#d8-agentsmd-自相矛盾且计数失准的-rust-测试布局) | AGENTS.md Rust 测试布局自相矛盾 | 文档 | P2 | 待办 |
+| [D6](#d6-readme-mcp-工具清单漏列-endpoint_list) | 工具清单漏列 | 文档 | P2 | ✅ 已完成 |
+| [D7](#d7-readme-宣称了根本不存在的-mcp-resources) | README 宣称不存在的 MCP Resources | 文档 | P1 | ✅ 已完成（已删除该节） |
+| [D8](#d8-agentsmd-自相矛盾且计数失准的-rust-测试布局) | AGENTS.md Rust 测试布局自相矛盾 | 文档 | P2 | ✅ 已完成 |
 | [R1](#r1-commandsrs1196-行--50-个-handler) | `commands.rs` 过大 | 重构 | P1 | 待办 |
 | [R2](#r2-crud-slicets-1094-行) | `crud-slice.ts` 过大 | 重构 | P2 | 待办 |
 | [R3](#r3-environmentsectiontsx-812-行) | `EnvironmentSection` 过大 | 重构 | P2 | 待办 |
@@ -180,40 +180,60 @@ cargo test --workspace
 
 ---
 
-## D2 AGENTS.md 引用了已删除的文件路径
+## D2 AGENTS.md 引用了已删除的文件路径 ✅ 已完成
 
 **类型：文档** ｜ **优先级：P0**
 
 ### 现状
 
 `web_api.rs` 已在提交 `755c8e3` 拆分为 `web_api/mod.rs` 模块树，该文件**不再存在**。
-AGENTS.md 仍有 4 处引用旧路径：
 
-- 架构图里的 CRUD 数据流（`src-tauri/src/commands.rs` / `web_api.rs`）
-- 「Key Directories」列表项 `src-tauri/src/web_api.rs`
-- 「OpenAPI」一节：``public_route_specs()` in `src-tauri/src/web_api.rs``
-- 「Dual-transport invariant」：改路径的指引 `a route in src-tauri/src/web_api.rs`
+> **本条原始记载有两处不准，以实测为准：**
+> 1. 失效引用不是 4 处而是 **6 处**——原列表漏了「Development Commands」里
+>    `dump-openapi` 那行的行尾注释，以及「Architecture」CRUD 数据流那行。
+> 2. 原文建议「全部改为 `web_api/mod.rs`」，这对 `public_route_specs()` 是**错的**：
+>    该函数定义在 **`web_api/spec.rs`**，由 `mod.rs` re-export。
+>    照抄会把一条失效路径换成另一条。
+>
+> 实际修复：CRUD 数据流、`Key Directories`、`dump-openapi` 注释、
+> Dual-transport、OpenAPI、Important Files 共 6 处；
+> `docs/http-api-reference.md` 3 处。其中三处不是纯路径替换：
+> - Dual-transport 改指 `web_api/` 并**补上注册与实现的分离**（`.route()`
+>   在 `mod.rs::build_router`，handler 在 `web_api/routes/<resource>.rs`），
+>   否则「五处协同编辑」的契约在新结构下不可执行。
+> - `http-api-reference.md` 的标题从「拆 `web_api.rs` 时」改为
+>   「**重构** `web_api/` 路由时」——目录已经拆过，说「拆目录」讲不通。
+> - OpenAPI 段尾的「splitting `web_api.rs`」改为「refactoring the `web_api/`
+>   route tree」——那个护栏本来就管的是任何路由树重构。
 
 ### 影响
 
 AGENTS.md 是 agent 与新贡献者的行为契约。路径失效会让后续改动**找不到文件**，
 或误以为 `web_api.rs` 仍然存在而重新创建它。
 
-### 目标
-
-全部改为 `src-tauri/src/web_api/mod.rs`（或按语境简写为 `web_api/`）。
-
-### 验收
+### 验收（原验收标准不可达，已修正）
 
 ```bash
 grep -rn "web_api\.rs" --include="*.md" .
 ```
 
-应无结果。`docs/http-api-reference.md` 同样有 3 处引用，一并处理。
+**该命令不可能归零，且不应强行归零。** `docs/REFACTOR-PLAN.md` 按 [D4](#d4-refactor-planmd-状态过期)
+的要求原样保留为历史存档，它按定义就要提到当年被拆的那个文件；其中还有一句
+在技术上**必须**保留——`mod web_api;` 同时可解析到 `web_api.rs` 或
+`web_api/mod.rs`，这正是拆分不需要改动 `lib.rs` / `main.rs` 的原因。
+把它改掉就是把一段正确的 Rust 模块解析说明写错。
+
+正确的验收是「**指引性**引用归零，历史性引用保留」：
+
+```bash
+grep -rn "web_api\.rs" --include="*.md" .    # 仅应命中 REFACTOR-PLAN.md 与本文档
+```
+
+`AGENTS.md` 与 `docs/http-api-reference.md` 已归零。
 
 ---
 
-## D3 README 自相矛盾（已删除的 npm 包）
+## D3 README 自相矛盾（已删除的 npm 包） ✅ 已完成
 
 **类型：文档** ｜ **优先级：P0**
 
@@ -221,7 +241,7 @@ grep -rn "web_api\.rs" --include="*.md" .
 
 提交 `fba0f08 refactor(distribution)!: drop the npm wrapper` 删除了整个
 `packages/simple-post-mcp/`（含 package.json、postinstall、bin 启动脚本）以及
-`.github/workflows/release-mcp.yml`。
+`.github/workflows/release-mcp.yml`。**已复核：两个路径均不存在。**
 
 README 开头仍写：
 
@@ -233,20 +253,24 @@ README 开头仍写：
 
 **同一文件内两处说法相反。**
 
-### 目标
+### 修复
 
-开头改为「独立的 `simple-post-mcp` 二进制」，与后文及 AGENTS.md 一致。
+开头改为「独立的 `simple-post-mcp` **二进制（不发布到 npm 包）**」。
+
+**没有**顺手删掉 README 里其余的 `npm install` / `npm run …`——那些是
+Tauri 应用自身的 dev 工作流（`package.json` 脚本），完全正确。
+错的只有「存在一个 npm **发布**的 `simple-post-mcp` 包」这一条断言；
+把两者混为一谈会误删整条上手流程。
 
 ### 验收
 
 ```bash
-grep -rn "npm 包\|npm 包" README.md
-grep -rn "packages/simple-post-mcp" .    # 应无结果
+grep -rn "packages/simple-post-mcp" --include="*.md" .   # 仅本文档提及
 ```
 
 ---
 
-## D4 REFACTOR-PLAN.md 状态过期
+## D4 REFACTOR-PLAN.md 状态过期 ✅ 已完成
 
 **类型：文档** ｜ **优先级：P1**
 
@@ -256,7 +280,7 @@ grep -rn "packages/simple-post-mcp" .    # 应无结果
 
 > 状态：**规划中，尚未执行。**
 
-但它规划的两项拆分**均已完成**：
+但它规划的两项拆分**均已完成**（`git show --stat` 已核对）：
 
 - `755c8e3 refactor(web): split web_api.rs into a web_api/ module tree`
 - `1c387de refactor(tree): split ProjectTree.tsx into rows/ hooks/ and shared types`
@@ -264,19 +288,21 @@ grep -rn "packages/simple-post-mcp" .    # 应无结果
 目标结构里的 `tree-types.ts`、`tree-utils.ts`、`hooks/*`、`rows/*`、
 `web_api/spec.rs`、`web_api/routes/*` 全部已落地。
 
-### 目标
+### 修复
 
-二选一：
+取**归档**方案：头部标注「已完成」并附两个提交号，同时写明「正文按原样保留——
+它是**为什么这么拆**的决策记录，不是当前状态的描述；再次改动这些目录前先读它」。
+正文**逐字未改**，diff 只触及开头数行。
 
-1. **归档**：在开头标注「A、B 两节均已于上述提交完成」，保留原文作为决策记录
-2. **重写**：删除已完成部分，只保留尚未执行的条目
+### 备注（已保留，勿删）
 
-倾向 1——该文档同时是「为什么这么拆」的历史记录。
-
-### 备注
-
-该文档的 A 节有一处**仍然有效**的约束，值得保留：
+该文档的 A 节有一处**仍然有效**的约束，修复后逐字复核仍在位：
 > 搬迁**只做移动**，不要同时改逻辑。逻辑改动单独开 PR。
+
+> 2026-09-29 补记：本条的归档决定直接约束了
+> [D2](#d2-agentsmd-引用了已删除的文件路径) 的验收标准——
+> `REFACTOR-PLAN.md` 必须保留对当年那个 `web_api.rs` 的指代，
+> 所以 D2 的 grep 归不了零，这是预期结果而非遗留缺陷。
 
 ---
 
@@ -305,20 +331,25 @@ README、AGENTS.md 均未提及，CI 也未执行。
 
 ---
 
-## D6 README MCP 工具清单漏列 `endpoint_list`
+## D6 README MCP 工具清单漏列 `endpoint_list` ✅ 已完成
 
 **类型：文档** ｜ **优先级：P2**
 
 ### 现状
 
-README 的权限矩阵清单中，Read 一行列出了 15 个工具，缺少 `endpoint_list`。
+README 的权限矩阵清单中，Read 一行缺少 `endpoint_list`。
 该工具确实已注册，`REQUIRED_CAPABILITY` 中有对应行且为 `Capability::Read`。
 
-总数 **44 是正确的**（`REQUIRED_CAPABILITY` 表实为 44 行），仅枚举漏了一行。
+实测 `Capability::Read` 共 **16 行**；README 用 `api_resolve_*` 通配覆盖其中 3 个，
+所以它的枚举方式与源码的行数不是一一对应——补 `endpoint_list` 时没有顺手把
+通配展开，保持了原有简写风格。
 
-### 目标
+总数 **44 是正确的**（由 `every_registered_tool_has_a_capability` 测试守护），
+本次**未改动** 44，仅补枚举。
 
-Read 列表补上 `endpoint_list`。
+### 修复
+
+Read 行在 `endpoint_get` 之前插入 `endpoint_list`（与源码顺序一致）。
 
 ### 验收
 
@@ -327,7 +358,7 @@ Read 列表补上 `endpoint_list`。
 
 ---
 
-## D7 README 宣称了根本不存在的 MCP Resources
+## D7 README 宣称了根本不存在的 MCP Resources ✅ 已完成（已删除该节）
 
 **类型：文档** ｜ **优先级：P1** ｜ **发现于 2026-09-29（D1 收尾时）**
 
@@ -352,23 +383,29 @@ README 有一节列出 4 个 MCP Resource：
 这一条是「写了但根本没有」。读者会以为存在一条只读通道，
 并据此设计 AI 集成——而接上去会发现 `resources/list` 无人应答。
 
-### 目标
+### 修复
 
-二选一，并在 README 里说清：
+**已删除该节**（推荐方案）。tools 已经覆盖全部能力，Resources 是早期设计的残留叙述。
+删除前复核了上下文：相邻段落引用的 `docs/openapi.yaml` 与
+`docs/http-api-reference.md` 本身自洽，Resources 只是一个普通段落而非标题，
+README 也没有目录，删除后没有留下悬空引用或标题层级断层。
 
-- **删掉这一节**（推荐）。tools 已经覆盖全部能力，Resources 是早期设计的残留叙述。
-- 或者实现它。届时还要同步本文档的「Tools vs Resources」边界。
+### 知识留存
 
-注意：真要实现的话，`simple-post://endpoints/{id}` 这个名字也该跟着
-nodes 重构一起改（见 D1），否则又是一次文档与实现分叉。
+若将来真的实现 Resources，`simple-post://endpoints/{id}` 这个 URI 用的是
+**nodes 重构之前**的命名（那时资源按 modules / collections / endpoints 分表）。
+届时应统一改为 node 语义，否则又是一次文档与实现分叉。**本条已结项，
+但这条知识不要随本节的删除一起丢掉。**
 
 ### 验收
 
-`grep -rn "simple-post://" --include="*.md" .` 无结果（若选择删除）。
+```bash
+grep -rn "simple-post://" --include="*.md" .   # 仅本文档提及
+```
 
 ---
 
-## D8 AGENTS.md 自相矛盾且计数失准的 Rust 测试布局
+## D8 AGENTS.md 自相矛盾且计数失准的 Rust 测试布局 ✅ 已完成
 
 **类型：文档** ｜ **优先级：P2** ｜ **发现于 2026-09-29（D1 收尾时）**
 
@@ -398,11 +435,14 @@ sibling `mod tests;`   : 21
 **实质差别**——那里 `pub mod test_counter` 排在 `mod tests` **之后**，
 按「内联=文件末尾」的直觉切分会把这个 test-only helper 编译进库。
 
-### 目标
+### 修复
 
-「Naming」段改为指向 `#[path]` 形式并删掉「inline」表述；
-「Testing & QA」段的计数改为不写死数字（或写成「绝大多数」），
-避免每次删测试文件都要回来改文档。
+- 「Naming」段改为指向 `#[path]` 兄弟文件形式，并注明内联只是少数派残留、
+  详见 Testing & QA——不再把少数派写成通例。
+- 「Testing & QA」段把「全部 22 个」换成一个**可复核的具名清单**而非数字：
+  「除少数仍内联在 `src-tauri/` 下的 `auth.rs` / `daemon_supervisor.rs` /
+  `port_registry.rs` 外全部使用兄弟形式」。删掉任一测试文件都不会让这句腐烂。
+- `db/mod.rs` 的 `test_counter` 警告经复核**仍然准确**，逐字保留。
 
 ### 验收
 

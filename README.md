@@ -2,7 +2,7 @@
 
 一款面向 Windows 10/11 的现代化桌面 API 调试 / 管理工具，核心差异化：**自带 MCP Server**，让 AI（Claude Desktop、Cursor、Cline）能直接读写接口、生成文档、参与调试。
 
-> 当前阶段：**v0.1 MVP 已交付**（详见下方「路线图」）。四种分发形态均可运行：Tauri 桌面应用、`serve-web` 无头 REST + SPA、Docker web 镜像、以及独立的 `simple-post-mcp` npm 包。数据层已从早期内存 mock 迁移为 SQLite 持久化。
+> 当前阶段：**v0.1 MVP 已交付**（详见下方「路线图」）。四种分发形态均可运行：Tauri 桌面应用、`serve-web` 无头 REST + SPA、Docker web 镜像、以及独立的 `simple-post-mcp` 二进制（不发布到 npm 包）。数据层已从早期内存 mock 迁移为 SQLite 持久化。
 
 ## 跑起来
 
@@ -152,7 +152,7 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 | `safe_write` | `Read` `Create` `Update` | 允许增删改，但**不含** `Send` |
 | `full_access` | 全部（含 `Delete` `Send`） | 允许出站 HTTP 调用与破坏性操作 |
 
-- **Read**：`project_list` / `project_get` / `module_list` / `collection_list` / `endpoint_get` / `endpoint_search` / `base_url_def_list` / `env_list` / `env_get_active` / `api_resolve_*` / `api_parse_response` / `api_diff_responses` / `api_extract_jsonpath`
+- **Read**：`project_list` / `project_get` / `module_list` / `collection_list` / `endpoint_list` / `endpoint_get` / `endpoint_search` / `base_url_def_list` / `env_list` / `env_get_active` / `api_resolve_*` / `api_parse_response` / `api_diff_responses` / `api_extract_jsonpath`
 - **Create**：`project_create` / `module_create` / `collection_create` / `endpoint_create` / `endpoint_duplicate`
 - **Update**：`project_update` / `module_update` / `module_move` / `collection_update` / `collection_move` / `endpoint_update` / `endpoint_move` / `env_update` / `env_set_var` / `env_set_baseurl` / `env_set_active` / `base_url_def_update` / `base_url_def_set_default`
 - **Delete**：`project_delete` / `module_delete` / `collection_delete` / `endpoint_delete` / `env_delete` / `base_url_def_delete`
@@ -161,13 +161,6 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 > 全局策略之外还有一道**按项目**的权限闸（`simple_post_core::permissions`，`Read < ReadCall < Full`，数据库未显式设置时默认 `ReadCall`，未知工具按 `Full`）。两道闸是「与」关系，取更严格者。
 
 完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口见 [`docs/openapi.yaml`](docs/openapi.yaml)（由 `scripts/dump-openapi.mjs` 从 `public_route_specs()` 生成）；[`docs/http-api-reference.md`](docs/http-api-reference.md) 只记录 yaml 表达不了的坑，不重复端点清单。
-
-Resources（AI 侧"读取"通道，HTTP MCP 模式下暴露）：
-
-- `simple-post://projects`
-- `simple-post://projects/{id}`
-- `simple-post://endpoints/{id}`
-- `simple-post://environments/{projectId}`
 
 ## Docker（web shape 一键部署）
 

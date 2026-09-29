@@ -1,6 +1,6 @@
 # Simple Post — HTTP API 参考
 
-> `docs/openapi.yaml` 是机器可读权威，由 `web_api.rs::public_route_specs()` 生成。
+> `docs/openapi.yaml` 是机器可读权威，由 `web_api/spec.rs` 里的 `public_route_specs()` 生成。
 > **本文不重复它**——端点清单、入参出参、稳定性标注都去查那份 yaml。
 > 这里只留下从 yaml 里读不出来的东西：会让请求静默走错路的坑。
 
@@ -11,7 +11,7 @@
 | `public` | 稳定 v1 契约；breaking change 需要 `/api/v2/*` 迁移 | 列举 |
 | `internal` | 内部运维 / UI 投影；无版本承诺 | **不**列举 |
 
-`web_api.rs::public_route_specs()` 是 single source of truth —— 加新 endpoint 时
+`web_api/spec.rs` 里的 `public_route_specs()` 是 single source of truth —— 加新 endpoint 时
 必须显式标注 stability，否则它不会出现在 yaml 里。已知未列入的有
 `/api/permissions/:projectId` 与 `/api/request-settings`（路由可用，只是没写进 spec）。
 
@@ -60,7 +60,7 @@ node scripts/dump-openapi.mjs > docs/openapi.yaml    # 重新生成
 npx @apidevtools/swagger-parser validate docs/openapi.yaml
 ```
 
-### ⭐ 拆 `web_api.rs` 时的回归护栏
+### ⭐ 重构 `web_api/` 路由时的回归护栏
 
 `openapi.yaml` 完全由 `public_route_specs()` 生成，所以它是判断"重构有没有
 悄悄弄丢路由"的最强手段——比任何测试都确定，因为丢一个 `.route()` 或改错
