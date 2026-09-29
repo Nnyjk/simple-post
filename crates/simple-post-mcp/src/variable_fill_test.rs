@@ -39,12 +39,9 @@ fn project_with_defs() -> Project {
     }
 }
 
-fn minimal_endpoint() -> Endpoint {
-    Endpoint {
-        id: "ep1".into(),
-        collection_id: "c1".into(),
-        name: "demo".into(),
-        description: None,
+fn minimal_endpoint() -> EndpointDetail {
+    EndpointDetail {
+        node_id: "ep1".into(),
         method: HttpMethod::Get,
         url: "/users/{{id}}".into(),
         environment_id: Some("e1".into()),
@@ -57,9 +54,6 @@ fn minimal_endpoint() -> Endpoint {
         docs: None,
         notes: None,
         tags: vec![],
-        sort_order: 0,
-        created_at: 0,
-        updated_at: 0,
     }
 }
 

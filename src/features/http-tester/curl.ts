@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Endpoint → cURL string builder.
  *
  * Thin wrapper over the shared `buildCurlCommand` in
@@ -10,7 +10,7 @@
  * endpoint values, so the user can copy a cURL that reflects an
  * unsaved HttpTester draft.
  */
-import type { Endpoint, Environment, HttpMethod } from '@/types/domain';
+import type { EndpointDetail, Environment, HttpMethod } from '@/types/domain';
 import { buildCurlCommand } from '@/lib/http-build';
 
 export interface EndpointOverrides {
@@ -28,7 +28,7 @@ export interface EndpointOverrides {
  * before the user clicks Save.
  */
 export function endpointToCurl(
-  endpoint: Endpoint,
+  endpoint: EndpointDetail,
   env: Environment | undefined,
   overrides?: EndpointOverrides,
 ): string {

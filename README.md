@@ -2,7 +2,7 @@
 
 一款面向 Windows 10/11 的现代化桌面 API 调试 / 管理工具，核心差异化：**自带 MCP Server**，让 AI（Claude Desktop、Cursor、Cline）能直接读写接口、生成文档、参与调试。
 
-> 当前阶段：**v0.1 MVP 已交付**（详见下方「路线图」）。四种分发形态均可运行：Tauri 桌面应用、`serve-web` 无头 REST + SPA、Docker web 镜像、以及独立的 `simple-post-mcp` npm 包。数据层已从早期内存 mock 迁移为 SQLite 持久化。
+> 当前阶段：**v0.1 MVP 已交付**（详见下方「路线图」）。四种分发形态均可运行：Tauri 桌面应用、`serve-web` 无头 REST + SPA、Docker web 镜像、以及独立的 `simple-post-mcp` 二进制（不发布到 npm 包）。数据层已从早期内存 mock 迁移为 SQLite 持久化。
 
 ## 跑起来
 
@@ -30,17 +30,17 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 
 完整示例见：
 
-- [`docs/reverse-proxy-nginx.conf`](docs/reverse-proxy-nginx.conf) — nginx 1.24+，含健康探针 + `/sp` → `/sp/` 重定向 + WS 升级
-- [`docs/reverse-proxy-caddyfile`](docs/reverse-proxy-caddyfile) — Caddy 2.7+，含 ACME 自动 TLS + `uri_strip_prefix` 模式
-
 > Vite 已配置 `host: '0.0.0.0'` + `allowedHosts: true`，局域网其他设备可直接访问本机 IP:5173。
 
 ## 已实现
 
 ### 数据层（SQLite + Zustand 状态缓存）
-- 4 级层级：Project → Module → Collection → Endpoint，外加 Environment / Response
+- 层级：Project → Module → Collection（**可递归嵌套，深度不设上限**）→ Endpoint，外加 Environment / Response
+- 整棵树存在**一张 `nodes` 表**里，用 `type` 字段区分模块 / 集合 / 接口；层级由 `parent_id` 表达，所属项目由 `root_id` 反规范化在每一行上（省掉一次向上追溯）
+- 接口的请求配置（method / url / auth / body / headers / params / tags）单独放 `endpoint_details` 侧表，按 node id 关联——这些字段对模块和集合没有意义
+- 类型矩阵是**被强制的契约**（SQLite trigger + 应用层双防线）：模块只能在顶层，接口只能挂在集合下，集合可以挂在模块或另一个集合下
 - 持久化：Zustand slice → `invokeCmd()` → Tauri IPC 或 `/api/*` → `simple-post-core` → SQLite（WAL 模式）
-- 完整 CRUD：项目 / 模块 / 集合 / 接口的增删改查 + 复制接口 + 级联清理
+- 完整 CRUD：项目 / 模块 / 集合 / 接口的增删改查 + 复制接口 + 级联清理（级联由 schema 保证，客户端只提交要删的节点 id）
 - 排序：模块 / 集合 / 接口的上下移
 - 响应：每个 endpoint 最多 10 条历史（FIFO）+ 用户保存的示例
 - 偏好持久化：主题（dark/light/system）+ 请求设置（超时 / 跟随重定向 / 响应上限）写 localStorage
@@ -52,12 +52,14 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 设置入口
 
 ### 侧边树（可展开 + 过滤）
-- 4 级：项目 → 模块 → 集合 → 接口
+- 项目 → 模块 → 集合 → 接口，**集合层用递归组件渲染，嵌套多深都能展开**
 - 每个集合 / 接口显示 method 彩色徽标
 - 顶栏 `+` 真实弹新建弹窗
 - 双击树项 inline 改名
 - 右键菜单：新建子项 / 重命名 / 上下移 / 删除 / 复制接口
 - 删除弹确认框
+
+**暴露嵌套能力的入口**：集合行右键的「新建子集合」；拖拽到某个集合正中间时进入 `into` 落点（落点子树），拖到上下边缘时是 `above` / `below` 的同级重排。面包屑（`项目 › 模块 › 集合 › …`）会逐级显示实际深度。
 
 ### 请求测试器
 - Method 选择 + URL 输入（变量高亮显示）+ Send + **Copy as cURL** + Save
@@ -148,7 +150,7 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 | `safe_write` | `Read` `Create` `Update` | 允许增删改，但**不含** `Send` |
 | `full_access` | 全部（含 `Delete` `Send`） | 允许出站 HTTP 调用与破坏性操作 |
 
-- **Read**：`project_list` / `project_get` / `module_list` / `collection_list` / `endpoint_get` / `endpoint_search` / `base_url_def_list` / `env_list` / `env_get_active` / `api_resolve_*` / `api_parse_response` / `api_diff_responses` / `api_extract_jsonpath`
+- **Read**：`project_list` / `project_get` / `module_list` / `collection_list` / `endpoint_list` / `endpoint_get` / `endpoint_search` / `base_url_def_list` / `env_list` / `env_get_active` / `api_resolve_*` / `api_parse_response` / `api_diff_responses` / `api_extract_jsonpath`
 - **Create**：`project_create` / `module_create` / `collection_create` / `endpoint_create` / `endpoint_duplicate`
 - **Update**：`project_update` / `module_update` / `module_move` / `collection_update` / `collection_move` / `endpoint_update` / `endpoint_move` / `env_update` / `env_set_var` / `env_set_baseurl` / `env_set_active` / `base_url_def_update` / `base_url_def_set_default`
 - **Delete**：`project_delete` / `module_delete` / `collection_delete` / `endpoint_delete` / `env_delete` / `base_url_def_delete`
@@ -156,68 +158,39 @@ UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下�
 
 > 全局策略之外还有一道**按项目**的权限闸（`simple_post_core::permissions`，`Read < ReadCall < Full`，数据库未显式设置时默认 `ReadCall`，未知工具按 `Full`）。两道闸是「与」关系，取更严格者。
 
-完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口见 [`docs/openapi.yaml`](docs/openapi.yaml)（由 `scripts/dump-openapi.mjs` 从 `public_route_specs()` 生成）；[`docs/http-api-reference.md`](docs/http-api-reference.md) 只记录 yaml 表达不了的坑，不重复端点清单。
+完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口的权威来源是 `public_route_specs()`（`src-tauri/src/web_api/spec.rs`）与 `build_router` 的 `.route()` 注册（`src-tauri/src/web_api/mod.rs`）；`node scripts/dump-openapi.mjs` 可从该表生成一份机器可读的 OpenAPI 文档。
 
-Resources（AI 侧"读取"通道，HTTP MCP 模式下暴露）：
+## 部署到服务器（serve-web shape）
 
-- `simple-post://projects`
-- `simple-post://projects/{id}`
-- `simple-post://endpoints/{id}`
-- `simple-post://environments/{projectId}`
-
-## Docker（web shape 一键部署）
-
-`simple-post` 的 `serve-web` shape 可以容器化部署到任何带 Docker 的 Linux 主机（amd64 / arm64）。
+`simple-post serve-web` 起一个无头 REST + SPA 服务，可直接跑在任何能跑 Rust
+二进制的机器上。构建产物：
 
 ```bash
-# 1. 准备构建产物（Dockerfile.web 把 dist/ 拷进镜像）
 npm install && npm run build
+# 然后运行 cargo build --release，产物为 target/release/simple-post
+```
 
-# 2. 构建镜像（约 50MB 运行时镜像，alpine + musl）
-docker build -f Dockerfile.web -t simple-post:web .
+启动与自检：
 
-# 3. 启动容器
-docker run -d --name simple-post \
-  -p 4173:4173 \
-  -e SIMPLE_POST_WEB_PASSWORD=changeme \
-  -v simple-post-data:/data \
-  simple-post:web
-
-# 4. 验证
+```bash
+./simple-post serve-web
 curl http://localhost:4173/api/healthz
 # {"status":"ok","version":"…","shape":"server"}
-
-# 5. 接 MCP 客户端：Claude Desktop / Cursor / Cline 的 mcpServers 里配
-#    url=http://host:4173/mcp  + Authorization: Bearer changeme
 ```
 
-或者用 compose 拉现成镜像：
-
-```bash
-cp .env.example .env && $EDITOR .env   # 至少填 SP_WEB_PASSWORD
-docker compose up -d
-docker compose ps                       # STATUS=healthy
-```
-
-镜像发布到 GHCR：推 `v*` tag 触发 `.github/workflows/docker-build.yml`，输出 `ghcr.io/nnyjk/simple-post:web-v<version>`（多架构 manifest）。
+接 MCP 客户端：Claude Desktop / Cursor / Cline 的 `mcpServers` 里配
+`url=http://host:4173/mcp` + `Authorization: Bearer <密码>`。
 
 安全提示：
 
 - `SIMPLE_POST_WEB_PASSWORD` **必须**设，否则 `/api/*` 和 `/mcp` 全开放（`auth_middleware` 在 password 为空时是 no-op）。
-- 健康检查路径 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便容器探针。静态资源 `/assets/*` 与 SPA 外壳同样免认证——浏览器无法给 `<script type="module">` 挂 `Authorization` 头，若对它们鉴权，带密码的部署会直接白屏。
+- 健康检查路径 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便探针。静态资源 `/assets/*` 与 SPA 外壳同样免认证——浏览器无法给 `<script type="module">` 挂 `Authorization` 头，若对它们鉴权，带密码的部署会直接白屏。
 - **出站 URL 策略**：`serve-web` 会代替浏览器发请求，所以有两条出口，权限不同。
-  - `POST /api/endpoints/:id/send`（**UI 的 Send 按钮走这条**）：只接受 endpoint id + 相对路径，base URL、路径、`{{var}}`、鉴权全部由服务端按数据库里的配置拼装。**浏览器无法指定目标地址**，因此这条路由没有 SSRF 面；传入绝对 URL 会被 400 拒绝。
+  - `POST /api/nodes/:id/send`（**UI 的 Send 按钮走这条**）：只接受 endpoint id + 相对路径，base URL、路径、`{{var}}`、鉴权全部由服务端按数据库里的配置拼装。**浏览器无法指定目标地址**，因此这条路由没有 SSRF 面；传入绝对 URL 会被 400 拒绝。
   - `POST /api/http/send`：**原始 URL 逃生舱**，调用方可以指定任意地址。仅 `http` / `https` 允许（`file:` / `gopher:` 等一律拒绝）。默认**不**拦截私网地址——桌面端用户常常就是要打 `localhost:3000`，默认拦会直接砸掉产品的主要用途。
   - 公网 / 共享部署请设 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段。
 - 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，`build_router` 会把整个 router nest 在 `/sp` 下；nginx 侧记得把 `/sp/assets/*` 转到 `/assets/*`（SPA shell 的 `<base href>` 仍是 `/`，**不**重写）。
-- 数据持久化：把 `/data` 挂到 named volume。SQLite 在 WAL 模式下也能安全落盘，但 `docker stop` 走 `tini` 转发 SIGTERM 才会触发优雅 checkpoint。
-
-详见：
-
-- `Dockerfile.web` — Alpine 多阶段 musl 构建
-- `docker/healthcheck.sh` — 容器内健康检查
-- `docker-compose.yml` — 参考部署（强制要求 `SP_WEB_PASSWORD`）
-- `.github/workflows/docker-build.yml` — buildx 多架构 + GHCR 发布
+- 数据持久化：把数据目录挂到持久卷即可。默认位置是 `SIMPLE_POST_DATA_DIR` 或 `%APPDATA%/simple-post`。SQLite 在 WAL 模式下也能安全落盘。
 
 ## 决策记录
 

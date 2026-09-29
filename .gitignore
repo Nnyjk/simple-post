@@ -78,3 +78,10 @@ src-tauri/gen/
 # rules so historical `src-tauri/target/` artifacts don't accidentally
 # surface again if the workspace is ever rolled back).
 /target/
+
+# Agent worktrees created by the desktop runtime: `.worktrees/<session>/`
+# is a full second checkout of this repo. Untracked here so it never shows
+# up in `git status`; see `.prettierignore` and `eslint.config.js` for the
+# matching lint-side ignores — without all three, the tooling crawls into
+# the worktree and reports *its* files as if they belonged to this tree.
+/.worktrees/

@@ -44,8 +44,10 @@ async fn module_move_preserves_collections_and_endpoints() {
     // `ON DELETE CASCADE`, moving a *populated* module silently
     // destroyed every collection under it and every endpoint under
     // those collections. A real `project_id` UPDATE fixes that.
-    use simple_post_core::db::{collections, endpoints, modules, permissions, projects};
-    use simple_post_core::domain::{Collection, Endpoint, Module, Project, RequestBody};
+    use simple_post_core::db::{endpoint_details, nodes, permissions, projects};
+    use simple_post_core::domain::{
+        EndpointDetail, Project, RequestBody, ResourceNode, ResourceNodeType,
+    };
     use simple_post_core::permissions::Permission;
 
     let st = state();
@@ -61,6 +63,20 @@ async fn module_move_preserves_collections_and_endpoints() {
             base_url_definitions: vec![],
             default_base_url_definition_id: None,
             color: String::new(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn node(root: &str, id: &str, kind: ResourceNodeType, parent: Option<&str>) -> ResourceNode {
+        ResourceNode {
+            id: id.into(),
+            root_id: root.into(),
+            parent_id: parent.map(String::from),
+            kind,
+            name: "n".into(),
+            description: None,
+            sort_order: 0,
             created_at: 0,
             updated_at: 0,
         }
@@ -83,36 +99,56 @@ async fn module_move_preserves_collections_and_endpoints() {
                 ..mk()
             },
         )?;
-        modules::create(
+        nodes::create(
             c,
-            &Module {
-                id: "m_move".into(),
-                project_id: "p_move_a".into(),
-                name: "M".into(),
-                description: None,
+            &ResourceNode {
                 sort_order: 0,
-                expanded: None,
+                ..node("p_move_a", "m_move", ResourceNodeType::Module, None)
             },
+            None,
         )?;
-        collections::create(
+        // A sibling left behind in the source project, so the test can
+        // see the gap close up behind the module that left.
+        nodes::create(
             c,
-            &Collection {
-                id: "c_move".into(),
-                module_id: "m_move".into(),
-                parent_collection_id: None,
-                name: "C".into(),
-                description: None,
-                sort_order: 0,
-                expanded: None,
+            &ResourceNode {
+                sort_order: 1,
+                ..node("p_move_a", "m_stays", ResourceNodeType::Module, None)
             },
+            None,
         )?;
-        endpoints::create(
+        // Two modules already in the destination, so the requested index
+        // is meaningful rather than clamped into an empty list.
+        for (id, order) in [("m_b0", 0), ("m_b1", 1)] {
+            nodes::create(
+                c,
+                &ResourceNode {
+                    sort_order: order,
+                    ..node("p_move_b", id, ResourceNodeType::Module, None)
+                },
+                None,
+            )?;
+        }
+        nodes::create(
             c,
-            &Endpoint {
-                id: "e_move".into(),
-                collection_id: "c_move".into(),
-                name: "E".into(),
-                description: None,
+            &node(
+                "p_move_a",
+                "c_move",
+                ResourceNodeType::Collection,
+                Some("m_move"),
+            ),
+            None,
+        )?;
+        nodes::create(
+            c,
+            &node(
+                "p_move_a",
+                "e_move",
+                ResourceNodeType::Endpoint,
+                Some("c_move"),
+            ),
+            Some(&EndpointDetail {
+                node_id: "e_move".into(),
                 method: simple_post_core::domain::HttpMethod::Get,
                 url: "/x".into(),
                 environment_id: None,
@@ -125,10 +161,7 @@ async fn module_move_preserves_collections_and_endpoints() {
                 docs: None,
                 notes: None,
                 tags: vec![],
-                sort_order: 0,
-                created_at: 0,
-                updated_at: 0,
-            },
+            }),
         )?;
         // The per-project gate defaults to `read_call`, which is below
         // the `full` a move requires. Set it after the project row
@@ -138,33 +171,67 @@ async fn module_move_preserves_collections_and_endpoints() {
     })
     .unwrap();
 
-    // Move it. The project permission defaults to Full so the
-    // per-project gate passes.
+    // Move it to the middle of the destination project's modules.
     module::tool_module_move(
         &st,
         serde_json::json!({
             "module_id": "m_move",
             "new_project_id": "p_move_b",
-            "new_sort_order": 3
+            "new_sort_order": 1
         }),
     )
     .await
     .expect("module_move should succeed");
 
     // The module keeps its id and now belongs to the target project.
-    let after = simple_post_core::db::with_conn(&st.pool, |c| modules::get(c, "m_move"))
+    let after = simple_post_core::db::with_conn(&st.pool, |c| nodes::get(c, "m_move"))
         .expect("module must still exist under its original id");
-    assert_eq!(after.project_id, "p_move_b");
-    assert_eq!(after.sort_order, 3);
+    assert_eq!(after.root_id, "p_move_b");
+    assert_eq!(after.sort_order, 1);
 
-    // Crucially: the child rows survived the move.
-    let c_after = simple_post_core::db::with_conn(&st.pool, |c| collections::get(c, "c_move"))
+    // Both projects' top-level orderings stay contiguous: the
+    // destination's modules close around the insertion, and the
+    // project being left has no gap where the module used to be.
+    let top_level = |root: &str| {
+        simple_post_core::db::with_conn(&st.pool, |c| {
+            simple_post_core::db::nodes::list_by_root_and_type(c, root, ResourceNodeType::Module)
+        })
+        .unwrap()
+        .into_iter()
+        .map(|n| (n.id, n.sort_order))
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        top_level("p_move_b"),
+        vec![("m_b0".into(), 0), ("m_move".into(), 1), ("m_b1".into(), 2)],
+        "the destination's modules must close around the inserted one"
+    );
+    assert_eq!(
+        top_level("p_move_a"),
+        vec![("m_stays".into(), 0)],
+        "the project being left must not keep a gap in its sort_order"
+    );
+
+    // Crucially: the child rows survived the move, and their `root_id`
+    // was re-derived with them. Updating only the module row — which is
+    // what the pre-`root_id` layout could express — would file the whole
+    // subtree under the old project and make it invisible to
+    // `list_by_root`.
+    let c_after = simple_post_core::db::with_conn(&st.pool, |c| nodes::get(c, "c_move"))
         .expect("collection must survive the module move");
-    assert_eq!(c_after.module_id, "m_move");
+    assert_eq!(c_after.parent_id.as_deref(), Some("m_move"));
+    assert_eq!(c_after.root_id, "p_move_b");
 
-    let e_after = simple_post_core::db::with_conn(&st.pool, |c| endpoints::get(c, "e_move"))
+    let e_after = simple_post_core::db::with_conn(&st.pool, |c| nodes::get(c, "e_move"))
         .expect("endpoint must survive the module move");
-    assert_eq!(e_after.collection_id, "c_move");
+    assert_eq!(e_after.parent_id.as_deref(), Some("c_move"));
+    assert_eq!(e_after.root_id, "p_move_b");
+
+    // The endpoint's request configuration is a separate table now, and
+    // must have travelled with it.
+    let detail = simple_post_core::db::with_conn(&st.pool, |c| endpoint_details::get(c, "e_move"))
+        .expect("endpoint detail must survive the module move");
+    assert_eq!(detail.url, "/x");
 }
 
 #[tokio::test]

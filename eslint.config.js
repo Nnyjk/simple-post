@@ -14,6 +14,10 @@ export default [
       'target/**',
       'node_modules/**',
       '.scratch/**',
+      // Agent worktrees are full second checkouts of this repo. Without
+      // this ignore the flat config cannot resolve a single tsconfigRootDir
+      // and every file in the real tree fails to parse.
+      '.worktrees/**',
       'src-tauri/gen/**',
       'docs/**',
       'public/**',

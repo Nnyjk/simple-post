@@ -29,12 +29,9 @@ fn state() -> Arc<AppState> {
     })
 }
 
-fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> Endpoint {
-    Endpoint {
-        id: "ep1".into(),
-        collection_id: "c1".into(),
-        name: "ep".into(),
-        description: None,
+fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> EndpointDetail {
+    EndpointDetail {
+        node_id: "ep1".into(),
         method: HttpMethod::Get,
         url: url.into(),
         environment_id: None,
@@ -51,9 +48,6 @@ fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> E
         docs: None,
         notes: None,
         tags: Vec::new(),
-        sort_order: 0,
-        created_at: 0,
-        updated_at: 0,
     }
 }
 

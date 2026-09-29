@@ -5,17 +5,17 @@
  *   - T-2: Every CRUD slice action follows the same shape —
  *     optimistic local mutation via `set()`, fire-and-forget
  *     `invoke<...>(COMMANDS.*)`, on error rollback to the previous
- *     state via `set()`. We pick the `endpoint` family (`updateEndpoint`)
- *     because it's the most-called optimistic action in the tree and
- *     it exercises the optimistic+rollback branch with two distinct
- *     store fields (the endpoints array and `updatedAt`).
+ *     state via `set()`. We pick the endpoint-detail family
+ *     (`updateEndpointDetail`) because it's the most-called optimistic
+ *     action in the tree and it exercises the optimistic+rollback branch.
  *
  * Coverage:
- *   - Seeds an endpoint in the store.
- *   - Invokes `updateEndpoint` against an `invoke` mock that rejects.
+ *   - Seeds an endpoint's detail row in the store.
+ *   - Invokes `updateEndpointDetail` against an `invoke` mock that
+ *     rejects.
  *   - Awaits the returned promise (the action awaits the IPC).
- *   - Asserts the rollback restored the original endpoint including
- *     its `updatedAt` timestamp and that a warning was logged.
+ *   - Asserts the rollback restored the original detail — same object
+ *     reference — and that a warning was logged.
  *
  * Run via:
  *   npx tsx --test src/stores/__tests__/crud-slice.test.ts
@@ -26,14 +26,12 @@ import assert from 'node:assert/strict';
 import { installBrowserShim, clearIpcMock, installIpcMock } from './_browser-shim';
 
 import { createCrudSlice } from '../crud-slice';
-import type { Endpoint, Environment } from '@/types/domain';
+import type { EndpointDetail, Environment } from '@/types/domain';
 
-/** A minimal but domain-shaped `Endpoint`. */
-function makeEndpoint(overrides: Partial<Endpoint> = {}): Endpoint {
+/** A minimal but domain-shaped `EndpointDetail`. */
+function makeDetail(overrides: Partial<EndpointDetail> = {}): EndpointDetail {
   return {
-    id: 'ep-1',
-    collectionId: 'col-1',
-    name: 'List Widgets',
+    nodeId: 'ep-1',
     method: 'GET',
     url: '/widgets',
     params: [],
@@ -41,9 +39,6 @@ function makeEndpoint(overrides: Partial<Endpoint> = {}): Endpoint {
     body: { mode: 'none', content: '' },
     auth: { type: 'none' },
     tags: [],
-    sortOrder: 0,
-    createdAt: 1_700_000_000_000,
-    updatedAt: 1_700_000_000_000,
     ...overrides,
   };
 }
@@ -63,19 +58,22 @@ function makeEnvironment(overrides: Partial<Environment> = {}): Environment {
 
 /**
  * 构造 CRUD slice 所需的最小 store；环境 action 读取 environments，
- * endpoint action 读取 endpoints，二者共用 Zustand 风格的 setter。
+ * endpoint action 读取 endpointDetails，二者共用 Zustand 风格的 setter。
  */
 type CrudHarnessState = {
-  endpoints: Endpoint[];
+  endpointDetails: Record<string, EndpointDetail>;
   environments: Environment[];
   openTabs: never[];
   activeTabId: null;
   activeEndpointId: null;
 };
 
-function makeCrudHarness(initialEndpoints: Endpoint[], initialEnvironments: Environment[] = []) {
+function makeCrudHarness(
+  initialDetails: Record<string, EndpointDetail> = {},
+  initialEnvironments: Environment[] = [],
+) {
   const bag: CrudHarnessState = {
-    endpoints: initialEndpoints,
+    endpointDetails: initialDetails,
     environments: initialEnvironments,
     openTabs: [],
     activeTabId: null,
@@ -131,51 +129,41 @@ afterEach(() => {
 // T-2 — optimistic update + rollback
 // ============================================================
 
-describe('crud-slice: updateEndpoint — T-2 optimistic + rollback', () => {
+describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () => {
   it('applies optimistic update, then rolls back when invoke rejects', async () => {
-    const original = makeEndpoint({
-      id: 'ep-rollback',
-      name: 'Original Name',
-      url: '/widgets',
-      updatedAt: 1_700_000_000_000,
-    });
-    const harness = makeCrudHarness([original]);
-    const before = Date.now();
+    const original = makeDetail({ nodeId: 'ep-rollback', url: '/widgets' });
+    const harness = makeCrudHarness({ 'ep-rollback': original });
 
-    // Mock `endpoints_update` to reject. The slice's catch branch should
-    // fire the rollback set() and `console.error` the failure.
+    // Mock `endpoint_detail_update` to reject. The slice's catch branch
+    // should fire the rollback set() and `console.error` the failure.
     installIpcMock(async (cmd) => {
-      if (cmd === 'endpoints_update') {
+      if (cmd === 'endpoint_detail_update') {
         throw new Error('sqlite: disk I/O error');
       }
       throw new Error('unexpected cmd: ' + cmd);
     });
 
     // Snapshot pre-call state for the equality assertion below.
-    const beforeUpdate = harness.bag.endpoints[0];
-    assert.equal(beforeUpdate.name, 'Original Name');
-    const originalUpdatedAt = beforeUpdate.updatedAt;
+    const beforeUpdate = harness.bag.endpointDetails['ep-rollback'];
+    assert.equal(beforeUpdate.url, '/widgets');
 
-    await harness.slice.updateEndpoint('ep-rollback', {
-      name: 'Renamed URL',
+    const action = harness.slice.updateEndpointDetail('ep-rollback', {
+      method: 'POST',
       url: '/widgets/v2',
     });
 
-    const after = harness.bag.endpoints[0];
-    // The original endpoint must still be in the store untouched.
-    assert.ok(after, 'endpoint not deleted');
-    assert.equal(after.id, 'ep-rollback', 'same id');
-    assert.equal(
-      after.name,
-      'Original Name',
-      'optimistic name change rolled back to "Original Name"',
-    );
+    // Optimistic write is visible before the IPC settles.
+    assert.equal(harness.bag.endpointDetails['ep-rollback'].method, 'POST');
+    assert.equal(harness.bag.endpointDetails['ep-rollback'].url, '/widgets/v2');
+
+    await action;
+
+    const after = harness.bag.endpointDetails['ep-rollback'];
+    // The original detail must still be in the store untouched.
+    assert.ok(after, 'detail not deleted');
+    assert.equal(after.nodeId, 'ep-rollback', 'same id');
+    assert.equal(after.method, 'GET', 'optimistic method change rolled back');
     assert.equal(after.url, '/widgets', 'optimistic url change rolled back');
-    assert.equal(
-      after.updatedAt,
-      originalUpdatedAt,
-      'updatedAt rolled back to the original timestamp',
-    );
 
     // The slice should have emitted a console warning/error carrying
     // the same error message — that's how the prod UX surfaces the
@@ -194,16 +182,26 @@ describe('crud-slice: updateEndpoint — T-2 optimistic + rollback', () => {
     // Sanity: the recovered object references the very same `prev`
     // capture the slice held (or an object equal to it). Identity
     // would be too strong because the slice stores the optimistic
-    // object back into the array, then replaces it with `prev` on
+    // object back into the map, then replaces it with `prev` on
     // rollback — so what we should see IS `prev`.
     assert.strictEqual(
       after,
       beforeUpdate,
-      'rolled-back endpoint reuses the prev snapshot reference',
+      'rolled-back detail reuses the prev snapshot reference',
     );
-    void before; // (kept for documentation; tested implicitly via the
-    // reference equality above — the rollback puts the
-    // original `prev` straight back into the array.)
+  });
+
+  it('未知 nodeId 不发 IPC — 没有 detail 行可乐观写入', async () => {
+    const harness = makeCrudHarness({});
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    await harness.slice.updateEndpointDetail('ghost', { url: '/nope' });
+
+    assert.deepEqual(calls, [], '没有 detail 行就不该打扰后端');
   });
 });
 
@@ -214,7 +212,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     const original = makeEnvironment({
       variables: { token: 'secret', empty: '' },
     });
-    const harness = makeCrudHarness([], [original]);
+    const harness = makeCrudHarness({}, [original]);
     const calls: CapturedInvoke[] = [];
     let release!: () => void;
     const pending = new Promise<void>((resolve) => {
@@ -253,7 +251,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
 
   it('变量删除失败时恢复原变量和值', async () => {
     const original = makeEnvironment({ variables: { token: 'secret', keep: 'yes' } });
-    const harness = makeCrudHarness([], [original]);
+    const harness = makeCrudHarness({}, [original]);
     installIpcMock(async () => {
       throw new Error('variable delete failed');
     });
@@ -268,7 +266,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     const original = makeEnvironment({
       baseUrls: { api: 'https://api.example.test', empty: '' },
     });
-    const harness = makeCrudHarness([], [original]);
+    const harness = makeCrudHarness({}, [original]);
     const calls: CapturedInvoke[] = [];
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });
@@ -299,7 +297,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
 
   it('BaseUrl 删除失败时恢复原槽位和值', async () => {
     const original = makeEnvironment({ baseUrls: { api: 'https://api.example.test' } });
-    const harness = makeCrudHarness([], [original]);
+    const harness = makeCrudHarness({}, [original]);
     installIpcMock(async () => {
       throw new Error('base URL delete failed');
     });
@@ -316,7 +314,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     // window in between where the variable did not exist. The rename is
     // now one atomic backend call.
     const original = makeEnvironment({ variables: { old: 'value', keep: 'yes' } });
-    const harness = makeCrudHarness([], [original]);
+    const harness = makeCrudHarness({}, [original]);
     const calls: CapturedInvoke[] = [];
     const echoed = makeEnvironment({ variables: { renamed: 'value', keep: 'yes' } });
     installIpcMock(async (cmd, args) => {
@@ -349,7 +347,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
 
   it('重命名失败时恢复完整快照 — 后端从未进入过删除状态', async () => {
     const original = makeEnvironment({ variables: { old: 'value', keep: 'yes' } });
-    const harness = makeCrudHarness([], [original]);
+    const harness = makeCrudHarness({}, [original]);
     const calls: CapturedInvoke[] = [];
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });
@@ -374,7 +372,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
 
   it('重命名的 key 不存在时不发 IPC', async () => {
     const original = makeEnvironment({ variables: { keep: 'yes' } });
-    const harness = makeCrudHarness([], [original]);
+    const harness = makeCrudHarness({}, [original]);
     const calls: CapturedInvoke[] = [];
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });

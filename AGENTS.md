@@ -17,9 +17,13 @@ Four runtime pieces:
 | MCP server | `crates/simple-post-mcp/` | JSON-RPC 2.0 dispatch (44 tools), axum HTTP daemon, stdio bridge |
 | Frontend | `src/` | React 18 + Vite 5 + Zustand 5 + Tailwind 3 + CodeMirror 6 |
 
+**Resource tree.** Modules, collections and endpoints all live in **one `nodes` table**, discriminated by `type`. Hierarchy is `parent_id`; the owning project is denormalised onto every row as `root_id` (one indexed read answers "which project", which is both the store's filter and the MCP permission gate's key). Endpoint request configuration — method, url, auth, body, headers, params, tags — is a separate `endpoint_details` row keyed by node id, because those fields are meaningless for a module and the tree never renders them. The logical shape is still Project → Module → **Collection (recursively nestable, unbounded depth)** → Endpoint, and UI renders it with a recursive component.
+
+The parent/child relationship is a **enforced contract**, not a convention: `ResourceNodeType::may_under` defines that a module may only be top-level, an endpoint may only sit under a collection, and a collection may sit under either a module or another collection. A SQLite trigger and an application-layer check both enforce it. `db::nodes::move_many` refuses any other combination, and the frontend's optimistic `moveNodes` guard mirrors it.
+
 **CLI modes** (`src-tauri/src/main.rs`, clap): default → Tauri GUI; `mcp` → embedded MCP daemon; `mcp-proxy` → stdio bridge; `serve-web` → headless REST + static SPA.
 
-**CRUD flow** — component → Zustand slice (optimistic update) → `invokeCmd()` (`src/lib/tauri-commands.ts`) → Tauri IPC **or** `fetch('/api/…')` → `src-tauri/src/commands.rs` / `web_api.rs` → `simple_post_core::db` → `store.db` (WAL).
+**CRUD flow** — component → Zustand slice (optimistic update) → `invokeCmd()` (`src/lib/tauri-commands.ts`) → Tauri IPC **or** `fetch('/api/…')` → `src-tauri/src/commands.rs` / `web_api/` → `simple_post_core::db` → `store.db` (WAL).
 
 **HTTP requests** bypass webview CORS: `src/lib/http.ts::sendRequest` → `httpRequest` command → `http_executor.rs` (reqwest).
 
@@ -31,12 +35,12 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 
 - `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/`, `response-viewer/`, `welcome/`
 - `src/stores/` — Zustand: `app-store.ts` barrel composing `bootstrap-slice`, `crud-slice`, `ui-slice`, `mcp-slice`, `dirty-tabs-slice` + `store-types.ts`
-- `src/lib/` — `tauri-commands.ts` (dual-transport IPC + `COMMANDS` registry), `http.ts`, `http-build.ts`, `mcp-types.ts`, `use-mcp-status.ts`
+- `src/lib/` — `tauri-commands.ts` (dual-transport IPC + `COMMANDS` registry), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`
 - `src/components/ui/` — shared primitives (`method-picker`, `tabs`, `dialog`, …)
 - `src/types/domain.ts` — TS mirrors of Rust domain types
-- `crates/simple-post-core/src/db/` — per-entity SQL modules + `schema.sql` (`fixtures.json` is test-only)
+- `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` holds the whole resource tree, `endpoint_details.rs` its endpoint-only configuration) + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
-- `src-tauri/src/` — `commands.rs`, `web_api.rs`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
+- `src-tauri/src/` — `commands.rs`, `web_api/`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
 - `scripts/` — dev/test/build utilities (see below); `docs/` — HTTP reference, OpenAPI, refactor plan
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
@@ -67,7 +71,7 @@ npm run mcp:repl       # interactive JSON-RPC REPL against a running daemon
 
 cargo test --workspace              # all Rust tests
 cargo test -p simple-post-core      # single crate
-node scripts/dump-openapi.mjs > docs/openapi.yaml   # regenerate OpenAPI after web_api.rs route changes
+node scripts/dump-openapi.mjs > openapi.yaml      # render the OpenAPI spec from public_route_specs()
 ```
 
 Lint/format tooling: **ESLint 10 (flat config) + Prettier 3**. ESLint owns correctness (`rules-of-hooks`, unused vars, …); style belongs to Prettier (`eslint-config-prettier` sits last in the config). Rust side: `cargo fmt`, `cargo clippy` with `-D warnings`.
@@ -84,19 +88,19 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **DB access.** Reads → `db::with_conn`; writes → `db::with_tx` (`BEGIN IMMEDIATE`, 3 retries / 50 ms backoff on `SQLITE_BUSY`). WAL + `foreign_keys=ON` + `busy_timeout=3000`. Complex fields (`KeyValue[]`, `RequestBody`, `AuthConfig`, `tags`) live in `*_json` text columns. New entity SQL goes in `crates/simple-post-core/src/db/<entity>.rs`.
 
-**Partial updates.** Patch types (`EndpointPatch`, …) use `#[serde(default, deserialize_with = "double_option")] Option<Option<T>>`: missing key = leave unchanged, JSON `null` = clear, value = set (`crates/simple-post-core/src/domain.rs`). Follow this pattern for any new updatable field.
+**Partial updates.** Patch types (`ResourceNodePatch`, `EndpointDetailPatch`, `ProjectPatch`, `EnvironmentPatch`, …) use `#[serde(default, deserialize_with = "double_option")] Option<Option<T>>`: missing key = leave unchanged, JSON `null` = clear, value = set (`crates/simple-post-core/src/domain.rs`). Follow this pattern for any new updatable field. Note `ResourceNodePatch::parent_id` is the one place the pattern earns its keep: `Some(None)` promotes a node to the top of its project, which is a real write target rather than "leave alone".
 
 **Serialization.** All domain types: `#[serde(rename_all = "camelCase")]`; TS counterparts in `src/types/domain.ts`. Keep both in sync when adding fields.
 
 **Zustand selectors (infinite-loop hazard).** Equality is `Object.is`; a selector returning a fresh array/object (`.map`, `.filter`, spread) causes infinite re-render. Selectors must return stable references or `.find(...)`; derive filtered lists with `useMemo` in the component. Slices never import each other — they share state via the `AppState` interface and `get()`/`set()`. Verify with `npx tsx scripts/_verify_store.mjs`.
 
-**Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands.rs`, registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `src-tauri/src/web_api.rs`, and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently.
+**Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands.rs`, registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `src-tauri/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently.
 
 **Tauri macro gotcha.** `http_request` in `src-tauri/src/lib.rs` must stay **non-`pub`** — marking it `pub` triggers a `__cmd__http_request` identifier collision (E0255) between `#[tauri::command]` and `generate_handler!`.
 
 **Routing.** Axum 0.7 path params use `:id` syntax (`/api/projects/:id`), not `{id}`.
 
-**Naming.** Rust: `snake_case` functions/modules/columns, `PascalCase` types. Tauri commands `snake_case` in Rust, `camelCase` in the frontend `COMMANDS` registry. Test files: `*.test.ts`; Rust tests inline as `#[cfg(test)] mod tests`.
+**Naming.** Rust: `snake_case` functions/modules/columns, `PascalCase` types. Tauri commands `snake_case` in Rust, `camelCase` in the frontend `COMMANDS` registry. Test files: `*.test.ts`; Rust tests go in a **sibling** `*_test.rs` file mounted by `#[path]`, not inline (the inline form survives only in a few files under `src-tauri/` — see Testing & QA).
 
 **Async/concurrency.** tokio multi-thread runtime; metrics via `AtomicU64` with `Ordering::Relaxed`; `port_registry.rs` uses OS atomic file creation (`create_new`) to prevent multi-instance races.
 
@@ -108,7 +112,14 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **IME guard.** Global shortcuts in `src/App.tsx` must check `e.isComposing`, else CJK IME Enter fires requests.
 
-**OpenAPI.** `public_route_specs()` in `src-tauri/src/web_api.rs` is the single source of truth; internal routes (`/api/mcp/*`, `/api/preferences`) are intentionally undocumented. Regenerate with `node scripts/dump-openapi.mjs > docs/openapi.yaml` after any route change. `docs/http-api-reference.md` deliberately does **not** restate the endpoint list — it holds only the traps the yaml cannot express (axum 0.7 wants `:id` not `{id}`, and copying `{id}` out of the OpenAPI spec silently routes into the SPA fallback; the stable error envelope; the auth matrix; the openapi-diff regression guard for splitting `web_api.rs`).
+**OpenAPI.** `public_route_specs()` in `src-tauri/src/web_api/spec.rs` (re-exported from `web_api/mod.rs`) is the single source of truth; internal routes (`/api/mcp/*`, `/api/preferences`) are intentionally undocumented. `node scripts/dump-openapi.mjs` renders that table as an OpenAPI 3.1 document on stdout — pipe it wherever you want, e.g. `node scripts/dump-openapi.mjs > openapi.yaml`. It has no checked-in output since `docs/` was removed.
+
+**Traps a generated spec cannot express**, kept here now that `docs/http-api-reference.md` is gone:
+
+- axum 0.7 path params are `:id`, **not** `{id}`. The OpenAPI spec's own convention is `{id}`, so copying a path out of the yaml silently registers a literal segment and the request falls through to the SPA fallback — a 200 with HTML, which looks like "the endpoint does nothing".
+- The error envelope is stable: `{ "code": <snake_case>, "message" }`. The frontend dispatches on `code` only.
+- The auth matrix: `/api/healthz`, `/mcp/healthz` and `/healthz` are always unauthenticated, as are `/assets/*` and the SPA shell — a browser cannot attach `Authorization` to a `<script type="module">`.
+- The openapi-diff comparison is the regression guard for any `web_api/` route-tree refactor: regenerate before and after, and a route that vanished shows up as a missing path rather than a failing test.
 
 ## Important Files
 
@@ -116,8 +127,9 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 - `src/lib/tauri-commands.ts` — `IS_TAURI_SHELL` detection, `invokeCmd`, `COMMANDS`, `WEB_ROUTES`
 - `src/stores/app-store.ts` — store barrel + safe selector hooks
 - `src-tauri/src/main.rs` / `src-tauri/src/lib.rs` — CLI dispatch / Tauri `run()`
-- `src-tauri/src/web_api.rs` — REST surface for `serve-web`; OpenAPI source
+- `src-tauri/src/web_api/` — REST surface for `serve-web`: router + spec re-exports in `mod.rs`, handlers in `routes/`, OpenAPI source in `spec.rs`
 - `crates/simple-post-core/src/db/mod.rs` + `schema.sql` — pool, transactions, migrations, seed
+- `crates/simple-post-core/src/db/nodes.rs` — the resource tree: CRUD, `list_children`, `move_many` (reparents + re-derives `root_id` across the subtree), `move_to_root` (cross-project), `duplicate`, `search`
 - `crates/simple-post-core/src/domain.rs`, `error.rs` — canonical types + wire errors
 - `crates/simple-post-mcp/src/mcp/mod.rs` — 44-tool registry, `REQUIRED_CAPABILITY`, `dispatch`
 - `Cargo.toml` — workspace root (members, shared deps, release profile)
@@ -138,7 +150,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 - TypeScript path alias `@/*` → `src/*`; `moduleResolution: bundler`, `noEmit` (type checks run via `npm run typecheck` / `tsc -b`, also embedded in `npm run build`).
 - Workspace builds output to `<repo>/target/`, not `src-tauri/target/`.
 - **Line endings: LF everywhere** — `.gitattributes` (`* text=auto eol=lf`) overrides `core.autocrlf`; `.editorconfig` mirrors it for editors (UTF-8, final newline, trim whitespace, 2-space default / 4 for `*.rs`, Markdown keeps trailing spaces). Only `*.bat` / `*.cmd` stay CRLF.
-- **Prettier scope**: `*.md`, lockfiles, and generated `docs/openapi.yaml` are in `.prettierignore` — hand-maintained prose and generated artifacts stay byte-stable.
+- **Prettier scope**: `*.md` and lockfiles are in `.prettierignore` — hand-maintained prose stays byte-stable. There is no longer a generated `docs/openapi.yaml` in the tree (`docs/` was removed); if you render one, put it outside the repo or add it to `.prettierignore` yourself.
 - Windows-first: PowerShell helpers in `scripts/*.ps1`. When writing UTF-8 files from PowerShell, specify `-Encoding utf8NoBOM` — 5.1's default ANSI encoding corrupts UTF-8 and can break `rustc`.
 - Multi-worker convention (per `README.md`): parallel workers deliver code only; end-to-end/browser verification is done once by the main session.
 
@@ -160,7 +172,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 Key facts:
 
 - **Test file placement — frontend.** Every test lives in a `__tests__/` directory beside the code it covers: `src/lib/__tests__/*.test.ts` and `src/stores/__tests__/*.test.ts`. The file is still named after the module (`http.test.ts` for `http.ts`), not after the folder. `__tests__` is a recognised convention (Create React App / Angular lineage) rather than *the* standard — co-location is the more common modern React default — but it is a legitimate one, and consistency inside this repo is what matters. The double underscore marks the directory as non-shippable without relying on a bundler honouring any name.
-- **Test file placement — Rust.** There is no `__tests__` equivalent and no way to add one: Rust's module system resolves a file's location from the module path, so a test-only directory is not discoverable. The two options are the inline `#[cfg(test)] mod tests { … }` and a sibling file reached through `#[path]`. This repo uses the sibling form for all 22 of them:
+- **Test file placement — Rust.** There is no `__tests__` equivalent and no way to add one: Rust's module system resolves a file's location from the module path, so a test-only directory is not discoverable. The two options are the inline `#[cfg(test)] mod tests { … }` and a sibling file reached through `#[path]`. This repo uses the sibling form everywhere except a handful still inline under `src-tauri/` (`auth.rs`, `daemon_supervisor.rs`, `port_registry.rs`) — match the dominant form when you add tests:
   ```rust
   #[cfg(test)]
   #[path = "projects_test.rs"]

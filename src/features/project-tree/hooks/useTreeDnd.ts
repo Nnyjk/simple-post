@@ -1,5 +1,5 @@
 import { useState, type DragEvent as ReactDragEvent } from 'react';
-import type { Collection, Endpoint, Module } from '@/types/domain';
+import type { ResourceNode } from '@/types/domain';
 import type { DragPayload, DropZone, TargetKind } from '../tree-types';
 import { DND_MIME, decodeDrag, encodeDrag } from '../tree-utils';
 
@@ -29,20 +29,10 @@ function setDataTransfer(e: ReactDragEvent, payload: DragPayload) {
 }
 
 export interface TreeDndBindings {
-  modules: Module[];
-  collections: Collection[];
-  endpoints: Endpoint[];
+  /** The active project's nodes — already filtered by `rootId`. */
+  nodes: ResourceNode[];
   activeProjectId: string | null;
-  moveModule: (moduleId: string, targetIndex: number) => void;
-  moveCollections: (
-    collectionIds: string[],
-    target: {
-      parentKind: 'module' | 'collection';
-      parentId: string;
-      index: number;
-    },
-  ) => void;
-  moveEndpoints: (endpointIds: string[], target: { collectionId: string; index: number }) => void;
+  moveNodes: (nodeIds: string[], parentId: string | null, index: number) => void;
 }
 
 /**
@@ -50,16 +40,13 @@ export interface TreeDndBindings {
  * cross-project guard, drop-index computation, the above/into/below
  * zone resolution and the live drop hint. State and store values are
  * passed in by `ProjectTree` — this hook owns no store selectors.
+ *
+ * One node array and one move action replaced three of each. The
+ * per-kind branches that used to pick a destination are gone: where a
+ * node lands is decided by the target's `parentId` plus the type matrix
+ * the server enforces.
  */
-export function useTreeDnd({
-  modules,
-  collections,
-  endpoints,
-  activeProjectId,
-  moveModule,
-  moveCollections,
-  moveEndpoints,
-}: TreeDndBindings) {
+export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBindings) {
   /**
    * Live indicator of the current drop target while a drag is in
    * flight. `null` when nothing is being dragged. Keyed by
@@ -82,18 +69,10 @@ export function useTreeDnd({
   ): boolean => {
     const projectIdOf = (kind: TargetKind, id: string): string | undefined => {
       if (kind === 'project') return id;
-      if (kind === 'module') return modules.find((m) => m.id === id)?.projectId;
-      if (kind === 'collection') {
-        const c = collections.find((cc) => cc.id === id);
-        if (!c) return undefined;
-        return modules.find((m) => m.id === c.moduleId)?.projectId;
-      }
-      // endpoint
-      const e = endpoints.find((ep) => ep.id === id);
-      if (!e) return undefined;
-      const c = collections.find((cc) => cc.id === e.collectionId);
-      if (!c) return undefined;
-      return modules.find((m) => m.id === c.moduleId)?.projectId;
+      // Every other kind is a node, and every node records its own
+      // owner — so the whole ladder is one lookup where it used to be
+      // endpoint → collection → module → project.
+      return nodes.find((n) => n.id === id)?.rootId;
     };
     const targetProject = projectIdOf(target.kind, target.id);
     if (!targetProject) return false;
@@ -102,6 +81,18 @@ export function useTreeDnd({
     }
     return true;
   };
+
+  /**
+   * Siblings of `parentId` within this project, in display order.
+   *
+   * `parentId: null` means the project's top level — the modules. That
+   * is scoped by `rootId` too, because `null` is every project's top
+   * level at once.
+   */
+  const siblingsOf = (parentId: string | null): ResourceNode[] =>
+    nodes
+      .filter((n) => n.parentId === parentId && (parentId !== null || n.rootId === activeProjectId))
+      .sort((a, b) => a.sortOrder - b.sortOrder);
 
   /**
    * Compute the index at which the dragged items should be inserted
@@ -115,48 +106,22 @@ export function useTreeDnd({
     zone: DropZone,
   ): number | null => {
     if (zone === 'into') {
-      // Insert at the end of the destination's children list.
-      if (target.kind === 'module') {
-        const childCount = collections.filter(
-          (c) => c.moduleId === target.id && c.parentCollectionId === null,
-        ).length;
-        return childCount;
-      }
-      if (target.kind === 'collection') {
-        const childCount = collections.filter((c) => c.parentCollectionId === target.id).length;
-        return childCount;
+      // Insert at the end of the destination's children list. A module
+      // holds collections; a collection holds endpoints and further
+      // collections — one count either way, because the move action
+      // re-numbers only the rows it inserts among.
+      if (target.kind === 'module' || target.kind === 'collection') {
+        return siblingsOf(target.id).length;
       }
       return null;
     }
-    // above / below: insert before/after the target row.
-    if (target.kind === 'module') {
-      const modList = modules
-        .filter((m) => m.projectId === activeProjectId)
-        .sort((a, b) => a.sortOrder - b.sortOrder);
-      const idx = modList.findIndex((m) => m.id === target.id);
-      if (idx < 0) return null;
-      return zone === 'above' ? idx : idx + 1;
-    }
-    if (target.kind === 'collection') {
-      const col = collections.find((c) => c.id === target.id);
-      if (!col) return null;
-      const siblings = collections
-        .filter(
-          (c) => c.moduleId === col.moduleId && c.parentCollectionId === col.parentCollectionId,
-        )
-        .sort((a, b) => a.sortOrder - b.sortOrder);
-      const idx = siblings.findIndex((c) => c.id === target.id);
-      if (idx < 0) return null;
-      return zone === 'above' ? idx : idx + 1;
-    }
-    // endpoint: insert before/after in the same collection.
-    if (target.kind === 'endpoint') {
-      const ep = endpoints.find((e) => e.id === target.id);
-      if (!ep) return null;
-      const siblings = endpoints
-        .filter((e) => e.collectionId === ep.collectionId)
-        .sort((a, b) => a.sortOrder - b.sortOrder);
-      const idx = siblings.findIndex((e) => e.id === target.id);
+    // above / below: insert before/after the target row, among the
+    // target's own siblings.
+    if (target.kind === 'module' || target.kind === 'collection' || target.kind === 'endpoint') {
+      const targetNode = nodes.find((n) => n.id === target.id);
+      if (!targetNode) return null;
+      const siblings = siblingsOf(targetNode.parentId);
+      const idx = siblings.findIndex((n) => n.id === target.id);
       if (idx < 0) return null;
       return zone === 'above' ? idx : idx + 1;
     }
@@ -164,35 +129,36 @@ export function useTreeDnd({
   };
 
   /**
-   * Cycle guard for collection-on-collection drops: the target must
-   * not be the source itself or any descendant (we'd create a loop).
+   * Cycle guard: the target must not be the source itself or any
+   * descendant, or we'd nest a node inside itself.
+   *
+   * Walks `parentId` rather than special-casing collections: a module
+   * dragged onto a collection inside it is the same loop as a
+   * collection dragged onto its own child, and the old guard only
+   * caught the second.
    */
-  const wouldCycleCollectionInto = (
-    collectionIds: string[],
-    target: { kind: 'module' | 'collection'; parentId: string },
-  ): boolean => {
-    if (target.kind !== 'collection') return false;
+  const wouldCycleInto = (movingIds: string[], targetId: string): boolean => {
+    if (movingIds.includes(targetId)) return true;
     const childIndex = new Map<string, string[]>();
-    for (const c of collections) {
-      if (c.parentCollectionId) {
-        const bucket = childIndex.get(c.parentCollectionId);
-        if (bucket) bucket.push(c.id);
-        else childIndex.set(c.parentCollectionId, [c.id]);
+    for (const n of nodes) {
+      if (n.parentId) {
+        const bucket = childIndex.get(n.parentId);
+        if (bucket) bucket.push(n.id);
+        else childIndex.set(n.parentId, [n.id]);
       }
     }
-    const blocked = new Set<string>(collectionIds);
-    const queue = [...collectionIds];
+    const blocked = new Set<string>(movingIds);
+    const queue = [...movingIds];
     while (queue.length > 0) {
       const id = queue.shift()!;
-      const kids = childIndex.get(id) ?? [];
-      for (const k of kids) {
+      for (const k of childIndex.get(id) ?? []) {
         if (!blocked.has(k)) {
           blocked.add(k);
           queue.push(k);
         }
       }
     }
-    return blocked.has(target.parentId);
+    return blocked.has(targetId);
   };
 
   /**
@@ -217,96 +183,65 @@ export function useTreeDnd({
       if (drag.ids.includes(target.id) && drag.kind === target.kind) return;
       if (!sameProjectGuard(drag, target)) return;
 
-      // Compute drop zone from the current cursor position (re-read
-      // from the event; the row passed the zone via dropHint, but the
-      // drop target may have moved since the last dragover).
-      const zone = computeZoneFromEvent(e, drag, target, targetEl);
-      const index = computeTargetIndex(drag, target, zone);
-      if (index === null) return;
-
+      // A module is the top of a project; it has no node parent, so it
+      // can only be reordered among its siblings.
       if (drag.kind === 'module') {
         if (target.kind !== 'module') return;
-        // Disallow dropping a module onto itself (already filtered above).
-        moveModule(drag.ids[0], index);
+        const idx = computeTargetIndex(
+          drag,
+          target,
+          computeZoneFromEvent(e, drag, target, targetEl),
+        );
+        if (idx === null) return;
+        moveNodes(drag.ids, null, idx);
         return;
       }
-      if (drag.kind === 'collection') {
-        if (target.kind === 'module') {
-          moveCollections(drag.ids, {
-            parentKind: 'module',
-            parentId: target.id,
-            index,
-          });
-          return;
-        }
-        if (target.kind === 'collection') {
-          if (zone === 'into') {
-            if (wouldCycleCollectionInto(drag.ids, { kind: 'collection', parentId: target.id })) {
-              return;
-            }
-            moveCollections(drag.ids, {
-              parentKind: 'collection',
-              parentId: target.id,
-              index,
-            });
-            return;
-          }
-          // above/below: drop as sibling (preserving the target's
-          // parent). This handles the "脱离集合" gesture: a sub-
-          // collection can be dragged next to its parent and dropped
-          // as a sibling.
-          const targetCol = collections.find((c) => c.id === target.id);
-          if (!targetCol) return;
-          if (targetCol.parentCollectionId === null) {
-            moveCollections(drag.ids, {
-              parentKind: 'module',
-              parentId: targetCol.moduleId,
-              index,
-            });
-          } else {
-            moveCollections(drag.ids, {
-              parentKind: 'collection',
-              parentId: targetCol.parentCollectionId,
-              index,
-            });
-          }
-          return;
-        }
+
+      if (target.kind === 'module') {
+        // Only a collection may sit directly under a module — the
+        // server's type matrix would refuse anything else, so refusing
+        // here keeps the optimistic state from showing a move that 400s.
+        if (drag.kind !== 'collection') return;
+        const zone = computeZoneFromEvent(e, drag, target, targetEl);
+        const idx =
+          zone === 'into' ? siblingsOf(target.id).length : computeTargetIndex(drag, target, zone);
+        if (idx === null) return;
+        moveNodes(drag.ids, target.id, idx);
         return;
       }
-      // drag.kind === 'endpoint'
+
       if (target.kind === 'collection') {
-        if (zone === 'into' || zone === 'below') {
-          // Dropping into / just below a collection row both map to
-          // "append into that collection". For 'into' it's natural;
-          // for 'below' it's a forgiving fallback so the user doesn't
-          // have to perfectly hit the middle of the row.
-          const childCount = endpoints.filter((e2) => e2.collectionId === target.id).length;
-          moveEndpoints(drag.ids, {
-            collectionId: target.id,
-            index: childCount,
-          });
+        const zone = computeZoneFromEvent(e, drag, target, targetEl);
+        if (zone === 'into') {
+          if (drag.kind === 'collection' && wouldCycleInto(drag.ids, target.id)) return;
+          moveNodes(drag.ids, target.id, siblingsOf(target.id).length);
           return;
         }
-        // 'above' on a collection row: drop as last item in the
-        // collection that comes BEFORE the target in the tree
-        // (typically the previous sibling at the same level). To keep
-        // the UX simple, just append to the target's collection — the
-        // caller can re-drag to reorder.
-        moveEndpoints(drag.ids, {
-          collectionId: target.id,
-          index: 0,
-        });
+        // above/below: drop as a sibling of the target, keeping the
+        // target's parent. This is the "脱离集合" gesture — a nested
+        // collection dragged next to its parent lands beside it.
+        //
+        // `parentId` covers both cases with no branch: a top-level
+        // collection's parent *is* its module node, and a nested one's
+        // is the collection above it. That is the whole point of the
+        // unified parent column.
+        const targetNode = nodes.find((n) => n.id === target.id);
+        if (!targetNode || !targetNode.parentId) return;
+        if (drag.kind === 'collection' && wouldCycleInto(drag.ids, target.id)) return;
+        const idx = computeTargetIndex(drag, target, zone);
+        if (idx === null) return;
+        moveNodes(drag.ids, targetNode.parentId, idx);
         return;
       }
-      if (target.kind === 'endpoint') {
-        const ep = endpoints.find((e2) => e2.id === target.id);
-        if (!ep) return;
-        moveEndpoints(drag.ids, {
-          collectionId: ep.collectionId,
-          index,
-        });
-      }
+
+      // target.kind === 'endpoint' — an endpoint's siblings are
+      // endpoints, so a collection or module can never land here.
+      if (drag.kind !== 'endpoint') return;
+      const targetNode = nodes.find((n) => n.id === target.id);
+      if (!targetNode || !targetNode.parentId) return;
+      const idx = computeTargetIndex(drag, target, computeZoneFromEvent(e, drag, target, targetEl));
+      if (idx === null) return;
+      moveNodes(drag.ids, targetNode.parentId, idx);
     };
 
   /**

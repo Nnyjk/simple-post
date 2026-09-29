@@ -1,6 +1,6 @@
-import { ChevronRight, FolderClosed, FolderOpen, Plus } from 'lucide-react';
+﻿import { ChevronRight, FolderClosed, FolderOpen, Plus } from 'lucide-react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
-import type { Collection } from '@/types/domain';
+import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
@@ -8,7 +8,7 @@ import type { DropZone } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
 export interface CollectionRowProps {
-  collection: Collection;
+  collection: ResourceNode;
   endpointCount: number;
   isEditing: boolean;
   onSelect: () => void;

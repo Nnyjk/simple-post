@@ -51,7 +51,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
 }
 
 function ModuleSettings({ moduleId }: { moduleId: string }) {
-  const mod = useAppStore((s) => s.modules.find((m) => m.id === moduleId));
+  const mod = useAppStore((s) => s.nodes.find((n) => n.id === moduleId));
   if (!mod) return <NotFound label="模块" />;
   return (
     <EntityCard
@@ -63,7 +63,7 @@ function ModuleSettings({ moduleId }: { moduleId: string }) {
 }
 
 function CollectionSettings({ collectionId }: { collectionId: string }) {
-  const col = useAppStore((s) => s.collections.find((c) => c.id === collectionId));
+  const col = useAppStore((s) => s.nodes.find((n) => n.id === collectionId));
   if (!col) return <NotFound label="集合" />;
   return (
     <EntityCard

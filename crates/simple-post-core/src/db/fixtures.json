@@ -90,6 +90,14 @@
       "expanded": true
     },
     {
+      "id": "c_order_refund",
+      "moduleId": "m_order",
+      "parentCollectionId": "c_order_crud",
+      "name": "退款",
+      "description": "挂在「订单 CRUD」之下的子集合",
+      "sortOrder": 0
+    },
+    {
       "id": "c_order_status",
       "moduleId": "m_order",
       "parentCollectionId": null,
@@ -300,6 +308,30 @@
       "tags": ["订单"],
       "sortOrder": 0,
       "createdAt": 1788759874000,
+      "updatedAt": 1789537474000
+    },
+    {
+      "id": "e_refund_create",
+      "collectionId": "c_order_refund",
+      "name": "申请退款",
+      "description": null,
+      "method": "POST",
+      "url": "/orders/{{orderId}}/refunds",
+      "environmentId": null,
+      "baseUrlDefinitionId": null,
+      "baseUrlOverride": null,
+      "params": [],
+      "headers": [],
+      "body": {
+        "mode": "json",
+        "content": "{\n  \"orderId\": \"\",\n  \"amount\": 0,\n  \"reason\": \"\"\n}"
+      },
+      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "docs": null,
+      "notes": null,
+      "tags": ["订单", "退款"],
+      "sortOrder": 0,
+      "createdAt": 1789364674000,
       "updatedAt": 1789537474000
     },
     {

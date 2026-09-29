@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Play, Save, Copy, Check, ChevronRight } from 'lucide-react';
-import { useAppStore, useActiveEndpoint, useActiveEnvironment } from '@/stores/app-store';
+import {
+  useAppStore,
+  useActiveEndpoint,
+  useActiveEndpointDetail,
+  useActiveEnvironment,
+} from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +14,7 @@ import { MethodPicker } from '@/components/ui/method-picker';
 import { BaseUrlPicker, type BaseUrlSelection } from '@/components/ui/base-url-picker';
 import { TagInput } from '@/components/ui/tag-input';
 import { Tooltip } from '@/components/ui/tooltip';
-import { type HttpMethod, type Endpoint } from '@/types/domain';
+import { type HttpMethod, type EndpointDetail } from '@/types/domain';
 import { methodColorVar, cn } from '@/lib/utils';
 import { joinBaseUrl, resolveEndpointBaseUrl, resolveVars } from '@/lib/url';
 import { sendEndpoint } from '@/lib/http';
@@ -34,25 +39,29 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 type TabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'tests';
 
 export function HttpTester() {
+  // The endpoint is a `ResourceNode` (identity + position) and its
+  // request configuration is a separate `EndpointDetail` row. Both
+  // selectors return stable store references, so neither allocates.
   const endpoint = useActiveEndpoint();
+  const detail = useActiveEndpointDetail();
   // Workspace-wide active env (the "ENV dev" pill in the top bar).
   // Used as the fallback env when the endpoint hasn't picked one of
   // its own — that way the baseUrl + variable resolution "just works"
   // for a fresh endpoint without forcing the user through a picker
   // first.
   const workspaceEnv = useActiveEnvironment();
-  // Raw store slices — we'll derive the endpoint's project / project envs
+  // Raw store slices — we'll derive the endpoint's project / ancestors
   // locally with useMemo. Going through `useAppStore` for each one keeps
   // the Zustand v5 "no allocation in selectors" rule intact.
-  const allCollections = useAppStore((s) => s.collections);
-  const allModules = useAppStore((s) => s.modules);
+  const allNodes = useAppStore((s) => s.nodes);
   const allProjects = useAppStore((s) => s.projects);
   const allEnvironments = useAppStore((s) => s.environments);
   // Pulled for the Header key autocomplete — we want the user's own
   // recently-used header names to surface in the datalist alongside
   // the built-in common list (see buildHeaderSuggestions).
-  const allEndpoints = useAppStore((s) => s.endpoints);
-  const updateEndpoint = useAppStore((s) => s.updateEndpoint);
+  const allEndpointDetails = useAppStore((s) => s.endpointDetails);
+  const updateNode = useAppStore((s) => s.updateNode);
+  const updateEndpointDetail = useAppStore((s) => s.updateEndpointDetail);
   const setRequestPending = useAppStore((s) => s.setRequestPending);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
   const addResponseHistory = useAppStore((s) => s.addResponseHistory);
@@ -88,70 +97,71 @@ export function HttpTester() {
   const urlInputRef = useRef<HTMLInputElement>(null);
 
   // Live URL — what's actually in the input box right now. The input
-  // now stores only the path (the part after baseUrl) — the full URL
-  // Live URL — what's actually in the input box right now. Sourced
-  // from the store-side draft (so it survives tab switches) and
-  // falling back to the persisted endpoint URL.
-  const liveUrl = draft?.url ?? endpoint?.url ?? '';
+  // now stores only the path (the part after baseUrl) — the full URL.
+  // Sourced from the store-side draft (so it survives tab switches) and
+  // falling back to the persisted detail URL.
+  const liveUrl = draft?.url ?? detail?.url ?? '';
 
-  // Resolve the endpoint's project + the project's environments. Both
-  // are needed for the baseUrl picker.
-  const project = useMemo(() => {
-    if (!endpoint) return undefined;
-    const c = allCollections.find((c) => c.id === endpoint.collectionId);
-    if (!c) return undefined;
-    const m = allModules.find((m) => m.id === c.moduleId);
-    if (!m) return undefined;
-    return allProjects.find((p) => p.id === m.projectId);
-  }, [endpoint, allCollections, allModules, allProjects]);
-  // Module / collection are resolved alongside the project so we can
-  // show a `项目 › 模块 › 集合` breadcrumb at the top of the page —
-  // same anchoring pattern the Settings panel uses (`设置 › 连接`).
-  const moduleAndCollection = useMemo(() => {
-    if (!endpoint) return null;
-    const c = allCollections.find((c) => c.id === endpoint.collectionId);
-    if (!c) return null;
-    const m = allModules.find((m) => m.id === c.moduleId);
-    if (!m) return null;
-    return { module: m, collection: c };
-  }, [endpoint, allCollections, allModules]);
+  // The endpoint's project, straight off the denormalised `rootId`.
+  // The old three-table model needed collection → module → project;
+  // the single tree carries the answer on every row.
+  const project = useMemo(
+    () => (endpoint ? allProjects.find((p) => p.id === endpoint.rootId) : undefined),
+    [endpoint, allProjects],
+  );
+  // Ancestors for the `项目 › 模块 › 集合` breadcrumb at the top of the
+  // page — same anchoring pattern the Settings panel uses
+  // (`设置 › 连接`). Collected root-first by walking `parentId` up, so
+  // nesting deeper than one collection needs no extra case here.
+  const ancestors = useMemo(() => {
+    if (!endpoint) return [];
+    const chain: { id: string; name: string; type: string }[] = [];
+    const seen = new Set<string>([endpoint.id]);
+    let cur = endpoint.parentId ? allNodes.find((n) => n.id === endpoint!.parentId) : undefined;
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      chain.unshift({ id: cur.id, name: cur.name, type: cur.type });
+      cur = cur.parentId ? allNodes.find((n) => n.id === cur!.parentId) : undefined;
+    }
+    return chain;
+  }, [endpoint, allNodes]);
   // The env that owns the baseUrl for this endpoint. Honors the
-  // endpoint's `environmentId` if set; otherwise falls back to the
+  // detail's `environmentId` if set; otherwise falls back to the
   // workspace-wide active env (the "ENV dev" pill in the top bar) so
   // a fresh endpoint isn't left baseUrl-less just because it hasn't
   // been told to prefer a specific env yet.
   const endpointEnv = useMemo(() => {
-    if (endpoint?.environmentId) {
-      return allEnvironments.find((e) => e.id === endpoint.environmentId);
+    if (detail?.environmentId) {
+      return allEnvironments.find((e) => e.id === detail.environmentId);
     }
     return workspaceEnv;
-  }, [endpoint, allEnvironments, workspaceEnv]);
+  }, [detail, allEnvironments, workspaceEnv]);
 
   // Effective baseUrl for this endpoint — drives both the picker label
   // and the join at send time.
   const resolved = useMemo(
     () =>
       resolveEndpointBaseUrl(
-        endpoint ?? { environmentId: null, baseUrlDefinitionId: null, baseUrlOverride: null },
+        detail ?? { environmentId: null, baseUrlDefinitionId: null, baseUrlOverride: null },
         endpointEnv,
         project,
       ),
-    [endpoint, endpointEnv, project],
+    [detail, endpointEnv, project],
   );
 
   // Drive the picker: reflect what's currently stored on the endpoint.
   // When the user picks a different source, the parent commits it back
-  // via `updateEndpoint` — no draft needed since baseUrl changes are
-  // persisted immediately (no Save button).
+  // via `updateEndpointDetail` — no draft needed since baseUrl changes
+  // are persisted immediately (no Save button).
   const selection: BaseUrlSelection = useMemo(() => {
-    if (!endpoint) return { kind: 'default' };
-    if (endpoint.baseUrlOverride) return { kind: 'override' };
-    if (endpoint.baseUrlDefinitionId) {
-      return { kind: 'definition', definitionId: endpoint.baseUrlDefinitionId };
+    if (!detail) return { kind: 'default' };
+    if (detail.baseUrlOverride) return { kind: 'override' };
+    if (detail.baseUrlDefinitionId) {
+      return { kind: 'definition', definitionId: detail.baseUrlDefinitionId };
     }
     return { kind: 'default' };
-  }, [endpoint]);
-  const customValue = endpoint?.baseUrlOverride ?? '';
+  }, [detail]);
+  const customValue = detail?.baseUrlOverride ?? '';
 
   // Entries for the env-var picker, derived from the endpoint's own
   // env (the one whose variables this endpoint resolves `{{x}}` against)
@@ -171,6 +181,13 @@ export function HttpTester() {
     if (!q) return allEnvEntries;
     return allEnvEntries.filter((e) => (e.key ?? '').toLowerCase().includes(q));
   }, [allEnvEntries, partialVar]);
+  // Header autocomplete harvests the user's own header names from every
+  // loaded detail. `Object.values` allocates, so it's memoized against
+  // the map's identity instead of being rebuilt on every render.
+  const headerSuggestions = useMemo(
+    () => buildHeaderSuggestions(Object.values(allEndpointDetails)),
+    [allEndpointDetails],
+  );
 
   const handleUrlChange = (next: string) => {
     if (!endpoint) return;
@@ -183,7 +200,7 @@ export function HttpTester() {
     // Replace the last `{{` and any partial variable name (up to `}}`,
     // whitespace, or another `{`) with the chosen key, closing the braces.
     if (!endpoint) return;
-    const base = draft?.url ?? endpoint.url ?? '';
+    const base = draft?.url ?? detail?.url ?? '';
     const next = base.replace(/\{\{[^}\s]*$/, `{{${key}}}`);
     setEndpointDraft(endpoint.id, { url: next });
     setVarPickerOpen(false);
@@ -227,7 +244,7 @@ export function HttpTester() {
   };
 
   // sync draft with active endpoint
-  const method = draft?.method ?? endpoint?.method ?? 'GET';
+  const method = draft?.method ?? detail?.method ?? 'GET';
 
   // Full URL = join baseUrl + path, then resolve `{{var}}` templates
   // against the env's variables. Used by handleSend, handleCopyCurl and
@@ -319,7 +336,10 @@ export function HttpTester() {
     );
   }, [curlFlash]);
 
-  if (!endpoint) {
+  // A node with no detail row is a hole in the data, not a normal state
+  // (every endpoint is created with one). Bail with the same empty
+  // state rather than rendering a half-broken tester.
+  if (!endpoint || !detail) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         从左侧选择一个接口开始
@@ -327,10 +347,10 @@ export function HttpTester() {
     );
   }
 
-  const enabledParams = endpoint.params.filter((p) => p.enabled && p.key).length;
-  const enabledHeaders = endpoint.headers.filter((h) => h.enabled && h.key).length;
-  const hasBody = endpoint.body.mode !== 'none' && endpoint.body.content;
-  const hasAuth = endpoint.auth.type !== 'none';
+  const enabledParams = detail.params.filter((p) => p.enabled && p.key).length;
+  const enabledHeaders = detail.headers.filter((h) => h.enabled && h.key).length;
+  const hasBody = detail.body.mode !== 'none' && detail.body.content;
+  const hasAuth = detail.auth.type !== 'none';
 
   const tabItems = TABS.map((t) => {
     let badge: React.ReactNode = null;
@@ -383,16 +403,17 @@ export function HttpTester() {
 
   const handleSave = () => {
     if (!endpoint) return;
-    const patch: Partial<Endpoint> = {};
+    const patch: Partial<Omit<EndpointDetail, 'nodeId'>> = {};
     if (draft?.url !== undefined) patch.url = draft.url;
     if (draft?.method !== undefined) patch.method = draft.method;
-    if (Object.keys(patch).length > 0) updateEndpoint(endpoint.id, patch);
+    if (Object.keys(patch).length > 0) updateEndpointDetail(endpoint.id, patch);
     clearEndpointDraft(endpoint.id);
   };
 
   const handleCopyCurl = async () => {
-    // Synthesize a "current" endpoint by overlaying any unsaved draft on top
-    // of the stored one — this matches what Send would actually transmit.
+    // Synthesize a "current" request by overlaying any unsaved draft on
+    // top of the stored detail — this matches what Send would actually
+    // transmit.
     //
     // The URL override is `resolvedUrl` (base URL + path + `{{var}}`), not
     // the raw path. `buildCurlCommand` only runs `resolveTemplate` over
@@ -403,7 +424,7 @@ export function HttpTester() {
     const overrides: { url?: string; method?: HttpMethod } = {};
     overrides.url = resolvedUrl;
     if (draft?.method !== undefined) overrides.method = draft.method;
-    const curl = endpointToCurl(endpoint, endpointEnv, overrides);
+    const curl = endpointToCurl(detail, endpointEnv, overrides);
     try {
       await navigator.clipboard.writeText(curl);
       setCurlFlash(true);
@@ -426,7 +447,7 @@ export function HttpTester() {
         aria-label="接口所属路径"
         className="flex shrink-0 items-center gap-1 px-4 pt-5 text-[11px] text-muted-foreground"
       >
-        {project && moduleAndCollection ? (
+        {project && ancestors.length > 0 ? (
           <>
             <button
               type="button"
@@ -439,13 +460,17 @@ export function HttpTester() {
             >
               {project.name}
             </button>
+            {ancestors.map((a) => (
+              <span key={a.id} className="contents">
+                <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+                <span className="truncate" title={a.name}>
+                  {a.name}
+                </span>
+              </span>
+            ))}
             <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-            <span className="truncate" title={moduleAndCollection.module.name}>
-              {moduleAndCollection.module.name}
-            </span>
-            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-            <span className="truncate text-foreground" title={moduleAndCollection.collection.name}>
-              {moduleAndCollection.collection.name}
+            <span className="truncate text-foreground" title={endpoint.name}>
+              {endpoint.name}
             </span>
           </>
         ) : (
@@ -460,7 +485,7 @@ export function HttpTester() {
             <InlineEdit
               key={`name-${endpoint.id}`}
               value={endpoint.name}
-              onSave={(next) => updateEndpoint(endpoint.id, { name: next })}
+              onSave={(next) => updateNode(endpoint.id, { name: next })}
               testId="endpoint-name-input"
               className="max-w-md text-sm font-semibold"
               display={() => (
@@ -473,8 +498,8 @@ export function HttpTester() {
               )}
             />
             <TagInput
-              value={endpoint.tags}
-              onChange={(tags) => updateEndpoint(endpoint.id, { tags })}
+              value={detail.tags}
+              onChange={(tags) => updateEndpointDetail(endpoint.id, { tags })}
               placeholder="+ 标签"
               className="min-w-[140px] max-w-[320px] border-transparent bg-transparent px-1 py-0.5 focus-within:ring-0 focus-within:ring-offset-0"
             />
@@ -482,7 +507,7 @@ export function HttpTester() {
           <InlineEdit
             key={`desc-${endpoint.id}`}
             value={endpoint.description ?? ''}
-            onSave={(next) => updateEndpoint(endpoint.id, { description: next || undefined })}
+            onSave={(next) => updateNode(endpoint.id, { description: next || undefined })}
             // Description legitimately allows clearing — without this, an
             // empty draft is treated as a cancel and the field keeps its old
             // value instead of going back to "no description".
@@ -526,12 +551,12 @@ export function HttpTester() {
             if (next.kind === 'default') {
               // Clear both — null on baseUrlDefinitionId makes
               // resolveEndpointBaseUrl fall back to the project default.
-              updateEndpoint(endpoint.id, {
+              updateEndpointDetail(endpoint.id, {
                 baseUrlDefinitionId: null,
                 baseUrlOverride: null,
               });
             } else if (next.kind === 'definition') {
-              updateEndpoint(endpoint.id, {
+              updateEndpointDetail(endpoint.id, {
                 baseUrlDefinitionId: next.definitionId,
                 baseUrlOverride: null,
               });
@@ -539,15 +564,15 @@ export function HttpTester() {
               // override — keep the previous value if the user just
               // re-picked the row, otherwise blank it so they can
               // type a fresh host.
-              updateEndpoint(endpoint.id, {
-                baseUrlOverride: endpoint.baseUrlOverride ?? '',
+              updateEndpointDetail(endpoint.id, {
+                baseUrlOverride: detail.baseUrlOverride ?? '',
                 baseUrlDefinitionId: null,
               });
             }
           }}
           onCustomValueChange={(v) => {
             if (!endpoint) return;
-            updateEndpoint(endpoint.id, { baseUrlOverride: v });
+            updateEndpointDetail(endpoint.id, { baseUrlOverride: v });
           }}
         />
         <div className="relative flex min-w-0 flex-1 items-center">
@@ -612,39 +637,39 @@ export function HttpTester() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'params' && (
           <KeyValueEditor
-            items={endpoint.params}
-            onChange={(items) => updateEndpoint(endpoint.id, { params: items })}
+            items={detail.params}
+            onChange={(items) => updateEndpointDetail(endpoint.id, { params: items })}
             keyPlaceholder="query 参数名"
             valuePlaceholder="值（支持 {{var}}）"
           />
         )}
         {tab === 'headers' && (
           <KeyValueEditor
-            items={endpoint.headers}
-            onChange={(items) => updateEndpoint(endpoint.id, { headers: items })}
+            items={detail.headers}
+            onChange={(items) => updateEndpointDetail(endpoint.id, { headers: items })}
             keyPlaceholder="Header 名"
             valuePlaceholder="值"
             // Recent (project-wide harvest) merged with the built-in
             // list — see common-headers.ts::buildHeaderSuggestions.
-            keySuggestions={buildHeaderSuggestions(allEndpoints)}
+            keySuggestions={headerSuggestions}
           />
         )}
         {tab === 'body' && (
           <BodyEditor
-            value={endpoint.body}
-            onChange={(body) => updateEndpoint(endpoint.id, { body })}
+            value={detail.body}
+            onChange={(body) => updateEndpointDetail(endpoint.id, { body })}
           />
         )}
         {tab === 'auth' && (
           <AuthEditor
-            value={endpoint.auth}
-            onChange={(auth) => updateEndpoint(endpoint.id, { auth })}
+            value={detail.auth}
+            onChange={(auth) => updateEndpointDetail(endpoint.id, { auth })}
           />
         )}
         {tab === 'docs' && (
           <DocsEditor
-            value={endpoint.docs ?? ''}
-            onChange={(docs) => updateEndpoint(endpoint.id, { docs })}
+            value={detail.docs ?? ''}
+            onChange={(docs) => updateEndpointDetail(endpoint.id, { docs })}
           />
         )}
         {tab === 'tests' && (

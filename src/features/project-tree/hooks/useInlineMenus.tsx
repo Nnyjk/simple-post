@@ -1,12 +1,14 @@
 import { CornerDownRight, FilePlus, FolderPlus } from 'lucide-react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { Collection, Module } from '@/types/domain';
+import type { ResourceNode } from '@/types/domain';
 import type { ContextMenuItem } from '../TreeContextMenu';
 import type { NewType } from '@/stores/app-store';
 
 export interface InlineMenuBindings {
-  collections: Collection[];
-  projectModules: Module[];
+  /** Every node of the active project, any type, any depth. */
+  nodes: ResourceNode[];
+  /** The project's top-level modules, already in `sortOrder`. */
+  projectModules: ResourceNode[];
   openNewItemWithIntent: (opts: {
     type: NewType;
     parentModuleId?: string;
@@ -22,7 +24,7 @@ export interface InlineMenuBindings {
  * arrays are memoized here.
  */
 export function useInlineMenus({
-  collections,
+  nodes,
   projectModules,
   openNewItemWithIntent,
   setMenu,
@@ -31,9 +33,12 @@ export function useInlineMenus({
     e.preventDefault();
     e.stopPropagation();
     const firstMod = projectModules[0];
+    // Top-level collections of that module only: a collection's parent
+    // is either a module or another collection, and an endpoint can only
+    // hang off a collection, so this is the shortest valid endpoint path.
     const firstColSorted = firstMod
-      ? collections
-          .filter((c) => c.moduleId === firstMod.id && c.parentCollectionId === null)
+      ? nodes
+          .filter((c) => c.type === 'collection' && c.parentId === firstMod.id)
           .sort((a, b) => a.sortOrder - b.sortOrder)[0]
       : null;
     const items: ContextMenuItem[] = [
@@ -85,8 +90,13 @@ export function useInlineMenus({
   const openCollectionPlusMenu = (collectionId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const col = collections.find((c) => c.id === collectionId);
+    const col = nodes.find((c) => c.id === collectionId && c.type === 'collection');
     if (!col) return;
+    // A collection's parent can be another collection, so the owning
+    // module is an ancestor, not `col.parentId`. The modal only uses
+    // `parentModuleId` to preselect the "所属模块" dropdown — the actual
+    // write target is `parentCollectionId`.
+    const moduleId = owningModuleId(nodes, collectionId);
     const items: ContextMenuItem[] = [
       {
         kind: 'item',
@@ -95,7 +105,7 @@ export function useInlineMenus({
         onClick: () =>
           openNewItemWithIntent({
             type: 'collection',
-            parentModuleId: col.moduleId,
+            parentModuleId: moduleId ?? '',
             parentCollectionId: col.id,
           }),
       },
@@ -106,7 +116,7 @@ export function useInlineMenus({
         onClick: () =>
           openNewItemWithIntent({
             type: 'endpoint',
-            parentModuleId: col.moduleId,
+            parentModuleId: moduleId ?? '',
             parentCollectionId: col.id,
           }),
       },
@@ -115,4 +125,20 @@ export function useInlineMenus({
   };
 
   return { openProjectPlusMenu, openModulePlusMenu, openCollectionPlusMenu };
+}
+
+/**
+ * Walk up `parentId` until a module row is found. Cycles are impossible
+ * in a healthy tree, but the `seen` guard keeps a corrupted one from
+ * spinning forever inside a click handler.
+ */
+function owningModuleId(nodes: ResourceNode[], collectionId: string): string | undefined {
+  const seen = new Set<string>();
+  let cur = nodes.find((n) => n.id === collectionId);
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    if (cur.type === 'module') return cur.id;
+    cur = cur.parentId ? nodes.find((n) => n.id === cur!.parentId) : undefined;
+  }
+  return undefined;
 }

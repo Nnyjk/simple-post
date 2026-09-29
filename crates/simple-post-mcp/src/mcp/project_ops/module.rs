@@ -1,4 +1,4 @@
-//! `module_*` MCP tools — module CRUD inside a project.
+﻿//! `module_*` MCP tools — module CRUD inside a project.
 //!
 //! 5 tools:
 //! - `module_list`
@@ -6,6 +6,13 @@
 //! - `module_update`
 //! - `module_delete`
 //! - `module_move`
+//!
+//! The tool names and their argument names are unchanged from the
+//! three-table layout: to an LLM client `module_id` still means "the id
+//! of a module", and renaming the tools would break every configured
+//! client for no semantic gain. Only the storage they read and write
+//! changed — a module is a `nodes` row with `type = 'module'` now, and
+//! `project_id` is its `root_id`.
 //!
 //! `module_list` reuses `super::ProjectIdArgs` (a module is owned by a
 //! project). The other Args structs are private to this module.
@@ -15,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
-use simple_post_core::domain::{Module, ModulePatch};
+use simple_post_core::domain::{ResourceNode, ResourceNodePatch, ResourceNodeType};
 use simple_post_core::error::AppError;
 
 #[derive(Debug, Deserialize)]
@@ -115,7 +122,11 @@ pub(super) async fn tool_module_list(
         .map_err(|e| AppError::Validation(format!("module_list args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "module_list").await?;
     let mods = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::modules::list_by_project(c, &a.project_id)
+        simple_post_core::db::nodes::list_by_root_and_type(
+            c,
+            &a.project_id,
+            ResourceNodeType::Module,
+        )
     })?;
     Ok(CallToolResult::json(mods))
 }
@@ -130,21 +141,25 @@ pub(super) async fn tool_module_create(
         return Err(AppError::Validation("name must not be empty".into()));
     }
     crate::mcp::check_permission(&state.pool, &a.project_id, "module_create").await?;
-    let m = Module {
-        id: format!("mod_{}", simple_post_core::domain::now_ms()),
-        project_id: a.project_id.clone(),
+    let now = simple_post_core::domain::now_ms();
+    let m = ResourceNode {
+        id: format!("mod_{now}"),
+        root_id: a.project_id.clone(),
+        // A module's parent is the project, not another node.
+        parent_id: None,
+        kind: ResourceNodeType::Module,
         name: a.name,
         description: None,
         sort_order: 0,
-        expanded: None,
+        created_at: now,
+        updated_at: now,
     };
     let id = m.id.clone();
     simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::modules::create(c, &m)
+        simple_post_core::db::nodes::create(c, &m, None)
     })?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::modules::get(c, &id)
-    })?;
+    let stored =
+        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::nodes::get(c, &id))?;
     Ok(CallToolResult::json(stored))
 }
 
@@ -155,17 +170,18 @@ pub(super) async fn tool_module_update(
     let a: ModuleUpdateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("module_update args: {e}")))?;
     crate::mcp::check_permission(&state.pool, "global", "module_update").await?;
-    let patch = ModulePatch {
+    let patch = ResourceNodePatch {
         name: a.name.clone(),
+        // `module_update` must never re-parent: that is `module_move`'s
+        // job, and it is gated separately. `Some(None)` would promote the
+        // module to the top of its project, so the absent-key form is the
+        // correct "leave it alone".
+        parent_id: None,
         description: None,
         sort_order: None,
-        // `module_update` must never re-parent: that is `module_move`'s job,
-        // and it is gated separately. `Some(None)` would mean "clear the
-        // project", so the absent-key form is the correct "leave it alone".
-        project_id: None,
     };
-    let m = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::modules::update(c, &a.module_id, patch)
+    let m = simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::nodes::update(c, &a.module_id, patch.clone())
     })?;
     Ok(CallToolResult::json(m))
 }
@@ -177,7 +193,7 @@ pub(super) async fn tool_module_delete(
     let module_id = arg_str(&args, "module_id")?.to_string();
     crate::mcp::check_permission(&state.pool, "global", "module_delete").await?;
     simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::modules::delete(c, &module_id)
+        simple_post_core::db::nodes::delete(c, &module_id)
     })?;
     Ok(CallToolResult::json(json!({ "deleted": module_id })))
 }
@@ -190,19 +206,19 @@ pub(super) async fn tool_module_move(
         .map_err(|e| AppError::Validation(format!("module_move args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.new_project_id, "module_move").await?;
 
-    // A cross-project move is a real `UPDATE` of `modules.project_id`.
+    // A cross-project move is a real transfer, not delete-then-recreate.
     //
-    // This used to be implemented as delete-then-recreate, which was a data
-    // loss bug: `collections.module_id` and `endpoints.collection_id` are
-    // both `ON DELETE CASCADE`, so deleting the module destroyed every
-    // collection under it and every endpoint under those collections. Only
-    // `name` / `description` / `sort_order` were carried over, and even the
-    // module id changed, breaking every caller holding a reference.
+    // That older implementation was a data loss bug: the old schema's
+    // `ON DELETE CASCADE` chain from module to collection to endpoint
+    // meant deleting the module destroyed every collection under it and
+    // every endpoint under those. The `nodes` layout makes the mistake
+    // unrepresentable — there is no cascade to fall into and no second
+    // table to half-copy.
     let module = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::modules::get(c, &a.module_id)
+        simple_post_core::db::nodes::get(c, &a.module_id)
     })?;
 
-    if module.project_id == a.new_project_id && a.new_sort_order.is_none() {
+    if module.root_id == a.new_project_id && a.new_sort_order.is_none() {
         return Ok(CallToolResult::json(json!({
             "module_id": a.module_id,
             "new_project_id": a.new_project_id,
@@ -211,17 +227,17 @@ pub(super) async fn tool_module_move(
     }
 
     let moved = simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::modules::reparent(
+        simple_post_core::db::nodes::move_to_root(
             c,
             &a.module_id,
             &a.new_project_id,
-            a.new_sort_order,
+            a.new_sort_order.map(|v| v as i32),
         )
     })?;
 
     Ok(CallToolResult::json(json!({
         "module_id": moved.id,
-        "new_project_id": moved.project_id,
+        "new_project_id": moved.root_id,
         "moved": true,
     })))
 }

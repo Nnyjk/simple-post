@@ -1,10 +1,10 @@
-/**
+﻿/**
  * URL helpers — pure, framework-free. Kept here so HttpTester, the
  * BaseUrlPicker, and the cURL exporter all share the same join /
  * resolution logic. If you change the resolution rules, change them
  * here once.
  */
-import type { BaseUrlDefinition, Endpoint, Environment, Project } from '@/types/domain';
+import type { BaseUrlDefinition, EndpointDetail, Environment, Project } from '@/types/domain';
 
 /** Where the effective baseUrl came from. Used by the picker to label
  *  the current selection (e.g. "项目默认" / "鉴权服务" / "自定义"). */
@@ -37,7 +37,7 @@ export interface ResolvedBaseUrl {
  * variables) — when no env is selected, baseUrl resolves to ''.
  */
 export function resolveEndpointBaseUrl(
-  endpoint: Pick<Endpoint, 'environmentId' | 'baseUrlDefinitionId' | 'baseUrlOverride'>,
+  endpoint: Pick<EndpointDetail, 'environmentId' | 'baseUrlDefinitionId' | 'baseUrlOverride'>,
   env: Pick<Environment, 'baseUrls'> | undefined,
   project: Pick<Project, 'baseUrlDefinitions' | 'defaultBaseUrlDefinitionId'> | undefined,
 ): ResolvedBaseUrl {

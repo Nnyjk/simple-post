@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { TopBar } from '@/features/top-bar/TopBar';
 import { BootstrapErrorBanner } from '@/features/top-bar/BootstrapErrorBanner';
+import { DbRecreatedBanner } from '@/features/top-bar/DbRecreatedBanner';
 import { ProjectTree } from '@/features/project-tree/ProjectTree';
 import { HttpTester } from '@/features/http-tester/HttpTester';
 import { ResponseViewer } from '@/features/response-viewer/ResponseViewer';
@@ -119,6 +120,9 @@ function App() {
       {/* Sits between the header and the workspace so a failed startup
           load is visible without covering the tree it made incomplete. */}
       <BootstrapErrorBanner />
+      {/* Sits below the failure banner: a destructive schema rebuild
+          empties the tree, so the user has to be told why. */}
+      <DbRecreatedBanner />
       <main className="flex min-h-0 flex-1">
         <ProjectTree />
         <div ref={containerRef} className="flex min-w-0 flex-1 flex-col">

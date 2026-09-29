@@ -37,13 +37,10 @@ describe('Tauri IPC 入参契约', () => {
       [COMMANDS.environmentsDelete, { id: 'env-1' }],
       [COMMANDS.baseUrlDefsUpdate, { id: 'def-1', patch: { name: 'api' } }],
       [COMMANDS.baseUrlDefsDelete, { id: 'def-1' }],
-      [
-        COMMANDS.collectionsMove,
-        {
-          collectionIds: ['c1'],
-          target: { parentKind: 'module', parentId: 'm1', index: 0 },
-        },
-      ],
+      // The tree is one node type now, so a move is a parent id and an
+      // index — no `parentKind`, which only ever existed because the
+      // destination could live in one of two tables.
+      [COMMANDS.nodesMove, { nodeIds: ['c1'], parentId: 'm1', index: 0 }],
     ];
 
     installIpcMock(async (cmd, args) => {

@@ -12,8 +12,7 @@ export function useTreeSelection() {
   const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
   const setActiveProject = useAppStore((s) => s.setActiveProject);
   const openTab = useAppStore((s) => s.openTab);
-  const toggleModule = useAppStore((s) => s.toggleModuleExpanded);
-  const toggleCollection = useAppStore((s) => s.toggleCollectionExpanded);
+  const toggleNodeExpanded = useAppStore((s) => s.toggleNodeExpanded);
 
   // ---------- click handlers (open tab + activate) ----------
   const openProjectTab = (id: string) => {
@@ -28,11 +27,11 @@ export function useTreeSelection() {
     // also collapsed it on the tree — but the user couldn't tell why
     // "收缩" never worked from the row click. Unconditional toggle
     // makes the row behave like every other tree widget.
-    toggleModule(id);
+    toggleNodeExpanded(id);
   };
   const openCollectionTab = (id: string) => {
     openTab('collection', id);
-    toggleCollection(id);
+    toggleNodeExpanded(id);
   };
   const openEndpointTab = (id: string) => {
     setActiveEndpoint(id);

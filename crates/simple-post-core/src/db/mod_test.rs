@@ -54,9 +54,8 @@ fn init_leaves_a_fresh_database_empty() {
     let (pool, _dir) = fresh_empty_pool();
     for table in [
         "projects",
-        "modules",
-        "collections",
-        "endpoints",
+        "nodes",
+        "endpoint_details",
         "environments",
         "base_url_definitions",
     ] {
@@ -125,4 +124,196 @@ fn with_conn_returns_caller_value() {
     })
     .unwrap();
     assert_eq!(v, 42);
+}
+
+// -------------------------------------------------------------------------
+// Schema versioning.
+// -------------------------------------------------------------------------
+
+fn temp_dir(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "simple-post-schema-test-{}-{}-{}",
+        tag,
+        std::process::id(),
+        crate::db::test_counter::next()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+/// Plant a `store.db` shaped like the pre-versioning layout — the
+/// three-table tree, the given `user_version`, and one row in it so a
+/// rebuild is observable from the outside.
+///
+/// `legacy_marker` is a table the current `schema.sql` would never
+/// create. It is the phase-independent witness that the file was
+/// *replaced* rather than emptied in place: an assertion about which
+/// tables the new schema happens to define would keep changing as the
+/// layout moves, and would pass even if the rebuild quietly reused the
+/// old file.
+fn plant_legacy_store(dir: &Path, version: i64) {
+    std::fs::create_dir_all(dir).unwrap();
+    let conn = Connection::open(dir.join("store.db")).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, \
+             color TEXT, created_at INTEGER, updated_at INTEGER);
+         CREATE TABLE modules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, \
+             name TEXT NOT NULL, description TEXT, sort_order INTEGER NOT NULL);
+         CREATE TABLE legacy_marker (note TEXT);
+         INSERT INTO projects VALUES ('p_legacy', 'Legacy', '#000', 1, 1);
+         INSERT INTO modules VALUES ('m_legacy', 'p_legacy', 'Legacy Module', NULL, 0);
+         INSERT INTO legacy_marker VALUES ('this build must never write a table like this');",
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", version).unwrap();
+    // Dropped here so the handle is released before `init` tries to
+    // delete the file — on Windows an open handle makes removal fail.
+}
+
+#[test]
+fn schema_version_matches_the_constant() {
+    let (pool, _dir) = fresh_empty_pool();
+    let v: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(
+        v, SCHEMA_VERSION,
+        "the PRAGMA at the bottom of schema.sql must agree with SCHEMA_VERSION; \
+         bump the constant when the layout changes shape"
+    );
+}
+
+#[test]
+fn fresh_install_is_stamped_and_not_flagged() {
+    let (pool, _dir) = fresh_empty_pool();
+    let flagged: Option<i64> = with_conn(&pool, |c| {
+        preferences::get(c, preferences::keys::DB_RECREATED_AT)
+    })
+    .unwrap();
+    assert!(
+        flagged.is_none(),
+        "a first install has nothing to recover from and must not show a reset notice"
+    );
+}
+
+#[test]
+fn init_rebuilds_a_legacy_store_and_records_it() {
+    let dir = temp_dir("legacy");
+    plant_legacy_store(&dir, 0);
+
+    let pool = init(&dir).expect("init");
+
+    let projects: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(projects, 0, "legacy rows must not survive a rebuild");
+
+    // The legacy `legacy_marker` table is gone entirely. This is the
+    // "the file was replaced" check: emptying the old file in place
+    // would have left it behind, and a schema this build no longer
+    // understands is a schema it has to keep understanding forever.
+    let still_there: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='legacy_marker'",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap();
+    assert_eq!(
+        still_there, 0,
+        "rebuild must replace the file, not just clear its rows"
+    );
+
+    let flagged: Option<i64> = with_conn(&pool, |c| {
+        preferences::get(c, preferences::keys::DB_RECREATED_AT)
+    })
+    .unwrap();
+    assert!(
+        flagged.is_some(),
+        "a rebuild must leave a trace, otherwise the empty tree reads as \
+         'you never had any projects' instead of 'we deleted them'"
+    );
+
+    let v: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(v, SCHEMA_VERSION, "the rebuilt store is stamped current");
+}
+
+#[test]
+fn init_keeps_a_current_store_intact() {
+    let (pool, dir) = fresh_pool();
+    assert_eq!(
+        with_conn(&pool, |c| Ok(c.query_row(
+            "SELECT COUNT(*) FROM projects",
+            [],
+            |r| r.get::<_, i64>(0)
+        )?))
+        .unwrap(),
+        3
+    );
+    drop(pool);
+
+    // Re-opening a store this build already wrote must not touch it.
+    let pool = init(&dir).expect("second init");
+    let projects: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(projects, 3, "a current store survives re-init intact");
+
+    let flagged: Option<i64> = with_conn(&pool, |c| {
+        preferences::get(c, preferences::keys::DB_RECREATED_AT)
+    })
+    .unwrap();
+    assert!(flagged.is_none(), "re-init is not a rebuild");
+}
+
+#[test]
+fn init_refuses_a_database_from_a_newer_build() {
+    let dir = temp_dir("newer");
+    plant_legacy_store(&dir, SCHEMA_VERSION + 1);
+
+    let err = init(&dir).expect_err("a newer schema must not be clobbered");
+    assert!(
+        matches!(err, AppError::Validation(_)),
+        "expected Validation, got {err:?}"
+    );
+    assert!(
+        dir.join("store.db").exists(),
+        "a downgrade must never delete data it does not understand"
+    );
+}
+
+#[test]
+fn remove_db_files_takes_the_wal_sidecars_with_it() {
+    let dir = temp_dir("sidecars");
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["store.db", "store.db-wal", "store.db-shm"] {
+        std::fs::write(dir.join(name), b"x").unwrap();
+    }
+
+    remove_db_files(&dir.join("store.db")).unwrap();
+
+    for name in ["store.db", "store.db-wal", "store.db-shm"] {
+        assert!(
+            !dir.join(name).exists(),
+            "{name} must be gone — a surviving store.db-wal would be replayed \
+             into the freshly created store.db"
+        );
+    }
+}
+
+#[test]
+fn remove_db_files_tolerates_absent_sidecars() {
+    let dir = temp_dir("no-sidecar");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("store.db"), b"x").unwrap();
+    // No -wal, no -shm. A failed open elsewhere can leave it that way.
+    remove_db_files(&dir.join("store.db")).expect("missing sidecar is not an error");
+    assert!(!dir.join("store.db").exists());
 }

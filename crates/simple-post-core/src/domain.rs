@@ -160,19 +160,148 @@ pub struct AuthConfig {
     pub apikey: Option<ApiKeyAuth>,
 }
 
-// ----- endpoint -----------------------------------------------------------
+// ----- base url -----------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Endpoint {
+pub struct BaseUrlDefinition {
     pub id: String,
-    pub collection_id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+}
+
+// ----- resource node -------------------------------------------------------
+//
+// The merged tree: one row per module / collection / endpoint, with the
+// endpoint's request configuration split out into `EndpointDetail`.
+
+/// What a [`ResourceNode`] is. Projects are not nodes — a project is the
+/// implicit root context, and `root_id` names it.
+///
+/// The set is closed on purpose. `nodes.type` carries a matching CHECK
+/// constraint, and `parse` rejects anything else rather than inventing a
+/// variant, so an unknown value can never reach a match arm that
+/// silently treats it as something it isn't.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ResourceNodeType {
+    Module,
+    Collection,
+    Endpoint,
+}
+
+impl ResourceNodeType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResourceNodeType::Module => "module",
+            ResourceNodeType::Collection => "collection",
+            ResourceNodeType::Endpoint => "endpoint",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "module" => Some(ResourceNodeType::Module),
+            "collection" => Some(ResourceNodeType::Collection),
+            "endpoint" => Some(ResourceNodeType::Endpoint),
+            _ => None,
+        }
+    }
+
+    /// Can a node of this type sit directly under a node of `parent`?
+    ///
+    /// This is the guarantee the old foreign keys gave for free:
+    /// `endpoints.collection_id REFERENCES collections(id)` meant an
+    /// endpoint could not hang off a module. SQLite cannot express that
+    /// over one polymorphic `parent_id` — CHECK constraints cannot read
+    /// another row — so the matrix lives here and is enforced on every
+    /// write by `db::nodes`.
+    pub fn may_under(self, parent: ResourceNodeType) -> bool {
+        match self {
+            // A module's parent is the project, which is not a node. The
+            // caller expresses that as `parent_id = NULL`, and the
+            // absence of a parent is the only legal case.
+            ResourceNodeType::Module => false,
+            // A collection either opens a module or nests under another
+            // collection — nesting is unbounded, which is why the tree
+            // renderer recurses.
+            ResourceNodeType::Collection => matches!(
+                parent,
+                ResourceNodeType::Module | ResourceNodeType::Collection
+            ),
+            ResourceNodeType::Endpoint => parent == ResourceNodeType::Collection,
+        }
+    }
+}
+
+/// One row of the tree: structure and identity, nothing more.
+///
+/// Endpoint request configuration lives in [`EndpointDetail`], keyed by
+/// `node_id`. Splitting it is not tidiness — `method` / `url` / `tags`
+/// mean nothing for a module, and folding them in would give every
+/// module and collection row permanently empty columns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceNode {
+    pub id: String,
+    /// Owning project. Denormalised so a whole tree is one indexed read
+    /// and so resolving "which project does this belong to" — the first
+    /// step of the per-project permission gate — is a primary-key hit
+    /// instead of a walk up the parent chain.
+    pub root_id: String,
+    /// `None` for a module, whose parent is the project.
+    pub parent_id: Option<String>,
+    #[serde(rename = "type")]
+    pub kind: ResourceNodeType,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub sort_order: i64,
+    #[serde(default = "now_ms")]
+    pub created_at: i64,
+    #[serde(default = "now_ms")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceNodePatch {
+    /// Re-parent. `None` leaves the current parent alone; an explicit
+    /// `Some(None)` promotes a node to the top of its project, which is
+    /// only legal for a module.
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_order: Option<i64>,
+}
+
+impl ResourceNodePatch {
+    pub fn is_empty(&self) -> bool {
+        self.parent_id.is_none()
+            && self.name.is_none()
+            && self.description.is_none()
+            && self.sort_order.is_none()
+    }
+}
+
+/// Endpoint request configuration. Joins to [`ResourceNode`] on
+/// `node_id`; the tree columns deliberately do not appear here so they
+/// have exactly one home.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndpointDetail {
+    pub node_id: String,
     pub method: HttpMethod,
-    /// Path-only URL; the actual host is resolved at send time via
-    /// `Environment.baseUrls[baseUrlDefinitionId]`.
+    /// Path only — the host is resolved at send time from the active
+    /// environment's `baseUrls`, so the same endpoint can be retargeted
+    /// between dev / staging / prod without a rewrite.
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment_id: Option<String>,
@@ -180,39 +309,25 @@ pub struct Endpoint {
     pub base_url_definition_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_override: Option<String>,
+    #[serde(default)]
     pub params: Vec<KeyValue>,
+    #[serde(default)]
     pub headers: Vec<KeyValue>,
+    #[serde(default)]
     pub body: RequestBody,
+    #[serde(default)]
     pub auth: AuthConfig,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
-    pub sort_order: i64,
-    /// Server-side timestamp; defaults to `now_ms()` when the caller
-    /// (e.g. the REST `POST /api/endpoints` handler) doesn't supply one.
-    /// Tauri commands always set this explicitly so the default is inert
-    /// for them.
-    #[serde(default = "now_ms")]
-    pub created_at: i64,
-    #[serde(default = "now_ms")]
-    pub updated_at: i64,
 }
 
-/// Partial-update payload. All fields are `Option<T>` so an unset
-/// `None` keeps the existing value. `Option<Option<T>>` (double Option)
-/// is used where the TS side distinguishes *absent* from *explicit null*
-/// — e.g. `docs: null` should clear the column, while `docs` not in the
-/// patch object should leave it alone.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EndpointPatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<Option<String>>,
+pub struct EndpointDetailPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<HttpMethod>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -242,17 +357,11 @@ pub struct EndpointPatch {
     pub notes: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sort_order: Option<i64>,
 }
 
-impl EndpointPatch {
-    /// True if no field is being changed. Used by the partial-update
-    /// path to avoid a no-op SQL write.
+impl EndpointDetailPatch {
     pub fn is_empty(&self) -> bool {
-        self.name.is_none()
-            && self.description.is_none()
-            && self.method.is_none()
+        self.method.is_none()
             && self.url.is_none()
             && self.environment_id.is_none()
             && self.base_url_definition_id.is_none()
@@ -264,91 +373,22 @@ impl EndpointPatch {
             && self.docs.is_none()
             && self.notes.is_none()
             && self.tags.is_none()
-            && self.sort_order.is_none()
     }
 }
 
-// ----- base url -----------------------------------------------------------
-
+/// An endpoint as the tree and the editor both see it: the node's
+/// structure plus its request configuration.
+///
+/// Separate from [`ResourceNode`] so a tree read can skip
+/// `endpoint_details` entirely — the tree only ever renders
+/// name / type / sort_order, and joining the detail table for every
+/// node to satisfy that would read a column set most rows do not have.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BaseUrlDefinition {
-    pub id: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-// ----- collection ---------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Collection {
-    pub id: String,
-    pub module_id: String,
-    pub parent_collection_id: Option<String>,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub sort_order: i64,
-    /// Derived in the tree on the renderer side. Persisted for round-trip
-    /// fidelity but never read back into the DB.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expanded: Option<bool>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CollectionPatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module_id: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_collection_id: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sort_order: Option<i64>,
-}
-
-// ----- module -------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Module {
-    pub id: String,
-    pub project_id: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub sort_order: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expanded: Option<bool>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModulePatch {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<Option<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sort_order: Option<i64>,
-    /// Re-parent the module to a different project.
-    ///
-    /// The renderer deliberately never sends this (`updateModule` in
-    /// `crud-slice.ts` is typed `Partial<Omit<Module, 'id' | 'projectId'>>`),
-    /// so the only caller is the MCP `module_move` tool. It exists because
-    /// a cross-project move must be a real `UPDATE`: the previous
-    /// delete-then-create approach destroyed every collection and endpoint
-    /// under the module via `ON DELETE CASCADE`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
+pub struct EndpointResource {
+    #[serde(flatten)]
+    pub node: ResourceNode,
+    pub detail: EndpointDetail,
 }
 
 // ----- project ------------------------------------------------------------

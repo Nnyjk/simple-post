@@ -1,20 +1,25 @@
 /**
- * CRUD slice — every Tauri-mediated write that mutates projects,
- * modules, collections, endpoints, environments, and baseUrl
- * definitions.
+ * CRUD slice — every Tauri-mediated write that mutates projects, the
+ * resource tree, environments, and baseUrl definitions.
+ *
+ * The tree is one `nodes` array plus an `endpointDetails` map, so the
+ * three action families the old three-table layout needed collapse into
+ * three actions total:
+ *
+ *   addNode / updateNode / deleteNode  (one cascade delete, not three)
+ *   moveNodes                          (one move, not three)
+ *   updateEndpointDetail               (configuration, kept separate)
+ *
+ * A delete no longer needs to know what it is deleting: `nodes.parent_id`
+ * cascades in the database, and the local write removes the subtree the
+ * same way. A move no longer needs a `parentKind`, because the parent's
+ * own `type` is what decides where a node may land.
  *
  * All write actions follow the same shape:
  *   1. Optimistic local mutation via `set()` so the UI updates
  *      immediately.
  *   2. Fire-and-forget (or awaited) `invokeCmd<...>(COMMANDS.*)`.
  *   3. On failure, snapshot+rollback the local state and log.
- *
- * The slice also owns the small pure helpers that the move/delete
- * actions share (`renumber`, `reorderByIndex`,
- * `indexCollectionChildren`, `collectCollectionSubtree`,
- * `idsToCloseForDelete`, `filterTabsAfterRemoval`). They live here
- * because nothing outside this slice needs them — putting them in a
- * shared "utils" file would be premature factoring.
  *
  * The slice reads `loaded`, `setActive*`, etc. from the rest of the
  * store via `get()` — that's fine because every slice shares the
@@ -24,14 +29,14 @@
 import type { StateCreator } from 'zustand';
 import type {
   Project,
-  Module,
-  Collection,
-  Endpoint,
+  ResourceNode,
+  ResourceNodeType,
+  EndpointDetail,
   Environment,
-  HttpMethod,
   BaseUrlDefinition,
 } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { indexByParent } from '@/lib/tree-index';
 import { uid } from '@/lib/utils';
 import type { OpenTab } from './store-types';
 import type { AppState } from './app-store';
@@ -41,6 +46,19 @@ export interface CrudSliceState {
   // Intentionally empty. CRUD slice only contributes actions. The
   // type alias exists so that `AppState & CrudSlice` still resolves.
   _crudSliceMarker?: never;
+}
+
+/** What a caller may set when creating a node. The id is ours to mint. */
+export interface NewNodeInput {
+  /** Owning project. Required for a module; derived from the parent otherwise. */
+  rootId?: string;
+  /** `null` (or omitted) puts a module at the top of its project. */
+  parentId?: string | null;
+  type: ResourceNodeType;
+  name: string;
+  description?: string;
+  /** Endpoint-only, and only meaningful when `type` is `'endpoint'`. */
+  detail?: Partial<Omit<EndpointDetail, 'nodeId'>>;
 }
 
 /** Action portion owned by the CRUD slice. */
@@ -53,56 +71,53 @@ export interface CrudSliceActions {
   updateProject: (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
 
-  addModule: (
-    projectId: string,
-    name: string,
-    opts?: { description?: string },
-  ) => Promise<string | null>;
-  updateModule: (id: string, patch: Partial<Omit<Module, 'id' | 'projectId'>>) => Promise<void>;
-  deleteModule: (id: string) => Promise<void>;
-
-  addCollection: (
-    moduleId: string,
-    name: string,
-    opts?: { description?: string; parentCollectionId?: string | null },
-  ) => Promise<string | null>;
-  updateCollection: (
+  /**
+   * Create a tree node of any type. `detail` rides along for an
+   * endpoint: the node and its configuration are written in one
+   * transaction, so an endpoint can never exist without a url.
+   */
+  addNode: (input: NewNodeInput) => Promise<string | null>;
+  /**
+   * Rename / re-describe / reorder one node. Moving is `moveNodes` —
+   * it has to keep the type matrix and the subtree's `rootId` honest,
+   * which a plain field write cannot.
+   */
+  updateNode: (
     id: string,
-    patch: Partial<Omit<Collection, 'id' | 'moduleId' | 'parentCollectionId'>>,
+    patch: Partial<Pick<ResourceNode, 'name' | 'description' | 'sortOrder'>>,
   ) => Promise<void>;
-  deleteCollection: (id: string) => Promise<void>;
+  /**
+   * Delete a node and everything under it. One action for all three
+   * types: the cascade lives in the schema, and the local write mirrors
+   * it by dropping the same subtree.
+   */
+  deleteNode: (id: string) => Promise<void>;
 
-  addEndpoint: (
-    collectionId: string,
-    name: string,
-    opts?: { method?: HttpMethod; url?: string },
-  ) => Promise<string | null>;
-  updateEndpoint: (id: string, patch: Partial<Endpoint>) => Promise<void>;
-  deleteEndpoint: (id: string) => Promise<void>;
+  /** Patch an endpoint's request configuration. */
+  updateEndpointDetail: (
+    nodeId: string,
+    patch: Partial<Omit<EndpointDetail, 'nodeId'>>,
+  ) => Promise<void>;
+
   /**
    * Duplicate an endpoint. Returns the new id **synchronously** because
    * the caller (ProjectTree) immediately activates the new tab — making
    * this async would break the existing UX. Implementation: optimistic
    * local copy first, then background invoke to persist; on invoke
-   * success the temp id is replaced with the persisted entity, on
-   * failure the optimistic copy is removed.
+   * success the temp id is replaced with the persisted node, on failure
+   * the optimistic copy is removed.
    */
   duplicateEndpoint: (id: string) => string | null;
 
   // actions: data — move (drag-and-drop reorder + cross-container moves)
-  moveModule: (moduleId: string, targetIndex: number) => Promise<void>;
-  moveCollections: (
-    collectionIds: string[],
-    target: {
-      parentKind: 'module' | 'collection';
-      parentId: string;
-      index: number;
-    },
-  ) => Promise<void>;
-  moveEndpoints: (
-    endpointIds: string[],
-    target: { collectionId: string; index: number },
-  ) => Promise<void>;
+  /**
+   * Move one or many nodes under `parentId` at sibling slot `index`.
+   *
+   * `parentId: null` means "top of the project" and is legal only for a
+   * module. `nodeIds` is in the order the nodes should land, so a
+   * multi-select drag keeps the user's pick order.
+   */
+  moveNodes: (nodeIds: string[], parentId: string | null, index: number) => Promise<void>;
 
   // actions: environment (async — Tauri commands)
   setEnvironmentVar: (envId: string, key: string, value: string | null) => Promise<void>;
@@ -133,51 +148,17 @@ function renumber<T extends { sortOrder: number }>(items: readonly T[]): T[] {
   return items.map((it, idx) => ({ ...it, sortOrder: idx }));
 }
 
-/** Move an item within a sorted-by-sortOrder list. */
-function reorderByIndex<T extends { sortOrder: number }>(
-  items: readonly T[],
-  fromIndex: number,
-  toIndex: number,
-): T[] {
-  if (fromIndex === toIndex) return items.slice();
-  const clampedFrom = Math.max(0, Math.min(fromIndex, items.length - 1));
-  const clampedTo = Math.max(0, Math.min(toIndex, items.length - 1));
-  const next = items.slice();
-  const [moved] = next.splice(clampedFrom, 1);
-  next.splice(clampedTo, 0, moved);
-  return renumber(next);
-}
-
 /**
- * Build a fast lookup: `parentId -> child collections`, sorted by
- * `sortOrder`. Used by both the renderer (to flatten the tree) and the
- * store (to find siblings when a move happens).
+ * A node and every descendant beneath it.
+ *
+ * BFS over `parentId` with a visited set. The set is not defensive
+ * padding: a cycle in the data would otherwise spin here forever, and
+ * the UI is the only thing standing between the store and a
+ * hand-edited `store.db`.
  */
-function indexCollectionChildren(
-  collections: readonly Collection[],
-): Map<string | null, Collection[]> {
-  const byParent = new Map<string | null, Collection[]>();
-  for (const c of collections) {
-    const key = c.parentCollectionId;
-    const bucket = byParent.get(key);
-    if (bucket) bucket.push(c);
-    else byParent.set(key, [c]);
-  }
-  for (const bucket of byParent.values()) {
-    bucket.sort((a, b) => a.sortOrder - b.sortOrder);
-  }
-  return byParent;
-}
-
-/**
- * Collect a collection's id and all descendant collection ids (BFS
- * down `parentCollectionId`). Used by `moveCollections` to update the
- * denormalized `moduleId` on every node in the moved subtree when
- * the move crosses modules.
- */
-function collectCollectionSubtree(
+function collectSubtree(
   rootId: string,
-  childrenIndex: Map<string | null, Collection[]>,
+  childrenIndex: Map<string | null, ResourceNode[]>,
 ): Set<string> {
   const out = new Set<string>();
   const queue: string[] = [rootId];
@@ -185,71 +166,9 @@ function collectCollectionSubtree(
     const id = queue.shift()!;
     if (out.has(id)) continue;
     out.add(id);
-    const kids = childrenIndex.get(id) ?? [];
-    for (const k of kids) queue.push(k.id);
+    for (const kid of childrenIndex.get(id) ?? []) queue.push(kid.id);
   }
   return out;
-}
-
-/**
- * Build the set of entity ids that should be closed alongside a deletion.
- * Pure helper so each delete* action can call it without duplicating logic.
- *
- *   deleteProject(p)  → { project p, all modules in p, all collections in
- *                        those modules, all endpoints in those collections }
- *   deleteModule(m)   → { module m, all collections in m, all endpoints
- *                        in those collections }
- *   deleteCollection(c) → { collection c, all endpoints in c }
- *   deleteEndpoint(e) → { endpoint e }
- */
-function idsToCloseForDelete(
-  scope: 'project' | 'module' | 'collection' | 'endpoint',
-  targetId: string,
-  state: Pick<AppState, 'projects' | 'modules' | 'collections' | 'endpoints'>,
-): { project: string[]; module: string[]; collection: string[]; endpoint: string[] } {
-  const moduleIds: string[] = [];
-  const collectionIds: string[] = [];
-  const endpointIds: string[] = [];
-
-  if (scope === 'project') {
-    const ms = state.modules.filter((m) => m.projectId === targetId);
-    moduleIds.push(...ms.map((m) => m.id));
-    collectionIds.push(
-      ...state.collections.filter((c) => moduleIds.includes(c.moduleId)).map((c) => c.id),
-    );
-    endpointIds.push(
-      ...state.endpoints.filter((e) => collectionIds.includes(e.collectionId)).map((e) => e.id),
-    );
-    return {
-      project: [targetId],
-      module: moduleIds,
-      collection: collectionIds,
-      endpoint: endpointIds,
-    };
-  }
-
-  if (scope === 'module') {
-    moduleIds.push(targetId);
-    collectionIds.push(
-      ...state.collections.filter((c) => c.moduleId === targetId).map((c) => c.id),
-    );
-    endpointIds.push(
-      ...state.endpoints.filter((e) => collectionIds.includes(e.collectionId)).map((e) => e.id),
-    );
-    return { project: [], module: moduleIds, collection: collectionIds, endpoint: endpointIds };
-  }
-
-  if (scope === 'collection') {
-    collectionIds.push(targetId);
-    endpointIds.push(
-      ...state.endpoints.filter((e) => e.collectionId === targetId).map((e) => e.id),
-    );
-    return { project: [], module: [], collection: collectionIds, endpoint: endpointIds };
-  }
-
-  // endpoint
-  endpointIds.push(targetId);
-  return { project: [], module: [], collection: [], endpoint: endpointIds };
 }
 
 /**
@@ -260,14 +179,8 @@ function idsToCloseForDelete(
 function filterTabsAfterRemoval(
   tabs: readonly OpenTab[],
   activeId: string | null,
-  toClose: ReturnType<typeof idsToCloseForDelete>,
+  closeSet: ReadonlySet<string>,
 ): { tabs: OpenTab[]; activeId: string | null; changed: boolean } {
-  const closeSet = new Set<string>();
-  for (const id of toClose.project) closeSet.add(`project:${id}`);
-  for (const id of toClose.module) closeSet.add(`module:${id}`);
-  for (const id of toClose.collection) closeSet.add(`collection:${id}`);
-  for (const id of toClose.endpoint) closeSet.add(`endpoint:${id}`);
-
   const nextTabs: OpenTab[] = [];
   for (const t of tabs) {
     if (closeSet.has(`${t.kind}:${t.id}`)) continue;
@@ -285,6 +198,49 @@ function filterTabsAfterRemoval(
     nextActive = fallback ? fallback.id : null;
   }
   return { tabs: nextTabs, activeId: nextActive, changed: true };
+}
+
+/**
+ * The tab keys to close when a subtree is deleted.
+ *
+ * A tab is keyed by the id of whatever it shows, and a `module` /
+ * `collection` / `endpoint` tab's id is its node id — so one pass over
+ * the removed ids answers all three at once. Projects are separate:
+ * they are not nodes, so they are closed by the project action.
+ */
+function tabKeysForSubtree(
+  nodes: readonly ResourceNode[],
+  removed: ReadonlySet<string>,
+  scope: 'project' | 'node',
+  targetId: string,
+): Set<string> {
+  const close = new Set<string>();
+  for (const n of nodes) {
+    if (removed.has(n.id)) close.add(`${n.type}:${n.id}`);
+  }
+  if (scope === 'project') close.add(`project:${targetId}`);
+  return close;
+}
+
+/** The `EndpointDetail` an optimistic endpoint create starts from. */
+function blankDetail(
+  nodeId: string,
+  partial?: Partial<Omit<EndpointDetail, 'nodeId'>>,
+): EndpointDetail {
+  return {
+    nodeId,
+    method: 'GET',
+    url: '',
+    environmentId: null,
+    baseUrlDefinitionId: null,
+    baseUrlOverride: null,
+    params: [],
+    headers: [],
+    body: { mode: 'none', content: '' },
+    auth: { type: 'none' },
+    tags: [],
+    ...partial,
+  };
 }
 
 export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, get) => ({
@@ -324,9 +280,8 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
     // Snapshot for rollback.
     const snapshot = {
       projects: get().projects,
-      modules: get().modules,
-      collections: get().collections,
-      endpoints: get().endpoints,
+      nodes: get().nodes,
+      endpointDetails: get().endpointDetails,
       environments: get().environments,
       responseHistory: get().responseHistory,
       responseExamples: get().responseExamples,
@@ -336,33 +291,32 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       activeEndpointId: get().activeEndpointId,
     };
     set((s) => {
-      const moduleIds = s.modules.filter((m) => m.projectId === id).map((m) => m.id);
-      const collectionIds = s.collections
-        .filter((c) => moduleIds.includes(c.moduleId))
-        .map((c) => c.id);
-      const droppedEndpointIds = s.endpoints
-        .filter((e) => collectionIds.includes(e.collectionId))
-        .map((e) => e.id);
+      // `rootId` is denormalised onto every node precisely so "what
+      // belongs to this project" is one filter rather than a walk down
+      // module → collection → endpoint.
+      const removed = new Set(s.nodes.filter((n) => n.rootId === id).map((n) => n.id));
+      const droppedEndpointIds = s.nodes
+        .filter((n) => n.type === 'endpoint' && removed.has(n.id))
+        .map((n) => n.id);
       const nextHistory = { ...s.responseHistory };
       const nextExamples = { ...s.responseExamples };
       for (const eid of droppedEndpointIds) {
         delete nextHistory[eid];
         delete nextExamples[eid];
       }
+      const nextDetails = { ...s.endpointDetails };
+      for (const eid of droppedEndpointIds) delete nextDetails[eid];
       const tabs = filterTabsAfterRemoval(
         s.openTabs,
         s.activeTabId,
-        idsToCloseForDelete('project', id, s),
+        tabKeysForSubtree(s.nodes, removed, 'project', id),
       );
       const nextActiveEndpointId =
-        s.activeEndpointId && droppedEndpointIds.includes(s.activeEndpointId)
-          ? null
-          : s.activeEndpointId;
+        s.activeEndpointId && removed.has(s.activeEndpointId) ? null : s.activeEndpointId;
       return {
         projects: s.projects.filter((p) => p.id !== id),
-        modules: s.modules.filter((m) => m.projectId !== id),
-        collections: s.collections.filter((c) => !moduleIds.includes(c.moduleId)),
-        endpoints: s.endpoints.filter((e) => !collectionIds.includes(e.collectionId)),
+        nodes: s.nodes.filter((n) => !removed.has(n.id)),
+        endpointDetails: nextDetails,
         environments: s.environments.filter((env) => env.projectId !== id),
         responseHistory: nextHistory,
         responseExamples: nextExamples,
@@ -383,43 +337,61 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
     }
   },
 
-  // ---------- module CRUD (async — Tauri commands) ----------
+  // ---------- resource tree (async — Tauri commands) ----------
 
-  addModule: async (projectId, name, opts) => {
+  addNode: async (input) => {
+    // Minted here rather than server-side so the Tauri and REST shapes
+    // agree: the REST body needs the id up front to key the endpoint's
+    // `detail.nodeId`, and letting the two paths differ would put the
+    // divergence in the one operation that writes two tables.
+    const id = uid();
     try {
-      const mod = await invokeCmd<Module>(COMMANDS.modulesCreate, {
-        projectId,
-        name,
-        opts: opts ?? null,
+      const node = await invokeCmd<ResourceNode>(COMMANDS.nodesCreate, {
+        id,
+        rootId: input.rootId ?? null,
+        parentId: input.parentId ?? null,
+        type: input.type,
+        name: input.name,
+        description: input.description,
+        sortOrder: 0,
+        ...(input.detail ? { detail: input.detail } : {}),
       });
-      set((s) => ({ modules: [...s.modules, mod] }));
-      return mod.id;
+      set((s) => ({
+        nodes: [...s.nodes, node],
+        // Only an endpoint has a detail row; writing an empty one for a
+        // module would make `Object.keys(endpointDetails)` lie.
+        ...(input.type === 'endpoint'
+          ? { endpointDetails: { ...s.endpointDetails, [id]: blankDetail(id, input.detail) } }
+          : {}),
+      }));
+      return node.id;
     } catch (e) {
-      console.error('[store] modules_create failed', e);
+      console.error(`[store] nodes_create failed (${input.type})`, e);
       return null;
     }
   },
-  updateModule: async (id, patch) => {
-    const prev = get().modules.find((m) => m.id === id);
+
+  updateNode: async (id, patch) => {
+    const prev = get().nodes.find((n) => n.id === id);
     if (!prev) return;
-    const optimistic: Module = { ...prev, ...patch };
-    set((s) => ({
-      modules: s.modules.map((m) => (m.id === id ? optimistic : m)),
-    }));
+    const optimistic: ResourceNode = { ...prev, ...patch };
+    set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? optimistic : n)) }));
     try {
-      await invokeCmd<Module>(COMMANDS.modulesUpdate, { id, patch });
+      await invokeCmd<ResourceNode>(COMMANDS.nodesUpdate, { id, patch });
     } catch (e) {
-      console.error('[store] modules_update failed', e);
-      set((s) => ({
-        modules: s.modules.map((m) => (m.id === id ? prev : m)),
-      }));
+      console.error('[store] nodes_update failed', e);
+      set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? prev : n)) }));
     }
   },
-  deleteModule: async (id) => {
+
+  deleteNode: async (id) => {
+    // One delete for all three types. `nodes.parent_id` cascades in the
+    // database; the local write drops the same subtree so the tree does
+    // not flicker back to a deleted node's children until the next
+    // reload.
     const snapshot = {
-      modules: get().modules,
-      collections: get().collections,
-      endpoints: get().endpoints,
+      nodes: get().nodes,
+      endpointDetails: get().endpointDetails,
       responseHistory: get().responseHistory,
       responseExamples: get().responseExamples,
       openTabs: get().openTabs,
@@ -427,430 +399,213 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       activeEndpointId: get().activeEndpointId,
     };
     set((s) => {
-      const collectionIds = s.collections.filter((c) => c.moduleId === id).map((c) => c.id);
-      const droppedEndpointIds = s.endpoints
-        .filter((e) => collectionIds.includes(e.collectionId))
-        .map((e) => e.id);
+      const removed = collectSubtree(id, indexByParent(s.nodes));
+      const droppedEndpointIds = s.nodes
+        .filter((n) => n.type === 'endpoint' && removed.has(n.id))
+        .map((n) => n.id);
       const nextHistory = { ...s.responseHistory };
       const nextExamples = { ...s.responseExamples };
       for (const eid of droppedEndpointIds) {
         delete nextHistory[eid];
         delete nextExamples[eid];
       }
+      const nextDetails = { ...s.endpointDetails };
+      for (const eid of droppedEndpointIds) delete nextDetails[eid];
       const tabs = filterTabsAfterRemoval(
         s.openTabs,
         s.activeTabId,
-        idsToCloseForDelete('module', id, s),
+        tabKeysForSubtree(s.nodes, removed, 'node', id),
       );
-      const nextActiveEndpointId =
-        s.activeEndpointId && droppedEndpointIds.includes(s.activeEndpointId)
-          ? null
-          : s.activeEndpointId;
       return {
-        modules: s.modules.filter((m) => m.id !== id),
-        collections: s.collections.filter((c) => c.moduleId !== id),
-        endpoints: s.endpoints.filter((e) => !collectionIds.includes(e.collectionId)),
+        nodes: s.nodes.filter((n) => !removed.has(n.id)),
+        endpointDetails: nextDetails,
         responseHistory: nextHistory,
         responseExamples: nextExamples,
-        activeEndpointId: nextActiveEndpointId,
+        activeEndpointId:
+          s.activeEndpointId && removed.has(s.activeEndpointId) ? null : s.activeEndpointId,
         openTabs: tabs.tabs,
         activeTabId: tabs.activeId,
       };
     });
     try {
-      await invokeCmd<void>(COMMANDS.modulesDelete, { id });
+      await invokeCmd<void>(COMMANDS.nodesDelete, { id });
     } catch (e) {
-      console.error('[store] modules_delete failed', e);
+      console.error('[store] nodes_delete failed', e);
       set(snapshot);
     }
   },
 
-  // ---------- collection CRUD ----------
-
-  addCollection: async (moduleId, name, opts) => {
-    try {
-      const collection = await invokeCmd<Collection>(COMMANDS.collectionsCreate, {
-        moduleId,
-        name,
-        opts: opts ?? null,
-      });
-      set((s) => ({ collections: [...s.collections, collection] }));
-      return collection.id;
-    } catch (e) {
-      console.error('[store] collections_create failed', e);
-      return null;
-    }
-  },
-  updateCollection: async (id, patch) => {
-    const prev = get().collections.find((c) => c.id === id);
+  updateEndpointDetail: async (nodeId, patch) => {
+    const prev = get().endpointDetails[nodeId];
     if (!prev) return;
-    const optimistic: Collection = { ...prev, ...patch };
-    set((s) => ({
-      collections: s.collections.map((c) => (c.id === id ? optimistic : c)),
-    }));
+    const optimistic: EndpointDetail = { ...prev, ...patch };
+    set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: optimistic } }));
     try {
-      await invokeCmd<Collection>(COMMANDS.collectionsUpdate, { id, patch });
+      await invokeCmd<EndpointDetail>(COMMANDS.endpointDetailUpdate, { nodeId, patch });
     } catch (e) {
-      console.error('[store] collections_update failed', e);
-      set((s) => ({
-        collections: s.collections.map((c) => (c.id === id ? prev : c)),
-      }));
-    }
-  },
-  deleteCollection: async (id) => {
-    const snapshot = {
-      collections: get().collections,
-      endpoints: get().endpoints,
-      responseHistory: get().responseHistory,
-      responseExamples: get().responseExamples,
-      openTabs: get().openTabs,
-      activeTabId: get().activeTabId,
-      activeEndpointId: get().activeEndpointId,
-    };
-    set((s) => {
-      const droppedEndpointIds = s.endpoints.filter((e) => e.collectionId === id).map((e) => e.id);
-      const nextHistory = { ...s.responseHistory };
-      const nextExamples = { ...s.responseExamples };
-      for (const eid of droppedEndpointIds) {
-        delete nextHistory[eid];
-        delete nextExamples[eid];
-      }
-      const tabs = filterTabsAfterRemoval(
-        s.openTabs,
-        s.activeTabId,
-        idsToCloseForDelete('collection', id, s),
-      );
-      const nextActiveEndpointId =
-        s.activeEndpointId && droppedEndpointIds.includes(s.activeEndpointId)
-          ? null
-          : s.activeEndpointId;
-      return {
-        collections: s.collections.filter((c) => c.id !== id),
-        endpoints: s.endpoints.filter((e) => e.collectionId !== id),
-        responseHistory: nextHistory,
-        responseExamples: nextExamples,
-        activeEndpointId: nextActiveEndpointId,
-        openTabs: tabs.tabs,
-        activeTabId: tabs.activeId,
-      };
-    });
-    try {
-      await invokeCmd<void>(COMMANDS.collectionsDelete, { id });
-    } catch (e) {
-      console.error('[store] collections_delete failed', e);
-      set(snapshot);
+      console.error('[store] endpoint_detail_update failed', e);
+      set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: prev } }));
     }
   },
 
-  // ---------- endpoint CRUD ----------
-
-  addEndpoint: async (collectionId, name, opts) => {
-    try {
-      const endpoint = await invokeCmd<Endpoint>(COMMANDS.endpointsCreate, {
-        collectionId,
-        name,
-        opts: opts ?? null,
-      });
-      set((s) => ({ endpoints: [...s.endpoints, endpoint] }));
-      return endpoint.id;
-    } catch (e) {
-      console.error('[store] endpoints_create failed', e);
-      return null;
-    }
-  },
-  updateEndpoint: async (id, patch) => {
-    const prev = get().endpoints.find((e) => e.id === id);
-    if (!prev) return;
-    const optimistic: Endpoint = { ...prev, ...patch, updatedAt: Date.now() };
-    set((s) => ({
-      endpoints: s.endpoints.map((e) => (e.id === id ? optimistic : e)),
-    }));
-    try {
-      await invokeCmd<Endpoint>(COMMANDS.endpointsUpdate, { id, patch });
-    } catch (e) {
-      console.error('[store] endpoints_update failed', e);
-      set((s) => ({
-        endpoints: s.endpoints.map((e) => (e.id === id ? prev : e)),
-      }));
-    }
-  },
-  deleteEndpoint: async (id) => {
-    const snapshot = {
-      endpoints: get().endpoints,
-      responseHistory: get().responseHistory,
-      responseExamples: get().responseExamples,
-      openTabs: get().openTabs,
-      activeTabId: get().activeTabId,
-      activeEndpointId: get().activeEndpointId,
-    };
-    set((s) => {
-      const nextHistory = { ...s.responseHistory };
-      const nextExamples = { ...s.responseExamples };
-      delete nextHistory[id];
-      delete nextExamples[id];
-      const tabs = filterTabsAfterRemoval(
-        s.openTabs,
-        s.activeTabId,
-        idsToCloseForDelete('endpoint', id, s),
-      );
-      return {
-        endpoints: s.endpoints.filter((e) => e.id !== id),
-        responseHistory: nextHistory,
-        responseExamples: nextExamples,
-        activeEndpointId: s.activeEndpointId === id ? null : s.activeEndpointId,
-        openTabs: tabs.tabs,
-        activeTabId: tabs.activeId,
-      };
-    });
-    try {
-      await invokeCmd<void>(COMMANDS.endpointsDelete, { id });
-    } catch (e) {
-      console.error('[store] endpoints_delete failed', e);
-      set(snapshot);
-    }
-  },
   /**
    * Optimistic duplicate + background invoke. Returns the temp id
    * synchronously so the caller (ProjectTree) can activate the new
-   * tab immediately. On invoke success the temp row is replaced by
-   * the persisted entity; on failure it's removed and we log.
+   * tab immediately. On invoke success the temp rows are replaced by
+   * the persisted ones; on failure they're removed and we log.
    */
   duplicateEndpoint: (id) => {
-    const original = get().endpoints.find((e) => e.id === id);
-    if (!original) return null;
+    const state = get();
+    const original = state.nodes.find((n) => n.id === id);
+    const originalDetail = state.endpointDetails[id];
+    if (!original || !originalDetail) return null;
     const newId = uid();
     const now = Date.now();
     set((s) => {
-      const maxOrder = s.endpoints
-        .filter((e) => e.collectionId === original.collectionId)
-        .reduce((acc, e) => Math.max(acc, e.sortOrder), -1);
+      // Beside the original, not at the end of the collection: a copy
+      // the user cannot see next to what they copied is easy to miss.
+      // This matches what `db::nodes::duplicate` does server-side.
+      const siblings = s.nodes
+        .filter((n) => n.parentId === original.parentId)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+      const at = siblings.findIndex((n) => n.id === id);
+      const shifted = s.nodes.map((n) =>
+        n.parentId === original.parentId && n.sortOrder > original.sortOrder
+          ? { ...n, sortOrder: n.sortOrder + 1 }
+          : n,
+      );
       return {
-        endpoints: [
-          ...s.endpoints,
+        nodes: [
+          ...shifted,
           {
             ...original,
             id: newId,
             name: `${original.name} (副本)`,
-            sortOrder: maxOrder + 1,
+            sortOrder: at + 1,
             createdAt: now,
             updatedAt: now,
           },
         ],
+        endpointDetails: {
+          ...s.endpointDetails,
+          [newId]: { ...originalDetail, nodeId: newId },
+        },
       };
     });
-    invokeCmd<Endpoint>(COMMANDS.endpointsDuplicate, { id })
+    invokeCmd<ResourceNode>(COMMANDS.nodesDuplicate, { id })
       .then((persisted) => {
-        // Swap the temp row with the persisted one (server may assign
-        // a different id or normalize fields).
-        set((s) => ({
-          endpoints: s.endpoints.map((e) => (e.id === newId ? persisted : e)),
-        }));
+        // Swap the temp rows with the persisted ones (the server may
+        // assign a different id or normalise fields).
+        set((s) => {
+          const nextNodes = s.nodes.map((n) => (n.id === newId ? persisted : n));
+          const nextDetails = { ...s.endpointDetails };
+          delete nextDetails[newId];
+          nextDetails[persisted.id] = { ...originalDetail, nodeId: persisted.id };
+          return { nodes: nextNodes, endpointDetails: nextDetails };
+        });
       })
       .catch((e) => {
-        console.error('[store] endpoints_duplicate failed', e);
-        set((s) => ({
-          endpoints: s.endpoints.filter((e) => e.id !== newId),
-        }));
+        console.error('[store] nodes_duplicate failed', e);
+        set((s) => {
+          const nextDetails = { ...s.endpointDetails };
+          delete nextDetails[newId];
+          return { nodes: s.nodes.filter((n) => n.id !== newId), endpointDetails: nextDetails };
+        });
       });
     return newId;
   },
 
   // ---------- move (drag-and-drop) ----------
 
-  moveModule: async (moduleId, targetIndex) => {
-    const prevModules = get().modules;
+  moveNodes: async (nodeIds, parentId, index) => {
+    const prevNodes = get().nodes;
     set((s) => {
-      const mod = s.modules.find((m) => m.id === moduleId);
-      if (!mod) return {};
-      const inScope = s.modules
-        .filter((m) => m.projectId === mod.projectId)
-        .sort((a, b) => a.sortOrder - b.sortOrder);
-      const fromIndex = inScope.findIndex((m) => m.id === moduleId);
-      if (fromIndex < 0) return {};
-      const reordered = reorderByIndex(inScope, fromIndex, targetIndex);
-      const outOfScope = s.modules.filter((m) => m.projectId !== mod.projectId);
-      return { modules: [...outOfScope, ...reordered] };
-    });
-    try {
-      await invokeCmd<void>(COMMANDS.modulesMove, { moduleId, targetIndex });
-    } catch (e) {
-      console.error('[store] modules_move failed', e);
-      set({ modules: prevModules });
-    }
-  },
-
-  moveCollections: async (collectionIds, target) => {
-    const prevCollections = get().collections;
-    set((s) => {
-      if (collectionIds.length === 0) return {};
-      // Dedup + drop unknowns up-front so the rest of the logic can
-      // assume every id is a real collection.
-      const idSet = new Set(collectionIds);
-      const sources = s.collections.filter((c) => idSet.has(c.id));
+      if (nodeIds.length === 0) return {};
+      const idSet = new Set(nodeIds);
+      const childrenIndex = indexByParent(s.nodes);
+      const sources = s.nodes.filter((n) => idSet.has(n.id));
       if (sources.length === 0) return {};
 
-      // Resolve the target parent + its owning module.
-      let targetModuleId: string;
-      if (target.parentKind === 'module') {
-        const targetMod = s.modules.find((m) => m.id === target.parentId);
-        if (!targetMod) return {};
-        targetModuleId = targetMod.id;
+      // The destination parent, and the project it puts the nodes in.
+      // `rootId` rides on every node, so the project-boundary check is a
+      // string compare instead of the old walk up to the module.
+      let targetRootId: string;
+      if (parentId === null) {
+        // "Top of the project" — legal only for a module.
+        if (sources.some((n) => n.type !== 'module')) return {};
+        targetRootId = sources[0].rootId;
       } else {
-        const targetCol = s.collections.find((c) => c.id === target.parentId);
-        if (!targetCol) return {};
-        targetModuleId = targetCol.moduleId;
+        const targetParent = s.nodes.find((n) => n.id === parentId);
+        if (!targetParent) return {};
+        targetRootId = targetParent.rootId;
       }
-      const targetParentId = target.parentKind === 'module' ? null : target.parentId;
 
-      // Cycle guard: a collection cannot be moved under itself or any
-      // descendant. Build the descendant set for every source once.
-      const childrenIndex = indexCollectionChildren(s.collections);
-      const allSubtrees = new Set<string>();
+      // Cycle guard: a node cannot be moved under itself or any
+      // descendant. The UI disables those drop targets, but a stale
+      // drag payload can still name one.
+      const movedSubtrees = new Set<string>();
       for (const src of sources) {
-        for (const id of collectCollectionSubtree(src.id, childrenIndex)) {
-          allSubtrees.add(id);
-        }
+        for (const nid of collectSubtree(src.id, childrenIndex)) movedSubtrees.add(nid);
       }
-      if (targetParentId !== null && allSubtrees.has(targetParentId)) {
-        // Target is inside one of the moved subtrees — would create a
-        // cycle. Silently no-op; the UI is expected to disable this
-        // drop target, but we double-check here for safety.
-        return {};
-      }
+      if (parentId !== null && movedSubtrees.has(parentId)) return {};
 
-      // Project-boundary guard: every source must belong to the same
-      // project as the target. Since `moduleId` is denormalized on
-      // collections, we just compare source.moduleId's project.
-      const targetProjectId = s.modules.find((m) => m.id === targetModuleId)?.projectId;
-      if (!targetProjectId) return {};
+      // Every source must already belong to the destination's project.
+      // The server refuses the move otherwise; refusing locally keeps
+      // the optimistic state from showing something that will 400.
       for (const src of sources) {
-        const srcMod = s.modules.find((m) => m.id === src.moduleId);
-        if (!srcMod || srcMod.projectId !== targetProjectId) return {};
+        if (src.rootId !== targetRootId) return {};
       }
 
-      // Siblings inside the new parent, with sources removed (we
-      // reinsert them at `target.index` below).
-      const siblings = s.collections
-        .filter(
-          (c) =>
-            c.moduleId === targetModuleId &&
-            c.parentCollectionId === targetParentId &&
-            !idSet.has(c.id),
-        )
-        .sort((a, b) => a.sortOrder - b.sortOrder);
+      // Destination siblings with the movers removed — they are
+      // reinserted at `index` below.
+      //
+      // For a top-level drop the siblings are the destination project's
+      // modules, which are the nodes with no parent; scoping by
+      // `parentId === null` alone would sweep in every project's
+      // top level at once.
+      const siblings =
+        parentId === null
+          ? s.nodes
+              .filter((n) => n.parentId === null && n.rootId === targetRootId && !idSet.has(n.id))
+              .sort((a, b) => a.sortOrder - b.sortOrder)
+          : (childrenIndex.get(parentId) ?? []).filter((n) => !idSet.has(n.id));
 
-      // The moved rows keep their relative order in `collectionIds`
-      // (no stable-sort key — just preserve call order).
+      // The moved rows keep the caller's order, so a multi-select drag
+      // lands the way the user picked them.
       const movedRows = sources
         .slice()
-        .sort((a, b) => collectionIds.indexOf(a.id) - collectionIds.indexOf(b.id))
-        .map((c) => ({
-          ...c,
-          moduleId: targetModuleId,
-          parentCollectionId: targetParentId,
-        }));
+        .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id))
+        .map((n) => ({ ...n, parentId, rootId: targetRootId }));
 
-      // Splice into the sibling list at the requested index.
-      const clampedIndex = Math.max(0, Math.min(target.index, siblings.length));
-      const nextSiblings = [
+      const clampedIndex = Math.max(0, Math.min(index, siblings.length));
+      const renumbered = renumber([
         ...siblings.slice(0, clampedIndex),
         ...movedRows,
         ...siblings.slice(clampedIndex),
-      ];
-      const renumbered = renumber(nextSiblings);
+      ]);
+      const renumberedById = new Map(renumbered.map((n) => [n.id, n] as const));
 
-      // Compose the new collections array: every collection either
-      // stays as-is (outside the new parent's siblings), or is one
-      // of the renamed rows, OR is a descendant of a moved row that
-      // needs its `moduleId` updated (the parentCollectionId stays
-      // the same — it still points to a collection inside the moved
-      // subtree).
-      const renumberedById = new Map(renumbered.map((c) => [c.id, c] as const));
-      const movedIdSet = idSet;
-      const next = s.collections.map((c) => {
-        const renamed = renumberedById.get(c.id);
+      // Every node either keeps its slot (outside the destination), is
+      // one of the renumbered rows, or is a descendant of a moved row
+      // whose `rootId` has to follow. The last case is the one that used
+      // to drift: the old store fixed a collection's `moduleId` here
+      // while the database left the descendants alone.
+      const next = s.nodes.map((n) => {
+        const renamed = renumberedById.get(n.id);
         if (renamed) return renamed;
-        if (movedIdSet.has(c.id)) {
-          // Should not happen — sources are deduped above and either
-          // become a renamed row or stay untouched. Defensive.
-          return c;
+        if (movedSubtrees.has(n.id) && n.rootId !== targetRootId) {
+          return { ...n, rootId: targetRootId };
         }
-        if (allSubtrees.has(c.id) && c.moduleId !== targetModuleId) {
-          // Descendant of a moved subtree: keep parentCollectionId,
-          // update moduleId to the new owning module.
-          return { ...c, moduleId: targetModuleId };
-        }
-        return c;
+        return n;
       });
 
-      return { collections: next };
+      return { nodes: next };
     });
     try {
-      await invokeCmd<void>(COMMANDS.collectionsMove, { collectionIds, target });
+      await invokeCmd<void>(COMMANDS.nodesMove, { nodeIds, parentId, index });
     } catch (e) {
-      console.error('[store] collections_move failed', e);
-      set({ collections: prevCollections });
-    }
-  },
-
-  moveEndpoints: async (endpointIds, target) => {
-    const prevEndpoints = get().endpoints;
-    set((s) => {
-      if (endpointIds.length === 0) return {};
-      const idSet = new Set(endpointIds);
-      const targetCol = s.collections.find((c) => c.id === target.collectionId);
-      if (!targetCol) return {};
-
-      // Project-boundary guard: every source endpoint must be in a
-      // collection whose module is in the same project as the target.
-      const targetProjectId = s.modules.find((m) => m.id === targetCol.moduleId)?.projectId;
-      if (!targetProjectId) return {};
-      for (const eid of endpointIds) {
-        const src = s.endpoints.find((e) => e.id === eid);
-        if (!src) return {};
-        const srcCol = s.collections.find((c) => c.id === src.collectionId);
-        if (!srcCol) return {};
-        const srcProjectId = s.modules.find((m) => m.id === srcCol.moduleId)?.projectId;
-        if (srcProjectId !== targetProjectId) return {};
-      }
-
-      // The destination siblings: everything in targetCol except
-      // the moved ones.
-      const destSiblings = s.endpoints
-        .filter((e) => e.collectionId === target.collectionId && !idSet.has(e.id))
-        .sort((a, b) => a.sortOrder - b.sortOrder);
-
-      const movedRows = endpointIds
-        .map((id) => s.endpoints.find((e) => e.id === id))
-        .filter((e): e is Endpoint => Boolean(e))
-        .map((e) => ({ ...e, collectionId: target.collectionId }));
-
-      const clampedIndex = Math.max(0, Math.min(target.index, destSiblings.length));
-      const nextDest = [
-        ...destSiblings.slice(0, clampedIndex),
-        ...movedRows,
-        ...destSiblings.slice(clampedIndex),
-      ];
-      const renumberedDest = renumber(nextDest);
-      const renumberedById = new Map(renumberedDest.map((e) => [e.id, e] as const));
-
-      const next = s.endpoints.map((e) => {
-        const renamed = renumberedById.get(e.id);
-        if (renamed) return renamed;
-        if (idSet.has(e.id)) {
-          // Defensive: should already be in the renamed map.
-          return { ...e, collectionId: target.collectionId };
-        }
-        return e;
-      });
-
-      return { endpoints: next };
-    });
-    try {
-      await invokeCmd<void>(COMMANDS.endpointsMove, { endpointIds, target });
-    } catch (e) {
-      console.error('[store] endpoints_move failed', e);
-      set({ endpoints: prevEndpoints });
+      console.error('[store] nodes_move failed', e);
+      set({ nodes: prevNodes });
     }
   },
 
@@ -968,7 +723,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
   deleteEnvironment: async (envId) => {
     const snapshot = {
       environments: get().environments,
-      endpoints: get().endpoints,
+      endpointDetails: get().endpointDetails,
       activeEnvironmentId: get().activeEnvironmentId,
     };
     set((s) => {
@@ -976,11 +731,13 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       // env so it falls back to the project default. We don't have a
       // selector that re-resolves baseUrl on the fly, so the explicit
       // null-out is what keeps the URL bar honest.
+      const nextDetails: Record<string, EndpointDetail> = {};
+      for (const [id, d] of Object.entries(s.endpointDetails)) {
+        nextDetails[id] = d.environmentId === envId ? { ...d, environmentId: null } : d;
+      }
       return {
         environments: s.environments.filter((env) => env.id !== envId),
-        endpoints: s.endpoints.map((ep) =>
-          ep.environmentId === envId ? { ...ep, environmentId: null } : ep,
-        ),
+        endpointDetails: nextDetails,
         // If the active environment was the one we just deleted, fall
         // back to the next sibling (or the project default).
         activeEnvironmentId: s.activeEnvironmentId === envId ? '' : s.activeEnvironmentId,
@@ -1095,7 +852,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
   deleteBaseUrlDefinition: async (projectId, defId) => {
     const snapshot = {
       projects: get().projects,
-      endpoints: get().endpoints,
+      endpointDetails: get().endpointDetails,
     };
     set((s) => {
       // Cascade: any endpoint that pointed at this def falls back to
@@ -1103,6 +860,10 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
       // entry from each env's baseUrls map — the resolution function
       // never reads an entry under a dead defId, so the stale data
       // is harmless and self-cleans on next save.
+      const nextDetails: Record<string, EndpointDetail> = {};
+      for (const [id, d] of Object.entries(s.endpointDetails)) {
+        nextDetails[id] = d.baseUrlDefinitionId === defId ? { ...d, baseUrlDefinitionId: null } : d;
+      }
       return {
         projects: s.projects.map((p) => {
           if (p.id !== projectId) return p;
@@ -1113,12 +874,7 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
               p.defaultBaseUrlDefinitionId === defId ? null : p.defaultBaseUrlDefinitionId,
           };
         }),
-        endpoints: s.endpoints.map((e) => {
-          if (e.baseUrlDefinitionId === defId) {
-            return { ...e, baseUrlDefinitionId: null };
-          }
-          return e;
-        }),
+        endpointDetails: nextDetails,
       };
     });
     try {

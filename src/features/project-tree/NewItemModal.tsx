@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAppStore, type NewType } from '@/stores/app-store';
+import { indexByParent } from '@/lib/tree-index';
+import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 
 const KIND_LABEL: Record<NewType, string> = {
@@ -50,8 +52,7 @@ const TYPE_CHIPS: { type: NewType; label: string; icon: React.ReactNode }[] = [
 export function NewItemModal() {
   // ---- store reads (raw refs only — no derived arrays) ----
   const newItem = useAppStore((s) => s.newItem);
-  const modules = useAppStore((s) => s.modules);
-  const collections = useAppStore((s) => s.collections);
+  const nodes = useAppStore((s) => s.nodes);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
 
   const closeNewItem = useAppStore((s) => s.closeNewItem);
@@ -67,17 +68,18 @@ export function NewItemModal() {
   // ---- derived (useMemo; never inside a selector) ----
   const projectModules = useMemo(
     () =>
-      modules
-        .filter((m) => m.projectId === activeProjectId)
+      nodes
+        .filter((n) => n.type === 'module' && n.rootId === activeProjectId)
         .sort((a, b) => a.sortOrder - b.sortOrder),
-    [modules, activeProjectId],
+    [nodes, activeProjectId],
   );
+  // Every collection under the chosen module, nested ones included. The
+  // old three-table model denormalized `moduleId` onto each collection,
+  // so `moduleId === parentModuleId` was a flat filter. With one tree
+  // that has to be a walk up `parentId` from each top-level collection.
   const moduleCollections = useMemo(
-    () =>
-      collections
-        .filter((c) => c.moduleId === newItem.parentModuleId)
-        .sort((a, b) => a.sortOrder - b.sortOrder),
-    [collections, newItem.parentModuleId],
+    () => collectionsUnderModule(nodes, newItem.parentModuleId),
+    [nodes, newItem.parentModuleId],
   );
 
   // ---- auto-fill parents when type / module change ----
@@ -428,6 +430,35 @@ function EndpointFields(props: {
       </Field>
     </div>
   );
+}
+
+// ---------- module-scoped collection lookup ----------
+
+/**
+ * All collections whose owning module is `moduleId`, nested levels
+ * included, depth-first in sibling `sort_order`. Returns `[]` for an
+ * empty/unknown module so callers can use `.length` directly.
+ *
+ * Walks the shared `parentId → children` index rather than building a
+ * second one: the buckets arrive already sorted, so the per-level
+ * `sort()` this used to do is gone, and filtering to `collection` in
+ * the walk is cheaper than pre-filtering every node on the way in.
+ * Descending from `moduleId` means other projects' and other modules'
+ * trees are never reachable, which is why no `rootId` filter is needed.
+ */
+function collectionsUnderModule(nodes: ResourceNode[], moduleId: string): ResourceNode[] {
+  if (!moduleId) return [];
+  const byParent = indexByParent(nodes);
+  const out: ResourceNode[] = [];
+  const walk = (parentId: string) => {
+    for (const k of byParent.get(parentId) ?? []) {
+      if (k.type !== 'collection') continue;
+      out.push(k);
+      walk(k.id);
+    }
+  };
+  walk(moduleId);
+  return out;
 }
 
 // ---------- tiny field wrapper ----------

@@ -1,6 +1,6 @@
-import { FileCode2 } from 'lucide-react';
+﻿import { FileCode2 } from 'lucide-react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
-import type { Endpoint } from '@/types/domain';
+import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { MethodPill } from '@/components/ui/method-pill';
 import { InlineEdit } from '@/components/ui/InlineEdit';
@@ -8,7 +8,9 @@ import type { DropZone } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
 export interface EndpointRowProps {
-  endpoint: Endpoint;
+  endpoint: ResourceNode;
+  /** The request configuration — the method pill reads from here. */
+  detail: EndpointDetail;
   active: boolean;
   selected: boolean;
   multiSelect: boolean;
@@ -28,6 +30,7 @@ export interface EndpointRowProps {
 
 export function EndpointRow({
   endpoint,
+  detail,
   active,
   selected,
   multiSelect,
@@ -88,10 +91,10 @@ export function EndpointRow({
             <FileCode2 className="h-3 w-3" />
           </span>
           <MethodPill
-            method={endpoint.method}
+            method={detail.method}
             size="xs"
             variant="solid"
-            title={`HTTP ${endpoint.method}`}
+            title={`HTTP ${detail.method}`}
           />
           <InlineEdit
             value={endpoint.name}

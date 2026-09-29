@@ -20,3 +20,7 @@ public
 # Hand-maintained Chinese docs: keep byte-stable so prose diffs stay
 # reviewable (the OpenAPI reference is generated instead).
 *.md
+
+# Agent worktrees are separate checkouts with their own tsconfig /
+# prettier state. Linting them from here reports their files as ours.
+.worktrees

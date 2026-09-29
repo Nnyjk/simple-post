@@ -117,42 +117,31 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
                 .delete(projects_delete),
         )
         .route("/api/http/send", post(http_send))
-        // Endpoint-scoped send. The client names an endpoint, never a URL, so
+        // ---- resource tree ----
+        //
+        // Replaces the 19 `/api/modules/*`, `/api/collections/*` and
+        // `/api/endpoints/*` paths these used to be spread across. The
+        // literal action verbs are registered before `/:id` so they win
+        // in the router's radix tree.
+        .route("/api/nodes", get(nodes_list).post(nodes_create))
+        .route("/api/nodes/move", post(nodes_move))
+        .route(
+            "/api/nodes/:id",
+            get(nodes_get).patch(nodes_update).delete(nodes_delete),
+        )
+        .route(
+            "/api/nodes/:id/endpoint-detail",
+            get(node_endpoint_detail_get).patch(node_endpoint_detail_patch),
+        )
+        // The bulk read the renderer's bootstrap issues. Registered on
+        // its own path rather than as a filter on `/api/nodes` because it
+        // answers a different question — configuration, not structure.
+        .route("/api/endpoint-details", get(endpoint_details_list))
+        .route("/api/nodes/:id/duplicate", post(node_duplicate))
+        // Node-scoped send. The client names an endpoint, never a URL, so
         // this route has no SSRF surface; the raw `/api/http/send` above is the
         // deliberate escape hatch and is governed by the outbound URL policy.
-        .route("/api/endpoints/:id/send", post(endpoint_send))
-        // ---- modules ----
-        .route("/api/modules", get(modules_list).post(modules_create))
-        // `/move` is registered before `/:id` so the literal path
-        // takes precedence in the router's radix tree.
-        .route("/api/modules/move", post(modules_move))
-        .route(
-            "/api/modules/:id",
-            patch(modules_update).delete(modules_delete),
-        )
-        // ---- collections ----
-        .route(
-            "/api/collections",
-            get(collections_list).post(collections_create),
-        )
-        .route("/api/collections/move", post(collections_move))
-        .route(
-            "/api/collections/:id",
-            patch(collections_update).delete(collections_delete),
-        )
-        // ---- endpoints ----
-        .route("/api/endpoints", get(endpoints_list).post(endpoints_create))
-        // Action verbs (`/search`, `/move`) are registered before
-        // `/:id` so the literals win over the parameter.
-        .route("/api/endpoints/search", post(endpoints_search))
-        .route("/api/endpoints/move", post(endpoints_move))
-        .route(
-            "/api/endpoints/:id",
-            get(endpoints_get)
-                .patch(endpoints_update)
-                .delete(endpoints_delete),
-        )
-        .route("/api/endpoints/:id/duplicate", post(endpoints_duplicate))
+        .route("/api/nodes/:id/send", post(node_send))
         // ---- environments ----
         .route(
             "/api/environments",
@@ -218,6 +207,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/preferences",
             get(preferences_get).put(preferences_put),
         )
+        // Internal, like `/api/preferences` above: boot-time state the
+        // renderer needs, not part of the documented v1 contract, so it
+        // stays out of `public_route_specs()` and out of openapi.yaml.
+        .route("/api/db/recreated-at", get(db_recreated_at))
         .with_state(state_arc.clone());
 
     // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools` — the AI client

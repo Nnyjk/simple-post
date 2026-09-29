@@ -30,7 +30,7 @@
 //! take a `&mut rusqlite::Connection` so the caller controls whether
 //! the call is in a transaction.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,10 +46,9 @@ use crate::error::AppError;
 // -------------------------------------------------------------------------
 
 pub mod base_url_defs;
-pub mod collections;
-pub mod endpoints;
+pub mod endpoint_details;
 pub mod environments;
-pub mod modules;
+pub mod nodes;
 pub mod permissions;
 pub mod preferences;
 pub mod projects;
@@ -65,17 +64,45 @@ pub mod projects;
 pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
 
 // -------------------------------------------------------------------------
+// Schema versioning.
+// -------------------------------------------------------------------------
+
+/// The layout this build reads and writes, stamped into
+/// `PRAGMA user_version` by the tail of `schema.sql`.
+///
+/// **Bump this whenever `schema.sql` changes shape in a way an older
+/// build's file cannot satisfy** — dropping or renaming a column, or
+/// splitting one table into several. Purely additive changes (a new
+/// table, a new nullable column with a default) do not need a bump:
+/// `CREATE TABLE IF NOT EXISTS` already handles them, and old files keep
+/// working because readers tolerate the missing column.
+///
+/// Keep the history comment at the bottom of `schema.sql` in sync.
+pub const SCHEMA_VERSION: i64 = 2;
+
+// -------------------------------------------------------------------------
 // Public API.
 // -------------------------------------------------------------------------
 
-/// Open (or create) the DB at `<data_dir>/store.db`, run migrations,
-/// seed if empty, return the pool.
+/// Open (or create) the DB at `<data_dir>/store.db`, bring it up to
+/// [`SCHEMA_VERSION`], and return the pool.
 ///
 /// `data_dir` is typically `dirs::data_dir().unwrap().join("com.simple-post")`.
 /// The directory is created if it doesn't exist.
+///
+/// A file written by an older layout is **replaced, not upgraded** —
+/// see [`ensure_current_schema`]. When that happens the rebuild is
+/// recorded under `preferences["db.recreated_at"]` so the UI can tell
+/// the user their previous data is gone instead of silently rendering
+/// an empty tree.
 pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir.join("store.db");
+
+    // Before any connection is handed out — a pool opened on a stale
+    // file would let reads succeed against tables this build no longer
+    // understands.
+    let rebuilt = ensure_current_schema(&db_path)?;
 
     let manager = SqliteConnectionManager::file(&db_path)
         .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)
@@ -109,6 +136,21 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     // forces the manager to actually open a connection, which is where
     // a locked file / bad path would surface.
     ping(&pool)?;
+
+    if rebuilt {
+        with_tx(&pool, |c| {
+            preferences::set(
+                c,
+                preferences::keys::DB_RECREATED_AT,
+                &crate::domain::now_ms(),
+            )
+        })?;
+        tracing::warn!(
+            "database schema v{SCHEMA_VERSION}: replaced an older store.db at {} — \
+             its contents are gone",
+            db_path.display()
+        );
+    }
 
     Ok(pool)
 }
@@ -182,7 +224,85 @@ where
 /// a fresh install starts empty and is populated by the user or by an
 /// MCP client. Test-only seed data lives in `test_support`.
 pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
-    conn.execute_batch(SCHEMA_SQL)?;
+    Ok(conn.execute_batch(SCHEMA_SQL)?)
+}
+
+/// Bring the on-disk database up to [`SCHEMA_VERSION`], replacing it
+/// when it predates this build's layout.
+///
+/// Returns `true` when the file was deleted and will be recreated, so
+/// the caller can surface the data loss.
+///
+/// **There is no migration path.** v0.1 has never shipped to real
+/// users, so a data-migration framework would be speculative weight
+/// guarding a population of one. A pre-versioned file (the original
+/// `modules` / `collections` / `endpoints` three-table layout) is
+/// replaced instead of upgraded. When that stops being true, this
+/// function is the one place that has to change.
+fn ensure_current_schema(db_path: &Path) -> Result<bool, AppError> {
+    if !db_path.exists() {
+        // Fresh install — `migrate` creates the file and stamps it.
+        return Ok(false);
+    }
+    let found = read_user_version(db_path)?;
+    if found == SCHEMA_VERSION {
+        return Ok(false);
+    }
+    if found > SCHEMA_VERSION {
+        // The file was written by a *newer* build. Recreating it would
+        // destroy data this build has no excuse destroying.
+        return Err(AppError::Validation(format!(
+            "database at {} is schema v{found}, but this build only understands \
+             v{SCHEMA_VERSION}. Update Simple Post, or point \
+             SIMPLE_POST_DATA_DIR somewhere else to start a separate workspace.",
+            db_path.display()
+        )));
+    }
+    remove_db_files(db_path)?;
+    Ok(true)
+}
+
+/// Read `PRAGMA user_version` without taking a write lock.
+///
+/// Opened read-only on purpose: `init` calls this before the pool
+/// exists, and a read-write handle would create the file we're about
+/// to decide whether to delete.
+fn read_user_version(db_path: &Path) -> Result<i64, AppError> {
+    let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+}
+
+/// Delete the database and its WAL sidecars.
+///
+/// The sidecars are not optional cleanup. Leaving `store.db-wal` behind
+/// while `migrate` creates a fresh `store.db` lets SQLite replay the
+/// old write-ahead log into the new file — which is how a "clean"
+/// rebuild comes back still holding the data it was supposed to drop.
+fn remove_db_files(db_path: &Path) -> Result<(), AppError> {
+    for suffix in ["", "-wal", "-shm"] {
+        let path = if suffix.is_empty() {
+            db_path.to_path_buf()
+        } else {
+            let mut name = db_path.as_os_str().to_os_string();
+            name.push(suffix);
+            PathBuf::from(name)
+        };
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            // Another process may have cleaned up first, or a failed
+            // open may have left the sidecar absent. Both are fine.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            // On Windows this is the shape a file held open by another
+            // process takes — a second `serve-web` or a stray daemon
+            // owns the handle. Failing loudly beats half-rebuilding.
+            Err(e) => {
+                return Err(AppError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("cannot remove {}: {e}", path.display()),
+                )))
+            }
+        }
+    }
     Ok(())
 }
 
@@ -243,6 +363,7 @@ const SCHEMA_SQL: &str = include_str!("schema.sql");
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
+    use crate::domain::{ResourceNode, ResourceNodeType};
     use rusqlite::params;
     use serde::Deserialize;
 
@@ -268,13 +389,13 @@ pub(crate) mod test_support {
     }
 
     /// Load the bundled fixture set into an already-initialised database.
+    ///
+    /// `with_conn`, not `with_tx`: `seed_fixtures` opens its own transaction
+    /// so the whole fixture set lands atomically, and nesting a `BEGIN
+    /// IMMEDIATE` around it fails with "cannot start a transaction within a
+    /// transaction".
     pub(crate) fn seed(pool: &DbPool) {
-        // `seed_fixtures` opens its own transaction, so this deliberately
-        // does *not* route through `with_tx` — `with_tx` issues `BEGIN
-        // IMMEDIATE` first, and nesting the two is SQLite's "cannot start a
-        // transaction within a transaction".
-        let mut conn = pool.get().expect("checkout connection");
-        seed_fixtures(&mut conn, &fixtures()).expect("seed fixtures");
+        with_conn(pool, |c| seed_fixtures(c, &fixtures())).expect("seed fixtures");
     }
 
     /// Top-level shape of `fixtures.json`. We only deserialize the fields
@@ -282,6 +403,10 @@ pub(crate) mod test_support {
     /// breaking older binaries (provided they have defaults).
     #[derive(Debug, Deserialize)]
     struct Fixtures {
+        /// Fixed clock the fixture set is stamped with. Deterministic, so
+        /// a seeded database is byte-identical between runs.
+        #[serde(default)]
+        now: i64,
         #[serde(default)]
         projects: Vec<FixtureProject>,
         #[serde(default)]
@@ -330,7 +455,10 @@ pub(crate) mod test_support {
         #[serde(default)]
         description: Option<String>,
         sort_order: i64,
+        /// UI-only expand state. Carried in the fixture so a future
+        /// renderer test can read a realistic tree, never persisted.
         #[serde(default)]
+        #[allow(dead_code)]
         expanded: Option<bool>,
     }
 
@@ -345,7 +473,9 @@ pub(crate) mod test_support {
         #[serde(default)]
         description: Option<String>,
         sort_order: i64,
+        /// UI-only expand state; see [`FixtureModule::expanded`].
         #[serde(default)]
+        #[allow(dead_code)]
         expanded: Option<bool>,
     }
 
@@ -395,6 +525,33 @@ pub(crate) mod test_support {
         is_active: bool,
     }
 
+    /// Insert one row of the tree.
+    ///
+    /// The three fixture sections collapse onto this one shape — the
+    /// only thing that varies is `kind` and whether `parent_id` is set.
+    /// Takes a real [`ResourceNode`] rather than a loose column list so
+    /// the fixture's translation stays a handful of struct literals
+    /// instead of a call with ten positional arguments.
+    fn insert_node(tx: &rusqlite::Transaction<'_>, n: &ResourceNode) -> Result<(), AppError> {
+        tx.execute(
+            "INSERT INTO nodes \
+         (id, root_id, parent_id, type, name, description, sort_order, created_at, updated_at) \
+         VALUES (?,?,?,?,?,?,?,?,?)",
+            params![
+                n.id,
+                n.root_id,
+                n.parent_id,
+                n.kind.as_str(),
+                n.name,
+                n.description,
+                n.sort_order,
+                n.created_at,
+                n.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Insert all rows from the fixtures file. Walks the dependency graph
     /// in topological order: projects → base_url_defs + modules + envs →
     /// collections → endpoints. Foreign keys stay satisfied without
@@ -434,66 +591,115 @@ pub(crate) mod test_support {
             let _ = p.base_url.as_ref();
         }
 
+        // The fixture file keeps its three-section shape (modules /
+        // collections / endpoints) because that is how a human reads a
+        // sample tree. The tables those sections used to map onto are
+        // gone, so this is where the translation happens: one `nodes`
+        // row per entry, plus an `endpoint_details` row for each
+        // endpoint.
+        //
+        // `root_id` is the one value the fixture does not carry — it was
+        // implied by the module each collection hung off. Derived here
+        // and memoised per owner so the lookup is a map read, not a
+        // re-walk for every descendant.
+        let mut owner: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+
         for m in &fx.modules {
-            tx.execute(
-                "INSERT INTO modules \
-             (id, project_id, name, description, sort_order) \
-             VALUES (?,?,?,?,?)",
-                params![m.id, m.project_id, m.name, m.description, m.sort_order],
+            insert_node(
+                &tx,
+                &ResourceNode {
+                    id: m.id.clone(),
+                    root_id: m.project_id.clone(),
+                    // A module's parent is the project, not another node.
+                    parent_id: None,
+                    kind: ResourceNodeType::Module,
+                    name: m.name.clone(),
+                    description: m.description.clone(),
+                    sort_order: m.sort_order,
+                    created_at: fx.now,
+                    updated_at: fx.now,
+                },
             )?;
-            let _ = m.expanded; // UI-only, not persisted
+            owner.insert(&m.id, &m.project_id);
         }
 
         for c in &fx.collections {
-            tx.execute(
-                "INSERT INTO collections \
-             (id, module_id, parent_collection_id, name, description, sort_order) \
-             VALUES (?,?,?,?,?,?)",
-                params![
-                    c.id,
-                    c.module_id,
-                    c.parent_collection_id,
-                    c.name,
-                    c.description,
-                    c.sort_order,
-                ],
+            let root_id = owner.get(c.module_id.as_str()).copied().ok_or_else(|| {
+                AppError::Validation(format!(
+                    "fixture collection {} names unknown module {}",
+                    c.id, c.module_id
+                ))
+            })?;
+            // A nested collection's `parent_id` is the collection, not
+            // the module — the type matrix allows either, and the fixture
+            // says which by naming a `parentCollectionId`.
+            let parent = c
+                .parent_collection_id
+                .as_deref()
+                .unwrap_or(c.module_id.as_str());
+            insert_node(
+                &tx,
+                &ResourceNode {
+                    id: c.id.clone(),
+                    root_id: root_id.to_string(),
+                    parent_id: Some(parent.to_string()),
+                    kind: ResourceNodeType::Collection,
+                    name: c.name.clone(),
+                    description: c.description.clone(),
+                    sort_order: c.sort_order,
+                    created_at: fx.now,
+                    updated_at: fx.now,
+                },
             )?;
-            let _ = c.expanded;
+            owner.insert(&c.id, root_id);
         }
 
         for e in &fx.endpoints {
-            let params_json = serde_json::to_string(&e.params)?;
-            let headers_json = serde_json::to_string(&e.headers)?;
-            let body_json = serde_json::to_string(&e.body)?;
-            let auth_json = serde_json::to_string(&e.auth)?;
-            let tags_json = serde_json::to_string(&e.tags)?;
+            let root_id = owner
+                .get(e.collection_id.as_str())
+                .copied()
+                .ok_or_else(|| {
+                    AppError::Validation(format!(
+                        "fixture endpoint {} names unknown collection {}",
+                        e.id, e.collection_id
+                    ))
+                })?;
+            insert_node(
+                &tx,
+                &ResourceNode {
+                    id: e.id.clone(),
+                    root_id: root_id.to_string(),
+                    parent_id: Some(e.collection_id.clone()),
+                    kind: ResourceNodeType::Endpoint,
+                    name: e.name.clone(),
+                    description: e.description.clone(),
+                    sort_order: e.sort_order,
+                    created_at: e.created_at,
+                    updated_at: e.updated_at,
+                },
+            )?;
+            // The node and its configuration land together: an endpoint
+            // with no detail row is a tree the reader cannot open.
             tx.execute(
-                "INSERT INTO endpoints \
-             (id, collection_id, name, description, method, url, \
-              environment_id, base_url_definition_id, base_url_override, \
-              params_json, headers_json, body_json, auth_json, \
-              docs, notes, tags_json, sort_order, created_at, updated_at) \
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO endpoint_details \
+             (node_id, method, url, environment_id, base_url_definition_id, \
+              base_url_override, params_json, headers_json, body_json, \
+              auth_json, docs, notes, tags_json) \
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 params![
                     e.id,
-                    e.collection_id,
-                    e.name,
-                    e.description,
                     e.method,
                     e.url,
                     e.environment_id,
                     e.base_url_definition_id,
                     e.base_url_override,
-                    params_json,
-                    headers_json,
-                    body_json,
-                    auth_json,
+                    serde_json::to_string(&e.params)?,
+                    serde_json::to_string(&e.headers)?,
+                    serde_json::to_string(&e.body)?,
+                    serde_json::to_string(&e.auth)?,
                     e.docs,
                     e.notes,
-                    tags_json,
-                    e.sort_order,
-                    e.created_at,
-                    e.updated_at,
+                    serde_json::to_string(&e.tags)?,
                 ],
             )?;
         }
@@ -530,6 +736,37 @@ pub(crate) mod test_support {
 #[allow(dead_code)]
 pub(crate) fn arc_str(s: impl Into<String>) -> Arc<str> {
     Arc::from(s.into())
+}
+
+/// Error type for a JSON-in-TEXT column that failed to decode.
+///
+/// `rusqlite`'s `FromSqlConversionFailure` wants
+/// `Box<dyn StdError + Send + Sync + 'static>`, so the message is
+/// parked in this tiny string-backed type.
+#[derive(Debug)]
+pub(crate) struct JsonColError(pub String);
+
+impl std::fmt::Display for JsonColError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for JsonColError {}
+
+/// Map a serde failure on a JSON column to rusqlite's conversion error,
+/// tagged with the column name.
+///
+/// Shaped this way so the rest of the row still loads and the caller
+/// sees *which* column was malformed rather than an opaque decode
+/// failure. Shared by every module that keeps structured data in a TEXT
+/// column.
+pub(crate) fn json_col_err(col: &str, e: serde_json::Error) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(JsonColError(format!("{col}: {e}"))),
+    )
 }
 
 // -------------------------------------------------------------------------

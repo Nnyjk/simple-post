@@ -10,9 +10,11 @@
  *       allocates (`map`, `filter`, `spread`, …).
  *
  *   (B) Cascade cleanup — deleting an endpoint must drop its
- *       `responseHistory[id]` and `responseExamples[id]` rows. Same
- *       applies when deleting the parent collection / module /
- *       project (each must clear every endpoint id in the subtree).
+ *       `responseHistory[id]`, `responseExamples[id]` and
+ *       `endpointDetails[id]` rows. Same applies when deleting the
+ *       parent collection / module / project (each must clear every
+ *       endpoint id in the subtree). One `deleteNode` action covers
+ *       all three tree types; `deleteProject` is the `rootId` scope.
  *
  *   (C) Persistence — `setTheme`/`updateRequestSettings` must
  *       persist to localStorage under `simple-post:prefs`. The init
@@ -101,24 +103,12 @@ function makeProject(id) {
     updatedAt: 0,
   };
 }
-function makeModule(id, projectId) {
-  return { id, projectId, name: 'M', description: '', sortOrder: 0 };
+function makeNode(id, type, parentId, sortOrder) {
+  return { id, rootId: 'p1', parentId, type, name: id.toUpperCase(), description: '', sortOrder };
 }
-function makeCollection(id, moduleId) {
+function makeDetail(nodeId) {
   return {
-    id,
-    moduleId,
-    parentCollectionId: null,
-    name: 'C',
-    description: '',
-    sortOrder: 0,
-  };
-}
-function makeEndpoint(id, collectionId) {
-  return {
-    id,
-    collectionId,
-    name: 'E',
+    nodeId,
     method: 'GET',
     url: '/x',
     params: [],
@@ -126,9 +116,6 @@ function makeEndpoint(id, collectionId) {
     body: { mode: 'none', content: '' },
     auth: { type: 'none' },
     tags: [],
-    sortOrder: 0,
-    createdAt: 0,
-    updatedAt: 0,
   };
 }
 function makeResp() {
@@ -188,7 +175,9 @@ const selSrc = readFileSync(new URL('../src/stores/app-store.ts', import.meta.ur
     // Allow `find(...)`, raw field access, or `?? null` postfix.
     const isFindOrField =
       /\.find\s*\(/.test(body) ||
-      /\bs\.(openTabs|projects|environments|endpoints|activeTabId|activeEndpointId)\b/.test(body);
+      /\bs\.(openTabs|projects|environments|nodes|endpointDetails|activeTabId|activeEndpointId)\b/.test(
+        body,
+      );
     const ok = !allocators && !spreads && isFindOrField;
     line(
       `selector @ L${i + 1}`,
@@ -207,12 +196,21 @@ const selSrc = readFileSync(new URL('../src/stores/app-store.ts', import.meta.ur
 // ---------- (B) cascade cleanup ----------
 console.log('\n=== (B) Cascade cleanup ===');
 
-async function seedAndDelete(scope, id, expectedGoneId) {
+// One flat tree replaces the three parallel arrays: hierarchy is
+// `parentId`, the owner is the denormalised `rootId`.
+const SEED_NODES = [
+  makeNode('m1', 'module', null, 0),
+  makeNode('c1', 'collection', 'm1', 0),
+  makeNode('c2', 'collection', 'm1', 1),
+  makeNode('ep1', 'endpoint', 'c1', 0),
+  makeNode('ep2', 'endpoint', 'c2', 0),
+];
+
+async function seedAndDelete(actionName, id, expectedGoneIds) {
   useAppStore.setState({
     projects: [makeProject('p1')],
-    modules: [makeModule('m1', 'p1')],
-    collections: [makeCollection('c1', 'm1'), makeCollection('c2', 'm1')],
-    endpoints: [makeEndpoint('ep1', 'c1'), makeEndpoint('ep2', 'c2')],
+    nodes: SEED_NODES,
+    endpointDetails: { ep1: makeDetail('ep1'), ep2: makeDetail('ep2') },
     responseHistory: { ep1: [makeResp()], ep2: [makeResp()] },
     responseExamples: {
       ep1: [{ ...makeResp(), id: 'ex1' }],
@@ -220,24 +218,38 @@ async function seedAndDelete(scope, id, expectedGoneId) {
     },
   });
   const state = useAppStore.getState();
-  await state[`delete${scope[0].toUpperCase()}${scope.slice(1)}`](id);
+  await state[actionName](id);
   const after = useAppStore.getState();
-  line(
-    `delete${scope[0].toUpperCase()}${scope.slice(1)}(${id}) → responseHistory[${expectedGoneId}] removed`,
-    !(expectedGoneId in after.responseHistory),
-    JSON.stringify(Object.keys(after.responseHistory)),
-  );
-  line(
-    `delete${scope[0].toUpperCase()}${scope.slice(1)}(${id}) → responseExamples[${expectedGoneId}] removed`,
-    !(expectedGoneId in after.responseExamples),
-    JSON.stringify(Object.keys(after.responseExamples)),
-  );
+  const label = `${actionName}(${id})`;
+  for (const gone of expectedGoneIds) {
+    line(
+      `${label} → responseHistory[${gone}] removed`,
+      !(gone in after.responseHistory),
+      JSON.stringify(Object.keys(after.responseHistory)),
+    );
+    line(
+      `${label} → responseExamples[${gone}] removed`,
+      !(gone in after.responseExamples),
+      JSON.stringify(Object.keys(after.responseExamples)),
+    );
+    // The detail row is keyed the same way and must not outlive its
+    // node — the HTTP tester reads it by node id.
+    line(
+      `${label} → endpointDetails[${gone}] removed`,
+      !(gone in after.endpointDetails),
+      JSON.stringify(Object.keys(after.endpointDetails)),
+    );
+  }
 }
 
-await seedAndDelete('endpoint', 'ep1', 'ep1');
-await seedAndDelete('collection', 'c2', 'ep2');
-await seedAndDelete('module', 'm1', 'ep1');
-await seedAndDelete('project', 'p1', 'ep1');
+// `deleteNode` covers the endpoint, collection and module cases in one
+// action — the cascade lives in the schema, so the client drops the
+// whole `parentId` subtree rather than knowing what hangs below what.
+await seedAndDelete('deleteNode', 'ep1', ['ep1']);
+await seedAndDelete('deleteNode', 'c2', ['ep2']);
+await seedAndDelete('deleteNode', 'm1', ['ep1', 'ep2']);
+// A project delete is the one scope that filters by `rootId` instead.
+await seedAndDelete('deleteProject', 'p1', ['ep1', 'ep2']);
 
 // ---------- (C) persistence write ----------
 console.log('\n=== (C) Persistence write ===');

@@ -398,14 +398,15 @@ export function WorkspaceTabs() {
 // ----------------------------------------------------------------
 //  Tab descriptors — built from the raw openTabs + entity lookups.
 //  `useTabDescriptors` only depends on the openTabs array reference and
-//  the four entity arrays, so it re-runs when any of them changes.
+//  the entity arrays, so it re-runs when any of them changes.
 // ----------------------------------------------------------------
 
 function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
   const projects = useAppStore((s) => s.projects);
-  const modules = useAppStore((s) => s.modules);
-  const collections = useAppStore((s) => s.collections);
-  const endpoints = useAppStore((s) => s.endpoints);
+  // One node array for module / collection / endpoint; the detail map
+  // only for the endpoint's method pill.
+  const nodes = useAppStore((s) => s.nodes);
+  const endpointDetails = useAppStore((s) => s.endpointDetails);
 
   // Manual map instead of .map().filter() to keep the shape stable when
   // the entity is missing (fall back to a "已删除" label rather than
@@ -440,7 +441,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       continue;
     }
     if (t.kind === 'module') {
-      const m = modules.find((x) => x.id === t.id);
+      const m = nodes.find((x) => x.id === t.id);
       if (!m) {
         out.push(missingDescriptor(t));
         continue;
@@ -459,7 +460,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       continue;
     }
     if (t.kind === 'collection') {
-      const c = collections.find((x) => x.id === t.id);
+      const c = nodes.find((x) => x.id === t.id);
       if (!c) {
         out.push(missingDescriptor(t));
         continue;
@@ -477,9 +478,12 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       });
       continue;
     }
-    // endpoint
-    const e = endpoints.find((x) => x.id === t.id);
-    if (!e) {
+    // endpoint — the method pill comes from the detail row, not the
+    // node, so a tab whose configuration is missing falls back to the
+    // "已删除" descriptor rather than rendering an empty pill.
+    const e = nodes.find((x) => x.id === t.id);
+    const eDetail = e ? endpointDetails[e.id] : undefined;
+    if (!e || !eDetail) {
       out.push(missingDescriptor(t));
       continue;
     }
@@ -488,10 +492,10 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       title: e.name,
       icon: (
         <MethodPill
-          method={e.method}
+          method={eDetail.method}
           size="xs"
           variant="solid"
-          title={`HTTP ${e.method}`}
+          title={`HTTP ${eDetail.method}`}
           className="!h-3.5 !w-3.5 !text-[9px]"
         />
       ),

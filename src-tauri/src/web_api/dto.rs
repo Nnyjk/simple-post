@@ -98,91 +98,6 @@ pub fn ensure_server_id(body: &mut Value) {
 // the wire contract stays 1:1 with the TS side.
 // -------------------------------------------------------------------------
 
-/// Body for `POST /api/endpoints`. Mirrors [`domain::Endpoint`] but
-/// omits the timestamps — the server fills them with `now_ms()` so
-/// callers don't have to know the millisecond-clock invariant.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EndpointWrite {
-    /// Optional — server fills via `ensure_server_id` when omitted.
-    #[serde(default)]
-    pub id: String,
-    pub collection_id: String,
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    pub method: crate::domain::HttpMethod,
-    pub url: String,
-    #[serde(default)]
-    pub environment_id: Option<String>,
-    #[serde(default)]
-    pub base_url_definition_id: Option<String>,
-    #[serde(default)]
-    pub base_url_override: Option<String>,
-    #[serde(default)]
-    pub params: Vec<crate::domain::KeyValue>,
-    #[serde(default)]
-    pub headers: Vec<crate::domain::KeyValue>,
-    #[serde(default)]
-    pub body: crate::domain::RequestBody,
-    #[serde(default)]
-    pub auth: crate::domain::AuthConfig,
-    #[serde(default)]
-    pub docs: Option<String>,
-    #[serde(default)]
-    pub notes: Option<String>,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    pub sort_order: i64,
-}
-
-/// Body for `POST /api/endpoints/search`. All fields optional —
-/// omitted filters don't constrain the result. Mirrors the args of
-/// `db::endpoints::search` (q, method, tags) so the same SQL runs.
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct EndpointsSearchBody {
-    #[serde(default)]
-    pub query: Option<String>,
-    #[serde(default)]
-    pub method: Option<String>,
-    #[serde(default)]
-    pub tags: Option<Vec<String>>,
-}
-
-/// Body for `POST /api/endpoints/move`. `endpoint_ids` is the
-/// caller-ordered list (drag-and-drop preserves selection order).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EndpointMoveBody {
-    pub endpoint_ids: Vec<String>,
-    pub collection_id: String,
-    pub index: i32,
-}
-
-/// Body for `POST /api/collections/move`. `parent_kind` is one of
-/// `"module"` (reparent to top-level under a module) or
-/// `"collection"` (reparent to be a child of a sibling collection).
-/// Unknown values surface as `AppError::Validation` from the DB
-/// layer.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CollectionMoveBody {
-    pub collection_ids: Vec<String>,
-    pub parent_kind: String,
-    pub parent_id: String,
-    pub index: i32,
-}
-
-/// Body for `POST /api/modules/move`. `target_index` is the zero-based
-/// slot the moved module lands at; clamping happens in the DB layer.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModuleMoveBody {
-    pub module_id: String,
-    pub target_index: i32,
-}
-
 /// Body for `POST /api/environments/:envId/vars`. `value = null`
 /// deletes the variable (mirrors `db::environments::set_var`'s
 /// "None removes the key" semantics).
@@ -242,4 +157,41 @@ pub struct PermissionPutBody {
 pub struct BaseUrlDefSetDefaultBody {
     #[serde(default)]
     pub def_id: Option<String>,
+}
+
+// ----- resource tree -------------------------------------------------------
+
+/// Body for `POST /api/nodes`.
+///
+/// An endpoint arrives as one payload carrying both halves rather than
+/// two requests: a node without its configuration cannot be opened, and
+/// two calls would leave a window where the tree holds an endpoint that
+/// errors when selected. `db::nodes::create` enforces the pairing.
+#[derive(Debug, Deserialize)]
+pub struct NodeCreateBody {
+    #[serde(flatten)]
+    pub node: crate::domain::ResourceNode,
+    /// Present for an endpoint, absent otherwise. A mismatch — either
+    /// way round — is rejected by `db::nodes`, not here, so the rule
+    /// lives in one place.
+    #[serde(default)]
+    pub detail: Option<crate::domain::EndpointDetail>,
+}
+
+/// Body for `POST /api/nodes/move`.
+///
+/// `nodeIds` is in the order the nodes should appear at the
+/// destination, so a multi-select drag keeps the user's pick order.
+///
+/// `parentId` replaces the old `parentKind` + `parentId` pair: which
+/// table the destination lived in is now a question about the parent's
+/// `type`, and `db::nodes::move_many` answers it. `null` means the top
+/// of the project and is legal only for a module.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeMoveBody {
+    pub node_ids: Vec<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub index: i32,
 }
