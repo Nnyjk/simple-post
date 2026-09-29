@@ -1,4 +1,5 @@
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
+import { indexByParent } from '@/lib/tree-index';
 import type { CollectionBranch, DragPayload, TreeBranch } from './tree-types';
 
 /**
@@ -46,16 +47,9 @@ export function buildTree(
   endpointDetails: Record<string, EndpointDetail>,
   projectId: string,
 ): TreeBranch[] {
-  const byParent = new Map<string | null, ResourceNode[]>();
-  for (const n of nodes) {
-    if (n.rootId !== projectId) continue;
-    const bucket = byParent.get(n.parentId);
-    if (bucket) bucket.push(n);
-    else byParent.set(n.parentId, [n]);
-  }
-  for (const list of byParent.values()) {
-    list.sort((a, b) => a.sortOrder - b.sortOrder);
-  }
+  // The bucketing itself is shared with the store — same index, narrowed
+  // to this project rather than the whole workspace.
+  const byParent = indexByParent(nodes, projectId);
 
   const childrenOf = (
     parentId: string,

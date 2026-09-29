@@ -17,6 +17,10 @@ Four runtime pieces:
 | MCP server | `crates/simple-post-mcp/` | JSON-RPC 2.0 dispatch (44 tools), axum HTTP daemon, stdio bridge |
 | Frontend | `src/` | React 18 + Vite 5 + Zustand 5 + Tailwind 3 + CodeMirror 6 |
 
+**Resource tree.** Modules, collections and endpoints all live in **one `nodes` table**, discriminated by `type`. Hierarchy is `parent_id`; the owning project is denormalised onto every row as `root_id` (one indexed read answers "which project", which is both the store's filter and the MCP permission gate's key). Endpoint request configuration — method, url, auth, body, headers, params, tags — is a separate `endpoint_details` row keyed by node id, because those fields are meaningless for a module and the tree never renders them. The logical shape is still Project → Module → **Collection (recursively nestable, unbounded depth)** → Endpoint, and UI renders it with a recursive component.
+
+The parent/child relationship is a **enforced contract**, not a convention: `ResourceNodeType::may_under` defines that a module may only be top-level, an endpoint may only sit under a collection, and a collection may sit under either a module or another collection. A SQLite trigger and an application-layer check both enforce it. `db::nodes::move_many` refuses any other combination, and the frontend's optimistic `moveNodes` guard mirrors it.
+
 **CLI modes** (`src-tauri/src/main.rs`, clap): default → Tauri GUI; `mcp` → embedded MCP daemon; `mcp-proxy` → stdio bridge; `serve-web` → headless REST + static SPA.
 
 **CRUD flow** — component → Zustand slice (optimistic update) → `invokeCmd()` (`src/lib/tauri-commands.ts`) → Tauri IPC **or** `fetch('/api/…')` → `src-tauri/src/commands.rs` / `web_api.rs` → `simple_post_core::db` → `store.db` (WAL).
@@ -31,10 +35,10 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 
 - `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/`, `response-viewer/`, `welcome/`
 - `src/stores/` — Zustand: `app-store.ts` barrel composing `bootstrap-slice`, `crud-slice`, `ui-slice`, `mcp-slice`, `dirty-tabs-slice` + `store-types.ts`
-- `src/lib/` — `tauri-commands.ts` (dual-transport IPC + `COMMANDS` registry), `http.ts`, `http-build.ts`, `mcp-types.ts`, `use-mcp-status.ts`
+- `src/lib/` — `tauri-commands.ts` (dual-transport IPC + `COMMANDS` registry), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`
 - `src/components/ui/` — shared primitives (`method-picker`, `tabs`, `dialog`, …)
 - `src/types/domain.ts` — TS mirrors of Rust domain types
-- `crates/simple-post-core/src/db/` — per-entity SQL modules + `schema.sql` + `fixtures.json`
+- `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` holds the whole resource tree, `endpoint_details.rs` its endpoint-only configuration) + `schema.sql` + `fixtures.json`
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
 - `src-tauri/src/` — `commands.rs`, `web_api.rs`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
 - `scripts/` — dev/test/build utilities (see below); `docs/` — HTTP reference, OpenAPI, refactor plan
@@ -84,7 +88,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **DB access.** Reads → `db::with_conn`; writes → `db::with_tx` (`BEGIN IMMEDIATE`, 3 retries / 50 ms backoff on `SQLITE_BUSY`). WAL + `foreign_keys=ON` + `busy_timeout=3000`. Complex fields (`KeyValue[]`, `RequestBody`, `AuthConfig`, `tags`) live in `*_json` text columns. New entity SQL goes in `crates/simple-post-core/src/db/<entity>.rs`.
 
-**Partial updates.** Patch types (`EndpointPatch`, …) use `#[serde(default, deserialize_with = "double_option")] Option<Option<T>>`: missing key = leave unchanged, JSON `null` = clear, value = set (`crates/simple-post-core/src/domain.rs`). Follow this pattern for any new updatable field.
+**Partial updates.** Patch types (`ResourceNodePatch`, `EndpointDetailPatch`, `ProjectPatch`, `EnvironmentPatch`, …) use `#[serde(default, deserialize_with = "double_option")] Option<Option<T>>`: missing key = leave unchanged, JSON `null` = clear, value = set (`crates/simple-post-core/src/domain.rs`). Follow this pattern for any new updatable field. Note `ResourceNodePatch::parent_id` is the one place the pattern earns its keep: `Some(None)` promotes a node to the top of its project, which is a real write target rather than "leave alone".
 
 **Serialization.** All domain types: `#[serde(rename_all = "camelCase")]`; TS counterparts in `src/types/domain.ts`. Keep both in sync when adding fields.
 
@@ -118,6 +122,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 - `src-tauri/src/main.rs` / `src-tauri/src/lib.rs` — CLI dispatch / Tauri `run()`
 - `src-tauri/src/web_api.rs` — REST surface for `serve-web`; OpenAPI source
 - `crates/simple-post-core/src/db/mod.rs` + `schema.sql` — pool, transactions, migrations, seed
+- `crates/simple-post-core/src/db/nodes.rs` — the resource tree: CRUD, `list_children`, `move_many` (reparents + re-derives `root_id` across the subtree), `move_to_root` (cross-project), `duplicate`, `search`
 - `crates/simple-post-core/src/domain.rs`, `error.rs` — canonical types + wire errors
 - `crates/simple-post-mcp/src/mcp/mod.rs` — 44-tool registry, `REQUIRED_CAPABILITY`, `dispatch`
 - `Cargo.toml` — workspace root (members, shared deps, release profile)

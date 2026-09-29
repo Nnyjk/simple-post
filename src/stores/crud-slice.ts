@@ -36,6 +36,7 @@ import type {
   BaseUrlDefinition,
 } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { indexByParent } from '@/lib/tree-index';
 import { uid } from '@/lib/utils';
 import type { OpenTab } from './store-types';
 import type { AppState } from './app-store';
@@ -145,26 +146,6 @@ export type CrudSlice = CrudSliceState & CrudSliceActions;
 /** Re-number sortOrder for a slice after a reorder. */
 function renumber<T extends { sortOrder: number }>(items: readonly T[]): T[] {
   return items.map((it, idx) => ({ ...it, sortOrder: idx }));
-}
-
-/**
- * Build a fast lookup: `parentId -> children`, sorted by `sortOrder`.
- *
- * One index for the whole tree now that there is one node type. The
- * renderer buckets on it to flatten the tree; the store uses it to find
- * a move's destination siblings.
- */
-function indexByParent(nodes: readonly ResourceNode[]): Map<string | null, ResourceNode[]> {
-  const byParent = new Map<string | null, ResourceNode[]>();
-  for (const n of nodes) {
-    const bucket = byParent.get(n.parentId);
-    if (bucket) bucket.push(n);
-    else byParent.set(n.parentId, [n]);
-  }
-  for (const bucket of byParent.values()) {
-    bucket.sort((a, b) => a.sortOrder - b.sortOrder);
-  }
-  return byParent;
 }
 
 /**

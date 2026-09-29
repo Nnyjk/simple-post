@@ -38,9 +38,12 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 ## 已实现
 
 ### 数据层（SQLite + Zustand 状态缓存）
-- 4 级层级：Project → Module → Collection → Endpoint，外加 Environment / Response
+- 层级：Project → Module → Collection（**可递归嵌套，深度不设上限**）→ Endpoint，外加 Environment / Response
+- 整棵树存在**一张 `nodes` 表**里，用 `type` 字段区分模块 / 集合 / 接口；层级由 `parent_id` 表达，所属项目由 `root_id` 反规范化在每一行上（省掉一次向上追溯）
+- 接口的请求配置（method / url / auth / body / headers / params / tags）单独放 `endpoint_details` 侧表，按 node id 关联——这些字段对模块和集合没有意义
+- 类型矩阵是**被强制的契约**（SQLite trigger + 应用层双防线）：模块只能在顶层，接口只能挂在集合下，集合可以挂在模块或另一个集合下
 - 持久化：Zustand slice → `invokeCmd()` → Tauri IPC 或 `/api/*` → `simple-post-core` → SQLite（WAL 模式）
-- 完整 CRUD：项目 / 模块 / 集合 / 接口的增删改查 + 复制接口 + 级联清理
+- 完整 CRUD：项目 / 模块 / 集合 / 接口的增删改查 + 复制接口 + 级联清理（级联由 schema 保证，客户端只提交要删的节点 id）
 - 排序：模块 / 集合 / 接口的上下移
 - 响应：每个 endpoint 最多 10 条历史（FIFO）+ 用户保存的示例
 - 偏好持久化：主题（dark/light/system）+ 请求设置（超时 / 跟随重定向 / 响应上限）写 localStorage
@@ -52,12 +55,14 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 设置入口
 
 ### 侧边树（可展开 + 过滤）
-- 4 级：项目 → 模块 → 集合 → 接口
+- 项目 → 模块 → 集合 → 接口，**集合层用递归组件渲染，嵌套多深都能展开**
 - 每个集合 / 接口显示 method 彩色徽标
 - 顶栏 `+` 真实弹新建弹窗
 - 双击树项 inline 改名
 - 右键菜单：新建子项 / 重命名 / 上下移 / 删除 / 复制接口
 - 删除弹确认框
+
+**暴露嵌套能力的入口**：集合行右键的「新建子集合」；拖拽到某个集合正中间时进入 `into` 落点（落点子树），拖到上下边缘时是 `above` / `below` 的同级重排。面包屑（`项目 › 模块 › 集合 › …`）会逐级显示实际深度。
 
 ### 请求测试器
 - Method 选择 + URL 输入（变量高亮显示）+ Send + **Copy as cURL** + Save
@@ -205,7 +210,7 @@ docker compose ps                       # STATUS=healthy
 - `SIMPLE_POST_WEB_PASSWORD` **必须**设，否则 `/api/*` 和 `/mcp` 全开放（`auth_middleware` 在 password 为空时是 no-op）。
 - 健康检查路径 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便容器探针。静态资源 `/assets/*` 与 SPA 外壳同样免认证——浏览器无法给 `<script type="module">` 挂 `Authorization` 头，若对它们鉴权，带密码的部署会直接白屏。
 - **出站 URL 策略**：`serve-web` 会代替浏览器发请求，所以有两条出口，权限不同。
-  - `POST /api/endpoints/:id/send`（**UI 的 Send 按钮走这条**）：只接受 endpoint id + 相对路径，base URL、路径、`{{var}}`、鉴权全部由服务端按数据库里的配置拼装。**浏览器无法指定目标地址**，因此这条路由没有 SSRF 面；传入绝对 URL 会被 400 拒绝。
+  - `POST /api/nodes/:id/send`（**UI 的 Send 按钮走这条**）：只接受 endpoint id + 相对路径，base URL、路径、`{{var}}`、鉴权全部由服务端按数据库里的配置拼装。**浏览器无法指定目标地址**，因此这条路由没有 SSRF 面；传入绝对 URL 会被 400 拒绝。
   - `POST /api/http/send`：**原始 URL 逃生舱**，调用方可以指定任意地址。仅 `http` / `https` 允许（`file:` / `gopher:` 等一律拒绝）。默认**不**拦截私网地址——桌面端用户常常就是要打 `localhost:3000`，默认拦会直接砸掉产品的主要用途。
   - 公网 / 共享部署请设 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段。
 - 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，`build_router` 会把整个 router nest 在 `/sp` 下；nginx 侧记得把 `/sp/assets/*` 转到 `/assets/*`（SPA shell 的 `<base href>` 仍是 `/`，**不**重写）。

@@ -21,7 +21,7 @@ URL 模板必须用冒号语法：
 
 ```
 /api/projects/:id
-/api/endpoints/:id/duplicate
+/api/nodes/:id/duplicate
 ```
 
 写成 `{id}` 时 axum 会把它注册成**字面 segment**，路由匹配不上，请求静默落到

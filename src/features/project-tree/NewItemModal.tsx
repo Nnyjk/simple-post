@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { useAppStore, type NewType } from '@/stores/app-store';
+import { indexByParent } from '@/lib/tree-index';
 import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 
@@ -437,21 +438,21 @@ function EndpointFields(props: {
  * All collections whose owning module is `moduleId`, nested levels
  * included, depth-first in sibling `sort_order`. Returns `[]` for an
  * empty/unknown module so callers can use `.length` directly.
+ *
+ * Walks the shared `parentId → children` index rather than building a
+ * second one: the buckets arrive already sorted, so the per-level
+ * `sort()` this used to do is gone, and filtering to `collection` in
+ * the walk is cheaper than pre-filtering every node on the way in.
+ * Descending from `moduleId` means other projects' and other modules'
+ * trees are never reachable, which is why no `rootId` filter is needed.
  */
 function collectionsUnderModule(nodes: ResourceNode[], moduleId: string): ResourceNode[] {
   if (!moduleId) return [];
-  const byParent = new Map<string, ResourceNode[]>();
-  for (const n of nodes) {
-    if (n.type !== 'collection' || !n.parentId) continue;
-    const bucket = byParent.get(n.parentId);
-    if (bucket) bucket.push(n);
-    else byParent.set(n.parentId, [n]);
-  }
+  const byParent = indexByParent(nodes);
   const out: ResourceNode[] = [];
   const walk = (parentId: string) => {
-    const kids = byParent.get(parentId);
-    if (!kids) return;
-    for (const k of [...kids].sort((a, b) => a.sortOrder - b.sortOrder)) {
+    for (const k of byParent.get(parentId) ?? []) {
+      if (k.type !== 'collection') continue;
       out.push(k);
       walk(k.id);
     }

@@ -12,12 +12,14 @@
 
 | # | 条目 | 类型 | 优先级 | 状态 |
 |---|---|---|---|---|
-| [D1](#d1-统一树结构的描述) | 统一树结构的描述 | 文档 + 代码 | P0 | 进行中（代码层 C1 已随 nodes 重构消解） |
+| [D1](#d1-统一树结构的描述) | 统一树结构的描述 | 文档 + 代码 | P0 | ✅ 已完成（C1/C2/C3 + 文档层全部落地） |
 | [D2](#d2-agentsmd-引用了已删除的文件路径) | AGENTS.md 引用已删除路径 | 文档 | P0 | 待办 |
 | [D3](#d3-readme-自相矛盾已删除的-npm-包) | README 自相矛盾 | 文档 | P0 | 待办 |
 | [D4](#d4-refactor-planmd-状态过期) | REFACTOR-PLAN 状态过期 | 文档 | P1 | 待办 |
 | [D5](#d5-scriptse2e-完全未记载) | `scripts/e2e/` 未记载 | 文档 + 工程 | P2 | 待办 |
 | [D6](#d6-readme-mcp-工具清单漏列-endpoint_list) | 工具清单漏列 | 文档 | P2 | 待办 |
+| [D7](#d7-readme-宣称了根本不存在的-mcp-resources) | README 宣称不存在的 MCP Resources | 文档 | P1 | 待办 |
+| [D8](#d8-agentsmd-自相矛盾且计数失准的-rust-测试布局) | AGENTS.md Rust 测试布局自相矛盾 | 文档 | P2 | 待办 |
 | [R1](#r1-commandsrs1196-行--50-个-handler) | `commands.rs` 过大 | 重构 | P1 | 待办 |
 | [R2](#r2-crud-slicets-1094-行) | `crud-slice.ts` 过大 | 重构 | P2 | 待办 |
 | [R3](#r3-environmentsectiontsx-812-行) | `EnvironmentSection` 过大 | 重构 | P2 | 待办 |
@@ -74,19 +76,24 @@ parent_collection_id TEXT REFERENCES collections(id) ON DELETE CASCADE
 > 该文件在 nodes 重构中保持了三段式结构（modules / collections / endpoints），
 > 翻译到新表只发生在 `db::init::seed_fixtures` 一处，因此 C3 仍是待办。
 
-### 文档层子任务
+### 文档层子任务 ✅ 已完成
 
 > 2026-09-29：nodes 重构后这批子任务的**措辞需要重写**——不只是「四层改递归」，
 > 文档里引用的表名、字段名、REST 路径、命令名全部已经不存在了。
 
-- [ ] README「数据层」一节改为 `nodes` + `endpoint_details` 两张表的描述，
+- [x] README「数据层」一节改为 `nodes` + `endpoint_details` 两张表的描述，
       并说明「Project → Module → Collection（可递归嵌套）→ Endpoint」
-- [ ] README「侧边树」一节同步
-- [ ] AGENTS.md 中描述层级、以及列出 `db/{modules,collections,endpoints}.rs`
-      与旧 REST 路径的段落同步
-- [ ] 在 schema 注释或 README 里点明：**集合层深度不设上限，UI 用递归组件渲染**，
+- [x] README「侧边树」一节同步，并单列一段写明**暴露嵌套能力的入口**
+      （右键「新建子集合」、拖拽的 into 落点、面包屑逐级展开）
+- [x] AGENTS.md 中描述层级的段落同步：Architecture 一节新增「Resource tree」
+      小节（单表模型 + `type` 矩阵是被强制的契约），`Key Directories`
+      点名 `db/nodes.rs`，`Partial updates` 的示例类型从已删除的
+      `EndpointPatch` 换成 `ResourceNodePatch` / `EndpointDetailPatch`
+- [x] 在 schema 注释或 README 里点明：**集合层深度不设上限，UI 用递归组件渲染**，
       以及 `type` 字段的类型矩阵（module 只能顶层 / endpoint 只能挂 collection）
-- [ ] 明确哪些 UI 入口会暴露嵌套能力（右键菜单的「新建子集合」、拖拽的 into 落点）
+- [x] 明确哪些 UI 入口会暴露嵌套能力（右键菜单的「新建子集合」、拖拽的 into 落点）
+- [x] 顺带清掉 `POST /api/endpoints/:id/send`（README）与
+      `/api/endpoints/:id/duplicate`（http-api-reference）两处失效路径
 
 ### 代码层子任务
 
@@ -107,33 +114,52 @@ endpoint 只能挂 collection，SQLite trigger 与应用层双防线。
 （`newItem`）里——那是两个下拉框的 UI 选值，不是领域字段；
 `submitNewItem` 的实际写入目标是单个 `parentId`。
 
-#### C2 — 合并两处集合分桶实现 ⬜ 仍待办
+#### C2 — 合并两处集合分桶实现 ✅ 已完成
 
 `tree-utils.ts` 的 `buildTree` 与 `crud-slice.ts` 的 `indexByParent`
-仍是**同一套分桶 + 排序逻辑的两次独立实现**，唯一差别是前者按 `rootId`
-过滤出单个项目、后者处理全量节点。
+曾是**同一套分桶 + 排序逻辑的两次独立实现**，唯一差别是前者按 `rootId`
+过滤出单个项目、后者处理全量节点。改排序键、加环检测、或调整空桶处理时，
+极易只改一处——而这两处喂给完全不同的消费者（视图渲染 vs 移动操作），
+行为不一致不会立刻暴露。
 
-重构后风险略有下降：分桶键从「`moduleId` + `parentCollectionId`」两段
-收敛成单一的 `parentId`，但重复实现本身还在。改排序键、加环检测、
-或调整空桶处理时，极容易只改一处——而这两处喂给完全不同的消费者
-（视图渲染 vs 移动操作），行为不一致不会立刻暴露。
+**已抽出 `src/lib/tree-index.ts::indexByParent(nodes, rootId?)`**，
+项目过滤作为可选参数（省略 = 全工作区）。两处调用点都改为调用它，
+`crud-slice` 的私有副本已删除。`collectSubtree` 留在 store——它只有 store
+这一个消费者（渲染器是自顶向下递归，不是 BFS），搬进共享模块只会撑大公共面。
 
-**目标**：抽出公共函数，项目过滤作为可选参数。
+> 实际动手时发现的是**三份**而不是两份：第三份在 `NewItemModal.tsx`
+> 的 `collectionsUnderModule`（本次重构新写的）。合流方式是把类型过滤
+> 放进遍历里，而不是给共享签名加一个 `type` 谓词：
+> `for (const k of byParent.get(parentId) ?? []) { if (k.type !== 'collection') continue; … }`。
+> 桶已经由共享函数排好序，所以原来的每层 `[...kids].sort()` 一并消失。
+> 从 `moduleId` 向下遍历天然走不到别的项目/模块，因此不需要 `rootId` 过滤。
 
-**护栏**：Zustand selector 纪律——抽出后的函数必须是**普通函数**，
-在组件内用 `useMemo` 调用，不得包装成返回新数组的 selector。
+新增 `src/lib/__tests__/tree-index.test.ts`（14 个用例）锁定：按 `parentId`
+分桶、`null` 独立成顶层桶、每桶按 `sortOrder` 升序且与输入顺序无关、
+`rootId` 过滤的开/关、孤儿节点（`parentId` 指向不存在的父）仍进桶、
+以及**入参数组与节点对象都不被改写**。
 
-#### C3 — fixtures 补一个嵌套集合样例 ⬜ 仍待办
+#### C3 — fixtures 补一个嵌套集合样例 ✅ 已完成
 
-让递归路径在演示数据和测试里都真实存在。
+`fixtures.json` 新增一个子集合 `c_order_refund`（挂在 `c_order_crud` 之下，
+`moduleId` 仍写 `m_order` 以便派生 `root_id`）与一个属于它的接口
+`e_refund_create`，递归路径的两段边（collection→collection、
+collection→endpoint）在测试数据里第一次真实存在。
 
-**前置警告**：fixtures 同时是 **Rust 测试基线**。既有断言包括
-`projects_test.rs` 的 3 项目 / `environments_test.rs` 的 3 环境 / `mod_test.rs`
-的空库播种流程。新增顶层项目或环境会直接打破这些断言。
+**插入顺序是硬约束**：`nodes.parent_id` 有外键，而 `seed_fixtures` 按
+modules → collections → endpoints 的文件顺序插入，所以子集合**必须排在
+父集合之后**，否则插入直接失败。
 
-**建议做法**：在既有 `p_demo` 下新增一个子集合（不动顶层数量），
-再补一条 Rust 测试断言递归查询路径。`seed_fixtures` 现在要把三段式 JSON
-翻译成 `nodes` + `endpoint_details`，嵌套样例会同时验证那条翻译逻辑。
+`nodes_test.rs` 新增 5 个回归（复用 `db::test_support::init_seeded`）：
+两个深度可区分（父集合的孩子含子集合，模块的孩子不含）、
+子集合与其接口继承祖先的 `root_id`、扁平 `list_by_root` 仍返回该行但
+`parent_id IS NULL` 查询不返回、`subtree_ids` 跨两种边走通 8 节点闭包、
+删父集合级联带走子集合与其 `endpoint_details` 行（兄弟节点存活）。
+
+**既有计数断言无需改动**：全仓 grep 确认，fixture 派生的计数只有
+`projects_test.rs` 的 3 项目、`environments_test.rs` 的 3 环境、
+`base_url_defs_test.rs` 的 1 个 def，都不受新增集合/接口影响。
+fixtures 仍是 **test-only**（`db::init` 不播种），已复核确认。
 
 ### 验收
 
@@ -298,6 +324,89 @@ Read 列表补上 `endpoint_list`。
 
 `REQUIRED_CAPABILITY` 的条目数应与 README 声称的 44 一致，且枚举无遗漏。
 权威来源始终是 `crates/simple-post-mcp/src/mcp/mod.rs`，README 只是摘要。
+
+---
+
+## D7 README 宣称了根本不存在的 MCP Resources
+
+**类型：文档** ｜ **优先级：P1** ｜ **发现于 2026-09-29（D1 收尾时）**
+
+### 现状
+
+README 有一节列出 4 个 MCP Resource：
+
+> Resources（AI 侧"读取"通道，HTTP MCP 模式下暴露）：
+>
+> - `simple-post://projects`
+> - `simple-post://projects/{id}`
+> - `simple-post://endpoints/{id}`
+> - `simple-post://environments/{projectId}`
+
+**这些 resource 从未实现。** 全仓 grep `simple-post://` 只命中 README 自身；
+`crates/simple-post-mcp/` 里没有任何 `resources/list` / `resources/read` 处理、
+没有 `uri_template`、也没有任何 scheme 字面量。MCP 侧只有 44 个 **tools**。
+
+### 影响
+
+比 D6（漏列一个已注册工具）更严重：D6 的方向是「有但没写全」，
+这一条是「写了但根本没有」。读者会以为存在一条只读通道，
+并据此设计 AI 集成——而接上去会发现 `resources/list` 无人应答。
+
+### 目标
+
+二选一，并在 README 里说清：
+
+- **删掉这一节**（推荐）。tools 已经覆盖全部能力，Resources 是早期设计的残留叙述。
+- 或者实现它。届时还要同步本文档的「Tools vs Resources」边界。
+
+注意：真要实现的话，`simple-post://endpoints/{id}` 这个名字也该跟着
+nodes 重构一起改（见 D1），否则又是一次文档与实现分叉。
+
+### 验收
+
+`grep -rn "simple-post://" --include="*.md" .` 无结果（若选择删除）。
+
+---
+
+## D8 AGENTS.md 自相矛盾且计数失准的 Rust 测试布局
+
+**类型：文档** ｜ **优先级：P2** ｜ **发现于 2026-09-29（D1 收尾时）**
+
+### 现状
+
+同一份 AGENTS.md 对 Rust 测试布局给了两个互斥的说法：
+
+| 位置 | 说法 |
+|---|---|
+| 「Naming」约定段 | 「Rust tests **inline** as `#[cfg(test)] mod tests`」 |
+| 「Testing & QA」段 | 「There is **no** `__tests__` equivalent… 本仓对**全部 22 个**都用 sibling `#[path]` 形式」 |
+
+实测（`src-tauri` + `crates` 全量 `.rs`）：
+
+```
+inline  `mod tests {`  : 3
+sibling `mod tests;`   : 21
+```
+
+即少数派才是内联形式，而「Naming」段恰好把少数派写成了通例；
+「22」这个数字也已失准（现为 21）。
+
+### 影响
+
+新 agent 读「Naming」段会以为该写内联 `#[cfg(test)] mod tests { … }`，
+而本仓 21/24 走的是 `#[path]` 兄弟文件；两者在 `db/mod.rs` 里还有
+**实质差别**——那里 `pub mod test_counter` 排在 `mod tests` **之后**，
+按「内联=文件末尾」的直觉切分会把这个 test-only helper 编译进库。
+
+### 目标
+
+「Naming」段改为指向 `#[path]` 形式并删掉「inline」表述；
+「Testing & QA」段的计数改为不写死数字（或写成「绝大多数」），
+避免每次删测试文件都要回来改文档。
+
+### 验收
+
+AGENTS.md 中不再出现 "tests inline"，且两段说法一致。
 
 ---
 
