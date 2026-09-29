@@ -12,7 +12,7 @@
 
 | # | 条目 | 类型 | 优先级 | 状态 |
 |---|---|---|---|---|
-| [D1](#d1-统一树结构的描述) | 统一树结构的描述 | 文档 + 代码 | P0 | 待办 |
+| [D1](#d1-统一树结构的描述) | 统一树结构的描述 | 文档 + 代码 | P0 | 进行中（代码层 C1 已随 nodes 重构消解） |
 | [D2](#d2-agentsmd-引用了已删除的文件路径) | AGENTS.md 引用已删除路径 | 文档 | P0 | 待办 |
 | [D3](#d3-readme-自相矛盾已删除的-npm-包) | README 自相矛盾 | 文档 | P0 | 待办 |
 | [D4](#d4-refactor-planmd-状态过期) | REFACTOR-PLAN 状态过期 | 文档 | P1 | 待办 |
@@ -32,31 +32,35 @@
 
 ### 现状
 
+> **2026-09-29 更新：本条的「现状」描述已被一次 schema 重构超越。**
+> `modules` / `collections` / `endpoints` 三张表已合并为单张 `nodes` +
+> `endpoint_details` 侧表，`parent_collection_id` 这个字段本身不存在了——
+> 层级统一由 `nodes.parent_id` 表达，归属项目由 `nodes.root_id` 反规范化。
+> 下面这张「四层 vs 递归」的实现位置表已全部失效，仅作为**成因**留档。
+> 文档层子任务依然成立且更紧迫：现在文档描述的模型在代码里连字段名都对不上了。
+
 所有文档都把数据模型描述成固定的四层：
 
 > README「4 级层级：Project → Module → Collection → Endpoint」
 > README 侧边树一节同样写「4 级：项目 → 模块 → 集合 → 接口」
 > AGENTS.md 的架构描述沿用了同一说法
 
-**但代码实现的是递归树。** `schema.sql` 的 `collections` 表有自引用外键：
+**但代码实现的是递归树。** 重构前的 `schema.sql` 的 `collections` 表有自引用外键：
 
 ```sql
 parent_collection_id TEXT REFERENCES collections(id) ON DELETE CASCADE
 ```
 
-全链路都已实现并生效：
+全链路当时都已实现并生效（文件名已随重构删除）：
 
 | 层 | 实现位置 | 做法 |
 |---|---|---|
-| 持久层 | `crates/simple-post-core/src/db/collections.rs` | `list_children` 按 `parent_collection_id IS NULL` 区分顶层 / 子级 |
+| 持久层 | `db/collections.rs` | `list_children` 按 `parent_collection_id IS NULL` 区分顶层 / 子级 |
 | 领域层 | `domain.rs` 的 `Collection` / `CollectionPatch` | `parent_collection_id` 与对应的 double_option |
 | MCP 层 | `project_ops/collection.rs` | `parent_collection_id`、`new_parent_collection_id` |
 | 状态层 | `crud-slice.ts` 的 `indexCollectionChildren` | 按父分桶 + BFS 收集子树 |
 | 视图层 | `tree-utils.ts` 的 `buildTree` | `Map<string \| null, Collection[]>` + 递归 `buildCollectionBranch` |
 | 组件层 | `rows/CollectionBranch.tsx` | 自递归渲染 |
-
-`useTreeDnd.ts` 里处理「落到非顶层集合时回落到其父级」的那段逻辑，也只有在这条
-自引用路径真实存在时才写得通。
 
 ### 成因
 
@@ -67,50 +71,59 @@ parent_collection_id TEXT REFERENCES collections(id) ON DELETE CASCADE
 > 2026-09-29 更新：`fixtures.json` 已降级为 **test-only**（`db::init` 不再播种，
 > 全新安装为空库）。所以「四层」的误读如今只来自文档本身——新用户看到的空工作区
 > 不再提供任何样例来支撑或反驳这个说法。改文档时不必再考虑演示数据的观感。
+> 该文件在 nodes 重构中保持了三段式结构（modules / collections / endpoints），
+> 翻译到新表只发生在 `db::init::seed_fixtures` 一处，因此 C3 仍是待办。
 
 ### 文档层子任务
 
-- [ ] README「数据层」一节改为「Project → Module → Collection（可递归嵌套）→ Endpoint」
+> 2026-09-29：nodes 重构后这批子任务的**措辞需要重写**——不只是「四层改递归」，
+> 文档里引用的表名、字段名、REST 路径、命令名全部已经不存在了。
+
+- [ ] README「数据层」一节改为 `nodes` + `endpoint_details` 两张表的描述，
+      并说明「Project → Module → Collection（可递归嵌套）→ Endpoint」
 - [ ] README「侧边树」一节同步
-- [ ] AGENTS.md 中描述层级的段落同步
-- [ ] 在 schema 注释或 README 里点明：**集合层深度不设上限，UI 用递归组件渲染**
+- [ ] AGENTS.md 中描述层级、以及列出 `db/{modules,collections,endpoints}.rs`
+      与旧 REST 路径的段落同步
+- [ ] 在 schema 注释或 README 里点明：**集合层深度不设上限，UI 用递归组件渲染**，
+      以及 `type` 字段的类型矩阵（module 只能顶层 / endpoint 只能挂 collection）
 - [ ] 明确哪些 UI 入口会暴露嵌套能力（右键菜单的「新建子集合」、拖拽的 into 落点）
 
 ### 代码层子任务
 
-#### C1 — 统一「顶层集合」的判定
+#### C1 — 统一「顶层集合」的判定 ✅ 已消解
 
-同一条语义（`parentCollectionId` 为空即顶层）在 8 处以不同写法重复表达：
+~~同一条语义（`parentCollectionId` 为空即顶层）在 8 处以不同写法重复表达~~
 
-```
-src/features/project-tree/hooks/useEditMenu.tsx     （3 处：顶层筛选、子级筛选、移动目标筛选）
-src/features/project-tree/hooks/useInlineMenus.tsx （1 处：新建时选父级）
-src/features/project-tree/hooks/useTreeDnd.ts       （1 处：拖拽落点的顶层判定）
-src/stores/crud-slice.ts                            （1 处：移动时的同父判定）
-crates/simple-post-core/src/db/collections.rs       （1 处：SQL 侧 parent_collection_id IS NULL）
-```
+**已随 nodes 重构结构性消解**：`parent_collection_id` 字段本身不存在了。
+层级只有 `nodes.parent_id` 一个来源，「顶层」= `parentId === null`，
+不存在第二种写法与之竞争。`module_id` 也退化为「向上走到第一个 module 节点」的
+派生值，不再是集合行上的独立列。
 
-**风险**：`=== null` / `!== null` / `!c.parentCollectionId` 三种写法在 filter 里语义不等价
-—— 最后一种会把空字符串误判为顶层。
+类型矩阵另有一处强制：`ResourceNodeType::may_under` 定义了 module 只能顶层、
+endpoint 只能挂 collection，SQLite trigger 与应用层双防线。
+也就是说「集合能挂在任意深度」现在是**被校验的契约**，而不是靠各处自觉。
 
-**目标**：在前端提出一个谓词（如 `isTopLevelCollection(c)`）并全部改用它。
-db 层保持 SQL 表达，不强行统一。
+剩余的 `parentModuleId` / `parentCollectionId` 只存在于**新建弹窗的草稿状态**
+（`newItem`）里——那是两个下拉框的 UI 选值，不是领域字段；
+`submitNewItem` 的实际写入目标是单个 `parentId`。
 
-#### C2 — 合并两处集合分桶实现
+#### C2 — 合并两处集合分桶实现 ⬜ 仍待办
 
-`tree-utils.ts` 的 `buildTree` 与 `crud-slice.ts` 的 `indexCollectionChildren`
-是**同一套分桶 + 排序逻辑的两次独立实现**，唯一差别是前者先按 `projectId`
-过滤模块归属、后者不过滤（它处理全量集合）。
+`tree-utils.ts` 的 `buildTree` 与 `crud-slice.ts` 的 `indexByParent`
+仍是**同一套分桶 + 排序逻辑的两次独立实现**，唯一差别是前者按 `rootId`
+过滤出单个项目、后者处理全量节点。
 
-**风险**：改排序键、加环检测、或调整空桶处理时，极容易只改一处——
-而这两处喂给完全不同的消费者（视图渲染 vs 移动操作），行为不一致不会立刻暴露。
+重构后风险略有下降：分桶键从「`moduleId` + `parentCollectionId`」两段
+收敛成单一的 `parentId`，但重复实现本身还在。改排序键、加环检测、
+或调整空桶处理时，极容易只改一处——而这两处喂给完全不同的消费者
+（视图渲染 vs 移动操作），行为不一致不会立刻暴露。
 
 **目标**：抽出公共函数，项目过滤作为可选参数。
 
 **护栏**：Zustand selector 纪律——抽出后的函数必须是**普通函数**，
 在组件内用 `useMemo` 调用，不得包装成返回新数组的 selector。
 
-#### C3 — fixtures 补一个嵌套集合样例
+#### C3 — fixtures 补一个嵌套集合样例 ⬜ 仍待办
 
 让递归路径在演示数据和测试里都真实存在。
 
@@ -119,7 +132,8 @@ db 层保持 SQL 表达，不强行统一。
 的空库播种流程。新增顶层项目或环境会直接打破这些断言。
 
 **建议做法**：在既有 `p_demo` 下新增一个子集合（不动顶层数量），
-再补一条 Rust 测试断言递归查询路径，并同步更新 README 的「Mock 数据」计数。
+再补一条 Rust 测试断言递归查询路径。`seed_fixtures` 现在要把三段式 JSON
+翻译成 `nodes` + `endpoint_details`，嵌套样例会同时验证那条翻译逻辑。
 
 ### 验收
 
@@ -132,7 +146,11 @@ cargo test --workspace
 
 树 UI 的以下行为**没有自动化覆盖**，需手测一次（HTML5 DnD 无法用脚本验证）：
 嵌套集合的展开/折叠、搜索过滤时父级保留、拖拽的 above / into / below 三态、
-跨模块移动子树时 `moduleId` 的级联更新。
+跨模块移动子树时 `root_id` 的级联重派生。
+
+> 2026-09-29 追加：`root_id` 的级联已有 Rust 侧回归覆盖
+> （`project_ops/mod_test.rs::module_move_preserves_collections_and_endpoints`
+> 断言整个子树的 `root_id` 被重新派生），但**浏览器里的拖放分发**仍无法自动验证。
 
 ---
 

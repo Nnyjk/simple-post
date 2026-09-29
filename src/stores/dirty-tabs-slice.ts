@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Dirty tabs slice — owns the queue that mediates "what should we do
  * about unsaved edits?" when a close path would otherwise drop a draft.
  *
@@ -15,17 +15,17 @@
  *   - `requestCloseAllTabs()`       → close every open tab.
  *   - `saveDirtyTab(id)`            → commit any pending edits on the
  *                                     tab (endpoint: apply draft via
- *                                     `updateEndpoint` + clear draft).
+ *                                     `updateEndpointDetail` + clear draft).
  *   - `resolveDirtyClose(action)`   → drive the queue one step forward
  *                                     based on the dialog button.
  *
  * Like every other slice, this one only couples to the rest of the
  * store via the shared `AppState` type — it never imports another
  * slice module directly. Cross-slice actions (e.g. `closeTab`,
- * `updateEndpoint`, `clearEndpointDraft`) are called via `get().…`.
+ * `updateEndpointDetail`, `clearEndpointDraft`) are called via `get().…`.
  */
 import type { StateCreator } from 'zustand';
-import type { Endpoint } from '@/types/domain';
+import type { EndpointDetail } from '@/types/domain';
 import type { AppState } from './app-store';
 
 /** State portion owned by the dirty tabs slice. */
@@ -72,7 +72,7 @@ export interface DirtyTabsSliceActions {
   /**
    * Commit any pending edits on the given tab without closing it. For
    * endpoint tabs this means applying the URL/method draft through
-   * `updateEndpoint` and clearing the draft. For other tabs the inline
+   * `updateEndpointDetail` and clearing the draft. For other tabs the inline
    * edit (if any) auto-commits on its own when the tab unmounts, so
    * this is a no-op for them.
    */
@@ -168,10 +168,14 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
       // Mirrors the body of HttpTester's `handleSave` so dialog "保存"
       // and button save produce the same persisted state.
       const draft = state.endpointDrafts[tabId]!;
-      const patch: Partial<Endpoint> = {};
+      // Url and method live in `endpoint_details`, so the draft is
+      // applied there — not to the node. A single `updateEndpoint` that
+      // split across two tables is exactly what the split is meant to
+      // avoid: renaming an endpoint must not rewrite request config.
+      const patch: Partial<EndpointDetail> = {};
       if (draft.url !== undefined) patch.url = draft.url;
       if (draft.method !== undefined) patch.method = draft.method;
-      if (Object.keys(patch).length > 0) state.updateEndpoint(tabId, patch);
+      if (Object.keys(patch).length > 0) state.updateEndpointDetail(tabId, patch);
       state.clearEndpointDraft(tabId);
       return;
     }

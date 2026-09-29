@@ -113,6 +113,16 @@ export const useActiveTab = () =>
 export const useActiveEnvironment = () =>
   useAppStore((s) => s.environments.find((e) => e.id === s.activeEnvironmentId));
 
+/**
+ * The node behind the active endpoint, or `null`.
+ *
+ * One selector, not a joined `{ node, detail }` object. Zustand v5
+ * compares selector results with `Object.is`, so building a fresh object
+ * here would return a new reference on every store write and re-render
+ * every consumer forever. Both halves are stable references instead, and
+ * callers that want the pair join them in a `useMemo` — see
+ * `useActiveEndpointResource`.
+ */
 export const useActiveEndpoint = () =>
   useAppStore((s) => {
     // If the active tab is an endpoint, prefer that id — it stays in sync
@@ -120,7 +130,17 @@ export const useActiveEndpoint = () =>
     // the user's actual selection even when there are stale references.
     const activeTab = s.openTabs.find((t) => t.id === s.activeTabId);
     const id = activeTab?.kind === 'endpoint' ? activeTab.id : s.activeEndpointId;
-    return s.endpoints.find((e) => e.id === id) ?? null;
+    if (!id) return null;
+    const node = s.nodes.find((n) => n.id === id);
+    return node && node.type === 'endpoint' ? node : null;
+  });
+
+/** The active endpoint's request configuration, or `undefined`. */
+export const useActiveEndpointDetail = () =>
+  useAppStore((s) => {
+    const activeTab = s.openTabs.find((t) => t.id === s.activeTabId);
+    const id = activeTab?.kind === 'endpoint' ? activeTab.id : s.activeEndpointId;
+    return id ? s.endpointDetails[id] : undefined;
   });
 
 // ---------- re-exports for consumer-facing types ----------

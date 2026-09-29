@@ -28,8 +28,9 @@ pub(crate) use mcp::{
 // from a separate `endpoints` module: they are addressed under a node
 // now, and the module they live in follows the address.
 pub(crate) use nodes::{
-    http_send, node_duplicate, node_endpoint_detail_get, node_endpoint_detail_patch, node_send,
-    nodes_create, nodes_delete, nodes_get, nodes_list, nodes_move, nodes_update,
+    endpoint_details_list, http_send, node_duplicate, node_endpoint_detail_get,
+    node_endpoint_detail_patch, node_send, nodes_create, nodes_delete, nodes_get, nodes_list,
+    nodes_move, nodes_update,
 };
 pub(crate) use permissions::{permissions_get, permissions_set};
 pub(crate) use preferences::{db_recreated_at, preferences_get, preferences_put};

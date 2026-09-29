@@ -39,11 +39,62 @@ export interface AuthConfig {
   apikey?: { key: string; value: string; in_: 'header' | 'query' };
 }
 
-export interface Endpoint {
+/**
+ * The three kinds of row the resource tree holds. A module is the
+ * top-level branch under a project, a collection nests arbitrarily deep
+ * under a module or another collection, and an endpoint is a leaf under
+ * a collection.
+ *
+ * Named `ResourceNodeType` rather than `NodeType` because `tsconfig`
+ * includes `"DOM"`, where `Node` is a global interface that would
+ * shadow the domain meaning in every file that touches the tree.
+ */
+export type ResourceNodeType = 'module' | 'collection' | 'endpoint';
+
+/**
+ * One row of the resource tree: structure and identity, nothing else.
+ *
+ * This is the TS mirror of `simple_post_core::domain::ResourceNode`.
+ * `Module` / `Collection` / `Endpoint` — three separate interfaces over
+ * three separate tables — collapsed into this one discriminated shape;
+ * the endpoint-only fields moved to {@link EndpointDetail}.
+ */
+export interface ResourceNode {
   id: string;
-  collectionId: string;
+  /**
+   * Owning project, denormalised onto every node. A single indexed read
+   * answers "which project does this belong to", which is both the store's
+   * project filter and the backend's per-project permission gate.
+   */
+  rootId: string;
+  /**
+   * The direct parent node, or `null` for a module — whose parent is the
+   * project rather than another node. A collection's parent is a module
+   * (top level) or another collection (nested); an endpoint's is always
+   * a collection. `db::nodes::move_many` refuses any other combination.
+   */
+  parentId: string | null;
+  type: ResourceNodeType;
   name: string;
   description?: string;
+  /** Position among siblings. Scoped to the parent, not the project. */
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Renderer-only expand state. Not persisted. */
+  expanded?: boolean;
+}
+
+/**
+ * An endpoint's request configuration, keyed by node id.
+ *
+ * Split from {@link ResourceNode} because `method` / `url` / `tags`
+ * mean nothing for a module — folding them in would give every module
+ * and collection row permanently empty columns. The tree only ever
+ * renders name / type / sortOrder, so a tree read skips this entirely.
+ */
+export interface EndpointDetail {
+  nodeId: string;
   method: HttpMethod;
   /**
    * The path part of the request URL, **without** any baseUrl. The full
@@ -87,9 +138,15 @@ export interface Endpoint {
    */
   notes?: string;
   tags: string[];
-  sortOrder: number;
-  createdAt: number;
-  updatedAt: number;
+}
+
+/**
+ * An endpoint node joined with its {@link EndpointDetail} — the shape
+ * the HTTP tester and the response viewer work in, where the method and
+ * url are needed alongside the node's identity.
+ */
+export interface EndpointResource extends ResourceNode {
+  detail: EndpointDetail;
 }
 
 /**
@@ -103,43 +160,6 @@ export interface BaseUrlDefinition {
   id: string;
   name: string;
   description?: string;
-}
-
-export interface Collection {
-  id: string;
-  /**
-   * The **top-most** module this collection ultimately belongs to.
-   * Denormalized onto every collection (root and nested) so we can filter
-   * "all collections in module M" in a single pass without walking the
-   * parent chain. Moved automatically when a collection (or any of its
-   * ancestors) is dragged between modules — see `moveCollection` in the
-   * store.
-   */
-  moduleId: string;
-  /**
-   * The direct parent collection, or `null` for a top-level collection
-   * (one that lives directly under its `moduleId`). A non-null value
-   * makes this collection a **nested** collection — the tree renders
-   * it under its parent.
-   *
-   * Constraint: the parent must belong to the same `moduleId` (the
-   * store enforces this on move; rendering assumes it).
-   */
-  parentCollectionId: string | null;
-  name: string;
-  description?: string;
-  sortOrder: number;
-  // expanded: derived in tree, not persisted
-  expanded?: boolean;
-}
-
-export interface Module {
-  id: string;
-  projectId: string;
-  name: string;
-  description?: string;
-  sortOrder: number;
-  expanded?: boolean;
 }
 
 export interface Project {

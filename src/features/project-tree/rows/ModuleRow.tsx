@@ -1,10 +1,10 @@
-import {
+﻿import {
   useRef,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { ChevronRight, FolderClosed, FolderOpen, Plus } from 'lucide-react';
-import type { Module } from '@/types/domain';
+import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
@@ -12,7 +12,7 @@ import type { DropZone } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
 export interface ModuleRowProps {
-  module: Module;
+  module: ResourceNode;
   collectionCount: number;
   endpointCount: number;
   isEditing: boolean;

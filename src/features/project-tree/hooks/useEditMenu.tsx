@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
+import type { ResourceNode } from '@/types/domain';
 import type { DeleteTarget, EditTarget, TargetKind } from '../tree-types';
 import type { ContextMenuItem } from '../TreeContextMenu';
 
@@ -44,32 +45,54 @@ export function useEditMenu({
   // ---------- store actions ----------
   const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
   const updateProject = useAppStore((s) => s.updateProject);
-  const updateModule = useAppStore((s) => s.updateModule);
-  const updateCollection = useAppStore((s) => s.updateCollection);
-  const updateEndpoint = useAppStore((s) => s.updateEndpoint);
+  const updateNode = useAppStore((s) => s.updateNode);
   const deleteProject = useAppStore((s) => s.deleteProject);
-  const deleteModule = useAppStore((s) => s.deleteModule);
-  const deleteCollection = useAppStore((s) => s.deleteCollection);
-  const deleteEndpoint = useAppStore((s) => s.deleteEndpoint);
+  const deleteNode = useAppStore((s) => s.deleteNode);
   const duplicateEndpoint = useAppStore((s) => s.duplicateEndpoint);
-  const moveCollections = useAppStore((s) => s.moveCollections);
+  const moveNodes = useAppStore((s) => s.moveNodes);
 
   // ---------- raw state (all raw references — safe for selectors) ----------
   const projects = useAppStore((s) => s.projects);
-  const modules = useAppStore((s) => s.modules);
-  const collections = useAppStore((s) => s.collections);
-  const endpoints = useAppStore((s) => s.endpoints);
+  const nodes = useAppStore((s) => s.nodes);
 
   const [toDelete, setToDelete] = useState<DeleteTarget | null>(null);
+
+  /**
+   * A node and every descendant beneath it, BFS on `parentId`.
+   *
+   * Used only to phrase the delete confirmation ("将同时删除 N 个
+   * 集合、M 个接口"), so it is a count over the visible tree rather
+   * than a reason to trust the client's view of the cascade — the
+   * database cascades regardless.
+   */
+  const subtreeOf = (rootId: string): ResourceNode[] => {
+    const childIndex = new Map<string, ResourceNode[]>();
+    for (const n of nodes) {
+      if (!n.parentId) continue;
+      const bucket = childIndex.get(n.parentId);
+      if (bucket) bucket.push(n);
+      else childIndex.set(n.parentId, [n]);
+    }
+    const out: ResourceNode[] = [];
+    const seen = new Set<string>();
+    const queue = [rootId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const self = nodes.find((n) => n.id === id);
+      if (self) out.push(self);
+      for (const k of childIndex.get(id) ?? []) queue.push(k.id);
+    }
+    return out;
+  };
 
   // ---------- edit / context menu / delete ----------
   const startEdit = (kind: TargetKind, id: string) => setEditing({ kind, id });
   const cancelEdit = () => setEditing(null);
   const saveEdit = (kind: TargetKind, id: string, next: string) => {
     if (kind === 'project') updateProject(id, { name: next });
-    else if (kind === 'module') updateModule(id, { name: next });
-    else if (kind === 'collection') updateCollection(id, { name: next });
-    else if (kind === 'endpoint') updateEndpoint(id, { name: next });
+    else updateNode(id, { name: next });
     setEditing(null);
   };
 
@@ -81,9 +104,7 @@ export function useEditMenu({
 
   const getName = (kind: TargetKind, id: string): string => {
     if (kind === 'project') return projects.find((p) => p.id === id)?.name ?? '';
-    if (kind === 'module') return modules.find((m) => m.id === id)?.name ?? '';
-    if (kind === 'collection') return collections.find((c) => c.id === id)?.name ?? '';
-    return endpoints.find((ep) => ep.id === id)?.name ?? '';
+    return nodes.find((n) => n.id === id)?.name ?? '';
   };
 
   const openDeleteDialog = (kind: TargetKind, id: string, cascade?: string) => {
@@ -93,9 +114,7 @@ export function useEditMenu({
   const handleDeleteConfirm = () => {
     if (!toDelete) return;
     if (toDelete.kind === 'project') deleteProject(toDelete.id);
-    else if (toDelete.kind === 'module') deleteModule(toDelete.id);
-    else if (toDelete.kind === 'collection') deleteCollection(toDelete.id);
-    else deleteEndpoint(toDelete.id);
+    else deleteNode(toDelete.id);
     setToDelete(null);
   };
 
@@ -127,23 +146,12 @@ export function useEditMenu({
       ];
     }
     if (kind === 'module') {
-      const mod = modules.find((m) => m.id === id);
-      const modCols = mod
-        ? collections
-            .filter((c) => c.moduleId === id && c.parentCollectionId === null)
-            .sort((a, b) => a.sortOrder - b.sortOrder)
-        : [];
-      const subCollectionIds = mod
-        ? collections
-            .filter((c) => c.moduleId === id && c.parentCollectionId !== null)
-            .map((c) => c.id)
-        : [];
-      const epCount = endpoints.filter((e) =>
-        [...modCols.map((c) => c.id), ...subCollectionIds].includes(e.collectionId),
-      ).length;
+      const subtree = subtreeOf(id);
+      const subCols = subtree.filter((n) => n.type === 'collection');
+      const epCount = subtree.filter((n) => n.type === 'endpoint').length;
       const cascade =
-        modCols.length > 0 || subCollectionIds.length > 0 || epCount > 0
-          ? `将同时删除 ${modCols.length + subCollectionIds.length} 个集合、${epCount} 个接口`
+        subCols.length > 0 || epCount > 0
+          ? `将同时删除 ${subCols.length} 个集合、${epCount} 个接口`
           : undefined;
       return [
         {
@@ -169,23 +177,24 @@ export function useEditMenu({
       ];
     }
     if (kind === 'collection') {
-      const col = collections.find((c) => c.id === id);
+      const col = nodes.find((c) => c.id === id);
       if (!col) return [];
-      const isTopLevel = col.parentCollectionId === null;
-      const parentName = isTopLevel
-        ? (modules.find((m) => m.id === col.moduleId)?.name ?? '')
-        : (collections.find((c) => c.id === col.parentCollectionId)?.name ?? '');
-      const colEps = endpoints.filter((e) => e.collectionId === id);
-      const subCols = collections.filter((c) => c.parentCollectionId === id);
-      const totalEps =
-        colEps.length +
-        endpoints.filter((e) => subCols.some((sc) => sc.id === e.collectionId)).length;
+      // A top-level collection's parent is its module; a nested one's is
+      // the collection above it. `parentId` says which, with no flag to
+      // keep in sync.
+      const isTopLevel = col.parentId
+        ? nodes.find((n) => n.id === col.parentId)?.type === 'module'
+        : false;
+      const parentName = col.parentId ? (nodes.find((n) => n.id === col.parentId)?.name ?? '') : '';
+      const ownEps = nodes.filter((n) => n.type === 'endpoint' && n.parentId === id);
+      const subCols = nodes.filter((n) => n.type === 'collection' && n.parentId === id);
+      const subEpCount = subtreeOf(id).filter(
+        (n) => n.type === 'endpoint' && n.parentId !== id,
+      ).length;
       const cascade =
-        colEps.length > 0 || subCols.length > 0
-          ? `将同时删除 ${colEps.length} 个接口、${subCols.length} 个子集合${
-              totalEps - colEps.length > 0
-                ? `（含子集合下的 ${totalEps - colEps.length} 个接口）`
-                : ''
+        ownEps.length > 0 || subCols.length > 0
+          ? `将同时删除 ${ownEps.length} 个接口、${subCols.length} 个子集合${
+              subEpCount > 0 ? `（含子集合下的 ${subEpCount} 个接口）` : ''
             }`
           : undefined;
       return [
@@ -196,7 +205,6 @@ export function useEditMenu({
           onClick: () =>
             openNewItemWithIntent({
               type: 'collection',
-              parentModuleId: col.moduleId,
               parentCollectionId: col.id,
             }),
         },
@@ -208,7 +216,6 @@ export function useEditMenu({
             openNewItemWithIntent({
               type: 'endpoint',
               parentCollectionId: id,
-              parentModuleId: col.moduleId,
             }),
         },
         { kind: 'divider' },
@@ -218,7 +225,7 @@ export function useEditMenu({
           icon: <Pencil className="h-3.5 w-3.5" />,
           onClick: () => startEdit('collection', id),
         },
-        ...(isTopLevel
+        ...(isTopLevel || !col.parentId
           ? []
           : [
               {
@@ -226,18 +233,19 @@ export function useEditMenu({
                 label: `脱离到「${parentName}」根级`,
                 icon: <CornerDownRight className="h-3.5 w-3.5" />,
                 onClick: () => {
-                  // Move to the top-level of the same module: parent
-                  // becomes null, appended at the end. Useful when a
-                  // collection is misplaced as a sub-collection and
-                  // the user wants to pop it back out.
-                  const targetSiblings = collections.filter(
-                    (c) => c.moduleId === col.moduleId && c.parentCollectionId === null,
+                  // Pop this collection back out to the top level of
+                  // whatever module the parent lives in. Useful when a
+                  // collection was nested by mistake.
+                  //
+                  // The destination is the parent's own parent — under
+                  // the unified tree, "the root level of this module"
+                  // is just "wherever my parent sits".
+                  const parent = nodes.find((n) => n.id === col.parentId);
+                  if (!parent) return;
+                  const targetSiblings = nodes.filter(
+                    (n) => n.type === 'collection' && n.parentId === parent.parentId,
                   );
-                  moveCollections([id], {
-                    parentKind: 'module',
-                    parentId: col.moduleId,
-                    index: targetSiblings.length,
-                  });
+                  moveNodes([id], parent.parentId, targetSiblings.length);
                 },
               },
             ]),
@@ -248,14 +256,11 @@ export function useEditMenu({
           icon: <Trash2 className="h-3.5 w-3.5" />,
           danger: true,
           onClick: () => openDeleteDialog('collection', id, cascade),
-          // unused but keeps type-check quiet about idx:
-          // (idx was used by the old up/down; now we rely on drag)
         },
       ];
     }
     // endpoint
-    const ep = endpoints.find((e) => e.id === id);
-    const epCol = ep ? collections.find((c) => c.id === ep.collectionId) : null;
+    const ep = nodes.find((e) => e.id === id);
     return [
       {
         kind: 'item',
@@ -284,7 +289,7 @@ export function useEditMenu({
           // Copy as cURL — uses endpointToCurl from src/features/http-tester/curl.ts.
         },
       },
-      ...(epCol
+      ...(ep
         ? [
             {
               kind: 'divider' as const,

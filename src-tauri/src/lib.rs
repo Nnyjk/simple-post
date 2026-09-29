@@ -279,6 +279,7 @@ pub fn run() {
             crate::commands::nodes_move,
             crate::commands::nodes_duplicate,
             crate::commands::endpoint_detail_get,
+            crate::commands::endpoint_details_list,
             crate::commands::endpoint_detail_update,
             crate::commands::environments_list,
             crate::commands::environments_create,

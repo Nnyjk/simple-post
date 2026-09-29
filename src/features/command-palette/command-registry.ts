@@ -17,7 +17,7 @@
  */
 
 import { useAppStore } from '@/stores/app-store';
-import type { Project } from '@/types/domain';
+import type { EndpointDetail, Project, ResourceNode } from '@/types/domain';
 
 export type CommandSection = '导航' | '命令';
 
@@ -37,27 +37,21 @@ interface RegistryState {
   activeProjectId: string;
   activeEnvironmentId: string;
   environments: { id: string; projectId: string; name: string }[];
-  endpoints: {
-    id: string;
-    name: string;
-    url: string;
-    method: string;
-    tags: string[];
-    collectionId: string;
-  }[];
-  collections: { id: string; moduleId: string; name: string }[];
-  modules: { id: string; projectId: string; name: string }[];
+  /** The whole tree, flat. One array for all three node types. */
+  nodes: ResourceNode[];
+  /** Endpoint request configuration, keyed by node id. */
+  endpointDetails: Record<string, EndpointDetail>;
 }
 
-/** Pick a representative project for an endpoint (deepest ancestor). */
+/**
+ * The project an endpoint belongs to.
+ *
+ * Was a three-hop walk (endpoint → collection → module → project) that
+ * existed only because the owner was not recorded. `rootId` is
+ * denormalised onto every node, so this is now a field read.
+ */
 function endpointProjectId(endpointId: string, s: RegistryState): string | null {
-  const ep = s.endpoints.find((e) => e.id === endpointId);
-  if (!ep) return null;
-  const col = s.collections.find((c) => c.id === ep.collectionId);
-  if (!col) return null;
-  const mod = s.modules.find((m) => m.id === col.moduleId);
-  if (!mod) return null;
-  return mod.projectId;
+  return s.nodes.find((n) => n.id === endpointId)?.rootId ?? null;
 }
 
 /** Build the full command list. Call once per palette open (cheap, ~tens of items). */
@@ -78,16 +72,19 @@ export function buildCommands(): Command[] {
   }
 
   // ---------- 导航：跳到接口 ----------
-  for (const ep of s.endpoints) {
+  for (const ep of s.nodes) {
+    if (ep.type !== 'endpoint') continue;
+    const detail = s.endpointDetails[ep.id];
+    if (!detail) continue;
     const pid = endpointProjectId(ep.id, s);
     if (!pid) continue;
     const project = s.projects.find((p) => p.id === pid);
     cmds.push({
       id: `nav:endpoint:${ep.id}`,
       title: ep.name,
-      hint: `${ep.method} · ${project?.name ?? ''}`,
+      hint: `${detail.method} · ${project?.name ?? ''}`,
       section: '导航',
-      keywords: [ep.url, ...ep.tags, 'endpoint', '接口'],
+      keywords: [detail.url, ...detail.tags, 'endpoint', '接口'],
       run: () => {
         const store = useAppStore.getState();
         if (store.activeProjectId !== pid) store.setActiveProject(pid);
@@ -162,7 +159,7 @@ export function buildCommands(): Command[] {
 
   // ---------- 命令：新建集合 ----------
   {
-    const firstMod = s.modules.find((m) => m.projectId === s.activeProjectId);
+    const firstMod = s.nodes.find((n) => n.type === 'module' && n.rootId === s.activeProjectId);
     cmds.push({
       id: 'cmd:new-collection',
       title: firstMod ? '新建集合' : '新建集合（需先有模块）',
@@ -180,11 +177,10 @@ export function buildCommands(): Command[] {
 
   // ---------- 命令：新建接口 ----------
   {
-    const projectMods = s.modules.filter((m) => m.projectId === s.activeProjectId);
-    const firstCol = s.collections.find((c) => projectMods.some((m) => m.id === c.moduleId));
+    const firstCol = s.nodes.find((n) => n.type === 'collection' && n.rootId === s.activeProjectId);
     const firstMod = firstCol
-      ? projectMods.find((m) => m.id === firstCol.moduleId)
-      : projectMods[0];
+      ? s.nodes.find((n) => n.id === firstCol.parentId)
+      : s.nodes.find((n) => n.type === 'module' && n.rootId === s.activeProjectId);
     cmds.push({
       id: 'cmd:new-endpoint',
       title: firstCol ? '新建接口' : '新建接口（需先有集合）',
@@ -197,7 +193,11 @@ export function buildCommands(): Command[] {
             ? {
                 type: 'endpoint',
                 parentCollectionId: firstCol.id,
-                parentModuleId: firstCol.moduleId,
+                // The owning module, named so the modal can offer it as
+                // the parent when the user re-picks. A nested
+                // collection's direct parent may be another collection,
+                // so this is only a hint, never a write target.
+                parentModuleId: firstCol.parentId ?? '',
               }
             : firstMod
               ? { type: 'endpoint', parentModuleId: firstMod.id }
@@ -208,17 +208,18 @@ export function buildCommands(): Command[] {
 
   // ---------- 命令：复制当前 URL ----------
   if (s.activeEndpointId) {
-    const ep = s.endpoints.find((e) => e.id === s.activeEndpointId);
-    if (ep) {
+    const ep = s.nodes.find((e) => e.id === s.activeEndpointId);
+    const epDetail = s.endpointDetails[s.activeEndpointId];
+    if (ep && epDetail) {
       cmds.push({
         id: 'cmd:copy-current-url',
         title: '复制当前接口 URL',
-        hint: ep.method,
+        hint: epDetail.method,
         section: '命令',
-        keywords: ['copy', 'url', '复制', ep.url, ep.name],
+        keywords: ['copy', 'url', '复制', epDetail.url, ep.name],
         run: () => {
           if (typeof navigator !== 'undefined' && navigator.clipboard) {
-            void navigator.clipboard.writeText(ep.url);
+            void navigator.clipboard.writeText(epDetail.url);
           }
         },
       });

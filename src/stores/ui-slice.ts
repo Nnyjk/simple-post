@@ -25,7 +25,7 @@
  * the shared `AppState` type, never by direct module import.
  */
 import type { StateCreator } from 'zustand';
-import type { ApiResponse } from '@/types/domain';
+import type { ApiResponse, ResourceNode } from '@/types/domain';
 import { uid } from '@/lib/utils';
 import type {
   Theme,
@@ -388,9 +388,11 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
       const valid = s.openTabs.filter((t) => {
         if (t.kind === 'settings') return true; // singleton — never stale
         if (t.kind === 'project') return s.projects.some((p) => p.id === t.id);
-        if (t.kind === 'module') return s.modules.some((m) => m.id === t.id);
-        if (t.kind === 'collection') return s.collections.some((c) => c.id === t.id);
-        return s.endpoints.some((e) => e.id === t.id);
+        // Every other tab is a tree node, and the tab's `kind` is the
+        // node's `type` — so one lookup answers module, collection and
+        // endpoint at once. Checking the type too means a tab can never
+        // survive because some *other* node happens to share its id.
+        return s.nodes.some((n) => n.id === t.id && n.type === t.kind);
       });
       if (valid.length === s.openTabs.length) return {};
       let nextActive = s.activeTabId;
@@ -592,7 +594,11 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
     }
 
     if (draft.type === 'module') {
-      const id = await state.addModule(state.activeProjectId, name, {
+      const id = await state.addNode({
+        rootId: state.activeProjectId,
+        parentId: null,
+        type: 'module',
+        name,
         description: draft.description,
       });
       set({ lastCreatedId: id });
@@ -601,9 +607,15 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
 
     if (draft.type === 'collection') {
       if (!draft.parentModuleId) return null;
-      const mod = state.modules.find((m) => m.id === draft.parentModuleId);
-      if (mod && !mod.expanded) state.toggleModuleExpanded(mod.id);
-      const id = await state.addCollection(draft.parentModuleId, name, {
+      const parent = state.nodes.find((n) => n.id === draft.parentModuleId);
+      if (parent && !parent.expanded) state.toggleNodeExpanded(parent.id);
+      const id = await state.addNode({
+        // `rootId` is derived from the parent server-side; naming it
+        // here as well would be a second source of truth for a value the
+        // parent already determines.
+        parentId: draft.parentModuleId,
+        type: 'collection',
+        name,
         description: draft.description,
       });
       set({ lastCreatedId: id });
@@ -612,13 +624,26 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
 
     // draft.type === 'endpoint'
     if (!draft.parentCollectionId) return null;
-    const col = state.collections.find((c) => c.id === draft.parentCollectionId);
-    if (col) {
-      if (!col.expanded) state.toggleCollectionExpanded(col.id);
-      const mod = state.modules.find((m) => m.id === col.moduleId);
-      if (mod && !mod.expanded) state.toggleModuleExpanded(mod.id);
+    // Expand every ancestor so the new endpoint is visible where it
+    // landed. With one node type this is a walk up `parentId` instead of
+    // the old "open the collection, then find its module" two-step.
+    let ancestor: ResourceNode | undefined = state.nodes.find(
+      (n) => n.id === draft.parentCollectionId,
+    );
+    while (ancestor) {
+      if (!ancestor.expanded) state.toggleNodeExpanded(ancestor.id);
+      ancestor = ancestor.parentId
+        ? state.nodes.find((n) => n.id === ancestor!.parentId)
+        : undefined;
     }
-    const id = await state.addEndpoint(draft.parentCollectionId, name);
+    const id = await state.addNode({
+      parentId: draft.parentCollectionId,
+      type: 'endpoint',
+      name,
+      // An endpoint is born with a detail row; without one the tree
+      // would hold a node the tester cannot open.
+      detail: { url: '' },
+    });
     if (id) state.setActiveEndpoint(id);
     set({ lastCreatedId: id });
     return id;

@@ -24,29 +24,22 @@ export const COMMANDS = {
   projectsUpdate: 'projects_update',
   projectsDelete: 'projects_delete',
 
-  // ----- modules -----
-  modulesList: 'modules_list',
-  modulesCreate: 'modules_create',
-  modulesUpdate: 'modules_update',
-  modulesDelete: 'modules_delete',
-  modulesMove: 'modules_move',
-
-  // ----- collections -----
-  collectionsList: 'collections_list',
-  collectionsCreate: 'collections_create',
-  collectionsUpdate: 'collections_update',
-  collectionsDelete: 'collections_delete',
-  collectionsMove: 'collections_move',
-
-  // ----- endpoints -----
-  endpointsList: 'endpoints_list',
-  endpointsGet: 'endpoints_get',
-  endpointsSearch: 'endpoints_search',
-  endpointsCreate: 'endpoints_create',
-  endpointsUpdate: 'endpoints_update',
-  endpointsDelete: 'endpoints_delete',
-  endpointsDuplicate: 'endpoints_duplicate',
-  endpointsMove: 'endpoints_move',
+  // ----- resource tree -----
+  // Replaces the 19 `modules_*` / `collections_*` / `endpoints_*`
+  // commands the three-table layout needed. A node is one of the three
+  // types, discriminated by `type`; the tree's shape is `parentId` and
+  // its owner is `rootId`. Endpoint request configuration lives behind
+  // its own pair, because `method` / `url` mean nothing for a module.
+  nodesList: 'nodes_list',
+  nodesGet: 'nodes_get',
+  nodesCreate: 'nodes_create',
+  nodesUpdate: 'nodes_update',
+  nodesDelete: 'nodes_delete',
+  nodesMove: 'nodes_move',
+  nodesDuplicate: 'nodes_duplicate',
+  endpointDetailsList: 'endpoint_details_list',
+  endpointDetailGet: 'endpoint_detail_get',
+  endpointDetailUpdate: 'endpoint_detail_update',
 
   // ----- environments -----
   environmentsList: 'environments_list',
@@ -322,107 +315,72 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: (a) => `/api/projects/${encodeURIComponent(String(a.id))}`,
   },
 
-  // ----- modules -----
-  [COMMANDS.modulesList]: {
+  // ----- resource tree -----
+  // One list call replaces the three unfiltered ones the old layout
+  // issued. `rootId` is the filter the SPA always has; `type` and `q`
+  // are optional and project the same endpoint the Tauri command does.
+  [COMMANDS.nodesList]: {
     method: 'GET',
-    path: (a) => `/api/modules${buildQuery({ projectId: a.projectId })}`,
+    path: (a) => `/api/nodes${buildQuery({ rootId: a.rootId, type: a.type, q: a.query })}`,
   },
-  [COMMANDS.modulesCreate]: { method: 'POST', path: () => '/api/modules' },
-  [COMMANDS.modulesUpdate]: {
+  [COMMANDS.nodesGet]: {
+    method: 'GET',
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.nodesCreate]: {
+    method: 'POST',
+    path: () => '/api/nodes',
+    // `NodeCreateBody` flattens the node, so the node's own fields are
+    // the body — not a `{ node: {…} }` wrapper. The Tauri command takes
+    // the same values as flat args, so the projection only has to add
+    // what the server stamps for itself: the id, and the detail row's
+    // key. `sortOrder` is required on the wire with no default, so an
+    // omitted one has to become 0 rather than `undefined`.
+    body: (a) => ({
+      id: a.id,
+      rootId: a.rootId,
+      parentId: a.parentId ?? null,
+      type: a.type,
+      name: a.name,
+      description: a.description,
+      sortOrder: a.sortOrder ?? 0,
+      ...(a.detail ? { detail: { ...(a.detail as object), nodeId: a.id } } : {}),
+    }),
+  },
+  [COMMANDS.nodesUpdate]: {
     method: 'PATCH',
-    path: (a) => `/api/modules/${encodeURIComponent(String(a.id))}`,
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}`,
     body: (a) => a.patch,
   },
-  [COMMANDS.modulesDelete]: {
+  [COMMANDS.nodesDelete]: {
     method: 'DELETE',
-    path: (a) => `/api/modules/${encodeURIComponent(String(a.id))}`,
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}`,
   },
-  [COMMANDS.modulesMove]: { method: 'POST', path: () => '/api/modules/move' },
-
-  // ----- collections -----
-  [COMMANDS.collectionsList]: {
-    method: 'GET',
-    path: (a) => `/api/collections${buildQuery({ moduleId: a.moduleId })}`,
-  },
-  [COMMANDS.collectionsCreate]: {
+  [COMMANDS.nodesMove]: {
     method: 'POST',
-    path: () => '/api/collections',
+    path: () => '/api/nodes/move',
+    // Tauri 与 Web 使用同一个扁平参数对象；只投影 REST 所需的字段。
+    // `parentId: null` is meaningful — "top of the project", legal only
+    // for a module — so it is passed through rather than dropped.
+    body: (a) => ({ nodeIds: a.nodeIds, parentId: a.parentId ?? null, index: a.index }),
   },
-  [COMMANDS.collectionsUpdate]: {
-    method: 'PATCH',
-    path: (a) => `/api/collections/${encodeURIComponent(String(a.id))}`,
-    body: (a) => a.patch,
-  },
-  [COMMANDS.collectionsDelete]: {
-    method: 'DELETE',
-    path: (a) => `/api/collections/${encodeURIComponent(String(a.id))}`,
-  },
-  [COMMANDS.collectionsMove]: {
+  [COMMANDS.nodesDuplicate]: {
     method: 'POST',
-    path: () => '/api/collections/move',
-    // Tauri 与 Web 使用同一个扁平目标对象；只投影 REST 所需的字段。
-    body: (a) => {
-      const target = a.target as {
-        parentKind: 'module' | 'collection';
-        parentId: string;
-        index: number;
-      };
-      return {
-        collectionIds: a.collectionIds,
-        parentKind: target.parentKind,
-        parentId: target.parentId,
-        index: target.index,
-      };
-    },
-  },
-
-  // ----- endpoints -----
-  [COMMANDS.endpointsList]: {
-    method: 'GET',
-    // canonical endpoint 列表只按 collectionId 过滤；projectId/moduleId
-    // 不是 REST 端支持的筛选条件，必须在 Web 投影层丢弃，不能静默透传。
-    path: (a) => `/api/endpoints${buildQuery({ collectionId: a.collectionId })}`,
-  },
-  [COMMANDS.endpointsGet]: {
-    method: 'GET',
-    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}`,
-  },
-  [COMMANDS.endpointsSearch]: {
-    method: 'POST',
-    path: () => '/api/endpoints/search',
-    body: (a) => ({ query: a.query, method: a.method, tags: a.tags }),
-  },
-  [COMMANDS.endpointsCreate]: {
-    method: 'POST',
-    path: () => '/api/endpoints',
-  },
-  [COMMANDS.endpointsUpdate]: {
-    method: 'PATCH',
-    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}`,
-    body: (a) => a.patch,
-  },
-  [COMMANDS.endpointsDelete]: {
-    method: 'DELETE',
-    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}`,
-  },
-  [COMMANDS.endpointsDuplicate]: {
-    method: 'POST',
-    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.id))}/duplicate`,
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}/duplicate`,
     // The path consumes `id`; the Rust handler takes no body, so we
     // explicitly hand back an empty object rather than letting the
     // default `body = args` projection leak `{ id }` into the wire.
     body: () => ({}),
   },
-  [COMMANDS.endpointsMove]: {
-    method: 'POST',
-    path: () => '/api/endpoints/move',
-    // Rust `EndpointMoveBody` is `{ endpoint_ids, collection_id, index }`;
-    // the Tauri side nests the destination in `target.collectionId`.
-    body: (a) => ({
-      endpointIds: a.endpointIds,
-      collectionId: (a.target as { collectionId: string } | undefined)?.collectionId,
-      index: (a.target as { index: number } | undefined)?.index ?? 0,
-    }),
+  [COMMANDS.endpointDetailsList]: { method: 'GET', path: () => '/api/endpoint-details' },
+  [COMMANDS.endpointDetailGet]: {
+    method: 'GET',
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.nodeId))}/endpoint-detail`,
+  },
+  [COMMANDS.endpointDetailUpdate]: {
+    method: 'PATCH',
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.nodeId))}/endpoint-detail`,
+    body: (a) => a.patch,
   },
 
   // ----- environments -----
@@ -534,12 +492,12 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // needed here.
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
 
-  // Endpoint-scoped send. `endpointId` is the path segment; the Rust
+  // Node-scoped send. `endpointId` is the path segment; the Rust
   // handler folds the body back onto it before deserialising
   // `EndpointSendArgs`, so the two shapes take the same argument object.
   [COMMANDS.endpointSend]: {
     method: 'POST',
-    path: (a) => `/api/endpoints/${encodeURIComponent(String(a.endpointId))}/send`,
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.endpointId))}/send`,
   },
 
   // ----- MCP daemon -----

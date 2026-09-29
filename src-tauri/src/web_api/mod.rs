@@ -133,6 +133,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/nodes/:id/endpoint-detail",
             get(node_endpoint_detail_get).patch(node_endpoint_detail_patch),
         )
+        // The bulk read the renderer's bootstrap issues. Registered on
+        // its own path rather than as a filter on `/api/nodes` because it
+        // answers a different question — configuration, not structure.
+        .route("/api/endpoint-details", get(endpoint_details_list))
         .route("/api/nodes/:id/duplicate", post(node_duplicate))
         // Node-scoped send. The client names an endpoint, never a URL, so
         // this route has no SSRF surface; the raw `/api/http/send` above is the

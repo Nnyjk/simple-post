@@ -408,6 +408,33 @@ pub fn endpoint_detail_get(
     crate::db::with_conn(&state, |c| crate::db::endpoint_details::get(c, &node_id))
 }
 
+/// Every endpoint's configuration in the workspace, as a flat list the
+/// renderer keys by `nodeId`.
+///
+/// Separate from [`nodes_list`] because the tree never renders a method
+/// or a url — it only needs name / type / order. Reading the detail table
+/// for every node on boot would pull a column set most rows do not have,
+/// and folding it into the tree read would be a join on every startup for
+/// data the user may never open.
+#[tauri::command]
+pub fn endpoint_details_list(state: State<DbPool>) -> Result<Vec<EndpointDetail>, AppError> {
+    // One query per project rather than a join: `endpoint_details` is
+    // keyed by node id, so the only way to reach a project's endpoints is
+    // through `nodes.root_id`. `list_by_root` already does that join, and
+    // the project count is bounded by what the user has open.
+    let roots = crate::db::with_conn(&state, crate::db::projects::list)?
+        .into_iter()
+        .map(|p| p.id)
+        .collect::<Vec<String>>();
+    let mut out = Vec::new();
+    for root in roots {
+        out.extend(crate::db::with_conn(&state, |c| {
+            crate::db::endpoint_details::list_by_root(c, &root)
+        })?);
+    }
+    Ok(out)
+}
+
 /// Patch an endpoint's request configuration. Separate from
 /// [`nodes_update`] so renaming an endpoint does not rewrite the JSON
 /// columns that did not change.

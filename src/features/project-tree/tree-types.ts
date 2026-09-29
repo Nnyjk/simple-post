@@ -1,5 +1,5 @@
 import type { DragEvent as ReactDragEvent } from 'react';
-import type { Collection, Endpoint, Module } from '@/types/domain';
+import type { EndpointDetail, ResourceNode } from '@/types/domain';
 
 export type TargetKind = 'project' | 'module' | 'collection' | 'endpoint';
 
@@ -33,12 +33,19 @@ export interface DragPayload {
 export type DropZone = 'above' | 'into' | 'below';
 
 export type CollectionBranch = {
-  collection: Collection;
-  endpoints: Endpoint[];
+  collection: ResourceNode;
+  endpoints: ResourceNode[];
+  /**
+   * Each endpoint paired with its configuration. The tree draws a
+   * method pill and a url, both of which live in the detail row, so
+   * carrying the pair here saves `rows/EndpointRow` a store lookup per
+   * rendered endpoint.
+   */
+  endpointDetails: Record<string, EndpointDetail>;
   children: CollectionBranch[];
 };
 
-export type TreeBranch = { module: Module; collections: CollectionBranch[] };
+export type TreeBranch = { module: ResourceNode; collections: CollectionBranch[] };
 
 /**
  * Everything the row components need in order to wire drag-and-drop.
@@ -47,16 +54,13 @@ export type TreeBranch = { module: Module; collections: CollectionBranch[] };
  * context), so `rows/*` and `hooks/*` never import each other.
  */
 export interface DragContextValue {
-  moveModule: (moduleId: string, targetIndex: number) => void;
-  moveCollections: (
-    collectionIds: string[],
-    target: {
-      parentKind: 'module' | 'collection';
-      parentId: string;
-      index: number;
-    },
-  ) => void;
-  moveEndpoints: (endpointIds: string[], target: { collectionId: string; index: number }) => void;
+  /**
+   * One move for the whole tree. `parentId: null` means "top of the
+   * project" and is legal only for a module — the destination parent's
+   * own `type` is what decides where anything else may land, which is
+   * why there is no `parentKind` to pass.
+   */
+  moveNodes: (nodeIds: string[], parentId: string | null, index: number) => void;
   setDataTransfer: (e: ReactDragEvent, payload: DragPayload) => void;
   makeDragOverHandler: (
     target: { kind: TargetKind; id: string },

@@ -45,20 +45,18 @@ function tabDisplay(tabId: string): TabDisplay {
     const p = state.projects.find((x) => x.id === tabId);
     return { title: p?.name ?? '（项目已删除）', kindLabel: '项目' };
   }
-  if (tab.kind === 'module') {
-    const m = state.modules.find((x) => x.id === tabId);
-    return { title: m?.name ?? '（模块已删除）', kindLabel: '模块' };
-  }
-  if (tab.kind === 'collection') {
-    const c = state.collections.find((x) => x.id === tabId);
-    return { title: c?.name ?? '（集合已删除）', kindLabel: '集合' };
-  }
-  if (tab.kind === 'endpoint') {
-    const e = state.endpoints.find((x) => x.id === tabId);
-    return {
-      title: e?.name ?? '（接口已删除）',
-      kindLabel: '接口',
-    };
+  // Module / collection / endpoint are all tree nodes now, and the
+  // tab's `kind` is the node's `type` — one lookup answers all three.
+  if (tab.kind === 'module' || tab.kind === 'collection' || tab.kind === 'endpoint') {
+    const n = state.nodes.find((x) => x.id === tabId);
+    const kindLabel = tab.kind === 'module' ? '模块' : tab.kind === 'collection' ? '集合' : '接口';
+    const goneLabel =
+      tab.kind === 'module'
+        ? '（模块已删除）'
+        : tab.kind === 'collection'
+          ? '（集合已删除）'
+          : '（接口已删除）';
+    return { title: n?.name ?? goneLabel, kindLabel };
   }
   return { title: '设置', kindLabel: '' };
 }
@@ -66,7 +64,7 @@ function tabDisplay(tabId: string): TabDisplay {
 export function DirtyCloseDialog() {
   const batch = useAppStore((s) => s.pendingDirtyClose);
   const resolveDirtyClose = useAppStore((s) => s.resolveDirtyClose);
-  const endpoints = useAppStore((s) => s.endpoints);
+  const endpointDetails = useAppStore((s) => s.endpointDetails);
 
   const current = useMemo(() => {
     if (!batch) return null;
@@ -82,9 +80,9 @@ export function DirtyCloseDialog() {
 
   // Endpoint-specific row: shows the method without re-stating the name
   // (the title already names the tab). Keeps the body visually useful
-  // without being repetitive.
+  // without being repetitive. The method lives in the detail row.
   const currentEndpoint =
-    current.kindLabel === '接口' ? (endpoints.find((e) => e.id === current.id) ?? null) : null;
+    current.kindLabel === '接口' ? (endpointDetails[current.id] ?? null) : null;
 
   return (
     <Dialog

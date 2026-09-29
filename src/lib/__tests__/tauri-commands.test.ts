@@ -215,125 +215,172 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.equal(c.body, undefined);
   });
 
-  it('modulesList → GET /api/modules with projectId in query string', async () => {
-    await invokeCmd(COMMANDS.modulesList, { projectId: 'pX' });
+  it('nodesList → GET /api/nodes with rootId in query string', async () => {
+    await invokeCmd(COMMANDS.nodesList, { rootId: 'pX' });
     const c = last();
     assert.equal(c.method, 'GET');
-    assert.equal(c.url, '/api/modules?projectId=pX');
+    assert.equal(c.url, '/api/nodes?rootId=pX');
     assert.equal(c.body, undefined);
   });
 
-  it('modulesList (no filter) → GET /api/modules (no query string)', async () => {
+  it('nodesList (no filter) → GET /api/nodes (no query string)', async () => {
     // List commands are sometimes invoked with no args in renderer code
-    // (`invoke<Module[]>(COMMANDS.modulesList)`); the URL must not
+    // (`invoke<ResourceNode[]>(COMMANDS.nodesList)`); the URL must not
     // gain a trailing "?".
-    await invokeCmd(COMMANDS.modulesList);
+    await invokeCmd(COMMANDS.nodesList);
     const c = last();
-    assert.equal(c.url, '/api/modules');
+    assert.equal(c.url, '/api/nodes');
   });
 
-  it('modulesMove → POST /api/modules/move with default args body (camelCase match)', async () => {
-    await invokeCmd(COMMANDS.modulesMove, { moduleId: 'm1', targetIndex: 2 });
+  it('nodesList → projects type and query onto the same canonical route', async () => {
+    await invokeCmd(COMMANDS.nodesList, { rootId: 'pX', type: 'endpoint', query: 'login' });
     const c = last();
-    assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/modules/move');
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
-      moduleId: 'm1',
-      targetIndex: 2,
-    });
+    // `buildQuery` sorts keys, so the wire order is alphabetical
+    // (`q` < `rootId` < `type`), not the caller's argument order.
+    assert.equal(c.url, '/api/nodes?q=login&rootId=pX&type=endpoint');
   });
 
-  it('collectionsList → GET /api/collections with moduleId query', async () => {
-    await invokeCmd(COMMANDS.collectionsList, { moduleId: 'mod-1' });
+  it('nodesList → 三个过滤条件落到同一条路由，query 也会被编码', async () => {
+    await invokeCmd(COMMANDS.nodesList, { rootId: 'pX', type: 'endpoint', query: 'a b&c' });
+    const c = last();
+    assert.equal(c.url, '/api/nodes?q=a%20b%26c&rootId=pX&type=endpoint');
+  });
+
+  it('nodesGet → GET /api/nodes/{id} with the id percent-encoded', async () => {
+    await invokeCmd(COMMANDS.nodesGet, { id: 'a/b' });
     const c = last();
     assert.equal(c.method, 'GET');
-    assert.equal(c.url, '/api/collections?moduleId=mod-1');
-  });
-
-  it('collectionsMove → POST /api/collections/move projects the real store target', async () => {
-    await invokeCmd(COMMANDS.collectionsMove, {
-      collectionIds: ['c1', 'c2'],
-      target: { parentKind: 'module', parentId: 'm1', index: 1 },
-    });
-    const c = last();
-    assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/collections/move');
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
-      collectionIds: ['c1', 'c2'],
-      parentKind: 'module',
-      parentId: 'm1',
-      index: 1,
-    });
-  });
-
-  it('collectionsMove → keeps a collection parent as parentId', async () => {
-    await invokeCmd(COMMANDS.collectionsMove, {
-      collectionIds: ['c1'],
-      target: { parentKind: 'collection', parentId: 'c-sib', index: 0 },
-    });
-    const c = last();
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
-      collectionIds: ['c1'],
-      parentKind: 'collection',
-      parentId: 'c-sib',
-      index: 0,
-    });
-  });
-
-  it('endpointsList → 只投影 canonical collectionId 过滤条件', async () => {
-    await invokeCmd(COMMANDS.endpointsList, {
-      collectionId: 'col-1',
-      // Tauri/store 可能携带这些上下文字段，但 REST canonical 只支持
-      // collectionId；它们不能泄漏到 Web query。
-      projectId: 'project-1',
-      moduleId: 'module-1',
-    });
-    const c = last();
-    assert.equal(c.method, 'GET');
-    assert.equal(c.url, '/api/endpoints?collectionId=col-1');
+    assert.equal(c.url, '/api/nodes/a%2Fb');
     assert.equal(c.body, undefined);
   });
 
-  it('endpointsList → 无 collectionId 时不生成不支持的过滤 query', async () => {
-    await invokeCmd(COMMANDS.endpointsList, { projectId: 'project-1', moduleId: 'module-1' });
-    const c = last();
-    assert.equal(c.url, '/api/endpoints');
-  });
-
-  it('endpointsSearch → POST /api/endpoints/search with { query } body', async () => {
-    await invokeCmd(COMMANDS.endpointsSearch, { query: 'login' });
-    const c = last();
-    assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/endpoints/search');
-    // Optional fields (`method`, `tags`) are dropped by `JSON.stringify`
-    // when `undefined`, so we only assert on what survives the wire.
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), { query: 'login' });
-  });
-
-  it('endpointsDuplicate → POST /api/endpoints/{id}/duplicate with empty body', async () => {
-    await invokeCmd(COMMANDS.endpointsDuplicate, { id: 'e1' });
+  it('nodesCreate → POST /api/nodes with a FLAT body (NodeCreateBody flattens the node)', async () => {
+    await invokeCmd(COMMANDS.nodesCreate, {
+      id: 'n1',
+      rootId: 'p1',
+      parentId: 'c1',
+      type: 'endpoint',
+      name: 'Login',
+      description: 'auth',
+    });
     const c = last();
     assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/endpoints/e1/duplicate');
+    assert.equal(c.url, '/api/nodes');
+    // The node's fields ARE the body. A `{ node: {…} }` wrapper would
+    // fail to deserialize into `NodeCreateBody`'s `#[serde(flatten)]`.
+    // `sortOrder` has no server default, so an omitted one must become
+    // `0` rather than `undefined` (which `JSON.stringify` drops).
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
+      id: 'n1',
+      rootId: 'p1',
+      parentId: 'c1',
+      type: 'endpoint',
+      name: 'Login',
+      description: 'auth',
+      sortOrder: 0,
+    });
+  });
+
+  it('nodesCreate → defaults parentId to null and stamps detail.nodeId from the id', async () => {
+    await invokeCmd(COMMANDS.nodesCreate, {
+      id: 'n1',
+      rootId: 'p1',
+      type: 'module',
+      name: 'Core',
+      sortOrder: 3,
+      detail: { method: 'POST', url: '/login' },
+    });
+    const c = last();
+    const body = JSON.parse(c.body ?? 'null');
+    // A module's parent is the project, expressed as `null`.
+    assert.equal(body.parentId, null);
+    assert.equal(body.sortOrder, 3);
+    // `endpoint_details.node_id` is required on the wire; the client
+    // already knows it, so the projection injects it rather than making
+    // the caller duplicate the id.
+    assert.deepEqual(body.detail, { method: 'POST', url: '/login', nodeId: 'n1' });
+  });
+
+  it('nodesUpdate → PATCH /api/nodes/{id} with body = patch only', async () => {
+    await invokeCmd(COMMANDS.nodesUpdate, { id: 'n1', patch: { name: 'Renamed' } });
+    const c = last();
+    assert.equal(c.method, 'PATCH');
+    assert.equal(c.url, '/api/nodes/n1');
+    // The `id` MUST NOT leak into the body — the Rust handler
+    // deserialises the body into a `NodePatch` struct.
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'Renamed' });
+  });
+
+  it('nodesDelete → DELETE /api/nodes/{id}, no body', async () => {
+    await invokeCmd(COMMANDS.nodesDelete, { id: 'n1' });
+    const c = last();
+    assert.equal(c.method, 'DELETE');
+    assert.equal(c.url, '/api/nodes/n1');
+    assert.equal(c.body, undefined);
+  });
+
+  it('nodesMove → POST /api/nodes/move with a flat body (camelCase match)', async () => {
+    await invokeCmd(COMMANDS.nodesMove, { nodeIds: ['m1', 'c1'], parentId: 'p1', index: 2 });
+    const c = last();
+    assert.equal(c.method, 'POST');
+    assert.equal(c.url, '/api/nodes/move');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
+      nodeIds: ['m1', 'c1'],
+      parentId: 'p1',
+      index: 2,
+    });
+  });
+
+  it('nodesMove → a top-level drop sends parentId: null, not undefined', async () => {
+    // Dropping onto the project root is a real move target, and `null`
+    // is what `move_many` reads as "re-parent to the project". Leaving
+    // it `undefined` would let `JSON.stringify` drop the key and make
+    // the server keep the old parent.
+    await invokeCmd(COMMANDS.nodesMove, { nodeIds: ['c1'], index: 0 });
+    const c = last();
+    const body = JSON.parse(c.body ?? 'null');
+    assert.equal(body.parentId, null);
+    assert.deepEqual(body.nodeIds, ['c1']);
+  });
+
+  it('nodesDuplicate → POST /api/nodes/{id}/duplicate with empty body', async () => {
+    await invokeCmd(COMMANDS.nodesDuplicate, { id: 'n1' });
+    const c = last();
+    assert.equal(c.method, 'POST');
+    assert.equal(c.url, '/api/nodes/n1/duplicate');
     // The path consumed `id`; the body projector hands back `{}` so the
     // wire payload doesn't carry an `{ id }` field that the Rust
     // handler would silently drop.
     assert.equal(c.body, '{}');
   });
 
-  it('endpointsMove → POST /api/endpoints/move translates target.collectionId into flat body', async () => {
-    await invokeCmd(COMMANDS.endpointsMove, {
-      endpointIds: ['e1', 'e2'],
-      target: { collectionId: 'col-1', index: 0 },
+  it('endpointDetailsList → GET /api/endpoint-details with no body', async () => {
+    await invokeCmd(COMMANDS.endpointDetailsList);
+    const c = last();
+    assert.equal(c.method, 'GET');
+    assert.equal(c.url, '/api/endpoint-details');
+    assert.equal(c.body, undefined);
+  });
+
+  it('endpointDetailGet → GET /api/nodes/{nodeId}/endpoint-detail', async () => {
+    await invokeCmd(COMMANDS.endpointDetailGet, { nodeId: 'n1' });
+    const c = last();
+    assert.equal(c.method, 'GET');
+    assert.equal(c.url, '/api/nodes/n1/endpoint-detail');
+    assert.equal(c.body, undefined);
+  });
+
+  it('endpointDetailUpdate → PATCH /api/nodes/{nodeId}/endpoint-detail with body = patch only', async () => {
+    await invokeCmd(COMMANDS.endpointDetailUpdate, {
+      nodeId: 'n1',
+      patch: { method: 'POST' },
     });
     const c = last();
-    assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/endpoints/move');
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
-      endpointIds: ['e1', 'e2'],
-      collectionId: 'col-1',
-      index: 0,
-    });
+    assert.equal(c.method, 'PATCH');
+    assert.equal(c.url, '/api/nodes/n1/endpoint-detail');
+    // The node id is the path; repeating it in the body would be
+    // silently dropped by `EndpointDetailPatch`.
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { method: 'POST' });
   });
 
   it('environmentsList → GET /api/environments with projectId query', async () => {

@@ -1,12 +1,11 @@
-import type { Collection, Endpoint, Module } from '@/types/domain';
+import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import type { CollectionBranch, DragPayload, TreeBranch } from './tree-types';
 
 /**
  * Custom mime type used for the in-app drag payload. We shove the dragged
  * kind + ids into the dataTransfer as JSON so a single drop can resolve
- * to `moveModule` / `moveCollections` / `moveEndpoints` without any
- * extra context. Using a vendor-prefixed type means other apps / the OS
- * can't accidentally pick the data up as text.
+ * to `moveNodes` without any extra context. Using a vendor-prefixed type
+ * means other apps / the OS can't accidentally pick the data up as text.
  */
 export const DND_MIME = 'application/x-simple-post-tree';
 
@@ -31,54 +30,70 @@ export function decodeDrag(raw: string): DragPayload | null {
   }
 }
 
+/**
+ * Turn the flat node list into the nested shape the rows render.
+ *
+ * One pass. Every node names its own parent, so the whole tree is a
+ * single `parentId → children` index — the old version needed three
+ * because a collection's owner and its parent lived in different
+ * columns, and a module's project was a fourth thing to look up.
+ *
+ * `projectId` narrows to one project's tree; nodes from other projects
+ * are dropped rather than rendered under a module that is not theirs.
+ */
 export function buildTree(
-  modules: Module[],
-  collections: Collection[],
-  endpoints: Endpoint[],
+  nodes: readonly ResourceNode[],
+  endpointDetails: Record<string, EndpointDetail>,
   projectId: string,
 ): TreeBranch[] {
-  // Bucket endpoints by collectionId once.
-  const endpointsByCol = new Map<string, Endpoint[]>();
-  for (const e of endpoints) {
-    const bucket = endpointsByCol.get(e.collectionId);
-    if (bucket) bucket.push(e);
-    else endpointsByCol.set(e.collectionId, [e]);
+  const byParent = new Map<string | null, ResourceNode[]>();
+  for (const n of nodes) {
+    if (n.rootId !== projectId) continue;
+    const bucket = byParent.get(n.parentId);
+    if (bucket) bucket.push(n);
+    else byParent.set(n.parentId, [n]);
   }
-  for (const list of endpointsByCol.values()) {
-    list.sort((a, b) => a.sortOrder - b.sortOrder);
-  }
-  // Bucket collections by parent (parentCollectionId can be null for
-  // top-level). Only build the subtree for collections that belong to
-  // this project.
-  const projectModuleIds = new Set(
-    modules.filter((m) => m.projectId === projectId).map((m) => m.id),
-  );
-  const colsByParent = new Map<string | null, Collection[]>();
-  for (const c of collections) {
-    if (!projectModuleIds.has(c.moduleId)) continue;
-    const key = c.parentCollectionId;
-    const bucket = colsByParent.get(key);
-    if (bucket) bucket.push(c);
-    else colsByParent.set(key, [c]);
-  }
-  for (const list of colsByParent.values()) {
+  for (const list of byParent.values()) {
     list.sort((a, b) => a.sortOrder - b.sortOrder);
   }
 
-  const buildCollectionBranch = (c: Collection): CollectionBranch => ({
-    collection: c,
-    endpoints: endpointsByCol.get(c.id) ?? [],
-    children: (colsByParent.get(c.id) ?? []).map(buildCollectionBranch),
-  });
+  const childrenOf = (
+    parentId: string,
+  ): { endpoints: ResourceNode[]; collections: ResourceNode[] } => {
+    const kids = byParent.get(parentId) ?? [];
+    return {
+      // The type matrix means a collection's children are only ever
+      // endpoints, and a module's are only ever top-level collections —
+      // so one filter, not a per-type query.
+      endpoints: kids.filter((k) => k.type === 'endpoint'),
+      collections: kids.filter((k) => k.type === 'collection'),
+    };
+  };
 
-  return modules
-    .filter((m) => m.projectId === projectId)
-    .sort((a, b) => a.sortOrder - b.sortOrder)
+  const buildCollectionBranch = (c: ResourceNode): CollectionBranch => {
+    const { endpoints, collections } = childrenOf(c.id);
+    // Only this branch's own endpoints, not the whole subtree — the
+    // rows render exactly these.
+    const ownDetails: Record<string, EndpointDetail> = {};
+    for (const e of endpoints) {
+      const d = endpointDetails[e.id];
+      if (d) ownDetails[e.id] = d;
+    }
+    return {
+      collection: c,
+      endpoints,
+      endpointDetails: ownDetails,
+      children: collections.map(buildCollectionBranch),
+    };
+  };
+
+  // A module's parent is the project, so top-level modules are the nodes
+  // with no `parentId` in this project.
+  return (byParent.get(null) ?? [])
+    .filter((n) => n.type === 'module')
     .map((m) => ({
       module: m,
-      collections: (colsByParent.get(null) ?? [])
-        .filter((c) => c.moduleId === m.id)
-        .map(buildCollectionBranch),
+      collections: childrenOf(m.id).collections.map(buildCollectionBranch),
     }));
 }
 
@@ -96,25 +111,41 @@ export function countTreeEndpoints(branches: CollectionBranch[]): number {
   return branches.reduce((acc, b) => acc + countSubtreeEndpoints(b), 0);
 }
 
-export function filterTree(tree: TreeBranch[], q: string): TreeBranch[] {
+export function filterTree(
+  tree: TreeBranch[],
+  q: string,
+  details: Record<string, EndpointDetail>,
+): TreeBranch[] {
   return tree
     .map((m) => {
-      const collections = filterCollectionBranch(m.collections, q);
+      const collections = filterCollectionBranch(m.collections, q, details);
       return { ...m, collections };
     })
     .filter((m) => m.collections.length > 0);
 }
 
-function filterCollectionBranch(branches: CollectionBranch[], q: string): CollectionBranch[] {
+function filterCollectionBranch(
+  branches: CollectionBranch[],
+  q: string,
+  details: Record<string, EndpointDetail>,
+): CollectionBranch[] {
   return branches
     .map((b) => {
-      const matchedEndpoints = b.endpoints.filter(
-        (e) =>
-          e.name.toLowerCase().includes(q) ||
-          e.url.toLowerCase().includes(q) ||
-          e.tags.some((t) => t.toLowerCase().includes(q)),
-      );
-      const filteredChildren = filterCollectionBranch(b.children, q);
+      // Url and tags live in the detail row, so a name-only match over
+      // the node would silently stop finding endpoints by path.
+      const matchedEndpoints = b.endpoints.filter((e) => {
+        if (e.name.toLowerCase().includes(q)) return true;
+        const d = details[e.id];
+        if (!d) return false;
+        return d.url.toLowerCase().includes(q) || d.tags.some((t) => t.toLowerCase().includes(q));
+      });
+      const matchedEndpointIds = new Set(matchedEndpoints.map((e) => e.id));
+      const filteredDetails: Record<string, EndpointDetail> = {};
+      for (const id of matchedEndpointIds) {
+        const d = details[id];
+        if (d) filteredDetails[id] = d;
+      }
+      const filteredChildren = filterCollectionBranch(b.children, q, details);
       // Keep a collection in the result if it has matched endpoints,
       // matched sub-collections, or its own name matches the query.
       const nameMatches = b.collection.name.toLowerCase().includes(q);
@@ -124,6 +155,7 @@ function filterCollectionBranch(branches: CollectionBranch[], q: string): Collec
       return {
         ...b,
         endpoints: matchedEndpoints,
+        endpointDetails: filteredDetails,
         children: filteredChildren,
       };
     })

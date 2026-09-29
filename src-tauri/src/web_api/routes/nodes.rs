@@ -237,6 +237,28 @@ pub(crate) async fn nodes_move(
 
 // ----- endpoint-only sub-resources ---------------------------------------
 
+/// `GET /api/endpoint-details` — every endpoint's configuration, flat.
+///
+/// The renderer's counterpart to `nodes_list`: the tree reads structure
+/// and the HTTP tester reads configuration, and the two are different
+/// enough that joining them on every boot would be a cost paid for data
+/// the tree never draws. Keyed by `nodeId` on the client.
+pub(crate) async fn endpoint_details_list(
+    State(s): State<Arc<WebState>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let projects = db::with_conn(&s.pool, db::projects::list).map_err(map_app_error)?;
+    let mut out = Vec::new();
+    for p in projects {
+        out.extend(
+            db::with_conn(&s.pool, |c| db::endpoint_details::list_by_root(c, &p.id))
+                .map_err(map_app_error)?,
+        );
+    }
+    Ok(Json(
+        serde_json::to_value(&out).unwrap_or_else(|_| json!([])),
+    ))
+}
+
 /// `GET /api/nodes/:id/endpoint-detail`
 pub(crate) async fn node_endpoint_detail_get(
     State(s): State<Arc<WebState>>,

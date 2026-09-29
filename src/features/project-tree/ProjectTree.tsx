@@ -33,18 +33,15 @@ const kindLabel: Record<TargetKind, string> = {
 
 export function ProjectTree() {
   // ---------- raw state (all raw references — safe for selectors) ----------
-  const modules = useAppStore((s) => s.modules);
-  const collections = useAppStore((s) => s.collections);
-  const endpoints = useAppStore((s) => s.endpoints);
+  const nodes = useAppStore((s) => s.nodes);
+  const endpointDetails = useAppStore((s) => s.endpointDetails);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const activeEndpointId = useAppStore((s) => s.activeEndpointId);
   const activeProject = useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
 
   // ---------- store actions ----------
   const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
-  const moveModule = useAppStore((s) => s.moveModule);
-  const moveCollections = useAppStore((s) => s.moveCollections);
-  const moveEndpoints = useAppStore((s) => s.moveEndpoints);
+  const moveNodes = useAppStore((s) => s.moveNodes);
 
   // ---------- local UI state ----------
   const [query, setQuery] = useState('');
@@ -52,28 +49,37 @@ export function ProjectTree() {
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
   // ---------- derived ----------
+  // Every filter below is a `useMemo` over a raw store reference, not a
+  // selector: a selector returning a fresh array re-renders on every
+  // store write under Zustand v5's `Object.is` comparison.
   const tree = useMemo(
-    () => buildTree(modules, collections, endpoints, activeProjectId),
-    [modules, collections, endpoints, activeProjectId],
+    () => buildTree(nodes, endpointDetails, activeProjectId),
+    [nodes, endpointDetails, activeProjectId],
   );
   const filtered = useMemo(
-    () => (query.trim() ? filterTree(tree, query.toLowerCase()) : tree),
-    [tree, query],
+    () => (query.trim() ? filterTree(tree, query.toLowerCase(), endpointDetails) : tree),
+    [tree, query, endpointDetails],
+  );
+  // `rootId` is denormalised onto every node, so "belongs to the open
+  // project" is one filter — no walk up to a module to find a project id.
+  const projectNodes = useMemo(
+    () => nodes.filter((n) => n.rootId === activeProjectId),
+    [nodes, activeProjectId],
   );
   const projectModules = useMemo(
     () =>
-      modules
-        .filter((m) => m.projectId === activeProjectId)
+      projectNodes
+        .filter((n) => n.type === 'module' && n.parentId === null)
         .sort((a, b) => a.sortOrder - b.sortOrder),
-    [modules, activeProjectId],
+    [projectNodes],
   );
   const projectCollections = useMemo(
-    () => collections.filter((c) => projectModules.some((m) => m.id === c.moduleId)),
-    [collections, projectModules],
+    () => projectNodes.filter((n) => n.type === 'collection'),
+    [projectNodes],
   );
   const projectEndpoints = useMemo(
-    () => endpoints.filter((e) => projectCollections.some((c) => c.id === e.collectionId)),
-    [endpoints, projectCollections],
+    () => projectNodes.filter((n) => n.type === 'endpoint'),
+    [projectNodes],
   );
 
   // ---------- click / selection handlers ----------
@@ -91,7 +97,7 @@ export function ProjectTree() {
 
   // ---------- inline "+" menus ----------
   const { openProjectPlusMenu, openModulePlusMenu, openCollectionPlusMenu } = useInlineMenus({
-    collections,
+    nodes: projectNodes,
     projectModules,
     openNewItemWithIntent,
     setMenu,
@@ -115,13 +121,9 @@ export function ProjectTree() {
     makeDragLeaveHandler,
     handleDragEnd,
   } = useTreeDnd({
-    modules,
-    collections,
-    endpoints,
+    nodes: projectNodes,
     activeProjectId,
-    moveModule,
-    moveCollections,
-    moveEndpoints,
+    moveNodes,
   });
 
   // ---------- render ----------
@@ -229,9 +231,7 @@ export function ProjectTree() {
                 }}
                 onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
                 dragContext={{
-                  moveModule,
-                  moveCollections,
-                  moveEndpoints,
+                  moveNodes,
                   setDataTransfer,
                   makeDragOverHandler,
                   makeDragLeaveHandler,

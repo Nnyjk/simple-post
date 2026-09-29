@@ -149,6 +149,14 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "GET",
+            path: "/api/endpoint-details",
+            summary: "Every endpoint's request configuration, flat",
+            stability: "public",
+            request: None,
+            response: Some("EndpointDetailList"),
+        },
+        RouteSpec {
+            method: "GET",
             path: "/api/nodes/:id/endpoint-detail",
             summary: "Get an endpoint's request configuration",
             stability: "public",
