@@ -559,7 +559,7 @@ pub fn default_project_color() -> String {
 
 /// Generate a unique opaque id. Mirrors `commands::uid` so REST and
 /// Tauri paths agree. Both functions live here because `commands` already
-/// depends on `domain`; pulling the inverse into commands.rs would cycle.
+/// depends on `domain`; pulling the inverse into `commands/` would cycle.
 /// The per-process monotonic counter guarantees uniqueness inside the
 /// running process even when the wall clock hasn't advanced.
 pub fn uid() -> String {

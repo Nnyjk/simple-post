@@ -65,7 +65,7 @@ pub(crate) async fn base_url_defs_update(
     Path(def_id): Path<String>,
     Json(patch): Json<crate::commands::BaseUrlDefPatch>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // `BaseUrlDefPatch` lives in `commands.rs` (not `domain`) because
+    // `BaseUrlDefPatch` lives in `commands/dto.rs` (not `domain`) because
     // it has no other callers. Reusing it here keeps the wire shape
     // identical to the IPC path.
     let row = db::with_tx(&s.pool, |c| {

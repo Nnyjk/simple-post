@@ -76,7 +76,7 @@ pub struct PreferencesPutBody {
 // -------------------------------------------------------------------------
 
 /// Fill in a server-generated `id` when the caller (SPA) omits one.
-/// Mirrors what every `commands.rs::*_create` does: take the user-facing
+/// Mirrors what every `commands::*_create` does: take the user-facing
 /// fields, then stamp `id = uid()`. Without this, every REST create
 /// fails with `[validation] missing field 'id'` because the domain
 /// structs all require `id` while the SPA only ships name / description

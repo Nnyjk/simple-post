@@ -6,7 +6,7 @@
  * through the panel.
  *
  * The shape mirrors what `McpStatusDto` serialises from Rust
- * (see `src-tauri/src/commands.rs`). Mismatches are tolerated on the
+ * (see `src-tauri/src/commands/`). Mismatches are tolerated on the
  * renderer side: unknown lifecycle strings collapse to `'stopped'` in
  * the badge, never throw.
  */

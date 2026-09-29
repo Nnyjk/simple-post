@@ -8,7 +8,7 @@
  *
  * Naming convention:
  *   - The string value MUST equal the function name in
- *     `src-tauri/src/commands.rs` (or the rust `#[tauri::command]` for
+ *     `src-tauri/src/commands/` (or the rust `#[tauri::command]` for
  *     `http_request`, which lives in `src-tauri/src/lib.rs`).
  *   - The key on the object is camelCase for ergonomic TS consumption:
  *     `mcp_status` ⇒ `mcpStatus`, `projects_update` ⇒ `projectsUpdate`.

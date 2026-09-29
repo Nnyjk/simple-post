@@ -68,7 +68,7 @@ impl DaemonStatus {
 
 /// Event payload for `daemon://crashed`. Renderer renders a toast with
 /// `message` and a "Retry" action that calls `restart_daemon` (Tauri
-/// command, see `commands.rs`).
+/// command, see `commands/mcp_status.rs`).
 #[derive(Debug, Clone, Serialize)]
 pub struct DaemonCrashedPayload {
     pub status: String, // always "crashed" — kept for symmetry w/ DTO

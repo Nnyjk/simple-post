@@ -23,7 +23,7 @@ The parent/child relationship is a **enforced contract**, not a convention: `Res
 
 **CLI modes** (`src-tauri/src/main.rs`, clap): default → Tauri GUI; `mcp` → embedded MCP daemon; `mcp-proxy` → stdio bridge; `serve-web` → headless REST + static SPA.
 
-**CRUD flow** — component → Zustand slice (optimistic update) → `invokeCmd()` (`src/lib/tauri-commands.ts`) → Tauri IPC **or** `fetch('/api/…')` → `src-tauri/src/commands.rs` / `web_api/` → `simple_post_core::db` → `store.db` (WAL).
+**CRUD flow** — component → Zustand slice (optimistic update) → `invokeCmd()` (`src/lib/tauri-commands.ts`) → Tauri IPC **or** `fetch('/api/…')` → `src-tauri/src/commands/` / `web_api/` → `simple_post_core::db` → `store.db` (WAL).
 
 **HTTP requests** bypass webview CORS: `src/lib/http.ts::sendRequest` → `httpRequest` command → `http_executor.rs` (reqwest).
 
@@ -40,7 +40,7 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 - `src/types/domain.ts` — TS mirrors of Rust domain types
 - `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` holds the whole resource tree, `endpoint_details.rs` its endpoint-only configuration) + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
-- `src-tauri/src/` — `commands.rs`, `web_api/`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
+- `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource + `dto.rs` / `send.rs`), `web_api/`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
 - `scripts/` — dev/test/build utilities (see below); `docs/` — HTTP reference, OpenAPI, refactor plan
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
@@ -94,7 +94,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **Zustand selectors (infinite-loop hazard).** Equality is `Object.is`; a selector returning a fresh array/object (`.map`, `.filter`, spread) causes infinite re-render. Selectors must return stable references or `.find(...)`; derive filtered lists with `useMemo` in the component. Slices never import each other — they share state via the `AppState` interface and `get()`/`set()`. Verify with `npx tsx scripts/_verify_store.mjs`.
 
-**Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands.rs`, registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `src-tauri/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently.
+**Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands/<resource>.rs` (re-exported by `commands/mod.rs`, which must use **glob** `pub use` — an item list drops the `#[macro_export]`ed `__cmd__<name>` macro and `generate_handler!` fails with E0433), registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `src-tauri/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently.
 
 **Tauri macro gotcha.** `http_request` in `src-tauri/src/lib.rs` must stay **non-`pub`** — marking it `pub` triggers a `__cmd__http_request` identifier collision (E0255) between `#[tauri::command]` and `generate_handler!`.
 
@@ -183,7 +183,7 @@ Key facts:
 - **A test that resolves the module under test at runtime survives neither a move nor a rename.** `tauri-commands.test.ts` probes `IS_TAURI_SHELL` in a `spawnSync` child because that flag is frozen at module-eval time, and resolves the module with `new URL('./tauri-commands.ts', import.meta.url).href`. That URL is relative to the *test file*, so moving the test into `__tests__/` silently broke it until the path gained its `../`. Typecheck and lint both passed on the broken version — only the child process failed. Grep for `import.meta.url` and `__dirname` whenever a test file changes directory.
 - ESLint scoping decisions (in `eslint.config.js`): `no-explicit-any` off under `**/*.test.ts` and `**/__tests__/` (deliberately loose mocks); `no-require-imports` off for `.mjs`/`.cjs` tooling; names starting with `_` are sanctioned unused placeholders; `react-hooks/rules-of-hooks` is **error** — `HttpTester`'s hooks were hoisted above its `if (!endpoint)` early return to satisfy it (never put hooks after an early return).
 - Headless store tests need `src/stores/__tests__/_browser-shim.ts`: installs Map-backed `localStorage` (Node 22 ships a methodless native `localStorage` that crashes otherwise), `document.visibilityState` emitter, timers, and `mockIPC`, and sets `window.__TAURI_INTERNALS__ = {}` *before* module eval so `IS_TAURI_SHELL === true`.
-- **No seed data ships with the app.** `db::init` runs `schema.sql` and stops — a fresh install is empty. `crates/simple-post-core/src/db/fixtures.json` is **test-only**: it is reachable solely through `#[cfg(test)] pub(crate) mod test_support` (`init_seeded` / `seed`), which does not exist in a production build. Because `test_support` is `pub(crate)`, sibling crates cannot use it — the `endpoint_send_tests` module in `src-tauri/src/commands.rs` builds its own rows through the public CRUD API instead. There is **no** TS mock-data module; store tests build their own fixtures inline.
+- **No seed data ships with the app.** `db::init` runs `schema.sql` and stops — a fresh install is empty. `crates/simple-post-core/src/db/fixtures.json` is **test-only**: it is reachable solely through `#[cfg(test)] pub(crate) mod test_support` (`init_seeded` / `seed`), which does not exist in a production build. Because `test_support` is `pub(crate)`, sibling crates cannot use it — the `endpoint_send_tests` module in `src-tauri/src/commands/endpoint_send_tests.rs` builds its own rows through the public CRUD API instead. There is **no** TS mock-data module; store tests build their own fixtures inline.
 - Rust DB tests isolate via `fresh_pool()` → temp-dir SQLite keyed by atomic counter + PID (`crates/simple-post-core/src/db/mod_test.rs`, the `#[path]` module of `db/mod.rs`).
 - Store custom hooks (`useActiveProject`, …) throw outside a React render; in Node, read state with `useAppStore.getState()`.
 - No React component/DOM tests; no coverage tooling configured (c8/nyc/tarpaulin absent).

@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 /// Re-export so `use crate::permissions::Permission` resolves to the
 /// single canonical type defined in `crate::domain`. Keeps call sites
-/// in commands.rs / mcp/ decoupled from `domain`'s exact location while
+/// in `commands/` / mcp/ decoupled from `domain`'s exact location while
 /// still sharing one definition across the crate.
 pub use crate::domain::Permission;
 

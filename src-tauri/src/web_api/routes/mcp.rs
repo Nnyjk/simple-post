@@ -19,7 +19,7 @@ pub(crate) async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<McpStatus
 // MCP capability policy (commit 1: feat(mcp): three-tier capability policy)
 // =========================================================================
 //
-// Three REST endpoints mirroring the Tauri commands in `commands.rs`:
+// Three REST endpoints mirroring the Tauri commands in `commands/`:
 //   GET  /api/mcp/capability       — read current policy
 //   PUT  /api/mcp/capability       — set policy (body: { policy: "..." })
 //   GET  /api/mcp/capability/tools — list tools visible under current policy
