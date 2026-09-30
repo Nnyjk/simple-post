@@ -28,6 +28,7 @@ import {
   blankDetail,
   collectSubtree,
   filterTabsAfterRemoval,
+  invokeWithRollback,
   tabKeysForSubtree,
 } from './crud-helpers';
 
@@ -123,12 +124,11 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
     if (!prev) return;
     const optimistic: ResourceNode = { ...prev, ...patch };
     set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? optimistic : n)) }));
-    try {
-      await invokeCmd<ResourceNode>(COMMANDS.nodesUpdate, { id, patch });
-    } catch (e) {
-      console.error('[store] nodes_update failed', e);
-      set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? prev : n)) }));
-    }
+    await invokeWithRollback(
+      'nodes_update',
+      () => invokeCmd<ResourceNode>(COMMANDS.nodesUpdate, { id, patch }),
+      () => set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? prev : n)) })),
+    );
   },
 
   deleteNode: async (id) => {
@@ -174,12 +174,11 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         activeTabId: tabs.activeId,
       };
     });
-    try {
-      await invokeCmd<void>(COMMANDS.nodesDelete, { id });
-    } catch (e) {
-      console.error('[store] nodes_delete failed', e);
-      set(snapshot);
-    }
+    await invokeWithRollback(
+      'nodes_delete',
+      () => invokeCmd<void>(COMMANDS.nodesDelete, { id }),
+      () => set(snapshot),
+    );
   },
 
   updateEndpointDetail: async (nodeId, patch) => {
@@ -187,12 +186,11 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
     if (!prev) return;
     const optimistic: EndpointDetail = { ...prev, ...patch };
     set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: optimistic } }));
-    try {
-      await invokeCmd<EndpointDetail>(COMMANDS.endpointDetailUpdate, { nodeId, patch });
-    } catch (e) {
-      console.error('[store] endpoint_detail_update failed', e);
-      set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: prev } }));
-    }
+    await invokeWithRollback(
+      'endpoint_detail_update',
+      () => invokeCmd<EndpointDetail>(COMMANDS.endpointDetailUpdate, { nodeId, patch }),
+      () => set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: prev } })),
+    );
   },
 
   /**

@@ -8,12 +8,49 @@
  * is the opposite case: it genuinely is shared, so the sub-factories keep
  * importing it from `@/lib/tree-index`.
  *
- * Nothing here touches the store. Every function is a pure
- * compute-over-arguments, which is what makes them safe to call from
- * inside a `set()` callback.
+ * Everything below except `invokeWithRollback` is a pure
+ * compute-over-arguments with no store access, which is what makes them
+ * safe to call from inside a `set()` callback.
  */
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import type { OpenTab } from '../store-types';
+
+/**
+ * The tail of every optimistic write: invoke the daemon, and on failure
+ * log and roll the local state back.
+ *
+ * All ~15 write actions had this shape open-coded —
+ *
+ *     try { await invokeCmd(COMMANDS.x, args); }
+ *     catch (e) { console.error('[store] x failed', e); set(rollback); }
+ *
+ * — which meant the log prefix and the "did you remember to roll back?"
+ * question had to be re-answered at every site. This owns the try/catch
+ * and the message format; the caller supplies only what "roll back"
+ * means for that particular write.
+ *
+ * `rollback` is a callback rather than a value because the rollback
+ * shapes genuinely differ: some are an updater (`set((s) => …)`) that has
+ * to run against the *current* state, and some are a literal snapshot
+ * object captured before the optimistic write. A helper that accepted a
+ * single form would have forced the other kind to be rewritten.
+ *
+ * Note this deliberately does NOT swallow the error into a return value —
+ * callers that need a value on failure (the create actions) keep their
+ * own try/catch and return `null`.
+ */
+export async function invokeWithRollback(
+  label: string,
+  invoke: () => Promise<unknown>,
+  rollback: () => void,
+): Promise<void> {
+  try {
+    await invoke();
+  } catch (e) {
+    console.error(`[store] ${label} failed`, e);
+    rollback();
+  }
+}
 
 /** Re-number sortOrder for a slice after a reorder. */
 export function renumber<T extends { sortOrder: number }>(items: readonly T[]): T[] {

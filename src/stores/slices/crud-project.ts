@@ -18,7 +18,7 @@ import type { StateCreator } from 'zustand';
 import type { Project } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
-import { filterTabsAfterRemoval, tabKeysForSubtree } from './crud-helpers';
+import { filterTabsAfterRemoval, invokeWithRollback, tabKeysForSubtree } from './crud-helpers';
 
 /** Project actions owned by the CRUD slice. */
 export interface ProjectCrudActions {
@@ -55,14 +55,14 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
     set((s) => ({
       projects: s.projects.map((p) => (p.id === id ? optimistic : p)),
     }));
-    try {
-      await invokeCmd<Project>(COMMANDS.projectsUpdate, { id, patch });
-    } catch (e) {
-      console.error('[store] projects_update failed', e);
-      set((s) => ({
-        projects: s.projects.map((p) => (p.id === id ? prev : p)),
-      }));
-    }
+    await invokeWithRollback(
+      'projects_update',
+      () => invokeCmd<Project>(COMMANDS.projectsUpdate, { id, patch }),
+      () =>
+        set((s) => ({
+          projects: s.projects.map((p) => (p.id === id ? prev : p)),
+        })),
+    );
   },
   deleteProject: async (id) => {
     // Snapshot for rollback.
@@ -117,11 +117,10 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         activeTabId: tabs.activeId,
       };
     });
-    try {
-      await invokeCmd<void>(COMMANDS.projectsDelete, { id });
-    } catch (e) {
-      console.error('[store] projects_delete failed', e);
-      set(snapshot);
-    }
+    await invokeWithRollback(
+      'projects_delete',
+      () => invokeCmd<void>(COMMANDS.projectsDelete, { id }),
+      () => set(snapshot),
+    );
   },
 });

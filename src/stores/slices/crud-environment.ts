@@ -19,6 +19,7 @@ import type { StateCreator } from 'zustand';
 import type { Environment, EndpointDetail } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
+import { invokeWithRollback } from './crud-helpers';
 
 /** Environment actions owned by the CRUD slice. */
 export interface EnvironmentCrudActions {
@@ -48,14 +49,14 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
-    try {
-      await invokeCmd<Environment>(COMMANDS.environmentsSetVar, { envId, key, value });
-    } catch (e) {
-      console.error('[store] environments_set_var failed', e);
-      set((s) => ({
-        environments: s.environments.map((env) => (env.id === envId ? prev : env)),
-      }));
-    }
+    await invokeWithRollback(
+      'environments_set_var',
+      () => invokeCmd<Environment>(COMMANDS.environmentsSetVar, { envId, key, value }),
+      () =>
+        set((s) => ({
+          environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+        })),
+    );
   },
   renameEnvironmentVar: async (envId, fromKey, toKey) => {
     const prev = get().environments.find((e) => e.id === envId);
@@ -116,14 +117,14 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
-    try {
-      await invokeCmd<Environment>(COMMANDS.environmentsUpdate, { id: envId, patch });
-    } catch (e) {
-      console.error('[store] environments_update failed', e);
-      set((s) => ({
-        environments: s.environments.map((env) => (env.id === envId ? prev : env)),
-      }));
-    }
+    await invokeWithRollback(
+      'environments_update',
+      () => invokeCmd<Environment>(COMMANDS.environmentsUpdate, { id: envId, patch }),
+      () =>
+        set((s) => ({
+          environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+        })),
+    );
   },
   setEnvironmentBaseUrl: async (envId, defId, url) => {
     const prev = get().environments.find((e) => e.id === envId);
@@ -135,14 +136,14 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
-    try {
-      await invokeCmd<Environment>(COMMANDS.environmentsSetBaseurl, { envId, defId, url });
-    } catch (e) {
-      console.error('[store] environments_set_baseurl failed', e);
-      set((s) => ({
-        environments: s.environments.map((env) => (env.id === envId ? prev : env)),
-      }));
-    }
+    await invokeWithRollback(
+      'environments_set_baseurl',
+      () => invokeCmd<Environment>(COMMANDS.environmentsSetBaseurl, { envId, defId, url }),
+      () =>
+        set((s) => ({
+          environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+        })),
+    );
   },
   deleteEnvironment: async (envId) => {
     const snapshot = {
@@ -167,12 +168,11 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
         activeEnvironmentId: s.activeEnvironmentId === envId ? '' : s.activeEnvironmentId,
       };
     });
-    try {
-      await invokeCmd<void>(COMMANDS.environmentsDelete, { id: envId });
-    } catch (e) {
-      console.error('[store] environments_delete failed', e);
-      set(snapshot);
-    }
+    await invokeWithRollback(
+      'environments_delete',
+      () => invokeCmd<void>(COMMANDS.environmentsDelete, { id: envId }),
+      () => set(snapshot),
+    );
   },
   setEnvironmentActive: async (envId) => {
     const prev = get().environments;
@@ -187,11 +187,10 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
         }),
       };
     });
-    try {
-      await invokeCmd<Environment>(COMMANDS.environmentsSetActive, { envId });
-    } catch (e) {
-      console.error('[store] environments_set_active failed', e);
-      set({ environments: prev });
-    }
+    await invokeWithRollback(
+      'environments_set_active',
+      () => invokeCmd<Environment>(COMMANDS.environmentsSetActive, { envId }),
+      () => set({ environments: prev }),
+    );
   },
 });

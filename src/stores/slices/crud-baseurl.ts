@@ -17,6 +17,7 @@ import type { BaseUrlDefinition, EndpointDetail, Project } from '@/types/domain'
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { uid } from '@/lib/utils';
 import type { AppState } from '../app-store';
+import { invokeWithRollback } from './crud-helpers';
 
 /** baseUrl-definition actions owned by the CRUD slice. */
 export interface BaseUrlCrudActions {
@@ -102,14 +103,14 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
     set((s) => ({
       projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),
     }));
-    try {
-      await invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsUpdate, { id: defId, patch });
-    } catch (e) {
-      console.error('[store] base_url_defs_update failed', e);
-      set((s) => ({
-        projects: s.projects.map((p) => (p.id === projectId ? prevProject : p)),
-      }));
-    }
+    await invokeWithRollback(
+      'base_url_defs_update',
+      () => invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsUpdate, { id: defId, patch }),
+      () =>
+        set((s) => ({
+          projects: s.projects.map((p) => (p.id === projectId ? prevProject : p)),
+        })),
+    );
   },
   deleteBaseUrlDefinition: async (projectId, defId) => {
     const snapshot = {
@@ -139,12 +140,11 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
         endpointDetails: nextDetails,
       };
     });
-    try {
-      await invokeCmd<void>(COMMANDS.baseUrlDefsDelete, { id: defId });
-    } catch (e) {
-      console.error('[store] base_url_defs_delete failed', e);
-      set(snapshot);
-    }
+    await invokeWithRollback(
+      'base_url_defs_delete',
+      () => invokeCmd<void>(COMMANDS.baseUrlDefsDelete, { id: defId }),
+      () => set(snapshot),
+    );
   },
   setDefaultBaseUrlDefinition: async (projectId, defId) => {
     const prevProject = get().projects.find((p) => p.id === projectId);
@@ -153,13 +153,13 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
     set((s) => ({
       projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),
     }));
-    try {
-      await invokeCmd<Project>(COMMANDS.baseUrlDefsSetDefault, { projectId, defId });
-    } catch (e) {
-      console.error('[store] base_url_defs_set_default failed', e);
-      set((s) => ({
-        projects: s.projects.map((p) => (p.id === projectId ? prevProject : p)),
-      }));
-    }
+    await invokeWithRollback(
+      'base_url_defs_set_default',
+      () => invokeCmd<Project>(COMMANDS.baseUrlDefsSetDefault, { projectId, defId }),
+      () =>
+        set((s) => ({
+          projects: s.projects.map((p) => (p.id === projectId ? prevProject : p)),
+        })),
+    );
   },
 });
