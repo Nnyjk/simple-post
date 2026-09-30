@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 
 export interface TabItem {
   id: string;
@@ -48,7 +48,7 @@ export function Tabs({ items, value, onChange, className, size = 'sm' }: TabsPro
             onClick={() => onChange(item.id)}
             className={cn(
               'relative inline-flex items-center gap-1.5 border-b-2 px-3 font-medium transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+              focusRing,
               'disabled:pointer-events-none disabled:opacity-50',
               size === 'sm' ? 'h-8 text-xs' : 'h-9 text-sm',
               // The `-mb-px` lifts the underline onto the strip's border

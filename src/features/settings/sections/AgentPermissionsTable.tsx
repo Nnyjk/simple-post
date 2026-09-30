@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Tooltip } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { cn, focusRingBare } from '@/lib/utils';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { Project } from '@/types/domain';
 
@@ -141,7 +141,7 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
                         }}
                         className={cn(
                           'inline-flex h-6 items-center rounded-sm px-2 text-[11px] font-medium transition-colors',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          focusRingBare,
                           active
                             ? 'bg-primary text-primary-foreground'
                             : 'text-muted-foreground hover:bg-accent hover:text-foreground',

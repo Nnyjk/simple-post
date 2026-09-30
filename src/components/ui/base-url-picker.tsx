@@ -22,7 +22,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Globe, Pencil } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 import { Input } from './input';
 import { Badge } from './badge';
 import type { BaseUrlDefinition } from '@/types/domain';
@@ -144,7 +144,7 @@ export function BaseUrlPicker({
           'hover:bg-accent/40',
           TRIGGER_WIDTH,
           !defaultDef && selection.kind === 'default' && 'text-muted-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+          focusRing,
         )}
       >
         <span

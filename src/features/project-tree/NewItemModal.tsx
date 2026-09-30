@@ -8,6 +8,7 @@ import { useAppStore, type NewType } from '@/stores/app-store';
 import { indexByParent } from '@/lib/tree-index';
 import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
+import { PROJECT_COLORS } from '@/lib/palette';
 
 const KIND_LABEL: Record<NewType, string> = {
   project: '项目',
@@ -15,8 +16,6 @@ const KIND_LABEL: Record<NewType, string> = {
   collection: '集合',
   endpoint: '接口',
 };
-
-const PROJECT_COLORS = ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24'];
 
 const TYPE_CHIPS: { type: NewType; label: string; icon: React.ReactNode }[] = [
   { type: 'project', label: '项目', icon: <Package className="h-4 w-4" /> },

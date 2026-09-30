@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import { SettingsCategory } from '../SettingsCategory';
 import { useEnvDialogs } from './hooks/useEnvDialogs';
 import { EnvBody } from './rows/EnvBody';
@@ -140,9 +141,9 @@ export function EnvironmentSection({
     >
       <div className="space-y-3">
         {environments.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border bg-card/30 px-3 py-8 text-center text-xs text-muted-foreground">
+          <EmptyHint className="rounded-lg border-border bg-card/30 px-3 py-8 text-xs">
             该项目还没有环境
-          </div>
+          </EmptyHint>
         ) : (
           <>
             {/* ----- Env switcher (top tab strip) ----------------- */}

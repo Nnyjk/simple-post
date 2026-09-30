@@ -24,7 +24,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 import { HTTP_METHODS, type HttpMethod } from '@/types/domain';
 import { MethodPill } from './method-pill';
 
@@ -131,7 +131,7 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
         className={cn(
           'flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-1.5 font-mono text-xs transition-colors',
           'hover:bg-accent/40',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+          focusRing,
         )}
       >
         <MethodPill method={value} size="sm" variant="solid" />

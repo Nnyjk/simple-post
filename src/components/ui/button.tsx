@@ -1,5 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 
 export type ButtonVariant = 'default' | 'ghost' | 'outline' | 'secondary' | 'destructive';
 export type ButtonSize = 'default' | 'sm' | 'xs' | 'icon';
@@ -32,7 +32,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         type={type}
         className={cn(
           'inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+          focusRing,
           'disabled:pointer-events-none disabled:opacity-50',
           variantClass[variant],
           sizeClass[size],

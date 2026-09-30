@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { Monitor, Moon, Sun, Keyboard, Search, Palette, Check } from 'lucide-react';
 import { useAppStore, type Theme } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import { SettingsCategory } from '../SettingsCategory';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 
 interface ThemeOption {
   icon: React.ReactNode;
@@ -98,7 +99,7 @@ export function AppearanceSection() {
                 data-testid={`theme-option-${opt.value}`}
                 className={cn(
                   'group flex flex-col gap-2 rounded-md border bg-background/30 p-2.5 text-left transition-all',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+                  focusRing,
                   active
                     ? 'border-primary/60 bg-primary/5 shadow-[0_0_0_3px_hsl(var(--primary)/0.10)]'
                     : 'border-border/70 hover:border-border hover:bg-background/60',
@@ -170,9 +171,9 @@ export function AppearanceSection() {
         hideDivider
       >
         {filteredShortcuts.length === 0 ? (
-          <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
+          <EmptyHint className="border-transparent px-4 py-6 text-[11px]">
             没有匹配的快捷键
-          </div>
+          </EmptyHint>
         ) : (
           <div className="divide-y divide-border/60">
             {filteredShortcuts.map(([label, keys]) => (

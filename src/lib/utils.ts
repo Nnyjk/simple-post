@@ -8,6 +8,33 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * The app's single focus-ring treatment for interactive surfaces.
+ *
+ * This string used to be hand-copied into 9 component files (and mirrored
+ * by an unused `.focus-ring` class in globals.css, now removed). Keeping
+ * one copy means a future change to the ring's width or offset lands
+ * everywhere at once — a copy-pasted literal is exactly the kind of thing
+ * that silently drifts so half the controls get a 1px ring and half get 2px.
+ *
+ * Use it as a `cn()` argument: `cn('…base styles', focusRing)`.
+ */
+export const focusRing =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ' +
+  'focus-visible:ring-offset-1 focus-visible:ring-offset-background';
+
+/**
+ * The same ring with no offset. Used by the custom-titlebar window
+ * controls (`WindowControls`) and the permission radios
+ * (`AgentPermissionsTable`), which sit flush against the window edge or
+ * inside a tight row where a 1px offset would clip. Kept as its own
+ * constant rather than inlined so the difference stays intentional and
+ * greppable — if a control ever migrates from "flush" to "inset", the
+ * swap is a one-token change.
+ */
+export const focusRingBare =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
 export function formatBytes(bytes: number): string {
   if (!bytes) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];

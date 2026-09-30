@@ -139,9 +139,12 @@
     @apply bg-card border border-border rounded-lg;
   }
 
-  .focus-ring {
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background;
-  }
+  /* The focus ring is a single TypeScript constant (`focusRing` in
+     src/lib/utils.ts), not a CSS class. A `.focus-ring` rule used to live
+     here but nothing ever applied it — the 9 components that needed the
+     ring each inlined the utilities instead, so the rule and the code
+     drifted apart. CSS can't import the TS constant, so the canonical copy
+     lives in TS and components pass it to `cn()`. */
 
   /* HTTP-method colour swatches are no longer global utility classes
      — they live in `<MethodPill />` (src/components/ui/method-pill.tsx)

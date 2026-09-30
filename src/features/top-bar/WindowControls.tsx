@@ -16,6 +16,16 @@
 import { useEffect, useState } from 'react';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { Tooltip } from '@/components/ui/tooltip';
+import { cn, focusRingBare } from '@/lib/utils';
+
+/**
+ * Geometry + resting colour shared by all three titlebar buttons. Only the
+ * hover treatment differs (neutral for minimize/restore, destructive for
+ * close), so the hover class is passed separately at each call site.
+ */
+const WIN_BTN =
+  'flex h-7 w-8 items-center justify-center rounded text-muted-foreground ' +
+  'transition-colors hover:bg-accent hover:text-foreground';
 
 /**
  * Wrap a Tauri window call so the same component code can run in a
@@ -122,7 +132,7 @@ export function WindowControls() {
           type="button"
           onClick={minimize}
           aria-label="最小化"
-          className="flex h-7 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(WIN_BTN, focusRingBare)}
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
@@ -134,7 +144,7 @@ export function WindowControls() {
           type="button"
           onClick={toggleMaximize}
           aria-label={isMaximized ? '还原窗口' : '最大化窗口'}
-          className="flex h-7 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(WIN_BTN, focusRingBare)}
         >
           {/*
             Win11 uses two icon shapes for this button:
@@ -153,7 +163,11 @@ export function WindowControls() {
           type="button"
           onClick={close}
           aria-label="关闭窗口"
-          className="flex h-7 w-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive hover:text-destructive-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            WIN_BTN,
+            'hover:bg-destructive hover:text-destructive-foreground',
+            focusRingBare,
+          )}
         >
           <X className="h-3.5 w-3.5" />
         </button>

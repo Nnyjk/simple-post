@@ -5,7 +5,7 @@ import { useMcpStatus } from '@/lib/use-mcp-status';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 import { WindowControls } from './WindowControls';
 
 /**
@@ -267,7 +267,7 @@ export function TopBar() {
         {...NO_DRAG}
         type="button"
         onClick={() => setPaletteOpen(true)}
-        className="ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        className="ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/80 ${focusRing}"
         data-testid="global-search"
         aria-label="打开命令面板"
       >

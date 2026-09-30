@@ -27,6 +27,7 @@
 import type { StateCreator } from 'zustand';
 import type { ApiResponse, ResourceNode } from '@/types/domain';
 import { uid } from '@/lib/utils';
+import { PROJECT_COLOR_DEFAULT } from '@/lib/palette';
 import type {
   Theme,
   RequestSettings,
@@ -269,7 +270,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
     name: '',
     description: '',
     baseUrl: '',
-    color: '#60a5fa',
+    color: PROJECT_COLOR_DEFAULT,
   },
   lastCreatedId: null,
 
@@ -535,7 +536,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
         name: '',
         description: '',
         baseUrl: '',
-        color: '#60a5fa',
+        color: PROJECT_COLOR_DEFAULT,
       },
     });
   },
@@ -549,7 +550,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
         name: '',
         description: '',
         baseUrl: '',
-        color: '#60a5fa',
+        color: PROJECT_COLOR_DEFAULT,
       },
     });
   },

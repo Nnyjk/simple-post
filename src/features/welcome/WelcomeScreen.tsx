@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { FilePlus, Settings as SettingsIcon, BookOpen, Sparkles } from 'lucide-react';
 import { useAppStore, type Theme } from '@/stores/app-store';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 import { gsap, useGSAP } from '@/lib/gsap';
 
 const THEME_ICON: Record<Theme, string> = {
@@ -142,7 +142,7 @@ function CtaCard({ icon, title, description, onClick, primary, children }: CtaCa
       data-welcome-stagger
       className={cn(
         'group flex flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+        focusRing,
         primary
           ? 'border-primary/50 bg-primary/5 hover:border-primary hover:bg-primary/10'
           : 'border-border bg-card/40 hover:border-primary/40 hover:bg-accent/40',

@@ -52,15 +52,27 @@ export default {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
         },
-        // HTTP method colors
-        method: {
-          GET: 'hsl(142 71% 45%)',
-          POST: 'hsl(217 91% 60%)',
-          PUT: 'hsl(38 92% 50%)',
-          PATCH: 'hsl(280 65% 60%)',
-          DELETE: 'hsl(0 72% 51%)',
-          HEAD: 'hsl(220 14% 46%)',
-          OPTIONS: 'hsl(220 14% 46%)',
+        // HTTP method colors deliberately do NOT live here. `MethodPill`
+        // paints its swatch through an inline `style` because the mapping
+        // has to be computed per-method at runtime (see `methodColorVar` in
+        // src/lib/utils.ts), which a static Tailwind color key cannot
+        // express. An earlier `method: { … }` block existed here and was
+        // removed: nothing ever emitted a `*-method-*` class, and it had
+        // silently drifted from `methodColorVar` (POST/PUT were swapped).
+        // Single source of truth: src/lib/utils.ts.
+        //
+        // Semantic hue accents (project / module / collection / endpoint /
+        // baseUrl / variable / connection / request) DO live here, under
+        // `hue` — see src/lib/hue.ts for the concept→class map.
+        hue: {
+          project: 'hsl(var(--hue-project))',
+          module: 'hsl(var(--hue-module))',
+          collection: 'hsl(var(--hue-collection))',
+          endpoint: 'hsl(var(--hue-endpoint))',
+          baseurl: 'hsl(var(--hue-baseurl))',
+          variable: 'hsl(var(--hue-variable))',
+          connection: 'hsl(var(--hue-connection))',
+          request: 'hsl(var(--hue-request))',
         },
       },
       borderRadius: {
