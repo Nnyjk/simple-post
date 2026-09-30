@@ -37,7 +37,7 @@ function makeDetail(overrides: Partial<EndpointDetail> = {}): EndpointDetail {
     params: [],
     headers: [],
     body: { mode: 'none', content: '' },
-    auth: { type: 'none' },
+    auth: { kind: 'none' },
     tags: [],
     ...overrides,
   };

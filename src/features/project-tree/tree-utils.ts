@@ -59,8 +59,8 @@ export function buildTree(
       // The type matrix means a collection's children are only ever
       // endpoints, and a module's are only ever top-level collections —
       // so one filter, not a per-type query.
-      endpoints: kids.filter((k) => k.type === 'endpoint'),
-      collections: kids.filter((k) => k.type === 'collection'),
+      endpoints: kids.filter((k) => k.kind === 'endpoint'),
+      collections: kids.filter((k) => k.kind === 'collection'),
     };
   };
 
@@ -84,7 +84,7 @@ export function buildTree(
   // A module's parent is the project, so top-level modules are the nodes
   // with no `parentId` in this project.
   return (byParent.get(null) ?? [])
-    .filter((n) => n.type === 'module')
+    .filter((n) => n.kind === 'module')
     .map((m) => ({
       module: m,
       collections: childrenOf(m.id).collections.map(buildCollectionBranch),

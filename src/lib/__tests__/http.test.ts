@@ -297,7 +297,7 @@ function send(
     params: [],
     headers: [],
     body: { mode: 'none', content: '' },
-    auth: { type: 'none' },
+    auth: { kind: 'none' },
     env: ENV,
     settings: settings(),
     ...overrides,
@@ -464,20 +464,20 @@ describe('sendRequest: body', () => {
 describe('sendRequest: auth', () => {
   it('Bearer: Authorization header reaches the server', async () => {
     captured.length = 0;
-    await send({ auth: { type: 'bearer', bearer: 'eyJ.tok' } as AuthConfig });
+    await send({ auth: { kind: 'bearer', bearer: 'eyJ.tok' } as AuthConfig });
     assert.equal(lastRequest().headers['authorization'], 'Bearer eyJ.tok');
   });
 
   it('Bearer: resolves {{token}} from env', async () => {
     captured.length = 0;
-    await send({ auth: { type: 'bearer', bearer: '{{token}}' } as AuthConfig, env: ENV });
+    await send({ auth: { kind: 'bearer', bearer: '{{token}}' } as AuthConfig, env: ENV });
     assert.equal(lastRequest().headers['authorization'], 'Bearer eyJ.tok');
   });
 
   it('Basic: Authorization header is base64(user:pass)', async () => {
     captured.length = 0;
     await send({
-      auth: { type: 'basic', basic: { username: 'alice', password: 'secret' } } as AuthConfig,
+      auth: { kind: 'basic', basic: { username: 'alice', password: 'secret' } } as AuthConfig,
     });
     const hdr = lastRequest().headers['authorization'];
     assert.ok(hdr?.startsWith('Basic '));
@@ -489,8 +489,8 @@ describe('sendRequest: auth', () => {
     captured.length = 0;
     await send({
       auth: {
-        type: 'apikey',
-        apikey: { key: 'X-API-Key', value: 'k_123', in_: 'header' },
+        kind: 'apikey',
+        apikey: { key: 'X-API-Key', value: 'k_123', inLocation: 'header' },
       } as AuthConfig,
     });
     assert.equal(lastRequest().headers['x-api-key'], 'k_123');
@@ -500,8 +500,8 @@ describe('sendRequest: auth', () => {
     captured.length = 0;
     await send({
       auth: {
-        type: 'apikey',
-        apikey: { key: 'apiKey', value: 'k_123', in_: 'query' },
+        kind: 'apikey',
+        apikey: { key: 'apiKey', value: 'k_123', inLocation: 'query' },
       } as AuthConfig,
     });
     assert.equal(lastRequest().url, '/api/x?apiKey=k_123');
@@ -513,8 +513,8 @@ describe('sendRequest: auth', () => {
     captured.length = 0;
     await send({
       auth: {
-        type: 'apikey',
-        apikey: { key: 'X-API-Key', value: '{{apiKey}}', in_: 'header' },
+        kind: 'apikey',
+        apikey: { key: 'X-API-Key', value: '{{apiKey}}', inLocation: 'header' },
       } as AuthConfig,
       env: ENV,
     });
@@ -658,7 +658,7 @@ describe('sendRequest: network error', () => {
       params: [],
       headers: [],
       body: { mode: 'none', content: '' },
-      auth: { type: 'none' },
+      auth: { kind: 'none' },
       settings: { timeoutMs: 1500, followRedirects: true, maxResponseSizeKb: 5120 },
     });
     assert.equal(resp.status, 0);

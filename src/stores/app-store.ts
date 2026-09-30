@@ -132,7 +132,7 @@ export const useActiveEndpoint = () =>
     const id = activeTab?.kind === 'endpoint' ? activeTab.id : s.activeEndpointId;
     if (!id) return null;
     const node = s.nodes.find((n) => n.id === id);
-    return node && node.type === 'endpoint' ? node : null;
+    return node && node.kind === 'endpoint' ? node : null;
   });
 
 /** The active endpoint's request configuration, or `undefined`. */

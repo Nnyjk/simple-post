@@ -336,11 +336,15 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     // what the server stamps for itself: the id, and the detail row's
     // key. `sortOrder` is required on the wire with no default, so an
     // omitted one has to become 0 rather than `undefined`.
+    //
+    // `kind` — not `type` — because that is the domain field name on
+    // both sides. It has to match the Tauri command's `kind` parameter
+    // as well, or desktop mode asks for a key the handler never reads.
     body: (a) => ({
       id: a.id,
       rootId: a.rootId,
       parentId: a.parentId ?? null,
-      type: a.type,
+      kind: a.kind,
       name: a.name,
       description: a.description,
       sortOrder: a.sortOrder ?? 0,

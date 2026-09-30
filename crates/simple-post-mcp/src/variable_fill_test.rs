@@ -456,7 +456,7 @@ fn resolve_endpoint_apikey_header_injects_custom_header() {
         apikey: Some(ApiKeyAuth {
             key: "X-API-Key".into(),
             value: "{{k}}".into(),
-            in_: ApiKeyLocation::Header,
+            in_location: ApiKeyLocation::Header,
         }),
     };
     let project = project_with_defs();
@@ -487,7 +487,7 @@ fn resolve_endpoint_apikey_query_appends_to_url() {
         apikey: Some(ApiKeyAuth {
             key: "access_token".into(),
             value: "{{k}}".into(),
-            in_: ApiKeyLocation::Query,
+            in_location: ApiKeyLocation::Query,
         }),
     };
     let project = project_with_defs();

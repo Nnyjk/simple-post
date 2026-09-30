@@ -77,10 +77,10 @@ function resolveTemplate(input: string, env: Environment | undefined): string {
  * never mutated.
  */
 function resolveAuth(auth: AuthConfig, env: Environment | undefined): AuthConfig {
-  if (auth.type === 'bearer') {
+  if (auth.kind === 'bearer') {
     return { ...auth, bearer: resolveTemplate(auth.bearer ?? '', env) };
   }
-  if (auth.type === 'basic' && auth.basic) {
+  if (auth.kind === 'basic' && auth.basic) {
     return {
       ...auth,
       basic: {
@@ -89,7 +89,7 @@ function resolveAuth(auth: AuthConfig, env: Environment | undefined): AuthConfig
       },
     };
   }
-  if (auth.type === 'apikey' && auth.apikey) {
+  if (auth.kind === 'apikey' && auth.apikey) {
     return {
       ...auth,
       apikey: {
@@ -127,7 +127,7 @@ interface OrderedHeader {
  * header (`Authorization` or apikey-as-header). Duplicate-key check
  * is case-insensitive (HTTP header names are).
  *
- * `apikey.in_ === 'query'` is NOT emitted as a header — the caller
+ * `apikey.inLocation === 'query'` is NOT emitted as a header — the caller
  * appends it to the URL via `appendApikeyToQuery`.
  */
 function buildOrderedHeaders(input: BuildInput, auth: AuthConfig): OrderedHeader[] {
@@ -156,16 +156,16 @@ function buildOrderedHeaders(input: BuildInput, auth: AuthConfig): OrderedHeader
   // Record (last value kept) and for cURL we'd otherwise emit two
   // `-H 'Authorization: …'` lines, the second of which the server
   // would see as a header-list, not an override.
-  if (auth.type === 'bearer' && auth.bearer) {
+  if (auth.kind === 'bearer' && auth.bearer) {
     if (!out.some((h) => h.key.toLowerCase() === 'authorization')) {
       out.push({ key: 'Authorization', value: `Bearer ${auth.bearer}` });
     }
-  } else if (auth.type === 'basic' && auth.basic) {
+  } else if (auth.kind === 'basic' && auth.basic) {
     if (!out.some((h) => h.key.toLowerCase() === 'authorization')) {
       const { username, password } = auth.basic;
       out.push({ key: 'Authorization', value: `Basic ${b64Basic(username, password)}` });
     }
-  } else if (auth.type === 'apikey' && auth.apikey && auth.apikey.in_ === 'header') {
+  } else if (auth.kind === 'apikey' && auth.apikey && auth.apikey.inLocation === 'header') {
     if (!out.some((h) => h.key.toLowerCase() === auth.apikey!.key.toLowerCase())) {
       out.push({ key: auth.apikey.key, value: auth.apikey.value });
     }
@@ -192,9 +192,9 @@ function b64Basic(user: string, pass: string): string {
   return btoa(bin);
 }
 
-/** Append an `apikey` config whose `in_` is `'query'` to the URL. */
+/** Append an `apikey` config whose `inLocation` is `'query'` to the URL. */
 function appendApikeyToQuery(url: string, auth: AuthConfig): string {
-  if (auth.type !== 'apikey' || !auth.apikey || auth.apikey.in_ !== 'query') {
+  if (auth.kind !== 'apikey' || !auth.apikey || auth.apikey.inLocation !== 'query') {
     return url;
   }
   const { key, value } = auth.apikey;

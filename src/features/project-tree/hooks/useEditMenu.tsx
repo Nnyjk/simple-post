@@ -147,8 +147,8 @@ export function useEditMenu({
     }
     if (kind === 'module') {
       const subtree = subtreeOf(id);
-      const subCols = subtree.filter((n) => n.type === 'collection');
-      const epCount = subtree.filter((n) => n.type === 'endpoint').length;
+      const subCols = subtree.filter((n) => n.kind === 'collection');
+      const epCount = subtree.filter((n) => n.kind === 'endpoint').length;
       const cascade =
         subCols.length > 0 || epCount > 0
           ? `将同时删除 ${subCols.length} 个集合、${epCount} 个接口`
@@ -183,13 +183,13 @@ export function useEditMenu({
       // the collection above it. `parentId` says which, with no flag to
       // keep in sync.
       const isTopLevel = col.parentId
-        ? nodes.find((n) => n.id === col.parentId)?.type === 'module'
+        ? nodes.find((n) => n.id === col.parentId)?.kind === 'module'
         : false;
       const parentName = col.parentId ? (nodes.find((n) => n.id === col.parentId)?.name ?? '') : '';
-      const ownEps = nodes.filter((n) => n.type === 'endpoint' && n.parentId === id);
-      const subCols = nodes.filter((n) => n.type === 'collection' && n.parentId === id);
+      const ownEps = nodes.filter((n) => n.kind === 'endpoint' && n.parentId === id);
+      const subCols = nodes.filter((n) => n.kind === 'collection' && n.parentId === id);
       const subEpCount = subtreeOf(id).filter(
-        (n) => n.type === 'endpoint' && n.parentId !== id,
+        (n) => n.kind === 'endpoint' && n.parentId !== id,
       ).length;
       const cascade =
         ownEps.length > 0 || subCols.length > 0
@@ -243,7 +243,7 @@ export function useEditMenu({
                   const parent = nodes.find((n) => n.id === col.parentId);
                   if (!parent) return;
                   const targetSiblings = nodes.filter(
-                    (n) => n.type === 'collection' && n.parentId === parent.parentId,
+                    (n) => n.kind === 'collection' && n.parentId === parent.parentId,
                   );
                   moveNodes([id], parent.parentId, targetSiblings.length);
                 },

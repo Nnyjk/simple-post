@@ -35,14 +35,21 @@ fn http_method_custom_verb_passes_through() {
 }
 
 #[test]
-fn apikey_in_field_uses_unquoted_name() {
+fn apikey_location_field_round_trips_without_a_rename() {
+    // The TS mirror reads `inLocation`. `in` is a TypeScript keyword and
+    // `in_` is not a fix — camelCase maps it straight back to `in`, which
+    // is how the two languages used to disagree on this one field.
     let v = json!({
-        "type": "apikey",
-        "apikey": { "key": "X-API-Key", "value": "abc", "in": "header" }
+        "kind": "apikey",
+        "apikey": { "key": "X-API-Key", "value": "abc", "inLocation": "header" }
     });
     let auth: AuthConfig = serde_json::from_value(v).unwrap();
-    let apikey = auth.apikey.unwrap();
-    assert_eq!(apikey.in_, ApiKeyLocation::Header);
+    let apikey = auth.apikey.clone().unwrap();
+    assert_eq!(apikey.in_location, ApiKeyLocation::Header);
+    // …and the emitted key is the same word the mirror declares.
+    let back = serde_json::to_value(&auth).unwrap();
+    assert_eq!(back["kind"], json!("apikey"));
+    assert_eq!(back["apikey"]["inLocation"], json!("header"));
 }
 
 #[test]
@@ -54,7 +61,7 @@ fn endpoint_camel_case_field_names() {
         "id": "e1",
         "rootId": "p1",
         "parentId": "c1",
-        "type": "endpoint",
+        "kind": "endpoint",
         "name": "foo",
         "sortOrder": 0,
         "createdAt": 1,
@@ -73,7 +80,7 @@ fn endpoint_camel_case_field_names() {
         "params": [],
         "headers": [],
         "body": { "mode": "none", "content": "" },
-        "auth": { "type": "none" },
+        "auth": { "kind": "none" },
         "tags": [],
     });
     let d: EndpointDetail = serde_json::from_value(v).unwrap();

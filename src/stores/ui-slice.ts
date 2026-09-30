@@ -392,7 +392,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
         // node's `type` — so one lookup answers module, collection and
         // endpoint at once. Checking the type too means a tab can never
         // survive because some *other* node happens to share its id.
-        return s.nodes.some((n) => n.id === t.id && n.type === t.kind);
+        return s.nodes.some((n) => n.id === t.id && n.kind === t.kind);
       });
       if (valid.length === s.openTabs.length) return {};
       let nextActive = s.activeTabId;
@@ -597,7 +597,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
       const id = await state.addNode({
         rootId: state.activeProjectId,
         parentId: null,
-        type: 'module',
+        kind: 'module',
         name,
         description: draft.description,
       });
@@ -614,7 +614,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
         // here as well would be a second source of truth for a value the
         // parent already determines.
         parentId: draft.parentModuleId,
-        type: 'collection',
+        kind: 'collection',
         name,
         description: draft.description,
       });
@@ -638,7 +638,7 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get)
     }
     const id = await state.addNode({
       parentId: draft.parentCollectionId,
-      type: 'endpoint',
+      kind: 'endpoint',
       name,
       // An endpoint is born with a detail row; without one the tree
       // would hold a node the tester cannot open.

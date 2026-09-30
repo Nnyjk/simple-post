@@ -101,7 +101,7 @@ fn json_columns_round_trip() {
         "params": [{"id":"k1","key":"page","value":"1","enabled":true,"description":"分页"}],
         "headers": [{"id":"k2","key":"X-Trace","value":"on","enabled":true}],
         "body": {"mode":"json","content":"{\"a\":1}","schema":"{}"},
-        "auth": {"type":"apikey","apikey":{"key":"X-API-Key","value":"{{apiKey}}","in":"query"}},
+        "auth": {"kind":"apikey","apikey":{"key":"X-API-Key","value":"{{apiKey}}","inLocation":"query"}},
         "docs": "# orders",
         "notes": "careful",
         "tags": ["订单","crud"]

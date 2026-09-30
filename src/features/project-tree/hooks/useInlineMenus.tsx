@@ -38,7 +38,7 @@ export function useInlineMenus({
     // hang off a collection, so this is the shortest valid endpoint path.
     const firstColSorted = firstMod
       ? nodes
-          .filter((c) => c.type === 'collection' && c.parentId === firstMod.id)
+          .filter((c) => c.kind === 'collection' && c.parentId === firstMod.id)
           .sort((a, b) => a.sortOrder - b.sortOrder)[0]
       : null;
     const items: ContextMenuItem[] = [
@@ -90,7 +90,7 @@ export function useInlineMenus({
   const openCollectionPlusMenu = (collectionId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const col = nodes.find((c) => c.id === collectionId && c.type === 'collection');
+    const col = nodes.find((c) => c.id === collectionId && c.kind === 'collection');
     if (!col) return;
     // A collection's parent can be another collection, so the owning
     // module is an ancestor, not `col.parentId`. The modal only uses
@@ -137,7 +137,7 @@ function owningModuleId(nodes: ResourceNode[], collectionId: string): string | u
   let cur = nodes.find((n) => n.id === collectionId);
   while (cur && !seen.has(cur.id)) {
     seen.add(cur.id);
-    if (cur.type === 'module') return cur.id;
+    if (cur.kind === 'module') return cur.id;
     cur = cur.parentId ? nodes.find((n) => n.id === cur!.parentId) : undefined;
   }
   return undefined;

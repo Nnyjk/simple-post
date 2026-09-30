@@ -120,7 +120,7 @@ export function HttpTester() {
     let cur = endpoint.parentId ? allNodes.find((n) => n.id === endpoint!.parentId) : undefined;
     while (cur && !seen.has(cur.id)) {
       seen.add(cur.id);
-      chain.unshift({ id: cur.id, name: cur.name, type: cur.type });
+      chain.unshift({ id: cur.id, name: cur.name, type: cur.kind });
       cur = cur.parentId ? allNodes.find((n) => n.id === cur!.parentId) : undefined;
     }
     return chain;
@@ -350,7 +350,7 @@ export function HttpTester() {
   const enabledParams = detail.params.filter((p) => p.enabled && p.key).length;
   const enabledHeaders = detail.headers.filter((h) => h.enabled && h.key).length;
   const hasBody = detail.body.mode !== 'none' && detail.body.content;
-  const hasAuth = detail.auth.type !== 'none';
+  const hasAuth = detail.auth.kind !== 'none';
 
   const tabItems = TABS.map((t) => {
     let badge: React.ReactNode = null;

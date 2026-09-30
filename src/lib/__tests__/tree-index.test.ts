@@ -46,7 +46,7 @@ function makeNode(
     id,
     rootId: 'p1',
     parentId,
-    type: 'endpoint' as ResourceNodeType,
+    kind: 'endpoint' as ResourceNodeType,
     name: id,
     sortOrder,
     createdAt: 0,
@@ -72,8 +72,8 @@ function idsFor(index: Map<string | null, ResourceNode[]>, parentId: string | nu
 describe('tree-index: bucketing by parentId', () => {
   it('puts each node in the bucket its parentId names', () => {
     const index = indexByParent([
-      makeNode('m1', null, 0, { type: 'module' }),
-      makeNode('c1', 'm1', 0, { type: 'collection' }),
+      makeNode('m1', null, 0, { kind: 'module' }),
+      makeNode('c1', 'm1', 0, { kind: 'collection' }),
       makeNode('e1', 'c1', 0),
     ]);
 
@@ -85,8 +85,8 @@ describe('tree-index: bucketing by parentId', () => {
   it('keeps `null` as its own top-level bucket, separate from any string parent', () => {
     const index = indexByParent([
       makeNode('c1', 'm1', 0),
-      makeNode('m1', null, 0, { type: 'module' }),
-      makeNode('m2', null, 1, { type: 'module' }),
+      makeNode('m1', null, 0, { kind: 'module' }),
+      makeNode('m2', null, 1, { kind: 'module' }),
     ]);
 
     // A module's parent is the project, so top level is `parentId: null`
@@ -125,9 +125,9 @@ describe('tree-index: sortOrder ordering', () => {
 
   it('sorts top level too, not just nested buckets', () => {
     const index = indexByParent([
-      makeNode('m2', null, 20, { type: 'module' }),
-      makeNode('m0', null, 5, { type: 'module' }),
-      makeNode('m1', null, 10, { type: 'module' }),
+      makeNode('m2', null, 20, { kind: 'module' }),
+      makeNode('m0', null, 5, { kind: 'module' }),
+      makeNode('m1', null, 10, { kind: 'module' }),
     ]);
 
     assert.deepEqual(idsFor(index, null), ['m0', 'm1', 'm2']);
@@ -154,10 +154,10 @@ describe('tree-index: sortOrder ordering', () => {
 
 describe('tree-index: optional rootId filter', () => {
   const crossProject = [
-    makeNode('m1', null, 0, { type: 'module' }),
-    makeNode('c1', 'm1', 0, { type: 'collection' }),
-    makeNode('m9', null, 1, { type: 'module', rootId: 'p2' }),
-    makeNode('c9', 'm9', 0, { type: 'collection', rootId: 'p2' }),
+    makeNode('m1', null, 0, { kind: 'module' }),
+    makeNode('c1', 'm1', 0, { kind: 'collection' }),
+    makeNode('m9', null, 1, { kind: 'module', rootId: 'p2' }),
+    makeNode('c9', 'm9', 0, { kind: 'collection', rootId: 'p2' }),
   ];
 
   it('drops other projects’ nodes when rootId is supplied', () => {

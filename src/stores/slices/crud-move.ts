@@ -48,7 +48,7 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
       let targetRootId: string;
       if (parentId === null) {
         // "Top of the project" — legal only for a module.
-        if (sources.some((n) => n.type !== 'module')) return {};
+        if (sources.some((n) => n.kind !== 'module')) return {};
         targetRootId = sources[0].rootId;
       } else {
         const targetParent = s.nodes.find((n) => n.id === parentId);

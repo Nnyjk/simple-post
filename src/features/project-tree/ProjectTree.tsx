@@ -69,16 +69,16 @@ export function ProjectTree() {
   const projectModules = useMemo(
     () =>
       projectNodes
-        .filter((n) => n.type === 'module' && n.parentId === null)
+        .filter((n) => n.kind === 'module' && n.parentId === null)
         .sort((a, b) => a.sortOrder - b.sortOrder),
     [projectNodes],
   );
   const projectCollections = useMemo(
-    () => projectNodes.filter((n) => n.type === 'collection'),
+    () => projectNodes.filter((n) => n.kind === 'collection'),
     [projectNodes],
   );
   const projectEndpoints = useMemo(
-    () => projectNodes.filter((n) => n.type === 'endpoint'),
+    () => projectNodes.filter((n) => n.kind === 'endpoint'),
     [projectNodes],
   );
 

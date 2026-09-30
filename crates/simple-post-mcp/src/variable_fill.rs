@@ -408,7 +408,7 @@ fn resolve_auth(auth: &AuthConfig, vars: &HashMap<String, String>) -> (AuthConfi
             Some(ApiKeyAuth {
                 key: k.resolved,
                 value: v.resolved,
-                in_: a.in_,
+                in_location: a.in_location,
             })
         }
         _ => auth.apikey.clone(),
@@ -436,7 +436,7 @@ fn resolve_auth(auth: &AuthConfig, vars: &HashMap<String, String>) -> (AuthConfi
 /// `Authorization` (or apikey-as-header). Duplicate-key check is
 /// case-insensitive (HTTP header names are).
 ///
-/// `apikey.in_ == Query` is NOT emitted as a header here — the
+/// `apikey.inLocation == Query` is NOT emitted as a header here — the
 /// caller appends it to the URL via `append_apikey_query`.
 fn build_headers(
     endpoint_headers: &[simple_post_core::domain::KeyValue],
@@ -499,7 +499,7 @@ fn build_headers(
         }
         (AuthType::Apikey, _) => {
             if let Some(a) = &auth.apikey {
-                if a.in_ == ApiKeyLocation::Header
+                if a.in_location == ApiKeyLocation::Header
                     && !out.iter().any(|(k, _)| k.eq_ignore_ascii_case(&a.key))
                 {
                     out.push((a.key.clone(), a.value.clone()));
@@ -529,7 +529,7 @@ fn append_apikey_query(url: String, auth: &AuthConfig) -> String {
         ..
     } = auth
     {
-        if a.in_ == ApiKeyLocation::Query && !a.key.is_empty() {
+        if a.in_location == ApiKeyLocation::Query && !a.key.is_empty() {
             let glue = if url.contains('?') { '&' } else { '?' };
             return format!("{url}{glue}{}={}", url_encode(&a.key), url_encode(&a.value));
         }
@@ -626,7 +626,7 @@ fn base64_encode(input: &[u8]) -> String {
 ///   3. Substitute `{{var}}` everywhere (URL path, headers, params,
 ///      body content, auth fields).
 ///   4. Append enabled query params (encoded).
-///   5. Append apikey query (if `auth.kind == Apikey && in_ == Query`).
+///   5. Append apikey query (if `auth.kind == Apikey && inLocation == Query`).
 ///   6. Build ordered header list (user headers + auto Content-Type
 ///      + auto Accept + auth-derived `Authorization`).
 ///   7. Decide body inclusion (only when `body.mode != None && content

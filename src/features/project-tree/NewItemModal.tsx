@@ -69,7 +69,7 @@ export function NewItemModal() {
   const projectModules = useMemo(
     () =>
       nodes
-        .filter((n) => n.type === 'module' && n.rootId === activeProjectId)
+        .filter((n) => n.kind === 'module' && n.rootId === activeProjectId)
         .sort((a, b) => a.sortOrder - b.sortOrder),
     [nodes, activeProjectId],
   );
@@ -452,7 +452,7 @@ function collectionsUnderModule(nodes: ResourceNode[], moduleId: string): Resour
   const out: ResourceNode[] = [];
   const walk = (parentId: string) => {
     for (const k of byParent.get(parentId) ?? []) {
-      if (k.type !== 'collection') continue;
+      if (k.kind !== 'collection') continue;
       out.push(k);
       walk(k.id);
     }

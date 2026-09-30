@@ -33,10 +33,21 @@ export interface RequestBody {
 export type AuthType = 'none' | 'bearer' | 'basic' | 'apikey';
 
 export interface AuthConfig {
-  type: AuthType;
+  /**
+   * Which scheme is in play. Named `kind` rather than `type` because
+   * `type` is a keyword in Rust too, and a serde `rename` bridging
+   * that gap used to make this field and `ResourceNode.kind` disagree
+   * with their Rust counterparts. Same rule as `ResourceNode.kind`.
+   */
+  kind: AuthType;
   bearer?: string;
   basic?: { username: string; password: string };
-  apikey?: { key: string; value: string; in_: 'header' | 'query' };
+  /**
+   * `in` is a reserved word in TypeScript (`obj.in` will not parse),
+   * so the location is spelled out. A trailing-underscore workaround
+   * does not help: the Rust field would camelCase back to `in`.
+   */
+  apikey?: { key: string; value: string; inLocation: 'header' | 'query' };
 }
 
 /**
@@ -74,7 +85,12 @@ export interface ResourceNode {
    * a collection. `db::nodes::move_many` refuses any other combination.
    */
   parentId: string | null;
-  type: ResourceNodeType;
+  /**
+   * Named `kind` because `type` is a Rust keyword; see
+   * {@link AuthConfig.kind} for why the wire name is not worked
+   * around with a serde `rename`.
+   */
+  kind: ResourceNodeType;
   name: string;
   description?: string;
   /** Position among siblings. Scoped to the parent, not the project. */

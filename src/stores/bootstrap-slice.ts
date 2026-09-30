@@ -219,7 +219,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // whole-workspace list, which could belong to a project the user
       // was never shown.
       const firstEndpoint = nodes.find(
-        (n) => n.type === 'endpoint' && n.rootId === firstProject?.id,
+        (n) => n.kind === 'endpoint' && n.rootId === firstProject?.id,
       );
 
       // Tolerant on purpose: a failure here must not fail the load. The

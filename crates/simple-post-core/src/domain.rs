@@ -8,6 +8,18 @@
 //! SQLite persistence layer (`crate::db`) serializes the more complex
 //! nested fields (KeyValue[], Body, Auth) into JSON TEXT columns;
 //! see `db/endpoints.rs` for the (de)serialization round-trip.
+//!
+//! **No per-field `#[serde(rename)]` anywhere in this file.** The Rust
+//! field name *is* the wire name, derived once by `rename_all`. The
+//! reason is not purity — a rename is a second source of truth for a
+//! field's name, and it is the seam where the two languages drift
+//! apart: `ApiKeyAuth` renamed its location field to `in` for
+//! TypeScript's benefit, and TypeScript could not even spell `in`,
+//! so the two sides disagreed and the value never round-tripped. When
+//! a wire name genuinely needs to differ from the Rust name, expand the
+//! Rust name instead — `in` is reserved on the TypeScript side, hence
+//! `in_location`, and a trailing-underscore workaround does not help
+//! because `in_` camelCases straight back to `in`.
 
 use std::collections::HashMap;
 
@@ -119,9 +131,9 @@ pub enum AuthType {
     Apikey,
 }
 
-/// Where the apikey is attached. The TS interface declares the field as
-/// `in_` because `in` is a Rust/JS reserved word; serde rename below keeps
-/// the JSON shape as `"in": "header" | "query"`.
+/// Where the apikey is attached. Reaches the wire as
+/// `inLocation: "header" | "query"` on [`ApiKeyAuth::in_location`];
+/// see the module docs for why the obvious `in` is not usable.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiKeyLocation {
@@ -142,15 +154,20 @@ pub struct BasicAuth {
 pub struct ApiKeyAuth {
     pub key: String,
     pub value: String,
-    /// Field name on the wire is `"in"`. See [`ApiKeyLocation`].
-    #[serde(rename = "in")]
-    pub in_: ApiKeyLocation,
+    /// Serialises as `inLocation`. `in` is a reserved word in
+    /// TypeScript, and `in_` is not a fix — `rename_all = "camelCase"`
+    /// maps `in_` back to `in` on the wire, so the two languages would
+    /// disagree exactly as before. See the module docs.
+    pub in_location: ApiKeyLocation,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfig {
-    #[serde(rename = "type")]
+    /// Which scheme is in play. Reads as `kind` on the wire because
+    /// that is what the field is called here — `type` is a keyword in
+    /// Rust too, and a serde `rename` to paper over that is what used
+    /// to make this field disagree with [`ResourceNode::kind`].
     pub kind: AuthType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer: Option<String>,
@@ -252,7 +269,10 @@ pub struct ResourceNode {
     pub root_id: String,
     /// `None` for a module, whose parent is the project.
     pub parent_id: Option<String>,
-    #[serde(rename = "type")]
+    /// Which of the three kinds this row is. Wire name `kind` for the
+    /// same reason as [`AuthConfig::kind`]: `type` is a Rust keyword,
+    /// and renaming it to `type` on the wire only re-opened the gap
+    /// between the Tauri command argument and the REST body.
     pub kind: ResourceNodeType,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

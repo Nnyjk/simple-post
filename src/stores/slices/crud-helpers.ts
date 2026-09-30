@@ -88,7 +88,7 @@ export function tabKeysForSubtree(
 ): Set<string> {
   const close = new Set<string>();
   for (const n of nodes) {
-    if (removed.has(n.id)) close.add(`${n.type}:${n.id}`);
+    if (removed.has(n.id)) close.add(`${n.kind}:${n.id}`);
   }
   if (scope === 'project') close.add(`project:${targetId}`);
   return close;
@@ -109,7 +109,7 @@ export function blankDetail(
     params: [],
     headers: [],
     body: { mode: 'none', content: '' },
-    auth: { type: 'none' },
+    auth: { kind: 'none' },
     tags: [],
     ...partial,
   };

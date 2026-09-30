@@ -77,8 +77,16 @@ pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
 /// `CREATE TABLE IF NOT EXISTS` already handles them, and old files keep
 /// working because readers tolerate the missing column.
 ///
+/// v3 is a *content* change rather than a column change, and it needs the
+/// bump anyway: `endpoint_details.auth_json` stores `serde_json` output
+/// verbatim, so dropping the `type` → `kind` rename in `domain.rs` left
+/// every existing row shaped `{"type":"bearer",…}` — including the `'{}'`
+/// default, which no longer deserializes because `kind` is required. A
+/// v2 file is unreadable, not merely stale, and the rebuild path is the
+/// project's answer to that (see [`ensure_current_schema`]).
+///
 /// Keep the history comment at the bottom of `schema.sql` in sync.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 // -------------------------------------------------------------------------
 // Public API.

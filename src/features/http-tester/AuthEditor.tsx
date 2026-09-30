@@ -24,18 +24,18 @@ export function AuthEditor({ value, onChange }: Props) {
         </label>
         <Tabs
           items={TYPES.map((t) => ({ id: t.id, label: t.label }))}
-          value={value.type}
-          onChange={(id) => onChange({ ...value, type: id as AuthType })}
+          value={value.kind}
+          onChange={(id) => onChange({ ...value, kind: id as AuthType })}
         />
       </div>
 
-      {value.type === 'none' && (
+      {value.kind === 'none' && (
         <div className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
           此请求不需要鉴权
         </div>
       )}
 
-      {value.type === 'bearer' && (
+      {value.kind === 'bearer' && (
         <div>
           <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             Token
@@ -52,7 +52,7 @@ export function AuthEditor({ value, onChange }: Props) {
         </div>
       )}
 
-      {value.type === 'basic' && (
+      {value.kind === 'basic' && (
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -88,7 +88,7 @@ export function AuthEditor({ value, onChange }: Props) {
         </div>
       )}
 
-      {value.type === 'apikey' && (
+      {value.kind === 'apikey' && (
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-1">
@@ -96,14 +96,14 @@ export function AuthEditor({ value, onChange }: Props) {
                 Add to
               </label>
               <Select
-                value={value.apikey?.in_ ?? 'header'}
+                value={value.apikey?.inLocation ?? 'header'}
                 onChange={(e) =>
                   onChange({
                     ...value,
                     apikey: {
                       key: value.apikey?.key ?? '',
                       value: value.apikey?.value ?? '',
-                      in_: e.target.value as 'header' | 'query',
+                      inLocation: e.target.value as 'header' | 'query',
                     },
                   })
                 }
@@ -125,7 +125,7 @@ export function AuthEditor({ value, onChange }: Props) {
                     apikey: {
                       key: e.target.value,
                       value: value.apikey?.value ?? '',
-                      in_: value.apikey?.in_ ?? 'header',
+                      inLocation: value.apikey?.inLocation ?? 'header',
                     },
                   })
                 }
@@ -146,7 +146,7 @@ export function AuthEditor({ value, onChange }: Props) {
                   apikey: {
                     key: value.apikey?.key ?? '',
                     value: e.target.value,
-                    in_: value.apikey?.in_ ?? 'header',
+                    inLocation: value.apikey?.inLocation ?? 'header',
                   },
                 })
               }

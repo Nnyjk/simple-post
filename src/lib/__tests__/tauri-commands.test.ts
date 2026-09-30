@@ -259,7 +259,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
       id: 'n1',
       rootId: 'p1',
       parentId: 'c1',
-      type: 'endpoint',
+      kind: 'endpoint',
       name: 'Login',
       description: 'auth',
     });
@@ -274,7 +274,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
       id: 'n1',
       rootId: 'p1',
       parentId: 'c1',
-      type: 'endpoint',
+      kind: 'endpoint',
       name: 'Login',
       description: 'auth',
       sortOrder: 0,
@@ -285,7 +285,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     await invokeCmd(COMMANDS.nodesCreate, {
       id: 'n1',
       rootId: 'p1',
-      type: 'module',
+      kind: 'module',
       name: 'Core',
       sortOrder: 3,
       detail: { method: 'POST', url: '/login' },

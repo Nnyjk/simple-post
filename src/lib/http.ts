@@ -335,7 +335,7 @@ export async function sendEndpoint(input: SendEndpointInput): Promise<ApiRespons
     params: [],
     headers: [],
     body: { mode: 'none', content: '' },
-    auth: { type: 'none' },
+    auth: { kind: 'none' },
     settings: input.settings,
   };
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};

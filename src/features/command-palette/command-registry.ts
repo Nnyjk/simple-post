@@ -73,7 +73,7 @@ export function buildCommands(): Command[] {
 
   // ---------- 导航：跳到接口 ----------
   for (const ep of s.nodes) {
-    if (ep.type !== 'endpoint') continue;
+    if (ep.kind !== 'endpoint') continue;
     const detail = s.endpointDetails[ep.id];
     if (!detail) continue;
     const pid = endpointProjectId(ep.id, s);
@@ -159,7 +159,7 @@ export function buildCommands(): Command[] {
 
   // ---------- 命令：新建集合 ----------
   {
-    const firstMod = s.nodes.find((n) => n.type === 'module' && n.rootId === s.activeProjectId);
+    const firstMod = s.nodes.find((n) => n.kind === 'module' && n.rootId === s.activeProjectId);
     cmds.push({
       id: 'cmd:new-collection',
       title: firstMod ? '新建集合' : '新建集合（需先有模块）',
@@ -177,10 +177,10 @@ export function buildCommands(): Command[] {
 
   // ---------- 命令：新建接口 ----------
   {
-    const firstCol = s.nodes.find((n) => n.type === 'collection' && n.rootId === s.activeProjectId);
+    const firstCol = s.nodes.find((n) => n.kind === 'collection' && n.rootId === s.activeProjectId);
     const firstMod = firstCol
       ? s.nodes.find((n) => n.id === firstCol.parentId)
-      : s.nodes.find((n) => n.type === 'module' && n.rootId === s.activeProjectId);
+      : s.nodes.find((n) => n.kind === 'module' && n.rootId === s.activeProjectId);
     cmds.push({
       id: 'cmd:new-endpoint',
       title: firstCol ? '新建接口' : '新建接口（需先有集合）',

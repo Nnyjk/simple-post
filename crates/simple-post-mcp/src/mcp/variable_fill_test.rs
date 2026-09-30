@@ -129,7 +129,7 @@ fn validate_endpoint_flags_missing_apikey() {
         apikey: Some(ApiKeyAuth {
             key: String::new(),
             value: String::new(),
-            in_: ApiKeyLocation::Header,
+            in_location: ApiKeyLocation::Header,
         }),
         ..Default::default()
     };

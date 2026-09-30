@@ -37,10 +37,10 @@ export interface NewNodeInput {
   rootId?: string;
   /** `null` (or omitted) puts a module at the top of its project. */
   parentId?: string | null;
-  type: ResourceNodeType;
+  kind: ResourceNodeType;
   name: string;
   description?: string;
-  /** Endpoint-only, and only meaningful when `type` is `'endpoint'`. */
+  /** Endpoint-only, and only meaningful when `kind` is `'endpoint'`. */
   detail?: Partial<Omit<EndpointDetail, 'nodeId'>>;
 }
 
@@ -97,7 +97,7 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         id,
         rootId: input.rootId ?? null,
         parentId: input.parentId ?? null,
-        type: input.type,
+        kind: input.kind,
         name: input.name,
         description: input.description,
         sortOrder: 0,
@@ -107,13 +107,13 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         nodes: [...s.nodes, node],
         // Only an endpoint has a detail row; writing an empty one for a
         // module would make `Object.keys(endpointDetails)` lie.
-        ...(input.type === 'endpoint'
+        ...(input.kind === 'endpoint'
           ? { endpointDetails: { ...s.endpointDetails, [id]: blankDetail(id, input.detail) } }
           : {}),
       }));
       return node.id;
     } catch (e) {
-      console.error(`[store] nodes_create failed (${input.type})`, e);
+      console.error(`[store] nodes_create failed (${input.kind})`, e);
       return null;
     }
   },
@@ -148,7 +148,7 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
     set((s) => {
       const removed = collectSubtree(id, indexByParent(s.nodes));
       const droppedEndpointIds = s.nodes
-        .filter((n) => n.type === 'endpoint' && removed.has(n.id))
+        .filter((n) => n.kind === 'endpoint' && removed.has(n.id))
         .map((n) => n.id);
       const nextHistory = { ...s.responseHistory };
       const nextExamples = { ...s.responseExamples };

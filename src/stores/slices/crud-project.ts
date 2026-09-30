@@ -84,7 +84,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       // module → collection → endpoint.
       const removed = new Set(s.nodes.filter((n) => n.rootId === id).map((n) => n.id));
       const droppedEndpointIds = s.nodes
-        .filter((n) => n.type === 'endpoint' && removed.has(n.id))
+        .filter((n) => n.kind === 'endpoint' && removed.has(n.id))
         .map((n) => n.id);
       const nextHistory = { ...s.responseHistory };
       const nextExamples = { ...s.responseExamples };

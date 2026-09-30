@@ -55,7 +55,7 @@ function input(overrides: Partial<BuildInput> = {}): BuildInput {
     params: [],
     headers: [],
     body: { mode: 'none', content: '' },
-    auth: { type: 'none' },
+    auth: { kind: 'none' },
     ...overrides,
   };
 }
@@ -224,7 +224,7 @@ describe('http-build: headers', () => {
 describe('http-build: auth (Bearer)', () => {
   it('adds Authorization: Bearer <value>', () => {
     const { init } = buildFetchInit(
-      input({ auth: { type: 'bearer', bearer: 'eyJ.tok' } as AuthConfig }),
+      input({ auth: { kind: 'bearer', bearer: 'eyJ.tok' } as AuthConfig }),
     );
     assert.equal((init.headers as Record<string, string>)['Authorization'], 'Bearer eyJ.tok');
   });
@@ -232,7 +232,7 @@ describe('http-build: auth (Bearer)', () => {
   it('resolves {{token}} in bearer against env', () => {
     const { init } = buildFetchInit(
       input({
-        auth: { type: 'bearer', bearer: '{{token}}' } as AuthConfig,
+        auth: { kind: 'bearer', bearer: '{{token}}' } as AuthConfig,
         env: ENV,
       }),
     );
@@ -241,7 +241,7 @@ describe('http-build: auth (Bearer)', () => {
 
   it('leaves missing var literal when env is absent', () => {
     const { init } = buildFetchInit(
-      input({ auth: { type: 'bearer', bearer: '{{missing}}' } as AuthConfig }),
+      input({ auth: { kind: 'bearer', bearer: '{{missing}}' } as AuthConfig }),
     );
     assert.equal((init.headers as Record<string, string>)['Authorization'], 'Bearer {{missing}}');
   });
@@ -250,7 +250,7 @@ describe('http-build: auth (Bearer)', () => {
     const { init } = buildFetchInit(
       input({
         headers: [kv('Authorization', 'Bearer user-override')],
-        auth: { type: 'bearer', bearer: 'eyJ.tok' } as AuthConfig,
+        auth: { kind: 'bearer', bearer: 'eyJ.tok' } as AuthConfig,
       }),
     );
     const h = init.headers as Record<string, string>;
@@ -269,7 +269,7 @@ describe('http-build: auth (Basic)', () => {
     const { init } = buildFetchInit(
       input({
         auth: {
-          type: 'basic',
+          kind: 'basic',
           basic: { username: 'alice', password: 'secret' },
         } as AuthConfig,
       }),
@@ -285,7 +285,7 @@ describe('http-build: auth (Basic)', () => {
     const { init } = buildFetchInit(
       input({
         auth: {
-          type: 'basic',
+          kind: 'basic',
           basic: { username: '用户', password: '密码' },
         } as AuthConfig,
       }),
@@ -303,7 +303,7 @@ describe('http-build: auth (Basic)', () => {
     const { init } = buildFetchInit(
       input({
         auth: {
-          type: 'basic',
+          kind: 'basic',
           basic: { username: '{{userId}}', password: '{{token}}' },
         } as AuthConfig,
         env: ENV,
@@ -320,7 +320,7 @@ describe('http-build: auth (Basic)', () => {
       input({
         headers: [kv('Authorization', 'Bearer override')],
         auth: {
-          type: 'basic',
+          kind: 'basic',
           basic: { username: 'a', password: 'b' },
         } as AuthConfig,
       }),
@@ -338,8 +338,8 @@ describe('http-build: auth (API Key)', () => {
     const { init } = buildFetchInit(
       input({
         auth: {
-          type: 'apikey',
-          apikey: { key: 'X-API-Key', value: 'k_123', in_: 'header' },
+          kind: 'apikey',
+          apikey: { key: 'X-API-Key', value: 'k_123', inLocation: 'header' },
         } as AuthConfig,
       }),
     );
@@ -350,8 +350,8 @@ describe('http-build: auth (API Key)', () => {
     const { init } = buildFetchInit(
       input({
         auth: {
-          type: 'apikey',
-          apikey: { key: 'X-API-Key', value: '{{apiKey}}', in_: 'header' },
+          kind: 'apikey',
+          apikey: { key: 'X-API-Key', value: '{{apiKey}}', inLocation: 'header' },
         } as AuthConfig,
         env: ENV,
       }),
@@ -364,8 +364,8 @@ describe('http-build: auth (API Key)', () => {
       input({
         headers: [kv('X-API-Key', 'override')],
         auth: {
-          type: 'apikey',
-          apikey: { key: 'X-API-Key', value: 'k_123', in_: 'header' },
+          kind: 'apikey',
+          apikey: { key: 'X-API-Key', value: 'k_123', inLocation: 'header' },
         } as AuthConfig,
       }),
     );
@@ -378,8 +378,8 @@ describe('http-build: auth (API Key)', () => {
     const { url, init } = buildFetchInit(
       input({
         auth: {
-          type: 'apikey',
-          apikey: { key: 'apiKey', value: 'k_123', in_: 'query' },
+          kind: 'apikey',
+          apikey: { key: 'apiKey', value: 'k_123', inLocation: 'query' },
         } as AuthConfig,
       }),
     );
@@ -393,8 +393,8 @@ describe('http-build: auth (API Key)', () => {
       input({
         url: 'http://api.example.com/x?foo=bar',
         auth: {
-          type: 'apikey',
-          apikey: { key: 'apiKey', value: 'k_123', in_: 'query' },
+          kind: 'apikey',
+          apikey: { key: 'apiKey', value: 'k_123', inLocation: 'query' },
         } as AuthConfig,
       }),
     );
@@ -405,8 +405,8 @@ describe('http-build: auth (API Key)', () => {
     const { url } = buildFetchInit(
       input({
         auth: {
-          type: 'apikey',
-          apikey: { key: 'a key', value: 'x&y', in_: 'query' },
+          kind: 'apikey',
+          apikey: { key: 'a key', value: 'x&y', inLocation: 'query' },
         } as AuthConfig,
       }),
     );
@@ -514,8 +514,8 @@ describe('http-build: cURL parity with fetch', () => {
       url: 'http://api.example.com/x',
       params: [kv('page', '1')],
       auth: {
-        type: 'apikey',
-        apikey: { key: 'k', value: 'v', in_: 'query' },
+        kind: 'apikey',
+        apikey: { key: 'k', value: 'v', inLocation: 'query' },
       } as AuthConfig,
     });
     const fetch = buildFetchInit(i);
@@ -544,7 +544,7 @@ describe('http-build: cURL parity with fetch', () => {
     const i = input({
       method: 'POST',
       body: { mode: 'json', content: '{"a":1}' },
-      auth: { type: 'bearer', bearer: 'eyJ.tok' } as AuthConfig,
+      auth: { kind: 'bearer', bearer: 'eyJ.tok' } as AuthConfig,
     });
     const curl = buildCurlCommand(i);
     assert.ok(curl.includes("-H 'Content-Type: application/json'"));
@@ -588,7 +588,7 @@ describe('http-build: cURL parity with fetch', () => {
       method: 'POST',
       body: { mode: 'json', content: '{"a":1}' },
       headers: [kv('X-Trace', 'abc'), kv('X-Other', 'def')],
-      auth: { type: 'bearer', bearer: 'tok' } as AuthConfig,
+      auth: { kind: 'bearer', bearer: 'tok' } as AuthConfig,
     });
     const { init } = buildFetchInit(i);
     const curl = buildCurlCommand(i);
@@ -609,8 +609,8 @@ describe('http-build: edge cases', () => {
       url: 'http://api.example.com/x',
       params: [kv('a', '1')],
       auth: {
-        type: 'apikey',
-        apikey: { key: 'k', value: 'v', in_: 'query' },
+        kind: 'apikey',
+        apikey: { key: 'k', value: 'v', inLocation: 'query' },
       } as AuthConfig,
       body: { mode: 'json', content: '{"x":1}' },
     });

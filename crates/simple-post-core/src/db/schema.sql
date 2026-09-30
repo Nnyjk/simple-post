@@ -204,10 +204,17 @@ END;
 --   0  pre-versioning (the original modules/collections/endpoints
 --      three-table layout). Any file stamped 0 is not readable by a
 --      current build and is rebuilt from scratch.
---   2  current. `nodes` / `endpoint_details` landed additively, so an
---      older v2 file gains them on the next `CREATE TABLE IF NOT
---      EXISTS` without needing its own version.
+--   2  `nodes` / `endpoint_details` landed additively, so an older v2
+--      file gains them on the next `CREATE TABLE IF NOT EXISTS`
+--      without needing its own version.
+--   3  current. No column changed — what changed is what
+--      `endpoint_details.auth_json` holds. It stores the serialised
+--      `domain::AuthConfig`, and dropping the `type` → `kind` serde
+--      rename (and `in` → `inLocation`) means a v2 row no longer
+--      deserialises: `kind` is a required field, so even the `'{}'`
+--      default fails. Unreadable rather than stale, hence a bump
+--      instead of a reader-side shim.
 --
 -- 1 was never shipped: the nodes merge landed before any build could
 --      stamp a version of its own, so it has no database anywhere.
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
