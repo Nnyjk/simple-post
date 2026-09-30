@@ -4,6 +4,7 @@ import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
+import { IconTile } from '@/components/ui/icon-tile';
 import type { DropZone } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
@@ -76,16 +77,17 @@ export function CollectionRow({
               collection.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          <span
-            aria-hidden
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-sky-500/15 text-sky-500"
-          >
-            {collection.expanded ? (
-              <FolderOpen className="h-3 w-3" />
-            ) : (
-              <FolderClosed className="h-3 w-3" />
-            )}
-          </span>
+          <IconTile
+            concept="collection"
+            size="sm"
+            icon={
+              collection.expanded ? (
+                <FolderOpen className="h-3 w-3" />
+              ) : (
+                <FolderClosed className="h-3 w-3" />
+              )
+            }
+          />
           <InlineEdit
             value={collection.name}
             onSave={onSaveEdit}

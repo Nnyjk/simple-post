@@ -48,6 +48,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { MethodPill } from '@/components/ui/method-pill';
+import { HUE } from '@/lib/hue';
 import { Flip, gsap, useGSAP } from '@/lib/gsap';
 
 const KIND_LABEL: Record<TabKind, string> = {
@@ -63,7 +64,16 @@ interface TabDescriptor {
   title: string;
   hint?: string;
   icon: React.ReactNode;
-  // Per-kind accent used on the leading icon, so the strip stays scannable.
+  /**
+   * Text colour class for the leading icon, so the strip stays scannable
+   * and matches the tree row for the same entity.
+   *
+   * This was an inline `style={{ color: … }}` with a hand-typed hex
+   * before. Two problems: the hex had already drifted from the tree's
+   * own colour for the same concept, and a fixed hex can't follow the
+   * theme — the module icon stayed amber-400 in dark mode while the tree
+   * row had already shifted. A class backed by a CSS variable fixes both.
+   */
   iconColor: string;
 }
 
@@ -281,9 +291,7 @@ export function WorkspaceTabs() {
             )}
             onClick={() => setActiveTab(d.tab.id)}
           >
-            <span className="shrink-0" style={{ color: active ? d.iconColor : undefined }}>
-              {d.icon}
-            </span>
+            <span className={cn('shrink-0', active && d.iconColor)}>{d.icon}</span>
             <span
               // Title is the main element that grows. It always truncates
               // — but the *amount* of room it gets depends on mode:
@@ -300,7 +308,7 @@ export function WorkspaceTabs() {
             {dirty && (
               <Tooltip content="有未保存的修改" side="bottom">
                 <span
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
                   aria-label="有未保存的修改"
                 />
               </Tooltip>
@@ -421,7 +429,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         tab: t,
         title: '设置',
         icon: <Settings2 className="h-3.5 w-3.5" />,
-        iconColor: '#a3a3a3',
+        iconColor: 'text-muted-foreground',
       });
       continue;
     }
@@ -436,7 +444,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         title: p.name,
         hint: p.description || undefined,
         icon: <Package className="h-3.5 w-3.5" />,
-        iconColor: '#a78bfa',
+        iconColor: HUE.project.text,
       });
       continue;
     }
@@ -455,7 +463,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         ) : (
           <FolderClosed className="h-3.5 w-3.5" />
         ),
-        iconColor: '#fbbf24',
+        iconColor: HUE.module.text,
       });
       continue;
     }
@@ -474,7 +482,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         ) : (
           <FolderClosed className="h-3.5 w-3.5" />
         ),
-        iconColor: '#60a5fa',
+        iconColor: HUE.collection.text,
       });
       continue;
     }
@@ -499,7 +507,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
           className="!h-3.5 !w-3.5 !text-[9px]"
         />
       ),
-      iconColor: '#a3a3a3',
+      iconColor: 'text-muted-foreground',
     });
   }
   return out;
@@ -510,7 +518,7 @@ function missingDescriptor(tab: OpenTab): TabDescriptor {
     tab,
     title: `（${KIND_LABEL[tab.kind]}已删除）`,
     icon: <Hash className="h-3.5 w-3.5" />,
-    iconColor: '#f87171',
+    iconColor: 'text-destructive',
   };
 }
 

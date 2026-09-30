@@ -4,6 +4,7 @@ import type { Project } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
+import { IconTile } from '@/components/ui/icon-tile';
 
 export function ProjectRow({
   project,
@@ -53,12 +54,7 @@ export function ProjectRow({
         'hover:bg-accent/60',
       )}
     >
-      <span
-        aria-hidden
-        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/15 text-violet-500"
-      >
-        <Package className="h-3 w-3" />
-      </span>
+      <IconTile concept="project" size="sm" icon={<Package className="h-3 w-3" />} />
       <InlineEdit
         value={project.name}
         onSave={onSaveEdit}

@@ -149,7 +149,7 @@ export function StatusBadge({ status }: { status: McpRuntimeStatus }) {
   if (status === 'running') {
     return (
       <Badge variant="success">
-        <span className="mr-1 h-1.5 w-1.5 rounded-full bg-emerald-400" />
+        <span className="mr-1 h-1.5 w-1.5 rounded-full bg-success" />
         running
       </Badge>
     );
@@ -180,7 +180,7 @@ export function StateSummary({ state }: { state: McpUiState | null }) {
   if (!state) {
     return (
       <span className="inline-flex items-center gap-2 text-muted-foreground">
-        <span className="h-1.5 w-1.5 rounded-full bg-zinc-500" />
+        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
         <span className="text-[11px]">连接中…</span>
       </span>
     );

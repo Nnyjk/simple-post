@@ -134,9 +134,7 @@ export function ProjectTree() {
     >
       {/* Header */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-card/40 px-3">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          工作区
-        </span>
+        <span className="label-caps">工作区</span>
         <Tooltip content="新建（项目 / 模块 / 集合 / 接口）" side="bottom">
           <Button
             variant="ghost"

@@ -94,7 +94,7 @@ export function TopBar() {
     >
       {/* Logo — pure decoration, sits inside the drag region. */}
       <div className="flex items-center gap-2 pr-2">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-blue-500 to-purple-500">
+        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-primary to-hue-project">
           <Sparkles className="h-3.5 w-3.5 text-white" />
         </div>
         <span className="text-sm font-semibold tracking-tight">Simple Post</span>
@@ -128,9 +128,7 @@ export function TopBar() {
         </Button>
         {projOpen && activeProject && (
           <div className="absolute left-0 top-full z-50 mt-1 w-64 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
-            <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              项目
-            </div>
+            <div className="px-2 py-1 label-caps">项目</div>
             {projects.map((p) => (
               <button
                 {...NO_DRAG}
@@ -189,9 +187,7 @@ export function TopBar() {
         </Button>
         {envOpen && (
           <div className="absolute left-0 top-full z-50 mt-1 w-56 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
-            <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              环境
-            </div>
+            <div className="px-2 py-1 label-caps">环境</div>
             {envs.length === 0 ? (
               <>
                 <div className="px-2 py-3 text-center text-xs text-muted-foreground">
@@ -267,7 +263,10 @@ export function TopBar() {
         {...NO_DRAG}
         type="button"
         onClick={() => setPaletteOpen(true)}
-        className="ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/80 ${focusRing}"
+        className={cn(
+          'ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/80',
+          focusRing,
+        )}
         data-testid="global-search"
         aria-label="打开命令面板"
       >
@@ -324,7 +323,7 @@ function McpStatusPill() {
   const unhealthy = status === 'crashed' || status === 'unhealthy';
   const connecting = status === 'starting' || status === 'restarting';
 
-  const dotClass = running ? 'bg-success' : unhealthy ? 'bg-destructive' : 'bg-zinc-500';
+  const dotClass = running ? 'bg-success' : unhealthy ? 'bg-destructive' : 'bg-muted-foreground';
 
   return (
     <Tooltip
@@ -359,7 +358,7 @@ function McpStatusPill() {
           <span
             className={cn(
               'absolute inset-0 animate-ping rounded-full',
-              running ? 'bg-success' : unhealthy ? 'bg-destructive' : 'bg-zinc-500',
+              running ? 'bg-success' : unhealthy ? 'bg-destructive' : 'bg-muted-foreground',
             )}
             style={{ opacity: 0.4 }}
           />

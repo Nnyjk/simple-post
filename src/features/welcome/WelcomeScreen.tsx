@@ -68,7 +68,7 @@ export function WelcomeScreen() {
         <div className="space-y-3">
           <div
             data-welcome-stagger
-            className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 shadow-lg"
+            className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-hue-project shadow-lg"
           >
             <Sparkles className="h-6 w-6 text-white" />
           </div>

@@ -22,6 +22,8 @@ import { ConnectionSection } from './sections/ConnectionSection';
 import { AppearanceSection } from './sections/AppearanceSection';
 import { RequestSection } from './sections/RequestSection';
 import { cn } from '@/lib/utils';
+import type { HueConcept } from '@/lib/hue';
+import { IconTile } from '@/components/ui/icon-tile';
 import { gsap, useGSAP } from '@/lib/gsap';
 
 const CATEGORY_IDS: readonly SettingsCategoryId[] = ['env', 'connection', 'appearance', 'request'];
@@ -31,38 +33,44 @@ const RAIL_ITEMS: {
   label: string;
   icon: React.ReactNode;
   hint: string;
-  // A unique accent colour for the rail pill — matches the icon's tinted
-  // background when the row is active, so the eye can trace the rail →
-  // header mapping at a glance.
-  accent: string;
+  /**
+   * Semantic hue for the rail pill, so the active row's icon tint reads
+   * as the same concept the section header uses. Previously each entry
+   * carried a raw Tailwind palette string typed by hand, which is how
+   * `connection` ended up violet — the same colour as `project`.
+   *
+   * `env` and `appearance` take no hue: environment is the app's primary
+   * context (`--primary`) and appearance is cosmetic, so both stay
+   * neutral rather than inventing a colour with no informational gain.
+   * See `src/lib/hue.ts`.
+   */
+  concept?: HueConcept;
 }[] = [
   {
     id: 'env',
     label: '环境',
     icon: <Cloud className="h-4 w-4" />,
     hint: '环境变量 / baseUrl',
-    accent: 'text-sky-500 bg-sky-500/15',
   },
   {
     id: 'connection',
     label: '连接',
     icon: <Cpu className="h-4 w-4" />,
     hint: 'MCP 协议设置',
-    accent: 'text-violet-500 bg-violet-500/15',
+    concept: 'connection',
   },
   {
     id: 'appearance',
     label: '外观与体验',
     icon: <Palette className="h-4 w-4" />,
     hint: '主题 / 快捷键',
-    accent: 'text-pink-500 bg-pink-500/15',
   },
   {
     id: 'request',
     label: '请求',
     icon: <Send className="h-4 w-4" />,
     hint: '超时 / 重定向 / 体积上限',
-    accent: 'text-emerald-500 bg-emerald-500/15',
+    concept: 'request',
   },
 ];
 
@@ -155,9 +163,7 @@ export function SettingsPanel() {
           visual weight of the project tree so the settings tab feels
           like another navigation context, not a popup. */}
       <aside className="flex w-48 shrink-0 flex-col gap-0.5 border-r border-border bg-card/40 p-2">
-        <div className="px-2 pb-2 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
-          分组
-        </div>
+        <div className="label-caps px-2 pb-2 pt-1 text-muted-foreground/70">分组</div>
         <nav className="flex flex-col gap-0.5" role="tablist" aria-label="设置分组">
           {RAIL_ITEMS.map((item) => {
             const active = item.id === activeSection;
@@ -175,17 +181,15 @@ export function SettingsPanel() {
                     : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
                 )}
               >
-                <span
+                <IconTile
+                  size="xs"
+                  icon={item.icon}
                   className={cn(
-                    'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors',
-                    active
-                      ? item.accent
-                      : 'bg-muted/60 text-muted-foreground group-hover:text-foreground',
+                    'transition-colors',
+                    !active && 'bg-muted/60 text-muted-foreground group-hover:text-foreground',
                   )}
-                  aria-hidden
-                >
-                  {item.icon}
-                </span>
+                  concept={active ? item.concept : undefined}
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{item.label}</span>
                   <span

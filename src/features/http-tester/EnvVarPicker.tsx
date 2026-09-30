@@ -101,7 +101,7 @@ export function EnvVarPicker({
       className="fixed z-50 max-h-64 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg animate-fade-in"
       onMouseDown={(e) => e.preventDefault() /* keep input focused */}
     >
-      <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 label-caps">
         <ChevronRight className="h-3 w-3" />
         插入环境变量{envName ? ` · ${envName}` : ''}
       </div>
@@ -126,7 +126,7 @@ export function EnvVarPicker({
               active ? 'bg-primary/15 text-foreground' : 'hover:bg-accent/60',
             )}
           >
-            <span className="shrink-0 font-mono text-blue-400">{`{{${e.key}}}`}</span>
+            <span className="shrink-0 font-mono text-primary">{`{{${e.key}}}`}</span>
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {truncate(e.value, 60)}
             </span>

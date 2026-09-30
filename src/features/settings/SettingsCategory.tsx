@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { IconTile } from '@/components/ui/icon-tile';
 
 interface SettingsCategoryProps {
   /**
@@ -80,14 +81,7 @@ export function SettingsCategory({
     >
       {hasHeader && (
         <header className="mb-3 flex items-start gap-3">
-          {icon && (
-            <span
-              aria-hidden
-              className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground"
-            >
-              {icon}
-            </span>
-          )}
+          {icon && <IconTile icon={icon} className="mt-0.5" />}
           <div className="min-w-0 flex-1">
             {title && (
               <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
@@ -168,17 +162,7 @@ export function SettingRow({
       )}
     >
       {icon && (
-        <span
-          aria-hidden
-          className={cn(
-            'mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
-            tone === 'danger'
-              ? 'bg-destructive/10 text-destructive'
-              : 'bg-muted/60 text-muted-foreground',
-          )}
-        >
-          {icon}
-        </span>
+        <IconTile icon={icon} className="mt-0.5" tone={tone === 'danger' ? 'danger' : 'default'} />
       )}
       <div className="min-w-0 flex-1">
         <div

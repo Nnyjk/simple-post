@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { IconTile } from '@/components/ui/icon-tile';
 
 /**
  * GroupHeader — section sub-title inside the env body.
@@ -16,18 +17,9 @@ export function GroupHeader({
 }) {
   return (
     <div className="flex items-start gap-2 border-b border-border/60 bg-muted/20 px-4 py-2">
-      {icon && (
-        <span
-          aria-hidden
-          className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-background text-muted-foreground"
-        >
-          {icon}
-        </span>
-      )}
+      {icon && <IconTile size="sm" className="mt-0.5 bg-background" icon={icon} />}
       <div className="min-w-0">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-foreground">
-          {title}
-        </div>
+        <div className="label-caps-strong">{title}</div>
         {description && (
           <div className="mt-0.5 text-[10px] text-muted-foreground">
             {description}

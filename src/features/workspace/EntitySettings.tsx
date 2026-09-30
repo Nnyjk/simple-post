@@ -43,7 +43,7 @@ function ProjectSettings({ projectId }: { projectId: string }) {
   if (!project) return <NotFound label="项目" />;
   return (
     <EntityCard
-      icon={<Package className="h-5 w-5 text-violet-400" />}
+      icon={<Package className="h-5 w-5 text-hue-project" />}
       badge="项目"
       name={project.name}
     />
@@ -55,7 +55,7 @@ function ModuleSettings({ moduleId }: { moduleId: string }) {
   if (!mod) return <NotFound label="模块" />;
   return (
     <EntityCard
-      icon={<FolderOpen className="h-5 w-5 text-warning" />}
+      icon={<FolderOpen className="h-5 w-5 text-hue-module" />}
       badge="模块"
       name={mod.name}
     />
@@ -67,7 +67,7 @@ function CollectionSettings({ collectionId }: { collectionId: string }) {
   if (!col) return <NotFound label="集合" />;
   return (
     <EntityCard
-      icon={<FolderClosed className="h-5 w-5 text-primary" />}
+      icon={<FolderClosed className="h-5 w-5 text-hue-collection" />}
       badge="集合"
       name={col.name}
     />
@@ -85,9 +85,7 @@ function EntityCard({ icon, badge, name }: { icon: React.ReactNode; badge: strin
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted/40">
           {icon}
         </div>
-        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {badge}
-        </div>
+        <div className="label-caps">{badge}</div>
         <h1 className="mt-1 truncate text-lg font-semibold text-foreground" title={name}>
           {name}
         </h1>

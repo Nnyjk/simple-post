@@ -2,6 +2,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { IconTile } from '@/components/ui/icon-tile';
 import type { Environment } from '@/types/domain';
 import { envIcon } from '../env-utils';
 
@@ -43,17 +44,16 @@ export function EnvSwitcher({
                 : 'border-border bg-card/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground',
             )}
           >
-            <span
-              aria-hidden
-              className={cn(
-                'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border',
+            <IconTile
+              size="xs"
+              neutralBorder
+              icon={envIcon(env.name)}
+              className={
                 isActive
                   ? 'border-primary/40 bg-primary/15 text-primary'
-                  : 'border-border bg-muted/60 text-muted-foreground',
-              )}
-            >
-              {envIcon(env.name)}
-            </span>
+                  : 'border-border bg-muted/60 text-muted-foreground'
+              }
+            />
             <span className="font-mono font-medium">{env.name}</span>
             {environments.length > 1 && (
               <Tooltip content="删除环境" side="bottom">

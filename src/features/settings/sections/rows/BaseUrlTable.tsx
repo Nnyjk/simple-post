@@ -1,14 +1,19 @@
-import { Globe, Plus, Star, Trash2 } from 'lucide-react';
+import { Globe, Star, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 import type { BaseUrlDefinition, Environment } from '@/types/domain';
+import { HUE } from '@/lib/hue';
+import { cn } from '@/lib/utils';
 import type { EnvironmentSectionProps } from '../EnvironmentSection';
 import { InlineNameCell } from './InlineNameCell';
+import { KeyValueTable, RowTile } from './KeyValueTable';
 
 /**
  * BaseUrlTable — list of named BaseUrl defs for the active env.
+ *
+ * The list chrome (empty state, row shell, "add" footer) is shared with
+ * `VariableTable` via `KeyValueTable`; only the cells below are local.
  */
 interface BaseUrlTableProps {
   env: Environment;
@@ -34,135 +39,64 @@ export function BaseUrlTable({
   onAddBaseUrl,
   onDeleteBaseUrl,
 }: BaseUrlTableProps) {
-  if (baseUrlDefinitions.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
-        <div className="text-[11px] text-muted-foreground">项目还没有命名服务</div>
-        <Button variant="default" size="sm" className="h-7 gap-1 text-xs" onClick={onAddBaseUrl}>
-          <Plus className="h-3.5 w-3.5" />
-          添加服务
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col">
-      {baseUrlDefinitions.map((def, idx) => {
+    <KeyValueTable
+      items={baseUrlDefinitions}
+      keyOf={(def) => def.id}
+      emptyText="项目还没有命名服务"
+      addText="添加服务"
+      onAdd={onAddBaseUrl}
+      rowClassName="py-3"
+      renderRow={(def) => {
         const url = env.baseUrls[def.id] ?? '';
         const isDefault = def.id === defaultBaseUrlDefinitionId;
         return (
-          <BaseUrlRow
-            key={def.id}
-            flush={idx === 0}
-            def={def}
-            envId={env.id}
-            url={url}
-            isDefault={isDefault}
-            projectId={projectId}
-            setEnvironmentBaseUrl={setEnvironmentBaseUrl}
-            updateBaseUrlDefinition={updateBaseUrlDefinition}
-            setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
-            onDelete={onDeleteBaseUrl}
-          />
+          <>
+            <RowTile concept="baseurl" icon={<Globe className="h-4 w-4" />} />
+
+            {/* Label — inline-rename the service name */}
+            <div className="min-w-0 w-44 shrink-0">
+              <InlineNameCell
+                value={def.name}
+                placeholder="服务名"
+                onCommit={(v) => updateBaseUrlDefinition(projectId, def.id, { name: v })}
+                className="text-xs font-medium"
+              />
+              {isDefault && <div className="label-caps mt-0.5">项目默认</div>}
+            </div>
+
+            {/* URL input — the full-width editor */}
+            <div className="min-w-0 flex-1">
+              <Input
+                value={url}
+                onChange={(e) => setEnvironmentBaseUrl(env.id, def.id, e.target.value)}
+                placeholder="http:// 或 https:// 起始的 URL"
+                className="h-8 font-mono text-xs"
+                spellCheck={false}
+              />
+            </div>
+
+            {/* Trailing actions */}
+            <div className="flex shrink-0 items-center gap-1">
+              <DefaultToggle
+                isDefault={isDefault}
+                onToggle={() => setDefaultBaseUrlDefinition(projectId, isDefault ? null : def.id)}
+              />
+              <Tooltip content="删除服务" side="bottom">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
+                  onClick={() => onDeleteBaseUrl({ id: def.id, name: def.name })}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </Tooltip>
+            </div>
+          </>
         );
-      })}
-      <button
-        type="button"
-        onClick={onAddBaseUrl}
-        className="flex items-center gap-2 border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        添加服务
-      </button>
-    </div>
-  );
-}
-
-interface BaseUrlRowProps {
-  flush: boolean;
-  def: BaseUrlDefinition;
-  envId: string;
-  url: string;
-  isDefault: boolean;
-  projectId: string;
-  setEnvironmentBaseUrl: BaseUrlTableProps['setEnvironmentBaseUrl'];
-  updateBaseUrlDefinition: BaseUrlTableProps['updateBaseUrlDefinition'];
-  setDefaultBaseUrlDefinition: BaseUrlTableProps['setDefaultBaseUrlDefinition'];
-  onDelete: (def: { id: string; name: string }) => void;
-}
-
-function BaseUrlRow({
-  flush,
-  def,
-  url,
-  isDefault,
-  envId,
-  projectId,
-  setEnvironmentBaseUrl,
-  updateBaseUrlDefinition,
-  setDefaultBaseUrlDefinition,
-  onDelete,
-}: BaseUrlRowProps) {
-  return (
-    <div
-      className={cn(
-        'group flex items-start gap-3 px-4 py-3',
-        !flush && 'border-t border-border/60',
-      )}
-    >
-      {/* Icon container — sky tones for base URLs */}
-      <span
-        aria-hidden
-        className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-sky-500/30 bg-sky-500/15 text-sky-500"
-      >
-        <Globe className="h-4 w-4" />
-      </span>
-
-      {/* Label — inline-rename the service name */}
-      <div className="min-w-0 w-44 shrink-0">
-        <InlineNameCell
-          value={def.name}
-          placeholder="服务名"
-          onCommit={(v) => updateBaseUrlDefinition(projectId, def.id, { name: v })}
-          className="text-xs font-medium"
-        />
-        {isDefault && (
-          <div className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            项目默认
-          </div>
-        )}
-      </div>
-
-      {/* URL input — the full-width editor */}
-      <div className="min-w-0 flex-1">
-        <Input
-          value={url}
-          onChange={(e) => setEnvironmentBaseUrl(envId, def.id, e.target.value)}
-          placeholder="http:// 或 https:// 起始的 URL"
-          className="h-8 font-mono text-xs"
-          spellCheck={false}
-        />
-      </div>
-
-      {/* Trailing actions */}
-      <div className="flex shrink-0 items-center gap-1">
-        <DefaultToggle
-          isDefault={isDefault}
-          onToggle={() => setDefaultBaseUrlDefinition(projectId, isDefault ? null : def.id)}
-        />
-        <Tooltip content="删除服务" side="bottom">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-            onClick={() => onDelete({ id: def.id, name: def.name })}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </Tooltip>
-      </div>
-    </div>
+      }}
+    />
   );
 }
 
@@ -176,7 +110,7 @@ function DefaultToggle({ isDefault, onToggle }: { isDefault: boolean; onToggle: 
         className={cn(
           'inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors',
           isDefault
-            ? 'border-amber-500/40 bg-amber-500/15 text-amber-500'
+            ? cn(HUE.module.border, HUE.module.bg, HUE.module.text)
             : 'border-border bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
         )}
       >

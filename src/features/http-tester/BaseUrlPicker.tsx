@@ -18,13 +18,22 @@
  * Visual style: card-style trigger (rounded-lg + accent icon container),
  * SettingRow-style dropdown rows (icon container + label + sub-label +
  * trailing badge), matching the new Settings category aesthetic.
+ *
+ * LOCATION: this lives in `features/http-tester/` rather than
+ * `components/ui/` because it is not a primitive — it imports the
+ * `BaseUrlDefinition` domain type, hard-codes "which named slot is
+ * active" semantics, and has exactly one consumer (HttpTester). Its
+ * three former siblings in `components/ui/` are the genuine primitives
+ * it composes.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Globe, Pencil } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
-import { Input } from './input';
-import { Badge } from './badge';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { IconTile } from '@/components/ui/icon-tile';
+import type { HueConcept } from '@/lib/hue';
 import type { BaseUrlDefinition } from '@/types/domain';
 
 /**
@@ -120,12 +129,10 @@ export function BaseUrlPicker({
   }, [resolvedBaseUrl]);
 
   // The accent used for the icon container and the "selected" hint.
-  // Sky-blue matches the "项目" / baseUrl layer in the project-tree
-  // design language (project→module→collection→endpoint).
-  const accentBg = 'bg-sky-500/15';
-  const accentText = 'text-sky-500';
-  const accentBorder = 'border-sky-500/30';
-
+  // baseUrl owns its own hue now, so it can no longer be confused with
+  // the collection colour it used to share. The "自定义" row uses
+  // `variable` — a value the user supplies — rather than borrowing
+  // `module`'s amber, which would drag a tree concept into a picker.
   return (
     <div ref={rootRef} className={cn('relative inline-block', className)}>
       <button
@@ -147,16 +154,7 @@ export function BaseUrlPicker({
           focusRing,
         )}
       >
-        <span
-          className={cn(
-            'flex h-6 w-6 shrink-0 items-center justify-center rounded-md border',
-            accentBg,
-            accentBorder,
-            accentText,
-          )}
-        >
-          <Globe className="h-3 w-3" />
-        </span>
+        <IconTile size="xs" bordered concept="baseurl" icon={<Globe className="h-3 w-3" />} />
         <span className="min-w-0 flex-1 text-left leading-tight">
           <span className="block truncate font-medium">{triggerLabel}</span>
           {triggerSubLabel && (
@@ -189,16 +187,14 @@ export function BaseUrlPicker({
                 onSelectionChange({ kind: 'default' });
                 setOpen(false);
               }}
-              iconContainerClass={cn(accentBg, accentBorder, accentText)}
+              concept="baseurl"
               icon={<Globe className="h-3.5 w-3.5" />}
               primary={defaultDef ? '项目默认' : '项目默认（无）'}
               secondary={defaultDef ? `→ ${defaultDef.name}` : '该项目尚未设置默认 baseUrl'}
               selectedHint={defaultDef ? '默认' : null}
             />
             {definitions.length > 0 && (
-              <li className="px-2 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                BaseUrl 定义
-              </li>
+              <li className="px-2 pt-2 pb-1 label-caps/60">BaseUrl 定义</li>
             )}
             {definitions.map((def) => (
               <Row
@@ -208,7 +204,7 @@ export function BaseUrlPicker({
                   onSelectionChange({ kind: 'definition', definitionId: def.id });
                   setOpen(false);
                 }}
-                iconContainerClass={cn(accentBg, accentBorder, accentText)}
+                concept="baseurl"
                 icon={<Globe className="h-3.5 w-3.5" />}
                 primary={def.name}
                 secondary={def.description}
@@ -222,7 +218,7 @@ export function BaseUrlPicker({
                 // Don't close — the custom input appears and the user
                 // needs to type something before the row is meaningful.
               }}
-              iconContainerClass="bg-amber-500/15 border-amber-500/30 text-amber-500"
+              concept="variable"
               icon={<Pencil className="h-3.5 w-3.5" />}
               primary="自定义"
               secondary={customValue || '在下方输入框填写'}
@@ -250,7 +246,8 @@ export function BaseUrlPicker({
 interface RowProps {
   selected: boolean;
   onSelect: () => void;
-  iconContainerClass: string;
+  /** Semantic hue for this row's icon tile. */
+  concept: HueConcept;
   icon: React.ReactNode;
   primary: string;
   secondary?: string;
@@ -258,15 +255,7 @@ interface RowProps {
   selectedHint?: string | null;
 }
 
-function Row({
-  selected,
-  onSelect,
-  iconContainerClass,
-  icon,
-  primary,
-  secondary,
-  selectedHint,
-}: RowProps) {
+function Row({ selected, onSelect, concept, icon, primary, secondary, selectedHint }: RowProps) {
   return (
     <li>
       <button
@@ -280,14 +269,7 @@ function Row({
           selected && 'bg-accent text-foreground',
         )}
       >
-        <span
-          className={cn(
-            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md border',
-            iconContainerClass,
-          )}
-        >
-          {icon}
-        </span>
+        <IconTile size="md" bordered concept={concept} icon={icon} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium leading-tight">{primary}</span>
           {secondary && (

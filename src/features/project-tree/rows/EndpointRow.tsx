@@ -4,6 +4,7 @@ import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { MethodPill } from '@/components/ui/method-pill';
 import { InlineEdit } from '@/components/ui/InlineEdit';
+import { IconTile } from '@/components/ui/icon-tile';
 import type { DropZone } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
@@ -84,12 +85,7 @@ export function EndpointRow({
               : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
           )}
         >
-          <span
-            aria-hidden
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-500"
-          >
-            <FileCode2 className="h-3 w-3" />
-          </span>
+          <IconTile concept="endpoint" size="sm" icon={<FileCode2 className="h-3 w-3" />} />
           <MethodPill
             method={detail.method}
             size="xs"

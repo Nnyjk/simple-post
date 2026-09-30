@@ -28,6 +28,42 @@
     --input: 240 5.9% 90%;
     --ring: 240 5% 64.9%;
     --radius: 0.5rem;
+
+    /* ------------------------------------------------------------------
+     * Semantic hue accents — 1:1 concept-to-colour.
+     *
+     * Every "this row is a module" / "this is a collection" / "this is a
+     * BaseUrl definition" decision used to be re-typed as a raw Tailwind
+     * palette pair at each site, or as an inline hex on the tab strip,
+     * so the same concept rendered in different colours depending on
+     * where you looked. These eight
+     * variables are the single source; `src/lib/hue.ts` maps a concept to
+     * the utility classes, and `tailwind.config.js` exposes them under
+     * the `hue` colour namespace.
+     *
+     * TWO TIERS, and that split is the point:
+     *   Tier A (project/module/collection/endpoint) carries more chroma
+     *   because these are the tree's structural vocabulary — the icons
+     *   differ in shape, so colour is reinforcement, not the signal.
+     *   Tier B (baseurl/variable/connection/request) is deliberately
+     *   quieter so settings and config chrome never competes with the
+     *   tree. It also keeps `connection`'s rose clearly distinct from
+     *   the saturated `destructive` red beside it.
+     *
+     * Hue ANGLES are fixed — they are what keeps the eight concepts
+     * apart at 12-14px, where hue distance is the only thing a viewer
+     * can still resolve. Only lightness/saturation should be tuned from
+     * here on; moving a hue re-collides two concepts. See
+     * src/lib/__tests__/hue.test.ts, which asserts the separation.
+     * ------------------------------------------------------------------ */
+    --hue-project: 265 58% 44%;
+    --hue-module: 45 68% 44%;
+    --hue-collection: 185 55% 38%;
+    --hue-endpoint: 150 52% 34%;
+    --hue-baseurl: 225 52% 46%;
+    --hue-variable: 95 44% 32%;
+    --hue-connection: 355 44% 48%;
+    --hue-request: 310 48% 44%;
   }
 
   /* Explicit `.light` block — identical to :root since light is the
@@ -57,6 +93,17 @@
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
     --ring: 240 5% 64.9%;
+
+    /* Mirrors :root — light is the default. See the :root block for why
+       these eight exist and why the split into two chroma tiers matters. */
+    --hue-project: 265 58% 44%;
+    --hue-module: 45 68% 44%;
+    --hue-collection: 185 55% 38%;
+    --hue-endpoint: 150 52% 34%;
+    --hue-baseurl: 225 52% 46%;
+    --hue-variable: 95 44% 32%;
+    --hue-connection: 355 44% 48%;
+    --hue-request: 310 48% 44%;
   }
 
   .dark {
@@ -77,6 +124,19 @@
     --border: 240 6% 16%;
     --input: 240 6% 14%;
     --ring: 240 5% 64.9%;
+
+    /* Dark-mode hues: same angles, higher lightness so a 15%-alpha tint
+       over the near-black `--card` still reads. `--hue-variable` moves
+       least (its olive is the hardest to lift legibly) and
+       `--hue-module` most, since amber darkens fastest. */
+    --hue-project: 265 62% 72%;
+    --hue-module: 45 78% 62%;
+    --hue-collection: 185 58% 58%;
+    --hue-endpoint: 150 52% 55%;
+    --hue-baseurl: 225 62% 74%;
+    --hue-variable: 95 44% 58%;
+    --hue-connection: 355 48% 70%;
+    --hue-request: 310 52% 70%;
   }
 
   * {
@@ -218,6 +278,19 @@
 }
 
 @layer components {
+  /* Section micro-label — the 10px uppercase caption used for group
+     headings ("分组", "BaseUrl 定义", "已保存的响应"). This exact
+     treatment was hand-copied into 13 call sites, so the two classes
+     below are the only definitions. `-strong` is the foreground-toned
+     variant for headers that should read as a heading rather than a
+     caption. */
+  .label-caps {
+    @apply text-[10px] font-medium uppercase tracking-wider text-muted-foreground;
+  }
+  .label-caps-strong {
+    @apply text-[10px] font-semibold uppercase tracking-wider text-foreground;
+  }
+
   /* Inline alert bar — auto-adapts to light/dark via semantic tokens. */
   .alert-warning-inline {
     @apply shrink-0 border-b bg-warning/5 px-2.5 py-1.5 text-xs text-warning-foreground;

@@ -206,9 +206,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           )}
           {grouped.map((group) => (
             <div key={group.section} className="pb-1">
-              <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                {group.section}
-              </div>
+              <div className="px-3 pb-1 pt-2 label-caps">{group.section}</div>
               {group.items.map(({ cmd, idx }) => {
                 const active = idx === selected;
                 return (

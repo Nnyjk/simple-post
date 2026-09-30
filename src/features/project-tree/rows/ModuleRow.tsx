@@ -6,6 +6,7 @@
 import { ChevronRight, FolderClosed, FolderOpen, Plus } from 'lucide-react';
 import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
+import { IconTile } from '@/components/ui/icon-tile';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
 import type { DropZone } from '../tree-types';
@@ -96,16 +97,17 @@ export function ModuleRow({
               module.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          <span
-            aria-hidden
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-amber-500/15 text-amber-500"
-          >
-            {module.expanded ? (
-              <FolderOpen className="h-3 w-3" />
-            ) : (
-              <FolderClosed className="h-3 w-3" />
-            )}
-          </span>
+          <IconTile
+            concept="module"
+            size="sm"
+            icon={
+              module.expanded ? (
+                <FolderOpen className="h-3 w-3" />
+              ) : (
+                <FolderClosed className="h-3 w-3" />
+              )
+            }
+          />
           <InlineEdit
             value={module.name}
             onSave={onSaveEdit}

@@ -19,9 +19,7 @@ export function AuthEditor({ value, onChange }: Props) {
   return (
     <div className="px-4 py-3 space-y-3">
       <div>
-        <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          类型
-        </label>
+        <label className="mb-1.5 block label-caps">类型</label>
         <Tabs
           items={TYPES.map((t) => ({ id: t.id, label: t.label }))}
           value={value.kind}
@@ -37,9 +35,7 @@ export function AuthEditor({ value, onChange }: Props) {
 
       {value.kind === 'bearer' && (
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Token
-          </label>
+          <label className="mb-1.5 block label-caps">Token</label>
           <Input
             value={value.bearer ?? ''}
             onChange={(e) => onChange({ ...value, bearer: e.target.value })}
@@ -55,9 +51,7 @@ export function AuthEditor({ value, onChange }: Props) {
       {value.kind === 'basic' && (
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              Username
-            </label>
+            <label className="mb-1.5 block label-caps">Username</label>
             <Input
               value={value.basic?.username ?? ''}
               onChange={(e) =>
@@ -70,9 +64,7 @@ export function AuthEditor({ value, onChange }: Props) {
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              Password
-            </label>
+            <label className="mb-1.5 block label-caps">Password</label>
             <Input
               type="password"
               value={value.basic?.password ?? ''}
@@ -92,9 +84,7 @@ export function AuthEditor({ value, onChange }: Props) {
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-1">
-              <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                Add to
-              </label>
+              <label className="mb-1.5 block label-caps">Add to</label>
               <Select
                 value={value.apikey?.inLocation ?? 'header'}
                 onChange={(e) =>
@@ -114,9 +104,7 @@ export function AuthEditor({ value, onChange }: Props) {
               />
             </div>
             <div className="col-span-2">
-              <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                Key
-              </label>
+              <label className="mb-1.5 block label-caps">Key</label>
               <Input
                 value={value.apikey?.key ?? ''}
                 onChange={(e) =>
@@ -135,9 +123,7 @@ export function AuthEditor({ value, onChange }: Props) {
             </div>
           </div>
           <div>
-            <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              Value
-            </label>
+            <label className="mb-1.5 block label-caps">Value</label>
             <Input
               value={value.apikey?.value ?? ''}
               onChange={(e) =>

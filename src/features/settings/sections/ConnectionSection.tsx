@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { SettingsCategory } from '../SettingsCategory';
 import { Badge } from '@/components/ui/badge';
+import { IconTile } from '@/components/ui/icon-tile';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { McpStatusPanel, StateSummary } from './McpStatusPanel';
@@ -205,9 +206,12 @@ export function ConnectionSection() {
       >
         <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
-              <Cpu className="h-5 w-5" />
-            </div>
+            <IconTile
+              concept="connection"
+              size="xl"
+              className="rounded-lg"
+              icon={<Cpu className="h-5 w-5" />}
+            />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-foreground">simple-post-mcp</span>
@@ -224,9 +228,7 @@ export function ConnectionSection() {
         </div>
         <div className="grid grid-cols-1 gap-3 border-t border-border/60 p-3 sm:grid-cols-2">
           <div className="flex items-start gap-3 px-1">
-            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground">
-              <Activity className="h-3.5 w-3.5" />
-            </span>
+            <IconTile className="mt-0.5" icon={<Activity className="h-3.5 w-3.5" />} />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">已注册工具</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -238,9 +240,7 @@ export function ConnectionSection() {
             </Badge>
           </div>
           <div className="flex items-start gap-3 border-t border-border/60 px-1 pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground">
-              <FileJson className="h-3.5 w-3.5" />
-            </span>
+            <IconTile className="mt-0.5" icon={<FileJson className="h-3.5 w-3.5" />} />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">传输协议</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
@@ -489,7 +489,7 @@ function CapabilityRadioGroup({
               checked={checked}
               disabled={disabled}
               onChange={() => onChange(opt.value)}
-              className="mt-0.5 h-3.5 w-3.5 accent-[var(--color-primary,#3b82f6)]"
+              className="mt-0.5 h-3.5 w-3.5 accent-primary"
             />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">{opt.label}</div>

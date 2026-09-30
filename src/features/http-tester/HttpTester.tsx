@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { InlineEdit } from '@/components/ui/InlineEdit';
 import { MethodPicker } from '@/components/ui/method-picker';
-import { BaseUrlPicker, type BaseUrlSelection } from '@/components/ui/base-url-picker';
+import { BaseUrlPicker, type BaseUrlSelection } from '@/features/http-tester/BaseUrlPicker';
 import { TagInput } from '@/components/ui/tag-input';
 import { Tooltip } from '@/components/ui/tooltip';
 import { type HttpMethod, type EndpointDetail } from '@/types/domain';
