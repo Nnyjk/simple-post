@@ -35,6 +35,12 @@ pub(crate) async fn request_settings_put(
     // `RequestSettingsPatch`, we accept the entire struct and write
     // it back verbatim. Callers wanting partial updates can fall
     // back to `/api/preferences` (`{"key": "request_settings", "value": ...}`).
+    //
+    // `RequestSettings` carries `#[serde(default)]`, so a body that
+    // omits a field is accepted and that field is reset to its default
+    // rather than rejected. That is the deliberate trade for reading
+    // blobs written by older builds; see the field's own docs. Send all
+    // three fields to replace the row wholesale.
     db::with_tx(&s.pool, |c| {
         db::preferences::set(c, REQUEST_SETTINGS_KEY, &body)
     })

@@ -31,7 +31,14 @@ use serde::{Deserialize, Serialize};
 /// string (`"GET"`, `"POST"`, …) the renderer already uses; an unknown
 /// verb falls through to `Custom(String)` so a forward-compat write from
 /// the UI doesn't blow up on the Rust side.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// `Deserialize` is hand-written so there is exactly **one** parser for
+/// this type. A derived impl accepted `"get"` as `Custom("get")` and
+/// round-tripped it back out lowercase, which the database then stored —
+/// so an IPC write and an MCP call using the same verb produced two
+/// different stored representations. Everything now goes through
+/// [`parse_http_method`].
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
     #[default]
@@ -43,8 +50,19 @@ pub enum HttpMethod {
     Head,
     Options,
     /// Any verb not in the standard list (e.g. `PROPFIND`, `LOCK`).
+    /// Serialises as a bare string: the enum's `UPPERCASE` rule renames
+    /// the unit variants above, and without `untagged` this one would
+    /// become `{"CUSTOM":"PROPFIND"}`. The matching *read* side is the
+    /// hand-written `Deserialize` below, which does not need it.
     #[serde(untagged)]
     Custom(String),
+}
+
+impl<'de> serde::Deserialize<'de> for HttpMethod {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        parse_http_method(&raw).map_err(serde::de::Error::custom)
+    }
 }
 
 impl HttpMethod {
@@ -62,16 +80,51 @@ impl HttpMethod {
     }
 }
 
-/// Canonical parser used by every MCP tool and the request-execution path.
-/// Empty / whitespace-only input is rejected with `AppError::Validation`
-/// (so the LLM sees a useful message); a known verb is mapped case-insensitively;
-/// any token-shape ASCII verb (e.g. `PROPFIND`) flows through as
-/// `HttpMethod::Custom` so future / niche HTTP verbs don't lose data.
+/// RFC 9110 `token`: the only characters a method may contain. Anything
+/// else — a space, a CJK character, a control byte — is rejected here
+/// rather than carried all the way to `reqwest`, which would surface as
+/// an opaque transport error at send time.
+fn is_method_token(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+/// Canonical parser used by every MCP tool, the request-execution path
+/// **and** `HttpMethod`'s `Deserialize` impl. A known verb is mapped
+/// case-insensitively; any other RFC 9110 token (e.g. `PROPFIND`, `LOCK`)
+/// flows through as `HttpMethod::Custom`, so future / niche HTTP verbs
+/// don't lose data. Empty, whitespace-bearing or non-token input is
+/// rejected with `AppError::Validation` so the caller — an LLM, usually —
+/// gets a message that says what was wrong.
 pub fn parse_http_method(m: &str) -> Result<HttpMethod, crate::error::AppError> {
     use crate::error::AppError;
     let trimmed = m.trim();
     if trimmed.is_empty() {
         return Err(AppError::Validation("method must not be empty".into()));
+    }
+    if !is_method_token(trimmed) {
+        return Err(AppError::Validation(format!(
+            "method {trimmed:?} is not a valid HTTP token"
+        )));
     }
     Ok(match trimmed.to_ascii_uppercase().as_str() {
         "GET" => HttpMethod::Get,
@@ -258,6 +311,16 @@ impl ResourceNodeType {
 /// `node_id`. Splitting it is not tidiness — `method` / `url` / `tags`
 /// mean nothing for a module, and folding them in would give every
 /// module and collection row permanently empty columns.
+///
+/// The mirror in `src/types/domain.ts` carries one field this does not:
+/// `expanded?: boolean`, the renderer's fold/open state. It is
+/// deliberately absent here — it is neither persisted nor part of a
+/// node's identity, so it has no business in a row type. The
+/// asymmetry is safe because this struct ignores unknown keys, so a
+/// node the renderer hands back with `expanded` set simply has it
+/// dropped. `#[serde(deny_unknown_fields)]` would be the wrong tool
+/// for closing that gap: it would reject the field outright, and it
+/// would also break [`EndpointResource`]'s `#[serde(flatten)]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceNode {
@@ -304,10 +367,7 @@ pub struct ResourceNodePatch {
 
 impl ResourceNodePatch {
     pub fn is_empty(&self) -> bool {
-        self.parent_id.is_none()
-            && self.name.is_none()
-            && self.description.is_none()
-            && self.sort_order.is_none()
+        serialises_to_empty_object(self)
     }
 }
 
@@ -381,19 +441,36 @@ pub struct EndpointDetailPatch {
 
 impl EndpointDetailPatch {
     pub fn is_empty(&self) -> bool {
-        self.method.is_none()
-            && self.url.is_none()
-            && self.environment_id.is_none()
-            && self.base_url_definition_id.is_none()
-            && self.base_url_override.is_none()
-            && self.params.is_none()
-            && self.headers.is_none()
-            && self.body.is_none()
-            && self.auth.is_none()
-            && self.docs.is_none()
-            && self.notes.is_none()
-            && self.tags.is_none()
+        serialises_to_empty_object(self)
     }
+}
+
+/// True when `value` carries no field the wire would emit.
+///
+/// The patch types answer "is there anything to write?" by asking
+/// whether they serialise to an empty object, rather than by listing
+/// their own fields. Every patch field already carries
+/// `skip_serializing_if = "Option::is_none"`, so that attribute *is*
+/// the encoding of "absent means don't touch this column" — deriving
+/// the check from it means there is exactly one source of truth and a
+/// newly added field cannot drift out of sync with a hand-written
+/// field list.
+///
+/// The three-state case falls out for free: `Some(None)` (clear the
+/// column) serialises to an explicit `null`, so the key is present and
+/// the patch is correctly *not* empty.
+///
+/// A serialisation failure is impossible for these types — every field
+/// is a scalar, an `Option`, a `Vec`, or a nested struct that is itself
+/// `Serialize` — but the fallback is `false` rather than `true` on
+/// purpose. Preferring "not empty" means an unexpected failure makes
+/// the write happen and the real error surface at the DB layer, instead
+/// of being swallowed as a silent no-op.
+fn serialises_to_empty_object<T: Serialize>(value: &T) -> bool {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.as_object().map(|m| m.is_empty()))
+        .unwrap_or(false)
 }
 
 /// An endpoint as the tree and the editor both see it: the node's
@@ -424,7 +501,15 @@ pub struct Project {
     pub base_url: Option<String>,
     #[serde(default)]
     pub base_url_definitions: Vec<BaseUrlDefinition>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Deliberately **not** `skip_serializing_if`. "This project has no
+    /// default baseUrl" is a decision the project makes, not an absence
+    /// of data, and the TypeScript mirror declares this field as
+    /// required-but-nullable (`defaultBaseUrlDefinitionId: string |
+    /// null`). Emitting `null` keeps the two sides telling the same
+    /// story; omitting the key made a declared contract field arrive as
+    /// `undefined`. Every other optional field on this struct is
+    /// genuinely optional in the mirror, so it keeps the skip.
+    #[serde(default)]
     pub default_base_url_definition_id: Option<String>,
     #[serde(default = "default_project_color")]
     pub color: String,
@@ -458,6 +543,14 @@ pub struct ProjectPatch {
     pub color: Option<String>,
 }
 
+impl ProjectPatch {
+    /// No write path calls this yet; it exists so the next caller does
+    /// not hand-roll a field list. See [`serialises_to_empty_object`].
+    pub fn is_empty(&self) -> bool {
+        serialises_to_empty_object(self)
+    }
+}
+
 // ----- environment --------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -487,10 +580,30 @@ pub struct EnvironmentPatch {
     pub is_active: Option<bool>,
 }
 
+impl EnvironmentPatch {
+    /// No write path calls this yet; it exists so the next caller does
+    /// not hand-roll a field list. See [`serialises_to_empty_object`].
+    pub fn is_empty(&self) -> bool {
+        serialises_to_empty_object(self)
+    }
+}
+
 // ----- agent permission ---------------------------------------------------
 
+/// Per-project MCP permission. `Read < ReadCall < Full`; the ordering
+/// itself lives in [`crate::permissions::permission_at_least`].
+///
+/// `snake_case`, not `lowercase`: `"lowercase"` maps `ReadCall` to
+/// `"readcall"`, a third spelling that matched neither [`Self::as_str`]
+/// (which is what `db::permissions` writes and `parse` reads), nor the
+/// `agent_permissions` CHECK constraint, nor the `AgentPermission`
+/// union on the TypeScript side. That third spelling survived only
+/// because the one consumer of the serialised form happened to fall
+/// back to a value equal to the correct answer. `snake_case` makes all
+/// four agree, and matches its sibling
+/// [`crate::permissions::CapabilityPolicy`].
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Permission {
     Read,
     #[default]
@@ -519,8 +632,21 @@ impl Permission {
 
 // ----- request settings ---------------------------------------------------
 
+/// Outbound-request knobs. A singleton, persisted as a JSON blob in the
+/// `preferences` KV table rather than in a table of its own.
+///
+/// `#[serde(default)]` at the container level is load-bearing on the
+/// **read** side, not the write side. The stored blob is whatever an
+/// earlier build wrote, so the day a fourth field is added here, every
+/// existing install's row deserialises without it — and without this
+/// attribute `request_settings_get` would fail outright for all of
+/// them. The cost lands on the write side: `PUT /api/request_settings`
+/// is a full replace, and a body that omits a field now resets that
+/// field to its default instead of being rejected. For a settings
+/// singleton whose defaults are documented on [`Default`], that is the
+/// more useful behaviour; the route's own comment says so too.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct RequestSettings {
     pub timeout_ms: u64,
     pub follow_redirects: bool,
@@ -537,8 +663,24 @@ impl Default for RequestSettings {
     }
 }
 
-// ----- api response (in-process; not persisted in the schema -------------
+// ----- api response (transient; not persisted in the schema) -------------
 
+/// The wire shape a response takes on its way out of Rust.
+///
+/// It is **not** the shape the renderer ends up holding, and it is not
+/// in-process either — it crosses the Tauri IPC boundary like every
+/// other type here. The difference is `headers`: this side models them
+/// as ordered pairs, because a response may legitimately repeat one
+/// (several `Set-Cookie` lines, say) and a map cannot express that. The
+/// renderer wants a plain object, so `src/lib/http.ts` folds the pairs
+/// through `tuplesToRecord` on arrival — lossy, and the one place in
+/// the request path where information is knowingly dropped; duplicates
+/// collapse last-one-wins.
+///
+/// Nothing in Rust describes the post-adapter shape.
+/// `ApiResponse` in `src/types/domain.ts` is that description, and it
+/// is deliberately a different type rather than a claimed mirror of
+/// this one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiResponse {
@@ -569,19 +711,35 @@ pub struct ApiResponse {
 ///
 /// `SystemTime::now()` panics only on clock skew past the unix epoch;
 /// treat that as a programmer error rather than user-recoverable.
-/// Default project color when a caller doesn't supply one. Mirrors
-/// `commands::default_color` so REST and Tauri paths agree. The two
-/// live in different modules to avoid a circular dep (commands already
-/// depends on domain).
+pub fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_millis() as i64
+}
+
+/// Default project color when a caller doesn't supply one. Lives here
+/// rather than in `commands/` so the REST and Tauri write paths cannot
+/// drift: `commands` already depends on `domain`, so a second copy on
+/// the far side of that edge would be free to disagree.
 pub fn default_project_color() -> String {
     "#3b82f6".to_string()
 }
 
-/// Generate a unique opaque id. Mirrors `commands::uid` so REST and
-/// Tauri paths agree. Both functions live here because `commands` already
-/// depends on `domain`; pulling the inverse into `commands/` would cycle.
-/// The per-process monotonic counter guarantees uniqueness inside the
-/// running process even when the wall clock hasn't advanced.
+/// A new primary key, `sp_` followed by the wall clock in hex and a
+/// per-process counter, concatenated.
+///
+/// It is **not** opaque and not unguessable — it encodes the timestamp
+/// it was minted at, which is fine for a single-user desktop app whose
+/// database is already readable by that user, and is stated here so
+/// nobody reaches for it in a context that needs more. The counter is
+/// what makes it unique: two keys minted in the same nanosecond would
+/// otherwise collide, and a process that restarts within one clock tick
+/// of a previous one could repeat a prefix.
+///
+/// A random suffix would remove both caveats; it is not worth the
+/// dependency while the store is local.
 pub fn uid() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -592,14 +750,6 @@ pub fn uid() -> String {
         .unwrap_or(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("sp_{:x}{:x}", nanos, n)
-}
-
-pub fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock before unix epoch")
-        .as_millis() as i64
 }
 
 /// Deserialize `null` and missing as *different* states on `Option<T>`:
