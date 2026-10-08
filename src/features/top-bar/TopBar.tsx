@@ -116,12 +116,12 @@ export function TopBar() {
                 className="h-2 w-2 rounded-sm"
                 style={{ backgroundColor: activeProject.color }}
               />
-              <span className="max-w-[160px] truncate">{activeProject.name}</span>
+              <span className="w-[160px] truncate">{activeProject.name}</span>
             </>
           ) : (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              <span className="max-w-[160px] truncate">加载中…</span>
+              <span className="w-[160px] truncate">加载中…</span>
             </>
           )}
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
@@ -182,7 +182,12 @@ export function TopBar() {
           className="gap-1.5"
         >
           <span className="text-[10px] uppercase tracking-wider text-muted-foreground">env</span>
-          <span className="max-w-[80px] truncate font-mono text-xs">{activeEnv?.name ?? '—'}</span>
+          {/* Fixed width, not `max-w`: the title bar must not resize when
+              the active name changes length. `max-w` only caps the long
+              case, so a short name collapsed the whole control and made
+              switching envs shove everything to its right sideways.
+              `truncate` still ellipsises an over-long name inside it. */}
+          <span className="w-[80px] truncate font-mono text-xs">{activeEnv?.name ?? '—'}</span>
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </Button>
         {envOpen && (
