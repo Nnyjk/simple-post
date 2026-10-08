@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, Suspense } from 'react';
 import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Sparkles, Loader2 } from 'lucide-react';
 import { useAppStore, useActiveProject, useActiveEnvironment } from '@/stores/app-store';
 import { useMcpStatus } from '@/lib/use-mcp-status';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
-import { CommandPalette } from '@/features/command-palette/CommandPalette';
+import { CommandPalette } from '@/features/command-palette/CommandPalette-lazy';
 import { cn, focusRing } from '@/lib/utils';
 import { WindowControls } from './WindowControls';
 
@@ -37,14 +37,16 @@ export function TopBar() {
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
 
-  // TopBar is the first mounted child of App.tsx, so it's the natural
-  // place to kick off `bootstrap()`. Doing it here (rather than
-  // module-load time) keeps the call inside React's effect lifecycle
-  // and avoids firing invoke during store creation.
-  const bootstrap = useAppStore((s) => s.bootstrap);
-  useEffect(() => {
-    void bootstrap();
-  }, [bootstrap]);
+  // NOTE: `bootstrap()` used to be kicked off from right here, in this
+  // effect, because TopBar is the first mounted child of App.tsx. That is
+  // strictly too late: effects run after React has parsed and executed the
+  // entire initial module graph and mounted the tree, so the backend round
+  // trip could not start until the slowest thing on the page was already
+  // done — the two costs were serialised instead of overlapping. It now
+  // fires from `main.tsx`, before `createRoot`, which lets the IPC run
+  // concurrently with mount and with the editor chunks warming up.
+  // `bootstrap()` is idempotent and guards on `loaded || loading`, so the
+  // call order relative to this component is not load-bearing.
 
   const envs = useMemo(
     () => environments.filter((e) => e.projectId === activeProjectId),
@@ -297,7 +299,9 @@ export function TopBar() {
           window operations cluster where every desktop app puts them. */}
       <WindowControls />
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <Suspense fallback={null}>
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      </Suspense>
     </header>
   );
 }
