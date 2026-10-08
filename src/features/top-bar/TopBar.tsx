@@ -118,12 +118,18 @@ export function TopBar() {
                 className="h-2 w-2 rounded-sm"
                 style={{ backgroundColor: activeProject.color }}
               />
-              <span className="w-[160px] truncate">{activeProject.name}</span>
+              {/* `max-w`, not a fixed `w`: the project name is a short
+                  label here, and reserving a full 160px for it left a
+                  conspicuous gap in the bar. Unlike the env slot, this
+                  name does not change on every switch, so the shrink-on-
+                  short-name behaviour of `max-w` is not worth trading
+                  the whitespace for. Long names still cap and ellipsise. */}
+              <span className="max-w-[160px] truncate">{activeProject.name}</span>
             </>
           ) : (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              <span className="w-[160px] truncate">加载中…</span>
+              <span className="max-w-[160px] truncate">加载中…</span>
             </>
           )}
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
