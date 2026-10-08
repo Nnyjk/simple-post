@@ -156,13 +156,17 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
     }
 
     // draft.type === 'endpoint'
-    if (!draft.parentCollectionId) return null;
+    // The parent is a collection, or the module itself when the endpoint
+    // needs no folder — an empty `parentCollectionId` is that second
+    // case, not a missing field. The module is what `addNode` derives
+    // `rootId` from either way.
+    const parentId = draft.parentCollectionId || draft.parentModuleId;
+    if (!parentId) return null;
     // Expand every ancestor so the new endpoint is visible where it
     // landed. With one node type this is a walk up `parentId` instead of
-    // the old "open the collection, then find its module" two-step.
-    let ancestor: ResourceNode | undefined = state.nodes.find(
-      (n) => n.id === draft.parentCollectionId,
-    );
+    // the old "open the collection, then find its module" two-step, and
+    // starting from the module covers the folderless case unchanged.
+    let ancestor: ResourceNode | undefined = state.nodes.find((n) => n.id === parentId);
     while (ancestor) {
       if (!ancestor.expanded) state.toggleNodeExpanded(ancestor.id);
       ancestor = ancestor.parentId
@@ -170,7 +174,7 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
         : undefined;
     }
     const id = await state.addNode({
-      parentId: draft.parentCollectionId,
+      parentId,
       kind: 'endpoint',
       name,
       // An endpoint is born with a detail row; without one the tree

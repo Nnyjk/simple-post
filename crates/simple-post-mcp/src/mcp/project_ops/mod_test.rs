@@ -250,6 +250,118 @@ async fn endpoint_create_rejects_empty_url() {
 }
 
 #[tokio::test]
+async fn endpoint_create_accepts_a_module_parent() {
+    // An endpoint with no collection of its own. The matrix names two
+    // parent types for an endpoint precisely so this does not need a
+    // throwaway collection first — and the MCP tool has to be able to
+    // build the same tree the UI can, so `module_id` is accepted
+    // alongside `collection_id`.
+    use simple_post_core::db::{endpoint_details, nodes, permissions, projects};
+    use simple_post_core::domain::{Project, ResourceNode, ResourceNodeType};
+    use simple_post_core::permissions::Permission;
+
+    let st = state();
+
+    fn mk() -> Project {
+        Project {
+            id: String::new(),
+            name: String::new(),
+            description: None,
+            base_url: None,
+            base_url_definitions: vec![],
+            default_base_url_definition_id: None,
+            color: String::new(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn node(root: &str, id: &str, kind: ResourceNodeType, parent: Option<&str>) -> ResourceNode {
+        ResourceNode {
+            id: id.into(),
+            root_id: root.into(),
+            parent_id: parent.map(String::from),
+            kind,
+            name: "n".into(),
+            description: None,
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(
+            c,
+            &Project {
+                id: "p_ep".into(),
+                name: "P".into(),
+                ..mk()
+            },
+        )?;
+        nodes::create(
+            c,
+            &node("p_ep", "m_ep", ResourceNodeType::Module, None),
+            None,
+        )?;
+        // The per-project gate defaults to `read_call`, which is below
+        // the `full` a create requires.
+        permissions::set(c, "p_ep", Permission::Full)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let res = endpoint::tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep",
+            "name": "root endpoint",
+            "method": "GET",
+            "url": "/x"
+        }),
+    )
+    .await
+    .expect("creating an endpoint under a module must succeed");
+
+    let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+    let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+    // `EndpointResource` flattens the node, so its fields sit at the top
+    // level next to `detail`.
+    assert_eq!(created["kind"], "endpoint");
+    assert_eq!(created["parentId"], "m_ep");
+    assert_eq!(created["rootId"], "p_ep");
+
+    // The detail row has to land with the node, or the tree holds a row
+    // the tester cannot open.
+    let id = created["id"].as_str().expect("node id").to_string();
+    assert_eq!(
+        simple_post_core::db::with_conn(&st.pool, |c| endpoint_details::get(c, &id))
+            .expect("detail row")
+            .url,
+        "/x"
+    );
+}
+
+#[tokio::test]
+async fn endpoint_create_requires_some_parent() {
+    // Neither id supplied: an endpoint with no parent is not a tree, so
+    // this is an input error — not a permission denial.
+    let res = endpoint::tool_endpoint_create(
+        &state(),
+        serde_json::json!({
+            "name": "n",
+            "method": "GET",
+            "url": "/x"
+        }),
+    )
+    .await;
+    assert!(
+        matches!(res, Err(AppError::Validation(_))),
+        "expected Validation rejection, got {res:?}"
+    );
+}
+
+#[tokio::test]
 async fn endpoint_create_rejects_unknown_method_gracefully() {
     // Empty method is malformed HTTP — surface a Validation error
     // (the LLM / UI gets `is_error=true` text) instead of panicking

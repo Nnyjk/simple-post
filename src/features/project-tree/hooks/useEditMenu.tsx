@@ -160,6 +160,15 @@ export function useEditMenu({
           icon: <FolderPlus className="h-3.5 w-3.5" />,
           onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: id }),
         },
+        // A module accepts an endpoint directly, so this needs no
+        // collection to exist first — `parentCollectionId` stays empty,
+        // which is the "直接放在模块下" placement.
+        {
+          kind: 'item',
+          label: '新建接口',
+          icon: <FilePlus className="h-3.5 w-3.5" />,
+          onClick: () => openNewItemWithIntent({ type: 'endpoint', parentModuleId: id }),
+        },
         { kind: 'divider' },
         {
           kind: 'item',

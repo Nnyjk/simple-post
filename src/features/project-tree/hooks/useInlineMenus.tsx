@@ -34,8 +34,9 @@ export function useInlineMenus({
     e.stopPropagation();
     const firstMod = projectModules[0];
     // Top-level collections of that module only: a collection's parent
-    // is either a module or another collection, and an endpoint can only
-    // hang off a collection, so this is the shortest valid endpoint path.
+    // is either a module or another collection. Used to pick the
+    // endpoint's landing spot, and it is a preference, not a
+    // requirement — an endpoint can sit on the module itself.
     const firstColSorted = firstMod
       ? nodes
           .filter((c) => c.kind === 'collection' && c.parentId === firstMod.id)
@@ -57,16 +58,20 @@ export function useInlineMenus({
         onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: firstMod.id }),
       });
     }
-    if (firstMod && firstColSorted) {
+    if (firstMod) {
       items.push({
         kind: 'item',
         label: '新建接口',
         icon: <FilePlus className="h-3.5 w-3.5" />,
+        // Nest in the module's first collection when it has one; with an
+        // empty id the endpoint lands on the module directly. So this
+        // item no longer disappears on a module that has no collections
+        // yet.
         onClick: () =>
           openNewItemWithIntent({
             type: 'endpoint',
             parentModuleId: firstMod.id,
-            parentCollectionId: firstColSorted.id,
+            parentCollectionId: firstColSorted?.id ?? '',
           }),
       });
     }
@@ -82,6 +87,15 @@ export function useInlineMenus({
         label: '新建集合',
         icon: <FolderPlus className="h-3.5 w-3.5" />,
         onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: moduleId }),
+      },
+      // A module takes an endpoint directly, so this needs no collection
+      // to exist first — passing only `parentModuleId` is the whole
+      // "直接放在模块下" intent.
+      {
+        kind: 'item',
+        label: '新建接口',
+        icon: <FilePlus className="h-3.5 w-3.5" />,
+        onClick: () => openNewItemWithIntent({ type: 'endpoint', parentModuleId: moduleId }),
       },
     ];
     setMenu({ x: e.clientX, y: e.clientY, items });

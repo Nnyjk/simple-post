@@ -107,9 +107,9 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   ): number | null => {
     if (zone === 'into') {
       // Insert at the end of the destination's children list. A module
-      // holds collections; a collection holds endpoints and further
-      // collections — one count either way, because the move action
-      // re-numbers only the rows it inserts among.
+      // holds collections and endpoints; a collection holds endpoints and
+      // further collections — one count either way, because the move
+      // action re-numbers only the rows it inserts among.
       if (target.kind === 'module' || target.kind === 'collection') {
         return siblingsOf(target.id).length;
       }
@@ -198,10 +198,12 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
       }
 
       if (target.kind === 'module') {
-        // Only a collection may sit directly under a module — the
-        // server's type matrix would refuse anything else, so refusing
-        // here keeps the optimistic state from showing a move that 400s.
-        if (drag.kind !== 'collection') return;
+        // A module takes collections *and* endpoints — an endpoint that
+        // needs no collection of its own lands straight on it. Anything
+        // else (another module) the server's type matrix refuses, so
+        // refusing here keeps the optimistic state from showing a move
+        // that 400s.
+        if (drag.kind !== 'collection' && drag.kind !== 'endpoint') return;
         const zone = computeZoneFromEvent(e, drag, target, targetEl);
         const idx =
           zone === 'into' ? siblingsOf(target.id).length : computeTargetIndex(drag, target, zone);
@@ -234,8 +236,12 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
         return;
       }
 
-      // target.kind === 'endpoint' — an endpoint's siblings are
-      // endpoints, so a collection or module can never land here.
+      // target.kind === 'endpoint' — dropping beside an endpoint. Only
+      // an endpoint goes here: the move makes the dragged row a sibling
+      // of the target, and the gesture this branch implements ("reorder
+      // among a collection's endpoints") has no meaning for a container.
+      // A collection whose sibling slot is a module-level endpoint is
+      // reachable by dropping onto the module row instead.
       if (drag.kind !== 'endpoint') return;
       const targetNode = nodes.find((n) => n.id === target.id);
       if (!targetNode || !targetNode.parentId) return;
@@ -248,14 +254,16 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
    * Whether the dragged kind can be **nested into** the given target
    * kind. Drives the 25/50/25 (vs 50/50) split on container rows.
    *
-   * Rules:
+   * Rules — the mirror of `ResourceNodeType::may_under`:
    *   - Modules can never be embedded (per the user's "模块无法被嵌
-   *     入集合" rule), so `into` is never valid when target is module.
-   *   - Collections can be embedded under another collection.
-   *   - Endpoints can be embedded under a collection.
+   *     入集合" rule), so `into` is never valid when the dragged kind
+   *     is a module.
+   *   - Collections can be embedded under a module or another
+   *     collection.
+   *   - Endpoints can be embedded under a module or a collection.
    */
   const canNestInto = (dragKind: TargetKind, targetKind: TargetKind): boolean => {
-    if (targetKind === 'module') return dragKind === 'collection';
+    if (targetKind === 'module') return dragKind === 'collection' || dragKind === 'endpoint';
     if (targetKind === 'collection') return dragKind === 'collection' || dragKind === 'endpoint';
     return false;
   };

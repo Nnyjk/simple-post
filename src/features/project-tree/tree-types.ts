@@ -45,7 +45,19 @@ export type CollectionBranch = {
   children: CollectionBranch[];
 };
 
-export type TreeBranch = { module: ResourceNode; collections: CollectionBranch[] };
+export type TreeBranch = {
+  module: ResourceNode;
+  /**
+   * Endpoints sitting directly on the module, with no collection of their
+   * own. A module accepts both kinds of child, so these render beside the
+   * collections rather than inside one — `TreeBranch` carries them
+   * separately, exactly as a `CollectionBranch` carries its own.
+   */
+  endpoints: ResourceNode[];
+  /** The subset of the store's detail map covering `endpoints`. */
+  endpointDetails: Record<string, EndpointDetail>;
+  collections: CollectionBranch[];
+};
 
 /**
  * Everything the row components need in order to wire drag-and-drop.

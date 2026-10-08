@@ -5,7 +5,7 @@ import type {
   TargetKind,
 } from '../tree-types';
 import { CollectionRow } from './CollectionRow';
-import { EndpointRow } from './EndpointRow';
+import { EndpointList } from './EndpointList';
 import { TreeChildren } from './TreeChildren';
 
 export interface CollectionBranchProps {
@@ -91,61 +91,19 @@ export function CollectionBranch(props: CollectionBranchProps) {
             {(colEndpoints.length > 0 || subCols.length > 0) && (
               <TreeChildren expanded={!!collection.expanded}>
                 {colEndpoints.length > 0 && (
-                  <div className="ml-3 border-l border-border/60 pl-1">
-                    {colEndpoints.map((ep) => {
-                      // An endpoint with no detail row is a tree the
-                      // backend would refuse to create, so a missing one
-                      // here means the two tables disagree. Skip the row
-                      // rather than render a method pill off `undefined`.
-                      const epDetail = endpointDetails[ep.id];
-                      if (!epDetail) return null;
-                      return (
-                        <EndpointRow
-                          key={ep.id}
-                          endpoint={ep}
-                          detail={epDetail}
-                          active={ep.id === activeEndpointId}
-                          selected={selectedEndpointIds.has(ep.id)}
-                          multiSelect={selectedEndpointIds.size > 1}
-                          isEditing={editing?.kind === 'endpoint' && editing.id === ep.id}
-                          onClick={(e) => onEndpointClick(ep.id, e)}
-                          onStartEdit={() => onEndpointStartEdit(ep.id)}
-                          onSaveEdit={(name) => onEndpointSaveEdit(ep.id, name)}
-                          onCancelEdit={onCancelEdit}
-                          onContextMenu={(e) => onEndpointContextMenu(e, ep.id)}
-                          onDragStart={(e) => {
-                            // When the user starts dragging a single
-                            // endpoint that is part of a multi-selection,
-                            // drag the whole selection. Otherwise drag
-                            // just the one row.
-                            const ids =
-                              selectedEndpointIds.has(ep.id) && selectedEndpointIds.size > 1
-                                ? Array.from(selectedEndpointIds)
-                                : [ep.id];
-                            dragContext.setDataTransfer(e, { kind: 'endpoint', ids });
-                          }}
-                          onDragEnd={dragContext.handleDragEnd}
-                          onDragOver={dragContext.makeDragOverHandler(
-                            { kind: 'endpoint', id: ep.id },
-                            null,
-                          )}
-                          onDragLeave={dragContext.makeDragLeaveHandler({
-                            kind: 'endpoint',
-                            id: ep.id,
-                          })}
-                          onDrop={dragContext.makeDropHandler(
-                            { kind: 'endpoint', id: ep.id },
-                            null,
-                          )}
-                          dropHint={
-                            dragContext.dropHint && dragContext.dropHint.key === `endpoint:${ep.id}`
-                              ? dragContext.dropHint.zone
-                              : null
-                          }
-                        />
-                      );
-                    })}
-                  </div>
+                  <EndpointList
+                    endpoints={colEndpoints}
+                    details={endpointDetails}
+                    editing={editing}
+                    selectedEndpointIds={selectedEndpointIds}
+                    activeEndpointId={activeEndpointId}
+                    onEndpointClick={onEndpointClick}
+                    onEndpointStartEdit={onEndpointStartEdit}
+                    onEndpointContextMenu={onEndpointContextMenu}
+                    onEndpointSaveEdit={onEndpointSaveEdit}
+                    onCancelEdit={onCancelEdit}
+                    dragContext={dragContext}
+                  />
                 )}
                 {subCols.length > 0 && (
                   <CollectionBranch {...props} branches={subCols} depth={depth + 1} />

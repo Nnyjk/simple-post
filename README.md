@@ -38,7 +38,7 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 层级：Project → Module → Collection（**可递归嵌套，深度不设上限**）→ Endpoint，外加 Environment / Response
 - 整棵树存在**一张 `nodes` 表**里，用 `type` 字段区分模块 / 集合 / 接口；层级由 `parent_id` 表达，所属项目由 `root_id` 反规范化在每一行上（省掉一次向上追溯）
 - 接口的请求配置（method / url / auth / body / headers / params / tags）单独放 `endpoint_details` 侧表，按 node id 关联——这些字段对模块和集合没有意义
-- 类型矩阵是**被强制的契约**（SQLite trigger + 应用层双防线）：模块只能在顶层，接口只能挂在集合下，集合可以挂在模块或另一个集合下
+- 类型矩阵是**被强制的契约**（SQLite trigger + 应用层双防线）：模块只能在顶层，接口可以挂在集合下、也可以直接挂在模块下，集合可以挂在模块或另一个集合下
 - 持久化：Zustand slice → `invokeCmd()` → Tauri IPC 或 `/api/*` → `simple-post-core` → SQLite（WAL 模式）
 - 完整 CRUD：项目 / 模块 / 集合 / 接口的增删改查 + 复制接口 + 级联清理（级联由 schema 保证，客户端只提交要删的节点 id）
 - 排序：模块 / 集合 / 接口的上下移

@@ -228,9 +228,13 @@ where
 /// boot.
 ///
 /// Every `CREATE` in the schema is `IF NOT EXISTS`, so re-running against
-/// an already-migrated database is a no-op. **No rows are inserted**:
-/// a fresh install starts empty and is populated by the user or by an
-/// MCP client. Test-only seed data lives in `test_support`.
+/// an already-migrated database changes nothing. The parent-matrix
+/// triggers are the deliberate exception: they are dropped and rebuilt,
+/// because their bodies *are* the contract and `IF NOT EXISTS` would
+/// leave an existing database enforcing a matrix the application layer
+/// no longer holds. **No rows are inserted**: a fresh install starts
+/// empty and is populated by the user or by an MCP client. Test-only
+/// seed data lives in `test_support`.
 pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
     Ok(conn.execute_batch(SCHEMA_SQL)?)
 }

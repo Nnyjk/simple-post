@@ -281,12 +281,44 @@ fn a_module_may_not_have_a_node_parent() {
 }
 
 #[test]
-fn an_endpoint_may_not_hang_off_a_module() {
+fn an_endpoint_may_hang_off_a_module_directly() {
+    // The one-endpoint case. Requiring a collection made this cost a
+    // throwaway folder first, which is why the matrix names two parent
+    // types for an endpoint and only one for a collection.
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     let (e, d) = endpoint("p1", "e1", "m1", 0);
-    let err = db::with_tx(&pool, |c| create(c, &e, Some(&d))).unwrap_err();
-    assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
+    put(&pool, &e, Some(&d));
+
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(got.kind, ResourceNodeType::Endpoint);
+    assert_eq!(got.parent_id.as_deref(), Some("m1"));
+    assert_eq!(got.root_id, "p1");
+    // The detail row has to land with the node, or the tree holds a row
+    // the tester cannot open.
+    assert_eq!(
+        db::with_conn(&pool, |c| db::endpoint_details::get(c, "e1"))
+            .unwrap()
+            .url,
+        "/e1"
+    );
+}
+
+#[test]
+fn an_endpoint_may_still_hang_off_a_collection() {
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "e1"))
+            .unwrap()
+            .parent_id
+            .as_deref(),
+        Some("c1")
+    );
 }
 
 #[test]
@@ -617,15 +649,27 @@ fn multi_select_keeps_caller_order() {
 // -------------------------------------------------------------------------
 
 #[test]
-fn a_trigger_rejects_an_endpoint_under_a_module() {
+fn a_trigger_rejects_an_endpoint_under_an_endpoint() {
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
-    // Raw INSERT, straight past `db::nodes::create`.
-    let err = db::with_tx(&pool, |c| {
+    // An endpoint is a leaf. Its widened parent set is module / collection,
+    // never another endpoint — and the trigger, not the application layer,
+    // is what has to hold that line for a raw writer.
+    db::with_tx(&pool, |c| {
         c.execute(
             "INSERT INTO nodes \
              (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
              VALUES ('e_raw', 'p1', 'm1', 'endpoint', 'raw', 0, 1, 1)",
+            [],
+        )?;
+        Ok(())
+    })
+    .expect("an endpoint under a module is legal");
+    let err = db::with_tx(&pool, |c| {
+        c.execute(
+            "INSERT INTO nodes \
+             (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
+             VALUES ('e_child', 'p1', 'e_raw', 'endpoint', 'raw', 0, 1, 1)",
             [],
         )?;
         Ok(())
@@ -699,6 +743,33 @@ fn the_trigger_allows_what_the_matrix_allows() {
             .parent_id
             .as_deref(),
         Some("c1")
+    );
+}
+
+#[test]
+fn the_trigger_allows_an_endpoint_under_a_module() {
+    // The update trigger carries the matrix too, and it was widened with
+    // it. Left on the old predicate it would abort the reparent the
+    // application layer had just agreed to — and `module_move` /
+    // `endpoint_move` go straight through it.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+
+    // Lift the endpoint out of its collection, raw.
+    db::with_tx(&pool, |c| {
+        c.execute("UPDATE nodes SET parent_id = 'm1' WHERE id = 'e1'", [])?;
+        Ok(())
+    })
+    .expect("reparenting an endpoint to a module is legal");
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "e1"))
+            .unwrap()
+            .parent_id
+            .as_deref(),
+        Some("m1")
     );
 }
 

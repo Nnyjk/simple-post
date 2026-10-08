@@ -54,7 +54,8 @@ export interface AuthConfig {
  * The three kinds of row the resource tree holds. A module is the
  * top-level branch under a project, a collection nests arbitrarily deep
  * under a module or another collection, and an endpoint is a leaf under
- * a collection.
+ * a collection — or directly under a module, when it needs no folder of
+ * its own.
  *
  * Named `ResourceNodeType` rather than `NodeType` because `tsconfig`
  * includes `"DOM"`, where `Node` is a global interface that would
@@ -81,8 +82,9 @@ export interface ResourceNode {
   /**
    * The direct parent node, or `null` for a module — whose parent is the
    * project rather than another node. A collection's parent is a module
-   * (top level) or another collection (nested); an endpoint's is always
-   * a collection. `db::nodes::move_many` refuses any other combination.
+   * (top level) or another collection (nested); an endpoint's is a
+   * collection or a module. `db::nodes::move_many` refuses any other
+   * combination.
    */
   parentId: string | null;
   /**

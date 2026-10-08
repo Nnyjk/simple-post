@@ -281,12 +281,18 @@ impl ResourceNodeType {
 
     /// Can a node of this type sit directly under a node of `parent`?
     ///
-    /// This is the guarantee the old foreign keys gave for free:
-    /// `endpoints.collection_id REFERENCES collections(id)` meant an
-    /// endpoint could not hang off a module. SQLite cannot express that
-    /// over one polymorphic `parent_id` — CHECK constraints cannot read
-    /// another row — so the matrix lives here and is enforced on every
-    /// write by `db::nodes`.
+    /// SQLite cannot express this over one polymorphic `parent_id` —
+    /// CHECK constraints cannot read another row — so the matrix lives
+    /// here and is enforced on every write by `db::nodes`, with
+    /// matching triggers in `schema.sql`.
+    ///
+    /// An endpoint's parent is deliberately two types, not one. The old
+    /// layout only had `endpoints.collection_id REFERENCES
+    /// collections(id)`, so a collection was mandatory, and that made
+    /// the simplest case — one endpoint, no folder worth creating —
+    /// cost a throwaway collection first. A module takes endpoints
+    /// directly; a collection still takes them and keeps its own
+    /// sub-collections.
     pub fn may_under(self, parent: ResourceNodeType) -> bool {
         match self {
             // A module's parent is the project, which is not a node. The
@@ -300,7 +306,12 @@ impl ResourceNodeType {
                 parent,
                 ResourceNodeType::Module | ResourceNodeType::Collection
             ),
-            ResourceNodeType::Endpoint => parent == ResourceNodeType::Collection,
+            // A collection groups an endpoint with its siblings; a module
+            // accepts one that needs no folder of its own.
+            ResourceNodeType::Endpoint => matches!(
+                parent,
+                ResourceNodeType::Module | ResourceNodeType::Collection
+            ),
         }
     }
 }

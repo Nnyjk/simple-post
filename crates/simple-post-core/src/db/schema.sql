@@ -146,11 +146,21 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
 -- `ResourceNodeType::may_under`, but the MCP tools are this project's
 -- primary external write path, and a future caller that reaches past
 -- `db::nodes` would otherwise be free to build a tree no reader can
--- walk. The old layout got this from
--- `endpoints.collection_id REFERENCES collections(id)`, which one
--- polymorphic `parent_id` cannot express: SQLite's CHECK constraints
--- cannot read another row, and a self-referencing foreign key says
--- nothing about which types may sit on which.
+-- walk. The old layout got the whole matrix from foreign keys —
+-- `endpoints.collection_id REFERENCES collections(id)` among them —
+-- which one polymorphic `parent_id` cannot express: SQLite's CHECK
+-- constraints cannot read another row, and a self-referencing foreign
+-- key says nothing about which types may sit on which.
+--
+-- These two triggers are dropped and rebuilt on every `migrate`
+-- instead of being `IF NOT EXISTS`. A trigger body is part of the
+-- contract, and `IF NOT EXISTS` would freeze whatever the first build
+-- to touch a given `store.db` wrote: relaxing the matrix to let an
+-- endpoint sit under a module would leave every existing database
+-- enforcing the old rule, which the application layer no longer
+-- agrees with. Bumping `SCHEMA_VERSION` instead would delete those
+-- databases outright, and losing a user's tree to widen a predicate
+-- is not a trade worth making.
 --
 -- Deliberately NOT covered here: `root_id` agreeing with the parent's.
 -- `move_many` re-derives it across a subtree, and a subtree is
@@ -158,7 +168,10 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
 -- disagree mid-transaction, and a constraint would have to be dropped
 -- exactly when it is needed. `db::nodes::validate_placement` checks it
 -- on create, and `move_many` owns it after that.
-CREATE TRIGGER IF NOT EXISTS trg_nodes_parent_matrix_insert
+DROP TRIGGER IF EXISTS trg_nodes_parent_matrix_insert;
+DROP TRIGGER IF EXISTS trg_nodes_parent_matrix_update;
+
+CREATE TRIGGER trg_nodes_parent_matrix_insert
 BEFORE INSERT ON nodes
 BEGIN
   -- A module's parent is the project, which is not a node.
@@ -171,12 +184,12 @@ BEGIN
     WHERE p.id = NEW.parent_id
       AND (
         (NEW.type = 'collection' AND p.type IN ('module', 'collection'))
-        OR (NEW.type = 'endpoint'   AND p.type = 'collection')
+        OR (NEW.type = 'endpoint'   AND p.type IN ('module', 'collection'))
       )
   );
 END;
 
-CREATE TRIGGER IF NOT EXISTS trg_nodes_parent_matrix_update
+CREATE TRIGGER trg_nodes_parent_matrix_update
 BEFORE UPDATE OF parent_id ON nodes
 -- NULL means "promote to the top of the project", which is only legal
 -- for a module — handled by the first clause. Every other type would
@@ -190,7 +203,7 @@ BEGIN
     WHERE p.id = NEW.parent_id
       AND (
         (NEW.type = 'collection' AND p.type IN ('module', 'collection'))
-        OR (NEW.type = 'endpoint'   AND p.type = 'collection')
+        OR (NEW.type = 'endpoint'   AND p.type IN ('module', 'collection'))
       )
   );
 END;

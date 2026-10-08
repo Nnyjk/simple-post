@@ -459,3 +459,30 @@ fn clearing_a_nullable_column_is_not_an_empty_patch() {
         serde_json::Value::Null
     );
 }
+
+#[test]
+fn may_under_is_the_whole_parent_child_matrix() {
+    use ResourceNodeType::{Collection, Endpoint, Module};
+
+    // A module's parent is the project, which is not a node — so no node
+    // type accepts one, and `db::nodes` spells "top level" as
+    // `parent_id = NULL` instead.
+    for parent in [Module, Collection, Endpoint] {
+        assert!(
+            !Module.may_under(parent),
+            "a module must not sit under a {}",
+            parent.as_str()
+        );
+    }
+
+    assert!(Collection.may_under(Module));
+    assert!(Collection.may_under(Collection));
+    assert!(!Collection.may_under(Endpoint));
+
+    // An endpoint is the one row naming *two* parents. Forcing a
+    // collection made the "single endpoint, no folder" case cost a
+    // throwaway collection first.
+    assert!(Endpoint.may_under(Module));
+    assert!(Endpoint.may_under(Collection));
+    assert!(!Endpoint.may_under(Endpoint));
+}

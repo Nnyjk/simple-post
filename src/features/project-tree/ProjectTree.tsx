@@ -7,13 +7,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import type { EditTarget, TargetKind } from './tree-types';
-import {
-  buildTree,
-  countSubtreeCollections,
-  countSubtreeEndpoints,
-  countTreeEndpoints,
-  filterTree,
-} from './tree-utils';
+import { buildTree, countModuleEndpoints, countSubtreeCollections, filterTree } from './tree-utils';
 import { useTreeDnd } from './hooks/useTreeDnd';
 import { useEditMenu } from './hooks/useEditMenu';
 import { useInlineMenus } from './hooks/useInlineMenus';
@@ -22,6 +16,7 @@ import { useTreeSelection } from './hooks/useTreeSelection';
 import { ProjectRow } from './rows/ProjectRow';
 import { ModuleRow } from './rows/ModuleRow';
 import { TreeChildren } from './rows/TreeChildren';
+import { EndpointList } from './rows/EndpointList';
 import { CollectionBranch } from './rows/CollectionBranch';
 
 const kindLabel: Record<TargetKind, string> = {
@@ -183,31 +178,64 @@ export function ProjectTree() {
             onPlusClick={openProjectPlusMenu}
           />
         )}
-        {filtered.map(({ module, collections: modCollections }) => (
-          <div key={module.id} className="mb-0.5">
+        {filtered.map((modBranch) => (
+          <div key={modBranch.module.id} className="mb-0.5">
             <ModuleRow
-              module={module}
-              collectionCount={modCollections.length}
-              endpointCount={countTreeEndpoints(modCollections)}
-              isEditing={editing?.kind === 'module' && editing.id === module.id}
-              onSelect={() => openModuleTab(module.id)}
-              onStartEdit={() => startEdit('module', module.id)}
-              onSaveEdit={(name) => saveEdit('module', module.id, name)}
+              module={modBranch.module}
+              collectionCount={modBranch.collections.length}
+              endpointCount={countModuleEndpoints(modBranch)}
+              isEditing={editing?.kind === 'module' && editing.id === modBranch.module.id}
+              onSelect={() => openModuleTab(modBranch.module.id)}
+              onStartEdit={() => startEdit('module', modBranch.module.id)}
+              onSaveEdit={(name) => saveEdit('module', modBranch.module.id, name)}
               onCancelEdit={cancelEdit}
-              onContextMenu={(e) => openMenu(e, 'module', module.id)}
-              onPlusClick={openModulePlusMenu(module.id)}
+              onContextMenu={(e) => openMenu(e, 'module', modBranch.module.id)}
+              onPlusClick={openModulePlusMenu(modBranch.module.id)}
               onDragStart={(e) => {
-                setDataTransfer(e, { kind: 'module', ids: [module.id] });
+                setDataTransfer(e, { kind: 'module', ids: [modBranch.module.id] });
               }}
               onDragEnd={handleDragEnd}
-              onDragOver={makeDragOverHandler({ kind: 'module', id: module.id }, null)}
-              onDragLeave={makeDragLeaveHandler({ kind: 'module', id: module.id })}
-              onDrop={makeDropHandler({ kind: 'module', id: module.id }, null)}
-              dropHint={dropHint && dropHint.key === `module:${module.id}` ? dropHint.zone : null}
+              onDragOver={makeDragOverHandler({ kind: 'module', id: modBranch.module.id }, null)}
+              onDragLeave={makeDragLeaveHandler({ kind: 'module', id: modBranch.module.id })}
+              onDrop={makeDropHandler({ kind: 'module', id: modBranch.module.id }, null)}
+              dropHint={
+                dropHint && dropHint.key === `module:${modBranch.module.id}` ? dropHint.zone : null
+              }
             />
-            <TreeChildren expanded={!!module.expanded}>
+            <TreeChildren expanded={!!modBranch.module.expanded}>
+              {/* Endpoints sitting on the module itself, above its
+                  collections — a module accepts both child kinds. */}
+              {modBranch.endpoints.length > 0 && (
+                <EndpointList
+                  endpoints={modBranch.endpoints}
+                  details={modBranch.endpointDetails}
+                  editing={editing}
+                  selectedEndpointIds={selectedEndpointIds}
+                  activeEndpointId={activeEndpointId}
+                  onEndpointClick={handleEndpointClick}
+                  onEndpointStartEdit={(id) => {
+                    setActiveEndpoint(id);
+                    startEdit('endpoint', id);
+                  }}
+                  onEndpointContextMenu={(e, id) => {
+                    setActiveEndpoint(id);
+                    openMenu(e, 'endpoint', id);
+                  }}
+                  onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
+                  onCancelEdit={cancelEdit}
+                  dragContext={{
+                    moveNodes,
+                    setDataTransfer,
+                    makeDragOverHandler,
+                    makeDragLeaveHandler,
+                    makeDropHandler,
+                    handleDragEnd,
+                    dropHint,
+                  }}
+                />
+              )}
               <CollectionBranch
-                branches={modCollections}
+                branches={modBranch.collections}
                 depth={1}
                 editing={editing}
                 onSelectCollection={openCollectionTab}
@@ -250,12 +278,7 @@ export function ProjectTree() {
           (a, m) => a + m.collections.reduce((b, c) => b + 1 + countSubtreeCollections(c), 0),
           0,
         )}{' '}
-        个集合 ·{' '}
-        {tree.reduce(
-          (a, m) => a + m.collections.reduce((b, c) => b + countSubtreeEndpoints(c), 0),
-          0,
-        )}{' '}
-        个接口
+        个集合 · {tree.reduce((a, m) => a + countModuleEndpoints(m), 0)} 个接口
         {selectedEndpointIds.size > 1 && (
           <span className="ml-1 text-primary">· 已选 {selectedEndpointIds.size} 个接口</span>
         )}

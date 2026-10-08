@@ -1,4 +1,4 @@
-﻿//! `endpoint_*` MCP tools — endpoint CRUD, search, duplicate, and movement.
+//! `endpoint_*` MCP tools — endpoint CRUD, search, duplicate, and movement.
 //!
 //! 8 tools:
 //! - `endpoint_list`
@@ -73,7 +73,13 @@ fn endpoint_resources(
 
 #[derive(Debug, Deserialize)]
 pub(super) struct EndpointCreateArgs {
-    pub collection_id: String,
+    /// Parent collection. Optional now that an endpoint may sit directly
+    /// under a module — exactly one of this and `module_id` is required.
+    #[serde(default)]
+    pub collection_id: Option<String>,
+    /// Parent module, for an endpoint that needs no collection of its own.
+    #[serde(default)]
+    pub module_id: Option<String>,
     pub name: String,
     pub method: String,
     pub url: String,
@@ -181,11 +187,20 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
     });
     v.push(crate::mcp::ToolEntry {
         name: "endpoint_create",
-        description: "Create a new endpoint inside a collection.",
+        description: "Create a new endpoint inside a collection, or directly \
+                       under a module (pass module_id when no collection is \
+                       wanted).",
         schema: json!({
             "type": "object",
             "properties": {
-                "collection_id": { "type": "string" },
+                "collection_id": {
+                    "type": "string",
+                    "description": "Parent collection id. Required unless module_id is given."
+                },
+                "module_id": {
+                    "type": "string",
+                    "description": "Parent module id, to create the endpoint directly under a module."
+                },
                 "name": { "type": "string" },
                 "method": { "type": "string" },
                 "url": { "type": "string" },
@@ -197,7 +212,7 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
                 "auth_config": { "type": "object" },
                 "tags": { "type": "array", "items": { "type": "string" } }
             },
-            "required": ["collection_id", "name", "method", "url"],
+            "required": ["name", "method", "url"],
             "additionalProperties": true,
         }),
         func: tool_fn!(tool_endpoint_create),
@@ -243,12 +258,16 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
     });
     v.push(crate::mcp::ToolEntry {
         name: "endpoint_move",
-        description: "Move an endpoint to a new collection / position.",
+        description: "Move an endpoint to a new parent / position. The new parent \
+                       may be a collection or a module id.",
         schema: json!({
             "type": "object",
             "properties": {
                 "endpoint_id": { "type": "string" },
-                "new_collection_id": { "type": "string" },
+                "new_collection_id": {
+                    "type": "string",
+                    "description": "New parent id — a collection, or a module to place the endpoint directly under one."
+                },
                 "new_sort_order": { "type": "integer" }
             },
             "required": ["endpoint_id", "new_collection_id"],
@@ -395,12 +414,29 @@ pub(super) async fn tool_endpoint_create(
     // input-level errors are cheap and shouldn't masquerade as
     // permission denials.
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
-    // Gate against the collection's real project. The old handler passed
+    // An endpoint's parent is a collection, or the module itself when the
+    // caller has no folder for it. `collection_id` and `module_id` are two
+    // names for that one relationship — the same shape `collection_create`
+    // uses for its own module-or-collection parent — so take whichever
+    // the client supplied and let the matrix reject a nonsense pairing.
+    let parent_id = a
+        .collection_id
+        .clone()
+        .or_else(|| a.module_id.clone())
+        .ok_or_else(|| {
+            AppError::Validation(
+                "endpoint_create needs a parent: pass collection_id to put the \
+                 endpoint inside a collection, or module_id to put it directly \
+                 under a module"
+                    .into(),
+            )
+        })?;
+    // Gate against the parent's real project. The old handler passed
     // the literal `"global"`, which is not a project id — `check_permission`
     // then compared the default `ReadCall` against the `Full` a creating
     // tool requires and denied every call.
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::nodes::root_id_of(c, &a.collection_id)
+        simple_post_core::db::nodes::root_id_of(c, &parent_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_create").await?;
 
@@ -417,7 +453,7 @@ pub(super) async fn tool_endpoint_create(
     let node = ResourceNode {
         id: id.clone(),
         root_id: project_id,
-        parent_id: Some(a.collection_id),
+        parent_id: Some(parent_id),
         kind: ResourceNodeType::Endpoint,
         name: a.name,
         description: None,

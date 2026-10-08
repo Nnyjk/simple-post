@@ -7,10 +7,11 @@
 //!
 //! ## What the merge lost, and what replaces it
 //!
-//! The old three-table layout got "an endpoint always hangs off a real
-//! collection" for free, from `endpoints.collection_id REFERENCES
-//! collections(id)`. One polymorphic `parent_id` cannot carry that:
-//! SQLite's CHECK constraints cannot read another row.
+//! The old three-table layout got "a parent always accepts the types
+//! its column could name" for free, from foreign keys like
+//! `endpoints.collection_id REFERENCES collections(id)`. One
+//! polymorphic `parent_id` cannot carry that: SQLite's CHECK
+//! constraints cannot read another row.
 //!
 //! So the parent/child matrix lives in
 //! [`ResourceNodeType::may_under`] and is enforced here on every write,

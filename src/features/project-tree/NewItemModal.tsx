@@ -37,8 +37,10 @@ const TYPE_CHIPS: { type: NewType; label: string; icon: React.ReactNode }[] = [
  *                         highlighted.
  *
  * The submit guard is intentionally strict: name must be non-empty
- * (after trim) and the appropriate parent (module / collection) must
- * be present. The footer "创建" button is disabled while invalid.
+ * (after trim) and the appropriate parent must be present. For an
+ * endpoint that parent is its *module* — its collection is optional,
+ * because "no collection" is a legal placement meaning 直接放在模块下.
+ * The footer "创建" button is disabled while invalid.
  *
  * On successful submit:
  *   - `submitNewItem()` is called, which writes the new row to the
@@ -82,47 +84,34 @@ export function NewItemModal() {
   );
 
   // ---- auto-fill parents when type / module change ----
-  // collection: default parentModuleId to first projectModule if unset.
+  // collection / endpoint: default parentModuleId to the project's first
+  // module if unset — both need one.
+  //
+  // An endpoint's *collection* is deliberately left empty. An empty
+  // collection is a placement, not a missing field — the endpoint goes
+  // straight onto the module — so nothing here may force a folder into
+  // existence.
   useEffect(() => {
-    if (newItem.type !== 'collection') return;
+    if (newItem.type !== 'collection' && newItem.type !== 'endpoint') return;
     if (newItem.parentModuleId) return;
     if (projectModules.length === 0) return;
     setNewItemParentModule(projectModules[0].id);
   }, [newItem.type, newItem.parentModuleId, projectModules, setNewItemParentModule]);
 
-  // endpoint: default parentModuleId to first projectModule, then
-  // parentCollectionId to first collection within that module.
-  useEffect(() => {
-    if (newItem.type !== 'endpoint') return;
-    if (!newItem.parentModuleId && projectModules.length > 0) {
-      setNewItemParentModule(projectModules[0].id);
-      return;
-    }
-    if (newItem.parentModuleId && !newItem.parentCollectionId && moduleCollections.length > 0) {
-      setNewItemParentCollection(moduleCollections[0].id);
-    }
-  }, [
-    newItem.type,
-    newItem.parentModuleId,
-    newItem.parentCollectionId,
-    projectModules,
-    moduleCollections,
-    setNewItemParentModule,
-    setNewItemParentCollection,
-  ]);
-
-  // endpoint: when parentModuleId changes, snap parentCollectionId to
-  // the first collection in the new module (or clear if none).
+  // endpoint: a collection belonging to another module is no longer a
+  // legal parent, so drop it rather than create the endpoint somewhere the
+  // user did not pick. `setNewItemParentModule` already clears on an
+  // explicit change; this covers a module set any other way.
   useEffect(() => {
     if (newItem.type !== 'endpoint' || !newItem.parentModuleId) return;
+    if (!newItem.parentCollectionId) return;
     const stillValid = moduleCollections.some((c) => c.id === newItem.parentCollectionId);
-    if (stillValid) return;
-    setNewItemParentCollection(moduleCollections[0]?.id ?? '');
+    if (!stillValid) setNewItemParentCollection('');
   }, [
     newItem.type,
     newItem.parentModuleId,
-    moduleCollections,
     newItem.parentCollectionId,
+    moduleCollections,
     setNewItemParentCollection,
   ]);
 
@@ -134,7 +123,9 @@ export function NewItemModal() {
       if (projectModules.length === 0) return false;
     }
     if (newItem.type === 'collection' && !newItem.parentModuleId) return false;
-    if (newItem.type === 'endpoint' && !newItem.parentCollectionId) return false;
+    // An endpoint needs its module and nothing more: no collection means
+    // "直接放在模块下", which the matrix allows.
+    if (newItem.type === 'endpoint' && !newItem.parentModuleId) return false;
     return true;
   }, [newItem, projectModules]);
 
@@ -168,8 +159,19 @@ export function NewItemModal() {
     () => projectModules.map((m) => ({ value: m.id, label: m.name })),
     [projectModules],
   );
+  // The leading empty option is the "no collection" choice, spelled out
+  // rather than implied: with collections present, an empty dropdown
+  // would otherwise read as "you still have to pick one". A module with
+  // no collections gets no collection field at all, so there is never a
+  // dead required control on screen.
   const collectionOptions = useMemo(
-    () => moduleCollections.map((c) => ({ value: c.id, label: c.name })),
+    () =>
+      moduleCollections.length === 0
+        ? []
+        : [
+            { value: '', label: '直接放在模块下（不使用集合）' },
+            ...moduleCollections.map((c) => ({ value: c.id, label: c.name })),
+          ],
     [moduleCollections],
   );
 
@@ -265,6 +267,7 @@ export function NewItemModal() {
             moduleOptions={moduleOptions}
             collectionOptions={collectionOptions}
             disabledModules={projectModules.length === 0}
+            showCollectionField={moduleCollections.length > 0}
             nameInputRef={nameInputRef}
           />
         )}
@@ -273,15 +276,8 @@ export function NewItemModal() {
           <p className="text-xs text-muted-foreground">当前项目还没有模块，请先新建一个模块。</p>
         )}
         {newItem.type === 'endpoint' && projectModules.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            当前项目还没有模块 / 集合，请先新建模块和集合。
-          </p>
+          <p className="text-xs text-muted-foreground">当前项目还没有模块，请先新建模块。</p>
         )}
-        {newItem.type === 'endpoint' &&
-          projectModules.length > 0 &&
-          moduleCollections.length === 0 && (
-            <p className="text-xs text-muted-foreground">所选模块下还没有集合，请先新建集合。</p>
-          )}
       </form>
     </Dialog>
   );
@@ -406,6 +402,8 @@ function EndpointFields(props: {
   moduleOptions: { value: string; label: string }[];
   collectionOptions: { value: string; label: string }[];
   disabledModules: boolean;
+  /** False when the chosen module has no collections to offer. */
+  showCollectionField: boolean;
   nameInputRef: React.RefObject<HTMLInputElement>;
 }) {
   return (
@@ -419,14 +417,19 @@ function EndpointFields(props: {
           disabled={props.disabledModules}
         />
       </Field>
-      <Field label="所属集合" required>
-        <Select
-          value={props.newItem.parentCollectionId}
-          onChange={(e) => props.onParentCollectionChange(e.target.value)}
-          options={props.collectionOptions}
-          disabled={props.disabledModules || props.collectionOptions.length === 0}
-        />
-      </Field>
+      {/* Optional on purpose: empty means the endpoint lands directly
+          under the module. Hidden when the module has no collections, so
+          the form never shows a control with nothing to pick. */}
+      {props.showCollectionField && (
+        <Field label="所属集合">
+          <Select
+            value={props.newItem.parentCollectionId}
+            onChange={(e) => props.onParentCollectionChange(e.target.value)}
+            options={props.collectionOptions}
+            disabled={props.disabledModules}
+          />
+        </Field>
+      )}
     </div>
   );
 }

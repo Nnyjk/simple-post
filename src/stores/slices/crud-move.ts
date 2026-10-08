@@ -9,10 +9,10 @@
  * field write: the local `set()` re-derives `sortOrder` across the
  * destination siblings and drags every descendant's `rootId` along with
  * the subtree it moves. The `ResourceNodeType::may_under` contract —
- * module → top level only, endpoint → under a collection, collection →
- * module or collection — is enforced in Rust by a trigger; the guards
- * below are the optimistic mirror of it, so a rejected drop never
- * renders state the backend would have refused.
+ * module → top level only, endpoint → under a collection or a module,
+ * collection → module or collection — is enforced in Rust by a trigger;
+ * the guards below are the optimistic mirror of it, so a rejected drop
+ * never renders state the backend would have refused.
  */
 import type { StateCreator } from 'zustand';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
