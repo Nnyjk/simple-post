@@ -4,10 +4,120 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>Simple Post</title>
+
+    <!--
+      Cold-start budget: everything in this <head> is render-blocking and
+      runs before the first paint. Two jobs:
+
+        1. Resolve the persisted theme *synchronously*. `main.tsx` does the
+           same thing, but it is a `type="module"` script, which is deferred
+           until after HTML parsing — long enough for a light-theme user to
+           get a dark first frame (or, before this block existed, a white
+           one). ~0.3 kB of inline JS is cheaper than that flash.
+        2. Paint the app background from inline CSS. `bg-background` is a
+           Tailwind utility, so until `index-<hash>.css` arrives the body has
+           no background at all and the browser paints default white. This
+           is the literal source of the blank screen at every cold start.
+
+      Both must stay byte-identical to the token values in
+      `src/styles/globals.css` (`.dark { --background: 240 10% 3.9% }`,
+      `:root { --background: 0 0% 100% }`) or the app jumps on hydration.
+    -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('simple-post:prefs');
+          var theme = raw ? (JSON.parse(raw) || {}).theme : null;
+          // Must mirror `resolveInitialTheme()` in `main.tsx` exactly:
+          //   no stored pref / unrecognised value -> 'dark'  (the app default)
+          //   'system'                            -> OS preference
+          //   'light'                              -> light
+          // An earlier version treated "nothing stored" as "follow the OS",
+          // which painted a light splash for a user whose app was about to
+          // mount dark — a flash, on a screen that exists precisely so there
+          // is no flash.
+          var dark =
+            theme === 'system'
+              ? window.matchMedia('(prefers-color-scheme: dark)').matches
+              : theme !== 'light';
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {
+          /* private mode / disabled storage — keep the `dark` default */
+        }
+      })();
+    </script>
+    <style>
+      html.dark,
+      html.dark body {
+        background-color: hsl(240 10% 3.9%);
+      }
+      html:not(.dark),
+      html:not(.dark) body {
+        background-color: hsl(0 0% 100%);
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      /*
+        Boot splash — lives in the HTML, not in React, on purpose. The
+        longest stretch of a cold start is the entry chunk downloading and
+        executing; anything rendered from JS is invisible for exactly that
+        window. This paints on the first HTML byte instead and is torn down
+        by `BootSplashGate` once the store has data (or failed), so the
+        user never sees a blank page and never sees a layout jump.
+      */
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        font:
+          500 13px/1.4 system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        color: hsl(240 5% 65%);
+        -webkit-font-smoothing: antialiased;
+      }
+      #boot-splash .sp-ring {
+        width: 26px;
+        height: 26px;
+        border: 2px solid hsl(240 5% 22%);
+        border-top-color: hsl(217 91% 60%);
+        border-radius: 50%;
+        animation: sp-boot-spin 0.7s linear infinite;
+      }
+      #boot-splash .sp-name {
+        letter-spacing: 0.02em;
+        opacity: 0.75;
+      }
+      @keyframes sp-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash .sp-ring {
+          animation-duration: 2.4s;
+        }
+      }
+    </style>
   </head>
   <body class="bg-background text-foreground antialiased">
     <div id="root"></div>
+    <div id="boot-splash" role="status" aria-live="polite">
+      <div class="sp-ring"></div>
+      <div class="sp-name">Simple Post</div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

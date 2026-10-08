@@ -329,32 +329,31 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
 /// `data_dir` is used by the daemon supervisor to resolve the SQLite
 /// file; it must match the GUI's `dirs::data_dir().join("com.simple-post")`
 /// convention so the two shapes share the same database.
+///
+/// `auto_start_daemon` is `Some(bool)` when the CLI forced the answer and
+/// `None` when the persisted `mcp.auto_start` row decides. Resolving that
+/// row here rather than in `main.rs` is deliberate: `main.rs` used to open
+/// its own `db::init()` pool purely to read one preference and then throw it
+/// away, so every cold web start paid for two full initialisations (each one
+/// a schema check, the whole `schema.sql`, and a 4-connection pool).
 pub async fn serve(
     bind_addr: std::net::SocketAddr,
     data_dir: PathBuf,
     spa_dir: PathBuf,
-    auto_start_daemon: bool,
+    auto_start_daemon: Option<bool>,
     password: Option<String>,
     base_path: Option<String>,
 ) -> Result<(), AppError> {
     let pool = db::init(&data_dir)?;
     let daemon = McpDaemonHandle::new();
 
-    if auto_start_daemon {
-        // Read the persisted `mcp.auto_start` row. The CLI flag can
-        // override the persisted value, but defaults to honouring it.
-        let want = db::with_conn(&pool, db::preferences::mcp_auto_start)?;
-        if want {
-            if let Err(e) = daemon.restart_without_app_handle(&data_dir).await {
-                eprintln!("[serve-web] ensure_started failed: {e:?}");
-            }
-        } else {
-            eprintln!(
-                "[serve-web] mcp.auto_start is off — daemon left stopped; \
-                 use POST /api/mcp/start or the settings panel to enable."
-            );
-        }
-    }
+    // Resolve the daemon decision *before* either value is moved into
+    // `WebState`, so no second `db::init()` is needed and the handle the
+    // background task warms up is the same one `/api/mcp/*` reads and writes.
+    let want_daemon = match auto_start_daemon {
+        Some(v) => v,
+        None => db::with_conn(&pool, db::preferences::mcp_auto_start).unwrap_or(false),
+    };
 
     // Build the MCP app state so `/mcp` JSON-RPC works in the same
     // process. The pool is shared with the GUI's `simple-post.db`;
@@ -367,7 +366,7 @@ pub async fn serve(
 
     let state = WebState {
         pool,
-        daemon,
+        daemon: daemon.clone(),
         data_dir: data_dir.clone(),
         mcp_state,
         password,
@@ -377,9 +376,41 @@ pub async fn serve(
 
     eprintln!("[serve-web] listening on http://{bind_addr}");
     eprintln!("[serve-web] data dir: {}", data_dir.display());
+
+    // -----------------------------------------------------------------------
+    // Bind BEFORE warming the MCP daemon.
+    //
+    // This ordering is the whole point. `restart_without_app_handle` costs a
+    // fixed 200 ms sleep, two `tasklist` spawns on Windows (it probes PID
+    // liveness twice), a full spawn of this same executable in `mcp` mode,
+    // and a healthz probe — and it used to run *before* `TcpListener::bind`.
+    // The browser sat on a refused connection for all of it, which reads as
+    // a blank page. Measured locally: first byte at ~344 ms with
+    // auto-start on vs ~90 ms with it off.
+    //
+    // Binding first turns that into a genuine background task: the daemon
+    // comes up in parallel with the page loading, and `/api/mcp/status`
+    // reports `Starting` until it is ready — the same transient the GUI
+    // already surfaces.
+    // -----------------------------------------------------------------------
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
         .map_err(|e| AppError::Validation(format!("bind {bind_addr}: {e}")))?;
+
+    if want_daemon {
+        let dir = data_dir.clone();
+        tokio::spawn(async move {
+            if let Err(e) = daemon.restart_without_app_handle(&dir).await {
+                eprintln!("[serve-web] ensure_started failed: {e:?}");
+            }
+        });
+    } else {
+        eprintln!(
+            "[serve-web] mcp.auto_start is off — daemon left stopped; \
+             use POST /api/mcp/start or the settings panel to enable."
+        );
+    }
+
     axum::serve(listener, router)
         .await
         .map_err(|e| AppError::Validation(format!("axum::serve: {e}")))

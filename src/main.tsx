@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { ingestBearerFromUrl } from './lib/tauri-commands';
+import { useAppStore } from './stores/app-store';
 import './styles/globals.css';
 
 // commit 5: when the reverse-proxy (or a hand-shared link) points at
@@ -41,6 +42,27 @@ function resolveInitialTheme(): Theme {
     (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   root.classList.toggle('dark', wantDark);
 }
+
+// ---------------------------------------------------------------------------
+// Start the backend round-trip BEFORE React mounts.
+//
+// `bootstrap()` used to be triggered from `TopBar`'s mount effect, which runs
+// only after React has parsed and executed the whole initial module graph and
+// committed the tree. That serialised the two biggest startup costs — fetching
+// the workspace and rendering the shell — when they have no dependency on each
+// other.
+//
+// Firing it here overlaps the IPC with `createRoot` and with the editor chunks
+// that `App` warms up on mount. `bootstrap()` is idempotent and returns
+// immediately when `loaded || loading`, so a later call is a no-op rather than
+// a duplicate fetch; the store is a module singleton, so the state this
+// writes is the same one the tree reads.
+//
+// Both transports are ready at module-eval time: web mode uses `fetch`, and
+// Tauri mode uses `window.__TAURI_INTERNALS__`, which Tauri injects before any
+// user script runs.
+// ---------------------------------------------------------------------------
+void useAppStore.getState().bootstrap();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

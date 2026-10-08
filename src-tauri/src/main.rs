@@ -166,6 +166,16 @@ fn main() {
             };
 
             // The CLI flag, when present, overrides the persisted row.
+            //
+            // `None` is forwarded verbatim rather than being resolved here.
+            // This used to open its own `db::init()` pool just to read one
+            // preference — a schema check, the full `schema.sql`, and a
+            // 4-connection pool — only for `web_api::serve` to open a second
+            // one a few lines later for the same file. `serve()` now resolves
+            // the persisted value from the pool it already has.
+            //
+            // An explicit flag still writes the override through here, so a
+            // forced value is persisted exactly as before.
             let auto_start = match mcp_auto_start {
                 Some(v) => {
                     // Persist the override so subsequent boots agree.
@@ -178,15 +188,9 @@ fn main() {
                             )
                         });
                     }
-                    v
+                    Some(v)
                 }
-                None => match simple_post_lib::db::init(&data_path) {
-                    Ok(pool) => simple_post_lib::db::with_conn(&pool, |c| {
-                        simple_post_lib::db::preferences::mcp_auto_start(c)
-                    })
-                    .unwrap_or(false),
-                    Err(_) => false,
-                },
+                None => None,
             };
 
             let runtime = tokio::runtime::Builder::new_multi_thread()

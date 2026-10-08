@@ -45,17 +45,20 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
+        // Only pin chunks that are genuinely shared by *several* statically
+        // loaded entry points, where a stable vendor chunk helps HTTP cache
+        // reuse across app releases.
+        //
+        // CodeMirror and `marked` used to be pinned here too. That defeated
+        // the code splitting: `manualChunks` hoists the listed modules (and
+        // their dependency closure) into one chunk, and Rollup then emits a
+        // *static* import for that chunk from any statically-loaded importer
+        // — which put 425 kB of editor back on the critical path even after
+        // `BodyEditor` / `ResponseViewer` / `DocsEditor` became lazy. Left to
+        // Rollup's automatic splitting they now sit in async chunks, which is
+        // the entire point. Verify with `.scratch/critical-path.mjs`.
         manualChunks: {
-          // 把重型 vendor 拆出主 chunk,避免单文件 > 500kB 警告
           react: ['react', 'react-dom'],
-          codemirror: [
-            '@uiw/react-codemirror',
-            '@codemirror/lang-json',
-            '@codemirror/theme-one-dark',
-          ],
-          // `react-markdown` was swapped for `marked` in the dep audit
-          // (30a0ce5); keep this chunk pointed at what's actually bundled.
-          markdown: ['marked'],
           state: ['zustand'],
         },
       },

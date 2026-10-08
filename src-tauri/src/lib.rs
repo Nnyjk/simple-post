@@ -376,7 +376,7 @@ pub async fn run_serve_web(
     bind_addr: std::net::SocketAddr,
     spa_dir: std::path::PathBuf,
     data_dir: std::path::PathBuf,
-    auto_start_daemon: bool,
+    auto_start_daemon: Option<bool>,
     password: Option<String>,
     base_path: Option<String>,
 ) {
