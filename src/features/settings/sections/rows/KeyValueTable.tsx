@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { IconTile } from '@/components/ui/icon-tile';
 import type { HueConcept } from '@/lib/hue';
 import { cn } from '@/lib/utils';
@@ -16,11 +15,14 @@ import { cn } from '@/lib/utils';
  * toggle. That shared shell now lives here; the per-table cells are
  * supplied through `renderRow`.
  *
- * The empty state and footer button are intentionally the same treatment
- * in both tables (a centred prompt + a small primary button when empty,
- * a hairline-divided text button at the foot when not) because they
- * express the same intent in both places: "this list is a set of named
- * slots you can add to".
+ * The add control is one element shared by both states. It used to be
+ * two: a centred solid `variant="default"` button inside the empty state,
+ * and a hairline-divided text button at the foot of a populated list. Both
+ * say "this list is a set of named slots you can add to", and both tables
+ * rendered them side by side on the same screen — so the empty one read as
+ * a different, more prominent action than the identical action you get one
+ * row later. Now the empty state keeps only its prompt and renders the very
+ * same footer button, so the control cannot drift between the two states.
  */
 
 export interface KeyValueTableProps<T> {
@@ -50,14 +52,25 @@ export function KeyValueTable<T>({
   rowClassName,
   renderRow,
 }: KeyValueTableProps<T>) {
+  // One control, both states. Hoisting it out of the branches is the point:
+  // a per-branch copy is exactly how the empty state came to look different
+  // from the populated one in the first place.
+  const addControl = (
+    <button
+      type="button"
+      onClick={onAdd}
+      className="flex items-center gap-2 border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+    >
+      <Plus className="h-3.5 w-3.5" />
+      {addText}
+    </button>
+  );
+
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 px-4 py-6 text-center">
-        <div className="text-[11px] text-muted-foreground">{emptyText}</div>
-        <Button variant="default" size="sm" className="h-7 gap-1 text-xs" onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5" />
-          {addText}
-        </Button>
+      <div className="flex flex-col">
+        <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">{emptyText}</div>
+        {addControl}
       </div>
     );
   }
@@ -79,14 +92,7 @@ export function KeyValueTable<T>({
           </div>
         );
       })}
-      <button
-        type="button"
-        onClick={onAdd}
-        className="flex items-center gap-2 border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-      >
-        <Plus className="h-3.5 w-3.5" />
-        {addText}
-      </button>
+      {addControl}
     </div>
   );
 }
