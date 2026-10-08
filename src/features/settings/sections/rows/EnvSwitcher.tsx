@@ -8,6 +8,11 @@ import { envIcon } from '../env-utils';
 
 /**
  * EnvSwitcher — top-of-section env picker.
+ *
+ * Renders unconditionally, including for a project with zero envs: the
+ * trailing `新建环境` button is the section's only add affordance, so
+ * gating the whole strip on a non-empty list is what used to leave a
+ * cold-start project with no way to create its first environment.
  */
 export function EnvSwitcher({
   environments,
@@ -15,12 +20,15 @@ export function EnvSwitcher({
   onPick,
   onRequestDelete,
   onAdd,
+  addDisabled,
 }: {
   environments: Environment[];
   activeId: string | null;
   onPick: (id: string) => void;
   onRequestDelete: (env: Environment) => void;
   onAdd: () => void;
+  /** Create is in flight — block a second submit until it resolves. */
+  addDisabled?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -83,6 +91,7 @@ export function EnvSwitcher({
         size="sm"
         className="h-8 gap-1 border-dashed text-xs text-muted-foreground hover:text-foreground"
         onClick={onAdd}
+        disabled={addDisabled}
       >
         <Plus className="h-3.5 w-3.5" />
         新建环境

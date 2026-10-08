@@ -26,6 +26,10 @@ interface EnvBodyProps {
   deleteBaseUrlDefinition: EnvironmentSectionProps['deleteBaseUrlDefinition'];
   setDefaultBaseUrlDefinition: EnvironmentSectionProps['setDefaultBaseUrlDefinition'];
   onDeleteBaseUrl: (def: { id: string; name: string }) => void;
+  /** Open the env name already focused — set for a just-created env. */
+  autoRename?: boolean;
+  /** The auto-open was consumed; the shell clears its pending-rename flag. */
+  onRenameEnd?: () => void;
 }
 
 export function EnvBody({
@@ -43,10 +47,17 @@ export function EnvBody({
   deleteBaseUrlDefinition,
   setDefaultBaseUrlDefinition,
   onDeleteBaseUrl,
+  autoRename,
+  onRenameEnd,
 }: EnvBodyProps) {
   return (
     <div className="flex flex-col">
-      <EnvHeader env={env} onRename={(name) => updateEnvironment(env.id, { name })} />
+      <EnvHeader
+        env={env}
+        onRename={(name) => updateEnvironment(env.id, { name })}
+        autoRename={autoRename}
+        onRenameEnd={onRenameEnd}
+      />
 
       <GroupHeader
         icon={<Globe className="h-3.5 w-3.5" />}

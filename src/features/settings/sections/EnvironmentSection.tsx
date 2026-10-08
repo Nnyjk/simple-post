@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { EmptyHint } from '@/components/ui/empty-hint';
 import { SettingsCategory } from '../SettingsCategory';
@@ -16,7 +16,8 @@ export interface EnvironmentSectionProps {
   setEnvironmentVar: (envId: string, key: string, value: string | null) => void;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
   setEnvironmentBaseUrl: (envId: string, defId: string, url: string | null) => void;
-  addEnvironment: (projectId: string, name: string) => void;
+  /** Resolves the new env's id, or `null` when the create failed. */
+  addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   deleteEnvironment: (envId: string) => void;
   updateEnvironment: (envId: string, patch: Partial<Environment>) => void;
 
@@ -31,6 +32,29 @@ export interface EnvironmentSectionProps {
   ) => void;
   deleteBaseUrlDefinition: (projectId: string, defId: string) => void;
   setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => void;
+}
+
+/**
+ * Default name for a freshly created environment.
+ *
+ * This used to be the hardcoded literal `'new-env'`, so every env a
+ * project owned beyond the first was born with the same name — in a
+ * section where environments are addressed by name, two tabs reading
+ * `new-env` are indistinguishable. Deriving from the names already in
+ * the project keeps the generated label unique and in the panel's
+ * Chinese voice (the same reasoning gives baseUrl definitions their
+ * `新服务` default).
+ */
+export function nextEnvironmentName(existingNames: readonly string[]): string {
+  const taken = new Set(existingNames.map((n) => n.trim()));
+  const base = '新环境';
+  let candidate = base;
+  let n = 1;
+  while (taken.has(candidate)) {
+    n += 1;
+    candidate = `${base} ${n}`;
+  }
+  return candidate;
 }
 
 /**
@@ -61,6 +85,10 @@ export interface EnvironmentSectionProps {
  * delete, mark-as-default) works as before; only the outer shell
  * changed.
  *
+ * The switcher strip is the one home of the `新建环境` control, so it
+ * renders even with zero environments — the empty state is a hint under
+ * the strip, never a replacement for it.
+ *
  * This file is the shell only: it owns the active-env selection, the
  * delete-confirmation state, and the layout. Every presentational part
  * lives under `rows/` (props only, no store access) and the dialog
@@ -83,6 +111,10 @@ export function EnvironmentSection({
   setDefaultBaseUrlDefinition,
 }: EnvironmentSectionProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Create is in flight, and the env (if any) whose name should be
+  // opened for rename once it lands.
+  const [creatingEnv, setCreatingEnv] = useState(false);
+  const [pendingRenameEnvId, setPendingRenameEnvId] = useState<string | null>(null);
 
   // ---- modal state ----
   const {
@@ -114,9 +146,39 @@ export function EnvironmentSection({
     [environments, activeId],
   );
 
-  const handleNewEnv = () => {
-    addEnvironment(projectId, 'new-env');
+  const handleNewEnv = async () => {
+    if (creatingEnv) return;
+    setCreatingEnv(true);
+    try {
+      const id = await addEnvironment(
+        projectId,
+        nextEnvironmentName(environments.map((e) => e.name)),
+      );
+      // `addEnvironment` swallows the IPC failure and resolves `null`;
+      // in that case nothing is added, nothing is selected, and the
+      // strip is left exactly as the user saw it — no phantom tab.
+      if (id) {
+        setActiveId(id);
+        setPendingRenameEnvId(id);
+      }
+    } finally {
+      setCreatingEnv(false);
+    }
   };
+
+  // Switching envs or arming a delete abandons a pending auto-rename:
+  // the flag must not follow the user to a different row.
+  const handlePick = (id: string) => {
+    setPendingRenameEnvId(null);
+    setActiveId(id);
+  };
+
+  const handleRequestEnvDelete = (env: Environment) => {
+    setPendingRenameEnvId(null);
+    requestEnvDelete({ id: env.id, name: env.name });
+  };
+
+  const handleRenameEnd = useCallback(() => setPendingRenameEnvId(null), []);
 
   const handleAddVar = () => {
     if (!activeEnv) return;
@@ -140,43 +202,52 @@ export function EnvironmentSection({
       variant="stacked"
     >
       <div className="space-y-3">
+        {/* ----- Env switcher (top tab strip) ----------------- */}
+        {/* Unconditional, and that is the whole point: the trailing
+            `新建环境` button lives in this strip, so gating the strip
+            behind a non-empty list left a project with zero envs
+            showing a bare hint string and no way to create its first
+            environment. */}
+        <EnvSwitcher
+          environments={environments}
+          activeId={activeId}
+          onPick={handlePick}
+          onRequestDelete={handleRequestEnvDelete}
+          onAdd={handleNewEnv}
+          addDisabled={creatingEnv}
+        />
+
         {environments.length === 0 ? (
           <EmptyHint className="rounded-lg border-border bg-card/30 px-3 py-8 text-xs">
-            该项目还没有环境
+            该项目还没有环境 · 点「新建环境」创建第一个，用来切换前置 URL 与环境变量
           </EmptyHint>
         ) : (
-          <>
-            {/* ----- Env switcher (top tab strip) ----------------- */}
-            <EnvSwitcher
-              environments={environments}
-              activeId={activeId}
-              onPick={setActiveId}
-              onRequestDelete={(env) => requestEnvDelete({ id: env.id, name: env.name })}
-              onAdd={handleNewEnv}
-            />
-
-            {/* ----- Active env body ------------------------------ */}
-            {activeEnv && (
-              <div className="overflow-hidden rounded-lg border border-border/70 bg-card/40 shadow-[0_1px_0_0_rgba(255,255,255,0.02)_inset]">
-                <EnvBody
-                  env={activeEnv}
-                  projectId={projectId}
-                  setEnvironmentVar={setEnvironmentVar}
-                  renameEnvironmentVar={renameEnvironmentVar}
-                  setEnvironmentBaseUrl={setEnvironmentBaseUrl}
-                  updateEnvironment={updateEnvironment}
-                  onAddVar={handleAddVar}
-                  onAddBaseUrl={handleAddBaseUrl}
-                  baseUrlDefinitions={baseUrlDefinitions}
-                  defaultBaseUrlDefinitionId={defaultBaseUrlDefinitionId}
-                  updateBaseUrlDefinition={updateBaseUrlDefinition}
-                  deleteBaseUrlDefinition={deleteBaseUrlDefinition}
-                  setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
-                  onDeleteBaseUrl={requestBaseUrlDelete}
-                />
-              </div>
-            )}
-          </>
+          activeEnv && (
+            <div className="overflow-hidden rounded-lg border border-border/70 bg-card/40 shadow-[0_1px_0_0_rgba(255,255,255,0.02)_inset]">
+              {/* Keyed by env id so switching tabs resets the body's own
+                  transient state — an input left mid-edit on the previous
+                  env, and the auto-rename latch, cannot bleed across. */}
+              <EnvBody
+                key={activeEnv.id}
+                env={activeEnv}
+                projectId={projectId}
+                setEnvironmentVar={setEnvironmentVar}
+                renameEnvironmentVar={renameEnvironmentVar}
+                setEnvironmentBaseUrl={setEnvironmentBaseUrl}
+                updateEnvironment={updateEnvironment}
+                onAddVar={handleAddVar}
+                onAddBaseUrl={handleAddBaseUrl}
+                baseUrlDefinitions={baseUrlDefinitions}
+                defaultBaseUrlDefinitionId={defaultBaseUrlDefinitionId}
+                updateBaseUrlDefinition={updateBaseUrlDefinition}
+                deleteBaseUrlDefinition={deleteBaseUrlDefinition}
+                setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
+                onDeleteBaseUrl={requestBaseUrlDelete}
+                autoRename={pendingRenameEnvId === activeEnv.id}
+                onRenameEnd={handleRenameEnd}
+              />
+            </div>
+          )
         )}
       </div>
 

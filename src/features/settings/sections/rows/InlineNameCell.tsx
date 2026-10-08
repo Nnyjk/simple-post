@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -13,23 +13,69 @@ import { cn } from '@/lib/utils';
  * the row-dense table layout here has no room for a double-click
  * affordance — and because it supports `validate` + inline error
  * rendering, which `InlineEdit` has no equivalent for.
+ *
+ * `autoEdit` opens the input without a click. The env panel uses it to
+ * drop a freshly created env straight into its name so the user never
+ * has to hunt for the rename affordance; every other call site (service
+ * names, variable keys) keeps driving the open by click.
  */
 export function InlineNameCell({
   value,
   placeholder,
   validate,
   onCommit,
+  autoEdit,
+  onAutoEditEnd,
   className,
 }: {
   value: string;
   placeholder: string;
   validate?: (next: string) => string | null;
   onCommit: (next: string) => void;
+  /**
+   * Open in rename mode on mount / on the flag's false → true edge. The
+   * owner clears it via `onAutoEditEnd` once consumed.
+   */
+  autoEdit?: boolean;
+  /** Fired the moment the `autoEdit` open is consumed, so the owner can drop the flag. */
+  onAutoEditEnd?: () => void;
   className?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // `autoEdit` is a flag, not an event: it can stay `true` across
+  // re-renders (and the cell can be remounted later, e.g. switching envs
+  // re-keys the body). A ref latch turns it into a false → true edge so
+  // we open exactly once per raise, never on every keystroke re-render.
+  const autoOpened = useRef(false);
+  // Only the auto-open preselects the text. A click-to-edit on an
+  // existing row keeps its previous caret-at-end behaviour, so renaming
+  // a service name is not silently a select-all-replace.
+  const preselectOnOpen = useRef(false);
+
+  useEffect(() => {
+    if (!autoEdit) {
+      autoOpened.current = false;
+      return;
+    }
+    if (autoOpened.current) return;
+    autoOpened.current = true;
+    preselectOnOpen.current = true;
+    setDraft(value);
+    setError(null);
+    setEditing(true);
+    onAutoEditEnd?.();
+  }, [autoEdit, value, onAutoEditEnd]);
+
+  // Runs one render after `editing` flips, which is the first point the
+  // input actually exists — the effect above cannot reach the ref.
+  useEffect(() => {
+    if (!editing || !preselectOnOpen.current) return;
+    preselectOnOpen.current = false;
+    inputRef.current?.select();
+  }, [editing]);
 
   const begin = () => {
     setDraft(value);
@@ -74,6 +120,7 @@ export function InlineNameCell({
   return (
     <div className="flex flex-col gap-1">
       <Input
+        ref={inputRef}
         autoFocus
         value={draft}
         onChange={(e) => {
