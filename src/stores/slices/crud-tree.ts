@@ -88,10 +88,11 @@ export interface TreeCrudActions {
 
 export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (set, get) => ({
   addNode: async (input) => {
-    // Minted here rather than server-side so the Tauri and REST shapes
-    // agree: the REST body needs the id up front to key the endpoint's
-    // `detail.nodeId`, and letting the two paths differ would put the
-    // divergence in the one operation that writes two tables.
+    // Offered to the backend so the REST path can key the endpoint's
+    // `detail.nodeId` off it — but *not* treated as authoritative: see
+    // `createdId` below. The earlier comment here claimed both shapes
+    // minted their ids here, which was never true of the Tauri command
+    // and is what hid this bug.
     const id = uid();
     try {
       const node = await invokeCmd<ResourceNode>(COMMANDS.nodesCreate, {
@@ -104,15 +105,32 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         sortOrder: 0,
         ...(input.detail ? { detail: input.detail } : {}),
       });
+      // Everything downstream keys off the id the *server* handed back,
+      // not the one we offered. The REST path honours ours
+      // (`ensure_server_id` only fills a missing id) but the Tauri
+      // command mints its own `uid()` and ignores the argument, so the
+      // two shapes return different ids for the same call. Keying the
+      // detail map by our local `id` therefore wrote it under a key no
+      // row has: `EndpointList` then skipped the endpoint for want of a
+      // detail and the tab resolved to the "已删除" descriptor, while
+      // the module's count — which counts nodes, not details — still
+      // showed the endpoint. Trusting `node.id` makes both transports
+      // agree without teaching the store which one it is talking to.
+      const createdId = node.id;
       set((s) => ({
         nodes: [...s.nodes, node],
         // Only an endpoint has a detail row; writing an empty one for a
         // module would make `Object.keys(endpointDetails)` lie.
         ...(input.kind === 'endpoint'
-          ? { endpointDetails: { ...s.endpointDetails, [id]: blankDetail(id, input.detail) } }
+          ? {
+              endpointDetails: {
+                ...s.endpointDetails,
+                [createdId]: blankDetail(createdId, input.detail),
+              },
+            }
           : {}),
       }));
-      return node.id;
+      return createdId;
     } catch (e) {
       console.error(`[store] nodes_create failed (${input.kind})`, e);
       return null;

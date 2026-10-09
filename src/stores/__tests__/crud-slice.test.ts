@@ -26,7 +26,7 @@ import assert from 'node:assert/strict';
 import { installBrowserShim, clearIpcMock, installIpcMock } from './_browser-shim';
 
 import { createCrudSlice } from '../crud-slice';
-import type { EndpointDetail, Environment } from '@/types/domain';
+import type { EndpointDetail, Environment, ResourceNode } from '@/types/domain';
 
 /** A minimal but domain-shaped `EndpointDetail`. */
 function makeDetail(overrides: Partial<EndpointDetail> = {}): EndpointDetail {
@@ -61,6 +61,7 @@ function makeEnvironment(overrides: Partial<Environment> = {}): Environment {
  * endpoint action 读取 endpointDetails，二者共用 Zustand 风格的 setter。
  */
 type CrudHarnessState = {
+  nodes: ResourceNode[];
   endpointDetails: Record<string, EndpointDetail>;
   environments: Environment[];
   openTabs: never[];
@@ -71,8 +72,10 @@ type CrudHarnessState = {
 function makeCrudHarness(
   initialDetails: Record<string, EndpointDetail> = {},
   initialEnvironments: Environment[] = [],
+  initialNodes: ResourceNode[] = [],
 ) {
   const bag: CrudHarnessState = {
+    nodes: initialNodes,
     endpointDetails: initialDetails,
     environments: initialEnvironments,
     openTabs: [],
@@ -383,5 +386,95 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
 
     assert.deepEqual(calls, [], '源 key 不存在时不应打扰后端');
     assert.deepEqual(harness.bag.environments[0].variables, { keep: 'yes' });
+  });
+});
+
+// ============================================================
+// addNode — the detail map must key off the id the server returned
+// ============================================================
+
+describe('crud-slice: addNode 的 id 以服务端返回值为准', () => {
+  /** A node as the backend would hand it back, with its own id. */
+  function serverNode(id: string, overrides: Partial<ResourceNode> = {}): ResourceNode {
+    return {
+      id,
+      rootId: 'p1',
+      parentId: 'm1',
+      kind: 'endpoint',
+      name: 'Login',
+      sortOrder: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      ...overrides,
+    };
+  }
+
+  it('后端另起 id 时，detail 挂在它返回的 id 上而不是本地 id', async () => {
+    const harness = makeCrudHarness();
+    // The Tauri `nodes_create` command mints its own `uid()` and drops
+    // the id the caller sent, so this is the desktop shape.
+    installIpcMock(async (cmd) => {
+      if (cmd === 'nodes_create') return serverNode('server-id');
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    const returned = await harness.slice.addNode({
+      parentId: 'm1',
+      kind: 'endpoint',
+      name: 'Login',
+      detail: { url: '' },
+    });
+
+    assert.equal(returned, 'server-id', '返回的 id 必须是服务端那个');
+    assert.equal(harness.bag.nodes.at(-1)?.id, 'server-id');
+    // The bug this guards: keying by the local id wrote the detail
+    // under a key no node carries, so `EndpointList` skipped the row
+    // and the workspace resolved the tab to its "已删除" descriptor.
+    assert.ok(
+      harness.bag.endpointDetails['server-id'],
+      'detail 必须按服务端 id 落位，否则树里那一行永远渲染不出来',
+    );
+    assert.equal(
+      Object.keys(harness.bag.endpointDetails).length,
+      1,
+      '不应在本地 id 下留下一条孤儿 detail',
+    );
+    assert.equal(harness.bag.endpointDetails['server-id'].nodeId, 'server-id');
+  });
+
+  it('后端沿用调用方 id 时行为一致', async () => {
+    const harness = makeCrudHarness();
+    // The REST shape: `ensure_server_id` keeps a caller-supplied id.
+    installIpcMock(async (cmd, args) => {
+      if (cmd === 'nodes_create') return serverNode(String(args?.id));
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    const returned = await harness.slice.addNode({
+      parentId: 'm1',
+      kind: 'endpoint',
+      name: 'Login',
+      detail: { url: '' },
+    });
+
+    assert.equal(returned, harness.bag.nodes.at(-1)?.id);
+    assert.ok(harness.bag.endpointDetails[returned!], 'detail 必须挂在返回的 id 上');
+    assert.equal(Object.keys(harness.bag.endpointDetails).length, 1);
+  });
+
+  it('非 endpoint 不写 detail 行', async () => {
+    const harness = makeCrudHarness();
+    installIpcMock(async (cmd) => {
+      if (cmd === 'nodes_create') return serverNode('m-server', { kind: 'module', parentId: null });
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    await harness.slice.addNode({ rootId: 'p1', kind: 'module', name: 'Core' });
+
+    assert.deepEqual(
+      harness.bag.endpointDetails,
+      {},
+      '给模块写一条空 detail 会让 Object.keys(endpointDetails) 说谎',
+    );
   });
 });
