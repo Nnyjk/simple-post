@@ -59,6 +59,7 @@ npm run clippy         # cargo clippy --workspace --all-targets -- -D warnings
 npm run tauri:dev      # Tauri desktop dev shell
 npm run tauri:build    # production NSIS installer bundle
 npm run tauri:check    # cargo check --manifest-path src-tauri/Cargo.toml
+npm run icons          # regenerate every platform icon from src-tauri/app-icon.svg
 
 npm test               # frontend unit tests (auto-discovers src/**/*.test.ts — see Testing)
 npm run test:watch     # same, watch mode
@@ -98,6 +99,8 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **Tauri macro gotcha.** `http_request` in `src-tauri/src/lib.rs` must stay **non-`pub`** — marking it `pub` triggers a `__cmd__http_request` identifier collision (E0255) between `#[tauri::command]` and `generate_handler!`.
 
+**App / window icons have no config knob.** There is no `icon` field on `WindowConfig` and no `defaultWindowIcon` under `app` in Tauri 2 — adding one fails the build with `unknown field` at `tauri-build`. The single lever is `bundle.icon`: `tauri-build` picks the first `.ico` from it and embeds it into the exe as resource `32512`, and tao registers window classes with a null icon, so Windows resolves the taskbar icon from that executable resource. Changing the taskbar icon therefore means **editing `src-tauri/app-icon.svg` and re-running `npm run icons`** — not editing `tauri.conf.json`. Two gotchas in that pipeline: `icon.icns` is not byte-reproducible (`tauri icon` stamps it, so it always diffs), and `tauri icon` parses its SVG with a strict XML parser whose comments may not contain `--`, which makes writing CSS custom-property names like `--primary` in a doc comment fail the whole run.
+
 **Routing.** Axum 0.7 path params use `:id` syntax (`/api/projects/:id`), not `{id}`.
 
 **Naming.** Rust: `snake_case` functions/modules/columns, `PascalCase` types. Tauri commands `snake_case` in Rust, `camelCase` in the frontend `COMMANDS` registry. Test files: `*.test.ts`; Rust tests go in a **sibling** `*_test.rs` file mounted by `#[path]`, not inline (the inline form survives only in a few files under `src-tauri/` — see Testing & QA).
@@ -134,6 +137,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 - `crates/simple-post-mcp/src/mcp/mod.rs` — 44-tool registry, `REQUIRED_CAPABILITY`, `dispatch`
 - `Cargo.toml` — workspace root (members, shared deps, release profile)
 - `src-tauri/tauri.conf.json` — window, NSIS bundle, build hooks, CSP (intentionally `null`)
+- `src-tauri/app-icon.svg` — the **only** source of app-icon artwork; `npm run icons` runs `tauri icon` over it to regenerate all of `src-tauri/icons/`
 - `src-tauri/rust-toolchain.toml`, `src-tauri/capabilities/default.json`
 - `vite.config.ts` — alias, dev server, `/api` + `/mcp` proxy (ws disabled on `/mcp`)
 - `tsconfig.json`, `package.json`, `tailwind.config.js`
