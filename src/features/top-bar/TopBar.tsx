@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useMemo, Suspense } from 'react';
-import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Sparkles, Loader2 } from 'lucide-react';
+import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Loader2 } from 'lucide-react';
 import { useAppStore, useActiveProject, useActiveEnvironment } from '@/stores/app-store';
 import { useMcpStatus } from '@/lib/use-mcp-status';
+import { AppIcon } from '@/components/ui/app-icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette-lazy';
@@ -97,9 +98,7 @@ export function TopBar() {
     >
       {/* Logo — pure decoration, sits inside the drag region. */}
       <div className="flex items-center gap-2 pr-2">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-primary to-hue-project">
-          <Sparkles className="h-3.5 w-3.5 text-white" />
-        </div>
+        <AppIcon className="h-6 w-6" />
         <span className="text-sm font-semibold tracking-tight">Simple Post</span>
       </div>
 

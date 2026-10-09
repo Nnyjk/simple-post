@@ -24,6 +24,7 @@
     "e2e:preflight": "node scripts/e2e/preflight.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
+    "icons": "tauri icon src-tauri/app-icon.svg -o src-tauri/icons",
     "mcp:repl": "node scripts/mcp-repl.mjs",
     "test:mcp": "node scripts/mcp-integration.test.mjs",
     "test:web:auth": "node scripts/test-web-auth.mjs",
