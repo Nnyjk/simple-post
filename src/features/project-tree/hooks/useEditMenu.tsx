@@ -119,32 +119,6 @@ export function useEditMenu({
   };
 
   const buildMenuItems = (kind: TargetKind, id: string): ContextMenuItem[] => {
-    if (kind === 'project') {
-      const isOnly = projects.length <= 1;
-      return [
-        {
-          kind: 'item',
-          label: '新建模块',
-          icon: <FolderPlus className="h-3.5 w-3.5" />,
-          onClick: () => openNewItemWithIntent({ type: 'module' }),
-        },
-        { kind: 'divider' },
-        {
-          kind: 'item',
-          label: '重命名',
-          icon: <Pencil className="h-3.5 w-3.5" />,
-          onClick: () => startEdit('project', id),
-        },
-        {
-          kind: 'item',
-          label: '删除',
-          icon: <Trash2 className="h-3.5 w-3.5" />,
-          danger: true,
-          disabled: isOnly,
-          onClick: () => openDeleteDialog('project', id),
-        },
-      ];
-    }
     if (kind === 'module') {
       const subtree = subtreeOf(id);
       const subCols = subtree.filter((n) => n.kind === 'collection');

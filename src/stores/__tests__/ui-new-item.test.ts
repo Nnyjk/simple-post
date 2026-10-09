@@ -71,10 +71,16 @@ function draft(overrides: Partial<NewItemDraft> = {}): NewItemDraft {
  * `setActiveEndpoint`, so everything else is a stub.
  */
 function makeHarness(nodeList: ResourceNode[]) {
-  const calls: { addNode: AddNodeCall[]; expanded: string[]; activeEndpoint: string[] } = {
+  const calls: {
+    addNode: AddNodeCall[];
+    expanded: string[];
+    activeEndpoint: string[];
+    activeProject: string[];
+  } = {
     addNode: [],
     expanded: [],
     activeEndpoint: [],
+    activeProject: [],
   };
   const bag = {
     nodes: nodeList,
@@ -87,6 +93,7 @@ function makeHarness(nodeList: ResourceNode[]) {
       return 'ep-new';
     },
     setActiveProject: () => {},
+    openProject: (id: string) => calls.activeProject.push(id),
     setActiveEndpoint: (id: string) => calls.activeEndpoint.push(id),
     toggleNodeExpanded: (id: string) => calls.expanded.push(id),
   };
@@ -181,5 +188,23 @@ describe('ui-new-item: changing the module clears the collection', () => {
     // Leaving it set would create the endpoint under a collection of a
     // module the user has just moved away from.
     assert.equal(h.bag.newItem.parentCollectionId, '');
+  });
+});
+
+describe('ui-new-item: a new project is entered, not just created', () => {
+  it('calls openProject so the tree scopes to it and its card opens', async () => {
+    const h = makeHarness([]);
+    h.bag.newItem = draft({ type: 'project', name: '支付网关' });
+
+    const id = await h.slice.submitNewItem();
+
+    assert.equal(id, 'proj-1');
+    // Not `setActiveProject`: the project is not a tree row any more, so
+    // creating it without opening its tab would leave the user staring
+    // at whatever pane they had before.
+    assert.deepEqual(h.calls.activeProject, ['proj-1']);
+    // No endpoint owns the new project yet — the last-response cache
+    // from the previous project must not be handed to it.
+    assert.deepEqual(h.calls.activeEndpoint, [null]);
   });
 });

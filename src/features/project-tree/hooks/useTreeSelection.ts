@@ -10,15 +10,14 @@ import { useAppStore } from '@/stores/app-store';
 export function useTreeSelection() {
   // ---------- store actions ----------
   const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
-  const setActiveProject = useAppStore((s) => s.setActiveProject);
   const openTab = useAppStore((s) => s.openTab);
   const toggleNodeExpanded = useAppStore((s) => s.toggleNodeExpanded);
 
   // ---------- click handlers (open tab + activate) ----------
-  const openProjectTab = (id: string) => {
-    setActiveProject(id);
-    openTab('project', id);
-  };
+  // No `openProjectTab` here any more: the project is not a row in this
+  // tree, so nothing in it can be clicked to enter a project. Entering
+  // one is `openProject` in the store, called from the welcome picker,
+  // the top-bar selector, the command palette and the breadcrumb.
   const openModuleTab = (id: string) => {
     openTab('module', id);
     // Toggle the row's expanded state on every click. Earlier this
@@ -63,7 +62,6 @@ export function useTreeSelection() {
   };
 
   return {
-    openProjectTab,
     openModuleTab,
     openCollectionTab,
     openEndpointTab,

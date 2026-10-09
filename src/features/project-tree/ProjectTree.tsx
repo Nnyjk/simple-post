@@ -13,7 +13,6 @@ import { useEditMenu } from './hooks/useEditMenu';
 import { useInlineMenus } from './hooks/useInlineMenus';
 import { useNewItemFlow } from './hooks/useNewItemFlow';
 import { useTreeSelection } from './hooks/useTreeSelection';
-import { ProjectRow } from './rows/ProjectRow';
 import { ModuleRow } from './rows/ModuleRow';
 import { TreeChildren } from './rows/TreeChildren';
 import { EndpointList } from './rows/EndpointList';
@@ -61,25 +60,9 @@ export function ProjectTree() {
     () => nodes.filter((n) => n.rootId === activeProjectId),
     [nodes, activeProjectId],
   );
-  const projectModules = useMemo(
-    () =>
-      projectNodes
-        .filter((n) => n.kind === 'module' && n.parentId === null)
-        .sort((a, b) => a.sortOrder - b.sortOrder),
-    [projectNodes],
-  );
-  const projectCollections = useMemo(
-    () => projectNodes.filter((n) => n.kind === 'collection'),
-    [projectNodes],
-  );
-  const projectEndpoints = useMemo(
-    () => projectNodes.filter((n) => n.kind === 'endpoint'),
-    [projectNodes],
-  );
 
   // ---------- click / selection handlers ----------
   const {
-    openProjectTab,
     openModuleTab,
     openCollectionTab,
     openEndpointTab,
@@ -91,9 +74,8 @@ export function ProjectTree() {
   const { openNewItemWithIntent, handleWorkspaceNew } = useNewItemFlow(setEditing);
 
   // ---------- inline "+" menus ----------
-  const { openProjectPlusMenu, openModulePlusMenu, openCollectionPlusMenu } = useInlineMenus({
+  const { openModulePlusMenu, openCollectionPlusMenu } = useInlineMenus({
     nodes: projectNodes,
-    projectModules,
     openNewItemWithIntent,
     setMenu,
   });
@@ -127,9 +109,24 @@ export function ProjectTree() {
       className="relative flex h-full w-64 shrink-0 flex-col border-r border-border bg-card/30"
       onDragEnd={handleDragEnd}
     >
-      {/* Header */}
+      {/* Header — the project is named here rather than rendered as a row.
+          The project is *not* a node in this tree (it is entered from
+          the welcome picker or the top-bar selector), so the panel still
+          needs to say which project's modules it is listing. */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-card/40 px-3">
-        <span className="label-caps">工作区</span>
+        {activeProject ? (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span
+              className="h-2 w-2 shrink-0 rounded-sm"
+              style={{ backgroundColor: activeProject.color }}
+            />
+            <span className="truncate text-xs font-medium" title={activeProject.name}>
+              {activeProject.name}
+            </span>
+          </span>
+        ) : (
+          <span className="label-caps">工作区</span>
+        )}
         <Tooltip content="新建（项目 / 模块 / 集合 / 接口）" side="bottom">
           <Button
             variant="ghost"
@@ -157,118 +154,152 @@ export function ProjectTree() {
         </div>
       </div>
 
-      {/* Tree */}
+      {/* Tree — the active project's nodes only. The project itself is
+          never a row here; see the header note above. */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
         {!activeProject ? (
           <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-            暂无项目。点击右上角 + 新建一个。
+            尚未选择项目。请在欢迎页或顶部项目选择器中选择一个。
+          </div>
+        ) : query.trim() && filtered.length === 0 ? (
+          <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+            没有匹配「{query}」的节点。
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="space-y-2 px-2 py-6 text-center">
+            <p className="text-xs text-muted-foreground">该项目还没有模块。</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openNewItemWithIntent({ type: 'module' })}
+              className="h-7 text-xs"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              新建模块
+            </Button>
           </div>
         ) : (
-          <ProjectRow
-            project={activeProject}
-            moduleCount={projectModules.length}
-            collectionCount={projectCollections.length}
-            endpointCount={projectEndpoints.length}
-            isEditing={editing?.kind === 'project' && editing.id === activeProject.id}
-            onSelect={() => openProjectTab(activeProject.id)}
-            onStartEdit={() => startEdit('project', activeProject.id)}
-            onSaveEdit={(name) => saveEdit('project', activeProject.id, name)}
-            onCancelEdit={cancelEdit}
-            onContextMenu={(e) => openMenu(e, 'project', activeProject.id)}
-            onPlusClick={openProjectPlusMenu}
-          />
-        )}
-        {filtered.map((modBranch) => (
-          <div key={modBranch.module.id} className="mb-0.5">
-            <ModuleRow
-              module={modBranch.module}
-              collectionCount={modBranch.collections.length}
-              endpointCount={countModuleEndpoints(modBranch)}
-              isEditing={editing?.kind === 'module' && editing.id === modBranch.module.id}
-              onSelect={() => openModuleTab(modBranch.module.id)}
-              onStartEdit={() => startEdit('module', modBranch.module.id)}
-              onSaveEdit={(name) => saveEdit('module', modBranch.module.id, name)}
-              onCancelEdit={cancelEdit}
-              onContextMenu={(e) => openMenu(e, 'module', modBranch.module.id)}
-              onPlusClick={openModulePlusMenu(modBranch.module.id)}
-              onDragStart={(e) => {
-                setDataTransfer(e, { kind: 'module', ids: [modBranch.module.id] });
-              }}
-              onDragEnd={handleDragEnd}
-              onDragOver={makeDragOverHandler({ kind: 'module', id: modBranch.module.id }, null)}
-              onDragLeave={makeDragLeaveHandler({ kind: 'module', id: modBranch.module.id })}
-              onDrop={makeDropHandler({ kind: 'module', id: modBranch.module.id }, null)}
-              dropHint={
-                dropHint && dropHint.key === `module:${modBranch.module.id}` ? dropHint.zone : null
-              }
-            />
-            <TreeChildren expanded={!!modBranch.module.expanded}>
-              {/* Endpoints sitting on the module itself, above its
-                  collections — a module accepts both child kinds. */}
-              {modBranch.endpoints.length > 0 && (
-                <EndpointList
-                  endpoints={modBranch.endpoints}
-                  details={modBranch.endpointDetails}
-                  editing={editing}
-                  selectedEndpointIds={selectedEndpointIds}
-                  activeEndpointId={activeEndpointId}
-                  onEndpointClick={handleEndpointClick}
-                  onEndpointStartEdit={(id) => {
-                    setActiveEndpoint(id);
-                    startEdit('endpoint', id);
-                  }}
-                  onEndpointContextMenu={(e, id) => {
-                    setActiveEndpoint(id);
-                    openMenu(e, 'endpoint', id);
-                  }}
-                  onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
+          <>
+            {/* Top-level create. The project used to be a row in this
+                tree and its "+" owned "add a module to this project".
+                With the project gone the entry point has to live in
+                the tree's own space, and it sits above the modules
+                because a module *is* a top-level node here — the same
+                position the project row used to occupy.
+
+                Hidden while a filter is active: a module created under
+                a query would not match it, so the control would appear
+                to do nothing. The header "+" still reaches the same
+                modal. */}
+            {!query.trim() && (
+              <button
+                type="button"
+                onClick={() => openNewItemWithIntent({ type: 'module' })}
+                className="mb-0.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                data-testid="tree-add-module-btn"
+              >
+                <Plus className="h-3 w-3 shrink-0" />
+                新建模块
+              </button>
+            )}
+            {filtered.map((modBranch) => (
+              <div key={modBranch.module.id} className="mb-0.5">
+                <ModuleRow
+                  module={modBranch.module}
+                  collectionCount={modBranch.collections.length}
+                  endpointCount={countModuleEndpoints(modBranch)}
+                  isEditing={editing?.kind === 'module' && editing.id === modBranch.module.id}
+                  onSelect={() => openModuleTab(modBranch.module.id)}
+                  onStartEdit={() => startEdit('module', modBranch.module.id)}
+                  onSaveEdit={(name) => saveEdit('module', modBranch.module.id, name)}
                   onCancelEdit={cancelEdit}
-                  dragContext={{
-                    moveNodes,
-                    setDataTransfer,
-                    makeDragOverHandler,
-                    makeDragLeaveHandler,
-                    makeDropHandler,
-                    handleDragEnd,
-                    dropHint,
+                  onContextMenu={(e) => openMenu(e, 'module', modBranch.module.id)}
+                  onPlusClick={openModulePlusMenu(modBranch.module.id)}
+                  onDragStart={(e) => {
+                    setDataTransfer(e, { kind: 'module', ids: [modBranch.module.id] });
                   }}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={makeDragOverHandler(
+                    { kind: 'module', id: modBranch.module.id },
+                    null,
+                  )}
+                  onDragLeave={makeDragLeaveHandler({ kind: 'module', id: modBranch.module.id })}
+                  onDrop={makeDropHandler({ kind: 'module', id: modBranch.module.id }, null)}
+                  dropHint={
+                    dropHint && dropHint.key === `module:${modBranch.module.id}`
+                      ? dropHint.zone
+                      : null
+                  }
                 />
-              )}
-              <CollectionBranch
-                branches={modBranch.collections}
-                depth={1}
-                editing={editing}
-                onSelectCollection={openCollectionTab}
-                onStartEditCollection={(id) => startEdit('collection', id)}
-                onSaveEditCollection={(id, name) => saveEdit('collection', id, name)}
-                onCancelEdit={cancelEdit}
-                onContextMenu={openMenu}
-                onPlusClick={openCollectionPlusMenu}
-                selectedEndpointIds={selectedEndpointIds}
-                activeEndpointId={activeEndpointId}
-                onEndpointClick={handleEndpointClick}
-                onEndpointStartEdit={(id) => {
-                  setActiveEndpoint(id);
-                  startEdit('endpoint', id);
-                }}
-                onEndpointContextMenu={(e, id) => {
-                  setActiveEndpoint(id);
-                  openMenu(e, 'endpoint', id);
-                }}
-                onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
-                dragContext={{
-                  moveNodes,
-                  setDataTransfer,
-                  makeDragOverHandler,
-                  makeDragLeaveHandler,
-                  makeDropHandler,
-                  handleDragEnd,
-                  dropHint,
-                }}
-              />
-            </TreeChildren>
-          </div>
-        ))}
+                <TreeChildren expanded={!!modBranch.module.expanded}>
+                  {/* Endpoints sitting on the module itself, above its
+                  collections — a module accepts both child kinds. */}
+                  {modBranch.endpoints.length > 0 && (
+                    <EndpointList
+                      endpoints={modBranch.endpoints}
+                      details={modBranch.endpointDetails}
+                      editing={editing}
+                      selectedEndpointIds={selectedEndpointIds}
+                      activeEndpointId={activeEndpointId}
+                      onEndpointClick={handleEndpointClick}
+                      onEndpointStartEdit={(id) => {
+                        setActiveEndpoint(id);
+                        startEdit('endpoint', id);
+                      }}
+                      onEndpointContextMenu={(e, id) => {
+                        setActiveEndpoint(id);
+                        openMenu(e, 'endpoint', id);
+                      }}
+                      onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
+                      onCancelEdit={cancelEdit}
+                      dragContext={{
+                        moveNodes,
+                        setDataTransfer,
+                        makeDragOverHandler,
+                        makeDragLeaveHandler,
+                        makeDropHandler,
+                        handleDragEnd,
+                        dropHint,
+                      }}
+                    />
+                  )}
+                  <CollectionBranch
+                    branches={modBranch.collections}
+                    depth={1}
+                    editing={editing}
+                    onSelectCollection={openCollectionTab}
+                    onStartEditCollection={(id) => startEdit('collection', id)}
+                    onSaveEditCollection={(id, name) => saveEdit('collection', id, name)}
+                    onCancelEdit={cancelEdit}
+                    onContextMenu={openMenu}
+                    onPlusClick={openCollectionPlusMenu}
+                    selectedEndpointIds={selectedEndpointIds}
+                    activeEndpointId={activeEndpointId}
+                    onEndpointClick={handleEndpointClick}
+                    onEndpointStartEdit={(id) => {
+                      setActiveEndpoint(id);
+                      startEdit('endpoint', id);
+                    }}
+                    onEndpointContextMenu={(e, id) => {
+                      setActiveEndpoint(id);
+                      openMenu(e, 'endpoint', id);
+                    }}
+                    onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
+                    dragContext={{
+                      moveNodes,
+                      setDataTransfer,
+                      makeDragOverHandler,
+                      makeDragLeaveHandler,
+                      makeDropHandler,
+                      handleDragEnd,
+                      dropHint,
+                    }}
+                  />
+                </TreeChildren>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Footer */}

@@ -453,7 +453,11 @@ export function HttpTester() {
               type="button"
               onClick={() => {
                 const id = useAppStore.getState().activeProjectId;
-                if (id) useAppStore.getState().setActiveProject(id);
+                // `openProject` rather than `setActiveProject`: the
+                // breadcrumb's first crumb is a link to the project, so
+                // it should bring up the project pane (and re-scope the
+                // tree), not just re-resolve the environment.
+                if (id) useAppStore.getState().openProject(id);
               }}
               className="truncate hover:text-foreground"
               title={project.name}

@@ -32,7 +32,8 @@ export function TopBar() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const activeProject = useActiveProject();
   const activeEnv = useActiveEnvironment();
-  const setActiveProject = useAppStore((s) => s.setActiveProject);
+  const openProject = useAppStore((s) => s.openProject);
+  const loaded = useAppStore((s) => s.loaded);
   const setActiveEnvironment = useAppStore((s) => s.setActiveEnvironment);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
@@ -102,14 +103,18 @@ export function TopBar() {
         <span className="text-sm font-semibold tracking-tight">Simple Post</span>
       </div>
 
-      {/* Project switcher — disabled until bootstrap populates projects. */}
+      {/* Project switcher — the project's home now that it is not a row
+          in the tree. Disabled only until bootstrap has the list; with
+          no project entered yet it reads "选择项目" rather than
+          "加载中…", because a fresh start is exactly the state where
+          the welcome picker is asking the user to choose. */}
       <div ref={projRef} className="relative">
         <Button
           {...NO_DRAG}
           variant="ghost"
           size="sm"
           onClick={() => setProjOpen((v) => !v)}
-          disabled={!activeProject}
+          disabled={!loaded}
           className="gap-1.5"
         >
           {activeProject ? (
@@ -128,13 +133,19 @@ export function TopBar() {
             </>
           ) : (
             <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              <span className="max-w-[160px] truncate">加载中…</span>
+              {loaded ? (
+                <span className="max-w-[160px] truncate">选择项目…</span>
+              ) : (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  <span className="max-w-[160px] truncate">加载中…</span>
+                </>
+              )}
             </>
           )}
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </Button>
-        {projOpen && activeProject && (
+        {projOpen && loaded && projects.length > 0 && (
           <div className="absolute left-0 top-full z-50 mt-1 w-64 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
             <div className="px-2 py-1 label-caps">项目</div>
             {projects.map((p) => (
@@ -143,12 +154,12 @@ export function TopBar() {
                 type="button"
                 key={p.id}
                 onClick={() => {
-                  setActiveProject(p.id);
+                  openProject(p.id);
                   setProjOpen(false);
                 }}
                 className={cn(
                   'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent',
-                  p.id === activeProject.id && 'bg-accent',
+                  p.id === activeProject?.id && 'bg-accent',
                 )}
               >
                 <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.color }} />

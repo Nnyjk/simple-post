@@ -48,6 +48,11 @@ export interface BootstrapSliceState {
   loaded: boolean;
 
   // 当前选择与 bootstrap 数据紧密耦合，保留在此切片内。
+  /**
+   * 当前项目 id。`''` = 尚未选择项目 —— 刚启动（bootstrap 不会预选）
+   * 或用户主动退出到欢迎页。树的渲染范围、TopBar 的环境列表、
+   * 新建模块/集合/接口的落点全部以它为准。
+   */
   activeProjectId: string;
   activeEnvironmentId: string;
   activeEndpointId: string | null;
@@ -75,6 +80,23 @@ export interface BootstrapSliceState {
 export interface BootstrapSliceActions {
   // actions: data — selection / expansion
   setActiveProject: (id: string) => void;
+  /**
+   * *Enter* a project: select it **and** make its tab the active one.
+   *
+   * This is the single entry point for "the user is now working in
+   * project X", and every surface that lands on a project goes through
+   * it — the welcome picker, the top-bar selector, the command palette,
+   * the HTTP tester's breadcrumb, and the create-project flow. Having
+   * one action is what keeps those paths converging on the same state
+   * instead of drifting into "tree shows X, right pane still shows Y".
+   *
+   * Distinct from `setActiveProject`, which is a pure selection setter:
+   * the palette's "jump to an endpoint in another project" needs to
+   * change the owner without inserting a project tab the user did not
+   * ask for, because the endpoint tab it opens immediately after is
+   * what they want to see.
+   */
+  openProject: (id: string) => void;
   setActiveEnvironment: (id: string) => void;
   setActiveEndpoint: (id: string | null) => void;
   /**
@@ -173,6 +195,10 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       };
     }),
   setActiveEnvironment: (id) => set({ activeEnvironmentId: id }),
+  openProject: (id) => {
+    get().setActiveProject(id);
+    get().openTab('project', id);
+  },
   setActiveEndpoint: (id) => {
     // `activeEndpointId` is owned by this slice; the workspace-tab side
     // effects (openTabs / activeTabId) belong to ui-slice — route them
@@ -209,19 +235,6 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         invokeCmd<Environment[]>(COMMANDS.environmentsList),
       ]);
 
-      const firstProject = projects[0];
-      const firstProjectEnv = firstProject
-        ? (environments.find((e) => e.projectId === firstProject.id && e.isActive) ??
-          environments.find((e) => e.projectId === firstProject.id))
-        : undefined;
-      // Open the first endpoint in the *first* project, not the first
-      // endpoint in the database. The old code took `endpoints[0]` from a
-      // whole-workspace list, which could belong to a project the user
-      // was never shown.
-      const firstEndpoint = nodes.find(
-        (n) => n.kind === 'endpoint' && n.rootId === firstProject?.id,
-      );
-
       // Tolerant on purpose: a failure here must not fail the load. The
       // workspace may simply predate the version stamp, and losing the
       // data because we could not read a notice about losing the data
@@ -231,6 +244,14 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         .then((at) => at ?? null)
         .catch(() => null);
 
+      // No selection is made here, deliberately. Bootstrap used to pick
+      // `projects[0]`, resolve its active environment, and open the
+      // first endpoint it contained — which meant the app never once
+      // showed the welcome screen on start, and a workspace with
+      // several projects silently dropped the user into whichever one
+      // happened to sort first. `activeProjectId` stays `''`, which is
+      // what the welcome picker and the tree's "no project" state both
+      // test; `openProject` is how a project gets entered.
       set({
         projects,
         nodes,
@@ -240,14 +261,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         bootstrapError: null,
         dbRecreatedAt: recreatedAt,
         loading: false,
-        activeProjectId: firstProject?.id ?? '',
-        activeEnvironmentId: firstProjectEnv?.id ?? '',
-        activeEndpointId: firstEndpoint?.id ?? null,
       });
-
-      if (firstEndpoint) {
-        get().openTab('endpoint', firstEndpoint.id);
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[store] bootstrap failed', error);

@@ -71,6 +71,7 @@ function PanelFallback({ label }: { label?: string }) {
 
 function App() {
   const activeTab = useAppStore((s) => s.openTabs.find((t) => t.id === s.activeTabId) ?? null);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
   const theme = useAppStore((s) => s.theme);
 
   // Local splitter state — HttpTester (top) / ResponseViewer (bottom) ratio.
@@ -162,8 +163,24 @@ function App() {
   //   endpoint → request/response split
   //   project / module / collection → EntitySettings metadata editor
   //   settings → left-rail + main section (now a tab itself, not a drawer)
+  //
+  // No active tab is the app's *startup* state (bootstrap selects no
+  // project) and also what closing the last tab leaves behind. Which of
+  // the two it is depends on whether a project has been entered: without
+  // one there is nothing to show but the picker, and with one the
+  // project itself is the natural landing surface — which is also where
+  // project rename / delete now live, since the project is no longer a
+  // row in the tree.
   const renderActiveContent = () => {
-    if (!activeTab) return <WelcomeScreen />;
+    if (!activeTab) {
+      return activeProjectId ? (
+        <Suspense fallback={<PanelFallback />}>
+          <EntitySettings kind="project" entityId={activeProjectId} />
+        </Suspense>
+      ) : (
+        <WelcomeScreen />
+      );
+    }
     if (activeTab.kind === 'endpoint') {
       return (
         <>

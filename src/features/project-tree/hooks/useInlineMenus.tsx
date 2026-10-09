@@ -7,8 +7,6 @@ import type { NewType } from '@/stores/app-store';
 export interface InlineMenuBindings {
   /** Every node of the active project, any type, any depth. */
   nodes: ResourceNode[];
-  /** The project's top-level modules, already in `sortOrder`. */
-  projectModules: ResourceNode[];
   openNewItemWithIntent: (opts: {
     type: NewType;
     parentModuleId?: string;
@@ -18,66 +16,18 @@ export interface InlineMenuBindings {
 }
 
 /**
- * The inline "+" menus attached to the project / module / collection
- * rows. Each builds its items lazily at click time (the first module /
- * collection of the project can change between renders), so no derived
- * arrays are memoized here.
+ * The inline "+" menus attached to the module / collection rows. Each
+ * builds its items lazily at click time (the first module / collection
+ * of the project can change between renders), so no derived arrays are
+ * memoized here.
+ *
+ * There is no project-level "+" any more: the project used to be a row
+ * in this tree, and that row owned the "create the first module of this
+ * project" entry point. With the project gone from the tree, that entry
+ * point is the empty state in `ProjectTree` plus the panel's own "新建"
+ * button, both of which reach the same modal.
  */
-export function useInlineMenus({
-  nodes,
-  projectModules,
-  openNewItemWithIntent,
-  setMenu,
-}: InlineMenuBindings) {
-  const openProjectPlusMenu = (e: ReactMouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const firstMod = projectModules[0];
-    // Top-level collections of that module only: a collection's parent
-    // is either a module or another collection. Used to pick the
-    // endpoint's landing spot, and it is a preference, not a
-    // requirement — an endpoint can sit on the module itself.
-    const firstColSorted = firstMod
-      ? nodes
-          .filter((c) => c.kind === 'collection' && c.parentId === firstMod.id)
-          .sort((a, b) => a.sortOrder - b.sortOrder)[0]
-      : null;
-    const items: ContextMenuItem[] = [
-      {
-        kind: 'item',
-        label: '新建模块',
-        icon: <FolderPlus className="h-3.5 w-3.5" />,
-        onClick: () => openNewItemWithIntent({ type: 'module' }),
-      },
-    ];
-    if (firstMod) {
-      items.push({
-        kind: 'item',
-        label: '新建集合',
-        icon: <FolderPlus className="h-3.5 w-3.5" />,
-        onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: firstMod.id }),
-      });
-    }
-    if (firstMod) {
-      items.push({
-        kind: 'item',
-        label: '新建接口',
-        icon: <FilePlus className="h-3.5 w-3.5" />,
-        // Nest in the module's first collection when it has one; with an
-        // empty id the endpoint lands on the module directly. So this
-        // item no longer disappears on a module that has no collections
-        // yet.
-        onClick: () =>
-          openNewItemWithIntent({
-            type: 'endpoint',
-            parentModuleId: firstMod.id,
-            parentCollectionId: firstColSorted?.id ?? '',
-          }),
-      });
-    }
-    setMenu({ x: e.clientX, y: e.clientY, items });
-  };
-
+export function useInlineMenus({ nodes, openNewItemWithIntent, setMenu }: InlineMenuBindings) {
   const openModulePlusMenu = (moduleId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -138,7 +88,7 @@ export function useInlineMenus({
     setMenu({ x: e.clientX, y: e.clientY, items });
   };
 
-  return { openProjectPlusMenu, openModulePlusMenu, openCollectionPlusMenu };
+  return { openModulePlusMenu, openCollectionPlusMenu };
 }
 
 /**

@@ -120,7 +120,12 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
         baseUrl: draft.baseUrl,
         color: draft.color,
       });
-      if (id) state.setActiveProject(id);
+      // Enter the new project: `openProject` selects it *and* activates
+      // its tab, so the tree immediately scopes to the fresh (empty)
+      // project and the right pane shows its card — where the name can
+      // still be edited. The project is no longer a tree row, so this
+      // is the only thing that makes the create feel like it landed.
+      if (id) state.openProject(id);
       state.setActiveEndpoint(null);
       set({ lastCreatedId: id });
       return id;

@@ -31,7 +31,12 @@ export function useNewItemFlow(setEditing: (t: EditTarget) => void) {
   useEffect(() => {
     if (!lastCreatedId) return;
     if (!lastIntent) return;
-    setEditing({ kind: lastIntent, id: lastCreatedId });
+    // A project has no row here, so there is nothing to drop into inline
+    // rename — the tree lists modules / collections / endpoints only.
+    // `submitNewItem` already entered the new project, whose name the
+    // user typed in the modal; entering rename mode would only leave a
+    // stale `editing` target behind.
+    if (lastIntent !== 'project') setEditing({ kind: lastIntent, id: lastCreatedId });
     setLastIntent(null);
     clearLastCreated();
   }, [lastCreatedId, lastIntent, clearLastCreated, setEditing]);

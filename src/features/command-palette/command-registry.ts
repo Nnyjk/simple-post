@@ -67,7 +67,11 @@ export function buildCommands(): Command[] {
       hint: '切换项目',
       section: '导航',
       keywords: ['project', '项目', p.description ?? ''],
-      run: () => useAppStore.getState().setActiveProject(p.id),
+      // `openProject`, not `setActiveProject`: picking a project from the
+      // palette is the same gesture as picking it from the welcome
+      // picker or the top bar, and all three must land on the same
+      // state (this project's tab active, tree scoped to it).
+      run: () => useAppStore.getState().openProject(p.id),
     });
   }
 

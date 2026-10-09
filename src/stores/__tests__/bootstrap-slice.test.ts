@@ -145,28 +145,53 @@ describe('bootstrap-slice 聚合加载契约', () => {
     // The detail list is keyed by node id, not carried as an array.
     assert.deepEqual(bag.endpointDetails, { e1: endpointDetail });
     assert.deepEqual(bag.environments, [environment]);
-    assert.equal(bag.activeProjectId, 'p1');
-    assert.equal(bag.activeEnvironmentId, 'env1');
+    // Nothing is selected at boot — see the next test.
+    assert.equal(bag.activeProjectId, '');
+    assert.equal(bag.activeEnvironmentId, '');
+    assert.equal(bag.activeEndpointId, null);
   });
 
-  it('首个接口只在首个项目内挑选（按 rootId，而不是全局第一个）', async () => {
+  it('启动不预选任何项目或接口，把选择权留给欢迎页', async () => {
     const bag = makeBootstrapHarness();
     const otherProject: Project = { ...project, id: 'p2', name: '别的项目' };
-    // A whole-workspace list would hand back this node first, and the
-    // user would land in a project the tree never showed them.
+    // Both projects are populated. An older bootstrap picked
+    // `projects[0]` and its first endpoint, so a user with several
+    // projects never saw the picker and never saw the project they were
+    // dropped into either.
     const otherEndpoint: ResourceNode = { ...endpointNode, id: 'e0', rootId: 'p2' };
+    const opened: { kind: string; id: string }[] = [];
+    bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
     installIpcMock(async (cmd) => {
       if (cmd === 'projects_list') return [project, otherProject];
       if (cmd === 'nodes_list') return [otherEndpoint, endpointNode];
       if (cmd === 'endpoint_details_list') return [endpointDetail];
-      if (cmd === 'environments_list') return [];
+      if (cmd === 'environments_list') return [environment];
       return [];
     });
 
     await bag.bootstrap();
 
-    assert.equal(bag.activeProjectId, 'p1');
-    assert.equal(bag.activeEndpointId, 'e1', 'not the other project’s endpoint');
+    assert.equal(bag.activeProjectId, '', 'no project is entered on load');
+    assert.equal(bag.activeEnvironmentId, '', 'and therefore no environment');
+    assert.equal(bag.activeEndpointId, null);
+    assert.deepEqual(opened, [], 'no tab is opened behind the welcome screen');
+  });
+
+  it('openProject 选中项目并激活它的标签', async () => {
+    const bag = makeBootstrapHarness();
+    const opened: { kind: string; id: string }[] = [];
+    const selected: string[] = [];
+    bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
+    bag.setActiveProject = (id: string) => selected.push(id);
+    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [project] : []));
+
+    bag.openProject('p1');
+
+    // Both halves, in this order: the tree only re-scopes once the
+    // project is the active one, and the right pane must not be left
+    // showing the previous project's entity.
+    assert.deepEqual(selected, ['p1']);
+    assert.deepEqual(opened, [{ kind: 'project', id: 'p1' }]);
   });
 
   it('读取 endpoint detail 失败时软降级为 {}，不影响其余数据', async () => {
