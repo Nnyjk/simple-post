@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette-lazy';
 import { cn, focusRing } from '@/lib/utils';
-import { WindowControls } from './WindowControls';
+import { WindowControls } from '@/components/ui/window-controls';
 
 /**
  * Tauri 2 quirk: `data-tauri-drag-region="true"` on a container makes
@@ -38,17 +38,7 @@ export function TopBar() {
   const setActiveEnvironment = useAppStore((s) => s.setActiveEnvironment);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
-
-  // NOTE: `bootstrap()` used to be kicked off from right here, in this
-  // effect, because TopBar is the first mounted child of App.tsx. That is
-  // strictly too late: effects run after React has parsed and executed the
-  // entire initial module graph and mounted the tree, so the backend round
-  // trip could not start until the slowest thing on the page was already
-  // done — the two costs were serialised instead of overlapping. It now
-  // fires from `main.tsx`, before `createRoot`, which lets the IPC run
-  // concurrently with mount and with the editor chunks warming up.
-  // `bootstrap()` is idempotent and guards on `loaded || loading`, so the
-  // call order relative to this component is not load-bearing.
+  const leaveProject = useAppStore((s) => s.leaveProject);
 
   const envs = useMemo(
     () => environments.filter((e) => e.projectId === activeProjectId),
@@ -96,11 +86,26 @@ export function TopBar() {
       data-tauri-drag-region="true"
       className="flex h-11 shrink-0 select-none items-center gap-2 border-b border-border bg-card/50 px-3"
     >
-      {/* Logo — pure decoration, sits inside the drag region. */}
-      <div className="flex items-center gap-2 pr-2">
-        <AppIcon className="h-6 w-6" />
-        <span className="text-sm font-semibold tracking-tight">Simple Post</span>
-      </div>
+      {/* Wordmark — doubles as the way back to the welcome screen
+          (`leaveProject`). Clicking the product name is the "go home"
+          convention, and it is the one element in this bar that never
+          controls anything else. */}
+      <Tooltip content="返回欢迎页" side="bottom">
+        <button
+          {...NO_DRAG}
+          type="button"
+          onClick={leaveProject}
+          aria-label="返回欢迎页"
+          data-testid="back-to-welcome"
+          className={cn(
+            'flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-accent/40',
+            focusRing,
+          )}
+        >
+          <AppIcon className="h-6 w-6" />
+          <span className="text-sm font-semibold tracking-tight">Simple Post</span>
+        </button>
+      </Tooltip>
 
       {/* Project switcher — the project's home now that it is not a row
           in the tree. Disabled only until bootstrap has the list; with
@@ -190,96 +195,104 @@ export function TopBar() {
         )}
       </div>
 
-      {/* Environment switcher */}
-      <div ref={envRef} className="relative">
-        <Button
-          {...NO_DRAG}
-          variant="ghost"
-          size="sm"
-          onClick={() => setEnvOpen((v) => !v)}
-          className="gap-1.5"
-        >
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">env</span>
-          {/* Fixed width, not `max-w`: the title bar must not resize when
+      {/* Environment switcher. Gated on an active project: the list is
+          `environments.filter(e => e.projectId === activeProjectId)`, so
+          with no project it is empty and the dropdown would report
+          "该项目暂无环境" about a project that does not exist, while still
+          offering "新建环境" — which cannot succeed without one.
+          `WorkspaceShell` normally mounts only once a project is active;
+          this guard also covers the settings-only case. */}
+      {activeProjectId !== '' && (
+        <div ref={envRef} className="relative">
+          <Button
+            {...NO_DRAG}
+            variant="ghost"
+            size="sm"
+            onClick={() => setEnvOpen((v) => !v)}
+            className="gap-1.5"
+          >
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">env</span>
+            {/* Fixed width, not `max-w`: the title bar must not resize when
               the active name changes length. `max-w` only caps the long
               case, so a short name collapsed the whole control and made
               switching envs shove everything to its right sideways.
               `truncate` still ellipsises an over-long name inside it. */}
-          <span className="w-[80px] truncate font-mono text-xs">{activeEnv?.name ?? '—'}</span>
-          <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-        </Button>
-        {envOpen && (
-          <div className="absolute left-0 top-full z-50 mt-1 w-56 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
-            <div className="px-2 py-1 label-caps">环境</div>
-            {envs.length === 0 ? (
-              <>
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  该项目暂无环境
-                </div>
-                <div className="mt-1 border-t border-border pt-1">
-                  <button
-                    {...NO_DRAG}
-                    type="button"
-                    onClick={() => {
-                      setEnvOpen(false);
-                      openSettingsTab('env');
-                    }}
-                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    新建环境
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                {envs.map((env) => (
-                  <button
-                    {...NO_DRAG}
-                    type="button"
-                    key={env.id}
-                    onClick={() => {
-                      setActiveEnvironment(env.id);
-                      setEnvOpen(false);
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent',
-                      env.id === activeEnv?.id && 'bg-accent',
-                    )}
-                  >
-                    <Circle
+            <span className="w-[80px] truncate font-mono text-xs">{activeEnv?.name ?? '—'}</span>
+            <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+          </Button>
+          {envOpen && (
+            <div className="absolute left-0 top-full z-50 mt-1 w-56 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
+              <div className="px-2 py-1 label-caps">环境</div>
+              {envs.length === 0 ? (
+                <>
+                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+                    该项目暂无环境
+                  </div>
+                  <div className="mt-1 border-t border-border pt-1">
+                    <button
+                      {...NO_DRAG}
+                      type="button"
+                      onClick={() => {
+                        setEnvOpen(false);
+                        openSettingsTab('env');
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      新建环境
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {envs.map((env) => (
+                    <button
+                      {...NO_DRAG}
+                      type="button"
+                      key={env.id}
+                      onClick={() => {
+                        setActiveEnvironment(env.id);
+                        setEnvOpen(false);
+                      }}
                       className={cn(
-                        'h-2 w-2',
-                        env.id === activeEnv?.id
-                          ? 'fill-success text-success'
-                          : 'text-muted-foreground/40',
+                        'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent',
+                        env.id === activeEnv?.id && 'bg-accent',
                       )}
-                    />
-                    <span className="font-mono text-xs">{env.name}</span>
-                    {env.id === activeEnv?.id && (
-                      <span className="ml-auto text-[10px] text-success">active</span>
-                    )}
-                  </button>
-                ))}
-                <div className="mt-1 border-t border-border pt-1">
-                  <button
-                    {...NO_DRAG}
-                    type="button"
-                    onClick={() => {
-                      setEnvOpen(false);
-                      openSettingsTab('env');
-                    }}
-                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    新建环境
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+                    >
+                      <Circle
+                        className={cn(
+                          'h-2 w-2',
+                          env.id === activeEnv?.id
+                            ? 'fill-success text-success'
+                            : 'text-muted-foreground/40',
+                        )}
+                      />
+                      <span className="font-mono text-xs">{env.name}</span>
+                      {env.id === activeEnv?.id && (
+                        <span className="ml-auto text-[10px] text-success">active</span>
+                      )}
+                    </button>
+                  ))}
+                  <div className="mt-1 border-t border-border pt-1">
+                    <button
+                      {...NO_DRAG}
+                      type="button"
+                      onClick={() => {
+                        setEnvOpen(false);
+                        openSettingsTab('env');
+                      }}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      新建环境
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Search box — clicking opens the command palette. */}
       <button

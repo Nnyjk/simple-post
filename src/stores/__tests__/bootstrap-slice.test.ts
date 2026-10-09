@@ -1,5 +1,10 @@
 /**
- * Bootstrap 契约测试：锁定无过滤参数的聚合加载，以及失败时的错误状态。
+ * Bootstrap 契约测试：锁定**两层**加载的时序，以及失败时的错误状态。
+ *
+ * 分层是这一版的核心，所以测试盯的不是"发了哪几个命令"，而是"欢迎页
+ * 在哪一刻可以画"：`loaded` 必须在只有 `projects_list` 落地时就为 true，
+ * 而 `nodesLoaded` 要等到树那一组读完。后者若和前者一起翻 true，启动画面
+ * 就又回到了"等最慢的那个查询"。
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,13 +22,18 @@ function makeBootstrapHarness() {
     endpointDetails: {},
     environments: [],
     loaded: false,
+    nodesLoaded: false,
+    nodesLoading: false,
     activeProjectId: '',
     activeEnvironmentId: '',
     activeEndpointId: null,
     loading: false,
     bootstrapError: null,
+    nodesError: null,
     openTab: () => undefined,
+    closeTab: () => undefined,
     setLastResponse: () => undefined,
+    loadWorkspace: async () => undefined,
   };
   const set = (partial: unknown) => {
     const next =
@@ -107,7 +117,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     clearIpcMock();
   });
 
-  it('Tauri 形状以空参数加载全部列表并一次性提交状态', async () => {
+  it('第一层只读 projects：欢迎页不必等树那一组', async () => {
     const bag = makeBootstrapHarness();
     const calls: CapturedCall[] = [];
     const responses: Record<string, unknown> = {
@@ -117,25 +127,58 @@ describe('bootstrap-slice 聚合加载契约', () => {
       endpoint_details_list: [endpointDetail],
       environments_list: [environment],
     };
+    // Gate the tree layer so we can observe the store mid-bootstrap. This
+    // is the whole point of the split: `loaded` must already be true
+    // while these are still pending.
+    let releaseTree: () => void = () => undefined;
+    const treeGate = new Promise<void>((resolve) => {
+      releaseTree = resolve;
+    });
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args });
+      if (cmd !== 'projects_list') await treeGate;
       return responses[cmd];
     });
 
-    await bag.bootstrap();
+    const booting = bag.bootstrap();
+    // Wait for layer 1 to settle without releasing the tree gate. A
+    // macrotask tick drains every pending microtask, which is exactly
+    // the boundary layer 1's `set()` lands on — counting
+    // `Promise.resolve()`s would be a guess about how many awaits
+    // `invokeCmd` happens to contain.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // `Promise.all` starts every call in order, so the captured list is
-    // deterministic even though the resolutions interleave.
-    assert.deepEqual(calls, [
-      { cmd: 'projects_list', args: {} },
+    assert.equal(bag.loaded, true, 'welcome screen can paint on the project list alone');
+    assert.equal(bag.nodesLoaded, false, 'tree has not landed yet');
+    assert.deepEqual(bag.projects, [project]);
+    // Layer 2 *starts* right away — it is only un-awaited that keeps it
+    // off the critical path. So the assertion is not "these commands were
+    // not issued" but "they have not resolved", which is what `loaded`
+    // being true alongside `nodesLoaded` false already proves.
+    assert.deepEqual(
+      calls.map((c) => c.cmd),
+      ['projects_list', 'nodes_list', 'endpoint_details_list', 'environments_list'],
+      'layer 2 is dispatched, just never awaited by bootstrap',
+    );
+
+    releaseTree();
+    await booting;
+    // `bootstrap()` returns as soon as layer 1 lands — that is the whole
+    // point of the split. Awaiting `loadWorkspace()` instead joins the
+    // pass bootstrap already started, which is only possible because an
+    // in-flight load hands back its pending promise instead of resolving
+    // immediately.
+    await bag.loadWorkspace();
+
+    assert.equal(bag.nodesLoaded, true);
+    assert.equal(bag.nodesLoading, false);
+    assert.equal(bag.bootstrapError, null);
+    assert.equal(bag.nodesError, null);
+    assert.deepEqual(calls.slice(1), [
       { cmd: 'nodes_list', args: {} },
       { cmd: 'endpoint_details_list', args: {} },
       { cmd: 'environments_list', args: {} },
     ]);
-    assert.equal(bag.loaded, true);
-    assert.equal(bag.loading, false);
-    assert.equal(bag.bootstrapError, null);
-    assert.deepEqual(bag.projects, [project]);
     assert.deepEqual(bag.nodes, [moduleNode, collectionNode, endpointNode]);
     // The detail list is keyed by node id, not carried as an array.
     assert.deepEqual(bag.endpointDetails, { e1: endpointDetail });
@@ -144,6 +187,51 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(bag.activeProjectId, '');
     assert.equal(bag.activeEnvironmentId, '');
     assert.equal(bag.activeEndpointId, null);
+  });
+
+  it('loadWorkspace 幂等：重复调用不会重复拉取', async () => {
+    const bag = makeBootstrapHarness();
+    const calls: string[] = [];
+    installIpcMock(async (cmd) => {
+      calls.push(cmd);
+      return [];
+    });
+
+    await bag.loadWorkspace();
+    await bag.loadWorkspace();
+    await bag.loadWorkspace();
+
+    assert.deepEqual(
+      calls,
+      ['nodes_list', 'endpoint_details_list', 'environments_list'],
+      'a second call after the first is a no-op',
+    );
+  });
+
+  it('并发调用 loadWorkspace 不会并发发起第二轮 IPC', async () => {
+    const bag = makeBootstrapHarness();
+    const calls: string[] = [];
+    let releaseTree: () => void = () => undefined;
+    const treeGate = new Promise<void>((resolve) => {
+      releaseTree = resolve;
+    });
+    installIpcMock(async (cmd) => {
+      calls.push(cmd);
+      if (cmd === 'nodes_list') await treeGate;
+      return [];
+    });
+
+    // `bootstrap`, `openProject` and the retry button all reach for this
+    // without coordinating — the in-flight guard is what keeps them from
+    // stacking three copies of the same query.
+    const first = bag.loadWorkspace();
+    const second = bag.loadWorkspace();
+    assert.equal(bag.nodesLoading, true);
+
+    releaseTree();
+    await Promise.all([first, second]);
+
+    assert.equal(calls.filter((c) => c === 'nodes_list').length, 1);
   });
 
   it('启动不预选任何项目或接口，把选择权留给欢迎页', async () => {
@@ -172,12 +260,18 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.deepEqual(opened, [], 'no tab is opened behind the welcome screen');
   });
 
-  it('openProject 选中项目并激活它的标签', async () => {
+  it('openProject 选中项目、激活它的标签，并顺带触发树加载', async () => {
     const bag = makeBootstrapHarness();
     const opened: { kind: string; id: string }[] = [];
     const selected: string[] = [];
+    let workspaceLoads = 0;
     bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
     bag.setActiveProject = (id: string) => selected.push(id);
+    // A user who clicks a project card before the background pass lands
+    // must still get a tree, so entering a project re-requests it.
+    bag.loadWorkspace = async () => {
+      workspaceLoads += 1;
+    };
     installIpcMock(async (cmd) => (cmd === 'projects_list' ? [project] : []));
 
     bag.openProject('p1');
@@ -187,6 +281,49 @@ describe('bootstrap-slice 聚合加载契约', () => {
     // showing the previous project's entity.
     assert.deepEqual(selected, ['p1']);
     assert.deepEqual(opened, [{ kind: 'project', id: 'p1' }]);
+    assert.equal(workspaceLoads, 1, 'entering a project pulls the tree layer');
+  });
+
+  it('leaveProject 回到欢迎页，但保留已加载的树与标签', async () => {
+    const bag = makeBootstrapHarness();
+    const closed: string[] = [];
+    bag.closeTab = (id: string) => closed.push(id);
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      if (cmd === 'nodes_list') return [moduleNode, collectionNode, endpointNode];
+      if (cmd === 'endpoint_details_list') return [endpointDetail];
+      if (cmd === 'environments_list') return [environment];
+      return [];
+    });
+
+    await bag.bootstrap();
+    await bag.loadWorkspace();
+    bag.openProject('p1');
+    assert.equal(bag.activeProjectId, 'p1');
+
+    bag.leaveProject();
+
+    // `App.tsx` switches surfaces on `activeProjectId === ''`, so clearing
+    // it is the whole of "go back to the welcome page".
+    assert.equal(bag.activeProjectId, '');
+    assert.equal(
+      bag.activeEnvironmentId,
+      '',
+      'an env from the abandoned project is meaningless here',
+    );
+    assert.equal(bag.activeEndpointId, null);
+    // Re-entering must not refetch: the tree is per-project state the user
+    // will very likely want back on the next click.
+    assert.equal(bag.nodesLoaded, true);
+    assert.deepEqual(bag.nodes, [moduleNode, collectionNode, endpointNode]);
+    assert.deepEqual(closed, [], 'leaving is not closing tabs');
+  });
+
+  it('leaveProject 在欢迎页上是 no-op', () => {
+    const bag = makeBootstrapHarness();
+    bag.activeProjectId = '';
+    bag.leaveProject();
+    assert.equal(bag.activeProjectId, '');
   });
 
   it('读取 endpoint detail 失败时软降级为 {}，不影响其余数据', async () => {
@@ -199,17 +336,20 @@ describe('bootstrap-slice 聚合加载契约', () => {
     });
 
     await bag.bootstrap();
+    await bag.loadWorkspace();
 
     assert.equal(bag.loaded, true);
+    assert.equal(bag.nodesLoaded, true);
     assert.equal(bag.bootstrapError, null);
+    assert.equal(bag.nodesError, null);
     assert.deepEqual(bag.endpointDetails, {});
     assert.deepEqual(bag.nodes, [endpointNode]);
   });
 
-  it('任一必选列表失败时保留错误且不伪装成成功空数据', async () => {
+  it('第一层失败时不伪装成成功空数据', async () => {
     const bag = makeBootstrapHarness();
     installIpcMock(async (cmd) => {
-      if (cmd === 'environments_list') throw new Error('environment store offline');
+      if (cmd === 'projects_list') throw new Error('project store offline');
       return [];
     });
 
@@ -217,8 +357,62 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     assert.equal(bag.loaded, false);
     assert.equal(bag.loading, false);
-    assert.equal(bag.bootstrapError, 'environment store offline');
+    assert.equal(bag.bootstrapError, 'project store offline');
     assert.deepEqual(bag.projects, []);
+  });
+
+  it('第二层失败时欢迎页仍然可用：错误落在 nodesError，不卡住启动', async () => {
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      if (cmd === 'environments_list') throw new Error('environment store offline');
+      return [];
+    });
+
+    await bag.bootstrap();
+    await bag.loadWorkspace();
+
+    // The distinguishing assertion of the split: layer 1 succeeding is
+    // enough for the welcome screen, so `loaded` is true even though the
+    // tree layer failed. Merging these two flags back together would
+    // either strand the boot splash or hide a real tree failure.
+    assert.equal(bag.loaded, true, 'welcome screen still paints');
+    assert.deepEqual(bag.projects, [project]);
+    assert.equal(bag.nodesLoaded, false);
+    assert.equal(bag.nodesLoading, false);
+    assert.equal(bag.bootstrapError, null, 'not reported as a startup failure');
+    assert.equal(bag.nodesError, 'environment store offline');
     assert.deepEqual(bag.environments, []);
+  });
+
+  it('第二层在项目已进入后才落地时，补选该项目的 active 环境', async () => {
+    const bag = makeBootstrapHarness();
+    let releaseTree: () => void = () => undefined;
+    const treeGate = new Promise<void>((resolve) => {
+      releaseTree = resolve;
+    });
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      if (cmd === 'environments_list') {
+        // Arrives after the user already clicked the card.
+        await treeGate;
+        return [environment];
+      }
+      return [];
+    });
+
+    const booting = bag.bootstrap();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // `setActiveProject` resolves against an empty `environments` list
+    // here, so it lands on the "none selected" sentinel.
+    bag.openProject('p1');
+    assert.equal(bag.activeEnvironmentId, '');
+
+    releaseTree();
+    await booting;
+    await bag.loadWorkspace();
+
+    assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the active env');
   });
 });

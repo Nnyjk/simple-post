@@ -27,13 +27,21 @@ The parent/child relationship is an **enforced contract**, not a convention: `Re
 
 **HTTP requests** bypass webview CORS: `src/lib/http.ts::sendRequest` → `httpRequest` command → `http_executor.rs` (reqwest).
 
+**Two surfaces, switched on `activeProjectId === ''`** (`src/App.tsx`). `WelcomeScreen` is a full-window page with no top bar, no tree and no tab strip; everything else lives in `WorkspaceShell` (`src/features/workspace/`), which is `lazy()`. The split does three things at once: it keeps the whole workspace — and through it the CodeMirror editors — out of the cold-start chunk; it pairs with the two-layer `bootstrap()` below; and it makes the no-project state genuinely empty instead of a frame full of controls that cannot do anything. `leaveProject()` (the TopBar wordmark) is the way back.
+
+**Two-layer `bootstrap()`** (`src/stores/bootstrap-slice.ts`). Layer 1 is `projects_list`, awaited; it flips `loaded`, which tears down the HTML boot splash. Layer 2 is `nodes_list` + `endpoint_details_list` + `environments_list`, run by `loadWorkspace()` and **not** awaited. Consequences worth respecting: `nodes: []` is ambiguous while `nodesLoaded === false` (render a loading state, never "该项目还没有模块"); layer-2 failures land in `nodesError`, not `bootstrapError`, so a tree failure cannot strand the splash; and `pruneStaleTabs()` no-ops until `nodesLoaded` or it would delete every tab it is supposed to be keeping.
+
+**Dev-server startup is NOT the app's startup.** `optimizeDeps.noDiscovery` + a short `include` in `vite.config.ts` is load-bearing, not a micro-optimisation: measured cold, the first request through the dev server took **11.3 s**, because the dependency crawler follows every `import()` and eagerly pre-bundles all 22 packages — the whole CodeMirror stack, `gsap`/`Flip`, `marked`, plus a 1.1 MB `lucide-react` — none of which the welcome screen touches. With discovery off and only the startup deps named, that same cold request is **139 ms**. Two things that look equivalent and are not: naming *all* deps in `include` is just as slow (10 s, because pre-bundling is eager once a package is named), and a `configureServer` pre-warm plugin makes it *worse* (15 s — it serialises behind Vite's own first request instead of overlapping it). Do not "optimise" this back. The trade it buys: the HTTP tester pays a few hundred ms of raw-ESM requests the first time it opens, which is the right side to spend on when the startup screen is on every launch.
+
+**GSAP is not on the critical path.** `src/lib/gsap.ts` pulls core + CSSPlugin (~60 kB raw), so anything it reaches from the entry chunk pays for it on every cold start. That is why `WelcomeScreen`'s entrance is CSS (`.welcome-enter` in `globals.css`) rather than `gsap.from()`, and why `NewItemModal` / `BootstrapErrorBanner` are mounted on `newItem.open` / `bootstrapError` rather than unconditionally — a `lazy()` component fires its import as soon as it is *rendered*, so wrapping them in `<Suspense>` alone still downloads them during first paint. Verify with the dependency-edge probe described under **Vite `manualChunks`**; a chunk listing alone will not show you a static import edge.
+
 **MCP flow**: AI client → stdio (`stdio_loop.rs`) → `POST 127.0.0.1:<port>/mcp` → `daemon_http.rs` → `mcp/mod.rs::dispatch` → capability gate (`read_only`/`safe_write`/`full_access`) → per-project permission check → tool handler → shared `db` pool / `http_executor`. Daemon port discovered via `mcp.port` file in the data dir (`SIMPLE_POST_DATA_DIR` or `%APPDATA%/simple-post`).
 
 Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 
 ## Key Directories
 
-- `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/`, `response-viewer/`, `welcome/`
+- `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/` (incl. `WorkspaceShell.tsx`), `response-viewer/`, `welcome/`
 - `src/stores/` — Zustand: `app-store.ts` barrel composing `bootstrap-slice`, `crud-slice`, `ui-slice`, `mcp-slice`, `dirty-tabs-slice` + `store-types.ts`
 - `src/lib/` — `tauri-commands.ts` (dual-transport IPC + `COMMANDS` registry), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`
 - `src/components/ui/` — shared primitives (`method-picker`, `tabs`, `dialog`, …)

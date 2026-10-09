@@ -247,6 +247,13 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
     }),
   pruneStaleTabs: () =>
     set((s) => {
+      // Layer 2 has not landed yet, so `s.nodes` is empty — which reads
+      // exactly like "every tree node was deleted". Running the filter
+      // now would close every module / collection / endpoint tab the
+      // user has. Bail instead; the effect that calls this re-runs when
+      // `nodesLoaded` flips, and that is the first moment the answer is
+      // trustworthy.
+      if (!s.nodesLoaded) return {};
       const valid = s.openTabs.filter((t) => {
         if (t.kind === 'settings') return true; // singleton — never stale
         if (t.kind === 'project') return s.projects.some((p) => p.id === t.id);

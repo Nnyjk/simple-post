@@ -31,6 +31,13 @@ export function ProjectTree() {
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const activeEndpointId = useAppStore((s) => s.activeEndpointId);
+  // Layer 2 of the bootstrap. `nodes: []` is ambiguous — it means both
+  // "this project has no modules" and "the tree has not arrived yet" —
+  // and reading it as the first would show a confident, wrong empty state
+  // to anyone who enters a project while the load is still in flight.
+  // See `stores/bootstrap-slice.ts`.
+  const nodesLoaded = useAppStore((s) => s.nodesLoaded);
+  const nodesError = useAppStore((s) => s.nodesError);
   const activeProject = useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
 
   // ---------- store actions ----------
@@ -161,6 +168,15 @@ export function ProjectTree() {
           <div className="px-2 py-6 text-center text-xs text-muted-foreground">
             尚未选择项目。请在欢迎页或顶部项目选择器中选择一个。
           </div>
+        ) : nodesError ? (
+          <div className="space-y-2 px-2 py-6 text-center">
+            <p className="text-xs text-destructive">项目内容加载失败</p>
+            <p className="text-[11px] text-muted-foreground" title={nodesError}>
+              {nodesError}
+            </p>
+          </div>
+        ) : !nodesLoaded ? (
+          <div className="px-2 py-6 text-center text-xs text-muted-foreground">加载项目内容…</div>
         ) : query.trim() && filtered.length === 0 ? (
           <div className="px-2 py-6 text-center text-xs text-muted-foreground">
             没有匹配「{query}」的节点。

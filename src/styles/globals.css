@@ -299,3 +299,40 @@
     @apply mt-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive-foreground;
   }
 }
+
+@layer components {
+  /* Welcome-screen entrance.
+     Replaces a `gsap.from()` stagger over `[data-welcome-stagger]`.
+     That animation lived on the startup surface, so importing GSAP for
+     it pulled ~60 kB raw of animation library into the entry chunk —
+     critical path on every cold start — to move six elements that then
+     sit still. CSS does the same work for free.
+
+     `animation-delay` is stepped by `--stagger-i` (set inline per
+     element) to reproduce the original 60ms cascade; the base 0.32s /
+     power3.out-ish cubic-bezier matches the GSAP tween it replaces.
+     Elements render at their final position by default and only animate
+     once `.welcome-enter` lands on the container, so a paint that happens
+     before the effect runs shows real content rather than a blank gap. */
+  .welcome-enter [data-welcome-stagger] {
+    animation: welcome-rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: calc(var(--stagger-i, 0) * 60ms);
+  }
+
+  @keyframes welcome-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .welcome-enter [data-welcome-stagger] {
+      animation: none;
+    }
+  }
+}

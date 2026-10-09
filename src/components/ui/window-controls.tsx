@@ -8,8 +8,14 @@
  * the only one that uses the accent color (matches Explorer + VS Code
  * + every other Win11 app the user already trusts).
  *
- * Tauri 2 drag-region caveat: every interactive control inside the
- * TopBar's `data-tauri-drag-region` row must opt out with
+ * Lives in `components/ui` rather than `features/top-bar` because both
+ * shells need it: the workspace header, and the standalone welcome
+ * screen — which is a full-window surface with no top bar of its own
+ * and would otherwise be un-minimizable, un-maximizable and, on
+ * Windows, un-closable.
+ *
+ * Tauri 2 drag-region caveat: every interactive control inside a
+ * `data-tauri-drag-region` row must opt out with
  * `data-tauri-drag-region="false"`, otherwise the webview drag gesture
  * swallows the click.
  */

@@ -96,9 +96,15 @@ export function WorkspaceTabs() {
   // Cleanup safety net: covers any mutation path that bypassed the
   // delete* actions (e.g. imported data, future Rust sync). Cheap because
   // the data is bounded by the workspace size.
+  //
+  // `nodesLoaded` is a dependency, not an incidental capture: `pruneStaleTabs`
+  // no-ops until the tree has loaded (an empty `nodes` array is
+  // indistinguishable from "all deleted"), so without re-running on that
+  // flip the tabs of a freshly-entered project would never be pruned.
+  const nodesLoaded = useAppStore((s) => s.nodesLoaded);
   useEffect(() => {
     pruneStaleTabs();
-  }, [pruneStaleTabs]);
+  }, [pruneStaleTabs, nodesLoaded]);
 
   // Build a descriptor for every tab. Done locally with useMemo so each
   // tab only re-renders when its underlying entity changes.
