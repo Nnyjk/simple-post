@@ -33,7 +33,7 @@ pub(crate) use nodes::{
     nodes_move, nodes_update,
 };
 pub(crate) use permissions::{permissions_get, permissions_set};
-pub(crate) use preferences::{db_recreated_at, preferences_get, preferences_put};
+pub(crate) use preferences::{preferences_get, preferences_put};
 pub(crate) use projects::{
     projects_create, projects_delete, projects_get, projects_list, projects_update,
 };

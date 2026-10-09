@@ -297,7 +297,6 @@ pub fn run() {
             crate::commands::request_settings_get,
             crate::commands::request_settings_update,
             crate::commands::permissions_get,
-            crate::commands::db_recreated_at,
             crate::commands::permissions_set,
             crate::commands::mcp_status,
             crate::commands::mcp_daemon_restart,

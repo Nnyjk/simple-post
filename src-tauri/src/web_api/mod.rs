@@ -207,10 +207,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/preferences",
             get(preferences_get).put(preferences_put),
         )
-        // Internal, like `/api/preferences` above: boot-time state the
-        // renderer needs, not part of the documented v1 contract, so it
-        // stays out of `public_route_specs()` and out of openapi.yaml.
-        .route("/api/db/recreated-at", get(db_recreated_at))
         .with_state(state_arc.clone());
 
     // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools` — the AI client

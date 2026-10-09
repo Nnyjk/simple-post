@@ -47,9 +47,6 @@ const BootstrapErrorBanner = lazy(() =>
     default: m.BootstrapErrorBanner,
   })),
 );
-const DbRecreatedBanner = lazy(() =>
-  import('@/features/top-bar/DbRecreatedBanner').then((m) => ({ default: m.DbRecreatedBanner })),
-);
 
 /**
  * Placeholder for a chunk that has not arrived yet.
@@ -231,11 +228,6 @@ function App() {
           load is visible without covering the tree it made incomplete. */}
       <Suspense fallback={null}>
         <BootstrapErrorBanner />
-      </Suspense>
-      {/* Sits below the failure banner: a destructive schema rebuild
-          empties the tree, so the user has to be told why. */}
-      <Suspense fallback={null}>
-        <DbRecreatedBanner />
       </Suspense>
       <main className="flex min-h-0 flex-1">
         <ProjectTree />

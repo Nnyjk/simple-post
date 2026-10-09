@@ -32,7 +32,6 @@
 //! drift between REST, Tauri command, and SQLite test paths.
 
 mod base_url_defs;
-mod db_status;
 mod dto;
 mod environments;
 mod mcp_auto_start;
@@ -53,7 +52,6 @@ mod send;
 // creates. A glob carries those macros up to `commands`; an item list would
 // leave them behind in the submodule and E0433 would follow.
 pub use base_url_defs::*;
-pub use db_status::*;
 pub use dto::*;
 pub use environments::*;
 pub use mcp_auto_start::*;

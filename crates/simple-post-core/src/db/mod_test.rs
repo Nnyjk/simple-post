@@ -185,20 +185,7 @@ fn schema_version_matches_the_constant() {
 }
 
 #[test]
-fn fresh_install_is_stamped_and_not_flagged() {
-    let (pool, _dir) = fresh_empty_pool();
-    let flagged: Option<i64> = with_conn(&pool, |c| {
-        preferences::get(c, preferences::keys::DB_RECREATED_AT)
-    })
-    .unwrap();
-    assert!(
-        flagged.is_none(),
-        "a first install has nothing to recover from and must not show a reset notice"
-    );
-}
-
-#[test]
-fn init_rebuilds_a_legacy_store_and_records_it() {
+fn init_rebuilds_a_legacy_store() {
     let dir = temp_dir("legacy");
     plant_legacy_store(&dir, 0);
 
@@ -225,16 +212,6 @@ fn init_rebuilds_a_legacy_store_and_records_it() {
     assert_eq!(
         still_there, 0,
         "rebuild must replace the file, not just clear its rows"
-    );
-
-    let flagged: Option<i64> = with_conn(&pool, |c| {
-        preferences::get(c, preferences::keys::DB_RECREATED_AT)
-    })
-    .unwrap();
-    assert!(
-        flagged.is_some(),
-        "a rebuild must leave a trace, otherwise the empty tree reads as \
-         'you never had any projects' instead of 'we deleted them'"
     );
 
     let v: i64 = with_conn(&pool, |c| {
@@ -265,12 +242,6 @@ fn init_keeps_a_current_store_intact() {
     })
     .unwrap();
     assert_eq!(projects, 3, "a current store survives re-init intact");
-
-    let flagged: Option<i64> = with_conn(&pool, |c| {
-        preferences::get(c, preferences::keys::DB_RECREATED_AT)
-    })
-    .unwrap();
-    assert!(flagged.is_none(), "re-init is not a rebuild");
 }
 
 #[test]

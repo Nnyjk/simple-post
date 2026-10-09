@@ -99,10 +99,10 @@ pub const SCHEMA_VERSION: i64 = 3;
 /// The directory is created if it doesn't exist.
 ///
 /// A file written by an older layout is **replaced, not upgraded** —
-/// see [`ensure_current_schema`]. When that happens the rebuild is
-/// recorded under `preferences["db.recreated_at"]` so the UI can tell
-/// the user their previous data is gone instead of silently rendering
-/// an empty tree.
+/// see [`ensure_current_schema`]. That is logged rather than recorded:
+/// the app has no migration path, and a rebuild is a developer's
+/// experience on a pre-release schema, not something to interrupt the
+/// user about on every launch.
 pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir.join("store.db");
@@ -146,13 +146,6 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     ping(&pool)?;
 
     if rebuilt {
-        with_tx(&pool, |c| {
-            preferences::set(
-                c,
-                preferences::keys::DB_RECREATED_AT,
-                &crate::domain::now_ms(),
-            )
-        })?;
         tracing::warn!(
             "database schema v{SCHEMA_VERSION}: replaced an older store.db at {} — \
              its contents are gone",
