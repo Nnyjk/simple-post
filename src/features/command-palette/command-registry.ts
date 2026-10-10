@@ -181,32 +181,28 @@ export function buildCommands(): Command[] {
 
   // ---------- 命令：新建接口 ----------
   {
+    // Creating an endpoint asks nothing, so the palette needs a parent
+    // and then just fires the action. The first collection of the project
+    // is the natural home; a project with no collection yet falls back to
+    // its first module, which is a legal parent in its own right.
     const firstCol = s.nodes.find((n) => n.kind === 'collection' && n.rootId === s.activeProjectId);
     const firstMod = firstCol
       ? s.nodes.find((n) => n.id === firstCol.parentId)
       : s.nodes.find((n) => n.kind === 'module' && n.rootId === s.activeProjectId);
+    const parent = firstCol ?? (firstMod?.kind === 'module' ? firstMod : undefined);
     cmds.push({
       id: 'cmd:new-endpoint',
-      title: firstCol ? '新建接口' : '新建接口（需先有集合）',
+      title: parent ? '新建接口' : '新建接口（需先有模块）',
       hint: 'New endpoint',
       section: '命令',
       keywords: ['new', 'create', 'add', 'endpoint', '接口', 'request', '新建'],
-      run: () =>
-        useAppStore.getState().openNewItem(
-          firstCol
-            ? {
-                type: 'endpoint',
-                parentCollectionId: firstCol.id,
-                // The owning module, named so the modal can offer it as
-                // the parent when the user re-picks. A nested
-                // collection's direct parent may be another collection,
-                // so this is only a hint, never a write target.
-                parentModuleId: firstCol.parentId ?? '',
-              }
-            : firstMod
-              ? { type: 'endpoint', parentModuleId: firstMod.id }
-              : { type: 'endpoint' },
-        ),
+      run: () => {
+        if (!parent) return;
+        // No rename target here (the palette has no tree row), but the
+        // endpoint's title in the workspace is editable, and it opens its
+        // own tab ready to use.
+        void useAppStore.getState().createEndpointAt(parent.id);
+      },
     });
   }
 

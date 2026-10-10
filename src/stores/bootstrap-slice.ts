@@ -92,7 +92,8 @@ export interface BootstrapSliceActions {
   // actions: data — selection / expansion
   setActiveProject: (id: string) => void;
   /**
-   * *Enter* a project: select it **and** make its tab the active one.
+   * *Enter* a project: select it **and** swap the tab strip to that
+   * project's own set.
    *
    * This is the single entry point for "the user is now working in
    * project X", and every surface that lands on a project goes through
@@ -101,11 +102,16 @@ export interface BootstrapSliceActions {
    * one action is what keeps those paths converging on the same state
    * instead of drifting into "tree shows X, right pane still shows Y".
    *
+   * The strip swap is the point of the ownership change: leaving project
+   * A for project B sets A's tabs aside in `projectTabs` and brings up
+   * B's, so an endpoint tab from one project can never be sitting on
+   * screen while the user works in the other. Coming back restores them,
+   * unsaved edits included — see {@link ProjectTabSet}.
+   *
    * Distinct from `setActiveProject`, which is a pure selection setter:
    * the palette's "jump to an endpoint in another project" needs to
-   * change the owner without inserting a project tab the user did not
-   * ask for, because the endpoint tab it opens immediately after is
-   * what they want to see.
+   * change the owner without swapping the strip, because it opens the
+   * endpoint tab immediately after and that is what they want to see.
    */
   openProject: (id: string) => void;
   /**
@@ -264,13 +270,34 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // land on `nodesLoaded === false` (the tree shows a loading state
       // rather than a wrong "no modules" empty state).
       void get().loadWorkspace();
+      // Swap the strip BEFORE the active project changes. Deciding what
+      // to set aside means asking which project owns each tab on screen,
+      // and that answer is only meaningful against the project currently
+      // in front — after `setActiveProject` there would be no "currently
+      // in front" left to attribute them to.
+      //
+      // This also replaces the old `openTab('project', id)`: the switch
+      // guarantees the incoming project owns a project tab, and decides
+      // whether the user lands on it or on whatever they had open here
+      // last time.
+      get().switchProjectTabs(id);
       get().setActiveProject(id);
-      get().openTab('project', id);
+      // The endpoint the tester was showing belongs to the project being
+      // left. Left in place, `useActiveEndpoint` would answer with an
+      // endpoint the new tree does not contain, and so would the last
+      // response — both of which describe somewhere the user no longer is.
+      set({ activeEndpointId: null });
+      get().setLastResponse(null);
     },
     leaveProject: () => {
       // No-op when nothing is entered, so a stray click on the title while
       // already on the welcome screen cannot disturb state.
       if (get().activeProjectId === '') return;
+      // Same swap as `openProject`, in the other direction, and for the
+      // same ordering reason: stash while the project is still the one in
+      // front. Getting this after the `set` below would attribute every
+      // open tab to nobody and lose the strip.
+      get().switchProjectTabs('');
       set({ activeProjectId: '', activeEnvironmentId: '', activeEndpointId: null });
     },
     setActiveEndpoint: (id) => {

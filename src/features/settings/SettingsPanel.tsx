@@ -7,6 +7,15 @@
  * so this component is just the body — no drawer chrome, no header,
  * no X-to-close (use the tab's X).
  *
+ * MOUNTED TWICE, ONE IMPLEMENTATION
+ * ---------------------------------
+ * The workspace renders it inside the tab strip, and the project-less
+ * `SettingsSurface` renders the very same component full-window for the
+ * welcome screen. That is safe because everything below reads from the
+ * store instead of taking props: the rail selection, the section data,
+ * even which project's environments are in scope. The two hosts differ
+ * only in the chrome around this body. See `SettingsSurface.tsx`.
+ *
  * The right pane opens with a slim breadcrumb + section title so the
  * user always has a "where am I" cue without us repeating the rail label
  * twice on the same screen. Each sub-section renders its own header via
@@ -24,6 +33,7 @@ import { RequestSection } from './sections/RequestSection';
 import { cn } from '@/lib/utils';
 import type { HueConcept } from '@/lib/hue';
 import { IconTile } from '@/components/ui/icon-tile';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import { gsap, useGSAP } from '@/lib/gsap';
 
 const CATEGORY_IDS: readonly SettingsCategoryId[] = ['env', 'connection', 'appearance', 'request'];
@@ -228,6 +238,22 @@ export function SettingsPanel() {
         {CATEGORY_IDS.map((id) => {
           if (id !== activeSection) return null;
           if (id === 'env') {
+            // Environments belong to a project, and this panel is also
+            // mounted on the project-less surface (`SettingsSurface.tsx`
+            // — reachable from the welcome screen). Without this guard the
+            // section rendered an empty env list *with* a working-looking
+            // "新建环境" button whose write went to `projectId === ''` and
+            // silently failed. Say what is missing instead of offering a
+            // control that cannot succeed.
+            if (activeProjectId === '') {
+              return (
+                <div key={activeSection} data-settings-section className="px-12 pb-4">
+                  <EmptyHint className="px-3 py-10 text-xs">
+                    环境变量属于项目。请先在欢迎页选择一个项目，再回到这里管理它的环境与前置 URL。
+                  </EmptyHint>
+                </div>
+              );
+            }
             return (
               <div key={activeSection} data-settings-section>
                 <EnvironmentSection

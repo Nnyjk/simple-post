@@ -1,11 +1,11 @@
 // =========================================================================
-// Public HTTP API contract (commit 2: chore(docs): HTTP API 公开契约)
+// Public HTTP API contract
 // =========================================================================
 //
 // `RouteSpec` is the single source of truth for which `/api/*` routes
 // are part of the stable contract. `scripts/dump-openapi.mjs` reads this
 // list (plus the corresponding `WEB_ROUTES` entries in
-// `src/lib/tauri-commands.ts`) to generate `docs/openapi.yaml`. Anything
+// `src/lib/tauri-commands.ts`) to generate an OpenAPI document. Anything
 // NOT in `public_route_specs()` is treated as `internal` — not part of
 // the stable v1 contract, no backward-compat promise.
 //
@@ -174,9 +174,9 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/nodes/:id/duplicate",
-            summary: "Copy an endpoint (endpoints only)",
+            summary: "Copy an endpoint (endpoints only); an optional newId names the copy",
             stability: "public",
-            request: None,
+            request: Some("NodeDuplicate"),
             response: Some("ResourceNode"),
         },
         RouteSpec {
@@ -248,6 +248,54 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             request: Some("CreateEnvironment"),
             response: Some("Environment"),
         },
+        RouteSpec {
+            method: "PATCH",
+            path: "/api/environments/:envId",
+            summary: "Update an environment (null clears a field)",
+            stability: "public",
+            request: Some("EnvironmentPatch"),
+            response: Some("Environment"),
+        },
+        RouteSpec {
+            method: "DELETE",
+            path: "/api/environments/:envId",
+            summary: "Delete an environment",
+            stability: "public",
+            request: None,
+            response: Some("DeleteAck"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/environments/active",
+            summary: "Set the active environment for a project",
+            stability: "public",
+            request: Some("SetActiveEnv"),
+            response: Some("Environment"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/environments/:envId/vars",
+            summary: "Set one environment variable (null deletes it)",
+            stability: "public",
+            request: Some("EnvSetVar"),
+            response: Some("Environment"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/environments/:envId/vars/rename",
+            summary: "Rename an environment variable in one step",
+            stability: "public",
+            request: Some("EnvRenameVar"),
+            response: Some("Environment"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/environments/:envId/baseurls",
+            summary: "Set one base URL slot (null deletes it)",
+            stability: "public",
+            request: Some("EnvSetBaseUrl"),
+            response: Some("Environment"),
+        },
         // ---- http send --------------------------------------------------
         RouteSpec {
             method: "POST",
@@ -268,8 +316,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         //   POST /api/mcp/stop               - daemon stop
         //   POST /api/mcp/restart            - daemon restart
         //   GET  /api/mcp/proxy-path         - mcp_proxy binary path
-        //   GET  /api/mcp/capability         - capability policy (commit 1)
-        //   PUT  /api/mcp/capability         - capability policy (commit 1)
+        //   GET  /api/mcp/capability         - capability policy
+        //   PUT  /api/mcp/capability         - capability policy
         //   GET  /api/mcp/capability/tools   - visible tools under current policy
         //   GET  /api/preferences            - raw preferences dump (UI)
         //   PUT  /api/preferences            - raw preferences patch

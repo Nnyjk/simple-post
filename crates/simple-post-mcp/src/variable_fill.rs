@@ -227,7 +227,10 @@ pub enum BaseUrlSource {
 /// declares the definitions and the default.
 ///
 /// Precedence (highest first):
-///   1. `endpoint.baseUrl_override`  — per-endpoint custom host
+///   1. `endpoint.baseUrl_override`  — per-endpoint custom mode. `None`
+///      falls through to the definition chain; `Some(host)` pins that
+///      host; `Some("")` means "no prefix at all" — the endpoint is in
+///      自定义 mode and the URL field already holds the whole address.
 ///   2. `detail.base_url_definition_id` — the def the endpoint
 ///      points at (must exist in `project.base_url_definitions`);
 ///      URL is then `env.base_urls[def_id]`.
@@ -251,18 +254,22 @@ pub fn resolve_base_url(
 ///
 /// `forced_def_id` takes precedence over `detail.base_url_definition_id`
 /// but still yields to `detail.base_url_override`, which is a per-endpoint
-/// hard host and was always the strongest signal. `Some("")` means "no base
-/// URL" — the renderer sends that when the user cleared the picker.
+/// host (or the explicit "no prefix" choice) and was always the strongest
+/// signal. `Some("")` means "no base URL" — the renderer sends that when
+/// the user cleared the picker.
 pub fn resolve_base_url_with(
     detail: &EndpointDetail,
     env: Option<&Environment>,
     project: &Project,
     forced_def_id: Option<&str>,
 ) -> (String, BaseUrlSource, Option<String>) {
+    // `Some("")` is a deliberate choice, not an absent value: the endpoint
+    // is in 自定义 mode and the URL field carries the whole address, so
+    // prepending the environment's base URL would corrupt it. Mirrors
+    // `resolveEndpointBaseUrl` in src/lib/url.ts — the two must agree or the
+    // preview (frontend) and the request (backend) disagree about the URL.
     if let Some(ovr) = detail.base_url_override.as_deref() {
-        if !ovr.is_empty() {
-            return (ovr.to_string(), BaseUrlSource::Override, None);
-        }
+        return (ovr.to_string(), BaseUrlSource::Override, None);
     }
     let forced = forced_def_id.map(|s| s.to_string());
     if matches!(forced.as_deref(), Some("")) {

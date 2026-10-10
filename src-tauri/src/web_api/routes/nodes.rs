@@ -18,6 +18,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::db;
@@ -169,21 +170,27 @@ pub(crate) async fn nodes_create(
     let parsed: NodeCreateBody = serde_json::from_value(body)
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
 
-    let mut node = parsed.node;
-    if node.root_id.is_empty() {
-        // A collection's owner is implied by its parent. Deriving it
-        // here means a caller only has to name the parent, and the
-        // two can never disagree.
+    let node = parsed.node;
+    // A child node's owner is implied by its parent. Deriving it here
+    // means a caller only has to name the parent, and the two can never
+    // disagree — the same rule and the same reason as the Tauri
+    // command's empty-`root_id` branch.
+    let mut root_id = node.root_id.clone().unwrap_or_default();
+    if root_id.is_empty() {
         if let Some(parent) = &node.parent_id {
-            node.root_id = db::with_conn(&s.pool, |c| db::nodes::root_id_of(c, parent))
+            root_id = db::with_conn(&s.pool, |c| db::nodes::root_id_of(c, parent))
                 .map_err(map_app_error)?;
         }
     }
+    let node = node.into_node(&root_id);
 
-    let created = db::with_tx(&s.pool, |c| {
-        db::nodes::create(c, &node, parsed.detail.as_ref())
-    })
-    .map_err(map_app_error)?;
+    // Expand the optional detail block here rather than at the DTO, so a
+    // half-filled endpoint ("new request" sends just a url) defaults the
+    // same way the Tauri command defaults it.
+    let detail = parsed.detail.map(|d| d.into_detail(&node.id));
+
+    let created = db::with_tx(&s.pool, |c| db::nodes::create(c, &node, detail.as_ref()))
+        .map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
         Json(serde_json::to_value(&created).unwrap_or(Value::Null)),
@@ -281,6 +288,26 @@ pub(crate) async fn node_endpoint_detail_patch(
     Ok(Json(serde_json::to_value(&d).unwrap_or(Value::Null)))
 }
 
+/// Body for `POST /api/nodes/:id/duplicate`.
+///
+/// Optional in its entirety — the whole point of the body is the id, and
+/// a caller that has no local copy to stay consistent with (a script,
+/// curl) can omit it and let the server mint one. Defined here rather
+/// than in `dto.rs` so the route's whole contract sits next to the
+/// handler that enforces it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NodeDuplicateBody {
+    /// The id to write the copy under, honoured verbatim.
+    ///
+    /// `#[serde(default)]` rather than a bare `Option<String>` because
+    /// the browser sends `null` when it has no id to offer: "absent" and
+    /// "explicitly null" both mean *mint one here*, and the SPA sending
+    /// null must not turn into a 400.
+    #[serde(default)]
+    pub new_id: Option<String>,
+}
+
 /// `POST /api/nodes/:id/duplicate` — endpoints only.
 ///
 /// Delegates to `db::nodes::duplicate`, which copies the node and its
@@ -290,8 +317,14 @@ pub(crate) async fn node_endpoint_detail_patch(
 pub(crate) async fn node_duplicate(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
+    // `Option<Json<_>>`, not `Json<_>`: the body is genuinely optional,
+    // and a required extractor would 400 every caller written before the
+    // SPA started sending an id.
+    body: Option<Json<NodeDuplicateBody>>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
-    let created = db::with_tx(&s.pool, |c| db::nodes::duplicate(c, &id)).map_err(map_app_error)?;
+    let new_id = body.and_then(|Json(b)| b.new_id);
+    let created = db::with_tx(&s.pool, |c| db::nodes::duplicate(c, &id, new_id.as_deref()))
+        .map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
         Json(serde_json::to_value(&created).unwrap_or(Value::Null)),

@@ -1,13 +1,12 @@
-import { useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Tooltip } from '@/components/ui/tooltip';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import type { EditTarget, TargetKind } from './tree-types';
-import { buildTree, countModuleEndpoints, countSubtreeCollections, filterTree } from './tree-utils';
+import { buildTree, countModuleEndpoints, filterTree } from './tree-utils';
 import { useTreeDnd } from './hooks/useTreeDnd';
 import { useEditMenu } from './hooks/useEditMenu';
 import { useInlineMenus } from './hooks/useInlineMenus';
@@ -17,6 +16,22 @@ import { ModuleRow } from './rows/ModuleRow';
 import { TreeChildren } from './rows/TreeChildren';
 import { EndpointList } from './rows/EndpointList';
 import { CollectionBranch } from './rows/CollectionBranch';
+
+// The create dialogs for the two kinds that live in a project. Both are
+// `lazy()` *and* mounted on the store's open flag: a `lazy()` component
+// fires its import the moment it is rendered, so an unconditional mount
+// would pull the dialog primitive (and, through the collection dialog's
+// select, GSAP) into the workspace chunk at project-open time instead of
+// on the click that needs it. An endpoint has no dialog — see
+// `useNewItemFlow::createEndpoint`.
+const CreateModuleDialog = lazy(() =>
+  import('@/features/create/CreateModuleDialog').then((m) => ({ default: m.CreateModuleDialog })),
+);
+const CreateCollectionDialog = lazy(() =>
+  import('@/features/create/CreateCollectionDialog').then((m) => ({
+    default: m.CreateCollectionDialog,
+  })),
+);
 
 const kindLabel: Record<TargetKind, string> = {
   project: '项目',
@@ -78,12 +93,19 @@ export function ProjectTree() {
   } = useTreeSelection();
 
   // ---------- new-item flow ----------
-  const { openNewItemWithIntent, handleWorkspaceNew } = useNewItemFlow(setEditing);
+  const { openNewItemWithIntent, createEndpoint } = useNewItemFlow(setEditing);
+
+  // Gating the two dialog mounts on the draft's kind keeps each chunk
+  // tied to the entry point that needs it: opening the *project* dialog
+  // from the top bar must not fetch the module dialog.
+  const newItemOpen = useAppStore((s) => s.newItem.open);
+  const newItemType = useAppStore((s) => s.newItem.type);
 
   // ---------- inline "+" menus ----------
   const { openModulePlusMenu, openCollectionPlusMenu } = useInlineMenus({
     nodes: projectNodes,
     openNewItemWithIntent,
+    createEndpointAt: createEndpoint,
     setMenu,
   });
 
@@ -92,6 +114,7 @@ export function ProjectTree() {
     useEditMenu({
       setEditing,
       openNewItemWithIntent,
+      createEndpointAt: createEndpoint,
       openEndpointTab,
       setMenu,
     });
@@ -119,8 +142,17 @@ export function ProjectTree() {
       {/* Header — the project is named here rather than rendered as a row.
           The project is *not* a node in this tree (it is entered from
           the welcome picker or the top-bar selector), so the panel still
-          needs to say which project's modules it is listing. */}
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-card/40 px-3">
+          needs to say which project's modules it is listing.
+
+          There is deliberately no "+" next to this title. The header
+          used to open a menu offering 项目 / 模块 / 集合 / 接口, but the
+          only thing creatable from inside a project is a module — the
+          other two need a parent, and a project is not this tree's
+          business. The list below owns that one action ("新建模块"), so
+          the button was a second path to a single option that also
+          offered three that cannot work here. Projects are created from
+          the welcome screen's 新建项目 card or the top-bar selector. */}
+      <div className="flex h-9 shrink-0 items-center border-b border-border bg-card/40 px-3">
         {activeProject ? (
           <span className="flex min-w-0 items-center gap-1.5">
             <span
@@ -134,18 +166,6 @@ export function ProjectTree() {
         ) : (
           <span className="label-caps">工作区</span>
         )}
-        <Tooltip content="新建（项目 / 模块 / 集合 / 接口）" side="bottom">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={handleWorkspaceNew}
-            aria-label="新建"
-            data-testid="tree-new-btn"
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </Tooltip>
       </div>
 
       {/* Search */}
@@ -203,10 +223,11 @@ export function ProjectTree() {
                 because a module *is* a top-level node here — the same
                 position the project row used to occupy.
 
-                Hidden while a filter is active: a module created under
+                This is now the ONLY way to add a module from inside a
+                project: the header's "+" is gone (see the header note).
+                Hidden while a filter is active — a module created under
                 a query would not match it, so the control would appear
-                to do nothing. The header "+" still reaches the same
-                modal. */}
+                to do nothing. */}
             {!query.trim() && (
               <button
                 type="button"
@@ -318,19 +339,6 @@ export function ProjectTree() {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground">
-        {tree.length} 个模块 ·{' '}
-        {tree.reduce(
-          (a, m) => a + m.collections.reduce((b, c) => b + 1 + countSubtreeCollections(c), 0),
-          0,
-        )}{' '}
-        个集合 · {tree.reduce((a, m) => a + countModuleEndpoints(m), 0)} 个接口
-        {selectedEndpointIds.size > 1 && (
-          <span className="ml-1 text-primary">· 已选 {selectedEndpointIds.size} 个接口</span>
-        )}
-      </div>
-
       {/* ---- Overlays ---- */}
       {menu && (
         <TreeContextMenu
@@ -357,6 +365,20 @@ export function ProjectTree() {
           confirmLabel="删除"
           onConfirm={handleDeleteConfirm}
         />
+      )}
+
+      {/* ---- Create dialogs, one per kind ----
+          Each is mounted only while its own draft is open, so the two
+          never coexist and each chunk loads on the click that needs it. */}
+      {newItemOpen && newItemType === 'module' && (
+        <Suspense fallback={null}>
+          <CreateModuleDialog />
+        </Suspense>
+      )}
+      {newItemOpen && newItemType === 'collection' && (
+        <Suspense fallback={null}>
+          <CreateCollectionDialog />
+        </Suspense>
       )}
     </aside>
   );

@@ -170,12 +170,74 @@ pub struct BaseUrlDefSetDefaultBody {
 #[derive(Debug, Deserialize)]
 pub struct NodeCreateBody {
     #[serde(flatten)]
-    pub node: crate::domain::ResourceNode,
+    pub node: NodeCreateNodeBody,
     /// Present for an endpoint, absent otherwise. A mismatch — either
     /// way round — is rejected by `db::nodes`, not here, so the rule
     /// lives in one place.
+    ///
+    /// `CreateEndpointDetailOpts`, not `EndpointDetail`: every field in
+    /// it is optional because an endpoint born from the tree's "new
+    /// request" action carries only what the user has typed so far — the
+    /// Tauri command has always accepted that shape (see the type's own
+    /// doc comment), and deserialising straight into `EndpointDetail`
+    /// here instead made `method` — which has no default — a required
+    /// field on the REST transport only. The same click therefore created
+    /// an endpoint in the desktop app and returned 400 over `serve-web`.
+    /// Reusing the command's type is what keeps the two transports from
+    /// drifting apart again.
     #[serde(default)]
-    pub detail: Option<crate::domain::EndpointDetail>,
+    pub detail: Option<crate::commands::CreateEndpointDetailOpts>,
+}
+
+/// The structural half of a `POST /api/nodes` body.
+///
+/// Not `ResourceNode`. That is the *stored* row, where `rootId` is always
+/// present because the database guarantees it — but a create call has no
+/// reason to know the owning project when it names a parent, and the
+/// renderer sends `rootId: null` to say exactly that. Deserialising the
+/// stored shape made "let the server work it out" the one thing a client
+/// could not express (`400 invalid type: null, expected a string`) on
+/// this transport alone; `root_id: Option<String>` here is the same
+/// contract as the Tauri command's argument of that name.
+///
+/// `id` is required because `ensure_server_id` fills it before this is
+/// parsed, and the timestamps are absent because the server stamps them.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeCreateNodeBody {
+    pub id: String,
+    /// `None` / empty means "derive it from `parentId`".
+    #[serde(default)]
+    pub root_id: Option<String>,
+    /// `None` for a module, whose parent is the project.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub kind: crate::domain::ResourceNodeType,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub sort_order: Option<i64>,
+}
+
+impl NodeCreateNodeBody {
+    /// The row `db::nodes::create` will write. `root_id` is threaded in
+    /// rather than read from the body so a caller cannot pass a node and
+    /// a project that disagree about who owns it.
+    pub(crate) fn into_node(self, root_id: &str) -> crate::domain::ResourceNode {
+        let now = crate::domain::now_ms();
+        crate::domain::ResourceNode {
+            id: self.id,
+            root_id: root_id.to_string(),
+            parent_id: self.parent_id,
+            kind: self.kind,
+            name: self.name,
+            description: self.description,
+            sort_order: self.sort_order.unwrap_or_default(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
 }
 
 /// Body for `POST /api/nodes/move`.
@@ -195,3 +257,7 @@ pub struct NodeMoveBody {
     pub parent_id: Option<String>,
     pub index: i32,
 }
+
+#[cfg(test)]
+#[path = "dto_test.rs"]
+mod tests;

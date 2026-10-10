@@ -1,10 +1,22 @@
 /**
- * Shared builder for "what we'd send" — used by the real fetch
- * sender (`src/lib/http.ts`) and by the cURL exporter
- * (`src/features/http-tester/curl.ts`). Keeping both surfaces on a
- * single implementation prevents them from drifting apart: a header
- * that fetch sends but cURL omits (or vice versa) is exactly the
- * debugging surprise we want to avoid.
+ * Shared builder for "what we'd send" — the single construction core for
+ * every surface that has to agree on the wire shape: the real sender
+ * (`src/lib/http.ts`) and the copy-as-cURL preview.
+ *
+ * The layering is deliberate and one-directional:
+ *
+ *   prepareRequest()   → the one place a request is turned into a
+ *                        URL + ordered headers + body (+ unresolved
+ *                        variables). Nothing else assembles one.
+ *   buildFetchInit()   → adapter over prepareRequest for `fetch`
+ *   buildCurlCommand() → adapter over prepareRequest for a shell line
+ *
+ * That inversion is the point. The cURL preview used to be a hand-kept
+ * "mirror" of what the backend sent; two implementations of the same
+ * rules drift, and the user sees it as "copy as cURL" producing a
+ * request that is not the one they just sent. Deriving both from one
+ * result makes that class of bug unrepresentable rather than merely
+ * unlikely — preview and execution are now literally the same product.
  *
  * Pure functions, no I/O. The browser's native `fetch` handles I/O;
  * this module only turns the user-editable request shape into the
@@ -18,13 +30,19 @@ import type {
   KeyValue,
   RequestBody,
 } from '@/types/domain';
-import { resolveVars } from './url';
+import { joinBaseUrl, resolveVarsWithMissing } from './url';
 
 /**
  * The inputs that affect the *wire shape* of a request. Settings
  * (timeout / redirects / size cap) and the caller's `AbortSignal`
  * intentionally live elsewhere — they only matter at execution time,
  * not at build time.
+ *
+ * `url` is the **whole** URL: there is no base-URL slot, so every
+ * caller has to join one first. Use [`prepareRequest`] when a base URL
+ * and a URL path are the natural inputs; this shape stays as the
+ * compatibility surface for the existing fetch/cURL adapters, which
+ * treat it as `baseUrl: ''`.
  */
 export interface BuildInput {
   method: HttpMethod;
@@ -52,7 +70,94 @@ export interface BuiltFetch {
   bodyForLog: string;
 }
 
+// ---------------------------------------------------------------------------
+// prepareRequest — the one construction core
+// ---------------------------------------------------------------------------
+
+export interface PrepareRequestInput {
+  method: HttpMethod;
+  /**
+   * URL **path** part, without any base URL. May carry `{{var}}`.
+   * A path that already has its own scheme (`https://…`) wins over
+   * `baseUrl`, which is what makes the endpoint's 自定义 mode work: the
+   * user types the whole address and the picker still has a value
+   * selected.
+   */
+  urlPath: string;
+  /** Resolved base URL. Empty string means "no base URL". */
+  baseUrl: string;
+  params: KeyValue[];
+  headers: KeyValue[];
+  body: RequestBody;
+  auth: AuthConfig;
+  env?: Environment;
+}
+
+export interface PreparedRequest {
+  method: HttpMethod;
+  /**
+   * The complete URL: `join(baseUrl, urlPath)` → `{{var}}` resolution →
+   * query params → apikey-in-query, in that order. Joining *before*
+   * resolving means a `{{var}}` inside the environment's own base URL is
+   * resolved too, matching `resolve_endpoint`'s order in Rust.
+   */
+  url: string;
+  /**
+   * Ordered header tuples. A list, not a `Record`, because HTTP allows
+   * a repeated header name and `Record` would silently collapse them —
+   * the wire shape has to survive to the backend, which takes
+   * `Vec<(String, String)>`.
+   */
+  headers: Array<[string, string]>;
+  /**
+   * Body content, or `null` when `mode === 'none'` or the content is
+   * empty. Sent verbatim: the body is **not** `{{var}}`-templated (an
+   * existing test pins that), so `{{x}}` inside a JSON payload goes out
+   * literally. `missingVars` still reports those markers, because a
+   * request that is going to ship an unresolved `{{x}}` is exactly what
+   * the user needs warning about.
+   */
+  body: string | null;
+  /**
+   * Every `{{name}}` left unresolved anywhere in URL / headers / body /
+   * auth, deduped and in first-occurrence order. The set is aligned
+   * with `resolve_endpoint`'s `missing_vars` in Rust; the *order* is
+   * renderer-local (URL, headers, body, auth) because nothing consumes
+   * it but this app's own warning UI.
+   */
+  missingVars: string[];
+}
+
 // ---- internal helpers ----
+
+/**
+ * Accumulates unresolved `{{name}}` markers across every field a request
+ * touches, deduping by first occurrence. A `Set` for membership plus an
+ * array for order: `Set` alone would give the same set but an order that
+ * depends on insertion internals, and the order is what makes the
+ * "these variables are missing" hint stable while the user types.
+ */
+interface MissingTracker {
+  add(names: readonly string[]): void;
+  list(): string[];
+}
+
+function createMissingTracker(): MissingTracker {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  return {
+    add(chunk) {
+      for (const n of chunk) {
+        if (seen.has(n)) continue;
+        seen.add(n);
+        names.push(n);
+      }
+    },
+    // Copy: `PreparedRequest` is a value object handed to callers, so it
+    // must not hand out the array we keep appending to.
+    list: () => names.slice(),
+  };
+}
 
 /** Append enabled, non-empty params as a `?k=v&...` query string. */
 function appendQueryString(url: string, params: readonly KeyValue[]): string {
@@ -66,37 +171,44 @@ function appendQueryString(url: string, params: readonly KeyValue[]): string {
   return `${url}${url.includes('?') ? '&' : '?'}${parts.join('&')}`;
 }
 
-/** Resolve `{{var}}` placeholders against the active env. */
-function resolveTemplate(input: string, env: Environment | undefined): string {
-  return resolveVars(input, env);
-}
-
 /**
  * Resolve all `{{var}}` placeholders inside an auth config against the
- * env. The returned config is a new object so the caller's input is
- * never mutated.
+ * env, recording any that stayed unresolved. The returned config is a
+ * new object so the caller's input is never mutated — the auth config
+ * lives in the Zustand store and a send must not write to it.
+ *
+ * Only the fields that end up on the wire are scanned, and only for the
+ * selected `kind`: a stale `bearer` string left on a Basic config is not
+ * part of this request and reporting its variables would be noise.
  */
-function resolveAuth(auth: AuthConfig, env: Environment | undefined): AuthConfig {
+function resolveAuth(
+  auth: AuthConfig,
+  env: Environment | undefined,
+  missing: MissingTracker,
+): AuthConfig {
   if (auth.kind === 'bearer') {
-    return { ...auth, bearer: resolveTemplate(auth.bearer ?? '', env) };
+    const r = resolveVarsWithMissing(auth.bearer ?? '', env);
+    missing.add(r.missing);
+    return { ...auth, bearer: r.value };
   }
   if (auth.kind === 'basic' && auth.basic) {
+    const u = resolveVarsWithMissing(auth.basic.username, env);
+    const p = resolveVarsWithMissing(auth.basic.password, env);
+    missing.add(u.missing);
+    missing.add(p.missing);
     return {
       ...auth,
-      basic: {
-        username: resolveTemplate(auth.basic.username, env),
-        password: resolveTemplate(auth.basic.password, env),
-      },
+      basic: { username: u.value, password: p.value },
     };
   }
   if (auth.kind === 'apikey' && auth.apikey) {
+    const k = resolveVarsWithMissing(auth.apikey.key, env);
+    const v = resolveVarsWithMissing(auth.apikey.value, env);
+    missing.add(k.missing);
+    missing.add(v.missing);
     return {
       ...auth,
-      apikey: {
-        ...auth.apikey,
-        key: resolveTemplate(auth.apikey.key, env),
-        value: resolveTemplate(auth.apikey.value, env),
-      },
+      apikey: { ...auth.apikey, key: k.value, value: v.value },
     };
   }
   return auth;
@@ -116,11 +228,6 @@ function autoContentType(mode: BodyMode): string | null {
   }
 }
 
-interface OrderedHeader {
-  key: string;
-  value: string;
-}
-
 /**
  * Build the ordered header list: user headers first, then the auto
  * `Content-Type` (if missing) and `Accept`, then any auth-derived
@@ -130,25 +237,33 @@ interface OrderedHeader {
  * `apikey.inLocation === 'query'` is NOT emitted as a header — the caller
  * appends it to the URL via `appendApikeyToQuery`.
  */
-function buildOrderedHeaders(input: BuildInput, auth: AuthConfig): OrderedHeader[] {
-  const out: OrderedHeader[] = [];
-  for (const h of input.headers) {
+function buildOrderedHeaders(
+  headers: readonly KeyValue[],
+  bodyMode: BodyMode,
+  auth: AuthConfig,
+  env: Environment | undefined,
+  missing: MissingTracker,
+): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const h of headers) {
     if (!h.enabled || !h.key) continue;
-    out.push({ key: h.key, value: resolveTemplate(h.value, input.env) });
+    const r = resolveVarsWithMissing(h.value, env);
+    missing.add(r.missing);
+    out.push([h.key, r.value]);
   }
 
   // Auto Content-Type based on body.mode. Per spec, only added when
   // the user hasn't already set one (case-insensitive). We add it
   // whenever the mode implies a body — content emptiness is handled
   // separately by `init.body` assignment.
-  const ct = autoContentType(input.body.mode);
-  if (ct && !out.some((h) => h.key.toLowerCase() === 'content-type')) {
-    out.push({ key: 'Content-Type', value: ct });
+  const ct = autoContentType(bodyMode);
+  if (ct && !out.some(([k]) => k.toLowerCase() === 'content-type')) {
+    out.push(['Content-Type', ct]);
   }
 
   // Default Accept so the server knows we'd parse JSON cleanly.
-  if (!out.some((h) => h.key.toLowerCase() === 'accept')) {
-    out.push({ key: 'Accept', value: 'application/json' });
+  if (!out.some(([k]) => k.toLowerCase() === 'accept')) {
+    out.push(['Accept', 'application/json']);
   }
 
   // Auth-derived header. Skip when the user already has the same
@@ -157,17 +272,17 @@ function buildOrderedHeaders(input: BuildInput, auth: AuthConfig): OrderedHeader
   // `-H 'Authorization: …'` lines, the second of which the server
   // would see as a header-list, not an override.
   if (auth.kind === 'bearer' && auth.bearer) {
-    if (!out.some((h) => h.key.toLowerCase() === 'authorization')) {
-      out.push({ key: 'Authorization', value: `Bearer ${auth.bearer}` });
+    if (!out.some(([k]) => k.toLowerCase() === 'authorization')) {
+      out.push(['Authorization', `Bearer ${auth.bearer}`]);
     }
   } else if (auth.kind === 'basic' && auth.basic) {
-    if (!out.some((h) => h.key.toLowerCase() === 'authorization')) {
+    if (!out.some(([k]) => k.toLowerCase() === 'authorization')) {
       const { username, password } = auth.basic;
-      out.push({ key: 'Authorization', value: `Basic ${b64Basic(username, password)}` });
+      out.push(['Authorization', `Basic ${b64Basic(username, password)}`]);
     }
   } else if (auth.kind === 'apikey' && auth.apikey && auth.apikey.inLocation === 'header') {
-    if (!out.some((h) => h.key.toLowerCase() === auth.apikey!.key.toLowerCase())) {
-      out.push({ key: auth.apikey.key, value: auth.apikey.value });
+    if (!out.some(([k]) => k.toLowerCase() === auth.apikey!.key.toLowerCase())) {
+      out.push([auth.apikey.key, auth.apikey.value]);
     }
   }
 
@@ -215,52 +330,148 @@ function hasBody(body: RequestBody): boolean {
 // ---- public API ----
 
 /**
+ * Turn the user-editable request shape into everything a transport needs.
+ * This is the only function in the app that assembles a request.
+ *
+ * Order of operations (matches `resolve_endpoint` in Rust, and the
+ * order matters at each step):
+ *
+ *   1. join `baseUrl` + `urlPath` — a path with its own scheme wins, so
+ *      a 自定义 full URL is never prefixed;
+ *   2. resolve `{{var}}` over the **joined** URL, so a variable inside
+ *      the environment's own base URL resolves too;
+ *   3. append enabled params as a query string (encoding them, and
+ *      choosing `?` vs `&` off the current URL);
+ *   4. append an apikey configured for the query location;
+ *   5. build the ordered header list;
+ *   6. decide body inclusion (`mode !== 'none'` **and** non-empty).
+ *
+ * Params are deliberately not scanned for missing variables: they are
+ * merged into the URL at step 3, so anything unresolved there is already
+ * visible there — and since they are percent-encoded on the way in,
+ * `{{` cannot survive into `PreparedRequest.url` as a live marker to
+ * re-detect anyway.
+ */
+export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
+  const missing = createMissingTracker();
+
+  const auth = resolveAuth(input.auth, input.env, missing);
+
+  const url = resolveVarsWithMissing(joinBaseUrl(input.baseUrl, input.urlPath), input.env);
+  missing.add(url.missing);
+
+  const withParams = appendQueryString(url.value, input.params);
+  const finalUrl = appendApikeyToQuery(withParams, auth);
+
+  const headers = buildOrderedHeaders(input.headers, input.body.mode, auth, input.env, missing);
+
+  const body = hasBody(input.body) ? input.body.content : null;
+  if (body !== null) {
+    // The body is shipped verbatim (see `PreparedRequest.body`), so every
+    // marker still in it is unresolved by definition. Probing with an
+    // empty variable pool turns `resolveVarsWithMissing` into a pure
+    // marker scanner — one regex in the codebase, mirroring Rust's
+    // `list_missing_vars`, instead of a second hand-rolled scanner here.
+    missing.add(resolveVarsWithMissing(body, undefined).missing);
+  }
+
+  return {
+    method: input.method,
+    url: finalUrl,
+    headers,
+    body,
+    missingVars: missing.list(),
+  };
+}
+
+/** `BuildInput` → `PrepareRequestInput`, with an empty base URL.
+ *
+ *  `BuildInput.url` has always been the complete URL, so the compat
+ *  adapters below treat it as a path with nothing to join. `joinBaseUrl`
+ *  is the identity on that input (an empty base returns the path, and a
+ *  path with a scheme is returned as-is), which is what keeps
+ *  `buildFetchInit` / `buildCurlCommand` byte-identical to before.
+ */
+function fromBuildInput(input: BuildInput): PrepareRequestInput {
+  return {
+    method: input.method,
+    urlPath: input.url,
+    baseUrl: '',
+    params: input.params,
+    headers: input.headers,
+    body: input.body,
+    auth: input.auth,
+    env: input.env,
+  };
+}
+
+/**
  * Build the `fetch(url, init)` pair for the given request. Pure — no
  * I/O, no state. The caller composes `signal` and `redirect` on top.
+ *
+ * A thin adapter over [`prepareRequest`]. Headers collapse back into a
+ * `Record` here because that is `fetch`'s natural shape, which means a
+ * repeated header name keeps only the last value — a pre-existing
+ * limitation of this entry point, and the reason the tuple-preserving
+ * `sendPreparedRequest` path exists for the backend transport.
  */
 export function buildFetchInit(input: BuildInput): BuiltFetch {
-  const auth = resolveAuth(input.auth, input.env);
-  const baseUrl = resolveTemplate(input.url, input.env);
-  const urlWithParams = appendQueryString(baseUrl, input.params);
-  const finalUrl = appendApikeyToQuery(urlWithParams, auth);
-  const orderedHeaders = buildOrderedHeaders(input, auth);
+  const prepared = prepareRequest(fromBuildInput(input));
 
   const headersRecord: Record<string, string> = {};
-  for (const h of orderedHeaders) headersRecord[h.key] = h.value;
+  for (const [k, v] of prepared.headers) headersRecord[k] = v;
 
   const init: RequestInit = {
     method: input.method,
     headers: headersRecord,
   };
-  if (hasBody(input.body)) {
-    init.body = input.body.content;
+  if (prepared.body !== null) {
+    init.body = prepared.body;
   }
 
   return {
-    url: finalUrl,
+    url: prepared.url,
     init,
-    bodyForLog: hasBody(input.body) ? input.body.content : '',
+    bodyForLog: prepared.body ?? '',
   };
 }
 
 /**
- * Build a copy-pasteable cURL command for the same request. Uses the
- * exact same URL / header / body derivation as `buildFetchInit` so
- * the two stay in lockstep.
+ * Render an already-prepared request as a copy-pasteable cURL command.
+ *
+ * THE ONE PLACE A cURL STRING IS ASSEMBLED. `buildCurlCommand` below is
+ * this same function behind a `BuildInput` adapter, which is the point:
+ * a preview that re-derives the URL, headers and body is a preview that
+ * can describe a request nobody sent. That is not hypothetical — the
+ * preview used to be built independently of Send and emitted
+ * `curl -X POST '/cashier'` for a request that had actually gone to
+ * `https://host/cashier`, because only the send path joined the base
+ * URL.
+ *
+ * Everything read here is already final: `url` is joined and
+ * `{{var}}`-resolved, `headers` is the ordered wire list including the
+ * auth-derived `Authorization`, and `body` is the exact string that
+ * would be written to the socket.
  */
-export function buildCurlCommand(input: BuildInput): string {
-  const auth = resolveAuth(input.auth, input.env);
-  const baseUrl = resolveTemplate(input.url, input.env);
-  const urlWithParams = appendQueryString(baseUrl, input.params);
-  const finalUrl = appendApikeyToQuery(urlWithParams, auth);
-  const orderedHeaders = buildOrderedHeaders(input, auth);
-
-  const lines: string[] = [`curl -X ${input.method.toUpperCase()} ${shellQuote(finalUrl)}`];
-  for (const h of orderedHeaders) {
-    lines.push(`  -H ${shellQuote(`${h.key}: ${h.value}`)}`);
+export function preparedToCurl(prepared: PreparedRequest): string {
+  const lines: string[] = [`curl -X ${prepared.method.toUpperCase()} ${shellQuote(prepared.url)}`];
+  // A list, not a record: `prepared.headers` keeps duplicate names, which
+  // is legal on the wire and which one `-H` per line reproduces.
+  for (const [k, v] of prepared.headers) {
+    lines.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
   }
-  if (hasBody(input.body)) {
-    lines.push(`  --data-raw ${shellQuote(input.body.content)}`);
+  if (prepared.body !== null) {
+    lines.push(`  --data-raw ${shellQuote(prepared.body)}`);
   }
   return lines.join(' \\\n');
+}
+
+/**
+ * Build a copy-pasteable cURL command for the same request. A thin
+ * adapter over [`prepareRequest`] → [`preparedToCurl`], so the emitted URL,
+ * headers and body are by construction the ones a real send would use —
+ * the two can no longer disagree.
+ */
+export function buildCurlCommand(input: BuildInput): string {
+  return preparedToCurl(prepareRequest(fromBuildInput(input)));
 }

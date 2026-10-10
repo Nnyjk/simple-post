@@ -47,7 +47,11 @@ impl CreateEndpointDetailOpts {
     /// Expand into the row `db::nodes::create` writes. `node_id` is
     /// threaded in rather than left to the caller so the detail cannot
     /// be built pointing at a node that was never inserted.
-    pub(super) fn into_detail(self, node_id: &str) -> EndpointDetail {
+    ///
+    /// `pub(crate)` rather than private to `commands`: `serve-web`'s
+    /// `POST /api/nodes` accepts the same opts type and expands it here,
+    /// so both transports default a half-filled endpoint identically.
+    pub(crate) fn into_detail(self, node_id: &str) -> EndpointDetail {
         EndpointDetail {
             node_id: node_id.to_string(),
             method: self.method.unwrap_or_default(),

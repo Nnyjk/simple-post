@@ -143,7 +143,12 @@ pub(super) async fn tool_collection_list(
 ) -> Result<CallToolResult, AppError> {
     let a: super::ModuleIdArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("collection_list args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, "global", "collection_list").await?;
+    crate::mcp::check_permission(
+        &state.pool,
+        &owning_project(&state.pool, &a.module_id)?,
+        "collection_list",
+    )
+    .await?;
     // The subtree of a module, because a nested collection's parent is
     // another collection — "collections under this module" is not a
     // one-hop parent match, and `list_by_module` only got away with it
@@ -179,7 +184,6 @@ pub(super) async fn tool_collection_create(
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
     }
-    crate::mcp::check_permission(&state.pool, "global", "collection_create").await?;
     // A collection's parent is a module (top level) or another collection
     // (nested). `new_module_id` and `parent_collection_id` are two names
     // for that one relationship, so pick whichever the caller supplied and
@@ -188,6 +192,14 @@ pub(super) async fn tool_collection_create(
         .parent_collection_id
         .clone()
         .or_else(|| Some(a.module_id.clone()));
+    // Gate against the project that will own the new collection, which is
+    // the parent node's project.
+    crate::mcp::check_permission(
+        &state.pool,
+        &owning_project(&state.pool, parent_id.as_deref().unwrap_or_default())?,
+        "collection_create",
+    )
+    .await?;
     let now = simple_post_core::domain::now_ms();
     let mut c = ResourceNode {
         id: format!("col_{now}"),

@@ -14,17 +14,25 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
+import type { NewDraftKind } from '@/stores/store-types';
 import type { ResourceNode } from '@/types/domain';
 import type { DeleteTarget, EditTarget, TargetKind } from '../tree-types';
 import type { ContextMenuItem } from '../TreeContextMenu';
 
 export interface EditMenuBindings {
   setEditing: Dispatch<SetStateAction<EditTarget | null>>;
+  /**
+   * Opens the create *dialog* for the kinds that still have one. An
+   * endpoint is absent by design — it is written directly by
+   * `createEndpointAt`, so the context menu needs no dialog and no draft.
+   */
   openNewItemWithIntent: (opts: {
-    type: 'project' | 'module' | 'collection' | 'endpoint';
+    type: NewDraftKind;
     parentModuleId?: string;
     parentCollectionId?: string;
   }) => void;
+  /** Create an endpoint under `parentId` and rename it in place. */
+  createEndpointAt: (parentId: string) => Promise<void>;
   openEndpointTab: (id: string) => void;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;
 }
@@ -39,6 +47,7 @@ export interface EditMenuBindings {
 export function useEditMenu({
   setEditing,
   openNewItemWithIntent,
+  createEndpointAt,
   openEndpointTab,
   setMenu,
 }: EditMenuBindings) {
@@ -135,13 +144,15 @@ export function useEditMenu({
           onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: id }),
         },
         // A module accepts an endpoint directly, so this needs no
-        // collection to exist first — `parentCollectionId` stays empty,
-        // which is the "直接放在模块下" placement.
+        // collection to exist first — and no dialog: the row is written
+        // and dropped straight into rename.
         {
           kind: 'item',
           label: '新建接口',
           icon: <FilePlus className="h-3.5 w-3.5" />,
-          onClick: () => openNewItemWithIntent({ type: 'endpoint', parentModuleId: id }),
+          onClick: () => {
+            void createEndpointAt(id);
+          },
         },
         { kind: 'divider' },
         {
@@ -195,11 +206,9 @@ export function useEditMenu({
           kind: 'item',
           label: '新建接口',
           icon: <FilePlus className="h-3.5 w-3.5" />,
-          onClick: () =>
-            openNewItemWithIntent({
-              type: 'endpoint',
-              parentCollectionId: id,
-            }),
+          onClick: () => {
+            void createEndpointAt(id);
+          },
         },
         { kind: 'divider' },
         {
@@ -269,7 +278,8 @@ export function useEditMenu({
         icon: <Terminal className="h-3.5 w-3.5" />,
         disabled: true,
         onClick: () => {
-          // Copy as cURL — uses endpointToCurl from src/features/http-tester/curl.ts.
+          // Copy as cURL — uses `preparedToCurl` from `@/lib/http-build`, rendering
+          // the very object Send ships.
         },
       },
       ...(ep

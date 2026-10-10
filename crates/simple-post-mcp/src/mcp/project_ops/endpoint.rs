@@ -594,9 +594,10 @@ pub(super) async fn tool_endpoint_duplicate(
 
     // The copy lands immediately after the original, not at the end of
     // the collection — a duplicate the user cannot see next to what they
-    // duplicated is easy to miss.
+    // duplicated is easy to miss. `None`: an MCP client has no optimistic
+    // row to stay consistent with, so the server names the copy.
     let created = simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::nodes::duplicate(c, &a.endpoint_id)
+        simple_post_core::db::nodes::duplicate(c, &a.endpoint_id, None)
     })?;
     let created = match a.name {
         Some(name) => simple_post_core::db::with_tx(&state.pool, |c| {

@@ -78,7 +78,7 @@ const originalFetch: typeof fetch = globalThis.fetch.bind(globalThis);
  * Test stub for the serve-web `/api/http/send` bridge.
  *
  * Production runs the bridge via the real axum `http_send` handler
- * (`src-tauri/src/web_api.rs`) which deserialises the
+ * (`src-tauri/src/web_api/routes/nodes.rs`) which deserialises the
  * `HttpSendBody`, runs `http_executor::execute`, and returns the
  * `HttpResult` envelope. To exercise the new http.ts → invokeCmd →
  * webFetch path inside Node tests we have to intercept

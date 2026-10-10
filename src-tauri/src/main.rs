@@ -83,9 +83,9 @@ enum Cmd {
         #[arg(long)]
         mcp_auto_start: Option<bool>,
 
-        /// Bearer password for `/api/*` + `/mcp` requests (commit 5).
-        /// When omitted (or empty) the route tree stays open — same
-        /// backwards-compatible behaviour as commit 4. When set,
+        /// Bearer password for `/api/*` + `/mcp` requests. When omitted
+        /// (or empty) the route tree stays open, which is the
+        /// backwards-compatible default. When set,
         /// every `/api/*` and `/mcp` request must carry
         /// `Authorization: Bearer <token>`; `/api/healthz`,
         /// `/mcp/healthz`, `/healthz`, and the SPA shell stay open
@@ -95,7 +95,7 @@ enum Cmd {
         #[arg(long, env = "SIMPLE_POST_WEB_PASSWORD")]
         web_password: Option<String>,
 
-        /// Reverse-proxy base path (commit 5). When set, the entire
+        /// Reverse-proxy base path. When set, the entire
         /// router is `nest`ed under this prefix so the SPA + REST +
         /// `/mcp` can live behind e.g. nginx at
         /// `https://host/sp/`. Must start with `/`. Also accepted

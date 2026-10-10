@@ -1,10 +1,9 @@
-﻿import { ChevronRight, FolderClosed, FolderOpen, Plus } from 'lucide-react';
+﻿import { ChevronRight, Plus } from 'lucide-react';
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
-import { IconTile } from '@/components/ui/icon-tile';
 import type { DropZone } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
@@ -33,6 +32,7 @@ export function CollectionRow({
   onSelect,
   onStartEdit,
   onSaveEdit,
+  onCancelEdit,
   onContextMenu,
   onPlusClick,
   onDragStart,
@@ -77,20 +77,18 @@ export function CollectionRow({
               collection.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          <IconTile
-            concept="collection"
-            size="sm"
-            icon={
-              collection.expanded ? (
-                <FolderOpen className="h-3 w-3" />
-              ) : (
-                <FolderClosed className="h-3 w-3" />
-              )
-            }
-          />
+          {/* No type icon — see the note in `ModuleRow.tsx`. The chevron
+              carries the expand state; the count badge carries the size. */}
           <InlineEdit
             value={collection.name}
             onSave={onSaveEdit}
+            // Controlled by the tree's `editing` target so a collection
+            // created from a dialog lands straight in rename. See the
+            // same note in `EndpointRow.tsx`.
+            editing={isEditing}
+            onEditingChange={(open) => {
+              if (!open) onCancelEdit();
+            }}
             className="flex-1"
             display={() => <span className="flex-1 truncate">{collection.name}</span>}
           />

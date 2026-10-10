@@ -26,9 +26,11 @@
  *     (add / remove / reorder). This is implemented as a FLIP animation
  *     via GSAP Flip — see the useGSAP block below.
  *   - The 0.5px primary stripe under the active tab is a single
- *     persistent element at the strip level; its x/width are tweened to
- *     match the active tab on every render so the indicator smoothly
- *     follows active-tab switches.
+ *     persistent element at the strip level. Its geometry is *derived*
+ *     from the active tab's live rect on every animation frame while any
+ *     layout animation can be in flight, rather than measured once and
+ *     tweened to — see "Active-tab indicator" below for why measuring
+ *     once is what made it drift and stretch when tabs were closed.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -45,6 +47,7 @@ import {
 } from 'lucide-react';
 import { useAppStore, type OpenTab, type TabKind } from '@/stores/app-store';
 import { Button } from '@/components/ui/button';
+import { TabJoinCorners } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { MethodPill } from '@/components/ui/method-pill';
@@ -56,8 +59,29 @@ const KIND_LABEL: Record<TabKind, string> = {
   module: '模块',
   collection: '集合',
   endpoint: '接口',
+  // A draft endpoint has no row in `nodes` — it is renderer state until
+  // Save writes it — so if it ever reaches `missingDescriptor` the only
+  // honest label is "unsaved", not "deleted".
+  'endpoint-draft': '未保存',
   settings: '设置',
 };
+
+/**
+ * Active-tab indicator tuning. See the "Active-tab indicator" block in
+ * the component for why these exist at all.
+ *
+ * `BAR_APPROACH` is the per-frame fraction of the remaining distance the
+ * bar closes on the active tab. At 60fps, 0.24 leaves ~1% of the gap
+ * after 17 frames — i.e. it settles in about the 0.28s the Flip tween
+ * runs for, which is what makes the two feel like one motion.
+ *
+ * `BAR_SETTLE_MS` is how long the driver keeps reading the live rect
+ * after something changes. It has to outlast the longest animation that
+ * can move a tab: the 280ms Flip plus the 200ms CSS width transition,
+ * with room for a resize to trigger both back to back.
+ */
+const BAR_APPROACH = 0.24;
+const BAR_SETTLE_MS = 480;
 
 interface TabDescriptor {
   tab: OpenTab;
@@ -112,13 +136,6 @@ export function WorkspaceTabs() {
 
   // Keep the active tab in view when the user adds many tabs.
   const stripRef = useRef<HTMLDivElement>(null);
-  // Persistent indicator bar (the 0.5px primary stripe under the active
-  // tab). It lives at the strip level instead of inside each tab so that
-  // we can tween it as a single element whenever the active tab changes.
-  const barRef = useRef<HTMLSpanElement>(null);
-  // First-run guard for the bar: snap into place on initial mount rather
-  // than running an entry tween from (0,0) to the first active tab.
-  const isFirstBarRun = useRef(true);
 
   // Compact-mode decision: when the strip cannot host every tab at its
   // full width, we let each tab shrink to a smaller floor (icon + 4-5
@@ -184,33 +201,112 @@ export function WorkspaceTabs() {
     { dependencies: [openTabs], scope: stripRef, revertOnUpdate: true },
   );
 
-  // Active-bar tween: track whichever tab is currently active. Re-runs
-  // when either the active tab changes *or* the tab set changes (a tab
-  // inserted before the active one shifts its target offsetLeft).
-  useGSAP(
-    () => {
-      if (!stripRef.current || !barRef.current || !activeTabId) return;
-      const activeEl = stripRef.current.querySelector<HTMLElement>(
-        `[data-tab-id="${activeTabId}"]`,
-      );
-      if (!activeEl) return;
-      const x = activeEl.offsetLeft;
-      const width = activeEl.offsetWidth;
-      if (isFirstBarRun.current) {
-        // Snap on the very first paint of the strip.
-        gsap.set(barRef.current, { x, width });
-        isFirstBarRun.current = false;
-        return;
+  // ------------------------------------------------------------------
+  //  Active-tab indicator
+  // ------------------------------------------------------------------
+  // DERIVED EVERY FRAME, NOT MEASURED ONCE.
+  //
+  // Three separate things move these tabs, and each of them can still be
+  // in flight at the moment an old "measure the active tab, tween the bar
+  // to that number" implementation would have read its target:
+  //
+  //   1. The Flip tween above. With `absolute: true` it re-parents every
+  //      tweened tab to `position: absolute` at its *pre-commit* spot, so
+  //      an `offsetLeft` read during the tween is the animated position,
+  //      not the final one. Reading it and tweening to it pointed the bar
+  //      at where the tab used to be.
+  //   2. The CSS width transition on the tab (`transition-[width,…]`,
+  //      200ms) when the strip flips between normal and compact width.
+  //      That changes every tab's width *and* every neighbour's offset
+  //      for the whole transition — and it was not in the bar's
+  //      dependency list at all, so the bar kept a stale width after
+  //      closing tabs took the strip out of compact mode.
+  //   3. The strip's own `scrollLeft` (the wheel handler and
+  //      `scrollIntoView` both move it).
+  //
+  // So the bar's target is re-read from the live rect on every frame
+  // while any of those can be running. Because the *current* position is
+  // then eased toward that target with a fixed per-frame factor, the bar
+  // both slides between tabs and tracks them mid-animation, and it cannot
+  // end up parked on a number that has since gone stale.
+  //
+  // The loop is not permanent: it re-runs for a bounded window whenever
+  // something that can move a tab changes (active tab, tab set, compact
+  // mode) and stops once the window elapses. Long enough to cover the
+  // 280ms Flip and the 200ms width transition, plus a resize burst on
+  // top of both; short enough that an idle strip does no per-frame work.
+  const barRef = useRef<HTMLSpanElement>(null);
+  // `started` distinguishes "place it" from "move it": the first frame
+  // for a given activation snaps (there is no previous position worth
+  // animating from — a fresh mount, or the strip coming back from having
+  // no tabs at all), and every frame after that eases.
+  const barState = useRef({ x: 0, width: 0, started: false });
+
+  const placeBar = useCallback(() => {
+    const strip = stripRef.current;
+    const bar = barRef.current;
+    if (!strip || !bar) {
+      // The strip itself unmounts when the last tab closes
+      // (`descriptors.length === 0` returns null above). Forgetting the
+      // previous position here means the next strip that appears snaps
+      // onto its tab instead of sliding in from a stale coordinate.
+      barState.current.started = false;
+      return;
+    }
+    const activeEl = activeTabId
+      ? strip.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`)
+      : null;
+    if (!activeEl) {
+      // Nothing is active (every tab closed) — collapse the bar rather
+      // than leave it parked under a tab that is no longer there.
+      barState.current.started = false;
+      gsap.set(bar, { width: 0, opacity: 0 });
+      return;
+    }
+    const stripRect = strip.getBoundingClientRect();
+    const tabRect = activeEl.getBoundingClientRect();
+    // The bar is absolutely positioned *inside* the scroll container, so it
+    // is laid out in content coordinates — the scroll offset has to be
+    // added back, or the bar drifts by exactly the amount scrolled.
+    const targetX = tabRect.left - stripRect.left + strip.scrollLeft;
+    const targetW = tabRect.width;
+    const cur = barState.current;
+    if (cur.started) {
+      // Exponential approach: ~0.28s to settle, which is what the removed
+      // 0.28s `power2.out` tween felt like, but toward a target that may
+      // itself be moving.
+      cur.x += (targetX - cur.x) * BAR_APPROACH;
+      cur.width += (targetW - cur.width) * BAR_APPROACH;
+      if (Math.abs(targetX - cur.x) < 0.25 && Math.abs(targetW - cur.width) < 0.25) {
+        cur.x = targetX;
+        cur.width = targetW;
       }
-      gsap.to(barRef.current, {
-        x,
-        width,
-        duration: 0.28,
-        ease: 'power2.out',
-      });
-    },
-    { dependencies: [activeTabId, openTabs] },
-  );
+    } else {
+      cur.x = targetX;
+      cur.width = targetW;
+      cur.started = true;
+    }
+    gsap.set(bar, { x: cur.x, width: cur.width, opacity: 1 });
+  }, [activeTabId]);
+
+  useEffect(() => {
+    let raf = 0;
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      placeBar();
+      if (now - startedAt < BAR_SETTLE_MS) raf = requestAnimationFrame(tick);
+    };
+    // First frame runs on the next animation frame, not synchronously:
+    // that is the first moment the Flip tween has actually started, so
+    // the bar reads a position that is real rather than a committed one
+    // it is about to animate away from.
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // `openTabs` (not just its length) and `isCompact` are both listed:
+    // removing a tab that is *not* the active one leaves `activeTabId`
+    // untouched while every tab to its right slides left, and a compact
+    // flip resizes them all.
+  }, [placeBar, openTabs, isCompact]);
 
   useEffect(() => {
     if (!activeTabId) return;
@@ -241,7 +337,13 @@ export function WorkspaceTabs() {
       role="tablist"
       aria-label="工作区标签"
       className={cn(
-        'relative flex h-9 shrink-0 items-stretch gap-0.5 overflow-hidden border-b border-border bg-card/40 pl-0 pr-1.5',
+        // No `border-b` here. The separator is a child (`below`) rather
+        // than a border because this strip is `overflow-hidden`, and that
+        // clips to the *padding* box — a border of its own would sit
+        // outside the clip and no descendant could ever cover it, so an
+        // active tab could not merge with the panel below. A 1px child
+        // line lives inside the clip, where the tab's fill can erase it.
+        'relative flex h-9 shrink-0 items-stretch gap-0.5 overflow-hidden bg-card/40 pl-0 pr-1.5',
         // Belt-and-braces: hide both the standard scrollbar and the
         // webkit one. The strip itself is `overflow-hidden` so a scrollbar
         // wouldn't actually appear here — but keeping the rules in case a
@@ -249,6 +351,12 @@ export function WorkspaceTabs() {
         'scrollbar-none',
       )}
     >
+      {/* The separator. `z-0` so the active tab's fill (z-10) wins over
+          the stretch of line underneath it. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-px bg-border"
+      />
       {descriptors.map((d) => {
         const active = d.tab.id === activeTabId;
         const dirty = dirtyTabIds.has(d.tab.id);
@@ -294,9 +402,17 @@ export function WorkspaceTabs() {
               active
                 ? 'border-border bg-background text-foreground'
                 : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+              // `z-10` is what merges the active tab with the panel: it has
+              // to paint over the strip's separator, which the `z-0` hairline
+              // child would otherwise draw across its bottom edge.
+              active && 'z-10',
             )}
             onClick={() => setActiveTab(d.tab.id)}
           >
+            {/* Shoulders first: the carves have to erase the tab's own
+                bottom corners (fill *and* side border), so they must paint
+                over it but under nothing the user can see. */}
+            {active && <TabJoinCorners stripClass="bg-card/40" />}
             <span className={cn('shrink-0', active && d.iconColor)}>{d.icon}</span>
             <span
               // Title is the main element that grows. It always truncates
@@ -350,13 +466,17 @@ export function WorkspaceTabs() {
         );
       })}
 
-      {/* Persistent active-tab indicator. The bar's x/width are tweened
-          by the useGSAP block above to follow whichever tab is currently
-          active — see comment near `barRef`. */}
+      {/* Persistent active-tab indicator. It lives at the strip level so
+          it can survive a tab-set change as one element, and its geometry
+          is written every frame while layout is in motion — see the
+          "Active-tab indicator" block above. `w-0` is deliberately absent
+          from the class list: the width is entirely the driver's to
+          write, and a class-level width would just be an inline override
+          fighting it. */}
       <span
         ref={barRef}
         aria-hidden
-        className="pointer-events-none absolute left-0 top-0 z-10 h-0.5 w-0 rounded-t-md bg-primary"
+        className="pointer-events-none absolute left-0 top-0 z-20 h-0.5 rounded-t-md bg-primary opacity-0"
       />
 
       <div className="ml-auto flex items-center pr-1">
@@ -421,6 +541,10 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
   // only for the endpoint's method pill.
   const nodes = useAppStore((s) => s.nodes);
   const endpointDetails = useAppStore((s) => s.endpointDetails);
+  // Unsaved endpoints live only here — never in `nodes`. Without this the
+  // strip would render them through the "已删除" fallback, which is the
+  // one thing a draft definitively is not.
+  const draftEndpoints = useAppStore((s) => s.draftEndpoints);
 
   // Manual map instead of .map().filter() to keep the shape stable when
   // the entity is missing (fall back to a "已删除" label rather than
@@ -492,6 +616,31 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       });
       continue;
     }
+    // endpoint-draft — same pill treatment as a saved endpoint, because it
+    // is the same object as far as the strip is concerned; the only
+    // difference is that its title is still being typed.
+    if (t.kind === 'endpoint-draft') {
+      const d = draftEndpoints[t.id];
+      if (!d) {
+        out.push(missingDescriptor(t));
+        continue;
+      }
+      out.push({
+        tab: t,
+        title: d.name,
+        icon: (
+          <MethodPill
+            method={d.method}
+            size="xs"
+            variant="solid"
+            title={`HTTP ${d.method}`}
+            className="!h-3.5 !w-3.5 !text-[9px]"
+          />
+        ),
+        iconColor: 'text-muted-foreground',
+      });
+      continue;
+    }
     // endpoint — the method pill comes from the detail row, not the
     // node, so a tab whose configuration is missing falls back to the
     // "已删除" descriptor rather than rendering an empty pill.
@@ -522,7 +671,11 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
 function missingDescriptor(tab: OpenTab): TabDescriptor {
   return {
     tab,
-    title: `（${KIND_LABEL[tab.kind]}已删除）`,
+    // A draft reaching here means its document was discarded while the tab
+    // was still open. "已删除" would be wrong — nothing was ever saved —
+    // and the label is the only signal the user gets, so it has to name
+    // what actually happened.
+    title: tab.kind === 'endpoint-draft' ? '（草稿已丢弃）' : `（${KIND_LABEL[tab.kind]}已删除）`,
     icon: <Hash className="h-3.5 w-3.5" />,
     iconColor: 'text-destructive',
   };

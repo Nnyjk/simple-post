@@ -3,9 +3,9 @@
 MCP server module + standalone CLI binary for Simple Post.
 
 Extracted from `src-tauri/src/mcp/` and `src-tauri/src/bin/mcp_proxy.rs`
-in commit 3 of the v0.2+ workspace refactor. Commit 4 fills the
-standalone binary's CLI surface (`--url` / `--password` /
-`--transport=stdio|http` / `--capability` / `--log-level`).
+during the workspace refactor. The standalone binary's CLI surface is
+`--url` / `--password` / `--transport=stdio|http` / `--capability` /
+`--log-level`.
 
 The binary is the only distribution form — there is no npm wrapper. An AI
 client that cannot run a Rust binary should connect to the daemon's HTTP
@@ -41,7 +41,7 @@ crates/simple-post-mcp/
         └── variable_fill.rs   # variable interpolation tools
 ```
 
-## CLI surface (commit 4)
+## CLI surface
 
 ```
 simple-post-mcp
@@ -80,7 +80,7 @@ JSON-RPC the stdio bridge speaks — it just replaces stdin/stdout with HTTP.
 ## Migration from `simple-post-mcp-proxy`
 
 The `simple-post-mcp-proxy` binary that lived at
-`src-tauri/src/bin/mcp_proxy.rs` was removed in commit 3. Replace your
+`src-tauri/src/bin/mcp_proxy.rs` has been removed. Replace your
 `mcpServers` entry:
 
 ```diff

@@ -32,7 +32,7 @@
  *   * Path-param + body separation (`body:` projector) is checked on
  *     `projects_update` (and a handful of others by side effect).
  *   * The unknown-cmd throw points the developer at both
- *     `tauri-commands.ts` and `web_api.rs`.
+ *     `tauri-commands.ts` and `web_api/`.
  *
  * Run via:
  *   npx tsx --test src/lib/tauri-commands.test.ts
@@ -343,15 +343,28 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(body.nodeIds, ['c1']);
   });
 
-  it('nodesDuplicate → POST /api/nodes/{id}/duplicate with empty body', async () => {
-    await invokeCmd(COMMANDS.nodesDuplicate, { id: 'n1' });
+  it('nodesDuplicate → POST /api/nodes/{id}/duplicate, carrying newId', async () => {
+    // `newId` is the id the copy is stored under — the SPA mints it
+    // optimistically and needs the server to keep it, or the tab it
+    // already opened points at a row nobody owns.
+    await invokeCmd(COMMANDS.nodesDuplicate, { id: 'n1', newId: 'copy-1' });
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/nodes/n1/duplicate');
-    // The path consumed `id`; the body projector hands back `{}` so the
-    // wire payload doesn't carry an `{ id }` field that the Rust
+    // The path consumed `id`; the body projector hands back only `newId`
+    // so the wire payload doesn't carry an `{ id }` field the Rust
     // handler would silently drop.
-    assert.equal(c.body, '{}');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { newId: 'copy-1' });
+  });
+
+  it('nodesDuplicate → no newId means "let the server mint one"', async () => {
+    // A caller with no local copy to stay consistent with (a script, an
+    // older client) omits it, and the handler's `null` means exactly
+    // that — not "reject the request".
+    await invokeCmd(COMMANDS.nodesDuplicate, { id: 'n1' });
+    const c = last();
+    assert.equal(c.url, '/api/nodes/n1/duplicate');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { newId: null });
   });
 
   it('endpointDetailsList → GET /api/endpoint-details with no body', async () => {
@@ -625,7 +638,7 @@ describe('invokeCmd (web shape) — error path', () => {
     // call site).
     const fakeCmd = 'this_command_does_not_exist' as unknown as TauriCommand;
     await assert.rejects(() => invokeCmd(fakeCmd), /src\/lib\/tauri-commands\.ts/);
-    await assert.rejects(() => invokeCmd(fakeCmd), /src-tauri\/src\/web_api\.rs/);
+    await assert.rejects(() => invokeCmd(fakeCmd), /src-tauri\/src\/web_api\//);
     // Fetch must NOT have been called — the throw must short-circuit
     // before any network activity, otherwise the error from a 404
     // would be misleading.

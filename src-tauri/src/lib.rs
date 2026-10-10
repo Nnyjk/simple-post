@@ -29,7 +29,7 @@ pub mod web_api;
 // Re-export the shared low-level layer so call sites can keep using
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /
 // `crate::permissions::*` / `crate::http_executor::*` /
-// `crate::mcp_metrics::*` after the workspace extraction (commit 3).
+// `crate::mcp_metrics::*` after the workspace extraction.
 pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, permissions};
 
 // Re-export the MCP module from the standalone `simple-post-mcp` crate.

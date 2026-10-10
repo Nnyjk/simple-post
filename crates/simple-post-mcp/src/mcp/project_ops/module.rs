@@ -1,4 +1,4 @@
-﻿//! `module_*` MCP tools — module CRUD inside a project.
+﻿//! `module_*` MCP tools —module CRUD inside a project.
 //!
 //! 5 tools:
 //! - `module_list`
@@ -11,7 +11,7 @@
 //! three-table layout: to an LLM client `module_id` still means "the id
 //! of a module", and renaming the tools would break every configured
 //! client for no semantic gain. Only the storage they read and write
-//! changed — a module is a `nodes` row with `type = 'module'` now, and
+//! changed —a module is a `nodes` row with `type = 'module'` now, and
 //! `project_id` is its `root_id`.
 //!
 //! `module_list` reuses `super::ProjectIdArgs` (a module is owned by a
@@ -24,6 +24,15 @@ use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
 use simple_post_core::domain::{ResourceNode, ResourceNodePatch, ResourceNodeType};
 use simple_post_core::error::AppError;
+
+/// Resolve the project a module belongs to, for the per-project permission
+/// gate. A module is a `nodes` row, so its project is the denormalised
+/// `root_id` —one indexed read, no parent walk.
+fn owning_project(pool: &simple_post_core::db::DbPool, node_id: &str) -> Result<String, AppError> {
+    simple_post_core::db::with_conn(pool, |c| {
+        simple_post_core::db::nodes::root_id_of(c, node_id)
+    })
+}
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ModuleCreateArgs {
@@ -169,7 +178,12 @@ pub(super) async fn tool_module_update(
 ) -> Result<CallToolResult, AppError> {
     let a: ModuleUpdateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("module_update args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, "global", "module_update").await?;
+    crate::mcp::check_permission(
+        &state.pool,
+        &owning_project(&state.pool, &a.module_id)?,
+        "module_update",
+    )
+    .await?;
     let patch = ResourceNodePatch {
         name: a.name.clone(),
         // `module_update` must never re-parent: that is `module_move`'s
@@ -191,7 +205,12 @@ pub(super) async fn tool_module_delete(
     args: Value,
 ) -> Result<CallToolResult, AppError> {
     let module_id = arg_str(&args, "module_id")?.to_string();
-    crate::mcp::check_permission(&state.pool, "global", "module_delete").await?;
+    crate::mcp::check_permission(
+        &state.pool,
+        &owning_project(&state.pool, &module_id)?,
+        "module_delete",
+    )
+    .await?;
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::nodes::delete(c, &module_id)
     })?;
@@ -212,7 +231,7 @@ pub(super) async fn tool_module_move(
     // `ON DELETE CASCADE` chain from module to collection to endpoint
     // meant deleting the module destroyed every collection under it and
     // every endpoint under those. The `nodes` layout makes the mistake
-    // unrepresentable — there is no cascade to fall into and no second
+    // unrepresentable —there is no cascade to fall into and no second
     // table to half-copy.
     let module = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::get(c, &a.module_id)

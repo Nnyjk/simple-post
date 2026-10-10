@@ -31,6 +31,12 @@ function makeBootstrapHarness() {
     bootstrapError: null,
     nodesError: null,
     openTab: () => undefined,
+    // Entering/leaving a project now hands the tab strip to `ui-tabs`
+    // rather than opening a tab from here. Stubbed for the same reason
+    // `openTab` is: the swap itself is `ui-tabs`' contract and is covered
+    // by `project-tabs.test.ts`; what these tests care about is *when*
+    // `bootstrap-slice` asks for it.
+    switchProjectTabs: () => undefined,
     closeTab: () => undefined,
     setLastResponse: () => undefined,
     loadWorkspace: async () => undefined,
@@ -260,12 +266,14 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.deepEqual(opened, [], 'no tab is opened behind the welcome screen');
   });
 
-  it('openProject 选中项目、激活它的标签，并顺带触发树加载', async () => {
+  it('openProject 选中项目、切换到它的标签区，并顺带触发树加载', async () => {
     const bag = makeBootstrapHarness();
     const opened: { kind: string; id: string }[] = [];
     const selected: string[] = [];
+    const switched: string[] = [];
     let workspaceLoads = 0;
     bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
+    bag.switchProjectTabs = (id: string) => switched.push(id);
     bag.setActiveProject = (id: string) => selected.push(id);
     // A user who clicks a project card before the background pass lands
     // must still get a tree, so entering a project re-requests it.
@@ -276,11 +284,17 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     bag.openProject('p1');
 
-    // Both halves, in this order: the tree only re-scopes once the
-    // project is the active one, and the right pane must not be left
-    // showing the previous project's entity.
+    // The switch runs *before* the selection moves, and that order is the
+    // point: setting aside the outgoing project's tabs means asking which
+    // project owns each one, which is only answerable while the outgoing
+    // project is still the one in front.
+    assert.deepEqual(switched, ['p1']);
     assert.deepEqual(selected, ['p1']);
-    assert.deepEqual(opened, [{ kind: 'project', id: 'p1' }]);
+    assert.deepEqual(
+      opened,
+      [],
+      'the strip swap owns putting the project tab on screen now, not this slice',
+    );
     assert.equal(workspaceLoads, 1, 'entering a project pulls the tree layer');
   });
 

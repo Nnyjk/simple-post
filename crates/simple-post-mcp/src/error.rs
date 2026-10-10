@@ -35,9 +35,8 @@ impl From<reqwest::Error> for ClientError {
 }
 
 /// Convert a `(status, body)` pair from the web backend into the
-/// JSON-RPC `code` field. The convention here matches what the
-/// existing `simple-post-mcp-proxy` shipped (commit 0a) so AI clients
-/// see the same code on either binary.
+/// JSON-RPC `code` field, so AI clients see the same code whichever
+/// binary serves them.
 pub fn http_status_to_rpc_code(status: u16) -> i64 {
     if status == 401 || status == 403 {
         // Wrong / missing password. Distinct from "backend error" so

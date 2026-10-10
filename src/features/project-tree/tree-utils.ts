@@ -108,10 +108,6 @@ export function countSubtreeEndpoints(branch: CollectionBranch): number {
   );
 }
 
-export function countSubtreeCollections(branch: CollectionBranch): number {
-  return branch.children.reduce((acc, c) => acc + 1 + countSubtreeCollections(c), 0);
-}
-
 export function countTreeEndpoints(branches: CollectionBranch[]): number {
   return branches.reduce((acc, b) => acc + countSubtreeEndpoints(b), 0);
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { History, ChevronDown } from 'lucide-react';
-import { useAppStore, useActiveEndpoint } from '@/stores/app-store';
+import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import type { ApiResponse } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils';
@@ -14,7 +14,10 @@ import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils'
  * slice is built with `useMemo` so we don't allocate a new array every render.
  */
 export function ResponseHistory() {
-  const endpoint = useActiveEndpoint();
+  // History is keyed by endpoint id, and a draft endpoint is keyed by its
+  // `draft:` id — so an unsaved endpoint still accumulates its own send
+  // history instead of showing nothing.
+  const endpoint = useActiveEndpointResource()?.node ?? null;
   // Raw reference — only re-renders when the dictionary itself is replaced.
   const history = useAppStore((s) => s.responseHistory);
   const setLastResponse = useAppStore((s) => s.setLastResponse);

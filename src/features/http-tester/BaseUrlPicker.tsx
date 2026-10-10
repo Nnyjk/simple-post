@@ -10,7 +10,19 @@
  *
  * The component is fully controlled. The parent owns:
  *   - `selection`  — which named slot is active (or "default" / "override")
- *   - `customValue` — text inside the "自定义" inline input
+ *
+ * The list holds the project's definitions and 自定义, and nothing else.
+ * There used to be a 项目默认 row above the definitions plus a "BaseUrl 定义"
+ * section header: both duplicated what the row carrying the 默认 badge
+ * already said, so "follow the project's default" is now that row
+ * itself (see the `isProjectDefault` branch in the map below).
+ *
+ * 自定义 (override) deliberately has **no input of its own**: picking it
+ * hands the URL field over to the user as the whole address, so a second
+ * host box here would be a second source of truth for the same request.
+ * An override that carries a host (rows saved before this split) still
+ * resolves as that host prefix — `resolvedBaseUrl` is non-empty in that
+ * case — and the trigger's sub-label shows it.
  *
  * The parent also passes the resolved baseUrl for the trigger label;
  * we don't compute it here to keep the picker dumb.
@@ -30,7 +42,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Globe, Pencil } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { IconTile } from '@/components/ui/icon-tile';
 import type { HueConcept } from '@/lib/hue';
@@ -56,9 +67,7 @@ export interface BaseUrlPickerProps {
    */
   resolvedBaseUrl: string;
   selection: BaseUrlSelection;
-  customValue: string;
   onSelectionChange: (next: BaseUrlSelection) => void;
-  onCustomValueChange: (next: string) => void;
   className?: string;
 }
 
@@ -70,9 +79,7 @@ export function BaseUrlPicker({
   defaultDefinitionId,
   resolvedBaseUrl,
   selection,
-  customValue,
   onSelectionChange,
-  onCustomValueChange,
   className,
 }: BaseUrlPickerProps) {
   const [open, setOpen] = useState(false);
@@ -120,13 +127,22 @@ export function BaseUrlPicker({
   const triggerLabel = useMemo(() => {
     if (selection.kind === 'definition' && selectedDef) return selectedDef.name;
     if (selection.kind === 'override') return '自定义';
-    return defaultDef ? '项目默认' : '项目默认（无）';
+    // Following the project default reads as *that definition*, not as a
+    // separate "项目默认" choice: the list has no such row, and the trigger
+    // has to name the same thing the list highlights.
+    return defaultDef ? defaultDef.name : '项目默认（无）';
   }, [selection, selectedDef, defaultDef]);
 
+  // The sub-label answers "what host will actually be used?". In
+  // 自定义 mode there may be no host at all — the URL field holds the
+  // whole address — so say that instead of rendering an empty row.
   const triggerSubLabel = useMemo(() => {
+    if (selection.kind === 'override') {
+      return resolvedBaseUrl ? `· ${hostOf(resolvedBaseUrl)}` : '· URL 栏直填完整地址';
+    }
     if (!resolvedBaseUrl) return '';
     return `· ${hostOf(resolvedBaseUrl)}`;
-  }, [resolvedBaseUrl]);
+  }, [selection, resolvedBaseUrl]);
 
   // The accent used for the icon container and the "selected" hint.
   // baseUrl owns its own hue now, so it can no longer be confused with
@@ -181,62 +197,65 @@ export function BaseUrlPicker({
           )}
         >
           <ul className="max-h-80 overflow-auto p-1">
-            <Row
-              selected={selection.kind === 'default'}
-              onSelect={() => {
-                onSelectionChange({ kind: 'default' });
-                setOpen(false);
-              }}
-              concept="baseurl"
-              icon={<Globe className="h-3.5 w-3.5" />}
-              primary={defaultDef ? '项目默认' : '项目默认（无）'}
-              secondary={defaultDef ? `→ ${defaultDef.name}` : '该项目尚未设置默认 baseUrl'}
-              selectedHint={defaultDef ? '默认' : null}
-            />
-            {definitions.length > 0 && (
-              <li className="px-2 pt-2 pb-1 label-caps/60">BaseUrl 定义</li>
+            {definitions.map((def) => {
+              // The row carrying the 默认 badge *is* the "follow the
+              // project's default" choice — a separate 项目默认 row used to
+              // sit above it and say the same thing, so picking that row
+              // and picking this one resolved to the same host. Selecting
+              // this row therefore stores no definition id at all, which
+              // keeps the endpoint tracking whichever definition the
+              // project marks as default later.
+              const isProjectDefault = def.id === defaultDefinitionId;
+              return (
+                <Row
+                  key={def.id}
+                  selected={
+                    selection.kind === 'default'
+                      ? isProjectDefault
+                      : selection.kind === 'definition' && selection.definitionId === def.id
+                  }
+                  onSelect={() => {
+                    onSelectionChange(
+                      isProjectDefault
+                        ? { kind: 'default' }
+                        : { kind: 'definition', definitionId: def.id },
+                    );
+                    setOpen(false);
+                  }}
+                  concept="baseurl"
+                  icon={<Globe className="h-3.5 w-3.5" />}
+                  primary={def.name}
+                  secondary={def.description}
+                  selectedHint={isProjectDefault ? '默认' : null}
+                />
+              );
+            })}
+            {selection.kind === 'default' && !defaultDef && (
+              // Only reachable when the project has no default definition
+              // at all: the endpoint is following the default, but there is
+              // no default to follow. Without this the list would open with
+              // nothing selected and no explanation.
+              <li className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                该项目尚未设置默认 baseUrl
+              </li>
             )}
-            {definitions.map((def) => (
-              <Row
-                key={def.id}
-                selected={selection.kind === 'definition' && selection.definitionId === def.id}
-                onSelect={() => {
-                  onSelectionChange({ kind: 'definition', definitionId: def.id });
-                  setOpen(false);
-                }}
-                concept="baseurl"
-                icon={<Globe className="h-3.5 w-3.5" />}
-                primary={def.name}
-                secondary={def.description}
-                selectedHint={def.id === defaultDefinitionId ? '默认' : null}
-              />
-            ))}
             <Row
               selected={selection.kind === 'override'}
               onSelect={() => {
                 onSelectionChange({ kind: 'override' });
-                // Don't close — the custom input appears and the user
-                // needs to type something before the row is meaningful.
+                // Close: the row's whole job is to hand the URL field to
+                // the user, and they are about to type into it — leaving a
+                // popover open over the URL bar is what made this feel
+                // inert before.
+                setOpen(false);
               }}
               concept="variable"
               icon={<Pencil className="h-3.5 w-3.5" />}
               primary="自定义"
-              secondary={customValue || '在下方输入框填写'}
+              secondary="URL 栏直接填完整地址，不拼接环境前缀"
               selectedHint={null}
             />
           </ul>
-          {selection.kind === 'override' && (
-            <div className="border-t border-border/60 bg-background/30 p-2">
-              <Input
-                value={customValue}
-                onChange={(e) => onCustomValueChange(e.target.value)}
-                placeholder="https://my.custom.host"
-                className="h-8 font-mono text-[11px]"
-                autoFocus
-                data-testid="baseurl-custom-input"
-              />
-            </div>
-          )}
         </div>
       )}
     </div>

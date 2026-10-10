@@ -13,7 +13,7 @@ import {
   Check,
   Wand2,
 } from 'lucide-react';
-import { useAppStore, useActiveEndpoint } from '@/stores/app-store';
+import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
@@ -26,7 +26,10 @@ import { ResponseHistory } from './ResponseHistory';
 export function ResponseViewer() {
   const response = useAppStore((s) => s.lastResponse);
   const pending = useAppStore((s) => s.requestPending);
-  const endpoint = useActiveEndpoint();
+  // The resource form, not the row form: a response can belong to an
+  // endpoint that was never saved, and "保存为示例" keys off this id —
+  // which works just as well for a `draft:`-prefixed one.
+  const endpoint = useActiveEndpointResource()?.node ?? null;
   const addResponseExample = useAppStore((s) => s.addResponseExample);
   const [savedFlash, setSavedFlash] = useState(false);
 
@@ -263,7 +266,9 @@ export function ResponseViewer() {
 
       {/* Body */}
       <div className="min-h-0 flex-1 overflow-auto">
-        {view === 'pretty' && <PrettyView body={response.body} formatted={formatted} />}
+        {view === 'pretty' && (
+          <PrettyView body={response.body} formatted={formatted} formatResult={formatResult} />
+        )}
         {view === 'raw' && (
           <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
             {response.body}
@@ -278,8 +283,15 @@ export function ResponseViewer() {
   );
 }
 
-function PrettyView({ body, formatted }: { body: string; formatted: boolean }) {
-  const formatResult = useMemo(() => tryFormatJson(body), [body]);
+function PrettyView({
+  body,
+  formatted,
+  formatResult,
+}: {
+  body: string;
+  formatted: boolean;
+  formatResult: ReturnType<typeof tryFormatJson>;
+}) {
   const isJson = formatResult.ok;
   const isDark = useIsDark();
 

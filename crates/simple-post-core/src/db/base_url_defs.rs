@@ -44,6 +44,24 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<BaseUrlDefinition, AppErro
     }
 }
 
+/// The project a definition belongs to. Callers need this to gate a
+/// mutation on the owning project — `BaseUrlDefinition` deliberately does
+/// not carry `project_id`, so this is the only way to recover it from a
+/// definition id alone.
+pub fn project_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
+    let pid: Option<String> = conn
+        .query_row(
+            "SELECT project_id FROM base_url_definitions WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .ok();
+    match pid {
+        Some(p) => Ok(p),
+        None => Err(AppError::NotFound(format!("base_url_definition {id}"))),
+    }
+}
+
 // -------------------------------------------------------------------------
 // Writes.
 // -------------------------------------------------------------------------

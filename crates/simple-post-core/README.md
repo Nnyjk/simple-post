@@ -34,7 +34,7 @@ crates/simple-post-core/
 
 ## Why this crate exists
 
-Before commit 3 the modules above lived inside `src-tauri`. The MCP
+The modules above used to live inside `src-tauri`. The MCP
 module (`src-tauri::mcp`) consumed them via `use crate::db::*` /
 `use crate::domain::*` / `use crate::error::*` / etc. Pulling the MCP
 module into its own `simple-post-mcp` crate would have created a

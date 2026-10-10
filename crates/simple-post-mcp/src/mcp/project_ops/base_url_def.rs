@@ -18,6 +18,17 @@ use crate::tool_fn;
 use simple_post_core::domain::BaseUrlDefinition;
 use simple_post_core::error::AppError;
 
+/// Resolve the project that owns a baseUrl definition, for the per-project
+/// permission gate.
+fn owning_project(
+    pool: &simple_post_core::db::DbPool,
+    definition_id: &str,
+) -> Result<String, AppError> {
+    simple_post_core::db::with_conn(pool, |c| {
+        simple_post_core::db::base_url_defs::project_id_of(c, definition_id)
+    })
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct BaseUrlDefCreateArgs {
     pub project_id: String,
@@ -160,7 +171,12 @@ pub(super) async fn tool_base_url_def_update(
 ) -> Result<CallToolResult, AppError> {
     let a: BaseUrlDefUpdateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_update args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, "global", "base_url_def_update").await?;
+    crate::mcp::check_permission(
+        &state.pool,
+        &owning_project(&state.pool, &a.definition_id)?,
+        "base_url_def_update",
+    )
+    .await?;
     let desc = a.description.as_ref().map(|d| d.as_ref().map(String::from));
     let d = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::base_url_defs::update(c, &a.definition_id, a.name.clone(), desc)
@@ -174,7 +190,12 @@ pub(super) async fn tool_base_url_def_delete(
 ) -> Result<CallToolResult, AppError> {
     let a: BaseUrlDefDeleteArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_delete args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, "global", "base_url_def_delete").await?;
+    crate::mcp::check_permission(
+        &state.pool,
+        &owning_project(&state.pool, &a.definition_id)?,
+        "base_url_def_delete",
+    )
+    .await?;
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::base_url_defs::delete(c, &a.definition_id)
     })?;
@@ -187,7 +208,7 @@ pub(super) async fn tool_base_url_def_set_default(
 ) -> Result<CallToolResult, AppError> {
     let a: BaseUrlDefSetDefaultArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_set_default args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_update").await?;
+    crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_set_default").await?;
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::base_url_defs::set_default(c, &a.project_id, Some(&a.definition_id))
     })?;

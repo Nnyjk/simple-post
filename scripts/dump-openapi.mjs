@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // scripts/dump-openapi.mjs
 //
-// Generate `docs/openapi.yaml` (OpenAPI 3.1) from the canonical
-// `public_route_specs()` table in `src-tauri/src/web_api/` (the
-// `web_api.rs` flat file is still accepted as a fallback).
+// Generate an OpenAPI 3.1 document from the canonical
+// `public_route_specs()` table in `src-tauri/src/web_api/spec.rs`.
 //
 // Why parse Rust source instead of calling the binary?
 //   - The OpenAPI doc should stay valid even when the Rust crate fails
@@ -20,16 +19,14 @@
 //   4. Tags internal / omitted routes via a top-level note.
 //
 // Usage:
-//   node scripts/dump-openapi.mjs > docs/openapi.yaml
+//   node scripts/dump-openapi.mjs > openapi.yaml
 //
-// Caveats:
+// Caveat:
 //   - This dumper trusts the literal shape of the `RouteSpec` table —
 //     a Rust refactor that breaks the table (different field names,
-//     different row layout) will silently emit empty yaml. Run
-//     `scripts/check-openapi-coverage.mjs` (commit 7+) to catch drift.
+//     different row layout) will silently emit empty yaml.
 //   - The `summary` text is human-readable; the dumper does no
-//     schema synthesis. See `docs/http-api-reference.md` for request /
-//     response examples.
+//     schema synthesis.
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -46,10 +43,9 @@ const SPEC_FN = 'pub fn public_route_specs() -> Vec<RouteSpec>';
 /**
  * Resolve the Rust source that owns `public_route_specs()`.
  *
- * The spec table has lived in two layouts: the single-file
- * `web_api.rs` and the split `web_api/` module directory. Search the
- * module tree first, fall back to the flat file, so the dumper keeps
- * working across the refactor either way.
+ * Walk the `web_api/` module tree and return the file holding the table.
+ * A flat `web_api.rs` sibling is also accepted, since Rust resolves `mod
+ * web_api;` to either layout.
  */
 function findSpecSource() {
   const candidates = [];
@@ -159,7 +155,7 @@ out.push('  description: |');
 out.push('    Stable HTTP API exposed by `simple-post serve-web`. Endpoints are');
 out.push('    partitioned into two tiers: `public` (this document; covered by');
 out.push('    the v1 contract) and `internal` (UI / supervisor use only; see the');
-out.push('    `web_api.rs` source). Internal endpoints are intentionally absent');
+out.push('    `web_api/` source). Internal endpoints are intentionally absent');
 out.push('    from this document — they may change without notice.');
 out.push('servers:');
 out.push('  - url: http://localhost:4224');
@@ -171,7 +167,11 @@ out.push('        default: localhost');
 out.push('        description: Hostname or LAN IP of the simple-post serve-web instance');
 out.push('paths:');
 for (const [path, methods] of [...byPath.entries()].sort()) {
-  out.push(`  ${path}:`);
+  // axum 0.7 writes path params as `:id`; OpenAPI requires `{id}`.
+  // Emitting the axum form verbatim produces a document that no OpenAPI
+  // 3.1 validator accepts. This is a presentation-only transform — the
+  // axum source keeps `:id`.
+  out.push(`  ${path.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, '{$1}')}:`);
   for (const r of methods) {
     out.push(`    ${r.method.toLowerCase()}:`);
     out.push(`      summary: ${y(r.summary)}`);
@@ -204,7 +204,7 @@ out.push('x-shape-references:');
 out.push('  note: |');
 out.push('    Request / response shapes referenced via `x-request-shape` / `x-response-shape`');
 out.push('    are domain types defined in `src-tauri/src/domain.rs` and serialised with');
-out.push('    `#[serde(rename_all = "camelCase")]`. See `docs/http-api-reference.md`');
-out.push('    for worked curl examples.');
+out.push('    `#[serde(rename_all = "camelCase")]`.');
+out.push('    Worked curl examples: see the README `serve-web` section.');
 
 process.stdout.write(out.join('\n') + '\n');

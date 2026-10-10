@@ -16,7 +16,7 @@ pub(crate) async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<McpStatus
 }
 
 // =========================================================================
-// MCP capability policy (commit 1: feat(mcp): three-tier capability policy)
+// MCP capability policy
 // =========================================================================
 //
 // Three REST endpoints mirroring the Tauri commands in `commands/`:

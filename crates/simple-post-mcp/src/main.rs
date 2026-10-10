@@ -1,7 +1,6 @@
 // crates/simple-post-mcp/src/main.rs
 //
-// Standalone MCP entry point. Replaces the placeholder stub from
-// commit 3 with a real CLI that talks JSON-RPC over stdin/stdout to
+// Standalone MCP entry point. Talks JSON-RPC over stdin/stdout to
 // a running `simple-post serve-web` instance.
 //
 // Usage:
@@ -12,7 +11,7 @@
 //
 // All flags also accept env-var overrides (SIMPLE_POST_WEB_URL /
 // SIMPLE_POST_WEB_PASSWORD / SIMPLE_POST_MCP_CAPABILITY); the flag
-// wins when both are set. See plan.md 工作流 4 (commit 4).
+// wins when both are set.
 
 use std::io::IsTerminal;
 use std::process::ExitCode;

@@ -2,16 +2,27 @@ import { CornerDownRight, FilePlus, FolderPlus } from 'lucide-react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { ResourceNode } from '@/types/domain';
 import type { ContextMenuItem } from '../TreeContextMenu';
-import type { NewType } from '@/stores/app-store';
+import type { NewDraftKind } from '@/stores/app-store';
 
 export interface InlineMenuBindings {
   /** Every node of the active project, any type, any depth. */
   nodes: ResourceNode[];
+  /**
+   * Opens the create *dialog* for the kinds that still have one.
+   * Endpoints are deliberately absent — they are created by
+   * `createEndpointAt`, not by a form.
+   */
   openNewItemWithIntent: (opts: {
-    type: NewType;
+    type: NewDraftKind;
     parentModuleId?: string;
     parentCollectionId?: string;
   }) => void;
+  /**
+   * Create an endpoint under `parentId` and drop it into inline rename.
+   * Resolves once the row exists; the caller owns the rename target, so
+   * it can be the tree row it just added.
+   */
+  createEndpointAt: (parentId: string) => Promise<void>;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;
 }
 
@@ -24,10 +35,14 @@ export interface InlineMenuBindings {
  * There is no project-level "+" any more: the project used to be a row
  * in this tree, and that row owned the "create the first module of this
  * project" entry point. With the project gone from the tree, that entry
- * point is the empty state in `ProjectTree` plus the panel's own "新建"
- * button, both of which reach the same modal.
+ * point is the 「新建模块」 row at the top of the list.
  */
-export function useInlineMenus({ nodes, openNewItemWithIntent, setMenu }: InlineMenuBindings) {
+export function useInlineMenus({
+  nodes,
+  openNewItemWithIntent,
+  createEndpointAt,
+  setMenu,
+}: InlineMenuBindings) {
   const openModulePlusMenu = (moduleId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -38,14 +53,15 @@ export function useInlineMenus({ nodes, openNewItemWithIntent, setMenu }: Inline
         icon: <FolderPlus className="h-3.5 w-3.5" />,
         onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: moduleId }),
       },
-      // A module takes an endpoint directly, so this needs no collection
-      // to exist first — passing only `parentModuleId` is the whole
-      // "直接放在模块下" intent.
       {
         kind: 'item',
         label: '新建接口',
         icon: <FilePlus className="h-3.5 w-3.5" />,
-        onClick: () => openNewItemWithIntent({ type: 'endpoint', parentModuleId: moduleId }),
+        // The module *is* the parent — an endpoint may sit directly under
+        // one — so this needs no collection to exist first and no dialog.
+        onClick: () => {
+          void createEndpointAt(moduleId);
+        },
       },
     ];
     setMenu({ x: e.clientX, y: e.clientY, items });
@@ -57,9 +73,8 @@ export function useInlineMenus({ nodes, openNewItemWithIntent, setMenu }: Inline
     const col = nodes.find((c) => c.id === collectionId && c.kind === 'collection');
     if (!col) return;
     // A collection's parent can be another collection, so the owning
-    // module is an ancestor, not `col.parentId`. The modal only uses
-    // `parentModuleId` to preselect the "所属模块" dropdown — the actual
-    // write target is `parentCollectionId`.
+    // module is an ancestor, not `col.parentId`. The dialog only uses it
+    // to name where the row will land; the write target is the collection.
     const moduleId = owningModuleId(nodes, collectionId);
     const items: ContextMenuItem[] = [
       {
@@ -77,12 +92,9 @@ export function useInlineMenus({ nodes, openNewItemWithIntent, setMenu }: Inline
         kind: 'item',
         label: '新建接口',
         icon: <FilePlus className="h-3.5 w-3.5" />,
-        onClick: () =>
-          openNewItemWithIntent({
-            type: 'endpoint',
-            parentModuleId: moduleId ?? '',
-            parentCollectionId: col.id,
-          }),
+        onClick: () => {
+          void createEndpointAt(col.id);
+        },
       },
     ];
     setMenu({ x: e.clientX, y: e.clientY, items });

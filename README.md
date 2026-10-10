@@ -2,7 +2,7 @@
 
 一款面向 Windows 10/11 的现代化桌面 API 调试 / 管理工具，核心差异化：**自带 MCP Server**，让 AI（Claude Desktop、Cursor、Cline）能直接读写接口、生成文档、参与调试。
 
-> 当前阶段：**v0.1 MVP 已交付**（详见下方「路线图」）。四种分发形态均可运行：Tauri 桌面应用、`serve-web` 无头 REST + SPA、Docker web 镜像、以及独立的 `simple-post-mcp` 二进制（不发布到 npm 包）。数据层已从早期内存 mock 迁移为 SQLite 持久化。
+> 当前阶段：**v0.1.0 beta**（详见下方「路线图」）。三种分发形态均可运行：Tauri 桌面应用、`serve-web` 无头 REST + SPA、以及独立的 `simple-post-mcp` 二进制（不发布到 npm 包）。数据持久化在 SQLite。
 
 ## 跑起来
 
@@ -25,7 +25,7 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 
 如果要把 `simple-post serve-web` 部署在 `https://host/sp/`，需要：
 
-1. 用 `--public-base-path /sp`（或 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`）启动 binary —— commit 5
+1. 用 `--public-base-path /sp`（或 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`）启动 binary
 2. 反代转发 `/sp/*` → `http://127.0.0.1:4173/`，并把 `/sp` 前缀剥离
 
 完整示例见：
@@ -42,7 +42,7 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 持久化：Zustand slice → `invokeCmd()` → Tauri IPC 或 `/api/*` → `simple-post-core` → SQLite（WAL 模式）
 - 完整 CRUD：项目 / 模块 / 集合 / 接口的增删改查 + 复制接口 + 级联清理（级联由 schema 保证，客户端只提交要删的节点 id）
 - 排序：模块 / 集合 / 接口的上下移
-- 响应：每个 endpoint 最多 10 条历史（FIFO）+ 用户保存的示例
+- 响应：每个 endpoint 最多 10 条历史（FIFO，**仅内存**，重启即失）+ 用户保存的示例
 - 偏好持久化：主题（dark/light/system）+ 请求设置（超时 / 跟随重定向 / 响应上限）写 localStorage
 
 ### 顶栏
@@ -84,7 +84,7 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 空集合 / 未发送时显示友好引导
 
 ### 设置抽屉
-- 环境变量：3 个环境 × 3 个变量，`{{var}}` 实时编辑
+- 环境变量：`{{var}}` 实时编辑，随项目创建，可重命名 / 删除
 - MCP Server 状态：running 指示 + daemon 实时上报的已注册工具列表（数量动态显示，取决于当前 capability 策略下的可见工具集）
 - 主题：dark / light / system 切换，立即生效并持久化
 - 请求设置：超时 / 跟随重定向 / 最大响应体积
@@ -102,28 +102,19 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 
 ## 路线图
 
-UI 先行阶段的所有打磨项（P0/P1/P2）已落地。v0.1 已交付；下面是后续阶段。**注意**：v0.2 最初列的部分条目在实现过程中已提前完成（下方已勾选），勾选状态以代码为准。
+v0.1.0 beta 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 `simple-post-mcp` 二进制，共用一套 Rust 核心。下面是计划中的后续阶段，勾选状态以代码为准。
 
-### v0.1 MVP — 已全部交付
+### v0.2
 
-- [x] **Tauri 壳**：`src-tauri/` 初始化、Cargo.toml、tauri.conf.json、图标
-- [x] **Rust 主进程**：SQLite（`rusqlite` + `r2d2`）、HTTP（`reqwest`）、MCP 子进程桥
-- [x] **真实持久化**：Zustand store → Tauri command → `simple-post-core`（SQLite via `rusqlite`）
-- [x] **真实请求**：渲染端 → Tauri command → `reqwest` → 返回结构化响应
-- [x] **MCP Server**：拆到独立 `crates/simple-post-mcp/` workspace member，`daemon_http.rs`（axum HTTP daemon）+ `stdio_loop.rs`（stdio bridge）+ `mcp/mod.rs`（JSON-RPC dispatcher）— 向 AI 客户端（Claude Desktop / Cursor / Cline）暴露 44 个 MCP 工具。同一 crate 以独立 `simple-post-mcp` 二进制分发；不发布到 npm，AI 客户端也可直连 daemon 的 HTTP 端点。
-- [x] **打包**：NSIS 安装包 + 便携 zip
-
-### v0.2（+2 周）
-
-- [x] 鉴权扩展：Bearer / Basic / API Key（`AuthType` 四变体已落地，含 apikey 的 header/query 注入）
+- [x] 鉴权扩展：Bearer / Basic / API Key（含 apikey 的 header/query 注入）
 - [ ] 鉴权扩展：OAuth2 简化版
-- [ ] 响应历史 & 收藏（持久化到 SQLite）
+- [ ] 响应历史持久化到 SQLite（当前历史仅在内存中）
 - [ ] 导入 Postman v2.1 / OpenAPI 3.0
 - [ ] 导出 OpenAPI 3.0
-- [x] MCP 写工具：以 `endpoint_create` / `endpoint_update` / `endpoint_search` / `endpoint_delete` 交付（v0.2 原计划的 `api_*` 命名未采用，见 44 工具清单）
+- [x] MCP 写工具：`endpoint_create` / `endpoint_update` / `endpoint_search` / `endpoint_delete`
 - [ ] MCP 进程可视化（设置页：PID、状态、tail 日志）
 
-### v0.3（+2 周）
+### v0.3
 
 - AI 文档生成（端点 → Markdown 文档）
 - AI 测试用例生成（schema → 测试）
@@ -198,5 +189,4 @@ curl http://localhost:4173/api/healthz
 - **存储**：SQLite（`rusqlite` + `r2d2`，整个 workspace 通过 `simple-post-core::db` 共享连接池；WAL + `foreign_keys=ON` + `busy_timeout=3000`）
 - **MCP 模式**：stdio 子进程桥（本地 AI 客户端）+ HTTP `POST /mcp`（`serve-web` 子命令，支持远程 / Bearer 鉴权 / 反代 base path）
 - **UI 风格**：暗色为主，shadcn 变量层，可切亮色
-- **第一阶段**：UI 先行 ✓（已完成 2026-09-11）
-- **当前阶段**：v0.1 MVP 已交付。四种分发形态（Tauri 桌面 / `serve-web` 无头 Web / Docker web 镜像 / 独立 MCP 二进制）共用一套 Rust 核心，`SIMPLE_POST_DATA_DIR`（或 `%APPDATA%/simple-post`）是唯一数据位置。
+- **数据位置**：三种分发形态（Tauri 桌面 / `serve-web` 无头 Web / 独立 MCP 二进制）共用一套 Rust 核心，`SIMPLE_POST_DATA_DIR`（或 `%APPDATA%/simple-post`）是唯一数据位置。

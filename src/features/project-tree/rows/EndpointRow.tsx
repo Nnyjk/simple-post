@@ -1,10 +1,8 @@
-﻿import { FileCode2 } from 'lucide-react';
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
+﻿import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { MethodPill } from '@/components/ui/method-pill';
 import { InlineEdit } from '@/components/ui/InlineEdit';
-import { IconTile } from '@/components/ui/icon-tile';
 import type { DropZone } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
@@ -39,6 +37,7 @@ export function EndpointRow({
   onClick,
   onStartEdit,
   onSaveEdit,
+  onCancelEdit,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -85,7 +84,11 @@ export function EndpointRow({
               : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
           )}
         >
-          <IconTile concept="endpoint" size="sm" icon={<FileCode2 className="h-3 w-3" />} />
+          {/* The HTTP method is the one icon this tree keeps: it is the only
+              marker here that carries data the row does not already show.
+              The generic endpoint tile that used to sit in front of it
+              repeated what the row type already is, and pushed the method
+              — the thing you scan for — one slot further right. */}
           <MethodPill
             method={detail.method}
             size="xs"
@@ -95,6 +98,17 @@ export function EndpointRow({
           <InlineEdit
             value={endpoint.name}
             onSave={onSaveEdit}
+            // Controlled by the tree's `editing` target, not by a local
+            // double-click: creating an endpoint from the "+" menu has to
+            // be able to drop the new row straight into rename, and that
+            // signal arrives as tree state. `false` (the user finished or
+            // cancelled) is the only transition this row acts on — opening
+            // is the tree's business, and the row's own double-click
+            // reaches it through `onStartEdit` above.
+            editing={isEditing}
+            onEditingChange={(open) => {
+              if (!open) onCancelEdit();
+            }}
             className="flex-1"
             display={() => <span className="flex-1 truncate">{endpoint.name}</span>}
           />

@@ -107,6 +107,123 @@ fn every_capability_row_names_a_registered_tool() {
     );
 }
 
+/// Gate B regression net — a permission check must never be discarded.
+///
+/// `.ok()` on a `check_permission(..).await` result silently swallows a
+/// `PermissionDenied`, which turns the per-project gate into a no-op for
+/// that tool. It shipped once on `api_call_endpoint`, the one tool that
+/// performs an outbound HTTP request. Propagate with `?` instead.
+#[test]
+fn no_permission_check_result_is_discarded() {
+    let offenders = source_files()
+        .into_iter()
+        .filter_map(|(path, text)| {
+            let swallowed = text.lines().any(|l| l.trim_start().starts_with(".ok();"));
+            let gates = text.contains("check_permission(");
+            (swallowed && gates).then_some(path)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        offenders.is_empty(),
+        "these files call check_permission and also end a statement with `.ok();` \
+         — confirm each one is a deliberate, non-permission discard: {offenders:?}"
+    );
+}
+
+/// Gate B regression net — never gate a single-resource tool against `"global"`.
+///
+/// `agent_permissions.project_id` is an FK to `projects(id)`, and project
+/// ids are minted `proj_<millis>`, so `"global"` can never have a row. The
+/// lookup then falls back to `Permission::default()` = `ReadCall`, while
+/// any write tool requires `Full` — so `ReadCall < Full` denies and the
+/// tool is permanently dead while still looking correctly registered. This
+/// shipped on five tools at once.
+///
+/// Two `Read`-tier list tools legitimately have no single owning project
+/// (`endpoint_list` / `endpoint_search` with no `project_id` scope every
+/// project), so `"global"` is the honest answer there and they are allowed
+/// explicitly. They pass only because `ReadCall >= Read`; if either is ever
+/// promoted above `Read` this allowlist must be revisited, because the gate
+/// would start denying every call.
+#[test]
+fn no_gate_is_passed_the_literal_global() {
+    const ALLOWED: &[&str] = &["endpoint_list", "endpoint_search"];
+    let offenders = source_files()
+        .into_iter()
+        .filter_map(|(path, text)| {
+            // Match the *argument*, not one spelling of the call, so
+            // `check_permission(&p, "global", ..)` and
+            // `check_permission(&p, x.unwrap_or("global"), ..)` are both
+            // caught. A call is scanned up to its `;`, because the argument
+            // sits after nested parens (`&state.pool`) that a naive
+            // "up to the first `)`" scan would stop at.
+            //
+            // Each hit is judged by the tool name in the SAME call, not by a
+            // file-wide tally: an earlier version counted allowlisted names
+            // anywhere in the file, so one mention in a doc comment
+            // whitewashed every real offender in that file.
+            let offenders = text
+                .match_indices("check_permission(")
+                .filter_map(|(i, _)| {
+                    let tail = &text[i..];
+                    let end = tail.find(';')?;
+                    let call = &tail[..end];
+                    if !call.contains("\"global\"") {
+                        return None;
+                    }
+                    let allowed = ALLOWED.iter().any(|a| call.contains(&format!("\"{a}\"")));
+                    (!allowed).then(|| (path.clone(), call.trim().replace('\n', " ")))
+                })
+                .collect::<Vec<_>>();
+            (!offenders.is_empty()).then_some(offenders)
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    assert!(
+        offenders.is_empty(),
+        "these files gate against the literal \"global\", which is not a project id \
+         and makes every call fail closed against ReadCall. Only the unscoped \
+         Read-tier list tools may do so: {offenders:?}"
+    );
+}
+
+/// Every `.rs` file in this crate, with its contents. The two tests above
+/// are source-level rather than behavioural on purpose: the bug they guard
+/// is invisible to a passing test suite, because a permanently-denied tool
+/// still returns a well-formed `PermissionDenied`.
+fn source_files() -> Vec<(String, String)> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                // Skip test modules: this file quotes the very call shape it
+                // is looking for in its own doc comments, so scanning it
+                // would report itself as an offender forever.
+                let is_test = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with("_test.rs") || n == "mod_test.rs");
+                if is_test {
+                    continue;
+                }
+                if let Ok(text) = std::fs::read_to_string(&path) {
+                    out.push((path.display().to_string(), text));
+                }
+            }
+        }
+    }
+    assert!(!out.is_empty(), "source_files() found no .rs files");
+    out
+}
+
 /// `dispatch` for an unknown name returns `NotFound`. This is the
 /// error path the JSON-RPC handler turns into `is_error: true`.
 #[tokio::test]

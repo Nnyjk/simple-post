@@ -51,12 +51,15 @@
  * --------------------------------------------------------------------------
  */
 
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { createBootstrapSlice } from './bootstrap-slice';
 import { createCrudSlice } from './crud-slice';
 import { createDirtyTabsSlice } from './dirty-tabs-slice';
 import { createUiSlice } from './ui-slice';
 import { createMcpSlice } from './mcp-slice';
+import type { DraftEndpoint } from './store-types';
+import type { EndpointDetail, ResourceNode } from '@/types/domain';
 
 // Compose the AppState type from the intersection of all slices. The slice
 // creators export both their `*Slice` types and the `create*` function;
@@ -114,7 +117,13 @@ export const useActiveEnvironment = () =>
   useAppStore((s) => s.environments.find((e) => e.id === s.activeEnvironmentId));
 
 /**
- * The node behind the active endpoint, or `null`.
+ * The node behind the active **saved** endpoint, or `null`.
+ *
+ * Answers "a row in `nodes`" only. An unsaved draft endpoint is not one —
+ * it exists solely in `draftEndpoints` — so this returns `null` for it by
+ * design. Anything that renders an endpoint, rather than reasoning about
+ * the database, wants [`useActiveEndpointResource`] instead, which
+ * answers for both storage forms in one shape.
  *
  * One selector, not a joined `{ node, detail }` object. Zustand v5
  * compares selector results with `Object.is`, so building a fresh object
@@ -143,6 +152,117 @@ export const useActiveEndpointDetail = () =>
     return id ? s.endpointDetails[id] : undefined;
   });
 
+// ---------------------------------------------------------------------------
+//  Endpoint resource — saved row or in-memory draft, one shape
+// ---------------------------------------------------------------------------
+
+/**
+ * The endpoint the active tab shows, whether it has been saved yet.
+ *
+ * WHY THIS IS NOT JUST THE TWO SELECTORS ABOVE
+ * --------------------------------------------
+ * `createEndpointAt` no longer writes anything: a new endpoint is a
+ * `DraftEndpoint` in memory until Save persists it (see
+ * `slices/ui-draft-endpoints.ts`). A draft has no `nodes` entry and no
+ * `endpoint_details` row, so both selectors above answer "nothing" for
+ * one — and every consumer would then have to re-answer "is there
+ * something here, and is it saved?" for itself.
+ *
+ * Synthesising the two missing halves puts a draft in front of consumers
+ * as the *same shape* as a saved endpoint. That is not a convenience
+ * shortcut: it is what lets the HTTP tester run one code path, so an
+ * unsaved endpoint is debuggable with the same editors, the same
+ * validation and the same cURL preview as a saved one — which is the
+ * entire reason to allow sending before saving.
+ *
+ * Note what is deliberately *not* synthesised: `params` / `headers` /
+ * `body`. Those live in `endpointDrafts[draftId]`, keyed by the same id,
+ * and are patch-semantics against the detail this function returns. The
+ * tester's existing overlay (`draft?.params ?? detail?.params ?? []`)
+ * therefore picks them up untouched, and a draft nobody has edited
+ * correctly reports none.
+ *
+ * The allocation is in `useMemo`, never in a selector — see the hard
+ * constraint at the top of this file.
+ */
+export function useActiveEndpointResource():
+  | { id: string; isDraft: true; node: ResourceNode; detail: EndpointDetail }
+  | { id: string; isDraft: false; node: ResourceNode; detail: EndpointDetail }
+  | null {
+  const tabKind = useAppStore((s) => s.openTabs.find((t) => t.id === s.activeTabId)?.kind);
+  const savedNode = useAppStore((s) =>
+    s.activeTabId
+      ? (s.nodes.find((n) => n.id === s.activeTabId && n.kind === 'endpoint') ?? null)
+      : null,
+  );
+  const savedDetail = useAppStore((s) =>
+    s.activeTabId ? s.endpointDetails[s.activeTabId] : undefined,
+  );
+  const draft = useAppStore((s) => (s.activeTabId ? s.draftEndpoints[s.activeTabId] : undefined));
+
+  return useMemo(() => {
+    if (tabKind === 'endpoint-draft') {
+      // A draft tab whose document is gone (discarded, or pruned out from
+      // under us) has nothing to show. `null` is the honest answer and
+      // the caller's empty state covers it.
+      if (!draft) return null;
+      return { id: draft.id, isDraft: true, node: draftNode(draft), detail: draftDetail(draft) };
+    }
+    if (tabKind === 'endpoint') {
+      if (!savedNode || !savedDetail) return null;
+      return { id: savedNode.id, isDraft: false, node: savedNode, detail: savedDetail };
+    }
+    return null;
+  }, [tabKind, savedNode, savedDetail, draft]);
+}
+
+/**
+ * A draft presented as a tree row.
+ *
+ * A draft is not in `nodes` and never will be until Save, so `sortOrder`
+ * is a placeholder — `addNode` assigns the real one when the row is
+ * finally written. `updatedAt` mirrors `createdAt` because nothing has
+ * happened to this "row" since it was born.
+ */
+function draftNode(d: DraftEndpoint): ResourceNode {
+  return {
+    id: d.id,
+    rootId: d.rootId,
+    parentId: d.parentId,
+    kind: 'endpoint',
+    name: d.name,
+    description: d.description,
+    sortOrder: 0,
+    createdAt: d.createdAt,
+    updatedAt: d.createdAt,
+  };
+}
+
+/**
+ * A draft's document fields presented as an `EndpointDetail`.
+ *
+ * `params` / `headers` / `body` start empty on purpose — see the note on
+ * `useActiveEndpointResource`. They are not "lost": the request-config
+ * editors write them into `endpointDrafts` under this same id, and
+ * `saveDraftEndpoint` merges both halves into the single row it writes.
+ */
+function draftDetail(d: DraftEndpoint): EndpointDetail {
+  return {
+    nodeId: d.id,
+    method: d.method,
+    url: d.url,
+    environmentId: d.environmentId,
+    baseUrlDefinitionId: d.baseUrlDefinitionId,
+    baseUrlOverride: d.baseUrlOverride,
+    params: [],
+    headers: [],
+    body: { mode: 'none', content: '' },
+    auth: d.auth,
+    docs: d.docs,
+    tags: d.tags,
+  };
+}
+
 // ---------- re-exports for consumer-facing types ----------
 // The slices declare their types alongside their slice creators; this barrel
 // re-exports the ones consumers import directly from `@/stores/app-store` so
@@ -151,6 +271,7 @@ export const useActiveEndpointDetail = () =>
 // also makes any future slice refactor invisible to consumers.
 
 export type { Theme, RequestSettings } from './store-types';
-export type { NewType, TabKind, SettingsCategoryId } from './store-types';
+export type { NewDraftKind, TabKind, SettingsCategoryId } from './store-types';
 export type { OpenTab, EndpointDraft, NewItemDraft, ApiResponseExample } from './store-types';
-export { SETTINGS_TAB_ID } from './store-types';
+export type { DraftEndpoint } from './store-types';
+export { SETTINGS_TAB_ID, DRAFT_ID_PREFIX, UNTITLED_ENDPOINT_NAME } from './store-types';

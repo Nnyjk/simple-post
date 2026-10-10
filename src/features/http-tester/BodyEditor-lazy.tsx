@@ -15,19 +15,30 @@
  */
 import { Suspense, lazy } from 'react';
 import type { RequestBody } from '@/types/domain';
+import type { FormatResult } from '@/lib/utils';
 
 const BodyEditorImpl = lazy(() => import('./BodyEditor').then((m) => ({ default: m.BodyEditor })));
 
 export function BodyEditor({
   value,
   onChange,
+  validationError,
+  onFormatResult,
 }: {
   value: RequestBody;
   onChange: (body: RequestBody) => void;
+  /** Pinned format error, owned by HttpTester — see BodyEditor's props. */
+  validationError?: string | null;
+  onFormatResult?: (result: FormatResult) => void;
 }) {
   return (
     <Suspense fallback={<EditorSkeleton />}>
-      <BodyEditorImpl value={value} onChange={onChange} />
+      <BodyEditorImpl
+        value={value}
+        onChange={onChange}
+        validationError={validationError}
+        onFormatResult={onFormatResult}
+      />
     </Suspense>
   );
 }

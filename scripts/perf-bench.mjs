@@ -4,9 +4,10 @@
 //   node scripts/perf-bench.mjs [--target URL] [--n N] [--assert]
 //
 // By default hits http://127.0.0.1:4173 (the dev port from
-// `npm run dev:split`); --target http://localhost:8080 covers the docker
-// / nginx-deployed setup. --assert enforces the budget: p95 < 200ms
-// (commit 5's plan requirement) and exits non-zero on regression.
+// `npm run dev:split`); --target points the bench at any other running
+// instance (e.g. one behind an nginx reverse proxy).
+// --assert enforces the budget: p95 < 200ms
+// and exits non-zero on regression.
 //
 // The script is silent (no JSON body, no auth) so it measures pure
 // network + axum overhead, not SQLite. The /api/healthz handler is the

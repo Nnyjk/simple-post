@@ -40,7 +40,7 @@ import type {
 } from '@/types/domain';
 import type { RequestSettings } from '@/stores/app-store';
 import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
-import { buildFetchInit } from './http-build';
+import { buildFetchInit, type PreparedRequest } from './http-build';
 
 export interface SendInput {
   method: HttpMethod;
@@ -294,12 +294,83 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
 }
 
 // ---------------------------------------------------------------------------
+// Prepared-request send — construction and execution, finally one path.
+// ---------------------------------------------------------------------------
+
+export interface SendPreparedInput {
+  /**
+   * The finished request, as produced by `prepareRequest`. The caller
+   * owns construction (base URL join, `{{var}}` resolution, header
+   * ordering, auth reduction) and this function only executes it.
+   */
+  request: PreparedRequest;
+  settings: RequestSettings;
+  signal?: AbortSignal;
+}
+
+/**
+ * Send an already-prepared request.
+ *
+ * The point of this entry point is that what is sent is *the same object*
+ * the preview renders. `sendEndpoint` hands URL composition to the
+ * backend, which meant the cURL preview (frontend rules) and the actual
+ * send (Rust rules) were two implementations kept in sync by hand — and
+ * they did not always agree. Calling `prepareRequest` once and sending
+ * the result makes that divergence unrepresentable.
+ *
+ * Headers travel as a tuple list rather than a `Record`: Rust
+ * deserialises `Vec<(String, String)>`, and the web bridge
+ * (`POST /api/http/send`) JSON-encodes a tuple list verbatim, so this is
+ * the one shape that works on both sides. A `Record` would also drop a
+ * repeated header name.
+ *
+ * ⚠️ Same caveat as [`sendRequest`]: the URL is caller-supplied, so the
+ * backend becomes a proxy for it. `OutboundPolicy` still applies.
+ *
+ * Never throws — failures come back as `status: 0` with a distinguishing
+ * `statusText`, exactly as from `sendRequest`.
+ */
+export async function sendPreparedRequest(input: SendPreparedInput): Promise<ApiResponse> {
+  const { request } = input;
+  // The envelope mapper / error builders only read `method` and
+  // `settings.timeoutMs` off this shape; the params/headers/body/auth
+  // fields are already baked into `request`, so the synthetic values
+  // below are never consulted. Same trick `sendEndpoint` uses.
+  const shape: SendInput = {
+    method: request.method,
+    url: request.url,
+    params: [],
+    headers: [],
+    body: { mode: 'none', content: '' },
+    auth: { kind: 'none' },
+    settings: input.settings,
+  };
+  const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
+
+  return invokeAndMap(
+    {
+      method: request.method,
+      url: request.url,
+      // `request.headers` is already `[name, value][]` — pass it as-is.
+      headers: request.headers,
+      body: request.body,
+      timeoutMs: input.settings.timeoutMs,
+      followRedirects: input.settings.followRedirects,
+      maxResponseSizeKb: input.settings.maxResponseSizeKb,
+    },
+    shape,
+    request.url,
+    options,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Endpoint-scoped send — what the UI's Send button uses.
 // ---------------------------------------------------------------------------
 
 export interface SendEndpointInput {
-  /** Stored endpoint to send. The backend reads method, params,
-   *  headers, body, auth and the base-URL definition from the database. */
+  /** Stored endpoint to send. The backend reads the base-URL definition
+   *  and environment rows from the database. */
   endpointId: string;
   /** Draft URL **path** (no base URL) from the URL input, or omitted to
    *  use the stored one. The input box only ever holds the path, so this
@@ -310,6 +381,16 @@ export interface SendEndpointInput {
    *  the database's `is_active` does not follow the selection. */
   environmentId?: string;
   method: HttpMethod;
+  /**
+   * The request configuration **as it appears on screen** — params,
+   * headers and body are drafts until Save, so without these the wire
+   * would carry the stored rows while the user reads their unsaved edits
+   * in the editor. `EndpointSendOverrides` already carries these three;
+   * the renderer's Send button just wasn't using them.
+   */
+  params?: KeyValue[];
+  headers?: KeyValue[];
+  body?: RequestBody;
   settings: RequestSettings;
   signal?: AbortSignal;
 }
@@ -346,15 +427,20 @@ export async function sendEndpoint(input: SendEndpointInput): Promise<ApiRespons
       {
         endpointId: input.endpointId,
         overrides: {
-          // All three travel. `url` and `method` are the renderer's
-          // unsaved draft; `environmentId` is the ENV pill's selection.
-          // None is redundant: the method picker and URL box write to the
-          // store draft rather than the endpoint row, and the ENV pill is
-          // Zustand-only, so omitting any of them makes the wire disagree
-          // with what the user sees.
+          // All of these travel, and none is redundant. `url`, `method`,
+          // `params`, `headers` and `body` are the renderer's unsaved
+          // draft; `environmentId` is the ENV pill's selection.
+          // The draft fields are what make Send mean "send what I see":
+          // params / headers / body only reach the database on Save, so
+          // omitting them here would transmit the previous save.
+          // The ENV pill is Zustand-only, so its selection cannot be
+          // read back from the row either.
           url: input.urlOverride,
           method: input.method,
           environmentId: input.environmentId,
+          params: input.params,
+          headers: input.headers,
+          body: input.body,
         },
         settings: {
           timeoutMs: input.settings.timeoutMs,

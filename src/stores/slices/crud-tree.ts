@@ -78,10 +78,9 @@ export interface TreeCrudActions {
   /**
    * Duplicate an endpoint. Returns the new id **synchronously** because
    * the caller (ProjectTree) immediately activates the new tab — making
-   * this async would break the existing UX. Implementation: optimistic
-   * local copy first, then background invoke to persist; on invoke
-   * success the temp id is replaced with the persisted node, on failure
-   * the optimistic copy is removed.
+   * this async would break the existing UX. Implementation: mint the id
+   * here, write the copy into the store optimistically, then persist it
+   * with that same id; on invoke failure the optimistic copy is removed.
    */
   duplicateEndpoint: (id: string) => string | null;
 }
@@ -212,10 +211,18 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
   },
 
   /**
-   * Optimistic duplicate + background invoke. Returns the temp id
-   * synchronously so the caller (ProjectTree) can activate the new
-   * tab immediately. On invoke success the temp rows are replaced by
-   * the persisted ones; on failure they're removed and we log.
+   * Optimistic duplicate + background invoke. Returns the id
+   * synchronously so the caller (ProjectTree) can activate the new tab
+   * and start renaming it immediately.
+   *
+   * The id is minted *here* and sent as `newId`, and the backend adopts
+   * it (`db::nodes::duplicate` no longer mints its own). That is the whole
+   * contract: when the server used to answer with a different id, the tab
+   * strip, `activeEndpointId` and the in-progress rename were all left
+   * pointing at the optimistic id — a row nothing owned — and the tab
+   * rendered as "接口已删除". `addNode` solves the same problem by
+   * trusting the returned id, but a duplicate cannot: its caller has
+   * already acted on the id before this call returns.
    */
   duplicateEndpoint: (id) => {
     const state = get();
@@ -255,26 +262,21 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         },
       };
     });
-    invokeCmd<ResourceNode>(COMMANDS.nodesDuplicate, { id })
-      .then((persisted) => {
-        // Swap the temp rows with the persisted ones (the server may
-        // assign a different id or normalise fields).
-        set((s) => {
-          const nextNodes = s.nodes.map((n) => (n.id === newId ? persisted : n));
-          const nextDetails = { ...s.endpointDetails };
-          delete nextDetails[newId];
-          nextDetails[persisted.id] = { ...originalDetail, nodeId: persisted.id };
-          return { nodes: nextNodes, endpointDetails: nextDetails };
-        });
-      })
-      .catch((e) => {
-        console.error('[store] nodes_duplicate failed', e);
-        set((s) => {
-          const nextDetails = { ...s.endpointDetails };
-          delete nextDetails[newId];
-          return { nodes: s.nodes.filter((n) => n.id !== newId), endpointDetails: nextDetails };
-        });
+    // `newId` is not a hint — it is the row's id, and the server adopts it
+    // (`db::nodes::duplicate` no longer mints its own). So there is nothing
+    // to reconcile when this resolves: the optimistic row *is* the row that
+    // was written. Swapping in the server's copy used to be the id fix,
+    // and once it stopped being one it only overwrote whatever the user
+    // had typed into the copy in the meantime. Only a failure has work to
+    // do — drop the copy that no longer exists anywhere else.
+    invokeCmd<ResourceNode>(COMMANDS.nodesDuplicate, { id, newId }).catch((e) => {
+      console.error('[store] nodes_duplicate failed', e);
+      set((s) => {
+        const nextDetails = { ...s.endpointDetails };
+        delete nextDetails[newId];
+        return { nodes: s.nodes.filter((n) => n.id !== newId), endpointDetails: nextDetails };
       });
+    });
     return newId;
   },
 });

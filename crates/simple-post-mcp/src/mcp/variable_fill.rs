@@ -109,13 +109,17 @@ async fn tool_api_resolve_template(
     if a.template.is_empty() {
         return Err(AppError::Validation("template must not be empty".into()));
     }
-    crate::mcp::check_permission(
-        &state.pool,
-        a.env_id.as_deref().unwrap_or("global"),
-        "api_resolve_template",
-    )
-    .await
-    .ok();
+    // No `env_id` means a pure template resolution with no project context;
+    // Gate A already covers the tool's tier, so there is no per-project row
+    // to consult. With an `env_id`, gate against that environment's project.
+    let gate_project = match a.env_id.as_deref() {
+        Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::environments::lookup_project_id(c, env_id)
+        })
+        .unwrap_or_default(),
+        None => String::new(),
+    };
+    crate::mcp::check_permission(&state.pool, &gate_project, "api_resolve_template").await?;
 
     // Pull variables from the named env (if any), else empty.
     let vars = if let Some(env_id) = a.env_id.as_deref() {
@@ -149,9 +153,7 @@ async fn tool_api_resolve_endpoint(
         simple_post_core::db::endpoint_details::get(c, &endpoint_id)
     })?;
     let project_id = endpoint_project_id(&state.pool, &endpoint.node_id);
-    crate::mcp::check_permission(&state.pool, &project_id, "api_resolve_endpoint")
-        .await
-        .ok();
+    crate::mcp::check_permission(&state.pool, &project_id, "api_resolve_endpoint").await?;
 
     let env = if let Some(env_id) = endpoint.environment_id.as_deref() {
         simple_post_core::db::with_conn(&state.pool, |c| {
@@ -204,9 +206,7 @@ async fn tool_api_validate_endpoint(
         simple_post_core::db::endpoint_details::get(c, &endpoint_id)
     })?;
     let project_id = endpoint_project_id(&state.pool, &endpoint.node_id);
-    crate::mcp::check_permission(&state.pool, &project_id, "api_validate_endpoint")
-        .await
-        .ok();
+    crate::mcp::check_permission(&state.pool, &project_id, "api_validate_endpoint").await?;
 
     let issues = validate(&endpoint);
     let ok = issues.is_empty();

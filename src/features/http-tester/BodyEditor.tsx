@@ -1,22 +1,44 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { BodyMode, RequestBody } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, CheckCircle2, Wand2 } from 'lucide-react';
-import { cn, tryFormatJson } from '@/lib/utils';
+import { AlertTriangle, Wand2 } from 'lucide-react';
+import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
+import { gsap, useGSAP } from '@/lib/gsap';
 
 interface Props {
   value: RequestBody;
   onChange: (body: RequestBody) => void;
-}
-
-interface BodyContentProps extends Props {
-  formatError?: string | null;
+  /**
+   * A format error the parent has pinned, or `null`.
+   *
+   * The parent owns it because validation is an **action**, not a
+   * derived value: it runs on Send / Save / 格式化 and its verdict is
+   * held until one of those runs again (see `lib/request-validation`).
+   * That is also why this component cannot clear the badge itself —
+   * fixing the JSON by typing is not evidence that it parses.
+   *
+   * Kept out of `BodyContent`'s own state so it survives switching to
+   * another HTTP tab and back: the error belongs to the request, not to
+   * how long this component has been mounted.
+   */
+  validationError?: string | null;
+  /**
+   * Called after 格式化 with the parse outcome.
+   *
+   * The result travels instead of a bare `ok` flag, and the parent settles
+   * its pinned error from it rather than re-running validation: by the time
+   * this callback fires, the formatted content is in the draft but the
+   * parent has not re-rendered, so re-checking there would validate the
+   * content the user just failed to format and re-pin an error that is
+   * already fixed.
+   */
+  onFormatResult?: (result: FormatResult) => void;
 }
 
 const BODY_TABS: { id: BodyMode; label: string }[] = [
@@ -26,25 +48,16 @@ const BODY_TABS: { id: BodyMode; label: string }[] = [
   { id: 'raw', label: 'raw' },
 ];
 
-export function BodyEditor({ value, onChange }: Props) {
-  const [formatError, setFormatError] = useState<string | null>(null);
-
-  // Switching mode away from json invalidates any prior format error.
-  useEffect(() => {
-    if (value.mode !== 'json' && formatError !== null) {
-      setFormatError(null);
-    }
-  }, [value.mode, formatError]);
-
+export function BodyEditor({ value, onChange, validationError, onFormatResult }: Props) {
   const handleFormat = () => {
-    const r = tryFormatJson(value.content);
-    if (r.ok) {
-      onChange({ ...value, content: r.formatted });
-      setFormatError(null);
-    } else {
-      setFormatError(r.error);
-      window.setTimeout(() => setFormatError(null), 3000);
+    const result = tryFormatJson(value.content);
+    if (result.ok) {
+      onChange({ ...value, content: result.formatted });
     }
+    // Report either way: the parent turns a pass into "clear the badge"
+    // and a failure into "pin it", which is exactly the same rule Send
+    // and Save follow.
+    onFormatResult?.(result);
   };
 
   return (
@@ -54,7 +67,6 @@ export function BodyEditor({ value, onChange }: Props) {
           items={BODY_TABS.map((t) => ({ id: t.id, label: t.label }))}
           value={value.mode}
           onChange={(id) => {
-            setFormatError(null);
             onChange({ ...value, mode: id as BodyMode });
           }}
         />
@@ -81,36 +93,64 @@ export function BodyEditor({ value, onChange }: Props) {
           此请求无 body
         </div>
       ) : (
-        <BodyContent value={value} onChange={onChange} formatError={formatError} />
+        <BodyContent value={value} onChange={onChange} validationError={validationError} />
       )}
     </div>
   );
 }
 
-function BodyContent({ value, onChange, formatError }: BodyContentProps) {
-  const [touched, setTouched] = useState(false);
+function BodyContent({ value, onChange, validationError }: Props) {
   const isDark = useIsDark();
+  const pillRef = useRef<HTMLDivElement>(null);
 
-  const { valid, error } = useMemo(() => {
-    if (value.mode !== 'json') return { valid: true, error: null as string | null };
-    if (!value.content.trim()) return { valid: true, error: null };
-    try {
-      JSON.parse(value.content);
-      return { valid: true, error: null };
-    } catch (e) {
-      return { valid: false, error: (e as Error).message };
-    }
-  }, [value.mode, value.content]);
+  // An error about a body you can no longer see (mode switched to
+  // `form`) would be a badge in a different country. Anything that
+  // leaves the json editor retires it — the next Send / Save re-checks
+  // whatever is there now.
+  const shownError = value.mode === 'json' ? (validationError ?? null) : null;
+
+  // GSAP owns visibility for the same reason it owns the transition:
+  // the element is never conditionally unmounted while an error is
+  // showing, so a re-run of the same verdict can't race the ref.
+  useGSAP(() => {
+    const el = pillRef.current;
+    if (!el || !shownError) return;
+    const mm = gsap.matchMedia();
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      gsap.fromTo(
+        el,
+        { autoAlpha: 0, y: -8, scale: 0.96 },
+        { autoAlpha: 1, y: 0, scale: 1, duration: 0.28, ease: 'power3.out' },
+      );
+      // One shake, then it stays put. The motion has to mean "look at
+      // me now" — a badge that keeps moving stops being read.
+      gsap.fromTo(
+        el,
+        { x: 0 },
+        {
+          keyframes: [
+            { x: -3, duration: 0.06 },
+            { x: 3, duration: 0.06 },
+            { x: -2, duration: 0.06 },
+            { x: 0, duration: 0.06 },
+          ],
+        },
+      );
+    });
+    return () => mm.revert();
+  }, [shownError]);
+
+  const hintText = useMemo(
+    () => (shownError ? `JSON 格式有误：${shownError}` : null),
+    [shownError],
+  );
 
   return (
-    <div>
+    <div className="relative">
       <div className="overflow-hidden rounded-md border border-border">
         <CodeMirror
           value={value.content}
-          onChange={(v) => {
-            setTouched(true);
-            onChange({ ...value, content: v });
-          }}
+          onChange={(v) => onChange({ ...value, content: v })}
           extensions={value.mode === 'json' ? [json()] : []}
           theme={isDark ? oneDark : lightCodeTheme}
           basicSetup={{
@@ -123,32 +163,41 @@ function BodyContent({ value, onChange, formatError }: BodyContentProps) {
           className="text-sm"
         />
       </div>
-      {formatError && (
-        <div className="alert-error-inline">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span>格式化失败：{formatError}</span>
-        </div>
-      )}
-      {value.mode === 'json' && touched && value.content.trim() && (
+
+      {/*
+        Floated at the top of the editor rather than stacked under it:
+        the 280 px CodeMirror used to sit between the user and the badge,
+        which is why a JSON error went unnoticed while typing. It stays
+        pinned — no timeout, no dismissal — and leaves only when a
+        validation run passes. `pointer-events-auto` costs one small dead
+        zone in the editor's top-right corner and buys the untruncated
+        message on hover, which matters exactly when the message is an
+        error the user has to act on.
+      */}
+      {hintText && (
         <div
+          ref={pillRef}
+          role="status"
+          aria-live="polite"
           className={cn(
-            'mt-2 flex items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-xs',
-            valid
-              ? 'border-success/20 bg-success/5 text-success-foreground'
-              : 'border-warning/20 bg-warning/5 text-warning-foreground',
+            'absolute right-2 top-2 z-10 flex max-w-[min(420px,60%)] items-center gap-1.5',
+            'rounded-full border px-2.5 py-1 text-[11px] shadow-md',
+            // Solid destructive, not a tinted surface. `--destructive-foreground`
+            // is 98% white in BOTH themes (it is the colour meant to sit *on*
+            // red), so pairing it with a near-white surface — which is what
+            // `bg-background/85` is in light mode — produced white text on a
+            // white editor: the badge vanished outright in light mode and, in
+            // dark mode, read as plain white text with a 40%-opacity border
+            // and no error signal at all. `destructive` + its own foreground
+            // is the pairing the tokens were designed for, and it resolves
+            // identically in both themes because nothing overrides either.
+            'border-destructive bg-destructive text-destructive-foreground',
           )}
+          title={hintText}
+          data-testid="json-status-pill"
         >
-          {valid ? (
-            <>
-              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>JSON 格式正确</span>
-            </>
-          ) : (
-            <>
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span className="font-mono">{error}</span>
-            </>
-          )}
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="truncate font-mono">{hintText}</span>
         </div>
       )}
     </div>

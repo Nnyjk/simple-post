@@ -14,6 +14,9 @@
  *                           responseHistory / responseExamples
  *   slices/ui-prefs.ts      theme / requestSettings (localStorage)
  *   slices/ui-new-item.ts   newItem draft + submitNewItem
+ *   slices/ui-draft-endpoints.ts
+ *                           draftEndpoints — the endpoint that has no
+ *                           `nodes` row until the user presses Save
  *
  * The sub-factories are composed HERE, not registered as separate slices
  * in `app-store.ts`, and that is the whole point of the split. Several
@@ -22,7 +25,10 @@
  * reaches for `addProject` / `addNode` / `setActiveEndpoint` in one
  * flow, and `deleteNode` (crud-slice) prunes `responseHistory`,
  * `responseExamples`, `openTabs` and `endpointDrafts` together so an
- * IPC failure restores all of them as one state. Rewriting any of those
+ * IPC failure restores all of them as one state. `saveDraftEndpoint` is the
+ * same shape one step later: it hands the whole endpoint over from the
+ * `endpoint-draft` tab to the `endpoint` tab, touching the draft map, the
+ * endpoint-draft map and both tab lists in sequence. Rewriting any of those
  * as a sequence of `get().closeTab()`-style calls would turn one `set()`
  * into several and change what a failure restores. So they stay whole,
  * and the files are grouped by concern instead of by slice.
@@ -42,18 +48,21 @@ import { createUiPrefs } from './slices/ui-prefs';
 import type { UiPrefs } from './slices/ui-prefs';
 import { createUiNewItem } from './slices/ui-new-item';
 import type { UiNewItem } from './slices/ui-new-item';
+import { createUiDraftEndpoints } from './slices/ui-draft-endpoints';
+import type { UiDraftEndpoints } from './slices/ui-draft-endpoints';
 
 /**
  * The composed UI slice. Every member is declared next to its
  * implementation in `./slices/`; this is the single place that names
- * them all. Consumers import `useAppStore` and never see these four
- * modules directly.
+ * them all. Consumers import `useAppStore` and never see these modules
+ * directly.
  */
-export interface UiSlice extends UiTabs, UiResponse, UiPrefs, UiNewItem {}
+export interface UiSlice extends UiTabs, UiResponse, UiPrefs, UiNewItem, UiDraftEndpoints {}
 
 export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get, store) => ({
   ...createUiTabs(set, get, store),
   ...createUiResponse(set, get, store),
   ...createUiPrefs(set, get, store),
   ...createUiNewItem(set, get, store),
+  ...createUiDraftEndpoints(set, get, store),
 });

@@ -1,8 +1,8 @@
 // =========================================================================
-// MCP capability policy (commit 1: feat(mcp): three-tier capability policy)
+// MCP capability policy
 // =========================================================================
 //
-// Three Tauri commands + matching REST endpoints (see `web_api.rs`).
+// Three Tauri commands + matching REST endpoints (see `web_api/`).
 // The capability policy is the **global** lever that filters `tools/list`
 // for the AI; per-project permissions in the `permissions` table still
 // gate individual mutations. Both layers fail closed, and an unregistered

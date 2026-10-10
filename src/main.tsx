@@ -5,7 +5,7 @@ import { ingestBearerFromUrl } from './lib/tauri-commands';
 import { useAppStore } from './stores/app-store';
 import './styles/globals.css';
 
-// commit 5: when the reverse-proxy (or a hand-shared link) points at
+// When the reverse-proxy (or a hand-shared link) points at
 // `?token=<x>`, persist the bearer before the React tree mounts so
 // the very first `webFetch()` already carries the header. `ingest`
 // also strips the query from `window.history` so the token doesn't

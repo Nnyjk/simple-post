@@ -13,7 +13,7 @@
  * safe to call from inside a `set()` callback.
  */
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
-import type { OpenTab } from '../store-types';
+import type { OpenTab, EndpointDraft } from '../store-types';
 
 /**
  * The tail of every optimistic write: invoke the daemon, and on failure
@@ -129,6 +129,28 @@ export function tabKeysForSubtree(
   }
   if (scope === 'project') close.add(`project:${targetId}`);
   return close;
+}
+
+/**
+ * Turn an endpoint draft into the `updateEndpointDetail` patch that
+ * persists it.
+ *
+ * Shared by the two save paths — HttpTester's Save button and the
+ * dirty-close dialog's 保存 — so they cannot drift: a field added to
+ * `EndpointDraft` is picked up by both, because the mapping is driven
+ * off the draft's own keys rather than a hand-written list.
+ *
+ * Every draft field is also an `EndpointDetail` field under the same
+ * name; that 1:1 correspondence is what makes the cast sound. It would
+ * not survive a field that needs transforming on the way in, and that
+ * field would want an explicit entry here.
+ */
+export function draftToPatch(draft: EndpointDraft): Partial<EndpointDetail> {
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(draft)) {
+    if (value !== undefined) patch[key] = value;
+  }
+  return patch as Partial<EndpointDetail>;
 }
 
 /** The `EndpointDetail` an optimistic endpoint create starts from. */

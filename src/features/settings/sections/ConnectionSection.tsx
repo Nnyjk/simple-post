@@ -28,7 +28,7 @@ const GENERIC_CONFIG = JSON.stringify(
         },
       },
       'simple-post-stdio': {
-        // `simple-post-mcp-proxy` was removed in commit 3; the standalone
+        // `simple-post-mcp-proxy` was removed; the standalone
         // bridge binary is now `simple-post-mcp`. There is deliberately
         // no npm wrapper — an AI client that cannot run a Rust binary
         // should point at the daemon over HTTP (`serve-web` + /mcp)
@@ -442,11 +442,10 @@ export function ConnectionSection() {
   );
 }
 
-// ----- Capability radio group (commit 1) -------------------------
+// ----- Capability radio group ---------------------------------
 // Three-way switch wired directly to the Tauri command. Plain radio
 // inputs keep this independent of the project's `SettingsCategory` and
-// store plumbing — the slice-level integration can be added later
-// (commit 1a TODO).
+// store plumbing.
 type CapabilityPolicy = 'read_only' | 'safe_write' | 'full_access';
 const CAPABILITY_OPTIONS: ReadonlyArray<{
   value: CapabilityPolicy;

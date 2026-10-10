@@ -35,9 +35,21 @@ export interface InlineEditProps {
   ariaLabel?: string;
   testId?: string;
   /**
-   * Notified whenever the editor enters or leaves edit mode. Useful for
-   * parents that want to gate other UX (e.g. marking a tab as having
-   * unsaved changes during an in-flight rename).
+   * Controlled edit state. Omit it and the editor owns its own, which is
+   * what every caller but the tree rows does.
+   *
+   * The tree needs the other mode: it keeps "the row being renamed" as
+   * tree state so a *freshly created* row can be dropped straight into
+   * rename without synthesising a double-click. Paired with
+   * `onEditingChange`, which is how it gets told the user is done.
+   */
+  editing?: boolean;
+  /**
+   * Notified whenever the editor enters or leaves edit mode — including
+   * when the change came from the user (double-click / Enter / Esc /
+   * blur), which is what makes it the closing channel for a controlled
+   * `editing`. Also useful for parents that gate other UX (e.g. marking a
+   * tab as having unsaved changes during an in-flight rename).
    */
   onEditingChange?: (editing: boolean) => void;
   /**
@@ -76,10 +88,15 @@ export function InlineEdit({
   trim = true,
   ariaLabel,
   testId,
+  editing,
   onEditingChange,
   commitEmpty = false,
 }: InlineEditProps) {
-  const [editing, setEditing] = useState(false);
+  const [localEditing, setLocalEditing] = useState(false);
+  // Controlled when the caller passes `editing`; otherwise the editor owns
+  // the flag. `editing === undefined` (not falsy) is the test, so passing
+  // `editing={false}` is still "controlled and closed".
+  const isEditing = editing ?? localEditing;
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
   // Guard against double-fire when Enter triggers both a keydown and a
@@ -87,52 +104,60 @@ export function InlineEdit({
   const committedRef = useRef(false);
   const cancelledRef = useRef(false);
 
+  /**
+   * Enter / leave edit mode. In controlled mode the parent owns the flag,
+   * so this only reports the intent — writing local state there would be
+   * silently overwritten by the parent's next render and the editor would
+   * appear not to open at all.
+   */
+  const request = useCallback(
+    (next: boolean) => {
+      if (editing === undefined) setLocalEditing(next);
+      onEditingChange?.(next);
+    },
+    [editing, onEditingChange],
+  );
+
   // Re-sync the local draft when the underlying value changes outside
   // an active edit session (e.g. the tree updates from another panel).
   useEffect(() => {
-    if (!editing) setDraft(value);
-  }, [value, editing]);
+    if (!isEditing) setDraft(value);
+  }, [value, isEditing]);
 
   // Auto-focus + select on entering edit mode.
   useEffect(() => {
-    if (!editing) return;
+    if (!isEditing) return;
     const el = inputRef.current;
     if (!el) return;
     el.focus();
     el.select();
-  }, [editing]);
+  }, [isEditing]);
 
   const open = useCallback(() => {
     cancelledRef.current = false;
     committedRef.current = false;
     setDraft(value);
-    setEditing(true);
-  }, [value]);
+    request(true);
+  }, [value, request]);
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
     setDraft(value);
-    setEditing(false);
-  }, [value]);
+    request(false);
+  }, [value, request]);
 
   const commit = useCallback(() => {
     if (committedRef.current) return;
     if (cancelledRef.current) {
-      setEditing(false);
+      request(false);
       return;
     }
     committedRef.current = true;
     const next = trim ? draft.trim() : draft;
     const shouldSave = commitEmpty ? next !== value : next.length > 0 && next !== value;
     if (shouldSave) onSave(next);
-    setEditing(false);
-  }, [draft, value, onSave, trim, commitEmpty]);
-
-  // Bridge editing state for parents that want to gate other UX (tab dirty
-  // markers, modal locks, etc.).
-  useEffect(() => {
-    onEditingChange?.(editing);
-  }, [editing, onEditingChange]);
+    request(false);
+  }, [draft, value, onSave, trim, commitEmpty, request]);
 
   const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
     // Stop Enter from bubbling — siblings (e.g. TagInput) may bind Enter
@@ -154,7 +179,7 @@ export function InlineEdit({
     e.stopPropagation();
   };
 
-  if (!editing) {
+  if (!isEditing) {
     return (
       <span
         onDoubleClick={open}

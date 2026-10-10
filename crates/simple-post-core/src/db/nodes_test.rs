@@ -849,10 +849,10 @@ fn duplicate_copies_the_endpoint_and_its_configuration() {
     d.tags = vec!["a".into()];
     put(&pool, &e, Some(&d));
 
-    let copy = db::with_tx(&pool, |c| duplicate(c, "e1")).unwrap();
+    let copy = db::with_tx(&pool, |c| duplicate(c, "e1", None)).unwrap();
     assert_ne!(copy.id, "e1", "a copy needs its own id");
     assert_eq!(copy.parent_id.as_deref(), Some("c1"), "same parent");
-    assert_eq!(copy.name, "Fetch one (copy)");
+    assert_eq!(copy.name, "Fetch one (副本)");
     assert_eq!(
         copy.sort_order,
         e.sort_order + 1,
@@ -871,9 +871,42 @@ fn duplicate_refuses_a_non_endpoint() {
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
     for id in ["m1", "c1"] {
-        let err = db::with_tx(&pool, |c| duplicate(c, id)).unwrap_err();
+        let err = db::with_tx(&pool, |c| duplicate(c, id, None)).unwrap_err();
         assert!(matches!(err, AppError::Validation(_)), "{id}: {err:?}");
     }
+}
+
+#[test]
+fn duplicate_adopts_the_id_the_caller_chose() {
+    // The SPA duplicates optimistically: it activates the tab and starts
+    // a rename against this id *before* the call returns, so an id minted
+    // here would leave every one of those pointing at a row that does not
+    // exist. `new_id` is therefore adopted verbatim, and `create` stays
+    // the place that refuses a collision.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+
+    let copy = db::with_tx(&pool, |c| duplicate(c, "e1", Some("picked-here"))).unwrap();
+    assert_eq!(copy.id, "picked-here", "the caller's id is the row's id");
+    assert_eq!(
+        copy.name, "e1 (副本)",
+        "the suffix is the UI's, not an English one"
+    );
+
+    // The detail row has to follow the same id, or the copy is a node the
+    // HTTP tester cannot open.
+    let detail = db::with_conn(&pool, |c| {
+        crate::db::endpoint_details::get(c, "picked-here")
+    })
+    .unwrap();
+    assert_eq!(detail.node_id, "picked-here");
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "picked-here")).unwrap().id,
+        "picked-here"
+    );
 }
 
 // -------------------------------------------------------------------------

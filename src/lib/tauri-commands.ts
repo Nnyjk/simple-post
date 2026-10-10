@@ -74,8 +74,8 @@ export const COMMANDS = {
    * (`simple-post-mcp.exe` / `simple-post-mcp`). The
    * ConnectionSection uses this to fill the "代理二进制路径"
    * placeholder with a real value instead of the literal hint.
-   * The legacy `simple-post-mcp-proxy` binary was removed in
-   * commit 3 — see plan 工作流 4 (commit 4).
+   * The legacy `simple-post-mcp-proxy` binary was removed; the
+   * standalone bridge binary is now `simple-post-mcp`.
    */
   mcpDaemonProxyPath: 'mcp_daemon_proxy_path',
   /**
@@ -85,7 +85,7 @@ export const COMMANDS = {
   mcpAutoStartGet: 'mcp_auto_start_get',
   mcpAutoStartSet: 'mcp_auto_start_set',
 
-  // ----- MCP capability policy (commit 1) -----
+  // ----- MCP capability policy -----
   // Three-tier global capability that filters `tools/list` for AI
   // clients. Default `read_only` — the key is absent until the user picks a
   // tier in Settings, and an absent key resolves to the read-only tier.
@@ -167,7 +167,8 @@ export function invokeCmd<T>(
 // -------------------------------------------------------------------------
 // Web-shape REST bridge.
 //
-// The route table mirrors the axum router in `src-tauri/src/web_api.rs`.
+// The route table mirrors the axum router in `src-tauri/src/web_api/`
+// (`.route()` registrations live in `mod.rs::build_router`).
 // We don't share the source — the two endpoints are kept in sync by the
 // integration tests in `scripts/mcp-integration.test.mjs` and a manual
 // review pass at PR time. Adding a new invoke command requires adding
@@ -223,7 +224,7 @@ function buildQuery(params: Record<string, unknown>): string {
  *   - POST   /api/{resource}/{id}/…     sub-resource action
  *                                       (duplicate, activate, …).
  */
-// ----- bearer-token cache (commit 5) -----
+// ----- bearer-token cache -----
 //
 // `serve-web` may be launched with `--password=<token>` /
 // `SIMPLE_POST_WEB_PASSWORD`. The renderer has to attach
@@ -239,7 +240,7 @@ function buildQuery(params: Record<string, unknown>): string {
 // Security trade-off: `localStorage` is readable by any same-origin
 // XSS. This is the same exposure Postman / Insomnia / dbx accept for
 // standalone clients (no per-user session). Documented for the
-// commit-5 review checklist.
+// the beta security review.
 export const WEB_BEARER_STORAGE_KEY = 'simple-post.web.bearer';
 
 export function writeBearerToStorage(token: string): void {
@@ -364,10 +365,12 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.nodesDuplicate]: {
     method: 'POST',
     path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}/duplicate`,
-    // The path consumes `id`; the Rust handler takes no body, so we
-    // explicitly hand back an empty object rather than letting the
-    // default `body = args` projection leak `{ id }` into the wire.
-    body: () => ({}),
+    // The path consumes `id`, so the body is projected explicitly rather
+    // than letting the default `body = args` leak `{ id }` into the wire.
+    // `newId` is the id the copy is stored under — the SPA mints it
+    // optimistically and needs the server to keep it. `null` is the
+    // "server picks" fallback the handler already understands.
+    body: (a) => ({ newId: a.newId ?? null }),
   },
   [COMMANDS.endpointDetailsList]: { method: 'GET', path: () => '/api/endpoint-details' },
   [COMMANDS.endpointDetailGet]: {
@@ -495,8 +498,8 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
 
   // ----- MCP daemon -----
   [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },
-  // Worker 1b added a dedicated `/api/mcp/restart` route on the
-  // `web_api.rs` side; the Tauri-side restart function returns the
+  // A dedicated `/api/mcp/restart` route exists on the web side; the
+  // Tauri-side restart function returns the
   // same `{ ok, pid, port }` envelope as `/start`, so reusing the
   // restart route keeps the renderer's discriminated-union handling
   // simple.
@@ -518,7 +521,7 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: () => '/api/preferences',
     body: (a) => ({ key: 'mcp.auto_start', value: a.value }),
   },
-  // ----- MCP capability policy (commit 1) -----
+  // ----- MCP capability policy -----
   // Dedicated endpoints — returns the policy directly (no need to dig
   // through the full preferences map, unlike `mcpAutoStart*`).
   [COMMANDS.mcpCapabilityGet]: {
@@ -544,7 +547,7 @@ async function webInvokeCmd<T>(
   const spec = WEB_ROUTES[cmd];
   if (!spec) {
     throw new Error(
-      `Command "${cmd}" is not exposed in the web shape. Add a REST entry in src/lib/tauri-commands.ts + src-tauri/src/web_api.rs to enable it.`,
+      `Command "${cmd}" is not exposed in the web shape. Add a REST entry in src/lib/tauri-commands.ts + src-tauri/src/web_api/ to enable it.`,
     );
   }
   // `mcpAutoStartGet` keeps its old GET-then-pick shape because the
@@ -568,7 +571,7 @@ async function webFetch<T>(
   options?: CallApiOptions,
 ): Promise<T> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
-  // commit 5: when the server is launched with `--password=…` /
+  // When the server is launched with `--password=…` /
   // `SIMPLE_POST_WEB_PASSWORD`, the renderer's `webFetch` must
   // attach `Authorization: Bearer <token>` on every API call.
   // The bearer is cached in `localStorage` (see comment block on

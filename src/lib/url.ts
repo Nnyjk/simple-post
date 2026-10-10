@@ -23,12 +23,26 @@ export interface ResolvedBaseUrl {
  * Resolve the effective baseUrl for an endpoint.
  *
  * Precedence (highest first):
- *   1. `endpoint.baseUrlOverride`       — per-endpoint custom host
+ *   1. `endpoint.baseUrlOverride`       — per-endpoint custom mode
  *   2. `endpoint.baseUrlDefinitionId`   — the def the endpoint points at
  *      (must be in `project.baseUrlDefinitions`); the URL is then
  *      `env.baseUrls[defId]`
  *   3. `project.defaultBaseUrlDefinitionId` → `env.baseUrls[defId]`
  *   4. `''`                              — nothing
+ *
+ * ## The override is three-state, and "present but empty" is meaningful
+ *
+ *   `null` / `undefined` — not in custom mode; fall through to the def chain.
+ *   `''`                 — custom mode with no prefix: the URL field is the
+ *                          whole address, so nothing is prepended to it.
+ *   `'https://x'`        — custom mode with an explicit host prefix (legacy
+ *                          shape; a full URL in the field still wins because
+ *                          `joinBaseUrl` lets a path carrying a scheme win).
+ *
+ * This is the `double_option` patch convention doing real work: the caller
+ * writes `baseUrlOverride: ''` to *record the choice*, not to clear it, and
+ * `null` is the only thing that clears it. Collapsing `''` back into the def
+ * chain is what made the picker's 自定义 row look like it did nothing.
  *
  * `env.baseUrls` is keyed by `BaseUrlDefinition.id`, NOT by name.
  * That keeps rename operations cheap and the resolution deterministic
@@ -41,7 +55,7 @@ export function resolveEndpointBaseUrl(
   env: Pick<Environment, 'baseUrls'> | undefined,
   project: Pick<Project, 'baseUrlDefinitions' | 'defaultBaseUrlDefinitionId'> | undefined,
 ): ResolvedBaseUrl {
-  if (endpoint.baseUrlOverride && endpoint.baseUrlOverride.length > 0) {
+  if (endpoint.baseUrlOverride !== null && endpoint.baseUrlOverride !== undefined) {
     return {
       baseUrl: endpoint.baseUrlOverride,
       source: 'override',
@@ -91,27 +105,74 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
   return `${trimmedBase}/${trimmedPath}`;
 }
 
+export interface ResolvedVars {
+  value: string;
+  /**
+   * `{{name}}` markers that were **not** resolved, deduped by first
+   * occurrence so the order is stable across re-renders (a warning pill
+   * that reshuffles on every keystroke is worse than useless).
+   *
+   * This is the renderer-side twin of `ResolvedTemplate.missing` in
+   * `crates/simple-post-mcp/src/variable_fill.rs`; the two must agree or
+   * the frontend's "unresolved variables" hint and the MCP tool's
+   * `missing_vars` report different things for the same endpoint.
+   */
+  missing: string[];
+}
+
 /**
- * Resolve a string of the form `{{varName}}` against a variable pool.
- * Accepts either an `Environment` (in which case `env.variables` is used)
- * or a raw `Record<string,string>`. Unknown variables are left intact
- * (e.g. `{{missing}}` stays as `{{missing}}`) so the user can see what's
- * missing in the request preview instead of silently turning into
- * `undefined`.
+ * Resolve a string of the form `{{varName}}` against a variable pool, and
+ * report which markers could not be resolved. Accepts either an
+ * `Environment` (in which case `env.variables` is used) or a raw
+ * `Record<string,string>`.
+ *
+ * Unknown variables are left intact (e.g. `{{missing}}` stays as
+ * `{{missing}}`) so the user can see what's missing in the request
+ * preview instead of silently turning into `undefined`.
+ *
+ * The marker name only accepts `\w+` (`[A-Za-z0-9_]+`); `{{ my-var }}`
+ * and `{{ a.b }}` pass through verbatim. Replacement is a **single,
+ * non-recursive pass** — `{{{{a}}}}` becomes `{{a}}` and is not expanded
+ * again. That mirrors `template_replace` / `is_word` in the Rust
+ * resolver, and it is what stops a variable whose value happens to
+ * contain `{{` from being expanded a second time (or looping).
+ */
+export function resolveVarsWithMissing(
+  input: string,
+  vars: Environment | Record<string, string> | undefined,
+): ResolvedVars {
+  if (!input) return { value: '', missing: [] };
+  // `Environment` carries the variables under `.variables`; a raw record
+  // is the map itself. Discriminate via `Environment.baseUrls` (a nested
+  // object) — a plain Record<string,string> would yield `string` there.
+  const map: Record<string, string> | undefined = isEnvironment(vars) ? vars.variables : vars;
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  const value = input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+    const v = map?.[key];
+    // Nullish check, not truthiness: a variable explicitly defined as
+    // the empty string resolves to '' and must NOT be reported missing —
+    // only an absent key leaves the marker in place.
+    if (v !== undefined && v !== null) return v;
+    if (!seen.has(key)) {
+      seen.add(key);
+      missing.push(key);
+    }
+    return `{{${key}}}`;
+  });
+  return { value, missing };
+}
+
+/**
+ * `resolveVarsWithMissing`, discarding the missing list. Kept as the
+ * name every existing caller imports — the two are one implementation,
+ * so a `{{x}}` can never survive here while being reported there.
  */
 export function resolveVars(
   input: string,
   vars: Environment | Record<string, string> | undefined,
 ): string {
-  if (!input) return '';
-  // `Environment` carries the variables under `.variables`; a raw record
-  // is the map itself. Discriminate via `Environment.baseUrls` (a nested
-  // object) — a plain Record<string,string> would yield `string` there.
-  const map: Record<string, string> | undefined = isEnvironment(vars) ? vars.variables : vars;
-  return input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-    const v = map?.[key];
-    return v ?? `{{${key}}}`;
-  });
+  return resolveVarsWithMissing(input, vars).value;
 }
 
 function isEnvironment(v: Environment | Record<string, string> | undefined): v is Environment {

@@ -2,7 +2,7 @@ name: CI
 
 # Quality gate — every push to main and every PR must clear the same
 # six checks `npm run check` runs locally, plus a production build.
-# Release/docker workflows stay independent of this one.
+# The release workflow stays independent of this one.
 
 on:
   push:

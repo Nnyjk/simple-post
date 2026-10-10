@@ -21,10 +21,12 @@
  * 256px panel plus a search box, a 新建 button that opens a modal which
  * cannot succeed without a parent project, and a footer count of zero.
  *
- * The settings tab is the one case where this shell renders with no
- * project: `openSettingsTab()` is reachable from the welcome screen.
- * That is fine — settings is global — and the tree correctly stays
- * hidden, so the panel simply takes the full width.
+ * The settings tab used to be reachable from here with no project open,
+ * which is why this shell once had to render the settings panel without
+ * a tree. It no longer does: `App.tsx` owns the project-less settings
+ * surface (`features/settings/SettingsSurface.tsx`), so reaching the
+ * same panel body from the welcome screen costs this shell nothing. Both
+ * hosts mount the one `SettingsPanel`; only the chrome differs.
  */
 
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
@@ -138,7 +140,12 @@ export function WorkspaceShell() {
         </Suspense>
       );
     }
-    if (activeTab.kind === 'endpoint') {
+    // A draft endpoint renders the same tester as a saved one. The two are
+    // deliberately not separate components: `useActiveEndpointResource`
+    // hands both over in one shape, so the tester runs a single code path
+    // and an unsaved endpoint is editable, sendable and previewable with
+    // the same UI as a saved one.
+    if (activeTab.kind === 'endpoint' || activeTab.kind === 'endpoint-draft') {
       return (
         <>
           <div

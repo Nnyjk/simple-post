@@ -112,7 +112,9 @@ pub(super) async fn tool_project_list(
     state: &AppState,
     _args: Value,
 ) -> Result<CallToolResult, AppError> {
-    crate::mcp::check_permission(&state.pool, "global", "project_list").await?;
+    // No per-project gate: listing projects spans every project, so there
+    // is no single owning row to consult. Gate A (the global
+    // `CapabilityPolicy`) is the gate that governs this tool.
     let projects =
         simple_post_core::db::with_conn(&state.pool, simple_post_core::db::projects::list)?;
     Ok(CallToolResult::json(projects))
@@ -140,7 +142,10 @@ pub(super) async fn tool_project_create(
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
     }
-    crate::mcp::check_permission(&state.pool, "global", "project_create").await?;
+    // No per-project gate here: the project does not exist yet, so there is
+    // no owning project whose stored permission could apply. Gate A (the
+    // global `CapabilityPolicy`, enforced in `mcp::dispatch`) is the gate
+    // that governs this tool — it must be `Create` or higher.
     let now = simple_post_core::domain::now_ms();
     let p = Project {
         id: format!("proj_{now}"),

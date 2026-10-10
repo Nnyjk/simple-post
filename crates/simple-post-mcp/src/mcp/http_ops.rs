@@ -181,9 +181,7 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::root_id_of(c, &endpoint.node_id)
     })?;
-    crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint")
-        .await
-        .ok();
+    crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint").await?;
 
     // Pull env + project if available. A dangling env id (e.g. the env
     // was deleted) is tolerated — the request just runs without env

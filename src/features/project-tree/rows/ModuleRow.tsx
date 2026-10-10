@@ -3,10 +3,9 @@
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
-import { ChevronRight, FolderClosed, FolderOpen, Plus } from 'lucide-react';
+import { ChevronRight, Plus } from 'lucide-react';
 import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
-import { IconTile } from '@/components/ui/icon-tile';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
 import type { DropZone } from '../tree-types';
@@ -39,6 +38,7 @@ export function ModuleRow({
   onSelect,
   onStartEdit,
   onSaveEdit,
+  onCancelEdit,
   onContextMenu,
   onPlusClick,
   onDragStart,
@@ -97,20 +97,23 @@ export function ModuleRow({
               module.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          <IconTile
-            concept="module"
-            size="sm"
-            icon={
-              module.expanded ? (
-                <FolderOpen className="h-3 w-3" />
-              ) : (
-                <FolderClosed className="h-3 w-3" />
-              )
-            }
-          />
+          {/* No type icon here. The row used to carry a tinted folder tile
+              (open/closed), but the disclosure chevron above already says
+              "this expands", and every node kind in this tree is a
+              container — the tile repeated what the indentation and the
+              count badge on the right already convey. The one icon that
+              carries information the row does not is the HTTP method on an
+              endpoint, and that one stays. */}
           <InlineEdit
             value={module.name}
             onSave={onSaveEdit}
+            // Controlled by the tree's `editing` target so a module
+            // created from a dialog lands straight in rename. See the
+            // same note in `EndpointRow.tsx`.
+            editing={isEditing}
+            onEditingChange={(open) => {
+              if (!open) onCancelEdit();
+            }}
             className="flex-1"
             display={() => <span className="flex-1 truncate">{module.name}</span>}
           />

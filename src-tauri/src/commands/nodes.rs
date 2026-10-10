@@ -146,9 +146,21 @@ pub fn nodes_move(
 ///
 /// Endpoints only: a "copy" of a module or collection would be an empty
 /// shell, and copying a subtree is a different feature, not a duplicate.
+///
+/// `new_id` is the caller's own id for the copy, honoured verbatim so an
+/// optimistic duplicate can hand the tab strip a row that will exist by
+/// the time it renders. Omitting it mints one server-side, which is what
+/// a caller with no local copy to stay consistent with (the MCP tool)
+/// wants.
 #[tauri::command]
-pub fn nodes_duplicate(state: State<DbPool>, id: String) -> Result<ResourceNode, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::nodes::duplicate(c, &id))
+pub fn nodes_duplicate(
+    state: State<DbPool>,
+    id: String,
+    new_id: Option<String>,
+) -> Result<ResourceNode, AppError> {
+    crate::db::with_tx(&state, |c| {
+        crate::db::nodes::duplicate(c, &id, new_id.as_deref())
+    })
 }
 
 /// The request configuration of one endpoint node.

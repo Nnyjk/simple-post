@@ -139,7 +139,21 @@ pub fn search(conn: &mut Connection, q: &str) -> Result<Vec<ResourceNode>, AppEr
 ///
 /// MUST be called inside `db::with_tx` — the node and its detail row
 /// have to land together or the copy cannot be opened.
-pub fn duplicate(conn: &mut Connection, id: &str) -> Result<ResourceNode, AppError> {
+///
+/// `new_id` lets the caller name the copy. `None` mints one here, which
+/// is what a stateless caller (the MCP tool) wants. The desktop UI
+/// passes its own because it duplicates *optimistically*: it writes the
+/// row into the store, activates the tab and drops the user straight
+/// into a rename before this call has even returned. An id minted here
+/// would be minted too late — the tab, the active selection and the
+/// in-progress rename would all be pointing at a row that does not
+/// exist, and the workspace rendered the tab as "接口已删除". Same
+/// contract as `nodes_create`, where the SPA's id is honoured.
+pub fn duplicate(
+    conn: &mut Connection,
+    id: &str,
+    new_id: Option<&str>,
+) -> Result<ResourceNode, AppError> {
     let node = get(conn, id)?;
     if node.kind != ResourceNodeType::Endpoint {
         return Err(AppError::Validation(format!(
@@ -150,8 +164,14 @@ pub fn duplicate(conn: &mut Connection, id: &str) -> Result<ResourceNode, AppErr
     let detail = super::endpoint_details::get(conn, id)?;
     let now = crate::domain::now_ms();
     let copy = ResourceNode {
-        id: crate::domain::uid(),
-        name: format!("{} (copy)", node.name),
+        id: new_id
+            .map(str::to_string)
+            .unwrap_or_else(crate::domain::uid),
+        // ` (副本)` rather than the English marker: the row's name is what
+        // the user reads in a Chinese UI, and the SPA writes the same
+        // suffix optimistically — the two disagreeing made the copy appear
+        // to rename itself a moment after it was created.
+        name: format!("{} (副本)", node.name),
         // Straight after the original. Not `MAX + 1` — the old
         // implementation pushed copies to the tail, which meant
         // duplicating an endpoint you were looking at moved it out from

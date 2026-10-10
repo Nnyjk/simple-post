@@ -234,6 +234,44 @@ fn resolve_base_url_override_wins() {
 }
 
 #[test]
+fn resolve_base_url_empty_override_is_a_choice_not_an_absence() {
+    // 自定义 with no host typed yet. The renderer writes `Some("")` to
+    // *record the mode*; only `None` clears it. If an empty override fell
+    // through to the definition chain, selecting 自定义 would silently
+    // resolve the project's base URL again — the exact "the click did
+    // nothing" bug on the Rust side.
+    let mut env = empty_env();
+    env.base_urls
+        .insert("data".into(), "https://data.example.com".into());
+    let mut ep = minimal_endpoint();
+    ep.base_url_override = Some(String::new());
+    let project = project_with_defs(); // default = "data"
+    let (url, src, _) = resolve_base_url(&ep, Some(&env), &project);
+    assert_eq!(url, "");
+    assert_eq!(src, BaseUrlSource::Override);
+
+    // End to end: the URL field's whole address survives the join, with
+    // no base URL prepended — including a path that carries no scheme.
+    let mut ep2 = minimal_endpoint();
+    ep2.base_url_override = Some(String::new());
+    ep2.url = "https://api.other.com/users/1".into();
+    let r = resolve_endpoint(&ep2, Some(&env), &project, None).expect("resolves");
+    assert_eq!(r.url, "https://api.other.com/users/1");
+
+    let mut ep3 = minimal_endpoint();
+    ep3.base_url_override = Some(String::new());
+    ep3.url = "/users/1".into();
+    let r2 = resolve_endpoint(&ep3, Some(&env), &project, None).expect("resolves");
+    assert_eq!(r2.url, "/users/1");
+
+    // Sanity: clearing the override restores the definition chain.
+    let cleared = minimal_endpoint();
+    let (url2, src2, _) = resolve_base_url(&cleared, Some(&env), &project);
+    assert_eq!(url2, "https://data.example.com");
+    assert_eq!(src2, BaseUrlSource::Default);
+}
+
+#[test]
 fn resolve_base_url_definition_chosen() {
     let mut env = empty_env();
     env.base_urls

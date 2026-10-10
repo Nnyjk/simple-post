@@ -59,11 +59,10 @@ pub struct WebState {
     /// the same database as the browser SPA.
     pub mcp_state: Arc<crate::mcp::AppState>,
     /// Optional bearer password. `None` keeps the route tree
-    /// unauthenticated (commit-5 backwards-compatible default).
+    /// unauthenticated (the backwards-compatible default).
     /// `Some(_)` enforces the `auth_middleware` on every `/api/*`
     /// and `/mcp` request. The frontend caches the bearer in
-    /// `localStorage` and attaches it via `webFetch()`; see
-    /// `docs/http-api-reference.md` for the contract.
+    /// `localStorage` and attaches it via `webFetch()`.
     pub password: Option<String>,
     /// Optional reverse-proxy base path (e.g. `"/sp"` for an
     /// nginx-prefixed deployment). When set, the entire router is
@@ -97,11 +96,10 @@ async fn healthz() -> Json<HealthDto> {
 /// `auth::is_public_path`). `state.base_path` (when `Some`) `nest`s
 /// the entire router under that prefix so a reverse proxy can mount
 /// the SPA at e.g. `https://host/sp/`. Both fields are `None` by
-/// default — same behaviour as before commit 5.
+/// default.
 pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
-    // Pull the auth fields before `Arc::new` consumes the struct —
-    // commit 5 split them out so a future `auth_middleware` consumer
-    // can read them without holding the heavy state.
+    // Pull the auth fields before `Arc::new` consumes the struct so the
+    // `auth_middleware` can read them without holding the heavy state.
     let password = state.password.clone();
     let base_path = state.base_path.clone();
     let state_arc = Arc::new(state);
@@ -196,7 +194,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/mcp/stop", post(mcp_stop))
         .route("/api/mcp/restart", post(mcp_restart))
         .route("/api/mcp/proxy-path", get(mcp_proxy_path))
-        // ---- mcp capability policy (commit 1) ----
+        // ---- mcp capability policy ----
         .route(
             "/api/mcp/capability",
             get(mcp_capability_get).put(mcp_capability_put),

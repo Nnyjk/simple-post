@@ -25,8 +25,8 @@
  * `updateEndpointDetail`, `clearEndpointDraft`) are called via `get().…`.
  */
 import type { StateCreator } from 'zustand';
-import type { EndpointDetail } from '@/types/domain';
 import type { AppState } from './app-store';
+import { draftToPatch } from './slices/crud-helpers';
 
 /** State portion owned by the dirty tabs slice. */
 export interface DirtyTabsSliceState {
@@ -168,13 +168,13 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
       // Mirrors the body of HttpTester's `handleSave` so dialog "保存"
       // and button save produce the same persisted state.
       const draft = state.endpointDrafts[tabId]!;
-      // Url and method live in `endpoint_details`, so the draft is
+      // Every draft field lives in `endpoint_details`, so the draft is
       // applied there — not to the node. A single `updateEndpoint` that
       // split across two tables is exactly what the split is meant to
       // avoid: renaming an endpoint must not rewrite request config.
-      const patch: Partial<EndpointDetail> = {};
-      if (draft.url !== undefined) patch.url = draft.url;
-      if (draft.method !== undefined) patch.method = draft.method;
+      // `draftToPatch` is the same mapping HttpTester's Save button uses,
+      // so the dialog and the button cannot persist different subsets.
+      const patch = draftToPatch(draft);
       if (Object.keys(patch).length > 0) state.updateEndpointDetail(tabId, patch);
       state.clearEndpointDraft(tabId);
       return;

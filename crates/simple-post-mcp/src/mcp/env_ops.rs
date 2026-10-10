@@ -238,10 +238,9 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
     let a: UpdateEnvArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("env_update args: {e}")))?;
     // Look up the owning project so the per-project permission gate is
-    // enforced against the right key. The previous implementation passed
-    // the magic string `"global"`, which combined with the default
-    // `ReadCall` project permission silently rejected every write. Fixed
-    // in commit 1 (MCP permission policy + env_ops project_id fix).
+    // enforced against the right key. Passing the magic string
+    // `"global"` here would combine with the default `ReadCall`
+    // project permission to silently reject every write.
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::lookup_project_id(c, &a.env_id)
     })?;
