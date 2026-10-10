@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { gsap, useGSAP } from '@/lib/gsap';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { Button } from './button';
 
 interface DialogProps {
@@ -65,22 +65,28 @@ export function Dialog({
 
   // Entrance animation — runs every time the dialog mounts (open flips to true).
   // No exit animation: `open=false` unmounts the portal entirely, which is fine.
+  //
+  // Under reduced motion the dialog simply appears. It still mounts, still
+  // traps focus and still has the backdrop, so nothing about its behaviour
+  // depends on the transition running.
   useGSAP(
     () => {
-      if (backdropRef.current) {
-        gsap.fromTo(
-          backdropRef.current,
-          { opacity: 0 },
-          { opacity: 1, duration: 0.18, ease: 'none' },
-        );
-      }
-      if (panelRef.current) {
-        gsap.fromTo(
-          panelRef.current,
-          { opacity: 0, scale: 0.96 },
-          { opacity: 1, scale: 1, duration: 0.22, ease: 'power2.out' },
-        );
-      }
+      return motionSafe(() => {
+        if (backdropRef.current) {
+          gsap.fromTo(
+            backdropRef.current,
+            { opacity: 0 },
+            { opacity: 1, duration: 0.18, ease: 'none' },
+          );
+        }
+        if (panelRef.current) {
+          gsap.fromTo(
+            panelRef.current,
+            { opacity: 0, scale: 0.96 },
+            { opacity: 1, scale: 1, duration: 0.22, ease: 'power2.out' },
+          );
+        }
+      });
     },
     { scope: panelRef, dependencies: [open] },
   );

@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CornerDownLeft, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { buildCommands, type Command } from './command-registry';
 import { cn } from '@/lib/utils';
-import { gsap, useGSAP } from '@/lib/gsap';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -93,22 +93,26 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   // Entrance animation — runs every time the palette mounts (open flips to true).
   // No exit animation: `open=false` unmounts the tree entirely, which is fine.
+  // Under reduced motion the palette just appears; the auto-focus and
+  // keyboard handling are unaffected either way.
   useGSAP(
     () => {
-      if (backdropRef.current) {
-        gsap.fromTo(
-          backdropRef.current,
-          { opacity: 0 },
-          { opacity: 1, duration: 0.18, ease: 'none' },
-        );
-      }
-      if (panelRef.current) {
-        gsap.fromTo(
-          panelRef.current,
-          { opacity: 0, scale: 0.98, y: -8 },
-          { opacity: 1, scale: 1, y: 0, duration: 0.22, ease: 'power3.out' },
-        );
-      }
+      return motionSafe(() => {
+        if (backdropRef.current) {
+          gsap.fromTo(
+            backdropRef.current,
+            { opacity: 0 },
+            { opacity: 1, duration: 0.18, ease: 'none' },
+          );
+        }
+        if (panelRef.current) {
+          gsap.fromTo(
+            panelRef.current,
+            { opacity: 0, scale: 0.98, y: -8 },
+            { opacity: 1, scale: 1, y: 0, duration: 0.22, ease: 'power3.out' },
+          );
+        }
+      });
     },
     { scope: panelRef, dependencies: [open] },
   );

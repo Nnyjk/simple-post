@@ -23,7 +23,7 @@ import { BodyEditor } from './BodyEditor-lazy';
 import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor-lazy';
 import { EnvVarPicker, extractPartialVar, shouldShowVarPicker } from './EnvVarPicker';
-import { gsap, useGSAP } from '@/lib/gsap';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
   { id: 'params', label: 'Params' },
@@ -459,26 +459,49 @@ export function HttpTester() {
   // after a pending request resolves.
   const sendBtnRef = useRef<HTMLButtonElement>(null);
   const playIconRef = useRef<HTMLSpanElement>(null);
+  // Whether a request was actually in flight the last time this ran.
+  // `useGSAP` fires once on mount as well as on every dep change, and at
+  // mount `requestPending` is false — so without this the button bounced
+  // every time an endpoint tab was opened, meaning nothing. The bounce is
+  // supposed to say "your response arrived", so it must be gated on there
+  // having been a request to arrive from.
+  const wasPendingRef = useRef(false);
 
   useGSAP(() => {
     if (!playIconRef.current || !sendBtnRef.current) return;
 
     if (requestPending) {
+      wasPendingRef.current = true;
       // Kill any leftover rotation (e.g. from a previous cancel) before
       // starting a fresh spin. gsap.fromTo with rotation +=360 +
       // repeat:-1 gives a continuous linear spin.
+      //
+      // Gated on reduced motion because this one never stops: an
+      // indefinite loop is the strongest vestibular trigger there is, and
+      // it is also the only animation here that runs while the user is
+      // just waiting. Nothing is lost by not spinning — while a request is
+      // in flight the button is already `disabled` and its label reads
+      // 发送中…, so the state never depended on the rotation.
       gsap.killTweensOf(playIconRef.current);
-      gsap.fromTo(
-        playIconRef.current,
-        { rotation: 0 },
-        { rotation: '+=360', duration: 1, repeat: -1, ease: 'none' },
-      );
-    } else {
-      // Resolve path: kill the spin and snap the icon back upright so
-      // the next render starts at rotation 0. Then micro-bounce the
-      // button to confirm the response arrived.
-      gsap.killTweensOf(playIconRef.current);
-      gsap.set(playIconRef.current, { rotation: 0 });
+      return motionSafe(() => {
+        gsap.fromTo(
+          playIconRef.current,
+          { rotation: 0 },
+          { rotation: '+=360', duration: 1, repeat: -1, ease: 'none' },
+        );
+      });
+    }
+
+    // Resolve path: kill the spin and snap the icon back upright so
+    // the next render starts at rotation 0.
+    const requestArrived = wasPendingRef.current;
+    wasPendingRef.current = false;
+    gsap.killTweensOf(playIconRef.current);
+    gsap.set(playIconRef.current, { rotation: 0 });
+    if (!requestArrived) return;
+
+    // Micro-bounce the button to confirm the response arrived.
+    return motionSafe(() => {
       gsap.killTweensOf(sendBtnRef.current);
       gsap.fromTo(
         sendBtnRef.current,
@@ -490,7 +513,7 @@ export function HttpTester() {
           ],
         },
       );
-    }
+    });
   }, [requestPending]);
 
   // C3: Copy-as-cURL feedback bounce. Fires when curlFlash transitions
@@ -499,17 +522,19 @@ export function HttpTester() {
   const copyCurlBtnRef = useRef<HTMLButtonElement>(null);
   useGSAP(() => {
     if (!curlFlash || !copyCurlBtnRef.current) return;
-    gsap.killTweensOf(copyCurlBtnRef.current);
-    gsap.fromTo(
-      copyCurlBtnRef.current,
-      { scale: 1 },
-      {
-        keyframes: [
-          { scale: 1.06, duration: 0.1, ease: 'power2.out' },
-          { scale: 1, duration: 0.1, ease: 'power2.in' },
-        ],
-      },
-    );
+    return motionSafe(() => {
+      gsap.killTweensOf(copyCurlBtnRef.current);
+      gsap.fromTo(
+        copyCurlBtnRef.current,
+        { scale: 1 },
+        {
+          keyframes: [
+            { scale: 1.06, duration: 0.1, ease: 'power2.out' },
+            { scale: 1, duration: 0.1, ease: 'power2.in' },
+          ],
+        },
+      );
+    });
   }, [curlFlash]);
 
   // The breadcrumb answers "where am I in the tree" — but the moment the

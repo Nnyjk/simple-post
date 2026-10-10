@@ -26,4 +26,51 @@ import { Flip } from 'gsap/Flip';
 // fully wired plugins."
 gsap.registerPlugin(useGSAP, Flip);
 
+/**
+ * Run an animation only when the user has not asked the OS for reduced
+ * motion. Returns a cleanup function, so it composes with `useGSAP`'s own
+ * return-a-cleanup contract:
+ *
+ * ```ts
+ * useGSAP(() => {
+ *   if (!panelRef.current) return;
+ *   return motionSafe(() => {
+ *     gsap.fromTo(panelRef.current, { opacity: 0 }, { opacity: 1 });
+ *   });
+ * }, [open]);
+ * ```
+ *
+ * `jumpToEnd` is for animations that are **carrying state**, not
+ * decorating it — pass what should happen with no motion at all:
+ *
+ * ```ts
+ * return motionSafe(() => gsap.to(el, { height: 0 }), () => gsap.set(el, { height: 0 }));
+ * ```
+ *
+ * This distinction is the whole point, and getting it wrong breaks the
+ * feature rather than merely looking different. A collapsed tree branch
+ * is held closed by an inline `height: 0` that GSAP owns, so simply not
+ * running the expand tween leaves the branch invisible after the user
+ * expanded it. Decoration can be skipped; state has to land somewhere.
+ *
+ * Why a helper instead of `gsap.matchMedia()` at each call site:
+ * `matchMedia` is the right primitive, but the useful part is the
+ * `(prefers-reduced-motion: …)` strings and the `revert()`, and both are
+ * easy to leave off. This code base had exactly one hand-written
+ * `matchMedia` (the body editor's validation pill) beside seven
+ * unguarded `useGSAP` blocks, which reads as an oversight rather than a
+ * policy. One spelling makes "we respect this" true everywhere or
+ * visibly false everywhere.
+ *
+ * Note the queries are `no-preference` / `reduce`, not one-sided: the
+ * default is to animate and the opt-out is explicit, and a browser that
+ * understands neither runs nothing rather than animating unconditionally.
+ */
+export function motionSafe(animate: () => void, jumpToEnd?: () => void): () => void {
+  const mm = gsap.matchMedia();
+  mm.add('(prefers-reduced-motion: no-preference)', animate);
+  if (jumpToEnd) mm.add('(prefers-reduced-motion: reduce)', jumpToEnd);
+  return () => mm.revert();
+}
+
 export { gsap, useGSAP, Flip };

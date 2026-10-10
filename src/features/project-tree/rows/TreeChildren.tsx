@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from 'react';
-import { gsap, useGSAP } from '@/lib/gsap';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 /**
  * Wraps the children of a tree node (module → CollectionBranch, or
@@ -28,32 +28,50 @@ export function TreeChildren({ expanded, children }: { expanded: boolean; childr
         gsap.set(el, expanded ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 });
         return;
       }
+      // The transition is motion, but it is also the only thing that moves
+      // this container between open and closed, so reduced motion has to
+      // land on the end state rather than skip it — the collapsed height
+      // is an inline style GSAP owns, and a skipped tween would leave a
+      // branch the user just expanded sitting at `height: 0`.
+      const rows = el.querySelectorAll<HTMLElement>(':scope > * > [data-tree-row]');
       if (expanded) {
-        gsap.fromTo(
-          el,
-          { height: 0, opacity: 0 },
-          {
-            height: 'auto',
-            opacity: 1,
-            duration: 0.25,
-            ease: 'power2.out',
+        return motionSafe(
+          () => {
+            gsap.fromTo(
+              el,
+              { height: 0, opacity: 0 },
+              {
+                height: 'auto',
+                opacity: 1,
+                duration: 0.25,
+                ease: 'power2.out',
+              },
+            );
+            gsap.from(rows, {
+              opacity: 0,
+              y: 4,
+              duration: 0.2,
+              stagger: 0.025,
+              ease: 'power2.out',
+            });
+          },
+          () => {
+            gsap.set(el, { height: 'auto', opacity: 1 });
+            gsap.set(rows, { opacity: 1, y: 0 });
           },
         );
-        gsap.from(el.querySelectorAll<HTMLElement>(':scope > * > [data-tree-row]'), {
-          opacity: 0,
-          y: 4,
-          duration: 0.2,
-          stagger: 0.025,
-          ease: 'power2.out',
-        });
-      } else {
-        gsap.to(el, {
-          height: 0,
-          opacity: 0,
-          duration: 0.2,
-          ease: 'power2.in',
-        });
       }
+      return motionSafe(
+        () => {
+          gsap.to(el, {
+            height: 0,
+            opacity: 0,
+            duration: 0.2,
+            ease: 'power2.in',
+          });
+        },
+        () => gsap.set(el, { height: 0, opacity: 0 }),
+      );
     },
     { dependencies: [expanded], scope: containerRef },
   );

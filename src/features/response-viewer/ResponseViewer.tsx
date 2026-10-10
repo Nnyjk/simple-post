@@ -20,7 +20,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { formatBytes, formatDuration, statusColorVar, cn, tryFormatJson } from '@/lib/utils';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
-import { gsap, useGSAP } from '@/lib/gsap';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { ResponseHistory } from './ResponseHistory';
 
 export function ResponseViewer() {
@@ -73,31 +73,49 @@ export function ResponseViewer() {
     // the animation).
     if (pending || !response || !statusPillRef.current) return;
 
-    // Pulse the status pill.
-    gsap.fromTo(
-      statusPillRef.current,
-      { scale: 0.92, opacity: 0 },
-      { scale: 1, opacity: 1, duration: 0.28, ease: 'power2.out' },
-    );
-
-    // Count-up duration (kill any in-flight tween first so back-to-back
-    // responses don't pile up overlapping tweens on the same object).
+    // Killing an in-flight tween is state hygiene, not motion: without it
+    // back-to-back responses pile overlapping tweens onto the same object
+    // and the number fights itself. It stays outside the guard.
     gsap.killTweensOf(durObjRef.current);
-    gsap.to(durObjRef.current, {
-      val: response.durationMs,
-      duration: 0.4,
-      ease: 'power2.out',
-      onUpdate: () => setDisplayDuration(Math.round(durObjRef.current.val)),
-    });
-
-    // Count-up size.
     gsap.killTweensOf(sizeObjRef.current);
-    gsap.to(sizeObjRef.current, {
-      val: response.sizeBytes,
-      duration: 0.4,
-      ease: 'power2.out',
-      onUpdate: () => setDisplaySize(Math.round(sizeObjRef.current.val)),
-    });
+
+    return motionSafe(
+      () => {
+        // Pulse the status pill.
+        gsap.fromTo(
+          statusPillRef.current,
+          { scale: 0.92, opacity: 0 },
+          { scale: 1, opacity: 1, duration: 0.28, ease: 'power2.out' },
+        );
+
+        // Count-up duration.
+        gsap.to(durObjRef.current, {
+          val: response.durationMs,
+          duration: 0.4,
+          ease: 'power2.out',
+          onUpdate: () => setDisplayDuration(Math.round(durObjRef.current.val)),
+        });
+
+        // Count-up size.
+        gsap.to(sizeObjRef.current, {
+          val: response.sizeBytes,
+          duration: 0.4,
+          ease: 'power2.out',
+          onUpdate: () => setDisplaySize(Math.round(sizeObjRef.current.val)),
+        });
+      },
+      // The count-ups are not decoration. `displayDuration` / `displaySize`
+      // are written *only* from `onUpdate`, so skipping the tweens would
+      // leave the response panel reading `0 ms` / `0 B` for every request
+      // — reduced motion would silently cost the user the measurement.
+      // Land the final values instead of tweening to them.
+      () => {
+        durObjRef.current.val = response.durationMs;
+        sizeObjRef.current.val = response.sizeBytes;
+        setDisplayDuration(response.durationMs);
+        setDisplaySize(response.sizeBytes);
+      },
+    );
   }, [response?.status, response?.durationMs, response?.sizeBytes, pending]);
 
   const handleSaveAsExample = () => {
@@ -113,17 +131,19 @@ export function ResponseViewer() {
   const saveExampleBtnRef = useRef<HTMLButtonElement>(null);
   useGSAP(() => {
     if (!savedFlash || !saveExampleBtnRef.current) return;
-    gsap.killTweensOf(saveExampleBtnRef.current);
-    gsap.fromTo(
-      saveExampleBtnRef.current,
-      { scale: 1 },
-      {
-        keyframes: [
-          { scale: 1.06, duration: 0.1, ease: 'power2.out' },
-          { scale: 1, duration: 0.1, ease: 'power2.in' },
-        ],
-      },
-    );
+    return motionSafe(() => {
+      gsap.killTweensOf(saveExampleBtnRef.current);
+      gsap.fromTo(
+        saveExampleBtnRef.current,
+        { scale: 1 },
+        {
+          keyframes: [
+            { scale: 1.06, duration: 0.1, ease: 'power2.out' },
+            { scale: 1, duration: 0.1, ease: 'power2.in' },
+          ],
+        },
+      );
+    });
   }, [savedFlash]);
 
   if (pending) {

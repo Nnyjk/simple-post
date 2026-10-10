@@ -9,7 +9,7 @@ import { AlertTriangle, Wand2 } from 'lucide-react';
 import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
-import { gsap, useGSAP } from '@/lib/gsap';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 interface Props {
   value: RequestBody;
@@ -115,8 +115,7 @@ function BodyContent({ value, onChange, validationError }: Props) {
   useGSAP(() => {
     const el = pillRef.current;
     if (!el || !shownError) return;
-    const mm = gsap.matchMedia();
-    mm.add('(prefers-reduced-motion: no-preference)', () => {
+    return motionSafe(() => {
       gsap.fromTo(
         el,
         { autoAlpha: 0, y: -8, scale: 0.96 },
@@ -137,7 +136,6 @@ function BodyContent({ value, onChange, validationError }: Props) {
         },
       );
     });
-    return () => mm.revert();
   }, [shownError]);
 
   const hintText = useMemo(

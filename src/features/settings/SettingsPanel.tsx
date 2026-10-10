@@ -34,7 +34,7 @@ import { cn } from '@/lib/utils';
 import type { HueConcept } from '@/lib/hue';
 import { IconTile } from '@/components/ui/icon-tile';
 import { EmptyHint } from '@/components/ui/empty-hint';
-import { gsap, useGSAP } from '@/lib/gsap';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 const CATEGORY_IDS: readonly SettingsCategoryId[] = ['env', 'connection', 'appearance', 'request'];
 
@@ -152,15 +152,22 @@ export function SettingsPanel() {
   // wrapper carries `key={activeSection}` so React remounts the section on
   // each switch, and we then animate the freshly mounted root from a
   // faded-out + slightly-down state to its natural position.
+  //
+  // Purely decorative: the section remounts either way, so under reduced
+  // motion it just appears. No end-state callback is needed — there is no
+  // state behind the tween, unlike the tree's expand height or the
+  // response panel's count-ups.
   useGSAP(
     () => {
       const root = mainRef.current?.querySelector<HTMLElement>('[data-settings-section]');
       if (!root) return;
-      gsap.fromTo(
-        root,
-        { opacity: 0, y: 4 },
-        { opacity: 1, y: 0, duration: 0.2, ease: 'power2.out' },
-      );
+      return motionSafe(() => {
+        gsap.fromTo(
+          root,
+          { opacity: 0, y: 4 },
+          { opacity: 1, y: 0, duration: 0.2, ease: 'power2.out' },
+        );
+      });
     },
     { scope: mainRef, dependencies: [activeSection] },
   );
