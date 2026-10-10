@@ -465,18 +465,26 @@ describe('http-build: {{var}} template resolution', () => {
     assert.equal(url, 'http://api.example.com/{{missing}}/x');
   });
 
-  it('body content is sent verbatim (no {{var}} resolution — matches curl.ts)', () => {
-    // Intentional: body templating is NOT done by the builder. This
-    // pins the current behavior so a future change that flips this
-    // requires a conscious update to this test (and likely a follow-up
-    // spec discussion with the user about whether they want body
-    // templating at all).
+  it('resolves {{var}} in body content, matching Rust resolve_endpoint', () => {
+    // The body used to ship verbatim. It now templates like every other
+    // field, because the app and its own backend disagreed: `resolve_endpoint`
+    // has always substituted. This asserts the substitution, and the next
+    // one asserts the payload still survives byte-for-byte when there is
+    // nothing to substitute.
     const body: RequestBody = {
       mode: 'json',
       content: '{"site":"{{site}}","u":"{{userId}}"}',
     };
     const { init } = buildFetchInit(input({ body, env: ENV }));
-    assert.equal(init.body, '{"site":"{{site}}","u":"{{userId}}"}');
+    assert.equal(init.body, '{"site":"cn","u":"u_demo"}');
+    // Still valid JSON — the substitution happened to be safe here.
+    assert.deepEqual(JSON.parse(init.body as string), { site: 'cn', u: 'u_demo' });
+  });
+
+  it('leaves body content byte-identical when it carries no marker', () => {
+    const body: RequestBody = { mode: 'json', content: '{"a": 1, "b": [2, 3]}' };
+    const { init } = buildFetchInit(input({ body, env: ENV }));
+    assert.equal(init.body, '{"a": 1, "b": [2, 3]}');
   });
 });
 
@@ -736,6 +744,46 @@ describe('prepareRequest: query assembly', () => {
     );
     assert.equal(r.url, '/x?page=1&k=v');
   });
+
+  it('resolves {{var}} in a param value before encoding it', () => {
+    const r = prepareRequest(
+      prep({ urlPath: '/x', params: [kv('q', '{{site}}'), kv('id', '{{userId}}')], env: ENV }),
+    );
+    assert.equal(r.url, '/x?q=cn&id=u_demo');
+    assert.deepEqual(r.missingVars, []);
+  });
+
+  it('leaves a param key verbatim, mirroring Rust resolve_endpoint', () => {
+    // Rust substitutes the value only (`p.key.clone()`), so resolving a
+    // key here would make the preview and the send disagree.
+    const r = prepareRequest(prep({ urlPath: '/x', params: [kv('{{site}}', 'v')], env: ENV }));
+    assert.equal(r.url, '/x?%7B%7Bsite%7D%7D=v');
+  });
+
+  it('reports a param marker it could not resolve', () => {
+    const r = prepareRequest(prep({ urlPath: '/x', params: [kv('q', '{{gone}}')], env: ENV }));
+    assert.deepEqual(r.missingVars, ['gone']);
+    assert.equal(r.url, '/x?q=%7B%7Bgone%7D%7D');
+  });
+
+  it('ignores markers on a disabled param', () => {
+    const r = prepareRequest(
+      prep({ urlPath: '/x', params: [kv('q', '{{gone}}', false)], env: ENV }),
+    );
+    assert.deepEqual(r.missingVars, []);
+    assert.equal(r.url, '/x');
+  });
+
+  it('drops a param whose variable resolves to empty', () => {
+    const r = prepareRequest(
+      prep({
+        urlPath: '/x',
+        params: [kv('q', '{{blank}}'), kv('keep', '1')],
+        env: { ...ENV, variables: { ...ENV.variables, blank: '' } },
+      }),
+    );
+    assert.equal(r.url, '/x?keep=1');
+  });
 });
 
 describe('prepareRequest: headers are ordered tuples', () => {
@@ -867,15 +915,35 @@ describe('prepareRequest: missingVars', () => {
     assert.deepEqual(r.missingVars, []);
   });
 
-  it('reports a marker from the body even when the variable exists', () => {
-    // The body is not templated, so `{{userId}}` ships literally and
-    // IS unresolved in the request that goes out — whether or not the
-    // environment happens to define it. Reporting it here is what lets
-    // the UI warn before the user hits Send.
-    const r = prepareRequest(
+  it('reports a marker from the body only when it did not resolve', () => {
+    // The body is templated, so a variable the environment defines is not
+    // a warning — it is already in the payload. An undefined one is, and
+    // that is the case the UI needs to surface before Send.
+    const resolved = prepareRequest(
       prep({ body: { mode: 'json', content: '{"u":"{{userId}}"}' }, env: ENV }),
     );
-    assert.deepEqual(r.missingVars, ['userId']);
+    assert.equal(resolved.body, '{"u":"u_demo"}');
+    assert.deepEqual(resolved.missingVars, []);
+
+    const unresolved = prepareRequest(
+      prep({ body: { mode: 'json', content: '{"u":"{{gone}}"}' }, env: ENV }),
+    );
+    assert.equal(unresolved.body, '{"u":"{{gone}}"}');
+    assert.deepEqual(unresolved.missingVars, ['gone']);
+  });
+
+  it('decides body inclusion on the authored content, not the resolved one', () => {
+    // A body that is nothing but a variable resolving to "" still ships an
+    // (empty) body. Testing after templating would drop the request's body
+    // and silently change the request. Mirrors `resolve_endpoint`.
+    const r = prepareRequest(
+      prep({
+        body: { mode: 'json', content: '{{blank}}' },
+        env: { ...ENV, variables: { ...ENV.variables, blank: '' } },
+      }),
+    );
+    assert.equal(r.body, '');
+    assert.deepEqual(r.missingVars, []);
   });
 
   it('does not scan the body of a request that sends none', () => {

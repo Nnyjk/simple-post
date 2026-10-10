@@ -97,9 +97,11 @@ export interface PreparedRequest {
   method: HttpMethod;
   /**
    * The complete URL: `join(baseUrl, urlPath)` → `{{var}}` resolution →
-   * query params → apikey-in-query, in that order. Joining *before*
-   * resolving means a `{{var}}` inside the environment's own base URL is
-   * resolved too, matching `resolve_endpoint`'s order in Rust.
+   * param values resolved and appended → apikey-in-query, in that order.
+   * Joining *before* resolving means a `{{var}}` inside the environment's
+   * own base URL is resolved too. Params are merged last because their
+   * values are resolved on the way in (see `appendQueryString`), so by
+   * the time they are encoded no marker can survive into the URL.
    */
   url: string;
   /**
@@ -110,20 +112,31 @@ export interface PreparedRequest {
    */
   headers: Array<[string, string]>;
   /**
-   * Body content, or `null` when `mode === 'none'` or the content is
-   * empty. Sent verbatim: the body is **not** `{{var}}`-templated (an
-   * existing test pins that), so `{{x}}` inside a JSON payload goes out
-   * literally. `missingVars` still reports those markers, because a
-   * request that is going to ship an unresolved `{{x}}` is exactly what
-   * the user needs warning about.
+   * Body content, or `null` when `mode === 'none'` or the authored content
+   * is empty. Templated like every other field: `{{var}}` resolves against
+   * the active environment.
+   *
+   * The inclusion test runs on the **authored** content, before
+   * templating, which mirrors Rust's `resolve_endpoint`. So a body whose
+   * only content is a variable that resolves to `""` ships an empty string
+   * rather than being dropped — a request that was deliberately given a
+   * body still gets one.
+   *
+   * This used to ship verbatim with the markers intact. The reason given
+   * was that substituting into a JSON payload can produce invalid JSON,
+   * which is real, but it left the app disagreeing with its own backend
+   * (`resolve_endpoint` has always templated) and left `{{x}}` going out
+   * to the server as data. If a variable resolves to something that
+   * breaks the payload, that is the user's value to fix, and
+   * `missingVars` covers the case where it did not resolve at all.
    */
   body: string | null;
   /**
-   * Every `{{name}}` left unresolved anywhere in URL / headers / body /
-   * auth, deduped and in first-occurrence order. The set is aligned
-   * with `resolve_endpoint`'s `missing_vars` in Rust; the *order* is
-   * renderer-local (URL, headers, body, auth) because nothing consumes
-   * it but this app's own warning UI.
+   * Every `{{name}}` left unresolved anywhere in URL / param values /
+   * headers / body / auth, deduped and in first-occurrence order. The set
+   * is aligned with `resolve_endpoint`'s `missing_vars` in Rust; the
+   * *order* is renderer-local (URL, params, headers, body, auth) because
+   * nothing consumes it but this app's own warning UI.
    */
   missingVars: string[];
 }
@@ -159,13 +172,36 @@ function createMissingTracker(): MissingTracker {
   };
 }
 
-/** Append enabled, non-empty params as a `?k=v&...` query string. */
-function appendQueryString(url: string, params: readonly KeyValue[]): string {
+/**
+ * Append enabled, non-empty params as a `?k=v&...` query string.
+ *
+ * A param value is a template like every other field: `{{userId}}`
+ * resolves against the active environment before it is encoded. Mirrors
+ * Rust's `resolve_endpoint`, which substitutes the **value** only and
+ * passes `key` through verbatim — a variable in a key is not something
+ * the backend resolves, so resolving it here would make the cURL preview
+ * and the actual send disagree, which is the one thing this module
+ * exists to make unrepresentable.
+ *
+ * Disabled params are skipped before substitution for the same reason
+ * headers are: they never ship, so their variables are not this
+ * request's problem and reporting them would be a false alarm.
+ */
+function appendQueryString(
+  url: string,
+  params: readonly KeyValue[],
+  env: Environment | undefined,
+  missing: MissingTracker,
+): string {
   const parts: string[] = [];
   for (const p of params) {
     if (!p.enabled) continue;
-    if (!p.key || p.value === '') continue; // spec: skip empty keys/values
-    parts.push(`${encodeURIComponent(p.key)}=${encodeURIComponent(p.value)}`);
+    const value = resolveVarsWithMissing(p.value, env);
+    missing.add(value.missing);
+    // Empty check runs on the *resolved* value: a variable that resolves
+    // to "" drops the param, exactly as a hand-typed empty value does.
+    if (!p.key || value.value === '') continue; // spec: skip empty keys/values
+    parts.push(`${encodeURIComponent(p.key)}=${encodeURIComponent(value.value)}`);
   }
   if (parts.length === 0) return url;
   return `${url}${url.includes('?') ? '&' : '?'}${parts.join('&')}`;
@@ -333,24 +369,35 @@ function hasBody(body: RequestBody): boolean {
  * Turn the user-editable request shape into everything a transport needs.
  * This is the only function in the app that assembles a request.
  *
- * Order of operations (matches `resolve_endpoint` in Rust, and the
- * order matters at each step):
+ * Order of operations (the order matters at each step):
  *
  *   1. join `baseUrl` + `urlPath` — a path with its own scheme wins, so
  *      a 自定义 full URL is never prefixed;
  *   2. resolve `{{var}}` over the **joined** URL, so a variable inside
  *      the environment's own base URL resolves too;
- *   3. append enabled params as a query string (encoding them, and
- *      choosing `?` vs `&` off the current URL);
+ *   3. resolve `{{var}}` in each enabled param's **value**, then append
+ *      the survivors as a query string (encoding them, and choosing `?`
+ *      vs `&` off the current URL);
  *   4. append an apikey configured for the query location;
  *   5. build the ordered header list;
- *   6. decide body inclusion (`mode !== 'none'` **and** non-empty).
+ *   6. decide body inclusion (`mode !== 'none'` **and** non-empty
+ *      authored content), then template the body.
  *
- * Params are deliberately not scanned for missing variables: they are
- * merged into the URL at step 3, so anything unresolved there is already
- * visible there — and since they are percent-encoded on the way in,
- * `{{` cannot survive into `PreparedRequest.url` as a live marker to
- * re-detect anyway.
+ * Every `{{var}}` that cannot be resolved is recorded, wherever it was
+ * written — URL, param value, header, auth, or body — and every field
+ * that goes on the wire is templated, including the body.
+ *
+ * Two of those were not always true, and both were the same kind of bug:
+ * the field looked handled, the app and its own backend disagreed, and a
+ * `{{x}}` went out to the server silently encoded or literal.
+ *
+ *   - Param values were exempt on the theory that a marker percent-encoded
+ *     into the query string was "already visible there". It was not:
+ *     `%7B%7Bx%7D%7D` is no more readable than `{{x}}`.
+ *   - The body shipped verbatim, on the theory that substituting into JSON
+ *     can produce invalid JSON. Real, but it left `{{x}}` in the payload
+ *     as data and the frontend disagreeing with `resolve_endpoint`, which
+ *     has always templated every field.
  */
 export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const missing = createMissingTracker();
@@ -360,26 +407,23 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const url = resolveVarsWithMissing(joinBaseUrl(input.baseUrl, input.urlPath), input.env);
   missing.add(url.missing);
 
-  const withParams = appendQueryString(url.value, input.params);
+  const withParams = appendQueryString(url.value, input.params, input.env, missing);
   const finalUrl = appendApikeyToQuery(withParams, auth);
 
   const headers = buildOrderedHeaders(input.headers, input.body.mode, auth, input.env, missing);
 
-  const body = hasBody(input.body) ? input.body.content : null;
-  if (body !== null) {
-    // The body is shipped verbatim (see `PreparedRequest.body`), so every
-    // marker still in it is unresolved by definition. Probing with an
-    // empty variable pool turns `resolveVarsWithMissing` into a pure
-    // marker scanner — one regex in the codebase, mirroring Rust's
-    // `list_missing_vars`, instead of a second hand-rolled scanner here.
-    missing.add(resolveVarsWithMissing(body, undefined).missing);
-  }
+  // Decide inclusion on the authored content, then template it — the same
+  // order Rust's `resolve_endpoint` uses. Checking inclusion *after*
+  // templating would silently drop a request whose body is a variable that
+  // resolves to the empty string.
+  const body = hasBody(input.body) ? resolveVarsWithMissing(input.body.content, input.env) : null;
+  if (body !== null) missing.add(body.missing);
 
   return {
     method: input.method,
     url: finalUrl,
     headers,
-    body,
+    body: body === null ? null : body.value,
     missingVars: missing.list(),
   };
 }
