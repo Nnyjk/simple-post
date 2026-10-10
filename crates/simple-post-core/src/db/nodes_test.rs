@@ -343,6 +343,40 @@ fn a_non_module_may_not_sit_at_the_top_of_a_project() {
 }
 
 #[test]
+fn a_top_level_node_naming_no_project_is_a_validation_error() {
+    // Both transports default an absent `rootId` to the empty string, and
+    // a module has no `parentId` to derive it from — so the empty string
+    // used to reach `INSERT` and come back as
+    // `FOREIGN KEY constraint failed`. On the REST surface that is a 500
+    // with `code: "sqlite"`, which a client cannot tell apart from a real
+    // server fault. It is a caller mistake and has to read like one.
+    let (pool, _dir) = fresh_pool();
+    let nameless = module("", "m1", 0);
+    let err = db::with_tx(&pool, |c| create(c, &nameless, None)).unwrap_err();
+    assert!(
+        matches!(err, AppError::Validation(_)),
+        "expected a validation error, got {err:?}"
+    );
+    assert!(
+        !matches!(err, AppError::Sqlite(_)),
+        "must not surface as a transport failure"
+    );
+}
+
+#[test]
+fn a_top_level_node_naming_an_unknown_project_is_a_validation_error() {
+    // The other half of the same hole: a typo in `rootId` also used to come
+    // back as a foreign-key failure.
+    let (pool, _dir) = fresh_pool();
+    let wrong = module("p_does_not_exist", "m1", 0);
+    let err = db::with_tx(&pool, |c| create(c, &wrong, None)).unwrap_err();
+    assert!(
+        matches!(err, AppError::Validation(_)),
+        "expected a validation error, got {err:?}"
+    );
+}
+
+#[test]
 fn root_id_must_match_the_parents() {
     // A node filed under one project while rendering inside another's
     // tree is invisible to list_by_root for the project it claims.

@@ -699,12 +699,23 @@ fn renumber_top_level(
 
 /// Check that a placement is legal before writing it.
 ///
-/// Three things can be wrong, and all three used to be caught by
-/// foreign keys that no longer exist:
+/// Four things can be wrong, and all four used to be caught by foreign
+/// keys that no longer exist:
 /// * a node under a parent whose type does not accept it
 /// * a module given a node parent
 /// * a `root_id` that disagrees with the parent's, which would file a
 ///   node under one project while rendering it in another's tree
+/// * a top-level node that names no project at all, or one that does not
+///   exist
+///
+/// The last one is the one this function used to let through: both
+/// transports default an absent `rootId` to the empty string, and a
+/// top-level node has no `parentId` to derive it from, so the empty
+/// string reached `INSERT` and SQLite reported
+/// `FOREIGN KEY constraint failed`. That surfaced as a 500 with
+/// `code: "sqlite"` — a transport failure for what is really a caller
+/// mistake, and one the error envelope tells a client it cannot
+/// distinguish from a genuine server fault.
 fn validate_placement(
     conn: &mut Connection,
     kind: ResourceNodeType,
@@ -716,6 +727,20 @@ fn validate_placement(
             return Err(AppError::Validation(format!(
                 "a {} needs a parent node; only a module can sit at the top of a project",
                 kind.as_str()
+            )));
+        }
+        // A module's parent is the project itself, which the row cannot
+        // reference — so the project has to be named, one way or the
+        // other.
+        if root_id.is_empty() {
+            return Err(AppError::Validation(
+                "a top-level node needs its project: pass rootId, or a parentId to derive it from"
+                    .into(),
+            ));
+        }
+        if crate::db::projects::get(conn, root_id).is_err() {
+            return Err(AppError::Validation(format!(
+                "no project with id {root_id:?}; a top-level node must name the project it belongs to"
             )));
         }
         return Ok(());
