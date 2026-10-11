@@ -68,6 +68,24 @@
     --radius-window: 8px;
     --radius-pill: 999px;
 
+    /* Theme preview swatches. `AppearanceSection` paints a thumbnail of
+       each theme so the user can see what switching will do. Those four
+       colours have to show BOTH themes at the same time, so they cannot
+       read the live `--background` / `--card`: whichever theme is active,
+       `var(--background)` resolves to that one. They are constants here
+       instead, so the thumbnail stays true when the palette moves. It used
+       to carry its own hardcoded hexes, which drifted — after dark moved
+       off #0A0A0A the thumbnail went on showing the old near-black.
+       Keep these in step with `:root` above and the `.dark` block below. */
+    --swatch-light-bg: 0 0% 98%;
+    --swatch-light-panel: 0 0% 100%;
+    --swatch-light-text: 0 0% 10.6%;
+    --swatch-light-accent: 208 60% 38%;
+    --swatch-dark-bg: 0 0% 12.5%;
+    --swatch-dark-panel: 0 0% 16.9%;
+    --swatch-dark-text: 0 0% 95.3%;
+    --swatch-dark-accent: 203 92% 63%;
+
     /* ------------------------------------------------------------------
      * Semantic hue accents — 1:1 concept-to-colour.
      *

@@ -13,10 +13,21 @@ interface ThemeOption {
   // A short hint that shows the *practical* difference between modes —
   // not a marketing blurb.
   hint: string;
-  // 4 hex colours the swatch uses to preview the theme. Picked to be
-  // visually distinct in both light and dark surroundings.
+  // 4 colours the swatch uses to preview the theme. These read the
+  // `--swatch-*` tokens in globals.css rather than carrying hexes of their
+  // own: they have to render *both* themes at once, so they cannot use the
+  // live `--background` / `--card` (those resolve to whichever theme is
+  // active), and when they carried literals instead they silently went on
+  // showing the old palette after dark mode moved off #0A0A0A.
   preview: { bg: string; panel: string; text: string; accent: string };
 }
+
+const swatch = (theme: 'light' | 'dark') => ({
+  bg: `hsl(var(--swatch-${theme}-bg))`,
+  panel: `hsl(var(--swatch-${theme}-panel))`,
+  text: `hsl(var(--swatch-${theme}-text))`,
+  accent: `hsl(var(--swatch-${theme}-accent))`,
+});
 
 const THEME_OPTIONS: ThemeOption[] = [
   {
@@ -24,25 +35,27 @@ const THEME_OPTIONS: ThemeOption[] = [
     label: '暗色',
     value: 'dark',
     hint: '默认 · 长时间使用更舒服',
-    preview: { bg: '#0f1115', panel: '#1a1d22', text: '#e5e7eb', accent: '#3b82f6' },
+    preview: swatch('dark'),
   },
   {
     icon: <Sun className="h-4 w-4" />,
     label: '亮色',
     value: 'light',
     hint: '白天或强光环境',
-    preview: { bg: '#ffffff', panel: '#f5f6f8', text: '#0f1115', accent: '#2563eb' },
+    preview: swatch('light'),
   },
   {
     icon: <Monitor className="h-4 w-4" />,
     label: '跟随系统',
     value: 'system',
     hint: 'Windows 主题切换时自动跟随',
+    // Half of each, so the option reads as "both" rather than as one of
+    // them. The gradient is a CSS string, so it cannot be a bare `hsl(var(…))`.
     preview: {
-      bg: 'linear-gradient(135deg,#0f1115_50%,#ffffff_50%)',
-      panel: '#9ca3af',
-      text: '#e5e7eb',
-      accent: '#3b82f6',
+      bg: 'linear-gradient(135deg, hsl(var(--swatch-dark-bg)) 50%, hsl(var(--swatch-light-bg)) 50%)',
+      panel: 'hsl(var(--muted-foreground))',
+      text: 'hsl(var(--swatch-dark-text))',
+      accent: 'hsl(var(--swatch-dark-accent))',
     },
   },
 ];
