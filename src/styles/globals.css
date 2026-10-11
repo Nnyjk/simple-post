@@ -4,30 +4,69 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    /* ------------------------------------------------------------------
+     * Surfaces are a LIGHTNESS LADDER, not a set of near-identical
+     * whites. Each step up is ~6 lightness points, which is what lets
+     * layer boundaries read without a shadow anywhere:
+     *
+     *   --background  #FAFAFA   the app canvas
+     *   --card        #FFFFFF   panels, popovers, menus
+     *   --muted       #EDEDED   inputs, segmented tracks, wells
+     *   --border      #DCDCDC   the hairline that separates them
+     *
+     * The old scale (background/card both #FFF, muted #F4F4F5) had no
+     * step between canvas and card, so every panel had to be separated
+     * by a border alone.
+     * ------------------------------------------------------------------ */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 10.6%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 0 0% 10.6%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --primary: 217 91% 60%;
+    --popover-foreground: 0 0% 10.6%;
+    --muted: 0 0% 92.9%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 0 0% 91.8%;
+    --accent-foreground: 0 0% 10.6%;
+    --primary: 208 60% 38%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 6% 10%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
+    --secondary: 0 0% 94.5%;
+    --secondary-foreground: 0 0% 10.6%;
+    --destructive: 5 59% 44%;
+    --destructive-foreground: 0 0% 100%;
     --success: 142 71% 45%;
     --success-foreground: 142 71% 30%;
     --warning: 38 92% 45%;
     --warning-foreground: 28 80% 35%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5% 64.9%;
-    --radius: 0.5rem;
+    --border: 0 0% 86.3%;
+    --input: 0 0% 83.5%;
+    --ring: 208 60% 38%;
+
+    /* Three text levels, not two. `--text-faint` is for information that
+       is there to be read, not acted on — timestamps, counts, paths. It
+       frees `--muted-foreground` to carry actual descriptive text at a
+       contrast that survives on `--card`. */
+    --text-faint: 0 0% 60.4%;
+
+    /* Hover / selection exist in two flavours: an alpha overlay for when
+       the surface may be translucent, and a solid equivalent for when it
+       is not (Windows "transparency effects" off, or a backdrop that
+       isn't available). Components should reach for
+       `bg-overlay-hover` / `bg-surface-hover` rather than hand-writing
+       `bg-accent/40`, so switching the backdrop never needs a redesign.
+       See the P4 spike for what turns the overlay path on. */
+    --overlay-hover: rgb(0 0 0 / 0.035);
+    --overlay-select: rgb(0 0 0 / 0.06);
+    --surface-hover: 0 0% 94.5%;
+    --surface-select: 0 0% 91.8%;
+
+    /* Windows rounds top-level windows to 8px; everything inside is 6 or
+       less. Keeping these separate stops the window from inheriting the
+       card radius (and vice versa). */
+    --edge-window: 0 0% 70.6%;
+    --radius: 6px;
+    --radius-window: 8px;
+    --radius-pill: 999px;
 
     /* ------------------------------------------------------------------
      * Semantic hue accents — 1:1 concept-to-colour.
@@ -66,33 +105,44 @@
     --hue-request: 310 48% 44%;
   }
 
-  /* Explicit `.light` block — identical to :root since light is the
+  /* Explicit `.light` block — mirrors `:root` because light is the
    * default (Tailwind darkMode: 'class' toggles `.dark` on <html>).
    * Defined for clarity; consumers can also just leave the class off. */
   .light {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --background: 0 0% 98%;
+    --foreground: 0 0% 10.6%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 0 0% 10.6%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --primary: 217 91% 60%;
+    --popover-foreground: 0 0% 10.6%;
+    --muted: 0 0% 92.9%;
+    --muted-foreground: 0 0% 40%;
+    --accent: 0 0% 91.8%;
+    --accent-foreground: 0 0% 10.6%;
+    --primary: 208 60% 38%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 6% 10%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
+    --secondary: 0 0% 94.5%;
+    --secondary-foreground: 0 0% 10.6%;
+    --destructive: 5 59% 44%;
+    --destructive-foreground: 0 0% 100%;
     --success: 142 71% 45%;
     --success-foreground: 142 71% 30%;
     --warning: 38 92% 45%;
     --warning-foreground: 28 80% 35%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5% 64.9%;
+    --border: 0 0% 86.3%;
+    --input: 0 0% 83.5%;
+    --ring: 208 60% 38%;
+
+    --text-faint: 0 0% 60.4%;
+    --overlay-hover: rgb(0 0 0 / 0.035);
+    --overlay-select: rgb(0 0 0 / 0.06);
+    --surface-hover: 0 0% 94.5%;
+    --surface-select: 0 0% 91.8%;
+
+    --edge-window: 0 0% 70.6%;
+    --radius: 6px;
+    --radius-window: 8px;
+    --radius-pill: 999px;
 
     /* Mirrors :root — light is the default. See the :root block for why
        these eight exist and why the split into two chroma tiers matters. */
@@ -107,28 +157,84 @@
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 8% 7%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 5%;
-    --popover-foreground: 0 0% 98%;
-    --muted: 240 6% 11%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 6% 14%;
-    --accent-foreground: 0 0% 98%;
+    /* ------------------------------------------------------------------
+     * Dark is NOT black. The old base was 240 10% 3.9% ≈ #0A0A0A, which
+     * left nowhere to go: every layer above it had to be lighter, and the
+     * border at #282828 was too dim to survive on top of it.
+     *
+     * #202020 gives the ladder room to run upward in small, even steps —
+     * the same rule light mode follows from #FAFAFA up to #FFFFFF:
+     *
+     *   --background  #202020   the app canvas
+     *   --card        #2B2B2B   panels, popovers, menus
+     *   --accent      #2D2D2D   hover / selection fill
+     *   --muted       #373737   inputs, segmented tracks, wells
+     *   --border      #444444   the hairline that separates them
+     *
+     * With four visible steps, structure reads without a shadow anywhere.
+     * That is the single biggest reason native Windows apps look the way
+     * they do in dark mode, and it is a token change, not a component
+     * change.
+     * ------------------------------------------------------------------ */
+    --background: 0 0% 12.5%;
+    --foreground: 0 0% 95.3%;
+    --card: 0 0% 16.9%;
+    --card-foreground: 0 0% 95.3%;
+    --popover: 0 0% 16.9%;
+    --popover-foreground: 0 0% 95.3%;
+
+    --muted: 0 0% 21.6%;
+    --muted-foreground: 0 0% 65.1%;
+    --accent: 0 0% 17.6%;
+    --accent-foreground: 0 0% 95.3%;
+
+    /* An accent that works on a dark canvas has to be LIGHTER, not the
+     * same blue carried over from light mode. The light value here is
+     * 208 60% 38%; this is roughly the ×1.55 value-bump equivalent, and
+     * the consequence is that `--primary-foreground` flips to near-black
+     * — text sitting on the saturated fill, not a generic white.
+     * Previously `.dark` did not redefine `--primary` at all, so the
+     * active tab bar and every focus ring were the light-mode blue. */
+    --primary: 203 92% 63%;
+    --primary-foreground: 0 0% 8%;
+    --ring: 203 92% 63%;
+
+    --secondary: 0 0% 21.6%;
+    --secondary-foreground: 0 0% 95.3%;
+
+    /* Destructive inverts with the surface: a saturated red on #202020
+     * reads as "error icon" but the red itself loses presence, so dark
+     * mode uses a light red with dark text on it. */
+    --destructive: 354 100% 80%;
+    --destructive-foreground: 0 0% 10%;
     --success: 142 71% 45%;
     --success-foreground: 142 71% 75%;
     --warning: 38 92% 55%;
     --warning-foreground: 38 92% 75%;
-    --border: 240 6% 16%;
-    --input: 240 6% 14%;
-    --ring: 240 5% 64.9%;
 
-    /* Dark-mode hues: same angles, higher lightness so a 15%-alpha tint
-       over the near-black `--card` still reads. `--hue-variable` moves
-       least (its olive is the hardest to lift legibly) and
-       `--hue-module` most, since amber darkens fastest. */
+    --border: 0 0% 26.7%;
+    --input: 0 0% 23.5%;
+
+    --text-faint: 0 0% 44.7%;
+    --overlay-hover: rgb(255 255 255 / 0.05);
+    --overlay-select: rgb(255 255 255 / 0.08);
+    --surface-hover: 0 0% 16.1%;
+    --surface-select: 0 0% 18.4%;
+
+    /* A visible 1px edge, because DWM's drop shadow does not read against
+     * a dark surface and the window edge would otherwise disappear. */
+    --edge-window: 0 0% 41.6%;
+    --radius: 6px;
+    --radius-window: 8px;
+    --radius-pill: 999px;
+
+    /* Dark-mode hues: same angles as light, higher lightness so a 15%-alpha
+       tint still reads. `--hue-variable` moves least (its olive is the
+       hardest to lift legibly) and `--hue-module` most, since amber
+       darkens fastest. Left untouched by the surface-ladder change above:
+       the new `--card` is lighter than the old one, so these tints sit on
+       a brighter base and read slightly softer. Worth an eyeball before
+       tuning — see the note in AGENTS.md. */
     --hue-project: 265 62% 72%;
     --hue-module: 45 78% 62%;
     --hue-collection: 185 58% 58%;
@@ -160,24 +266,34 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Scrollbar */
+  /* Scrollbar — 14px slot with a collapsed thumb that expands on hover.
+     The width is the same; the *thumb* is what changes, via the border
+     being eaten by `background-clip: padding-box`. 5px of border on a
+     14px track leaves 4px visible; on hover the border drops to 3px and
+     it becomes 8px. Opacity 0.6 → 1 carries the same "de-emphasised until
+     wanted" signal. */
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 14px;
+    height: 14px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
-    border-radius: 8px;
-    border: 2px solid transparent;
+    background: hsl(var(--muted-foreground) / 0.6);
+    border: 5px solid transparent;
+    border-radius: 999px;
     background-clip: padding-box;
+    transition:
+      background-color 120ms ease-out,
+      border-width 120ms ease-out;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.4);
-    background-clip: padding-box;
-    border: 2px solid transparent;
+    background: hsl(var(--muted-foreground));
+    border-width: 3px;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   /* Hide scrollbar entirely (e.g. compact tab strip). Use only when the
@@ -212,8 +328,38 @@
      anywhere you'd reach for the old `.method-badge` /
      `.method-letter` selectors. */
 
+  /* Keyboard hint. Reads as a physical key: a filled well (`--muted`) with
+     a hairline that is one step darker than the surface it sits on
+     (`--input`), rather than the old flat muted badge at 10px. */
   .kbd {
-    @apply inline-flex items-center justify-center px-1.5 h-5 text-[10px] font-mono rounded border border-border bg-muted text-muted-foreground;
+    @apply inline-flex items-center justify-center px-1.5 h-[22px] text-[11px] font-mono rounded border border-input bg-muted text-foreground;
+  }
+
+  /* Numbered key cap for "hold a modifier and press this" hints (Alt+1..9
+     and friends). 26×26 at radius 6, half-weight, matching how the two
+     reference apps size a keycap: big enough to read as an object rather
+     than as a character in a sentence. */
+  .keycap {
+    @apply inline-flex items-center justify-center w-[26px] h-[26px] rounded bg-muted border border-input font-mono text-sm font-semibold text-foreground;
+    border-radius: 6px;
+  }
+
+  /* Selection affordance for list rows: a filled surface plus a 3px accent
+     bar on the leading edge. Used by the project tree and the settings
+     nav; see AGENTS.md for why the bar sits outside the row's padding
+     rather than being a left border (which would shift the text). */
+  .left-accent {
+    @apply relative;
+  }
+  .left-accent::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 7px;
+    bottom: 7px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: hsl(var(--primary));
   }
 }
 
@@ -285,18 +431,28 @@
      variant for headers that should read as a heading rather than a
      caption. */
   .label-caps {
-    @apply text-[10px] font-medium uppercase tracking-wider text-muted-foreground;
+    @apply text-[11px] font-medium uppercase tracking-wider text-faint;
   }
   .label-caps-strong {
-    @apply text-[10px] font-semibold uppercase tracking-wider text-foreground;
+    @apply text-[11px] font-semibold uppercase tracking-wider text-foreground;
   }
 
   /* Inline alert bar — auto-adapts to light/dark via semantic tokens. */
   .alert-warning-inline {
     @apply shrink-0 border-b bg-warning/5 px-2.5 py-1.5 text-xs text-warning-foreground;
   }
+  /* `.alert-error-inline` used to pair `bg-destructive/5` with
+     `text-destructive-foreground`. That is white-on-white in light mode,
+     and in dark mode it is near-white text on a barely-tinted near-black
+     surface — an invisible badge in both, with no error signal at all.
+     The fix is the shape AGENTS.md prescribes: a tinted surface with the
+     token that the scope actually lightens. `text-destructive` is a
+     saturated red in light and a light pink in dark, so it reads on the
+     5%-tinted surface either way. If you ever want the solid fill, it has
+     to be `bg-destructive text-destructive-foreground` with BOTH tokens
+     at once — never one without the other. */
   .alert-error-inline {
-    @apply mt-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive-foreground;
+    @apply mt-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive;
   }
 }
 

@@ -52,6 +52,21 @@ export default {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
         },
+        // Third text level, for information that is present rather than
+        // actionable — timestamps, counts, breadcrumb trails. Gives
+        // `muted-foreground` back to descriptive text. See globals.css.
+        faint: 'hsl(var(--text-faint))',
+        // Hover / selection, in the two flavours globals.css defines: an
+        // alpha overlay for translucent surfaces, a solid fill for opaque
+        // ones. Components should prefer these over a hand-written
+        // `bg-accent/40` so the backdrop can change without a redesign.
+        'overlay-hover': 'var(--overlay-hover)',
+        'overlay-select': 'var(--overlay-select)',
+        'surface-hover': 'hsl(var(--surface-hover))',
+        'surface-select': 'hsl(var(--surface-select))',
+        // 1px edge for the window frame. Windows' own drop shadow does not
+        // read against a dark surface, so the edge is drawn explicitly.
+        'edge-window': 'hsl(var(--edge-window))',
         // HTTP method colors deliberately do NOT live here. `MethodPill`
         // paints its swatch through an inline `style` because the mapping
         // has to be computed per-method at runtime (see `methodColorVar` in
@@ -75,10 +90,34 @@ export default {
           request: 'hsl(var(--hue-request))',
         },
       },
+      // An explicit ladder rather than a derived one. The old chain
+      // (`lg: var(--radius)`, `md: calc(-2px)`, `sm: calc(-4px)`) meant
+      // rounding a card and rounding a button were always tied together,
+      // which is the opposite of how native Windows does it: 8px for the
+      // window, 6px for cards and rows, 4px for controls.
       borderRadius: {
-        lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
+        window: 'var(--radius-window)',
+        pill: 'var(--radius-pill)',
+        lg: 'var(--radius)', // 6px — cards, rows, popovers, menus
+        md: '4px', // 4px — buttons, inputs, chips
+        sm: '3px', // 3px — inner detail, e.g. a badge inside a chip
+        DEFAULT: '4px', // controls; `rounded` reads as "a control"
+      },
+      // Type scale, shifted up one step. Chrome in this app was running at
+      // 10–12px, which is what reads as "web app" rather than "desktop
+      // app". Overriding here rather than editing every `text-xs` call
+      // site means one file moves the whole interface.
+      //
+      // `text-xs` 12 → 13px is the load-bearing one (tree rows, tab strip,
+      // settings nav). 14px is unchanged: this is a dense multi-panel
+      // workspace with a 256px tree pane, so the 14px floor that suits a
+      // search-box UI would start truncating here.
+      fontSize: {
+        xs: ['0.8125rem', { lineHeight: '1.25rem' }], // 13px
+        sm: ['0.875rem', { lineHeight: '1.25rem' }], // 14px (unchanged)
+        base: ['1rem', { lineHeight: '1.5rem' }], // 16px (unchanged)
+        lg: ['1.125rem', { lineHeight: '1.625rem' }], // 18px — section titles
+        '2xl': ['1.75rem', { lineHeight: '2rem' }], // 28px — welcome hero
       },
       fontFamily: {
         sans: [
