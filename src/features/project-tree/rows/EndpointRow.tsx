@@ -51,8 +51,19 @@ export function EndpointRow({
       data-tree-row
       onContextMenu={onContextMenu}
       className={cn(
-        'group mb-0.5 rounded-sm',
-        active ? 'bg-primary/15' : selected ? 'bg-primary/10' : 'hover:bg-accent/60',
+        // `active` means "this is the request open in the tab strip";
+        // `selected` means "ticked for a bulk operation". They are
+        // different things, so they read differently: active gets the
+        // accent bar, selected gets the fill and the "已选" badge only.
+        //
+        // Both used to be a `bg-primary/…` tint, which made "active" and
+        // "selected" the same colour and left the row reading as a link
+        // rather than as a position in a list. A neutral fill plus a 3px
+        // leading bar is the idiom both reference apps converge on, and it
+        // keeps the saturated accent for the bar alone.
+        'group mb-0.5 rounded-md',
+        active && 'left-accent bg-surface-select',
+        selected && !active && 'bg-surface-select',
       )}
     >
       <div
@@ -78,10 +89,10 @@ export function EndpointRow({
             }
           }}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs transition-colors',
-            active
-              ? 'bg-primary/15 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.20)]'
-              : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+            // Same rule as ModuleRow: the name carries the row, the
+            // method pill carries the data. Neither is muted.
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-foreground transition-colors',
+            !active && !selected && 'hover:bg-overlay-hover',
           )}
         >
           {/* The HTTP method is the one icon this tree keeps: it is the only
@@ -113,7 +124,7 @@ export function EndpointRow({
             display={() => <span className="flex-1 truncate">{endpoint.name}</span>}
           />
           {multiSelect && selected && (
-            <span className="shrink-0 rounded bg-primary/20 px-1.5 text-[10px] font-medium text-primary">
+            <span className="shrink-0 rounded bg-primary/20 px-1.5 text-[11px] font-medium text-primary">
               已选
             </span>
           )}

@@ -136,7 +136,13 @@ export function ProjectTree() {
   // ---------- render ----------
   return (
     <aside
-      className="relative flex h-full w-64 shrink-0 flex-col border-r border-border bg-card/30"
+      // Solid `--card`, not the old `bg-card/30`. The panel used to be a
+      // 30%-alpha tint over whatever sat behind it, which is exactly the
+      // hand-rolled transparency the surface ladder replaces — now that
+      // `--card` is a distinct step from `--background`, the panel reads as
+      // a step rather than as a wash, and `--overlay-hover` /
+      // `--surface-select` handle the states inside it.
+      className="relative flex h-full w-64 shrink-0 flex-col border-r border-border bg-card"
       onDragEnd={handleDragEnd}
     >
       {/* Header — the project is named here rather than rendered as a row.

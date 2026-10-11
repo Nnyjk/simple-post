@@ -59,11 +59,7 @@ export function ModuleRow({
   const handleDragLeave = (e: ReactDragEvent) => onDragLeave(e);
 
   return (
-    <div
-      ref={rowRef}
-      onContextMenu={onContextMenu}
-      className="group mb-0.5 rounded-sm hover:bg-accent/60"
-    >
+    <div ref={rowRef} onContextMenu={onContextMenu} className="group mb-0.5 rounded-md">
       <div
         className={cn(
           'relative flex items-center gap-0.5 rounded-sm transition-colors',
@@ -87,13 +83,19 @@ export function ModuleRow({
             }
           }}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-muted-foreground transition-colors',
-            'hover:bg-accent/60 hover:text-foreground',
+            // The name is the reason this row exists, so it renders in
+            // `--foreground`. It used to be `text-muted-foreground` and
+            // only brighten on hover, which made the most important thing
+            // in the tree the least legible thing in it. Secondary
+            // information — the chevron, the count — takes the muted tiers
+            // instead; that is the whole point of having three of them.
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-foreground transition-colors',
+            'hover:bg-overlay-hover',
           )}
         >
           <ChevronRight
             className={cn(
-              'h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform',
+              'h-3 w-3 shrink-0 text-faint transition-transform',
               module.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
@@ -117,7 +119,7 @@ export function ModuleRow({
             className="flex-1"
             display={() => <span className="flex-1 truncate">{module.name}</span>}
           />
-          <span className="shrink-0 rounded bg-muted/60 px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span className="shrink-0 rounded bg-muted px-1.5 font-mono text-[10px] tabular-nums text-faint">
             {endpointCount > 0 ? `${collectionCount}/${endpointCount}` : collectionCount}
           </span>
         </button>

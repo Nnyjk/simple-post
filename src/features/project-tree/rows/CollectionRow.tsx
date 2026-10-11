@@ -43,7 +43,7 @@ export function CollectionRow({
   dropHint,
 }: CollectionRowProps) {
   return (
-    <div onContextMenu={onContextMenu} className="group mb-0.5 rounded-sm hover:bg-accent/60">
+    <div onContextMenu={onContextMenu} className="group mb-0.5 rounded-md">
       <div
         className={cn(
           'relative flex items-center gap-0.5 rounded-sm transition-colors',
@@ -67,13 +67,14 @@ export function CollectionRow({
             }
           }}
           className={cn(
-            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors',
-            'hover:bg-accent/60 hover:text-foreground',
+            // Name in `--foreground` — see the note in `ModuleRow.tsx`.
+            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-foreground transition-colors',
+            'hover:bg-overlay-hover',
           )}
         >
           <ChevronRight
             className={cn(
-              'h-3 w-3 shrink-0 text-muted-foreground/60 transition-transform',
+              'h-3 w-3 shrink-0 text-faint transition-transform',
               collection.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
@@ -92,7 +93,7 @@ export function CollectionRow({
             className="flex-1"
             display={() => <span className="flex-1 truncate">{collection.name}</span>}
           />
-          <span className="shrink-0 rounded bg-muted/60 px-1.5 font-mono text-[10px] tabular-nums text-muted-foreground">
+          <span className="shrink-0 rounded bg-muted px-1.5 font-mono text-[10px] tabular-nums text-faint">
             {endpointCount}
           </span>
         </button>

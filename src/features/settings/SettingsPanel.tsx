@@ -192,10 +192,14 @@ export function SettingsPanel() {
                 aria-selected={active}
                 onClick={() => setActiveSection(item.id)}
                 className={cn(
-                  'group flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                  // Active = neutral fill + a 3px accent bar on the leading
+                  // edge. The previous `shadow-[inset_0_0_0_1px_…--border)]`
+                  // drew a full outline, which reads as "this is a box" rather
+                  // than "you are here"; the bar reads as position.
+                  'group flex items-center gap-2 rounded-md py-1.5 pl-2.5 pr-2 text-left text-xs transition-colors',
                   active
-                    ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border))]'
-                    : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                    ? 'left-accent bg-surface-select text-foreground'
+                    : 'hover:bg-overlay-hover',
                 )}
               >
                 <IconTile
@@ -203,7 +207,7 @@ export function SettingsPanel() {
                   icon={item.icon}
                   className={cn(
                     'transition-colors',
-                    !active && 'bg-muted/60 text-muted-foreground group-hover:text-foreground',
+                    !active && 'bg-muted text-faint group-hover:text-muted-foreground',
                   )}
                   concept={active ? item.concept : undefined}
                 />
