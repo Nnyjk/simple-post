@@ -60,6 +60,14 @@
     --surface-hover: 0 0% 94.5%;
     --surface-select: 0 0% 91.8%;
 
+    /* The raised thumb of a segmented control (`Tabs variant="segmented"`).
+       It sits inside a `--muted` trough, so it has to be *lighter* than the
+       panel behind it in both themes — that inversion is what makes it read
+       as lifted rather than pressed. Light is pure white, matching the
+       reference; dark takes `--border`'s value so the thumb and the 1px
+       hairline on it are one colour and the stroke adds no new hue. */
+    --chip: 0 0% 100%;
+
     /* Windows rounds top-level windows to 8px; everything inside is 6 or
        less. Keeping these separate stops the window from inheriting the
        card radius (and vice versa). */
@@ -156,6 +164,7 @@
     --overlay-select: rgb(0 0 0 / 0.06);
     --surface-hover: 0 0% 94.5%;
     --surface-select: 0 0% 91.8%;
+    --chip: 0 0% 100%;
 
     --edge-window: 0 0% 70.6%;
     --radius: 6px;
@@ -238,6 +247,13 @@
     --overlay-select: rgb(255 255 255 / 0.08);
     --surface-hover: 0 0% 16.1%;
     --surface-select: 0 0% 18.4%;
+    /* Not the reference's `#3A3A3A`. Its trough is a translucent 4.5%
+       white overlay, which lands around 21% — ours is a solid `--muted`
+       at 21.6%, so matching its thumb exactly would leave the selected
+       segment invisible. Taking `--border`'s value keeps the same
+       relationship (trough < thumb < stroke all agree) with enough step
+       to actually read on a solid trough. */
+    --chip: 0 0% 26.7%;
 
     /* A visible 1px edge, because DWM's drop shadow does not read against
      * a dark surface and the window edge would otherwise disappear. */

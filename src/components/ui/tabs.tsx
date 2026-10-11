@@ -30,7 +30,8 @@ export type TabsProps =
        * and only the strip.
        */
       joinStripClass: string;
-    });
+    })
+  | (TabsBaseProps & { variant: 'segmented'; joinStripClass?: never });
 
 /**
  * Underline-style tab bar — the same visual idiom used by the workspace
@@ -44,9 +45,16 @@ export type TabsProps =
  * tab is filled with the panel's own background and sits *on top of* the
  * separator, so it reads as part of the panel below rather than as a
  * control floating above it. See `TabJoinCorners` for the shoulders.
+ *
+ * `variant="segmented"` is a different claim again: a mode *switcher*
+ * (Pretty / Raw / Headers) rather than navigation. Those belong inside a
+ * filled trough with a raised thumb, because the thing being chosen among
+ * is a small peer set, not a document location. Ported from WinShun's
+ * `ScopeTabs.qml`; see the geometry note on the container below.
  */
 export function Tabs({ items, value, onChange, className, size = 'sm', ...rest }: TabsProps) {
   const connected = rest.variant === 'connected';
+  const segmented = rest.variant === 'segmented';
   const joinStripClass = rest.variant === 'connected' ? rest.joinStripClass : null;
 
   return (
@@ -64,7 +72,15 @@ export function Tabs({ items, value, onChange, className, size = 'sm', ...rest }
         // as a mistake), and the active tab covers it. That covering only
         // works while the wrapper does *not* clip — `overflow-hidden`
         // clips to the padding box, which is above the wrapper's border.
-        connected ? 'flex items-end gap-0' : 'flex items-end gap-0 border-b border-border/60',
+        //
+        // `segmented` is a self-contained trough instead: it owns its own
+        // fill and has no relationship to any separator below it, so it
+        // must not inherit the `-mb-px` the other two need.
+        segmented
+          ? 'flex items-center gap-0.5 rounded-lg bg-muted p-[3px]'
+          : connected
+            ? 'flex items-end gap-0'
+            : 'flex items-end gap-0 border-b border-border/60',
         className,
       )}
     >
@@ -85,24 +101,35 @@ export function Tabs({ items, value, onChange, className, size = 'sm', ...rest }
               // The `-mb-px` lifts the tab one pixel onto the separator so
               // the two collapse into one continuous stroke — under
               // `underline` the underline is the stroke, under
-              // `connected` the tab's own background is.
-              '-mb-px',
-              connected
+              // `connected` the tab's own background is. A segmented
+              // trough has no separator to sit on.
+              !segmented && '-mb-px',
+              segmented
                 ? cn(
-                    'rounded-t-md',
-                    // `z-10` puts the active fill above the separator it
-                    // is meant to erase; inactive tabs stay unmarked so the
-                    // line runs past them unbroken.
+                    'rounded-md',
+                    // Inactive steps back to regular weight so the
+                    // selected segment is the only thing on the row with
+                    // emphasis; the thumb's fill and hairline do the rest.
                     active
-                      ? 'z-10 bg-background text-foreground'
-                      : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                      ? 'bg-chip font-semibold text-foreground ring-1 ring-inset ring-border'
+                      : 'font-normal text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
                   )
-                : cn(
-                    'border-b-2',
-                    active
-                      ? 'border-primary text-foreground'
-                      : 'border-transparent text-muted-foreground hover:border-border/60 hover:text-foreground',
-                  ),
+                : connected
+                  ? cn(
+                      'rounded-t-md',
+                      // `z-10` puts the active fill above the separator it
+                      // is meant to erase; inactive tabs stay unmarked so the
+                      // line runs past them unbroken.
+                      active
+                        ? 'z-10 bg-background text-foreground'
+                        : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                    )
+                  : cn(
+                      'border-b-2',
+                      active
+                        ? 'border-primary text-foreground'
+                        : 'border-transparent text-muted-foreground hover:border-border/60 hover:text-foreground',
+                    ),
             )}
           >
             {item.label}

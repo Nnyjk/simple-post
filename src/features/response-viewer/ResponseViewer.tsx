@@ -250,14 +250,20 @@ export function ResponseViewer() {
       {/* Tabs */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
         <Tabs
+          variant="segmented"
           items={[
             { id: 'pretty', label: 'Pretty' },
             { id: 'raw', label: 'Raw' },
             {
               id: 'headers',
               label: 'Headers',
+              // A filled badge cannot work here: the segment it sits in is
+              // either the `--muted` trough or the `--chip` thumb, and no
+              // single fill contrasts with both. Counts are "present, not
+              // actionable" information anyway, so they take the third
+              // text level and drop the chip.
               badge: (
-                <span className="rounded bg-muted px-1 text-[10px]">
+                <span className="text-faint tabular-nums">
                   {Object.keys(response.headers).length}
                 </span>
               ),

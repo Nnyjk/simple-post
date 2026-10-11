@@ -67,6 +67,12 @@ export default {
         // 1px edge for the window frame. Windows' own drop shadow does not
         // read against a dark surface, so the edge is drawn explicitly.
         'edge-window': 'hsl(var(--edge-window))',
+        // Raised thumb of a segmented control, inside a `bg-muted` trough.
+        // Has to stay a *separate* key from `card`: on the surfaces these
+        // sit on, `--card` and the thumb need opposite lightness in dark
+        // mode, so aliasing one to the other would make the selected
+        // segment vanish.
+        chip: 'hsl(var(--chip))',
         // HTTP method colors deliberately do NOT live here. `MethodPill`
         // paints its swatch through an inline `style` because the mapping
         // has to be computed per-method at runtime (see `methodColorVar` in
