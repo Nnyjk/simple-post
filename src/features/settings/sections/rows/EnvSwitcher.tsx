@@ -13,6 +13,13 @@ import { envIcon } from '../env-utils';
  * trailing `新建环境` button is the section's only add affordance, so
  * gating the whole strip on a non-empty list is what used to leave a
  * cold-start project with no way to create its first environment.
+ *
+ * `showAdd` / `showDelete` exist for the **module** layer, which shows the
+ * same environments but must not offer the two project-level writes: adding
+ * an environment and deleting one both act on the project, and deleting
+ * one from inside a module tab would take out every module's values for it.
+ * The host points at the project's own 环境 layer instead. Default `true`,
+ * so the settings section's behaviour is unchanged.
  */
 export function EnvSwitcher({
   environments,
@@ -21,6 +28,8 @@ export function EnvSwitcher({
   onRequestDelete,
   onAdd,
   addDisabled,
+  showAdd = true,
+  showDelete = true,
 }: {
   environments: Environment[];
   activeId: string | null;
@@ -29,6 +38,10 @@ export function EnvSwitcher({
   onAdd: () => void;
   /** Create is in flight — block a second submit until it resolves. */
   addDisabled?: boolean;
+  /** Show the trailing 新建环境 button. */
+  showAdd?: boolean;
+  /** Show each env's delete affordance. */
+  showDelete?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -63,7 +76,7 @@ export function EnvSwitcher({
               }
             />
             <span className="font-mono font-medium">{env.name}</span>
-            {environments.length > 1 && (
+            {showDelete && environments.length > 1 && (
               <Tooltip content="删除环境" side="bottom">
                 <span
                   role="button"
@@ -86,16 +99,18 @@ export function EnvSwitcher({
           </button>
         );
       })}
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-8 gap-1 border-dashed text-xs text-muted-foreground hover:text-foreground"
-        onClick={onAdd}
-        disabled={addDisabled}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        新建环境
-      </Button>
+      {showAdd && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 gap-1 border-dashed text-xs text-muted-foreground hover:text-foreground"
+          onClick={onAdd}
+          disabled={addDisabled}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          新建环境
+        </Button>
+      )}
     </div>
   );
 }
