@@ -61,6 +61,10 @@ struct SetVarArgs {
 struct SetBaseUrlArgs {
     env_id: String,
     definition_id: String,
+    /// The module whose cell is being written. A URL belongs to
+    /// (environment × service × module) — the same service can point at
+    /// two hosts for two modules.
+    module_id: String,
     url: String,
 }
 
@@ -109,7 +113,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_update",
-            description: "Update an environment's name/baseUrls/variables.",
+            description: "Update an environment's name/moduleBaseUrls/variables. moduleBaseUrls replaces the whole map and is keyed by service id then module id.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -118,7 +122,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                         "type": "object",
                         "properties": {
                             "name": { "type": "string" },
-                            "baseUrls": { "type": "object" },
+                            "moduleBaseUrls": { "type": "object" },
                             "variables": { "type": "object" }
                         },
                         "additionalProperties": true
@@ -157,15 +161,16 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_set_baseurl",
-            description: "Set the URL for a (env, baseUrl definition) pair.",
+            description: "Set the URL one service has for one module in one environment. That (environment x service x module) cell is the only place a base URL lives and it never inherits, so an unconfigured cell means the request goes out without a base URL. url must not be empty.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "env_id": { "type": "string" },
                     "definition_id": { "type": "string" },
+                    "module_id": { "type": "string" },
                     "url": { "type": "string" }
                 },
-                "required": ["env_id", "definition_id", "url"],
+                "required": ["env_id", "definition_id", "module_id", "url"],
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_env_set_baseurl),
@@ -221,6 +226,7 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
         project_id: a.project_id.clone(),
         name: a.name,
         base_urls: std::collections::HashMap::new(),
+        module_base_urls: std::collections::HashMap::new(),
         variables: std::collections::HashMap::new(),
         is_active: false,
     };
@@ -254,10 +260,16 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .and_then(|p| p.get("name"))
             .and_then(Value::as_str)
             .map(String::from),
-        base_urls: a
+        // `base_urls` is left None. The column is dead —
+        // `db::migrate` moved every value into `moduleBaseUrls` and
+        // `db::environments::update` ignores it — so forwarding it would
+        // report a successful write that changed nothing. An AI client
+        // reading this tool's description uses `moduleBaseUrls`.
+        base_urls: None,
+        module_base_urls: a
             .patch
             .as_ref()
-            .and_then(|p| p.get("baseUrls"))
+            .and_then(|p| p.get("moduleBaseUrls"))
             .and_then(|v| serde_json::from_value(v.clone()).ok()),
         variables: a
             .patch
@@ -334,23 +346,23 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    let mut env = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::environments::get(c, &a.env_id)
-    })?;
-    env.base_urls.insert(a.definition_id.clone(), a.url.clone());
-    let patch = EnvironmentPatch {
-        base_urls: Some(env.base_urls.clone()),
-        ..Default::default()
-    };
-    simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::environments::update(c, &a.env_id, patch)
+    // Read-merge-write, like `env_set_var`: the map is one JSON column, so
+    // one atomic UPDATE keeps a reader from seeing a half-written map.
+    // It goes through `set_module_base_url` rather than a hand-built
+    // patch because that is the one function that knows the nested
+    // shape; patching `baseUrls` here would write the dead column and
+    // leave the live layer untouched.
+    let env = simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::db::environments::set_module_base_url(
+            c,
+            &a.env_id,
+            &a.definition_id,
+            &a.module_id,
+            Some(&a.url),
+        )
     })?;
 
-    Ok(CallToolResult::json(json!({
-        "env_id": a.env_id,
-        "definition_id": a.definition_id,
-        "url": a.url,
-    })))
+    Ok(CallToolResult::json(env))
 }
 
 async fn tool_env_set_active(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {

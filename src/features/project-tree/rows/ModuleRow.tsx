@@ -1,8 +1,4 @@
-﻿import {
-  useRef,
-  type DragEvent as ReactDragEvent,
-  type MouseEvent as ReactMouseEvent,
-} from 'react';
+﻿import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { ChevronRight, Plus } from 'lucide-react';
 import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
@@ -48,22 +44,8 @@ export function ModuleRow({
   onDrop,
   dropHint,
 }: ModuleRowProps) {
-  const rowRef = useRef<HTMLDivElement>(null);
-  // Bind the per-row element into the handlers. The closures captured
-  // by `makeDragOverHandler` / `makeDropHandler` (above) were created
-  // with `null` for the element, since the element only exists at
-  // render time. We re-wrap them here so the runtime can read the
-  // actual bounding rect.
-  const handleDragOver = (e: ReactDragEvent) => onDragOver(e);
-  const handleDrop = (e: ReactDragEvent) => onDrop(e);
-  const handleDragLeave = (e: ReactDragEvent) => onDragLeave(e);
-
   return (
-    <div
-      ref={rowRef}
-      onContextMenu={onContextMenu}
-      className="group mb-0.5 rounded-sm hover:bg-accent/60"
-    >
+    <div onContextMenu={onContextMenu} className="group mb-0.5 rounded-sm hover:bg-accent/60">
       <div
         className={cn(
           'relative flex items-center gap-0.5 rounded-sm transition-colors',
@@ -75,9 +57,9 @@ export function ModuleRow({
           draggable
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
           onClick={onSelect}
           onDoubleClick={(e) => {
             if (!isEditing) {

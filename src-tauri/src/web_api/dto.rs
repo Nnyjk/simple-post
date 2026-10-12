@@ -120,12 +120,17 @@ pub struct EnvRenameVarBody {
     pub to_key: String,
 }
 
-/// Body for `POST /api/environments/:envId/baseurls`. `url = null`
-/// removes the slot.
+/// Body for `POST /api/environments/:envId/module-baseurls`. `url = null`
+/// clears that one cell. This is the only layer a URL lives in — there is
+/// no layer above it and no fallback to another module's value.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EnvSetBaseUrlBody {
+pub struct EnvSetModuleBaseUrlBody {
     pub def_id: String,
+    /// The module whose address for this service is being written. The
+    /// same service can point at two hosts for two modules, so this is
+    /// part of the address rather than a filter.
+    pub module_id: String,
     #[serde(default)]
     pub url: Option<String>,
 }
@@ -150,9 +155,21 @@ pub struct PermissionPutBody {
     pub permission: String,
 }
 
-/// Body for `POST /api/projects/:projectId/baseurls/default`.
-/// `def_id = null` clears the project's default pointer.
-#[derive(Debug, Deserialize, Default)]
+/// Body for `POST /api/projects/:projectId/baseurls`. The project is in
+/// the path because the service list belongs to the project; only the
+/// attributes of one service ride in the body.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseUrlDefCreateBody {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Body for `POST /api/projects/:projectId/baseurls/default`. `defId = null`
+/// takes the project's ★ away entirely — the state a freshly created
+/// project is in.
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseUrlDefSetDefaultBody {
     #[serde(default)]

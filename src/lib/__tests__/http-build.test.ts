@@ -42,6 +42,10 @@ const ENV: Environment = {
   projectId: 'p_test',
   name: 'test',
   baseUrls: {},
+  // The (module × service) URL layer — not a concept `prepareRequest`
+  // knows about (it receives an already-resolved `baseUrl`), but the
+  // field has no default, so the fixture has to name it.
+  moduleBaseUrls: {},
   variables: {
     token: 'eyJ.tok',
     userId: 'u_demo',
@@ -485,6 +489,122 @@ describe('http-build: {{var}} template resolution', () => {
     const body: RequestBody = { mode: 'json', content: '{"a": 1, "b": [2, 3]}' };
     const { init } = buildFetchInit(input({ body, env: ENV }));
     assert.equal(init.body, '{"a": 1, "b": [2, 3]}');
+  });
+});
+
+// ============================================================
+// D2. Join / substitute ordering — the `//` regression
+// ============================================================
+
+/**
+ * `prepareRequest` joins the base URL *before* substituting `{{var}}`,
+ * on purpose: an environment's own base URL may be templated, so the
+ * substitution has to be able to see it. The cost is that `joinBaseUrl`
+ * inserts its separator before it knows what `{{var}}` will become, so a
+ * variable whose value already starts with `/` yields
+ * `http://host:9200//api` — a different route to most servers.
+ *
+ * These cases go through the real `prepareRequest`, not `joinBaseUrl`
+ * alone, because the ordering only exists in the composed pipeline. Rust's
+ * `resolve_endpoint` carries the same cases in
+ * `crates/simple-post-mcp/src/variable_fill_test.rs`; the two must agree
+ * or the preview describes a URL nobody sends.
+ */
+describe('http-build: baseUrl join + {{var}} expansion never yields //', () => {
+  const envWith = (vars: Record<string, string>): Environment => ({
+    ...ENV,
+    variables: { ...ENV.variables, ...vars },
+  });
+
+  it('repairs the double slash when the path is nothing but the marker', () => {
+    const { url } = prepareRequest(
+      prep({ baseUrl: 'http://host:9200', urlPath: '{{var}}', env: envWith({ var: '/api' }) }),
+    );
+    assert.equal(url, 'http://host:9200/api');
+  });
+
+  it('is unchanged when the baseUrl itself ends in a slash', () => {
+    const { url } = prepareRequest(
+      prep({ baseUrl: 'http://host:9200/', urlPath: '{{var}}', env: envWith({ var: '/api' }) }),
+    );
+    assert.equal(url, 'http://host:9200/api');
+  });
+
+  it('repairs the boundary when the path continues past the marker', () => {
+    const { url } = prepareRequest(
+      prep({
+        baseUrl: 'http://host:9200',
+        urlPath: '{{var}}/users',
+        env: envWith({ var: '/api' }),
+      }),
+    );
+    assert.equal(url, 'http://host:9200/api/users');
+  });
+
+  it('does not eat the separator when the value has no leading slash', () => {
+    const { url } = prepareRequest(
+      prep({ baseUrl: 'http://host:9200', urlPath: '{{var}}', env: envWith({ var: 'api' }) }),
+    );
+    assert.equal(url, 'http://host:9200/api');
+  });
+
+  it('keeps the https:// scheme intact', () => {
+    const { url } = prepareRequest(
+      prep({ baseUrl: 'https://host:9200', urlPath: '{{var}}', env: envWith({ var: '/api' }) }),
+    );
+    assert.equal(url, 'https://host:9200/api');
+  });
+
+  it('still lets a schemed urlPath win outright over the baseUrl', () => {
+    const { url } = prepareRequest(
+      prep({
+        baseUrl: 'https://custom.example.com',
+        urlPath: 'https://other.example.com/users/1',
+      }),
+    );
+    assert.equal(url, 'https://other.example.com/users/1');
+  });
+
+  it('keeps an unresolved marker and reports it', () => {
+    const r = prepareRequest(prep({ baseUrl: 'http://host:9200', urlPath: '{{gone}}', env: ENV }));
+    assert.equal(r.url, 'http://host:9200/{{gone}}');
+    assert.deepEqual(r.missingVars, ['gone']);
+  });
+
+  it('still appends params with ? and & after collapsing', () => {
+    // The collapse must run before the query append and must not eat a
+    // query string that is already in the URL — the `?`/`&` choice reads
+    // the URL, so a mangled path would not be the only symptom.
+    const fresh = prepareRequest(
+      prep({
+        baseUrl: 'http://host:9200',
+        urlPath: '{{var}}',
+        env: envWith({ var: '/api' }),
+        params: [kv('page', '1')],
+      }),
+    );
+    assert.equal(fresh.url, 'http://host:9200/api?page=1');
+
+    const existing = prepareRequest(
+      prep({
+        baseUrl: 'http://host:9200',
+        urlPath: '{{var}}?foo=bar',
+        env: envWith({ var: '/api' }),
+        params: [kv('page', '1')],
+      }),
+    );
+    assert.equal(existing.url, 'http://host:9200/api?foo=bar&page=1');
+  });
+
+  it('leaves // inside query data alone', () => {
+    const { url } = prepareRequest(
+      prep({
+        baseUrl: 'http://host:9200',
+        urlPath: '{{var}}?redirect=https://a//b',
+        env: envWith({ var: '/api' }),
+      }),
+    );
+    assert.equal(url, 'http://host:9200/api?redirect=https://a//b');
   });
 });
 

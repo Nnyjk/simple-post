@@ -40,6 +40,12 @@ struct RunRequestArgs {
     env_id: Option<String>,
     #[serde(default)]
     base_url_definition_id: Option<String>,
+    /// Which module's cell `base_url_definition_id` is read from. A URL
+    /// lives at (environment × service × module), and this tool has no
+    /// endpoint to take the module from, so without it there is no cell
+    /// and no base URL.
+    #[serde(default)]
+    module_id: Option<String>,
     #[serde(default)]
     settings_override: Option<Value>,
     #[serde(default)]
@@ -68,7 +74,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         ToolEntry {
             name: "api_run_request",
             description:
-                "Run an ad-hoc HTTP request. Supports env/baseUrl resolution, auth, and settings overrides.",
+                "Run an ad-hoc HTTP request. Supports env/baseUrl resolution, auth, and settings overrides. A base URL is read from moduleBaseUrls[base_url_definition_id][module_id], so both ids are needed to prepend one.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -80,6 +86,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "auth": { "type": "object" },
                     "env_id": { "type": "string" },
                     "base_url_definition_id": { "type": "string" },
+                    "module_id": { "type": "string" },
                     "settings_override": { "type": "object" },
                     "timeout_ms": { "type": "integer" },
                     "follow_redirects": { "type": "boolean" },
@@ -142,6 +149,7 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
         &substituted.resolved,
         env.as_ref(),
         a.base_url_definition_id.as_deref(),
+        a.module_id.as_deref(),
     );
 
     let headers = flatten_string_map(a.headers.as_ref(), "headers")?;
@@ -208,6 +216,21 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         .as_ref()
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
+
+    // Which module's services this endpoint may resolve against needs the
+    // tree, and the module is not on the detail row — it lives in the
+    // `nodes` table. Fill it in unless the caller already said, because
+    // `resolve_endpoint` is pure and a caller sending as another module
+    // should not be second-guessed by a lookup. Skipping it leaves the
+    // service list narrowing to nothing and the request base-less.
+    let mut overrides = overrides;
+    if overrides.module_id.is_none() {
+        overrides.module_id = simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::nodes::module_id_of(c, &endpoint.node_id)
+        })
+        .ok()
+        .flatten();
+    }
 
     let project_ref: &simple_post_core::domain::Project =
         project.as_ref().unwrap_or(&EMPTY_PROJECT);
@@ -329,15 +352,30 @@ fn extract_endpoint_settings(so: &Option<Value>) -> (Option<u64>, Option<bool>, 
     (t, r, m)
 }
 
-fn apply_base_url(url: &str, env: Option<&Environment>, def_id: Option<&str>) -> (String, String) {
-    let Some(env) = env else {
+/// Prepend a base URL read from the live value layer.
+///
+/// `module_base_urls[def_id][module_id]` is the only place a URL lives
+/// (see `variable_fill::resolve_base_url_with`). Both keys are
+/// required and there is deliberately **no fallback**: the v1 code
+/// reached for `env.base_urls` and then for "whatever key happens to
+/// come first", which after the shape-B migration resolved nothing and
+/// before it aimed an arbitrary service at the request. Missing env,
+/// missing service, missing module or missing cell all mean "no base
+/// URL" — the caller sent the path it asked for.
+fn apply_base_url(
+    url: &str,
+    env: Option<&Environment>,
+    def_id: Option<&str>,
+    module_id: Option<&str>,
+) -> (String, String) {
+    let (Some(env), Some(def_id), Some(module_id)) = (env, def_id, module_id) else {
         return (url.to_string(), String::new());
     };
-    let def_id = def_id.or_else(|| env.base_urls.keys().next().map(String::as_str));
-    let Some(def_id) = def_id else {
-        return (url.to_string(), String::new());
-    };
-    match env.base_urls.get(def_id) {
+    match env
+        .module_base_urls
+        .get(def_id)
+        .and_then(|cells| cells.get(module_id))
+    {
         Some(base) => {
             let combined = if url.starts_with('/') {
                 format!("{}{}", base.trim_end_matches('/'), url)

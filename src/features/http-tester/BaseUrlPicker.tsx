@@ -2,19 +2,24 @@
  * BaseUrlPicker — the dropdown that sits between the method picker and
  * the URL field in HttpTester.
  *
- * The picker drives a project-level *baseUrl definition* (named slot
- * like "鉴权服务" / "数据服务") plus an optional per-endpoint override.
- * The actual URL is looked up from `env.baseUrls[defId]` at resolve time
+ * The picker drives a baseUrl *service* (named slot like "鉴权服务" /
+ * "数据服务") plus an optional per-endpoint override. The actual URL is
+ * looked up from `env.moduleBaseUrls[defId][moduleId]` at resolve time
  * (see lib/url.ts), so flipping the active env changes the URL
  * automatically without touching the endpoint's selection.
+ *
+ * `definitions` is the project's whole service list — services belong to
+ * the project, so every module sees all of them and every one of them is a
+ * real choice here. `defaultDefinitionId` is therefore the project-wide ★
+ * (`Project.defaultBaseUrlDefinitionId`), not a module's.
  *
  * The component is fully controlled. The parent owns:
  *   - `selection`  — which named slot is active (or "default" / "override")
  *
- * The list holds the project's definitions and 自定义, and nothing else.
+ * The list holds the project's services and 自定义, and nothing else.
  * There used to be a 项目默认 row above the definitions plus a "BaseUrl 定义"
  * section header: both duplicated what the row carrying the 默认 badge
- * already said, so "follow the project's default" is now that row
+ * already said, so "follow the project default" is now that row
  * itself (see the `isProjectDefault` branch in the map below).
  *
  * 自定义 (override) deliberately has **no input of its own**: picking it
@@ -56,9 +61,13 @@ export type BaseUrlSelection =
   { kind: 'default' } | { kind: 'definition'; definitionId: string } | { kind: 'override' };
 
 export interface BaseUrlPickerProps {
-  /** The project's baseUrl definitions — drives the dropdown rows. */
+  /**
+   * The project's services — drives the dropdown rows. Not filtered by the
+   * endpoint's module: the list is project-level, so every module's
+   * endpoints can point at any of them.
+   */
   definitions: readonly BaseUrlDefinition[];
-  /** The project's default def id (may be null). */
+  /** The project-wide default service id (may be null when it has none). */
   defaultDefinitionId: string | null;
   /**
    * The currently resolved baseUrl. Used only for the trigger's
@@ -112,9 +121,9 @@ export function BaseUrlPicker({
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Default-row label: "项目默认" when the project actually has a
-  // default def, otherwise "项目默认（无）" to make the empty case
-  // obvious. The custom row always shows "自定义".
+  // Default-row label: the project ★ by name when it has one, otherwise an
+  // explicit "无" so the empty case is obvious rather than reading as a
+  // name. The custom row always shows "自定义".
   const defaultDef = useMemo(
     () => definitions.find((d) => d.id === defaultDefinitionId) ?? null,
     [definitions, defaultDefinitionId],
@@ -127,10 +136,10 @@ export function BaseUrlPicker({
   const triggerLabel = useMemo(() => {
     if (selection.kind === 'definition' && selectedDef) return selectedDef.name;
     if (selection.kind === 'override') return '自定义';
-    // Following the project default reads as *that definition*, not as a
-    // separate "项目默认" choice: the list has no such row, and the trigger
-    // has to name the same thing the list highlights.
-    return defaultDef ? defaultDef.name : '项目默认（无）';
+    // Following the project default reads as *that service*, not as a
+    // separate "项目默认" choice: the list has no such row, and the
+    // trigger has to name the same thing the list highlights.
+    return defaultDef ? defaultDef.name : '项目无默认服务';
   }, [selection, selectedDef, defaultDef]);
 
   // The sub-label answers "what host will actually be used?". In
@@ -199,12 +208,12 @@ export function BaseUrlPicker({
           <ul className="max-h-80 overflow-auto p-1">
             {definitions.map((def) => {
               // The row carrying the 默认 badge *is* the "follow the
-              // project's default" choice — a separate 项目默认 row used to
-              // sit above it and say the same thing, so picking that row
-              // and picking this one resolved to the same host. Selecting
+              // project default" choice — a separate row used to sit
+              // above it and say the same thing, so picking that row and
+              // picking this one resolved to the same host. Selecting
               // this row therefore stores no definition id at all, which
-              // keeps the endpoint tracking whichever definition the
-              // project marks as default later.
+              // keeps the endpoint tracking whichever service the project
+              // stars later.
               const isProjectDefault = def.id === defaultDefinitionId;
               return (
                 <Row
@@ -231,12 +240,12 @@ export function BaseUrlPicker({
               );
             })}
             {selection.kind === 'default' && !defaultDef && (
-              // Only reachable when the project has no default definition
-              // at all: the endpoint is following the default, but there is
-              // no default to follow. Without this the list would open with
-              // nothing selected and no explanation.
+              // Only reachable when the project has no starred service at
+              // all: the endpoint is following the default, but there is
+              // no default to follow. Without this the list would open
+              // with nothing selected and no explanation.
               <li className="px-2 py-1.5 text-[11px] text-muted-foreground">
-                该项目尚未设置默认 baseUrl
+                该项目尚未设置默认服务
               </li>
             )}
             <Row

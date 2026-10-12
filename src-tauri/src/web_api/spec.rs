@@ -64,9 +64,9 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/projects",
-            summary: "Create a project",
+            summary: "Create a project (body: name plus an opts object, or a flat Project)",
             stability: "public",
-            request: Some("CreateProject"),
+            request: Some("Project"),
             response: Some("Project"),
         },
         RouteSpec {
@@ -179,22 +179,15 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             request: Some("NodeDuplicate"),
             response: Some("ResourceNode"),
         },
-        RouteSpec {
-            method: "POST",
-            path: "/api/nodes/:id/send",
-            summary: "Send a stored endpoint by id; the caller never names a URL",
-            stability: "public",
-            request: Some("EndpointSend"),
-            response: Some("HttpResult"),
-        },
         // ---- baseUrl definitions ----------------------------------------
-        // All five were live but undocumented. They are project-scoped
-        // for reads / creates / set-default and id-scoped for mutations,
-        // matching the two route families the handlers comment describes.
+        // A service belongs to the project, so the read and both writes
+        // hang off `/api/projects/:projectId/baseurls`. Only the id-scoped
+        // verbs stay under `/api/baseurl-defs/:defId`, because a rename or
+        // a delete names the service itself and needs no project context.
         RouteSpec {
             method: "GET",
             path: "/api/projects/:projectId/baseurls",
-            summary: "List a project's base URL definitions",
+            summary: "List a project's services; every module can resolve every one",
             stability: "public",
             request: None,
             response: Some("BaseUrlDefinition[]"),
@@ -202,15 +195,16 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/projects/:projectId/baseurls",
-            summary: "Create a base URL definition in a project",
+            summary: "Add a service to the project",
             stability: "public",
-            request: Some("BaseUrlDefinition"),
+            request: Some("BaseUrlDefCreate"),
             response: Some("BaseUrlDefinition"),
         },
         RouteSpec {
             method: "POST",
             path: "/api/projects/:projectId/baseurls/default",
-            summary: "Set (or clear) the project's default base URL definition",
+            summary:
+                "Set (or clear) the project's star default service; answers the updated Project",
             stability: "public",
             request: Some("BaseUrlDefSetDefault"),
             response: Some("Project"),
@@ -218,7 +212,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         RouteSpec {
             method: "PATCH",
             path: "/api/baseurl-defs/:defId",
-            summary: "Rename or re-describe a base URL definition",
+            summary: "Rename or re-describe a service",
             stability: "public",
             request: Some("BaseUrlDefPatch"),
             response: Some("BaseUrlDefinition"),
@@ -226,7 +220,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         RouteSpec {
             method: "DELETE",
             path: "/api/baseurl-defs/:defId",
-            summary: "Delete a base URL definition",
+            summary: "Delete a service; the star pointer is cleared with it if it named this one",
             stability: "public",
             request: None,
             response: Some("DeleteAck"),
@@ -290,10 +284,11 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/environments/:envId/baseurls",
-            summary: "Set one base URL slot (null deletes it)",
+            path: "/api/environments/:envId/module-baseurls",
+            summary: "Set one service's URL for one module in this environment \
+                      (the only layer; null clears that one cell)",
             stability: "public",
-            request: Some("EnvSetBaseUrl"),
+            request: Some("EnvSetModuleBaseUrl"),
             response: Some("Environment"),
         },
         // ---- http send --------------------------------------------------

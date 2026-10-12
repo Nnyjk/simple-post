@@ -8,31 +8,20 @@ use axum::{
 use serde_json::Value;
 
 use crate::db;
-use crate::error::AppError;
 
-use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState};
+use super::super::{map_app_error, HttpErrorResponse, WebState};
 
-use super::super::dto::BaseUrlDefSetDefaultBody;
+use super::super::dto::{BaseUrlDefCreateBody, BaseUrlDefSetDefaultBody};
 
 // ----- baseUrlDefs --------------------------------------------------------
 //
-// `base_url_defs` live in their own table; we keep them reachable via
-// two route families:
-//   - `/api/projects/:projectId/baseurls[/default]` for project-scoped
-//     creates and "set as project default" actions
-//   - `/api/baseurl-defs/:defId` for id-scoped updates / deletes
-//
-// This mirrors the path the resource lives on in the renderer (a def
-// "belongs to" a project) without forcing the TS caller to remember
-// which table a delete hits.
+// A service belongs to a **project**, and the address says so: the
+// create and set-default verbs hang off `/api/projects/:projectId/baseurls`,
+// next to the list they extend. Only the id-scoped verbs stay under
+// `/api/baseurl-defs/:defId`, because a rename or a delete names the
+// service itself and needs no project context to find it.
 
-/// Read the project's base-URL definitions.
-///
-/// The renderer does not normally call this: `Project` nests its
-/// `baseUrlDefinitions`, so the store already has them after bootstrap.
-/// It exists so a REST client that just created or patched a definition
-/// can read the family back — previously the family offered POST / PATCH
-/// / DELETE / set-default but no way to list.
+/// Read every service of a project, flat.
 pub(crate) async fn base_url_defs_list(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
@@ -44,19 +33,27 @@ pub(crate) async fn base_url_defs_list(
     Ok(Json(serde_json::to_value(&rows).unwrap_or(Value::Null)))
 }
 
+/// Add a service to the project's list.
 pub(crate) async fn base_url_defs_create(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
-    Json(mut body): Json<Value>,
+    Json(body): Json<BaseUrlDefCreateBody>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
-    ensure_server_id(&mut body);
-    let def: crate::domain::BaseUrlDefinition = serde_json::from_value(body)
-        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
-    db::with_tx(&s.pool, |c| db::base_url_defs::create(c, &def, &project_id))
-        .map_err(map_app_error)?;
+    let def = crate::domain::BaseUrlDefinition {
+        id: crate::domain::uid(),
+        name: body.name,
+        description: body.description,
+    };
+    // The stored row comes back rather than the request's own copy: the
+    // renderer swaps it into the project's list it already holds.
+    let stored = db::with_tx(&s.pool, |c| {
+        db::base_url_defs::create(c, &def, &project_id)?;
+        db::base_url_defs::get(c, &def.id)
+    })
+    .map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
-        Json(serde_json::to_value(&def).unwrap_or(Value::Null)),
+        Json(serde_json::to_value(&stored).unwrap_or(Value::Null)),
     ))
 }
 
@@ -83,17 +80,25 @@ pub(crate) async fn base_url_defs_delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Point the project's ★ at one of its own services (`defId = null`
+/// clears it) and echo the project back.
+///
+/// The ★ is `Project.defaultBaseUrlDefinitionId` — the pointer every
+/// endpoint naming no service resolves against — so the caller is
+/// handed the updated value instead of a `204` and a re-read.
 pub(crate) async fn base_url_defs_set_default(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
     Json(body): Json<BaseUrlDefSetDefaultBody>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // Echo back the post-update project so the renderer can replace
-    // its in-memory copy without an extra round-trip.
-    let row = db::with_tx(&s.pool, |c| {
+    let project = db::with_tx(&s.pool, |c| {
         db::base_url_defs::set_default(c, &project_id, body.def_id.as_deref())?;
-        crate::db::projects::get(c, &project_id)
+        db::projects::get(c, &project_id)
     })
     .map_err(map_app_error)?;
-    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+    Ok(Json(serde_json::to_value(&project).unwrap_or(Value::Null)))
 }
+
+#[cfg(test)]
+#[path = "base_url_defs_test.rs"]
+mod tests;

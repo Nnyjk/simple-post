@@ -30,7 +30,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { indexByParent } from '../tree-index';
+import { indexByParent, moduleIdOfEndpoint } from '../tree-index';
 import type { ResourceNode, ResourceNodeType } from '@/types/domain';
 
 // ---------- fixtures ----------
@@ -244,5 +244,67 @@ describe('tree-index: does not mutate its input', () => {
     // Sorting happens on the freshly created buckets, so the buckets hold
     // the caller's objects rather than copies of them.
     assert.equal(index.get('c1')?.[0], nodes[1]);
+  });
+});
+
+// ============================================================
+// moduleIdOfEndpoint
+// ============================================================
+
+/**
+ * Module → collection → endpoint is the deep shape; the endpoint sitting
+ * directly on a module is the one the type matrix allows and the tree
+ * renders, so the walk has to terminate on both.
+ */
+const NESTED_TREE: ResourceNode[] = [
+  makeNode('mod_a', null, 0, { kind: 'module' }),
+  makeNode('col_a', 'mod_a', 0, { kind: 'collection' }),
+  makeNode('sub_a', 'col_a', 0, { kind: 'collection' }),
+  makeNode('ep_deep', 'sub_a', 0),
+  makeNode('ep_shallow', 'mod_a', 1),
+  makeNode('mod_b', null, 1, { kind: 'module' }),
+  makeNode('ep_b', 'mod_b', 0),
+];
+
+describe('tree-index: moduleIdOfEndpoint', () => {
+  it('finds the module through arbitrarily nested collections', () => {
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'ep_deep'), 'mod_a');
+  });
+
+  it('finds the module for an endpoint sitting directly on it', () => {
+    // An endpoint needs no collection of its own, so the one-level case
+    // is the common one, not an edge case.
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'ep_shallow'), 'mod_a');
+  });
+
+  it('does not confuse two modules', () => {
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'ep_b'), 'mod_b');
+  });
+
+  it('returns the module itself when handed one', () => {
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'mod_a'), 'mod_a');
+  });
+
+  it('returns null for an endpoint id that is not in the tree', () => {
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'nope'), null);
+  });
+
+  it('returns null for no endpoint at all', () => {
+    // The HTTP tester renders its empty state before an endpoint exists;
+    // that must resolve the project-level base URL, not throw.
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, null), null);
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, undefined), null);
+    assert.equal(moduleIdOfEndpoint([], 'ep_deep'), null);
+  });
+
+  it('terminates on a cyclic parent chain instead of hanging', () => {
+    // The schema forbids this, so the walk can assume it away — but an
+    // unbounded loop here would hang the send path, and a bounded one
+    // that answers null costs three lines.
+    const cyclic = [
+      makeNode('x', 'y', 0, { kind: 'collection' }),
+      makeNode('y', 'x', 0, { kind: 'collection' }),
+    ];
+    assert.equal(moduleIdOfEndpoint(cyclic, 'x'), null);
   });
 });

@@ -245,3 +245,98 @@ fn round_trip_via_base_url_definitions_struct() {
     assert_eq!(back.base_url_definitions.len(), 1);
     assert_eq!(back.base_url_definitions[0].name, "默认");
 }
+
+#[test]
+fn create_with_defaults_seeds_a_project_and_one_environment() {
+    let pool = fresh_pool();
+    let created = db::with_tx(&pool, |c| {
+        create_with_defaults(c, &sample_project("p_new", "New Project"))
+    })
+    .unwrap();
+
+    assert_eq!(created.id, "p_new");
+    assert!(
+        created.base_url_definitions.is_empty(),
+        "no service is seeded: a URL belongs to (environment × module × \
+         service) and a new project has no modules to hang one on"
+    );
+    assert_eq!(
+        created.default_base_url_definition_id, None,
+        "no ★ until the user picks one in settings"
+    );
+
+    let envs = db::with_conn(&pool, |c| db::environments::list_by_project(c, "p_new")).unwrap();
+    assert_eq!(envs.len(), 1, "exactly the default environment");
+    assert_eq!(envs[0].name, DEFAULT_ENVIRONMENT_NAME);
+    assert!(
+        envs[0].is_active,
+        "it has to be the active one to be useful"
+    );
+    assert!(
+        envs[0].module_base_urls.is_empty(),
+        "and it has no values to resolve against yet"
+    );
+
+    // And the row is really there, not just in the echo.
+    let got = db::with_conn(&pool, |c| get(c, "p_new")).unwrap();
+    assert_eq!(got.id, "p_new");
+}
+
+#[test]
+fn create_with_defaults_creates_no_module() {
+    // The module-owned model needed one (services hung off modules). The
+    // project-owned model does not, and a 「默认模块」 the user did not ask
+    // for is a row they then have to notice and delete.
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| {
+        create_with_defaults(c, &sample_project("p_new", "New Project"))
+    })
+    .unwrap();
+    let modules: i64 = db::with_conn(&pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE root_id = 'p_new'",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap();
+    assert_eq!(modules, 0);
+}
+
+#[test]
+fn create_with_defaults_ignores_optimistic_service_state_on_the_input() {
+    // The renderer seeds the form optimistically; echoing that back would
+    // make the create response claim services exist that no row does.
+    let pool = fresh_pool();
+    let mut p = sample_project("p_new", "New Project");
+    p.base_url_definitions = vec![BaseUrlDefinition {
+        id: "d".into(),
+        name: "乐观".into(),
+        description: None,
+    }];
+    p.default_base_url_definition_id = Some("d".into());
+    let created = db::with_tx(&pool, |c| create_with_defaults(c, &p)).unwrap();
+    assert!(created.base_url_definitions.is_empty());
+    assert_eq!(created.default_base_url_definition_id, None);
+}
+
+#[test]
+fn update_ignores_the_legacy_base_url_field() {
+    // `projects` has no `base_url` column. Emitting `SET base_url = ?`
+    // for it turned `PATCH {"baseUrl": "…"}` into a `no such column`
+    // error — a caller mistake reported as a database fault.
+    let pool = fresh_pool();
+    let patched = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "p_demo",
+            ProjectPatch {
+                base_url: Some(Some("http://ignored".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(patched.id, "p_demo");
+    assert_eq!(patched.base_url, None);
+}

@@ -166,6 +166,7 @@ const ENV: Environment = {
   projectId: 'p_e2e',
   name: 'e2e',
   baseUrls: {},
+  moduleBaseUrls: {},
   variables: {
     site: 'cn',
     region: 'east',

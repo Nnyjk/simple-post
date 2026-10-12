@@ -256,12 +256,12 @@ export function ProjectTree() {
                     setDataTransfer(e, { kind: 'module', ids: [modBranch.module.id] });
                   }}
                   onDragEnd={handleDragEnd}
-                  onDragOver={makeDragOverHandler(
-                    { kind: 'module', id: modBranch.module.id },
-                    null,
-                  )}
+                  onDragOver={makeDragOverHandler({
+                    kind: 'module',
+                    id: modBranch.module.id,
+                  })}
                   onDragLeave={makeDragLeaveHandler({ kind: 'module', id: modBranch.module.id })}
-                  onDrop={makeDropHandler({ kind: 'module', id: modBranch.module.id }, null)}
+                  onDrop={makeDropHandler({ kind: 'module', id: modBranch.module.id })}
                   dropHint={
                     dropHint && dropHint.key === `module:${modBranch.module.id}`
                       ? dropHint.zone

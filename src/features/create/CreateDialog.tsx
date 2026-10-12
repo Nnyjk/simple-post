@@ -35,8 +35,6 @@ interface CreateDialogProps {
   /** Focused on open — the name is the only field you always have to fill. */
   nameInputRef: RefObject<HTMLInputElement>;
   children: ReactNode;
-  /** Widen the frame for the project form (it has the widest field set). */
-  wide?: boolean;
 }
 
 /**
@@ -53,7 +51,6 @@ export function CreateDialog({
   onSubmit,
   nameInputRef,
   children,
-  wide,
 }: CreateDialogProps) {
   // Deferred one tick: the input only exists once the dialog has
   // rendered, and `Dialog` mounts its portal on the open transition.
@@ -79,7 +76,6 @@ export function CreateDialog({
       }}
       title={title}
       description={description}
-      className={wide ? 'max-w-lg' : undefined}
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={onClose}>

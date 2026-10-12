@@ -232,6 +232,21 @@ pub struct AuthConfig {
 
 // ----- base url -----------------------------------------------------------
 
+/// One named service in a **project's** service list.
+///
+/// The list is project-wide: every module sees every service, which is the
+/// model the user asked for — 「服务应该绑定到项目，这样每一个模块都会全部
+/// 包含这些服务」. There is deliberately no module field and no per-row
+/// default flag, so two services in one project cannot share a `name` and
+/// an endpoint's `baseUrlDefinitionId` is unambiguous across the whole
+/// tree. The module-owned shape those two fields served (`moduleId` /
+/// `isDefault`) was shipped, tried and reversed; the columns still exist
+/// in the table, neutralised, because dropping them would mean a rebuild
+/// would mean a `SCHEMA_VERSION` bump would mean deleting the user's
+/// store.
+///
+/// A row names a service; it never holds a URL. The URL for (service ×
+/// module × environment) lives in [`Environment::module_base_urls`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseUrlDefinition {
@@ -391,11 +406,16 @@ pub struct EndpointDetail {
     pub node_id: String,
     pub method: HttpMethod,
     /// Path only — the host is resolved at send time from the active
-    /// environment's `baseUrls`, so the same endpoint can be retargeted
-    /// between dev / staging / prod without a rewrite.
+    /// environment's `moduleBaseUrls`, so the same endpoint can be
+    /// retargeted between dev / staging / prod without a rewrite.
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment_id: Option<String>,
+    /// The service this endpoint resolves against. `None` means "use the
+    /// project's ★" (`Project::default_base_url_definition_id`), which is
+    /// not the same as naming one: the resolution step that reads it is
+    /// what makes the difference visible, so the field stays absent rather
+    /// than being filled in with the default's id at write time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_definition_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -512,6 +532,13 @@ pub struct Project {
     pub base_url: Option<String>,
     #[serde(default)]
     pub base_url_definitions: Vec<BaseUrlDefinition>,
+    /// The project's ★ service. An endpoint naming no service of its own
+    /// resolves against this one, so a project with `None` here sends
+    /// those requests with no base URL rather than borrowing another
+    /// project's or another module's. NULL is the state a freshly created
+    /// project is in: nothing is seeded, because a service the user did
+    /// not name is a service they then have to delete.
+    ///
     /// Deliberately **not** `skip_serializing_if`. "This project has no
     /// default baseUrl" is a decision the project makes, not an absence
     /// of data, and the TypeScript mirror declares this field as
@@ -547,6 +574,10 @@ pub struct ProjectPatch {
     pub base_url: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_definitions: Option<Vec<BaseUrlDefinition>>,
+    /// The project's ★. `Some(None)` clears it, which is a real state
+    /// rather than an omission: the renderer offers 「无默认服务」 in the
+    /// same menu that names one, and an endpoint naming no service then
+    /// resolves to no base URL at all.
     #[serde(default, deserialize_with = "double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_base_url_definition_id: Option<Option<String>>,
@@ -570,8 +601,29 @@ pub struct Environment {
     pub id: String,
     pub project_id: String,
     pub name: String,
+    /// **DEPRECATED — read for wire compatibility, written by nothing.**
+    ///
+    /// It was `def_id -> url`, the value layer back when a URL did not
+    /// care which module the endpoint sat in. The live layer is
+    /// [`Self::module_base_urls`]; `db::migrate` copied every value into
+    /// it and is the only reader of the column left in the crate.
+    ///
+    /// Kept on the struct so a payload from an older client still
+    /// deserialises — the mirror declares it optional — but
+    /// `db::environments::update` ignores it. Silently dropping it is the
+    /// price, and this comment is the record of it.
     #[serde(default)]
     pub base_urls: HashMap<String, String>,
+    /// `def_id -> module_id -> url`. **The only layer a URL lives in.**
+    ///
+    /// Each cell is independent: a missing entry means "this module has
+    /// no address for this service", and resolution stops there rather
+    /// than falling back to the environment-level map or to another
+    /// module's value. That is why the map is keyed by module at all —
+    /// two modules can legitimately point the same service at different
+    /// hosts, and an empty cell is a real answer rather than a hole.
+    #[serde(default)]
+    pub module_base_urls: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
     pub variables: HashMap<String, String>,
     #[serde(default)]
@@ -583,8 +635,15 @@ pub struct Environment {
 pub struct EnvironmentPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Deprecated with [`Environment::base_urls`]: accepted so an older
+    /// payload still deserialises, never written — the column is dead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_urls: Option<HashMap<String, String>>,
+    /// Replaces the whole `module_base_urls` map. `db::environments::update`
+    /// writes it as one atomic `UPDATE` of the JSON column, so a reader can
+    /// never observe half the cells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_base_urls: Option<HashMap<String, HashMap<String, String>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variables: Option<HashMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

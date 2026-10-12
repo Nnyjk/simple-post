@@ -71,7 +71,6 @@ function draft(overrides: Partial<NewItemDraft> = {}): NewItemDraft {
     parentCollectionId: '',
     name: 'n',
     description: '',
-    baseUrl: '',
     color: '#000000',
     ...overrides,
   };
@@ -329,7 +328,7 @@ describe('ui-new-item: a new project is entered, not just created', () => {
     assert.deepEqual(h.calls.addProject, [
       {
         name: '支付网关',
-        opts: { description: '', baseUrl: '', color: '#000000' },
+        opts: { description: '', color: '#000000' },
       },
     ]);
     // Not `setActiveProject`: the project is not a tree row any more, so

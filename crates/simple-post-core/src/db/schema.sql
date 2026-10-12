@@ -17,18 +17,49 @@ CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
+  -- The project's ★ service: what an endpoint naming no service of its
+  -- own resolves against. One per project, not per module — the service
+  -- list is project-wide, so a ★ that scoped to a module would name a
+  -- service other modules cannot see. NULL is a normal state (a project
+  -- nobody has given a default service yet), not an absent value.
   default_base_url_definition_id TEXT,
   color TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
+-- A named service, owned by the PROJECT. Every module sees every service
+-- in this list — there is no per-module service list, so two modules can
+-- never hold services that share a `name`. That is the whole point of the
+-- model: 「服务应该绑定到项目，这样每一个模块都会全部包含这些服务」.
+--
+-- A service row carries no URL. The value lives in
+-- `environments.module_base_urls_json`, keyed by (service × module), so a
+-- row here answers "what services exist" and nothing else.
+--
+-- `module_id` and `is_default` below are **dead columns kept on purpose**.
+-- They held the module-owned service model (per-module service lists and
+-- per-module ★) that this build reversed; `db::migrate` nulls / zeroes
+-- them and nothing reads or writes them after that. They stay because
+-- dropping a column means rebuilding the table, which means a
+-- `SCHEMA_VERSION` bump, and a bump makes `ensure_current_schema` delete
+-- the user's store. `db::ADDED_COLUMNS` re-adds both to stores that
+-- predate them, for the same reason: the migration has to be able to read
+-- the old shape in order to neutralise it.
+--
+-- Added after this table first shipped, so the `CREATE TABLE IF NOT
+-- EXISTS` above is a no-op for a store that already has the table.
 CREATE TABLE IF NOT EXISTS base_url_definitions (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  -- NULL always. Nullable rather than NOT NULL because `ADDED_COLUMNS`
+  -- can only append a nullable column to a live table.
+  module_id TEXT REFERENCES nodes(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT,
-  sort_order INTEGER NOT NULL DEFAULT 0
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  -- 0 always. See above.
+  is_default INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_base_url_defs_project
   ON base_url_definitions(project_id);
@@ -42,7 +73,19 @@ CREATE TABLE IF NOT EXISTS environments (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 0,
+  -- DEPRECATED, kept only so the column survives. It was `def_id -> url`,
+  -- the single value layer before services carried a module. Nothing
+  -- reads or writes it now; `db::migrate` copied every live value into
+  -- `module_base_urls_json` and is the only reader left in the crate.
+  --
+  -- Not cleared by the migration for the shape it can leave behind (see
+  -- `migrate_base_urls_into_value_layer`): those stores re-derive the
+  -- identical values on every later run, so the stale blob is inert.
   base_urls_json TEXT NOT NULL DEFAULT '{}',
+  -- def_id -> module_id -> url. **The only layer a base URL lives in.**
+  -- Each cell is independent: a module with no entry for a service has no
+  -- URL for it, and does not inherit another module's or the project's.
+  module_base_urls_json TEXT NOT NULL DEFAULT '{}',
   variables_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_envs_project ON environments(project_id);
@@ -125,8 +168,8 @@ CREATE INDEX IF NOT EXISTS idx_nodes_type   ON nodes(type, name);
 CREATE TABLE IF NOT EXISTS endpoint_details (
   node_id                TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
   method                 TEXT NOT NULL,
-  -- Path only. The host comes from the environment's baseUrls at send
-  -- time, so one endpoint can be retargeted without a rewrite.
+  -- Path only. The host comes from the environment's moduleBaseUrls at
+  -- send time, so one endpoint can be retargeted without a rewrite.
   url                    TEXT NOT NULL,
   environment_id         TEXT,
   base_url_definition_id TEXT,
@@ -227,6 +270,16 @@ END;
 --      deserialises: `kind` is a required field, so even the `'{}'`
 --      default fails. Unreadable rather than stale, hence a bump
 --      instead of a reader-side shim.
+--
+-- After 3: the service list moved to the project and the value layer
+-- became (environment × module × service) in
+-- `environments.module_base_urls_json`. STILL version 3 — `module_base_urls_json`
+-- is additive and arrives via `db::ADDED_COLUMNS`, and the two columns
+-- this model retired (`base_url_definitions.module_id` / `.is_default`)
+-- are kept and neutralised rather than dropped, because a DROP means a
+-- rebuild means a version bump means `ensure_current_schema` deletes every
+-- user's store. Rows written by either predecessor layout are repaired by
+-- `migrate_base_urls_into_value_layer` in `db::mod`.
 --
 -- 1 was never shipped: the nodes merge landed before any build could
 --      stamp a version of its own, so it has no database anywhere.

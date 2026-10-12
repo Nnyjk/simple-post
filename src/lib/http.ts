@@ -258,8 +258,11 @@ async function invokeAndMap(
  * JSON envelope.
  *
  * ⚠️ This path lets the caller name an arbitrary URL, so the server
- * becomes a proxy. It stays for the explicit "raw URL" case; the UI's
- * Send button uses [`sendEndpoint`] instead, which cannot.
+ * becomes a proxy. That is inherent to the raw-URL case and to
+ * [`sendPreparedRequest`] alike — both take a finished URL, because
+ * "the frontend assembles the whole request, the backend sends it"
+ * means the URL is the frontend's to own. `OutboundPolicy` is what
+ * keeps that from being unrestricted.
  *
  * Note: there is no "raw browser fetch" fallback. In every supported
  * distribution shape there's a real backend in front of `reqwest`,
@@ -312,11 +315,11 @@ export interface SendPreparedInput {
  * Send an already-prepared request.
  *
  * The point of this entry point is that what is sent is *the same object*
- * the preview renders. `sendEndpoint` hands URL composition to the
- * backend, which meant the cURL preview (frontend rules) and the actual
- * send (Rust rules) were two implementations kept in sync by hand — and
- * they did not always agree. Calling `prepareRequest` once and sending
- * the result makes that divergence unrepresentable.
+ * the preview renders. Handing URL composition to the backend instead
+ * meant the cURL preview (frontend rules) and the actual send (Rust
+ * rules) were two implementations kept in sync by hand — and they did
+ * not always agree. Calling `prepareRequest` once and sending the result
+ * makes that divergence unrepresentable.
  *
  * Headers travel as a tuple list rather than a `Record`: Rust
  * deserialises `Vec<(String, String)>`, and the web bridge
@@ -335,7 +338,7 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Api
   // The envelope mapper / error builders only read `method` and
   // `settings.timeoutMs` off this shape; the params/headers/body/auth
   // fields are already baked into `request`, so the synthetic values
-  // below are never consulted. Same trick `sendEndpoint` uses.
+  // below are never consulted.
   const shape: SendInput = {
     method: request.method,
     url: request.url,
@@ -362,104 +365,4 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Api
     request.url,
     options,
   );
-}
-
-// ---------------------------------------------------------------------------
-// Endpoint-scoped send — what the UI's Send button uses.
-// ---------------------------------------------------------------------------
-
-export interface SendEndpointInput {
-  /** Stored endpoint to send. The backend reads the base-URL definition
-   *  and environment rows from the database. */
-  endpointId: string;
-  /** Draft URL **path** (no base URL) from the URL input, or omitted to
-   *  use the stored one. The input box only ever holds the path, so this
-   *  is what the user sees; the backend joins it onto the base URL. */
-  urlOverride?: string;
-  /** The environment whose variables and base URLs the user is looking
-   *  at right now. Required in practice: the ENV pill is Zustand-only, so
-   *  the database's `is_active` does not follow the selection. */
-  environmentId?: string;
-  method: HttpMethod;
-  /**
-   * The request configuration **as it appears on screen** — params,
-   * headers and body are drafts until Save, so without these the wire
-   * would carry the stored rows while the user reads their unsaved edits
-   * in the editor. `EndpointSendOverrides` already carries these three;
-   * the renderer's Send button just wasn't using them.
-   */
-  params?: KeyValue[];
-  headers?: KeyValue[];
-  body?: RequestBody;
-  settings: RequestSettings;
-  signal?: AbortSignal;
-}
-
-/**
- * Send a stored endpoint by id.
- *
- * The renderer never supplies a finished URL, so this route has no SSRF
- * surface: the target is derived from rows the user configured. URL
- * composition — base URL precedence, `{{var}}` substitution, auth
- * reduction — happens once, in Rust, by
- * `simple_post_mcp::variable_fill::resolve_endpoint`.
- *
- * `url` in the returned `ApiResponse` is filled from the response
- * envelope, which carries the URL the backend actually dialled.
- */
-export async function sendEndpoint(input: SendEndpointInput): Promise<ApiResponse> {
-  // The envelope mapper wants a `SendInput` only for the method and the
-  // synthetic URL shown on a failure; the real URL arrives in the result.
-  const shape: SendInput = {
-    method: input.method,
-    url: '',
-    params: [],
-    headers: [],
-    body: { mode: 'none', content: '' },
-    auth: { kind: 'none' },
-    settings: input.settings,
-  };
-  const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
-
-  try {
-    const r = await invokeCmd<RustHttpResult>(
-      COMMANDS.endpointSend,
-      {
-        endpointId: input.endpointId,
-        overrides: {
-          // All of these travel, and none is redundant. `url`, `method`,
-          // `params`, `headers` and `body` are the renderer's unsaved
-          // draft; `environmentId` is the ENV pill's selection.
-          // The draft fields are what make Send mean "send what I see":
-          // params / headers / body only reach the database on Save, so
-          // omitting them here would transmit the previous save.
-          // The ENV pill is Zustand-only, so its selection cannot be
-          // read back from the row either.
-          url: input.urlOverride,
-          method: input.method,
-          environmentId: input.environmentId,
-          params: input.params,
-          headers: input.headers,
-          body: input.body,
-        },
-        settings: {
-          timeoutMs: input.settings.timeoutMs,
-          followRedirects: input.settings.followRedirects,
-          maxResponseSizeKb: input.settings.maxResponseSizeKb,
-        },
-      },
-      options,
-    );
-    // `shape.method` is the draft method, which is now also what travels in
-    // `overrides.method`, so the badge cannot disagree with the request.
-    return envelopeToApiResponse(r, shape, r.response?.url ?? '');
-  } catch (err) {
-    const name = (err as { name?: string })?.name;
-    const msg = (err as Error)?.message ?? String(err);
-    if (name === 'AbortError' || /abort/i.test(msg)) {
-      return abortedResponse(shape, '', 0);
-    }
-    console.error('[http.ts] endpoint_send failed:', err);
-    return networkErrorResponse(shape, '', 0, msg);
-  }
 }

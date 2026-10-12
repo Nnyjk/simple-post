@@ -13,7 +13,9 @@ use crate::error::AppError;
 
 use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState};
 
-use super::super::dto::{EnvRenameVarBody, EnvSetBaseUrlBody, EnvSetVarBody, SetActiveEnvBody};
+use super::super::dto::{
+    EnvRenameVarBody, EnvSetModuleBaseUrlBody, EnvSetVarBody, SetActiveEnvBody,
+};
 
 // ----- environments -------------------------------------------------------
 
@@ -91,13 +93,26 @@ pub(crate) async fn environments_rename_var(
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 
-pub(crate) async fn environments_set_baseurl(
+/// Write one cell of the one and only URL layer:
+/// `env.moduleBaseUrls[defId][moduleId]`.
+///
+/// The same service can point at two different hosts for two modules, so
+/// `moduleId` is part of the address rather than a filter. Nothing sits
+/// above this cell and nothing falls back to it, so `url: null` means the
+/// request goes out without a base URL.
+pub(crate) async fn environments_set_module_baseurl(
     State(s): State<Arc<WebState>>,
     Path(env_id): Path<String>,
-    Json(body): Json<EnvSetBaseUrlBody>,
+    Json(body): Json<EnvSetModuleBaseUrlBody>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
     let row = db::with_tx(&s.pool, |c| {
-        db::environments::set_base_url(c, &env_id, &body.def_id, body.url.as_deref())
+        db::environments::set_module_base_url(
+            c,
+            &env_id,
+            &body.def_id,
+            &body.module_id,
+            body.url.as_deref(),
+        )
     })
     .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))

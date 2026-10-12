@@ -1,9 +1,23 @@
 //! CRUD for the `base_url_definitions` table.
 //!
-//! Each project declares a *set* of named baseUrl slots (e.g.
-//! "鉴权服务", "数据服务"); each environment then provides a concrete
-//! URL for each name. The definitions live in their own table so the
-//! FK into `projects` carries the cascade for free.
+//! A service is owned by the **project**, and every module sees the whole
+//! list — the user's rule is 「服务应该绑定到项目，这样每一个模块都会全部包含
+//! 这些服务」. So there is no module filter here at all: two services in one
+//! project cannot share a `name`, and an endpoint's
+//! `base_url_definition_id` means the same thing wherever the endpoint
+//! sits, which is what lets a drag between modules keep working without
+//! re-pointing anything.
+//!
+//! The URL a service resolves to is not in this table. It is the
+//! (environment × module × service) cell in
+//! `super::environments::module_base_urls`; ★ lives on the project
+//! (`projects.default_base_url_definition_id`), not on a row.
+//!
+//! `module_id` and `is_default` still exist as columns because a build
+//! shipped with them and dropping them would mean a rebuild would mean a
+//! `SCHEMA_VERSION` bump would mean `ensure_current_schema` deletes the
+//! user's store. [`list_by_project`] and [`get`] deliberately do not read
+//! them, and nothing here writes them.
 
 use rusqlite::{params, Connection, Row};
 
@@ -119,19 +133,44 @@ pub fn update(
 }
 
 pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
-    let rows = conn.execute(
+    // ★ points at a row here, so deleting the row has to take the pointer
+    // with it. Leaving it would not crash — resolution treats an unknown
+    // service as "no base URL" — but the project would keep advertising a
+    // default that no longer exists, and the ★ menu would render a ghost
+    // entry until someone clicked it. One `UPDATE`, no promotion: with a
+    // single ★ per project there is nothing to promote it to.
+    let mut tx = conn.savepoint()?;
+    let removed = tx.execute(
         "DELETE FROM base_url_definitions WHERE id = ?1",
         params![id],
     )?;
-    if rows == 0 {
+    if removed == 0 {
+        // Nothing matched: roll the savepoint back rather than reporting
+        // success, so a typo'd id is a NotFound like every other CRUD
+        // call here. The star update below would otherwise be what decides
+        // it, and it matches nothing whenever another service holds the
+        // star — i.e. exactly when the delete *did* have work to do.
+        tx.rollback()?;
         return Err(AppError::NotFound(format!("base_url_definition {id}")));
     }
+    tx.execute(
+        "UPDATE projects SET default_base_url_definition_id = NULL \
+         WHERE default_base_url_definition_id = ?1",
+        params![id],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
-/// Mark `id` as the project's default base-url definition. Updates
+/// Mark `id` as the project's ★ service. Updates
 /// `projects.default_base_url_definition_id` only; envs and other
 /// defs are untouched.
+///
+/// ★ is project-scoped, not row-scoped: the service list is shared by
+/// every module, so a per-service flag would make the "default" mean
+/// different things to different modules. What an endpoint naming no
+/// service resolves against is the project ★, then its own module's cell
+/// in the environment — see the resolution order in the settings model.
 ///
 /// Pass `def_id = None` to clear the default.
 pub fn set_default(

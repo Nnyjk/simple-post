@@ -49,7 +49,6 @@ const emptyDraft = (): NewItemDraft => ({
   parentCollectionId: '',
   name: '',
   description: '',
-  baseUrl: '',
   color: PROJECT_COLOR_DEFAULT,
 });
 
@@ -74,7 +73,6 @@ export interface UiNewItemActions {
   setNewItemType: (type: NewDraftKind) => void;
   setNewItemName: (n: string) => void;
   setNewItemDescription: (d: string) => void;
-  setNewItemBaseUrl: (u: string) => void;
   setNewItemColor: (c: string) => void;
   setNewItemParentModule: (id: string) => void;
   setNewItemParentCollection: (id: string) => void;
@@ -144,7 +142,6 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
   setNewItemType: (type) => set((s) => ({ newItem: { ...s.newItem, type } })),
   setNewItemName: (n) => set((s) => ({ newItem: { ...s.newItem, name: n } })),
   setNewItemDescription: (d) => set((s) => ({ newItem: { ...s.newItem, description: d } })),
-  setNewItemBaseUrl: (u) => set((s) => ({ newItem: { ...s.newItem, baseUrl: u } })),
   setNewItemColor: (c) => set((s) => ({ newItem: { ...s.newItem, color: c } })),
   setNewItemParentModule: (id) =>
     set((s) => ({
@@ -167,7 +164,6 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
     if (draft.type === 'project') {
       const id = await state.addProject(name, {
         description: draft.description,
-        baseUrl: draft.baseUrl,
         color: draft.color,
       });
       // Enter the new project: `openProject` selects it *and* activates

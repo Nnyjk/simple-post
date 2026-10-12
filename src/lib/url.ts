@@ -7,7 +7,9 @@
 import type { BaseUrlDefinition, EndpointDetail, Environment, Project } from '@/types/domain';
 
 /** Where the effective baseUrl came from. Used by the picker to label
- *  the current selection (e.g. "项目默认" / "鉴权服务" / "自定义"). */
+ *  the current selection (e.g. "项目默认服务" / "鉴权服务" / "自定义").
+ *  `default` is the project's ★ — `Project.defaultBaseUrlDefinitionId`
+ *  — reached because the endpoint named no service itself. */
 export type BaseUrlSource = 'override' | 'definition' | 'default' | 'none';
 
 export interface ResolvedBaseUrl {
@@ -22,17 +24,16 @@ export interface ResolvedBaseUrl {
 /**
  * Resolve the effective baseUrl for an endpoint.
  *
- * Precedence (highest first):
- *   1. `endpoint.baseUrlOverride`       — per-endpoint custom mode
- *   2. `endpoint.baseUrlDefinitionId`   — the def the endpoint points at
- *      (must be in `project.baseUrlDefinitions`); the URL is then
- *      `env.baseUrls[defId]`
- *   3. `project.defaultBaseUrlDefinitionId` → `env.baseUrls[defId]`
- *   4. `''`                              — nothing
+ * Order of resolution (highest first):
+ *   1. `endpoint.baseUrlOverride`      — per-endpoint 自定义 mode
+ *   2. `endpoint.baseUrlDefinitionId`  — the service the endpoint named,
+ *      else `Project.defaultBaseUrlDefinitionId`
+ *   3. `env.moduleBaseUrls[defId][moduleId]` — the one and only value layer
+ *   4. `''`                             — nothing
  *
  * ## The override is three-state, and "present but empty" is meaningful
  *
- *   `null` / `undefined` — not in custom mode; fall through to the def chain.
+ *   `null` / `undefined` — not in custom mode; fall through to the service chain.
  *   `''`                 — custom mode with no prefix: the URL field is the
  *                          whole address, so nothing is prepended to it.
  *   `'https://x'`        — custom mode with an explicit host prefix (legacy
@@ -41,19 +42,44 @@ export interface ResolvedBaseUrl {
  *
  * This is the `double_option` patch convention doing real work: the caller
  * writes `baseUrlOverride: ''` to *record the choice*, not to clear it, and
- * `null` is the only thing that clears it. Collapsing `''` back into the def
- * chain is what made the picker's 自定义 row look like it did nothing.
+ * `null` is the only thing that clears it. Collapsing `''` back into the
+ * service chain is what made the picker's 自定义 row look like it did
+ * nothing.
  *
- * `env.baseUrls` is keyed by `BaseUrlDefinition.id`, NOT by name.
- * That keeps rename operations cheap and the resolution deterministic
- * even if two defs ever share a name. The env is taken from
- * `endpoint.environmentId` (the active env for the endpoint's other
- * variables) — when no env is selected, baseUrl resolves to ''.
+ * ## Services are project-level, values are per (env × module × service)
+ *
+ * `project.baseUrlDefinitions` is the project's whole list — every module
+ * sees all of it, so naming a service is never a cross-module error. What
+ * is module-specific is the *cell* the URL is read from, which is why
+ * `moduleId` is a required argument: two modules pointing the same 服务
+ * at two hosts is the case the model exists to express.
+ *
+ * There is **no fallback layer**. `baseUrls` is deprecated and never read;
+ * an empty cell yields `''` / `'none'` rather than borrowing another
+ * module's or another service's URL.
+ *
+ * `moduleId` is `null` for an endpoint that sits under no module (a deleted
+ * node, or the tester's empty state). There is no cell for such a module,
+ * so only step 1 can produce a value.
+ *
+ * `source` reports **which row selected the service**, not which cell
+ * supplied the URL: a service the endpoint named is `'definition'`, the
+ * project ★ reached by omission is `'default'`, and anything unresolved is
+ * `'none'`.
+ *
+ * Mirrors `resolve_base_url_with` in
+ * `crates/simple-post-mcp/src/variable_fill.rs`; the two must agree.
  */
 export function resolveEndpointBaseUrl(
   endpoint: Pick<EndpointDetail, 'environmentId' | 'baseUrlDefinitionId' | 'baseUrlOverride'>,
-  env: Pick<Environment, 'baseUrls'> | undefined,
+  env: Pick<Environment, 'moduleBaseUrls'> | undefined,
   project: Pick<Project, 'baseUrlDefinitions' | 'defaultBaseUrlDefinitionId'> | undefined,
+  /**
+   * The module the endpoint sits under, resolved by the caller with
+   * `moduleIdOfEndpoint` — it is a tree question, and this module
+   * deliberately knows nothing about the tree.
+   */
+  moduleId: string | null,
 ): ResolvedBaseUrl {
   if (endpoint.baseUrlOverride !== null && endpoint.baseUrlOverride !== undefined) {
     return {
@@ -63,22 +89,19 @@ export function resolveEndpointBaseUrl(
       definitionName: null,
     };
   }
+  // `null` (not chosen) falls through to the project ★. This is the one
+  // place the project's default is read, and it is read exactly once.
   const defId = endpoint.baseUrlDefinitionId ?? project?.defaultBaseUrlDefinitionId ?? null;
-  if (defId && project) {
-    const def = project.baseUrlDefinitions.find((d) => d.id === defId);
-    if (def) {
-      const url = env?.baseUrls[defId];
-      if (url) {
-        return {
-          baseUrl: url,
-          source: endpoint.baseUrlDefinitionId === defId ? 'definition' : 'default',
-          definitionId: def.id,
-          definitionName: def.name,
-        };
-      }
-    }
-  }
-  return { baseUrl: '', source: 'none', definitionId: null, definitionName: null };
+  const def = defId ? project?.baseUrlDefinitions.find((d) => d.id === defId) : undefined;
+  if (!def) return { baseUrl: '', source: 'none', definitionId: null, definitionName: null };
+  const url = moduleId ? (env?.moduleBaseUrls?.[def.id]?.[moduleId] ?? '') : '';
+  if (!url) return { baseUrl: '', source: 'none', definitionId: null, definitionName: null };
+  return {
+    baseUrl: url,
+    source: endpoint.baseUrlDefinitionId ? 'definition' : 'default',
+    definitionId: def.id,
+    definitionName: def.name,
+  };
 }
 
 /**
@@ -103,6 +126,55 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
   if (!trimmedBase) return trimmedPath;
   if (trimmedPath.startsWith('/')) return trimmedBase + trimmedPath;
   return `${trimmedBase}/${trimmedPath}`;
+}
+
+/**
+ * Collapse runs of `/` in the **path** of a URL that has already been
+ * joined *and* `{{var}}`-resolved, leaving every other byte alone.
+ *
+ * Joining happens before substitution — necessarily, because an
+ * environment's own base URL may be templated — so `joinBaseUrl` cannot
+ * know that `{{var}}` will expand to something already starting with `/`.
+ * It dutifully inserts a separator, and the substitution then turns
+ * `http://host:9200/{{var}}` into `http://host:9200//api`, which is a
+ * different route to most servers (often a redirect or a 404). Only after
+ * substitution is the truth known, which is why this is a separate pass
+ * rather than something `joinBaseUrl` tries to guess at.
+ *
+ * Scope is deliberately narrow — a blind `replace(/\/{2,}/g, '/')` would
+ * corrupt real URLs:
+ *   - `scheme://` is not a path. `https://` must survive verbatim.
+ *   - a leading `//` with **no** scheme is a protocol-relative
+ *     reference (`//cdn.example.com/x`); its slashes carry meaning.
+ *   - `?query` / `#fragment` are data, not path: a param carrying a
+ *     nested URL (`?redirect=https://x//y`) must pass through untouched.
+ *   - an unresolved `{{var}}` marker is text, not a separator, so it is
+ *     reported by `missingVars` rather than being flattened away.
+ *
+ * Mirrors `collapse_url_slashes` in
+ * `crates/simple-post-mcp/src/variable_fill.rs`; the two must agree or
+ * the preview and the request that actually goes out describe different
+ * URLs.
+ */
+export function collapseUrlSlashes(url: string): string {
+  if (!url) return url ?? '';
+  // `scheme://` and the protocol-relative `//` are heads, not path.
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(url);
+  let head = '';
+  let rest = url;
+  if (scheme) {
+    head = scheme[0];
+    rest = url.slice(scheme[0].length);
+  } else if (url.startsWith('//')) {
+    head = '//';
+    rest = url.slice(2);
+  }
+  // An authority never contains a `/` (it ends at the first one), so
+  // whatever follows the head is safe to treat as path.
+  const cut = rest.search(/[?#]/);
+  const path = cut === -1 ? rest : rest.slice(0, cut);
+  const tail = cut === -1 ? '' : rest.slice(cut);
+  return head + path.replace(/\/{2,}/g, '/') + tail;
 }
 
 export interface ResolvedVars {

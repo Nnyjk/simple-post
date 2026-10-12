@@ -48,7 +48,7 @@ export const COMMANDS = {
   environmentsDelete: 'environments_delete',
   environmentsSetVar: 'environments_set_var',
   environmentsRenameVar: 'environments_rename_var',
-  environmentsSetBaseurl: 'environments_set_baseurl',
+  environmentsSetModuleBaseurl: 'environments_set_module_baseurl',
   environmentsSetActive: 'environments_set_active',
 
   // ----- baseUrl definitions -----
@@ -95,13 +95,6 @@ export const COMMANDS = {
 
   // ----- low-level HTTP executor (Tauri side) -----
   httpRequest: 'http_request',
-
-  // ----- endpoint-scoped send -----
-  // The renderer names an endpoint, never a URL. The server resolves the
-  // base URL + path + `{{var}}` substitution + auth, so the browser
-  // cannot point the server at an arbitrary target. `httpRequest` above
-  // stays as the explicit raw-URL escape hatch.
-  endpointSend: 'endpoint_send',
 } as const;
 
 export type TauriCommand = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -411,10 +404,14 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars/rename`,
     body: (a) => ({ fromKey: a.fromKey, toKey: a.toKey }),
   },
-  [COMMANDS.environmentsSetBaseurl]: {
+  [COMMANDS.environmentsSetModuleBaseurl]: {
     method: 'POST',
-    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/baseurls`,
-    body: (a) => ({ defId: a.defId, url: a.url }),
+    // The value layer is (环境 × 模块 × 服务), so both halves of the cell
+    // travel in the body. The literal path segment keeps it distinct from
+    // the retired `/baseurls` route, which is gone because a bare
+    // `defId` could only ever have written the flat, module-blind layer.
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/module-baseurls`,
+    body: (a) => ({ defId: a.defId, moduleId: a.moduleId, url: a.url }),
   },
   [COMMANDS.environmentsSetActive]: {
     method: 'POST',
@@ -430,9 +427,13 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.baseUrlDefsCreate]: {
     method: 'POST',
+    // Services hang off a **project**, so the project is the scope and
+    // lives in the path; `/api/baseurl-defs` is the collection the sibling
+    // PATCH/DELETE below address by bare id.
     path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
-    // projectId 只存在于路径，id 由 Web 服务端生成；显式投影可避免两者
-    // 随默认 args 泄漏到请求体。
+    // Explicit projection: `name` is the whole contract, and the id is
+    // minted by the server — the default `args` fallback would leak both
+    // `projectId` and any caller-held `opts` into the body.
     body: (a) => {
       const opts = a.opts as { description?: unknown } | undefined;
       return {
@@ -452,6 +453,8 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.baseUrlDefsSetDefault]: {
     method: 'POST',
+    // The ★ is a property of the project, so the project — not a module —
+    // is the scope.
     path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls/default`,
     body: (a) => ({ defId: a.defId }),
   },
@@ -487,14 +490,6 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // struct deserialises directly from `args` so no translation is
   // needed here.
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
-
-  // Node-scoped send. `endpointId` is the path segment; the Rust
-  // handler folds the body back onto it before deserialising
-  // `EndpointSendArgs`, so the two shapes take the same argument object.
-  [COMMANDS.endpointSend]: {
-    method: 'POST',
-    path: (a) => `/api/nodes/${encodeURIComponent(String(a.endpointId))}/send`,
-  },
 
   // ----- MCP daemon -----
   [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },

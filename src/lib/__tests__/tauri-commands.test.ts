@@ -415,17 +415,19 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { key: 'token', value: 'abc' });
   });
 
-  it('environmentsSetBaseurl → POST /api/environments/{envId}/baseurls', async () => {
-    await invokeCmd(COMMANDS.environmentsSetBaseurl, {
+  it('environmentsSetModuleBaseurl → POST /api/environments/{envId}/module-baseurls', async () => {
+    await invokeCmd(COMMANDS.environmentsSetModuleBaseurl, {
       envId: 'env1',
       defId: 'def1',
+      moduleId: 'mod1',
       url: 'https://api.example.com',
     });
     const c = last();
     assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/environments/env1/baseurls');
+    assert.equal(c.url, '/api/environments/env1/module-baseurls');
     assert.deepEqual(JSON.parse(c.body ?? 'null'), {
       defId: 'def1',
+      moduleId: 'mod1',
       url: 'https://api.example.com',
     });
   });
@@ -463,17 +465,18 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { fromKey: 'old', toKey: 'new' });
   });
 
-  it('baseUrlDefsCreate → 只投影 Web body 字段', async () => {
+  it('baseUrlDefsCreate → POST /api/projects/{projectId}/baseurls with { name }', async () => {
     await invokeCmd(COMMANDS.baseUrlDefsCreate, {
-      projectId: 'p-1',
-      // id 与 projectId 都由路径/服务端负责，不能随默认 args 泄漏。
+      // 服务挂在项目上，所以作用域是 projectId；id 由 Web 服务端生成，
+      // 不能随默认 args 泄漏进 body。
       id: 'def-1',
+      projectId: 'p/1',
       name: 'Local',
       opts: { description: '本地服务' },
     });
     const c = last();
     assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/projects/p-1/baseurls');
+    assert.equal(c.url, '/api/projects/p%2F1/baseurls');
     assert.deepEqual(JSON.parse(c.body ?? 'null'), {
       name: 'Local',
       description: '本地服务',
@@ -499,15 +502,24 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.equal(c.body, undefined);
   });
 
-  it('baseUrlDefsSetDefault → POST /api/projects/{pid}/baseurls/default with { defId } body', async () => {
+  it('baseUrlDefsSetDefault → POST /api/projects/{projectId}/baseurls/default with { defId } body', async () => {
     await invokeCmd(COMMANDS.baseUrlDefsSetDefault, {
-      projectId: 'p/1',
+      projectId: 'p-1',
       defId: 'd-2',
     });
     const c = last();
     assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/projects/p%2F1/baseurls/default');
+    assert.equal(c.url, '/api/projects/p-1/baseurls/default');
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { defId: 'd-2' });
+  });
+
+  it('baseUrlDefsSetDefault → defId: null 表示该项目没有默认服务', async () => {
+    // `null` 是清空 ★ 的显式动作，不是"恢复某个模块的默认值"——
+    // ★ 是项目级的，根本不存在模块默认值。
+    await invokeCmd(COMMANDS.baseUrlDefsSetDefault, { projectId: 'p-1', defId: null });
+    const c = last();
+    assert.equal(c.url, '/api/projects/p-1/baseurls/default');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { defId: null });
   });
 
   it('requestSettingsGet → GET /api/request-settings', async () => {
@@ -594,9 +606,10 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
   });
 
   it('every invoke call sets content-type: application/json', async () => {
-    await invokeCmd(COMMANDS.environmentsSetBaseurl, {
+    await invokeCmd(COMMANDS.environmentsSetModuleBaseurl, {
       envId: 'env1',
       defId: 'def1',
+      moduleId: 'mod1',
       url: 'https://api.example.com',
     });
     const c = last();

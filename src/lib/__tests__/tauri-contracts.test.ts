@@ -29,10 +29,13 @@ describe('Tauri IPC 入参契约', () => {
       [COMMANDS.environmentsSetVar, { envId: 'env-1', key: 'token', value: 'abc' }],
       [COMMANDS.environmentsSetVar, { envId: 'env-1', key: 'token', value: null }],
       [
-        COMMANDS.environmentsSetBaseurl,
-        { envId: 'env-1', defId: 'def-1', url: 'https://example.test' },
+        COMMANDS.environmentsSetModuleBaseurl,
+        { envId: 'env-1', defId: 'def-1', moduleId: 'mod-1', url: 'https://example.test' },
       ],
-      [COMMANDS.environmentsSetBaseurl, { envId: 'env-1', defId: 'def-1', url: null }],
+      [
+        COMMANDS.environmentsSetModuleBaseurl,
+        { envId: 'env-1', defId: 'def-1', moduleId: 'mod-1', url: null },
+      ],
       [COMMANDS.environmentsUpdate, { id: 'env-1', patch: { name: 'dev' } }],
       [COMMANDS.environmentsDelete, { id: 'env-1' }],
       [COMMANDS.baseUrlDefsUpdate, { id: 'def-1', patch: { name: 'api' } }],

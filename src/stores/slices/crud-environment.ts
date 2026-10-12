@@ -5,10 +5,15 @@
  * `../crud-slice.ts` for the slice-wide contract: optimistic `set()` →
  * `invokeCmd` → snapshot-and-rollback).
  *
- * `null` is the delete sentinel on both a variable and a baseUrl slot,
- * and an empty string is a real value — the tests in
+ * `null` is the delete sentinel on both a variable and a baseUrl slot, and
+ * an empty string is a real value — the tests in
  * `../../__tests__/crud-slice.test.ts` pin that distinction, so the
  * `value === null` checks below are load-bearing, not style.
+ *
+ * `moduleBaseUrls[defId][moduleId]` is the only place a service's URL
+ * lives: one independent cell per (module, service) pair, no inheritance
+ * and no fallback. `resolveEndpointBaseUrl` reads exactly one of them.
+ * The flat `baseUrls` map is deprecated and deliberately not written.
  *
  * `deleteEnvironment` and `setEnvironmentActive` write keys owned by
  * other slices (`activeEnvironmentId`, `endpointDetails`) in the same
@@ -27,7 +32,17 @@ export interface EnvironmentCrudActions {
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => Promise<void>;
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => Promise<void>;
-  setEnvironmentBaseUrl: (envId: string, defId: string, url: string | null) => Promise<void>;
+  /**
+   * Set (or with `null` clear) one cell: what service `defId` points at,
+   * for module `moduleId`, in this environment. Each cell is an
+   * independent value — clearing one must not touch its neighbours.
+   */
+  setEnvironmentModuleBaseUrl: (
+    envId: string,
+    defId: string,
+    moduleId: string,
+    url: string | null,
+  ) => Promise<void>;
   deleteEnvironment: (envId: string) => Promise<void>;
   setEnvironmentActive: (envId: string) => Promise<void>;
 }
@@ -126,19 +141,34 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
         })),
     );
   },
-  setEnvironmentBaseUrl: async (envId, defId, url) => {
+  setEnvironmentModuleBaseUrl: async (envId, defId, moduleId, url) => {
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return;
-    const nextBaseUrls = { ...prev.baseUrls };
-    if (url === null) delete nextBaseUrls[defId];
-    else nextBaseUrls[defId] = url;
-    const optimistic: Environment = { ...prev, baseUrls: nextBaseUrls };
+    // Copy both levels: the inner map is shared with every other module's
+    // row, so mutating it in place would write this cell into modules the
+    // caller never named.
+    const nextByModule = { ...(prev.moduleBaseUrls[defId] ?? {}) };
+    if (url === null) delete nextByModule[moduleId];
+    else nextByModule[moduleId] = url;
+    const nextModuleBaseUrls = { ...prev.moduleBaseUrls, [defId]: nextByModule };
+    // Drop the whole service row once its last cell is gone, so an env
+    // that has been cleared does not carry a hollow `defId → {}` shell
+    // that reads as "this service is configured here" in any UI diffing
+    // the object by key.
+    if (Object.keys(nextByModule).length === 0) delete nextModuleBaseUrls[defId];
+    const optimistic: Environment = { ...prev, moduleBaseUrls: nextModuleBaseUrls };
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
     await invokeWithRollback(
-      'environments_set_baseurl',
-      () => invokeCmd<Environment>(COMMANDS.environmentsSetBaseurl, { envId, defId, url }),
+      'environments_set_module_baseurl',
+      () =>
+        invokeCmd<Environment>(COMMANDS.environmentsSetModuleBaseurl, {
+          envId,
+          defId,
+          moduleId,
+          url,
+        }),
       () =>
         set((s) => ({
           environments: s.environments.map((env) => (env.id === envId ? prev : env)),
@@ -153,9 +183,9 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     };
     set((s) => {
       // Clear `environmentId` on any endpoint that pointed at the deleted
-      // env so it falls back to the project default. We don't have a
-      // selector that re-resolves baseUrl on the fly, so the explicit
-      // null-out is what keeps the URL bar honest.
+      // env so it stops resolving against it. We don't have a selector
+      // that re-resolves baseUrl on the fly, so the explicit null-out is
+      // what keeps the URL bar honest.
       const nextDetails: Record<string, EndpointDetail> = {};
       for (const [id, d] of Object.entries(s.endpointDetails)) {
         nextDetails[id] = d.environmentId === envId ? { ...d, environmentId: null } : d;

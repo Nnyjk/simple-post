@@ -13,6 +13,13 @@ use crate::permissions::CapabilityPolicy;
 pub struct CreateProjectOpts {
     pub description: Option<String>,
     pub color: Option<String>,
+    // No `baseUrl`. It was introduced together with the "new project
+    // seeds a default service holding a URL" model, and that model is
+    // gone: `create_with_defaults` now writes only the project and its
+    // default environment. A base URL belongs to
+    // (environment × module × service) and a fresh project has no
+    // modules, so there is no cell to write one into — the user fills
+    // the cartesian grid in settings instead.
 }
 
 /// Tauri 与 Web 共用的能力策略返回形状。

@@ -196,6 +196,62 @@ fn root_id_of_is_one_lookup_for_every_type() {
 }
 
 #[test]
+fn module_id_of_walks_up_to_the_owning_module() {
+    // The value layer is `moduleBaseUrls[service][module]`, so this is the
+    // lookup that decides *which* of a service's addresses an endpoint
+    // gets — a nested endpoint has to reach its module through the
+    // collection in between.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &module("p1", "m2", 1), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    put(&pool, &collection("p1", "c2", "m1", 1), None);
+    let (e, d) = endpoint("p1", "e1", "c2", 0);
+    put(&pool, &e, Some(&d));
+    // An endpoint straight under a module, with no collection in between.
+    let (direct, direct_detail) = endpoint("p1", "e2", "m2", 0);
+    put(&pool, &direct, Some(&direct_detail));
+
+    for (id, expected) in [("c1", "m1"), ("c2", "m1"), ("e1", "m1"), ("e2", "m2")] {
+        let found = db::with_conn(&pool, |c| module_id_of(c, id)).unwrap();
+        assert_eq!(found.as_deref(), Some(expected), "module_id_of({id})");
+    }
+}
+
+#[test]
+fn module_id_of_is_none_for_a_module_or_an_unknown_node() {
+    // Both mean "there is no module above this", and both resolve to no
+    // base URL — but they are different states, so neither is an error.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    assert_eq!(
+        db::with_conn(&pool, |c| module_id_of(c, "m1")).unwrap(),
+        None,
+        "a module is not under a module"
+    );
+    assert_eq!(
+        db::with_conn(&pool, |c| module_id_of(c, "nope")).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn module_id_of_follows_an_endpoint_that_was_dragged_to_another_module() {
+    // Services are project-wide now, so a cross-module drag needs no
+    // re-pointing of the endpoint's service — but the *cell* it resolves
+    // through moves with it, and that is this lookup.
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &module("p1", "m2", 1), None);
+    let (e, d) = endpoint("p1", "e1", "m1", 0);
+    put(&pool, &e, Some(&d));
+
+    db::with_tx(&pool, |c| move_many(c, &["e1".to_string()], Some("m2"), 0)).unwrap();
+    let found = db::with_conn(&pool, |c| module_id_of(c, "e1")).unwrap();
+    assert_eq!(found.as_deref(), Some("m2"));
+}
+
+#[test]
 fn subtree_ids_walks_the_whole_closure() {
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);

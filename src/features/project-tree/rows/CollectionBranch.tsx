@@ -73,15 +73,15 @@ export function CollectionBranch(props: CollectionBranchProps) {
                 dragContext.setDataTransfer(e, { kind: 'collection', ids: [collection.id] })
               }
               onDragEnd={dragContext.handleDragEnd}
-              onDragOver={dragContext.makeDragOverHandler(
-                { kind: 'collection', id: collection.id },
-                null,
-              )}
+              onDragOver={dragContext.makeDragOverHandler({
+                kind: 'collection',
+                id: collection.id,
+              })}
               onDragLeave={dragContext.makeDragLeaveHandler({
                 kind: 'collection',
                 id: collection.id,
               })}
-              onDrop={dragContext.makeDropHandler({ kind: 'collection', id: collection.id }, null)}
+              onDrop={dragContext.makeDropHandler({ kind: 'collection', id: collection.id })}
               dropHint={
                 dragContext.dropHint && dragContext.dropHint.key === `collection:${collection.id}`
                   ? dragContext.dropHint.zone

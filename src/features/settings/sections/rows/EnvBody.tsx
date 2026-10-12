@@ -1,29 +1,30 @@
 import { Braces, Globe } from 'lucide-react';
-import type { Environment } from '@/types/domain';
+import type { Environment, ResourceNode } from '@/types/domain';
 import type { EnvironmentSectionProps } from '../EnvironmentSection';
-import { BaseUrlTable } from './BaseUrlTable';
 import { EnvHeader } from './EnvHeader';
 import { GroupHeader } from './GroupHeader';
+import { ModuleBaseUrlTable } from './ModuleBaseUrlTable';
 import { VariableTable } from './VariableTable';
 
 /**
- * EnvBody — one env's tables (URL rows + variable rows).
+ * EnvBody — one env's tables (前置 URL rows + variable rows).
  */
 interface EnvBodyProps {
   env: Environment;
   projectId: string;
+  /** This project's modules — the grouping axis of the 前置 URL table. */
+  modules: readonly ResourceNode[];
 
   setEnvironmentVar: EnvironmentSectionProps['setEnvironmentVar'];
   renameEnvironmentVar: EnvironmentSectionProps['renameEnvironmentVar'];
-  setEnvironmentBaseUrl: EnvironmentSectionProps['setEnvironmentBaseUrl'];
+  setEnvironmentModuleBaseUrl: EnvironmentSectionProps['setEnvironmentModuleBaseUrl'];
   updateEnvironment: EnvironmentSectionProps['updateEnvironment'];
   onAddVar: () => void;
-  onAddBaseUrl: () => void;
 
   baseUrlDefinitions: EnvironmentSectionProps['baseUrlDefinitions'];
-  defaultBaseUrlDefinitionId: EnvironmentSectionProps['defaultBaseUrlDefinitionId'];
+  defaultBaseUrlDefinitionId: string | null;
+  addBaseUrlDefinition: EnvironmentSectionProps['addBaseUrlDefinition'];
   updateBaseUrlDefinition: EnvironmentSectionProps['updateBaseUrlDefinition'];
-  deleteBaseUrlDefinition: EnvironmentSectionProps['deleteBaseUrlDefinition'];
   setDefaultBaseUrlDefinition: EnvironmentSectionProps['setDefaultBaseUrlDefinition'];
   onDeleteBaseUrl: (def: { id: string; name: string }) => void;
   /** Open the env name already focused — set for a just-created env. */
@@ -35,16 +36,16 @@ interface EnvBodyProps {
 export function EnvBody({
   env,
   projectId,
+  modules,
   setEnvironmentVar,
   renameEnvironmentVar,
-  setEnvironmentBaseUrl,
+  setEnvironmentModuleBaseUrl,
   updateEnvironment,
   onAddVar,
-  onAddBaseUrl,
   baseUrlDefinitions,
   defaultBaseUrlDefinitionId,
+  addBaseUrlDefinition,
   updateBaseUrlDefinition,
-  deleteBaseUrlDefinition,
   setDefaultBaseUrlDefinition,
   onDeleteBaseUrl,
   autoRename,
@@ -62,19 +63,23 @@ export function EnvBody({
       <GroupHeader
         icon={<Globe className="h-3.5 w-3.5" />}
         title="前置 URL"
-        description="项目级 BaseUrl 定义 + 当前环境的覆盖值"
+        // Describes the model as it is: the service list belongs to the
+        // project and every module sees all of it, while the address in
+        // the third column is this module's own value for that service in
+        // this environment.
+        description="项目共用一份服务清单，每个模块各填各的前置 URL"
         meta={baseUrlDefinitions.length > 0 ? `${baseUrlDefinitions.length} 个服务` : undefined}
       />
-      <BaseUrlTable
+      <ModuleBaseUrlTable
         env={env}
         projectId={projectId}
+        modules={modules}
         baseUrlDefinitions={baseUrlDefinitions}
         defaultBaseUrlDefinitionId={defaultBaseUrlDefinitionId}
-        setEnvironmentBaseUrl={setEnvironmentBaseUrl}
+        setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
+        addBaseUrlDefinition={addBaseUrlDefinition}
         updateBaseUrlDefinition={updateBaseUrlDefinition}
-        deleteBaseUrlDefinition={deleteBaseUrlDefinition}
         setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
-        onAddBaseUrl={onAddBaseUrl}
         onDeleteBaseUrl={onDeleteBaseUrl}
       />
 

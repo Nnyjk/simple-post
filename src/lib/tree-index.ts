@@ -47,3 +47,52 @@ export function indexByParent(
   }
   return byParent;
 }
+
+/**
+ * The module an endpoint ultimately sits under, or `null` when it is not
+ * under one.
+ *
+ * A project's own id is denormalised onto every node as `rootId`, which
+ * makes "which project" one lookup — but there is no equivalent column
+ * for the module, so this walks `parentId` instead. That asymmetry is
+ * deliberate on the DB side (the module changes on a move, the project
+ * never does) and cheap here: the walk is bounded by collection nesting
+ * depth, and `nodes` is already in memory.
+ *
+ * Needed because baseUrl **values** are per module: an endpoint resolves
+ * its service against `env.moduleBaseUrls[defId][moduleId]` (see
+ * `resolveEndpointBaseUrl` in `lib/url.ts`), and the resolution layer has
+ * to know which module the endpoint belongs to before it can read that
+ * cell. The service *list* is project-level and needs no such narrowing —
+ * that asymmetry is why this function stays even though services no
+ * longer belong to a module.
+ *
+ * Takes the whole node list and does its own index lookup rather than a
+ * prebuilt map, so callers can pass `store.nodes` directly. It is
+ * **not** memoised: call it inside a `useMemo`, never as a Zustand
+ * selector (a fresh string is stable under `Object.is`, so a selector
+ * returning this is safe, but the walk itself should not rerun per
+ * render).
+ */
+export function moduleIdOfEndpoint(
+  nodes: readonly ResourceNode[],
+  endpointId: string | null | undefined,
+): string | null {
+  if (!endpointId) return null;
+  const byId = new Map<string, ResourceNode>();
+  for (const n of nodes) byId.set(n.id, n);
+
+  // `kind` is the node's own type; an endpoint may sit directly under a
+  // module (no collection), so both shapes terminate here.
+  let cur = byId.get(endpointId);
+  let guard = 0;
+  while (cur && guard++ < 64) {
+    if (cur.kind === 'module') return cur.id;
+    if (!cur.parentId) return null;
+    cur = byId.get(cur.parentId);
+  }
+  // A cycle cannot happen — the schema's parent matrix and the move
+  // guard both forbid it — but a bounded walk that silently returns
+  // `null` beats an unbounded one that hangs the send path.
+  return null;
+}

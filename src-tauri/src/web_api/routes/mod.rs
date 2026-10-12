@@ -18,19 +18,20 @@ pub(crate) use base_url_defs::{
 };
 pub(crate) use environments::{
     environments_create, environments_delete, environments_list, environments_rename_var,
-    environments_set_active, environments_set_baseurl, environments_set_var, environments_update,
+    environments_set_active, environments_set_module_baseurl, environments_set_var,
+    environments_update,
 };
 pub(crate) use mcp::{
     mcp_capability_get, mcp_capability_list_tools, mcp_capability_put, mcp_healthz,
     mcp_json_rpc_post, mcp_proxy_path, mcp_restart, mcp_start, mcp_status, mcp_stop, mcp_tools,
 };
-// `http_send` and `node_send` are re-exported from here rather than
-// from a separate `endpoints` module: they are addressed under a node
-// now, and the module they live in follows the address.
+// `http_send` is re-exported from here rather than from a separate
+// `endpoints` module: it is addressed under a node now, and the module
+// it lives in follows the address.
 pub(crate) use nodes::{
     endpoint_details_list, http_send, node_duplicate, node_endpoint_detail_get,
-    node_endpoint_detail_patch, node_send, nodes_create, nodes_delete, nodes_get, nodes_list,
-    nodes_move, nodes_update,
+    node_endpoint_detail_patch, nodes_create, nodes_delete, nodes_get, nodes_list, nodes_move,
+    nodes_update,
 };
 pub(crate) use permissions::{permissions_get, permissions_set};
 pub(crate) use preferences::{preferences_get, preferences_put};

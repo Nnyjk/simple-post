@@ -201,7 +201,6 @@ export interface NewItemDraft {
   parentCollectionId: string;
   name: string;
   description: string;
-  baseUrl: string;
   color: string;
 }
 

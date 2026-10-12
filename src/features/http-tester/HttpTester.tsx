@@ -12,6 +12,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { type AuthConfig, type RequestBody } from '@/types/domain';
 import { methodColorVar, cn } from '@/lib/utils';
 import { resolveEndpointBaseUrl } from '@/lib/url';
+import { moduleIdOfEndpoint } from '@/lib/tree-index';
 import { validateRequest } from '@/lib/request-validation';
 import { sendPreparedRequest } from '@/lib/http';
 import { prepareRequest, preparedToCurl } from '@/lib/http-build';
@@ -156,14 +157,25 @@ export function HttpTester() {
 
   // Effective baseUrl for this endpoint — drives both the picker label
   // and the join at send time.
+  //
+  // The service list is the project's, so the picker offers all of it; what
+  // is per-module is the *cell* the URL is read from. `moduleId` is
+  // therefore still needed — it selects the row of
+  // `env.moduleBaseUrls[defId]` this endpoint reads — but it no longer
+  // narrows which services are on offer.
+  const moduleId = useMemo(
+    () => moduleIdOfEndpoint(allNodes, endpoint?.id),
+    [allNodes, endpoint?.id],
+  );
   const resolved = useMemo(
     () =>
       resolveEndpointBaseUrl(
         detail ?? { environmentId: null, baseUrlDefinitionId: null, baseUrlOverride: null },
         endpointEnv,
         project,
+        moduleId,
       ),
-    [detail, endpointEnv, project],
+    [detail, endpointEnv, project, moduleId],
   );
 
   // Drive the picker: reflect what's currently stored on the endpoint.
@@ -795,6 +807,9 @@ export function HttpTester() {
           className="border-0"
         />
         <BaseUrlPicker
+          // The project's whole service list — services are project-level,
+          // so every one of them is a real choice here. What differs per
+          // service is the *cell* the URL is read from, not eligibility.
           definitions={project?.baseUrlDefinitions ?? []}
           defaultDefinitionId={project?.defaultBaseUrlDefinitionId ?? null}
           resolvedBaseUrl={resolved.baseUrl}
@@ -803,7 +818,7 @@ export function HttpTester() {
             if (!endpoint) return;
             if (next.kind === 'default') {
               // Clear both — null on baseUrlDefinitionId makes
-              // resolveEndpointBaseUrl fall back to the project default.
+              // resolveEndpointBaseUrl fall back to the project ★.
               updateEndpointDetail(endpoint.id, {
                 baseUrlDefinitionId: null,
                 baseUrlOverride: null,

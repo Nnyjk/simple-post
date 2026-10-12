@@ -1,16 +1,19 @@
 /**
- * CRUD sub-factory — project-scoped baseUrl definitions.
+ * CRUD sub-factory — project-scoped baseUrl service definitions.
  *
  * One of five sub-factories composed by `createCrudSlice` (see
  * `../crud-slice.ts` for the slice-wide contract: optimistic `set()` →
  * `invokeCmd` → snapshot-and-rollback).
  *
- * Definitions live on the project (`project.baseUrlDefinitions`), while
- * the per-environment overrides live in `environment.baseUrls` keyed by
- * definition id. Deleting a definition therefore has to null out the
- * endpoints pointing at it *and* leave the env overrides alone — see the
- * comment on `deleteBaseUrlDefinition` for why the orphaned overrides are
- * not cleaned up.
+ * A service belongs to the **project**, not to a module — every module
+ * sees the same list, so these actions are all keyed by `projectId`. The
+ * per-module part of the model is the URL, which lives in
+ * `environment.moduleBaseUrls[defId][moduleId]` and is written by
+ * `crud-environment.ts`.
+ *
+ * Deleting a definition still has to null out the endpoints pointing at
+ * it; see the comment on `deleteBaseUrlDefinition` for why the orphaned
+ * per-env URLs are not cleaned up.
  */
 import type { StateCreator } from 'zustand';
 import type { BaseUrlDefinition, EndpointDetail, Project } from '@/types/domain';
@@ -21,6 +24,10 @@ import { invokeWithRollback } from './crud-helpers';
 
 /** baseUrl-definition actions owned by the CRUD slice. */
 export interface BaseUrlCrudActions {
+  /**
+   * Add a service to `projectId`. Returns its id synchronously so the
+   * caller can seed an env cell for it without a round trip.
+   */
   addBaseUrlDefinition: (projectId: string, name: string) => string;
   updateBaseUrlDefinition: (
     projectId: string,
@@ -28,6 +35,13 @@ export interface BaseUrlCrudActions {
     patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>,
   ) => Promise<void>;
   deleteBaseUrlDefinition: (projectId: string, defId: string) => Promise<void>;
+  /**
+   * Star a service as the **project's** default, or clear the star with
+   * `null`. The star is project-wide — there is no per-module default —
+   * so it is what an endpoint with no `baseUrlDefinitionId` resolves
+   * through. Clearing it is a real (if intentional) way to leave those
+   * endpoints with no baseUrl.
+   */
   setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => Promise<void>;
 }
 
@@ -37,34 +51,33 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
 ) => ({
   /**
    * Optimistic local add + background invoke. Returns the temp id
-   * synchronously because EnvironmentSection passes it directly into
-   * `setEnvironmentBaseUrl` to seed an empty row. On invoke success
-   * the temp row is replaced with the persisted entity (server may
-   * assign a different id); on failure the local row is removed.
+   * synchronously because the settings table passes it straight into
+   * `setEnvironmentModuleBaseUrl` to seed an empty cell. On invoke
+   * success the temp row is replaced with the persisted entity (the
+   * server mints its own id); on failure the local row is removed.
+   *
+   * The project's first service becomes its default here. The backend
+   * does the same, but mirroring it locally is what stops the ★ from
+   * appearing a moment late in the one place it is load-bearing: an
+   * endpoint that picked no service resolves through it.
    */
   addBaseUrlDefinition: (projectId, name) => {
     const defId = uid();
+    const label = name.trim() || '未命名';
     set((s) => ({
       projects: s.projects.map((p) => {
         if (p.id !== projectId) return p;
         const wasEmpty = p.baseUrlDefinitions.length === 0;
         return {
           ...p,
-          baseUrlDefinitions: [
-            ...p.baseUrlDefinitions,
-            { id: defId, name: name.trim() || '未命名' },
-          ],
-          // Convenience: when the project had no defs yet, the newly
-          // added one becomes the default — otherwise the picker
-          // would have nothing to show as "项目默认".
+          baseUrlDefinitions: [...p.baseUrlDefinitions, { id: defId, name: label }],
+          // Convenience: with no ★ the picker would have nothing to
+          // offer as the project default.
           defaultBaseUrlDefinitionId: wasEmpty ? defId : p.defaultBaseUrlDefinitionId,
         };
       }),
     }));
-    invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, {
-      projectId,
-      name: name.trim() || '未命名',
-    })
+    invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, { projectId, name: label })
       .then((persisted) => {
         set((s) => ({
           projects: s.projects.map((p) => {
@@ -118,11 +131,11 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
       endpointDetails: get().endpointDetails,
     };
     set((s) => {
-      // Cascade: any endpoint that pointed at this def falls back to
-      // the project default. We don't bother removing the now-orphan
-      // entry from each env's baseUrls map — the resolution function
-      // never reads an entry under a dead defId, so the stale data
-      // is harmless and self-cleans on next save.
+      // Cascade: any endpoint that pointed at this def falls back to the
+      // project default. We don't bother removing the now-orphan cells
+      // from each env's `moduleBaseUrls` — the resolution function never
+      // reads an entry under a dead defId, so the stale data is harmless
+      // and self-cleans on next save.
       const nextDetails: Record<string, EndpointDetail> = {};
       for (const [id, d] of Object.entries(s.endpointDetails)) {
         nextDetails[id] = d.baseUrlDefinitionId === defId ? { ...d, baseUrlDefinitionId: null } : d;
@@ -133,6 +146,9 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
           return {
             ...p,
             baseUrlDefinitions: p.baseUrlDefinitions.filter((d) => d.id !== defId),
+            // The ★ pointed at a row that no longer exists; leaving it
+            // would make the settings table highlight nothing and the
+            // resolver look a def up that misses forever.
             defaultBaseUrlDefinitionId:
               p.defaultBaseUrlDefinitionId === defId ? null : p.defaultBaseUrlDefinitionId,
           };
@@ -149,6 +165,9 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
   setDefaultBaseUrlDefinition: async (projectId, defId) => {
     const prevProject = get().projects.find((p) => p.id === projectId);
     if (!prevProject) return;
+    // One field, one `set()`: the star is a single id rather than a
+    // flag spread across rows, so there is no intermediate state in which
+    // two services are both default.
     const optimistic: Project = { ...prevProject, defaultBaseUrlDefinitionId: defId };
     set((s) => ({
       projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),

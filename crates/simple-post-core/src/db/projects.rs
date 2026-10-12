@@ -95,7 +95,7 @@ pub fn create(conn: &mut Connection, p: &Project) -> Result<(), AppError> {
 }
 
 /// Apply a partial update. Only fields with `Some(...)` are written;
-/// `Option<Option<T>>` (`description`, `base_url`,
+/// `Option<Option<T>>` (`description`,
 /// `default_base_url_definition_id`) distinguishes "leave alone"
 /// (outer `None`) from "clear" (inner `None`).
 ///
@@ -119,13 +119,14 @@ pub fn update(conn: &mut Connection, id: &str, patch: ProjectPatch) -> Result<Pr
             None => rusqlite::types::Value::Null,
         });
     }
-    if let Some(b) = &patch.base_url {
-        sets.push(format!("base_url = ?{}", binds.len() + 1));
-        binds.push(match b {
-            Some(v) => rusqlite::types::Value::Text(v.clone()),
-            None => rusqlite::types::Value::Null,
-        });
-    }
+    // `patch.base_url` is accepted and **ignored**. The `projects` table
+    // has never had a `base_url` column — a project's URL lives in an
+    // environment's `moduleBaseUrls`, under a module's service — so
+    // emitting a `SET base_url = ?` for it turned `PATCH {"baseUrl": "…"}`
+    // into a `no such column` error, i.e. a caller mistake surfaced as a
+    // database fault. Keeping the field in the patch type keeps an old
+    // client's payload deserialising; silently dropping it is the price,
+    // and the comment on the field in `domain.rs` says so.
     if let Some(d) = &patch.default_base_url_definition_id {
         sets.push(format!(
             "default_base_url_definition_id = ?{}",
@@ -168,6 +169,67 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
         return Err(AppError::NotFound(format!("project {id}")));
     }
     Ok(())
+}
+
+/// The environment every new project is born with.
+///
+/// A project with zero environments is a dead end rather than a blank
+/// slate: `{{var}}` has nothing to resolve against, every base URL
+/// resolves to `''`, and the settings panel opens on an empty-state hint
+/// telling the user to create one. Seeding the first row means the very
+/// next thing they do — add a request — can already use it. It is
+/// renameable inline, so the name is a starting point, not a decision.
+pub const DEFAULT_ENVIRONMENT_NAME: &str = "默认环境";
+
+/// Create a project **and** the one row that makes it usable.
+///
+/// [`create`] alone takes the project row and nothing else, so the project
+/// it writes has no environment and no service — the state the create
+/// dialog's caller is handed back.
+///
+/// What is seeded, and just as importantly what is not:
+///
+/// - Always [`DEFAULT_ENVIRONMENT_NAME`], active, so `{{var}}` and every
+///   base URL have somewhere to resolve against the moment the project
+///   exists.
+/// - **No module, no service, no URL.** The service list belongs to the
+///   project but a URL belongs to (environment × module × service), and a
+///   project has no modules yet — so there is no cell to write a base URL
+///   into. Seeding a placeholder 「默认服务」 and a URL slot for it would
+///   mean inventing a name the user then has to find and delete, and
+///   asking for the URL in the create form would be asking for a value
+///   with nowhere to live. The user fills the cartesian grid in settings,
+///   where the row they are filling is visible.
+///
+/// The returned `Project` is the post-write read, so a caller can hand it
+/// straight back to the renderer instead of re-fetching.
+///
+/// The caller must already hold a transaction (`db::with_tx`): the
+/// project and its environment have to land together or neither should.
+pub fn create_with_defaults(conn: &mut Connection, project: &Project) -> Result<Project, AppError> {
+    let mut project = project.clone();
+    // The caller's struct may carry optimistic state for the form (and,
+    // for a re-submitted form, an optimistic ★). Nothing is seeded, so
+    // the honest answer is an empty service list and no default — echoing
+    // the caller's values back would make the response disagree with what
+    // was written.
+    project.base_url_definitions = Vec::new();
+    project.default_base_url_definition_id = None;
+
+    create(conn, &project)?;
+
+    let env = crate::domain::Environment {
+        id: crate::domain::uid(),
+        project_id: project.id.clone(),
+        name: DEFAULT_ENVIRONMENT_NAME.to_string(),
+        base_urls: Default::default(),
+        module_base_urls: Default::default(),
+        variables: Default::default(),
+        is_active: true,
+    };
+    super::environments::create(conn, &env)?;
+
+    Ok(project)
 }
 
 // -------------------------------------------------------------------------

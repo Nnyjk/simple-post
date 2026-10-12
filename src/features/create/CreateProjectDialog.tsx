@@ -19,15 +19,33 @@
 
 import { useRef } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import { Input } from '@/components/ui/input';
 import { CreateDialog, ColorPicker, DescriptionField, Field, NameField } from './CreateDialog';
+
+/**
+ * The rows `projects_create` seeds. Mirrors `DEFAULT_ENVIRONMENT_NAME` in
+ * `crates/simple-post-core/src/db/projects.rs`.
+ *
+ * Duplicated rather than fetched, for the same reason
+ * `lib/palette.ts` mirrors `domain::default_project_color()`: the backend
+ * is the single source of truth and this only feeds the hint under the
+ * field. The response to `projects_create` carries the real values, so a
+ * drift here shows up as a wrong hint and nothing else — change both
+ * sides together.
+ *
+ * There is deliberately **no** base-URL hint, because a new project seeds
+ * no service at all: `defaultBaseUrlDefinitionId` comes back `null` and
+ * the user adds services, stars one, and fills each module's address in
+ * Settings. Asking for a URL here would be asking for something that
+ * nothing stores — the field it used to bind to was dropped along with
+ * the default module and default service.
+ */
+const DEFAULT_ENVIRONMENT_NAME = '默认环境';
 
 export function CreateProjectDialog() {
   const draft = useAppStore((s) => s.newItem);
   const closeNewItem = useAppStore((s) => s.closeNewItem);
   const setNewItemName = useAppStore((s) => s.setNewItemName);
   const setNewItemDescription = useAppStore((s) => s.setNewItemDescription);
-  const setNewItemBaseUrl = useAppStore((s) => s.setNewItemBaseUrl);
   const setNewItemColor = useAppStore((s) => s.setNewItemColor);
   const submitNewItem = useAppStore((s) => s.submitNewItem);
 
@@ -51,7 +69,6 @@ export function CreateProjectDialog() {
       canSubmit
       onSubmit={submit}
       nameInputRef={nameInputRef}
-      wide
     >
       <NameField
         value={draft.name}
@@ -60,16 +77,13 @@ export function CreateProjectDialog() {
         placeholder="输入名称"
       />
       <DescriptionField value={draft.description} onChange={setNewItemDescription} />
-      <Field label="Base URL">
-        <Input
-          value={draft.baseUrl}
-          onChange={(e) => setNewItemBaseUrl(e.target.value)}
-          placeholder="https://api.example.com"
-        />
-      </Field>
       <Field label="颜色">
         <ColorPicker value={draft.color} onChange={setNewItemColor} />
       </Field>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        新项目会带一个环境「{DEFAULT_ENVIRONMENT_NAME}
+        」。服务清单与各模块的前置 URL 在「设置 · 环境变量」里配置。
+      </p>
     </CreateDialog>
   );
 }

@@ -28,6 +28,37 @@ function setDataTransfer(e: ReactDragEvent, payload: DragPayload) {
   lastDragPayload = payload;
 }
 
+/**
+ * The zone math, as a pure function of (row rect, cursor, whether the
+ * dragged kind may nest here).
+ *
+ * Split out from `computeZoneFromEvent` so the 25/50/25 vs 50/50 rule is
+ * testable without a DOM — this is the one piece of the drop decision
+ * that can silently collapse without anyone noticing (see the note in
+ * `computeZoneFromEvent` about where the rect comes from).
+ *
+ * `rect` is the row's own client rect; `supportsInto` is
+ * `canNestInto(dragKind, targetKind)`. Without it — a leaf row, or a
+ * drag whose kind may not nest here — the row keeps a plain 50/50
+ * split and can never answer `into`.
+ *
+ * A missing or zero-height rect has no ratio to speak of, so it
+ * resolves to `above`: the one zone that is meaningful in every
+ * context, and the only one that can't nest a node somewhere invalid.
+ */
+export function zoneFromRowPosition(
+  rect: { top: number; height: number } | null | undefined,
+  clientY: number,
+  supportsInto: boolean,
+): DropZone {
+  if (!rect || rect.height <= 0) return 'above';
+  const ratio = (clientY - rect.top) / rect.height;
+  if (!supportsInto) return ratio < 0.5 ? 'above' : 'below';
+  if (ratio < 0.28) return 'above';
+  if (ratio > 0.72) return 'below';
+  return 'into';
+}
+
 export interface TreeDndBindings {
   /** The active project's nodes — already filtered by `rootId`. */
   nodes: ResourceNode[];
@@ -165,90 +196,84 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
    * Drop handler factory. Bound per-row so each row can decide whether
    * to accept the drop (and which index to insert at).
    */
-  const makeDropHandler =
-    (target: { kind: TargetKind; id: string }, targetEl: HTMLElement | null) =>
-    (e: ReactDragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const raw = e.dataTransfer.getData(DND_MIME) || e.dataTransfer.getData('text/plain');
-      let drag = decodeDrag(raw);
-      // Fallback: some synthetic drag drivers (Playwright) don't
-      // propagate dataTransfer across dragstart → drop. The
-      // `lastDragPayload` mirror written in `setDataTransfer` covers
-      // that case.
-      if (!drag) drag = lastDragPayload;
-      setDropHint(null);
-      lastDragPayload = null;
-      if (!drag) return;
-      if (drag.ids.includes(target.id) && drag.kind === target.kind) return;
-      if (!sameProjectGuard(drag, target)) return;
+  const makeDropHandler = (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const raw = e.dataTransfer.getData(DND_MIME) || e.dataTransfer.getData('text/plain');
+    let drag = decodeDrag(raw);
+    // Fallback: some synthetic drag drivers (Playwright) don't
+    // propagate dataTransfer across dragstart → drop. The
+    // `lastDragPayload` mirror written in `setDataTransfer` covers
+    // that case.
+    if (!drag) drag = lastDragPayload;
+    setDropHint(null);
+    lastDragPayload = null;
+    if (!drag) return;
+    if (drag.ids.includes(target.id) && drag.kind === target.kind) return;
+    if (!sameProjectGuard(drag, target)) return;
 
-      // A module is the top of a project; it has no node parent, so it
-      // can only be reordered among its siblings.
-      if (drag.kind === 'module') {
-        if (target.kind !== 'module') return;
-        const idx = computeTargetIndex(
-          drag,
-          target,
-          computeZoneFromEvent(e, drag, target, targetEl),
-        );
-        if (idx === null) return;
-        moveNodes(drag.ids, null, idx);
-        return;
-      }
+    // A module is the top of a project; it has no node parent, so it
+    // can only be reordered among its siblings.
+    if (drag.kind === 'module') {
+      if (target.kind !== 'module') return;
+      const idx = computeTargetIndex(drag, target, computeZoneFromEvent(e, drag, target));
+      if (idx === null) return;
+      moveNodes(drag.ids, null, idx);
+      return;
+    }
 
-      if (target.kind === 'module') {
-        // A module takes collections *and* endpoints — an endpoint that
-        // needs no collection of its own lands straight on it. Anything
-        // else (another module) the server's type matrix refuses, so
-        // refusing here keeps the optimistic state from showing a move
-        // that 400s.
-        if (drag.kind !== 'collection' && drag.kind !== 'endpoint') return;
-        const zone = computeZoneFromEvent(e, drag, target, targetEl);
-        const idx =
-          zone === 'into' ? siblingsOf(target.id).length : computeTargetIndex(drag, target, zone);
-        if (idx === null) return;
-        moveNodes(drag.ids, target.id, idx);
-        return;
-      }
+    if (target.kind === 'module') {
+      // A module takes collections *and* endpoints — an endpoint that
+      // needs no collection of its own lands straight on it. Anything
+      // else (another module) the server's type matrix refuses, so
+      // refusing here keeps the optimistic state from showing a move
+      // that 400s.
+      if (drag.kind !== 'collection' && drag.kind !== 'endpoint') return;
+      const zone = computeZoneFromEvent(e, drag, target);
+      const idx =
+        zone === 'into' ? siblingsOf(target.id).length : computeTargetIndex(drag, target, zone);
+      if (idx === null) return;
+      moveNodes(drag.ids, target.id, idx);
+      return;
+    }
 
-      if (target.kind === 'collection') {
-        const zone = computeZoneFromEvent(e, drag, target, targetEl);
-        if (zone === 'into') {
-          if (drag.kind === 'collection' && wouldCycleInto(drag.ids, target.id)) return;
-          moveNodes(drag.ids, target.id, siblingsOf(target.id).length);
-          return;
-        }
-        // above/below: drop as a sibling of the target, keeping the
-        // target's parent. This is the "脱离集合" gesture — a nested
-        // collection dragged next to its parent lands beside it.
-        //
-        // `parentId` covers both cases with no branch: a top-level
-        // collection's parent *is* its module node, and a nested one's
-        // is the collection above it. That is the whole point of the
-        // unified parent column.
-        const targetNode = nodes.find((n) => n.id === target.id);
-        if (!targetNode || !targetNode.parentId) return;
+    if (target.kind === 'collection') {
+      const zone = computeZoneFromEvent(e, drag, target);
+      if (zone === 'into') {
         if (drag.kind === 'collection' && wouldCycleInto(drag.ids, target.id)) return;
-        const idx = computeTargetIndex(drag, target, zone);
-        if (idx === null) return;
-        moveNodes(drag.ids, targetNode.parentId, idx);
+        moveNodes(drag.ids, target.id, siblingsOf(target.id).length);
         return;
       }
-
-      // target.kind === 'endpoint' — dropping beside an endpoint. Only
-      // an endpoint goes here: the move makes the dragged row a sibling
-      // of the target, and the gesture this branch implements ("reorder
-      // among a collection's endpoints") has no meaning for a container.
-      // A collection whose sibling slot is a module-level endpoint is
-      // reachable by dropping onto the module row instead.
-      if (drag.kind !== 'endpoint') return;
+      // above/below: drop as a sibling of the target, keeping the
+      // target's parent. This is the "脱离集合" gesture — a nested
+      // collection dragged next to its parent lands beside it.
+      //
+      // `parentId` covers both cases with no branch: a top-level
+      // collection's parent *is* its module node, and a nested one's
+      // is the collection above it. That is the whole point of the
+      // unified parent column.
       const targetNode = nodes.find((n) => n.id === target.id);
       if (!targetNode || !targetNode.parentId) return;
-      const idx = computeTargetIndex(drag, target, computeZoneFromEvent(e, drag, target, targetEl));
+      if (drag.kind === 'collection' && wouldCycleInto(drag.ids, target.id)) return;
+      const idx = computeTargetIndex(drag, target, zone);
       if (idx === null) return;
       moveNodes(drag.ids, targetNode.parentId, idx);
-    };
+      return;
+    }
+
+    // target.kind === 'endpoint' — dropping beside an endpoint. Only
+    // an endpoint goes here: the move makes the dragged row a sibling
+    // of the target, and the gesture this branch implements ("reorder
+    // among a collection's endpoints") has no meaning for a container.
+    // A collection whose sibling slot is a module-level endpoint is
+    // reachable by dropping onto the module row instead.
+    if (drag.kind !== 'endpoint') return;
+    const targetNode = nodes.find((n) => n.id === target.id);
+    if (!targetNode || !targetNode.parentId) return;
+    const idx = computeTargetIndex(drag, target, computeZoneFromEvent(e, drag, target));
+    if (idx === null) return;
+    moveNodes(drag.ids, targetNode.parentId, idx);
+  };
 
   /**
    * Whether the dragged kind can be **nested into** the given target
@@ -273,39 +298,45 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
    * to the row. When the dragged kind can be nested into the target
    * (see `canNestInto`), containers use a 25/50/25 split; otherwise
    * (or for leaves like endpoints) the row uses a plain 50/50 split.
+   *
+   * The rect is read off `e.currentTarget` — the row element the
+   * handler is bound to — rather than threaded in as an argument. That
+   * is deliberate: the row only exists at render time, so a caller
+   * passing an element would have had to build the closure after mount
+   * and could easily pass `null` instead. When that happened the split
+   * silently degraded to a constant `'above'`, which took out both
+   * "drop into a module / collection" and downward reordering with no
+   * error anywhere. Reading it from the event means there is no
+   * argument to forget.
    */
   const computeZoneFromEvent = (
     e: ReactDragEvent,
     drag: DragPayload | null,
     target: { kind: TargetKind; id: string },
-    el: HTMLElement | null,
-  ): DropZone => {
-    const rect = el?.getBoundingClientRect();
-    if (!rect) return 'above';
-    const y = e.clientY - rect.top;
-    const ratio = y / rect.height;
-    const supportsInto = drag ? canNestInto(drag.kind, target.kind) : false;
-    if (!supportsInto) {
-      return ratio < 0.5 ? 'above' : 'below';
-    }
-    if (ratio < 0.28) return 'above';
-    if (ratio > 0.72) return 'below';
-    return 'into';
-  };
+  ): DropZone =>
+    zoneFromRowPosition(
+      e.currentTarget.getBoundingClientRect(),
+      e.clientY,
+      drag ? canNestInto(drag.kind, target.kind) : false,
+    );
 
-  const makeDragOverHandler =
-    (target: { kind: TargetKind; id: string }, el: HTMLElement | null) => (e: ReactDragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.dataTransfer.dropEffect = 'move';
-      const raw = e.dataTransfer.getData(DND_MIME);
-      const drag = decodeDrag(raw);
-      const zone = computeZoneFromEvent(e, drag, target, el);
-      const hint = { key: `${target.kind}:${target.id}`, zone };
-      setDropHint((prev) =>
-        prev && prev.key === hint.key && prev.zone === hint.zone ? prev : hint,
-      );
-    };
+  const makeDragOverHandler = (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const raw = e.dataTransfer.getData(DND_MIME);
+    // Browsers refuse to hand back drag data during `dragover` — the
+    // spec only lets `drop` and `dragstart` read it — so `decodeDrag`
+    // is null on every hover and `canNestInto` would never be consulted.
+    // That is enough to hide the middle band of a container row, which
+    // is the only thing telling the user "this row will take the node
+    // as a child rather than reorder beside it". The mirror written by
+    // `setDataTransfer` at dragstart is what makes the hint honest.
+    const drag = decodeDrag(raw) ?? lastDragPayload;
+    const zone = computeZoneFromEvent(e, drag, target);
+    const hint = { key: `${target.kind}:${target.id}`, zone };
+    setDropHint((prev) => (prev && prev.key === hint.key && prev.zone === hint.zone ? prev : hint));
+  };
 
   const makeDragLeaveHandler =
     (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => {

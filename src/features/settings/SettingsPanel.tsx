@@ -124,13 +124,13 @@ export function SettingsPanel() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const setEnvironmentVar = useAppStore((s) => s.setEnvironmentVar);
   const renameEnvironmentVar = useAppStore((s) => s.renameEnvironmentVar);
-  const setEnvironmentBaseUrl = useAppStore((s) => s.setEnvironmentBaseUrl);
+  const setEnvironmentModuleBaseUrl = useAppStore((s) => s.setEnvironmentModuleBaseUrl);
   const deleteEnvironment = useAppStore((s) => s.deleteEnvironment);
   const updateEnvironment = useAppStore((s) => s.updateEnvironment);
   const addEnvironment = useAppStore((s) => s.addEnvironment);
 
-  // The section also manages baseUrl *definitions* (project-scoped named
-  // slots). Those actions touch the project, not the env.
+  // The section also manages baseUrl *definitions* (the project's named
+  // services). Those actions touch the project, not the env.
   const projects = useAppStore((s) => s.projects);
   const addBaseUrlDefinition = useAppStore((s) => s.addBaseUrlDefinition);
   const updateBaseUrlDefinition = useAppStore((s) => s.updateBaseUrlDefinition);
@@ -144,6 +144,20 @@ export function SettingsPanel() {
   const environments = useMemo(
     () => allEnvironments.filter((e) => e.projectId === activeProjectId),
     [allEnvironments, activeProjectId],
+  );
+
+  // Modules are the row axis of the 前置 URL table — the row set is
+  // (every module × every project service) — so they are filtered to this
+  // project. Sorted by `sortOrder` because the table presents them in tree
+  // order and `nodes` is a flat list whose array order is not the tree's
+  // sibling order.
+  const nodes = useAppStore((s) => s.nodes);
+  const modules = useMemo(
+    () =>
+      nodes
+        .filter((n) => n.kind === 'module' && n.rootId === activeProjectId)
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+    [nodes, activeProjectId],
   );
 
   const mainRef = useRef<HTMLElement>(null);
@@ -266,9 +280,10 @@ export function SettingsPanel() {
                 <EnvironmentSection
                   environments={environments}
                   projectId={activeProjectId}
+                  modules={modules}
                   setEnvironmentVar={setEnvironmentVar}
                   renameEnvironmentVar={renameEnvironmentVar}
-                  setEnvironmentBaseUrl={setEnvironmentBaseUrl}
+                  setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
                   deleteEnvironment={deleteEnvironment}
                   updateEnvironment={updateEnvironment}
                   addEnvironment={addEnvironment}

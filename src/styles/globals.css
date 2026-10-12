@@ -308,12 +308,15 @@
      critical path on every cold start — to move six elements that then
      sit still. CSS does the same work for free.
 
-     `animation-delay` is stepped by `--stagger-i` (set inline per
-     element) to reproduce the original 60ms cascade; the base 0.32s /
-     power3.out-ish cubic-bezier matches the GSAP tween it replaces.
-     Elements render at their final position by default and only animate
-     once `.welcome-enter` lands on the container, so a paint that happens
-     before the effect runs shows real content rather than a blank gap. */
+     `animation-delay` reads `--stagger-i`, so a caller can cascade the
+     elements by setting it inline (60ms per index) the way the GSAP
+     version did. Nothing sets it today — every element animates
+     together — so treat it as an opt-in hook, not as behaviour that is
+     already there. The base 0.32s / power3.out-ish cubic-bezier matches
+     the GSAP tween it replaces. Elements render at their final position
+     by default and only animate once `.welcome-enter` lands on the
+     container, so a paint that happens before the effect runs shows
+     real content rather than a blank gap. */
   .welcome-enter [data-welcome-stagger] {
     animation: welcome-rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards;
     animation-delay: calc(var(--stagger-i, 0) * 60ms);
