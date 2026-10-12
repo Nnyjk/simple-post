@@ -123,7 +123,10 @@ export function WorkspaceShell() {
 
   // Choose what to render in the right pane based on the active tab kind.
   //   endpoint → request/response split
-  //   project / module / collection → EntitySettings metadata editor
+  //   project / module / collection → EntitySettings: the entity's own
+  //     single-column pane (identity, base info, and whatever configuration
+  //     belongs to that kind — the project's environments, the module's
+  //     per-environment baseUrls)
   //   settings → the settings panel (now a tab itself, not a drawer)
   //
   // No active tab with a project active is what closing the last tab
