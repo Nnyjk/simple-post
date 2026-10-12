@@ -129,9 +129,21 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         environments: s.environments.filter((env) => env.projectId !== id),
         responseHistory: nextHistory,
         responseExamples: nextExamples,
+        // Deleting the project in front moves the user to a surviving one,
+        // or — when it was the last — back to the welcome screen.
+        //
+        // The empty string is the surface switch (`App.tsx` renders the
+        // welcome picker on `activeProjectId === ''`), and the welcome
+        // screen has a 新建项目 card for the empty state. The alternative
+        // used to be "keep pointing at the id we just deleted", which left
+        // `App.tsx` in the workspace branch with a project that no longer
+        // exists: the tree showed 尚未选择项目, the pane showed 该项目已不存在,
+        // and nothing in that frame said what to do about it. A guard in the
+        // UI used to hide that by refusing the delete; the store handles it
+        // instead, so the action is allowed to mean what it says.
         activeProjectId:
           s.activeProjectId === id
-            ? (s.projects.find((p) => p.id !== id)?.id ?? s.activeProjectId)
+            ? (s.projects.find((p) => p.id !== id)?.id ?? '')
             : s.activeProjectId,
         activeEndpointId: nextActiveEndpointId,
         openTabs: tabs.tabs,
