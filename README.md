@@ -84,6 +84,7 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 - 空集合 / 未发送时显示友好引导
 
 ### 设置抽屉
+- 服务（baseUrl）：**项目级共享一份服务清单**，每个模块在每个环境下各填各的地址；表头按「模块 × 服务」逐格展开，某一格为空就是该模块在该环境下没有这个服务的地址，不会继承别的模块
 - 环境变量：`{{var}}` 实时编辑，随项目创建，可重命名 / 删除
 - MCP Server 状态：running 指示 + daemon 实时上报的已注册工具列表（数量动态显示，取决于当前 capability 策略下的可见工具集）
 - 主题：dark / light / system 切换，立即生效并持久化
@@ -141,8 +142,8 @@ v0.1.0 beta 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 `si
 | `safe_write` | `Read` `Create` `Update` | 允许增删改，但**不含** `Send` |
 | `full_access` | 全部（含 `Delete` `Send`） | 允许出站 HTTP 调用与破坏性操作 |
 
-- **Read**：`project_list` / `project_get` / `module_list` / `collection_list` / `endpoint_list` / `endpoint_get` / `endpoint_search` / `base_url_def_list` / `env_list` / `env_get_active` / `api_resolve_*` / `api_parse_response` / `api_diff_responses` / `api_extract_jsonpath`
-- **Create**：`project_create` / `module_create` / `collection_create` / `endpoint_create` / `endpoint_duplicate`
+- **Read**：`project_list` / `project_get` / `module_list` / `collection_list` / `endpoint_list` / `endpoint_get` / `endpoint_search` / `base_url_def_list` / `env_list` / `env_get_active` / `api_resolve_*` / `api_validate_endpoint` / `api_parse_response` / `api_diff_responses` / `api_extract_jsonpath`
+- **Create**：`project_create` / `module_create` / `collection_create` / `endpoint_create` / `endpoint_duplicate` / `env_create` / `base_url_def_create`
 - **Update**：`project_update` / `module_update` / `module_move` / `collection_update` / `collection_move` / `endpoint_update` / `endpoint_move` / `env_update` / `env_set_var` / `env_set_baseurl` / `env_set_active` / `base_url_def_update` / `base_url_def_set_default`
 - **Delete**：`project_delete` / `module_delete` / `collection_delete` / `endpoint_delete` / `env_delete` / `base_url_def_delete`
 - **Send**（仅 `full_access`）：`api_run_request` / `api_call_endpoint`

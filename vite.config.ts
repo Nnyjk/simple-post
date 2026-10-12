@@ -94,7 +94,10 @@ export default defineConfig({
         // — which put 425 kB of editor back on the critical path even after
         // `BodyEditor` / `ResponseViewer` / `DocsEditor` became lazy. Left to
         // Rollup's automatic splitting they now sit in async chunks, which is
-        // the entire point. Verify with `.scratch/critical-path.mjs`.
+        // the entire point. To verify, read the emitted chunk graph in
+        // `dist/assets` and confirm no statically-imported entry names
+        // these packages — a chunk *listing* alone will not show a static
+        // import edge.
         manualChunks: {
           react: ['react', 'react-dom'],
           state: ['zustand'],

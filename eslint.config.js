@@ -19,7 +19,6 @@ export default [
       // and every file in the real tree fails to parse.
       '.worktrees/**',
       'src-tauri/gen/**',
-      'docs/**',
       'public/**',
     ],
   },

@@ -37,6 +37,10 @@ The parent/child relationship is an **enforced contract**, not a convention: `Re
 
 **GSAP is not on the critical path.** `src/lib/gsap.ts` pulls core + CSSPlugin (~60 kB raw), so anything it reaches from the entry chunk pays for it on every cold start. That is why `WelcomeScreen`'s entrance is CSS (`.welcome-enter` in `globals.css`) rather than `gsap.from()`, and why `NewItemModal` / `BootstrapErrorBanner` are mounted on `newItem.open` / `bootstrapError` rather than unconditionally — a `lazy()` component fires its import as soon as it is *rendered*, so wrapping them in `<Suspense>` alone still downloads them during first paint. Verify with the dependency-edge probe described under **Vite `manualChunks`**; a chunk listing alone will not show you a static import edge.
 
+**Services (baseUrl) are project-owned; their URLs are per (环境 × 模块 × 服务).** The service *list* is a project-level fact — `base_url_definitions.project_id` only — so two modules can never hold services that share a `name`, and every module sees every service. The *value* is the per-cell question: `environments.module_base_urls_json` is `service_id → module_id → url`, and each cell is independent. A module with no entry for a service has no URL for it and inherits **nothing** — not the project's ★, not another module's. There is deliberately no fallback layer above it; the v1 code reached for `env.base_urls` and then "whatever key happens to exist", which is exactly the silent cross-module bleed this replaced. `resolve_base_url_with` (`crates/simple-post-mcp/src/variable_fill.rs`) is the resolver; the module-less `resolve_base_url` wrapper exists for callers that have no module and now serves tests only.
+
+**Three columns are dead on purpose — do not "clean them up".** `environments.base_urls_json`, `base_url_definitions.module_id` and `base_url_definitions.is_default` are superseded and never read or written by application code. They stay because a `DROP` means rebuilding the table, which means bumping `SCHEMA_VERSION`, and `ensure_current_schema` **deletes every user's store** on a bump. That is why `PRAGMA user_version` is still `3` despite the shape having changed: `module_base_urls_json` arrives additively through `db::ADDED_COLUMNS`, and `db::migrate` repairs rows written by either predecessor layout. An agent tidying "unused columns" here destroys user data.
+
 **MCP flow**: AI client → stdio (`stdio_loop.rs`) → `POST 127.0.0.1:<port>/mcp` → `daemon_http.rs` → `mcp/mod.rs::dispatch` → capability gate (`read_only`/`safe_write`/`full_access`) → per-project permission check → tool handler → shared `db` pool / `http_executor`. Daemon port discovered via `mcp.port` file in the data dir (`SIMPLE_POST_DATA_DIR` or `%APPDATA%/simple-post`).
 
 Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
@@ -50,8 +54,8 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 - `src/types/domain.ts` — TS mirrors of Rust domain types
 - `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` holds the whole resource tree, `endpoint_details.rs` its endpoint-only configuration) + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
-- `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource + `dto.rs` / `send.rs`), `web_api/`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
-- `scripts/` — dev/test/build utilities (see below); `docs/` — HTTP reference, OpenAPI, refactor plan
+- `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource + `dto.rs`), `web_api/`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
+- `scripts/` — dev/test/build utilities (see below)
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
 ## Development Commands

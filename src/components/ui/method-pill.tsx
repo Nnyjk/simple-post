@@ -101,7 +101,7 @@ export function MethodPill({
  * via the slash syntax — modern browsers (>= 2023) accept this in
  * any property that takes a colour.
  */
-export function methodTint(method: HttpMethod): {
+function methodTint(method: HttpMethod): {
   backgroundColor: string;
   color: string;
   borderColor: string;

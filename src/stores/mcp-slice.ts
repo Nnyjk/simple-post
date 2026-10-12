@@ -31,7 +31,7 @@ import type { AppState } from './app-store';
  * truth — both `startMcpPolling` (in the store) and the legacy
  * `setInterval` it replaced used this value.
  */
-export const MCP_REFRESH_INTERVAL_MS = 3000;
+const MCP_REFRESH_INTERVAL_MS = 3000;
 
 // Browser-only — holds the bound `visibilitychange` handler so the
 // store can detach it on `stopMcpPolling`. The store action is the
