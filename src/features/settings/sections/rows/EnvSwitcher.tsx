@@ -1,18 +1,33 @@
 import { Plus, Trash2 } from 'lucide-react';
+import { type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { IconTile } from '@/components/ui/icon-tile';
 import type { Environment } from '@/types/domain';
 import { envIcon } from '../env-utils';
+import { InlineNameCell } from './InlineNameCell';
 
 /**
  * EnvSwitcher — top-of-section env picker.
  *
- * Renders unconditionally, including for a project with zero envs: the
- * trailing `新建环境` button is the section's only add affordance, so
- * gating the whole strip on a non-empty list is what used to leave a
- * cold-start project with no way to create its first environment.
+ * THIS IS THE ONLY PLACE AN ENVIRONMENT'S NAME APPEARS
+ * ---------------------------------------------------
+ * The env body used to open with its own header row — icon, then the name
+ * as a click-to-edit cell — directly under this strip, so the active env
+ * was spelled twice within a few centimetres of each other, and the module
+ * layer (which shows the same environments) had no such row, because it had
+ * nowhere to put rename. The strip already names every environment, so the
+ * row went and the rename came up here with it: the **active** chip hosts the
+ * `InlineNameCell`, which reads as the name with a pencil appearing on
+ * hover. An inactive chip is a plain span — renaming something you cannot
+ * see yet is not a gesture anyone needs.
+ *
+ * Because that puts a button inside what used to be a button, the chip is
+ * now a `div` with `role="tab"`, `tabIndex` and hand-written Enter/Space
+ * handling. Those are the semantics the old `<button>` gave for free; the
+ * role and `aria-selected` are unchanged, so assistive technology sees the
+ * same tab strip it always did.
  *
  * `showAdd` / `showDelete` exist for the **module** layer, which shows the
  * same environments but must not offer the two project-level writes: adding
@@ -30,6 +45,9 @@ export function EnvSwitcher({
   addDisabled,
   showAdd = true,
   showDelete = true,
+  onRename,
+  autoRenameId = null,
+  onAutoRenameEnd,
 }: {
   environments: Environment[];
   activeId: string | null;
@@ -42,18 +60,44 @@ export function EnvSwitcher({
   showAdd?: boolean;
   /** Show each env's delete affordance. */
   showDelete?: boolean;
+  /**
+   * Commit a new name for an environment. Omitted by the module layer,
+   * which must not rename a project-level environment — that also turns the
+   * active chip's name cell back into a plain span there.
+   */
+  onRename?: (envId: string, name: string) => void;
+  /** Open this env's name cell already focused — set for a just-created one. */
+  autoRenameId?: string | null;
+  /** The auto-open was consumed; the owner clears its pending-rename flag. */
+  onAutoRenameEnd?: () => void;
 }) {
+  const renameable = !!onRename;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {environments.map((env) => {
         const isActive = env.id === activeId;
+        const isRenaming = isActive && renameable;
         return (
-          <button
+          <div
             key={env.id}
-            type="button"
             role="tab"
             aria-selected={isActive}
-            onClick={() => onPick(env.id)}
+            tabIndex={0}
+            // While the cell is open the chip stops being a switch: a click
+            // that lands on the name (or anywhere else in the chip) must not
+            // re-pick an environment the user is in the middle of naming.
+            onClick={() => {
+              if (!isRenaming) onPick(env.id);
+            }}
+            onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+              // The open cell owns its own keys; Enter/Escape there commit
+              // and cancel, and must not also reach the chip.
+              if (isRenaming) return;
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onPick(env.id);
+              }
+            }}
             className={cn(
               'group relative flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
               // Coloured icon container matches the project's tier
@@ -75,7 +119,18 @@ export function EnvSwitcher({
                   : 'border-border bg-muted/60 text-muted-foreground'
               }
             />
-            <span className="font-mono font-medium">{env.name}</span>
+            {isRenaming ? (
+              <InlineNameCell
+                value={env.name}
+                placeholder="环境名"
+                autoEdit={autoRenameId === env.id}
+                onAutoEditEnd={onAutoRenameEnd}
+                onCommit={(name) => onRename?.(env.id, name)}
+                className="font-mono text-xs font-medium"
+              />
+            ) : (
+              <span className="font-mono font-medium">{env.name}</span>
+            )}
             {showDelete && environments.length > 1 && (
               <Tooltip content="删除环境" side="bottom">
                 <span
@@ -96,7 +151,7 @@ export function EnvSwitcher({
                 </span>
               </Tooltip>
             )}
-          </button>
+          </div>
         );
       })}
       {showAdd && (

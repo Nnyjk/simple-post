@@ -33,7 +33,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { EnvironmentSection, nextEnvironmentName } from '../EnvironmentSection';
 import type { EnvironmentSectionProps } from '../EnvironmentSection';
-import { EnvHeader } from '../rows/EnvHeader';
+import { EnvBody } from '../rows/EnvBody';
+import { EnvSwitcher } from '../rows/EnvSwitcher';
 import type { Environment } from '@/types/domain';
 
 /** Minimal env — the section only reads id / name / isActive / the maps. */
@@ -123,8 +124,8 @@ describe('EnvironmentSection with a single environment', () => {
   //
   // Note what this cannot assert: the env *body*. The section resolves
   // its active env in a `useEffect`, and static markup runs no effects,
-  // so `activeId` is still `null` here. That is why the rename
-  // affordance is checked through `EnvHeader` below instead.
+  // so `activeId` is still `null` here. That is why the rename affordance
+  // is checked through `EnvSwitcher` below instead.
   const html = render(makeProps({ environments: [makeEnv()] }));
 
   it('drops the empty hint', () => {
@@ -140,21 +141,82 @@ describe('EnvironmentSection with a single environment', () => {
   });
 });
 
-describe('EnvHeader — inline rename for a project’s only environment', () => {
-  const html = renderToStaticMarkup(
-    createElement(EnvHeader, { env: makeEnv(), onRename: () => {} }),
+describe('EnvSwitcher — the env name lives here, and so does its rename', () => {
+  // The name row that used to open the env body is gone; the strip is now
+  // the only place a name appears, which means the rename had to come with
+  // it or the section would have silently lost the ability to rename.
+  const props = {
+    environments: [makeEnv()],
+    activeId: 'env-1',
+    onPick: () => {},
+    onRequestDelete: () => {},
+    onAdd: () => {},
+  };
+  const renameable = renderToStaticMarkup(
+    createElement(EnvSwitcher, { ...props, onRename: () => {} }),
   );
 
-  it('renders the name as a click-to-edit cell, not static text', () => {
+  it('renders the active chip as a click-to-edit cell, not static text', () => {
     // `InlineNameCell` renders a button when closed and an input when
     // open, so the button is what proves rename is still one click away
     // for the first env of a single-env project.
-    assert.match(html, /<button/);
-    assert.match(html, />dev</);
+    assert.match(renameable, /<button/);
+    assert.match(renameable, />dev</);
+    assert.match(renameable, /lucide-pencil/);
   });
 
   it('exposes no input before the cell is opened', () => {
-    assert.doesNotMatch(html, /<input/);
+    assert.doesNotMatch(renameable, /<input/);
+  });
+
+  it('keeps the chip a tab for assistive tech after the swap away from <button>', () => {
+    // The name cell is a button, so the chip had to stop being one. These
+    // are the semantics the old element gave for free.
+    assert.match(renameable, /role="tab"/);
+    assert.match(renameable, /aria-selected="true"/);
+    assert.match(renameable, /tabindex="0"/);
+  });
+
+  it('drops the rename affordance when the host does not offer it', () => {
+    // The module layer omits `onRename`: renaming a project-level
+    // environment from inside a module tab is not its business.
+    const readOnly = renderToStaticMarkup(createElement(EnvSwitcher, props));
+    assert.match(readOnly, />dev</);
+    assert.doesNotMatch(readOnly, /lucide-pencil/);
+  });
+});
+
+describe('EnvBody — no name row of its own', () => {
+  const p = makeProps();
+  const html = renderToStaticMarkup(
+    createElement(EnvBody, {
+      env: makeEnv(),
+      projectId: p.projectId,
+      modules: p.modules,
+      setEnvironmentVar: p.setEnvironmentVar,
+      renameEnvironmentVar: p.renameEnvironmentVar,
+      setEnvironmentModuleBaseUrl: p.setEnvironmentModuleBaseUrl,
+      onAddVar: () => {},
+      baseUrlDefinitions: p.baseUrlDefinitions,
+      defaultBaseUrlDefinitionId: p.defaultBaseUrlDefinitionId,
+      addBaseUrlDefinition: p.addBaseUrlDefinition,
+      updateBaseUrlDefinition: p.updateBaseUrlDefinition,
+      setDefaultBaseUrlDefinition: p.setDefaultBaseUrlDefinition,
+      onDeleteBaseUrl: () => {},
+    }),
+  );
+
+  it('never spells the env name, which the switcher directly above already says', () => {
+    // The regression this file grew a case for: the body opened with its
+    // own icon + name header row, so the active env was named twice within
+    // a few centimetres — and the module layer, which never had that row,
+    // was the only view that read as one thing.
+    assert.doesNotMatch(html, />dev</);
+  });
+
+  it('still renders the groups that belong to the env', () => {
+    assert.match(html, /前置 URL/);
+    assert.match(html, /环境变量/);
   });
 });
 

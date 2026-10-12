@@ -1,13 +1,13 @@
 import { Cloud, Rocket, TestTube } from 'lucide-react';
 
 /**
- * Pick an icon for the env tab based on its name. The mapping is loose
+ * Pick an icon for the env chip based on its name. The mapping is loose
  * by design — names that don't match anything get the neutral Cloud
  * icon, which still differentiates the env visually without forcing the
  * user to pick an icon manually.
  *
- * Shared by the tab strip (`rows/EnvSwitcher`) and the env body header
- * (`rows/EnvHeader`) so both pick the same glyph for the same name.
+ * `rows/EnvSwitcher` is the only caller left: the env body no longer has a
+ * name row of its own, so the switcher owns both the name and its glyph.
  */
 export function envIcon(name: string) {
   const n = name.toLowerCase();

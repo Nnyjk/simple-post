@@ -81,10 +81,9 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  *
  * Layout:
  *
- *   ┌── env tab strip ─────────────────────────────────────────┐
+ *   ┌── env switcher (also the rename surface) ──────────────┐
  *   │  ☁  dev  ⚡ staging  🚀 prod            + 新建环境       │
  *   ├────────────────────────────────────────────────────────┤
- *   │  dev                                              [active]
  *   ├──────────── 前置 URL ───────────────────────────────────┤
  *   │  模块         服务          前置 URL                     │
  *   │  🗂 默认模块   ★ 默认服务   http://localhost:4000/demo  │
@@ -96,6 +95,11 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  *   │  { } env    dev                                 [×]    │
  *   │                  + 添加变量                            │
  *   └────────────────────────────────────────────────────────┘
+ *
+ * There is no per-env header row: the switcher above already names every
+ * environment, and naming the active one again a few pixels lower was pure
+ * duplication. Its rename moved into the switcher with it — see
+ * `EnvSwitcher`.
  *
  * Visually it inherits the new SettingsCategory aesthetic — coloured
  * icon containers, SettingRow-style padded rows, badge trailing
@@ -204,6 +208,11 @@ export function EnvironmentSection({
 
   const handleRenameEnd = useCallback(() => setPendingRenameEnvId(null), []);
 
+  const handleRenameEnv = useCallback(
+    (envId: string, name: string) => updateEnvironment(envId, { name }),
+    [updateEnvironment],
+  );
+
   const handleAddVar = () => {
     if (!activeEnv) return;
     // Inline empty-row append — same as the old card-based UX.
@@ -232,6 +241,12 @@ export function EnvironmentSection({
           onRequestDelete={handleRequestEnvDelete}
           onAdd={handleNewEnv}
           addDisabled={creatingEnv}
+          // Renaming lives on the switcher now — see `EnvSwitcher`. The
+          // auto-open latch is the same one the removed header row used, so
+          // create-and-name is still a single gesture.
+          onRename={handleRenameEnv}
+          autoRenameId={pendingRenameEnvId}
+          onAutoRenameEnd={handleRenameEnd}
         />
 
         {environments.length === 0 ? (
@@ -252,7 +267,6 @@ export function EnvironmentSection({
                 setEnvironmentVar={setEnvironmentVar}
                 renameEnvironmentVar={renameEnvironmentVar}
                 setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
-                updateEnvironment={updateEnvironment}
                 onAddVar={handleAddVar}
                 baseUrlDefinitions={baseUrlDefinitions}
                 defaultBaseUrlDefinitionId={defaultBaseUrlDefinitionId}
@@ -260,8 +274,6 @@ export function EnvironmentSection({
                 updateBaseUrlDefinition={updateBaseUrlDefinition}
                 setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
                 onDeleteBaseUrl={requestBaseUrlDelete}
-                autoRename={pendingRenameEnvId === activeEnv.id}
-                onRenameEnd={handleRenameEnd}
               />
             </div>
           )

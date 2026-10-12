@@ -10,7 +10,7 @@ import { HUE, type HueConcept } from '@/lib/hue';
  *
  *   h-5   project-tree rows, GroupHeader
  *   h-6   settings rail, EnvSwitcher
- *   h-7   SettingsCategory / SettingRow, EnvHeader
+ *   h-7   SettingsCategory / SettingRow
  *   h-9   ModuleBaseUrlTable, VariableTable
  *   h-10  ConnectionSection hero card
  *

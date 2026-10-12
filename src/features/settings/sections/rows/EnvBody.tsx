@@ -1,13 +1,17 @@
 import { Braces, Globe } from 'lucide-react';
 import type { Environment, ResourceNode } from '@/types/domain';
 import type { EnvironmentSectionProps } from '../EnvironmentSection';
-import { EnvHeader } from './EnvHeader';
 import { GroupHeader } from './GroupHeader';
 import { ModuleBaseUrlTable } from './ModuleBaseUrlTable';
 import { VariableTable } from './VariableTable';
 
 /**
  * EnvBody — one env's tables (前置 URL rows + variable rows).
+ *
+ * No name row. The switcher above this already says which environment is
+ * open and owns the rename; repeating it here is what made the project /
+ * settings env view look different from the module one, which has never
+ * had the row. Keyed by env id, so it remounts per environment.
  */
 interface EnvBodyProps {
   env: Environment;
@@ -18,7 +22,6 @@ interface EnvBodyProps {
   setEnvironmentVar: EnvironmentSectionProps['setEnvironmentVar'];
   renameEnvironmentVar: EnvironmentSectionProps['renameEnvironmentVar'];
   setEnvironmentModuleBaseUrl: EnvironmentSectionProps['setEnvironmentModuleBaseUrl'];
-  updateEnvironment: EnvironmentSectionProps['updateEnvironment'];
   onAddVar: () => void;
 
   baseUrlDefinitions: EnvironmentSectionProps['baseUrlDefinitions'];
@@ -27,10 +30,6 @@ interface EnvBodyProps {
   updateBaseUrlDefinition: EnvironmentSectionProps['updateBaseUrlDefinition'];
   setDefaultBaseUrlDefinition: EnvironmentSectionProps['setDefaultBaseUrlDefinition'];
   onDeleteBaseUrl: (def: { id: string; name: string }) => void;
-  /** Open the env name already focused — set for a just-created env. */
-  autoRename?: boolean;
-  /** The auto-open was consumed; the shell clears its pending-rename flag. */
-  onRenameEnd?: () => void;
 }
 
 export function EnvBody({
@@ -40,7 +39,6 @@ export function EnvBody({
   setEnvironmentVar,
   renameEnvironmentVar,
   setEnvironmentModuleBaseUrl,
-  updateEnvironment,
   onAddVar,
   baseUrlDefinitions,
   defaultBaseUrlDefinitionId,
@@ -48,18 +46,9 @@ export function EnvBody({
   updateBaseUrlDefinition,
   setDefaultBaseUrlDefinition,
   onDeleteBaseUrl,
-  autoRename,
-  onRenameEnd,
 }: EnvBodyProps) {
   return (
     <div className="flex flex-col">
-      <EnvHeader
-        env={env}
-        onRename={(name) => updateEnvironment(env.id, { name })}
-        autoRename={autoRename}
-        onRenameEnd={onRenameEnd}
-      />
-
       <GroupHeader
         icon={<Globe className="h-3.5 w-3.5" />}
         title="前置 URL"
