@@ -684,7 +684,18 @@ mod tests {
         assert_eq!(s.pid, None);
         assert_eq!(s.port, None);
         assert_eq!(s.requests_handled, 0);
-        assert_eq!(s.uptime_ms, 0);
+        // Not `assert_eq!(.., 0)`: `McpMetrics::new()` stamps
+        // `started_at_ms = now_ms()` and `snapshot()` returns the delta, so
+        // a millisecond boundary crossed between the two lines makes this
+        // read 1. It is a wall-clock difference between two adjacent
+        // statements, not a state change — asserting exactly 0 reddened
+        // CI at random whenever the machine was busy enough to deschedule
+        // the thread in between.
+        assert!(
+            s.uptime_ms <= 1,
+            "uptime of a handle that was never started should be ~0, got {}",
+            s.uptime_ms
+        );
         assert!(s.last_error.is_none());
     }
 
