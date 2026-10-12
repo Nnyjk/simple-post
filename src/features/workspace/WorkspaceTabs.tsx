@@ -21,7 +21,12 @@
  *     FLIP. Re-measured whenever the tab set, active tab, or window size
  *     changes.
  *   - Keyboard: middle-click closes, just like a browser tab.
- *   - Visual state: active tab uses the primary tint, others stay muted.
+ *   - Visual state: the active tab merges into the panel below (browser
+ *     idiom — see `TabJoinCorners`), and its label is the only one on the
+ *     strip at DemiBold weight. WinShun's `PageTabs.qml` steps weight
+ *     rather than fill to mark the current item; that transfers here
+ *     without its width-reservation hack, because these tabs are a fixed
+ *     160/92px and the labels truncate rather than reflow.
  *   - Tab positions slide rather than snap when the tab set changes
  *     (add / remove / reorder). This is implemented as a FLIP animation
  *     via GSAP Flip — see the useGSAP block below.
@@ -401,7 +406,12 @@ export function WorkspaceTabs() {
               isCompact ? 'w-[92px]' : 'w-[160px]',
               active
                 ? 'border-border bg-background text-foreground'
-                : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                : // `bg-overlay-hover`, not a hand-written `bg-accent/40`:
+                  // on the new dark ladder `--accent` (17.6%) sits barely
+                  // above this strip's own tint, so the old hover moved
+                  // the surface by about one lightness point and read as
+                  // nothing. The overlay token is a real step.
+                  'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
               // `z-10` is what merges the active tab with the panel: it has
               // to paint over the strip's separator, which the `z-0` hairline
               // child would otherwise draw across its bottom edge.
@@ -422,7 +432,15 @@ export function WorkspaceTabs() {
               //  - compact: ~36px (≈ 2 Chinese chars). Hint hidden.
               // The full title remains available on hover via the
               // `title` attribute.
-              className={cn('min-w-0 truncate', isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1')}
+              //
+              // The weight step lives on the label, not on the tab: it is
+              // the one element whose type changes, and the method pill and
+              // the icons beside it should not go bold with it.
+              className={cn(
+                'min-w-0 truncate',
+                isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
+                active && 'font-semibold',
+              )}
               title={d.title}
             >
               {d.title}
@@ -437,9 +455,7 @@ export function WorkspaceTabs() {
             )}
             {d.hint && !isCompact && (
               <Tooltip content={d.hint} side="bottom">
-                <span className="max-w-[40px] truncate text-[10px] text-muted-foreground/70">
-                  {d.hint}
-                </span>
+                <span className="max-w-[40px] truncate text-[10px] text-faint">{d.hint}</span>
               </Tooltip>
             )}
             <Tooltip content="关闭" side="bottom">
@@ -452,7 +468,7 @@ export function WorkspaceTabs() {
                   requestCloseTab(d.tab.id);
                 }}
                 className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 hover:bg-accent hover:text-foreground',
+                  'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-faint hover:bg-overlay-hover hover:text-foreground',
                   // Always show on hover, but keep visible on the active tab.
                   active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 )}
@@ -483,7 +499,7 @@ export function WorkspaceTabs() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 text-muted-foreground/70"
+          className="h-6 w-6 text-faint"
           onClick={() => {
             // "Close all but active" affordance — useful when the user
             // ends up with dozens of tabs from a deep tree dive. Routes
@@ -799,17 +815,18 @@ function MenuItem({
       onClick={onClick}
       className={cn(
         'flex w-full items-center gap-2 px-2.5 py-1.5 text-left transition-colors',
-        'hover:bg-accent hover:text-foreground',
-        'focus:bg-accent focus:text-foreground focus:outline-none',
+        // Same reasoning as the tab row above: `--accent` is barely above
+        // the popover it sits on, so a solid `bg-accent` hover is a
+        // no-op on the new ladder.
+        'hover:bg-overlay-hover hover:text-foreground',
+        'focus:bg-overlay-hover focus:text-foreground focus:outline-none',
         disabled &&
           'cursor-not-allowed text-muted-foreground/50 hover:bg-transparent hover:text-muted-foreground/50',
       )}
     >
       <span className="shrink-0 text-muted-foreground">{icon}</span>
       <span className="flex-1">{label}</span>
-      {shortcut && (
-        <span className="shrink-0 text-[10px] text-muted-foreground/60">{shortcut}</span>
-      )}
+      {shortcut && <span className="shrink-0 text-[10px] text-faint">{shortcut}</span>}
     </button>
   );
 }
