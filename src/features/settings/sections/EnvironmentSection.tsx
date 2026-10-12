@@ -106,9 +106,11 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  * per module: every module group lists the project's whole service list and
  * fills in its own cells. The ★ is per project, not per module.
  *
- * The switcher strip is the one home of the `新建环境` control, so it
- * renders even with zero environments — the empty state is a hint under
- * the strip, never a replacement for it.
+ * The switcher strip owns the `新建环境` control, so it renders even with
+ * zero environments — the empty state is a hint under the strip, never a
+ * replacement for it. A **module** tab shows the same environment list for
+ * a narrower purpose (see `ModuleServiceSection`), so this is not the only
+ * host of the list; it is the one host of the project-level writes on it.
  *
  * This file is the shell only: it owns the active-env selection, the
  * delete-confirmation state, and the layout. Every presentational part

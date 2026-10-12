@@ -16,24 +16,29 @@
  * even which project's environments are in scope. The two hosts differ
  * only in the chrome around this body. See `SettingsSurface.tsx`.
  *
+ * The 环境 section is one level further down that same chain: this panel
+ * only picks which section is showing, and the section's own store wiring
+ * lives in `ProjectEnvSection` because the *project tab* mounts it too, as
+ * one of its layers. Two hosts, one section, no second copy of "which
+ * environments and modules are in scope".
+ *
  * The right pane opens with a slim breadcrumb + section title so the
  * user always has a "where am I" cue without us repeating the rail label
  * twice on the same screen. Each sub-section renders its own header via
  * `SettingsCategory`, which in turn wraps rows in a soft card shell.
  */
 
-import { useMemo, useRef } from 'react';
+import { useRef } from 'react';
 import { ChevronRight, Cloud, Cpu, Palette } from 'lucide-react';
 import { Send } from 'lucide-react';
 import { useAppStore, type SettingsCategoryId } from '@/stores/app-store';
-import { EnvironmentSection } from './sections/EnvironmentSection';
+import { ProjectEnvSection } from './sections/ProjectEnvSection';
 import { ConnectionSection } from './sections/ConnectionSection';
 import { AppearanceSection } from './sections/AppearanceSection';
 import { RequestSection } from './sections/RequestSection';
 import { cn } from '@/lib/utils';
 import type { HueConcept } from '@/lib/hue';
 import { IconTile } from '@/components/ui/icon-tile';
-import { EmptyHint } from '@/components/ui/empty-hint';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 const CATEGORY_IDS: readonly SettingsCategoryId[] = ['env', 'connection', 'appearance', 'request'];
@@ -117,49 +122,12 @@ export function SettingsPanel() {
   const activeSection = useAppStore((s) => s.activeSettingsSection);
   const setActiveSection = useAppStore((s) => s.setActiveSettingsSection);
 
-  // The env section needs to filter environments down to the active
-  // project. Pull the data here so the section component stays
-  // presentational.
-  const allEnvironments = useAppStore((s) => s.environments);
-  const activeProjectId = useAppStore((s) => s.activeProjectId);
-  const setEnvironmentVar = useAppStore((s) => s.setEnvironmentVar);
-  const renameEnvironmentVar = useAppStore((s) => s.renameEnvironmentVar);
-  const setEnvironmentModuleBaseUrl = useAppStore((s) => s.setEnvironmentModuleBaseUrl);
-  const deleteEnvironment = useAppStore((s) => s.deleteEnvironment);
-  const updateEnvironment = useAppStore((s) => s.updateEnvironment);
-  const addEnvironment = useAppStore((s) => s.addEnvironment);
-
-  // The section also manages baseUrl *definitions* (the project's named
-  // services). Those actions touch the project, not the env.
-  const projects = useAppStore((s) => s.projects);
-  const addBaseUrlDefinition = useAppStore((s) => s.addBaseUrlDefinition);
-  const updateBaseUrlDefinition = useAppStore((s) => s.updateBaseUrlDefinition);
-  const deleteBaseUrlDefinition = useAppStore((s) => s.deleteBaseUrlDefinition);
-  const setDefaultBaseUrlDefinition = useAppStore((s) => s.setDefaultBaseUrlDefinition);
-  const activeProject = useMemo(
-    () => projects.find((p) => p.id === activeProjectId) ?? null,
-    [projects, activeProjectId],
-  );
-
-  const environments = useMemo(
-    () => allEnvironments.filter((e) => e.projectId === activeProjectId),
-    [allEnvironments, activeProjectId],
-  );
-
-  // Modules are the row axis of the 前置 URL table — the row set is
-  // (every module × every project service) — so they are filtered to this
-  // project. Sorted by `sortOrder` because the table presents them in tree
-  // order and `nodes` is a flat list whose array order is not the tree's
-  // sibling order.
-  const nodes = useAppStore((s) => s.nodes);
-  const modules = useMemo(
-    () =>
-      nodes
-        .filter((n) => n.kind === 'module' && n.rootId === activeProjectId)
-        .sort((a, b) => a.sortOrder - b.sortOrder),
-    [nodes, activeProjectId],
-  );
-
+  // Nothing else is read here. The env section's store wiring — which
+  // environments belong to the active project, which modules are the row
+  // axis of the 前置 URL table, and the seven env / four service actions —
+  // lives in `ProjectEnvSection`, because the project tab mounts the very
+  // same section as one of its own layers. Assembling those props here
+  // would be the second copy of those rules.
   const mainRef = useRef<HTMLElement>(null);
 
   // Cross-fade the active section when `activeSection` changes. The outer
@@ -263,41 +231,9 @@ export function SettingsPanel() {
         {CATEGORY_IDS.map((id) => {
           if (id !== activeSection) return null;
           if (id === 'env') {
-            // Environments belong to a project, and this panel is also
-            // mounted on the project-less surface (`SettingsSurface.tsx`
-            // — reachable from the welcome screen). Without this guard the
-            // section rendered an empty env list *with* a working-looking
-            // "新建环境" button whose write went to `projectId === ''` and
-            // silently failed. Say what is missing instead of offering a
-            // control that cannot succeed.
-            if (activeProjectId === '') {
-              return (
-                <div key={activeSection} data-settings-section className="px-12 pb-4">
-                  <EmptyHint className="px-3 py-10 text-xs">
-                    环境变量属于项目。请先在欢迎页选择一个项目，再回到这里管理它的环境与前置 URL。
-                  </EmptyHint>
-                </div>
-              );
-            }
             return (
               <div key={activeSection} data-settings-section>
-                <EnvironmentSection
-                  environments={environments}
-                  projectId={activeProjectId}
-                  modules={modules}
-                  setEnvironmentVar={setEnvironmentVar}
-                  renameEnvironmentVar={renameEnvironmentVar}
-                  setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
-                  deleteEnvironment={deleteEnvironment}
-                  updateEnvironment={updateEnvironment}
-                  addEnvironment={addEnvironment}
-                  baseUrlDefinitions={activeProject?.baseUrlDefinitions ?? []}
-                  defaultBaseUrlDefinitionId={activeProject?.defaultBaseUrlDefinitionId ?? null}
-                  addBaseUrlDefinition={addBaseUrlDefinition}
-                  updateBaseUrlDefinition={updateBaseUrlDefinition}
-                  deleteBaseUrlDefinition={deleteBaseUrlDefinition}
-                  setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
-                />
+                <ProjectEnvSection />
               </div>
             );
           }
