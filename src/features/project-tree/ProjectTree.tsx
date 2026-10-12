@@ -3,6 +3,7 @@ import { Plus, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { cn, focusRing } from '@/lib/utils';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import type { EditTarget, TargetKind } from './tree-types';
@@ -58,6 +59,17 @@ export function ProjectTree() {
   // ---------- store actions ----------
   const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
   const moveNodes = useAppStore((s) => s.moveNodes);
+  const openTab = useAppStore((s) => s.openTab);
+  /**
+   * Is the project tab the one in front? Written as a selector that folds
+   * the whole answer into a **boolean** on purpose: a selector returning
+   * `s.openTabs.find(...)` would hand back a fresh reference per call and
+   * re-render the tree on every store write.
+   */
+  const projectTabActive = useAppStore((s) => {
+    if (s.activeTabId !== s.activeProjectId) return false;
+    return s.openTabs.some((t) => t.kind === 'project' && t.id === s.activeProjectId);
+  });
 
   // ---------- local UI state ----------
   const [query, setQuery] = useState('');
@@ -150,6 +162,13 @@ export function ProjectTree() {
           the welcome picker or the top-bar selector), so the panel still
           needs to say which project's modules it is listing.
 
+          The name is a **button**: it opens (or re-activates) the project
+          tab, which is what makes the title an entry point into the
+          project's own workspace rather than a label. With the project
+          out of the tree there is no other row that can mean "show me
+          this project", so closing its tab used to leave the panel with
+          no way back to the project card.
+
           There is deliberately no "+" next to this title. The header
           used to open a menu offering 项目 / 模块 / 集合 / 接口, but the
           only thing creatable from inside a project is a module — the
@@ -160,7 +179,28 @@ export function ProjectTree() {
           the welcome screen's 新建项目 card or the top-bar selector. */}
       <div className="flex h-9 shrink-0 items-center border-b border-border bg-card/40 px-3">
         {activeProject ? (
-          <span className="flex min-w-0 items-center gap-1.5">
+          // The title is the project tab's own entry point. The project is
+          // not a row in this tree, so before this the only way back to its
+          // card was the tab strip — and a user who closed that tab (or whose
+          // strip was full) had nothing to click at all.
+          //
+          // `openTab` activates an existing tab rather than duplicating it,
+          // so this is also safe to hit while the project tab is already
+          // open; `projectTabActive` only drives the "you are here" fill.
+          <button
+            type="button"
+            onClick={() => openTab('project', activeProject.id)}
+            title="打开项目标签"
+            aria-label={`打开项目标签 ${activeProject.name}`}
+            aria-current={projectTabActive ? 'true' : undefined}
+            className={cn(
+              'flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors',
+              focusRing,
+              projectTabActive
+                ? 'bg-surface-select text-foreground'
+                : 'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
+            )}
+          >
             <span
               className="h-2 w-2 shrink-0 rounded-sm"
               style={{ backgroundColor: activeProject.color }}
@@ -168,7 +208,7 @@ export function ProjectTree() {
             <span className="truncate text-xs font-medium" title={activeProject.name}>
               {activeProject.name}
             </span>
-          </span>
+          </button>
         ) : (
           <span className="label-caps">工作区</span>
         )}
