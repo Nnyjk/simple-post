@@ -94,6 +94,19 @@ interface TabDescriptor {
   hint?: string;
   icon: React.ReactNode;
   /**
+   * The kind as a *word*, for the hover title only — never rendered on the
+   * strip itself, where 160px has no room for a second word and the icon
+   * already distinguishes the kinds.
+   *
+   * Set for the three node kinds only. Endpoint tabs carry a method pill
+   * that says more than "接口" ever would, and `settings` needs nothing
+   * (its title *is* the label). The node kinds are exactly the ones whose
+   * pane stopped repeating the identity after the header was removed —
+   * `EntitySettings` has no kind label of its own any more, so this is
+   * where that word lives.
+   */
+  kindLabel?: string;
+  /**
    * Text colour class for the leading icon, so the strip stays scannable
    * and matches the tree row for the same entity.
    *
@@ -441,7 +454,7 @@ export function WorkspaceTabs() {
                 isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
                 active && 'font-semibold',
               )}
-              title={d.title}
+              title={d.kindLabel ? `${d.kindLabel} · ${d.title}` : d.title}
             >
               {d.title}
             </span>
@@ -608,6 +621,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         tab: t,
         title: p.name,
         hint: p.description || undefined,
+        kindLabel: KIND_LABEL.project,
         icon: <Package className="h-3.5 w-3.5" />,
         iconColor: HUE.project.text,
       });
@@ -623,6 +637,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         tab: t,
         title: m.name,
         hint: m.description || undefined,
+        kindLabel: KIND_LABEL.module,
         icon: m.expanded ? (
           <FolderOpen className="h-3.5 w-3.5" />
         ) : (
@@ -642,6 +657,7 @@ function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         tab: t,
         title: c.name,
         hint: c.description || undefined,
+        kindLabel: KIND_LABEL.collection,
         icon: c.expanded ? (
           <FolderOpen className="h-3.5 w-3.5" />
         ) : (

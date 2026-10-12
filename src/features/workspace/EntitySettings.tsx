@@ -8,9 +8,19 @@
  * header. Both were wrong for the same reason — they made the user *choose*
  * between "what this thing is" and "how this thing is configured", when
  * both are short enough to just be there. Two fields, then an env list you
- * scroll through. So the pane is a single waterfall now: identity in the
- * header, then 基础信息, then whatever configuration belongs to that kind,
- * stacked top to bottom.
+ * scroll through. So the pane is a single waterfall now: 基础信息, then
+ * whatever configuration belongs to that kind, stacked top to bottom.
+ *
+ * NO IDENTITY HEADER
+ * ------------------
+ * There used to be a header here repeating the icon, the name and the kind
+ * label. It is gone, because the tab strip directly above already carries
+ * all three: the tab names the entity and its icon says which kind it is.
+ * The header was that same fact twice, and a fixed 44px of the viewport
+ * spent on the duplicate. The only thing genuinely lost was the kind as a
+ * *word* — so the tab's hover title now spells it out (`项目 · ttt`),
+ * which puts the label where the eye already is instead of in a second
+ * place that scrolls away.
  *
  * That is not only a layout preference. The layers hid things: with
  * 基础信息 selected, a module's addresses were invisible and the only clue
@@ -30,13 +40,12 @@
  */
 
 import { lazy, Suspense, useState, type ReactNode } from 'react';
-import { FolderClosed, FolderOpen, Package, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useAppStore, type TabKind } from '@/stores/app-store';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { IconTile } from '@/components/ui/icon-tile';
-import { AutoSaveInput, AutoSaveTextarea, InfoField } from './EntityInfoFields';
+import { AutoSaveInput, AutoSaveTextarea, InfoBlock, InfoField } from './EntityInfoFields';
 
 // Both configuration blocks are separate chunks. `EntitySettings` is itself
 // lazy (mounted on any entity tab), but the env section drags in its
@@ -76,47 +85,6 @@ export function EntitySettings({ kind, entityId }: EntitySettingsProps) {
 // ----------------------------------------------------------------------------
 //  Shared chrome
 // ----------------------------------------------------------------------------
-
-/**
- * The three kinds that own a tab pane. `HueConcept` is wider than that —
- * it also names colours for things that are not nodes — so the label map is
- * keyed by the narrower type rather than pretending to cover it all.
- */
-type EntityKind = 'project' | 'module' | 'collection';
-
-const KIND_LABEL: Record<EntityKind, string> = {
-  project: '项目',
-  module: '模块',
-  collection: '集合',
-};
-
-/**
- * Identity header. Kept because it is the one thing that is true of the
- * whole pane: which entity everything below belongs to. On a long scroll it
- * is also the only fixed cue, since the tab strip is above the fold's
- * competition for attention.
- */
-function EntityHeader({
-  concept,
-  icon,
-  name,
-}: {
-  concept: EntityKind;
-  icon: ReactNode;
-  name: string;
-}) {
-  return (
-    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-card/40 px-6">
-      <IconTile icon={icon} concept={concept} size="sm" />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-foreground" title={name}>
-          {name}
-        </div>
-        <div className="label-caps">{KIND_LABEL[concept]}</div>
-      </div>
-    </header>
-  );
-}
 
 /**
  * One titled block in the waterfall.
@@ -164,20 +132,14 @@ function ProjectWorkspace({ projectId }: { projectId: string }) {
   if (!project) return <NotFound label="项目" />;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <EntityHeader concept="project" icon={<Package className="h-4 w-4" />} name={project.name} />
-      <div className="min-h-0 flex-1 overflow-y-auto pb-6">
-        <ProjectInfo projectId={projectId} />
-        <EntitySection
-          title="环境"
-          hint="这个项目的环境变量与前置 URL · 与设置里的环境分区是同一份"
-        >
-          <Suspense fallback={<BlockFallback />}>
-            <ProjectEnvSection />
-          </Suspense>
-        </EntitySection>
-        <ProjectDangerZone projectId={projectId} />
-      </div>
+    <div className="h-full min-h-0 overflow-y-auto pb-6">
+      <ProjectInfo projectId={projectId} />
+      <EntitySection title="环境" hint="这个项目的环境变量与前置 URL · 与设置里的环境分区是同一份">
+        <Suspense fallback={<BlockFallback />}>
+          <ProjectEnvSection />
+        </Suspense>
+      </EntitySection>
+      <ProjectDangerZone projectId={projectId} />
     </div>
   );
 }
@@ -189,7 +151,7 @@ function ProjectInfo({ projectId }: { projectId: string }) {
 
   return (
     <EntitySection title="基础信息">
-      <div className="rounded-lg border border-border/70 bg-card/40">
+      <InfoBlock>
         <InfoField label="名称" hint="显示在资源树顶部、项目标签与欢迎页">
           <AutoSaveInput
             value={project.name}
@@ -198,11 +160,7 @@ function ProjectInfo({ projectId }: { projectId: string }) {
             placeholder="项目名称"
           />
         </InfoField>
-        <InfoField
-          label="描述"
-          hint="记下这个项目是什么 · Ctrl/⌘+Enter 保存，Esc 放弃"
-          className="border-t border-border/60"
-        >
+        <InfoField label="描述" hint="记下这个项目是什么">
           <AutoSaveTextarea
             value={project.description}
             onSave={(description) => void updateProject(project.id, { description })}
@@ -210,7 +168,7 @@ function ProjectInfo({ projectId }: { projectId: string }) {
             placeholder="添加描述…"
           />
         </InfoField>
-      </div>
+      </InfoBlock>
     </EntitySection>
   );
 }
@@ -262,46 +220,37 @@ function ModuleWorkspace({ moduleId }: { moduleId: string }) {
   const updateNode = useAppStore((s) => s.updateNode);
   if (!mod) return <NotFound label="模块" />;
 
-  const Folder = mod.expanded ? FolderOpen : FolderClosed;
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <EntityHeader concept="module" icon={<Folder className="h-4 w-4" />} name={mod.name} />
-      <div className="min-h-0 flex-1 overflow-y-auto pb-6">
-        <EntitySection title="基础信息">
-          <div className="rounded-lg border border-border/70 bg-card/40">
-            <InfoField label="名称" hint="显示在资源树与模块标签">
-              <AutoSaveInput
-                value={mod.name}
-                onSave={(name) => void updateNode(mod.id, { name })}
-                ariaLabel="模块名称"
-                placeholder="模块名称"
-              />
-            </InfoField>
-            <InfoField
-              label="描述"
-              hint="记下这个模块负责什么 · Ctrl/⌘+Enter 保存，Esc 放弃"
-              className="border-t border-border/60"
-            >
-              <AutoSaveTextarea
-                value={mod.description}
-                onSave={(description) => void updateNode(mod.id, { description })}
-                ariaLabel="模块描述"
-                placeholder="添加描述…"
-              />
-            </InfoField>
-          </div>
-        </EntitySection>
+    <div className="h-full min-h-0 overflow-y-auto pb-6">
+      <EntitySection title="基础信息">
+        <InfoBlock>
+          <InfoField label="名称" hint="显示在资源树与模块标签">
+            <AutoSaveInput
+              value={mod.name}
+              onSave={(name) => void updateNode(mod.id, { name })}
+              ariaLabel="模块名称"
+              placeholder="模块名称"
+            />
+          </InfoField>
+          <InfoField label="描述" hint="记下这个模块负责什么">
+            <AutoSaveTextarea
+              value={mod.description}
+              onSave={(description) => void updateNode(mod.id, { description })}
+              ariaLabel="模块描述"
+              placeholder="添加描述…"
+            />
+          </InfoField>
+        </InfoBlock>
+      </EntitySection>
 
-        <EntitySection
-          title="服务"
-          hint="服务清单属于项目，这里填的是本模块自己的地址 · 各环境分别保存"
-        >
-          <Suspense fallback={<BlockFallback />}>
-            <ModuleServiceSection moduleId={moduleId} />
-          </Suspense>
-        </EntitySection>
-      </div>
+      <EntitySection
+        title="服务"
+        hint="服务清单属于项目，这里填的是本模块自己的地址 · 各环境分别保存"
+      >
+        <Suspense fallback={<BlockFallback />}>
+          <ModuleServiceSection moduleId={moduleId} />
+        </Suspense>
+      </EntitySection>
     </div>
   );
 }
@@ -315,37 +264,28 @@ function CollectionWorkspace({ collectionId }: { collectionId: string }) {
   const updateNode = useAppStore((s) => s.updateNode);
   if (!col) return <NotFound label="集合" />;
 
-  const Folder = col.expanded ? FolderOpen : FolderClosed;
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <EntityHeader concept="collection" icon={<Folder className="h-4 w-4" />} name={col.name} />
-      <div className="min-h-0 flex-1 overflow-y-auto pb-6">
-        <EntitySection title="基础信息">
-          <div className="rounded-lg border border-border/70 bg-card/40">
-            <InfoField label="名称" hint="显示在资源树与集合标签">
-              <AutoSaveInput
-                value={col.name}
-                onSave={(name) => void updateNode(col.id, { name })}
-                ariaLabel="集合名称"
-                placeholder="集合名称"
-              />
-            </InfoField>
-            <InfoField
-              label="描述"
-              hint="记下这组接口的用途 · Ctrl/⌘+Enter 保存，Esc 放弃"
-              className="border-t border-border/60"
-            >
-              <AutoSaveTextarea
-                value={col.description}
-                onSave={(description) => void updateNode(col.id, { description })}
-                ariaLabel="集合描述"
-                placeholder="添加描述…"
-              />
-            </InfoField>
-          </div>
-        </EntitySection>
-      </div>
+    <div className="h-full min-h-0 overflow-y-auto pb-6">
+      <EntitySection title="基础信息">
+        <InfoBlock>
+          <InfoField label="名称" hint="显示在资源树与集合标签">
+            <AutoSaveInput
+              value={col.name}
+              onSave={(name) => void updateNode(col.id, { name })}
+              ariaLabel="集合名称"
+              placeholder="集合名称"
+            />
+          </InfoField>
+          <InfoField label="描述" hint="记下这组接口的用途">
+            <AutoSaveTextarea
+              value={col.description}
+              onSave={(description) => void updateNode(col.id, { description })}
+              ariaLabel="集合描述"
+              placeholder="添加描述…"
+            />
+          </InfoField>
+        </InfoBlock>
+      </EntitySection>
     </div>
   );
 }

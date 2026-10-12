@@ -148,30 +148,47 @@ export function AutoSaveTextarea({
 }
 
 /**
- * One labelled row inside the 基础信息 card.
+ * The 基础信息 list — hairlines between rows, and no card around them.
  *
- * Vertical (label above control), because the controls here are full-width
- * text fields and the settings panel's `SettingRow` puts its control on the
- * right — a layout that works for a switch or a small button and collapses
- * for a textarea.
+ * This block used to be a `rounded-lg border bg-card/40` shell with the rows
+ * inside it, which put a card inside a section that is already a titled
+ * block, holding a card-ish `Input` and `textarea` of its own. Three borders
+ * deep for two text fields. The section heading is the boundary that is
+ * doing the work here, so the rows only need hairlines between them, and
+ * they run the full width of the section — the same list shape
+ * `SettingRow` produces in the settings panel, so the workspace's own rows
+ * and the settings rows it sits above read as one kind of thing.
+ */
+export function InfoBlock({ children }: { children: React.ReactNode }) {
+  return <div className="divide-y divide-border/60 border-y border-border/60">{children}</div>;
+}
+
+/**
+ * One labelled row inside `InfoBlock`.
+ *
+ * Label and hint on the left, control on the right — the `SettingRow`
+ * layout, deliberately, so these two fields do not introduce a third
+ * settings shape next to the ones the settings panel already renders. It
+ * also puts the hint under its own label instead of trailing the control,
+ * which is where a hint belongs: the old stacking had 描述's keyboard
+ * legend sitting between the textarea and the divider below it.
  */
 export function InfoField({
   label,
   hint,
-  className,
   children,
 }: {
   label: string;
   hint?: string;
-  /** Stacking/separation for the row — e.g. `border-t` between two of them. */
-  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn('space-y-1.5 px-4 py-3', className)}>
-      <div className="text-xs font-medium text-foreground">{label}</div>
-      {children}
-      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+    <div className="flex items-start gap-6 py-3">
+      <div className="w-40 shrink-0">
+        <div className="text-xs font-medium text-foreground">{label}</div>
+        {hint && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}
+      </div>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }
