@@ -9,7 +9,6 @@ import { DropHintOverlay } from './DropHintOverlay';
 
 export interface CollectionRowProps {
   collection: ResourceNode;
-  endpointCount: number;
   isEditing: boolean;
   onSelect: () => void;
   onStartEdit: () => void;
@@ -27,7 +26,6 @@ export interface CollectionRowProps {
 
 export function CollectionRow({
   collection,
-  endpointCount,
   isEditing,
   onSelect,
   onStartEdit,
@@ -78,8 +76,8 @@ export function CollectionRow({
               collection.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          {/* No type icon — see the note in `ModuleRow.tsx`. The chevron
-              carries the expand state; the count badge carries the size. */}
+          {/* No type icon and no size badge — see the note in
+              `ModuleRow.tsx`. The chevron carries the expand state. */}
           <InlineEdit
             value={collection.name}
             onSave={onSaveEdit}
@@ -93,9 +91,6 @@ export function CollectionRow({
             className="flex-1"
             display={() => <span className="flex-1 truncate">{collection.name}</span>}
           />
-          <span className="shrink-0 rounded bg-muted px-1.5 font-mono text-[10px] tabular-nums text-faint">
-            {endpointCount}
-          </span>
         </button>
         <div className="invisible flex shrink-0 items-center pr-1 group-hover:visible">
           <Tooltip content="新建" side="top">

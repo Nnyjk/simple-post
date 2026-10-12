@@ -102,26 +102,6 @@ export function buildTree(
     });
 }
 
-export function countSubtreeEndpoints(branch: CollectionBranch): number {
-  return (
-    branch.endpoints.length + branch.children.reduce((acc, c) => acc + countSubtreeEndpoints(c), 0)
-  );
-}
-
-export function countTreeEndpoints(branches: CollectionBranch[]): number {
-  return branches.reduce((acc, b) => acc + countSubtreeEndpoints(b), 0);
-}
-
-/**
- * Every endpoint under a module: the ones sitting on it directly plus the
- * ones inside its collections. A module holds both, so counting only the
- * collections' would under-report every module that has a folderless
- * endpoint.
- */
-export function countModuleEndpoints(branch: TreeBranch): number {
-  return branch.endpoints.length + countTreeEndpoints(branch.collections);
-}
-
 /**
  * Does this endpoint match the search? Name, url or any tag — url and
  * tags live in the detail row, so a name-only match over the node would

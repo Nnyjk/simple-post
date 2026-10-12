@@ -61,7 +61,6 @@ export function CollectionBranch(props: CollectionBranchProps) {
           <div key={collection.id} className="mb-0.5" data-tree-row>
             <CollectionRow
               collection={collection}
-              endpointCount={colEndpoints.length}
               isEditing={editing?.kind === 'collection' && editing.id === collection.id}
               onSelect={() => onSelectCollection(collection.id)}
               onStartEdit={() => onStartEditCollection(collection.id)}

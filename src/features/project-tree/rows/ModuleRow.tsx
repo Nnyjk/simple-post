@@ -9,8 +9,6 @@ import { DropHintOverlay } from './DropHintOverlay';
 
 export interface ModuleRowProps {
   module: ResourceNode;
-  collectionCount: number;
-  endpointCount: number;
   isEditing: boolean;
   onSelect: () => void;
   onStartEdit: () => void;
@@ -28,8 +26,6 @@ export interface ModuleRowProps {
 
 export function ModuleRow({
   module,
-  collectionCount,
-  endpointCount,
   isEditing,
   onSelect,
   onStartEdit,
@@ -81,8 +77,8 @@ export function ModuleRow({
             // `--foreground`. It used to be `text-muted-foreground` and
             // only brighten on hover, which made the most important thing
             // in the tree the least legible thing in it. Secondary
-            // information — the chevron, the count — takes the muted tiers
-            // instead; that is the whole point of having three of them.
+            // information — the chevron — takes the muted tiers instead;
+            // that is the whole point of having three of them.
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-foreground transition-colors',
             'hover:bg-overlay-hover',
           )}
@@ -97,9 +93,14 @@ export function ModuleRow({
               (open/closed), but the disclosure chevron above already says
               "this expands", and every node kind in this tree is a
               container — the tile repeated what the indentation and the
-              count badge on the right already convey. The one icon that
-              carries information the row does not is the HTTP method on an
-              endpoint, and that one stays. */}
+              name beside it already convey. The one icon that carries
+              information the row does not is the HTTP method on an
+              endpoint, and that one stays.
+
+              No size badge on the right either. It counted the children
+              the chevron already reveals, and expanding is one click —
+              a number that duplicates the tree's own structure is noise,
+              not information. */}
           <InlineEdit
             value={module.name}
             onSave={onSaveEdit}
@@ -113,9 +114,6 @@ export function ModuleRow({
             className="flex-1"
             display={() => <span className="flex-1 truncate">{module.name}</span>}
           />
-          <span className="shrink-0 rounded bg-muted px-1.5 font-mono text-[10px] tabular-nums text-faint">
-            {endpointCount > 0 ? `${collectionCount}/${endpointCount}` : collectionCount}
-          </span>
         </button>
         <div className="invisible flex shrink-0 items-center pr-1 group-hover:visible">
           <Tooltip content="新建" side="top">

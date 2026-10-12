@@ -7,7 +7,7 @@ import { cn, focusRing } from '@/lib/utils';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
 import { ConfirmDialog } from './ConfirmDialog';
 import type { EditTarget, TargetKind } from './tree-types';
-import { buildTree, countModuleEndpoints, filterTree } from './tree-utils';
+import { buildTree, filterTree } from './tree-utils';
 import { useTreeDnd } from './hooks/useTreeDnd';
 import { useEditMenu } from './hooks/useEditMenu';
 import { useInlineMenus } from './hooks/useInlineMenus';
@@ -289,8 +289,6 @@ export function ProjectTree() {
               <div key={modBranch.module.id} className="mb-0.5">
                 <ModuleRow
                   module={modBranch.module}
-                  collectionCount={modBranch.collections.length}
-                  endpointCount={countModuleEndpoints(modBranch)}
                   isEditing={editing?.kind === 'module' && editing.id === modBranch.module.id}
                   onSelect={() => openModuleTab(modBranch.module.id)}
                   onStartEdit={() => startEdit('module', modBranch.module.id)}

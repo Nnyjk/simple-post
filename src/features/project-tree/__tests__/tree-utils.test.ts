@@ -16,8 +16,10 @@
  *   3. Search keeps a module whose *own* endpoint matched, and filters
  *      its non-matching endpoints away — the same predicate both levels
  *      share.
- *   4. `countModuleEndpoints` counts both levels, so a module badge does
- *      not under-report.
+ *
+ * The counting helpers that used to live here (`countModuleEndpoints` and
+ * its two helpers) went with the tree's size badge: nothing counts children
+ * for display any more, so the chain had no caller left.
  *
  * Run via:
  *   npx tsx --test src/features/project-tree/__tests__/tree-utils.test.ts
@@ -25,7 +27,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTree, countModuleEndpoints, filterTree } from '../tree-utils';
+import { buildTree, filterTree } from '../tree-utils';
 import type { EndpointDetail, ResourceNode, ResourceNodeType } from '@/types/domain';
 
 // ---------- fixtures ----------
@@ -203,24 +205,5 @@ describe('tree-utils: filterTree reaches module-level endpoints', () => {
     const tree = buildTree(nodes, details, 'p1');
 
     assert.deepEqual(filterTree(tree, 'nothing-matches-this', details), []);
-  });
-});
-
-// ============================================================
-// counts
-// ============================================================
-
-describe('tree-utils: countModuleEndpoints', () => {
-  it('counts the module-level endpoints and the collections’ ones together', () => {
-    const { nodes, details } = mixedTree();
-    const m1 = buildTree(nodes, details, 'p1')[0];
-
-    // e_module + e_nested + e_deep.
-    assert.equal(countModuleEndpoints(m1), 3);
-  });
-
-  it('is zero for an empty module', () => {
-    const nodes = [makeNode('m1', null, 'module')];
-    assert.equal(countModuleEndpoints(buildTree(nodes, {}, 'p1')[0]), 0);
   });
 });
