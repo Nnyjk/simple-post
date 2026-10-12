@@ -5,24 +5,42 @@ import { SettingsCategory } from '../SettingsCategory';
 import { useEnvDialogs } from './hooks/useEnvDialogs';
 import { EnvBody } from './rows/EnvBody';
 import { EnvSwitcher } from './rows/EnvSwitcher';
-import type { BaseUrlDefinition, Environment } from '@/types/domain';
+import type { BaseUrlDefinition, Environment, ResourceNode } from '@/types/domain';
 
 export interface EnvironmentSectionProps {
   // ---- scope ----
   environments: Environment[];
   projectId: string;
+  /**
+   * This project's modules, already filtered and `sortOrder`-sorted by the
+   * host. They are the row axis of the 前置 URL table: the row set is
+   * (every module × every project service), so a project with no modules
+   * has nothing to configure and the table says so instead of rendering an
+   * empty grid.
+   */
+  modules: readonly ResourceNode[];
 
   // ---- env-scoped actions ----
   setEnvironmentVar: (envId: string, key: string, value: string | null) => void;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
-  setEnvironmentBaseUrl: (envId: string, defId: string, url: string | null) => void;
+  /**
+   * Set (or with `null` clear) one cell of the value layer: what service
+   * `defId` points at, for module `moduleId`, in this environment.
+   */
+  setEnvironmentModuleBaseUrl: (
+    envId: string,
+    defId: string,
+    moduleId: string,
+    url: string | null,
+  ) => void;
   /** Resolves the new env's id, or `null` when the create failed. */
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   deleteEnvironment: (envId: string) => void;
   updateEnvironment: (envId: string, patch: Partial<Environment>) => void;
 
-  // ---- project-scoped baseUrl definitions ----
+  // ---- project-scoped service definitions ----
   baseUrlDefinitions: readonly BaseUrlDefinition[];
+  /** The project's ★. Project-wide — there is no per-module default. */
   defaultBaseUrlDefinitionId: string | null;
   addBaseUrlDefinition: (projectId: string, name: string) => string;
   updateBaseUrlDefinition: (
@@ -31,6 +49,7 @@ export interface EnvironmentSectionProps {
     patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>,
   ) => void;
   deleteBaseUrlDefinition: (projectId: string, defId: string) => void;
+  /** Star a service as the project default, or pass `null` to unstar. */
   setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => void;
 }
 
@@ -66,10 +85,12 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  *   │  ☁  dev  ⚡ staging  🚀 prod            + 新建环境       │
  *   ├────────────────────────────────────────────────────────┤
  *   │  dev                                              [active]
- *   ├──────────── 前置 URL · BaseUrl 定义 ────────────────────┤
- *   │  🌐  默认      http://localhost:4000/demo  [默认] [×]   │
- *   │  🌐  数据服务  http://127.0.0.1:9100/api        [×]    │
- *   │                  + 添加服务                            │
+ *   ├──────────── 前置 URL ───────────────────────────────────┤
+ *   │  模块         服务          前置 URL                     │
+ *   │  🗂 默认模块   ★ 默认服务   http://localhost:4000/demo  │
+ *   │               数据服务     http://127.0.0.1:9100/api   │
+ *   │               + 添加服务                                 │
+ *   │  🗂 南通6.0    ★ 默认服务     http://192.168.11.101:27000 │
  *   ├──────────── 环境变量 ───────────────────────────────────┤
  *   │  { } token  eyJhbGciOi...                       [×]    │
  *   │  { } env    dev                                 [×]    │
@@ -81,9 +102,9 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  * controls, hover-revealed delete buttons — but adds an env switcher
  * strip across the top because each env holds its own value overrides.
  *
- * Per-row inline edit (rename service/variable, edit URL/value,
- * delete, mark-as-default) works as before; only the outer shell
- * changed.
+ * The 前置 URL table is grouped by module because the **address** is
+ * per module: every module group lists the project's whole service list and
+ * fills in its own cells. The ★ is per project, not per module.
  *
  * The switcher strip is the one home of the `新建环境` control, so it
  * renders even with zero environments — the empty state is a hint under
@@ -97,9 +118,10 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
 export function EnvironmentSection({
   environments,
   projectId,
+  modules,
   setEnvironmentVar,
   renameEnvironmentVar,
-  setEnvironmentBaseUrl,
+  setEnvironmentModuleBaseUrl,
   addEnvironment,
   deleteEnvironment,
   updateEnvironment,
@@ -186,13 +208,6 @@ export function EnvironmentSection({
     setEnvironmentVar(activeEnv.id, '', '');
   };
 
-  const handleAddBaseUrl = () => {
-    if (!activeEnv) return;
-    // Match the variable UX: append an empty row immediately.
-    const defId = addBaseUrlDefinition(projectId, '新服务');
-    setEnvironmentBaseUrl(activeEnv.id, defId, '');
-  };
-
   return (
     <SettingsCategory
       hideDivider
@@ -231,16 +246,16 @@ export function EnvironmentSection({
                 key={activeEnv.id}
                 env={activeEnv}
                 projectId={projectId}
+                modules={modules}
                 setEnvironmentVar={setEnvironmentVar}
                 renameEnvironmentVar={renameEnvironmentVar}
-                setEnvironmentBaseUrl={setEnvironmentBaseUrl}
+                setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
                 updateEnvironment={updateEnvironment}
                 onAddVar={handleAddVar}
-                onAddBaseUrl={handleAddBaseUrl}
                 baseUrlDefinitions={baseUrlDefinitions}
                 defaultBaseUrlDefinitionId={defaultBaseUrlDefinitionId}
+                addBaseUrlDefinition={addBaseUrlDefinition}
                 updateBaseUrlDefinition={updateBaseUrlDefinition}
-                deleteBaseUrlDefinition={deleteBaseUrlDefinition}
                 setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
                 onDeleteBaseUrl={requestBaseUrlDelete}
                 autoRename={pendingRenameEnvId === activeEnv.id}
@@ -257,7 +272,7 @@ export function EnvironmentSection({
         open={!!deletingBaseUrl}
         onOpenChange={(o) => !o && clearBaseUrlDelete()}
         title={`删除「${deletingBaseUrl?.name ?? ''}」?`}
-        description="该操作会从所有环境中移除对应的 URL。"
+        description="该服务会从项目服务清单中移除，所有模块里为它填写的地址也会一并失效；引用它的接口会回落到项目默认服务。"
         confirmText="删除"
         destructive
         onConfirm={confirmDeleteBaseUrl}
@@ -267,7 +282,7 @@ export function EnvironmentSection({
         open={!!deletingEnv}
         onOpenChange={(o) => !o && clearEnvDelete()}
         title={`删除环境「${deletingEnv?.name ?? ''}」?`}
-        description="依赖它的接口会回落到项目默认 baseUrl。"
+        description="依赖它的接口会停止使用这个环境的前置 URL。"
         confirmText="删除"
         destructive
         onConfirm={confirmDeleteEnv}

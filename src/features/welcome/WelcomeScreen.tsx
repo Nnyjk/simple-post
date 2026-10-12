@@ -168,11 +168,20 @@ export function WelcomeScreen() {
                     focusRing,
                   )}
                 >
-                  <span
-                    className="h-8 w-1.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: p.color }}
-                    aria-hidden
-                  />
+                  {/* The colour chip lives in a fixed 32px slot rather than
+                      being its own 6px-wide flex child.
+
+                      This list is a single column of cards and the eye reads
+                      the labels as one left edge, but the leading slots are
+                      not the same width: the chip is `w-1.5` and the 新建项目
+                      card below leads with a `w-8` icon badge. Sizing the chip
+                      to itself therefore pushed every project label 26px
+                      right of the 新建项目 label in the same list — measured at
+                      x=389 vs x=415. Reserving the slot fixes the edge without
+                      giving up either the thin bar or the round badge. */}
+                  <span className="flex h-8 w-8 shrink-0 items-center" aria-hidden>
+                    <span className="h-8 w-1.5 rounded-full" style={{ backgroundColor: p.color }} />
+                  </span>
                   <span className="min-w-0 flex-1">
                     <span
                       className="block truncate text-base font-semibold leading-snug"

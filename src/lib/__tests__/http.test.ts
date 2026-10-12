@@ -275,6 +275,7 @@ const ENV: Environment = {
   projectId: 'p_test',
   name: 'test',
   baseUrls: {},
+  moduleBaseUrls: {},
   variables: { token: 'eyJ.tok', userId: 'u_demo', apiKey: 'k_123' },
   isActive: true,
 };

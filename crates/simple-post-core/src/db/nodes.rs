@@ -217,6 +217,38 @@ pub fn root_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
     })
 }
 
+/// Which module a node sits under, or `None` when it is not under one.
+///
+/// Every node except a module has exactly one module above it, and the
+/// endpoint configuration's base URL is keyed by that module: the live
+/// value layer is `moduleBaseUrls[service][module]`, so resolving an
+/// endpoint's URL is two lookups — which service, then which module —
+/// and this is the second. It is a tree question rather than a property
+/// of the node's own row, which is why it is not denormalised the way
+/// `root_id` is.
+///
+/// `None` is a real answer, not a failure: the node itself may be a
+/// module, or not exist at all. Callers that need to tell those apart ask
+/// [`type_of`] first or simply treat "no module" as "no base URL",
+/// which is what resolution does. The walk skips the node itself, so a
+/// module is never reported as its own answer.
+pub fn module_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, AppError> {
+    let found: Option<String> = conn
+        .query_row(
+            "WITH RECURSIVE up(id, parent_id, type, depth) AS ( \
+                 SELECT id, parent_id, type, 0 FROM nodes WHERE id = ?1 \
+                 UNION ALL \
+                 SELECT p.id, p.parent_id, p.type, up.depth + 1 \
+                 FROM nodes p JOIN up ON p.id = up.parent_id \
+             ) \
+             SELECT id FROM up WHERE type = 'module' AND depth > 0 LIMIT 1",
+            params![id],
+            |r| r.get(0),
+        )
+        .ok();
+    Ok(found)
+}
+
 /// The type of a node, or `NotFound`.
 pub fn type_of(conn: &mut Connection, id: &str) -> Result<ResourceNodeType, AppError> {
     let raw: String = conn

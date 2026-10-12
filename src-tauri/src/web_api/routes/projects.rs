@@ -31,17 +31,82 @@ pub(crate) async fn projects_get(
     Ok(Json(serde_json::to_value(row).unwrap_or(Value::Null)))
 }
 
+/// Create a project, seeding its default environment (and, when a base
+/// URL was supplied, a named service holding it).
+///
+/// Two body shapes land here, and both are live:
+///
+/// - `{ "name": …, "opts": { description, color, baseUrl } }` — what
+///   `invokeCmd(COMMANDS.projectsCreate, …)` sends, because
+///   `WEB_ROUTES.projectsCreate` has no `body:` mapper and the args
+///   object *is* the payload. This is the SPA's own contract.
+/// - a flat `Project` — the documented public v1 shape, which an
+///   external REST client uses.
+///
+/// They used to disagree, and the disagreement was silent: the route
+/// parsed a `Project`, `Project` has no `opts` field, and serde discards
+/// unknown keys without complaint. So in `serve-web` the create form's
+/// description, colour **and** base URL were all discarded and the
+/// project came back with only its name — which looked exactly like the
+/// form not working rather than like a transport mismatch.
+///
+/// `opts` wins when present; otherwise the flat fields are read off the
+/// body. A base URL is not among them: it is not a project attribute,
+/// and `Project.base_url` is legacy and never persisted.
 pub(crate) async fn projects_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    let opts: crate::commands::dto::CreateProjectOpts = match body.get("opts") {
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?,
+        None => crate::commands::dto::CreateProjectOpts {
+            description: body
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            color: body
+                .get("color")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        },
+    };
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| map_app_error(AppError::Validation("missing field 'name'".to_string())))?;
+
+    let now = crate::domain::now_ms();
+    let mut project: crate::domain::Project = crate::domain::Project {
+        id: String::new(),
+        name,
+        description: opts.description,
+        base_url: None,
+        base_url_definitions: Vec::new(),
+        default_base_url_definition_id: None,
+        color: opts
+            .color
+            .unwrap_or_else(crate::domain::default_project_color),
+        created_at: now,
+        updated_at: now,
+    };
     ensure_server_id(&mut body);
-    let project: crate::domain::Project = serde_json::from_value(body)
-        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
-    db::with_tx(&s.pool, |c| db::projects::create(c, &project)).map_err(map_app_error)?;
+    if let Some(id) = body.get("id").and_then(Value::as_str) {
+        if !id.is_empty() {
+            project.id = id.to_string();
+        } else {
+            project.id = crate::domain::uid();
+        }
+    } else {
+        project.id = crate::domain::uid();
+    }
+
+    let created = db::with_tx(&s.pool, |c| db::projects::create_with_defaults(c, &project))
+        .map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
-        Json(serde_json::to_value(&project).unwrap_or(Value::Null)),
+        Json(serde_json::to_value(&created).unwrap_or(Value::Null)),
     ))
 }
 

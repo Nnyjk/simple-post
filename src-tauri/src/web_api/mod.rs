@@ -136,10 +136,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // answers a different question — configuration, not structure.
         .route("/api/endpoint-details", get(endpoint_details_list))
         .route("/api/nodes/:id/duplicate", post(node_duplicate))
-        // Node-scoped send. The client names an endpoint, never a URL, so
-        // this route has no SSRF surface; the raw `/api/http/send` above is the
-        // deliberate escape hatch and is governed by the outbound URL policy.
-        .route("/api/nodes/:id/send", post(node_send))
         // ---- environments ----
         .route(
             "/api/environments",
@@ -158,14 +154,17 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             post(environments_rename_var),
         )
         .route(
-            "/api/environments/:envId/baseurls",
-            post(environments_set_baseurl),
+            "/api/environments/:envId/module-baseurls",
+            post(environments_set_module_baseurl),
         )
         // ---- baseUrlDefs ----
-        // Project-scoped create lives under the project; id-scoped
-        // update/delete uses a separate `/baseurl-defs/:defId`
-        // namespace so a future cross-project lookup doesn't have to
-        // re-key on `projectId`.
+        // A service belongs to the project, so all three project-scoped
+        // verbs hang off `/api/projects/:projectId/baseurls`.
+        // `/baseurls/default` is a literal sibling of the
+        // `/api/baseurl-defs/:defId` parametrised route's parent — it is
+        // a different prefix entirely, so no radix-tree precedence
+        // question arises; `base_url_defs_test` in this crate pins that
+        // every one of them stays reachable.
         .route(
             "/api/projects/:projectId/baseurls",
             get(base_url_defs_list).post(base_url_defs_create),

@@ -457,7 +457,13 @@
       "id": "env_dev",
       "projectId": "p_demo",
       "name": "dev",
-      "baseUrls": { "def_default": "http://localhost:4000/demo" },
+      "moduleBaseUrls": {
+        "def_default": {
+          "m_auth": "http://localhost:4000/demo/auth",
+          "m_order": "http://localhost:4000/demo/order",
+          "m_pay": "http://localhost:4000/demo/pay"
+        }
+      },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.dev", "env": "dev" },
       "isActive": true
     },
@@ -465,7 +471,13 @@
       "id": "env_staging",
       "projectId": "p_demo",
       "name": "staging",
-      "baseUrls": { "def_default": "http://localhost:4000/demo" },
+      "moduleBaseUrls": {
+        "def_default": {
+          "m_auth": "http://localhost:4000/demo/auth",
+          "m_order": "http://localhost:4000/demo/order",
+          "m_pay": "http://localhost:4000/demo/pay"
+        }
+      },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.staging", "env": "staging" },
       "isActive": false
     },
@@ -473,7 +485,13 @@
       "id": "env_prod",
       "projectId": "p_demo",
       "name": "prod",
-      "baseUrls": { "def_default": "http://localhost:4000/demo" },
+      "moduleBaseUrls": {
+        "def_default": {
+          "m_auth": "http://localhost:4000/demo/auth",
+          "m_order": "http://localhost:4000/demo/order",
+          "m_pay": "http://localhost:4000/demo/pay"
+        }
+      },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.prod", "env": "prod" },
       "isActive": false
     }

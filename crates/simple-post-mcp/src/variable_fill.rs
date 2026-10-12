@@ -64,6 +64,21 @@ pub struct EndpointOverrides {
     /// an empty string means "no base URL", which is how the renderer
     /// represents an endpoint being sent against a bare path.
     pub base_url_definition_id: Option<String>,
+    /// Which module's **cell** in `env.moduleBaseUrls` this endpoint
+    /// reads.
+    ///
+    /// Services belong to the project, not to a module, so the module is
+    /// not a filter over which services exist — every module sees the
+    /// project's whole list. It selects the value instead: a URL lives at
+    /// `(environment × service × module)`, and two modules may point the
+    /// same service at different hosts.
+    ///
+    /// Supplied by the caller rather than derived here because this
+    /// function has no database handle — it is pure, and the module
+    /// lives in the `nodes` table. `None` means "no tree context": there
+    /// is no cell to read, so only the per-endpoint
+    /// `base_url_override` can produce a base URL.
+    pub module_id: Option<String>,
 }
 
 /// What `resolve_endpoint` produces. Already has every `{{var}}`
@@ -206,16 +221,18 @@ pub fn list_missing_vars(s: &str) -> Vec<String> {
 // -------------------------------------------------------------------------
 
 /// Where the effective baseUrl came from. Used by picker-style
-/// surfaces to label the current selection ("项目默认" /
+/// surfaces to label the current selection ("模块默认" /
 /// "鉴权服务" / "自定义"). The MCP daemon uses the same enum to
 /// explain its choice back to the renderer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BaseUrlSource {
     /// `detail.baseUrlOverride` won.
     Override,
-    /// `detail.baseUrlDefinitionId` won (and pointed at a real def).
+    /// A service was named explicitly — the endpoint's own
+    /// `baseUrlDefinitionId`, or the caller's `forced_def_id`.
     Definition,
-    /// Project default won.
+    /// The project's ★ service
+    /// (`Project.defaultBaseUrlDefinitionId`) won.
     Default,
     /// Nothing matched; the caller is responsible for whatever
     /// fallback (often `""`).
@@ -223,45 +240,65 @@ pub enum BaseUrlSource {
 }
 
 /// Compute the effective baseUrl for an endpoint, given the
-/// env that supplies its `baseUrls[defId]` and the project that
-/// declares the definitions and the default.
+/// env that supplies its `moduleBaseUrls[defId][moduleId]` and the
+/// project that declares the services.
 ///
 /// Precedence (highest first):
-///   1. `endpoint.baseUrl_override`  — per-endpoint custom mode. `None`
-///      falls through to the definition chain; `Some(host)` pins that
+///   1. `endpoint.base_url_override`  — per-endpoint custom mode. `None`
+///      falls through to the service chain; `Some(host)` pins that
 ///      host; `Some("")` means "no prefix at all" — the endpoint is in
 ///      自定义 mode and the URL field already holds the whole address.
-///   2. `detail.base_url_definition_id` — the def the endpoint
-///      points at (must exist in `project.base_url_definitions`);
-///      URL is then `env.base_urls[def_id]`.
-///   3. `project.default_base_url_definition_id` → `env.base_urls[def_id]`
-///   4. `""` — nothing
+///   2. `detail.base_url_definition_id`, then the project's ★
+///      (`project.default_base_url_definition_id`).
+///   3. `""` — nothing.
 ///
-/// `env.base_urls` is keyed by `BaseUrlDefinition.id`, NOT by name.
-/// That keeps rename operations cheap and the resolution deterministic
-/// even if two defs ever share a name. The env is taken from
-/// `detail.environment_id` — when no env is selected (None) the
-/// lookup short-circuits to "".
+/// This three-argument form carries no module context, so step 2 has
+/// no cell to read and resolves to `""` unless the per-endpoint
+/// override applies. Callers that know the module must use
+/// [`resolve_base_url_with`].
+///
+/// `env.module_base_urls` is keyed by `BaseUrlDefinition.id` then by
+/// module id, NOT by name. That keeps rename operations cheap and the
+/// resolution deterministic even if two services share a name. The env
+/// is taken from `detail.environment_id` — when no env is selected
+/// (None) the lookup short-circuits to "".
 pub fn resolve_base_url(
     detail: &EndpointDetail,
     env: Option<&Environment>,
     project: &Project,
 ) -> (String, BaseUrlSource, Option<String>) {
-    resolve_base_url_with(detail, env, project, None)
+    resolve_base_url_with(detail, env, project, None, None)
 }
 
-/// [`resolve_base_url`] with a caller-supplied definition choice.
+/// [`resolve_base_url`] with a caller-supplied definition choice and the
+/// endpoint's module.
 ///
 /// `forced_def_id` takes precedence over `detail.base_url_definition_id`
 /// but still yields to `detail.base_url_override`, which is a per-endpoint
 /// host (or the explicit "no prefix" choice) and was always the strongest
 /// signal. `Some("")` means "no base URL" — the renderer sends that when
 /// the user cleared the picker.
+///
+/// `module_id` selects **which cell of the value layer** this call reads,
+/// not which services exist: services are project-scoped, and
+/// `env.module_base_urls[def_id][module_id]` is the only place a URL
+/// lives. `None` therefore resolves to `""` rather than guessing a
+/// module's cell for another.
+///
+/// It is supplied rather than derived here so this function stays pure:
+/// the module lives in the `nodes` table, which this module deliberately
+/// knows nothing about. Callers thread it through
+/// [`EndpointOverrides::module_id`].
+///
+/// Mirrors `resolveEndpointBaseUrl` in `src/lib/url.ts`; the two must
+/// agree or the on-screen preview and the request that actually goes out
+/// describe different URLs.
 pub fn resolve_base_url_with(
     detail: &EndpointDetail,
     env: Option<&Environment>,
     project: &Project,
     forced_def_id: Option<&str>,
+    module_id: Option<&str>,
 ) -> (String, BaseUrlSource, Option<String>) {
     // `Some("")` is a deliberate choice, not an absent value: the endpoint
     // is in 自定义 mode and the URL field carries the whole address, so
@@ -275,34 +312,60 @@ pub fn resolve_base_url_with(
     if matches!(forced.as_deref(), Some("")) {
         return (String::new(), BaseUrlSource::None, None);
     }
-    let def_id = forced
-        .or_else(|| detail.base_url_definition_id.clone())
-        .or_else(|| project.default_base_url_definition_id.clone());
-    let def_id = match def_id {
-        Some(d) => d,
+
+    // Which service answers: the caller's pick, else the endpoint's own,
+    // else the project's ★. The endpoint naming none is the normal case,
+    // not a gap — that is what the ★ exists for.
+    let explicit = forced.or_else(|| detail.base_url_definition_id.clone());
+    // Decided before `explicit` is consumed by the match below: this is
+    // about *which row answered*, not which value, so a forced choice and
+    // the endpoint's own pick both report `Definition`.
+    let was_explicit = explicit.is_some();
+    let def_id = match explicit {
+        Some(def_id) => def_id,
+        None => match project.default_base_url_definition_id.clone() {
+            Some(def_id) => def_id,
+            // No ★: the endpoint goes out with no base URL, full stop.
+            // There is no layer above this one to borrow from and no
+            // service to guess.
+            None => return (String::new(), BaseUrlSource::None, None),
+        },
+    };
+    // The id has to name a service the project actually holds. A miss
+    // covers a deleted service, an id copied from another project, and a
+    // stale endpoint pointer; all three mean "no base URL" rather than
+    // "quietly aim at a different host". Deliberately NOT a fall back to
+    // the ★.
+    if !project.base_url_definitions.iter().any(|d| d.id == def_id) {
+        return (String::new(), BaseUrlSource::None, None);
+    }
+
+    // No module, no cell. Services are shared by every module but their
+    // addresses are not, so there is nothing to read.
+    let module_id = match module_id {
+        Some(module_id) => module_id,
         None => return (String::new(), BaseUrlSource::None, None),
     };
-    let def = project.base_url_definitions.iter().find(|d| d.id == def_id);
-    let url = env.and_then(|e| e.base_urls.get(&def_id));
-    if let (Some(_def), Some(u)) = (def, url) {
-        if !u.is_empty() {
-            // A definition was named explicitly — either the caller's
-            // forced choice or the endpoint's own — so report
-            // `Definition`. Only the project default is `Default`.
-            // Classifying off `detail.base_url_definition_id` alone
-            // mislabelled a forced choice as `Default`, which
-            // `api_resolve_endpoint` hands straight to an AI client.
-            let explicitly_chosen = forced_def_id.map(|f| !f.is_empty()).unwrap_or(false)
-                || detail.base_url_definition_id.is_some();
-            let source = if explicitly_chosen {
+
+    // The one and only place a URL lives. Missing or empty means this
+    // (environment × service × module) cell is unconfigured, which is the
+    // same answer as naming nothing: `source: none`. There is deliberately
+    // no fallback to `env.base_urls` (dead column) nor to another
+    // module's cell — an empty cell is a real answer, not a hole.
+    match env
+        .and_then(|e| e.module_base_urls.get(&def_id))
+        .and_then(|cells| cells.get(module_id))
+    {
+        Some(u) if !u.is_empty() => {
+            let source = if was_explicit {
                 BaseUrlSource::Definition
             } else {
                 BaseUrlSource::Default
             };
-            return (u.clone(), source, Some(def_id));
+            (u.clone(), source, Some(def_id))
         }
+        _ => (String::new(), BaseUrlSource::None, None),
     }
-    (String::new(), BaseUrlSource::None, None)
 }
 
 /// Concatenate `base_url` and `path` safely. Treats `path` as
@@ -337,11 +400,19 @@ pub fn join_base_url(base_url: &str, path: &str) -> String {
 }
 
 fn has_scheme(s: &str) -> bool {
+    scheme_prefix_len(s).is_some()
+}
+
+/// Byte length of a leading `scheme://`, or `None`. Shared by
+/// [`has_scheme`] and [`collapse_url_slashes`] so the two can never
+/// disagree about where the scheme ends — that boundary is exactly what
+/// decides which slashes are a protocol and which are a typo.
+fn scheme_prefix_len(s: &str) -> Option<usize> {
     // RFC 3986 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
     // Mirrors the TS regex `/^[a-z][a-z0-9+.-]*:\/\//i`.
     let bytes = s.as_bytes();
     if bytes.is_empty() || !bytes[0].is_ascii_alphabetic() {
-        return false;
+        return None;
     }
     let mut i = 1;
     while i < bytes.len() {
@@ -353,7 +424,68 @@ fn has_scheme(s: &str) -> bool {
         break;
     }
     // Now expect `:` followed by `//`.
-    i + 2 < bytes.len() && bytes[i] == b':' && bytes[i + 1] == b'/' && bytes[i + 2] == b'/'
+    if i + 2 < bytes.len() && bytes[i] == b':' && bytes[i + 1] == b'/' && bytes[i + 2] == b'/' {
+        Some(i + 3)
+    } else {
+        None
+    }
+}
+
+/// Collapse runs of `/` in the **path** of a URL that has already been
+/// joined *and* `{{var}}`-resolved, leaving every other byte alone.
+///
+/// Joining happens before substitution — necessarily, because an
+/// environment's own base URL may be templated — so [`join_base_url`]
+/// cannot know that `{{var}}` will expand to something already starting
+/// with `/`. It inserts a separator, and the substitution then turns
+/// `http://host:9200/{{var}}` into `http://host:9200//api`, which is a
+/// different route to most servers. Only after substitution is the truth
+/// known.
+///
+/// Scope is deliberately narrow — a blind collapse would corrupt real
+/// URLs:
+///   - `scheme://` is not a path. `https://` must survive verbatim.
+///   - a leading `//` with **no** scheme is a protocol-relative
+///     reference (`//cdn.example.com/x`); its slashes carry meaning.
+///   - `?query` / `#fragment` are data, not path: a param carrying a
+///     nested URL (`?redirect=https://x//y`) must pass through untouched.
+///   - an unresolved `{{var}}` marker is text, not a separator, so it
+///     lands in `missing_vars` rather than being flattened away.
+///
+/// Mirrors `collapseUrlSlashes` in `src/lib/url.ts`; the two must agree
+/// or the preview and the request that actually goes out describe
+/// different URLs.
+pub fn collapse_url_slashes(url: &str) -> String {
+    if url.is_empty() {
+        return String::new();
+    }
+    // `scheme://` and the protocol-relative `//` are heads, not path.
+    let (head, rest) = match scheme_prefix_len(url) {
+        Some(n) => url.split_at(n),
+        None if url.starts_with("//") => url.split_at(2),
+        None => ("", url),
+    };
+    // An authority never contains a `/` (it ends at the first one), so
+    // whatever follows the head is safe to treat as path.
+    let cut = rest.find(['?', '#']).unwrap_or(rest.len());
+    let (path, tail) = rest.split_at(cut);
+
+    let mut out = String::with_capacity(head.len() + path.len() + tail.len());
+    out.push_str(head);
+    let mut prev_slash = false;
+    for ch in path.chars() {
+        if ch == '/' {
+            if prev_slash {
+                continue;
+            }
+            prev_slash = true;
+        } else {
+            prev_slash = false;
+        }
+        out.push(ch);
+    }
+    out.push_str(tail);
+    out
 }
 
 // -------------------------------------------------------------------------
@@ -629,9 +761,11 @@ fn base64_encode(input: &[u8]) -> String {
 ///
 /// Resolution order (mirrors `buildFetchInit`):
 ///   1. Apply overrides (url / method / headers / params / body).
-///   2. Resolve baseUrl via [`resolve_base_url`].
+///   2. Resolve baseUrl via [`resolve_base_url_with`].
 ///   3. Substitute `{{var}}` everywhere (URL path, headers, params,
-///      body content, auth fields).
+///      body content, auth fields), then collapse duplicate path
+///      slashes (see [`collapse_url_slashes`] — the substitution is what
+///      can turn the join's separator into a `//`).
 ///   4. Append enabled query params (encoded).
 ///   5. Append apikey query (if `auth.kind == Apikey && inLocation == Query`).
 ///   6. Build ordered header list (user headers + auto Content-Type
@@ -642,6 +776,12 @@ fn base64_encode(input: &[u8]) -> String {
 /// Returns `Ok(ResolvedEndpoint)` on success. The `missing_vars`
 /// field carries the union of every `{{x}}` that didn't resolve —
 /// callers decide whether to fail or warn.
+///
+/// The module is selected through `overrides.module_id` rather than a
+/// parameter: the module is caller context, exactly like the caller's own
+/// base-URL choice, and putting it here means every existing caller that
+/// passes `None` keeps compiling — resolving to "no module, so no cell to
+/// read", which is what an endpoint with no tree context deserves.
 ///
 /// `AppError::Validation` is only returned for clearly malformed
 /// input (e.g. negative size constraints). For the current send
@@ -709,16 +849,27 @@ pub fn resolve_endpoint(
     }
 
     // ---- baseUrl resolution + URL substitution ------------------------
-    let (base_url, _src, _def_id) =
-        resolve_base_url_with(detail, env, project, eff_def_id.as_deref());
+    let (base_url, _src, _def_id) = resolve_base_url_with(
+        detail,
+        env,
+        project,
+        eff_def_id.as_deref(),
+        overrides.and_then(|o| o.module_id.as_deref()),
+    );
     let joined = join_base_url(&base_url, &eff_url);
     let url_r = resolve_template(&joined, &vars);
     for m in url_r.missing {
         record_missing(&mut missing, &mut seen, m);
     }
+    // After substitution, never before: `{{var}}` → `/api` is what turns
+    // the separator `join_base_url` inserted into a `//`, so this is the
+    // first point where the real path is known. Query/fragment data is
+    // left alone by `collapse_url_slashes`, which is why params can still
+    // be appended after it.
+    let url_norm = collapse_url_slashes(&url_r.resolved);
 
     // ---- query string append (uses already-substituted params) -------
-    let url_with_params = append_query_string(url_r.resolved, &params_subst);
+    let url_with_params = append_query_string(url_norm, &params_subst);
 
     // ---- auth resolution ---------------------------------------------
     let (resolved_auth, auth_miss) = resolve_auth(&eff_auth, &vars);

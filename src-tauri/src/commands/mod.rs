@@ -32,7 +32,11 @@
 //! drift between REST, Tauri command, and SQLite test paths.
 
 mod base_url_defs;
-mod dto;
+// `pub(crate)` because the REST route deserialises the same
+// `CreateProjectOpts` the Tauri command takes — the two transports have
+// to agree on what a create carries, and two copies of the DTO would be
+// exactly the drift this file's header warns about.
+pub(crate) mod dto;
 mod environments;
 mod mcp_auto_start;
 mod mcp_capability;
@@ -41,7 +45,6 @@ mod nodes;
 mod permissions;
 mod projects;
 mod request_settings;
-mod send;
 
 // The globs (not item lists) are load-bearing: `#[tauri::command]` also emits
 // two `#[macro_export]`ed helper macros next to the function —
@@ -61,8 +64,3 @@ pub use nodes::*;
 pub use permissions::*;
 pub use projects::*;
 pub use request_settings::*;
-pub use send::*;
-
-#[cfg(test)]
-#[path = "endpoint_send_tests.rs"]
-mod endpoint_send_tests;

@@ -1,7 +1,16 @@
 //! CRUD for the `environments` table.
 //!
-//! Each environment holds a per-definition URL map (`baseUrls`) and a
-//! free-form variable pool. `set_active` is a transactional
+//! Each environment holds a per-(service × module) URL map
+//! (`moduleBaseUrls`) and a free-form variable pool. That map is the only
+//! URL layer: a cell is either set or it is not, and a missing cell
+//! resolves to `''` rather than falling back to another module's value or
+//! to the retired environment-level map. The `base_urls_json` column still
+//! exists — dropping a column means rebuilding the table, which means a
+//! `SCHEMA_VERSION` bump, which means `ensure_current_schema` deletes the
+//! user's store — but nothing here reads or writes it; the one reader is
+//! the migration in `db::migrate`.
+//!
+//! `set_active` is a transactional
 //! "demote others, promote this" — the transaction must hold the
 //! write lock across both steps or two simultaneous set_active calls
 //! could leave two envs active. We don't take the lock here — the
@@ -14,6 +23,14 @@ use rusqlite::{params, Connection, Row};
 use crate::domain::{Environment, EnvironmentPatch};
 use crate::error::AppError;
 
+/// Column list every read here shares, in [`row_to_env`]'s order.
+///
+/// One string rather than four copies: the two URL columns sit next to
+/// each other, and a read that named only one would silently produce an
+/// environment whose modules all resolve to `''`.
+const COLUMNS: &str =
+    "id, project_id, name, is_active, base_urls_json, module_base_urls_json, variables_json";
+
 // -------------------------------------------------------------------------
 // Reads.
 // -------------------------------------------------------------------------
@@ -24,12 +41,11 @@ pub fn list_by_project(
     conn: &mut Connection,
     project_id: &str,
 ) -> Result<Vec<Environment>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, project_id, name, is_active, base_urls_json, variables_json \
-         FROM environments \
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM environments \
          WHERE project_id = ?1 \
-         ORDER BY name ASC, id ASC",
-    )?;
+         ORDER BY name ASC, id ASC"
+    ))?;
     let rows = stmt.query_map(params![project_id], row_to_env)?;
     let mut out = Vec::new();
     for r in rows {
@@ -41,11 +57,10 @@ pub fn list_by_project(
 /// All environments across every project — used by the REST
 /// `GET /api/environments` when no `projectId` filter is supplied.
 pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, project_id, name, is_active, base_urls_json, variables_json \
-         FROM environments \
-         ORDER BY project_id ASC, name ASC, id ASC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM environments \
+         ORDER BY project_id ASC, name ASC, id ASC"
+    ))?;
     let rows = stmt.query_map(params![], row_to_env)?;
     let mut out = Vec::new();
     for r in rows {
@@ -62,12 +77,11 @@ pub fn get_active(
     conn: &mut Connection,
     project_id: &str,
 ) -> Result<Option<Environment>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, project_id, name, is_active, base_urls_json, variables_json \
-         FROM environments \
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM environments \
          WHERE project_id = ?1 AND is_active = 1 \
-         LIMIT 1",
-    )?;
+         LIMIT 1"
+    ))?;
     let mut rows = stmt.query(params![project_id])?;
     match rows.next()? {
         Some(row) => Ok(Some(row_to_env(row).map_err(AppError::Sqlite)?)),
@@ -76,10 +90,7 @@ pub fn get_active(
 }
 
 pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, project_id, name, is_active, base_urls_json, variables_json \
-         FROM environments WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM environments WHERE id = ?1"))?;
     let mut rows = stmt.query(params![id])?;
     match rows.next()? {
         Some(row) => row_to_env(row).map_err(AppError::Sqlite),
@@ -92,13 +103,13 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
 /// resolution to apply the per-project permission check; treating an
 /// unknown id as a silent "global" would be a permission bypass.
 ///
-/// The five `env_*` mutating tools (update / delete / set_var / set_baseurl
-/// / set_active) used to call `check_permission(.., "global", ..)`
+/// The `env_*` mutating tools (update / delete / set_var / set_active)
+/// used to call `check_permission(.., "global", ..)`
 /// with the literal `"global"` as a stand-in for "any project". That
 /// was a permission-bypass waiting to happen: any project whose agent
 /// permission row was absent defaulted to `Permission::ReadCall`
 /// (see `db::permissions::get`), so the "global" lookup would silently
-/// succeed for `env_update` / `env_set_var` / `env_set_baseurl` and
+/// succeed for `env_update` / `env_set_var` and
 /// `env_set_active` (which check `ReadCall`), and for `env_delete`
 /// (which checked `Full` and so still got denied — but only by
 /// accident). This helper is the missing piece that closes that gap:
@@ -121,18 +132,23 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
 // -------------------------------------------------------------------------
 
 pub fn create(conn: &mut Connection, e: &Environment) -> Result<(), AppError> {
-    let base_urls_json = serde_json::to_string(&e.base_urls)?;
+    let module_base_urls_json = serde_json::to_string(&e.module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
+    // `base_urls_json` is deliberately absent from this list. Naming it
+    // would keep writing a column nothing reads, and carrying a caller's
+    // legacy `baseUrls` into it would leave a blob that looks live to the
+    // next reader. Leaving it out lets the schema default apply, which is
+    // the empty value it holds on every row this build writes.
     conn.execute(
         "INSERT INTO environments \
-         (id, project_id, name, is_active, base_urls_json, variables_json) \
+         (id, project_id, name, is_active, module_base_urls_json, variables_json) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             e.id,
             e.project_id,
             e.name,
             e.is_active as i64,
-            base_urls_json,
+            module_base_urls_json,
             variables_json,
         ],
     )?;
@@ -156,10 +172,15 @@ pub fn update(
         sets.push(format!("name = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(name.clone()));
     }
-    if let Some(b) = &patch.base_urls {
-        sets.push(format!("base_urls_json = ?{}", binds.len() + 1));
-        binds.push(rusqlite::types::Value::Text(serde_json::to_string(b)?));
+    if let Some(m) = &patch.module_base_urls {
+        sets.push(format!("module_base_urls_json = ?{}", binds.len() + 1));
+        binds.push(rusqlite::types::Value::Text(serde_json::to_string(m)?));
     }
+    // `patch.base_urls` is accepted and **ignored** — the column behind it
+    // is dead (see the module docs). Writing it would make a retired
+    // layer look current to the next reader, and dropping the field from
+    // the patch type would fail a payload from an older client outright,
+    // so silently skipping it is the trade.
     if let Some(v) = &patch.variables {
         sets.push(format!("variables_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(v)?));
@@ -321,36 +342,56 @@ pub fn rename_var(
     Ok(env)
 }
 
-/// Set or clear a single `baseUrls[def_id]` slot on an environment.
-/// `url = None` removes the slot (so a `def` without a configured URL
-/// on this env resolves to ""). `url = Some(u)` upserts `def_id → u`.
+/// Set or clear one `moduleBaseUrls[def_id][module_id]` cell.
+///
+/// `url = None` removes the cell, and that is a real answer rather than a
+/// hole: (service × module) is the only layer there is, so a cleared cell
+/// means this module has no address for this service and resolution stops
+/// there. It does not fall back to another module's value or to the
+/// retired environment-level map — two modules pointing one service at
+/// different hosts is the normal case, not an error to be smoothed over.
+///
+/// The endpoint's module is not verified against the environment's
+/// project here: the pair only becomes a URL when an endpoint actually
+/// resolves it, and `base_url_definitions.project_id_of` is the check that
+/// keeps a cross-project service from being named at all.
 ///
 /// MUST be called inside `db::with_tx`.
 ///
 /// Returns the post-update [`Environment`] for the renderer to echo.
-pub fn set_base_url(
+pub fn set_module_base_url(
     conn: &mut Connection,
     env_id: &str,
     def_id: &str,
+    module_id: &str,
     url: Option<&str>,
 ) -> Result<Environment, AppError> {
-    // Same load → mutate → write pattern as `set_var`. The two
-    // helpers stay split so the SQL stays trivial to grep and the
-    // JSON column names (`variables_json` / `base_urls_json`) are
-    // visible at the call site.
+    // Same load → mutate → write pattern as `set_var`, for the same
+    // reason: one atomic UPDATE of the JSON column keeps a reader from
+    // seeing a half-written map. The nested map is only created when a
+    // value is actually being set, so clearing the last cell in a service
+    // does not leave an empty `{}` behind it.
     let mut env = get(conn, env_id)?;
     match url {
         Some(u) => {
-            env.base_urls.insert(def_id.to_string(), u.to_string());
+            env.module_base_urls
+                .entry(def_id.to_string())
+                .or_default()
+                .insert(module_id.to_string(), u.to_string());
         }
         None => {
-            env.base_urls.remove(def_id);
+            if let Some(per_module) = env.module_base_urls.get_mut(def_id) {
+                per_module.remove(module_id);
+                if per_module.is_empty() {
+                    env.module_base_urls.remove(def_id);
+                }
+            }
         }
     }
-    let base_urls_json = serde_json::to_string(&env.base_urls)?;
+    let module_base_urls_json = serde_json::to_string(&env.module_base_urls)?;
     let rows = conn.execute(
-        "UPDATE environments SET base_urls_json = ?1 WHERE id = ?2",
-        params![base_urls_json, env_id],
+        "UPDATE environments SET module_base_urls_json = ?1 WHERE id = ?2",
+        params![module_base_urls_json, env_id],
     )?;
     if rows == 0 {
         return Err(AppError::NotFound(format!("environment {env_id}")));
@@ -364,7 +405,8 @@ pub fn set_base_url(
 
 fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
     let base_urls_json: String = row.get(4)?;
-    let variables_json: String = row.get(5)?;
+    let module_base_urls_json: String = row.get(5)?;
+    let variables_json: String = row.get(6)?;
     let parse_err = |e: serde_json::Error, col: &str| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
@@ -372,8 +414,15 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
             Box::new(JsonColError(format!("{col}: {e}"))),
         )
     };
+    // `base_urls` is decoded but never used: the column is kept only so it
+    // survives, and decoding it is what keeps the wire field honest for a
+    // client that still sends one. A malformed blob therefore still fails
+    // the read rather than being silently reported as an empty map.
     let base_urls: HashMap<String, String> =
         serde_json::from_str(&base_urls_json).map_err(|e| parse_err(e, "base_urls_json"))?;
+    let module_base_urls: HashMap<String, HashMap<String, String>> =
+        serde_json::from_str(&module_base_urls_json)
+            .map_err(|e| parse_err(e, "module_base_urls_json"))?;
     let variables: HashMap<String, String> =
         serde_json::from_str(&variables_json).map_err(|e| parse_err(e, "variables_json"))?;
     Ok(Environment {
@@ -382,6 +431,7 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
         name: row.get(2)?,
         is_active: row.get::<_, i64>(3)? != 0,
         base_urls,
+        module_base_urls,
         variables,
     })
 }

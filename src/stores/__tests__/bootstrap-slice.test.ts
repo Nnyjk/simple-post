@@ -95,6 +95,7 @@ const environment: Environment = {
   projectId: 'p1',
   name: '开发',
   baseUrls: {},
+  moduleBaseUrls: {},
   variables: {},
   isActive: true,
 };

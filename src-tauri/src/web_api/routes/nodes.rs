@@ -30,63 +30,10 @@ use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState}
 
 use super::super::dto::{HttpSendBody, NodeCreateBody, NodeMoveBody};
 
-/// `POST /api/nodes/:id/send` — endpoints only.
-///
-/// The browser names the endpoint, not a URL. This is the fix for the
-/// previous `POST /api/http/send` shape, where any authenticated caller
-/// could hand the server an arbitrary target — the cloud metadata
-/// address `169.254.169.254` included, which made every `serve-web` /
-/// Docker deployment an open proxy. `/api/http/send` still exists for
-/// ad-hoc raw-URL pokes, but it is no longer what the UI uses.
-pub(crate) async fn node_send(
-    State(s): State<Arc<WebState>>,
-    Path(id): Path<String>,
-    Json(body): Json<Value>,
-) -> Result<Json<HttpResult>, HttpErrorResponse> {
-    // The renderer's URL input only ever holds a path; the base URL is
-    // composed from the endpoint + environment rows. An absolute URL in
-    // the draft is therefore either a client bug or someone aiming the
-    // server at a host of their choosing — which is precisely the SSRF
-    // this route exists to remove. `join_base_url` would happily accept
-    // it (a path carrying a scheme wins), so it is refused here, at the
-    // shape boundary where the caller is an untrusted remote client.
-    //
-    // The Tauri command allows it: there the local user is the operator
-    // and the absolute form is a legitimate thing to type. A caller who
-    // genuinely wants an arbitrary target on this deployment can still
-    // use `POST /api/http/send`, which is gated by the outbound policy.
-    if let Some(u) = body.pointer("/overrides/url").and_then(|v| v.as_str()) {
-        if reqwest::Url::parse(u).is_ok() {
-            return Err(map_app_error(AppError::Validation(format!(
-                "overrides.url must be a path relative to the endpoint's base URL, \
-                 got an absolute URL `{u}`. Use POST /api/http/send for ad-hoc targets."
-            ))));
-        }
-    }
-
-    // `Json<Value>` accepts any JSON value, but `body["k"] = v` panics on a
-    // non-object (serde_json's `index_or_insert` has `_ => panic!`). With
-    // `panic = "abort"` in the release profile that turns a malformed
-    // request body into a process abort for every other user, so the shape
-    // is checked before the insert.
-    let Value::Object(mut map) = body else {
-        return Err(map_app_error(AppError::Validation(
-            "request body must be a JSON object".into(),
-        )));
-    };
-    map.insert("endpointId".to_string(), Value::String(id));
-    let args: crate::commands::EndpointSendArgs = serde_json::from_value(Value::Object(map))
-        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
-    let result = crate::commands::send_endpoint_by_id(&s.pool, &args)
-        .await
-        .map_err(map_app_error)?;
-    Ok(Json(result))
-}
-
 /// `POST /api/http/send` — the raw-URL escape hatch.
 ///
 /// Not part of the tree; kept at its own path because it is not about a
-/// stored node. Gated by the outbound policy, unlike `node_send` above.
+/// stored node. Gated by the outbound policy.
 pub(crate) async fn http_send(
     State(_s): State<Arc<WebState>>,
     Json(body): Json<HttpSendBody>,

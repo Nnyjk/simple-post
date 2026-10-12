@@ -74,6 +74,55 @@ fn delete_removes_def() {
 }
 
 #[test]
+fn delete_clears_a_star_that_pointed_at_it() {
+    // p_demo stars def_default out of the box. Leaving the pointer behind
+    // would keep the project advertising a service that no longer exists.
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| delete(c, "def_default")).unwrap();
+    let proj = db::with_conn(&pool, |c| db::projects::get(c, "p_demo")).unwrap();
+    assert_eq!(proj.default_base_url_definition_id, None);
+}
+
+#[test]
+fn delete_leaves_other_stars_alone() {
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| {
+        create(
+            c,
+            &BaseUrlDefinition {
+                id: "def_alt".into(),
+                name: "Alt".into(),
+                description: None,
+            },
+            "p_demo",
+        )?;
+        set_default(c, "p_demo", Some("def_alt"))?;
+        Ok(())
+    })
+    .unwrap();
+    db::with_tx(&pool, |c| delete(c, "def_default")).unwrap();
+    let proj = db::with_conn(&pool, |c| db::projects::get(c, "p_demo")).unwrap();
+    assert_eq!(
+        proj.default_base_url_definition_id.as_deref(),
+        Some("def_alt"),
+        "only the star of the deleted service is taken down"
+    );
+}
+
+#[test]
+fn delete_missing_returns_not_found_and_changes_nothing() {
+    let pool = fresh_pool();
+    let err = db::with_tx(&pool, |c| delete(c, "def_ghost")).unwrap_err();
+    assert_eq!(err.code(), "not_found");
+    // The savepoint rolls back, so the real star survives the failed call.
+    let proj = db::with_conn(&pool, |c| db::projects::get(c, "p_demo")).unwrap();
+    assert_eq!(
+        proj.default_base_url_definition_id.as_deref(),
+        Some("def_default")
+    );
+}
+
+#[test]
 fn set_default_updates_project_pointer() {
     let pool = fresh_pool();
     // Add a second def under p_demo, then point at it.

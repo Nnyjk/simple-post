@@ -50,6 +50,7 @@ fn settings_override_extracts_values() {
         auth: None,
         env_id: None,
         base_url_definition_id: None,
+        module_id: None,
         settings_override: Some(so),
         timeout_ms: None,
         follow_redirects: None,
@@ -73,22 +74,32 @@ fn arg_helpers_cover_top_level() {
 
 #[test]
 fn apply_base_url_handles_env_and_override() {
-    let mut base_urls = HashMap::new();
-    base_urls.insert("auth".into(), "https://auth.example.com".into());
+    let mut module_base_urls = HashMap::new();
+    module_base_urls.insert(
+        "auth".into(),
+        HashMap::from([("mod_a".into(), "https://auth.example.com".into())]),
+    );
     let env = Environment {
         id: "e1".into(),
         project_id: "p1".into(),
         name: "dev".into(),
-        base_urls,
+        base_urls: HashMap::new(),
+        module_base_urls,
         variables: HashMap::new(),
         is_active: true,
     };
-    let (joined, base) = apply_base_url("/login", Some(&env), Some("auth"));
+    let (joined, base) = apply_base_url("/login", Some(&env), Some("auth"), Some("mod_a"));
     assert_eq!(joined, "https://auth.example.com/login");
     assert_eq!(base, "https://auth.example.com");
 
-    let (passthru, _) = apply_base_url("/login", None, None);
+    let (passthru, _) = apply_base_url("/login", None, None, None);
     assert_eq!(passthru, "/login");
+
+    // No module, no cell: the same service has a URL for `mod_a` only,
+    // and there is no fallback to it or to another service.
+    let (no_module, empty) = apply_base_url("/login", Some(&env), Some("auth"), None);
+    assert_eq!(no_module, "/login");
+    assert_eq!(empty, "");
 }
 
 #[test]

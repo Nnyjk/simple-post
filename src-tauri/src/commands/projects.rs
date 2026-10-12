@@ -42,8 +42,7 @@ pub fn projects_create(
         updated_at: now,
     };
     crate::db::with_tx(&state, |c| {
-        crate::db::projects::create(c, &project)?;
-        Ok(project.clone())
+        crate::db::projects::create_with_defaults(c, &project)
     })
 }
 

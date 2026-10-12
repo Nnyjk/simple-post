@@ -75,9 +75,9 @@ export function EndpointList({
               dragContext.setDataTransfer(e, { kind: 'endpoint', ids });
             }}
             onDragEnd={dragContext.handleDragEnd}
-            onDragOver={dragContext.makeDragOverHandler({ kind: 'endpoint', id: ep.id }, null)}
+            onDragOver={dragContext.makeDragOverHandler({ kind: 'endpoint', id: ep.id })}
             onDragLeave={dragContext.makeDragLeaveHandler({ kind: 'endpoint', id: ep.id })}
-            onDrop={dragContext.makeDropHandler({ kind: 'endpoint', id: ep.id }, null)}
+            onDrop={dragContext.makeDropHandler({ kind: 'endpoint', id: ep.id })}
             dropHint={
               dragContext.dropHint && dragContext.dropHint.key === `endpoint:${ep.id}`
                 ? dragContext.dropHint.zone

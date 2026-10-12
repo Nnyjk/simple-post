@@ -12,7 +12,7 @@ const VAR_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /**
  * VariableTable — the env's `{{key}} → value` overrides.
  *
- * Shares its list chrome with `BaseUrlTable` via `KeyValueTable`; only
+ * Shares its list chrome with the 前置 URL table via `KeyValueTable`; only
  * the cells below are local.
  */
 interface VariableTableProps {

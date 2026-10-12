@@ -2,6 +2,8 @@
 // region: environments
 // ===========================================================================
 
+use std::collections::HashMap;
+
 use tauri::State;
 
 use crate::db::DbPool;
@@ -34,6 +36,7 @@ pub fn environments_create(
         project_id,
         name,
         base_urls: opts.base_urls.unwrap_or_default(),
+        module_base_urls: HashMap::new(),
         variables: opts.variables.unwrap_or_default(),
         is_active: opts.make_active.unwrap_or(false),
     };
@@ -90,15 +93,32 @@ pub fn environments_rename_var(
     })
 }
 
+/// Write one cell of the one and only URL layer:
+/// `env.moduleBaseUrls[defId][moduleId]`.
+///
+/// `defId` names a service of the project and `moduleId` the module
+/// whose address for it is being set — the same service can point at
+/// two hosts for two modules. There is no second layer to write and
+/// nothing above this one to fall back to, so a cell cleared here means
+/// the request goes out without a base URL. `url = None` clears it;
+/// passing an empty string would store a cell that reads as empty and
+/// is indistinguishable from cleared.
 #[tauri::command]
-pub fn environments_set_baseurl(
+pub fn environments_set_module_baseurl(
     state: State<DbPool>,
     env_id: String,
     def_id: String,
+    module_id: String,
     url: Option<String>,
 ) -> Result<Environment, AppError> {
     crate::db::with_tx(&state, |c| {
-        crate::db::environments::set_base_url(c, &env_id, &def_id, url.as_deref())
+        crate::db::environments::set_module_base_url(
+            c,
+            &env_id,
+            &def_id,
+            &module_id,
+            url.as_deref(),
+        )
     })
 }
 

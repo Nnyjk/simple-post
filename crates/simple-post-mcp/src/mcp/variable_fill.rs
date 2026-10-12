@@ -179,6 +179,18 @@ async fn tool_api_resolve_endpoint(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
+    // Same per-module lookup as `api_call_endpoint`: `api_resolve_endpoint`
+    // has to agree with the send path about which URL an endpoint resolves
+    // to, or an AI client previews one host and the send goes to another.
+    let mut overrides = overrides;
+    if overrides.module_id.is_none() {
+        overrides.module_id = simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::nodes::module_id_of(c, &endpoint.node_id)
+        })
+        .ok()
+        .flatten();
+    }
+
     let resolved = crate::variable_fill::resolve_endpoint(
         &endpoint,
         env.as_ref(),

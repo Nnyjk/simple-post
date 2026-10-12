@@ -137,16 +137,56 @@ fn environment_base_urls_round_trip() {
         base_urls: [("def_default".to_string(), "http://x".to_string())]
             .into_iter()
             .collect(),
+        module_base_urls: [(
+            "def_default".to_string(),
+            [
+                ("m_auth".to_string(), "http://auth".to_string()),
+                ("m_order".to_string(), "http://order".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        )]
+        .into_iter()
+        .collect(),
         variables: [("token".to_string(), "abc".to_string())]
             .into_iter()
             .collect(),
         is_active: true,
     };
     let s = serde_json::to_string(&env).unwrap();
+    // The wire names both URL maps, and the retired one keeps its
+    // historical `baseUrls` spelling so an older client still parses it.
+    assert!(s.contains("\"moduleBaseUrls\""), "{s}");
     let back: Environment = serde_json::from_str(&s).unwrap();
     assert_eq!(back.base_urls.get("def_default").unwrap(), "http://x");
+    assert_eq!(
+        back.module_base_urls
+            .get("def_default")
+            .unwrap()
+            .get("m_auth")
+            .unwrap(),
+        "http://auth"
+    );
     assert_eq!(back.variables.get("token").unwrap(), "abc");
     assert!(back.is_active);
+}
+
+#[test]
+fn environment_deserialises_without_module_base_urls() {
+    // A payload written before the value layer moved must still load: the
+    // field carries `#[serde(default)]` precisely so it arrives empty
+    // rather than failing the whole read.
+    let back: Environment = serde_json::from_value(json!({
+        "id": "e1",
+        "projectId": "p1",
+        "name": "dev",
+        "baseUrls": { "def_default": "http://x" },
+        "variables": {},
+        "isActive": false,
+    }))
+    .unwrap();
+    assert!(back.module_base_urls.is_empty());
+    assert_eq!(back.base_urls.get("def_default").unwrap(), "http://x");
 }
 
 #[test]

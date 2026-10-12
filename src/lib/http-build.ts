@@ -30,7 +30,7 @@ import type {
   KeyValue,
   RequestBody,
 } from '@/types/domain';
-import { joinBaseUrl, resolveVarsWithMissing } from './url';
+import { collapseUrlSlashes, joinBaseUrl, resolveVarsWithMissing } from './url';
 
 /**
  * The inputs that affect the *wire shape* of a request. Settings
@@ -97,11 +97,15 @@ export interface PreparedRequest {
   method: HttpMethod;
   /**
    * The complete URL: `join(baseUrl, urlPath)` → `{{var}}` resolution →
-   * param values resolved and appended → apikey-in-query, in that order.
+   * path slash-collapse → param values resolved and appended →
+   * apikey-in-query, in that order.
    * Joining *before* resolving means a `{{var}}` inside the environment's
-   * own base URL is resolved too. Params are merged last because their
-   * values are resolved on the way in (see `appendQueryString`), so by
-   * the time they are encoded no marker can survive into the URL.
+   * own base URL is resolved too. The collapse comes after resolving
+   * because it is the substitution, not the join, that turns the join's
+   * separator into a `//` when a variable expands to a value starting
+   * with `/`. Params are merged last because their values are resolved on
+   * the way in (see `appendQueryString`), so by the time they are encoded
+   * no marker can survive into the URL.
    */
   url: string;
   /**
@@ -404,10 +408,17 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
 
   const auth = resolveAuth(input.auth, input.env, missing);
 
-  const url = resolveVarsWithMissing(joinBaseUrl(input.baseUrl, input.urlPath), input.env);
+  const joined = joinBaseUrl(input.baseUrl, input.urlPath);
+  const url = resolveVarsWithMissing(joined, input.env);
   missing.add(url.missing);
+  // After substitution, never before: `{{var}}` → `/api` is what turns the
+  // separator `joinBaseUrl` inserted into a `//`, so this is the first
+  // point where the real path is known. Query/fragment data is left alone
+  // by `collapseUrlSlashes`, which is why params can still be appended
+  // after it.
+  const normalized = collapseUrlSlashes(url.value);
 
-  const withParams = appendQueryString(url.value, input.params, input.env, missing);
+  const withParams = appendQueryString(normalized, input.params, input.env, missing);
   const finalUrl = appendApikeyToQuery(withParams, auth);
 
   const headers = buildOrderedHeaders(input.headers, input.body.mode, auth, input.env, missing);

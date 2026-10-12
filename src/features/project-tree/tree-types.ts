@@ -74,15 +74,9 @@ export interface DragContextValue {
    */
   moveNodes: (nodeIds: string[], parentId: string | null, index: number) => void;
   setDataTransfer: (e: ReactDragEvent, payload: DragPayload) => void;
-  makeDragOverHandler: (
-    target: { kind: TargetKind; id: string },
-    el: HTMLElement | null,
-  ) => (e: ReactDragEvent) => void;
+  makeDragOverHandler: (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => void;
   makeDragLeaveHandler: (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => void;
-  makeDropHandler: (
-    target: { kind: TargetKind; id: string },
-    el: HTMLElement | null,
-  ) => (e: ReactDragEvent) => void;
+  makeDropHandler: (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => void;
   handleDragEnd: (e: ReactDragEvent) => void;
   dropHint: { key: string; zone: DropZone } | null;
 }

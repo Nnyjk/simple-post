@@ -123,25 +123,29 @@ export interface EndpointDetail {
   url: string;
   /**
    * Environment to inherit `baseUrls` and free-form `variables` from.
-   * `null` (or absent) means "no env selected" — pickers fall back to
-   * the project's default baseUrl definition and the variable pool is
-   * empty.
+   * `null` (or absent) means "no env selected" — then the variable pool
+   * is empty and no baseUrl resolves (a URL slot without a value is not
+   * a value; see `resolveEndpointBaseUrl`).
    */
   environmentId?: string | null;
   /**
-   * Which project-level baseUrl definition this endpoint uses. `null`
-   * (or absent) means "use the project's default definition" (see
-   * `Project.defaultBaseUrlDefinitionId`). The actual URL is then
-   * looked up from `env.baseUrls[defId]`. Decoupling the env from
-   * the baseUrl means a single endpoint can keep its
-   * "鉴权服务 / 数据服务" semantics while the operator flips between
-   * dev / staging / prod envs.
+   * Which service this endpoint uses. The id names a row of **this
+   * project's** `baseUrlDefinitions`; a service of another project is a
+   * dangling reference and resolves to no baseUrl at all rather than to
+   * another project's host.
+   *
+   * `null` (or absent) means "follow the project default service" —
+   * `Project.defaultBaseUrlDefinitionId`. The actual URL is then
+   * `env.moduleBaseUrls[defId][moduleId]`, looked up for the endpoint's
+   * own module. Decoupling the env from the service is what lets one
+   * endpoint keep its "鉴权服务 / 数据服务" semantics while the operator
+   * flips between dev / staging / prod.
    */
   baseUrlDefinitionId?: string | null;
   /**
-   * Per-endpoint baseUrl override — wins over both the env's
-   * `baseUrls[defId]` and the project default. Use for one-off hosts
-   * (e.g. a staging mirror that lives in no env).
+   * Per-endpoint baseUrl override — wins over the module's service
+   * resolution. Use for one-off hosts (e.g. a staging mirror that
+   * lives in no env). Three-state: `null` = not in custom mode.
    */
   baseUrlOverride?: string | null;
   params: KeyValue[];
@@ -168,11 +172,20 @@ export interface EndpointResource extends ResourceNode {
 }
 
 /**
- * A named baseUrl slot owned by a project. The project declares the
- * *set of names* (e.g. "鉴权服务", "数据服务"); each env then provides
- * a concrete URL for each name. This is the "baseUrl 脱离变量单独
- * 配置" model — baseUrls are first-class project resources, not
- * just `{{var}}` placeholders in the env's free-form variables.
+ * One named service ("鉴权服务", "数据服务") belonging to a **project**.
+ *
+ * The service *list* belongs to the project and every module sees all of
+ * it: the user asked for exactly that ("服务应该绑定到项目，这样每一个
+ * 模块都会全部包含这些服务"), because a per-module list makes two modules
+ * that need the same host maintain it twice over.
+ *
+ * What stays per-module is the *URL*, in {@link Environment.moduleBaseUrls}:
+ * which service exists is a project question, but where "数据服务" points
+ * for a given environment and a given module is a
+ * (环境 × 模块 × 服务) question. That asymmetry is the whole model.
+ *
+ * Mirrors `BaseUrlDefinition` in
+ * `crates/simple-post-core/src/domain.rs`.
  */
 export interface BaseUrlDefinition {
   id: string;
@@ -187,16 +200,23 @@ export interface Project {
   /** @deprecated Use `baseUrlDefinitions` and `Environment.baseUrls[defId]` instead. The `baseUrl` field is kept for backward compatibility; new code should not reference it. */
   baseUrl?: string;
   /**
-   * The named baseUrl slots this project exposes. Each env maps each
-   * id to a concrete URL. Empty when the project hasn't declared any
-   * (a freshly imported project is allowed to start here).
+   * The named baseUrl slots this project exposes. **One list, shared by
+   * every module** — the settings table is the cartesian product of these
+   * services against the project's modules, and the HttpTester picker
+   * lists all of them. Empty when the project hasn't declared any (a
+   * freshly created project starts here; §9 of the v2 contract stopped
+   * `create_with_defaults` from seeding one).
    */
   baseUrlDefinitions: BaseUrlDefinition[];
   /**
-   * Which definition the picker should show when the user picks
-   * "项目默认". Endpoints with `baseUrlDefinitionId === null` also
-   * resolve through this id. `null` means "no default" — the picker
-   * then has nothing to offer as default.
+   * The project-wide default service (★) — what an endpoint resolves
+   * through when it names no service itself, i.e.
+   * `baseUrlDefinitionId === null`.
+   *
+   * `null` means "no default", which is a real, intentional state: the
+   * project has services but the user has not starred one, so endpoints
+   * that picked nothing have no baseUrl. Starring is per **project**;
+   * there is no per-module default.
    */
   defaultBaseUrlDefinitionId: string | null;
   color: string;
@@ -209,20 +229,33 @@ export interface Environment {
   projectId: string;
   name: string;
   /**
-   * Per-environment URLs for each project-level baseUrl definition,
-   * keyed by `BaseUrlDefinition.id`. The picker in HttpTester reads
-   * `env.baseUrls[endpoint.baseUrlDefinitionId ?? project.default…]`
-   * to compose the full URL.
+   * @deprecated 扁平值层，**不再读写**。
    *
-   * This replaces the older `Environment.baseUrl: string`. The store
-   * migrates the old single-URL field into this map at boot (under
-   * the project's default definition), so existing data carries
-   * forward.
+   * 它是 (环境 × 模块 × 服务) 那一层出现之前的形状，键只有 `defId`，
+   * 看不见模块，因此无法表达「同一个服务在两个模块指向不同主机」。
+   * 唯一值层是 {@link Environment.moduleBaseUrls}。
+   *
+   * 字段仍留在 schema 与线格式里：删列要重建表 = bump `SCHEMA_VERSION`
+   * = `ensure_current_schema` 直接删库。迁移会把历史值搬进
+   * `moduleBaseUrls`，留在 `baseUrls` 里的那份是不再被读取的死数据。
    */
   baseUrls: Record<string, string>;
   /**
+   * The one and only URL layer: `serviceId → moduleId → URL`.
+   *
+   * Every cell is an independent value. There is **no inheritance and no
+   * fallback** between them — an absent or empty cell means "no value for
+   * this combination", full stop, and deliberately does not borrow the
+   * project default service's cell or any other module's. That is what
+   * lets two modules use the same 服务 name against different hosts.
+   *
+   * `resolveEndpointBaseUrl` reads `moduleBaseUrls[def.id][moduleId]`,
+   * and the settings table writes one cell per (module, service) pair.
+   */
+  moduleBaseUrls: Record<string, Record<string, string>>;
+  /**
    * Free-form template variables (e.g. `token`, `apiKey`). baseUrl
-   * values live in `baseUrls`, not here.
+   * values live in `moduleBaseUrls`, not here.
    */
   variables: Record<string, string>;
   isActive: boolean;

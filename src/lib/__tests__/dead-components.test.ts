@@ -17,7 +17,7 @@ import { join, relative, resolve } from 'node:path';
  * This walks the real import graph instead of trusting convention. A
  * file is live if any non-test file under `src/` imports it, directly or
  * transitively. The transitive part matters: `KeyValueTable` is imported
- * by `BaseUrlTable` but by nothing else, and a naive one-hop check
+ * by the settings tables but by nothing else, and a naive one-hop check
  * would have called it dead and demanded its deletion.
  *
  * Deliberately conservative — it only asserts the strong, unambiguous

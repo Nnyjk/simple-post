@@ -15,7 +15,7 @@
  * already moved past.
  */
 import type { StateCreator } from 'zustand';
-import type { Project } from '@/types/domain';
+import type { Project, Environment } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import { filterTabsAfterRemoval, invokeWithRollback, tabKeysForSubtree } from './crud-helpers';
@@ -24,7 +24,7 @@ import { filterTabsAfterRemoval, invokeWithRollback, tabKeysForSubtree } from '.
 export interface ProjectCrudActions {
   addProject: (
     name: string,
-    opts?: { description?: string; baseUrl?: string; color?: string },
+    opts?: { description?: string; color?: string },
   ) => Promise<string | null>;
   updateProject: (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
@@ -41,6 +41,27 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         opts: opts ?? null,
       });
       set((s) => ({ projects: [...s.projects, project] }));
+      // A new project arrives with a default environment, and with a
+      // named service holding the Base URL the create form collected
+      // (see `db::projects::create_with_defaults`). Nothing refetches
+      // that: `openProject`'s `loadWorkspace` early-returns because
+      // layer 2 already ran during bootstrap, so without this the env
+      // switcher reads "—" and `{{var}}` has nothing to resolve against
+      // until the app is restarted — the exact "I typed a Base URL and
+      // nothing happened" this path exists to prevent.
+      //
+      // Replace rather than merge: `environments_list` is unfiltered and
+      // returns every project's environments, which is what the store
+      // already holds.
+      try {
+        const environments = await invokeCmd<Environment[]>(COMMANDS.environmentsList);
+        set({ environments });
+      } catch (e) {
+        // The project itself exists; a failed env refresh is not a
+        // failed create, and failing the whole action would leave a
+        // project on disk the store does not know about.
+        console.error('[store] environments_list after create failed', e);
+      }
       return project.id;
     } catch (e) {
       console.error('[store] projects_create failed', e);
