@@ -22,8 +22,8 @@ import { useAppStore } from '@/stores/app-store';
 import { CreateDialog, ColorPicker, DescriptionField, Field, NameField } from './CreateDialog';
 
 /**
- * The rows `projects_create` seeds. Mirrors `DEFAULT_ENVIRONMENT_NAME` in
- * `crates/simple-post-core/src/db/projects.rs`.
+ * The rows `projects_create` seeds. Mirrors `DEFAULT_ENVIRONMENT_NAME` and
+ * `DEFAULT_MODULE_NAME` in `crates/simple-post-core/src/db/projects.rs`.
  *
  * Duplicated rather than fetched, for the same reason
  * `lib/palette.ts` mirrors `domain::default_project_color()`: the backend
@@ -37,9 +37,10 @@ import { CreateDialog, ColorPicker, DescriptionField, Field, NameField } from '.
  * the user adds services, stars one, and fills each module's address in
  * Settings. Asking for a URL here would be asking for something that
  * nothing stores — the field it used to bind to was dropped along with
- * the default module and default service.
+ * the default service.
  */
 const DEFAULT_ENVIRONMENT_NAME = '默认环境';
+const DEFAULT_MODULE_NAME = '默认模块';
 
 export function CreateProjectDialog() {
   const draft = useAppStore((s) => s.newItem);
@@ -82,7 +83,8 @@ export function CreateProjectDialog() {
       </Field>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         新项目会带一个环境「{DEFAULT_ENVIRONMENT_NAME}
-        」。服务清单与各模块的前置 URL 在「设置 · 环境变量」里配置。
+        」和一个模块「{DEFAULT_MODULE_NAME}
+        」，都可以就地改名。服务清单与各模块的前置 URL 在「设置 · 环境变量」里配置。
       </p>
     </CreateDialog>
   );

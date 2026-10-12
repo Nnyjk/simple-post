@@ -1,6 +1,6 @@
 use super::*;
 use crate::db;
-use crate::domain::BaseUrlDefinition;
+use crate::domain::{BaseUrlDefinition, ResourceNodeType};
 
 fn fresh_pool() -> db::DbPool {
     let dir = std::env::temp_dir().join(format!(
@@ -283,24 +283,55 @@ fn create_with_defaults_seeds_a_project_and_one_environment() {
 }
 
 #[test]
-fn create_with_defaults_creates_no_module() {
-    // The module-owned model needed one (services hung off modules). The
-    // project-owned model does not, and a 「默认模块」 the user did not ask
-    // for is a row they then have to notice and delete.
+fn create_with_defaults_seeds_one_module_at_the_project_root() {
+    // This used to assert the opposite, on the grounds that a 「默认模块」
+    // the user did not ask for is a row they have to notice and delete.
+    // It came back once the module became both the row axis of the
+    // base-URL grid and the subject of the module workspace's 服务 block:
+    // with none, a fresh project showed three dead ends at once (the
+    // tree's 「该项目还没有模块」, the grid's 「没有模块可归属」, an empty
+    // 服务 block) for a shape the user needs anyway.
     let pool = fresh_pool();
     db::with_tx(&pool, |c| {
         create_with_defaults(c, &sample_project("p_new", "New Project"))
     })
     .unwrap();
-    let modules: i64 = db::with_conn(&pool, |c| {
-        Ok(c.query_row(
-            "SELECT COUNT(*) FROM nodes WHERE root_id = 'p_new'",
-            [],
-            |r| r.get(0),
-        )?)
+
+    let nodes = db::with_conn(&pool, |c| db::nodes::list_by_root(c, "p_new")).unwrap();
+    assert_eq!(nodes.len(), 1, "exactly the default module");
+    let module = &nodes[0];
+    assert_eq!(module.kind, ResourceNodeType::Module);
+    assert_eq!(module.name, DEFAULT_MODULE_NAME);
+    assert_eq!(
+        module.root_id, "p_new",
+        "root_id is what says which project owns the row — the nodes table \
+         has no project row to inherit it from"
+    );
+    assert_eq!(
+        module.parent_id, None,
+        "a top-level module's parent is the project, which stores as NULL"
+    );
+}
+
+#[test]
+fn create_with_defaults_seeds_the_environment_and_the_module_in_one_transaction() {
+    // The seed is only useful if it is there when the project is: a
+    // half-written project would render with the module already visible
+    // but no environment to resolve {{var}} against, or the reverse.
+    let pool = fresh_pool();
+    let outcome = db::with_tx(&pool, |c| {
+        create_with_defaults(c, &sample_project("p_conflict", "New Project"))
+    });
+    assert!(outcome.is_ok());
+
+    let envs = db::with_conn(&pool, |c| {
+        db::environments::list_by_project(c, "p_conflict")
     })
     .unwrap();
-    assert_eq!(modules, 0);
+    let modules = db::with_conn(&pool, |c| db::nodes::list_by_root(c, "p_conflict")).unwrap();
+    assert_eq!(envs.len(), 1);
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules[0].root_id, "p_conflict");
 }
 
 #[test]

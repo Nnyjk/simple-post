@@ -181,10 +181,23 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
 /// renameable inline, so the name is a starting point, not a decision.
 pub const DEFAULT_ENVIRONMENT_NAME: &str = "默认环境";
 
-/// Create a project **and** the one row that makes it usable.
+/// The module every new project is born with.
+///
+/// This one *was* deliberately not seeded: a 「默认模块」 the user did not
+/// ask for read as a row they had to notice and delete. The pendulum went
+/// the other way once the module became the row axis of the base-URL grid
+/// **and** the thing the workspace's 服务 block is about. With none, a fresh
+/// project showed three separate dead ends at once — the tree's
+/// 「该项目还没有模块」, the 前置 URL grid's 「没有模块可归属」, and an
+/// empty 服务 block — for a shape the user is going to need anyway. Seeding
+/// it turns all three into one thing to fill in. Renameable inline, same
+/// contract as the environment.
+pub const DEFAULT_MODULE_NAME: &str = "默认模块";
+
+/// Create a project **and** the two rows that make it usable.
 ///
 /// [`create`] alone takes the project row and nothing else, so the project
-/// it writes has no environment and no service — the state the create
+/// it writes has no environment and no module — the state the create
 /// dialog's caller is handed back.
 ///
 /// What is seeded, and just as importantly what is not:
@@ -192,20 +205,22 @@ pub const DEFAULT_ENVIRONMENT_NAME: &str = "默认环境";
 /// - Always [`DEFAULT_ENVIRONMENT_NAME`], active, so `{{var}}` and every
 ///   base URL have somewhere to resolve against the moment the project
 ///   exists.
-/// - **No module, no service, no URL.** The service list belongs to the
-///   project but a URL belongs to (environment × module × service), and a
-///   project has no modules yet — so there is no cell to write a base URL
-///   into. Seeding a placeholder 「默认服务」 and a URL slot for it would
-///   mean inventing a name the user then has to find and delete, and
-///   asking for the URL in the create form would be asking for a value
-///   with nowhere to live. The user fills the cartesian grid in settings,
-///   where the row they are filling is visible.
+/// - Always [`DEFAULT_MODULE_NAME`], so the tree, the base-URL grid and the
+///   module workspace all have a row to point at.
+/// - **No service, no URL.** The service list belongs to the project but a
+///   URL belongs to (environment × module × service), so the URL needs a
+///   service name the user has not chosen yet. Seeding a placeholder
+///   「默认服务」 and a URL slot for it would mean inventing a name they then
+///   have to find and delete, and asking for the URL in the create form
+///   would be asking for a value with nowhere to live. The user fills the
+///   cartesian grid in settings, where the row they are filling is visible.
 ///
 /// The returned `Project` is the post-write read, so a caller can hand it
 /// straight back to the renderer instead of re-fetching.
 ///
 /// The caller must already hold a transaction (`db::with_tx`): the
-/// project and its environment have to land together or neither should.
+/// project, its environment and its module have to land together or none
+/// should.
 pub fn create_with_defaults(conn: &mut Connection, project: &Project) -> Result<Project, AppError> {
     let mut project = project.clone();
     // The caller's struct may carry optimistic state for the form (and,
@@ -228,6 +243,24 @@ pub fn create_with_defaults(conn: &mut Connection, project: &Project) -> Result<
         is_active: true,
     };
     super::environments::create(conn, &env)?;
+
+    let module = crate::domain::ResourceNode {
+        id: crate::domain::uid(),
+        root_id: project.id.clone(),
+        // A module's parent is the project itself. `nodes` carries no
+        // project row, so the parent of a top-level module is stored as
+        // `NULL` and `root_id` is what says which project owns it.
+        parent_id: None,
+        kind: crate::domain::ResourceNodeType::Module,
+        name: DEFAULT_MODULE_NAME.to_string(),
+        description: None,
+        // First and only row, so the order is arbitrary — 0 is what the
+        // create-a-module path writes for a first module.
+        sort_order: 0,
+        created_at: crate::domain::now_ms(),
+        updated_at: crate::domain::now_ms(),
+    };
+    super::nodes::create(conn, &module, None)?;
 
     Ok(project)
 }

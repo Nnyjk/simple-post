@@ -15,7 +15,7 @@
  * already moved past.
  */
 import type { StateCreator } from 'zustand';
-import type { Project, Environment } from '@/types/domain';
+import type { Project, Environment, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import { filterTabsAfterRemoval, invokeWithRollback, tabKeysForSubtree } from './crud-helpers';
@@ -41,18 +41,20 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         opts: opts ?? null,
       });
       set((s) => ({ projects: [...s.projects, project] }));
-      // A new project arrives with a default environment, and with a
-      // named service holding the Base URL the create form collected
-      // (see `db::projects::create_with_defaults`). Nothing refetches
-      // that: `openProject`'s `loadWorkspace` early-returns because
-      // layer 2 already ran during bootstrap, so without this the env
-      // switcher reads "—" and `{{var}}` has nothing to resolve against
-      // until the app is restarted — the exact "I typed a Base URL and
-      // nothing happened" this path exists to prevent.
+      // A new project arrives with a default environment **and** a default
+      // module (see `db::projects::create_with_defaults`). Neither is
+      // refetched: `openProject`'s `loadWorkspace` early-returns because
+      // layer 2 already ran during bootstrap, so without these the env
+      // switcher reads "—" with `{{var}}` having nothing to resolve
+      // against, and the tree reads 「该项目还没有模块」 for a project that
+      // has one — both until the app is restarted. That is the exact "I
+      // created a project and nothing is there" this path exists to
+      // prevent.
       //
-      // Replace rather than merge: `environments_list` is unfiltered and
-      // returns every project's environments, which is what the store
-      // already holds.
+      // Both are unfiltered list reads (every project's environments, every
+      // project's nodes), which is what the store already holds — so they
+      // replace rather than merge. A module has no `endpoint_details` row,
+      // so the detail map needs nothing here.
       try {
         const environments = await invokeCmd<Environment[]>(COMMANDS.environmentsList);
         set({ environments });
@@ -61,6 +63,16 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         // failed create, and failing the whole action would leave a
         // project on disk the store does not know about.
         console.error('[store] environments_list after create failed', e);
+      }
+      try {
+        const nodes = await invokeCmd<ResourceNode[]>(COMMANDS.nodesList);
+        set({ nodes, nodesLoaded: true });
+      } catch (e) {
+        // Same reasoning as above: the seeded module is on disk, the
+        // store just cannot show it yet. Same for `nodesLoaded` — it must
+        // not stay `false` or the tree renders a permanent loading state
+        // and `pruneStaleTabs` no-ops.
+        console.error('[store] nodes_list after create failed', e);
       }
       return project.id;
     } catch (e) {
