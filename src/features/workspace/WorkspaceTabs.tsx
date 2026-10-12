@@ -445,37 +445,56 @@ export function WorkspaceTabs() {
             >
               {d.title}
             </span>
-            {dirty && (
-              <Tooltip content="有未保存的修改" side="bottom">
-                <span
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                  aria-label="有未保存的修改"
-                />
+            {/*
+             * The trailing controls travel together as ONE flex item so
+             * they can be pushed to the tab's right edge with `ml-auto`.
+             *
+             * The title carries `flex-1` but is also capped at
+             * `max-w-[88px]`, which is what guarantees the hint its room.
+             * That cap means a short title leaves free space the flexbox
+             * has nowhere to put: it fell at the *end* of the row, after
+             * the close button, so `ttt ×` sat in the left third of a
+             * 160px tab with a dead gap behind the ×. `ml-auto` moves that
+             * free space in front of the group instead, which is where a
+             * browser tab puts it — title left, × pinned right.
+             *
+             * One wrapper rather than `ml-auto` on the close button itself:
+             * `Tooltip` wraps its child in a `relative inline-flex` span,
+             * so that span is the flex item, not the button inside it.
+             */}
+            <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
+              {dirty && (
+                <Tooltip content="有未保存的修改" side="bottom">
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+                    aria-label="有未保存的修改"
+                  />
+                </Tooltip>
+              )}
+              {d.hint && !isCompact && (
+                <Tooltip content={d.hint} side="bottom">
+                  <span className="max-w-[40px] truncate text-[10px] text-faint">{d.hint}</span>
+                </Tooltip>
+              )}
+              <Tooltip content="关闭" side="bottom">
+                <button
+                  type="button"
+                  aria-label="关闭标签"
+                  // Stop propagation so the close click doesn't also activate.
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestCloseTab(d.tab.id);
+                  }}
+                  className={cn(
+                    'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-faint hover:bg-overlay-hover hover:text-foreground',
+                    // Always show on hover, but keep visible on the active tab.
+                    active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                  )}
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </Tooltip>
-            )}
-            {d.hint && !isCompact && (
-              <Tooltip content={d.hint} side="bottom">
-                <span className="max-w-[40px] truncate text-[10px] text-faint">{d.hint}</span>
-              </Tooltip>
-            )}
-            <Tooltip content="关闭" side="bottom">
-              <button
-                type="button"
-                aria-label="关闭标签"
-                // Stop propagation so the close click doesn't also activate.
-                onClick={(e) => {
-                  e.stopPropagation();
-                  requestCloseTab(d.tab.id);
-                }}
-                className={cn(
-                  'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-faint hover:bg-overlay-hover hover:text-foreground',
-                  // Always show on hover, but keep visible on the active tab.
-                  active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                )}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </Tooltip>
+            </span>
             {/* Active-tab indicator moved to a strip-level element below
                 so it can tween between tabs as a single persistent node. */}
           </div>
