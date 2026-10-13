@@ -35,12 +35,37 @@ pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, permis
 // Re-export the MCP module from the standalone `simple-post-mcp` crate.
 // The main crate only hosts the embedded daemon + `serve-web` glue;
 // the actual JSON-RPC dispatcher lives there.
-pub use simple_post_mcp::mcp;
+//
+// `daemon_http` is re-exported for the same reason and no other:
+// `run_mcp` needs `serve_with_config` to hand the listener
+// configuration (mount path + Host/Origin allowlists) to the router,
+// which `mcp::serve_http` has no parameter for.
+pub use simple_post_mcp::{daemon_http, mcp};
 
 /// CLI subcommand `mcp` entry. Owns data-dir resolution, DB init, axum serve,
 /// port-record write, and SIGINT/SIGTERM shutdown.
-pub fn run_mcp(transport: String, port: u16, bind: String) {
+///
+/// `http_config` carries the listener settings the router needs beyond
+/// `bind` / `port`: the mount path and the Host/Origin allowlists. The
+/// supervisor fills it from the `mcp.http_config` preference
+/// (`daemon_cli_args`); a hand-run `simple-post mcp` gets clap's
+/// defaults, which are the loopback-only shipped configuration.
+pub fn run_mcp(
+    transport: String,
+    port: u16,
+    bind: String,
+    http_config: crate::domain::McpHttpConfig,
+) {
     init_tracing();
+
+    // A hand-run daemon can still be pointed at a contradictory
+    // configuration (`--bind=0.0.0.0` without `--allow-remote`), and
+    // failing here is far better than serving a LAN port that the Host
+    // guard answers with 403.
+    if let Err(e) = http_config.validate() {
+        eprintln!("[mcp] invalid listener configuration: {e}");
+        std::process::exit(2);
+    }
 
     // Resolve data dir *the same way* `port_registry` does so the SQLite
     // file the daemon reads/writes is alongside the `mcp.port` file
@@ -62,6 +87,7 @@ pub fn run_mcp(transport: String, port: u16, bind: String) {
     };
 
     let bind_for_log = bind.clone();
+    let mount_path = http_config.normalized_path();
     runtime.block_on(async move {
         // Open the SQLite pool first so the daemon's tools can read/write
         // immediately on first request — no first-call warm-up cost.
@@ -81,15 +107,41 @@ pub fn run_mcp(transport: String, port: u16, bind: String) {
         // HTTP MCP connections.)
         let _ = transport; // accepted for forward-compat; not yet branched on.
 
-        let actual_port = match crate::mcp::serve_http(pool, port, &bind).await {
-            Ok(p) => p,
+        // Bind + spawn here rather than through `mcp::serve_http`: that
+        // helper predates the listener configuration and has no way to
+        // pass the mount path / allowlists into `daemon_http::serve`.
+        // The block below is the same bind → resolve port → spawn
+        // sequence, with `serve_with_config` in place of `serve`.
+        let listener = match tokio::net::TcpListener::bind((bind_for_log.as_str(), port)).await {
+            Ok(l) => l,
             Err(e) => {
-                eprintln!("[mcp] serve_http({bind_for_log}:{port}) failed: {e:?}");
+                eprintln!("[mcp] bind {bind_for_log}:{port} failed: {e}");
                 std::process::exit(1);
             }
         };
+        let actual_port = match listener.local_addr() {
+            Ok(a) => a.port(),
+            Err(e) => {
+                eprintln!("[mcp] local_addr failed: {e}");
+                std::process::exit(1);
+            }
+        };
+
+        let state = std::sync::Arc::new(crate::mcp::AppState {
+            pool,
+            started_at: std::time::Instant::now(),
+            metrics: std::sync::Arc::new(crate::mcp_metrics::McpMetrics::new()),
+        });
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::daemon_http::serve_with_config(listener, state, http_config).await
+            {
+                tracing::error!(error = %e, "MCP daemon exited with error");
+            }
+        });
+
         eprintln!(
-            "[mcp] daemon listening on http://{bind_for_log}:{actual_port}/mcp \
+            "[mcp] daemon listening on http://{bind_for_log}:{actual_port}{mount_path} \
              (data dir: {})",
             data_dir.display()
         );
@@ -237,7 +289,7 @@ pub fn run() {
         }
     };
 
-    let daemon_handle = McpDaemonHandle::new();
+    let daemon_handle = McpDaemonHandle::with_pool(pool.clone());
 
     tauri::Builder::default()
         .manage(pool)
@@ -289,6 +341,8 @@ pub fn run() {
             crate::commands::mcp_capability_get,
             crate::commands::mcp_capability_set,
             crate::commands::mcp_capability_list_tools,
+            crate::commands::mcp_http_config_get,
+            crate::commands::mcp_http_config_set,
         ])
         .setup(|app| {
             // Read the persisted MCP auto-start preference **before**

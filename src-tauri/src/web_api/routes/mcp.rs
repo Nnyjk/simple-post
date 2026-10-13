@@ -16,6 +16,79 @@ pub(crate) async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<McpStatus
 }
 
 // =========================================================================
+// MCP HTTP listener configuration
+// =========================================================================
+//
+//   GET /api/mcp/http-config — read bind host / port / path + allowlists
+//   PUT /api/mcp/http-config — validate, persist, report restart need
+//
+// Both delegate to `commands::mcp_http_config`'s plain functions, so the
+// REST route and the Tauri command cannot disagree about validation or
+// about whether a restart is required.
+//
+// Note this configures the **daemon child**, not this server: the
+// `/mcp` routes mounted by `web_api::build_router` stay at the canonical
+// path, which is what the documented stdio-bridge → `serve-web`
+// client config depends on.
+
+/// `GET /api/mcp/http-config` — the daemon's listener configuration.
+/// An absent `preferences` row answers with the shipped loopback
+/// default rather than a 404, so a fresh install renders a form
+/// instead of an error.
+pub(crate) async fn mcp_http_config_get(
+    State(s): State<Arc<WebState>>,
+) -> Result<Json<crate::domain::McpHttpConfig>, HttpErrorResponse> {
+    crate::commands::read_http_config(&s.pool)
+        .map(Json)
+        .map_err(map_app_error)
+}
+
+/// The `PUT` body, accepted in either of the two shapes this route can
+/// legitimately receive.
+///
+/// * **wrapped** — `{ "config": { … } }`. This is what the dual-transport
+///   `invokeCmd` sends: its `WEB_ROUTES` entry reproduces the Tauri
+///   command's argument list, because one call site has to work against
+///   both transports.
+/// * **bare** — `{ "host": …, "path": … }`, the documented REST shape.
+///
+/// The wrapped form is tried first and is the only reason both can
+/// coexist: `McpHttpConfig` carries `#[serde(default)]` and does not
+/// deny unknown fields, so it happily accepts `{ "config": { … } }` as
+/// an object whose every field is *absent* — a save that looks like it
+/// worked and quietly overwrites the user's LAN config with the
+/// loopback default. Ordering the variants is what stops that.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum McpHttpConfigBody {
+    Wrapped {
+        config: crate::domain::McpHttpConfig,
+    },
+    Bare(crate::domain::McpHttpConfig),
+}
+
+impl McpHttpConfigBody {
+    fn into_config(self) -> crate::domain::McpHttpConfig {
+        match self {
+            Self::Wrapped { config } | Self::Bare(config) => config,
+        }
+    }
+}
+
+/// `PUT /api/mcp/http-config` — full replace. A LAN bind with
+/// `allowRemote: false` is refused with a `validation` error rather
+/// than stored, because that combination produces a daemon that
+/// listens on the network and answers nothing.
+pub(crate) async fn mcp_http_config_put(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<McpHttpConfigBody>,
+) -> Result<Json<crate::commands::McpHttpConfigDto>, HttpErrorResponse> {
+    crate::commands::write_http_config(&s.pool, body.into_config())
+        .map(Json)
+        .map_err(map_app_error)
+}
+
+// =========================================================================
 // MCP capability policy
 // =========================================================================
 //

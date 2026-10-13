@@ -37,6 +37,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
+use crate::domain::McpHttpConfig;
 use crate::mcp_metrics::{parse_metric_line, McpMetrics};
 use crate::port_registry::{self, PortRecord};
 
@@ -119,13 +120,44 @@ impl DaemonState {
     }
 }
 /// 构造守护进程的真实 CLI 参数，桌面端与 Web 端共享同一份契约。
-fn daemon_cli_args(port: u16) -> Vec<String> {
-    vec![
+///
+/// Everything but the port comes from the persisted `mcp.http_config`
+/// row — the daemon used to be spawned with `--bind=127.0.0.1` and a
+/// hardcoded `/mcp`, which meant a user who opened the daemon to the LAN
+/// had to hand-edit the child's command line. Reading the row here means
+/// the settings panel and the child process cannot disagree.
+///
+/// `port` is the OS-assigned port the supervisor just claimed; it is
+/// passed explicitly rather than letting the child re-pick, because the
+/// supervisor writes that same port into `mcp.port` and health-probes it.
+/// The child's own `mcp.http_config.port` is therefore only a default for
+/// a hand-run `simple-post mcp`.
+///
+/// The empty allowlists are passed as `--allowed-hosts=` /
+/// `--allowed-origins=`, which clap parses as an empty list. That is
+/// meaningful, not filler: an empty host list with `--allow-remote` is
+/// the daemon denying every non-loopback `Host`, and omitting the flag
+/// would rely on the same default arriving the same way.
+fn daemon_cli_args(port: u16, config: &McpHttpConfig) -> Vec<String> {
+    let mut args = vec![
         "mcp".to_string(),
         "--transport=http".to_string(),
         format!("--port={port}"),
-        "--bind=127.0.0.1".to_string(),
-    ]
+        format!("--bind={}", config.host),
+        format!("--path={}", config.normalized_path()),
+    ];
+    if config.allow_remote {
+        args.push("--allow-remote".to_string());
+    }
+    args.push(format!(
+        "--allowed-hosts={}",
+        config.allowed_hosts.join(",")
+    ));
+    args.push(format!(
+        "--allowed-origins={}",
+        config.allowed_origins.join(",")
+    ));
+    args
 }
 
 /// How long teardown waits for a killed daemon to actually leave the
@@ -336,6 +368,18 @@ async fn wait_for_pid_exit(pid: u32, budget: Duration) -> bool {
 #[derive(Clone)]
 pub struct McpDaemonHandle {
     inner: Arc<Mutex<DaemonState>>,
+    /// The pool used to read `mcp.http_config` at spawn time, so the
+    /// child's CLI matches what the settings panel shows.
+    ///
+    /// `None` on the bare `new()` used by tests, which then falls back
+    /// to [`McpHttpConfig::default`]. Both real host shapes
+    /// (`lib.rs::run` and `web_api::serve`) construct through
+    /// [`Self::with_pool`] — the whole point of reading the row at
+    /// *spawn* time rather than at construction is that the user can
+    /// save new settings and then hit restart.
+    ///
+    /// `r2d2::Pool` is `Arc`-backed, so this clone is cheap.
+    pool: Option<crate::db::DbPool>,
 }
 
 impl Default for McpDaemonHandle {
@@ -345,9 +389,21 @@ impl Default for McpDaemonHandle {
 }
 
 impl McpDaemonHandle {
+    /// A handle with no DB access — spawns fall back to the default
+    /// listener configuration. Kept for tests and for any embedder that
+    /// drives the supervisor without a database.
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(DaemonState::empty())),
+            pool: None,
+        }
+    }
+
+    /// The constructor both real host shapes use.
+    pub fn with_pool(pool: crate::db::DbPool) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(DaemonState::empty())),
+            pool: Some(pool),
         }
     }
 
@@ -470,6 +526,11 @@ impl McpDaemonHandle {
         }
 
         // ----- Fresh spawn path ------------------------------------------
+        // Resolved once, up front: it feeds both the child's command line
+        // and the port record, and the two must agree — a record that
+        // claimed `127.0.0.1` for a daemon actually bound to `0.0.0.0`
+        // would make `requires_restart` answer "always" on every save.
+        let http_config = self.http_config();
         let mut g = self.inner.lock().await;
         // Re-check under the lock: another task may have just spawned
         // while we were awaiting the lock above.
@@ -514,7 +575,7 @@ impl McpDaemonHandle {
         // ----- Spawn the child -------------------------------------------
         let exe = std::env::current_exe().map_err(crate::error::AppError::Io)?;
         let mut cmd = tokio::process::Command::new(exe);
-        cmd.args(daemon_cli_args(port))
+        cmd.args(daemon_cli_args(port, &http_config))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
@@ -532,7 +593,7 @@ impl McpDaemonHandle {
         let pid = child.id().unwrap_or(0);
         let stderr = child.stderr.take();
 
-        let rec = PortRecord::new(pid, port, "127.0.0.1", data_dir.to_string());
+        let rec = PortRecord::new(pid, port, &http_config.host, data_dir.to_string());
         if let Err(e) = port_registry::write(&rec) {
             // Port file write failed — we own the child; reap it before
             // returning so we don't leak a daemon with no port file.
@@ -787,6 +848,34 @@ impl McpDaemonHandle {
     pub async fn shutdown(&self) -> Result<(), crate::error::AppError> {
         self.teardown(DaemonStatus::Stopped).await
     }
+
+    /// The listener configuration to spawn with: the persisted row when
+    /// this handle carries a pool, otherwise the shipped defaults.
+    ///
+    /// Read at *spawn* time rather than construction, so saving new
+    /// settings and then hitting restart is enough — no re-creation of
+    /// the managed state needed.
+    ///
+    /// **Fail-closed on a bad row.** An unreadable `mcp.http_config`
+    /// resolves to [`McpHttpConfig::default`] — loopback-only — rather
+    /// than propagating the error and refusing to start. A hand-edited
+    /// or truncated row must not be able to brick the daemon, and the
+    /// default is the direction that exposes nothing.
+    fn http_config(&self) -> McpHttpConfig {
+        let Some(pool) = self.pool.as_ref() else {
+            return McpHttpConfig::default();
+        };
+        match crate::db::with_conn(pool, crate::db::preferences::mcp_http_config) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    target: "mcp_daemon",
+                    "mcp.http_config unreadable ({e:?}) — spawning on the loopback-only default"
+                );
+                McpHttpConfig::default()
+            }
+        }
+    }
 }
 
 /// Daemon stderr → metrics forwarder. Runs until EOF (process exit).
@@ -942,14 +1031,69 @@ mod tests {
     #[test]
     fn daemon_cli_args_use_real_http_transport_flag() {
         assert_eq!(
-            daemon_cli_args(43123),
+            daemon_cli_args(43123, &McpHttpConfig::default()),
             vec![
                 "mcp",
                 "--transport=http",
                 "--port=43123",
                 "--bind=127.0.0.1",
+                "--path=/mcp",
+                "--allowed-hosts=",
+                "--allowed-origins=",
             ]
         );
+    }
+
+    #[test]
+    fn daemon_cli_args_carry_the_persisted_listener_configuration() {
+        // The child's CLI has to match the row the settings panel wrote,
+        // otherwise the panel shows a LAN daemon that is still bound to
+        // loopback (or the reverse).
+        let cfg = McpHttpConfig {
+            host: "0.0.0.0".into(),
+            path: "/ai/mcp/".into(),
+            allow_remote: true,
+            allowed_hosts: vec!["studio.local".into(), "10.0.0.5".into()],
+            allowed_origins: vec!["https://claude.ai".into()],
+            ..McpHttpConfig::default()
+        };
+        let args = daemon_cli_args(4173, &cfg);
+        for expected in [
+            "--bind=0.0.0.0",
+            "--path=/ai/mcp", // normalised: no trailing slash
+            "--allow-remote",
+            "--allowed-hosts=studio.local,10.0.0.5",
+            "--allowed-origins=https://claude.ai",
+        ] {
+            assert!(
+                args.iter().any(|a| a == expected),
+                "missing {expected} in {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn daemon_cli_args_omit_the_remote_flag_when_it_is_off() {
+        // `--allow-remote` is a flag, so passing it while the setting is
+        // false would open the daemon the user explicitly left closed.
+        let args = daemon_cli_args(1, &McpHttpConfig::default());
+        assert!(!args.iter().any(|a| a == "--allow-remote"), "got {args:?}");
+    }
+
+    #[test]
+    fn daemon_cli_args_pass_empty_lists_explicitly() {
+        // An empty host allowlist with `--allow-remote` is the daemon
+        // *denying* every non-loopback Host, which is not the same as
+        // "clap defaulted it" — the supervisor must not depend on that
+        // coincidence.
+        let cfg = McpHttpConfig {
+            allow_remote: true,
+            ..McpHttpConfig::default()
+        };
+        let args = daemon_cli_args(1, &cfg);
+        assert!(args.iter().any(|a| a == "--allow-remote"));
+        assert!(args.iter().any(|a| a == "--allowed-hosts="));
+        assert!(args.iter().any(|a| a == "--allowed-origins="));
     }
 
     #[test]

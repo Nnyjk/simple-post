@@ -338,6 +338,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         //   GET  /api/mcp/capability         - capability policy
         //   PUT  /api/mcp/capability         - capability policy
         //   GET  /api/mcp/capability/tools   - visible tools under current policy
+        //   GET  /api/mcp/http-config        - daemon bind host/port/path + allowlists
+        //   PUT  /api/mcp/http-config        - daemon listener configuration
         //   GET  /api/preferences            - raw preferences dump (UI)
         //   PUT  /api/preferences            - raw preferences patch
         // /api/permissions* and /api/request_settings* are intentionally

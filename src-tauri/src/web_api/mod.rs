@@ -199,6 +199,11 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             get(mcp_capability_get).put(mcp_capability_put),
         )
         .route("/api/mcp/capability/tools", get(mcp_capability_list_tools))
+        // ---- mcp http listener config (daemon bind/path/allowlists) ----
+        .route(
+            "/api/mcp/http-config",
+            get(mcp_http_config_get).put(mcp_http_config_put),
+        )
         // ---- preferences ----
         .route(
             "/api/preferences",
@@ -338,7 +343,9 @@ pub async fn serve(
     base_path: Option<String>,
 ) -> Result<(), AppError> {
     let pool = db::init(&data_dir)?;
-    let daemon = McpDaemonHandle::new();
+    // The supervisor reads `mcp.http_config` from this pool at spawn time
+    // so the daemon child's CLI matches the settings panel.
+    let daemon = McpDaemonHandle::with_pool(pool.clone());
 
     // Resolve the daemon decision *before* either value is moved into
     // `WebState`, so no second `db::init()` is needed and the handle the

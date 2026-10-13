@@ -23,7 +23,8 @@ pub(crate) use environments::{
 };
 pub(crate) use mcp::{
     mcp_capability_get, mcp_capability_list_tools, mcp_capability_put, mcp_healthz,
-    mcp_json_rpc_post, mcp_proxy_path, mcp_restart, mcp_start, mcp_status, mcp_stop, mcp_tools,
+    mcp_http_config_get, mcp_http_config_put, mcp_json_rpc_post, mcp_proxy_path, mcp_restart,
+    mcp_start, mcp_status, mcp_stop, mcp_tools,
 };
 // `http_send` is re-exported from here rather than from a separate
 // `endpoints` module: it is addressed under a node now, and the module
