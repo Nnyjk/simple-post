@@ -105,6 +105,20 @@ pub mod keys {
     /// row resolves to `read_only`, so an AI client can list and get but
     /// cannot change anything until the user raises the tier.
     pub const MCP_POLICY: &str = "mcp.policy";
+
+    /// `"mcp.http_config"` → object. **Default: loopback `/mcp`, no
+    /// remote access.** Where the MCP HTTP daemon listens (`host`,
+    /// `port`, `path`) and which `Host` / `Origin` values it answers
+    /// (`allowRemote`, `allowedHosts`, `allowedOrigins`).
+    ///
+    /// Stored as a **JSON-encoded** [`crate::domain::McpHttpConfig`]
+    /// through [`set`] — the encoding is not optional, and a bare
+    /// object written by hand fails to parse on read, which
+    /// [`mcp_http_config`] reports as an error rather than silently
+    /// falling back to the default. Read by `daemon_supervisor`
+    /// (`daemon_cli_args`) and by the daemon's Host/Origin guard;
+    /// written by `mcp_http_config_set` / `PUT /api/mcp/http-config`.
+    pub const MCP_HTTP_CONFIG: &str = "mcp.http_config";
 }
 
 /// Read the `mcp.auto_start` preference with the documented default
@@ -141,6 +155,34 @@ pub fn set_mcp_policy(
     p: crate::permissions::CapabilityPolicy,
 ) -> Result<(), AppError> {
     set(conn, keys::MCP_POLICY, &p.as_str())
+}
+
+/// Read the `mcp.http_config` preference, falling back to
+/// [`McpHttpConfig::default`] when the row is absent.
+///
+/// A **present but unparseable** row is an error, not a fallback. That
+/// is the same distinction [`mcp_policy`] draws for an unknown tier
+/// string, and it exists because of the `preferences.value` contract:
+/// the column holds a JSON-encoded value, so a row written by hand
+/// (`{host:…, path:…}` without quotes) would silently downgrade a
+/// LAN-exposed daemon to loopback-only if we treated it as "absent".
+/// Failing loudly is the only way the user finds out.
+pub fn mcp_http_config(conn: &mut Connection) -> Result<crate::domain::McpHttpConfig, AppError> {
+    let raw: Option<crate::domain::McpHttpConfig> = get(conn, keys::MCP_HTTP_CONFIG)?;
+    Ok(raw.unwrap_or_default())
+}
+
+/// Persist the MCP HTTP listener configuration.
+///
+/// Goes through [`set`], which runs `serde_json::to_string`. Writing
+/// the bare object by hand is the exact failure this module's docs
+/// warn about: every reader runs `from_str`, so an unquoted value
+/// never comes back.
+pub fn set_mcp_http_config(
+    conn: &mut Connection,
+    config: &crate::domain::McpHttpConfig,
+) -> Result<(), AppError> {
+    set(conn, keys::MCP_HTTP_CONFIG, config)
 }
 
 // -------------------------------------------------------------------------

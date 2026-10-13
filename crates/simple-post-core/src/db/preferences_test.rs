@@ -161,3 +161,98 @@ fn mcp_policy_tolerates_garbage_value() {
     let p = db::with_conn(&pool, mcp_policy).unwrap();
     assert_eq!(p, crate::permissions::CapabilityPolicy::ReadOnly);
 }
+
+// ----- mcp.http_config ----------------------------------------------------
+
+#[test]
+fn mcp_http_config_defaults_when_missing() {
+    let pool = fresh_pool();
+    let c = db::with_conn(&pool, mcp_http_config).unwrap();
+    assert_eq!(c, crate::domain::McpHttpConfig::default());
+    assert_eq!(c.host, "127.0.0.1");
+    assert_eq!(c.port, 0);
+    assert_eq!(c.path, "/mcp");
+    assert!(
+        !c.allow_remote,
+        "default must be loopback-only — an absent row is not consent to expose the daemon"
+    );
+    assert!(c.allowed_hosts.is_empty());
+    assert!(c.allowed_origins.is_empty());
+}
+
+#[test]
+fn mcp_http_config_round_trips_every_field() {
+    use crate::domain::McpHttpConfig;
+    let pool = fresh_pool();
+    let cfg = McpHttpConfig {
+        host: "0.0.0.0".into(),
+        port: 4173,
+        path: "/ai/mcp".into(),
+        allow_remote: true,
+        allowed_hosts: vec!["studio.local".into(), "10.0.0.5".into()],
+        allowed_origins: vec!["https://claude.ai".into()],
+    };
+    db::with_tx(&pool, |c| set_mcp_http_config(c, &cfg)).unwrap();
+    let back = db::with_conn(&pool, mcp_http_config).unwrap();
+    assert_eq!(back, cfg);
+}
+
+#[test]
+fn mcp_http_config_is_stored_as_json_not_bare_text() {
+    // The `preferences.value` contract: `set` runs
+    // `serde_json::to_string` and every reader runs `from_str`. A bare
+    // (unquoted) object is what silently falls back to the default
+    // elsewhere in this codebase, so pin the encoding at the column
+    // level rather than only through the round-trip above.
+    let pool = fresh_pool();
+    let cfg = crate::domain::McpHttpConfig::default();
+    db::with_tx(&pool, |c| set_mcp_http_config(c, &cfg)).unwrap();
+
+    let raw = db::with_conn(&pool, list_all)
+        .unwrap()
+        .into_iter()
+        .find(|(k, _)| k == keys::MCP_HTTP_CONFIG)
+        .map(|(_, v)| v)
+        .expect("row must be present");
+    let parsed: serde_json::Value = serde_json::from_str(&raw).expect("stored value must be JSON");
+    assert_eq!(parsed["host"], "127.0.0.1");
+    assert_eq!(parsed["path"], "/mcp");
+    assert_eq!(parsed["allowRemote"], false);
+    assert_eq!(parsed["allowedHosts"].as_array().map(Vec::len), Some(0));
+    assert_eq!(parsed["allowedOrigins"].as_array().map(Vec::len), Some(0));
+}
+
+#[test]
+fn mcp_http_config_missing_fields_fall_back_to_defaults() {
+    // `#[serde(default)]` at the container level: a blob written by an
+    // older build must still deserialise, with the absent keys taking
+    // their documented defaults rather than failing the whole read.
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| {
+        set(
+            c,
+            keys::MCP_HTTP_CONFIG,
+            &serde_json::json!({
+                "host": "0.0.0.0",
+                "allowRemote": true,
+            }),
+        )
+    })
+    .unwrap();
+    let back = db::with_conn(&pool, mcp_http_config).unwrap();
+    assert_eq!(back.host, "0.0.0.0");
+    assert!(back.allow_remote);
+    assert_eq!(back.port, 0);
+    assert_eq!(back.path, "/mcp");
+    assert!(back.allowed_hosts.is_empty());
+}
+
+#[test]
+fn mcp_http_config_reports_an_unparseable_row_instead_of_hiding_it() {
+    // Hand-written (unquoted) value. Silently defaulting here would
+    // downgrade a LAN-exposed daemon to loopback-only with nothing in
+    // the log, so this must surface as an error.
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| set(c, keys::MCP_HTTP_CONFIG, &"0.0.0.0")).unwrap();
+    assert!(db::with_conn(&pool, mcp_http_config).is_err());
+}

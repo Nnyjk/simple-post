@@ -733,6 +733,142 @@ impl Default for RequestSettings {
     }
 }
 
+// ----- MCP HTTP listener config -------------------------------------------
+
+/// Where the MCP HTTP daemon listens and who it answers to.
+///
+/// A settings singleton persisted as a JSON blob in `preferences` under
+/// [`crate::db::preferences::keys::MCP_HTTP_CONFIG`] — the same
+/// "preferences bag holds JSON values" rule every other structured
+/// setting follows.
+///
+/// `#[serde(default)]` at the container level is load-bearing on the
+/// **read** side for the same reason it is on [`RequestSettings`]: the
+/// stored blob is whatever an earlier build wrote, so a field added
+/// later must not make every existing install's row fail to parse.
+/// The cost lands on the write side — a body that omits a field resets
+/// that field to its default instead of being rejected — which is the
+/// more useful behaviour for a settings singleton.
+///
+/// The security-relevant half is `allow_remote` plus the two allow
+/// lists, and they are **fail-closed by construction**: the default
+/// (`allow_remote: false`, both lists empty) accepts only loopback
+/// `Host` headers and no `Origin` at all. `validate` refuses the one
+/// combination that would silently contradict itself — a non-loopback
+/// bind with remote access left off, which would listen on the LAN
+/// while the guard rejected every request that actually arrived from
+/// it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct McpHttpConfig {
+    /// Bind address. `127.0.0.1` keeps the daemon local-only.
+    pub host: String,
+    /// Listen port. `0` means "OS-assigned" — the daemon's own chosen
+    /// port is then published through the `mcp.port` record.
+    pub port: u16,
+    /// Mount path for the JSON-RPC endpoint. Must start with `/`.
+    pub path: String,
+    /// Master switch for non-loopback access. `false` (the default)
+    /// means the `Host` guard only accepts loopback names.
+    pub allow_remote: bool,
+    /// `Host` values accepted once `allow_remote` is on. A bare `"*"`
+    /// accepts any. Empty means *no* non-loopback host is accepted —
+    /// not "accept everything".
+    pub allowed_hosts: Vec<String>,
+    /// `Origin` values accepted. AI clients (curl, Claude Code) send no
+    /// `Origin` at all and are therefore never blocked by this; a
+    /// browser-style request that *does* send one must match. A bare
+    /// `"*"` accepts any.
+    pub allowed_origins: Vec<String>,
+}
+
+impl Default for McpHttpConfig {
+    fn default() -> Self {
+        Self {
+            host: DEFAULT_MCP_HOST.to_string(),
+            port: 0,
+            path: DEFAULT_MCP_PATH.to_string(),
+            allow_remote: false,
+            allowed_hosts: Vec::new(),
+            allowed_origins: Vec::new(),
+        }
+    }
+}
+
+/// Default bind address for the MCP HTTP daemon — loopback only.
+pub const DEFAULT_MCP_HOST: &str = "127.0.0.1";
+/// Default mount path for the MCP JSON-RPC endpoint.
+pub const DEFAULT_MCP_PATH: &str = "/mcp";
+
+impl McpHttpConfig {
+    /// The mount path in the exact form axum's router wants: always a
+    /// leading `/`, never a trailing one. `"/"`, `""` and a missing
+    /// slash all collapse onto [`DEFAULT_MCP_PATH`] rather than
+    /// producing a router that 404s everything the user can see in the
+    /// settings panel.
+    pub fn normalized_path(&self) -> String {
+        let raw = self.path.trim();
+        let trimmed = raw.trim_end_matches('/');
+        if trimmed.is_empty() {
+            return DEFAULT_MCP_PATH.to_string();
+        }
+        if trimmed.starts_with('/') {
+            trimmed.to_string()
+        } else {
+            format!("/{trimmed}")
+        }
+    }
+
+    /// Reject configurations that cannot mean what they say.
+    ///
+    /// Called on every write (Tauri command and REST route alike) so an
+    /// invalid combination can never reach the `preferences` row that
+    /// `daemon_cli_args` reads at spawn time.
+    pub fn validate(&self) -> Result<(), crate::error::AppError> {
+        use crate::error::AppError;
+
+        if self.host.trim().is_empty() {
+            return Err(AppError::Validation("host must not be empty".into()));
+        }
+        // Normalise before checking so `/mcp/` and `/mcp` cannot both
+        // pass validation and then disagree at the router.
+        if self.path.trim().is_empty() {
+            return Err(AppError::Validation(format!(
+                "path must not be empty (expected something like {DEFAULT_MCP_PATH:?})"
+            )));
+        }
+        if !self.normalized_path().starts_with('/') {
+            return Err(AppError::Validation(format!(
+                "path must start with '/' (got {:?})",
+                self.path
+            )));
+        }
+        // The self-contradicting combination: bound to the LAN, but the
+        // guard configured to reject everything that isn't loopback —
+        // the daemon would be unreachable and would read as "MCP is
+        // broken" rather than "your settings contradict each other".
+        if !self.allow_remote && !is_loopback_host(&self.host) {
+            return Err(AppError::Validation(format!(
+                "host {:?} is not a loopback address, so allowRemote must also be \
+                 enabled — otherwise the daemon listens on a network the Host guard \
+                 refuses to answer",
+                self.host
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// Is `host` one of the loopback names the guard always accepts?
+///
+/// Shared by [`McpHttpConfig::validate`] and the daemon's Host guard —
+/// they must agree, or a config could validate and then lock the
+/// listener out of answering its own healthz probe.
+pub fn is_loopback_host(host: &str) -> bool {
+    let h = host.trim().trim_start_matches('[').trim_end_matches(']');
+    matches!(h, "127.0.0.1" | "localhost" | "::1")
+}
+
 // ----- api response (transient; not persisted in the schema) -------------
 
 /// The wire shape a response takes on its way out of Rust.
