@@ -3529,7 +3529,7 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "simple-post"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "clap",
@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "simple-post-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dirs 5.0.1",
  "r2d2",
@@ -3572,7 +3572,7 @@ dependencies = [
 
 [[package]]
 name = "simple-post-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "clap",
