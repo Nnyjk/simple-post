@@ -151,11 +151,24 @@ export function ResponseViewer() {
   }
 
   if (!response) {
+    // The history strip is rendered here too, and it needs this branch to
+    // be a **flex column**, exactly like the populated branch below.
+    //
+    // `WorkspaceShell` wraps the viewer in `min-h-0 flex-1`, which is not
+    // itself a flex container, so a fragment's children lay out in
+    // normal block flow: an `h-full` `<section>` takes the whole box and
+    // the `shrink-0` strip that follows it lands below the bottom edge.
+    // Nothing crashes and nothing logs — the strip is in the DOM, fully
+    // rendered, simply off-screen — which is why it shipped looking like
+    // "the panel is missing" and why a DOM query for it still succeeds.
+    // That class of bug cannot be caught by a unit test (there is no DOM
+    // in this runner), so `__tests__/response-viewer-layout.test.ts`
+    // pins the container shape at the source level instead.
     return (
-      <>
+      <section className="flex h-full min-h-0 flex-col">
         <EmptyState />
         <ResponseHistory />
-      </>
+      </section>
     );
   }
 
@@ -388,7 +401,12 @@ function HeadersView({ headers }: { headers: Record<string, string> }) {
 
 function EmptyState() {
   return (
-    <section className="flex h-full min-h-0 flex-col items-center justify-center border-t border-border bg-card/30 px-4 text-center">
+    // `flex-1`, not `h-full`: this section is a sibling of the history
+    // strip inside a flex column, and `h-full` would claim the whole box
+    // and push the strip out of view. `flex-1` takes the *remaining*
+    // space, which is what "fills the response pane" actually means once
+    // there is a strip below it.
+    <section className="flex min-h-0 flex-1 flex-col items-center justify-center border-t border-border bg-card/30 px-4 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40">
         <CheckCircle2 className="h-6 w-6 text-muted-foreground/50" />
       </div>

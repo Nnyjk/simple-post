@@ -47,15 +47,6 @@ function appendCapped(
     : [...prev, entry];
 }
 
-/** Group the server's flat, per-endpoint-ordered list into the store's map. */
-function groupByEndpoint(rows: ResponseHistoryEntry[]): Record<string, ResponseHistoryEntry[]> {
-  const grouped: Record<string, ResponseHistoryEntry[]> = {};
-  for (const row of rows) {
-    (grouped[row.endpointId] ??= []).push(row);
-  }
-  return grouped;
-}
-
 export interface UiResponseState {
   lastResponse: ApiResponse | null;
   requestPending: boolean;
@@ -81,12 +72,21 @@ export interface UiResponseActions {
    */
   addResponseHistory: (endpointId: string, response: ApiResponse) => void;
   /**
-   * Replace the map with one project's stored history. Fired from
-   * `setActiveProject`, which is the single canonical "the user is now
-   * working in project X" event. Never throws and never rejects — it
-   * runs beside the bootstrap critical path, not on it.
+   * Read one endpoint's stored history into the map.
+   *
+   * **Per endpoint, on demand** — fired when an endpoint tab becomes
+   * active, not once per project. The first cut loaded the whole
+   * project's history when a project opened, which sized the read to the
+   * project instead of to the panel: the strip shows at most ten rows for
+   * the endpoint in front of the user, and has no use for the other
+   * endpoints' rows until it opens them.
+   *
+   * Fails soft. An unreadable history degrades to an empty strip, which
+   * is exactly the state the renderer was in before persistence existed.
+   * It must not reach `bootstrapError` — that flag means a dead startup,
+   * and a missing history panel is not one.
    */
-  loadResponseHistory: (rootId: string) => Promise<void>;
+  loadResponseHistory: (endpointId: string) => Promise<void>;
   /** Drop one endpoint's history locally and on the server. */
   clearResponseHistory: (endpointId: string) => Promise<void>;
   addResponseExample: (endpointId: string, response: ApiResponse) => string;
@@ -97,7 +97,7 @@ export interface UiResponseActions {
 
 export type UiResponse = UiResponseState & UiResponseActions;
 
-export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set, get) => ({
+export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set) => ({
   lastResponse: null,
   requestPending: false,
   responseHistory: {},
@@ -155,26 +155,25 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
       });
   },
 
-  loadResponseHistory: async (rootId) => {
-    // `''` is the welcome screen, not a project — there is no row to
-    // filter by, and asking for it would return some other project's
-    // history under no project at all.
-    if (rootId === '') return;
+  loadResponseHistory: async (endpointId) => {
+    // A draft endpoint never reaches the database, so there is nothing to
+    // read. Its history stays in memory for as long as the tab does.
+    if (endpointId === '' || endpointId.startsWith(DRAFT_ID_PREFIX)) return;
     try {
       const rows = await invokeCmd<ResponseHistoryEntry[]>(COMMANDS.responseHistoryList, {
-        rootId,
+        endpointId,
       });
-      // Race guard. This is dispatched without being awaited, so the user
-      // can switch A→B→A while A's load is still in flight; committing
-      // unconditionally would land A's rows under whichever project
-      // happens to be in front. A's own (later) load is what fills them.
-      if (get().activeProjectId !== rootId) return;
-      set({ responseHistory: groupByEndpoint(rows) });
+      // No race guard, and that is a consequence of the per-endpoint scope
+      // rather than a lucky omission: this writes only
+      // `responseHistory[endpointId]`, so a result that lands after the
+      // user moved on is still that endpoint's own rows and is correct
+      // wherever it lands. The project-scoped version this replaced had to
+      // compare `activeProjectId` before committing, because one late
+      // answer could overwrite a whole other project's map.
+      set((s) => ({
+        responseHistory: { ...s.responseHistory, [endpointId]: rows },
+      }));
     } catch (e) {
-      // Fails soft on purpose: an unreadable history degrades to "the
-      // strip is empty", which is the same as the pre-persistence state.
-      // It must not reach `bootstrapError` — that flag is a dead
-      // startup, and this is not one.
       console.warn('[store] response history load failed', e);
     }
   },

@@ -16,6 +16,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use serde_json::json;
+
 use crate::web_api::{build_router, WebState};
 
 /// A `WebState` over a throwaway SQLite file plus an empty SPA dir, with
@@ -87,6 +89,14 @@ async fn seed_tree(dir: &std::path::Path) {
              (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
              VALUES ('e1', 'p1', 'mod_a', 'endpoint', 'GET /orders', 0, 1, 1)",
         )?;
+        // A sibling endpoint, so the scoping tests have two endpoints to
+        // tell apart. `response_history.endpoint_id` is a foreign key onto
+        // `nodes`, so an append naming `e2` has to find a real row.
+        c.execute_batch(
+            "INSERT INTO nodes \
+             (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
+             VALUES ('e2', 'p1', 'mod_a', 'endpoint', 'GET /users', 1, 1, 1)",
+        )?;
         Ok(())
     })
     .expect("seed tree");
@@ -156,9 +166,9 @@ fn append_body() -> serde_json::Value {
 }
 
 /// `POST` then `GET` — the round trip the strip depends on, and the one
-/// that fails loudly if the append route was never registered (the GET
-/// would answer the SPA shell's `200` and this would compare HTML to a
-/// list).
+/// that fails loudly if either route was never registered (a missing
+/// route answers with the SPA shell's `200` and an HTML body, and this
+/// would compare HTML to a list).
 #[tokio::test]
 async fn append_then_list_answers_both_routes() {
     let (addr, dir) = serve_test_router().await;
@@ -175,7 +185,7 @@ async fn append_then_list_answers_both_routes() {
     assert_eq!(entry["bodyTruncated"], false);
     assert!(entry["response"]["error"].is_null());
 
-    let (status, rows) = get_json(addr, "/api/response-history?rootId=p1").await;
+    let (status, rows) = get_json(addr, "/api/response-history/e1").await;
     assert_eq!(status, 200, "list route must answer, got {rows}");
     let rows = rows
         .as_array()
@@ -184,23 +194,49 @@ async fn append_then_list_answers_both_routes() {
     assert_eq!(rows[0]["response"]["url"], "http://x/orders");
 }
 
-/// `rootId` is required on this route, unlike `GET /api/nodes`. The
-/// status code alone proves little here — an SPA-fallback `200` would also
-/// pass a `status == 200` check — so the body is the discriminator: an
-/// empty list would render as "this project has no history", which is a
-/// different and wrong answer to "you did not say which project".
+/// An endpoint nobody has sent to is `[]`, not `404`.
+///
+/// This is the commonest request the strip makes — every endpoint opened
+/// for the first time — and "brand new endpoint" is an empty history, not
+/// a missing resource. A `404` would make the two indistinguishable on
+/// both transports.
 #[tokio::test]
-async fn a_list_without_root_id_is_rejected_rather_than_answered_empty() {
-    let (addr, _dir) = serve_test_router().await;
+async fn an_endpoint_with_no_history_reads_as_empty() {
+    let (addr, dir) = serve_test_router().await;
+    seed_tree(&dir).await;
 
-    let (status, body) = get_json(addr, "/api/response-history").await;
-    assert_eq!(status, 400, "expected a validation error, got {body}");
-    assert_eq!(body["code"], "validation");
+    let (status, body) = get_json(addr, "/api/response-history/e1").await;
+    assert_eq!(status, 200, "got {body}");
+    assert_eq!(body.as_array().map(Vec::len), Some(0));
 }
 
-/// The id-scoped delete and the collection-level GET/POST have to coexist
-/// in the radix tree. `removed` is the whole reason this route does not
-/// answer `204` like its neighbours, so the count is asserted too.
+/// The list is scoped to its endpoint, so a sibling's rows must not leak
+/// into it. The renderer keys the map by `endpointId` without re-checking
+/// every row, which is only sound because the read is this narrow.
+#[tokio::test]
+async fn the_list_never_includes_a_sibling_endpoints_rows() {
+    let (addr, dir) = serve_test_router().await;
+    seed_tree(&dir).await;
+
+    post_json(addr, "/api/response-history", append_body()).await;
+    let mut other = append_body();
+    other["endpointId"] = json!("e2");
+    let (status, entry) = post_json(addr, "/api/response-history", other).await;
+    assert_eq!(status, 201, "got {entry}");
+
+    let (_, rows) = get_json(addr, "/api/response-history/e1").await;
+    let rows = rows.as_array().expect("array");
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows.iter().all(|r| r["endpointId"] == "e1"),
+        "a project-wide read leaked a sibling's row: {rows:?}"
+    );
+}
+
+/// The id-scoped GET and DELETE share one path, and the collection-level
+/// POST has to coexist with them in the radix tree. `removed` is the whole
+/// reason this delete does not answer `204` like its neighbours, so the
+/// count is asserted too.
 #[tokio::test]
 async fn clear_answers_how_many_rows_went() {
     let (addr, dir) = serve_test_router().await;
@@ -218,7 +254,7 @@ async fn clear_answers_how_many_rows_went() {
     assert_eq!(status, 200, "clearing twice is not an error, got {body}");
     assert_eq!(body["removed"], 0);
 
-    let (_, rows) = get_json(addr, "/api/response-history?rootId=p1").await;
+    let (_, rows) = get_json(addr, "/api/response-history/e1").await;
     assert_eq!(rows.as_array().map(Vec::len), Some(0));
 }
 
@@ -235,7 +271,7 @@ async fn the_per_endpoint_cap_holds_across_transport_appends() {
         assert_eq!(status, 201, "every append must answer, got {body}");
     }
 
-    let (_, rows) = get_json(addr, "/api/response-history?rootId=p1").await;
+    let (_, rows) = get_json(addr, "/api/response-history/e1").await;
     assert_eq!(
         rows.as_array().map(Vec::len),
         Some(crate::domain::RESPONSE_HISTORY_PER_ENDPOINT as usize),

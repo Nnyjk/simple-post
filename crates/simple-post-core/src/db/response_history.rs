@@ -55,9 +55,16 @@ const COLUMNS: &str = "rh.id, rh.endpoint_id, rh.status, rh.status_text, rh.dura
 ///
 /// Bounded by the cap [`append`] maintains, so this cannot return an
 /// unbounded list for a live endpoint — but an endpoint that had a
-/// larger cap in an older build, or one written by a build where the cap
-/// differed, can still hold more. `LIMIT` is here so the read is
-/// bounded by the same constant the write is, whatever the file holds.
+/// larger cap in an older build can still hold more. `LIMIT` is here so
+/// the read is bounded by the same constant the write is, whatever the
+/// file holds.
+///
+/// Scoped to **one endpoint**, deliberately. The obvious alternative is
+/// a "everything in this project" read issued once when a project opens
+/// — but that is a bulk fetch for a panel that shows at most ten rows
+/// for the endpoint actually in front of the user, and its cost grows
+/// with the project rather than with what is on screen. One indexed read
+/// per endpoint the user opens is both cheaper and what the UI wants.
 pub fn list_by_endpoint(
     conn: &mut Connection,
     endpoint_id: &str,
@@ -70,33 +77,6 @@ pub fn list_by_endpoint(
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params![endpoint_id], row_to_entry)?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(AppError::Sqlite)?);
-    }
-    Ok(out)
-}
-
-/// Every endpoint's history under one project, newest first within each
-/// endpoint.
-///
-/// This is the bootstrap read: the renderer holds one
-/// `Record<endpointId, …>` and a project switch replaces it wholesale,
-/// so one round-trip is the difference between a usable history and one
-/// call per endpoint. It joins through `nodes` to use the `root_id`
-/// index rather than resolving ancestors in the renderer.
-pub fn list_by_root(
-    conn: &mut Connection,
-    root_id: &str,
-) -> Result<Vec<ResponseHistoryEntry>, AppError> {
-    let sql = format!(
-        "SELECT {COLUMNS} FROM response_history rh \
-         JOIN nodes n ON n.id = rh.endpoint_id \
-         WHERE n.root_id = ?1 \
-         ORDER BY rh.endpoint_id ASC, rh.created_at DESC, rh.rowid DESC"
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params![root_id], row_to_entry)?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r.map_err(AppError::Sqlite)?);

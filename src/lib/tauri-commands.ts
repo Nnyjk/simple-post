@@ -64,12 +64,14 @@ export const COMMANDS = {
 
   // ----- response history -----
   // Persisted per-endpoint send history. One resource, three verbs:
-  // `list` reads a whole project's rows in a single round-trip (the
-  // store keys them by endpoint, but per-endpoint reads would be one
-  // IPC call per endpoint on every project switch), `append` stores what
-  // a send just produced, `clear` is the explicit "forget this
-  // endpoint's history" affordance — deleting the endpoint itself is the
-  // foreign key's job, not this pair's.
+  // ----- response history -----
+  // Every verb names one endpoint. `list` reads the rows for the endpoint
+  // the user just opened (it is fired from `setActiveTab`, not from a
+  // project switch — a project-scoped read fetched rows for endpoints
+  // nobody was looking at), `append` stores what a send just produced,
+  // and `clear` is the explicit "forget this endpoint's history"
+  // affordance — deleting the endpoint itself is the foreign key's job,
+  // not this pair's.
   responseHistoryAppend: 'response_history_append',
   responseHistoryClear: 'response_history_clear',
   responseHistoryList: 'response_history_list',
@@ -511,12 +513,13 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
 
   // ----- response history -----
-  // `rootId` is the only filter: the renderer keeps one map per active
-  // project and replaces it wholesale, so the server returns a flat list
-  // ordered `endpointId ASC, created_at DESC` and the store groups it.
+  // Scoped to one endpoint, and the id lives in the path rather than a
+  // query string because there is nothing optional about it: the strip
+  // asks for the endpoint it is about to paint, and an endpoint with
+  // nothing stored answers `[]` rather than an error.
   [COMMANDS.responseHistoryList]: {
     method: 'GET',
-    path: (a) => `/api/response-history${buildQuery({ rootId: a.rootId })}`,
+    path: (a) => `/api/response-history/${encodeURIComponent(String(a.endpointId))}`,
   },
   [COMMANDS.responseHistoryAppend]: {
     method: 'POST',

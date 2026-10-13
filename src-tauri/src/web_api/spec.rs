@@ -298,13 +298,15 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         // first half is the `/api/endpoint-details` read they are
         // rendered next to.
         //
-        // The list is project-scoped through `rootId` while both writes
-        // name one endpoint, so the query parameter and the path
-        // parameter disagree on purpose; see `routes/response_history.rs`.
+        // The list and the clear share one path because they act on the
+        // same unit — a single endpoint's rows. Only the append is
+        // collection-level, because the id it names is in its body
+        // alongside the response; see `routes/response_history.rs`.
         RouteSpec {
             method: "GET",
-            path: "/api/response-history",
-            summary: "Stored responses for every endpoint in a project (rootId); newest first per endpoint",
+            path: "/api/response-history/:endpointId",
+            summary: "Stored responses for one endpoint; newest first, at most the endpoint's \
+                      10 kept rows. An endpoint with nothing stored answers []",
             stability: "public",
             request: None,
             response: Some("ResponseHistoryEntry[]"),

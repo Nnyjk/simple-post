@@ -332,27 +332,45 @@ fn clear_drops_one_endpoints_rows_and_reports_the_count() {
 }
 
 // -------------------------------------------------------------------------
-// The bootstrap read
+// The per-endpoint read
 // -------------------------------------------------------------------------
 
 #[test]
-fn list_by_root_covers_one_project_only() {
+fn list_by_endpoint_returns_that_endpoint_and_nothing_else() {
     let (pool, _dir) = fresh_pool();
     for (id, tag) in [("e1", "one"), ("e2", "two"), ("e3", "three")] {
         db::with_tx(&pool, |c| append(c, id, &resp(200, tag))).unwrap();
     }
     db::with_tx(&pool, |c| append(c, "e1", &resp(500, "boom"))).unwrap();
 
-    let rows = db::with_conn(&pool, |c| list_by_root(c, "p1")).unwrap();
-    assert_eq!(rows.len(), 3, "e1 has two rows, e2 has one, e3 is p2's");
-    assert!(rows.iter().all(|r| r.endpoint_id != "e3"));
-    // Per-endpoint grouping: e1's two rows arrive newest-first
-    // together, which is what lets the renderer rebuild the keyed map
-    // without sorting.
-    let e1: Vec<&ResponseHistoryEntry> = rows.iter().filter(|r| r.endpoint_id == "e1").collect();
-    assert_eq!(e1.len(), 2);
-    assert_eq!(e1[0].response.body, "boom");
-    assert_eq!(e1[1].response.body, "one");
+    let rows = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter().all(|r| r.endpoint_id == "e1"),
+        "a sibling endpoint's rows must never appear in this list — the \
+         renderer keys the map by `endpointId` without re-checking"
+    );
+    // Newest first, which is what lets the strip drop its own reverse.
+    assert_eq!(rows[0].response.body, "boom");
+    assert_eq!(rows[1].response.body, "one");
+}
+
+#[test]
+fn an_endpoint_with_no_history_reads_as_empty_not_as_everybody_elses() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "one"))).unwrap();
+
+    // The read this function replaced was project-scoped and returned
+    // every endpoint's rows. Asking an empty endpoint for its history is
+    // the single most common request the strip makes — every endpoint
+    // the user opens for the first time — so "empty" has to be a real
+    // answer rather than a fallback to something bigger.
+    assert!(db::with_conn(&pool, |c| list_by_endpoint(c, "e2"))
+        .unwrap()
+        .is_empty());
+    assert!(db::with_conn(&pool, |c| list_by_endpoint(c, "nope"))
+        .unwrap()
+        .is_empty());
 }
 
 // -------------------------------------------------------------------------

@@ -258,10 +258,8 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     // ---------- selection / expansion ----------
 
     setActiveProject: (id) => {
-      // Only a real change re-reads per-project data. Re-selecting the
-      // project already in front is not an event, and the strip swap /
-      // tree load in `openProject` must not be duplicated by it.
-      const changed = get().activeProjectId !== id;
+      // Only a real change re-reads the project's active environment.
+      // Re-selecting the project already in front is not an event.
       set((s) => {
         const env =
           s.environments.find((e) => e.projectId === id && e.isActive) ??
@@ -274,17 +272,11 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
           activeEnvironmentId: env?.id ?? '',
         };
       });
-      // Per-project response history hangs off this action rather than
-      // `openProject` (which calls it) or `loadWorkspace` (which
-      // short-circuits on `nodesLoaded`, and at boot `activeProjectId`
-      // is `''` anyway): the command palette's "jump to an endpoint in
-      // another project" deliberately bypasses `openProject`, so this is
-      // the only event every path into a project shares.
-      //
-      // Fire-and-forget, like layer 2 of `bootstrap()` — the history strip
-      // is not on the critical path into a project, and its failure lands
-      // nowhere near `bootstrapError`.
-      if (changed) void get().loadResponseHistory(id);
+      // Response history deliberately does NOT load here. It is scoped to
+      // one endpoint, not to a project, and it is fired from
+      // `setActiveTab` — the event every path into an endpoint shares.
+      // Loading it per project meant fetching rows for endpoints the user
+      // was not looking at, sized by the project rather than by the strip.
     },
     setActiveEnvironment: (id) => set({ activeEnvironmentId: id }),
     openProject: (id) => {

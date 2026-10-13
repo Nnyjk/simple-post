@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { History, ChevronDown } from 'lucide-react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
+import { DRAFT_ID_PREFIX } from '@/stores/store-types';
 import type { ResponseHistoryEntry } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils';
@@ -26,12 +27,36 @@ export function ResponseHistory() {
   // Raw reference — only re-renders when the dictionary itself is replaced.
   const history = useAppStore((s) => s.responseHistory);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
+  const loadResponseHistory = useAppStore((s) => s.loadResponseHistory);
   const clearResponseHistory = useAppStore((s) => s.clearResponseHistory);
   const [open, setOpen] = useState(false);
 
+  const endpointId = endpoint?.id ?? null;
+
+  // Read this endpoint's stored history when it becomes the one on screen.
+  //
+  // The effect is the trigger rather than an action-level hook, and that
+  // is not a style choice. `activeTabId` has **three** writers — `openTab`
+  // (which is how the tree and the command palette open an endpoint),
+  // `setActiveTab` (the tab strip) and `closeTab`'s fallback — so a hook
+  // placed on any one of them silently misses the others, and a history
+  // that loads only when the user switches tabs *back* to an endpoint is
+  // indistinguishable from one that never loads. A component effect keys
+  // off the value the UI actually resolved, so every path is covered by
+  // construction.
+  //
+  // `id in history` is the "already have it" guard: switching back to a tab
+  // should not refetch rows the store is holding, and `clearResponseHistory`
+  // deletes the key, so a cleared endpoint does get re-read.
+  useEffect(() => {
+    if (!endpointId || endpointId.startsWith(DRAFT_ID_PREFIX)) return;
+    if (endpointId in useAppStore.getState().responseHistory) return;
+    void loadResponseHistory(endpointId);
+  }, [endpointId, loadResponseHistory]);
+
   // Read the array reference for the current endpoint. If the user switches
   // endpoints, this picks up the new array (or undefined).
-  const entries = endpoint ? history[endpoint.id] : undefined;
+  const entries = endpointId ? history[endpointId] : undefined;
   const count = entries?.length ?? 0;
 
   // Newest first. The server already returns each endpoint's rows
@@ -52,8 +77,8 @@ export function ResponseHistory() {
   };
 
   const onClear = () => {
-    if (!endpoint) return;
-    void clearResponseHistory(endpoint.id);
+    if (!endpointId) return;
+    void clearResponseHistory(endpointId);
   };
 
   return (

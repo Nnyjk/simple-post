@@ -226,20 +226,13 @@ describe('addResponseHistory 的落盘与乐观行', () => {
   });
 });
 
-describe('loadResponseHistory 的分组与竞态', () => {
-  it('按 endpointId 分组进 Record', async () => {
-    listResult = [makeEntry('epA', 'a2'), makeEntry('epB', 'b1'), makeEntry('epA', 'a1')];
-    // The commit is guarded on the active project still being `rootId`,
-    // which in the app is true because `setActiveProject` set it before
-    // dispatching. Mirror that here.
-    useAppStore.setState({ activeProjectId: 'p1' });
-    await useAppStore.getState().loadResponseHistory('p1');
+describe('loadResponseHistory 按接口加载', () => {
+  it('只写自己那个接口的键，服务端顺序原样保留', async () => {
+    listResult = [makeEntry('epA', 'a2'), makeEntry('epA', 'a1')];
+    await useAppStore.getState().loadResponseHistory('epA');
 
-    assert.deepEqual(
-      Object.keys(useAppStore.getState().responseHistory).sort(),
-      ['epA', 'epB'],
-      'the flat list becomes one key per endpoint',
-    );
+    assert.deepEqual(calls[0].args, { endpointId: 'epA' }, '按接口查，不是按项目查');
+    assert.deepEqual(Object.keys(useAppStore.getState().responseHistory), ['epA']);
     assert.deepEqual(
       useAppStore.getState().responseHistory.epA?.map((r) => r.id),
       ['a2', 'a1'],
@@ -247,104 +240,60 @@ describe('loadResponseHistory 的分组与竞态', () => {
     );
   });
 
-  it('加载失败不抛出，也不写 bootstrapError', async () => {
-    listFails = true;
-    await assert.doesNotReject(() => useAppStore.getState().loadResponseHistory('p1'));
-    assert.equal(useAppStore.getState().bootstrapError, null);
-    assert.deepEqual(useAppStore.getState().responseHistory, {});
-  });
-
-  it("rootId 为 '' 时不发请求", async () => {
-    await useAppStore.getState().loadResponseHistory('');
-    assert.deepEqual(cmdNames(), [], "'' is the welcome screen, not a project");
-  });
-
-  it('中途切换项目后，迟到的结果被丢弃', async () => {
+  it('不再需要项目级竞态守卫：迟到的结果仍写回它自己的键', async () => {
     let release: () => void = () => undefined;
     listGate = new Promise<void>((resolve) => {
       release = resolve;
     });
     listResult = [makeEntry('epA', 'a1')];
 
-    useAppStore.setState({ activeProjectId: 'p1' });
-    const loading = useAppStore.getState().loadResponseHistory('p1');
-
-    // The user leaves for another project while the read is in flight.
-    useAppStore.setState({ activeProjectId: 'p2' });
+    const loading = useAppStore.getState().loadResponseHistory('epA');
+    // The user moves on to another endpoint while the read is in flight.
+    useAppStore.setState({ activeEndpointId: 'epB' });
     release();
     await loading;
 
     assert.deepEqual(
-      useAppStore.getState().responseHistory,
-      {},
-      "p1's rows must not land under p2",
-    );
-  });
-
-  it('切换项目重新加载：setActiveProject 是唯一的触发点', async () => {
-    listResult = [makeEntry('epA', 'a1')];
-
-    useAppStore.getState().setActiveProject('p1');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(cmdNames(), ['response_history_list']);
-    assert.deepEqual(calls[0].args, { rootId: 'p1' });
-    assert.deepEqual(Object.keys(useAppStore.getState().responseHistory), ['epA']);
-
-    // Re-selecting the project already in front is not an event.
-    useAppStore.getState().setActiveProject('p1');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(cmdNames(), ['response_history_list'], 'no re-fetch for the same project');
-  });
-
-  it('新项目的加载整体替换旧项目的 map', async () => {
-    listResult = [makeEntry('epA', 'a1')];
-    useAppStore.setState({ activeProjectId: 'p1' });
-    await useAppStore.getState().loadResponseHistory('p1');
-    assert.deepEqual(Object.keys(useAppStore.getState().responseHistory), ['epA']);
-
-    listResult = [makeEntry('epZ', 'z1')];
-    useAppStore.setState({ activeProjectId: 'p2' });
-    await useAppStore.getState().loadResponseHistory('p2');
-    assert.deepEqual(
       Object.keys(useAppStore.getState().responseHistory),
-      ['epZ'],
-      "p1's keys do not survive the switch",
+      ['epA'],
+      'a per-endpoint result is that endpoint 的 rows, so it is correct ' +
+        'wherever it lands; dropping it would lose data the server already has',
     );
   });
-});
 
-describe('clearResponseHistory', () => {
-  it('乐观清空并落一次库；draft 不落盘', async () => {
-    appendFails = true;
-    const { addResponseHistory, clearResponseHistory } = useAppStore.getState();
-    addResponseHistory(REAL_ID, makeResponse());
-    addResponseHistory(DRAFT_ID, makeResponse());
-    calls = [];
+  it('一个接口的加载不清掉另一个接口已经拿到的行', async () => {
+    listResult = [makeEntry('epA', 'a1')];
+    await useAppStore.getState().loadResponseHistory('epA');
 
-    await clearResponseHistory(REAL_ID);
-    await clearResponseHistory(DRAFT_ID);
+    listResult = [];
+    await useAppStore.getState().loadResponseHistory('epB');
 
-    assert.deepEqual(cmdNames(), ['response_history_clear']);
-    assert.deepEqual(calls[0].args, { endpointId: REAL_ID });
-    assert.ok(
-      !(REAL_ID in useAppStore.getState().responseHistory),
-      'the strip must not keep rows the file may no longer have',
+    assert.deepEqual(
+      Object.keys(useAppStore.getState().responseHistory).sort(),
+      ['epA', 'epB'],
+      "epB's empty history must not wipe epA's rows",
     );
-    // A draft's rows are memory-only, so clearing is purely local.
-    assert.ok(!(DRAFT_ID in useAppStore.getState().responseHistory));
+    assert.equal(useAppStore.getState().responseHistory.epB?.length, 0);
   });
 
-  it('清空失败不抛，也不把行放回去', async () => {
-    appendFails = true;
-    const { addResponseHistory, clearResponseHistory } = useAppStore.getState();
-    addResponseHistory(REAL_ID, makeResponse());
-    installIpcMock(async (cmd) => {
-      calls.push({ cmd, args: {} });
-      if (cmd === 'response_history_clear') throw new Error('clear failed');
-      throw new Error(`unexpected command: ${cmd}`);
-    });
+  it('加载失败不抛出，也不写 bootstrapError', async () => {
+    listFails = true;
+    await assert.doesNotReject(() => useAppStore.getState().loadResponseHistory('epA'));
+    assert.equal(useAppStore.getState().bootstrapError, null);
+    assert.deepEqual(useAppStore.getState().responseHistory, {});
+  });
 
-    await assert.doesNotReject(() => clearResponseHistory(REAL_ID));
-    assert.ok(!(REAL_ID in useAppStore.getState().responseHistory));
+  it('draft 接口不发请求', async () => {
+    await useAppStore.getState().loadResponseHistory(DRAFT_ID);
+    assert.deepEqual(
+      cmdNames(),
+      [],
+      'a draft endpoint has no nodes row, so the server has nothing to read',
+    );
+  });
+
+  it('空 id 不发请求', async () => {
+    await useAppStore.getState().loadResponseHistory('');
+    assert.deepEqual(cmdNames(), []);
   });
 });

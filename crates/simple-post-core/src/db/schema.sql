@@ -225,8 +225,13 @@ CREATE TABLE IF NOT EXISTS response_history (
   body_truncated  INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL
 );
--- The one read per endpoint that matters: the strip's
--- `list_by_endpoint`.
+-- The one read this table has: the history strip asks for **one
+-- endpoint's** rows, and that is the only query the renderer issues.
+--
+-- It was once "every endpoint in a project", fetched in bulk when a
+-- project opened. That was the wrong shape — a panel showing ten rows
+-- for the endpoint in front of the user should not cost a read whose
+-- size grows with the project — so the bulk read and its index are gone.
 --
 -- `rowid` is deliberately NOT in the index even though the ORDER BY
 -- uses it as the tie-break — SQLite rejects `rowid` in an index
@@ -236,8 +241,13 @@ CREATE TABLE IF NOT EXISTS response_history (
 -- keeps the table that small.
 CREATE INDEX IF NOT EXISTS idx_response_history_endpoint
   ON response_history(endpoint_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_response_history_root
-  ON response_history(created_at DESC);
+
+-- Dropped rather than left behind. `CREATE INDEX IF NOT EXISTS` cannot
+-- remove anything, so a store written by a build that had the
+-- project-scoped index would keep it forever otherwise. Dropping an
+-- index is not a schema version event: no row is touched, `user_version`
+-- stays put, and `ensure_current_schema` is not involved.
+DROP INDEX IF EXISTS idx_response_history_root;
 
 -- Second line of defence for the parent/child matrix.
 --

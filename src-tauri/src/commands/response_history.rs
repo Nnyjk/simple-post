@@ -8,28 +8,29 @@ use crate::db::DbPool;
 use crate::domain::{ResponseHistoryEntry, StoredResponse};
 use crate::error::AppError;
 
-/// Every stored response under one project, grouped per endpoint and
-/// newest-first inside each group.
+/// One endpoint's stored responses, newest first.
 ///
-/// Project-scoped on purpose, the same reason `nodes_list` is: the
-/// renderer holds one `Record<endpointId, …>` that a project switch
-/// replaces wholesale, so the read has to answer "the active project's
-/// whole history" in a single round-trip rather than one call per
-/// endpoint.
+/// Scoped to a single endpoint on purpose. The first cut of this command
+/// took a project and answered "every response in it", which sounded
+/// cheaper than a read per endpoint until it was measured against what
+/// the strip actually shows: at most `RESPONSE_HISTORY_PER_ENDPOINT` rows
+/// for the one endpoint in front of the user. A project-wide read sizes
+/// itself to the project, not to the panel, and the renderer has no use
+/// for the other endpoints' rows until it opens them.
 ///
-/// `root_id` is required rather than optional — and `db::response_history`
-/// offers no unfiltered variant on purpose. `list_by_root` joins through
-/// `nodes.root_id` so the read uses the index; dropping the predicate would
-/// mean scanning every capped row in the file, which is exactly the set of
-/// rows the per-endpoint cap exists to bound. A caller that wants a
-/// different project's history names that project.
+/// So the caller asks for the endpoint it is about to paint, and the
+/// renderer keeps one entry per endpoint in a map it already had.
+///
+/// An unknown id is `Ok(vec![])`, not a 404: the most common request here
+/// is the first one for an endpoint that has never been sent, and that is
+/// an empty history rather than a missing resource.
 #[tauri::command]
 pub fn response_history_list(
     state: State<DbPool>,
-    root_id: String,
+    endpoint_id: String,
 ) -> Result<Vec<ResponseHistoryEntry>, AppError> {
     crate::db::with_conn(&state, |c| {
-        crate::db::response_history::list_by_root(c, &root_id)
+        crate::db::response_history::list_by_endpoint(c, &endpoint_id)
     })
 }
 

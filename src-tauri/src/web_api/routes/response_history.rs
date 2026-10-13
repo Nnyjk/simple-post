@@ -6,20 +6,17 @@
 //! `db::response_history`, so the IPC path and this one cannot drift on
 //! the two rules that are easy to get subtly wrong.
 //!
-//! Scope is the split worth stating once: the **list** is project-scoped
-//! (the renderer's history map is replaced wholesale on a project switch,
-//! so one round-trip has to be enough), while **append** and **clear**
-//! name a single endpoint, because that is the row they act on. Adding a
-//! `:projectId` path segment to the two writes would put a scope the
-//! server then has to trust — `endpoint_id` cascades off `nodes`, so
-//! naming a mismatched project would be a caller bug the write path
-//! cannot detect.
+//! Scope is the split worth stating once: **every** verb names a single
+//! endpoint — the list because it paints one endpoint's strip, and the
+//! two writes because that is the row they act on. Nothing here is
+//! project-scoped: adding a `:projectId` segment would put a scope the
+//! server then has to trust, and `endpoint_id` cascades off `nodes` so a
+//! mismatched project would be a caller bug the write path cannot detect.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::StatusCode,
     Json,
 };
@@ -28,34 +25,31 @@ use serde_json::{json, Value};
 
 use crate::db;
 use crate::domain::StoredResponse;
-use crate::error::AppError;
 
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
-/// `GET /api/response-history?rootId=<projectId>`
+/// `GET /api/response-history/:endpointId` — one endpoint's rows, newest
+/// first.
 ///
-/// `rootId` mirrors `GET /api/nodes`: a bare `Query<HashMap<String,
-/// String>>` read by hand, so an unknown query key is ignored rather than
-/// rejected. It is *required* here, unlike on `/api/nodes` — a node list
-/// has a sensible unfiltered answer (the whole tree, for first paint
-/// before a project is active) and this one does not. Answering a missing
-/// `rootId` with an empty list would be worse than a 400: the caller would
-/// render "this project has no history" when it had actually asked the
-/// wrong question.
+/// Shares the path with `DELETE` below, so the two verbs that act on a
+/// single endpoint read the same way in a URL bar.
+///
+/// An id with nothing stored is `200 []`, not `404`. The commonest
+/// request this route gets is the first one for an endpoint nobody has
+/// sent yet, and that is an empty history rather than a missing
+/// resource — answering 404 would make "brand new endpoint" look like a
+/// failure on both transports.
 pub(crate) async fn response_history_list(
     State(s): State<Arc<WebState>>,
-    Query(params): Query<HashMap<String, String>>,
+    Path(endpoint_id): Path<String>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let root_id = params.get("rootId").ok_or_else(|| {
-        map_app_error(AppError::Validation(
-            "GET /api/response-history requires rootId".into(),
-        ))
-    })?;
-    let rows = db::with_conn(&s.pool, |c| db::response_history::list_by_root(c, root_id))
-        .map_err(map_app_error)?;
+    let rows = db::with_conn(&s.pool, |c| {
+        db::response_history::list_by_endpoint(c, &endpoint_id)
+    })
+    .map_err(map_app_error)?;
     // `[]` rather than `null` on a serialisation failure: this row set is
-    // a map the renderer keys by endpoint, and a `null` there would read
-    // as "the server has no history table" rather than "the read failed".
+    // a list the renderer appends to, and a `null` there would read as
+    // "the server has no history table" rather than "the read failed".
     Ok(Json(
         serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
     ))
