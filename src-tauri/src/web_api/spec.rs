@@ -291,6 +291,40 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             request: Some("EnvSetModuleBaseUrl"),
             response: Some("Environment"),
         },
+        // ---- response history -------------------------------------------
+        // Listed because the browser build needs it: the response-history
+        // strip is renderer state that used to be lost on every relaunch,
+        // and these three routes are the second half of the fix — the
+        // first half is the `/api/endpoint-details` read they are
+        // rendered next to.
+        //
+        // The list is project-scoped through `rootId` while both writes
+        // name one endpoint, so the query parameter and the path
+        // parameter disagree on purpose; see `routes/response_history.rs`.
+        RouteSpec {
+            method: "GET",
+            path: "/api/response-history",
+            summary: "Stored responses for every endpoint in a project (rootId); newest first per endpoint",
+            stability: "public",
+            request: None,
+            response: Some("ResponseHistoryEntry[]"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/response-history",
+            summary: "Store one response; the server clips the body at 256 KiB and trims the endpoint back to its 10 newest rows",
+            stability: "public",
+            request: Some("ResponseHistoryAppend"),
+            response: Some("ResponseHistoryEntry"),
+        },
+        RouteSpec {
+            method: "DELETE",
+            path: "/api/response-history/:endpointId",
+            summary: "Clear one endpoint's stored responses; answers how many rows were removed",
+            stability: "public",
+            request: None,
+            response: Some("DeleteCount"),
+        },
         // ---- http send --------------------------------------------------
         RouteSpec {
             method: "POST",

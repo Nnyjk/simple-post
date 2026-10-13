@@ -62,6 +62,18 @@ export const COMMANDS = {
   requestSettingsGet: 'request_settings_get',
   requestSettingsUpdate: 'request_settings_update',
 
+  // ----- response history -----
+  // Persisted per-endpoint send history. One resource, three verbs:
+  // `list` reads a whole project's rows in a single round-trip (the
+  // store keys them by endpoint, but per-endpoint reads would be one
+  // IPC call per endpoint on every project switch), `append` stores what
+  // a send just produced, `clear` is the explicit "forget this
+  // endpoint's history" affordance — deleting the endpoint itself is the
+  // foreign key's job, not this pair's.
+  responseHistoryAppend: 'response_history_append',
+  responseHistoryClear: 'response_history_clear',
+  responseHistoryList: 'response_history_list',
+
   // ----- agent permissions -----
   permissionsGet: 'permissions_get',
   permissionsSet: 'permissions_set',
@@ -496,6 +508,27 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'PUT',
     path: () => '/api/request-settings',
     body: (a) => (a as { patch?: unknown }).patch ?? a,
+  },
+
+  // ----- response history -----
+  // `rootId` is the only filter: the renderer keeps one map per active
+  // project and replaces it wholesale, so the server returns a flat list
+  // ordered `endpointId ASC, created_at DESC` and the store groups it.
+  [COMMANDS.responseHistoryList]: {
+    method: 'GET',
+    path: (a) => `/api/response-history${buildQuery({ rootId: a.rootId })}`,
+  },
+  [COMMANDS.responseHistoryAppend]: {
+    method: 'POST',
+    path: () => '/api/response-history',
+    // Explicit projection rather than the default `body = args`: the two
+    // halves below are the whole wire contract, and a caller-held extra
+    // key must not ride along.
+    body: (a) => ({ endpointId: a.endpointId, response: a.response }),
+  },
+  [COMMANDS.responseHistoryClear]: {
+    method: 'DELETE',
+    path: (a) => `/api/response-history/${encodeURIComponent(String(a.endpointId))}`,
   },
 
   // ----- agent permissions -----

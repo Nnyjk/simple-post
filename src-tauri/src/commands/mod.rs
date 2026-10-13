@@ -46,6 +46,7 @@ mod nodes;
 mod permissions;
 mod projects;
 mod request_settings;
+mod response_history;
 
 // The globs (not item lists) are load-bearing: `#[tauri::command]` also emits
 // two `#[macro_export]`ed helper macros next to the function —
@@ -66,3 +67,4 @@ pub use nodes::*;
 pub use permissions::*;
 pub use projects::*;
 pub use request_settings::*;
+pub use response_history::*;

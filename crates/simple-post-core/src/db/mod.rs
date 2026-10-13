@@ -52,6 +52,7 @@ pub mod nodes;
 pub mod permissions;
 pub mod preferences;
 pub mod projects;
+pub mod response_history;
 
 // -------------------------------------------------------------------------
 // Public types.
