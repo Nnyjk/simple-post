@@ -160,7 +160,16 @@ pub struct JsonRpcError {
 
 /// The shape `tools/call` returns in its `result` field. Mirrors the MCP
 /// `CallToolResult` schema (subset — we only emit text content today).
+///
+/// **`rename_all = "camelCase"` is load-bearing, not style.** The MCP spec
+/// spells the failure flag `isError`. Serialising the Rust field name
+/// verbatim shipped `is_error`, which a spec-compliant client ignores — the
+/// LLM then reads a failed tool call as a success. This struct is the only
+/// thing that shapes a `tools/call` result, so the attribute is the fix;
+/// `CallToolContent`'s `rename_all = "snake_case"` below is unrelated (it
+/// controls the `type` *tag*, whose only variant is `text`).
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
     pub content: Vec<CallToolContent>,
     #[serde(skip_serializing_if = "is_false")]
@@ -213,7 +222,19 @@ impl CallToolResult {
 
 /// Static description of a registered tool — name, doc string, and the JSON
 /// Schema for its `arguments`. Returned by `tools/list`.
+///
+/// **`rename_all = "camelCase"` is load-bearing.** The MCP spec spells this
+/// field `inputSchema`; emitting `input_schema` makes every compliant client
+/// conclude the tool takes no arguments, so the model has nothing but the
+/// prose description to guess a parameter list from. All 44 tools were
+/// affected at once, which is exactly why it survived so long: nothing in
+/// this crate reads the descriptor back (`Deserialize` is unused), and a
+/// hand-written client reading `input_schema` keeps working.
+///
+/// `descriptor_emits_spec_camel_case_field_names` in `mod_test.rs` locks this
+/// down; without it a future `#[derive]` tidy-up silently re-breaks it.
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolDescriptor {
     pub name: String,
     pub description: String,

@@ -276,3 +276,106 @@ fn json_rpc_response_err_shape() {
     assert_eq!(e.code, -32601);
     assert_eq!(e.message, "method not found");
 }
+
+// ===========================================================================
+// MCP wire-format compliance
+//
+// These are source-level on purpose. A tool whose descriptor serialises
+// `input_schema` instead of `inputSchema` still dispatches perfectly: every
+// handler receives the right `arguments`, every unit test passes, and the
+// only symptom is that a spec-compliant client believes the tool takes no
+// arguments. Nothing functional can catch it — only an assertion on the
+// serialised shape can.
+// ===========================================================================
+
+/// The MCP spec names this field `inputSchema`. It shipped as `input_schema`,
+/// so every compliant client saw 44 argument-less tools and the LLM had
+/// nothing but prose to guess a parameter list from.
+#[test]
+fn descriptor_emits_spec_camel_case_field_names() {
+    let d = ToolDescriptor {
+        name: "t".into(),
+        description: "d".into(),
+        input_schema: json!({"type": "object"}),
+    };
+    let v = serde_json::to_value(&d).unwrap();
+    assert!(
+        v.get("inputSchema").is_some(),
+        "spec requires `inputSchema`; got {v}"
+    );
+    assert!(v.get("input_schema").is_none(), "snake_case leak: {v}");
+}
+
+/// Per-tool: every registered descriptor, not just a hand-built one. A new
+/// tool added with a struct literal that bypasses `ToolDescriptor` would
+/// otherwise slip past the single-descriptor test above.
+#[test]
+fn every_registered_descriptor_uses_camel_case_schema_key() {
+    let state = test_state();
+    for entry in tool_table() {
+        let v = serde_json::to_value(ToolDescriptor {
+            name: entry.name.to_string(),
+            description: entry.description.to_string(),
+            input_schema: entry.schema.clone(),
+        })
+        .unwrap();
+        assert!(
+            v.get("inputSchema").is_some(),
+            "tool {} serialises without inputSchema: {v}",
+            entry.name
+        );
+    }
+    drop(state);
+}
+
+/// The spec spells the failure flag `isError`. As `is_error` it was silently
+/// dropped by clients, so a denied or failed tool call read as a success.
+#[test]
+fn error_call_tool_result_emits_spec_is_error_key() {
+    let v = serde_json::to_value(CallToolResult::err("boom")).unwrap();
+    assert_eq!(
+        v.get("isError").and_then(|x| x.as_bool()),
+        Some(true),
+        "{v}"
+    );
+    assert!(v.get("is_error").is_none(), "snake_case leak: {v}");
+}
+
+/// Success must *omit* the flag rather than emit `isError: false` — some
+/// clients treat an explicit false as a failure signal, and the spec makes it
+/// optional.
+#[test]
+fn success_call_tool_result_omits_error_flag_entirely() {
+    let v = serde_json::to_value(CallToolResult::json(json!({"ok": true}))).unwrap();
+    assert!(v.get("isError").is_none(), "flag should be omitted: {v}");
+    assert!(v.get("is_error").is_none(), "{v}");
+    assert!(v.get("content").is_some());
+}
+
+/// `handle_tools_call`'s failure arm builds its JSON by hand instead of
+/// going through `CallToolResult`, so the struct's attribute does not cover
+/// it — and it shipped `is_error` while the struct was being fixed. Source-
+/// level because the symptom is only observable over HTTP.
+#[test]
+fn daemon_http_error_arm_types_the_spec_spelling() {
+    let src = include_str!("../daemon_http.rs");
+    // Comment lines are skipped on purpose: the file documents this exact
+    // bug, so a bare `src.contains` would match its own prose and fail for
+    // the wrong reason.
+    let code: Vec<&str> = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with("//"))
+        .collect();
+    let code = code.join("\n");
+
+    assert!(
+        !code.contains("\"is_error\": true"),
+        "daemon_http hand-writes the error envelope and must use the spec's \
+         `isError`; a bare `is_error` there is invisible to clients"
+    );
+    assert!(
+        code.contains("\"isError\": true"),
+        "expected the hand-written error envelope to spell isError"
+    );
+}
