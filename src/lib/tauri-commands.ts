@@ -108,6 +108,15 @@ export const COMMANDS = {
   mcpCapabilitySet: 'mcp_capability_set',
   mcpCapabilityListTools: 'mcp_capability_list_tools',
 
+  // ----- Streamable HTTP listener config -----
+  // Host / port / path of the MCP endpoint, plus the remote-access
+  // opt-in and the Host/Origin whitelists. Read returns the persisted
+  // config; the write returns `{ config, requiresRestart }` — the
+  // listener cannot rebind in place, so the caller surfaces a restart
+  // hint rather than pretending the change is live.
+  mcpHttpConfigGet: 'mcp_http_config_get',
+  mcpHttpConfigSet: 'mcp_http_config_set',
+
   // ----- low-level HTTP executor (Tauri side) -----
   httpRequest: 'http_request',
 } as const;
@@ -553,6 +562,20 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.mcpCapabilityListTools]: {
     method: 'GET',
     path: () => '/api/mcp/capability/tools',
+  },
+
+  // ----- Streamable HTTP listener config -----
+  // Both verbs share one path. The settings panel is reachable in the
+  // `serve-web` shape too, so this pair must exist here or the section
+  // silently does nothing in browser mode (dual-transport invariant).
+  [COMMANDS.mcpHttpConfigGet]: {
+    method: 'GET',
+    path: () => '/api/mcp/http-config',
+  },
+  [COMMANDS.mcpHttpConfigSet]: {
+    method: 'PUT',
+    path: () => '/api/mcp/http-config',
+    body: (a) => ({ config: a.config }),
   },
 };
 

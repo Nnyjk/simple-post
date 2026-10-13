@@ -288,3 +288,32 @@ export interface McpStatus {
   requestsHandled: number;
   lastError?: string;
 }
+
+/**
+ * Persisted configuration of the Streamable-HTTP MCP listener.
+ *
+ * Mirrors the Rust `McpHttpConfig` (`#[serde(rename_all = "camelCase")]`).
+ * Two fields carry meaning beyond their type:
+ *
+ * - `port: 0` means "let the OS assign one". It is deliberately not
+ *   persisted as a concrete number, because a daemon port that changes on
+ *   every restart must not be written into an AI client's config file
+ *   (see AGENTS.md — "an MCP client must not hardcode a daemon port").
+ * - `allowRemote` is the second gate on top of `host`: binding a
+ *   non-loopback address without it leaves the listener reachable from
+ *   the LAN, so the whitelist fields below only matter while it is on.
+ */
+export interface McpHttpConfig {
+  /** Listen address. Loopback-only unless `allowRemote` is also set. */
+  host: string;
+  /** `0` = OS-assigned ephemeral port. */
+  port: number;
+  /** Route the MCP endpoint is mounted at. Defaults to `/mcp`. */
+  path: string;
+  /** Opt-in for serving beyond this machine. Defaults to `false`. */
+  allowRemote: boolean;
+  /** Accepted `Host` header values. `['*']` disables the check. */
+  allowedHosts: string[];
+  /** Accepted `Origin` header values. `['*']` disables the check. */
+  allowedOrigins: string[];
+}
