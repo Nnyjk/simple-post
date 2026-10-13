@@ -46,14 +46,30 @@ export interface McpUiState {
 }
 
 /**
- * Wire shape returned by the `mcp_daemon_restart` Tauri command. The
- * command swallows any underlying `AppError` and reports a uniform
- * envelope so the renderer can keep using a simple `.then(result =>
- * …)` instead of a try/catch at every call site. `pid` / `port` are
- * the new daemon's identity after a successful restart.
+ * Wire shape returned by the `mcp_daemon_start` / `mcp_daemon_stop` /
+ * `mcp_daemon_restart` commands. All three lifecycle verbs share ONE
+ * envelope on purpose: the Rust commands swallow the underlying
+ * `AppError` and report a uniform result, so the renderer keeps a single
+ * discriminated branch instead of a try/catch (or three different shapes)
+ * at every call site.
+ *
+ *   - `ok: true` with a `pid`/`port` → that daemon is the live one.
+ *   - `ok: true` with `pid: null`   → a legitimate stop; nothing is running.
+ *   - `ok: false`                   → spawn failed / healthz timed out.
+ *
+ * `pid` / `port` after a successful start are the NEW daemon's identity.
+ * After an idempotent start against an already-running daemon they are the
+ * EXISTING daemon's — the server does not respawn in that case.
  */
 export interface RestartResult {
   ok: boolean;
-  pid?: number;
-  port?: number;
+  pid?: number | null;
+  port?: number | null;
 }
+
+/**
+ * The same envelope under a name that reads correctly at the start/stop
+ * call sites. Kept as an alias rather than a second interface so the
+ * structural type is identical in both directions.
+ */
+export type DaemonControlResult = RestartResult;

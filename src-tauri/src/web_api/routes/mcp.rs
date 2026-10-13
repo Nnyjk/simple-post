@@ -93,41 +93,85 @@ pub(crate) async fn mcp_capability_list_tools(
     ))
 }
 
+/// `POST /api/mcp/stop` — manual OFF switch.
+///
+/// Response envelope is the same `RestartResult` shape as
+/// `/api/mcp/start` and `/api/mcp/restart`: `{ ok, pid, port }`. A
+/// successful stop reports `{ ok: true, pid: null, port: null }` —
+/// nothing is serving after it, so `null` is the answer, not a missing
+/// field. Stopping an already-stopped daemon is `{ ok: true }`, not an
+/// error.
+///
+/// Terminates the daemon this process spawned and one it merely
+/// adopted from the port record (see `daemon_supervisor::teardown`),
+/// then releases `mcp.port`.
 pub(crate) async fn mcp_stop(
     State(s): State<Arc<WebState>>,
-) -> Result<Json<&'static str>, HttpErrorResponse> {
-    let _ = s.daemon.shutdown().await;
-    Ok(Json("stopped"))
+) -> Result<Json<crate::commands::RestartResult>, HttpErrorResponse> {
+    match s.daemon.stop().await {
+        Ok(snapshot) => Ok(Json(crate::commands::RestartResult {
+            ok: true,
+            pid: snapshot.pid,
+            port: snapshot.port,
+        })),
+        Err(e) => {
+            eprintln!("[mcp_stop] failed: {e:?}");
+            Ok(Json(crate::commands::RestartResult {
+                ok: false,
+                pid: None,
+                port: None,
+            }))
+        }
+    }
 }
 
+/// `POST /api/mcp/start` — manual ON switch.
+///
+/// Idempotent, and idempotency is the point: this used to call
+/// `restart_without_app_handle`, so "click start" on a healthy daemon
+/// killed and respawned it — losing in-flight MCP sessions and churning
+/// the port for no reason. It now goes through the supervisor's
+/// idempotent `start`, which returns the existing daemon's identity
+/// untouched and only spawns when nothing healthy is tracked.
+///
+/// Response envelope is the same `RestartResult` shape as
+/// `/api/mcp/stop` and `/api/mcp/restart`: `{ ok, pid, port }`, where
+/// `pid`/`port` identify the daemon now serving. Underlying failures
+/// (spawn error, healthz timeout) collapse to
+/// `{ ok: false, pid: null, port: null }` exactly as restart does.
 pub(crate) async fn mcp_start(
     State(s): State<Arc<WebState>>,
-) -> Result<Json<McpStatusDto>, HttpErrorResponse> {
-    // We don't have an `AppHandle` outside of Tauri; the daemon
-    // supervisor's `ensure_started` actually only needs it for the
-    // `app.path()` lookup, which has a `dirs::data_dir()` fallback in
-    // `port_registry`. We construct a sentinel `AppHandle::default()`
-    // is not possible — so call the data-dir-less spawn path via the
-    // same helper the GUI uses.
-    //
-    // Implementation note: `ensure_started` requires `&AppHandle`.
-    // The web shape doesn't have one. Workaround: invoke the same
-    // supervisor code via a dedicated `McpDaemonHandle::ensure_started_no_app`
-    // method that derives the data dir from `port_registry::data_dir()`
-    // (the supervisor already stores it on the `McpDaemonHandle`).
-    //
-    // To keep the current call signature stable, we simply call
-    // `restart` (which clears + re-spawns) — idempotent enough for
-    // user "click start" semantics. If the daemon is already running,
-    // `restart` will see it, kill it, and re-spawn.
-    match s.daemon.restart_without_app_handle(&s.data_dir).await {
-        Ok(snap) => Ok(Json(snap.into())),
-        Err(e) => Err(map_app_error(e)),
+) -> Result<Json<crate::commands::RestartResult>, HttpErrorResponse> {
+    // No `AppHandle` outside of Tauri, so this is the `serve-web`
+    // binding of the shared supervisor path: it derives nothing from
+    // Tauri, and takes the data dir the server was started with.
+    match s.daemon.start_without_app_handle(&s.data_dir).await {
+        Ok(snapshot) => Ok(Json(crate::commands::RestartResult {
+            ok: true,
+            pid: snapshot.pid,
+            port: snapshot.port,
+        })),
+        Err(e) => {
+            eprintln!("[mcp_start] failed: {e:?}");
+            Ok(Json(crate::commands::RestartResult {
+                ok: false,
+                pid: None,
+                port: None,
+            }))
+        }
     }
 }
 
 // ----- mcp daemon (additional verbs) --------------------------------------
 
+/// `POST /api/mcp/restart` — kill the current daemon (spawned or
+/// adopted) and bring up a fresh one.
+///
+/// Response envelope: `RestartResult` — `{ ok, pid, port }` — byte-
+/// identical to `/api/mcp/start` and `/api/mcp/stop`. Errors are
+/// swallowed into `{ ok: false, pid: null, port: null }` rather than a
+/// 5xx, so all three lifecycle verbs keep one uniform `{ ok: bool }`
+/// contract for the UI.
 pub(crate) async fn mcp_restart(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<crate::commands::RestartResult>, HttpErrorResponse> {

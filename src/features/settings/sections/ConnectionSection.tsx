@@ -12,38 +12,12 @@ import { AgentPermissionsTable } from './AgentPermissionsTable';
 import { DaemonRestartDialog } from './DaemonRestartDialog';
 import { COMMANDS } from '@/lib/tauri-commands';
 import { invokeCmd } from '@/lib/tauri-commands';
-
-const GENERIC_CONFIG = JSON.stringify(
-  {
-    mcpServers: {
-      'simple-post': {
-        command: 'simple-post',
-        args: ['mcp'],
-        env: {
-          SIMPLE_POST_DATA_DIR: '%APPDATA%\\\\simple-post',
-        },
-        metadata: {
-          description: 'Simple Post — 本地 API 工具的 MCP Server',
-          version: '0.1.0',
-        },
-      },
-      'simple-post-stdio': {
-        // `simple-post-mcp-proxy` was removed; the standalone
-        // bridge binary is now `simple-post-mcp`. There is deliberately
-        // no npm wrapper — an AI client that cannot run a Rust binary
-        // should point at the daemon over HTTP (`serve-web` + /mcp)
-        // instead, which needs no local install on the client machine.
-        command: 'simple-post-mcp',
-        args: ['stdio'],
-        env: {
-          SIMPLE_POST_DATA_DIR: '%APPDATA%\\\\simple-post',
-        },
-      },
-    },
-  },
-  null,
-  2,
-);
+import {
+  MCP_CLIENT_PRESETS,
+  buildClientConfig,
+  unavailableReason,
+  type McpTransport,
+} from '@/lib/mcp-client-config';
 
 export function ConnectionSection() {
   // Selector: raw ref only — see app-store rules.
@@ -170,6 +144,12 @@ export function ConnectionSection() {
   }, []);
 
   const [copyState, setCopyState] = useState<'idle' | 'success' | 'error'>('idle');
+
+  // ----- Generated client configs -----
+  // Driven by LIVE daemon facts rather than a hand-written constant, so
+  // the snippet always names the port the daemon is actually on.
+  const [transport, setTransport] = useState<McpTransport>('http');
+  const facts = { port: mcpStatus?.port ?? null, proxyPath };
   const handleCopyProxy = async () => {
     if (!proxyPath) return;
     try {
@@ -306,8 +286,12 @@ export function ConnectionSection() {
               启动时自动拉起 MCP 子进程
             </div>
             <div className="mt-0.5 text-[11px] text-muted-foreground">
-              关闭后 MCP 不会随应用启动；可在下方「MCP 进程」卡片里点击「立即启动」手起。
-              适用于需要按需启动 daemon 的场景（例如调试、CI、限制后台进程）。
+              关闭后 MCP 不会随应用启动；可在「MCP 进程」卡片里点「启动」手动拉起。
+              这与卡片里的「启动 / 停止」开关是两件事：这里决定
+              <strong className="font-medium text-foreground/80">下次打开应用</strong>
+              时是否自动运行，而卡片里的开关决定
+              <strong className="font-medium text-foreground/80">当前这次</strong>
+              是否运行——关掉本开关不会掐断正在服务的 daemon。
             </div>
           </div>
           <Switch
@@ -394,19 +378,69 @@ export function ConnectionSection() {
       </SettingsCategory>
 
       {/* ----- Client-side config ---------------------------------- */}
+      {/* One tile per AI client, generated from the LIVE daemon facts
+          (its actual port + the resolved bridge path). The previous
+          hand-written blob was broken twice over: `args: ['stdio']` is
+          not a valid argument for the bridge binary (it takes
+          `--transport=stdio` as a flag), and `%APPDATA%` in an `env`
+          value is never expanded because env is passed to the child
+          verbatim. See `src/lib/mcp-client-config.ts`. */}
       <SettingsCategory
         title="接入配置"
-        description="通用 MCP 配置，贴到任何支持 mcpServers 的客户端即可"
+        description="按客户端生成可直接粘贴的配置；HTTP 方式无需在客户端安装二进制"
         icon={<FileJson className="h-3.5 w-3.5" />}
         hideDivider
       >
-        <div className="p-3">
-          <CopyConfigTile
-            icon={<FileJson className="h-4 w-4" />}
-            name="通用 JSON"
-            description="兼容 Claude Desktop / Cursor / Continue 等任意 mcpServers 客户端"
-            configJson={GENERIC_CONFIG}
-          />
+        <div className="space-y-3 p-3">
+          {/* Transport picker. HTTP is first and recommended: it needs
+              nothing installed on the client machine, so it is the only
+              option that works for a client that cannot spawn
+              processes — and it keeps working after the app moves. */}
+          <div className="flex items-center gap-1 rounded-md border border-border bg-background p-0.5">
+            {(
+              [
+                { value: 'http', label: 'HTTP（推荐）', hint: '直连 daemon /mcp，无需本地二进制' },
+                { value: 'stdio', label: 'stdio', hint: '拉起 simple-post-mcp 桥接进程' },
+              ] as const
+            ).map((opt) => {
+              const active = transport === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setTransport(opt.value as McpTransport)}
+                  aria-pressed={active}
+                  title={opt.hint}
+                  className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    active
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {MCP_CLIENT_PRESETS.map((p) => {
+              const supported = p.supports.includes(transport);
+              const configJson = supported ? buildClientConfig(p, transport, facts) : null;
+              const reason = supported
+                ? unavailableReason(p, transport, facts)
+                : `该客户端未提供${transport === 'http' ? '远程 HTTP' : 'stdio'}接入方式`;
+              return (
+                <CopyConfigTile
+                  key={`${p.id}-${transport}`}
+                  icon={<FileJson className="h-4 w-4" />}
+                  name={p.name}
+                  description={configJson ? `${p.description} · ${p.configPath}` : reason}
+                  configJson={configJson ?? `// ${reason}`}
+                />
+              );
+            })}
+          </div>
         </div>
       </SettingsCategory>
 

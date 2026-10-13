@@ -89,3 +89,82 @@ pub async fn mcp_daemon_restart(
         }
     }
 }
+
+/// Manual ON switch — start the embedded MCP daemon.
+///
+/// Idempotent: when a healthy daemon is already tracked, its existing
+/// `pid` / `port` are returned and nothing is killed or respawned. A
+/// genuinely stopped / crashed / unhealthy daemon takes the spawn path
+/// and reports the new daemon's identity.
+///
+/// Response envelope is [`RestartResult`] — `{ ok, pid, port }` — the
+/// same shape as `mcp_daemon_restart`, so the three lifecycle verbs
+/// share one renderer contract. Underlying `AppError`s (spawn failure,
+/// healthz timeout) are swallowed into `{ ok: false, pid: null,
+/// port: null }` for the same reason as restart: the panel renders a
+/// badge, it does not branch on an exception type.
+///
+/// Interaction with `mcp_auto_start_set`: the preference is about
+/// *launch* and never kills a running daemon; this command is the
+/// runtime switch. Turning `auto_start` on starts the daemon (same
+/// idempotent path), turning it off only stops future launches — call
+/// this command to stop it now.
+#[tauri::command]
+pub async fn mcp_daemon_start(
+    state: State<'_, crate::daemon_supervisor::McpDaemonHandle>,
+    app_handle: tauri::AppHandle,
+) -> Result<RestartResult, AppError> {
+    match state.start(&app_handle).await {
+        Ok(snapshot) => Ok(RestartResult {
+            ok: true,
+            pid: snapshot.pid,
+            port: snapshot.port,
+        }),
+        Err(e) => {
+            eprintln!("[mcp_daemon_start] failed: {e:?}");
+            Ok(RestartResult {
+                ok: false,
+                pid: None,
+                port: None,
+            })
+        }
+    }
+}
+
+/// Manual OFF switch — terminate the embedded MCP daemon and release
+/// its port file.
+///
+/// Terminates the daemon this supervisor spawned *and* one it merely
+/// adopted from the port record, so no orphaned process is left holding
+/// the port. Safe to call when nothing is running: that returns
+/// `{ ok: true, pid: null, port: null }` rather than an error.
+///
+/// Response envelope is [`RestartResult`] — `{ ok, pid, port }`, byte-
+/// identical to `mcp_daemon_restart`'s — so the renderer does not need
+/// a shape-agnostic branch per verb. After a successful stop `pid` and
+/// `port` are `null` by definition (nothing is serving); a subsequent
+/// `mcp_daemon_start` runs the fresh-spawn path cleanly.
+///
+/// Interaction with `mcp_auto_start_set`: this is the runtime switch the
+/// auto-start preference deliberately is not. Disabling `auto_start`
+/// leaves a running daemon alone; only this command stops it now.
+#[tauri::command]
+pub async fn mcp_daemon_stop(
+    state: State<'_, crate::daemon_supervisor::McpDaemonHandle>,
+) -> Result<RestartResult, AppError> {
+    match state.stop().await {
+        Ok(snapshot) => Ok(RestartResult {
+            ok: true,
+            pid: snapshot.pid,
+            port: snapshot.port,
+        }),
+        Err(e) => {
+            eprintln!("[mcp_daemon_stop] failed: {e:?}");
+            Ok(RestartResult {
+                ok: false,
+                pid: None,
+                port: None,
+            })
+        }
+    }
+}

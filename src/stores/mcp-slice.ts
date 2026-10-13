@@ -23,7 +23,12 @@
  */
 import type { StateCreator } from 'zustand';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
-import type { McpRuntimeStatus, McpUiState, RestartResult } from '@/lib/mcp-types';
+import type {
+  DaemonControlResult,
+  McpRuntimeStatus,
+  McpUiState,
+  RestartResult,
+} from '@/lib/mcp-types';
 import type { AppState } from './app-store';
 
 /**
@@ -121,6 +126,25 @@ export interface McpSliceActions {
    */
   restartMcp: () => Promise<void>;
   /**
+   * Manual runtime ON switch — start the daemon if it is not already
+   * running. Distinct from `mcp.auto_start` (a launch-time preference)
+   * and from `restartMcp` (which always tears the old process down).
+   *
+   * The command is idempotent server-side: calling it while healthy
+   * returns the existing daemon's `{ok, pid, port}` without respawning,
+   * so this never costs a user their connections.
+   */
+  startMcp: () => Promise<void>;
+  /**
+   * Manual runtime OFF switch — terminate the daemon and release its port
+   * file. Safe to call when nothing is running (`ok: true, pid: null`).
+   *
+   * This is deliberately NOT `mcp.auto_start = false`: auto_start only
+   * decides whether the daemon comes up when the app launches, and turning
+   * it off must not kill a daemon the user is actively using.
+   */
+  stopMcp: () => Promise<void>;
+  /**
    * Record that the auto-open restart dialog has been shown for the
    * given status. Idempotent — the ConnectionSection effect's dedupe
    * logic calls this when the user dismisses the dialog so the next
@@ -162,6 +186,37 @@ export interface McpSliceActions {
 }
 
 export type McpSlice = McpSliceState & McpSliceActions;
+
+/**
+ * The lifecycle verbs (start / stop / restart) all answer the same
+ * `{ ok, pid, port }` envelope, so the badge bookkeeping is identical for
+ * all three. Two helpers keep that from being re-derived per action —
+ * which is exactly how the three drifted apart the first time.
+ *
+ * `set` is threaded in rather than closed over because these sit at
+ * module scope; the creator captures `set` and passes it down.
+ */
+type SetState = (partial: Partial<AppState>) => void;
+
+/**
+ * Force `mcpStatus.status` to `status`, preserving the rest of the last
+ * known snapshot. Falls back to `EMPTY_MCP_STATE` before the first poll
+ * lands, so the badge never renders from a partial object.
+ */
+function withStatus(get: () => AppState, status: McpRuntimeStatus): McpUiState {
+  const cur = get().mcpStatus;
+  return cur ? { ...cur, status } : { ...EMPTY_MCP_STATE, status };
+}
+
+/**
+ * `ok: false` is NOT an exception — the Rust commands swallow the
+ * underlying `AppError` and report it in the envelope — so it needs the
+ * same "flip the badge, let the dialog explain" treatment the exception
+ * path gets. Every lifecycle verb settles a failed call on `crashed`.
+ */
+function paintFailure(get: () => AppState, set: SetState): void {
+  set({ mcpStatus: withStatus(get, 'crashed') });
+}
 
 export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, get) => ({
   // MCP daemon state — populated lazily by `startMcpPolling()`. The
@@ -300,6 +355,61 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
           ? { ...cur, status: 'crashed', lastError }
           : { ...EMPTY_MCP_STATE, status: 'crashed', lastError },
       });
+      throw e;
+    }
+  },
+  /**
+   * Manual ON switch. Idempotent by contract: the Rust command returns
+   * the existing daemon when one is healthy rather than respawning it,
+   * so a double-click costs the user nothing.
+   */
+  startMcp: async () => {
+    const prev = get().mcpStatus;
+    set({
+      mcpStatus: prev
+        ? { ...prev, status: 'starting' }
+        : { ...EMPTY_MCP_STATE, status: 'starting' },
+    });
+    try {
+      const result = await invokeCmd<DaemonControlResult>(COMMANDS.mcpDaemonStart);
+      if (!result.ok) {
+        console.warn('[store] mcp_daemon_start returned ok=false');
+        paintFailure(get, set);
+        return;
+      }
+      await get().refreshMcpStatus();
+    } catch (e) {
+      console.error('[store] mcp_daemon_start failed', e);
+      const cur = get().mcpStatus;
+      const lastError = e instanceof Error ? e.message : String(e);
+      set({
+        mcpStatus: cur
+          ? { ...cur, status: 'crashed', lastError }
+          : { ...EMPTY_MCP_STATE, status: 'crashed', lastError },
+      });
+      throw e;
+    }
+  },
+  /**
+   * Manual OFF switch. Deliberately independent of `mcp.auto_start` —
+   * see the interface doc-comment.
+   */
+  stopMcp: async () => {
+    try {
+      const result = await invokeCmd<DaemonControlResult>(COMMANDS.mcpDaemonStop);
+      if (!result.ok) {
+        console.warn('[store] mcp_daemon_stop returned ok=false');
+      }
+      // Settle on the real reported state either way. `stopped` is the
+      // expected outcome; if the server disagreed (e.g. a healthz race
+      // left it up) the poll corrects us rather than us guessing.
+      await get().refreshMcpStatus();
+      const cur = get().mcpStatus;
+      if (!cur || cur.status === 'running' || cur.status === 'starting') {
+        set({ mcpStatus: withStatus(get, 'stopped') });
+      }
+    } catch (e) {
+      console.error('[store] mcp_daemon_stop failed', e);
       throw e;
     }
   },

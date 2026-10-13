@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, Play, Power, RefreshCw } from 'lucide-react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -44,11 +44,14 @@ const RESTART_GRACE_MS = 2000;
 export function McpStatusPanel() {
   const mcpStatus = useMcpStatus();
   const restartMcp = useAppStore((s) => s.restartMcp);
+  const startMcp = useAppStore((s) => s.startMcp);
+  const stopMcp = useAppStore((s) => s.stopMcp);
 
   // Cosmetic local state — debounces the button's click → disable
   // transition so a flaky invoke doesn't cause flicker. Mirrors the
   // grace window the original implementation used.
   const [isRestartingLocal, setIsRestartingLocal] = useState(false);
+  const [isTogglingLocal, setIsTogglingLocal] = useState(false);
   const graceRef = useRef<number | null>(null);
 
   // Event-driven refresh + grace-timer cleanup, hosted in a single
@@ -119,29 +122,80 @@ export function McpStatusPanel() {
   }
 
   const status: McpRuntimeStatus = mcpStatus?.status ?? 'stopped';
+  const isRunning = status === 'running';
+  // Drives the destructive tint on the restart icon — a daemon that is
+  // down / crashed / unhealthy is exactly the case where "restart" is
+  // the recovery action the user wants.
   const isStopped = status === 'stopped' || status === 'crashed' || status === 'unhealthy';
   // Disable the button during the local grace period OR while the
   // daemon itself says it is restarting.
   const disabled = isRestartingLocal || status === 'restarting' || status === 'starting';
+  const toggleDisabled = isTogglingLocal || status === 'restarting' || status === 'starting';
+
+  async function handleToggle() {
+    if (isTogglingLocal) return;
+    setIsTogglingLocal(true);
+    try {
+      // The server decides what a toggle means: `stop` when it believes
+      // we are up, `start` otherwise. Guessing from a possibly-stale
+      // polled status is how you end up restarting what you meant to
+      // leave alone.
+      if (isRunning) {
+        await stopMcp();
+      } else {
+        await startMcp();
+      }
+    } catch {
+      // Both actions already logged and flipped the badge. Re-enable
+      // so the user can retry from the same place.
+    } finally {
+      if (graceRef.current !== null) window.clearTimeout(graceRef.current);
+      graceRef.current = window.setTimeout(() => {
+        setIsTogglingLocal(false);
+        graceRef.current = null;
+      }, RESTART_GRACE_MS);
+    }
+  }
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      onClick={() => {
-        void handleClick();
-      }}
-      disabled={disabled}
-      className="gap-1.5"
-    >
-      {disabled ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <RefreshCw className={cn('h-3.5 w-3.5', isStopped && 'text-destructive')} />
-      )}
-      {disabled ? '重启中…' : '重启 MCP'}
-    </Button>
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant={isRunning ? 'outline' : 'secondary'}
+        size="sm"
+        onClick={() => {
+          void handleToggle();
+        }}
+        disabled={toggleDisabled}
+        className="gap-1.5"
+      >
+        {toggleDisabled ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : isRunning ? (
+          <Power className="h-3.5 w-3.5" />
+        ) : (
+          <Play className="h-3.5 w-3.5" />
+        )}
+        {toggleDisabled ? '处理中…' : isRunning ? '停止' : '启动'}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          void handleClick();
+        }}
+        disabled={disabled}
+        className="gap-1.5"
+      >
+        {disabled ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <RefreshCw className={cn('h-3.5 w-3.5', isStopped && 'text-destructive')} />
+        )}
+        {disabled ? '重启中…' : '重启 MCP'}
+      </Button>
+    </div>
   );
 }
 
