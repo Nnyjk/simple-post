@@ -349,12 +349,21 @@ export function TopBar() {
  * hosted its own 3s poll and needed both React state and refs to
  * coordinate cancellation. With the shared poll those are gone, and
  * the shorter name is a clearer signal to future readers.
+ *
+ * It is also the entry point to the connection settings: every control
+ * the connection tab offers lives under 「设置 · 连接」, so a dot trying
+ * to tell you the daemon is down should take you somewhere you can start
+ * it. The pill used to be a `<button>` with no `onClick` at all, which is
+ * worse than a `<span>` — it announced itself as activatable to keyboard
+ * and AT users and then did nothing.
  */
 function McpStatusPill() {
   const mcp = useMcpStatus();
+  const openSettingsTab = useAppStore((s) => s.openSettingsTab);
 
   const status = mcp?.status ?? 'stopped';
   const pid = mcp?.pid ?? null;
+  const port = mcp?.port ?? null;
   const requestsHandled = mcp?.requestsHandled ?? 0;
 
   const running = status === 'running';
@@ -379,10 +388,18 @@ function McpStatusPill() {
                     ? '未启动'
                     : '连接中…'}
           </div>
+          {/* Used to read 「stdio 模式」 unconditionally, which stopped
+              being true when the daemon narrowed to Streamable HTTP — the
+              pill was advertising a transport it no longer speaks. The
+              port is the same number the connection page writes into the
+              client config, so it is the one extra fact worth surfacing. */}
           <div className="text-[10px] text-muted-foreground">
-            stdio 模式{pid !== null ? ` · PID ${pid}` : ''}
+            Streamable HTTP
+            {port !== null ? ` · :${port}` : ''}
+            {pid !== null ? ` · PID ${pid}` : ''}
             {requestsHandled > 0 ? ` · ${requestsHandled} reqs` : ''}
           </div>
+          <div className="text-[10px] text-muted-foreground/70">点击打开「设置 · 连接」</div>
         </div>
       }
       side="bottom"
@@ -390,7 +407,12 @@ function McpStatusPill() {
       <button
         {...NO_DRAG}
         type="button"
-        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs hover:bg-accent"
+        onClick={() => openSettingsTab('connection')}
+        aria-label="MCP 状态 — 打开连接设置"
+        className={cn(
+          'inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs hover:bg-accent',
+          focusRing,
+        )}
       >
         <span className="relative flex h-2 w-2">
           <span
