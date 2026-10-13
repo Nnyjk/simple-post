@@ -16,7 +16,10 @@
  *     stored entry knows the body was clipped;
  *   - a failed append leaves the row in place and does not reject —
  *     the send already succeeded, and a history write is not a send;
- *   - a load that lands after the user switched projects is dropped.
+ *   - a read is merged, never assigned over: it is a snapshot from before
+ *     the user pressed Send, so it is blind to that send, and the store's
+ *     newest-last order is the one `appendCapped` and the strip agree on
+ *     rather than the reply's `created_at DESC`.
  *
  * Run via: npx tsx --test src/stores/__tests__/ui-response-history.test.ts
  */
@@ -227,16 +230,108 @@ describe('addResponseHistory 的落盘与乐观行', () => {
 });
 
 describe('loadResponseHistory 按接口加载', () => {
-  it('只写自己那个接口的键，服务端顺序原样保留', async () => {
-    listResult = [makeEntry('epA', 'a2'), makeEntry('epA', 'a1')];
+  it('只写自己那个接口的键，并把服务端的 newest-first 归一成 newest-last', async () => {
+    // `list_by_endpoint` answers `created_at DESC, rowid DESC`.
+    listResult = [
+      makeEntry('epA', 'a3', { createdAt: 3 }),
+      makeEntry('epA', 'a2', { createdAt: 2 }),
+      makeEntry('epA', 'a1', { createdAt: 1 }),
+    ];
     await useAppStore.getState().loadResponseHistory('epA');
 
     assert.deepEqual(calls[0].args, { endpointId: 'epA' }, '按接口查，不是按项目查');
     assert.deepEqual(Object.keys(useAppStore.getState().responseHistory), ['epA']);
     assert.deepEqual(
       useAppStore.getState().responseHistory.epA?.map((r) => r.id),
-      ['a2', 'a1'],
-      'server order is preserved within an endpoint (newest first)',
+      ['a1', 'a2', 'a3'],
+      'store 是 newest-last —— appendCapped 从尾部追加、从头部淘汰，' +
+        '照抄服务端的 newest-first 会把这两头同时搞反',
+    );
+  });
+
+  it('重开后下一次发送淘汰的仍是与 SQLite 同一条：最旧的', async () => {
+    // Ten rows, as the database would answer them.
+    listResult = Array.from({ length: 10 }, (_, i) =>
+      makeEntry('epA', `rh-${i + 1}`, { createdAt: 1_000 + i }),
+    ).reverse();
+
+    await useAppStore.getState().loadResponseHistory('epA');
+    useAppStore.getState().addResponseHistory('epA', makeResponse({ status: 201 }));
+
+    const rows = useAppStore.getState().responseHistory.epA ?? [];
+    assert.equal(rows.length, 10, '内存上限对重开的接口一样生效');
+    assert.equal(
+      rows[0].id,
+      'rh-2',
+      'rh-1 被淘汰 —— SQLite 裁掉的也是它；顺序反了的话这里丢的是 rh-10',
+    );
+    assert.equal(rows.at(-1)?.response.status, 201, '新发的那一条在最后');
+  });
+
+  it('首次打开：读取晚于发送落地时，乐观行不能被吃掉', async () => {
+    let releaseList: () => void = () => undefined;
+    let releaseAppend: () => void = () => undefined;
+    const listGateP = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    const appendGateP = new Promise<void>((resolve) => {
+      releaseAppend = resolve;
+    });
+    const stored = makeEntry(REAL_ID, 'rh-new', { createdAt: 2_000, bodyTruncated: true });
+
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      if (cmd === 'response_history_list') {
+        await listGateP;
+        // The snapshot the server took before the user pressed Send.
+        return [makeEntry(REAL_ID, 'rh-old', { createdAt: 1_000 })];
+      }
+      if (cmd === 'response_history_append') {
+        await appendGateP;
+        return stored;
+      }
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    const loading = useAppStore.getState().loadResponseHistory(REAL_ID);
+    useAppStore.getState().addResponseHistory(REAL_ID, makeResponse({ body: 'fresh' }));
+
+    // The read answers while the optimistic row is still provisional.
+    releaseList();
+    await loading;
+
+    const mid = useAppStore.getState().responseHistory[REAL_ID] ?? [];
+    assert.equal(mid.length, 2, '读取没有擦掉在途的乐观行');
+    assert.equal(mid[0].id, 'rh-old');
+    assert.ok(mid[1].id.startsWith('pending:'), '新发的那一条还在原地等着被服务端返回的行替换');
+
+    releaseAppend();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const after = useAppStore.getState().responseHistory[REAL_ID] ?? [];
+    assert.deepEqual(
+      after.map((r) => r.id),
+      ['rh-old', 'rh-new'],
+      '落盘仍替换到了自己那条乐观行，而不是找不到就静默丢弃',
+    );
+    assert.equal(after[1].bodyTruncated, true, '裁剪信息只有服务端那一行有');
+  });
+
+  it('落盘后到达的读取不会把同一行算成两条', async () => {
+    listResult = [
+      makeEntry('epA', 'a2', { createdAt: 2 }),
+      makeEntry('epA', 'a1', { createdAt: 1 }),
+    ];
+    await useAppStore.getState().loadResponseHistory('epA');
+    // Re-reading the same snapshot — the guard in `ResponseHistory` skips
+    // this in the app, but a duplicate row is still the wrong answer.
+    await useAppStore.getState().loadResponseHistory('epA');
+
+    const rows = useAppStore.getState().responseHistory.epA ?? [];
+    assert.equal(rows.length, 2, '按 id 去重，不是拼接');
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ['a1', 'a2'],
     );
   });
 

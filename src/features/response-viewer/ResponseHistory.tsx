@@ -10,7 +10,7 @@ import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils'
  * Collapsible "History (n)" strip shown at the bottom of the response viewer.
  *
  * The rows come from the store's `responseHistory`, which is backed by the
- * `response_history` table and reloaded per project — so they survive a
+ * `response_history` table and loaded per endpoint — so they survive a
  * relaunch, and every one of them carries a server-stamped `id` and
  * `createdAt` (see `ResponseHistoryEntry`).
  *
@@ -59,8 +59,16 @@ export function ResponseHistory() {
   const entries = endpointId ? history[endpointId] : undefined;
   const count = entries?.length ?? 0;
 
-  // Newest first. The server already returns each endpoint's rows
-  // `created_at DESC`; the store appends, so both are newest-last here.
+  // Newest first, for display only.
+  //
+  // The store holds newest-*last* — `appendCapped` pushes onto the end and
+  // drops the front, and `mergeLoaded` normalises a server read into the
+  // same order — so this reverse is the single place the order flips, and
+  // the only reason the store is allowed to disagree with the reply it
+  // got. Reversing anywhere else, or letting the reply's own
+  // `created_at DESC` order through unchanged, silently inverts the
+  // strip: rows paint oldest-first, and the next send drops the newest row
+  // from the cache while SQLite trims the oldest.
   const ordered = useMemo(() => (entries ? entries.slice().reverse() : []), [entries]);
 
   // One reading of the clock per render, so the ten rows below cannot

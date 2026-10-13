@@ -47,15 +47,59 @@ function appendCapped(
     : [...prev, entry];
 }
 
+/**
+ * Fold a server read into what the strip is already showing.
+ *
+ * The server's array is the wrong shape on two counts, and a plain
+ * assignment is wrong on a third.
+ *
+ * **Order.** `list_by_endpoint` answers `created_at DESC` because that is
+ * what a "most recent first" *query* wants, but the store's invariant is
+ * newest-**last** — {@link appendCapped} pushes onto the end and drops the
+ * front, and the strip reverses at render time. Storing the reply verbatim
+ * turned both of those upside down: a reopened endpoint painted
+ * oldest-first, and the next send then dropped the *newest* row from the
+ * cache while SQLite trimmed the *oldest* one, leaving the strip and the
+ * table disagreeing about which ten rows exist.
+ *
+ * **Union, not replace.** The reply is a snapshot from before the user
+ * pressed Send, so it is blind to rows that arrived since — the
+ * provisional row, or the stored one an append has already swapped in.
+ * The window is real on a first open, where the panel's effect fires the
+ * read and the user can send before it lands; and once the optimistic row
+ * is gone, `addResponseHistory`'s swap finds nothing to replace and the
+ * response sits in the database, invisible until the component remounts.
+ *
+ * Deduped by id, so a read that already contains a locally-appended row
+ * does not double it, then re-capped under the same FIFO the in-memory
+ * path uses.
+ */
+function mergeLoaded(
+  rows: ResponseHistoryEntry[],
+  local: ResponseHistoryEntry[],
+): ResponseHistoryEntry[] {
+  const known = new Set(rows.map((r) => r.id));
+  // Reverse before sorting, never instead of it: the sort is stable, so
+  // this order is what survives for two rows stamped in the same
+  // millisecond — precisely the tie `rowid DESC` broke on the way out.
+  const merged = rows.slice().reverse();
+  for (const row of local) {
+    if (!known.has(row.id)) merged.push(row);
+  }
+  return merged.sort((a, b) => a.createdAt - b.createdAt).slice(-MAX_HISTORY_PER_ENDPOINT);
+}
+
 export interface UiResponseState {
   lastResponse: ApiResponse | null;
   requestPending: boolean;
   /**
-   * Per-endpoint send history, newest-last. Backed by `response_history`
-   * and reloaded per project — `loadResponseHistory` replaces the whole
-   * map, which is why a draft endpoint's rows can be in here too: a
-   * `draft:` id is never persisted, so those rows exist only for as long
-   * as the tab does.
+   * Per-endpoint send history, **newest-last** — the order `appendCapped`
+   * writes and {@link mergeLoaded} normalises a server read into. The
+   * strip reverses at render time; nothing else may.
+   *
+   * Backed by `response_history` and loaded per endpoint, so a `draft:`
+   * endpoint's rows can be in here too: such an id is never persisted, so
+   * those rows exist only for as long as the tab does.
    */
   responseHistory: Record<string, ResponseHistoryEntry[]>;
   responseExamples: Record<string, ApiResponseExample[]>;
@@ -163,15 +207,21 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
       const rows = await invokeCmd<ResponseHistoryEntry[]>(COMMANDS.responseHistoryList, {
         endpointId,
       });
-      // No race guard, and that is a consequence of the per-endpoint scope
-      // rather than a lucky omission: this writes only
-      // `responseHistory[endpointId]`, so a result that lands after the
-      // user moved on is still that endpoint's own rows and is correct
-      // wherever it lands. The project-scoped version this replaced had to
-      // compare `activeProjectId` before committing, because one late
-      // answer could overwrite a whole other project's map.
+      // Merged, not assigned — see `mergeLoaded` for why a read that
+      // arrives after a send must not erase that send.
+      //
+      // No *project*-level guard, and that is a consequence of the
+      // per-endpoint scope rather than a lucky omission: this touches
+      // only `responseHistory[endpointId]`, so an answer that lands after
+      // the user moved on is still that endpoint's own rows. The
+      // project-scoped version this replaced had to compare
+      // `activeProjectId` before committing, because one late answer
+      // could overwrite a whole other project's map.
       set((s) => ({
-        responseHistory: { ...s.responseHistory, [endpointId]: rows },
+        responseHistory: {
+          ...s.responseHistory,
+          [endpointId]: mergeLoaded(rows, s.responseHistory[endpointId] ?? []),
+        },
       }));
     } catch (e) {
       console.warn('[store] response history load failed', e);
@@ -191,7 +241,9 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
     } catch (e) {
       // No restore: the rows are the server's to keep, and putting them
       // back in the strip would advertise history the file may no longer
-      // have. The next project switch reloads whatever actually survived.
+      // have. `ResponseHistory`'s effect re-reads whatever survived the
+      // next time this endpoint is opened, because the clear dropped the
+      // key it guards on.
       console.warn('[store] response history clear failed', e);
     }
   },
