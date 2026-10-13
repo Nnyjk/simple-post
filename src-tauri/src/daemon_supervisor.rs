@@ -16,9 +16,19 @@
 //!   * `watch_exit` awaits the child and, on non-zero exit, emits
 //!     `daemon://crashed` to the Tauri app handle. The renderer shows
 //!     a toast and lets the user retry.
-//!   * `shutdown` is called on GUI exit. It sends SIGTERM / `child.kill()`
-//!     and releases the port file.
+//!   * `stop` is the manual OFF switch (Tauri `mcp_daemon_stop` /
+//!     `POST /api/mcp/stop`); `shutdown` is the app-exit hook. Both
+//!     go through the same `teardown`, which also terminates a daemon
+//!     this supervisor merely *adopted* — see [`teardown_targets`].
+//!   * `start` is the manual ON switch and is idempotent: a healthy
+//!     tracked daemon is returned untouched rather than respawned.
+//!
+//! `auto_start` (a persisted preference) and `start`/`stop` (runtime
+//! verbs) compose rather than overlap: the preference decides whether
+//! the daemon comes up on launch, the manual switch decides whether it
+//! is up *now*. Disabling `auto_start` never kills a running daemon.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -118,6 +128,209 @@ fn daemon_cli_args(port: u16) -> Vec<String> {
     ]
 }
 
+/// How long teardown waits for a killed daemon to actually leave the
+/// process table before the port file is released and a replacement is
+/// spawned. This replaces a flat 200ms sleep, which was a guess: on
+/// Windows the child could still be alive at that point, and a socket
+/// that has not finished closing can keep the port out of the bind
+/// queue on macOS/Linux. Bounded on purpose — a wedged process must not
+/// hang the UI's start/stop button forever.
+const TEARDOWN_TIMEOUT: Duration = Duration::from_millis(2_000);
+/// Poll cadence inside [`TEARDOWN_TIMEOUT`].
+const TEARDOWN_POLL: Duration = Duration::from_millis(50);
+
+/// Host-side data directory used by the Tauri shape, which has no
+/// data-dir parameter to thread through. Matches what the daemon child
+/// derives for itself; the `serve-web` shape passes its own explicitly.
+fn host_data_dir() -> String {
+    dirs::data_dir()
+        .map(|p| p.join("simple-post").display().to_string())
+        .unwrap_or_default()
+}
+
+/// What a freshly spawned child needs from its host once the shared
+/// spawn path returns.
+struct PendingWatch {
+    inner: Arc<Mutex<DaemonState>>,
+    pid: u32,
+}
+
+/// Result of [`McpDaemonHandle::ensure_started_with`] — the one
+/// host-agnostic spawn path.
+///
+/// # Why the Tauri binding is a *method on this type* and not a
+/// parameter of the spawn path
+///
+/// This started as an `ExitNotifier` enum that *owned* an `AppHandle`,
+/// which the spawn path took by reference and cloned into the
+/// background exit-watcher task. That compiles, passes review, and
+/// works — until someone runs `cargo test -p simple-post --lib`, whose
+/// test binary then dies at **load** time with
+/// `0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND` and zero tests run. The
+/// unresolvable entrypoint is `comctl32.dll!TaskDialogIndirect`, which
+/// only exists in comctl32 **v6** (a side-by-side assembly resolved via
+/// an activation context, not the v5 copy in `System32`). It reaches the
+/// test binary because an `AppHandle` travelling through shared,
+/// `tokio::spawn`ed code keeps the whole Tauri Windows runtime
+/// reachable from this module, and with it `tao`/`muda` — five extra
+/// DLLs and +2.4 MB of GUI/COM/shell code that the `--lib` test build
+/// has no business linking.
+///
+/// The coupling is therefore split the other way round: the spawn path
+/// stays 100% Tauri-free and returns *what it spawned*; only this thin
+/// `finish` pair knows about `AppHandle`, and it is reachable solely
+/// from the three Tauri bindings (`ensure_started`, `start`,
+/// `restart`), exactly the shape that worked before the refactor.
+/// **Do not move an `AppHandle` back into a type or a parameter that
+/// `ensure_started_with` can see.**
+struct Started {
+    port: u16,
+    /// `Some` only when a fresh child was spawned and still needs an
+    /// exit-watcher; `None` on the reuse path (no new process, nothing
+    /// to watch).
+    watch: Option<PendingWatch>,
+}
+
+impl Started {
+    /// Tauri shape: arm the watcher that emits `daemon://crashed`.
+    fn tauri_finish(self, app_handle: &AppHandle) -> u16 {
+        let port = self.port;
+        if let Some(w) = self.watch {
+            let app = app_handle.clone();
+            tokio::spawn(async move {
+                watch_exit(w.inner, app, w.pid).await;
+            });
+        }
+        port
+    }
+
+    /// `serve-web` shape: same watcher, minus the Tauri event emission.
+    /// The web UI learns about a dead daemon from the `/api/mcp/status`
+    /// poll instead.
+    fn poll_only_finish(self) -> u16 {
+        let port = self.port;
+        if let Some(w) = self.watch {
+            tokio::spawn(async move {
+                watch_exit_no_app(w.inner, w.pid).await;
+            });
+        }
+        port
+    }
+}
+
+/// One PID a lifecycle verb must terminate, plus how it can be reaped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TeardownTarget {
+    pub pid: u32,
+    /// `true` when the supervisor holds a `Child` handle for this PID —
+    /// we spawned it, so we own the reap and can use `try_wait()`.
+    /// `false` for an *adopted* daemon named only by the port record:
+    /// there is no handle, so the PID has to be killed out-of-band via
+    /// [`port_registry::terminate_pid`].
+    pub via_handle: bool,
+}
+
+/// Pure: which PIDs a teardown must terminate.
+///
+/// Two channels, one PID each:
+///   * `owned_pid` — the child we spawned and still hold a handle for.
+///   * `adopted_pid` — a live daemon named by the port record that we
+///     never spawned. This is the case that made "restart" a no-op:
+///     `ensure_started`'s reuse path fills `state.pid` but never sets
+///     `state.child`, so the old `if let Some(child) = g.child.take()`
+///     was `None` and `restart` immediately re-adopted the very process
+///     it was supposed to replace, while reporting success.
+///
+/// A PID appears at most once (a daemon we both spawned and adopted is
+/// the same process, and the handle is the cheaper way to reap it).
+/// `0` is filtered out here rather than at each call site — `child.id()`
+/// legitimately returns `None` right after spawn, and a `0` target
+/// would otherwise reach `taskkill /F /PID 0`.
+fn teardown_targets(owned_pid: Option<u32>, adopted_pid: Option<u32>) -> Vec<TeardownTarget> {
+    let mut out = Vec::new();
+    if let Some(pid) = owned_pid.filter(|p| *p != 0) {
+        out.push(TeardownTarget {
+            pid,
+            via_handle: true,
+        });
+    }
+    if let Some(pid) = adopted_pid.filter(|p| *p != 0 && Some(*p) != owned_pid) {
+        out.push(TeardownTarget {
+            pid,
+            via_handle: false,
+        });
+    }
+    out
+}
+
+/// Pure: is a "start" request already satisfied?
+///
+/// This is the idempotency rule for the manual ON switch: if the
+/// supervisor is tracking a daemon that still answers healthz, a start
+/// returns that daemon's identity rather than killing and respawning it.
+/// `tracked_port.is_some()` is required alongside the status because
+/// `Running` with no tracked port is the "adopted, then lost the port
+/// record" state — liveness cannot be confirmed there, and a fresh
+/// spawn is the only honest answer.
+fn start_is_noop(status: DaemonStatus, tracked_port: Option<u16>, healthy: bool) -> bool {
+    status == DaemonStatus::Running && tracked_port.is_some() && healthy
+}
+
+/// Pure: does this exit-watcher still own the supervisor state?
+///
+/// Both `watch_exit` variants flip shared state to `Crashed` only while
+/// the daemon they are watching is still the one the state points at.
+/// `teardown` clears `pid` *before* killing, so a watcher woken by the
+/// teardown's own kill sees `None` and stays quiet instead of
+/// overwriting the `Restarting`/`Stopped` status the verb just set — or,
+/// worse, the fresh state a subsequent start installs on the same
+/// handle. Keep this as a function rather than an inline comparison so
+/// the guard is unit-tested; it is the only thing standing between a
+/// deliberate teardown and a spurious "crashed" toast.
+fn watcher_owns_state(state_pid: Option<u32>, watched_pid: u32) -> bool {
+    state_pid == Some(watched_pid)
+}
+
+/// Bounded wait for an owned child to be reaped.
+///
+/// Returns `true` when `try_wait()` observed the exit inside `budget`.
+/// Cheap on both host shapes — no syscall beyond the wait itself — which
+/// is why the handle-based path polls far tighter than the PID one.
+async fn wait_for_child_exit(child: &mut tokio::process::Child, budget: Duration) -> bool {
+    let deadline = Instant::now() + budget;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => {}
+            Err(e) => {
+                tracing::warn!(target: "mcp_daemon", "try_wait during teardown failed: {e}");
+                return false;
+            }
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        sleep(TEARDOWN_POLL).await;
+    }
+}
+
+/// Bounded wait for a PID we hold no handle for to leave the process
+/// table. Coarser than [`wait_for_child_exit`] because
+/// [`port_registry::is_pid_alive`] costs a process spawn on Windows
+/// (`tasklist`), so polling it at 50ms would dominate the teardown.
+async fn wait_for_pid_exit(pid: u32, budget: Duration) -> bool {
+    let deadline = Instant::now() + budget;
+    loop {
+        if !port_registry::is_pid_alive(pid) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        sleep(TEARDOWN_POLL).await;
+    }
+}
+
 /// Public handle held in Tauri state. Cloning is cheap (Arc-like) so
 /// we can hand copies into spawned tasks.
 #[derive(Clone)]
@@ -192,21 +405,54 @@ impl McpDaemonHandle {
         }
     }
 
-    /// Idempotent boot:
-    ///   1. If `port_registry::read()` returns a record whose PID is
-    ///      still alive AND `/mcp/healthz` answers → reuse. This is
-    ///      the "user rebooted their laptop and the daemon didn't
-    ///      clean up its port file" case.
-    ///   2. Otherwise release any stale file, claim a fresh port,
-    ///      spawn the process, write the port record with the new
-    ///      PID, and wait up to 5s for `/mcp/healthz` to come green.
-    ///   3. Spawn the stderr-forwarder and exit-watcher as background
-    ///      tasks; they outlive this function and update state until
-    ///      the child dies.
+    /// Idempotent boot (Tauri shape). Thin binding of
+    /// [`Self::ensure_started_with`]: this is the signature the GUI's
+    /// `.setup()` block and `mcp_auto_start_set` call.
     pub async fn ensure_started(
         &self,
         app_handle: &AppHandle,
     ) -> Result<u16, crate::error::AppError> {
+        Ok(self
+            .ensure_started_with(&host_data_dir())
+            .await?
+            .tauri_finish(app_handle))
+    }
+
+    /// [`Self::ensure_started`] for the `serve-web` shape, which has no
+    /// `AppHandle` and knows its own data dir.
+    pub async fn ensure_started_without_app_handle(
+        &self,
+        data_dir: &Path,
+    ) -> Result<u16, crate::error::AppError> {
+        Ok(self
+            .ensure_started_with(&data_dir.display().to_string())
+            .await?
+            .poll_only_finish())
+    }
+
+    /// The single spawn path shared by every host shape.
+    ///
+    /// Deliberately free of `AppHandle` (and of anything else Tauri) so
+    /// the `--lib` test binary does not link the GUI runtime — see the
+    /// long note on [`Started`] before changing its signature.
+    ///
+    ///   1. If `port_registry::read()` returns a record whose PID is
+    ///      still alive AND `/mcp/healthz` answers → reuse. This is
+    ///      the "user rebooted their laptop and the daemon didn't
+    ///      clean up its port file" case. The reused daemon is
+    ///      *adopted*: `state.pid` is recorded but `state.child` stays
+    ///      `None`, because the supervisor never spawned it and so has
+    ///      no reap handle — see [`teardown_targets`] for what that
+    ///      implies for stop/restart. No watcher is handed back either:
+    ///      there is no child handle for it to observe.
+    ///   2. Otherwise release any stale file, claim a fresh port,
+    ///      spawn the process, write the port record with the new
+    ///      PID, and wait up to 5s for `/mcp/healthz` to come green.
+    ///   3. Spawn the stderr-forwarder here, and return the
+    ///      `(state, pid)` pair the *caller* turns into its own
+    ///      exit-watcher. That task outlives this function and updates
+    ///      state until the child dies.
+    async fn ensure_started_with(&self, data_dir: &str) -> Result<Started, crate::error::AppError> {
         // ----- Reuse path ------------------------------------------------
         if let Some(rec) = port_registry::read() {
             if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
@@ -216,7 +462,10 @@ impl McpDaemonHandle {
                 g.port_record = Some(rec.clone());
                 g.status = DaemonStatus::Running;
                 g.started_at = Some(Instant::now());
-                return Ok(rec.port);
+                return Ok(Started {
+                    port: rec.port,
+                    watch: None,
+                });
             }
         }
 
@@ -231,7 +480,10 @@ impl McpDaemonHandle {
                 g.port_record = Some(rec.clone());
                 g.status = DaemonStatus::Running;
                 g.started_at = Some(Instant::now());
-                return Ok(rec.port);
+                return Ok(Started {
+                    port: rec.port,
+                    watch: None,
+                });
             }
         }
         // Status now: Starting. Anything that fails below flips us to
@@ -280,11 +532,7 @@ impl McpDaemonHandle {
         let pid = child.id().unwrap_or(0);
         let stderr = child.stderr.take();
 
-        let data_dir = dirs::data_dir()
-            .map(|p| p.join("simple-post").display().to_string())
-            .unwrap_or_default();
-
-        let rec = PortRecord::new(pid, port, "127.0.0.1", data_dir);
+        let rec = PortRecord::new(pid, port, "127.0.0.1", data_dir.to_string());
         if let Err(e) = port_registry::write(&rec) {
             // Port file write failed — we own the child; reap it before
             // returning so we don't leak a daemon with no port file.
@@ -324,18 +572,17 @@ impl McpDaemonHandle {
             sleep(Duration::from_millis(100)).await;
         }
         if !healthy {
-            // Don't kill yet — the exit-watcher will do that and emit
-            // the right Tauri event. We just flip the visible state.
+            // Keep the child in `state` rather than handing it to a
+            // watcher: the spawn path cannot arm one without knowing the
+            // host (that is the whole point of [`Started`]), and a
+            // watcher that *took* the handle would strip `state.child`
+            // and leave `stop`/`restart` unable to reap this process.
+            // Leaving it here keeps the `owned_pid` channel of
+            // [`teardown_targets`] working for an unhealthy start too.
             let mut g = self.inner.lock().await;
             g.status = DaemonStatus::Unhealthy;
             g.last_error = Some("healthz never came up within 5s".into());
-            // Hand the child over to the watcher before returning.
             g.child = Some(child);
-            let app = app_handle.clone();
-            let inner = self.inner.clone();
-            tokio::spawn(async move {
-                watch_exit(inner, app, pid).await;
-            });
             return Err(crate::error::AppError::Validation(
                 "mcp daemon healthz timeout".into(),
             ));
@@ -349,176 +596,196 @@ impl McpDaemonHandle {
         if let Some(stderr) = stderr {
             tokio::spawn(forward_stderr_and_parse_metrics(stderr, metrics));
         }
-        let app = app_handle.clone();
-        let inner = self.inner.clone();
         {
             let mut g = self.inner.lock().await;
             g.status = DaemonStatus::Running;
             g.child = Some(child);
         }
-        tokio::spawn(async move {
-            watch_exit(inner, app, pid).await;
-        });
 
-        Ok(port)
+        // The watcher is the caller's to arm: it is the one piece of
+        // host behaviour this path refuses to know about.
+        Ok(Started {
+            port,
+            watch: Some(PendingWatch {
+                inner: self.inner.clone(),
+                pid,
+            }),
+        })
     }
 
-    /// Restart: kill the running child (if any), wait briefly for the
-    /// OS to free the port, then `ensure_started` again. Returns the
-    /// post-restart `McpStatusDto` so the Tauri command can echo the
-    /// new `pid` / `port` back to the renderer without an extra poll.
+    /// Manual ON switch (Tauri shape). Idempotent by construction: a
+    /// healthy tracked daemon is returned untouched — no kill, no
+    /// respawn, no port churn — and only a genuinely stopped / crashed /
+    /// unhealthy daemon pays the spawn path.
+    pub async fn start(
+        &self,
+        app_handle: &AppHandle,
+    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+        if self.is_serving().await {
+            return Ok(self.snapshot());
+        }
+        // We deliberately ignore the returned port: the caller wants the
+        // whole snapshot, which already carries the new `port`.
+        let _ = self
+            .ensure_started_with(&host_data_dir())
+            .await?
+            .tauri_finish(app_handle);
+        Ok(self.snapshot())
+    }
+
+    /// [`Self::start`] for the `serve-web` shape.
+    pub async fn start_without_app_handle(
+        &self,
+        data_dir: &Path,
+    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+        self.ensure_started_with(&data_dir.display().to_string())
+            .await?
+            .poll_only_finish();
+        Ok(self.snapshot())
+    }
+
+    /// Manual OFF switch. Terminates the daemon we spawned *and* one we
+    /// merely adopted, releases the port file, and leaves the state at
+    /// `Stopped` with `pid`/`port` cleared — so the next `start` runs
+    /// the fresh-spawn path cleanly. Safe to call when nothing is
+    /// running: every teardown step is a no-op in that case.
+    pub async fn stop(&self) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+        self.teardown(DaemonStatus::Stopped).await?;
+        Ok(self.snapshot())
+    }
+
+    /// Restart: tear the daemon down completely (see [`Self::teardown`]),
+    /// then spawn a fresh one. Returns the post-restart
+    /// `McpStatusDto` so the caller can echo the new `pid` / `port` back
+    /// without an extra poll.
     pub async fn restart(
         &self,
         app_handle: &AppHandle,
     ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
-        {
-            let mut g = self.inner.lock().await;
-            g.status = DaemonStatus::Restarting;
-            if let Some(mut child) = g.child.take() {
-                let _ = child.start_kill();
-            }
-        }
-        // Give the OS a moment to release the port. 200ms is plenty on
-        // Windows; macOS/Linux can sometimes need a touch longer under
-        // TIME_WAIT but the daemon process exiting already moves us
-        // out of the bind queue.
-        sleep(Duration::from_millis(200)).await;
-        let _ = port_registry::release();
-        // We deliberately ignore the inner `u16` return from
-        // `ensure_started` — the caller wants the full snapshot, and
-        // the snapshot already carries the new `port` field.
-        let _ = self.ensure_started(app_handle).await?;
+        self.teardown(DaemonStatus::Restarting).await?;
+        let _ = self
+            .ensure_started_with(&host_data_dir())
+            .await?
+            .tauri_finish(app_handle);
         Ok(self.snapshot())
     }
 
-    /// Variant of [`Self::restart`] for non-Tauri hosts (the
-    /// `simple-post serve-web` shape). `ensure_started` accepts
-    /// `&AppHandle` but the body never actually uses it (it derives
-    /// the data dir from `dirs::data_dir()`), so we just thread the
-    /// data dir through explicitly and skip the `AppHandle` argument
-    /// entirely.
-    ///
-    /// Implementation: duplicates the spawn portion of `ensure_started`
-    /// rather than refactoring into a shared helper, so the audited
-    /// Tauri path stays byte-for-byte identical to its
-    /// pre-distribution state. The duplicated block is small (≈50 LOC)
-    /// and is the same code that the `mcp` subcommand would emit if
-    /// we ever needed to launch it standalone.
+    /// [`Self::restart`] for the `serve-web` shape, which has no
+    /// `AppHandle` and knows its own data dir. This used to be a
+    /// ~100-line near-duplicate of `ensure_started`; it is now a
+    /// binding of the shared path like its Tauri counterpart, so a fix
+    /// to spawn / teardown cannot land on one verb and miss the other.
     pub async fn restart_without_app_handle(
         &self,
-        data_dir: &std::path::Path,
+        data_dir: &Path,
     ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
-        {
-            let mut g = self.inner.lock().await;
-            g.status = DaemonStatus::Restarting;
-            if let Some(mut child) = g.child.take() {
-                let _ = child.start_kill();
-            }
-        }
-        sleep(Duration::from_millis(200)).await;
-        let _ = port_registry::release();
-
-        // ----- Reuse path (mirrors ensure_started lines 202-227) ----
-        if let Some(rec) = port_registry::read() {
-            if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
-                let mut g = self.inner.lock().await;
-                g.pid = Some(rec.pid);
-                g.port = Some(rec.port);
-                g.port_record = Some(rec.clone());
-                g.status = DaemonStatus::Running;
-                g.started_at = Some(Instant::now());
-                return Ok(self.snapshot());
-            }
-        }
-        let mut g = self.inner.lock().await;
-        if let Some(rec) = port_registry::read() {
-            if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
-                g.pid = Some(rec.pid);
-                g.port = Some(rec.port);
-                g.port_record = Some(rec.clone());
-                g.status = DaemonStatus::Running;
-                g.started_at = Some(Instant::now());
-                return Ok(self.snapshot());
-            }
-        }
-        g.status = DaemonStatus::Starting;
-        g.last_error = None;
-        drop(g);
-
-        let _ = port_registry::release();
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(crate::error::AppError::Io)?;
-        let port = listener
-            .local_addr()
-            .map(|a| a.port())
-            .map_err(crate::error::AppError::Io)?;
-        drop(listener);
-
-        let exe = std::env::current_exe().map_err(crate::error::AppError::Io)?;
-        let mut cmd = tokio::process::Command::new(exe);
-        cmd.args(daemon_cli_args(port))
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                let mut g = self.inner.lock().await;
-                g.status = DaemonStatus::Crashed { exit_code: None };
-                g.last_error = Some(format!("spawn failed: {e}"));
-                return Err(crate::error::AppError::Io(e));
-            }
-        };
-        let pid = child.id().unwrap_or(0);
-        let stderr = child.stderr.take();
-        let rec = PortRecord::new(pid, port, "127.0.0.1", data_dir.display().to_string());
-        if let Err(e) = port_registry::write(&rec) {
-            let _ = child.kill().await;
-            let mut g = self.inner.lock().await;
-            g.status = DaemonStatus::Crashed { exit_code: None };
-            g.last_error = Some(format!("port registry: {e:?}"));
-            return Err(e);
-        }
-        let metrics = {
-            let g = self.inner.lock().await;
-            Arc::clone(&g.metrics)
-        };
-        if let Some(stderr) = stderr {
-            tokio::spawn(forward_stderr_and_parse_metrics(stderr, metrics));
-        }
-        let inner = self.inner.clone();
-        // NOTE: web shape has no `AppHandle`, so `watch_exit` would
-        // need a no-app variant for daemon://crashed events. For v1
-        // we accept that the web UI won't get Tauri events — the
-        // `/api/mcp/status` poll is enough to reflect state changes.
-        tokio::spawn(async move {
-            watch_exit_no_app(inner, pid).await;
-        });
-        let mut g = self.inner.lock().await;
-        g.status = DaemonStatus::Running;
-        g.child = Some(child);
-        drop(g);
-
+        self.teardown(DaemonStatus::Restarting).await?;
+        let _ = self
+            .ensure_started_with(&data_dir.display().to_string())
+            .await?
+            .poll_only_finish();
         Ok(self.snapshot())
+    }
+
+    /// Is the daemon we are currently tracking still serving? The probe
+    /// runs outside the lock (it is an HTTP round-trip), and the
+    /// decision itself is the pure [`start_is_noop`].
+    async fn is_serving(&self) -> bool {
+        let (status, port) = {
+            let g = self.inner.lock().await;
+            (g.status, g.port)
+        };
+        let healthy = match port {
+            Some(p) => port_registry::healthz(p).await,
+            None => false,
+        };
+        start_is_noop(status, port, healthy)
+    }
+
+    /// Terminate whatever daemon we are tracking, then clear tracked
+    /// state and drop the port file. Shared by `stop`, `restart`, and
+    /// `shutdown`; `next` is the status the caller wants the snapshot
+    /// to report while the teardown is in flight (`Stopped` for the
+    /// manual switch and for app exit, `Restarting` for a restart).
+    ///
+    /// Ordering is load-bearing:
+    ///
+    ///   1. Resolve the kill targets **before** taking the lock. The
+    ///      liveness probe costs a process spawn on Windows
+    ///      (`tasklist`), and holding the supervisor mutex across it
+    ///      would stall every status poll for the duration.
+    ///   2. Under the lock: set the new status, then clear `pid` /
+    ///      `port` / `port_record`, and take the child handle. Clearing
+    ///      first is what makes the [`watcher_owns_state`] guard hold:
+    ///      the exit-watcher woken by our own kill can no longer match,
+    ///      so it cannot overwrite this status with `Crashed`.
+    ///   3. Kill, then **wait (bounded) for the processes to actually
+    ///      be gone** before releasing the port file. The old code
+    ///      slept a flat 200ms and hoped; on Windows the child could
+    ///      still be alive, and a socket that has not finished closing
+    ///      keeps the port out of the bind queue elsewhere, so the
+    ///      replacement could lose the port race and come up `Unhealthy`.
+    async fn teardown(&self, next: DaemonStatus) -> Result<(), crate::error::AppError> {
+        // (1) Resolve targets outside the lock. The port record is the
+        // authority here: it survives a supervisor that never spawned
+        // the daemon (the `serve-web` shape, a second restart in a row,
+        // a fresh GUI adopting a daemon a previous one started).
+        let record_pid = port_registry::read()
+            .filter(|rec| port_registry::is_pid_alive(rec.pid))
+            .map(|rec| rec.pid);
+        let (child, targets) = {
+            let mut g = self.inner.lock().await;
+            let owned_pid = g.child.as_ref().and_then(|c| c.id());
+            let targets = teardown_targets(owned_pid, record_pid);
+            g.status = next;
+            g.pid = None;
+            g.port = None;
+            g.port_record = None;
+            (g.child.take(), targets)
+        };
+
+        // (3) Terminate. Owned children go first: we hold the handle,
+        // so `try_wait` reaps them without an out-of-band signal.
+        if let Some(mut child) = child {
+            let _ = child.start_kill();
+            if !wait_for_child_exit(&mut child, TEARDOWN_TIMEOUT).await {
+                tracing::warn!(
+                    target: "mcp_daemon",
+                    "daemon pid {} still alive after {}ms — continuing anyway",
+                    child.id().unwrap_or(0),
+                    TEARDOWN_TIMEOUT.as_millis()
+                );
+            }
+        }
+        for target in targets.iter().filter(|t| !t.via_handle) {
+            if !port_registry::terminate_pid(target.pid) {
+                // Already gone, or the OS refused. Either way the wait
+                // below is the real answer, so don't fail the verb.
+                tracing::debug!(
+                    target: "mcp_daemon",
+                    "taskkill/kill -9 declined for adopted pid {}",
+                    target.pid
+                );
+                continue;
+            }
+            if !wait_for_pid_exit(target.pid, TEARDOWN_TIMEOUT).await {
+                tracing::warn!(
+                    target: "mcp_daemon",
+                    "adopted daemon pid {} still alive after {}ms — continuing anyway",
+                    target.pid,
+                    TEARDOWN_TIMEOUT.as_millis()
+                );
+            }
+        }
+        port_registry::release()
     }
 
     /// Best-effort shutdown. Called from the GUI's exit hook (and from
-    /// tests). We do NOT block on `child.wait()` — the watcher task
-    /// will reap the child asynchronously and the GUI is on its way
-    /// out anyway.
+    /// tests). Shares the lifecycle teardown with the manual stop
+    /// switch, so app exit also terminates an *adopted* daemon rather
+    /// than orphaning it with its port file already gone.
     pub async fn shutdown(&self) -> Result<(), crate::error::AppError> {
-        let mut g = self.inner.lock().await;
-        if let Some(mut child) = g.child.take() {
-            let _ = child.start_kill();
-        }
-        g.status = DaemonStatus::Stopped;
-        g.pid = None;
-        g.port = None;
-        g.port_record = None;
-        drop(g);
-        port_registry::release()
+        self.teardown(DaemonStatus::Stopped).await
     }
 }
 
@@ -601,8 +868,10 @@ async fn watch_exit(inner: Arc<Mutex<DaemonState>>, app_handle: AppHandle, pid: 
         let mut g = inner.lock().await;
         // Only flip the status if this watcher is still observing the
         // child whose PID matches the current supervisor PID. A
-        // restart would have replaced both.
-        if g.pid == Some(pid) {
+        // restart would have replaced both, and — since `teardown`
+        // clears `pid` before killing — even a watcher woken by a
+        // deliberate teardown sees `None` here and stays quiet.
+        if watcher_owns_state(g.pid, pid) {
             g.status = DaemonStatus::Crashed { exit_code };
             g.last_error = Some(message.clone());
             g.pid = None;
@@ -645,7 +914,7 @@ async fn watch_exit_no_app(inner: Arc<Mutex<DaemonState>>, pid: u32) {
     };
     {
         let mut g = inner.lock().await;
-        if g.pid == Some(pid) {
+        if watcher_owns_state(g.pid, pid) {
             g.status = DaemonStatus::Crashed { exit_code };
             g.last_error = Some(message);
             g.pid = None;
@@ -658,6 +927,13 @@ async fn watch_exit_no_app(inner: Arc<Mutex<DaemonState>>, pid: u32) {
 // -------------------------------------------------------------------------
 // Tests
 // -------------------------------------------------------------------------
+
+/// Pure-logic tests for the lifecycle decisions (kill-target selection,
+/// start idempotency, the exit-watcher guard) live in the sibling file
+/// so they can never touch the process table or the real port file.
+#[cfg(test)]
+#[path = "daemon_supervisor_test.rs"]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {

@@ -130,7 +130,7 @@ fn no_permission_check_result_is_discarded() {
     );
 }
 
-/// Gate B regression net — never gate a single-resource tool against `"global"`.
+/// Gate B regression net — never gate a tool against `"global"`.
 ///
 /// `agent_permissions.project_id` is an FK to `projects(id)`, and project
 /// ids are minted `proj_<millis>`, so `"global"` can never have a row. The
@@ -139,15 +139,24 @@ fn no_permission_check_result_is_discarded() {
 /// tool is permanently dead while still looking correctly registered. This
 /// shipped on five tools at once.
 ///
-/// Two `Read`-tier list tools legitimately have no single owning project
-/// (`endpoint_list` / `endpoint_search` with no `project_id` scope every
-/// project), so `"global"` is the honest answer there and they are allowed
-/// explicitly. They pass only because `ReadCall >= Read`; if either is ever
-/// promoted above `Read` this allowlist must be revisited, because the gate
-/// would start denying every call.
+/// It was not merely a dead-tool bug. When the caller scoped a read with a
+/// `collection_id` or `module_id` instead of a `project_id`, the handler
+/// passed `"global"` and so consulted **no real project's row at all** —
+/// the owning project's real permission was never read, on either side of
+/// the gate. `endpoint_list` and `endpoint_search` shipped that way, which
+/// is why this test used to carry an allowlist naming them: two `Read`-tier
+/// tools that scope every project genuinely have no single owning project,
+/// and `"global"` was the only id available to express that.
+///
+/// Both now resolve the real owner from whatever the caller actually
+/// supplied (`nodes::root_id_of` for a module / collection, the id itself
+/// for a project) and **refuse an unscoped call** rather than fabricate an
+/// id — an unscoped read spans projects, and the per-project gate has no
+/// single project to authorise against. So the allowlist is empty and the
+/// test is unconditional: there is no longer any correct use of the
+/// literal.
 #[test]
 fn no_gate_is_passed_the_literal_global() {
-    const ALLOWED: &[&str] = &["endpoint_list", "endpoint_search"];
     let offenders = source_files()
         .into_iter()
         .filter_map(|(path, text)| {
@@ -157,11 +166,6 @@ fn no_gate_is_passed_the_literal_global() {
             // caught. A call is scanned up to its `;`, because the argument
             // sits after nested parens (`&state.pool`) that a naive
             // "up to the first `)`" scan would stop at.
-            //
-            // Each hit is judged by the tool name in the SAME call, not by a
-            // file-wide tally: an earlier version counted allowlisted names
-            // anywhere in the file, so one mention in a doc comment
-            // whitewashed every real offender in that file.
             let offenders = text
                 .match_indices("check_permission(")
                 .filter_map(|(i, _)| {
@@ -171,8 +175,7 @@ fn no_gate_is_passed_the_literal_global() {
                     if !call.contains("\"global\"") {
                         return None;
                     }
-                    let allowed = ALLOWED.iter().any(|a| call.contains(&format!("\"{a}\"")));
-                    (!allowed).then(|| (path.clone(), call.trim().replace('\n', " ")))
+                    Some((path.clone(), call.trim().replace('\n', " ")))
                 })
                 .collect::<Vec<_>>();
             (!offenders.is_empty()).then_some(offenders)
@@ -182,8 +185,7 @@ fn no_gate_is_passed_the_literal_global() {
     assert!(
         offenders.is_empty(),
         "these files gate against the literal \"global\", which is not a project id \
-         and makes every call fail closed against ReadCall. Only the unscoped \
-         Read-tier list tools may do so: {offenders:?}"
+         and makes every call consult no real permission row: {offenders:?}"
     );
 }
 

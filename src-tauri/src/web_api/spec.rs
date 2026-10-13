@@ -301,14 +301,38 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             request: Some("HttpRequestInput"),
             response: Some("HttpResult"),
         },
+        // ---- mcp daemon lifecycle (manual switch) ----------------------
+        // Documented rather than left internal: `start` / `stop` are the
+        // renderer-facing ON/OFF switch for the embedded daemon, they
+        // share the Tauri commands `mcp_daemon_start` /
+        // `mcp_daemon_stop`, and they are the pair a third-party client
+        // needs in order to control the daemon at runtime. Both answer
+        // with the same `{ ok, pid, port }` envelope as `/restart`.
+        RouteSpec {
+            method: "POST",
+            path: "/api/mcp/start",
+            summary: "Start the embedded MCP daemon (idempotent: a healthy \
+                      running daemon is left untouched and echoed back)",
+            stability: "public",
+            request: None,
+            response: Some("RestartResult"),
+        },
+        RouteSpec {
+            method: "POST",
+            path: "/api/mcp/stop",
+            summary: "Stop the embedded MCP daemon and release its port file \
+                      (idempotent; always `{ ok: true, pid: null, port: null }` \
+                      on success)",
+            stability: "public",
+            request: None,
+            response: Some("RestartResult"),
+        },
         // ---- internal (not in OpenAPI v1) -------------------------------
         // The following endpoints are intentionally NOT listed above —
         // they are supervisor / UI projections and have no version
         // commitment. They appear in `WEB_ROUTES` for runtime access but
         // the OpenAPI v1 doc omits them.
         //   GET  /api/mcp/status             - daemon status (UI)
-        //   POST /api/mcp/start              - daemon launch
-        //   POST /api/mcp/stop               - daemon stop
         //   POST /api/mcp/restart            - daemon restart
         //   GET  /api/mcp/proxy-path         - mcp_proxy binary path
         //   GET  /api/mcp/capability         - capability policy

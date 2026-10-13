@@ -209,6 +209,56 @@ pub fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
+/// Force-terminate a PID named by a `PortRecord`.
+///
+/// This is the out-of-band counterpart to [`is_pid_alive`], and it
+/// exists for exactly one caller: the daemon supervisor's teardown.
+/// `ensure_started`'s reuse path *adopts* an already-running daemon
+/// (live PID in the port record + green healthz) without ever spawning
+/// it, so the supervisor holds no `Child` handle for that process and
+/// cannot reap it the usual way. A restart that only looked at the
+/// handle it happened to hold silently re-adopted the very process it
+/// was supposed to replace; this function is what makes that case
+/// actually terminate.
+///
+///   * Windows — `taskkill /F /PID <pid>`. Forced (no graceful window:
+///     the daemon is a stateless JSON-RPC loop with nothing to flush),
+///     and deliberately *without* `/T` so a recycled PID can only ever
+///     cost the caller its own daemon, never an unrelated tree.
+///   * Unix — `kill -9 <pid>`.
+///
+/// Returns whether the OS accepted the signal. A `false` return is
+/// best-effort noise, not a contract violation: the caller re-checks
+/// with [`is_pid_alive`] inside a bounded wait, and "the process was
+/// already gone" is a perfectly good outcome for a teardown.
+pub fn terminate_pid(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+}
+
 /// Try one create_new write. Returns:
 ///   * `Ok(true)`  — wrote successfully.
 ///   * `Ok(false)` — file already existed (`AlreadyExists`), caller should

@@ -68,6 +68,21 @@ export const COMMANDS = {
 
   // ----- MCP daemon -----
   mcpStatus: 'mcp_status',
+  /**
+   * Idempotent start. If a daemon is already running this returns its
+   * existing `{ok, pid, port}` without killing and respawning it — the
+   * same envelope as restart, so the renderer has one shape to handle.
+   */
+  mcpDaemonStart: 'mcp_daemon_start',
+  /** Manual runtime kill switch. Returns `{ok, pid: null, port: null}`. */
+  mcpDaemonStop: 'mcp_daemon_stop',
+  /**
+   * Restart MUST terminate the daemon the port record points at, not just
+   * the `Child` handle the supervisor happens to own: when the supervisor
+   * adopted an already-running daemon it has no handle, so a
+   * handle-only kill silently leaves the old process alive and the
+   * "restart" adopts the same process again.
+   */
   mcpDaemonRestart: 'mcp_daemon_restart',
   /**
    * Resolves the absolute on-disk path of the stdio bridge binary
@@ -493,11 +508,18 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
 
   // ----- MCP daemon -----
   [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },
-  // A dedicated `/api/mcp/restart` route exists on the web side; the
-  // Tauri-side restart function returns the
-  // same `{ ok, pid, port }` envelope as `/start`, so reusing the
-  // restart route keeps the renderer's discriminated-union handling
-  // simple.
+  // The three lifecycle verbs share one `{ ok, pid, port }` envelope, so
+  // the renderer's discriminated-union handling stays in one place.
+  // `start` is idempotent on the server — it returns the existing daemon
+  // rather than respawning it.
+  [COMMANDS.mcpDaemonStart]: {
+    method: 'POST',
+    path: () => '/api/mcp/start',
+  },
+  [COMMANDS.mcpDaemonStop]: {
+    method: 'POST',
+    path: () => '/api/mcp/stop',
+  },
   [COMMANDS.mcpDaemonRestart]: {
     method: 'POST',
     path: () => '/api/mcp/restart',
