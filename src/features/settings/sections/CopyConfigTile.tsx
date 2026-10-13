@@ -9,7 +9,12 @@ const RESET_DELAY_MS = 2000;
 
 export interface CopyConfigTileProps {
   icon: ReactNode;
-  name: string;
+  /**
+   * Optional client name. Renders nothing when omitted — with a single
+   * supported client the title is pure redundancy, since the card
+   * header above it already says which format is being generated.
+   */
+  name?: string;
   description: string;
   configJson: string;
 }
@@ -69,39 +74,43 @@ export function CopyConfigTile({ icon, name, description, configJson }: CopyConf
     scheduleReset();
   };
 
+  // No border/bg shell here either: the tile renders inside the
+  // "接入配置" category card, so a bordered tile made the same surface
+  // appear twice (card → tile → <pre>). One plain <pre> is the only
+  // nested surface left, and it is the code being shown.
   return (
-    <div className="flex flex-col rounded-md border border-border bg-card/30 p-3">
+    <div>
       <div className="flex items-center gap-2">
-        <span className="text-muted-foreground">{icon}</span>
-        <span className="text-xs font-semibold text-foreground">{name}</span>
+        <span className="shrink-0 text-muted-foreground">{icon}</span>
+        {name && <span className="shrink-0 text-xs font-semibold text-foreground">{name}</span>}
+        <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{description}</p>
+        <Button
+          variant={copyState === 'success' ? 'secondary' : 'outline'}
+          size="xs"
+          onClick={handleCopy}
+          className={cn(
+            'shrink-0 gap-1.5',
+            copyState === 'error' && 'border-destructive text-destructive',
+          )}
+        >
+          {copyState === 'success' ? (
+            <>
+              <Check className="h-3 w-3" />
+              已复制
+            </>
+          ) : copyState === 'error' ? (
+            <>复制失败</>
+          ) : (
+            <>
+              <Copy className="h-3 w-3" />
+              复制配置
+            </>
+          )}
+        </Button>
       </div>
-      <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>
-      <pre className="mt-2 max-h-32 overflow-auto rounded bg-muted/50 p-2 font-mono text-[10px] leading-relaxed text-foreground/90">
+      <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/50 p-2.5 font-mono text-[10px] leading-relaxed text-foreground/90">
         {configJson}
       </pre>
-      <Button
-        variant={copyState === 'success' ? 'secondary' : 'outline'}
-        size="sm"
-        onClick={handleCopy}
-        className={cn(
-          'mt-2 w-full gap-1.5',
-          copyState === 'error' && 'border-destructive text-destructive',
-        )}
-      >
-        {copyState === 'success' ? (
-          <>
-            <Check className="h-3.5 w-3.5" />
-            已复制
-          </>
-        ) : copyState === 'error' ? (
-          <>复制失败</>
-        ) : (
-          <>
-            <Copy className="h-3.5 w-3.5" />
-            复制配置
-          </>
-        )}
-      </Button>
     </div>
   );
 }

@@ -3,34 +3,56 @@ import { describe, it } from 'node:test';
 
 import {
   MCP_CLIENT_PRESETS,
+  MCP_SERVER_KEY,
   buildClientConfig,
   buildServerEntry,
-  bridgeTargetUrl,
   daemonMcpUrl,
   unavailableReason,
+  wrapForClient,
   type McpClientPreset,
-  type McpTransport,
 } from '../mcp-client-config';
 
 // These tests exist because the failure mode is SILENT. A client given
 // the wrong root key or the wrong `type` value does not error — the
 // server simply never shows up in its tool list. A copy button that
 // ships a wrong shape is therefore worse than no copy button, and
-// nothing in CI would ever notice. So each documented quirk is pinned.
+// nothing in CI would ever notice.
 
-const RUNNING = { port: 51234, proxyPath: 'C:\\apps\\simple-post-mcp.exe' };
+const RUNNING = { port: 51234 };
 
-function preset(id: string): McpClientPreset {
-  const found = MCP_CLIENT_PRESETS.find((p) => p.id === id);
-  assert.ok(found, `preset ${id} should exist`);
-  return found;
+function onlyPreset(): McpClientPreset {
+  const [first, ...rest] = MCP_CLIENT_PRESETS;
+  assert.ok(first, 'at least one preset must ship');
+  assert.deepEqual(rest, [], 'exactly one client format ships');
+  return first;
 }
 
-function parse(presetId: string, t: McpTransport): Record<string, unknown> {
-  const json = buildClientConfig(preset(presetId), t, RUNNING);
-  assert.ok(json, `${presetId}/${t} should generate`);
+function parse(): Record<string, unknown> {
+  const json = buildClientConfig(onlyPreset(), RUNNING);
+  assert.ok(json, 'the running daemon should generate a snippet');
   return JSON.parse(json);
 }
+
+describe('the preset table', () => {
+  it('holds exactly one preset, and it is the Claude Code shape', () => {
+    // The assertion is the COUNT, not the id. Eight of the nine rows used
+    // to sit here, each a hand-maintained transcription of a client's
+    // documented format — a table that rots silently, because a stale
+    // row still renders and still copies.
+    assert.equal(MCP_CLIENT_PRESETS.length, 1);
+    assert.equal(MCP_CLIENT_PRESETS[0].id, 'claude-code');
+  });
+
+  it('keeps the verification source on the surviving row', () => {
+    // Without it the next person cannot tell a checked shape from a
+    // guessed one, which is the difference this file exists to protect.
+    assert.match(onlyPreset().source, /Claude Code/);
+  });
+
+  it('names a config path the user can actually find', () => {
+    assert.match(onlyPreset().configPath, /\.mcp\.json/);
+  });
+});
 
 describe('daemonMcpUrl', () => {
   it('builds the /mcp endpoint from the daemon port', () => {
@@ -46,199 +68,89 @@ describe('daemonMcpUrl', () => {
   });
 });
 
-describe('bridgeTargetUrl', () => {
-  it('points at the daemon ROOT, not /mcp', () => {
-    // `simple-post-mcp --url=` appends `/mcp` itself.
-    assert.equal(bridgeTargetUrl(51234), 'http://127.0.0.1:51234');
-    assert.ok(!bridgeTargetUrl(51234)?.endsWith('/mcp'));
-  });
-});
-
 describe('root key', () => {
-  it('is mcpServers for the Claude family, Cursor, Cline, Windsurf, Continue', () => {
-    for (const id of ['claude-desktop', 'claude-code', 'cursor', 'cline', 'windsurf', 'continue']) {
-      const obj = parse(id, 'stdio');
-      assert.ok('mcpServers' in obj, `${id} should use mcpServers, got ${Object.keys(obj)}`);
-    }
+  it('is mcpServers — the key Claude Code actually reads', () => {
+    assert.ok('mcpServers' in parse());
   });
 
-  it('is servers for VS Code — mcpServers there is silently ignored', () => {
-    const obj = parse('vscode', 'stdio');
-    assert.ok('servers' in obj, 'VS Code reads `servers`');
-    assert.ok(!('mcpServers' in obj), 'mcpServers would be silently ignored by VS Code');
+  it('nests the entry under the shared server key', () => {
+    const servers = (parse().mcpServers ?? {}) as Record<string, unknown>;
+    assert.ok(MCP_SERVER_KEY in servers, `expected a "${MCP_SERVER_KEY}" entry`);
   });
 
-  it('is context_servers for Zed', () => {
-    const obj = parse('zed', 'stdio');
-    assert.ok('context_servers' in obj);
-    assert.ok(!('mcpServers' in obj));
+  it('wrapForClient puts the entry under the preset root key', () => {
+    assert.deepEqual(wrapForClient(onlyPreset(), { type: 'http' }), {
+      mcpServers: { 'simple-post': { type: 'http' } },
+    });
   });
 });
 
 describe('the `type` field', () => {
-  it('is REQUIRED on Cursor stdio (documented as Yes in their field table)', () => {
-    const entry = buildServerEntry(preset('cursor'), 'stdio', RUNNING);
-    assert.equal(entry?.type, 'stdio');
-  });
-
-  it('is absent on Cursor remote — Cursor infers transport from `url`', () => {
-    const entry = buildServerEntry(preset('cursor'), 'http', RUNNING);
+  it('is "http" — Claude Code requires it on a remote entry', () => {
+    // Omitting `type` here is what the first version of this file did for
+    // every client, and no client accepted the result.
+    const entry = buildServerEntry(onlyPreset(), RUNNING);
     assert.ok(entry);
-    assert.equal('type' in entry, false, 'the documented remote example carries only url');
+    assert.equal(entry.type, 'http');
     assert.equal(entry.url, 'http://127.0.0.1:51234/mcp');
   });
 
-  it('is "http" on the Claude family and VS Code', () => {
-    for (const id of ['claude-desktop', 'claude-code', 'vscode', 'http-generic']) {
-      const entry = buildServerEntry(preset(id), 'http', RUNNING);
-      assert.equal(entry?.type, 'http', `${id} should emit type: "http"`);
-    }
-  });
-
-  it('is "streamableHttp" on Cline — "http" would silently fall back to SSE', () => {
-    const entry = buildServerEntry(preset('cline'), 'http', RUNNING);
-    // The literal itself is the assertion: Cline treats anything else
-    // (including "http", and especially a missing `type`) as the legacy
-    // HTTP+SSE transport and then fails to connect.
-    assert.equal(entry?.type, 'streamableHttp');
-    assert.equal(entry?.url, 'http://127.0.0.1:51234/mcp');
-  });
-
-  it('is absent on Zed — it infers from command vs url and rejects a type field', () => {
-    for (const t of ['stdio', 'http'] as const) {
-      const entry = buildServerEntry(preset('zed'), t, RUNNING);
-      assert.ok(entry);
-      assert.equal('type' in entry, false, `Zed must not receive a type field (${t})`);
-    }
-  });
-
-  it('is absent on VS Code stdio — their own example omits it', () => {
-    const entry = buildServerEntry(preset('vscode'), 'stdio', RUNNING);
+  it('carries no stdio keys, because HTTP needs nothing on the client', () => {
+    const entry = buildServerEntry(onlyPreset(), RUNNING);
     assert.ok(entry);
-    assert.equal('type' in entry, false);
-    assert.equal(entry.command, RUNNING.proxyPath);
-  });
-});
-
-describe('Zed specifics', () => {
-  it('carries source:"custom" and env on stdio, and no type', () => {
-    const obj = parse('zed', 'stdio') as {
-      context_servers: Record<string, Record<string, unknown>>;
-    };
-    const e = obj.context_servers['simple-post'];
-    assert.equal(e.source, 'custom');
-    assert.ok(e.env && typeof e.env === 'object', 'Zed expects an env object');
-    assert.deepEqual(e.args, ['--url', 'http://127.0.0.1:51234']);
-  });
-
-  it('carries source:"custom" on remote too', () => {
-    const e = buildServerEntry(preset('zed'), 'http', RUNNING);
-    assert.equal(e?.source, 'custom');
-    assert.equal(e?.url, 'http://127.0.0.1:51234/mcp');
-  });
-});
-
-describe('stdio command shape', () => {
-  it('never passes a bare "stdio" positional arg', () => {
-    // `simple-post-mcp` takes --transport=stdio as a FLAG; a positional
-    // arg makes clap exit 2 with "unexpected argument 'stdio' found".
-    const entry = buildServerEntry(preset('claude-desktop'), 'stdio', RUNNING);
-    assert.ok(entry);
-    // Check `args`, not the whole entry: `"type": "stdio"` is a
-    // legitimate transport marker, a bare `"stdio"` POSITIONAL arg is
-    // what makes clap exit 2.
-    assert.ok(
-      Array.isArray(entry.args) && !entry.args.includes('stdio'),
-      'a bare "stdio" positional arg makes the bridge fail to parse',
-    );
-    assert.deepEqual(entry.args, ['--url', 'http://127.0.0.1:51234']);
-  });
-
-  it('uses an ABSOLUTE command path so spawn works without PATH', () => {
-    for (const id of ['claude-desktop', 'cursor', 'cline', 'vscode', 'zed']) {
-      const entry = buildServerEntry(preset(id), 'stdio', RUNNING);
-      const cmd = String(entry?.command);
-      assert.ok(
-        cmd.includes('/') || cmd.includes('\\'),
-        `${id} command must be an absolute path, got: ${cmd}`,
-      );
-    }
+    assert.ok(!('command' in entry), 'no local binary to spawn');
+    assert.ok(!('args' in entry), 'no bridge arguments to get wrong');
   });
 });
 
 describe('buildClientConfig', () => {
-  it('emits valid JSON for every preset and transport it claims to support', () => {
-    for (const p of MCP_CLIENT_PRESETS) {
-      for (const t of p.supports) {
-        const json = buildClientConfig(p, t, RUNNING);
-        assert.ok(json, `${p.id}/${t} should generate`);
-        assert.doesNotThrow(() => JSON.parse(json), `${p.id}/${t} must be valid JSON`);
-      }
-    }
+  it('emits valid JSON for the preset it ships', () => {
+    const json = buildClientConfig(onlyPreset(), RUNNING);
+    assert.ok(json);
+    assert.doesNotThrow(() => JSON.parse(json));
+  });
+
+  it('names the port the daemon is actually on', () => {
+    // The snippet is generated per render from the live snapshot, so it
+    // cannot drift onto a port from an earlier session.
+    assert.deepEqual(parse(), {
+      mcpServers: {
+        'simple-post': { type: 'http', url: 'http://127.0.0.1:51234/mcp' },
+      },
+    });
   });
 
   it('never emits a literal null or undefined into a snippet', () => {
-    for (const p of MCP_CLIENT_PRESETS) {
-      for (const t of p.supports) {
-        const json = buildClientConfig(p, t, RUNNING);
-        assert.ok(json);
-        assert.ok(
-          !json.includes('null') && !json.includes('undefined'),
-          `${p.id}/${t} leaked a nullish value: ${json}`,
-        );
-      }
-    }
+    const json = buildClientConfig(onlyPreset(), RUNNING);
+    assert.ok(json);
+    assert.ok(!json.includes('null') && !json.includes('undefined'), json);
   });
 
   it('never ships an unexpanded %APPDATA% env placeholder', () => {
-    // env values go to the child verbatim; there is no shell to expand.
-    for (const p of MCP_CLIENT_PRESETS) {
-      for (const t of p.supports) {
-        const json = buildClientConfig(p, t, RUNNING);
-        assert.ok(json);
-        assert.ok(!json.includes('%APPDATA%'), `${p.id}/${t} leaked %APPDATA%`);
-      }
-    }
-  });
-
-  it('produces an http config even when the bridge path is unresolved', () => {
-    // HTTP needs no binary, so a missing bridge path must not disable it.
-    for (const p of MCP_CLIENT_PRESETS) {
-      if (!p.supports.includes('http')) continue;
-      const json = buildClientConfig(p, 'http', { port: 51234, proxyPath: null });
-      assert.ok(json, `${p.id} http should not need proxyPath`);
-    }
+    const json = buildClientConfig(onlyPreset(), RUNNING);
+    assert.ok(json);
+    assert.ok(!json.includes('%APPDATA%'), json);
   });
 
   it('returns null when the daemon is down so the UI can explain why', () => {
-    assert.equal(
-      buildClientConfig(preset('cursor'), 'http', { port: null, proxyPath: null }),
-      null,
-    );
+    // No port means no URL. Emitting a snippet with a literal `null` in it
+    // would be copyable and broken, which is worse than an explanation.
+    assert.equal(buildClientConfig(onlyPreset(), { port: null }), null);
+  });
+
+  it('returns null for a non-positive port rather than guessing', () => {
+    assert.equal(buildClientConfig(onlyPreset(), { port: 0 }), null);
   });
 });
 
 describe('unavailableReason', () => {
-  it('blames the daemon first when no port is known', () => {
-    assert.match(
-      unavailableReason(preset('cursor'), 'http', { port: null, proxyPath: null }),
-      /MCP 未运行/,
-    );
+  it('blames the daemon when no port is known', () => {
+    assert.match(unavailableReason(onlyPreset(), { port: null }), /MCP 未运行/);
   });
 
-  it('blames the bridge path when only stdio is affected', () => {
-    assert.match(
-      unavailableReason(preset('cursor'), 'stdio', { port: 51234, proxyPath: null }),
-      /桥接二进制/,
-    );
-    assert.doesNotMatch(
-      unavailableReason(preset('cursor'), 'http', { port: 51234, proxyPath: null }),
-      /桥接二进制/,
-    );
-  });
-
-  it('names an unsupported transport instead of blaming the environment', () => {
-    const r = unavailableReason(preset('continue'), 'http', RUNNING);
-    assert.match(r, /未提供/);
+  it('never blames the bridge binary — that path is gone', () => {
+    // The stdio bridge is no longer a generated shape, so a message
+    // pointing at it would send the user after an install they do not need.
+    assert.doesNotMatch(unavailableReason(onlyPreset(), { port: null }), /桥接/);
   });
 });
