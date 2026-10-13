@@ -281,6 +281,45 @@ export interface ApiResponse {
   url?: string;
 }
 
+/**
+ * One persisted row of an endpoint's send history — the renderer mirror
+ * of `ResponseHistoryEntry` in `crates/simple-post-core/src/domain.rs`.
+ *
+ * WHY THIS WRAPS `ApiResponse` INSTEAD OF WIDENING IT
+ * -------------------------------------------------
+ * The two have different lifetimes. `ApiResponse` is the payload: what
+ * came back, handed straight to the viewer by `setLastResponse`. `id`,
+ * `endpointId`, `createdAt` and `bodyTruncated` are the *row's* identity
+ * and provenance — they belong to the fact that a response was recorded,
+ * not to the response itself. Splicing them onto `ApiResponse` would give
+ * every live response fields that are meaningless until it has been
+ * stored (`id`, `createdAt`) or that the viewer has no way to act on
+ * (`endpointId` is the map key it is already reached through).
+ *
+ * It is also what makes the history strip able to show *when*: a stored
+ * row carries the timestamp the database minted, which is the same
+ * instant on every machine reading the same `store.db`.
+ *
+ * `bodyTruncated` lives here for a second reason: the server clips an
+ * oversized body on write and drops `bodyJson` with it, so the row that
+ * comes back is NOT always the response the caller sent. Only the
+ * persisted entry knows that, and it has to sit next to the body it is
+ * describing — see `addResponseHistory`, which swaps its provisional row
+ * for the server's once the append resolves.
+ */
+export interface ResponseHistoryEntry {
+  /** Row id, minted by the server. Stable per entry — use it as a React key. */
+  id: string;
+  /** `nodes.id` of the endpoint this response came from. */
+  endpointId: string;
+  /** What was stored, which may be a clipped form of what was sent. */
+  response: ApiResponse;
+  /** The server clipped `response.body`; `response.bodyJson` is gone too. */
+  bodyTruncated: boolean;
+  /** Unix milliseconds, stamped by the database rather than the renderer. */
+  createdAt: number;
+}
+
 export interface McpStatus {
   running: boolean;
   pid?: number;

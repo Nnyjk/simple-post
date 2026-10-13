@@ -183,6 +183,72 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   tags_json              TEXT NOT NULL DEFAULT '[]'
 );
 
+-- One persisted HTTP response, kept per endpoint so the response
+-- history strip survives a restart. Before this table the history was
+-- a renderer-only `Record<endpointId, ApiResponse[]>` that a relaunch,
+-- a project switch or a closed tab erased.
+--
+-- `endpoint_id` cascades, and `nodes.parent_id` / `nodes.root_id`
+-- cascade in turn, so deleting an endpoint — or any ancestor, up to the
+-- project — takes its history with it in the same DELETE. There is
+-- deliberately no application-level prune to forget; the FK is the
+-- contract. That does mean a `draft:` endpoint (a renderer-only endpoint
+-- that has never been saved, see `DRAFT_ID_PREFIX` in
+-- `src/stores/store-types.ts`) cannot be stored here at all: it has no
+-- `nodes` row to point at, and the renderer skips persisting those.
+--
+-- Everything the list view renders (`status`, `created_at`, `method`,
+-- `url`, `duration_ms`) is a real column rather than a field inside a
+-- JSON blob, because those are what the strip sorts and filters on.
+-- `body` is capped on write at
+-- `domain::RESPONSE_HISTORY_MAX_BODY_BYTES` — `body_truncated` records
+-- that it happened, so the viewer can say so instead of silently
+-- showing half a document as if it were the whole one.
+CREATE TABLE IF NOT EXISTS response_history (
+  id              TEXT PRIMARY KEY,
+  endpoint_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  status          INTEGER NOT NULL,
+  status_text     TEXT NOT NULL DEFAULT '',
+  duration_ms     INTEGER NOT NULL DEFAULT 0,
+  size_bytes      INTEGER NOT NULL DEFAULT 0,
+  content_type    TEXT NOT NULL DEFAULT '',
+  -- Key → value, not ordered pairs: by the time a response reaches
+  -- here it has already been through `tuplesToRecord` in
+  -- `src/lib/http.ts`, so the renderer holds a map and a map is what
+  -- round-trips without inventing an order SQLite cannot restore.
+  headers_json    TEXT NOT NULL DEFAULT '{}',
+  body            TEXT NOT NULL DEFAULT '',
+  body_json       TEXT,
+  error           TEXT,
+  method          TEXT,
+  url             TEXT,
+  body_truncated  INTEGER NOT NULL DEFAULT 0,
+  created_at      INTEGER NOT NULL
+);
+-- The one read this table has: the history strip asks for **one
+-- endpoint's** rows, and that is the only query the renderer issues.
+--
+-- It was once "every endpoint in a project", fetched in bulk when a
+-- project opened. That was the wrong shape — a panel showing ten rows
+-- for the endpoint in front of the user should not cost a read whose
+-- size grows with the project — so the bulk read and its index are gone.
+--
+-- `rowid` is deliberately NOT in the index even though the ORDER BY
+-- uses it as the tie-break — SQLite rejects `rowid` in an index
+-- definition ("no such column: rowid"), and there is nothing to gain by
+-- working around that. The sort it leaves behind runs over at most ten
+-- rows per endpoint, because `db::response_history::append` is what
+-- keeps the table that small.
+CREATE INDEX IF NOT EXISTS idx_response_history_endpoint
+  ON response_history(endpoint_id, created_at DESC);
+
+-- Dropped rather than left behind. `CREATE INDEX IF NOT EXISTS` cannot
+-- remove anything, so a store written by a build that had the
+-- project-scoped index would keep it forever otherwise. Dropping an
+-- index is not a schema version event: no row is touched, `user_version`
+-- stays put, and `ensure_current_schema` is not involved.
+DROP INDEX IF EXISTS idx_response_history_root;
+
 -- Second line of defence for the parent/child matrix.
 --
 -- `db::nodes` checks every write against
@@ -283,4 +349,10 @@ END;
 --
 -- 1 was never shipped: the nodes merge landed before any build could
 --      stamp a version of its own, so it has no database anywhere.
+--
+-- STILL version 3 after `response_history` landed: a new table is the
+-- purest additive change there is — every `CREATE` above is
+-- `IF NOT EXISTS`, so an existing store gains it on the next
+-- `db::migrate` and needs no `ADDED_COLUMNS` entry (that list is for
+-- columns added to a table that already exists) and no version bump.
 PRAGMA user_version = 3;

@@ -21,7 +21,7 @@
 //! `in_location`, and a trailing-underscore workaround does not help
 //! because `in_` camelCases straight back to `in`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -870,6 +870,10 @@ pub fn is_loopback_host(host: &str) -> bool {
 }
 
 // ----- api response (transient; not persisted in the schema) -------------
+//
+// The header comment above `ApiResponse` says it is transient. It still
+// is: nothing stores one verbatim. What follows is the persisted
+// projection, which is a *different* type rather than a re-used one.
 
 /// The wire shape a response takes on its way out of Rust.
 ///
@@ -905,6 +909,86 @@ pub struct ApiResponse {
     pub method: Option<HttpMethod>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+}
+
+// ----- persisted response history ----------------------------------------
+
+/// How many responses one endpoint keeps. Mirrored by the renderer's
+/// `MAX_HISTORY_PER_ENDPOINT` in `stores/slices/ui-response.ts` — the
+/// store caps so the array it shows never grows, the database caps so
+/// `store.db` never grows. The two agreeing is a nicety; the database's
+/// cap is the one that bounds the file, so a future caller that forgets
+/// the store-side one still cannot grow the store without limit.
+pub const RESPONSE_HISTORY_PER_ENDPOINT: i64 = 10;
+
+/// Hard cap on a single stored response body, in bytes.
+///
+/// History is a convenience — the point is "what did this endpoint
+/// return ten minutes ago", not an archive. Without a cap, one endpoint
+/// returning a 50 MB blob ten times puts 500 MB in the user's
+/// `store.db` with no way back, so the body is clipped on write and
+/// `ResponseHistoryEntry::body_truncated` says it happened. 256 KiB is
+/// generous for the JSON and HTML a human reads while debugging and
+/// keeps the worst case per endpoint around 2.5 MB.
+pub const RESPONSE_HISTORY_MAX_BODY_BYTES: usize = 256 * 1024;
+
+/// A response as the **renderer** holds it, which is what has to
+/// round-trip out of the database.
+///
+/// Deliberately not [`ApiResponse`]: that type models headers as
+/// ordered pairs because it has to survive the IPC hop without losing a
+/// duplicate `Set-Cookie`. By the time a response is stored, it has
+/// already crossed that boundary and been folded through
+/// `tuplesToRecord` into a plain object — the duplicate-header loss has
+/// happened and is not this type's problem. Persisting pairs here would
+/// mean persisting information the renderer no longer has, and the
+/// renderer's own `ApiResponse` would have to gain a second shape.
+///
+/// This is the Rust mirror of `ApiResponse` in `src/types/domain.ts`,
+/// which is likewise the *post-adapter* type rather than a mirror of
+/// [`ApiResponse`] above.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredResponse {
+    pub status: u16,
+    pub status_text: String,
+    pub duration_ms: u64,
+    pub size_bytes: u64,
+    /// `BTreeMap` rather than `HashMap` so a row reads back with a
+    /// stable header order — a `HashMap` would shuffle them on every
+    /// read and make two identical rows serialise differently.
+    pub headers: BTreeMap<String, String>,
+    /// Already clipped to [`RESPONSE_HISTORY_MAX_BODY_BYTES`] by the
+    /// write path.
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_json: Option<serde_json::Value>,
+    pub content_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<HttpMethod>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// One row of `response_history`.
+///
+/// The wrapper exists rather than widening the stored response with
+/// `id` / `createdAt` because the two have different lifetimes: the
+/// response is the payload, these three are the row's identity. It also
+/// keeps `bodyTruncated` next to the body it is talking about — a flag
+/// smeared onto `StoredResponse` would have to be optional there and
+/// required here, for one bit of information.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponseHistoryEntry {
+    pub id: String,
+    pub endpoint_id: String,
+    pub response: StoredResponse,
+    /// `body` was clipped at [`RESPONSE_HISTORY_MAX_BODY_BYTES`].
+    pub body_truncated: bool,
+    pub created_at: i64,
 }
 
 // -------------------------------------------------------------------------

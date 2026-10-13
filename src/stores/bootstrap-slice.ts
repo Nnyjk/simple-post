@@ -90,6 +90,13 @@ export interface BootstrapSliceState {
 /** Action portion owned by the bootstrap slice. */
 export interface BootstrapSliceActions {
   // actions: data — selection / expansion
+  /**
+   * Select a project. The canonical "the user is now working in project
+   * X" event — see `openProject` below for the distinction — and so also
+   * where the per-project response history is (re)loaded from, because
+   * `responseHistory` is a whole-project map that a cross-project jump
+   * would otherwise leave pointing at the old project.
+   */
   setActiveProject: (id: string) => void;
   /**
    * *Enter* a project: select it **and** swap the tab strip to that
@@ -250,7 +257,9 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
 
     // ---------- selection / expansion ----------
 
-    setActiveProject: (id) =>
+    setActiveProject: (id) => {
+      // Only a real change re-reads the project's active environment.
+      // Re-selecting the project already in front is not an event.
       set((s) => {
         const env =
           s.environments.find((e) => e.projectId === id && e.isActive) ??
@@ -262,7 +271,13 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
           activeProjectId: id,
           activeEnvironmentId: env?.id ?? '',
         };
-      }),
+      });
+      // Response history deliberately does NOT load here. It is scoped to
+      // one endpoint, not to a project, and it is fired from
+      // `setActiveTab` — the event every path into an endpoint shares.
+      // Loading it per project meant fetching rows for endpoints the user
+      // was not looking at, sized by the project rather than by the strip.
+    },
     setActiveEnvironment: (id) => set({ activeEnvironmentId: id }),
     openProject: (id) => {
       // The tree is what the user is about to look at, so don't wait for

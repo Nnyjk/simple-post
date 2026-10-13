@@ -40,6 +40,12 @@ function makeBootstrapHarness() {
     closeTab: () => undefined,
     setLastResponse: () => undefined,
     loadWorkspace: async () => undefined,
+    // `setActiveProject` kicks the per-project response history read on
+    // a real change. Stubbed for the same reason `openTab` is: the load
+    // itself is `ui-response`'s contract (covered by
+    // `ui-response-history.test.ts`); what these tests care about is
+    // *when* `bootstrap-slice` asks for it.
+    loadResponseHistory: async () => undefined,
   };
   const set = (partial: unknown) => {
     const next =

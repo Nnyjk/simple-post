@@ -187,6 +187,22 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/permissions/:projectId",
             get(permissions_get).put(permissions_set),
         )
+        // ---- response history ----
+        //
+        // Every verb names one endpoint: the list because it paints one
+        // endpoint's strip, and the two writes because that is the row
+        // they act on. `response_history_test.rs`
+        // drives a real listener for this table: the property that
+        // matters is that `/api/response-history` and
+        // `/api/response-history/:endpointId` coexist in axum's radix
+        // tree, and a route that lost that fight still answers — with
+        // the SPA fallback's `200` and an HTML body, which looks exactly
+        // like a working endpoint to curl.
+        .route("/api/response-history", post(response_history_append))
+        .route(
+            "/api/response-history/:endpointId",
+            get(response_history_list).delete(response_history_clear),
+        )
         // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))
         .route("/api/mcp/start", post(mcp_start))

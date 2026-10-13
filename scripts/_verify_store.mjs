@@ -103,8 +103,22 @@ function makeProject(id) {
     updatedAt: 0,
   };
 }
-function makeNode(id, type, parentId, sortOrder) {
-  return { id, rootId: 'p1', parentId, type, name: id.toUpperCase(), description: '', sortOrder };
+function makeNode(id, kind, parentId, sortOrder) {
+  // `kind`, not `type`: the one-`nodes`-table refactor renamed the field,
+  // and both cascade paths filter on `n.kind === 'endpoint'` — a seed
+  // still calling it `type` silently prunes nothing and reports the whole
+  // section green about the wrong thing.
+  return {
+    id,
+    rootId: 'p1',
+    parentId,
+    kind,
+    name: id.toUpperCase(),
+    description: '',
+    sortOrder,
+    createdAt: 0,
+    updatedAt: 0,
+  };
 }
 function makeDetail(nodeId) {
   return {
@@ -128,6 +142,13 @@ function makeResp() {
     body: '',
     contentType: 'text/plain',
   };
+}
+// One `response_history` row. The wrapper is what the strip reads; the
+// assertions below only ask whether a *key* survives a cascade, but
+// seeding a bare `ApiResponse` here would let a shape regression in
+// `ResponseHistoryEntry` pass unnoticed in the one script that seeds it.
+function makeHistoryEntry(id, endpointId) {
+  return { id, endpointId, response: makeResp(), bodyTruncated: false, createdAt: 0 };
 }
 
 // ---------- (A) selector stability ----------
@@ -211,7 +232,10 @@ async function seedAndDelete(actionName, id, expectedGoneIds) {
     projects: [makeProject('p1')],
     nodes: SEED_NODES,
     endpointDetails: { ep1: makeDetail('ep1'), ep2: makeDetail('ep2') },
-    responseHistory: { ep1: [makeResp()], ep2: [makeResp()] },
+    responseHistory: {
+      ep1: [makeHistoryEntry('rh1', 'ep1')],
+      ep2: [makeHistoryEntry('rh2', 'ep2')],
+    },
     responseExamples: {
       ep1: [{ ...makeResp(), id: 'ex1' }],
       ep2: [{ ...makeResp(), id: 'ex2' }],
@@ -307,7 +331,11 @@ const KEY = 'simple-post:prefs';
 
 // ---------- (D) persistence init (code review) ----------
 console.log('\n=== (D) Persistence init (code review) ===');
-const uiSrc = readFileSync(new URL('../src/stores/ui-slice.ts', import.meta.url), 'utf8');
+// `slices/ui-prefs.ts`, not `ui-slice.ts`: the ui slice was split into
+// sub-factories and the prefs seed moved with it, so reading the barrel
+// here reports "not found" for a contract that is still very much in
+// force one directory over.
+const uiSrc = readFileSync(new URL('../src/stores/slices/ui-prefs.ts', import.meta.url), 'utf8');
 const hasLoadPrefs = /function loadPrefs\(\)/.test(uiSrc);
 const readsKeyConst = /const PREFS_KEY = 'simple-post:prefs'/.test(uiSrc);
 const readsKey = /window\.localStorage\.getItem\(PREFS_KEY\)/.test(uiSrc);

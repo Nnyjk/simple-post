@@ -329,6 +329,13 @@ pub fn run() {
             crate::commands::base_url_defs_set_default,
             crate::commands::request_settings_get,
             crate::commands::request_settings_update,
+            // Response history (per-endpoint FIFO, capped in the db
+            // write path). Registered as its own group because it is
+            // the one resource whose reads are project-scoped rather
+            // than endpoint-scoped.
+            crate::commands::response_history_list,
+            crate::commands::response_history_append,
+            crate::commands::response_history_clear,
             crate::commands::permissions_get,
             crate::commands::permissions_set,
             crate::commands::mcp_status,

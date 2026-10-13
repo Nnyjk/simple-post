@@ -62,6 +62,20 @@ export const COMMANDS = {
   requestSettingsGet: 'request_settings_get',
   requestSettingsUpdate: 'request_settings_update',
 
+  // ----- response history -----
+  // Persisted per-endpoint send history. One resource, three verbs:
+  // ----- response history -----
+  // Every verb names one endpoint. `list` reads the rows for the endpoint
+  // the user just opened (it is fired from `setActiveTab`, not from a
+  // project switch — a project-scoped read fetched rows for endpoints
+  // nobody was looking at), `append` stores what a send just produced,
+  // and `clear` is the explicit "forget this endpoint's history"
+  // affordance — deleting the endpoint itself is the foreign key's job,
+  // not this pair's.
+  responseHistoryAppend: 'response_history_append',
+  responseHistoryClear: 'response_history_clear',
+  responseHistoryList: 'response_history_list',
+
   // ----- agent permissions -----
   permissionsGet: 'permissions_get',
   permissionsSet: 'permissions_set',
@@ -496,6 +510,28 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'PUT',
     path: () => '/api/request-settings',
     body: (a) => (a as { patch?: unknown }).patch ?? a,
+  },
+
+  // ----- response history -----
+  // Scoped to one endpoint, and the id lives in the path rather than a
+  // query string because there is nothing optional about it: the strip
+  // asks for the endpoint it is about to paint, and an endpoint with
+  // nothing stored answers `[]` rather than an error.
+  [COMMANDS.responseHistoryList]: {
+    method: 'GET',
+    path: (a) => `/api/response-history/${encodeURIComponent(String(a.endpointId))}`,
+  },
+  [COMMANDS.responseHistoryAppend]: {
+    method: 'POST',
+    path: () => '/api/response-history',
+    // Explicit projection rather than the default `body = args`: the two
+    // halves below are the whole wire contract, and a caller-held extra
+    // key must not ride along.
+    body: (a) => ({ endpointId: a.endpointId, response: a.response }),
+  },
+  [COMMANDS.responseHistoryClear]: {
+    method: 'DELETE',
+    path: (a) => `/api/response-history/${encodeURIComponent(String(a.endpointId))}`,
   },
 
   // ----- agent permissions -----
