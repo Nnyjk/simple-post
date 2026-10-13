@@ -18,10 +18,12 @@ import { HUE, type HueConcept } from '@/lib/hue';
  * its own palette colour. `sm`/`md`/`lg` now name the three sizes that
  * actually recur; callers that used h-6 or h-10 move to the nearest.
  *
- * Two neutral states are supported because the settings rows already had
- * them before this component existed: `concept` omitted (muted) and
- * `tone="danger"`. Both reuse the exact classes those call sites had, so
- * nothing shifts visually.
+ * The settings rows already had two non-concept states before this
+ * component existed — `concept` omitted (muted) and a destructive tint —
+ * and those are now `tone="default"` and `tone="danger"`, reusing the
+ * exact classes those call sites had, so nothing shifts visually.
+ * `success` / `warning` / `primary` join them for tiles that report a
+ * state or claim the app's primary context rather than a tree concept.
  */
 
 export type IconTileSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
@@ -39,9 +41,35 @@ const SIZE_CLASS: Record<IconTileSize, string> = {
   xl: 'h-10 w-10',
 };
 
-const NEUTRAL = 'bg-muted/60 text-muted-foreground';
-const DANGER = 'bg-destructive/10 text-destructive';
-const PRIMARY = 'bg-primary/15 text-primary';
+/**
+ * Tone → paint.
+ *
+ * `default` is the only entry that can be overridden by `concept`; the
+ * other four are states the tile is reporting rather than identities it
+ * is standing for, so nothing may repaint them.
+ *
+ * `success` / `warning` take the `-foreground` token rather than the base
+ * one. On a 15%-alpha tint the base values (`--success` 142 71% 45%,
+ * `--warning` 38 92% 45%) are the *border* step of each ramp — legible as
+ * an edge, too light as a glyph on the near-white the light theme puts
+ * behind them. `--success-foreground` / `--warning-foreground` are the
+ * text steps (30% in light, 75% in dark) and are what `Badge`'s success /
+ * warning variants already use on the same tint. See the semantic-token
+ * pairing note in AGENTS.md.
+ *
+ * `danger` deliberately does NOT follow that rule:
+ * `--destructive-foreground` is `0 0% 100%` in *both* scopes, so pairing
+ * it with a light tint is white-on-white in light mode. `--destructive`
+ * at 5 59% 44% clears ~5:1 on that tint in both.
+ */
+const TONE: Record<NonNullable<IconTileProps['tone']>, { bg: string; text: string }> = {
+  default: { bg: 'bg-muted/60', text: 'text-muted-foreground' },
+  danger: { bg: 'bg-destructive/10', text: 'text-destructive' },
+  primary: { bg: 'bg-primary/15', text: 'text-primary' },
+  success: { bg: 'bg-success/15', text: 'text-success-foreground' },
+  warning: { bg: 'bg-warning/15', text: 'text-warning-foreground' },
+};
+
 const PRIMARY_BORDER = 'border-primary/30';
 const NEUTRAL_BORDER = 'border-border';
 
@@ -56,12 +84,20 @@ export interface IconTileProps {
   /** Add the concept's 30%-alpha edge. Used by the form-sized rows. */
   bordered?: boolean;
   /**
-   * `primary` paints with the app's `--primary` rather than a hue. It
-   * exists for the two tiles that stand for the *environment* — which
-   * deliberately has no hue of its own (see `src/lib/hue.ts`) and keeps
-   * `--primary` because it is the app's primary context.
+   * Paints with a semantic status token instead of a concept hue.
+   *
+   * `primary` exists for the two tiles that stand for the *environment* —
+   * which deliberately has no hue of its own (see `src/lib/hue.ts`) and
+   * keeps `--primary` because it is the app's primary context.
+   *
+   * `success` / `warning` / `danger` are for tiles that report the
+   * *state* of a running thing. They exist because a fixed concept hue
+   * cannot do that job: `concept="connection"` is rose (`--hue-connection`
+   * at 355°) in every lifecycle, so a daemon's hero tile stayed red while
+   * it was serving — which is a claim, not a colour preference. See
+   * `src/lib/mcp-status-tone.ts`.
    */
-  tone?: 'default' | 'danger' | 'primary';
+  tone?: 'default' | 'danger' | 'primary' | 'success' | 'warning';
   /** Neutral tiles on the settings rail also carry a hairline border. */
   neutralBorder?: boolean;
   className?: string;
@@ -80,14 +116,19 @@ export function IconTile({
   ...rest
 }: IconTileProps) {
   const hue = tone === 'default' && concept ? HUE[concept] : null;
+  // A concept hue wins over the neutral resting tone; every explicit tone
+  // wins over both. One lookup, so no caller can end up with a hue `bg`
+  // and a tone `text` — which is how a rose background once shipped with
+  // a green glyph.
+  const paint = hue ?? TONE[tone];
   return (
     <span
       aria-hidden={rest['aria-hidden'] ?? true}
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded-md',
         SIZE_CLASS[size],
-        tone === 'danger' ? DANGER : tone === 'primary' ? PRIMARY : hue ? hue.bg : NEUTRAL,
-        tone === 'default' ? (hue ? hue.text : null) : null,
+        paint.bg,
+        paint.text,
         bordered && tone === 'primary' ? PRIMARY_BORDER : bordered && hue ? hue.border : null,
         neutralBorder ? NEUTRAL_BORDER : null,
         className,

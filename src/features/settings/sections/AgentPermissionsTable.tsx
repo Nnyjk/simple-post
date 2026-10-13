@@ -102,16 +102,33 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
     <div className="space-y-2">
       <p className="text-[11px] text-muted-foreground">
         控制 AI agent 对每个项目可执行的操作范围。
-        <span className="text-warning">修改权限后需重启 MCP daemon 生效</span>。
+        {/* `text-warning` is the *border* step of the amber ramp
+            (38 92% 45%); on the card's own surface it lands around 3.3:1
+            in the light theme, which 11px text cannot carry.
+            `--warning-foreground` is the text step (28 80% 35% light,
+            38 92% 75% dark) and is what the warning badge uses. Same
+            rule as the tile tones — see AGENTS.md's semantic-token
+            pairing note. */}
+        <span className="text-warning-foreground">修改权限后需重启 MCP daemon 生效</span>。
       </p>
-      <div className="overflow-hidden rounded-md border border-border bg-card/30">
+      {/* No border/bg shell: this already lives inside the "AI 权限"
+          category card, and a second bordered surface inside it read as
+          a card nested in a card. The row separators carry the grouping.
+
+          No `px-3` either. `PermissionLevel` already indents this block to
+          sit under its own heading; a second 12px inset on top of that
+          pushed the project names 28px right of the 「按项目授权」 title
+          they belong to, which is the misalignment this table was part
+          of. Flush left, the colour dot hangs like a list bullet and the
+          separator spans the full content width. */}
+      <div>
         {projects.map((project, idx) => {
           const current = perms[project.id] ?? 'read_call';
           return (
             <div
               key={project.id}
               className={cn(
-                'grid grid-cols-[1fr_auto] items-center gap-3 px-3 py-1.5',
+                'grid grid-cols-[1fr_auto] items-center gap-3 py-1.5',
                 idx > 0 && 'border-t border-border/60',
               )}
             >
@@ -123,10 +140,17 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
                 />
                 <span className="truncate font-mono text-xs text-foreground">{project.name}</span>
               </div>
+              {/* Same trough as the segmented control directly above it in the same
+                card (`CapabilityRadioGroup`): h-7 segments, `border/70`
+                over `muted/40`. They were h-6 over `background/50`, so
+                two controls of the same kind rendered a step apart in
+                size and on two different surfaces — the other half of the
+                misalignment. The focus ring stays bare because this track
+                is wrapped in a `Tooltip`, which takes the real outline. */}
               <div
                 role="radiogroup"
                 aria-label={`${project.name} 权限`}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-background/50 p-0.5"
+                className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-muted/40 p-0.5"
               >
                 {(Object.keys(MODE_LABELS) as AgentPermission[]).map((mode) => {
                   const active = current === mode;
@@ -140,7 +164,7 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
                           void handleChange(project.id, mode);
                         }}
                         className={cn(
-                          'inline-flex h-6 items-center rounded-sm px-2 text-[11px] font-medium transition-colors',
+                          'inline-flex h-7 items-center rounded-sm px-3 text-[11px] font-medium transition-colors',
                           focusRingBare,
                           active
                             ? 'bg-primary text-primary-foreground'

@@ -1,0 +1,117 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { groupTools, OTHER_GROUP_KEY } from '@/lib/mcp-tool-groups';
+
+/**
+ * The 44 tools the daemon actually registers today. Kept verbatim (not
+ * derived) so that adding a tool to the Rust registry without teaching
+ * `groupTools` its prefix shows up as a failing 「其他」 assertion rather
+ * than as a silently missing table row.
+ */
+const REGISTERED_TOOLS = [
+  'env_list',
+  'env_get_active',
+  'env_create',
+  'env_update',
+  'env_delete',
+  'env_set_var',
+  'env_set_baseurl',
+  'env_set_active',
+  'project_list',
+  'project_get',
+  'project_create',
+  'project_update',
+  'project_delete',
+  'module_list',
+  'module_create',
+  'module_update',
+  'module_delete',
+  'module_move',
+  'collection_list',
+  'collection_create',
+  'collection_update',
+  'collection_delete',
+  'collection_move',
+  'endpoint_list',
+  'endpoint_get',
+  'endpoint_search',
+  'endpoint_create',
+  'endpoint_update',
+  'endpoint_delete',
+  'endpoint_duplicate',
+  'endpoint_move',
+  'base_url_def_list',
+  'base_url_def_create',
+  'base_url_def_update',
+  'base_url_def_delete',
+  'base_url_def_set_default',
+  'api_run_request',
+  'api_call_endpoint',
+  'api_resolve_template',
+  'api_resolve_endpoint',
+  'api_validate_endpoint',
+  'api_parse_response',
+  'api_diff_responses',
+  'api_extract_jsonpath',
+];
+
+test('groupTools: every registered tool lands in its prefix family', () => {
+  const groups = groupTools(REGISTERED_TOOLS);
+  const keys = groups.map((g) => g.key);
+
+  // Nothing should fall through to 其他 for the current registry — that
+  // is the signal that a new tool needs a category.
+  assert.equal(
+    keys.includes(OTHER_GROUP_KEY),
+    false,
+    `未归类: ${JSON.stringify(groups.find((g) => g.key === OTHER_GROUP_KEY)?.items)}`,
+  );
+  assert.deepEqual(keys, ['env', 'project', 'module', 'collection', 'endpoint', 'baseUrl', 'api']);
+});
+
+test('groupTools: per-family counts match the registry', () => {
+  const byKey = Object.fromEntries(
+    groupTools(REGISTERED_TOOLS).map((g) => [g.key, g.items.length]),
+  );
+  assert.deepEqual(byKey, {
+    env: 8,
+    project: 5,
+    module: 5,
+    collection: 5,
+    endpoint: 8,
+    baseUrl: 5,
+    api: 8,
+  });
+  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 44);
+});
+
+test('groupTools: no tool is dropped or duplicated', () => {
+  const flat = groupTools(REGISTERED_TOOLS).flatMap((g) => g.items);
+  assert.equal(flat.length, REGISTERED_TOOLS.length);
+  assert.deepEqual([...flat].sort(), [...REGISTERED_TOOLS].sort());
+});
+
+test('groupTools: a name with no known prefix lands in 其他, last', () => {
+  const groups = groupTools(['endpoint_list', 'brand_new_tool']);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[1].key, OTHER_GROUP_KEY);
+  assert.deepEqual(groups[1].items, ['brand_new_tool']);
+});
+
+test('groupTools: empty input yields no groups', () => {
+  assert.deepEqual(groupTools([]), []);
+});
+
+test('groupTools: an empty family is dropped, not rendered as a heading', () => {
+  const groups = groupTools(['env_list', 'api_run_request']);
+  assert.deepEqual(
+    groups.map((g) => g.key),
+    ['env', 'api'],
+  );
+});
+
+test('groupTools: input order does not change output order', () => {
+  const forward = groupTools(['endpoint_list', 'env_list']);
+  const reversed = groupTools(['env_list', 'endpoint_list']);
+  assert.deepEqual(forward, reversed);
+});

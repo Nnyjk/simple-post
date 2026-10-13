@@ -1,23 +1,21 @@
-import { Cpu, FileJson, Bot, Server, Activity, Copy, RefreshCw, Power } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Cpu, FileJson, Bot, Server, Activity } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { SettingsCategory } from '../SettingsCategory';
 import { Badge } from '@/components/ui/badge';
 import { IconTile } from '@/components/ui/icon-tile';
-import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { McpStatusPanel, StateSummary } from './McpStatusPanel';
+import { McpStatusPanel, StateSummary, type McpRuntimeStatus } from './McpStatusPanel';
 import { CopyConfigTile } from './CopyConfigTile';
 import { AgentPermissionsTable } from './AgentPermissionsTable';
 import { DaemonRestartDialog } from './DaemonRestartDialog';
+import { McpHttpConfigSection } from './McpHttpConfigSection';
 import { COMMANDS } from '@/lib/tauri-commands';
 import { invokeCmd } from '@/lib/tauri-commands';
-import {
-  MCP_CLIENT_PRESETS,
-  buildClientConfig,
-  unavailableReason,
-  type McpTransport,
-} from '@/lib/mcp-client-config';
+import { MCP_CLIENT_PRESETS, buildClientConfig, unavailableReason } from '@/lib/mcp-client-config';
+import { daemonTone } from '@/lib/mcp-status-tone';
+import { groupTools } from '@/lib/mcp-tool-groups';
+import { cn, focusRing } from '@/lib/utils';
 
 export function ConnectionSection() {
   // Selector: raw ref only — see app-store rules.
@@ -27,6 +25,11 @@ export function ConnectionSection() {
   // the *only* place polling is started — any other consumer (TopBar
   // pill, etc.) just reads `mcpStatus` and gets the same payload.
   const mcpStatus = useAppStore((s) => s.mcpStatus);
+  // The hero tile reports the daemon's lifecycle. It used to carry the
+  // fixed `connection` concept hue (rose, 355°) instead, which meant a
+  // daemon serving traffic painted red next to a green `running` badge.
+  // See `src/lib/mcp-status-tone.ts`.
+  const daemonStatus: McpRuntimeStatus = mcpStatus?.status ?? 'stopped';
 
   // MCP auto-start preference — drives the "启动配置" Switch below.
   // The slice hydrates this on the first read; the panel renders an
@@ -108,86 +111,46 @@ export function ConnectionSection() {
     }
   }, [mcpStatus?.status, restartDialogSeen]);
 
-  // Proxy binary path — fetched lazily from the daemon on mount.
-  //
-  // Three states to render:
-  //   - `proxyPathAvailable` true   → show the daemon-reported path
-  //   - `proxyPathAvailable` false during the loading window → show
-  //     a "正在解析…" badge rather than the previous `<you>` literal
-  //   - on invoke reject (Worker hasn't shipped the command yet,
-  //     very early dev mode) → the path slot is hidden until the
-  //     daemon starts serving it. The user can force a retry via the
-  //     "重新载入" button.
-  const [proxyPath, setProxyPath] = useState<string | null>(null);
-  const [proxyPathAvailable, setProxyPathAvailable] = useState(false);
-  const [proxyPathLoading, setProxyPathLoading] = useState(true);
-  const refreshProxyPath = () => {
-    setProxyPathLoading(true);
-    invokeCmd<string>(COMMANDS.mcpDaemonProxyPath)
-      .then((p) => {
-        if (typeof p === 'string' && p.length > 0) {
-          setProxyPath(p);
-          setProxyPathAvailable(true);
-        }
-      })
-      .catch(() => {
-        // Worker hasn't shipped the command (or the daemon isn't
-        // ready) — leave the slot hidden until the user retries.
-        setProxyPathAvailable(false);
-      })
-      .finally(() => {
-        setProxyPathLoading(false);
-      });
-  };
-  useEffect(() => {
-    refreshProxyPath();
-  }, []);
-
-  const [copyState, setCopyState] = useState<'idle' | 'success' | 'error'>('idle');
-
   // ----- Generated client configs -----
   // Driven by LIVE daemon facts rather than a hand-written constant, so
   // the snippet always names the port the daemon is actually on.
-  const [transport, setTransport] = useState<McpTransport>('http');
-  const facts = { port: mcpStatus?.port ?? null, proxyPath };
-  const handleCopyProxy = async () => {
-    if (!proxyPath) return;
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(proxyPath);
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = proxyPath;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
-      setCopyState('success');
-    } catch {
-      setCopyState('error');
-    }
-    window.setTimeout(() => setCopyState('idle'), 2000);
-  };
+  const facts = { port: mcpStatus?.port ?? null };
 
   const tools = mcpStatus?.registeredTools ?? [];
+  // Categories for the tool table. Recomputed per render rather than
+  // memoised: the input is a 44-element array and `groupTools` is a
+  // single pass, so a `useMemo` would cost more than it saves.
+  const toolGroups = groupTools(tools);
 
   return (
     <>
-      {/* ----- MCP process — hero card ---------------------------- */}
+      {/* =================================================================
+          Five cards in the order the reader actually needs them: run the
+          daemon → point it at an address → hand a client the config →
+          decide what that client may do → see the resulting toolset.
+
+          There are no section headings. This tab carried three numbered
+          ones (① 服务 / ② 接入 / ③ 权限) and every one of them restated
+          the card directly beneath it — ① 服务 sat above a card titled
+          「MCP 进程」, ② 接入 above 「HTTP 服务配置」. A heading that
+          repeats its own card's title is one more line to read and no
+          new information, so the cards carry the structure themselves
+          and the separation falls to `SettingsCategory`'s own bottom
+          border.
+          ================================================================= */}
+
+      {/* ----- The daemon, and the only card that runs it --------- */}
       <SettingsCategory
         title="MCP 进程"
-        description="stdio 模式 · 供 Claude Desktop、Cursor 等本地调用"
+        description="MCP 守护进程 · 以 Streamable HTTP 暴露给 AI 客户端"
         icon={<Server className="h-3.5 w-3.5" />}
         meta="进程级状态"
-        hideDivider
       >
         <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <IconTile
-              concept="connection"
+              // Status, not identity: see the note on `daemonStatus`.
+              tone={daemonTone(daemonStatus)}
               size="xl"
               className="rounded-lg"
               icon={<Cpu className="h-5 w-5" />}
@@ -196,7 +159,7 @@ export function ConnectionSection() {
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-foreground">simple-post-mcp</span>
                 <Badge variant="muted" className="font-mono">
-                  stdio
+                  HTTP
                 </Badge>
               </div>
               <div className="mt-1 text-[11px]">
@@ -206,13 +169,35 @@ export function ConnectionSection() {
           </div>
           <McpStatusPanel />
         </div>
+
+        {/* Auto-start used to be a whole second card. It is one switch
+            about the same daemon the buttons above already control, so
+            it now sits directly under them instead of competing with
+            them from a card away. */}
+        <div className="flex items-center justify-between gap-3 border-t border-border/60 p-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-foreground">随应用启动</div>
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              关闭后 MCP 不会随应用启动，可在「MCP 进程」卡片里点「启动」手动拉起。
+              关掉本开关不会掐断正在服务的 daemon —— 上面的「停止 / 启动」决定当前这次是否运行，
+              这里只决定下次打开应用时。
+            </div>
+          </div>
+          <Switch
+            checked={mcpAutoStart === true}
+            disabled={mcpAutoStart === null || autoStartBusy}
+            onCheckedChange={handleAutoStartToggle}
+            aria-label="随应用启动 MCP 进程"
+          />
+        </div>
+
         <div className="grid grid-cols-1 gap-3 border-t border-border/60 p-3 sm:grid-cols-2">
           <div className="flex items-start gap-3 px-1">
             <IconTile className="mt-0.5" icon={<Activity className="h-3.5 w-3.5" />} />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">已注册工具</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                stdio JSON-RPC 接口，可被任何支持 MCP 的客户端调用
+                MCP 标准接口，可被任何支持 MCP 的客户端调用
               </div>
             </div>
             <Badge variant="muted" className="shrink-0 font-mono">
@@ -224,237 +209,147 @@ export function ConnectionSection() {
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">传输协议</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                默认 stdio，无网络监听面 — 进程级安全
+                Streamable HTTP，默认只监听本机回环地址
               </div>
             </div>
             <Badge variant="muted" className="shrink-0 font-mono">
-              JSON-RPC 2.0
+              HTTP
             </Badge>
           </div>
         </div>
       </SettingsCategory>
 
-      {/* ----- MCP capability policy --------------------------- */}
-      {/* Three-tier global capability that filters `tools/list` for AI
-          clients. Persisted to `preferences.mcp.policy`; it is the
-          global lever, while the per-project `permissions` table
-          still gates individual mutations. */}
+      {/* The listener config is the SOURCE of the snippet below it: its
+          host/port/path are concatenated into that URL. */}
+      <McpHttpConfigSection />
+
+      {/* ----- Client-side config ---------------------------------- */}
+      {/* One tile, one format: the Claude Code HTTP shape generated from
+          the LIVE daemon port. There is no transport tab and no client
+          picker — HTTP needs nothing installed on the client machine,
+          and it is the shape that keeps working after the daemon picks a
+          new port. See `src/lib/mcp-client-config.ts`. */}
       <SettingsCategory
-        title="AI 写入权限"
-        description="控制 AI 客户端可见的工具集。切换后立刻生效，无需重启 daemon。"
+        title="接入配置"
+        description="可直接粘贴到客户端的 Claude Code 配置；HTTP 方式无需在客户端安装二进制"
+        icon={<FileJson className="h-3.5 w-3.5" />}
+      >
+        <div className="space-y-3 p-3">
+          {MCP_CLIENT_PRESETS.map((p) => {
+            const configJson = buildClientConfig(p, facts);
+            const reason = unavailableReason(p, facts);
+            return (
+              <CopyConfigTile
+                key={p.id}
+                icon={<FileJson className="h-4 w-4" />}
+                // No client title: with one supported format the tile's
+                // own name would just repeat the card header.
+                description={configJson ? `${p.description} · ${p.configPath}` : reason}
+                configJson={configJson ?? `// ${reason}`}
+              />
+            );
+          })}
+        </div>
+      </SettingsCategory>
+
+      {/* ----- AI permissions: two gates, one hierarchy ---------- */}
+      {/* `resolve_capability` merges these by taking the STRICTER of the
+          two, so they are not two parallel switches: the global policy
+          sets the ceiling and a per-project grant can only tighten it.
+          Rendering them as two adjacent cards invited the reading that
+          either one alone is sufficient, which is the one reading that
+          is never true. */}
+      <SettingsCategory
+        title="AI 权限"
+        description="两层取更严格者：全局策略定上限，按项目授权只能收紧、不能放宽"
         icon={<Bot className="h-3.5 w-3.5" />}
         meta={
           capability === null
             ? '加载中…'
-            : capability === 'read_only'
-              ? '只读'
-              : capability === 'safe_write'
-                ? '读写'
-                : '全部'
+            : `${capability === 'read_only' ? '只读' : capability === 'safe_write' ? '读写' : '全部'} · ${projects.length} 个项目`
         }
       >
-        <div className="space-y-3 p-3">
-          <CapabilityRadioGroup
-            value={capability}
-            disabled={capabilityBusy || capability === null}
-            onChange={handleCapabilityChange}
-          />
-          {capability !== null && (
-            <div className="text-[11px] text-muted-foreground">
-              当前可见 {capabilityTools.length} 个工具
-              {capabilityTools.length > 0 ? '：' : ''}
-              {capabilityTools.slice(0, 8).join('、')}
-              {capabilityTools.length > 8 ? '…' : ''}
-            </div>
-          )}
-        </div>
-      </SettingsCategory>
-
-      {/* ----- MCP auto-start (前/后台分布 -- 默认 off) ----------- */}
-      {/* 渲染面板，默认目标为 false。Tauri 形态 + serve-web 形态都尊重这个键，
-          所以一处开关覆盖两种形态。 */}
-      <SettingsCategory
-        title="启动配置"
-        description="决定 simple-post 启动时是否自动拉起 MCP 子进程；关闭后由用户手动开启"
-        icon={<Power className="h-3.5 w-3.5" />}
-        meta={mcpAutoStart === null ? '加载中…' : mcpAutoStart ? '已开启' : '已关闭'}
-        hideDivider
-      >
-        <div className="flex items-center justify-between gap-3 p-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-xs font-medium text-foreground">
-              启动时自动拉起 MCP 子进程
-            </div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
-              关闭后 MCP 不会随应用启动；可在「MCP 进程」卡片里点「启动」手动拉起。
-              这与卡片里的「启动 / 停止」开关是两件事：这里决定
-              <strong className="font-medium text-foreground/80">下次打开应用</strong>
-              时是否自动运行，而卡片里的开关决定
-              <strong className="font-medium text-foreground/80">当前这次</strong>
-              是否运行——关掉本开关不会掐断正在服务的 daemon。
-            </div>
+        {/* 上位 — Gate A: which tools an AI client can even see. */}
+        <PermissionLevel step={1} title="全局能力策略" hint="对所有 AI 客户端生效">
+          <div className="space-y-3">
+            <CapabilityRadioGroup
+              value={capability}
+              disabled={capabilityBusy || capability === null}
+              onChange={handleCapabilityChange}
+            />
+            {capability !== null && (
+              // Count only. The names appear once, in the card below —
+              // spelling out the first eight here repeated half of that
+              // list in a second format for no added signal.
+              <div className="text-[11px] text-muted-foreground">
+                当前可见 {capabilityTools.length} 个工具
+              </div>
+            )}
           </div>
-          <Switch
-            checked={mcpAutoStart === true}
-            disabled={mcpAutoStart === null || autoStartBusy}
-            onCheckedChange={handleAutoStartToggle}
-            aria-label="启动时自动拉起 MCP 子进程"
-          />
-        </div>
+        </PermissionLevel>
+
+        {/* 下位 — Gate B: what an agent may do on one project. */}
+        <PermissionLevel step={2} title="按项目授权" hint="只在上一层放行的范围内进一步收紧">
+          <div className="space-y-3">
+            <div className="text-[11px] text-muted-foreground">
+              即使全局策略选了「全部」，某个项目在这里保持默认的「读+调用」时，
+              该项目上的写操作依然被拒。两层中更严格的一层决定最终结果。
+            </div>
+            <AgentPermissionsTable projects={projects} />
+          </div>
+        </PermissionLevel>
       </SettingsCategory>
 
-      {/* ----- Snippet card (live tool list) ---------------------- */}
+      {/* ----- The toolset the daemon exposes --------------------- */}
+      {/* Grouped by name prefix rather than listed flat: the names come
+          in seven families, and one `<pre>` of them hid that entirely.
+
+          The 「代理二进制路径」 block that used to sit at the bottom of
+          this card is gone. The proxy binary is a stdio artefact — it
+          existed so a client could spawn a bridge process — and this tab
+          is HTTP-only since the transport narrowed, so the path it
+          printed was a file nothing here can use any more. */}
       <SettingsCategory
         title="可用工具清单"
         description={
           tools.length > 0
-            ? `${tools.length} 个工具 · 由 daemon 实时上报`
+            ? `由 daemon 实时上报 · ${toolGroups.length} 个分类`
             : 'daemon 未上报工具清单，重启 MCP 后会刷新'
         }
         icon={<FileJson className="h-3.5 w-3.5" />}
-        meta={tools.length > 0 ? `${tools.length} 个工具` : '0 个工具'}
+        // Last card in the tab: no trailing rule, otherwise the section
+        // ends on a line with nothing after it.
         hideDivider
       >
-        <pre className="m-3 max-h-40 overflow-auto rounded-md border border-border/70 bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-foreground/90">
-          {tools.length > 0 ? tools.join('\n') : '(empty — daemon 未就绪)'}
-        </pre>
-        <div className="m-3 mt-0 flex items-center justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[11px] font-medium text-foreground">
-              代理二进制路径
-              {!proxyPathAvailable && !proxyPathLoading && (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal text-muted-foreground">
-                  实际路径待打包后显示（开发模式占位）
-                </span>
-              )}
-            </div>
-            {proxyPathAvailable && proxyPath ? (
-              <div
-                className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground"
-                title={proxyPath}
-              >
-                {proxyPath}
+        {toolGroups.length > 0 ? (
+          <div className="space-y-3 p-3">
+            {toolGroups.map((group) => (
+              <div key={group.key}>
+                <div className="mb-1 flex items-baseline gap-2">
+                  <span className="text-[11px] font-medium text-foreground/80">{group.label}</span>
+                  <span className="text-[10px] tabular-nums text-muted-foreground/70">
+                    {group.items.length}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {group.items.map((name) => (
+                    <span
+                      key={name}
+                      title={name}
+                      className="truncate rounded px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </div>
               </div>
-            ) : (
-              <div className="mt-0.5 text-[10px] text-muted-foreground/70">
-                {proxyPathLoading ? '解析中…' : '尚未解析到路径'}
-              </div>
-            )}
+            ))}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {!proxyPathAvailable && !proxyPathLoading && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={refreshProxyPath}
-                className="gap-1.5"
-              >
-                <RefreshCw className="h-3 w-3" />
-                重新载入
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant={copyState === 'success' ? 'secondary' : 'outline'}
-              size="xs"
-              onClick={handleCopyProxy}
-              disabled={!proxyPathAvailable}
-              className="gap-1.5"
-            >
-              {copyState === 'success' ? (
-                <>已复制</>
-              ) : copyState === 'error' ? (
-                <>复制失败</>
-              ) : (
-                <>
-                  <Copy className="h-3 w-3" />
-                  复制代理路径
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      </SettingsCategory>
-
-      {/* ----- Client-side config ---------------------------------- */}
-      {/* One tile per AI client, generated from the LIVE daemon facts
-          (its actual port + the resolved bridge path). The previous
-          hand-written blob was broken twice over: `args: ['stdio']` is
-          not a valid argument for the bridge binary (it takes
-          `--transport=stdio` as a flag), and `%APPDATA%` in an `env`
-          value is never expanded because env is passed to the child
-          verbatim. See `src/lib/mcp-client-config.ts`. */}
-      <SettingsCategory
-        title="接入配置"
-        description="按客户端生成可直接粘贴的配置；HTTP 方式无需在客户端安装二进制"
-        icon={<FileJson className="h-3.5 w-3.5" />}
-        hideDivider
-      >
-        <div className="space-y-3 p-3">
-          {/* Transport picker. HTTP is first and recommended: it needs
-              nothing installed on the client machine, so it is the only
-              option that works for a client that cannot spawn
-              processes — and it keeps working after the app moves. */}
-          <div className="flex items-center gap-1 rounded-md border border-border bg-background p-0.5">
-            {(
-              [
-                { value: 'http', label: 'HTTP（推荐）', hint: '直连 daemon /mcp，无需本地二进制' },
-                { value: 'stdio', label: 'stdio', hint: '拉起 simple-post-mcp 桥接进程' },
-              ] as const
-            ).map((opt) => {
-              const active = transport === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setTransport(opt.value as McpTransport)}
-                  aria-pressed={active}
-                  title={opt.hint}
-                  className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                    active
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {MCP_CLIENT_PRESETS.map((p) => {
-              const supported = p.supports.includes(transport);
-              const configJson = supported ? buildClientConfig(p, transport, facts) : null;
-              const reason = supported
-                ? unavailableReason(p, transport, facts)
-                : `该客户端未提供${transport === 'http' ? '远程 HTTP' : 'stdio'}接入方式`;
-              return (
-                <CopyConfigTile
-                  key={`${p.id}-${transport}`}
-                  icon={<FileJson className="h-4 w-4" />}
-                  name={p.name}
-                  description={configJson ? `${p.description} · ${p.configPath}` : reason}
-                  configJson={configJson ?? `// ${reason}`}
-                />
-              );
-            })}
-          </div>
-        </div>
-      </SettingsCategory>
-
-      {/* ----- Agent permissions ----------------------------------- */}
-      <SettingsCategory
-        title="AI Agent 权限"
-        description="按项目分别授权 agent 可执行的操作集。重启 MCP 后生效"
-        icon={<Bot className="h-3.5 w-3.5" />}
-        meta={`${projects.length} 个项目`}
-        hideDivider
-      >
-        <div className="p-3">
-          <AgentPermissionsTable projects={projects} />
-        </div>
+        ) : (
+          <p className="px-3 py-6 text-center text-[11px] text-muted-foreground">
+            daemon 未就绪 — 启动 MCP 后此处会列出全部已注册工具
+          </p>
+        )}
       </SettingsCategory>
 
       <DaemonRestartDialog
@@ -476,10 +371,101 @@ export function ConnectionSection() {
   );
 }
 
-// ----- Capability radio group ---------------------------------
-// Three-way switch wired directly to the Tauri command. Plain radio
-// inputs keep this independent of the project's `SettingsCategory` and
-// store plumbing.
+// ----- Permission level --------------------------------------
+// One rung of the AI-permission ladder. The visual grammar has to
+// carry the relationship on its own, because the two gates are not
+// parallel settings:
+//
+//   - step 1 takes the accent-coloured badge — it is the ceiling.
+//   - step 2 takes a muted badge and carries a top divider — it is a
+//     narrowing of the level above it.
+//
+// A reader who never reads a word of the prose should still see that
+// step 2 lives under step 1 rather than beside it.
+//
+// BOTH RUNGS SHARE ONE LEFT EDGE. That is a correction, not a stylistic
+// preference: indenting step 2 was tried and is wrong here. A second
+// inset stacked on the card's own padding made 「② is inside something」
+// claim while its prose kept the extra shift, and the eye then had two
+// different answers to "where does a block start". The hierarchy is
+// carried by the divider, the badge colour and the title's weight;
+// geometry stays flat so a reader can scan straight down one column.
+//
+// The body's left padding is derived from the header's, not chosen
+// independently: the header is a `h-5` badge (20px) plus `gap-3` (12px),
+// so its TEXT column sits 32px right of the row's own padding. The body
+// has to start where the title does — starting at the row's own padding
+// ran the prose 32px to the LEFT of the heading it belongs to, and
+// `AgentPermissionsTable`'s own `px-3` pushed the project names back out
+// again, which is how one card ended up with three left edges.
+// `p-3` (12) + rail (32) = 44 = `pl-11`, on both rungs.
+//
+// The indent is expressed with padding *inside* the row, never with a
+// margin on the wrapper. `sm:ml-4` used to sit on the same element as
+// `border-t`, so the rule above step 2 started 16px in and left a notch
+// against the step-1 block above it. A margin on the bordered element
+// moves the separator; padding on its children cannot.
+function PermissionLevel({
+  step,
+  title,
+  hint,
+  meta,
+  children,
+}: {
+  step: 1 | 2;
+  title: string;
+  hint: string;
+  meta?: string;
+  children: ReactNode;
+}) {
+  const subordinate = step === 2;
+  return (
+    <div className={cn(subordinate && 'border-t border-border/60')}>
+      <div className="flex items-start gap-3 p-3">
+        <span
+          className={cn(
+            'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
+            subordinate ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground',
+          )}
+        >
+          {step}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span
+              className={cn(
+                'text-xs font-medium',
+                subordinate ? 'text-foreground/90' : 'text-foreground',
+              )}
+            >
+              {title}
+            </span>
+            {meta && <span className="text-[10px] text-muted-foreground/80">{meta}</span>}
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
+        </div>
+      </div>
+      {/* `pb-3` on BOTH rungs. Step 1 needs it so its controls do not sit
+          flush against the separator; step 2 needs it for the card's
+          bottom edge. The old ternary handed it to step 2 only, which
+          left step 1's content touching the rule. */}
+      <div className="pb-3 pl-11 pr-3">{children}</div>
+    </div>
+  );
+}
+
+// ----- Capability segmented control ----------------------------
+//
+// This was three stacked `<label>`s that each drew their own border —
+// three cards nested inside the "AI 权限" card, which is the exact
+// layering that made the tab read as boxes inside boxes. The three
+// options are mutually exclusive and are what the per-project picker in
+// step 2 below already looks like, so it is the same segmented control
+// as that one: one bordered track, the active option filled.
+//
+// The per-option hint moved out of the option and onto a single line
+// under the control, which is all it ever needed — you read about the
+// one you picked, not the two you didn't.
 type CapabilityPolicy = 'read_only' | 'safe_write' | 'full_access';
 const CAPABILITY_OPTIONS: ReadonlyArray<{
   value: CapabilityPolicy;
@@ -500,37 +486,42 @@ function CapabilityRadioGroup({
   onChange: (next: CapabilityPolicy) => void;
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      {CAPABILITY_OPTIONS.map((opt) => {
-        const checked = value === opt.value;
-        const id = `mcp-cap-${opt.value}`;
-        return (
-          <label
-            key={opt.value}
-            htmlFor={id}
-            className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 transition-colors ${
-              checked
-                ? 'border-primary bg-primary/5'
-                : 'border-border bg-background hover:border-primary/40'
-            } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
-          >
-            <input
-              id={id}
-              type="radio"
-              name="mcp-capability"
-              value={opt.value}
-              checked={checked}
+    <div className="space-y-2">
+      <div
+        role="radiogroup"
+        aria-label="全局能力策略"
+        className={cn(
+          'inline-flex rounded-md border border-border/70 bg-muted/40 p-0.5',
+          disabled && 'opacity-50',
+        )}
+      >
+        {CAPABILITY_OPTIONS.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
               disabled={disabled}
-              onChange={() => onChange(opt.value)}
-              className="mt-0.5 h-3.5 w-3.5 accent-primary"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium text-foreground">{opt.label}</div>
-              <div className="mt-0.5 text-[11px] text-muted-foreground">{opt.hint}</div>
-            </div>
-          </label>
-        );
-      })}
+              onClick={() => onChange(opt.value)}
+              className={cn(
+                'inline-flex h-7 items-center rounded-sm px-3 text-[11px] font-medium transition-colors',
+                focusRing,
+                'disabled:cursor-not-allowed',
+                active
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+              )}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="text-[11px] text-muted-foreground">
+        {value ? CAPABILITY_OPTIONS.find((o) => o.value === value)?.hint : '正在读取当前策略…'}
+      </div>
     </div>
   );
 }
