@@ -1,14 +1,41 @@
 use super::*;
 use serde_json::json;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+/// Per-call counter that disambiguates temp dirs when several tests
+/// construct their state() in the same millisecond (cargo's default
+/// runs tests in parallel).
+static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// Cheap fake pool for tests. `r2d2::Pool` is generic over the manager,
 /// so we can't construct one without a real `SqliteConnectionManager` —
 /// tests that need a real DB use `db::init` against a temp file. For
 /// smoke tests that only exercise dispatch + arg parsing, a dummy is fine.
+///
+/// **The temp dir is per-call.** This one used to be a fixed
+/// `simple-post-mcp-test`, which is a fixture bug that reads as an
+/// unrelated flake: `db::init` → `ensure_current_schema` removes the
+/// `store.db` it is about to replace, and cargo runs the tests in this
+/// file on parallel threads, so two callers race on one file and the
+/// loser dies with `os error 32` (file in use) on Windows. It only
+/// surfaced once this file had a second `test_state()` caller — the
+/// descriptor test. The sibling files in this crate
+/// (`variable_fill_test.rs`, `response_parse_test.rs`,
+/// `project_ops/{mod,endpoint}_test.rs`) already did the pid + now_ms +
+/// counter thing; this brings the last one in line.
 fn test_state() -> Arc<AppState> {
+    let id = STATE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "simple-post-mcp-test-{}-{}-{}",
+        std::process::id(),
+        simple_post_core::domain::now_ms(),
+        id
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
     Arc::new(AppState {
-        pool: simple_post_core::db::init(&std::env::temp_dir().join("simple-post-mcp-test"))
-            .unwrap(),
+        pool: simple_post_core::db::init(&dir).unwrap(),
         started_at: Instant::now(),
         metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
