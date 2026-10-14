@@ -8,7 +8,7 @@ use crate::db::DbPool;
 use crate::domain::*;
 use crate::error::AppError;
 
-use super::dto::{BaseUrlDefPatch, CreateBaseUrlDefOpts};
+use super::dto::{adopt_or_mint_id, BaseUrlDefPatch, CreateBaseUrlDefOpts};
 
 /// Every service of the project, flat.
 ///
@@ -35,6 +35,10 @@ pub fn base_url_defs_list(
 /// creating a service is not the same as choosing one, and a project
 /// whose endpoints have no default go out with no base URL rather than
 /// one the user never picked.
+///
+/// The id is the caller's when it sends one — see
+/// `simple_post_server::dto::adopt_or_mint_id`, which this shares with
+/// the REST handler so both transports agree on who owns a service id.
 #[tauri::command]
 pub fn base_url_defs_create(
     state: State<DbPool>,
@@ -44,7 +48,7 @@ pub fn base_url_defs_create(
 ) -> Result<BaseUrlDefinition, AppError> {
     let opts = opts.unwrap_or_default();
     let def = BaseUrlDefinition {
-        id: uid(),
+        id: adopt_or_mint_id(opts.id),
         name,
         description: opts.description,
     };

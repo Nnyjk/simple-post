@@ -469,14 +469,18 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     // lives in the path; `/api/baseurl-defs` is the collection the sibling
     // PATCH/DELETE below address by bare id.
     path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
-    // Explicit projection: `name` is the whole contract, and the id is
-    // minted by the server — the default `args` fallback would leak both
-    // `projectId` and any caller-held `opts` into the body.
+    // Explicit projection: `name` is the whole contract, and the default
+    // `args` fallback would leak both `projectId` and any caller-held
+    // `opts` into the body. `opts.id` is forwarded because the renderer
+    // mints the id (it keys the ★ and the env cells off it before the row
+    // is persisted); a blank one lets the server mint instead.
     body: (a) => {
-      const opts = a.opts as { description?: unknown } | undefined;
+      const opts = a.opts as { description?: unknown; id?: unknown } | undefined;
+      const id = typeof opts?.id === 'string' ? opts.id : '';
       return {
         name: a.name,
         ...(opts ? { description: opts.description } : {}),
+        ...(id ? { id } : {}),
       };
     },
   },

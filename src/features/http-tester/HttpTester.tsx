@@ -163,9 +163,14 @@ export function HttpTester() {
   // therefore still needed — it selects the row of
   // `env.moduleBaseUrls[defId]` this endpoint reads — but it no longer
   // narrows which services are on offer.
+  //
+  // `endpoint` is passed as the walk's starting row rather than looked up
+  // by id: a draft endpoint has no `nodes` row, so an id-only lookup
+  // answered "no module" for it and the cell was never read (see
+  // `moduleIdOfEndpoint`'s `self`).
   const moduleId = useMemo(
-    () => moduleIdOfEndpoint(allNodes, endpoint?.id),
-    [allNodes, endpoint?.id],
+    () => moduleIdOfEndpoint(allNodes, endpoint?.id, endpoint),
+    [allNodes, endpoint],
   );
   const resolved = useMemo(
     () =>
@@ -179,9 +184,11 @@ export function HttpTester() {
   );
 
   // Drive the picker: reflect what's currently stored on the endpoint.
-  // When the user picks a different source, the parent commits it back
-  // via `updateEndpointDetail` — no draft needed since baseUrl changes
-  // are persisted immediately (no Save button).
+  // When the user picks a different source, `commitBaseUrl` puts it where
+  // this endpoint keeps its baseUrl choice — the row for a saved one, the
+  // draft document for an unsaved one. A saved endpoint persists that
+  // immediately (there is no Save button for this choice); a draft
+  // carries it until Save folds it into the row.
   //
   // `baseUrlOverride` is three-state and the empty string is the point of
   // 自定义: `null` means "not in custom mode", `''` means "custom mode,
@@ -264,6 +271,31 @@ export function HttpTester() {
       else updateNode(endpoint.id, { description: next || undefined });
     },
     [endpoint, isDraft, updateDraftEndpoint, updateNode],
+  );
+
+  /**
+   * Commit one baseUrl choice to wherever this endpoint keeps it.
+   *
+   * `baseUrlDefinitionId` / `baseUrlOverride` are draft *document* fields
+   * (see `slices/ui-draft-endpoints.ts`), so an unsaved endpoint has to
+   * write them through `updateDraftEndpoint` — `saveDraftEndpoint` already
+   * folds them into the single row it persists. Writing them with
+   * `updateEndpointDetail` instead was a silent no-op for a draft: that
+   * action returns early when there is no `endpoint_details` row yet, so
+   * the picker snapped straight back to the project's default and the URL
+   * stayed unprefixed — the click looked like it had done nothing.
+   *
+   * A saved endpoint keeps persisting immediately, as before: there is no
+   * Save button for this choice, and the endpoint row is the only place
+   * it can live.
+   */
+  const commitBaseUrl = useCallback(
+    (patch: { baseUrlDefinitionId: string | null; baseUrlOverride: string | null }) => {
+      if (!endpoint) return;
+      if (isDraft) updateDraftEndpoint(endpoint.id, patch);
+      else updateEndpointDetail(endpoint.id, patch);
+    },
+    [endpoint, isDraft, updateDraftEndpoint, updateEndpointDetail],
   );
 
   // "新建即命名" — a fresh draft opens with its title already selected.
@@ -819,12 +851,12 @@ export function HttpTester() {
             if (next.kind === 'default') {
               // Clear both — null on baseUrlDefinitionId makes
               // resolveEndpointBaseUrl fall back to the project ★.
-              updateEndpointDetail(endpoint.id, {
+              commitBaseUrl({
                 baseUrlDefinitionId: null,
                 baseUrlOverride: null,
               });
             } else if (next.kind === 'definition') {
-              updateEndpointDetail(endpoint.id, {
+              commitBaseUrl({
                 baseUrlDefinitionId: next.definitionId,
                 baseUrlOverride: null,
               });
@@ -837,8 +869,8 @@ export function HttpTester() {
               // host; keep it so re-picking 自定义 doesn't retarget an
               // existing request by surprise.
               const alreadyCustom = selection.kind === 'override';
-              updateEndpointDetail(endpoint.id, {
-                baseUrlOverride: detail.baseUrlOverride ?? '',
+              commitBaseUrl({
+                baseUrlOverride: detail?.baseUrlOverride ?? '',
                 baseUrlDefinitionId: null,
               });
               if (!alreadyCustom) focusUrlForFullAddress();

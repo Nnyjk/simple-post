@@ -40,7 +40,11 @@ pub(crate) async fn base_url_defs_create(
     Json(body): Json<BaseUrlDefCreateBody>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     let def = crate::domain::BaseUrlDefinition {
-        id: crate::domain::uid(),
+        // Same id policy as the Tauri command, one helper for both (see
+        // `crate::dto::adopt_or_mint_id`): the renderer keys the project's
+        // ★ and the per-(env × module) URL cells off this id before the
+        // row exists.
+        id: crate::dto::adopt_or_mint_id(body.id),
         name: body.name,
         description: body.description,
     };

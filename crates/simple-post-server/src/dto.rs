@@ -99,6 +99,30 @@ pub struct BaseUrlDefPatch {
 #[serde(rename_all = "camelCase")]
 pub struct CreateBaseUrlDefOpts {
     pub description: Option<String>,
+    /// Client-minted id for the new service, adopted as-is when non-blank.
+    ///
+    /// The renderer already holds this id in two other places before the
+    /// row exists — the project's ★ and the per-(env × module) URL cells
+    /// it seeds — so a server-minted id silently orphans both. See
+    /// [`adopt_or_mint_id`], which both transports call.
+    pub id: Option<String>,
+}
+
+/// Adopt the caller's id when it carries one, else mint.
+///
+/// One rule for both transports (the Tauri command's `opts.id` and the
+/// REST body's `id`), so "who owns a service id" cannot drift between
+/// them: the renderer mints it because it needs the id *before* the row
+/// exists. Minting on the server instead left the ★ and the
+/// `env.moduleBaseUrls[defId][moduleId]` cells keyed to a row that was
+/// never written, which is why a freshly configured service resolved to
+/// no URL at all. Blank is treated as absent so `""` (or whitespace)
+/// cannot create an empty-id row.
+pub fn adopt_or_mint_id(requested: Option<String>) -> String {
+    match requested {
+        Some(id) if !id.trim().is_empty() => id,
+        _ => crate::domain::uid(),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

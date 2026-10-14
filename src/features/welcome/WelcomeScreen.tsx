@@ -261,11 +261,13 @@ export function WelcomeScreen() {
 function EmptyWorkspace({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="space-y-3" data-welcome-stagger>
-      {/* The only card on screen in the first-run state, so it centres
-          itself rather than stretching to the list width. */}
-      <div className="mx-auto max-w-sm">
-        <NewProjectCard onClick={onCreate} primary />
-      </div>
+      {/* Same measure as the list it replaces, deliberately. The card used
+          to be wrapped in `mx-auto max-w-sm` so the lone first-run control
+          would "centre itself" — but the width belongs to the container
+          (`max-w-xl` above), not to the one card currently on screen, so
+          that wrapper made a single button two sizes depending on whether
+          a second project existed. See the `w-full` on `NewProjectCard`. */}
+      <NewProjectCard onClick={onCreate} primary />
       <p className="text-xs text-muted-foreground">还没有任何项目，先创建一个开始使用。</p>
     </div>
   );
@@ -278,7 +280,13 @@ function NewProjectCard({ onClick, primary }: { onClick: () => void; primary?: b
       onClick={onClick}
       className={cn(
         // Same row shape as a project card so the two read as one list.
-        'group flex items-center gap-3.5 rounded-lg border px-4 py-3.5 text-left transition-colors',
+        //
+        // `w-full` is explicit on both sides of that promise: as a grid
+        // item the list-stretched this card by accident, while the
+        // first-run state stretched it by wrapping it in a `max-w-sm`
+        // box. Naming the width here means the control keeps one size
+        // whichever state renders it.
+        'group flex w-full items-center gap-3.5 rounded-lg border px-4 py-3.5 text-left transition-colors',
         focusRing,
         primary
           ? 'border-primary/50 bg-primary/5 hover:border-primary hover:bg-primary/10'

@@ -145,6 +145,92 @@ async fn the_project_scoped_create_route_answers() {
     );
 }
 
+/// A caller-supplied `id` must be adopted verbatim.
+///
+/// The renderer mints the id because it needs it *before* the row exists:
+/// it seeds the project's ★ and the `env.moduleBaseUrls[defId][moduleId]`
+/// cell. A server-minted id left both keyed to a row that was never
+/// written, so a freshly configured service resolved to no URL at all. This
+/// drives the whole chain — create with the id, then write the cell against
+/// it — because "the create answered 201 with that id" is only half the
+/// contract; the cell has to be readable under the same key afterwards.
+#[tokio::test]
+async fn a_caller_supplied_id_is_adopted_and_its_cell_is_readable() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project(&dir).await;
+
+    let created = post_json(
+        addr,
+        "/api/projects/p1/baseurls",
+        serde_json::json!({ "name": "auth", "id": "def_client_1" }),
+    )
+    .await;
+    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    let created: serde_json::Value = created.json().await.expect("json body");
+    assert_eq!(
+        created["id"], "def_client_1",
+        "后端必须采纳调用方的 id，否则 ★ 与 URL 单元格会指向一条不存在的行；got {created}"
+    );
+
+    let cell = post_json(
+        addr,
+        "/api/environments/env_1/module-baseurls",
+        serde_json::json!({
+            "defId": "def_client_1",
+            "moduleId": "mod_a",
+            "url": "https://api.demo.dev",
+        }),
+    )
+    .await;
+    assert_eq!(cell.status(), reqwest::StatusCode::OK);
+    let cell: serde_json::Value = cell.json().await.expect("json body");
+    assert_eq!(
+        cell["moduleBaseUrls"]["def_client_1"]["mod_a"], "https://api.demo.dev",
+        "按同一个 id 写入的单元格必须读得回来"
+    );
+}
+
+/// Omitting `id` keeps the old contract — the server mints — so an older
+/// renderer (or any other client) is not broken by the new field.
+#[tokio::test]
+async fn omitting_the_id_still_yields_a_server_minted_one() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project(&dir).await;
+
+    let response = post_json(
+        addr,
+        "/api/projects/p1/baseurls",
+        serde_json::json!({ "name": "auth" }),
+    )
+    .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("json body");
+    let id = body["id"].as_str().expect("id as str");
+    assert!(!id.is_empty(), "服务端必须铸一个非空 id，got {body}");
+}
+
+/// A blank `id` is treated as absent rather than written as a row whose id
+/// is `""` — the same "empty means absent" rule every optional id on this
+/// API follows.
+#[tokio::test]
+async fn a_blank_id_is_treated_as_absent() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project(&dir).await;
+
+    let response = post_json(
+        addr,
+        "/api/projects/p1/baseurls",
+        serde_json::json!({ "name": "auth", "id": "   " }),
+    )
+    .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("json body");
+    let id = body["id"].as_str().expect("id as str");
+    assert!(!id.trim().is_empty(), "空白 id 不能落库，got {body}");
+}
+
 /// `POST /api/projects/:projectId/baseurls/default` must answer with the
 /// updated `Project` — `defaultBaseUrlDefinitionId` is live again, so the
 /// caller is handed the new pointer instead of a `204` and a re-read.
