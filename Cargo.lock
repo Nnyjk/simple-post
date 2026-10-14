@@ -3544,6 +3544,7 @@ dependencies = [
  "serde_json_path",
  "simple-post-core",
  "simple-post-mcp",
+ "simple-post-server",
  "tauri",
  "tauri-build",
  "thiserror 1.0.69",
@@ -3586,6 +3587,27 @@ dependencies = [
  "serde_json_path",
  "simple-post-core",
  "thiserror 1.0.69",
+ "tokio",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "simple-post-server"
+version = "0.1.1"
+dependencies = [
+ "axum",
+ "clap",
+ "dirs 5.0.1",
+ "mime_guess",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_json_path",
+ "simple-post-core",
+ "simple-post-mcp",
+ "tauri",
  "tokio",
  "tower-http 0.5.2",
  "tracing",

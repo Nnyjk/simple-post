@@ -106,6 +106,21 @@ try {
   const health = await fetch(`${BASE}${PREFIX}/api/healthz`);
   assert(health.status === 200, `${PREFIX}/api/healthz returns 200 (got ${health.status})`);
 
+  // The unprefixed alias must answer with the *probe*, not with the SPA
+  // shell. `auth::is_public_path` has listed `/healthz` since the beginning,
+  // but no route was ever registered for it, so it fell through to the SPA
+  // fallback and answered `200 text/html`. Any probe that only checks for a
+  // 200 calls that healthy — a probe that cannot fail is worse than none.
+  const legacyHealth = await fetch(`${BASE}${PREFIX}/healthz`);
+  assert(legacyHealth.status === 200, `${PREFIX}/healthz returns 200 (got ${legacyHealth.status})`);
+  const legacyBody = await legacyHealth.text();
+  assert(
+    legacyBody.includes('"status":"ok"'),
+    `${PREFIX}/healthz returns the health JSON, not the SPA shell (got ${JSON.stringify(
+      legacyBody.slice(0, 60),
+    )})`,
+  );
+
   const bareHealth = await fetch(`${BASE}/healthz`);
   assert(bareHealth.status === 404, `bare /healthz returns 404 (got ${bareHealth.status})`);
 
@@ -119,6 +134,7 @@ try {
     spaType.toLowerCase().includes('text/html'),
     `${PREFIX}/ returns text/html (got ${JSON.stringify(spaType)})`,
   );
+  const shell = await spa.text();
 
   const unknown = await fetch(`${BASE}${PREFIX}/some/spa/route`);
   assert(unknown.status === 200, `${PREFIX}/some/spa/route returns 200 (got ${unknown.status})`);
@@ -126,6 +142,86 @@ try {
   assert(
     unknownType.toLowerCase().includes('text/html'),
     `${PREFIX}/some/spa/route returns text/html (got ${JSON.stringify(unknownType)})`,
+  );
+  const deepShell = await unknown.text();
+
+  // ---------------------------------------------------------------------
+  // 浏览器视角：读外壳里写出来的 URL，然后真的去请求它。
+  //
+  // 下面这组断言是这个文件存在的原因。之前的版本只验证了服务端
+  // nest 得对不对（`/sp/api/projects` → 200、裸路径 → 404），从
+  // 来没验证过**浏览器会请求什么**。而 `vite build` 默认发出的是
+  // 绝对路径 `/assets/...`，前端的 `fetch` 也是 `/api/...`：两者都
+  // 不带前缀，在嵌套路由下全部 404 —— 应用起得来但每个接口都死。
+  //
+  // 曾经还有一个 `nest_service('/assets', …)` 的补丁把静态资源额外
+  // 发布到裸根，让 `<script src>` 能解析，掩盖了 fetch 那一半。
+  // 下面的断言连同那个补丁一起去掉：资源现在由外壳自带前缀。
+  // ---------------------------------------------------------------------
+
+  /** 取外壳里所有根绝对引用（`src="..."` / `href="..."`）。 */
+  function shellReferences(html) {
+    return [...html.matchAll(/(?:src|href)="([^"]*)"/g)].map((m) => m[1]);
+  }
+
+  const references = shellReferences(shell);
+  const assetRefs = references.filter((u) => u.startsWith(`${PREFIX}/assets/`));
+  assert(
+    assetRefs.length > 0,
+    `shell references at least one prefixed /assets entry (got ${JSON.stringify(references)})`,
+  );
+  assert(
+    references.every((u) => !u.startsWith('/assets/')),
+    `no reference may point at the bare /assets root (got ${JSON.stringify(references)})`,
+  );
+
+  // 资源必须真的能取到，而且内容类型必须是 JS/CSS —— 返回 200 +
+  // text/html 是 ServeDir 回落到 index.html 的典型特征，状态码断言
+  // 看不见，只有 content-type 能看见。
+  for (const ref of new Set(assetRefs)) {
+    const res = await fetch(`${BASE}${ref}`);
+    const type = (res.headers.get('content-type') ?? '').toLowerCase();
+    assert(res.status === 200, `${ref} returns 200 (got ${res.status})`);
+    assert(
+      !type.includes('text/html'),
+      `${ref} is a real asset, not the SPA fallback (got ${JSON.stringify(type)})`,
+    );
+  }
+
+  // 前端靠这个全局拼 API 前缀。取不到就等于所有接口仍然裸奔在根上。
+  const injected = shell.match(/window\.__SIMPLE_POST_BASE__\s*=\s*"([^"]*)"/);
+  assert(injected !== null, 'shell injects window.__SIMPLE_POST_BASE__ for the renderer');
+  if (injected) {
+    assert(
+      injected[1] === PREFIX,
+      `injected base is ${PREFIX} (got ${JSON.stringify(injected[1])})`,
+    );
+    const viaInjected = `${injected[1]}/api/projects`;
+    const res = await fetch(`${BASE}${viaInjected}`, {
+      headers: { Authorization: 'Bearer probe' },
+    });
+    assert(
+      res.ok || res.status === 401,
+      `API URL the renderer will build resolves (${viaInjected} → ${res.status})`,
+    );
+  }
+
+  // 深链（刷新）拿到的外壳必须同样带前缀，否则刷新一次就白屏。
+  const deepRefs = shellReferences(deepShell);
+  assert(
+    deepRefs.every((u) => !u.startsWith('/assets/')),
+    `deep-link shell is rewritten too (got ${JSON.stringify(deepRefs)})`,
+  );
+  assert(
+    /window\.__SIMPLE_POST_BASE__\s*=\s*"[^"]*"/.test(deepShell),
+    'deep-link shell carries the base global',
+  );
+
+  // 反向的钉子：裸根不该再暴露 /assets。补丁移除后它在 /sp 下 404。
+  const bareAsset = await fetch(`${BASE}/assets/does-not-matter.js`);
+  assert(
+    bareAsset.status === 404,
+    `bare /assets is no longer republished (got ${bareAsset.status})`,
   );
 } catch (error) {
   failures++;

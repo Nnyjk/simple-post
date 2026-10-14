@@ -57,10 +57,10 @@ pub(crate) async fn projects_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
-    let opts: crate::commands::dto::CreateProjectOpts = match body.get("opts") {
+    let opts: crate::dto::CreateProjectOpts = match body.get("opts") {
         Some(v) => serde_json::from_value(v.clone())
             .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?,
-        None => crate::commands::dto::CreateProjectOpts {
+        None => crate::dto::CreateProjectOpts {
             description: body
                 .get("description")
                 .and_then(Value::as_str)

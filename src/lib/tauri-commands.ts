@@ -644,6 +644,35 @@ async function webInvokeCmd<T>(
   return webFetch<T>(spec.method, spec.path(args), body, options);
 }
 
+/**
+ * The reverse-proxy prefix this deployment is mounted under, or `''`.
+ *
+ * `serve-web` runs the router `nest`ed under `--public-base-path`
+ * (`SIMPLE_POST_PUBLIC_BASE_PATH`), and it injects the value into the SPA
+ * shell as `window.__SIMPLE_POST_BASE__` before the module entry runs.
+ * The reason it has to be injected at *runtime*: in the container the
+ * prefix arrives as an environment variable, so one image has to serve
+ * both `https://host/` and `https://host/sp/`.
+ *
+ * `import.meta.env.BASE_URL` is not an alternative — it is a build-time
+ * constant baked in by `vite build --base`, which the image never passes.
+ * Reading it here would report `''` under a prefix and silently send every
+ * request to the bare root, which a nested router never serves.
+ *
+ * Kept in sync with `BASE_GLOBAL` in
+ * `crates/simple-post-server/src/web_api/static_files.rs`. A root
+ * deployment injects nothing, so the default of `''` is what preserves
+ * today's root-absolute behaviour.
+ */
+export function readApiBase(): string {
+  // Same guard as `readBearerFromStorage`: these module-level helpers run
+  // under Node in the unit tests, where `window` does not exist. Touching
+  // it unguarded turns every slice test into a ReferenceError.
+  if (typeof window === 'undefined') return '';
+  const injected = (window as unknown as Record<string, unknown>).__SIMPLE_POST_BASE__;
+  return typeof injected === 'string' ? injected.replace(/\/+$/, '') : '';
+}
+
 async function webFetch<T>(
   method: RouteSpec['method'],
   path: string,
@@ -674,7 +703,7 @@ async function webFetch<T>(
   if (options?.signal) {
     init.signal = options.signal;
   }
-  const res = await fetch(path, init);
+  const res = await fetch(readApiBase() + path, init);
   if (!res.ok) {
     // Both branches assign before use — declare without an initializer
     // so `no-useless-assignment` stays happy.

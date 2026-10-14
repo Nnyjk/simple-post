@@ -1,0 +1,75 @@
+# =============================================================================
+# Docker build context — keep it to what the image is actually built from.
+#
+# This file is load-bearing, not housekeeping: the build context is uploaded
+# to the daemon before a single instruction runs, and `target/` alone is
+# multiple GB on a dev box. Every entry here is a layer-cache key that would
+# otherwise be invalidated by editing an unrelated file.
+# =============================================================================
+
+# ---- Build outputs (both are rebuilt inside the image) ----
+# `target/` is the big one: without this line the context upload alone takes
+# minutes and every `COPY . .` busts the compile layer.
+target/
+**/target/
+src-tauri/target/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ---- Rust intermediate ----
+# `src-tauri/gen/` is tauri-build output, regenerated on demand and
+# gitignored — shipping it would just be a stale second copy.
+src-tauri/gen/
+
+# ---- VCS / CI / agent state ----
+.git/
+.gitattributes
+.gitignore
+.github/
+.worktrees/
+.scratch/
+scripts/.scratch/
+.minimax/
+.playwright-mcp/
+coverage/
+
+# ---- Secrets ----
+# Never bake a populated .env into an image; `.env.example` is not needed by
+# any build stage either (the compose file documents the variables inline).
+.env
+.env.*
+!.env.example
+
+# ---- Tooling configs only the host lint uses ----
+# The image runs `tsc -b` and `vite build`, never ESLint or Prettier.
+eslint.config.js
+.prettierrc
+.prettierignore
+.editorconfig
+
+# ---- Docs & scratch (not build inputs) ----
+*.md
+docs/
+
+# ---- Editor / OS cruft ----
+.vscode/
+.idea/
+**/.DS_Store
+**/Thumbs.db
+**/*.swp
+**/*.swo
+*~
+
+# ---- Local run artifacts ----
+*.log
+npm-debug.log*
+**/*.bak
+**/*.removed
+**/*.tmp.ts
+**/*.tmp.cjs
+build-exit.txt
+build-output.txt

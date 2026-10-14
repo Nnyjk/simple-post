@@ -33,6 +33,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+// Only the GUI host emits `daemon://crashed`. Behind this feature the
+// crate has no Tauri dependency at all, which is what keeps the
+// container image free of GTK/WebKit and the `--lib` test binary free
+// of the Windows GUI runtime.
+#[cfg(feature = "gui")]
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -174,6 +179,7 @@ const TEARDOWN_POLL: Duration = Duration::from_millis(50);
 /// Host-side data directory used by the Tauri shape, which has no
 /// data-dir parameter to thread through. Matches what the daemon child
 /// derives for itself; the `serve-web` shape passes its own explicitly.
+#[cfg(feature = "gui")]
 fn host_data_dir() -> String {
     dirs::data_dir()
         .map(|p| p.join("simple-post").display().to_string())
@@ -225,6 +231,7 @@ struct Started {
 
 impl Started {
     /// Tauri shape: arm the watcher that emits `daemon://crashed`.
+    #[cfg(feature = "gui")]
     fn tauri_finish(self, app_handle: &AppHandle) -> u16 {
         let port = self.port;
         if let Some(w) = self.watch {
@@ -304,6 +311,11 @@ fn teardown_targets(owned_pid: Option<u32>, adopted_pid: Option<u32>) -> Vec<Tea
 /// `Running` with no tracked port is the "adopted, then lost the port
 /// record" state — liveness cannot be confirmed there, and a fresh
 /// spawn is the only honest answer.
+// Pure decision function with no Tauri in it, so it stays compiled
+// unconditionally — `daemon_supervisor_test.rs` exercises it directly.
+// Only its production caller (`is_serving`) is GUI-gated, hence the
+// `allow(dead_code)` on a feature that has no GUI.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
 fn start_is_noop(status: DaemonStatus, tracked_port: Option<u16>, healthy: bool) -> bool {
     status == DaemonStatus::Running && tracked_port.is_some() && healthy
 }
@@ -409,9 +421,9 @@ impl McpDaemonHandle {
 
     /// Snapshot of the daemon's current state in the shape the renderer
     /// wants. Cheap — just locks and copies. The function signature
-    /// returns `crate::commands::McpStatusDto`; if those fields ever
+    /// returns `crate::dto::McpStatusDto`; if those fields ever
     /// change, this is the one place that needs updating.
-    pub fn snapshot(&self) -> crate::commands::McpStatusDto {
+    pub fn snapshot(&self) -> crate::dto::McpStatusDto {
         // We use `try_lock` because Tauri's command invocations are
         // synchronous on the main thread; blocking would deadlock when
         // the supervisor's own task is mid-update. If the lock is held
@@ -422,7 +434,7 @@ impl McpDaemonHandle {
             Err(_) => {
                 // Lock contended — tool list unreachable without blocking,
                 // so surface none and let the next poll pick up the truth.
-                return crate::commands::McpStatusDto {
+                return crate::dto::McpStatusDto {
                     status: DaemonStatus::Starting.as_str().to_string(),
                     running: false,
                     pid: None,
@@ -443,7 +455,7 @@ impl McpDaemonHandle {
         // transient and the renderer can switch on the lifecycle
         // string for those.
         let running = status_str == "running";
-        crate::commands::McpStatusDto {
+        crate::dto::McpStatusDto {
             status: status_str,
             running,
             pid: state.pid,
@@ -464,6 +476,7 @@ impl McpDaemonHandle {
     /// Idempotent boot (Tauri shape). Thin binding of
     /// [`Self::ensure_started_with`]: this is the signature the GUI's
     /// `.setup()` block and `mcp_auto_start_set` call.
+    #[cfg(feature = "gui")]
     pub async fn ensure_started(
         &self,
         app_handle: &AppHandle,
@@ -678,10 +691,11 @@ impl McpDaemonHandle {
     /// healthy tracked daemon is returned untouched — no kill, no
     /// respawn, no port churn — and only a genuinely stopped / crashed /
     /// unhealthy daemon pays the spawn path.
+    #[cfg(feature = "gui")]
     pub async fn start(
         &self,
         app_handle: &AppHandle,
-    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+    ) -> Result<crate::dto::McpStatusDto, crate::error::AppError> {
         if self.is_serving().await {
             return Ok(self.snapshot());
         }
@@ -698,7 +712,7 @@ impl McpDaemonHandle {
     pub async fn start_without_app_handle(
         &self,
         data_dir: &Path,
-    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+    ) -> Result<crate::dto::McpStatusDto, crate::error::AppError> {
         self.ensure_started_with(&data_dir.display().to_string())
             .await?
             .poll_only_finish();
@@ -710,7 +724,7 @@ impl McpDaemonHandle {
     /// `Stopped` with `pid`/`port` cleared — so the next `start` runs
     /// the fresh-spawn path cleanly. Safe to call when nothing is
     /// running: every teardown step is a no-op in that case.
-    pub async fn stop(&self) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+    pub async fn stop(&self) -> Result<crate::dto::McpStatusDto, crate::error::AppError> {
         self.teardown(DaemonStatus::Stopped).await?;
         Ok(self.snapshot())
     }
@@ -719,10 +733,11 @@ impl McpDaemonHandle {
     /// then spawn a fresh one. Returns the post-restart
     /// `McpStatusDto` so the caller can echo the new `pid` / `port` back
     /// without an extra poll.
+    #[cfg(feature = "gui")]
     pub async fn restart(
         &self,
         app_handle: &AppHandle,
-    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+    ) -> Result<crate::dto::McpStatusDto, crate::error::AppError> {
         self.teardown(DaemonStatus::Restarting).await?;
         let _ = self
             .ensure_started_with(&host_data_dir())
@@ -739,7 +754,7 @@ impl McpDaemonHandle {
     pub async fn restart_without_app_handle(
         &self,
         data_dir: &Path,
-    ) -> Result<crate::commands::McpStatusDto, crate::error::AppError> {
+    ) -> Result<crate::dto::McpStatusDto, crate::error::AppError> {
         self.teardown(DaemonStatus::Restarting).await?;
         let _ = self
             .ensure_started_with(&data_dir.display().to_string())
@@ -751,6 +766,7 @@ impl McpDaemonHandle {
     /// Is the daemon we are currently tracking still serving? The probe
     /// runs outside the lock (it is an HTTP round-trip), and the
     /// decision itself is the pure [`start_is_noop`].
+    #[cfg(feature = "gui")]
     async fn is_serving(&self) -> bool {
         let (status, port) = {
             let g = self.inner.lock().await;
@@ -911,6 +927,7 @@ async fn forward_stderr_and_parse_metrics(
 /// Awaits the child's exit; updates state and emits the Tauri event.
 /// Holds its own Arc clone of the supervisor's mutex so this task
 /// survives any intermediate restarts cleanly.
+#[cfg(feature = "gui")]
 async fn watch_exit(inner: Arc<Mutex<DaemonState>>, app_handle: AppHandle, pid: u32) {
     // F-D1 fix: take the Child OUT of state inside the lock, then drop
     // the guard before awaiting `wait()`. The previous version held

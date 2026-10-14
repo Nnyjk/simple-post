@@ -8,7 +8,7 @@ use crate::db::DbPool;
 use crate::domain::*;
 use crate::error::AppError;
 
-use super::dto::{BaseUrlDefPatch, CreateBaseUrlDefOpts};
+use super::dto::{adopt_or_mint_id, BaseUrlDefPatch, CreateBaseUrlDefOpts};
 
 /// Every service of the project, flat.
 ///
@@ -29,29 +29,16 @@ pub fn base_url_defs_list(
     })
 }
 
-/// Adopt the caller's id when it carries one, else mint.
-///
-/// Shared by both transports so "who owns the id" cannot drift between
-/// them: the renderer mints it (`stores/slices/crud-baseurl.ts`) because
-/// it needs the id *before* the row exists — to seed the project's ★ and
-/// the `env.moduleBaseUrls[defId][moduleId]` cell. Minting here instead
-/// left both pointing at a row that was never written, which is why a
-/// freshly configured service could be selected and then resolved to no
-/// URL at all. Blank is treated as absent so `""` cannot create an
-/// empty-id row.
-pub(crate) fn adopt_or_mint_id(requested: Option<String>) -> String {
-    match requested {
-        Some(id) if !id.trim().is_empty() => id,
-        _ => uid(),
-    }
-}
-
 /// Add a service to the **project's** list.
 ///
 /// The project is the scope. It stays `None` afterwards if it had no ★:
 /// creating a service is not the same as choosing one, and a project
 /// whose endpoints have no default go out with no base URL rather than
 /// one the user never picked.
+///
+/// The id is the caller's when it sends one — see
+/// `simple_post_server::dto::adopt_or_mint_id`, which this shares with
+/// the REST handler so both transports agree on who owns a service id.
 #[tauri::command]
 pub fn base_url_defs_create(
     state: State<DbPool>,

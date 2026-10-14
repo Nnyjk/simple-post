@@ -26,6 +26,14 @@ tauri-build = { version = "2", features = [] }
 # Workspace members
 simple-post-core = { path = "../crates/simple-post-core" }
 simple-post-mcp = { path = "../crates/simple-post-mcp" }
+# The headless host (REST + SPA + MCP daemon supervisor). Re-exported
+# below so the Tauri commands keep resolving `crate::daemon_supervisor`
+# / `crate::web_api` / `crate::dto` exactly as before the split.
+#
+# `features = ["gui"]` re-attaches the three `AppHandle`-taking daemon
+# verbs the desktop shell needs. Without it the crate is Tauri-free,
+# which is what the Docker image builds.
+simple-post-server = { path = "../crates/simple-post-server", features = ["gui"] }
 
 # Tauri shell
 tauri = { version = "2", features = [] }
