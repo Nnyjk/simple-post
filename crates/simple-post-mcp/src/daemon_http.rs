@@ -1,53 +1,23 @@
-//! HTTP-mode MCP daemon — axum router + JSON-RPC dispatch.
+//! HTTP 模式 MCP daemon —— axum router + JSON-RPC 分发。
 //!
-//! Hand-rolled JSON-RPC 2.0 over HTTP (no SSE, no batching). The
-//! `simple-post-mcp-proxy` binary bridges stdio clients into HTTP for
-//! in-process use; this module is what that proxy hits, plus what a
-//! human curls when debugging.
+//! 手写的 JSON-RPC 2.0 over HTTP（无 SSE、无批处理）。
 //!
-//! ---
+//! ## 工具级错误为什么走 `result.isError` 而不是 JSON-RPC 的 `error`
 //!
-//! ## Why errors go in `result.isError` (not the JSON-RPC `error` field)
+//! JSON-RPC 的 `error` 字段只承载**信封级**失败（parse error -32700、
+//! invalid request -32600、method not found -32601、invalid params -32602、
+//! internal error -32603），它与 `result` 在一个响应里互斥。MCP 则规定
+//! `tools/call` 的失败用 `result.isError: true`：工具**跑了**，只是它报告的工作
+//! 出错，LLM 仍应读到正文、呈现给用户或自行恢复。
 //!
-//! **JSON-RPC 2.0 recap.** The spec defines two error channels:
-//! `error` is for *transport / envelope* failures (parse error -32700,
-//! invalid request -32600, method not found -32601, invalid params
-//! -32602, internal error -32603). A successful `result` carries
-//! whatever the invoked method returned. The two are mutually exclusive
-//! in a single response.
+//! 所以本文件把两类失败分流：
+//!   * 工具 handler 的失败 → 合成 `result.isError: true`，永不走 `error`
+//!   * 信封级失败（JSON 解析不过、`jsonrpc != "2.0"`、method 未知、缺 `params.name`）
+//!     → `error`，因为此时还没有工具正文可读
 //!
-//! **MCP sits on top of JSON-RPC.** Per the MCP spec, `tools/call`
-//! responses use `result.content` for success and `result.isError: true`
-//! for tool-level failure — i.e. the tool *ran*, but its work reported
-//! an error. The LLM is still expected to read the body so it can
-//! surface the message to the user and / or recover.
-//!
-//! **Our choice.** Every tool-handler failure (both
-//! "the-tool-itself-failed" and "transport-of-the-tool blew up mid-way")
-//! is routed into a synthetic `result.isError: true` body. It never
-//! uses the JSON-RPC `error` field. Envelope-level failures (malformed
-//! JSON, missing `jsonrpc: "2.0"`, unknown method, missing
-//! `params.name`) DO still flow through `error` via the parsing arm
-//! above the dispatch site — those happen before any method body runs
-//! and have no tool body for the LLM to read, so the spec channel is
-//! the only honest one.
-//!
-//! **Reasoning.** LLM clients (Claude Desktop, Cursor, our own proxy)
-//! treat tool errors uniformly: show the message to the user, retry, or
-//! skip. They do not branch on transport-vs-tool to decide their UX.
-//! Collapsing both flavours into a single observable channel
-//! (`result.isError`) keeps the LLM's recovery loop simple — read
-//! `result.content`, decide.
-//!
-//! **Trade-off accepted.** Callers that *do* want to distinguish
-//! transport-level from tool-level failures (e.g. a future metrics
-//! dashboard that wants to alert on deserialization bugs separately
-//! from genuine tool crashes) lose that signal at the JSON-RPC
-//! boundary. We accept this because the metrics surface that actually
-//! needs the split lives one layer down on `GET /mcp/healthz`
-//! (`requests_handled` and the server-side counter for envelope
-//! failures), where the distinction is still observable. The JSON-RPC
-//! response body is not the right place to re-introduce it.
+//! 代价：调用方在 JSON-RPC 边界上分不出传输级与工具级失败。真正需要这个区分的地方在
+//! 下一层 —— `GET /mcp/healthz` 的 `requests_handled` 与服务端信封失败计数；
+//! 不要在响应体里把它重新引回来。
 
 use std::sync::Arc;
 
@@ -67,16 +37,13 @@ use tokio::net::TcpListener;
 use crate::mcp::{self, AppState, CallToolResult, JsonRpcError, JsonRpcResponse};
 
 // =========================================================================
-// Public router + entry
+// 公共 router 与入口
 // =========================================================================
 
-/// The three request paths for one mount prefix, as
-/// `(json_rpc, healthz, tools)`.
+/// 一个挂载前缀下的三条请求路径，依次是 `(json_rpc, healthz, tools)`。
 ///
-/// Pure and separate from [`mcp_routes`] on purpose: axum 0.7's
-/// `Router` exposes no route listing, so a unit test asserting which
-/// paths got mounted has to be able to ask that question without
-/// standing up a server.
+/// 刻意与 [`mcp_routes`] 分开且保持纯函数：axum 0.7 的 `Router` 不提供路由清单，
+/// 断言「到底挂了哪些路径」的单测必须能不启服务器就问到答案。
 pub fn route_paths(path: &str) -> (String, String, String) {
     (
         path.to_string(),
@@ -85,18 +52,12 @@ pub fn route_paths(path: &str) -> (String, String, String) {
     )
 }
 
-/// Every prefix the router serves: the configured one, plus the
-/// canonical `/mcp` when it differs.
+/// router 挂载的全部前缀：配置里那个，加上规范路径 `/mcp`（两者不同时）。
 ///
-/// The alias is not optional decoration.
-/// `port_registry::healthz` probes a hardcoded
-/// `http://127.0.0.1:<port>/mcp/healthz`, so a user who renames the
-/// path without it would get a daemon the supervisor reports as
-/// `Unhealthy` — and `ensure_started` fails on outright — while the
-/// daemon itself is serving perfectly. It also keeps every
-/// already-configured AI client (which hardcodes `/mcp`; see the
-/// "MCP client must not hardcode a daemon port" note in AGENTS.md)
-/// working across the rename.
+/// 别名不是装饰：`port_registry::healthz` 探的是写死的
+/// `http://127.0.0.1:<port>/mcp/healthz`，改名而不留别名会让 supervisor 报
+/// `Unhealthy`、`ensure_started` 直接失败，而 daemon 其实服务得好好的。留着它也
+/// 让已配置好、写死 `/mcp` 的 AI 客户端在改名后继续可用。
 pub fn mounted_prefixes(config: &McpHttpConfig) -> Vec<String> {
     let path = config.normalized_path();
     if path == DEFAULT_MCP_PATH {
@@ -105,10 +66,9 @@ pub fn mounted_prefixes(config: &McpHttpConfig) -> Vec<String> {
     vec![path, DEFAULT_MCP_PATH.to_string()]
 }
 
-/// The three AI-client routes, mounted at `path`.
+/// 挂在 `path` 上的三条 AI 客户端路由。
 ///
-/// `path` must already be normalised (leading `/`, no trailing one) —
-/// call it through [`McpHttpConfig::normalized_path`].
+/// `path` 必须已归一（以 `/` 开头、不带尾斜杠）—— 走 [`McpHttpConfig::normalized_path`]。
 fn mcp_routes(path: &str) -> Router<Arc<AppState>> {
     let (json_rpc, healthz, tools) = route_paths(path);
     Router::new()
@@ -117,26 +77,19 @@ fn mcp_routes(path: &str) -> Router<Arc<AppState>> {
         .route(&tools, get(handle_tools))
 }
 
-/// Build the axum [`Router`] for the MCP HTTP daemon with the shipped
-/// defaults (loopback bind, `/mcp`, remote access off).
+/// 用出厂默认（回环绑定、`/mcp`、关闭远程）构建 MCP HTTP daemon 的 [`Router`]。
 ///
-/// Exposed so integration tests (and the eventual `daemon_supervisor`)
-/// can reuse the exact same wiring the live server uses. The daemon
-/// binary calls [`build_router_with_config`] instead — this wrapper
-/// exists for the default case and for tests that don't care about
-/// listener configuration.
+/// 集成测试要复用与线上完全相同的接线，所以对外暴露；daemon 二进制走的是
+/// [`build_router_with_config`]，这个包装只服务默认场景与不关心监听配置的测试。
 pub fn build_router(state: Arc<AppState>) -> Router {
     build_router_with_config(state, &McpHttpConfig::default())
 }
 
-/// Build the router honouring the user's `mcp.http_config`.
+/// 按用户的 `mcp.http_config` 构建 router。
 ///
-/// The mount prefixes come from [`mounted_prefixes`] (configured path
-/// plus the `/mcp` alias); the allowlists are installed as a middleware
-/// by [`host_origin_guard`], whose default is loopback-only —
-/// fail-closed, because the alternative reading of "no allowlist" is
-/// "allow everything", which turns the remote switch itself into the
-/// vulnerability.
+/// 挂载前缀来自 [`mounted_prefixes`]（配置路径 + `/mcp` 别名）；白名单由
+/// [`host_origin_guard`] 作为中间件装上，默认只允许回环 —— fail-closed：把
+/// 「没配白名单」读成「全都放行」等于让这个开关本身变成漏洞。
 pub fn build_router_with_config(state: Arc<AppState>, config: &McpHttpConfig) -> Router {
     mounted_prefixes(config)
         .into_iter()
@@ -148,15 +101,13 @@ pub fn build_router_with_config(state: Arc<AppState>, config: &McpHttpConfig) ->
         .with_state(state)
 }
 
-/// Bind + serve with the default configuration. The caller passes an
-/// already-bound listener so they know the actual port (the `port = 0`
-/// "OS-assigned" trick).
+/// 用默认配置绑定并服务。调用方自己传已绑好的 listener，以便拿到实际端口
+/// （`port = 0` 的「OS 分配」技巧）。
 pub async fn serve(listener: TcpListener, state: Arc<AppState>) -> std::io::Result<()> {
     serve_with_config(listener, state, McpHttpConfig::default()).await
 }
 
-/// Bind + serve on an already-bound listener under the user's
-/// `mcp.http_config`.
+/// 在调用方已绑定的 listener 上，按用户的 `mcp.http_config` 服务。
 pub async fn serve_with_config(
     listener: TcpListener,
     state: Arc<AppState>,
@@ -167,45 +118,35 @@ pub async fn serve_with_config(
 }
 
 // =========================================================================
-// Host / Origin guard
+// Host / Origin 守卫
 // =========================================================================
 //
-// Mounted over the whole MCP router. The rules, in the order they are
-// applied:
+// 覆盖整个 MCP router，按以下顺序判定：
 //
-//   1. `allow_remote == false` (the default): the `Host` header must
-//      resolve to loopback, or equal the configured bind host.
-//   2. `allow_remote == true`: a non-loopback `Host` must match
-//      `allowedHosts` (a bare `*` matches anything). **An empty list
-//      denies every non-loopback host** — reading "no allowlist" as
-//      "allow everything" would turn the switch itself into the
-//      vulnerability.
-//   3. `Origin`: absent means an AI client (curl, Claude Code, Claude
-//      Desktop) and is allowed; present must match `allowedOrigins`.
+//   1. `allow_remote == false`（默认）：`Host` 必须解析为回环，或等于配置的绑定 host。
+//   2. `allow_remote == true`：非回环 `Host` 必须命中 `allowedHosts`（裸 `*` 通配）。
+//      **空列表拒绝一切非回环 host** —— 把「没配白名单」读成「全都放行」，等于让
+//      这个开关本身成为漏洞。
+//   3. `Origin`：缺省意味着是 AI 客户端（curl、Claude Code、Claude Desktop），放行；
+//      存在则必须命中 `allowedOrigins`。
 //
-// Loopback is allowed in every configuration, including with a
-// populated allowlist. That is what keeps `port_registry::healthz`
-// working after the user configures a LAN-only allowlist.
+// 任何配置下回环都放行，即使用户配了只含内网地址的白名单 ——
+// `port_registry::healthz` 正靠这一点继续工作。
 
-/// Strip the port off a `Host` header value.
-///
-/// Returns the bare host name so the allowlist compares names, not
-/// `name:port` pairs — a client reaching the daemon on `:4173` must
-/// still match an entry the user typed as `studio.local`.
+/// 剥掉 `Host` 头里的端口。白名单按名字比较而不是 `name:port`，否则用户写
+/// `studio.local` 就匹配不上走 `:4173` 进来的客户端。
 pub fn host_name(raw: &str) -> String {
     let h = raw.trim();
     if let Some(rest) = h.strip_prefix('[') {
-        // Bracketed IPv6 literal, with or without `:port`. A bare
-        // IPv6 address is not a legal Host header, so an unterminated
-        // bracket is passed through as-is and simply won't match.
+        // 带方括号的 IPv6 字面量，可带可不带 `:port`。裸 IPv6 不是合法的
+        // Host 头，所以括号不闭合时原样返回，自然匹配不上任何条目。
         if let Some(close) = rest.find(']') {
             return rest[..close].to_string();
         }
         return h.to_string();
     }
     match h.rsplit_once(':') {
-        // Only strip a numeric tail: a bare `::1` has several colons
-        // and its "port" is not digits.
+        // 只剥纯数字尾巴：裸 `::1` 有多个冒号，「端口」那段不是数字。
         Some((name, port)) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => {
             name.to_string()
         }
@@ -213,17 +154,13 @@ pub fn host_name(raw: &str) -> String {
     }
 }
 
-/// Does one allowlist entry cover `value`?
-///
-/// A bare `*` is the wildcard. Host names compare case-insensitively
-/// (DNS is case-insensitive).
+/// 单条白名单是否覆盖 `value`。裸 `*` 是通配；主机名大小写不敏感（DNS 本就如此）。
 fn entry_matches(pattern: &str, value: &str) -> bool {
     let p = pattern.trim();
     p == "*" || p.eq_ignore_ascii_case(value)
 }
 
-/// The `Host` half of the guard. `None` denies: a request that carries
-/// no `Host` is not something this daemon should be guessing about.
+/// 守卫的 `Host` 一半。`None` 直接拒：连 `Host` 都没有的请求，不该由 daemon 去猜。
 pub fn host_permitted(config: &McpHttpConfig, host_header: Option<&str>) -> bool {
     let Some(raw) = host_header else {
         return false;
@@ -232,8 +169,8 @@ pub fn host_permitted(config: &McpHttpConfig, host_header: Option<&str>) -> bool
     if simple_post_core::domain::is_loopback_host(&host) {
         return true;
     }
-    // The configured bind host is always itself acceptable — otherwise
-    // `allow_remote` on a named interface would reject its own traffic.
+    // 配置的绑定 host 永远可接受 —— 否则在具名网卡上开 `allow_remote`，它会拒掉
+    // 自己发出的流量。
     if host == host_name(&config.host) {
         return true;
     }
@@ -243,12 +180,9 @@ pub fn host_permitted(config: &McpHttpConfig, host_header: Option<&str>) -> bool
     config.allowed_hosts.iter().any(|p| entry_matches(p, &host))
 }
 
-/// The `Origin` half of the guard.
-///
-/// `None` allows. AI clients issue plain HTTP requests with no
-/// `Origin` at all, so requiring one would break every real caller;
-/// the header only shows up for browser-shaped requests, which is
-/// exactly the case worth checking.
+/// 守卫的 `Origin` 一半。`None` 放行：AI 客户端发的是裸 HTTP 请求，根本不带
+/// `Origin`，强制要求会打断所有真实调用方；这个头只出现在浏览器形状的请求里，
+/// 而那正是值得校验的场景。
 pub fn origin_permitted(config: &McpHttpConfig, origin: Option<&str>) -> bool {
     let Some(o) = origin else {
         return true;
@@ -259,8 +193,7 @@ pub fn origin_permitted(config: &McpHttpConfig, origin: Option<&str>) -> bool {
         .any(|p| p.trim() == "*" || p.trim() == o.trim())
 }
 
-/// Combined decision, shaped so both halves are testable without an
-/// HTTP client and the middleware stays a thin adapter.
+/// 合并判定。拆成这样是为了两半都能不起 HTTP 客户端直接单测，中间件只当薄适配层。
 pub fn check_access(
     config: &McpHttpConfig,
     host_header: Option<&str>,
@@ -284,9 +217,8 @@ pub fn check_access(
     Ok(())
 }
 
-/// 403 in the same envelope shape the rest of the backend uses —
-/// `{ "error": { "code": "forbidden", "message": "..." } }`, with
-/// `code` the stable contract and `message` the human-facing part.
+/// 403 用与其余后端一致的信封：`{ "error": { "code": "forbidden", "message": "..." } }`，
+/// `code` 是稳定契约，`message` 面向人。
 fn forbidden_response(message: String) -> Response {
     (
         StatusCode::FORBIDDEN,
@@ -332,7 +264,7 @@ async fn handle_healthz(State(state): State<Arc<AppState>>) -> Json<HealthzRespo
             .metrics
             .requests_handled
             .load(std::sync::atomic::Ordering::Relaxed),
-        current_connections: 0, // axum 0.7 doesn't surface this cheaply
+        current_connections: 0, // axum 0.7 没有便宜的取法
         registered_tools: mcp::registered_tool_names(),
     })
 }
@@ -370,10 +302,8 @@ async fn handle_mcp_post(State(state): State<Arc<AppState>>, body: String) -> Re
     dispatch_mcp_request(state, body).await
 }
 
-/// Core of `handle_mcp_post` — exposed so the `serve-web` shape can
-/// reuse the exact same JSON-RPC dispatch under the same `/mcp`
-/// route, without re-mounting the daemon router (which would
-/// double-prefix `/mcp`).
+/// `handle_mcp_post` 的本体。对外暴露，好让 `serve-web` 形状在同一个 `/mcp` 路由
+/// 上复用完全相同的分发，而不必再挂一遍 daemon router（那会把 `/mcp` 前缀叠两次）。
 pub async fn dispatch_mcp_request(state: Arc<AppState>, body: String) -> Response {
     state
         .metrics
@@ -442,17 +372,12 @@ async fn handle_tools_list(state: Arc<AppState>, id: Option<Value>) -> JsonRpcRe
     JsonRpcResponse::ok(id, json!({ "tools": tools }))
 }
 
-/// Handle a `tools/call` JSON-RPC request.
+/// 处理 `tools/call`。
 ///
-/// Tool-level failures are surfaced by embedding a synthetic
-/// `{ "isError": true }` body inside `result` rather than populating
-/// the top-level `error` field. Rationale: per the MCP spec, an LLM
-/// must always be able to *read* a failed tool's message so it can
-/// recover and retry. A transport-level `error` short-circuits before
-/// the LLM sees the body and would block recovery, so we deliberately
-/// don't use it here. Real transport-level problems (parse errors,
-/// unknown methods) still go through the `error` arm via
-/// `json_rpc_error`.
+/// 工具级失败塞进 `result` 的合成 `{ "isError": true }` 正文，不填顶层 `error`
+/// —— 按 MCP spec，LLM 必须总能**读到**失败消息才能恢复重试；信封级 `error` 会在
+/// LLM 看到正文之前就短路。真正的传输级问题（解析失败、method 未知）仍走
+/// `json_rpc_error`。理由全文见本文件开头的章节。
 async fn handle_tools_call(
     state: Arc<AppState>,
     id: Option<Value>,
@@ -470,15 +395,12 @@ async fn handle_tools_call(
 
     match mcp::dispatch(&state, &name, args).await {
         Ok(result) => JsonRpcResponse::ok_with_result(id, result),
-        // Tool-handler failure → embed in `result.isError: true` rather
-        // than the JSON-RPC `error` field. See the module-level
-        // rationale "Why errors go in `result.isError`" at the top of
-        // this file for the full reasoning.
+        // 工具 handler 失败 → 塞进 `result.isError`，不走 JSON-RPC 的 `error`。
+        // 理由见文件开头的章节。
         //
-        // Hand-written JSON, NOT a `CallToolResult` — so the spec's
-        // `isError` spelling has to be typed out here as well. `CallToolResult`
-        // gets it right via `#[serde(rename_all = "camelCase")]`; this arm
-        // bypasses that, and shipped `is_error` while the struct was fixed.
+        // 这里是手写 JSON，**不经过** `CallToolResult`，所以 spec 的 `isError`
+        // 拼写也得在这里手打一遍：`CallToolResult` 靠
+        // `#[serde(rename_all = "camelCase")]` 拼对，这一支绕开了那个属性。
         Err(e) => JsonRpcResponse::ok(
             id,
             json!({
@@ -506,12 +428,11 @@ fn json_rpc_error(id: Option<Value>, code: i64, message: String) -> JsonRpcRespo
 }
 
 // =========================================================================
-// small helper: render an already-serialized CallToolResult as JSON-RPC
+// 小工具：把已序列化的 CallToolResult 渲染成 JSON-RPC
 // =========================================================================
 
-/// Used only by tests + the `tools/call` path. Renamed from `ok` so we
-/// can take a strongly-typed `CallToolResult` (and the existing `ok`
-/// still accepts a raw `Value` for `tools/list`, `ping`, etc.).
+/// 只被测试与 `tools/call` 用。之所以不叫 `ok`，是为了收强类型的
+/// `CallToolResult`；原来的 `ok` 仍收裸 `Value`，供 `tools/list`、`ping` 等使用。
 pub trait JsonRpcResponseExt {
     fn ok_with_result(id: Option<Value>, result: CallToolResult) -> Self;
 }
@@ -523,11 +444,11 @@ impl JsonRpcResponseExt for JsonRpcResponse {
 }
 
 // =========================================================================
-// Tests
+// 测试
 // =========================================================================
 //
-// Host / Origin allowlist behaviour and the router's path mounting live
-// in the sibling file so they can never reach for a socket.
+// Host / Origin 白名单行为与 router 的路径挂载都放在兄弟文件里，
+// 确保它们永远不会去摸 socket。
 #[cfg(test)]
 #[path = "daemon_http_test.rs"]
 mod tests;

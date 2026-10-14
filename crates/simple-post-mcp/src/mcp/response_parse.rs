@@ -1,13 +1,7 @@
-//! Response-parsing MCP tools — 3 tools total.
+//! 响应解析类 MCP 工具 —— 共 3 个：`api_parse_response`、`api_diff_responses`、
+//! `api_extract_jsonpath`。
 //!
-//! | tool                  | role                                                  |
-//! |-----------------------|-------------------------------------------------------|
-//! | api_parse_response    | Parse a raw HTTP response body into a structured form |
-//! | api_diff_responses    | Diff two parsed responses                            |
-//! | api_extract_jsonpath  | Run a JSONPath query against a response body          |
-//!
-//! MCP wrapper over `crate::response_parse`. Adds JSON-RPC I/O around the
-//! base layer's pure transforms.
+//! 都是 `crate::response_parse` 的 MCP 包装：在纯变换之外补上 JSON-RPC 的 I/O。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,7 +12,7 @@ use simple_post_core::domain::ApiResponse;
 use simple_post_core::error::AppError;
 
 // =========================================================================
-// Args shapes
+// Args 形状
 // =========================================================================
 
 #[derive(Debug, Deserialize)]
@@ -65,7 +59,7 @@ struct ExtractJsonPathArgs {
 }
 
 // =========================================================================
-// Dispatch table
+// dispatch 表
 // =========================================================================
 
 pub(crate) fn table() -> Vec<ToolEntry> {
@@ -145,7 +139,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 }
 
 // =========================================================================
-// Tool impls
+// 工具实现
 // =========================================================================
 
 async fn tool_api_parse_response(
@@ -154,7 +148,7 @@ async fn tool_api_parse_response(
 ) -> Result<CallToolResult, AppError> {
     let a: ParseResponseArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("api_parse_response args: {e}")))?;
-    let _ = state; // No project gate — pure transform.
+    let _ = state; // 纯变换，没有项目门。
 
     let headers = crate::mcp::http_ops::flatten_string_map(a.headers.as_ref(), "headers")?;
     let parsed = crate::response_parse::parse(&a.body, &a.content_type, a.status, &headers);
@@ -206,8 +200,7 @@ async fn tool_api_diff_responses(
         "removed_paths": diff.removed_paths,
         "changed_paths": diff.changed_paths,
     });
-    // Surface the body_json on both sides as a convenience so the LLM
-    // can pattern-match without doing its own reparse.
+    // 顺手把两侧的 body_json 也带出去，LLM 不必自己再 parse 一遍。
     if let Value::Object(map) = &mut val {
         map.insert(
             "body_json_a".into(),
@@ -239,8 +232,8 @@ async fn tool_api_extract_jsonpath(
             "value": v,
         }))),
         None => {
-            // Lenient: "no match" is not an error. Surface as found=false
-            // so the LLM can branch without parsing an error message.
+            // 「没匹配上」不是错误：给 `found: false` 让 LLM 直接分支，不必去解析
+            // 错误消息里找。唯一的例外是 content_type 不是 JSON，那属于用错工具。
             if !a
                 .content_type
                 .to_ascii_lowercase()
@@ -260,7 +253,7 @@ async fn tool_api_extract_jsonpath(
 }
 
 // =========================================================================
-// Helpers
+// 辅助函数
 // =========================================================================
 
 fn build_api(input: &ResponseInput) -> Result<ApiResponse, AppError> {
@@ -319,7 +312,7 @@ fn header_diff(a: &ApiResponse, b: &ApiResponse) -> Vec<String> {
 }
 
 // =========================================================================
-// Tests
+// 测试
 // =========================================================================
 
 #[cfg(test)]

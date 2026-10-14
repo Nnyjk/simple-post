@@ -1,15 +1,7 @@
-//! `project_*` MCP tools — top-level project CRUD.
+//! `project_*` MCP 工具 —— 项目级 CRUD，共 5 个。
 //!
-//! 5 tools:
-//! - `project_list`
-//! - `project_get`
-//! - `project_create`
-//! - `project_update`
-//! - `project_delete`
-//!
-//! Args structs that are only used here live alongside their tool impls.
-//! Shared structs (`ProjectIdArgs`, `ModuleIdArgs`) stay in `super` and
-//! are imported via `super::ProjectIdArgs`.
+//! 只在本文件用到的 Args 结构放在各自工具实现旁边；共用的 `ProjectIdArgs` /
+//! `ModuleIdArgs` 留在 `super`，通过 `super::ProjectIdArgs` 引入。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -112,9 +104,8 @@ pub(super) async fn tool_project_list(
     state: &AppState,
     _args: Value,
 ) -> Result<CallToolResult, AppError> {
-    // No per-project gate: listing projects spans every project, so there
-    // is no single owning row to consult. Gate A (the global
-    // `CapabilityPolicy`) is the gate that governs this tool.
+    // 无按项目的门：列全部项目跨项目，没有单一归属行可查，由 Gate A（全局
+    // `CapabilityPolicy`）裁决。
     let projects =
         simple_post_core::db::with_conn(&state.pool, simple_post_core::db::projects::list)?;
     Ok(CallToolResult::json(projects))
@@ -142,10 +133,8 @@ pub(super) async fn tool_project_create(
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
     }
-    // No per-project gate here: the project does not exist yet, so there is
-    // no owning project whose stored permission could apply. Gate A (the
-    // global `CapabilityPolicy`, enforced in `mcp::dispatch`) is the gate
-    // that governs this tool — it must be `Create` or higher.
+    // 无按项目的门：项目还不存在，没有归属项目、也就没有可套用的存档权限。管它的是
+    // Gate A（全局 `CapabilityPolicy`，在 `mcp::dispatch` 里执行），必须 `Create` 起。
     let now = simple_post_core::domain::now_ms();
     let p = Project {
         id: format!("proj_{now}"),

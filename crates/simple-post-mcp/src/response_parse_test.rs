@@ -54,7 +54,7 @@ fn parse_non_json_body_has_no_body_json() {
 #[test]
 fn parse_empty_body_has_zero_size() {
     let r = parse("", "application/json", 204, &[]);
-    // Body is empty → no parse, but size and status text are set.
+    // body 为空 → 不解析，但 size 与 status text 仍会填上。
     assert!(r.body_json.is_none());
     assert_eq!(r.size_bytes, 0);
     assert_eq!(r.status_text, "No Content");
@@ -62,8 +62,8 @@ fn parse_empty_body_has_zero_size() {
 
 #[test]
 fn parse_invalid_json_yields_none_not_panic() {
-    // A JSON content-type header should not turn a malformed body
-    // into a hard error — the renderer falls back to "raw text".
+    // content-type 是 JSON 不足以让一个畸形 body 变成硬错误 —— 渲染进程会回退到
+    // 「原始文本」。
     let r = parse("{not valid", "application/json", 200, &[]);
     assert!(r.body_json.is_none());
 }
@@ -132,8 +132,7 @@ fn diff_changed_paths_carry_from_to() {
 
 #[test]
 fn diff_type_change_is_changed_not_removed_added() {
-    // `n` flips from number to string — that's a single change,
-    // not "remove number, add string".
+    // `n` 从数字变成字符串 —— 这是一次变更，不是「删数字、加字符串」。
     let a = api(200, r#"{"n":1}"#);
     let b = api(200, r#"{"n":"1"}"#);
     let d = diff(&a, &b);
@@ -193,7 +192,7 @@ fn diff_one_side_only_json_marks_body_changed_and_paths_added_or_removed() {
     let a = api(200, r#"{"a":1}"#);
     let b = api_text(200, "<html>oops</html>");
     let d = diff(&a, &b);
-    // $ is the body level; every JSON path is "removed" (was in a).
+    // `$` 是 body 层；每条 JSON 路径都算「删除」（原先在 a 里）。
     assert_eq!(d.changed_paths.len(), 1);
     assert_eq!(d.changed_paths[0].path, "$");
     assert!(d.removed_paths.contains(&"$.a".to_string()));
@@ -237,8 +236,7 @@ fn extract_jsonpath_array_index() {
 #[test]
 fn extract_jsonpath_wildcard_returns_first_match() {
     let v = extract_jsonpath(r#"{"xs":[10,20,30]}"#, "application/json", "$.xs[*]");
-    // Wildcard is supported by serde_json_path; we return the
-    // first match.
+    // 通配符由 serde_json_path 支持；这里返回首个匹配。
     assert_eq!(v, Some(json!(10)));
 }
 
@@ -250,14 +248,10 @@ fn extract_jsonpath_no_match_returns_none() {
 
 #[test]
 fn extract_jsonpath_invalid_path_returns_none() {
-    // serde_json_path 0.1 leniently accepts lots of "garbage"
-    // strings (e.g. `$$ bad path`, `@@nope`) and quietly resolves
-    // them to the root document. To honor the "invalid path ⇒
-    // None" contract without pulling in a stricter parser, we
-    // require the path to begin with `$` and to NOT contain raw
-    // whitespace — RFC 9535 only allows whitespace as a SEGMENT
-    // separator, which we don't support here. Paths that fail this
-    // gate (or that the underlying parser rejects) return None.
+    // serde_json_path 0.1 会宽松接受大量「垃圾」字符串（如 `$$ bad path`、`@@nope`），
+    // 并悄悄把它们解析成根文档。要在不引入更严格解析器的前提下守住「路径非法 ⇒ None」
+    // 这条契约，就要求路径以 `$` 开头且不含裸空白 —— RFC 9535 只允许空白充当 SEGMENT
+    // 分隔符，这里不支持。过不了这道关（或底层解析器拒绝）的路径一律返回 None。
     let v = extract_jsonpath(r#"{"a":1}"#, "application/json", "$$ bad path");
     assert!(v.is_none(), "expected None, got {v:?}");
     let v = extract_jsonpath(r#"{"a":1}"#, "application/json", "totally not a path");

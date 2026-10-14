@@ -4,27 +4,18 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Per-call counter that disambiguates temp dirs when several tests
-/// construct their state() in the same millisecond (cargo's default
-/// runs tests in parallel).
+/// 每次调用自增，用来在同毫秒内构造多个 state() 时区分临时目录
+/// （cargo 默认并行跑测试）。
 static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Cheap fake pool for tests. `r2d2::Pool` is generic over the manager,
-/// so we can't construct one without a real `SqliteConnectionManager` —
-/// tests that need a real DB use `db::init` against a temp file. For
-/// smoke tests that only exercise dispatch + arg parsing, a dummy is fine.
+/// 测试用的廉价假连接池。`r2d2::Pool` 对 manager 泛型，没有真实
+/// `SqliteConnectionManager` 就构造不出来 —— 需要真库的单测改用 `db::init` 开临时
+/// 文件；只跑 dispatch 与参数解析的冒烟测试用这个空壳足够。
 ///
-/// **The temp dir is per-call.** This one used to be a fixed
-/// `simple-post-mcp-test`, which is a fixture bug that reads as an
-/// unrelated flake: `db::init` → `ensure_current_schema` removes the
-/// `store.db` it is about to replace, and cargo runs the tests in this
-/// file on parallel threads, so two callers race on one file and the
-/// loser dies with `os error 32` (file in use) on Windows. It only
-/// surfaced once this file had a second `test_state()` caller — the
-/// descriptor test. The sibling files in this crate
-/// (`variable_fill_test.rs`, `response_parse_test.rs`,
-/// `project_ops/{mod,endpoint}_test.rs`) already did the pid + now_ms +
-/// counter thing; this brings the last one in line.
+/// **临时目录必须逐次调用唯一。** 用固定的 `simple-post-mcp-test` 会读起来像不相干的
+/// 偶发失败：`db::init` → `ensure_current_schema` 会先删掉它即将替换的 `store.db`，
+/// 而本文件的测试跑在并行线程上，两个调用方抢同一个文件，输的那个在 Windows 上死于
+/// `os error 32`（文件被占用）。
 fn test_state() -> Arc<AppState> {
     let id = STATE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
@@ -41,15 +32,14 @@ fn test_state() -> Arc<AppState> {
     })
 }
 
-/// `tools/list` returns every registered tool, including all 5
-/// categories. This is the primary regression net — if a worker adds
-/// a tool but forgets the dispatch table, this catches it.
+/// `tools/list` 覆盖每个已注册工具，含全部类别。主要回归网 —— 加了工具却忘了登记
+/// dispatch 表时它会抓到。
 #[test]
 fn tools_list_returns_all_registered_tools() {
     let names = registered_tool_names();
     assert!(!names.is_empty(), "no tools registered");
 
-    // Spot-check: every category has at least one tool.
+    // 抽查：每个类别至少一个工具。
     let has = |prefix: &str| names.iter().any(|n| n.starts_with(prefix));
     assert!(has("env_"), "missing env_* tools");
     assert!(has("project_"), "missing project_* tools");
@@ -65,10 +55,8 @@ fn tools_list_returns_all_registered_tools() {
     assert!(has("api_diff_responses"), "missing api_diff_responses");
     assert!(has("api_extract_jsonpath"), "missing api_extract_jsonpath");
 
-    // Tool count sanity check — spec asks for ~28+ tools; the
-    // assertion is intentionally loose so individual workers can add
-    // tools without breaking the test, but tight enough to catch
-    // accidentally dropping a category.
+    // 工具总数抽查 —— 断言刻意放宽，好让后来加工具不必改测试，但紧到能抓到整个
+    // 类别被弄丢。
     assert!(
         names.len() >= 30,
         "tool count too low: {} — did a category get dropped?",
@@ -76,15 +64,10 @@ fn tools_list_returns_all_registered_tools() {
     );
 }
 
-/// `REQUIRED_CAPABILITY` must stay **exhaustive** over the registry.
+/// `REQUIRED_CAPABILITY` 对注册表必须**穷尽**。
 ///
-/// Regression net for a real defect: `module_move` and
-/// `collection_move` were registered as tools but had no capability
-/// row. Both gates treat a missing row as "unclassified" — the
-/// `tools/list` filter used to keep such tools *visible* and the
-/// dispatcher used to *skip* its check, so a `read_only` global
-/// policy never gated them. Both now fail closed; this test is what
-/// stops the next tool from silently escaping its policy.
+/// 回归网：两道能力门都把缺行当作「未分类」，而未分类一律 fail closed（拒绝）。
+/// 有了本测试，下一个工具就不会在注册表里悄悄绕过用户选的策略。
 #[test]
 fn every_registered_tool_has_a_capability() {
     let missing: Vec<&str> = tool_table()
@@ -99,13 +82,11 @@ fn every_registered_tool_has_a_capability() {
     );
 }
 
-/// The exact tool count, asserted where the docs can point at it.
+/// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` and `README.md` both state "44 tools". The bijection
-/// test above stays green when a tool is added or removed *with* its
-/// capability row, so on its own it cannot keep those numbers honest.
-/// Bump this constant in the same commit that changes the registry, and
-/// the same commit should update the two documents.
+/// `AGENTS.md` 与 `README.md` 都写着「44 tools」。上面的双射测试在「工具连同它的
+/// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
+/// 里要改这个常量，同一个 commit 也应更新那两份文档。
 const EXPECTED_TOOL_COUNT: usize = 44;
 
 #[test]
@@ -118,8 +99,7 @@ fn registered_tool_count_matches_the_documented_figure() {
     );
 }
 
-/// The reverse direction: a capability row for a tool that no longer
-/// exists is dead configuration that hides a registry rename.
+/// 反方向：指向一个已不存在的工具的 capability 行，是会掩盖注册表改名的死配置。
 #[test]
 fn every_capability_row_names_a_registered_tool() {
     let registered = registered_tool_names();
@@ -134,12 +114,11 @@ fn every_capability_row_names_a_registered_tool() {
     );
 }
 
-/// Gate B regression net — a permission check must never be discarded.
+/// Gate B 回归网 —— 权限检查结果绝不丢弃。
 ///
-/// `.ok()` on a `check_permission(..).await` result silently swallows a
-/// `PermissionDenied`, which turns the per-project gate into a no-op for
-/// that tool. It shipped once on `api_call_endpoint`, the one tool that
-/// performs an outbound HTTP request. Propagate with `?` instead.
+/// 对 `check_permission` 的结果调用 `.ok()` 会静默吞掉 `PermissionDenied`，于是这道
+/// 按项目的门对那个工具形同虚设 —— 包括唯一会发外网请求的 `api_call_endpoint`。要用
+/// `?` 传播。
 #[test]
 fn no_permission_check_result_is_discarded() {
     let offenders = source_files()
@@ -157,42 +136,27 @@ fn no_permission_check_result_is_discarded() {
     );
 }
 
-/// Gate B regression net — never gate a tool against `"global"`.
+/// Gate B 回归网 —— 绝不用字面量 "global" 过门。
 ///
-/// `agent_permissions.project_id` is an FK to `projects(id)`, and project
-/// ids are minted `proj_<millis>`, so `"global"` can never have a row. The
-/// lookup then falls back to `Permission::default()` = `ReadCall`, while
-/// any write tool requires `Full` — so `ReadCall < Full` denies and the
-/// tool is permanently dead while still looking correctly registered. This
-/// shipped on five tools at once.
+/// `agent_permissions.project_id` 是指向 `projects(id)` 的外键，而项目 id 是
+/// `proj_<millis>` 铸出来的，所以 "global" 永远不可能有对应行。查不到就退回
+/// `Permission::default()` = `ReadCall`，而任何写工具要求 `Full` —— `ReadCall < Full`
+/// 于是拒绝，工具看着注册得好好的，却被永久拒绝。
 ///
-/// It was not merely a dead-tool bug. When the caller scoped a read with a
-/// `collection_id` or `module_id` instead of a `project_id`, the handler
-/// passed `"global"` and so consulted **no real project's row at all** —
-/// the owning project's real permission was never read, on either side of
-/// the gate. `endpoint_list` and `endpoint_search` shipped that way, which
-/// is why this test used to carry an allowlist naming them: two `Read`-tier
-/// tools that scope every project genuinely have no single owning project,
-/// and `"global"` was the only id available to express that.
+/// 按 `collection_id` / `module_id` 收窄时更严重：那不是工具失效，而是根本没有归属
+/// 项目可查，真实拥有者的权限一次也没被读过。
 ///
-/// Both now resolve the real owner from whatever the caller actually
-/// supplied (`nodes::root_id_of` for a module / collection, the id itself
-/// for a project) and **refuse an unscoped call** rather than fabricate an
-/// id — an unscoped read spans projects, and the per-project gate has no
-/// single project to authorise against. So the allowlist is empty and the
-/// test is unconditional: there is no longer any correct use of the
-/// literal.
+/// 现在 handler 一律从调用方给的东西解析真实归属（模块 / 集合走 `nodes::root_id_of`，
+/// 项目就是 id 本身），并且**拒绝无范围的调用**而不是编一个 id —— 跨项目的读没有单一
+/// 项目可授权。于是不存在「正确使用这个字面量」的场景，允许清单为空，本测试无条件执行。
 #[test]
 fn no_gate_is_passed_the_literal_global() {
     let offenders = source_files()
         .into_iter()
         .filter_map(|(path, text)| {
-            // Match the *argument*, not one spelling of the call, so
-            // `check_permission(&p, "global", ..)` and
-            // `check_permission(&p, x.unwrap_or("global"), ..)` are both
-            // caught. A call is scanned up to its `;`, because the argument
-            // sits after nested parens (`&state.pool`) that a naive
-            // "up to the first `)`" scan would stop at.
+            // 匹配的是*参数*，而不是某一种调用写法，所以无论直接传字面量，还是
+            // `unwrap_or` 出字面量，都抓得到。扫描到 `;` 为止，因为参数位于
+            // `&state.pool` 这类嵌套括号之后，天真的「扫到第一个 `)`」会提前停下。
             let offenders = text
                 .match_indices("check_permission(")
                 .filter_map(|(i, _)| {
@@ -216,10 +180,9 @@ fn no_gate_is_passed_the_literal_global() {
     );
 }
 
-/// Every `.rs` file in this crate, with its contents. The two tests above
-/// are source-level rather than behavioural on purpose: the bug they guard
-/// is invisible to a passing test suite, because a permanently-denied tool
-/// still returns a well-formed `PermissionDenied`.
+/// 本 crate 的每个 `.rs` 文件及其内容。上面两个测试刻意做成源码级而非行为级：它们守
+/// 的缺陷对一套全绿的测试是不可见的 —— 被永久拒绝的工具照样返回一个格式完好的
+/// `PermissionDenied`。
 fn source_files() -> Vec<(String, String)> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut out = Vec::new();
@@ -233,9 +196,8 @@ fn source_files() -> Vec<(String, String)> {
             if path.is_dir() {
                 stack.push(path);
             } else if path.extension().is_some_and(|e| e == "rs") {
-                // Skip test modules: this file quotes the very call shape it
-                // is looking for in its own doc comments, so scanning it
-                // would report itself as an offender forever.
+                // 跳过测试模块：本文件在自己的文档注释里就引用了它要找的那种调用
+                // 写法，扫到自己会永远把自己报成违规者。
                 let is_test = path
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -253,8 +215,8 @@ fn source_files() -> Vec<(String, String)> {
     out
 }
 
-/// `dispatch` for an unknown name returns `NotFound`. This is the
-/// error path the JSON-RPC handler turns into `is_error: true`.
+/// `dispatch` 遇到未知名字返回 `NotFound` —— JSON-RPC 处理器会把它折成
+/// `is_error: true`。
 #[tokio::test]
 async fn dispatch_unknown_tool_returns_not_found() {
     let state = test_state();
@@ -265,8 +227,7 @@ async fn dispatch_unknown_tool_returns_not_found() {
     ));
 }
 
-/// Argument helpers behave correctly on the boundary cases that bit
-/// us in earlier iterations: missing key, wrong type, null.
+/// 参数辅助函数在边界情形下行为正确：缺键、类型不对、null。
 #[test]
 fn arg_helpers_handle_missing_or_wrong_type() {
     let v = json!({ "name": "x", "count": 7, "flag": true });
@@ -282,7 +243,7 @@ fn arg_helpers_handle_missing_or_wrong_type() {
     assert!(!arg_bool_opt(&v2, "x"));
 }
 
-/// `JsonRpcResponse::ok` produces a valid response envelope.
+/// `JsonRpcResponse::ok` 产出合法的响应信封。
 #[test]
 fn json_rpc_response_ok_shape() {
     let r = JsonRpcResponse::ok(Some(json!(1)), json!({"x": 1}));
@@ -292,7 +253,7 @@ fn json_rpc_response_ok_shape() {
     assert!(r.error.is_none());
 }
 
-/// `JsonRpcResponse::err` produces an error envelope.
+/// `JsonRpcResponse::err` 产出错误信封。
 #[test]
 fn json_rpc_response_err_shape() {
     let r = JsonRpcResponse::err(Some(json!(2)), -32601, "method not found");
@@ -305,19 +266,15 @@ fn json_rpc_response_err_shape() {
 }
 
 // ===========================================================================
-// MCP wire-format compliance
+// MCP 线格式合规
 //
-// These are source-level on purpose. A tool whose descriptor serialises
-// `input_schema` instead of `inputSchema` still dispatches perfectly: every
-// handler receives the right `arguments`, every unit test passes, and the
-// only symptom is that a spec-compliant client believes the tool takes no
-// arguments. Nothing functional can catch it — only an assertion on the
-// serialised shape can.
+// 以下都是源码级断言。描述符序列化成 `input_schema` 而不是 `inputSchema` 时，
+// dispatch 一切正常：每个 handler 都拿到正确的 `arguments`，每个单测都通过，唯一症状
+// 只是合规客户端以为该工具没有参数。功能测试抓不到，只有断言序列化结果才抓得到。
 // ===========================================================================
 
-/// The MCP spec names this field `inputSchema`. It shipped as `input_schema`,
-/// so every compliant client saw 44 argument-less tools and the LLM had
-/// nothing but prose to guess a parameter list from.
+/// spec 里这个字段叫 `inputSchema`。序列化成 `input_schema` 时，每个合规客户端都会看到
+/// 一批没有参数的工具，LLM 只能靠描述文字去猜参数列表。
 #[test]
 fn descriptor_emits_spec_camel_case_field_names() {
     let d = ToolDescriptor {
@@ -333,9 +290,8 @@ fn descriptor_emits_spec_camel_case_field_names() {
     assert!(v.get("input_schema").is_none(), "snake_case leak: {v}");
 }
 
-/// Per-tool: every registered descriptor, not just a hand-built one. A new
-/// tool added with a struct literal that bypasses `ToolDescriptor` would
-/// otherwise slip past the single-descriptor test above.
+/// 逐个工具检查，不只是上面那个手工构造的描述符。新工具若绕过 `ToolDescriptor` 直接
+/// 拼结构体字面量，只有这个测试能抓到。
 #[test]
 fn every_registered_descriptor_uses_camel_case_schema_key() {
     let state = test_state();
@@ -355,8 +311,8 @@ fn every_registered_descriptor_uses_camel_case_schema_key() {
     drop(state);
 }
 
-/// The spec spells the failure flag `isError`. As `is_error` it was silently
-/// dropped by clients, so a denied or failed tool call read as a success.
+/// spec 把失败标志写作 `isError`。写成 `is_error` 会被客户端静默丢弃，于是被拒绝或
+/// 出错的工具调用读起来像成功。
 #[test]
 fn error_call_tool_result_emits_spec_is_error_key() {
     let v = serde_json::to_value(CallToolResult::err("boom")).unwrap();
@@ -368,9 +324,8 @@ fn error_call_tool_result_emits_spec_is_error_key() {
     assert!(v.get("is_error").is_none(), "snake_case leak: {v}");
 }
 
-/// Success must *omit* the flag rather than emit `isError: false` — some
-/// clients treat an explicit false as a failure signal, and the spec makes it
-/// optional.
+/// 成功时必须**省略**这个标志，而不是发 `isError: false` —— 有的客户端把显式 false
+/// 当成失败信号，而 spec 也把它列为可选。
 #[test]
 fn success_call_tool_result_omits_error_flag_entirely() {
     let v = serde_json::to_value(CallToolResult::json(json!({"ok": true}))).unwrap();
@@ -379,16 +334,14 @@ fn success_call_tool_result_omits_error_flag_entirely() {
     assert!(v.get("content").is_some());
 }
 
-/// `handle_tools_call`'s failure arm builds its JSON by hand instead of
-/// going through `CallToolResult`, so the struct's attribute does not cover
-/// it — and it shipped `is_error` while the struct was being fixed. Source-
-/// level because the symptom is only observable over HTTP.
+/// `handle_tools_call` 的失败分支手写 JSON、不经 `CallToolResult`，所以结构体上那个
+/// 属性管不到它 —— spec 的 `isError` 拼写必须在这里也手打一遍。之所以源码级断言，是
+/// 因为症状只在 HTTP 上才观察得到。
 #[test]
 fn daemon_http_error_arm_types_the_spec_spelling() {
     let src = include_str!("../daemon_http.rs");
-    // Comment lines are skipped on purpose: the file documents this exact
-    // bug, so a bare `src.contains` would match its own prose and fail for
-    // the wrong reason.
+    // 刻意跳过注释行：该文件正在记录这个缺陷本身，裸 `src.contains` 会命中它自己的
+    // 说明文字，从而因错误的原因失败。
     let code: Vec<&str> = src
         .lines()
         .map(str::trim)

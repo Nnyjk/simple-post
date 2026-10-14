@@ -1,20 +1,15 @@
-//! Variable-fill + baseUrl resolution + auth injection.
+//! 变量填充 + baseUrl 解析 + 鉴权注入。
 //!
-//! Mirrors `src/lib/url.ts` (`resolveEndpointBaseUrl`, `resolveVars`)
-//! and `src/lib/http-build.ts` (`buildFetchInit`) on the renderer
-//! side. Keeping the logic here means the MCP daemon and the
-//! Tauri command path share one resolver instead of drifting
-//! apart — same as the `buildFetchInit` / `buildCurlCommand` shared
-//! layer the renderer uses today.
+//! 对应渲染进程侧的 `src/lib/url.ts`（`resolveEndpointBaseUrl`、`resolveVars`）与
+//! `src/lib/http-build.ts`（`buildFetchInit`）。逻辑放在这里，MCP daemon 与 Tauri
+//! 命令两条路才共用同一个解析器，而不会各自漂移。
 //!
-//! Two layers of API:
+//! 两层 API：
 //!
-//!   * [`resolve_template`] — `{{var}}` substitution against a
-//!     variable map. The low-level building block.
-//!   * [`resolve_endpoint`] — combine an [`EndpointDetail`] + active
-//!     `Environment` + `Project` + optional [`EndpointOverrides`]
-//!     into a fully-formed [`ResolvedEndpoint`] ready for the HTTP
-//!     sender.
+//!   * [`resolve_template`] —— 对变量表做 `{{var}}` 替换，底层积木。
+//!   * [`resolve_endpoint`] —— 把 [`EndpointDetail`] + 当前 [`Environment`] +
+//!     [`Project`] + 可选 [`EndpointOverrides`] 合成为可直接交给发送器的
+//!     [`ResolvedEndpoint`]。
 
 use std::collections::HashMap;
 
@@ -27,21 +22,19 @@ use simple_post_core::domain::{
 use simple_post_core::error::AppError;
 
 // -------------------------------------------------------------------------
-// Public types
+// 公共类型
 // -------------------------------------------------------------------------
 
-/// `{{var}}` substitution result. `missing` is sorted/deduped so the
-/// caller can show a stable "unresolved variables" list to the user.
+/// `{{var}}` 替换的结果。`missing` 已去重并按出现顺序排列，调用方可以直接拿它渲染
+/// 「未解析变量」列表。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTemplate {
     pub resolved: String,
     pub missing: Vec<String>,
 }
 
-/// Override values supplied by the caller at send time. Each field
-/// is `Option<T>` so "not overridden" stays distinct from "overridden
-/// to None / empty". Drives ad-hoc curl-style tweaks from the
-/// renderer without rewriting the stored endpoint.
+/// 调用方在发送时给出的覆盖值。每个字段都是 `Option<T>`，于是「没覆盖」与「覆盖成
+/// None / 空」是两回事。让渲染进程能做 curl 式的临时改动而不改写已存的端点。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndpointOverrides {
@@ -50,41 +43,29 @@ pub struct EndpointOverrides {
     pub headers: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub params: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub body: Option<RequestBody>,
-    /// Which base-URL definition to resolve against, instead of the one
-    /// persisted on the endpoint.
+    /// 覆盖端点上已存的 base URL 定义，改用这个去解析。
     ///
-    /// The renderer's base-URL picker is ephemeral: a user can switch
-    /// definitions without saving the endpoint, so the stored
-    /// `detail.base_url_definition_id` is not authoritative at send
-    /// time. Without this field the browser would have to pre-join the
-    /// base URL and the whole point of moving URL composition server-side
-    /// would be lost.
+    /// 渲染进程的 base URL 选择器是临时的：用户不保存端点也能切换定义，所以发送时
+    /// `detail.base_url_definition_id` 并不权威。没有这个字段，浏览器就得自己先拼
+    /// base URL，「URL 组装搬到服务端」这件事就白做了。
     ///
-    /// `None` keeps the endpoint's own value. `Some(id)` overrides it;
-    /// an empty string means "no base URL", which is how the renderer
-    /// represents an endpoint being sent against a bare path.
+    /// `None` = 用端点自己的值；`Some(id)` = 覆盖；空串 = 「没有 base URL」，
+    /// 渲染进程用它表示「对着一条裸路径发请求」。
     pub base_url_definition_id: Option<String>,
-    /// Which module's **cell** in `env.moduleBaseUrls` this endpoint
-    /// reads.
+    /// 该端点读的是 `env.moduleBaseUrls` 里哪个模块的**格子**。
     ///
-    /// Services belong to the project, not to a module, so the module is
-    /// not a filter over which services exist — every module sees the
-    /// project's whole list. It selects the value instead: a URL lives at
-    /// `(environment × service × module)`, and two modules may point the
-    /// same service at different hosts.
+    /// 服务属于项目而非模块，所以模块不是「哪些服务存在」的过滤器 —— 每个模块都看到
+    /// 全量列表。它选的是取值：URL 住在 `(环境 × 服务 × 模块)`，两个模块可以让同一个
+    /// 服务指向不同 host。
     ///
-    /// Supplied by the caller rather than derived here because this
-    /// function has no database handle — it is pure, and the module
-    /// lives in the `nodes` table. `None` means "no tree context": there
-    /// is no cell to read, so only the per-endpoint
-    /// `base_url_override` can produce a base URL.
+    /// 由调用方传入而不是在这里推导，因为本函数是纯的、没有 DB 句柄，而模块住在
+    /// `nodes` 表里。`None` 表示「没有树上下文」：没有格子可读，只剩每端点的
+    /// `base_url_override` 能产出 base URL。
     pub module_id: Option<String>,
 }
 
-/// What `resolve_endpoint` produces. Already has every `{{var}}`
-/// substituted, the baseUrl joined in, and the auth config reduced
-/// to its post-resolve form. The HTTP sender (`simple_post_core::http_executor`)
-/// consumes this directly.
+/// `resolve_endpoint` 的产物：`{{var}}` 已全部替换、baseUrl 已拼好、鉴权配置已化到
+/// 解析后的形态。HTTP 发送器（`simple_post_core::http_executor`）直接消费它。
 #[derive(Debug, Clone)]
 pub struct ResolvedEndpoint {
     pub url: String,
@@ -97,18 +78,17 @@ pub struct ResolvedEndpoint {
 }
 
 // -------------------------------------------------------------------------
-// resolve_template — the {{var}} substitution primitive.
+// resolve_template —— `{{var}}` 替换原语
 // -------------------------------------------------------------------------
 
-/// Substitute every `{{name}}` marker in `template` against `vars`.
-/// Unknown markers are left as `{{name}}` (not silently turned into
-/// the string "undefined" or an empty value) so the request preview
-/// shows what's missing.
+/// 用 `vars` 替换 `template` 里的每个 `{{name}}` 标记。
 ///
-/// Non-alphanumerics in the marker name (e.g. `{{ my-var }}`) are
-/// not supported — the regex matches `\w+` which is `[A-Za-z0-9_]+`,
-/// the same set the renderer accepts. This is intentional: the
-/// TS-side regex (`/\\{\\{(\\w+)\\}\\}/g`) is the source of truth.
+/// 未知名**原样保留**成 `{{name}}`（不变成 "undefined"、也不变空），这样请求预览能
+/// 显示到底缺了什么。
+///
+/// 标记名不支持非字母数字（`{{ my-var }}` 也不行）：正则只认 `\w+` =
+/// `[A-Za-z0-9_]`，与渲染进程接受的是同一套。以 TS 侧的正则
+/// `/\\{\\{(\\w+)\\}\\}/g` 为准。
 pub fn resolve_template(template: &str, vars: &HashMap<String, String>) -> ResolvedTemplate {
     if template.is_empty() {
         return ResolvedTemplate {
@@ -133,23 +113,20 @@ pub fn resolve_template(template: &str, vars: &HashMap<String, String>) -> Resol
     ResolvedTemplate { resolved, missing }
 }
 
-/// Walk `{{...}}` markers in `template` and let `repl` decide what
-/// each one becomes. The inner scanner is non-recursive by design
-/// (`{{{{a}}}}` → `{{a}}` on the first pass, then expanded if `a`
-/// resolves) so a doubled-up marker can never blow the stack.
+/// 遍历 `template` 里的 `{{...}}` 标记，由 `repl` 决定各自变成什么。内层扫描器刻意
+/// 不递归（`{{{{a}}}}` 第一趟得到 `{{a}}`，之后若 `a` 可解析再展开），所以叠写的标记
+/// 不可能爆栈。
 fn template_replace<F: FnMut(&str) -> String>(template: &str, mut repl: F) -> String {
     let bytes = template.as_bytes();
     let mut out = String::with_capacity(template.len());
     let mut i = 0;
     while i < bytes.len() {
         if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
-            // Find the matching `}}`.
+            // 找配对的 `}}`。
             if let Some(end_rel) = find_close(template, i + 2) {
                 let inner = &template[i + 2..i + 2 + end_rel];
-                // Marker content must be a bare identifier (`\w+`),
-                // matching the renderer regex. Anything else (e.g.
-                // `{{ foo }}` with whitespace, `{{ foo.bar }}`)
-                // passes through verbatim — same as the TS side.
+                // 标记内容必须是裸标识符（`\w+`），与渲染进程的正则一致。其它形状
+                // （`{{ foo }}` 带空格、`{{ foo.bar }}`）原样放过 —— TS 侧同样如此。
                 if is_word(inner) {
                     out.push_str(&repl(inner));
                 } else {
@@ -159,7 +136,7 @@ fn template_replace<F: FnMut(&str) -> String>(template: &str, mut repl: F) -> St
                 continue;
             }
         }
-        // Push one UTF-8 char (not byte) so we don't slice a rune.
+        // 按 UTF-8 字符（不是字节）推进，避免切在 rune 中间。
         let ch_end = next_char_boundary(template, i);
         out.push_str(&template[i..ch_end]);
         i = ch_end;
@@ -168,7 +145,7 @@ fn template_replace<F: FnMut(&str) -> String>(template: &str, mut repl: F) -> St
 }
 
 fn find_close(s: &str, from: usize) -> Option<usize> {
-    // Search for `}}` at a char boundary starting at `from`.
+    // 从 `from` 开始在字符边界上找 `}}`。
     let mut i = from;
     while i + 1 < s.len() {
         if s.as_bytes()[i] == b'}' && s.as_bytes()[i + 1] == b'}' {
@@ -191,10 +168,8 @@ fn next_char_boundary(s: &str, i: usize) -> usize {
     j
 }
 
-/// Extract every `{{name}}` marker name from `s`. Used by
-/// `resolve_endpoint` to gather all variables mentioned anywhere in
-/// the URL / headers / params / body / auth fields, so the caller
-/// can list "missing vars" without re-scanning.
+/// 抽出 `s` 里所有 `{{name}}` 标记名。`resolve_endpoint` 用它汇总 URL / headers /
+/// params / body / auth 各处提到的变量，调用方不必为「缺了哪些变量」再扫一遍。
 pub fn list_missing_vars(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen: HashMap<String, ()> = HashMap::new();
@@ -217,51 +192,41 @@ pub fn list_missing_vars(s: &str) -> Vec<String> {
 }
 
 // -------------------------------------------------------------------------
-// Base URL resolution — see src/lib/url.ts::resolveEndpointBaseUrl.
+// base URL 解析 —— 对应 src/lib/url.ts::resolveEndpointBaseUrl
 // -------------------------------------------------------------------------
 
-/// Where the effective baseUrl came from. Used by picker-style
-/// surfaces to label the current selection ("模块默认" /
-/// "鉴权服务" / "自定义"). The MCP daemon uses the same enum to
-/// explain its choice back to the renderer.
+/// 最终 baseUrl 的来源。用来给选择器一类的界面标注当前选项（「模块默认」/「鉴权服务」
+/// /「自定义」）；MCP daemon 用同一个 enum 把自己选了哪一路解释回渲染进程。
 #[derive(Debug, Clone, PartialEq)]
 pub enum BaseUrlSource {
-    /// `detail.baseUrlOverride` won.
+    /// `detail.baseUrlOverride` 胜出。
     Override,
-    /// A service was named explicitly — the endpoint's own
-    /// `baseUrlDefinitionId`, or the caller's `forced_def_id`.
+    /// 明确点名了某个服务 —— 端点自己的 `baseUrlDefinitionId`，或调用方的
+    /// `forced_def_id`。
     Definition,
-    /// The project's ★ service
-    /// (`Project.defaultBaseUrlDefinitionId`) won.
+    /// 项目 ★（`Project.defaultBaseUrlDefinitionId`）胜出。
     Default,
-    /// Nothing matched; the caller is responsible for whatever
-    /// fallback (often `""`).
+    /// 谁都没匹配上；兜底由调用方负责（通常是 `""`）。
     None,
 }
 
-/// Compute the effective baseUrl for an endpoint, given the
-/// env that supplies its `moduleBaseUrls[defId][moduleId]` and the
-/// project that declares the services.
+/// 给定提供 `moduleBaseUrls[defId][moduleId]` 的环境、以及声明服务的项目，算出端点
+/// 最终生效的 baseUrl。
 ///
-/// Precedence (highest first):
-///   1. `endpoint.base_url_override`  — per-endpoint custom mode. `None`
-///      falls through to the service chain; `Some(host)` pins that
-///      host; `Some("")` means "no prefix at all" — the endpoint is in
-///      自定义 mode and the URL field already holds the whole address.
-///   2. `detail.base_url_definition_id`, then the project's ★
-///      (`project.default_base_url_definition_id`).
-///   3. `""` — nothing.
+/// 优先级（从高到低）：
+///   1. `endpoint.base_url_override` —— 每端点的自定义模式。`None` 落到服务链；
+///      `Some(host)` 钉死该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义
+///      模式，URL 字段里已经是完整地址。
+///   2. `detail.base_url_definition_id`，再退到项目 ★
+///      （`project.default_base_url_definition_id`）。
+///   3. `""` —— 什么都没有。
 ///
-/// This three-argument form carries no module context, so step 2 has
-/// no cell to read and resolves to `""` unless the per-endpoint
-/// override applies. Callers that know the module must use
-/// [`resolve_base_url_with`].
+/// 这个三参数形式不带模块上下文，所以第 2 步没有格子可读，除每端点 override 外一律
+/// 解析成 `""`。知道模块的调用方必须用 [`resolve_base_url_with`]。
 ///
-/// `env.module_base_urls` is keyed by `BaseUrlDefinition.id` then by
-/// module id, NOT by name. That keeps rename operations cheap and the
-/// resolution deterministic even if two services share a name. The env
-/// is taken from `detail.environment_id` — when no env is selected
-/// (None) the lookup short-circuits to "".
+/// `env.module_base_urls` 按 `BaseUrlDefinition.id` 再按模块 id 建键，**不按名字**：
+/// 改名便宜，解析也确定 —— 即便两个服务同名。环境取自 `detail.environment_id`；
+/// 未选环境（None）时直接短路成 ""。
 pub fn resolve_base_url(
     detail: &EndpointDetail,
     env: Option<&Environment>,
@@ -270,29 +235,22 @@ pub fn resolve_base_url(
     resolve_base_url_with(detail, env, project, None, None)
 }
 
-/// [`resolve_base_url`] with a caller-supplied definition choice and the
-/// endpoint's module.
+/// [`resolve_base_url`] 再加上调用方指定的定义选择与模块。
 ///
-/// `forced_def_id` takes precedence over `detail.base_url_definition_id`
-/// but still yields to `detail.base_url_override`, which is a per-endpoint
-/// host (or the explicit "no prefix" choice) and was always the strongest
-/// signal. `Some("")` means "no base URL" — the renderer sends that when
-/// the user cleared the picker.
+/// `forced_def_id` 优先于 `detail.base_url_definition_id`，但仍让位给
+/// `detail.base_url_override` —— 那是每端点的 host（或明确的「不要前缀」），始终是
+/// 最强信号。`Some("")` 表示「没有 base URL」，渲染进程在用户清空选择器时就是这么
+/// 发的。
 ///
-/// `module_id` selects **which cell of the value layer** this call reads,
-/// not which services exist: services are project-scoped, and
-/// `env.module_base_urls[def_id][module_id]` is the only place a URL
-/// lives. `None` therefore resolves to `""` rather than guessing a
-/// module's cell for another.
+/// `module_id` 选的是这次调用读**取值层的哪一格**，不是「哪些服务存在」：服务是项目
+/// 级的，而 `env.module_base_urls[def_id][module_id]` 是 URL 唯一的住址。所以
+/// `None` 解析成 `""`，而不是替别的模块猜一格。
 ///
-/// It is supplied rather than derived here so this function stays pure:
-/// the module lives in the `nodes` table, which this module deliberately
-/// knows nothing about. Callers thread it through
-/// [`EndpointOverrides::module_id`].
+/// 由调用方传入而非在此推导，是为了保持本函数纯净：模块住在 `nodes` 表里，而本模块
+/// 刻意不认识 `nodes`。调用方经 [`EndpointOverrides::module_id`] 传下来。
 ///
-/// Mirrors `resolveEndpointBaseUrl` in `src/lib/url.ts`; the two must
-/// agree or the on-screen preview and the request that actually goes out
-/// describe different URLs.
+/// 与 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 对应；两边必须一致，否则屏幕上的
+/// 预览与真正发出去的请求描述的是两个 URL。
 pub fn resolve_base_url_with(
     detail: &EndpointDetail,
     env: Option<&Environment>,
@@ -300,11 +258,9 @@ pub fn resolve_base_url_with(
     forced_def_id: Option<&str>,
     module_id: Option<&str>,
 ) -> (String, BaseUrlSource, Option<String>) {
-    // `Some("")` is a deliberate choice, not an absent value: the endpoint
-    // is in 自定义 mode and the URL field carries the whole address, so
-    // prepending the environment's base URL would corrupt it. Mirrors
-    // `resolveEndpointBaseUrl` in src/lib/url.ts — the two must agree or the
-    // preview (frontend) and the request (backend) disagree about the URL.
+    // `Some("")` 是明确选择而不是缺省：端点处于自定义模式，URL 字段里就是完整地址，
+    // 再前置环境的 base URL 会把它弄坏。与 src/lib/url.ts 的
+    // `resolveEndpointBaseUrl` 对应 —— 两边不一致，前端预览与后端请求说的就是两个 URL。
     if let Some(ovr) = detail.base_url_override.as_deref() {
         return (ovr.to_string(), BaseUrlSource::Override, None);
     }
@@ -313,45 +269,36 @@ pub fn resolve_base_url_with(
         return (String::new(), BaseUrlSource::None, None);
     }
 
-    // Which service answers: the caller's pick, else the endpoint's own,
-    // else the project's ★. The endpoint naming none is the normal case,
-    // not a gap — that is what the ★ exists for.
+    // 谁来应答：调用方的选择，否则端点自己的，否则项目 ★。端点没点名是常态，不是缺口 ——
+    // ★ 就是为此存在的。
     let explicit = forced.or_else(|| detail.base_url_definition_id.clone());
-    // Decided before `explicit` is consumed by the match below: this is
-    // about *which row answered*, not which value, so a forced choice and
-    // the endpoint's own pick both report `Definition`.
+    // 必须在下面的 match 消费掉 `explicit` 之前定下来：这里关心的是*哪一行应答*，
+    // 不是哪个值，所以强制选择与端点自选都报 `Definition`。
     let was_explicit = explicit.is_some();
     let def_id = match explicit {
         Some(def_id) => def_id,
         None => match project.default_base_url_definition_id.clone() {
             Some(def_id) => def_id,
-            // No ★: the endpoint goes out with no base URL, full stop.
-            // There is no layer above this one to borrow from and no
-            // service to guess.
+            // 没有 ★：端点就这么不带 base URL 发出，没有更上层可借，也没有服务可猜。
             None => return (String::new(), BaseUrlSource::None, None),
         },
     };
-    // The id has to name a service the project actually holds. A miss
-    // covers a deleted service, an id copied from another project, and a
-    // stale endpoint pointer; all three mean "no base URL" rather than
-    // "quietly aim at a different host". Deliberately NOT a fall back to
-    // the ★.
+    // 这个 id 必须点名项目真实持有的服务。没命中可能是服务已删、id 从别的项目复制而来，
+    // 或端点上的指针过期 —— 三种都表示「没有 base URL」，而不是「悄悄换个 host」。
+    // 刻意**不**回退到 ★。
     if !project.base_url_definitions.iter().any(|d| d.id == def_id) {
         return (String::new(), BaseUrlSource::None, None);
     }
 
-    // No module, no cell. Services are shared by every module but their
-    // addresses are not, so there is nothing to read.
+    // 没有模块就没有格子。服务由每个模块共享，地址不是 —— 无从可读。
     let module_id = match module_id {
         Some(module_id) => module_id,
         None => return (String::new(), BaseUrlSource::None, None),
     };
 
-    // The one and only place a URL lives. Missing or empty means this
-    // (environment × service × module) cell is unconfigured, which is the
-    // same answer as naming nothing: `source: none`. There is deliberately
-    // no fallback to `env.base_urls` (dead column) nor to another
-    // module's cell — an empty cell is a real answer, not a hole.
+    // URL 唯一的住址。缺失或为空表示这一格 (环境 × 服务 × 模块) 没配，与「什么都没
+    // 点名」是同一个答案：`source: none`。刻意既不回退到 `env.base_urls`（死列），
+    // 也不借用别的模块的格子 —— 空格子是一个真实答案，不是一个洞。
     match env
         .and_then(|e| e.module_base_urls.get(&def_id))
         .and_then(|cells| cells.get(module_id))
@@ -368,9 +315,8 @@ pub fn resolve_base_url_with(
     }
 }
 
-/// Concatenate `base_url` and `path` safely. Treats `path` as
-/// already-absolute if it carries a scheme, and collapses duplicate
-/// slashes at the join boundary.
+/// 安全地拼接 `base_url` 与 `path`。`path` 自带 scheme 时按已是绝对地址处理，拼接处
+/// 的重复斜杠也会被收掉。
 ///
 ///   join_base_url("https://api.example.com", "/users/1")
 ///     → "https://api.example.com/users/1"
@@ -379,12 +325,12 @@ pub fn resolve_base_url_with(
 ///   join_base_url("", "/users/1")
 ///     → "/users/1"
 ///   join_base_url("https://api.example.com", "https://other/")
-///     → "https://other/"  (the path wins — it carries its own scheme)
+///     → "https://other/"  (path 胜出 —— 它自带 scheme)
 pub fn join_base_url(base_url: &str, path: &str) -> String {
     if path.is_empty() {
         return base_url.to_string();
     }
-    // Already has a scheme → path is fully self-contained.
+    // 自带 scheme → path 完全自洽。
     if has_scheme(path) {
         return path.to_string();
     }
@@ -403,13 +349,12 @@ fn has_scheme(s: &str) -> bool {
     scheme_prefix_len(s).is_some()
 }
 
-/// Byte length of a leading `scheme://`, or `None`. Shared by
-/// [`has_scheme`] and [`collapse_url_slashes`] so the two can never
-/// disagree about where the scheme ends — that boundary is exactly what
-/// decides which slashes are a protocol and which are a typo.
+/// 前导 `scheme://` 的字节长度，没有则 `None`。[`has_scheme`] 与
+/// [`collapse_url_slashes`] 共用它，两者才不会对「scheme 到哪结束」产生分歧 ——
+/// 这条边界正是决定哪些斜杠属于协议、哪些是笔误的依据。
 fn scheme_prefix_len(s: &str) -> Option<usize> {
-    // RFC 3986 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
-    // Mirrors the TS regex `/^[a-z][a-z0-9+.-]*:\/\//i`.
+    // RFC 3986 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )，对应 TS 正则
+    // `/^[a-z][a-z0-9+.-]*:\/\//i`。
     let bytes = s.as_bytes();
     if bytes.is_empty() || !bytes[0].is_ascii_alphabetic() {
         return None;
@@ -423,7 +368,7 @@ fn scheme_prefix_len(s: &str) -> Option<usize> {
         }
         break;
     }
-    // Now expect `:` followed by `//`.
+    // 接下来要求 `:` 后跟 `//`。
     if i + 2 < bytes.len() && bytes[i] == b':' && bytes[i + 1] == b'/' && bytes[i + 2] == b'/' {
         Some(i + 3)
     } else {
@@ -431,42 +376,34 @@ fn scheme_prefix_len(s: &str) -> Option<usize> {
     }
 }
 
-/// Collapse runs of `/` in the **path** of a URL that has already been
-/// joined *and* `{{var}}`-resolved, leaving every other byte alone.
+/// 收掉 URL **路径**里连续的 `/`，其余字节一概不动。输入必须是已经拼接**并且**已经
+/// 完成 `{{var}}` 替换的 URL。
 ///
-/// Joining happens before substitution — necessarily, because an
-/// environment's own base URL may be templated — so [`join_base_url`]
-/// cannot know that `{{var}}` will expand to something already starting
-/// with `/`. It inserts a separator, and the substitution then turns
-/// `http://host:9200/{{var}}` into `http://host:9200//api`, which is a
-/// different route to most servers. Only after substitution is the truth
-/// known.
+/// 拼接必然发生在替换之前（环境自己的 base URL 里也可能有模板），所以
+/// [`join_base_url`] 无从知道 `{{var}}` 会展开成什么。它插入一个分隔符，随后替换把
+/// `http://host:9200/{{var}}` 变成 `http://host:9200//api`，对多数服务端那是另一条
+/// 路由。只有替换之后真相才成立。
 ///
-/// Scope is deliberately narrow — a blind collapse would corrupt real
-/// URLs:
-///   - `scheme://` is not a path. `https://` must survive verbatim.
-///   - a leading `//` with **no** scheme is a protocol-relative
-///     reference (`//cdn.example.com/x`); its slashes carry meaning.
-///   - `?query` / `#fragment` are data, not path: a param carrying a
-///     nested URL (`?redirect=https://x//y`) must pass through untouched.
-///   - an unresolved `{{var}}` marker is text, not a separator, so it
-///     lands in `missing_vars` rather than being flattened away.
+/// 作用范围刻意很窄 —— 无脑收连斜杠会毁掉真实 URL：
+///   - `scheme://` 不是路径，`https://` 必须原样存活
+///   - 无 scheme 的前导 `//` 是协议相对引用（`//cdn.example.com/x`），斜杠有意义
+///   - `?query` / `#fragment` 是数据不是路径：参数里嵌套的 URL
+///     （`?redirect=https://x//y`）必须原样穿过
+///   - 未解析的 `{{var}}` 是文本不是分隔符，它该进 `missing_vars` 而不是被抹平
 ///
-/// Mirrors `collapseUrlSlashes` in `src/lib/url.ts`; the two must agree
-/// or the preview and the request that actually goes out describe
-/// different URLs.
+/// 与 `src/lib/url.ts` 的 `collapseUrlSlashes` 对应；两边必须一致，否则预览与真正发
+/// 出的请求描述的是两个 URL。
 pub fn collapse_url_slashes(url: &str) -> String {
     if url.is_empty() {
         return String::new();
     }
-    // `scheme://` and the protocol-relative `//` are heads, not path.
+    // `scheme://` 与协议相对的 `//` 都是头部，不是路径。
     let (head, rest) = match scheme_prefix_len(url) {
         Some(n) => url.split_at(n),
         None if url.starts_with("//") => url.split_at(2),
         None => ("", url),
     };
-    // An authority never contains a `/` (it ends at the first one), so
-    // whatever follows the head is safe to treat as path.
+    // authority 里不会有 `/`（到第一个 `/` 就结束），所以头部之后都可以当路径。
     let cut = rest.find(['?', '#']).unwrap_or(rest.len());
     let (path, tail) = rest.split_at(cut);
 
@@ -489,14 +426,12 @@ pub fn collapse_url_slashes(url: &str) -> String {
 }
 
 // -------------------------------------------------------------------------
-// Auth — substitute `{{var}}` markers in bearer / basic / apikey fields.
+// 鉴权 —— 对 bearer / basic / apikey 各字段做 `{{var}}` 替换
 // -------------------------------------------------------------------------
 
-/// Apply `{{var}}` substitution to every auth field that carries
-/// user-visible text. Returns a fresh `AuthConfig`; the input is
-/// not mutated (callers may be re-using the endpoint object across
-/// sends). Missing variables inside auth text flow into the same
-/// missing-list the URL scan produced.
+/// 对鉴权配置里所有带用户可见文本的字段做 `{{var}}` 替换。返回**新的**
+/// `AuthConfig`，不改传入值（调用方可能在多次发送之间复用同一个端点对象）。
+/// 鉴权文本里缺的变量汇入 URL 扫描产出的同一份 missing 列表。
 fn resolve_auth(auth: &AuthConfig, vars: &HashMap<String, String>) -> (AuthConfig, Vec<String>) {
     let mut missing: Vec<String> = Vec::new();
     let mut seen: HashMap<String, ()> = HashMap::new();
@@ -564,19 +499,17 @@ fn resolve_auth(auth: &AuthConfig, vars: &HashMap<String, String>) -> (AuthConfi
 }
 
 // -------------------------------------------------------------------------
-// URL / header / param / body assembly.
+// URL / header / param / body 组装
 // -------------------------------------------------------------------------
 
-/// Build the full ordered header list for an endpoint.
+/// 构建端点的完整有序请求头列表。
 ///
-/// Order: user headers (enabled, non-empty), then the auto
-/// `Content-Type` if missing and the body mode implies one, then a
-/// default `Accept: application/json`, then the auth-derived
-/// `Authorization` (or apikey-as-header). Duplicate-key check is
-/// case-insensitive (HTTP header names are).
+/// 顺序：用户请求头（启用且非空）→ body 模式蕴含时补的 `Content-Type`（缺失才补）
+/// → 默认 `Accept: application/json` → 鉴权推出的 `Authorization`（或作为请求头的
+/// apikey）。重复键按大小写不敏感判断（HTTP 请求头名本就不敏感）。
 ///
-/// `apikey.inLocation == Query` is NOT emitted as a header here — the
-/// caller appends it to the URL via `append_apikey_query`.
+/// `apikey.inLocation == Query` 在这里**不**生成请求头 —— 由调用方经
+/// `append_apikey_query` 追加到 URL。
 fn build_headers(
     endpoint_headers: &[simple_post_core::domain::KeyValue],
     body_mode: &simple_post_core::domain::BodyMode,
@@ -693,9 +626,8 @@ fn append_query_string(mut url: String, params: &[(String, String)]) -> String {
 }
 
 fn url_encode(s: &str) -> String {
-    // Form-encoded per `application/x-www-form-urlencoded` (matches
-    // `encodeURIComponent` on the TS side). Space → `+`, everything
-    // outside the unreserved set → `%XX` upper-case hex.
+    // 按 `application/x-www-form-urlencoded` 编码（与 TS 侧的 `encodeURIComponent`
+    // 一致）：空格 → `+`，unreserved 集合之外一律 → 大写十六进制 `%XX`。
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
         match b {
@@ -709,20 +641,16 @@ fn url_encode(s: &str) -> String {
     out
 }
 
-/// Base64-encode `user:pass` for HTTP Basic auth. Routes through
-/// UTF-8 bytes first so credentials containing non-ASCII (e.g.
-/// Chinese usernames, emoji passwords) encode correctly — matches
-/// the browser convention that Express and most servers accept
-/// (decode the header as raw bytes).
+/// 为 HTTP Basic 鉴权把 `user:pass` 做 base64。先过 UTF-8 字节，所以含非 ASCII 的
+/// 凭据（中文用户名、emoji 密码）也编码正确 —— 与浏览器、以及 Express 等多数服务端
+/// 的约定一致（把请求头当裸字节解码）。
 fn b64_basic(user: &str, pass: &str) -> String {
     let combined = format!("{user}:{pass}");
     base64_encode(combined.as_bytes())
 }
 
-/// Minimal, allocation-friendly base64 encoder. Standard alphabet
-/// (`A-Z a-z 0-9 + /`), `=` padding. Used only for `Authorization:
-/// Basic` so a hand-rolled 30-line encoder beats pulling in the
-/// `base64` crate just for this.
+/// 极简 base64 编码器，标准字母表（`A-Z a-z 0-9 + /`）、`=` 补齐。只为
+/// `Authorization: Basic` 而存在 —— 为此拉一个 `base64` crate 不如手写这 30 行。
 fn base64_encode(input: &[u8]) -> String {
     const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
@@ -753,40 +681,31 @@ fn base64_encode(input: &[u8]) -> String {
 }
 
 // -------------------------------------------------------------------------
-// resolve_endpoint — the headline API.
+// resolve_endpoint —— 主 API
 // -------------------------------------------------------------------------
 
-/// Combine an endpoint + env + project + overrides into the
-/// fully-resolved wire shape.
+/// 把端点 + 环境 + 项目 + 覆盖值合成为完全解析好的线上形状。
 ///
-/// Resolution order (mirrors `buildFetchInit`):
-///   1. Apply overrides (url / method / headers / params / body).
-///   2. Resolve baseUrl via [`resolve_base_url_with`].
-///   3. Substitute `{{var}}` everywhere (URL path, headers, params,
-///      body content, auth fields), then collapse duplicate path
-///      slashes (see [`collapse_url_slashes`] — the substitution is what
-///      can turn the join's separator into a `//`).
-///   4. Append enabled query params (encoded).
-///   5. Append apikey query (if `auth.kind == Apikey && inLocation == Query`).
-///   6. Build ordered header list (user headers + auto Content-Type
-///      + auto Accept + auth-derived `Authorization`).
-///   7. Decide body inclusion (only when `body.mode != None && content
-///      non-empty`).
+/// 解析顺序（对应 `buildFetchInit`）：
+///   1. 套用覆盖值（url / method / headers / params / body）
+///   2. 经 [`resolve_base_url_with`] 解析 baseUrl
+///   3. 到处替换 `{{var}}`（URL 路径、headers、params、body 内容、鉴权字段），然后
+///      收掉路径里的重复斜杠（见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的
+///      分隔符变成 `//`）
+///   4. 追加启用的 query 参数（编码后）
+///   5. 追加 apikey query（`auth.kind == Apikey && inLocation == Query` 时）
+///   6. 构建有序请求头列表（用户头 + 自动 Content-Type + 自动 Accept + 鉴权推出的
+///      `Authorization`）
+///   7. 决定是否带上 body（仅当 `body.mode != None && content` 非空）
 ///
-/// Returns `Ok(ResolvedEndpoint)` on success. The `missing_vars`
-/// field carries the union of every `{{x}}` that didn't resolve —
-/// callers decide whether to fail or warn.
+/// `missing_vars` 汇总所有没解析出来的 `{{x}}`，失败还是告警由调用方决定。
 ///
-/// The module is selected through `overrides.module_id` rather than a
-/// parameter: the module is caller context, exactly like the caller's own
-/// base-URL choice, and putting it here means every existing caller that
-/// passes `None` keeps compiling — resolving to "no module, so no cell to
-/// read", which is what an endpoint with no tree context deserves.
+/// 模块走 `overrides.module_id` 而不是单独一个参数：它属于调用方上下文，与调用方自己
+/// 选的 base URL 同类；放在覆盖值里，传入 `None` 的现有调用方都不用改，解析结果是
+/// 「没有模块，也就没有格子可读」—— 这正是一个没有树上下文的端点该得的答案。
 ///
-/// `AppError::Validation` is only returned for clearly malformed
-/// input (e.g. negative size constraints). For the current send
-/// path, no validation rules are enforced — the HTTP sender will
-/// surface its own errors when it tries to use the result.
+/// `AppError::Validation` 只用于明显畸形的输入。当前发送路径没有别的校验规则，真正
+/// 用不了的时候由 HTTP 发送器自己报错。
 pub fn resolve_endpoint(
     detail: &EndpointDetail,
     env: Option<&Environment>,
@@ -802,15 +721,14 @@ pub fn resolve_endpoint(
             }
         };
 
-    // ---- apply overrides (cheap copy of the relevant fields) ---------
+    // ---- 套用覆盖值（相关字段的浅拷贝）---------
     let mut eff_url = detail.url.clone();
     let mut eff_method = detail.method.clone();
     let mut eff_headers = detail.headers.clone();
     let mut eff_params = detail.params.clone();
     let mut eff_body = detail.body.clone();
     let eff_auth = detail.auth.clone();
-    // The caller's pick wins over the endpoint's own definition; this is
-    // what lets the renderer's unsaved base-URL selection take effect.
+    // 调用方的选择压过端点自带的定义 —— 渲染进程未保存的 base URL 选择正是靠这条生效。
     let eff_def_id = overrides.and_then(|o| o.base_url_definition_id.clone());
     if let Some(o) = overrides {
         if let Some(u) = o.url.clone() {
@@ -830,12 +748,11 @@ pub fn resolve_endpoint(
         }
     }
 
-    // ---- variable pool ------------------------------------------------
+    // ---- 变量池 ------------------------------------------------
     let vars: HashMap<String, String> = env.map(|e| e.variables.clone()).unwrap_or_default();
 
-    // ---- params: substitute vars first, then build the URL append.
-    // Doing this in two steps means missing-var tracking and the
-    // params_out echo list share one source of truth.
+    // ---- params：先替换变量，再拼 URL。
+    // 分两步做，missing 追踪与回显用的 params_out 列表才共用同一份真相。
     let mut params_subst: Vec<(String, String)> = Vec::with_capacity(eff_params.len());
     for p in &eff_params {
         if !p.enabled || p.key.is_empty() || p.value.is_empty() {
@@ -848,7 +765,7 @@ pub fn resolve_endpoint(
         params_subst.push((p.key.clone(), r.resolved));
     }
 
-    // ---- baseUrl resolution + URL substitution ------------------------
+    // ---- baseUrl 解析 + URL 替换 ------------------------
     let (base_url, _src, _def_id) = resolve_base_url_with(
         detail,
         env,
@@ -861,26 +778,24 @@ pub fn resolve_endpoint(
     for m in url_r.missing {
         record_missing(&mut missing, &mut seen, m);
     }
-    // After substitution, never before: `{{var}}` → `/api` is what turns
-    // the separator `join_base_url` inserted into a `//`, so this is the
-    // first point where the real path is known. Query/fragment data is
-    // left alone by `collapse_url_slashes`, which is why params can still
-    // be appended after it.
+    // 替换之后、绝不之前：`{{var}}` → `/api` 才会把 `join_base_url` 插的分隔符变成
+    // `//`，到这里真实路径才第一次已知。`collapse_url_slashes` 不碰 query/fragment
+    // 数据，所以 params 仍能在它之后再追加。
     let url_norm = collapse_url_slashes(&url_r.resolved);
 
-    // ---- query string append (uses already-substituted params) -------
+    // ---- 追加 query string（用已替换的 params）-------
     let url_with_params = append_query_string(url_norm, &params_subst);
 
-    // ---- auth resolution ---------------------------------------------
+    // ---- 鉴权解析 ---------------------------------------------
     let (resolved_auth, auth_miss) = resolve_auth(&eff_auth, &vars);
     for m in auth_miss {
         record_missing(&mut missing, &mut seen, m);
     }
 
-    // ---- apikey in query ---------------------------------------------
+    // ---- query 形式的 apikey ---------------------------------------------
     let final_url = append_apikey_query(url_with_params, &resolved_auth);
 
-    // ---- body inclusion + substitution --------------------------------
+    // ---- body 是否带上 + 替换 --------------------------------
     let body = match &eff_body.mode {
         simple_post_core::domain::BodyMode::None => None,
         _ if eff_body.content.is_empty() => None,
@@ -893,7 +808,7 @@ pub fn resolve_endpoint(
         }
     };
 
-    // ---- header ordering ---------------------------------------------
+    // ---- 请求头排序 ---------------------------------------------
     let headers = build_headers(
         &eff_headers,
         &eff_body.mode,
@@ -914,7 +829,7 @@ pub fn resolve_endpoint(
 }
 
 // -------------------------------------------------------------------------
-// Tests — the cases the brief explicitly calls out, plus a few more.
+// 测试
 // -------------------------------------------------------------------------
 
 #[cfg(test)]

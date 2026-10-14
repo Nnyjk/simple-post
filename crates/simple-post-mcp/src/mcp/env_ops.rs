@@ -1,24 +1,9 @@
-//! Environment-domain MCP tools — 8 tools total.
+//! 环境域 MCP 工具 —— 共 8 个。
 //!
-//! Every tool in this file:
-//!   1. Parses its `arguments` (small typed structs via serde).
-//!   2. Calls `simple_post_core::permissions::require`.
-//!   3. Delegates to `simple_post_core::db::environments::*`.
-//!   4. Wraps the result in a `CallToolResult::json` so it goes back to
-//!      the LLM as a single text-content block.
-//!
-//! ## Tools in this file
-//!
-//! | tool                | verb      | mutating?       |
-//! |---------------------|-----------|----------------|
-//! | env_list            | list      | no             |
-//! | env_get_active      | list      | no             |
-//! | env_create          | create    | yes            |
-//! | env_update          | update    | yes            |
-//! | env_delete          | delete    | yes            |
-//! | env_set_var         | update    | yes            |
-//! | env_set_baseurl     | update    | yes            |
-//! | env_set_active      | update    | yes            |
+//! 每个工具都是同一套四步：解析 `arguments`（小型 serde 类型）→ 过
+//! `simple_post_core::permissions::require` → 委托
+//! `simple_post_core::db::environments::*` → 用 `CallToolResult::json` 包成单个
+//! text content 块回给 LLM。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -29,7 +14,7 @@ use simple_post_core::domain::{Environment, EnvironmentPatch};
 use simple_post_core::error::AppError;
 
 // =========================================================================
-// Args shapes (private)
+// 私有 Args 形状
 // =========================================================================
 
 #[derive(Debug, Deserialize)]
@@ -61,18 +46,17 @@ struct SetVarArgs {
 struct SetBaseUrlArgs {
     env_id: String,
     definition_id: String,
-    /// The module whose cell is being written. A URL belongs to
-    /// (environment × service × module) — the same service can point at
-    /// two hosts for two modules.
+    /// 要写入的模块。URL 住在 (环境 × 服务 × 模块) 这一格 —— 同一个服务可以在两个
+    /// 模块指向两个不同 host。
     module_id: String,
     url: String,
 }
 
 // =========================================================================
-// Public: dispatch table fragment
+// 公共：dispatch 表片段
 // =========================================================================
 
-/// Return the 8 env_* rows. Called once by `mcp::mod::tool_table`.
+/// 被 `mcp::mod::tool_table` 调一次的 8 行 env_* 记录。
 pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
@@ -190,7 +174,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 }
 
 // =========================================================================
-// Tool impls
+// 工具实现
 // =========================================================================
 
 async fn tool_env_list(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
@@ -243,16 +227,14 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
 async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: UpdateEnvArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("env_update args: {e}")))?;
-    // Look up the owning project so the per-project permission gate is
-    // enforced against the right key. Passing the magic string
-    // `"global"` here would combine with the default `ReadCall`
-    // project permission to silently reject every write.
+    // 先查出所属项目，按项目那扇门才对得上键。写死字面量 "global" 会撞上默认的
+    // `ReadCall` 档位，把每一次写都静默拒掉。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::lookup_project_id(c, &a.env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // Pull each optional field out of the patch.
+    // 逐个把可选字段从 patch 里取出来。
     let patch = EnvironmentPatch {
         name: a
             .patch
@@ -260,11 +242,9 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .and_then(|p| p.get("name"))
             .and_then(Value::as_str)
             .map(String::from),
-        // `base_urls` is left None. The column is dead —
-        // `db::migrate` moved every value into `moduleBaseUrls` and
-        // `db::environments::update` ignores it — so forwarding it would
-        // report a successful write that changed nothing. An AI client
-        // reading this tool's description uses `moduleBaseUrls`.
+        // `base_urls` 固定留 None：该列已死 —— `db::migrate` 把值全搬进了
+        // `moduleBaseUrls`，`db::environments::update` 也不读它，转发只会回报一次
+        // 「写成功」而实际什么都没改。客户端照本工具描述走 `moduleBaseUrls`。
         base_urls: None,
         module_base_urls: a
             .patch
@@ -291,8 +271,7 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
 
 async fn tool_env_delete(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let env_id = arg_str(&args, "env_id")?.to_string();
-    // See tool_env_update for the rationale — look up the owning
-    // project before checking per-project permission.
+    // 理由同 tool_env_update —— 过门前先查所属项目。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::lookup_project_id(c, &env_id)
     })?;
@@ -306,14 +285,13 @@ async fn tool_env_delete(state: &AppState, args: Value) -> Result<CallToolResult
 async fn tool_env_set_var(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: SetVarArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("env_set_var args: {e}")))?;
-    // Look up the owning project so the per-project permission gate
-    // is enforced against the right key.
+    // 过门前先查所属项目，门才对得上键。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::lookup_project_id(c, &a.env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // env_set_var is implemented as "read, merge into variables, write".
+    // env_set_var 实现为「读 — 并入 variables — 写」。
     let mut env = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::get(c, &a.env_id)
     })?;
@@ -339,19 +317,16 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
     if a.url.trim().is_empty() {
         return Err(AppError::Validation("url must not be empty".into()));
     }
-    // Look up the owning project so the per-project permission gate
-    // is enforced against the right key.
+    // 过门前先查所属项目，门才对得上键。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::lookup_project_id(c, &a.env_id)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // Read-merge-write, like `env_set_var`: the map is one JSON column, so
-    // one atomic UPDATE keeps a reader from seeing a half-written map.
-    // It goes through `set_module_base_url` rather than a hand-built
-    // patch because that is the one function that knows the nested
-    // shape; patching `baseUrls` here would write the dead column and
-    // leave the live layer untouched.
+    // 与 `env_set_var` 同为「读—合并—写」：整张 map 是一个 JSON 列，一次原子
+    // UPDATE 才不会让读者看到半张 map。走 `set_module_base_url` 而不是手搓
+    // patch，因为只有它知道嵌套形状；在这里 patch `baseUrls` 只会写进那列死列，
+    // 真正生效的一层纹丝不动。
     let env = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::environments::set_module_base_url(
             c,
@@ -367,8 +342,7 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
 
 async fn tool_env_set_active(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let env_id = arg_str(&args, "env_id")?.to_string();
-    // Look up the owning project so the per-project permission gate
-    // is enforced against the right key.
+    // 过门前先查所属项目，门才对得上键。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::lookup_project_id(c, &env_id)
     })?;

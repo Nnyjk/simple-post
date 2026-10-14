@@ -1,20 +1,11 @@
-//! Variable-fill / validation MCP tools — 3 tools total.
+//! 变量填充 / 校验类 MCP 工具 —— 共 3 个：`api_resolve_template`、
+//! `api_resolve_endpoint`、`api_validate_endpoint`。
 //!
-//! | tool                     | role                                              |
-//! |--------------------------|---------------------------------------------------|
-//! | api_resolve_template     | Resolve `{{var}}` markers in a free-form string   |
-//! | api_resolve_endpoint     | Resolve an endpoint's full request                |
-//! | api_validate_endpoint    | Static check that an endpoint looks runnable      |
+//! 都是底层 `crate::variable_fill` 的 MCP 适配层：重活在那里干，这里补上权限检查、
+//! 参数校验与 JSON-RPC 形状的返回值。
 //!
-//! These are MCP adapters over the base `crate::variable_fill` module. The
-//! base layer does the heavy lifting; we wrap with permission checks,
-//! argument validation, and JSON-RPC-shaped return types.
-//!
-//! ## Naming
-//!
-//! MCP tool names use the `api_*` prefix to match the TS-side convention
-//! in `src/lib/http.ts`. The Rust module is `variable_fill` to align with
-//! the base layer's file name.
+//! 命名：工具名带 `api_*` 前缀，对齐 `src/lib/http.ts` 的 TS 侧惯例；Rust 模块名
+//! 跟底层文件名一致。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,7 +16,7 @@ use simple_post_core::domain::EndpointDetail;
 use simple_post_core::error::AppError;
 
 // =========================================================================
-// Args shapes
+// Args 形状
 // =========================================================================
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +36,7 @@ struct ResolveEndpointArgs {
 }
 
 // =========================================================================
-// Dispatch table
+// dispatch 表
 // =========================================================================
 
 pub(crate) fn table() -> Vec<ToolEntry> {
@@ -97,7 +88,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 }
 
 // =========================================================================
-// Tool impls
+// 工具实现
 // =========================================================================
 
 async fn tool_api_resolve_template(
@@ -109,9 +100,8 @@ async fn tool_api_resolve_template(
     if a.template.is_empty() {
         return Err(AppError::Validation("template must not be empty".into()));
     }
-    // No `env_id` means a pure template resolution with no project context;
-    // Gate A already covers the tool's tier, so there is no per-project row
-    // to consult. With an `env_id`, gate against that environment's project.
+    // 没有 `env_id` 就是纯模板替换，没有项目上下文：档位已由 Gate A 判过，没有
+    // 按项目的行可查。给了 `env_id` 就按该环境所属项目过门。
     let gate_project = match a.env_id.as_deref() {
         Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::environments::lookup_project_id(c, env_id)
@@ -121,7 +111,7 @@ async fn tool_api_resolve_template(
     };
     crate::mcp::check_permission(&state.pool, &gate_project, "api_resolve_template").await?;
 
-    // Pull variables from the named env (if any), else empty.
+    // 取指定环境的变量，取不到就用空表。
     let vars = if let Some(env_id) = a.env_id.as_deref() {
         simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::environments::get(c, env_id)
@@ -132,7 +122,7 @@ async fn tool_api_resolve_template(
         Default::default()
     };
 
-    let _ = a.scope; // reserved for future scoping (headers/body etc.)
+    let _ = a.scope; // 留给将来的分域替换（headers/body 等）
     let resolved = crate::variable_fill::resolve_template(&a.template, &vars);
 
     Ok(CallToolResult::json(json!({
@@ -179,9 +169,8 @@ async fn tool_api_resolve_endpoint(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    // Same per-module lookup as `api_call_endpoint`: `api_resolve_endpoint`
-    // has to agree with the send path about which URL an endpoint resolves
-    // to, or an AI client previews one host and the send goes to another.
+    // 与 `api_call_endpoint` 同一套按模块查找：预览与真正发送必须对「这个端点解析
+    // 到哪个 host」达成一致，否则 AI 客户端预览一个、实际打到另一个。
     let mut overrides = overrides;
     if overrides.module_id.is_none() {
         overrides.module_id = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -229,13 +218,15 @@ async fn tool_api_validate_endpoint(
 }
 
 // =========================================================================
-// Local helpers
+// 本文件内的辅助函数
 // =========================================================================
 
-/// Resolve an endpoint node → project id so we can gate the call.
-/// Falls back to an empty string (which the permission layer treats as
-/// "global-ish"). One indexed lookup: `root_id` is denormalised onto
-/// every node precisely so this does not have to walk the parent chain.
+/// 端点 node → project id，供按项目的那扇门使用。
+///
+/// 查不到时退化成空串 —— 那等于「没有这一行」，取默认 `ReadCall`。本文件三个工具
+/// 都是 `Read` 档，所以这层退化不会误放行写操作；将来若挂上更高档位的工具，空串
+/// 就会把调用永久拒掉。
+/// `root_id` 已反规范化在每一行上，一次索引读即可，不必回溯父链。
 fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> String {
     simple_post_core::db::with_conn(pool, |c| {
         simple_post_core::db::nodes::root_id_of(c, node_id)
@@ -243,8 +234,7 @@ fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> St
     .unwrap_or_default()
 }
 
-/// Static validation — does this endpoint look like it'll run without
-/// immediate failure? Returns a list of `{field, message}` issues.
+/// 静态检查：端点看起来跑不跑得起来。返回 `{field, message}` 形式的 issues 列表。
 fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
     use simple_post_core::domain::{AuthType, BodyMode};
     let mut issues = Vec::new();
@@ -335,12 +325,9 @@ fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
     issues
 }
 
-/// Placeholder used when an endpoint's project has been deleted. The
-/// variable_fill resolver requires a `&Project`; this keeps callers
-/// alive in dangling-reference scenarios.
-// `static` (not `const`) so `&EMPTY_PROJECT` is `&'static Project` — taking a
-// reference to a `const` creates a temporary that's freed at end of statement,
-// which trips E0716 when the resulting `&Project` outlives the statement.
+// 项目已被删除时的空壳，让调用方不必处理悬垂引用。
+// 必须是 `static` 而非 `const`：`&EMPTY_PROJECT` 要拿到的是 `&'static Project`，
+// 引用 `const` 会产生语句结束即释放的临时值，存活的 `&Project` 会触发 E0716。
 static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::domain::Project {
     id: String::new(),
     name: String::new(),
@@ -354,7 +341,7 @@ static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::doma
 };
 
 // =========================================================================
-// Tests
+// 测试
 // =========================================================================
 
 #[cfg(test)]

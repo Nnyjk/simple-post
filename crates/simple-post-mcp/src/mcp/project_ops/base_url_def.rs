@@ -1,24 +1,13 @@
-//! `base_url_def_*` MCP tools — services owned by a **project**.
+//! `base_url_def_*` MCP 工具 —— 服务由**项目**持有，共 5 个。
 //!
-//! 5 tools:
-//! - `base_url_def_list`
-//! - `base_url_def_create`
-//! - `base_url_def_update`
-//! - `base_url_def_delete`
-//! - `base_url_def_set_default`
+//! 全部按项目作用域：「服务绑定到项目，每一个模块都看得到全部服务」—— 模块本身不
+//! 持有服务，所以任何模块下的端点都能解析其中任何一个。模块仍然重要，但只作为取值层
+//! 的键（`moduleBaseUrls[defId][moduleId]`），而那次查表并不是一个工具。
 //!
-//! Every one of them is project-scoped. 「服务应该绑定到项目，这样每一个模块都会
-//! 全部包含这些服务」 — a module owns no services, so an endpoint of any module
-//! can resolve any of them. The module still matters, but only as a key
-//! into the environment's value layer
-//! (`moduleBaseUrls[defId][moduleId]`), and that lookup is not a tool.
+//! `base_url_def_set_default` 写的是项目的 ★（`Project.defaultBaseUrlDefinitionId`），
+//! 即没点名任何服务的端点据以解析的那个指针。
 //!
-//! `base_url_def_set_default` writes the project's ★
-//! (`Project.defaultBaseUrlDefinitionId`), the pointer an endpoint naming
-//! no service of its own resolves against.
-//!
-//! The ids are distinct from the Tauri / REST commands, which use the
-//! plural `base_url_defs_*`.
+//! 工具名与 Tauri / REST 命令不同 —— 后者用复数 `base_url_defs_*`。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -28,14 +17,11 @@ use crate::tool_fn;
 use simple_post_core::domain::BaseUrlDefinition;
 use simple_post_core::error::AppError;
 
-/// Resolve the project that owns a service, for the per-project
-/// permission gate.
+/// 解析服务所属项目，供按项目的那扇门使用。
 ///
-/// `def → project` rather than a literal `"global"`: the agent
-/// permission table's `project_id` is a foreign key, so a bogus key finds
-/// no row, falls back to the default `ReadCall`, and every write tool —
-/// which requires `Full` — is denied. That failure looks like a
-/// correctly-registered tool that never works.
+/// 要的是 `def → project`，而不是写死字面量 "global"：agent 权限表的 `project_id`
+/// 是外键，假 id 查不到行、退回默认 `ReadCall`，于是要求 `Full` 的写工具全被拒 ——
+/// 症状是「注册得好好的工具从来不能用」。
 fn owning_project(
     pool: &simple_post_core::db::DbPool,
     definition_id: &str,
@@ -47,8 +33,7 @@ fn owning_project(
 
 #[derive(Debug, Deserialize)]
 pub(super) struct BaseUrlDefCreateArgs {
-    /// The project the service belongs to. Every module of it can see
-    /// the service.
+    /// 服务所属项目。它的每一个模块都看得到这个服务。
     pub project_id: String,
     pub name: String,
     #[serde(default)]
@@ -71,18 +56,15 @@ pub(super) struct BaseUrlDefDeleteArgs {
 
 #[derive(Debug, Deserialize)]
 pub(super) struct BaseUrlDefSetDefaultArgs {
-    /// The project whose ★ is being set.
+    /// 要设置 ★ 的项目。
     pub project_id: String,
-    /// The service to mark. Must belong to that same project.
+    /// 要标记的服务，必须属于同一个项目。
     ///
-    /// Optional, and `null` means "this project has no ★ at all" — which
-    /// is the state a freshly created project is in, and a real one to be
-    /// able to return to. Endpoints naming no service then resolve to an
-    /// empty base URL, full stop. The GUI (`base_url_defs_set_default`
-    /// with `null`) and REST (`POST /api/projects/:projectId/baseurls/
-    /// default` with `"defId": null`) can both express it, so leaving it
-    /// out here would make the MCP surface the only one of the three
-    /// that cannot.
+    /// 可选，`null` 表示「这个项目没有 ★」—— 新建项目本来就是这个状态，之后也随时
+    /// 可以回到它；此时没点名服务的端点一律解析出空 base URL。GUI
+    /// （`base_url_defs_set_default` 传 `null`）与 REST（`POST
+    /// /api/projects/:projectId/baseurls/default` 带 `"defId": null`）都能表达，
+    /// 这里若不支持，MCP 就会是三者中唯一做不到的那个。
     #[serde(default)]
     pub definition_id: Option<String>,
 }
@@ -181,8 +163,7 @@ pub(super) async fn tool_base_url_def_create(
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
     }
-    // The service is created into the project the caller named, so that
-    // project's permission row is the one that governs it.
+    // 服务建进调用方指名的那个项目，所以管它的是那个项目的权限行。
     crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_create").await?;
 
     let def = BaseUrlDefinition {
@@ -240,14 +221,11 @@ pub(super) async fn tool_base_url_def_set_default(
 ) -> Result<CallToolResult, AppError> {
     let a: BaseUrlDefSetDefaultArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("base_url_def_set_default args: {e}")))?;
-    // The project is the scope, so it is what the gate keys on. The `?`
-    // matters: dropping it here is how a write tool ends up looking
-    // registered but permanently denied.
+    // 作用域就是项目，门也按项目取键。`?` 不能丢：丢掉正是「写工具看着注册好了、
+    // 却被永久拒绝」的成因。
     crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_set_default").await?;
-    // `set_default` takes `Option<&str>` and rejects a service belonging
-    // to another project, so `None` clears the ★ without bypassing that
-    // check. There is one ★ per project, so there is nothing to promote
-    // it to when the service it named is deleted.
+    // `set_default` 收 `Option<&str>` 且会拒绝跨项目的服务，所以 `None` 清除 ★ 不会
+    // 绕过这项校验。每个项目只有一个 ★，它指名的服务被删时也就没有别的可顶上。
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::base_url_defs::set_default(
             c,

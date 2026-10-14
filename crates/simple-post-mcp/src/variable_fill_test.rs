@@ -3,12 +3,10 @@ use simple_post_core::domain::{
     ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, KeyValue, RequestBody,
 };
 
-/// The module the endpoint under test sits in. Two modules exist so a
-/// test can prove the module selects the *cell* — under v2 the service
-/// list is project-wide, so the module is no longer a filter over which
-/// services exist.
+/// 被测端点所在的模块。之所以设两个模块，是为了让测试能证明模块选的是**格子** ——
+/// 服务列表是项目级的，模块不再是「哪些服务存在」的过滤器。
 const MOD_A: &str = "mod_a";
-/// A second module, with its own address for the same service.
+/// 第二个模块，为同一个服务持有自己的地址。
 const MOD_B: &str = "mod_b";
 
 fn empty_env() -> Environment {
@@ -31,8 +29,8 @@ fn set_cell(env: &mut Environment, def_id: &str, module: &str, url: &str) {
         .insert(module.to_string(), url.to_string());
 }
 
-/// The project's service list, project-scoped and flat, with `data`
-/// carrying the ★.
+/// 项目的服务列表：项目级、扁平，`data` 持★。
+
 fn project_with_defs() -> Project {
     Project {
         id: "p1".into(),
@@ -58,8 +56,8 @@ fn project_with_defs() -> Project {
     }
 }
 
-/// Overrides carrying only the module context, for the tests that are
-/// about substitution and need a resolvable base URL but no draft.
+/// 只带模块上下文的覆盖值，供那些关注替换、需要可解析 base URL 但没有草稿的测试用。
+
 fn in_module_a() -> EndpointOverrides {
     EndpointOverrides {
         module_id: Some(MOD_A.to_string()),
@@ -87,13 +85,11 @@ fn minimal_endpoint() -> EndpointDetail {
 
 // ---- project-scoped services, per-module values ---------------
 //
-// 服务应该绑定到项目：the service list belongs to the project and every
-// module sees all of it. What is per-module is the *value* — the same
-// service can point at two different hosts for two modules, and an
-// empty cell is a real answer rather than a hole to fall through.
+// 服务应该绑定到项目，每个模块都看到全部。按模块区分的是**取值** —— 同一个服务可以在
+// 两个模块指向不同 host，而空格子是一个真实答案，不是可以穿过去的洞。
 
-/// An environment holding a distinct URL per (service × module), so a
-/// wrong module resolving cannot pass as a right answer.
+/// 每个 (服务 × 模块) 各持一个不同 URL 的环境，好让「模块取错」无法伪装成「取对了」。
+
 fn env_with_two_modules() -> Environment {
     let mut env = empty_env();
     set_cell(&mut env, "data", MOD_A, "https://mod-a.example.com");
@@ -115,9 +111,9 @@ fn the_project_star_resolves_the_endpoints_own_module_cell() {
 
 #[test]
 fn the_same_service_resolves_a_different_host_per_module() {
-    // The service is shared; only its address is per-module. This is the
-    // test that fails if `module_id` is ever read as a filter over which
-    // services exist instead of a key into the value layer.
+    // 服务是共享的，按模块区分的只有它的地址。这个测试会在 `module_id` 被当成
+    // 「哪些服务存在」的过滤器（而不是取值层的键）时失败。
+
     let env = env_with_two_modules();
     let project = project_with_defs();
     let (url, src, def) =
@@ -129,9 +125,9 @@ fn the_same_service_resolves_a_different_host_per_module() {
 
 #[test]
 fn a_definition_id_the_project_does_not_hold_resolves_to_nothing() {
-    // Covers a deleted service, an id copied from another project, and a
-    // stale endpoint pointer alike. Falling back to the ★would aim the
-    // request at a host the user did not pick.
+    // 同一批覆盖服务已删、从别的项目复制来的 id、以及端点上的指针过期。
+    // 回退到 ★会把请求打到用户没选过的 host 上。
+
     let env = env_with_two_modules();
     let project = project_with_defs();
     let mut ep = minimal_endpoint();
@@ -144,7 +140,7 @@ fn a_definition_id_the_project_does_not_hold_resolves_to_nothing() {
 
 #[test]
 fn a_forced_definition_the_project_does_not_hold_is_also_refused() {
-    // The caller's own pick is checked against the same project list.
+    // 调用方自己点名的那一个，同样要过这份项目列表的校验。
     let env = env_with_two_modules();
     let project = project_with_defs();
     let (url, src, _) = resolve_base_url_with(
@@ -160,8 +156,8 @@ fn a_forced_definition_the_project_does_not_hold_is_also_refused() {
 
 #[test]
 fn a_project_with_no_star_resolves_to_nothing() {
-    // NULL is what a freshly created project has. Its endpoints go out
-    // with no base URL rather than borrowing any service.
+    // NULL 正是新建项目的状态。它的端点会不带 base URL 发出，而不是借用任何服务。
+
     let env = env_with_two_modules();
     let mut project = project_with_defs();
     project.default_base_url_definition_id = None;
@@ -173,7 +169,7 @@ fn a_project_with_no_star_resolves_to_nothing() {
 
 #[test]
 fn no_module_context_resolves_to_nothing() {
-    // The caller did not say which module the endpoint is in, so there
+    // 调用方没说端点在哪个模块，所以没有格子可读 ——
     // is no cell to read — and no cell is not a licence to read another
     // module's.
     let env = env_with_two_modules();
@@ -186,9 +182,9 @@ fn no_module_context_resolves_to_nothing() {
 
 #[test]
 fn an_empty_cell_does_not_fall_back_to_another_module() {
-    // `data` has a URL for MOD_B but none for MOD_A. Borrowing MOD_B's
-    // would send an `air` request to `water`'s host — the mistake the
-    // whole (environment × module × service) shape exists to prevent.
+    // `data` 给 MOD_B 配了 URL 而没给 MOD_A 配。借用 MOD_B 的
+    // 会把一个 `air` 请求发到 `water` 的 host 上 —— 这正是
+    // 整个 (环境 × 模块 × 服务) 形状要防的错误。
     let mut env = env_with_two_modules();
     env.module_base_urls.get_mut("data").unwrap().remove(MOD_A);
     let project = project_with_defs();
@@ -200,9 +196,9 @@ fn an_empty_cell_does_not_fall_back_to_another_module() {
 
 #[test]
 fn the_deprecated_base_urls_column_is_never_read() {
-    // `Environment.baseUrls` is the dead layer `db::migrate` emptied. A
-    // value left there must not resolve, or the shape-B migration would
-    // keep serving through a path nothing writes.
+    // `Environment.baseUrls` 是 `db::migrate` 已清空的那层死列。留在那里的
+    // 值不该解析成功，否则 shape-B 迁移后就仍会走一条没人写的路径发请求。
+
     let mut env = empty_env();
     env.base_urls
         .insert("data".into(), "https://stale.example.com".into());
@@ -215,9 +211,9 @@ fn the_deprecated_base_urls_column_is_never_read() {
 
 #[test]
 fn resolve_endpoint_applies_the_module_from_overrides() {
-    // The MCP tools pass the module through `EndpointOverrides` rather
-    // than as a parameter, so this is the shape the daemon actually
-    // exercises.
+    // MCP 工具经 `EndpointOverrides` 传模块而不是用参数，所以这才是 daemon
+    // 真正跑到的形状。
+
     let env = env_with_two_modules();
     let project = project_with_defs();
     let r = resolve_endpoint(
@@ -244,9 +240,9 @@ fn resolve_endpoint_without_module_context_has_no_base_url() {
 
 #[test]
 fn a_per_endpoint_override_still_beats_the_service_chain() {
-    // 自定义mode is the strongest signal and has always been; nothing
-    // below it may retarget a request whose URL field carries the whole
-    // address.
+    // 自定义模式始终是最强信号；它之下的任何一层都不得改投一个 URL 字段里
+    // 已经是完整地址的请求。
+
     let env = env_with_two_modules();
     let project = project_with_defs();
     let mut ep = minimal_endpoint();
@@ -294,19 +290,19 @@ fn resolve_template_empty_input_returns_empty() {
 fn resolve_template_chinese_var_name_and_value() {
     let mut vars = HashMap::new();
     vars.insert("名字".into(), "小明".into());
-    // Note: `\w+` is `[A-Za-z0-9_]+`, so non-ASCII names don't match
-    // the marker syntax. The marker passes through verbatim.
+    // 注意：`\w+` 即 `[A-Za-z0-9_]+`，所以非 ASCII 名字不匹配标记语法，原样穿过。
+
     let r = resolve_template("hi {{名字}}", &vars);
     assert_eq!(r.resolved, "hi {{名字}}");
-    // Whitespace inside the marker is also not a word.
+    // 标记内部的空白同样不算 word。
     let r = resolve_template("hi {{ name }}", &vars);
     assert_eq!(r.resolved, "hi {{ name }}");
 }
 
 #[test]
 fn resolve_template_empty_value_is_kept() {
-    // An empty-string entry IS a hit; the substitution must produce
-    // an empty segment, not leave the marker.
+    // 空字符串条目**算命中**；替换必须产出空片段，而不是留下标记。
+
     let mut vars = HashMap::new();
     vars.insert("empty".into(), "".into());
     let r = resolve_template("x={{empty}}!", &vars);
@@ -393,14 +389,14 @@ fn resolve_base_url_empty_forced_id_means_none() {
     let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, Some(""), Some(MOD_A));
     assert_eq!(url, "");
     assert_eq!(src, BaseUrlSource::None);
-    // Sanity: without the override the project ★does apply.
+    // 对照：没有覆盖值时项目 ★确实生效。
     let (url2, src2, _) = resolve_base_url_with(&ep, Some(&env), &project, None, Some(MOD_A));
     assert_eq!(url2, "https://data.example.com");
     assert_eq!(src2, BaseUrlSource::Default);
 }
 
-/// A per-endpoint hard host stays the strongest signal even when the
-/// caller also names a definition.
+/// 即便调用方同时点名了一个定义，每端点的硬 host 仍是最强信号。
+
 #[test]
 fn resolve_base_url_endpoint_host_still_wins_over_forced() {
     let mut env = empty_env();
@@ -458,7 +454,7 @@ fn resolve_base_url_empty_override_is_a_choice_not_an_absence() {
     let r2 = resolve_endpoint(&ep3, Some(&env), &project, Some(&in_module_a())).expect("resolves");
     assert_eq!(r2.url, "/users/1");
 
-    // Sanity: clearing the override restores the project ★
+    // 对照：清掉覆盖值后项目 ★回来
     let cleared = minimal_endpoint();
     let (url2, src2, _) = resolve_base_url_with(&cleared, Some(&env), &project, None, Some(MOD_A));
     assert_eq!(url2, "https://data.example.com");
@@ -591,7 +587,7 @@ fn collapse_url_slashes_keeps_scheme_intact() {
 
 #[test]
 fn collapse_url_slashes_keeps_protocol_relative_reference() {
-    // `//` with no scheme is the marker that says "next is a host".
+    // 无 scheme 的 `//` 是「接下来是 host」的标记。
     assert_eq!(
         collapse_url_slashes("//cdn.example.com//x"),
         "//cdn.example.com/x"
@@ -605,7 +601,7 @@ fn collapse_url_slashes_leaves_query_and_fragment_alone() {
         collapse_url_slashes("http://host/x?redirect=https://a//b#frag//ment"),
         "http://host/x?redirect=https://a//b#frag//ment"
     );
-    // Still collapses the path side of the same URL.
+    // 同一个 URL 的路径那一侧仍会收连斜杠。
     assert_eq!(
         collapse_url_slashes("http://host//x?a=1"),
         "http://host/x?a=1"
@@ -664,8 +660,8 @@ fn resolve_endpoint_collapses_marker_boundary_mid_path() {
 
 #[test]
 fn resolve_endpoint_var_without_leading_slash_keeps_separator() {
-    // Collapsing removes *duplicates*, never the single slash the join
-    // contributed —otherwise `api` would be glued onto the host.
+    // 收的是*重复*斜杠，绝不碰拼接插入的那一个 —— 否则 `api` 会被粘到 host 上。
+
     let mut env = empty_env();
     set_cell(&mut env, "data", MOD_A, "http://host:9200");
     env.variables.insert("var".into(), "api".into());
@@ -699,7 +695,7 @@ fn resolve_endpoint_unresolved_marker_survives_the_collapse() {
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
     // The marker is text, not a separator; `missing_vars` is the only
-    // signal the caller gets that the URL is incomplete.
+    // 调用方唯一能看出 URL 不完整的信号。
     assert_eq!(r.url, "http://host:9200/{{gone}}");
     assert_eq!(r.missing_vars, vec!["gone".to_string()]);
 }
@@ -721,12 +717,12 @@ fn resolve_endpoint_appends_params_after_collapsing() {
     }];
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
-    // The collapse runs before the query append and must not eat a query
-    // string already present —the `?`/`&` choice reads the URL.
+    // 收斜杠发生在追加 query 之前，且不能吃掉已经存在的 query ——
+    // `?`/`&` 的选择要读这整个 URL。
     assert_eq!(r.url, "http://host:9200/api?foo=bar&page=1");
 }
 
-// ---- resolve_endpoint baseUrl precedence -------------------------
+// ---- resolve_endpoint 的 baseUrl 优先级 -------------------------
 
 #[test]
 fn resolve_endpoint_picks_override_over_definition() {
@@ -782,14 +778,14 @@ fn resolve_endpoint_collects_missing_vars_across_url_headers_body_auth() {
     };
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
-    // URL + headers + body + auth missing vars are unioned, deduped,
+    // URL + headers + body + auth 的 missing 变量会合并、去重，
     // and ordered by first appearance.
     assert!(r.missing_vars.contains(&"user_id".to_string()));
     assert!(r.missing_vars.contains(&"trace_id".to_string()));
     assert!(r.missing_vars.contains(&"payload".to_string()));
     assert!(r.missing_vars.contains(&"token".to_string()));
-    // And the unresolved markers stayed put (we can see them in the
-    // body string and URL):
+    // 而未解析的标记原地不动（从
+    // body 字符串与 URL 里都能看到）：
     assert!(r.url.contains("{{user_id}}"));
     assert!(r.body.unwrap().contains("{{payload}}"));
 }
@@ -876,7 +872,7 @@ fn resolve_endpoint_apikey_header_injects_custom_header() {
         .find(|(k, _)| k.eq_ignore_ascii_case("x-api-key"))
         .expect("apikey header must be present");
     assert_eq!(hit.1, "ABC123");
-    // And the URL must NOT carry the apikey in the query.
+    // URL 绝不能把 apikey 带进 query。
     assert!(!r.url.contains("ABC123"));
 }
 
@@ -915,10 +911,10 @@ fn resolve_endpoint_apikey_query_appends_to_url() {
 
 #[test]
 fn resolve_endpoint_user_authorization_wins_over_auth_config() {
-    // If the user already declared an Authorization header, the
-    // auth-config-derived one must NOT replace it (matches the
-    // TS behavior —fetch keeps the last value of a record key,
-    // cURL would otherwise emit two `-H` lines for the same name).
+    // 用户已声明过 Authorization 头时，鉴权配置推出的那个**不能**替换它
+    // （与 TS 行为一致 —— fetch 保留记录键的最后一个值，
+
+    // 否则 cURL 会为同一个名字吐出两行 `-H`）。
     let mut env = empty_env();
     set_cell(&mut env, "data", MOD_A, "https://api.example.com");
     env.variables.insert("token".into(), "from-env".into());
@@ -1117,6 +1113,6 @@ fn resolve_endpoint_applies_url_override() {
         ..Default::default()
     };
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&overrides)).unwrap();
-    // Full-path override (with scheme) wins over baseUrl + path.
+    // 完整路径的覆盖值（自带 scheme）压过 baseUrl + path。
     assert_eq!(r.url, "https://override.example.com/custom");
 }

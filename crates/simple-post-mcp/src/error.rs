@@ -1,15 +1,12 @@
 // crates/simple-post-mcp/src/error.rs
 //
-// Error types for the standalone `simple-post-mcp` client. We never
-// surface Rust errors verbatim on stdout because the JSON-RPC channel
-// is line-oriented text — a panic message or a multi-line backtrace
-// would corrupt the wire format and hang the AI client.
+// 独立客户端的错误类型。Rust 错误原文绝不直接吐到 stdout：JSON-RPC 通道是
+// 逐行文本，一段 panic message 或多行 backtrace 就会破坏帧格式并挂住客户端。
 //
-// `map_http_status` produces the JSON-RPC error code we hand back when
-// the web backend rejects a request:
-//   - HTTP 401 (unauthenticated / wrong password) → -32001
-//   - other 4xx / 5xx                                → -32000
-//   - transport-level failure (connect / read)        → -32603 (internal)
+// `http_status_to_rpc_code` 给出后端拒绝时回传的 JSON-RPC code：
+//   - HTTP 401/403（密码错或缺失）      → -32001
+//   - 其余 4xx / 5xx                     → -32000
+//   - 传输层失败（连接 / 读）            → -32603 (internal)
 
 use simple_post_core::error::AppError;
 
@@ -34,30 +31,25 @@ impl From<reqwest::Error> for ClientError {
     }
 }
 
-/// Convert a `(status, body)` pair from the web backend into the
-/// JSON-RPC `code` field, so AI clients see the same code whichever
-/// binary serves them.
+/// 把后端返回的 `(status, body)` 折成 JSON-RPC `code`，让换哪个二进制都能给
+/// AI 客户端同样的 code。
 pub fn http_status_to_rpc_code(status: u16) -> i64 {
     if status == 401 || status == 403 {
-        // Wrong / missing password. Distinct from "backend error" so
-        // AI clients can decide whether to retry with a new token.
+        // 密码错/缺失。与「后端出错」分开，客户端才知道该不该换个 token 重试。
         -32001
     } else if status >= 400 {
-        // Generic backend rejection.
+        // 其余 4xx / 5xx 一律归为后端拒绝。
         -32000
     } else {
-        // 2xx / 3xx shouldn't reach this path because the caller
-        // checks status before mapping, but keep it well-defined.
+        // 调用方先判过状态码，2xx / 3xx 到不了这里；仍给出确定取值。
         0
     }
 }
 
 impl From<AppError> for ClientError {
     fn from(_e: AppError) -> Self {
-        // We don't try to translate every AppError variant — the
-        // standalone client only talks to `/mcp` and `/mcp/healthz`
-        // over HTTP, so AppError only ever appears wrapped in an
-        // HTTP response body. The `Backend` arm surfaces it.
+        // 不逐个 variant 翻译：独立客户端只经 HTTP 访问 `/mcp` 与 `/mcp/healthz`，
+        // `AppError` 只会裹在响应体里，由 `Backend` 分支透出。
         ClientError::BadFrame("AppError in standalone pipeline".into())
     }
 }
