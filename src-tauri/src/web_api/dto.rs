@@ -164,6 +164,13 @@ pub struct BaseUrlDefCreateBody {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// Client-minted id, adopted when non-blank — the REST twin of
+    /// `commands::dto::CreateBaseUrlDefOpts::id`. Both transports take it
+    /// for the same reason: the renderer keys the project's ★ and the
+    /// per-(env × module) URL cells off this id before the row is
+    /// persisted, so a server-minted one orphans every reference to it.
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 /// Body for `POST /api/projects/:projectId/baseurls/default`. `defId = null`

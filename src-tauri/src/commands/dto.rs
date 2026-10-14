@@ -96,6 +96,13 @@ pub struct BaseUrlDefPatch {
 #[serde(rename_all = "camelCase")]
 pub struct CreateBaseUrlDefOpts {
     pub description: Option<String>,
+    /// Client-minted id for the new service, adopted as-is when non-blank.
+    ///
+    /// The renderer already holds this id in two other places before the
+    /// row exists — the project's ★ and the per-(env × module) URL cells it
+    /// seeds — so a server-minted id silently orphans both. See
+    /// `slices/crud-baseurl.ts` and `nodes_create`'s equivalent `newId`.
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -50,11 +50,20 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
   get,
 ) => ({
   /**
-   * Optimistic local add + background invoke. Returns the temp id
+   * Optimistic local add + background invoke. Returns the id
    * synchronously because the settings table passes it straight into
-   * `setEnvironmentModuleBaseUrl` to seed an empty cell. On invoke
-   * success the temp row is replaced with the persisted entity (the
-   * server mints its own id); on failure the local row is removed.
+   * `setEnvironmentModuleBaseUrl` to seed an env cell.
+   *
+   * The id is minted **here** and the backend adopts it (`opts.id`), which
+   * is the whole point. Two things in this slice are keyed by a service id
+   * before the row is ever persisted — the project's ★ and every
+   * `env.moduleBaseUrls[defId][moduleId]` cell — so a backend-minted id
+   * turns both into keys that name a row nobody has: the cell write has
+   * already gone to the database under the old key, and swapping the row
+   * afterwards cannot move it. `resolveEndpointBaseUrl` then reads a cell
+   * that does not exist and yields `''`, which is why a brand-new service
+   * could be selected but never applied. `duplicateEndpoint` already
+   * mints its id this way for the same class of reason.
    *
    * The project's first service becomes its default here. The backend
    * does the same, but mirroring it locally is what stops the ★ from
@@ -77,7 +86,11 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
         };
       }),
     }));
-    invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, { projectId, name: label })
+    invokeCmd<BaseUrlDefinition>(COMMANDS.baseUrlDefsCreate, {
+      projectId,
+      name: label,
+      opts: { id: defId },
+    })
       .then((persisted) => {
         set((s) => ({
           projects: s.projects.map((p) => {
@@ -97,6 +110,14 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
             return {
               ...p,
               baseUrlDefinitions: p.baseUrlDefinitions.filter((d) => d.id !== defId),
+              // The row is gone, so a ★ naming it is a dangling pointer:
+              // `resolveEndpointBaseUrl` would look it up, miss, and hand
+              // every endpoint in the project an empty base URL — a
+              // failure the create attempt already caused once. Take the
+              // ★ back to nothing rather than promote a service the user
+              // never chose.
+              defaultBaseUrlDefinitionId:
+                p.defaultBaseUrlDefinitionId === defId ? null : p.defaultBaseUrlDefinitionId,
             };
           }),
         }));

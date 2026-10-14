@@ -467,8 +467,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
 
   it('baseUrlDefsCreate → POST /api/projects/{projectId}/baseurls with { name }', async () => {
     await invokeCmd(COMMANDS.baseUrlDefsCreate, {
-      // 服务挂在项目上，所以作用域是 projectId；id 由 Web 服务端生成，
-      // 不能随默认 args 泄漏进 body。
+      // 服务挂在项目上，所以作用域是 projectId；顶层 `id` 不能随默认 args
+      // 泄漏进 body（调用方把要用的 id 放在 opts 里）。
       id: 'def-1',
       projectId: 'p/1',
       name: 'Local',
@@ -481,6 +481,29 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
       name: 'Local',
       description: '本地服务',
     });
+  });
+
+  it('baseUrlDefsCreate → opts.id 下发，服务行不会与 ★ / 单元格脱钩', async () => {
+    await invokeCmd(COMMANDS.baseUrlDefsCreate, {
+      projectId: 'p1',
+      name: 'auth',
+      opts: { id: 'def_client_1' },
+    });
+    const c = last();
+    // 前端铸 id、后端采纳：丢掉它就等于让 ★ 和 env 单元格指向一条从未
+    // 落库的行，解析必然为空。
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'auth', id: 'def_client_1' });
+  });
+
+  it('baseUrlDefsCreate → opts.id 为空串时不发 id，由服务端铸', async () => {
+    await invokeCmd(COMMANDS.baseUrlDefsCreate, {
+      projectId: 'p1',
+      name: 'auth',
+      opts: { id: '' },
+    });
+    const c = last();
+    // 空串不能变成一条 id 为 "" 的行。
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'auth' });
   });
 
   it('baseUrlDefsUpdate → PATCH /api/baseurl-defs/{id}', async () => {

@@ -73,10 +73,26 @@ export function indexByParent(
  * selector (a fresh string is stable under `Object.is`, so a selector
  * returning this is safe, but the walk itself should not rerun per
  * render).
+ *
+ * DRAFTS ARE NOT IN `nodes`
+ * -------------------------
+ * An unsaved endpoint lives only in `draftEndpoints` until Save, so
+ * `byId.get(draftId)` misses and the walk returned `null` — which reads
+ * downstream as "this endpoint has no module", i.e. no baseUrl cell at
+ * all. The parents *are* real rows, so the walk only ever lacked a
+ * starting point: pass the draft's own node as `self`.
  */
 export function moduleIdOfEndpoint(
   nodes: readonly ResourceNode[],
   endpointId: string | null | undefined,
+  /**
+   * The endpoint's own row when `nodes` does not carry it — an unsaved
+   * draft, which `useActiveEndpointResource` synthesises from the
+   * `DraftEndpoint`. Ignored when `nodes` has a row for `endpointId`, so a
+   * caller that always passes `resource.node` is right for both storage
+   * forms.
+   */
+  self?: ResourceNode | null,
 ): string | null {
   if (!endpointId) return null;
   const byId = new Map<string, ResourceNode>();
@@ -84,7 +100,7 @@ export function moduleIdOfEndpoint(
 
   // `kind` is the node's own type; an endpoint may sit directly under a
   // module (no collection), so both shapes terminate here.
-  let cur = byId.get(endpointId);
+  let cur = byId.get(endpointId) ?? (self?.id === endpointId ? self : undefined);
   let guard = 0;
   while (cur && guard++ < 64) {
     if (cur.kind === 'module') return cur.id;

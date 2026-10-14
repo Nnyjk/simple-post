@@ -26,6 +26,7 @@ import assert from 'node:assert/strict';
 import { installBrowserShim, clearIpcMock, installIpcMock } from './_browser-shim';
 
 import { createCrudSlice } from '../crud-slice';
+import { resolveEndpointBaseUrl } from '@/lib/url';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 
 /** A minimal but domain-shaped `EndpointDetail`. */
@@ -558,5 +559,117 @@ describe('crud-slice: addNode 的 id 以服务端返回值为准', () => {
       {},
       '给模块写一条空 detail 会让 Object.keys(endpointDetails) 说谎',
     );
+  });
+});
+
+// ============================================================
+// addBaseUrlDefinition — the renderer mints the id, the backend adopts it
+//
+// The bug this guards is the "a brand-new service resolves to no URL" one.
+// Two things are keyed by a service id *before* the row is persisted — the
+// project's ★ and every `env.moduleBaseUrls[defId][moduleId]` cell — so a
+// backend-minted id left both pointing at a row that was never written, and
+// `resolveEndpointBaseUrl` answered '' for the service the user had just
+// configured. The assertions therefore end at the resolver, not at the
+// request shape: an id that survives the round trip and still resolves is
+// the whole contract.
+// ============================================================
+
+describe('crud-slice: 新建 baseUrl 服务的 id 前端铸、后端采纳', () => {
+  /** 一个还没有任何服务的项目，★ 也是空的。 */
+  function emptyProject(): Project {
+    return makeProject({ baseUrlDefinitions: [], defaultBaseUrlDefinitionId: null });
+  }
+
+  it('本地 id 随请求下发，服务行与 ★ 留在同一个 id 上', async () => {
+    const harness = makeCrudHarness({}, [makeEnvironment()], [], [emptyProject()]);
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      if (cmd === 'base_url_defs_create') {
+        const opts = (args?.opts ?? {}) as { id?: string };
+        // 修复后的契约：后端采纳调用方的 id。
+        return { id: opts.id, name: String(args?.name) };
+      }
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    const defId = harness.slice.addBaseUrlDefinition('project-1', 'auth');
+    assert.ok(defId, 'addBaseUrlDefinition 必须同步返回 id，设置表要拿它种单元格');
+
+    const create = calls.find((c) => c.cmd === 'base_url_defs_create');
+    assert.ok(create, '必须发出 base_url_defs_create');
+    assert.equal(
+      (create!.args.opts as { id?: string }).id,
+      defId,
+      '请求必须带上本地 id，否则 ★ 和单元格会和落库的行脱钩',
+    );
+
+    // 让 create 的 .then 落定（它把返回的行换进列表）。
+    await new Promise((r) => setTimeout(r, 0));
+
+    const project = harness.bag.projects[0];
+    assert.deepEqual(
+      project.baseUrlDefinitions.map((d) => d.id),
+      [defId],
+      '服务行的 id 必须还是那个本地 id',
+    );
+    assert.ok(
+      project.baseUrlDefinitions.some((d) => d.id === project.defaultBaseUrlDefinitionId),
+      `★ (${project.defaultBaseUrlDefinitionId}) 必须指向列表里真实存在的一行，` +
+        '否则项目默认永远解析为空',
+    );
+  });
+
+  it('按返回的 id 填完单元格后，解析器读得到地址（显式选择与项目默认两条路）', async () => {
+    const harness = makeCrudHarness({}, [makeEnvironment()], [], [emptyProject()]);
+    installIpcMock(async (cmd, args) => {
+      if (cmd === 'base_url_defs_create') {
+        const opts = (args?.opts ?? {}) as { id?: string };
+        return { id: opts.id, name: String(args?.name) };
+      }
+      if (cmd === 'environments_set_module_baseurl') return null;
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    const defId = harness.slice.addBaseUrlDefinition('project-1', 'auth');
+    await harness.slice.setEnvironmentModuleBaseUrl(
+      'env-1',
+      defId,
+      'mod_a',
+      'https://api.demo.dev',
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    const project = harness.bag.projects[0];
+    const env = harness.bag.environments[0];
+    const none = { environmentId: null, baseUrlDefinitionId: null, baseUrlOverride: null };
+
+    assert.equal(
+      resolveEndpointBaseUrl({ ...none, baseUrlDefinitionId: defId }, env, project, 'mod_a')
+        .baseUrl,
+      'https://api.demo.dev',
+      '显式选择该服务后必须解析出它的前置 URL',
+    );
+    assert.equal(
+      resolveEndpointBaseUrl(none, env, project, 'mod_a').baseUrl,
+      'https://api.demo.dev',
+      '项目默认（★）也必须解析出同一个地址',
+    );
+  });
+
+  it('后端铸了另一个 id 时，本地行回滚而不是留下一条悬空 ★', async () => {
+    const harness = makeCrudHarness({}, [makeEnvironment()], [], [emptyProject()]);
+    installIpcMock(async (cmd) => {
+      if (cmd === 'base_url_defs_create') throw new Error('UNIQUE constraint failed');
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    harness.slice.addBaseUrlDefinition('project-1', 'auth');
+    await new Promise((r) => setTimeout(r, 0));
+
+    const project = harness.bag.projects[0];
+    assert.deepEqual(project.baseUrlDefinitions, [], '写失败时乐观行要被撤掉');
+    assert.equal(project.defaultBaseUrlDefinitionId, null, '★ 不能停在一个不存在的 id 上');
   });
 });

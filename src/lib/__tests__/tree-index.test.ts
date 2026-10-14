@@ -307,4 +307,30 @@ describe('tree-index: moduleIdOfEndpoint', () => {
     ];
     assert.equal(moduleIdOfEndpoint(cyclic, 'x'), null);
   });
+
+  it('resolves an unsaved draft from the node synthesised for it', () => {
+    // A draft endpoint lives only in `draftEndpoints` — it is not in
+    // `nodes` and will not be until Save — so an id-only lookup answered
+    // null, which reads downstream as "no module", i.e. no baseUrl cell.
+    // Its parents are real rows, so passing the draft's own node as the
+    // walk's start is all the missing first step.
+    const draft = makeNode('draft_1', 'sub_a', 0);
+    // `NESTED_TREE` has no row for the draft — that is the whole point —
+    // while its parent (`sub_a`) is a perfectly ordinary row.
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'draft_1'), null);
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'draft_1', draft), 'mod_a');
+    // Directly on a module, with no collection in between.
+    assert.equal(
+      moduleIdOfEndpoint(NESTED_TREE, 'draft_2', makeNode('draft_2', 'mod_b', 0)),
+      'mod_b',
+    );
+  });
+
+  it('ignores a `self` that is not the endpoint being asked about', () => {
+    // A stale node handed over by a caller mid-switch must not walk from
+    // the wrong endpoint and answer with its module.
+    const draft = makeNode('draft_1', 'col_a', 0);
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'ep_b', draft), 'mod_b');
+    assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'draft_1', makeNode('other', 'mod_b', 0)), null);
+  });
 });
