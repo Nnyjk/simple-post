@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # arm64 is cross-built rather than built on a native runner: the
       # project has no arm64 CI runner budget, and this path is a release,

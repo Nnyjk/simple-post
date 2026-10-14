@@ -37,7 +37,7 @@ jobs:
             args: '' # tauri.conf.json targets=["nsis"] 已经够
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node
         uses: actions/setup-node@v7
