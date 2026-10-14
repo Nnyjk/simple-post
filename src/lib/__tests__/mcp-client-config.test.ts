@@ -12,11 +12,9 @@ import {
   type McpClientPreset,
 } from '../mcp-client-config';
 
-// These tests exist because the failure mode is SILENT. A client given
-// the wrong root key or the wrong `type` value does not error — the
-// server simply never shows up in its tool list. A copy button that
-// ships a wrong shape is therefore worse than no copy button, and
-// nothing in CI would ever notice.
+// 这些测试存在是因为失败模式是**静默**的：客户端拿到错的根键或错的 `type` 值
+// 不会报错——服务端只是永远不出现在它的工具列表里。所以一个会发出错误形状的复制按钮
+// 比没有复制按钮更糟，而 CI 里没有任何东西会发现。
 
 const RUNNING = { port: 51234 };
 
@@ -35,17 +33,14 @@ function parse(): Record<string, unknown> {
 
 describe('the preset table', () => {
   it('holds exactly one preset, and it is the Claude Code shape', () => {
-    // The assertion is the COUNT, not the id. Eight of the nine rows used
-    // to sit here, each a hand-maintained transcription of a client's
-    // documented format — a table that rots silently, because a stale
-    // row still renders and still copies.
+    // 断言的是**数量**而不是 id。每一行都是某个客户端文档格式的手抄——过期的行照样
+    // 渲染、照样能复制，所以这张表会静默过期。
     assert.equal(MCP_CLIENT_PRESETS.length, 1);
     assert.equal(MCP_CLIENT_PRESETS[0].id, 'claude-code');
   });
 
   it('keeps the verification source on the surviving row', () => {
-    // Without it the next person cannot tell a checked shape from a
-    // guessed one, which is the difference this file exists to protect.
+    // 没有它，下一个改动的人就分不清这个形状是查证过的还是猜的，而这正是本文件要守的。
     assert.match(onlyPreset().source, /Claude Code/);
   });
 
@@ -87,8 +82,7 @@ describe('root key', () => {
 
 describe('the `type` field', () => {
   it('is "http" — Claude Code requires it on a remote entry', () => {
-    // Omitting `type` here is what the first version of this file did for
-    // every client, and no client accepted the result.
+    // 漏掉 `type` 就是错的：Claude Code 的远程项要求它。
     const entry = buildServerEntry(onlyPreset(), RUNNING);
     assert.ok(entry);
     assert.equal(entry.type, 'http');
@@ -111,8 +105,7 @@ describe('buildClientConfig', () => {
   });
 
   it('names the port the daemon is actually on', () => {
-    // The snippet is generated per render from the live snapshot, so it
-    // cannot drift onto a port from an earlier session.
+    // 片段每次渲染都由实时快照生成，所以不会漂到上一次会话的端口上。
     assert.deepEqual(parse(), {
       mcpServers: {
         'simple-post': { type: 'http', url: 'http://127.0.0.1:51234/mcp' },
@@ -133,8 +126,8 @@ describe('buildClientConfig', () => {
   });
 
   it('returns null when the daemon is down so the UI can explain why', () => {
-    // No port means no URL. Emitting a snippet with a literal `null` in it
-    // would be copyable and broken, which is worse than an explanation.
+    // 没有端口就没有 URL。发出一个里面带着字面量 `null` 的片段会「能复制但坏掉」，
+    // 那比一句解释更糟。
     assert.equal(buildClientConfig(onlyPreset(), { port: null }), null);
   });
 
@@ -149,8 +142,7 @@ describe('unavailableReason', () => {
   });
 
   it('never blames the bridge binary — that path is gone', () => {
-    // The stdio bridge is no longer a generated shape, so a message
-    // pointing at it would send the user after an install they do not need.
+    // stdio 桥接不再是生成的形状，所以指向它的提示只会把用户引去找一个并不需要的安装。
     assert.doesNotMatch(unavailableReason(onlyPreset(), { port: null }), /桥接/);
   });
 });

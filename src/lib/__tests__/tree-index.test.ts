@@ -1,30 +1,21 @@
 /**
- * Pure unit tests for `src/lib/tree-index.ts` — the shared
- * `parentId → children` index.
+ * `src/lib/tree-index.ts`（共享的 `parentId → children` 索引）的纯单测。
  *
- * Why this file exists
- * --------------------
- * The index used to be written out twice (once in the CRUD store, once
- * inside `buildTree`), and the two copies could drift. These tests pin
- * the one contract both callers rely on:
+ * 索引只能有一份实现：组件里就地过滤扁平列表拿 children，等于重建一份。这里钉住
+ * 调用方依赖的那一条契约：
  *
- *   1. Nodes land in the bucket their `parentId` names, with `null` as
- *      its own top-level bucket (a module's parent is the project, not
- *      another node).
- *   2. Each bucket is ordered by `sortOrder` — *within* its parent, and
- *      regardless of the order the caller happened to hand over.
- *   3. The optional `rootId` narrows to one project, and omitting it
- *      means the whole workspace.
- *   4. Nothing the caller owns is reordered or written to — the map
- *      holds the caller's node objects by reference, and the caller's
- *      own array keeps its order.
+ *   1. 节点落进 `parentId` 指定的那个桶，`null` 自成一个顶层桶（module 的父级是
+ *      项目，不是另一个节点）。
+ *   2. 每个桶按 `sortOrder` 排序——是在*它自己的父级内*排，且与调用方碰巧给出的
+ *      顺序无关。
+ *   3. 可选的 `rootId` 收窄到单个项目，省略即整份工作区。
+ *   4. 调用方拥有的东西一个都不重排、不写回——map 按引用持有调用方的节点对象，
+ *      调用方自己的数组保持原序。
  *
- * Note (4) is what lets the store build an index inside a `set()`
- * callback; the counterpart hazard — building one inside a Zustand
- * selector, which would re-render forever — is a caller rule, documented
- * on the function itself.
+ * 第 4 条正是 store 能在 `set()` 回调里建索引的依据；对应的另一个坑——放进 Zustand
+ * selector 里建会无限重渲染——属于调用方规则，写在函数自身的注释里。
  *
- * Run via:
+ * 运行：
  *   npx tsx --test src/lib/__tests__/tree-index.test.ts
  */
 import { describe, it } from 'node:test';
@@ -33,9 +24,9 @@ import assert from 'node:assert/strict';
 import { indexByParent, moduleIdOfEndpoint } from '../tree-index';
 import type { ResourceNode, ResourceNodeType } from '@/types/domain';
 
-// ---------- fixtures ----------
+// ---------- 夹具 ----------
 
-/** Minimal domain-shaped node; the index only reads `id` / `rootId` / `parentId` / `sortOrder`. */
+/** 最小化的领域形状节点；索引只读 `id` / `rootId` / `parentId` / `sortOrder`。 */
 function makeNode(
   id: string,
   parentId: string | null,
@@ -55,18 +46,18 @@ function makeNode(
   };
 }
 
-/** Ids of one bucket, in bucket order — the shape the renderer walks. */
+/** 某个桶的 id 列表，按桶内顺序——渲染器走的就是这个形状。 */
 function idsOf(bucket: readonly ResourceNode[] | undefined): string[] {
   return (bucket ?? []).map((n) => n.id);
 }
 
-/** Ids of every bucket for `parentId`, in bucket order. */
+/** `parentId` 下每个桶的 id 列表，按桶内顺序。 */
 function idsFor(index: Map<string | null, ResourceNode[]>, parentId: string | null): string[] {
   return idsOf(index.get(parentId));
 }
 
 // ============================================================
-// Bucketing
+// 分桶
 // ============================================================
 
 describe('tree-index: bucketing by parentId', () => {
@@ -89,8 +80,7 @@ describe('tree-index: bucketing by parentId', () => {
       makeNode('m2', null, 1, { kind: 'module' }),
     ]);
 
-    // A module's parent is the project, so top level is `parentId: null`
-    // and never the string `'null'` or a project id.
+    // module 的父级是项目，所以顶层是 `parentId: null`，绝不会变成字符串 `'null'` 或某个项目 id。
     assert.equal(index.get(null)?.length, 2);
     assert.deepEqual(idsFor(index, null), ['m1', 'm2']);
     assert.deepEqual(idsFor(index, 'm1'), ['c1']);
@@ -109,7 +99,7 @@ describe('tree-index: bucketing by parentId', () => {
 });
 
 // ============================================================
-// Ordering
+// 排序
 // ============================================================
 
 describe('tree-index: sortOrder ordering', () => {
@@ -134,8 +124,7 @@ describe('tree-index: sortOrder ordering', () => {
   });
 
   it('scopes the sort to the parent — the same sortOrder under two parents both survive', () => {
-    // `sortOrder` is position among *siblings*, not across the project, so
-    // a global sort would interleave the two collections incorrectly.
+    // `sortOrder` 是*同级*内的位置，不是全项目内的；全局排序会错误地交错两个集合。
     const index = indexByParent([
       makeNode('a2', 'c1', 20),
       makeNode('b2', 'c2', 20),
@@ -149,7 +138,7 @@ describe('tree-index: sortOrder ordering', () => {
 });
 
 // ============================================================
-// The optional project filter
+// 可选的项目过滤
 // ============================================================
 
 describe('tree-index: optional rootId filter', () => {
@@ -188,8 +177,7 @@ describe('tree-index: optional rootId filter', () => {
   });
 
   it('narrows the top-level bucket to the requested project’s modules only', () => {
-    // This is exactly what `buildTree` reads for a project's module list,
-    // and what `moveNodes` must not do when it scopes a top-level drop.
+    // `buildTree` 读某个项目的模块列表正是读这个；而 `moveNodes` 划定顶层落点范围时不能这么做。
     const p2 = indexByParent(crossProject, 'p2');
     assert.deepEqual(idsFor(p2, null), ['m9']);
     assert.deepEqual(idsFor(p2, 'm9'), ['c9']);
@@ -201,15 +189,14 @@ describe('tree-index: optional rootId filter', () => {
 });
 
 // ============================================================
-// Orphans
+// 孤儿
 // ============================================================
 
 describe('tree-index: orphans', () => {
   it('still buckets a node whose parentId names a node absent from the input', () => {
-    // The parent may simply be filtered out by `rootId`, or missing from a
-    // partial load. Dropping the child would make it unreachable in the
-    // store, so the bucket is built regardless — the walker's decision to
-    // ignore it is a separate one.
+    // 父节点可能只是被 `rootId` 过滤掉了，或在一次部分加载里缺席。丢掉子节点会让它在
+    // store 里无法抵达，所以桶照建——遍历者要不要忽略它是另一个决定。
+    // store 里无法抵达，所以桶照建——遍历者要不要忽略它是另一个决定。
     const index = indexByParent([makeNode('e1', 'missing-parent', 0)]);
 
     assert.deepEqual(idsFor(index, 'missing-parent'), ['e1']);
@@ -218,7 +205,7 @@ describe('tree-index: orphans', () => {
 });
 
 // ============================================================
-// Purity — the caller's array must survive
+// 纯度 —— 调用方的数组必须完好
 // ============================================================
 
 describe('tree-index: does not mutate its input', () => {
@@ -241,8 +228,7 @@ describe('tree-index: does not mutate its input', () => {
     const index = indexByParent(nodes);
 
     assert.deepEqual(nodes, snapshot);
-    // Sorting happens on the freshly created buckets, so the buckets hold
-    // the caller's objects rather than copies of them.
+    // 排序发生在刚创建的桶上，所以桶里是调用方的对象本身而不是它们的副本。
     assert.equal(index.get('c1')?.[0], nodes[1]);
   });
 });
@@ -252,9 +238,8 @@ describe('tree-index: does not mutate its input', () => {
 // ============================================================
 
 /**
- * Module → collection → endpoint is the deep shape; the endpoint sitting
- * directly on a module is the one the type matrix allows and the tree
- * renders, so the walk has to terminate on both.
+ * 模块 → 集合 → endpoint 是深的那层；endpoint 直接挂在模块上是类型矩阵允许、树也
+ * 会渲染的那种，所以遍历必须在两种形态上都终止。
  */
 const NESTED_TREE: ResourceNode[] = [
   makeNode('mod_a', null, 0, { kind: 'module' }),
@@ -272,8 +257,7 @@ describe('tree-index: moduleIdOfEndpoint', () => {
   });
 
   it('finds the module for an endpoint sitting directly on it', () => {
-    // An endpoint needs no collection of its own, so the one-level case
-    // is the common one, not an edge case.
+    // endpoint 不需要自己的集合，所以只有一层那种是常见情形，不是边界情形。
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'ep_shallow'), 'mod_a');
   });
 
@@ -290,17 +274,15 @@ describe('tree-index: moduleIdOfEndpoint', () => {
   });
 
   it('returns null for no endpoint at all', () => {
-    // The HTTP tester renders its empty state before an endpoint exists;
-    // that must resolve the project-level base URL, not throw.
+    // HTTP 测试器在 endpoint 还不存在时就渲染空状态；那时必须解析出项目级的 base URL，而不是抛错。
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, null), null);
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, undefined), null);
     assert.equal(moduleIdOfEndpoint([], 'ep_deep'), null);
   });
 
   it('terminates on a cyclic parent chain instead of hanging', () => {
-    // The schema forbids this, so the walk can assume it away — but an
-    // unbounded loop here would hang the send path, and a bounded one
-    // that answers null costs three lines.
+    // schema 禁止这种情况，所以遍历可以当它不存在——但这里无界的循环会挂死发送路径，而有界的
+    // 遍历答 null 只要三行。
     const cyclic = [
       makeNode('x', 'y', 0, { kind: 'collection' }),
       makeNode('y', 'x', 0, { kind: 'collection' }),
@@ -309,17 +291,14 @@ describe('tree-index: moduleIdOfEndpoint', () => {
   });
 
   it('resolves an unsaved draft from the node synthesised for it', () => {
-    // A draft endpoint lives only in `draftEndpoints` — it is not in
-    // `nodes` and will not be until Save — so an id-only lookup answered
-    // null, which reads downstream as "no module", i.e. no baseUrl cell.
-    // Its parents are real rows, so passing the draft's own node as the
-    // walk's start is all the missing first step.
+    // 草稿 endpoint 只存在于 `draftEndpoints`——它不在 `nodes` 里，Save 之前也不会在——
+    // 所以只按 id 查会得到 null，下游读起来就是「没有模块」，也就是没有 baseUrl 格子。
+    // 它的各级父节点都是真实行，所以把草稿自身的节点作为遍历起点，就是补上了缺失的那一步。
     const draft = makeNode('draft_1', 'sub_a', 0);
-    // `NESTED_TREE` has no row for the draft — that is the whole point —
-    // while its parent (`sub_a`) is a perfectly ordinary row.
+    // NESTED_TREE 没有那行草稿——这正是重点——而它的父节点（sub_a）是再普通不过的一行。
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'draft_1'), null);
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'draft_1', draft), 'mod_a');
-    // Directly on a module, with no collection in between.
+    // 直接挂在模块上，中间没有集合。
     assert.equal(
       moduleIdOfEndpoint(NESTED_TREE, 'draft_2', makeNode('draft_2', 'mod_b', 0)),
       'mod_b',
@@ -327,8 +306,7 @@ describe('tree-index: moduleIdOfEndpoint', () => {
   });
 
   it('ignores a `self` that is not the endpoint being asked about', () => {
-    // A stale node handed over by a caller mid-switch must not walk from
-    // the wrong endpoint and answer with its module.
+    // 调用方在切换中途递来一个过期节点时，遍历不得从错误的 endpoint 出发、用它的模块作答。
     const draft = makeNode('draft_1', 'col_a', 0);
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'ep_b', draft), 'mod_b');
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'draft_1', makeNode('other', 'mod_b', 0)), null);

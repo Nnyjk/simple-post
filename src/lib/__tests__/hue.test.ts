@@ -4,23 +4,18 @@ import { HUE, HUE_ANGLES, HUE_MIN_SEPARATION, HUE_SEPARATION_PAIRS } from '../hu
 import type { HueConcept } from '../hue';
 
 /**
- * Guards the semantic hue system.
+ * 语义色相系统的回归网。
  *
- * These assertions exist because the failure mode this refactor set out
- * to kill is silent: two concepts drift onto the same colour and nothing
- * throws, the tests stay green, and the inconsistency only shows up
- * when someone notices the module icon in the tab strip no longer
- * matches the one in the tree. A test is the only thing here that can
- * notice without a human looking.
+ * 这里要拦的失败模式是静默的：两个概念漂到同一个颜色上，不抛异常、测试照绿，直到
+ * 有人发现页签条里的模块图标和树里那个不一致。只有测试不靠人看也能发现。
  *
- * The separation check is the load-bearing one. The other two guard
- * against the mechanical mistake of editing one of a concept's three
- * classes and forgetting the other two.
+ * 间隔检查是承重的那条。另外两条防的是机械失误：改了某个概念的三个类里的一个，
+ * 忘了另外两个。
  */
 
 const CONCEPTS = Object.keys(HUE_ANGLES) as HueConcept[];
 
-/** Shortest distance between two hues on the colour wheel. */
+/** 色轮上两个色相的最短距离。 */
 function hueDistance(a: number, b: number): number {
   const raw = Math.abs(a - b) % 360;
   return raw > 180 ? 360 - raw : raw;
@@ -32,10 +27,8 @@ test('every concept has a class trio and a hue angle', () => {
   for (const concept of CONCEPTS) {
     const entry = HUE[concept];
     assert.ok(entry, `${concept} missing from HUE`);
-    // The three classes must name the SAME --hue-* variable. If someone
-    // edits `text` and not `bg`, the tile gets a tinted background with
-    // a foreground from a different concept and the pairing is silently
-    // wrong — this is the drift the map is supposed to prevent.
+    // 三个类必须指向**同一个** `--hue-*` 变量。有人改了 `text` 却没改 `bg`，tile
+    // 就会是另一个概念的淡色底配这个概念的字色，配对静默地错掉——正是这张表要防的漂移
     for (const [slot, cls] of Object.entries(entry)) {
       assert.match(
         cls,
@@ -53,8 +46,7 @@ test('HUE and HUE_ANGLES cover exactly the same concepts', () => {
 });
 
 test('the four previously-colliding pairs stay visually distinct', () => {
-  // These pairs used to share a colour outright. If someone "simplifies"
-  // the palette by reusing a hue, this is what catches it.
+  // 这几对必须彼此可辨。若有人「简化」调色板、复用同一个色相，拦下它的就是这里。
   assert.equal(HUE_SEPARATION_PAIRS.length, 4);
 
   for (const [a, b] of HUE_SEPARATION_PAIRS) {
@@ -68,9 +60,8 @@ test('the four previously-colliding pairs stay visually distinct', () => {
 });
 
 test('no two concepts share a hue angle at all', () => {
-  // Stricter than the pair check: nothing anywhere in the system may
-  // reuse another's angle, because a hue can end up adjacent to any
-  // other once a panel's contents change.
+  // 比配对检查更严：系统里任何地方都不得复用别人的角度，因为面板内容一变，
+  // 任意两个色相都可能挨到一起
   for (let i = 0; i < CONCEPTS.length; i++) {
     for (let j = i + 1; j < CONCEPTS.length; j++) {
       const a = CONCEPTS[i];

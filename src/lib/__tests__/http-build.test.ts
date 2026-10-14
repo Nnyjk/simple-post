@@ -1,20 +1,18 @@
 /**
- * Pure unit tests for `http-build.ts` — the shared wire-shape builder.
+ * `http-build.ts`（共享的线上形态构造器）的纯单测。通过 `npm test` 运行
+ * （它调用 `tsx --test`）。
  *
- * Run via `npm test` (which invokes `tsx --test`).
+ * 覆盖矩阵：
+ *   A. 查询串拼装
+ *   B. header 顺序 / 自动 Content-Type / 自动 Accept
+ *   C. 认证：Bearer / Basic / API Key（header 与 query）
+ *   D. URL 与 header 的 `{{var}}` 模板解析
+ *   E. body 是否包含（none / json / form / raw，空内容保护）
+ *   F. HTTP 方法保真（全部 7 个动词）
+ *   G. cURL 一致性 —— `buildCurlCommand` 与 `buildFetchInit` 同源
+ *   H. 边界：特殊字符、UTF-8 凭据、与用户 header 的去重
  *
- * Coverage matrix (mapped to PLAN §2 sendRequest 关键行为):
- *   A. Query string assembly
- *   B. Header ordering / auto Content-Type / auto Accept
- *   C. Auth: Bearer / Basic / API Key (header + query)
- *   D. URL & header `{{var}}` template resolution
- *   E. Body inclusion (none / json / form / raw, empty-content guard)
- *   F. HTTP method preservation (all 7 verbs)
- *   G. cURL parity — `buildCurlCommand` mirrors `buildFetchInit`
- *   H. Edge cases: special chars, UTF-8 credentials, dedupe vs user headers
- *
- * The tests do NOT exercise `fetch` itself; integration coverage of the
- * actual network layer lives in `http.test.ts`.
+ * 这些测试**不**触及 `fetch` 本身；真实网络层的集成覆盖在 `http.test.ts`。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,16 +33,15 @@ import type {
   RequestBody,
 } from '../../types/domain';
 
-// ---------- shared fixtures ----------
+// ---------- 共用夹具 ----------
 
 const ENV: Environment = {
   id: 'env_test',
   projectId: 'p_test',
   name: 'test',
   baseUrls: {},
-  // The (module × service) URL layer — not a concept `prepareRequest`
-  // knows about (it receives an already-resolved `baseUrl`), but the
-  // field has no default, so the fixture has to name it.
+  // (模块 × 服务) 的 URL 层——`prepareRequest` 并不认这个概念（它收到的是已解析好的
+  // `baseUrl`），但该字段没有默认值，所以夹具必须点名它
   moduleBaseUrls: {},
   variables: {
     token: 'eyJ.tok',
@@ -71,8 +68,8 @@ function input(overrides: Partial<BuildInput> = {}): BuildInput {
   };
 }
 
-/** Same fixture shape, but split into the path/base URL pair that
- *  `prepareRequest` (and the base-URL picker) actually work with. */
+/** 同样的夹具形状，但拆成 `prepareRequest`（与 base URL 选择器）真正吃的那对
+ *  path / base URL。 */
 function prep(overrides: Partial<PrepareRequestInput> = {}): PrepareRequestInput {
   return {
     method: 'GET',
@@ -86,7 +83,7 @@ function prep(overrides: Partial<PrepareRequestInput> = {}): PrepareRequestInput
   };
 }
 
-/** Tuple list → lookup map, for "does the header exist" assertions. */
+/** 元组列表 → 查找表，供「某个 header 存不存在」这类断言用。 */
 function headerMap(tuples: ReadonlyArray<readonly [string, string]>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of tuples) out[k] = v;
@@ -94,7 +91,7 @@ function headerMap(tuples: ReadonlyArray<readonly [string, string]>): Record<str
 }
 
 // ============================================================
-// A. Query string assembly
+// A. 查询串拼装
 // ============================================================
 
 describe('http-build: query string', () => {
@@ -158,7 +155,7 @@ describe('http-build: query string', () => {
 });
 
 // ============================================================
-// B. Header ordering / auto Content-Type / auto Accept
+// B. header 顺序 / 自动 Content-Type / 自动 Accept
 // ============================================================
 
 describe('http-build: headers', () => {
@@ -187,7 +184,7 @@ describe('http-build: headers', () => {
         headers: [kv('content-type', 'application/vnd.custom+json')],
       }),
     );
-    // User value wins; auto-application/json must NOT clobber.
+    // 用户值优先；自动补的 application/json 不得覆盖它。
     assert.equal(
       (init.headers as Record<string, string>)['content-type'],
       'application/vnd.custom+json',
@@ -242,16 +239,15 @@ describe('http-build: headers', () => {
       }),
     );
     const keys = Object.keys(init.headers as Record<string, string>);
-    // The exact insertion order depends on the implementation's
-    // header-array-to-record collapse, but these two user headers
-    // must precede any auto-injected ones (Content-Type, Accept).
+    // 确切插入顺序取决于实现里 header 数组收成 record 的方式，但这两个用户 header
+    // 必须排在任何自动补的（Content-Type、Accept）之前
     assert.ok(keys.indexOf('X-Trace') < keys.indexOf('Content-Type'));
     assert.ok(keys.indexOf('X-Other') < keys.indexOf('Accept'));
   });
 });
 
 // ============================================================
-// C.1 Auth — Bearer
+// C.1 认证 —— Bearer
 // ============================================================
 
 describe('http-build: auth (Bearer)', () => {
@@ -288,13 +284,13 @@ describe('http-build: auth (Bearer)', () => {
     );
     const h = init.headers as Record<string, string>;
     assert.equal(h['Authorization'], 'Bearer user-override');
-    // No duplicate "authorization" key at any case.
+    // 任何大小写下都不该出现重复的 "authorization" 键。
     assert.equal(h['authorization'], undefined);
   });
 });
 
 // ============================================================
-// C.2 Auth — Basic
+// C.2 认证 —— Basic
 // ============================================================
 
 describe('http-build: auth (Basic)', () => {
@@ -323,9 +319,8 @@ describe('http-build: auth (Basic)', () => {
         } as AuthConfig,
       }),
     );
-    // The header should not throw, and decoding btoa(...) gives the
-    // raw UTF-8 bytes — we verify the round-trip rather than pinning
-    // a specific base64 string (which depends on encoder details).
+    // 这里要验的是不抛异常，且解 btoa(...) 得到原始 UTF-8 字节——所以验往返而不钉死
+    // 某个 base64 字符串（它取决于编码器细节）。
     const hdr = (init.headers as Record<string, string>)['Authorization'];
     assert.ok(hdr.startsWith('Basic '));
     const decoded = Buffer.from(hdr.slice('Basic '.length), 'base64').toString('utf-8');
@@ -363,7 +358,7 @@ describe('http-build: auth (Basic)', () => {
 });
 
 // ============================================================
-// C.3 Auth — API Key (header / query)
+// C.3 认证 —— API Key（header / query）
 // ============================================================
 
 describe('http-build: auth (API Key)', () => {
@@ -448,7 +443,7 @@ describe('http-build: auth (API Key)', () => {
 });
 
 // ============================================================
-// D. Template resolution (URL / header / body)
+// D. 模板解析（URL / header / body）
 // ============================================================
 
 describe('http-build: {{var}} template resolution', () => {
@@ -470,18 +465,15 @@ describe('http-build: {{var}} template resolution', () => {
   });
 
   it('resolves {{var}} in body content, matching Rust resolve_endpoint', () => {
-    // The body used to ship verbatim. It now templates like every other
-    // field, because the app and its own backend disagreed: `resolve_endpoint`
-    // has always substituted. This asserts the substitution, and the next
-    // one asserts the payload still survives byte-for-byte when there is
-    // nothing to substitute.
+    // body 与其他字段一样被模板化，因为 `resolve_endpoint` 一直如此——应用与它自己的
+    // 后端不该不一致。这条断言替换本身；下一条断言无可替换时载荷逐字节不变。
     const body: RequestBody = {
       mode: 'json',
       content: '{"site":"{{site}}","u":"{{userId}}"}',
     };
     const { init } = buildFetchInit(input({ body, env: ENV }));
     assert.equal(init.body, '{"site":"cn","u":"u_demo"}');
-    // Still valid JSON — the substitution happened to be safe here.
+    // 仍是合法 JSON——这次替换恰好是安全的。
     assert.deepEqual(JSON.parse(init.body as string), { site: 'cn', u: 'u_demo' });
   });
 
@@ -493,22 +485,19 @@ describe('http-build: {{var}} template resolution', () => {
 });
 
 // ============================================================
-// D2. Join / substitute ordering — the `//` regression
+// D2. join / 替换的先后 —— `//` 那条回归
 // ============================================================
 
 /**
- * `prepareRequest` joins the base URL *before* substituting `{{var}}`,
- * on purpose: an environment's own base URL may be templated, so the
- * substitution has to be able to see it. The cost is that `joinBaseUrl`
- * inserts its separator before it knows what `{{var}}` will become, so a
- * variable whose value already starts with `/` yields
- * `http://host:9200//api` — a different route to most servers.
+ * `prepareRequest` 刻意在替换 `{{var}}` **之前**先 join base URL：环境自己的
+ * base URL 也可能是模板，替换必须能看见它。代价是 `joinBaseUrl` 在还不知道
+ * `{{var}}` 会变成什么时就插入了分隔符，于是值以 `/` 开头的变量会得到
+ * `http://host:9200//api`——对多数服务端那是另一条路由。
  *
- * These cases go through the real `prepareRequest`, not `joinBaseUrl`
- * alone, because the ordering only exists in the composed pipeline. Rust's
- * `resolve_endpoint` carries the same cases in
- * `crates/simple-post-mcp/src/variable_fill_test.rs`; the two must agree
- * or the preview describes a URL nobody sends.
+ * 这些用例走真正的 `prepareRequest` 而非只用 `joinBaseUrl`，因为这个顺序只存在于
+ * 组装后的流水线里。Rust 侧对应的用例在
+ * `crates/simple-post-mcp/src/variable_fill_test.rs`；两者必须一致，否则预览描述的
+ * URL 没人会发。
  */
 describe('http-build: baseUrl join + {{var}} expansion never yields //', () => {
   const envWith = (vars: Record<string, string>): Environment => ({
@@ -572,9 +561,8 @@ describe('http-build: baseUrl join + {{var}} expansion never yields //', () => {
   });
 
   it('still appends params with ? and & after collapsing', () => {
-    // The collapse must run before the query append and must not eat a
-    // query string that is already in the URL — the `?`/`&` choice reads
-    // the URL, so a mangled path would not be the only symptom.
+    // 折叠必须跑在追加查询串之前，且不能吃掉 URL 里已有的查询串——`?`/`&` 的选择要
+    // 读 URL，所以 path 被弄坏不会是唯一的症状
     const fresh = prepareRequest(
       prep({
         baseUrl: 'http://host:9200',
@@ -609,7 +597,7 @@ describe('http-build: baseUrl join + {{var}} expansion never yields //', () => {
 });
 
 // ============================================================
-// E. Body inclusion
+// E. body 是否包含
 // ============================================================
 
 describe('http-build: body inclusion', () => {
@@ -647,7 +635,7 @@ describe('http-build: body inclusion', () => {
 });
 
 // ============================================================
-// F. HTTP method preservation (all 7 verbs)
+// F. HTTP 方法保真（全部 7 个动词）
 // ============================================================
 
 describe('http-build: HTTP method', () => {
@@ -662,7 +650,7 @@ describe('http-build: HTTP method', () => {
 });
 
 // ============================================================
-// G. cURL parity
+// G. cURL 一致性
 // ============================================================
 
 describe('http-build: cURL parity with fetch', () => {
@@ -682,13 +670,10 @@ describe('http-build: cURL parity with fetch', () => {
   });
 
   it('emits the caller-joined URL when the input is a path', () => {
-    // Regression net. `buildCurlCommand` only runs `resolveTemplate` over
-    // the url it is given — it does NOT join a base URL. Every other test
-    // in this file passes a full URL, so the path-only shape the renderer
-    // actually produces (the URL input holds just the path) was never
-    // covered, and "Copy as cURL" emitted `curl -X POST '/cashier'`,
-    // which cannot run. HttpTester now hands the joined URL in; this test
-    // pins the contract that whatever URL arrives is what gets emitted.
+    // 回归网。`buildCurlCommand` 只对它拿到的 url 跑模板替换——它**不**join base URL。
+    // 本文件其余测试都传完整 URL，所以渲染器真正产出的「只有 path」那种形状从
+    // 来没被覆盖过，于是「复制为 cURL」发出的是 `curl -X POST '/cashier'`，根本跑
+    // 不了。契约钉在这里：传进来什么 URL，就发出什么 URL。
     const i = input({ method: 'POST', url: 'https://api.example.com/cashier' });
     const curl = buildCurlCommand(i);
     assert.ok(
@@ -730,7 +715,7 @@ describe('http-build: cURL parity with fetch', () => {
       body: { mode: 'raw', content: "it's a 'test'" },
     });
     const curl = buildCurlCommand(i);
-    // POSIX single-quote escape: ' → '\''
+    // POSIX 单引号转义：' → '\''
     assert.ok(curl.includes(`--data-raw 'it'\\''s a '\\''test'\\'''`));
   });
 
@@ -757,7 +742,7 @@ describe('http-build: cURL parity with fetch', () => {
 });
 
 // ============================================================
-// H. Edge cases / dedupe across surfaces
+// H. 边界 / 跨界面的去重
 // ============================================================
 
 describe('http-build: edge cases', () => {
@@ -792,13 +777,11 @@ describe('http-build: edge cases', () => {
 });
 
 // ============================================================
-// I. prepareRequest — the single construction core
+// I. prepareRequest —— 唯一的构造核
 //
-// `prepareRequest` is what the sender and the cURL preview now share.
-// The cases below are the ones that used to be silent bugs in that
-// arrangement: a base URL that was never joined, a header collapsed by
-// a Record, and — the reason it exists — no way to ask "what is still
-// unresolved?" before sending.
+// 发送端与 cURL 预览现在共用 `prepareRequest`。下面这些用例覆盖这个安排里最容易
+// 静默出错的几处：base URL 没 join、header 被 `Record` 压扁，以及——它存在的
+// 理由——发送前无从追问「还有哪些没解析出来」。
 // ============================================================
 
 describe('prepareRequest: base URL join', () => {
@@ -818,8 +801,8 @@ describe('prepareRequest: base URL join', () => {
   });
 
   it('lets a path carrying its own scheme win (自定义 mode)', () => {
-    // The picker's 自定义 row is exactly this: the URL field holds the
-    // whole address, so prefixing the environment base would corrupt it.
+    // 选择器里的「自定义」行就是这个：URL 字段装的是完整地址，再前缀环境 base 会
+    // 把它弄坏
     const r = prepareRequest(
       prep({ baseUrl: 'https://custom.example.com', urlPath: 'https://other/x' }),
     );
@@ -832,9 +815,8 @@ describe('prepareRequest: base URL join', () => {
   });
 
   it('resolves {{var}} after joining, including inside the base URL', () => {
-    // Join-then-resolve, not resolve-then-join: an env base URL is
-    // itself templated, and resolving only the path would leave
-    // `https://{{host}}/v1` half-substituted.
+    // 先 join 再解析，而不是先解析再 join：环境自己的 base URL 也是模板，只解析 path
+    // 会让 `https://{{host}}/v1` 留在半替换状态
     const env = {
       variables: { host: 'api.example.com', site: 'cn' },
       baseUrls: {},
@@ -874,8 +856,7 @@ describe('prepareRequest: query assembly', () => {
   });
 
   it('leaves a param key verbatim, mirroring Rust resolve_endpoint', () => {
-    // Rust substitutes the value only (`p.key.clone()`), so resolving a
-    // key here would make the preview and the send disagree.
+    // Rust 只替换值（`p.key.clone()`），这里若解析 key，预览与真实发送就会不一致
     const r = prepareRequest(prep({ urlPath: '/x', params: [kv('{{site}}', 'v')], env: ENV }));
     assert.equal(r.url, '/x?%7B%7Bsite%7D%7D=v');
   });
@@ -924,8 +905,8 @@ describe('prepareRequest: headers are ordered tuples', () => {
   });
 
   it('keeps a repeated header name as two tuples', () => {
-    // The reason the wire shape is a list and not a Record: HTTP allows
-    // a header to repeat, and collapsing to `Record` would drop one.
+    // 线上形态之所以是列表而不是 Record：HTTP 允许 header 重复，收成 `Record`
+    // 会丢掉一个
     const r = prepareRequest(prep({ headers: [kv('Set-Cookie', 'a=1'), kv('Set-Cookie', 'b=2')] }));
     assert.deepEqual(r.headers, [
       ['Set-Cookie', 'a=1'],
@@ -962,7 +943,7 @@ describe('prepareRequest: headers are ordered tuples', () => {
         auth: { kind: 'bearer', bearer: 'auth-v1' } as AuthConfig,
       }),
     );
-    // Exactly one authorization entry, and it is the user's.
+    // 恰好一条 authorization 条目，且是用户那条
     const auths = r.headers.filter(([k]) => k.toLowerCase() === 'authorization');
     assert.deepEqual(auths, [['authorization', 'Bearer user']]);
   });
@@ -989,9 +970,8 @@ describe('prepareRequest: body', () => {
   });
 
   it('carries the content verbatim, without {{var}} expansion', () => {
-    // Matches the pre-existing builder: a JSON body is the user's text,
-    // not a template. The markers are still *reported* (see below) —
-    // shipped literally, but not silently.
+    // 这里没传 env，所以标记无处可解析、原样留在载荷里并被 `missingVars` 报告。
+    // 有 env 时 body 与其他字段一样被模板化（见上面那条用例）。
     const r = prepareRequest(prep({ body: { mode: 'json', content: '{"u":"{{userId}}"}' } }));
     assert.equal(r.body, '{"u":"{{userId}}"}');
   });
@@ -1027,8 +1007,7 @@ describe('prepareRequest: missingVars', () => {
   });
 
   it('ignores markers on headers that are not on the wire', () => {
-    // A disabled header never ships, so its variables are not this
-    // request's problem — reporting them would be a false alarm.
+    // 未启用的 header 不会发出，所以它里面的变量不算这次请求的问题——报出来是误报
     const r = prepareRequest(
       prep({ headers: [kv('X-Region', '{{gone}}', false), kv('', '{{alsoGone}}')], env: ENV }),
     );
@@ -1036,9 +1015,8 @@ describe('prepareRequest: missingVars', () => {
   });
 
   it('reports a marker from the body only when it did not resolve', () => {
-    // The body is templated, so a variable the environment defines is not
-    // a warning — it is already in the payload. An undefined one is, and
-    // that is the case the UI needs to surface before Send.
+    // body 会被模板化，所以环境已定义的变量不构成警告——它已经在载荷里了；未定义
+    // 的才是，也正是 UI 需要在发送前提示出来的那种
     const resolved = prepareRequest(
       prep({ body: { mode: 'json', content: '{"u":"{{userId}}"}' }, env: ENV }),
     );
@@ -1053,9 +1031,8 @@ describe('prepareRequest: missingVars', () => {
   });
 
   it('decides body inclusion on the authored content, not the resolved one', () => {
-    // A body that is nothing but a variable resolving to "" still ships an
-    // (empty) body. Testing after templating would drop the request's body
-    // and silently change the request. Mirrors `resolve_endpoint`.
+    // body 只是一个解析为空串的变量时，仍会发一个（空）body。模板化之后再判断会把
+    // 这个请求的 body 悄悄丢掉从而改变请求。与 `resolve_endpoint` 同序
     const r = prepareRequest(
       prep({
         body: { mode: 'json', content: '{{blank}}' },
@@ -1125,15 +1102,13 @@ describe('prepareRequest: missingVars', () => {
         auth: { kind: 'bearer', bearer: '{{a}}' } as AuthConfig,
       }),
     );
-    // URL first, then headers, then body, then auth — and `{{a}}` in two
-    // places is listed once.
+    // 先 URL，再 header，再 body，再 auth——而两处出现的 `{{a}}` 只列一次
     assert.deepEqual(r.missingVars, ['a', 'b', 'c']);
   });
 
   it('does not report a marker that a value merely contains', () => {
-    // A resolved variable whose *value* is `{{notavar}}` is not itself
-    // a missing variable — replacement is one non-recursive pass, so
-    // the injected text is data, not a second round of substitution.
+    // 一个已解析变量的*值*里含 `{{notavar}}` 并不使它本身成为缺失变量——替换是非递归
+    // 的单趟，注入进来的文本是数据，不是第二轮替换
     const r = prepareRequest(
       prep({
         urlPath: '/{{a}}',
@@ -1146,12 +1121,10 @@ describe('prepareRequest: missingVars', () => {
 });
 
 // ============================================================
-// J. The adapters stay byte-identical
+// J. 两个适配器保持逐字节一致
 //
-// The fetch / cURL helpers are now thin wrappers. These pin that they
-// reproduce the legacy product exactly — an empty base URL is the
-// identity, so a `BuildInput.url` that is already a full URL must come
-// out untouched.
+// fetch / cURL 辅助函数是薄包装。这里钉住它们精确复现既有产物——空 base URL 是
+// 恒等，所以一个本来就是完整 URL 的 `BuildInput.url` 必须原样出来。
 // ============================================================
 
 describe('prepareRequest is what the legacy adapters build', () => {
@@ -1190,7 +1163,7 @@ describe('prepareRequest is what the legacy adapters build', () => {
   });
 
   it('an empty base URL leaves a complete URL alone', () => {
-    // `buildFetchInit`'s contract: `BuildInput.url` is the whole URL.
+    // `buildFetchInit` 的契约：`BuildInput.url` 就是完整 URL
     assert.equal(buildFetchInit(input()).url, 'http://api.example.com/x');
     assert.equal(
       prepareRequest(prep({ urlPath: 'http://api.example.com/x' })).url,
@@ -1200,16 +1173,13 @@ describe('prepareRequest is what the legacy adapters build', () => {
 });
 
 /**
- * The invariant the whole refactor exists to establish: what the user
- * copies is what the server receives.
+ * 整个重构要立的那条不变式：用户复制到的，就是服务端收到的。
  *
- * `sendPreparedRequest` and `preparedToCurl` are handed the *same*
- * `PreparedRequest` object, so there is no second assembly of the wire
- * shape left to disagree with. These tests pin that down by rendering one
- * request through both public entry points and demanding byte equality —
- * if someone later teaches `buildCurlCommand` a header rule that
- * `prepareRequest` does not have, or the preview starts re-joining the
- * base URL, this is what notices.
+ * `sendPreparedRequest` 与 `preparedToCurl` 拿到的是**同一个** `PreparedRequest`
+ * 对象，于是不存在第二份线上形态组装还能跟它不一致。这些用例把同一个请求同时过
+ * 两个公开入口并要求逐字节相等——日后若有人给 `buildCurlCommand` 加了
+ * `prepareRequest` 没有的 header 规则，或预览又开始自己 join base URL，拦下它的
+ * 就是这里。
  */
 describe('prepareRequest → preparedToCurl: preview and send cannot drift', () => {
   const full = prep({
@@ -1233,10 +1203,9 @@ describe('prepareRequest → preparedToCurl: preview and send cannot drift', () 
   });
 
   it('emits the joined URL, never the bare path', () => {
-    // The exact regression this replaced: the preview used to be built
-    // from `EndpointDetail.url`, which holds only the path, so it printed
-    // `curl -X POST '/cashier'` for a request that had gone to
-    // `https://api.example.com/cashier`.
+    // 预览必须发出 join 后的 URL，绝不是裸 path：预览若只拿 `EndpointDetail.url`
+    // （它只存 path），就会为一个实际去了 `https://api.example.com/cashier` 的请求
+    // 打印出 `curl -X POST '/cashier'`
     const curl = preparedToCurl(prepareRequest(full));
     assert.match(curl, /^curl -X POST 'https:\/\/api\.example\.com\/cashier\/settle\?shop=a%20b'/);
   });

@@ -1,24 +1,20 @@
 /**
- * URL resolution tests — `src/lib/url.ts`.
+ * URL 解析测试 —— `src/lib/url.ts`。
  *
- * The behaviour under test is the baseUrl picker's 自定义 row. `baseUrlOverride`
- * is three-state and only the *presence* of the key selects the mode:
+ * 被测行为是 baseUrl 选择器的「自定义」行。`baseUrlOverride` 是三态，只有该键
+ * *存在*才选中这个模式：
  *
- *   null / undefined → follow the service chain
- *   ''               → 自定义, no prefix: the URL field is the whole address
- *   'https://host'   → 自定义 with an explicit host prefix (legacy shape)
+ *   null / undefined → 走服务链
+ *   ''               → 「自定义」但不加前缀：URL 字段就是完整地址
+ *   'https://host'   → 「自定义」且带显式主机前缀
  *
- * The middle case is the regression this file exists for. When the
- * resolver required a *non-empty* override, picking 自定义 wrote `''`, the
- * next render read it back as "no override", and the picker snapped back
- * to the project default — the row looked like it did nothing. The same
- * collapse happens in Rust (`resolve_base_url_with`), and the two must
- * agree or the cURL preview and the request that actually goes out
- * disagree about the URL.
+ * 中间那档是本文件存在的理由：解析器一旦要求 override *非空*，选「自定义」写入的
+ * `''` 在下一次渲染就会被读回成「没有 override」，选择器弹回项目默认，那一行看起来
+ * 就像什么都没做。Rust 侧（`resolve_base_url_with`）有同样的收敛，两者必须一致，
+ * 否则 cURL 预览与真正发出的请求对 URL 的说法不同。
  *
- * The second half pins the value layer: services are the project's whole
- * list, the URL for one is `env.moduleBaseUrls[defId][moduleId]`, and
- * there is no fallback between cells.
+ * 后一半钉住值层：服务是项目全量列表，某个服务的 URL 是
+ * `env.moduleBaseUrls[defId][moduleId]`，格子之间没有回退。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +28,7 @@ import {
 } from '../url';
 import type { BaseUrlDefinition, EndpointDetail, Environment, Project } from '@/types/domain';
 
-/** The project's service list — shared by every module. */
+/** 项目的服务列表 —— 所有模块共享。 */
 const DEFINITIONS: BaseUrlDefinition[] = [
   { id: 'a_data', name: '数据服务', description: '数据面' },
   { id: 'a_auth', name: '鉴权服务', description: '鉴权面' },
@@ -41,9 +37,8 @@ const DEFINITIONS: BaseUrlDefinition[] = [
 ];
 
 /**
- * One service, one cell per module. The same 服务 deliberately points at
- * two different hosts, which is the case the two-level map exists for and
- * the case a flat `baseUrls[defId]` cannot express.
+ * 一个服务，每个模块一个格子。同名的「数据服务」刻意指向两个不同主机——这正是
+ * 两层 map 存在的理由，也是扁平的 `baseUrls[defId]` 表达不了的。
  */
 const ENV = {
   name: 'dev',
@@ -56,7 +51,7 @@ const ENV = {
   },
 } as unknown as Environment;
 
-/** `a_data` is the project ★. */
+/** `a_data` 是项目的 ★。 */
 const PROJECT = {
   baseUrlDefinitions: DEFINITIONS,
   defaultBaseUrlDefinitionId: 'a_data',
@@ -93,7 +88,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
   it('treats an empty override as 自定义 with no prefix', () => {
     const r = resolveEndpointBaseUrl(endpoint({ baseUrlOverride: '' }), ENV, PROJECT, 'mod_a');
     assert.equal(r.source, 'override');
-    // The whole point: no environment base URL sneaks back in.
+    // 要点就在这里：环境 base URL 不得偷偷回来。
     assert.equal(r.baseUrl, '');
   });
 
@@ -126,16 +121,15 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
   });
 });
 
-// ---- the value layer: (环境 × 模块 × 服务) -------------------------------
+// ---- 值层：(环境 × 模块 × 服务) -----------------------------------------
 //
-// Every cell holds the wrong answers for every other cell, so neither a
-// project-wide value nor a borrowed neighbour's value can pass here as a
-// right one.
+// 每个格子里的值对其他所有格子都是错的，所以项目级值或借来的邻居值都不可能在这里
+// 被当成正确答案蒙混过去。
 
 describe('resolveEndpointBaseUrl — one independent cell per (module, service)', () => {
   it('reads the module’s own cell, not another module’s', () => {
-    // `a_data` is the ★ for both modules; each endpoint must land on its
-    // own module's address, never the other's.
+    // `a_data` 是两个模块共同的 ★；每个 endpoint 必须落在自己模块的地址上，绝不是
+    // 另一个的
     assert.equal(
       resolveEndpointBaseUrl(endpoint(), ENV, PROJECT, 'mod_a').baseUrl,
       'https://a-data.example.com',
@@ -147,8 +141,7 @@ describe('resolveEndpointBaseUrl — one independent cell per (module, service)'
   });
 
   it('lets an explicitly named service resolve in a module the ★ never reached', () => {
-    // `b_base` has a value under mod_b only. mod_a must get nothing rather
-    // than mod_b's address.
+    // `b_base` 只在 mod_b 下有值。mod_a 必须什么都拿不到，而不是拿到 mod_b 的地址。
     const inOwnModule = resolveEndpointBaseUrl(
       endpoint({ baseUrlDefinitionId: 'b_base' }),
       ENV,
@@ -177,13 +170,13 @@ describe('resolveEndpointBaseUrl — one independent cell per (module, service)'
       moduleBaseUrls: { x1: { mod_c: 'https://c.example.com' } },
     } as unknown as Environment;
 
-    // A URL exists under the id, but nothing selects it.
+    // URL 在那个 id 下确实存在，但没有任何东西选中它。
     assert.equal(resolveEndpointBaseUrl(endpoint(), envWithValue, noStar, 'mod_c').baseUrl, '');
     assert.equal(resolveEndpointBaseUrl(endpoint(), envWithValue, noStar, 'mod_c').source, 'none');
   });
 
   it('resolves nothing for an endpoint that is under no module', () => {
-    // There is no cell for a `null` module, so only 自定义 could answer.
+    // `null` 模块没有格子，所以只有「自定义」才可能给出答案。
     const r = resolveEndpointBaseUrl(endpoint(), ENV, PROJECT, null);
     assert.equal(r.baseUrl, '');
     assert.equal(r.source, 'none');
@@ -202,9 +195,8 @@ describe('resolveEndpointBaseUrl — one independent cell per (module, service)'
   });
 
   it('never reads the deprecated flat layer', () => {
-    // `baseUrls[defId]` is the module-blind shape. If it were consulted, an
-    // endpoint would resolve to a host that belongs to no module in
-    // particular — the exact leak the two-level map removes.
+    // `baseUrls[defId]` 是看不见模块的形状。若被读到，endpoint 会解析到一个不属于
+    // 任何具体模块的主机——正是两层 map 消除的那种泄漏
     const legacy = {
       baseUrls: { b_base: 'https://legacy.example.com' },
       moduleBaseUrls: {},
@@ -261,27 +253,22 @@ describe('joinBaseUrl — a 自定义 URL field is never prefixed', () => {
 });
 
 /**
- * The join/substitute ordering is deliberate — the environment's own
- * base URL may be templated, so `{{var}}` has to resolve *after* the
- * join to be able to see it. The price is that `joinBaseUrl` inserts a
- * separator before knowing what `{{var}}` will become, and a variable
- * whose value already starts with `/` turns that separator into a `//`:
- * `http://host:9200/{{var}}` → `http://host:9200//api`, a different
- * route to most servers. `collapseUrlSlashes` is the post-substitution
- * pass that repairs it.
+ * join/替换的先后是有意的——环境自己的 base URL 可能是模板，所以 `{{var}}` 必须在
+ * join **之后**解析才能看见它。代价是 `joinBaseUrl` 在还不知道 `{{var}}` 会变成
+ * 什么时就插入了分隔符，而值以 `/` 开头的变量会把它变成 `//`：
+ * `http://host:9200/{{var}}` → `http://host:9200//api`，对多数服务端那是另一条
+ * 路由。`collapseUrlSlashes` 就是替换之后修它的那一遍。
  *
- * The boundaries it must NOT cross are the point of the tests below: the
- * scheme's `//`, a protocol-relative reference, and anything behind `?`
- * or `#` are not path and are data the user typed on purpose.
+ * 它**不能**越过的边界正是下面这些用例的要点：scheme 的 `//`、protocol-relative
+ * 引用、以及 `?` 或 `#` 之后的任何东西都不是 path，而是用户有意输入的数据。
  */
 describe('collapseUrlSlashes — the join/substitute order boundary', () => {
-  /** The real pipeline: join → resolve → collapse. */
+  /** 真正的流水线：join → resolve → collapse。 */
   const pipeline = (baseUrl: string, path: string, vars: Record<string, string>) =>
     collapseUrlSlashes(resolveVarsWithMissing(joinBaseUrl(baseUrl, path), vars).value);
 
   it('repairs the double slash when a variable expands to a leading-slash value', () => {
-    // The reported bug: baseUrl has no trailing slash and the path is
-    // nothing but the marker, so the join supplies the `/`.
+    // baseUrl 没有尾斜杠，而 path 只有一个标记，所以 `/` 由 join 提供。
     assert.equal(pipeline('http://host:9200', '{{var}}', { var: '/api' }), 'http://host:9200/api');
   });
 
@@ -297,8 +284,7 @@ describe('collapseUrlSlashes — the join/substitute order boundary', () => {
   });
 
   it('keeps the separator when the variable has no leading slash', () => {
-    // Collapsing removes *duplicates*, never the single slash that the
-    // join contributed — otherwise `api` would be glued onto the host.
+    // 折叠只去掉*重复*的，绝不去掉 join 贡献的那一个 `/`——否则 `api` 会被粘到主机上
     assert.equal(pipeline('http://host:9200', '{{var}}', { var: 'api' }), 'http://host:9200/api');
   });
 
@@ -308,13 +294,12 @@ describe('collapseUrlSlashes — the join/substitute order boundary', () => {
   });
 
   it('preserves a protocol-relative reference', () => {
-    // `//` with no scheme is the marker that says "next is a host".
+    // 无 scheme 的 `//` 是「接下来是主机」的标记。
     assert.equal(collapseUrlSlashes('//cdn.example.com//x'), '//cdn.example.com/x');
   });
 
   it('leaves an unresolved marker untouched so it still reports as missing', () => {
-    // The marker is text, not a separator: the collapse must not eat it,
-    // because `missingVars` is the only signal the user gets.
+    // 标记是文本不是分隔符：折叠不能吃掉它，因为 `missingVars` 是用户唯一拿到的信号。
     const joined = joinBaseUrl('http://host:9200', '{{gone}}');
     assert.equal(joined, 'http://host:9200/{{gone}}');
     const r = resolveVarsWithMissing(joined, {});
@@ -325,12 +310,12 @@ describe('collapseUrlSlashes — the join/substitute order boundary', () => {
   });
 
   it('does not touch query or fragment data', () => {
-    // `//` inside a query value is payload (a nested URL), not a path.
+    // 查询值里的 `//` 是载荷（嵌套 URL），不是 path。
     assert.equal(
       collapseUrlSlashes('http://host/x?redirect=https://a//b#frag//ment'),
       'http://host/x?redirect=https://a//b#frag//ment',
     );
-    // Still collapses the path side of the same URL.
+    // 同一个 URL 的 path 那一侧仍然会折叠。
     assert.equal(collapseUrlSlashes('http://host//x?a=1'), 'http://host/x?a=1');
   });
 
@@ -339,8 +324,7 @@ describe('collapseUrlSlashes — the join/substitute order boundary', () => {
   });
 
   it('lets a schemed path win over the base URL, then still collapses it', () => {
-    // `joinBaseUrl` returns a self-contained path untouched; the collapse
-    // applies to whichever path survived the join.
+    // `joinBaseUrl` 原样返回自带的完整 path；折叠作用于 join 后活下来的那个 path。
     assert.equal(
       pipeline('https://custom.example.com', 'https://other/{{var}}', { var: '/api' }),
       'https://other/api',
@@ -367,11 +351,10 @@ describe('resolveVars — 自定义 does not disable environment variables', () 
 });
 
 /**
- * `resolveVarsWithMissing` is what lets the request layer answer "which
- * variables are still unresolved?" without re-scanning strings by hand.
- * The rules it must keep are the ones Rust's `resolve_template` /
- * `list_missing_vars` enforce, because the MCP daemon reports the same
- * list for the same endpoint from the other side.
+ * `resolveVarsWithMissing` 让请求层不必手工重扫字符串，就能回答「还有哪些变量没
+ * 解析出来」。它必须守住的规则与 Rust 的 `resolve_template` /
+ * `list_missing_vars` 一致，因为 MCP daemon 会从另一侧为同一个 endpoint 报同一份
+ * 列表。
  */
 describe('resolveVarsWithMissing — reports what it could not resolve', () => {
   it('returns an empty missing list when everything resolves', () => {
@@ -382,7 +365,7 @@ describe('resolveVarsWithMissing — reports what it could not resolve', () => {
 
   it('keeps the marker in the value AND names it in missing', () => {
     const r = resolveVarsWithMissing('/u/{{a}}/{{gone}}', { a: '1' });
-    // Not blanked, not 'undefined' — the user must see the hole.
+    // 既不清空也不变成 'undefined'——用户必须看见那个洞。
     assert.equal(r.value, '/u/1/{{gone}}');
     assert.deepEqual(r.missing, ['gone']);
   });
@@ -400,34 +383,30 @@ describe('resolveVarsWithMissing — reports what it could not resolve', () => {
   });
 
   it('treats a variable defined as the empty string as resolved, not missing', () => {
-    // Nullish, not truthy: clearing a variable to '' is a deliberate
-    // choice, and reporting it as "missing" would nag about a value the
-    // user emptied on purpose.
+    // 判空用 nullish 而非真值：把变量清成 '' 是用户有意的选择，报成「缺失」等于
+    // 纠缠一个他故意清空的值
     const r = resolveVarsWithMissing('/u/{{a}}', { a: '' });
     assert.equal(r.value, '/u/');
     assert.deepEqual(r.missing, []);
   });
 
   it('leaves non-identifier markers alone and does not report them', () => {
-    // The marker name is `\w+` only, matching Rust's `is_word`.
-    // `{{ my-var }}` / `{{ a.b }}` are literal text, not variables —
-    // reporting them would be noise the user cannot act on.
+    // 标记名只接受 `\w+`，与 Rust 的 `is_word` 一致。`{{ my-var }}` / `{{ a.b }}` 是
+    // 字面文本而非变量——报出来只是用户无从处理的噪声
     const r = resolveVarsWithMissing('{{ my-var }} {{ a.b }} {{ok}}', { ok: '1' });
     assert.equal(r.value, '{{ my-var }} {{ a.b }} 1');
     assert.deepEqual(r.missing, []);
   });
 
   it('is a single non-recursive pass', () => {
-    // `{{{{a}}}}` contains a well-formed `{{a}}` starting at index 2,
-    // so that is what gets replaced — and the *injected* text is never
-    // rescanned. Without that, a variable whose value is itself a
-    // `{{…}}` marker would expand again (or loop).
+    // `{{{{a}}}}` 在下标 2 处含一个格式良好的 `{{a}}`，所以被替换的是它——而*注入
+    // 进去*的文本永远不会被再扫一遍。没有这条，值本身是 `{{…}}` 标记的变量会再展开
+    // 一次（或死循环）。
     const resolved = resolveVarsWithMissing('{{{{a}}}}', { a: 'x' });
     assert.equal(resolved.value, '{{x}}');
     assert.deepEqual(resolved.missing, []);
 
-    // Same shape, unresolved: the marker survives untouched and is
-    // reported exactly once.
+    // 同样的形状，未解析：标记原样存活，且只被报一次。
     const missing = resolveVarsWithMissing('{{{{gone}}}}', {});
     assert.equal(missing.value, '{{{{gone}}}}');
     assert.deepEqual(missing.missing, ['gone']);

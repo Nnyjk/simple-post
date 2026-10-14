@@ -1,27 +1,19 @@
 /**
- * Categorisation for the 「可用工具清单」 table.
+ * 「可用工具清单」表格的分类。
  *
- * The daemon reports a flat, alphabetically sorted `string[]` of 44 tool
- * names. Rendering that as one `<pre>` made the card a wall of text with
- * no shape — you could not tell that the tools come in families, and
- * reading "there are 44 of these" told you nothing about *what* they do.
- *
- * So the list is grouped by the tool-name prefix the registry already
- * uses (`env_`, `endpoint_`, …). That prefix is not a heuristic layered
- * on top: it is the same convention `REQUIRED_CAPABILITY` and
- * `tool_table()` key off in the Rust registry, so a group here always
- * matches one coherent capability tier. Adding a tool whose name does not
- * match any prefix is not an error — it lands in 「其他」 rather than
- * disappearing, which is what makes the missing-prefix case visible
- * instead of silent.
+ * daemon 报来的是按字母排好的扁平 `string[]`。所以按注册表本就在用的工具名前缀
+ *（`env_`、`endpoint_`…）分组——这个前缀不是额外叠上去的启发式：Rust 注册表里的
+ * `REQUIRED_CAPABILITY` 与 `tool_table()` 认的也是同一套约定，所以这里的每一组都
+ * 对应一个内聚的能力档。名字不匹配任何前缀的工具不算错，它落进「其他」而不是
+ * 消失，这样缺前缀这件事是看得见的而不是静默的。
  */
 
 export interface ToolGroup {
-  /** Stable key for React lists and for tests. */
+  /** React 列表与测试用的稳定 key。 */
   key: string;
-  /** Human label rendered as the group's row heading. */
+  /** 渲染成该组行标题的可读标签。 */
   label: string;
-  /** Tool names, sorted, so the table order is stable across polls. */
+  /** 工具名，已排序，使表格顺序在多次轮询间稳定。 */
   items: string[];
 }
 
@@ -39,11 +31,10 @@ export const OTHER_GROUP_KEY = 'other';
 export const OTHER_GROUP_LABEL = '其他';
 
 /**
- * Split `names` into the categories above, preserving CATEGORIES order
- * and appending 「其他」 last when something did not match.
+ * 把 `names` 拆进上面的分类，保持 CATEGORIES 的顺序，有未匹配项时把「其他」追加
+ * 在最后。
  *
- * Groups with no members are dropped — an empty heading is noise, and
- * the count is already implied by the card header's total.
+ * 没有成员的组会被丢掉——空标题只是噪声，而总数卡片头部已经交代了。
  */
 export function groupTools(names: readonly string[]): ToolGroup[] {
   const buckets = new Map<string, string[]>();

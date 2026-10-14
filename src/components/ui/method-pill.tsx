@@ -1,30 +1,20 @@
 /**
- * MethodPill — the small colored badge that represents an HTTP verb.
+ * MethodPill —— 代表 HTTP 动词的那枚小彩色徽标。
  *
- * Two sizes cover every place we display the HTTP method:
+ * 两档尺寸覆盖全部展示位置：
+ *   `xs` → 16×16 单字母小片，用在资源树 endpoint 条目这类紧凑行里。只显示动词
+ *          首字母——放不下更多，颜色承担主要识别。
+ *   `sm` → 正常标签尺寸的药丸，放得下完整动词（"POST" / "DELETE"）。用在 HttpTester
+ *          的 URL 栏、下拉行、未保存关闭对话框等处。
  *
- *   size="xs"    → 16×16 single-letter chip, used in compact rows such
- *                  as the project tree's endpoint entries. Shows just the
- *                  verb's first letter — there is no room for more. The
- *                  colour does the heavy lifting.
- *   size="sm"    → proper label-size pill that fits the full verb
- *                  ("POST" / "DELETE"). Used in the HttpTester URL bar,
- *                  dropdown rows, the dirty-close dialog, and elsewhere.
+ * 两种视觉口味：
+ *   `solid`  → 满色底 + 白字。一眼可见的最高对比度——URL 栏里当前动词首选
+ *              （读作主要的「动词控件」）。
+ *   `tinted` → 该色以 15% alpha 作底 + 同色文字。视觉重量更低，用在下拉行与树行，
+ *              那里一枚饱和药丸会比行内容更抢眼。
  *
- * Two visual flavours:
- *
- *   variant="solid"   → strong colour background, white text. Maximum
- *                       contrast at a glance — preferred for the active
- *                       verb in the URL bar (so it reads as the primary
- *                       "verb affordance").
- *   variant="tinted"  → the colour as a tinted background (alpha 0.15)
- *                       + coloured text. Lower visual weight, used in
- *                       dropdown rows and tree rows where a saturated
- *                       pill would shout louder than the row content.
- *
- * The same method produces the same hue across every size/variant.
- * The HSL → alpha-15 mapping lives in `methodTint()` so adjacent code
- * (e.g. dropdown row backgrounds) can reuse it without re-implementing.
+ * 同一个 method 在任何尺寸/口味下都是同一个色相。HSL → alpha-15 的映射放在
+ * `methodTint()` 里，好让邻近代码（如下拉行背景）复用而不必重新实现。
  */
 
 import type { HttpMethod } from '@/types/domain';
@@ -35,16 +25,15 @@ export type MethodPillVariant = 'solid' | 'tinted';
 
 export interface MethodPillProps {
   method: HttpMethod;
-  /** Square single-letter vs full label. Default `sm` (full label). */
+  /** 单字母方块还是完整标签。默认 `sm`（完整标签）。 */
   size?: MethodPillSize;
-  /** Visual flavour. Default `solid` (max contrast). */
+  /** 视觉口味。默认 `solid`（最高对比）。 */
   variant?: MethodPillVariant;
-  /** Hide the text and show only the colour swatch + aria-label. */
+  /** 隐藏文字，只留色块 + aria-label。 */
   hideLabel?: boolean;
   className?: string;
   /**
-   * Override the displayed text. Defaults to the full method (or first
-   * letter when size="xs").
+   * 覆盖显示的文字。默认是完整 method（`size="xs"` 时为首字母）。
    */
   label?: string;
   title?: string;
@@ -66,9 +55,8 @@ export function MethodPill({
 }: MethodPillProps) {
   const text = label ?? (size === 'xs' ? method.charAt(0).toUpperCase() : method);
 
-  // The solid variant uses the colour directly as background with white
-  // text. The tinted variant uses the colour at 15% alpha as backdrop
-  // and at full saturation as text — see `methodTint` below.
+  // solid 变体把颜色直接当背景配白字；tinted 变体用该色 15% alpha 作底、满饱和作
+  // 字色——见下方 `methodTint`
   const style =
     variant === 'tinted'
       ? methodTint(method)
@@ -93,13 +81,11 @@ export function MethodPill({
 }
 
 /**
- * Coloured "tinted" set: alpha-15 backdrop + full-saturation text +
- * alpha-30 border (so the pill edges remain visible on hover/focus).
+ * 着色的 "tinted" 一组：15% alpha 底 + 满饱和字色 + 30% alpha 边框（药丸边缘在
+ * hover/focus 时仍看得见）。
  *
- * `methodColorVar` returns a modern HSL triple without commas
- * (e.g. `hsl(142 71% 45%)`). We re-emit it with an alpha channel
- * via the slash syntax — modern browsers (>= 2023) accept this in
- * any property that takes a colour.
+ * `methodColorVar` 返回不带逗号的现代 HSL 三元组（如 `hsl(142 71% 45%)`）。这里用
+ * 斜杠语法补上 alpha 通道——现代浏览器（2023 起）在任何接受颜色的属性上都认。
  */
 function methodTint(method: HttpMethod): {
   backgroundColor: string;

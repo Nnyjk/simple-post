@@ -1,25 +1,21 @@
 /**
- * MethodPicker — custom listbox for selecting an HTTP method.
+ * MethodPicker —— 选 HTTP 方法的自绘 listbox。
  *
- * Replaces the native <select> previously used in HttpTester's URL bar.
- * The native <select> cannot style its <option> children independently of
- * the trigger, so picking a colored method (e.g. POST → blue) would bleed
- * the color into every other option. This component renders each option as
- * a real <button>, so each one can be tinted by `methodColorVar`.
+ * 替掉原生 `<select>`：原生控件无法把 `<option>` 子项与触发器分开上色，于是选中
+ * 某个带色的方法（如 POST → 蓝）会把颜色渗到每个其他选项上。本组件把每个选项渲染
+ * 成真正的 `<button>`，各自按 `methodColorVar` 上色。
  *
- * The trigger shows a **MethodPill** (solid flavour) so the chosen verb
- * reads as the affordance rather than as plain coloured text. Dropdown
- * rows use the same pill but in the **tinted** flavour so they don't
- * out-shout the row content.
+ * 触发器显示 **solid** 口味的 **MethodPill**，好让选中的动词读作控件而不是一段
+ * 彩色文字；下拉行用同一枚药丸的 **tinted** 口味，免得比行内容更抢眼。
  *
- * Interaction:
- *  - Click trigger → toggle open / close
- *  - Click outside (mousedown) → close
- *  - Esc → close
- *  - ↑ / ↓ → move active index (does not commit)
- *  - Enter → commit active option and close
- *  - Tab → close (default tab navigation is preserved)
- *  - Click an option → commit and close
+ * 交互：
+ *  - 点触发器 → 开 / 关
+ *  - 点外部（mousedown）→ 关
+ *  - Esc → 关
+ *  - ↑ / ↓ → 移动 active 下标（不提交）
+ *  - Enter → 提交 active 选项并关闭
+ *  - Tab → 关（默认 tab 导航保留）
+ *  - 点某个选项 → 提交并关闭
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -45,9 +41,8 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // Each time the picker opens, re-anchor the keyboard cursor to the
-  // currently selected method. Mid-session ↑/↓ moves are not disturbed by
-  // external value changes (those should be rare while the popover is up).
+  // 每次打开时把键盘游标重新锚到当前选中的方法上。会话中途的 ↑/↓ 移动不会被外部
+  // value 变化打断（弹层开着时这类变化本应很少见）。
   useEffect(() => {
     if (!open) return;
     const i = HTTP_METHODS.indexOf(value);
@@ -55,15 +50,14 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, value]);
 
-  // Focus follows activeIndex while open. Closing unmounts the list, so we
-  // only need to drive focus while `open` is true.
+  // 打开期间焦点跟随 activeIndex。关闭时列表卸载，所以只在 `open` 为真时驱动焦点。
   useEffect(() => {
     if (!open) return;
     const el = optionRefs.current[activeIndex];
     el?.focus();
   }, [open, activeIndex]);
 
-  // Click outside closes.
+  // 点外部关闭。
   useEffect(() => {
     if (!open) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -75,9 +69,8 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [open]);
 
-  // Keyboard handling while the popover is open. We attach to `document` so
-  // navigation works regardless of whether focus is on the trigger or on
-  // an option (the option gets focus on open via the effect above).
+  // 弹层打开期间的键盘处理。挂在 `document` 上，这样无论焦点在触发器还是在某个选项
+  // 上（选项在打开时由上面的 effect 取得焦点），导航都生效。
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -106,8 +99,7 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
         return;
       }
       if (e.key === 'Tab') {
-        // Per spec: do NOT preventDefault — let normal tab navigation
-        // proceed. Just close the popover.
+        // 按约定：不 preventDefault——让正常的 tab 导航照常走，只把弹层关掉。
         setOpen(false);
       }
     };
@@ -167,17 +159,15 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
                     'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs outline-none transition-colors',
                     'hover:bg-accent',
                     'focus:bg-accent',
-                    // Selected or keyboard-active row gets the same accent
-                    // bg to mirror the trigger affordance.
+                    // 选中行与键盘 active 行用同一个 accent 底色，与触发器的控件感一致
                     (isActive || isSelected) && 'bg-accent',
                   )}
                 >
                   <MethodPill
                     method={m}
                     size="sm"
-                    // Selected row goes solid (mirrors the trigger);
-                    // other rows stay tinted so the dropdown doesn't
-                    // shout louder than the row content it accompanies.
+                    // 选中行用 solid（与触发器一致）；其余行保持 tinted，免得下拉比它伴随的
+                    // 行内容更抢眼
                     variant={isSelected ? 'solid' : 'tinted'}
                   />
                 </button>

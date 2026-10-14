@@ -1,26 +1,20 @@
 /**
- * Common HTTP request headers, used by the KeyValueEditor's datalist
- * autocomplete on the Headers tab.
+ * 常用 HTTP 请求头，供 Headers 页 KeyValueEditor 的 datalist 自动补全使用。
  *
- * The list is intentionally short and grouped by *intent*, not by spec
- * alphabet — when the user types `a` we want `Authorization` near the
- * top, not buried behind `Accept-CH`. Order inside the array is the
- * display order in the datalist (Chrome/Firefox honor it; Safari sorts
- * alphabetically — we accept that).
+ * 这份列表刻意短，并按*意图*而非 spec 字母序分组——用户敲 `a` 时要看到
+ * `Authorization`，而不是被 `Accept-CH` 埋在后面。数组内的顺序就是 datalist 的
+ * 显示顺序（Chrome/Firefox 遵守，Safari 按字母排——接受之）。
  *
- * Entries:
- *   - `name`: the literal header name. Will fill the key field.
- *   - `description`: one-line tooltip / dropdown subtitle. Shown when
- *     the editor renders a richer datalist; the basic <datalist> only
- *     shows `name`.
- *   - `placeholderValue?`: optional "fill the value" hint shown in the
- *     description (e.g. "Bearer xxx" for Authorization). We don't
- *     auto-fill — that would be too magical — but the hint nudges the
- *     user toward the right format.
- *   - `source?`: `builtin` for the curated list below, `recent` for
- *     names harvested from the user's own endpoints. Surfaced so the
- *     editor can label "最近用过" if it wants to render a richer UI
- *     than a plain <datalist>.
+ * 条目字段：
+ *   - `name`：字面 header 名，会填进 key 字段。
+ *   - `description`：单行 tooltip / 下拉副标题。编辑器渲染更丰富的 datalist 时
+ *     展示；基础 `<datalist>` 只显示 `name`。
+ *   - `placeholderValue?`：可选的「值该长什么样」提示，显示在 description 里
+ *     （如 Authorization 的 `Bearer xxx`）。不自动填——那太魔法——但提示把用户
+ *     往正确格式上引。
+ *   - `source?`：内置列表是 `builtin`，从用户自己 endpoint 里收来的名字是
+ *     `recent`。暴露出来，好让编辑器在渲染比裸 `<datalist>` 更丰富的 UI 时标注
+ *     「最近用过」。
  */
 export interface CommonHeader {
   name: string;
@@ -30,19 +24,15 @@ export interface CommonHeader {
 }
 
 /**
- * Build the merged suggestion list the editor consumes.
+ * 构造编辑器消费的合并建议列表。
  *
- *   1. Walk every endpoint's headers and collect the *enabled* non-empty
- *      keys. These become the `recent` bucket — i.e. the user's own
- *      "global" headers, matching what Apifox surfaces in its global
- *      header autocomplete.
- *   2. Pull any recent names that aren't already in the built-in list
- *      to the front, preserving first-seen order (most-recent wins).
- *   3. Append the built-in list, deduped against the recent entries
- *      (case-insensitive on header name).
+ *   1. 遍历每个 endpoint 的 headers，收集**启用**且非空的 key。它们成为 `recent`
+ *      桶——即用户自己的「全局」header，与 Apifox 全局 header 自动补全展示的一致。
+ *   2. 把不在内置列表里的 recent 名字提到最前，保持首次出现顺序（最近用的优先）。
+ *   3. 追加内置列表，按 header 名不分大小写去重。
  *
- * Pure function — `endpoints` is the raw `endpoints` slice from the
- * store; filtering / sorting happens here so callers stay simple.
+ * 纯函数——`endpoints` 是 store 的原始 `endpoints` 切片；过滤与排序都在这里做，
+ * 调用方保持简单。
  */
 export function buildHeaderSuggestions(
   endpoints: ReadonlyArray<{ headers: ReadonlyArray<{ key: string; enabled: boolean }> }>,
@@ -73,7 +63,7 @@ export function buildHeaderSuggestions(
 }
 
 export const COMMON_HEADERS: readonly CommonHeader[] = [
-  // ---------- identity / auth ----------
+  // ---------- 身份 / 认证 ----------
   {
     name: 'Authorization',
     description: '凭据令牌(Bearer / Basic / 自定义方案)',
@@ -93,7 +83,7 @@ export const COMMON_HEADERS: readonly CommonHeader[] = [
     description: '认证 token(部分厂商约定头)',
   },
 
-  // ---------- content negotiation ----------
+  // ---------- 内容协商 ----------
   {
     name: 'Content-Type',
     description: '请求体媒体类型',
@@ -119,7 +109,7 @@ export const COMMON_HEADERS: readonly CommonHeader[] = [
     description: '客户端提示,告知服务端可发送的偏好字段',
   },
 
-  // ---------- cache / freshness ----------
+  // ---------- 缓存 / 新鲜度 ----------
   {
     name: 'Cache-Control',
     description: '缓存指令',
@@ -142,7 +132,7 @@ export const COMMON_HEADERS: readonly CommonHeader[] = [
     description: '资源标识符',
   },
 
-  // ---------- cors / security ----------
+  // ---------- CORS / 安全 ----------
   {
     name: 'Origin',
     description: '请求来源(浏览器跨域时自动加)',
@@ -165,14 +155,14 @@ export const COMMON_HEADERS: readonly CommonHeader[] = [
     description: '网关设置的原始客户端 IP',
   },
 
-  // ---------- user agent ----------
+  // ---------- User-Agent ----------
   {
     name: 'User-Agent',
     description: '客户端标识',
     placeholderValue: 'simple-post/0.1',
   },
 
-  // ---------- tracing / observability ----------
+  // ---------- 追踪 / 可观测性 ----------
   {
     name: 'X-Request-Id',
     description: '请求唯一 ID,便于服务端日志关联',
@@ -186,7 +176,7 @@ export const COMMON_HEADERS: readonly CommonHeader[] = [
     description: 'W3C Trace Context 父 span 信息',
   },
 
-  // ---------- misc ----------
+  // ---------- 杂项 ----------
   {
     name: 'Host',
     description: '目标主机(由 URL 推导,通常无需手动设置)',
