@@ -248,6 +248,7 @@ pub fn set_var(
 ///   - 环境不存在时 [`AppError::NotFound`]
 ///   - [`AppError::Validation`]：`from_key` 不存在（没东西可改）、`to_key` 已存在（拒绝覆盖
 ///     另一个变量），或 `from_key == to_key`（无操作的改名几乎总是 UI bug）
+///
 /// 返回更新后的 [`Environment`]，调用方回显权威行而非乐观猜测。
 pub fn rename_var(
     conn: &mut Connection,

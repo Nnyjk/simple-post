@@ -30,7 +30,6 @@ fn set_cell(env: &mut Environment, def_id: &str, module: &str, url: &str) {
 }
 
 /// 项目的服务列表：项目级、扁平，`data` 持★。
-
 fn project_with_defs() -> Project {
     Project {
         id: "p1".into(),
@@ -57,7 +56,6 @@ fn project_with_defs() -> Project {
 }
 
 /// 只带模块上下文的覆盖值，供那些关注替换、需要可解析 base URL 但没有草稿的测试用。
-
 fn in_module_a() -> EndpointOverrides {
     EndpointOverrides {
         module_id: Some(MOD_A.to_string()),
@@ -89,7 +87,6 @@ fn minimal_endpoint() -> EndpointDetail {
 // 两个模块指向不同 host，而空格子是一个真实答案，不是可以穿过去的洞。
 
 /// 每个 (服务 × 模块) 各持一个不同 URL 的环境，好让「模块取错」无法伪装成「取对了」。
-
 fn env_with_two_modules() -> Environment {
     let mut env = empty_env();
     set_cell(&mut env, "data", MOD_A, "https://mod-a.example.com");
