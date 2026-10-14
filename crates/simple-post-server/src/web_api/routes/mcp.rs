@@ -38,7 +38,7 @@ pub(crate) async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<McpStatus
 pub(crate) async fn mcp_http_config_get(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<crate::domain::McpHttpConfig>, HttpErrorResponse> {
-    crate::commands::read_http_config(&s.pool)
+    crate::http_config::read_http_config(&s.pool)
         .map(Json)
         .map_err(map_app_error)
 }
@@ -82,8 +82,8 @@ impl McpHttpConfigBody {
 pub(crate) async fn mcp_http_config_put(
     State(s): State<Arc<WebState>>,
     Json(body): Json<McpHttpConfigBody>,
-) -> Result<Json<crate::commands::McpHttpConfigDto>, HttpErrorResponse> {
-    crate::commands::write_http_config(&s.pool, body.into_config())
+) -> Result<Json<crate::http_config::McpHttpConfigDto>, HttpErrorResponse> {
+    crate::http_config::write_http_config(&s.pool, body.into_config())
         .map(Json)
         .map_err(map_app_error)
 }
@@ -180,16 +180,16 @@ pub(crate) async fn mcp_capability_list_tools(
 /// then releases `mcp.port`.
 pub(crate) async fn mcp_stop(
     State(s): State<Arc<WebState>>,
-) -> Result<Json<crate::commands::RestartResult>, HttpErrorResponse> {
+) -> Result<Json<crate::dto::RestartResult>, HttpErrorResponse> {
     match s.daemon.stop().await {
-        Ok(snapshot) => Ok(Json(crate::commands::RestartResult {
+        Ok(snapshot) => Ok(Json(crate::dto::RestartResult {
             ok: true,
             pid: snapshot.pid,
             port: snapshot.port,
         })),
         Err(e) => {
             eprintln!("[mcp_stop] failed: {e:?}");
-            Ok(Json(crate::commands::RestartResult {
+            Ok(Json(crate::dto::RestartResult {
                 ok: false,
                 pid: None,
                 port: None,
@@ -214,19 +214,19 @@ pub(crate) async fn mcp_stop(
 /// `{ ok: false, pid: null, port: null }` exactly as restart does.
 pub(crate) async fn mcp_start(
     State(s): State<Arc<WebState>>,
-) -> Result<Json<crate::commands::RestartResult>, HttpErrorResponse> {
+) -> Result<Json<crate::dto::RestartResult>, HttpErrorResponse> {
     // No `AppHandle` outside of Tauri, so this is the `serve-web`
     // binding of the shared supervisor path: it derives nothing from
     // Tauri, and takes the data dir the server was started with.
     match s.daemon.start_without_app_handle(&s.data_dir).await {
-        Ok(snapshot) => Ok(Json(crate::commands::RestartResult {
+        Ok(snapshot) => Ok(Json(crate::dto::RestartResult {
             ok: true,
             pid: snapshot.pid,
             port: snapshot.port,
         })),
         Err(e) => {
             eprintln!("[mcp_start] failed: {e:?}");
-            Ok(Json(crate::commands::RestartResult {
+            Ok(Json(crate::dto::RestartResult {
                 ok: false,
                 pid: None,
                 port: None,
@@ -247,18 +247,18 @@ pub(crate) async fn mcp_start(
 /// contract for the UI.
 pub(crate) async fn mcp_restart(
     State(s): State<Arc<WebState>>,
-) -> Result<Json<crate::commands::RestartResult>, HttpErrorResponse> {
+) -> Result<Json<crate::dto::RestartResult>, HttpErrorResponse> {
     // Same swallow-error envelope as the Tauri command
     // (`mcp_daemon_restart`). Errors surface as `{ ok: false, pid:
     // null, port: null }` rather than as a 5xx, so the web UI's
     // restart action keeps a uniform `{ ok: bool }` contract.
     let result = match s.daemon.restart_without_app_handle(&s.data_dir).await {
-        Ok(snapshot) => crate::commands::RestartResult {
+        Ok(snapshot) => crate::dto::RestartResult {
             ok: true,
             pid: snapshot.pid,
             port: snapshot.port,
         },
-        Err(_) => crate::commands::RestartResult {
+        Err(_) => crate::dto::RestartResult {
             ok: false,
             pid: None,
             port: None,

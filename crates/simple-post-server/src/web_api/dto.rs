@@ -43,8 +43,8 @@ pub struct McpStatusDto {
     pub last_error: Option<String>,
 }
 
-impl From<crate::commands::McpStatusDto> for McpStatusDto {
-    fn from(s: crate::commands::McpStatusDto) -> Self {
+impl From<crate::dto::McpStatusDto> for McpStatusDto {
+    fn from(s: crate::dto::McpStatusDto) -> Self {
         // The Tauri command DTO already has the right shape — copy
         // field-by-field so a future rename on either side doesn't
         // silently desync.
@@ -203,7 +203,7 @@ pub struct NodeCreateBody {
     /// Reusing the command's type is what keeps the two transports from
     /// drifting apart again.
     #[serde(default)]
-    pub detail: Option<crate::commands::CreateEndpointDetailOpts>,
+    pub detail: Option<crate::dto::CreateEndpointDetailOpts>,
 }
 
 /// The structural half of a `POST /api/nodes` body.
