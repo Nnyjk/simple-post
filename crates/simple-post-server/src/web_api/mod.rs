@@ -106,6 +106,19 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
 
     let api = Router::new()
         .route("/api/healthz", get(healthz))
+        // Unprefixed alias for the same probe.
+        //
+        // `auth::is_public_path` has always listed `/healthz`, and it is the
+        // path every deployment doc, the container healthcheck and
+        // `scripts/test-web-basepath.mjs` name — but no route was ever
+        // registered for it. With no match it fell through to the SPA
+        // fallback and answered `200 text/html` (the shell), which is
+        // indistinguishable from success to a probe that only greps for
+        // `200 OK`, and `404` outright once the router is nested under a
+        // base path. A health probe that cannot fail is worse than none.
+        //
+        // The handler is shared, so the two paths cannot drift.
+        .route("/healthz", get(healthz))
         // ---- projects (already existed) ----
         .route("/api/projects", get(projects_list).post(projects_create))
         .route(
@@ -257,10 +270,19 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // `index.html` fallback — so every JS/CSS request returned 200 with
     // `text/html`, the SPA never booted, and the app was blank. Status-code
     // assertions cannot see this; the body content-type is the tell.
-    let spa_clone = spa_dir.clone();
-    let serve_dir = ServeDir::new(spa_dir.clone()).fallback(
-        tower_http::services::fs::ServeFile::new(spa_dir.join("index.html")),
-    );
+    //
+    // The fallback is the base-aware shell, not a plain `ServeFile`:
+    // a deep link (`/sp/some/route`) has to come back with asset URLs
+    // the browser can resolve, or a refresh on that URL blanks the app.
+    let serve_dir = ServeDir::new(spa_dir.clone()).fallback(axum::routing::any({
+        let spa_fallback = spa_dir.clone();
+        let base_fallback = base_path.clone();
+        move || {
+            let spa = spa_fallback.clone();
+            let base = base_fallback.clone();
+            async move { spa_index(spa, base).await }
+        }
+    }));
 
     // Pull base_path before the auth layer consumes `state` (the layer
     // takes ownership of a clone of `state.password`).
@@ -275,14 +297,21 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // password-protected `serve-web` — which the README calls mandatory —
     // returned the shell at `/` but 401 for every JS/CSS file, so the app
     // rendered blank in the exact deployment the docs push.
-    let guarded = Router::new()
-        .merge(api)
-        .merge(mcp_routes)
-        .route("/", get(move || spa_index(spa_clone)))
-        .layer(axum::middleware::from_fn_with_state(
-            auth_state,
-            crate::auth::auth_middleware,
-        ));
+    let guarded = {
+        let spa_root = spa_dir.clone();
+        let base_root = base_path.clone();
+        Router::new()
+            .merge(api)
+            .merge(mcp_routes)
+            .route(
+                "/",
+                get(move || spa_index(spa_root.clone(), base_root.clone())),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                auth_state,
+                crate::auth::auth_middleware,
+            ))
+    };
 
     // Everything not matched above is static: `/assets/*` (hashed JS/CSS),
     // `/favicon.svg`, and any client-side route, which falls back to the
@@ -298,6 +327,13 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // the SPA fallback) is mounted under the prefix and `MatchedPath`
     // inside handlers reflects the strip-prefix path. When unset the
     // router is served at root.
+    //
+    // Nothing is republished outside the prefix any more. The shell
+    // carries the prefix in its own asset URLs and hands the renderer the
+    // value it needs for API calls — see `static_files::shell_with_base`.
+    // The earlier `nest_service("/assets", …)` half-fix is gone: it made
+    // `<script src>` resolve but left every `fetch('/api/…')` 404ing, and
+    // it served the static tree outside the prefix the operator asked for.
     match base_path.as_deref() {
         Some(p) if !p.is_empty() => {
             eprintln!("[serve-web] base_path: {p}");
@@ -313,22 +349,11 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             // which lists `/`), and the API underneath stays protected.
             let prefix = p.trim_end_matches('/');
             let spa_shell = spa_dir.clone();
-            Router::new()
-                .nest(prefix, inner)
-                // The SPA shell references its bundle with **absolute**
-                // URLs (`<script src="/assets/index-<hash>.js">`), so
-                // nesting the router under `/sp` alone is not enough: the
-                // browser would ask for `/assets/...`, which the nested
-                // router never sees. Re-publish the static tree at the bare
-                // `/assets` prefix so the documented deployment works
-                // without requiring a hand-written rewrite in nginx.
-                //
-                // `nest_service` strips `/assets` before handing the
-                // request to ServeDir, so it resolves
-                // `dist/assets/<file>` — the same files `/sp/assets/*`
-                // serves through the nested fallback.
-                .nest_service("/assets", ServeDir::new(spa_dir.join("assets")))
-                .route(&format!("{prefix}/"), get(move || spa_index(spa_shell)))
+            let base_shell = base_path.clone();
+            Router::new().nest(prefix, inner).route(
+                &format!("{prefix}/"),
+                get(move || spa_index(spa_shell.clone(), base_shell.clone())),
+            )
         }
         _ => inner,
     }
