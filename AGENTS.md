@@ -130,6 +130,15 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **Naming.** Rust: `snake_case` functions/modules/columns, `PascalCase` types. Tauri commands `snake_case` in Rust, `camelCase` in the frontend `COMMANDS` registry. Test files: `*.test.ts`; Rust tests go in a **sibling** `*_test.rs` file mounted by `#[path]`, not inline (the inline form survives only in a few files under `src-tauri/` — see Testing & QA).
 
+**Source comments — two rules, both binding on Rust and TS sources.** Comments in this repo had drifted into a retrospective style — "This shipped once on x", "both ways to silently become a no-op, and both shipped" — with no rule ever stated, which is how the drift went unnoticed. Two explicit rules now govern every comment. A repaired defect is not a constraint, so narrative about one is dead weight for whoever reads the code next.
+
+1. **Only what holds _now_.** Delete past-tense narrative — `// shipped once on api_call_endpoint`, `// early versions made nginx strip the prefix`, `// used to render a ghost row here`. Keep current invariants — `// may point at a row outside the current list; check membership before use`, `// cannot use sort here: sort is stable and that breaks the server's same-millisecond rowid DESC tiebreak`. The discriminator is not how much a comment says, it is whether the constraint it names still holds. An invariant no reader can reconstruct from the code is worth keeping; a bug that is already fixed is not.
+2. **Chinese, terse, one point per comment.** Compress prose to the conclusion plus the reason it matters, and keep only the part of the reason that says what breaks if you write it the obvious way. Do not restate the code — the code is the documentation. One to three lines; use a short list when it genuinely has to expand.
+
+Identifiers, keywords, API names, column names and wire strings stay as written: they are not translatable prose. A comment that must quote code should quote the smallest fragment that carries the constraint.
+
+One hazard specific to this repo: some regression tests read the source **as text** (`include_str!` in `mcp/mod_test.rs`), and `no_gate_is_passed_the_literal_global` does *not* skip comment lines — it looks for `check_permission(` and `"global"` in the same statement. Never write that call shape as a comment example there, or the test goes red on a prose change. Do not loosen those tests or delete them to make a comment edit pass.
+
 **Async/concurrency.** tokio multi-thread runtime; metrics via `AtomicU64` with `Ordering::Relaxed`; `port_registry.rs` uses OS atomic file creation (`create_new`) to prevent multi-instance races.
 
 **MCP stdout discipline.** In `simple-post-mcp`, stdout carries *only* JSON-RPC frames; all logging, panics, and `__mcp_metrics__{…}` telemetry go to **stderr**. Non-JSON on stdout crashes AI clients.
