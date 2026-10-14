@@ -1,0 +1,127 @@
+# =============================================================================
+# simple-post — Docker Swarm stack
+#
+#     docker volume create simple-post-data      # swarm does NOT create it
+#     docker build  -t simple-post:local . && docker push <registry>/simple-post:local
+#     docker stack deploy -c docker-swarm.yml simple-post
+#     docker stack services simple-post
+#
+# `docker stack deploy` only honours a subset of the Compose spec, so this
+# file deliberately avoids: `build:` (silently ignored — swarm pulls the
+# image instead), top-level `version:` (rejected), `container_name`
+# (rejected: swarm tasks are named by the scheduler), and every
+# `deploy`-section key that has no Swarm implementation.
+# =============================================================================
+
+services:
+  simple-post:
+    # No `build:`. Swarm resolves this tag through a registry, so on a
+    # multi-node cluster the image must be pushed (and every node must be
+    # able to pull it) before the stack is deployed. The compose-file copy
+    # keeps the same `simple-post:local` tag so the two paths agree on what
+    # "the image" means.
+    image: simple-post:local
+
+    environment:
+      SIMPLE_POST_DATA_DIR: /data
+
+      # See docker-compose.yml for the full warning: an empty password leaves
+      # `/api/*` and `/mcp` unauthenticated on a `0.0.0.0` listener.
+      SIMPLE_POST_WEB_PASSWORD: ${SP_WEB_PASSWORD:-}
+      RUST_LOG: ${SP_RUST_LOG:-info}
+
+      # SIMPLE_POST_PUBLIC_BASE_PATH: ${SP_PUBLIC_BASE_PATH}
+      # SIMPLE_POST_BLOCK_PRIVATE_NET: 1
+
+    ports:
+      # Published on every node in the cluster, not just the one running the
+      # task. `- ${SP_WEB_BIND:-4173}:4173`
+      - '${SP_WEB_BIND:-4173}:4173'
+
+    volumes:
+      # `driver: local` + `docker volume create` on one specific node — the
+      # volume is **node-local**, so it does not follow the task to another
+      # node. That is precisely why replicas is 1 (see below); if you ever
+      # need multi-node durability, move the store off SQLite or put the
+      # volume on shared storage and re-evaluate the WAL assumption.
+      - simple-post-data:/data
+
+    healthcheck:
+      test: ['CMD', '/usr/local/bin/simple-post-healthcheck']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    deploy:
+      # -------------------------------------------------------------------------
+      # replicas: 1 — do not raise this.
+      #
+      # The store is a single SQLite file in WAL mode. WAL relies on shared-
+      # memory index files (`-shm` / `-wal`) that only work when every reader
+      # and writer sees the same filesystem, so WAL on a network volume is
+      # already unsafe. Running two writers on the same file makes it worse:
+      # they interleave transactions, `with_tx` retries three times and then
+      # gives up with SQLITE_BUSY, and `mcp.port` (a single-writer OS-atomic
+      # file) can only have one owner.
+      #
+      # If you need availability, the answer is a real replicated database —
+      # not a second replica of this container.
+      # -------------------------------------------------------------------------
+      replicas: 1
+
+      # `vip` is the default and, with one replica, behaves the same as
+      # `dnsrr` here. It matters only if the file is ever reused with more
+      # than one replica: vip load-balances across the replicas behind a
+      # virtual IP, dnsrr hands out container IPs via DNS. Either way the
+      # traffic is plain TCP over the default **overlay** network, so the
+      # bearer password above is the only thing standing between a
+      # same-cluster task and the whole API.
+      endpoint_mode: vip
+
+      update_config:
+        # start-first, not stop-first: the new task comes up (and must pass
+        # its healthcheck) before the old one is drained. There is a brief
+        # window where two tasks accept connections, which for a single-
+        # writer SQLite file means two writers — the same constraint the
+        # replicas: 1 comment is about. Swap to stop-first if that matters
+        # more than zero-downtime updates; the store is WAL, so a clean stop
+        # is always safe.
+        order: start-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 30s
+        max_failure_ratio: 0.3
+
+      rollback_config:
+        order: stop-first
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        monitor: 30s
+        max_failure_ratio: 0.3
+
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+      resources:
+        limits:
+          # The release profile is `opt-level = "s"`, so the resident set is
+          # small; this is a guard against a runaway outbound request batch,
+          # not a sizing recommendation.
+          memory: 512M
+
+      # Uncomment to pin the task to the node holding the node-local volume
+      # above (and create that volume on that same node):
+      #   docker volume create --driver local simple-post-data
+      # placement:
+      #   constraints:
+      #     - node.labels.simple_post_data == "true"
+
+volumes:
+  simple-post-data:
+    driver: local

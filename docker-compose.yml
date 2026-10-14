@@ -1,0 +1,89 @@
+# =============================================================================
+# simple-post — Docker Compose deployment
+#
+# The same file shape is accepted by `docker stack deploy` (see
+# docker-swarm.yml for the swarm-flavoured copy), which is why there is no
+# `build:` key here and no top-level `version:` — `docker stack deploy`
+# ignores the first and rejects the second. Build the image first:
+#
+#     docker build -t simple-post:local .
+#     docker compose up -d
+#
+# Image entrypoint (baked into the image, not repeated here):
+#     simple-post-server serve-web --bind 0.0.0.0 --port 4173 \
+#         --spa-dir /app/spa --data-dir /data
+# =============================================================================
+
+services:
+  simple-post:
+    # Local tag — there is no registry push in v0.1. Swap in a registry
+    # reference when one exists; nothing else in this file has to change.
+    image: simple-post:local
+    container_name: simple-post
+    restart: unless-stopped
+
+    # Host port is configurable; the container port is fixed at 4173 because
+    # it is what the image's CMD binds and what EXPOSE advertises.
+    ports:
+      - '${SP_WEB_BIND:-4173}:4173'
+
+    environment:
+      # Volume mount target. Matches the image's ENV and its `--data-dir`,
+      # so the SQLite store (plus `mcp.port` and the preferences row) all
+      # land in the named volume below.
+      SIMPLE_POST_DATA_DIR: /data
+
+      # Bearer password for `/api/*` + `/mcp`.
+      #
+      # ⚠️  THIS IS NOT SAFE TO OMIT. With an empty password `auth_middleware`
+      # is a no-op, so `/api/*` and `/mcp` are served **unauthenticated** —
+      # and because the image binds `0.0.0.0`, that publishes the whole API
+      # (including `POST /api/http/send`, an arbitrary-URL egress) to
+      # everything that can reach port 4173. Set it:
+      #
+      #     echo 'SP_WEB_PASSWORD=<long random string>' >> .env
+      #
+      # Only `/healthz`, `/api/healthz`, `/mcp/healthz`, `/assets/*` and the
+      # SPA shell stay public regardless — see README 「部署到服务器」.
+      SIMPLE_POST_WEB_PASSWORD: ${SP_WEB_PASSWORD:-}
+
+      # tracing-subscriber filter. Unset means "info and above".
+      RUST_LOG: ${SP_RUST_LOG:-info}
+
+      # ---- reverse-proxy deployments only ------------------------------
+      # Mounting at https://host/sp/ ? Uncomment and set SP_PUBLIC_BASE_PATH
+      # in .env. build_router nests the *entire* router under the prefix,
+      # so `/healthz` moves to `/sp/healthz` along with everything else.
+      # The image's healthcheck reads this same variable and probes the
+      # prefixed path, so the container stays healthy either way — you do
+      # not need to override `healthcheck:` here.
+      #
+      # NOTE: do not ship an empty value here. clap reads it from the env and
+      # an empty string is a *set* value that fails the "must start with /"
+      # validation, so leave the key commented out instead of blank.
+      # SIMPLE_POST_PUBLIC_BASE_PATH: ${SP_PUBLIC_BASE_PATH}
+
+      # ---- outbound hardening -------------------------------------------
+      # `POST /api/http/send` accepts an arbitrary http(s) URL by design, and
+      # private ranges are NOT blocked by default (desktop users legitimately
+      # hit localhost:3000). In a container "localhost" is the container
+      # itself, so the usual false positives mostly disappear — on a shared or
+      # public host, set this to 1 to reject loopback / RFC1918 / link-local
+      # (including cloud metadata at 169.254.169.254) / CGNAT.
+      # SIMPLE_POST_BLOCK_PRIVATE_NET: 1
+
+    volumes:
+      - simple-post-data:/data
+
+    # Same probe the image declares, restated so `docker compose ps` shows it.
+    # `/healthz` is on the always-unauthenticated bypass list.
+    healthcheck:
+      test: ['CMD', '/usr/local/bin/simple-post-healthcheck']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  simple-post-data:
+    driver: local
