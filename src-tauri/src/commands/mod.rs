@@ -1,41 +1,24 @@
-//! All Tauri commands exposed to the renderer.
+//! 暴露给渲染进程的 Tauri 命令。
 //!
-//! Each `#[tauri::command]` is a thin wrapper around the corresponding
-//! `crate::db::...` data-access function; the `send` module additionally
-//! holds the shared endpoint-send entry point used by both transports.
-//! Argument shapes are kept aligned with the TS contract in
-//! `src/types/domain.ts` and the call sites in `src/lib/tauri*.ts`.
-//! Renames on the wire follow Tauri 2 defaults (`camelCase`).
+//! 每个 `#[tauri::command]` 都是对应 `crate::db::…` 的一层薄壳；参数形状对齐
+//! `src/types/domain.ts` 与 `src/lib/tauri*.ts`，线上重命名按 Tauri 2 默认走 `camelCase`。
 //!
-//! Authority split:
-//!   * Mutations write through `crate::db::with_tx` so partial state
-//!     never escapes.
-//!   * Reads go through `crate::db::with_conn` (read-only transaction).
-//!   * The `mcp_status` command is the one exception — it pulls from
-//!     `crate::daemon_supervisor::McpDaemonHandle`, not the DB. The DTO
-//!     shape used by both sides is declared here: see [`McpStatusDto`].
+//! 取舍：
+//!   * 写走 `crate::db::with_tx`，中间态不外泄；读走 `crate::db::with_conn`。
+//!   * `mcp_status` 例外：它读 `crate::daemon_supervisor::McpDaemonHandle` 而非 DB，
+//!     两侧共用的 DTO 见 [`McpStatusDto`]。
+//!   * 共享形状放 `crate::domain`；放不进去的创建选项与移动目标放 [`dto`]。
 //!
-//! Patch types come from `crate::domain` (the canonical place for
-//! shared shapes). Create-options and move-targets that don't fit the
-//! domain crate live in [`dto`] as small adapter DTOs.
+//! 布局照 `web_api/routes/`：一个资源一个模块，`dto` 放共用线上形状。子模块私有，
+//! 在此 `pub use` 出去，`lib.rs` 的 `generate_handler!` 与 `web_api/` 的 REST handler
+//! 都靠 `crate::commands::<name>` 解析。
 //!
-//! Layout mirrors `web_api/routes/`: one module per resource, the
-//! shared wire shapes in `dto`, and `send` holding the one place a
-//! configured endpoint becomes an outbound HTTP request. The modules
-//! themselves are private — everything below is re-exported here, so
-//! `crate::commands::<name>` keeps resolving for `generate_handler!`
-//! in `lib.rs` and for the REST handlers in `web_api/`.
-//!
-//! Note on `uid` and the default project color: they live in
-//! `crate::domain` (re-exported from `simple-post-core::domain`). The
-//! `db` crate also re-uses them, so keeping a single definition avoids
-//! drift between REST, Tauri command, and SQLite test paths.
+//! `uid` 与项目默认色定义在 `crate::domain`，`db` crate 也复用，单一定义以免 REST、
+//! Tauri 命令与 SQLite 测试路径三方漂移。
 
 mod base_url_defs;
-// `pub(crate)` because the REST route deserialises the same
-// `CreateProjectOpts` the Tauri command takes — the two transports have
-// to agree on what a create carries, and two copies of the DTO would be
-// exactly the drift this file's header warns about.
+// `pub(crate)`：REST 路由反序列化的是 Tauri 命令同一个 `CreateProjectOpts`，两个传输
+// 必须对「创建带什么」达成一致，各存一份 DTO 正是本文件开头警告的漂移。
 pub(crate) mod dto;
 mod environments;
 mod mcp_auto_start;
@@ -48,14 +31,10 @@ mod projects;
 mod request_settings;
 mod response_history;
 
-// The globs (not item lists) are load-bearing: `#[tauri::command]` also emits
-// two `#[macro_export]`ed helper macros next to the function —
-// `__cmd__<name>` and `__tauri_command_name_<name>` — and
-// `generate_handler!` rewrites `crate::commands::<name>` into a call to
-// `crate::commands::__cmd__<name>`, i.e. it resolves the macro *through the
-// path's module*, not through the crate-root alias `#[macro_export]` also
-// creates. A glob carries those macros up to `commands`; an item list would
-// leave them behind in the submodule and E0433 would follow.
+// 必须是 glob，不能列条目：`#[tauri::command]` 除函数外还生成两个
+// `#[macro_export]` 宏（`__cmd__<name>`、`__tauri_command_name_<name>`），
+// 而 `generate_handler!` 把 `crate::commands::<name>` 改写成对 `crate::commands::__cmd__<name>`
+// 的调用，是经该路径所在模块解析宏，而非经 crate 根的别名。列条目会把宏留在子模块，E0433 随后而来。
 pub use base_url_defs::*;
 pub use dto::*;
 pub use environments::*;

@@ -8,9 +8,8 @@ use crate::error::AppError;
 
 use super::dto::{McpStatusDto, RestartResult};
 
-/// Snapshot of the MCP daemon. Reads from the in-memory handle held
-/// in Tauri state — does NOT touch the DB. The handle's `snapshot()`
-/// must return [`McpStatusDto`].
+/// MCP daemon 快照。读 Tauri state 里的内存 handle，完全不碰 DB。
+/// `snapshot()` 必须返回 [`McpStatusDto`]。
 #[tauri::command]
 pub fn mcp_status(
     state: State<crate::daemon_supervisor::McpDaemonHandle>,
@@ -18,27 +17,13 @@ pub fn mcp_status(
     Ok(state.snapshot())
 }
 
-/// Absolute path of the `simple-post-mcp` binary that AI clients
-/// (Claude Desktop, Cursor, …) launch in their `mcpServers` config.
+/// AI 客户端在 `mcpServers` 里启动的 `simple-post-mcp` 绝对路径，供连接面板的
+/// 「复制代理路径」直接粘贴。
 ///
-/// The renderer surfaces this string verbatim in the Connection panel's
-/// "copy proxy path" button so the user can paste it into their client.
-/// We resolve from `current_exe()` (the running Tauri process) and
-/// substitute the trailing `simple-post(.exe)` segment with
-/// `simple-post-mcp(.exe)` — the two binaries ship in the same
-/// workspace `target/<profile>/` directory after `cargo build
-/// --workspace`.
+/// 取 `current_exe()` 的所在目录：两个二进制经 `cargo build --workspace` 落在同一
+/// `target/<profile>/`，没有 npm 包装路径可指。
 ///
-/// In a development checkout the simple-post Tauri binary lives at
-/// `src-tauri/target/<profile>/simple-post(.exe)` while simple-post-mcp
-/// is at the workspace root `target/<profile>/simple-post-mcp(.exe)`;
-/// this command returns the same directory as `current_exe` so the
-/// hint is correct for installed / packaged builds. There is no
-/// npm-wrapped path, so this directory is the only one to point at.
-///
-/// Returns `"<unresolved current_exe>"` when the lookup fails for any
-/// reason; the renderer treats that string as a non-actionable
-/// placeholder rather than blocking the UI.
+/// 查找失败时返回 `"<unresolved current_exe>"`，渲染侧按不可操作的占位串处理，不阻塞 UI。
 #[tauri::command]
 pub fn mcp_daemon_proxy_path() -> String {
     use std::path::PathBuf;
@@ -59,15 +44,11 @@ pub fn mcp_daemon_proxy_path() -> String {
         .unwrap_or_else(|| "<unresolved current_exe>".to_string())
 }
 
-/// Restart the embedded MCP daemon. Idempotent at the user-action
-/// level — the panel disables the button while a restart is in flight
-/// so two rapid clicks only result in one restart.
+/// 重启内嵌 MCP daemon。用户层面幂等：面板在重启进行中禁用按钮，连点两次只重启一次。
 ///
-/// We swallow `AppError` into `{ ok: false, pid: null, port: null }`
-/// rather than propagating it. The renderer's restart action already
-/// has its own try/catch that flips the badge to `crashed` on
-/// failure, so a uniform `{ ok: bool }` envelope keeps the call site
-/// shape identical to the old `Promise<void>` style.
+/// `AppError` 被吞成 `{ ok: false, pid: null, port: null }` 而不外抛：渲染侧的
+/// restart 动作自带 try/catch 会把徽章翻成 `crashed`，统一 `{ ok: bool }` 信封
+/// 让调用点形状与 start / stop 一致。
 #[tauri::command]
 pub async fn mcp_daemon_restart(
     state: State<'_, crate::daemon_supervisor::McpDaemonHandle>,
@@ -90,25 +71,18 @@ pub async fn mcp_daemon_restart(
     }
 }
 
-/// Manual ON switch — start the embedded MCP daemon.
+/// 手动开：启动内嵌 MCP daemon。
 ///
-/// Idempotent: when a healthy daemon is already tracked, its existing
-/// `pid` / `port` are returned and nothing is killed or respawned. A
-/// genuinely stopped / crashed / unhealthy daemon takes the spawn path
-/// and reports the new daemon's identity.
+/// 幂等：已跟踪到健康 daemon 时原样返回其 `pid` / `port`，不杀不重启；只有真的
+/// 停止 / 崩溃 / 不健康才走拉起路径并报新的 daemon 身份。
 ///
-/// Response envelope is [`RestartResult`] — `{ ok, pid, port }` — the
-/// same shape as `mcp_daemon_restart`, so the three lifecycle verbs
-/// share one renderer contract. Underlying `AppError`s (spawn failure,
-/// healthz timeout) are swallowed into `{ ok: false, pid: null,
-/// port: null }` for the same reason as restart: the panel renders a
-/// badge, it does not branch on an exception type.
+/// 返回 [`RestartResult`] `{ ok, pid, port }`，与 restart / stop 同形，渲染侧不必
+/// 按动词分支。底层 `AppError`（拉起失败、healthz 超时）同样吞成
+/// `{ ok: false, pid: null, port: null }`。
 ///
-/// Interaction with `mcp_auto_start_set`: the preference is about
-/// *launch* and never kills a running daemon; this command is the
-/// runtime switch. Turning `auto_start` on starts the daemon (same
-/// idempotent path), turning it off only stops future launches — call
-/// this command to stop it now.
+/// 与 `mcp_auto_start_set` 的分工：那个管「启动时」，从不杀运行中的 daemon；本命令
+/// 才是运行时开关。`auto_start` 打开会走同一条幂等路径把它拉起来，关闭只压制以后
+/// 的启动——要现在停，得调本命令。
 #[tauri::command]
 pub async fn mcp_daemon_start(
     state: State<'_, crate::daemon_supervisor::McpDaemonHandle>,
@@ -131,23 +105,17 @@ pub async fn mcp_daemon_start(
     }
 }
 
-/// Manual OFF switch — terminate the embedded MCP daemon and release
-/// its port file.
+/// 手动关：终止内嵌 MCP daemon 并释放它的端口文件。
 ///
-/// Terminates the daemon this supervisor spawned *and* one it merely
-/// adopted from the port record, so no orphaned process is left holding
-/// the port. Safe to call when nothing is running: that returns
-/// `{ ok: true, pid: null, port: null }` rather than an error.
+/// 本 supervisor 拉起的 daemon 和仅从端口记录「接手」的 daemon 都会终止，否则会留下
+/// 占着端口的孤儿进程。没东西在跑时调用是安全的，返回 `{ ok: true, pid: null, port: null }`
+/// 而非报错。
 ///
-/// Response envelope is [`RestartResult`] — `{ ok, pid, port }`, byte-
-/// identical to `mcp_daemon_restart`'s — so the renderer does not need
-/// a shape-agnostic branch per verb. After a successful stop `pid` and
-/// `port` are `null` by definition (nothing is serving); a subsequent
-/// `mcp_daemon_start` runs the fresh-spawn path cleanly.
+/// 返回 [`RestartResult`]，与 `mcp_daemon_restart` 逐字节同形。停成功后 `pid` 与
+/// `port` 按定义即 `null`，随后的 `mcp_daemon_start` 干净地走新拉起路径。
 ///
-/// Interaction with `mcp_auto_start_set`: this is the runtime switch the
-/// auto-start preference deliberately is not. Disabling `auto_start`
-/// leaves a running daemon alone; only this command stops it now.
+/// 与 `mcp_auto_start_set` 的分工：关 `auto_start` 不动运行中的 daemon，只有本命令
+/// 能现在停。
 #[tauri::command]
 pub async fn mcp_daemon_stop(
     state: State<'_, crate::daemon_supervisor::McpDaemonHandle>,
