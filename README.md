@@ -26,7 +26,9 @@ npm run perf:bench      # serve-web 性能基准（p50/p95/p99，可选 --assert
 如果要把 `simple-post serve-web` 部署在 `https://host/sp/`，需要：
 
 1. 用 `--public-base-path /sp`（或 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`）启动 binary
-2. 反代转发 `/sp/*` → `http://127.0.0.1:4173/`，并把 `/sp` 前缀剥离
+2. 反代把 `/sp/*` **原样**转发到 `http://127.0.0.1:4173/sp/*`，**不要剥离前缀**——前缀由 binary 自己处理
+
+关键点：**前缀只能由一处处理。** 早期版本让 nginx 剥离前缀，同时服务端 `nest`，于是在 `/sp` 下 SPA 资源全 404。这里必须由 binary 统一处理——`web_api` 会把整个 router（含 `/api` 与 `/mcp`）`nest` 在 `/sp` 下，并且按实际挂载前缀改写 SPA 外壳里的资源引用（见下方「部署到服务器」）。nginx 若再剥一次，两边就对不上了。
 
 完整示例见：
 
@@ -150,7 +152,7 @@ v0.1.0 beta 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 `si
 
 > 全局策略之外还有一道**按项目**的权限闸（`simple_post_core::permissions`，`Read < ReadCall < Full`，数据库未显式设置时默认 `ReadCall`，未知工具按 `Full`）。两道闸是「与」关系，取更严格者。
 
-完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口的权威来源是 `public_route_specs()`（`src-tauri/src/web_api/spec.rs`）与 `build_router` 的 `.route()` 注册（`src-tauri/src/web_api/mod.rs`）；`node scripts/dump-openapi.mjs` 可从该表生成一份机器可读的 OpenAPI 文档。
+完整列表 + 入参 / 出参 + 权限矩阵见 [`crates/simple-post-mcp/src/mcp/mod.rs`](crates/simple-post-mcp/src/mcp/mod.rs)。同名 HTTP REST 接口的权威来源是 `public_route_specs()`（`crates/simple-post-server/src/web_api/spec.rs`）与 `build_router` 的 `.route()` 注册（`crates/simple-post-server/src/web_api/mod.rs`）；`node scripts/dump-openapi.mjs` 可从该表生成一份机器可读的 OpenAPI 文档。
 
 ## 部署到服务器（serve-web shape）
 
@@ -161,6 +163,17 @@ v0.1.0 beta 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 `si
 npm install && npm run build
 # 然后运行 cargo build --release，产物为 target/release/simple-post
 ```
+
+也可以只构建**不含 Tauri** 的 headless 二进制 —— 同样的 `serve-web` / `mcp`
+子命令，但不链接 GUI 运行时，因此在 Linux 上不需要 GTK/WebKit，容器镜像用的就是它：
+
+```bash
+cargo build --release -p simple-post-server
+./target/release/simple-post-server serve-web
+```
+
+桌面版 `simple-post` 的 `serve-web` 仍然可用（内部转调同一个实现），`npm run dev:split`
+不受影响；两者共用同一份 router 代码，不存在两份行为。
 
 启动与自检：
 
@@ -181,7 +194,8 @@ curl http://localhost:4173/api/healthz
   - `POST /api/nodes/:id/send`（**UI 的 Send 按钮走这条**）：只接受 endpoint id + 相对路径，base URL、路径、`{{var}}`、鉴权全部由服务端按数据库里的配置拼装。**浏览器无法指定目标地址**，因此这条路由没有 SSRF 面；传入绝对 URL 会被 400 拒绝。
   - `POST /api/http/send`：**原始 URL 逃生舱**，调用方可以指定任意地址。仅 `http` / `https` 允许（`file:` / `gopher:` 等一律拒绝）。默认**不**拦截私网地址——桌面端用户常常就是要打 `localhost:3000`，默认拦会直接砸掉产品的主要用途。
   - 公网 / 共享部署请设 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段。
-- 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，`build_router` 会把整个 router nest 在 `/sp` 下；nginx 侧记得把 `/sp/assets/*` 转到 `/assets/*`（SPA shell 的 `<base href>` 仍是 `/`，**不**重写）。
+- 反代部署（nginx / Caddy）时设 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`，`build_router` 会把整个 router（含 `/api/*` 与 `/mcp`）nest 在 `/sp` 下；nginx 侧**原样转发、不要剥离前缀**。服务端会按该前缀改写 SPA 外壳的资源引用，并向渲染器注入 `window.__SIMPLE_POST_BASE__`，前端据此拼 `/sp/api/...`——不需要 `<base href>`，也不需要 nginx rewrite。
+- 健康检查同理：设了前缀后 `/healthz` 也移到 `/sp/healthz`。容器镜像里的 healthcheck 脚本会读同一个环境变量去探前缀路径，所以两种模式都是 healthy。
 - 数据持久化：把数据目录挂到持久卷即可。默认位置是 `SIMPLE_POST_DATA_DIR` 或 `%APPDATA%/simple-post`。SQLite 在 WAL 模式下也能安全落盘。
 
 ## 决策记录
@@ -191,3 +205,37 @@ curl http://localhost:4173/api/healthz
 - **MCP 模式**：stdio 子进程桥（本地 AI 客户端）+ HTTP `POST /mcp`（`serve-web` 子命令，支持远程 / Bearer 鉴权 / 反代 base path）
 - **UI 风格**：暗色为主，shadcn 变量层，可切亮色
 - **数据位置**：三种分发形态（Tauri 桌面 / `serve-web` 无头 Web / 独立 MCP 二进制）共用一套 Rust 核心，`SIMPLE_POST_DATA_DIR`（或 `%APPDATA%/simple-post`）是唯一数据位置。
+
+## 容器部署（Docker）
+
+镜像里只有 `simple-post-server`（**Tauri-free** 的 serve-web 二进制）+ SPA 静态产物 + 一个数据目录。不装 GTK / WebKit / X11，也不装 OpenSSL：SQLite 走 `rusqlite` 的 `bundled` 静态编译，TLS 走 rustls 的内置根证书集。这是桌面版在 Linux 上装不装得上 GUI 工具链的区别，也是镜像只有几十 MB 的原因。
+
+```bash
+docker build -t simple-post:local .
+docker compose up -d          # → http://localhost:4173
+```
+
+`docker-compose.yml` 不写 `build:`（`docker stack deploy` 会忽略）也不写顶层 `version:`（会被直接拒绝），同一份文件形状两种编排器都吃。镜像内路径固定：SPA 在 `/app/spa`，数据在 `/data`。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SP_WEB_PASSWORD` | 空 | 映射到 `SIMPLE_POST_WEB_PASSWORD`：`/api/*` + `/mcp` 的 Bearer 口令，**留空即完全不鉴权** |
+| `SP_WEB_BIND` | `4173` | 宿主机映射端口（容器内固定 4173） |
+| `SP_RUST_LOG` | `info` | 映射到 `RUST_LOG`：tracing 日志过滤 |
+| `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反代挂在 `https://host/sp/` 时用，**必须以 `/` 开头**；不要写成空值 |
+| `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置 `1` 后 `/api/http/send` 拒绝回环 / 私网 / 链路本地（含云 metadata） |
+
+`SP_*` 是 compose 的插值变量名（写在 `.env`，见仓库里的 `.env.example`），由 yml 转成 binary 直接认识的 `SIMPLE_POST_*`；后两项是 binary 自己读的环境变量，可以直接 `docker run -e` 传。
+
+> ⚠️ **口令不是可选的保险，是唯一的门**。容器监听 `0.0.0.0`，`SIMPLE_POST_WEB_PASSWORD` 留空时 `/api/*` 与 `/mcp` 对整个网络裸奔——其中 `POST /api/http/send` 是任意 URL 出口。镜像自带的 HEALTHCHECK 打的是 `/healthz`，该路径永远免认证，所以探针可安全使用；但它保护不了 `/api/*`。
+
+Swarm：
+
+```bash
+docker volume create simple-post-data            # stack deploy 不会自动建命名卷
+docker push <registry>/simple-post:local          # stack 走 registry 拉取，不在节点上构建
+docker stack deploy -c docker-swarm.yml simple-post
+docker stack services simple-post                # 看 rollout 状态
+```
+
+`docker-swarm.yml` 里 `replicas` 固定为 **1，不要调大**：数据落在一个 WAL 模式的 SQLite 文件里，WAL 依赖同机共享内存，多个写进程会互相 `SQLITE_BUSY`，`mcp.port` 也只能有一个属主，`local` 命名卷还是节点本地的。要高可用得先换掉存储，不是加副本。
