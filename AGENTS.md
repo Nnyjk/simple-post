@@ -135,7 +135,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **App / window icons have no config knob.** There is no `icon` field on `WindowConfig` and no `defaultWindowIcon` under `app` in Tauri 2 — adding one fails the build with `unknown field` at `tauri-build`. The single lever is `bundle.icon`: `tauri-build` picks the first `.ico` from it and embeds it into the exe as resource `32512`, and tao registers window classes with a null icon, so Windows resolves the taskbar icon from that executable resource. Changing the taskbar icon therefore means **editing `src-tauri/app-icon.svg` and re-running `npm run icons`** — not editing `tauri.conf.json`. Two gotchas in that pipeline: `icon.icns` is not byte-reproducible (`tauri icon` stamps it, so it always diffs), and `tauri icon` parses its SVG with a strict XML parser whose comments may not contain `--`, which makes writing CSS custom-property names like `--primary` in a doc comment fail the whole run.
 
-**Routing.** Axum 0.7 path params use `:id` syntax (`/api/projects/:id`), not `{id}`.
+**Routing.** Axum 0.8 path params use `{id}` syntax (`/api/projects/{id}`). The old `:id` form panics at router construction, not at request time, so a missed route takes down every test in the crate at once.
 
 **Naming.** Rust: `snake_case` functions/modules/columns, `PascalCase` types. Tauri commands `snake_case` in Rust, `camelCase` in the frontend `COMMANDS` registry. Test files: `*.test.ts`; Rust tests go in a **sibling** `*_test.rs` file mounted by `#[path]`, not inline (the inline form survives only in a few files under `src-tauri/` — see Testing & QA).
 
@@ -194,7 +194,7 @@ The regression net is `scripts/test-web-basepath.mjs`, which parses the served s
 
 **Traps a generated spec cannot express**, kept here now that `docs/http-api-reference.md` is gone:
 
-- axum 0.7 path params are `:id`, **not** `{id}`. The OpenAPI spec's own convention is `{id}`, so copying a path out of the yaml silently registers a literal segment and the request falls through to the SPA fallback — a 200 with HTML, which looks like "the endpoint does nothing".
+- axum path params are `{id}` — the same form the OpenAPI spec itself uses, so a path copied out of `openapi.yaml` registers correctly and the old「spec 用 `{id}`、axum 用 `:id`，抄错就静默变字面量段」的分歧已不存在。两条 `RouteSpec` 与 `.route()` 共用同一批常量，改一处即可。
 - The error envelope is stable: `{ "code": <snake_case>, "message" }`. The `code` is the part to branch on — treat it as the contract and `message` as human-facing text. Note the frontend currently does **not** branch on it: `invokeCmd` folds `code` into the thrown message (`HTTP 400 POST /api/… [validation] …`), so a caller that needs to distinguish "not found" from "denied" must parse the string or add a typed branch. Don't widen that string-formatting into more call sites.
 - The auth matrix: `/api/healthz`, `/mcp/healthz` and `/healthz` are always unauthenticated, as are `/assets/*` and the SPA shell — a browser cannot attach `Authorization` to a `<script type="module">`.
 - The openapi-diff comparison is the regression guard for any `web_api/` route-tree refactor: regenerate before and after, and a route that vanished shows up as a missing path rather than a failing test.

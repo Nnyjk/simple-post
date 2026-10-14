@@ -101,7 +101,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // ---- projects ----
         .route("/api/projects", get(projects_list).post(projects_create))
         .route(
-            "/api/projects/:id",
+            "/api/projects/{id}",
             get(projects_get)
                 .patch(projects_update)
                 .delete(projects_delete),
@@ -109,55 +109,55 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/http/send", post(http_send))
         // ---- resource tree ----
         //
-        // 字面量动词必须注册在 `/:id` 之前，否则在 radix tree 里被参数段吃掉。
+        // 字面量动词必须注册在 `/{id}` 之前，否则在 radix tree 里被参数段吃掉。
         .route("/api/nodes", get(nodes_list).post(nodes_create))
         .route("/api/nodes/move", post(nodes_move))
         .route(
-            "/api/nodes/:id",
+            "/api/nodes/{id}",
             get(nodes_get).patch(nodes_update).delete(nodes_delete),
         )
         .route(
-            "/api/nodes/:id/endpoint-detail",
+            "/api/nodes/{id}/endpoint-detail",
             get(node_endpoint_detail_get).patch(node_endpoint_detail_patch),
         )
         // renderer bootstrap 的批量读。独立路径而非 `/api/nodes` 的过滤：它回答的
         // 是「配置」，不是「结构」。
         .route("/api/endpoint-details", get(endpoint_details_list))
-        .route("/api/nodes/:id/duplicate", post(node_duplicate))
+        .route("/api/nodes/{id}/duplicate", post(node_duplicate))
         // ---- environments ----
         .route(
             "/api/environments",
             get(environments_list).post(environments_create),
         )
-        // 同样的 radix tree 优先级：`/active`（字面量）注册在 `/:envId`（参数）之前。
+        // 同样的 radix tree 优先级：`/active`（字面量）注册在 `/{envId}`（参数）之前。
         .route("/api/environments/active", post(environments_set_active))
         .route(
-            "/api/environments/:envId",
+            "/api/environments/{envId}",
             patch(environments_update).delete(environments_delete),
         )
-        .route("/api/environments/:envId/vars", post(environments_set_var))
+        .route("/api/environments/{envId}/vars", post(environments_set_var))
         .route(
-            "/api/environments/:envId/vars/rename",
+            "/api/environments/{envId}/vars/rename",
             post(environments_rename_var),
         )
         .route(
-            "/api/environments/:envId/module-baseurls",
+            "/api/environments/{envId}/module-baseurls",
             post(environments_set_module_baseurl),
         )
         // ---- baseUrlDefs ----
-        // 服务属于项目，故三个 project 级动词挂在 `/api/projects/:projectId/baseurls`。
-        // `/baseurls/default` 与 `/api/baseurl-defs/:defId` 前缀不同，不存在 radix
+        // 服务属于项目，故三个 project 级动词挂在 `/api/projects/{projectId}/baseurls`。
+        // `/baseurls/default` 与 `/api/baseurl-defs/{defId}` 前缀不同，不存在 radix
         // tree 优先级问题；`base_url_defs_test` 盯住每一条都仍可达。
         .route(
-            "/api/projects/:projectId/baseurls",
+            "/api/projects/{projectId}/baseurls",
             get(base_url_defs_list).post(base_url_defs_create),
         )
         .route(
-            "/api/projects/:projectId/baseurls/default",
+            "/api/projects/{projectId}/baseurls/default",
             post(base_url_defs_set_default),
         )
         .route(
-            "/api/baseurl-defs/:defId",
+            "/api/baseurl-defs/{defId}",
             patch(base_url_defs_update).delete(base_url_defs_delete),
         )
         // ---- request settings (singleton) ----
@@ -167,18 +167,18 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         )
         // ---- permissions (per project) ----
         .route(
-            "/api/permissions/:projectId",
+            "/api/permissions/{projectId}",
             get(permissions_get).put(permissions_set),
         )
         // ---- response history ----
         //
         // 每个动词都指向单个 endpoint。`/api/response-history` 与
-        // `/api/response-history/:endpointId` 必须在 axum 的 radix tree 里共存：
+        // `/api/response-history/{endpointId}` 必须在 axum 的 radix tree 里共存：
         // 抢优先级失败的那条会落到 SPA fallback，回 `200` + HTML，curl 看着就像
         // 一个正常工作的端点。`response_history_test.rs` 用真实 listener 盯这一条。
         .route("/api/response-history", post(response_history_append))
         .route(
-            "/api/response-history/:endpointId",
+            "/api/response-history/{endpointId}",
             get(response_history_list).delete(response_history_clear),
         )
         // ---- mcp (existing + new verbs) ----

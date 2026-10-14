@@ -231,7 +231,7 @@ pub(crate) struct NodeDuplicateBody {
     pub new_id: Option<String>,
 }
 
-/// `POST /api/nodes/:id/duplicate` —— 仅限 endpoint。
+/// `POST /api/nodes/{id}/duplicate` —— 仅限 endpoint。
 ///
 /// 委派给 `db::nodes::duplicate`，后者在一个事务里复制节点及其 detail，并在一开始
 /// 就拒绝非 endpoint——而不是造出一个看着像半成品副本的空集合。
@@ -239,7 +239,8 @@ pub(crate) async fn node_duplicate(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
     // 用 `Option<Json<_>>` 而非 `Json<_>`：body 确实是可选的，必填 extractor 会让
-    // 所有写在 SPA 开始发 id 之前的调用方都吃 400。
+    // 所有写在 SPA 开始发 id 之前的调用方都吃 400。axum 0.8 起 `Option<T>` 只吞
+    // 「字段缺失」，畸形 JSON 仍会走 rejection —— 正好是这里要的分界。
     body: Option<Json<NodeDuplicateBody>>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     let new_id = body.and_then(|Json(b)| b.new_id);
