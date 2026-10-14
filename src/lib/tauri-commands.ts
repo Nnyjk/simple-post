@@ -107,6 +107,12 @@ export const COMMANDS = {
   mcpHttpConfigGet: 'mcp_http_config_get',
   mcpHttpConfigSet: 'mcp_http_config_set',
 
+  // ----- OAuth 2.0 -----
+  // 取一份可注入请求的 token。判断与取 token 全在 Rust 的
+  // `simple_post_core::oauth2`，MCP 的 `api_call_endpoint` 与 UI 走同一段逻辑。
+  // `force` 供 UI 的「获取 Token」按钮绕过后端缓存；发请求时不传，走按需刷新。
+  oauth2Token: 'oauth2_token',
+
   // ----- low-level HTTP executor (Tauri side) -----
   httpRequest: 'http_request',
 } as const;
@@ -475,6 +481,11 @@ const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: (a) => `/api/permissions/${encodeURIComponent(String(a.projectId))}`,
     body: (a) => ({ permission: a.permission }),
   },
+
+  // ----- OAuth 2.0 -----
+  // 与 Tauri 命令同一个 `OAuth2TokenRequest`（`{ auth, manual?, force? }`），
+  // 故请求体就是 args 本身，两种形态无需翻译。
+  [COMMANDS.oauth2Token]: { method: 'POST', path: () => '/api/oauth2/token' },
 
   // ----- low-level HTTP executor -----
   // 两侧 args 形状相同（camelCase）；Rust 的 `HttpSendBody` 直接从 `args` 反序列化，

@@ -30,7 +30,7 @@ export interface RequestBody {
   schema?: string;
 }
 
-export type AuthType = 'none' | 'bearer' | 'basic' | 'apikey';
+export type AuthType = 'none' | 'bearer' | 'basic' | 'apikey' | 'oauth2';
 
 export interface AuthConfig {
   /**
@@ -45,6 +45,71 @@ export interface AuthConfig {
    * 改成尾下划线也不行——Rust 字段 camelCase 回来仍是 `in`。
    */
   apikey?: { key: string; value: string; inLocation: 'header' | 'query' };
+  /** `kind === 'oauth2'` 时才有；缺省即「配到一半」，取 token 时才报错。 */
+  oauth2?: OAuth2Auth;
+}
+
+/**
+ * OAuth2 流程。线上 snake_case，与 RFC 6749 的 `grant_type` 同名，用户与 AI
+ * 客户端都不必再做一次映射。
+ */
+export type OAuth2GrantType = 'authorization_code' | 'client_credentials' | 'password' | 'implicit';
+
+/** 客户端凭据怎么送到 token 端点：`Basic` 头（多数 IdP）或 form body。 */
+export type OAuth2ClientAuth = 'basic' | 'body';
+
+/** access token 挂哪；与 `apikey.inLocation` 同构。 */
+export type OAuth2TokenLocation = 'header' | 'query';
+
+/**
+ * `OAuth2Auth` 的 TS 镜像，字段名与 `crates/simple-post-core/src/domain.rs`
+ * 的同名结构体逐字对应。
+ *
+ * 每个字段都在 Rust 侧带 `#[serde(default)]`，所以这里也全部必填——
+ * 缺字段推迟到取 token 时由后端报错，那时报错比 serde 的字段列表有用。
+ */
+export interface OAuth2Auth {
+  grantType: OAuth2GrantType;
+  /** token 端点；`implicit` 不用。 */
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  clientAuth: OAuth2ClientAuth;
+  /** 空格分隔；空串即「用服务端默认值」。 */
+  scope: string;
+  /** 登录地址，只存着供用户复制——本应用不开回环端口，不主动打开浏览器。 */
+  authorizationUrl: string;
+  /** `authorization_code` 用，须与 IdP 侧登记的一致。 */
+  redirectUri: string;
+  /** PKCE verifier；本应用不自动生成，须与 IdP 侧的 challenge 对应。 */
+  codeVerifier: string;
+  /**
+   * 用户从浏览器粘回来的原文：`authorization_code` 下是回调 URL 或其中的 code，
+   * `implicit` 下是整条回调 URL 或裸 token（解析都在 Rust 侧 `parse_pasted`）。
+   */
+  authCode: string;
+  username: string;
+  password: string;
+  /** 追加进 token 请求的表单字段（Azure 的 `audience`、Okta 的 `organization`…）。 */
+  extraParams: KeyValue[];
+  tokenLocation: OAuth2TokenLocation;
+  /** query 档的参数名；空白时后端回落 `access_token`。 */
+  tokenParam: string;
+}
+
+/**
+ * 取 token 的返回形状，镜像 Rust 的 `OAuth2TokenDto`。
+ *
+ * 刻意不含 `refresh_token`：它在后端续期，浏览器形态下没必要持有。
+ */
+export interface OAuth2TokenResult {
+  accessToken: string;
+  tokenType: string;
+  /** Unix 秒；`null` = 不知道何时过期。 */
+  expiresAt: number | null;
+  scope: string | null;
+  /** 本次是否真发了网络请求；`false` = 命中后端缓存。 */
+  refreshed: boolean;
 }
 
 /**
