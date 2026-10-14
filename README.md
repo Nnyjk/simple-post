@@ -232,10 +232,22 @@ docker compose up -d          # → http://localhost:4173
 Swarm：
 
 ```bash
-docker volume create simple-post-data            # stack deploy 不会自动建命名卷
-docker push <registry>/simple-post:local          # stack 走 registry 拉取，不在节点上构建
-docker stack deploy -c docker-swarm.yml simple-post
-docker stack services simple-post                # 看 rollout 状态
+# 1) 指定一个节点持有数据：打标签 + 在那个节点上建卷
+docker node update --label-add simple_post_data=true <node-id>
+docker volume create --driver local simple-post-data   # stack deploy 不会自动建命名卷
+
+# 2) 用带 registry 前缀的 tag 构建并推送（多节点靠它拉取）
+docker build -t <registry>/simple-post:0.1.1 .
+docker push   <registry>/simple-post:0.1.1
+
+# 3) 部署时告诉 stack 用哪个镜像
+SP_IMAGE=<registry>/simple-post:0.1.1 docker stack deploy -c docker-swarm.yml simple-post
+docker stack services simple-post                      # 看 rollout 状态
 ```
 
-`docker-swarm.yml` 里 `replicas` 固定为 **1，不要调大**：数据落在一个 WAL 模式的 SQLite 文件里，WAL 依赖同机共享内存，多个写进程会互相 `SQLITE_BUSY`，`mcp.port` 也只能有一个属主，`local` 命名卷还是节点本地的。要高可用得先换掉存储，不是加副本。
+`docker-swarm.yml` 里有两条**不要动**的约束，它们挡的是两种不同的失败：
+
+- `replicas: 1` —— 数据落在一个 WAL 模式的 SQLite 文件里，WAL 依赖同机共享内存，多个写进程会互相 `SQLITE_BUSY`，`mcp.port` 也只能有一个属主。要高可用得先换掉存储，不是加副本。
+- `placement` —— 卷是 `local` 驱动，只存在于一个节点。**`replicas: 1` 挡不住这个问题**：节点故障或更新后的重调度会把唯一的任务放到别的节点，Docker 在那儿建一个空卷，服务照样 healthy 起来，但你的项目全没了，日志里也不会有异常。把 `placement` 注释掉部署会直接失败（"no suitable node"），这正是想要的失败方式。
+
+另外 `image` 写成 `${SP_IMAGE:-simple-post:local}`：Swarm 是按 spec 里写的名字在**每个节点**上拉镜像，裸的本地 tag 只存在于一台机器上，所以多节点必须给 `SP_IMAGE` 指向你真正 push 上去的那个 tag。

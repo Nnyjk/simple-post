@@ -1,10 +1,27 @@
 # =============================================================================
 # simple-post — Docker Swarm stack
 #
-#     docker volume create simple-post-data      # swarm does NOT create it
-#     docker build  -t simple-post:local . && docker push <registry>/simple-post:local
-#     docker stack deploy -c docker-swarm.yml simple-post
+#     # 1. choose ONE node to own the data, label it, create the volume there
+#     docker node update --label-add simple_post_data=true <node-id>
+#     docker volume create --driver local simple-post-data
+#
+#     # 2. build and push under a registry-qualified name
+#     docker build -t <registry>/simple-post:0.1.1 .
+#     docker push   <registry>/simple-post:0.1.1
+#
+#     # 3. deploy, naming the image the workers will pull
+#     SP_IMAGE=<registry>/simple-post:0.1.1 \
+#       docker stack deploy -c docker-swarm.yml simple-post
+#
 #     docker stack services simple-post
+#
+# Step 1 is not optional and not bookkeeping. The store is a single SQLite
+# file in a node-local volume, and the placement constraint below is what
+# keeps the task on the node that has it. Skip the label and the deploy
+# fails loudly ("no suitable node"); remove the constraint and it does not
+# fail at all — it schedules onto some other node, Docker creates an empty
+# volume there, and the service comes up on a blank database with no
+# indication that your projects are gone.
 #
 # `docker stack deploy` only honours a subset of the Compose spec, so this
 # file deliberately avoids: `build:` (silently ignored — swarm pulls the
@@ -15,12 +32,14 @@
 
 services:
   simple-post:
-    # No `build:`. Swarm resolves this tag through a registry, so on a
-    # multi-node cluster the image must be pushed (and every node must be
-    # able to pull it) before the stack is deployed. The compose-file copy
-    # keeps the same `simple-post:local` tag so the two paths agree on what
-    # "the image" means.
-    image: simple-post:local
+    # No `build:` — Swarm resolves this name through a registry, and every
+    # node pulls the name written *here*. A bare local tag such as
+    # `simple-post:local` exists on exactly one machine, so on a multi-node
+    # cluster the workers either fail to pull it or silently use a stale
+    # local copy. Defaulting to the local tag keeps the single-node flow
+    # working out of the box; `SP_IMAGE` is how you point the stack at the
+    # registry-qualified tag you actually pushed (step 2/3 above).
+    image: '${SP_IMAGE:-simple-post:local}'
 
     environment:
       SIMPLE_POST_DATA_DIR: /data
@@ -41,9 +60,19 @@ services:
     volumes:
       # `driver: local` + `docker volume create` on one specific node — the
       # volume is **node-local**, so it does not follow the task to another
-      # node. That is precisely why replicas is 1 (see below); if you ever
-      # need multi-node durability, move the store off SQLite or put the
-      # volume on shared storage and re-evaluate the WAL assumption.
+      # node.
+      #
+      # Note that this is a *different* problem from `replicas: 1`, and
+      # `replicas: 1` does not solve it. Replicas is about two writers
+      # touching one file at once; this is about the task landing on a node
+      # that has never heard of the volume, where Docker creates an empty
+      # one and the service starts on a blank database. Only the placement
+      # constraint below closes the second hole — see it for the
+      # consequence of removing it.
+      #
+      # If you need real multi-node availability, move the store off SQLite
+      # or put the volume on genuinely shared/replicated storage, and
+      # re-evaluate the WAL assumption on both counts.
       - simple-post-data:/data
 
     healthcheck:
@@ -67,6 +96,10 @@ services:
       #
       # If you need availability, the answer is a real replicated database —
       # not a second replica of this container.
+      #
+      # This constraint set is about *concurrency*. It says nothing about
+      # *placement* — see `placement` below for the node-local-volume trap
+      # that `replicas: 1` does not cover.
       # -------------------------------------------------------------------------
       replicas: 1
 
@@ -115,12 +148,26 @@ services:
           # not a sizing recommendation.
           memory: 512M
 
-      # Uncomment to pin the task to the node holding the node-local volume
-      # above (and create that volume on that same node):
-      #   docker volume create --driver local simple-post-data
-      # placement:
-      #   constraints:
-      #     - node.labels.simple_post_data == "true"
+      # -------------------------------------------------------------------------
+      # placement — ON BY DEFAULT. Removing this is how you lose your data.
+      #
+      # The volume above has the `local` driver, so it exists on exactly one
+      # node. Without a constraint, a node failure — or an ordinary reschedule
+      # after an update — puts the single task on a *different* node, where
+      # Docker has no such volume and quietly creates an empty one. The service
+      # comes up healthy, the schema seeds, and every project you had is gone,
+      # with nothing in the logs to suggest why. `replicas: 1` does not help:
+      # that is about two writers at once, not about which node runs.
+      #
+      # With the constraint, an unlabelled cluster fails the deploy outright
+      # ("no suitable node"), which is the outcome worth having.
+      #
+      # The one-line setup this depends on is in the header above:
+      #   docker node update --label-add simple_post_data=true <node-id>
+      # -------------------------------------------------------------------------
+      placement:
+        constraints:
+          - node.labels.simple_post_data == 'true'
 
 volumes:
   simple-post-data:
