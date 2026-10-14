@@ -153,16 +153,15 @@ fn mcp_policy_round_trips() {
 
 #[test]
 fn mcp_policy_tolerates_garbage_value() {
-    // Forward-compat: a future release can ship a new tier;
-    // older clients that can't parse it must still boot, just at
-    // the safe ReadOnly default.
+    // 向前兼容：将来的版本可以发新档位；解析不了的旧客户端仍必须能启动，只是落在安全的
+    // ReadOnly 默认值上。
     let pool = fresh_pool();
     db::with_tx(&pool, |c| set(c, keys::MCP_POLICY, &"nuclear".to_string())).unwrap();
     let p = db::with_conn(&pool, mcp_policy).unwrap();
     assert_eq!(p, crate::permissions::CapabilityPolicy::ReadOnly);
 }
 
-// ----- mcp.http_config ----------------------------------------------------
+// mcp.http_config
 
 #[test]
 fn mcp_http_config_defaults_when_missing() {
@@ -199,11 +198,9 @@ fn mcp_http_config_round_trips_every_field() {
 
 #[test]
 fn mcp_http_config_is_stored_as_json_not_bare_text() {
-    // The `preferences.value` contract: `set` runs
-    // `serde_json::to_string` and every reader runs `from_str`. A bare
-    // (unquoted) object is what silently falls back to the default
-    // elsewhere in this codebase, so pin the encoding at the column
-    // level rather than only through the round-trip above.
+    // `preferences.value` 契约：`set` 跑 `serde_json::to_string`，每个读者都跑 `from_str`。
+    // 裸（未加引号的）对象正是本代码库别处会静默退回默认值的形态，故此处把编码钉在列这一层，
+    // 而不只靠上面那次往返。
     let pool = fresh_pool();
     let cfg = crate::domain::McpHttpConfig::default();
     db::with_tx(&pool, |c| set_mcp_http_config(c, &cfg)).unwrap();
@@ -224,9 +221,8 @@ fn mcp_http_config_is_stored_as_json_not_bare_text() {
 
 #[test]
 fn mcp_http_config_missing_fields_fall_back_to_defaults() {
-    // `#[serde(default)]` at the container level: a blob written by an
-    // older build must still deserialise, with the absent keys taking
-    // their documented defaults rather than failing the whole read.
+    // 容器级 `#[serde(default)]`：更早构建写下的 blob 必须仍能反序列化，缺席的键取它们各自
+    // 有文档的默认值，而不是让整次读失败。
     let pool = fresh_pool();
     db::with_tx(&pool, |c| {
         set(
@@ -249,9 +245,8 @@ fn mcp_http_config_missing_fields_fall_back_to_defaults() {
 
 #[test]
 fn mcp_http_config_reports_an_unparseable_row_instead_of_hiding_it() {
-    // Hand-written (unquoted) value. Silently defaulting here would
-    // downgrade a LAN-exposed daemon to loopback-only with nothing in
-    // the log, so this must surface as an error.
+    // 手工写入的（未加引号的）值。静默退回默认会把一个暴露在局域网上的守护进程降级成
+    // 仅 loopback 且日志里毫无痕迹，故这必须表现为错误。
     let pool = fresh_pool();
     db::with_tx(&pool, |c| set(c, keys::MCP_HTTP_CONFIG, &"0.0.0.0")).unwrap();
     assert!(db::with_conn(&pool, mcp_http_config).is_err());

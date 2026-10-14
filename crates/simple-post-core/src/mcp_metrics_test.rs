@@ -42,7 +42,7 @@ fn merge_from_stderr_advances_only_when_higher() {
     m.merge_from_stderr(&snap_fresh);
     assert_eq!(m.requests_handled.load(Ordering::Relaxed), 5);
 
-    // Stale snapshot must not rewind.
+    // 陈旧的快照不得让计数倒退。
     let snap_stale = MetricsSnapshot {
         requests_handled: 2,
         errors: 0,
@@ -60,8 +60,7 @@ fn emit_then_parse_round_trip() {
         uptime_ms: 1234,
     };
     let line = emit_metric_line(&snap);
-    // Prefix check: line must start with our marker so consumers can
-    // filter cheaply.
+    // 前缀检查：该行必须以我们的标记开头，好让消费方廉价地过滤。
     assert!(line.starts_with(METRIC_PREFIX));
     assert!(line.ends_with('\n'));
 
@@ -80,8 +79,7 @@ fn parse_returns_none_for_unrelated_line() {
 
 #[test]
 fn parse_handles_crlf_line_endings() {
-    // Windows consoles sometimes inject \r before \n; we must
-    // still recognize the frame.
+    // Windows 控制台有时会在 \n 前插入 \r；我们仍须认得出这一帧。
     let snap = MetricsSnapshot {
         requests_handled: 7,
         errors: 0,

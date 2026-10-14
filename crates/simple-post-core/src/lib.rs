@@ -1,9 +1,8 @@
-//! Shared low-level layer for Simple Post.
+//! Simple Post 的共享底层。
 //!
-//! Hosts the modules that the main Tauri crate and the standalone
-//! `simple-post-mcp` crate both depend on. Splitting them out breaks the
-//! cycle that would otherwise arise if `simple-post-mcp` lived next to
-//! `db::` / `domain::` / `error::` in the main crate.
+//! 托管主 Tauri crate 与独立的 `simple-post-mcp` crate 双方都依赖的模块。把它们拆出来，
+//! 打破了「若 `simple-post-mcp` 与 `db::` / `domain::` / `error::` 并列住在主 crate 里」
+//! 本会产生的依赖环。
 
 pub mod db;
 pub mod domain;

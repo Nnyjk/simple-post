@@ -1,37 +1,26 @@
-//! HTTP execution layer.
+//! HTTP 执行层。
 //!
-//! Pure I/O — no business logic. The caller (a Tauri command, the MCP
-//! daemon, or a future cron worker) builds an [`HttpRequestInput`],
-//! hands it to [`execute`], and gets back an [`HttpResult`] shaped to
-//! match the wire contract the React renderer already understands
-//! (see `src/lib/http.ts::ApiResponse`).
+//! 纯 I/O——不含业务逻辑。调用方（Tauri command、MCP 守护进程或将来的 cron worker）构造
+//! [`HttpRequestInput`]、交给 [`execute`]、拿回一个 [`HttpResult`]，其形状与 React 渲染层
+//! 已经理解的线契约一致（见 `src/lib/http.ts::ApiResponse`）。
 //!
-//! This module is the only place in the backend that talks to
-//! `reqwest`. Splitting the wire types and the actual network call
-//! out of `lib.rs` makes the layer reusable from the MCP daemon
-//! without dragging in the Tauri `#[command]` macro plumbing (and
-//! the macro-namespace collision that comes with it — see the
-//! `http_request` NOTE in `lib.rs`).
+//! 本模块是后端里唯一与 `reqwest` 说话的地方。把线类型与真正的网络调用从 `lib.rs` 里拆出来，
+//! 使这一层能被 MCP 守护进程复用，而不必拖进 Tauri 的 `#[command]` 宏管线（以及随之而来的
+//! 宏命名空间冲突——见 `lib.rs` 里 `http_request` 的 NOTE）。
 
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-// -------------------------------------------------------------------------
-// Wire types — mirror `ApiResponse` / `HttpError` on the TS side.
-// -------------------------------------------------------------------------
+// 线类型——镜像 TS 侧的 `ApiResponse` / `HttpError`。
 
-/// Successful HTTP response. Field names match `ApiResponse` so the
-/// React side can reuse its existing response-view code without a
-/// translation layer.
-///
-/// `rename_all = "camelCase"` is load-bearing, not cosmetic: without it
-/// serde emits `status_text` / `duration_ms` / `size_bytes` /
-/// `content_type` while `src/lib/http.ts` reads `statusText` /
-/// `durationMs` / `sizeBytes` / `contentType`. Every one of those came
-/// back `undefined`, so the response bar rendered `NaN s` and `0 B` for
-/// every request, and the content type never reached the viewer.
-/// `HttpResult` below already had the attribute; this type was missed.
+/// 成功的 HTTP 响应。字段名与 `ApiResponse` 一致，故 React 侧可以复用它现有的响应视图代码
+/// 而无需翻译层。
+/// `rename_all = "camelCase"` 是承重的，不是装饰：没有它 serde 会发出 `status_text` /
+/// `duration_ms` / `size_bytes` / `content_type`，而 `src/lib/http.ts` 读的是
+/// `statusText` / `durationMs` / `sizeBytes` / `contentType`——每一个都读回 `undefined`，
+/// 于是响应栏对每个请求都渲染成 `NaN s` 与 `0 B`，content type 也永远到不了阅读器。
+/// 下面的 `HttpResult` 本就有这个属性；本类型当时漏了。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpResponse {
@@ -39,34 +28,29 @@ pub struct HttpResponse {
     pub status_text: String,
     pub duration_ms: u128,
     pub size_bytes: u64,
-    /// Flattened headers as `[name, value]` pairs (matches the
-    /// `headersToObject` shape on the JS side).
+    /// 扁平化为 `[name, value]` 对的响应头（匹配 JS 侧的 `headersToObject` 形状）。
     pub headers: Vec<[String; 2]>,
     pub body: String,
     pub content_type: String,
     pub method: String,
     pub url: String,
-    /// True when the response body was clamped to `max_bytes` server-side.
+    /// 响应体是否在服务端被裁到 `max_bytes`。
     pub truncated: bool,
 }
 
-/// Transport-level failure. Distinct from `HttpResponse.status == 0`,
-/// which the frontend uses for HTTP-level non-2xx. This is "the
-/// request never reached the application layer" — DNS, connect,
-/// TLS, reset, aborted, timeout.
-///
-/// `rename_all` is a no-op today (both fields are single words) but keeps
-/// this type from re-introducing the mismatch [`HttpResponse`] had.
+/// 传输层失败。与 `HttpResponse.status == 0` 不同——后者是前端用来表示 HTTP 层的非 2xx。
+/// 本类型表示「请求从未抵达应用层」——DNS、连接、TLS、重置、中止、超时。
+/// `rename_all` 今天是空操作（两个字段都是单词），但它使本类型不会重新引入
+/// [`HttpResponse`] 曾有的那种不匹配。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpError {
-    /// `timeout` | `network` (DNS / connect / TLS / reset / aborted)
+    /// `timeout` | `network`（DNS / 连接 / TLS / 重置 / 中止）
     pub kind: String,
     pub message: String,
 }
 
-/// Discriminated union — easier to consume from TS than a bare enum
-/// because the field shape is stable regardless of variant.
+/// 判别式联合——比裸枚举更好从 TS 消费，因为字段形状不随变体而变。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpResult {
@@ -97,14 +81,10 @@ impl HttpResult {
     }
 }
 
-// -------------------------------------------------------------------------
-// Input — the thing the caller builds before handing off.
-// -------------------------------------------------------------------------
+// 输入——调用方交接前构造的东西。
 
-/// Everything `execute` needs to know about one request. Kept as a
-/// flat struct (not a builder) because every caller already knows
-/// all the fields up front — the build logic lives in
-/// `crate::variable_fill`, not here.
+/// `execute` 发出一个请求所需的全部信息。保持扁平结构体（而非 builder），因为每个调用方本来
+/// 就已经知道全部字段——构造逻辑住在 `crate::variable_fill`，不在这里。
 #[derive(Debug, Clone)]
 pub struct HttpRequestInput {
     pub method: String,
@@ -116,16 +96,11 @@ pub struct HttpRequestInput {
     pub max_response_size_kb: u64,
 }
 
-// -------------------------------------------------------------------------
-// Internals — small enough that inlining them as `pub(crate)` keeps
-// the public surface clean. The Tauri command in lib.rs and the
-// eventual MCP daemon both call `execute`; nothing else needs to
-// touch these.
-// -------------------------------------------------------------------------
+// 内部实现——小到把它们内联为 `pub(crate)` 能保持公开面干净。lib.rs 里的 Tauri command 与
+// 将来的 MCP 守护进程都调 `execute`；别的都不需要碰这些。
 
-/// Parse the textual HTTP method into a `reqwest::Method`, defaulting
-/// to GET on unknown verbs (the frontend already gates on a known
-/// list).
+/// 把文本形式的 HTTP 方法解析成 `reqwest::Method`，未知动词回退 GET（前端已经在已知列表上
+/// 把过一道）。
 pub(crate) fn parse_method(method: &str) -> reqwest::Method {
     match method.to_ascii_uppercase().as_str() {
         "GET" => reqwest::Method::GET,
@@ -139,9 +114,8 @@ pub(crate) fn parse_method(method: &str) -> reqwest::Method {
     }
 }
 
-/// Cap a body string to at most `max_bytes` bytes (UTF-8 safe char
-/// boundary). Adds a marker when truncated. Matches the truncation
-/// contract from the original fetch path.
+/// 把 body 字符串裁到至多 `max_bytes` 字节（落在 UTF-8 安全的字符边界上）。被裁时加上一个
+/// 标记。与原 fetch 路径的截断契约一致。
 pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
     if max_bytes == 0 {
         return (body, false);
@@ -150,8 +124,7 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
         return (body, false);
     }
     let cap = (max_bytes as usize).min(body.len());
-    // Walk back to the nearest char boundary so we don't slice a
-    // multi-byte rune in half.
+    // 回退到最近的字符边界，免得把一个多字节 rune 切成两半。
     let mut cut = cap;
     while cut > 0 && !body.is_char_boundary(cut) {
         cut -= 1;
@@ -165,35 +138,26 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
     (out, true)
 }
 
-// -------------------------------------------------------------------------
-// Outbound URL policy.
-// -------------------------------------------------------------------------
+// 出站 URL 策略。
 
-/// How permissive [`execute`] is about where it is allowed to connect.
+/// [`execute`] 对「允许连到哪里」有多宽松。
+/// 两个独立的旋钮，因为不同形态的正确答案不同：
+/// * **桌面（Tauri）**——本机用户**就是**操作者。调 `http://localhost:3000` 是 API 客户端
+///   最常见的动作，故默认就封掉私有网段会直接毁掉产品。只有 scheme 白名单生效。
+/// * **Web / Docker**——服务端网络可达，且所有调用方共用同一个静态 bearer 口令。此时服务端
+///   就是一台开放代理，除非拒绝私有网段，故运维应设 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`。
 ///
-/// Two independent knobs, because the right answer differs per shape:
-///
-/// * **Desktop (Tauri)** — the local user *is* the operator. Calling
-///   `http://localhost:3000` is the single most common thing an API client
-///   does, so blocking private ranges by default would break the product.
-///   Only the scheme allowlist applies.
-/// * **Web / Docker** — the server is network-reachable and every caller
-///   shares one static bearer password. Here the server becomes an open
-///   proxy unless private ranges are refused, so operators should set
-///   `SIMPLE_POST_BLOCK_PRIVATE_NET=1`.
-///
-/// `execute` refuses a non-`http(s)` URL under both policies: `file:`,
-/// `gopher:` and friends turn a debug tool into a local file reader, and
-/// no API client has a legitimate use for them.
+/// 两种策略下 `execute` 都拒绝非 `http(s)` 的 URL：`file:`、`gopher:` 之类会把一个调试工具
+/// 变成读本地文件的通道，而 API 客户端对它们没有任何正当用法。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutboundPolicy {
-    /// Refuse loopback / private / link-local / unique-local addresses.
-    /// Driven by `SIMPLE_POST_BLOCK_PRIVATE_NET`.
+    /// 拒绝 loopback / 私有 / link-local / unique-local 地址。由
+    /// `SIMPLE_POST_BLOCK_PRIVATE_NET` 驱动。
     pub block_private_net: bool,
 }
 
 impl Default for OutboundPolicy {
-    /// Desktop-friendly default: scheme allowlist only.
+    /// 桌面友好的默认值：只有 scheme 白名单。
     fn default() -> Self {
         Self {
             block_private_net: false,
@@ -202,8 +166,7 @@ impl Default for OutboundPolicy {
 }
 
 impl OutboundPolicy {
-    /// Read the policy from the environment. Kept here (rather than at
-    /// the call sites) so the desktop and web shapes cannot disagree.
+    /// 从环境读取策略。放在这里而非各调用点，好让桌面与 Web 两种形态无法分叉。
     pub fn from_env() -> Self {
         let flag = std::env::var("SIMPLE_POST_BLOCK_PRIVATE_NET")
             .map(|v| {
@@ -217,45 +180,40 @@ impl OutboundPolicy {
     }
 }
 
-/// Outcome of checking a target URL against [`OutboundPolicy`].
+/// 目标 URL 对 [`OutboundPolicy`] 检查的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UrlVerdict {
     Allowed,
-    /// Human-readable reason the request was refused. Rendered into the
-    /// same `HttpResult` envelope as a transport failure, so the UI shows
-    /// it with the normal error banner.
+    /// 请求被拒的人读理由。渲染进与传输失败同一个 `HttpResult` 封装，好让 UI 用普通的错误
+    /// 横幅显示它。
     Refused(String),
 }
 
-/// True for IPs that must never be reachable through the server-side
-/// proxy: loopback, RFC1918, link-local (incl. cloud metadata at
-/// 169.254.169.254), carrier-grade NAT, and IPv6 unique-local.
-///
-/// Hostnames are not resolved here. Resolving would introduce a DNS
-/// rebinding window between the check and the dial; a caller that needs
-/// name-based policy should be explicit about that tradeoff rather than
-/// have a half-measure applied silently.
+/// 判定为绝不该通过服务端代理抵达的 IP：loopback、RFC1918、link-local（含
+/// 169.254.169.254 处的云元数据）、运营商级 NAT、以及 IPv6 unique-local。
+/// 此处**不**解析主机名：解析会在检查与拨号之间开出一个 DNS rebinding 窗口；需要基于名字的
+/// 策略时，调用方应当显式地接受那个取舍，而不是被悄悄上一个半吊子的措施。
 fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
             v4.is_loopback()
                 || v4.is_private()
                 || v4.is_link_local()
-                // 100.64.0.0/10 — carrier-grade NAT, common in k8s.
+                // 100.64.0.0/10——运营商级 NAT，k8s 里常见。
                 || (v4.octets()[0] == 100
                     && (64..=127).contains(&v4.octets()[1]))
-                // 0.0.0.0/8 — "this network", resolves to localhost.
+                // 0.0.0.0/8——「本网络」，解析后即 localhost。
                 || v4.octets()[0] == 0
-                // 240.0.0.0/4 — reserved, incl. 255.255.255.255.
+                // 240.0.0.0/4——保留，含 255.255.255.255。
                 || v4.octets()[0] >= 240
         }
         std::net::IpAddr::V6(v6) => {
             v6.is_loopback()
-                // fc00::/7 — unique local.
+                // fc00::/7——unique local。
                 || (v6.segments()[0] & 0xfe00) == 0xfc00
-                // fe80::/10 — link local.
+                // fe80::/10——link local。
                 || (v6.segments()[0] & 0xffc0) == 0xfe80
-                // ::ffff:a.b.c.d — IPv4-mapped; check the embedded v4.
+                // ::ffff:a.b.c.d——IPv4 映射；检查内嵌的 v4。
                 || v6
                     .to_ipv4_mapped()
                     .map(|v| is_forbidden_ip(std::net::IpAddr::V4(v)))
@@ -264,10 +222,9 @@ fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// Apply [`OutboundPolicy`] to a target URL string.
+/// 把 [`OutboundPolicy`] 施加到一个目标 URL 字符串上。
 pub fn check_url(url: &str, policy: OutboundPolicy) -> UrlVerdict {
-    // `reqwest::Url` is a re-export of the `url` crate, so this needs no
-    // extra dependency in the workspace.
+    // `reqwest::Url` 就是 `url` crate 的重导出，故这里不需要工作区里多一个依赖。
     let parsed = match reqwest::Url::parse(url) {
         Ok(u) => u,
         Err(e) => return UrlVerdict::Refused(format!("invalid URL `{url}`: {e}")),
@@ -286,10 +243,9 @@ pub fn check_url(url: &str, policy: OutboundPolicy) -> UrlVerdict {
         return UrlVerdict::Allowed;
     }
 
-    // `host_str()` keeps IPv6 in `[::1]` form, so strip the brackets
-    // before parsing. A name that is not a literal IP is left alone: a
-    // hostname is deliberately not resolved here, because resolving would
-    // open a DNS-rebinding window between this check and the dial.
+    // `host_str()` 保持 IPv6 的 `[::1]` 形态，故解析前先去掉方括号。不是 IP 字面量的名字被
+    // 原样放过：主机名在此**刻意**不被解析，因为解析会在这次检查与拨号之间开出一个
+    // DNS rebinding 窗口。
     let host_forbidden = parsed
         .host_str()
         .map(|h| h.trim_start_matches('[').trim_end_matches(']'))
@@ -307,43 +263,33 @@ pub fn check_url(url: &str, policy: OutboundPolicy) -> UrlVerdict {
     }
 }
 
-// -------------------------------------------------------------------------
-// Public entry — the actual HTTP call.
-// -------------------------------------------------------------------------
+// 公开入口——真正的那次 HTTP 调用。
 
-/// Issue a real HTTP request through `reqwest`, bypassing browser
-/// CORS. Pure async I/O; no shared state.
-///
-/// The frontend calls the `http_request` Tauri command in `lib.rs`,
-/// which forwards here. The MCP daemon (`crate::mcp`) routes
-/// requests through its own `execute_http` shim today and will
-/// eventually call this directly when its compat layer is retired.
+/// 经 `reqwest` 发出真实 HTTP 请求，绕开浏览器 CORS。纯异步 I/O；无共享状态。
+/// 前端调 `lib.rs` 里的 `http_request` Tauri command，由它转发到这里。MCP 守护进程
+/// （`crate::mcp`）今天经它自己的 `execute_http` 转发层路由请求，待该兼容层退役后会
+/// 直接调这里。
 pub async fn execute(input: &HttpRequestInput) -> HttpResult {
     execute_with_policy(input, OutboundPolicy::from_env()).await
 }
 
-/// [`execute`] with an explicit policy. Tests use this directly; the
-/// env-driven [`execute`] is the production entry point.
+/// 带显式策略的 [`execute`]。测试直接用它；由环境驱动的 [`execute`] 是生产入口。
 pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolicy) -> HttpResult {
     let start = Instant::now();
 
-    // Refuse before building a client or touching the network.
+    // 在建客户端或碰网络之前就拒绝。
     if let UrlVerdict::Refused(reason) = check_url(&input.url, policy) {
         return HttpResult::err("network", reason);
     }
 
-    // Per-call Client to keep the API request-scoped; future slices
-    // can hoist this into tauri::State if we want connection pooling
-    // across calls.
+    // 每次调用一个 Client，好让 API 保持请求作用域；将来若想要跨调用的连接池，
+    // 可以把它提到 `tauri::State`。
     //
-    // The redirect policy re-runs `check_url` on **every hop**. Checking
-    // only the initial URL leaves the whole guard cosmetic: with
-    // `follow_redirects` on (the default), an attacker-controlled URL
-    // that answers `302 Location: http://169.254.169.254/…` reaches the
-    // metadata service in one hop, and `Policy::limited(10)` happily
-    // follows it. `custom` gives per-hop control; the hop budget is
-    // counted here because `custom` replaces `limited` rather than
-    // composing with it.
+    // 重定向策略在**每一跳**上都重跑 `check_url`。只查初始 URL 会让整道守卫变成摆设：
+    // 开着 `follow_redirects`（默认）时，一个回答 `302 Location: http://169.254.169.254/…`
+    // 的攻击者可控 URL 一跳就能摸到元数据服务，而 `Policy::limited(10)` 会愉快地跟着跳。
+    // `custom` 给出逐跳控制；跳数预算在这里计数，因为 `custom` 是**取代** `limited` 而非
+    // 与它组合。
     const MAX_REDIRECTS: usize = 10;
     let redirect = if input.follow_redirects {
         let hops = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -433,9 +379,7 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     })
 }
 
-// -------------------------------------------------------------------------
-// Tests — internal helpers + the result envelope.
-// -------------------------------------------------------------------------
+// 测试——内部辅助函数 + 结果封装。
 
 #[cfg(test)]
 #[path = "http_executor_test.rs"]

@@ -1,34 +1,23 @@
-//! CRUD for the `nodes` table — the merged resource tree.
+//! `nodes` 表的 CRUD——合并后的资源树。
 //!
-//! One row per node, discriminated by `type`, linked by `parent_id`,
-//! with `root_id` denormalising the owning project so a whole tree is
-//! one indexed read and "which project does this belong to" is a
-//! primary-key hit instead of a walk up the parent chain.
+//! 每个节点一行，由 `type` 区分、以 `parent_id` 相连；`root_id` 反范式化出所属项目，
+//! 故整棵树是一次走索引的读，「这属于哪个项目」也成了一次主键命中，而不必沿父链上溯。
 //!
-//! ## What the merge lost, and what replaces it
+//! ## 合并丢了什么，由什么接管
 //!
-//! The old three-table layout got "a parent always accepts the types
-//! its column could name" for free, from foreign keys like
-//! `endpoints.collection_id REFERENCES collections(id)`. One
-//! polymorphic `parent_id` cannot carry that: SQLite's CHECK
-//! constraints cannot read another row.
+//! 三表布局靠外键（如 `endpoints.collection_id REFERENCES collections(id)`）免费得到
+//! 「父永远接受它的列能指名的那些类型」。单一多态 `parent_id` 做不到：SQLite 的 CHECK
+//! 约束读不到别的行。
 //!
-//! So the parent/child matrix lives in
-//! [`ResourceNodeType::may_under`] and is enforced here on every write,
-//! with matching triggers in `schema.sql` as a second line of defence.
-//! The trigger half is not redundant belt-and-braces: the MCP tools are
-//! this project's primary external write path, and a future caller that
-//! skips `db::nodes` would otherwise be free to build a tree no reader
-//! can walk.
+//! 故父子矩阵住在 [`ResourceNodeType::may_under`]，并在此处每次写入时执行，`schema.sql`
+//! 另有配套触发器作为第二道防线。触发器那半不是冗余的双保险：MCP 工具是本项目主要的外部
+//! 写路径，跳过 `db::nodes` 的将来调用者否则可以自由搭出一棵没有读者走得动的树。
 //!
-//! ## `root_id` is derived, and derived values need maintenance
+//! ## `root_id` 是推导值，推导值需要维护
 //!
-//! It exists so that `list_by_root` is one indexed scan and
-//! `root_id_of` is one primary-key lookup — the first step of the
-//! per-project permission gate. The cost is that a move across a
-//! project boundary has to re-derive it across the whole subtree, not
-//! just the rows the caller named. [`move_many`] does that, and
-//! `subtree_module_id_cascade_has_a_test` is the regression net.
+//! 它换来的是 `list_by_root` 一次走索引的扫描、`root_id_of` 一次主键查找——逐项目权限门的
+//! 第一步。代价是跨项目边界的移动必须为整棵子树重新推导，而不只是调用方指名的那几行。
+//! [`move_many`] 做了这件事，`subtree_module_id_cascade_has_a_test` 是回归网。
 
 use rusqlite::{params, Connection, Row};
 
@@ -38,19 +27,14 @@ use crate::error::AppError;
 const COLUMNS: &str = "id, root_id, parent_id, type, name, description, sort_order, \
                        created_at, updated_at";
 
-/// Same list, qualified for the queries that join a second table.
+/// 同一份列表，为要 join 第二张表的查询加上表限定。
 const COLUMNS_N: &str = "n.id, n.root_id, n.parent_id, n.type, n.name, n.description, \
                          n.sort_order, n.created_at, n.updated_at";
 
-// -------------------------------------------------------------------------
-// Reads.
-// -------------------------------------------------------------------------
+// 读。
 
-/// Every node under one project, ordered for display.
-///
-/// This replaces the three list commands the renderer used to issue
-/// without filters, which returned the whole database regardless of
-/// which project was open.
+/// 一个项目下的全部节点，按显示序排列。
+/// 只取该项目，而不像无过滤的整库读取那样把整个数据库都拖回来。
 pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<ResourceNode>, AppError> {
     let sql = format!(
         "SELECT {COLUMNS} FROM nodes WHERE root_id = ?1 \
@@ -65,11 +49,9 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Resource
     Ok(out)
 }
 
-/// Every node of one type under one project.
-///
-/// `resource_type` is interpolated rather than bound because
-/// [`ResourceNodeType::as_str`] returns from a closed set of three
-/// literals — there is no user-controlled string reaching the SQL.
+/// 一个项目下某种类型的全部节点。
+/// `resource_type` 是插值而非绑定，因为 [`ResourceNodeType::as_str`] 从三个字面量的封闭集合
+/// 返回——没有用户可控的字符串进入 SQL。
 pub fn list_by_root_and_type(
     conn: &mut Connection,
     root_id: &str,
@@ -88,8 +70,7 @@ pub fn list_by_root_and_type(
     Ok(out)
 }
 
-/// Every node in the database. Used by the MCP list tools, which answer
-/// for a project the caller named rather than one the UI has active.
+/// 全库节点。供 MCP 的 list 工具使用：它们应答的是调用方指名的项目，而非 UI 当前激活的那个。
 pub fn list_all(conn: &mut Connection) -> Result<Vec<ResourceNode>, AppError> {
     let sql = format!("SELECT {COLUMNS} FROM nodes ORDER BY root_id ASC, sort_order ASC, id ASC");
     let mut stmt = conn.prepare(&sql)?;
@@ -101,16 +82,11 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<ResourceNode>, AppError> {
     Ok(out)
 }
 
-/// Substring search over the tree.
-///
-/// Endpoint `url` lives in `endpoint_details`, so this joins to reach
-/// it — the same reason the config was split out. A module or
-/// collection has no url, which the `n.type = 'endpoint'` guard keeps
-/// from matching a null column.
-///
-/// Must be called inside `db::with_tx` if the caller also wants the
-/// matching endpoints' details; the join is read-only, so `with_conn`
-/// is enough on its own.
+/// 对树做子串搜索。
+/// endpoint 的 `url` 在 `endpoint_details`，故此处得 join 才能触及——配置被拆出去的同一个
+/// 理由。模块与 collection 没有 url，`n.type = 'endpoint'` 这道守卫免得匹配上 null 列。
+/// 只想只读的话 `with_conn` 足够；调用方若还要读命中 endpoint 的详情，则必须在
+/// `db::with_tx` 内调用——join 本身是只读的。
 pub fn search(conn: &mut Connection, q: &str) -> Result<Vec<ResourceNode>, AppError> {
     let pattern = format!("%{q}%");
     let sql = format!(
@@ -129,26 +105,15 @@ pub fn search(conn: &mut Connection, q: &str) -> Result<Vec<ResourceNode>, AppEr
     Ok(out)
 }
 
-/// Copy an endpoint and its configuration under the same parent.
-///
-/// Endpoints only — the same shape as the old `db::endpoints::duplicate`
-/// this replaces, and for the same reason: a "copy" of a module or a
-/// collection would be an empty shell, and the old UI has no way to
-/// express that. A subtree copy is a different feature, not a
-/// duplicate.
-///
-/// MUST be called inside `db::with_tx` — the node and its detail row
-/// have to land together or the copy cannot be opened.
-///
-/// `new_id` lets the caller name the copy. `None` mints one here, which
-/// is what a stateless caller (the MCP tool) wants. The desktop UI
-/// passes its own because it duplicates *optimistically*: it writes the
-/// row into the store, activates the tab and drops the user straight
-/// into a rename before this call has even returned. An id minted here
-/// would be minted too late — the tab, the active selection and the
-/// in-progress rename would all be pointing at a row that does not
-/// exist, and the workspace rendered the tab as "接口已删除". Same
-/// contract as `nodes_create`, where the SPA's id is honoured.
+/// 在同一父下复制一个 endpoint 及其配置。
+/// 只限 endpoint：模块或 collection 的「副本」是个空壳，UI 也没有表达它的方式。
+/// 复制子树是另一个功能，不是 duplicate。
+/// **必须在 `db::with_tx` 内调用**——节点与它的 detail 行必须一起落地，否则副本打不开。
+/// `new_id` 让调用方命名副本；`None` 在此生成一个，那正无状态调用方（MCP 工具）要的。
+/// 桌面 UI 传自己的 id，因为它做的是**乐观**复制：在本调用返回之前就把行写进 store、激活
+/// 标签页并把用户直接送进重命名。此处生成的 id 会来得太晚——标签页、选中项与进行中的
+/// 重命名都会指向一行不存在的记录，工作区把标签页渲染成「接口已删除」。与 `nodes_create`
+/// 同一契约：接受 SPA 给的 id。
 pub fn duplicate(
     conn: &mut Connection,
     id: &str,
@@ -167,15 +132,11 @@ pub fn duplicate(
         id: new_id
             .map(str::to_string)
             .unwrap_or_else(crate::domain::uid),
-        // ` (副本)` rather than the English marker: the row's name is what
-        // the user reads in a Chinese UI, and the SPA writes the same
-        // suffix optimistically — the two disagreeing made the copy appear
-        // to rename itself a moment after it was created.
+        // 用「 (副本)」而非英文标记：这一行的名字是用户在中文界面里读到的东西，而 SPA 乐观
+        // 写入时用的是同一个后缀——两者不一致会让副本看起来在创建后一刻自己改了名。
         name: format!("{} (副本)", node.name),
-        // Straight after the original. Not `MAX + 1` — the old
-        // implementation pushed copies to the tail, which meant
-        // duplicating an endpoint you were looking at moved it out from
-        // under the cursor.
+        // 紧跟原件之后，不是 `MAX + 1`：把副本排到队尾，会让人正看着的 endpoint 复制后
+        // 从光标底下跑掉。
         sort_order: node.sort_order + 1,
         created_at: now,
         updated_at: now,
@@ -199,12 +160,8 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<ResourceNode, AppError> {
     }
 }
 
-/// The project a node belongs to, in one lookup.
-///
-/// The old layout needed two: `collections.module_id`, then
-/// `modules.project_id`. This is the first step of the per-project
-/// permission gate in `db::permissions`, so it runs on every
-/// mutating MCP tool.
+/// 一个节点所属的项目，一次查完。
+/// `db::permissions` 里逐项目权限门的第一步，故每个会改动的 MCP 工具都会跑到它。
 pub fn root_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
     conn.query_row(
         "SELECT root_id FROM nodes WHERE id = ?1",
@@ -217,21 +174,14 @@ pub fn root_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
     })
 }
 
-/// Which module a node sits under, or `None` when it is not under one.
-///
-/// Every node except a module has exactly one module above it, and the
-/// endpoint configuration's base URL is keyed by that module: the live
-/// value layer is `moduleBaseUrls[service][module]`, so resolving an
-/// endpoint's URL is two lookups — which service, then which module —
-/// and this is the second. It is a tree question rather than a property
-/// of the node's own row, which is why it is not denormalised the way
-/// `root_id` is.
-///
-/// `None` is a real answer, not a failure: the node itself may be a
-/// module, or not exist at all. Callers that need to tell those apart ask
-/// [`type_of`] first or simply treat "no module" as "no base URL",
-/// which is what resolution does. The walk skips the node itself, so a
-/// module is never reported as its own answer.
+/// 某节点挂在哪个模块下，不在模块下则为 `None`。
+/// 除模块本身外每个节点上方恰有一个模块，而 endpoint 配置的 base URL 正以该模块为键：
+/// 现役值层是 `moduleBaseUrls[service][module]`，故解析一个 endpoint 的 URL 是两次查找
+/// ——哪个服务、哪个模块——此函数是第二次。这是树上的问题而非该行自身的属性，故不像
+/// `root_id` 那样反范式化。
+/// `None` 是真实答案而非失败：该节点自身可能就是模块，或者根本不存在。需要区分二者的调用方
+/// 先问 [`type_of`]，或干脆把「没有模块」当作「没有 base URL」，解析器正是这么做的。
+/// 向上遍历跳过节点自身，故模块不会被当成自己的答案。
 pub fn module_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, AppError> {
     let found: Option<String> = conn
         .query_row(
@@ -249,7 +199,7 @@ pub fn module_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, A
     Ok(found)
 }
 
-/// The type of a node, or `NotFound`.
+/// 节点的类型，或 `NotFound`。
 pub fn type_of(conn: &mut Connection, id: &str) -> Result<ResourceNodeType, AppError> {
     let raw: String = conn
         .query_row("SELECT type FROM nodes WHERE id = ?1", params![id], |r| {
@@ -260,18 +210,14 @@ pub fn type_of(conn: &mut Connection, id: &str) -> Result<ResourceNodeType, AppE
             other => AppError::Sqlite(other),
         })?;
     ResourceNodeType::parse(&raw).ok_or_else(|| {
-        // The CHECK constraint should make this unreachable; surfacing it
-        // beats mapping an unknown type onto some arbitrary variant.
+        // CHECK 约束应当使这不可达；如实报出，好过把未知类型映射到某个随便的变体上。
         AppError::Db(format!("node {id} has unrecognised type {raw:?}"))
     })
 }
 
-/// `roots` plus every descendant of every root, in BFS-stable order.
-///
-/// Uses `UNION` rather than `UNION ALL` so a cycle already present in
-/// the data terminates the walk instead of looping forever. Nothing
-/// above this function defends against a cycle at write time, so this
-/// has to be the one place that can.
+/// `roots` 加上每个 root 的全部后代，BFS 序稳定。
+/// 用 `UNION` 而非 `UNION ALL`，使数据中已存在的环终止遍历而不是永远绕圈。本函数之上
+/// 没有人在写入时防环，故这里必须是那个能防的地方。
 pub fn subtree_ids(conn: &mut Connection, roots: &[String]) -> Result<Vec<String>, AppError> {
     if roots.is_empty() {
         return Ok(Vec::new());
@@ -295,19 +241,12 @@ pub fn subtree_ids(conn: &mut Connection, roots: &[String]) -> Result<Vec<String
     Ok(ids)
 }
 
-// -------------------------------------------------------------------------
-// Writes.
-// -------------------------------------------------------------------------
+// 写。
 
-/// Insert a node, and its `endpoint_details` row when the type calls
-/// for one.
-///
-/// Both halves go in together: a node without its detail row, or a
-/// detail row without its node, is a tree the reader cannot walk. The
-/// caller supplies the `detail` for an endpoint and must pass `None`
-/// otherwise — [`check_detail_agreement`] enforces that before the
-/// insert, so the mistake is reported as a validation error rather
-/// than surfacing later as a half-populated endpoint.
+/// 插入一个节点；类型需要时连同它的 `endpoint_details` 行。
+/// 两半一起落：缺 detail 行的节点、或缺节点的 detail 行，都是没有读者走得动的树。调用方为
+/// endpoint 提供 `detail`，其余必须传 `None`——[`check_detail_agreement`] 在插入前强制，
+/// 故此错误以校验错误报出，而不是日后表现为一个半填充的 endpoint。
 pub fn create(
     conn: &mut Connection,
     node: &ResourceNode,
@@ -338,23 +277,19 @@ pub fn create(
     Ok(node.clone())
 }
 
-/// Partial update of the structural columns.
-///
-/// `parent_id` routes through [`reparent`] rather than being written
-/// directly, because moving is the operation that has to keep the type
-/// matrix and the subtree's `root_id` honest — a plain UPDATE of
-/// `parent_id` would do neither.
+/// 结构列的部分更新。
+/// `parent_id` 绕道 [`reparent`] 而非直接写入，因为移动正是必须同时保住类型矩阵与子树
+/// `root_id` 的那个操作——直接 UPDATE `parent_id` 两样都做不到。
 pub fn update(
     conn: &mut Connection,
     id: &str,
     patch: ResourceNodePatch,
 ) -> Result<ResourceNode, AppError> {
-    // Named apart from the `reparent` function it calls.
+    // 单独取名，好与它调用的 `reparent` 函数区分开。
     let reparent_to = patch.parent_id.clone();
 
-    // Built column-by-column rather than from a fixed list, because each
-    // field is independently optional and the double Option on
-    // `description` distinguishes "leave it" from "clear it".
+    // 逐列拼装而非从固定列表来，因为每个字段都各自可选，而 `description` 上的双层 Option
+    // 还要区分「保持不动」与「清空」。
     let mut named: Vec<&str> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
     if let Some(n) = &patch.name {
@@ -389,7 +324,7 @@ pub fn update(
     }
 
     match reparent_to {
-        // Absent: nothing asked to move.
+        // 缺席：没人要求移动。
         None => {}
         Some(new_parent) => reparent(conn, id, new_parent.as_deref())?,
     }
@@ -397,20 +332,16 @@ pub fn update(
     get(conn, id)
 }
 
-/// Move a node under a new parent without changing its position among
-/// its siblings.
-///
-/// Thin wrapper over [`move_many`] so a single-node move and a
-/// multi-select drag cannot diverge — the cycle check, the type matrix
-/// and the `root_id` cascade all live in one place.
+/// 把节点移到新父下，且不改变它在兄弟中的位置。
+/// [`move_many`] 的薄封装，好让单节点移动与多选拖拽不会分叉——环检查、类型矩阵与
+/// `root_id` 级联全在一处。
 pub fn reparent(
     conn: &mut Connection,
     id: &str,
     new_parent_id: Option<&str>,
 ) -> Result<(), AppError> {
     let node = get(conn, id)?;
-    // Keep the node's current slot: read its index among the old
-    // siblings and reuse it against the new set.
+    // 保持节点当前的位置：读出它在旧兄弟中的序号，用到新集合上复用。
     let index = sibling_index(conn, &node, id)?;
     move_many(
         conn,
@@ -420,12 +351,9 @@ pub fn reparent(
     )
 }
 
-/// Delete a node and its whole subtree.
-///
-/// The `ON DELETE CASCADE` on `parent_id` does the teardown, and the
-/// `root_id` cascade on `projects` covers deleting a project. The only
-/// thing this adds is reporting a missing id instead of silently
-/// succeeding.
+/// 删除一个节点及其整棵子树。
+/// `parent_id` 上的 `ON DELETE CASCADE` 负责拆除，`projects` 上的 `root_id` 级联负责删项目。
+/// 本函数唯一多做的事是把不存在的 id 报出来，而不是静默成功。
 pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     let rows = conn.execute("DELETE FROM nodes WHERE id = ?1", params![id])?;
     if rows == 0 {
@@ -434,23 +362,16 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Move one or many nodes to a new sibling position under
-/// `new_parent_id`.
-///
-/// `node_ids` is in the order the nodes should appear at the
-/// destination, so a multi-select drag keeps the user's pick order.
-/// `None` for the parent is only meaningful for a module, whose parent
-/// is the project rather than a node.
-///
-/// MUST be called inside `db::with_tx` — this issues one UPDATE per
-/// sibling to renumber, and the caller wants those to land together.
-///
-/// The five things that have to be true afterwards, in order:
-/// 1. no node sits inside its own subtree (cycle)
-/// 2. every moved node's type is allowed under the new parent
-/// 3. the new parent's siblings are a contiguous `0..N` run
-/// 4. the whole subtree's `root_id` matches the new parent's
-/// 5. each moved row carries the new `parent_id` and its new slot
+/// 把一个或多个节点移到 `new_parent_id` 下的新兄弟位置。
+/// `node_ids` 即节点在目标处应出现的顺序，故多选拖拽保留用户的挑选顺序。父为 `None` 只对
+/// 模块有意义——模块的父是项目而非节点。
+/// **必须在 `db::with_tx` 内调用**——每个兄弟一次 UPDATE 来重编号，调用方要它们一起落地。
+/// 事后必须成立的五件事，按序：
+/// 1. 没有节点落在自己的子树里（环）
+/// 2. 每个被移动节点的类型都被新父接受
+/// 3. 新父的兄弟是连续的 `0..N`
+/// 4. 整棵子树的 `root_id` 与新父一致
+/// 5. 每个被移动行带上新的 `parent_id` 与新的槽位
 pub fn move_many(
     conn: &mut Connection,
     node_ids: &[String],
@@ -461,16 +382,14 @@ pub fn move_many(
         return Ok(());
     }
 
-    // Load the movers up front. Everything below needs their types and
-    // current owners, and reading once keeps the checks consistent with
-    // each other even if a trigger or a concurrent writer is in play.
+    // 先把被移动者全部读出来。下面每一步都要它们的类型与当前归属，而只读一次能让各步检查
+    // 彼此一致——即便期间有触发器或并发写入者在场。
     let mut movers = Vec::with_capacity(node_ids.len());
     for id in node_ids {
         movers.push(get(conn, id)?);
     }
 
-    // 1. Cycle check. A collection nested under one of its own
-    //    descendants would make every tree walk below this point loop.
+    // 1. 环检查。collection 嵌在自己的后代之下，会让此处往下的每次树遍历都绕圈。
     let moved_subtrees = subtree_ids(conn, node_ids)?;
     let subtree_set: std::collections::HashSet<&String> = moved_subtrees.iter().collect();
     if let Some(parent) = new_parent_id {
@@ -481,9 +400,7 @@ pub fn move_many(
         }
     }
 
-    // 2. Type matrix. A module has no node parent, so `None` is the only
-    //    legal landing spot for one; anything else needs a parent whose
-    //    type accepts it.
+    // 2. 类型矩阵。模块没有节点父，故 `None` 是它唯一合法的落点；其余需要一个类型接受它的父。
     let new_root_id = match new_parent_id {
         None => {
             for m in &movers {
@@ -513,10 +430,7 @@ pub fn move_many(
         }
     };
 
-    // 3. Reorder the new parent's children. Scoped to the destination,
-    //    which is why this is one uniform query — the old layout had to
-    //    branch on "module or collection parent" because they were
-    //    different tables.
+    // 3. 重排新父的子节点。按目标作用域限定，故这是一条统一查询。
     let siblings: Vec<String> = match new_parent_id {
         Some(p) => {
             let mut stmt = conn.prepare(
@@ -557,12 +471,8 @@ pub fn move_many(
     }
     drop(update);
 
-    // 4. Re-derive `root_id` across each moved subtree. Derived value,
-    //    so a boundary crossing has to reach every descendant — doing
-    //    it only for the named rows leaves the subtree filed under the
-    //    old project and invisible to `list_by_root`, which is the
-    //    same shape of bug as the collection `module_id` drift that
-    //    `reassign_subtree_module` fixes on the old layout.
+    // 4. 为每棵被移动子树重新推导 `root_id`。它是推导值，故跨边界必须触及每一个后代——只改
+    //    指名的行会让子树仍归档在旧项目下、对 `list_by_root` 不可见。
     if movers.iter().any(|m| m.root_id != new_root_id) {
         let mut update_root = conn.prepare("UPDATE nodes SET root_id = ?1 WHERE id = ?2")?;
         for id in &moved_subtrees {
@@ -570,7 +480,7 @@ pub fn move_many(
         }
     }
 
-    // 5. Attach the movers.
+    // 5. 挂上被移动者。
     let mut attach = conn.prepare("UPDATE nodes SET parent_id = ?1 WHERE id = ?2")?;
     for id in node_ids {
         attach.execute(params![new_parent_id, id])?;
@@ -578,21 +488,14 @@ pub fn move_many(
     Ok(())
 }
 
-/// Transfer a module to a different project, at a given top-level slot.
-///
-/// The one move [`move_many`] cannot express. With `new_parent_id` of
-/// `None` it has no parent row to read a root from, so it keeps the
-/// module's current `root_id` — correct for "reorder my modules", wrong
-/// for "move this module to another project", which is what the MCP
-/// `module_move` tool has always meant.
-///
-/// Separate rather than an extra argument on `move_many` because the two
-/// differ in more than a parameter value: a boundary crossing has to
-/// renumber the *old* project's top-level siblings too, or that project
-/// is left with a gap in its `sort_order` run.
-///
-/// `target_index` of `None` appends. MUST be called inside `db::with_tx`
-/// — both projects' orderings have to land together.
+/// 把一个模块转到另一个项目，并落到指定的顶层槽位。
+/// [`move_many`] 表达不了的那一种移动。以 `new_parent_id` 为 `None` 调用时它没有父行可读
+/// root，于是保留模块当前的 `root_id`——对「重排我的模块」正确，对「把这个模块移到另一个
+/// 项目」错误，而后者正是 MCP `module_move` 工具一向的意思。
+/// 单独成函数而不是给 `move_many` 加参数，因为两者差别不止一个参数值：跨边界还要重编
+/// **旧**项目的顶层兄弟，否则那个项目的 `sort_order` 会留下空档。
+/// `target_index` 为 `None` 表示追加。**必须在 `db::with_tx` 内调用**——两个项目的排序必须
+/// 一起落地。
 pub fn move_to_root(
     conn: &mut Connection,
     id: &str,
@@ -606,8 +509,7 @@ pub fn move_to_root(
             node.kind.as_str()
         )));
     }
-    // A typo'd project id would otherwise file the subtree under a root
-    // no project row backs, where nothing can ever list it again.
+    // 否则一个打错的项目 id 会把子树归到没有任何项目行支撑的 root 下，此后永远没人能列出它。
     let dest_exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM projects WHERE id = ?1)",
@@ -624,19 +526,14 @@ pub fn move_to_root(
 
     let moved_subtrees = subtree_ids(conn, &[id.to_string()])?;
 
-    // Close the gap in the project being left, unless that is also the
-    // destination — in which case the insert below renumbers anyway and
-    // running the compaction first would only churn the same rows.
-    //
-    // The departing module is excluded: at this point it is still filed
-    // under the old root, so counting it would leave its old slot
-    // occupied and shift nothing up.
+    // 补上离开的那个项目留下的空档，除非它同时就是目的地——那种情况下面的插入反正会重编号，
+    // 先做压缩只会白白改动同一批行。离开中的模块要排除：此刻它仍归档在旧 root 下，把它算
+    // 进去会让它腾出的槽位继续占着，什么也不上移。
     if node.root_id != new_root_id {
         renumber_top_level(conn, &node.root_id, Some(id))?;
     }
 
-    // Slot the module into the destination, pulling the rest of that
-    // project's top level up around it.
+    // 把模块放进目的项目的顶层，并把该项目其余顶层围绕它上移。
     let mut order = top_level_ids(conn, new_root_id)?
         .into_iter()
         .filter(|existing| existing != id)
@@ -648,9 +545,8 @@ pub fn move_to_root(
     order.insert(idx, id.to_string());
     write_order(conn, &order)?;
 
-    // Re-derive `root_id` across the subtree, for the same reason
-    // `move_many` does: the named row alone would leave every descendant
-    // filed under the old project and invisible to `list_by_root`.
+    // 为子树重新推导 `root_id`，理由同 `move_many`：只改指名的行，会让每个后代仍归档在旧
+    // 项目下、对 `list_by_root` 不可见。
     let mut update_root = conn.prepare("UPDATE nodes SET root_id = ?1 WHERE id = ?2")?;
     for sid in &moved_subtrees {
         update_root.execute(params![new_root_id, sid])?;
@@ -660,15 +556,10 @@ pub fn move_to_root(
     get(conn, id)
 }
 
-/// Direct children of one node, in display order.
-///
-/// `kind` narrows to a single type. With the unified tree this is the
-/// only query a "list the endpoints in this collection" needs — the old
-/// `endpoints::list_by_collection` existed because an endpoint's parent
-/// could only ever be a collection, which is no longer true.
-///
-/// Not recursive: for a whole subtree use [`subtree_ids`] with
-/// [`list_by_root_and_type`], or walk parents from the root.
+/// 一个节点的直接子节点，按显示序排列。
+/// `kind` 可收窄到单一类型。在合并后的树上，这是「列出这个 collection 里的 endpoint」唯一
+/// 需要的查询。
+/// 非递归：要整棵子树，用 [`subtree_ids`] 配 [`list_by_root_and_type`]，或从根沿父回溯。
 pub fn list_children(
     conn: &mut Connection,
     parent_id: &str,
@@ -688,7 +579,7 @@ pub fn list_children(
     })
 }
 
-/// Ids of a project's top-level nodes, in display order.
+/// 一个项目顶层节点的 id，按显示序。
 fn top_level_ids(conn: &mut Connection, root_id: &str) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id FROM nodes WHERE root_id = ?1 AND parent_id IS NULL \
@@ -700,7 +591,7 @@ fn top_level_ids(conn: &mut Connection, root_id: &str) -> Result<Vec<String>, Ap
     Ok(ids)
 }
 
-/// Write `0..N` into `sort_order` for the given ids, in the given order.
+/// 按给定顺序把 `0..N` 写进 `sort_order`。
 fn write_order(conn: &mut Connection, ids: &[String]) -> Result<(), AppError> {
     let mut update = conn.prepare("UPDATE nodes SET sort_order = ?1 WHERE id = ?2")?;
     for (i, id) in ids.iter().enumerate() {
@@ -709,10 +600,9 @@ fn write_order(conn: &mut Connection, ids: &[String]) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Collapse a project's top-level ordering back to a contiguous `0..N`
-/// run after a member left it. `exclude` is the member that left — it is
-/// still filed under this root at the moment this runs, so leaving it in
-/// would keep its vacated slot occupied.
+/// 某成员离开后，把该项目的顶层顺序重新压成连续的 `0..N`。
+/// `exclude` 是离开的那个成员——运行本函数时它仍归档在这个 root 下，把它留着会让它腾出的
+/// 槽位继续占着。
 fn renumber_top_level(
     conn: &mut Connection,
     root_id: &str,
@@ -725,29 +615,18 @@ fn renumber_top_level(
     write_order(conn, &ids)
 }
 
-// -------------------------------------------------------------------------
-// Internals.
-// -------------------------------------------------------------------------
+// 内部实现。
 
-/// Check that a placement is legal before writing it.
+/// 写入前先检查一次放置是否合法。四种可能出错的地方：
+/// * 挂在一个类型不接受它的父下
+/// * 模块被给了节点父
+/// * `root_id` 与父的不一致——那会让节点归档在一个项目下、却渲染在另一个项目的树里
+/// * 顶层节点没有指名项目，或指名的项目不存在
 ///
-/// Four things can be wrong, and all four used to be caught by foreign
-/// keys that no longer exist:
-/// * a node under a parent whose type does not accept it
-/// * a module given a node parent
-/// * a `root_id` that disagrees with the parent's, which would file a
-///   node under one project while rendering it in another's tree
-/// * a top-level node that names no project at all, or one that does not
-///   exist
-///
-/// The last one is the one this function used to let through: both
-/// transports default an absent `rootId` to the empty string, and a
-/// top-level node has no `parentId` to derive it from, so the empty
-/// string reached `INSERT` and SQLite reported
-/// `FOREIGN KEY constraint failed`. That surfaced as a 500 with
-/// `code: "sqlite"` — a transport failure for what is really a caller
-/// mistake, and one the error envelope tells a client it cannot
-/// distinguish from a genuine server fault.
+/// 最后一条尤其要紧：两条传输层都把缺席的 `rootId` 默认成空串，而顶层节点没有 `parentId`
+/// 可供推导，空串于是直达 `INSERT`，SQLite 报 `FOREIGN KEY constraint failed`——那会以
+/// 500 加 `code: "sqlite"` 出现，把一个调用方的错误说成传输故障，而错误封装无法让客户端
+/// 把它与真正的服务端故障区分开。
 fn validate_placement(
     conn: &mut Connection,
     kind: ResourceNodeType,
@@ -761,9 +640,7 @@ fn validate_placement(
                 kind.as_str()
             )));
         }
-        // A module's parent is the project itself, which the row cannot
-        // reference — so the project has to be named, one way or the
-        // other.
+        // 模块的父是项目本身，行无法引用它——所以项目必须以某种方式被指名。
         if root_id.is_empty() {
             return Err(AppError::Validation(
                 "a top-level node needs its project: pass rootId, or a parentId to derive it from"
@@ -795,20 +672,15 @@ fn validate_placement(
     Ok(())
 }
 
-/// An endpoint needs exactly one detail row; a module or collection
-/// must not have one.
-///
-/// Checked up front so a caller who forgets — or passes a detail for a
-/// collection — gets a validation error naming the mistake, instead of
-/// a tree where opening the item reports a missing row.
+/// 一个 endpoint 恰有一行 detail；module 或 collection 不得有。
+/// 前置检查，好让忘传——或给 collection 传了 detail 的——调用方拿到一条指名错误的校验错误，
+/// 而不是一棵打开该条目时报告缺行的树。
 fn check_detail_agreement(
     node: &ResourceNode,
     detail: Option<&EndpointDetail>,
 ) -> Result<(), AppError> {
     match (node.kind, detail) {
-        // Order matters: the valid endpoint case has to be matched
-        // before the "no detail allowed" arm below, which would
-        // otherwise swallow it.
+        // 顺序要紧：合法的 endpoint 分支必须先于下面那条「不允许 detail」的分支匹配，否则被它吞掉。
         (ResourceNodeType::Endpoint, Some(d)) if d.node_id == node.id => Ok(()),
         (ResourceNodeType::Endpoint, Some(EndpointDetail { node_id, .. })) => {
             Err(AppError::Validation(format!(
@@ -828,7 +700,7 @@ fn check_detail_agreement(
     }
 }
 
-/// Zero-based position of `id` among the siblings it currently has.
+/// `id` 在它当前兄弟中的零基位置。
 fn sibling_index(conn: &mut Connection, node: &ResourceNode, id: &str) -> Result<i32, AppError> {
     let ids: Vec<String> = match &node.parent_id {
         Some(p) => {
@@ -878,9 +750,7 @@ fn row_to_node(row: &Row<'_>) -> Result<ResourceNode, rusqlite::Error> {
     })
 }
 
-// -------------------------------------------------------------------------
-// Tests.
-// -------------------------------------------------------------------------
+// 测试。
 
 #[cfg(test)]
 #[path = "nodes_test.rs"]

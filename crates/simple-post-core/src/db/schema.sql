@@ -1,90 +1,73 @@
 -- Simple Post schema.
--- Executed once at boot from `db/mod.rs::migrate`. Idempotent:
--- every `CREATE` uses `IF NOT EXISTS` so a re-run on an already-migrated
--- database is a no-op.  Foreign keys are enforced; ON DELETE CASCADE
--- keeps project / module / collection deletion cheap (one DELETE on the
--- root removes the whole subtree).
+-- 由 `db/mod.rs::migrate` 在启动时执行一次。幂等：每个 `CREATE` 都是
+-- `IF NOT EXISTS`，故在已迁移的库上重跑是无操作。外键被强制；ON DELETE CASCADE 让删
+-- project / module / collection 很廉价（对根一次 DELETE 带走整棵子树）。
 --
--- Migrations create tables and insert **no rows**. A fresh install is
--- empty by design — test fixtures live in `fixtures.json` behind
--- `#[cfg(test)]`, not here.
+-- 迁移建表并插入**零行**。全新安装按设计是空的——测试 fixture 在 `#[cfg(test)]` 背后的
+-- `fixtures.json`，不在这里。
 --
--- Timestamp convention: every `*_at` column is a unix-ms integer
--- (what JS / TS `Date.now()` returns). Easier to compare, sort, and
--- ship through serde_json than RFC-3339 strings.
+-- 时间戳约定：每个 `*_at` 列都是 unix 毫秒整数（JS / TS `Date.now()` 的返回值），
+-- 比 RFC-3339 字符串更易比较、排序与经 serde_json 传输。
 
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
-  -- The project's ★ service: what an endpoint naming no service of its
-  -- own resolves against. One per project, not per module — the service
-  -- list is project-wide, so a ★ that scoped to a module would name a
-  -- service other modules cannot see. NULL is a normal state (a project
-  -- nobody has given a default service yet), not an absent value.
+  -- 项目的 ★ 服务：未指名服务的 endpoint 所解析的对象。每项目一个而非每模块一个——
+  -- 服务表是项目级的，一个按模块划分的 ★ 会指名别的模块看不见的服务。NULL 是正常状态
+  -- （项目还没被给过默认服务），不是一个缺失的值。
   default_base_url_definition_id TEXT,
   color TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
--- A named service, owned by the PROJECT. Every module sees every service
--- in this list — there is no per-module service list, so two modules can
--- never hold services that share a `name`. That is the whole point of the
--- model: 「服务应该绑定到项目，这样每一个模块都会全部包含这些服务」.
+-- 一条具名服务，由**项目**拥有。每个模块都能看到这份列表里的全部服务——没有按模块的服务表，
+-- 故两个模块不可能持有同名的服务。这正是该模型的要义：
+-- 「服务应该绑定到项目，这样每一个模块都会全部包含这些服务」。
 --
--- A service row carries no URL. The value lives in
--- `environments.module_base_urls_json`, keyed by (service × module), so a
--- row here answers "what services exist" and nothing else.
+-- 服务行不携带 URL。值住在 `environments.module_base_urls_json` 里，以 (服务 × 模块)
+-- 为键，故这一行只回答「存在哪些服务」，别无其他。
 --
--- `module_id` and `is_default` below are **dead columns kept on purpose**.
--- They held the module-owned service model (per-module service lists and
--- per-module ★) that this build reversed; `db::migrate` nulls / zeroes
--- them and nothing reads or writes them after that. They stay because
--- dropping a column means rebuilding the table, which means a
--- `SCHEMA_VERSION` bump, and a bump makes `ensure_current_schema` delete
--- the user's store. `db::ADDED_COLUMNS` re-adds both to stores that
--- predate them, for the same reason: the migration has to be able to read
--- the old shape in order to neutralise it.
+-- 下面的 `module_id` 与 `is_default` 是**刻意保留的死列**。它们曾服务于本构建已推翻的
+-- 「模块持有」模型（按模块的服务表与按模块的 ★）；`db::migrate` 把它们置空/置零，此后
+-- 无人读写。留着是因为删列 = 重建表 = bump `SCHEMA_VERSION`，而 bump 会让
+-- `ensure_current_schema` 删掉用户的库。`db::ADDED_COLUMNS` 同样把这两列补回那些早于它们的
+-- 库，理由一致：迁移必须能**读**旧形状才能把它中和掉。
 --
--- Added after this table first shipped, so the `CREATE TABLE IF NOT
--- EXISTS` above is a no-op for a store that already has the table.
+-- 这两列是本表首度发布之后才加的，故上面的 `CREATE TABLE IF NOT EXISTS` 对已有该表的库
+-- 是无操作。
 CREATE TABLE IF NOT EXISTS base_url_definitions (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  -- NULL always. Nullable rather than NOT NULL because `ADDED_COLUMNS`
-  -- can only append a nullable column to a live table.
+  -- 恒为 NULL。之所以可空而非 NOT NULL，是因为 `ADDED_COLUMNS` 只能给活着的表追加可空列。
   module_id TEXT REFERENCES nodes(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
-  -- 0 always. See above.
+  -- 恒为 0。见上。
   is_default INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_base_url_defs_project
   ON base_url_definitions(project_id);
 
--- The `modules` / `collections` / `endpoints` tables that used to live
--- here are gone; `nodes` + `endpoint_details` below replaced them. See
--- the section header there for why the split is two tables and not one.
+-- 曾经住在这里的 `modules` / `collections` / `endpoints` 三张表已 gone，由下面的 `nodes` +
+-- `endpoint_details` 取代。为什么要拆成两张表而不是一张，见那里的小节头。
 
 CREATE TABLE IF NOT EXISTS environments (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 0,
-  -- DEPRECATED, kept only so the column survives. It was `def_id -> url`,
-  -- the single value layer before services carried a module. Nothing
-  -- reads or writes it now; `db::migrate` copied every live value into
-  -- `module_base_urls_json` and is the only reader left in the crate.
+  -- 已废弃，只为让该列存活。它曾是 `def_id -> url`，即服务还不携带模块之前的单一值层。
+  -- 现在无人读写；`db::migrate` 已把每个现役值复制进 `module_base_urls_json`，
+  -- 并是本 crate 里仅剩的读者。
   --
-  -- Not cleared by the migration for the shape it can leave behind (see
-  -- `migrate_base_urls_into_value_layer`): those stores re-derive the
-  -- identical values on every later run, so the stale blob is inert.
+  -- 迁移**不**清空它可能留下的那一种形状（见 `migrate_base_urls_into_value_layer`）：
+  -- 那些库在之后每次运行都重新推导出逐字节相同的值，故残留 blob 是惰性的。
   base_urls_json TEXT NOT NULL DEFAULT '{}',
-  -- def_id -> module_id -> url. **The only layer a base URL lives in.**
-  -- Each cell is independent: a module with no entry for a service has no
-  -- URL for it, and does not inherit another module's or the project's.
+  -- def_id -> module_id -> url。**base URL 唯一所在的一层。**
+  -- 每个单元格独立：某模块对一个服务没有条目即对它没有 URL，且不会继承别的模块的或项目的。
   module_base_urls_json TEXT NOT NULL DEFAULT '{}',
   variables_json TEXT NOT NULL DEFAULT '{}'
 );
@@ -95,8 +78,7 @@ CREATE TABLE IF NOT EXISTS agent_permissions (
   permission TEXT NOT NULL CHECK(permission IN ('read','read_call','full'))
 );
 
--- Singleton row (CHECK id=1). Holds the global HTTP client knobs
--- surfaced in the Settings UI.
+-- 单例行（CHECK id=1）。存设置 UI 里露出的全局 HTTP 客户端旋钮。
 CREATE TABLE IF NOT EXISTS request_settings (
   id INTEGER PRIMARY KEY CHECK(id=1),
   timeout_ms INTEGER NOT NULL DEFAULT 30000,
@@ -104,72 +86,58 @@ CREATE TABLE IF NOT EXISTS request_settings (
   max_response_size_kb INTEGER NOT NULL DEFAULT 5120
 );
 
--- Free-form key/value bag used for the renderer's last-opened project,
--- UI prefs, recent envs, etc. Values are JSON-encoded so the schema
--- doesn't need to know about specific keys up front.
+-- 自由键值对袋子，用于渲染层的上次打开项目、UI 偏好、最近环境等。值经 JSON 编码，故
+-- schema 不必预先知道具体有哪些键。
 CREATE TABLE IF NOT EXISTS preferences (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 
 -- ===========================================================================
--- Resource tree — the merge of modules / collections / endpoints.
+-- 资源树——modules / collections / endpoints 的合并体。
 --
--- One row per tree node, discriminated by `type`. `parent_id` is the
--- only hierarchy link; `root_id` denormalises the owning project onto
--- every node so a whole tree is one indexed read instead of a walk up
--- the parent chain per node.
+-- 每个树节点一行，由 `type` 区分。`parent_id` 是唯一的层级连接；`root_id` 把所属项目
+-- 反范式化到每个节点上，故整棵树是一次走索引的读，而不是逐节点沿父链上溯。
 --
--- Projects are deliberately NOT nodes. A project is the implicit root
--- context — the UI binds exactly one active project — so `root_id`
--- stays single-valued and a module's parent is expressed as NULL.
+-- 项目刻意**不**是节点。项目是隐式的根上下文——UI 恰好绑定一个激活项目——故 `root_id`
+-- 保持单值，模块的父以 NULL 表达。
 --
--- Nothing reads these tables yet: modules / collections / endpoints are
--- still the live layout, and get dropped in a later pass. They are
--- additive, so SCHEMA_VERSION does not need a bump — see its doc
--- comment in db/mod.rs.
+-- 纯增量，故 SCHEMA_VERSION 不需要 bump——见它在 db/mod.rs 里的文档注释。
 -- ===========================================================================
 
 CREATE TABLE IF NOT EXISTS nodes (
   id          TEXT PRIMARY KEY,
-  -- Owning project. Cascades, so deleting a project still takes the
-  -- whole tree with it in a single DELETE.
+  -- 所属项目。级联，故删项目仍在单条 DELETE 里带走整棵树。
   root_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  -- NULL for a module: its parent is the project, which is not a node.
-  -- Self-referencing CASCADE gives the subtree teardown the old
-  -- three-level foreign key chain provided.
+  -- 模块为 NULL：其父是项目，而项目不是节点。自引用的 CASCADE 提供了旧三级外键链
+  -- 给过的子树拆除。
   parent_id   TEXT REFERENCES nodes(id) ON DELETE CASCADE,
   type        TEXT NOT NULL CHECK(type IN ('module','collection','endpoint')),
   name        TEXT NOT NULL,
   description TEXT,
-  -- Scoped to the parent, not to (parent, type). Under one parent the
-  -- children are all the same type anyway, so nothing that reads in
-  -- display order changes behaviour.
+  -- 按父而非 (父, type) 划定作用域。同一个父下的子节点反正都是同一类型，故任何按显示序
+  -- 读的东西行为都不变。
   sort_order  INTEGER NOT NULL,
-  -- Modules and collections had no timestamps before; carrying them
-  -- here costs nothing and spares every CRUD path a per-type branch.
+  -- 模块与 collection 此前没有时间戳；放在这里不花代价，还让每条 CRUD 路径省掉一次
+  -- 按类型分支。
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
--- The two tree reads: "this project's whole tree" and "this node's
--- children, in order".
+-- 树的两个读取：「这个项目的整棵树」与「这个节点的子节点，按序」。
 CREATE INDEX IF NOT EXISTS idx_nodes_root   ON nodes(root_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_nodes_type   ON nodes(type, name);
 
--- Endpoint configuration, split out because none of these columns mean
--- anything for a module or a collection. Folding them into `nodes`
--- would give every module and collection row a set of permanently
--- empty columns, and leave `method = ?` filters in a search with
--- nothing to discriminate them.
+-- endpoint 的配置，拆出来是因为这里没有一列对模块或 collection 有意义。折叠进 `nodes`
+-- 会让每个模块和 collection 行带上一组永远为空的列，也会让搜索里的 `method = ?`
+-- 过滤无物可分。
 --
--- `node_id` is both the primary key and the join. No name, sort_order
--- or timestamps here: those live once, on `nodes`.
+-- `node_id` 既是主键也是连接键。这里没有 name、sort_order 或时间戳：那些在 `nodes` 上
+-- 只住一份。
 CREATE TABLE IF NOT EXISTS endpoint_details (
   node_id                TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
   method                 TEXT NOT NULL,
-  -- Path only. The host comes from the environment's moduleBaseUrls at
-  -- send time, so one endpoint can be retargeted without a rewrite.
+  -- 只有路径。host 在发送时取自环境的 moduleBaseUrls，故一个 endpoint 可改指向而无需重写。
   url                    TEXT NOT NULL,
   environment_id         TEXT,
   base_url_definition_id TEXT,
@@ -183,27 +151,16 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   tags_json              TEXT NOT NULL DEFAULT '[]'
 );
 
--- One persisted HTTP response, kept per endpoint so the response
--- history strip survives a restart. Before this table the history was
--- a renderer-only `Record<endpointId, ApiResponse[]>` that a relaunch,
--- a project switch or a closed tab erased.
+-- 一条已持久化的 HTTP 响应，按 endpoint 保留，好让响应历史条带挺过重启。
 --
--- `endpoint_id` cascades, and `nodes.parent_id` / `nodes.root_id`
--- cascade in turn, so deleting an endpoint — or any ancestor, up to the
--- project — takes its history with it in the same DELETE. There is
--- deliberately no application-level prune to forget; the FK is the
--- contract. That does mean a `draft:` endpoint (a renderer-only endpoint
--- that has never been saved, see `DRAFT_ID_PREFIX` in
--- `src/stores/store-types.ts`) cannot be stored here at all: it has no
--- `nodes` row to point at, and the renderer skips persisting those.
+-- `endpoint_id` 级联，而 `nodes.parent_id` / `nodes.root_id` 又依次级联，故删掉一个
+-- endpoint——或一路向上的任一祖先，直到项目——会在同一条 DELETE 里带走它的历史。
+-- 刻意没有应用层的清理逻辑需要去记：外键就是契约。
 --
--- Everything the list view renders (`status`, `created_at`, `method`,
--- `url`, `duration_ms`) is a real column rather than a field inside a
--- JSON blob, because those are what the strip sorts and filters on.
--- `body` is capped on write at
--- `domain::RESPONSE_HISTORY_MAX_BODY_BYTES` — `body_truncated` records
--- that it happened, so the viewer can say so instead of silently
--- showing half a document as if it were the whole one.
+-- 列表视图渲染的一切（`status`、`created_at`、`method`、`url`、`duration_ms`）都是真实
+-- 列而非 JSON blob 里的字段，因为条带正是按它们排序与过滤的。`body` 在写入时被裁到
+-- `domain::RESPONSE_HISTORY_MAX_BODY_BYTES`，`body_truncated` 记录发生过这件事，好让阅读器
+-- 能说出来，而不是把半个文档当整个静默显示。
 CREATE TABLE IF NOT EXISTS response_history (
   id              TEXT PRIMARY KEY,
   endpoint_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
@@ -212,10 +169,9 @@ CREATE TABLE IF NOT EXISTS response_history (
   duration_ms     INTEGER NOT NULL DEFAULT 0,
   size_bytes      INTEGER NOT NULL DEFAULT 0,
   content_type    TEXT NOT NULL DEFAULT '',
-  -- Key → value, not ordered pairs: by the time a response reaches
-  -- here it has already been through `tuplesToRecord` in
-  -- `src/lib/http.ts`, so the renderer holds a map and a map is what
-  -- round-trips without inventing an order SQLite cannot restore.
+  -- 是 key → value 而非有序对：响应到达此处时早已在 `src/lib/http.ts` 里过了
+  -- `tuplesToRecord`，故渲染层持有的是 map，而 map 才是无需凭空发明一个 SQLite 无法还原
+  -- 的顺序就能往返的东西。
   headers_json    TEXT NOT NULL DEFAULT '{}',
   body            TEXT NOT NULL DEFAULT '',
   body_json       TEXT,
@@ -225,65 +181,43 @@ CREATE TABLE IF NOT EXISTS response_history (
   body_truncated  INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL
 );
--- The one read this table has: the history strip asks for **one
--- endpoint's** rows, and that is the only query the renderer issues.
+-- 这张表唯一的读取：历史条带问的是**一个** endpoint 的行，而这也是渲染层唯一发出的查询。
 --
--- It was once "every endpoint in a project", fetched in bulk when a
--- project opened. That was the wrong shape — a panel showing ten rows
--- for the endpoint in front of the user should not cost a read whose
--- size grows with the project — so the bulk read and its index are gone.
---
--- `rowid` is deliberately NOT in the index even though the ORDER BY
--- uses it as the tie-break — SQLite rejects `rowid` in an index
--- definition ("no such column: rowid"), and there is nothing to gain by
--- working around that. The sort it leaves behind runs over at most ten
--- rows per endpoint, because `db::response_history::append` is what
--- keeps the table that small.
+-- `rowid` 刻意**不**进索引，尽管 ORDER BY 用它决胜——SQLite 在索引定义里拒绝 `rowid`
+--（"no such column: rowid"），绕开它也没有收益。它留下的排序每 endpoint 最多跑十行，
+-- 因为让这张表保持那么小的是 `db::response_history::append`。
 CREATE INDEX IF NOT EXISTS idx_response_history_endpoint
   ON response_history(endpoint_id, created_at DESC);
 
--- Dropped rather than left behind. `CREATE INDEX IF NOT EXISTS` cannot
--- remove anything, so a store written by a build that had the
--- project-scoped index would keep it forever otherwise. Dropping an
--- index is not a schema version event: no row is touched, `user_version`
--- stays put, and `ensure_current_schema` is not involved.
+-- 刻意 DROP 而非留着。`CREATE INDEX IF NOT EXISTS` 无法移除任何东西，否则由曾经持有这个
+-- 项目范围索引的构建写下的库会永远留着它。删索引不是 schema 版本事件：没有行被碰到，
+-- `user_version` 不动，`ensure_current_schema` 也不参与。
 DROP INDEX IF EXISTS idx_response_history_root;
 
--- Second line of defence for the parent/child matrix.
+-- 父子矩阵的第二道防线。
 --
--- `db::nodes` checks every write against
--- `ResourceNodeType::may_under`, but the MCP tools are this project's
--- primary external write path, and a future caller that reaches past
--- `db::nodes` would otherwise be free to build a tree no reader can
--- walk. The old layout got the whole matrix from foreign keys —
--- `endpoints.collection_id REFERENCES collections(id)` among them —
--- which one polymorphic `parent_id` cannot express: SQLite's CHECK
--- constraints cannot read another row, and a self-referencing foreign
--- key says nothing about which types may sit on which.
+-- `db::nodes` 用 `ResourceNodeType::may_under` 检查每一次写入，但 MCP 工具是本项目主要的
+-- 外部写路径，绕过 `db::nodes` 的将来调用者否则可以自由搭出一棵没有读者走得动的树。
+-- 三表布局是从外键拿到整个矩阵的——`endpoints.collection_id REFERENCES collections(id)`
+-- 是其中之一——而单一多态 `parent_id` 表达不了：SQLite 的 CHECK 约束读不到别的行，
+-- 自引用的外键也说不清哪些类型能坐在哪些类型之下。
 --
--- These two triggers are dropped and rebuilt on every `migrate`
--- instead of being `IF NOT EXISTS`. A trigger body is part of the
--- contract, and `IF NOT EXISTS` would freeze whatever the first build
--- to touch a given `store.db` wrote: relaxing the matrix to let an
--- endpoint sit under a module would leave every existing database
--- enforcing the old rule, which the application layer no longer
--- agrees with. Bumping `SCHEMA_VERSION` instead would delete those
--- databases outright, and losing a user's tree to widen a predicate
--- is not a trade worth making.
+-- 这两个触发器在每次 `migrate` 时 DROP 再建，而不是 `IF NOT EXISTS`。触发器体是契约的
+-- 一部分，而 `IF NOT EXISTS` 会把第一个碰到某个 `store.db` 的构建写下的东西永久冻结：
+-- 为让 endpoint 能坐在模块下而放宽矩阵，会让每个既有库继续执行应用层已不再认同的旧规则。
+-- 改为 bump `SCHEMA_VERSION` 则会把那些库直接删掉，而为了放宽一个谓词丢掉用户的树
+-- 不是值得做的交易。
 --
--- Deliberately NOT covered here: `root_id` agreeing with the parent's.
--- `move_many` re-derives it across a subtree, and a subtree is
--- rewritten one row at a time — so parent and child legitimately
--- disagree mid-transaction, and a constraint would have to be dropped
--- exactly when it is needed. `db::nodes::validate_placement` checks it
--- on create, and `move_many` owns it after that.
+-- 刻意**不**在此覆盖的：`root_id` 与父的一致性。`move_many` 会为整棵子树重新推导它，
+-- 而子树是一次改写一行的——故父子在事务中途短暂不一致是合法的，约束恰好在最需要它的
+-- 时刻必须被撤下。创建时由 `db::nodes::validate_placement` 检查，此后归 `move_many` 管。
 DROP TRIGGER IF EXISTS trg_nodes_parent_matrix_insert;
 DROP TRIGGER IF EXISTS trg_nodes_parent_matrix_update;
 
 CREATE TRIGGER trg_nodes_parent_matrix_insert
 BEFORE INSERT ON nodes
 BEGIN
-  -- A module's parent is the project, which is not a node.
+  -- 模块的父是项目，而项目不是节点。
   SELECT RAISE(ABORT, 'nodes: a module has no node parent')
   WHERE NEW.type = 'module' AND NEW.parent_id IS NOT NULL;
 
@@ -300,10 +234,8 @@ END;
 
 CREATE TRIGGER trg_nodes_parent_matrix_update
 BEFORE UPDATE OF parent_id ON nodes
--- NULL means "promote to the top of the project", which is only legal
--- for a module — handled by the first clause. Every other type would
--- need a parent, and the NOT EXISTS below turns the implicit FK's
--- missing-parent case into an abort too.
+-- NULL 表示「提升到项目顶层」，那只对模块合法——由第一条子句处理。其余类型都需要一个父，
+-- 而下面的 NOT EXISTS 也把隐式外键的「父不存在」情形变成了中止。
 WHEN NEW.parent_id IS NOT NULL
 BEGIN
   SELECT RAISE(ABORT, 'nodes: parent type does not accept this child type')
@@ -317,42 +249,28 @@ BEGIN
   );
 END;
 
--- Schema version marker, read back by `db::ensure_current_schema` before
--- any connection is handed out. Keep in sync with
--- `db::SCHEMA_VERSION` — a mismatch there is caught by
--- `schema_version_matches_the_constant`.
+-- schema 版本标记，在发出任何连接之前由 `db::ensure_current_schema` 读回。须与
+-- `db::SCHEMA_VERSION` 保持同步——那里的不一致由 `schema_version_matches_the_constant`
+-- 抓住。
 --
--- Version history:
---   0  pre-versioning (the original modules/collections/endpoints
---      three-table layout). Any file stamped 0 is not readable by a
---      current build and is rebuilt from scratch.
---   2  `nodes` / `endpoint_details` landed additively, so an older v2
---      file gains them on the next `CREATE TABLE IF NOT EXISTS`
---      without needing its own version.
---   3  current. No column changed — what changed is what
---      `endpoint_details.auth_json` holds. It stores the serialised
---      `domain::AuthConfig`, and dropping the `type` → `kind` serde
---      rename (and `in` → `inLocation`) means a v2 row no longer
---      deserialises: `kind` is a required field, so even the `'{}'`
---      default fails. Unreadable rather than stale, hence a bump
---      instead of a reader-side shim.
+-- 版本历史：
+--   0  版本号之前（原 modules/collections/endpoints 三表布局）。任何标记为 0 的文件
+--      当前构建读不了，会被从零重建。
+--   2  `nodes` / `endpoint_details` 以增量方式落地，故更旧的 v2 文件在下次
+--      `CREATE TABLE IF NOT EXISTS` 时白得它们，不需要自己的版本。
+--   3  当前。没有任何一列改动——改动的是 `endpoint_details.auth_json` **装的东西**。它存
+--      序列化的 `domain::AuthConfig`，而撤掉 `type` → `kind` 的 serde rename（以及
+--      `in` → `inLocation`）意味着 v2 的行不再反序列化得出：`kind` 是必填字段，故连 `'{}'`
+--      默认值都失败。是不可读而非陈旧，故 bump 版本而不是在读者侧加兼容层。
 --
--- After 3: the service list moved to the project and the value layer
--- became (environment × module × service) in
--- `environments.module_base_urls_json`. STILL version 3 — `module_base_urls_json`
--- is additive and arrives via `db::ADDED_COLUMNS`, and the two columns
--- this model retired (`base_url_definitions.module_id` / `.is_default`)
--- are kept and neutralised rather than dropped, because a DROP means a
--- rebuild means a version bump means `ensure_current_schema` deletes every
--- user's store. Rows written by either predecessor layout are repaired by
--- `migrate_base_urls_into_value_layer` in `db::mod`.
+-- 3 之后：服务表移到了项目，值层变成
+-- `environments.module_base_urls_json` 里的 (环境 × 模块 × 服务)。**仍是**版本 3——
+-- `module_base_urls_json` 是增量的、经 `db::ADDED_COLUMNS` 到达，而该模型退役的两列
+-- （`base_url_definitions.module_id` / `.is_default`）被保留并中和而非删除，因为 DROP =
+-- 重建 = bump 版本 = `ensure_current_schema` 删掉每个用户的库。由两种前任布局之一写下的
+-- 行由 `db::mod` 里的 `migrate_base_urls_into_value_layer` 修复。
 --
--- 1 was never shipped: the nodes merge landed before any build could
---      stamp a version of its own, so it has no database anywhere.
---
--- STILL version 3 after `response_history` landed: a new table is the
--- purest additive change there is — every `CREATE` above is
--- `IF NOT EXISTS`, so an existing store gains it on the next
--- `db::migrate` and needs no `ADDED_COLUMNS` entry (that list is for
--- columns added to a table that already exists) and no version bump.
+-- `response_history` 落地后**仍是**版本 3：新表是最纯粹的增量改动——上面每个 `CREATE`
+-- 都是 `IF NOT EXISTS`，故既有库在下次 `db::migrate` 白得它，既不需要 `ADDED_COLUMNS`
+-- 条目（那份列表是给「给已存在的表加列」用的）也不需要 bump 版本。
 PRAGMA user_version = 3;

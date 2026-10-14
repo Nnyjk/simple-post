@@ -3,11 +3,9 @@ use crate::db;
 use crate::domain::{AuthConfig, Project, RequestBody};
 use std::path::PathBuf;
 
-/// A database with two projects and no tree content.
-///
-/// Built through the public CRUD API rather than `test_support::seed`,
-/// so the write path and the type matrix are exercised directly. The
-/// tests that need the shipped tree shape use [`seeded_pool`] instead.
+/// 一个含两个项目、树内容为空的库。
+/// 经公开 CRUD API 而非 `test_support::seed` 构造，故写路径与类型矩阵被直接考验。需要
+/// 出厂树形状的测试改用 [`seeded_pool`]。
 fn fresh_pool() -> (db::DbPool, PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-nodes-test-{}-{}",
@@ -58,7 +56,7 @@ fn node(
     }
 }
 
-/// A top-level module: its parent is the project, which is not a node.
+/// 一个顶层模块：其父是项目，而项目不是节点。
 fn module(root: &str, id: &str, sort: i64) -> ResourceNode {
     node(root, id, ResourceNodeType::Module, None, sort)
 }
@@ -97,13 +95,10 @@ fn put(pool: &db::DbPool, n: &ResourceNode, d: Option<&EndpointDetail>) {
     db::with_tx(pool, |c| create(c, n, d)).expect("create node");
 }
 
-/// A database carrying the bundled `fixtures.json` tree, including the
-/// one nested collection (`c_order_refund`, under `c_order_crud`).
-///
-/// The tests below need a real `collection -> collection` edge, which
-/// no hand-built tree in this file had before — every fixture
-/// collection used to be top-level, so the recursive path had no
-/// example in the test data at all.
+/// 一个带着出厂 `fixtures.json` 树的库，含那个嵌套 collection（`c_order_refund`，
+/// 挂在 `c_order_crud` 之下）。
+/// 下面的测试需要一条真实的 `collection -> collection` 边，否则递归路径在测试数据里
+/// 没有任何例子。
 fn seeded_pool() -> (db::DbPool, PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-nodes-seeded-test-{}-{}",
@@ -114,9 +109,7 @@ fn seeded_pool() -> (db::DbPool, PathBuf) {
     (db::test_support::init_seeded(&dir), dir)
 }
 
-// -------------------------------------------------------------------------
-// Reads.
-// -------------------------------------------------------------------------
+// 读。
 
 #[test]
 fn list_by_root_returns_only_that_projects_tree() {
@@ -133,11 +126,9 @@ fn list_by_root_returns_only_that_projects_tree() {
 
 #[test]
 fn list_by_root_orders_siblings_by_sort_order() {
-    // The read is flat, not hierarchical: `sort_order` is scoped to a
-    // parent, so a module and its first collection can both sit at 0 and
-    // the tree shape is rebuilt by the caller bucketing on parent_id.
-    // What has to hold is that siblings come back in display order.
-    // (`list_by_module` on the old layout behaved the same way.)
+    // 这次读是扁平的而非分层的：`sort_order` 以父划定作用域，故一个模块与它的第一个
+    // collection 都可以坐在 0 上，树形状由调用方按 parent_id 分桶重建。
+    // 必须成立的是：兄弟节点按显示序回来。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "third", "m1", 2), None);
@@ -176,8 +167,7 @@ fn list_by_root_and_type_filters() {
 
 #[test]
 fn root_id_of_is_one_lookup_for_every_type() {
-    // The old layout walked collections -> modules for this. Same
-    // answer, one primary-key hit.
+    // 同一个答案，一次主键命中。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
@@ -197,10 +187,8 @@ fn root_id_of_is_one_lookup_for_every_type() {
 
 #[test]
 fn module_id_of_walks_up_to_the_owning_module() {
-    // The value layer is `moduleBaseUrls[service][module]`, so this is the
-    // lookup that decides *which* of a service's addresses an endpoint
-    // gets — a nested endpoint has to reach its module through the
-    // collection in between.
+    // 值层是 `moduleBaseUrls[service][module]`，故这次查找决定一个 endpoint 拿到该服务的哪一个
+    // 地址——嵌套的 endpoint 必须穿过中间那个 collection 抵达它的模块。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &module("p1", "m2", 1), None);
@@ -208,7 +196,7 @@ fn module_id_of_walks_up_to_the_owning_module() {
     put(&pool, &collection("p1", "c2", "m1", 1), None);
     let (e, d) = endpoint("p1", "e1", "c2", 0);
     put(&pool, &e, Some(&d));
-    // An endpoint straight under a module, with no collection in between.
+    // 直接挂在模块下、中间没有 collection 的 endpoint。
     let (direct, direct_detail) = endpoint("p1", "e2", "m2", 0);
     put(&pool, &direct, Some(&direct_detail));
 
@@ -220,8 +208,7 @@ fn module_id_of_walks_up_to_the_owning_module() {
 
 #[test]
 fn module_id_of_is_none_for_a_module_or_an_unknown_node() {
-    // Both mean "there is no module above this", and both resolve to no
-    // base URL — but they are different states, so neither is an error.
+    // 两者都表示「这上面没有模块」，且都解析不到 base URL——但它们是不同的状态，故都不是错误。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     assert_eq!(
@@ -237,9 +224,8 @@ fn module_id_of_is_none_for_a_module_or_an_unknown_node() {
 
 #[test]
 fn module_id_of_follows_an_endpoint_that_was_dragged_to_another_module() {
-    // Services are project-wide now, so a cross-module drag needs no
-    // re-pointing of the endpoint's service — but the *cell* it resolves
-    // through moves with it, and that is this lookup.
+    // 服务现在是项目级的，故跨模块拖拽无需改指 endpoint 的服务——但它解析所经过的**单元格**
+    // 跟着它走，而这次查找就是在测那个。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &module("p1", "m2", 1), None);
@@ -266,9 +252,7 @@ fn subtree_ids_walks_the_whole_closure() {
     assert_eq!(got, vec!["c1", "c2", "c3"]);
 }
 
-// -------------------------------------------------------------------------
-// Writes.
-// -------------------------------------------------------------------------
+// 写。
 
 #[test]
 fn each_type_can_be_created() {
@@ -286,8 +270,7 @@ fn each_type_can_be_created() {
 
 #[test]
 fn collections_nest_without_a_depth_limit_in_the_type() {
-    // The docs describe a four-level tree. This is the assertion that
-    // says otherwise: nesting is unbounded and always worked.
+    // 文档描述的是四层树。这条断言说的是另一回事：嵌套无上限，且一直如此。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     let mut parent = "m1".to_string();
@@ -320,9 +303,7 @@ fn detail_payload_on_a_non_endpoint_is_rejected() {
     assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
 }
 
-// -------------------------------------------------------------------------
-// Parent / child matrix. Foreign keys used to guarantee all of this.
-// -------------------------------------------------------------------------
+// 父子矩阵。这些过去全靠外键保证。
 
 #[test]
 fn a_module_may_not_have_a_node_parent() {
@@ -338,9 +319,8 @@ fn a_module_may_not_have_a_node_parent() {
 
 #[test]
 fn an_endpoint_may_hang_off_a_module_directly() {
-    // The one-endpoint case. Requiring a collection made this cost a
-    // throwaway folder first, which is why the matrix names two parent
-    // types for an endpoint and only one for a collection.
+    // 单个 endpoint 的情形。要求一个 collection 曾让这种最简情况先得为此建一个用完即弃的
+    // 文件夹，故矩阵给 endpoint 命名两种父类型、只给 collection 一种。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     let (e, d) = endpoint("p1", "e1", "m1", 0);
@@ -350,8 +330,7 @@ fn an_endpoint_may_hang_off_a_module_directly() {
     assert_eq!(got.kind, ResourceNodeType::Endpoint);
     assert_eq!(got.parent_id.as_deref(), Some("m1"));
     assert_eq!(got.root_id, "p1");
-    // The detail row has to land with the node, or the tree holds a row
-    // the tester cannot open.
+    // detail 行必须与节点一起落地，否则树上会有一行测试者打不开的东西。
     assert_eq!(
         db::with_conn(&pool, |c| db::endpoint_details::get(c, "e1"))
             .unwrap()
@@ -400,12 +379,10 @@ fn a_non_module_may_not_sit_at_the_top_of_a_project() {
 
 #[test]
 fn a_top_level_node_naming_no_project_is_a_validation_error() {
-    // Both transports default an absent `rootId` to the empty string, and
-    // a module has no `parentId` to derive it from — so the empty string
-    // used to reach `INSERT` and come back as
-    // `FOREIGN KEY constraint failed`. On the REST surface that is a 500
-    // with `code: "sqlite"`, which a client cannot tell apart from a real
-    // server fault. It is a caller mistake and has to read like one.
+    // 两条传输层都把缺席的 `rootId` 默认成空串，而模块没有 `parentId` 可供推导——故空串会直达
+    // `INSERT` 并以 `FOREIGN KEY constraint failed` 回来。在 REST 面上那是一个 500 加
+    // `code: "sqlite"`，客户端无法把它与真正的服务端故障区分开。它是调用方的错误，
+    // 就必须读起来像调用方的错误。
     let (pool, _dir) = fresh_pool();
     let nameless = module("", "m1", 0);
     let err = db::with_tx(&pool, |c| create(c, &nameless, None)).unwrap_err();
@@ -421,8 +398,7 @@ fn a_top_level_node_naming_no_project_is_a_validation_error() {
 
 #[test]
 fn a_top_level_node_naming_an_unknown_project_is_a_validation_error() {
-    // The other half of the same hole: a typo in `rootId` also used to come
-    // back as a foreign-key failure.
+    // 同一个洞的另一半：`rootId` 打错字同样会以外键失败回来。
     let (pool, _dir) = fresh_pool();
     let wrong = module("p_does_not_exist", "m1", 0);
     let err = db::with_tx(&pool, |c| create(c, &wrong, None)).unwrap_err();
@@ -434,8 +410,8 @@ fn a_top_level_node_naming_an_unknown_project_is_a_validation_error() {
 
 #[test]
 fn root_id_must_match_the_parents() {
-    // A node filed under one project while rendering inside another's
-    // tree is invisible to list_by_root for the project it claims.
+    // 一个归档在一个项目下、却在另一个项目的树里渲染的节点，对它自称的那个项目而言
+    // `list_by_root` 是看不见的。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     let mismatched = collection("p2", "c1", "m1", 0);
@@ -443,9 +419,7 @@ fn root_id_must_match_the_parents() {
     assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
 }
 
-// -------------------------------------------------------------------------
-// Moving.
-// -------------------------------------------------------------------------
+// 移动。
 
 #[test]
 fn a_node_may_not_move_under_its_own_descendant() {
@@ -467,7 +441,7 @@ fn move_rejects_an_illegal_parent_type() {
     let (e, d) = endpoint("p1", "e1", "c1", 0);
     put(&pool, &e, Some(&d));
 
-    // An endpoint is not a legal parent for anything.
+    // endpoint 不是任何东西的合法父。
     let err = db::with_tx(&pool, |c| move_many(c, &["c1".to_string()], Some("e1"), 0)).unwrap_err();
     assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
 }
@@ -493,9 +467,8 @@ fn move_renumbers_the_destination_without_gaps() {
 
 #[test]
 fn move_across_projects_reassigns_the_whole_subtree() {
-    // The regression that motivated re-deriving root_id at all: naming
-    // only the dragged rows leaves the subtree filed under the old
-    // project, so it disappears from the new project's tree on reload.
+    // 促使重新推导 root_id 的那个回归：只指名被拖动的行会让子树仍归档在旧项目下，
+    // 于是重载时它从新项目的树上消失。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &module("p2", "m2", 0), None);
@@ -544,12 +517,10 @@ fn a_within_project_move_leaves_the_rest_of_the_tree_untouched() {
     );
 }
 
-// -------------------------------------------------------------------------
-// `move_to_root` — the one move `move_many` cannot express, because with
-// no parent node there is nothing to read a new `root_id` from.
-// -------------------------------------------------------------------------
+// `move_to_root`——`move_many` 表达不了的那一种移动，因为没有父节点时就没有可读的新
+// `root_id` 之处。
 
-/// Top-level modules of a project, as `(id, sort_order)` in display order.
+/// 一个项目的顶层模块，按显示序的 `(id, sort_order)`。
 fn top_level(pool: &db::DbPool, root: &str) -> Vec<(String, i64)> {
     db::with_conn(pool, |c| {
         list_by_root_and_type(c, root, ResourceNodeType::Module)
@@ -562,10 +533,8 @@ fn top_level(pool: &db::DbPool, root: &str) -> Vec<(String, i64)> {
 
 #[test]
 fn move_to_root_reassigns_the_whole_subtree() {
-    // The bug this shape invites: updating only the named row would file
-    // the collection and the endpoint under the old project, where
-    // `list_by_root` would never show them again — the same class of
-    // drift as the collection `module_id` bug the old layout had.
+    // 这一形状招来的 bug：只更新指名的行会把 collection 与 endpoint 留在旧项目下，
+    // `list_by_root` 从此再也不显示它们——与旧布局里 collection `module_id` 的漂移同一类。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &module("p2", "m2", 0), None);
@@ -589,8 +558,7 @@ fn move_to_root_reassigns_the_whole_subtree() {
             .as_deref(),
         Some("c1")
     );
-    // The endpoint's configuration is a separate table; it must not be
-    // left behind.
+    // endpoint 的配置在另一张表里；它绝不能被落下。
     assert_eq!(
         db::with_conn(&pool, |c| super::super::endpoint_details::get(c, "e1"))
             .unwrap()
@@ -601,9 +569,8 @@ fn move_to_root_reassigns_the_whole_subtree() {
 
 #[test]
 fn move_to_root_closes_the_gap_it_leaves_behind() {
-    // Regression net. The compaction pass runs while the departing module
-    // is *still* filed under the old root, so counting it would leave its
-    // vacated slot occupied and shift nothing up.
+    // 回归网。压缩那一遍跑在离开中的模块**仍**归档在旧 root 下时，故把它算进去会让它腾出的
+    // 槽位继续占着，什么也不上移。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "a", 0), None);
     put(&pool, &module("p1", "b", 1), None);
@@ -661,9 +628,8 @@ fn move_to_root_clamps_an_index_past_the_end() {
 
 #[test]
 fn move_to_root_rejects_a_non_module() {
-    // A collection or an endpoint changing project is a *move*, not a
-    // transfer: its parent chain decides the project, and silently
-    // re-rooting it would detach it from its siblings.
+    // collection 或 endpoint 换项目是一次**移动**，不是转移：它的项目由父链决定，
+    // 静默改根会让它脱离自己的同级。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
@@ -674,8 +640,7 @@ fn move_to_root_rejects_a_non_module() {
 
 #[test]
 fn move_to_root_rejects_an_unknown_project() {
-    // Otherwise the subtree would be filed under a root no project row
-    // backs, where nothing can ever list it.
+    // 否则子树会被归档到一个没有任何项目行支撑的 root 下，此后永远没人能列出它。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
 
@@ -733,18 +698,14 @@ fn multi_select_keeps_caller_order() {
     assert_eq!(ids, vec!["c", "a", "b"], "the caller's pick order wins");
 }
 
-// -------------------------------------------------------------------------
-// Triggers. The application layer is the primary check; these prove a
-// write that bypasses it still cannot produce an unwalkable tree.
-// -------------------------------------------------------------------------
+// 触发器。应用层才是主要的检查；这些测试证明一次绕过它的写入仍造不出走不动的树。
 
 #[test]
 fn a_trigger_rejects_an_endpoint_under_an_endpoint() {
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
-    // An endpoint is a leaf. Its widened parent set is module / collection,
-    // never another endpoint — and the trigger, not the application layer,
-    // is what has to hold that line for a raw writer.
+    // endpoint 是叶子。它被拓宽的父集合是 module / collection，绝不是另一个 endpoint——
+    // 而对一个裸写入者来说，守住这条线的是触发器而不是应用层。
     db::with_tx(&pool, |c| {
         c.execute(
             "INSERT INTO nodes \
@@ -815,8 +776,7 @@ fn a_trigger_rejects_an_illegal_reparent() {
 
 #[test]
 fn the_trigger_allows_what_the_matrix_allows() {
-    // A trigger that fires on everything is worse than none: it pushes
-    // callers toward disabling foreign keys.
+    // 一个对一切都开火的触发器比没有更糟：它把调用方推向关掉外键。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
@@ -838,17 +798,15 @@ fn the_trigger_allows_what_the_matrix_allows() {
 
 #[test]
 fn the_trigger_allows_an_endpoint_under_a_module() {
-    // The update trigger carries the matrix too, and it was widened with
-    // it. Left on the old predicate it would abort the reparent the
-    // application layer had just agreed to — and `module_move` /
-    // `endpoint_move` go straight through it.
+    // update 触发器也带着同一份矩阵，且与它一起被拓宽了。留在旧谓词上，它会中止应用层刚刚
+    // 认可的那次改父——而 `module_move` / `endpoint_move` 直穿它。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
     let (e, d) = endpoint("p1", "e1", "c1", 0);
     put(&pool, &e, Some(&d));
 
-    // Lift the endpoint out of its collection, raw.
+    // 把它从 collection 里抬出来，走裸 SQL。
     db::with_tx(&pool, |c| {
         c.execute("UPDATE nodes SET parent_id = 'm1' WHERE id = 'e1'", [])?;
         Ok(())
@@ -883,10 +841,8 @@ fn the_check_constraint_holds_the_type_set_closed() {
     );
 }
 
-// -------------------------------------------------------------------------
-// Search and duplicate. Both are needed by the read path that replaces
-// `/api/endpoints/search` and `/api/endpoints/:id/duplicate`.
-// -------------------------------------------------------------------------
+// 搜索与复制。两者都是取代 `/api/endpoints/search` 与
+// `/api/endpoints/:id/duplicate` 的读路径所需要的。
 
 #[test]
 fn search_matches_node_name() {

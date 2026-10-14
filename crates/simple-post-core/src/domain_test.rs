@@ -36,9 +36,8 @@ fn http_method_custom_verb_passes_through() {
 
 #[test]
 fn apikey_location_field_round_trips_without_a_rename() {
-    // The TS mirror reads `inLocation`. `in` is a TypeScript keyword and
-    // `in_` is not a fix — camelCase maps it straight back to `in`, which
-    // is how the two languages used to disagree on this one field.
+    // TS 镜像读的是 `inLocation`。`in` 是 TypeScript 关键字，而 `in_` 不是解法——camelCase 会
+    // 把它直接映射回 `in`。
     let v = json!({
         "kind": "apikey",
         "apikey": { "key": "X-API-Key", "value": "abc", "inLocation": "header" }
@@ -46,7 +45,7 @@ fn apikey_location_field_round_trips_without_a_rename() {
     let auth: AuthConfig = serde_json::from_value(v).unwrap();
     let apikey = auth.apikey.clone().unwrap();
     assert_eq!(apikey.in_location, ApiKeyLocation::Header);
-    // …and the emitted key is the same word the mirror declares.
+    // ……且发出的键正是镜像声明的那个词。
     let back = serde_json::to_value(&auth).unwrap();
     assert_eq!(back["kind"], json!("apikey"));
     assert_eq!(back["apikey"]["inLocation"], json!("header"));
@@ -54,9 +53,8 @@ fn apikey_location_field_round_trips_without_a_rename() {
 
 #[test]
 fn endpoint_camel_case_field_names() {
-    // The structural half and the configuration half are separate types
-    // now, so this checks both deserialize from the camelCase wire shape
-    // their TS mirrors expect.
+    // 结构那一半与配置那一半现在是分开的两个类型，故这里检查两者都能从各自 TS 镜像预期的
+    // camelCase 线形状反序列化。
     let v = json!({
         "id": "e1",
         "rootId": "p1",
@@ -91,7 +89,7 @@ fn endpoint_camel_case_field_names() {
 
 #[test]
 fn endpoint_patch_distinguishes_absent_from_null() {
-    // `description` field absent → None
+    // `description` 字段缺席 → None
     let p: EndpointDetailPatch = serde_json::from_value(json!({
         "url": "/renamed"
     }))
@@ -99,7 +97,7 @@ fn endpoint_patch_distinguishes_absent_from_null() {
     assert_eq!(p.url.as_deref(), Some("/renamed"));
     assert!(p.environment_id.is_none());
 
-    // `environmentId: null` → Some(None) (clear the column)
+    // `environmentId: null` → Some(None)（清空该列）
     let p: EndpointDetailPatch = serde_json::from_value(json!({
         "environmentId": null
     }))
@@ -116,14 +114,13 @@ fn endpoint_patch_distinguishes_absent_from_null() {
 
 #[test]
 fn node_patch_distinguishes_absent_from_null() {
-    // `parentId` absent → leave the node where it is
+    // `parentId` 缺席 → 节点原地不动
     let p: ResourceNodePatch = serde_json::from_value(json!({ "name": "renamed" })).unwrap();
     assert_eq!(p.name.as_deref(), Some("renamed"));
     assert!(p.parent_id.is_none());
 
-    // `parentId: null` → promote to the top of the project. Only legal
-    // for a module, but the domain layer carries the intent and the DB
-    // layer is what enforces the type matrix.
+    // `parentId: null` → 提升到项目顶层。那只对模块合法，但领域层承载的是意图，
+    // 执行类型矩阵是 DB 层的事。
     let p: ResourceNodePatch = serde_json::from_value(json!({ "parentId": null })).unwrap();
     assert_eq!(p.parent_id, Some(None));
 }
@@ -154,8 +151,8 @@ fn environment_base_urls_round_trip() {
         is_active: true,
     };
     let s = serde_json::to_string(&env).unwrap();
-    // The wire names both URL maps, and the retired one keeps its
-    // historical `baseUrls` spelling so an older client still parses it.
+    // 线格式同时给出两张 URL map，而已下线的那张保留它历史上的 `baseUrls` 拼法，好让旧客户端
+    // 仍能解析。
     assert!(s.contains("\"moduleBaseUrls\""), "{s}");
     let back: Environment = serde_json::from_str(&s).unwrap();
     assert_eq!(back.base_urls.get("def_default").unwrap(), "http://x");
@@ -173,9 +170,8 @@ fn environment_base_urls_round_trip() {
 
 #[test]
 fn environment_deserialises_without_module_base_urls() {
-    // A payload written before the value layer moved must still load: the
-    // field carries `#[serde(default)]` precisely so it arrives empty
-    // rather than failing the whole read.
+    // 值层迁移之前写下的载荷必须仍能加载：该字段带 `#[serde(default)]` 正是为了让它到达时
+    // 为空，而不是让整次读失败。
     let back: Environment = serde_json::from_value(json!({
         "id": "e1",
         "projectId": "p1",
@@ -204,12 +200,9 @@ fn permission_round_trip() {
 
 #[test]
 fn permission_serde_wire_matches_as_str() {
-    // The regression this guards: `rename_all = "lowercase"` spelled
-    // ReadCall `"readcall"`, a third form matching neither `as_str()` nor
-    // the `agent_permissions` CHECK constraint nor the TS union. The old
-    // round-trip test passed anyway — serde could read back its own
-    // invention — so it is this assertion, not the round trip, that
-    // would have caught it.
+    // 这里守住的是：`rename_all = "lowercase"` 曾把 ReadCall 拼成 `"readcall"`，一种既不匹配
+    // `as_str()`、也不匹配 `agent_permissions` CHECK 约束、更不匹配 TS 联合类型的第三种
+    // 拼法。往返测试抓不到它——serde 读得回自己编出来的东西——所以靠的是这条断言。
     for p in [Permission::Read, Permission::ReadCall, Permission::Full] {
         let wire = serde_json::to_string(&p).unwrap();
         assert_eq!(
@@ -224,10 +217,8 @@ fn permission_serde_wire_matches_as_str() {
 
 #[test]
 fn http_method_has_one_parser_for_every_entry_point() {
-    // Lowercase from any caller must land on the same stored verb the
-    // MCP path would produce. A derived `Deserialize` used to make
-    // `"get"` into `Custom("get")`, which then round-tripped out
-    // lowercase and was written to the database that way.
+    // 任何调用方给的小写都必须落到与 MCP 路径相同的存库动词上。派生的 `Deserialize` 会把
+    // `"get"` 变成 `Custom("get")`，再原样小写往返出去并照此存库。
     for (json, want) in [
         ("\"get\"", HttpMethod::Get),
         ("\"PoSt\"", HttpMethod::Post),
@@ -237,12 +228,12 @@ fn http_method_has_one_parser_for_every_entry_point() {
         let m: HttpMethod = serde_json::from_str(json).unwrap();
         assert_eq!(m, want, "deserialising {json}");
         assert_eq!(m.as_str(), want.as_str());
-        // Whatever comes in, what goes out is upper-case.
+        // 不管进来的是什么，出去的必是大写。
         assert_eq!(
             serde_json::to_string(&m).unwrap(),
             format!("\"{}\"", m.as_str())
         );
-        // …and `parse_http_method` agrees with the serde path.
+        // ……且 `parse_http_method` 与 serde 路径给出同一个答案。
         assert_eq!(parse_http_method(json.trim_matches('"')).unwrap(), want);
     }
 }
@@ -254,7 +245,7 @@ fn http_method_rejects_non_token_input() {
             parse_http_method(bad).is_err(),
             "{bad:?} should not parse as a method"
         );
-        // Same rejection through the serde path — one parser, one verdict.
+        // 同样的拒绝也走 serde 路径——一个解析器，一个判决。
         let err = serde_json::from_str::<HttpMethod>(&format!("\"{bad}\""));
         assert!(err.is_err(), "serde should reject {bad:?}");
     }
@@ -262,8 +253,7 @@ fn http_method_rejects_non_token_input() {
 
 #[test]
 fn project_always_emits_default_base_url_definition_id() {
-    // The TS mirror declares it required-but-nullable, so "no default"
-    // has to arrive as an explicit null rather than as a missing key.
+    // TS 镜像把它声明为必填但可空，故「无默认」必须以显式 null 到达，而不是一个缺席的键。
     let p = Project {
         id: "p".into(),
         name: "n".into(),
@@ -281,7 +271,7 @@ fn project_always_emits_default_base_url_definition_id() {
         "key must be present, got {v}"
     );
     assert_eq!(v["defaultBaseUrlDefinitionId"], serde_json::Value::Null);
-    // …and a set value still round-trips.
+    // ……而设了值仍能往返。
     let p = Project {
         default_base_url_definition_id: Some("def1".into()),
         ..p
@@ -300,11 +290,9 @@ fn a_default_patch_is_empty() {
 
 #[test]
 fn request_settings_reads_a_blob_written_by_an_older_build() {
-    // The value lives in `preferences` as JSON, so whatever the last
-    // build wrote is what the next one has to read. A field added to
-    // `RequestSettings` tomorrow must not break every install that
-    // stored a row before it existed — that is what the container-level
-    // `#[serde(default)]` buys, and this is the case it protects.
+    // 值以 JSON 存在 `preferences` 里，故下一个构建必须读得动上一个构建写下的东西。明天给
+    // `RequestSettings` 加的字段不能弄坏在它之前存过行的每个安装——这正是容器级
+    // `#[serde(default)]` 买下的东西，而这里就是它守护的情形。
     let older = json!({ "timeoutMs": 5000 });
     let s: RequestSettings = serde_json::from_value(older).unwrap();
     assert_eq!(s.timeout_ms, 5000, "stored value must win");
@@ -313,7 +301,7 @@ fn request_settings_reads_a_blob_written_by_an_older_build() {
         RequestSettings::default().follow_redirects,
         "absent field falls back to its default"
     );
-    // An empty blob is the degenerate case: all defaults, not an error.
+    // 空 blob 是退化情形：全是默认值，不是错误。
     let s: RequestSettings = serde_json::from_value(json!({})).unwrap();
     assert_eq!(s.timeout_ms, 30_000);
     assert!(s.follow_redirects);
@@ -322,19 +310,13 @@ fn request_settings_reads_a_blob_written_by_an_older_build() {
 
 #[test]
 fn every_patch_field_alone_makes_the_patch_non_empty() {
-    // This is the regression net for the footgun `is_empty` used to be.
-    // It used to be a hand-written field list, so adding a field and
-    // forgetting to extend the list made the MCP `endpoint_update` tool
-    // silently ignore that field while the Tauri and REST paths — which
-    // never called `is_empty` at all — applied it. One bug, two
-    // opposite behaviours depending on the transport.
-    //
-    // `is_empty` now derives from serialisation, so it cannot drift.
-    // This test is the second line of defence, and its real job is
-    // different: adding a field makes the compiler demand a line here,
-    // turning a silent skip into an edit you cannot forget. Struct
-    // update syntax is deliberate — it names the field on the same line
-    // as the assertion, so a reviewer can check the two at a glance.
+    // 这里守住的是：`is_empty` 曾是手写字段列表这个坑。加了字段却忘了扩列表，会让 MCP 的
+    // `endpoint_update` 工具静默忽略该字段，而 Tauri 与 REST 路径——它们压根不调
+    // `is_empty`——却会应用它。同一个 bug，随传输层不同给出两种相反的行为。
+    // `is_empty` 现从序列化推导，故不会失配。
+    // 本测试是第二道防线，而它真正的职责不同：加字段会逼编译器在这里补一行，把一次静默
+    // 跳过变成一处忘不掉的编辑。刻意用结构体更新语法——它让字段名与断言同一行，好让评审
+    // 一眼对照两边。
 
     let n = ResourceNodePatch {
         parent_id: Some(Some("c1".into())),
@@ -476,15 +458,14 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
 
 #[test]
 fn clearing_a_nullable_column_is_not_an_empty_patch() {
-    // `Some(None)` means "write NULL", not "leave alone" — the reason
-    // `double_option` exists at all. It must not read as a no-op, or
-    // "clear this field" silently stops clearing.
+    // `Some(None)` 意味着「写 NULL」而非「保持不动」——这正是 `double_option` 存在的理由。
+    // 它绝不能读起来像一次空操作，否则「清空这个字段」就静默地不再清空了。
     let n = ResourceNodePatch {
         description: Some(None),
         ..Default::default()
     };
     assert!(!n.is_empty(), "clearing description is a real write");
-    // …and it really does emit the key.
+    // ……且它确实发出了那个键。
     let v = serde_json::to_value(&n).unwrap();
     assert!(v.get("description").is_some(), "got {v}");
     assert_eq!(v["description"], serde_json::Value::Null);
@@ -504,9 +485,8 @@ fn clearing_a_nullable_column_is_not_an_empty_patch() {
 fn may_under_is_the_whole_parent_child_matrix() {
     use ResourceNodeType::{Collection, Endpoint, Module};
 
-    // A module's parent is the project, which is not a node — so no node
-    // type accepts one, and `db::nodes` spells "top level" as
-    // `parent_id = NULL` instead.
+    // 模块的父是项目，而项目不是节点——故没有任何节点类型接受一个模块，且 `db::nodes`
+    // 把「顶层」写成 `parent_id = NULL`。
     for parent in [Module, Collection, Endpoint] {
         assert!(
             !Module.may_under(parent),
@@ -519,9 +499,8 @@ fn may_under_is_the_whole_parent_child_matrix() {
     assert!(Collection.may_under(Collection));
     assert!(!Collection.may_under(Endpoint));
 
-    // An endpoint is the one row naming *two* parents. Forcing a
-    // collection made the "single endpoint, no folder" case cost a
-    // throwaway collection first.
+    // endpoint 是唯一命名*两种*父的行。强制一个 collection 曾让「单个 endpoint、无文件夹」
+    // 这种最简情况先得建一个用完即弃的 collection。
     assert!(Endpoint.may_under(Module));
     assert!(Endpoint.may_under(Collection));
     assert!(!Endpoint.may_under(Endpoint));

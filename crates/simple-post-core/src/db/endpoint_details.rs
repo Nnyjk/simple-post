@@ -1,21 +1,14 @@
-//! CRUD for the `endpoint_details` table — the endpoint-only half of a
-//! resource node.
+//! `endpoint_details` 表的 CRUD——资源节点的 endpoint 专属那一半。
 //!
-//! Split out of `nodes` because `method` / `url` / `body` / `auth` /
-//! `tags` mean nothing for a module or a collection. Folding them in
-//! would give every module and collection row a set of permanently
-//! empty columns, and leave `method = ?` filters in a search with
-//! nothing to discriminate them against.
+//! 从 `nodes` 拆出，因为 `method` / `url` / `body` / `auth` / `tags` 对模块或 collection
+//! 毫无意义。折叠进去会让每个模块和 collection 行带上一组永远为空的列，也会让搜索里的
+//! `method = ?` 过滤条件无物可分。
 //!
-//! `node_id` is both the primary key and the join back to `nodes`. The
-//! tree columns (name, sort_order, timestamps) deliberately do not
-//! appear here so they have exactly one home — see
-//! [`crate::domain::ResourceNode`].
+//! `node_id` 既是主键也是回到 `nodes` 的连接键。树的列（name、sort_order、时间戳）刻意
+//! 不出现在这里，好让它们各自只有一个归属——见 [`crate::domain::ResourceNode`]。
 //!
-//! Every function here takes `&mut Connection` so the caller decides
-//! whether the call sits inside a transaction. Writes that touch both
-//! tables go through [`super::nodes::create`] / [`super::nodes::delete`]
-//! instead, so the two halves cannot drift apart.
+//! 每个函数都取 `&mut Connection`，由调用方决定这次调用是否在事务内。同时触及两张表的
+//! 写入走 [`super::nodes::create`] / [`super::nodes::delete`]，故两半不会走散。
 
 use rusqlite::{params, Connection, Row};
 
@@ -28,13 +21,10 @@ const COLUMNS: &str = "node_id, method, url, environment_id, base_url_definition
                        base_url_override, params_json, headers_json, body_json, auth_json, \
                        docs, notes, tags_json";
 
-// -------------------------------------------------------------------------
-// Reads.
-// -------------------------------------------------------------------------
+// 读。
 
-/// One endpoint's configuration. `NotFound` when the node exists but
-/// carries no detail row — which means the `nodes` and `endpoint_details`
-/// tables disagree, and is worth surfacing rather than defaulting.
+/// 一个 endpoint 的配置。节点存在却没有 detail 行时为 `NotFound`——那意味着 `nodes` 与
+/// `endpoint_details` 两张表不一致，值得暴露出来而不是给它一个默认值。
 pub fn get(conn: &mut Connection, node_id: &str) -> Result<EndpointDetail, AppError> {
     let sql = format!("SELECT {COLUMNS} FROM endpoint_details WHERE node_id = ?1");
     let mut stmt = conn.prepare(&sql)?;
@@ -47,9 +37,8 @@ pub fn get(conn: &mut Connection, node_id: &str) -> Result<EndpointDetail, AppEr
     }
 }
 
-/// Configuration for several nodes at once — the shape a tree read wants
-/// when it has already narrowed to `type = 'endpoint'` and needs the
-/// bodies in the same round-trip.
+/// 一次取多个节点的配置——树已经收窄到 `type = 'endpoint'`、想在同一次往返里连 body 一起
+/// 拿时的形状。
 pub fn list_by_node_ids(
     conn: &mut Connection,
     node_ids: &[String],
@@ -74,14 +63,9 @@ pub fn list_by_node_ids(
     Ok(out)
 }
 
-/// Every endpoint's configuration under one project, joined through
-/// `nodes` so the `root_id` index does the narrowing.
-///
-/// This is the single query that replaces today's `SELECT ... FROM
-/// endpoints WHERE collection_id = ?` per collection.
+/// 一个项目下全部 endpoint 的配置，经 `nodes` join，好让 `root_id` 索引来收窄。
 pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<EndpointDetail>, AppError> {
-    // Column list spelled out rather than reusing COLUMNS: the columns
-    // are qualified with the `e` alias so `nodes` can be joined in.
+    // 列清单在此写出而非复用 COLUMNS：这些列要用 `e` 别名限定，`nodes` 才能 join 进来。
     let sql = "SELECT e.node_id, e.method, e.url, e.environment_id, e.base_url_definition_id, \
                   e.base_url_override, e.params_json, e.headers_json, e.body_json, e.auth_json, \
                   e.docs, e.notes, e.tags_json \
@@ -98,9 +82,7 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
     Ok(out)
 }
 
-// -------------------------------------------------------------------------
-// Writes.
-// -------------------------------------------------------------------------
+// 写。
 
 pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError> {
     conn.execute(
@@ -203,18 +185,14 @@ pub fn update(
     get(conn, node_id)
 }
 
-// -------------------------------------------------------------------------
-// Internals.
-// -------------------------------------------------------------------------
+// 内部实现。
 
 fn json<T: serde::Serialize>(v: &T) -> Result<rusqlite::types::Value, AppError> {
     Ok(rusqlite::types::Value::Text(serde_json::to_string(v)?))
 }
 
-/// Append one `col = ?n` clause for an `Option<Option<T>>` field.
-///
-/// The double Option is the same convention the rest of the domain uses:
-/// absent leaves the column alone, explicit null clears it.
+/// 为一个 `Option<Option<T>>` 字段追加 `col = ?n` 子句。
+/// 双层 Option 是全领域统一的约定：缺席则该列不动，显式 null 则清空。
 fn push_optional(
     sets: &mut Vec<String>,
     binds: &mut Vec<rusqlite::types::Value>,
@@ -238,9 +216,8 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
     let auth_json: String = row.get(9)?;
     let tags_json: String = row.get(12)?;
 
-    // A stored verb the parser rejects would otherwise be an
-    // `AppError::Validation` escaping a row mapper that owes the caller
-    // a `rusqlite::Error`; re-wrap it so the failure names the column.
+    // 一个存下来的动词若被解析器拒绝，本会是一个 `AppError::Validation` 从一个欠调用方一个
+    // `rusqlite::Error` 的行映射器里逃出去；重新包一层，好让失败指明列名。
     let method = crate::domain::parse_http_method(&method_str).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(
             1,
@@ -271,9 +248,7 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
     })
 }
 
-// -------------------------------------------------------------------------
-// Tests.
-// -------------------------------------------------------------------------
+// 测试。
 
 #[cfg(test)]
 #[path = "endpoint_details_test.rs"]
