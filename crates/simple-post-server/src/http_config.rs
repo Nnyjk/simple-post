@@ -1,28 +1,18 @@
 // =========================================================================
-// MCP HTTP listener configuration
+// MCP HTTP 监听配置
 // =========================================================================
 //
-// The daemon's bind address, port, mount path and Host/Origin allowlists
-// are persisted as a JSON blob in `preferences` under `mcp.http_config`.
+// daemon 的绑定地址、端口、挂载路径与 Host/Origin 白名单以 JSON blob 形式持久化在
+// `preferences` 的 `mcp.http_config` 下。
 //
-// **Why a helper pair and not a plain preferences write.** The daemon
-// is a *child process*: whatever is in this row is what
-// `daemon_supervisor::daemon_cli_args` puts on its command line at the
-// next spawn. Saving therefore does not reconfigure a running daemon,
-// so the response carries `requires_restart` and the UI can say so
-// rather than silently showing settings that are not in effect.
+// **为什么是这对辅助函数而不是直接写 preferences。** daemon 是*子进程*：这一行的内容
+// 就是 `daemon_supervisor::daemon_cli_args` 在下次 spawn 时放进命令行的东西。故保存
+// 并不会重配正在运行的 daemon，响应里因此带 `requires_restart`，让 UI 能把这件事说
+// 出来，而不是静默展示一份根本没生效的设置。
 //
-// Both transports go through the two plain functions below — the Tauri
-// commands in `src-tauri/src/commands/mcp_http_config.rs` and the REST
-// routes in `web_api/routes/mcp.rs` are both thin wrappers, so the
-// desktop and web shapes cannot drift on validation or on the restart
-// verdict.
-//
-// This file is host-agnostic and moved into the server crate with the
-// rest of the `serve-web` surface; it needs `crate::port_registry`,
-// which lives here too. The two `#[tauri::command]` wrappers that used
-// to sit at the bottom of this file stayed in `src-tauri` and call the
-// functions below.
+// 两条 transport 都走下面这两个普通函数——`src-tauri/src/commands/mcp_http_config.rs`
+// 的 Tauri 命令与 `web_api/routes/mcp.rs` 的 REST 路由都是薄包装，故桌面端与 web 端在
+// 校验上、在「是否需要重启」这个判断上都不会漂移。
 
 use serde::Serialize;
 
@@ -31,25 +21,22 @@ use crate::domain::McpHttpConfig;
 use crate::error::AppError;
 use crate::port_registry::{self, PortRecord};
 
-/// Response envelope for a write: the stored config plus whether the
-/// running daemon is already serving something else.
+/// 一次写入的响应信封：存下的配置，加上「正在运行的 daemon 是否已经在服务别的东西」。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpHttpConfigDto {
     pub config: McpHttpConfig,
-    /// The new config differs from what the running daemon is actually
-    /// serving, so it only takes effect after a restart.
+    /// 新配置与正在运行的 daemon 实际在服务的东西不同，须重启才生效。
     pub requires_restart: bool,
 }
 
-/// Read the persisted config. An absent row yields
-/// [`McpHttpConfig::default`]; an unparseable one is an error (see
-/// `db::preferences::mcp_http_config`).
+/// 读持久化配置。行缺失返回 [`McpHttpConfig::default`]；无法解析则报错（见
+/// `db::preferences::mcp_http_config`）。
 pub fn read_http_config(pool: &DbPool) -> Result<McpHttpConfig, AppError> {
     crate::db::with_conn(pool, crate::db::preferences::mcp_http_config)
 }
 
-/// Validate, persist, and report whether a restart is needed.
+/// 校验、持久化，并报告是否需要重启。
 pub fn write_http_config(
     pool: &DbPool,
     config: McpHttpConfig,
@@ -66,25 +53,20 @@ pub fn write_http_config(
     })
 }
 
-/// Does the new config differ from the one the daemon is serving now?
+/// 新配置与 daemon 现在服务的东西是否不同？
 ///
-/// Three sources of truth, and only two of them are knowable at save
-/// time:
+/// 有三个真值来源，但保存时只有两个可知：
 ///
-///   * **host / port** — the running daemon's own `--bind` and the port
-///     it actually bound are published in the `mcp.port` record. A
-///     configured `port: 0` means "OS-assigned", which the running
-///     daemon has already resolved, so it is never a difference.
-///   * **path / allow_remote / allow lists** — the record does not carry
-///     these, so the previously *persisted* row is the only available
-///     reference. That is accurate for every daemon this app spawned
-///     (the supervisor builds its CLI from the same row), and errs
-///     toward "restart" for a hand-launched one, which is the safe
-///     direction for a flag the user cannot otherwise verify.
+///   * **host / port** —— 运行中 daemon 自己的 `--bind` 与它实际绑定的端口发布在
+///     `mcp.port` 记录里。配置里的 `port: 0` 表示「由 OS 分配」，运行中的 daemon
+///     早已解析完毕，故永远不构成差异。
+///   * **path / allow_remote / 白名单** —— 记录里没有这些，故只能拿*先前持久化的*
+///     那一行当参照。对本应用 spawn 出来的每个 daemon 这都是准确的（supervisor 用同一
+///     行构造 CLI）；对手工拉起的 daemon 会偏向「要重启」，而对一个用户无从自行核验的
+///     flag 来说这正是安全的方向。
 ///
-/// `record: None` is the "cannot tell" case and answers `true`. A record
-/// whose PID is gone answers `false`: nothing is serving, so the next
-/// start picks the new row up with no restart step in between.
+/// `record: None` 是「判断不了」的情形，回答 `true`。记录的 PID 已消失则回答
+/// `false`：没有东西在服务，下一次 start 自然会取到新行，中间不需要重启步骤。
 fn requires_restart(
     new: &McpHttpConfig,
     previous: &McpHttpConfig,

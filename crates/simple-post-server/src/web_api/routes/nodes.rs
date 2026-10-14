@@ -1,14 +1,8 @@
-//! REST handlers for the merged resource tree.
+//! 合并后的资源树的 REST handler。
 //!
-//! Replaces the 19 paths `/api/modules/*`, `/api/collections/*` and
-//! `/api/endpoints/*` carried between them. The collapse is the point:
-//! one table, one set of handlers, and the branch that used to read
-//! `"module"` or `"collection"` when computing a move's destination is
-//! gone — `db::nodes::move_many` asks the parent's type instead.
-//!
-//! The two endpoint-only sub-resources (`/duplicate`, `/send`) stay, now
-//! addressed under a node. They are actions on one request, not part of
-//! the tree's structure.
+//! 模块 / 集合 / endpoint 统一在一张 `nodes` 表里，故这些 handler 也不分资源类型。
+//! 两个只属于 endpoint 的子资源（`/duplicate`、`/send`）保留，只是改挂在节点之下：
+//! 它们是对单个请求的动作，不是树结构的一部分。
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,10 +24,11 @@ use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState}
 
 use super::super::dto::{HttpSendBody, NodeCreateBody, NodeMoveBody};
 
-/// `POST /api/http/send` — the raw-URL escape hatch.
+/// `POST /api/http/send` —— 裸 URL 逃生口。
 ///
-/// Not part of the tree; kept at its own path because it is not about a
-/// stored node. Gated by the outbound policy.
+/// **这是本 crate 唯一对外发请求的路由**：URL 完全由 body 决定，绕过端点配置的
+/// base URL 解析，出站策略只在 `http_executor` 执行层把关。节点级的 `/send` 不再
+/// 存在，否则就是第二条不受管辖的出站通道——`base_url_defs_test` 盯住它不可路由。
 pub(crate) async fn http_send(
     State(_s): State<Arc<WebState>>,
     Json(body): Json<HttpSendBody>,
@@ -47,18 +42,16 @@ pub(crate) async fn http_send(
         follow_redirects: body.follow_redirects,
         max_response_size_kb: body.max_response_size_kb,
     };
-    // The function returns an `HttpResult` (success OR transport-level
-    // failure wrapped in `ok=false`). Both serialise to JSON cleanly.
+    // 返回值是 `HttpResult`（成功或传输层失败都包在 `ok=false` 里），两者都能干净地
+    // 序列化成 JSON。
     Ok(Json(http_executor::execute(&input).await))
 }
 
 /// `GET /api/nodes`
 ///
-/// `rootId` narrows to one project — the SPA always has an active one,
-/// so this replaces three unfiltered list calls that used to pull the
-/// whole database regardless. `type` and `q` are optional filters; `q`
-/// searches endpoint name, url and description, which is why it reaches
-/// into `endpoint_details` rather than matching on the node alone.
+/// `rootId` 把结果收窄到一个项目——SPA 总有且只有一个当前项目，故这一个参数就能覆盖
+/// 按项目/按类型/搜索三种列表。`type` 与 `q` 是可选过滤；`q` 搜端点的 name、url 与
+/// description，故它要进 `endpoint_details` 而不是只匹配节点。
 pub(crate) async fn nodes_list(
     State(s): State<Arc<WebState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -81,9 +74,7 @@ pub(crate) async fn nodes_list(
             None => match params.get("rootId") {
                 Some(root_id) => db::with_conn(&s.pool, |c| db::nodes::list_by_root(c, root_id))
                     .map_err(map_app_error)?,
-                // No active project yet during first paint. Returning
-                // the whole tree mirrors what the old three list calls
-                // did, so the SPA can still render something.
+                // 首屏还没有当前项目时返回整棵树，好让 SPA 仍能渲染出点什么。
                 None => db::with_conn(&s.pool, db::nodes::list_all).map_err(map_app_error)?,
             },
         },
@@ -104,11 +95,9 @@ pub(crate) async fn nodes_get(
 
 /// `POST /api/nodes`
 ///
-/// An endpoint arrives as one body carrying both halves: the structural
-/// node and its `detail`. They are written in a single transaction, and
-/// `db::nodes::create` refuses a mismatched pair — an endpoint with no
-/// payload, or a collection carrying one — rather than leaving a tree
-/// the reader cannot open.
+/// endpoint 以一次 body 带来两半：结构节点与它的 `detail`。两者在一个事务里写入，
+/// `db::nodes::create` 拒绝不匹配的配对——endpoint 没有 payload、或集合带着
+/// payload，都不行——而不是留下一棵读者打不开的树。
 pub(crate) async fn nodes_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
@@ -118,10 +107,8 @@ pub(crate) async fn nodes_create(
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
 
     let node = parsed.node;
-    // A child node's owner is implied by its parent. Deriving it here
-    // means a caller only has to name the parent, and the two can never
-    // disagree — the same rule and the same reason as the Tauri
-    // command's empty-`root_id` branch.
+    // 子节点的归属由父节点蕴含。故在此推导，调用方只需点名父节点，两者不可能矛盾——
+    // 规则与理由都和 Tauri 命令里 root_id 为空的分支相同。
     let mut root_id = node.root_id.clone().unwrap_or_default();
     if root_id.is_empty() {
         if let Some(parent) = &node.parent_id {
@@ -131,9 +118,8 @@ pub(crate) async fn nodes_create(
     }
     let node = node.into_node(&root_id);
 
-    // Expand the optional detail block here rather than at the DTO, so a
-    // half-filled endpoint ("new request" sends just a url) defaults the
-    // same way the Tauri command defaults it.
+    // 在此展开可选的 detail 块而不是在 DTO 里，好让半填的 endpoint（"新建请求"只发
+    // 一个 url）采用与 Tauri 命令相同的默认值。
     let detail = parsed.detail.map(|d| d.into_detail(&node.id));
 
     let created = db::with_tx(&s.pool, |c| db::nodes::create(c, &node, detail.as_ref()))
@@ -144,16 +130,15 @@ pub(crate) async fn nodes_create(
     ))
 }
 
-/// `PATCH /api/nodes/:id` — structural columns only.
+/// `PATCH /api/nodes/:id` —— 只改结构列。
 ///
-/// Endpoint configuration has its own route. Mixing them would make a
-/// name rename rewrite JSON columns that did not change.
+/// endpoint 配置另有路由。混在一起会让一次改名去重写根本没变的 JSON 列。
 pub(crate) async fn nodes_update(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
     Json(patch): Json<crate::domain::ResourceNodePatch>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // `with_tx` wants `Fn`, so the patch is cloned rather than moved.
+    // `with_tx` 要 `Fn`，故 patch 克隆而非移动。
     let row = db::with_tx(&s.pool, |c| db::nodes::update(c, &id, patch.clone()))
         .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
@@ -161,9 +146,7 @@ pub(crate) async fn nodes_update(
 
 /// `DELETE /api/nodes/:id`
 ///
-/// Takes the whole subtree: `nodes.parent_id` self-references with
-/// `ON DELETE CASCADE`, which is the same one-statement teardown the
-/// old three-level foreign key chain gave.
+/// 连带整棵子树：`nodes.parent_id` 自引用且 `ON DELETE CASCADE`，一条语句即可拆完。
 pub(crate) async fn nodes_delete(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
@@ -174,10 +157,8 @@ pub(crate) async fn nodes_delete(
 
 /// `POST /api/nodes/move`
 ///
-/// `parentId` is null for "top of the project", which is legal only for
-/// a module. The old body carried a separate `parentKind` because the
-/// destination was chosen from two different tables; the parent's type
-/// answers that now.
+/// `parentId` 为 null 表示「项目顶层」，且仅对模块合法。目的地位于哪张表由父节点的
+/// `type` 回答，不再需要单独的 `parentKind`。
 pub(crate) async fn nodes_move(
     State(s): State<Arc<WebState>>,
     Json(body): Json<NodeMoveBody>,
@@ -189,14 +170,12 @@ pub(crate) async fn nodes_move(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ----- endpoint-only sub-resources ---------------------------------------
+// ----- 只属于 endpoint 的子资源 ---------------------------------------
 
-/// `GET /api/endpoint-details` — every endpoint's configuration, flat.
+/// `GET /api/endpoint-details` —— 所有 endpoint 的配置，打平。
 ///
-/// The renderer's counterpart to `nodes_list`: the tree reads structure
-/// and the HTTP tester reads configuration, and the two are different
-/// enough that joining them on every boot would be a cost paid for data
-/// the tree never draws. Keyed by `nodeId` on the client.
+/// renderer 侧与 `nodes_list` 配对：树读结构、HTTP 测试器读配置，两者差异大到每次
+/// 启动都 join 会为一份树从不绘制的数据付费。客户端按 `nodeId` 建键。
 pub(crate) async fn endpoint_details_list(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
@@ -235,38 +214,32 @@ pub(crate) async fn node_endpoint_detail_patch(
     Ok(Json(serde_json::to_value(&d).unwrap_or(Value::Null)))
 }
 
-/// Body for `POST /api/nodes/:id/duplicate`.
+/// `POST /api/nodes/:id/duplicate` 的 body。
 ///
-/// Optional in its entirety — the whole point of the body is the id, and
-/// a caller that has no local copy to stay consistent with (a script,
-/// curl) can omit it and let the server mint one. Defined here rather
-/// than in `dto.rs` so the route's whole contract sits next to the
-/// handler that enforces it.
+/// 整块可选——这个 body 的全部意义就是那个 id，而没有本地副本需要保持一致的调用方
+/// （脚本、curl）可以直接省掉，让服务端铸一个。定义在此而非 `dto.rs`，好让整条
+/// 路由的契约与强制它的 handler 待在一起。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NodeDuplicateBody {
-    /// The id to write the copy under, honoured verbatim.
+    /// 副本要写入的 id，原样采纳。
     ///
-    /// `#[serde(default)]` rather than a bare `Option<String>` because
-    /// the browser sends `null` when it has no id to offer: "absent" and
-    /// "explicitly null" both mean *mint one here*, and the SPA sending
-    /// null must not turn into a 400.
+    /// 用 `#[serde(default)]` 而非裸的 `Option<String>`，因为浏览器在没有 id 可给时
+    /// 会发 `null`：「缺失」与「显式 null」都表示*在此铸一个*，SPA 发 null 不该变成
+    /// 400。
     #[serde(default)]
     pub new_id: Option<String>,
 }
 
-/// `POST /api/nodes/:id/duplicate` — endpoints only.
+/// `POST /api/nodes/:id/duplicate` —— 仅限 endpoint。
 ///
-/// Delegates to `db::nodes::duplicate`, which copies the node and its
-/// detail in one transaction and refuses a non-endpoint up front rather
-/// than producing an empty collection that looks like a half-finished
-/// copy.
+/// 委派给 `db::nodes::duplicate`，后者在一个事务里复制节点及其 detail，并在一开始
+/// 就拒绝非 endpoint——而不是造出一个看着像半成品副本的空集合。
 pub(crate) async fn node_duplicate(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
-    // `Option<Json<_>>`, not `Json<_>`: the body is genuinely optional,
-    // and a required extractor would 400 every caller written before the
-    // SPA started sending an id.
+    // 用 `Option<Json<_>>` 而非 `Json<_>`：body 确实是可选的，必填 extractor 会让
+    // 所有写在 SPA 开始发 id 之前的调用方都吃 400。
     body: Option<Json<NodeDuplicateBody>>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     let new_id = body.and_then(|Json(b)| b.new_id);

@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------
-// Error → HTTP status mapping.
+// Error → HTTP 状态映射。
 // -------------------------------------------------------------------------
 
 use axum::{
@@ -11,9 +11,8 @@ use serde_json::{json, Value};
 
 use crate::error::AppError;
 
-/// All DB / domain errors funnel through here. JSON body keeps the
-/// shape stable (`{ "code": "...", "message": "..." }`) so the
-/// browser can render a toast without case-matching on status.
+/// 所有 DB / domain 错误都汇到这里。JSON body 形状固定
+/// （`{ "code": "...", "message": "..." }`），浏览器据此弹 toast 而不必逐个匹配状态码。
 pub struct HttpErrorResponse {
     status: StatusCode,
     body: Json<Value>,
@@ -35,15 +34,11 @@ impl IntoResponse for HttpErrorResponse {
 }
 
 pub fn map_app_error(e: AppError) -> HttpErrorResponse {
-    // Use the existing `code()` / `Display` so we don't duplicate the
-    // string-table here.
+    // 复用既有的 `code()` / `Display`，不在这里重抄一份字符串表。
     //
-    // These keys must match `AppError::code()` in
-    // `simple-post-core::error`. It previously matched `"invalid_input"`,
-    // which no variant ever returns — so every validation error and every
-    // permission denial fell through to 500 instead of 400 / 403, and
-    // clients could not tell "you sent something wrong" from "the server
-    // broke".
+    // 这些键必须与 `simple-post-core::error` 的 `AppError::code()` 一致：对不上就会
+    // 让校验错误与权限拒绝一起落到 500 而不是 400 / 403，客户端便无法区分「你发错了」
+    // 与「服务端坏了」。
     HttpErrorResponse::new(
         match e.code() {
             "not_found" => StatusCode::NOT_FOUND,

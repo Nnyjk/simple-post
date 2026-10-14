@@ -1,42 +1,32 @@
-//! Supervises the HTTP MCP daemon child process.
+//! HTTP MCP daemon 子进程的监管者。
 //!
-//! The Tauri GUI spawns the same binary in `mcp` subcommand mode as a
-//! child process, exposes its lifecycle via [`McpDaemonHandle`], and
-//! emits a `daemon://crashed` event to the renderer when the child
-//! exits unexpectedly.
+//! Tauri GUI 把同一个二进制以 `mcp` 子命令模式拉成子进程，通过 [`McpDaemonHandle`]
+//! 暴露其生命周期，并在子进程意外退出时向 renderer 发 `daemon://crashed` 事件。
 //!
-//! Lifecycle:
-//!   * `ensure_started` is called from the GUI's `.setup()` block.
-//!     If an existing port file points at a live PID, we reuse it
-//!     (cheap restart path for the "user just rebooted their laptop"
-//!     case). Otherwise we spawn a fresh child on an OS-assigned port.
-//!   * `forward_stderr_and_parse_metrics` tails the child's stderr
-//!     line-by-line, feeding metrics lines into the in-memory
-//!     `McpMetrics` so `mcp_status` can reflect live numbers.
-//!   * `watch_exit` awaits the child and, on non-zero exit, emits
-//!     `daemon://crashed` to the Tauri app handle. The renderer shows
-//!     a toast and lets the user retry.
-//!   * `stop` is the manual OFF switch (Tauri `mcp_daemon_stop` /
-//!     `POST /api/mcp/stop`); `shutdown` is the app-exit hook. Both
-//!     go through the same `teardown`, which also terminates a daemon
-//!     this supervisor merely *adopted* — see [`teardown_targets`].
-//!   * `start` is the manual ON switch and is idempotent: a healthy
-//!     tracked daemon is returned untouched rather than respawned.
+//! 生命周期：
+//!   * `ensure_started` 由 GUI 的 `.setup()` 调用。若端口文件指向一个活着的 PID，
+//!     直接复用（重启笔记本后的廉价路径），否则在 OS 分配的端口上拉起子进程。
+//!   * `forward_stderr_and_parse_metrics` 逐行读子进程 stderr，把指标行喂进内存里的
+//!     `McpMetrics`，`mcp_status` 由此反映实时数字。
+//!   * `watch_exit` 等待子进程，非零退出时向 Tauri app handle 发
+//!     `daemon://crashed`；renderer 弹 toast 并让用户重试。
+//!   * `stop` 是手动 OFF 开关（Tauri `mcp_daemon_stop` / `POST /api/mcp/stop`），
+//!     `shutdown` 是退出钩子。两者走同一条 `teardown`，它也会终止本监管者只是
+//!     *收养* 的 daemon，见 [`teardown_targets`]。
+//!   * `start` 是手动 ON 开关且幂等：健康且被跟踪的 daemon 原样返回，不重新拉起。
 //!
-//! `auto_start` (a persisted preference) and `start`/`stop` (runtime
-//! verbs) compose rather than overlap: the preference decides whether
-//! the daemon comes up on launch, the manual switch decides whether it
-//! is up *now*. Disabling `auto_start` never kills a running daemon.
+//! `auto_start`（持久化偏好）与 `start` / `stop`（运行时动词）是叠加而非重叠的
+//! 关系：偏好决定 daemon 启动时是否自动起来，开关决定它*现在*是否在跑。
+//! 关掉 `auto_start` 不会杀掉已在运行的 daemon。
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-// Only the GUI host emits `daemon://crashed`. Behind this feature the
-// crate has no Tauri dependency at all, which is what keeps the
-// container image free of GTK/WebKit and the `--lib` test binary free
-// of the Windows GUI runtime.
+// 只有 GUI host 会发 `daemon://crashed`。此 feature 之下本 crate 完全不依赖
+// Tauri——这正是容器镜像免掉 GTK/WebKit、`--lib` 测试二进制免掉 Windows GUI
+// runtime 的原因。
 #[cfg(feature = "gui")]
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
@@ -46,26 +36,23 @@ use crate::domain::McpHttpConfig;
 use crate::mcp_metrics::{parse_metric_line, McpMetrics};
 use crate::port_registry::{self, PortRecord};
 
-/// Lifecycle states the renderer cares about. `#[serde(rename_all =
-/// "snake_case")]` keeps the wire shape stable so the React side can
-/// switch on the string directly.
+/// renderer 关心的生命周期状态。`#[serde(rename_all = "snake_case")]` 固定线格式，
+/// React 侧可直接按字符串分支。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonStatus {
-    /// No process has been spawned yet (initial state).
+    /// 尚未 spawn 过任何进程（初始态）。
     Stopped,
-    /// Spawn issued but healthz hasn't come back yet.
+    /// 已发出 spawn，但 healthz 还没回来。
     Starting,
-    /// Healthz green, child PID still alive.
+    /// healthz 绿，子进程 PID 仍存活。
     Running,
-    /// User triggered restart, old child killed, new one being spawned.
+    /// 用户触发重启，旧子进程已杀，新进程正在拉起。
     Restarting,
-    /// Child exited with a non-zero status (or was killed by a signal).
-    /// The exit_code is preserved so the renderer can show it.
+    /// 子进程非零退出（或被信号杀死）。保留 `exit_code` 供 renderer 展示。
     Crashed { exit_code: Option<i32> },
-    /// Child alive but `/mcp/healthz` is failing — typically a hang or
-    /// a deadlock on first request. We don't auto-restart; the user
-    /// has to act.
+    /// 子进程活着但 `/mcp/healthz` 失败——通常是首次请求卡死或死锁。不自动重启，
+    /// 须由用户处理。
     Unhealthy,
 }
 
@@ -82,27 +69,25 @@ impl DaemonStatus {
     }
 }
 
-/// Event payload for `daemon://crashed`. Renderer renders a toast with
-/// `message` and a "Retry" action that calls `restart_daemon` (Tauri
-/// command, see `commands/mcp_status.rs`).
+/// `daemon://crashed` 的事件体。renderer 用 `message` 弹一个带「重试」动作的
+/// toast，该动作调用 `restart_daemon`（Tauri 命令，见 `commands/mcp_status.rs`）。
 #[derive(Debug, Clone, Serialize)]
 pub struct DaemonCrashedPayload {
-    pub status: String, // always "crashed" — kept for symmetry w/ DTO
+    pub status: String, // 恒为 "crashed"——与 DTO 对称
     pub exit_code: Option<i32>,
     pub message: String,
     pub last_error: Option<String>,
 }
 
-/// Internal: per-spawn bookkeeping. Lives behind a tokio mutex so the
-/// public methods can be `&self` (Tauri state wants shared refs).
+/// 内部：每次 spawn 的记账。放在 tokio mutex 后，公开方法才能是 `&self`
+/// （Tauri state 需要共享引用）。
 struct DaemonState {
     pid: Option<u32>,
     port: Option<u16>,
     port_record: Option<PortRecord>,
-    /// Kept so `shutdown` and `restart` can `kill()` without losing the
-    /// handle. Some platforms error if `wait()` is called after the
-    /// child has already been reaped elsewhere; we keep `child` until
-    /// `shutdown` so we own the reap.
+    /// 保留句柄，好让 `shutdown` 与 `restart` 能 `kill()` 而不丢它。某些平台上
+    /// 子进程已被别处 reap 后再 `wait()` 会报错，所以 `child` 一直留到
+    /// `shutdown`，reap 归我们。
     child: Option<tokio::process::Child>,
     metrics: Arc<McpMetrics>,
     status: DaemonStatus,
@@ -126,23 +111,16 @@ impl DaemonState {
 }
 /// 构造守护进程的真实 CLI 参数，桌面端与 Web 端共享同一份契约。
 ///
-/// Everything but the port comes from the persisted `mcp.http_config`
-/// row — the daemon used to be spawned with `--bind=127.0.0.1` and a
-/// hardcoded `/mcp`, which meant a user who opened the daemon to the LAN
-/// had to hand-edit the child's command line. Reading the row here means
-/// the settings panel and the child process cannot disagree.
+/// 除端口外全部取自持久化的 `mcp.http_config` 行：在这里读该行，设置面板与子
+/// 进程命令行就不可能各说各话。
 ///
-/// `port` is the OS-assigned port the supervisor just claimed; it is
-/// passed explicitly rather than letting the child re-pick, because the
-/// supervisor writes that same port into `mcp.port` and health-probes it.
-/// The child's own `mcp.http_config.port` is therefore only a default for
-/// a hand-run `simple-post mcp`.
+/// `port` 是监管者刚申领到的 OS 分配端口，显式传入而非让子进程自己再挑一次——
+/// 监管者会把这个端口写进 `mcp.port` 并拿它做 health 探测。子进程自身的
+/// `mcp.http_config.port` 只对手工运行的 `simple-post mcp` 起作用。
 ///
-/// The empty allowlists are passed as `--allowed-hosts=` /
-/// `--allowed-origins=`, which clap parses as an empty list. That is
-/// meaningful, not filler: an empty host list with `--allow-remote` is
-/// the daemon denying every non-loopback `Host`, and omitting the flag
-/// would rely on the same default arriving the same way.
+/// 空的 allowlist 以 `--allowed-hosts=` / `--allowed-origins=` 传下去，clap 解析成
+/// 空列表。这是有意义的而非凑数：配合 `--allow-remote`，空 host 列表意味着
+/// **拒绝**所有非 loopback 的 `Host`；省掉该 flag 则要依赖默认值恰好一致。
 fn daemon_cli_args(port: u16, config: &McpHttpConfig) -> Vec<String> {
     let mut args = vec![
         "mcp".to_string(),
@@ -165,20 +143,14 @@ fn daemon_cli_args(port: u16, config: &McpHttpConfig) -> Vec<String> {
     args
 }
 
-/// How long teardown waits for a killed daemon to actually leave the
-/// process table before the port file is released and a replacement is
-/// spawned. This replaces a flat 200ms sleep, which was a guess: on
-/// Windows the child could still be alive at that point, and a socket
-/// that has not finished closing can keep the port out of the bind
-/// queue on macOS/Linux. Bounded on purpose — a wedged process must not
-/// hang the UI's start/stop button forever.
+/// teardown 在释放端口文件、放行替换进程之前，等被杀的 daemon 真正离开进程表
+/// 的上限时长。刻意有界——卡死的进程不能把 UI 的启动/停止按钮永久吊住。
 const TEARDOWN_TIMEOUT: Duration = Duration::from_millis(2_000);
-/// Poll cadence inside [`TEARDOWN_TIMEOUT`].
+/// [`TEARDOWN_TIMEOUT`] 内部的轮询节奏。
 const TEARDOWN_POLL: Duration = Duration::from_millis(50);
 
-/// Host-side data directory used by the Tauri shape, which has no
-/// data-dir parameter to thread through. Matches what the daemon child
-/// derives for itself; the `serve-web` shape passes its own explicitly.
+/// Tauri 形态使用的主机侧数据目录——它没有数据目录参数可传。须与 daemon 子进程
+/// 自行推导出的结果一致；`serve-web` 形态显式传自己的。
 #[cfg(feature = "gui")]
 fn host_data_dir() -> String {
     dirs::data_dir()
@@ -186,51 +158,38 @@ fn host_data_dir() -> String {
         .unwrap_or_default()
 }
 
-/// What a freshly spawned child needs from its host once the shared
-/// spawn path returns.
+/// 新拉起的子进程在共享 spawn 路径返回后还需要 host 提供的东西。
 struct PendingWatch {
     inner: Arc<Mutex<DaemonState>>,
     pid: u32,
 }
 
-/// Result of [`McpDaemonHandle::ensure_started_with`] — the one
-/// host-agnostic spawn path.
+/// [`McpDaemonHandle::ensure_started_with`] 的返回值——唯一的主机无关 spawn 路径。
 ///
-/// # Why the Tauri binding is a *method on this type* and not a
-/// parameter of the spawn path
+/// # 为何 Tauri 绑定是*本类型上的方法*而非 spawn 路径的参数
 ///
-/// This started as an `ExitNotifier` enum that *owned* an `AppHandle`,
-/// which the spawn path took by reference and cloned into the
-/// background exit-watcher task. That compiles, passes review, and
-/// works — until someone runs `cargo test -p simple-post --lib`, whose
-/// test binary then dies at **load** time with
-/// `0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND` and zero tests run. The
-/// unresolvable entrypoint is `comctl32.dll!TaskDialogIndirect`, which
-/// only exists in comctl32 **v6** (a side-by-side assembly resolved via
-/// an activation context, not the v5 copy in `System32`). It reaches the
-/// test binary because an `AppHandle` travelling through shared,
-/// `tokio::spawn`ed code keeps the whole Tauri Windows runtime
-/// reachable from this module, and with it `tao`/`muda` — five extra
-/// DLLs and +2.4 MB of GUI/COM/shell code that the `--lib` test build
-/// has no business linking.
+/// spawn 路径必须 100% 不含 Tauri，`AppHandle` 只能出现在下面这层薄薄的
+/// `finish` 对里，且只从三个 Tauri 绑定（`ensure_started`、`start`、`restart`）
+/// 可达。**不要把 `AppHandle` 移回 `ensure_started_with` 能看见的任何类型或
+/// 参数。** 一个被 `tokio::spawn` 的共享代码持有的 `AppHandle` 会把整个 Tauri
+/// Windows runtime 留在这个模块的可达图里：`--lib` 测试二进制会因此链上
+/// `tao` / `muda` 的五个 DLL 与 +2.4 MB GUI/COM/shell 代码，并在**加载**时死于
+/// `0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND`（未解析的入口点是
+/// `comctl32.dll!TaskDialogIndirect`，它只存在于 comctl32 **v6**——经 activation
+/// context 解析的 side-by-side 程序集，而非 `System32` 里的 v5 副本），一个测试都
+/// 跑不了。
 ///
-/// The coupling is therefore split the other way round: the spawn path
-/// stays 100% Tauri-free and returns *what it spawned*; only this thin
-/// `finish` pair knows about `AppHandle`, and it is reachable solely
-/// from the three Tauri bindings (`ensure_started`, `start`,
-/// `restart`), exactly the shape that worked before the refactor.
-/// **Do not move an `AppHandle` back into a type or a parameter that
-/// `ensure_started_with` can see.**
+/// `daemon_supervisor_test.rs::the_shared_spawn_path_stays_free_of_tauri` 是这
+/// 条不变量的回归网。
 struct Started {
     port: u16,
-    /// `Some` only when a fresh child was spawned and still needs an
-    /// exit-watcher; `None` on the reuse path (no new process, nothing
-    /// to watch).
+    /// 仅在刚拉起新子进程、仍需退出监视器时为 `Some`；复用路径为 `None`
+    /// （没有新进程，也就没有东西可监视）。
     watch: Option<PendingWatch>,
 }
 
 impl Started {
-    /// Tauri shape: arm the watcher that emits `daemon://crashed`.
+    /// Tauri 形态：装上发 `daemon://crashed` 的监视器。
     #[cfg(feature = "gui")]
     fn tauri_finish(self, app_handle: &AppHandle) -> u16 {
         let port = self.port;
@@ -243,9 +202,8 @@ impl Started {
         port
     }
 
-    /// `serve-web` shape: same watcher, minus the Tauri event emission.
-    /// The web UI learns about a dead daemon from the `/api/mcp/status`
-    /// poll instead.
+    /// `serve-web` 形态：同一个监视器，只是不发 Tauri 事件——web UI 从
+    /// `/api/mcp/status` 轮询得知 daemon 已死。
     fn poll_only_finish(self) -> u16 {
         let port = self.port;
         if let Some(w) = self.watch {
@@ -257,34 +215,29 @@ impl Started {
     }
 }
 
-/// One PID a lifecycle verb must terminate, plus how it can be reaped.
+/// 生命周期动词必须终止的一个 PID，附其可用的回收方式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TeardownTarget {
     pub pid: u32,
-    /// `true` when the supervisor holds a `Child` handle for this PID —
-    /// we spawned it, so we own the reap and can use `try_wait()`.
-    /// `false` for an *adopted* daemon named only by the port record:
-    /// there is no handle, so the PID has to be killed out-of-band via
-    /// [`port_registry::terminate_pid`].
+    /// `true` 表示监管者对该 PID 持有 `Child` 句柄——是我们 spawn 的，reap
+    /// 归我们，可用 `try_wait()`。
+    /// `false` 表示只有端口记录点名的*被收养* daemon：没有句柄，只能经
+    /// [`port_registry::terminate_pid`] 带外杀掉。
     pub via_handle: bool,
 }
 
-/// Pure: which PIDs a teardown must terminate.
+/// 纯函数：teardown 必须终止哪些 PID。
 ///
-/// Two channels, one PID each:
-///   * `owned_pid` — the child we spawned and still hold a handle for.
-///   * `adopted_pid` — a live daemon named by the port record that we
-///     never spawned. This is the case that made "restart" a no-op:
-///     `ensure_started`'s reuse path fills `state.pid` but never sets
-///     `state.child`, so the old `if let Some(child) = g.child.take()`
-///     was `None` and `restart` immediately re-adopted the very process
-///     it was supposed to replace, while reporting success.
+/// 两个来源，各一个 PID：
+///   * `owned_pid`——我们 spawn 且仍持有句柄的子进程。
+///   * `adopted_pid`——端口记录点名、自己从未 spawn 的活 daemon。复用路径会填
+///     `state.pid` 却不填 `state.child`，只查句柄的 teardown 会扑空，于是 `restart`
+///     立刻重新收养了它本该替换掉的同一个进程，同时报告成功。
 ///
-/// A PID appears at most once (a daemon we both spawned and adopted is
-/// the same process, and the handle is the cheaper way to reap it).
-/// `0` is filtered out here rather than at each call site — `child.id()`
-/// legitimately returns `None` right after spawn, and a `0` target
-/// would otherwise reach `taskkill /F /PID 0`.
+/// 同一 PID 至多出现一次（既 spawn 又收养的 daemon 是同一个进程，而句柄是更
+/// 廉价的回收方式）。`0` 在这里滤掉而不是在每个调用点：spawn 后
+/// `child.id()` 合法地返回 `None`，漏网的 `0` 会一路走到
+/// `taskkill /F /PID 0`。
 fn teardown_targets(owned_pid: Option<u32>, adopted_pid: Option<u32>) -> Vec<TeardownTarget> {
     let mut out = Vec::new();
     if let Some(pid) = owned_pid.filter(|p| *p != 0) {
@@ -302,44 +255,35 @@ fn teardown_targets(owned_pid: Option<u32>, adopted_pid: Option<u32>) -> Vec<Tea
     out
 }
 
-/// Pure: is a "start" request already satisfied?
+/// 纯函数：一次「启动」请求是否已被满足。
 ///
-/// This is the idempotency rule for the manual ON switch: if the
-/// supervisor is tracking a daemon that still answers healthz, a start
-/// returns that daemon's identity rather than killing and respawning it.
-/// `tracked_port.is_some()` is required alongside the status because
-/// `Running` with no tracked port is the "adopted, then lost the port
-/// record" state — liveness cannot be confirmed there, and a fresh
-/// spawn is the only honest answer.
-// Pure decision function with no Tauri in it, so it stays compiled
-// unconditionally — `daemon_supervisor_test.rs` exercises it directly.
-// Only its production caller (`is_serving`) is GUI-gated, hence the
-// `allow(dead_code)` on a feature that has no GUI.
+/// 手动 ON 开关的幂等规则：若监管者跟踪的 daemon 仍能答 healthz，就返回该
+/// daemon 的身份而不 kill 重拉。`tracked_port.is_some()` 必须与状态同时成立——
+/// `Running` 但无跟踪端口是「已收养、随后丢了端口记录」的状态，此处无法确认存活，
+/// 而重新 spawn 才是唯一诚实的答案。
+// 纯决策函数且不含 Tauri，故始终参与编译——`daemon_supervisor_test.rs` 直接测它。
+// 它唯一的生产调用方（`is_serving`）受 GUI feature 门控，故在无 GUI 的 feature 上
+// 挂 `allow(dead_code)`。
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 fn start_is_noop(status: DaemonStatus, tracked_port: Option<u16>, healthy: bool) -> bool {
     status == DaemonStatus::Running && tracked_port.is_some() && healthy
 }
 
-/// Pure: does this exit-watcher still own the supervisor state?
+/// 纯函数：这个退出监视器是否仍拥有监管者状态。
 ///
-/// Both `watch_exit` variants flip shared state to `Crashed` only while
-/// the daemon they are watching is still the one the state points at.
-/// `teardown` clears `pid` *before* killing, so a watcher woken by the
-/// teardown's own kill sees `None` and stays quiet instead of
-/// overwriting the `Restarting`/`Stopped` status the verb just set — or,
-/// worse, the fresh state a subsequent start installs on the same
-/// handle. Keep this as a function rather than an inline comparison so
-/// the guard is unit-tested; it is the only thing standing between a
-/// deliberate teardown and a spurious "crashed" toast.
+/// 两个 `watch_exit` 变体都只在自己监视的 daemon 仍是状态所指的那个时才把共享
+/// 状态翻成 `Crashed`。`teardown` 会**先**清 `pid` 再 kill，所以被 teardown 自己
+/// 那次 kill 唤醒的监视器看到 `None`，保持安静，不会覆盖动词刚设的
+/// `Restarting` / `Stopped`，更不会覆盖后续 start 在同一 handle 上装的新状态。
+/// 保持成独立函数是为了让这个守卫可被单测——它是「有意 teardown」与「假崩溃
+/// toast」之间唯一的东西。
 fn watcher_owns_state(state_pid: Option<u32>, watched_pid: u32) -> bool {
     state_pid == Some(watched_pid)
 }
 
-/// Bounded wait for an owned child to be reaped.
-///
-/// Returns `true` when `try_wait()` observed the exit inside `budget`.
-/// Cheap on both host shapes — no syscall beyond the wait itself — which
-/// is why the handle-based path polls far tighter than the PID one.
+/// 对自有子进程做有界等待，等它被 reap。返回 `true` 表示 `try_wait()` 在预算内
+/// 观察到退出。两种 host 形态下都很廉价——除等待本身外无系统调用——这也是句柄
+/// 路径轮询比 PID 路径密得多的原因。
 async fn wait_for_child_exit(child: &mut tokio::process::Child, budget: Duration) -> bool {
     let deadline = Instant::now() + budget;
     loop {
@@ -358,10 +302,9 @@ async fn wait_for_child_exit(child: &mut tokio::process::Child, budget: Duration
     }
 }
 
-/// Bounded wait for a PID we hold no handle for to leave the process
-/// table. Coarser than [`wait_for_child_exit`] because
-/// [`port_registry::is_pid_alive`] costs a process spawn on Windows
-/// (`tasklist`), so polling it at 50ms would dominate the teardown.
+/// 对无句柄的 PID 做有界等待，等它离开进程表。比 [`wait_for_child_exit`] 粗，
+/// 因为 [`port_registry::is_pid_alive`] 在 Windows 上要 spawn 一个进程
+/// （`tasklist`），按 50ms 轮询会让它主导整个 teardown。
 async fn wait_for_pid_exit(pid: u32, budget: Duration) -> bool {
     let deadline = Instant::now() + budget;
     loop {
@@ -375,22 +318,18 @@ async fn wait_for_pid_exit(pid: u32, budget: Duration) -> bool {
     }
 }
 
-/// Public handle held in Tauri state. Cloning is cheap (Arc-like) so
-/// we can hand copies into spawned tasks.
+/// 放在 Tauri state 里的公开句柄。克隆廉价（近似 Arc），可随意拷进 spawn 的任务。
 #[derive(Clone)]
 pub struct McpDaemonHandle {
     inner: Arc<Mutex<DaemonState>>,
-    /// The pool used to read `mcp.http_config` at spawn time, so the
-    /// child's CLI matches what the settings panel shows.
+    /// spawn 时读 `mcp.http_config` 用的连接池，好让子进程 CLI 与设置面板一致。
     ///
-    /// `None` on the bare `new()` used by tests, which then falls back
-    /// to [`McpHttpConfig::default`]. Both real host shapes
-    /// (`lib.rs::run` and `web_api::serve`) construct through
-    /// [`Self::with_pool`] — the whole point of reading the row at
-    /// *spawn* time rather than at construction is that the user can
-    /// save new settings and then hit restart.
+    /// 测试用的裸 `new()` 为 `None`，此时回退到 [`McpHttpConfig::default`]。两种
+    /// 真实 host 形态（`lib.rs::run` 与 `web_api::serve`）都走
+    /// [`Self::with_pool`] 构造——在 *spawn* 时读该行而非构造时，正是为了用户改完
+    /// 设置再点重启就能生效，不必重建受管 state。
     ///
-    /// `r2d2::Pool` is `Arc`-backed, so this clone is cheap.
+    /// `r2d2::Pool` 底层是 `Arc`，故此克隆廉价。
     pool: Option<crate::db::DbPool>,
 }
 
@@ -401,9 +340,8 @@ impl Default for McpDaemonHandle {
 }
 
 impl McpDaemonHandle {
-    /// A handle with no DB access — spawns fall back to the default
-    /// listener configuration. Kept for tests and for any embedder that
-    /// drives the supervisor without a database.
+    /// 不碰数据库的句柄——spawn 时回退到默认监听配置。供测试与任何不带数据库驱动
+    /// 监管者的嵌入方使用。
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(DaemonState::empty())),
@@ -411,7 +349,7 @@ impl McpDaemonHandle {
         }
     }
 
-    /// The constructor both real host shapes use.
+    /// 两种真实 host 形态共用的构造器。
     pub fn with_pool(pool: crate::db::DbPool) -> Self {
         Self {
             inner: Arc::new(Mutex::new(DaemonState::empty())),
@@ -419,21 +357,16 @@ impl McpDaemonHandle {
         }
     }
 
-    /// Snapshot of the daemon's current state in the shape the renderer
-    /// wants. Cheap — just locks and copies. The function signature
-    /// returns `crate::dto::McpStatusDto`; if those fields ever
-    /// change, this is the one place that needs updating.
+    /// renderer 想要的当前状态快照。廉价——只是加锁加拷贝。返回
+    /// `crate::dto::McpStatusDto`；字段若变，只需改这一处。
     pub fn snapshot(&self) -> crate::dto::McpStatusDto {
-        // We use `try_lock` because Tauri's command invocations are
-        // synchronous on the main thread; blocking would deadlock when
-        // the supervisor's own task is mid-update. If the lock is held
-        // we just report "starting" rather than wait — UI truth is
-        // allowed to be one frame stale.
+        // 用 `try_lock`：Tauri 命令在主线程同步调用，阻塞会与监管者自己的
+        // 更新任务互锁。锁被占时直接报 "starting" 而不是等——UI 允许落后一帧。
         let state = match self.inner.try_lock() {
             Ok(s) => s,
             Err(_) => {
-                // Lock contended — tool list unreachable without blocking,
-                // so surface none and let the next poll pick up the truth.
+                // 锁被占：拿不到锁就取不到工具列表，故返回空列表，让下一次轮询
+                // 拿到真值。
                 return crate::dto::McpStatusDto {
                     status: DaemonStatus::Starting.as_str().to_string(),
                     running: false,
@@ -449,11 +382,9 @@ impl McpDaemonHandle {
         };
         let snap = state.metrics.snapshot();
         let status_str = state.status.as_str().to_string();
-        // `running` is a derived view of `status` kept for back-compat
-        // with any caller that still reads the bool. Only the strict
-        // `"running"` state counts — `starting`/`restarting` are
-        // transient and the renderer can switch on the lifecycle
-        // string for those.
+        // `running` 是 `status` 的派生视图，为仍读这个 bool 的调用方保留。仅严格
+        // 的 `"running"` 计入——`starting` / `restarting` 是瞬态，renderer 对这两者
+        // 应改用生命周期字符串分支。
         let running = status_str == "running";
         crate::dto::McpStatusDto {
             status: status_str,
@@ -462,20 +393,17 @@ impl McpDaemonHandle {
             port: state.port,
             uptime_ms: snap.uptime_ms,
             requests_handled: snap.requests_handled,
-            // `current_connections` is reserved for a future stderr
-            // metrics line; the daemon does not emit one yet, so we
-            // hard-code `0`. Surfacing a counter here now means the
-            // wire shape is forward-compatible — when the daemon
-            // starts emitting it the UI doesn't need a schema bump.
+            // `current_connections` 是为将来某条 stderr 指标行预留的；daemon 尚未发出
+            // 这样的行，故硬编码 `0`。先把这个计数器放上线格式里是为了向前兼容——
+            // daemon 真的开始发它时，UI 不必改 schema。
             current_connections: 0,
             registered_tools: crate::mcp::registered_tool_names(),
             last_error: state.last_error.clone(),
         }
     }
 
-    /// Idempotent boot (Tauri shape). Thin binding of
-    /// [`Self::ensure_started_with`]: this is the signature the GUI's
-    /// `.setup()` block and `mcp_auto_start_set` call.
+    /// 幂等启动（Tauri 形态）。[`Self::ensure_started_with`] 的薄绑定：GUI 的
+    /// `.setup()` 与 `mcp_auto_start_set` 调的就是这个签名。
     #[cfg(feature = "gui")]
     pub async fn ensure_started(
         &self,
@@ -487,8 +415,7 @@ impl McpDaemonHandle {
             .tauri_finish(app_handle))
     }
 
-    /// [`Self::ensure_started`] for the `serve-web` shape, which has no
-    /// `AppHandle` and knows its own data dir.
+    /// `serve-web` 形态的 [`Self::ensure_started`]：无 `AppHandle`，自带数据目录。
     pub async fn ensure_started_without_app_handle(
         &self,
         data_dir: &Path,
@@ -499,30 +426,22 @@ impl McpDaemonHandle {
             .poll_only_finish())
     }
 
-    /// The single spawn path shared by every host shape.
+    /// 所有 host 形态共用的唯一 spawn 路径。
     ///
-    /// Deliberately free of `AppHandle` (and of anything else Tauri) so
-    /// the `--lib` test binary does not link the GUI runtime — see the
-    /// long note on [`Started`] before changing its signature.
+    /// 刻意不含 `AppHandle`（及任何其他 Tauri 东西），好让 `--lib` 测试二进制
+    /// 不链入 GUI runtime——改签名前先读 [`Started`] 上的长注记。
     ///
-    ///   1. If `port_registry::read()` returns a record whose PID is
-    ///      still alive AND `/mcp/healthz` answers → reuse. This is
-    ///      the "user rebooted their laptop and the daemon didn't
-    ///      clean up its port file" case. The reused daemon is
-    ///      *adopted*: `state.pid` is recorded but `state.child` stays
-    ///      `None`, because the supervisor never spawned it and so has
-    ///      no reap handle — see [`teardown_targets`] for what that
-    ///      implies for stop/restart. No watcher is handed back either:
-    ///      there is no child handle for it to observe.
-    ///   2. Otherwise release any stale file, claim a fresh port,
-    ///      spawn the process, write the port record with the new
-    ///      PID, and wait up to 5s for `/mcp/healthz` to come green.
-    ///   3. Spawn the stderr-forwarder here, and return the
-    ///      `(state, pid)` pair the *caller* turns into its own
-    ///      exit-watcher. That task outlives this function and updates
-    ///      state until the child dies.
+    ///   1. `port_registry::read()` 返回的记录若 PID 仍活着**且** `/mcp/healthz`
+    ///      有响应 → 复用（重启后 daemon 没清理端口文件的场景）。被复用的 daemon 是
+    ///      *被收养*的：记 `state.pid` 但 `state.child` 保持 `None`，因为我们从未
+    ///      spawn 它、没有 reap 句柄——这对 stop/restart 意味着什么见
+    ///      [`teardown_targets`]。也不返回监视器：没有子进程句柄可供观察。
+    ///   2. 否则释放陈旧文件、申领新端口、spawn 进程、以新 PID 写端口记录，并等
+    ///      最多 5s 直到 `/mcp/healthz` 转绿。
+    ///   3. 在此启动 stderr 转发器，并返回 `(state, pid)`，由*调用方*据此建自己的
+    ///      退出监视器。该任务活得比本函数久，直到子进程死亡为止更新状态。
     async fn ensure_started_with(&self, data_dir: &str) -> Result<Started, crate::error::AppError> {
-        // ----- Reuse path ------------------------------------------------
+        // ----- 复用路径 ------------------------------------------------
         if let Some(rec) = port_registry::read() {
             if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
                 let mut g = self.inner.lock().await;
@@ -538,15 +457,13 @@ impl McpDaemonHandle {
             }
         }
 
-        // ----- Fresh spawn path ------------------------------------------
-        // Resolved once, up front: it feeds both the child's command line
-        // and the port record, and the two must agree — a record that
-        // claimed `127.0.0.1` for a daemon actually bound to `0.0.0.0`
-        // would make `requires_restart` answer "always" on every save.
+        // ----- 全新 spawn 路径 ------------------------------------------
+        // 一次解析、提前取好：它同时喂给子进程命令行和端口记录，两者必须一致——
+        // 记录若声称 `127.0.0.1` 而 daemon 实际绑在 `0.0.0.0`，`requires_restart`
+        // 会在每次保存时都回答「需要重启」。
         let http_config = self.http_config();
         let mut g = self.inner.lock().await;
-        // Re-check under the lock: another task may have just spawned
-        // while we were awaiting the lock above.
+        // 持锁复查：等锁期间别的任务可能刚 spawn 过。
         if let Some(rec) = port_registry::read() {
             if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
                 g.pid = Some(rec.pid);
@@ -560,22 +477,18 @@ impl McpDaemonHandle {
                 });
             }
         }
-        // Status now: Starting. Anything that fails below flips us to
-        // Crashed / Unhealthy so the UI can reflect it.
+        // 状态置 Starting。下面任何一步失败都会把它翻成 Crashed / Unhealthy 供 UI 呈现。
         g.status = DaemonStatus::Starting;
         g.last_error = None;
-        drop(g); // release before we await on spawn (tokio::process::Command needs &mut self)
+        drop(g); // 在 await spawn 前释放（tokio::process::Command 需要 &mut self）
 
-        // Clear the stale file before we pick a new port so the read
-        // path inside port_registry::write() doesn't bounce off it.
+        // 先清陈旧文件再挑新端口，免得 port_registry::write() 里的读路径撞上它。
         let _ = port_registry::release();
 
-        // ----- Allocate a port ------------------------------------------
-        // Bind port 0 → OS picks. The actual port comes out of
-        // local_addr(); we then drop the listener before spawning so
-        // the daemon can grab it (race-free on Linux because we hold
-        // the lockfile and only one GUI claims it, but a real TOCTOU
-        // would require two GUIs starting at the same instant).
+        // ----- 分配端口 -------------------------------------------
+        // 绑 0 → 由 OS 选。真实端口从 local_addr() 出来，随即 drop 掉 listener
+        // 让 daemon 去抢（Linux 上无竞态，因为我们持锁且只有一个 GUI 会申领；
+        // 真 TOCTOU 需要两个 GUI 恰好同时启动）。
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(crate::error::AppError::Io)?;
@@ -585,14 +498,14 @@ impl McpDaemonHandle {
             .map_err(crate::error::AppError::Io)?;
         drop(listener);
 
-        // ----- Spawn the child -------------------------------------------
+        // ----- spawn 子进程 -------------------------------------------
         let exe = std::env::current_exe().map_err(crate::error::AppError::Io)?;
         let mut cmd = tokio::process::Command::new(exe);
         cmd.args(daemon_cli_args(port, &http_config))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true); // GUI drop ⇒ child gets SIGKILL
+            .kill_on_drop(true); // GUI 被 drop ⇒ 子进程收到 SIGKILL
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -608,8 +521,8 @@ impl McpDaemonHandle {
 
         let rec = PortRecord::new(pid, port, &http_config.host, data_dir.to_string());
         if let Err(e) = port_registry::write(&rec) {
-            // Port file write failed — we own the child; reap it before
-            // returning so we don't leak a daemon with no port file.
+            // 端口文件写失败——子进程归我们，返回前先 reap，别留下一个没有端口文件的
+            // daemon。
             let _ = child.kill().await;
             let mut g = self.inner.lock().await;
             g.status = DaemonStatus::Crashed { exit_code: None };
@@ -617,7 +530,7 @@ impl McpDaemonHandle {
             return Err(e);
         }
 
-        // ----- Update public state ---------------------------------------
+        // ----- 更新公开状态 -------------------------------------------
         {
             let mut g = self.inner.lock().await;
             g.pid = Some(pid);
@@ -625,12 +538,11 @@ impl McpDaemonHandle {
             g.port_record = Some(rec);
             g.status = DaemonStatus::Starting;
             g.started_at = Some(Instant::now());
-            // NOTE: keep `g.metrics` from before — it may have been
-            // updated by an earlier session and is reused if we ever
-            // recycle this handle across restarts in a long-lived run.
+            // 注意：保留此前的 `g.metrics`——它可能已被更早的一轮更新过，长驻运行中复用
+            // 本 handle 重启时还要继续用。
         }
 
-        // ----- Wait for healthz ------------------------------------------
+        // ----- 等 healthz --------------------------------------------
         let mut healthy = false;
         for _ in 0..50 {
             // 50 × 100ms = 5s
@@ -638,21 +550,17 @@ impl McpDaemonHandle {
                 healthy = true;
                 break;
             }
-            // If the child already exited, bail out fast — no point
-            // burning the whole 5s on a process that died immediately.
+            // 子进程若已退出就快速退出——没必要为一个立刻死掉的进程烧完 5s。
             if let Ok(Some(_)) = child.try_wait() {
                 break;
             }
             sleep(Duration::from_millis(100)).await;
         }
         if !healthy {
-            // Keep the child in `state` rather than handing it to a
-            // watcher: the spawn path cannot arm one without knowing the
-            // host (that is the whole point of [`Started`]), and a
-            // watcher that *took* the handle would strip `state.child`
-            // and leave `stop`/`restart` unable to reap this process.
-            // Leaving it here keeps the `owned_pid` channel of
-            // [`teardown_targets`] working for an unhealthy start too.
+            // 把子进程留在 `state` 里而不是交给监视器：spawn 路径不知道 host 就装不了监视器
+            // （这正是 [`Started`] 的全部要点），而监视器若*拿走*句柄就会剥掉
+            // `state.child`，让 `stop` / `restart` 无法 reap 这个进程。留在这里，
+            // 不健康启动时 [`teardown_targets`] 的 `owned_pid` 通道依然有效。
             let mut g = self.inner.lock().await;
             g.status = DaemonStatus::Unhealthy;
             g.last_error = Some("healthz never came up within 5s".into());
@@ -662,7 +570,7 @@ impl McpDaemonHandle {
             ));
         }
 
-        // ----- Hand off to background tasks ------------------------------
+        // ----- 交给后台任务 -------------------------------------------
         let metrics = {
             let g = self.inner.lock().await;
             Arc::clone(&g.metrics)
@@ -676,8 +584,7 @@ impl McpDaemonHandle {
             g.child = Some(child);
         }
 
-        // The watcher is the caller's to arm: it is the one piece of
-        // host behaviour this path refuses to know about.
+        // 监视器归调用方去装：这是本路径唯一拒绝知晓的主机行为。
         Ok(Started {
             port,
             watch: Some(PendingWatch {
@@ -687,10 +594,9 @@ impl McpDaemonHandle {
         })
     }
 
-    /// Manual ON switch (Tauri shape). Idempotent by construction: a
-    /// healthy tracked daemon is returned untouched — no kill, no
-    /// respawn, no port churn — and only a genuinely stopped / crashed /
-    /// unhealthy daemon pays the spawn path.
+    /// 手动 ON 开关（Tauri 形态）。天生幂等：健康且被跟踪的 daemon 原样返回——不
+    /// kill、不重拉、不折腾端口；只有确实停止 / 崩溃 / 不健康的 daemon 才走 spawn
+    /// 路径。
     #[cfg(feature = "gui")]
     pub async fn start(
         &self,
@@ -699,8 +605,7 @@ impl McpDaemonHandle {
         if self.is_serving().await {
             return Ok(self.snapshot());
         }
-        // We deliberately ignore the returned port: the caller wants the
-        // whole snapshot, which already carries the new `port`.
+        // 刻意忽略返回的端口：调用方要的是整份快照，里面已带新的 `port`。
         let _ = self
             .ensure_started_with(&host_data_dir())
             .await?
@@ -708,7 +613,7 @@ impl McpDaemonHandle {
         Ok(self.snapshot())
     }
 
-    /// [`Self::start`] for the `serve-web` shape.
+    /// `serve-web` 形态的 [`Self::start`]。
     pub async fn start_without_app_handle(
         &self,
         data_dir: &Path,
@@ -719,20 +624,16 @@ impl McpDaemonHandle {
         Ok(self.snapshot())
     }
 
-    /// Manual OFF switch. Terminates the daemon we spawned *and* one we
-    /// merely adopted, releases the port file, and leaves the state at
-    /// `Stopped` with `pid`/`port` cleared — so the next `start` runs
-    /// the fresh-spawn path cleanly. Safe to call when nothing is
-    /// running: every teardown step is a no-op in that case.
+    /// 手动 OFF 开关。既终止我们 spawn 的 daemon，也终止只是收养来的那个，释放端口
+    /// 文件，并把状态留在 `Stopped` 且 `pid` / `port` 清空——于是下一次 `start`
+    /// 干净地走全新 spawn 路径。什么都没在跑时调用也安全：每步 teardown 都是 no-op。
     pub async fn stop(&self) -> Result<crate::dto::McpStatusDto, crate::error::AppError> {
         self.teardown(DaemonStatus::Stopped).await?;
         Ok(self.snapshot())
     }
 
-    /// Restart: tear the daemon down completely (see [`Self::teardown`]),
-    /// then spawn a fresh one. Returns the post-restart
-    /// `McpStatusDto` so the caller can echo the new `pid` / `port` back
-    /// without an extra poll.
+    /// 重启：彻底 teardown（见 [`Self::teardown`]）再拉起一个新的。返回重启后的
+    /// `McpStatusDto`，调用方无需再轮询即可回显新 `pid` / `port`。
     #[cfg(feature = "gui")]
     pub async fn restart(
         &self,
@@ -746,11 +647,9 @@ impl McpDaemonHandle {
         Ok(self.snapshot())
     }
 
-    /// [`Self::restart`] for the `serve-web` shape, which has no
-    /// `AppHandle` and knows its own data dir. This used to be a
-    /// ~100-line near-duplicate of `ensure_started`; it is now a
-    /// binding of the shared path like its Tauri counterpart, so a fix
-    /// to spawn / teardown cannot land on one verb and miss the other.
+    /// `serve-web` 形态的 [`Self::restart`]：无 `AppHandle`，自带数据目录。与其 Tauri
+    /// 对应物一样是共享路径的绑定，所以 spawn / teardown 的修复不会只落在一个动词
+    /// 上而漏掉另一个。
     pub async fn restart_without_app_handle(
         &self,
         data_dir: &Path,
@@ -763,9 +662,8 @@ impl McpDaemonHandle {
         Ok(self.snapshot())
     }
 
-    /// Is the daemon we are currently tracking still serving? The probe
-    /// runs outside the lock (it is an HTTP round-trip), and the
-    /// decision itself is the pure [`start_is_noop`].
+    /// 当前跟踪的 daemon 是否仍在服务？探测在锁外跑（它是一次 HTTP 往返），判断本身
+    /// 是纯函数 [`start_is_noop`]。
     #[cfg(feature = "gui")]
     async fn is_serving(&self) -> bool {
         let (status, port) = {
@@ -779,34 +677,25 @@ impl McpDaemonHandle {
         start_is_noop(status, port, healthy)
     }
 
-    /// Terminate whatever daemon we are tracking, then clear tracked
-    /// state and drop the port file. Shared by `stop`, `restart`, and
-    /// `shutdown`; `next` is the status the caller wants the snapshot
-    /// to report while the teardown is in flight (`Stopped` for the
-    /// manual switch and for app exit, `Restarting` for a restart).
+    /// 终止当前跟踪的 daemon，然后清空跟踪状态并删掉端口文件。由 `stop`、`restart`
+    /// 与 `shutdown` 共用；`next` 是 teardown 进行期间调用方希望快照报告的状态
+    /// （手动开关与应用退出用 `Stopped`，重启用 `Restarting`）。
     ///
-    /// Ordering is load-bearing:
+    /// 顺序是硬要求：
     ///
-    ///   1. Resolve the kill targets **before** taking the lock. The
-    ///      liveness probe costs a process spawn on Windows
-    ///      (`tasklist`), and holding the supervisor mutex across it
-    ///      would stall every status poll for the duration.
-    ///   2. Under the lock: set the new status, then clear `pid` /
-    ///      `port` / `port_record`, and take the child handle. Clearing
-    ///      first is what makes the [`watcher_owns_state`] guard hold:
-    ///      the exit-watcher woken by our own kill can no longer match,
-    ///      so it cannot overwrite this status with `Crashed`.
-    ///   3. Kill, then **wait (bounded) for the processes to actually
-    ///      be gone** before releasing the port file. The old code
-    ///      slept a flat 200ms and hoped; on Windows the child could
-    ///      still be alive, and a socket that has not finished closing
-    ///      keeps the port out of the bind queue elsewhere, so the
-    ///      replacement could lose the port race and come up `Unhealthy`.
+    ///   1. **先**在锁外解析出要杀的 PID。存活探测在 Windows 上要 spawn 一个进程
+    ///      （`tasklist`），跨着监管者 mutex 跑会把每次状态轮询都堵住。
+    ///   2. 锁内：先设新状态，再清 `pid` / `port` / `port_record`，并取走子进程
+    ///      句柄。先清正是 [`watcher_owns_state`] 守卫成立的原因：被我们自己那次
+    ///      kill 唤醒的退出监视器此后匹配不上，也就无法用 `Crashed` 覆盖此状态。
+    ///   3. 先 kill，再**有界等待**进程真正消失，然后才释放端口文件。固定睡
+    ///      200ms 是靠猜：Windows 上子进程可能仍活着，而未关闭完的 socket 在别的
+    ///      平台上会让端口留在 bind 队列外，替换进程抢不到端口，起来就是
+    ///      `Unhealthy`。
     async fn teardown(&self, next: DaemonStatus) -> Result<(), crate::error::AppError> {
-        // (1) Resolve targets outside the lock. The port record is the
-        // authority here: it survives a supervisor that never spawned
-        // the daemon (the `serve-web` shape, a second restart in a row,
-        // a fresh GUI adopting a daemon a previous one started).
+        // (1) 锁外解析目标。端口记录是此处的权威：即便监管者从未 spawn 过该
+        // daemon（`serve-web` 形态、连续两次重启、新 GUI 收养上一个启动的 daemon）
+        // 它也仍在。
         let record_pid = port_registry::read()
             .filter(|rec| port_registry::is_pid_alive(rec.pid))
             .map(|rec| rec.pid);
@@ -821,8 +710,7 @@ impl McpDaemonHandle {
             (g.child.take(), targets)
         };
 
-        // (3) Terminate. Owned children go first: we hold the handle,
-        // so `try_wait` reaps them without an out-of-band signal.
+        // (3) 终止。自有子进程先杀：我们持有句柄，`try_wait` 无需带外信号即可 reap。
         if let Some(mut child) = child {
             let _ = child.start_kill();
             if !wait_for_child_exit(&mut child, TEARDOWN_TIMEOUT).await {
@@ -836,8 +724,7 @@ impl McpDaemonHandle {
         }
         for target in targets.iter().filter(|t| !t.via_handle) {
             if !port_registry::terminate_pid(target.pid) {
-                // Already gone, or the OS refused. Either way the wait
-                // below is the real answer, so don't fail the verb.
+                // 已经没了，或 OS 拒绝了。反正下面的等待才是真答案，故不让该动词失败。
                 tracing::debug!(
                     target: "mcp_daemon",
                     "taskkill/kill -9 declined for adopted pid {}",
@@ -857,26 +744,22 @@ impl McpDaemonHandle {
         port_registry::release()
     }
 
-    /// Best-effort shutdown. Called from the GUI's exit hook (and from
-    /// tests). Shares the lifecycle teardown with the manual stop
-    /// switch, so app exit also terminates an *adopted* daemon rather
-    /// than orphaning it with its port file already gone.
+    /// 尽力而为的关闭。由 GUI 退出钩子（及测试）调用。与手动停止开关共用同一条
+    /// 生命周期 teardown，故应用退出会终止被*收养*的 daemon，而不是任其带着还在的
+    /// 端口文件变孤儿。
     pub async fn shutdown(&self) -> Result<(), crate::error::AppError> {
         self.teardown(DaemonStatus::Stopped).await
     }
 
-    /// The listener configuration to spawn with: the persisted row when
-    /// this handle carries a pool, otherwise the shipped defaults.
+    /// 要 spawn 的监听配置：本 handle 带池时读持久化行，否则用出厂默认。
     ///
-    /// Read at *spawn* time rather than construction, so saving new
-    /// settings and then hitting restart is enough — no re-creation of
-    /// the managed state needed.
+    /// 在 *spawn* 时读而非构造时，所以用户存了新设置再点重启就足够，无需重建受管
+    /// state。
     ///
-    /// **Fail-closed on a bad row.** An unreadable `mcp.http_config`
-    /// resolves to [`McpHttpConfig::default`] — loopback-only — rather
-    /// than propagating the error and refusing to start. A hand-edited
-    /// or truncated row must not be able to brick the daemon, and the
-    /// default is the direction that exposes nothing.
+    /// **坏行 fail-closed**：`mcp.http_config` 读不出来就退回
+    /// [`McpHttpConfig::default`]——只监听 loopback——而不是把错误抛出去拒绝启动。
+    /// 手工编辑或截断的行不该有能力把 daemon 弄废，而默认值正是那个不暴露任何东西
+    /// 的方向。
     fn http_config(&self) -> McpHttpConfig {
         let Some(pool) = self.pool.as_ref() else {
             return McpHttpConfig::default();
@@ -894,7 +777,7 @@ impl McpDaemonHandle {
     }
 }
 
-/// Daemon stderr → metrics forwarder. Runs until EOF (process exit).
+/// daemon stderr → 指标转发器。读到 EOF（进程退出）为止。
 async fn forward_stderr_and_parse_metrics(
     reader: tokio::process::ChildStderr,
     metrics: Arc<McpMetrics>,
@@ -908,14 +791,12 @@ async fn forward_stderr_and_parse_metrics(
                 if let Some(snap) = parse_metric_line(&line) {
                     metrics.merge_from_stderr(&snap);
                 } else {
-                    // Anything that isn't a metrics line is presumably
-                    // a tracing/log line from the daemon — surface it
-                    // on our own tracing channel so dev consoles see
-                    // both streams.
+                    // 非指标行 presumed 是 daemon 的 tracing / 日志行，转投我们自己的
+                    // tracing 通道，好让开发控制台同时看到两路流。
                     tracing::debug!(target: "mcp_daemon", "{}", line);
                 }
             }
-            Ok(None) => break, // EOF — child closed stderr
+            Ok(None) => break, // EOF —— 子进程关闭了 stderr
             Err(e) => {
                 tracing::warn!(target: "mcp_daemon", "stderr read: {e}");
                 break;
@@ -924,26 +805,22 @@ async fn forward_stderr_and_parse_metrics(
     }
 }
 
-/// Awaits the child's exit; updates state and emits the Tauri event.
-/// Holds its own Arc clone of the supervisor's mutex so this task
-/// survives any intermediate restarts cleanly.
+/// 等待子进程退出；更新状态并发 Tauri 事件。持监管者 mutex 的独立 Arc 克隆，
+/// 故该任务能安然度过中间的多次重启。
 #[cfg(feature = "gui")]
 async fn watch_exit(inner: Arc<Mutex<DaemonState>>, app_handle: AppHandle, pid: u32) {
-    // F-D1 fix: take the Child OUT of state inside the lock, then drop
-    // the guard before awaiting `wait()`. The previous version held
-    // `inner.lock().await` across `child.wait().await`, which permanently
-    // deadlocked `mcp_daemon_restart` — restart()'s `self.inner.lock().await`
-    // would queue behind this watcher forever while a healthy daemon sat
-    // there. With the take-out pattern the guard drops at the end of the
-    // block, leaving wait() lock-free so other callers (restart, shutdown,
-    // snapshot) can proceed.
+    // 在锁内把 Child **取出来**，然后在 await `wait()` 前丢开 guard。跨着
+    // `child.wait().await` 持 `inner.lock().await` 会把 `mcp_daemon_restart` 永久
+    // 死锁——`restart()` 的 `self.inner.lock().await` 会永远排在这个监视器后面，
+    // 而那边明明坐着一个健康的 daemon。取出的写法让 guard 在块末即释放，`wait()`
+    // 无锁，restart / shutdown / snapshot 才能继续。
     let mut child = {
         let mut g = inner.lock().await;
         match g.child.take() {
             Some(c) => c,
             None => {
-                // Supervisor tore down the child out from under us
-                // (e.g. shutdown() called); nothing to do.
+                // 监管者已在我们脚下把子进程 teardown 掉（例如调了 shutdown()）；
+                // 无事可做。
                 return;
             }
         }
@@ -972,11 +849,9 @@ async fn watch_exit(inner: Arc<Mutex<DaemonState>>, app_handle: AppHandle, pid: 
 
     {
         let mut g = inner.lock().await;
-        // Only flip the status if this watcher is still observing the
-        // child whose PID matches the current supervisor PID. A
-        // restart would have replaced both, and — since `teardown`
-        // clears `pid` before killing — even a watcher woken by a
-        // deliberate teardown sees `None` here and stays quiet.
+        // 仅当本监视器观察的子进程 PID 仍等于当前监管者 PID 时才翻状态。重启会同时换掉
+        // 两者；又因为 `teardown` 先清 `pid` 再 kill，连被有意 teardown 唤醒的监视器
+        // 在此也只会看到 `None` 而保持安静。
         if watcher_owns_state(g.pid, pid) {
             g.status = DaemonStatus::Crashed { exit_code };
             g.last_error = Some(message.clone());
@@ -985,18 +860,15 @@ async fn watch_exit(inner: Arc<Mutex<DaemonState>>, app_handle: AppHandle, pid: 
             g.port_record = None;
         }
     }
-    // Best-effort event emission — UI will catch up on next mcp_status
-    // poll even if the event bus is closed for some reason.
+    // 尽力发事件——即使事件总线因故已关闭，UI 也会在下一次 mcp_status 轮询时补上。
     if let Err(e) = app_handle.emit("daemon://crashed", &payload) {
         eprintln!("[daemon] emit daemon://crashed failed: {e}");
     }
 }
 
-/// Web-shape counterpart of [`Self::watch_exit`]. Same F-D1 fix (take
-/// the Child out of state under the lock, drop the guard, then await
-/// `wait()`); the only difference is the missing `AppHandle` event
-/// emission — the web shape has no Tauri bus, and the `/api/mcp/status`
-/// poll covers the same surface.
+/// [`Self::watch_exit`] 的 web 形态对应物。同样的「锁内取走 Child、丢开 guard、
+/// 再 await `wait()`」；唯一差别是没有 `AppHandle` 事件——web 形态没有 Tauri
+/// 总线，`/api/mcp/status` 轮询覆盖同一片表面。
 async fn watch_exit_no_app(inner: Arc<Mutex<DaemonState>>, pid: u32) {
     let mut child = {
         let mut g = inner.lock().await;
@@ -1031,12 +903,11 @@ async fn watch_exit_no_app(inner: Arc<Mutex<DaemonState>>, pid: u32) {
 }
 
 // -------------------------------------------------------------------------
-// Tests
+// 测试
 // -------------------------------------------------------------------------
 
-/// Pure-logic tests for the lifecycle decisions (kill-target selection,
-/// start idempotency, the exit-watcher guard) live in the sibling file
-/// so they can never touch the process table or the real port file.
+/// 生命周期决策的纯逻辑测试（杀目标选择、启动幂等性、退出监视器守卫）放在同级的
+/// 独立文件里，故它们绝不会碰到真实进程表或真实的端口文件。
 #[cfg(test)]
 #[path = "daemon_supervisor_test.rs"]
 mod lifecycle_tests;
@@ -1063,9 +934,8 @@ mod tests {
 
     #[test]
     fn daemon_cli_args_carry_the_persisted_listener_configuration() {
-        // The child's CLI has to match the row the settings panel wrote,
-        // otherwise the panel shows a LAN daemon that is still bound to
-        // loopback (or the reverse).
+        // 子进程 CLI 必须与设置面板写入的那一行一致，否则面板显示的是 LAN daemon 而它
+        // 实际仍绑 loopback（或反过来）。
         let cfg = McpHttpConfig {
             host: "0.0.0.0".into(),
             path: "/ai/mcp/".into(),
@@ -1091,18 +961,15 @@ mod tests {
 
     #[test]
     fn daemon_cli_args_omit_the_remote_flag_when_it_is_off() {
-        // `--allow-remote` is a flag, so passing it while the setting is
-        // false would open the daemon the user explicitly left closed.
+        // `--allow-remote` 是个 flag，设置关闭时仍传它等于打开用户明确关掉的 LAN 暴露。
         let args = daemon_cli_args(1, &McpHttpConfig::default());
         assert!(!args.iter().any(|a| a == "--allow-remote"), "got {args:?}");
     }
 
     #[test]
     fn daemon_cli_args_pass_empty_lists_explicitly() {
-        // An empty host allowlist with `--allow-remote` is the daemon
-        // *denying* every non-loopback Host, which is not the same as
-        // "clap defaulted it" — the supervisor must not depend on that
-        // coincidence.
+        // 配合 `--allow-remote`，空 host 名单意味着 daemon *拒绝*所有非 loopback 的
+        // `Host`，这与「clap 取了默认值」不是一回事——监管者不能依赖这种巧合。
         let cfg = McpHttpConfig {
             allow_remote: true,
             ..McpHttpConfig::default()
@@ -1121,13 +988,10 @@ mod tests {
         assert_eq!(s.pid, None);
         assert_eq!(s.port, None);
         assert_eq!(s.requests_handled, 0);
-        // Not `assert_eq!(.., 0)`: `McpMetrics::new()` stamps
-        // `started_at_ms = now_ms()` and `snapshot()` returns the delta, so
-        // a millisecond boundary crossed between the two lines makes this
-        // read 1. It is a wall-clock difference between two adjacent
-        // statements, not a state change — asserting exactly 0 reddened
-        // CI at random whenever the machine was busy enough to deschedule
-        // the thread in between.
+        // 不能写 `assert_eq!(.., 0)`：`McpMetrics::new()` 打上
+        // `started_at_ms = now_ms()`，`snapshot()` 返回的是时间差，跨过一条语句的
+        // 毫秒边界就会读到 1。那是两条相邻语句之间的墙钟差，不是状态变化——精确
+        // 断言 0 会在机器忙到被抢占时随机把 CI 弄红。
         assert!(
             s.uptime_ms <= 1,
             "uptime of a handle that was never started should be ~0, got {}",
@@ -1144,7 +1008,7 @@ mod tests {
 
     #[test]
     fn status_strings_match_wire_contract() {
-        // Renderer switches on these literal strings; keep them stable.
+        // renderer 直接按这些字面量字符串分支，保持稳定。
         assert_eq!(DaemonStatus::Stopped.as_str(), "stopped");
         assert_eq!(DaemonStatus::Starting.as_str(), "starting");
         assert_eq!(DaemonStatus::Running.as_str(), "running");
@@ -1158,8 +1022,7 @@ mod tests {
 
     #[test]
     fn crashed_serializes_with_exit_code() {
-        // Wire shape sanity check — the renderer cares about
-        // `{ "crashed": { "exit_code": 1 } }`.
+        // 线格式自检——renderer 依赖 `{ "crashed": { "exit_code": 1 } }`。
         let s = DaemonStatus::Crashed { exit_code: Some(1) };
         let v = serde_json::to_value(s).unwrap();
         let obj = v.as_object().expect("struct variant serializes to object");

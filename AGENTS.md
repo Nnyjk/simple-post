@@ -146,7 +146,12 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 Identifiers, keywords, API names, column names and wire strings stay as written: they are not translatable prose. A comment that must quote code should quote the smallest fragment that carries the constraint.
 
-One hazard specific to this repo: some regression tests read the source **as text** (`include_str!` in `mcp/mod_test.rs`), and `no_gate_is_passed_the_literal_global` does *not* skip comment lines — it looks for `check_permission(` and `"global"` in the same statement. Never write that call shape as a comment example there, or the test goes red on a prose change. Do not loosen those tests or delete them to make a comment edit pass.
+Two hazards specific to this repo. Several regression tests read the source **as text** (`include_str!`), and two of them do *not* skip comment lines — so a prose edit alone can turn them red:
+
+- `mcp/mod_test.rs::no_gate_is_passed_the_literal_global` looks for `check_permission(` and `"global"` in the same `;`-delimited statement. Never write that call shape as a comment example anywhere under `crates/simple-post-mcp/src/`.
+- `daemon_supervisor_test.rs::the_shared_spawn_path_stays_free_of_tauri` does a raw `body.contains(...)` over the whole brace-matched body of `ensure_started_with` for `AppHandle`, `tauri::`, `Emitter` and `EmitterExt`. A comment inside that function naming any of those four makes the test fail. Its own test body is written around exactly this.
+
+Do not loosen either test or delete it to make a comment edit pass. The assertions are worth more than the prose is.
 
 **Async/concurrency.** tokio multi-thread runtime; metrics via `AtomicU64` with `Ordering::Relaxed`; `port_registry.rs` uses OS atomic file creation (`create_new`) to prevent multi-instance races.
 

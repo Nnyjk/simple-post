@@ -1,7 +1,5 @@
-//! Handler modules, one per REST resource. Each file owns the handlers
-//! for its family; the router registrations themselves stay in
-//! `super::build_router` so the full route table remains readable in
-//! one place.
+//! 每类 REST 资源一个 handler 模块。每个文件拥有自己那族 handler；路由注册本身留在
+//! `super::build_router`，好让整张路由表在一处读完。
 
 pub(crate) mod base_url_defs;
 pub(crate) mod environments;
@@ -27,9 +25,8 @@ pub(crate) use mcp::{
     mcp_http_config_get, mcp_http_config_put, mcp_json_rpc_post, mcp_proxy_path, mcp_restart,
     mcp_start, mcp_status, mcp_stop, mcp_tools,
 };
-// `http_send` is re-exported from here rather than from a separate
-// `endpoints` module: it is addressed under a node now, and the module
-// it lives in follows the address.
+// `http_send` 从这里而非某个独立的 `endpoints` 模块再导出：它现在挂在节点之下，
+// 模块归属随地址走。
 pub(crate) use nodes::{
     endpoint_details_list, http_send, node_duplicate, node_endpoint_detail_get,
     node_endpoint_detail_patch, nodes_create, nodes_delete, nodes_get, nodes_list, nodes_move,

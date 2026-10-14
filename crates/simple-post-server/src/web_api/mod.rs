@@ -1,15 +1,12 @@
-//! REST + static-file HTTP layer for the `simple-post serve-web` shape.
+//! `simple-post serve-web` 的 REST + 静态文件层。
 //!
-//! Browser users hit this on the LAN to read / write the same SQLite
-//! data the Tauri shell reads. The daemon JSON-RPC entry (`/mcp`)
-//! stays untouched so MCP clients (Claude Desktop, Cursor, …) keep
-//! working unchanged.
+//! 局域网浏览器读写与 Tauri 桌面端同一份 SQLite。`/mcp` 的 JSON-RPC
+//! 不接守护子进程，直接在本进程跑同一个 `mcp::dispatch`，AI 客户端
+//! 无需改动。
 //!
-//! Layout: `WebState` + `build_router` + the `serve` entry point live
-//! here; handlers are split one module per resource under `routes/`,
-//! wire types in `dto.rs`, the `AppError` → HTTP mapping in `error.rs`,
-//! the OpenAPI contract table in `spec.rs`, and the SPA static
-//! handlers in `static_files.rs`.
+//! 布局：`WebState` / `build_router` / `serve` 在这里；handler 按资源拆到
+//! `routes/`，wire 类型在 `dto.rs`，`AppError` → HTTP 映射在 `error.rs`，
+//! OpenAPI 契约表在 `spec.rs`，SPA 静态处理在 `static_files.rs`。
 
 mod dto;
 mod error;
@@ -44,30 +41,24 @@ use static_files::spa_index;
 // Shared state.
 // -------------------------------------------------------------------------
 
-/// `Clone` is cheap (`DbPool` is an `Arc<Pool>` clone, the daemon
-/// handle is an `Arc<Mutex<…>>` clone). The router gets one of these
-/// per request via `axum::extract::State`.
+/// `Clone` 廉价（`DbPool` 是 `Arc<Pool>` 克隆，daemon handle 是
+/// `Arc<Mutex<…>>` 克隆）。
 #[derive(Clone)]
 pub struct WebState {
     pub pool: DbPool,
     pub daemon: McpDaemonHandle,
     pub data_dir: PathBuf,
-    /// MCP app state — used by the `/mcp` JSON-RPC handler so the
-    /// server shape can speak the AI-client protocol directly. Same
-    /// pool / metrics the daemon child uses, so a tool call from a
-    /// Claude Desktop pointing at `http://server:4173/mcp` lands on
-    /// the same database as the browser SPA.
+    /// `/mcp` JSON-RPC 用的 MCP 状态：与 daemon 子进程共用同一 pool 与
+    /// metrics，所以指向 `http://server:4173/mcp` 的 AI 客户端与浏览器 SPA
+    /// 落在同一份数据上。
     pub mcp_state: Arc<crate::mcp::AppState>,
-    /// Optional bearer password. `None` keeps the route tree
-    /// unauthenticated (the backwards-compatible default).
-    /// `Some(_)` enforces the `auth_middleware` on every `/api/*`
-    /// and `/mcp` request. The frontend caches the bearer in
-    /// `localStorage` and attaches it via `webFetch()`.
+    /// 可选 bearer 口令。`None` 保持整棵路由树不鉴权；`Some(_)` 则对每个
+    /// `/api/*` 与 `/mcp` 请求强制 `auth_middleware`。前端把 bearer 存在
+    /// `localStorage`，由 `webFetch()` 带上。
     pub password: Option<String>,
-    /// Optional reverse-proxy base path (e.g. `"/sp"` for an
-    /// nginx-prefixed deployment). When set, the entire router is
-    /// `nest`ed under this prefix; `curl /api/projects` returns 404
-    /// and `curl /sp/api/projects` returns 200.
+    /// 可选反代 base path（如 `"/sp"`）。设置后整棵 router（含 `/mcp` 与
+    /// 三个健康探针）都 `nest` 到该前缀下：`curl /api/projects` 404，
+    /// `curl /sp/api/projects` 200。
     pub base_path: Option<String>,
 }
 
@@ -87,39 +78,27 @@ async fn healthz() -> Json<HealthDto> {
 // Router.
 // -------------------------------------------------------------------------
 
-/// Assemble the axum router. `spa_dir` is the **absolute** path to
-/// the `dist/` directory (typically `<project_root>/dist/`); the
-/// caller resolves it once and passes it in.
+/// 组装 axum router。`spa_dir` 是 `dist/` 的**绝对**路径，由调用方解析一次传入。
 ///
-/// `state.password` (when `Some`) installs the bearer middleware
-/// over every route except the documented public bypass list (see
-/// `auth::is_public_path`). `state.base_path` (when `Some`) `nest`s
-/// the entire router under that prefix so a reverse proxy can mount
-/// the SPA at e.g. `https://host/sp/`. Both fields are `None` by
-/// default.
+/// `state.password` 为 `Some` 时给除 `auth::is_public_path` 公开名单外的
+/// 全部路由装上 bearer 中间件。`state.base_path` 为 `Some` 时把整棵 router
+/// `nest` 到该前缀下，供反代把 SPA 挂在 `https://host/sp/`。两者默认 `None`。
 pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
-    // Pull the auth fields before `Arc::new` consumes the struct so the
-    // `auth_middleware` can read them without holding the heavy state.
+    // 先取出 auth 字段，`Arc::new` 之后结构体就被移走了。
     let password = state.password.clone();
     let base_path = state.base_path.clone();
     let state_arc = Arc::new(state);
 
     let api = Router::new()
         .route("/api/healthz", get(healthz))
-        // Unprefixed alias for the same probe.
+        // 无前缀的探针别名。`auth::is_public_path` 名单里也有它，但
+        // **名单成员 ≠ 路由已注册**：漏注册时请求落到 SPA fallback，根路径
+        // 回 `200 text/html`、带 base path 时回 404——只 grep `200 OK` 的探针
+        // 分不出这两种。健康探针要断言响应体，不能只看状态行。
         //
-        // `auth::is_public_path` has always listed `/healthz`, and it is the
-        // path every deployment doc, the container healthcheck and
-        // `scripts/test-web-basepath.mjs` name — but no route was ever
-        // registered for it. With no match it fell through to the SPA
-        // fallback and answered `200 text/html` (the shell), which is
-        // indistinguishable from success to a probe that only greps for
-        // `200 OK`, and `404` outright once the router is nested under a
-        // base path. A health probe that cannot fail is worse than none.
-        //
-        // The handler is shared, so the two paths cannot drift.
+        // 两条路径共用 `healthz`，不会各自漂移。
         .route("/healthz", get(healthz))
-        // ---- projects (already existed) ----
+        // ---- projects ----
         .route("/api/projects", get(projects_list).post(projects_create))
         .route(
             "/api/projects/:id",
@@ -130,10 +109,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/http/send", post(http_send))
         // ---- resource tree ----
         //
-        // Replaces the 19 `/api/modules/*`, `/api/collections/*` and
-        // `/api/endpoints/*` paths these used to be spread across. The
-        // literal action verbs are registered before `/:id` so they win
-        // in the router's radix tree.
+        // 字面量动词必须注册在 `/:id` 之前，否则在 radix tree 里被参数段吃掉。
         .route("/api/nodes", get(nodes_list).post(nodes_create))
         .route("/api/nodes/move", post(nodes_move))
         .route(
@@ -144,9 +120,8 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/nodes/:id/endpoint-detail",
             get(node_endpoint_detail_get).patch(node_endpoint_detail_patch),
         )
-        // The bulk read the renderer's bootstrap issues. Registered on
-        // its own path rather than as a filter on `/api/nodes` because it
-        // answers a different question — configuration, not structure.
+        // renderer bootstrap 的批量读。独立路径而非 `/api/nodes` 的过滤：它回答的
+        // 是「配置」，不是「结构」。
         .route("/api/endpoint-details", get(endpoint_details_list))
         .route("/api/nodes/:id/duplicate", post(node_duplicate))
         // ---- environments ----
@@ -154,8 +129,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/environments",
             get(environments_list).post(environments_create),
         )
-        // `/active` (literal) before `/:envId` (param) for the same
-        // radix-tree precedence reason.
+        // 同样的 radix tree 优先级：`/active`（字面量）注册在 `/:envId`（参数）之前。
         .route("/api/environments/active", post(environments_set_active))
         .route(
             "/api/environments/:envId",
@@ -171,13 +145,9 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             post(environments_set_module_baseurl),
         )
         // ---- baseUrlDefs ----
-        // A service belongs to the project, so all three project-scoped
-        // verbs hang off `/api/projects/:projectId/baseurls`.
-        // `/baseurls/default` is a literal sibling of the
-        // `/api/baseurl-defs/:defId` parametrised route's parent — it is
-        // a different prefix entirely, so no radix-tree precedence
-        // question arises; `base_url_defs_test` in this crate pins that
-        // every one of them stays reachable.
+        // 服务属于项目，故三个 project 级动词挂在 `/api/projects/:projectId/baseurls`。
+        // `/baseurls/default` 与 `/api/baseurl-defs/:defId` 前缀不同，不存在 radix
+        // tree 优先级问题；`base_url_defs_test` 盯住每一条都仍可达。
         .route(
             "/api/projects/:projectId/baseurls",
             get(base_url_defs_list).post(base_url_defs_create),
@@ -202,15 +172,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         )
         // ---- response history ----
         //
-        // Every verb names one endpoint: the list because it paints one
-        // endpoint's strip, and the two writes because that is the row
-        // they act on. `response_history_test.rs`
-        // drives a real listener for this table: the property that
-        // matters is that `/api/response-history` and
-        // `/api/response-history/:endpointId` coexist in axum's radix
-        // tree, and a route that lost that fight still answers — with
-        // the SPA fallback's `200` and an HTML body, which looks exactly
-        // like a working endpoint to curl.
+        // 每个动词都指向单个 endpoint。`/api/response-history` 与
+        // `/api/response-history/:endpointId` 必须在 axum 的 radix tree 里共存：
+        // 抢优先级失败的那条会落到 SPA fallback，回 `200` + HTML，curl 看着就像
+        // 一个正常工作的端点。`response_history_test.rs` 用真实 listener 盯这一条。
         .route("/api/response-history", post(response_history_append))
         .route(
             "/api/response-history/:endpointId",
@@ -240,13 +205,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         )
         .with_state(state_arc.clone());
 
-    // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools` — the AI client
-    // entry. We don't reuse `daemon_http::build_router` because its
-    // inner routes already carry the `/mcp` prefix; we'd have to
-    // re-mount them under another `/mcp` (yielding `/mcp/mcp`). So
-    // we register the AI-client routes here directly against the
-    // shared `mcp_state` — same DB pool + metrics as the daemon
-    // child uses.
+    // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools`。不复用
+    // `daemon_http::build_router`：它的内层路由自带 `/mcp` 前缀，再挂一次就成了
+    // `/mcp/mcp`。这里直接对共享的 `mcp_state` 注册——与 daemon 子进程同一
+    // pool + metrics。
     let mcp_app_state = state_arc.mcp_state.clone();
     let mcp_app_state_2 = mcp_app_state.clone();
     let mcp_app_state_3 = mcp_app_state.clone();
@@ -258,22 +220,16 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/mcp/healthz", get(move || mcp_healthz(mcp_app_state_2)))
         .route("/mcp/tools", get(move || mcp_tools(mcp_app_state_3)));
 
-    // Static SPA. `ServeDir` handles `/assets/*` with proper Range /
-    // ETag / Last-Modified headers; its fallback returns `index.html`
-    // for client-side routing.
+    // 静态 SPA。`ServeDir` 给 `/assets/*` 正确的 Range / ETag / Last-Modified，
+    // fallback 交给 `index.html` 以支持前端路由。
     //
-    // The root is `spa_dir` itself, NOT `spa_dir/assets`. This is the
-    // whole `dist/` tree, because request paths already carry the
-    // `/assets/` prefix (`<script src="/assets/index-<hash>.js">`).
-    // Rooting at `spa_dir/assets` made ServeDir look for
-    // `dist/assets/assets/index-<hash>.js`, miss, and fall through to the
-    // `index.html` fallback — so every JS/CSS request returned 200 with
-    // `text/html`, the SPA never booted, and the app was blank. Status-code
-    // assertions cannot see this; the body content-type is the tell.
+    // 根是 `spa_dir` 本身而非 `spa_dir/assets`：请求路径已带 `/assets/` 前缀，
+    // 指到 `spa_dir/assets` 会去找 `dist/assets/assets/…` 而 miss，落进
+    // `index.html` fallback，于是每个 JS/CSS 都回 `200 text/html`。状态码看不出
+    // 问题，要看 body 的 content-type。
     //
-    // The fallback is the base-aware shell, not a plain `ServeFile`:
-    // a deep link (`/sp/some/route`) has to come back with asset URLs
-    // the browser can resolve, or a refresh on that URL blanks the app.
+    // fallback 是带 base 的 shell 而非裸 `ServeFile`：深链 `/sp/some/route`
+    // 必须带浏览器能解析的 asset URL，否则在该 URL 上刷新即白屏。
     let serve_dir = ServeDir::new(spa_dir.clone()).fallback(axum::routing::any({
         let spa_fallback = spa_dir.clone();
         let base_fallback = base_path.clone();
@@ -284,19 +240,13 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         }
     }));
 
-    // Pull base_path before the auth layer consumes `state` (the layer
-    // takes ownership of a clone of `state.password`).
+    // 在鉴权层消费掉 `state` 之前取 `base_path`（该层会拿走 `state.password`
+    // 的克隆）。
     let auth_state = crate::auth::AuthState::new(password.as_deref());
 
-    // The API + MCP surface, behind the bearer middleware.
-    //
-    // Only this router is layered. The SPA shell and the static tree are
-    // mounted *outside* it, because a browser cannot attach an
-    // `Authorization: Bearer` header to a `<script type="module">` or a
-    // stylesheet request. Gating `/assets/*` behind auth meant a
-    // password-protected `serve-web` — which the README calls mandatory —
-    // returned the shell at `/` but 401 for every JS/CSS file, so the app
-    // rendered blank in the exact deployment the docs push.
+    // 只给这一棵 router 装鉴权层；shell 与静态树挂在外面。浏览器无法给
+    // `<script type="module">` 或样式表请求附 `Authorization: Bearer`，
+    // 把 `/assets/*` 拦在层内会让每个 JS/CSS 都 401，页面全白。
     let guarded = {
         let spa_root = spa_dir.clone();
         let base_root = base_path.clone();
@@ -313,40 +263,21 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             ))
     };
 
-    // Everything not matched above is static: `/assets/*` (hashed JS/CSS),
-    // `/favicon.svg`, and any client-side route, which falls back to the
-    // shell. Public by construction, same as the shell at `/`.
-    //
-    // The fallback lives on the outer router because only one router in a
-    // merge chain may own a fallback.
+    // 其余（`/assets/*`、`/favicon.svg`、以及回落 shell 的前端路由）一律公开，
+    // 与 `/` 同等待遇。fallback 只能挂在外层 router：merge 链里只允许一个。
     let inner = Router::new().merge(guarded).fallback_service(serve_dir);
 
-    // Optionally nest under `base_path` so a reverse proxy (nginx,
-    // Caddy, Cloudflare) can host Simple Post at e.g.
-    // `https://server/sp/`. When set, the entire router (including
-    // the SPA fallback) is mounted under the prefix and `MatchedPath`
-    // inside handlers reflects the strip-prefix path. When unset the
-    // router is served at root.
-    //
-    // Nothing is republished outside the prefix any more. The shell
-    // carries the prefix in its own asset URLs and hands the renderer the
-    // value it needs for API calls — see `static_files::shell_with_base`.
-    // The earlier `nest_service("/assets", …)` half-fix is gone: it made
-    // `<script src>` resolve but left every `fetch('/api/…')` 404ing, and
-    // it served the static tree outside the prefix the operator asked for.
+    // 可选地把整棵 router（含 SPA fallback）nest 到 `base_path` 下，供
+    // nginx / Caddy 等把应用挂在 `https://server/sp/`。前缀之外不再重复发布：
+    // shell 自带前缀的 asset URL 并把前缀交给 renderer，见
+    // `static_files::shell_with_base`。未设置时按根路径服务。
     match base_path.as_deref() {
         Some(p) if !p.is_empty() => {
             eprintln!("[serve-web] base_path: {p}");
-            // axum's `nest` matches the *bare* prefix (`/sp`) but never
-            // forwards the trailing-slash spelling (`/sp/`) to the inner
-            // router's `/` route — that request 404s. The shipped reverse
-            // proxy examples redirect `/sp` → `/sp/`, so the documented
-            // deployment landed users on a 404 at the app root.
-            //
-            // Serve the SPA shell for the trailing-slash form as well.
-            // Deliberately no auth layer: this is the same public static
-            // asset that `/sp` already serves (see `auth::is_public_path`,
-            // which lists `/`), and the API underneath stays protected.
+            // axum 的 `nest` 只匹配裸前缀 `/sp`，`/sp/` 不会转发给内层的 `/`（会 404）。
+            // 反代示例常把 `/sp` 重定向到 `/sp/`，所以尾斜杠形式同样返回 shell。
+            // 刻意不加鉴权层：这就是 `/sp` 已在发的同一份公开静态内容（见
+            // `auth::is_public_path` 名单里的 `/`），其下的 API 仍受保护。
             let prefix = p.trim_end_matches('/');
             let spa_shell = spa_dir.clone();
             let base_shell = base_path.clone();
@@ -363,18 +294,15 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
 // Entry point used by `lib.rs::run_serve_web`.
 // -------------------------------------------------------------------------
 
-/// Bind a TCP listener and serve `router` until SIGINT/SIGTERM.
+/// 绑定 TCP listener 并服务到 SIGINT/SIGTERM。
 ///
-/// `data_dir` is used by the daemon supervisor to resolve the SQLite
-/// file; it must match the GUI's `dirs::data_dir().join("com.simple-post")`
-/// convention so the two shapes share the same database.
+/// `data_dir` 供 daemon supervisor 定位 SQLite 文件，必须与桌面端
+/// `dirs::data_dir().join("com.simple-post")` 的约定一致，两种形态才共用同一
+/// 数据库。
 ///
-/// `auto_start_daemon` is `Some(bool)` when the CLI forced the answer and
-/// `None` when the persisted `mcp.auto_start` row decides. Resolving that
-/// row here rather than in `main.rs` is deliberate: `main.rs` used to open
-/// its own `db::init()` pool purely to read one preference and then throw it
-/// away, so every cold web start paid for two full initialisations (each one
-/// a schema check, the whole `schema.sql`, and a 4-connection pool).
+/// `auto_start_daemon` 为 `Some(bool)` 时 CLI 已给定答案，`None` 时由持久化的
+/// `mcp.auto_start` 行决定。在这里解析而非在 `main.rs`：那边会另开一个
+/// `db::init()` 池只为读一个 preference，冷启动就付两次 schema 检查与两个连接池。
 pub async fn serve(
     bind_addr: std::net::SocketAddr,
     data_dir: PathBuf,
@@ -384,21 +312,18 @@ pub async fn serve(
     base_path: Option<String>,
 ) -> Result<(), AppError> {
     let pool = db::init(&data_dir)?;
-    // The supervisor reads `mcp.http_config` from this pool at spawn time
-    // so the daemon child's CLI matches the settings panel.
+    // 守护进程在 spawn 时从这个池读 `mcp.http_config`，使子进程命令行与设置面板一致。
     let daemon = McpDaemonHandle::with_pool(pool.clone());
 
-    // Resolve the daemon decision *before* either value is moved into
-    // `WebState`, so no second `db::init()` is needed and the handle the
-    // background task warms up is the same one `/api/mcp/*` reads and writes.
+    // 在两个值被移进 `WebState` 之前定好守护进程决策：省掉第二次 `db::init()`，
+    // 且后台任务预热的 handle 就是 `/api/mcp/*` 读写的那一个。
     let want_daemon = match auto_start_daemon {
         Some(v) => v,
         None => db::with_conn(&pool, db::preferences::mcp_auto_start).unwrap_or(false),
     };
 
-    // Build the MCP app state so `/mcp` JSON-RPC works in the same
-    // process. The pool is shared with the GUI's `simple-post.db`;
-    // metrics are fresh per process so they reset on every restart.
+    // `/mcp` JSON-RPC 与本进程共用 `mcp_state`：pool 与 GUI 的 `simple-post.db`
+    // 同源，metrics 按进程新建故每次重启归零。
     let mcp_state = Arc::new(McpAppState {
         pool: pool.clone(),
         started_at: std::time::Instant::now(),
@@ -418,22 +343,13 @@ pub async fn serve(
     eprintln!("[serve-web] listening on http://{bind_addr}");
     eprintln!("[serve-web] data dir: {}", data_dir.display());
 
-    // -----------------------------------------------------------------------
-    // Bind BEFORE warming the MCP daemon.
+    // 必须先 bind 再预热 MCP daemon。`restart_without_app_handle` 是固定 200ms
+    // sleep + Windows 上两次 `tasklist` + 拉起本可执行文件的 `mcp` 模式子进程 +
+    // 一次 healthz；排在 bind 之前，浏览器全程对着 connection refused，表现为
+    // 白屏。
     //
-    // This ordering is the whole point. `restart_without_app_handle` costs a
-    // fixed 200 ms sleep, two `tasklist` spawns on Windows (it probes PID
-    // liveness twice), a full spawn of this same executable in `mcp` mode,
-    // and a healthz probe — and it used to run *before* `TcpListener::bind`.
-    // The browser sat on a refused connection for all of it, which reads as
-    // a blank page. Measured locally: first byte at ~344 ms with
-    // auto-start on vs ~90 ms with it off.
-    //
-    // Binding first turns that into a genuine background task: the daemon
-    // comes up in parallel with the page loading, and `/api/mcp/status`
-    // reports `Starting` until it is ready — the same transient the GUI
-    // already surfaces.
-    // -----------------------------------------------------------------------
+    // 先 bind 则它变成真正的后台任务：daemon 与页面并行起来，
+    // `/api/mcp/status` 在就绪前报 `Starting`——GUI 已在暴露这个瞬态。
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
         .map_err(|e| AppError::Validation(format!("bind {bind_addr}: {e}")))?;
@@ -457,17 +373,11 @@ pub async fn serve(
         .map_err(|e| AppError::Validation(format!("axum::serve: {e}")))
 }
 
-/// Helper used by both `serve-web` and (future) embedders to resolve
-/// the project root from the current executable.
-///
-/// `simple-post.exe` lives in `<project_root>/src-tauri/target/...`;
-/// walking up two parents lands on the project root, where `dist/`
-/// lives. We tolerate the absence — callers should fall back to
-/// `<cwd>/dist` if the relative path doesn't exist.
+/// 从当前可执行文件向上找 `dist/`。`simple-post.exe` 位于
+/// `<project_root>/src-tauri/target/…`，向上若干级即到项目根；找不到时回落
+/// `<cwd>/dist`。
 pub fn default_spa_dir() -> PathBuf {
-    // Walk up from the binary looking for `dist/`. Three levels is
-    // enough for both `target/debug/simple-post.exe` (typical cargo
-    // run) and `target/release/simple-post.exe` (CI artifacts).
+    // 最多向上找 6 级，够 `target/debug/` 与 `target/release/` 两种布局。
     let mut here = std::env::current_exe().ok();
     for _ in 0..6 {
         let Some(p) = here.as_ref() else { break };
@@ -479,22 +389,18 @@ pub fn default_spa_dir() -> PathBuf {
         }
         here = p.parent().map(|x| x.to_path_buf());
     }
-    // Fallback: cwd/dist — works when `cargo run` is invoked from
-    // the project root.
+    // 回落 `cwd/dist`（在项目根执行 `cargo run` 时命中）。
     std::env::current_dir()
         .map(|d| d.join("dist"))
         .unwrap_or_else(|_| PathBuf::from("dist"))
 }
 
-/// Helper used by both `serve-web` and (future) embedders to resolve
-/// the data directory. Defaults to `dirs::data_dir()/com.simple-post`
-/// via `port_registry::data_dir()`.
+/// 数据目录。与 `port_registry::data_dir()` 同一解析结果——守护子进程与本进程
+/// 必须落在同一处，`mcp.port` 才发现得到。
 pub fn default_data_dir() -> Result<PathBuf, AppError> {
     port_registry::data_dir()
 }
 
-// Quiet the unused-import warning for `Method` if no per-method
-// routing is added in the future. Keeping the import cheap and
-// forward-compatible.
+// 占位：`Method` 目前未用于按方法分路由，保留以备扩展。
 #[allow(dead_code)]
 const _UNUSED_METHOD: Method = Method::GET;
