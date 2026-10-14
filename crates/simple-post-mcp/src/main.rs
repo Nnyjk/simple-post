@@ -1,17 +1,16 @@
 // crates/simple-post-mcp/src/main.rs
 //
-// Standalone MCP entry point. Talks JSON-RPC over stdin/stdout to
-// a running `simple-post serve-web` instance.
+// 独立 MCP 入口。以 stdin/stdout 上的 JSON-RPC 对接运行中的
+// `simple-post serve-web`。
 //
-// Usage:
+// 用法：
 //   simple-post-mcp                                       # stdio to localhost:4224
 //   simple-post-mcp --url=http://B:4224 --password=<tok>  # cross-machine
 //   simple-post-mcp --transport=http --port=4333         # expose /mcp over HTTP
 //   simple-post-mcp --capability=read_only               # belt-and-suspenders filter
 //
-// All flags also accept env-var overrides (SIMPLE_POST_WEB_URL /
-// SIMPLE_POST_WEB_PASSWORD / SIMPLE_POST_MCP_CAPABILITY); the flag
-// wins when both are set.
+// 每个 flag 都有环境变量兜底（SIMPLE_POST_WEB_URL /
+// SIMPLE_POST_WEB_PASSWORD / SIMPLE_POST_MCP_CAPABILITY），两者同时给时 flag 优先。
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -70,14 +69,12 @@ struct Cli {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // Initialise tracing so `--log-level=debug` actually shows
-    // something on stderr. Errors here are non-fatal: we keep going
-    // even if the subscriber can't be installed (e.g. already set
-    // by an enclosing test harness).
+    // 装 tracing，`--log-level=debug` 才有 stderr 输出。装不上也不致命
+    // （例如已被外层测试 harness 占了全局 subscriber）。
     init_tracing(&cli.log_level);
 
     let cap_override = match cli.capability.as_deref() {
-        None => CapabilityOverride::FullAccess, // no local filter — backend decides
+        None => CapabilityOverride::FullAccess, // 本地不过滤，交后端裁决
         Some(s) => match CapabilityOverride::from_str(s) {
             Ok(c) => c,
             Err(e) => {
@@ -115,10 +112,9 @@ async fn main() -> ExitCode {
             }
         }
         "http" => {
-            // Bind a tiny axum surface so curl / Node-side smoke tests
-            // can POST to /mcp without spinning up the full
-            // `simple-post serve-web` + MCP daemon stack. The body
-            // is forwarded via the same `WebClient` as stdio mode.
+            // 起一个极小的 axum 面，让 curl / Node 冒烟测试不必拉起整套
+            // `serve-web` + daemon 就能 POST /mcp。转发用的是与 stdio 模式
+            // 同一个 `WebClient`。
             run_http_transport(client, cap_override, cli.port).await
         }
         other => {

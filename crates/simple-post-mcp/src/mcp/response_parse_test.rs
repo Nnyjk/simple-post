@@ -6,9 +6,8 @@ use std::sync::{
 };
 use std::time::Instant;
 
-/// Per-call counter that disambiguates temp dirs when several tests
-/// construct their state() in the same millisecond (cargo's default
-/// runs tests in parallel).
+/// 每次调用自增，用来在同毫秒内构造多个 state() 时区分临时目录
+/// （cargo 默认并行跑测试）。
 static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn state() -> Arc<AppState> {
@@ -27,16 +26,14 @@ fn state() -> Arc<AppState> {
     })
 }
 
-/// Decode the inner JSON payload inside a `CallToolResult`.
+/// 取出 `CallToolResult` 里的 JSON 载荷。
 ///
-/// Tool results wrap their JSON value as a single `Text` content
-/// entry, so `serde_json::to_string(&res)` doubles-serializes: every
-/// `"` inside the body becomes `\"`. Rather than rely on substring
-/// matching (which the previous test relied on and was wrong),
-/// pull the inner string out, then parse it into `Value`.
+/// 工具结果把 JSON 值包成一个 `Text` content 条目，所以 `serde_json::to_string(&res)`
+/// 会二次序列化：body 里的每个引号都变成转义形式。与其做子串匹配，不如把内层字符串取
+/// 出来再解析成 `Value`。
 fn extract_text_json(res: &CallToolResult) -> serde_json::Value {
     let wrapped: serde_json::Value = serde_json::to_value(res).unwrap();
-    // CallToolResult shape: { content: [ { type: "text", text: "<json>" } ], is_error: bool }
+    // CallToolResult 形状：{ content: [ { type: "text", text: "<json>" } ], is_error: bool }
     let text = wrapped["content"][0]["text"]
         .as_str()
         .expect("text content present");
@@ -156,7 +153,7 @@ async fn extract_jsonpath_rejects_non_json_content_type() {
     )
     .await
     .unwrap();
-    // Error path returns is_error=true
+    // 错误路径返回 is_error=true
     assert!(res.is_error);
 }
 

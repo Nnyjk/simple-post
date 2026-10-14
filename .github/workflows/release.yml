@@ -11,6 +11,15 @@ on:
         required: false
         default: ''
 
+# One release per tag. `cancel-in-progress: false` is deliberate: the point
+# is to stop two runs racing for the same release, and cancelling a publish
+# halfway would leave a partial one, which is worse than the duplicate it
+# prevents. A second trigger queues behind the first instead of running
+# beside it.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -33,7 +42,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Same major as ci.yml. This used to pin 20 while CI ran 22, so a
+          # release built against a Node the gate never tested — and 22 is
+          # what `engines` plus ESLint 10 actually want.
+          node-version: 22
           cache: 'npm'
 
       # GitHub Actions 默认会设 NODE_ENV=production,导致 `npm ci` 跳过
@@ -78,6 +90,14 @@ jobs:
             - **macOS**: open the `.dmg`, drag `Simple Post.app` to Applications
             - **Ubuntu**: `sudo dpkg -i simple-post_*_amd64.deb` or `chmod +x Simple_Post_*_amd64.AppImage && ./Simple_Post_*_amd64.AppImage`
             - **Windows**: run the `Simple_Post_*_x64-setup.exe` NSIS installer
+
+            ### Container image
+            A matching multi-arch image is published to GitHub Container
+            Registry by `.github/workflows/publish-image.yml` on the same tag:
+
+            ```
+            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ```
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

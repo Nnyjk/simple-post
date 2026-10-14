@@ -2,16 +2,13 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * EmptyHint — inline placeholder shown when a list is empty.
+ * EmptyHint —— 列表为空时显示的行内占位。
  *
- * Uses a dashed border to read as "this is where content will go", not as
- * an alert.
+ * 用虚线边框，读作「内容会出现在这里」而不是一条警告。
  *
- * The default box metrics match the original `section.tsx` treatment. Two
- * call sites need a different density (a taller box in the env panel, a
- * borderless one in the shortcuts list), so `className` merges over the
- * defaults — callers override only the axis that differs and keep the
- * dashed-border vocabulary.
+ * 默认盒模型是有意定的。有两个调用点需要不同密度（环境面板里更高的盒子、快捷键
+ * 列表里无边框的那个），所以 `className` 覆盖默认值——调用方只改不同于默认的那个轴，
+ * 虚线边框的语汇保持不变。
  */
 export function EmptyHint({ children, className }: { children: ReactNode; className?: string }) {
   return (

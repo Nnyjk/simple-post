@@ -1,42 +1,35 @@
-//! Unified application error type.
+//! 统一的应用错误类型。
 //!
-//! Every fallible operation in the backend returns `Result<T, AppError>`.
-//! The serde impl below shapes `AppError` into a stable `{code, message}`
-//! object so the React renderer can dispatch on `error.code` without
-//! needing string parsing or bespoke error classes.
+//! 后端每个可能失败的操作都返回 `Result<T, AppError>`。下面的 serde 实现把 `AppError`
+//! 塑造成稳定的 `{code, message}` 对象，好让 React 渲染层直接按 `error.code` 分派，
+//! 无需解析字符串或另设错误类。
 
 use serde::{Serialize, Serializer};
 
-/// All errors that can cross the Rust ↔ JS boundary.
+/// 所有能跨 Rust ↔ JS 边界的错误。
 ///
-/// Each variant has a stable `code` string on the wire (the variant
-/// name in snake_case) plus a human-readable `message`. New variants
-/// should keep the `code` lowercase and stable across releases —
-/// the frontend dispatches on it.
+/// 每个变体在线上都有一个稳定的 `code` 字符串（即 snake_case 的变体名）加一条给人看的
+/// `message`。新变体应保持 `code` 小写且跨版本稳定——前端要按它分派。
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    /// Resource lookup returned nothing (e.g. `db::projects::get` on a
-    /// missing id). The renderer maps this to a 404 toast.
+    /// 资源查找没有结果（如对不存在的 id 调 `db::projects::get`）。渲染层映射为 404 提示。
     #[error("not found: {0}")]
     NotFound(String),
 
-    /// Caller-supplied input failed validation (empty name, bad id, …).
-    /// Surfaces to the user as an inline form error.
+    /// 调用方给的输入没通过校验（空名字、坏 id 等）。以行内表单错误呈现给用户。
     #[error("validation: {0}")]
     Validation(String),
 
-    /// The agent / MCP caller is not permitted to perform the action.
+    /// agent / MCP 调用方无权执行该动作。
     #[error("permission denied: {0}")]
     PermissionDenied(String),
 
-    /// SQLite / r2d2 / serde / io failure. The inner message is what
-    /// ends up in `tracing::error!`; the wire shape stays generic so
-    /// we don't leak SQL fragments into the renderer.
+    /// SQLite / r2d2 / serde / io 失败。内层消息进 `tracing::error!`；线上形状保持通用，
+    /// 以免把 SQL 片段泄进渲染层。
     #[error("db error: {0}")]
     Db(String),
 
-    /// Network / transport failure that came up below the response
-    /// layer (DNS, connect, TLS, timeout, …).
+    /// 响应层以下冒出来的网络 / 传输失败（DNS、连接、TLS、超时等）。
     #[error("http error: {0}")]
     Http(String),
 
@@ -54,10 +47,8 @@ pub enum AppError {
 }
 
 impl AppError {
-    /// Short, stable code string used by the renderer to switch on the
-    /// error category. Add new variants here AND in the match below
-    /// when introducing them — otherwise the wire shape silently
-    /// changes.
+    /// 渲染层用来切换错误类别的简短稳定 code。新增变体时**这里和下面的 match 都要加**，
+    /// 否则线上形状会静默改变。
     pub fn code(&self) -> &'static str {
         match self {
             AppError::NotFound(_) => "not_found",
@@ -73,9 +64,8 @@ impl AppError {
     }
 }
 
-/// Wire shape: `{ "code": "not_found", "message": "..." }`. Always
-/// camelCased via the `rename_all` below so the renderer doesn't need
-/// to know about Rust naming conventions.
+/// 线上形状：`{ "code": "not_found", "message": "..." }`。两个键都是字面量，
+/// 故渲染层不必知道 Rust 的命名习惯。
 impl Serialize for AppError {
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
@@ -86,9 +76,7 @@ impl Serialize for AppError {
     }
 }
 
-// -------------------------------------------------------------------------
-// Tests — wire shape stability.
-// -------------------------------------------------------------------------
+// 测试——线上形状的稳定性。
 
 #[cfg(test)]
 #[path = "error_test.rs"]

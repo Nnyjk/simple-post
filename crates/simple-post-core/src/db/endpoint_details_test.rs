@@ -18,11 +18,8 @@ fn node(id: &str, kind: ResourceNodeType, parent: Option<&str>, sort: i64) -> Re
     }
 }
 
-/// A database with one project, one module, one collection and three
-/// endpoints.
-///
-/// Built through the public CRUD API: the fixtures describe the old
-/// three-table layout and populate none of `nodes`.
+/// 一个含一个项目、一个模块、一个 collection 与三个 endpoint 的库。
+/// 经公开 CRUD API 构造：fixture 描述的是旧三表布局，没有一行落在 `nodes` 上。
 fn fresh_pool() -> (db::DbPool, PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-endpoint-details-test-{}-{}",

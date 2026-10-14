@@ -10,20 +10,17 @@ import { cn, focusRing } from '@/lib/utils';
 import { WindowControls } from '@/components/ui/window-controls';
 
 /**
- * Tauri 2 quirk: `data-tauri-drag-region="true"` on a container makes
- * ANY mousedown inside it start a window-drag gesture. Interactive
- * children (buttons / inputs) silently lose their click handlers unless
- * they're explicitly opted out with `data-tauri-drag-region="false"`.
+ * Tauri 2 的坑：容器上带 `data-tauri-drag-region="true"` 时，内部**任何** mousedown
+ * 都会启动窗口拖拽；交互子元素（按钮 / 输入）必须显式用
+ * `data-tauri-drag-region="false"` 退出，否则会静默丢失点击处理。
  *
- * Pattern used here:
- *   - <header> = the whole row, drag-enabled.
- *   - Every <button> inside = drag-disabled (we pass the prop through
- *     the Button component, which spreads ...props onto the native
- *     <button>).
+ * 此处的做法：
+ *   - `<header>` 整行开启拖拽。
+ *   - 其中每个 `<button>` 都关闭拖拽（经 Button 组件透传，它把 ...props 展开到原生
+ *     `<button>`）。
  *
- * Permissions live in `src-tauri/capabilities/default.json` —
- * `core:window:allow-start-dragging` must be listed or the drag
- * gesture won't fire even with the attribute present.
+ * 权限在 `src-tauri/capabilities/default.json` —— 必须列出
+ * `core:window:allow-start-dragging`，否则即使有该属性拖拽也不会触发。
  */
 const NO_DRAG = { 'data-tauri-drag-region': 'false' } as const;
 
@@ -60,15 +57,11 @@ export function TopBar() {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  // Global Ctrl/Cmd + K opens the command palette. Works from any focus
-  // target (including input/textarea) — the spec is explicit about this.
+  // 全局 Ctrl/Cmd + K 打开命令面板，任意焦点目标（含 input/textarea）下都要生效。
   //
-  // `e.isComposing` guard: while the IME composition session is open
-  // (e.g. typing a Chinese character via Pinyin) Chrome/Firefox still
-  // dispatch a `keydown` for Ctrl-modifier keys. Without this guard,
-  // the palette would pop up over the IME candidate window and the
-  // user's `k` press would vanish into the palette. Skipping composition
-  // lets the IME commit happen first.
+  // `e.isComposing` 守卫：IME 组合会话进行中（例如用拼音打汉字）时，Chrome/Firefox
+  // 仍会为 Ctrl 组合键派发 `keydown`。不加此守卫，面板会盖在候选窗上，用户那一下
+  // `k` 就被面板吞掉。跳过组合态，让 IME 先上屏。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
@@ -86,10 +79,8 @@ export function TopBar() {
       data-tauri-drag-region="true"
       className="flex h-11 shrink-0 select-none items-center gap-2 border-b border-border bg-card/50 px-3"
     >
-      {/* Wordmark — doubles as the way back to the welcome screen
-          (`leaveProject`). Clicking the product name is the "go home"
-          convention, and it is the one element in this bar that never
-          controls anything else. */}
+      {/* 字标 —— 同时是回欢迎页的入口（`leaveProject`）。点产品名回首页是惯例，且它是
+          本条中唯一不控制别的东西的元素。 */}
       <Tooltip content="返回欢迎页" side="bottom">
         <button
           {...NO_DRAG}
@@ -107,11 +98,9 @@ export function TopBar() {
         </button>
       </Tooltip>
 
-      {/* Project switcher — the project's home now that it is not a row
-          in the tree. Disabled only until bootstrap has the list; with
-          no project entered yet it reads "选择项目" rather than
-          "加载中…", because a fresh start is exactly the state where
-          the welcome picker is asking the user to choose. */}
+      {/* 项目切换器 —— 项目的入口（它不在树里）。只在 bootstrap 拿到列表前禁用；尚未
+          进入项目时显示「选择项目…」而非「加载中…」，因为全新启动正是欢迎页请用户挑选
+          的状态。 */}
       <div ref={projRef} className="relative">
         <Button
           {...NO_DRAG}
@@ -127,12 +116,9 @@ export function TopBar() {
                 className="h-2 w-2 rounded-sm"
                 style={{ backgroundColor: activeProject.color }}
               />
-              {/* `max-w`, not a fixed `w`: the project name is a short
-                  label here, and reserving a full 160px for it left a
-                  conspicuous gap in the bar. Unlike the env slot, this
-                  name does not change on every switch, so the shrink-on-
-                  short-name behaviour of `max-w` is not worth trading
-                  the whitespace for. Long names still cap and ellipsise. */}
+              {/* 用 `max-w` 而非固定 `w`：项目名在这里只是短标签，预留满 160px 会在条上
+                  留下刺眼的空隙。与环境位不同，它不会每次切换都变，故不值得为省白空间
+                  换来 `max-w` 遇短名就收窄的行为。长名仍会封顶并加省略号。 */}
               <span className="max-w-[160px] truncate">{activeProject.name}</span>
             </>
           ) : (
@@ -195,13 +181,10 @@ export function TopBar() {
         )}
       </div>
 
-      {/* Environment switcher. Gated on an active project: the list is
-          `environments.filter(e => e.projectId === activeProjectId)`, so
-          with no project it is empty and the dropdown would report
-          "该项目暂无环境" about a project that does not exist, while still
-          offering "新建环境" — which cannot succeed without one.
-          `WorkspaceShell` normally mounts only once a project is active;
-          this guard also covers the settings-only case. */}
+      {/* 环境切换器。以已有项目为前提：列表是
+          `environments.filter(e => e.projectId === activeProjectId)`，没有项目时它为空，
+          下拉会对一个不存在的项目报「该项目暂无环境」，还给出必然失败的「新建环境」。
+          `WorkspaceShell` 通常只在项目激活后挂载，此守卫另覆盖只有设置页的情形。 */}
       {activeProjectId !== '' && (
         <div ref={envRef} className="relative">
           <Button
@@ -212,11 +195,9 @@ export function TopBar() {
             className="gap-1.5"
           >
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground">env</span>
-            {/* Fixed width, not `max-w`: the title bar must not resize when
-              the active name changes length. `max-w` only caps the long
-              case, so a short name collapsed the whole control and made
-              switching envs shove everything to its right sideways.
-              `truncate` still ellipsises an over-long name inside it. */}
+            {/* 固定宽度而非 `max-w`：标题栏不得因当前环境名长短变化而改变尺寸。`max-w`
+              只封顶长名，短名反而会把整个控件收窄，切换环境时把它右侧的一切推来推去。
+              `truncate` 仍会在固定宽度内把过长名字省略。 */}
             <span className="w-[80px] truncate font-mono text-xs">{activeEnv?.name ?? '—'}</span>
             <ChevronDown className="h-3.5 w-3.5 opacity-60" />
           </Button>
@@ -294,7 +275,7 @@ export function TopBar() {
         </div>
       )}
 
-      {/* Search box — clicking opens the command palette. */}
+      {/* 搜索框 —— 点击打开命令面板。 */}
       <button
         {...NO_DRAG}
         type="button"
@@ -329,8 +310,7 @@ export function TopBar() {
         </Tooltip>
       </div>
 
-      {/* Minimize / maximize / close. Pinned to the right edge so the
-          window operations cluster where every desktop app puts them. */}
+      {/* 最小化 / 最大化 / 关闭。钉在右缘，让窗口操作聚在桌面应用惯放的位置。 */}
       <WindowControls />
 
       <Suspense fallback={null}>
@@ -341,21 +321,12 @@ export function TopBar() {
 }
 
 /**
- * Top-right MCP status pill. Reads from the singleton daemon snapshot
- * (see `useMcpStatus`) — the polling loop lives in the store, so this
- * component is pure render: no `setInterval`, no `invoke`, no listener.
+ * 右上角 MCP 状态药丸。读共享的守护进程快照（见 `useMcpStatus`）—— 轮询循环在 store
+ * 里，故本组件是纯渲染：无 `setInterval`、无 `invoke`、无监听。
  *
- * Renamed from the prior `McpStatus` because the previous version
- * hosted its own 3s poll and needed both React state and refs to
- * coordinate cancellation. With the shared poll those are gone, and
- * the shorter name is a clearer signal to future readers.
- *
- * It is also the entry point to the connection settings: every control
- * the connection tab offers lives under 「设置 · 连接」, so a dot trying
- * to tell you the daemon is down should take you somewhere you can start
- * it. The pill used to be a `<button>` with no `onClick` at all, which is
- * worse than a `<span>` — it announced itself as activatable to keyboard
- * and AT users and then did nothing.
+ * 它也是连接设置的入口：连接页提供的每个控件都在「设置 · 连接」下，故一个告诉你
+ * daemon 挂了的圆点，应当能把你带到能启动它的地方。它必须是真正可点的 `<button>` ——
+ * 无 `onClick` 的按钮比 `<span>` 更糟：它向键盘与读屏用户宣告可激活，却什么都不做。
  */
 function McpStatusPill() {
   const mcp = useMcpStatus();
@@ -388,11 +359,8 @@ function McpStatusPill() {
                     ? '未启动'
                     : '连接中…'}
           </div>
-          {/* Used to read 「stdio 模式」 unconditionally, which stopped
-              being true when the daemon narrowed to Streamable HTTP — the
-              pill was advertising a transport it no longer speaks. The
-              port is the same number the connection page writes into the
-              client config, so it is the one extra fact worth surfacing. */}
+          {/* 传输方式写死 Streamable HTTP —— 药丸不能宣告它已不再说的传输。端口与连接页
+              写进客户端配置的是同一个数字，故它是唯一值得额外呈现的信息。 */}
           <div className="text-[10px] text-muted-foreground">
             Streamable HTTP
             {port !== null ? ` · :${port}` : ''}

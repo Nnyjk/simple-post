@@ -1,31 +1,18 @@
-//! Tauri 2 backend for Simple Post.
+//! Simple Post 的 Tauri 2 后端。
 //!
-//! Responsibilities:
-//!   - Expose the `http_request` command so the React app can issue
-//!     real network calls through `reqwest` instead of the browser's
-//!     `fetch`. The webview doesn't enforce CORS when the call exits
-//!     through a Rust-side HTTP client, which is what fixes the
-//!     "Network Error" reported when the app was launched as a plain
-//!     Vite SPA.
-//!   - Match the contract of `src/lib/http.ts::sendRequest` so the
-//!     frontend can swap one transport for the other without changing
-//!     call sites.
-//!   - Wire the `#[tauri::command]` surface in `commands/` onto managed
-//!     state, and boot the embedded MCP daemon as a child process so
-//!     the UI can surface live daemon status.
+//! - `http_request` 让 React 经 `reqwest` 发真实请求而非浏览器 `fetch`：
+//!   调用从 Rust 侧出去，webview 的 CORS 不适用。
+//! - 契约对齐 `src/lib/http.ts::sendRequest`，前端换传输不必改调用点。
+//! - 把 `commands/` 的 `#[tauri::command]` 接到 managed state，并以子进程
+//!   拉起内嵌 MCP daemon，供 UI 展示实时状态。
 //!
-//! ## What moved out
-// The server half of this crate — `web_api`, `daemon_supervisor`,
-//! `auth`, `port_registry`, `dto`, `http_config`, and the `mcp` /
-//! `serve-web` entry points — now lives in `simple-post-server`. It is
-//! re-exported below so every existing `crate::…` path in `commands/`
-//! keeps resolving and nothing above this line had to change.
+//! ## 无头的一半
+//! `web_api`、`daemon_supervisor`、`auth`、`port_registry`、`dto`、
+//! `http_config` 与 `mcp` / `serve-web` 入口）在 `simple-post-server`，
+//! 下方整体 `pub use` 回来，`commands/` 里的 `crate::…` 路径因此照旧可解析。
 //!
-//! The reason is `tauri` itself: it is an unconditional dependency of
-//! this crate, so a Linux container serving `serve-web` had to install
-//! the whole GTK/WebKit stack to run a GUI it cannot display. The
-//! dependency now points the other way — this crate depends on the
-//! server crate — so the image can be built Tauri-free.
+//! 原因：`tauri` 是本 crate 的无条件依赖，Linux 容器跑 `serve-web` 就得装上整套
+//! GTK/WebKit。依赖方向定为「本 crate → server crate」，镜像才能无 Tauri 构建。
 
 use tauri::Manager;
 
@@ -34,37 +21,24 @@ pub mod commands;
 pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, permissions};
 pub use simple_post_mcp::{daemon_http, mcp};
 
-// The headless host, re-exported wholesale. Keeping these `pub use`
-// lines rather than thin forwarding wrappers is what lets the code in
-// `commands/` be untouched by the crate split.
+// 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
 pub use simple_post_server::{auth, daemon_supervisor, dto, http_config, port_registry, web_api};
 
-// CLI entry points. `serve-web` and `mcp` used to be defined here; they
-// are host-agnostic and now belong to the server crate, but the
-// desktop binary keeps dispatching to them so `cargo run -- serve-web`
-// (and therefore `npm run dev:split`) behaves exactly as before.
+// CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
+// `cargo run -- serve-web`（即 `npm run dev:split`）行为不变。
 pub use simple_post_server::{init_tracing, run_mcp, run_mcp_proxy, run_serve_web};
 
 // ----- HTTP request command ------------------------------------------------
 //
-// The actual I/O lives in `crate::http_executor::execute`. The Tauri
-// command body is a thin pass-through so the `generate_handler!` macro
-// can still find the `http_request` symbol in `lib.rs`.
+// 实际 I/O 在 `crate::http_executor::execute`；这里只是转发，让 `generate_handler!`
+// 能在 `lib.rs` 里找到 `http_request`。
 
-/// Issue a real HTTP request through `reqwest`, bypassing browser CORS.
+/// 经 `reqwest` 发真实请求，绕过浏览器 CORS。Tauri 外壳内走此路，纯 Vite 下前端退回
+/// `fetch`，改 UI 无需重编 Rust。
 ///
-/// The frontend calls this when running inside Tauri (where
-/// `window.__TAURI_INTERNALS__` is present). When the app is served
-/// just by Vite (no Tauri shell), the frontend falls back to the
-/// existing `fetch` path so dev iteration on UI doesn't require a
-/// Rust rebuild every time.
-///
-/// NOTE: this function MUST stay non-`pub`. Tauri 2's command +
-/// `generate_handler!` macros both emit an internal
-/// `__cmd__http_request` macro; emitting them in the same crate-root
-/// file with `pub` collides on the macro namespace (E0255). See
-/// https://v2.tauri.app/develop/calling-rust/ — "Commands defined in
-/// the lib.rs file cannot be marked as pub".
+/// 必须保持非 `pub`：`#[tauri::command]` 与 `generate_handler!` 都会生成内部的
+/// `__cmd__http_request` 宏，`pub` 时在同一 crate 根文件撞名（E0255）。
+/// 见 https://v2.tauri.app/develop/calling-rust/ 。
 #[tauri::command]
 async fn http_request(
     method: String,
@@ -89,26 +63,19 @@ async fn http_request(
 
 // ----- Tauri entry point ----------------------------------------------------
 
-/// Tauri GUI entry. Wires:
-///   * `McpDaemonHandle` into managed state so the `mcp_status` command
-///     reads it via `State<McpDaemonHandle>`.
-///   * All DB / permissions commands into the invoke handler.
-///   * A `.setup()` block that asynchronously spawns the daemon child
-///     the moment the GUI finishes its own boot.
+/// Tauri GUI 入口：把 `McpDaemonHandle` 与 DB pool 放进 managed state（供
+/// `State<…>` 读取）、注册全部命令、在 `.setup()` 里异步拉起 daemon 子进程。
 ///
-/// The daemon supervisor is launched in `tokio::spawn` rather than
-/// awaited inline so the GUI window can render immediately and the
-/// supervisor's 5-second healthz wait doesn't sit on the main run-loop.
+/// supervisor 走 `tokio::spawn` 而非就地 await，窗口才能先渲染，5 秒 healthz
+/// 等待也不占主 run-loop。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_tracing();
 
     use crate::daemon_supervisor::McpDaemonHandle;
 
-    // Open the GUI's own DB pool before launching the webview so every
-    // `#[tauri::command]` that takes `State<DbPool>` resolves on the
-    // very first invoke. Same data-dir convention as the daemon —
-    // SQLite WAL keeps both processes consistent on the shared file.
+    // 先于 webview 建好 GUI 自己的 DB pool，`State<DbPool>` 的命令首次 invoke 即可解析。
+    // data_dir 约定与 daemon 相同，SQLite WAL 让两个进程共享同一文件。
     let data_dir = match crate::port_registry::data_dir() {
         Ok(d) => d,
         Err(e) => {
@@ -130,10 +97,9 @@ pub fn run() {
         .manage(pool)
         .manage(daemon_handle)
         .invoke_handler(tauri::generate_handler![
-            // Local HTTP request command (kept here from pre-MCP days).
+            // 本地发请求的命令。
             http_request,
-            // Endpoint-scoped send is deliberately absent: the frontend
-            // assembles the full request and hands it to `http_request`.
+            // 刻意没有「按 endpoint 发送」的命令：前端组装完整请求后交给 `http_request`。
             crate::commands::projects_list,
             crate::commands::projects_get,
             crate::commands::projects_create,
@@ -164,10 +130,7 @@ pub fn run() {
             crate::commands::base_url_defs_set_default,
             crate::commands::request_settings_get,
             crate::commands::request_settings_update,
-            // Response history (per-endpoint FIFO, capped in the db
-            // write path). Registered as its own group because it is
-            // the one resource whose reads are project-scoped rather
-            // than endpoint-scoped.
+            // 响应历史：按 endpoint 的 FIFO，上限在 db 写入侧截断。
             crate::commands::response_history_list,
             crate::commands::response_history_append,
             crate::commands::response_history_clear,
@@ -187,10 +150,7 @@ pub fn run() {
             crate::commands::mcp_http_config_set,
         ])
         .setup(|app| {
-            // Read the persisted MCP auto-start preference **before**
-            // spawning the supervisor so we honour the user's choice.
-            // `mcp.auto_start` defaults to `false` — the user opts in
-            // from the settings panel.
+            // 先读持久化的 mcp.auto_start（默认 false，需用户在设置里开启）再拉 supervisor。
             let pool: tauri::State<crate::db::DbPool> = app.state();
             let auto_start = match crate::db::with_conn(pool.inner(), |c| {
                 crate::db::preferences::mcp_auto_start(c)
@@ -202,17 +162,12 @@ pub fn run() {
                 }
             };
 
-            // `app.state::<McpDaemonHandle>()` borrows the managed
-            // value; we clone the (cheap, Arc-backed) handle and move
-            // it into the spawn.
+            // state() 只借用，clone（Arc 支撑，便宜）后再 move 进 spawn。
             let handle = app.state::<McpDaemonHandle>().inner().clone();
             let app_handle = app.handle().clone();
-            // `tauri::async_runtime::spawn`, NOT `tokio::spawn` —
-            // Tauri runs `.setup()` synchronously outside the tokio
-            // runtime, so a raw `tokio::spawn` panics with
-            // "there is no reactor running". Tauri's async_runtime
-            // module has direct access to its tokio handle and spawns
-            // tasks correctly from this context.
+            // 必须用 `tauri::async_runtime::spawn`，不是 `tokio::spawn`：`.setup()`
+            // 在 tokio runtime 之外同步执行，裸 `tokio::spawn` 会 panic
+            // "there is no reactor running"。
             tauri::async_runtime::spawn(async move {
                 if !auto_start {
                     eprintln!(
@@ -222,11 +177,8 @@ pub fn run() {
                     return;
                 }
                 if let Err(e) = handle.ensure_started(&app_handle).await {
-                    // Don't panic the GUI on daemon-spawn failure — the
-                    // supervisor already flipped its status to Crashed
-                    // and the renderer will show the message via
-                    // `mcp_status` (or the toast from
-                    // `daemon://crashed`).
+                    // 不因拉起失败而 panic GUI：supervisor 已置 Crashed，渲染侧经 `mcp_status`
+                    // （或 `daemon://crashed` toast）呈现。
                     eprintln!("[daemon] ensure_started failed: {e:?}");
                 }
             });

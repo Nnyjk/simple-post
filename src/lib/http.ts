@@ -1,34 +1,25 @@
 /**
- * Real HTTP sender — single transport, two distribution shapes:
+ * 真实 HTTP 发送 —— 一条传输路径、两种分发形态：
  *
- *   1. Tauri shell  → `invokeCmd(COMMANDS.httpRequest, …)` hits the
- *                     `http_request` Rust command, which delegates to
- *                     `http_executor::execute` (reqwest). Bypasses the
- *                     webview's CORS enforcement entirely.
- *   2. Web / Dev    → `invokeCmd` falls through to `webInvokeCmd` →
- *                     `POST /api/http/send` on the axum `serve-web`
- *                     host, which calls the same `http_executor::execute`.
- *                     Same Rust path, same response shape.
+ *   1. Tauri shell  → `invokeCmd(COMMANDS.httpRequest, …)` 命中 Rust 的
+ *                     `http_request` 命令，它委派给 `http_executor::execute`
+ *                     （reqwest）。完全绕开 webview 的 CORS。
+ *   2. Web / Dev    → `invokeCmd` 落到 `webInvokeCmd` → axum `serve-web` 上的
+ *                     `POST /api/http/send`，调用同一个 `http_executor::execute`。
+ *                     同一条 Rust 路径，同一种响应形状。
  *
- * Both shapes return the same `RustHttpResult` envelope; the rest of
- * the app (HttpTester, ResponseViewer, the cURL exporter) doesn't
- * care which one ran.
+ * 两种形态都返回同一个 `RustHttpResult` 信封；应用其余部分（HttpTester、
+ * ResponseViewer、cURL 导出）不关心跑的是哪条。
  *
- * Contract:
- *   - Builds URL + init via `buildFetchInit` (single source of truth
- *     shared with the cURL exporter). Only the URL, headers (as a
- *     tuple array) and body *string* are sent — the rest is a
- *     JSON-friendly payload.
- *   - Composes a per-call AbortController from the caller's `signal`
- *     and arms `settings.timeoutMs`. The signal is forwarded to
- *     `invokeCmd` which passes it to native `fetch` in the web
- *     shape; the Tauri shape rejects the JS promise but lets the
- *     Rust `reqwest` keep running to completion.
- *   - Returns an `ApiResponse`. Network failures, timeouts, and aborts
- *     surface as `status: 0` with distinguishing `statusText` so the
- *     UI can render the right banner.
- *   - Never throws — `HttpTester` just dispatches the returned
- *     `ApiResponse` into the store.
+ * 契约：
+ *   - URL + init 由 `buildFetchInit` 构造（与 cURL 导出共享的唯一真相）。
+ *     只发送 URL、header（元组数组）与 body **字符串**，其余是 JSON 友好的载荷。
+ *   - 由调用方的 `signal` 组合出每次调用的 AbortController，并按
+ *     `settings.timeoutMs` 定时。signal 会传给 `invokeCmd`，web 形态下它交给
+ *     原生 `fetch`；Tauri 形态只 reject JS promise，Rust 里的 `reqwest` 仍跑到底。
+ *   - 返回 `ApiResponse`。网络失败、超时与中止都以 `status: 0` 加可区分的
+ *     `statusText` 上报，UI 据此渲染对应横幅。
+ *   - 绝不抛异常——`HttpTester` 只把返回的 `ApiResponse` 塞进 store。
  */
 import type {
   ApiResponse,
@@ -51,17 +42,15 @@ export interface SendInput {
   auth: AuthConfig;
   env?: Environment;
   settings: RequestSettings;
-  /** Optional abort signal from the caller (component unmount,
-   *  re-click on Send to cancel the previous in-flight call). */
+  /** 可选的调用方中止信号（组件卸载、重发取消上一次在途请求）。 */
   signal?: AbortSignal;
 }
 
 // ---------------------------------------------------------------------------
-// shared helpers
+// 共用辅助
 // ---------------------------------------------------------------------------
 
-/** Same flattening but starting from `Array<[name, value]>` (Rust
- *  serialises headers as a tuple list across both shapes). */
+/** 同样的扁平化，但从 `Array<[name, value]>` 起步（两种形态下 Rust 都把 header 序列化成元组列表）。 */
 function tuplesToRecord(pairs: ReadonlyArray<readonly [string, string]>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of pairs) {
@@ -71,8 +60,7 @@ function tuplesToRecord(pairs: ReadonlyArray<readonly [string, string]>): Record
   return out;
 }
 
-/** Best-effort JSON parse — leave `bodyJson` undefined on failure
- *  (per spec, no throw). */
+/** 尽力解析 JSON —— 失败就留 `bodyJson` 未定义（按约定不抛）。 */
 function tryParseJson(text: string): unknown | undefined {
   try {
     return JSON.parse(text);
@@ -82,8 +70,8 @@ function tryParseJson(text: string): unknown | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// error shape builders — shared so the UI sees the same banner regardless
-// of which underlying transport (Tauri IPC vs. serve-web HTTP) ran.
+// 错误形状构造器 —— 共用，好让 UI 不管跑的是哪条底层传输（Tauri IPC 还是
+// serve-web HTTP）都看到同一个横幅
 // ---------------------------------------------------------------------------
 
 function timeoutResponse(input: SendInput, url: string, durationMs: number): ApiResponse {
@@ -137,10 +125,9 @@ function networkErrorResponse(
 }
 
 // ---------------------------------------------------------------------------
-// Backend result envelope — matches `crate::http_executor::HttpResult`
-// (camelCase fields, see `#[serde(rename_all = "camelCase")]` on the
-// Rust struct). Both the Tauri command and the axum `/api/http/send`
-// route return this exact shape so we can deserialise with one type.
+// 后端结果信封 —— 对应 `crate::http_executor::HttpResult`（camelCase 字段，
+// 见 Rust 结构体上的 `#[serde(rename_all = "camelCase")]`）。Tauri 命令与
+// axum 的 `/api/http/send` 路由都返回这一形状，所以一个类型就能反序列化
 // ---------------------------------------------------------------------------
 
 interface RustHttpOk {
@@ -165,8 +152,7 @@ interface RustHttpResult {
   error?: RustHttpErr;
 }
 
-/** Convert any `HeadersInit` shape into a list of `[name, value]`
- *  tuples. Mirrors the helper the old `sendViaTauri` carried. */
+/** 把任意 `HeadersInit` 形状转成 `[name, value]` 元组列表。 */
 function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
   if (Array.isArray(h)) return h as Array<[string, string]>;
   if (typeof Headers !== 'undefined' && h instanceof Headers) {
@@ -179,17 +165,16 @@ function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
 }
 
 // ---------------------------------------------------------------------------
-// public entry — single transport, one call site.
+// 公开入口 —— 一条传输路径，一个调用点。
 // ---------------------------------------------------------------------------
 
 /**
- * Convert the backend `HttpResult` envelope into the renderer's
- * `ApiResponse`. Shared by the raw-URL path and the endpoint-scoped path
- * so both surfaces produce byte-identical UI state.
+ * 把后端 `HttpResult` 信封转成渲染器的 `ApiResponse`。裸 URL 路径与 endpoint
+ * 路径共用，好让两个界面产出逐字节相同的 UI 状态。
  */
 function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string): ApiResponse {
   if (!r.ok || !r.response) {
-    // Round-trip succeeded; the server-side request itself failed.
+    // 往返成功，是服务端那个请求本身失败了
     const kind = r.error?.kind ?? 'network';
     const msg = r.error?.message ?? 'unknown';
     if (kind === 'timeout') {
@@ -213,8 +198,7 @@ function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string)
   };
 }
 
-/** Dispatch an `invokeCmd` call and fold the result into an
- *  `ApiResponse`, never throwing. */
+/** 分发一次 `invokeCmd` 调用并把结果折成 `ApiResponse`，绝不抛异常。 */
 async function invokeAndMap(
   args: Record<string, unknown>,
   input: SendInput,
@@ -225,15 +209,12 @@ async function invokeAndMap(
     const r = await invokeCmd<RustHttpResult>(COMMANDS.httpRequest, args, options);
     return envelopeToApiResponse(r, input, url);
   } catch (err) {
-    // `invokeCmd` rejects on:
-    //   - Tauri IPC failure (e.g. devtools not wired)
-    //   - serve-web HTTP non-2xx / network unreachable
-    //   - WEB_ROUTES missing the command (would only happen if
-    //     someone added a COMMANDS entry without a matching route)
-    //   - the caller's AbortSignal aborting (Tauri shape rejects,
-    //     web shape throws DOMException)
-    // We surface abort distinctly; everything else falls back to
-    // the generic Network Error banner so the UI stays informative.
+    // `invokeCmd` 会 reject 的情形：
+    //   - Tauri IPC 失败（如 devtools 没接上）
+    //   - serve-web HTTP 非 2xx / 网络不可达
+    //   - WEB_ROUTES 缺该命令（只有加了 COMMANDS 却没配对应路由才会发生）
+    //   - 调用方的 AbortSignal 中止（Tauri 形态 reject，web 形态抛 DOMException）
+    // 中止单独识别，其余都落到通用 Network Error 横幅，UI 至少还有信息量
     const name = (err as { name?: string })?.name;
     const msg = (err as Error)?.message ?? String(err);
     if (name === 'AbortError' || /abort/i.test(msg)) {
@@ -245,36 +226,27 @@ async function invokeAndMap(
 }
 
 /**
- * Send the request described by `input` via the backend transport
- * (`invokeCmd(COMMANDS.httpRequest, …)`). See module header.
+ * 经后端传输（`invokeCmd(COMMANDS.httpRequest, …)`）发送 `input` 描述的请求。
  *
- * The transport is picked once at module load:
+ * 传输在模块加载时选定一次：
  *   - Tauri shell → `invoke()` IPC → Rust `http_executor::execute`
- *   - serve-web   → `POST /api/http/send` → same Rust executor
+ *   - serve-web   → `POST /api/http/send` → 同一个 Rust executor
  *
- * Both shapes hit the same `reqwest`-based executor so we get
- * identical behaviour: timeout, redirect, max body, body truncation
- * all happen server-side and the result crosses the boundary as a
- * JSON envelope.
+ * 两种形态都打到同一个基于 `reqwest` 的 executor，所以超时、重定向、最大体积、
+ * body 截断都在服务端发生，结果以 JSON 信封跨过边界。
  *
- * ⚠️ This path lets the caller name an arbitrary URL, so the server
- * becomes a proxy. That is inherent to the raw-URL case and to
- * [`sendPreparedRequest`] alike — both take a finished URL, because
- * "the frontend assembles the whole request, the backend sends it"
- * means the URL is the frontend's to own. `OutboundPolicy` is what
- * keeps that from being unrestricted.
+ * ⚠️ 这条路径允许调用方指定任意 URL，服务端因此成了代理。裸 URL 场景与
+ * [`sendPreparedRequest`] 都一样——两者都收一个已完成的 URL，因为「前端组装
+ * 整个请求、后端负责发」就意味着 URL 归前端所有。限制它的是 `OutboundPolicy`。
  *
- * Note: there is no "raw browser fetch" fallback. In every supported
- * distribution shape there's a real backend in front of `reqwest`,
- * so a direct browser fetch would only ever be relevant for a
- * hypothetical Vite-only / no-server mode that we don't ship.
+ * 没有「裸浏览器 fetch」回退：所有受支持的发行形态前面都有真实后端，直连浏览器的
+ * fetch 只在不带服务器的 Vite-only 模式下才有意义，而那种模式不发布。
  */
 export async function sendRequest(input: SendInput): Promise<ApiResponse> {
   const built = buildFetchInit(input);
-  // `buildFetchInit` returns a `RequestInit` with `Headers | [][]
-  // | Record`. Normalise to a tuple list — Rust deserialises
-  // `Vec<(String, String)>` and the web bridge JSON-encodes a tuple
-  // list verbatim, so this is the only shape that works on both sides.
+  // `buildFetchInit` 返回的 `RequestInit.headers` 可能是 `Headers | [][]`
+  // | `Record`。统一归一成元组列表——Rust 反序列化 `Vec<(String, String)>`，
+  // web 桥对元组列表原样 JSON 编码，这是两侧唯一都能用的形状
   const headers = initHeadersToTuples(built.init.headers ?? {});
   const body =
     typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
@@ -297,14 +269,13 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// Prepared-request send — construction and execution, finally one path.
+// Prepared-request 发送 —— 构造与执行终于是同一条路径
 // ---------------------------------------------------------------------------
 
 export interface SendPreparedInput {
   /**
-   * The finished request, as produced by `prepareRequest`. The caller
-   * owns construction (base URL join, `{{var}}` resolution, header
-   * ordering, auth reduction) and this function only executes it.
+   * `prepareRequest` 产出的已完成请求。构造归调用方（base URL join、
+   * `{{var}}` 解析、header 排序、auth 归约），本函数只负责执行。
    */
   request: PreparedRequest;
   settings: RequestSettings;
@@ -312,33 +283,27 @@ export interface SendPreparedInput {
 }
 
 /**
- * Send an already-prepared request.
+ * 发送一个已 prepare 的请求。
  *
- * The point of this entry point is that what is sent is *the same object*
- * the preview renders. Handing URL composition to the backend instead
- * meant the cURL preview (frontend rules) and the actual send (Rust
- * rules) were two implementations kept in sync by hand — and they did
- * not always agree. Calling `prepareRequest` once and sending the result
- * makes that divergence unrepresentable.
+ * 这个入口的意义在于：发出去的就是预览渲染的那个对象。组装归前端规则时，
+ * cURL 预览与真实发送就成了两套靠手工对齐的实现，对不齐时用户看到的是
+ * 「复制为 cURL」给出另一个请求；调一次 `prepareRequest` 再发其结果，
+ * 这种分歧无从表达。
  *
- * Headers travel as a tuple list rather than a `Record`: Rust
- * deserialises `Vec<(String, String)>`, and the web bridge
- * (`POST /api/http/send`) JSON-encodes a tuple list verbatim, so this is
- * the one shape that works on both sides. A `Record` would also drop a
- * repeated header name.
+ * header 走元组列表而非 `Record`：Rust 反序列化 `Vec<(String, String)>`，
+ * web 桥（`POST /api/http/send`）对元组列表原样 JSON 编码，这是两侧唯一都能用
+ * 的形状；`Record` 还会丢掉重名 header。
  *
- * ⚠️ Same caveat as [`sendRequest`]: the URL is caller-supplied, so the
- * backend becomes a proxy for it. `OutboundPolicy` still applies.
+ * ⚠️ 与 [`sendRequest`] 同一条注意事项：URL 由调用方提供，服务端因此成了它的
+ * 代理，`OutboundPolicy` 依然生效。
  *
- * Never throws — failures come back as `status: 0` with a distinguishing
- * `statusText`, exactly as from `sendRequest`.
+ * 绝不抛异常——失败以 `status: 0` 加可区分的 `statusText` 返回，与 `sendRequest`
+ * 完全一致。
  */
 export async function sendPreparedRequest(input: SendPreparedInput): Promise<ApiResponse> {
   const { request } = input;
-  // The envelope mapper / error builders only read `method` and
-  // `settings.timeoutMs` off this shape; the params/headers/body/auth
-  // fields are already baked into `request`, so the synthetic values
-  // below are never consulted.
+  // 信封映射器与错误构造器只从这个形状读 `method` 与 `settings.timeoutMs`；
+  // params/headers/body/auth 都已并入 `request`，所以下面的占位值永不被查
   const shape: SendInput = {
     method: request.method,
     url: request.url,
@@ -354,7 +319,7 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Api
     {
       method: request.method,
       url: request.url,
-      // `request.headers` is already `[name, value][]` — pass it as-is.
+      // `request.headers` 已是 `[name, value][]`，原样传
       headers: request.headers,
       body: request.body,
       timeoutMs: input.settings.timeoutMs,

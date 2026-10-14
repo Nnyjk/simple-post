@@ -1,18 +1,14 @@
 /**
- * Boot splash gate — tears down the HTML splash from `index.html`.
+ * 启动闪屏闸 —— 拆掉 `index.html` 里的 HTML 闪屏。
  *
- * The splash is static markup rather than a React component on purpose:
- * the single longest phase of a cold start is the entry chunk downloading
- * and executing, and *nothing* rendered from JS is visible during it.
- * Painting from HTML covers that window for free.
+ * 闪屏刻意是静态标记而非 React 组件：冷启动里最长的一个阶段是 entry chunk 的下载与执行，
+ * 而这期间 JS 渲染出的*任何东西*都不可见；用 HTML 上色能白得覆盖这段窗口。
  *
- * That leaves the handoff. Removing the splash the instant React mounts
- * would just move the blank screen a few hundred ms later, because the
- * store still has no data — so the gate waits for the first moment the
- * app can actually show something: `loaded` (data arrived) or
- * `bootstrapError` (it never will, and the banner has to be readable).
+ * 于是只剩交接问题。React 一挂载就移除闪屏，只是把空白屏挪后几百毫秒 —— 那时 store 仍没有
+ * 数据。故本闸等到应用真能显示点什么的第一个时刻：`loaded`（数据到了）或
+ * `bootstrapError`（永远不会有，而横幅必须可读）。
  *
- * Mounted from `App.tsx`; it renders nothing.
+ * 由 `App.tsx` 挂载；它不渲染任何东西。
  */
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/app-store';
@@ -25,9 +21,8 @@ export function BootSplashGate() {
 
   useEffect(() => {
     if (!done) return;
-    // `getElementById` per call rather than a captured ref: the node is
-    // owned by index.html, and looking it up lazily keeps this correct
-    // even if the document was swapped between render and effect.
+    // 每次调用都用 `getElementById` 而非预先捕获的 ref：该节点归 index.html 所有，惰性
+    // 查找使这段代码在渲染与 effect 之间文档被换掉时依然正确。
     document.getElementById('boot-splash')?.remove();
   }, [done]);
 

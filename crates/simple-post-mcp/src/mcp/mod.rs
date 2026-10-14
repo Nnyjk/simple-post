@@ -1,35 +1,19 @@
-//! MCP daemon — top-level entry, dispatch table, shared types.
-//!
-//! File layout:
+//! MCP daemon —— 顶层入口、dispatch 表与共享类型。
 //!
 //! ```text
 //!   mcp/
-//!     mod.rs             ← you are here (entry + dispatch + shared types)
-//!     env_ops.rs         ← 8 env_* tools
-//!     project_ops.rs     ← project / module / collection / endpoint / baseUrlDef
+//!     mod.rs             ← 当前文件（入口 + dispatch + 共享类型）
+//!     env_ops.rs         ← 8 个 env_* 工具
+//!     project_ops/       ← project / module / collection / endpoint / baseUrlDef
 //!     http_ops.rs        ← api_run_request, api_call_endpoint
 //!     variable_fill.rs   ← api_resolve_template / endpoint / validate
 //!     response_parse.rs  ← api_parse_response / diff / extract_jsonpath
 //! ```
 //!
-//! ## Where the storage types come from
-//!
-//! Every domain type, DB function, HTTP executor, variable resolver, response
-//! parser, and permission gate lives in another module:
-//!
-//! | concern            | module                                    |
-//! |--------------------|-------------------------------------------|
-//! | domain types       | `simple_post_core::domain::*`                        |
-//! | storage            | `simple_post_core::db::*`                            |
-//! | HTTP execution     | `simple_post_core::http_executor::*`                 |
-//! | var + baseUrl fill | `crate::variable_fill::*`                 |
-//! | response parse     | `crate::response_parse::*`                |
-//! | permission         | `simple_post_core::permissions::*`                   |
-//! | metrics            | `simple_post_core::mcp_metrics::*`                   |
-//! | errors             | `simple_post_core::error::AppError`                  |
-//!
-//! This module is the glue — nothing domain-shaped is defined here, only
-//! the dispatch wiring and the JSON-RPC envelope types.
+//! 本模块只做胶水，不定义任何域概念：域类型、DB、HTTP 执行、变量解析、响应解析、
+//! 权限全在 `simple_post_core::domain` / `::db` / `::http_executor` / `::permissions`
+//! 与 `crate::variable_fill` / `crate::response_parse` 里，这里只有 dispatch 接线
+//! 和 JSON-RPC 信封类型。
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -46,17 +30,13 @@ pub mod variable_fill;
 use simple_post_core::permissions::{resolve_capability, Capability, CapabilityPolicy};
 
 // =========================================================================
-// Public entry: serve_http
+// 公共入口：serve_http
 // =========================================================================
 
-/// Bind the MCP HTTP daemon on `bind:port` and spawn the axum server.
+/// 在 `bind:port` 上起 MCP HTTP daemon，返回**实际**端口。
 ///
-/// `port = 0` requests an OS-assigned port (useful for tests + the dev
-/// supervisor that records the chosen port in a file). The returned
-/// `u16` is the *actual* port — pass it back to the renderer / proxy so
-/// they can connect.
-///
-/// This is the single entry point `lib.rs::run_mcp` calls.
+/// `port = 0` 表示交给 OS 分配（测试与写端口文件的 dev supervisor 需要）。
+/// `lib.rs::run_mcp` 的唯一入口。
 pub async fn serve_http(
     pool: simple_post_core::db::DbPool,
     port: u16,
@@ -86,30 +66,26 @@ pub async fn serve_http(
 }
 
 // =========================================================================
-// App-wide state
+// 全 daemon 共享状态
 // =========================================================================
 
-/// Per-daemon state shared across every axum handler.
+/// 每个 axum handler 共享的 daemon 状态。
 pub struct AppState {
-    /// DB pool. `r2d2::Pool` is cheap to clone (Arc inside) — `AppState`
-    /// is also wrapped in an Arc, and the router hands out a clone of
-    /// *that* to each handler; we clone the pool again when actually
-    /// touching it.
+    /// DB 连接池。`r2d2::Pool` clone 廉价（内部是 Arc），`AppState` 外面还包了一层
+    /// Arc，router 每个 handler 拿的是那一份的 clone；真正访问时再 clone 一次池。
     pub pool: simple_post_core::db::DbPool,
-    /// Wall-clock anchor for uptime reporting.
+    /// uptime 报告的墙钟锚点。
     pub started_at: Instant,
-    /// Live counters — bumped on every handled request so
-    /// `/mcp/healthz` and the `mcp_status` Tauri command can show them.
+    /// 实时计数器，每处理一个请求就自增，供 `/mcp/healthz` 与 `mcp_status` 展示。
     pub metrics: Arc<simple_post_core::mcp_metrics::McpMetrics>,
 }
 
 // =========================================================================
-// JSON-RPC envelope (re-exported by daemon_http.rs)
+// JSON-RPC 信封（daemon_http.rs 会再导出）
 // =========================================================================
 
-/// JSON-RPC 2.0 response envelope. Exactly one of `result` / `error`
-/// is `Some` — the other is `None` and `#[serde(skip_serializing_if)]`
-/// drops it from the wire.
+/// JSON-RPC 2.0 响应信封。`result` / `error` 恰有一个是 `Some`，另一个为
+/// `None`，被 `#[serde(skip_serializing_if)]` 从线上抹掉。
 #[derive(Debug, Serialize)]
 pub struct JsonRpcResponse {
     pub jsonrpc: &'static str,
@@ -121,7 +97,7 @@ pub struct JsonRpcResponse {
 }
 
 impl JsonRpcResponse {
-    /// Build a successful response.
+    /// 成功响应。
     pub fn ok(id: Option<Value>, result: Value) -> Self {
         Self {
             jsonrpc: "2.0",
@@ -131,7 +107,7 @@ impl JsonRpcResponse {
         }
     }
 
-    /// Build an error response (transport-level, not tool-level).
+    /// 传输层错误响应（不是工具层错误）。
     pub fn err(id: Option<Value>, code: i64, message: impl Into<String>) -> Self {
         Self {
             jsonrpc: "2.0",
@@ -155,19 +131,17 @@ pub struct JsonRpcError {
 }
 
 // =========================================================================
-// MCP tool call result
+// tools/call 的返回值
 // =========================================================================
 
-/// The shape `tools/call` returns in its `result` field. Mirrors the MCP
-/// `CallToolResult` schema (subset — we only emit text content today).
+/// `tools/call` 放在 `result` 里的形状，对应 MCP 的 `CallToolResult`
+/// （子集：目前只发 text content）。
 ///
-/// **`rename_all = "camelCase"` is load-bearing, not style.** The MCP spec
-/// spells the failure flag `isError`. Serialising the Rust field name
-/// verbatim shipped `is_error`, which a spec-compliant client ignores — the
-/// LLM then reads a failed tool call as a success. This struct is the only
-/// thing that shapes a `tools/call` result, so the attribute is the fix;
-/// `CallToolContent`'s `rename_all = "snake_case"` below is unrelated (it
-/// controls the `type` *tag*, whose only variant is `text`).
+/// `rename_all = "camelCase"` 是硬约束，不是风格：spec 里失败标志叫 `isError`，
+/// 原样序列化 Rust 字段名会被合规客户端整个忽略，于是 LLM 把失败的调用读成成功。
+/// 本结构是 `tools/call` result 的唯一塑形来源，所以属性就是全部修复手段。
+/// 下面 `CallToolContent` 的 `rename_all = "snake_case"` 与此无关 —— 它管的是
+/// `type` **标签**，而该标签只有 `text` 一个变体。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
@@ -187,7 +161,7 @@ pub enum CallToolContent {
 }
 
 impl CallToolResult {
-    /// Convenience: success result wrapping a JSON value (serialized as text).
+    /// 成功结果，包一层 JSON 值（序列化成 text）。
     pub fn json(value: impl Serialize) -> Self {
         let text = serde_json::to_string(&value)
             .unwrap_or_else(|e| format!("{{\"__serialize_error\":\"{}\"}}", e));
@@ -197,7 +171,7 @@ impl CallToolResult {
         }
     }
 
-    /// Convenience: success result wrapping a plain string.
+    /// 成功结果，包一段纯文本。
     pub fn text(text: impl Into<String>) -> Self {
         Self {
             content: vec![CallToolContent::Text { text: text.into() }],
@@ -205,9 +179,8 @@ impl CallToolResult {
         }
     }
 
-    /// Convenience: error result. Per spec, `is_error: true` is returned as
-    /// a *successful* tool invocation so the LLM can read the message and
-    /// continue the conversation.
+    /// 错误结果。按 spec，`is_error: true` 仍算一次**成功**的工具调用，
+    /// 这样 LLM 能读到消息并继续对话。
     pub fn err(text: impl Into<String>) -> Self {
         Self {
             content: vec![CallToolContent::Text { text: text.into() }],
@@ -217,22 +190,15 @@ impl CallToolResult {
 }
 
 // =========================================================================
-// Tool descriptor
+// 工具描述符
 // =========================================================================
 
-/// Static description of a registered tool — name, doc string, and the JSON
-/// Schema for its `arguments`. Returned by `tools/list`.
+/// 已注册工具的静态描述 —— 名称、说明、`arguments` 的 JSON Schema，`tools/list` 返回。
 ///
-/// **`rename_all = "camelCase"` is load-bearing.** The MCP spec spells this
-/// field `inputSchema`; emitting `input_schema` makes every compliant client
-/// conclude the tool takes no arguments, so the model has nothing but the
-/// prose description to guess a parameter list from. All 44 tools were
-/// affected at once, which is exactly why it survived so long: nothing in
-/// this crate reads the descriptor back (`Deserialize` is unused), and a
-/// hand-written client reading `input_schema` keeps working.
-///
-/// `descriptor_emits_spec_camel_case_field_names` in `mod_test.rs` locks this
-/// down; without it a future `#[derive]` tidy-up silently re-breaks it.
+/// `rename_all = "camelCase"` 是硬约束：spec 把这个字段写作 `inputSchema`，发出
+/// `input_schema` 会让每个合规客户端都认定该工具没有参数，模型只能从描述文字里
+/// 猜参数列表。本 crate 从不回读 descriptor（`Deserialize` 未使用），所以只有
+/// 断言序列化结果才拦得住 —— 见 `mod_test.rs`。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDescriptor {
@@ -242,17 +208,15 @@ pub struct ToolDescriptor {
 }
 
 // =========================================================================
-// Tool function signature
+// 工具函数签名
 // =========================================================================
 
-/// Every tool funnels through this signature. `args` is the full
-/// `arguments` object the client sent (or `Value::Null` if none). The
-/// handler is responsible for picking out the fields it cares about and
-/// mapping missing / wrong-typed ones into `AppError::Validation`.
+/// 所有工具都走这个签名。`args` 是客户端发来的完整 `arguments`（没有则为
+/// `Value::Null`），缺失/类型不对的字段由 handler 自己归一成
+/// `AppError::Validation`。
 ///
-/// The `'a` HRTB ties the returned future's lifetime to the borrow on
-/// `&AppState` — without it the boxed `dyn Future` would default to
-/// `'static` and the `&AppState` borrow would be rejected.
+/// `'a` 这个 HRTB 把返回 future 的生命周期绑到 `&AppState` 的借用上；去掉它，
+/// boxed `dyn Future` 会退回 `'static`，`&AppState` 借用就过不了编译。
 pub type ToolFn = for<'a> fn(
     state: &'a AppState,
     args: Value,
@@ -264,20 +228,16 @@ pub type ToolFn = for<'a> fn(
     >,
 >;
 
-/// Wrap an `async fn tool_xxx(&AppState, Value) -> Result<...>` into the
-/// boxed-future `ToolFn` shape the dispatch table stores.
-///
-/// Use at every `func:` slot in `table()`:
+/// 把 `async fn tool_xxx(&AppState, Value) -> Result<...>` 包成 dispatch 表
+/// 里存的 boxed-future `ToolFn`。每个 `func:` 槽位都用它：
 ///
 /// ```ignore
 /// ToolEntry { name: ..., func: tool_fn!(tool_xxx), ... }
 /// ```
 ///
-/// `#[macro_export]` puts it at the crate root, so call sites just write
-/// `crate::tool_fn!(...)`. The macro body uses `$crate::mcp::AppState` /
-/// `CallToolResult` and `simple_post_core::error::AppError` so it doesn't depend on
-/// any `use` imports at the call site. `serde_json::Value` is the one
-/// unqualified path — every submodule already imports it.
+/// `#[macro_export]` 把它放在 crate 根，调用处只写 `crate::tool_fn!(...)`。
+/// 宏体里的路径除 `serde_json::Value` 外都带 `$crate::` 前缀，调用方无需任何
+/// `use`；`serde_json::Value` 不带前缀是因为每个子模块都已经 import 了它。
 #[macro_export]
 macro_rules! tool_fn {
     ($f:path) => {{
@@ -302,70 +262,65 @@ macro_rules! tool_fn {
 }
 
 // =========================================================================
-// Dispatch table
+// dispatch 表
 // =========================================================================
 
-/// One row of the dispatch table. Hand-rolled instead of a `HashMap` so the
-/// lookup is branchless and the order of `tools/list` is stable.
+/// dispatch 表的一行。手写而不用 `HashMap`，为了让查表无分支且 `tools/list`
+/// 的顺序稳定。
 pub(crate) struct ToolEntry {
     name: &'static str,
     description: &'static str,
-    /// JSON Schema for the `arguments` object. Kept as a `Value` literal so
-    /// it survives `cargo check` without a `schemars` round-trip.
+    /// `arguments` 对象的 JSON Schema。存成 `Value` 字面量，`cargo check`
+    /// 不需要 `schemars` 往返。
     schema: Value,
     func: ToolFn,
 }
 
-/// The full tool registry. Order here is the order `tools/list` returns
-/// them — we group by category so humans reading `/mcp/tools` see a
-/// clean list.
+/// 完整工具注册表。这里的顺序就是 `tools/list` 的顺序，按类别分组，方便人在
+/// `/mcp/tools` 里看。
 fn tool_table() -> &'static [ToolEntry] {
     static TABLE: std::sync::OnceLock<Vec<ToolEntry>> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
         let mut v = Vec::with_capacity(64);
 
-        // env_ops: 8 tools
+        // env_ops：8 个
         v.extend(env_ops::table());
 
-        // project_ops: project + module + collection + endpoint + baseUrl
+        // project_ops：project + module + collection + endpoint + baseUrl
         v.extend(project_ops::table());
 
-        // http_ops: 2 tools
+        // http_ops：2 个
         v.extend(http_ops::table());
 
-        // variable_fill (MCP adapter): 3 tools
+        // variable_fill（MCP 适配层）：3 个
         v.extend(variable_fill::table());
 
-        // response_parse (MCP adapter): 3 tools
+        // response_parse（MCP 适配层）：3 个
         v.extend(response_parse::table());
 
         v
     })
 }
 
-/// Snapshot of all tool names (for `/mcp/healthz` + sanity checks).
+/// 全部工具名的快照（给 `/mcp/healthz` 与自检）。
 ///
-/// **NOTE:** This returns the full unfiltered registry (every tool the
-/// crate ships), not the user-visible filtered set. Callers that want
-/// the visibility-after-policy set should use [`tool_descriptors`]
-/// instead. Used by healthz + metrics — neither needs the user's view.
+/// **注意**这是未过滤的全量注册表，不是用户在当前策略下看得见的那份；要
+/// 「按策略之后」的那份请用 [`tool_descriptors`]。healthz 与 metrics 都
+/// 不需要用户的视角。
 pub fn registered_tool_names() -> Vec<String> {
     tool_table().iter().map(|e| e.name.to_string()).collect()
 }
 
-/// Map a tool name to the global [`Capability`] class it requires.
+/// 工具名 → 它需要的全局 [`Capability`]。
 ///
-/// This table is **exhaustive**: every entry in [`tool_table`] must appear
-/// here. Both capability gates fail *closed* on a missing entry, so a tool
-/// added to the registry without a capability row is denied rather than
-/// silently exempted. `every_registered_tool_has_a_capability` is the
-/// regression net that keeps the two sets in sync.
+/// **穷尽**：`tool_table()` 里每一条都必须在此有行。两道能力门在缺行时都
+/// *fail closed*，所以少一行的工具是被拒绝，而不是被默认放行；
+/// `every_registered_tool_has_a_capability` 是让两张表同步的回归网。
 ///
-/// (The per-project [`simple_post_core::permissions::required_permission`]
-/// table is a separate, coarser gate — it defaults unknown tools to
-/// `Permission::Full`. This table is what enforces the user's global
-/// `read_only` / `safe_write` / `full_access` choice, so it cannot afford
-/// a default.)
+/// 用户全局 `read_only` / `safe_write` / `full_access` 的执行点在这里，
+/// 因此本表不能有默认值。按项目的
+/// [`simple_post_core::permissions::required_permission`] 是另一道更粗的门
+/// （未知工具默认 `Permission::Full`），两者不要互相顶替。
 pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     // env
     ("env_list", Capability::Read),
@@ -409,10 +364,10 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("base_url_def_update", Capability::Update),
     ("base_url_def_delete", Capability::Delete),
     ("base_url_def_set_default", Capability::Update),
-    // HTTP execution — outbound network calls. Highest trust.
+    // HTTP 执行 —— 唯二会发外网请求的工具，信任级别最高。
     ("api_run_request", Capability::Send),
     ("api_call_endpoint", Capability::Send),
-    // Read-side variable / endpoint helpers
+    // 读侧的变量 / 端点辅助
     ("api_resolve_template", Capability::Read),
     ("api_resolve_endpoint", Capability::Read),
     ("api_validate_endpoint", Capability::Read),
@@ -421,11 +376,8 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("api_extract_jsonpath", Capability::Read),
 ];
 
-/// O(n) lookup over the small `REQUIRED_CAPABILITY` table. Returns
-/// `None` for unrecognised names — callers must handle the conservative
-/// "deny" path themselves. The dispatcher uses this on every
-/// `tools/call`; the table is intentionally linear (one row per
-/// registered tool) so a hash map would be premature optimisation.
+/// 在小表 `REQUIRED_CAPABILITY` 上线性查。未知名返回 `None`，调用方必须自己
+/// 走「拒绝」分支。表只有「每工具一行」这么大，哈希表属于过早优化。
 pub fn required_capability(name: &str) -> Option<Capability> {
     REQUIRED_CAPABILITY
         .iter()
@@ -433,15 +385,12 @@ pub fn required_capability(name: &str) -> Option<Capability> {
         .map(|(_, c)| *c)
 }
 
-/// Snapshot of every tool's full descriptor (for `tools/list` +
-/// `/mcp/tools`). Filters out tools whose required [`Capability`] is
-/// not covered by the **current** [`CapabilityPolicy`] — this is the
-/// single source of truth for the LLM-visible inventory. A misconfigured
-/// policy should never leak a write tool to the AI.
+/// 全部工具描述符的快照（给 `tools/list` 与 `/mcp/tools`）。按当前
+/// [`CapabilityPolicy`] 滤掉策略不覆盖的工具 —— 这是 LLM 可见清单的唯一真相，
+/// 配错的策略绝不能把写工具泄给 AI。
 ///
-/// The default policy when none is set is [`CapabilityPolicy::ReadOnly`]
-/// (safe-by-default). A user who hasn't visited the settings panel yet
-/// sees only the read-only inventory.
+/// 未设置策略时取 [`CapabilityPolicy::ReadOnly`]（safe-by-default）：没进过
+/// 设置面板的用户只看到只读清单。
 pub async fn tool_descriptors(state: &AppState) -> Vec<ToolDescriptor> {
     let policy = resolve_capability(&state.pool, None)
         .await
@@ -449,9 +398,8 @@ pub async fn tool_descriptors(state: &AppState) -> Vec<ToolDescriptor> {
     tool_table()
         .iter()
         .filter(|e| {
-            // Fail **closed**: a registered tool with no capability row is a
-            // registry bug, and hiding it is safer than exposing a write
-            // tool to an AI client that the user's policy never approved.
+            // fail **closed**：注册了却没有 capability 行的工具是注册表 bug，
+            // 藏起来比把用户没批准过的写工具暴露给 AI 客户端安全。
             required_capability(e.name)
                 .map(|req| policy.satisfies(req))
                 .unwrap_or(false)
@@ -464,21 +412,19 @@ pub async fn tool_descriptors(state: &AppState) -> Vec<ToolDescriptor> {
         .collect()
 }
 
-/// Dispatch a `tools/call` by name. Unknown name → `AppError::NotFound`
-/// (mapped to `is_error: true` by the JSON-RPC handler so the LLM sees
-/// the missing tool name).
+/// 按名字 dispatch 一次 `tools/call`。未知名字 → `AppError::NotFound`
+/// （JSON-RPC 层折成 `is_error: true`，LLM 能看到缺的是哪个工具）。
 ///
-/// Applies the global capability gate as a **second** check (the first
-/// is `tool_descriptors` for `tools/list`). A direct `tools/call` to
-/// a write tool while the policy is `ReadOnly` returns
-/// `AppError::PermissionDenied` — the LLM never reaches the handler.
+/// 进 handler 前再过一次全局能力门（`tools/list` 那道在 `tool_descriptors`）。
+/// 策略为 `ReadOnly` 时直接 `tools/call` 一个写工具，拿到的是
+/// `AppError::PermissionDenied`，handler 根本不会执行。
 pub async fn dispatch(
     state: &AppState,
     name: &str,
     args: Value,
 ) -> Result<CallToolResult, simple_post_core::error::AppError> {
-    // Resolve the handler *first* so an unregistered name still returns
-    // `NotFound` rather than being masked by the capability gate.
+    // 先解析 handler：未注册的名字必须回 `NotFound`，而不是被能力门掩盖成
+    // `PermissionDenied`。
     let entry = tool_table()
         .iter()
         .find(|e| e.name == name)
@@ -486,15 +432,9 @@ pub async fn dispatch(
             simple_post_core::error::AppError::NotFound(format!("tool '{name}' not registered"))
         })?;
 
-    // Capability pre-flight: deny before the handler runs, so a
-    // misconfigured LLM that calls `tools/call` directly without
-    // re-reading `tools/list` still cannot mutate. Resolves the
-    // effective policy the same way `tool_descriptors` does — global
-    // preference + (no project here) = just the preference.
-    //
-    // Fails **closed**: a registered tool with no `REQUIRED_CAPABILITY`
-    // row is denied. See that table's docs — the omission is always a
-    // registry bug, never an implicit "allow".
+    // 能力预检：策略取法与 `tool_descriptors` 完全一致（此处无项目维度，只有
+    // 全局偏好），这样不复查 `tools/list` 就直接 `tools/call` 的客户端同样
+    // 无法改动任何东西。缺行 = 拒绝：缺行永远是注册表 bug，不是隐式放行。
     match required_capability(name) {
         Some(req) => {
             let policy = resolve_capability(&state.pool, None).await?;
@@ -520,10 +460,10 @@ pub async fn dispatch(
 }
 
 // =========================================================================
-// Argument helpers (used by every tool impl)
+// 参数辅助函数（每个工具实现都会用）
 // =========================================================================
 
-/// Pull a required string field out of `args`. Missing or wrong-typed → error.
+/// 取必填字符串字段。缺失或类型不对 → error。
 pub fn arg_str<'a>(
     args: &'a Value,
     key: &str,
@@ -533,42 +473,43 @@ pub fn arg_str<'a>(
     })
 }
 
-/// Pull an optional string field. Returns `None` if missing or null.
+/// 取可选字符串字段。缺失或 null 都返回 `None`。
 pub fn arg_str_opt(args: &Value, key: &str) -> Option<String> {
     args.get(key).and_then(Value::as_str).map(String::from)
 }
 
-/// Pull a required u64 field.
+/// 取必填 u64 字段。
 pub fn arg_u64(args: &Value, key: &str) -> Result<u64, simple_post_core::error::AppError> {
     args.get(key).and_then(Value::as_u64).ok_or_else(|| {
         simple_post_core::error::AppError::Validation(format!("missing or non-u64 '{key}'"))
     })
 }
 
-/// Pull an optional u64 field.
+/// 取可选 u64 字段。
 pub fn arg_u64_opt(args: &Value, key: &str) -> Option<u64> {
     args.get(key).and_then(Value::as_u64)
 }
 
-/// Pull a required boolean field.
+/// 取必填布尔字段。
 pub fn arg_bool(args: &Value, key: &str) -> Result<bool, simple_post_core::error::AppError> {
     args.get(key).and_then(Value::as_bool).ok_or_else(|| {
         simple_post_core::error::AppError::Validation(format!("missing or non-bool '{key}'"))
     })
 }
 
-/// Pull an optional boolean field. Defaults to `false` if missing.
+/// 取可选布尔字段，缺失时为 `false`。
 pub fn arg_bool_opt(args: &Value, key: &str) -> bool {
     args.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 // =========================================================================
-// Permission helper — thin wrapper over simple_post_core::permissions so call sites
-// don't need to import it directly.
+// 权限辅助函数 —— simple_post_core::permissions 的薄封装，
+// 免得每个调用处自己 import。
 // =========================================================================
 
-/// Look up the project's stored permission level and compare against the
-/// level required by `tool_name`. On deny, returns `AppError::PermissionDenied`.
+/// 查项目存下来的权限档位，与 `tool_name` 需要的档位比较；不通过则返回
+/// `AppError::PermissionDenied`。调用处**必须**用 `?` 传播 —— 吞掉它就等于
+/// 门形同虚设。
 pub async fn check_permission(
     pool: &simple_post_core::db::DbPool,
     project_id: &str,
@@ -581,7 +522,7 @@ pub async fn check_permission(
 }
 
 // =========================================================================
-// Tests
+// 测试
 // =========================================================================
 
 #[cfg(test)]

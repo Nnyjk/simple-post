@@ -1,14 +1,13 @@
 /**
- * TagInput — controlled chip-based input for a `string[]` value.
+ * TagInput —— 针对 `string[]` 的受控 chip 输入。
  *
- * Behavior:
- *  - Type a token, press Enter or `,` to commit it as a tag.
- *  - Backspace on an empty draft input removes the last tag.
- *  - Click the `x` on a chip to remove that tag.
- *  - Duplicate tags are de-duplicated (case-insensitive).
+ * 行为：
+ *  - 输入一个词，按 Enter 或 `,` 提交成标签。
+ *  - 草稿为空时按 Backspace 删掉最后一个标签。
+ *  - 点 chip 上的 `x` 删掉该标签。
+ *  - 重复标签按不分大小写去重。
  *
- * No new dependencies; styling re-uses the shadcn-style border / muted vars
- * already defined in `globals.css`.
+ * 不引入新依赖；样式复用 `globals.css` 里已有的 shadcn 风格边框 / muted 变量。
  */
 
 import { useState, useRef, type KeyboardEvent, type ClipboardEvent } from 'react';
@@ -21,7 +20,7 @@ export interface TagInputProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
-  /** Max tags allowed; default unlimited. */
+  /** 允许的最多标签数，默认不限。 */
   maxTags?: number;
 }
 
@@ -69,7 +68,7 @@ export function TagInput({
       e.preventDefault();
       removeAt(value.length - 1);
     } else if (e.key === 'Delete' && draft === '' && value.length > 0) {
-      // Allow forward delete on empty draft too.
+      // 草稿为空时也允许向前删除。
       e.preventDefault();
       removeAt(0);
     }
@@ -85,7 +84,7 @@ export function TagInput({
         .map((p) => normalize(p))
         .filter(Boolean);
       if (parts.length === 0) return;
-      // de-dupe against existing
+      // 对已有标签去重
       const seen = new Set(value.map((t) => t.toLowerCase()));
       const merged = [...value];
       for (const p of parts) {
@@ -139,7 +138,7 @@ export function TagInput({
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         onBlur={() => {
-          // Commit any pending draft on blur so users don't lose typed text.
+          // 失焦时提交未决草稿，免得用户打好的文字丢失。
           if (draft.trim()) commit(draft);
         }}
         placeholder={value.length === 0 ? placeholder : ''}

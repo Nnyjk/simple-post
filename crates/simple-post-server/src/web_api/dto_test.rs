@@ -1,23 +1,20 @@
-//! Regression net for the `POST /api/nodes` body contract.
+//! `POST /api/nodes` body 契约的回归网。
 //!
-//! The route used to deserialise `detail` straight into
-//! `simple_post_core::domain::EndpointDetail`, whose `method` has no
-//! `#[serde(default)]`. The tree's "new request" action sends exactly
-//! what the user has typed so far — `detail: { url }` — so the *same*
-//! click created an endpoint in the desktop app (whose command takes
-//! `CreateEndpointDetailOpts`, every field optional) and answered
-//! `400 validation: missing field 'method'` under `serve-web`.
+//! 这些测试把宽容的形状钉在 DTO 边界上：不碰池、不碰 router、不碰 HTTP——body 必须
+//! 能解析，半填的 endpoint 必须能展开成一行带真实 method 的记录。
 //!
-//! These tests pin the tolerant shape at the DTO boundary: no pool, no
-//! router, no HTTP — the body has to parse, and a half-filled endpoint
-//! has to expand into a row with a real method.
+//! 关键点：`detail` 的类型是 `CreateEndpointDetailOpts`（字段全可选），不是
+//! `EndpointDetail`。树的「新建请求」动作发的正是 `detail: { url }`，而
+//! `EndpointDetail` 的 `method` 没有 `#[serde(default)]`，按它解析会把同一次点击变成
+//! 「桌面端建出 endpoint、`serve-web` 回 400」。同理 `rootId` 允许 `null`（"让服务端
+//! 自己推"），因为存储行类型 `ResourceNode.root_id: String` 与 create 调用所知的不是
+//! 同一回事。
 
 use serde_json::json;
 
 use super::NodeCreateBody;
 
-/// A body shaped like the one the tree sends when creating an endpoint:
-/// structural node plus a `detail` carrying nothing but the url.
+/// 树上创建 endpoint 时发的 body 形状：结构节点 + 一个只带 url 的 `detail`。
 fn endpoint_body(detail: serde_json::Value) -> serde_json::Value {
     json!({
         "id": "e1",
@@ -43,8 +40,7 @@ fn accepts_an_endpoint_detail_that_names_only_a_url() {
 
     assert_eq!(row.node_id, "e1");
     assert_eq!(row.url, "");
-    // The whole point: a method the request can actually be sent with,
-    // defaulted rather than demanded from the client.
+    // 要害所在：method 由服务端给出可发送的默认值，而不是向客户端索要。
     assert_eq!(row.method.as_str(), "GET");
 }
 
@@ -57,8 +53,8 @@ fn an_absent_detail_stays_absent_so_a_collection_is_not_given_one() {
 
     let parsed: NodeCreateBody = serde_json::from_value(body).expect("body parses");
 
-    // `db::nodes::create` rejects a collection carrying a detail, so the
-    // DTO must not manufacture one for a node that sent none.
+    // `db::nodes::create` 会拒绝带 detail 的 collection，故 DTO 不能替一个本来没发
+    // detail 的节点凭空造一个。
     assert!(parsed.detail.is_none());
 }
 
@@ -76,12 +72,11 @@ fn a_method_the_caller_did_send_is_kept() {
     assert_eq!(row.url, "/orders");
 }
 
-/// The structural half, on its own: the renderer names a parent and
-/// sends `rootId: null` for "work it out", because the stored row type
-/// (`ResourceNode.root_id: String`) is not the same thing as what a
-/// create call knows. Taking the body as `ResourceNode` turned that
-/// into `400 invalid type: null, expected a string` — on this transport
-/// only, since the Tauri command takes `root_id: Option<String>`.
+/// 只有结构那一半：renderer 指定父节点并把 `rootId` 发成 `null` 表示「你来推」，
+/// 因为存储行的类型（`ResourceNode.root_id: String`）与 create 调用所知的不是同一
+/// 回事。按 `ResourceNode` 取 body 会变成 `400 invalid type: null, expected a
+/// string`——且只在这条 transport 上，因为 Tauri 命令收的是 `root_id:
+/// Option<String>`。
 #[test]
 fn accepts_a_null_root_id_so_the_route_can_derive_it() {
     let mut body = endpoint_body(json!({ "url": "" }));
@@ -91,7 +86,7 @@ fn accepts_a_null_root_id_so_the_route_can_derive_it() {
 
     assert_eq!(parsed.node.root_id, None);
     assert_eq!(parsed.node.parent_id.as_deref(), Some("m1"));
-    // The row the route builds once it has looked the parent up.
+    // 路由查到父节点后构造出的那一行。
     let row = parsed.node.into_node("p1");
     assert_eq!(row.root_id, "p1");
     assert_eq!(row.id, "e1");
@@ -117,7 +112,7 @@ fn a_root_id_the_caller_did_send_is_not_derived_over() {
 
     let parsed: NodeCreateBody = serde_json::from_value(body).expect("body parses");
 
-    // What the route does: derive only when the client left it out.
+    // 路由的做法：只在客户端没给时才推导。
     let root_id = parsed.node.root_id.clone().unwrap_or_default();
     let row = parsed.node.into_node(&root_id);
 

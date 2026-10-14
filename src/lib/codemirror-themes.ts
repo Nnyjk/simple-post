@@ -3,16 +3,14 @@ import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 
 /**
- * CodeMirror light theme + JSON-friendly highlight style.
+ * CodeMirror 亮色主题 + 偏 JSON 的高亮样式。
  *
- * Mirrors the HSL palette in `src/styles/globals.css` so the editor
- * tracks the Tailwind `light` palette without depending on `@uiw/codemirror-theme-*`.
+ * 镜像 `src/styles/globals.css` 里的 HSL 调色板，好让编辑器跟上 Tailwind 的 `light`
+ * 调色板，又不依赖 `@uiw/codemirror-theme-*`。
  *
- * JSON tokens (propertyName / string / number / bool / null / punctuation /
- * bracket) get explicit colors so the syntax highlighting survives the
- * `json()` language extension in light mode — CodeMirror's stock `'light'`
- * theme doesn't style these tokens, which is why JSON looked unstyled
- * before this was added.
+ * JSON token（propertyName / string / number / bool / null / punctuation / bracket）
+ * 逐个指定颜色，这样亮色模式下的 `json()` 语言扩展仍有语法高亮——CodeMirror 自带的
+ * `'light'` 主题不给这些 token 上色。
  */
 const lightEditorTheme = EditorView.theme(
   {
@@ -49,23 +47,19 @@ const lightEditorTheme = EditorView.theme(
 );
 
 const lightJsonHighlight = HighlightStyle.define([
-  // JSON keys (left side of `:`) — match the primary brand blue so users
-  // can quickly scan property names in large payloads.
+  // JSON 键（`:` 左边）——取主品牌蓝，用户扫大 payload 时能一眼扫出属性名
   { tag: t.propertyName, color: 'hsl(217 91% 38%)', fontWeight: '600' },
-  // String values — warm green, easy on the eyes on a white background.
+  // 字符串值——暖绿，白底上不刺眼
   { tag: t.string, color: 'hsl(120 45% 30%)' },
-  // Numbers — orange so they pop without competing with strings.
+  // 数字——橙色，跳出来但不与字符串争
   { tag: t.number, color: 'hsl(20 75% 38%)' },
-  // Booleans / null — purple, bold so JSON literals stand out.
+  // 布尔 / null——紫色加粗，让 JSON 字面量突出
   { tag: [t.bool, t.null, t.atom], color: 'hsl(280 60% 38%)', fontWeight: '600' },
-  // Punctuation / brackets / operators — muted slate, shouldn't compete with values.
+  // 标点 / 括号 / 运算符——灰蓝，不与值争
   { tag: [t.punctuation, t.bracket, t.operator, t.separator], color: 'hsl(240 6% 40%)' },
-  // Comments — slightly muted, italic.
+  // 注释——稍灰，斜体
   { tag: [t.lineComment, t.blockComment], color: 'hsl(240 4% 46%)', fontStyle: 'italic' },
 ]);
 
-/**
- * CodeMirror extension bundle to use in light mode. Pass as the `theme`
- * prop on `<CodeMirror>` (it accepts `string | Extension | Extension[]`).
- */
+/** 亮色模式下用的 CodeMirror 扩展包。作为 `<CodeMirror>` 的 `theme` 属性传入（它接受 `string | Extension | Extension[]`）。 */
 export const lightCodeTheme = [lightEditorTheme, syntaxHighlighting(lightJsonHighlight)];

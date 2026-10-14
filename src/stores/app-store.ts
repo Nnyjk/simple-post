@@ -1,54 +1,38 @@
 /**
- * Simple Post — global app store (Zustand barrel).
+ * Simple Post —— 全局 store（Zustand 桶文件）。
  *
- * --------------------------------------------------------------------------
- * SELECTOR RULES (HARD CONSTRAINT — read before adding new selectors)
- * --------------------------------------------------------------------------
- * Zustand v5 uses `Object.is` to compare selector outputs. Any selector that
- * returns a freshly-allocated value (`.map`, `.filter`, `.sort`, spread, etc.)
- * WILL trigger an infinite re-render loop in the consuming component.
+ * ---------------------------------------------------------------------------
+ * 选择器规则（硬约束——加选择器前先读这段）
+ * ---------------------------------------------------------------------------
+ * Zustand v5 用 `Object.is` 比较选择器的返回值。任何返回新分配值的选择器
+ * （`.map`、`.filter`、`.sort`、展开等）都会让消费它的组件陷入无限重渲染。
  *
- * Therefore:
- *   ✅ ALLOWED:  return raw state references or single `.find()` results
- *                e.g. `s => s.projects`, `s => s.endpoints.find(e => e.id === id)`
- *   ❌ FORBIDDEN: `s => s.endpoints.filter(...)`, `s => [...s.endpoints]`,
- *                 `s => s.endpoints.sort(...)`, anything that allocates.
+ * 因此：
+ *   ✅ 允许：返回 state 原始引用或单个 `.find()` 的结果
+ *            如 `s => s.projects`、`s => s.endpoints.find(e => e.id === id)`
+ *   ❌ 禁止：`s => s.endpoints.filter(...)`、`s => [...s.endpoints]`、
+ *            `s => s.endpoints.sort(...)` 等一切会分配新值的写法
  *
- * All filtering / sorting / grouping that needs derived arrays MUST happen
- * inside the consuming component via `useMemo`, not inside the selector.
+ * 所有需要派生数组的过滤 / 排序 / 分组都必须放在消费组件里用 `useMemo` 做，
+ * 不能放在选择器里。下面导出的几个 `useActive*` 就是标准范式。
+ * ---------------------------------------------------------------------------
  *
- * The three exported `useActive*` selectors below are the canonical pattern.
- * If you need a new selector, follow the same shape (`s => s.x` or
- * `s => s.x.find(...)`). Do not introduce array-derived selectors.
- * --------------------------------------------------------------------------
+ * 切片
+ * ---------------------------------------------------------------------------
+ * store 由五个 slice 工厂组合而成，每个管一块范围明确的状态。工厂是纯函数，
+ * 接受标准 `(set, get, store)` 三元组，返回 state + actions 的部分对象；下面
+ * `create<AppState>((set, get, store) => ({ ...createXxxSlice(...) }))` 做的就是
+ * 把它们并进同一个底层 store。
  *
- * SLICING
- * --------------------------------------------------------------------------
- * The store is composed of five slice creators, each owning a tightly-scoped
- * piece of state. The slice creators are pure factories that take the
- * standard `(set, get, store)` Zustand triple and return a partial state +
- * actions object; merging the slices into one backing store is what
- * `create<AppState>((set, get, store) => ({ ...createXxxSlice(set, get, store) }))`
- * below does.
+ * 每个切片：
+ *   - 只拥有自己声明的 state 和改动这些 state 的动作。
+ *   - 只通过共享的 `AppState` 类型与 store 其余部分耦合，绝不直接 import
+ *     另一个切片模块。
+ *   - 跨切片读用 `get()`，写用 `set()`。
  *
- * Each slice:
- *   - Owns the state it declares and the actions that mutate that state.
- *   - Couples to the rest of the store ONLY via the shared `AppState`
- *     type. It never imports another slice module directly.
- *   - Reads cross-slice state through `get()` and writes via `set()`.
- *
- * Adding new functionality? Pick the slice that best fits (see the
- * header comment of each slice file) and extend it. If you're adding
- * a totally new concern, create a new slice file and append its
- * creator here.
- *
- * Slice inventory:
- *   - `./bootstrap-slice.ts`   — initial-load data + active selection
- *   - `./crud-slice.ts`        — all Tauri-mediated CRUD writes
- *   - `./dirty-tabs-slice.ts`  — dirty-guarded close queue
- *   - `./ui-slice.ts`          — workspace tabs + prefs + new-item modal
- *   - `./mcp-slice.ts`         — MCP daemon polling
- * --------------------------------------------------------------------------
+ * 加新功能时挑最合适的那个切片扩展；是完全新的关注点就新建切片文件，
+ * 并把它的工厂追加到下面。
+ * ---------------------------------------------------------------------------
  */
 
 import { useMemo } from 'react';
@@ -61,28 +45,22 @@ import { createMcpSlice } from './mcp-slice';
 import type { DraftEndpoint } from './store-types';
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
 
-// Compose the AppState type from the intersection of all slices. The slice
-// creators export both their `*Slice` types and the `create*` function;
-// using the `*Slice` types here (rather than `ReturnType<typeof create*>`)
-// gives the IDE better hover info and lets us drop unused imports cleanly.
+// 由各切片的交集组合出 AppState。各切片工厂同时导出自己的 `*Slice` 类型与
+// `create*` 函数；这里用 `*Slice` 类型（而非 `ReturnType<typeof create*>`）
+// 是为了更好的 IDE hover，也能干净地丢掉用不到的 import。
 import type { BootstrapSlice } from './bootstrap-slice';
 import type { CrudSlice } from './crud-slice';
 import type { DirtyTabsSlice } from './dirty-tabs-slice';
 import type { UiSlice } from './ui-slice';
 import type { McpSlice } from './mcp-slice';
 
-/**
- * The composed AppState — intersection of all five slices. Consumers can
- * either use the named selector hooks below (`useActiveProject`, etc.) or
- * pick a raw field via `useAppStore((s) => s.projects)`.
- */
+/** 组合后的 AppState —— 五个切片的交集。 */
 export type AppState = BootstrapSlice & CrudSlice & DirtyTabsSlice & UiSlice & McpSlice;
 
 /**
- * The composed Zustand store. Slice creators are called with the same
- * `(set, get, store)` triple so they all read from and write to the same
- * backing store instance — that's how the cross-slice actions work without
- * any module-level coupling.
+ * 组合后的 Zustand store。各切片工厂拿到同一个 `(set, get, store)` 三元组，
+ * 因此读写的都是同一个底层 store 实例——跨切片动作就是这么实现的，
+ * 模块之间没有任何耦合。
  */
 export const useAppStore = create<AppState>()((set, get, store) => ({
   ...createBootstrapSlice(set, get, store),
@@ -92,23 +70,20 @@ export const useAppStore = create<AppState>()((set, get, store) => ({
   ...createMcpSlice(set, get, store),
 }));
 
-// ---------- selectors ----------
-// IMPORTANT: every selector below returns a raw state reference (or a single
-// `.find()` result). Do not add selectors that allocate new arrays/objects —
-// that will trigger infinite re-renders under Zustand v5.
+// ---------- 选择器 ----------
+// 重要：下面每个选择器都返回 state 原始引用或单个 `.find()` 的结果。
+// 不要加会分配新数组 / 对象的 selector——在 Zustand v5 下会无限重渲染。
 
 /**
- * Currently active project, or `undefined` if `bootstrap()` hasn't run yet
- * (e.g. the very first render before the daemon data arrives). Callers
- * must tolerate `undefined` and render a loading state.
+ * 当前活动项目；`bootstrap()` 还没跑完时为 `undefined`（例如后端数据到达前的
+ * 首次渲染）。调用方必须容忍 `undefined` 并渲染加载态。
  */
 export const useActiveProject = () =>
   useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
 
 /**
- * The currently active workspace tab (raw reference), or `null` when no
- * tab is open. Returned as the `OpenTab` object so consumers can switch
- * on `kind` to pick the right renderer.
+ * 当前活动的工作区标签（原始引用），没有标签打开时为 `null`。返回 `OpenTab`
+ * 对象本身，好让消费方按 `kind` 选渲染器。
  */
 export const useActiveTab = () =>
   useAppStore((s) => s.openTabs.find((t) => t.id === s.activeTabId) ?? null);
@@ -117,26 +92,22 @@ export const useActiveEnvironment = () =>
   useAppStore((s) => s.environments.find((e) => e.id === s.activeEnvironmentId));
 
 /**
- * The node behind the active **saved** endpoint, or `null`.
+ * 活动**已存** endpoint 背后的节点，或 `null`。
  *
- * Answers "a row in `nodes`" only. An unsaved draft endpoint is not one —
- * it exists solely in `draftEndpoints` — so this returns `null` for it by
- * design. Anything that renders an endpoint, rather than reasoning about
- * the database, wants [`useActiveEndpointResource`] instead, which
- * answers for both storage forms in one shape.
+ * 只回答"`nodes` 里的一行"。未保存的 draft endpoint 不是——它只存在于
+ * `draftEndpoints`——所以这里对它返回 `null`，且是设计如此。任何要**渲染**
+ * endpoint 而不是跟数据库较劲的调用方，应该用 [`useActiveEndpointResource`]，
+ * 它用同一种形状回答两种存储形式。
  *
- * One selector, not a joined `{ node, detail }` object. Zustand v5
- * compares selector results with `Object.is`, so building a fresh object
- * here would return a new reference on every store write and re-render
- * every consumer forever. Both halves are stable references instead, and
- * callers that want the pair join them in a `useMemo` — see
- * `useActiveEndpointResource`.
+ * 只有一个选择器，而不是 join 出来的 `{ node, detail }` 对象。Zustand v5 用
+ * `Object.is` 比较选择器结果，在这里新建对象意味着每次写 store 都返回新引用，
+ * 永远重渲染所有消费方。两半都是稳定引用，需要配对的调用方在自己的
+ * `useMemo` 里 join，见 `useActiveEndpointResource`。
  */
 export const useActiveEndpoint = () =>
   useAppStore((s) => {
-    // If the active tab is an endpoint, prefer that id — it stays in sync
-    // with `setActiveEndpoint` (see setActiveEndpoint below) and reflects
-    // the user's actual selection even when there are stale references.
+    // 活动标签是 endpoint 时优先用它——它与 `setActiveEndpoint` 保持同步，
+    // 即使存在陈旧引用也反映用户实际选中的那个。
     const activeTab = s.openTabs.find((t) => t.id === s.activeTabId);
     const id = activeTab?.kind === 'endpoint' ? activeTab.id : s.activeEndpointId;
     if (!id) return null;
@@ -144,7 +115,7 @@ export const useActiveEndpoint = () =>
     return node && node.kind === 'endpoint' ? node : null;
   });
 
-/** The active endpoint's request configuration, or `undefined`. */
+/** 活动 endpoint 的请求配置，或 `undefined`。 */
 export const useActiveEndpointDetail = () =>
   useAppStore((s) => {
     const activeTab = s.openTabs.find((t) => t.id === s.activeTabId);
@@ -153,37 +124,28 @@ export const useActiveEndpointDetail = () =>
   });
 
 // ---------------------------------------------------------------------------
-//  Endpoint resource — saved row or in-memory draft, one shape
+//  endpoint 资源——已存行或内存草稿，统一一种形状
 // ---------------------------------------------------------------------------
 
 /**
- * The endpoint the active tab shows, whether it has been saved yet.
+ * 当前标签显示的 endpoint，不论它是否已保存。
  *
- * WHY THIS IS NOT JUST THE TWO SELECTORS ABOVE
- * --------------------------------------------
- * `createEndpointAt` no longer writes anything: a new endpoint is a
- * `DraftEndpoint` in memory until Save persists it (see
- * `slices/ui-draft-endpoints.ts`). A draft has no `nodes` entry and no
- * `endpoint_details` row, so both selectors above answer "nothing" for
- * one — and every consumer would then have to re-answer "is there
- * something here, and is it saved?" for itself.
+ * **为什么不能只用上面那两个选择器。** 新建 endpoint 在保存前不写任何东西：
+ * 它只是内存里的 `DraftEndpoint`（见 `slices/ui-draft-endpoints.ts`）。草稿既没有
+ * `nodes` 条目也没有 `endpoint_details` 行，上面两个选择器对它都回答"没有"——
+ * 于是每个消费方都得自己再回答一次"这里有东西吗？存过吗？"
  *
- * Synthesising the two missing halves puts a draft in front of consumers
- * as the *same shape* as a saved endpoint. That is not a convenience
- * shortcut: it is what lets the HTTP tester run one code path, so an
- * unsaved endpoint is debuggable with the same editors, the same
- * validation and the same cURL preview as a saved one — which is the
- * entire reason to allow sending before saving.
+ * 补上缺的那两半，草稿就能以**同一种形状**出现在消费方面前。这不是图方便的
+ * 取巧：正是它让 HTTP 测试器只需一条代码路径，未保存的 endpoint 也能用同样的
+ * 编辑器、同样的校验、同样的 cURL 预览来调试——这本来就是允许"先发再存"的
+ * 全部理由。
  *
- * Note what is deliberately *not* synthesised: `params` / `headers` /
- * `body`. Those live in `endpointDrafts[draftId]`, keyed by the same id,
- * and are patch-semantics against the detail this function returns. The
- * tester's existing overlay (`draft?.params ?? detail?.params ?? []`)
- * therefore picks them up untouched, and a draft nobody has edited
- * correctly reports none.
+ * 刻意**不**补的是 `params` / `headers` / `body`：它们在 `endpointDrafts[draftId]`
+ * 里，用同一个 id 作键，且是对本函数返回的 detail 的补丁语义。测试器已有的叠加
+ * （`draft?.params ?? detail?.params ?? []`）因此原样就能取到，没人编辑过的
+ * 草稿也正确地报告"没有"。
  *
- * The allocation is in `useMemo`, never in a selector — see the hard
- * constraint at the top of this file.
+ * 分配发生在 `useMemo` 里，绝不在选择器里——见本文件顶部的硬约束。
  */
 export function useActiveEndpointResource():
   | { id: string; isDraft: true; node: ResourceNode; detail: EndpointDetail }
@@ -202,9 +164,8 @@ export function useActiveEndpointResource():
 
   return useMemo(() => {
     if (tabKind === 'endpoint-draft') {
-      // A draft tab whose document is gone (discarded, or pruned out from
-      // under us) has nothing to show. `null` is the honest answer and
-      // the caller's empty state covers it.
+      // 文档已消失的 draft 标签（被丢弃或被下方清扫剪掉）没东西可显示。
+      // `null` 是诚实的答案，调用方的空状态会接住它。
       if (!draft) return null;
       return { id: draft.id, isDraft: true, node: draftNode(draft), detail: draftDetail(draft) };
     }
@@ -217,12 +178,11 @@ export function useActiveEndpointResource():
 }
 
 /**
- * A draft presented as a tree row.
+ * 把草稿呈现为一棵树节点行。
  *
- * A draft is not in `nodes` and never will be until Save, so `sortOrder`
- * is a placeholder — `addNode` assigns the real one when the row is
- * finally written. `updatedAt` mirrors `createdAt` because nothing has
- * happened to this "row" since it was born.
+ * 草稿不在 `nodes` 里，保存之前也永远不会在，所以 `sortOrder` 是占位值——
+ * 真正写入这行时由 `addNode` 分配。`updatedAt` 照抄 `createdAt`，因为这"一行"
+ * 出生以来什么都没发生过。
  */
 function draftNode(d: DraftEndpoint): ResourceNode {
   return {
@@ -239,12 +199,11 @@ function draftNode(d: DraftEndpoint): ResourceNode {
 }
 
 /**
- * A draft's document fields presented as an `EndpointDetail`.
+ * 把草稿的文档字段呈现为 `EndpointDetail`。
  *
- * `params` / `headers` / `body` start empty on purpose — see the note on
- * `useActiveEndpointResource`. They are not "lost": the request-config
- * editors write them into `endpointDrafts` under this same id, and
- * `saveDraftEndpoint` merges both halves into the single row it writes.
+ * `params` / `headers` / `body` 故意从空开始——见 `useActiveEndpointResource`
+ * 的说明。它们并没有"丢"：请求配置编辑器会写进同一 id 下的 `endpointDrafts`，
+ * 而 `saveDraftEndpoint` 把两半合并成它最终写入的那一行。
  */
 function draftDetail(d: DraftEndpoint): EndpointDetail {
   return {
@@ -263,12 +222,11 @@ function draftDetail(d: DraftEndpoint): EndpointDetail {
   };
 }
 
-// ---------- re-exports for consumer-facing types ----------
-// The slices declare their types alongside their slice creators; this barrel
-// re-exports the ones consumers import directly from `@/stores/app-store` so
-// existing call sites (`type TabKind`, `type OpenTab`, `type NewType`, etc.)
-// don't have to learn the new slice modules. Keeping the import path stable
-// also makes any future slice refactor invisible to consumers.
+// ---------- 面向消费方的类型再导出 ----------
+// 各切片把类型声明在自己的工厂旁边；这个桶再导出消费方直接从
+// `@/stores/app-store` 引入的那些，调用点（`type TabKind`、`type OpenTab`、
+// `type NewType` 等）不必改去认新的切片模块。保持 import 路径稳定，
+// 也让日后任何切片重构对消费方不可见。
 
 export type { Theme, RequestSettings } from './store-types';
 export type { NewDraftKind, TabKind, SettingsCategoryId } from './store-types';

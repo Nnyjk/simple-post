@@ -1,4 +1,4 @@
-// Shared domain types — will be used by both renderer and (later) Rust commands
+// 领域类型，与 simple_post_core::domain 一一对应
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
 
@@ -24,9 +24,9 @@ export type BodyMode = 'none' | 'json' | 'form' | 'raw';
 
 export interface RequestBody {
   mode: BodyMode;
-  // json / form / raw content
+  // json / form / raw 模式下的原始内容
   content: string;
-  // for json mode, optional schema (stringified JSON Schema)
+  // json 模式可选：序列化后的 JSON Schema
   schema?: string;
 }
 
@@ -34,118 +34,93 @@ export type AuthType = 'none' | 'bearer' | 'basic' | 'apikey';
 
 export interface AuthConfig {
   /**
-   * Which scheme is in play. Named `kind` rather than `type` because
-   * `type` is a keyword in Rust too, and a serde `rename` bridging
-   * that gap used to make this field and `ResourceNode.kind` disagree
-   * with their Rust counterparts. Same rule as `ResourceNode.kind`.
+   * 命名 `kind` 而非 `type`（Rust 关键字）；用 serde `rename` 绕过去会让
+   * 它与 `ResourceNode.kind` 的 Rust 对应字段对不上。
    */
   kind: AuthType;
   bearer?: string;
   basic?: { username: string; password: string };
   /**
-   * `in` is a reserved word in TypeScript (`obj.in` will not parse),
-   * so the location is spelled out. A trailing-underscore workaround
-   * does not help: the Rust field would camelCase back to `in`.
+   * `in` 是 TS 保留字（`obj.in` 解析不过），位置直接拼写出来；
+   * 改成尾下划线也不行——Rust 字段 camelCase 回来仍是 `in`。
    */
   apikey?: { key: string; value: string; inLocation: 'header' | 'query' };
 }
 
 /**
- * The three kinds of row the resource tree holds. A module is the
- * top-level branch under a project, a collection nests arbitrarily deep
- * under a module or another collection, and an endpoint is a leaf under
- * a collection — or directly under a module, when it needs no folder of
- * its own.
+ * 资源树的三种行：module 在项目下顶层，collection 可在 module 或
+ * collection 下无限嵌套，endpoint 是叶子，挂 collection 下——
+ * 不需要专门建一层时也可直接挂 module 下。
  *
- * Named `ResourceNodeType` rather than `NodeType` because `tsconfig`
- * includes `"DOM"`, where `Node` is a global interface that would
- * shadow the domain meaning in every file that touches the tree.
+ * 命名 `ResourceNodeType` 而非 `NodeType`：tsconfig 含 `"DOM"`，
+ * `Node` 是全局接口，会在每个碰树的文件里盖掉领域含义。
  */
 export type ResourceNodeType = 'module' | 'collection' | 'endpoint';
 
 /**
- * One row of the resource tree: structure and identity, nothing else.
+ * 资源树的一行：只含结构与身份。
  *
- * This is the TS mirror of `simple_post_core::domain::ResourceNode`.
- * `Module` / `Collection` / `Endpoint` — three separate interfaces over
- * three separate tables — collapsed into this one discriminated shape;
- * the endpoint-only fields moved to {@link EndpointDetail}.
+ * 是 `simple_post_core::domain::ResourceNode` 的 TS 镜像。
+ * `Module` / `Collection` / `Endpoint` 三个接口、三个表合并为这一个
+ * 可辨识联合，endpoint 独有字段挪到 {@link EndpointDetail}。
  */
 export interface ResourceNode {
   id: string;
   /**
-   * Owning project, denormalised onto every node. A single indexed read
-   * answers "which project does this belong to", which is both the store's
-   * project filter and the backend's per-project permission gate.
+   * 归属项目，冗余写在每个节点上：一次索引读即可回答"属于哪个项目"，
+   * 既是 store 的项目过滤条件，也是后端按项目鉴权的 key。
    */
   rootId: string;
   /**
-   * The direct parent node, or `null` for a module — whose parent is the
-   * project rather than another node. A collection's parent is a module
-   * (top level) or another collection (nested); an endpoint's is a
-   * collection or a module. `db::nodes::move_many` refuses any other
-   * combination.
+   * 直接父节点；module 的父级是项目，故为 `null`。collection 的父级是
+   * module（顶层）或 collection（嵌套），endpoint 的是 collection 或
+   * module；其他组合 `db::nodes::move_many` 会拒绝。
    */
   parentId: string | null;
-  /**
-   * Named `kind` because `type` is a Rust keyword; see
-   * {@link AuthConfig.kind} for why the wire name is not worked
-   * around with a serde `rename`.
-   */
+  /** 命名 `kind` 因为 `type` 是 Rust 关键字；不用 serde `rename` 绕，理由同 {@link AuthConfig.kind}。 */
   kind: ResourceNodeType;
   name: string;
   description?: string;
-  /** Position among siblings. Scoped to the parent, not the project. */
+  /** 同级中的序号，作用域是父节点而非项目。 */
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
-  /** Renderer-only expand state. Not persisted. */
+  /** 仅渲染器的展开状态，不落库。 */
   expanded?: boolean;
 }
 
 /**
- * An endpoint's request configuration, keyed by node id.
+ * endpoint 的请求配置，按 node id 单独一行。
  *
- * Split from {@link ResourceNode} because `method` / `url` / `tags`
- * mean nothing for a module — folding them in would give every module
- * and collection row permanently empty columns. The tree only ever
- * renders name / type / sortOrder, so a tree read skips this entirely.
+ * 从 {@link ResourceNode} 拆出：method / url / tags 对 module 无意义，
+ * 混在一起会让每个 module 行多出永久为空的列。树只渲染
+ * name / kind / sortOrder，所以读树不碰这张表。
  */
 export interface EndpointDetail {
   nodeId: string;
   method: HttpMethod;
   /**
-   * The path part of the request URL, **without** any baseUrl. The full
-   * URL is computed at send time by `resolveBaseUrl` (see lib/url).
-   * Stored as a path so the same endpoint can be retargeted between
-   * environments without rewriting the URL.
+   * 请求 URL 的 path 部分，**不含**任何 baseUrl；完整 URL 在发送时由
+   * `resolveBaseUrl`（见 lib/url）算出。存 path 是为了让同一个 endpoint
+   * 换环境时不必重写 URL。
    */
   url: string;
   /**
-   * Environment to inherit `baseUrls` and free-form `variables` from.
-   * `null` (or absent) means "no env selected" — then the variable pool
-   * is empty and no baseUrl resolves (a URL slot without a value is not
-   * a value; see `resolveEndpointBaseUrl`).
+   * 继承 baseUrl 与自由变量 `variables` 的环境。`null`（或缺省）表示
+   * 未选环境——此时变量池为空，也解析不出 baseUrl。
    */
   environmentId?: string | null;
   /**
-   * Which service this endpoint uses. The id names a row of **this
-   * project's** `baseUrlDefinitions`; a service of another project is a
-   * dangling reference and resolves to no baseUrl at all rather than to
-   * another project's host.
+   * 本 endpoint 用的服务，id 指向**本项目**的 `baseUrlDefinitions` 行；
+   * 指向别的项目即为悬挂引用，不会退化成拿别的主机。
    *
-   * `null` (or absent) means "follow the project default service" —
-   * `Project.defaultBaseUrlDefinitionId`. The actual URL is then
-   * `env.moduleBaseUrls[defId][moduleId]`, looked up for the endpoint's
-   * own module. Decoupling the env from the service is what lets one
-   * endpoint keep its "鉴权服务 / 数据服务" semantics while the operator
-   * flips between dev / staging / prod.
+   * `null`（或缺省）表示跟随项目默认服务 `Project.defaultBaseUrlDefinitionId`，
+   * URL 取 `env.moduleBaseUrls[defId][moduleId]`，按 endpoint 自己的模块查。
    */
   baseUrlDefinitionId?: string | null;
   /**
-   * Per-endpoint baseUrl override — wins over the module's service
-   * resolution. Use for one-off hosts (e.g. a staging mirror that
-   * lives in no env). Three-state: `null` = not in custom mode.
+   * 本 endpoint 的 baseUrl 覆盖，优先于模块的服务解析；用于不挂在任何
+   * 环境里的一次性主机。三态：`null` = 不在自定义模式。
    */
   baseUrlOverride?: string | null;
   params: KeyValue[];
@@ -153,39 +128,25 @@ export interface EndpointDetail {
   body: RequestBody;
   auth: AuthConfig;
   docs?: string;
-  /**
-   * Markdown notes for the endpoint. Kept separate from `docs` so the
-   * user can keep the full-page docs untouched while filling in a quick
-   * description inline.
-   */
+  /** Markdown 笔记。与 `docs` 分开存放：整页文档保持不动，描述就地填写。 */
   notes?: string;
   tags: string[];
 }
 
-/**
- * An endpoint node joined with its {@link EndpointDetail} — the shape
- * the HTTP tester and the response viewer work in, where the method and
- * url are needed alongside the node's identity.
- */
+/** endpoint 节点 join 上它的 {@link EndpointDetail}——HTTP 测试器与响应查看器工作的形状，需要 method / url 连同节点身份。 */
 export interface EndpointResource extends ResourceNode {
   detail: EndpointDetail;
 }
 
 /**
- * One named service ("鉴权服务", "数据服务") belonging to a **project**.
+ * 项目级的一个具名服务（"鉴权服务"、"数据服务"）。
  *
- * The service *list* belongs to the project and every module sees all of
- * it: the user asked for exactly that ("服务应该绑定到项目，这样每一个
- * 模块都会全部包含这些服务"), because a per-module list makes two modules
- * that need the same host maintain it twice over.
+ * 列表归项目，所有模块都看得见全部服务；按模块各存一份会让两个用同一主机的
+ * 模块重复维护。留在模块上的是**URL**，见 {@link Environment.moduleBaseUrls}：
+ * 有哪些服务是项目问题，而某环境下"数据服务"指向哪里是
+ * (环境 × 模块 × 服务) 问题。这个不对称就是整个模型。
  *
- * What stays per-module is the *URL*, in {@link Environment.moduleBaseUrls}:
- * which service exists is a project question, but where "数据服务" points
- * for a given environment and a given module is a
- * (环境 × 模块 × 服务) question. That asymmetry is the whole model.
- *
- * Mirrors `BaseUrlDefinition` in
- * `crates/simple-post-core/src/domain.rs`.
+ * 对应 `crates/simple-post-core/src/domain.rs` 的 `BaseUrlDefinition`。
  */
 export interface BaseUrlDefinition {
   id: string;
@@ -197,26 +158,18 @@ export interface Project {
   id: string;
   name: string;
   description?: string;
-  /** @deprecated Use `baseUrlDefinitions` and `Environment.baseUrls[defId]` instead. The `baseUrl` field is kept for backward compatibility; new code should not reference it. */
+  /** @deprecated 改用 `baseUrlDefinitions` + `Environment.moduleBaseUrls`；仅为兼容保留，新代码不要引用。 */
   baseUrl?: string;
   /**
-   * The named baseUrl slots this project exposes. **One list, shared by
-   * every module** — the settings table is the cartesian product of these
-   * services against the project's modules, and the HttpTester picker
-   * lists all of them. Empty when the project hasn't declared any (a
-   * freshly created project starts here; §9 of the v2 contract stopped
-   * `create_with_defaults` from seeding one).
+   * 本项目对外暴露的具名 baseUrl 槽位。**一份列表，全模块共享**——
+   * 设置页表格是这些服务与本项目模块的笛卡尔积，HttpTester 选择器也列出
+   * 全部。新建项目此处为空（v2 契约 §9 起 `create_with_defaults` 不再预置）。
    */
   baseUrlDefinitions: BaseUrlDefinition[];
   /**
-   * The project-wide default service (★) — what an endpoint resolves
-   * through when it names no service itself, i.e.
-   * `baseUrlDefinitionId === null`.
-   *
-   * `null` means "no default", which is a real, intentional state: the
-   * project has services but the user has not starred one, so endpoints
-   * that picked nothing have no baseUrl. Starring is per **project**;
-   * there is no per-module default.
+   * 项目级默认服务（★）——endpoint 未指定服务时按它解析，即
+   * `baseUrlDefinitionId === null`。`null` 是有意状态：有服务但用户没打星，
+   * 未指定服务的 endpoint 就没有 baseUrl。打星是**项目级**的，没有模块级默认。
    */
   defaultBaseUrlDefinitionId: string | null;
   color: string;
@@ -229,34 +182,26 @@ export interface Environment {
   projectId: string;
   name: string;
   /**
-   * @deprecated 扁平值层，**不再读写**。
+   * @deprecated 扁平值层，不再读写。
    *
-   * 它是 (环境 × 模块 × 服务) 那一层出现之前的形状，键只有 `defId`，
-   * 看不见模块，因此无法表达「同一个服务在两个模块指向不同主机」。
-   * 唯一值层是 {@link Environment.moduleBaseUrls}。
+   * 它是 (环境 × 模块 × 服务) 那一层之前的形状：键只有 `defId`，看不见模块，
+   * 表达不了「同一服务在两个模块指向不同主机」。唯一值层是
+   * {@link Environment.moduleBaseUrls}。
    *
-   * 字段仍留在 schema 与线格式里：删列要重建表 = bump `SCHEMA_VERSION`
-   * = `ensure_current_schema` 直接删库。迁移会把历史值搬进
-   * `moduleBaseUrls`，留在 `baseUrls` 里的那份是不再被读取的死数据。
+   * 仍留在 schema 与线格式里：删列要重建表 = bump `SCHEMA_VERSION`
+   * = `ensure_current_schema` 直接删库。迁移把历史值搬进 `moduleBaseUrls`，
+   * 留在 `baseUrls` 的那份是死数据。
    */
   baseUrls: Record<string, string>;
   /**
-   * The one and only URL layer: `serviceId → moduleId → URL`.
+   * 唯一的 URL 层：`serviceId → moduleId → URL`。
    *
-   * Every cell is an independent value. There is **no inheritance and no
-   * fallback** between them — an absent or empty cell means "no value for
-   * this combination", full stop, and deliberately does not borrow the
-   * project default service's cell or any other module's. That is what
-   * lets two modules use the same 服务 name against different hosts.
-   *
-   * `resolveEndpointBaseUrl` reads `moduleBaseUrls[def.id][moduleId]`,
-   * and the settings table writes one cell per (module, service) pair.
+   * 每个格子都是独立值，彼此**不继承也不回退**——缺省或空即"该组合没有值"，
+   * 不会借用项目默认服务或别的模块的格子；两个模块能对同一服务名配不同主机
+   * 就靠这一点。`resolveEndpointBaseUrl` 读 `moduleBaseUrls[def.id][moduleId]`。
    */
   moduleBaseUrls: Record<string, Record<string, string>>;
-  /**
-   * Free-form template variables (e.g. `token`, `apiKey`). baseUrl
-   * values live in `moduleBaseUrls`, not here.
-   */
+  /** 自由模板变量（如 `token`、`apiKey`）。baseUrl 值在 `moduleBaseUrls`，不在这里。 */
   variables: Record<string, string>;
   isActive: boolean;
 }
@@ -268,55 +213,36 @@ export interface ApiResponse {
   sizeBytes: number;
   headers: Record<string, string>;
   body: string;
-  // for JSON content, parsed for pretty view
+  // JSON 响应解析结果，供美化视图用
   bodyJson?: unknown;
-  // for binary or other
   contentType: string;
   error?: string;
-  // ----- request context (optional, set by the sender) -----
-  // Populated by HttpTester.handleSend so response history rows can show
-  // which request produced this response. Optional so existing producers
-  // (real backend, mock senders from other tasks) stay source-compatible.
+  // ----- 请求上下文（可选，由发送方填）-----
+  // HttpTester.handleSend 填，供响应历史行显示这次响应出自哪个请求
   method?: HttpMethod;
   url?: string;
 }
 
 /**
- * One persisted row of an endpoint's send history — the renderer mirror
- * of `ResponseHistoryEntry` in `crates/simple-post-core/src/domain.rs`.
+ * endpoint 发送历史的一行落库记录——`crates/simple-post-core/src/domain.rs`
+ * 里 `ResponseHistoryEntry` 的渲染器镜像。
  *
- * WHY THIS WRAPS `ApiResponse` INSTEAD OF WIDENING IT
- * -------------------------------------------------
- * The two have different lifetimes. `ApiResponse` is the payload: what
- * came back, handed straight to the viewer by `setLastResponse`. `id`,
- * `endpointId`, `createdAt` and `bodyTruncated` are the *row's* identity
- * and provenance — they belong to the fact that a response was recorded,
- * not to the response itself. Splicing them onto `ApiResponse` would give
- * every live response fields that are meaningless until it has been
- * stored (`id`, `createdAt`) or that the viewer has no way to act on
- * (`endpointId` is the map key it is already reached through).
+ * 套一层而不是加宽 `ApiResponse`：后者是当次响应，直接交给查看器；
+ * `id` / `endpointId` / `createdAt` / `bodyTruncated` 是**这行记录的**身份与出处。
  *
- * It is also what makes the history strip able to show *when*: a stored
- * row carries the timestamp the database minted, which is the same
- * instant on every machine reading the same `store.db`.
- *
- * `bodyTruncated` lives here for a second reason: the server clips an
- * oversized body on write and drops `bodyJson` with it, so the row that
- * comes back is NOT always the response the caller sent. Only the
- * persisted entry knows that, and it has to sit next to the body it is
- * describing — see `addResponseHistory`, which swaps its provisional row
- * for the server's once the append resolves.
+ * `bodyTruncated` 尤其只能放在这里：服务端写库时会裁剪超长 body 并连
+ * `bodyJson` 一起丢，所以读回来的行未必等于调用方发的那次响应。
  */
 export interface ResponseHistoryEntry {
-  /** Row id, minted by the server. Stable per entry — use it as a React key. */
+  /** 行 id，服务端生成，每条唯一，当 React key 用。 */
   id: string;
-  /** `nodes.id` of the endpoint this response came from. */
+  /** 来源 endpoint 的 `nodes.id`。 */
   endpointId: string;
-  /** What was stored, which may be a clipped form of what was sent. */
+  /** 实际落库的内容，可能是被裁剪后的形态。 */
   response: ApiResponse;
-  /** The server clipped `response.body`; `response.bodyJson` is gone too. */
+  /** 服务端裁剪了 `response.body`，`response.bodyJson` 一并丢弃。 */
   bodyTruncated: boolean;
-  /** Unix milliseconds, stamped by the database rather than the renderer. */
+  /** Unix 毫秒，由数据库打戳而非渲染器。 */
   createdAt: number;
 }
 
@@ -329,30 +255,26 @@ export interface McpStatus {
 }
 
 /**
- * Persisted configuration of the Streamable-HTTP MCP listener.
+ * Streamable-HTTP MCP 监听器的持久化配置，对应 Rust 的 `McpHttpConfig`
+ * （`#[serde(rename_all = "camelCase")]`）。两处含义超出类型本身：
  *
- * Mirrors the Rust `McpHttpConfig` (`#[serde(rename_all = "camelCase")]`).
- * Two fields carry meaning beyond their type:
- *
- * - `port: 0` means "let the OS assign one". It is deliberately not
- *   persisted as a concrete number, because a daemon port that changes on
- *   every restart must not be written into an AI client's config file
- *   (see AGENTS.md — "an MCP client must not hardcode a daemon port").
- * - `allowRemote` is the second gate on top of `host`: binding a
- *   non-loopback address without it leaves the listener reachable from
- *   the LAN, so the whitelist fields below only matter while it is on.
+ * - `port: 0` = 交给 OS 分配。不固化成具体数字：每次重启都变的端口不能
+ *   写进 AI 客户端的配置文件（见 AGENTS.md「MCP client must not hardcode
+ * a daemon port」）。
+ * - `allowRemote` 是 `host` 之外的第二道闸：绑了非回环地址而不开它，
+ *   监听就暴露到局域网，下面的白名单字段只在开启时才有意义。
  */
 export interface McpHttpConfig {
-  /** Listen address. Loopback-only unless `allowRemote` is also set. */
+  /** 监听地址；未开 `allowRemote` 时仅回环。 */
   host: string;
-  /** `0` = OS-assigned ephemeral port. */
+  /** `0` = 由 OS 分配临时端口。 */
   port: number;
-  /** Route the MCP endpoint is mounted at. Defaults to `/mcp`. */
+  /** MCP 端点挂载路径，默认 `/mcp`。 */
   path: string;
-  /** Opt-in for serving beyond this machine. Defaults to `false`. */
+  /** 是否对外提供服务，默认 `false`。 */
   allowRemote: boolean;
-  /** Accepted `Host` header values. `['*']` disables the check. */
+  /** 接受的 `Host` 头；`['*']` 关闭该检查。 */
   allowedHosts: string[];
-  /** Accepted `Origin` header values. `['*']` disables the check. */
+  /** 接受的 `Origin` 头；`['*']` 关闭该检查。 */
   allowedOrigins: string[];
 }

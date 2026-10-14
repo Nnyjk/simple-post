@@ -18,19 +18,13 @@ import {
 } from './mcp-http-config-form';
 
 /**
- * Streamable-HTTP listener configuration.
+ * Streamable-HTTP 监听配置。
  *
- * This card is **configuration only** — it never starts or stops the
- * daemon. It used to carry its own 启用 switch right above 启动 / 停止 /
- * 重启 in the "MCP 进程" card, and the two drove exactly the same
- * state, so the reader had to work out which one was authoritative.
- * Runtime control now belongs to one card; this one persists what gets
- * read through `mcp_http_config_get` / `mcp_http_config_set`.
+ * 这张卡片**只管配置**，从不启停 daemon。运行期控制只归「MCP 进程」那一张卡片，
+ * 本卡片负责持久化 `mcp_http_config_get` / `mcp_http_config_set` 读写的配置。
  *
- * The listener cannot rebind in place, so saving persists the config and
- * the backend answers with `requiresRestart`; the footer says so and
- * points at the card that owns the restart rather than implying the
- * running service already moved.
+ * 监听无法就地改绑，故保存只落配置，由后端回 `requiresRestart`；页脚照此说明并指向
+ * 拥有重启的那张卡片，不会暗示运行中的服务已经换地址。
  */
 export function McpHttpConfigSection() {
   const [saved, setSaved] = useState<McpHttpConfig | null>(null);
@@ -52,8 +46,7 @@ export function McpHttpConfigSection() {
         setDraft(draftFromConfig(config));
       })
       .catch((e: unknown) => {
-        // The command may be absent in an older backend. Keep the form on
-        // defaults and say so rather than rendering a blank card.
+        // 命令在更旧的后端上可能不存在。让表单留在默认值上并说明，而不是渲染一张空白卡。
         console.error('[mcp http config] hydrate failed', e);
         setLoadError('读取 HTTP 服务配置失败');
         setSaved(DEFAULT_MCP_HTTP_CONFIG);
@@ -68,8 +61,8 @@ export function McpHttpConfigSection() {
     hydrate();
   }, [hydrate]);
 
-  // Derived, not stored: a selector-free `useMemo` over local form state,
-  // so there is no new-array-in-a-Zustand-selector hazard here.
+  // 派生而非存储：对本地表单状态做一个不碰 selector 的 `useMemo`，故这里不存在
+  // 「Zustand selector 里新建数组」那个坑。
   const dirty = useMemo(() => (saved ? isDraftDirty(draft, saved) : false), [draft, saved]);
   const error = useMemo(() => draftError(draft), [draft]);
   const remoteRedundant = !draft.allowRemote && isLoopbackHost(draft.host);
@@ -91,8 +84,8 @@ export function McpHttpConfigSection() {
         COMMANDS.mcpHttpConfigSet,
         { config },
       );
-      // Trust the backend's echo — it normalises (trim / default path),
-      // so re-seeding from it keeps the dirty flag honest.
+      // 采信后端的回显 —— 它做过规范化（trim / 默认路径），据它重新播种才能让「已修改」
+      // 标志保持诚实。
       const next = result.config ?? config;
       setSaved(next);
       setDraft(draftFromConfig(next));
@@ -111,7 +104,7 @@ export function McpHttpConfigSection() {
       description="监听地址、端口、MCP 路径与访问白名单"
       icon={<Server className="h-3.5 w-3.5" />}
     >
-      {/* ----- listener ---------------------------------------- */}
+      {/* ----- 监听 ------------------------------------------- */}
       <div className="space-y-3 p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="text-[11px] font-medium text-muted-foreground">监听配置</div>
@@ -164,7 +157,7 @@ export function McpHttpConfigSection() {
         </div>
       </div>
 
-      {/* ----- remote access ------------------------------------ */}
+      {/* ----- 远程访问 --------------------------------------- */}
       <div className="space-y-3 border-t border-border/60 p-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
@@ -211,7 +204,7 @@ export function McpHttpConfigSection() {
         )}
       </div>
 
-      {/* ----- save ------------------------------------------------ */}
+      {/* ----- 保存 --------------------------------------------- */}
       <div className="flex items-center justify-between gap-3 border-t border-border/60 p-3">
         <div className="min-w-0 flex-1 text-[11px] text-muted-foreground">
           {saveError ? (
@@ -240,7 +233,7 @@ export function McpHttpConfigSection() {
   );
 }
 
-/** Label-above-control field, matching the settings rows elsewhere. */
+/** 标签在控件上方的字段，与设置面板别处的行一致。 */
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block min-w-0">
@@ -252,12 +245,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /**
- * One whitelist textarea.
+ * 一个白名单文本域。
  *
- * There is no shared `Textarea` primitive in `components/ui/` and adding
- * one would be dead weight for a single caller (the `dead-components`
- * sentinel aside, it is a wider API surface than the feature needs), so
- * this mirrors `Input`'s class contract inline.
+ * `components/ui/` 里没有共享的 `Textarea` 原语，而为唯一调用方加一个只是死重量
+ * （不算 `dead-components` 那条哨兵，它的 API 面比这个特性需要还宽），故这里内联镜像
+ * `Input` 的类名约定。
  */
 function ListTextarea({
   value,

@@ -1,30 +1,21 @@
-//! `endpoint_*` tool regression tests — mounted from `endpoint.rs` with
-//! `#[cfg(test)] #[path = "endpoint_test.rs"] mod tests;`.
+//! `endpoint_*` 工具回归测试 —— 由 `endpoint.rs` 以
+//! `#[cfg(test)] #[path = "endpoint_test.rs"] mod tests;` 挂载。
 //!
-//! The three groups here each guard a defect that shipped as a
-//! *successful* response:
+//! 下面三组各自守住一类「以**成功**响应收场」的缺陷：
 //!
-//! 1. **Malformed patches were swallowed.** Every patch field was read
-//!    with `.and_then(|v| serde_json::from_value(v).ok())`, which turns
-//!    a deserialisation failure into "leave this column alone". An agent
-//!    that sent `{"params":[{"k":"a","v":"1"}]}` — wrong field names —
-//!    got `is_error: false` and no write, and could not tell that from a
-//!    patch that worked. These tests assert the opposite: a malformed
-//!    field is a `Validation` error naming the field and the shape.
+//! 1. **畸形 patch 被吞掉。** 每个 patch 字段都用
+//!    `.and_then(|v| serde_json::from_value(v).ok())` 读，于是反序列化失败变成
+//!    「这一列别动」。agent 发来 `{"params":[{"k":"a","v":"1"}]}`（字段名写错）会拿到
+//!    `is_error: false` 且什么都没写，且无法与真正生效的 patch 区分。这些测试断言的是
+//!    相反的行为：字段畸形必须是点名该字段与期望形状的 `Validation` 错误。
 //!
-//! 2. **The build surface was unreachable or unwritable.** `docs` /
-//!    `notes` were hardcoded to `None` in the patch, so no tool could
-//!    ever write them; `environment_id` / `base_url_definition_id` /
-//!    `base_url_override` were settable only through the same lossy
-//!    reader. These tests walk the whole 配置 surface and assert each
-//!    field actually lands.
+//! 2. **搭建接口够不到或写不进。** patch 里 `docs` / `notes` 被写死成 `None`，任何工具
+//!    都写不了它们；`environment_id` / `base_url_definition_id` / `base_url_override`
+//!    只能经同一个有损读取器设置。这些测试把整张配置面走一遍，逐个断言字段真的落库。
 //!
-//! 3. **`endpoint_list` / `endpoint_search` gated against the literal
-//!    `"global"`.** `"global"` is not a project id, so the per-project
-//!    lookup found no row and fell back to the default permission. A
-//!    scope given as `collection_id` / `module_id` was not resolved to
-//!    its owner at all, so the real project's permission was never
-//!    consulted.
+//! 3. **`endpoint_list` / `endpoint_search` 曾拿字面量 `"global"` 过门。** `"global"`
+//!    不是项目 id，按项目的那次查询找不到行、退回默认档位；而以 `collection_id` /
+//!    `module_id` 给出的范围根本没被解析成它的归属，真实项目的权限因此一次也没被查过。
 
 use super::*;
 use crate::mcp::AppState;
@@ -58,8 +49,7 @@ fn state() -> std::sync::Arc<AppState> {
     })
 }
 
-/// `Project` has no `Default` (every field is meaningful), so build the
-/// minimal row the fixtures need.
+/// `Project` 没有 `Default`（每个字段都有意义），所以手工造出 fixture 所需的最小行。
 fn bare_project(id: &str, name: &str) -> Project {
     Project {
         id: id.into(),
@@ -106,11 +96,10 @@ fn bare_detail(node_id: &str) -> EndpointDetail {
     }
 }
 
-/// A project + module + collection + endpoint, already granted `Full` so
-/// the mutating tools are not stopped by Gate B before the behaviour under
-/// test is reached.
+/// 一个项目 + 模块 + 集合 + 端点，并且已授予 `Full` —— 好让改写类工具不会在到达被测
+/// 行为之前就被 Gate B 拦下。
 ///
-/// Returns the endpoint id.
+/// 返回端点 id。
 fn fixture() -> (std::sync::Arc<AppState>, String) {
     let st = state();
     simple_post_core::db::with_tx(&st.pool, |c| {
@@ -140,7 +129,7 @@ fn fixture() -> (std::sync::Arc<AppState>, String) {
             ),
             Some(&bare_detail("e_ep_fix")),
         )?;
-        // Gate B's default is ReadCall, which is below the Full an update
+        // Gate B 默认是 ReadCall，低于更新所需的 Full —— 只能在项目行存在之后设置。
         // requires. `agent_permissions.project_id` is an FK to projects,
         // so this can only be set once the project row exists.
         permissions::set(c, "p_ep_fix", Permission::Full)?;
@@ -155,7 +144,7 @@ fn detail_of(st: &AppState, id: &str) -> EndpointDetail {
 }
 
 // =========================================================================
-// 1. Malformed patches must be loud errors, not silent no-ops
+// 1. 畸形 patch 必须是响亮的错误，而不是静默的无操作
 // =========================================================================
 
 /// The headline defect. `{"k":"a","v":"1"}` is what an LLM writes first;
@@ -177,13 +166,13 @@ async fn endpoint_update_rejects_malformed_params_instead_of_ignoring_it() {
     let Err(AppError::Validation(msg)) = res else {
         panic!("expected a Validation error, got {res:?}");
     };
-    // The message has to name the field, or the agent cannot tell which
+    // 消息必须点名字段，否则 agent 分不清十五个 patch 字段里错的是哪一个。
     // of its fifteen patch fields was wrong.
     assert!(
         msg.contains("'params'"),
         "error must name the offending field, got: {msg}"
     );
-    // …and say what was expected, so the retry is possible without
+    // ……并且说清期望形状，这样不必去读工具的 Rust 源码就能重试。
     // reading the tool's Rust source.
     assert!(
         msg.contains("key") && msg.contains("value"),
@@ -364,10 +353,10 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
     assert_eq!(d.method, HttpMethod::Post);
     assert_eq!(d.url, "/api/users/{id}");
 
-    // Query params. The rows were authored without `id`/`enabled`, the
+    // Query 参数。这些行没写 `id`/`enabled`，正是 agent 会写出的形状 ——
     // two fields `KeyValue` requires and an agent has no reason to know
-    // about — the coercion mints the first and defaults the second to
-    // `true` (a header stored disabled is a header never sent).
+    // 转换器补铸前者、把后者默认成
+    // `true`（存成禁用的请求头就是一个永远发不出去的请求头）。
     assert_eq!(d.params.len(), 2);
     let page = d.params.iter().find(|kv| kv.key == "page").expect("page");
     assert_eq!(page.value, "1");
@@ -386,7 +375,7 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
         .iter()
         .any(|kv| kv.key == "Content-Type" && kv.value == "application/json"));
 
-    // Body: mode, content and schema — all three, not just the first two
+    // Body：mode、content、schema 三项都要写，不能只前两个。
     // `endpoint_create` could reach.
     assert_eq!(d.body.mode, BodyMode::Json);
     assert_eq!(d.body.content, "{\"name\":\"ada\"}");
@@ -410,8 +399,8 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
         Some("https://staging.example.com")
     );
 
-    // docs / notes were hardcoded to `None` in the old patch builder, so
-    // no tool could ever write them.
+    // docs / notes 在旧 patch 构造器里被写死成 `None`，于是没有任何工具写得动它们。
+
     assert_eq!(d.docs.as_deref(), Some("Creates a user."));
     assert_eq!(d.notes.as_deref(), Some("checked by hand"));
 
@@ -552,8 +541,8 @@ async fn a_collection_scope_resolves_to_its_owning_project() {
     );
 
     // Granted: `p_b` — the endpoint's REAL owner — is now Full. This is
-    // the assertion that would fail if the handler gated against a
-    // fabricated id: granting the true owner would have no effect.
+    // 这条断言会在 handler 拿一个编造的 id 过门时失败：
+    // 给真正的归属方授权将毫无作用。
     simple_post_core::db::with_tx(&st.pool, |c| permissions::set(c, "p_b", Permission::Full))
         .unwrap();
     tool_endpoint_update(
@@ -563,7 +552,7 @@ async fn a_collection_scope_resolves_to_its_owning_project() {
     .await
     .expect("granting the true owning project must unlock its endpoints");
 
-    // The list call resolves the same scope and must therefore succeed.
+    // list 调用解析同一个范围，因此必须成功。
     assert!(
         tool_endpoint_list(&st, serde_json::json!({ "collection_id": "c_b" }))
             .await
@@ -656,7 +645,7 @@ async fn endpoint_search_gates_under_its_own_tool_name() {
         Ok(())
     })
     .unwrap();
-    // The project sits at the default `ReadCall`. Search requires Read,
+    // 项目停在默认 `ReadCall`。搜索要求 Read，
     // so it passes; what matters is that the *search* row was consulted,
     // which is asserted structurally below.
     assert_eq!(
@@ -717,8 +706,8 @@ async fn two_endpoint_creates_in_the_same_millisecond_get_distinct_ids() {
         ids.len(),
         "every create must get its own id; got {ids:?}"
     );
-    // The `ep_` prefix is part of the convention the sibling create tools
-    // follow, so widening the id must not lose it.
+    // `ep_` 前缀是同级创建工具遵循的约定的一部分，所以放宽 id 也不能丢掉它。
+
     assert!(
         ids.iter().all(|id| id.starts_with("ep_")),
         "endpoint ids must keep the ep_ prefix; got {ids:?}"
@@ -726,7 +715,7 @@ async fn two_endpoint_creates_in_the_same_millisecond_get_distinct_ids() {
 }
 
 // =========================================================================
-// 5. `endpoint_create` accepts the full configuration in one call
+// 5. `endpoint_create` 一次调用即可接受完整配置
 // =========================================================================
 
 /// `endpoint_create` previously hardcoded `environment_id`,
@@ -852,9 +841,9 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
     let props = &descriptor["properties"];
 
     // `params` / `headers` share one `$defs` entry, so the item shape is
-    // spelled out once and referenced. What matters is that it is
-    // *resolvable* — an agent following the `$ref` must land on a real
-    // definition carrying the field names, not a bare `{"type":"object"}`.
+    // 完整写出再被引用。关键在于它**可解析** —— 跟着 `$ref` 走的 agent 必须落到
+    // 一个真实携带字段名的定义上，而不是一个光秃秃的
+    // `{"type":"object"}`。
     let params_ref = props["params"]["items"]["$ref"]
         .as_str()
         .expect("params items must $ref the keyValue definition");
@@ -878,7 +867,7 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
         serde_json::json!(["key", "value"])
     );
 
-    // The enum must match what the parser actually accepts. Both are
+    // 枚举必须与解析器实际接受的完全一致。
     // derived from `domain::BodyMode` / `domain::AuthType`.
     assert_eq!(
         props["body_mode"]["enum"],
@@ -888,7 +877,7 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
         props["auth_type"]["enum"],
         serde_json::json!(["none", "bearer", "basic", "apikey"])
     );
-    // Every value the schema advertises must parse.
+    // schema 声明的每个取值都必须能解析。
     for mode in props["body_mode"]["enum"].as_array().expect("enum") {
         let s = mode.as_str().expect("string");
         assert!(
@@ -911,7 +900,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
     let patch_props = &descriptor["properties"]["patch"]["properties"];
 
     // Every field `tool_endpoint_update` accepts, and no field it does
-    // not — the two lists drifting apart is what makes a schema a lie.
+    // —— 两份列表一旦漂移，schema 就是在撒谎。
     let mut documented: Vec<&str> = patch_props
         .as_object()
         .expect("patch properties")
@@ -949,7 +938,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
         patch_props["auth"]["properties"]["kind"]["enum"],
         serde_json::json!(["none", "bearer", "basic", "apikey"])
     );
-    // The nullable fields must document that `null` clears them — that
+    // 可空字段必须写明 `null` 表示清空 ——
     // three-state meaning is invisible on the wire otherwise.
     assert_eq!(patch_props["environment_id"]["type"][1], "null");
     assert_eq!(patch_props["base_url_override"]["type"][1], "null");

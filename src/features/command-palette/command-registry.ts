@@ -1,19 +1,15 @@
 /**
- * Command registry for the Command Palette (Ctrl/Cmd + K).
+ * 命令面板（Ctrl/Cmd + K）的命令注册表。
  *
- * The registry exposes a single factory `buildCommands(state)` that returns a
- * flat list of `Command` items — both static actions (open settings, switch
- * theme, ...) and state-derived navigation entries (jump to endpoint, switch
- * active environment, ...). The palette then performs a single fuzzy match
- * pass over the combined list.
+ * 单一工厂 `buildCommands()` 返回扁平 `Command` 列表 —— 既有静态动作（打开设置、切主题…），
+ * 也有由状态派生的导航项（跳到接口、切环境…）；面板再对合并后的列表做一次模糊匹配。
  *
- * Conventions:
- *  - `id` must be unique across the list (used as React key + de-dup marker).
- *  - `title` is the user-facing label; `hint` is a secondary line (right side).
- *  - `run` is invoked when the user activates the row. It may read latest state
- *    via `useAppStore.getState()` so we never capture a stale snapshot.
- *  - `section` is a coarse grouping ("导航", "命令") used only for the result
- *    list header — matching is unaffected.
+ * 约定：
+ *  - `id` 全表唯一（既作 React key 也作去重标记）。
+ *  - `title` 是主标签，`hint` 是右侧副标签。
+ *  - `run` 在用户激活该行时调用；需要最新状态就读 `useAppStore.getState()`，
+ *    不要捕获快照。
+ *  - `section` 只用于结果列表的分组标题（"导航" / "命令"），不影响匹配。
  */
 
 import { useAppStore } from '@/stores/app-store';
@@ -26,35 +22,29 @@ export interface Command {
   title: string;
   hint?: string;
   section: CommandSection;
-  /** Optional keywords appended to the search haystack (lowercased). */
+  /** 追加进搜索范围的关键词（已转小写）。 */
   keywords?: string[];
   run: () => void;
 }
 
-/** Snapshot shape needed by `buildCommands`. */
+/** `buildCommands` 需要的快照形状。 */
 interface RegistryState {
   projects: Project[];
   activeProjectId: string;
   activeEnvironmentId: string;
   environments: { id: string; projectId: string; name: string }[];
-  /** The whole tree, flat. One array for all three node types. */
+  /** 整棵树，打平；三种节点类型同在一个数组里。 */
   nodes: ResourceNode[];
-  /** Endpoint request configuration, keyed by node id. */
+  /** 接口的请求配置，按 node id 索引。 */
   endpointDetails: Record<string, EndpointDetail>;
 }
 
-/**
- * The project an endpoint belongs to.
- *
- * Was a three-hop walk (endpoint → collection → module → project) that
- * existed only because the owner was not recorded. `rootId` is
- * denormalised onto every node, so this is now a field read.
- */
+/** 接口所属项目 —— 每行节点都带着反规范化的 `rootId`，读字段即可。 */
 function endpointProjectId(endpointId: string, s: RegistryState): string | null {
   return s.nodes.find((n) => n.id === endpointId)?.rootId ?? null;
 }
 
-/** Build the full command list. Call once per palette open (cheap, ~tens of items). */
+/** 生成完整命令列表。面板每次打开调一次即可（几十条，很便宜）。 */
 export function buildCommands(): Command[] {
   const s = useAppStore.getState();
   const cmds: Command[] = [];
@@ -67,10 +57,8 @@ export function buildCommands(): Command[] {
       hint: '切换项目',
       section: '导航',
       keywords: ['project', '项目', p.description ?? ''],
-      // `openProject`, not `setActiveProject`: picking a project from the
-      // palette is the same gesture as picking it from the welcome
-      // picker or the top bar, and all three must land on the same
-      // state (this project's tab active, tree scoped to it).
+      // 用 `openProject` 而非 `setActiveProject`：从面板选项目与欢迎页选择器、顶栏
+      // 是同一个动作，三处必须落到同一状态（该项目的标签激活、树按它收窄）。
       run: () => useAppStore.getState().openProject(p.id),
     });
   }
@@ -181,10 +169,8 @@ export function buildCommands(): Command[] {
 
   // ---------- 命令：新建接口 ----------
   {
-    // Creating an endpoint asks nothing, so the palette needs a parent
-    // and then just fires the action. The first collection of the project
-    // is the natural home; a project with no collection yet falls back to
-    // its first module, which is a legal parent in its own right.
+    // 新建接口不询问任何信息，故面板只需给出一个父节点就能触发动作。取项目第一个集合
+    // 作为归宿；项目还没有集合则回落到第一个模块 —— 模块本身也是合法父节点。
     const firstCol = s.nodes.find((n) => n.kind === 'collection' && n.rootId === s.activeProjectId);
     const firstMod = firstCol
       ? s.nodes.find((n) => n.id === firstCol.parentId)
@@ -198,9 +184,7 @@ export function buildCommands(): Command[] {
       keywords: ['new', 'create', 'add', 'endpoint', '接口', 'request', '新建'],
       run: () => {
         if (!parent) return;
-        // No rename target here (the palette has no tree row), but the
-        // endpoint's title in the workspace is editable, and it opens its
-        // own tab ready to use.
+        // 面板里没有树行，故无重命名目标；但接口标题在工作区可改，且会直接开好标签。
         void useAppStore.getState().createEndpointAt(parent.id);
       },
     });

@@ -1,35 +1,26 @@
-//! CRUD for the `base_url_definitions` table.
+//! `base_url_definitions` 表的 CRUD。
 //!
-//! A service is owned by the **project**, and every module sees the whole
-//! list — the user's rule is 「服务应该绑定到项目，这样每一个模块都会全部包含
-//! 这些服务」. So there is no module filter here at all: two services in one
-//! project cannot share a `name`, and an endpoint's
-//! `base_url_definition_id` means the same thing wherever the endpoint
-//! sits, which is what lets a drag between modules keep working without
-//! re-pointing anything.
+//! 服务由**项目**拥有，每个模块都能看到整张列表——用户的规则是「服务应该绑定到项目，
+//! 这样每一个模块都会全部包含这些服务」。故此处完全没有按模块过滤：同一项目里两个服务
+//! 不可能同名，而 endpoint 的 `base_url_definition_id` 无论 endpoint 挂在哪里都指同一个
+//! 服务，这正是模块之间的拖拽无需改指任何东西也能继续工作的原因。
 //!
-//! The URL a service resolves to is not in this table. It is the
-//! (environment × module × service) cell in
-//! `super::environments::module_base_urls`; ★ lives on the project
-//! (`projects.default_base_url_definition_id`), not on a row.
+//! 服务解析到的 URL 不在这张表里，它是 `super::environments::module_base_urls` 里的
+//! (环境 × 模块 × 服务) 单元格；★ 住在项目上（`projects.default_base_url_definition_id`），
+//! 而不在某一行上。
 //!
-//! `module_id` and `is_default` still exist as columns because a build
-//! shipped with them and dropping them would mean a rebuild would mean a
-//! `SCHEMA_VERSION` bump would mean `ensure_current_schema` deletes the
-//! user's store. [`list_by_project`] and [`get`] deliberately do not read
-//! them, and nothing here writes them.
+//! `module_id` 与 `is_default` 仍是表里的列，因为带它们的构建曾经发布过，而删列 = 重建表 =
+//! bump `SCHEMA_VERSION` = `ensure_current_schema` 删掉用户的库。[`list_by_project`] 与
+//! [`get`] 刻意不读它们，此处也没有任何地方写它们。
 
 use rusqlite::{params, Connection, Row};
 
 use crate::domain::BaseUrlDefinition;
 use crate::error::AppError;
 
-// -------------------------------------------------------------------------
-// Reads.
-// -------------------------------------------------------------------------
+// 读。
 
-/// All definitions for a project, ordered by `sort_order` (so the
-/// picker matches the order the user originally set them in).
+/// 某项目的全部服务定义，按 `sort_order` 排序（使选择器与用户当初设置的顺序一致）。
 pub fn list_by_project(
     conn: &mut Connection,
     project_id: &str,
@@ -58,10 +49,8 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<BaseUrlDefinition, AppErro
     }
 }
 
-/// The project a definition belongs to. Callers need this to gate a
-/// mutation on the owning project — `BaseUrlDefinition` deliberately does
-/// not carry `project_id`, so this is the only way to recover it from a
-/// definition id alone.
+/// 一个定义所属的项目。调用方需要它来把改动关在所属项目内——`BaseUrlDefinition` 刻意不
+/// 带 `project_id`，故这是仅凭定义 id 恢复它的唯一办法。
 pub fn project_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
     let pid: Option<String> = conn
         .query_row(
@@ -76,17 +65,14 @@ pub fn project_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError
     }
 }
 
-// -------------------------------------------------------------------------
-// Writes.
-// -------------------------------------------------------------------------
+// 写。
 
 pub fn create(
     conn: &mut Connection,
     def: &BaseUrlDefinition,
     project_id: &str,
 ) -> Result<(), AppError> {
-    // `sort_order` defaults to 0 on insert (per the schema). Re-numbers
-    // can be applied with `reorder` if the renderer asks for it.
+    // 插入时 `sort_order` 按 schema 取默认 0。渲染层若要重新编号，可用 `reorder`。
     conn.execute(
         "INSERT INTO base_url_definitions (id, project_id, name, description) \
          VALUES (?1, ?2, ?3, ?4)",
@@ -133,23 +119,18 @@ pub fn update(
 }
 
 pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
-    // ★ points at a row here, so deleting the row has to take the pointer
-    // with it. Leaving it would not crash — resolution treats an unknown
-    // service as "no base URL" — but the project would keep advertising a
-    // default that no longer exists, and the ★ menu would render a ghost
-    // entry until someone clicked it. One `UPDATE`, no promotion: with a
-    // single ★ per project there is nothing to promote it to.
+    // ★ 指着这里的一行，所以删行必须把指针一并带走。留着也不会崩——解析把未知服务当作
+    // 「没有 base URL」——但项目会继续宣传一个已不存在的默认，★ 菜单里会渲染出一个幽灵条目
+    // 直到有人点了它。一次 `UPDATE`，不做提升：每项目只有一个 ★，没有可提升的对象。
     let mut tx = conn.savepoint()?;
     let removed = tx.execute(
         "DELETE FROM base_url_definitions WHERE id = ?1",
         params![id],
     )?;
     if removed == 0 {
-        // Nothing matched: roll the savepoint back rather than reporting
-        // success, so a typo'd id is a NotFound like every other CRUD
-        // call here. The star update below would otherwise be what decides
-        // it, and it matches nothing whenever another service holds the
-        // star — i.e. exactly when the delete *did* have work to do.
+        // 没匹配上：回滚 savepoint 而不是报成功，好让一个打错的 id 像这里其他 CRUD 调用
+        // 一样是 NotFound。否则反而是下面的 ★ 更新在决定结果，而只要 ★ 握在别的服务手里
+        // 它就一条也匹配不上——恰好就是删除**确实**有活要干的时候。
         tx.rollback()?;
         return Err(AppError::NotFound(format!("base_url_definition {id}")));
     }
@@ -162,17 +143,13 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Mark `id` as the project's ★ service. Updates
-/// `projects.default_base_url_definition_id` only; envs and other
-/// defs are untouched.
+/// 把 `id` 标为项目的 ★ 服务。只更新 `projects.default_base_url_definition_id`；
+/// 环境与其他定义一概不动。
 ///
-/// ★ is project-scoped, not row-scoped: the service list is shared by
-/// every module, so a per-service flag would make the "default" mean
-/// different things to different modules. What an endpoint naming no
-/// service resolves against is the project ★, then its own module's cell
-/// in the environment — see the resolution order in the settings model.
-///
-/// Pass `def_id = None` to clear the default.
+/// ★ 是项目范围而非行范围的：服务列表由每个模块共享，逐服务的标记会让「默认」对不同模块
+/// 意味着不同的东西。未指名服务的 endpoint 所解析的对象，是项目 ★，然后是它在环境里自己
+/// 那个模块的单元格——解析顺序见设置模型。
+/// 传 `def_id = None` 即清除默认。
 pub fn set_default(
     conn: &mut Connection,
     project_id: &str,
@@ -188,9 +165,7 @@ pub fn set_default(
     Ok(())
 }
 
-// -------------------------------------------------------------------------
-// Row mapper.
-// -------------------------------------------------------------------------
+// 行映射器。
 
 fn row_to_def(row: &Row<'_>) -> Result<BaseUrlDefinition, rusqlite::Error> {
     Ok(BaseUrlDefinition {
@@ -200,9 +175,7 @@ fn row_to_def(row: &Row<'_>) -> Result<BaseUrlDefinition, rusqlite::Error> {
     })
 }
 
-// -------------------------------------------------------------------------
-// Tests.
-// -------------------------------------------------------------------------
+// 测试。
 
 #[cfg(test)]
 #[path = "base_url_defs_test.rs"]

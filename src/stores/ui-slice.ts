@@ -1,42 +1,17 @@
 /**
- * UI slice — owns every piece of state that the renderer manipulates
- * but the Tauri daemon doesn't persist.
+ * ui-slice 的公开面。实现按关注点拆到 `./slices/`，在这里组合，
+ * 不在 `app-store.ts` 里注册为独立 slice。
  *
- * LAYOUT
- * ------
- * This file is the slice's public surface only. The implementations live
- * in one sub-factory per concern, under `./slices/`, mirroring how
- * `crud-slice.ts` is organised:
+ * 多个 action 刻意在同一次 `set()` 里写别的 slice 的键——`submitNewItem` 写
+ * `lastCreatedId` 并调 `addProject` / `addNode` / `setActiveEndpoint`；`deleteNode`
+ * 一起剪掉 `responseHistory` / `responseExamples` / `openTabs` / `endpointDrafts`；
+ * `saveDraftEndpoint` 按顺序改 draft map、endpoint-draft map 和两份标签列表。
+ * 拆成多次 `get().closeTab()` 式的调用会把一次 `set()` 变成多次，
+ * IPC 失败时能回滚的状态也就不一样了。
  *
- *   slices/ui-tabs.ts       openTabs / activeTabId / dirtyTabIds /
- *                           endpointDrafts / activeSettingsSection
- *   slices/ui-response.ts   lastResponse / requestPending /
- *                           responseHistory / responseExamples
- *   slices/ui-prefs.ts      theme / requestSettings (localStorage)
- *   slices/ui-new-item.ts   newItem draft + submitNewItem
- *   slices/ui-draft-endpoints.ts
- *                           draftEndpoints — the endpoint that has no
- *                           `nodes` row until the user presses Save
- *
- * The sub-factories are composed HERE, not registered as separate slices
- * in `app-store.ts`, and that is the whole point of the split. Several
- * actions deliberately write `set()` keys owned by other slices in the
- * same atomic write — `submitNewItem` writes `lastCreatedId` and
- * reaches for `addProject` / `addNode` / `setActiveEndpoint` in one
- * flow, and `deleteNode` (crud-slice) prunes `responseHistory`,
- * `responseExamples`, `openTabs` and `endpointDrafts` together so an
- * IPC failure restores all of them as one state. `saveDraftEndpoint` is the
- * same shape one step later: it hands the whole endpoint over from the
- * `endpoint-draft` tab to the `endpoint` tab, touching the draft map, the
- * endpoint-draft map and both tab lists in sequence. Rewriting any of those
- * as a sequence of `get().closeTab()`-style calls would turn one `set()`
- * into several and change what a failure restores. So they stay whole,
- * and the files are grouped by concern instead of by slice.
- *
- * The topology is a star: sub-factories may import `../store-types` and
- * the shared `AppState` type, and they never import each other or this
- * file. Each takes the standard `(set, get, store)` Zustand triple and
- * returns only its own state + action object.
+ * 拓扑是星形：子工厂可 import `../store-types` 与共享的 `AppState` 类型，
+ * 彼此之间、以及与本文件之间都不互相 import。各取标准
+ * `(set, get, store)` 三元组，只返回自己的 state + action 对象。
  */
 import type { StateCreator } from 'zustand';
 import type { AppState } from './app-store';
@@ -51,12 +26,7 @@ import type { UiNewItem } from './slices/ui-new-item';
 import { createUiDraftEndpoints } from './slices/ui-draft-endpoints';
 import type { UiDraftEndpoints } from './slices/ui-draft-endpoints';
 
-/**
- * The composed UI slice. Every member is declared next to its
- * implementation in `./slices/`; this is the single place that names
- * them all. Consumers import `useAppStore` and never see these modules
- * directly.
- */
+/** 组合后的 UI slice；每个成员在 `./slices/` 里紧挨实现处声明。 */
 export interface UiSlice extends UiTabs, UiResponse, UiPrefs, UiNewItem, UiDraftEndpoints {}
 
 export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get, store) => ({

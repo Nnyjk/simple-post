@@ -1,43 +1,28 @@
-//! Shared domain types — 1:1 mirror of `src/types/domain.ts`.
+//! 与 `src/types/domain.ts` 1:1 镜像的共享领域类型。
 //!
-//! These structs are the wire shape that crosses the Tauri IPC boundary
-//! (renderer ↔ Rust). Field naming follows `#[serde(rename_all = "camelCase")]`
-//! so the React code can keep using its existing `snake_case → camelCase`
-//! naming without translation.
+//! 这些结构体是跨 Tauri IPC 边界的线格式，字段名一律由 `#[serde(rename_all = "camelCase")]`
+//! 一次导出，React 侧无需翻译。
 //!
-//! SQLite persistence layer (`crate::db`) serializes the more complex
-//! nested fields (KeyValue[], Body, Auth) into JSON TEXT columns;
-//! see `db/endpoints.rs` for the (de)serialization round-trip.
+//! 持久化层（`crate::db`）把复杂嵌套字段（KeyValue[]、RequestBody、AuthConfig）序列化成
+//! JSON TEXT 列，往返见 `db/endpoint_details.rs`。
 //!
-//! **No per-field `#[serde(rename)]` anywhere in this file.** The Rust
-//! field name *is* the wire name, derived once by `rename_all`. The
-//! reason is not purity — a rename is a second source of truth for a
-//! field's name, and it is the seam where the two languages drift
-//! apart: `ApiKeyAuth` renamed its location field to `in` for
-//! TypeScript's benefit, and TypeScript could not even spell `in`,
-//! so the two sides disagreed and the value never round-tripped. When
-//! a wire name genuinely needs to differ from the Rust name, expand the
-//! Rust name instead — `in` is reserved on the TypeScript side, hence
-//! `in_location`, and a trailing-underscore workaround does not help
-//! because `in_` camelCases straight back to `in`.
+//! **本文件不允许出现逐字段 `#[serde(rename)]`。** Rust 字段名**就是**线名。逐字段 rename 是
+//! 字段名的第二处真相，也正是两种语言开始分叉的缝：TypeScript 侧 `in` 是保留字，写不出来。
+//! 线名确需不同于 Rust 名时，扩展 Rust 名——故用 `in_location` 而非 `in`；加下划线后缀没用，
+//! `in_` camelCase 之后又变回 `in`。
 
 use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-// ----- HTTP method ---------------------------------------------------------
+// HTTP 方法
 
-/// Mirrors `HttpMethod` on the TS side. Serializes to the upper-case verb
-/// string (`"GET"`, `"POST"`, …) the renderer already uses; an unknown
-/// verb falls through to `Custom(String)` so a forward-compat write from
-/// the UI doesn't blow up on the Rust side.
+/// TS 侧 `HttpMethod` 的镜像。序列化为渲染层已在用的大写动词（`"GET"`、`"POST"`…）；
+/// 未知动词落到 `Custom(String)`，使 UI 的前向兼容写入不会在 Rust 侧炸掉。
 ///
-/// `Deserialize` is hand-written so there is exactly **one** parser for
-/// this type. A derived impl accepted `"get"` as `Custom("get")` and
-/// round-tripped it back out lowercase, which the database then stored —
-/// so an IPC write and an MCP call using the same verb produced two
-/// different stored representations. Everything now goes through
-/// [`parse_http_method`].
+/// `Deserialize` 手写，好让本类型只有**一个**解析器：派生实现会把 `"get"` 收成
+/// `Custom("get")` 并原样存库，于是 IPC 写入与 MCP 调用同一个动词会存出两种表示。
+/// 一切都走 [`parse_http_method`]。
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
@@ -49,11 +34,9 @@ pub enum HttpMethod {
     Delete,
     Head,
     Options,
-    /// Any verb not in the standard list (e.g. `PROPFIND`, `LOCK`).
-    /// Serialises as a bare string: the enum's `UPPERCASE` rule renames
-    /// the unit variants above, and without `untagged` this one would
-    /// become `{"CUSTOM":"PROPFIND"}`. The matching *read* side is the
-    /// hand-written `Deserialize` below, which does not need it.
+    /// 标准列表以外的动词（如 `PROPFIND`、`LOCK`）。序列化为裸字符串：枚举的 `UPPERCASE`
+    /// 规则会重命名上面的单元变体，而不加 `untagged` 这个会变成 `{"CUSTOM":"PROPFIND"}`。
+    /// 配套的**读**侧是下面的手写 `Deserialize`，它不需要这个属性。
     #[serde(untagged)]
     Custom(String),
 }
@@ -80,10 +63,8 @@ impl HttpMethod {
     }
 }
 
-/// RFC 9110 `token`: the only characters a method may contain. Anything
-/// else — a space, a CJK character, a control byte — is rejected here
-/// rather than carried all the way to `reqwest`, which would surface as
-/// an opaque transport error at send time.
+/// RFC 9110 `token`：方法允许出现的全部字符。空格、中日韩字符、控制字节在此拒绝，
+/// 否则会一路带到 `reqwest`，在发送那一刻才变成一个不透明的传输错误。
 fn is_method_token(s: &str) -> bool {
     !s.is_empty()
         && s.bytes().all(|b| {
@@ -108,13 +89,10 @@ fn is_method_token(s: &str) -> bool {
         })
 }
 
-/// Canonical parser used by every MCP tool, the request-execution path
-/// **and** `HttpMethod`'s `Deserialize` impl. A known verb is mapped
-/// case-insensitively; any other RFC 9110 token (e.g. `PROPFIND`, `LOCK`)
-/// flows through as `HttpMethod::Custom`, so future / niche HTTP verbs
-/// don't lose data. Empty, whitespace-bearing or non-token input is
-/// rejected with `AppError::Validation` so the caller — an LLM, usually —
-/// gets a message that says what was wrong.
+/// 每个 MCP 工具、请求执行路径**以及** `HttpMethod` 的 `Deserialize` 共用的解析器。
+/// 已知动词大小写不敏感地映射；其余 RFC 9110 token（如 `PROPFIND`、`LOCK`）原样流成
+/// `HttpMethod::Custom`，使将来/冷门的 HTTP 动词不丢数据。空串、含空白、非 token 的输入
+/// 以 `AppError::Validation` 拒绝，好让调用方（通常是 LLM）拿到一条说明问题的消息。
 pub fn parse_http_method(m: &str) -> Result<HttpMethod, crate::error::AppError> {
     use crate::error::AppError;
     let trimmed = m.trim();
@@ -138,7 +116,7 @@ pub fn parse_http_method(m: &str) -> Result<HttpMethod, crate::error::AppError> 
     })
 }
 
-// ----- key / value ----------------------------------------------------------
+// 键值对
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -151,7 +129,7 @@ pub struct KeyValue {
     pub description: Option<String>,
 }
 
-// ----- body ---------------------------------------------------------------
+// body
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -172,7 +150,7 @@ pub struct RequestBody {
     pub schema: Option<String>,
 }
 
-// ----- auth ---------------------------------------------------------------
+// auth
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -184,9 +162,8 @@ pub enum AuthType {
     Apikey,
 }
 
-/// Where the apikey is attached. Reaches the wire as
-/// `inLocation: "header" | "query"` on [`ApiKeyAuth::in_location`];
-/// see the module docs for why the obvious `in` is not usable.
+/// apikey 挂在哪。线上为 `inLocation: "header" | "query"`；
+/// 为何不能用显然的 `in` 见模块文档。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ApiKeyLocation {
@@ -207,20 +184,16 @@ pub struct BasicAuth {
 pub struct ApiKeyAuth {
     pub key: String,
     pub value: String,
-    /// Serialises as `inLocation`. `in` is a reserved word in
-    /// TypeScript, and `in_` is not a fix — `rename_all = "camelCase"`
-    /// maps `in_` back to `in` on the wire, so the two languages would
-    /// disagree exactly as before. See the module docs.
+    /// 序列化为 `inLocation`。`in` 在 TypeScript 是保留字；`in_` 也不行——
+    /// `rename_all = "camelCase"` 会把 `in_` 变回线上的 `in`，两种语言照样对不上。见模块文档。
     pub in_location: ApiKeyLocation,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfig {
-    /// Which scheme is in play. Reads as `kind` on the wire because
-    /// that is what the field is called here — `type` is a keyword in
-    /// Rust too, and a serde `rename` to paper over that is what used
-    /// to make this field disagree with [`ResourceNode::kind`].
+    /// 用的是哪种方案。线上叫 `kind`，因为这里字段就叫 `kind`：`type` 在 Rust 里同样是
+    /// 关键字，用 serde `rename` 遮掩只会在 Tauri command 参数与 REST body 之间重新撕开一道缝。
     pub kind: AuthType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer: Option<String>,
@@ -230,23 +203,17 @@ pub struct AuthConfig {
     pub apikey: Option<ApiKeyAuth>,
 }
 
-// ----- base url -----------------------------------------------------------
+// base url
 
-/// One named service in a **project's** service list.
+/// 项目服务表里的一条具名服务。
 ///
-/// The list is project-wide: every module sees every service, which is the
-/// model the user asked for — 「服务应该绑定到项目，这样每一个模块都会全部
-/// 包含这些服务」. There is deliberately no module field and no per-row
-/// default flag, so two services in one project cannot share a `name` and
-/// an endpoint's `baseUrlDefinitionId` is unambiguous across the whole
-/// tree. The module-owned shape those two fields served (`moduleId` /
-/// `isDefault`) was shipped, tried and reversed; the columns still exist
-/// in the table, neutralised, because dropping them would mean a rebuild
-/// would mean a `SCHEMA_VERSION` bump would mean deleting the user's
-/// store.
+/// 服务表是**项目级**的：每个模块都能看到全部服务。故本结构体没有模块字段，也没有逐行
+/// 默认标记——于是一个项目里两个服务不可能同名，endpoint 的 `baseUrlDefinitionId` 在整棵
+/// 树上无歧义。表中那两个为已下线的「模块持有」模型服务的列（`module_id` / `is_default`）
+/// 仍在表里但已被中和：删列 = 重建表 = bump `SCHEMA_VERSION` = 删掉用户的库。
 ///
-/// A row names a service; it never holds a URL. The URL for (service ×
-/// module × environment) lives in [`Environment::module_base_urls`].
+/// 本行只指认服务，从不持有 URL。(服务 × 模块 × 环境) 的 URL 在
+/// [`Environment::module_base_urls`]。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseUrlDefinition {
@@ -256,18 +223,12 @@ pub struct BaseUrlDefinition {
     pub description: Option<String>,
 }
 
-// ----- resource node -------------------------------------------------------
-//
-// The merged tree: one row per module / collection / endpoint, with the
-// endpoint's request configuration split out into `EndpointDetail`.
+// 资源树：module / collection / endpoint 各一行，endpoint 的请求配置拆到 `EndpointDetail`。
 
-/// What a [`ResourceNode`] is. Projects are not nodes — a project is the
-/// implicit root context, and `root_id` names it.
+/// [`ResourceNode`] 的种类。项目不是节点——项目是隐式的根上下文，由 `root_id` 指名。
 ///
-/// The set is closed on purpose. `nodes.type` carries a matching CHECK
-/// constraint, and `parse` rejects anything else rather than inventing a
-/// variant, so an unknown value can never reach a match arm that
-/// silently treats it as something it isn't.
+/// 这个集合刻意封闭：`nodes.type` 上有配套的 CHECK 约束，`parse` 对其余值一律拒绝而不
+/// 凭空造变体，故未知值永远到不了那些会把它当成别的东西的 match 分支。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ResourceNodeType {
@@ -294,35 +255,24 @@ impl ResourceNodeType {
         }
     }
 
-    /// Can a node of this type sit directly under a node of `parent`?
+    /// 本类型的节点能否直接挂在 `parent` 类型的节点下。
     ///
-    /// SQLite cannot express this over one polymorphic `parent_id` —
-    /// CHECK constraints cannot read another row — so the matrix lives
-    /// here and is enforced on every write by `db::nodes`, with
-    /// matching triggers in `schema.sql`.
+    /// SQLite 无法在单一多态 `parent_id` 上表达它——CHECK 约束读不到别的行——故矩阵写在
+    /// 这里，并由 `db::nodes` 在每次写入时执行，`schema.sql` 另有配套触发器。
     ///
-    /// An endpoint's parent is deliberately two types, not one. The old
-    /// layout only had `endpoints.collection_id REFERENCES
-    /// collections(id)`, so a collection was mandatory, and that made
-    /// the simplest case — one endpoint, no folder worth creating —
-    /// cost a throwaway collection first. A module takes endpoints
-    /// directly; a collection still takes them and keeps its own
-    /// sub-collections.
+    /// endpoint 的父刻意是两个类型：模块直接收 endpoint，免得「一个 endpoint」这种最简场景
+    /// 先得为此建一个用完即弃的 collection；collection 同样收 endpoint，也继续收子 collection。
     pub fn may_under(self, parent: ResourceNodeType) -> bool {
         match self {
-            // A module's parent is the project, which is not a node. The
-            // caller expresses that as `parent_id = NULL`, and the
-            // absence of a parent is the only legal case.
+            // 模块的父是项目，不是节点。调用方以 `parent_id = NULL` 表达，故「无父」是唯一合法情形。
             ResourceNodeType::Module => false,
-            // A collection either opens a module or nests under another
-            // collection — nesting is unbounded, which is why the tree
-            // renderer recurses.
+            // collection 要么开在模块下，要么嵌在另一个 collection 下——嵌套深度无上限，
+            // 故树渲染器是递归的。
             ResourceNodeType::Collection => matches!(
                 parent,
                 ResourceNodeType::Module | ResourceNodeType::Collection
             ),
-            // A collection groups an endpoint with its siblings; a module
-            // accepts one that needs no folder of its own.
+            // collection 用来把 endpoint 与同级分组；模块则直接收下不需要独立文件夹的那个。
             ResourceNodeType::Endpoint => matches!(
                 parent,
                 ResourceNodeType::Module | ResourceNodeType::Collection
@@ -331,37 +281,27 @@ impl ResourceNodeType {
     }
 }
 
-/// One row of the tree: structure and identity, nothing more.
+/// 资源树的一行：只有结构与身份。
 ///
-/// Endpoint request configuration lives in [`EndpointDetail`], keyed by
-/// `node_id`. Splitting it is not tidiness — `method` / `url` / `tags`
-/// mean nothing for a module, and folding them in would give every
-/// module and collection row permanently empty columns.
+/// endpoint 的请求配置在 [`EndpointDetail`] 里，按 `node_id` 关联。拆开不是为了整洁：
+/// `method` / `url` / `tags` 对模块毫无意义，折叠进来会让每个模块和 collection 行永远
+/// 带着空列。
 ///
-/// The mirror in `src/types/domain.ts` carries one field this does not:
-/// `expanded?: boolean`, the renderer's fold/open state. It is
-/// deliberately absent here — it is neither persisted nor part of a
-/// node's identity, so it has no business in a row type. The
-/// asymmetry is safe because this struct ignores unknown keys, so a
-/// node the renderer hands back with `expanded` set simply has it
-/// dropped. `#[serde(deny_unknown_fields)]` would be the wrong tool
-/// for closing that gap: it would reject the field outright, and it
-/// would also break [`EndpointResource`]'s `#[serde(flatten)]`.
+/// `src/types/domain.ts` 侧的镜像多一个字段：渲染器的折叠/展开态 `expanded?: boolean`。
+/// 此处刻意不要——它既不落库也不属于节点身份。缺它也安全：本结构体忽略未知键，渲染层
+/// 带 `expanded` 回传会被直接丢弃。用 `#[serde(deny_unknown_fields)]` 堵这个口是错的：
+/// 它会连该字段一并拒绝，也会破坏 [`EndpointResource`] 的 `#[serde(flatten)]`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceNode {
     pub id: String,
-    /// Owning project. Denormalised so a whole tree is one indexed read
-    /// and so resolving "which project does this belong to" — the first
-    /// step of the per-project permission gate — is a primary-key hit
-    /// instead of a walk up the parent chain.
+    /// 所属项目。反范式化：整棵树因此是一次走索引的读，「这属于哪个项目」——逐项目权限门的
+    /// 第一步——也变成主键命中，而不必沿父链上溯。
     pub root_id: String,
-    /// `None` for a module, whose parent is the project.
+    /// `None` 表示模块，其父是项目。
     pub parent_id: Option<String>,
-    /// Which of the three kinds this row is. Wire name `kind` for the
-    /// same reason as [`AuthConfig::kind`]: `type` is a Rust keyword,
-    /// and renaming it to `type` on the wire only re-opened the gap
-    /// between the Tauri command argument and the REST body.
+    /// 这一行是三种里的哪一种。线上叫 `kind`，理由同 [`AuthConfig::kind`]：`type` 是 Rust
+    /// 关键字，把它在线上叫 `type` 只会重开 Tauri command 参数与 REST body 之间的缝。
     pub kind: ResourceNodeType,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -376,9 +316,7 @@ pub struct ResourceNode {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceNodePatch {
-    /// Re-parent. `None` leaves the current parent alone; an explicit
-    /// `Some(None)` promotes a node to the top of its project, which is
-    /// only legal for a module.
+    /// 改父。`None` 保持原父不动；显式 `Some(None)` 把节点提到项目顶层，这只对模块合法。
     #[serde(default, deserialize_with = "double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<Option<String>>,
@@ -397,25 +335,21 @@ impl ResourceNodePatch {
     }
 }
 
-/// Endpoint request configuration. Joins to [`ResourceNode`] on
-/// `node_id`; the tree columns deliberately do not appear here so they
-/// have exactly one home.
+/// endpoint 的请求配置。按 `node_id` 与 [`ResourceNode`] 关联；树的列刻意不出现在这里，
+/// 好让它们各自只有一个归属。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndpointDetail {
     pub node_id: String,
     pub method: HttpMethod,
-    /// Path only — the host is resolved at send time from the active
-    /// environment's `moduleBaseUrls`, so the same endpoint can be
-    /// retargeted between dev / staging / prod without a rewrite.
+    /// 只有路径——host 在发送时从当前环境的 `moduleBaseUrls` 解析，故同一 endpoint 可在
+    /// dev / staging / prod 之间改指向而无需重写。
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment_id: Option<String>,
-    /// The service this endpoint resolves against. `None` means "use the
-    /// project's ★" (`Project::default_base_url_definition_id`), which is
-    /// not the same as naming one: the resolution step that reads it is
-    /// what makes the difference visible, so the field stays absent rather
-    /// than being filled in with the default's id at write time.
+    /// 该 endpoint 解析所依据的服务。`None` 表示「用项目的 ★」
+    /// （`Project::default_base_url_definition_id`），这与指名某个服务不是一回事：区别要到
+    /// 读取该值的解析步骤才显形，故此处保持缺席，而不是在写入时就填上默认服务的 id。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_definition_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -476,27 +410,16 @@ impl EndpointDetailPatch {
     }
 }
 
-/// True when `value` carries no field the wire would emit.
+/// `value` 是否不含任何会上线的字段。
 ///
-/// The patch types answer "is there anything to write?" by asking
-/// whether they serialise to an empty object, rather than by listing
-/// their own fields. Every patch field already carries
-/// `skip_serializing_if = "Option::is_none"`, so that attribute *is*
-/// the encoding of "absent means don't touch this column" — deriving
-/// the check from it means there is exactly one source of truth and a
-/// newly added field cannot drift out of sync with a hand-written
-/// field list.
+/// 「有没有东西要写」由「能否序列化成空对象」回答，而不是自己再列一遍字段：每个 patch 字段
+/// 都带 `skip_serializing_if = "Option::is_none"`，故该属性**就是**「缺席即不碰此列」的编码，
+/// 判定从它推导出来就只有一处真相，新增字段不会与手写字段表失配。三态情形随之免费得到：
+/// `Some(None)`（清空该列）序列化为显式 `null`，键存在，patch 正确地*不*算空。
 ///
-/// The three-state case falls out for free: `Some(None)` (clear the
-/// column) serialises to an explicit `null`, so the key is present and
-/// the patch is correctly *not* empty.
-///
-/// A serialisation failure is impossible for these types — every field
-/// is a scalar, an `Option`, a `Vec`, or a nested struct that is itself
-/// `Serialize` — but the fallback is `false` rather than `true` on
-/// purpose. Preferring "not empty" means an unexpected failure makes
-/// the write happen and the real error surface at the DB layer, instead
-/// of being swallowed as a silent no-op.
+/// 这些类型不会序列化失败（字段只有标量、`Option`、`Vec`，或本身 `Serialize` 的嵌套结构），
+/// 但兜底取 `false` 而非 `true` 是刻意的：偏向「非空」意味着意外失败会让写入照常发生、
+/// 真实错误在 DB 层暴露，而不是被吞成一次静默的空操作。
 fn serialises_to_empty_object<T: Serialize>(value: &T) -> bool {
     serde_json::to_value(value)
         .ok()
@@ -504,13 +427,9 @@ fn serialises_to_empty_object<T: Serialize>(value: &T) -> bool {
         .unwrap_or(false)
 }
 
-/// An endpoint as the tree and the editor both see it: the node's
-/// structure plus its request configuration.
-///
-/// Separate from [`ResourceNode`] so a tree read can skip
-/// `endpoint_details` entirely — the tree only ever renders
-/// name / type / sort_order, and joining the detail table for every
-/// node to satisfy that would read a column set most rows do not have.
+/// 树与编辑器共同看到的 endpoint：节点结构 + 请求配置。
+/// 与 [`ResourceNode`] 分开，好让树的读取可以完全跳过 `endpoint_details`——树只渲染
+/// name / type / sort_order，为此对每个节点都 join 详情表，等于读一组多数行根本没有的列。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndpointResource {
@@ -519,7 +438,7 @@ pub struct EndpointResource {
     pub detail: EndpointDetail,
 }
 
-// ----- project ------------------------------------------------------------
+// project
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -532,29 +451,20 @@ pub struct Project {
     pub base_url: Option<String>,
     #[serde(default)]
     pub base_url_definitions: Vec<BaseUrlDefinition>,
-    /// The project's ★ service. An endpoint naming no service of its own
-    /// resolves against this one, so a project with `None` here sends
-    /// those requests with no base URL rather than borrowing another
-    /// project's or another module's. NULL is the state a freshly created
-    /// project is in: nothing is seeded, because a service the user did
-    /// not name is a service they then have to delete.
+    /// 项目的 ★ 服务。未指名服务的 endpoint 按它解析，故此处为 `None` 的项目发出这类请求时
+    /// 没有 base URL，而不是借用别的项目或别的模块的。新建项目就是 NULL：不播种，因为用户
+    /// 没点名的服务，是用户随后还得去删的服务。
     ///
-    /// Deliberately **not** `skip_serializing_if`. "This project has no
-    /// default baseUrl" is a decision the project makes, not an absence
-    /// of data, and the TypeScript mirror declares this field as
-    /// required-but-nullable (`defaultBaseUrlDefinitionId: string |
-    /// null`). Emitting `null` keeps the two sides telling the same
-    /// story; omitting the key made a declared contract field arrive as
-    /// `undefined`. Every other optional field on this struct is
-    /// genuinely optional in the mirror, so it keeps the skip.
+    /// 刻意**不**加 `skip_serializing_if`：「本项目没有默认 baseUrl」是项目做出的决定，不是
+    /// 数据缺席；TypeScript 镜像把它声明为必填但可空（`defaultBaseUrlDefinitionId:
+    /// string | null`），发 `null` 两边才讲同一个故事，省掉键则让一个已声明的契约字段以
+    /// `undefined` 到达。本结构体其余可选字段在镜像里确实可选，故保留 skip。
     #[serde(default)]
     pub default_base_url_definition_id: Option<String>,
     #[serde(default = "default_project_color")]
     pub color: String,
-    /// Server-side timestamp; defaults to `now_ms()` when the caller
-    /// (e.g. the REST `POST /api/projects` handler) doesn't supply one.
-    /// Tauri commands always set this explicitly so the default is inert
-    /// for them.
+    /// 服务端时间戳；调用方（如 REST 的 `POST /api/projects` handler）不给时取 `now_ms()`。
+    /// Tauri command 一律显式设置，故对它们而言该默认值是惰性的。
     #[serde(default = "now_ms")]
     pub created_at: i64,
     #[serde(default = "now_ms")]
@@ -574,10 +484,8 @@ pub struct ProjectPatch {
     pub base_url: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_definitions: Option<Vec<BaseUrlDefinition>>,
-    /// The project's ★. `Some(None)` clears it, which is a real state
-    /// rather than an omission: the renderer offers 「无默认服务」 in the
-    /// same menu that names one, and an endpoint naming no service then
-    /// resolves to no base URL at all.
+    /// 项目的 ★。`Some(None)` 清空它，这是真实状态而非省略：渲染器在列出服务的同一个菜单里
+    /// 提供「无默认服务」，而未指名服务的 endpoint 于是解析不到任何 base URL。
     #[serde(default, deserialize_with = "double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_base_url_definition_id: Option<Option<String>>,
@@ -586,14 +494,13 @@ pub struct ProjectPatch {
 }
 
 impl ProjectPatch {
-    /// No write path calls this yet; it exists so the next caller does
-    /// not hand-roll a field list. See [`serialises_to_empty_object`].
+    /// 尚无写路径调用；存在是为了让下一个调用方不必自己手写字段表。见 [`serialises_to_empty_object`]。
     pub fn is_empty(&self) -> bool {
         serialises_to_empty_object(self)
     }
 }
 
-// ----- environment --------------------------------------------------------
+// environment
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -601,27 +508,21 @@ pub struct Environment {
     pub id: String,
     pub project_id: String,
     pub name: String,
-    /// **DEPRECATED — read for wire compatibility, written by nothing.**
+    /// **已废弃——仅为线兼容而读，无人写入。**
     ///
-    /// It was `def_id -> url`, the value layer back when a URL did not
-    /// care which module the endpoint sat in. The live layer is
-    /// [`Self::module_base_urls`]; `db::migrate` copied every value into
-    /// it and is the only reader of the column left in the crate.
+    /// 它曾是 `def_id -> url`，即 URL 还不关心 endpoint 挂在哪个模块时的值层。现役层是
+    /// [`Self::module_base_urls`]；`db::migrate` 已把每个值搬过去，且是本 crate 里仅剩的
+    /// 该列读者。
     ///
-    /// Kept on the struct so a payload from an older client still
-    /// deserialises — the mirror declares it optional — but
-    /// `db::environments::update` ignores it. Silently dropping it is the
-    /// price, and this comment is the record of it.
+    /// 留在结构体上，好让旧客户端的载荷仍能反序列化（镜像声明为可选），但
+    /// `db::environments::update` 忽略它。静默丢弃是代价，此处即是记录。
     #[serde(default)]
     pub base_urls: HashMap<String, String>,
-    /// `def_id -> module_id -> url`. **The only layer a URL lives in.**
+    /// `def_id -> module_id -> url`。**URL 只存在于这一层。**
     ///
-    /// Each cell is independent: a missing entry means "this module has
-    /// no address for this service", and resolution stops there rather
-    /// than falling back to the environment-level map or to another
-    /// module's value. That is why the map is keyed by module at all —
-    /// two modules can legitimately point the same service at different
-    /// hosts, and an empty cell is a real answer rather than a hole.
+    /// 每个单元格独立：缺项表示「此模块对此服务无地址」，解析到此为止，不会回落到环境级
+    /// map 或别的模块的值。故该 map 之所以按模块做键：两个模块完全可以把同一服务指向不同
+    /// host，而空单元格是一个真实答案，不是一个洞。
     #[serde(default)]
     pub module_base_urls: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
@@ -635,13 +536,12 @@ pub struct Environment {
 pub struct EnvironmentPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Deprecated with [`Environment::base_urls`]: accepted so an older
-    /// payload still deserialises, never written — the column is dead.
+    /// 随 [`Environment::base_urls`] 一起废弃：只收下以让旧载荷仍能反序列化，从不写入——
+    /// 该列已死。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_urls: Option<HashMap<String, String>>,
-    /// Replaces the whole `module_base_urls` map. `db::environments::update`
-    /// writes it as one atomic `UPDATE` of the JSON column, so a reader can
-    /// never observe half the cells.
+    /// 整张 `module_base_urls` map 替换。`db::environments::update` 以一次原子 `UPDATE`
+    /// 写入该 JSON 列，故读者永远看不到半个 map。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_base_urls: Option<HashMap<String, HashMap<String, String>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -651,27 +551,21 @@ pub struct EnvironmentPatch {
 }
 
 impl EnvironmentPatch {
-    /// No write path calls this yet; it exists so the next caller does
-    /// not hand-roll a field list. See [`serialises_to_empty_object`].
+    /// 尚无写路径调用；存在是为了让下一个调用方不必自己手写字段表。见 [`serialises_to_empty_object`]。
     pub fn is_empty(&self) -> bool {
         serialises_to_empty_object(self)
     }
 }
 
-// ----- agent permission ---------------------------------------------------
+// agent 权限
 
-/// Per-project MCP permission. `Read < ReadCall < Full`; the ordering
-/// itself lives in [`crate::permissions::permission_at_least`].
+/// 逐项目的 MCP 权限。`Read < ReadCall < Full`；序关系本身在
+/// [`crate::permissions::permission_at_least`]。
 ///
-/// `snake_case`, not `lowercase`: `"lowercase"` maps `ReadCall` to
-/// `"readcall"`, a third spelling that matched neither [`Self::as_str`]
-/// (which is what `db::permissions` writes and `parse` reads), nor the
-/// `agent_permissions` CHECK constraint, nor the `AgentPermission`
-/// union on the TypeScript side. That third spelling survived only
-/// because the one consumer of the serialised form happened to fall
-/// back to a value equal to the correct answer. `snake_case` makes all
-/// four agree, and matches its sibling
-/// [`crate::permissions::CapabilityPolicy`].
+/// 用 `snake_case` 而非 `lowercase`：后者把 `ReadCall` 映射成 `"readcall"`，一个既不匹配
+/// [`Self::as_str`]（`db::permissions` 写的、`parse` 读的），也不匹配 `agent_permissions`
+/// 的 CHECK 约束、更不匹配 TypeScript 侧 `AgentPermission` 联合类型的第三种拼法。
+/// `snake_case` 让四处一致，且与其兄弟 [`crate::permissions::CapabilityPolicy`] 相同。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
@@ -700,21 +594,15 @@ impl Permission {
     }
 }
 
-// ----- request settings ---------------------------------------------------
+// 请求设置
 
-/// Outbound-request knobs. A singleton, persisted as a JSON blob in the
-/// `preferences` KV table rather than in a table of its own.
+/// 出站请求旋钮。单例，作为 JSON blob 存在 `preferences` KV 表里，而非自成一表。
 ///
-/// `#[serde(default)]` at the container level is load-bearing on the
-/// **read** side, not the write side. The stored blob is whatever an
-/// earlier build wrote, so the day a fourth field is added here, every
-/// existing install's row deserialises without it — and without this
-/// attribute `request_settings_get` would fail outright for all of
-/// them. The cost lands on the write side: `PUT /api/request_settings`
-/// is a full replace, and a body that omits a field now resets that
-/// field to its default instead of being rejected. For a settings
-/// singleton whose defaults are documented on [`Default`], that is the
-/// more useful behaviour; the route's own comment says so too.
+/// 容器级 `#[serde(default)]` 的分量在**读**侧而非写侧：存下的 blob 是某个更早构建写的，
+/// 故此日新增第四个字段时，每个既有安装的行都能缺它反序列化——否则
+/// `request_settings_get` 会让它们全部失败。代价落在写侧：`PUT /api/request_settings`
+/// 是整体替换，缺字段的请求体会把该字段重置为默认值而不是被拒。对一个默认值写在
+/// [`Default`] 上的设置单例，这更有用；该路由自己的注释也这么写。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RequestSettings {
@@ -733,52 +621,38 @@ impl Default for RequestSettings {
     }
 }
 
-// ----- MCP HTTP listener config -------------------------------------------
+// MCP HTTP 监听配置
 
-/// Where the MCP HTTP daemon listens and who it answers to.
+/// MCP HTTP 守护进程监听在哪、应答谁。
 ///
-/// A settings singleton persisted as a JSON blob in `preferences` under
-/// [`crate::db::preferences::keys::MCP_HTTP_CONFIG`] — the same
-/// "preferences bag holds JSON values" rule every other structured
-/// setting follows.
+/// 设置单例，作为 JSON blob 存在 `preferences` 的
+/// [`crate::db::preferences::keys::MCP_HTTP_CONFIG`] 之下——与所有其他结构化设置同属
+/// 「preferences 袋子装 JSON 值」这条规则。
 ///
-/// `#[serde(default)]` at the container level is load-bearing on the
-/// **read** side for the same reason it is on [`RequestSettings`]: the
-/// stored blob is whatever an earlier build wrote, so a field added
-/// later must not make every existing install's row fail to parse.
-/// The cost lands on the write side — a body that omits a field resets
-/// that field to its default instead of being rejected — which is the
-/// more useful behaviour for a settings singleton.
+/// 容器级 `#[serde(default)]` 的分量在**读**侧，理由同 [`RequestSettings`]：存下的 blob 是
+/// 更早构建写的，后来新增的字段不能让每个既有安装的行解析失败。代价落在写侧——缺字段会
+/// 把该字段重置为默认值而不是被拒——对设置单例而言这更有用。
 ///
-/// The security-relevant half is `allow_remote` plus the two allow
-/// lists, and they are **fail-closed by construction**: the default
-/// (`allow_remote: false`, both lists empty) accepts only loopback
-/// `Host` headers and no `Origin` at all. `validate` refuses the one
-/// combination that would silently contradict itself — a non-loopback
-/// bind with remote access left off, which would listen on the LAN
-/// while the guard rejected every request that actually arrived from
-/// it.
+/// 与安全相关的是 `allow_remote` 加那两张允许表，且它们**结构上 fail-closed**：默认值
+/// （`allow_remote: false`，两表皆空）只接受 loopback `Host`，且完全不接受任何 `Origin`。
+/// `validate` 拒绝唯一那个自相矛盾的组合——非 loopback 绑定却不开远程访问，那会监听在
+/// 局域网上而守卫挡掉所有真正从那里到达的请求。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct McpHttpConfig {
-    /// Bind address. `127.0.0.1` keeps the daemon local-only.
+    /// 绑定地址。`127.0.0.1` 即守护进程仅本机可达。
     pub host: String,
-    /// Listen port. `0` means "OS-assigned" — the daemon's own chosen
-    /// port is then published through the `mcp.port` record.
+    /// 监听端口。`0` 表示「由 OS 分配」——守护进程自己选定的端口随后经 `mcp.port` 记录公布。
     pub port: u16,
-    /// Mount path for the JSON-RPC endpoint. Must start with `/`.
+    /// JSON-RPC 端点的挂载路径。必须以 `/` 开头。
     pub path: String,
-    /// Master switch for non-loopback access. `false` (the default)
-    /// means the `Host` guard only accepts loopback names.
+    /// 非 loopback 访问的总开关。`false`（默认）表示 `Host` 守卫只接受 loopback 名字。
     pub allow_remote: bool,
-    /// `Host` values accepted once `allow_remote` is on. A bare `"*"`
-    /// accepts any. Empty means *no* non-loopback host is accepted —
-    /// not "accept everything".
+    /// 开启 `allow_remote` 后接受的 `Host` 值。裸 `"*"` 表示任意。空表示**不接受**任何
+    /// 非 loopback host——不是「全都接受」。
     pub allowed_hosts: Vec<String>,
-    /// `Origin` values accepted. AI clients (curl, Claude Code) send no
-    /// `Origin` at all and are therefore never blocked by this; a
-    /// browser-style request that *does* send one must match. A bare
-    /// `"*"` accepts any.
+    /// 接受的 `Origin` 值。AI 客户端（curl、Claude Code）根本不发 `Origin`，故永不被此拦；
+    /// 确实发了的浏览器式请求必须匹配。裸 `"*"` 表示任意。
     pub allowed_origins: Vec<String>,
 }
 
@@ -801,11 +675,8 @@ pub const DEFAULT_MCP_HOST: &str = "127.0.0.1";
 pub const DEFAULT_MCP_PATH: &str = "/mcp";
 
 impl McpHttpConfig {
-    /// The mount path in the exact form axum's router wants: always a
-    /// leading `/`, never a trailing one. `"/"`, `""` and a missing
-    /// slash all collapse onto [`DEFAULT_MCP_PATH`] rather than
-    /// producing a router that 404s everything the user can see in the
-    /// settings panel.
+    /// axum 路由器想要的挂载路径形态：恒有前导 `/`，恒无尾随 `/`。`"/"`、`""` 与缺斜杠一律
+    /// 收敛到 [`DEFAULT_MCP_PATH`]，而不是产出一个把设置面板里看得见的东西全都 404 的路由器。
     pub fn normalized_path(&self) -> String {
         let raw = self.path.trim();
         let trimmed = raw.trim_end_matches('/');
@@ -819,19 +690,16 @@ impl McpHttpConfig {
         }
     }
 
-    /// Reject configurations that cannot mean what they say.
-    ///
-    /// Called on every write (Tauri command and REST route alike) so an
-    /// invalid combination can never reach the `preferences` row that
-    /// `daemon_cli_args` reads at spawn time.
+    /// 拒绝无法自圆其说的配置。
+    /// 每次写入都调用（Tauri command 与 REST 路由皆然），故自相矛盾的组合永远到不了
+    /// `daemon_cli_args` 生成时读取的那一行 `preferences`。
     pub fn validate(&self) -> Result<(), crate::error::AppError> {
         use crate::error::AppError;
 
         if self.host.trim().is_empty() {
             return Err(AppError::Validation("host must not be empty".into()));
         }
-        // Normalise before checking so `/mcp/` and `/mcp` cannot both
-        // pass validation and then disagree at the router.
+        // 先归一化再检查，好让 `/mcp/` 与 `/mcp` 不会双双通过验证、随后在路由器上打架。
         if self.path.trim().is_empty() {
             return Err(AppError::Validation(format!(
                 "path must not be empty (expected something like {DEFAULT_MCP_PATH:?})"
@@ -843,10 +711,8 @@ impl McpHttpConfig {
                 self.path
             )));
         }
-        // The self-contradicting combination: bound to the LAN, but the
-        // guard configured to reject everything that isn't loopback —
-        // the daemon would be unreachable and would read as "MCP is
-        // broken" rather than "your settings contradict each other".
+        // 那个自相矛盾的组合：绑到局域网，守卫却配置为拒掉一切非 loopback——守护进程将不可达，
+        // 读起来是「MCP 坏了」而不是「你的设置自相矛盾」。
         if !self.allow_remote && !is_loopback_host(&self.host) {
             return Err(AppError::Validation(format!(
                 "host {:?} is not a loopback address, so allowRemote must also be \
@@ -859,38 +725,26 @@ impl McpHttpConfig {
     }
 }
 
-/// Is `host` one of the loopback names the guard always accepts?
-///
-/// Shared by [`McpHttpConfig::validate`] and the daemon's Host guard —
-/// they must agree, or a config could validate and then lock the
-/// listener out of answering its own healthz probe.
+/// `host` 是否是守卫恒接受的那几个 loopback 名字之一？
+/// 由 [`McpHttpConfig::validate`] 与守护进程的 Host 守卫共用——两者必须一致，否则一份配置
+/// 能通过验证、随后又把监听者挡在自己的 healthz 探针之外。
 pub fn is_loopback_host(host: &str) -> bool {
     let h = host.trim().trim_start_matches('[').trim_end_matches(']');
     matches!(h, "127.0.0.1" | "localhost" | "::1")
 }
 
-// ----- api response (transient; not persisted in the schema) -------------
-//
-// The header comment above `ApiResponse` says it is transient. It still
-// is: nothing stores one verbatim. What follows is the persisted
-// projection, which is a *different* type rather than a re-used one.
+// API 响应（瞬态，不落 schema）。`ApiResponse` 本身仍不落库；其下是已持久化的投影，
+// 是个**不同的**类型，而不是复用的同一个。
 
-/// The wire shape a response takes on its way out of Rust.
+/// 响应离开 Rust 时的线形状。
 ///
-/// It is **not** the shape the renderer ends up holding, and it is not
-/// in-process either — it crosses the Tauri IPC boundary like every
-/// other type here. The difference is `headers`: this side models them
-/// as ordered pairs, because a response may legitimately repeat one
-/// (several `Set-Cookie` lines, say) and a map cannot express that. The
-/// renderer wants a plain object, so `src/lib/http.ts` folds the pairs
-/// through `tuplesToRecord` on arrival — lossy, and the one place in
-/// the request path where information is knowingly dropped; duplicates
-/// collapse last-one-wins.
-///
-/// Nothing in Rust describes the post-adapter shape.
-/// `ApiResponse` in `src/types/domain.ts` is that description, and it
-/// is deliberately a different type rather than a claimed mirror of
-/// this one.
+/// 它**不是**渲染层最终持有的形状，也不是进程内形状——像这里其余类型一样跨 Tauri IPC。
+/// 差别在 `headers`：此侧建模为有序对，因为响应可以合法重复某个头（多行 `Set-Cookie` 之类），
+/// 而 map 表达不了。渲染层要的是普通对象，故 `src/lib/http.ts` 在到达时用
+/// `tuplesToRecord` 折叠——有损，且是请求路径上唯一一处明知丢弃信息的地方；重复项按
+/// 后者胜出。
+/// Rust 侧没有任何东西描述适配之后的形状。`src/types/domain.ts` 的 `ApiResponse` 才是那份
+/// 描述，且它刻意是另一个类型，而非声称镜像本类型。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiResponse {
@@ -911,42 +765,30 @@ pub struct ApiResponse {
     pub url: Option<String>,
 }
 
-// ----- persisted response history ----------------------------------------
+// 已持久化的响应历史
 
-/// How many responses one endpoint keeps. Mirrored by the renderer's
-/// `MAX_HISTORY_PER_ENDPOINT` in `stores/slices/ui-response.ts` — the
-/// store caps so the array it shows never grows, the database caps so
-/// `store.db` never grows. The two agreeing is a nicety; the database's
-/// cap is the one that bounds the file, so a future caller that forgets
-/// the store-side one still cannot grow the store without limit.
+/// 单个 endpoint 保留多少条响应。渲染器 `stores/slices/ui-response.ts` 的
+/// `MAX_HISTORY_PER_ENDPOINT` 与之镜像——store 侧封顶使所展示的数组不增长，数据库侧封顶
+/// 使 `store.db` 不增长。两者一致是锦上添花；真正给文件封顶的是数据库侧，故日后漏掉
+/// store 侧的调用方也无法让库无限增长。
 pub const RESPONSE_HISTORY_PER_ENDPOINT: i64 = 10;
 
-/// Hard cap on a single stored response body, in bytes.
+/// 单条已存响应体的硬上限（字节）。
 ///
-/// History is a convenience — the point is "what did this endpoint
-/// return ten minutes ago", not an archive. Without a cap, one endpoint
-/// returning a 50 MB blob ten times puts 500 MB in the user's
-/// `store.db` with no way back, so the body is clipped on write and
-/// `ResponseHistoryEntry::body_truncated` says it happened. 256 KiB is
-/// generous for the JSON and HTML a human reads while debugging and
-/// keeps the worst case per endpoint around 2.5 MB.
+/// 历史是便利功能——要点是「这个 endpoint 十分钟前返回了什么」，不是归档。没有上限时，
+/// 一个 endpoint 连返十次 50 MB 就把 500 MB 塞进用户的 `store.db` 且无法挽回，故写入时裁剪，
+/// 并由 `ResponseHistoryEntry::body_truncated` 标记发生过。256 KiB 对人调试时读的 JSON 和
+/// HTML 足够宽裕，把每 endpoint 最坏情况压到约 2.5 MB。
 pub const RESPONSE_HISTORY_MAX_BODY_BYTES: usize = 256 * 1024;
 
-/// A response as the **renderer** holds it, which is what has to
-/// round-trip out of the database.
+/// 响应在**渲染层**持有的形状，也就是必须能往返出数据库的形状。
 ///
-/// Deliberately not [`ApiResponse`]: that type models headers as
-/// ordered pairs because it has to survive the IPC hop without losing a
-/// duplicate `Set-Cookie`. By the time a response is stored, it has
-/// already crossed that boundary and been folded through
-/// `tuplesToRecord` into a plain object — the duplicate-header loss has
-/// happened and is not this type's problem. Persisting pairs here would
-/// mean persisting information the renderer no longer has, and the
-/// renderer's own `ApiResponse` would have to gain a second shape.
-///
-/// This is the Rust mirror of `ApiResponse` in `src/types/domain.ts`,
-/// which is likewise the *post-adapter* type rather than a mirror of
-/// [`ApiResponse`] above.
+/// 刻意不是 [`ApiResponse`]：那个类型把 headers 建模为有序对，只为不丢重复的 `Set-Cookie`
+/// 而熬过一次 IPC。响应入库时早已越过那道边界、并被 `tuplesToRecord` 折成普通对象——重复头的
+/// 丢失已经发生，不是本类型的问题。此处存对子等于存渲染层已不再拥有的信息，而渲染层自己的
+/// `ApiResponse` 就得多长一种形状。
+/// 本类型是 `src/types/domain.ts` 里 `ApiResponse` 的 Rust 镜像，那同样是适配**之后**的类型，
+/// 而非上面 [`ApiResponse`] 的镜像。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredResponse {
@@ -954,12 +796,10 @@ pub struct StoredResponse {
     pub status_text: String,
     pub duration_ms: u64,
     pub size_bytes: u64,
-    /// `BTreeMap` rather than `HashMap` so a row reads back with a
-    /// stable header order — a `HashMap` would shuffle them on every
-    /// read and make two identical rows serialise differently.
+    /// 用 `BTreeMap` 而非 `HashMap`，行读回来时表头顺序才稳定——`HashMap` 每次读都打乱，
+    /// 使两行相同的数据序列化出不同结果。
     pub headers: BTreeMap<String, String>,
-    /// Already clipped to [`RESPONSE_HISTORY_MAX_BODY_BYTES`] by the
-    /// write path.
+    /// 已被写入路径裁剪到 [`RESPONSE_HISTORY_MAX_BODY_BYTES`]。
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_json: Option<serde_json::Value>,
@@ -972,35 +812,26 @@ pub struct StoredResponse {
     pub url: Option<String>,
 }
 
-/// One row of `response_history`.
+/// `response_history` 的一行。
 ///
-/// The wrapper exists rather than widening the stored response with
-/// `id` / `createdAt` because the two have different lifetimes: the
-/// response is the payload, these three are the row's identity. It also
-/// keeps `bodyTruncated` next to the body it is talking about — a flag
-/// smeared onto `StoredResponse` would have to be optional there and
-/// required here, for one bit of information.
+/// 外面包一层而不是给已存响应加宽 `id` / `createdAt`，是因为两者生命周期不同：响应是载荷，
+/// 这三个是行的身份。它也让 `bodyTruncated` 紧挨它所描述的 body——把这个标志抹到
+/// `StoredResponse` 上，就得在那里把它设为可选、在这里设为必填，只为一比特的信息。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResponseHistoryEntry {
     pub id: String,
     pub endpoint_id: String,
     pub response: StoredResponse,
-    /// `body` was clipped at [`RESPONSE_HISTORY_MAX_BODY_BYTES`].
+    /// `body` 已在 [`RESPONSE_HISTORY_MAX_BODY_BYTES`] 处裁剪。
     pub body_truncated: bool,
     pub created_at: i64,
 }
 
-// -------------------------------------------------------------------------
-// Helpers
-// -------------------------------------------------------------------------
+// 辅助函数
 
-/// Current wall-clock as unix-milliseconds. Single source of truth
-/// for `*_at` columns on the write paths so the values are
-/// self-consistent within a single transaction.
-///
-/// `SystemTime::now()` panics only on clock skew past the unix epoch;
-/// treat that as a programmer error rather than user-recoverable.
+/// 当前 unix 毫秒。写路径上所有 `*_at` 列的唯一真相，使单个事务内的值自洽。
+/// `SystemTime::now()` 只在时钟早于 unix epoch 时 panic；把这当程序员错误，而非用户可恢复的故障。
 pub fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -1009,27 +840,18 @@ pub fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
-/// Default project color when a caller doesn't supply one. Lives here
-/// rather than in `commands/` so the REST and Tauri write paths cannot
-/// drift: `commands` already depends on `domain`, so a second copy on
-/// the far side of that edge would be free to disagree.
+/// 调用方未给项目颜色时的默认值。住在这里而非 `commands/`，是为了让 REST 与 Tauri 两条写路径
+/// 无法分叉：`commands` 已依赖 `domain`，在那条边另一侧再放一份只会自由地各说各话。
 pub fn default_project_color() -> String {
     "#3b82f6".to_string()
 }
 
-/// A new primary key, `sp_` followed by the wall clock in hex and a
-/// per-process counter, concatenated.
+/// 新主键：`sp_` + 墙钟十六进制 + 每进程计数器，拼接而成。
 ///
-/// It is **not** opaque and not unguessable — it encodes the timestamp
-/// it was minted at, which is fine for a single-user desktop app whose
-/// database is already readable by that user, and is stated here so
-/// nobody reaches for it in a context that needs more. The counter is
-/// what makes it unique: two keys minted in the same nanosecond would
-/// otherwise collide, and a process that restarts within one clock tick
-/// of a previous one could repeat a prefix.
-///
-/// A random suffix would remove both caveats; it is not worth the
-/// dependency while the store is local.
+/// 它**不是**不透明、也不可猜测——它编码了生成时刻，这对单用户桌面应用可以接受（其数据库
+/// 本就被该用户可读），此处点明以免有人把它用在需要更多保证的场景。计数器才是唯一性所在：
+/// 否则同一纳秒内生成的两个键会相撞，而在一个时钟节拍内重启的进程会重复前缀。随机后缀可
+/// 去掉这两条隐患，但库仍是本地的，不值得多一个依赖。
 pub fn uid() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1042,14 +864,13 @@ pub fn uid() -> String {
     format!("sp_{:x}{:x}", nanos, n)
 }
 
-/// Deserialize `null` and missing as *different* states on `Option<T>`:
-///   - JSON absent  → `None` outer (`patch.field` not set → don't touch column)
-///   - JSON `null`  → `Some(None)`             → write NULL to column
-///   - JSON `"foo"` → `Some(Some("foo"))`      → write "foo"
+/// 在 `Option<T>` 上把 JSON 缺席与 `null` 解析成**不同**状态：
+///   - 缺席     → `None` 外层（`patch.field` 未设 → 不碰该列）
+///   - `null`   → `Some(None)`       → 向该列写 NULL
+///   - `"foo"`  → `Some(Some("foo"))` → 写 "foo"
 ///
-/// serde's built-in `Option<T>` collapses absent and `null`, which
-/// destroys the "clear column" vs "leave alone" distinction in patch
-/// structs. This wrapper restores it.
+/// serde 内建的 `Option<T>` 把缺席与 `null` 折叠成一回事，这会毁掉 patch 结构体里
+/// 「清空该列」与「保持不动」的区分。本包装器把它还原。
 pub fn double_option<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
 where
     T: Deserialize<'de>,
@@ -1058,9 +879,7 @@ where
     Deserialize::deserialize(de).map(Some)
 }
 
-// -------------------------------------------------------------------------
-// Tests — round-trip serialization for the shapes that cross IPC.
-// -------------------------------------------------------------------------
+// 测试——跨 IPC 形状的往返序列化。
 
 #[cfg(test)]
 #[path = "domain_test.rs"]

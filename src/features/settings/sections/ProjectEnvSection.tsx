@@ -1,29 +1,23 @@
 /**
- * ProjectEnvSection — the store-connected host for {@link EnvironmentSection}.
+ * ProjectEnvSection —— {@link EnvironmentSection} 的接 store 的宿主。
  *
- * WHY THIS EXISTS
- * ---------------
- * `EnvironmentSection` is presentational by design: every list and every
- * action arrives as a prop, which is what lets its rows be tested without a
- * store. That made it cheap to reuse — and then expensive to reuse, because
- * the ~15 props have to be assembled from the store by whoever mounts it,
- * and the assembly is where the project's own rules live:
+ * 它为何存在
+ * ----------
+ * `EnvironmentSection` 按设计是纯展示：每个列表和每个动作都从 props 进来，它的行因此
+ * 能脱离 store 测试。但那 15 个左右的 props 得由挂载方从 store 里拼出来，而这份拼装
+ * 正是项目自身规则的所在：
  *
- *   - environments are filtered to `activeProjectId`
- *   - the 前置 URL table's row axis is *this project's modules*, sorted by
- *     `sortOrder` because `nodes` is a flat list whose array order is not
- *     the tree's sibling order
- *   - the service list and the project ★ come off the project row
+ *   - 环境按 `activeProjectId` 过滤
+ *   - 前置 URL 表的行轴是*本项目的模块*，按 `sortOrder` 排序，因为 `nodes` 是打平的
+ *     列表，数组顺序不是树的兄弟顺序
+ *   - 服务清单与项目 ★ 取自项目行
  *
- * Those rules now have two hosts — the settings tab's 环境 section, and the
- * project tab's own 环境 layer — and a rule written twice is a rule that
- * drifts. So the wiring lives here, once, and each host mounts *this*.
+ * 这些规则现在有两个宿主：设置标签的环境分区，和项目标签自己的环境层。规则写两遍就会
+ * 漂移，故接线只在此处写一次，两个宿主挂的都是*这个*。
  *
- * The no-project guard is here for the same reason. Both hosts are
- * reachable with no project open (the workspace's settings tab, and the
- * welcome screen's `SettingsSurface`), and the section renders a
- * working-looking "新建环境" button whose write would go to
- * `projectId === ''` and silently fail. Say what is missing instead.
+ * 无项目守卫同理。两个宿主在没有项目打开时也都可达（工作区的设置标签，以及欢迎页的
+ * `SettingsSurface`），而该分区会渲染一个看着能用的「新建环境」按钮，其写入却会打到
+ * `projectId === ''` 并静默失败。故这里直接说明缺了什么。
  */
 
 import { useMemo } from 'react';
@@ -59,10 +53,8 @@ export function ProjectEnvSection() {
     [allEnvironments, activeProjectId],
   );
 
-  // Modules are the row axis of the 前置 URL table — the row set is
-  // (every module × every project service) — so they are filtered to this
-  // project and sorted by `sortOrder`, which the table presents as tree
-  // order while `nodes` is a flat list.
+  // 模块是前置 URL 表的行轴，行集是（每个模块 × 每个项目服务），故按本项目过滤并按
+  // `sortOrder` 排序 —— 表里按树序呈现，而 `nodes` 是打平的。
   const modules = useMemo(
     () =>
       nodes
@@ -73,9 +65,8 @@ export function ProjectEnvSection() {
 
   if (activeProjectId === '') {
     return (
-      // `px-12` matches `SettingsCategory`'s own inset, so this hint sits on
-      // the same reading column as the section it stands in for — in both
-      // hosts.
+      // `px-12` 与 `SettingsCategory` 自身的内缩一致，故这条提示与它所代表的分区落在
+      // 同一条阅读列上，两个宿主皆然。
       <EmptyHint className="px-12 py-10 text-xs">
         环境变量属于项目。请先在欢迎页选择一个项目，再回到这里管理它的环境与前置 URL。
       </EmptyHint>

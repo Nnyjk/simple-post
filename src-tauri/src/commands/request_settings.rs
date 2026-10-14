@@ -10,15 +10,10 @@ use crate::error::AppError;
 
 use super::dto::RequestSettingsPatch;
 
-/// Preferences KV key under which the singleton `RequestSettings` row is
-/// stored. Matches the JSON-encoded value via `serde_json`.
+/// 单例 `RequestSettings` 在 `preferences` 里的 KV key；值是 `serde_json` 编码的 JSON。
 const REQUEST_SETTINGS_KEY: &str = "request_settings";
 
-/// App-wide request defaults (timeout, redirects, max body size). The
-/// DB stores these as a JSON-encoded value in the `preferences` table
-/// under the `REQUEST_SETTINGS_KEY` row. The `get` command always
-/// returns a row, falling back to `RequestSettings::default()` if the
-/// row is missing.
+/// 缺行时回退 `RequestSettings::default()`，保证总有值可给。
 #[tauri::command]
 pub fn request_settings_get(state: State<DbPool>) -> Result<RequestSettings, AppError> {
     let stored: Option<RequestSettings> = crate::db::with_conn(&state, |c| {

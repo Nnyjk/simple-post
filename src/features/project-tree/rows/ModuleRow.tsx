@@ -41,14 +41,10 @@ export function ModuleRow({
   dropHint,
 }: ModuleRowProps) {
   return (
-    // Merge note: the merge already applied the `wip/module-baseurls`
-    // side's removal of `rowRef` — the declaration is gone from the file
-    // and `rowRef` appears nowhere else under `src/`, so keeping
-    // `ref={rowRef}` on this line would not compile. This takes that
-    // side's structure and keeps the aesthetic side's wrapper radius.
-    // The wrapper-level `hover:bg-accent/60` is dropped to match
-    // `CollectionRow`, which puts its hover on the inner button as
-    // `bg-overlay-hover` instead.
+    // 合并注记：合并时已应用 `wip/module-baseurls` 一侧对 `rowRef` 的删除 —— 声明已从文件
+    // 移除，`src/` 下别处也不再出现 `rowRef`，故此行保留 `ref={rowRef}` 根本无法编译。这里
+    // 取那一侧的结构，并保留审美那一侧的外层圆角；外层的 `hover:bg-accent/60` 去掉，以与
+    // `CollectionRow` 一致 —— 后者把 hover 放在内层按钮上作 `bg-overlay-hover`。
     <div onContextMenu={onContextMenu} className="group mb-0.5 rounded-md">
       <div
         className={cn(
@@ -73,12 +69,8 @@ export function ModuleRow({
             }
           }}
           className={cn(
-            // The name is the reason this row exists, so it renders in
-            // `--foreground`. It used to be `text-muted-foreground` and
-            // only brighten on hover, which made the most important thing
-            // in the tree the least legible thing in it. Secondary
-            // information — the chevron — takes the muted tiers instead;
-            // that is the whole point of having three of them.
+            // 名字是这一行存在的理由，故用 `--foreground` 渲染。次级信息（那个箭头）才用弱化
+            // 色阶 —— 这正是设三级文字的意义。
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs font-medium text-foreground transition-colors',
             'hover:bg-overlay-hover',
           )}
@@ -89,24 +81,17 @@ export function ModuleRow({
               module.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          {/* No type icon here. The row used to carry a tinted folder tile
-              (open/closed), but the disclosure chevron above already says
-              "this expands", and every node kind in this tree is a
-              container — the tile repeated what the indentation and the
-              name beside it already convey. The one icon that carries
-              information the row does not is the HTTP method on an
-              endpoint, and that one stays.
+          {/* 这里没有类型图标。上方的展开箭头已经说明「这东西会展开」，而这棵树里的每种
+              节点都是容器 —— 类型图标只是重复缩进与旁边的名字已经传达的内容。唯一携带行本身
+              没有的信息的图标是接口上的 HTTP method，那个保留。
 
-              No size badge on the right either. It counted the children
-              the chevron already reveals, and expanding is one click —
-              a number that duplicates the tree's own structure is noise,
-              not information. */}
+              右侧也没有数量徽标：它数的是箭头已经揭示出来的子项，而展开只需一次点击 —— 重复
+              树自身结构的数字是噪声，不是信息。 */}
           <InlineEdit
             value={module.name}
             onSave={onSaveEdit}
-            // Controlled by the tree's `editing` target so a module
-            // created from a dialog lands straight in rename. See the
-            // same note in `EndpointRow.tsx`.
+            // 由树的 `editing` 目标受控，好让从对话框创建的模块直接进入重命名。见
+            // `EndpointRow.tsx` 处的同一条说明。
             editing={isEditing}
             onEditingChange={(open) => {
               if (!open) onCancelEdit();

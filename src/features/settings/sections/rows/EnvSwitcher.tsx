@@ -9,32 +9,22 @@ import { envIcon } from '../env-utils';
 import { InlineNameCell } from './InlineNameCell';
 
 /**
- * EnvSwitcher — top-of-section env picker.
+ * EnvSwitcher —— 分区顶部的环境选择条。
  *
- * THIS IS THE ONLY PLACE AN ENVIRONMENT'S NAME APPEARS
- * ---------------------------------------------------
- * The env body used to open with its own header row — icon, then the name
- * as a click-to-edit cell — directly under this strip, so the active env
- * was spelled twice within a few centimetres of each other, and the module
- * layer (which shows the same environments) had no such row, because it had
- * nowhere to put rename. The strip already names every environment, so the
- * row went and the rename came up here with it: the **active** chip hosts the
- * `InlineNameCell`, which reads as the name with a pencil appearing on
- * hover. An inactive chip is a plain span — renaming something you cannot
- * see yet is not a gesture anyone needs.
+ * 环境名只在这里出现一次
+ * ----------------------
+ * 这条选择条已经叫出了每一个环境的名字，故**激活**的那枚 chip 自带 `InlineNameCell`，
+ * 读起来就是名字加一个悬停才出现的铅笔。未激活的 chip 只是普通 span —— 去改一个还看不见
+ * 的环境不是谁需要的动作。
  *
- * Because that puts a button inside what used to be a button, the chip is
- * now a `div` with `role="tab"`, `tabIndex` and hand-written Enter/Space
- * handling. Those are the semantics the old `<button>` gave for free; the
- * role and `aria-selected` are unchanged, so assistive technology sees the
- * same tab strip it always did.
+ * 由此 chip 内部出现了按钮，故它改成带 `role="tab"`、`tabIndex` 与手写 Enter / Space
+ * 的 `div`：那些是原先 `<button>` 免费提供的语义。`role` 与 `aria-selected` 未变，
+ * 辅助技术看到的仍是同一条标签条。
  *
- * `showAdd` / `showDelete` exist for the **module** layer, which shows the
- * same environments but must not offer the two project-level writes: adding
- * an environment and deleting one both act on the project, and deleting
- * one from inside a module tab would take out every module's values for it.
- * The host points at the project's own 环境 layer instead. Default `true`,
- * so the settings section's behaviour is unchanged.
+ * `showAdd` / `showDelete` 是为**模块**层准备的：它展示同一批环境，但不能提供那两个
+ * 项目级写入 —— 新建环境和删除环境都作用在项目上，而在模块标签里删掉一个环境会连带
+ * 抹掉每个模块在它下面的值。那一层改为指向项目自己的环境分区。默认 `true`，
+ * 设置分区的行为不变。
  */
 export function EnvSwitcher({
   environments,
@@ -54,21 +44,20 @@ export function EnvSwitcher({
   onPick: (id: string) => void;
   onRequestDelete: (env: Environment) => void;
   onAdd: () => void;
-  /** Create is in flight — block a second submit until it resolves. */
+  /** 新建在途 —— 挡住第二次提交直到它落地。 */
   addDisabled?: boolean;
-  /** Show the trailing 新建环境 button. */
+  /** 显示末尾的新建环境按钮。 */
   showAdd?: boolean;
-  /** Show each env's delete affordance. */
+  /** 显示每个环境的删除入口。 */
   showDelete?: boolean;
   /**
-   * Commit a new name for an environment. Omitted by the module layer,
-   * which must not rename a project-level environment — that also turns the
-   * active chip's name cell back into a plain span there.
+   * 为某个环境提交新名字。模块层不传：它不该重命名项目级的环境，也因此那里的激活 chip
+   * 名字单元格退回普通 span。
    */
   onRename?: (envId: string, name: string) => void;
-  /** Open this env's name cell already focused — set for a just-created one. */
+  /** 直接以聚焦状态打开该环境的名称单元格 —— 用于刚建出来的那个。 */
   autoRenameId?: string | null;
-  /** The auto-open was consumed; the owner clears its pending-rename flag. */
+  /** 自动打开已被消费；属主据此清掉自己的待重命名标志。 */
   onAutoRenameEnd?: () => void;
 }) {
   const renameable = !!onRename;
@@ -83,15 +72,14 @@ export function EnvSwitcher({
             role="tab"
             aria-selected={isActive}
             tabIndex={0}
-            // While the cell is open the chip stops being a switch: a click
-            // that lands on the name (or anywhere else in the chip) must not
-            // re-pick an environment the user is in the middle of naming.
+            // 单元格打开期间 chip 不再是切换器：落在名字上（或 chip 内任何位置）的点击
+            // 不该把用户正在命名的环境切走。
             onClick={() => {
               if (!isRenaming) onPick(env.id);
             }}
             onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
-              // The open cell owns its own keys; Enter/Escape there commit
-              // and cancel, and must not also reach the chip.
+              // 打开的单元格自己管按键：在那里 Enter / Esc 分别是提交与取消，
+              // 不该同时传到 chip。
               if (isRenaming) return;
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -100,10 +88,8 @@ export function EnvSwitcher({
             }}
             className={cn(
               'group relative flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
-              // Coloured icon container matches the project's tier
-              // language (sky = base / data, amber = config / builds,
-              // violet = production-ish). Picked automatically from the
-              // env name so users don't have to tag each one.
+              // 着色图标容器对应项目的档位语言（天蓝 = 基础 / 数据，琥珀 = 配置 / 构建，
+              // 紫 = 类生产）。按环境名自动挑，用户不必逐个打标。
               isActive
                 ? 'border-primary/40 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.25)]'
                 : 'border-border bg-card/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground',

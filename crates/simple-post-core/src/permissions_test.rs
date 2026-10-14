@@ -190,8 +190,7 @@ fn capability_policy_deserializes_from_snake_case_wire() {
 // resolve_capability — global × per-project conservative merge
 // ============================================================
 
-/// Construct a fresh in-temp pool. Mirrors the helper in
-/// `db::preferences::tests`.
+/// 建一个位于临时目录的新连接池。镜像 `db::preferences::tests` 里的辅助函数。
 fn fresh_pool() -> crate::db::DbPool {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-cap-test-{}-{}",

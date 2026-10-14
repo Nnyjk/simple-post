@@ -5,15 +5,13 @@ import { Input } from '@/components/ui/input';
 import { uid } from '@/lib/utils';
 
 /**
- * A single suggestion shown in the key column's `<datalist>`. The
- * editor doesn't import `CommonHeader` directly so callers can pass
- * any compatible shape (Params tab passes nothing, Headers tab passes
- * the shared `COMMON_HEADERS`).
+ * 键列 `<datalist>` 中的一条建议。编辑器不直接引入 `CommonHeader`，好让调用方传入任何
+ * 兼容的形状（Params 页不传，Headers 页传共享的 `COMMON_HEADERS`）。
  */
 export interface KeySuggestion {
   name: string;
-  /** One-line hint; rendered as the option's `title` for browsers that
-   *  surface it (Chrome / Firefox) and as the option's text fallback. */
+  /** 一行提示；在会展示它的浏览器（Chrome / Firefox）里渲染为选项的 `title`，同时作为
+   *  选项的文本回退。 */
   description?: string;
 }
 
@@ -23,16 +21,13 @@ interface Props {
   keyPlaceholder?: string;
   valuePlaceholder?: string;
   /**
-   * Optional autocomplete list. When provided AND non-empty, the
-   * editor renders a single `<datalist>` (id shared across all rows)
-   * that the browser wires up to every key input. Empty / omitted =
-   * plain free-text input.
+   * 可选的自动补全列表。传入且非空时，编辑器渲染**一个** `<datalist>`（所有行共用同一
+   * id），浏览器会把它接到每个键输入框上。留空或不传 = 纯自由文本输入。
    */
   keySuggestions?: ReadonlyArray<KeySuggestion>;
 }
 
-// Single shared id — `<datalist>` association is by document-wide id,
-// so we only need to emit one list element regardless of row count.
+// 单一共享 id —— `<datalist>` 的关联靠文档级 id，故无论行数多少都只需输出一个列表元素。
 const SUGGESTIONS_DATALIST_ID = 'kve-key-suggestions';
 
 export function KeyValueEditor({
@@ -119,11 +114,9 @@ export function KeyValueEditor({
         添加
       </Button>
 
-      {/* The datalist lives at the bottom of the same container; the
-          browser locates it by id when any input references it via
-          `list=`. Each row's description shows up as the option's
-          title (Chrome / Firefox tooltip) and as the option's text
-          fallback for browsers that don't render <datalist> popups. */}
+      {/* datalist 放在同一容器的底部；任何输入框用 `list=` 引用它时，浏览器按 id 找到它。
+          每条的 description 既作为选项的 title（Chrome / Firefox 的 tooltip），也作为不渲染
+          <datalist> 弹层的浏览器的文本回退。 */}
       {hasSuggestions && (
         <datalist id={SUGGESTIONS_DATALIST_ID}>
           {keySuggestions!.map((s) => (

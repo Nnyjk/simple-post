@@ -4,41 +4,28 @@ import { IconTile } from '@/components/ui/icon-tile';
 import type { HueConcept } from '@/lib/hue';
 import { cn } from '@/lib/utils';
 /**
- * KeyValueTable — the chrome shared by the env panel's two row tables
- * (BaseUrl definitions and environment variables).
+ * KeyValueTable —— 环境面板两张行表（前置 URL 定义、环境变量）共用的外壳。
  *
- * These two were 313 lines of near-verbatim copy: the same empty state,
- * the same `group flex items-start gap-3 px-4` row shell with its
- * first-row-suppresses-the-border rule, and the same full-width "add"
- * footer. Only the contents differed — icon, accent, labels, the
- * variable key's validation rule, and BaseUrl's extra "set default"
- * toggle. That shared shell now lives here; the per-table cells are
- * supplied through `renderRow`.
+ * 两者只有这些不同：图标、强调色、标签、变量键的校验规则，以及前置 URL 额外的
+ * 「设为默认」开关。这份公共外壳住在这里，各表自己的单元格由 `renderRow` 提供。
  *
- * The add control is one element shared by both states. It used to be
- * two: a centred solid `variant="default"` button inside the empty state,
- * and a hairline-divided text button at the foot of a populated list. Both
- * say "this list is a set of named slots you can add to", and both tables
- * rendered them side by side on the same screen — so the empty one read as
- * a different, more prominent action than the identical action you get one
- * row later. Now the empty state keeps only its prompt and renders the very
- * same footer button, so the control cannot drift between the two states.
+ * 新增控件是两种状态共用的同一个元素。空状态只保留提示文案，渲染的正是同一个页脚按钮，
+ * 故两个状态之间不会漂移出两样东西。
  */
 
 export interface KeyValueTableProps<T> {
   items: readonly T[];
-  /** Stable React key. Required because `env.variables` allows a blank key. */
+  /** 稳定的 React key。必填，因为 `env.variables` 允许空键。 */
   keyOf: (item: T, index: number) => string;
-  /** Shown centred when `items` is empty. */
+  /** `items` 为空时居中显示。 */
   emptyText: string;
-  /** Label on both the empty-state button and the footer button. */
+  /** 空状态按钮与页脚按钮共用的标签。 */
   addText: string;
   onAdd: () => void;
-  /** Row padding. BaseUrl rows are slightly taller than variable rows. */
+  /** 行内边距。前置 URL 的行比变量行略高。 */
   rowClassName?: string;
   /**
-   * The row's cell contents, minus the row shell. Receives `flush` so a
-   * row can suppress its own top border when it is the first one.
+   * 行的单元格内容，不含行外壳。收到 `flush` 参数，行据此在自己是第一行时抑制上边框。
    */
   renderRow: (item: T, index: number, flush: boolean) => ReactNode;
 }
@@ -52,9 +39,8 @@ export function KeyValueTable<T>({
   rowClassName,
   renderRow,
 }: KeyValueTableProps<T>) {
-  // One control, both states. Hoisting it out of the branches is the point:
-  // a per-branch copy is exactly how the empty state came to look different
-  // from the populated one in the first place.
+  // 一个控件，两种状态。把它提到分支之外正是要点：每个分支各写一份，空状态才会
+  // 长得和有内容的状态不一样。
   const addControl = (
     <button
       type="button"
@@ -97,10 +83,7 @@ export function KeyValueTable<T>({
   );
 }
 
-/**
- * The 36px bordered tile both tables put at the head of each row. The
- * `py-*` nudge differs per table, so it stays a parameter.
- */
+/** 两张表都放在每行开头的那块 36px 描边色块。两表的 `py-*` 微调不同，故留作参数。 */
 export function RowTile({ concept, icon }: { concept: HueConcept; icon: ReactNode }) {
   return <IconTile size="lg" bordered concept={concept} icon={icon} />;
 }

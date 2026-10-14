@@ -1,20 +1,13 @@
-//! CRUD for the `environments` table.
+//! `environments` 表的 CRUD。
 //!
-//! Each environment holds a per-(service × module) URL map
-//! (`moduleBaseUrls`) and a free-form variable pool. That map is the only
-//! URL layer: a cell is either set or it is not, and a missing cell
-//! resolves to `''` rather than falling back to another module's value or
-//! to the retired environment-level map. The `base_urls_json` column still
-//! exists — dropping a column means rebuilding the table, which means a
-//! `SCHEMA_VERSION` bump, which means `ensure_current_schema` deletes the
-//! user's store — but nothing here reads or writes it; the one reader is
-//! the migration in `db::migrate`.
+//! 每个环境持有一张按 (服务 × 模块) 的 URL map（`moduleBaseUrls`）和一个自由变量池。那张
+//! map 是**唯一**的 URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的
+//! 值，也不会回落到已下线的环境级 map。`base_urls_json` 列仍在表里——删列 = 重建表 =
+//! bump `SCHEMA_VERSION` = `ensure_current_schema` 删掉用户的库——但此处不读不写；唯一的
+//! 读者是 `db::migrate` 里的那个迁移。
 //!
-//! `set_active` is a transactional
-//! "demote others, promote this" — the transaction must hold the
-//! write lock across both steps or two simultaneous set_active calls
-//! could leave two envs active. We don't take the lock here — the
-//! caller is expected to wrap `set_active` in `db::with_tx`.
+//! `set_active` 是事务性的「降级其他、升级这个」——事务必须把写锁跨在两步上，否则两次并发
+//! 的 set_active 会留下两个激活环境。这里不取锁，调用方须把 `set_active` 包进 `db::with_tx`。
 
 use std::collections::HashMap;
 
@@ -23,20 +16,16 @@ use rusqlite::{params, Connection, Row};
 use crate::domain::{Environment, EnvironmentPatch};
 use crate::error::AppError;
 
-/// Column list every read here shares, in [`row_to_env`]'s order.
+/// 这里每次读共用的列清单，顺序同 [`row_to_env`]。
 ///
-/// One string rather than four copies: the two URL columns sit next to
-/// each other, and a read that named only one would silently produce an
-/// environment whose modules all resolve to `''`.
+/// 用一个字符串而非四份拷贝：两个 URL 列彼此相邻，只点名其中一个的读会静默产出一个所有模块
+/// 都解析成 `''` 的环境。
 const COLUMNS: &str =
     "id, project_id, name, is_active, base_urls_json, module_base_urls_json, variables_json";
 
-// -------------------------------------------------------------------------
-// Reads.
-// -------------------------------------------------------------------------
+// 读。
 
-/// All environments under a project, ordered by `name` for stable
-/// display in the picker.
+/// 一个项目下的全部环境，按 `name` 排序以让选择器显示稳定。
 pub fn list_by_project(
     conn: &mut Connection,
     project_id: &str,
@@ -54,8 +43,7 @@ pub fn list_by_project(
     Ok(out)
 }
 
-/// All environments across every project — used by the REST
-/// `GET /api/environments` when no `projectId` filter is supplied.
+/// 跨全部项目的全部环境——供 REST `GET /api/environments` 未给 `projectId` 过滤时使用。
 pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM environments \
@@ -69,10 +57,8 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
     Ok(out)
 }
 
-/// The single active env for the project, or `None` if none is
-/// active. The schema doesn't enforce a single-active-row invariant
-/// (the UI does), so this returns whatever row has `is_active = 1`.
-/// `set_active` keeps that invariant intact.
+/// 某项目唯一激活的环境，没有则 `None`。schema 不强制「只有一行激活」的不变式（那是 UI
+/// 的职责），故这里返回 `is_active = 1` 的那一行；[`set_active`] 负责维持该不变式。
 pub fn get_active(
     conn: &mut Connection,
     project_id: &str,
@@ -98,24 +84,13 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
     }
 }
 
-/// Look up the `project_id` owning `env_id`. Returns `NotFound` when
-/// the env id is unknown — the caller (a mutating MCP tool) needs that
-/// resolution to apply the per-project permission check; treating an
-/// unknown id as a silent "global" would be a permission bypass.
+/// 查 `env_id` 所属的 `project_id`。env id 未知时返回 `NotFound`——调用方（会改动的 MCP
+/// 工具）需要这个解析结果来施加逐项目权限检查；把未知 id 当作静默的「global」就是一个
+/// 权限绕过。
 ///
-/// The `env_*` mutating tools (update / delete / set_var / set_active)
-/// used to call `check_permission(.., "global", ..)`
-/// with the literal `"global"` as a stand-in for "any project". That
-/// was a permission-bypass waiting to happen: any project whose agent
-/// permission row was absent defaulted to `Permission::ReadCall`
-/// (see `db::permissions::get`), so the "global" lookup would silently
-/// succeed for `env_update` / `env_set_var` and
-/// `env_set_active` (which check `ReadCall`), and for `env_delete`
-/// (which checked `Full` and so still got denied — but only by
-/// accident). This helper is the missing piece that closes that gap:
-///
-///   tool_env_update(env_id="e_unknown") ⇒ lookup_project_id fails
-///   ⇒ NotFound ⇒ handler returns NotFound before touching anything.
+/// 这正是补上那一环的工具：
+///   tool_env_update(env_id="e_unknown") ⇒ lookup_project_id 失败
+///   ⇒ NotFound ⇒ handler 在动任何东西之前就返回 NotFound。
 pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, AppError> {
     let pid: Option<String> = conn
         .query_row(
@@ -127,18 +102,14 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
     pid.ok_or_else(|| AppError::NotFound(format!("environment {env_id}")))
 }
 
-// -------------------------------------------------------------------------
-// Writes.
-// -------------------------------------------------------------------------
+// 写。
 
 pub fn create(conn: &mut Connection, e: &Environment) -> Result<(), AppError> {
     let module_base_urls_json = serde_json::to_string(&e.module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
-    // `base_urls_json` is deliberately absent from this list. Naming it
-    // would keep writing a column nothing reads, and carrying a caller's
-    // legacy `baseUrls` into it would leave a blob that looks live to the
-    // next reader. Leaving it out lets the schema default apply, which is
-    // the empty value it holds on every row this build writes.
+    // `base_urls_json` 刻意不在这个列表里。点名它会继续写一个无人读的列，而把调用方的遗留
+    // `baseUrls` 带进去会留下一个在下一个读者眼里像是活的 blob。不写它就让 schema 默认值
+    // 生效，那正是本构建写的每一行上它所承载的空值。
     conn.execute(
         "INSERT INTO environments \
          (id, project_id, name, is_active, module_base_urls_json, variables_json) \
@@ -160,11 +131,9 @@ pub fn update(
     id: &str,
     patch: EnvironmentPatch,
 ) -> Result<Environment, AppError> {
-    // Note: `is_active` is intentionally *not* patched here — use
-    // `set_active` to flip it. That keeps the "exactly one active"
-    // invariant concentrated in one function and avoids surprising
-    // a caller who patches `name` and accidentally breaks the
-    // single-active invariant.
+    // 注意：`is_active` 在这里**也会**被 patch。`set_active` 才是负责维持「恰好一个激活」
+    // 的那一处，但它清零其余行而这里不——两者都写 `is_active` 时，「恰好一个」就不再成立。
+    // 这处分工尚未对齐，不要把本函数当作翻转激活状态的正规入口。
     let mut sets: Vec<String> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -176,11 +145,9 @@ pub fn update(
         sets.push(format!("module_base_urls_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(m)?));
     }
-    // `patch.base_urls` is accepted and **ignored** — the column behind it
-    // is dead (see the module docs). Writing it would make a retired
-    // layer look current to the next reader, and dropping the field from
-    // the patch type would fail a payload from an older client outright,
-    // so silently skipping it is the trade.
+    // `patch.base_urls` 收下但**忽略**——它背后的列已死（见模块文档）。写它会让一个已下线的
+    // 层在下一个读者眼里像是现役的；而把该字段从 patch 类型里删掉，则会让旧客户端的载荷
+    // 直接失败。故静默跳过是取舍。
     if let Some(v) = &patch.variables {
         sets.push(format!("variables_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(v)?));
@@ -206,16 +173,11 @@ pub fn update(
     get(conn, id)
 }
 
-/// Promote `id` to active and demote all other envs of the same
-/// project. MUST be called inside `db::with_tx` — the two
-/// `UPDATE`s have to take the write lock together or a concurrent
-/// `set_active` could leave two envs active.
-///
-/// Returns the post-update environment so the caller can echo it
-/// back to the renderer.
+/// 把 `id` 升级为激活，并把同项目其余环境降级。**必须在 `db::with_tx` 内调用**——两条
+/// `UPDATE` 必须一起拿到写锁，否则并发的 `set_active` 会留下两个激活环境。
+/// 返回更新后的环境，好让调用方直接回显给渲染层。
 pub fn set_active(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
-    // Look up the project so we can scope the demotion. This must
-    // happen before the updates so we can short-circuit on a missing id.
+    // 先查项目，好给降级划定范围。必须在两条 UPDATE 之前，以便 id 不存在时直接短路。
     let project_id: Option<String> = conn
         .query_row(
             "SELECT project_id FROM environments WHERE id = ?1",
@@ -247,23 +209,18 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Set or clear a single variable on an environment. `value = None`
-/// removes the key entirely (so `set_var(env, "k", None)` is the
-/// delete-by-key path). `value = Some(v)` upserts `k → v`.
-///
-/// MUST be called inside `db::with_tx`.
-///
-/// Returns the post-update [`Environment`] so the caller can echo it
-/// back to the renderer without a second read.
+/// 设置或清除环境上的单个变量。`value = None` 整个移除该键（故
+/// `set_var(env, "k", None)` 就是按键删除的路径）；`value = Some(v)` upsert `k → v`。
+/// **必须在 `db::with_tx` 内调用。** 返回更新后的 [`Environment`]，调用方无需再读一次
+/// 即可回显给渲染层。
 pub fn set_var(
     conn: &mut Connection,
     env_id: &str,
     key: &str,
     value: Option<&str>,
 ) -> Result<Environment, AppError> {
-    // Read once, mutate the in-memory map, write the JSON column.
-    // Cheaper than a JSON-extend SQL function for a single key, and
-    // keeps the round-trip shape identical to `get`.
+    // 读一次，改内存 map，再写 JSON 列。对单个键来说比 JSON 扩展的 SQL 函数便宜，且与
+    // `get` 保持完全相同的往返形状。
     let mut env = get(conn, env_id)?;
     match value {
         Some(v) => {
@@ -284,25 +241,15 @@ pub fn set_var(
     Ok(env)
 }
 
-/// Rename a single environment variable in one shot: `from_key` becomes
-/// `to_key`, keeping its value.
+/// 一次性重命名一个环境变量：`from_key` 变成 `to_key`，值保留。
+/// 这是对该 JSON 列的一次 `UPDATE`，故那个键永远不会被观察到不存在。
+/// **必须在 `db::with_tx` 内调用。**
+/// 错误：
+///   - 环境不存在时 [`AppError::NotFound`]
+///   - [`AppError::Validation`]：`from_key` 不存在（没东西可改）、`to_key` 已存在（拒绝覆盖
+///     另一个变量），或 `from_key == to_key`（无操作的改名几乎总是 UI bug）
 ///
-/// The renderer used to model a rename as `set_var(from_key, None)` followed
-/// by `set_var(to_key, value)` — two transactions with a window in between
-/// where the variable does not exist. Anything interrupting that window
-/// (crash, or the second call failing) destroyed the variable. This is one
-/// `UPDATE` of the JSON column, so the key is never observably missing.
-///
-/// MUST be called inside `db::with_tx`.
-///
-/// Errors:
-///   - [`AppError::NotFound`] if the environment doesn't exist
-///   - [`AppError::Validation`] if `from_key` is absent (nothing to rename),
-///     if `to_key` already exists (refusing to clobber another variable), or
-///     if `from_key == to_key` (a no-op rename is almost always a UI bug)
-///
-/// Returns the post-update [`Environment`] so the caller echoes the
-/// authoritative row rather than an optimistic guess.
+/// 返回更新后的 [`Environment`]，调用方回显权威行而非乐观猜测。
 pub fn rename_var(
     conn: &mut Connection,
     env_id: &str,
@@ -321,7 +268,7 @@ pub fn rename_var(
         ))
     })?;
     if env.variables.contains_key(to_key) {
-        // Restore the key we just removed so an abort leaves the map untouched.
+        // 恢复刚移除的键，好让这次中止把 map 留在未改动状态。
         env.variables.insert(from_key.to_string(), value);
         return Err(AppError::Validation(format!(
             "rename_var: environment {env_id} already has a variable {to_key:?}"
@@ -329,8 +276,8 @@ pub fn rename_var(
     }
     env.variables.insert(to_key.to_string(), value);
 
-    // Same single-UPDATE shape as `set_var`: the `variables_json` column is
-    // written whole, which is atomic, so the rename has no intermediate state.
+    // 与 `set_var` 同一个单次 UPDATE 形状：`variables_json` 整列写入，是原子的，故改名
+    // 没有中间状态。
     let variables_json = serde_json::to_string(&env.variables)?;
     let rows = conn.execute(
         "UPDATE environments SET variables_json = ?1 WHERE id = ?2",
@@ -342,23 +289,15 @@ pub fn rename_var(
     Ok(env)
 }
 
-/// Set or clear one `moduleBaseUrls[def_id][module_id]` cell.
+/// 设置或清除一个 `moduleBaseUrls[def_id][module_id]` 单元格。
 ///
-/// `url = None` removes the cell, and that is a real answer rather than a
-/// hole: (service × module) is the only layer there is, so a cleared cell
-/// means this module has no address for this service and resolution stops
-/// there. It does not fall back to another module's value or to the
-/// retired environment-level map — two modules pointing one service at
-/// different hosts is the normal case, not an error to be smoothed over.
-///
-/// The endpoint's module is not verified against the environment's
-/// project here: the pair only becomes a URL when an endpoint actually
-/// resolves it, and `base_url_definitions.project_id_of` is the check that
-/// keeps a cross-project service from being named at all.
-///
-/// MUST be called inside `db::with_tx`.
-///
-/// Returns the post-update [`Environment`] for the renderer to echo.
+/// `url = None` 移除该单元格，而这是真实答案而非一个洞：(服务 × 模块) 是唯一的一层，
+/// 故被清空的单元格意味着此模块对此服务无地址，解析到此为止。它不会回落到别的模块的值，
+/// 也不会回落到已下线的环境级 map——两个模块把同一个服务指向不同 host 是常态，不是该被抹平的
+/// 错误。
+/// 此处不核对 endpoint 的模块是否属于该环境的项目：这一对只有在 endpoint 真的去解析它时才
+/// 成为 URL，而拦住跨项目服务被指名的是 `base_url_definitions.project_id_of`。
+/// **必须在 `db::with_tx` 内调用。** 返回更新后的 [`Environment`] 供渲染层回显。
 pub fn set_module_base_url(
     conn: &mut Connection,
     env_id: &str,
@@ -366,11 +305,9 @@ pub fn set_module_base_url(
     module_id: &str,
     url: Option<&str>,
 ) -> Result<Environment, AppError> {
-    // Same load → mutate → write pattern as `set_var`, for the same
-    // reason: one atomic UPDATE of the JSON column keeps a reader from
-    // seeing a half-written map. The nested map is only created when a
-    // value is actually being set, so clearing the last cell in a service
-    // does not leave an empty `{}` behind it.
+    // 与 `set_var` 同样的「载入 → 改 → 写」形状，同一个理由：对 JSON 列的一次原子 UPDATE 使
+    // 读者看不到写了一半的 map。嵌套 map 只在确实要设值时才创建，故清掉某服务最后一个单元格
+    // 不会在它后面留下一个空 `{}`。
     let mut env = get(conn, env_id)?;
     match url {
         Some(u) => {
@@ -399,9 +336,7 @@ pub fn set_module_base_url(
     Ok(env)
 }
 
-// -------------------------------------------------------------------------
-// Row mapper.
-// -------------------------------------------------------------------------
+// 行映射器。
 
 fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
     let base_urls_json: String = row.get(4)?;
@@ -414,10 +349,8 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
             Box::new(JsonColError(format!("{col}: {e}"))),
         )
     };
-    // `base_urls` is decoded but never used: the column is kept only so it
-    // survives, and decoding it is what keeps the wire field honest for a
-    // client that still sends one. A malformed blob therefore still fails
-    // the read rather than being silently reported as an empty map.
+    // `base_urls` 解析了但从不使用：该列只为存活而留，解析它是为了让仍会发来该字段的客户端在
+    // 线格式上仍然诚实。故一个畸形的 blob 仍会让这次读失败，而不是被静默报成空 map。
     let base_urls: HashMap<String, String> =
         serde_json::from_str(&base_urls_json).map_err(|e| parse_err(e, "base_urls_json"))?;
     let module_base_urls: HashMap<String, HashMap<String, String>> =
@@ -436,9 +369,8 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
     })
 }
 
-/// Tiny `StdError` wrapper around a string. Needed because rusqlite
-/// demands `Box<dyn StdError + Send + Sync + 'static>` for the
-/// `FromSqlConversionFailure` payload.
+/// 包住字符串的小 `StdError`。需要它是因为 rusqlite 的 `FromSqlConversionFailure` 载荷要求
+/// `Box<dyn StdError + Send + Sync + 'static>`。
 #[derive(Debug)]
 struct JsonColError(String);
 
@@ -450,9 +382,7 @@ impl std::fmt::Display for JsonColError {
 
 impl std::error::Error for JsonColError {}
 
-// -------------------------------------------------------------------------
-// Tests.
-// -------------------------------------------------------------------------
+// 测试。
 
 #[cfg(test)]
 #[path = "environments_test.rs"]

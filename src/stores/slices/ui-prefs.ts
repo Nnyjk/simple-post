@@ -3,18 +3,15 @@ import type { AppState } from '../app-store';
 import type { RequestSettings, Theme } from '../store-types';
 
 /**
- * ui-prefs — the two user preferences that survive a reload.
+ * ui-prefs — 两个能跨刷新生效的偏好。
  *
- * The localStorage helpers are private to this module (they were private
- * to `ui-slice.ts` before the split), because nothing outside the store
- * should be writing the prefs key. Both setters write the *whole* prefs
- * object rather than merging into whatever is on disk, so the two
- * actions can't interleave into a half-written record.
+ * localStorage 助手保持模块私有：store 之外不该写这个 key。
+ * 两个 setter 都整份覆盖而不是与磁盘上的内容合并，避免两个 action
+ * 交错写出半条记录。
  */
 
 const PREFS_KEY = 'simple-post:prefs';
 
-/** Persisted user preferences — only the fields that survive reloads. */
 interface PersistedPrefs {
   theme?: Theme;
   requestSettings?: Partial<RequestSettings>;
@@ -37,7 +34,7 @@ function savePrefs(prefs: PersistedPrefs): void {
   try {
     window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
-    // localStorage may be disabled (private mode, quota); silently ignore.
+    // localStorage 可能被禁用（隐私模式、配额）；静默忽略。
   }
 }
 

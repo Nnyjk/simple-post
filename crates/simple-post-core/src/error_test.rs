@@ -41,9 +41,8 @@ fn serde_error_converts_via_from() {
 
 #[test]
 fn all_codes_are_distinct() {
-    // `r2d2::Error` has no public constructor (its inner field is
-    // private), so the `Pool` variant is exercised by its own test
-    // below rather than being fabricated here.
+    // `r2d2::Error` 没有公开构造函数（其内部字段是私有的），故 `Pool` 变体由下面那个测试
+    // 单独考，而不是在这里凭空造一个。
     let codes = [
         AppError::NotFound("x".into()).code(),
         AppError::Validation("x".into()).code(),
@@ -62,23 +61,14 @@ fn all_codes_are_distinct() {
     );
 }
 
-/// `r2d2::Error` can only be produced by the crate itself, so obtain a
-/// real one: hold the single connection in a size-1 pool, then ask for
-/// a second one — that must time out.
-///
-/// The timeout is generous on purpose. It used to be 1ms, on the theory
-/// that a shorter wait makes the test faster — but `connection_timeout`
-/// also governs `build()`, which eagerly opens a connection, so under
-/// parallel test load the *pool construction* was the thing timing out
-/// and the failure surfaced as `build pool: Error(None)`, a flake that
-/// has nothing to do with the behaviour under test.
-///
-/// A tight timeout buys nothing here anyway: with `max_size(1)` and the
-/// only connection checked out, a second `get()` cannot succeed no
-/// matter how long it waits. So the timeout only decides *how fast* the
-/// test observes something already guaranteed. 250ms leaves ample room
-/// for an in-memory SQLite open on a loaded machine while still failing
-/// the second `get()` unconditionally.
+/// `r2d2::Error` 只能由该 crate 自己产生，故这里取一个真的：把唯一那条连接占在一个
+/// 大小为 1 的池里，再要第二条——那必然超时。
+/// 超时给得宽是刻意的：`connection_timeout` 同时管着 `build()`，而后者会急切地开一条
+/// 连接，故在并行测试负载下超时的是**池的构造**，失败表现为 `build pool: Error(None)`，
+/// 与被测行为无关。
+/// 紧的超时在这里也换不来什么：池大小 1 且唯一连接已被借出时，第二次 `get()` 无论等多久
+/// 都不可能成功。超时只决定测试多快观察到一件本已注定的事。250ms 给负载机器上打开一个
+/// 内存 SQLite 留足余量，同时仍让第二次 `get()` 无条件失败。
 #[test]
 fn pool_code_is_distinct() {
     let mgr = r2d2_sqlite::SqliteConnectionManager::memory();

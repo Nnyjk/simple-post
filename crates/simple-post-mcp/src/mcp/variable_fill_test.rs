@@ -8,9 +8,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Per-call counter that disambiguates temp dirs when several tests
-/// construct their state() in the same millisecond (cargo's default
-/// runs tests in parallel).
+/// 每次调用自增，用来在同毫秒内构造多个 state() 时区分临时目录
+/// （cargo 默认并行跑测试）。
 static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn state() -> Arc<AppState> {

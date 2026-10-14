@@ -19,10 +19,9 @@ pub(crate) async fn permissions_get(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
 ) -> Result<Json<String>, HttpErrorResponse> {
-    // Mirror the Tauri command: return the bare `Permission` (which
-    // serializes to a lowercase string via
-    // `#[serde(rename_all = "lowercase")]`). The TS caller already
-    // has this contract on the IPC side.
+    // 镜像 Tauri 命令：回裸的 `Permission`（经
+    // `#[serde(rename_all = "lowercase")]` 序列化为小写字符串）。TS 侧在 IPC 那边已经
+    // 持有这份契约。
     let perm =
         db::with_conn(&s.pool, |c| db::permissions::get(c, &project_id)).map_err(map_app_error)?;
     Ok(Json(perm.as_str().to_string()))
@@ -33,9 +32,8 @@ pub(crate) async fn permissions_set(
     Path(project_id): Path<String>,
     Json(body): Json<PermissionPutBody>,
 ) -> Result<StatusCode, HttpErrorResponse> {
-    // `Permission::parse` is the single source of truth for the
-    // accepted values — a typo at the call site fails loudly with
-    // 400 instead of writing a bogus row.
+    // `Permission::parse` 是可接受取值的唯一事实来源——调用点拼错会响亮地 400，而不是
+    // 写进一行垃圾数据。
     let perm = crate::domain::Permission::parse(&body.permission).ok_or_else(|| {
         map_app_error(AppError::Validation(format!(
             "unknown permission: {}",

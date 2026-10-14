@@ -1,13 +1,11 @@
 import { Cloud, Rocket, TestTube } from 'lucide-react';
 
 /**
- * Pick an icon for the env chip based on its name. The mapping is loose
- * by design — names that don't match anything get the neutral Cloud
- * icon, which still differentiates the env visually without forcing the
- * user to pick an icon manually.
+ * 按环境名挑一个图标。映射刻意宽松 —— 匹配不上任何规则的名字拿到中性的 Cloud 图标，
+ * 仍能在视觉上区分环境，而不必强迫用户手动挑图标。
  *
- * `rows/EnvSwitcher` is the only caller left: the env body no longer has a
- * name row of its own, so the switcher owns both the name and its glyph.
+ * `rows/EnvSwitcher` 是如今唯一的调用方：环境内容不再有名字行，故名字与其字形都由切换
+ * 器持有。
  */
 export function envIcon(name: string) {
   const n = name.toLowerCase();

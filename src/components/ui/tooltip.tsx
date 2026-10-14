@@ -9,28 +9,22 @@ interface TooltipProps {
   className?: string;
 }
 
-/** Gap between the trigger and the bubble, in px. */
+/** 触发器与气泡之间的间距（px）。 */
 const GAP = 6;
-/** Distance kept from the viewport edge when clamping, in px. */
+/** 贴边收拢时与视口边缘保持的距离（px）。 */
 const EDGE = 8;
 
 /**
- * Hover hint, portaled to `document.body` and positioned `fixed`.
+ * 悬浮提示，portal 到 `document.body` 并用 `fixed` 定位。
  *
- * The portal is the point. The bubble used to be an absolutely
- * positioned child of its trigger, which meant it was laid out inside
- * whatever the trigger lived in — and clipped by it. In the node tree
- * that container is `overflow-y-auto`, so a row near the top had its
- * "新建" hint sliced off by the scroll box, and a row near the bottom
- * lost it to the panel edge. `z-index` cannot fix a clip: an ancestor's
- * `overflow` wins regardless of stacking order. Escaping to `document.body`
- * and measuring the trigger's rect is what actually makes the hint
- * readable, and it is the same shape `TreeContextMenu` and `Dialog`
- * already use.
+ * portal 是要点。气泡若作为触发器的绝对定位子元素，就会被布局进触发器所在的容器
+ * 并被它裁掉：节点树里那个容器是 `overflow-y-auto`，于是靠近顶部的行提示会被滚动
+ * 框切掉，靠近底部的行则被面板边缘吃掉。`z-index` 修不了裁剪——无论层叠顺序如何，
+ * 祖先的 `overflow` 都赢。逃逸到 `document.body` 并量触发器的 rect 才是真正让提示
+ * 可读的办法，这也正是 `TreeContextMenu` 与 `Dialog` 已有的形状。
  *
- * The bubble is measured after mount, then re-measured on scroll and
- * resize so it stays glued to its trigger while the tree scrolls
- * underneath a stationary pointer.
+ * 气泡在挂载后测量，并在滚动与 resize 时重新测量，好让它在树于静止指针下方滚动时
+ * 始终贴着触发器。
  */
 export function Tooltip({ content, children, side = 'top', className }: TooltipProps) {
   const [visible, setVisible] = useState(false);
@@ -39,9 +33,8 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
   const bubbleRef = useRef<HTMLSpanElement>(null);
   const timeoutRef = useRef<number | null>(null);
 
-  // A nullish `content` is a deliberate "no hint here" — the response
-  // viewer's format button passes one when the body is valid JSON.
-  // Rendering the bubble anyway put an empty pill on screen.
+  // `content` 为 nullish 是有意的「这里不提示」——响应查看器的格式化按钮在 body
+  // 是合法 JSON 时就会传一个空值。仍然渲染气泡只会在屏幕上多一枚空药丸。
   const hasContent = content !== undefined && content !== null && content !== '';
 
   const cancelPending = useCallback(() => {
@@ -58,26 +51,23 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
     const a = anchor.getBoundingClientRect();
     const b = bubble.getBoundingClientRect();
     let top = side === 'top' ? a.top - b.height - GAP : a.bottom + GAP;
-    // Flip to the opposite side rather than open off-screen — a
-    // tooltip with nowhere to go is worse than one in the wrong place.
+    // 与其开到屏幕外，不如翻到另一侧——一个没处可去的提示比位置不对的更糟。
     if (side === 'top' && top < EDGE) top = a.bottom + GAP;
     else if (side === 'bottom' && top + b.height > window.innerHeight - EDGE) {
       top = a.top - b.height - GAP;
     }
     let left = a.left + a.width / 2 - b.width / 2;
-    // The tree is a narrow left-hand panel, so a centred bubble on a
-    // row near either edge runs off the window without this.
+    // 树是左侧一块窄面板，所以靠近任一边缘的行，居中的气泡没有这一步就会跑出窗口
     left = Math.min(Math.max(left, EDGE), Math.max(EDGE, window.innerWidth - b.width - EDGE));
     setPos({ top, left });
   }, [side]);
 
-  // `useLayoutEffect`, not `useEffect`: measure before the first paint
-  // so the bubble never flashes at the pre-measurement origin.
+  // 用 `useLayoutEffect` 而非 `useEffect`：首帧之前就量好，气泡才不会在测量前的原点
+  // 闪一下
   useLayoutEffect(() => {
     if (!visible) return;
     place();
-    // Capture phase — the tree's scroll box is an ancestor, not the
-    // window itself, so a bubble-phase listener would never fire.
+    // 捕获阶段——树的滚动框是祖先而非 window 本身，冒泡阶段的监听器永远不触发。
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
     return () => {
@@ -113,7 +103,7 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
           <span
             ref={bubbleRef}
             role="tooltip"
-            // Measured after mount; hidden until the rect is known.
+            // 挂载后测量；rect 已知之前保持隐藏。
             style={{
               top: pos?.top ?? 0,
               left: pos?.left ?? 0,

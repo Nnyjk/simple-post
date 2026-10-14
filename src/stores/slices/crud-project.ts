@@ -1,18 +1,14 @@
 /**
- * CRUD sub-factory — projects.
+ * CRUD 子工厂 —— 项目。
  *
- * One of five sub-factories composed by `createCrudSlice` (see
- * `../crud-slice.ts` for the slice-wide contract: optimistic `set()` →
- * `invokeCmd` → snapshot-and-rollback).
+ * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
+ * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
  *
- * `deleteProject` is the widest cross-slice writer in the slice. It
- * removes the project's entire subtree, its environments, the response
- * history / saved examples keyed by the dropped endpoints, and the
- * matching workspace tabs — all in a single atomic `set()`. That
- * single-write shape is deliberate: rewriting it as a sequence of
- * `get().closeTab()`-style calls would split it into several renders and
- * make the IPC-failure `set(snapshot)` restore a state the user had
- * already moved past.
+ * `deleteProject` 是本切片里跨度最大的跨切片写入：它在一次原子的 `set()` 里
+ * 移除该项目的整棵子树、它的环境、按被丢弃 endpoint 作键的响应历史 / 已存示例，
+ * 以及对应的工作区标签。保持单次写入是刻意的：改写成多次
+ * `get().closeTab()` 式的调用会把它拆成好几次渲染，也让 IPC 失败时的
+ * `set(snapshot)` 回滚到一个用户已经走过的状态。
  */
 import type { StateCreator } from 'zustand';
 import type { Project, Environment, ResourceNode } from '@/types/domain';
@@ -20,7 +16,7 @@ import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import { filterTabsAfterRemoval, invokeWithRollback, tabKeysForSubtree } from './crud-helpers';
 
-/** Project actions owned by the CRUD slice. */
+/** CRUD 切片拥有的 project 动作。 */
 export interface ProjectCrudActions {
   addProject: (
     name: string,
@@ -41,37 +37,30 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         opts: opts ?? null,
       });
       set((s) => ({ projects: [...s.projects, project] }));
-      // A new project arrives with a default environment **and** a default
-      // module (see `db::projects::create_with_defaults`). Neither is
-      // refetched: `openProject`'s `loadWorkspace` early-returns because
-      // layer 2 already ran during bootstrap, so without these the env
-      // switcher reads "—" with `{{var}}` having nothing to resolve
-      // against, and the tree reads 「该项目还没有模块」 for a project that
-      // has one — both until the app is restarted. That is the exact "I
-      // created a project and nothing is there" this path exists to
-      // prevent.
+      // 新项目会带一个默认环境**和**一个默认 module（见
+      // `db::projects::create_with_defaults`）。两者都不重新拉取：bootstrap 期间
+      // 第二层已经跑过，`openProject` 的 `loadWorkspace` 会提前返回，所以不补这
+      // 两步的话，环境切换器会显示"—"而 `{{var}}` 无从解析，树会对一个明明有
+      // module 的项目显示「该项目还没有模块」——而且一直持续到应用重启。
       //
-      // Both are unfiltered list reads (every project's environments, every
-      // project's nodes), which is what the store already holds — so they
-      // replace rather than merge. A module has no `endpoint_details` row,
-      // so the detail map needs nothing here.
+      // 两者都是不带过滤的整表读取（所有项目的环境、所有项目的节点），也正是
+      // store 已经持有的内容——所以是替换而不是合并。module 没有
+      // `endpoint_details` 行，这里 detail 映射无需处理。
       try {
         const environments = await invokeCmd<Environment[]>(COMMANDS.environmentsList);
         set({ environments });
       } catch (e) {
-        // The project itself exists; a failed env refresh is not a
-        // failed create, and failing the whole action would leave a
-        // project on disk the store does not know about.
+        // 项目本身已经存在；环境刷新失败不等于创建失败，让整个动作失败会在磁盘上
+        // 留下一个 store 不知道的项目。
         console.error('[store] environments_list after create failed', e);
       }
       try {
         const nodes = await invokeCmd<ResourceNode[]>(COMMANDS.nodesList);
         set({ nodes, nodesLoaded: true });
       } catch (e) {
-        // Same reasoning as above: the seeded module is on disk, the
-        // store just cannot show it yet. Same for `nodesLoaded` — it must
-        // not stay `false` or the tree renders a permanent loading state
-        // and `pruneStaleTabs` no-ops.
+        // 同理：种子 module 已在磁盘上，只是 store 暂时显示不出来。`nodesLoaded`
+        // 也一样——它绝不能停在 `false`，否则树会永远渲染加载态，
+        // 而 `pruneStaleTabs` 会一直空转。
         console.error('[store] nodes_list after create failed', e);
       }
       return project.id;
@@ -81,7 +70,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
     }
   },
   updateProject: async (id, patch) => {
-    // Optimistic local update + background invoke; rollback on failure.
+    // 乐观本地更新 + 后台 invoke；失败回滚。
     const prev = get().projects.find((p) => p.id === id);
     if (!prev) return;
     const optimistic: Project = { ...prev, ...patch, updatedAt: Date.now() };
@@ -98,7 +87,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
     );
   },
   deleteProject: async (id) => {
-    // Snapshot for rollback.
+    // 回滚用的快照。
     const snapshot = {
       projects: get().projects,
       nodes: get().nodes,
@@ -112,9 +101,8 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       activeEndpointId: get().activeEndpointId,
     };
     set((s) => {
-      // `rootId` is denormalised onto every node precisely so "what
-      // belongs to this project" is one filter rather than a walk down
-      // module → collection → endpoint.
+      // `rootId` 被反规范化到每个节点身上，正是为了让"什么属于这个项目"变成一次
+      // 过滤，而不必沿 module → collection → endpoint 一路向下走。
       const removed = new Set(s.nodes.filter((n) => n.rootId === id).map((n) => n.id));
       const droppedEndpointIds = s.nodes
         .filter((n) => n.kind === 'endpoint' && removed.has(n.id))
@@ -141,18 +129,13 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         environments: s.environments.filter((env) => env.projectId !== id),
         responseHistory: nextHistory,
         responseExamples: nextExamples,
-        // Deleting the project in front moves the user to a surviving one,
-        // or — when it was the last — back to the welcome screen.
+        // 删掉在前面的项目时，把用户送到幸存的那个；它是最后一个时回欢迎页。
         //
-        // The empty string is the surface switch (`App.tsx` renders the
-        // welcome picker on `activeProjectId === ''`), and the welcome
-        // screen has a 新建项目 card for the empty state. The alternative
-        // used to be "keep pointing at the id we just deleted", which left
-        // `App.tsx` in the workspace branch with a project that no longer
-        // exists: the tree showed 尚未选择项目, the pane showed 该项目已不存在,
-        // and nothing in that frame said what to do about it. A guard in the
-        // UI used to hide that by refusing the delete; the store handles it
-        // instead, so the action is allowed to mean what it says.
+        // 空串是切表面的开关（`App.tsx` 在 `activeProjectId === ''` 时渲染欢迎
+        // 选择器，而欢迎页有"新建项目"卡片兜住空状态）。把 `activeProjectId`
+        // 留在刚删掉的 id 上会让 `App.tsx` 待在工作区分支里对着一个不存在的
+        // 项目：树显示"尚未选择项目"，右侧显示"该项目已不存在"，整个画面没有一处
+        // 说明该怎么办。
         activeProjectId:
           s.activeProjectId === id
             ? (s.projects.find((p) => p.id !== id)?.id ?? '')

@@ -1,35 +1,27 @@
 /**
- * End-to-end tests for the path the Send button actually takes:
- * `prepareRequest` → `sendPreparedRequest` → a **real local HTTP server**.
+ * 「发送」按钮实际走的那条路径的端到端测试：
+ * `prepareRequest` → `sendPreparedRequest` → **真实本地 HTTP 服务**。
+ * 通过 `npm test` 运行（它调用 `tsx --test`）。
  *
- * Run via `npm test` (which invokes `tsx --test`).
+ * 为什么要有这个文件
+ * ------------------
+ * 旁边两个文件各覆盖一半，都不覆盖这条接缝：
  *
- * Why this file exists
- * --------------------
- * The two neighbours each cover half of this and neither covers the seam:
+ *   - `http-build.test.ts` 钉住 `prepareRequest` *产出*什么——base URL join、
+ *     `{{var}}` 解析、查询串拼装、header 排序、body 是否包含——但从不真的发出去，
+ *     所以抓不到「值组装对了却在去往线上的路上丢掉」这种情况。
+ *   - `http.test.ts` 确实对真实服务端跑 `fetch`，但它驱动的是旧的 `sendRequest`
+ *     路径，那条路径把模板解析与查询串组装放在**后端**里。代码不同，规则也不同。
  *
- *   - `http-build.test.ts` (1000+ lines) pins what `prepareRequest`
- *     *produces* — base-URL join, `{{var}}` resolution, query assembly,
- *     header ordering, body inclusion — but never sends anything, so it
- *     cannot catch a value that is assembled correctly and then lost on
- *     the way to the wire.
- *   - `http.test.ts` does run `fetch` against a real server, but it drives
- *     the legacy `sendRequest` path, which resolves templates and assembles
- *     the query **inside the backend**. Different code, different rules.
+ * `sendPreparedRequest` 才是 UI 用的那个，而它存在的全部理由就是发送端与 cURL 预览
+ * 共用一个构造核。所以这条接缝值得对着一个服务端来钉：断言变成「服务端收到了 X」而
+ * 不是「构造器返回了 X」——只有后者能挡住活在两者之间的 bug。
  *
- * `sendPreparedRequest` is the one the UI uses, and its whole reason to
- * exist is that the sender and the cURL preview share one construction
- * core. That makes the seam worth pinning against a server: the assertion
- * becomes "the server received X" rather than "the builder returned X",
- * which is the only form that survives a bug living between the two.
- *
- * Coverage matrix:
- *   B. Environment `{{var}}` substitution — in the base URL, in the path,
- *      in a header value, and in a query param value; plus the
- *      unresolved-marker behaviour that drives the UI's warning.
- *   C. Multi-value assembly — three params (one disabled), two custom
- *      headers, a JSON body, and the auto-injected `accept` /
- *      `content-type`.
+ * 覆盖矩阵：
+ *   B. 环境 `{{var}}` 替换 —— 在 base URL 里、在 path 里、在 header 值里、在查询参数
+ *      值里；外加驱动 UI 告警的未解析标记行为。
+ *   C. 多值组装 —— 三个参数（其中一个禁用）、两个自定义 header、一个 JSON body，
+ *      以及自动注入的 `accept` / `content-type`。
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,7 +33,7 @@ import { prepareRequest, type PrepareRequestInput } from '../http-build';
 import type { RequestSettings } from '../../stores/app-store';
 import type { Environment, KeyValue } from '../../types/domain';
 
-// ---------- server scaffolding ----------
+// ---------- 服务端脚手架 ----------
 
 interface Captured {
   method: string;
@@ -70,9 +62,8 @@ before(async () => {
       headers: { ...req.headers } as Record<string, string>,
       body: await readBody(req),
     });
-    // Echo the request back, so the assertion can also be read off the
-    // response the UI would render — the same shape the throwaway echo
-    // server used during manual browser verification.
+    // 把请求原样回显，好让断言既能读捕获到的内容，也能读 UI 会渲染的那个响应——
+    // 与手工浏览器验证时用的临时 echo 服务是同一个形状。
     const payload = JSON.stringify({ ok: true, received: captured[captured.length - 1] });
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(payload);
@@ -86,9 +77,9 @@ after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-// ---------- bridge stub ----------
+// ---------- 桥接桩 ----------
 
-/** Body shape of `POST /api/http/send` (camelCase, mirrors Rust `HttpSendBody`). */
+/** `POST /api/http/send` 的 body 形状（camelCase，镜像 Rust 的 `HttpSendBody`）。 */
 interface SendBody {
   method: string;
   url: string;
@@ -102,13 +93,11 @@ interface SendBody {
 const originalFetch: typeof fetch = globalThis.fetch.bind(globalThis);
 
 /**
- * Test stub for the serve-web `/api/http/send` bridge, mirroring the axum
- * `http_send` handler: unwrap the envelope body, perform the real upstream
- * request, reply with the `HttpResult` envelope `http.ts` expects.
+ * serve-web `/api/http/send` 桥接的测试桩，镜像 axum 的 `http_send` handler：
+ * 剥掉信封 body、发真实上游请求、回 `http.ts` 期待的 `HttpResult` 信封。
  *
- * Only the `ok: true` path is modelled — this file is about what reaches the
- * server, so timeout / abort / network-error mapping is `http.test.ts`'s
- * job and duplicating it would add maintenance without adding coverage.
+ * 只建模 `ok: true` 这条路——本文件讲的是到达服务端的东西，所以超时 / 中止 /
+ * 网络错误的映射是 `http.test.ts` 的活，抄一遍只增加维护量不增加覆盖。
  */
 async function mockBridgeFetch(
   input: string | URL | Request,
@@ -153,7 +142,7 @@ async function mockBridgeFetch(
 
 globalThis.fetch = mockBridgeFetch as unknown as typeof fetch;
 
-// ---------- fixtures ----------
+// ---------- 夹具 ----------
 
 const SETTINGS: RequestSettings = {
   timeoutMs: 5000,
@@ -184,10 +173,9 @@ function prep(overrides: Partial<PrepareRequestInput> = {}): PrepareRequestInput
   return {
     method: 'GET',
     urlPath: '/x',
-    // A stored endpoint always resolves against *some* base URL, and an
-    // empty one yields a relative path — which is fine for the preview but
-    // not something the send bridge can hand to a server. Default to the
-    // test server so every case exercises a real absolute request.
+    // 已存的 endpoint 总能解析出*某个* base URL，而空 base 会产出相对路径——对预览没
+    // 问题，但不是发送桥能交给服务端的东西。默认给测试服务端，好让每个用例都在跑
+    // 一个真实的绝对地址请求。
     baseUrl,
     params: [],
     headers: [],
@@ -198,7 +186,7 @@ function prep(overrides: Partial<PrepareRequestInput> = {}): PrepareRequestInput
   };
 }
 
-/** Assemble with the production core, then send that exact object. */
+/** 用生产构造核组装，然后发送那个确切的对象。 */
 async function send(overrides: Partial<PrepareRequestInput> = {}) {
   const request = prepareRequest(prep(overrides));
   const response = await sendPreparedRequest({ request, settings: SETTINGS });
@@ -208,7 +196,7 @@ async function send(overrides: Partial<PrepareRequestInput> = {}) {
   return { request, response, last };
 }
 
-/** Query string of the captured URL, as a lookup map. */
+/** 捕获到的 URL 的查询串，转成查找表。 */
 function queryMap(url: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const pair of (url.split('?')[1] ?? '').split('&')) {
@@ -221,7 +209,7 @@ function queryMap(url: string): Record<string, string> {
 }
 
 // ============================================================
-// B. Environment {{var}} substitution
+// B. 环境 {{var}} 替换
 // ============================================================
 
 describe('e2e: {{var}} reaches the server substituted', () => {
@@ -235,8 +223,7 @@ describe('e2e: {{var}} reaches the server substituted', () => {
 
     assert.equal(request.missingVars.length, 0, 'builder should resolve every var');
 
-    // The base URL carried {{site}} and the path carried {{userId}} — both
-    // must be gone by the time the request leaves the client.
+    // base URL 带 `{{site}}`、path 带 `{{userId}}`——两者都必须在请求离开客户端前消失。
     assert.equal(last.url, `/api/cn/users/u_42`);
     assert.doesNotMatch(last.url, /\{\{/);
 
@@ -257,9 +244,7 @@ describe('e2e: {{var}} reaches the server substituted', () => {
   });
 
   it('reports a param variable that could not be resolved', async () => {
-    // The server gets the marker literally, but the user is told — which
-    // is the whole point of `missingVars`. Before this was fixed the
-    // marker went out encoded and silent.
+    // 服务端拿到的是字面标记，但用户被告知了——这正是 `missingVars` 的全部意义。
     const { request, last } = await send({
       urlPath: '/search',
       params: [kv('q', '{{gone}}')],
@@ -270,8 +255,7 @@ describe('e2e: {{var}} reaches the server substituted', () => {
   });
 
   it('does not report a variable on a param that never ships', async () => {
-    // Same rule as headers: a disabled param is not this request's
-    // problem, and warning about it would be a false alarm.
+    // 与 header 同规则：未启用的参数不算这次请求的问题，报它就是误报。
     const { request } = await send({
       urlPath: '/search',
       params: [kv('q', '{{gone}}', false)],
@@ -293,10 +277,8 @@ describe('e2e: {{var}} reaches the server substituted', () => {
   });
 
   it('leaves an unresolvable var literal and reports it in missingVars', async () => {
-    // The documented contract: the body/URL is sent as-is with the marker
-    // intact, and `missingVars` is what the UI turns into a warning. Silently
-    // sending `{{nope}}` would be worse than useless — it would look like a
-    // server-side value.
+    // 有文档在案的契约：body/URL 原样带标记发出，而 `missingVars` 正是 UI 拿来变成
+    // 告警的东西。悄悄发出 `{{nope}}` 比没用更糟——它看起来像个服务端变量。
     const { request, last } = await send({
       urlPath: '/users/{{nope}}',
     });
@@ -316,7 +298,7 @@ describe('e2e: {{var}} reaches the server substituted', () => {
 });
 
 // ============================================================
-// C. Multi-value params / headers / body assembly
+// C. 多值的参数 / header / body 组装
 // ============================================================
 
 describe('e2e: multi-value params, headers and body arrive intact', () => {
@@ -349,8 +331,7 @@ describe('e2e: multi-value params, headers and body arrive intact', () => {
     assert.equal(last.headers['x-trace'], 'abc123');
     assert.equal(last.headers['accept'], 'application/json', 'accept is auto-injected');
 
-    // Same object, so the preview and the send cannot disagree about the
-    // header list either.
+    // 同一个对象，所以预览与发送在 header 列表上也不可能不一致。
     assert.deepEqual(
       request.headers.map(([k]) => k.toLowerCase()).filter((k) => k.startsWith('x-')),
       ['x-client', 'x-trace'],
@@ -368,16 +349,14 @@ describe('e2e: multi-value params, headers and body arrive intact', () => {
     assert.equal(last.method, 'POST');
     assert.equal(last.body, payload, 'the body must go out byte-for-byte');
     assert.match(last.headers['content-type'] ?? '', /application\/json/);
-    // The echo server replies with what it received — read the assertion off
-    // the response the UI would render, not just the captured side.
+    // echo 服务端回的就是它收到的内容——断言既读捕获侧，也读 UI 会渲染的那个响应。
     assert.deepEqual(JSON.parse(last.body), { name: 'ada', tags: ['x', 'y'], nested: { n: 1 } });
   });
 
   it('templates the body before it reaches the server', async () => {
-    // The body used to ship verbatim, which meant the frontend disagreed
-    // with Rust's `resolve_endpoint` and a `{{userId}}` went out as data.
-    // The assertion is on what the *server* received, not on what the
-    // builder returned.
+    // body 在到达服务端之前就要被模板化，否则前端会与 Rust 的 `resolve_endpoint`
+    // 不一致，`{{userId}}` 会作为数据发出去。断言落在*服务端*收到什么，而不是构造器
+    // 返回什么。
     const { last } = await send({
       method: 'POST',
       urlPath: '/users',

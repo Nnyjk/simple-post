@@ -1,37 +1,21 @@
-//! CRUD for the `response_history` table — one persisted HTTP response
-//! per row, capped per endpoint.
+//! `response_history` 表的 CRUD——每行一条已持久化的 HTTP 响应，按 endpoint 封顶。
 //!
-//! This table is what makes the response-history strip survive a
-//! restart. It used to be a renderer-only
-//! `Record<endpointId, ApiResponse[]>` that a relaunch, a project switch
-//! or a closed tab erased, and nothing in the database knew a response
-//! had ever happened.
+//! 这张表让响应历史条带能挺过重启。三条性质在此强制而非交给调用方，因为三者都是调用方会
+//! 静默搞错的东西：
 //!
-//! Three properties are enforced here rather than trusted to callers,
-//! because all three are things a caller gets wrong silently:
+//!   * **每 endpoint 封顶。** [`append`] 在与插入同一个事务里裁到
+//!     [`RESPONSE_HISTORY_PER_ENDPOINT`]，故一个无限循环发送的客户端最终也只留十行。
+//!     交给渲染层就意味着每个**其他**写入方——将来的 MCP 工具、脚本——都能无上限地撑大库，
+//!     而那个上限会住在唯一没人调试时会去读的地方。
+//!   * **响应体封顶。** [`append`] 把 `body` 裁到 `RESPONSE_HISTORY_MAX_BODY_BYTES` 并记录
+//!     这一事实。改为拒绝整个响应会连状态行、响应头和耗时一起丢掉，而那恰恰是历史行主要
+//!     为之存在的东西。
+//!   * **清理。** 这里刻意没有 `delete_for_*`：`endpoint_id` 会级联，而 `nodes.parent_id` /
+//!     `nodes.root_id` 又依次级联，故删掉一个 endpoint——或一路向上删到项目——会在同一条
+//!     DELETE 里带走它的历史。应用层的清理只是外键已经给出的保证的第二份拷贝。
 //!
-//!   * **The per-endpoint cap.** [`append`] trims to
-//!     [`RESPONSE_HISTORY_PER_ENDPOINT`] in the same transaction as the
-//!     insert, so a client that loops sends forever still leaves ten
-//!     rows. Leaving this to the renderer would mean every *other*
-//!     writer — a future MCP tool, a script — could grow the store
-//!     without limit, and the cap would live in the one place nobody
-//!     reads when debugging.
-//!   * **The body cap.** [`append`] clips
-//!     `RESPONSE_HISTORY_MAX_BODY_BYTES` off `body` and records it.
-//!     Rejecting the response instead would lose the status line, the
-//!     headers and the timing, which are the parts a history row is
-//!     mostly for.
-//!   * **Cleanup.** There is no `delete_for_*` here on purpose:
-//!     `endpoint_id` cascades, and `nodes.parent_id` / `nodes.root_id`
-//!     cascade in turn, so deleting an endpoint — or any ancestor up to
-//!     the project — takes its history with it in the same DELETE. An
-//!     application-level prune would be a second copy of a guarantee
-//!     the foreign keys already make.
-//!
-//! Every function takes `&mut Connection` so the caller decides whether
-//! the call sits inside a transaction. [`append`] needs one to make the
-//! insert and the trim atomic.
+//! 每个函数都取 `&mut Connection`，由调用方决定这次调用是否在事务内。[`append`] 需要事务，
+//! 好让插入与裁剪是原子的。
 
 use rusqlite::{params, Connection, Row};
 
@@ -47,24 +31,16 @@ const COLUMNS: &str = "rh.id, rh.endpoint_id, rh.status, rh.status_text, rh.dura
                        rh.size_bytes, rh.content_type, rh.headers_json, rh.body, rh.body_json, \
                        rh.error, rh.method, rh.url, rh.body_truncated, rh.created_at";
 
-// -------------------------------------------------------------------------
-// Reads.
-// -------------------------------------------------------------------------
+// 读。
 
-/// One endpoint's history, newest first.
-///
-/// Bounded by the cap [`append`] maintains, so this cannot return an
-/// unbounded list for a live endpoint — but an endpoint that had a
-/// larger cap in an older build can still hold more. `LIMIT` is here so
-/// the read is bounded by the same constant the write is, whatever the
-/// file holds.
-///
-/// Scoped to **one endpoint**, deliberately. The obvious alternative is
-/// a "everything in this project" read issued once when a project opens
-/// — but that is a bulk fetch for a panel that shows at most ten rows
-/// for the endpoint actually in front of the user, and its cost grows
-/// with the project rather than with what is on screen. One indexed read
-/// per endpoint the user opens is both cheaper and what the UI wants.
+/// 一个 endpoint 的历史，最新的在前。
+/// 受 [`append`] 维持的封顶约束，故活跃 endpoint 不可能返回无界的列表——但在更早构建里
+/// 封顶更大的 endpoint 仍可能持有更多行。`LIMIT` 在这里，是为了让这次读与写入受同一个
+/// 常量约束，无论文件里存了什么。
+/// 刻意**只限一个 endpoint**。显而易见的替代方案是项目打开时一次性做一次「这个项目的一切」
+/// 的读——但那是为了一个最多显示十行、且只显示用户面前那个 endpoint 的面板做一次批量拉取，
+/// 且代价随项目而非随屏幕上的东西增长。用户每打开一个 endpoint 一次走索引的读，既更便宜，
+/// 也正是 UI 想要的。
 pub fn list_by_endpoint(
     conn: &mut Connection,
     endpoint_id: &str,
@@ -84,34 +60,22 @@ pub fn list_by_endpoint(
     Ok(out)
 }
 
-// -------------------------------------------------------------------------
-// Writes.
-// -------------------------------------------------------------------------
+// 写。
 
-/// Store one response and trim the endpoint back to the cap.
-///
-/// Returns the row as it landed, including the body clip, so a caller
-/// that cares can show it without a second read.
-///
-/// The trim is `DELETE … WHERE id NOT IN (SELECT id … LIMIT cap)`
-/// rather than "count, then delete the oldest N": that is one statement,
-/// it cannot be wrong about how many rows there were, and it does not
-/// have a window between counting and deleting for a concurrent append
-/// to slip through. SQLite serialises writers, and the whole thing runs
-/// inside the caller's `BEGIN IMMEDIATE`.
-///
-/// `created_at` is taken once here and shared by the insert, so the
-/// stored timestamp is the same value the caller would have computed.
+/// 存下一条响应，并把该 endpoint 裁回封顶。
+/// 返回落库后的行（含响应体裁剪），关心的调用方无需再读一次即可展示。
+/// 裁剪是 `DELETE … WHERE id NOT IN (SELECT id … LIMIT cap)` 而非「先计数、再删最旧的 N」：
+/// 那是一条语句，它不会在「到底有几行」这件事上出错，也没有计数与删除之间的窗口留给并发
+/// append 钻进来。SQLite 串行化写入，且整件事跑在调用方的 `BEGIN IMMEDIATE` 之内。
+/// `created_at` 在此取一次、由插入共用，故存下的时间戳与调用方本会算出的值相同。
 pub fn append(
     conn: &mut Connection,
     endpoint_id: &str,
     response: &StoredResponse,
 ) -> Result<ResponseHistoryEntry, AppError> {
     let (body, truncated) = clip_body(&response.body);
-    // A clipped body cannot be pretty-printed, so the parsed copy goes
-    // too — leaving `bodyJson` populated from the full document while
-    // `body` shows half of it is the one combination that shows the
-    // viewer two different answers to "what did this return".
+    // 被裁过的 body 无法再美化，故解析出的副本也一并去掉——让 `bodyJson` 仍由完整文档填充、
+    // 而 `body` 只显示它的一半，是唯一会让阅读器对「这返回了什么」给出两个不同答案的组合。
     let body_json = if truncated {
         None
     } else {
@@ -161,7 +125,7 @@ pub fn append(
     })
 }
 
-/// Drop everything beyond the cap, oldest first.
+/// 丢掉超出封顶的部分，最旧的先丢。
 fn trim_to_cap(conn: &mut Connection, endpoint_id: &str) -> Result<(), AppError> {
     conn.execute(
         "DELETE FROM response_history \
@@ -177,12 +141,9 @@ fn trim_to_cap(conn: &mut Connection, endpoint_id: &str) -> Result<(), AppError>
     Ok(())
 }
 
-/// Drop one endpoint's history. Returns how many rows went.
-///
-/// Nothing calls this from a delete path — the foreign key already
-/// covers that — so its only job is the explicit "clear this endpoint's
-/// history" affordance, where the endpoint is alive and its rows are
-/// not wanted.
+/// 丢掉一个 endpoint 的历史，返回删掉的行数。
+/// 删除路径没有任何东西调用它——外键已经覆盖了——故它唯一的职责是显式的「清掉这个
+/// endpoint 的历史」这个入口：此时 endpoint 还活着，只是它的行不再被需要。
 pub fn clear(conn: &mut Connection, endpoint_id: &str) -> Result<usize, AppError> {
     Ok(conn.execute(
         "DELETE FROM response_history WHERE endpoint_id = ?1",
@@ -190,19 +151,12 @@ pub fn clear(conn: &mut Connection, endpoint_id: &str) -> Result<usize, AppError
     )?)
 }
 
-// -------------------------------------------------------------------------
-// Internals.
-// -------------------------------------------------------------------------
+// 内部实现。
 
-/// Clip `body` to the cap, on a UTF-8 boundary.
-///
-/// Char-boundary rather than byte-boundary because the clipped half is
-/// shown in the response viewer: a `String` that stopped mid-codepoint
-/// would serialise fine and then render as U+FFFD on arrival, turning a
-/// deliberate truncation marker into mojibake. `char_indices` is a
-/// single pass and the truncation path is the rare one, so paying for
-/// the scan only when the body is actually over the cap is the right
-/// trade.
+/// 把 `body` 裁到封顶，落在 UTF-8 字符边界上。
+/// 取字符边界而非字节边界，是因为被裁掉的那一半是要在响应阅读器里显示的：一个停在半个
+/// 码位上的 `String` 序列化不会报错，到达时却渲染成 U+FFFD，把一个刻意的截断标记变成乱码。
+/// `char_indices` 是单趟扫描，而截剪是罕见路径，故只在 body 真的超限时才付这次扫描的代价。
 fn clip_body(body: &str) -> (String, bool) {
     if body.len() <= RESPONSE_HISTORY_MAX_BODY_BYTES {
         return (body.to_string(), false);
@@ -222,10 +176,9 @@ fn row_to_entry(row: &Row<'_>) -> Result<ResponseHistoryEntry, rusqlite::Error> 
     let method_str: Option<String> = row.get(11)?;
     let body_truncated: i64 = row.get(13)?;
 
-    // Same re-wrap as `endpoint_details::row_to_detail`: a stored verb
-    // the parser rejects is a `domain` failure, not a row-mapping one,
-    // so it is converted into the `rusqlite::Error` this mapper owes the
-    // caller — with the column named so the message is actionable.
+    // 与 `endpoint_details::row_to_detail` 同样的重新包装：一个存下来的动词若被解析器拒绝，那是
+    // `domain` 的失败而非行映射的失败，故转成这个映射器欠调用方的 `rusqlite::Error`——并带上
+    // 列名，好让消息可用。
     let method = match method_str {
         Some(m) => Some(parse_http_method(&m).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
@@ -261,9 +214,7 @@ fn row_to_entry(row: &Row<'_>) -> Result<ResponseHistoryEntry, rusqlite::Error> 
     })
 }
 
-// -------------------------------------------------------------------------
-// Tests.
-// -------------------------------------------------------------------------
+// 测试。
 
 #[cfg(test)]
 #[path = "response_history_test.rs"]

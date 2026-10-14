@@ -7,37 +7,27 @@ import type { ApiResponseExample } from '../store-types';
 import { DRAFT_ID_PREFIX } from '../store-types';
 
 /**
- * Cap on how many responses we keep per endpoint in the store.
+ * store 中每个 endpoint 保留的历史条数上限。
  *
- * The database enforces the same number on every append, so this is not
- * bounding the file — it is bounding what the history strip renders. Two
- * copies of one cap is not redundancy to remove: the server's protects
- * the store from *any* writer (a future MCP tool, a script), and this one
- * protects the UI from a read that returns more than the strip can show.
+ * 与数据库的上限各守一头，不是重复：服务端那个挡住任何写入方（未来的 MCP
+ * 工具、脚本），这个挡住读回来的条数超出历史条能显示的量。
  */
 const MAX_HISTORY_PER_ENDPOINT = 10;
 
 /**
- * ui-response — the last HTTP response, the in-flight flag, and the
- * per-endpoint history / saved examples.
+ * ui-response —— 最近一次响应、请求中标记、按 endpoint 的历史与已存示例。
  *
- * Grouped because they are one lifecycle: a send sets `requestPending`,
- * resolves into `lastResponse`, and then gets appended to
- * `responseHistory`. Splitting the pending flag from the history would
- * put the three steps of a single user action in three files.
+ * 合成一个子工厂：一次发送依次写 `requestPending` → `lastResponse` →
+ * `responseHistory`，拆开就把一个用户动作的三步散进三个文件。
  *
- * `responseHistory` is now **persisted** (see `addResponseHistory` /
- * `loadResponseHistory` below), which is the one reason this sub-factory
- * reaches for the IPC layer at all; `responseExamples` is still
- * memory-only, and both are read by the CRUD delete actions
- * (`deleteNode` / `deleteProject` prune both maps in the same `set()` as
- * the node removal — the server's cascade already did the SQL half).
- * That cross-slice write is why this stays a sub-factory composed into
- * `ui-slice` rather than a slice of its own — see the note in
- * `../ui-slice.ts`.
+ * `responseHistory` 落盘（见 `addResponseHistory` / `loadResponseHistory`），
+ * 这是本子工厂唯一接触 IPC 的理由；`responseExamples` 仍只在内存里。
+ * 两者都由 CRUD 的删除动作在移除节点的同一次 `set()` 里剪掉——服务端级联
+ * 已经删掉了 SQL 那一半。正因这种跨 slice 写入，它才是组合进 `ui-slice`
+ * 的子工厂而非独立 slice，见 `../ui-slice.ts`。
  */
 
-/** FIFO append under {@link MAX_HISTORY_PER_ENDPOINT}. */
+/** FIFO 追加，受 {@link MAX_HISTORY_PER_ENDPOINT} 截断。 */
 function appendCapped(
   prev: ResponseHistoryEntry[],
   entry: ResponseHistoryEntry,
@@ -48,40 +38,27 @@ function appendCapped(
 }
 
 /**
- * Fold a server read into what the strip is already showing.
+ * 把服务端读回的行并进历史条：按 id 去重、补上本地已有但回包里没有的行，
+ * 再按内存路径同一套 FIFO 截断。
  *
- * The server's array is the wrong shape on two counts, and a plain
- * assignment is wrong on a third.
+ * **顺序。** `list_by_endpoint` 按 `created_at DESC` 回答，那是"最近在前"的
+ * *查询*要的顺序；而 store 的约定是最新在**末尾**——`appendCapped` 追加到
+ * 尾部、丢头部，渲染时才反转。照抄回包会把两处都弄反：重开的 endpoint 画成
+ * 最旧在前，且下一次发送丢的是最新行、SQLite 截掉的是最旧行，
+ * 历史条与表里对不上是哪十行。
  *
- * **Order.** `list_by_endpoint` answers `created_at DESC` because that is
- * what a "most recent first" *query* wants, but the store's invariant is
- * newest-**last** — {@link appendCapped} pushes onto the end and drops the
- * front, and the strip reverses at render time. Storing the reply verbatim
- * turned both of those upside down: a reopened endpoint painted
- * oldest-first, and the next send then dropped the *newest* row from the
- * cache while SQLite trimmed the *oldest* one, leaving the strip and the
- * table disagreeing about which ten rows exist.
- *
- * **Union, not replace.** The reply is a snapshot from before the user
- * pressed Send, so it is blind to rows that arrived since — the
- * provisional row, or the stored one an append has already swapped in.
- * The window is real on a first open, where the panel's effect fires the
- * read and the user can send before it lands; and once the optimistic row
- * is gone, `addResponseHistory`'s swap finds nothing to replace and the
- * response sits in the database, invisible until the component remounts.
- *
- * Deduped by id, so a read that already contains a locally-appended row
- * does not double it, then re-capped under the same FIFO the in-memory
- * path uses.
+ * **取并集而非覆盖。** 回包是用户按下发送之前的快照，看不到此后到达的行
+ * （乐观行，或已被 append 换入的存储行）。首次打开时面板的 effect 发起读取、
+ * 用户可以先发出去，这个窗口是真的；乐观行一旦被清掉，`addResponseHistory`
+ * 的替换就找不到目标，响应留在数据库里，直到组件重挂载才可见。
  */
 function mergeLoaded(
   rows: ResponseHistoryEntry[],
   local: ResponseHistoryEntry[],
 ): ResponseHistoryEntry[] {
   const known = new Set(rows.map((r) => r.id));
-  // Reverse before sorting, never instead of it: the sort is stable, so
-  // this order is what survives for two rows stamped in the same
-  // millisecond — precisely the tie `rowid DESC` broke on the way out.
+  // 先反转再排序，不能只反转：sort 稳定，同一毫秒打戳的两行靠这个次序分
+  // 高下——正是服务端 `rowid DESC` 打破的那个平局。
   const merged = rows.slice().reverse();
   for (const row of local) {
     if (!known.has(row.id)) merged.push(row);
@@ -93,13 +70,11 @@ export interface UiResponseState {
   lastResponse: ApiResponse | null;
   requestPending: boolean;
   /**
-   * Per-endpoint send history, **newest-last** — the order `appendCapped`
-   * writes and {@link mergeLoaded} normalises a server read into. The
-   * strip reverses at render time; nothing else may.
+   * 每个 endpoint 的发送历史，**最新在末尾**——`appendCapped` 写这个次序，
+   * {@link mergeLoaded} 把服务端读回的行归一到它。只在渲染时反转，别处不许反。
    *
-   * Backed by `response_history` and loaded per endpoint, so a `draft:`
-   * endpoint's rows can be in here too: such an id is never persisted, so
-   * those rows exist only for as long as the tab does.
+   * 来自 `response_history`，按 endpoint 读取，所以 `draft:` 开头的 id 也会
+   * 出现在这里：这种 id 从不落盘，这些行只随标签页存活。
    */
   responseHistory: Record<string, ResponseHistoryEntry[]>;
   responseExamples: Record<string, ApiResponseExample[]>;
@@ -107,31 +82,24 @@ export interface UiResponseState {
 
 export interface UiResponseActions {
   /**
-   * Record a send in the history strip, and persist it.
+   * 记一次发送到历史条并落盘。
    *
-   * Stays **synchronous** for the in-memory half: the Send button's UX
-   * depends on the row appearing the moment `lastResponse` does, so the
-   * provisional row is inserted first and the append is fire-and-forget
-   * after it.
+   * 内存那一半必须**同步**：发送按钮的体验依赖历史行与 `lastResponse` 同一刻
+   * 出现，所以先插乐观行，落盘在其后 fire-and-forget。
    */
   addResponseHistory: (endpointId: string, response: ApiResponse) => void;
   /**
-   * Read one endpoint's stored history into the map.
+   * 读单个 endpoint 的历史进 map。
    *
-   * **Per endpoint, on demand** — fired when an endpoint tab becomes
-   * active, not once per project. The first cut loaded the whole
-   * project's history when a project opened, which sized the read to the
-   * project instead of to the panel: the strip shows at most ten rows for
-   * the endpoint in front of the user, and has no use for the other
-   * endpoints' rows until it opens them.
+   * **按需、按 endpoint**：在 endpoint 标签页变为活动时触发，而不是开项目时
+   * 读一整份——历史条只显示当前这个 endpoint 的至多十行，别的 endpoint 的行
+   * 在打开它们之前用不上。
    *
-   * Fails soft. An unreadable history degrades to an empty strip, which
-   * is exactly the state the renderer was in before persistence existed.
-   * It must not reach `bootstrapError` — that flag means a dead startup,
-   * and a missing history panel is not one.
+   * **失败软化。** 读不到就退化成空历史条，也就是持久化之前渲染器的状态；
+   * 但不得落到 `bootstrapError`——那个 flag 表示启动已死，缺一个历史面板不算。
    */
   loadResponseHistory: (endpointId: string) => Promise<void>;
-  /** Drop one endpoint's history locally and on the server. */
+  /** 删掉单个 endpoint 的历史，本地与服务端都删。 */
   clearResponseHistory: (endpointId: string) => Promise<void>;
   addResponseExample: (endpointId: string, response: ApiResponse) => string;
   deleteResponseExample: (endpointId: string, exampleId: string) => void;
@@ -148,9 +116,8 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
   responseExamples: {},
 
   addResponseHistory: (endpointId, response) => {
-    // Provisional row, inserted before anything can await. Its id is
-    // renderer-minted and clearly not a server id, so the swap below can
-    // never collide with a stored row.
+    // 乐观行，先于任何 await 插入。id 由渲染侧生成，明显不是服务端 id，
+    // 所以下面的替换不可能与已存行相撞。
     const provisional: ResponseHistoryEntry = {
       id: `pending:${uid()}`,
       endpointId,
@@ -165,22 +132,17 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
       };
     });
 
-    // A draft endpoint exists only in the renderer — there is no `nodes`
-    // row for the foreign key to hold the history against, so the server
-    // rejects the append. Its history keeps accumulating in memory,
-    // exactly as it did when nothing was persisted at all.
+    // draft endpoint 只存在于渲染侧，没有 `nodes` 行给外键挂历史，服务端会拒收；
+    // 它的历史继续在内存里累积。
     if (endpointId.startsWith(DRAFT_ID_PREFIX)) return;
 
     void invokeCmd<ResponseHistoryEntry>(COMMANDS.responseHistoryAppend, { endpointId, response })
       .then((stored) => {
-        // The returned row is the source of truth for what was stored:
-        // the body may have been clipped to 256 KiB, and `bodyJson` is
-        // dropped with it. Keeping the provisional row would leave the
-        // strip claiming a clipped half-document is the whole response.
+        // 返回的行才是实际落库的内容：body 可能被截到 256 KiB，`bodyJson` 一并
+        // 丢弃。留着乐观行会让历史条把半份文档说成整个响应。
         set((s) => {
           const prev = s.responseHistory[endpointId];
-          // Cleared (or re-capped) while the append was in flight — the
-          // optimistic row is gone and there is nothing to replace.
+          // 追加在途期间被清空（或已重新截断）：乐观行没了，没有可替换的目标。
           if (!prev?.some((e) => e.id === provisional.id)) return {};
           return {
             responseHistory: {
@@ -191,32 +153,24 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
         });
       })
       .catch((e: unknown) => {
-        // Deliberately swallowed. The send already succeeded and the
-        // user already has the response on screen; surfacing a failed
-        // *history* write as a send failure would be a lie about what
-        // went wrong. The optimistic row stays as the best answer we have.
+        // 故意吞掉。发送已经成功、响应已经在屏上，把一次*历史*写入失败说成
+        // 发送失败是对故障的错误描述；乐观行留着就是现有最好的答案。
         console.warn('[store] response history append failed', e);
       });
   },
 
   loadResponseHistory: async (endpointId) => {
-    // A draft endpoint never reaches the database, so there is nothing to
-    // read. Its history stays in memory for as long as the tab does.
+    // draft endpoint 从不入库，没有可读的行；它的历史只随标签页存活。
     if (endpointId === '' || endpointId.startsWith(DRAFT_ID_PREFIX)) return;
     try {
       const rows = await invokeCmd<ResponseHistoryEntry[]>(COMMANDS.responseHistoryList, {
         endpointId,
       });
-      // Merged, not assigned — see `mergeLoaded` for why a read that
-      // arrives after a send must not erase that send.
+      // 并入而非赋值，理由见 `mergeLoaded`。
       //
-      // No *project*-level guard, and that is a consequence of the
-      // per-endpoint scope rather than a lucky omission: this touches
-      // only `responseHistory[endpointId]`, so an answer that lands after
-      // the user moved on is still that endpoint's own rows. The
-      // project-scoped version this replaced had to compare
-      // `activeProjectId` before committing, because one late answer
-      // could overwrite a whole other project's map.
+      // 不需要项目级守卫，这是按 endpoint 的作用域带来的结果而非侥幸：
+      // 这里只动 `responseHistory[endpointId]`，迟到的回包仍属于那个 endpoint
+      // 自己的行。
       set((s) => ({
         responseHistory: {
           ...s.responseHistory,
@@ -239,11 +193,9 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
     try {
       await invokeCmd<number>(COMMANDS.responseHistoryClear, { endpointId });
     } catch (e) {
-      // No restore: the rows are the server's to keep, and putting them
-      // back in the strip would advertise history the file may no longer
-      // have. `ResponseHistory`'s effect re-reads whatever survived the
-      // next time this endpoint is opened, because the clear dropped the
-      // key it guards on.
+      // 不回滚：这些行归服务端管，把它们放回历史条等于宣称文件里可能已经不存在的
+      // 历史。`ResponseHistory` 的 effect 会在下次打开该 endpoint 时重读幸存者，
+      // 因为清空动作丢掉了它依赖的那个 key。
       console.warn('[store] response history clear failed', e);
     }
   },

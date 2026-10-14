@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------
-// Wire DTOs (camelCase to match the TS side) + wire helpers.
+// 线格式 DTO（camelCase 以对齐 TS 侧）+ 线格式辅助函数。
 // -------------------------------------------------------------------------
 
 use serde::{Deserialize, Serialize};
@@ -45,9 +45,7 @@ pub struct McpStatusDto {
 
 impl From<crate::dto::McpStatusDto> for McpStatusDto {
     fn from(s: crate::dto::McpStatusDto) -> Self {
-        // The Tauri command DTO already has the right shape — copy
-        // field-by-field so a future rename on either side doesn't
-        // silently desync.
+        // Tauri 命令 DTO 形状已经对了——逐字段拷贝，任一侧改名都不会静默失同步。
         Self {
             status: s.status,
             running: s.running,
@@ -64,23 +62,21 @@ impl From<crate::dto::McpStatusDto> for McpStatusDto {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct PreferencesPutBody {
-    /// Single key to set. Maps directly to a `preferences` table row.
+    /// 要设置的单键。直接对应 `preferences` 表的一行。
     pub key: String,
-    /// JSON-encoded value. Stored verbatim by `db::preferences::set`.
+    /// JSON 编码的值。由 `db::preferences::set` 原样存下。
     pub value: Value,
 }
 
 // -------------------------------------------------------------------------
-// Wire helpers — kept tiny, but server-injected fields all flow through
-// here so the SPA vs REST contract stays 1:1 with the Tauri command path.
+// 线格式辅助函数——本身很小，但服务端注入的字段都从这里走，好让 SPA 与 REST 的
+// 契约与 Tauri 命令路径保持 1:1。
 // -------------------------------------------------------------------------
 
-/// Fill in a server-generated `id` when the caller (SPA) omits one.
-/// Mirrors what every `commands::*_create` does: take the user-facing
-/// fields, then stamp `id = uid()`. Without this, every REST create
-/// fails with `[validation] missing field 'id'` because the domain
-/// structs all require `id` while the SPA only ships name / description
-/// / color / etc.
+/// 调用方（SPA）没给 `id` 时补一个服务端生成的。镜像每个 `commands::*_create` 的
+/// 做法：取用户可见字段，再盖上 `id = uid()`。不补的话每次 REST create 都会以
+/// `[validation] missing field 'id'` 失败——domain 结构体全都要求 `id`，而 SPA 只发
+/// name / description / color 等。
 pub fn ensure_server_id(body: &mut Value) {
     let needs_fill = match body.get("id") {
         None | Some(Value::Null) => true,
@@ -93,14 +89,12 @@ pub fn ensure_server_id(body: &mut Value) {
 }
 
 // -------------------------------------------------------------------------
-// Wire DTOs for the resource CRUD surface. Keep this block small —
-// every shape that's already in `domain::*` is reused directly so
-// the wire contract stays 1:1 with the TS side.
+// 资源 CRUD 面的线格式 DTO。这一块保持精简——已在 `domain::*` 里的形状直接复用，
+// 使线格式契约与 TS 侧保持 1:1。
 // -------------------------------------------------------------------------
 
-/// Body for `POST /api/environments/:envId/vars`. `value = null`
-/// deletes the variable (mirrors `db::environments::set_var`'s
-/// "None removes the key" semantics).
+/// `POST /api/environments/:envId/vars` 的 body。`value = null` 表示删除该变量
+/// （与 `db::environments::set_var` 的「None 移除键」语义一致）。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvSetVarBody {
@@ -109,10 +103,8 @@ pub struct EnvSetVarBody {
     pub value: Option<String>,
 }
 
-/// Body for `POST /api/environments/:envId/vars/rename`. Carries both
-/// halves of the rename so the backend can do it in one transaction —
-/// a client must NOT compose this as a delete followed by a set, which
-/// leaves a window where the variable does not exist.
+/// `POST /api/environments/:envId/vars/rename` 的 body。同时带改名的两半，好让后端
+/// 在一个事务里做完——客户端绝不能把它拆成「先删后设」，那中间会有变量不存在的窗口。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvRenameVarBody {
@@ -120,62 +112,54 @@ pub struct EnvRenameVarBody {
     pub to_key: String,
 }
 
-/// Body for `POST /api/environments/:envId/module-baseurls`. `url = null`
-/// clears that one cell. This is the only layer a URL lives in — there is
-/// no layer above it and no fallback to another module's value.
+/// `POST /api/environments/:envId/module-baseurls` 的 body。`url = null` 清空这一格。
+/// 这是 URL 唯一所在的一层——上面没有别的层，也不向别的模块的值回落。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvSetModuleBaseUrlBody {
     pub def_id: String,
-    /// The module whose address for this service is being written. The
-    /// same service can point at two hosts for two modules, so this is
-    /// part of the address rather than a filter.
+    /// 正在写入该服务地址的模块。同一个服务可以对两个模块指向两个不同主机，故
+    /// `moduleId` 是地址的一部分而非过滤条件。
     pub module_id: String,
     #[serde(default)]
     pub url: Option<String>,
 }
 
-/// Body for `POST /api/environments/active`. `envId` lives in the
-/// body (not the URL) so the literal route `/active` can act as the
-/// "set the active environment" verb without colliding with
-/// `/api/environments/:envId`.
+/// `POST /api/environments/active` 的 body。`envId` 放在 body 而非 URL 里，好让字面量
+/// 路由 `/active` 能充当「设置当前环境」的动词而不与 `/api/environments/:envId` 冲突。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetActiveEnvBody {
     pub env_id: String,
 }
 
-/// Body for `PUT /api/permissions/:projectId`. The `permission`
-/// string is parsed via [`domain::Permission::parse`] — a typo at the
-/// call site fails with `AppError::Validation` instead of writing a
-/// bogus row.
+/// `PUT /api/permissions/:projectId` 的 body。`permission` 字符串经
+/// [`domain::Permission::parse`] 解析——调用点拼错会以 `AppError::Validation` 失败，
+/// 而不是写进一行垃圾数据。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionPutBody {
     pub permission: String,
 }
 
-/// Body for `POST /api/projects/:projectId/baseurls`. The project is in
-/// the path because the service list belongs to the project; only the
-/// attributes of one service ride in the body.
+/// `POST /api/projects/:projectId/baseurls` 的 body。项目放在路径里，因为服务列表属于
+/// 项目；body 里只承载单个服务的属性。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseUrlDefCreateBody {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    /// Client-minted id, adopted when non-blank — the REST twin of
-    /// `commands::dto::CreateBaseUrlDefOpts::id`. Both transports take it
-    /// for the same reason: the renderer keys the project's ★ and the
-    /// per-(env × module) URL cells off this id before the row is
-    /// persisted, so a server-minted one orphans every reference to it.
+    /// 客户端自铸的 id，非空白时照单采纳——REST 侧的
+    /// `commands::dto::CreateBaseUrlDefOpts::id`。两条 transport 出于同一理由收它：
+    /// renderer 在这一行持久化之前就拿这个 id 当项目 ★ 与每格（环境 × 模块）URL
+    /// 单元格的键，服务端铸的 id 会让所有引用变成孤儿。
     #[serde(default)]
     pub id: Option<String>,
 }
 
-/// Body for `POST /api/projects/:projectId/baseurls/default`. `defId = null`
-/// takes the project's ★ away entirely — the state a freshly created
-/// project is in.
+/// `POST /api/projects/:projectId/baseurls/default` 的 body。`defId = null` 表示把项目
+/// 的 ★ 完全撤掉——新建项目正处于这个状态。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseUrlDefSetDefaultBody {
@@ -183,57 +167,47 @@ pub struct BaseUrlDefSetDefaultBody {
     pub def_id: Option<String>,
 }
 
-// ----- resource tree -------------------------------------------------------
+// ----- 资源树 -----------------------------------------------------------
 
-/// Body for `POST /api/nodes`.
+/// `POST /api/nodes` 的 body。
 ///
-/// An endpoint arrives as one payload carrying both halves rather than
-/// two requests: a node without its configuration cannot be opened, and
-/// two calls would leave a window where the tree holds an endpoint that
-/// errors when selected. `db::nodes::create` enforces the pairing.
+/// endpoint 以一次请求带来两半而非两次：没有配置的节点打不开，而两次调用会留下一个
+/// 「树里有个 endpoint、选中却报错」的窗口。`db::nodes::create` 强制这个配对。
 #[derive(Debug, Deserialize)]
 pub struct NodeCreateBody {
     #[serde(flatten)]
     pub node: NodeCreateNodeBody,
-    /// Present for an endpoint, absent otherwise. A mismatch — either
-    /// way round — is rejected by `db::nodes`, not here, so the rule
-    /// lives in one place.
+    /// endpoint 才有，其余节点不带。任一侧不匹配都被 `db::nodes` 拒绝（不在这里），
+    /// 故这条规则只有一处。
     ///
-    /// `CreateEndpointDetailOpts`, not `EndpointDetail`: every field in
-    /// it is optional because an endpoint born from the tree's "new
-    /// request" action carries only what the user has typed so far — the
-    /// Tauri command has always accepted that shape (see the type's own
-    /// doc comment), and deserialising straight into `EndpointDetail`
-    /// here instead made `method` — which has no default — a required
-    /// field on the REST transport only. The same click therefore created
-    /// an endpoint in the desktop app and returned 400 over `serve-web`.
-    /// Reusing the command's type is what keeps the two transports from
-    /// drifting apart again.
+    /// 用 `CreateEndpointDetailOpts` 而非 `EndpointDetail`：后者每个字段都必填，而从
+    /// 树的「新建请求」建出的 endpoint 只带用户目前敲下的内容——Tauri 命令一直接受
+    /// 这种形状（见该类型自己的文档注释）。在这里直接反序列化成 `EndpointDetail` 会让
+    /// `method`——它没有默认值——只在 REST 这一条 transport 上变成必填，于是同一次点击
+    /// 在桌面端建出 endpoint、在 `serve-web` 下回 400。复用命令的类型正是为了防止两条
+    /// transport 再次漂移。
     #[serde(default)]
     pub detail: Option<crate::dto::CreateEndpointDetailOpts>,
 }
 
-/// The structural half of a `POST /api/nodes` body.
+/// `POST /api/nodes` body 中结构性的那一半。
 ///
-/// Not `ResourceNode`. That is the *stored* row, where `rootId` is always
-/// present because the database guarantees it — but a create call has no
-/// reason to know the owning project when it names a parent, and the
-/// renderer sends `rootId: null` to say exactly that. Deserialising the
-/// stored shape made "let the server work it out" the one thing a client
-/// could not express (`400 invalid type: null, expected a string`) on
-/// this transport alone; `root_id: Option<String>` here is the same
-/// contract as the Tauri command's argument of that name.
+/// 不是 `ResourceNode`。后者是*存储*行，`rootId` 恒在（数据库保证）；但 create 调用在
+/// 指定父节点时没有理由知道所属项目，而 renderer 会发 `rootId: null` 来表达这层意思。
+/// 按存储形状反序列化会让「让服务端自己推」成为这条 transport 上客户端唯一无法表达
+/// 的诉求（`400 invalid type: null, expected a string`）；这里的 `root_id:
+/// Option<String>` 与 Tauri 命令同名参数是同一份契约。
 ///
-/// `id` is required because `ensure_server_id` fills it before this is
-/// parsed, and the timestamps are absent because the server stamps them.
+/// `id` 必填，因为解析本类型之前 `ensure_server_id` 已补上它；时间戳缺席，因为由
+/// 服务端盖。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeCreateNodeBody {
     pub id: String,
-    /// `None` / empty means "derive it from `parentId`".
+    /// `None` / 空表示「由 `parentId` 推导」。
     #[serde(default)]
     pub root_id: Option<String>,
-    /// `None` for a module, whose parent is the project.
+    /// 模块为 `None`，它的父节点是项目。
     #[serde(default)]
     pub parent_id: Option<String>,
     pub kind: crate::domain::ResourceNodeType,
@@ -245,9 +219,8 @@ pub struct NodeCreateNodeBody {
 }
 
 impl NodeCreateNodeBody {
-    /// The row `db::nodes::create` will write. `root_id` is threaded in
-    /// rather than read from the body so a caller cannot pass a node and
-    /// a project that disagree about who owns it.
+    /// `db::nodes::create` 将要写入的那一行。`root_id` 由这里传入而非从 body 里读，
+    /// 免得调用方传出一个节点与一个对「谁拥有它」各执一词的项目。
     pub(crate) fn into_node(self, root_id: &str) -> crate::domain::ResourceNode {
         let now = crate::domain::now_ms();
         crate::domain::ResourceNode {
@@ -264,15 +237,13 @@ impl NodeCreateNodeBody {
     }
 }
 
-/// Body for `POST /api/nodes/move`.
+/// `POST /api/nodes/move` 的 body。
 ///
-/// `nodeIds` is in the order the nodes should appear at the
-/// destination, so a multi-select drag keeps the user's pick order.
+/// `nodeIds` 就是节点在目标位置应出现的顺序，故多选拖拽能保持用户的选择次序。
 ///
-/// `parentId` replaces the old `parentKind` + `parentId` pair: which
-/// table the destination lived in is now a question about the parent's
-/// `type`, and `db::nodes::move_many` answers it. `null` means the top
-/// of the project and is legal only for a module.
+/// `parentId` 取代了旧的 `parentKind` + `parentId` 组合：目的地位于哪张表，如今是父
+/// 节点 `type` 的问题，由 `db::nodes::move_many` 回答。`null` 表示项目顶层，且仅对模块
+/// 合法。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeMoveBody {

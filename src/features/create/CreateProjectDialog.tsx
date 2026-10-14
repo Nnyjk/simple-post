@@ -1,20 +1,11 @@
 /**
- * CreateProjectDialog — the only create dialog that is not project-scoped.
+ * CreateProjectDialog —— 唯一一个不隶属于项目的创建对话框。
  *
- * WHY IT IS MOUNTED IN `App.tsx` RATHER THAN IN A SCREEN
- * ------------------------------------------------------
- * A project is the one kind with no containing project, so it can be
- * created from three different regions: the welcome screen's card, the
- * top-bar project dropdown, and the command palette (Ctrl+K). Two of
- * those are on the *workspace* surface and one is on the *welcome*
- * surface, so mounting the dialog in either screen would leave the other
- * two entry points writing a draft nobody renders — the exact failure
- * this decomposition exists to remove.
- *
- * `App.tsx` owns the surface switch, so it owns the one portal that has
- * to outlive a switch. The module and collection dialogs do *not* need
- * this: they are only reachable from inside a project, which is exactly
- * where `ProjectTree` mounts them.
+ * 项目是唯一没有上级项目的类型，可从三处创建：欢迎页卡片、顶栏项目下拉、命令面板
+ * （Ctrl+K）。其中两处在 *workspace* 面、一处在 *welcome* 面，挂在任一屏都会让另两个
+ * 入口写出一个没人渲染的草稿。故这个 portal 挂在 `App.tsx` —— 门面切换由它掌管，只有它
+ * 能让 portal 活过切换。模块与集合对话框不需要：它们只在项目内可达，那正是 `ProjectTree`
+ * 挂载它们的地方。
  */
 
 import { useRef } from 'react';
@@ -22,22 +13,15 @@ import { useAppStore } from '@/stores/app-store';
 import { CreateDialog, ColorPicker, DescriptionField, Field, NameField } from './CreateDialog';
 
 /**
- * The rows `projects_create` seeds. Mirrors `DEFAULT_ENVIRONMENT_NAME` and
- * `DEFAULT_MODULE_NAME` in `crates/simple-post-core/src/db/projects.rs`.
+ * `projects_create` 播种的行。对应 `crates/simple-post-core/src/db/projects.rs` 里的
+ * `DEFAULT_ENVIRONMENT_NAME` 与 `DEFAULT_MODULE_NAME`。
  *
- * Duplicated rather than fetched, for the same reason
- * `lib/palette.ts` mirrors `domain::default_project_color()`: the backend
- * is the single source of truth and this only feeds the hint under the
- * field. The response to `projects_create` carries the real values, so a
- * drift here shows up as a wrong hint and nothing else — change both
- * sides together.
+ * 刻意复制而非拉取，理由同 `lib/palette.ts` 镜像 `domain::default_project_color()`：
+ * 后端是唯一真相源，这份只喂字段下方的提示；`projects_create` 的响应带着真值，故这里漂移
+ * 最多表现为提示写错，不会波及数据 —— 两边一起改。
  *
- * There is deliberately **no** base-URL hint, because a new project seeds
- * no service at all: `defaultBaseUrlDefinitionId` comes back `null` and
- * the user adds services, stars one, and fills each module's address in
- * Settings. Asking for a URL here would be asking for something that
- * nothing stores — the field it used to bind to was dropped along with
- * the default service.
+ * 刻意**不**给 baseUrl 提示：新项目不播种任何服务，`defaultBaseUrlDefinitionId` 回来是
+ * `null`，服务由用户自己添加、打星号、再在设置里逐模块填地址。
  */
 const DEFAULT_ENVIRONMENT_NAME = '默认环境';
 const DEFAULT_MODULE_NAME = '默认模块';
@@ -53,9 +37,8 @@ export function CreateProjectDialog() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const open = draft.open && draft.type === 'project';
 
-  // Empty is allowed here, unlike the other two: `submitNewItem` falls
-  // back to 「新项目」, and a first-run user who just wants *a* project
-  // should not have to name it before they can see it.
+  // 这里允许留空，另两个对话框不允许：`submitNewItem` 会回落到「新项目」，首次使用的
+  // 用户只想先有个项目，不该非得先起名才看得见它。
   const submit = () => {
     void submitNewItem();
     closeNewItem();

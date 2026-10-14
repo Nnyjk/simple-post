@@ -1,18 +1,17 @@
 /**
- * `duplicateEndpoint` — 乐观复制的 id 必须就是持久化的 id。
+ * `duplicateEndpoint` —— 乐观复制的 id 必须就是持久化的 id。
  *
- * 回归的用户可见 bug：右键「复制」后，树里多了一行正常的副本，但标签页
- * 的标题是「（接口已删除）」。原因是前端先 `uid()` 生成 id 写进 store 并
- * **同步**返回，调用方立刻用它开 tab、进入重命名；而后端 `nodes::duplicate`
- * 又自己发了一个 id，回调里再把乐观行替换成后端那份 —— 于是 `openTabs` /
- * `activeEndpointId` / `setEditing` 全都指向了一个谁也不拥有的行，
- * `useTabDescriptors` 查不到就走了 `missingDescriptor`。
+ * 契约：调用方在前端 `uid()` 生成 id 写进 store 并**同步**返回之后，就立刻用它
+ * 开 tab、进入重命名；所以后端必须采纳这个 id。若后端自己再发一个，回调里把
+ * 乐观行替换成后端那份，`openTabs` / `activeEndpointId` / `setEditing` 就全都
+ * 指向了一个谁也不拥有的行，`useTabDescriptors` 查不到便走 `missingDescriptor`
+ * ——树里多出一行正常副本，标签标题却是「（接口已删除）」。
  *
  * 这里跑的是**真实组合 store**（`useAppStore`）而不是手搓 harness：坏的
  * 恰恰是切片之间的协作（crud 写 id，ui-tabs 用它开 tab），单独测一个切片
  * 看不到这个洞。
  *
- * Run via:
+ * 运行：
  *   npx tsx --test src/stores/__tests__/crud-duplicate.test.ts
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -97,7 +96,7 @@ describe('duplicateEndpoint：id 与 name 两端一致', () => {
     const calls: CapturedInvoke[] = [];
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });
-      // 后端沿用调用方的 id —— 修复后的契约。
+      // 后端沿用调用方的 id。
       return { ...endpoint1, id: String(args?.newId), name: 'Fetch one (副本)' };
     });
 

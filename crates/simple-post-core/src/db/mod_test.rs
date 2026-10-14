@@ -1,30 +1,24 @@
 use super::*;
 use std::path::PathBuf;
 
-/// Build a fresh pool rooted at a temp directory, with the bundled
-/// fixture set loaded. Each test owns its own dir so they're
-/// independent. Returns the dir so the caller can `keep` / `drop`
-/// it as desired.
-///
-/// `db::init` no longer seeds — see [`fresh_empty_pool`] for the
-/// un-seeded shape. Tests below assert against `p_demo` and friends, so
-/// they opt into the fixtures explicitly.
+/// 建一个以临时目录为根的新连接池，并灌入内嵌 fixture 集。每个测试独享自己的目录，故彼此
+/// 独立。返回目录，好让调用方按需 `keep` / `drop`。
+/// 下面断言 `p_demo` 之类的测试显式选用 fixture；未播种的形状见 [`fresh_empty_pool`]。
 fn fresh_pool() -> (DbPool, PathBuf) {
     let (pool, dir) = fresh_empty_pool();
     test_support::seed(&pool);
     (pool, dir)
 }
 
-/// Same as [`fresh_pool`] but **no rows inserted** — the state a real
-/// first boot leaves behind. Use this when the test is about migration
-/// or about how the app behaves on an empty database.
+/// 同 [`fresh_pool`] 但**不插入任何行**——真实首次启动留下的状态。测迁移、或测应用在空库上
+/// 行为时用它。
 fn fresh_empty_pool() -> (DbPool, PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-db-test-{}-{}",
         std::process::id(),
         crate::db::test_counter::next()
     ));
-    // Make sure we start clean even if a previous run left files.
+    // 即使上一次运行留下了文件也确保从干净状态开始。
     let _ = std::fs::remove_dir_all(&dir);
     let pool = init(&dir).expect("init");
     (pool, dir)
@@ -43,14 +37,13 @@ fn init_creates_dir_and_db_file() {
     assert!(dir.exists(), "data dir should exist");
     assert!(dir.join("store.db").exists(), "store.db should exist");
 
-    // `ping` round-trips a connection.
+    // `ping` 会真正走一次连接。
     ping(&pool).expect("ping");
 }
 
 #[test]
 fn init_leaves_a_fresh_database_empty() {
-    // Simple Post ships no seed data: `db::init` creates tables and
-    // stops. Rows only ever come from the user or from an MCP client.
+    // Simple Post 不带任何种子数据：`db::init` 建完表即止。行只来自用户或 MCP 客户端。
     let (pool, _dir) = fresh_empty_pool();
     for table in [
         "projects",
@@ -70,8 +63,7 @@ fn init_leaves_a_fresh_database_empty() {
 #[test]
 fn migrate_is_idempotent() {
     let (pool, _dir) = fresh_pool();
-    // Second call on the same DB: every CREATE is IF NOT EXISTS, so
-    // re-running the schema is a no-op and rows are untouched.
+    // 同一个库上第二次调用：每个 CREATE 都是 IF NOT EXISTS，故重跑 schema 是无操作且行不受影响。
     with_conn(&pool, migrate).expect("second migrate");
     let count: i64 = with_conn(&pool, |c| {
         Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
@@ -83,8 +75,7 @@ fn migrate_is_idempotent() {
 #[test]
 fn with_tx_rolls_back_on_error() {
     let (pool, _dir) = fresh_pool();
-    // Force an error inside the closure; the rollback should
-    // restore the row count to 3 (the seeded projects).
+    // 在闭包里制造错误；回滚应把行数恢复到 3（seed 出来的项目数）。
     let res: Result<(), AppError> = with_tx(&pool, |c| {
         c.execute("DELETE FROM projects", [])?;
         Err(AppError::Validation("nope".into()))
@@ -126,9 +117,7 @@ fn with_conn_returns_caller_value() {
     assert_eq!(v, 42);
 }
 
-// -------------------------------------------------------------------------
-// Schema versioning.
-// -------------------------------------------------------------------------
+// schema 版本。
 
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -141,16 +130,11 @@ fn temp_dir(tag: &str) -> PathBuf {
     dir
 }
 
-/// Plant a `store.db` shaped like the pre-versioning layout — the
-/// three-table tree, the given `user_version`, and one row in it so a
-/// rebuild is observable from the outside.
-///
-/// `legacy_marker` is a table the current `schema.sql` would never
-/// create. It is the phase-independent witness that the file was
-/// *replaced* rather than emptied in place: an assertion about which
-/// tables the new schema happens to define would keep changing as the
-/// layout moves, and would pass even if the rebuild quietly reused the
-/// old file.
+/// 种一个形状像版本号之前布局的 `store.db`——三表树、给定的 `user_version`，再加一行，
+/// 使重建可从外部观察。
+/// `legacy_marker` 是当前 `schema.sql` 绝不会创建的表。它是与阶段无关的证据，证明文件是被
+/// **替换**而非就地清空的：断言「新 schema 恰好定义了哪些表」会随布局演进不断变化，而且
+/// 即便重建悄悄复用了旧文件也照样会通过。
 fn plant_legacy_store(dir: &Path, version: i64) {
     std::fs::create_dir_all(dir).unwrap();
     let conn = Connection::open(dir.join("store.db")).unwrap();
@@ -166,8 +150,7 @@ fn plant_legacy_store(dir: &Path, version: i64) {
     )
     .unwrap();
     conn.pragma_update(None, "user_version", version).unwrap();
-    // Dropped here so the handle is released before `init` tries to
-    // delete the file — on Windows an open handle makes removal fail.
+    // 在此处 drop，好让句柄在 `init` 试图删除文件之前释放——Windows 上打开的句柄会让删除失败。
 }
 
 #[test]
@@ -197,10 +180,8 @@ fn init_rebuilds_a_legacy_store() {
     .unwrap();
     assert_eq!(projects, 0, "legacy rows must not survive a rebuild");
 
-    // The legacy `legacy_marker` table is gone entirely. This is the
-    // "the file was replaced" check: emptying the old file in place
-    // would have left it behind, and a schema this build no longer
-    // understands is a schema it has to keep understanding forever.
+    // 旧的 `legacy_marker` 表彻底消失。这就是「文件被替换」的检查：就地清空旧文件会把它留下，
+    // 而一个本构建已不再理解的 schema，是它必须永远继续理解下去的东西。
     let still_there: i64 = with_conn(&pool, |c| {
         Ok(c.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='legacy_marker'",
@@ -235,7 +216,7 @@ fn init_keeps_a_current_store_intact() {
     );
     drop(pool);
 
-    // Re-opening a store this build already wrote must not touch it.
+    // 重新打开一个本构建已经写过的库，必须不碰它。
     let pool = init(&dir).expect("second init");
     let projects: i64 = with_conn(&pool, |c| {
         Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
@@ -284,32 +265,25 @@ fn remove_db_files_tolerates_absent_sidecars() {
     let dir = temp_dir("no-sidecar");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("store.db"), b"x").unwrap();
-    // No -wal, no -shm. A failed open elsewhere can leave it that way.
+    // 没有 -wal，没有 -shm。别处的打开失败就可能留下这种状态。
     remove_db_files(&dir.join("store.db")).expect("missing sidecar is not an error");
     assert!(!dir.join("store.db").exists());
 }
 
-// ===========================================================================
-// Data migration — both predecessor service-list shapes.
+// 数据迁移——两种前任服务表形状。
 //
-// The stores below are built with `init` (which runs `migrate` against an
-// empty database, a no-op) and then filled with rows written the way each
-// predecessor build wrote them. That is a faithful stand-in for a real
-// legacy file: the migration reads rows, and the current `CREATE TABLE`
-// carries every column either predecessor had — `module_id` and
-// `is_default` among them — so the only thing that distinguishes a legacy
-// file is the data in it, which is what these tests set.
-// ===========================================================================
+// 下面的库是用 `init` 建的（对空库跑 `migrate`，无操作），再按每个前任构建各自的写法填入行。
+// 这对真实的旧文件是忠实的替身：迁移读的是行，而当前的 `CREATE TABLE` 带着两个前任都有的
+// 每一列——`module_id` 与 `is_default` 也在内——故唯一区分「旧文件」的就是里面的数据，
+// 而那正是这些测试所设置的。
 
-/// Module → URL map, the shape both `environments` JSON columns use.
+/// 模块 → URL map，两个 `environments` JSON 列共用的形状。
 type UrlMap = std::collections::BTreeMap<String, String>;
-/// def_id → module_id → URL.
+/// def_id → module_id → URL。
 type PerModuleMap = std::collections::BTreeMap<String, UrlMap>;
 
-/// A store with the current schema and nothing in it, ready for legacy
-/// rows. The data migration has already run once here (against no rows),
-/// which is exactly the state a booting app is in when it is handed a
-/// database it has to repair.
+/// 当前 schema 且空无一行的库，等着放旧行。数据迁移在此已经跑过一次（对零行），这正是
+/// 一个启动中的应用被交上一个必须修复的数据库时所处的状态。
 fn legacy_store(tag: &str) -> DbPool {
     let dir = temp_dir(tag);
     init(&dir).expect("init")
@@ -333,8 +307,7 @@ fn add_module(conn: &mut Connection, id: &str, project: &str, sort_order: i64, c
     .unwrap();
 }
 
-/// One service row. `module` is what tells the two shapes apart: `Some`
-/// is the module-owned layout, `None` the project-owned one.
+/// 一条服务行。`module` 正是区分两种形状的东西：`Some` 是模块持有布局，`None` 是项目持有。
 fn add_service(
     conn: &mut Connection,
     id: &str,
@@ -374,8 +347,7 @@ fn add_env(
     .unwrap();
 }
 
-/// An endpoint sitting directly under `module` — the tree allows it, and
-/// it keeps these fixtures to one node per endpoint.
+/// 直接挂在 `module` 下的 endpoint——树允许这样，且它让这些 fixture 每个 endpoint 只用一个节点。
 fn add_endpoint(conn: &mut Connection, id: &str, module: &str, service: Option<&str>, path: &str) {
     conn.execute(
         "INSERT INTO nodes (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
@@ -391,9 +363,8 @@ fn add_endpoint(conn: &mut Connection, id: &str, module: &str, service: Option<&
     .unwrap();
 }
 
-/// Which module an endpoint is under. Walks up the tree because an
-/// endpoint is at least one edge below its module, and a collection in
-/// between must not stop the walk.
+/// 某 endpoint 挂在哪个模块下。沿树上溯，因为 endpoint 至少比它的模块低一条边，而中间夹
+/// 一个 collection 不该终止这次上溯。
 fn module_of(conn: &mut Connection, node_id: &str) -> Option<String> {
     conn.query_row(
         "WITH RECURSIVE up(id, parent_id, type) AS ( \
@@ -440,9 +411,8 @@ fn read_env_maps(conn: &mut Connection, env_id: &str) -> (UrlMap, PerModuleMap) 
     .unwrap()
 }
 
-/// How the **current** model resolves an endpoint's base URL: the
-/// project's ★ when the endpoint names no service, then that service's
-/// cell for the endpoint's own module, and nothing else.
+/// **当前**模型如何解析一个 endpoint 的 base URL：endpoint 未指名服务时用项目的 ★，然后是
+/// 该服务在 endpoint 自己模块下的单元格，别无其他。
 fn resolve_current(
     conn: &mut Connection,
     project_id: &str,
@@ -474,8 +444,7 @@ fn resolve_current(
         .unwrap_or_default()
 }
 
-/// How the **shape A** (project-owned list) layout resolved it: the
-/// per-module override first, the environment-level URL second.
+/// **shape A**（项目持有列表）布局当年如何解析：先按模块覆盖，再环境级 URL。
 fn resolve_legacy_project_owned(
     conn: &mut Connection,
     project_id: &str,
@@ -498,9 +467,8 @@ fn resolve_legacy_project_owned(
         .unwrap_or_default()
 }
 
-/// How the **shape B** (module-owned lists) layout resolved it: the
-/// service the endpoint named, or its own module's ★, straight out of the
-/// environment-level map.
+/// **shape B**（模块持有列表）布局当年如何解析：endpoint 指名的服务，或它自己模块的 ★，
+/// 直接取自环境级 map。
 fn resolve_legacy_module_owned(conn: &mut Connection, endpoint_id: &str, env_id: &str) -> String {
     let module = module_of(conn, endpoint_id);
     let def = endpoint_service(conn, endpoint_id).or_else(|| {
@@ -524,7 +492,7 @@ fn resolve_legacy_module_owned(conn: &mut Connection, endpoint_id: &str, env_id:
         .unwrap_or_default()
 }
 
-/// Endpoints of a project, with the URL each layout would resolve.
+/// 一个项目下的 endpoint，以及每种布局各自会解析出的 URL。
 fn urls_under_current(
     conn: &mut Connection,
     project_id: &str,
@@ -549,8 +517,7 @@ fn urls_under_current(
         .collect()
 }
 
-/// Everything the migration is allowed to touch, as raw strings, so two
-/// runs can be compared byte for byte.
+/// 迁移被允许触碰的一切，以原始字符串给出，好让两次运行能逐字节比对。
 fn snapshot(conn: &mut Connection, project_id: &str) -> Vec<String> {
     let mut out = Vec::new();
     {
@@ -622,17 +589,13 @@ fn snapshot(conn: &mut Connection, project_id: &str) -> Vec<String> {
     out
 }
 
-// -------------------------------------------------------------------------
-// Shape A — the project-owned service list.
-// -------------------------------------------------------------------------
+// shape A——项目持有的服务表。
 
-/// The real pre-v1 layout: one service list per project (`module_id`
-/// NULL), values in `base_urls_json[def_id]` with a per-module override
-/// in `module_base_urls_json[def_id][module_id]`.
+/// 真实的 pre-v1 布局：每项目一份服务列表（`module_id` 为 NULL），值在
+/// `base_urls_json[def_id]`，按模块的覆盖在 `module_base_urls_json[def_id][module_id]`。
 fn seed_shape_a(conn: &mut Connection) {
     add_project(conn, "p_a", Some("d_base"));
-    // The user's own store is the model for the ids and timestamps: two
-    // modules created minutes apart, `sort_order` 0 and 1.
+    // id 与时间戳以用户自己的库为模型：相隔几分钟创建的两个模块，`sort_order` 0 与 1。
     add_module(conn, "m_air", "p_a", 0, 1_791_617_412_693);
     add_module(conn, "m_water", "p_a", 1, 1_791_621_861_037);
     add_service(conn, "d_base", "p_a", "base", None, 0, false);
@@ -659,13 +622,11 @@ fn seed_shape_a(conn: &mut Connection) {
         Some("d_base"),
         "/water/health",
     );
-    // No service named: these resolve through the project ★, and are here
-    // to prove that path survives too.
+    // 未指名服务：这些走项目 ★ 解析，放进来是为了证明那条路径也活着。
     add_endpoint(conn, "a_star_air", "m_air", None, "/star/air");
     add_endpoint(conn, "a_star_water", "m_water", None, "/star/water");
-    // A service no environment ever gave a value to: the answer is empty
-    // before and after, and the cell must stay absent rather than become
-    // an empty string.
+    // 一个任何环境都没给过值的服务：迁移前后答案都是空，且该单元格必须保持缺席，
+    // 而不是变成空字符串。
     add_endpoint(conn, "a_unset", "m_air", Some("d_air"), "/air/unset");
 }
 
@@ -701,8 +662,7 @@ fn shape_a_urls_are_byte_identical_after_migration() {
             after, legacy,
             "every endpoint must resolve to exactly the URL it did before"
         );
-        // Spot-check the two interesting cells rather than trusting the
-        // comparison above to have exercised them at all.
+        // 抽查那两个有意思的单元格，而不是相信上面的比较真的碰到了它们。
         assert_eq!(
             after[0].1, "http://127.0.0.1:9201",
             "override wins for m_air"
@@ -746,9 +706,8 @@ fn shape_a_puts_every_value_in_the_module_keyed_layer() {
 
 #[test]
 fn shape_a_leaves_the_environment_level_urls_in_place() {
-    // Contract §4.6: shape A's `base_urls_json` is left as it was. It is
-    // the one layout where that is safe, because re-running the migration
-    // re-derives the identical values from it.
+    // 契约 §4.6：shape A 的 `base_urls_json` 保持原样。那是这一布局中留它安全的唯一情形，
+    // 因为重跑迁移会从它重新推导出完全相同的值。
     let pool = legacy_store("shape-a-keeps-base-urls");
     with_conn(&pool, |c| {
         seed_shape_a(c);
@@ -762,8 +721,8 @@ fn shape_a_leaves_the_environment_level_urls_in_place() {
 
 #[test]
 fn shape_a_star_stays_empty_when_the_project_had_none() {
-    // Electing a ★ here would hand endpoints that resolved to `''` a host
-    // they never had, so a NULL default survives the migration as NULL.
+    // 在这里选出一个 ★ 会给原本解析为 `''` 的 endpoint 一个它从未有过的 host，
+    // 故 NULL 默认在迁移后仍是 NULL。
     let pool = legacy_store("shape-a-null-star");
     with_conn(&pool, |c| {
         seed_shape_a(c);
@@ -779,14 +738,11 @@ fn shape_a_star_stays_empty_when_the_project_had_none() {
     .unwrap();
 }
 
-// -------------------------------------------------------------------------
-// Shape B — the module-owned service lists.
-// -------------------------------------------------------------------------
+// shape B——模块持有的服务列表。
 
-/// The layout the module-owned build left behind, modelled on a real user
-/// store: module `air` holds `air` / `base`(★) / 「新服务」, module
-/// `water` holds only 「新服务」(★), and the environment's URL map is keyed
-/// by whichever clone each module created.
+/// 模块持有构建留下的布局，以一个真实用户库为模型：模块 `air` 持有 `air` / `base`(★) /
+/// 「新服务」，模块 `water` 只持有「新服务」(★)，而环境的 URL map 以各模块各自创建的
+/// clone 为键。
 fn seed_shape_b(conn: &mut Connection) {
     add_project(conn, "p_b", None);
     add_module(conn, "m_air", "p_b", 0, 1_791_617_412_693);
@@ -805,8 +761,7 @@ fn seed_shape_b(conn: &mut Connection) {
         true,
     );
 
-    // Two live URLs plus the orphan keys a real store accumulates: ids of
-    // services deleted in the UI, which no longer resolve to anything.
+    // 两个现役 URL，外加真实库会积累的孤儿键：在 UI 里被删掉、已解析不出任何东西的服务 id。
     let base_urls: UrlMap = [
         (
             "sp_air_base".to_string(),
@@ -899,7 +854,7 @@ fn shape_b_collapses_each_service_name_to_one_project_level_row() {
         for (name, module) in &names {
             assert!(module.is_none(), "{name} still owns a module: {module:?}");
         }
-        // air is the first module, so its rows are the survivors.
+        // air 是第一个模块，故它的行是存活者。
         assert_eq!(names[1].0, "base");
         let (_, cells) = read_env_maps(c, "e_b_prod");
         assert_eq!(
@@ -926,9 +881,8 @@ fn shape_b_collapses_each_service_name_to_one_project_level_row() {
 
 #[test]
 fn shape_b_conflicting_stars_resolve_to_the_first_module() {
-    // air stars 「base」 and water stars 「新服务」. There is no
-    // inheritance between modules, so neither is "the" answer; the
-    // tie-break is the first module, stated rather than derived.
+    // air 给「base」打 ★ 而 water 给「新服务」打 ★。模块之间没有继承，故哪个都不是「那个」
+    // 答案；决胜规则就是第一个模块，这是明示的而非推导出的。
     let pool = legacy_store("shape-b-star-conflict");
     with_conn(&pool, |c| {
         seed_shape_b(c);
@@ -985,9 +939,8 @@ fn shape_b_neutralises_the_columns_it_retired() {
 
 #[test]
 fn shape_b_clears_the_urls_it_moved() {
-    // Every value in `base_urls_json` is now in the module-keyed layer,
-    // so leaving it would make the next boot read it as shape A and copy
-    // air's host into every module's empty cell.
+    // `base_urls_json` 里的每个值现在都在以模块为键的那一层，故留着它会让下次启动把它读成
+    // shape A，并把 air 的 host 复制进每个模块的空单元格。
     let pool = legacy_store("shape-b-clears-base-urls");
     with_conn(&pool, |c| {
         seed_shape_b(c);
@@ -1033,13 +986,11 @@ fn shape_b_remaps_endpoints_onto_the_surviving_rows() {
     .unwrap();
 }
 
-// -------------------------------------------------------------------------
-// Idempotency.
-// -------------------------------------------------------------------------
+// 幂等性。
 
 #[test]
 fn migrating_twice_changes_nothing_in_either_shape() {
-    // (temp-dir tag, project id, fixture builder)
+    // (临时目录 tag, 项目 id, fixture 构造函数)
     type Shape = (&'static str, &'static str, fn(&mut Connection));
     let shapes: [Shape; 2] = [
         ("twice-a", "p_a", seed_shape_a),
@@ -1061,8 +1012,7 @@ fn migrating_twice_changes_nothing_in_either_shape() {
                 after_first,
                 "{tag}: a second migrate must be a no-op"
             );
-            // And a third, for the shape where the guard has to notice
-            // the store is already repaired.
+            // 再来第三次，为的是那个守卫必须注意到库已被修好的形状。
             migrate(c)?;
             assert_eq!(snapshot(c, project_id), after_first, "{tag}: third run");
             Ok(())
@@ -1073,9 +1023,8 @@ fn migrating_twice_changes_nothing_in_either_shape() {
 
 #[test]
 fn a_current_store_is_left_alone() {
-    // The seeded fixtures are already in the target shape, so migrating
-    // them must not touch a row — that is what makes the pass free on
-    // every boot after the first.
+    // seed 出来的 fixture 已经是目标形状，故对它们跑迁移不得碰到任何一行——这正是首轮之后
+    // 每次启动都零成本的原因。
     let (pool, _dir) = fresh_pool();
     with_conn(&pool, |c| {
         let before = snapshot(c, "p_demo");

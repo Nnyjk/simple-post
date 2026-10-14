@@ -10,10 +10,9 @@ import { KeyValueTable, RowTile } from './KeyValueTable';
 const VAR_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * VariableTable — the env's `{{key}} → value` overrides.
+ * VariableTable —— 该环境的 `{{key}} → value` 覆盖值。
  *
- * Shares its list chrome with the 前置 URL table via `KeyValueTable`; only
- * the cells below are local.
+ * 列表外壳与 前置 URL 表共用 `KeyValueTable`；只有下面的单元格是本表自己的。
  */
 interface VariableTableProps {
   env: Environment;
@@ -42,7 +41,7 @@ export function VariableTable({
         <>
           <RowTile concept="variable" icon={<Braces className="h-4 w-4" />} />
 
-          {/* Variable key — inline rename */}
+          {/* 变量名 —— 就地重命名 */}
           <div className="min-w-0 w-44 shrink-0">
             <InlineNameCell
               value={name}
@@ -52,10 +51,9 @@ export function VariableTable({
               }
               onCommit={(newKey) => {
                 if (!newKey || newKey === name) return;
-                // 一个命令完成重命名。之前这里是「先删旧 key，再写新 key」
-                // 两次 setEnvironmentVar，两次事务之间变量是消失的——进程
-                // 中断或第二次调用失败就会把变量删掉。改成单次原子调用后
-                // 不存在这个窗口。
+                // 一个命令完成重命名。拆成「先删旧 key、再写新 key」两次调用时，两次之间
+                // 变量处于消失状态 —— 进程中断或第二次调用失败就会把它删掉。单次原子调用后
+                // 没有这个窗口。
                 renameEnvironmentVar(env.id, name, newKey);
               }}
               className="font-mono text-xs font-medium"
@@ -63,7 +61,7 @@ export function VariableTable({
             <div className="label-caps mt-0.5">{`{{${name || '...'}}}`}</div>
           </div>
 
-          {/* Variable value */}
+          {/* 变量值 */}
           <div className="min-w-0 flex-1">
             <Input
               value={value}
@@ -74,7 +72,7 @@ export function VariableTable({
             />
           </div>
 
-          {/* Trailing actions */}
+          {/* 末尾操作 */}
           <div className="flex shrink-0 items-center gap-1">
             <Tooltip content="删除变量" side="bottom">
               <Button

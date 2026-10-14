@@ -26,18 +26,15 @@ import { ResponseHistory } from './ResponseHistory';
 export function ResponseViewer() {
   const response = useAppStore((s) => s.lastResponse);
   const pending = useAppStore((s) => s.requestPending);
-  // The resource form, not the row form: a response can belong to an
-  // endpoint that was never saved, and "保存为示例" keys off this id —
-  // which works just as well for a `draft:`-prefixed one.
+  // 取资源形式而非行形式：响应可能属于从未保存过的接口，而「保存为示例」以此 id 为键，
+  // 对 `draft:` 前缀的 id 同样成立。
   const endpoint = useActiveEndpointResource()?.node ?? null;
   const addResponseExample = useAppStore((s) => s.addResponseExample);
   const [savedFlash, setSavedFlash] = useState(false);
 
   const [view, setView] = useState<'pretty' | 'raw' | 'headers'>('pretty');
-  // Pretty tab opens in formatted mode by default — that's the
-  // whole point of the tab. When a new response arrives we reset
-  // the toggle so a refresh / retry also re-renders pretty JSON
-  // (the user can still flip to "原文" mid-inspection).
+  // Pretty 页默认以格式化形态打开 —— 这正是该页的意义。新响应到达时重置开关，使刷新 /
+  // 重试也重新渲染格式化 JSON（用户检查中途仍可翻到「原文」）。
   const [formatted, setFormatted] = useState<boolean>(true);
 
   useEffect(() => {
@@ -47,17 +44,12 @@ export function ResponseViewer() {
   const formatResult = useMemo(() => tryFormatJson(response?.body ?? ''), [response?.body]);
   const canFormat = formatResult.ok;
 
-  // C1: status pill pulse + count-up wiring.
-  // `statusPillRef` targets the icon + status code + statusText row so
-  // the whole pill morphs in as one unit. The two mutable count-up
-  // objects live in refs (not state) so gsap can mutate `.val` on
-  // every frame without re-rendering for the value alone; we push
-  // rounded snapshots into `displayDuration` / `displaySize` state for
-  // React to render. Initial `.val` is 0 so the *first* response
-  // counts up from 0 → target; for subsequent responses the previous
-  // value is preserved across renders and the next animation glides
-  // from there to the new target — visible "ramp" only on the very
-  // first frame after the pill mounts.
+  // C1：状态药丸的脉冲 + 数字滚动。
+  // `statusPillRef` 指向「图标 + 状态码 + statusText」整行，使整个药丸作为一个整体形变。
+  // 两个可变计数对象放在 ref（而非 state）里，gsap 才能逐帧改 `.val` 而不为此数值单独
+  // 重渲染；再把取整后的快照推进 `displayDuration` / `displaySize` state 交给 React 渲染。
+  // 初始 `.val` 为 0，故第一个响应从 0 滚到目标；此后的响应保留上一次的取值，下一段动画
+  // 从那里滑向新目标 —— 可见的「爬升」只出现在药丸挂载后的第一帧。
   const statusPillRef = useRef<HTMLDivElement>(null);
   const durObjRef = useRef({ val: 0 });
   const sizeObjRef = useRef({ val: 0 });
@@ -65,17 +57,13 @@ export function ResponseViewer() {
   const [displaySize, setDisplaySize] = useState(0);
 
   useGSAP(() => {
-    // PendingState hides the pill, so bail until the full response UI
-    // is mounted. `pending` is in the dep array so we re-fire when
-    // pending flips false (a response that arrived *during* a request
-    // hasn't been animated yet — handleSend sets lastResponse first,
-    // then clears pending, and the second transition is what surfaces
-    // the animation).
+    // PendingState 会隐藏药丸，故等完整响应 UI 挂载后再动。`pending` 在依赖数组里，是为了
+    // pending 翻回 false 时重跑（请求**进行中**到达的响应还没动画过 —— handleSend 先写
+    // lastResponse 再清 pending，第二次跃迁才是动画浮现的那一次）。
     if (pending || !response || !statusPillRef.current) return;
 
-    // Killing an in-flight tween is state hygiene, not motion: without it
-    // back-to-back responses pile overlapping tweens onto the same object
-    // and the number fights itself. It stays outside the guard.
+    // 杀掉在途 tween 是状态卫生而非动效本身：不做的话连续两个响应会把重叠的 tween 堆到
+    // 同一个对象上，数字跟自己打架。此句留在守卫之外。
     gsap.killTweensOf(durObjRef.current);
     gsap.killTweensOf(sizeObjRef.current);
 
@@ -104,11 +92,9 @@ export function ResponseViewer() {
           onUpdate: () => setDisplaySize(Math.round(sizeObjRef.current.val)),
         });
       },
-      // The count-ups are not decoration. `displayDuration` / `displaySize`
-      // are written *only* from `onUpdate`, so skipping the tweens would
-      // leave the response panel reading `0 ms` / `0 B` for every request
-      // — reduced motion would silently cost the user the measurement.
-      // Land the final values instead of tweening to them.
+      // 数字滚动不是装饰。`displayDuration` / `displaySize` **只**由 `onUpdate` 写入，跳过
+      // tween 会让响应面板对每个请求都显示 `0 ms` / `0 B` —— 降低动效就会静默地让用户
+      // 失去测量值。此处直接落终值而非补间过去。
       () => {
         durObjRef.current.val = response.durationMs;
         sizeObjRef.current.val = response.sizeBytes;
@@ -125,9 +111,8 @@ export function ResponseViewer() {
     window.setTimeout(() => setSavedFlash(false), 1500);
   };
 
-  // C3: Save-as-example bounce. Fires only when savedFlash transitions
-  // false → true (the next state change to false intentionally no-ops,
-  // because the tooltip text has already swapped to "已保存" by then).
+  // C3：保存为示例的弹跳。仅在 savedFlash 由 false → true 时触发；下一次变回 false 刻意
+  // 为空操作 —— 那时 tooltip 文案早已换成「已保存」。
   const saveExampleBtnRef = useRef<HTMLButtonElement>(null);
   useGSAP(() => {
     if (!savedFlash || !saveExampleBtnRef.current) return;
@@ -151,19 +136,13 @@ export function ResponseViewer() {
   }
 
   if (!response) {
-    // The history strip is rendered here too, and it needs this branch to
-    // be a **flex column**, exactly like the populated branch below.
+    // 历史条也在这里渲染，故本分支必须与下方有数据分支一样是 **flex 纵向**容器。
     //
-    // `WorkspaceShell` wraps the viewer in `min-h-0 flex-1`, which is not
-    // itself a flex container, so a fragment's children lay out in
-    // normal block flow: an `h-full` `<section>` takes the whole box and
-    // the `shrink-0` strip that follows it lands below the bottom edge.
-    // Nothing crashes and nothing logs — the strip is in the DOM, fully
-    // rendered, simply off-screen — which is why it shipped looking like
-    // "the panel is missing" and why a DOM query for it still succeeds.
-    // That class of bug cannot be caught by a unit test (there is no DOM
-    // in this runner), so `__tests__/response-viewer-layout.test.ts`
-    // pins the container shape at the source level instead.
+    // `WorkspaceShell` 把 viewer 包在 `min-h-0 flex-1` 里，而那本身不是 flex 容器，
+    // 故 fragment 的子元素走普通块级流：`h-full` 的 `<section>` 占满整个盒子，紧随其后的
+    // `shrink-0` 历史条就落到下边缘之外 —— 不崩溃、不打日志，条在 DOM 里、完整渲染、只是
+    // 跑到屏幕外，DOM 查询照样查得到。这类问题单元测试抓不到（本 runner 无 DOM），故
+    // `__tests__/response-viewer-layout.test.ts` 在源码层面钉住容器形状。
     return (
       <section className="flex h-full min-h-0 flex-col">
         <EmptyState />
@@ -247,9 +226,8 @@ export function ResponseViewer() {
         </div>
       </div>
 
-      {/* Inline error banner — only renders for aborted/timeout/network
-          responses (i.e. `status === 0`). Real HTTP error statuses
-          (4xx/5xx) still flow through the normal status pill above. */}
+      {/* 行内错误横幅 —— 只对中止 / 超时 / 网络错误（即 `status === 0`）渲染。真正的
+          HTTP 错误状态（4xx/5xx）仍走上方正常的状态药丸。 */}
       {response.status === 0 && response.error && (
         <div className="flex shrink-0 items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
           <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -270,11 +248,9 @@ export function ResponseViewer() {
             {
               id: 'headers',
               label: 'Headers',
-              // A filled badge cannot work here: the segment it sits in is
-              // either the `--muted` trough or the `--chip` thumb, and no
-              // single fill contrasts with both. Counts are "present, not
-              // actionable" information anyway, so they take the third
-              // text level and drop the chip.
+              // 填充徽标在这里行不通：它所在的分段要么是 `--muted` 的槽，要么是 `--chip`
+              // 的滑块，没有一种填充能同时与两者拉开对比。计数本就是「有但不需操作」的
+              // 信息，故用第三级文字、放弃 chip。
               badge: (
                 <span className="text-faint tabular-nums">
                   {Object.keys(response.headers).length}
@@ -401,11 +377,9 @@ function HeadersView({ headers }: { headers: Record<string, string> }) {
 
 function EmptyState() {
   return (
-    // `flex-1`, not `h-full`: this section is a sibling of the history
-    // strip inside a flex column, and `h-full` would claim the whole box
-    // and push the strip out of view. `flex-1` takes the *remaining*
-    // space, which is what "fills the response pane" actually means once
-    // there is a strip below it.
+    // 用 `flex-1` 而非 `h-full`：本 section 在 flex 纵向容器里与历史条平级，`h-full` 会
+    // 占满整个盒子把历史条挤出视野；`flex-1` 取的是**剩余**空间 —— 在下方有历史条时，
+    // 「填满响应面板」真正的意思就是这个。
     <section className="flex min-h-0 flex-1 flex-col items-center justify-center border-t border-border bg-card/30 px-4 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40">
         <CheckCircle2 className="h-6 w-6 text-muted-foreground/50" />

@@ -1,20 +1,17 @@
 /**
- * Tests for `src/stores/slices/ui-draft-endpoints.ts` — the endpoint that
- * exists only in the renderer until the user presses Save.
+ * `src/stores/slices/ui-draft-endpoints.ts` 的测试——那个在用户按下 Save 之前
+ * 只存在于渲染侧的 endpoint。
  *
- * These run against the **real composed store** rather than a hand-built
- * harness, because the contract they protect is a contract between slices:
- * a draft writes nothing, `saveDraftEndpoint` hands the tab over to a real
- * `endpoint`, and `pruneStaleTabs` (a different sub-factory) must not read
- * a missing `nodes` row as "deleted". A harness would stub away exactly the
- * wiring most likely to break.
+ * 它们跑在**真实组合 store** 上而不是手搭的 harness，因为要保护的契约是切片
+ * 之间的契约：草稿什么都不写，`saveDraftEndpoint` 把标签移交给一个真正的
+ * `endpoint`，而 `pruneStaleTabs`（另一个子工厂）绝不能把缺失的 `nodes` 行读成
+ * "已删除"。harness 恰好会把最容易坏的那段接线 stub 掉。
  *
- * "Writes nothing" is asserted two ways, because either alone is weak: the
- * IPC mock counts calls, and `nodes.length` is checked. A draft that
- * optimistically appended a local row would pass the first and fail the
- * second, and vice versa.
+ * "什么都不写"用两种方式断言，因为任何一种单独都不够：IPC mock 数调用次数，
+ * 再查 `nodes.length`。乐观追加了一行本地行的草稿会通过前者、失败于后者，
+ * 反之亦然。
  *
- * Run via: npx tsx --test src/stores/__tests__/ui-draft-endpoints.test.ts
+ * 运行：npx tsx --test src/stores/__tests__/ui-draft-endpoints.test.ts
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,11 +36,11 @@ const MODULE: ResourceNode = {
 
 const COLLECTION: ResourceNode = { ...MODULE, id: 'c1', parentId: 'm1', kind: 'collection' };
 
-/** Every IPC call the store made, in order. The "did it write?" oracle. */
+/** store 发出过的每次 IPC 调用，按顺序。"写没写？"的裁判。 */
 let ipcCalls: { cmd: string; args: Record<string, unknown> }[] = [];
-/** Make `nodes_create` reject, the way a daemon failure would. */
+/** 让 `nodes_create` reject，就像守护进程失败那样。 */
 let failCreate = false;
-/** What the daemon hands back — deliberately NOT the id we offered it. */
+/** 守护进程回什么——刻意**不是**我们提供给它的那个 id。 */
 const SERVER_ID = 'ep-server-1';
 
 let origError: typeof console.error;
@@ -59,9 +56,8 @@ beforeEach(() => {
     ipcCalls.push({ cmd, args: args ?? {} });
     if (cmd === 'nodes_create') {
       if (failCreate) throw new Error('nodes_create failed');
-      // Mirrors the real Tauri command, which mints its own id and ignores
-      // the one we offered — so a test that keys off the offered id fails
-      // here rather than only against a live daemon.
+      // 镜像真实的 Tauri 命令：它自己铸 id 并忽略我们提供的那个——所以依赖所提供 id
+      // 的测试在这里就失败，而不是只对着活着的守护进程才失败。
       return {
         id: SERVER_ID,
         rootId: 'p1',
@@ -99,7 +95,7 @@ afterEach(() => {
   clearIpcMock();
 });
 
-/** The tab showing `id`, or undefined — a bare reference, never an array. */
+/** 显示 `id` 的标签，或 undefined——一个裸引用，永远不是数组。 */
 function tabFor(id: string) {
   return useAppStore.getState().openTabs.find((t) => t.id === id);
 }
@@ -121,8 +117,8 @@ describe('draft endpoints: creating one touches neither the database nor the tre
     const state = useAppStore.getState();
     assert.equal(tabFor(draftId)?.kind, 'endpoint-draft');
     assert.equal(state.activeTabId, draftId);
-    // Deliberately NOT `endpoint`: nothing in `nodes` answers to this id,
-    // and every "does this row still exist?" sweep keys off the kind.
+    // 刻意**不**是 `endpoint`：`nodes` 里谁也不认识这个 id，而每一处
+    // "这一行还在吗？"的清扫都按 kind 作键。
     assert.equal(state.openTabs.filter((t) => t.kind === 'endpoint').length, 0);
   });
 
@@ -144,12 +140,11 @@ describe('draft endpoints: creating one touches neither the database nor the tre
     const state = useAppStore.getState();
     assert.equal(state.nodes.length, 2, 'the tree is unchanged');
     assert.equal(ipcCalls.length, 0);
-    // The tree watches this to react to a new row; with a draft there is no
-    // row, so the contract is "a draft appeared under this id".
+    // 树盯着它以便对新一行做出反应；而草稿没有行，所以契约是
+    // "这个 id 之下出现了一个草稿"。
     assert.equal(state.lastCreatedId, draftId);
     assert.equal(tabFor(draftId!)?.kind, 'endpoint-draft');
-    // Not an endpoint activation: `setActiveEndpoint` would hand the
-    // workspace a tab for a row that does not exist.
+    // 不是激活 endpoint：`setActiveEndpoint` 会递给工作区一个并不存在的行的标签。
     assert.equal(state.activeEndpointId, null);
   });
 
@@ -202,8 +197,8 @@ describe('draft endpoints: Save is the only thing that writes', () => {
     const draftId = useAppStore.getState().createEndpointDraft('m1');
     const store = useAppStore.getState();
     store.updateDraftEndpoint(draftId, { name: '用户列表', method: 'POST', url: '/from-draft' });
-    // The request-config editors write here, exactly as they do for a
-    // saved endpoint — including the url, which is why the patch wins.
+    // 请求配置编辑器写在这里，与它们对已存 endpoint 所做的完全一样——包括 url，
+    // 这正是补丁胜过文档字段的原因。
     store.setEndpointDraft(draftId, {
       url: '/from-patch',
       params: [{ id: 'k1', key: 'page', value: '1', enabled: true }],
@@ -220,13 +215,13 @@ describe('draft endpoints: Save is the only thing that writes', () => {
     const state = useAppStore.getState();
     assert.equal(state.nodes.length, 3, 'the tree finally grows');
     assert.equal(state.nodes.find((n) => n.id === SERVER_ID)?.name, '用户列表');
-    // Document fields and request-config fields in one detail write.
+    // 文档字段与请求配置字段合并进同一次 detail 写入。
     const detail = state.endpointDetails[SERVER_ID];
     assert.equal(detail.method, 'POST');
     assert.equal(detail.url, '/from-patch', 'the newest edit of a field wins');
     assert.equal(detail.params.length, 1);
 
-    // The draft is gone from every map, and the tab changed kind.
+    // 草稿从每张映射里都没了，标签也换了 kind。
     assert.equal(draftId in state.draftEndpoints, false);
     assert.equal(draftId in state.endpointDrafts, false);
     assert.equal(tabFor(draftId), undefined, 'the draft tab is closed');
@@ -244,13 +239,11 @@ describe('draft endpoints: Save is the only thing that writes', () => {
     await store.saveDraftEndpoint(draftId);
 
     const state = useAppStore.getState();
-    // The edit is in the *row* — which is the only place it survives a
-    // reload, and the only place the assertion belongs.
+    // 这次编辑在**行**里——那是它熬过重载的唯一地方，也是断言唯一该落的地方。
     assert.equal(state.endpointDetails[SERVER_ID]?.headers?.[0]?.key, 'X-Key');
-    // …and nowhere else. Copying the pending edits across to the new id
-    // would recreate exactly what Save exists to end: a `•` on a saved
-    // tab, "关闭已保存" declining to close it, and a second Save that
-    // writes nothing new.
+    // ……而且别处也没有。把待保存的编辑复制到新 id 之下，恰恰会重建 Save 存在的
+    // 意义所要终结的东西：一个已保存标签上的 `•`、"关闭已保存"不肯关它、
+    // 以及第二次写不出新东西的 Save。
     assert.equal(
       state.endpointDrafts[SERVER_ID],
       undefined,
@@ -282,8 +275,7 @@ describe('draft endpoints: Save is the only thing that writes', () => {
 
     const state = useAppStore.getState();
     assert.equal(endpointId, null);
-    // Nothing was thrown away: the point of a draft is that a failed save
-    // costs the user nothing.
+    // 什么都没被丢掉：草稿的意义就在于保存失败不花用户任何代价。
     assert.equal(state.nodes.length, 2, 'nothing partial was written');
     assert.equal(state.draftEndpoints[draftId]?.name, '用户列表');
     assert.equal(state.endpointDrafts[draftId]?.body?.content, '{"a":1}');
@@ -311,8 +303,8 @@ describe('draft endpoints: Save is the only thing that writes', () => {
 
 describe('draft endpoints: the tab survives the sweeps that prune dead tabs', () => {
   it('pruneStaleTabs cannot mistake "not written yet" for "deleted"', () => {
-    // A real endpoint alongside the draft: the sweep must keep *both*, so
-    // the exemption cannot be "keep everything".
+    // 旁边还有一个真实的 endpoint：清扫必须**两个都**留下，所以这条豁免
+    // 不可能是"全都留着"。
     useAppStore.setState({
       nodes: [...useAppStore.getState().nodes, { ...MODULE, id: 'ep-real', kind: 'endpoint' }],
     });
@@ -330,8 +322,7 @@ describe('draft endpoints: the tab survives the sweeps that prune dead tabs', ()
   });
 
   it('still closes a real tab whose row is gone', () => {
-    // The counterpart: the exemption is scoped to drafts, not a blanket
-    // "stop pruning".
+    // 反面：豁免只限草稿，不是一句笼统的"别清扫了"。
     useAppStore.getState().openTab('endpoint', 'ep-deleted');
 
     useAppStore.getState().pruneStaleTabs();
@@ -353,16 +344,14 @@ describe('draft endpoints: the tab survives the sweeps that prune dead tabs', ()
   });
 
   it('closeSavedTabs closes clean saved tabs and never a draft', () => {
-    // Two invariants, and the second one is the regression this guards:
-    // a draft tab is dirty from birth — there is no row it could have been
-    // "saved" into — so "关闭已保存" must leave it alone; and the sweeps
-    // that rebuild `draftEndpoints` / `endpointDrafts` key off the
-    // *surviving* tabs by kind, so closing one tab cannot drag a still-open
-    // draft's edits away with it.
+    // 两条不变量，第二条正是这个守卫要防的回归：
+    // 草稿标签一出生就是脏的——它根本没有一行能被"保存"进去——所以
+    // "关闭已保存"必须绕开它；而重建 `draftEndpoints` / `endpointDrafts` 的
+    // 那些清扫按 kind 对**幸存**的标签作键，所以关掉一个标签不会把另一个仍
+    // 开着的草稿的编辑一起带走。
     const kept = useAppStore.getState().createEndpointDraft('m1');
     useAppStore.getState().setEndpointDraft(kept, { url: '/kept' });
-    // A saved endpoint with nothing pending — the only kind of tab this
-    // action is entitled to close.
+    // 一个什么都没有待保存内容的已存 endpoint——这个动作唯一有资格关掉的标签种类。
     useAppStore.getState().openTab('endpoint', 'ep-clean');
 
     const closed = useAppStore.getState().closeSavedTabs();
@@ -376,9 +365,8 @@ describe('draft endpoints: the tab survives the sweeps that prune dead tabs', ()
   });
 
   it('closing a draft tab reclaims the draft itself, not just its edits', () => {
-    // `closeTab` used to drop only `endpointDrafts`, which left the
-    // document fields under an id no tab referenced — a draft that had
-    // outlived its tab and could no longer be saved or reached.
+    // `closeTab` 只删 `endpointDrafts` 时，会把文档字段留在一个没有任何标签引用的
+    // id 之下——一个活得比标签还久、既存不下去也够不着的草稿。
     const draftId = useAppStore.getState().createEndpointDraft('m1');
     useAppStore.getState().updateDraftEndpoint(draftId, { name: '改名过' });
 

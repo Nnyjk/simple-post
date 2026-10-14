@@ -13,12 +13,9 @@ interface Props {
 export function DocsEditor({ value, onChange }: Props) {
   const [mode, setMode] = useState<'edit' | 'preview' | 'split'>('split');
 
-  // `marked` is synchronous and escaping-safe for our use case: the
-  // markdown source is whatever the user typed in the editor above the
-  // preview (or restored from the endpoint's `docs` field that *they*
-  // wrote). We don't pass `dangerouslyAllow` flags, so inline HTML in
-  // the source is rendered as escaped text — exactly the posture we
-  // had with `react-markdown` defaults.
+  // `marked` 是同步的，且在我们的用法下转义是安全的：markdown 源要么是用户在预览上方的
+  // 编辑器里敲的，要么是从接口那个由*用户*自己写的 `docs` 字段还原的。我们不传
+  // `dangerouslyAllow` 标志，故源里的行内 HTML 会被渲染成转义文本。
   const html = useMemo(() => marked.parse(value, { async: false }) as string, [value]);
 
   return (
@@ -58,8 +55,8 @@ export function DocsEditor({ value, onChange }: Props) {
             {value.trim() ? (
               <article
                 className="markdown-prose"
-                // Output of `marked.parse` for trusted (user-authored) input
-                // — see the useMemo above for the threat-model note.
+                // `marked.parse` 对可信（用户自己撰写）输入的输出 —— 威胁模型的说明见上方
+                // useMemo。
                 dangerouslySetInnerHTML={{ __html: html }}
               />
             ) : (

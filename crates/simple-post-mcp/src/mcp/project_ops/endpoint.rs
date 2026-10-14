@@ -1,22 +1,8 @@
-//! `endpoint_*` MCP tools — endpoint CRUD, search, duplicate, and movement.
+//! `endpoint_*` MCP 工具 —— 端点 CRUD、搜索、复制、移动，共 8 个。
 //!
-//! 8 tools:
-//! - `endpoint_list`
-//! - `endpoint_get`
-//! - `endpoint_search`
-//! - `endpoint_create`
-//! - `endpoint_update`
-//! - `endpoint_delete`
-//! - `endpoint_duplicate`
-//! - `endpoint_move`
-//!
-//! Private helpers also live here because they're only used by these
-//! tools:
-//! - `parse_body_mode`, `build_auth`: input parsing for `endpoint_create`.
-//! - Permission gating resolves the owning project with
-//!   `simple_post_core::db::nodes::root_id_of` — one indexed read, where
-//!   the old `endpoints::project_id_of` walked `collection → module →
-//!   project`.
+//! 只服务于这些工具的私有辅助函数也放在这里：`parse_body_mode` / `build_auth` 负责
+//! `endpoint_create` 的输入解析；过门时用 `simple_post_core::db::nodes::root_id_of`
+//! 解析归属项目 —— 一次索引读。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -29,12 +15,10 @@ use simple_post_core::domain::{
 };
 use simple_post_core::error::AppError;
 
-/// Load a node plus its request configuration as one object.
+/// node 与其请求配置合成一个对象返回。
 ///
-/// An AI client asking "show me this endpoint" wants the method and the
-/// url, and those live in `endpoint_details` now. Returning the bare
-/// node would answer with a name and a type, which is not what the tool
-/// is for.
+/// AI 客户端问「把这个端点给我」要的是 method 与 url，而它们现在在
+/// `endpoint_details` 里；只回 node 只会得到一个名字和一个类型。
 fn endpoint_resource(
     pool: &simple_post_core::db::DbPool,
     node_id: &str,
@@ -46,8 +30,7 @@ fn endpoint_resource(
     })
 }
 
-/// Pair a list of endpoint nodes with their configurations, preserving
-/// the node order the caller asked for.
+/// 给端点 node 列表配上各自的配置，保持调用方给定的 node 顺序。
 fn endpoint_resources(
     pool: &simple_post_core::db::DbPool,
     nodes: Vec<ResourceNode>,
@@ -73,11 +56,10 @@ fn endpoint_resources(
 
 #[derive(Debug, Deserialize)]
 pub(super) struct EndpointCreateArgs {
-    /// Parent collection. Optional now that an endpoint may sit directly
-    /// under a module — exactly one of this and `module_id` is required.
+    /// 父集合。端点现在可以直接挂在模块下，所以它与 `module_id` 二选一即可。
     #[serde(default)]
     pub collection_id: Option<String>,
-    /// Parent module, for an endpoint that needs no collection of its own.
+    /// 父模块，给不需要自己集合的端点用。
     #[serde(default)]
     pub module_id: Option<String>,
     pub name: String,
@@ -91,9 +73,7 @@ pub(super) struct EndpointCreateArgs {
     pub body_mode: Option<String>,
     #[serde(default)]
     pub body_content: Option<String>,
-    /// Optional body schema hint, stored verbatim. `endpoint_create`
-    /// used to hardcode `schema: None`, so an agent could not attach one
-    /// at creation time and had to follow up with `endpoint_update`.
+    /// 可选的 body schema 提示，原样存储，不参与发包。
     #[serde(default)]
     pub body_schema: Option<String>,
     #[serde(default)]
@@ -102,13 +82,10 @@ pub(super) struct EndpointCreateArgs {
     pub auth_config: Option<Value>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
-    /// Environment to bind. Accepted at create so a freshly built
-    /// endpoint lands already pointed at the right environment instead
-    /// of needing a second call.
+    /// 要绑定的环境。建时就收下，新建的端点直接指向正确的环境，省掉第二次调用。
     #[serde(default)]
     pub environment_id: Option<String>,
-    /// Service (`base_url_definitions` row) this endpoint resolves
-    /// against. `None` means "inherit the project's ★".
+    /// 该端点据以解析的服务（`base_url_definitions` 的一行）。`None` = 沿用项目 ★。
     #[serde(default)]
     pub base_url_definition_id: Option<String>,
     #[serde(default)]
@@ -121,25 +98,17 @@ pub(super) struct EndpointCreateArgs {
     pub notes: Option<String>,
 }
 
-/// Mint a unique endpoint id.
+/// 生成唯一的端点 id。
 ///
-/// The id used to be `format!("ep_{now}")`, i.e. `ep_` plus
-/// `now_ms()` — a **millisecond** clock. Two `endpoint_create` calls in
-/// the same millisecond produced the same primary key, and the second
-/// one failed the `nodes.id` primary-key constraint with a raw SQLite
-/// error. An AI client firing a batch of creates in a loop hits this
-/// routinely, and the error it surfaced was not actionable.
+/// 绝不能用 `ep_` + `now_ms()`：那是毫秒时钟，同一毫秒内两次 `endpoint_create` 会
+/// 得到同一个主键，第二次直接撞 `nodes.id` 约束。AI 客户端成批循环创建时必然踩到。
 ///
-/// `domain::uid()` is the crate's canonical id source: nanoseconds plus
-/// a per-process counter, so two calls cannot collide within a process
-/// and a restart cannot repeat a prefix. The readable `ep_` prefix is
-/// kept so an id still says what it identifies, matching the
-/// `col_` / `mod_` / `proj_` convention the sibling create tools use.
+/// `domain::uid()` 是本 crate 的 id 唯一来源：纳秒 + 进程内计数器，进程内不撞、重启
+/// 也不重复前缀。保留可读的 `ep_` 前缀，与 `col_` / `mod_` / `proj_` 一致。
 fn mint_endpoint_id() -> String {
     let uid = simple_post_core::domain::uid();
-    // `uid()` returns `sp_<hex>`; swap the generic prefix for the
-    // endpoint one rather than reimplementing the clock here, so there
-    // is still exactly one id source in the crate.
+    // `uid()` 给出 `sp_<hex>`；只把通用前缀换成端点的，别在这里重新实现时钟 ——
+    // crate 里应当只有一处 id 来源。
     uid.replacen("sp_", "ep_", 1)
 }
 
@@ -155,13 +124,11 @@ pub(super) struct EndpointMoveArgs {
 pub(super) struct EndpointSearchArgs {
     #[serde(default)]
     pub project_id: Option<String>,
-    /// Scope to a module's whole subtree. Read by the permission gate and
-    /// by the result narrowing, not by the SQL layer — `nodes::search`
-    /// matches name / url / description across the table, so the subtree
-    /// filter is applied after it returns.
+    /// 收窄到模块的整棵子树。由过门与结果收窄消费，不进 SQL —— `nodes::search` 是
+    /// 全表匹配 name / url / description，子树过滤只能在它返回之后做。
     #[serde(default)]
     pub module_id: Option<String>,
-    /// Scope to one collection's direct children.
+    /// 收窄到某个集合的直接子节点。
     #[serde(default)]
     pub collection_id: Option<String>,
     #[serde(default)]
@@ -496,26 +463,18 @@ pub(super) async fn tool_endpoint_list(
     let project_id = arg_str_opt(&args, "project_id");
     let module_id = arg_str_opt(&args, "module_id");
 
-    // Gate against the project that actually owns whatever the caller
-    // named. `collection_id` / `module_id` name a *node*, so
-    // `nodes::root_id_of` is one indexed read to its project; a bare
-    // `project_id` is already the answer.
+    // 按「调用方点名的东西真正归谁」过门。`collection_id` / `module_id` 指的是
+    // *node*，所以 `nodes::root_id_of` 一次索引读就能拿到它的项目；裸 `project_id`
+    // 本身就是答案。
     //
-    // This used to pass `project_id.unwrap_or("global")`, and
-    // `agent_permissions.project_id` is an FK to `projects(id)` — so
-    // `"global"` matched no row, fell back to `Permission::default()`
-    // and happened to pass only because `endpoint_list` is `Read` tier.
-    // Scoping to a collection or module instead of a project bypassed
-    // the gate entirely: the real owner's permission was never consulted
-    // at all, so a Read-only project was readable through a scoped call
-    // no matter what it had granted. Resolving the owner closes that.
+    // 写死字面量 "global" 不是项目 id（`agent_permissions.project_id` 是指向
+    // `projects(id)` 的外键），查不到行就退回 `Permission::default()`。更糟的是按
+    // 集合或模块收窄时根本没有归属项目可查，真实拥有者的权限一次也没被读过 —— 只读
+    // 项目照样能被这种收窄调用读走。解析出真实归属才补上这一层。
     //
-    // With no scope named the read genuinely spans every project, and
-    // there is no single project to gate against. Rather than fabricate
-    // an id (the exact bug this file is fixing) the call is rejected:
-    // an unscoped read that touches every project is not something the
-    // per-project gate can express, and returning one project's data
-    // under another's authorisation is worse than saying no.
+    // 一个范围都不给时，这次读确实横跨所有项目，没有单一项目可依。那就明确拒绝，
+    // 而不是编一个 id：跨项目的读，按项目那扇门表达不了；拿一个项目的授权去返回
+    // 另一个项目的数据，比说不行更糟。
     let owner_project = match collection_id.as_deref().or(module_id.as_deref()) {
         Some(node_id) => Some(simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::nodes::root_id_of(c, node_id)
@@ -532,9 +491,8 @@ pub(super) async fn tool_endpoint_list(
     };
     crate::mcp::check_permission(&state.pool, &owner_project, "endpoint_list").await?;
 
-    // `module_id` narrows to a module's whole subtree, because an
-    // endpoint's ancestor chain is now uniform — every node except a
-    // module has a node parent.
+    // `module_id` 收窄到模块整棵子树：节点的父链现在是同构的 —— 除模块外，每个节点
+    // 都有节点父级。
     let scope = collection_id
         .as_deref()
         .map(|c| ("collection", c.to_string()))
@@ -565,8 +523,8 @@ pub(super) async fn tool_endpoint_list(
         Some((_, pid)) => simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::nodes::list_by_root_and_type(c, &pid, ResourceNodeType::Endpoint)
         })?,
-        // Unreachable: `scope` is `None` only when nothing was named, and
-        // that case is rejected above because it has no owner to gate on.
+        // 走不到：`scope` 为 `None` 只在什么都没点名时发生，而那种情况已被上面
+        // 「没有归属可过门」的检查拒掉了。
         None => Vec::new(),
     };
 
@@ -598,19 +556,13 @@ pub(super) async fn tool_endpoint_search(
     let a: EndpointSearchArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_search args: {e}")))?;
 
-    // Same owner resolution as `endpoint_list` — a `collection_id` /
-    // `module_id` names a node and `root_id_of` resolves its project;
-    // `project_id` is already the answer. The previous
-    // `project_id.unwrap_or("global")` matched no `agent_permissions`
-    // row (the column is an FK to `projects(id)`), so the gate silently
-    // consulted the default instead of the owner's real permission, and
-    // a collection- or module-scoped search was never gated at all.
+    // 归属解析与 `endpoint_list` 完全一致。字面量 "global" 不是项目 id（那一列是指向
+    // `projects(id)` 的外键），查不到行就静默退回默认值；按集合或模块收窄时更糟，
+    // 真实拥有者的权限根本没被查过。
     //
-    // An unscoped search spans projects, so it has no single owner to
-    // authorise against and is rejected rather than answered under a
-    // fabricated id. Also note the gate now names *this* tool: it
-    // previously passed `"endpoint_list"`, so a permission change
-    // aimed at search was evaluated against the wrong row.
+    // 一个范围都不给就横跨项目，没有单一归属可授权，同样明确拒绝而不是编 id。
+    // 另外注意这里传的是**本工具**的名字：传别的名字会让针对搜索的权限改动被拿去
+    // 比另一行。
     let owner_project = match a.collection_id.as_deref().or(a.module_id.as_deref()) {
         Some(node_id) => Some(simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::nodes::root_id_of(c, node_id)
@@ -627,10 +579,8 @@ pub(super) async fn tool_endpoint_search(
     };
     crate::mcp::check_permission(&state.pool, &owner_project, "endpoint_search").await?;
 
-    // `method` and `tags` live in `endpoint_details`, so the free-text
-    // match and those two filters are applied after narrowing to
-    // endpoint nodes — the SQL layer matches name / url / description
-    // only.
+    // `method` 与 `tags` 住在 `endpoint_details`，所以自由文本匹配与这两个过滤都放在
+    // 收窄到端点 node 之后 —— SQL 层只匹配 name / url / description。
     let mut nodes = match a.q.as_deref().filter(|q| !q.is_empty()) {
         Some(q) => simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::nodes::search(c, q)
@@ -643,10 +593,9 @@ pub(super) async fn tool_endpoint_search(
             )
         })?,
     };
-    // A `module_id` / `collection_id` scope must narrow the free-text
-    // branch too, not just the unfiltered one — otherwise the gate
-    // checks the module's project and the result set still spans every
-    // project, which is the cross-project bleed the gate exists to stop.
+    // `module_id` / `collection_id` 范围必须也收窄自由文本那一支，不只是无过滤那一支
+    // —— 否则门查的是模块所属项目，返回的结果却横跨所有项目，正是这道门要挡的
+    // 跨项目渗漏。
     if a.q.as_deref().filter(|q| !q.is_empty()).is_some() {
         if let Some(scope_id) = a.collection_id.as_deref().or(a.module_id.as_deref()) {
             let scope_id = scope_id.to_string();
@@ -684,15 +633,11 @@ pub(super) async fn tool_endpoint_create(
     if a.url.trim().is_empty() {
         return Err(AppError::Validation("url must not be empty".into()));
     }
-    // Validate the HTTP verb *before* touching the permission table:
-    // input-level errors are cheap and shouldn't masquerade as
-    // permission denials.
+    // 先验 HTTP 动词再碰权限表：输入级错误很便宜，不该被误报成权限拒绝。
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
-    // An endpoint's parent is a collection, or the module itself when the
-    // caller has no folder for it. `collection_id` and `module_id` are two
-    // names for that one relationship — the same shape `collection_create`
-    // uses for its own module-or-collection parent — so take whichever
-    // the client supplied and let the matrix reject a nonsense pairing.
+    // 端点的父级是集合，或者调用方没建文件夹时直接是模块。`collection_id` 与
+    // `module_id` 是同一关系的两个名字（`collection_create` 用的也是同一形状），
+    // 取客户端给的那个，不成对的组合交给约束矩阵去拒。
     let parent_id = a
         .collection_id
         .clone()
@@ -705,10 +650,8 @@ pub(super) async fn tool_endpoint_create(
                     .into(),
             )
         })?;
-    // Gate against the parent's real project. The old handler passed
-    // the literal `"global"`, which is not a project id — `check_permission`
-    // then compared the default `ReadCall` against the `Full` a creating
-    // tool requires and denied every call.
+    // 按父节点的真实项目过门。写死字面量 "global" 不是项目 id，过门时只能拿默认的
+    // `ReadCall` 去比创建工具要求的 `Full`，于是每次调用都被拒。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::root_id_of(c, &parent_id)
     })?;
@@ -750,8 +693,7 @@ pub(super) async fn tool_endpoint_create(
         notes: a.notes,
         tags: a.tags.unwrap_or_default(),
     };
-    // Node and detail land together: an endpoint with no configuration
-    // row is a tree the reader cannot open.
+    // node 与 detail 一起落库：没有配置行的端点是一棵打不开的树。
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::nodes::create(c, &node, Some(&detail))
     })?;
@@ -777,22 +719,16 @@ pub(super) async fn tool_endpoint_update(
         )));
     }
 
-    // `name` is structural and everything else is configuration, so one
-    // call now writes two tables. The patch is split on the way in
-    // rather than by the caller so `endpoint_update` keeps meaning
-    // "patch whatever you named" — which is what every existing client
-    // assumes.
+    // `name` 是结构、其余是配置，所以一次调用要写两张表。拆分在入口做而不是交给
+    // 调用方，`endpoint_update` 才仍然是「改你点名的那些」—— 现有客户端都这么假设。
     //
-    // Every field below is read with a real `Result` (`patch_field` /
-    // `patch_value_field`), never `.and_then(… .ok())`. A malformed
-    // field aborts the call *before* the transaction opens, so a patch
-    // is all-or-nothing: the agent either gets a `Validation` error
-    // naming the offending field, or every field it named is written.
+    // 下面每个字段都用真 `Result`（`patch_field` / `patch_value_field`）读，绝不用
+    // `.ok()`。字段有问题会在开事务**之前**中止，于是 patch 是全有或全无：agent 要
+    // 么拿到点名了出错字段的 `Validation`，要么点名的字段全写进去。
     let node_patch = simple_post_core::domain::ResourceNodePatch {
         parent_id: None,
-        // `name` / `sort_order` are plain `Option<T>` on the patch type
-        // — there is no "clear a name" state — so they use the
-        // single-level reader.
+        // `name` / `sort_order` 在 patch 类型上是普通 `Option<T>`，没有「清空名字」
+        // 这档状态，所以用单层读取器。
         name: patch_value_field::<String>(&patch_obj, "name")?,
         description: patch_field::<String>(&patch_obj, "description")?,
         sort_order: patch_value_field::<i64>(&patch_obj, "sort_order")?,
@@ -809,9 +745,8 @@ pub(super) async fn tool_endpoint_update(
             .map(coerce_key_values),
         body: patch_value_field(&patch_obj, "body")?,
         auth: patch_value_field(&patch_obj, "auth")?,
-        // `docs` and `notes` were hardcoded to `None` here, which made
-        // them unreachable through the only tool that can write them —
-        // the agent could read an endpoint's notes but never change one.
+        // `docs` / `notes` 必须能从这里读进来：它们只能经由本工具写入，写死 `None`
+        // 等于让 agent 永远改不了自己刚读到的备注。
         docs: patch_field::<String>(&patch_obj, "docs")?,
         notes: patch_field::<String>(&patch_obj, "notes")?,
         tags: patch_value_field::<Vec<String>>(&patch_obj, "tags")?,
@@ -826,8 +761,7 @@ pub(super) async fn tool_endpoint_update(
                 .into(),
         ));
     }
-    // One transaction: a rename that succeeds while its url edit does not
-    // is a half-applied patch the caller cannot detect.
+    // 单事务：改名成功而 url 修改失败，是调用方察觉不到的半截 patch。
     simple_post_core::db::with_tx(&state.pool, |c| {
         if !node_patch.is_empty() {
             simple_post_core::db::nodes::update(c, &endpoint_id, node_patch.clone())?;
@@ -866,10 +800,8 @@ pub(super) async fn tool_endpoint_duplicate(
     let ep = endpoint_resource(&state.pool, &a.endpoint_id)?;
     crate::mcp::check_permission(&state.pool, &ep.node.root_id, "endpoint_create").await?;
 
-    // The copy lands immediately after the original, not at the end of
-    // the collection — a duplicate the user cannot see next to what they
-    // duplicated is easy to miss. `None`: an MCP client has no optimistic
-    // row to stay consistent with, so the server names the copy.
+    // 副本紧挨着原件放，而不是扔到集合末尾 —— 看不出挨着谁的东西很容易被漏掉。
+    // 第二个参数给 `None`：MCP 客户端没有乐观行要对齐，副本的名字由服务端起。
     let created = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::nodes::duplicate(c, &a.endpoint_id, None)
     })?;
@@ -901,13 +833,10 @@ pub(super) async fn tool_endpoint_move(
     })?;
     crate::mcp::check_permission(&state.pool, &node.root_id, "endpoint_update").await?;
 
-    // One transaction, one row, id preserved.
+    // 单事务、单行、id 保持不变。
     //
-    // The old handler deleted the endpoint and re-created it under a
-    // freshly minted id, in two separate transactions. A crash between
-    // them lost the endpoint outright, and even on the happy path the
-    // caller's `endpoint_id` dangled — the response had to tell them the
-    // new one. `nodes::move_many` re-parents in place.
+    // 「删掉重建」既会丢数据（中途崩溃 = 端点没了），也会让调用方的 `endpoint_id`
+    // 悬空 —— 响应还得告诉它新 id 是什么。`nodes::move_many` 是原地换父级。
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::nodes::move_many(
             c,
@@ -923,7 +852,7 @@ pub(super) async fn tool_endpoint_move(
 }
 
 // =========================================================================
-// Private helpers (only used by the endpoint_* tools above)
+// 私有辅助函数（只被上面的 endpoint_* 工具使用）
 // =========================================================================
 
 fn parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyMode, AppError> {
@@ -942,13 +871,12 @@ fn parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyMode, AppErr
     })
 }
 
-/// The `body_mode` values accepted on the wire, read from
-/// [`simple_post_core::domain::BodyMode`]'s own `serde` rename rather
-/// than restated, so the JSON Schema and the parser cannot drift apart.
+/// 线上接受的 `body_mode` 取值，与 [`simple_post_core::domain::BodyMode`] 的变体
+/// 一一对应；JSON Schema 与解析器共用这一份，改一处即可。
 const BODY_MODE_VALUES: &[&str] = &["none", "json", "form", "raw"];
 
-/// The `auth_type` values accepted on the wire, mirroring
-/// [`simple_post_core::domain::AuthType`]'s lowercase variants.
+/// 线上接受的 `auth_type` 取值，对应 [`simple_post_core::domain::AuthType`] 的小写
+/// 变体名。
 const AUTH_TYPE_VALUES: &[&str] = &["none", "bearer", "basic", "apikey"];
 
 fn build_auth(
@@ -969,19 +897,14 @@ fn build_auth(
         }
     };
     let cfg = auth_config.unwrap_or(Value::Null);
-    // `auth_config` is deserialized with a real `Result` rather than
-    // `unwrap_or_default()`: a malformed config used to be silently
-    // replaced by an all-empty `AuthConfig`, so an agent could set
-    // `auth_type: "bearer"` with a typo'd `auth_config` and get a
-    // SUCCESS response describing an auth with no token at all.
+    // `auth_config` 用真 `Result` 反序列化，绝不 `unwrap_or_default()`：配置写错时
+    // 静默退化成全空 `AuthConfig`，agent 会拿到一个 SUCCESS 响应，里面描述的却是
+    // 根本没有 token 的 bearer。
     //
-    // `kind` is deserialized through `AuthConfigWire` rather than
-    // straight into `AuthConfig`: the domain type has no serde default
-    // on `kind`, so `{"bearer":"tok"}` — the shape the JSON Schema
-    // documents and the shape an agent writes — failed on a missing
-    // field. `auth_type` is where the scheme is actually chosen, and it
-    // is written back onto the result below, so a `kind` inside the
-    // config is redundant rather than required.
+    // `kind` 经 `AuthConfigWire` 而不是直接进 `AuthConfig`：域类型在 `kind` 上没有
+    // serde 默认值，于是 `{"bearer":"tok"}` —— JSON Schema 文档化的、agent 实际会
+    // 写的那种形状 —— 会因缺字段而失败。方案真正是在 `auth_type` 里选的，下面会
+    // 写回结果，所以 config 里的 `kind` 是冗余而非必需。
     let mut out: AuthConfig = match cfg {
         Value::Null => AuthConfig::default(),
         other => {
@@ -1001,7 +924,7 @@ fn build_auth(
     Ok(out)
 }
 
-/// `AuthConfig` with `kind` optional — see [`build_auth`].
+/// `kind` 可选的 `AuthConfig` —— 理由见 [`build_auth`]。
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AuthConfigWire {
@@ -1018,9 +941,8 @@ struct AuthConfigWire {
 impl AuthConfigWire {
     fn into_auth_config(self) -> simple_post_core::domain::AuthConfig {
         simple_post_core::domain::AuthConfig {
-            // Overwritten by the caller from `auth_type`; kept only so a
-            // config that *does* carry `kind` round-trips intact when
-            // `auth_type` is omitted entirely.
+            // 由调用方按 `auth_type` 覆写；保留它只为让「完全不带 `auth_type`、
+            // 但 config 自带 `kind`」的形状能原样往返。
             kind: self.kind.unwrap_or_default(),
             bearer: self.bearer,
             basic: self.basic,
@@ -1030,40 +952,25 @@ impl AuthConfigWire {
 }
 
 // =========================================================================
-// Strict patch field readers
+// 严格的 patch 字段读取器
 // =========================================================================
 //
-// These replace the `.and_then(|v| serde_json::from_value(v).ok())` shape
-// that used to build `EndpointDetailPatch`. `.ok()` collapsed two very
-// different outcomes into one:
+// 每个读取器都保持的契约：
 //
-//   * the field was absent      → "leave this column alone"   (correct)
-//   * the field was present but
-//     deserialisation failed   → "leave this column alone"   (WRONG)
+//   * 键缺失          → `None` → 该列不动
+//   * 显式 JSON `null` → `Some(None)` → 该列清空（仅 `double_option` 字段）
+//   * 有值且格式正确   → `Some(Some(v))` → 写入
+//   * 有值但格式错误   → `Err(AppError::Validation)`，点名字段与期望形状
 //
-// So `{"params": [{"k": "a", "v": "1"}]}` — a plausible typo, and the
-// shape an LLM reaches for first — returned `CallToolResult` with
-// `is_error: false` and wrote nothing at all. The agent had no way to
-// tell a successful patch from a dropped one, which makes "build an
-// endpoint's interface parameters" unreliable for exactly the reason it
-// is supposed to work.
+// 关键是第四行。`.ok()` 会把「字段缺失」与「字段格式错」压成同一个结果，于是一个
+// 写坏的 patch 会返回 `is_error: false` 却什么都没写 —— agent 无法区分「改成功」与
+// 「被丢掉」。
 //
-// The contract the readers below keep:
-//
-//   * absent key               → `None`  → column untouched
-//   * explicit JSON `null`     → `Some(None)` → column cleared (for the
-//                                `double_option` fields)
-//   * present and well-formed  → `Some(Some(v))` → column written
-//   * present and malformed    → `Err(AppError::Validation)` naming the
-//                                field AND the shape that was expected
-//
-// The `?` on every row means a malformed patch now aborts the whole call
-// before the transaction opens, so a patch can never be *partially*
-// applied: either every field it named is written, or none is.
+// 每一行的 `?` 都意味着格式错误会在开事务**之前**中止整个调用，于是 patch 绝不会
+// 只应用一半：要么点名的字段全写进去，要么一个不写。
 
-/// Human-readable shape hint appended to a malformed-field error. One
-/// line per field, because the agent's next move is to re-send the patch
-/// and it should not have to guess which nested key was wrong.
+/// 附在「字段格式错」错误后的可读形状提示，逐字段写明 —— agent 下一步就是重发
+/// patch，不该再去猜哪个嵌套键写错了。
 fn patch_shape_hint(field: &str) -> String {
     match field {
         "method" => "a string HTTP verb, e.g. \"GET\", \"POST\", \"PUT\", \
@@ -1101,8 +1008,7 @@ fn patch_shape_hint(field: &str) -> String {
     }
 }
 
-/// Wrap a field-specific deserialisation failure into the actionable
-/// `Validation` error the agent sees.
+/// 把某个字段的反序列化失败包成 agent 看得懂的 `Validation` 错误。
 fn malformed_field(field: &str, detail: impl std::fmt::Display) -> AppError {
     let hint = patch_shape_hint(field);
     if hint.is_empty() {
@@ -1114,12 +1020,10 @@ fn malformed_field(field: &str, detail: impl std::fmt::Display) -> AppError {
     }
 }
 
-/// Read one patch field, preserving the three-state `double_option`
-/// contract: absent → `None` (untouched), `null` → `Some(None)` (clear),
-/// a value → `Some(Some(v))`.
+/// 读一个 patch 字段，保持 `double_option` 的三档语义：缺失 → `None`（不动）、
+/// `null` → `Some(None)`（清空）、有值 → `Some(Some(v))`。
 ///
-/// Unlike the old `.ok()` reader, a deserialisation failure here is an
-/// **error**, not a silent "leave unchanged".
+/// 反序列化失败是**错误**，不是静默的「别动」。
 fn patch_field<T: serde::de::DeserializeOwned>(
     patch_obj: &Value,
     field: &str,
@@ -1128,8 +1032,8 @@ fn patch_field<T: serde::de::DeserializeOwned>(
         return Ok(None);
     };
     if raw.is_null() {
-        // `double_option` semantics: an explicit null is "clear this
-        // column", which is a real write target rather than "leave alone".
+        // `double_option` 语义：显式 null 是「清空这一列」，一个真实的写入目标，
+        // 不是「别动」。
         return Ok(Some(None));
     }
     match serde_json::from_value::<T>(raw.clone()) {
@@ -1138,13 +1042,11 @@ fn patch_field<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Read one patch field that has no clear-by-null semantics — the value
-/// itself is the payload (`params`, `headers`, `tags`, `body`, `auth`).
+/// 读一个没有「用 null 清空」语义的 patch 字段 —— 值本身就是载荷（`params`、
+/// `headers`、`tags`、`body`、`auth`）。
 ///
-/// `null` here is a **mistake**, not a request to clear: these columns
-/// are cleared by sending an empty array / an empty-ish body, and
-/// treating `null` as "clear" would make a client that serialises an
-/// absent value as `null` silently wipe a configured header list.
+/// 这里的 `null` 是**笔误**而非清空请求：这些列要靠发空数组 / 空 body 才清得掉；
+/// 把 `null` 当清空，会让「把缺失值序列化成 null」的客户端悄悄抹掉配好的请求头列表。
 fn patch_value_field<T: serde::de::DeserializeOwned>(
     patch_obj: &Value,
     field: &str,
@@ -1161,32 +1063,18 @@ fn patch_value_field<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Wire shape for one `KeyValue` row as an agent authors it.
+/// agent 手写的一行 `KeyValue` 的线上形状。
 ///
-/// [`simple_post_core::domain::KeyValue`] carries `id` and `enabled` with
-/// no serde `default`, so the obvious agent-authored row —
-/// `{"key":"page","value":"1"}` — fails to deserialise. Under the old
-/// `.ok()` reader that failure vanished into "leave the column alone",
-/// so the single most likely thing an agent writes produced a SUCCESS
-/// response and no write.
+/// [`simple_post_core::domain::KeyValue`] 的 `id` 与 `enabled` 没有 serde 默认值，
+/// 于是最自然的写法 `{"key":"page","value":"1"}` 反序列化失败。两处放宽的理由不同：
 ///
-/// Two fields are relaxed relative to the domain type, and the reasons
-/// differ:
+/// * `id` 可选，缺失时另铸。纯簿记字段 —— UI 拿它在 React 里做行 key，请求组装不读。
+///   客户端真传了就保留，于是把上一行原样回传的编辑是就地更新，不会把它变成孤儿。
+/// * `enabled` 可选，且**默认 `true`**，不是 `KeyValue` 自己的 `Default`（`false`）。
+///   存成禁用的请求头就是一个永远发不出去的请求头；agent 点名一个请求头就是要发它。
+///   显式 `false` 仍然照办，那对应「留着但先关掉」。
 ///
-/// * `id` is optional and minted when absent. It is pure bookkeeping —
-///   the UI uses it to key rows in React; nothing in request building
-///   reads it. A client that *does* send one keeps it, so an edit that
-///   echoes the previous row back updates in place instead of orphaning
-///   it.
-/// * `enabled` is optional and **defaults to `true`**, not to
-///   `KeyValue`'s own `Default` of `false`. A header stored disabled is
-///   a header the request never sends — the silent-failure mode this
-///   whole fix exists to remove. An agent that names a header means to
-///   send it; an explicit `false` is still honoured for the "keep it but
-///   switch it off" case.
-///
-/// `value` is relaxed the same way, because an intentionally-empty header
-/// value is a real thing to send and not a mistake.
+/// `value` 用同样方式放宽，因为「故意发一个空请求头值」是真事，不是笔误。
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct KeyValueInput {
@@ -1217,8 +1105,8 @@ impl KeyValueInput {
     }
 }
 
-/// Deserialize a `params` / `headers` array, repairing the bookkeeping
-/// fields `KeyValue` demands but an agent has no reason to know about.
+/// 反序列化 `params` / `headers` 数组，并补齐 `KeyValue` 要求、而 agent 没有理由
+/// 知道的那些簿记字段。
 fn coerce_key_values(rows: Vec<KeyValueInput>) -> Vec<simple_post_core::domain::KeyValue> {
     rows.into_iter()
         .map(KeyValueInput::into_key_value)
@@ -1226,12 +1114,11 @@ fn coerce_key_values(rows: Vec<KeyValueInput>) -> Vec<simple_post_core::domain::
 }
 
 // =========================================================================
-// Test-only re-exports
+// 仅测试用的再导出
 // =========================================================================
 //
-// `mod.rs::tests` needs to call `parse_body_mode` and `build_auth` to
-// verify their behaviour. They're file-private helpers above; expose
-// them with `#[cfg(test)]` so production callers can't see them.
+// `mod.rs::tests` 需要直接调 `parse_body_mode` 与 `build_auth`。它们是上面这些文件私
+// 有的辅助函数，用 `#[cfg(test)]` 暴露，生产调用方看不到。
 
 #[cfg(test)]
 pub(super) fn __test_parse_body_mode(
@@ -1249,13 +1136,11 @@ pub(super) fn __test_build_auth(
 }
 
 // =========================================================================
-// Tests
+// 测试
 // =========================================================================
 //
-// Sibling `#[path]` module, matching the crate-wide convention: Rust
-// resolves a module's file from its module path, so a test-only
-// *directory* is not discoverable and inline `mod tests` is the minority
-// form here.
+// 兄弟 `#[path]` 模块，遵循本 crate 的惯例：Rust 按模块路径找文件，所以测试专用
+// *目录* 是找不到的；内联 `mod tests` 在这里也是少数派。
 
 #[cfg(test)]
 #[path = "endpoint_test.rs"]

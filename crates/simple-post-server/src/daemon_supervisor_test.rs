@@ -1,21 +1,14 @@
-//! Pure-logic tests for the daemon lifecycle decisions.
+//! daemon 生命周期决策的纯逻辑测试。
 //!
-//! Sibling `#[path]` module of `daemon_supervisor.rs` (mounted as
-//! `mod lifecycle_tests`), split out because these assertions must never
-//! be able to spawn a daemon, bind a port, or delete the developer's
-//! real `mcp.port`. Everything exercised here is a total function over
-//! values the caller already holds:
+//! `daemon_supervisor.rs` 的同级 `#[path]` 模块（以 `mod lifecycle_tests` 挂载），
+//! 之所以拆出来，是为了让这些断言绝无可能 spawn daemon、绑定端口或删掉开发者真实的
+//! `mcp.port`。这里跑的全是调用方已经持有的值之上的全函数：
 //!
-//!   * [`teardown_targets`] — which PIDs a lifecycle verb must kill, and
-//!     through which channel. This is the regression net for the defect
-//!     where `restart` adopted and re-adopted the same live daemon.
-//!   * [`start_is_noop`] — the manual ON switch's idempotency rule.
-//!   * [`watcher_owns_state`] — the guard that stops a deliberate
-//!     teardown's own kill from reporting a spurious crash.
+//!   * [`teardown_targets`] —— 一个生命周期动词必须杀哪些 PID、走哪条通道。
+//!   * [`start_is_noop`] —— 手动 ON 开关的幂等规则。
+//!   * [`watcher_owns_state`] —— 阻止「有意 teardown 自己的 kill」被报成崩溃的守卫。
 //!
-//! Anything that needs a real process (the spawn path, the bounded
-//! teardown wait) is out of scope by design and stays untested here
-//! rather than faked.
+//! 需要真实进程的（spawn 路径、有界 teardown 等待）按设计不在此列，宁可不测也不伪造。
 
 use super::*;
 
@@ -32,10 +25,9 @@ fn owned_child_is_killed_through_its_handle() {
 
 #[test]
 fn adopted_daemon_is_killed_by_pid_even_without_a_handle() {
-    // The core regression. `ensure_started`'s reuse path records the
-    // PID of a daemon it never spawned, so `state.child` is `None`.
-    // The pre-fix teardown only looked at the handle, found nothing,
-    // and restart silently re-adopted the same live process.
+    // 核心回归点。`ensure_started` 的复用路径记下一个它从未 spawn 的 daemon 的 PID，
+    // 故 `state.child` 是 `None`。只查句柄的 teardown 什么都找不到，重启便静默地重新
+    // 收养了同一个活进程。
     let targets = teardown_targets(None, Some(4242));
     assert_eq!(targets.len(), 1, "an adopted daemon must still be targeted");
     assert_eq!(targets[0].pid, 4242);
@@ -47,8 +39,8 @@ fn adopted_daemon_is_killed_by_pid_even_without_a_handle() {
 
 #[test]
 fn same_pid_is_targeted_once_via_the_handle() {
-    // Daemon we both spawned and see in the record: one kill, and the
-    // handle is the cheaper reap (try_wait, no signal round-trip).
+    // 既 spawn 又在记录里见到的 daemon：只杀一次，且句柄是更廉价的回收方式（try_wait，
+    // 无需信号往返）。
     let targets = teardown_targets(Some(4242), Some(4242));
     assert_eq!(
         targets,
@@ -61,9 +53,8 @@ fn same_pid_is_targeted_once_via_the_handle() {
 
 #[test]
 fn distinct_pids_are_both_targeted() {
-    // Possible when a stale record outlived a daemon we still own a
-    // handle for; both have to go or the restart keeps serving the old
-    // port.
+    // 陈旧记录的寿命长于我们仍持有句柄的 daemon 时会出现；两个都得杀，否则重启后仍在服务
+    // 旧端口。
     let targets = teardown_targets(Some(11), Some(22));
     assert_eq!(targets.len(), 2);
     assert_eq!(targets[0].pid, 11);
@@ -74,16 +65,14 @@ fn distinct_pids_are_both_targeted() {
 
 #[test]
 fn nothing_tracked_means_nothing_to_kill() {
-    // The `stop`-when-never-started path must be a safe no-op, not an
-    // error and not a kill aimed at PID 0.
+    // 从未启动过就 stop 的路径必须是安全的 no-op：既不报错，也不把杀招对准 PID 0。
     assert!(teardown_targets(None, None).is_empty());
 }
 
 #[test]
 fn zero_pids_are_filtered_out() {
-    // `child.id()` is `None` immediately after spawn and the port
-    // record carries `pid: 0` until the round-trip completes. `0` is
-    // never a real PID, and `taskkill /F /PID 0` would be a wild kill.
+    // spawn 后 `child.id()` 立刻返回 `None`，端口记录在往返完成前也带 `pid: 0`。`0`
+    // 从不是真 PID，而 `taskkill /F /PID 0` 是一场乱杀。
     assert!(teardown_targets(Some(0), Some(0)).is_empty());
     let mixed = teardown_targets(Some(0), Some(77));
     assert_eq!(mixed.len(), 1);
@@ -98,8 +87,7 @@ fn start_is_a_noop_only_for_a_healthy_tracked_daemon() {
 
 #[test]
 fn start_respawns_when_the_daemon_is_not_healthy() {
-    // Clicking "start" on a live-but-hung daemon is exactly the case
-    // that must not report success while doing nothing.
+    // 对一个活着但卡死的 daemon 点「启动」，正是那种「不能什么都不做却报告成功」的情形。
     assert!(!start_is_noop(DaemonStatus::Running, Some(4173), false));
     assert!(!start_is_noop(DaemonStatus::Unhealthy, Some(4173), false));
     assert!(!start_is_noop(
@@ -112,9 +100,8 @@ fn start_respawns_when_the_daemon_is_not_healthy() {
 
 #[test]
 fn start_respawns_when_running_without_a_tracked_port() {
-    // "Adopted, then lost the port record" — liveness cannot be
-    // confirmed, so the honest answer is a fresh spawn rather than
-    // reporting an identity we cannot verify.
+    // 「已收养、随后丢了端口记录」——无法确认存活，故诚实的答案是重新 spawn，而不是报一个
+    // 我们无法核实的身份。
     assert!(!start_is_noop(DaemonStatus::Running, None, true));
 }
 
@@ -133,38 +120,28 @@ fn watcher_only_claims_state_it_still_owns() {
 }
 
 // -------------------------------------------------------------------------
-// Source-level guard
+// 源码级守卫
 // -------------------------------------------------------------------------
 //
-// The `AppHandle`-free spawn path is a **structural** invariant with no
-// compile-time enforcement: nothing stops a later edit from threading a
-// Tauri type back through `ensure_started_with`. When that happens the
-// crate still compiles, `cargo build -p simple-post` still produces a
-// working binary, every existing test still passes — and then the
-// `simple-post` **test** binary stops being able to load at all on
-// Windows:
+// 「spawn 路径不含 `AppHandle`」是一条**结构性**不变量，没有任何编译期强制：没什么能
+// 阻止后来某次改动把 Tauri 类型重新串回 `ensure_started_with`。一旦发生，本 crate 仍
+// 编译，`cargo build -p simple-post` 仍产出可用的二进制，所有既有测试仍全绿——然后
+// `simple-post` 的**测试**二进制在 Windows 上彻底加载不了：
 //
 //   simple_post_lib-<hash>.exe : exit 0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)
 //
-// The unresolvable import is `comctl32.dll!TaskDialogIndirect`, exported
-// only by comctl32 **v6** — a side-by-side assembly resolved through an
-// activation context, not by the v5 copy in System32. It arrives with
-// the `tao`/`muda` windowing stack that an owned `AppHandle` keeps
-// reachable from this module. The failure surfaces as "the whole crate's
-// tests silently stop running", which reads like an environment problem
-// rather than a code problem — it cost a long bisect to find.
+// 未解析的导入是 `comctl32.dll!TaskDialogIndirect`，只由 comctl32 **v6** 导出——经
+// activation context 解析的 side-by-side 程序集，而非 `System32` 里的 v5 副本。它是
+// 被一个被持有的 `AppHandle` 留在本模块可达图里的 `tao` / `muda` 窗口栈带进来的。这个
+// 故障表现为「整个 crate 的测试静默地不跑了」，看起来像环境问题而不是代码问题。
 //
-// So this is a source scan, on purpose, exactly like
-// `no_gate_is_passed_the_literal_global` in
-// `crates/simple-post-mcp/src/mcp/mod_test.rs`: the bug has no behavioural
-// signature to assert on, because the behaviour is "this test binary
-// cannot start".
+// 故这里刻意做源码扫描，与
+// `crates/simple-post-mcp/src/mcp/mod_test.rs` 的 `no_gate_is_passed_the_literal_global`
+// 同理：这个缺陷没有可断言的行为特征，因为它的行为就是「这个测试二进制起不来」。
 //
-// It reads its sibling source at compile time, so it cannot drift the way
-// a hand-maintained allowlist can.
+// 它在编译期读取同级源码，故不会像手工维护的白名单那样随时间腐化。
 
-/// Extract a top-level `fn` body by brace matching, starting at its
-/// signature. Returns `None` when the signature is absent.
+/// 从签名开始用括号配对提取一个顶层 `fn` 的函数体。签名不存在时返回 `None`。
 fn fn_body<'a>(src: &'a str, signature: &str) -> Option<&'a str> {
     let start = src.find(signature)? + signature.len();
     let bytes = src.as_bytes();
@@ -191,17 +168,15 @@ fn fn_body<'a>(src: &'a str, signature: &str) -> Option<&'a str> {
 #[test]
 fn the_shared_spawn_path_stays_free_of_tauri() {
     let src = include_str!("daemon_supervisor.rs");
-    // NOTE the trailing `(`. `ensure_started_with` is a substring of
-    // `ensure_started_without_app_handle` — "with" + "out" spells
-    // "without" — so a search without the paren silently matches the
-    // WRONG function and this test passes no matter what is injected.
-    // The same trap applies to `ensure_started` vs `ensure_started_…`.
+    // 注意结尾那个 `(`。`ensure_started_with` 是 `ensure_started_without_app_handle`
+    // 的子串——"with" + "out" 拼出 "without"——所以不带括号去搜会悄悄匹配到**错误**的
+    // 函数，于是无论注入什么这个测试都通过。同样的陷阱适用于 `ensure_started` 与
+    // `ensure_started_…`。
     let body = fn_body(src, "async fn ensure_started_with(")
         .expect("ensure_started_with must exist in daemon_supervisor.rs");
 
-    // `AppHandle` by name, plus the Tauri traits/paths that would drag
-    // the windowing runtime in behind it. A type alias or a fully
-    // qualified `tauri::AppHandle` is caught by the second check.
+    // 按名字找 `AppHandle`，再加上会把窗口运行时一并拖进来的那些 Tauri trait / 路径。
+    // 类型别名或完全限定的 `tauri::AppHandle` 由第二项检查兜住。
     for forbidden in ["AppHandle", "tauri::", "Emitter", "EmitterExt"] {
         assert!(
             !body.contains(forbidden),
@@ -215,10 +190,8 @@ fn the_shared_spawn_path_stays_free_of_tauri() {
 
 #[test]
 fn the_tauri_binding_is_where_the_app_handle_is_accepted() {
-    // The counterpart to the scan above: `ensure_started` MUST still take
-    // an `AppHandle`, because that is the GUI's entry point. Without this
-    // the previous test could be satisfied by deleting the parameter and
-    // silently breaking every caller.
+    // 上面那次扫描的对照：`ensure_started` **必须**仍收 `AppHandle`，因为它才是 GUI 的
+    // 入口。没有这条，上一个测试靠删掉该参数就能通过，同时静默弄坏每个调用方。
     let src = include_str!("daemon_supervisor.rs");
     let body = fn_body(src, "pub async fn ensure_started(")
         .expect("ensure_started must exist in daemon_supervisor.rs");

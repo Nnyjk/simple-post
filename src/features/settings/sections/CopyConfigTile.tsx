@@ -10,9 +10,8 @@ const RESET_DELAY_MS = 2000;
 export interface CopyConfigTileProps {
   icon: ReactNode;
   /**
-   * Optional client name. Renders nothing when omitted — with a single
-   * supported client the title is pure redundancy, since the card
-   * header above it already says which format is being generated.
+   * 可选的客户端名称。不传则不渲染 —— 只支持一个客户端时这个标题纯属重复，上方的卡片
+   *   表头已经说明了正在生成哪种格式。
    */
   name?: string;
   description: string;
@@ -20,10 +19,9 @@ export interface CopyConfigTileProps {
 }
 
 /**
- * One tile in the "接入配置复制" row. Shows the AI client name, a one-line
- * description, the JSON snippet to copy, and a full-width copy button. The
- * button swaps to a success / error state for `RESET_DELAY_MS`, tracked in a
- * ref so unmount during the window won't leak.
+ * 「接入配置复制」一行中的一格。显示 AI 客户端名称、一行描述、要复制的 JSON 片段，
+ * 以及一个复制按钮。按钮会在 `RESET_DELAY_MS` 内切换为成功 / 失败态，该计时器存在 ref 里，
+ * 故窗口期内卸载不会泄漏。
  */
 export function CopyConfigTile({ icon, name, description, configJson }: CopyConfigTileProps) {
   const [copyState, setCopyState] = useState<CopyState>('idle');
@@ -57,7 +55,7 @@ export function CopyConfigTile({ icon, name, description, configJson }: CopyConf
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(configJson);
       } else {
-        // Fallback for environments without async clipboard (older Tauri webviews).
+        // 无异步剪贴板的环境的兜底（较旧的 Tauri webview）。
         const ta = document.createElement('textarea');
         ta.value = configJson;
         ta.style.position = 'fixed';
@@ -74,10 +72,9 @@ export function CopyConfigTile({ icon, name, description, configJson }: CopyConf
     scheduleReset();
   };
 
-  // No border/bg shell here either: the tile renders inside the
-  // "接入配置" category card, so a bordered tile made the same surface
-  // appear twice (card → tile → <pre>). One plain <pre> is the only
-  // nested surface left, and it is the code being shown.
+  // 这里同样不加边框 / 背景壳：本格渲染在「接入配置」分类卡片内部，带边框会让同一个表面
+  // 出现两次（card → tile → <pre>）。剩下唯一的嵌套表面就是那个光秃秃的 `<pre>`，而它装的
+  // 正是要展示的代码。
   return (
     <div>
       <div className="flex items-center gap-2">

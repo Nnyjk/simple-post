@@ -31,28 +31,20 @@ pub(crate) async fn projects_get(
     Ok(Json(serde_json::to_value(row).unwrap_or(Value::Null)))
 }
 
-/// Create a project, seeding its default environment (and, when a base
-/// URL was supplied, a named service holding it).
+/// 创建项目，并种下它的默认环境。
 ///
-/// Two body shapes land here, and both are live:
+/// 有两种 body 形状，都仍在使用：
 ///
-/// - `{ "name": …, "opts": { description, color, baseUrl } }` — what
-///   `invokeCmd(COMMANDS.projectsCreate, …)` sends, because
-///   `WEB_ROUTES.projectsCreate` has no `body:` mapper and the args
-///   object *is* the payload. This is the SPA's own contract.
-/// - a flat `Project` — the documented public v1 shape, which an
-///   external REST client uses.
+/// - `{ "name": …, "opts": { description, color } }` —— `invokeCmd(COMMANDS.projectsCreate, …)`
+///   发的就是这个，因为 `WEB_ROUTES.projectsCreate` 没有 `body:` mapper，参数对象*就是*
+///   payload。这是 SPA 自己的契约。
+/// - 打平的 `Project` —— 文档化的公共 v1 形状，外部 REST 客户端使用。
 ///
-/// They used to disagree, and the disagreement was silent: the route
-/// parsed a `Project`, `Project` has no `opts` field, and serde discards
-/// unknown keys without complaint. So in `serve-web` the create form's
-/// description, colour **and** base URL were all discarded and the
-/// project came back with only its name — which looked exactly like the
-/// form not working rather than like a transport mismatch.
+/// 两者都解析：`Project` 没有 `opts` 字段，而 serde 会静默丢弃未知键，于是按 `Project`
+/// 解析会让 create 表单的 description 与 colour 全被丢掉，只剩 name 返回。
 ///
-/// `opts` wins when present; otherwise the flat fields are read off the
-/// body. A base URL is not among them: it is not a project attribute,
-/// and `Project.base_url` is legacy and never persisted.
+/// `opts` 在场时优先，否则从打平的字段里读。base URL 不在其中：它不是项目属性，
+/// `Project.base_url` 是遗留字段且从不持久化。
 pub(crate) async fn projects_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
@@ -115,8 +107,8 @@ pub(crate) async fn projects_update(
     Path(id): Path<String>,
     Json(patch): Json<crate::domain::ProjectPatch>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // `db::with_tx` takes an `Fn` closure (not `FnOnce`), so we can't
-    // move `patch` in — clone it. The struct is a small flat object.
+    // `db::with_tx` 收 `Fn` 闭包（不是 `FnOnce`），故不能把 `patch` 移进去——克隆一下。
+    // 这个结构体是个小的扁平对象。
     let row = db::with_tx(&s.pool, |c| db::projects::update(c, &id, patch.clone()))
         .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(row).unwrap_or(Value::Null)))

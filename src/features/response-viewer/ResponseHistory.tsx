@@ -7,24 +7,20 @@ import { Button } from '@/components/ui/button';
 import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils';
 
 /**
- * Collapsible "History (n)" strip shown at the bottom of the response viewer.
+ * 响应查看器底部的可折叠「历史（n）」条。
  *
- * The rows come from the store's `responseHistory`, which is backed by the
- * `response_history` table and loaded per endpoint — so they survive a
- * relaunch, and every one of them carries a server-stamped `id` and
- * `createdAt` (see `ResponseHistoryEntry`).
+ * 各行来自 store 的 `responseHistory`，由 `response_history` 表支撑、按接口加载 —— 故能
+ * 跨重启保留，且每行都带服务端盖的 `id` 与 `createdAt`（见 `ResponseHistoryEntry`）。
  *
- * Selector note: we read the raw `responseHistory` object via a stable selector
- * (a single state field, not a derived `.find()`/`.filter()` result), and
- * resolve the per-endpoint array inside the component. The most-recent-first
- * slice is built with `useMemo` so we don't allocate a new array every render.
+ * selector 说明：用稳定的 selector 读原始 `responseHistory` 对象（单个状态字段，而非派生
+ * 的 `.find()` / `.filter()` 结果），按接口的数组在组件内解析；最新在前的切片用 `useMemo`
+ * 构建，以免每次渲染都新建数组。
  */
 export function ResponseHistory() {
-  // History is keyed by endpoint id, and a draft endpoint is keyed by its
-  // `draft:` id — so an unsaved endpoint still accumulates its own send
-  // history instead of showing nothing.
+  // 历史按接口 id 作键，草稿接口用它的 `draft:` id —— 故未保存的接口同样会累积自己的发送
+  // 历史，而不是什么都不显示。
   const endpoint = useActiveEndpointResource()?.node ?? null;
-  // Raw reference — only re-renders when the dictionary itself is replaced.
+  // 原始引用 —— 只在这份字典本身被替换时重渲染。
   const history = useAppStore((s) => s.responseHistory);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
   const loadResponseHistory = useAppStore((s) => s.loadResponseHistory);
@@ -33,54 +29,42 @@ export function ResponseHistory() {
 
   const endpointId = endpoint?.id ?? null;
 
-  // Read this endpoint's stored history when it becomes the one on screen.
+  // 当这个接口成为屏上那个时，读它存储的历史。
   //
-  // The effect is the trigger rather than an action-level hook, and that
-  // is not a style choice. `activeTabId` has **three** writers — `openTab`
-  // (which is how the tree and the command palette open an endpoint),
-  // `setActiveTab` (the tab strip) and `closeTab`'s fallback — so a hook
-  // placed on any one of them silently misses the others, and a history
-  // that loads only when the user switches tabs *back* to an endpoint is
-  // indistinguishable from one that never loads. A component effect keys
-  // off the value the UI actually resolved, so every path is covered by
-  // construction.
+  // 用组件 effect 而非某个动作级 hook 作触发器，这不是风格选择。`activeTabId` 有**三个**
+  // 写入方 —— `openTab`（树与命令面板打开接口走它）、`setActiveTab`（标签条）以及
+  // `closeTab` 的回落 —— 挂在其中任一个上的 hook 都会静默漏掉其余，而「只有用户切*回*
+  // 接口时才加载」的历史与「从不加载」无法区分。按 UI 实际解析出的值来触发，所有路径
+  // 都被构造性地覆盖。
   //
-  // `id in history` is the "already have it" guard: switching back to a tab
-  // should not refetch rows the store is holding, and `clearResponseHistory`
-  // deletes the key, so a cleared endpoint does get re-read.
+  // `id in history` 是「已经有了」的守卫：切回标签不该重取 store 已持有的行；而
+  // `clearResponseHistory` 会删掉该键，故清空过的接口确实会被重读。
   useEffect(() => {
     if (!endpointId || endpointId.startsWith(DRAFT_ID_PREFIX)) return;
     if (endpointId in useAppStore.getState().responseHistory) return;
     void loadResponseHistory(endpointId);
   }, [endpointId, loadResponseHistory]);
 
-  // Read the array reference for the current endpoint. If the user switches
-  // endpoints, this picks up the new array (or undefined).
+  // 当前接口的数组引用。用户切换接口时这里会取到新数组（或 undefined）。
   const entries = endpointId ? history[endpointId] : undefined;
   const count = entries?.length ?? 0;
 
-  // Newest first, for display only.
+  // 仅供显示：最新在前。
   //
-  // The store holds newest-*last* — `appendCapped` pushes onto the end and
-  // drops the front, and `mergeLoaded` normalises a server read into the
-  // same order — so this reverse is the single place the order flips, and
-  // the only reason the store is allowed to disagree with the reply it
-  // got. Reversing anywhere else, or letting the reply's own
-  // `created_at DESC` order through unchanged, silently inverts the
-  // strip: rows paint oldest-first, and the next send drops the newest row
-  // from the cache while SQLite trims the oldest.
+  // store 里最新在*后* —— `appendCapped` 往末尾追加并从头部丢弃，`mergeLoaded` 也把服务端
+  // 读回的结果规范成同一顺序 —— 故这一次 reverse 是顺序翻转的唯一位置，也是 store 唯一
+  // 可以与它收到的回复不一致的理由。别处再翻一次、或放行回复自带的 `created_at DESC`
+  // 顺序，都会静默把整条倒过来：行按最旧在前绘制，而下一次发送会从缓存丢掉最新的一行、
+  // 同时 SQLite 裁掉最旧的。
   const ordered = useMemo(() => (entries ? entries.slice().reverse() : []), [entries]);
 
-  // One reading of the clock per render, so the ten rows below cannot
-  // disagree about what "3 分钟前" means. Not a `useMemo`: it depends on
-  // nothing in state, and memoising it would freeze the stamps until
-  // something *else* re-rendered.
+  // 每次渲染读一次时钟，使下面各行对「3 分钟前」的理解不会互相分歧。不用 `useMemo`：它
+  // 不依赖任何状态，memo 反而会把时间戳冻住直到别的什么触发重渲染。
   const now = Date.now();
 
   const onPick = (entry: ResponseHistoryEntry) => {
-    // Unwrap: the viewer shows a response, not a stored row. A clipped
-    // row carries `bodyTruncated`, but the body it hands over is already
-    // the clipped one the server stored — nothing to strip here.
+    // 解包：查看器展示的是响应，不是存储行。被截断的行带 `bodyTruncated`，但它交出的 body
+    // 已是服务端存下的那个截断版本 —— 这里无需再裁。
     setLastResponse(entry.response);
   };
 
@@ -109,10 +93,8 @@ export function ResponseHistory() {
           <span className="font-medium">历史</span>
           <span className="rounded bg-muted px-1 text-[10px] tabular-nums">{count}</span>
         </button>
-        {/* Sibling of the toggle, not a child: nesting a button inside the
-            toggle would both be invalid HTML and expand the panel on
-            every clear. `count > 0` because an empty strip has nothing
-            to clear and the affordance would only be noise. */}
+        {/* 是切换器的兄弟而非子元素：把按钮嵌进切换器既是无效 HTML，也会让每次清空都
+            顺带展开面板。`count > 0`：空条没什么可清，这个便利性只会是噪声。 */}
         {count > 0 && (
           <Button
             variant="ghost"
@@ -146,13 +128,10 @@ export function ResponseHistory() {
 }
 
 /**
- * "刚刚 / 12 秒前 / 3 分钟前", falling back to a clock time once "x 分钟前"
- * stops carrying information.
+ * 「刚刚 / 12 秒前 / 3 分钟前」，「x 分钟前」不再携带信息后退回具体时刻。
  *
- * Local to this file rather than `src/lib/utils.ts`: it is the only caller,
- * and `utils.ts` is otherwise formatters for a payload (bytes, ms, status
- * hue) with no notion of "now". Anything else that starts rendering
- * relative times is the moment to promote it.
+ * 留在本文件而非 `src/lib/utils.ts`：本组件是它唯一的调用方，而 `utils.ts` 其余都是载荷
+ * 的格式化器（字节、毫秒、状态色相），没有「现在」的概念。等第二个调用方出现时再提升。
  */
 function formatRelativeTime(createdAt: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - createdAt) / 1000));
@@ -167,15 +146,14 @@ function formatRelativeTime(createdAt: number, now: number): string {
 
 interface HistoryRowProps {
   entry: ResponseHistoryEntry;
-  /** One clock reading shared by every row in the list. */
+  /** 列表中每一行共用的一次时钟读数。 */
   now: number;
   onPick: (entry: ResponseHistoryEntry) => void;
 }
 
 function HistoryRow({ entry, now, onPick }: HistoryRowProps) {
-  // Method/url are not part of the original ApiResponse contract; they're
-  // populated by the sender as optional fields. Fall back to placeholders
-  // if a future backend forgets to set them.
+  // method / url 不属于最初的 ApiResponse 契约，而是发送方填的可选字段。后端若忘了填，
+  // 回落到占位值。
   const method = (entry.response.method ?? 'GET') as string;
   const url = entry.response.url ?? '';
   const status = entry.response.status;
@@ -202,13 +180,10 @@ function HistoryRow({ entry, now, onPick }: HistoryRowProps) {
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/80">
           {truncated || '(无 URL)'}
         </span>
-        {/* The server clipped this body at 256 KiB and dropped `bodyJson`
-            with it, so the viewer will show half a document. Without a
-            marker the user cannot tell that from the endpoint having
-            returned half a document. `--warning-foreground` is the text
-            step of the amber ramp (lightened in the dark scope) — see
-            the semantic-token pairing note in AGENTS.md; pairing a
-            `-foreground` token with a light *surface* is the trap. */}
+        {/* 服务端在 256 KiB 处截断了这个 body 并连同 `bodyJson` 一起丢弃，故查看器会
+            显示半份文档。没有标记时，用户分不清这是被截断还是接口本就只返回了半份。
+            `--warning-foreground` 是琥珀色阶的文字档（暗色作用域里被提亮）—— 见 AGENTS.md
+            的语义色配对说明；把 `-foreground` 色标配到浅色*表面*上才是陷阱。 */}
         {entry.bodyTruncated && (
           <span
             className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning-foreground"
@@ -227,9 +202,8 @@ function HistoryRow({ entry, now, onPick }: HistoryRowProps) {
         <span className="shrink-0 w-14 text-right tabular-nums text-muted-foreground">
           {formatDuration(entry.response.durationMs)}
         </span>
-        {/* Third text level: present, not actionable — the row carries the
-            timestamp because a history that survives a relaunch is a
-            record of *when*, not just of what came back. */}
+        {/* 第三级文字：有，但不可操作 —— 这一行带上时间戳，是因为能跨重启存活的历史记录
+            的是*何时*，不只是回来了什么。 */}
         <span className="shrink-0 w-16 text-right tabular-nums text-faint">
           {formatRelativeTime(entry.createdAt, now)}
         </span>

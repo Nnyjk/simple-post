@@ -26,20 +26,17 @@ interface AgentPermissionsTableProps {
 }
 
 /**
- * Per-project AI agent permission picker.
+ * 按项目的 AI agent 权限选择器。
  *
- * Persists via `permissions_get` / `permissions_set` Tauri commands.
- * The table also seeds an in-memory map of pending edits so the UI
- * stays responsive while the invoke round-trips; on failure we revert
- * to the persisted value.
+ * 经 `permissions_get` / `permissions_set` 持久化。表内另存一份待写入 map，让 invoke
+ * 往返期间界面仍然跟手；失败则回落到已持久化的值。
  */
 export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) {
   const [perms, setPerms] = useState<Record<string, AgentPermission>>({});
   const [loaded, setLoaded] = useState(false);
 
-  // Fetch persisted permissions once on mount and whenever the
-  // project list changes (new project → new default row). Unknown
-  // permissions default to `read_call` — the safest middle tier.
+  // 挂载时取一次已持久化的权限，项目列表变化时再取（新项目即新的一行）。认不出的权限值
+  // 落到 `read_call`，即最稳妥的中间档。
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -67,22 +64,16 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
     return () => {
       cancelled = true;
     };
-    // Re-fetch when the project slice's *identity* changes. The
-    // original `[projects.length]` over-fired on single-field edits
-    // (the count didn't change but the effect re-ran anyway because
-    // `length` changed with add/remove) and missed reorders. The
-    // slice reference is stable until the array mutates, so this is
-    // both cheaper and more correct.
+    // 依赖项目 slice 的*引用*而非长度：数组没变就无需重取，变了就该重取
+    // （增删与重排都靠引用变化捕捉到）。
   }, [projects]);
 
   const handleChange = async (projectId: string, mode: AgentPermission) => {
     const prev = perms[projectId] ?? 'read_call';
-    // Optimistic local update for snappy UX. Roll back on failure.
+    // 乐观更新保证跟手，失败回滚。
     setPerms((p) => ({ ...p, [projectId]: mode }));
     try {
-      // Rust `permissions_set` returns `()` on success, so type the
-      // invoke as `void`. Previous calls left the response untyped,
-      // which masked the desired shape and slipped through lint.
+      // Rust 侧 `permissions_set` 成功时返回 `()`，故把这次 invoke 标成 `void`。
       await invokeCmd<void>(COMMANDS.permissionsSet, { projectId, permission: mode });
     } catch (e) {
       console.error('[permissions] permissions_set failed', e);
@@ -102,25 +93,18 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
     <div className="space-y-2">
       <p className="text-[11px] text-muted-foreground">
         控制 AI agent 对每个项目可执行的操作范围。
-        {/* `text-warning` is the *border* step of the amber ramp
-            (38 92% 45%); on the card's own surface it lands around 3.3:1
-            in the light theme, which 11px text cannot carry.
-            `--warning-foreground` is the text step (28 80% 35% light,
-            38 92% 75% dark) and is what the warning badge uses. Same
-            rule as the tile tones — see AGENTS.md's semantic-token
-            pairing note. */}
+        {/* `text-warning` 是琥珀色阶的*边框*档（38 92% 45%），压在卡片自身表面上，
+            亮色主题下约 3.3:1，11px 文字撑不住。`--warning-foreground` 才是文字档
+            （亮 28 80% 35%、暗 38 92% 75%），也是警告徽标在用的那一个。规则同色块
+            那组，见 AGENTS.md 的语义 token 配对一节。 */}
         <span className="text-warning-foreground">修改权限后需重启 MCP daemon 生效</span>。
       </p>
-      {/* No border/bg shell: this already lives inside the "AI 权限"
-          category card, and a second bordered surface inside it read as
-          a card nested in a card. The row separators carry the grouping.
+      {/* 不加边框和底色：本区块已经位于「AI 权限」分类卡片内，再套一层带边框的表面会
+          读成卡片套卡片。分组交给行分隔线。
 
-          No `px-3` either. `PermissionLevel` already indents this block to
-          sit under its own heading; a second 12px inset on top of that
-          pushed the project names 28px right of the 「按项目授权」 title
-          they belong to, which is the misalignment this table was part
-          of. Flush left, the colour dot hangs like a list bullet and the
-          separator spans the full content width. */}
+          也不加 `px-3`：`PermissionLevel` 已把本块缩进到自己的标题之下，再叠 12px 会把
+          项目名推到离「按项目授权」标题 28px 的位置。齐左后色点像列表符号挂着，分隔线也
+          正好横跨整个内容宽度。 */}
       <div>
         {projects.map((project, idx) => {
           const current = perms[project.id] ?? 'read_call';
@@ -140,13 +124,9 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
                 />
                 <span className="truncate font-mono text-xs text-foreground">{project.name}</span>
               </div>
-              {/* Same trough as the segmented control directly above it in the same
-                card (`CapabilityRadioGroup`): h-7 segments, `border/70`
-                over `muted/40`. They were h-6 over `background/50`, so
-                two controls of the same kind rendered a step apart in
-                size and on two different surfaces — the other half of the
-                misalignment. The focus ring stays bare because this track
-                is wrapped in a `Tooltip`, which takes the real outline. */}
+              {/* 与同一张卡片里正上方的分段控件（`CapabilityRadioGroup`）用同一条凹槽：
+                  h-7 分段、`border/70` 配 `muted/40`。本轨道用裸 focus ring，因为它包在
+                  `Tooltip` 里，真正的外框由 Tooltip 给出。 */}
               <div
                 role="radiogroup"
                 aria-label={`${project.name} 权限`}
@@ -186,9 +166,8 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
 }
 
 /**
- * Narrow an arbitrary string (the union persisted by the Rust side)
- * into the `AgentPermission` enum. Anything we don't recognise falls
- * back to `read_call` so the UI never lands on a phantom mode.
+ * 把任意字符串（Rust 侧持久化的联合类型）收窄成 `AgentPermission` 枚举。认不出的都
+ * 落回 `read_call`，界面上不会出现幻影档位。
  */
 function isPermission(v: unknown): v is AgentPermission {
   return v === 'read' || v === 'read_call' || v === 'full';

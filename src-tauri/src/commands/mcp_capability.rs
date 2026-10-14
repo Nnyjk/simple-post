@@ -1,12 +1,9 @@
 // =========================================================================
 // MCP capability policy
 // =========================================================================
-//
-// Three Tauri commands + matching REST endpoints (see `web_api/`).
-// The capability policy is the **global** lever that filters `tools/list`
-// for the AI; per-project permissions in the `permissions` table still
-// gate individual mutations. Both layers fail closed, and an unregistered
-// tool is treated as unclassified rather than permitted.
+// 三个 Tauri 命令，REST 对应项见 `web_api/`。
+// 能力策略是**全局**杠杆，过滤给 AI 的 `tools/list`；`permissions` 表里的按项目权限
+// 仍单独管住各个写操作。两层都 fail closed，未登记的工具按「未分类」拒绝而非放行。
 
 use crate::db::DbPool;
 use crate::error::AppError;

@@ -1,22 +1,18 @@
 /**
- * CRUD sub-factory — the resource tree.
+ * CRUD 子工厂 —— 资源树。
  *
- * One of five sub-factories composed by `createCrudSlice` (see
- * `../crud-slice.ts` for the slice-wide contract: optimistic `set()` →
- * `invokeCmd` → snapshot-and-rollback).
+ * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
+ * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
  *
- * The tree is one `nodes` array plus an `endpointDetails` map, so the
- * three action families the old three-table layout needed collapse into
- * three actions total:
+ * 树就是一个 `nodes` 数组加一张 `endpointDetails` 映射，所以旧三表布局需要的
+ * 三族动作塌缩成三个动作：
  *
- *   addNode / updateNode / deleteNode  (one cascade delete, not three)
- *   updateEndpointDetail               (configuration, kept separate)
+ *   addNode / updateNode / deleteNode  （一次级联删除，不是三次）
+ *   updateEndpointDetail               （配置，保持独立）
  *
- * A delete no longer needs to know what it is deleting: `nodes.parent_id`
- * cascades in the database, and the local write removes the subtree the
- * same way. A move (see `./crud-move.ts`) no longer needs a
- * `parentKind`, because the parent's own `type` is what decides where a
- * node may land.
+ * 删除不再需要知道自己删的是什么：`nodes.parent_id` 在数据库里级联，本地写入
+ * 也用同样方式移除子树。移动（见 `./crud-move.ts`）不再需要 `parentKind`，
+ * 因为父节点自己的 `type` 就决定了节点能落到哪里。
  */
 import type { StateCreator } from 'zustand';
 import type { ResourceNode, ResourceNodeType, EndpointDetail } from '@/types/domain';
@@ -32,66 +28,58 @@ import {
   tabKeysForSubtree,
 } from './crud-helpers';
 
-/** What a caller may set when creating a node. The id is ours to mint. */
+/** 调用方在新建节点时可以设定什么。id 由我们铸造。 */
 export interface NewNodeInput {
-  /** Owning project. Required for a module; derived from the parent otherwise. */
+  /** 所属项目。建 module 时必填；其余情况由父节点推导。 */
   rootId?: string;
-  /** `null` (or omitted) puts a module at the top of its project. */
+  /** `null`（或省略）把 module 放在项目顶层。 */
   parentId?: string | null;
   kind: ResourceNodeType;
   name: string;
   description?: string;
-  /** Endpoint-only, and only meaningful when `kind` is `'endpoint'`. */
+  /** 仅 endpoint 使用，且只有 `kind` 为 `'endpoint'` 时才有意义。 */
   detail?: Partial<Omit<EndpointDetail, 'nodeId'>>;
 }
 
-/** Resource-tree actions owned by the CRUD slice. */
+/** CRUD 切片拥有的资源树动作。 */
 export interface TreeCrudActions {
   /**
-   * Create a tree node of any type. `detail` rides along for an
-   * endpoint: the node and its configuration are written in one
-   * transaction, so an endpoint can never exist without a url.
+   * 建任意类型的树节点。endpoint 可以带上 `detail`：节点与它的配置在同一个
+   * 事务里写入，所以 endpoint 永远不会在没有 url 的情况下存在。
    */
   addNode: (input: NewNodeInput) => Promise<string | null>;
   /**
-   * Rename / re-describe / reorder one node. Moving is `moveNodes` —
-   * it has to keep the type matrix and the subtree's `rootId` honest,
-   * which a plain field write cannot.
+   * 重命名 / 改描述 / 重排一个节点。移动是 `moveNodes`——它必须同时守住类型
+   * 矩阵和子树的 `rootId`，普通字段写入做不到。
    */
   updateNode: (
     id: string,
     patch: Partial<Pick<ResourceNode, 'name' | 'description' | 'sortOrder'>>,
   ) => Promise<void>;
   /**
-   * Delete a node and everything under it. One action for all three
-   * types: the cascade lives in the schema, and the local write mirrors
-   * it by dropping the same subtree.
+   * 删除一个节点及其下方的一切。三种类型共用一个动作：级联写在 schema 里，
+   * 本地写入通过丢掉同一棵子树来镜像它。
    */
   deleteNode: (id: string) => Promise<void>;
 
-  /** Patch an endpoint's request configuration. */
+  /** 打补丁：修改一个 endpoint 的请求配置。 */
   updateEndpointDetail: (
     nodeId: string,
     patch: Partial<Omit<EndpointDetail, 'nodeId'>>,
   ) => Promise<void>;
 
   /**
-   * Duplicate an endpoint. Returns the new id **synchronously** because
-   * the caller (ProjectTree) immediately activates the new tab — making
-   * this async would break the existing UX. Implementation: mint the id
-   * here, write the copy into the store optimistically, then persist it
-   * with that same id; on invoke failure the optimistic copy is removed.
+   * 复制一个 endpoint。**同步**返回新 id，因为调用方（ProjectTree）会立刻激活
+   * 新标签——改成异步会破坏现有交互。实现：在这里铸造 id，先乐观地把副本写进
+   * store，再用同一个 id 落盘；invoke 失败时移除那份乐观副本。
    */
   duplicateEndpoint: (id: string) => string | null;
 }
 
 export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (set, get) => ({
   addNode: async (input) => {
-    // Offered to the backend so the REST path can key the endpoint's
-    // `detail.nodeId` off it — but *not* treated as authoritative: see
-    // `createdId` below. The earlier comment here claimed both shapes
-    // minted their ids here, which was never true of the Tauri command
-    // and is what hid this bug.
+    // 提供给后端，好让 REST 路径据此确定 endpoint 的 `detail.nodeId`——但**不**
+    // 当作权威，见下面的 `createdId`。
     const id = uid();
     try {
       const node = await invokeCmd<ResourceNode>(COMMANDS.nodesCreate, {
@@ -104,22 +92,18 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         sortOrder: 0,
         ...(input.detail ? { detail: input.detail } : {}),
       });
-      // Everything downstream keys off the id the *server* handed back,
-      // not the one we offered. The REST path honours ours
-      // (`ensure_server_id` only fills a missing id) but the Tauri
-      // command mints its own `uid()` and ignores the argument, so the
-      // two shapes return different ids for the same call. Keying the
-      // detail map by our local `id` therefore wrote it under a key no
-      // row has: `EndpointList` then skipped the endpoint for want of a
-      // detail and the tab resolved to the "已删除" descriptor, while
-      // the module's count — which counts nodes, not details — still
-      // showed the endpoint. Trusting `node.id` makes both transports
-      // agree without teaching the store which one it is talking to.
+      // 下游一切都按**服务端**返回的 id 作键，而不是我们提供的那个。REST 路径会
+      // 采纳我们提供的（`ensure_server_id` 只在缺失时才填），但 Tauri 命令自己
+      // 铸一个 `uid()` 并忽略该参数，所以同样一次调用在两种传输下返回不同的
+      // id。用本地 `id` 给 detail 映射作键，就会把它写在一个没有任何行持有的键
+      // 下：`EndpointList` 因找不到 detail 而跳过该 endpoint，标签解析成"已删除"
+      // 描述符，而 module 的计数（数的是节点而非 detail）仍显示着它。信任
+      // `node.id` 让两种传输一致，不必让 store 知道自己在跟谁说话。
       const createdId = node.id;
       set((s) => ({
         nodes: [...s.nodes, node],
-        // Only an endpoint has a detail row; writing an empty one for a
-        // module would make `Object.keys(endpointDetails)` lie.
+        // 只有 endpoint 有 detail 行；给 module 写一个空的会让
+        // `Object.keys(endpointDetails)` 说谎。
         ...(input.kind === 'endpoint'
           ? {
               endpointDetails: {
@@ -149,10 +133,8 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
   },
 
   deleteNode: async (id) => {
-    // One delete for all three types. `nodes.parent_id` cascades in the
-    // database; the local write drops the same subtree so the tree does
-    // not flicker back to a deleted node's children until the next
-    // reload.
+    // 三种类型共用一次删除。`nodes.parent_id` 在数据库里级联；本地写入丢掉
+    // 同一棵子树，好让树不会在下一次重载之前闪回已删节点的子节点。
     const snapshot = {
       nodes: get().nodes,
       endpointDetails: get().endpointDetails,
@@ -211,18 +193,14 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
   },
 
   /**
-   * Optimistic duplicate + background invoke. Returns the id
-   * synchronously so the caller (ProjectTree) can activate the new tab
-   * and start renaming it immediately.
+   * 乐观复制 + 后台 invoke。同步返回 id，好让调用方（ProjectTree）能立刻
+   * 激活新标签并马上开始重命名。
    *
-   * The id is minted *here* and sent as `newId`, and the backend adopts
-   * it (`db::nodes::duplicate` no longer mints its own). That is the whole
-   * contract: when the server used to answer with a different id, the tab
-   * strip, `activeEndpointId` and the in-progress rename were all left
-   * pointing at the optimistic id — a row nothing owned — and the tab
-   * rendered as "接口已删除". `addNode` solves the same problem by
-   * trusting the returned id, but a duplicate cannot: its caller has
-   * already acted on the id before this call returns.
+   * id 在这里铸造并作为 `newId` 发出，后端采纳它（`db::nodes::duplicate`
+   * 不再自己铸）。这就是全部契约：一旦服务端回答了不同的 id，标签条、
+   * `activeEndpointId` 和进行中的重命名会全都指着那个谁都不拥有的乐观 id，
+   * 标签渲染成"接口已删除"。`addNode` 靠信任返回的 id 解决同一个问题，但复制
+   * 做不到：它的调用方在本次调用返回之前就已经对那个 id 采取行动了。
    */
   duplicateEndpoint: (id) => {
     const state = get();
@@ -232,9 +210,8 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
     const newId = uid();
     const now = Date.now();
     set((s) => {
-      // Beside the original, not at the end of the collection: a copy
-      // the user cannot see next to what they copied is easy to miss.
-      // This matches what `db::nodes::duplicate` does server-side.
+      // 放在原节点旁边，而不是集合末尾：用户看不见的副本挨着它复制的东西很容易
+      // 被漏掉。这与服务端 `db::nodes::duplicate` 的做法一致。
       const siblings = s.nodes
         .filter((n) => n.parentId === original.parentId)
         .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -262,13 +239,9 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         },
       };
     });
-    // `newId` is not a hint — it is the row's id, and the server adopts it
-    // (`db::nodes::duplicate` no longer mints its own). So there is nothing
-    // to reconcile when this resolves: the optimistic row *is* the row that
-    // was written. Swapping in the server's copy used to be the id fix,
-    // and once it stopped being one it only overwrote whatever the user
-    // had typed into the copy in the meantime. Only a failure has work to
-    // do — drop the copy that no longer exists anywhere else.
+    // `newId` 不是提示——它就是那一行的 id，服务端会采纳它。所以这里 resolve 之后
+    // 没有东西需要对齐：那份乐观行**就是**被写下去的那一行。只有失败才有活要干
+    // ——删掉那个在别处已不存在的副本。
     invokeCmd<ResourceNode>(COMMANDS.nodesDuplicate, { id, newId }).catch((e) => {
       console.error('[store] nodes_duplicate failed', e);
       set((s) => {

@@ -1,15 +1,10 @@
 // crates/simple-post-mcp/src/http_client.rs
 //
-// Thin wrapper over `reqwest::Client` for talking to a running
-// `simple-post serve-web` instance. Holds the bearer password (if
-// any) so callers don't have to thread it through every method.
+// 访问运行中的 `simple-post serve-web` 的 `reqwest::Client` 薄封装，
+// 持有 bearer 密码，调用方不必逐个方法往下传。
 //
-// All methods are synchronous because the stdio loop runs on a
-// `spawn_blocking` task (see `main.rs`); the `reqwest::blocking`
-// feature isn't pulled in (the lib already has the async client via
-// `simple-post-core::http_executor`), so we use the async client and
-// `tokio::task::block_in_place` from the caller side. If we ever
-// need true async, swap this for `async fn`.
+// 方法一律 `async fn`：lib 已经通过 `simple-post-core::http_executor`
+// 带进了异步 client，没有开启 `reqwest::blocking`。
 
 use reqwest::{header, Client, StatusCode};
 use serde_json::Value;
@@ -24,9 +19,8 @@ pub struct WebClient {
 }
 
 impl WebClient {
-    /// Build a client. `base_url` should be `http://host:port` (no
-    /// trailing slash). `password` is the optional bearer token
-    /// passed as `--password` or `SIMPLE_POST_WEB_PASSWORD`.
+    /// `base_url` 写 `http://host:port`（尾斜杠内部会 trim）；
+    /// `password` 来自 `--password` / `SIMPLE_POST_WEB_PASSWORD`。
     pub fn new(base_url: impl Into<String>, password: Option<String>) -> Self {
         let inner = Client::builder()
             .pool_max_idle_per_host(4)
@@ -40,8 +34,8 @@ impl WebClient {
         }
     }
 
-    /// POST a JSON-RPC frame to `/mcp` and return the raw response
-    /// body. Caller (stdio_loop) is responsible for parsing.
+    /// POST 一帧 JSON-RPC 到 `/mcp`，原样返回 body；解析交给调用方
+    /// （stdio_loop）。
     pub async fn post_mcp(&self, frame: &Value) -> Result<Value, ClientError> {
         let url = format!("{}/mcp", self.base_url.trim_end_matches('/'));
         let mut req = self.inner.post(&url);
@@ -65,9 +59,8 @@ impl WebClient {
         }
     }
 
-    /// Liveness probe — GET `/mcp/healthz`. Returns the parsed JSON
-    /// or an error string. Used by `--transport=http` to surface a
-    /// minimal HTTP surface for curl checks.
+    /// 存活探测 —— GET `/mcp/healthz`，返回解析后的 JSON。供
+    /// `--transport=http` 起一个最小 HTTP 面给 curl 检查。
     pub async fn healthz(&self) -> Result<Value, ClientError> {
         let url = format!("{}/mcp/healthz", self.base_url.trim_end_matches('/'));
         let mut req = self.inner.get(&url);
@@ -88,9 +81,8 @@ impl WebClient {
     }
 }
 
-/// Map a `ClientError` into the JSON-RPC `error` block the stdio
-/// loop writes to stdout. HTTP 401/403 → -32001 (auth); other HTTP
-/// 4xx/5xx → -32000; everything else → -32603 (internal).
+/// 把 `ClientError` 折成 stdio loop 写到 stdout 的 JSON-RPC `error` 块。
+/// 401/403 → -32001（鉴权）；其余 4xx/5xx → -32000；其他 → -32603。
 pub fn to_rpc_error(err: ClientError) -> (i64, String) {
     match &err {
         ClientError::Backend { status, body } => (http_status_to_rpc_code(*status), body.clone()),
@@ -100,9 +92,7 @@ pub fn to_rpc_error(err: ClientError) -> (i64, String) {
     }
 }
 
-/// Convenience: classify a status code so we can decide whether to
-/// hand it to `to_rpc_error` or treat it as a transient failure that
-/// the caller should retry.
+/// 状态码分类，决定是交给 `to_rpc_error` 还是当瞬时失败让调用方重试。
 pub fn is_auth_status(status: StatusCode) -> bool {
     matches!(status.as_u16(), 401 | 403)
 }

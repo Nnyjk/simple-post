@@ -1,50 +1,33 @@
 /**
- * Semantic hue accents — the single concept→colour map.
+ * 语义色相强调 —— 概念→颜色的唯一映射。
  *
- * WHY THIS FILE EXISTS
- * --------------------
- * "Which colour is a module?" had four different answers depending on
- * where you looked:
+ * 为什么要有这个文件：「模块是什么颜色」曾因查看位置不同而有多个答案，其中还
+ * 混着内联 hex 这类不跟随主题的值（内联 hex 在暗色下不会跟着树那行一起偏移）。
+ * 现在所有这类判断都走 `HUE`，而具体色值由 `globals.css` 以 CSS 变量持有，
+ * 随 `.dark` 类自动切换明暗。
  *
- *   project-tree/rows/ModuleRow.tsx   an amber palette pair
- *   workspace/WorkspaceTabs.tsx       iconColor: '#fbbf24'   (inline hex)
- *   workspace/EntitySettings.tsx      text-warning           (a *status* token)
- *   settings/sections/rows/…          the same amber pair as the tree
+ * 两档
+ * ---
+ * A 档 —— project / module / collection / endpoint。彩度更高。这是树的结构词汇；
+ *   图标形状本身已不同（package / folder / open-folder / code），颜色只是加强而
+ *   不是承载含义。
  *
- * Two of those didn't even follow the theme: the inline hex is a fixed
- * value, so a module's tab icon stayed amber-400 in dark mode where the
- * tree row had already shifted. This module routes every one of those
- * decisions through `HUE`, and `globals.css` owns the actual values as
- * CSS variables so light/dark swap automatically with the `.dark` class.
+ * B 档 —— baseurl / variable / connection / request。刻意更安静，好让设置与配置
+ *   区永远不与树抢注意力。低彩度也让 `connection` 的玫红不会被误认成同面板里紧挨着
+ *   的饱和 `--destructive` 红。
  *
- * TWO TIERS
- * ---------
- * Tier A — project / module / collection / endpoint. More chroma. These
- * are the tree's structural vocabulary; the icons already differ in
- * shape (package / folder / open-folder / code), so colour reinforces
- * rather than carries the meaning.
+ * 另外两个概念刻意不取色相：
+ *   - environment  → `--primary`（它是应用的主要上下文，复用 primary 在语义上诚实，
+ *     而非撞色）
+ *   - appearance   → `--muted-foreground`（纯外观偏好面板，给它色相只会无信息收益地
+ *     喊叫）
  *
- * Tier B — baseurl / variable / connection / request. Deliberately
- * quieter, so settings and config chrome never competes with the tree
- * for attention. Low chroma also keeps `connection`'s rose from being
- * mistaken for the saturated `--destructive` red that sits right beside
- * it in the same panel.
- *
- * Two further concepts deliberately take NO hue:
- *   - environment  → `--primary` (it is the app's primary context, and
- *     reusing primary is semantically honest rather than a collision)
- *   - appearance   → `--muted-foreground` (a cosmetic preference panel;
- *     giving it a hue made it shout for no informational gain)
- *
- * HUE ANGLES ARE LOAD-BEARING
- * ---------------------------
- * These accents render at 12-14px behind a 15%-alpha tint, where
- * lightness differences are nearly invisible and hue distance is the only
- * cue a viewer can still resolve. The angles below are therefore spaced
- * so that no two *co-occurring* concepts land within 30° of each other —
- * see HUE_ANGLES and the separation assertions in
- * `src/lib/__tests__/hue.test.ts`. Adjusting saturation or lightness is
- * safe; rotating a hue is not, because it re-collides two concepts.
+ * 色相角度是要命的
+ * ---------------
+ * 这些强调色以 12-14px 渲染在 15% alpha 的底色上，此时明度差几乎看不见，色相距离
+ * 是观者唯一还能分辨的线索。下面的角度因此按「任何两个*同时出现*的概念不相隔
+ * 30° 以内」排布——见 HUE_ANGLES 与 `src/lib/__tests__/hue.test.ts` 里的间隔断言。
+ * 调饱和度或明度是安全的；旋转某个色相不是，那会让两个概念重新撞上。
  */
 
 export type HueConcept =
@@ -58,15 +41,14 @@ export type HueConcept =
   | 'request';
 
 /**
- * Hue angle in degrees, per concept. The single source of truth for the
- * *separation* property; the concrete colour triples live in
- * `src/styles/globals.css` under `--hue-*`.
+ * 每个概念的色相角度（度）。「间隔」性质的唯一真相来源；具体颜色三元组在
+ * `src/styles/globals.css` 的 `--hue-*` 下。
  *
- * The four pairs that used to collide (and their new separation):
- *   baseurl ↔ collection   40°  (were both `sky`)
- *   variable ↔ module      50°  (were both `amber`)
- *   connection ↔ project   90°  (were both `violet`)
- *   request ↔ endpoint    160°  (were both `emerald`)
+ * 必须分开的四对及其间隔：
+ *   baseurl ↔ collection   40°
+ *   variable ↔ module      50°
+ *   connection ↔ project   90°
+ *   request ↔ endpoint    160°
  */
 export const HUE_ANGLES: Record<HueConcept, number> = {
   project: 265,
@@ -79,7 +61,7 @@ export const HUE_ANGLES: Record<HueConcept, number> = {
   request: 310,
 };
 
-/** Concept pairs that appear in the same list/panel and must stay apart. */
+/** 会出现在同一列表/面板中、必须彼此分开的概念对。 */
 export const HUE_SEPARATION_PAIRS: readonly (readonly [HueConcept, HueConcept])[] = [
   ['baseurl', 'collection'],
   ['variable', 'module'],
@@ -87,23 +69,21 @@ export const HUE_SEPARATION_PAIRS: readonly (readonly [HueConcept, HueConcept])[
   ['request', 'endpoint'],
 ];
 
-/** Minimum hue angle, in degrees, that two co-occurring concepts must keep. */
+/** 两个同时出现的概念必须保持的最小色相角度（度）。 */
 export const HUE_MIN_SEPARATION = 30;
 
 export interface HueClasses {
-  /** 15%-alpha tint used as the tile's background. */
+  /** 15% alpha 的底色，作 tile 背景。 */
   bg: string;
-  /** Full-chroma foreground — icon glyph and text. */
+  /** 满彩度前景 —— 图标字形与文字。 */
   text: string;
-  /** 30%-alpha edge, for tiles that carry a border. */
+  /** 30% alpha 的边缘，给要带边框的 tile。 */
   border: string;
 }
 
 /**
- * Concept → utility classes. The three entries per concept are kept
- * adjacent on purpose: changing one without the others is exactly the
- * drift this file exists to prevent, and a test asserts they always
- * reference the same `--hue-*` variable.
+ * 概念 → 工具类。每个概念的三个条目刻意相邻：只改其中一个正是本文件要防的漂移，
+ * 且有测试断言它们始终指向同一个 `--hue-*` 变量。
  */
 export const HUE: Record<HueConcept, HueClasses> = {
   project: {

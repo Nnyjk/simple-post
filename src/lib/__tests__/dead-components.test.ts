@@ -4,32 +4,22 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 /**
- * Dead-code sentinel for the shared component library.
+ * 共享组件库的死代码哨兵。
  *
- * This repo accumulated `components/ui/section.tsx` (116 lines, 5
- * exports) and `components/ui/prompt-dialog.tsx` (105 lines) with zero
- * importers. Nothing failed: typecheck passed, lint passed, all 188
- * tests passed. A component in that directory is only "a primitive" by
- * convention, so an unused one is indistinguishable from a work-in-
- * progress one until someone goes looking — and by then it has usually
- * been duplicated by hand somewhere else.
+ * `components/ui` 里的文件只靠约定算「原语」，所以一个没人 import 的原语与一个
+ * 写了一半的原语看不出来，而没人去找时它通常已经被手工复制到别处了。这里走真实
+ * import 图而不是信约定：`src/` 下只要有任一非测试文件（直接或传递）import 它，
+ * 它就算活的。传递那部分是必需的——`KeyValueTable` 只被设置页表格 import，
+ * 只看一跳会判它死并要求删除。
  *
- * This walks the real import graph instead of trusting convention. A
- * file is live if any non-test file under `src/` imports it, directly or
- * transitively. The transitive part matters: `KeyValueTable` is imported
- * by the settings tables but by nothing else, and a naive one-hop check
- * would have called it dead and demanded its deletion.
- *
- * Deliberately conservative — it only asserts the strong, unambiguous
- * signal (imported by nobody at all), so a component that is exported
- * for a future caller but genuinely unreferenced will still fail. That
- * is the intended pressure: an unreferenced primitive should either
- * find a caller or go, not sit indefinitely.
+ * 刻意保守：只断言那个强而无歧义的信号（完全没有 import 者）。所以为将来调用方
+ * 导出、但确实没有引用的组件仍会失败。这正是想要的压力——没人用的原语要么找到
+ * 调用方，要么走掉，不该无限期挂着。
  */
 
 const SRC = resolve(process.cwd(), 'src');
 
-/** Every .ts/.tsx file under src/, keyed by its module path without extension. */
+/** `src/` 下每个 .ts/.tsx 文件，键为去掉扩展名的模块路径。 */
 function collectSourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry);
@@ -45,7 +35,7 @@ function collectSourceFiles(dir: string, out: string[] = []): string[] {
 
 const files = collectSourceFiles(SRC);
 
-/** `@/lib/utils` -> absolute path without extension. */
+/** `@/lib/utils` → 不带扩展名的绝对路径。 */
 function resolveAlias(spec: string, fromFile: string): string | null {
   if (spec.startsWith('@/')) return join(SRC, spec.slice(2));
   if (spec.startsWith('.')) return resolve(join(fromFile, '..'), spec);
@@ -67,8 +57,7 @@ for (const file of files) {
   for (const spec of importsOf(file)) {
     const target = resolveAlias(spec, file);
     if (!target) continue;
-    // Match on the extension-less module path; `foo` and `foo/index`
-    // both resolve to the same entry.
+    // 按无扩展名的模块路径匹配；`foo` 与 `foo/index` 指向同一个入口
     const key = target.replace(/\.tsx?$/, '');
     const list = IMPORTED_BY.get(key) ?? [];
     list.push(file);
@@ -76,7 +65,7 @@ for (const file of files) {
   }
 }
 
-/** Does `entry` reach any file that is not itself part of the library? */
+/** `entry` 能否到达任何一个不属于该库的文件？ */
 function isReachableFromApp(entry: string): boolean {
   const seen = new Set<string>([entry]);
   const queue = [entry];
@@ -86,7 +75,7 @@ function isReachableFromApp(entry: string): boolean {
       if (seen.has(importer)) continue;
       seen.add(importer);
       const isLibrary = importer.startsWith(join(SRC, 'components', 'ui'));
-      if (!isLibrary) return true; // reached a feature or a store
+      if (!isLibrary) return true; // 到达了 feature 或 store
       queue.push(importer);
     }
   }

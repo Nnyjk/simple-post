@@ -1,35 +1,27 @@
 /**
- * Single GSAP init point for the renderer.
+ * 渲染器里唯一初始化 GSAP 的地方。
  *
- * Why this file exists:
- *  - `gsap.registerPlugin(...)` must run once, before any animation code
- *    executes. Centralising it here means every component just imports
- *    `gsap` / `useGSAP` / `Flip` from this module and gets the
- *    registrations for free — no chance of forgetting to register, no
- *    duplicate registration, no ordering surprises in dev.
- *  - Keeping the gsap + @gsap/react packages off the rest of the
- *    codebase's import surface also makes it easy to swap or remove
- *    later (delete this file + the deps; nothing else breaks).
+ * - `gsap.registerPlugin(...)` 必须在任何动画代码执行前跑过一次。集中在这里，
+ *   各组件一律从本模块 import `gsap` / `useGSAP` / `Flip`，注册就白拿：不会漏注册，
+ *   不会重复注册，dev 下也没有顺序意外。
+ * - 把 gsap 与 @gsap/react 挡在其他代码的 import 面之外，也让日后换掉或移除变简单
+ *   （删掉本文件与依赖即可，别处不会坏）。
  *
- * IMPORTANT: do not import this file from anywhere that runs during
- * SSR. This is a Tauri 2 webview app, so SSR is not in play — but if
- * that ever changes, gate the import on a `typeof window !== 'undefined'`
- * check.
+ * 注意：不要从任何会在 SSR 期执行的地方 import 本文件。本应用是 Tauri 2 webview，
+ * 不涉及 SSR；万一变了，就用 `typeof window !== 'undefined'` 守卫。
  */
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Flip } from 'gsap/Flip';
 
-// Register once at module evaluation. Plugins are idempotent — calling
-// `registerPlugin` twice is a no-op — but doing it here keeps every
-// consumer's mental model simple: "I import from '@/lib/gsap', I get
-// fully wired plugins."
+// 模块求值时注册一次。插件注册是幂等的（`registerPlugin` 调两次是空操作），
+// 但放在这里能让每个消费方的心智模型只有一句话：「我从 '@/lib/gsap' 导入，拿到的
+// 是接好线的插件。」
 gsap.registerPlugin(useGSAP, Flip);
 
 /**
- * Run an animation only when the user has not asked the OS for reduced
- * motion. Returns a cleanup function, so it composes with `useGSAP`'s own
- * return-a-cleanup contract:
+ * 仅当用户没有向系统要求减弱动效时才播动画。返回清理函数，以便与 `useGSAP`
+ * 自己的返回清理契约组合：
  *
  * ```ts
  * useGSAP(() => {
@@ -40,31 +32,22 @@ gsap.registerPlugin(useGSAP, Flip);
  * }, [open]);
  * ```
  *
- * `jumpToEnd` is for animations that are **carrying state**, not
- * decorating it — pass what should happen with no motion at all:
+ * `jumpToEnd` 用于**承载状态**而非装饰性的动画——传入「完全不动时应该是什么」：
  *
  * ```ts
  * return motionSafe(() => gsap.to(el, { height: 0 }), () => gsap.set(el, { height: 0 }));
  * ```
  *
- * This distinction is the whole point, and getting it wrong breaks the
- * feature rather than merely looking different. A collapsed tree branch
- * is held closed by an inline `height: 0` that GSAP owns, so simply not
- * running the expand tween leaves the branch invisible after the user
- * expanded it. Decoration can be skipped; state has to land somewhere.
+ * 这个区别是要点，弄错会弄坏功能而不只是观感不同。收起的树分支由 GSAP 持有的
+ * 内联 `height: 0` 关着，所以单纯不播展开补间，会让分支在用户展开后仍然不可见。
+ * 装饰可以跳过，状态必须落到某个值上。
  *
- * Why a helper instead of `gsap.matchMedia()` at each call site:
- * `matchMedia` is the right primitive, but the useful part is the
- * `(prefers-reduced-motion: …)` strings and the `revert()`, and both are
- * easy to leave off. This code base had exactly one hand-written
- * `matchMedia` (the body editor's validation pill) beside seven
- * unguarded `useGSAP` blocks, which reads as an oversight rather than a
- * policy. One spelling makes "we respect this" true everywhere or
- * visibly false everywhere.
+ * 为什么不在每个调用点用 `gsap.matchMedia()`：`matchMedia` 才是对的原语，但有用的
+ * 是那些 `(prefers-reduced-motion: …)` 字符串与 `revert()`，而这两样都容易漏写。
+ * 统一一种写法，能让「我们尊重这个」到处为真，或者到处明显为假。
  *
- * Note the queries are `no-preference` / `reduce`, not one-sided: the
- * default is to animate and the opt-out is explicit, and a browser that
- * understands neither runs nothing rather than animating unconditionally.
+ * 注意查询条件是 `no-preference` / `reduce` 双边而非单边：默认播动画、退出显式，
+ * 而两边都不认识的浏览器什么都不播，而不是无条件播。
  */
 export function motionSafe(animate: () => void, jumpToEnd?: () => void): () => void {
   const mm = gsap.matchMedia();

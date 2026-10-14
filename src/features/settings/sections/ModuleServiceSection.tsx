@@ -1,34 +1,25 @@
 /**
- * ModuleServiceSection — the 「服务」 layer of a **module** tab.
+ * ModuleServiceSection —— **模块** 标签下的「服务」层。
  *
- * WHAT IT ANSWERS, AND WHY IT ISN'T `EnvironmentSection`
- * ------------------------------------------------------
- * The project's 环境 section answers "what are this project's environments,
- * and what is every module's address in each of them?" — a cartesian
- * product, with the module as a grouping column. Inside one module's own
- * tab that question is already answered by the pane's title, and the
- * grouping column would print the same name on every row.
+ * 它回答什么，以及为何不是 `EnvironmentSection`
+ * ------------------------------------------------
+ * 项目的「环境」分区回答的是「本项目有哪些环境，每个模块在各环境里的地址是什么」——
+ * 一个以模块为分组列的笛卡尔积。在某个模块自己的标签里，这个问题已经被面板标题回答过了，
+ * 留着分组列只会在每一行上重复打印同一个名字。
  *
- * So this is the same table with the module axis collapsed to one entry:
- * every environment, and for each one, this module's address for each of
- * the project's services. It is still `ModuleBaseUrlTable` in `module`
- * mode — the cell semantics (a value belongs to exactly one
- * module × service × environment, with nothing to inherit from) are the
- * whole reason that component exists, and a second table would be a second
- * place for that rule to live.
+ * 所以这就是同一张表，只是把模块这一维塌成一项：列出每个环境，以及本模块在各环境下、
+ * 对项目每个服务的地址。它仍是 `ModuleBaseUrlTable` 的 `module` 模式 —— 单元格语义
+ * （一个值只属于唯一的 模块 × 服务 × 环境，且无可继承）正是该组件存在的全部理由，
+ * 再来一张表就等于让这条规则有第二个住处。
  *
- * WHAT IT DELIBERATELY DOES NOT OFFER
- * -----------------------------------
- * The service *list* belongs to the project. Renaming, starring, deleting
- * or adding a service is a project-level edit, so none of those controls
- * appear here: the cells are the module's to fill, the catalogue is the
- * project's to curate. When there is nothing to fill — no environments, or
- * no services yet — the empty state says where the missing piece is created
- * and opens the project tab, which is where both of them live.
+ * 它刻意不提供什么
+ * ----------------
+ * 服务*清单*属于项目。改名、打星号、删除、新增都是项目级编辑，故这里一个控件都不出现：
+ * 单元格归模块填，清单归项目维护。没什么可填时 —— 还没有环境，或还没有服务 —— 空状态会
+ * 说明缺的那块在哪里创建，并打开项目标签，两者都在那里。
  *
- * Environment creation / deletion are excluded for the same reason; the
- * env strip is still `EnvSwitcher`, so the list reads identically, just
- * without the two project-level buttons.
+ * 环境的新建 / 删除同样排除，理由一致；环境条仍是 `EnvSwitcher`，故列表读起来完全一样，
+ * 只是少了那两个项目级按钮。
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -52,9 +43,8 @@ export function ModuleServiceSection({ moduleId }: { moduleId: string }) {
 
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // The module may belong to a project that is not the one in front — a
-  // tab set is per project, but the module is found through the flat node
-  // list, and `rootId` is the key that says which project owns it.
+  // 该模块可能属于另一个项目：标签集按项目分，但模块是从打平的节点列表里找到的，
+  // `rootId` 才是说明它归哪个项目的那把钥匙。
   const project = useMemo(
     () => (mod ? (projects.find((p) => p.id === mod.rootId) ?? null) : null),
     [projects, mod],
@@ -65,9 +55,8 @@ export function ModuleServiceSection({ moduleId }: { moduleId: string }) {
     [environments, mod],
   );
 
-  // Default to the project-active env whenever the list shape changes,
-  // unless the user has explicitly picked one. Same rule as
-  // `EnvironmentSection`, so the two strips behave identically.
+  // 列表形状一变就回到项目当前激活的环境，除非用户已明确选过。规则同
+  // `EnvironmentSection`，两条环境条行为一致。
   useEffect(() => {
     if (projectEnvs.length === 0) {
       setActiveId(null);
@@ -87,7 +76,7 @@ export function ModuleServiceSection({ moduleId }: { moduleId: string }) {
     return <EmptyHint className="px-3 py-8 text-xs">该模块已不存在</EmptyHint>;
   }
 
-  /** Environments and services are both created from the project tab. */
+  /** 环境和服务都在项目标签里创建。 */
   const goToProject = () => openTab('project', mod.rootId);
 
   return (
@@ -96,9 +85,8 @@ export function ModuleServiceSection({ moduleId }: { moduleId: string }) {
         environments={projectEnvs}
         activeId={activeId}
         onPick={setActiveId}
-        // No-ops: both controls are hidden on this strip, but the props
-        // are required so a future `showDelete` flip here cannot reach an
-        // undefined callback.
+        // 空操作：这条环境条上两个控件都隐藏了，但 props 仍是必填，日后有人在这里翻
+        // `showDelete` 也不会调到 undefined 回调。
         onRequestDelete={() => undefined}
         onAdd={() => undefined}
         showAdd={false}
@@ -125,9 +113,8 @@ export function ModuleServiceSection({ moduleId }: { moduleId: string }) {
               meta={`${project?.baseUrlDefinitions.length ?? 0} 个服务`}
             />
             <ModuleBaseUrlTable
-              // Keyed by env id so switching environments resets this
-              // table's own transient state — an input left mid-edit on
-              // the previous env cannot bleed across.
+              // 以 env id 为 key，切环境即重置这张表自己的临时状态 —— 上一个环境里
+              // 编辑到一半的输入不会渗过来。
               key={activeEnv.id}
               mode="module"
               env={activeEnv}

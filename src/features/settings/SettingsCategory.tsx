@@ -4,59 +4,47 @@ import { IconTile } from '@/components/ui/icon-tile';
 
 interface SettingsCategoryProps {
   /**
-   * @deprecated anchor id is no longer rendered (the drawer now uses tabs).
-   * Kept for API compatibility with existing call sites.
+   * @deprecated 锚点 id 不再渲染（抽屉改用标签页）。保留仅为兼容既有调用点。
    */
   id?: string;
   title?: string;
   description?: string;
   /**
-   * Optional leading icon for the section header. We pair it with the
-   * title to give each category a recognisable affordance — the icon also
-   * doubles as the colour anchor in the side rail, so the two views read
-   * as a single source of truth.
+   * 小节标题的前导图标，与标题配对让每个分类有个可辨认的标志 —— 该图标同时是侧栏的
+   *   颜色锚点，故两个视图是同一份真相。
    */
   icon?: ReactNode;
   /**
-   * Trailing element in the header — typically a primary action like
-   * "恢复默认" or "添加服务". Rendered as a flex child to the right of
-   * the title block; reserves enough vertical room for a button without
-   * inflating the row height.
+   * 标题末尾的元素，通常是「恢复默认」「添加服务」这类主动作。渲染为标题块右侧的 flex
+   *   子项；预留出按钮所需的纵向空间而不撑高整行。
    */
   actions?: ReactNode;
   /**
-   * Secondary line under the description — e.g. "3 项 · 影响所有 HTTP 请求".
-   * Uses the same muted type as the description, one tone cooler.
+   * 描述下方的次级行，如「3 项 · 影响所有 HTTP 请求」。与描述同用弱化字号，色调再低
+   *   一档。
    */
   meta?: ReactNode;
   /**
-   * When true, the section does not render its own bottom border. The
-   * outer list (`SettingsPanel`) is expected to add a final divider
-   * (or nothing) instead, so we don't end up with a stray line at the
-   * bottom of the scroll area.
+   * 为 true 时本小节不渲染自己的下边框。末尾的分隔线（或不留）由外层列表
+   * （`SettingsPanel`）负责，免得滚动区底部多出一条孤线。
    */
   hideDivider?: boolean;
   /**
-   * Body variant — `stacked` (default) renders children with a vertical
-   * gap, `card` wraps the children in a single rounded card shell (used
-   * when the section *is* one coherent surface, like the env panel).
+   * 内容变体 —— `stacked`（默认）给子元素加纵向间距，`card` 把子元素包进一张圆角卡片
+   *   壳（用于本小节*就是*一个完整表面的场合，如环境面板）。
    */
   variant?: 'stacked' | 'card';
   children: ReactNode;
 }
 
 /**
- * One entry in a settings tab detail page.
+ * 设置标签详情页中的一个条目。
  *
- * Visually: a header (icon + small title + optional muted description)
- * followed by a content well. The negative horizontal margin pulls the
- * outer divider (when present) out to the main pane edges, while the
- * inner `px-12` keeps the body comfortably inset.
+ * 结构：表头（图标 + 小标题 + 可选弱化描述）后接内容井。负的横向 margin 把外层分隔线
+ * （若有）拉到主面板两缘，内层 `px-12` 则让正文保持舒适的内缩。
  *
- * The body is a soft card by default (`variant="card"`) so each settings
- * group reads as a single coherent surface; pass `variant="stacked"` when
- * the children are already self-contained cards or rows and only need a
- * header above them.
+ * 内容默认是柔和卡片（`variant="card"`），使每个设置分组读起来是一个完整表面；子元素
+ * 已经是自足的卡片或行、只差一个表头时，传 `variant="stacked"`。
  */
 export function SettingsCategory({
   title,
@@ -72,9 +60,8 @@ export function SettingsCategory({
   return (
     <section
       className={cn(
-        // Outer block: pull the bottom divider out to the pane edges,
-        // keep the body on a comfortable reading column. The 48px side
-        // inset matches the rest of the settings tab.
+        // 外层块：把底部分隔线拉到面板两缘，正文留在舒适的阅读列上。48px 的左右内缩与
+        // 设置标签其余部分一致。
         '-mx-6 px-12 py-5',
         !hideDivider && 'border-b border-border/60',
       )}
@@ -109,35 +96,31 @@ export function SettingsCategory({
 }
 
 // ----------------------------------------------------------------
-// SettingRow — single key/value row inside a SettingsCategory.
+// SettingRow —— SettingsCategory 内的单条键值行。
 //
-// Layout:
-//   [ icon ]  Label                        [ control ]   ← row 1
-//             description text                       hint  ← row 2 (optional)
-//   ──────────────────────────────────────────────────────  ← divider (optional)
+// 布局：
+//   [ icon ]  Label                        [ control ]   ← 第 1 行
+//             description text                       hint  ← 第 2 行（可选）
+//   ──────────────────────────────────────────────────────  ← 分隔线（可选）
 //
-// Use as a direct child of a `SettingsCategory` with `variant="card"` —
-// each row gets its own subtle divider (top-bordered) so they read as
-// a vertical list inside the card shell.
+// 作为 `variant="card"` 的 `SettingsCategory` 的直接子元素使用 —— 每一行自带一条浅分隔
+// 线（上边框），故它们在卡片壳里读起来是一个纵向列表。
 // ----------------------------------------------------------------
 
 export interface SettingRowProps {
-  /** Optional leading icon — usually the same icon used on the section
-   *  header, kept small so it doesn't compete with the control. */
+  /** 可选的前导图标 —— 通常与小节表头同一个，保持小巧以免与控件争夺注意力。 */
   icon?: ReactNode;
   label: string;
   description?: ReactNode;
-  /** Right-aligned control (input / switch / select / button group). */
+  /** 右对齐的控件（输入框 / 开关 / 选择器 / 按钮组）。 */
   control: ReactNode;
-  /** Optional sub-label under the control, e.g. "默认 30000ms" or "v0.2". */
+  /** 控件下方的可选副标签，如「默认 30000ms」或「v0.2」。 */
   hint?: ReactNode;
-  /** Optional trailing badge, e.g. a status pill. */
+  /** 可选的末尾徽标，如状态药丸。 */
   badge?: ReactNode;
-  /** Visual emphasis — `danger` turns the label destructive-tinted for
-   *  irreversible or removing actions. */
+  /** 视觉强调 —— `danger` 把标签染成破坏色，用于不可撤销或删除类动作。 */
   tone?: 'default' | 'danger';
-  /** When true, hides the row's top border (use for the first row inside
-   *  a card so we don't get a stray divider at the top). */
+  /** 为 true 时隐藏本行的上边框（用于卡片内的首行，免得顶部多出一条孤线）。 */
   flush?: boolean;
   disabled?: boolean;
 }

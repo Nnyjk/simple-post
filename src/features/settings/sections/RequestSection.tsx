@@ -7,9 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SettingsCategory, SettingRow } from '../SettingsCategory';
 
-// Single source of truth for "what does this reset to". Exposed as a
-// constant so the "恢复默认" handler and the disabled-state check both
-// agree on what counts as a customisation.
+// 「恢复默认恢复到哪里」的唯一真相。做成常量，好让「恢复默认」处理器与禁用态判定对
+// 「什么算被改动过」保持一致。
 const REQUEST_DEFAULTS = {
   timeoutMs: 30_000,
   followRedirects: true,
@@ -17,13 +16,11 @@ const REQUEST_DEFAULTS = {
 } as const;
 
 /**
- * Request behaviour — applies to every outbound HTTP call.
+ * 请求行为 —— 作用于每一次外发 HTTP 调用。
  *
- * Three rows, each with a label, a description that tells the user *why*
- * the default matters, and a control on the right. A "恢复默认" button
- * sits in the section header; it's only enabled when at least one row
- * has drifted from `REQUEST_DEFAULTS`, so the affordance doesn't keep
- * tempting the user to "reset" things that are already reset.
+ * 三行，各带标签、一句说明默认值*为何*重要的描述，以及右侧的控件。「恢复默认」按钮放在
+ * 小节表头，且只有当至少一行已偏离 `REQUEST_DEFAULTS` 时才可用，免得这个便利性一直引诱
+ * 用户去「重置」本来就已是默认值的东西。
  */
 export function RequestSection() {
   const settings = useAppStore((s) => s.requestSettings);
@@ -117,9 +114,8 @@ export function RequestSection() {
         }
       />
 
-      {/* Footer inside the same card — a tiny reminder that the values
-          shown here only matter in the (current) mock pipeline. Keeps the
-          user oriented without forcing them to scroll the doc. */}
+      {/* 同一张卡片内的页脚 —— 一句小提醒，说明这里的取值在当前管线中才真正起作用。
+          让用户不至于跑去看文档也知道自己身在何处。 */}
       <div className="flex items-center gap-2 border-t border-border/60 bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
         <Badge variant="muted" className="font-mono">
           v0.2

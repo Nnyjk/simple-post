@@ -1,21 +1,10 @@
-﻿//! `module_*` MCP tools —module CRUD inside a project.
+﻿//! `module_*` MCP 工具 —— 项目内的模块 CRUD，共 5 个。
 //!
-//! 5 tools:
-//! - `module_list`
-//! - `module_create`
-//! - `module_update`
-//! - `module_delete`
-//! - `module_move`
+//! 工具名与参数名沿用三表时期的老名字：对 LLM 客户端而言 `module_id` 仍然是
+//! 「模块的 id」，改名只会白白打断所有已配置的客户端。变的只有存储 —— 模块现在是
+//! `type = 'module'` 的 `nodes` 行，所属项目就是它的 `root_id`。
 //!
-//! The tool names and their argument names are unchanged from the
-//! three-table layout: to an LLM client `module_id` still means "the id
-//! of a module", and renaming the tools would break every configured
-//! client for no semantic gain. Only the storage they read and write
-//! changed —a module is a `nodes` row with `type = 'module'` now, and
-//! `project_id` is its `root_id`.
-//!
-//! `module_list` reuses `super::ProjectIdArgs` (a module is owned by a
-//! project). The other Args structs are private to this module.
+//! `module_list` 复用 `super::ProjectIdArgs`（模块归属于项目）；其余 Args 私有。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,9 +14,8 @@ use crate::tool_fn;
 use simple_post_core::domain::{ResourceNode, ResourceNodePatch, ResourceNodeType};
 use simple_post_core::error::AppError;
 
-/// Resolve the project a module belongs to, for the per-project permission
-/// gate. A module is a `nodes` row, so its project is the denormalised
-/// `root_id` —one indexed read, no parent walk.
+/// 解析模块所属项目，供按项目的那扇门使用。模块是 `nodes` 行，所属项目就是反规范化
+/// 在行上的 `root_id` —— 一次索引读，不必回溯父链。
 fn owning_project(pool: &simple_post_core::db::DbPool, node_id: &str) -> Result<String, AppError> {
     simple_post_core::db::with_conn(pool, |c| {
         simple_post_core::db::nodes::root_id_of(c, node_id)
@@ -154,7 +142,7 @@ pub(super) async fn tool_module_create(
     let m = ResourceNode {
         id: format!("mod_{now}"),
         root_id: a.project_id.clone(),
-        // A module's parent is the project, not another node.
+        // 模块的父级是项目本身，不是另一个节点。
         parent_id: None,
         kind: ResourceNodeType::Module,
         name: a.name,
@@ -186,10 +174,8 @@ pub(super) async fn tool_module_update(
     .await?;
     let patch = ResourceNodePatch {
         name: a.name.clone(),
-        // `module_update` must never re-parent: that is `module_move`'s
-        // job, and it is gated separately. `Some(None)` would promote the
-        // module to the top of its project, so the absent-key form is the
-        // correct "leave it alone".
+        // `module_update` 绝不改父级 —— 那是 `module_move` 的职责，且单独设门。
+        // `Some(None)` 会把模块提到项目顶层，所以这里必须用「键缺失」表示「别动」。
         parent_id: None,
         description: None,
         sort_order: None,
@@ -225,14 +211,11 @@ pub(super) async fn tool_module_move(
         .map_err(|e| AppError::Validation(format!("module_move args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.new_project_id, "module_move").await?;
 
-    // A cross-project move is a real transfer, not delete-then-recreate.
+    // 跨项目移动是真正的搬迁，不是「删掉再建一个」。
     //
-    // That older implementation was a data loss bug: the old schema's
-    // `ON DELETE CASCADE` chain from module to collection to endpoint
-    // meant deleting the module destroyed every collection under it and
-    // every endpoint under those. The `nodes` layout makes the mistake
-    // unrepresentable —there is no cascade to fall into and no second
-    // table to half-copy.
+    // 曾经的删了重建会把数据一起带走：旧 schema 里 `ON DELETE CASCADE` 从模块一路
+    // 串到集合再到端点，删模块就等于删掉它下面所有集合与端点。`nodes` 布局让这个
+    // 错误无处落脚 —— 没有级联可踩，也没有第二张表可以只搬一半。
     let module = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::get(c, &a.module_id)
     })?;

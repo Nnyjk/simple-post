@@ -1,23 +1,20 @@
 /**
- * Slice-level tests for `src/stores/mcp-slice.ts`.
+ * `src/stores/mcp-slice.ts` 的切片级测试。
  *
- * Targets from the second-pass audit (P2 tier):
- *   - T-1: `startMcpPolling` is idempotent + `visibilitychange` pauses
- *          and resumes the 3s `setInterval`.
- *   - T-1: `refreshMcpStatus` merges a successful Tauri invoke result
- *          into `mcpStatus`; on failure the last snapshot is preserved.
- *   - T-9: `restartMcp` optimistically flips `mcpStatus.status` to
- *          `'restarting'`; on IPC failure it flips back to `'crashed'`
- *          and records `lastError`.
+ * 覆盖的职责：
+ *   - `startMcpPolling` 幂等，且 `visibilitychange` 会暂停并恢复那个 3s
+ *     `setInterval`。
+ *   - `refreshMcpStatus` 把一次成功的 Tauri invoke 结果并入 `mcpStatus`；
+ *     失败时保留上一次快照。
+ *   - `restartMcp` 乐观地把 `mcpStatus.status` 翻成 `'restarting'`；IPC 失败时
+ *     翻回 `'crashed'` 并记下 `lastError`。
  *
- * Run via:
+ * 运行：
  *   npx tsx --test src/stores/__tests__/mcp-slice.test.ts
  *
- * The store slices assume a Tauri webview environment
- * (`window.setInterval`, `document.visibilitychange`,
- * `window.__TAURI_INTERNALS__.invoke`); the `_browser-shim` helper
- * installs enough of a browser + IPC stub on `globalThis` for the
- * slice to run unchanged.
+ * store 各切片假设自己跑在 Tauri webview 环境里（`window.setInterval`、
+ * `document.visibilitychange`、`window.__TAURI_INTERNALS__.invoke`）；`_browser-shim`
+ * 在 `globalThis` 上装够用的浏览器 + IPC 桩，让切片能原样运行。
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,13 +33,10 @@ import type { McpUiState, RestartResult } from '@/lib/mcp-types';
 // ---------- harness ----------
 
 /**
- * Build a minimal "store" that the slice can be wired into. The slice's
- * `startMcpPolling` captures `state = get()` and references
- * `state.refreshMcpStatus` inside its tick — so we attach the slice
- * methods onto the very same object `get()` returns. That way the
- * polling pipeline is fully wired without bringing in the full
- * `useAppStore` (and all of bootstrap/ui/dirty-slice's transitive
- * module-load requirements).
+ * 搭一个能把这个切片接进去的最小"store"。切片的 `startMcpPolling` 会捕获
+ * `state = get()`，并在 tick 里引用 `state.refreshMcpStatus`——所以把切片方法
+ * 挂在 `get()` 返回的**同一个**对象上。这样轮询管线完整接通，又不必拖进整个
+ * `useAppStore`（以及 bootstrap/ui/dirty 各切片带来的全部传递性模块加载要求）。
  */
 function makeMcpHarness(initialStatus: McpUiState | null = null) {
   const bag: Record<string, any> = {
@@ -57,8 +51,8 @@ function makeMcpHarness(initialStatus: McpUiState | null = null) {
   const get = () => bag;
 
   const slice = createMcpSlice(set as any, get as any, {} as any);
-  // Re-bind onto `bag` so `bag.refreshMcpStatus()` (called by the
-  // ticking closure) and `bag.startMcpPolling()` resolve to the slice.
+  // 重新绑到 `bag` 上，好让 `bag.refreshMcpStatus()`（由 tick 闭包调用）与
+  // `bag.startMcpPolling()` 都解析到切片。
   Object.assign(bag, slice);
   return bag as unknown as McpSlice;
 }
@@ -90,7 +84,7 @@ afterEach(() => {
 });
 
 // ============================================================
-// T-1 — polling lifecycle
+// T-1 —— 轮询生命周期
 // ============================================================
 
 describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
@@ -107,7 +101,7 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
       );
       assert.notEqual(mcp._mcpTimer, null, 'timer id persisted on store');
       const firstId = mcp._mcpTimer;
-      // A fourth call, with timer still set, must not allocate a new timer.
+      // 第四次调用时定时器仍在，绝不能再分配一个新定时器。
       mcp.startMcpPolling();
       assert.equal(mcp._mcpTimer, firstId, 'idempotent — same timer id');
       assert.equal(counter.count, 1, 'no second setInterval registered');
@@ -123,17 +117,15 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
       const initialTimer = mcp._mcpTimer;
       assert.notEqual(initialTimer, null, 'precondition: timer running');
 
-      // Going hidden: handler should clear the timer and null the id.
+      // 切到隐藏：handler 应当清掉定时器并把 id 置空。
       shim.setVisibility('hidden');
       assert.equal(mcp._mcpTimer, null, 'timer cleared on hidden');
 
-      // Going visible: handler must restart polling and allocate a
-      // fresh timer id.
+      // 切回可见：handler 必须重启轮询并分配一个新的定时器 id。
       shim.setVisibility('visible');
       assert.notEqual(mcp._mcpTimer, null, 'timer restarted on visible');
       assert.notEqual(mcp._mcpTimer, initialTimer, 'visible branch allocates a new timer id');
-      // Across the round-trip (start → hidden → visible) we should
-      // have allocated exactly two timers.
+      // 整轮往返（start → 隐藏 → 可见）下来，应当恰好分配过两个定时器。
       assert.equal(counter.count, 2, 'two setInterval calls total');
     } finally {
       mcp.stopMcpPolling();
@@ -141,7 +133,7 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
   });
 
   it('refreshMcpStatus merges success payload; failure keeps the last snapshot', async () => {
-    // ---- success path ----
+    // ---- 成功路径 ----
     installIpcMock(async (cmd) => {
       if (cmd === 'mcp_status') {
         return { ...BASE_RUNNING, pid: 9999, requestsHandled: 42 };
@@ -158,7 +150,7 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
     const previousPid = mcp.mcpStatus.pid;
     const previousUptime = mcp.mcpStatus.uptimeMs;
 
-    // ---- failure path ----
+    // ---- 失败路径 ----
     clearIpcMock();
     installIpcMock(async () => {
       throw new Error('daemon unreachable');
@@ -170,7 +162,7 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
 });
 
 // ============================================================
-// T-9 — restartMcp failure recovery
+// T-9 —— restartMcp 失败恢复
 // ============================================================
 
 describe('mcp-slice: restartMcp — T-9 failure recovery', () => {
@@ -190,12 +182,11 @@ describe('mcp-slice: restartMcp — T-9 failure recovery', () => {
     const mcp = makeMcpHarness({ ...BASE_RUNNING, status: 'crashed' });
 
     const inflight = mcp.restartMcp();
-    // The optimistic update is applied synchronously, before the
-    // IPC round-trip resolves.
+    // 乐观更新在 IPC 往返 resolve 之前就同步生效了。
     assert.equal(mcp.mcpStatus!.status, 'restarting', 'status optimistically flipped before await');
     await inflight;
-    // After the daemon-restart succeeds and refreshMcpStatus pulls the
-    // fresh snapshot, status should be the polled `running`.
+    // 守护进程重启成功、refreshMcpStatus 拉到新快照之后，status 应当是轮询到的
+    // `running`。
     assert.equal(mcp.mcpStatus!.status, 'running');
     assert.equal(mcp.mcpStatus!.pid, 5555);
     assert.equal(mcp.mcpStatus!.port, 6789);

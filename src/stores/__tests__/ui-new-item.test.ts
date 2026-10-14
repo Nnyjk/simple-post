@@ -1,29 +1,23 @@
 /**
- * Slice-level test for `src/stores/slices/ui-new-item.ts` — the create
- * paths' parent choice.
+ * `src/stores/slices/ui-new-item.ts` 的切片级测试——创建路径的父节点选择。
  *
- * Two entry points are covered:
+ * 覆盖两个入口：
  *
- *   - `createEndpointAt(parentId)` — no dialog, explicit parent. This is
- *     where endpoints are born now, as a frontend draft: nothing reaches
- *     SQLite until `saveDraftEndpoint`, so the assertions here are about
- *     *not* writing rather than about what was written.
- *   - `submitNewItem()` — the three dialog kinds (project / module /
- *     collection).
+ *   - `createEndpointAt(parentId)` —— 不用对话框，父节点显式给出。endpoint
+ *     现在就诞生于此，作为前端草稿：在 `saveDraftEndpoint` 之前什么都不会触及
+ *     SQLite，所以这里的断言关于**不**写入，而不是关于写了什么。
+ *   - `submitNewItem()` —— 三种对话框种类（project / module / collection）。
  *
- * The parent/child contract gives an endpoint two legal parents (a module
- * or a collection) and a collection the same two, so both paths must
- * resolve the parent from somewhere and refuse when they cannot:
+ * 父子契约给了 endpoint 两个合法父节点（module 或 collection），collection 也
+ * 同样是这两个，所以两条路径都必须从某处解析出父节点，并在解析不出时拒绝：
  *
- *   - `createEndpointAt`: the id it was handed, validated against `nodes`
- *   - `submitNewItem`: `parentCollectionId || parentModuleId`, same
- *     validation
+ *   - `createEndpointAt`：拿到的 id，对着 `nodes` 校验
+ *   - `submitNewItem`：`parentCollectionId || parentModuleId`，同样校验
  *
- * The "refuse" case is the guard that must survive, because a node with
- * no parent is not a tree — and for an endpoint now, because a draft whose
- * parent never existed can never be saved.
+ * "拒绝"这个分支是必须活下来的守卫，因为没有父节点的节点不构成一棵树——对
+ * endpoint 更是如此，因为父节点从未存在过的草稿永远存不下去。
  *
- * Run via:
+ * 运行：
  *   npx tsx --test src/stores/__tests__/ui-new-item.test.ts
  */
 import { describe, it } from 'node:test';
@@ -77,13 +71,11 @@ function draft(overrides: Partial<NewItemDraft> = {}): NewItemDraft {
 }
 
 /**
- * A minimal store for the two actions under test. They only reach for the
- * node list, the expand toggle, `addNode` / `addProject` /
- * `setActiveEndpoint` / `openProject`, so everything else is a stub.
+ * 被测两个动作用的最小 store。它们只摸节点列表、展开开关、
+ * `addNode` / `addProject` / `setActiveEndpoint` / `openProject`，其余都是桩。
  *
- * `createUiDraftEndpoints` is composed in for real rather than stubbed:
- * `createEndpointAt` delegates to `createEndpointDraft`, and a stub there
- * would test that the call happened instead of that a draft came out.
+ * `createUiDraftEndpoints` 是真的组合进来的而不是打桩：`createEndpointAt` 会委托
+ * 给 `createEndpointDraft`，在那里打桩测到的只是"调用发生过"，而不是"草稿出来了"。
  */
 function makeHarness(nodeList: ResourceNode[]) {
   const calls: {
@@ -139,8 +131,8 @@ function makeHarness(nodeList: ResourceNode[]) {
     ...createUiNewItem(set as never, get as never, {} as never),
     ...createUiDraftEndpoints(set as never, get as never, {} as never),
   };
-  // In the real store an action reaches its siblings through `get()`, so
-  // the composed actions have to sit on the object `get` returns — not
+  // 在真实 store 里动作是通过 `get()` 够到兄弟动作的，所以组合出来的动作必须挂在
+  // `get` 返回的那个对象上，而不是摆在旁边。
   // beside it.
   Object.assign(bag, slice);
   return { bag, calls, slice };
@@ -152,13 +144,12 @@ describe('ui-new-item: createEndpointAt takes the parent from its argument', () 
 
     const draftId = await h.slice.createEndpointAt('m1');
 
-    // A placeholder that reads as provisional, not as a final name.
+    // 读起来是暂定的，而不是一个最终名字。
     assert.ok(draftId, 'a valid parent must yield a draft id');
     const draft = h.bag.draftEndpoints[draftId] as { name: string; parentId: string };
     assert.equal(draft.name, UNTITLED_ENDPOINT_NAME);
     assert.equal(draft.parentId, 'm1');
-    // The contract change: no row, and no daemon call behind it. The tree
-    // gains nothing until Save.
+    // 契约：没有行，其后也没有守护进程调用。Save 之前树得不到任何东西。
     assert.equal(h.calls.addNode.length, 0, 'a draft must not reach the database');
     assert.equal(h.bag.nodes.length, 1);
   });
@@ -183,8 +174,8 @@ describe('ui-new-item: createEndpointAt takes the parent from its argument', () 
   });
 
   it('refuses a parent that cannot hold an endpoint', async () => {
-    // A project is not a tree node, but the check is on `kind` alone so a
-    // future node type is rejected by default rather than accepted.
+    // project 不是树节点，但这里只按 `kind` 判断，所以将来的节点类型默认被拒绝而不是
+    // 被接受。
     const h = makeHarness([makeNode('m1', null, 'module')]);
 
     const id = await h.slice.createEndpointAt('m1-nope');
@@ -219,7 +210,7 @@ describe('ui-new-item: createEndpointAt takes the parent from its argument', () 
 
     await h.slice.createEndpointAt('c2');
 
-    // The collection itself, then its parent, then the module.
+    // 集合本身，然后是它的父节点，然后是 module。
     assert.deepEqual(h.calls.expanded, ['c2', 'c1', 'm1']);
   });
 
@@ -228,8 +219,8 @@ describe('ui-new-item: createEndpointAt takes the parent from its argument', () 
 
     const draftId = await h.slice.createEndpointAt('m1');
 
-    // `setActiveEndpoint` would open an `endpoint` tab for an id nothing in
-    // `nodes` answers to, so the draft opens its own kind instead.
+    // `setActiveEndpoint` 会为一个 `nodes` 里谁也不认识的 id 打开 `endpoint` 标签，
+    // 所以草稿改为打开自己那种。
     assert.deepEqual(h.calls.openTab, [{ kind: 'endpoint-draft', refId: draftId }]);
     assert.deepEqual(h.calls.activeEndpoint, []);
     assert.equal(h.bag.activeTabId, draftId);
@@ -240,9 +231,8 @@ describe('ui-new-item: createEndpointAt takes the parent from its argument', () 
 
     const draftId = await h.slice.createEndpointAt('m1');
 
-    // Same shared signal as the dialog kinds. The difference is what the id
-    // resolves to: a `draft:` id names a draft, not a row to rename — so
-    // the tree has to recognise the prefix rather than look for a node.
+    // 与各对话框种类共享同一个信号。区别在于这个 id 解析成什么：`draft:` id 指的是
+    // 一个草稿，而不是一行待重命名的东西——所以树必须认得这个前缀，而不是去找节点。
     assert.equal(h.bag.lastCreatedId, draftId);
   });
 });
@@ -254,8 +244,8 @@ describe('ui-new-item: a collection draft prefers its collection parent', () => 
       makeNode('c1', 'm1', 'collection'),
       makeNode('c2', 'c1', 'collection'),
     ]);
-    // "新建子集合" carries the *module* for context and the *collection*
-    // for intent; the collection is the real parent.
+    // 「新建子集合」带着*上下文用的 module*和*表达意图的 collection*；
+    // collection 才是真正的父节点。
     h.bag.newItem = draft({ parentModuleId: 'm1', parentCollectionId: 'c1' });
 
     const id = await h.slice.submitNewItem();
@@ -298,7 +288,7 @@ describe('ui-new-item: a module draft always lands at the project root', () => {
     assert.equal(call.parentId, null);
     assert.equal(call.rootId, 'p1');
     assert.equal(call.kind, 'module');
-    // Blank name falls back to the kind's default rather than writing "".
+    // 名字留空时退回该种类的默认值，而不是写入 ""。
     assert.equal(call.name, '新模块');
   });
 });
@@ -311,8 +301,7 @@ describe('ui-new-item: changing the module clears the collection', () => {
     h.slice.setNewItemParentModule('m2');
 
     assert.equal(h.bag.newItem.parentModuleId, 'm2');
-    // Leaving it set would create the collection under a collection of a
-    // module the user has just moved away from.
+    // 不清掉的话，集合会被建在用户刚离开的某个 module 的集合之下。
     assert.equal(h.bag.newItem.parentCollectionId, '');
   });
 });
@@ -331,12 +320,11 @@ describe('ui-new-item: a new project is entered, not just created', () => {
         opts: { description: '', color: '#000000' },
       },
     ]);
-    // Not `setActiveProject`: the project is not a tree row any more, so
-    // creating it without opening its tab would leave the user staring
-    // at whatever pane they had before.
+    // 不是 `setActiveProject`：项目已经不再是树里的一行，所以建完却不打开它的标签，
+    // 会让用户盯着切换前那个面板。
     assert.deepEqual(h.calls.activeProject, ['proj-1']);
-    // No endpoint owns the new project yet — the last-response cache
-    // from the previous project must not be handed to it.
+    // 还没有 endpoint 属于这个新项目——上一个项目留下的最近响应缓存
+    // 不能被交给它。
     assert.deepEqual(h.calls.activeEndpoint, [null]);
   });
 });

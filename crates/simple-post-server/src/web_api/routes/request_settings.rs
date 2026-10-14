@@ -7,19 +7,16 @@ use crate::db;
 
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
-// ----- request settings (singleton row in preferences KV) -----------------
+// ----- request settings（preferences KV 里的单例行）-----------------
 
-/// Preference key under which the singleton `RequestSettings` is
-/// stored. Same key as the Tauri command — the two shapes share the
-/// row.
+/// 存放 `RequestSettings` 单例的偏好键。与 Tauri 命令同一个键——两种形态共用一行。
 const REQUEST_SETTINGS_KEY: &str = "request_settings";
 
 pub(crate) async fn request_settings_get(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // Missing row → `unwrap_or_default()`. Matches the Tauri command's
-    // "always returns a value" contract so the renderer can call this
-    // unconditionally.
+    // 行缺失 → `unwrap_or_default()`。与 Tauri 命令「总是返回一个值」的契约一致，
+    // 故 renderer 可以无条件调它。
     let stored: Option<crate::domain::RequestSettings> =
         db::with_conn(&s.pool, |c| db::preferences::get(c, REQUEST_SETTINGS_KEY))
             .map_err(map_app_error)?;
@@ -31,16 +28,13 @@ pub(crate) async fn request_settings_put(
     State(s): State<Arc<WebState>>,
     Json(body): Json<crate::domain::RequestSettings>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // PUT semantics: full replace. Unlike the Tauri command's
-    // `RequestSettingsPatch`, we accept the entire struct and write
-    // it back verbatim. Callers wanting partial updates can fall
-    // back to `/api/preferences` (`{"key": "request_settings", "value": ...}`).
+    // PUT 语义：整体替换。与 Tauri 命令的 `RequestSettingsPatch` 不同，这里收整个结构体
+    // 并原样写回。想要局部更新的调用方可以退回 `/api/preferences`
+    // （`{"key": "request_settings", "value": ...}`）。
     //
-    // `RequestSettings` carries `#[serde(default)]`, so a body that
-    // omits a field is accepted and that field is reset to its default
-    // rather than rejected. That is the deliberate trade for reading
-    // blobs written by older builds; see the field's own docs. Send all
-    // three fields to replace the row wholesale.
+    // `RequestSettings` 带 `#[serde(default)]`，故省略某字段的 body 会被接受，且该字段
+    // 被重置为默认值而非被拒。这是为了读取旧版本写下的 blob 而刻意做的取舍；见该字段
+    // 自己的文档。要整体替换请把三个字段都发上。
     db::with_tx(&s.pool, |c| {
         db::preferences::set(c, REQUEST_SETTINGS_KEY, &body)
     })

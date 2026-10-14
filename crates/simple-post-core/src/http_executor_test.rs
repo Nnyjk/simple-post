@@ -1,17 +1,12 @@
 use super::*;
 
-// ---- wire shape -------------------------------------------------------
+// 线形状
 
-/// `HttpResponse` must serialise in camelCase.
-///
-/// Regression net for a real UI defect: the type had no
-/// `rename_all`, so serde emitted `duration_ms` / `size_bytes` /
-/// `content_type` / `status_text` while `src/lib/http.ts` read
-/// `durationMs` / `sizeBytes` / `contentType` / `statusText`. Every
-/// field came back `undefined`, so the response bar showed
-/// `NaN s` and `0 B` for every single request. The mismatch is
-/// invisible to a status-code assertion and to a live-looking page,
-/// which is why it survived; only a browser read showed it.
+/// `HttpResponse` 必须序列化为 camelCase。
+/// 没有 `rename_all` 时 serde 发出 `duration_ms` / `size_bytes` / `content_type` /
+/// `status_text`，而 `src/lib/http.ts` 读的是 `durationMs` / `sizeBytes` / `contentType` /
+/// `statusText`——每个字段都读回 `undefined`，响应栏于是对每个请求都显示 `NaN s` 与
+/// `0 B`。这种不匹配对状态码断言和看起来正常的页面都是隐形的。
 #[test]
 fn http_response_serialises_camel_case() {
     let r = HttpResponse {
@@ -45,7 +40,7 @@ fn http_response_serialises_camel_case() {
             "`{key}` is missing — the TS side reads camelCase, not snake_case"
         );
     }
-    // And the snake_case spellings must be gone.
+    // snake_case 的那些拼法也必须消失。
     for key in ["status_text", "duration_ms", "size_bytes", "content_type"] {
         assert!(
             resp[key].is_null(),
@@ -54,9 +49,9 @@ fn http_response_serialises_camel_case() {
     }
 }
 
-// ---- outbound URL policy ----------------------------------------------
-/// The default policy must not break the most common thing an API
-/// client does: calling a dev server on loopback.
+// 出站 URL 策略
+
+/// 默认策略不得破坏 API 客户端最常做的事：调一个 loopback 上的开发服务器。
 #[test]
 fn default_policy_allows_loopback_and_private() {
     for url in [
@@ -73,8 +68,8 @@ fn default_policy_allows_loopback_and_private() {
     }
 }
 
-/// Scheme allowlist applies under BOTH policies. `file://` turns a
-/// debug tool into a local file reader; no API client needs it.
+/// scheme 白名单在**两种**策略下都生效。`file://` 会把一个调试工具变成读本地文件的
+/// 通道；没有 API 客户端需要它。
 #[test]
 fn non_http_schemes_are_always_refused() {
     for url in [
@@ -105,9 +100,8 @@ fn non_http_schemes_are_always_refused() {
     }
 }
 
-/// The web-deployment policy refuses exactly the ranges that make the
-/// server an SSRF pivot. `169.254.169.254` is the cloud metadata
-/// endpoint and was a live open proxy before this check existed.
+/// Web 部署的策略恰好拒绝那些让服务端成为 SSRF 支点的网段。`169.254.169.254` 是云
+/// 元数据端点。
 #[test]
 fn strict_policy_refuses_metadata_and_private_ranges() {
     let strict = OutboundPolicy {
@@ -149,9 +143,8 @@ fn strict_policy_still_allows_public_addresses() {
     }
 }
 
-/// A hostname is not resolved, so a public-looking name is allowed
-/// even under the strict policy. Documented limitation, not an
-/// oversight — see the comment on `check_url`.
+/// 主机名不被解析，故即便在严格策略下，一个看起来公网的名字也被放行。这是被记录在案的
+/// 限制而非疏漏——见 `check_url` 上的注释。
 #[test]
 fn hostname_is_not_resolved_under_strict_policy() {
     let strict = OutboundPolicy {
@@ -173,8 +166,7 @@ fn malformed_url_is_refused() {
 
 #[tokio::test]
 async fn execute_refuses_before_dialing() {
-    // Must not attempt the connection: the result is a refusal
-    // envelope, not a timeout.
+    // 绝不能尝试连接：结果是一个拒绝信封，而不是超时。
     let input = HttpRequestInput {
         method: "GET".into(),
         url: "file:///C:/Windows/win.ini".into(),
@@ -191,14 +183,10 @@ async fn execute_refuses_before_dialing() {
     assert!(err.message.contains("scheme"), "got: {}", err.message);
 }
 
-/// The policy must survive a redirect.
-///
-/// Regression net for a guard that was purely cosmetic: `check_url`
-/// ran on the initial URL only, while the client was built with
-/// `Policy::limited(10)`. One `302` to a forbidden address therefore
-/// reached it — exactly the threat the policy exists to stop. Spins a
-/// real loopback server that answers `302` toward the metadata
-/// address and asserts the hop is refused.
+/// 策略必须挺过一次重定向。
+/// 逐跳重检 `check_url` 是承重的：只查初始 URL 时，一个回答 `302` 指向被禁地址的 URL
+/// 照样能抵达它——正是这条策略存在的意义所要阻止的威胁。这里起一个真实的 loopback
+/// 服务器朝元数据地址回 `302`，并断言那一跳被拒绝。
 #[tokio::test]
 async fn redirect_hop_is_re_checked_against_the_policy() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -222,11 +210,9 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
 
     let input = HttpRequestInput {
         method: "GET".into(),
-        // `localhost` on purpose: the policy checks IP literals and
-        // deliberately does not resolve names, so the *first* hop is
-        // allowed and only the redirect target can be refused. Using
-        // `127.0.0.1` here would be stopped at the initial check and
-        // would prove nothing about redirects.
+        // 刻意用 `localhost`：策略检查的是 IP 字面量且刻意不解析名字，故**第一跳**被放行，
+        // 只有重定向目标才可能被拒。这里若用 `127.0.0.1`，会在初始检查处就被拦下，
+        // 对重定向什么也证明不了。
         url: format!("http://localhost:{port}/bounce"),
         headers: vec![],
         body: None,
@@ -243,10 +229,9 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
     )
     .await;
     let err = out.error.expect("redirect must be refused");
-    // reqwest surfaces a refused hop as "error following redirect";
-    // a *followed* hop to an unreachable metadata address would instead
-    // time out and read "error sending request". The distinction is
-    // what makes this a real test of the per-hop re-check.
+    // reqwest 把被拒的一跳报成 "error following redirect"；一个*被跟随*到不可达元数据
+    // 地址的跳则会超时并读成 "error sending request"。这个区别正是它成为逐跳重检的
+    // 真测试的原因。
     assert!(
         err.message.contains("error following redirect"),
         "expected the redirect to be refused rather than followed, got: {}",
@@ -254,7 +239,7 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
     );
 }
 
-// ---- parse_method -----------------------------------------------------
+// parse_method
 
 #[test]
 fn parse_method_known_verbs_uppercase() {
@@ -269,27 +254,22 @@ fn parse_method_known_verbs_uppercase() {
 
 #[test]
 fn parse_method_unparseable_falls_back_to_get() {
-    // Defensive: a frontend bug shouldn't 500 the command.
-    //
-    // `from_bytes` is happy with any token-shape ASCII (e.g. "PROPFIND"
-    // or "FROBNICATE" passes through unchanged — see the
-    // `parse_method_custom_verb_passes_through` test below), so the only
-    // inputs that actually fall back to GET are the genuinely unparseable
-    // ones (empty string, or tokens containing illegal characters such as
-    // whitespace).
+    // 防御性的：一个前端 bug 不该让这个 command 500。
+    // `from_bytes` 对任何 token 形状的 ASCII 都满意（如 "PROPFIND" 原样通过——见下面的
+    // `parse_method_custom_verb_passes_through` 测试），故真正回退到 GET 的只有确实解析
+    // 不出的输入（空串，或含空白这类非法字符的 token）。
     assert_eq!(parse_method(""), reqwest::Method::GET);
     assert_eq!(parse_method("BAD METHOD"), reqwest::Method::GET);
 }
 
 #[test]
 fn parse_method_custom_verb_passes_through() {
-    // `from_bytes` succeeds for any token-shape ASCII; we only fall
-    // back to GET on truly unparseable input.
+    // `from_bytes` 对任何 token 形状的 ASCII 都成功；只在真正解析不出的输入上回退到 GET。
     let m = parse_method("PROPFIND");
     assert_eq!(m, reqwest::Method::from_bytes(b"PROPFIND").unwrap());
 }
 
-// ---- truncate_body ----------------------------------------------------
+// truncate_body
 
 #[test]
 fn truncate_body_under_cap_is_unchanged() {
@@ -300,8 +280,7 @@ fn truncate_body_under_cap_is_unchanged() {
 
 #[test]
 fn truncate_body_zero_max_means_no_cap() {
-    // 0 = "feature disabled" per the docstring; the body is
-    // returned verbatim regardless of length.
+    // 0 按文档注释即「功能关闭」；无论多长都原样返回 body。
     let big = "x".repeat(10_000);
     let (out, truncated) = truncate_body(big.clone(), 0);
     assert_eq!(out, big);
@@ -314,38 +293,33 @@ fn truncate_body_at_cap_adds_marker() {
     let (out, truncated) = truncate_body(big, 100);
     assert!(truncated);
     assert!(out.contains("[truncated at 100 bytes"));
-    // Marker is appended on top of the slice; the slice itself is
-    // exactly `cap` runes.
+    // 标记追加在切片之上；切片本身恰好是 `cap` 个 rune。
     assert!(out.starts_with(&"a".repeat(100)));
 }
 
 #[test]
 fn truncate_body_respects_utf8_char_boundary() {
-    // Each Chinese character is 3 bytes in UTF-8. Cutting at 4
-    // would slice a rune — we expect to walk back to 3.
-    let body = "你好你好".to_string(); // 12 bytes total
+    // 中日韩字符在 UTF-8 里各 3 字节。在 4 处切会切掉半个 rune——我们期望回退到 3。
+    let body = "你好你好".to_string(); // 共 12 字节
     let (out, truncated) = truncate_body(body, 4);
     assert!(truncated);
-    // We should have one full "你" + marker, NOT a broken rune.
+    // 应当是一个完整的「你」加上标记，而不是半个坏 rune。
     assert!(out.starts_with("你"));
     assert!(out.contains("[truncated"));
-    // No lone continuation bytes (replacement would have shown up
-    // as the U+FFFD char; we keep things simple and just assert
-    // the slice prefix is valid UTF-8).
+    // 没有孤立的续字节（否则会以 U+FFFD 出现）；这里保持简单，只断言切片前缀是合法 UTF-8。
     assert!(std::str::from_utf8(out.as_bytes()).is_ok());
 }
 
 #[test]
 fn truncate_body_exact_cap_is_not_truncated() {
-    // Boundary case: `body.len() <= max_bytes` is the no-truncation
-    // branch; the marker must not appear.
-    let body = "abcde".to_string(); // 5 bytes
+    // 边界情形：`body.len() <= max_bytes` 是不截断那一支；标记不应出现。
+    let body = "abcde".to_string(); // 5 字节
     let (out, truncated) = truncate_body(body, 5);
     assert_eq!(out, "abcde");
     assert!(!truncated);
 }
 
-// ---- HttpResult helpers -----------------------------------------------
+// HttpResult 辅助函数
 
 #[test]
 fn http_result_ok_carries_response_only() {

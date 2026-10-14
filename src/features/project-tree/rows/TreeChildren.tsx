@@ -2,21 +2,15 @@ import { useRef, type ReactNode } from 'react';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 /**
- * Wraps the children of a tree node (module → CollectionBranch, or
- * CollectionRow → endpoints + sub-collections) so we can animate the
- * expand/collapse with GSAP instead of a hard mount/unmount. The
- * children stay in the DOM at all times; visual presence is driven by
- * the container's `height` + `opacity`. On expand we also stagger-fade
- * the direct row descendants so the new content reveals itself
- * row-by-row rather than popping in all at once.
+ * 包裹树节点的子级（模块 → CollectionBranch，或 CollectionRow → 接口 + 子集合），使展开 /
+ * 折叠能用 GSAP 动画而非硬挂载 / 卸载。子级始终留在 DOM 中；可见性由容器的 `height` +
+ * `opacity` 驱动。展开时还对其直接行后代做错峰淡入，让新内容逐行浮现而不是一次性弹出。
  */
 export function TreeChildren({ expanded, children }: { expanded: boolean; children: ReactNode }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // `useGSAP` runs the callback once on mount in addition to every
-  // dependency change. Without a guard, an initially-expanded branch
-  // would tween from height: 0 → 'auto' on first paint and flash from
-  // collapsed. We sync to the current state on the first run and
-  // animate on every subsequent change.
+  // `useGSAP` 除每次依赖变化外，挂载时也会跑一次回调。不加守卫的话，初始即展开的分支会
+  // 在首帧从 height: 0 补间到 'auto'，闪一下折叠态。故首次运行直接同步到当前状态，之后
+  // 每次变化才做动画。
   const isFirstRun = useRef(true);
 
   useGSAP(
@@ -28,11 +22,9 @@ export function TreeChildren({ expanded, children }: { expanded: boolean; childr
         gsap.set(el, expanded ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 });
         return;
       }
-      // The transition is motion, but it is also the only thing that moves
-      // this container between open and closed, so reduced motion has to
-      // land on the end state rather than skip it — the collapsed height
-      // is an inline style GSAP owns, and a skipped tween would leave a
-      // branch the user just expanded sitting at `height: 0`.
+      // 这个过渡既是动效，也是本容器在开合之间唯一的位移来源，故 reduced motion 必须落到
+      // 终态而不是跳过 —— 折叠高度是 GSAP 拥有的内联样式，跳过补间会让用户刚展开的分支停在
+      // `height: 0`。
       const rows = el.querySelectorAll<HTMLElement>(':scope > * > [data-tree-row]');
       if (expanded) {
         return motionSafe(

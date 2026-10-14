@@ -1,26 +1,19 @@
 /**
- * DirtyCloseDialog — single-instance dialog that mediates "what should we
- * do about unsaved edits?" when a close path would otherwise drop a draft.
+ * DirtyCloseDialog —— 单实例对话框，在某条关闭路径会丢掉草稿时替用户决定「这些未保存
+ * 的修改怎么办」。
  *
- * The store owns the queue (`pendingDirtyClose: { tabIds, index }`) and
- * the resolution action (`resolveDirtyClose`). This component is just
- * the view: it reads the current id, looks up the tab's display title,
- * and renders the three-button chrome.
+ * 队列（`pendingDirtyClose: { tabIds, index }`）与结算动作（`resolveDirtyClose`）都归
+ * store。本组件只是视图：读当前 id、查出标签的显示标题、渲染三个按钮。
  *
- * Three buttons, in the order the user spec calls out:
- *   - 直接关闭 — drop the current tab's changes; abort the rest of the
- *     queue. Other dirty tabs in the batch stay open so the user
- *     doesn't lose unrelated work.
- *   - 保存     — apply the current tab's pending edits and advance to
- *     the next dirty tab in the queue. If this was the last one, the
- *     dialog closes.
- *   - 全部保存 — apply every remaining tab's pending edits, close them
- *     all, then close the dialog.
+ * 三个按钮，按用户提需求的顺序：
+ *   - 直接关闭 —— 丢弃当前标签的修改，并中止队列余下部分。批次里其他脏标签保持打开，
+ *     用户不会因此丢掉不相干的工作。
+ *   - 保存     —— 应用当前标签的待存修改，队列推进到下一个脏标签。若这是最后一个，
+ *     对话框关闭。
+ *   - 全部保存 —— 应用其余每个标签的待存修改，全部关闭，然后关掉对话框。
  *
- * The dialog intentionally disables the backdrop close. The × close
- * button in the title row, however, behaves like `直接关闭` — that
- * way the user has an explicit dismiss path that doesn't strand the
- * queue (previously × was a no-op and effectively dead).
+ * 刻意禁用遮罩关闭。但标题行的 × 关闭按钮行为等同 `直接关闭`，好让用户有一条不会把
+ * 队列晾在那里的显式退出路径。
  */
 
 import { useMemo } from 'react';
@@ -45,8 +38,8 @@ function tabDisplay(tabId: string): TabDisplay {
     const p = state.projects.find((x) => x.id === tabId);
     return { title: p?.name ?? '（项目已删除）', kindLabel: '项目' };
   }
-  // Module / collection / endpoint are all tree nodes now, and the
-  // tab's `kind` is the node's `type` — one lookup answers all three.
+  // 模块 / 集合 / 接口现在都是树节点，标签的 `kind` 就是节点的 `type`，
+  // 一次查找答完三者。
   if (tab.kind === 'module' || tab.kind === 'collection' || tab.kind === 'endpoint') {
     const n = state.nodes.find((x) => x.id === tabId);
     const kindLabel = tab.kind === 'module' ? '模块' : tab.kind === 'collection' ? '集合' : '接口';
@@ -78,18 +71,16 @@ export function DirtyCloseDialog() {
   const total = batch.tabIds.length;
   const position = total > 1 ? `第 ${batch.index + 1} / ${total} 个` : null;
 
-  // Endpoint-specific row: shows the method without re-stating the name
-  // (the title already names the tab). Keeps the body visually useful
-  // without being repetitive. The method lives in the detail row.
+  // 接口专属的一行：只显示方法，不重复名字（标题已经叫出了这个标签），让正文有信息量
+  // 却不啰嗦。方法存在 detail 行里。
   const currentEndpoint =
     current.kindLabel === '接口' ? (endpointDetails[current.id] ?? null) : null;
 
   return (
     <Dialog
       open
-      // The × close button (and Escape) behave like `discard`: skip
-      // the current tab's save and advance. Backdrop click is still
-      // disabled (don't let an accidental click strand the queue).
+      // × 关闭按钮（以及 Esc）行为等同 `discard`：跳过当前标签的保存并推进。
+      // 遮罩点击仍禁用 —— 不让一次误点把队列晾在那里。
       onOpenChange={(o) => {
         if (!o) resolveDirtyClose('discard');
       }}
@@ -136,9 +127,8 @@ export function DirtyCloseDialog() {
         </div>
       }
     >
-      {/* Body is intentionally sparse — the title + buttons carry the
-          decision. The method badge is the only extra context the
-          user needs (color-coded by HTTP method). */}
+      {/* 正文刻意稀疏 —— 标题加按钮已经承载了这个决定。方法徽标是用户唯一需要的额外
+          语境（按 HTTP 方法着色）。 */}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {currentEndpoint ? (
           <>

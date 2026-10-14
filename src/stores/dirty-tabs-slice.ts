@@ -1,118 +1,84 @@
 ﻿/**
- * Dirty tabs slice — owns the queue that mediates "what should we do
- * about unsaved edits?" when a close path would otherwise drop a draft.
+ * 脏标签切片 —— 拥有那个队列：当关闭路径会丢掉草稿时，由它来斡旋
+ * "这些未保存的改动该怎么办"。
  *
- * State on this slice: only `pendingDirtyClose` (the queue itself).
- * The other inputs (`openTabs`, `dirtyTabIds`, `endpointDrafts`,
- * `activeTabId`) live in the UI slice — the queue is a tiny
- * orchestration layer over them.
+ * 本切片的 state：只有 `pendingDirtyClose`（队列本身）。其余输入
+ * （`openTabs`、`dirtyTabIds`、`endpointDrafts`、`activeTabId`）在 UI 切片里——
+ * 队列只是它们之上的一层很薄的编排。
  *
- * Action contract (unchanged from the previous monolithic store):
- *   - `partitionDirty(ids)`         → pure helper used by the other
- *                                     requestClose* actions.
- *   - `requestCloseTab(id)`         → single-tab dirty-guarded close.
- *   - `requestCloseOthers()`        → close all tabs except the active.
- *   - `requestCloseAllTabs()`       → close every open tab.
- *   - `saveDirtyTab(id)`            → commit any pending edits on the
- *                                     tab (endpoint: apply draft via
- *                                     `updateEndpointDetail` + clear draft).
- *   - `resolveDirtyClose(action)`   → drive the queue one step forward
- *                                     based on the dialog button.
- *
- * Like every other slice, this one only couples to the rest of the
- * store via the shared `AppState` type — it never imports another
- * slice module directly. Cross-slice actions (e.g. `closeTab`,
- * `updateEndpointDetail`, `clearEndpointDraft`) are called via `get().…`.
+ * 和其他切片一样，本切片只通过共享的 `AppState` 类型与 store 其余部分耦合，
+ * 绝不直接 import 另一个切片模块。跨切片动作（`closeTab`、
+ * `updateEndpointDetail`、`clearEndpointDraft`）通过 `get().…` 调用。
  */
 import type { StateCreator } from 'zustand';
 import type { AppState } from './app-store';
 import { draftToPatch } from './slices/crud-helpers';
 
-/** State portion owned by the dirty tabs slice. */
+/** 脏标签切片拥有的 state。 */
 export interface DirtyTabsSliceState {
   /**
-   * Batch of dirty tab ids waiting for the user to decide what to do
-   * about their unsaved changes before the close proceeds. Populated by
-   * the `requestClose*` actions when a close path would otherwise drop
-   * a draft. The DirtyCloseDialog component reads this and walks
-   * through the queue one tab at a time.
+   * 等待用户就未保存改动表态、之后才继续关闭的脏标签 id 批次。当某条关闭路径
+   * 否则会丢掉草稿时，由 `requestClose*` 动作填充。DirtyCloseDialog 读它，
+   * 一次处理一个标签。
    *
-   * Semantics for the dialog buttons (see resolveDirtyClose):
-   *   - "直接关闭" — close the current tab; abort the rest of the queue
-   *     (the user's other dirty tabs stay open).
-   *   - "保存"     — save the current tab, then advance to the next.
-   *   - "全部保存" — save every remaining tab in the queue, then close
-   *     them all.
+   * 对话框各按钮的语义（见 resolveDirtyClose）：
+   *   - "直接关闭"——关掉当前标签，并中止队列其余部分
+   *     （用户其他脏标签保持打开）。
+   *   - "保存"    ——保存当前标签，然后前进到下一个。
+   *   - "全部保存"——保存队列里剩下的每一个标签，然后全部关掉。
    *
-   * Non-endpoint tabs (project / module / collection) become "dirty"
-   * only while an inline rename is in flight; closing the tab forces
-   * the inline input to blur, which fires its own commit — so the
-   * "save" path for those kinds is effectively "just close".
+   * 非 endpoint 的标签（project / module / collection）只有在行内改名在途时
+   * 才会"变脏"；关掉标签会强制行内输入失焦，从而触发它自己的提交——所以对这些
+   * 种类来说"保存"路径实际上就是"直接关掉"。
    */
   pendingDirtyClose: { tabIds: string[]; index: number } | null;
 }
 
-/** Action portion owned by the dirty tabs slice. */
+/** 脏标签切片拥有的动作。 */
 export interface DirtyTabsSliceActions {
   /**
-   * Dirty-guarded close variants. If the targeted tab is dirty, the
-   * action populates `pendingDirtyClose` and lets the user decide
-   * (discard / save / save-all) before any close happens. If nothing is
-   * dirty, the close proceeds immediately.
+   * 带脏守卫的关闭变体。若目标标签是脏的，动作会填充 `pendingDirtyClose`，
+   * 让用户在真正关闭发生之前决定（丢弃 / 保存 / 全部保存）；若什么都不脏，
+   * 立即关闭。
    *
-   * `requestCloseTab` is single-tab; `requestCloseOthers` is "close
-   * every tab except the active one"; `requestCloseAllTabs` is
-   * "close every tab". The single-tab form is what the tab X buttons
-   * and the right-click "关闭" item use; the batch forms power the
-   * "Close All" / "Close Others" affordances.
+   * `requestCloseTab` 是单个标签；`requestCloseOthers` 是"关掉除活动标签外的
+   * 所有标签"；`requestCloseAllTabs` 是"关掉所有标签"。单个的形式供标签上的 X
+   * 按钮和右键"关闭"项使用，批量形式供"Close All" / "Close Others" 使用。
    */
   requestCloseTab: (tabId: string) => void;
   requestCloseOthers: () => void;
   requestCloseAllTabs: () => void;
   /**
-   * Commit any pending edits on the given tab without closing it. For
-   * endpoint tabs this means applying the URL/method draft through
-   * `updateEndpointDetail` and clearing the draft. For other tabs the inline
-   * edit (if any) auto-commits on its own when the tab unmounts, so
-   * this is a no-op for them.
+   * 提交给定标签上未保存的编辑而不关闭它。对 endpoint 标签意味着通过
+   * `updateEndpointDetail` 应用 URL / method 草稿并清掉草稿。对其他标签，行内
+   * 编辑（若有）在标签卸载时会自行提交，所以对它们是空操作。
    */
   saveDirtyTab: (tabId: string) => void;
   /**
-   * Move `pendingDirtyClose.index` forward, or clear the batch when
-   * the end is reached. Used by the "保存" / "直接关闭" / "全部保存"
-   * buttons in DirtyCloseDialog.
+   * 把 `pendingDirtyClose.index` 往前推一步，走到末尾则清空批次。
+   * DirtyCloseDialog 的"保存" / "直接关闭" / "全部保存"按钮使用。
    */
   resolveDirtyClose: (action: 'discard' | 'save' | 'saveAll') => void;
-  /**
-   * Filter the given tab ids down to the ones currently flagged as
-   * dirty. Internal helper shared by the request-close paths.
-   */
+  /** 把给定的标签 id 过滤成当前标脏的那些。请求关闭路径共用的内部助手。 */
   partitionDirty: (targetIds: string[]) => string[];
 }
 
 export type DirtyTabsSlice = DirtyTabsSliceState & DirtyTabsSliceActions;
 
 export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice> = (set, get) => ({
-  // No pending close batch at boot. The DirtyCloseDialog component
-  // only mounts when this becomes non-null.
+  // 启动时没有待关闭批次。DirtyCloseDialog 只在它变成非 null 时才挂载。
   pendingDirtyClose: null,
 
-  // ---------- dirty-guarded close paths ----------
-  // The plain closeTab / closeAllTabs / closeSavedTabs above are still
-  // exported because:
-  //   - `closeTab` is the internal "actually close" primitive that the
-  //     dialog and the delete* actions call.
-  //   - `closeAllTabs` is convenient when we *know* there are no dirty
-  //     tabs (e.g. a fresh data import wipes everything).
-  // The WorkspaceTabs strip and the right-click menu instead use
-  // `requestClose*`, which routes through the dirty guard.
+  // ---------- 带脏守卫的关闭路径 ----------
+  // 上面那些不带守卫的 closeTab / closeAllTabs / closeSavedTabs 仍然导出，因为：
+  //   - `closeTab` 是"真的关掉"那个内部原语，对话框和 delete* 动作都调它。
+  //   - `closeAllTabs` 在我们**确定**没有脏标签时很方便（例如新导入的数据把一切抹平）。
+  // 而 WorkspaceTabs 标签条与右键菜单用的是 `requestClose*`，走脏守卫。
 
   /**
-   * Internal helper — given the list of tab ids a close action intends
-   * to close, partition them into the "drop immediately" set (clean
-   * tabs) and the "ask the user" set (dirty tabs). Returns the dirty
-   * subset; the caller is responsible for closing the clean ones
-   * via the existing closeTab primitive.
+   * 内部助手——把某个关闭动作打算关掉的标签 id 列表分成"直接丢弃"的一批
+   * （干净标签）和"问用户"的一批（脏标签）。返回脏的那部分；干净的那些由调用方
+   * 通过现成的 closeTab 原语负责关闭。
    */
   partitionDirty: (targetIds: string[]) => {
     const state = get();
@@ -124,8 +90,8 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
     const state = get();
     if (!state.openTabs.some((t) => t.id === tabId)) return;
     if (state.dirtyTabIds.has(tabId)) {
-      // Dirty — open the dialog for just this one. Non-dirty fast path
-      // is irrelevant because there's nothing else to close.
+      // 脏——只为这一个打开对话框。不脏的快速路径在这里没有意义，因为没有别的
+      // 标签要关。
       set({ pendingDirtyClose: { tabIds: [tabId], index: 0 } });
       return;
     }
@@ -137,7 +103,7 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
     const targetIds = state.openTabs.filter((t) => t.id !== state.activeTabId).map((t) => t.id);
     if (targetIds.length === 0) return;
     const dirty = get().partitionDirty(targetIds);
-    // Close the clean ones right away; queue the dirty for the dialog.
+    // 干净的立刻关掉；脏的排进队列交给对话框。
     for (const id of targetIds) {
       if (!dirty.includes(id)) get().closeTab(id);
     }
@@ -164,25 +130,20 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
     const tab = state.openTabs.find((t) => t.id === tabId);
     if (!tab) return;
     if (tab.kind === 'endpoint' && state.endpointDrafts[tabId]) {
-      // Apply the draft to the stored endpoint, then clear the draft.
-      // Mirrors the body of HttpTester's `handleSave` so dialog "保存"
-      // and button save produce the same persisted state.
+      // 把草稿应用到已存的 endpoint，然后清掉草稿。逻辑与 HttpTester 的
+      // `handleSave` 相同，使对话框的"保存"与按钮的保存落出同样的结果。
       const draft = state.endpointDrafts[tabId]!;
-      // Every draft field lives in `endpoint_details`, so the draft is
-      // applied there — not to the node. A single `updateEndpoint` that
-      // split across two tables is exactly what the split is meant to
-      // avoid: renaming an endpoint must not rewrite request config.
-      // `draftToPatch` is the same mapping HttpTester's Save button uses,
-      // so the dialog and the button cannot persist different subsets.
+      // 每个草稿字段都住在 `endpoint_details`，所以草稿应用在那里而不是节点上。
+      // 一次跨两张表的 `updateEndpoint` 正是这次划分要避免的：重命名一个
+      // endpoint 不该顺手改写请求配置。`draftToPatch` 与 HttpTester 的 Save
+      // 按钮用的是同一份映射，所以对话框与按钮不可能落出不同的子集。
       const patch = draftToPatch(draft);
       if (Object.keys(patch).length > 0) state.updateEndpointDetail(tabId, patch);
       state.clearEndpointDraft(tabId);
       return;
     }
-    // Project / module / collection / settings — dirty state comes from
-    // an in-flight inline rename. Closing the tab (next call) will
-    // unmount the editor and the blur will fire its own commit, so
-    // there's nothing for us to do here.
+    // project / module / collection / settings —— 脏状态来自一次在途的行内改名。
+    // 关掉标签（下一步）会卸载编辑器，失焦就会触发它自己的提交，所以这里无事可做。
   },
 
   resolveDirtyClose: (action) => {
@@ -195,9 +156,8 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
       return;
     }
     if (action === 'saveAll') {
-      // Commit every remaining tab in the queue, then close them all
-      // and clear the batch. We use the un-guarded `closeTab` so it
-      // doesn't re-enter the guard and queue itself again.
+      // 提交队列里剩下的每一个标签，然后全部关掉并清空批次。这里用不带守卫的
+      // `closeTab`，否则它会重入守卫把自己重新排进队列。
       for (let i = batch.index; i < batch.tabIds.length; i++) {
         state.saveDirtyTab(batch.tabIds[i]);
         state.closeTab(batch.tabIds[i]);
@@ -216,9 +176,8 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
       }
       return;
     }
-    // action === 'discard' — close this tab without saving, and abort
-    // the rest of the queue. The user's other dirty tabs stay open so
-    // nothing else is lost without their say-so.
+    // action === 'discard' —— 不保存直接关掉当前标签，并中止队列其余部分。
+    // 用户其他脏标签保持打开，免得别的内容没经过他同意就丢掉。
     state.closeTab(currentId);
     set({ pendingDirtyClose: null });
   },

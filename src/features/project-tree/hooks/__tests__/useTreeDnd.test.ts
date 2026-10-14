@@ -1,26 +1,11 @@
 /**
- * Unit tests for `zoneFromRowPosition` in
- * `src/features/project-tree/hooks/useTreeDnd.ts` — the pure core of
- * the tree's drop-zone resolution.
+ * `src/features/project-tree/hooks/useTreeDnd.ts` 里 `zoneFromRowPosition` 的单元测试
+ * —— 树判定放置区的纯核心。
  *
- * Why this file exists
- * --------------------
- * Every row used to hand `null` as its target element to
- * `makeDragOverHandler` / `makeDropHandler`. The zone math starts from
- * the row's bounding rect, so a null rect collapsed the split to a
- * constant `'above'` — with no error anywhere. Two gestures died
- * silently at once:
+ * 分区计算从行自身的 bounding rect 出发，rect 不可用时只会退化成常量答案且不报错。
+ * 故规则本身在此钉住：给定真实 rect，三个区必须都可达，且分界要匹配该行的嵌套能力。
  *
- *   1. `into` became unreachable on container rows, so "drag into a
- *      module / collection" never reached the `moveNodes` branch.
- *   2. `below` became unreachable everywhere, so every reorder landed
- *      *above* its target — dragging A under B looked like no-op.
- *
- * Both are invisible to typecheck and to a passing build, so the rule
- * itself is pinned here: with a real rect, all three zones must be
- * reachable, and the split must match the row's nesting capability.
- *
- * Run via:
+ * 运行：
  *   npx tsx --test src/features/project-tree/hooks/__tests__/useTreeDnd.test.ts
  */
 import { describe, it } from 'node:test';
@@ -30,10 +15,10 @@ import { zoneFromRowPosition } from '../useTreeDnd';
 
 // ---------- fixtures ----------
 
-/** A 100px-tall row starting 200px down the viewport. */
+/** 高 100px、位于视口下方 200px 起的一行。 */
 const ROW = { top: 200, height: 100 };
 
-/** Cursor Y for a given vertical ratio within `ROW`. */
+/** `ROW` 内给定纵向比例时的光标 Y。 */
 function yAt(ratio: number): number {
   return ROW.top + ratio * ROW.height;
 }
@@ -48,7 +33,7 @@ describe('useTreeDnd: zoneFromRowPosition on a container row', () => {
   it('answers above at the top edge', () => {
     assert.equal(zoneFromRowPosition(ROW, yAt(0), supportsInto), 'above');
     assert.equal(zoneFromRowPosition(ROW, yAt(0.1), supportsInto), 'above');
-    // 0.28 is the exclusive upper bound of the top quarter.
+    // 0.28 是上四分位不含的上界。
     assert.equal(zoneFromRowPosition(ROW, yAt(0.27), supportsInto), 'above');
   });
 
@@ -59,14 +44,13 @@ describe('useTreeDnd: zoneFromRowPosition on a container row', () => {
   });
 
   it('answers below at the bottom edge', () => {
-    // 0.72 is the exclusive lower bound of the bottom quarter.
+    // 0.72 是下四分位不含的下界。
     assert.equal(zoneFromRowPosition(ROW, yAt(0.73), supportsInto), 'below');
     assert.equal(zoneFromRowPosition(ROW, yAt(0.99), supportsInto), 'below');
   });
 
   it('reaches every zone, so neither nesting nor downward reorder can go missing', () => {
-    // The regression this file exists for: a constant answer meant one
-    // of these three was dead code no matter what the cursor did.
+    // 本文件要防的回归：答案恒定意味着三个区里必有一个是死代码，光标怎么动都到不了。
     const zones = new Set(
       [0.05, 0.5, 0.95].map((r) => zoneFromRowPosition(ROW, yAt(r), supportsInto)),
     );
@@ -94,9 +78,8 @@ describe('useTreeDnd: zoneFromRowPosition on a row that cannot nest', () => {
   });
 
   it('does not widen the split even in the middle of the row', () => {
-    // The container thresholds are 0.28 / 0.72; a leaf must not inherit
-    // them, or a pointer resting mid-row would try to nest a node into
-    // an endpoint.
+    // 容器的阈值是 0.28 / 0.72；叶子行不能继承它们，否则指针停在行中间就会去把节点
+    // 嵌进一个接口里。
     assert.notEqual(zoneFromRowPosition(ROW, yAt(0.5), supportsInto), 'into');
   });
 });
@@ -112,16 +95,13 @@ describe('useTreeDnd: zoneFromRowPosition without a usable rect', () => {
   });
 
   it('falls back to above for a zero-height rect rather than dividing by zero', () => {
-    // height 0 would make the ratio ±Infinity / NaN, which satisfies no
-    // comparison — the old inline math answered 'into' or 'below' from
-    // whichever branch happened to swallow the NaN.
+    // height 为 0 会让比例变成 ±Infinity / NaN，而 NaN 满足不了任何比较，故须显式回落。
     assert.equal(zoneFromRowPosition({ top: 200, height: 0 }, 200, true), 'above');
     assert.equal(zoneFromRowPosition({ top: 200, height: 0 }, 200, false), 'above');
   });
 
   it('is viewport-relative, not page-relative', () => {
-    // clientY is viewport coordinates, so the rect must be read as such:
-    // a scrolled tree still splits at the same cursor heights.
+    // clientY 是视口坐标，rect 也必须按视口读：树滚动后仍在同样的光标高度处分界。
     const scrolled = { top: 40, height: 100 };
     assert.equal(zoneFromRowPosition(scrolled, 90, true), 'into');
     assert.equal(zoneFromRowPosition(scrolled, 130, true), 'below');

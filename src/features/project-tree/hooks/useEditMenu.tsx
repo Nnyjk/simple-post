@@ -22,27 +22,24 @@ import type { ContextMenuItem } from '../TreeContextMenu';
 export interface EditMenuBindings {
   setEditing: Dispatch<SetStateAction<EditTarget | null>>;
   /**
-   * Opens the create *dialog* for the kinds that still have one. An
-   * endpoint is absent by design — it is written directly by
-   * `createEndpointAt`, so the context menu needs no dialog and no draft.
+   * 为仍有对话框的各类打开创建*对话框*。接口刻意缺席 —— 它由 `createEndpointAt`
+   * 直接写入，故右键菜单既不需要对话框也不需要草稿。
    */
   openNewItemWithIntent: (opts: {
     type: NewDraftKind;
     parentModuleId?: string;
     parentCollectionId?: string;
   }) => void;
-  /** Create an endpoint under `parentId` and rename it in place. */
+  /** 在 `parentId` 下创建接口并就地重命名。 */
   createEndpointAt: (parentId: string) => Promise<void>;
   openEndpointTab: (id: string) => void;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;
 }
 
 /**
- * Inline rename + context menu construction + the delete confirmation
- * flow. The `editing` value and its setter are owned by `ProjectTree`
- * (shared with `useNewItemFlow`, which needs the setter to drop a freshly
- * created row straight into rename); the store values read below are raw
- * references or `.find()` results.
+ * 就地重命名 + 右键菜单构造 + 删除确认流程。`editing` 值及其 setter 由 `ProjectTree`
+ * 持有（与 `useNewItemFlow` 共用，后者需要该 setter 把新建的行直接丢进重命名）；下面读
+ * 到的 store 值都是原始引用或 `.find()` 的结果。
  */
 export function useEditMenu({
   setEditing,
@@ -67,12 +64,10 @@ export function useEditMenu({
   const [toDelete, setToDelete] = useState<DeleteTarget | null>(null);
 
   /**
-   * A node and every descendant beneath it, BFS on `parentId`.
+   * 一个节点及其下所有后代，沿 `parentId` 做 BFS。
    *
-   * Used only to phrase the delete confirmation ("将同时删除 N 个
-   * 集合、M 个接口"), so it is a count over the visible tree rather
-   * than a reason to trust the client's view of the cascade — the
-   * database cascades regardless.
+   * 只用来措辞删除确认（「将同时删除 N 个集合、M 个接口」），故这是对可见树的计数，
+   * 不是可以信任客户端级联视图的理由 —— 数据库无论如何都会级联。
    */
   const subtreeOf = (rootId: string): ResourceNode[] => {
     const childIndex = new Map<string, ResourceNode[]>();
@@ -143,9 +138,8 @@ export function useEditMenu({
           icon: <FolderPlus className="h-3.5 w-3.5" />,
           onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: id }),
         },
-        // A module accepts an endpoint directly, so this needs no
-        // collection to exist first — and no dialog: the row is written
-        // and dropped straight into rename.
+        // 模块直接接受接口，故无需先存在某个集合，也无需对话框：行写入后直接进入
+        // 重命名。
         {
           kind: 'item',
           label: '新建接口',
@@ -173,9 +167,8 @@ export function useEditMenu({
     if (kind === 'collection') {
       const col = nodes.find((c) => c.id === id);
       if (!col) return [];
-      // A top-level collection's parent is its module; a nested one's is
-      // the collection above it. `parentId` says which, with no flag to
-      // keep in sync.
+      // 顶层集合的父级是它的模块；嵌套集合的父级是它上面那个集合。`parentId` 本身就
+      // 能说明是哪种，无需另设一个要同步的标志。
       const isTopLevel = col.parentId
         ? nodes.find((n) => n.id === col.parentId)?.kind === 'module'
         : false;
@@ -225,13 +218,10 @@ export function useEditMenu({
                 label: `脱离到「${parentName}」根级`,
                 icon: <CornerDownRight className="h-3.5 w-3.5" />,
                 onClick: () => {
-                  // Pop this collection back out to the top level of
-                  // whatever module the parent lives in. Useful when a
-                  // collection was nested by mistake.
+                  // 把这个集合弹回其父级所在模块的顶层 —— 集合被误嵌套时有用。
                   //
-                  // The destination is the parent's own parent — under
-                  // the unified tree, "the root level of this module"
-                  // is just "wherever my parent sits".
+                  // 目的地就是父级的父级：在统一的树下，「本模块的根级」就是「我父级所在的
+                  // 那一层」。
                   const parent = nodes.find((n) => n.id === col.parentId);
                   if (!parent) return;
                   const targetSiblings = nodes.filter(
@@ -278,8 +268,8 @@ export function useEditMenu({
         icon: <Terminal className="h-3.5 w-3.5" />,
         disabled: true,
         onClick: () => {
-          // Copy as cURL — uses `preparedToCurl` from `@/lib/http-build`, rendering
-          // the very object Send ships.
+          // 复制为 cURL —— 用 `@/lib/http-build` 的 `preparedToCurl` 渲染发送所用的
+          // 那个对象。
         },
       },
       ...(ep
@@ -292,10 +282,8 @@ export function useEditMenu({
               label: '脱离当前集合',
               icon: <CornerDownRight className="h-3.5 w-3.5" />,
               onClick: () => {
-                // No-op placeholder: an endpoint must live in a
-                // collection, so the natural "detach" is to move it
-                // to a different one. We delegate to the user via
-                // drag — clicking just opens a hint.
+                // 空操作占位：接口必须住在某个集合里，故自然的「脱离」是把它移到另一个
+                // 集合。这件事交给用户拖拽 —— 点击只是给个提示。
                 openEndpointTab(id);
               },
             },

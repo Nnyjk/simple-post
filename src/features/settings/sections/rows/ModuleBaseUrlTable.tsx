@@ -9,58 +9,44 @@ import type { EnvironmentSectionProps } from '../EnvironmentSection';
 import { InlineNameCell } from './InlineNameCell';
 
 /**
- * The 前置 URL table — one row per (module, service) pair.
+ * 前置 URL 表 —— 每行一个 (模块, 服务) 对。
  *
- * Shape is ApiFox's: three columns (模块 / 服务 / 前置 URL), modules
- * grouped in `sortOrder`, and the module name printed only on its group's
- * first row so the column reads as a rowspan.
+ * 形状取自 ApiFox：三列（模块 / 服务 / 前置 URL），模块按 `sortOrder` 分组，模块名只印在
+ * 每组首行，使该列读起来像 rowspan。
  *
- * The row set is the **cartesian product** of the project's modules and
- * the project's services, not a join of the two: every module gets a row
- * for every service, because the service list is project-wide and every
- * module may legitimately point the same 服务 at a different host. That is
- * the whole reason `Environment.moduleBaseUrls` is keyed
- * `serviceId → moduleId` rather than flat.
+ * 行集是项目模块与项目服务的**笛卡尔积**，不是两者的 join：每个模块为每个服务各得一行，
+ * 因为服务列表是项目级的，而每个模块都可能合理地把同一个 服务 指向不同 host。这正是
+ * `Environment.moduleBaseUrls` 按 `serviceId → moduleId` 作键而非扁平结构的原因。
  *
- * Consequently a cell holds one independent value and there is nothing to
- * inherit: an empty cell means "this module has no address for this
- * service here", full stop. It deliberately does **not** show another
- * module's cell or the project default's cell as a placeholder —
- * pre-filling it would be exactly the 偷偷借用 the model forbids.
+ * 因此单元格各持一个独立值，没有任何东西可继承：空单元格就是「此模块在此环境对此服务没有
+ * 地址」，仅此而已。它刻意**不**把别的模块或项目默认的单元格显示成占位 —— 预填正是该
+ * 模型所禁止的 偷偷借用。
  *
- * Services are listed in the order the project hands them over, and that
- * array order *is* the sort order: `db::base_url_defs::list_by_project`
- * already orders by `sort_order ASC, id ASC`, so the wire array arrives
- * sorted. Adding a `sortOrder` field to `BaseUrlDefinition` would
- * duplicate that ordering and let the two disagree, so the table renders
- * the array as-is and must not re-sort it.
+ * 服务按项目给出的顺序列出，而这个数组顺序*就是*排序：
+ * `db::base_url_defs::list_by_project` 已按 `sort_order ASC, id ASC` 排序，故线上数组
+ * 到达时已排好。给 `BaseUrlDefinition` 加一个 `sortOrder` 字段会重复这份排序并让两者
+ * 分歧，故本表按原样渲染、不得重排。
  *
- * Presentational: everything arrives as props, including the module list
- * (already filtered to this project and sorted by the host).
+ * 纯展示：一切都由 props 传入，包括模块列表（已按项目过滤并由宿主排序）。
  *
- * TWO MODES, ONE TABLE
+ * 两种模式，一张表
  * --------------------
- * `mode="project"` is the whole-project view: the cartesian product, the
- * 模块 column, and full management of the *service definitions* (rename,
- * ★, delete, add) because that list is the project's own.
+ * `mode="project"` 是全项目视图：笛卡尔积、模块 列，以及对*服务定义*的完整管理
+ * （重命名、★、删除、新增），因为那个列表属于项目本身。
  *
- * `mode="module"` is the single-module view a **module tab** shows: the
- * row set collapses to just this module, the 模块 column disappears (there
- * is only one value in it), and the service cells turn read-only — the
- * service *list* belongs to the project, so renaming, starring or deleting
- * one from inside a module would be an action on something the user is not
- * looking at, and the delete would take away every other module's row for
- * it. What stays is the cell that is genuinely the module's own: its
- * address for each service, in this environment.
+ * `mode="module"` 是**模块标签**所示的单模块视图：行集收缩为仅此模块，模块 列消失
+ * （其中只有一个值），服务单元格变只读 —— 服务*列表*属于项目，从模块内部重命名、加星或
+ * 删除一个服务，就是对用户正在看的东西之外的对象动手，而且删除会连带拿走其他所有模块
+ * 为它的那一行。留下的是真正属于该模块的东西：它在此环境下对每个服务的地址。
  */
 interface ModuleBaseUrlTableProps {
   env: Environment;
   projectId: string;
   modules: readonly ResourceNode[];
-  /** Which view this table is serving. See the note above. */
+  /** 本表服务的是哪个视图，见上方说明。 */
   mode?: 'project' | 'module';
   baseUrlDefinitions: readonly BaseUrlDefinition[];
-  /** The project's ★ — one id for the whole project, not one per module. */
+  /** 项目 ★ —— 整个项目一个 id，不是每个模块一个。 */
   defaultBaseUrlDefinitionId: string | null;
   setEnvironmentModuleBaseUrl: EnvironmentSectionProps['setEnvironmentModuleBaseUrl'];
   addBaseUrlDefinition: EnvironmentSectionProps['addBaseUrlDefinition'];
@@ -69,9 +55,9 @@ interface ModuleBaseUrlTableProps {
   onDeleteBaseUrl: (def: { id: string; name: string }) => void;
 }
 
-/** Column widths, shared by the header and every row so they line up. */
+/** 列宽，由表头与每一行共用以保证对齐。 */
 const GRID = 'grid grid-cols-[7rem_11rem_minmax(0,1fr)_auto] items-center gap-2';
-/** Same table without the 模块 column — `mode="module"`. */
+/** 同一张表去掉 模块 列 —— `mode="module"`。 */
 const GRID_SINGLE = 'grid grid-cols-[11rem_minmax(0,1fr)_auto] items-center gap-2';
 
 export function ModuleBaseUrlTable({
@@ -91,9 +77,8 @@ export function ModuleBaseUrlTable({
   const grid = single ? GRID_SINGLE : GRID;
 
   if (modules.length === 0) {
-    // The table's row set is (module × service), so with no module there
-    // is nothing to configure — every cell would be unaddressable. Point
-    // at the fix rather than rendering an empty grid.
+    // 行集是 (模块 × 服务)，没有模块就无从配置 —— 每个单元格都无法寻址。故直接指出修法，
+    // 而不是渲染一张空网格。
     return (
       <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
         该项目还没有模块 · 先在左侧资源树新建模块，服务配置才有归属
@@ -102,10 +87,8 @@ export function ModuleBaseUrlTable({
   }
 
   if (baseUrlDefinitions.length === 0 && single) {
-    // Project mode answers this with the 添加服务 row. Here that control
-    // would be a project-level write hiding inside a module tab, and the
-    // row set would be a single "add" line — so say where the service
-    // list actually lives instead.
+    // 项目模式用「添加服务」那一行作答。此处那个控件会是藏在模块标签里的项目级写入，且行集
+    // 会只剩一行「新增」—— 故改为说明服务列表实际在哪里。
     return (
       <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
         该项目还没有定义服务 · 在项目标签里添加第一个服务
@@ -128,9 +111,8 @@ export function ModuleBaseUrlTable({
           env={env}
           projectId={projectId}
           module={module}
-          // The full project list, not a per-module slice — that is the
-          // cartesian product. In `module` mode `modules` is already the
-          // single module, so the same expression is the right one.
+          // 完整项目列表而非每模块的切片 —— 这就是笛卡尔积。`module` 模式下 `modules` 本就
+          // 是那唯一一个模块，故同一个表达式在两种模式下都对。
           defs={baseUrlDefinitions}
           defaultBaseUrlDefinitionId={defaultBaseUrlDefinitionId}
           setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
@@ -173,9 +155,9 @@ function ModuleGroup({
   setDefaultBaseUrlDefinition: EnvironmentSectionProps['setDefaultBaseUrlDefinition'];
   onDeleteBaseUrl: (def: { id: string; name: string }) => void;
   flush: boolean;
-  /** `mode="module"`: drop the 模块 column and the service controls. */
+  /** `mode="module"`：去掉 模块 列与服务控件。 */
   single: boolean;
-  /** The grid class for this mode, so header and rows cannot disagree. */
+  /** 本模式的网格 class，保证表头与各行不会分歧。 */
   grid: string;
 }) {
   return (
@@ -189,10 +171,8 @@ function ModuleGroup({
             !(flush && i === 0) && 'border-t border-border/60',
           )}
         >
-          {/* Module cell — printed once per group. Empty cells below it
-              are what turn this column into a visual rowspan. Omitted
-              entirely in `module` mode, where the grid has no such
-              column. */}
+          {/* 模块单元格 —— 每组只印一次。它下面的空单元格让这一列读起来像 rowspan。
+              `module` 模式下整个省略，那里网格没有这一列。 */}
           {!single &&
             (i === 0 ? (
               <div className="flex min-w-0 items-center gap-1.5" title={module.name}>
@@ -203,12 +183,9 @@ function ModuleGroup({
               <span />
             ))}
 
-          {/* Service cell — rename + project-wide default star. Both are
-              project-level, so they repeat on every module's rows and
-              editing either from any row edits the same thing. In
-              `module` mode both are dropped: the pane is about this
-              module's address, and the project owns the list those
-              controls would edit. */}
+          {/* 服务单元格 —— 重命名 + 项目级默认星标。两者都是项目级的，故在每个模块的行上
+              重复出现，从任意一行改的都是同一个东西。`module` 模式下两者都去掉：该面板讲的
+              是本模块的地址，而这些控件要改的列表归项目所有。 */}
           <div className="flex min-w-0 items-center gap-1">
             {single ? (
               <span className="truncate text-xs text-muted-foreground" title={def.name}>
@@ -235,16 +212,13 @@ function ModuleGroup({
             )}
           </div>
 
-          {/* URL cell — this module's own value for this service in this
-              environment. Generic hint only: naming another cell here
-              would promise an inheritance that does not exist.
+          {/* URL 单元格 —— 本模块在此环境下对此服务的自有值。只给通用提示：在此点名另一个
+              单元格等于承诺一种并不存在的继承。
 
-              An emptied input sends `null`, not `''`. Both read as "no
-              address" at send time, but only `null` actually *removes* the
-              cell — the store deletes the key and prunes the service row
-              once its last cell is gone, so a cleared project does not
-              accumulate `defId → moduleId → ""` shells that read as
-              "configured here" to anything diffing the object by key. */}
+              清空的输入框送的是 `null` 而非 `''`。两者在发送时都读作「无地址」，但只有
+              `null` 真正**删除**该单元格 —— store 会删掉这个键，并在最后一个单元格消失时
+              剪掉服务行，故清空过的项目不会堆积 `defId → moduleId → ""` 的空壳，让任何
+              按键 diff 对象的读法误判为「此处已配置」。 */}
           <div className="min-w-0">
             <Input
               value={env.moduleBaseUrls[def.id]?.[module.id] ?? ''}
@@ -263,10 +237,8 @@ function ModuleGroup({
             />
           </div>
 
-          {/* Deleting removes the project-wide service, so it also takes
-              away every other module's row for it. Hover-revealed, and
-              every row carries one because the affordance belongs to the
-              service rather than to any single cell. */}
+          {/* 删除的是项目级的服务，故会连带拿走其他所有模块为它的那一行。悬停才显示，且
+              每行都带一个 —— 这个便利性属于服务，而不是任何单个单元格。 */}
           {!single && (
             <div className="flex shrink-0 items-center">
               <Tooltip content="删除服务" side="bottom">
@@ -284,9 +256,8 @@ function ModuleGroup({
         </div>
       ))}
 
-      {/* Adding is offered per module group because that is the row the
-          user is looking at when they add one — but the service itself
-          lands on the project and shows up in every group. */}
+      {/* 「添加服务」按模块组给出，因为新增时用户正看着那一行 —— 但服务本身落在项目上，
+          会在每个组里都出现。 */}
       {!single && (
         <div
           className={cn(
@@ -313,13 +284,11 @@ function ModuleGroup({
 }
 
 /**
- * The project's default service (★).
+ * 项目默认服务（★）。
  *
- * Starred rows are what an endpoint resolves through when it names no
- * service itself, so this is the one control in the table that changes
- * the URL an existing interface sends. Clicking it off is not a no-op:
- * it deliberately leaves the project with no default, so every endpoint
- * that relied on one loses its baseUrl.
+ * 接口自身未指定服务时按带星的那一行解析，故这是表中唯一会改变**既有**接口所发 URL 的
+ * 控件。把它点掉不是空操作：它刻意让项目落到没有默认，于是每个依赖默认的接口都失去它
+ * 的 baseUrl。
  */
 function DefaultToggle({ isDefault, onToggle }: { isDefault: boolean; onToggle: () => void }) {
   return (

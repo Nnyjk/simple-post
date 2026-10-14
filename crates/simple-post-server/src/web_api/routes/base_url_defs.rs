@@ -15,13 +15,11 @@ use super::super::dto::{BaseUrlDefCreateBody, BaseUrlDefSetDefaultBody};
 
 // ----- baseUrlDefs --------------------------------------------------------
 //
-// A service belongs to a **project**, and the address says so: the
-// create and set-default verbs hang off `/api/projects/:projectId/baseurls`,
-// next to the list they extend. Only the id-scoped verbs stay under
-// `/api/baseurl-defs/:defId`, because a rename or a delete names the
-// service itself and needs no project context to find it.
+// 服务属于**项目**，地址也这么说：create 与 set-default 挂在
+// `/api/projects/:projectId/baseurls` 下，紧邻它们扩充的那个列表。只有按 id 的动词留在
+// `/api/baseurl-defs/:defId`——改名或删除点名的是服务本身，找到它不需要项目上下文。
 
-/// Read every service of a project, flat.
+/// 读某项目的全部服务，打平。
 pub(crate) async fn base_url_defs_list(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
@@ -33,23 +31,22 @@ pub(crate) async fn base_url_defs_list(
     Ok(Json(serde_json::to_value(&rows).unwrap_or(Value::Null)))
 }
 
-/// Add a service to the project's list.
+/// 往项目的服务列表里加一个。
 pub(crate) async fn base_url_defs_create(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
     Json(body): Json<BaseUrlDefCreateBody>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     let def = crate::domain::BaseUrlDefinition {
-        // Same id policy as the Tauri command, one helper for both (see
-        // `crate::dto::adopt_or_mint_id`): the renderer keys the project's
-        // ★ and the per-(env × module) URL cells off this id before the
-        // row exists.
+        // 与 Tauri 命令同一套 id 策略，两边共用一个辅助函数（见
+        // `crate::dto::adopt_or_mint_id`）：renderer 在这一行存在之前就拿这个 id 当
+        // 项目 ★ 与每格（环境 × 模块）URL 单元格的键。
         id: crate::dto::adopt_or_mint_id(body.id),
         name: body.name,
         description: body.description,
     };
-    // The stored row comes back rather than the request's own copy: the
-    // renderer swaps it into the project's list it already holds.
+    // 回存下的行而不是请求里那份副本：renderer 要拿它换掉自己手上已有的项目列表里的
+    // 那一条。
     let stored = db::with_tx(&s.pool, |c| {
         db::base_url_defs::create(c, &def, &project_id)?;
         db::base_url_defs::get(c, &def.id)
@@ -66,9 +63,8 @@ pub(crate) async fn base_url_defs_update(
     Path(def_id): Path<String>,
     Json(patch): Json<crate::dto::BaseUrlDefPatch>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // `BaseUrlDefPatch` lives in `commands/dto.rs` (not `domain`) because
-    // it has no other callers. Reusing it here keeps the wire shape
-    // identical to the IPC path.
+    // `BaseUrlDefPatch` 住在 `commands/dto.rs`（而非 `domain`），因为它没有其他调用方。
+    // 在此复用它，好让线格式与 IPC 路径完全一致。
     let row = db::with_tx(&s.pool, |c| {
         db::base_url_defs::update(c, &def_id, patch.name.clone(), patch.description.clone())
     })
@@ -84,12 +80,10 @@ pub(crate) async fn base_url_defs_delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Point the project's ★ at one of its own services (`defId = null`
-/// clears it) and echo the project back.
+/// 把项目的 ★ 指向它自己的某个服务（`defId = null` 则清空），并回显项目。
 ///
-/// The ★ is `Project.defaultBaseUrlDefinitionId` — the pointer every
-/// endpoint naming no service resolves against — so the caller is
-/// handed the updated value instead of a `204` and a re-read.
+/// ★ 就是 `Project.defaultBaseUrlDefinitionId`——任何没点名服务的 endpoint 都拿它
+/// 解析——故直接回传更新后的值，而不是 `204` 加一次重读。
 pub(crate) async fn base_url_defs_set_default(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,

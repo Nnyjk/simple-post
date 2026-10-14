@@ -1,18 +1,16 @@
 /**
- * Tests for `src/lib/request-validation.ts`.
+ * `src/lib/request-validation.ts` 的测试。
  *
- * The rule under test is deliberately narrow ("json-mode body must
- * parse"), so the interesting assertions are the ones about what it must
- * NOT complain about:
+ * 被测规则刻意很窄（「json 模式的 body 必须能解析」），所以有意思的断言是那些关于
+ * 它**不该**管什么：
  *
- *   - an empty json body is unfinished, not malformed
- *   - non-json modes are none of its business
- *   - a **pass** is as meaningful as a failure — it is what dismisses a
- *     pinned badge, so callers depend on `null` meaning "clear it"
+ *   - 空的 json body 是没写完，不是格式坏了
+ *   - 非 json 模式不归它管
+ *   - 一次**通过**与一次失败同样有意义——它是让钉住的徽标消失的那一次，所以调用方
+ *     依赖 `null` 表示「清掉它」
  *
- * The behavioural contract this file protects (only Send / Save / 格式化
- * call it, and the verdict is pinned until one of them passes) lives in
- * HttpTester; what is asserted here is the pure function underneath.
+ * 本文件保护的行为契约（只有 发送 / 保存 / 格式化 会调用它，结论被钉住直到其中之一
+ * 通过）住在 HttpTester；这里断言的是底下那个纯函数。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,22 +35,21 @@ describe('validateRequest', () => {
   });
 
   it('treats an empty json body as unfinished, not malformed', () => {
-    // Blocking here would make the badge complain about a field the user
-    // has not filled in yet, and there is nothing to parse.
+    // 在这里拦下，徽标就会去抱怨一个用户还没填的字段，而且根本没什么可解析的。
     assert.equal(validateRequest({ body: body('') }), null);
     assert.equal(validateRequest({ body: body('   \n ') }), null);
   });
 
   it('stays out of the way for non-json modes', () => {
-    // `raw` content that happens to be broken JSON is legal as raw text.
+    // `raw` 内容恰好是坏 JSON 也仍是合法的原始文本。
     assert.equal(validateRequest({ body: body('{"a":', 'raw') }), null);
     assert.equal(validateRequest({ body: body('not json at all', 'form') }), null);
     assert.equal(validateRequest({ body: body('', 'none') }), null);
   });
 
   it('returns null — not an issue object — so callers can clear a pinned error', () => {
-    // The dismissal path is `issue === null`. Returning a falsy-but-present
-    // value here would silently leave the badge stuck on screen.
+    // 消掉错误的路径就是 `issue === null`。这里若返回一个 falsy 但存在的值，徽标会
+    // 悄悄留在屏幕上。
     const result = validateRequest({ body: body('{"ok":true}') });
     assert.strictEqual(result, null);
   });

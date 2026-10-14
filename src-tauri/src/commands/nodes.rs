@@ -2,14 +2,10 @@
 // region: nodes
 // ===========================================================================
 //
-// Replaces `modules_*`, `collections_*` and `endpoints_*` — nineteen Tauri
-// commands that existed only because the tree was three tables. The
-// handlers below are the Tauri half of the same surface `web_api/routes/
-// nodes.rs` serves over REST; both go through `crate::db::nodes` so the
-// two transports cannot diverge.
+// Tauri 半边；REST 半边在 `web_api/routes/nodes.rs`，两者都过 `crate::db::nodes`，
+// 两种传输不可能分叉。
 //
-// Two commands are not about structure and keep their own handlers:
-// `nodes_duplicate` and the endpoint-detail pair.
+// 非结构的两类命令另有归属：`nodes_duplicate` 与 endpoint-detail 一对。
 
 use tauri::State;
 
@@ -19,13 +15,10 @@ use crate::error::AppError;
 
 use super::dto::CreateEndpointDetailOpts;
 
-/// Every node under one project, or the whole database when no root is
-/// named.
+/// 某项目下的全部节点；不给 `root_id` 则全库。
 ///
-/// `kind` narrows to a single type and `query` runs the substring search
-/// (which joins `endpoint_details`, since `url` lives there). `query`
-/// wins over `kind` — a search across one type is a filter the caller
-/// can apply, and a backend that guessed between them would be guessing.
+/// `kind` 收窄到单一类型，`query` 走子串搜索（要 join `endpoint_details`，`url` 在那）。
+/// `query` 优先于 `kind`：跨类型搜索是调用方自己就能加的过滤，后端替它在两者间猜才是猜。
 #[tauri::command]
 pub fn nodes_list(
     state: State<DbPool>,
@@ -43,9 +36,8 @@ pub fn nodes_list(
         ),
         None => None,
     };
-    // A type filter without a root would scan the whole database and
-    // throw most of it away. Say so rather than quietly returning the
-    // tree for a different project than the caller has active.
+    // 只有类型过滤而无 root 会扫全库再丢掉大半；直接报错，免得悄悄返回
+    // 另一个项目的树。
     if kind.is_some() && root_id.is_none() {
         return Err(AppError::Validation("type filter requires rootId".into()));
     }
@@ -63,13 +55,10 @@ pub fn nodes_get(state: State<DbPool>, id: String) -> Result<ResourceNode, AppEr
     crate::db::with_conn(&state, |c| crate::db::nodes::get(c, &id))
 }
 
-/// Create a node. An endpoint arrives as one call carrying both halves —
-/// the structural node and its request configuration — because they are
-/// written in a single transaction and a tree where either can be missing
-/// is a tree the reader cannot open.
+/// 建节点。endpoint 一次调用带上两半（结构节点 + 请求配置）：两者写在同一个事务里，
+/// 而任何一半可能缺失的树是打不开的树。
 ///
-/// `root_id` is only required for a module. For a collection or an
-/// endpoint it is derived from the parent, so the two can never disagree.
+/// 只有 module 需要 `root_id`；collection / endpoint 从父节点推出，两者不可能打架。
 #[tauri::command]
 pub fn nodes_create(
     state: State<DbPool>,
@@ -106,9 +95,8 @@ pub fn nodes_create(
     })
 }
 
-/// Rename / re-describe / re-order one node. Moving is a separate command
-/// — see [`nodes_move`] — because it has to keep the type matrix and the
-/// subtree's `root_id` honest.
+/// 改名 / 改描述 / 改顺序。移动另立一个命令（见 [`nodes_move`]），因为它得保住
+/// 类型矩阵与整棵子树的 `root_id`。
 #[tauri::command]
 pub fn nodes_update(
     state: State<DbPool>,
@@ -124,12 +112,11 @@ pub fn nodes_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| crate::db::nodes::delete(c, &id))
 }
 
-/// Move one or many nodes under a new parent at a new sibling position.
+/// 移动节点到新父节点下的新同级位置。
 ///
-/// `parent_id` of `None` means "top of the project" and is only legal for
-/// a module — the old `parentKind` field is gone because the destination
-/// parent's own type answers the question. `node_ids` is in the order the
-/// nodes should land, so a multi-select drag keeps the user's pick order.
+/// `parent_id` 为 `None` 是「项目顶层」，只对 module 合法——目标父节点自身的类型
+/// 已经回答了「放哪」，无需另带 `parentKind`。`node_ids` 即落地顺序，多选拖拽得以
+/// 保持用户的选择次序。
 #[tauri::command]
 pub fn nodes_move(
     state: State<DbPool>,
@@ -142,16 +129,12 @@ pub fn nodes_move(
     })
 }
 
-/// Copy an endpoint under the same parent, immediately after it.
+/// 在同父下、紧跟其后复制一个 endpoint。
 ///
-/// Endpoints only: a "copy" of a module or collection would be an empty
-/// shell, and copying a subtree is a different feature, not a duplicate.
+/// 只限 endpoint：module / collection 的「副本」是空壳，复制子树是另一个功能而非复制。
 ///
-/// `new_id` is the caller's own id for the copy, honoured verbatim so an
-/// optimistic duplicate can hand the tab strip a row that will exist by
-/// the time it renders. Omitting it mints one server-side, which is what
-/// a caller with no local copy to stay consistent with (the MCP tool)
-/// wants.
+/// `new_id` 由调用方给就照用，让乐观复制能立刻给标签栏一行它渲染时确实存在的记录；
+/// 不给则服务端生成，没有本地副本要对齐的一方（MCP 工具）要的就是后者。
 #[tauri::command]
 pub fn nodes_duplicate(
     state: State<DbPool>,
@@ -172,20 +155,16 @@ pub fn endpoint_detail_get(
     crate::db::with_conn(&state, |c| crate::db::endpoint_details::get(c, &node_id))
 }
 
-/// Every endpoint's configuration in the workspace, as a flat list the
-/// renderer keys by `nodeId`.
+/// 全部 endpoint 的请求配置，扁平列表，渲染侧按 `nodeId` 建索引。
 ///
-/// Separate from [`nodes_list`] because the tree never renders a method
-/// or a url — it only needs name / type / order. Reading the detail table
-/// for every node on boot would pull a column set most rows do not have,
-/// and folding it into the tree read would be a join on every startup for
-/// data the user may never open.
+/// 与 [`nodes_list`] 分开：树不渲染 method / url，只需要名称 / 类型 / 顺序。启动时为
+/// 每个节点读一次 detail 表，会拉来多数行根本没有的列集，而折进树读取就是每次启动
+/// 一次 join，换来用户可能一辈子不打开的数据。
 #[tauri::command]
 pub fn endpoint_details_list(state: State<DbPool>) -> Result<Vec<EndpointDetail>, AppError> {
-    // One query per project rather than a join: `endpoint_details` is
-    // keyed by node id, so the only way to reach a project's endpoints is
-    // through `nodes.root_id`. `list_by_root` already does that join, and
-    // the project count is bounded by what the user has open.
+    // 每个项目一次查询而非 join：`endpoint_details` 以节点 id 为键，要触达某项目的
+    // endpoint 只能经 `nodes.root_id`；`list_by_root` 已含这个 join，项目数受用户
+    // 实际打开的范围约束。
     let roots = crate::db::with_conn(&state, crate::db::projects::list)?
         .into_iter()
         .map(|p| p.id)
@@ -199,9 +178,7 @@ pub fn endpoint_details_list(state: State<DbPool>) -> Result<Vec<EndpointDetail>
     Ok(out)
 }
 
-/// Patch an endpoint's request configuration. Separate from
-/// [`nodes_update`] so renaming an endpoint does not rewrite the JSON
-/// columns that did not change.
+/// 改 endpoint 的请求配置。与 [`nodes_update`] 分开，免得改个名字就重写没变的 JSON 列。
 #[tauri::command]
 pub fn endpoint_detail_update(
     state: State<DbPool>,

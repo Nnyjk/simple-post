@@ -1,24 +1,20 @@
 /**
- * Integration tests for `sendRequest` — runs `fetch` against a real
- * local HTTP server (built on `node:http`) so the wire path is
- * exercised end-to-end.
+ * `sendRequest` 的集成测试 —— 对一个真实的本地 HTTP 服务（基于 `node:http`）跑
+ * `fetch`，把线上路径端到端走一遍。通过 `npm test` 运行。
  *
- * Run via `npm test`.
- *
- * Coverage matrix:
- *   1. All 7 HTTP methods arrive at the server with the right verb.
- *   2. Query parameters arrive in the URL.
- *   3. User headers + auto Content-Type + auto Accept all reach the server.
- *   4. Body is sent verbatim for json / form / raw; nothing for mode=none.
- *   5. Auth (Bearer / Basic / API Key header / API Key query) reaches the server.
- *   6. {{var}} templates in URL / header / auth resolve against env.
- *   7. Response: 200 / 404 / 500 status passthrough; JSON → bodyJson set,
- *      non-JSON → bodyJson undefined.
- *   8. settings.timeoutMs fires → status 0, statusText 'Timeout'.
- *   9. Caller-initiated abort → status 0, statusText 'Aborted'.
- *  10. Network error (server unreachable) → status 0, statusText 'Network Error'.
- *  11. settings.maxResponseSizeKb caps body and appends a truncation marker.
- *  12. settings.followRedirects: true follows, false surfaces 3xx.
+ * 覆盖矩阵：
+ *   1. 全部 7 个 HTTP 方法以正确的动词到达服务端。
+ *   2. 查询参数出现在 URL 里。
+ *   3. 用户 header + 自动 Content-Type + 自动 Accept 都到达服务端。
+ *   4. body 对 json / form / raw 逐字送达；mode=none 则不送。
+ *   5. 认证（Bearer / Basic / API Key header / API Key query）到达服务端。
+ *   6. URL / header / 认证里的 {{var}} 模板对环境解析。
+ *   7. 响应：200 / 404 / 500 状态透传；JSON → 设置 bodyJson，非 JSON → bodyJson 未定义。
+ *   8. settings.timeoutMs 触发 → status 0、statusText 'Timeout'。
+ *   9. 调用方发起中止 → status 0、statusText 'Aborted'。
+ *  10. 网络错误（服务端不可达）→ status 0、statusText 'Network Error'。
+ *  11. settings.maxResponseSizeKb 限制体积并追加截断标记。
+ *  12. settings.followRedirects：true 跟随，false 把 3xx 暴露出来。
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +25,7 @@ import { sendRequest, type SendInput } from '../http';
 import type { RequestSettings } from '../../stores/app-store';
 import type { AuthConfig, Environment, HttpMethod } from '../../types/domain';
 
-// ---------- server scaffolding ----------
+// ---------- 服务端脚手架 ----------
 
 interface CapturedRequest {
   method: string;
@@ -42,7 +38,7 @@ interface ScriptedResponse {
   status?: number;
   headers?: Record<string, string>;
   body?: string;
-  /** Delay before sending the response, in milliseconds. */
+  /** 发送响应前的延迟（毫秒）。 */
   delayMs?: number;
 }
 
@@ -56,9 +52,8 @@ let nextResponse: ScriptedResponse = {
 let server: Server;
 let baseUrl: string;
 
-/** Body shape of `POST /api/http/send` (camelCase, mirrors Rust
- *  `HttpSendBody`). Kept here so the fetch mock can parse what the
- *  http.ts sends. */
+/** `POST /api/http/send` 的 body 形状（camelCase，镜像 Rust 的
+ *  `HttpSendBody`）。放在这里，好让 fetch mock 能解析 http.ts 发出的东西。 */
 interface SendBody {
   method: string;
   url: string;
@@ -69,34 +64,28 @@ interface SendBody {
   maxResponseSizeKb: number;
 }
 
-/** Original `globalThis.fetch` — used by the mock to proxy the real
- *  HTTP request to the test server after unwrapping the bridge
- *  envelope. */
+/** 原始的 `globalThis.fetch` —— mock 用它在剥掉桥接信封后，把真实 HTTP 请求
+ *  转发给测试服务端。 */
 const originalFetch: typeof fetch = globalThis.fetch.bind(globalThis);
 
 /**
- * Test stub for the serve-web `/api/http/send` bridge.
+ * serve-web `/api/http/send` 桥接的测试桩。
  *
- * Production runs the bridge via the real axum `http_send` handler
- * (`src-tauri/src/web_api/routes/nodes.rs`) which deserialises the
- * `HttpSendBody`, runs `http_executor::execute`, and returns the
- * `HttpResult` envelope. To exercise the new http.ts → invokeCmd →
- * webFetch path inside Node tests we have to intercept
- * `globalThis.fetch`, recognise the relative `/api/http/send` URL,
- * and reply with an equivalent envelope around whatever the real
- * upstream server returns.
+ * 生产环境里这个桥接由真正的 axum `http_send` handler 执行
+ * （`src-tauri/src/web_api/routes/nodes.rs`）：它反序列化 `HttpSendBody`、跑
+ * `http_executor::execute`、返回 `HttpResult` 信封。要在 Node 测试里走通
+ * http.ts → invokeCmd → webFetch 这条路，就得拦下 `globalThis.fetch`、认出相对的
+ * `/api/http/send` URL，然后围绕真实上游服务端的返回内容回一个等价信封。
  *
- * Mirrors production semantics:
- *   - timeoutMs → AbortController that fires at the deadline; the
- *     returned envelope has `ok:false, error:{kind:'timeout'}`, the
- *     same shape Rust returns on a reqwest timeout.
- *   - followRedirects=false → native fetch `redirect:'manual'`,
- *     preserving 3xx bodies in the captured request.
- *   - caller AbortSignal → propagated to the upstream fetch; if it
- *     fires we re-throw so http.ts maps it to `abortedResponse`.
- *   - transport failure (ECONNREFUSED, DNS, etc.) → envelope with
- *     `ok:false, error:{kind:'network'}`, the same envelope Rust
- *     returns on `reqwest::Error`.
+ * 镜像生产语义：
+ *   - timeoutMs → 到点触发的 AbortController；返回的信封是
+ *     `ok:false, error:{kind:'timeout'}`，与 Rust 在 reqwest 超时时返回的形状相同。
+ *   - followRedirects=false → 原生 fetch 的 `redirect:'manual'`，在捕获的请求里保留
+ *     3xx 的 body。
+ *   - 调用方 AbortSignal → 传给上游 fetch；触发时我们重新抛出，好让 http.ts 把它
+ *     映射成 `abortedResponse`。
+ *   - 传输失败（ECONNREFUSED、DNS 等）→ `ok:false, error:{kind:'network'}` 的信封，
+ *     与 Rust 在 `reqwest::Error` 时返回的相同。
  */
 async function mockBridgeFetch(
   input: string | URL | Request,
@@ -105,15 +94,14 @@ async function mockBridgeFetch(
   const urlStr =
     typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
   if (urlStr !== '/api/http/send') {
-    // Anything else (shouldn't happen in this suite) — passthrough.
+    // 其余情况（本套件里不该发生）——放行。
     return originalFetch(input as Request | string | URL, init);
   }
 
   const rawBody = typeof init?.body === 'string' ? init.body : '{}';
   const sendBody = JSON.parse(rawBody) as SendBody;
 
-  // Combine timeout + caller signal into one controller so either
-  // source aborts the upstream fetch.
+  // 把超时与调用方信号合成一个控制器，任一来源都能中止上游 fetch。
   const ctrl = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -141,21 +129,17 @@ async function mockBridgeFetch(
   try {
     const upstream = await originalFetch(sendBody.url, upstreamInit);
     const rawText = await upstream.text();
-    // Mirror Rust `http_executor::truncate_body`: cap bytes on a
-    // UTF-8 char boundary and append the marker the production
-    // server returns. Default cap is 0 = no truncation (matches
-    // the Rust `if max_bytes == 0 { return (body, false); }`
-    // branch).
+    // 镜像 Rust 的 `http_executor::truncate_body`：按 UTF-8 字符边界截断字节，并
+    // 追加生产服务端返回的那个标记。默认上限 0 = 不截断（对应 Rust 的
+    // `if max_bytes == 0 { return (body, false); }` 分支）。
     const maxBytes = sendBody.maxResponseSizeKb * 1024;
     let text = rawText;
     let truncated = false;
     if (maxBytes > 0 && rawText.length > maxBytes) {
       let cut = maxBytes;
-      // Walk back to a UTF-8 lead byte (or ASCII byte) so the
-      // slice doesn't split a multi-byte codepoint. Mirrors the
-      // `while cut > 0 && !body.is_char_boundary(cut)` loop in
-      // Rust without depending on `String.prototype.isCharBoundary`
-      // (not available in Node).
+      // 往回退到一个 UTF-8 首字节（或 ASCII 字节），好让切片不劈开多字节码点。镜像
+      // Rust 里的 `while cut > 0 && !body.is_char_boundary(cut)` 循环，又不依赖
+      // `String.prototype.isCharBoundary`（Node 里没有）。
       while (cut > 0) {
         const code = rawText.charCodeAt(cut - 1);
         if (code < 0x80 || code >= 0xc0) break;
@@ -185,7 +169,7 @@ async function mockBridgeFetch(
     });
   } catch (err) {
     if (timedOut) {
-      // Rust returns ok:false / error.kind=timeout on reqwest timeout.
+      // Rust 在 reqwest 超时时返回 ok:false / error.kind=timeout。
       const result = {
         ok: false,
         error: {
@@ -200,10 +184,10 @@ async function mockBridgeFetch(
     }
     const name = (err as { name?: string })?.name;
     if (name === 'AbortError' || /abort/i.test((err as Error).message ?? '')) {
-      // Caller-initiated abort — re-throw so http.ts maps it.
+      // 调用方发起的中止 —— 重新抛出，好让 http.ts 去映射。
       throw err;
     }
-    // Transport failure — envelope with kind=network (mirrors Rust).
+    // 传输失败 —— kind=network 的信封（镜像 Rust）。
     const result = {
       ok: false,
       error: {
@@ -243,8 +227,7 @@ before(async () => {
         body,
       });
       const r = nextResponse;
-      // Reset scripted response to a safe default; tests override
-      // before each call when they need a specific shape.
+      // 把脚本化响应重置成安全默认值；需要特定形状的测试会在每次调用前覆盖它。
       nextResponse = {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -258,8 +241,7 @@ before(async () => {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;
-  // Install the bridge stub AFTER server listen so the upstream
-  // fetcher inside the stub has a real port to dial.
+  // 桥接桩必须在服务端 listen 之后安装，好让桩里的上游 fetcher 有真实端口可拨。
   globalThis.fetch = mockBridgeFetch as unknown as typeof fetch;
 });
 
@@ -268,7 +250,7 @@ after(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-// ---------- helpers ----------
+// ---------- 辅助 ----------
 
 const ENV: Environment = {
   id: 'env_test',
@@ -312,7 +294,7 @@ function lastRequest(): CapturedRequest {
 }
 
 // ============================================================
-// 1. All 7 HTTP methods
+// 1. 全部 7 个 HTTP 方法
 // ============================================================
 
 describe('sendRequest: HTTP methods', () => {
@@ -329,7 +311,7 @@ describe('sendRequest: HTTP methods', () => {
 });
 
 // ============================================================
-// 2. Query parameters
+// 2. 查询参数
 // ============================================================
 
 describe('sendRequest: query params', () => {
@@ -363,7 +345,7 @@ describe('sendRequest: query params', () => {
 });
 
 // ============================================================
-// 3. Headers + auto Content-Type + auto Accept
+// 3. Header + 自动 Content-Type + 自动 Accept
 // ============================================================
 
 describe('sendRequest: headers', () => {
@@ -414,7 +396,7 @@ describe('sendRequest: headers', () => {
 });
 
 // ============================================================
-// 4. Body content reaches the server
+// 4. body 内容到达服务端
 // ============================================================
 
 describe('sendRequest: body', () => {
@@ -459,7 +441,7 @@ describe('sendRequest: body', () => {
 });
 
 // ============================================================
-// 5. Auth
+// 5. 认证
 // ============================================================
 
 describe('sendRequest: auth', () => {
@@ -524,7 +506,7 @@ describe('sendRequest: auth', () => {
 });
 
 // ============================================================
-// 6. {{var}} resolution in URL
+// 6. URL 里的 {{var}} 解析
 // ============================================================
 
 describe('sendRequest: URL template resolution', () => {
@@ -536,7 +518,7 @@ describe('sendRequest: URL template resolution', () => {
 });
 
 // ============================================================
-// 7. Response handling
+// 7. 响应处理
 // ============================================================
 
 describe('sendRequest: response handling', () => {
@@ -600,7 +582,7 @@ describe('sendRequest: response handling', () => {
 });
 
 // ============================================================
-// 8. Timeout (settings.timeoutMs)
+// 8. 超时（settings.timeoutMs）
 // ============================================================
 
 describe('sendRequest: timeout', () => {
@@ -620,7 +602,7 @@ describe('sendRequest: timeout', () => {
 });
 
 // ============================================================
-// 9. Caller-initiated abort
+// 9. 调用方发起的中止
 // ============================================================
 
 describe('sendRequest: caller abort', () => {
@@ -645,14 +627,12 @@ describe('sendRequest: caller abort', () => {
 });
 
 // ============================================================
-// 10. Network error
+// 10. 网络错误
 // ============================================================
 
 describe('sendRequest: network error', () => {
   it('returns status 0 / Network Error when port is unreachable', async () => {
-    // Port 1 is reserved + nothing is listening on it; the connection
-    // should be refused promptly. We use a tighter timeout to keep
-    // the test fast.
+    // 端口 1 是保留端口且上面没有监听，连接应当很快被拒。这里用更紧的超时让测试保持快速。
     const resp = await sendRequest({
       method: 'GET',
       url: 'http://127.0.0.1:1/api/x',
@@ -669,7 +649,7 @@ describe('sendRequest: network error', () => {
 });
 
 // ============================================================
-// 11. Size cap / truncation
+// 11. 体积上限 / 截断
 // ============================================================
 
 describe('sendRequest: size cap', () => {
@@ -684,9 +664,8 @@ describe('sendRequest: size cap', () => {
       settings: settings({ maxResponseSizeKb: 1 }), // 1 KB cap
     });
     assert.ok(resp.body.length <= 1024 + 64, `body too large: ${resp.body.length}`);
-    // Truncation is enforced server-side by `http_executor::truncate_body`
-    // (the same Rust function both shapes call). The marker text is
-    // therefore the Rust one, not the old client-side `[truncated at N KB]`.
+    // 截断由服务端的 `http_executor::truncate_body` 执行（两种形态调的是同一个 Rust
+    // 函数），所以标记文本是 Rust 那边那个，而不是客户端旧的 `[truncated at N KB]`。
     assert.match(resp.body, /\[truncated at 1024 bytes by Tauri HTTP layer\]$/);
   });
 
@@ -705,17 +684,16 @@ describe('sendRequest: size cap', () => {
 });
 
 // ============================================================
-// 12. Redirect behavior
+// 12. 重定向行为
 // ============================================================
 
 describe('sendRequest: redirect', () => {
   type ReqListener = (req: IncomingMessage, res: ServerResponse) => void;
   it('follows 302 when settings.followRedirects is true', async () => {
-    // First server: 302 → /redirected. Second server: 200 + body.
-    // node:test runs sequentially per file, so we can stack two
-    // local servers by listening on another ephemeral port. To keep
-    // this test self-contained we instead use a redirect to the same
-    // server (which returns 200 by default after the first request).
+    // 第一个服务端：302 → /redirected。第二个服务端：200 + body。
+    // node:test 在一个文件内顺序执行，所以可以在另一个临时端口上再叠一个本地
+    // 服务端。为了让本测试自包含，这里改用重定向到同一个服务端（第一次请求之后它
+    // 默认返回 200）。
     captured.length = 0;
     let firstCall = true;
     const originalListeners = server.listeners('request').slice() as ReqListener[];
@@ -750,7 +728,7 @@ describe('sendRequest: redirect', () => {
     assert.deepEqual(resp.bodyJson, { followed: true });
     assert.ok(captured.some((c) => c.url === '/redirected'));
 
-    // Restore the default handler for subsequent tests in this file.
+    // 把默认 handler 恢复回去，供本文件后续测试使用。
     server.removeAllListeners('request');
     for (const l of originalListeners) server.on('request', l);
   });

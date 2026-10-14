@@ -1,17 +1,14 @@
-//! REST handlers for the persisted response-history strip.
+//! 持久化响应历史条的 REST handler。
 //!
-//! The browser transport of the three `response_history_*` Tauri
-//! commands. Everything here is deliberately thin: the cap (10 rows per
-//! endpoint), the 256 KiB body clip and the row mapping all live in
-//! `db::response_history`, so the IPC path and this one cannot drift on
-//! the two rules that are easy to get subtly wrong.
+//! 三个 `response_history_*` Tauri 命令的浏览器 transport。这里刻意很薄：上限
+//! （每 endpoint 10 行）、256 KiB body 截断与行映射全都住在
+//! `db::response_history`，故 IPC 路径与本路径不会在这两条易被 subtly 弄错的规则
+//! 上漂移。
 //!
-//! Scope is the split worth stating once: **every** verb names a single
-//! endpoint — the list because it paints one endpoint's strip, and the
-//! two writes because that is the row they act on. Nothing here is
-//! project-scoped: adding a `:projectId` segment would put a scope the
-//! server then has to trust, and `endpoint_id` cascades off `nodes` so a
-//! mismatched project would be a caller bug the write path cannot detect.
+//! 值得说一次的边界划分：**每个**动词都指向单个 endpoint——列表是因为它画的是某个
+//! endpoint 的条，两个写是因为它们作用的就是那些行。此处没有任何 project 维度的
+//! 东西：加一段 `:projectId` 只会引入一个服务端随后必须信任的 scope，而
+//! `endpoint_id` 已随 `nodes` 级联删除，写入路径检测不出项目不匹配。
 
 use std::sync::Arc;
 
@@ -28,17 +25,14 @@ use crate::domain::StoredResponse;
 
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
-/// `GET /api/response-history/:endpointId` — one endpoint's rows, newest
-/// first.
+/// `GET /api/response-history/:endpointId` —— 某个 endpoint 的行，最新在前。
 ///
-/// Shares the path with `DELETE` below, so the two verbs that act on a
-/// single endpoint read the same way in a URL bar.
+/// 与下面的 `DELETE` 共用路径，故这两个作用于单个 endpoint 的动词在 URL 里读起来
+/// 一样。
 ///
-/// An id with nothing stored is `200 []`, not `404`. The commonest
-/// request this route gets is the first one for an endpoint nobody has
-/// sent yet, and that is an empty history rather than a missing
-/// resource — answering 404 would make "brand new endpoint" look like a
-/// failure on both transports.
+/// 什么也没存的 id 回 `200 []` 而非 `404`：这条路由最常见的请求就是「用户还没发过请求
+/// 的 endpoint」的首次查询，而那是空历史而非缺失资源——回 404 会让「全新 endpoint」在
+/// 两条 transport 上都长得像失败。
 pub(crate) async fn response_history_list(
     State(s): State<Arc<WebState>>,
     Path(endpoint_id): Path<String>,
@@ -47,35 +41,31 @@ pub(crate) async fn response_history_list(
         db::response_history::list_by_endpoint(c, &endpoint_id)
     })
     .map_err(map_app_error)?;
-    // `[]` rather than `null` on a serialisation failure: this row set is
-    // a list the renderer appends to, and a `null` there would read as
-    // "the server has no history table" rather than "the read failed".
+    // 序列化失败时给 `[]` 而非 `null`：这份行集是 renderer 会往里追加的列表，那里的
+    // `null` 会被读成「服务端根本没有历史表」而不是「这次读失败了」。
     Ok(Json(
         serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
     ))
 }
 
-/// Body for `POST /api/response-history`.
+/// `POST /api/response-history` 的 body。
 ///
-/// Declared here rather than in `dto.rs` for the reason
-/// `NodeDuplicateBody` gives: the whole contract of a two-field route
-/// belongs next to the handler that enforces it, and there is no second
-/// consumer that would justify widening `dto.rs`.
+/// 定义在此而非 `dto.rs`，理由同 `NodeDuplicateBody`：一个双字段路由的完整契约属于
+/// 强制它的 handler，且没有第二个消费方值得为此扩大 `dto.rs`。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ResponseHistoryAppendBody {
     pub endpoint_id: String,
-    /// The renderer's own post-adapter `ApiResponse` shape. Deserialised
-    /// straight into the domain type so there is one wire contract rather
-    /// than a REST DTO that has to be translated field by field.
+    /// renderer 经 adapter 之后的 `ApiResponse` 形状。直接反序列化成 domain 类型，
+    /// 故只有一份线格式契约，而不是一个要逐字段翻译的 REST DTO。
     pub response: StoredResponse,
 }
 
-/// `POST /api/response-history` — store one response.
+/// `POST /api/response-history` —— 存一条响应。
 ///
-/// `201`, not `200`: the call created a row with a server-minted id and a
-/// server-stamped `createdAt`, and both come back in the entry. A `200`
-/// would say nothing was created while handing over a row that was.
+/// 回 `201` 而非 `200`：这次调用建出了一行带服务端铸造 id 与服务端盖的 `createdAt`
+/// 的记录，两者都在返回的 entry 里。`200` 会说「什么都没建」却递上一行确实建出来
+/// 的记录。
 pub(crate) async fn response_history_append(
     State(s): State<Arc<WebState>>,
     Json(body): Json<ResponseHistoryAppendBody>,
@@ -92,10 +82,9 @@ pub(crate) async fn response_history_append(
 
 /// `DELETE /api/response-history/:endpointId`
 ///
-/// Answers `{ "removed": n }` instead of the `204` its neighbours use.
-/// This is the one delete in the tree whose count the caller acts on —
-/// zero means "there was nothing to clear", which is a state the strip
-/// shows differently — and a `204` cannot carry it.
+/// 回 `{ "removed": n }` 而非邻路由所用的 `204`。这是树里唯一一个调用方会据其数字
+/// 行动的删除——0 意味着「本来就没东西可清」，而这条状态在历史条上呈现不同——`204`
+/// 承载不了它。
 pub(crate) async fn response_history_clear(
     State(s): State<Arc<WebState>>,
     Path(endpoint_id): Path<String>,
