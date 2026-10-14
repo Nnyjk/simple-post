@@ -93,13 +93,12 @@ pub(crate) async fn environments_rename_var(
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 
-/// Write one cell of the one and only URL layer:
-/// `env.moduleBaseUrls[defId][moduleId]`.
+/// 写入 URL 唯一所在的那一层的一个格子：
+/// `env.moduleBaseUrls[defId][moduleId]`。
 ///
-/// The same service can point at two different hosts for two modules, so
-/// `moduleId` is part of the address rather than a filter. Nothing sits
-/// above this cell and nothing falls back to it, so `url: null` means the
-/// request goes out without a base URL.
+/// 同一个服务可以对两个模块指向两个不同主机，故 `moduleId` 是地址的一部分而非过滤
+/// 条件。这一格之上没有任何东西，也不向它回落，故 `url: null` 意味着请求不带
+/// base URL 地发出去。
 pub(crate) async fn environments_set_module_baseurl(
     State(s): State<Arc<WebState>>,
     Path(env_id): Path<String>,

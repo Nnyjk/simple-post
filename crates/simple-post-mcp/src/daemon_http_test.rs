@@ -1,20 +1,18 @@
-//! Host / Origin guard + router path-mounting tests.
+//! Host / Origin 守卫 + router 路径挂载的测试。
 //!
-//! These are deliberately *unit* tests against the pure decision
-//! functions rather than HTTP round-trips: every rule here is a
-//! function of two headers and a config, so a socket would only add
-//! flakiness without observing anything new. The middleware itself is
-//! the adapter between `HeaderMap` and [`super::check_access`].
+//! 刻意是对那些纯判定函数做**单元**测试而不是 HTTP 往返：这里每条规则都只是两个头
+//! 与一份配置的函数，挂上 socket 只会平白增加抖动而观察不到任何新东西。中间件本身只是
+//! `HeaderMap` 与 [`super::check_access`] 之间的适配层。
 
 use super::*;
 use simple_post_core::domain::McpHttpConfig;
 
-/// Loopback-only defaults — the shipped configuration.
+/// 出厂配置：仅回环。
 fn local_only() -> McpHttpConfig {
     McpHttpConfig::default()
 }
 
-/// `allow_remote: true` with an explicit host allowlist.
+/// `allow_remote: true` 且带显式 host 白名单。
 fn remote_with(hosts: &[&str]) -> McpHttpConfig {
     McpHttpConfig {
         allow_remote: true,
@@ -24,7 +22,7 @@ fn remote_with(hosts: &[&str]) -> McpHttpConfig {
 }
 
 // -------------------------------------------------------------------------
-// Host header parsing
+// Host 头解析
 // -------------------------------------------------------------------------
 
 #[test]
@@ -37,9 +35,8 @@ fn host_name_strips_a_numeric_port() {
 fn host_name_keeps_a_bracketed_ipv6_literal_intact() {
     assert_eq!(host_name("[::1]:4173"), "::1");
     assert_eq!(host_name("[::1]"), "::1");
-    // An unterminated bracket is not a host we can reason about, so it
-    // is passed through rather than silently truncated to something
-    // that might match the allowlist.
+    // 括号不闭合的 host 不是我们能推理的东西，所以原样放过，而不是悄悄截断成某个
+    // 可能命中白名单的值。
     assert_eq!(host_name("[::1"), "[::1");
 }
 
@@ -50,7 +47,7 @@ fn host_name_keeps_a_bare_host_untouched() {
 }
 
 // -------------------------------------------------------------------------
-// Rule 1 — allow_remote == false: loopback only
+// 规则 1 —— allow_remote == false：只允许回环
 // -------------------------------------------------------------------------
 
 #[test]
@@ -82,8 +79,7 @@ fn remote_host_is_denied_by_default() {
 
 #[test]
 fn a_missing_host_header_is_denied() {
-    // Fail closed: a request the server cannot attribute to a host is
-    // not one to guess about.
+    // fail closed：连宿主都无法归属的请求，不该去猜。
     assert!(!host_permitted(&local_only(), None));
 }
 
@@ -97,7 +93,7 @@ fn the_configured_bind_host_is_always_acceptable() {
 }
 
 // -------------------------------------------------------------------------
-// Rule 2 — allow_remote == true: allowlist, empty list denies
+// 规则 2 —— allow_remote == true：白名单，空列表一律拒绝
 // -------------------------------------------------------------------------
 
 #[test]
@@ -105,7 +101,7 @@ fn allow_remote_with_a_matching_host_is_allowed() {
     let cfg = remote_with(&["studio.local", "10.0.0.5"]);
     assert!(host_permitted(&cfg, Some("studio.local:4173")));
     assert!(host_permitted(&cfg, Some("10.0.0.5:4173")));
-    // Host names are case-insensitive.
+    // 主机名大小写不敏感。
     assert!(host_permitted(&cfg, Some("STUDIO.local:4173")));
 }
 
@@ -117,21 +113,20 @@ fn allow_remote_with_a_non_matching_host_is_denied() {
 
 #[test]
 fn allow_remote_with_an_empty_allowlist_denies_every_remote_host() {
-    // The security-critical case. "No allowlist" must read as "nothing
-    // extra is allowed", not "everything is allowed" — the latter turns
-    // the remote switch itself into the vulnerability.
+    // 这里是最要安全的一种情形。「没配白名单」必须读成「什么都不额外允许」，而不是
+    // 「全都允许」—— 后者等于让这个远程开关本身成为漏洞。
     let cfg = remote_with(&[]);
     assert!(!host_permitted(&cfg, Some("10.0.0.5:4173")));
     assert!(!host_permitted(&cfg, Some("studio.local")));
-    // Loopback keeps working, which is what lets `port_registry::healthz`
-    // keep reporting green with a LAN-only allowlist configured.
+    // 回环仍要能通，`port_registry::healthz` 正靠这一点在只含内网地址的白名单下继续
+    // 报绿。
     assert!(host_permitted(&cfg, Some("127.0.0.1:4173")));
 }
 
 #[test]
 fn allow_remote_still_denies_when_the_switch_is_off() {
-    // A populated allowlist does nothing on its own — without the
-    // switch, a LAN bind is a contradiction `validate` refuses.
+    // 光有一份非空白名单自己不起作用 —— 没有开关时，绑定内网本身是个矛盾，`validate`
+    // 会拒绝。
     let cfg = McpHttpConfig {
         allow_remote: false,
         allowed_hosts: vec!["studio.local".into()],
@@ -153,13 +148,13 @@ fn a_star_entry_matches_any_host() {
 }
 
 // -------------------------------------------------------------------------
-// Rule 3 — Origin
+// 规则 3 —— Origin
 // -------------------------------------------------------------------------
 
 #[test]
 fn a_request_without_an_origin_is_allowed() {
-    // curl / Claude Code / Claude Desktop never send one; requiring it
-    // would lock out every real AI client.
+    // curl / Claude Code / Claude Desktop 根本不发这个头；强制要求会把所有真实 AI
+    // 客户端挡在门外。
     let cfg = McpHttpConfig::default();
     assert!(origin_permitted(&cfg, None));
     assert!(check_access(&cfg, Some("127.0.0.1:4173"), None).is_ok());
@@ -173,8 +168,7 @@ fn an_origin_outside_the_allowlist_is_denied() {
     };
     assert!(origin_permitted(&cfg, Some("https://claude.ai")));
     assert!(!origin_permitted(&cfg, Some("https://evil.example")));
-    // An empty allowlist with a browser-shaped request denies it — the
-    // default config is not a browser endpoint.
+    // 空白名单遇到浏览器形状的请求要拒绝 —— 默认配置并不是给浏览器用的端点。
     assert!(!origin_permitted(
         &McpHttpConfig::default(),
         Some("https://evil.example")
@@ -192,8 +186,7 @@ fn a_star_origin_entry_matches_any_origin() {
 
 #[test]
 fn origin_check_runs_after_the_host_check() {
-    // A request that fails both must report the host, so the message
-    // points at the thing the user most likely got wrong.
+    // 两项都失败的请求必须报出 host，好让消息指向用户最可能弄错的那一处。
     let cfg = McpHttpConfig::default();
     let err = check_access(&cfg, Some("10.0.0.5:4173"), Some("https://evil.example"))
         .expect_err("must deny");
@@ -201,14 +194,13 @@ fn origin_check_runs_after_the_host_check() {
 }
 
 // -------------------------------------------------------------------------
-// Router mounting
+// router 挂载
 // -------------------------------------------------------------------------
 
 #[test]
 fn a_custom_path_is_also_served_on_the_canonical_mcp_route() {
-    // `port_registry::healthz` probes a hardcoded `/mcp/healthz`, and
-    // every already-configured AI client points at `/mcp`. Without this
-    // alias a rename silently breaks the supervisor's liveness probe.
+    // `port_registry::healthz` 探的是写死的 `/mcp/healthz`，每个已配置好的 AI 客户端也都
+    // 指着 `/mcp`。没有这个别名，一次改名就会悄悄打断 supervisor 的存活探测。
     let cfg = McpHttpConfig {
         path: "/ai/mcp".into(),
         ..McpHttpConfig::default()
@@ -222,8 +214,8 @@ fn a_custom_path_is_also_served_on_the_canonical_mcp_route() {
 
 #[test]
 fn the_default_path_is_not_mounted_twice() {
-    // Merging `/mcp` with itself would panic in axum, so the alias
-    // must be skipped when the configured path already *is* `/mcp`.
+    // 把 `/mcp` 与自身合并会让 axum panic，所以配置路径本身就是 `/mcp` 时必须跳过
+    // 这个别名。
     assert_eq!(mounted_prefixes(&McpHttpConfig::default()), vec!["/mcp"]);
 }
 
@@ -237,7 +229,7 @@ fn a_trailing_slash_still_yields_a_single_mcp_mount() {
 }
 
 // -------------------------------------------------------------------------
-// Path normalisation
+// 路径归一
 // -------------------------------------------------------------------------
 
 #[test]
@@ -261,7 +253,7 @@ fn paths_normalise_to_leading_slash_without_trailing_slash() {
 }
 
 // -------------------------------------------------------------------------
-// Validation — the self-contradicting combination
+// 校验 —— 自相矛盾的组合
 // -------------------------------------------------------------------------
 
 #[test]
@@ -308,15 +300,14 @@ fn an_empty_host_is_rejected() {
 }
 
 // -------------------------------------------------------------------------
-// Helpers
+// 辅助函数
 // -------------------------------------------------------------------------
 
 #[test]
 fn the_router_builds_for_every_mount_shape() {
-    // Exercises the real `build_router_with_config` merge + middleware
-    // wiring rather than only the pure prefix helper. A duplicate merge
-    // (which axum panics on) or a mis-declared state type surfaces here
-    // instead of at daemon boot.
+    // 走真实的 `build_router_with_config` 合并 + 中间件接线，而不只测那个纯前缀辅助
+    // 函数。重复合并（axum 会 panic）或状态类型声明错误，都会在此暴露而不是在 daemon
+    // 启动时。
     for path in ["/mcp", "/mcp/", "mcp", "/ai/mcp", "/", ""] {
         let cfg = McpHttpConfig {
             path: path.to_string(),
@@ -326,8 +317,8 @@ fn the_router_builds_for_every_mount_shape() {
     }
 }
 
-/// `AppState` whose pool is only ever *borrowed* by the router-building
-/// tests — no handler runs, so the in-memory database is never touched.
+/// `AppState`，它的池只被 router 构建类测试**借用** —— 不会跑任何 handler，所以内存
+/// 数据库根本没被碰到。
 fn test_state() -> AppState {
     AppState {
         pool: r2d2::Pool::builder()

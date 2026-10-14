@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 贡献指南 / 红线
+    url: https://github.com/Nnyjk/simple-post/blob/main/.github/CONTRIBUTING.md
+    about: 提交前必读。本地门禁一条命令：npm run check
+  - name: Agent 运行时契约
+    url: https://github.com/Nnyjk/simple-post/blob/main/AGENTS.md
+    about: 架构不变量、已知陷阱、文件地图。红线的详细出处都在这里。
+  - name: 路线图
+    url: https://github.com/Nnyjk/simple-post/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap
+    about: v0.2 / v0.3 / v1.0 的已排期条目。先在这里找，避免重复立项。

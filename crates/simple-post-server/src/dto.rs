@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
-// Create-options and move-target DTOs. Patch types live in `crate::domain`
-// and are pulled in via `use crate::domain::*`.
+// 创建选项与移动目标 DTO。Patch 类型住在 `crate::domain`，经
+// `use crate::domain::*` 引入。
 // ---------------------------------------------------------------------------
 
 use serde::{Deserialize, Serialize};
@@ -13,13 +13,8 @@ use crate::permissions::CapabilityPolicy;
 pub struct CreateProjectOpts {
     pub description: Option<String>,
     pub color: Option<String>,
-    // No `baseUrl`. It was introduced together with the "new project
-    // seeds a default service holding a URL" model, and that model is
-    // gone: `create_with_defaults` writes the project, a default
-    // environment and a default module — and no service. A base URL
-    // belongs to (environment × module × service), so it needs a service
-    // name the user has not chosen yet; the user fills the cartesian grid
-    // in settings instead.
+    // 没有 `baseUrl`。base URL 属于（环境 × 模块 × 服务）三者的交叉格，而新建
+    // 项目时用户还没起服务名；那一格矩阵由用户在设置里填。
 }
 
 /// Tauri 与 Web 共用的能力策略返回形状。
@@ -28,12 +23,10 @@ pub struct McpCapabilityDto {
     pub policy: CapabilityPolicy,
 }
 
-/// The endpoint request configuration a `nodes_create` call carries
-/// alongside its structural node.
+/// `nodes_create` 随结构节点一并携带的 endpoint 请求配置。
 ///
-/// One optional block, all fields optional: an endpoint created from the
-/// tree's "new request" action starts empty and is filled in afterwards,
-/// and every column here has a sensible default for that case.
+/// 整块可选、字段全可选：从树上的「新建请求」建出来的 endpoint 起始为空、事后
+/// 再填，每一列在这种情形下都有合理默认值。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateEndpointDetailOpts {
@@ -51,16 +44,12 @@ pub struct CreateEndpointDetailOpts {
 }
 
 impl CreateEndpointDetailOpts {
-    /// Expand into the row `db::nodes::create` writes. `node_id` is
-    /// threaded in rather than left to the caller so the detail cannot
-    /// be built pointing at a node that was never inserted.
+    /// 展开成 `db::nodes::create` 要写的那一行。`node_id` 由这里传入而非留给调用方，
+    /// 免得 detail 指向一个从未插入的节点。
     ///
-    /// `pub` rather than `pub(crate)`: `POST /api/nodes` (this crate)
-    /// and the `nodes_create` Tauri command (`src-tauri`) accept the
-    /// same opts type and expand it through here, so both transports
-    /// default a half-filled endpoint identically. It was `pub(crate)`
-    /// while this type lived in `commands`; the crate split made the
-    /// second caller a genuine cross-crate one.
+    /// 之所以是 `pub` 而非 `pub(crate)`：`POST /api/nodes`（本 crate）与
+    /// `nodes_create` Tauri 命令（`src-tauri`）接受同一个 opts 类型并都经这里展开，
+    /// 两条 transport 才能对半填的 endpoint 采用同样的默认值。
     pub fn into_detail(self, node_id: &str) -> EndpointDetail {
         EndpointDetail {
             node_id: node_id.to_string(),
@@ -99,6 +88,24 @@ pub struct BaseUrlDefPatch {
 #[serde(rename_all = "camelCase")]
 pub struct CreateBaseUrlDefOpts {
     pub description: Option<String>,
+    /// 客户端自铸的 id，非空白时照单采纳。
+    ///
+    /// renderer 在这一行存在之前就已经在两个地方持有这个 id——项目的 ★，以及它顺带
+    /// 种下的每个（环境 × 模块）URL 单元格——故服务端铸出的 id 会让两者都指向孤儿。
+    /// 见 [`adopt_or_mint_id`]，两条 transport 都调它。
+    pub id: Option<String>,
+}
+
+/// 采纳调用方给的 id，没有则铸一个。
+///
+/// 两条 transport（Tauri 命令的 `opts.id` 与 REST body 的 `id`）共用这一条规则，
+/// 「服务 id 归谁铸」就不会在两边漂移：由 renderer 铸，是因为它在行存在之前就需要这个
+/// id。空白按缺失处理，免得 `""`（或纯空白）造出空 id 的行。
+pub fn adopt_or_mint_id(requested: Option<String>) -> String {
+    match requested {
+        Some(id) if !id.trim().is_empty() => id,
+        _ => crate::domain::uid(),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,39 +117,30 @@ pub struct RequestSettingsPatch {
 }
 
 // ---------------------------------------------------------------------------
-// MCP daemon DTO — single source of truth for the daemon's wire shape.
-// `crate::daemon_supervisor::McpDaemonHandle::snapshot()` returns this
-// type; the `mcp_status` Tauri command forwards it verbatim.
+// MCP daemon DTO —— daemon 线格式的唯一事实来源。
+// `crate::daemon_supervisor::McpDaemonHandle::snapshot()` 返回它，
+// `mcp_status` Tauri 命令原样转发。
 // ---------------------------------------------------------------------------
 
-/// Snapshot of the embedded MCP daemon. Returned by `mcp_status` and
-/// periodically polled by the UI to show "is the AI bridge running?".
+/// 内嵌 MCP daemon 的快照。由 `mcp_status` 返回，UI 周期性轮询以展示「AI 桥接是否
+/// 在跑」。
 ///
-/// The wire shape matches `src/lib/mcp-types.ts::McpUiState` exactly.
-/// `status` is the source-of-truth lifecycle string (mirrors the
-/// internal `DaemonStatus` enum via `as_str()`); `running` is kept
-/// as a derived boolean so any caller still consuming the old shape
-/// keeps working without a forced migration.
+/// 线格式与 `src/lib/mcp-types.ts::McpUiState` 完全一致。`status` 是生命周期真值
+/// （经 `as_str()` 镜像内部的 `DaemonStatus` 枚举）；`running` 保留为派生布尔量，
+/// 让仍消费旧形状的调用方无需强制迁移。
 ///
-/// This whole module used to live in `src-tauri/src/commands/dto.rs`,
-/// i.e. inside the Tauri crate. That put every wire DTO in the
-/// dependency cone of the GUI runtime, which is why the server shape
-/// had to reach through `crate::commands::…` for a plain struct. None
-/// of these types are Tauri-specific — they are `Serialize` /
-/// `Deserialize` bags — so they moved down here, below both hosts.
-/// `src-tauri/src/commands/dto.rs` re-exports this module, so the old
-/// `crate::commands::Foo` paths keep resolving to the same types.
+/// 这些类型都不含 Tauri 专有内容——只是 `Serialize` / `Deserialize` 的袋子——故放在
+/// 两个 host 之下；`src-tauri/src/commands/dto.rs` 再导出本模块，旧的
+/// `crate::commands::Foo` 路径仍解析到同一批类型。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpStatusDto {
-    /// Lifecycle state, one of `"stopped" | "starting" | "running" |
-    /// "restarting" | "crashed" | "unhealthy"`. New field; consumers
-    /// that only read `running` continue to work because we set
-    /// `running = (status == "running")`.
+    /// 生命周期状态，取值 `"stopped" | "starting" | "running" |
+    /// "restarting" | "crashed" | "unhealthy"`。只读 `running` 的消费者不受影响，
+    /// 因为我们置 `running = (status == "running")`。
     pub status: String,
-    /// Back-compat boolean. `true` iff `status == "running"`. Older
-    /// callers can keep reading this without learning the lifecycle
-    /// enum; the badge/UI logic has migrated to `status`.
+    /// 向后兼容布尔量，当且仅当 `status == "running"` 为真。旧调用方可继续读它而不必
+    /// 认识生命周期枚举；徽标 / UI 逻辑已改用 `status`。
     pub running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -150,10 +148,8 @@ pub struct McpStatusDto {
     pub port: Option<u16>,
     pub uptime_ms: u64,
     pub requests_handled: u64,
-    /// Number of currently-active MCP client connections. The metrics
-    /// module does not expose a counter for this yet, so the
-    /// supervisor writes `0` until the daemon learns to emit it via
-    /// stderr; UI surfaces this as a "0 connections" line.
+    /// 当前活跃的 MCP 客户端连接数。metrics 模块尚未暴露对应计数器，故 supervisor
+    /// 在 daemon 通过 stderr 上报之前一律写 `0`；UI 把它显示成一行「0 connections」。
     pub current_connections: u64,
     pub registered_tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -161,9 +157,8 @@ pub struct McpStatusDto {
 }
 
 impl McpStatusDto {
-    /// Safe "not running" snapshot. `registered_tools` is empty because
-    /// no daemon means no tools surface — callers learn the tool list
-    /// on the next poll after the daemon comes back up.
+    /// 安全的「未运行」快照。`registered_tools` 为空是因为没有 daemon 就没有工具可
+    /// 暴露——调用方会在 daemon 回来后的下一次轮询拿到工具列表。
     pub fn stopped() -> Self {
         Self {
             status: "stopped".to_string(),
@@ -179,16 +174,13 @@ impl McpStatusDto {
     }
 }
 
-/// Returned by the `mcp_daemon_restart` Tauri command. Distinct from
-/// `McpStatusDto` because the restart path is the one place we
-/// deliberately swallow the underlying `AppError` (so the UI can
-/// render a uniform `{ ok: false, ... }` envelope without an extra
-/// `.catch` on every call site).
+/// `mcp_daemon_restart` Tauri 命令的返回值。与 `McpStatusDto` 分开，是因为重启路径
+/// 是唯一一处刻意吞掉底层 `AppError` 的地方——好让 UI 渲染统一的
+/// `{ ok: false, ... }` 信封，而不必在每个调用点再挂一层 `.catch`。
 ///
-/// F-D4 fix: `pid` and `port` deliberately serialize as JSON `null` on
-/// the failure path (rather than being skipped) so the response shape
-/// is stable: `{ ok, pid, port }` always. This lines up with the
-/// renderer's `RestartResult` type in `src/lib/mcp-types.ts`.
+/// 失败路径上 `pid` / `port` 刻意序列化成 JSON `null`（而非跳过），使响应形状稳定：
+/// `{ ok, pid, port }` 恒在。这与 renderer 的 `RestartResult` 类型（见
+/// `src/lib/mcp-types.ts`）对齐。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestartResult {

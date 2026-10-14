@@ -9,14 +9,13 @@ interface ConfirmDialogProps {
   message: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** Use the destructive button variant + a clear "不可撤销" hint in copy. */
+  /** 使用破坏色按钮变体，并在文案里给出明确的「不可撤销」提示。 */
   destructive?: boolean;
   onConfirm: () => void;
 }
 
 /**
- * Thin wrapper over the `Dialog` primitive for delete / irreversible actions.
- * Closes itself after `onConfirm` runs.
+ * `Dialog` 基础件之上的薄封装，用于删除 / 不可撤销动作。`onConfirm` 跑完后自行关闭。
  */
 export function ConfirmDialog({
   open,

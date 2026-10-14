@@ -10,18 +10,16 @@ interface ConfirmDialogProps {
   confirmText?: string;
   cancelText?: string;
   /**
-   * Renders the confirm button in destructive style (red). Use for
-   * deletes and other irreversible actions.
+   * 把确认按钮渲染成破坏性样式（红）。用于删除与其他不可逆动作。
    */
   destructive?: boolean;
   onConfirm: () => void;
 }
 
 /**
- * A styled replacement for the browser's `window.confirm`. Same
- * motivation as PromptDialog — fixed positioning, custom title (the
- * browser labels confirm dialogs "localhost:5173 显示"), and a
- * styled destructive variant.
+ * 浏览器 `window.confirm` 的样式化替代。动机与 PromptDialog 相同——fixed 定位、
+ * 自定义标题（浏览器会把确认框标成「localhost:5173 显示」）、以及一个样式化的
+ * 破坏性变体。
  */
 export function ConfirmDialog({
   open,

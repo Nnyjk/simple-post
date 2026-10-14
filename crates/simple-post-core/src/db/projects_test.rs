@@ -133,12 +133,10 @@ fn update_sets_default_base_url_definition_id() {
 #[test]
 fn delete_removes_project_and_cascades_to_the_whole_tree() {
     let pool = fresh_pool();
-    // One module, one nested collection, one endpoint under it, plus the
-    // endpoint's configuration row. Deleting the project has to take all
-    // four: `nodes.root_id` cascades from `projects`, `nodes.parent_id`
-    // cascades down the tree, and `endpoint_details` cascades from its
-    // node. Asserting only the module would pass even if the deeper
-    // levels leaked.
+    // 一个模块、一个嵌套 collection、其下的一个 endpoint，外加那个 endpoint 的配置行。
+    // 删项目必须带走全部四个：`nodes.root_id` 从 `projects` 级联，`nodes.parent_id`
+    // 沿树向下级联，`endpoint_details` 从它的节点级联。只断言模块的话，即便更深的层次泄漏
+    // 也会通过。
     db::with_tx(&pool, |c| {
         c.execute(
             "INSERT INTO nodes \
@@ -167,8 +165,8 @@ fn delete_removes_project_and_cascades_to_the_whole_tree() {
     })
     .unwrap();
 
-    // `endpoint_details` keys on `node_id`; `nodes` on `id`. Same shape
-    // of question — "is this row still here?" — for both tables.
+    // `endpoint_details` 以 `node_id` 为键，`nodes` 以 `id` 为键：两张表面对的是同一个问题
+    // ——「这一行还在吗」。
     let count = |table: &str, col: &str, id: &str| {
         db::with_conn(&pool, |c| {
             let n: i64 = c.query_row(
@@ -284,13 +282,9 @@ fn create_with_defaults_seeds_a_project_and_one_environment() {
 
 #[test]
 fn create_with_defaults_seeds_one_module_at_the_project_root() {
-    // This used to assert the opposite, on the grounds that a 「默认模块」
-    // the user did not ask for is a row they have to notice and delete.
-    // It came back once the module became both the row axis of the
-    // base-URL grid and the subject of the module workspace's 服务 block:
-    // with none, a fresh project showed three dead ends at once (the
-    // tree's 「该项目还没有模块」, the grid's 「没有模块可归属」, an empty
-    // 服务 block) for a shape the user needs anyway.
+    // 模块既是 base URL 表格的行轴，又是模块工作区服务区的主题；没有它，一个全新项目会同时
+    // 摆出三个死路——树的「该项目还没有模块」、表格的「没有模块可归属」、空的服务区——
+    // 而这是一张用户反正会用到的形状。
     let pool = fresh_pool();
     db::with_tx(&pool, |c| {
         create_with_defaults(c, &sample_project("p_new", "New Project"))
@@ -315,9 +309,8 @@ fn create_with_defaults_seeds_one_module_at_the_project_root() {
 
 #[test]
 fn create_with_defaults_seeds_the_environment_and_the_module_in_one_transaction() {
-    // The seed is only useful if it is there when the project is: a
-    // half-written project would render with the module already visible
-    // but no environment to resolve {{var}} against, or the reverse.
+    // 种子只有在项目存在时才有意义：一个写了一半的项目会渲染成「模块已经可见，却没有环境
+    // 可供解析 {{var}}」，或反过来。
     let pool = fresh_pool();
     let outcome = db::with_tx(&pool, |c| {
         create_with_defaults(c, &sample_project("p_conflict", "New Project"))
@@ -336,8 +329,7 @@ fn create_with_defaults_seeds_the_environment_and_the_module_in_one_transaction(
 
 #[test]
 fn create_with_defaults_ignores_optimistic_service_state_on_the_input() {
-    // The renderer seeds the form optimistically; echoing that back would
-    // make the create response claim services exist that no row does.
+    // 渲染层乐观地种下表单；把那份乐观状态回显，会让创建响应声称存在没有任何行支撑的服务。
     let pool = fresh_pool();
     let mut p = sample_project("p_new", "New Project");
     p.base_url_definitions = vec![BaseUrlDefinition {
@@ -353,9 +345,8 @@ fn create_with_defaults_ignores_optimistic_service_state_on_the_input() {
 
 #[test]
 fn update_ignores_the_legacy_base_url_field() {
-    // `projects` has no `base_url` column. Emitting `SET base_url = ?`
-    // for it turned `PATCH {"baseUrl": "…"}` into a `no such column`
-    // error — a caller mistake reported as a database fault.
+    // `projects` 没有 `base_url` 列。为它发出 `SET base_url = ?` 会把
+    // `PATCH {"baseUrl": "…"}` 变成一个 `no such column` 错误——把调用方的错误报成数据库故障。
     let pool = fresh_pool();
     let patched = db::with_tx(&pool, |c| {
         update(

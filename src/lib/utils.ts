@@ -1,36 +1,27 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-/** Conditional className joiner — `clsx` first to combine truthy
- *  inputs, then `tailwind-merge` so later utilities win over earlier
- *  ones (e.g. `cn('px-4', false && 'px-2')` → `'px-4'`). */
+/** 条件 className 拼接 —— 先用 `clsx` 合并真值入参，再用 `tailwind-merge`
+ *  让后面的工具类压过前面的（如 `cn('px-4', false && 'px-2')` → `'px-4'`）。 */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 /**
- * The app's single focus-ring treatment for interactive surfaces.
+ * 应用里交互元素唯一的焦点环写法，当 `cn()` 的一个参数用：`cn('…基础样式', focusRing)`。
  *
- * This string used to be hand-copied into 9 component files (and mirrored
- * by an unused `.focus-ring` class in globals.css, now removed). Keeping
- * one copy means a future change to the ring's width or offset lands
- * everywhere at once — a copy-pasted literal is exactly the kind of thing
- * that silently drifts so half the controls get a 1px ring and half get 2px.
- *
- * Use it as a `cn()` argument: `cn('…base styles', focusRing)`.
+ * 只留一份意味着日后改环的宽度或偏移时处处同时生效——手抄的字面量正是那种会
+ * 悄悄漂移、一半控件 1px 一半 2px 的东西。
  */
 export const focusRing =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ' +
   'focus-visible:ring-offset-1 focus-visible:ring-offset-background';
 
 /**
- * The same ring with no offset. Used by the custom-titlebar window
- * controls (`WindowControls`) and the permission radios
- * (`AgentPermissionsTable`), which sit flush against the window edge or
- * inside a tight row where a 1px offset would clip. Kept as its own
- * constant rather than inlined so the difference stays intentional and
- * greppable — if a control ever migrates from "flush" to "inset", the
- * swap is a one-token change.
+ * 同样的环，但无偏移。给贴着窗口边缘的自定义标题栏控件（`WindowControls`）与
+ * 权限单选（`AgentPermissionsTable`）用——那里 1px 偏移会被裁掉。单独成一个常量
+ * 而不是就地内联，是为了让「贴边」与「内嵌」的差异保持有意且可 grep：某个控件若哪天
+ * 从贴边改成内嵌，换的是一个 token。
  */
 export const focusRingBare =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -57,11 +48,8 @@ export function methodColorVar(method: string): string {
   switch (method.toUpperCase()) {
     case 'GET':
       return 'hsl(142 71% 45%)';
-    // POST and PUT are intentionally swapped from a typical REST-coloring
-    // convention: blue is reserved for "create" (POST) elsewhere in the
-    // product, so POST takes the warmer orange and PUT takes the cooler
-    // blue. This way the two create/update verbs don't blend visually
-    // when they sit next to each other in the tree.
+    // POST 与 PUT 刻意与常见 REST 配色对调：产品里别处蓝色留给「创建」（POST），
+    // 所以 POST 取更暖的橙、PUT 取更冷的蓝，两个创建/更新动词并排时不会糊在一起
     case 'POST':
       return 'hsl(38 92% 50%)';
     case 'PUT':
@@ -88,13 +76,12 @@ export function uid(): string {
 }
 
 // ---------------------------------------------------------------------------
-// JSON pretty-printer — used by the response viewer and the body editor's
-// "format" button. Returns a tagged result so callers can distinguish
-// success from parse errors without try/catch noise.
+// JSON 美化 —— 响应查看器与 body 编辑器的「格式化」按钮共用。返回带标签的结果，
+// 调用方无需 try/catch 就能区分成功与解析错误。
 //
-// Kept in `utils.ts` because `tryFormatJson` is pure and dependency-free
-// (unlike `useIsDark`, which imports `useAppStore` and lives in
-// `theme.ts` to avoid closing a `crud-slice → utils → app-store` cycle).
+// 放在 `utils.ts` 是因为 `tryFormatJson` 纯且无依赖（`useIsDark` 会 import
+// `useAppStore`，因此住在 `theme.ts`，以免形成 `crud-slice → utils → app-store`
+// 的环）。
 // ---------------------------------------------------------------------------
 
 export type FormatResult = { ok: true; formatted: string } | { ok: false; error: string };

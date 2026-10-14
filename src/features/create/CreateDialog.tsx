@@ -1,18 +1,9 @@
 /**
- * The create dialogs' shared chrome — the `Dialog` frame, the submit
- * guard, and the two fields every kind has.
+ * 三个新建对话框共用的外壳 —— `Dialog` 框、提交守卫，以及各类型都有的两个字段。
  *
- * WHY THIS IS NOT A "NewItemModal"
- * -------------------------------
- * There used to be one modal with a type-chooser first stage, which meant
- * every entry point — the welcome screen, the tree, the top bar, the
- * command palette — shared a component that had to know about all four
- * kinds and could be opened in a state none of them asked for. The kinds
- * are now separate components that live next to their own entry points
- * (see `CreateProjectDialog` / `CreateModuleDialog` /
- * `CreateCollectionDialog`), and this file holds only what they have in
- * common. An endpoint has no dialog at all: `createEndpointAt` writes the
- * row directly.
+ * 各类型是独立组件、住在自己的入口旁（`CreateProjectDialog` / `CreateModuleDialog` /
+ * `CreateCollectionDialog`），本文件只留它们的公共部分。接口没有对话框：
+ * `createEndpointAt` 直接写那一行。
  */
 
 import { useEffect, type FormEvent, type ReactNode, type RefObject } from 'react';
@@ -25,23 +16,19 @@ import { PROJECT_COLORS } from '@/lib/palette';
 interface CreateDialogProps {
   open: boolean;
   onClose: () => void;
-  /** Dialog title, e.g. 「新建模块」. */
+  /** 对话框标题，如 「新建模块」。 */
   title: string;
-  /** Optional one-line explanation under the title. */
+  /** 标题下的一行说明，可选。 */
   description?: string;
-  /** False while the required fields are still empty. */
+  /** 必填项还没填齐时为 false。 */
   canSubmit: boolean;
   onSubmit: () => void;
-  /** Focused on open — the name is the only field you always have to fill. */
+  /** 打开即聚焦 —— 名称是唯一每次都要填的字段。 */
   nameInputRef: RefObject<HTMLInputElement>;
   children: ReactNode;
 }
 
-/**
- * Frame shared by the three create dialogs: submit-on-Enter, focus the
- * name field on open, and a footer whose primary button reflects the
- * guard rather than being clicked into a no-op.
- */
+/** 三个对话框共用的框架：回车提交、打开时聚焦名称，主按钮直接反映守卫而非点了没反应。 */
 export function CreateDialog({
   open,
   onClose,
@@ -52,8 +39,7 @@ export function CreateDialog({
   nameInputRef,
   children,
 }: CreateDialogProps) {
-  // Deferred one tick: the input only exists once the dialog has
-  // rendered, and `Dialog` mounts its portal on the open transition.
+  // 延后一拍：输入框要等对话框渲染出来才存在，而 `Dialog` 的 portal 在 open 过渡时才挂。
   useEffect(() => {
     if (!open) return;
     const t = window.setTimeout(() => nameInputRef.current?.focus(), 0);
@@ -155,11 +141,7 @@ export function DescriptionField({
   );
 }
 
-/**
- * Project colour swatches. Only the project dialog has one: a colour is
- * what tells two projects apart in the welcome list and the tree header,
- * and neither a module nor a collection has anywhere to show it.
- */
+/** 项目颜色色板。只有项目对话框有：颜色正是欢迎页列表和树头部分辨两个项目的依据，模块与集合都没处显示它。 */
 export function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   return (
     <div className="flex items-center gap-1.5">

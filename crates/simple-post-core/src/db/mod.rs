@@ -1,34 +1,18 @@
-//! Persistence layer for Simple Post.
+//! SQLite 持久化层。
 //!
-//! Layout:
-//!   - `db::init` opens (or creates) the SQLite file and runs `schema.sql`.
-//!     A brand-new database is left **empty** — this crate seeds nothing.
-//!   - `db::with_conn` / `db::with_tx` are the only sanctioned ways to
-//!     touch a connection — every CRUD module goes through one of them.
-//!   - `db::ping` is a cheap liveness probe.
+//! - `db::init` 打开（或创建）库文件并执行 `schema.sql`；**不种任何种子数据**——
+//!   行只来自用户或 MCP 客户端。
+//! - 读用 `db::with_conn`，写用 `db::with_tx`；所有 CRUD 模块只能走这两者之一。
+//! - `init` 里启用 WAL：读者互不阻塞，单个写者也不阻塞读者。
+//! - 库文件在 `%APPDATA%\com.simple-post\store.db`（`dirs::data_dir()`），
+//!   目录和文件缺失时自动创建；首次启动建完表即止。
+//! - `db::ping` 是廉价存活探针。
 //!
-//! Concurrency model:
-//!   - WAL mode is enabled in `init`, so concurrent readers don't block
-//!     each other and a single writer doesn't block readers.
-//!   - Writes go through `with_tx`, which uses `BEGIN IMMEDIATE` and
-//!     retries on `SQLITE_BUSY` (3 attempts, 50 ms back-off). The
-//!     upgrade from DEFERRED → IMMEDIATE happens inside the transaction
-//!     so we can't deadlock with another reader.
+//! `db/fixtures.json` 仅供测试：只经 `#[cfg(test)] pub(crate) mod test_support`
+//! 可达，生产构建里根本不存在。见 `test_support::init_seeded`。
 //!
-//! File location:
-//!   - On Windows: `%APPDATA%\com.simple-post\store.db`
-//!     (`dirs::data_dir()/com.simple-post/store.db`)
-//!   - The directory is created if missing; the DB file is created if
-//!     missing. First boot creates the tables and stops there — rows
-//!     only ever come from the user or from an MCP client.
-//!
-//! `db/fixtures.json` still ships in-tree, but it is **test-only** data:
-//! it lives behind `#[cfg(test)] pub(crate) mod test_support` and is
-//! unreachable from a production build. See `test_support::init_seeded`.
-//!
-//! Per-table CRUD lives in the sibling `db/*.rs` modules. They all
-//! take a `&mut rusqlite::Connection` so the caller controls whether
-//! the call is in a transaction.
+//! 每表 CRUD 在同目录 `db/*.rs`，全部接收 `&mut rusqlite::Connection`，
+//! 由调用方决定是否在事务内。
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,11 +24,7 @@ use rusqlite::{params, Connection, OpenFlags};
 
 use crate::error::AppError;
 
-// -------------------------------------------------------------------------
-// Sub-modules. Public so the orchestration layer / Tauri commands can
-// reach individual CRUD functions without going through an aggregator.
-// -------------------------------------------------------------------------
-
+// 子模块：对外公开，让编排层 / Tauri commands 可直接调用单个 CRUD 函数。
 pub mod base_url_defs;
 pub mod endpoint_details;
 pub mod environments;
@@ -54,74 +34,47 @@ pub mod preferences;
 pub mod projects;
 pub mod response_history;
 
-// -------------------------------------------------------------------------
-// Public types.
-// -------------------------------------------------------------------------
+// 公开类型。
 
-/// The shared connection pool. Cloning a `DbPool` is cheap (it's just
-/// an `Arc` inside) — pass it around freely. Pool size is small (4)
-/// because SQLite serialises writes anyway; bigger pools just add
-/// contention without throughput.
+/// 共享连接池。`DbPool` 只是 `Arc` 包裹的廉价克隆，可随意传递。
+/// 池大小固定 4：SQLite 本就串行化写入，池更大只增加争用、不增吞吐。
 pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
 
-// -------------------------------------------------------------------------
-// Schema versioning.
-// -------------------------------------------------------------------------
+// schema 版本。
 
-/// The layout this build reads and writes, stamped into
-/// `PRAGMA user_version` by the tail of `schema.sql`.
+/// 本构建读写的布局，由 `schema.sql` 末尾写入 `PRAGMA user_version`。
 ///
-/// **Bump this whenever `schema.sql` changes shape in a way an older
-/// build's file cannot satisfy** — dropping or renaming a column, or
-/// splitting one table into several. Purely additive changes (a new
-/// table, a new nullable column with a default) do not need a bump:
-/// `CREATE TABLE IF NOT EXISTS` already handles them, and old files keep
-/// working because readers tolerate the missing column.
+/// **仅当旧版本文件无法满足新形状时才可 bump**（删列/改名、一表拆多表）。纯增量的
+/// 改动（新表、可空新列）不需要：`CREATE TABLE IF NOT EXISTS` 已覆盖，缺列靠
+/// [`ADDED_COLUMNS`] 补。
 ///
-/// v3 is a *content* change rather than a column change, and it needs the
-/// bump anyway: `endpoint_details.auth_json` stores `serde_json` output
-/// verbatim, so dropping the `type` → `kind` rename in `domain.rs` left
-/// every existing row shaped `{"type":"bearer",…}` — including the `'{}'`
-/// default, which no longer deserializes because `kind` is required. A
-/// v2 file is unreadable, not merely stale, and the rebuild path is the
-/// project's answer to that (see [`ensure_current_schema`]).
+/// 改 `domain.rs` 里 auth 的字段名同样要 bump：`auth_json` 存的是 serde 原样输出，
+/// 改名后旧行反序列化不出来，文件即不可读。
 ///
-/// Keep the history comment at the bottom of `schema.sql` in sync.
+/// 版本号历史写在 `schema.sql` 末尾，改动请同步。
 pub const SCHEMA_VERSION: i64 = 3;
 
-// -------------------------------------------------------------------------
-// Public API.
-// -------------------------------------------------------------------------
+// 公开 API。
 
-/// Open (or create) the DB at `<data_dir>/store.db`, bring it up to
-/// [`SCHEMA_VERSION`], and return the pool.
+/// 打开（或创建）`<data_dir>/store.db`，升到 [`SCHEMA_VERSION`]，返回连接池。
 ///
-/// `data_dir` is typically `dirs::data_dir().unwrap().join("com.simple-post")`.
-/// The directory is created if it doesn't exist.
+/// `data_dir` 通常是 `dirs::data_dir().unwrap().join("com.simple-post")`，缺失即创建。
 ///
-/// A file written by an older layout is **replaced, not upgraded** —
-/// see [`ensure_current_schema`]. That is logged rather than recorded:
-/// the app has no migration path, and a rebuild is a developer's
-/// experience on a pre-release schema, not something to interrupt the
-/// user about on every launch.
+/// 旧布局的文件是**替换而非升级**（见 [`ensure_current_schema`]）：本应用没有迁移路径，
+/// 故只记日志，不在每次启动时打扰用户。
 pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir.join("store.db");
 
-    // Before any connection is handed out — a pool opened on a stale
-    // file would let reads succeed against tables this build no longer
-    // understands.
+    // 先于任何连接发出：陈旧文件上开池，读会成功但表已非本构建所理解。
     let rebuilt = ensure_current_schema(&db_path)?;
 
     let manager = SqliteConnectionManager::file(&db_path)
         .with_flags(OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE)
-        // WAL across pool connections: each new connection inherits the
-        // journal mode set by the first connection. We set it here so a
-        // cold start doesn't race a reader against a writer.
+        // WAL 跨池连接生效：每条新连接继承首条连接设置的日志模式。显式设一次，
+        // 免得冷启动时读写互相竞态。
         .with_init(|c| {
-            // PRAGMA can't carry user params safely across connections,
-            // so we set WAL/synchronous/FK/busy_timeout via the canonical
-            // raw-statement path.
+            // PRAGMA 无法跨连接携带用户参数，故走裸语句路径。
             c.execute_batch(
                 "PRAGMA journal_mode = WAL;\
                  PRAGMA synchronous = NORMAL;\
@@ -130,8 +83,7 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
             )
         });
 
-    // Eagerly probe the file so a corrupt / read-only DB fails fast
-    // before the caller has wired up the rest of the app.
+    // 提前探一次文件：损坏/只读要在调用方接好其余部分之前就失败。
     let mut probe = manager.connect()?;
     migrate(&mut probe)?;
     drop(probe);
@@ -141,9 +93,7 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
         .build(manager)
         .map_err(AppError::Pool)?;
 
-    // Smoke-test the pool: the first checkout from a freshly built pool
-    // forces the manager to actually open a connection, which is where
-    // a locked file / bad path would surface.
+    // 新建池的首次 checkout 会真正建连接——锁文件/坏路径在这里暴露。
     ping(&pool)?;
 
     if rebuilt {
@@ -157,13 +107,10 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     Ok(pool)
 }
 
-/// Run a closure against a pooled connection (read or write).
-/// Read-only callers can use this; write callers should prefer
-/// `with_tx` so the SQL is wrapped in a transaction.
+/// 在池中取一条连接执行闭包。只读用它；写优先用 `with_tx`。
 ///
-/// The connection's PRAGMAs (foreign_keys, journal_mode, …) are
-/// applied by the pool's `with_init` hook above, so each checkout
-/// gets a correctly-configured handle.
+/// PRAGMA（foreign_keys、journal_mode 等）由池的 `with_init` 钩子逐连接应用，
+/// 故每次 checkout 拿到的都是配置好的句柄。
 pub fn with_conn<F, R>(pool: &DbPool, f: F) -> Result<R, AppError>
 where
     F: FnOnce(&mut Connection) -> Result<R, AppError>,
@@ -172,18 +119,11 @@ where
     f(&mut conn)
 }
 
-/// Run a closure inside a write transaction with `SQLITE_BUSY` retry.
+/// 在写事务内执行闭包，`SQLITE_BUSY` 重试 3 次、间隔 50 ms：够等其他写者提交，
+/// 又不至于卡顿；3 次仍失败则作为 `AppError::Db` 上抛。
 ///
-/// On a contended DB the `BEGIN IMMEDIATE` (or the first write inside
-/// the transaction) can fail with `SQLITE_BUSY`. We retry up to 3
-/// times with 50 ms between attempts — long enough for the other
-/// writer to commit, short enough to stay snappy. After 3 failures we
-/// surface the error as `AppError::Db`.
-///
-/// Note: rusqlite's `transaction()` helper uses `BEGIN DEFERRED` by
-/// default, which can silently turn into `SQLITE_BUSY` on the *first
-/// write*. We want `BEGIN IMMEDIATE` up front so the lock is taken
-/// before any reads happen, matching the semantics callers expect.
+/// 不用 rusqlite 的 `transaction()`：它是 `BEGIN DEFERRED`，`SQLITE_BUSY` 会拖到
+/// **首次写入**才暴露。要的是一进事务就取锁，即 `BEGIN IMMEDIATE`。
 pub fn with_tx<F, R>(pool: &DbPool, f: F) -> Result<R, AppError>
 where
     F: Fn(&mut Connection) -> Result<R, AppError>,
@@ -218,54 +158,34 @@ where
     })
 }
 
-/// Run the embedded `schema.sql`, bring an existing store up to the
-/// current column set, then repair the rows either predecessor layout
-/// wrote. Idempotent — safe to call on every boot.
+/// 执行内嵌 `schema.sql`，把既有库补到当前列集，再修复旧布局写的行。幂等，每次启动可调。
 ///
-/// Every `CREATE` in the schema is `IF NOT EXISTS`, so re-running against
-/// an already-migrated database changes nothing. The parent-matrix
-/// triggers are the deliberate exception: they are dropped and rebuilt,
-/// because their bodies *are* the contract and `IF NOT EXISTS` would
-/// leave an existing database enforcing a matrix the application layer
-/// no longer holds. **No rows are inserted**: a fresh install starts
-/// empty and is populated by the user or by an MCP client. Test-only
-/// seed data lives in `test_support`.
+/// 所有 `CREATE` 都是 `IF NOT EXISTS`，对已迁移的库是空操作。父子矩阵触发器是唯一例外：
+/// 先 DROP 再建——触发器体**就是**契约，`IF NOT EXISTS` 会让老库继续执行应用层已放弃的矩阵。
+/// **不插入任何行**：全新安装是空库，由用户或 MCP 客户端填充；测试种子在 `test_support`。
 pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
     conn.execute_batch(SCHEMA_SQL)?;
-    // Before the data migration, never inside `SCHEMA_SQL`: that pass
-    // reads and writes `module_base_urls_json`, `module_id` and
-    // `is_default`, and a store old enough to lack them has no way to
-    // hold the values the pass is there to move. `SCHEMA_SQL`'s
-    // `CREATE TABLE IF NOT EXISTS` is a no-op on exactly those stores,
-    // which is why the columns have to be re-added here.
+    // 必须在数据迁移之前、且不能放进 `SCHEMA_SQL`：那个 pass 要读写的
+    // `module_base_urls_json` / `module_id` / `is_default` 在够旧的库里根本不存在，
+    // 而 `SCHEMA_SQL` 的 `CREATE TABLE IF NOT EXISTS` 对这些库正是空操作——
+    // 所以列只能在这里补。
     add_missing_columns(conn)?;
     migrate_base_urls_into_value_layer(conn)
 }
 
-/// Columns that exist in a `store.db` written by some build of this
-/// project but not in every one.
+/// 本项目某个构建写过、但并非每个构建都有的列。
 ///
-/// `CREATE TABLE IF NOT EXISTS` is a no-op against a table that already
-/// exists, so a column added to `schema.sql` later never reaches a user
-/// who already has a file. Re-adding it here is the only way that file
-/// ever sees it.
+/// `CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，后加的列因此永远到不了已有文件；
+/// 在此补列是那些文件唯一的补救途径。幂等性靠问 SQLite 而非记账：已存在的列被跳过，
+/// 故每次启动都跑、第二次无事发生。
 ///
-/// This deliberately does **not** bump `SCHEMA_VERSION`. That constant is
-/// not a migration counter: [`ensure_current_schema`] reacts to a mismatch
-/// by *deleting* the database, so a patch release that widened a table
-/// would wipe every user's projects, environments and tree. The `IF NOT
-/// EXISTS` in `schema.sql` and this additive pass are the whole
-/// "purely additive changes need no bump" promise the version doc makes.
+/// **刻意不 bump `SCHEMA_VERSION`**：它不是迁移计数器，[`ensure_current_schema`] 遇到
+/// 不匹配会**删库**——一个只是拓宽表的补丁版本会清空所有用户的项目、环境与资源树。
+/// 「纯增量改动不 bump」的承诺，全靠 `schema.sql` 的 `IF NOT EXISTS` 加上这一遍。
 ///
-/// Idempotency comes from asking SQLite rather than from bookkeeping: a
-/// column already present is skipped, so this runs on every boot and does
-/// nothing the second time.
-///
-/// The first entry is the live value layer. The other two are the retired
-/// per-module service model, kept because the data migration has to be
-/// able to *read* that layout — a store that had the columns added by
-/// [`SCHEMA_SQL`]'s `CREATE TABLE` and a store that had them added by this
-/// list are the same shape to the migration, and both must be repairable.
+/// 首项是现役值层。末两项是已下线的「服务挂在模块上」模型，只因数据迁移必须能**读**
+/// 那个布局才留着——由 `SCHEMA_SQL` 建出这三列的库与由本列表补出的库，对迁移是同一种形状，
+/// 两者都必须可修复。
 const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
         "environments",
@@ -275,9 +195,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
         "base_url_definitions",
         "module_id",
-        // Nullable because `ALTER TABLE ... ADD COLUMN` can only append a
-        // column with a default, and a foreign key needs one; every row
-        // of this shape lands with the column NULL anyway.
+        // 可空：`ALTER TABLE ... ADD COLUMN` 只能追加带默认值的列，而外键需要默认值；
+        // 该形状下每行的这一列本来就是 NULL。
         "TEXT REFERENCES nodes(id) ON DELETE CASCADE",
     ),
     (
@@ -287,11 +206,10 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// Add each [`ADDED_COLUMNS`] entry whose table is missing that column.
+/// 为 [`ADDED_COLUMNS`] 中缺列的表补上该列。
 ///
-/// The `PRAGMA table_info` scan is deliberately literal: a table that
-/// `schema.sql` has not created yet simply yields no rows, which leaves it
-/// alone rather than failing the whole boot.
+/// `PRAGMA table_info` 扫描刻意直白：`schema.sql` 尚未创建的表不返回行，于是被跳过，
+/// 而不是让整个启动失败。
 fn add_missing_columns(conn: &mut Connection) -> Result<(), AppError> {
     for (table, column, decl) in ADDED_COLUMNS {
         if table_has_column(conn, table, column)? {
@@ -303,7 +221,7 @@ fn add_missing_columns(conn: &mut Connection) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Does `table` already carry a column called `column`?
+/// `table` 是否已带 `column` 列？
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, AppError> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
     let mut rows = stmt.query([])?;
@@ -316,46 +234,31 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
     Ok(false)
 }
 
-// -------------------------------------------------------------------------
-// Data migration — service list back to the project, values into
-// (environment × module × service).
+// 数据迁移：服务表回到项目级，URL 落到 (环境 × 模块 × 服务)。
 //
-// This is data repair, not a version change. `SCHEMA_VERSION` is untouched
-// on purpose (bumping it makes `ensure_current_schema` delete the store),
-// so the columns arrive through [`ADDED_COLUMNS`] and this pass repairs
-// the rows the current model cannot read.
+// 这是数据修复而非版本变更：`SCHEMA_VERSION` 刻意不动（bump 会让
+// `ensure_current_schema` 删库），列由 [`ADDED_COLUMNS`] 补齐，本 pass 修复旧布局写的行。
 //
-// **Two predecessor layouts are live in the wild**, because a build that
-// put the service list on the module shipped and was run:
-//
-// - **shape B** (that build): one service row per (module × name), values
-//   in `base_urls_json[clone_id]`, ★ per module in `is_default`.
-// - **shape A** (before it): one project-wide service list with
-//   `module_id` NULL, values in `base_urls_json[def_id]` plus an optional
-//   per-module override in `module_base_urls_json[def_id][module_id]`.
-//
-// Which one a store is gets decided per project by the evidence, never
-// assumed: `module_id` non-NULL can only be shape B, and a store with no
-// such row but a populated `base_urls_json` is shape A. A store written by
-// this build has neither, so the pass is a no-op.
-// -------------------------------------------------------------------------
+// **两种旧布局都在野外的库里存在**，按证据逐项目判定，绝不假定：
+// - shape B：每个 (模块 × name) 一行，值在 `base_urls_json[clone_id]`，★ 按模块记在
+//   `is_default`。
+// - shape A：项目级服务表，`module_id` 为 NULL，值在 `base_urls_json[def_id]`，
+//   外加 `module_base_urls_json[def_id][module_id]` 的按模块覆盖。
+// `module_id` 非 NULL 只可能是 B；无此行但 `base_urls_json` 有值则是 A。
+// 本构建写的库两者皆无，pass 即空操作。
 
-/// A service row as either predecessor layout wrote it. `module_id` is the
-/// shape discriminator: `Some` means the module-owned model, `None` the
-/// project-owned one.
+/// 旧布局写下的一条服务行。`module_id` 是布局判别式：`Some` = 模块持有，`None` = 项目持有。
 struct ServiceRow {
     id: String,
     name: String,
     module_id: Option<String>,
     sort_order: i64,
-    /// The ★ flag the module-owned model kept per row. Always false in
-    /// shape A — that layout had no per-row flag at all.
+    /// 模块持有模型按行记的 ★。shape A 无此标记，故此处恒为 false。
     is_default: bool,
 }
 
-/// One module of the project. Only what "the first module" means: display
-/// order, then creation, then id as the final tie-break so the choice is
-/// stable across runs rather than dependent on scan order.
+/// 项目的一个模块，即「第一个模块」的含义：显示序 → 创建时间 → id，
+/// 让选择跨次运行稳定，而不是取决于扫描顺序。
 struct ModuleRow {
     id: String,
     sort_order: i64,
@@ -363,37 +266,27 @@ struct ModuleRow {
 }
 
 impl ModuleRow {
-    /// Display order, as `(sort_order, created_at, id)`.
+    /// 显示序，写作 `(sort_order, created_at, id)`。
     fn rank(&self) -> (i64, i64, &str) {
         (self.sort_order, self.created_at, self.id.as_str())
     }
 }
 
-/// One environment with **both** URL layers readable. This is the only
-/// reader of `base_urls_json` left in the crate, and it reads
-/// `module_base_urls_json` because a shape A store's override layer is
-/// part of the answer.
+/// 两层 URL 都可读的环境行。本 crate 仅剩这一个 `base_urls_json` 的读者，且必须同时读
+/// `module_base_urls_json`——shape A 的覆盖层是答案的一部分。
 struct EnvRow {
     id: String,
-    /// `def_id -> url`. Read as the shape A fallback and as the shape B
-    /// source; never written except to be emptied once shape B is done
-    /// with it (see [`migrate_project`]).
+    /// `def_id -> url`。作为 shape A 的兜底与 shape B 的来源来读；只在 shape B 走完后
+    /// 被清空一次（见 [`migrate_project`]）。
     base_urls: std::collections::BTreeMap<String, String>,
-    /// `def_id -> module_id -> url`, the live layer.
+    /// `def_id -> module_id -> url`，现役值层。
     module_base_urls:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
-/// Projects with rows this pass still has to touch.
-///
-/// Two independent kinds of evidence, unioned:
-///
-/// - a service that still names a module ⇒ shape B;
-/// - an environment that still carries service-level URLs ⇒ shape A.
-///
-/// A project with neither is already in the current shape and is left
-/// strictly alone, which is what makes the pass free on every boot after
-/// the first.
+/// 本 pass 仍需处理的项目 id。两类独立证据取并集：仍有服务指名模块 ⇒ shape B；
+/// 仍有服务级 URL 的环境 ⇒ shape A。两者皆无即已是现役形状，严格不碰——
+/// 这也是首轮之后每次启动都零成本的原因。
 fn pending_projects(conn: &mut Connection) -> Result<Vec<String>, AppError> {
     let mut pending: std::collections::BTreeSet<String> = Default::default();
 
@@ -415,9 +308,8 @@ fn pending_projects(conn: &mut Connection) -> Result<Vec<String>, AppError> {
     Ok(pending.into_iter().collect())
 }
 
-/// Project ids owning an environment whose `base_urls_json` still holds
-/// something. Parsed rather than compared against `'{}'` so a blob that
-/// differs only in whitespace or key order still counts as evidence.
+/// `base_urls_json` 仍有内容的环境所属项目 id。
+/// 解析而非与 `'{}'` 比较：仅空白或键序不同的 blob 也算证据。
 fn read_envs_needing_repair(conn: &mut Connection) -> Result<Vec<String>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT project_id, base_urls_json FROM environments \
@@ -432,9 +324,7 @@ fn read_envs_needing_repair(conn: &mut Connection) -> Result<Vec<String>, AppErr
         match serde_json::from_str::<std::collections::BTreeMap<String, String>>(&raw) {
             Ok(map) if !map.is_empty() => out.push(project_id),
             Ok(_) => {}
-            // Unreadable means there is nothing to carry across: the
-            // alternative is refusing to boot over a column this build
-            // already treats as dead.
+            // 解析不了就没东西可搬：否则会为一个本构建已当死列的字段拒绝启动。
             Err(e) => tracing::warn!(
                 "environments.base_urls_json is not readable ({e}); \
                  migrating this environment without its service-level URLs"
@@ -444,29 +334,23 @@ fn read_envs_needing_repair(conn: &mut Connection) -> Result<Vec<String>, AppErr
     Ok(out)
 }
 
-/// Move every project's services back onto the project and every URL into
-/// `module_base_urls_json[def_id][module_id]`.
-///
-/// One transaction for all projects: a crash mid-way rolls the whole pass
-/// back and the next boot redoes it from the same starting state, so there
-/// is no half-migrated shape to detect.
+/// 把每个项目的服务搬回项目级，URL 搬进 `module_base_urls_json[def_id][module_id]`。
+/// 所有项目共用一个事务：中途崩溃则整遍回滚，下次启动从同一初始状态重来，
+/// 不存在半迁移形状。
 fn migrate_base_urls_into_value_layer(conn: &mut Connection) -> Result<(), AppError> {
     let pending = pending_projects(conn)?;
     if pending.is_empty() {
         return Ok(());
     }
 
-    // `BEGIN IMMEDIATE` / `COMMIT` spelled out rather than
-    // `conn.transaction()`, for the same reason [`run_immediate_tx`] does
-    // it: `rusqlite::Transaction` only hands back an immutable borrow of
-    // the connection, and every helper below takes the same `&mut
-    // Connection` the rest of this module takes. IMMEDIATE rather than the
-    // deferred default so a second boot racing this one fails at BEGIN
-    // instead of half way through the rewrite.
+    // 手写 `BEGIN IMMEDIATE` / `COMMIT` 而非 `conn.transaction()`，理由同
+    // [`run_immediate_tx`]：`rusqlite::Transaction` 只把不可变的连接借用交回来，
+    // 而下面每个 helper 都要本模块通用的 `&mut Connection`。用 IMMEDIATE 而非默认的
+    // deferred，是让并发启动在 BEGIN 处就失败，而不是改写改到一半才失败。
     conn.execute_batch("BEGIN IMMEDIATE")?;
     for project_id in &pending {
         if let Err(e) = migrate_project(conn, project_id) {
-            // Best-effort rollback — the original error is the useful one.
+            // 尽力回滚——原始错误才有诊断价值。
             let _ = conn.execute_batch("ROLLBACK");
             return Err(e);
         }
@@ -480,7 +364,7 @@ fn migrate_base_urls_into_value_layer(conn: &mut Connection) -> Result<(), AppEr
     Ok(())
 }
 
-/// The per-project half of [`migrate_base_urls_into_value_layer`].
+/// [`migrate_base_urls_into_value_layer`] 的逐项目一半。
 fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppError> {
     let modules = read_modules(conn, project_id)?;
     let services = read_services(conn, project_id)?;
@@ -489,15 +373,12 @@ fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppErr
     }
     let envs = read_envs(conn, project_id)?;
 
-    // Shape B is "some row still owns a module". Deciding per project is
-    // what lets a store that was never touched by the module-owned build
-    // take the cheaper, id-preserving path — and it is the only evidence
-    // available, since both layouts leave `base_urls_json` populated.
+    // shape B = 「还有行持有模块」。逐项目判定，才让从未被模块持有版碰过的库走保 id 的
+    // 廉价路径；且这是唯一可用证据——两种布局的 `base_urls_json` 都是有值的。
     let module_owned = services.iter().any(|s| s.module_id.is_some());
 
-    // The project's own ★ is read before anything rewrites it: shape A
-    // keeps it (it is what its endpoints already resolved against) and
-    // shape B has none left to keep (that model moved ★ onto the module).
+    // 在任何改写之前读出项目自己的 ★：shape A 保留它（endpoint 本就按它解析），
+    // shape B 已无处可留（那个模型把 ★ 移到了模块上）。
     let star_before: Option<String> = conn.query_row(
         "SELECT default_base_url_definition_id FROM projects WHERE id = ?1",
         params![project_id],
@@ -505,8 +386,7 @@ fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppErr
     )?;
 
     let canonical = pick_canonical(&services, &modules, module_owned);
-    // clone id -> canonical id, for shape B only: an endpoint that named
-    // a per-module clone has to be re-pointed at the row that survives.
+    // clone id -> 存活的 canonical id，仅 shape B：指名 clone 的 endpoint 要改指到留下的那一行。
     let survivor_of: std::collections::HashMap<&str, &str> = canonical
         .iter()
         .filter(|c| !c.replaced.is_empty())
@@ -523,11 +403,9 @@ fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppErr
         remap_endpoints_onto_canonical(conn, project_id, &survivor_of)?;
     }
 
-    // ★. Shape A keeps whatever the project already pointed at (a NULL
-    // stays NULL: inventing a default would give endpoints that resolved
-    // to `''` a host they never had). Shape B has to choose, because the
-    // per-module ★ it used to live on is going away — see
-    // [`choose_star_for_module_owned`].
+    // ★：shape A 保留原指向（NULL 就保持 NULL——凭空造一个默认，等于给原本解析为 `''`
+    // 的 endpoint 一个它从未有过的 host）；shape B 必须选，因为按模块的 ★ 即将消失，
+    // 见 [`choose_star_for_module_owned`]。
     let star = if module_owned {
         choose_star_for_module_owned(&services, &modules, &canonical)
     } else {
@@ -538,9 +416,7 @@ fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppErr
         params![star, project_id],
     )?;
 
-    // Retire the per-module clones, then neutralise the two columns the
-    // model they belonged to used. Deleting after the value layer is
-    // written is what keeps the ids resolvable while it is being read.
+    // 先写值层再退场 clone：读的时候那些 id 还得可解析。
     for c in &canonical {
         for old in &c.replaced {
             conn.execute(
@@ -555,17 +431,12 @@ fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppErr
         params![project_id],
     )?;
 
-    // Shape B only: `base_urls_json` was the value layer, and every value
-    // in it is now in `module_base_urls_json` — each clone's URL under its
-    // own module, each leftover key pointing at a row that no longer
-    // exists. Leaving it would not merely be untidy: the next boot sees a
-    // store with no `module_id` left, decides it is shape A, and expands
-    // `base_urls[canonical]` into every module's empty cell — filling
-    // module B with module A's host, on every boot, forever. Clearing it
-    // is what makes this shape idempotent. Shape A is left alone: its
-    // keys are its own def ids, it re-derives byte-identical values on
-    // every later run, and it is the one layout where the stale blob is
-    // genuinely harmless.
+    // 仅 shape B：`base_urls_json` 就是值层，其中每个值都已进 `module_base_urls_json`
+    // （各 clone 的 URL 归到它自己的模块，剩余键指向已不存在的行）。留着不只是脏：
+    // 下次启动看到没有 `module_id` 的库会判定为 shape A，于是把 `base_urls[canonical]`
+    // 展开进每个模块的空单元格——模块 B 被填上模块 A 的 host，且每次启动都重来。
+    // 清空它才使这一形状幂等。shape A 不动：它的键就是自己的 def id，之后每遍都重新
+    // 推导出逐字节相同的值，是唯一残留 blob 真正无害的布局。
     if module_owned {
         conn.execute(
             "UPDATE environments SET base_urls_json = '{}' WHERE project_id = ?1",
@@ -575,35 +446,25 @@ fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppErr
     Ok(())
 }
 
-/// A service that survives the migration, plus the ids it stands in for.
+/// 迁移后存活的服务行，加上它顶替的那些 id。
 struct CanonicalService {
     id: String,
     name: String,
     sort_order: i64,
-    /// Ids of the per-module clones this row replaces (shape B only).
-    /// Empty means nothing was collapsed, which is every row in shape A.
+    /// 被本行顶替的 per-module clone id（仅 shape B）。为空表示没有折叠，
+    /// shape A 每行皆如此。
     replaced: Vec<String>,
 }
 
-/// Decide which row represents each service name.
+/// 决定每个服务名由哪一行代表。
 ///
-/// Shape A: every row is already project-wide, so every row survives and
-/// nothing is collapsed. Renaming is therefore not a merge, and two rows
-/// sharing a `name` are a state the application itself cannot create.
-///
-/// Shape B: one row per (module × name), and the project's service list
-/// has to end up with one row per name. The survivor is the one under the
-/// **first** module — display order, then creation, then id — because
-/// that is the module whose configuration the project had the most of,
-/// and because picking anything else would need a rule for "which module
-/// wins" that has no basis in the data. Within one module the tie-break
-/// is the row's own display order.
-///
-/// A row with no module at all cannot be "the first module's", so it is
-/// ranked behind every real module: it wins only when it is the sole row
-/// for that name, which is the case a mixed store leaves behind when the
-/// module-owned build created new services before the old ones were
-/// collapsed.
+/// - shape A：每行已是项目级，全部存活、无需合并，故重命名不是合并——同 `name` 两行
+///   是应用层自己造不出的状态。
+/// - shape B：每 (模块 × name) 一行，须收敛为每 name 一行。存活者取**第一个**模块下的
+///   那行（显示序 → 创建时间 → id）：那是项目配置最多的模块，换一个就得有一条
+///   「哪个模块赢」的规则，而数据里没有依据。同模块内以该行自身显示序决胜。
+/// - 无模块的行排在所有真模块之后，只在该 name 仅剩它一行时胜出——混合库里模块持有版
+///   在旧行折叠前新建服务会留下这种状态。
 fn pick_canonical(
     services: &[ServiceRow],
     modules: &[ModuleRow],
@@ -623,7 +484,7 @@ fn pick_canonical(
 
     let rank_of = |module_id: Option<&str>| -> (u8, (i64, i64, &str)) {
         match module_id.and_then(|m| modules.iter().find(|x| x.id == m)) {
-            // Owned rows sort ahead of unowned leftovers.
+            // 有模块的行排在无主残留之前。
             Some(m) => (0, m.rank()),
             None => (1, (0, 0, "")),
         }
@@ -633,8 +494,7 @@ fn pick_canonical(
     for s in services {
         let entry = by_name.entry(s.name.as_str()).or_insert(s);
         let better = rank_of(s.module_id.as_deref()) < rank_of(entry.module_id.as_deref())
-            // Same module (or both unowned): fall back to the row's own
-            // display order so the choice does not depend on scan order.
+            // 同模块（或都无主）时退回该行自身的显示序，使选择不依赖扫描顺序。
             || (rank_of(s.module_id.as_deref()) == rank_of(entry.module_id.as_deref())
                 && (s.sort_order, s.id.as_str()) < (entry.sort_order, entry.id.as_str()));
         if better {
@@ -657,21 +517,13 @@ fn pick_canonical(
         .collect()
 }
 
-/// Which service becomes the project's ★ under the module-owned model.
+/// 模块持有模型下，谁成为项目的 ★。
 ///
-/// The first module's ★, because that is the one the project most
-/// plausibly meant: its requests went out through it. **When two modules
-/// disagree there is no right answer** — the module-owned model gave each
-/// module an independent default and nothing ever tied them together, so
-/// there is no inheritance to follow and no majority to consult. "First
-/// module wins" is a stated tie-break, not a reconstruction of intent;
-/// the alternative (leaving ★ unset) would silently strip every endpoint
-/// that named no service of a base URL it had.
-///
-/// A first module with no ★ of its own falls back to the service with the
-/// smallest `sort_order`, which is the one the picker shows first — the
-/// same answer `base_url_defs::set_default` would produce if the user
-/// picked "the first one".
+/// 取第一个模块的 ★——最可能就是用户本意，它的请求正是从这里发出的。**两模块冲突时没有
+/// 正确答案**：该模型给每个模块独立默认值，从未把两者关联，既无继承可循，也无多数可问；
+/// 「第一个模块胜出」是明示的决胜规则，不是还原本意。另一个选择（不设 ★）会静默剥掉每个
+/// 未指名服务的 endpoint 的 base URL。首个模块自己无 ★ 时，退回 `sort_order` 最小的服务，
+/// 即选择器里排在最前的那个。
 fn choose_star_for_module_owned(
     services: &[ServiceRow],
     modules: &[ModuleRow],
@@ -687,9 +539,7 @@ fn choose_star_for_module_owned(
             .iter()
             .min_by(|a, b| (a.sort_order, &a.id).cmp(&(b.sort_order, &b.id)))
         {
-            // The ★ may itself be a clone, in which case the project's
-            // default has to name the row that survived, not the row that
-            // is about to be deleted.
+            // ★ 自身可能就是 clone，此时项目默认须指名存活的行，而不是即将被删的那一行。
             if let Some(keep) = canonical
                 .iter()
                 .find(|c| c.name == pick.name)
@@ -705,24 +555,16 @@ fn choose_star_for_module_owned(
         .map(|c| c.id.clone())
 }
 
-/// Copy every live URL into `module_base_urls_json[def_id][module_id]`.
+/// 把每个现役 URL 复制进 `module_base_urls_json[def_id][module_id]`。
 ///
-/// The cell's value is whatever the **old** model resolved for that exact
-/// (service × module) pair, and nothing else:
+/// 单元格的值就是**旧**模型为该 (服务 × 模块) 对解析出的值，不多不少：
+/// - shape A：有按模块覆盖就用覆盖，否则用环境级 URL——正是旧解析的顺序。
+/// - shape B：同名 clone 在该模块下的 URL；该模块没有此服务则缺席，这正是要点：
+///   空单元格表示「此模块对此服务无地址」，不得从兄弟模块回填。
 ///
-/// - shape A: the per-module override if the environment has one, else
-///   the environment-level URL — which is precisely what the previous
-///   resolution did, in that order.
-/// - shape B: the URL of the clone of the same name under that module.
-///   Absent for a module that never had that service, which is the point:
-///   an empty cell means "this module has no address for this service" and
-///   must not be filled from a sibling module.
-///
-/// A cell that already holds a value keeps it, so the pass is additive and
-/// re-running changes nothing. When neither source has a value the cell is
-/// left absent rather than written empty — "not set" is a state the UI
-/// shows and the resolver treats as no base URL, and materialising it as
-/// `""` would make the two indistinguishable in the stored data.
+/// 已有值的单元格保持不变，故本 pass 只增不改、重跑无事。两边都无值时**不写**该单元格：
+/// 「未设置」是 UI 会显示、解析器会当作无 base URL 的状态，物化成 `""` 会让两者在存储的
+/// 数据里无法区分。
 fn write_value_layer(
     conn: &mut Connection,
     envs: &[EnvRow],
@@ -771,16 +613,10 @@ fn write_value_layer(
     Ok(())
 }
 
-/// Point every endpoint in the project at the surviving row for the
-/// service it named.
-///
-/// Shape B only — in shape A the ids never change. An endpoint naming
-/// nothing keeps naming nothing: it resolves through the project ★, which
-/// is re-pointed in the same pass.
-///
-/// Endpoints naming an id this project does not own are left alone. That
-/// is a cross-project reference, which the write paths reject; it is not
-/// something a data pass should silently rewrite.
+/// 把项目内每个 endpoint 改指到它原名所指名服务的那一行。仅 shape B——shape A 的 id 从不变。
+/// 未指名服务的保持未指名：它走项目 ★，而 ★ 在同一 pass 里已改指。
+/// 指名了本项目不持有的 id 的一律不动：那是跨项目引用，写路径本就拒绝，
+/// 不该由数据 pass 静默改写。
 fn remap_endpoints_onto_canonical(
     conn: &mut Connection,
     project_id: &str,
@@ -888,21 +724,15 @@ fn read_envs(conn: &mut Connection, project_id: &str) -> Result<Vec<EnvRow>, App
     Ok(out)
 }
 
-/// Bring the on-disk database up to [`SCHEMA_VERSION`], replacing it
-/// when it predates this build's layout.
+/// 把磁盘上的库升到 [`SCHEMA_VERSION`]，版本不符则替换。
+/// 返回 `true` 表示文件已被删除、将重建，由调用方告知数据丢失。
 ///
-/// Returns `true` when the file was deleted and will be recreated, so
-/// the caller can surface the data loss.
-///
-/// **There is no migration path.** v0.1 has never shipped to real
-/// users, so a data-migration framework would be speculative weight
-/// guarding a population of one. A pre-versioned file (the original
-/// `modules` / `collections` / `endpoints` three-table layout) is
-/// replaced instead of upgraded. When that stops being true, this
-/// function is the one place that has to change.
+/// **没有迁移路径。** v0.1 未曾发布给真实用户，数据迁移框架是守护一个人群的投机重量；
+/// 版本号之前的三表布局（`modules` / `collections` / `endpoints`）文件直接替换而非升级。
+/// 这个判断一旦改变，只有本函数需要动。
 fn ensure_current_schema(db_path: &Path) -> Result<bool, AppError> {
     if !db_path.exists() {
-        // Fresh install — `migrate` creates the file and stamps it.
+        // 全新安装——`migrate` 会创建文件并写入版本号。
         return Ok(false);
     }
     let found = read_user_version(db_path)?;
@@ -910,8 +740,7 @@ fn ensure_current_schema(db_path: &Path) -> Result<bool, AppError> {
         return Ok(false);
     }
     if found > SCHEMA_VERSION {
-        // The file was written by a *newer* build. Recreating it would
-        // destroy data this build has no excuse destroying.
+        // 文件来自**更新**的构建。重建会毁掉本构建无权毁掉的数据。
         return Err(AppError::Validation(format!(
             "database at {} is schema v{found}, but this build only understands \
              v{SCHEMA_VERSION}. Update Simple Post, or point \
@@ -923,22 +752,16 @@ fn ensure_current_schema(db_path: &Path) -> Result<bool, AppError> {
     Ok(true)
 }
 
-/// Read `PRAGMA user_version` without taking a write lock.
-///
-/// Opened read-only on purpose: `init` calls this before the pool
-/// exists, and a read-write handle would create the file we're about
-/// to decide whether to delete.
+/// 不取写锁地读 `PRAGMA user_version`。
+/// 刻意只读打开：`init` 在池存在之前调用，读写句柄会创建我们正要决定是否删除的文件。
 fn read_user_version(db_path: &Path) -> Result<i64, AppError> {
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
 
-/// Delete the database and its WAL sidecars.
-///
-/// The sidecars are not optional cleanup. Leaving `store.db-wal` behind
-/// while `migrate` creates a fresh `store.db` lets SQLite replay the
-/// old write-ahead log into the new file — which is how a "clean"
-/// rebuild comes back still holding the data it was supposed to drop.
+/// 删除数据库及其 WAL 附属文件。附属文件不是可选清理：留着 `store.db-wal` 而 `migrate`
+/// 重建了新 `store.db`，SQLite 会把旧 write-ahead log 重放进新文件——「干净」的重建于是
+/// 带回了本该丢掉的数据。
 fn remove_db_files(db_path: &Path) -> Result<(), AppError> {
     for suffix in ["", "-wal", "-shm"] {
         let path = if suffix.is_empty() {
@@ -950,12 +773,10 @@ fn remove_db_files(db_path: &Path) -> Result<(), AppError> {
         };
         match std::fs::remove_file(&path) {
             Ok(()) => {}
-            // Another process may have cleaned up first, or a failed
-            // open may have left the sidecar absent. Both are fine.
+            // 别的进程可能先清过了，或打开失败时附属文件本就不存在。都无妨。
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            // On Windows this is the shape a file held open by another
-            // process takes — a second `serve-web` or a stray daemon
-            // owns the handle. Failing loudly beats half-rebuilding.
+            // Windows 上「文件被另一进程占用」就长这样——第二个 `serve-web` 或残留的
+            // daemon 还握着句柄。宁可大声失败，也不要重建一半。
             Err(e) => {
                 return Err(AppError::Io(std::io::Error::new(
                     e.kind(),
@@ -967,24 +788,16 @@ fn remove_db_files(db_path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Liveness probe. `SELECT 1` round-trips a connection from the pool.
-/// Useful at startup and from a Tauri command for the health badge.
+/// 存活探针。`SELECT 1` 走一次池中连接，用于启动时与 Tauri command 的健康灯。
 pub fn ping(pool: &DbPool) -> Result<(), AppError> {
     let conn = pool.get()?;
     conn.execute_batch("SELECT 1")?;
     Ok(())
 }
 
-// -------------------------------------------------------------------------
-// Internals.
-// -------------------------------------------------------------------------
-
-/// Run `BEGIN IMMEDIATE`, dispatch to the caller, COMMIT on success
-/// or ROLLBACK on error. Returns the caller's value or error.
-///
-/// This is split out from `with_tx` so the retry loop can borrow the
-/// closure without a generic lifetime argument; `Fn` (not `FnOnce`)
-/// is used so we can call repeatedly without moving the closure.
+/// 执行 `BEGIN IMMEDIATE`，分派给调用方，成功 COMMIT、失败 ROLLBACK。返回调用方的值或错误。
+/// 从 `with_tx` 拆出，是为了让重试循环能在不带泛型生命周期参数的情况下借用闭包；
+/// 用 `Fn`（而非 `FnOnce`）才能反复调用而不移走闭包。
 fn run_immediate_tx<F, R>(conn: &mut Connection, f: &F) -> Result<R, AppError>
 where
     F: Fn(&mut Connection) -> Result<R, AppError>,
@@ -996,30 +809,20 @@ where
             Ok(v)
         }
         Err(e) => {
-            // Best-effort rollback — if even ROLLBACK fails we keep the
-            // original error; the connection will be dropped / reused.
+            // 尽力回滚——连 ROLLBACK 都失败时也保留原始错误，连接随后被丢弃或复用。
             let _ = conn.execute_batch("ROLLBACK");
             Err(e)
         }
     }
 }
 
-// -------------------------------------------------------------------------
-// Embedded static asset — kept in-tree so the binary doesn't need a
-// filesystem lookup at runtime. `include_str!` makes the asset
-// participate in `cargo build` rebuilds when it changes.
-// -------------------------------------------------------------------------
+// 内嵌静态资源：`include_str!` 使 schema 变更参与 `cargo build` 的重编判定。
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
 
-// -------------------------------------------------------------------------
-// Test-only fixture loading.
-//
-// Everything in this module is `#[cfg(test)]`: it compiles into
-// `cargo test` and nowhere else. `db::init` has no path in here, so a
-// production build can never insert seed rows — a fresh install starts
-// empty. `fixtures.json` remains in-tree purely as test data.
-// -------------------------------------------------------------------------
+// 仅测试。整个模块是 `#[cfg(test)]`，只编进 `cargo test`，别处不存在。
+// `db::init` 没有进这里的路径，故生产构建永远插不进种子行——全新安装是空库。
+// `fixtures.json` 留在仓库里纯粹作为测试数据。
 
 #[cfg(test)]
 pub(crate) mod test_support {
@@ -1028,44 +831,34 @@ pub(crate) mod test_support {
     use rusqlite::params;
     use serde::Deserialize;
 
-    /// The bundled fixture file. Test data only — never read by `db::init`.
+    /// 内嵌的 fixture 文件。纯测试数据——`db::init` 永不读取。
     const FIXTURES_JSON: &str = include_str!("fixtures.json");
 
-    /// Parse the bundled fixtures. Panicking here is correct: a malformed
-    /// `fixtures.json` is a repository defect, not a runtime condition.
+    /// 解析内嵌 fixture。这里 panic 是正确的：`fixtures.json` 畸形是仓库缺陷，不是运行期状况。
     fn fixtures() -> Fixtures {
         serde_json::from_str(FIXTURES_JSON).expect("fixtures.json must parse")
     }
 
-    /// Open a database at `dir` and load the bundled fixture set into it.
-    ///
-    /// This is what the `#[path]`-mounted test modules use in place of the
-    /// old implicit seeding: `init` used to seed on every call, so the
-    /// per-module `fresh_pool()` helpers relied on that side effect. Seeding
-    /// is now an explicit, visible step rather than a `db::init` surprise.
+    /// 在 `dir` 开库并灌入内嵌 fixture 集。
+    /// 供 `#[path]` 挂载的测试模块使用：播种是显式的一步，而不是 `db::init` 的副作用。
     pub(crate) fn init_seeded(dir: &Path) -> DbPool {
         let pool = init(dir).expect("init");
         seed(&pool);
         pool
     }
 
-    /// Load the bundled fixture set into an already-initialised database.
-    ///
-    /// `with_conn`, not `with_tx`: `seed_fixtures` opens its own transaction
-    /// so the whole fixture set lands atomically, and nesting a `BEGIN
-    /// IMMEDIATE` around it fails with "cannot start a transaction within a
-    /// transaction".
+    /// 把 fixture 集灌进已初始化的库。
+    /// 用 `with_conn` 而非 `with_tx`：`seed_fixtures` 自开事务，外层再套一个
+    /// `BEGIN IMMEDIATE` 会报 "cannot start a transaction within a transaction"。
     pub(crate) fn seed(pool: &DbPool) {
         with_conn(pool, |c| seed_fixtures(c, &fixtures())).expect("seed fixtures");
     }
 
-    /// Top-level shape of `fixtures.json`. We only deserialize the fields
-    /// the seeder actually needs; the file can grow extra sections without
-    /// breaking older binaries (provided they have defaults).
+    /// `fixtures.json` 的顶层形状。只反序列化播种真正需要的字段，文件可增章节而不破旧
+    /// 二进制（新字段须有默认值）。
     #[derive(Debug, Deserialize)]
     struct Fixtures {
-        /// Fixed clock the fixture set is stamped with. Deterministic, so
-        /// a seeded database is byte-identical between runs.
+        /// fixture 集打上的固定时钟，确定性——播种后的库逐字节一致。
         #[serde(default)]
         now: i64,
         #[serde(default)]
@@ -1116,8 +909,7 @@ pub(crate) mod test_support {
         #[serde(default)]
         description: Option<String>,
         sort_order: i64,
-        /// UI-only expand state. Carried in the fixture so a future
-        /// renderer test can read a realistic tree, never persisted.
+        /// 仅 UI 的展开状态。带入 fixture 以便渲染测试能读到真实树，永不落库。
         #[serde(default)]
         #[allow(dead_code)]
         expanded: Option<bool>,
@@ -1134,7 +926,7 @@ pub(crate) mod test_support {
         #[serde(default)]
         description: Option<String>,
         sort_order: i64,
-        /// UI-only expand state; see [`FixtureModule::expanded`].
+        /// 仅 UI 的展开状态，见 [`FixtureModule::expanded`]。
         #[serde(default)]
         #[allow(dead_code)]
         expanded: Option<bool>,
@@ -1179,11 +971,8 @@ pub(crate) mod test_support {
         id: String,
         project_id: String,
         name: String,
-        /// `def_id -> module_id -> url`, the live value layer. The
-        /// retired `base_urls_json` is not seeded at all: a fixture
-        /// database is a current-model store, and leaving a populated
-        /// legacy column behind would make every seeded test boot run the
-        /// data migration.
+        /// `def_id -> module_id -> url`，现役值层。下线的 `base_urls_json` 完全不播种：
+        /// fixture 库是现役模型的库，留下有值的旧列会让每个播种测试启动都跑一遍数据迁移。
         #[serde(default)]
         module_base_urls: serde_json::Value,
         #[serde(default)]
@@ -1191,13 +980,9 @@ pub(crate) mod test_support {
         is_active: bool,
     }
 
-    /// Insert one row of the tree.
-    ///
-    /// The three fixture sections collapse onto this one shape — the
-    /// only thing that varies is `kind` and whether `parent_id` is set.
-    /// Takes a real [`ResourceNode`] rather than a loose column list so
-    /// the fixture's translation stays a handful of struct literals
-    /// instead of a call with ten positional arguments.
+    /// 插入资源树的一行。fixture 的三个树段落都落到这一种形状，变的只有 `kind` 与
+    /// `parent_id` 是否为空。收 [`ResourceNode`] 而非散列，是为了让翻译写成几个结构体字面量，
+    /// 而不是十个位置参数的调用。
     fn insert_node(tx: &rusqlite::Transaction<'_>, n: &ResourceNode) -> Result<(), AppError> {
         tx.execute(
             "INSERT INTO nodes \
@@ -1218,10 +1003,8 @@ pub(crate) mod test_support {
         Ok(())
     }
 
-    /// Insert all rows from the fixtures file. Walks the dependency graph
-    /// in topological order: projects → base_url_defs + modules + envs →
-    /// collections → endpoints. Foreign keys stay satisfied without
-    /// `PRAGMA defer_foreign_keys`.
+    /// 按依赖拓扑顺序插入 fixture 全部行：projects → base_url_defs + modules + envs →
+    /// collections → endpoints。外键自然满足，无需 `PRAGMA defer_foreign_keys`。
     fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
         let tx = conn.transaction()?;
 
@@ -1240,9 +1023,7 @@ pub(crate) mod test_support {
                 p.updated_at,
             ],
         )?;
-            // baseUrlDefinitions are stored as a JSON-ish blob on the project
-            // row (no schema column) — actually we *do* persist each def into
-            // its own table so the foreign-key chain into endpoints works.
+            // 每个 def 单独入表，endpoint 的外键链才成立。
             for (i, d) in p.base_url_definitions.iter().enumerate() {
                 tx.execute(
                     "INSERT INTO base_url_definitions \
@@ -1251,23 +1032,14 @@ pub(crate) mod test_support {
                     params![d.id, p.id, d.name, d.description, i as i64],
                 )?;
             }
-            // `baseUrl` is the legacy field on Project; we don't persist
-            // it into its own column (the schema has none). The runtime
-            // migrates legacy data into env.baseUrls[defId] at boot.
+            // `baseUrl` 是 Project 上的遗留字段，schema 无对应列，不落库。
             let _ = p.base_url.as_ref();
         }
 
-        // The fixture file keeps its three-section shape (modules /
-        // collections / endpoints) because that is how a human reads a
-        // sample tree. The tables those sections used to map onto are
-        // gone, so this is where the translation happens: one `nodes`
-        // row per entry, plus an `endpoint_details` row for each
-        // endpoint.
-        //
-        // `root_id` is the one value the fixture does not carry — it was
-        // implied by the module each collection hung off. Derived here
-        // and memoised per owner so the lookup is a map read, not a
-        // re-walk for every descendant.
+        // fixture 保持三段式（modules / collections / endpoints），便于人读样例树；
+        // 翻译在此发生：每项一行 `nodes`，endpoint 另加一行 `endpoint_details`。
+        // `root_id` 是 fixture 不带的那个值——原本由所属模块隐含，此处推导并按 owner
+        // 记忆化，使查表是一次 map 读，而非每个后代都重走一遍。
         let mut owner: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
 
         for m in &fx.modules {
@@ -1276,7 +1048,7 @@ pub(crate) mod test_support {
                 &ResourceNode {
                     id: m.id.clone(),
                     root_id: m.project_id.clone(),
-                    // A module's parent is the project, not another node.
+                    // 模块的父是项目，不是另一个节点。
                     parent_id: None,
                     kind: ResourceNodeType::Module,
                     name: m.name.clone(),
@@ -1296,9 +1068,8 @@ pub(crate) mod test_support {
                     c.id, c.module_id
                 ))
             })?;
-            // A nested collection's `parent_id` is the collection, not
-            // the module — the type matrix allows either, and the fixture
-            // says which by naming a `parentCollectionId`.
+            // 嵌套集合的 `parent_id` 是集合而非模块——类型矩阵两者都允许，
+            // fixture 用是否给 `parentCollectionId` 表示。
             let parent = c
                 .parent_collection_id
                 .as_deref()
@@ -1344,8 +1115,7 @@ pub(crate) mod test_support {
                     updated_at: e.updated_at,
                 },
             )?;
-            // The node and its configuration land together: an endpoint
-            // with no detail row is a tree the reader cannot open.
+            // 节点与配置一起落：没有 detail 行的 endpoint 打不开。
             tx.execute(
                 "INSERT INTO endpoint_details \
              (node_id, method, url, environment_id, base_url_definition_id, \
@@ -1393,22 +1163,16 @@ pub(crate) mod test_support {
     }
 }
 
-// -------------------------------------------------------------------------
-// Shared helper macros / functions for the CRUD modules.
-// -------------------------------------------------------------------------
+// CRUD 模块共用的辅助类型与函数。
 
-/// Re-export of `Arc<str>` for callers that want cheap-clone handles
-/// to id strings. Not used yet but ready for the orchestration layer.
+/// `Arc<str>` 的重导出，供需要廉价克隆 id 句柄的调用方使用。
 #[allow(dead_code)]
 pub(crate) fn arc_str(s: impl Into<String>) -> Arc<str> {
     Arc::from(s.into())
 }
 
-/// Error type for a JSON-in-TEXT column that failed to decode.
-///
-/// `rusqlite`'s `FromSqlConversionFailure` wants
-/// `Box<dyn StdError + Send + Sync + 'static>`, so the message is
-/// parked in this tiny string-backed type.
+/// JSON-in-TEXT 列解码失败时的错误类型。rusqlite 的 `FromSqlConversionFailure`
+/// 要 `Box<dyn StdError + Send + Sync + 'static>`，故用这个字符串承载类型把消息装下。
 #[derive(Debug)]
 pub(crate) struct JsonColError(pub String);
 
@@ -1420,13 +1184,8 @@ impl std::fmt::Display for JsonColError {
 
 impl std::error::Error for JsonColError {}
 
-/// Map a serde failure on a JSON column to rusqlite's conversion error,
-/// tagged with the column name.
-///
-/// Shaped this way so the rest of the row still loads and the caller
-/// sees *which* column was malformed rather than an opaque decode
-/// failure. Shared by every module that keeps structured data in a TEXT
-/// column.
+/// 把 JSON 列的 serde 失败映射成 rusqlite 转换错误并带上列名——调用方能看出是哪一列坏了，
+/// 而不是面对一个不透明的解码失败。所有把结构化数据放 TEXT 列的模块共用。
 pub(crate) fn json_col_err(col: &str, e: serde_json::Error) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         0,
@@ -1435,17 +1194,14 @@ pub(crate) fn json_col_err(col: &str, e: serde_json::Error) -> rusqlite::Error {
     )
 }
 
-// -------------------------------------------------------------------------
-// Tests for the top-level surface: pool, init, migrate, ping, with_tx retry.
-// -------------------------------------------------------------------------
+// 顶层表面积（pool / init / migrate / ping / with_tx 重试）的测试。
 
 #[cfg(test)]
 #[path = "mod_test.rs"]
 mod tests;
 
-/// Tiny per-process counter to give each test a unique temp dir.
-/// Hoisted to its own module so test files don't fight over a global
-/// mutable state in `mod tests`.
+/// 每进程计数器，给每个测试一个唯一临时目录。独立成模块，免得测试文件在
+/// `mod tests` 里争同一个可变全局。
 #[doc(hidden)]
 pub mod test_counter {
     use std::sync::atomic::{AtomicU64, Ordering};

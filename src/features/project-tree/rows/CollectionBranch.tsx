@@ -28,9 +28,8 @@ export interface CollectionBranchProps {
 }
 
 /**
- * Recursive renderer for a list of sibling collections. Each collection
- * renders its own row + its children (endpoints + sub-collections) when
- * expanded. Recursion bottoms out at the deepest collection.
+ * 一组兄弟集合的递归渲染器。每个集合在展开时渲染自己的行及其子级（接口 + 子集合）。
+ * 递归在最深的集合处到底。
  */
 export function CollectionBranch(props: CollectionBranchProps) {
   const {

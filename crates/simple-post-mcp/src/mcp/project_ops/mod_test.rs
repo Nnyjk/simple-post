@@ -4,9 +4,8 @@ use simple_post_core::error::AppError;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Instant;
 
-/// Per-call counter that disambiguates temp dirs when several tests
-/// construct their state() in the same millisecond (cargo's default
-/// runs tests in parallel).
+/// 每次调用自增，用来在同毫秒内构造多个 state() 时区分临时目录
+/// （cargo 默认并行跑测试）。
 static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn state() -> std::sync::Arc<AppState> {
@@ -38,12 +37,10 @@ async fn project_create_rejects_empty_name() {
 
 #[tokio::test]
 async fn module_move_preserves_collections_and_endpoints() {
-    // Regression net for a real data-loss bug. `module_move` used to
-    // delete-then-recreate the module, and because
-    // `collections.module_id` / `endpoints.collection_id` are both
-    // `ON DELETE CASCADE`, moving a *populated* module silently
-    // destroyed every collection under it and every endpoint under
-    // those collections. A real `project_id` UPDATE fixes that.
+    // 回归网，防一次真实的数据丢失。`module_move` 一度是「删掉重建」，
+    // 而 `collections.module_id` / `endpoints.collection_id` 都是 `ON DELETE CASCADE`，
+    // 搬一个**有内容**的模块会连带悄悄销毁它下面所有集合、以及那些集合下的所有端点。
+    // 改用一次真实的 `project_id` UPDATE 就不再有这个后果。
     use simple_post_core::db::{endpoint_details, nodes, permissions, projects};
     use simple_post_core::domain::{
         EndpointDetail, Project, RequestBody, ResourceNode, ResourceNodeType,
@@ -52,8 +49,8 @@ async fn module_move_preserves_collections_and_endpoints() {
 
     let st = state();
 
-    /// `Project` has no `Default` (every field is meaningful), so
-    /// build the two minimal rows the move needs.
+    /// `Project` 没有 `Default`（每个字段都有意义），所以手工造这次移动所需的
+    /// 两行最小数据。
     fn mk() -> Project {
         Project {
             id: String::new(),
@@ -107,8 +104,7 @@ async fn module_move_preserves_collections_and_endpoints() {
             },
             None,
         )?;
-        // A sibling left behind in the source project, so the test can
-        // see the gap close up behind the module that left.
+        // 在源项目里留一个同胞，好让测试看清搬走之后空出来的位置。
         nodes::create(
             c,
             &ResourceNode {
@@ -117,8 +113,7 @@ async fn module_move_preserves_collections_and_endpoints() {
             },
             None,
         )?;
-        // Two modules already in the destination, so the requested index
-        // is meaningful rather than clamped into an empty list.
+        // 目标项目里先放两个模块，这样请求的插入位置才有意义，而不是被夹到一个空列表上。
         for (id, order) in [("m_b0", 0), ("m_b1", 1)] {
             nodes::create(
                 c,
@@ -163,15 +158,14 @@ async fn module_move_preserves_collections_and_endpoints() {
                 tags: vec![],
             }),
         )?;
-        // The per-project gate defaults to `read_call`, which is below
-        // the `full` a move requires. Set it after the project row
-        // exists — `agent_permissions.project_id` is an FK to projects.
+        // 按项目的那扇门默认 `read_call`，低于移动要求的 `full`。必须在项目行存在
+        // 之后才设 —— `agent_permissions.project_id` 是指向 projects 的外键。
         permissions::set(c, "p_move_b", Permission::Full)?;
         Ok(())
     })
     .unwrap();
 
-    // Move it to the middle of the destination project's modules.
+    // 把它移到目标项目模块列表的中间。
     module::tool_module_move(
         &st,
         serde_json::json!({
@@ -183,15 +177,14 @@ async fn module_move_preserves_collections_and_endpoints() {
     .await
     .expect("module_move should succeed");
 
-    // The module keeps its id and now belongs to the target project.
+    // 模块保留了 id，且现在归属目标项目。
     let after = simple_post_core::db::with_conn(&st.pool, |c| nodes::get(c, "m_move"))
         .expect("module must still exist under its original id");
     assert_eq!(after.root_id, "p_move_b");
     assert_eq!(after.sort_order, 1);
 
-    // Both projects' top-level orderings stay contiguous: the
-    // destination's modules close around the insertion, and the
-    // project being left has no gap where the module used to be.
+    // 两个项目的顶层排序都保持连续：目标侧在插入处合拢，被离开的那个项目里也不会在
+    // 模块原先的位置留下空洞。
     let top_level = |root: &str| {
         simple_post_core::db::with_conn(&st.pool, |c| {
             simple_post_core::db::nodes::list_by_root_and_type(c, root, ResourceNodeType::Module)
@@ -212,11 +205,9 @@ async fn module_move_preserves_collections_and_endpoints() {
         "the project being left must not keep a gap in its sort_order"
     );
 
-    // Crucially: the child rows survived the move, and their `root_id`
-    // was re-derived with them. Updating only the module row — which is
-    // what the pre-`root_id` layout could express — would file the whole
-    // subtree under the old project and make it invisible to
-    // `list_by_root`.
+    // 关键：子行在移动中存活，且它们的 `root_id` 跟着一起重新推导。只更新模块行
+    // ——`root_id` 布局之前的版本只能这么表达——会把整棵子树归到旧项目名下，让
+    // `list_by_root` 看不见。
     let c_after = simple_post_core::db::with_conn(&st.pool, |c| nodes::get(c, "c_move"))
         .expect("collection must survive the module move");
     assert_eq!(c_after.parent_id.as_deref(), Some("m_move"));
@@ -227,8 +218,7 @@ async fn module_move_preserves_collections_and_endpoints() {
     assert_eq!(e_after.parent_id.as_deref(), Some("c_move"));
     assert_eq!(e_after.root_id, "p_move_b");
 
-    // The endpoint's request configuration is a separate table now, and
-    // must have travelled with it.
+    // 端点的请求配置现在另存一张表，必须跟着一起搬过去。
     let detail = simple_post_core::db::with_conn(&st.pool, |c| endpoint_details::get(c, "e_move"))
         .expect("endpoint detail must survive the module move");
     assert_eq!(detail.url, "/x");
@@ -251,11 +241,9 @@ async fn endpoint_create_rejects_empty_url() {
 
 #[tokio::test]
 async fn endpoint_create_accepts_a_module_parent() {
-    // An endpoint with no collection of its own. The matrix names two
-    // parent types for an endpoint precisely so this does not need a
-    // throwaway collection first — and the MCP tool has to be able to
-    // build the same tree the UI can, so `module_id` is accepted
-    // alongside `collection_id`.
+    // 一个不需要自己集合的端点。约束矩阵之所以给端点列出两种父类型，正是为了不必先
+    // 造一个用完即弃的集合；而 MCP 工具要能建出与 UI 一样的树，所以 `module_id` 与
+    // `collection_id` 一样被接受。
     use simple_post_core::db::{endpoint_details, nodes, permissions, projects};
     use simple_post_core::domain::{Project, ResourceNode, ResourceNodeType};
     use simple_post_core::permissions::Permission;
@@ -304,8 +292,7 @@ async fn endpoint_create_accepts_a_module_parent() {
             &node("p_ep", "m_ep", ResourceNodeType::Module, None),
             None,
         )?;
-        // The per-project gate defaults to `read_call`, which is below
-        // the `full` a create requires.
+        // 按项目的那扇门默认 `read_call`，低于创建要求的 `full`。
         permissions::set(c, "p_ep", Permission::Full)?;
         Ok(())
     })
@@ -325,14 +312,12 @@ async fn endpoint_create_accepts_a_module_parent() {
 
     let crate::mcp::CallToolContent::Text { text } = &res.content[0];
     let created: serde_json::Value = serde_json::from_str(text).expect("json result");
-    // `EndpointResource` flattens the node, so its fields sit at the top
-    // level next to `detail`.
+    // `EndpointResource` 把 node 摊平，所以它的字段与 `detail` 平级。
     assert_eq!(created["kind"], "endpoint");
     assert_eq!(created["parentId"], "m_ep");
     assert_eq!(created["rootId"], "p_ep");
 
-    // The detail row has to land with the node, or the tree holds a row
-    // the tester cannot open.
+    // detail 行必须与 node 一起落库，否则树上会留一行打不开的东西。
     let id = created["id"].as_str().expect("node id").to_string();
     assert_eq!(
         simple_post_core::db::with_conn(&st.pool, |c| endpoint_details::get(c, &id))
@@ -344,8 +329,8 @@ async fn endpoint_create_accepts_a_module_parent() {
 
 #[tokio::test]
 async fn endpoint_create_requires_some_parent() {
-    // Neither id supplied: an endpoint with no parent is not a tree, so
-    // this is an input error — not a permission denial.
+    // 两个父 id 都没给：没有父级的端点不构成一棵树，所以这是输入错误 —— 不是权限
+    // 拒绝。
     let res = endpoint::tool_endpoint_create(
         &state(),
         serde_json::json!({
@@ -363,11 +348,9 @@ async fn endpoint_create_requires_some_parent() {
 
 #[tokio::test]
 async fn endpoint_create_rejects_unknown_method_gracefully() {
-    // Empty method is malformed HTTP — surface a Validation error
-    // (the LLM / UI gets `is_error=true` text) instead of panicking
-    // or persisting garbage. Custom token-shape verbs like
-    // "PROPFIND" / "FROBNICATE" still pass through as
-    // `HttpMethod::Custom`.
+    // method 为空是畸形 HTTP —— 应当报 `Validation` 错误（LLM / UI 拿到
+    // `is_error=true` 文本），而不是 panic 或把垃圾写进库。`PROPFIND` /
+    // `FROBNICATE` 这类自定义形状的动词仍会以 `HttpMethod::Custom` 放行。
     let res = endpoint::tool_endpoint_create(
         &state(),
         serde_json::json!({
@@ -384,15 +367,13 @@ async fn endpoint_create_rejects_unknown_method_gracefully() {
     );
 }
 
-/// `parse_body_mode` lives in `endpoint.rs` (only used by
-/// `endpoint_create`). Test it through the `endpoint` submodule's
-/// `pub(super)` visibility — actually, it's file-private; re-expose
-/// it via a tiny test-only wrapper.
+/// `parse_body_mode` 住在 `endpoint.rs`（只被 `endpoint_create` 用）。
+/// 经由 `endpoint` 子模块的可见性来测 —— 其实它是文件私有的，所以用一个测试专用的薄
+/// 包装重新暴露出来。
 #[test]
 fn parse_body_mode_known_values() {
-    // Reach the helper through `super::endpoint::__test_parse_body_mode`
-    // (defined below as a test-only re-export) so we don't have to
-    // make `parse_body_mode` `pub(super)` for production.
+    // 经 `super::endpoint::__test_parse_body_mode`（下方定义的仅测试再导出）访问该
+    // 辅助函数，免得为了测试把 `parse_body_mode` 提成 `pub(super)` 给生产代码看。
     assert!(super::endpoint::__test_parse_body_mode("json").is_ok());
     assert!(super::endpoint::__test_parse_body_mode("form").is_ok());
     assert!(super::endpoint::__test_parse_body_mode("raw").is_ok());

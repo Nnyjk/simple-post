@@ -8,17 +8,10 @@ export interface LocalExpansion {
 }
 
 /**
- * Local-only expand/collapse state for sub-list rows.
+ * 子列表行的展开状态，只存在本组件。
  *
- * Why local and not the persisted `entity.expanded` field? The
- * EntitySettings panels share the same entity objects as the left
- * tree, so mutating `module.expanded` / `collection.expanded` would
- * drag the tree along — collapsing a row in the right pane would
- * silently collapse it on the left, which is jarring. A per-pane
- * `Set<string>` keeps the right pane's expand/collapse state private.
- *
- * Returns the bare API; render-side filtering of sub-rows happens in
- * the consumer (e.g. `if (exp.isExpanded(id)) …`).
+ * 不写 `entity.expanded`：EntitySettings 面板与左侧树共用同一批 entity 对象，
+ * 改它会让右栏折叠时左栏跟着折叠。
  */
 export function useLocalExpansion(): LocalExpansion {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

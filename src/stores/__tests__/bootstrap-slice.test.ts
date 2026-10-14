@@ -31,20 +31,18 @@ function makeBootstrapHarness() {
     bootstrapError: null,
     nodesError: null,
     openTab: () => undefined,
-    // Entering/leaving a project now hands the tab strip to `ui-tabs`
-    // rather than opening a tab from here. Stubbed for the same reason
-    // `openTab` is: the swap itself is `ui-tabs`' contract and is covered
-    // by `project-tabs.test.ts`; what these tests care about is *when*
-    // `bootstrap-slice` asks for it.
+    // 进入 / 离开项目现在把标签条交给 `ui-tabs`，而不是从这里开标签。打桩理由与
+    // `openTab` 相同：那次交换本身是 `ui-tabs` 的契约，由
+    // `project-tabs.test.ts` 覆盖；这些测试关心的是 `bootstrap-slice`
+    // **什么时候**开口要它。
     switchProjectTabs: () => undefined,
     closeTab: () => undefined,
     setLastResponse: () => undefined,
     loadWorkspace: async () => undefined,
-    // `setActiveProject` kicks the per-project response history read on
-    // a real change. Stubbed for the same reason `openTab` is: the load
-    // itself is `ui-response`'s contract (covered by
-    // `ui-response-history.test.ts`); what these tests care about is
-    // *when* `bootstrap-slice` asks for it.
+    // `setActiveProject` 在真正发生变化时会触发按项目的响应历史读取。打桩理由同样
+    // 与 `openTab` 相同：加载本身是 `ui-response` 的契约（由
+    // `ui-response-history.test.ts` 覆盖）；这些测试关心的是
+    // `bootstrap-slice` **什么时候**开口要它。
     loadResponseHistory: async () => undefined,
   };
   const set = (partial: unknown) => {
@@ -135,14 +133,13 @@ describe('bootstrap-slice 聚合加载契约', () => {
     const calls: CapturedCall[] = [];
     const responses: Record<string, unknown> = {
       projects_list: [project],
-      // One flat tree replaces the old modules/collections/endpoints trio.
+      // 一棵扁平的树取代了原来的 module / collection / endpoint 三件套。
       nodes_list: [moduleNode, collectionNode, endpointNode],
       endpoint_details_list: [endpointDetail],
       environments_list: [environment],
     };
-    // Gate the tree layer so we can observe the store mid-bootstrap. This
-    // is the whole point of the split: `loaded` must already be true
-    // while these are still pending.
+    // 给树那一层设闸，好让我们能在 bootstrap 中途观察 store。这正是这次拆分的
+    // 重点：这些还在 pending 时 `loaded` 就必须已经是 true。
     let releaseTree: () => void = () => undefined;
     const treeGate = new Promise<void>((resolve) => {
       releaseTree = resolve;
@@ -154,20 +151,17 @@ describe('bootstrap-slice 聚合加载契约', () => {
     });
 
     const booting = bag.bootstrap();
-    // Wait for layer 1 to settle without releasing the tree gate. A
-    // macrotask tick drains every pending microtask, which is exactly
-    // the boundary layer 1's `set()` lands on — counting
-    // `Promise.resolve()`s would be a guess about how many awaits
-    // `invokeCmd` happens to contain.
+    // 不释放树闸就等第一层落定。一个宏任务 tick 会排空所有 pending 微任务，
+    // 而那正好是第一层 `set()` 落地的边界——数 `Promise.resolve()` 只会是对
+    // `invokeCmd` 恰好含有几个 await 的猜测。
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.equal(bag.loaded, true, 'welcome screen can paint on the project list alone');
     assert.equal(bag.nodesLoaded, false, 'tree has not landed yet');
     assert.deepEqual(bag.projects, [project]);
-    // Layer 2 *starts* right away — it is only un-awaited that keeps it
-    // off the critical path. So the assertion is not "these commands were
-    // not issued" but "they have not resolved", which is what `loaded`
-    // being true alongside `nodesLoaded` false already proves.
+    // 第二层是**立刻开始**的——只是不 await 才让它离开关键路径。所以断言不是
+    // "这些命令没被发出"，而是"它们还没 resolve"——`loaded` 为 true 而同时
+    // `nodesLoaded` 为 false 已经证明了这一点。
     assert.deepEqual(
       calls.map((c) => c.cmd),
       ['projects_list', 'nodes_list', 'endpoint_details_list', 'environments_list'],
@@ -176,11 +170,10 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     releaseTree();
     await booting;
-    // `bootstrap()` returns as soon as layer 1 lands — that is the whole
-    // point of the split. Awaiting `loadWorkspace()` instead joins the
-    // pass bootstrap already started, which is only possible because an
-    // in-flight load hands back its pending promise instead of resolving
-    // immediately.
+    // `bootstrap()` 第一层一落地就返回——这正是这次拆分的全部意义。去 await
+    // `loadWorkspace()` 反而会把这一趟并进 bootstrap 已经启动的那一趟，
+    // 而后者之所以做得到，只是在于在途的加载交回它的 pending promise 而不是
+    // 立即 resolve。
     await bag.loadWorkspace();
 
     assert.equal(bag.nodesLoaded, true);
@@ -193,10 +186,10 @@ describe('bootstrap-slice 聚合加载契约', () => {
       { cmd: 'environments_list', args: {} },
     ]);
     assert.deepEqual(bag.nodes, [moduleNode, collectionNode, endpointNode]);
-    // The detail list is keyed by node id, not carried as an array.
+    // detail 列表按节点 id 作键，不是以数组形式带回来。
     assert.deepEqual(bag.endpointDetails, { e1: endpointDetail });
     assert.deepEqual(bag.environments, [environment]);
-    // Nothing is selected at boot — see the next test.
+    // 启动时不选中任何东西——见下一个测试。
     assert.equal(bag.activeProjectId, '');
     assert.equal(bag.activeEnvironmentId, '');
     assert.equal(bag.activeEndpointId, null);
@@ -234,9 +227,8 @@ describe('bootstrap-slice 聚合加载契约', () => {
       return [];
     });
 
-    // `bootstrap`, `openProject` and the retry button all reach for this
-    // without coordinating — the in-flight guard is what keeps them from
-    // stacking three copies of the same query.
+    // `bootstrap`、`openProject` 与重试按钮都会各自来找它，彼此不协调——在途守卫
+    // 正是防止它们叠起三份同样的查询。
     const first = bag.loadWorkspace();
     const second = bag.loadWorkspace();
     assert.equal(bag.nodesLoading, true);
@@ -250,10 +242,8 @@ describe('bootstrap-slice 聚合加载契约', () => {
   it('启动不预选任何项目或接口，把选择权留给欢迎页', async () => {
     const bag = makeBootstrapHarness();
     const otherProject: Project = { ...project, id: 'p2', name: '别的项目' };
-    // Both projects are populated. An older bootstrap picked
-    // `projects[0]` and its first endpoint, so a user with several
-    // projects never saw the picker and never saw the project they were
-    // dropped into either.
+    // 两个项目都有内容。自动选中某个项目（连同它的第一个 endpoint）会让有多项目的
+    // 用户既看不到选择页，也看不到自己被丢进去的那个项目。
     const otherEndpoint: ResourceNode = { ...endpointNode, id: 'e0', rootId: 'p2' };
     const opened: { kind: string; id: string }[] = [];
     bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
@@ -282,8 +272,8 @@ describe('bootstrap-slice 聚合加载契约', () => {
     bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
     bag.switchProjectTabs = (id: string) => switched.push(id);
     bag.setActiveProject = (id: string) => selected.push(id);
-    // A user who clicks a project card before the background pass lands
-    // must still get a tree, so entering a project re-requests it.
+    // 用户在后台那一趟落地之前就点了项目卡片，也必须仍能拿到树，
+    // 所以进入项目会重新请求。
     bag.loadWorkspace = async () => {
       workspaceLoads += 1;
     };
@@ -291,10 +281,9 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     bag.openProject('p1');
 
-    // The switch runs *before* the selection moves, and that order is the
-    // point: setting aside the outgoing project's tabs means asking which
-    // project owns each one, which is only answerable while the outgoing
-    // project is still the one in front.
+    // 切换发生在选中**之前**，这个次序就是重点：把出去那个项目的标签暂存起来，
+    // 需要先回答每个标签属于哪个项目，而这个问题只有当出去的那个项目还在前面时
+    // 才答得出来。
     assert.deepEqual(switched, ['p1']);
     assert.deepEqual(selected, ['p1']);
     assert.deepEqual(
@@ -324,8 +313,8 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     bag.leaveProject();
 
-    // `App.tsx` switches surfaces on `activeProjectId === ''`, so clearing
-    // it is the whole of "go back to the welcome page".
+    // `App.tsx` 在 `activeProjectId === ''` 时切换表面，所以清空它就是
+    // "回到欢迎页"的全部。
     assert.equal(bag.activeProjectId, '');
     assert.equal(
       bag.activeEnvironmentId,
@@ -333,8 +322,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
       'an env from the abandoned project is meaningless here',
     );
     assert.equal(bag.activeEndpointId, null);
-    // Re-entering must not refetch: the tree is per-project state the user
-    // will very likely want back on the next click.
+    // 重新进入不得重拉：树是按项目的状态，用户下次点击时多半还想要它。
     assert.equal(bag.nodesLoaded, true);
     assert.deepEqual(bag.nodes, [moduleNode, collectionNode, endpointNode]);
     assert.deepEqual(closed, [], 'leaving is not closing tabs');
@@ -351,7 +339,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     const bag = makeBootstrapHarness();
     installIpcMock(async (cmd) => {
       if (cmd === 'nodes_list') return [endpointNode];
-      // The tree still renders; only the HTTP tester comes up blank.
+      // 树仍然渲染；只有 HTTP 测试器是空的。
       if (cmd === 'endpoint_details_list') throw new Error('detail store offline');
       return [];
     });
@@ -393,10 +381,9 @@ describe('bootstrap-slice 聚合加载契约', () => {
     await bag.bootstrap();
     await bag.loadWorkspace();
 
-    // The distinguishing assertion of the split: layer 1 succeeding is
-    // enough for the welcome screen, so `loaded` is true even though the
-    // tree layer failed. Merging these two flags back together would
-    // either strand the boot splash or hide a real tree failure.
+    // 这正是拆分的分水岭：第一层成功就足以撑起欢迎页，所以即便树那一层失败，
+    // `loaded` 仍为 true。把两个 flag 重新合在一起，要么会把启动画面卡住，
+    // 要么会掩盖一次真实的树失败。
     assert.equal(bag.loaded, true, 'welcome screen still paints');
     assert.deepEqual(bag.projects, [project]);
     assert.equal(bag.nodesLoaded, false);
@@ -415,7 +402,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     installIpcMock(async (cmd) => {
       if (cmd === 'projects_list') return [project];
       if (cmd === 'environments_list') {
-        // Arrives after the user already clicked the card.
+        // 在用户已经点了卡片之后才到达。
         await treeGate;
         return [environment];
       }
@@ -425,8 +412,8 @@ describe('bootstrap-slice 聚合加载契约', () => {
     const booting = bag.bootstrap();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    // `setActiveProject` resolves against an empty `environments` list
-    // here, so it lands on the "none selected" sentinel.
+    // 这里 `setActiveProject` 是对着空的 `environments` 列表解析的，
+    // 所以落在"未选中"哨兵上。
     bag.openProject('p1');
     assert.equal(bag.activeEnvironmentId, '');
 

@@ -16,9 +16,8 @@ pub(crate) async fn preferences_get(
     let pairs = db::with_conn(&s.pool, db::preferences::list_all).map_err(map_app_error)?;
     let mut out = serde_json::Map::new();
     for (k, v) in pairs {
-        // Try to parse as JSON; fall back to string. This mirrors the
-        // Tauri command's `serde_json::Value` round-trip so the
-        // browser sees typed values, not quoted strings.
+        // 试着按 JSON 解析，失败则当字符串。与 Tauri 命令的 `serde_json::Value` 往返一致，
+        // 故浏览器看到的是带类型的值而非带引号的字符串。
         let parsed: Value = serde_json::from_str(&v).unwrap_or(Value::String(v));
         out.insert(k, parsed);
     }
@@ -29,9 +28,8 @@ pub(crate) async fn preferences_put(
     State(s): State<Arc<WebState>>,
     Json(body): Json<PreferencesPutBody>,
 ) -> Result<StatusCode, HttpErrorResponse> {
-    // Re-encode the value the same way `db::preferences::set` does
-    // (serde_json::to_string), so `mcp_auto_start` etc. keep parsing
-    // typed values consistently.
+    // 按 `db::preferences::set` 同样的方式重新编码该值（serde_json::to_string），
+    // 使 `mcp_auto_start` 等保持一致的带类型值语义。
     let raw = serde_json::to_string(&body.value)
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
     db::with_tx(&s.pool, |c| db::preferences::set(c, &body.key, &raw)).map_err(map_app_error)?;

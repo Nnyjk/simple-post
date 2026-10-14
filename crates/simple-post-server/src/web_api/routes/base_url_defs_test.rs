@@ -1,18 +1,13 @@
-//! Routing and wire shape for the baseUrl-def and environment-baseUrl
-//! routes.
+//! baseUrl-def 与 environment-baseUrl 路由的路由与线格式。
 //!
-//! Every route in the baseUrl family is reached through a **path
-//! parameter** — `:projectId` or `:defId` — and the project-scoped ones
-//! put a literal segment (`baseurls`, `baseurls/default`) next to each
-//! other and next to the id-scoped `/api/baseurl-defs/:defId`. Whether
-//! those coexist is a property of axum's radix router, not something the
-//! registration code can assert about itself by reading — so these tests
-//! drive a real listener and observe the real matching.
+//! baseUrl 一族里每条路由都经一个**路径参数**到达——`:projectId` 或 `:defId`——且
+//! 项目级的那些把字面量段（`baseurls`、`baseurls/default`）彼此相邻、又与按 id 的
+//! `/api/baseurl-defs/:defId` 相邻。它们能否共存是 axum radix router 的性质，不是注册
+//! 代码读一读就能断言的——所以这些测试驱动真实 listener，观察真实的匹配结果。
 //!
-//! The status code is the discriminator. A handler that ran answers
-//! `200` / `201` / `204`, or its own `400` / `404` when it rejected the
-//! input; a route that lost the precedence fight answers `404` from the
-//! SPA fallback, or `405` if it matched a neighbour's method set.
+//! 判别依据是状态码。跑起来的 handler 回 `200` / `201` / `204`，或它自己拒收输入时的
+//! `400` / `404`；抢优先级失败的路由会从 SPA fallback 回 `404`，或在被邻居的方法集匹配
+//! 上时回 `405`。
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -21,11 +16,10 @@ use std::time::Duration;
 
 use crate::web_api::{build_router, WebState};
 
-/// A `WebState` over a throwaway SQLite file plus an empty SPA dir, with
-/// the router bound to an ephemeral port on loopback.
+/// 建一个 `WebState`：一次性的 SQLite 文件 + 空 SPA 目录，router 绑在 loopback 上一个
+/// 临时端口。
 ///
-/// Per-test isolation is an atomic counter plus the pid, because cargo
-/// runs tests in parallel and several would otherwise share a temp path.
+/// 每个测试的隔离靠原子计数器加 pid，因为 cargo 并行跑测试，好几个会共用同一条临时路径。
 async fn serve_test_router() -> (SocketAddr, PathBuf) {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -84,10 +78,8 @@ async fn delete(addr: SocketAddr, path: &str) -> reqwest::StatusCode {
         .status()
 }
 
-/// Seed a project, one module, one service belonging to the project, and
-/// one environment. `module_id` / `is_default` are written as NULL / 0 —
-/// those columns are neutralised but still present, because dropping them
-/// would mean rebuilding the user's database.
+/// 种下一个项目、一个模块、一个属于该项目的服务、一个环境。`module_id` / `is_default`
+/// 按 NULL / 0 写入——这两列已作废但仍留着，删列等于重建用户的数据库。
 async fn seed_project(dir: &std::path::Path) {
     let pool = crate::db::init(dir).expect("db init");
     crate::db::with_tx(&pool, |c| {
@@ -113,9 +105,8 @@ async fn seed_project(dir: &std::path::Path) {
     .expect("seed project");
 }
 
-/// `POST /api/projects/:projectId/baseurls` must answer `201` with the
-/// stored row — the project is the scope, so the id lives in the path and
-/// only the attributes ride in the body.
+/// `POST /api/projects/:projectId/baseurls` 必须回 `201` 与存下的行——项目就是 scope，
+/// 故 id 在路径里，body 里只有属性。
 #[tokio::test]
 async fn the_project_scoped_create_route_answers() {
     let (addr, dir) = serve_test_router().await;
@@ -145,14 +136,95 @@ async fn the_project_scoped_create_route_answers() {
     );
 }
 
-/// `POST /api/projects/:projectId/baseurls/default` must answer with the
-/// updated `Project` — `defaultBaseUrlDefinitionId` is live again, so the
-/// caller is handed the new pointer instead of a `204` and a re-read.
+/// 调用方给的 `id` 必须被原样采纳。
 ///
-/// The status code is the discriminator between the three outcomes that
-/// look alike from the client: `200` means the handler ran, `404` means
-/// it fell through to the SPA fallback, and `405` means it matched a
-/// neighbour's method set.
+/// renderer 之所以铸这个 id，是因为它在行存在*之前*就要用它：拿它当项目 ★，以及
+/// 当 `env.moduleBaseUrls[defId][moduleId]` 那一格的键。服务端铸的 id 会让两者都指向
+/// 一条从未写入的行，于是刚配好的服务解析不出任何 URL。这里驱动整条链——带 id 创建，
+/// 再按它写那一格——因为「create 回 201 且带那个 id」只是契约的一半；格子之后必须能用
+/// 同一个键读回来。
+#[tokio::test]
+async fn a_caller_supplied_id_is_adopted_and_its_cell_is_readable() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project(&dir).await;
+
+    let created = post_json(
+        addr,
+        "/api/projects/p1/baseurls",
+        serde_json::json!({ "name": "auth", "id": "def_client_1" }),
+    )
+    .await;
+    assert_eq!(created.status(), reqwest::StatusCode::CREATED);
+    let created: serde_json::Value = created.json().await.expect("json body");
+    assert_eq!(
+        created["id"], "def_client_1",
+        "后端必须采纳调用方的 id，否则 ★ 与 URL 单元格会指向一条不存在的行；got {created}"
+    );
+
+    let cell = post_json(
+        addr,
+        "/api/environments/env_1/module-baseurls",
+        serde_json::json!({
+            "defId": "def_client_1",
+            "moduleId": "mod_a",
+            "url": "https://api.demo.dev",
+        }),
+    )
+    .await;
+    assert_eq!(cell.status(), reqwest::StatusCode::OK);
+    let cell: serde_json::Value = cell.json().await.expect("json body");
+    assert_eq!(
+        cell["moduleBaseUrls"]["def_client_1"]["mod_a"], "https://api.demo.dev",
+        "按同一个 id 写入的单元格必须读得回来"
+    );
+}
+
+/// 省掉 `id` 保持既有契约——由服务端铸——这样旧版 renderer（或其他任何客户端）不会被
+/// 新字段破坏。
+#[tokio::test]
+async fn omitting_the_id_still_yields_a_server_minted_one() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project(&dir).await;
+
+    let response = post_json(
+        addr,
+        "/api/projects/p1/baseurls",
+        serde_json::json!({ "name": "auth" }),
+    )
+    .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("json body");
+    let id = body["id"].as_str().expect("id as str");
+    assert!(!id.is_empty(), "服务端必须铸一个非空 id，got {body}");
+}
+
+/// 空白 `id` 按缺失处理，而不是写成一行 id 为 `""` 的记录——本 API 上每个可选 id 都
+/// 遵循同一条「空即缺失」规则。
+#[tokio::test]
+async fn a_blank_id_is_treated_as_absent() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project(&dir).await;
+
+    let response = post_json(
+        addr,
+        "/api/projects/p1/baseurls",
+        serde_json::json!({ "name": "auth", "id": "   " }),
+    )
+    .await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("json body");
+    let id = body["id"].as_str().expect("id as str");
+    assert!(!id.trim().is_empty(), "空白 id 不能落库，got {body}");
+}
+
+/// `POST /api/projects/:projectId/baseurls/default` 必须回更新后的 `Project`——
+/// `defaultBaseUrlDefinitionId` 又活起来了，故调用方直接拿到新指针，而不是
+/// `204` 加一次重读。
+///
+/// 状态码是那三种客户端看来相似的结果之间的判别依据：`200` 表示 handler 跑了，`404`
+/// 表示它落到了 SPA fallback，`405` 表示它匹配上了邻居的方法集。
 #[tokio::test]
 async fn setting_the_star_answers_the_updated_project() {
     let (addr, dir) = serve_test_router().await;
@@ -176,15 +248,14 @@ async fn setting_the_star_answers_the_updated_project() {
     assert_eq!(body["defaultBaseUrlDefinitionId"], "def_1");
 }
 
-/// `defId: null` takes the ★ away — the state a freshly created project
-/// is in, and one the other two surfaces (IPC, MCP) can also express.
+/// `defId: null` 把 ★ 撤掉——新建项目正处于这个状态，且 IPC 与 MCP 另外两个表面也能
+/// 表达它。
 #[tokio::test]
 async fn clearing_the_star_answers_a_project_with_no_default() {
     let (addr, dir) = serve_test_router().await;
     seed_project(&dir).await;
 
-    // Set it first, so clearing has something to clear and a no-op write
-    // cannot masquerade as a working one.
+    // 先设上，好让清除有东西可清，空写入不能冒充成一次生效的写入。
     post_json(
         addr,
         "/api/projects/p1/baseurls/default",
@@ -207,8 +278,7 @@ async fn clearing_the_star_answers_a_project_with_no_default() {
     );
 }
 
-/// `PATCH` / `DELETE /api/baseurl-defs/:defId` must still be reachable by
-/// id.
+/// 按 id 的 `PATCH` / `DELETE /api/baseurl-defs/:defId` 必须仍能到达。
 #[tokio::test]
 async fn the_id_parametrised_route_still_matches() {
     let (addr, _dir) = serve_test_router().await;
@@ -221,9 +291,8 @@ async fn the_id_parametrised_route_still_matches() {
     );
 }
 
-/// `/module-baseurls` is back: it is the only layer a URL lives in, keyed
-/// by service **and** module, so a route that failed to register would
-/// leave the model with no write path at all.
+/// `/module-baseurls`：URL 唯一所在的一层，按服务**与**模块双向寻址，故这条路由若没
+/// 注册成功，整个模型就完全没有写入路径。
 #[tokio::test]
 async fn the_module_base_url_route_writes_the_cell() {
     let (addr, dir) = serve_test_router().await;
@@ -245,9 +314,8 @@ async fn the_module_base_url_route_writes_the_cell() {
     assert_eq!(body["moduleBaseUrls"]["def_1"]["mod_a"], "http://x");
 }
 
-/// The flat `/baseurls` verb is gone. Its absence is load-bearing: the
-/// value layer is per (service × module), so a surviving flat route would
-/// let a caller write a field nothing reads back.
+/// 打平的 `/baseurls` 动词已不在。它的缺席是硬要求：值这一层按（服务 × 模块）划分，
+/// 一条幸存的打平路由会让调用方写进一个没人读得回的字段。
 #[tokio::test]
 async fn the_flat_base_url_route_is_gone() {
     let (addr, _dir) = serve_test_router().await;
@@ -266,9 +334,8 @@ async fn the_flat_base_url_route_is_gone() {
     );
 }
 
-/// The deleted backend send path must stay unroutable: the frontend
-/// assembles the full request and posts it to `/api/http/send`, so a
-/// surviving node-scoped send would be a second, ungoverned way out.
+/// 已删除的节点级 send 路径必须保持不可路由：前端自己拼装完整请求并 POST 到
+/// `/api/http/send`，一条幸存的节点级 send 就是第二条不受管辖的出站通道。
 #[tokio::test]
 async fn the_node_scoped_send_route_is_gone() {
     let (addr, _dir) = serve_test_router().await;
@@ -283,9 +350,8 @@ async fn the_node_scoped_send_route_is_gone() {
     );
 }
 
-/// The project-scoped read: `GET /api/projects/:projectId/baseurls` still
-/// lists, and an unknown project answers the handler's own `200` (an
-/// empty list) rather than a routing failure.
+/// 项目级读：`GET /api/projects/:projectId/baseurls` 仍能列出，且未知项目回 handler
+/// 自己的 `200`（空列表）而非路由失败。
 #[tokio::test]
 async fn the_project_scoped_list_route_still_answers() {
     let (addr, _dir) = serve_test_router().await;
@@ -298,9 +364,8 @@ async fn the_project_scoped_list_route_still_answers() {
         .expect("request completes")
         .status();
 
-    // `list_by_project` filters rather than erroring, so an unknown
-    // project is a successful empty list — anything but a routing
-    // failure proves the route is live.
+    // `list_by_project` 是过滤而非报错，故未知项目是一次成功的空列表——不是路由失败就足以
+    // 证明这条路由还活着。
     assert_eq!(
         status,
         reqwest::StatusCode::OK,
@@ -308,9 +373,8 @@ async fn the_project_scoped_list_route_still_answers() {
     );
 }
 
-/// Guards the harness itself: if the server never came up, every
-/// assertion above would be reading connection-refused noise. A wrong
-/// path must 404 quickly rather than hang.
+/// 守住这套夹具本身：若服务器根本没起来，上面每条断言读到的都是 connection refused 的
+/// 噪声。一条错误路径必须快速 404，而不是挂起。
 #[tokio::test]
 async fn the_harness_rejects_an_unrouted_path() {
     let (addr, _dir) = serve_test_router().await;

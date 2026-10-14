@@ -1,26 +1,14 @@
 /**
- * Shared builder for "what we'd send" — the single construction core for
- * every surface that has to agree on the wire shape: the real sender
- * (`src/lib/http.ts`) and the copy-as-cURL preview.
+ * 「我们将要发出什么」的唯一构造核：真实发送（`src/lib/http.ts`）与
+ * copy-as-cURL 预览都从这里派生，两边因此不可能对同一请求有不同描述。
  *
- * The layering is deliberate and one-directional:
+ *   prepareRequest()   → 唯一的组装处：请求 → URL + 有序 header + body
+ *                        （变量未解析），别处不再拼装请求
+ *   buildFetchInit()   → prepareRequest 的 fetch 适配器
+ *   buildCurlCommand() → prepareRequest 的 shell 行适配器
  *
- *   prepareRequest()   → the one place a request is turned into a
- *                        URL + ordered headers + body (+ unresolved
- *                        variables). Nothing else assembles one.
- *   buildFetchInit()   → adapter over prepareRequest for `fetch`
- *   buildCurlCommand() → adapter over prepareRequest for a shell line
- *
- * That inversion is the point. The cURL preview used to be a hand-kept
- * "mirror" of what the backend sent; two implementations of the same
- * rules drift, and the user sees it as "copy as cURL" producing a
- * request that is not the one they just sent. Deriving both from one
- * result makes that class of bug unrepresentable rather than merely
- * unlikely — preview and execution are now literally the same product.
- *
- * Pure functions, no I/O. The browser's native `fetch` handles I/O;
- * this module only turns the user-editable request shape into the
- * URL + init pair (or cURL string) the runtime needs.
+ * 纯函数，无 I/O。I/O 归运行时的原生 `fetch`，本模块只把用户可编辑的
+ * 请求形状转成运行时要的 URL + init（或 cURL 字符串）。
  */
 import type {
   AuthConfig,
@@ -33,16 +21,12 @@ import type {
 import { collapseUrlSlashes, joinBaseUrl, resolveVarsWithMissing } from './url';
 
 /**
- * The inputs that affect the *wire shape* of a request. Settings
- * (timeout / redirects / size cap) and the caller's `AbortSignal`
- * intentionally live elsewhere — they only matter at execution time,
- * not at build time.
+ * 影响请求**线上形态**的入参。设置项（超时 / 重定向 / 体积上限）与调用方的
+ * `AbortSignal` 有意不放这里——它们只在执行期起作用。
  *
- * `url` is the **whole** URL: there is no base-URL slot, so every
- * caller has to join one first. Use [`prepareRequest`] when a base URL
- * and a URL path are the natural inputs; this shape stays as the
- * compatibility surface for the existing fetch/cURL adapters, which
- * treat it as `baseUrl: ''`.
+ * `url` 是**完整** URL：这里没有 baseUrl 槽位，调用方必须先拼好。
+ * 手上正好是 baseUrl 与 path 时用 [`prepareRequest`]；此形状留给既有
+ * fetch/cURL 适配器，它们视其为 `baseUrl: ''`。
  */
 export interface BuildInput {
   method: HttpMethod;
@@ -55,36 +39,32 @@ export interface BuildInput {
 }
 
 export interface BuiltFetch {
-  /** Final URL — query params and apikey-in-query appended. */
-  url: string;
   /**
-   * `RequestInit` ready to hand to `fetch`. `signal` and `redirect`
-   * are NOT set — the caller composes those on top.
+   * 最终 URL：query 参数与 query 位置的 apikey 已追加。
    */
+  url: string;
+  /** 可直接交给 `fetch` 的 `RequestInit`；`signal` 与 `redirect` 不在其中，由调用方叠加。 */
   init: RequestInit;
   /**
-   * Echo of the body's content as a string (already URL/form-safe in
-   * the form modes). Reserved for a future "show what we'd send"
-   * preview surface; `sendRequest` does not currently use it.
+   * body 的字符串回显（form 模式已 URL/form 安全）。留给将来的「看看我们
+   * 会发出什么」预览面，`sendRequest` 目前不用它。
    */
   bodyForLog: string;
 }
 
 // ---------------------------------------------------------------------------
-// prepareRequest — the one construction core
+// prepareRequest — 唯一的构造核
 // ---------------------------------------------------------------------------
 
 export interface PrepareRequestInput {
   method: HttpMethod;
   /**
-   * URL **path** part, without any base URL. May carry `{{var}}`.
-   * A path that already has its own scheme (`https://…`) wins over
-   * `baseUrl`, which is what makes the endpoint's 自定义 mode work: the
-   * user types the whole address and the picker still has a value
-   * selected.
+   * URL 的 path 部分，不含任何 base URL，可带 `{{var}}`。自带 scheme
+   * （`https://…`）的 path 优先于 `baseUrl`——endpoint 的「自定义」模式
+   * 靠这点成立：用户手输整个地址，选择器里仍有服务被选中。
    */
   urlPath: string;
-  /** Resolved base URL. Empty string means "no base URL". */
+  /** 已解析的 base URL；空串表示没有 base URL。 */
   baseUrl: string;
   params: KeyValue[];
   headers: KeyValue[];
@@ -96,63 +76,41 @@ export interface PrepareRequestInput {
 export interface PreparedRequest {
   method: HttpMethod;
   /**
-   * The complete URL: `join(baseUrl, urlPath)` → `{{var}}` resolution →
-   * path slash-collapse → param values resolved and appended →
-   * apikey-in-query, in that order.
-   * Joining *before* resolving means a `{{var}}` inside the environment's
-   * own base URL is resolved too. The collapse comes after resolving
-   * because it is the substitution, not the join, that turns the join's
-   * separator into a `//` when a variable expands to a value starting
-   * with `/`. Params are merged last because their values are resolved on
-   * the way in (see `appendQueryString`), so by the time they are encoded
-   * no marker can survive into the URL.
+   * 完整 URL：`join(baseUrl, urlPath)` → 解析 `{{var}}` → 折叠 path 斜杠 →
+   * 解析并追加参数值 → 追加 query 位置的 apikey，顺序如列。
+   * 先 join 再解析，环境自身的 base URL 里的变量才解析得到；折叠放在解析
+   * 之后，因为把变量替换成以 `/` 开头的值才会把 join 的分隔符变成 `//`；
+   * 参数放最后，因为它们的值在进来时已解析（见 `appendQueryString`）。
    */
   url: string;
   /**
-   * Ordered header tuples. A list, not a `Record`, because HTTP allows
-   * a repeated header name and `Record` would silently collapse them —
-   * the wire shape has to survive to the backend, which takes
-   * `Vec<(String, String)>`.
+   * 有序 header 元组。用列表而非 `Record`：HTTP 允许重名 header，
+   * `Record` 会静默把它们合并，而线上形态要能传到后端（那里收
+   * `Vec<(String, String)>`）。
    */
   headers: Array<[string, string]>;
   /**
-   * Body content, or `null` when `mode === 'none'` or the authored content
-   * is empty. Templated like every other field: `{{var}}` resolves against
-   * the active environment.
+   * body 内容；`mode === 'none'` 或用户填的内容为空时为 `null`。
+   * 与其他字段一样模板化：`{{var}}` 对当前环境解析。
    *
-   * The inclusion test runs on the **authored** content, before
-   * templating, which mirrors Rust's `resolve_endpoint`. So a body whose
-   * only content is a variable that resolves to `""` ships an empty string
-   * rather than being dropped — a request that was deliberately given a
-   * body still gets one.
-   *
-   * This used to ship verbatim with the markers intact. The reason given
-   * was that substituting into a JSON payload can produce invalid JSON,
-   * which is real, but it left the app disagreeing with its own backend
-   * (`resolve_endpoint` has always templated) and left `{{x}}` going out
-   * to the server as data. If a variable resolves to something that
-   * breaks the payload, that is the user's value to fix, and
-   * `missingVars` covers the case where it did not resolve at all.
+   * 判空跑在**用户写的原文**上、模板化之前，与 Rust 的 `resolve_endpoint`
+   * 同序；所以内容只有一个变量且解析为 `""` 的 body 照样发空串而不被丢掉。
    */
   body: string | null;
   /**
-   * Every `{{name}}` left unresolved anywhere in URL / param values /
-   * headers / body / auth, deduped and in first-occurrence order. The set
-   * is aligned with `resolve_endpoint`'s `missing_vars` in Rust; the
-   * *order* is renderer-local (URL, params, headers, body, auth) because
-   * nothing consumes it but this app's own warning UI.
+   * URL / 参数值 / header / body / auth 里全部未解析的 `{{name}}`，去重且按
+   * 首次出现排序。集合与 Rust `resolve_endpoint` 的 `missing_vars` 对齐；
+   * *顺序*是渲染器本地的，只有本应用的告警提示消费它。
    */
   missingVars: string[];
 }
 
-// ---- internal helpers ----
+// ---- 内部辅助 ----
 
 /**
- * Accumulates unresolved `{{name}}` markers across every field a request
- * touches, deduping by first occurrence. A `Set` for membership plus an
- * array for order: `Set` alone would give the same set but an order that
- * depends on insertion internals, and the order is what makes the
- * "these variables are missing" hint stable while the user types.
+ * 跨请求涉及的每个字段累积未解析的 `{{name}}`，按首次出现去重。
+ * `Set` 管去重 + 数组管顺序：只用 `Set` 集合相同但顺序依赖插入内部实现，
+ * 而顺序正是「缺哪些变量」提示在用户打字时保持稳定的原因。
  */
 interface MissingTracker {
   add(names: readonly string[]): void;
@@ -170,26 +128,21 @@ function createMissingTracker(): MissingTracker {
         names.push(n);
       }
     },
-    // Copy: `PreparedRequest` is a value object handed to callers, so it
-    // must not hand out the array we keep appending to.
+    // 拷贝：`PreparedRequest` 是交给调用方的值对象，不能把仍在追加的数组交出去。
     list: () => names.slice(),
   };
 }
 
 /**
- * Append enabled, non-empty params as a `?k=v&...` query string.
+ * 把启用的非空参数拼成 `?k=v&...` 查询串。
  *
- * A param value is a template like every other field: `{{userId}}`
- * resolves against the active environment before it is encoded. Mirrors
- * Rust's `resolve_endpoint`, which substitutes the **value** only and
- * passes `key` through verbatim — a variable in a key is not something
- * the backend resolves, so resolving it here would make the cURL preview
- * and the actual send disagree, which is the one thing this module
- * exists to make unrepresentable.
+ * 参数值与其他字段一样是模板：`{{userId}}` 在编码前对当前环境解析。
+ * 与 Rust 的 `resolve_endpoint` 一致，只替换**值**、`key` 原样透传——后端不
+ * 解析 key 里的变量，这里若解析，cURL 预览与真实发送就会不一致，而那正是
+ * 本模块要消除的分歧。
  *
- * Disabled params are skipped before substitution for the same reason
- * headers are: they never ship, so their variables are not this
- * request's problem and reporting them would be a false alarm.
+ * 未启用的参数在替换前就跳过，理由与 header 相同：它不会发出，其中的变量
+ * 不算这次请求的问题，报出来是误报。
  */
 function appendQueryString(
   url: string,
@@ -202,8 +155,7 @@ function appendQueryString(
     if (!p.enabled) continue;
     const value = resolveVarsWithMissing(p.value, env);
     missing.add(value.missing);
-    // Empty check runs on the *resolved* value: a variable that resolves
-    // to "" drops the param, exactly as a hand-typed empty value does.
+    // 空值判断跑在*解析后*的值上：解析为 "" 的变量与手输的空值同样丢掉该参数
     if (!p.key || value.value === '') continue; // spec: skip empty keys/values
     parts.push(`${encodeURIComponent(p.key)}=${encodeURIComponent(value.value)}`);
   }
@@ -212,14 +164,11 @@ function appendQueryString(
 }
 
 /**
- * Resolve all `{{var}}` placeholders inside an auth config against the
- * env, recording any that stayed unresolved. The returned config is a
- * new object so the caller's input is never mutated — the auth config
- * lives in the Zustand store and a send must not write to it.
+ * 解析 auth config 里的 `{{var}}` 并记录未解析项。返回新对象、不改传入值——
+ * auth config 存在 Zustand store 里，发送不能写它。
  *
- * Only the fields that end up on the wire are scanned, and only for the
- * selected `kind`: a stale `bearer` string left on a Basic config is not
- * part of this request and reporting its variables would be noise.
+ * 只扫选中的 `kind` 且只扫会上线的字段：Basic config 上残留的 `bearer`
+ * 串不属于这次请求，报它的变量纯属噪声。
  */
 function resolveAuth(
   auth: AuthConfig,
@@ -254,7 +203,7 @@ function resolveAuth(
   return auth;
 }
 
-/** Auto Content-Type for the given body mode (or `null` for `none`). */
+/** 按 body mode 自动补 Content-Type（`none` 返回 `null`）。 */
 function autoContentType(mode: BodyMode): string | null {
   switch (mode) {
     case 'json':
@@ -269,13 +218,12 @@ function autoContentType(mode: BodyMode): string | null {
 }
 
 /**
- * Build the ordered header list: user headers first, then the auto
- * `Content-Type` (if missing) and `Accept`, then any auth-derived
- * header (`Authorization` or apikey-as-header). Duplicate-key check
- * is case-insensitive (HTTP header names are).
+ * 有序 header 列表：先是用户 header，再是自动 Content-Type（缺失时）与
+ * Accept，最后是 auth 派生的 header（`Authorization` 或 header 位置的
+ * apikey）。查重大小写不敏感——HTTP header 名本就大小写不敏感。
  *
- * `apikey.inLocation === 'query'` is NOT emitted as a header — the caller
- * appends it to the URL via `appendApikeyToQuery`.
+ * `apikey.inLocation === 'query'` 不出 header，调用方通过
+ * `appendApikeyToQuery` 拼到 URL 上。
  */
 function buildOrderedHeaders(
   headers: readonly KeyValue[],
@@ -292,25 +240,21 @@ function buildOrderedHeaders(
     out.push([h.key, r.value]);
   }
 
-  // Auto Content-Type based on body.mode. Per spec, only added when
-  // the user hasn't already set one (case-insensitive). We add it
-  // whenever the mode implies a body — content emptiness is handled
-  // separately by `init.body` assignment.
+  // 按 body.mode 自动补 Content-Type。用户已设过（不分大小写）就不加；
+  // 只要 mode 蕴含 body 就补，内容空不空由 `init.body` 那一步单独管
   const ct = autoContentType(bodyMode);
   if (ct && !out.some(([k]) => k.toLowerCase() === 'content-type')) {
     out.push(['Content-Type', ct]);
   }
 
-  // Default Accept so the server knows we'd parse JSON cleanly.
+  // 默认 Accept，让服务端知道我们要干净地解析 JSON
   if (!out.some(([k]) => k.toLowerCase() === 'accept')) {
     out.push(['Accept', 'application/json']);
   }
 
-  // Auth-derived header. Skip when the user already has the same
-  // name (case-insensitive) — user wins for fetch since we use a
-  // Record (last value kept) and for cURL we'd otherwise emit two
-  // `-H 'Authorization: …'` lines, the second of which the server
-  // would see as a header-list, not an override.
+  // auth 派生 header。用户已有同名（不分大小写）时跳过：fetch 用 Record
+  // 只会留最后一个值，而 cURL 里两条 `-H 'Authorization: …'` 服务端看到的是
+  // header 列表而非覆盖。
   if (auth.kind === 'bearer' && auth.bearer) {
     if (!out.some(([k]) => k.toLowerCase() === 'authorization')) {
       out.push(['Authorization', `Bearer ${auth.bearer}`]);
@@ -330,14 +274,12 @@ function buildOrderedHeaders(
 }
 
 /**
- * Base64-encode `user:pass` for HTTP Basic auth. We route through
- * `TextEncoder` so credentials containing non-ASCII (e.g. Chinese
- * usernames, emoji passwords) are encoded as UTF-8 bytes before
- * base64 — the de-facto browser convention that Express and most
- * servers accept, since they decode the header as raw bytes.
+ * 为 HTTP Basic 认证把 `user:pass` 做 base64。走 `TextEncoder` 是为了先把
+ * 含非 ASCII 的凭据（中文用户名、emoji 密码）按 UTF-8 编码成字节再 base64——
+ * 浏览器的事实惯例，Express 等多数服务端按裸字节解码这个 header。
  *
- * `btoa` is provided by the DOM lib, which is in the project's
- * tsconfig (`"lib": ["ES2022", "DOM", "DOM.Iterable"]`).
+ * `btoa` 由 DOM lib 提供，已在项目 tsconfig 的
+ * `"lib": ["ES2022", "DOM", "DOM.Iterable"]` 里。
  */
 function b64Basic(user: string, pass: string): string {
   const raw = `${user}:${pass}`;
@@ -347,7 +289,7 @@ function b64Basic(user: string, pass: string): string {
   return btoa(bin);
 }
 
-/** Append an `apikey` config whose `inLocation` is `'query'` to the URL. */
+/** 把 `inLocation` 为 `'query'` 的 `apikey` 追加到 URL。 */
 function appendApikeyToQuery(url: string, auth: AuthConfig): string {
   if (auth.kind !== 'apikey' || !auth.apikey || auth.apikey.inLocation !== 'query') {
     return url;
@@ -357,51 +299,34 @@ function appendApikeyToQuery(url: string, auth: AuthConfig): string {
   return `${url}${url.includes('?') ? '&' : '?'}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
 }
 
-/** POSIX-shell single-quote escape: `it's` → `'it'\''s'`. */
+/** POSIX shell 单引号转义：`it's` → `'it'\''s'`。 */
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-/** Attach a body only when the mode says so AND content is non-empty. */
+/** 仅当 mode 允许且内容非空时才附上 body。 */
 function hasBody(body: RequestBody): boolean {
   return body.mode !== 'none' && body.content.length > 0;
 }
 
-// ---- public API ----
+// ---- 公开 API ----
 
 /**
- * Turn the user-editable request shape into everything a transport needs.
- * This is the only function in the app that assembles a request.
+ * 把用户可编辑的请求形状变成传输层需要的一切。全应用唯一组装请求的函数。
  *
- * Order of operations (the order matters at each step):
+ * 操作顺序（每一步的顺序都有讲究）：
  *
- *   1. join `baseUrl` + `urlPath` — a path with its own scheme wins, so
- *      a 自定义 full URL is never prefixed;
- *   2. resolve `{{var}}` over the **joined** URL, so a variable inside
- *      the environment's own base URL resolves too;
- *   3. resolve `{{var}}` in each enabled param's **value**, then append
- *      the survivors as a query string (encoding them, and choosing `?`
- *      vs `&` off the current URL);
- *   4. append an apikey configured for the query location;
- *   5. build the ordered header list;
- *   6. decide body inclusion (`mode !== 'none'` **and** non-empty
- *      authored content), then template the body.
+ *   1. join `baseUrl` + `urlPath`——自带 scheme 的 path 优先，「自定义」的
+ *      完整 URL 因此不会被前缀；
+ *   2. 在 join 后的 URL 上解析 `{{var}}`，环境自身 base URL 里的变量才解析得到；
+ *   3. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL
+ *      选 `?` 还是 `&`）；
+ *   4. 追加 query 位置的 apikey；
+ *   5. 构造有序 header 列表；
+ *   6. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再模板化 body。
  *
- * Every `{{var}}` that cannot be resolved is recorded, wherever it was
- * written — URL, param value, header, auth, or body — and every field
- * that goes on the wire is templated, including the body.
- *
- * Two of those were not always true, and both were the same kind of bug:
- * the field looked handled, the app and its own backend disagreed, and a
- * `{{x}}` went out to the server silently encoded or literal.
- *
- *   - Param values were exempt on the theory that a marker percent-encoded
- *     into the query string was "already visible there". It was not:
- *     `%7B%7Bx%7D%7D` is no more readable than `{{x}}`.
- *   - The body shipped verbatim, on the theory that substituting into JSON
- *     can produce invalid JSON. Real, but it left `{{x}}` in the payload
- *     as data and the frontend disagreeing with `resolve_endpoint`, which
- *     has always templated every field.
+ * 每个写下的 `{{var}}`，无论落在 URL、参数值、header、auth 还是 body，解析
+ * 不到就记录；每个上线的字段都被模板化，body 也不例外。
  */
 export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const missing = createMissingTracker();
@@ -411,11 +336,9 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const joined = joinBaseUrl(input.baseUrl, input.urlPath);
   const url = resolveVarsWithMissing(joined, input.env);
   missing.add(url.missing);
-  // After substitution, never before: `{{var}}` → `/api` is what turns the
-  // separator `joinBaseUrl` inserted into a `//`, so this is the first
-  // point where the real path is known. Query/fragment data is left alone
-  // by `collapseUrlSlashes`, which is why params can still be appended
-  // after it.
+  // 折叠放在替换之后、绝不之前：`{{var}}` → `/api` 才会把 `joinBaseUrl`
+  // 插入的分隔符变成 `//`，到这里真实 path 才确定。`collapseUrlSlashes` 不碰
+  // query/fragment，所以参数还能在它之后追加
   const normalized = collapseUrlSlashes(url.value);
 
   const withParams = appendQueryString(normalized, input.params, input.env, missing);
@@ -423,10 +346,8 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
 
   const headers = buildOrderedHeaders(input.headers, input.body.mode, auth, input.env, missing);
 
-  // Decide inclusion on the authored content, then template it — the same
-  // order Rust's `resolve_endpoint` uses. Checking inclusion *after*
-  // templating would silently drop a request whose body is a variable that
-  // resolves to the empty string.
+  // 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。
+  // 先模板化再判断会静默丢掉 body 只是一个解析为空串的变量的请求
   const body = hasBody(input.body) ? resolveVarsWithMissing(input.body.content, input.env) : null;
   if (body !== null) missing.add(body.missing);
 
@@ -439,13 +360,11 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   };
 }
 
-/** `BuildInput` → `PrepareRequestInput`, with an empty base URL.
+/** `BuildInput` → `PrepareRequestInput`，base URL 为空串。
  *
- *  `BuildInput.url` has always been the complete URL, so the compat
- *  adapters below treat it as a path with nothing to join. `joinBaseUrl`
- *  is the identity on that input (an empty base returns the path, and a
- *  path with a scheme is returned as-is), which is what keeps
- *  `buildFetchInit` / `buildCurlCommand` byte-identical to before.
+ *  `BuildInput.url` 一向是完整 URL，所以下面的兼容适配器把它当作无 base 可
+ *  join 的 path；`joinBaseUrl` 在该输入上是恒等的（空 base 返回 path，自带
+ *  scheme 的 path 原样返回）。
  */
 function fromBuildInput(input: BuildInput): PrepareRequestInput {
   return {
@@ -461,14 +380,12 @@ function fromBuildInput(input: BuildInput): PrepareRequestInput {
 }
 
 /**
- * Build the `fetch(url, init)` pair for the given request. Pure — no
- * I/O, no state. The caller composes `signal` and `redirect` on top.
+ * 构造 `fetch(url, init)` 参数对。纯函数，无 I/O、无状态；`signal` 与
+ * `redirect` 由调用方叠加。
  *
- * A thin adapter over [`prepareRequest`]. Headers collapse back into a
- * `Record` here because that is `fetch`'s natural shape, which means a
- * repeated header name keeps only the last value — a pre-existing
- * limitation of this entry point, and the reason the tuple-preserving
- * `sendPreparedRequest` path exists for the backend transport.
+ * [`prepareRequest`] 之上的薄适配器。header 在这里收回 `Record`（`fetch`
+ * 的自然形状），代价是重名 header 只留最后一个值——该入口的既有局限，
+ * 也是保留 tuple 形态的 `sendPreparedRequest` 走后台传输的原因。
  */
 export function buildFetchInit(input: BuildInput): BuiltFetch {
   const prepared = prepareRequest(fromBuildInput(input));
@@ -492,26 +409,20 @@ export function buildFetchInit(input: BuildInput): BuiltFetch {
 }
 
 /**
- * Render an already-prepared request as a copy-pasteable cURL command.
+ * 把已 prepare 的请求渲染成可粘贴的 cURL 命令。
  *
- * THE ONE PLACE A cURL STRING IS ASSEMBLED. `buildCurlCommand` below is
- * this same function behind a `BuildInput` adapter, which is the point:
- * a preview that re-derives the URL, headers and body is a preview that
- * can describe a request nobody sent. That is not hypothetical — the
- * preview used to be built independently of Send and emitted
- * `curl -X POST '/cashier'` for a request that had actually gone to
- * `https://host/cashier`, because only the send path joined the base
- * URL.
+ * **全应用唯一拼 cURL 字符串的地方。** `buildCurlCommand` 只是它在
+ * `BuildInput` 之上的适配器：预览若自己重新推导 URL、header 与 body，就是
+ * 在描述一个没人发过的请求。
  *
- * Everything read here is already final: `url` is joined and
- * `{{var}}`-resolved, `headers` is the ordered wire list including the
- * auth-derived `Authorization`, and `body` is the exact string that
- * would be written to the socket.
+ * 这里读到的一切都已是终态：`url` 已 join 且已解析 `{{var}}`，`headers`
+ * 是含 auth 派生 `Authorization` 的有序线上列表，`body` 是真正会写进 socket
+ * 的那个字符串。
  */
 export function preparedToCurl(prepared: PreparedRequest): string {
   const lines: string[] = [`curl -X ${prepared.method.toUpperCase()} ${shellQuote(prepared.url)}`];
-  // A list, not a record: `prepared.headers` keeps duplicate names, which
-  // is legal on the wire and which one `-H` per line reproduces.
+  // 用列表而非 record：`prepared.headers` 保留重名，线上合法，且每行一个 `-H`
+  // 正好复现
   for (const [k, v] of prepared.headers) {
     lines.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
   }
@@ -522,10 +433,8 @@ export function preparedToCurl(prepared: PreparedRequest): string {
 }
 
 /**
- * Build a copy-pasteable cURL command for the same request. A thin
- * adapter over [`prepareRequest`] → [`preparedToCurl`], so the emitted URL,
- * headers and body are by construction the ones a real send would use —
- * the two can no longer disagree.
+ * 为同一请求生成可粘贴的 cURL 命令。[`prepareRequest`] → [`preparedToCurl`]
+ * 之上的薄适配器，所以发出的 URL、header、body 按构造就是真实发送会用的那套。
  */
 export function buildCurlCommand(input: BuildInput): string {
   return preparedToCurl(prepareRequest(fromBuildInput(input)));

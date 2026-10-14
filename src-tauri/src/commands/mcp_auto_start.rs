@@ -7,44 +7,24 @@ use tauri::State;
 use crate::db::DbPool;
 use crate::error::AppError;
 
-/// Read the persisted `mcp.auto_start` preference. The value defaults
-/// to `false` (MCP daemon does NOT auto-start at launch) — the
-/// rationale lives on `db::preferences::keys::MCP_AUTO_START`.
+/// 读持久化的 `mcp.auto_start`。默认 `false`（daemon 不自动启动），理由见
+/// `db::preferences::keys::MCP_AUTO_START`。
 ///
-/// Read directly from the DB rather than via the in-memory store, so
-/// the value is always the persisted truth even if the user toggled it
-/// in another window since the app booted.
+/// 直读 DB 而非内存 store，这样即使用户在别的窗口改过，拿到的仍是持久化的真值。
 #[tauri::command]
 pub fn mcp_auto_start_get(state: State<'_, DbPool>) -> Result<bool, AppError> {
     crate::db::with_conn(&state, crate::db::preferences::mcp_auto_start)
 }
 
-/// Persist the `mcp.auto_start` preference and immediately try to act
-/// on it:
-///   - `value == true`  → `start()` (idempotent; OK if already running)
-///   - `value == false` → leave the daemon as-is
+/// 持久化 `mcp.auto_start`，并立即据此行动：`true` 走 `start()`（幂等，已在跑也算成功），
+/// `false` 保持现状。
 ///
-/// We do **not** shut the daemon down when the user disables
-/// auto-start mid-session — `auto_start` is about whether the daemon
-/// starts on launch, not a runtime kill switch. Stopping mid-flight is
-/// a separate user action (`mcp_daemon_stop`, and its web twin
-/// `POST /api/mcp/stop`).
+/// 关掉它**不会**停掉运行中的 daemon：`auto_start` 只管「启动时拉不拉」，不是运行时
+/// 杀开关。现在要停是另一个用户动作（`mcp_daemon_stop`，及其 Web 对应
+/// `POST /api/mcp/stop`）。手动启动的 daemon 本次会话继续跑到用户关开关或退出应用。
 ///
-/// The two compose like this:
-///
-///   * `auto_start = true`  → the daemon is up now (and up again at the
-///     next launch).
-///   * `auto_start = false` → only future launches are suppressed. A
-///     daemon started this session stays up until the user turns the
-///     manual switch off, or exits the app (`shutdown` stops it).
-///   * `auto_start = false` + manual start → the daemon runs for this
-///     session and does not come back on the next launch.
-///
-/// So "stop" is always the manual switch's job; this preference is only
-/// ever about launch. `mcp_daemon_start` uses the same idempotent
-/// supervisor path as this command, so enabling the toggle on an
-/// already-healthy daemon reports that daemon's identity rather than
-/// churning the port.
+/// `mcp_daemon_start` 走的是同一条幂等 supervisor 路径，因此在已健康的 daemon 上打开
+/// 开关，报的是那个 daemon 的身份，不会把端口翻来覆去地换。
 #[tauri::command]
 pub async fn mcp_auto_start_set(
     state: State<'_, DbPool>,
@@ -56,8 +36,7 @@ pub async fn mcp_auto_start_set(
         crate::db::preferences::set(c, crate::db::preferences::keys::MCP_AUTO_START, &value)
     })?;
     if value {
-        // Best-effort start; surface the error so the UI can flip the
-        // toggle back if launch failed.
+        // 尽力拉起；错误要抛出去，UI 才能把开关翻回去。
         daemon.start(&app_handle).await?;
     }
     Ok(value)

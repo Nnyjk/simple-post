@@ -1,27 +1,16 @@
 /**
- * Pure unit tests for `src/features/project-tree/tree-utils.ts` — the
- * flat-node-list → nested-tree builder and its search filter.
+ * `src/features/project-tree/tree-utils.ts` 的纯单元测试 —— 打平节点列表 → 嵌套树
+ * 的构建，以及它的搜索过滤。
  *
- * Why this file exists
- * --------------------
- * The parent/child matrix gives an endpoint *two* legal parents: a
- * collection, or a module. `buildTree` used to model only the first —
- * it mapped a module to its collections and dropped the rest — so a
- * folderless endpoint would have been written to the database and then
- * rendered nowhere. These tests pin the second half of the contract:
+ * 父子矩阵给了接口*两个*合法父节点：集合，或模块。这几个用例钉住的正是后半个约定：
  *
- *   1. A module's own endpoints reach `TreeBranch.endpoints`, with the
- *      detail rows that back them, beside (not inside) its collections.
- *   2. A collection's endpoints still land in its `CollectionBranch`.
- *   3. Search keeps a module whose *own* endpoint matched, and filters
- *      its non-matching endpoints away — the same predicate both levels
- *      share.
+ *   1. 模块自己的接口进入 `TreeBranch.endpoints`，带着支撑它们的 detail 行，且与集合
+ *      并列而非嵌在集合里。
+ *   2. 集合的接口仍落在它自己的 `CollectionBranch` 里。
+ *   3. 搜索保留「自己名下接口命中」的模块，并滤掉不匹配的接口 —— 两个层级共用
+ *      同一个判定式。
  *
- * The counting helpers that used to live here (`countModuleEndpoints` and
- * its two helpers) went with the tree's size badge: nothing counts children
- * for display any more, so the chain had no caller left.
- *
- * Run via:
+ * 运行：
  *   npx tsx --test src/features/project-tree/__tests__/tree-utils.test.ts
  */
 import { describe, it } from 'node:test';
@@ -64,10 +53,10 @@ function makeDetail(id: string, url: string, tags: string[] = []): EndpointDetai
 }
 
 /**
- * One project holding both placements at once:
+ * 一个项目，两种摆放同时在场：
  *
  *   m1
- *   ├── e_module   (directly on the module — the folderless case)
+ *   ├── e_module   （直接挂在模块上，即无文件夹的情形）
  *   └── c1
  *       ├── e_nested
  *       └── c2
@@ -107,10 +96,9 @@ describe('tree-utils: buildTree keeps endpoints on their module', () => {
       m1.endpoints.map((n) => n.id),
       ['e_module'],
     );
-    // The detail row travels with it — the row renders a method pill and
-    // a url from that record.
+    // detail 行跟着一起过来，行要从这条记录里画 method 药丸和 url。
     assert.equal(m1.endpointDetails.e_module.url, '/module-level');
-    // Collections are unaffected.
+    // 集合不受影响。
     assert.deepEqual(
       m1.collections.map((c) => c.collection.id),
       ['c1'],
@@ -127,7 +115,7 @@ describe('tree-utils: buildTree keeps endpoints on their module', () => {
       ['e_nested'],
     );
     assert.equal(c1.endpointDetails.e_nested.url, '/nested');
-    // Recursion is intact: c1's sub-collection keeps its own endpoint.
+    // 递归完好：c1 的子集合保住了自己的接口。
     assert.deepEqual(
       c1.children[0].endpoints.map((n) => n.id),
       ['e_deep'],
@@ -138,8 +126,7 @@ describe('tree-utils: buildTree keeps endpoints on their module', () => {
     const nodes = [makeNode('m1', null, 'module'), makeNode('e_orphan', 'm1', 'endpoint')];
     const m1 = buildTree(nodes, {}, 'p1')[0];
 
-    // The node is listed (the tree is structural), but there is no detail
-    // to draw, and `EndpointList` skips the row.
+    // 节点仍列出（树是结构性的），但没有 detail 可画，`EndpointList` 会跳过这一行。
     assert.deepEqual(
       m1.endpoints.map((n) => n.id),
       ['e_orphan'],

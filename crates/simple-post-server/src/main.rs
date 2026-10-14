@@ -1,25 +1,22 @@
-// `simple-post-server` — the headless entrypoint.
+// `simple-post-server` —— 无头入口。
 //
-// This binary is what the Docker image runs. It is the same CLI shape
-// as the `serve-web` / `mcp` subcommands of the desktop `simple-post`
-// binary, but built without Tauri, so it carries no GTK/WebKit on
-// Linux and no Windows GUI runtime.
+// 这个二进制就是 Docker 镜像跑的东西。它与桌面 `simple-post` 二进制的
+// `serve-web` / `mcp` 子命令是同一种 CLI 形态，但构建时不带 Tauri，故在 Linux 上
+// 不携带 GTK/WebKit，在 Windows 上不带 GUI runtime。
 //
-// `serve-web` is the container command:
+// `serve-web` 是容器命令：
 //
 //     simple-post-server serve-web --bind 0.0.0.0 --port 4173
 //
-// There is deliberately no "no subcommand" case: launching the desktop
-// GUI is not something this binary can do, and defaulting to an empty
-// help screen is friendlier than a panic.
+// 刻意没有「无子命令」这一支：启动桌面 GUI 不是这个二进制能做的事，而默认落到一个
+// 空帮助屏比 panic 友好。
 
 use clap::{Parser, Subcommand};
 
-/// Headless server host for Simple Post.
+/// Simple Post 的无头服务端 host。
 ///
-/// This is the Tauri-free half of the project: the browser-facing REST
-/// and SPA server (`serve-web`), plus the embedded MCP daemon (`mcp`).
-/// The desktop application lives in the `simple-post` binary.
+/// 这是项目的无 Tauri 那一半：面向浏览器的 REST + SPA 服务器（`serve-web`），以及
+/// 内嵌的 MCP daemon（`mcp`）。桌面应用在 `simple-post` 二进制里。
 #[derive(Parser, Debug)]
 #[command(
     name = "simple-post-server",
@@ -174,14 +171,12 @@ fn main() {
     }
 }
 
-/// Normalise a `--allowed-*` CLI list into a real `Vec<String>`.
+/// 把 `--allowed-*` 的 CLI 列表规范成真正的 `Vec<String>`。
 ///
-/// `None` (flag absent) and `Some("")` (the supervisor's
-/// `--allowed-hosts=` for an empty list) both have to land on an empty
-/// list, never on a one-element `[""]`. An empty host allowlist is the
-/// daemon *denying* every non-loopback `Host`, so a stray empty entry
-/// would both leak into the persisted config and become a never-matching
-/// rule.
+/// `None`（flag 缺席）与 `Some("")`（supervisor 对空列表发的 `--allowed-hosts=`）
+/// 都必须落到空列表，绝不能是单元素 `[""]`。空 host 白名单意味着 daemon *拒绝*所有
+/// 非 loopback 的 `Host`，故一个多余的空项既会漏进持久化配置，又会变成永不匹配的
+/// 规则。
 fn split_allow_list(raw: Option<String>) -> Vec<String> {
     raw.unwrap_or_default()
         .split(',')
@@ -190,7 +185,7 @@ fn split_allow_list(raw: Option<String>) -> Vec<String> {
         .collect()
 }
 
-/// Resolve `serve-web`'s flags into concrete paths and run the server.
+/// 把 `serve-web` 的 flag 解析成具体路径并跑起服务器。
 fn serve_web(
     bind: String,
     port: u16,
@@ -222,16 +217,13 @@ fn serve_web(
         },
     };
 
-    // The CLI flag, when present, overrides the persisted row.
+    // CLI flag 存在时覆盖持久化的那一行。
     //
-    // `None` is forwarded verbatim rather than being resolved here:
-    // `web_api::serve` resolves the persisted value from the pool it
-    // already opens, and opening a second one here just to read one
-    // preference means a second schema check and a second connection
-    // pool for the same file.
+    // `None` 原样向上传而不在此解析：`web_api::serve` 会用它自己已经打开的连接池读
+    // 持久化值，在这里另开一个只为读一个 preference，等于对同一个文件付第二次 schema
+    // 检查与第二个连接池。
     //
-    // An explicit flag still writes the override through here, so a
-    // forced value is persisted exactly as before.
+    // 但显式 flag 仍经这里把覆盖值写回，使强制值照旧被持久化。
     let auto_start = match mcp_auto_start {
         Some(v) => {
             if let Ok(pool) = simple_post_server::db::init(&data_path) {
@@ -288,7 +280,7 @@ mod tests {
                 assert_eq!(port, 0);
                 assert_eq!(path, "/mcp");
                 assert!(!allow_remote);
-                // And the normalisation the dispatch arm applies:
+                // 以及 dispatch 分支施加的规范化。
                 assert!(split_allow_list(allowed_hosts).is_empty());
                 assert!(split_allow_list(allowed_origins).is_empty());
             }
@@ -296,10 +288,9 @@ mod tests {
         }
     }
 
-    /// The supervisor emits `--allowed-hosts=` with an *empty* value for
-    /// an empty list. clap hands that over as `Some("")`, and it must
-    /// normalise to an empty list rather than a one-element `[""]` — a
-    /// literal empty string never matches any `Host`.
+    /// supervisor 对空列表会发 `--allowed-hosts=`（值为空）。clap 会把它交给
+    /// `Some("")`，必须规范化成空列表而不是单元素 `[""]`——空字符串永远匹配不上任何
+    /// `Host`。
     #[test]
     fn a_supervisor_style_empty_allowlist_stays_empty() {
         let empty = Some(String::new());
@@ -314,10 +305,9 @@ mod tests {
         assert_eq!(origins, vec!["https://claude.ai"]);
     }
 
-    /// The container default. The Dockerfile passes an explicit
-    /// `--bind 0.0.0.0`; if the *default* ever changed to a LAN bind
-    /// instead, that flag would stop being a deliberate choice and the
-    /// "no bind flag means loopback-only" guarantee would be gone.
+    /// 容器默认值。Dockerfile 会显式传 `--bind 0.0.0.0`；若*默认值*哪天改成 LAN
+    /// 绑定，那个 flag 就失去「刻意选择」的意味，「不带 bind flag 即仅 loopback」的
+    /// 保证也随之消失。
     #[test]
     fn serve_web_defaults_are_the_documented_ones() {
         match parse(&["simple-post-server", "serve-web"]).cmd {
@@ -337,9 +327,8 @@ mod tests {
         }
     }
 
-    /// A container passes every flag explicitly. If clap's names drift,
-    /// the image would silently start on defaults — most dangerously
-    /// loopback-only, which publishes a port nothing can reach.
+    /// 容器每个 flag 都是显式传的。clap 的名字一旦漂移，镜像就会静默按默认值启动——最
+    /// 危险的是仅 loopback，那等于发布了一个谁都连不上的端口。
     #[test]
     fn the_container_flags_parse_back_to_themselves() {
         match parse(&[
@@ -374,8 +363,7 @@ mod tests {
         }
     }
 
-    /// There is no GUI here, so a bare invocation must be a parse
-    /// error rather than a silent no-op.
+    /// 这里没有 GUI，故裸调用必须是解析错误而不是静默 no-op。
     #[test]
     fn a_bare_invocation_is_rejected() {
         assert!(Cli::try_parse_from(["simple-post-server"]).is_err());

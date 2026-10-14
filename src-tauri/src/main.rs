@@ -1,4 +1,4 @@
-// Prevents an extra console window on Windows in release builds.
+// release 构建下 Windows 不再弹多余的控制台窗口。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clap::{Parser, Subcommand};
@@ -139,14 +139,11 @@ enum Cmd {
     },
 }
 
-/// Normalise a `--allowed-*` CLI list into a real `Vec<String>`.
+/// 把 `--allowed-*` 的命令行列表归一成真正的 `Vec<String>`。
 ///
-/// `None` (flag absent) and `Some("")` (the supervisor's
-/// `--allowed-hosts=` for an empty list) both have to land on an empty
-/// list, never on a one-element `[""]`. An empty host allowlist is the
-/// daemon *denying* every non-loopback `Host`, so a stray empty entry
-/// would both leak into the persisted config and become a never-matching
-/// rule.
+/// `None`（flag 未给）与 `Some("")`（supervisor 对空列表发的 `--allowed-hosts=`）都必须
+/// 落到空列表，绝不能落成单元素 `[""]`。空 host allowlist 等于 daemon 拒绝一切非
+/// loopback `Host`，多出的那个空项既会漏进持久化配置，又是一条永远匹配不上的规则。
 fn split_allow_list(raw: Option<String>) -> Vec<String> {
     raw.unwrap_or_default()
         .split(',')
@@ -160,7 +157,6 @@ fn main() {
 
     let cli = Cli::parse();
     match cli.cmd {
-        // MCP daemon — HTTP transport by default.
         Some(Cmd::Mcp {
             transport,
             port,
@@ -170,8 +166,7 @@ fn main() {
             allowed_hosts,
             allowed_origins,
         }) => {
-            // Defer to the lib entry point so binary and lib share the same
-            // daemon implementation.
+            // 转发给 lib 入口，二进制与 lib 共用同一份 daemon 实现。
             let http_config = simple_post_lib::domain::McpHttpConfig {
                 host: bind.clone(),
                 port,
@@ -183,7 +178,7 @@ fn main() {
             simple_post_lib::run_mcp(transport, port, bind, http_config);
         }
 
-        // mcp-proxy is a separate binary; refuse to start here.
+        // mcp-proxy 是独立二进制，此处拒绝启动。
         Some(Cmd::McpProxy) => {
             eprintln!(
                 "mcp-proxy is a separate binary:\n  \
@@ -193,8 +188,7 @@ fn main() {
             std::process::exit(2);
         }
 
-        // Browser-facing web host. Spawn a tiny tokio runtime, parse the
-        // bind address, defer to the lib entry point.
+        // 面向浏览器的 web 宿主：起一个小 tokio runtime、解析 bind 地址，转发给 lib 入口。
         Some(Cmd::ServeWeb {
             bind,
             port,
@@ -226,20 +220,16 @@ fn main() {
                 },
             };
 
-            // The CLI flag, when present, overrides the persisted row.
+            // 命令行给了就覆盖持久化的那一行。
             //
-            // `None` is forwarded verbatim rather than being resolved here.
-            // This used to open its own `db::init()` pool just to read one
-            // preference — a schema check, the full `schema.sql`, and a
-            // 4-connection pool — only for `web_api::serve` to open a second
-            // one a few lines later for the same file. `serve()` now resolves
-            // the persisted value from the pool it already has.
+            // `None` 原样转发，不在此解析：为此单独开一个 `db::init()` 池只为读一个
+            // preference（一次 schema 检查、整份 `schema.sql`、4 连接池），而几行之后
+            // `web_api::serve` 会为同一个文件再开一个；`serve()` 用它已有的池解析该值。
             //
-            // An explicit flag still writes the override through here, so a
-            // forced value is persisted exactly as before.
+            // 显式给值时仍在此落库，强制值因此被持久化。
             let auto_start = match mcp_auto_start {
                 Some(v) => {
-                    // Persist the override so subsequent boots agree.
+                    // 落库覆盖值，后续启动才一致。
                     if let Ok(pool) = simple_post_lib::db::init(&data_path) {
                         let _ = simple_post_lib::db::with_tx(&pool, |c| {
                             simple_post_lib::db::preferences::set(
@@ -268,25 +258,20 @@ fn main() {
             ));
         }
 
-        // No subcommand → launch the Tauri GUI.
         None => simple_post_lib::run(),
     }
 }
 
-/// Inline rather than a sibling `main_test.rs`: this binary has no test
-/// module of its own, and the one thing worth pinning here is a
-/// *round trip* between clap's parse of the flags and the config the
-/// daemon actually serves with. `daemon_supervisor::daemon_cli_args`
-/// emits these exact strings to spawn the daemon child, so a rename or a
-/// change in how an empty list parses is a daemon that fails to start —
-/// and the supervisor would only report it as `Unhealthy`.
+/// 内联而非另立 `main_test.rs`：本二进制没有自己的测试模块，而这里唯一值得钉住的是
+/// 「clap 解析出的 flag ↔ daemon 实际服务的配置」这一往返。
+/// `daemon_supervisor::daemon_cli_args` 正是发出这些字符串去拉 daemon 子进程的，一旦
+/// 改名或空列表解析方式变了，daemon 起不来，而 supervisor 只会报 `Unhealthy`。
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The argv the supervisor builds for an empty allowlist. If clap
-    /// ever rejects the empty value, this parse fails and the daemon
-    /// child never boots.
+    /// supervisor 在空 allowlist 下构造的 argv。clap 一旦拒绝这个空值，这里就解析失败，
+    /// daemon 子进程永远起不来。
     const SUPERVISOR_ARGV: &[&str] = &[
         "simple-post",
         "mcp",
@@ -366,8 +351,7 @@ mod tests {
 
     #[test]
     fn a_lan_bind_without_allow_remote_is_rejected_by_validation() {
-        // The combination that would otherwise listen on the LAN while
-        // the Host guard answers 403 to everything arriving from it.
+        // 否则就会一边监听 LAN，一边被 Host 守卫对一切外来请求回 403。
         let (cfg, _) = parse_mcp(&[
             "simple-post",
             "mcp",

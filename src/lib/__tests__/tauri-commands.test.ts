@@ -1,40 +1,27 @@
 /**
- * Unit tests for `src/lib/tauri-commands.ts` — the dual-shape
- * `invokeCmd` wrapper.
+ * `src/lib/tauri-commands.ts`（双形态 `invokeCmd` 包装）的单测。
  *
- * Why this file exists
- * --------------------
- * The Tauri desktop shell and the browser / serve-web shape share a
- * single renderer call site (`invokeCmd`). The wrapper needs to:
+ * Tauri 桌面 shell 与浏览器 / serve-web 形态共用同一个渲染层调用点
+ * （`invokeCmd`）。这个包装需要做到：
  *
- *   1. Detect the shape at module load via
- *      `window.__TAURI_INTERNALS__` / `window.__TAURI__`.
- *   2. Map every invoke command name on the `COMMANDS` table to a
- *      concrete `(method, path, body)` triple for the web shape —
- *      including path-param encoding, query-string projection for
- *      list filters, and body projection when path params must be
- *      peeled off the wire payload (e.g. `projects_update`).
- *   3. Throw a self-documenting error if a command is missing from
- *      `WEB_ROUTES` so the developer is pointed at the right files
- *      to add it.
+ *   1. 在模块加载时经 `window.__TAURI_INTERNALS__` / `window.__TAURI__` 判定形态。
+ *   2. 把 `COMMANDS` 表里每个 invoke 命令名映射成 web 形态的
+ *      `(method, path, body)` 三元组——包括路径参数编码、列表过滤的查询串投影，
+ *      以及路径参数必须从线上载荷里剥离时的 body 投影（如 `projects_update`）。
+ *   3. 命令在 `WEB_ROUTES` 里缺失时抛一个自带说明的错误，把开发者指向该加它的文件。
  *
- * What this file covers
- * ---------------------
- *   * `IS_TAURI_SHELL` is verified through a child Node process so
- *     the module-load-time evaluation runs in isolation (the const
- *     can't be retoggled in the same process — see the table at the
- *     top of `tauri-commands.ts`).
- *   * `invokeCmd` in the web shape is exercised by stubbing global
- *     `fetch`. We assert on `(method, url, parsed body)` so a silent
- *     drift in route paths would fail loudly.
- *   * Path-param encoding (`encodeURIComponent`) is checked on a
- *     representative collection of entry points.
- *   * Path-param + body separation (`body:` projector) is checked on
- *     `projects_update` (and a handful of others by side effect).
- *   * The unknown-cmd throw points the developer at both
- *     `tauri-commands.ts` and `web_api/`.
+ * 本文件覆盖什么
+ * --------------
+ *   * `IS_TAURI_SHELL` 通过子 Node 进程验证，好让模块加载时的求值在隔离中跑
+ *     （那个 const 在同一进程里没法重新切换——见 `tauri-commands.ts` 顶部的表）。
+ *   * web 形态的 `invokeCmd` 通过桩掉全局 `fetch` 来跑。我们断言
+ *     `(method, url, 解析后的 body)`，这样路由路径的静默漂移会响亮地失败。
+ *   * 路径参数编码（`encodeURIComponent`）在一批有代表性的入口上检查。
+ *   * 路径参数与 body 的分离（`body:` 投影器）在 `projects_update` 上检查
+ *     （另有若干入口靠副作用顺带覆盖）。
+ *   * 未知命令的抛错同时把开发者指向 `tauri-commands.ts` 与 `web_api/`。
  *
- * Run via:
+ * 运行：
  *   npx tsx --test src/lib/tauri-commands.test.ts
  */
 
@@ -92,15 +79,13 @@ function restoreFetchMock(): void {
 }
 
 // ---------------------------------------------------------------------------
-// IS_TAURI_SHELL — must be run in an isolated child process because the
-// value is captured at module evaluation time.
+// IS_TAURI_SHELL —— 必须放在隔离的子进程里跑，因为该值在模块求值时就被捕获了。
 // ---------------------------------------------------------------------------
 
 /**
- * Spawn a fresh Node process that loads `tauri-commands.ts` and prints
- * `IS_TAURI_SHELL` as JSON. The optional `window` object is installed
- * on `globalThis` before the module is imported so the module-load-time
- * detection sees the right shape.
+ * 起一个全新的 Node 进程，加载 `tauri-commands.ts` 并把 `IS_TAURI_SHELL` 以 JSON
+ * 打印出来。可选的 `window` 对象会在 import 模块**之前**装到 `globalThis` 上，好让
+ * 模块加载时的检测看到正确的形态。
  */
 function readIsTauriShellInChild(windowShim?: Record<string, unknown>): {
   value: boolean;
@@ -109,11 +94,9 @@ function readIsTauriShellInChild(windowShim?: Record<string, unknown>): {
   const setup = windowShim
     ? `globalThis.window = ${JSON.stringify(windowShim)};`
     : `delete globalThis.window;`;
-  // Dynamic import in the child needs a `file://` URL on Windows; a
-  // bare absolute path gets parsed as a URL and rejected.
-  // `new URL(rel, import.meta.url).href` returns the file URL as a
-  // string, which is the shape dynamic `import()` requires.
-  // Relative to *this* file, so it needs the `../` hop out of `__tests__`.
+  // 子进程里的动态 import 在 Windows 上需要 `file://` URL；裸的绝对路径会被当成
+  // URL 解析并拒绝。`new URL(rel, import.meta.url).href` 返回的就是 file URL 字符串，
+  // 正是动态 `import()` 要的形状。相对*本*文件，所以要 `../` 跳出 `__tests__`。
   const moduleUrl = new URL('../tauri-commands.ts', import.meta.url).href;
   const code = [
     setup,
@@ -154,13 +137,13 @@ describe('IS_TAURI_SHELL (child-process probe)', () => {
   });
 
   it('in this test file (no window) it must be false', () => {
-    // Sanity check — guarantees the rest of the suite runs in web shape.
+    // 健全性检查——保证本套件余下部分都跑在 web 形态。
     assert.equal(IS_TAURI_SHELL, false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// invokeCmd in the web shape — path / method / body assertions.
+// web 形态下的 invokeCmd —— 对 path / method / body 的断言。
 // ---------------------------------------------------------------------------
 
 describe('invokeCmd (web shape) — path & body mapping', () => {
@@ -189,7 +172,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     await invokeCmd(COMMANDS.projectsGet, { id: 'a/b c' });
     const c = last();
     assert.equal(c.method, 'GET');
-    // '/' and ' ' must be percent-encoded; nothing raw should leak.
+    // '/' 与 ' ' 必须百分号编码；不该有任何裸字符漏出去。
     assert.equal(c.url, '/api/projects/a%2Fb%20c');
   });
 
@@ -201,9 +184,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     const c = last();
     assert.equal(c.method, 'PATCH');
     assert.equal(c.url, '/api/projects/p1');
-    // The `id` MUST NOT leak into the body — the Rust handler
-    // deserialises the body into a `ProjectPatch` struct and an
-    // unexpected `id` field would be silently ignored at best.
+    // `id` 绝不能漏进 body —— Rust handler 把 body 反序列化成 `ProjectPatch`，多出来的
+    // `id` 字段轻则被静默忽略。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'New name' });
   });
 
@@ -224,9 +206,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
   });
 
   it('nodesList (no filter) → GET /api/nodes (no query string)', async () => {
-    // List commands are sometimes invoked with no args in renderer code
-    // (`invoke<ResourceNode[]>(COMMANDS.nodesList)`); the URL must not
-    // gain a trailing "?".
+    // 列表命令在渲染层有时不带参数调用（`invoke<ResourceNode[]>(COMMANDS.nodesList)`）；
+    // URL 不该因此多出一个尾随的 `?`。
     await invokeCmd(COMMANDS.nodesList);
     const c = last();
     assert.equal(c.url, '/api/nodes');
@@ -235,8 +216,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
   it('nodesList → projects type and query onto the same canonical route', async () => {
     await invokeCmd(COMMANDS.nodesList, { rootId: 'pX', type: 'endpoint', query: 'login' });
     const c = last();
-    // `buildQuery` sorts keys, so the wire order is alphabetical
-    // (`q` < `rootId` < `type`), not the caller's argument order.
+    // `buildQuery` 会给键排序，所以线上顺序是字母序（`q` < `rootId` < `type`），不是
+    // 调用方的参数顺序。
     assert.equal(c.url, '/api/nodes?q=login&rootId=pX&type=endpoint');
   });
 
@@ -266,10 +247,9 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/nodes');
-    // The node's fields ARE the body. A `{ node: {…} }` wrapper would
-    // fail to deserialize into `NodeCreateBody`'s `#[serde(flatten)]`.
-    // `sortOrder` has no server default, so an omitted one must become
-    // `0` rather than `undefined` (which `JSON.stringify` drops).
+    // 节点自身的字段**就是** body。套一层 `{ node: {…} }` 会无法反序列进
+    // `NodeCreateBody` 的 `#[serde(flatten)]`。`sortOrder` 在服务端没有默认值，所以
+    // 缺省时必须变成 `0` 而不是 `undefined`（后者会被 `JSON.stringify` 丢掉）。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), {
       id: 'n1',
       rootId: 'p1',
@@ -292,12 +272,11 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     });
     const c = last();
     const body = JSON.parse(c.body ?? 'null');
-    // A module's parent is the project, expressed as `null`.
+    // module 的父级是项目，用 `null` 表达。
     assert.equal(body.parentId, null);
     assert.equal(body.sortOrder, 3);
-    // `endpoint_details.node_id` is required on the wire; the client
-    // already knows it, so the projection injects it rather than making
-    // the caller duplicate the id.
+    // 线上 `endpoint_details.node_id` 是必填；客户端本来就知道它，所以由投影注入，
+    // 而不是让调用方重复一遍 id。
     assert.deepEqual(body.detail, { method: 'POST', url: '/login', nodeId: 'n1' });
   });
 
@@ -306,8 +285,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     const c = last();
     assert.equal(c.method, 'PATCH');
     assert.equal(c.url, '/api/nodes/n1');
-    // The `id` MUST NOT leak into the body — the Rust handler
-    // deserialises the body into a `NodePatch` struct.
+    // `id` 绝不能漏进 body —— Rust handler 把 body 反序列化成 `NodePatch`。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'Renamed' });
   });
 
@@ -332,10 +310,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
   });
 
   it('nodesMove → a top-level drop sends parentId: null, not undefined', async () => {
-    // Dropping onto the project root is a real move target, and `null`
-    // is what `move_many` reads as "re-parent to the project". Leaving
-    // it `undefined` would let `JSON.stringify` drop the key and make
-    // the server keep the old parent.
+    // 落到项目根是一个真实的移动目标，而 `null` 正是 `move_many` 读作「改挂到项目」的
+    // 值。留成 `undefined` 会让 `JSON.stringify` 丢掉这个键，服务端就会保留旧父级。
     await invokeCmd(COMMANDS.nodesMove, { nodeIds: ['c1'], index: 0 });
     const c = last();
     const body = JSON.parse(c.body ?? 'null');
@@ -344,23 +320,20 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
   });
 
   it('nodesDuplicate → POST /api/nodes/{id}/duplicate, carrying newId', async () => {
-    // `newId` is the id the copy is stored under — the SPA mints it
-    // optimistically and needs the server to keep it, or the tab it
-    // already opened points at a row nobody owns.
+    // `newId` 是副本落库所用的 id —— SPA 乐观地铸出它，并需要服务端保留，否则它已经
+    // 打开的那个页签会指向一条谁都不拥有的行。
     await invokeCmd(COMMANDS.nodesDuplicate, { id: 'n1', newId: 'copy-1' });
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/nodes/n1/duplicate');
-    // The path consumed `id`; the body projector hands back only `newId`
-    // so the wire payload doesn't carry an `{ id }` field the Rust
-    // handler would silently drop.
+    // path 吃掉了 `id`；body 投影器只交回 `newId`，好让线上载荷不带 Rust handler 会
+    // 静默丢弃的 `{ id }` 字段。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { newId: 'copy-1' });
   });
 
   it('nodesDuplicate → no newId means "let the server mint one"', async () => {
-    // A caller with no local copy to stay consistent with (a script, an
-    // older client) omits it, and the handler's `null` means exactly
-    // that — not "reject the request".
+    // 没有本地副本需要保持一致的调用方（脚本、更老的客户端）会省略它，而 handler 里的
+    // `null` 意思正是如此——不是「拒绝这个请求」。
     await invokeCmd(COMMANDS.nodesDuplicate, { id: 'n1' });
     const c = last();
     assert.equal(c.url, '/api/nodes/n1/duplicate');
@@ -391,8 +364,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     const c = last();
     assert.equal(c.method, 'PATCH');
     assert.equal(c.url, '/api/nodes/n1/endpoint-detail');
-    // The node id is the path; repeating it in the body would be
-    // silently dropped by `EndpointDetailPatch`.
+    // 节点 id 走 path；在 body 里重复它会被 `EndpointDetailPatch` 静默丢弃。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { method: 'POST' });
   });
 
@@ -459,16 +431,15 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     });
     const c = last();
     assert.equal(c.method, 'POST');
-    // The env id is path-encoded; the rename needs one round-trip, not
-    // a delete followed by a set.
+    // 环境 id 走路径编码；重命名只需一次往返，不必先删后设。
     assert.equal(c.url, '/api/environments/env%201/vars/rename');
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { fromKey: 'old', toKey: 'new' });
   });
 
   it('baseUrlDefsCreate → POST /api/projects/{projectId}/baseurls with { name }', async () => {
     await invokeCmd(COMMANDS.baseUrlDefsCreate, {
-      // 服务挂在项目上，所以作用域是 projectId；id 由 Web 服务端生成，
-      // 不能随默认 args 泄漏进 body。
+      // 服务挂在项目上，所以作用域是 projectId；顶层 `id` 不能随默认 args
+      // 泄漏进 body（调用方把要用的 id 放在 opts 里）。
       id: 'def-1',
       projectId: 'p/1',
       name: 'Local',
@@ -481,6 +452,29 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
       name: 'Local',
       description: '本地服务',
     });
+  });
+
+  it('baseUrlDefsCreate → opts.id 下发，服务行不会与 ★ / 单元格脱钩', async () => {
+    await invokeCmd(COMMANDS.baseUrlDefsCreate, {
+      projectId: 'p1',
+      name: 'auth',
+      opts: { id: 'def_client_1' },
+    });
+    const c = last();
+    // 前端铸 id、后端采纳：丢掉它就等于让 ★ 和 env 单元格指向一条从未
+    // 落库的行，解析必然为空。
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'auth', id: 'def_client_1' });
+  });
+
+  it('baseUrlDefsCreate → opts.id 为空串时不发 id，由服务端铸', async () => {
+    await invokeCmd(COMMANDS.baseUrlDefsCreate, {
+      projectId: 'p1',
+      name: 'auth',
+      opts: { id: '' },
+    });
+    const c = last();
+    // 空串不能变成一条 id 为 "" 的行。
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'auth' });
   });
 
   it('baseUrlDefsUpdate → PATCH /api/baseurl-defs/{id}', async () => {
@@ -618,7 +612,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Forwarding of options.signal to fetch.
+// 把 options.signal 转发给 fetch。
 // ---------------------------------------------------------------------------
 
 describe('invokeCmd (web shape) — abort signal forwarding', () => {
@@ -631,14 +625,13 @@ describe('invokeCmd (web shape) — abort signal forwarding', () => {
     await invokeCmd(COMMANDS.projectsList, undefined, { signal: ctrl.signal });
     assert.ok(calls.length === 1);
     assert.ok(calls[0]!.signal, 'expected signal to be forwarded');
-    // Both references target the same controller's signal.
+    // 两个引用指向同一个控制器的 signal。
     assert.ok(calls[0]!.signal === ctrl.signal);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Error path — commands without a `WEB_ROUTES` entry must throw with a
-// pointer to both source files.
+// 错误路径 —— 没有 `WEB_ROUTES` 条目的命令必须抛出，并同时指向两个源文件。
 // ---------------------------------------------------------------------------
 
 describe('invokeCmd (web shape) — error path', () => {
@@ -646,33 +639,28 @@ describe('invokeCmd (web shape) — error path', () => {
   after(() => restoreFetchMock());
 
   it('throws a self-documenting error when the command is unmapped', async () => {
-    // Cast through `unknown` because no public literal exists for an
-    // unmapped command (TypeScript would otherwise flag it at the
-    // call site).
+    // 命令未映射时抛出自带说明的错误。
+    // 经 `unknown` 强转，因为没有任何公开字面量代表未映射的命令（否则 TypeScript
+    // 会在调用点就报错）。
     const fakeCmd = 'this_command_does_not_exist' as unknown as TauriCommand;
     await assert.rejects(() => invokeCmd(fakeCmd), /src\/lib\/tauri-commands\.ts/);
     await assert.rejects(() => invokeCmd(fakeCmd), /src-tauri\/src\/web_api\//);
-    // Fetch must NOT have been called — the throw must short-circuit
-    // before any network activity, otherwise the error from a 404
-    // would be misleading.
+    // `fetch` 必须**没有**被调用——这次抛错要在任何网络动作之前短路，否则来自 404 的
+    // 错误会误导人。
     assert.equal(calls.length, 0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Reverse-proxy base path.
+// 反向代理 base path。
 //
-// `serve-web` can nest its whole router under a prefix
-// (`--public-base-path` / `SIMPLE_POST_PUBLIC_BASE_PATH`), and it injects
-// that value into the SPA shell as `window.__SIMPLE_POST_BASE__` before
-// the module entry runs. The renderer has to read it, because every
-// `WEB_ROUTES` path is root-absolute (`/api/projects`) and a nested
-// router never serves the bare root.
+// `serve-web` 可以把整个 router 嵌在一个前缀下（`--public-base-path` /
+// `SIMPLE_POST_PUBLIC_BASE_PATH`），并在模块入口运行前把该值以
+// `window.__SIMPLE_POST_BASE__` 注入 SPA shell。渲染层必须读它，因为每条
+// `WEB_ROUTES` 路径都是根绝对的（`/api/projects`），而嵌套后的 router 从不服务裸根路径。
 //
-// This is the half the previous test file could not see: the integration
-// test (`scripts/test-web-basepath.mjs`) asserted the *server* nests
-// correctly, and this one asserted the renderer maps commands to paths.
-// Neither asserted the URL the two of them actually agree on.
+// 这一块是单测看不到的另一半：集成测试（`scripts/test-web-basepath.mjs`）断言*服务端*
+// 嵌套正确，而本文件断言渲染层把命令映射到路径。两者都没断言它们实际一致的那个 URL。
 // ---------------------------------------------------------------------------
 
 describe('readApiBase', () => {
@@ -698,8 +686,8 @@ describe('readApiBase', () => {
     assert.equal(readApiBase(), '/sp');
   });
 
-  // `nest` strips the trailing slash, so an operator writing
-  // `SIMPLE_POST_PUBLIC_BASE_PATH=/sp/` must not produce `/sp//api/...`.
+  // `nest` 会去掉尾斜杠，所以运维写 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp/` 时不该产出
+  // `/sp//api/...`。
   it('normalises a trailing slash so URLs do not gain a double slash', () => {
     (globalThis as { window?: unknown }).window = { __SIMPLE_POST_BASE__: '/sp/' };
     assert.equal(readApiBase(), '/sp');

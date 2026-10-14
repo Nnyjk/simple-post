@@ -167,9 +167,8 @@ fn clearing_a_cell_does_not_borrow_a_sibling_modules_value() {
 #[test]
 fn clearing_the_last_cell_drops_the_service_key_entirely() {
     let pool = fresh_pool();
-    // A service nobody in the environment has an address for should not
-    // linger as an empty object in the stored JSON — that is what makes
-    // "not set" distinguishable from "set to nothing" on disk.
+    // 一个环境里没任何人有地址的服务，不该作为空对象留在存下的 JSON 里——那正是让磁盘上的
+    // 「未设置」与「设为空」可区分的东西。
     let env = db::with_tx(&pool, |c| {
         set_module_base_url(c, "env_dev", "def_default", "m_auth", None)?;
         set_module_base_url(c, "env_dev", "def_default", "m_order", None)?;
@@ -237,9 +236,8 @@ fn update_can_replace_module_base_urls() {
 
 #[test]
 fn update_ignores_the_retired_base_urls_field() {
-    // `baseUrls` still deserialises — an old client's payload must not
-    // fail — but writing it would resurrect a dead layer, so the patch is
-    // accepted and dropped.
+    // `baseUrls` 仍能反序列化——旧客户端的载荷不能失败——但写它会复活一个已死的层，
+    // 故这个 patch 被收下并丢弃。
     let pool = fresh_pool();
     db::with_tx(&pool, |c| {
         let mut patch = EnvironmentPatch::default();
@@ -270,9 +268,8 @@ fn lookup_project_id_returns_owner_of_seeded_env() {
 
 #[test]
 fn lookup_project_id_returns_not_found_for_unknown_env() {
-    // Critical for closing the "global" permission-bypass: a tool
-    // calling lookup_project_id on a forged env_id must NOT get
-    // back any project (and thus any permission grant).
+    // 对堵住「global」权限绕过很关键：工具拿一个伪造的 env_id 调 lookup_project_id
+    // 绝不能拿回任何项目（因而也拿不到任何权限授予）。
     let pool = fresh_pool();
     let err = db::with_conn(&pool, |c| lookup_project_id(c, "env_ghost")).unwrap_err();
     assert_eq!(err.code(), "not_found");
@@ -280,8 +277,7 @@ fn lookup_project_id_returns_not_found_for_unknown_env() {
 
 #[test]
 fn lookup_project_id_does_not_match_empty_string() {
-    // An empty env_id is the easiest bypass attempt — make sure
-    // we don't accidentally accept it.
+    // 空 env_id 是最容易尝试的绕过——确保我们不会顺手接受它。
     let pool = fresh_pool();
     let err = db::with_conn(&pool, |c| lookup_project_id(c, "")).unwrap_err();
     assert_eq!(err.code(), "not_found");
@@ -289,10 +285,8 @@ fn lookup_project_id_does_not_match_empty_string() {
 
 #[test]
 fn rename_var_moves_key_and_keeps_its_value() {
-    // env_dev seeds {token, env}. The rename must be one atomic
-    // UPDATE of variables_json: the renderer used to model it as
-    // set_var(from, None) + set_var(to, value), leaving a window
-    // where the variable did not exist at all.
+    // env_dev seed 了 {token, env}。改名必须是对 variables_json 的一次原子 UPDATE：否则那个
+    // 变量会存在一个它根本不存在的窗口。
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| rename_var(c, "env_dev", "token", "access_token")).unwrap();
     assert_eq!(

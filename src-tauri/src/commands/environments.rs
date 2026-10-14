@@ -74,13 +74,10 @@ pub fn environments_set_var(
     })
 }
 
-/// Rename an environment variable in one transaction.
+/// 一个事务里重命名环境变量。
 ///
-/// The renderer used to model a rename as `set_var(old, None)` followed
-/// by `set_var(new, value)` — two commands, two transactions, with a
-/// window in between where the variable does not exist. Anything
-/// interrupting that window (crash, or the second command failing)
-/// destroyed the variable. One call, one `BEGIN IMMEDIATE`, no window.
+/// 必须单次调用：拆成 `set_var(old, None)` + `set_var(new, value)` 会留出一个
+/// 「变量不存在」的窗口，窗口内崩溃或第二步失败就毁掉这个变量。
 #[tauri::command]
 pub fn environments_rename_var(
     state: State<DbPool>,
@@ -93,16 +90,12 @@ pub fn environments_rename_var(
     })
 }
 
-/// Write one cell of the one and only URL layer:
-/// `env.moduleBaseUrls[defId][moduleId]`.
+/// 写唯一一层 URL 的一格：`env.moduleBaseUrls[defId][moduleId]`。
 ///
-/// `defId` names a service of the project and `moduleId` the module
-/// whose address for it is being set — the same service can point at
-/// two hosts for two modules. There is no second layer to write and
-/// nothing above this one to fall back to, so a cell cleared here means
-/// the request goes out without a base URL. `url = None` clears it;
-/// passing an empty string would store a cell that reads as empty and
-/// is indistinguishable from cleared.
+/// `defId` 是项目的一个服务，`moduleId` 是正在给它配地址的模块——同一服务可在两个
+/// 模块指向两个主机。这一层之上没有第二层可写、也没有可回落的东西，所以在此清空一格
+/// 就意味着请求不带 base URL 发出。`url = None` 才是清空；传空串会存下一格「看着是空」
+/// 的值，与清空无法区分。
 #[tauri::command]
 pub fn environments_set_module_baseurl(
     state: State<DbPool>,

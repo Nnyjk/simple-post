@@ -4,20 +4,15 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
 /**
- * A compact click-to-edit text cell. Click the value to swap in an
- * input; blur or Enter commits, Escape reverts. Optional `validate`
- * rejects commits with an inline error message.
+ * 紧凑的「点击即编辑」文本单元格。点值换成输入框；失焦或回车提交，Esc 还原。可选的
+ * `validate` 会拦下提交并就地显示错误。
  *
- * Kept local to the environment section (rather than reusing
- * `@/components/ui/InlineEdit`) because it opens on a single click —
- * the row-dense table layout here has no room for a double-click
- * affordance — and because it supports `validate` + inline error
- * rendering, which `InlineEdit` has no equivalent for.
+ * 刻意留在环境分区本地（而非复用 `@/components/ui/InlineEdit`）：它单击即开 ——
+ * 这里行距很密的表格布局容不下双击的手势提示；且它支持 `validate` 与就地报错，
+ * `InlineEdit` 没有对应能力。
  *
- * `autoEdit` opens the input without a click. The env panel uses it to
- * drop a freshly created env straight into its name so the user never
- * has to hunt for the rename affordance; every other call site (service
- * names, variable keys) keeps driving the open by click.
+ * `autoEdit` 让输入框不经点击直接打开。环境面板用它把刚建好的环境直接落到命名上，
+ * 用户不必去找重命名入口；其余调用点（服务名、变量键）仍由点击驱动打开。
  */
 export function InlineNameCell({
   value,
@@ -33,11 +28,11 @@ export function InlineNameCell({
   validate?: (next: string) => string | null;
   onCommit: (next: string) => void;
   /**
-   * Open in rename mode on mount / on the flag's false → true edge. The
-   * owner clears it via `onAutoEditEnd` once consumed.
+   * 挂载时 / 该标志由 false 翻成 true 时以重命名模式打开。消费掉之后由属主经
+   * `onAutoEditEnd` 把它清掉。
    */
   autoEdit?: boolean;
-  /** Fired the moment the `autoEdit` open is consumed, so the owner can drop the flag. */
+  /** `autoEdit` 的这次打开一被消费就触发，好让属主落下标志。 */
   onAutoEditEnd?: () => void;
   className?: string;
 }) {
@@ -45,14 +40,12 @@ export function InlineNameCell({
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // `autoEdit` is a flag, not an event: it can stay `true` across
-  // re-renders (and the cell can be remounted later, e.g. switching envs
-  // re-keys the body). A ref latch turns it into a false → true edge so
-  // we open exactly once per raise, never on every keystroke re-render.
+  // `autoEdit` 是标志而非事件：它可以跨多次重渲染一直为 `true`，单元格之后也可能重新
+  // 挂载（例如切环境会给正文换 key）。用 ref 上闩把它变成 false → true 的边沿，
+  // 于是每次拉高只开一次，而不会在每次击键引起的重渲染上都开。
   const autoOpened = useRef(false);
-  // Only the auto-open preselects the text. A click-to-edit on an
-  // existing row keeps its previous caret-at-end behaviour, so renaming
-  // a service name is not silently a select-all-replace.
+  // 只有自动打开才预选文本。点击编辑既有行仍保持原先「光标在末尾」的行为，
+  // 免得改个服务名悄悄变成全选覆盖。
   const preselectOnOpen = useRef(false);
 
   useEffect(() => {
@@ -69,8 +62,8 @@ export function InlineNameCell({
     onAutoEditEnd?.();
   }, [autoEdit, value, onAutoEditEnd]);
 
-  // Runs one render after `editing` flips, which is the first point the
-  // input actually exists — the effect above cannot reach the ref.
+  // 在 `editing` 翻过去之后的那一次渲染才跑，那才是输入框真正存在的第一刻 ——
+  // 上面的 effect 够不到这个 ref。
   useEffect(() => {
     if (!editing || !preselectOnOpen.current) return;
     preselectOnOpen.current = false;

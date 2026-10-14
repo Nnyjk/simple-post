@@ -1,26 +1,21 @@
-//! Port registry for the MCP HTTP daemon.
+//! MCP HTTP daemon 的端口注册表。
 //!
-//! The daemon writes a small JSON record (`mcp.port`) to the platform
-//! data directory on startup. The GUI reads it on launch to discover
-//! the daemon endpoint, and the standalone `simple-post-mcp-proxy`
-//! binary reads the same file to know where to forward JSON-RPC traffic
-//! over stdio.
+//! daemon 启动时把一条小 JSON 记录（`mcp.port`）写到平台数据目录。GUI 启动时读它
+//! 以发现 daemon 端点；独立的 `simple-post-mcp-proxy` 二进制读同一个文件，得知把
+//! JSON-RPC 流量转到哪里。
 //!
-//! Concurrency: two GUI instances starting at the same time both try to
-//! claim the file. We serialize the write path through a process-wide
-//! `tokio::sync::Mutex` and use `O_EXCL` (`OpenOptions::create_new`) so
-//! the OS itself rejects the second writer. The loser re-reads, finds a
-//! live PID, and surfaces a `Validation` error rather than silently
-//! stomping on the winner's record.
+//! 并发：两个 GUI 实例同时启动都会抢这个文件。写路径用进程级
+//! `tokio::sync::Mutex` 串起来，并用 `O_EXCL`（`OpenOptions::create_new`）让 OS
+//! 自己拒掉第二个写入者。输家重读、发现是个活 PID，于是报 `Validation` 错误，而不是
+//! 悄悄覆盖赢家的记录。
 //!
-//! File path:
+//! 文件路径：
 //!   * Windows: `%APPDATA%\simple-post\mcp.port`
 //!   * macOS:   `~/Library/Application Support/simple-post/mcp.port`
-//!   * Linux:   `$XDG_DATA_HOME/simple-post/mcp.port` (or
-//!     `~/.local/share/simple-post/mcp.port`)
+//!   * Linux:   `$XDG_DATA_HOME/simple-post/mcp.port`（或
+//!     `~/.local/share/simple-post/mcp.port`）
 //!
-//! For tests we honor `SIMPLE_POST_DATA_DIR` as the base directory so
-//! the unit tests can avoid clobbering a real user's port file.
+//! 测试下用 `SIMPLE_POST_DATA_DIR` 覆盖基准目录，免得单测踩掉真实用户的端口文件。
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,44 +25,38 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-/// Name of the registry file inside the data directory. Exposed so the
-/// proxy binary can open the same path without re-deriving the layout.
+/// 数据目录内的注册文件名。导出，好让 proxy 二进制不必重新推导目录结构就能打开
+/// 同一路径。
 pub const FILE_NAME: &str = "mcp.port";
 
-/// Environment variable that overrides the data dir for tests. When
-/// set, `port_file_path()` uses `$SIMPLE_POST_DATA_DIR/simple-post/mcp.port`
-/// instead of the platform default.
+/// 测试用数据目录覆盖环境变量。设置后 `port_file_path()` 用
+/// `$SIMPLE_POST_DATA_DIR/simple-post/mcp.port` 而非平台默认。
 const DATA_DIR_ENV: &str = "SIMPLE_POST_DATA_DIR";
 
-/// What the daemon wrote on startup. The renderer never sees this; the
-/// proxy binary reads just enough of it to learn `port` and forwards
-/// everything else.
+/// daemon 启动时写入的内容。renderer 从不看到它；proxy 二进制只取其中的 `port`，
+/// 其余原样转发。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PortRecord {
-    /// PID of the daemon process. 0 means "not yet known" (used briefly
-    /// between file write and `child.id()` round-trip).
+    /// daemon 进程 PID。0 表示「尚不知道」（文件写入与 `child.id()` 往返之间会
+    /// 短暂出现）。
     pub pid: u32,
-    /// TCP port the daemon is listening on (loopback).
+    /// daemon 正在监听的 TCP 端口。
     pub port: u16,
-    /// Bind interface, e.g. `127.0.0.1`. The proxy uses this verbatim.
+    /// 绑定接口，如 `127.0.0.1`。proxy 原样使用。
     pub bind: String,
-    /// Unix epoch seconds when the daemon wrote this record. Lets the
-    /// GUI / proxy diagnose "this port file is 12 hours old, the daemon
-    /// probably died" without external state.
+    /// daemon 写入本记录的 Unix epoch 秒。便于 GUI / proxy 在没有外部状态的情况下
+    /// 判断「这个端口文件已经 12 小时了，daemon 大概死了」。
     pub started_at: u64,
-    /// Absolute data directory the daemon was serving. Kept for
-    /// diagnostics and so the GUI can sanity-check it matches the
-    /// instance that wrote the file.
+    /// daemon 当时服务的数据目录绝对路径。仅供诊断，也让 GUI 能核对它与写入方
+    /// 实例是否一致。
     pub data_dir: String,
-    /// Build version of the writing binary (`CARGO_PKG_VERSION`).
-    /// Helpful when chasing "old daemon still running" support tickets.
+    /// 写入方二进制的构建版本（`CARGO_PKG_VERSION`）。
     pub version: String,
 }
 
 impl PortRecord {
-    /// Build a record from the daemon's own metadata. `pid == 0` is fine
-    /// for the first write; `ensure_started` rewrites once `child.id()`
-    /// is known.
+    /// 用 daemon 自己的元数据构造记录。首次写入时 `pid == 0` 可以接受；
+    /// `ensure_started` 会在 `child.id()` 已知后重写一次。
     pub fn new(pid: u32, port: u16, bind: impl Into<String>, data_dir: impl Into<String>) -> Self {
         Self {
             pid,
@@ -80,17 +69,16 @@ impl PortRecord {
     }
 }
 
-/// Global write lock so two GUI instances in the same process can't
-/// race. Held across `create_new` + the read-existing fallback so the
-/// check-and-write is atomic from the perspective of other writers.
+/// 全局写锁，防止同进程内两个实例互相踩。持有范围覆盖 `create_new` 与「读现有
+/// 记录再决定」的整个回落流程，使 check-and-write 对其他写入者是原子的。
 static WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn write_lock() -> &'static Mutex<()> {
     WRITE_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-/// Resolve the base directory: env override → `dirs::data_dir()`. The
-/// returned path is the parent that will contain `simple-post/mcp.port`.
+/// 解析基准目录：环境变量覆盖 → `dirs::data_dir()`。返回的路径是容纳
+/// `simple-post/mcp.port` 的父目录。
 fn base_dir() -> Result<PathBuf, crate::error::AppError> {
     if let Some(s) = std::env::var_os(DATA_DIR_ENV) {
         if !s.is_empty() {
@@ -105,38 +93,30 @@ fn base_dir() -> Result<PathBuf, crate::error::AppError> {
     })
 }
 
-/// Public: the directory the daemon writes its data into (and where the
-/// `mcp.port` file lives). Public so the daemon + GUI can open the
-/// SQLite pool under the same path the proxy will discover.
+/// 公开：daemon 写数据的目录（也是 `mcp.port` 文件所在处）。公开是因为 daemon 与
+/// GUI 需要在 proxy 将要发现的同一路径下打开 SQLite 池。
 ///
-/// When the `SIMPLE_POST_DATA_DIR` env override is set, this returns
-/// it verbatim (the SQLite file and the `mcp.port` file both end up
-/// directly under the override directory — flat layout for tests +
-/// power users). When not set, falls back to `dirs::data_dir()` with
-/// no `com.simple-post` segment — callers that want the historical
-/// `com.simple-post` suffix can `.join("com.simple-post")` themselves.
+/// 设置 `SIMPLE_POST_DATA_DIR` 时原样返回它；否则回退 `dirs::data_dir()`，**不带**
+/// `com.simple-post` 段——需要该后缀的调用方自己 `.join("com.simple-post")`。
 pub fn data_dir() -> Result<PathBuf, crate::error::AppError> {
     base_dir()
 }
 
-/// Internal: compute the port-file path under an arbitrary base. Used
-/// by tests that don't want to touch the user's real data dir.
+/// 内部：在任意基准目录下算出端口文件路径。供不想碰用户真实数据目录的测试使用。
 fn port_file_path_at(base: &Path) -> Result<PathBuf, crate::error::AppError> {
     let dir = base.join("simple-post");
     std::fs::create_dir_all(&dir).map_err(crate::error::AppError::Io)?;
     Ok(dir.join(FILE_NAME))
 }
 
-/// Absolute path to `mcp.port`. Creates the `simple-post` parent
-/// directory if it doesn't exist yet (idempotent — the daemon process
-/// is the first writer on a fresh install).
+/// `mcp.port` 的绝对路径。必要时创建 `simple-post` 父目录（幂等——全新安装上第一个
+/// 写它的就是 daemon 进程）。
 pub fn port_file_path() -> Result<PathBuf, crate::error::AppError> {
     port_file_path_at(&base_dir()?)
 }
 
-/// Read the current record. Returns `None` if the file doesn't exist,
-/// isn't readable, or fails to deserialize (corrupt/partial write —
-/// treated as "no daemon", safer than panicking).
+/// 读当前记录。文件不存在、读不了或反序列化失败（损坏 / 写了一半——按「没有 daemon」
+/// 处理，比 panic 安全）时返回 `None`。
 pub fn read() -> Option<PortRecord> {
     let path = port_file_path().ok()?;
     let bytes = std::fs::read(&path).ok()?;
@@ -152,25 +132,19 @@ pub fn read() -> Option<PortRecord> {
     }
 }
 
-/// Best-effort PID liveness check.
+/// 尽力而为的 PID 存活探测。
 ///
-///   * Windows — spawns `tasklist /FI "PID eq <pid>"` and looks for the
-///     CSV row containing the PID. `tasklist` exits 0 with output even
-///     when the PID doesn't exist (it prints "INFO: No tasks …"), so
-///     the only reliable signal is the presence of the PID in stdout.
+///   * Windows —— spawn `tasklist /FI "PID eq <pid>"`，在 CSV 行里找这个 PID。
+///     PID 不存在时 `tasklist` 仍以 0 退出且有输出（打 "INFO: No tasks …"），故唯一
+///     可靠的信号是该 PID 是否出现在 stdout 中。
 ///
-///   * Unix — spawns `kill -0 <pid>` and checks exit code. Exit 0 means
-///     the process exists (even if owned by another user). No new
-///     crates required; `kill` is in coreutils on every supported
-///     platform. We chose std::process over `libc::kill` to avoid
-///     pulling in a second direct dep just for one syscall.
+///   * Unix —— spawn `kill -0 <pid>` 看退出码。退出 0 表示进程存在（哪怕属于别的
+///     用户）。不引入新 crate：`kill` 在所有支持平台的 coreutils 里都有。选
+///     `std::process` 而非 `libc::kill`，只为一个系统调用不值得多一个直接依赖。
 ///
-/// Both backends are best-effort: a TOCTOU between this check and the
-/// caller acting on the result is unavoidable without holding a kernel
-/// handle. The caller (`write`) treats "PID says alive" as "another
-/// daemon owns the file; refuse"; treating "PID says dead" as
-/// "unlink and retry" — so the worst case is one extra restart, not
-/// data loss.
+/// 两个后端都是尽力而为：不持有内核句柄时，本检查与调用方据此行动之间的 TOCTOU
+/// 无法避免。调用方（`write`）把「PID 说活着」当作「另一个 daemon 占着文件，拒绝」，
+/// 把「PID 说死了」当作「unlink 后重试」——最坏结果是一次多余的重启，不是数据丢失。
 pub fn is_pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -187,9 +161,8 @@ pub fn is_pid_alive(pid: u32) -> bool {
         match output {
             Ok(out) => {
                 let s = String::from_utf8_lossy(&out.stdout);
-                // tasklist prints "INFO: No tasks are running..." for a
-                // missing PID — that line doesn't contain our quoted
-                // needle, so the membership test is sufficient.
+                // PID 不存在时 tasklist 打的是 "INFO: No tasks are running..."，那行不含我们加引号的
+                // needle，故成员判断即足够。
                 s.contains(&needle)
             }
             Err(_) => false,
@@ -209,28 +182,22 @@ pub fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
-/// Force-terminate a PID named by a `PortRecord`.
+/// 强制终止 `PortRecord` 点名的 PID。
 ///
-/// This is the out-of-band counterpart to [`is_pid_alive`], and it
-/// exists for exactly one caller: the daemon supervisor's teardown.
-/// `ensure_started`'s reuse path *adopts* an already-running daemon
-/// (live PID in the port record + green healthz) without ever spawning
-/// it, so the supervisor holds no `Child` handle for that process and
-/// cannot reap it the usual way. A restart that only looked at the
-/// handle it happened to hold silently re-adopted the very process it
-/// was supposed to replace; this function is what makes that case
-/// actually terminate.
+/// 这是 [`is_pid_alive`] 的带外对应物，且只有一个调用方：daemon supervisor 的
+/// teardown。`ensure_started` 的复用路径会*收养*已在运行的 daemon（端口记录里是活
+/// PID + healthz 绿）却从未 spawn 它，故监管者对该进程没有 `Child` 句柄，无法走
+/// 常规 reap。只查自己手上那个句柄的重启会静默地重新收养它本该替换掉的进程；本函数
+/// 才让这一种情况真的被终止。
 ///
-///   * Windows — `taskkill /F /PID <pid>`. Forced (no graceful window:
-///     the daemon is a stateless JSON-RPC loop with nothing to flush),
-///     and deliberately *without* `/T` so a recycled PID can only ever
-///     cost the caller its own daemon, never an unrelated tree.
-///   * Unix — `kill -9 <pid>`.
+///   * Windows —— `taskkill /F /PID <pid>`。强制（没有优雅窗口：daemon 是无状态的
+///     JSON-RPC 循环，没什么要 flush），且**刻意不带** `/T`，这样被回收复用的 PID
+///     最多让调用方损失自己的 daemon，绝不牵连无关进程树。
+///   * Unix —— `kill -9 <pid>`。
 ///
-/// Returns whether the OS accepted the signal. A `false` return is
-/// best-effort noise, not a contract violation: the caller re-checks
-/// with [`is_pid_alive`] inside a bounded wait, and "the process was
-/// already gone" is a perfectly good outcome for a teardown.
+/// 返回 OS 是否接受了该信号。`false` 是尽力而为下的噪声，不是契约违约：调用方会在
+/// 有界等待里用 [`is_pid_alive`] 复核，而「进程本来就已经没了」对 teardown 而言完全
+/// 是个可接受的结果。
 pub fn terminate_pid(pid: u32) -> bool {
     if pid == 0 {
         return false;
@@ -259,11 +226,10 @@ pub fn terminate_pid(pid: u32) -> bool {
     }
 }
 
-/// Try one create_new write. Returns:
-///   * `Ok(true)`  — wrote successfully.
-///   * `Ok(false)` — file already existed (`AlreadyExists`), caller should
-///     inspect the existing record.
-///   * `Err(_)`    — actual IO failure.
+/// 试一次 create_new 写入。返回：
+///   * `Ok(true)`  —— 写成功。
+///   * `Ok(false)` —— 文件已存在（`AlreadyExists`），调用方应去查看现有记录。
+///   * `Err(_)`    —— 真正的 IO 失败。
 fn try_create_new(path: &Path, json: &[u8]) -> Result<bool, crate::error::AppError> {
     match std::fs::OpenOptions::new()
         .write(true)
@@ -280,24 +246,21 @@ fn try_create_new(path: &Path, json: &[u8]) -> Result<bool, crate::error::AppErr
     }
 }
 
-/// Acquire the registry file for `rec`.
+/// 申领 `rec` 的注册文件。
 ///
-/// Behavior:
-///   1. Try `create_new(true)` (atomic O_EXCL on Unix, equivalent on
-///      Windows). On success, write and return.
-///   2. If the file already exists, read the existing record:
-///      - Live PID → `Validation("port in use by live pid X")`. Caller
-///        surfaces this to the user; we don't stomp.
-///      - Dead PID (or unreadable) → remove and retry, up to 3 times.
-///        Three retries shields us from a TOCTOU where another writer
-///        repopulates the file between our `remove` and `create_new`.
-///   3. Other IO errors bubble up as `AppError::Io`.
+/// 行为：
+///   1. 先试 `create_new(true)`（Unix 上的原子 O_EXCL，Windows 上等价）。成功则写入并
+///      返回。
+///   2. 文件已存在则读现有记录：
+///      - PID 活着 → `Validation("port in use by live pid X")`，由调用方呈现给用户；
+///        我们不覆盖。
+///      - PID 已死（或读不出）→ 删掉重试，最多 3 次。三次重试挡住的是另一个写入者在
+///        我们的 `remove` 与 `create_new` 之间又把文件填回去的 TOCTOU。
+///   3. 其他 IO 错误以 `AppError::Io` 上抛。
 ///
-/// The function is synchronous because the caller (daemon supervisor)
-/// already sits inside a tokio task and we don't want to drag the
-/// runtime's `block_on` into a second layer. The shared mutex is a
-/// `tokio::sync::Mutex` because that's what's available without a
-/// second crate; we never await it from async context here.
+/// 本函数是同步的，因为调用方（daemon supervisor）本就在 tokio 任务里，不想把运行时
+/// 的 `block_on` 再拖进一层。共享锁是 `tokio::sync::Mutex`，因为不引第二个 crate 就
+/// 只有它可用；此处从不从异步上下文 await 它。
 pub fn write(rec: &PortRecord) -> Result<(), crate::error::AppError> {
     let json = serde_json::to_vec(rec)?;
 
@@ -305,8 +268,7 @@ pub fn write(rec: &PortRecord) -> Result<(), crate::error::AppError> {
     let guard = match tokio::runtime::Handle::try_current() {
         Ok(h) => tokio::task::block_in_place(|| h.block_on(lock.lock())),
         Err(_) => {
-            // No runtime yet (unit-test path). Build a temporary
-            // single-thread runtime just to take the lock.
+            // 还没有运行时（单测路径）：临时建一个单线程运行时，只为拿这把锁。
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -321,7 +283,7 @@ pub fn write(rec: &PortRecord) -> Result<(), crate::error::AppError> {
         if try_create_new(&path, &json)? {
             return Ok(());
         }
-        // File is there. Inspect it.
+        // 文件在。检查它。
         let existing = read();
         if let Some(prev) = existing {
             if is_pid_alive(prev.pid) {
@@ -336,8 +298,7 @@ pub fn write(rec: &PortRecord) -> Result<(), crate::error::AppError> {
                 prev.pid
             );
         }
-        // Best-effort cleanup; ignore NotFound. If removal fails for any
-        // other reason we keep retrying — maybe next round will succeed.
+        // 尽力清理，NotFound 忽略。其他原因失败则继续重试——也许下一轮就成功。
         match std::fs::remove_file(port_file_path()?) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -352,9 +313,8 @@ pub fn write(rec: &PortRecord) -> Result<(), crate::error::AppError> {
     ))
 }
 
-/// Remove the port file (called on GUI shutdown).
-/// Idempotent — `NotFound` is treated as success so the renderer can
-/// call this freely without `if path.exists()` guards.
+/// 删掉端口文件（GUI 退出时调用）。幂等——`NotFound` 视作成功，故 renderer 可以
+/// 随意调用而不必先 `if path.exists()`。
 pub fn release() -> Result<(), crate::error::AppError> {
     let path = port_file_path()?;
     match std::fs::remove_file(&path) {
@@ -364,10 +324,8 @@ pub fn release() -> Result<(), crate::error::AppError> {
     }
 }
 
-/// HTTP probe used by the GUI to detect a daemon that crashed but left
-/// its port file behind. 2-second timeout — long enough to span a
-/// busy-CPU moment on startup, short enough that the renderer doesn't
-/// visibly stall on the splash.
+/// GUI 用来发现「崩溃但留下端口文件」的 daemon 的 HTTP 探测。2 秒超时——既能跨过
+/// 启动时 CPU 繁忙的瞬间，又不至于让渲染进程在启动画面上明显卡住。
 pub async fn healthz(port: u16) -> bool {
     let url = format!("http://127.0.0.1:{port}/mcp/healthz");
     let client = match reqwest::Client::builder()
@@ -406,24 +364,19 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// Process-wide mutex that serializes any test which touches the
-    /// `SIMPLE_POST_DATA_DIR` env var. The env var is a single global slot
-    /// shared by every thread in the process, so without this lock two
-    /// parallel tests would race: one sets the var, the other writes under
-    /// that path, the first releases — and the read the second sees
-    /// belongs to a completely different scratch dir.
+    /// 串行化任何碰 `SIMPLE_POST_DATA_DIR` 环境变量的测试的进程级 mutex。该环境变量
+    /// 是全进程共享的单个槽位，没有这把锁两个并行测试就会互相踩：一个刚设好变量，
+    /// 另一个已在那个路径下写入，第一个随后释放——第二个读到的属于一个完全不同的
+    /// scratch 目录。
     ///
-    /// We deliberately hold the guard for the *whole* test (including the
-    /// `release()`/`read()` calls inside it) by tying it to the
-    /// `ScopedEnv` RAII handle. Restoring the previous env var on drop
-    /// thus also happens before the next test acquires the lock.
+    /// 刻意把 guard 持有*整个*测试体（包括其中的 `release()` / `read()`），做法是
+    /// 把它绑到 `ScopedEnv` 这个 RAII 句柄上。于是 drop 时恢复上一个环境变量也发生在
+    /// 下一个测试拿到锁之前。
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// Each test gets its own tempdir under the OS temp dir, then points
-    /// `SIMPLE_POST_DATA_DIR` at it so `port_file_path()` resolves under
-    /// the scratch instead of touching the real APPDATA / XDG_DATA_HOME.
-    /// Returns the parent; tests are responsible for removing it on
-    /// success (cleanup runs anyway on best-effort).
+    /// 每个测试在系统临时目录下拿到自己的临时目录，再把 `SIMPLE_POST_DATA_DIR`
+    /// 指过去，使 `port_file_path()` 落在 scratch 而不是真实的 APPDATA /
+    /// XDG_DATA_HOME 上。
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
     struct ScopedEnv {
@@ -434,9 +387,8 @@ mod tests {
 
     impl ScopedEnv {
         fn new() -> Self {
-            // Acquire the process-wide test lock first, *then* swap the
-            // env var. Order matters: if another test is mid-flight when
-            // we swap, our writes would land in its scratch.
+            // 先拿进程级测试锁，*再*换环境变量。顺序有讲究：若另一个测试正在跑而我们换了
+            // 变量，我们的写会落到它的 scratch 里。
             let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let id = COUNTER.fetch_add(1, Ordering::Relaxed);
             let scratch = std::env::temp_dir().join(format!(
@@ -446,9 +398,8 @@ mod tests {
             ));
             std::fs::create_dir_all(&scratch).unwrap();
             let prev = std::env::var_os(DATA_DIR_ENV);
-            // SAFETY: the lock above guarantees no other thread observes
-            // a partial state — we set the var, run the test body, and
-            // restore it on drop, all under the held guard.
+            // SAFETY：上面的锁保证没有别的线程看到中间状态——设变量、跑测试体、drop 时恢复，
+            // 全程都在持有的 guard 之内。
             unsafe { std::env::set_var(DATA_DIR_ENV, &scratch) };
             Self {
                 _guard: guard,
@@ -465,8 +416,7 @@ mod tests {
                 None => unsafe { std::env::remove_var(DATA_DIR_ENV) },
             }
             let _ = std::fs::remove_dir_all(&self.scratch);
-            // `_guard` is dropped after this method returns, releasing
-            // the mutex for the next test.
+            // `_guard` 在本方法返回后才 drop，把 mutex 让给下一个测试。
         }
     }
 
@@ -482,8 +432,7 @@ mod tests {
     #[test]
     fn write_then_read_returns_same_record() {
         let _env = ScopedEnv::new();
-        // pid 0 short-circuits is_pid_alive, so we don't risk
-        // tripping over our own test runner process.
+        // pid 0 会让 `is_pid_alive` 短路，免得撞上测试运行器进程自身。
         let rec = sample(41234, 0);
         write(&rec).expect("write");
         let got = read().expect("read after write");
@@ -504,10 +453,10 @@ mod tests {
     #[test]
     fn write_with_live_existing_pid_rejects() {
         let _env = ScopedEnv::new();
-        // First writer: pid = our own process id (definitely alive).
+        // 第一个写入者：pid 取我们自己的进程 id（肯定活着）。
         let rec1 = sample(41236, std::process::id());
         write(&rec1).expect("first write");
-        // Second writer: pid 0, different port — should be rejected.
+        // 第二个写入者：pid 0，端口不同——应被拒。
         let rec2 = sample(41237, 0);
         let err = write(&rec2).expect_err("second write should fail");
         match err {
@@ -523,13 +472,11 @@ mod tests {
     #[test]
     fn write_replaces_stale_record_after_dead_pid() {
         let _env = ScopedEnv::new();
-        // First writer: pid 999999999 — almost certainly not alive.
-        // is_pid_alive will return false for any PID we don't have, so
-        // we don't need to rely on the OS agreeing.
+        // 第一个写入者：pid 999999999——几乎肯定不存在。`is_pid_alive` 对任何我们没有的
+        // PID 都返回 false，故不必依赖 OS 的具体说法。
         let rec1 = sample(41238, 999_999_999);
         write(&rec1).expect("first write");
-        // Second writer: fresh record, different port. The stale record
-        // should be detected and replaced.
+        // 第二个写入者：全新记录、端口不同。陈旧记录应被检出并替换。
         let rec2 = sample(41239, 0);
         write(&rec2).expect("second write replaces stale");
         let got = read().expect("read after replace");
@@ -541,7 +488,7 @@ mod tests {
     #[test]
     fn release_is_idempotent_when_missing() {
         let _env = ScopedEnv::new();
-        // No prior write.
+        // 此前没有写入。
         release().expect("release on empty dir");
         release().expect("release again");
     }
@@ -553,17 +500,14 @@ mod tests {
 
     #[test]
     fn is_pid_alive_self_is_true() {
-        // Both Windows (windows-sys) and Unix (kill -0) backends
-        // return true for the running test process.
+        // Windows（windows-sys）与 Unix（kill -0）两个后端对本进程都返回 true。
         assert!(is_pid_alive(std::process::id()));
     }
 
     #[test]
     fn is_pid_alive_far_far_future_pid_is_false() {
-        // Pick a pid far outside any plausible OS range; the OS will
-        // say it doesn't exist. We don't hardcode a value because
-        // pid_t is u32 on Windows but i32 on Unix — but u32::MAX / 2
-        // is safely unrepresentable on both.
+        // 取一个远超任何合理 OS 范围的 pid。不写死具体值，因为 pid_t 在 Windows 上是
+        // u32、在 Unix 上是 i32——但 `u32::MAX / 2` 在两者上都不可表示。
         let pid = u32::MAX / 2;
         assert!(!is_pid_alive(pid));
     }

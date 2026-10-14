@@ -1,16 +1,10 @@
 /**
- * Command Palette — full-screen modal opened with Ctrl/Cmd + K.
+ * 命令面板 —— Ctrl/Cmd + K 打开的全屏模态。
  *
- * Architecture:
- *  - Receives an `open` flag and an `onClose` callback from the parent.
- *  - When `open` flips to `true`, the search input auto-focuses and the
- *    selection index resets to 0.
- *  - Commands come from `command-registry.buildCommands()`; per-render
- *    fuzzy filtering happens inside this component (avoids allocating in
- *    the Zustand selector — see app-store.ts header).
- *  - Click on backdrop or Esc key calls `onClose`. Outside click is
- *    detected by listening on the backdrop `mousedown` so that selection
- *    inside the dialog doesn't dismiss it.
+ * - 命令来自 `command-registry.buildCommands()`，模糊过滤在本组件内做：
+ *   放进 Zustand selector 会在其中新建数组，触发无限重渲染。
+ * - 点遮罩或按 Esc 关闭。判定「点在面板外」靠 backdrop 上的 `mousedown`
+ *   加 `closest('[role="dialog"]')`，故面板内选中一项不会误关。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -26,16 +20,16 @@ interface CommandPaletteProps {
 
 const MAX_RESULTS = 50;
 
-/** Lowercase substring match with a small prefix / boundary bonus. */
+/** 小写子串匹配，前缀 / 词首命中另加一点分。 */
 function scoreCommand(cmd: Command, q: string): number {
-  if (!q) return 1; // empty query: show everything in registry order
+  if (!q) return 1; // 空查询：按注册表原序全部列出
   const title = cmd.title.toLowerCase();
   const hint = (cmd.hint ?? '').toLowerCase();
   const kw = (cmd.keywords ?? []).join(' ').toLowerCase();
   const hay = `${title} ${hint} ${kw}`;
   const idx = hay.indexOf(q);
   if (idx < 0) return -1;
-  // Earlier match is better; matches inside `title` are preferred.
+  // 命中位置越靠前越好，命中 `title` 内的额外加分。
   let bonus = 0;
   if (title.startsWith(q)) bonus += 50;
   else if (title.includes(q)) bonus += 20;
@@ -49,7 +43,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Snapshot of commands — rebuild on open so newly-added endpoints show up.
+  // 命令快照 —— 每次打开重建，好让新建的接口立刻出现在面板里。
   const allCommands = useMemo<Command[]>(() => (open ? buildCommands() : []), [open]);
 
   const results = useMemo(() => {
@@ -63,24 +57,24 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     return scored;
   }, [allCommands, query]);
 
-  // Reset state when (re)opening.
+  // 每次打开重置状态。
   useEffect(() => {
     if (open) {
       setQuery('');
       setSelected(0);
-      // Focus on next tick so the modal is in the DOM.
+      // 延后一拍，好让模态先进 DOM。
       const t = window.setTimeout(() => inputRef.current?.focus(), 0);
       return () => window.clearTimeout(t);
     }
     return undefined;
   }, [open]);
 
-  // Clamp selection when the result list shrinks.
+  // 结果变短时把选中项收进范围，否则回车会落在已消失的行上。
   useEffect(() => {
     if (selected >= results.length) setSelected(Math.max(0, results.length - 1));
   }, [results.length, selected]);
 
-  // Auto-scroll the selected row into view.
+  // 把选中行滚进视野。
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -91,10 +85,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Entrance animation — runs every time the palette mounts (open flips to true).
-  // No exit animation: `open=false` unmounts the tree entirely, which is fine.
-  // Under reduced motion the palette just appears; the auto-focus and
-  // keyboard handling are unaffected either way.
+  // 入场动画，每次挂载（`open` 翻 true）都跑一遍；无退场动画 —— `open=false`
+  // 直接卸载整棵树。reduced motion 下退化为直接出现，自动聚焦与键盘行为不变。
   useGSAP(
     () => {
       return motionSafe(() => {
@@ -141,7 +133,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }
   };
 
-  // Group consecutive commands by section for header rendering.
+  // 按 section 把相邻命令并成组，好渲染分组标题。
   const grouped: { section: string; items: { cmd: Command; idx: number }[] }[] = [];
   results.forEach((cmd, idx) => {
     const last = grouped[grouped.length - 1];
@@ -156,11 +148,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     <div
       className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-[12vh]"
       onMouseDown={(e) => {
-        // Click outside the dialog panel closes.
-        // Note: `e.target === e.currentTarget` does NOT work here because
-        // there is an inner backdrop div that captures the mousedown.
-        // Use closest('[role="dialog"]') so any future DOM nesting still
-        // resolves correctly.
+        // 点面板外关闭。不能用 `e.target === e.currentTarget`：外层还有一层
+        // backdrop 会吃掉 mousedown。改用 `closest('[role="dialog"]')`，
+        // 日后 DOM 再嵌一层也仍能判对。
         const dialog = (e.currentTarget as HTMLElement).querySelector('[role="dialog"]');
         if (dialog && !dialog.contains(e.target as Node)) onClose();
       }}
@@ -174,7 +164,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         className="relative w-full max-w-xl overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
         onKeyDown={onKeyDown}
       >
-        {/* Search row */}
+        {/* 搜索行 */}
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
           <input
@@ -197,7 +187,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           </button>
         </div>
 
-        {/* Results */}
+        {/* 结果列表 */}
         <div
           ref={listRef}
           className="max-h-[55vh] overflow-y-auto py-1"
@@ -240,7 +230,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           ))}
         </div>
 
-        {/* Footer hint */}
+        {/* 底部快捷键提示 */}
         <div className="flex items-center gap-3 border-t border-border bg-card/40 px-3 py-1.5 text-[10px] text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <CornerDownLeft className="h-3 w-3" /> 触发

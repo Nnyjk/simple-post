@@ -18,23 +18,19 @@ import { groupTools } from '@/lib/mcp-tool-groups';
 import { cn, focusRing } from '@/lib/utils';
 
 export function ConnectionSection() {
-  // Selector: raw ref only — see app-store rules.
+  // selector：只取原始引用 —— 见 app-store 规则。
   const projects = useAppStore((s) => s.projects);
 
-  // Subscribe to the shared MCP daemon snapshot. `useMcpStatus` is
-  // the *only* place polling is started — any other consumer (TopBar
-  // pill, etc.) just reads `mcpStatus` and gets the same payload.
+  // 共享的 MCP 守护进程快照。`useMcpStatus` 是**唯一**发起轮询的地方 —— 其他消费方
+  // （顶栏药丸等）只读 `mcpStatus`，拿到同一份数据。
   const mcpStatus = useAppStore((s) => s.mcpStatus);
-  // The hero tile reports the daemon's lifecycle. It used to carry the
-  // fixed `connection` concept hue (rose, 355°) instead, which meant a
-  // daemon serving traffic painted red next to a green `running` badge.
-  // See `src/lib/mcp-status-tone.ts`.
+  // 主图块报的是守护进程的生命周期，取色随状态走而非用固定的 `connection` 色相
+  // —— 否则正在服务的 daemon 会在绿色 `running` 徽标旁画成红色。
+  // 见 `src/lib/mcp-status-tone.ts`。
   const daemonStatus: McpRuntimeStatus = mcpStatus?.status ?? 'stopped';
 
-  // MCP auto-start preference — drives the "启动配置" Switch below.
-  // The slice hydrates this on the first read; the panel renders an
-  // indeterminate state until then. Default is `false` at first
-  // launch: an MCP server running is explicit user intent.
+  // MCP 自动启动偏好 —— 驱动下方的「启动配置」开关。slice 首次读取时才 hydrate，
+  // 在此之前面板渲染不定态。首次启动默认 `false`：让 MCP 服务跑起来须是用户的明确意图。
   const mcpAutoStart = useAppStore((s) => s.mcpAutoStart);
   const setMcpAutoStart = useAppStore((s) => s.setMcpAutoStart);
   const refreshMcpAutoStart = useAppStore((s) => s.refreshMcpAutoStart);
@@ -44,10 +40,8 @@ export function ConnectionSection() {
   }, [refreshMcpAutoStart]);
 
   // ----- MCP capability policy -------------------------------
-  // Three-tier global capability that filters `tools/list` for AI
-  // clients. Stored in sqlite `preferences.mcp.policy`; UI hydrates
-  // on mount, persists on change. An absent key resolves to
-  // `read_only`, so a fresh install cannot be written to.
+  // 三档全局能力，过滤 AI 客户端看到的 `tools/list`。存于 sqlite `preferences.mcp.policy`，
+  // UI 挂载时 hydrate、变更即持久化。键缺失解析为 `read_only`，故全新安装不可被写。
   type CapabilityPolicy = 'read_only' | 'safe_write' | 'full_access';
   const [capability, setCapability] = useState<CapabilityPolicy | null>(null);
   const [capabilityBusy, setCapabilityBusy] = useState(false);
@@ -95,9 +89,8 @@ export function ConnectionSection() {
     }
   };
 
-  // Auto-open the restart dialog when the daemon crashes or goes
-  // unhealthy. Dedup by `status` so two consecutive `crashed` polls
-  // don't reopen the dialog after the user dismisses it.
+  // daemon 崩溃或不健康时自动弹重启对话框。按 `status` 去重，免得用户关闭后连续两次
+  // `crashed` 轮询又把它弹回来。
   const restartDialogSeen = useAppStore((s) => s.restartDialogSeen);
   const markRestartDialogSeen = useAppStore((s) => s.markRestartDialogSeen);
   const restartMcp = useAppStore((s) => s.restartMcp);
@@ -112,34 +105,25 @@ export function ConnectionSection() {
   }, [mcpStatus?.status, restartDialogSeen]);
 
   // ----- Generated client configs -----
-  // Driven by LIVE daemon facts rather than a hand-written constant, so
-  // the snippet always names the port the daemon is actually on.
+  // 由 daemon **实时**事实驱动而非手写常量，故片段里的端口永远是 daemon 实际所在端口。
   const facts = { port: mcpStatus?.port ?? null };
 
   const tools = mcpStatus?.registeredTools ?? [];
-  // Categories for the tool table. Recomputed per render rather than
-  // memoised: the input is a 44-element array and `groupTools` is a
-  // single pass, so a `useMemo` would cost more than it saves.
+  // 工具表的分类。每次渲染重算而不 memo：输入是 44 元素数组、`groupTools` 单趟完成，
+  // `useMemo` 的成本高于收益。
   const toolGroups = groupTools(tools);
 
   return (
     <>
       {/* =================================================================
-          Five cards in the order the reader actually needs them: run the
-          daemon → point it at an address → hand a client the config →
-          decide what that client may do → see the resulting toolset.
+          五张卡片按读者的实际需要排序：拉起 daemon → 给它一个地址 → 把配置交给客户端
+          → 决定该客户端能做什么 → 看最终的工具集。
 
-          There are no section headings. This tab carried three numbered
-          ones (① 服务 / ② 接入 / ③ 权限) and every one of them restated
-          the card directly beneath it — ① 服务 sat above a card titled
-          「MCP 进程」, ② 接入 above 「HTTP 服务配置」. A heading that
-          repeats its own card's title is one more line to read and no
-          new information, so the cards carry the structure themselves
-          and the separation falls to `SettingsCategory`'s own bottom
-          border.
+          不设小节标题：重复自己卡片标题的标题只是多一行字、不带新信息，故结构由卡片
+          自身承担，分隔交给 `SettingsCategory` 的下边框。
           ================================================================= */}
 
-      {/* ----- The daemon, and the only card that runs it --------- */}
+      {/* ----- 守护进程，唯一能启动它的卡片 --------- */}
       <SettingsCategory
         title="MCP 进程"
         description="MCP 守护进程 · 以 Streamable HTTP 暴露给 AI 客户端"
@@ -149,7 +133,7 @@ export function ConnectionSection() {
         <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
             <IconTile
-              // Status, not identity: see the note on `daemonStatus`.
+              // 取的是状态而非身份 —— 见 `daemonStatus` 处的说明。
               tone={daemonTone(daemonStatus)}
               size="xl"
               className="rounded-lg"
@@ -170,10 +154,8 @@ export function ConnectionSection() {
           <McpStatusPanel />
         </div>
 
-        {/* Auto-start used to be a whole second card. It is one switch
-            about the same daemon the buttons above already control, so
-            it now sits directly under them instead of competing with
-            them from a card away. */}
+        {/* 自动启动只是关于同一个 daemon 的一个开关（上面的按钮已在控制它），故直接置于
+            其下，而非隔着卡片与它们竞争。 */}
         <div className="flex items-center justify-between gap-3 border-t border-border/60 p-3">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium text-foreground">随应用启动</div>
@@ -219,16 +201,13 @@ export function ConnectionSection() {
         </div>
       </SettingsCategory>
 
-      {/* The listener config is the SOURCE of the snippet below it: its
-          host/port/path are concatenated into that URL. */}
+      {/* 监听配置是下方片段的**来源**：其 host/port/path 被拼进那个 URL。 */}
       <McpHttpConfigSection />
 
-      {/* ----- Client-side config ---------------------------------- */}
-      {/* One tile, one format: the Claude Code HTTP shape generated from
-          the LIVE daemon port. There is no transport tab and no client
-          picker — HTTP needs nothing installed on the client machine,
-          and it is the shape that keeps working after the daemon picks a
-          new port. See `src/lib/mcp-client-config.ts`. */}
+      {/* ----- 客户端配置 ---------------------------------- */}
+      {/* 一格一种格式：由 daemon **实时**端口生成的 Claude Code HTTP 配置。没有传输方式
+          分页，也没有客户端选择器 —— HTTP 不需要在客户端机器上装任何东西，且是 daemon
+          换了端口后仍然有效的形态。见 `src/lib/mcp-client-config.ts`。 */}
       <SettingsCategory
         title="接入配置"
         description="可直接粘贴到客户端的 Claude Code 配置；HTTP 方式无需在客户端安装二进制"
@@ -242,8 +221,7 @@ export function ConnectionSection() {
               <CopyConfigTile
                 key={p.id}
                 icon={<FileJson className="h-4 w-4" />}
-                // No client title: with one supported format the tile's
-                // own name would just repeat the card header.
+                // 不给客户端标题：只支持一种格式时，格子自己的名字只会重复卡片标题。
                 description={configJson ? `${p.description} · ${p.configPath}` : reason}
                 configJson={configJson ?? `// ${reason}`}
               />
@@ -252,13 +230,9 @@ export function ConnectionSection() {
         </div>
       </SettingsCategory>
 
-      {/* ----- AI permissions: two gates, one hierarchy ---------- */}
-      {/* `resolve_capability` merges these by taking the STRICTER of the
-          two, so they are not two parallel switches: the global policy
-          sets the ceiling and a per-project grant can only tighten it.
-          Rendering them as two adjacent cards invited the reading that
-          either one alone is sufficient, which is the one reading that
-          is never true. */}
+      {/* ----- AI 权限：两道闸，一道层级 ---------- */}
+      {/* `resolve_capability` 取两层中**更严格**者，故两者不是并列开关：全局策略定上限，
+          按项目授权只能收紧。摆成两张相邻卡片会让人读成「任一层单独就够」，而那永远不成立。 */}
       <SettingsCategory
         title="AI 权限"
         description="两层取更严格者：全局策略定上限，按项目授权只能收紧、不能放宽"
@@ -269,7 +243,7 @@ export function ConnectionSection() {
             : `${capability === 'read_only' ? '只读' : capability === 'safe_write' ? '读写' : '全部'} · ${projects.length} 个项目`
         }
       >
-        {/* 上位 — Gate A: which tools an AI client can even see. */}
+        {/* 上位 —— 闸 A：AI 客户端能看到哪些工具。 */}
         <PermissionLevel step={1} title="全局能力策略" hint="对所有 AI 客户端生效">
           <div className="space-y-3">
             <CapabilityRadioGroup
@@ -278,9 +252,8 @@ export function ConnectionSection() {
               onChange={handleCapabilityChange}
             />
             {capability !== null && (
-              // Count only. The names appear once, in the card below —
-              // spelling out the first eight here repeated half of that
-              // list in a second format for no added signal.
+              // 只报数量。名字在下方的卡片里已列过一次，在这里再抄前八个，只是把同一份
+              // 清单换个格式重说一遍。
               <div className="text-[11px] text-muted-foreground">
                 当前可见 {capabilityTools.length} 个工具
               </div>
@@ -288,7 +261,7 @@ export function ConnectionSection() {
           </div>
         </PermissionLevel>
 
-        {/* 下位 — Gate B: what an agent may do on one project. */}
+        {/* 下位 —— 闸 B：agent 在某个项目上能做什么。 */}
         <PermissionLevel step={2} title="按项目授权" hint="只在上一层放行的范围内进一步收紧">
           <div className="space-y-3">
             <div className="text-[11px] text-muted-foreground">
@@ -300,15 +273,8 @@ export function ConnectionSection() {
         </PermissionLevel>
       </SettingsCategory>
 
-      {/* ----- The toolset the daemon exposes --------------------- */}
-      {/* Grouped by name prefix rather than listed flat: the names come
-          in seven families, and one `<pre>` of them hid that entirely.
-
-          The 「代理二进制路径」 block that used to sit at the bottom of
-          this card is gone. The proxy binary is a stdio artefact — it
-          existed so a client could spawn a bridge process — and this tab
-          is HTTP-only since the transport narrowed, so the path it
-          printed was a file nothing here can use any more. */}
+      {/* ----- daemon 暴露的工具集 --------------------- */}
+      {/* 按名字前缀分组而非平铺：名字分七个族，一整块 `<pre>` 会把这点完全盖住。 */}
       <SettingsCategory
         title="可用工具清单"
         description={
@@ -317,8 +283,7 @@ export function ConnectionSection() {
             : 'daemon 未上报工具清单，重启 MCP 后会刷新'
         }
         icon={<FileJson className="h-3.5 w-3.5" />}
-        // Last card in the tab: no trailing rule, otherwise the section
-        // ends on a line with nothing after it.
+        // 本 tab 的最后一张卡片：不带尾部横线，否则整节结束在一行后面什么都没有的位置。
         hideDivider
       >
         {toolGroups.length > 0 ? (
@@ -355,8 +320,7 @@ export function ConnectionSection() {
       <DaemonRestartDialog
         open={showRestartDialog}
         onClose={() => {
-          // Record what we just dismissed so the same status doesn't
-          // immediately reopen the dialog on the next 3s poll.
+          // 记下刚关闭时的状态，免得下一次 3s 轮询又用同一个状态把对话框弹回来。
           if (mcpStatus?.status) markRestartDialogSeen(mcpStatus.status);
           setShowRestartDialog(false);
         }}
@@ -371,40 +335,26 @@ export function ConnectionSection() {
   );
 }
 
-// ----- Permission level --------------------------------------
-// One rung of the AI-permission ladder. The visual grammar has to
-// carry the relationship on its own, because the two gates are not
-// parallel settings:
+// ----- 权限层级 --------------------------------------
+// AI 权限梯子的一级。两道闸不是并列设置，故视觉语法须自己表达出这层从属关系：
 //
-//   - step 1 takes the accent-coloured badge — it is the ceiling.
-//   - step 2 takes a muted badge and carries a top divider — it is a
-//     narrowing of the level above it.
+//   - step 1 用强调色徽标 —— 它是上限。
+//   - step 2 用弱化徽标并带上边框 —— 它是上一层的收紧。
 //
-// A reader who never reads a word of the prose should still see that
-// step 2 lives under step 1 rather than beside it.
+// 不读任何说明文字的人也应看得出 step 2 在 step 1 之下而非与之并列。
 //
-// BOTH RUNGS SHARE ONE LEFT EDGE. That is a correction, not a stylistic
-// preference: indenting step 2 was tried and is wrong here. A second
-// inset stacked on the card's own padding made 「② is inside something」
-// claim while its prose kept the extra shift, and the eye then had two
-// different answers to "where does a block start". The hierarchy is
-// carried by the divider, the badge colour and the title's weight;
-// geometry stays flat so a reader can scan straight down one column.
+// 两级共用同一条左边界：step 2 再嵌一层缩进，会让「step 2 属于某个东西」的说法与它
+// 正文的额外位移并存，眼睛对「块从哪开始」就有两个答案。层级由分隔线、徽标色与标题
+// 字重承担，几何保持平直，便于读者沿一列直扫。
 //
-// The body's left padding is derived from the header's, not chosen
-// independently: the header is a `h-5` badge (20px) plus `gap-3` (12px),
-// so its TEXT column sits 32px right of the row's own padding. The body
-// has to start where the title does — starting at the row's own padding
-// ran the prose 32px to the LEFT of the heading it belongs to, and
-// `AgentPermissionsTable`'s own `px-3` pushed the project names back out
-// again, which is how one card ended up with three left edges.
-// `p-3` (12) + rail (32) = 44 = `pl-11`, on both rungs.
+// 正文的左 padding 由表头导出而非独立选择：表头是 `h-5` 徽标（20px）加 `gap-3`
+// （12px），其**文字列**位于行自身 padding 右侧 32px 处，正文必须与标题同一起点 ——
+// 从行自身 padding 起会让正文比它所属的标题左 32px，而 `AgentPermissionsTable` 自身的
+// `px-3` 又把项目名推回去，一张卡就出现三条左边界。
+// `p-3`（12）+ 轨距（32）= 44 = `pl-11`，两级皆同。
 //
-// The indent is expressed with padding *inside* the row, never with a
-// margin on the wrapper. `sm:ml-4` used to sit on the same element as
-// `border-t`, so the rule above step 2 started 16px in and left a notch
-// against the step-1 block above it. A margin on the bordered element
-// moves the separator; padding on its children cannot.
+// 缩进用行**内部**的 padding 表达，绝不用外层 wrapper 的 margin：margin 落在带
+// `border-t` 的元素上会连分隔线一起挪动，而子元素的 padding 不会。
 function PermissionLevel({
   step,
   title,
@@ -445,27 +395,19 @@ function PermissionLevel({
           <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
         </div>
       </div>
-      {/* `pb-3` on BOTH rungs. Step 1 needs it so its controls do not sit
-          flush against the separator; step 2 needs it for the card's
-          bottom edge. The old ternary handed it to step 2 only, which
-          left step 1's content touching the rule. */}
+      {/* `pb-3` 两级都要：step 1 免得控件紧贴分隔线，step 2 是卡片底边所需。 */}
       <div className="pb-3 pl-11 pr-3">{children}</div>
     </div>
   );
 }
 
-// ----- Capability segmented control ----------------------------
+// ----- 能力分段控件 ----------------------------
 //
-// This was three stacked `<label>`s that each drew their own border —
-// three cards nested inside the "AI 权限" card, which is the exact
-// layering that made the tab read as boxes inside boxes. The three
-// options are mutually exclusive and are what the per-project picker in
-// step 2 below already looks like, so it is the same segmented control
-// as that one: one bordered track, the active option filled.
+// 三个选项互斥，且形状就是下方 step 2 的按项目选择器，故用同一个分段控件：一条带边框的
+// 轨道、选中项填充。逐项各画一条边框会在「AI 权限」卡片里套出三张卡片 —— 正是让这个
+// tab 读成盒中盒的层次。
 //
-// The per-option hint moved out of the option and onto a single line
-// under the control, which is all it ever needed — you read about the
-// one you picked, not the two you didn't.
+// 每项的说明放在控件下方一行即可 —— 用户只读自己选中的那一项说明。
 type CapabilityPolicy = 'read_only' | 'safe_write' | 'full_access';
 const CAPABILITY_OPTIONS: ReadonlyArray<{
   value: CapabilityPolicy;

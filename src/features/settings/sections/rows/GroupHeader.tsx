@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { IconTile } from '@/components/ui/icon-tile';
 
 /**
- * GroupHeader — section sub-title inside the env body.
+ * GroupHeader —— 环境内容里的分区副标题。
  */
 export function GroupHeader({
   icon,

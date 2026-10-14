@@ -1,83 +1,62 @@
 ﻿/**
- * URL helpers — pure, framework-free. Kept here so HttpTester, the
- * BaseUrlPicker, and the cURL exporter all share the same join /
- * resolution logic. If you change the resolution rules, change them
- * here once.
+ * URL 辅助 —— 纯函数、无框架依赖。HttpTester、BaseUrlPicker 与 cURL 导出共用
+ * 同一套 join / 解析逻辑；要改解析规则就只在这里改一次。
  */
 import type { BaseUrlDefinition, EndpointDetail, Environment, Project } from '@/types/domain';
 
-/** Where the effective baseUrl came from. Used by the picker to label
- *  the current selection (e.g. "项目默认服务" / "鉴权服务" / "自定义").
- *  `default` is the project's ★ — `Project.defaultBaseUrlDefinitionId`
- *  — reached because the endpoint named no service itself. */
+/** 生效的 baseUrl 来自哪一行；选择器用它标注当前选择（"项目默认服务" /
+ *  "鉴权服务" / "自定义"）。`default` 是项目 ★，即
+ *  `Project.defaultBaseUrlDefinitionId`，因 endpoint 自身没指定服务而命中。 */
 export type BaseUrlSource = 'override' | 'definition' | 'default' | 'none';
 
 export interface ResolvedBaseUrl {
   baseUrl: string;
   source: BaseUrlSource;
-  /** The id of the baseUrl definition that contributed the value, if any. */
+  /** 贡献该值的 baseUrl definition 的 id，无则 `null`。 */
   definitionId: string | null;
-  /** Human-readable name of the contributing definition. */
+  /** 贡献该值的 definition 名。 */
   definitionName: string | null;
 }
 
 /**
- * Resolve the effective baseUrl for an endpoint.
+ * 解析 endpoint 生效的 baseUrl。解析顺序（优先级由高到低）：
+ *   1. `endpoint.baseUrlOverride`      —— 每 endpoint 的「自定义」模式
+ *   2. `endpoint.baseUrlDefinitionId`  —— endpoint 命名的服务，未指定则
+ *      取 `Project.defaultBaseUrlDefinitionId`
+ *   3. `env.moduleBaseUrls[defId][moduleId]` —— 唯一的值层
+ *   4. `''`                             —— 什么都没有
  *
- * Order of resolution (highest first):
- *   1. `endpoint.baseUrlOverride`      — per-endpoint 自定义 mode
- *   2. `endpoint.baseUrlDefinitionId`  — the service the endpoint named,
- *      else `Project.defaultBaseUrlDefinitionId`
- *   3. `env.moduleBaseUrls[defId][moduleId]` — the one and only value layer
- *   4. `''`                             — nothing
+ * override 是三态，「有值但为空」是有意义的：
+ *   `null` / `undefined` —— 不在自定义模式，继续走服务链
+ *   `''`                 —— 自定义但不加前缀：URL 字段本身就是完整地址
+ *   `'https://x'`        —— 自定义且带显式主机前缀
  *
- * ## The override is three-state, and "present but empty" is meaningful
+ * 这正是 `double_option` patch 约定在干活：调用方写 `baseUrlOverride: ''`
+ * 是**记录这个选择**而不是清空，只有 `null` 才清空。把 `''` 并回服务链，
+ * 选择器里的「自定义」行看起来就像什么都没做。
  *
- *   `null` / `undefined` — not in custom mode; fall through to the service chain.
- *   `''`                 — custom mode with no prefix: the URL field is the
- *                          whole address, so nothing is prepended to it.
- *   `'https://x'`        — custom mode with an explicit host prefix (legacy
- *                          shape; a full URL in the field still wins because
- *                          `joinBaseUrl` lets a path carrying a scheme win).
+ * 服务是项目级的，值是 (环境 × 模块 × 服务) 的：`project.baseUrlDefinitions`
+ * 是项目全量列表，所有模块都看得见，指名服务永远不是跨模块错误；模块相关的是
+ * 取值的那个格子，所以 `moduleId` 是必填参数——同一服务在两个模块指向两个
+ * 主机，正是这个模型要表达的。
  *
- * This is the `double_option` patch convention doing real work: the caller
- * writes `baseUrlOverride: ''` to *record the choice*, not to clear it, and
- * `null` is the only thing that clears it. Collapsing `''` back into the
- * service chain is what made the picker's 自定义 row look like it did
- * nothing.
+ * **没有回退层。** `baseUrls` 已废弃且从不读取；空格子给出 `''` / `'none'`，
+ * 绝不借用别的模块或别的服务的 URL。挂在无模块下的 endpoint（节点已删，或
+ * 测试器的空状态）`moduleId` 为 `null`，这种模块没有格子，只有第 1 步能出值。
  *
- * ## Services are project-level, values are per (env × module × service)
+ * `source` 报的是**哪一行选中了服务**，不是哪个格子提供了 URL：endpoint 命名
+ * 的服务是 `'definition'`，靠省略命中的项目 ★ 是 `'default'`，没解析出是 `'none'`。
  *
- * `project.baseUrlDefinitions` is the project's whole list — every module
- * sees all of it, so naming a service is never a cross-module error. What
- * is module-specific is the *cell* the URL is read from, which is why
- * `moduleId` is a required argument: two modules pointing the same 服务
- * at two hosts is the case the model exists to express.
- *
- * There is **no fallback layer**. `baseUrls` is deprecated and never read;
- * an empty cell yields `''` / `'none'` rather than borrowing another
- * module's or another service's URL.
- *
- * `moduleId` is `null` for an endpoint that sits under no module (a deleted
- * node, or the tester's empty state). There is no cell for such a module,
- * so only step 1 can produce a value.
- *
- * `source` reports **which row selected the service**, not which cell
- * supplied the URL: a service the endpoint named is `'definition'`, the
- * project ★ reached by omission is `'default'`, and anything unresolved is
- * `'none'`.
- *
- * Mirrors `resolve_base_url_with` in
- * `crates/simple-post-mcp/src/variable_fill.rs`; the two must agree.
+ * 对应 `crates/simple-post-mcp/src/variable_fill.rs` 的 `resolve_base_url_with`，
+ * 两者必须一致。
  */
 export function resolveEndpointBaseUrl(
   endpoint: Pick<EndpointDetail, 'environmentId' | 'baseUrlDefinitionId' | 'baseUrlOverride'>,
   env: Pick<Environment, 'moduleBaseUrls'> | undefined,
   project: Pick<Project, 'baseUrlDefinitions' | 'defaultBaseUrlDefinitionId'> | undefined,
   /**
-   * The module the endpoint sits under, resolved by the caller with
-   * `moduleIdOfEndpoint` — it is a tree question, and this module
-   * deliberately knows nothing about the tree.
+   * endpoint 所处的模块，由调用方用 `moduleIdOfEndpoint` 解析——这是树的问题，
+   * 本模块刻意不懂树。
    */
   moduleId: string | null,
 ): ResolvedBaseUrl {
@@ -89,8 +68,7 @@ export function resolveEndpointBaseUrl(
       definitionName: null,
     };
   }
-  // `null` (not chosen) falls through to the project ★. This is the one
-  // place the project's default is read, and it is read exactly once.
+  // `null`（未选择）落到项目 ★。全应用只有这一处读项目默认服务，且只读一次。
   const defId = endpoint.baseUrlDefinitionId ?? project?.defaultBaseUrlDefinitionId ?? null;
   const def = defId ? project?.baseUrlDefinitions.find((d) => d.id === defId) : undefined;
   if (!def) return { baseUrl: '', source: 'none', definitionId: null, definitionName: null };
@@ -105,9 +83,8 @@ export function resolveEndpointBaseUrl(
 }
 
 /**
- * Concatenate a baseUrl and a request path safely. Treats the path as
- * already-absolute if it carries a scheme, and collapses duplicate
- * slashes at the join boundary.
+ * 安全地拼接 baseUrl 与请求 path。path 自带 scheme 时视作绝对地址，并折叠
+ * join 边界上的重复斜杠。
  *
  *   joinBaseUrl('https://api.example.com', '/users/1')
  *     → 'https://api.example.com/users/1'
@@ -116,7 +93,7 @@ export function resolveEndpointBaseUrl(
  *   joinBaseUrl('', '/users/1')
  *     → '/users/1'
  *   joinBaseUrl('https://api.example.com', 'https://other/')
- *     → 'https://other/'  (the path wins — it carries its own scheme)
+ *     → 'https://other/'  （path 优先——它自带 scheme）
  */
 export function joinBaseUrl(baseUrl: string, path: string): string {
   const trimmedPath = path ?? '';
@@ -129,36 +106,29 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
 }
 
 /**
- * Collapse runs of `/` in the **path** of a URL that has already been
- * joined *and* `{{var}}`-resolved, leaving every other byte alone.
+ * 折叠 URL **path** 里连续的 `/`，输入必须已 join 且已解析 `{{var}}`，
+ * 其余字节一概不动。
  *
- * Joining happens before substitution — necessarily, because an
- * environment's own base URL may be templated — so `joinBaseUrl` cannot
- * know that `{{var}}` will expand to something already starting with `/`.
- * It dutifully inserts a separator, and the substitution then turns
- * `http://host:9200/{{var}}` into `http://host:9200//api`, which is a
- * different route to most servers (often a redirect or a 404). Only after
- * substitution is the truth known, which is why this is a separate pass
- * rather than something `joinBaseUrl` tries to guess at.
+ * join 必然发生在替换之前（环境自身的 base URL 可能是模板），所以
+ * `joinBaseUrl` 无从知道 `{{var}}` 会展开成以 `/` 开头的值。它照样插入分隔符，
+ * 替换随后把 `http://host:9200/{{var}}` 变成 `http://host:9200//api`，对多数
+ * 服务端那是另一条路由（往往是重定向或 404）。只有替换之后真相才知道，
+ * 所以这是独立一遍，而不是让 `joinBaseUrl` 去猜。
  *
- * Scope is deliberately narrow — a blind `replace(/\/{2,}/g, '/')` would
- * corrupt real URLs:
- *   - `scheme://` is not a path. `https://` must survive verbatim.
- *   - a leading `//` with **no** scheme is a protocol-relative
- *     reference (`//cdn.example.com/x`); its slashes carry meaning.
- *   - `?query` / `#fragment` are data, not path: a param carrying a
- *     nested URL (`?redirect=https://x//y`) must pass through untouched.
- *   - an unresolved `{{var}}` marker is text, not a separator, so it is
- *     reported by `missingVars` rather than being flattened away.
+ * 范围刻意收窄——无脑 `replace(/\/{2,}/g, '/')` 会破坏真实 URL：
+ *   - `scheme://` 不是 path，`https://` 必须原样保留；
+ *   - 无 scheme 的前导 `//` 是 protocol-relative 引用（`//cdn.example.com/x`），
+ *     它的斜杠有意义；
+ *   - `?query` / `#fragment` 是数据不是 path：携带嵌套 URL 的参数
+ *     （`?redirect=https://x//y`）必须原样穿过；
+ *   - 未解析的 `{{var}}` 标记是文本不是分隔符，由 `missingVars` 报告，不在这里压平。
  *
- * Mirrors `collapse_url_slashes` in
- * `crates/simple-post-mcp/src/variable_fill.rs`; the two must agree or
- * the preview and the request that actually goes out describe different
- * URLs.
+ * 对应 `crates/simple-post-mcp/src/variable_fill.rs` 的 `collapse_url_slashes`；
+ * 两者不一致，预览与真正发出的请求就会描述不同的 URL。
  */
 export function collapseUrlSlashes(url: string): string {
   if (!url) return url ?? '';
-  // `scheme://` and the protocol-relative `//` are heads, not path.
+  // `scheme://` 与 protocol-relative 的 `//` 是头部，不是 path。
   const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(url);
   let head = '';
   let rest = url;
@@ -169,8 +139,7 @@ export function collapseUrlSlashes(url: string): string {
     head = '//';
     rest = url.slice(2);
   }
-  // An authority never contains a `/` (it ends at the first one), so
-  // whatever follows the head is safe to treat as path.
+  // authority 内不含 `/`（到第一个 `/` 就结束），所以头部之后可安全当 path。
   const cut = rest.search(/[?#]/);
   const path = cut === -1 ? rest : rest.slice(0, cut);
   const tail = cut === -1 ? '' : rest.slice(cut);
@@ -180,51 +149,43 @@ export function collapseUrlSlashes(url: string): string {
 export interface ResolvedVars {
   value: string;
   /**
-   * `{{name}}` markers that were **not** resolved, deduped by first
-   * occurrence so the order is stable across re-renders (a warning pill
-   * that reshuffles on every keystroke is worse than useless).
+   * 未解析的 `{{name}}`，按首次出现去重，顺序在多次渲染间稳定（每次敲键都
+   * 重排的告警胶囊比没有更糟）。
    *
-   * This is the renderer-side twin of `ResolvedTemplate.missing` in
-   * `crates/simple-post-mcp/src/variable_fill.rs`; the two must agree or
-   * the frontend's "unresolved variables" hint and the MCP tool's
-   * `missing_vars` report different things for the same endpoint.
+   * 它是 `crates/simple-post-mcp/src/variable_fill.rs` 里
+   * `ResolvedTemplate.missing` 的渲染器孪生；两者不一致，同一 endpoint 在前端
+   * 的「未解析变量」提示与 MCP 的 `missing_vars` 报告就不是一回事。
    */
   missing: string[];
 }
 
 /**
- * Resolve a string of the form `{{varName}}` against a variable pool, and
- * report which markers could not be resolved. Accepts either an
- * `Environment` (in which case `env.variables` is used) or a raw
- * `Record<string,string>`.
+ * 把 `{{varName}}` 形式的字符串对着变量池解析，并报告解析不到的标记。变量池可以是
+ * `Environment`（用 `env.variables`），也可以是裸的 `Record<string,string>`。
  *
- * Unknown variables are left intact (e.g. `{{missing}}` stays as
- * `{{missing}}`) so the user can see what's missing in the request
- * preview instead of silently turning into `undefined`.
+ * 未知变量原样保留（如 `{{missing}}` 仍是 `{{missing}}`），让用户在请求预览里
+ * 看得见缺什么，而不是静默变成 `undefined`。
  *
- * The marker name only accepts `\w+` (`[A-Za-z0-9_]+`); `{{ my-var }}`
- * and `{{ a.b }}` pass through verbatim. Replacement is a **single,
- * non-recursive pass** — `{{{{a}}}}` becomes `{{a}}` and is not expanded
- * again. That mirrors `template_replace` / `is_word` in the Rust
- * resolver, and it is what stops a variable whose value happens to
- * contain `{{` from being expanded a second time (or looping).
+ * 变量名只接受 `\w+`（`[A-Za-z0-9_]+`）；`{{ my-var }}`、`{{ a.b }}` 原样穿过。
+ * 替换是**单趟、非递归**的——`{{{{a}}}}` 变成 `{{a}}`，不会再展开一次。这与
+ * Rust 解析器的 `template_replace` / `is_word` 一致，也是变量值里恰好含 `{{`
+ * 时不会被二次展开（或死循环）的原因。
  */
 export function resolveVarsWithMissing(
   input: string,
   vars: Environment | Record<string, string> | undefined,
 ): ResolvedVars {
   if (!input) return { value: '', missing: [] };
-  // `Environment` carries the variables under `.variables`; a raw record
-  // is the map itself. Discriminate via `Environment.baseUrls` (a nested
-  // object) — a plain Record<string,string> would yield `string` there.
+  // `Environment` 的变量在 `.variables` 下，裸 record 本身就是映射。用
+  // `Environment.baseUrls`（嵌套对象）区分——裸 `Record<string,string>` 在那里
+  // 会得到 `string`
   const map: Record<string, string> | undefined = isEnvironment(vars) ? vars.variables : vars;
   const missing: string[] = [];
   const seen = new Set<string>();
   const value = input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     const v = map?.[key];
-    // Nullish check, not truthiness: a variable explicitly defined as
-    // the empty string resolves to '' and must NOT be reported missing —
-    // only an absent key leaves the marker in place.
+    // 判空用 nullish 而非真值：显式定义为空串的变量解析为 '' 且**不算**缺失，
+    // 只有键不存在才把标记留在原地
     if (v !== undefined && v !== null) return v;
     if (!seen.has(key)) {
       seen.add(key);
@@ -236,9 +197,8 @@ export function resolveVarsWithMissing(
 }
 
 /**
- * `resolveVarsWithMissing`, discarding the missing list. Kept as the
- * name every existing caller imports — the two are one implementation,
- * so a `{{x}}` can never survive here while being reported there.
+ * `resolveVarsWithMissing`，丢弃 missing 列表。保留这个名字是因为既有调用方都
+ * import 它——两者同一实现，`{{x}}` 不可能在这里存活却被那里报出来。
  */
 export function resolveVars(
   input: string,
@@ -256,6 +216,5 @@ function isEnvironment(v: Environment | Record<string, string> | undefined): v i
   );
 }
 
-// Re-export the picker-facing types so callers don't need a second
-// import path.
+// 重导出面向选择器的类型，调用方就不必再引第二条路径
 export type { BaseUrlDefinition };

@@ -3,10 +3,9 @@ import assert from 'node:assert/strict';
 import { groupTools, OTHER_GROUP_KEY } from '@/lib/mcp-tool-groups';
 
 /**
- * The 44 tools the daemon actually registers today. Kept verbatim (not
- * derived) so that adding a tool to the Rust registry without teaching
- * `groupTools` its prefix shows up as a failing 「其他」 assertion rather
- * than as a silently missing table row.
+ * daemon 今天实际注册的 44 个工具。逐字照抄（而非推导）是有意的：给 Rust 注册表加了
+ * 工具却没教 `groupTools` 它的前缀时，它会变成一条失败的「其他」断言，而不是表格里
+ * 悄悄少一行。
  */
 const REGISTERED_TOOLS = [
   'env_list',
@@ -59,8 +58,7 @@ test('groupTools: every registered tool lands in its prefix family', () => {
   const groups = groupTools(REGISTERED_TOOLS);
   const keys = groups.map((g) => g.key);
 
-  // Nothing should fall through to 其他 for the current registry — that
-  // is the signal that a new tool needs a category.
+  // 当前注册表不该有任何东西落到「其他」——落到那里就是「新工具需要一个分类」的信号。
   assert.equal(
     keys.includes(OTHER_GROUP_KEY),
     false,

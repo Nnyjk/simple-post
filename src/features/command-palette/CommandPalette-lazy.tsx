@@ -1,13 +1,11 @@
 /**
- * Lazy boundary for the command palette (Ctrl+K).
+ * 命令面板（Ctrl+K）的 lazy 边界。
  *
- * The palette is mounted unconditionally by `TopBar` but is only ever
- * visible in response to a keystroke, so keeping it in the entry graph
- * meant every cold start paid for a dialog almost nobody opens on load.
+ * 面板被 `TopBar` 无条件挂载，却只对一次按键才有反应，故把它留在 entry 图里意味着每次冷
+ * 启动都要为一个几乎没人一打开就会用的对话框买单。
  *
- * `TopBar` renders it behind a `Suspense` with a `null` fallback: there is
- * nothing to show until `open` flips to true, and by then the user has
- * already pressed a key, so the chunk is normally resident or one fetch away.
+ * `TopBar` 用 `Suspense` 且 fallback 为 `null` 渲染它：在 `open` 翻成 true 之前没什么可
+ * 显示，而那时用户已经按过键，chunk 通常已在内存或只差一次取件。
  */
 import { lazy } from 'react';
 

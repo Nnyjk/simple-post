@@ -9,75 +9,60 @@ import {
 import { cn } from '@/lib/utils';
 
 export interface InlineEditProps {
-  /** The current persisted value — also the value to revert to on cancel. */
+  /** 当前已持久化的值——也是取消时回退到的值。 */
   value: string;
   /**
-   * Called with the (optionally trimmed) new value on Enter / blur when
-   * the new value is non-empty AND differs from `value`. The component
-   * intentionally skips no-op commits so consumers don't have to diff.
+   * 在 Enter / 失焦时以新值（可先 trim）调用，条件是新值非空**且**不同于 `value`。
+   * 组件刻意跳过空提交，调用方不必自己做 diff。
    */
   onSave: (next: string) => void;
   /**
-   * Render-prop for the display element. The component wraps the
-   * returned node in a `<span>` that listens for `onDoubleClick` and
-   * forwards an `open` callback so the caller can wire the trigger
-   * however they like (e.g. a button, an icon, the value text itself).
+   * 展示元素的 render-prop。组件把返回的节点裹进一个 `<span>`，它监听
+   * `onDoubleClick` 并转发 `open` 回调，触发器怎么接由调用方决定（按钮、图标、
+   * 值文本本身都可以）。
    */
   display: (trigger: { open: () => void }) => ReactNode;
   placeholder?: string;
   className?: string;
   /**
-   * Trim whitespace from the draft before commit/cancel. Defaults to
-   * `true` to match the tree-row rename UX; set `false` for fields
-   * that legitimately allow leading/trailing whitespace (rare).
+   * 提交/取消前对草稿做 trim。默认 `true` 以对齐树行重命名的交互；
+   * 确实允许首尾空白的字段（少见）设为 `false`。
    */
   trim?: boolean;
   ariaLabel?: string;
   testId?: string;
   /**
-   * Controlled edit state. Omit it and the editor owns its own, which is
-   * what every caller but the tree rows does.
+   * 受控的编辑状态。不传时编辑器自持状态——除树行外的所有调用方都是如此。
    *
-   * The tree needs the other mode: it keeps "the row being renamed" as
-   * tree state so a *freshly created* row can be dropped straight into
-   * rename without synthesising a double-click. Paired with
-   * `onEditingChange`, which is how it gets told the user is done.
+   * 树需要另一种模式：它把「正在重命名的行」存为树状态，这样*新建*的行可以直接
+   * 进入重命名而无需合成一次双击。与 onEditingChange 配对，由它告知用户已结束。
    */
   editing?: boolean;
   /**
-   * Notified whenever the editor enters or leaves edit mode — including
-   * when the change came from the user (double-click / Enter / Esc /
-   * blur), which is what makes it the closing channel for a controlled
-   * `editing`. Also useful for parents that gate other UX (e.g. marking a
-   * tab as having unsaved changes during an in-flight rename).
+   * 编辑器进入或离开编辑模式时通知——包括由用户触发的改变（双击 / Enter / Esc /
+   * 失焦），这使它成为受控 `editing` 的闭合通道。对用它在编辑期间门控其他交互的
+   * 父组件也有用（例如把页签标为有未保存改动）。
    */
   onEditingChange?: (editing: boolean) => void;
   /**
-   * When `true`, an empty draft is committed as `onSave('')` instead of
-   * being treated as a cancel. Defaults to `false` (blank = cancel) to
-   * match the tree-row rename UX. Set `true` for fields that legitimately
-   * allow clearing (e.g. an optional description).
+   * 为 `true` 时，空草稿会作为 `onSave('')` 提交，而不是当作取消。默认
+   * `false`（留空 = 取消）以对齐树行重命名的交互。确实允许清空的字段
+   * （如可选描述）设为 `true`。
    */
   commitEmpty?: boolean;
 }
 
 /**
- * Generic inline editor. Renders the `display` node by default; on
- * double-click (or via `display`'s `open()` callback) swaps in a
- * single-line `<input>` that auto-focuses and selects the existing
- * text. Keyboard:
- *   - Enter  → commit (save if non-empty + changed, else cancel —
- *              unless `commitEmpty`, in which case an empty draft is
- *              committed as `onSave('')`)
- *   - Esc    → cancel (revert draft to `value`)
- *   - Blur   → commit
+ * 通用行内编辑器。默认渲染 display 节点；双击（或经 display 的 open() 回调）
+ * 换成自动聚焦并全选原文的单行 <input>。键盘：
+ *   - Enter  → 提交（非空且有变化则保存，否则取消——除非 commitEmpty，
+ *              此时空草稿会作为 `onSave('')` 提交）
+ *   - Esc    → 取消（草稿回退到 `value`）
+ *   - Blur   → 提交
  *
- * When in edit mode, click and Enter events on the `<input>` are stopped
- * from propagating. This is the right default for an inline editor that
- * is typically nested inside a clickable row (the row shouldn't collapse
- * while the user is editing) and alongside siblings that may bind to
- * Enter (e.g. a TagInput). Callers that actually need bubbling can wrap
- * the editor in their own click target.
+ * 编辑模式下 <input> 上的 click 与 Enter 事件不冒泡。这对一个通常嵌在可点
+ * 行里（编辑时那行不该折叠）、旁边还有绑 Enter 的兄弟组件（如 TagInput）的行内编辑器
+ * 来说是正确默认。确实需要冒泡的调用方可以自己再包一层点击目标。
  */
 export function InlineEdit({
   value,
@@ -93,22 +78,18 @@ export function InlineEdit({
   commitEmpty = false,
 }: InlineEditProps) {
   const [localEditing, setLocalEditing] = useState(false);
-  // Controlled when the caller passes `editing`; otherwise the editor owns
-  // the flag. `editing === undefined` (not falsy) is the test, so passing
-  // `editing={false}` is still "controlled and closed".
+  // 传了 `editing` 就是受控，否则编辑器自持这个标志。判据是
+  // `editing === undefined`（而非 falsy），所以传 `editing={false}` 仍表示「受控且关闭」。
   const isEditing = editing ?? localEditing;
   const [draft, setDraft] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Guard against double-fire when Enter triggers both a keydown and a
-  // synthetic blur as React unmounts the editing branch.
+  // 防 Enter 在 React 卸载编辑分支时同时触发 keydown 与合成 blur 而重复提交。
   const committedRef = useRef(false);
   const cancelledRef = useRef(false);
 
   /**
-   * Enter / leave edit mode. In controlled mode the parent owns the flag,
-   * so this only reports the intent — writing local state there would be
-   * silently overwritten by the parent's next render and the editor would
-   * appear not to open at all.
+   * 进入/离开编辑模式。受控模式下标志归父组件，所以这里只上报意图——在那里写本地状态
+   * 会被父组件的下一次渲染静默覆盖，编辑器看起来会完全没打开。
    */
   const request = useCallback(
     (next: boolean) => {
@@ -118,13 +99,12 @@ export function InlineEdit({
     [editing, onEditingChange],
   );
 
-  // Re-sync the local draft when the underlying value changes outside
-  // an active edit session (e.g. the tree updates from another panel).
+  // 底层 value 在一次编辑会话之外变化时（如树从另一个面板更新），重新同步本地草稿。
   useEffect(() => {
     if (!isEditing) setDraft(value);
   }, [value, isEditing]);
 
-  // Auto-focus + select on entering edit mode.
+  // 进入编辑模式时自动聚焦并全选。
   useEffect(() => {
     if (!isEditing) return;
     const el = inputRef.current;
@@ -160,8 +140,7 @@ export function InlineEdit({
   }, [draft, value, onSave, trim, commitEmpty, request]);
 
   const handleKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    // Stop Enter from bubbling — siblings (e.g. TagInput) may bind Enter
-    // and would otherwise treat a committed rename as their own action.
+    // 阻止 Enter 冒泡——兄弟组件（如 TagInput）可能绑了 Enter，会把已提交的重命名当成自己的动作。
     if (e.key === 'Enter') {
       e.preventDefault();
       e.stopPropagation();
@@ -174,8 +153,7 @@ export function InlineEdit({
   };
 
   const stopClick: React.MouseEventHandler<HTMLInputElement> = (e) => {
-    // The input itself swallows clicks so the surrounding row's onClick
-    // (collapse/expand) doesn't fire mid-edit.
+    // input 自己吞掉点击，好让外层那行的 onClick（折叠/展开）不会在编辑途中触发。
     e.stopPropagation();
   };
 
@@ -183,8 +161,7 @@ export function InlineEdit({
     return (
       <span
         onDoubleClick={open}
-        // `inline-flex` keeps the wrapper on the same line as the
-        // surrounding text and lets `display` size itself naturally.
+        // `inline-flex` 让包裹元素与周围文本同行，并让 display 自然决定尺寸。
         className={cn('inline-flex', className)}
       >
         {display({ open })}

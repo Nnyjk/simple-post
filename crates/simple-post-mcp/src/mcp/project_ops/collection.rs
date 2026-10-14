@@ -1,14 +1,6 @@
-﻿//! `collection_*` MCP tools — collection CRUD and movement within a module.
+﻿//! `collection_*` MCP 工具 —— 集合 CRUD 与在模块内的移动，共 5 个。
 //!
-//! 5 tools:
-//! - `collection_list`
-//! - `collection_create`
-//! - `collection_update`
-//! - `collection_delete`
-//! - `collection_move`
-//!
-//! `collection_list` reuses `super::ModuleIdArgs`. All other Args structs
-//! are local to this module.
+//! `collection_list` 复用 `super::ModuleIdArgs`；其余 Args 私有于本模块。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,15 +10,11 @@ use crate::tool_fn;
 use simple_post_core::domain::{ResourceNode, ResourceNodePatch, ResourceNodeType};
 use simple_post_core::error::AppError;
 
-/// Resolve the project a node belongs to, for the per-project permission
-/// gate.
+/// 解析节点所属项目，供按项目的那扇门使用。
 ///
-/// Handlers used to pass the literal `"global"` here, which is not a
-/// project id: `check_permission` then compared `ReadCall` (the default
-/// for a project with no row) against `Full` (what a mutating tool
-/// requires) and denied every call. The nodes layout makes the correct
-/// answer one indexed read — `root_id` is denormalised onto every row
-/// precisely so this does not have to walk up the parent chain.
+/// 绝不能写死字面量 "global"：它不是项目 id，会拿「无此行时的默认 `ReadCall`」
+/// 去比写工具要求的 `Full`，于是每次调用都被拒，而工具看起来注册得好好的。
+/// `root_id` 已反规范化在每一行上，正确答案就是一次索引读，不必回溯父链。
 fn owning_project(pool: &simple_post_core::db::DbPool, node_id: &str) -> Result<String, AppError> {
     simple_post_core::db::with_conn(pool, |c| {
         simple_post_core::db::nodes::root_id_of(c, node_id)
@@ -55,7 +43,7 @@ pub(super) struct CollectionMoveArgs {
     #[serde(default)]
     pub new_parent_collection_id: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)] // reserved for future sort-order API
+    #[allow(dead_code)] // 留给将来的排序接口
     pub new_sort_order: Option<i64>,
 }
 
@@ -149,17 +137,14 @@ pub(super) async fn tool_collection_list(
         "collection_list",
     )
     .await?;
-    // The subtree of a module, because a nested collection's parent is
-    // another collection — "collections under this module" is not a
-    // one-hop parent match, and `list_by_module` only got away with it
-    // by walking the same chain in SQL.
+    // 取模块的整棵子树：嵌套集合的父级是另一个集合，「这个模块下的集合」不是一跳
+    // 父级就能匹配上的。
     let subtree = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::subtree_ids(c, std::slice::from_ref(&a.module_id))
     })?;
     let in_subtree: std::collections::HashSet<&String> = subtree.iter().collect();
-    // One indexed read of the project's collections, narrowed to the
-    // subtree. Going through `root_id` rather than a table scan keeps
-    // this proportional to the project, not the database.
+    // 走 `root_id` 索引读该项目的集合再按子树收窄，代价与项目规模成正比，
+    // 而不是全表扫。
     let project = owning_project(&state.pool, &a.module_id)?;
     let cols = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::list_by_root_and_type(
@@ -184,16 +169,14 @@ pub(super) async fn tool_collection_create(
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
     }
-    // A collection's parent is a module (top level) or another collection
-    // (nested). `new_module_id` and `parent_collection_id` are two names
-    // for that one relationship, so pick whichever the caller supplied and
-    // let `root_id` be derived from whichever node won.
+    // 集合的父级要么是模块（顶层）要么是集合（嵌套）。`new_module_id` 与
+    // `parent_collection_id` 是同一关系的两个名字，取调用方给的那个；`root_id`
+    // 由胜出的那个节点推导。
     let parent_id = a
         .parent_collection_id
         .clone()
         .or_else(|| Some(a.module_id.clone()));
-    // Gate against the project that will own the new collection, which is
-    // the parent node's project.
+    // 按「将来拥有这个新集合的项目」过门，也就是父节点所属的项目。
     crate::mcp::check_permission(
         &state.pool,
         &owning_project(&state.pool, parent_id.as_deref().unwrap_or_default())?,
@@ -290,9 +273,8 @@ pub(super) async fn tool_collection_move(
         "collection_move",
     )
     .await?;
-    // Same two names, one relationship: nested wins when both are given,
-    // matching the old `module_id` + `parent_collection_id` pair where
-    // the caller had to supply a module even for a nested move.
+    // 同样是「两个名字一个关系」：两个都给时嵌套优先 —— 调用方即使只想做嵌套移动，
+    // 也仍需带上 module id。
     let new_parent = a
         .new_parent_collection_id
         .clone()

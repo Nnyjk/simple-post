@@ -1,21 +1,11 @@
 /**
- * Project accent colours — the palette offered when creating a project.
+ * 项目强调色 —— 新建项目时可选的调色板，由这一份列表独占。
  *
- * This used to be duplicated in three places: a 4-entry list in
- * `NewItemModal`, a 6-entry list inside the (now removed)
- * `components/ui/section.tsx`, and a bare `'#60a5fa'` literal repeated
- * three times in `ui-slice` as the new-project default. The two lists had
- * already drifted apart in length, and the default literal was a fourth
- * hand-typed value. One list now owns all of it.
+ * 这些色值在明暗两种卡片底色上都可读，并与资源树使用的语义 `hue` 强调色（见
+ * `src/lib/hue.ts`）保持距离——项目自身的颜色应当读作装饰，而不是节点类型。
  *
- * The values are picked to be legible on both light and dark card
- * backgrounds and to stay clear of the semantic `hue` accents used by the
- * resource tree (see `src/lib/hue.ts`) — a project's own colour should
- * read as decoration, not as a node kind.
- *
- * `PROJECT_COLOR_DEFAULT` is also the `color` seeded into a brand-new
- * project, so importing it from the store is safe: `ui-slice` already
- * depends on this module and nothing here imports the store.
+ * `PROJECT_COLOR_DEFAULT` 同时也是全新项目被写入的 `color`，所以 store 从这里
+ * import 是安全的：`ui-slice` 本就依赖本模块，而本模块不 import store。
  */
 export const PROJECT_COLORS = [
   '#60a5fa', // blue
@@ -26,5 +16,5 @@ export const PROJECT_COLORS = [
   '#a3a3a3', // neutral
 ] as const;
 
-/** Seed colour for a newly created project — the first swatch. */
+/** 新建项目的种子色 —— 第一块色板。 */
 export const PROJECT_COLOR_DEFAULT: string = PROJECT_COLORS[0];

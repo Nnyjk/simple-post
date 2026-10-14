@@ -75,8 +75,7 @@ fn delete_removes_def() {
 
 #[test]
 fn delete_clears_a_star_that_pointed_at_it() {
-    // p_demo stars def_default out of the box. Leaving the pointer behind
-    // would keep the project advertising a service that no longer exists.
+    // p_demo 出厂就以 def_default 为 ★。留着那个指针会让项目继续宣传一个已不存在的服务。
     let pool = fresh_pool();
     db::with_tx(&pool, |c| delete(c, "def_default")).unwrap();
     let proj = db::with_conn(&pool, |c| db::projects::get(c, "p_demo")).unwrap();
@@ -114,7 +113,7 @@ fn delete_missing_returns_not_found_and_changes_nothing() {
     let pool = fresh_pool();
     let err = db::with_tx(&pool, |c| delete(c, "def_ghost")).unwrap_err();
     assert_eq!(err.code(), "not_found");
-    // The savepoint rolls back, so the real star survives the failed call.
+    // savepoint 回滚了，故那个真正的 ★ 在这次失败的调用之后仍在。
     let proj = db::with_conn(&pool, |c| db::projects::get(c, "p_demo")).unwrap();
     assert_eq!(
         proj.default_base_url_definition_id.as_deref(),

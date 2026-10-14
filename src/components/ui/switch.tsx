@@ -8,10 +8,9 @@ interface SwitchProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onC
 
 export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
   ({ className, checked, onCheckedChange, disabled, ...props }, ref) => {
-    // The thumb grows under the cursor: 12px resting, 14px on hover, 17px
-    // while pressed. Windows' own switch does this, and it is the detail
-    // that makes the control read as a physical object rather than as a
-    // styled div — you can see what is about to happen before you click.
+    // 滑块会在指针下变大：静止 12px、hover 14px、按下 17px。Windows 自带的开关就是
+    // 这么做的，也正是这个细节让控件读作一个实体，而不是一个上了样式的 div——
+    // 点击之前你就看得见将要发生什么
     const [hovered, setHovered] = useState(false);
     const [pressed, setPressed] = useState(false);
     const thumb = pressed ? 17 : hovered ? 14 : 12;
@@ -31,14 +30,13 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
         }}
         onPointerDown={() => setPressed(true)}
         onPointerUp={() => setPressed(false)}
-        // 40x20, not the old 36x20 — a 16px thumb with 2px of breathing room
-        // needs the wider track to keep the 120ms travel from looking cramped.
+        // 40x20：16px 的滑块加 2px 余量，需要更宽的轨道，那 120ms 的行程才不显得局促。
         className={cn(
           'relative inline-flex h-5 w-10 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-150',
           focusRing,
           'disabled:cursor-not-allowed disabled:opacity-50',
-          // Off is an outlined track, not a filled grey one: on the new
-          // ladder a filled `--muted` read as "on but dim".
+          // 关是描边轨道而非填灰轨道：在新的亮度阶梯上，填充的 `--muted` 会被读成
+          // 「开着但变暗」
           checked ? 'bg-primary' : 'border border-muted-foreground bg-transparent',
           !checked && hovered && !disabled && 'bg-overlay-hover',
           className,
@@ -48,8 +46,7 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(
         <span
           className={cn(
             'pointer-events-none block rounded-full transition-[width,height,transform] duration-150 ease-out',
-            // Position is measured from the track, so the growth stays
-            // centred rather than pushing the thumb toward the edge.
+            // 位移从轨道量起，所以变大部分保持居中，而不是把滑块推向边缘
             checked ? 'translate-x-[24px]' : 'translate-x-[3px]',
             checked ? 'bg-primary-foreground' : 'bg-muted-foreground',
           )}

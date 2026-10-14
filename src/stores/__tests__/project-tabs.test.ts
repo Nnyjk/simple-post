@@ -1,23 +1,17 @@
 /**
- * Tests for the per-project tab strip — `switchProjectTabs` in
- * `src/stores/slices/ui-tabs.ts`, driven through `openProject` /
- * `leaveProject` so the ordering those two rely on is exercised too.
+ * 按项目划分的标签条测试——`src/stores/slices/ui-tabs.ts` 的 `switchProjectTabs`，
+ * 通过 `openProject` / `leaveProject` 驱动，好让这两者依赖的调用次序也被跑到。
  *
- * WHY THE REAL COMPOSED STORE
- * ---------------------------
- * The behaviour under test is a contract *between* slices: `ui-tabs`
- * decides which tabs a project owns (it has to read `nodes` and
- * `draftEndpoints` to answer that), while `bootstrap-slice` owns
- * `activeProjectId` and must call the switch before moving it. A harness
- * that stubbed either side would stub away the thing most likely to
- * break.
+ * **为什么用真实组合 store。** 被测行为是切片**之间**的契约：`ui-tabs` 决定
+ * 哪些标签属于某个项目（为此必须读 `nodes` 和 `draftEndpoints`），
+ * `bootstrap-slice` 则拥有 `activeProjectId` 且必须在移动它之前调用切换。
+ * stub 掉任何一侧的 harness 都会把最容易坏的东西 stub 掉。
  *
- * The load is stubbed out entirely (`nodesLoaded: true`) because it is
- * irrelevant here: `nodes` holds every project's rows at once and the
- * tree filters them by `rootId`, which is exactly why switching projects
- * can restore a tab strip with no round-trip at all.
+ * 加载被整个 stub 掉（`nodesLoaded: true`），因为这里与它无关：`nodes` 一次
+ * 持有所有项目的行，树按 `rootId` 过滤它们——这也正是切项目可以零往返地恢复
+ * 一条标签条的原因。
  *
- * Run via: npx tsx --test src/stores/__tests__/project-tabs.test.ts
+ * 运行：npx tsx --test src/stores/__tests__/project-tabs.test.ts
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -52,9 +46,8 @@ beforeEach(() => {
   origError = console.error.bind(console);
   console.error = () => {};
 
-  // Nothing should reach the daemon: the tree is already loaded and
-  // switching projects never refetches it. A call here would mean a
-  // switch had started depending on a round-trip.
+  // 不该有任何请求打到守护进程：树已经加载过，切项目从不重拉它。这里若出现调用，
+  // 就说明切换开始依赖某次往返了。
   installIpcMock((cmd) => {
     throw new Error(`unexpected command during a project switch: ${cmd}`);
   });
@@ -63,7 +56,7 @@ beforeEach(() => {
     projects: [],
     nodes: [M1, E1, M2, E2],
     endpointDetails: {},
-    // The whole point: everything is already in memory, per project.
+    // 重点就在这里：一切都已按项目留在内存里了。
     nodesLoaded: true,
     activeProjectId: '',
     activeEnvironmentId: '',
@@ -88,7 +81,7 @@ afterEach(() => {
 const tabIds = () => useAppStore.getState().openTabs.map((t) => t.id);
 const tabFor = (id: string) => useAppStore.getState().openTabs.find((t) => t.id === id);
 
-/** Enter project A, open an endpoint tab in it, and dirty it. */
+/** 进入项目 A，在里面开一个 endpoint 标签并把它标脏。 */
 function enterAWithADirtyEndpoint() {
   const store = useAppStore.getState();
   store.openProject('p1');

@@ -3,64 +3,45 @@ import { cn } from '@/lib/utils';
 import { HUE, type HueConcept } from '@/lib/hue';
 
 /**
- * IconTile — the tinted square an icon sits in.
+ * IconTile —— 图标所坐的那块着色方块。
  *
- * This one visual idiom was open-coded at 15 call sites across five
- * different sizes:
+ * 尺寸档（调用方按最近的档选）：
+ *   xs  设置侧栏、环境切换器 24px
+ *   sm  资源树行、GroupHeader 20px
+ *   md  设置行 / 分类头 28px
+ *   lg  表单行（baseUrl / 变量）36px
+ *   xl  ConnectionSection 的 hero 卡片 40px
  *
- *   h-5   project-tree rows, GroupHeader
- *   h-6   settings rail, EnvSwitcher
- *   h-7   SettingsCategory / SettingRow
- *   h-9   ModuleBaseUrlTable, VariableTable
- *   h-10  ConnectionSection hero card
- *
- * …with four of them carrying a border and eleven not, and each typing
- * its own palette colour. `sm`/`md`/`lg` now name the three sizes that
- * actually recur; callers that used h-6 or h-10 move to the nearest.
- *
- * The settings rows already had two non-concept states before this
- * component existed — `concept` omitted (muted) and a destructive tint —
- * and those are now `tone="default"` and `tone="danger"`, reusing the
- * exact classes those call sites had, so nothing shifts visually.
- * `success` / `warning` / `primary` join them for tiles that report a
- * state or claim the app's primary context rather than a tree concept.
+ * 概念色相（`concept`）表达身份，`tone` 表达状态或应用的主要上下文（environment），
+ * 两者不是一回事，也不要混用。
  */
 
 export type IconTileSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
 const SIZE_CLASS: Record<IconTileSize, string> = {
-  // settings rail, env switcher: 24px
   xs: 'h-6 w-6',
-  // project-tree rows, GroupHeader: 20px
   sm: 'h-5 w-5',
-  // settings rows / category headers: 28px
   md: 'h-7 w-7',
-  // form rows (baseUrl / variable): 36px
   lg: 'h-9 w-9',
-  // ConnectionSection's hero card: 40px
   xl: 'h-10 w-10',
 };
 
 /**
- * Tone → paint.
+ * tone → 上色。
  *
- * `default` is the only entry that can be overridden by `concept`; the
- * other four are states the tile is reporting rather than identities it
- * is standing for, so nothing may repaint them.
+ * `default` 是唯一能被 `concept` 覆盖的条目；其余四种是 tile 在*报告的状态*，不是
+ * 它代表的身份，所以谁也不许改画它们。
  *
- * `success` / `warning` take the `-foreground` token rather than the base
- * one. On a 15%-alpha tint the base values (`--success` 142 71% 45%,
- * `--warning` 38 92% 45%) are the *border* step of each ramp — legible as
- * an edge, too light as a glyph on the near-white the light theme puts
- * behind them. `--success-foreground` / `--warning-foreground` are the
- * text steps (30% in light, 75% in dark) and are what `Badge`'s success /
- * warning variants already use on the same tint. See the semantic-token
- * pairing note in AGENTS.md.
+ * `success` / `warning` 取 `-foreground` 那个 token 而非基础 token：15% alpha 的淡色
+ * 底上，基础值（`--success` 142 71% 45%、`--warning` 38 92% 45%）只是各自色阶的
+ * *边框*档，作为描边可读，作为浅色主题铺在其上的近白底色里的字形就太淡了。
+ * `--success-foreground` / `--warning-foreground` 才是文字档（亮色 30%、暗色 75%），
+ * 也正是 `Badge` 的 success / warning 变体在同一淡色底上用的。见 AGENTS.md 的语义
+ * token 配对说明。
  *
- * `danger` deliberately does NOT follow that rule:
- * `--destructive-foreground` is `0 0% 100%` in *both* scopes, so pairing
- * it with a light tint is white-on-white in light mode. `--destructive`
- * at 5 59% 44% clears ~5:1 on that tint in both.
+ * `danger` 刻意不守这条规则：`--destructive-foreground` 在*两个*作用域里都是
+ * `0 0% 100%`，配淡色底在亮色模式下就是白底白字；而 `--destructive` 的 5 59% 44%
+ * 在该淡色底上两种主题都过 ~5:1。
  */
 const TONE: Record<NonNullable<IconTileProps['tone']>, { bg: string; text: string }> = {
   default: { bg: 'bg-muted/60', text: 'text-muted-foreground' },
@@ -76,32 +57,29 @@ const NEUTRAL_BORDER = 'border-border';
 export interface IconTileProps {
   icon: ReactNode;
   /**
-   * Which semantic concept this tile stands for. Omit for a neutral tile
-   * (the settings-row resting state). See `src/lib/hue.ts`.
+   * 这个 tile 代表哪个语义概念。省略即为中性 tile（设置行的静止态）。
+   * 见 `src/lib/hue.ts`。
    */
   concept?: HueConcept;
   size?: IconTileSize;
-  /** Add the concept's 30%-alpha edge. Used by the form-sized rows. */
+  /** 加上概念的 30% alpha 描边。表单尺寸的行用。 */
   bordered?: boolean;
   /**
-   * Paints with a semantic status token instead of a concept hue.
+   * 用语义状态 token 上色，而不是概念色相。
    *
-   * `primary` exists for the two tiles that stand for the *environment* —
-   * which deliberately has no hue of its own (see `src/lib/hue.ts`) and
-   * keeps `--primary` because it is the app's primary context.
+   * `primary` 供那两个代表 *environment* 的 tile 用——environment 刻意不占色相
+   * （见 `src/lib/hue.ts`），它保留 `--primary` 是因为那是应用的主要上下文。
    *
-   * `success` / `warning` / `danger` are for tiles that report the
-   * *state* of a running thing. They exist because a fixed concept hue
-   * cannot do that job: `concept="connection"` is rose (`--hue-connection`
-   * at 355°) in every lifecycle, so a daemon's hero tile stayed red while
-   * it was serving — which is a claim, not a colour preference. See
-   * `src/lib/mcp-status-tone.ts`.
+   * `success` / `warning` / `danger` 给报告某个运行中事物*状态*的 tile。固定概念
+   * 色相做不了这活：`concept="connection"` 在任何生命周期下都是玫红
+   * （`--hue-connection` 355°），daemon 的 hero tile 会在服务期间一直红着——
+   * 那是在声明，不是在挑颜色。见 `src/lib/mcp-status-tone.ts`。
    */
   tone?: 'default' | 'danger' | 'primary' | 'success' | 'warning';
-  /** Neutral tiles on the settings rail also carry a hairline border. */
+  /** 设置侧栏上的中性 tile 也带一条发丝边。 */
   neutralBorder?: boolean;
   className?: string;
-  /** Mirrored onto the wrapper for the "hide from AT" call sites. */
+  /** 镜像到包裹元素上，供「对读屏隐藏」的调用点使用。 */
   'aria-hidden'?: boolean;
 }
 
@@ -116,10 +94,8 @@ export function IconTile({
   ...rest
 }: IconTileProps) {
   const hue = tone === 'default' && concept ? HUE[concept] : null;
-  // A concept hue wins over the neutral resting tone; every explicit tone
-  // wins over both. One lookup, so no caller can end up with a hue `bg`
-  // and a tone `text` — which is how a rose background once shipped with
-  // a green glyph.
+  // 概念色相压过中性静止色调，任何显式 tone 再压过两者。一次查表，所以没有调用方
+  // 会拿到 hue 的 `bg` 配 tone 的 `text`
   const paint = hue ?? TONE[tone];
   return (
     <span

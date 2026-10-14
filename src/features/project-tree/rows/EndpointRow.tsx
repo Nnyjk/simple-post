@@ -8,7 +8,7 @@ import { DropHintOverlay } from './DropHintOverlay';
 
 export interface EndpointRowProps {
   endpoint: ResourceNode;
-  /** The request configuration — the method pill reads from here. */
+  /** 请求配置 —— method pill 从这里读取。 */
   detail: EndpointDetail;
   active: boolean;
   selected: boolean;
@@ -51,16 +51,10 @@ export function EndpointRow({
       data-tree-row
       onContextMenu={onContextMenu}
       className={cn(
-        // `active` means "this is the request open in the tab strip";
-        // `selected` means "ticked for a bulk operation". They are
-        // different things, so they read differently: active gets the
-        // accent bar, selected gets the fill and the "已选" badge only.
+        // `active` 是「标签条里打开着的那个请求」；`selected` 是「为批量操作勾上的」。两者
+        // 是不同的事，故读起来也不同：active 得到强调条，selected 得到填充与「已选」徽标。
         //
-        // Both used to be a `bg-primary/…` tint, which made "active" and
-        // "selected" the same colour and left the row reading as a link
-        // rather than as a position in a list. A neutral fill plus a 3px
-        // leading bar is the idiom both reference apps converge on, and it
-        // keeps the saturated accent for the bar alone.
+        // 中性填充 + 3px 前导条是两家参照应用共同收敛到的写法，也让饱和强调色只留给那根条。
         'group mb-0.5 rounded-md',
         active && 'left-accent bg-surface-select',
         selected && !active && 'bg-surface-select',
@@ -89,17 +83,14 @@ export function EndpointRow({
             }
           }}
           className={cn(
-            // Same rule as ModuleRow: the name carries the row, the
-            // method pill carries the data. Neither is muted.
+            // 与 ModuleRow 同一条规则：名字承担这一行，method pill 承担数据。两者都不弱化。
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-foreground transition-colors',
             !active && !selected && 'hover:bg-overlay-hover',
           )}
         >
-          {/* The HTTP method is the one icon this tree keeps: it is the only
-              marker here that carries data the row does not already show.
-              The generic endpoint tile that used to sit in front of it
-              repeated what the row type already is, and pushed the method
-              — the thing you scan for — one slot further right. */}
+          {/* HTTP method 是这棵树保留的唯一图标：它是此处唯一携带该行尚未展示之数据的标记。
+              原本在它前面的通用接口图标块重复了行类型本身，还把真正用来扫视的 method 又往右
+              挤了一格。 */}
           <MethodPill
             method={detail.method}
             size="xs"
@@ -109,13 +100,9 @@ export function EndpointRow({
           <InlineEdit
             value={endpoint.name}
             onSave={onSaveEdit}
-            // Controlled by the tree's `editing` target, not by a local
-            // double-click: creating an endpoint from the "+" menu has to
-            // be able to drop the new row straight into rename, and that
-            // signal arrives as tree state. `false` (the user finished or
-            // cancelled) is the only transition this row acts on — opening
-            // is the tree's business, and the row's own double-click
-            // reaches it through `onStartEdit` above.
+            // 由树的 `editing` 目标受控，而非本地的双击：从「+」菜单创建接口必须能把新行直接
+            // 丢进重命名，而那个信号是树状态传来的。本行只响应 `false`（用户完成或取消）这
+            // 一个跃迁 —— 打开是树的事，本行自己的双击通过上面的 `onStartEdit` 抵达它。
             editing={isEditing}
             onEditingChange={(open) => {
               if (!open) onCancelEdit();

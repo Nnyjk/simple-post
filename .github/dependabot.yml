@@ -1,0 +1,47 @@
+version: 2
+
+# Actions, npm and cargo deps were all drifting: the workflows pinned
+# floating `@v4` tags with nothing watching them, and nothing watched the
+# other two either. Three ecosystems, one file.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+    # Grouped so a floating-tag bump across five workflows is one reviewable
+    # PR instead of five that all need to merge before CI is meaningful.
+    groups:
+      actions-minor:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - ci
+
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - frontend
+
+  - package-ecosystem: cargo
+    directory: '/'
+    schedule:
+      interval: weekly
+    groups:
+      cargo-minor:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+      - backend

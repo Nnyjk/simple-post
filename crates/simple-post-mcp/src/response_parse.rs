@@ -1,23 +1,15 @@
-//! Response parsing + diff + JSONPath extraction.
+//! 响应解析 + diff + JSONPath 抽取。纯变换，无 I/O。
 //!
-//! Pure transforms — no I/O. Three public functions:
+//!   * [`parse`] —— 把 `(body, content_type, status, headers)` 折成
+//!     [`ParsedResponse`]（解析好的 JSON、字节数、状态文本）。MCP 的
+//!     `api_parse_response` 与渲染进程侧的预览都用它，省得在浏览器里再 parse 一遍。
+//!   * [`diff`] —— 在 JSON 结构层比较两个 [`ApiResponse`]，给出新增 / 删除 / 变更的
+//!     JSONPath 字符串，变更项另附 before/after 字面值。
+//!   * [`extract_jsonpath`] —— 对响应体跑一条 JSONPath 表达式，返回首个匹配（或
+//!     `None`）。
 //!
-//!   * [`parse`] — turn a raw `(body, content_type, status, headers)`
-//!     tuple into a [`ParsedResponse`] (parsed JSON, byte size, status
-//!     text). Used by the MCP `api_parse_response` tool and by the
-//!     renderer-side preview that wants `bodyJson` without re-parsing
-//!     in the browser.
-//!   * [`diff`] — compare two [`ApiResponse`] values and report what
-//!     changed at the JSON-structure level. JSONPath strings for
-//!     added / removed / changed paths, plus the literal
-//!     before/after values for changed paths.
-//!   * [`extract_jsonpath`] — run a JSONPath expression against a
-//!     response body, return the first match (or `None`).
-//!
-//! Diff implementation is a hand-rolled recursive walk — no
-//! `json-patch` dep. The renderer already does its own visual diff;
-//! this layer just produces a structural summary that any UI can
-//! render (added / removed / changed lists).
+//! diff 是手写的递归遍历，不引 `json-patch`。渲染进程已经自己画视觉 diff 了；这一层
+//! 只产出一份任何 UI 都能渲染的结构摘要（新增 / 删除 / 变更三个列表）。
 
 use serde_json::Value;
 use serde_json_path::JsonPathExt;
@@ -26,26 +18,22 @@ use serde::Serialize;
 use simple_post_core::domain::ApiResponse;
 
 // -------------------------------------------------------------------------
-// Public types
+// 公共类型
 // -------------------------------------------------------------------------
 
-/// Parsed view of a response. Adds a few derived fields on top of
-/// the raw input so downstream consumers don't have to re-parse.
+/// 响应的解析视图：在原始输入之上补几个派生字段，下游不必再解析一遍。
 #[derive(Debug, Clone)]
 pub struct ParsedResponse {
-    /// Parsed body for JSON content (else `None`).
+    /// JSON 内容的解析结果，否则 `None`。
     pub body_json: Option<Value>,
-    /// Byte length of the *truncated* body, matches the wire shape.
+    /// **截断后** body 的字节长度，与线上形状一致。
     pub size_bytes: u64,
-    /// Standard HTTP status reason phrase for the status code (e.g.
-    /// `"OK"` for 200). Empty when the code is non-standard.
+    /// 状态码的标准 reason phrase（如 200 → `"OK"`）；非标准码时为空。
     pub status_text: String,
 }
 
-/// One `before → after` pair at a single JSONPath. The "from" /
-/// "to" values are taken verbatim from the JSON tree at that path;
-/// a primitive type change (string vs number vs bool) shows up as
-/// a normal "changed" entry, not as remove+add.
+/// 某个 JSONPath 上的一组 before → after。`from` / `to` 直接取自该路径处的 JSON 树；
+/// 基本类型变化（字符串 / 数字 / 布尔）算作普通「变更」项，而不是删除 + 新增。
 #[derive(Debug, Clone, Serialize)]
 pub struct ChangedPath {
     pub path: String,
@@ -53,17 +41,15 @@ pub struct ChangedPath {
     pub to: Value,
 }
 
-/// Diff summary between two [`ApiResponse`] values. Empty collections
-/// mean "no change at that level". `status_text` / header diffs are
-/// out of scope here — callers that care compare those fields
-/// directly.
+/// 两个 [`ApiResponse`] 的 diff 摘要。空集合表示「该层无变化」。`status_text` 与
+/// 请求头 diff 不在范围内 —— 在意的调用方自己比那两个字段。
 #[derive(Debug, Clone, Default)]
 pub struct ResponseDiff {
-    /// JSONPath expressions that exist only in `b`.
+    /// 只在 `b` 里存在的 JSONPath。
     pub added_paths: Vec<String>,
-    /// JSONPath expressions that exist only in `a`.
+    /// 只在 `a` 里存在的 JSONPath。
     pub removed_paths: Vec<String>,
-    /// JSONPath expressions whose leaf value differs between `a` and `b`.
+    /// `a` 与 `b` 之间叶子值不同的 JSONPath。
     pub changed_paths: Vec<ChangedPath>,
 }
 
@@ -71,19 +57,12 @@ pub struct ResponseDiff {
 // parse
 // -------------------------------------------------------------------------
 
-/// Parse a raw HTTP response. Returns the structured view the
-/// renderer / MCP tool consumer wants.
+/// 解析原始 HTTP 响应，给出渲染进程 / MCP 工具想要的结构化视图。
 ///
-/// Behavior:
-///   * `body_json` is `Some` only when `content_type` contains
-///     `application/json` AND the body parses cleanly. A body
-///     that isn't JSON (or JSON with a syntax error) yields
-///     `body_json = None` — never an error.
-///   * `size_bytes` is the byte length of the input body as given
-///     (caller is responsible for truncating first if there's a
-///     size cap).
-///   * `status_text` is the canonical reason phrase (e.g. `"OK"`,
-///     `"Not Found"`) or `""` when the status is non-standard.
+///   * `body_json` 只有在 `content_type` 含 `application/json` **且** body 解析得通时
+///     才是 `Some`；不是 JSON（或 JSON 有语法错）一律 `None` —— 从不报错。
+///   * `size_bytes` 是传入 body 的字节长度；要限长由调用方先截断。
+///   * `status_text` 是规范 reason phrase（如 `"OK"`、`"Not Found"`），非标准码为 `""`。
 pub fn parse(
     body: &str,
     content_type: &str,
@@ -107,11 +86,9 @@ pub fn parse(
     }
 }
 
-/// Canonical HTTP reason phrase for a status code. Mirrors
-/// `http::StatusCode::canonical_reason()` without dragging the
-/// `http` crate in for this one use. Returns `""` for codes that
-/// aren't in the standard set (the renderer already treats empty
-/// as "non-standard" and falls back to its own phrasing).
+/// 状态码对应的规范 HTTP reason phrase。等同 `http::StatusCode::canonical_reason()`，
+/// 但不值得为此把 `http` crate 拖进来。集合外的码返回 `""`（渲染进程本就把空值当作
+/// 「非标准」，并回退到自己的措辞）。
 pub fn status_reason(status: u16) -> &'static str {
     match status {
         100 => "Continue",
@@ -180,22 +157,18 @@ pub fn status_reason(status: u16) -> &'static str {
 }
 
 // -------------------------------------------------------------------------
-// diff — hand-rolled recursive JSON walker.
+// diff —— 手写递归 JSON 遍历
 // -------------------------------------------------------------------------
 
-/// Compare two [`ApiResponse`] values at the JSON level.
+/// 在 JSON 层比较两个 [`ApiResponse`]。
 ///
-/// Rules:
-///   * If both bodies parse as JSON, run the recursive comparison.
-///   * If neither parses, compare bodies as strings — if they
-///     differ, report `$` as a single "changed" entry.
-///   * If one parses and the other doesn't, the parsed side wins:
-///     all its paths become "removed" (or "added", depending on
-///     which side has them), and `$` becomes "changed".
+///   * 两侧都能解析成 JSON → 跑递归比较。
+///   * 两侧都解析不了 → 当字符串比，不同就把 `$` 报成一条「变更」。
+///   * 只有一侧能解析 → 解析成功的那侧全部路径算「删除」（或「新增」，看它在哪侧），
+///     `$` 算「变更」。
 ///
-/// All three lists are sorted (added/removed lexicographically;
-/// changed by the JSONPath string) so the diff is stable across
-/// runs and easy to assert on in the test suite.
+/// 三个列表都排序（新增/删除按字典序，变更按 JSONPath 字符串），diff 因此跨次运行
+/// 稳定，单测也好断言。
 pub fn diff(a: &ApiResponse, b: &ApiResponse) -> ResponseDiff {
     let a_json = a.body_json.clone();
     let b_json = b.body_json.clone();
@@ -214,7 +187,7 @@ pub fn diff(a: &ApiResponse, b: &ApiResponse) -> ResponseDiff {
             d
         }
         (Some(av), None) => {
-            // All of `av`'s paths are "removed"; body itself is "changed".
+            // `av` 的全部路径算「删除」，body 本身算「变更」。
             let mut d = ResponseDiff::default();
             let mut paths: Vec<String> = Vec::new();
             collect_paths(&av, "$", &mut paths);
@@ -249,11 +222,8 @@ fn sort_diff(d: &mut ResponseDiff) {
     d.changed_paths.sort_by(|x, y| x.path.cmp(&y.path));
 }
 
-/// Recursive diff of two `serde_json::Value` trees. The path
-/// notation matches JSONPath for the cases we care about:
-///   `$` for the root,
-///   `$.key` for object members,
-///   `$[i]` for array elements.
+/// 两棵 `serde_json::Value` 的递归 diff。路径写法与我们关心的情形下的 JSONPath 一致：
+/// 根是 `$`，对象成员是 `$.key`，数组元素是 `$[i]`。
 fn diff_values(a: &Value, b: &Value) -> ResponseDiff {
     let mut added: Vec<String> = Vec::new();
     let mut removed: Vec<String> = Vec::new();
@@ -277,27 +247,26 @@ fn walk(
     removed: &mut Vec<String>,
     changed: &mut Vec<ChangedPath>,
 ) {
-    // Same JSON type AND same value → leaf equality.
+    // 同类型且同值 → 叶子相等。
     if a == b {
         return;
     }
     match (a, b) {
         (Value::Object(am), Value::Object(bm)) => {
-            // Keys only in `b` → added.
+            // 只在 `b` 里的键 → 新增。
             for (k, v) in bm {
                 let child = format!("{path}.{k}");
                 match am.get(k) {
                     Some(av) => walk(av, v, &child, added, removed, changed),
                     None => {
-                        // Whole subtree added; collect every leaf path
-                        // so the renderer can highlight each one.
+                        // 整棵子树新增；收集每个叶子路径，渲染进程才能逐个高亮。
                         let mut leaves: Vec<String> = Vec::new();
                         collect_paths(v, &child, &mut leaves);
                         added.extend(leaves);
                     }
                 }
             }
-            // Keys only in `a` → removed.
+            // 只在 `a` 里的键 → 删除。
             for (k, v) in am {
                 if !bm.contains_key(k) {
                     let child = format!("{path}.{k}");
@@ -314,7 +283,7 @@ fn walk(
                 match (av.get(i), bv.get(i)) {
                     (Some(x), Some(y)) => walk(x, y, &child, added, removed, changed),
                     (Some(x), None) => {
-                        // Tail removed.
+                        // 尾部被截掉。
                         let mut leaves: Vec<String> = Vec::new();
                         collect_paths(x, &child, &mut leaves);
                         removed.extend(leaves);
@@ -328,8 +297,7 @@ fn walk(
                 }
             }
         }
-        // Type changed (e.g. string ↔ number) or both primitives
-        // with different values → leaf change.
+        // 类型变了（如字符串 ↔ 数字）或同为基本类型但值不同 → 叶子变更。
         _ => {
             changed.push(ChangedPath {
                 path: path.to_string(),
@@ -340,9 +308,8 @@ fn walk(
     }
 }
 
-/// Collect every JSONPath leaf under `v`, prefixing each with
-/// `prefix`. Used to expand "subtree added/removed" into the
-/// flat list the renderer wants.
+/// 收集 `v` 下每个 JSONPath 叶子，各自加上 `prefix`。把「整棵子树新增/删除」摊成
+/// 渲染进程要的扁平列表。
 fn collect_paths(v: &Value, prefix: &str, out: &mut Vec<String>) {
     match v {
         Value::Object(map) => {
@@ -365,18 +332,10 @@ fn collect_paths(v: &Value, prefix: &str, out: &mut Vec<String>) {
 // extract_jsonpath
 // -------------------------------------------------------------------------
 
-/// Run a JSONPath expression against `body` and return the first
-/// match, or `None`.
+/// 对 `body` 跑一条 JSONPath 表达式，返回首个匹配，或 `None`。
 ///
-/// Returns `None` (not `Err`) when:
-///   * the body isn't JSON,
-///   * the body fails to parse,
-///   * the JSONPath expression fails to parse,
-///   * the query yields zero matches.
-///
-/// This deliberately mirrors the lenient semantics of the existing
-/// MCP `extract_jsonpath_stub` — callers want "first match" or
-/// "nothing", not a typed error.
+/// 以下情形返回 `None` 而不是 `Err`：body 不是 JSON；body 解析失败；表达式解析失败；
+/// 零匹配。调用方要的是「首个匹配」或「没有」，不是一个带类型的错误。
 pub fn extract_jsonpath(body: &str, content_type: &str, path: &str) -> Option<Value> {
     if !content_type
         .to_ascii_lowercase()
@@ -384,11 +343,9 @@ pub fn extract_jsonpath(body: &str, content_type: &str, path: &str) -> Option<Va
     {
         return None;
     }
-    // Guard against `serde_json_path` 0.1's lenient parser, which
-    // happily turns "$$ bad path" / "@@nope" into a query that matches
-    // the root. Per RFC 9535 a JSONPath must start with `$`; we also
-    // reject bare whitespace inside the path so we don't silently
-    // resolve user typos to "everything".
+    // 防的是 `serde_json_path` 0.1 那个宽松解析器：它会把 "$$ bad path" / "@@nope"
+    // 也变成一条能匹配到根的查询。RFC 9535 要求 JSONPath 以 `$` 开头；路径里出现裸
+    // 空白也一并拒绝，免得把用户笔误静默解析成「全都匹配」。
     let trimmed = path.trim();
     if !trimmed.starts_with('$') {
         return None;
@@ -398,9 +355,8 @@ pub fn extract_jsonpath(body: &str, content_type: &str, path: &str) -> Option<Va
     }
     let value: Value = serde_json::from_str(body).ok()?;
     let query = value.json_path(trimmed).ok()?;
-    // `as_node` returns Some only when there's exactly one match.
-    // For zero or many matches we fall through to `as_node_list` so
-    // callers still get something rather than a silent empty result.
+    // `as_node` 只有恰好一个匹配时才返回 Some；零个或多个都落到 `as_node_list`，
+    // 好让调用方仍拿到东西，而不是一个静默的空结果。
     if let Some(node) = query.as_node() {
         return Some(node.clone());
     }
@@ -409,7 +365,7 @@ pub fn extract_jsonpath(body: &str, content_type: &str, path: &str) -> Option<Va
 }
 
 // -------------------------------------------------------------------------
-// Tests
+// 测试
 // -------------------------------------------------------------------------
 
 #[cfg(test)]

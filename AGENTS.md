@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-`simple-post` is a desktop API client/debugger (Postman-like, Windows-first) whose core differentiator is a **built-in MCP server**: external AI clients (Claude Desktop, Cursor, Cline) can list/search/run/mutate endpoints through 44 MCP tools. Stack: **Tauri 2 + React 18 + TypeScript** frontend over a **Cargo workspace** (SQLite via `rusqlite`, `reqwest`, `axum`), shipping both a desktop app and a standalone npm-distributed MCP binary.
+`simple-post` is a desktop API client/debugger (Postman-like, Windows-first) whose core differentiator is a **built-in MCP server**: external AI clients (Claude Desktop, Cursor, Cline) can list/search/run/mutate endpoints through 44 MCP tools. Stack: **Tauri 2 + React 18 + TypeScript** frontend over a **Cargo workspace** (SQLite via `rusqlite`, `reqwest`, `axum`), shipping three shapes off one Rust core — the Tauri desktop app, the headless `serve-web` REST+SPA host, and the `simple-post-mcp` bridge. The bridge ships as a **compiled binary only** (release artefact / `cargo install`); there is no npm package for it — see Runtime/Tooling Preferences.
 
-Docs are partly Chinese (`README.md`, crate READMEs); code/identifiers are English.
+Docs are partly Chinese (`README.md`, the two crate READMEs); code/identifiers are English. Division of labour: `README.md` is the human-facing product doc (positioning, distribution shapes, deployment constraints, roadmap); this file is the **agent runtime contract** (invariants, traps, file map). When the two would repeat each other, a fact belongs here only if an agent would break it by not knowing it.
 
 ## Architecture & Data Flow
 
@@ -99,9 +99,21 @@ node scripts/dump-openapi.mjs > openapi.yaml      # render the OpenAPI spec from
 
 Lint/format tooling: **ESLint 10 (flat config) + Prettier 3**. ESLint owns correctness (`rules-of-hooks`, unused vars, …); style belongs to Prettier (`eslint-config-prettier` sits last in the config). Rust side: `cargo fmt`, `cargo clippy` with `-D warnings`.
 
-**CI quality gate** — `.github/workflows/ci.yml` runs on every push to `main` and every PR (`release.yml` only publishes):
-- `web` (ubuntu, Node 22): `format:check` → `lint` → `typecheck` → `npm test` → `vite build`
-- `rust` (windows-latest): `cargo fmt --check` → `clippy -D warnings` → `cargo test --workspace`
+**CI quality gate** — `.github/workflows/ci.yml`, on every push to `main`, every PR, a weekly schedule and manual dispatch:
+
+- `Web — format, lint, typecheck, test, build` (ubuntu, Node 22): `format:check` → `lint` → `typecheck` → `npm test` → `vite build`
+- `Rust — fmt, clippy, test` (windows-latest): `cargo fmt --check` → `clippy -D warnings` → `cargo test --workspace`. `swatinem/rust-cache` runs with `cache-target: true`, because three separate cargo invocations each cold-compiling the same `target/` was the expensive half.
+- `Docker — image build + container smoke test` (ubuntu, 75 min budget): builds `linux/amd64`, then runs a **running-container** smoke test — HEALTHCHECK wait, `/healthz` body assertion, SPA shell + hashed asset fetch, unauthenticated `/api/*` → 401, project create over REST, `id -u == 10001`, no `libgtk`/`libwebkit`, and a *replaced* container against the same named volume.
+
+Those three display names are the **required status checks** configured on `main` (see #25). Renaming a job is therefore a settings change, not just a YAML edit.
+
+`web` and `rust` are unconditional — measured at 37s and 1m57s, they cost nothing to always run, and keeping them unconditional is what makes "a skipped required check means passed" safe. `docker` was 18m14s, 98.7% of a full run, so it alone is scope-gated by a `changes` job using `dorny/paths-filter`: a README-only PR skips it. Its `if` is `!cancelled() && outputs.docker != 'false'` — the fail-closed half, so a broken filter runs the gate instead of reporting green. A skipped job is reported successful, which is why a skipped required check is acceptable.
+
+`Docker — linux/arm64 compile check (advisory)` is a separate job running only on `main`, the weekly schedule, or manual dispatch, with `continue-on-error` at job level. It was never a gate; it just should not have run on every PR.
+
+Publishing: `release.yml` (desktop installers, draft) and `publish-image.yml` (GHCR, `linux/amd64` + `linux/arm64`) both trigger on `v*`. Both use `cancel-in-progress: false` — cancelling a publish halfway leaves a partial release, which is worse than the duplicate it prevents.
+
+The smoke test asserts the **response body**, not the status line: an unrouted path falls through to the ServeDir SPA fallback and returns `200 text/html`, so a status-only assertion cannot fail. See the `is_public_path` entry under Code Conventions.
 
 Keep `npm run check` green locally before pushing — CI runs the same checks.
 
@@ -126,6 +138,20 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 **Routing.** Axum 0.7 path params use `:id` syntax (`/api/projects/:id`), not `{id}`.
 
 **Naming.** Rust: `snake_case` functions/modules/columns, `PascalCase` types. Tauri commands `snake_case` in Rust, `camelCase` in the frontend `COMMANDS` registry. Test files: `*.test.ts`; Rust tests go in a **sibling** `*_test.rs` file mounted by `#[path]`, not inline (the inline form survives only in a few files under `src-tauri/` — see Testing & QA).
+
+**Source comments — two rules, both binding on Rust and TS sources.** Comments in this repo had drifted into a retrospective style — "This shipped once on x", "both ways to silently become a no-op, and both shipped" — with no rule ever stated, which is how the drift went unnoticed. Two explicit rules now govern every comment. A repaired defect is not a constraint, so narrative about one is dead weight for whoever reads the code next.
+
+1. **Only what holds _now_.** Delete past-tense narrative — `// shipped once on api_call_endpoint`, `// early versions made nginx strip the prefix`, `// used to render a ghost row here`. Keep current invariants — `// may point at a row outside the current list; check membership before use`, `// cannot use sort here: sort is stable and that breaks the server's same-millisecond rowid DESC tiebreak`. The discriminator is not how much a comment says, it is whether the constraint it names still holds. An invariant no reader can reconstruct from the code is worth keeping; a bug that is already fixed is not.
+2. **Chinese, terse, one point per comment.** Compress prose to the conclusion plus the reason it matters, and keep only the part of the reason that says what breaks if you write it the obvious way. Do not restate the code — the code is the documentation. One to three lines; use a short list when it genuinely has to expand.
+
+Identifiers, keywords, API names, column names and wire strings stay as written: they are not translatable prose. A comment that must quote code should quote the smallest fragment that carries the constraint.
+
+Two hazards specific to this repo. Several regression tests read the source **as text** (`include_str!`), and two of them do *not* skip comment lines — so a prose edit alone can turn them red:
+
+- `mcp/mod_test.rs::no_gate_is_passed_the_literal_global` looks for `check_permission(` and `"global"` in the same `;`-delimited statement. Never write that call shape as a comment example anywhere under `crates/simple-post-mcp/src/`.
+- `daemon_supervisor_test.rs::the_shared_spawn_path_stays_free_of_tauri` does a raw `body.contains(...)` over the whole brace-matched body of `ensure_started_with` for `AppHandle`, `tauri::`, `Emitter` and `EmitterExt`. A comment inside that function naming any of those four makes the test fail. Its own test body is written around exactly this.
+
+Do not loosen either test or delete it to make a comment edit pass. The assertions are worth more than the prose is.
 
 **Async/concurrency.** tokio multi-thread runtime; metrics via `AtomicU64` with `Ordering::Relaxed`; `port_registry.rs` uses OS atomic file creation (`create_new`) to prevent multi-instance races.
 
@@ -194,7 +220,8 @@ The regression net is `scripts/test-web-basepath.mjs`, which parses the served s
 - `tsconfig.json`, `package.json`, `tailwind.config.js`
 - `eslint.config.js`, `.prettierrc`, `.prettierignore` — lint/format rules and scope
 - `.editorconfig`, `.gitattributes` — LF-everywhere policy (only `*.bat`/`*.cmd` are CRLF)
-- `.github/workflows/ci.yml` — the push/PR quality gate; `release.yml` only publishes
+- `.github/workflows/ci.yml` — the push/PR quality gate; `release.yml` publishes desktop installers on a `v*` tag, `publish-image.yml` publishes the matching multi-arch container image
+- `.github/dependabot.yml` — github-actions / npm / cargo, weekly, minor+patch grouped
 - `scripts/run-tests.mjs` — test discovery runner behind `npm test`
 
 ## Runtime/Tooling Preferences
@@ -207,7 +234,7 @@ The regression net is `scripts/test-web-basepath.mjs`, which parses the served s
 - **Line endings: LF everywhere** — `.gitattributes` (`* text=auto eol=lf`) overrides `core.autocrlf`; `.editorconfig` mirrors it for editors (UTF-8, final newline, trim whitespace, 2-space default / 4 for `*.rs`, Markdown keeps trailing spaces). Only `*.bat` / `*.cmd` stay CRLF.
 - **Prettier scope**: `*.md` and lockfiles are in `.prettierignore` — hand-maintained prose stays byte-stable. There is no longer a generated `docs/openapi.yaml` in the tree (`docs/` was removed); if you render one, put it outside the repo or add it to `.prettierignore` yourself.
 - Windows-first: PowerShell helpers in `scripts/*.ps1`. When writing UTF-8 files from PowerShell, specify `-Encoding utf8NoBOM` — 5.1's default ANSI encoding corrupts UTF-8 and can break `rustc`.
-- Multi-worker convention (per `README.md`): parallel workers deliver code only; end-to-end/browser verification is done once by the main session.
+- Multi-worker convention: parallel workers deliver code only; end-to-end/browser verification is done once by the main session. The reason is shared-resource contention — several agents on one dev server, one browser session and one writable file collide, and the symptom looks like a flaky failure rather than a conflict.
 
 ## Testing & QA
 

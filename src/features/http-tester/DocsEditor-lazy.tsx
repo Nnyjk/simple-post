@@ -1,12 +1,11 @@
 /**
- * Lazy boundary for the endpoint docs editor.
+ * 接口文档编辑器的 lazy 边界。
  *
- * `marked` is 36 kB raw / 11 kB gzip and is only reachable from the docs
- * tab. Statically importing it put the markdown chunk in the entry's
- * critical path for every user, including those who never open docs.
+ * `marked` 未压缩 36 kB / gzip 11 kB，且只有文档页够得着；静态引入它会把 markdown
+ * chunk 放进每个人的 entry 关键路径，包括从不打开文档的那些人。
  *
- * Same contract as `DocsEditor` (string in, string out); `HttpTester` is
- * unaware that the implementation is now behind a chunk boundary.
+ * 与 `DocsEditor` 同一契约（字符串进、字符串出）；`HttpTester` 无需知道实现现在在
+ * chunk 边界之后。
  */
 import { Suspense, lazy } from 'react';
 

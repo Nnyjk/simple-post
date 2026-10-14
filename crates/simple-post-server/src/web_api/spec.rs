@@ -1,46 +1,40 @@
 // =========================================================================
-// Public HTTP API contract
+// 公共 HTTP API 契约
 // =========================================================================
 //
-// `RouteSpec` is the single source of truth for which `/api/*` routes
-// are part of the stable contract. `scripts/dump-openapi.mjs` reads this
-// list (plus the corresponding `WEB_ROUTES` entries in
-// `src/lib/tauri-commands.ts`) to generate an OpenAPI document. Anything
-// NOT in `public_route_specs()` is treated as `internal` — not part of
-// the stable v1 contract, no backward-compat promise.
+// `RouteSpec` 是「哪些 `/api/*` 路由属于稳定契约」的唯一事实来源。
+// `scripts/dump-openapi.mjs` 读这份表（配合 `src/lib/tauri-commands.ts` 的
+// `WEB_ROUTES`）生成 OpenAPI 文档。不在 `public_route_specs()` 里的一律按
+// `internal` 处理——不在 v1 稳定契约内，无向后兼容承诺。
 //
-// Stability rules:
-//   * `public`   — endpoint shape, auth, and response codes are stable.
-//                  Breaking changes require a `/api/v2/*` migration.
-//   * `internal` — no version commitment; UI / supervisor use only.
+// 稳定性分级：
+//   * `public`   —— 端点形状、鉴权、响应码稳定。破坏性变更需走 `/api/v2/*` 迁移。
+//   * `internal` —— 无版本承诺，只供 UI / supervisor 使用。
 //
-// This list is hand-curated and intentionally does NOT enumerate every
-// axum router binding (e.g. `/mcp/*` from `daemon_http` are out of
-// scope — they're a JSON-RPC MCP contract, documented separately).
+// 本表为手工维护，**故意**不枚举每一条 axum 路由绑定（如 `/mcp/*` 属于另一套
+// JSON-RPC MCP 契约，另行记录）。
 
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RouteSpec {
-    /// HTTP method (GET / POST / PUT / PATCH / DELETE).
+    /// HTTP 方法（GET / POST / PUT / PATCH / DELETE）。
     pub method: &'static str,
-    /// Path template (axum syntax: `/api/projects/:id`).
+    /// 路径模板（axum 语法：`/api/projects/:id`）。
     pub path: &'static str,
-    /// Short description for the OpenAPI doc.
+    /// OpenAPI 文档里的简短说明。
     pub summary: &'static str,
-    /// `'public'` part of the stable v1 contract, or `'internal'`.
+    /// `'public'` 属 v1 稳定契约，`'internal'` 不是。
     pub stability: &'static str,
-    /// Optional request body shape name (looked up by the OpenAPI dumper).
-    /// `None` means "no body" or "shape not yet documented".
+    /// 可选的请求体形状名（由 OpenAPI dumper 查表）。`None` 表示无请求体，
+    /// 或该形状尚未记录。
     pub request: Option<&'static str>,
-    /// Optional response shape name. `None` means "shape not yet
-    /// documented" — the dumper emits an `unknown` placeholder.
+    /// 可选的响应形状名。`None` 会让 dumper 输出 `unknown` 占位。
     pub response: Option<&'static str>,
 }
 
-/// Single source of truth for the public HTTP API. **Hand-curated** —
-/// any new endpoint that should be in the v1 stable contract MUST be
-/// added here. Anything absent is `internal` and not part of OpenAPI.
+/// 公共 HTTP API 的唯一事实来源。**手工维护**——任何应进入 v1 稳定契约的新
+/// 端点都必须在此登记。缺席者按 `internal` 处理，不进 OpenAPI。
 pub fn public_route_specs() -> Vec<RouteSpec> {
     vec![
         // ---- health -----------------------------------------------------
@@ -94,11 +88,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             response: Some("DeleteAck"),
         },
         // ---- resource tree ---------------------------------------------
-        // Replaces the 19 /api/modules/*, /api/collections/* and
-        // /api/endpoints/* paths these used to be spread across. The
-        // structural update and the endpoint configuration are separate
-        // routes on purpose: a rename must not rewrite JSON columns that
-        // did not change.
+        // 结构更新与 endpoint 配置刻意分成两条路由：一次改名不该重写那些
+        // 根本没变的 JSON 列。
         RouteSpec {
             method: "GET",
             path: "/api/nodes",
@@ -180,10 +171,9 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             response: Some("ResourceNode"),
         },
         // ---- baseUrl definitions ----------------------------------------
-        // A service belongs to the project, so the read and both writes
-        // hang off `/api/projects/:projectId/baseurls`. Only the id-scoped
-        // verbs stay under `/api/baseurl-defs/:defId`, because a rename or
-        // a delete names the service itself and needs no project context.
+        // 服务属于项目，故读与两个写挂在 `/api/projects/:projectId/baseurls`。
+        // 只有按 id 的动词留在 `/api/baseurl-defs/:defId`：改名或删除点名的是服务
+        // 本身，不需要项目上下文就能找到它。
         RouteSpec {
             method: "GET",
             path: "/api/projects/:projectId/baseurls",
@@ -292,16 +282,11 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             response: Some("Environment"),
         },
         // ---- response history -------------------------------------------
-        // Listed because the browser build needs it: the response-history
-        // strip is renderer state that used to be lost on every relaunch,
-        // and these three routes are the second half of the fix — the
-        // first half is the `/api/endpoint-details` read they are
-        // rendered next to.
+        // 登记它们是因为浏览器端要用：三个动词与 `/api/endpoint-details` 的读
+        // 一起构成响应历史条的持久化面。
         //
-        // The list and the clear share one path because they act on the
-        // same unit — a single endpoint's rows. Only the append is
-        // collection-level, because the id it names is in its body
-        // alongside the response; see `routes/response_history.rs`.
+        // 列表与清除共用一条路径，因为作用对象都是「某个 endpoint 的若干行」；
+        // 只有追加是集合级的，它点的 id 在 body 里，见 `routes/response_history.rs`。
         RouteSpec {
             method: "GET",
             path: "/api/response-history/:endpointId",
@@ -338,12 +323,10 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             response: Some("HttpResult"),
         },
         // ---- mcp daemon lifecycle (manual switch) ----------------------
-        // Documented rather than left internal: `start` / `stop` are the
-        // renderer-facing ON/OFF switch for the embedded daemon, they
-        // share the Tauri commands `mcp_daemon_start` /
-        // `mcp_daemon_stop`, and they are the pair a third-party client
-        // needs in order to control the daemon at runtime. Both answer
-        // with the same `{ ok, pid, port }` envelope as `/restart`.
+        // 登记而非留作 internal：`start` / `stop` 是 renderer 侧的 daemon 开关，
+        // 与 Tauri 命令 `mcp_daemon_start` / `mcp_daemon_stop` 同源，也是第三方
+        // 客户端在运行时控制 daemon 所需的那一对。两者都回与 `/restart` 相同的
+        // `{ ok, pid, port }` 信封。
         RouteSpec {
             method: "POST",
             path: "/api/mcp/start",
@@ -364,10 +347,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             response: Some("RestartResult"),
         },
         // ---- internal (not in OpenAPI v1) -------------------------------
-        // The following endpoints are intentionally NOT listed above —
-        // they are supervisor / UI projections and have no version
-        // commitment. They appear in `WEB_ROUTES` for runtime access but
-        // the OpenAPI v1 doc omits them.
+        // 以下端点刻意不登记：它们是 supervisor / UI 的投影，无版本承诺。它们
+        // 在 `WEB_ROUTES` 里可供运行时访问，但 OpenAPI v1 文档省略。
         //   GET  /api/mcp/status             - daemon status (UI)
         //   POST /api/mcp/restart            - daemon restart
         //   GET  /api/mcp/proxy-path         - mcp_proxy binary path
@@ -378,8 +359,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         //   PUT  /api/mcp/http-config        - daemon listener configuration
         //   GET  /api/preferences            - raw preferences dump (UI)
         //   PUT  /api/preferences            - raw preferences patch
-        // /api/permissions* and /api/request_settings* are intentionally
-        // absent from the public contract. The baseUrl-def family is now
-        // documented above.
+        // `/api/permissions*` 与 `/api/request_settings*` 同样刻意不在公共契约内。
+        // baseUrl-def 一族已登记在上方。
     ]
 }

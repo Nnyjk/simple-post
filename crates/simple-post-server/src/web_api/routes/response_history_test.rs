@@ -1,16 +1,12 @@
-//! Routing and wire shape for the response-history routes.
+//! 响应历史路由的路由与线格式。
 //!
-//! Driven against a real listener for the reason `base_url_defs_test.rs`
-//! gives: whether `/api/response-history` and
-//! `/api/response-history/:endpointId` coexist in axum's radix tree is a
-//! property of the router, not something the registration code can assert
-//! about itself by reading. The failure mode is nasty because it is
-//! silent — a route that lost the precedence fight falls through to the
-//! SPA fallback and answers `200` with an HTML body, which to `curl` looks
-//! exactly like a working endpoint that happens to ignore its path.
+//! 驱动真实 listener，理由同 `base_url_defs_test.rs`：`/api/response-history` 与
+//! `/api/response-history/:endpointId` 能否在 axum 的 radix tree 里共存，是 router 的
+//! 性质，不是注册代码读一读就能断言的。失败形态之所以难缠，是因为它是静默的——抢
+//! 优先级失败的路由会落到 SPA fallback，回 `200` 加一个 HTML body，在 curl 看来与一个
+//! 「恰好忽略自己路径」的正常端点毫无区别。
 //!
-//! The discriminator used throughout is therefore the *body*: these tests
-//! read the JSON back rather than only checking the status code.
+//! 故全篇的判别依据是 *body*：这些测试把 JSON 读回来，而不只是看状态码。
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -20,12 +16,11 @@ use serde_json::json;
 
 use crate::web_api::{build_router, WebState};
 
-/// A `WebState` over a throwaway SQLite file plus an empty SPA dir, with
-/// the router bound to an ephemeral port on loopback.
+/// 建一个 `WebState`：一次性的 SQLite 文件 + 空 SPA 目录，router 绑在 loopback 上一个
+/// 临时端口。
 ///
-/// Copied from `base_url_defs_test.rs` rather than shared: the counter is
-/// per-module, and a shared harness across two `#[path]` test modules
-/// would need a `pub(crate)` home neither of them owns.
+/// 从 `base_url_defs_test.rs` 复制而来而非共用：计数器是每模块各自的，而跨两个
+/// `#[path]` 测试模块共享一套夹具需要一个谁都不拥有的 `pub(crate)` 落点。
 async fn serve_test_router() -> (SocketAddr, PathBuf) {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -66,13 +61,11 @@ async fn serve_test_router() -> (SocketAddr, PathBuf) {
     (addr, dir)
 }
 
-/// Seed one project holding one module and one endpoint under it.
+/// 种下一个项目，含一个模块与其下一个 endpoint。
 ///
-/// The endpoint is what `response_history.endpoint_id` references, and the
-/// `nodes.root_id` column it denormalises is what the project-scoped list
-/// joins through — so an endpoint seeded without a root would make the
-/// list legitimately empty and the append would fail its foreign key,
-/// which would look like a routing bug in every test below.
+/// 这个 endpoint 正是 `response_history.endpoint_id` 引用的对象，而它冗余的
+/// `nodes.root_id` 列正是项目级列表 join 所经的路径——种一个没有 root 的 endpoint
+/// 会让列表理所当然地空掉、append 撞上外键，于是下面每个测试都长得像路由 bug。
 async fn seed_tree(dir: &std::path::Path) {
     let pool = crate::db::init(dir).expect("db init");
     crate::db::with_tx(&pool, |c| {
@@ -89,9 +82,9 @@ async fn seed_tree(dir: &std::path::Path) {
              (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
              VALUES ('e1', 'p1', 'mod_a', 'endpoint', 'GET /orders', 0, 1, 1)",
         )?;
-        // A sibling endpoint, so the scoping tests have two endpoints to
-        // tell apart. `response_history.endpoint_id` is a foreign key onto
-        // `nodes`, so an append naming `e2` has to find a real row.
+        // 一个兄弟 endpoint，好让作用域测试有两个可分辨的对象。
+        // `response_history.endpoint_id` 是指向 `nodes` 的外键，故点名 `e2` 的
+        // append 必须找得到真实行。
         c.execute_batch(
             "INSERT INTO nodes \
              (id, root_id, parent_id, type, name, sort_order, created_at, updated_at) \
@@ -144,10 +137,9 @@ async fn delete_json(addr: SocketAddr, path: &str) -> (reqwest::StatusCode, serd
     (status, body)
 }
 
-/// The body the renderer sends after folding `ApiResponse`'s header pairs
-/// through `tuplesToRecord`. `bodyJson` is omitted entirely — the domain
-/// type carries `skip_serializing_if`, so a response the caller never
-/// parsed is a shape without that key, and the route has to accept it.
+/// renderer 把 `ApiResponse` 的 header 对经 `tuplesToRecord` 折叠后发的 body。`bodyJson`
+/// 整个省略——domain 类型带 `skip_serializing_if`，故调用方从未解析过的响应就是
+/// 没有这个键的形状，路由必须能接受。
 fn append_body() -> serde_json::Value {
     serde_json::json!({
         "endpointId": "e1",
@@ -165,10 +157,8 @@ fn append_body() -> serde_json::Value {
     })
 }
 
-/// `POST` then `GET` — the round trip the strip depends on, and the one
-/// that fails loudly if either route was never registered (a missing
-/// route answers with the SPA shell's `200` and an HTML body, and this
-/// would compare HTML to a list).
+/// 先 `POST` 再 `GET`——历史条依赖的往返，且任一条路由从未注册都会让它响亮地失败
+/// （缺路由时回的是 SPA shell 的 `200` 加 HTML body，这里就会拿 HTML 去比一个列表）。
 #[tokio::test]
 async fn append_then_list_answers_both_routes() {
     let (addr, dir) = serve_test_router().await;
@@ -178,10 +168,10 @@ async fn append_then_list_answers_both_routes() {
     assert_eq!(status, 201, "append route must answer, got {entry}");
     assert_eq!(entry["endpointId"], "e1");
     assert_eq!(entry["response"]["status"], 200);
-    // The server mints both of these; the caller's body carried neither.
+    // 这两个都由服务端铸造；调用方的 body 一个都没带。
     assert!(entry["id"].as_str().is_some_and(|s| !s.is_empty()));
     assert!(entry["createdAt"].as_i64().is_some_and(|n| n > 0));
-    // Defaults a renderer that omits them must not have to send.
+    // 省略了它们时不应要求 renderer 发送的默认值。
     assert_eq!(entry["bodyTruncated"], false);
     assert!(entry["response"]["error"].is_null());
 
@@ -194,12 +184,10 @@ async fn append_then_list_answers_both_routes() {
     assert_eq!(rows[0]["response"]["url"], "http://x/orders");
 }
 
-/// An endpoint nobody has sent to is `[]`, not `404`.
+/// 没人发过请求的 endpoint 回 `[]`，不是 `404`。
 ///
-/// This is the commonest request the strip makes — every endpoint opened
-/// for the first time — and "brand new endpoint" is an empty history, not
-/// a missing resource. A `404` would make the two indistinguishable on
-/// both transports.
+/// 这是历史条最常发的请求——每个首次被打开的 endpoint 都会来一次——而「全新 endpoint」
+/// 是空历史而非缺失资源。回 `404` 会让两者在两条 transport 上都无法区分。
 #[tokio::test]
 async fn an_endpoint_with_no_history_reads_as_empty() {
     let (addr, dir) = serve_test_router().await;
@@ -210,9 +198,8 @@ async fn an_endpoint_with_no_history_reads_as_empty() {
     assert_eq!(body.as_array().map(Vec::len), Some(0));
 }
 
-/// The list is scoped to its endpoint, so a sibling's rows must not leak
-/// into it. The renderer keys the map by `endpointId` without re-checking
-/// every row, which is only sound because the read is this narrow.
+/// 列表收窄到自己的 endpoint，故兄弟的行不能漏进来。renderer 按 `endpointId` 建键
+/// 而不逐行复核，这只有在这个读取足够窄的前提下才成立。
 #[tokio::test]
 async fn the_list_never_includes_a_sibling_endpoints_rows() {
     let (addr, dir) = serve_test_router().await;
@@ -233,10 +220,8 @@ async fn the_list_never_includes_a_sibling_endpoints_rows() {
     );
 }
 
-/// The id-scoped GET and DELETE share one path, and the collection-level
-/// POST has to coexist with them in the radix tree. `removed` is the whole
-/// reason this delete does not answer `204` like its neighbours, so the
-/// count is asserted too.
+/// 按 id 的 GET 与 DELETE 共用一条路径，集合级的 POST 必须与它们在 radix tree 里共存。
+/// `removed` 正是这个删除不像邻路由那样回 `204` 的全部理由，故连计数一起断言。
 #[tokio::test]
 async fn clear_answers_how_many_rows_went() {
     let (addr, dir) = serve_test_router().await;
@@ -248,8 +233,7 @@ async fn clear_answers_how_many_rows_went() {
     assert_eq!(status, 200, "clear route must answer, got {body}");
     assert_eq!(body["removed"], 1);
 
-    // Idempotent: the second clear has nothing to remove and says so,
-    // rather than 404-ing on an endpoint that is still alive.
+    // 幂等：第二次清除没东西可删，如实说 0，而不是对一个仍活着的 endpoint 回 404。
     let (status, body) = delete_json(addr, "/api/response-history/e1").await;
     assert_eq!(status, 200, "clearing twice is not an error, got {body}");
     assert_eq!(body["removed"], 0);
@@ -258,9 +242,8 @@ async fn clear_answers_how_many_rows_went() {
     assert_eq!(rows.as_array().map(Vec::len), Some(0));
 }
 
-/// The cap is enforced in `db::response_history::append`, not here — but
-/// this is the transport-level proof that eleven POSTs leave ten rows,
-/// i.e. that every writer goes through the trimming path.
+/// 上限由 `db::response_history::append` 强制而非在此——但这是 transport 层面的证据：
+/// 十一次 POST 只剩十行，即每个写入方都走了裁剪路径。
 #[tokio::test]
 async fn the_per_endpoint_cap_holds_across_transport_appends() {
     let (addr, dir) = serve_test_router().await;

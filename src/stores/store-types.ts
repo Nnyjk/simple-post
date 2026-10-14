@@ -1,26 +1,20 @@
 /**
- * Shared type + constant declarations used across multiple slice modules.
+ * 跨多个切片模块共用的类型与常量声明。
  *
- * Lives in its own file (rather than each slice re-declaring the same
- * types) because several slices need to agree on the same shape —
- * e.g. UiSlice's `openTabs` ↔ DirtyTabsSlice's `pendingDirtyClose`
- * both refer to `OpenTab`. Putting the canonical declaration here
- * keeps each slice's own types file tiny and avoids the "two copies
- * that drifted" failure mode.
+ * 单独成文件（而不是每个切片各声明一遍）是因为好几个切片必须对同一形状达成
+ * 一致——例如 UiSlice 的 `openTabs` 与 DirtyTabsSlice 的 `pendingDirtyClose`
+ * 都引用 `OpenTab`。规范声明放这里，各切片的类型文件就能保持极小，
+ * 避免"两份拷贝各自漂移"这种失败模式。
  *
- * This file is intentionally TYPE-ONLY + a couple of small runtime
- * constants. The slice creators import from it but never call into
- * it; runtime state lives in the slice modules themselves.
+ * 本文件有意只含类型加几个小的运行时常量。切片工厂只 import，从不调用它；
+ * 运行时状态留在切片模块自己那里。
  */
 import type { AuthConfig, HttpMethod, KeyValue, RequestBody } from '@/types/domain';
 
-/** Visual theme preset. Drives CSS variables on the document root. */
+/** 视觉主题预设。驱动 document 根节点上的 CSS 变量。 */
 export type Theme = 'dark' | 'light' | 'system';
 
-/**
- * Tunable knobs for the HTTP executor. Persisted to localStorage so
- * users don't have to re-set them between sessions.
- */
+/** HTTP 执行器的可调项。落 localStorage，免得每次会话都要重设。 */
 export interface RequestSettings {
   timeoutMs: number;
   followRedirects: boolean;
@@ -28,75 +22,66 @@ export interface RequestSettings {
 }
 
 /**
- * The kinds that still open a *create dialog*. An endpoint is deliberately
- * absent: creating one asks no questions (the node you clicked is the
- * parent), so it writes straight to a frontend draft and lands in rename —
- * see `slices/ui-new-item.ts::createEndpointAt`.
+ * 仍然会弹出**新建对话框**的种类。endpoint 被刻意排除：新建它不需要问任何
+ * 问题（你点的节点就是父节点），所以它直接写进前端草稿并落到重命名，
+ * 见 `slices/ui-new-item.ts::createEndpointAt`。
  *
- * NOTE: `ProjectTree` mirrors this shape for its own hook bindings; the two
- * are intentionally the same so the tree's menu items can be typed against
- * the store's action signature.
+ * 注意：`ProjectTree` 为自己的 hook 绑定镜像了同一形状，两者有意保持一致，
+ * 树菜单项才能按 store 的动作签名来定类型。
  */
 export type NewDraftKind = 'project' | 'module' | 'collection';
 
 /**
- * Kinds of tabs the right-pane workspace can show.
+ * 右栏工作区能显示的标签种类。
  *
- * `endpoint-draft` is the one kind whose id is **not** a `nodes` row: it is
- * a `DraftEndpoint` id, minted in the renderer and only persisted when the
- * user presses Save (see `slices/ui-draft-endpoints.ts`). It is a distinct
- * kind rather than an `endpoint` with a missing row on purpose — every
- * "does this entity still exist?" sweep (`pruneStaleTabs`, the cascade
- * deletes, the dirty-close queue) has to be able to tell "deleted" from
- * "not written yet", and folding the two would close a brand-new draft tab
- * the instant the tree refreshed.
+ * `endpoint-draft` 是唯一 id **不是** `nodes` 行的种类：它是渲染侧铸造的
+ * `DraftEndpoint` id，只有用户按 Save 时才落库（见
+ * `slices/ui-draft-endpoints.ts`）。它是独立种类而不是"少一行的 endpoint"，
+ * 是刻意的——每一处"这个实体还在吗？"的清扫（`pruneStaleTabs`、级联删除、
+ * 脏关闭队列）都得能区分"已删除"与"还没写入"，混同两者会让新建的草稿标签
+ * 在树一刷新的瞬间就被关掉。
  */
 export type TabKind =
   'project' | 'module' | 'collection' | 'endpoint' | 'endpoint-draft' | 'settings';
 
 /**
- * Id prefix for anything that lives only in memory. A real node id is a
- * bare `uid()`, so `draft:` cannot collide with one — which is what lets a
- * draft tab, a draft endpoint and a real endpoint share the one `openTabs`
- * array without a lookup that has to guess which it is holding.
+ * 只存在于内存的东西所用的 id 前缀。真实节点 id 是裸 `uid()`，所以 `draft:`
+ * 不可能与它相撞——正是这一点让草稿标签、草稿 endpoint 和真实 endpoint
+ * 共用同一个 `openTabs` 数组，而不必靠"猜"来判断持有的是哪一种的查找。
  */
 export const DRAFT_ID_PREFIX = 'draft:';
 
 /**
- * An endpoint that exists only in the renderer.
+ * 只存在于渲染侧的 endpoint。
  *
- * WHOLE-DOCUMENT semantics, unlike `EndpointDraft` (which is a patch over
- * an already-stored `EndpointDetail`). There is no stored row for a draft
- * to be a patch *against*, so every field the save will write is present
- * here, starting from the defaults `blankDetail` would have supplied.
+ * 语义是**整份文档**，不同于 `EndpointDraft`（后者是对已存 `EndpointDetail`
+ * 的补丁）。草稿没有可供补丁所依附的存储行，所以保存时要写的每个字段都在这里，
+ * 从 `blankDetail` 本该提供的默认值起步。
  *
- * The split is the whole point of the design: params / headers / body are
- * *not* fields, because they arrive through the request-config editors,
- * which write to `endpointDrafts` like they do for a saved endpoint.
- * `saveDraftEndpoint` merges the two halves — see `slices/ui-draft-endpoints.ts`.
+ * 这个划分正是设计的要点：params / headers / body **不是**这里的字段，因为它们
+ * 由请求配置编辑器送来，而那些编辑器对草稿和已存 endpoint 都一样写进
+ * `endpointDrafts`。`saveDraftEndpoint` 合并两半，见 `slices/ui-draft-endpoints.ts`。
  */
 export interface DraftEndpoint {
-  /** Locally minted unique id, also used as the tab id. Always starts with `DRAFT_ID_PREFIX`. */
+  /** 本地铸造的唯一 id，同时用作标签 id。总以 `DRAFT_ID_PREFIX` 开头。 */
   id: string;
-  /** Node the endpoint will be written under (a module or a collection). */
+  /** endpoint 将被写入的父节点（一个 module 或一个 collection）。 */
   parentId: string;
-  /** Owning project. Used by the UI to scope the draft; see the save path for why it is not replayed. */
+  /** 所属项目。UI 用它界定草稿范围；不重放的原因见保存路径。 */
   rootId: string;
-  /** Interface name — `UNTITLED_ENDPOINT_NAME` until renamed, then updated in place. */
+  /** 接口名——重命名前是 `UNTITLED_ENDPOINT_NAME`，之后就地更新。 */
   name: string;
   /**
-   * One-line summary, like `ResourceNode.description`.
+   * 一行摘要，用法同 `ResourceNode.description`。
    *
-   * A node field rather than a detail field, so it is written through
-   * `addNode`'s own `description` and *not* through the merged `detail` —
-   * but it lives here rather than nowhere, because the workspace's
-   * description editor is enabled for a draft exactly as it is for a
-   * saved endpoint, and an editor that silently discards its input is
-   * worse than one that is absent.
+   * 它是节点字段而不是 detail 字段，所以走 `addNode` 自己的 `description`
+   * 写入，**不**走被合并的 `detail`——但它之所以存在而不是干脆没有，是因为
+   * 工作区的描述编辑器对草稿和对已存 endpoint 一样启用，而一个默默丢弃输入
+   * 的编辑器比一个根本不存在的编辑器更糟。
    */
   description: string;
   method: HttpMethod;
-  /** URL path without any baseUrl, same meaning as `EndpointDetail.url`. */
+  /** 不含任何 baseUrl 的 URL 路径，含义同 `EndpointDetail.url`。 */
   url: string;
   auth: AuthConfig;
   environmentId: string | null;
@@ -108,33 +93,27 @@ export interface DraftEndpoint {
 }
 
 /**
- * The name a draft endpoint is born with.
+ * draft endpoint 的初始名字。
  *
- * Re-exported rather than redeclared: `ui-new-item.ts` has owned it since
- * before drafts existed, and two constants with the same value would let
- * the dialog path and the draft path drift apart silently. Sub-factories
- * import it from here — they must not import each other.
+ * 从 `ui-new-item.ts` 再导出而不是重新声明：两个值相同的常量会让对话框路径
+ * 和草稿路径悄无声息地分叉。子工厂从这里 import——它们不得互相 import。
  */
 export { UNTITLED_ENDPOINT_NAME } from './slices/ui-new-item';
 
-/**
- * Inner sections of the settings tab. Drives the left rail.
- */
+/** 设置标签内部的分节。驱动左侧栏。 */
 export type SettingsCategoryId = 'env' | 'connection' | 'appearance' | 'request';
 
 /**
- * Sentinel id used for the (single) settings tab. Real entities use their
- * own id, but settings is a singleton panel — using a fixed id keeps the
- * open/close/active logic identical to the entity tabs.
+ * （唯一一个）设置标签所用的哨兵 id。真实实体用自己的 id，但设置是单例面板，
+ * 用固定 id 才能让开关与激活逻辑和实体标签完全一致。
  */
 export const SETTINGS_TAB_ID = '__settings__';
 
 /**
- * An open tab in the right-pane workspace.
+ * 右栏工作区里一个已打开的标签。
  *
- * `id` reuses the underlying entity id (project / module / collection /
- * endpoint), which makes lookup O(1) and lets `closeTab` cleanly remove
- * a tab when the user deletes the entity.
+ * `id` 复用底层实体的 id（project / module / collection / endpoint），查找因此
+ * 是 O(1)，用户删除实体时 `closeTab` 也能干净地把对应标签摘掉。
  */
 export interface OpenTab {
   id: string;
@@ -142,45 +121,37 @@ export interface OpenTab {
 }
 
 /**
- * One project's own tab strip, set aside while the user is somewhere else.
+ * 某个项目自己的标签条，用户在别处时暂存起来。
  *
- * `openTabs` is a single flat array because the strip renders one list at
- * a time — but that list is per-project. An endpoint tab belonging to
- * project A means nothing while project B is open, and `pruneStaleTabs`
- * would eventually retire it as "no longer in the tree". So switching
- * projects stashes the outgoing set here and restores the incoming one.
+ * `openTabs` 是单个扁平数组，因为标签条一次只渲染一条列表——但那条列表是按项目
+ * 分的。属于项目 A 的 endpoint 标签在打开 B 时毫无意义，而 `pruneStaleTabs`
+ * 最终会把它当成"不在树里了"退役。所以切项目把出去的那份暂存到这里、
+ * 把进来的那份取回来。
  *
- * ONLY THE TAB LIST IS KEPT, and that is the point. Everything an unsaved
- * tab holds — `draftEndpoints[draftId]`, `endpointDrafts[id]`, its entry
- * in `dirtyTabIds` — is keyed by tab id and is deliberately never touched
- * by a switch. "Leave project A with three dirty tabs and a named draft,
- * come back, find them exactly as they were" therefore needs no second
- * copy of any of it: this record says *which* tabs to show, and the maps
- * they were always keyed under still hold their contents.
+ * **只保留标签表**，这正是重点。未保存标签持有的一切——`draftEndpoints[draftId]`、
+ * `endpointDrafts[id]`、它在 `dirtyTabIds` 里的条目——都按标签 id 作键，
+ * 而切换刻意不碰它们。因此"带着三个脏标签和一个命名好的草稿离开项目 A，
+ * 回来发现原样不变"不需要为其中任何一份数据做第二份拷贝：这条记录只说明
+ * **哪些**标签要显示，而它们一直挂在原键下的那些映射里内容还在。
  */
 export interface ProjectTabSet {
   tabs: OpenTab[];
-  /** Which of them was in front, or `null` if the user closed it last. */
+  /** 其中哪个在前面；用户最后把它关掉时为 `null`。 */
   activeTabId: string | null;
 }
 
 /**
- * Per-endpoint unsaved edits. Lives in `endpointDrafts` (not in
- * HttpTester local state) so that switching tabs and switching back
- * preserves the user's pending edits. Every field is individually
- * optional — only the fields the user actually edited are present, and
- * an absent field means "same as the stored `EndpointDetail`".
+ * 每个 endpoint 的未保存编辑。存在 `endpointDrafts`（而不是 HttpTester 的局部
+ * state）里，切走标签再切回来才留得住用户正在输入的内容。每个字段各自可选——
+ * 只有用户真正编辑过的字段才存在，缺失的字段含义是"与已存的
+ * `EndpointDetail` 相同"。
  *
- * This used to cover just `url` / `method`, which made the dirty flag
- * mean "you typed in the URL bar" and nothing else. Every request-config
- * editor (params / headers / body / auth / docs / tags) writes here too,
- * so one rule covers the whole tab: **edits live in the draft, Save
- * persists them, and the tab is dirty until then.**
+ * 所有请求配置编辑器（params / headers / body / auth / docs / tags）也都写进
+ * 这里，所以整个标签遵循同一条规则：**编辑存在草稿里，Save 才落盘，在此之前
+ * 标签一直是脏的。**
  *
- * Deliberately *not* here: `baseUrlDefinitionId` / `baseUrlOverride`.
- * Those are connection configuration, committed the moment the picker
- * row is clicked — the same "no Save button" behaviour they have always
- * had.
+ * 刻意**不**包含 `baseUrlDefinitionId` / `baseUrlOverride`：它们是连接配置，
+ * 点中选择器那一行的瞬间就提交了——始终是那种"没有 Save 按钮"的行为。
  */
 export interface EndpointDraft {
   url?: string;
@@ -193,7 +164,7 @@ export interface EndpointDraft {
   tags?: string[];
 }
 
-/** In-memory draft of one of the create dialogs. */
+/** 某个新建对话框的内存草稿。 */
 export interface NewItemDraft {
   open: boolean;
   type: NewDraftKind | null;
@@ -204,5 +175,5 @@ export interface NewItemDraft {
   color: string;
 }
 
-/** Saved example — same shape as ApiResponse but with a stable `id` for delete. */
+/** 已保存的示例——形状与 ApiResponse 相同，只是多了用于删除的稳定 `id`。 */
 export type ApiResponseExample = import('@/types/domain').ApiResponse & { id: string };

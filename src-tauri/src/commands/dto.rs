@@ -1,16 +1,12 @@
 // ---------------------------------------------------------------------------
-// Create-options and move-target DTOs. Patch types live in `crate::domain`
-// and are pulled in via `use crate::domain::*`.
+// 创建选项与移动目标的 DTO。Patch 类型在 `crate::domain`，经 `use crate::domain::*` 进来。
 //
-// The definitions moved to `simple_post_server::dto` with the rest of the
-// headless host. They were never Tauri-specific — plain
-// `Serialize`/`Deserialize` shapes — but living in this crate put every
-// one of them in the dependency cone of the GUI runtime, which is why
-// `web_api` had to reach through `crate::commands::…` for a struct.
+// 定义在 `simple_post_server::dto`：这些形状从不是 Tauri 专属（只是普通
+// `Serialize` / `Deserialize`），留在本 crate 会把每一个都拖进 GUI 运行时依赖锥，
+// `web_api` 才不得不绕 `crate::commands::…` 拿结构体。
 //
-// Re-exported wholesale so every existing `crate::commands::dto::Foo`
-// and `crate::commands::Foo` path below keeps resolving to the same
-// types. This module is a compatibility surface, not a definition site.
+// 这里整体转发，只为保住既有的 `crate::commands::dto::Foo` 与 `crate::commands::Foo`
+// 路径：本模块是兼容面，不是定义处。
 // ---------------------------------------------------------------------------
 
 pub use simple_post_server::dto::*;

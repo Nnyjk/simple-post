@@ -18,13 +18,10 @@ import { TreeChildren } from './rows/TreeChildren';
 import { EndpointList } from './rows/EndpointList';
 import { CollectionBranch } from './rows/CollectionBranch';
 
-// The create dialogs for the two kinds that live in a project. Both are
-// `lazy()` *and* mounted on the store's open flag: a `lazy()` component
-// fires its import the moment it is rendered, so an unconditional mount
-// would pull the dialog primitive (and, through the collection dialog's
-// select, GSAP) into the workspace chunk at project-open time instead of
-// on the click that needs it. An endpoint has no dialog — see
-// `useNewItemFlow::createEndpoint`.
+// 项目内两类实体的创建对话框。两者既 `lazy()` **又**挂在 store 的 open 标志上：
+// `lazy()` 组件一被渲染就触发 import，无条件挂载会在打开项目时就把对话框基础组件
+// （以及经集合对话框的 select 牵进来的 GSAP）拉进 workspace chunk，而不是等到需要它的
+// 那次点击。接口没有对话框 —— 见 `useNewItemFlow::createEndpoint`。
 const CreateModuleDialog = lazy(() =>
   import('@/features/create/CreateModuleDialog').then((m) => ({ default: m.CreateModuleDialog })),
 );
@@ -47,11 +44,9 @@ export function ProjectTree() {
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const activeEndpointId = useAppStore((s) => s.activeEndpointId);
-  // Layer 2 of the bootstrap. `nodes: []` is ambiguous — it means both
-  // "this project has no modules" and "the tree has not arrived yet" —
-  // and reading it as the first would show a confident, wrong empty state
-  // to anyone who enters a project while the load is still in flight.
-  // See `stores/bootstrap-slice.ts`.
+  // bootstrap 的第二层。`nodes: []` 是歧义的 —— 既可能是「该项目没有模块」，也可能是
+  // 「树还没到」，读成前者会让加载途中进入项目的人看到一个笃定但错误的空态。
+  // 见 `stores/bootstrap-slice.ts`。
   const nodesLoaded = useAppStore((s) => s.nodesLoaded);
   const nodesError = useAppStore((s) => s.nodesError);
   const activeProject = useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
@@ -61,10 +56,9 @@ export function ProjectTree() {
   const moveNodes = useAppStore((s) => s.moveNodes);
   const openTab = useAppStore((s) => s.openTab);
   /**
-   * Is the project tab the one in front? Written as a selector that folds
-   * the whole answer into a **boolean** on purpose: a selector returning
-   * `s.openTabs.find(...)` would hand back a fresh reference per call and
-   * re-render the tree on every store write.
+   * 项目标签是否在前台？刻意写成把整个答案折叠成 **boolean** 的 selector：返回
+   * `s.openTabs.find(...)` 的 selector 每次调用都会交出新的引用，导致每次 store 写入都
+   * 重渲染整棵树。
    */
   const projectTabActive = useAppStore((s) => {
     if (s.activeTabId !== s.activeProjectId) return false;
@@ -77,9 +71,8 @@ export function ProjectTree() {
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
 
   // ---------- derived ----------
-  // Every filter below is a `useMemo` over a raw store reference, not a
-  // selector: a selector returning a fresh array re-renders on every
-  // store write under Zustand v5's `Object.is` comparison.
+  // 下面每个过滤都是对原始 store 引用做的 `useMemo`，而不是 selector：返回新数组的
+  // selector 在 Zustand v5 的 `Object.is` 比较下会让每次 store 写入都触发重渲染。
   const tree = useMemo(
     () => buildTree(nodes, endpointDetails, activeProjectId),
     [nodes, endpointDetails, activeProjectId],
@@ -88,8 +81,8 @@ export function ProjectTree() {
     () => (query.trim() ? filterTree(tree, query.toLowerCase(), endpointDetails) : tree),
     [tree, query, endpointDetails],
   );
-  // `rootId` is denormalised onto every node, so "belongs to the open
-  // project" is one filter — no walk up to a module to find a project id.
+  // `rootId` 反规范化地存在于每个节点上，故「属于当前打开的项目」只是一次过滤 ——
+  // 不必向上走到模块再去找项目 id。
   const projectNodes = useMemo(
     () => nodes.filter((n) => n.rootId === activeProjectId),
     [nodes, activeProjectId],
@@ -107,9 +100,8 @@ export function ProjectTree() {
   // ---------- new-item flow ----------
   const { openNewItemWithIntent, createEndpoint } = useNewItemFlow(setEditing);
 
-  // Gating the two dialog mounts on the draft's kind keeps each chunk
-  // tied to the entry point that needs it: opening the *project* dialog
-  // from the top bar must not fetch the module dialog.
+  // 两个对话框的挂载按草稿类型加门，使每个 chunk 绑定到真正需要它的入口：从顶栏打开
+  // *项目* 对话框不应顺带拉取模块对话框。
   const newItemOpen = useAppStore((s) => s.newItem.open);
   const newItemType = useAppStore((s) => s.newItem.type);
 
@@ -148,45 +140,30 @@ export function ProjectTree() {
   // ---------- render ----------
   return (
     <aside
-      // Solid `--card`, not the old `bg-card/30`. The panel used to be a
-      // 30%-alpha tint over whatever sat behind it, which is exactly the
-      // hand-rolled transparency the surface ladder replaces — now that
-      // `--card` is a distinct step from `--background`, the panel reads as
-      // a step rather than as a wash, and `--overlay-hover` /
-      // `--surface-select` handle the states inside it.
+      // 用实色 `--card` 而非 `bg-card/30`：半透明叠加正是表面色阶要替掉的手搓透明；
+      // `--card` 现在是区别于 `--background` 的一级，面板读起来是一层而非一层薄雾，
+      // 其内部状态交给 `--overlay-hover` / `--surface-select`。
       className="relative flex h-full w-64 shrink-0 flex-col border-r border-border bg-card"
       onDragEnd={handleDragEnd}
     >
-      {/* Header — the project is named here rather than rendered as a row.
-          The project is *not* a node in this tree (it is entered from
-          the welcome picker or the top-bar selector), so the panel still
-          needs to say which project's modules it is listing.
+      {/* 表头 —— 项目在这里被点名，而不是渲染成一行。项目**不是**本树中的节点（它从
+          欢迎页选择器或顶栏选择器进入），故面板仍需说明自己列的是哪个项目的模块。
 
-          The name is a **button**: it opens (or re-activates) the project
-          tab, which is what makes the title an entry point into the
-          project's own workspace rather than a label. With the project
-          out of the tree there is no other row that can mean "show me
-          this project", so closing its tab used to leave the panel with
-          no way back to the project card.
+          名字是**按钮**：它打开（或重新激活）项目标签，标题因此成为进入项目自身工作区
+          的入口而非一个标签。项目不在树里，没有别的行能表示「给我看这个项目」，故关掉
+          它的标签后面板就没有回到项目卡片的路径。
 
-          There is deliberately no "+" next to this title. The header
-          used to open a menu offering 项目 / 模块 / 集合 / 接口, but the
-          only thing creatable from inside a project is a module — the
-          other two need a parent, and a project is not this tree's
-          business. The list below owns that one action ("新建模块"), so
-          the button was a second path to a single option that also
-          offered three that cannot work here. Projects are created from
-          the welcome screen's 新建项目 card or the top-bar selector. */}
+          此处刻意没有「+」。项目内部唯一能创建的是模块 —— 集合和接口都需要父级，而项目
+          不归这棵树管。下面列表已独占那一个动作（「新建模块」），表头按钮既是通往单个选项
+          的第二条路径，又顺带提供三个在这里根本用不了的选项。项目在欢迎页的「新建项目」
+          卡片或顶栏选择器里创建。 */}
       <div className="flex h-9 shrink-0 items-center border-b border-border bg-card/40 px-3">
         {activeProject ? (
-          // The title is the project tab's own entry point. The project is
-          // not a row in this tree, so before this the only way back to its
-          // card was the tab strip — and a user who closed that tab (or whose
-          // strip was full) had nothing to click at all.
+          // 标题就是项目标签自己的入口。项目不是这棵树里的一行，回项目卡片的路只有标签条
+          // —— 关掉那个标签（或标签条已满）的用户就点不到任何东西。
           //
-          // `openTab` activates an existing tab rather than duplicating it,
-          // so this is also safe to hit while the project tab is already
-          // open; `projectTabActive` only drives the "you are here" fill.
+          // `openTab` 是激活已有标签而非复制一个，故项目标签已开着时再点也安全；
+          // `projectTabActive` 只驱动「你在这里」的填充。
           <button
             type="button"
             onClick={() => openTab('project', activeProject.id)}
@@ -214,7 +191,7 @@ export function ProjectTree() {
         )}
       </div>
 
-      {/* Search */}
+      {/* 搜索 */}
       <div className="px-2 pt-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -227,8 +204,7 @@ export function ProjectTree() {
         </div>
       </div>
 
-      {/* Tree — the active project's nodes only. The project itself is
-          never a row here; see the header note above. */}
+      {/* 树 —— 只含当前项目的节点。项目本身在此永远不是一行；见上方表头说明。 */}
       <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
         {!activeProject ? (
           <div className="px-2 py-6 text-center text-xs text-muted-foreground">
@@ -262,18 +238,11 @@ export function ProjectTree() {
           </div>
         ) : (
           <>
-            {/* Top-level create. The project used to be a row in this
-                tree and its "+" owned "add a module to this project".
-                With the project gone the entry point has to live in
-                the tree's own space, and it sits above the modules
-                because a module *is* a top-level node here — the same
-                position the project row used to occupy.
+            {/* 顶层新建。项目不是这棵树里的一行，「给本项目加模块」这个入口必须落在树
+                自己的空间里；它置于模块之上，因为模块*就是*这里的顶层节点。
 
-                This is now the ONLY way to add a module from inside a
-                project: the header's "+" is gone (see the header note).
-                Hidden while a filter is active — a module created under
-                a query would not match it, so the control would appear
-                to do nothing. */}
+                这是项目内添加模块的**唯一**途径（表头的「+」已去掉，见表头说明）。过滤
+                生效时隐藏 —— 查询下创建的模块不会匹配它，这个控件看起来就会是无效的。 */}
             {!query.trim() && (
               <button
                 type="button"
@@ -313,8 +282,7 @@ export function ProjectTree() {
                   }
                 />
                 <TreeChildren expanded={!!modBranch.module.expanded}>
-                  {/* Endpoints sitting on the module itself, above its
-                  collections — a module accepts both child kinds. */}
+                  {/* 直接挂在模块上的接口，排在其集合之上 —— 模块同时接受两种子节点。 */}
                   {modBranch.endpoints.length > 0 && (
                     <EndpointList
                       endpoints={modBranch.endpoints}
@@ -411,9 +379,9 @@ export function ProjectTree() {
         />
       )}
 
-      {/* ---- Create dialogs, one per kind ----
-          Each is mounted only while its own draft is open, so the two
-          never coexist and each chunk loads on the click that needs it. */}
+      {/* ---- 创建对话框，每类一个 ----
+          各自只在自己的草稿打开时挂载，故两者不会共存，每个 chunk 都在需要它的那次点击
+          才加载。 */}
       {newItemOpen && newItemType === 'module' && (
         <Suspense fallback={null}>
           <CreateModuleDialog />

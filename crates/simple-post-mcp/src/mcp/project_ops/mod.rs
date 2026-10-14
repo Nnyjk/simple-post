@@ -1,40 +1,21 @@
-//! Project / module / collection / endpoint / baseUrl-definition MCP tools.
+//! project / module / collection / endpoint / baseUrlDef MCP 工具，共
+//! 5 + 5 + 5 + 8 + 5 = **28 个**。
 //!
-//! Total: 5 + 5 + 5 + 8 + 5 = **28 tools**.
+//! ## 命名
 //!
-//! ## Permission naming
+//! [`simple_post_core::permissions::required_permission`] 按**工具名**映射到
+//! `Permission` 档位（`Read` < `ReadCall` < `Full`）。真正发外网请求的那个工具在
+//! 本 crate 里叫 `api_call_endpoint`，落在 `ReadCall`。
 //!
-//! [`simple_post_core::permissions::required_permission`] maps tool names
-//! to a `Permission` rank (`Read` < `ReadCall` < `Full`). The map is
-//! keyed by the *tool* name, so call sites use e.g. `endpoint_get` and
-//! `endpoint_execute` (the latter is `api_call_endpoint` here, since it
-//! actually issues a network call).
+//! ## 过门策略
 //!
-//! ## Permission gating strategy
+//! 参数里直接带 `project_id` 的照传。`endpoint_get` / `_delete` / `_duplicate` /
+//! `_move` / `_search` 这类只给 endpoint 或 node id 的，先查出所属项目再过门。
 //!
-//! For tools that take `project_id` directly we pass it to
-//! [`simple_post_core::permissions::require`]. For `endpoint_*` tools that don't
-//! (get / delete / duplicate / move / search), we look up the endpoint
-//! first to find its `project_id`, then gate.
+//! ## 文件分工
 //!
-//! ## File layout
-//!
-//! ```text
-//!   project_ops/
-//!     mod.rs        ← you are here (dispatch table + shared Args + tests)
-//!     project.rs    ← project_* (5 tools)
-//!     module.rs     ← module_* (5 tools)
-//!     collection.rs ← collection_* (5 tools)
-//!     endpoint.rs   ← endpoint_* (8 tools)
-//!                  (endpoint_project_id lookup moved to simple_post_core::db::endpoints::project_id_of)
-//!     base_url_def.rs ← base_url_def_* (5 tools)
-//! ```
-//!
-//! The `table()` function stitches the per-category `register(&mut v)`
-//! functions back together in the original stable order so
-//! `tools/list` is unchanged. External callers still do
-//! `use crate::mcp::project_ops::*` and reach `table()` through
-//! re-exports.
+//! `table()` 按固定顺序把各分类的 `register(&mut v)` 拼起来，`tools/list` 的顺序
+//! 因此稳定。调用方仍是 `use crate::mcp::project_ops::*` 再取 `table()`。
 
 use serde::Deserialize;
 
@@ -47,13 +28,12 @@ pub(super) mod module;
 pub(super) mod project;
 
 // =========================================================================
-// Shared Args shapes (used by more than one submodule)
+// 跨子模块共用的 Args 形状
 // =========================================================================
 //
-// `ProjectIdArgs` is consumed by `project_get`, `module_list`, and
-// `base_url_def_list`. `ModuleIdArgs` is consumed by `collection_list`.
-// Each lives once here so the per-entity submodules can `use super::*`
-// and stay focused on their own Args.
+// `ProjectIdArgs` 被 `project_get` / `module_list` / `base_url_def_list` 共用，
+// `ModuleIdArgs` 被 `collection_list` 共用。集中放在这里，各实体子模块就能
+// `use super::*`，专心写自己的 Args。
 
 #[derive(Debug, Deserialize)]
 pub(super) struct ProjectIdArgs {
@@ -66,14 +46,12 @@ pub(super) struct ModuleIdArgs {
 }
 
 // =========================================================================
-// Dispatch table
+// dispatch 表
 // =========================================================================
 
-/// Stitched dispatch table — preserves the original ordering:
-/// projects (5) → modules (5) → collections (5) → endpoints (8) →
-/// base_url_defs (5). Each submodule's `register()` only pushes its
-/// own slice; this function concatenates them so callers see one
-/// `table()` with all 28 entries.
+/// 拼好的 dispatch 表，顺序固定：projects (5) → modules (5) → collections (5)
+/// → endpoints (8) → base_url_defs (5)。各子模块的 `register()` 只推自己那一段，
+/// 这里拼起来，调用方拿到含全部 28 条的单个 `table()`。
 pub(crate) fn table() -> Vec<ToolEntry> {
     let mut v = Vec::with_capacity(32);
 
@@ -96,7 +74,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 }
 
 // =========================================================================
-// Tests
+// 测试
 // =========================================================================
 
 #[cfg(test)]

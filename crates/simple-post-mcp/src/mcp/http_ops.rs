@@ -1,12 +1,7 @@
-//! HTTP execution MCP tools — 2 tools total.
+//! HTTP 执行类 MCP 工具 —— 共 2 个：`api_run_request`（临时请求，不挂端点）与
+//! `api_call_endpoint`（按 id 解析并发出端点）。
 //!
-//! | tool               | role                                                |
-//! |--------------------|-----------------------------------------------------|
-//! | api_run_request    | Run an ad-hoc HTTP request (no endpoint)             |
-//! | api_call_endpoint  | Resolve + run an endpoint by id                      |
-//!
-//! Both funnel through [`run_http`] so the output shape is identical
-//! regardless of origin.
+//! 两者汇到同一条执行与结果封装路径，所以不论来源，输出形状一致。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,7 +13,7 @@ use simple_post_core::error::AppError;
 use simple_post_core::http_executor::{self, HttpRequestInput, HttpResponse, HttpResult};
 
 // =========================================================================
-// Args shapes
+// Args 形状
 // =========================================================================
 
 #[derive(Debug, Deserialize)]
@@ -26,24 +21,23 @@ struct RunRequestArgs {
     method: String,
     url: String,
     #[serde(default)]
-    #[allow(dead_code)] // accepted by JSON Schema for forward compatibility
+    #[allow(dead_code)] // JSON Schema 为向前兼容而接受，当前未实现
     headers: Option<Value>,
     #[serde(default)]
-    #[allow(dead_code)] // accepted by JSON Schema for forward compatibility
+    #[allow(dead_code)] // JSON Schema 为向前兼容而接受，当前未实现
     params: Option<Value>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)] // accepted by JSON Schema for forward compatibility
+    #[allow(dead_code)] // JSON Schema 为向前兼容而接受，当前未实现
     auth: Option<Value>,
     #[serde(default)]
     env_id: Option<String>,
     #[serde(default)]
     base_url_definition_id: Option<String>,
-    /// Which module's cell `base_url_definition_id` is read from. A URL
-    /// lives at (environment × service × module), and this tool has no
-    /// endpoint to take the module from, so without it there is no cell
-    /// and no base URL.
+    /// `base_url_definition_id` 取值时读的是哪个模块的格子。URL 住在
+    /// (环境 × 服务 × 模块)，而本工具没有端点可借模块，不给就没有格子、没有
+    /// base URL。
     #[serde(default)]
     module_id: Option<String>,
     #[serde(default)]
@@ -66,7 +60,7 @@ struct CallEndpointArgs {
 }
 
 // =========================================================================
-// Dispatch table
+// dispatch 表
 // =========================================================================
 
 pub(crate) fn table() -> Vec<ToolEntry> {
@@ -117,7 +111,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 }
 
 // =========================================================================
-// Tool impls
+// 工具实现
 // =========================================================================
 
 async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
@@ -127,11 +121,9 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
         return Err(AppError::Validation("url must not be empty".into()));
     }
 
-    // Resolve URL: pull vars from env (if any) and prepend the chosen
-    // baseUrl. The renderer-side resolver lives in variable_fill; we
-    // reuse its low-level primitives here so the same env-driven
-    // substitution runs whether the call comes from the Tauri command
-    // or this MCP tool.
+    // 解析 URL：取 env 变量并前置选定的 baseUrl。解析器本体在 variable_fill，
+    // 这里复用它的底层原语，好让同一次 env 驱动的替换在 Tauri 命令与本工具
+    // 两条路上跑出一致结果。
     let env: Option<Environment> = if let Some(env_id) = a.env_id.as_deref() {
         Some(simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::environments::get(c, env_id)
@@ -191,9 +183,8 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint").await?;
 
-    // Pull env + project if available. A dangling env id (e.g. the env
-    // was deleted) is tolerated — the request just runs without env
-    // variable substitution.
+    // env / project 取不到就降级：悬空的 env id（例如环境已被删）不至于让调用
+    // 失败，只是这次请求不做变量替换。
     let env: Option<Environment> = if let Some(env_id) = endpoint.environment_id.as_deref() {
         simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::environments::get(c, env_id)
@@ -217,12 +208,9 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    // Which module's services this endpoint may resolve against needs the
-    // tree, and the module is not on the detail row — it lives in the
-    // `nodes` table. Fill it in unless the caller already said, because
-    // `resolve_endpoint` is pure and a caller sending as another module
-    // should not be second-guessed by a lookup. Skipping it leaves the
-    // service list narrowing to nothing and the request base-less.
+    // 端点属于哪个模块只在树里，detail 行上没有，得查 `nodes` 补齐；但调用方
+    // 自己指定了就不覆盖 —— `resolve_endpoint` 是纯函数，别让它被一次查库改写。
+    // 不补的结果是服务列表收窄到空，请求裸奔没有 base URL。
     let mut overrides = overrides;
     if overrides.module_id.is_none() {
         overrides.module_id = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -266,18 +254,14 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
 }
 
 // =========================================================================
-// Shared helpers
+// 共享辅助函数
 // =========================================================================
 
-/// Flatten a JSON object (`{"Foo": "bar"}`) or array of pairs
-/// (`[["Foo","bar"]]`) into `Vec<(String, String)>`.
+/// 把 JSON 对象（`{"Foo": "bar"}`）或键值对数组（`[["Foo","bar"]]`）压平成
+/// `Vec<(String, String)>`。
 ///
-/// `label` is used to prefix the error message when the input shape
-/// is wrong (e.g. a string instead of an object). Returning a
-/// `Result` lets the MCP tool surface the error to the LLM as a
-/// Validation message; the other version in `response_parse.rs`
-/// silently dropped bad shapes, which is the wrong default for
-/// user-driven input.
+/// `label` 用来给形状错误的提示加前缀。这里返回 `Result` 而不是静默丢弃：
+/// 输入来自 AI 客户端，静默丢形状等于凭空造一个「成功但少了几个头」的结果。
 pub(crate) fn flatten_string_map(
     v: Option<&Value>,
     label: &str,
@@ -352,16 +336,13 @@ fn extract_endpoint_settings(so: &Option<Value>) -> (Option<u64>, Option<bool>, 
     (t, r, m)
 }
 
-/// Prepend a base URL read from the live value layer.
+/// 从活的取值层读一个 base URL 前置上去。
 ///
-/// `module_base_urls[def_id][module_id]` is the only place a URL lives
-/// (see `variable_fill::resolve_base_url_with`). Both keys are
-/// required and there is deliberately **no fallback**: the v1 code
-/// reached for `env.base_urls` and then for "whatever key happens to
-/// come first", which after the shape-B migration resolved nothing and
-/// before it aimed an arbitrary service at the request. Missing env,
-/// missing service, missing module or missing cell all mean "no base
-/// URL" — the caller sent the path it asked for.
+/// `module_base_urls[def_id][module_id]` 是 URL 唯一住址（见
+/// `variable_fill::resolve_base_url_with`），两个键都必须给，且**刻意没有兜底**：
+/// 回退到 `env.base_urls` 那列死列、或「取第一个能用的键」，都等于把一个任意的
+/// 服务怼到这次请求上。env、服务、模块、格子缺任意一个都表示「没有 base URL」，
+/// 按调用方给的路径原样发出。
 fn apply_base_url(
     url: &str,
     env: Option<&Environment>,
@@ -388,15 +369,13 @@ fn apply_base_url(
     }
 }
 
-/// Render an `HttpMethod` enum back to its wire string.
+/// `HttpMethod` 还原成线上字符串。
 fn format_method(m: &HttpMethod) -> String {
     m.as_str().to_string()
 }
 
-/// Convert an `HttpResult` into a `CallToolResult`. Successful calls
-/// get a clean JSON envelope (with `_base_url` / `_missing_vars`
-/// annotations when applicable); failures come back with
-/// `is_error: true` so the LLM sees the message and can recover.
+/// `HttpResult` → `CallToolResult`。成功给干净的 JSON 信封（必要时附
+/// `_base_url` / `_missing_vars`）；失败走 `is_error: true`，LLM 读得到消息才能恢复。
 fn build_result_envelope(
     method: &str,
     url: &str,
@@ -459,14 +438,12 @@ fn build_result_envelope(
     }
 }
 
-/// Bump the error counter on transport failures. Pulled out so the
-/// `Option` arm doesn't carry the full state through closures.
+/// 传输失败时的错误计数。单独抽出来是为了让 `Option` 分支不必把整个 state
+/// 带进闭包。
 fn state_metrics_err() {
-    // No state in scope here; the http_executor layer handles its own
-    // metrics via `tracing`. The MCP daemon's `mcp_metrics.errors`
-    // counter is bumped from the daemon_http.rs handler on the `Err`
-    // arm of `execute` — so this function is intentionally a no-op and
-    // exists only to keep the call site symmetric with the success path.
+    // 这里拿不到 state：`http_executor` 自己用 `tracing` 记指标，daemon 的
+    // `mcp_metrics.errors` 由 daemon_http.rs 的处理器自增。本函数刻意为空，只为让
+    // 成功/失败两侧的调用点对称。
 }
 
 fn http_response_to_api(resp: &HttpResponse, method: &str, url: &str) -> ApiResponse {
@@ -490,15 +467,13 @@ fn header_pairs_to_tuples(pairs: &[[String; 2]]) -> Vec<(String, String)> {
 }
 
 // =========================================================================
-// Project fallback (see api_call_endpoint for context)
+// Project 占位兜底
 // =========================================================================
 
-/// `variable_fill::resolve_endpoint` requires a `&Project`; we don't
-/// always have one loaded. Use this as a last-resort placeholder so the
-/// resolve step doesn't borrow a `None`.
-// `static` (not `const`) so `&EMPTY_PROJECT` is `&'static Project` — taking a
-// reference to a `const` creates a temporary that's freed at end of statement,
-// which trips E0716 when the resulting `&Project` outlives the statement.
+// `resolve_endpoint` 要一个 `&Project`，而项目不一定查得到；查不到就用这个空壳，
+// 免得解析这一步去 borrow 一个 `None`。
+// 必须是 `static` 而非 `const`：`&EMPTY_PROJECT` 要拿到的是 `&'static Project`，
+// 引用 `const` 会产生语句结束即释放的临时值，存活的 `&Project` 会触发 E0716。
 static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::domain::Project {
     id: String::new(),
     name: String::new(),
@@ -512,7 +487,7 @@ static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::doma
 };
 
 // =========================================================================
-// Tests
+// 测试
 // =========================================================================
 
 #[cfg(test)]

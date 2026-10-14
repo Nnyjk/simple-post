@@ -8,17 +8,14 @@ use crate::db::DbPool;
 use crate::domain::*;
 use crate::error::AppError;
 
-use super::dto::{BaseUrlDefPatch, CreateBaseUrlDefOpts};
+use super::dto::{adopt_or_mint_id, BaseUrlDefPatch, CreateBaseUrlDefOpts};
 
-/// Every service of the project, flat.
+/// 项目全部服务，扁平。
 ///
-/// 「服务应该绑定到项目，这样每一个模块都会全部包含这些服务」 — a
-/// module owns no services, so there is one list per project and every
-/// module of it can resolve every row. The list is flat because the
-/// endpoint's `baseUrlDefinitionId` is flat too, and because an
-/// endpoint's module picks a *value* out of
-/// `env.moduleBaseUrls[defId][moduleId]` rather than a subset of the
-/// services.
+/// 「服务应该绑定到项目，这样每一个模块都会全部包含这些服务」——模块不持有服务，
+/// 一个项目一份列表，其每个模块都能解析每一行。之所以扁平：endpoint 的
+/// `baseUrlDefinitionId` 也是扁平的，且它是从 `env.moduleBaseUrls[defId][moduleId]`
+/// 里挑一个**值**，而不是挑服务的一个子集。
 #[tauri::command]
 pub fn base_url_defs_list(
     state: State<DbPool>,
@@ -29,12 +26,13 @@ pub fn base_url_defs_list(
     })
 }
 
-/// Add a service to the **project's** list.
+/// 往**项目**的服务列表里加一条。
 ///
-/// The project is the scope. It stays `None` afterwards if it had no ★:
-/// creating a service is not the same as choosing one, and a project
-/// whose endpoints have no default go out with no base URL rather than
-/// one the user never picked.
+/// 项目即作用域。此前没有 ★ 就仍是 `None`：建服务不等于选一个，用户没挑过默认的项目
+/// 就该在没有 base URL 的状态下发出去，而不是带上一个他从未选过的地址。
+///
+/// 调用方给了 id 就用它，见 `simple_post_server::dto::adopt_or_mint_id`；本命令与
+/// REST handler 共用它，两个传输才对「服务 id 归谁」达成一致。
 #[tauri::command]
 pub fn base_url_defs_create(
     state: State<DbPool>,
@@ -44,15 +42,14 @@ pub fn base_url_defs_create(
 ) -> Result<BaseUrlDefinition, AppError> {
     let opts = opts.unwrap_or_default();
     let def = BaseUrlDefinition {
-        id: uid(),
+        id: adopt_or_mint_id(opts.id),
         name,
         description: opts.description,
     };
     crate::db::with_tx(&state, |c| {
         crate::db::base_url_defs::create(c, &def, &project_id)?;
-        // Returns the stored row rather than the input: the renderer
-        // swaps it into its list, and `get` is the only read that agrees
-        // with what the database now holds.
+        // 返回库里那一行而非入参：渲染侧要把它换进自己的列表，只有重读才与
+        // 数据库此刻持有的内容一致。
         crate::db::base_url_defs::get(c, &def.id)
     })
 }
@@ -68,21 +65,16 @@ pub fn base_url_defs_update(
     })
 }
 
-/// Delete a service. The project's ★ pointer is cleared with it when it
-/// named this row — there is nothing to promote, since a project has
-/// one ★ and no rule for choosing its replacement.
+/// 删一个服务。项目的 ★ 若指着它则一并清空——一个项目只有一个 ★，没有选替补的规则。
 #[tauri::command]
 pub fn base_url_defs_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| crate::db::base_url_defs::delete(c, &id))
 }
 
-/// Point the project's ★ at one of its own services, or take the ★ away
-/// (`def_id = None`).
+/// 把项目的 ★ 指到它自己的某个服务上，或收回（`def_id = None`）。
 ///
-/// Returns the `Project` rather than nothing: `defaultBaseUrlDefinitionId`
-/// is live again — it is what an endpoint naming no service resolves
-/// against — so the caller would otherwise have to guess the new value
-/// from a void answer and re-read to confirm the write landed.
+/// 返回 `Project` 而非空：`defaultBaseUrlDefinitionId` 是活的，没指名服务的 endpoint
+/// 按它解析，返回空会让调用方从「无」猜出新值，再重读一次确认写入。
 #[tauri::command]
 pub fn base_url_defs_set_default(
     state: State<DbPool>,

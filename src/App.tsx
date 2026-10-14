@@ -4,95 +4,57 @@ import { useAppStore, SETTINGS_TAB_ID } from '@/stores/app-store';
 import { BootSplashGate } from '@/features/welcome/BootSplashGate';
 
 // ---------------------------------------------------------------------------
-// Two surfaces, one store.
+// 两个 surface，一个 store，按 `activeProjectId` 分流：
 //
-// The app has two screens, and this file picks between them on
-// `activeProjectId`:
+//   activeProjectId === ''  → WelcomeScreen   （全窗口，无顶栏/树/标签）
+//   otherwise               → WorkspaceShell  （顶栏 + 树 + 标签）
 //
-//   activeProjectId === ''  → WelcomeScreen   (full window, no chrome)
-//   otherwise               → WorkspaceShell  (top bar + tree + tabs)
+// 设置是唯一的例外：settings 单例同时也是一个 tab，无项目时必须仍可达，
+// 否则欢迎页的「打开设置」会写出一个没人渲染的 tab。此时渲染
+// `SettingsSurface` —— 与 workspace 内同一份 `SettingsPanel`，只是外壳不同。
+// 判断放在本文件而非 `WelcomeScreen` 内，才能保证两个宿主共用一份面板实现。
 //
-// …plus one cross-cutting exception, because settings is global rather
-// than project-scoped. The settings singleton is also a *tab*, so it has
-// to be reachable while no project is open — otherwise the welcome
-// screen's "打开设置" writes a tab nobody renders and visibly does
-// nothing (that is exactly the bug this branch fixes). When the settings
-// tab is the active one and there is no project, the surface is
-// `SettingsSurface`: the same `SettingsPanel` the workspace mounts, with
-// the chrome a standalone surface needs.
+// 不在共享布局里做条件渲染：欢迎页会被挤进一个窗格，四周是无法在没有项目
+// 时做任何事的 chrome。
 //
-// Leaving a project while the settings tab is open lands here too, which
-// is the correct reading — the panel is still open, it just no longer has
-// a project behind it.
+// 收益：workspace（顶栏、项目树、HTTP tester、设置面板，以及经由它们的
+// CodeMirror 编辑器）全部 `lazy()`，冷启动只拉 store 与项目选择器。
 //
-// A conditional inside a shared layout is the thing to avoid: it leaves
-// the welcome screen a page squeezed into a pane, surrounded by chrome
-// that cannot do anything without a project.
-//
-// The split buys three things:
-//
-//   1. Speed. The workspace — top bar, project tree, HTTP tester,
-//      settings panels, and through them the CodeMirror editors — is
-//      `lazy()`. Opening the app fetches the store and the picker; the
-//      rest arrives only if a project is actually entered.
-//
-//   2. Data. `bootstrap()` has two layers (see `bootstrap-slice.ts`).
-//      Layer 1 is the project list and it alone tears down the boot
-//      splash; layer 2 is the tree and its configuration and it streams
-//      in behind the welcome screen.
-//
-//   3. No dead UI. With no project there is no tree, no env switcher and
-//      no empty right pane — the welcome page owns the whole window. The
-//      one surface that is *not* project-scoped (settings) is the
-//      deliberate exception above.
-//
-// Everything global stays here rather than inside either shell: the theme
-// effect (the welcome page is themed too), the Ctrl+Enter / Ctrl+S hotkeys
-// (the workspace owns the buttons they click, but the listener must survive
-// a shell swap), and the two overlays reachable from both surfaces — the
-// create-item modal and the startup-error banner.
+// 全局部分留在本文件而非任一 shell：主题、Ctrl+Enter / Ctrl+S 快捷键
+// （按钮归 workspace，但监听器必须跨 surface 存活）、以及两个 surface
+// 都能触发的浮层。
 // ---------------------------------------------------------------------------
 
-// The whole workspace frame. Its chunk pulls in the tree, the top bar,
-// the HTTP tester, the settings panels and — through those — the
-// CodeMirror editors. None of it is reachable until a project is open.
+// 整个 workspace 外壳：chunk 内含树、顶栏、HTTP tester、设置面板，
+// 以及经由它们的 CodeMirror 编辑器 —— 没有项目就都到不了。
 const WorkspaceShell = lazy(() =>
   import('@/features/workspace/WorkspaceShell').then((m) => ({ default: m.WorkspaceShell })),
 );
 
-// Settings as a standalone surface — mounted only when there is no
-// project to host it as a tab. It is a *different* chunk from the
-// workspace's settings tab on purpose: both are `lazy()`, and this one
-// must stay out of the welcome screen's first paint until the user
-// actually asks for settings. The panel body is shared; only the host
-// differs (see `features/settings/SettingsSurface.tsx`).
+// 设置的独立宿主，仅在没有项目可挂载 tab 时才挂载。与 workspace 的
+// settings tab 分属不同 chunk：两者都是 `lazy()`，这个必须留在欢迎页首屏之外。
+// 面板体共用，只有外壳不同（见 `features/settings/SettingsSurface.tsx`）。
 const SettingsSurface = lazy(() =>
   import('@/features/settings/SettingsSurface').then((m) => ({ default: m.SettingsSurface })),
 );
 
-// A startup failure can land on either surface, so the banner sits
-// above both rather than inside the shell that happens to be mounted.
+// 启动失败可能落在任一 surface，故置于两者之上，而非嵌在某个 shell 里。
 const BootstrapErrorBanner = lazy(() =>
   import('@/features/top-bar/BootstrapErrorBanner').then((m) => ({
     default: m.BootstrapErrorBanner,
   })),
 );
 
-// Portal-rendered and driven entirely by `newItem.open`, so one instance
-// serves both surfaces: the welcome page's "新建项目" and the top-bar
-// project dropdown are the same dialog. Scoped to `type === 'project'` —
-// the module and collection dialogs are project-scoped and live in
-// `ProjectTree`, and an endpoint has no dialog at all.
+// Portal 渲染，由 `newItem.open` 驱动，故一个实例服务两个 surface。
+// 仅限 `type === 'project'`：模块/集合对话框属项目域，住在 `ProjectTree` 里；
+// endpoint 没有对话框。
 const CreateProjectDialog = lazy(() =>
   import('@/features/create/CreateProjectDialog').then((m) => ({ default: m.CreateProjectDialog })),
 );
 
 /**
- * Placeholder for any full-window lazy surface (the workspace frame, the
- * standalone settings host). Sized to fill its slot rather than a centred
- * spinner: a shell that collapses to nothing and then snaps to full
- * height is a layout jump. It also carries the boot splash's visual
- * language so the hand-off reads as continuous.
+ * 全窗口 lazy surface 的占位（workspace 外壳、设置独立宿主）。撑满而非
+ * 居中 spinner：塌成 0 高度再跳到满高是布局跳动。
  */
 function SurfaceFallback({ label }: { label?: string }) {
   return (
@@ -105,27 +67,21 @@ function SurfaceFallback({ label }: { label?: string }) {
 function App() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const theme = useAppStore((s) => s.theme);
-  // Gate the two overlays on the state that makes them visible rather
-  // than mounting them unconditionally.
+  // 两个浮层按「使其可见」的状态挂载，不无条件渲染。
   //
-  // A `lazy()` component fires its import the moment it is *rendered*, so
-  // `<Suspense><CreateProjectDialog /></Suspense>` at startup still
-  // downloads the chunk during the first paint — it just doesn't block
-  // it. The create dialog pulls in the dialog primitive, and through the
-  // collection dialog's select, GSAP (~38 kB gzip), none of which the
-  // welcome screen needs. Mounting on `open` makes the fetch happen on
-  // the click that needs it instead.
+  // `lazy()` 组件在被 *render* 的瞬间就发 import，所以启动时写
+  // `<Suspense><CreateProjectDialog /></Suspense>` 仍会在首屏下载 chunk ——
+  // 只是不阻塞。创建对话框拉进 dialog 原语，并经集合对话框的 select 拉进
+  // GSAP（~38 kB gzip），欢迎页一个都不需要。挂在 `open` 上让下载发生在
+  // 需要它的那次点击。
   const bootstrapError = useAppStore((s) => s.bootstrapError);
   const newItemOpen = useAppStore((s) => s.newItem.open);
   const newItemType = useAppStore((s) => s.newItem.type);
-  // Raw reference, not a derived object — see the selector rules in
-  // `stores/app-store.ts`. The comparison below is against a constant
-  // string, so no allocation happens here either.
+  // 裸引用而非派生对象，selector 规则见 `stores/app-store.ts`。
   const activeTabId = useAppStore((s) => s.activeTabId);
 
-  // Apply the persisted theme to the <html> element. The store loads the
-  // initial value synchronously from localStorage, so this runs once on
-  // mount and again whenever the user changes theme from settings.
+  // 把持久化的主题写到 <html>。store 从 localStorage 同步读初值，
+  // 故挂载时跑一次，设置里改主题时再跑。
   useEffect(() => {
     const root = document.documentElement;
     const apply = (dark: boolean) => {
@@ -145,22 +101,18 @@ function App() {
     }
   }, [theme]);
 
-  // Global hotkeys — Ctrl+Enter (send), Ctrl+S (save).
-  // Ctrl+K (command palette) is handled inside <TopBar> so the palette can
-  // share its open-state with the search box click.
+  // 全局快捷键：Ctrl+Enter 发送、Ctrl+S 保存。
+  // Ctrl+K 命令面板在 <TopBar> 内处理，好与搜索框点击共享 open 状态。
   //
-  // IME guard: `e.isComposing` is true while the IME composition
-  // session is open (e.g. Chinese Pinyin, Japanese kana). Browsers
-  // still dispatch `keydown` during composition; without skipping
-  // these, a user mid-IME would accidentally fire send/save shortcuts
-  // when their IME candidate window swallows the actual letter.
+  // IME 守卫：组合输入期间（中文拼音等）浏览器照样派发 `keydown`，
+  // 不跳过 `e.isComposing` 就会在候选窗吞掉按键时误触发。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        // trigger a synthetic send by re-using the button: we'll just dispatch click on the visible send button via document
+        // 复用可见的发送按钮触发一次合成发送：直接 click 它
         const btn = document.querySelector<HTMLButtonElement>('[data-testid="send-btn"]');
         btn?.click();
       }
@@ -169,29 +121,25 @@ function App() {
         const btn = document.querySelector<HTMLButtonElement>('[data-testid="save-btn"]');
         btn?.click();
       }
-      // Esc used to close the settings drawer. Settings is now a tab —
-      // close it via the tab's X button, or by activating another tab.
-      // On the project-less host it has a 返回 button instead (see
-      // `features/settings/SettingsSurface.tsx`).
+      // Esc 不再关闭设置抽屉：设置现在是 tab，用 tab 的 X 或切到别的 tab；
+      // 无项目宿主上则是「返回」按钮（见 `features/settings/SettingsSurface.tsx`）。
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
   const onWelcome = activeProjectId === '';
-  // Settings is the one surface that does not need a project. Checking it
-  // here — rather than inside `WelcomeScreen` — is what keeps the two
-  // hosts on one panel implementation instead of two divergent ones.
+  // 设置是唯一不需要项目的 surface。在此判断（而非放进 `WelcomeScreen`），
+  // 才能让两个宿主共用一份面板实现。
   const onWelcomeSettings = onWelcome && activeTabId === SETTINGS_TAB_ID;
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-      {/* Removes the static HTML splash once the store can render real data
-          (or has failed). See features/welcome/BootSplashGate.tsx. */}
+      {/* store 能渲染真实数据（或已失败）后移除静态 HTML 启动闪屏，
+          见 features/welcome/BootSplashGate.tsx。 */}
       <BootSplashGate />
-      {/* Spans both surfaces: layer 1 of the bootstrap can fail with the
-          welcome screen mounted, in which case there is no top bar to
-          host it. Mounted only once there is an error to show. */}
+      {/* 跨两个 surface：第 1 层 bootstrap 失败时欢迎页已挂载，没有顶栏可承载它。
+          有错才挂载。 */}
       {bootstrapError !== null && (
         <Suspense fallback={null}>
           <BootstrapErrorBanner />
@@ -208,10 +156,8 @@ function App() {
           <WorkspaceShell />
         </Suspense>
       )}
-      {/* Portal-rendered, and the only create dialog that has to survive a
-          surface swap: a project can be created from the welcome screen,
-          the top-bar dropdown or the command palette, and the first two
-          live on different surfaces. */}
+      {/* Portal 渲染，且是唯一必须跨 surface 存活的创建对话框：
+          项目可从欢迎页、顶栏下拉或命令面板创建，而前两者在不同 surface 上。 */}
       {newItemOpen && newItemType === 'project' && (
         <Suspense fallback={null}>
           <CreateProjectDialog />

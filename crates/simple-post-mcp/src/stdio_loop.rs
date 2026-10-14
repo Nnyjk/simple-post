@@ -1,25 +1,21 @@
 // crates/simple-post-mcp/src/stdio_loop.rs
 //
-// Synchronous stdio ↔ HTTP bridge for the `simple-post-mcp` binary.
+// `simple-post-mcp` 二进制的 stdio ↔ HTTP 桥。
 //
-// One JSON-RPC frame per line on stdin; one line of response per
-// frame on stdout. Matches the protocol every existing MCP client
-// (Claude Desktop, Cursor, …) speaks, so the binary is a drop-in
-// replacement for the previous `simple-post-mcp-proxy`.
+// stdin 每行一帧 JSON-RPC，stdout 每帧回一行 —— Claude Desktop、Cursor
+// 等 MCP 客户端说的就是这套协议。
 //
-// Errors don't panic: HTTP failures and parse errors are converted
-// to JSON-RPC `error` blocks and written back on stdout. Only
-// truly fatal I/O failures (stdin pipe closed) end the loop.
+// 出错不 panic：HTTP 失败与解析失败都转成 JSON-RPC `error` 块写回 stdout，
+// 只有真正致命的 I/O 失败（stdin 管道关闭）才结束循环。
 //
-// Frame shape:
+// 帧形态：
 //   in:  {"jsonrpc":"2.0","id":N,"method":"tools/list","params":{}}
 //   out: {"jsonrpc":"2.0","id":N,"result":{...}}
 //        {"jsonrpc":"2.0","id":N,"error":{"code":N,"message":"..."}}
 //        {"jsonrpc":"2.0","method":"...","params":{...}} (notifications, no id)
 //
-// `tools/list` responses are filtered through `capability::filter_tools`
-// before being written back, so the client sees the same visibility
-// as if it had hit `/mcp` directly with a narrower `mcp.policy`.
+// `tools/list` 的结果先过一遍 `capability::filter_tools` 再写回，客户端看到的
+// 就是「本地档位收窄之后」那份清单。
 
 use std::io::{self, BufRead, Write};
 
@@ -44,7 +40,7 @@ pub async fn run(
         line.clear();
         let n = reader.read_line(&mut line)?;
         if n == 0 {
-            // EOF — clean shutdown.
+            // EOF，干净退出。
             return Ok(());
         }
         let trimmed = line.trim();
@@ -66,15 +62,13 @@ pub async fn run(
             }
         };
 
-        // Notifications (no `id`) get forwarded but never get a
-        // response written — matching JSON-RPC 2.0.
+        // 无 `id` 的 notification 只转发，不回响应帧。
         let id = frame.get("id").cloned();
         let method = frame.get("method").cloned().unwrap_or(Value::Null);
         let _params = frame.get("params").cloned().unwrap_or(Value::Null);
 
-        // For `tools/list`, fetch the full set and apply our local
-        // capability filter on top of whatever the backend returned.
-        // For every other method, we just proxy the frame as-is.
+        // `tools/list` 取回全集后叠一层本地 capability 过滤；
+        // 其他 method 原样代理。
         let response = if method == "tools/list" {
             let full = client.post_mcp(&frame).await;
             match full {
@@ -119,7 +113,7 @@ pub async fn run(
             }
         };
 
-        // Notifications get no response line.
+        // notification 不写响应行。
         if id.is_none() {
             continue;
         }

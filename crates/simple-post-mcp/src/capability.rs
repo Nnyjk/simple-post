@@ -1,34 +1,20 @@
 // crates/simple-post-mcp/src/capability.rs
 //
-// `--capability` flag (and the matching `SIMPLE_POST_MCP_CAPABILITY`
-// env var) → tool-list filter applied locally on top of whatever the
-// web backend returns. The backend already filters by its persisted
-// `mcp.policy`, but a stricter client may want to further narrow
-// what it sees in `tools/list`.
+// `--capability`（及 `SIMPLE_POST_MCP_CAPABILITY`）在本地上再过滤一次
+// `tools/list`，后端已按 `mcp.policy` 过滤过一层。
 //
-// We don't have access to the backend's `CapabilityPolicy` enum
-// directly (it lives in `simple-post-core::permissions`), so we keep
-// a tiny local enum that mirrors the wire format. Mapping:
+// 后端的 `CapabilityPolicy` 在 `simple-post-core::permissions`，这里拿不到，
+// 于是镜像一份本地 enum：
 //
-//   read_only   → keep only tools whose backend metadata marks
-//                 them as `Capability::Read`. We don't have that
-//                 metadata in the response body, so in practice we
-//                 only filter the well-known "destructive" tools
-//                 (those whose names contain `_delete`, `_create`,
-//                 `_update`, `_set_`, `_move`, `_duplicate`).
+//   read_only   → 只留 `Capability::Read`。响应体里没有该元数据，只能按名字
+//                 里的 `_delete` / `_create` / `_update` / `_set_` /
+//                 `_move` / `_duplicate` 反推。
+//   safe_write  → read-only 之外放行安全改写（env_set_var、env_set_baseurl、
+//                 env_set_active、base_url_def_set_default、request_settings_update）。
+//   full_access → 不过滤，仍以后端策略为准。
 //
-//   safe_write  → read-only + the safe mutators (env_set_var,
-//                 env_set_baseurl, env_set_active, base_url_def_set_default,
-//                 request_settings_update). We hardcode the destructive
-//                 exclusion list.
-//
-//   full_access → no extra filter. Server's policy still applies.
-//
-// This is intentionally conservative: the *server* is the authority
-// on what the client is allowed to do; this layer only adds an
-// opt-in belt-and-suspenders narrowing for paranoid clients (e.g.
-// the user wants Claude to never see destructive tools even when
-// the server is set to `safe_write`).
+// 这层只收窄、不放宽：真正的裁决权在后端，本地开关是给「服务端已放开但仍不想让
+// AI 看见破坏性工具」的用户用的。
 
 use std::str::FromStr;
 
@@ -64,10 +50,8 @@ impl std::fmt::Display for CapabilityOverride {
     }
 }
 
-/// Hardcoded list of tool name suffixes / prefixes that mark a tool
-/// as destructive. We avoid pulling the backend's REQUIRED_CAPABILITY
-/// table over the wire just for a UI filter — anything genuinely new
-/// lands here as part of the same commit that adds the tool.
+/// 破坏性工具的名字后缀。刻意不把后端的 `REQUIRED_CAPABILITY` 拉到客户端来，
+/// 新增工具时在同一个 commit 里补一行即可。
 const DESTRUCTIVE_SUFFIXES: &[&str] = &[
     "_create",
     "_update",
@@ -77,15 +61,13 @@ const DESTRUCTIVE_SUFFIXES: &[&str] = &[
     "_duplicate",
 ];
 
-/// Return `true` if `name` should be visible in `tools/list` given
-/// the override. `FullAccess` never strips anything locally.
+/// `FullAccess` 在本地一律放行。
 pub fn filter_tools(name: &str, cap: CapabilityOverride) -> bool {
     match cap {
         CapabilityOverride::FullAccess => true,
         CapabilityOverride::SafeWrite => !is_destructive(name),
         CapabilityOverride::ReadOnly => {
-            // Anything that mutates state or talks to the network is
-            // hidden — keep only the safe readers.
+            // 会改状态或发外网的一律隐藏，只留安全的读。
             !is_destructive(name)
                 && !name.contains("api_run_request")
                 && !name.contains("api_call_endpoint")

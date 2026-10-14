@@ -1,42 +1,28 @@
 /**
- * EntitySettings — the pane behind a project / module / collection tab.
+ * EntitySettings —— 项目 / 模块 / 集合标签背后的面板。
  *
- * ONE COLUMN, NO TABS
+ * 单列，无标签页
  * -------------------
- * An entity tab used to be a card: an icon, a name, and a sentence pointing
- * at 设置 → 环境. Then it became a two-layer pane with a switcher in the
- * header. Both were wrong for the same reason — they made the user *choose*
- * between "what this thing is" and "how this thing is configured", when
- * both are short enough to just be there. Two fields, then an env list you
- * scroll through. So the pane is a single waterfall now: 基础信息, then
- * whatever configuration belongs to that kind, stacked top to bottom.
+ * 实体面板不该让用户在「这个东西是什么」与「这个东西怎么配置」之间*选择* —— 两者都短到
+ * 直接摆着就行。于是面板是自上而下的单条瀑布：先是 基础信息，再是属于该类型的配置。
  *
- * NO IDENTITY HEADER
+ * 没有身份表头
  * ------------------
- * There used to be a header here repeating the icon, the name and the kind
- * label. It is gone, because the tab strip directly above already carries
- * all three: the tab names the entity and its icon says which kind it is.
- * The header was that same fact twice, and a fixed 44px of the viewport
- * spent on the duplicate. The only thing genuinely lost was the kind as a
- * *word* — so the tab's hover title now spells it out (`项目 · ttt`),
- * which puts the label where the eye already is instead of in a second
- * place that scrolls away.
+ * 紧邻上方的标签条已经带齐这三样：标签点名实体、图标说明类型。唯一真正丢掉的是类型作为
+ * 一个*词*，故标签的 hover 标题现在把它拼出来（`项目 · ttt`），把标签放在眼睛本来就在的
+ * 地方，而不是放在第二个会滚走的角落里。
  *
- * That is not only a layout preference. The layers hid things: with
- * 基础信息 selected, a module's addresses were invisible and the only clue
- * they existed was a summary line ("1 个环境已填写") that the pane then had
- * to explain. One column means the module's env switcher and its baseUrl
- * table are simply below its name, where you scroll into them.
+ * 这不只是布局偏好。分层会藏东西：选中 基础信息 时模块的地址不可见，唯一的线索只剩一行
+ * 汇总（「1 个环境已填写」），还得再解释一遍。单列意味着模块的环境切换器与 baseUrl 表就在
+ * 它名字的下方，滚过去就能看到。
  *
- * WHAT IS NOT RE-IMPLEMENTED HERE
+ * 此处没有重新实现的东西
  * -------------------------------
- * The 环境 block is the *same* `EnvironmentSection` the settings tab mounts,
- * behind the same store-connected `ProjectEnvSection`; the 服务 block is
- * `ModuleBaseUrlTable` in `module` mode. Two hosts, one implementation —
- * see those files for why the rules live there and not here.
+ * 环境 区块就是设置标签所挂载的**同一个** `EnvironmentSection`，经同一个 store 连接的
+ * `ProjectEnvSection` 驱动；服务 区块是 `module` 模式的 `ModuleBaseUrlTable`。两个宿主，
+ * 一份实现 —— 规则为何住在那里而非这里，见那些文件。
  *
- * Endpoint tabs route to `HttpTester` instead of this component, so the
- * switch's default branch returns null.
+ * 接口标签走 `HttpTester` 而非本组件，故 switch 的 default 分支返回 null。
  */
 
 import { lazy, Suspense, useState, type ReactNode } from 'react';
@@ -47,11 +33,9 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { AutoSaveInput, AutoSaveTextarea, InfoBlock, InfoField } from './EntityInfoFields';
 
-// Both configuration blocks are separate chunks. `EntitySettings` is itself
-// lazy (mounted on any entity tab), but the env section drags in its
-// switcher, both tables and the dialog plumbing. They are mounted with the
-// pane rather than behind a click, so `lazy()` here only splits the chunk —
-// it does not defer anything the user cannot see scrolling.
+// 两个配置区块各自是独立 chunk。`EntitySettings` 本身就是 lazy（挂在任意实体标签上），
+// 但环境区块会牵进它的切换器、两张表和对话框管线。它们随面板一起挂载而非藏在一次点击
+// 之后，故此处 `lazy()` 只是拆 chunk，并不会推迟任何用户滚动时本来就看得见的东西。
 const ProjectEnvSection = lazy(() =>
   import('@/features/settings/sections/ProjectEnvSection').then((m) => ({
     default: m.ProjectEnvSection,
@@ -77,7 +61,7 @@ export function EntitySettings({ kind, entityId }: EntitySettingsProps) {
     case 'collection':
       return <CollectionWorkspace collectionId={entityId} />;
     default:
-      // Endpoint tabs route to HttpTester instead.
+      // 接口标签走 HttpTester。
       return null;
   }
 }
@@ -87,11 +71,10 @@ export function EntitySettings({ kind, entityId }: EntitySettingsProps) {
 // ----------------------------------------------------------------------------
 
 /**
- * One titled block in the waterfall.
+ * 瀑布中的一个带标题区块。
  *
- * The inset matches what `SettingsCategory` produces for the env block, so
- * a project tab reads as one column rather than as "our blocks" plus "their
- * block, indented differently".
+ * 内缩与 `SettingsCategory` 为环境 区块产出的保持一致，故项目标签读起来是一列，而不是
+ * 「我们的区块」外加「他们的区块，缩进还不一样」。
  */
 function EntitySection({
   title,
@@ -99,7 +82,7 @@ function EntitySection({
   children,
 }: {
   title: string;
-  /** One line under the title. States a rule; does not restate the title. */
+  /** 标题下的一行。讲一条规则，不复述标题。 */
   hint?: string;
   children: ReactNode;
 }) {
@@ -114,7 +97,7 @@ function EntitySection({
   );
 }
 
-/** Suspense stand-in sized to the block it replaces. */
+/** 尺寸与它所替代的区块相当的 Suspense 占位。 */
 function BlockFallback() {
   return (
     <div className="flex min-h-32 items-center justify-center py-10 text-xs text-muted-foreground">

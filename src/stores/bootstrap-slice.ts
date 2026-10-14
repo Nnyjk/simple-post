@@ -1,46 +1,30 @@
 /**
- * Bootstrap slice — owns the top-level data (projects, the resource tree,
- * environments) and the one-shot `bootstrap()` action that hydrates them
- * from the Rust daemon on app start.
+ * Bootstrap 切片 —— 顶层数据（projects、资源树、environments）与启动时的一次性
+ * `bootstrap()`，外加当前选择与展开状态。选择状态与这些数据同处一片是刻意的：
+ * `bootstrap()` 要挑默认值，`setActive*` 要读刚加载的数据，两半一直在互相调用。
  *
- * The tree is one `nodes` array plus an `endpointDetails` map keyed by
- * node id, replacing the three parallel `modules` / `collections` /
- * `endpoints` arrays. `nodes` carries structure — id, owner, parent,
- * type, name, order — and `endpointDetails` carries the request
- * configuration that only an endpoint has. Keeping them apart is not
- * tidiness: `method` / `url` / `tags` mean nothing for a module, and the
- * tree never renders them.
+ * 树是扁平的 `nodes` 数组 + 按 node id 索引的 `endpointDetails`，不是三条并行数组：
+ * `method` / `url` / `tags` 对模块无意义，树也从不渲染它们。
  *
- * Also owns the "active selection" state (`activeProjectId`,
- * `activeEnvironmentId`, `activeEndpointId`) plus the per-node expansion
- * flag (`ResourceNode.expanded`). Co-locating them is intentional:
- * bootstrap() picks defaults, and the set-active* actions consume the
- * data the slice just loaded, so the two halves talk to each other
- * constantly.
- *
- * CRUD-style mutations (add/update/delete) live in the crud-slice.
- * This slice is read-only besides the expansion toggle.
+ * 增删改在 crud-slice；本切片除展开开关外只读。
  */
 import type { StateCreator } from 'zustand';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from './app-store';
 
-/** State portion owned by the bootstrap slice. */
+/** 状态部分。 */
 export interface BootstrapSliceState {
   // data
   projects: Project[];
   /**
-   * Every node in the workspace, flat. Hierarchy is `parentId`; the tree
-   * component buckets by it rather than reading a nested shape, which
-   * keeps a drag-and-drop reorder a single array write.
+   * 工作区全部节点，扁平。层级靠 `parentId`，树组件按它分桶而不读嵌套结构，
+   * 这样拖拽重排就是一次数组写入。
    */
   nodes: ResourceNode[];
   /**
-   * Endpoint request configuration, keyed by node id. Only `type:
-   * 'endpoint'` nodes have an entry. A `Record` rather than an array so
-   * "this endpoint's url" is a map read instead of a scan — the HTTP
-   * tester does it on every keystroke's re-render.
+   * 接口请求配置，按 node id 索引。只有 `type: 'endpoint'` 的节点有条目。
+   * 用 `Record` 而非数组：HTTP tester 每次按键重渲染都要读"这个接口的 url"。
    */
   endpointDetails: Record<string, EndpointDetail>;
   environments: Environment[];
@@ -49,28 +33,23 @@ export interface BootstrapSliceState {
   /**
    * 第二层（树 + 接口配置 + 环境）是否已就绪。
    *
-   * 与 `loaded` 刻意分开：欢迎页只需要 `projects`，所以 `loaded` 一旦
-   * 项目列表落地就翻 true，启动画面随即被 `BootSplashGate` 拆掉 ——
-   * 用户看到欢迎页不必等三个可能很大的列表。剩下的数据只对"已经进入
-   * 某个项目"有意义，由 `loadWorkspace()` 在后台（或用户进入项目时按需）
-   * 补齐。
+   * 与 `loaded` 刻意分开：欢迎页只需 `projects`，故 `loaded` 一落地就拆掉启动
+   * 画面，不必等三个可能很大的列表。
    *
-   * 消费方必须区分二者：把 `nodes: []` 当成"该项目没有模块"会在这段
-   * 窗口里显示一句彻底错误的空状态。
+   * 消费方必须区分二者：`nodesLoaded === false` 窗口里的 `nodes: []` 是歧义的，
+   * 此时渲染加载态而非"该项目还没有模块"。
    */
   nodesLoaded: boolean;
   /**
-   * 第二层加载进行中。单独一个 flag 而不是复用 `loading`，因为两者回答
-   * 不同问题：`loading` 是"欢迎页的数据还没到"，这个是"树还在拉"。
+   * 第二层进行中。单独一个 flag 而不复用 `loading`：后者回答"欢迎页的数据还没到"，
    * 合并会让启动画面等上整个树。
    */
   nodesLoading: boolean;
 
   // 当前选择与 bootstrap 数据紧密耦合，保留在此切片内。
   /**
-   * 当前项目 id。`''` = 尚未选择项目 —— 刚启动（bootstrap 不会预选）
-   * 或用户主动退出到欢迎页。树的渲染范围、TopBar 的环境列表、
-   * 新建模块/集合/接口的落点全部以它为准。
+   * 当前项目 id。`''` = 尚未选择项目（刚启动，或已退出到欢迎页）。树的渲染范围、
+   * 顶栏环境列表、新建模块/集合/接口的落点全以它为准。
    */
   activeProjectId: string;
   activeEnvironmentId: string;
@@ -80,122 +59,79 @@ export interface BootstrapSliceState {
   /** 最近一次启动加载错误；成功后清空。 */
   bootstrapError: string | null;
   /**
-   * 第二层（树 / 接口配置 / 环境）的加载错误。与 `bootstrapError` 分开，
-   * 这样"欢迎页正常但树拉取失败"不会被误报成"启动失败"——后者会把启动
-   * 画面一直钉在屏幕上。
+   * 第二层的加载错误。与 `bootstrapError` 分开，否则"欢迎页正常但树拉取失败"
+   * 会被误报成启动失败，把启动画面一直钉在屏幕上。
    */
   nodesError: string | null;
 }
 
-/** Action portion owned by the bootstrap slice. */
+/** action 部分。 */
 export interface BootstrapSliceActions {
   // actions: data — selection / expansion
   /**
-   * Select a project. The canonical "the user is now working in project
-   * X" event — see `openProject` below for the distinction — and so also
-   * where the per-project response history is (re)loaded from, because
-   * `responseHistory` is a whole-project map that a cross-project jump
-   * would otherwise leave pointing at the old project.
+   * 纯选择 setter：设 `activeProjectId` 并按该项目重解 `activeEnvironmentId`。
+   * 不换标签条（那是 `openProject` 的职责）。响应历史也不在此加载 —— 它按
+   * endpoint 作用域，由 `setActiveTab` 触发。
    */
   setActiveProject: (id: string) => void;
   /**
-   * *Enter* a project: select it **and** swap the tab strip to that
-   * project's own set.
+   * *进入* 项目：既选中，又把标签条换成该项目自己的一组。
    *
-   * This is the single entry point for "the user is now working in
-   * project X", and every surface that lands on a project goes through
-   * it — the welcome picker, the top-bar selector, the command palette,
-   * the HTTP tester's breadcrumb, and the create-project flow. Having
-   * one action is what keeps those paths converging on the same state
-   * instead of drifting into "tree shows X, right pane still shows Y".
+   * 这是"用户在项目 X 里工作"的唯一入口 —— 欢迎页选择器、顶栏选择器、命令面板、
+   * HTTP tester 面包屑、新建项目流程都走它。单点才能让这些路径收敛到同一状态，
+   * 而不是"树是 X、右栏还是 Y"。
    *
-   * The strip swap is the point of the ownership change: leaving project
-   * A for project B sets A's tabs aside in `projectTabs` and brings up
-   * B's, so an endpoint tab from one project can never be sitting on
-   * screen while the user works in the other. Coming back restores them,
-   * unsaved edits included — see {@link ProjectTabSet}.
+   * 换条即所有权转移：A 的标签存进 `projectTabs`，B 的取上来，切回时连未保存的
+   * 编辑一并恢复（见 {@link ProjectTabSet}）。
    *
-   * Distinct from `setActiveProject`, which is a pure selection setter:
-   * the palette's "jump to an endpoint in another project" needs to
-   * change the owner without swapping the strip, because it opens the
-   * endpoint tab immediately after and that is what they want to see.
+   * 与 `setActiveProject` 的分工：后者不换条，因为命令面板的"跳到另一项目的接口"
+   * 紧接着就打开那个接口标签，换条会把它顶掉。
    */
   openProject: (id: string) => void;
   /**
-   * Leave the current project and return to the welcome screen.
+   * 退出项目回欢迎页。`openProject` 的逆操作，也是现在唯一的回去路径 ——
+   * 欢迎页是独立 surface，`App.tsx` 按 `activeProjectId === ''` 切换，没有第二个
+   * "当前在哪个屏"的状态要同步。
    *
-   * The inverse of `openProject`, and the only way back now that the
-   * welcome page is a standalone surface rather than a panel inside the
-   * workspace frame. `App.tsx` switches on `activeProjectId === ''`, so
-   * clearing it is what swaps the surfaces — there is no separate
-   * "which screen am I on" state to keep in sync.
-   *
-   * Deliberately does NOT close tabs or clear the loaded tree. Those are
-   * per-project artifacts the user may want back the moment they click
-   * the project again, and re-entering via `openProject` restores them
-   * immediately since `nodesLoaded` short-circuits the reload. Only the
-   * selection is reset — `activeEnvironmentId` along with it, since an
-   * environment belonging to the abandoned project is meaningless while
-   * no project is active.
+   * 刻意不关标签、不清树：它们是按项目的产物，用户可能马上点回来，`openProject`
+   * 时 `nodesLoaded` 会短路重载。只重置选择 —— `activeEnvironmentId` 一并清空，
+   * 因为无项目时环境无意义。
    */
   leaveProject: () => void;
   setActiveEnvironment: (id: string) => void;
   setActiveEndpoint: (id: string | null) => void;
-  /**
-   * Expand / collapse one node. One action for all three types, where
-   * there used to be `toggleModuleExpanded` and `toggleCollectionExpanded`
-   * — the flag is on the node either way, and only the tree knows which
-   * types it renders as expandable.
-   */
+  /** 展开 / 折叠一个节点。三种类型共用一个动作：展开位在节点上，只有树知道哪些类型渲染成可展开。 */
   toggleNodeExpanded: (id: string) => void;
 
   // actions: bootstrap (one-shot at app start)
   /**
-   * Fetch persistent data from the SQLite daemon and mirror into the
-   * store. Idempotent — a second call after the first is a no-op.
-   * Fired from `main.tsx`, before `createRoot`, so the IPC overlaps
-   * React mounting instead of queueing behind it.
+   * 从 daemon 拉持久化数据镜像进 store。幂等。由 `main.tsx` 在 `createRoot` 之前
+   * 触发，让 IPC 与 React 挂载重叠，而不是排在它后面。
    *
-   * Two layers:
+   * 两层：
    *
-   *   1. `projects` — awaited. Flips `loaded`, which tears down the HTML
-   *      boot splash and lets the welcome screen paint.
-   *   2. `nodes` / `endpointDetails` / `environments` — delegated to
-   *      `loadWorkspace()` and *not* awaited, so a large tree never
-   *      delays the first screen.
+   *   1. `projects` —— await。翻 `loaded`，拆掉 HTML 启动闪屏，欢迎页开画。
+   *   2. `nodes` / `endpointDetails` / `environments` —— 交给 `loadWorkspace()`，
+   *      **不** await，大树不会拖慢首屏。
    *
-   * Step 2 still starts immediately; it just stops being on the critical
-   * path. `openProject` also kicks it, so a user who clicks a project
-   * card before the background pass lands still gets a complete tree.
+   * 第 2 步立即开始，只是不在关键路径上。`openProject` 也会触发它，故在后台
+   * 那一趟落地前就点开项目卡的用户仍能拿到完整的树。
    */
   bootstrap: () => Promise<void>;
 
   /**
-   * Layer 2 — the resource tree, every endpoint's request configuration,
-   * and the environments.
+   * 第二层 —— 资源树、每个接口的请求配置、环境。
    *
-   * Safe to call at any time and from anywhere: it early-returns when the
-   * data is already in place or a load is in flight, so `bootstrap`,
-   * `openProject` and the retry button can all reach for it without
-   * coordinating. Never rejects — failures land in `nodesError`, which is
-   * a *different* flag from `bootstrapError` on purpose: layer 1 can
-   * succeed while layer 2 fails, and that shows up as "the welcome page
-   * works but the tree failed to load", not as a dead startup.
+   * 任何时候、任何地方都可调：数据已就位或有加载在途时提前返回，故 `bootstrap`、
+   * `openProject` 与重试按钮可以各自调用而无需互相协调。永不 reject，失败落
+   * `nodesError`：第 1 层成功而第 2 层失败要显示成"欢迎页可用但树加载失败"，
+   * 而不是死掉的启动。
    */
   loadWorkspace: () => Promise<void>;
 
   /**
-   * Dismiss the startup-load error banner without retrying.
-   *
-   * `bootstrapError` used to be write-only state: `bootstrap()` set it on
-   * failure and nothing ever read it, so a failed startup looked
-   * identical to an empty database — every list rendered blank with no
-   * indication that the backend was unreachable. The banner in
-   * `features/top-bar/BootstrapErrorBanner` is the reader; this action is
-   * its dismiss affordance.
-   *
-   * Only clears the message — `loaded` / `loading` are untouched, so a
-   * subsequent `bootstrap()` retry still runs.
+   * 关掉启动加载错误横幅（`features/top-bar/BootstrapErrorBanner`）而不重试。
+   * 只清消息，`loaded` / `loading` 不动，故后续 `bootstrap()` 重试仍会跑。
    */
   clearBootstrapError: () => void;
 }
@@ -203,13 +139,10 @@ export interface BootstrapSliceActions {
 export type BootstrapSlice = BootstrapSliceState & BootstrapSliceActions;
 
 /**
- * Fetch every endpoint's request configuration in one call.
+ * 一次调用取回所有接口的请求配置。
  *
- * Fails soft to `{}` on purpose. A missing configuration map degrades to
- * "the HTTP tester shows blank method / url" — recoverable, and the tree
- * still renders. Failing the whole load instead would leave the user
- * with an empty workspace and a retry button, which is a far worse
- * outcome for a partial read.
+ * 刻意 fail soft 到 `{}`：缺这张表只降级为"HTTP tester 的 method / url 为空"，
+ * 可恢复且树照常渲染；整体失败则只剩空工作区加一个重试按钮，不划算。
  */
 async function loadEndpointDetails(): Promise<Record<string, EndpointDetail>> {
   const rows = await invokeCmd<EndpointDetail[]>(COMMANDS.endpointDetailsList).catch(
@@ -223,22 +156,17 @@ async function loadEndpointDetails(): Promise<Record<string, EndpointDetail>> {
 
 export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice> = (set, get) => {
   /**
-   * The layer-2 pass currently in flight, or `null`.
+   * 当前在途的第二层加载，或 `null`。
    *
-   * Lives in the slice closure rather than in store state on purpose: it
-   * is a promise, not data, and putting it in state would make every
-   * subscriber's `Object.is` comparison see a new reference on each write.
-   * It exists so concurrent callers of `loadWorkspace()` share one pass
-   * instead of either duplicating the queries or resolving early.
+   * 放在切片闭包而非 store state：它是 promise 不是数据，进 state 会让每个订阅者
+   * 的 `Object.is` 每次写入都看到新引用。存在是为了让并发调用共享同一趟加载，
+   * 而不是重复查询或提前 resolve。
    */
   let inFlight: Promise<void> | null = null;
 
   return {
-    // v0.1 MCP rollout — empty at boot; `bootstrap()` populates from the
-    // daemon (which reads SQLite). The selectors and consumers all tolerate
-    // an empty list because `loaded: false` triggers a loading state in the
-    // UI rather than rendering the (now-empty) tree.
-    // 启动时为空；bootstrap() 成功后会一次性填入 SQLite 中的数据。
+    // 启动时为空；`bootstrap()` 从 daemon（读 SQLite）填入。空列表可接受：
+    // `loaded: false` 时 UI 渲染加载态而非空树。
     projects: [],
     nodes: [],
     endpointDetails: {},
@@ -258,70 +186,49 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     // ---------- selection / expansion ----------
 
     setActiveProject: (id) => {
-      // Only a real change re-reads the project's active environment.
-      // Re-selecting the project already in front is not an event.
+      // 只有真正的变化才重解激活环境；重新选中当前项目不是一个事件。
       set((s) => {
         const env =
           s.environments.find((e) => e.projectId === id && e.isActive) ??
           s.environments.find((e) => e.projectId === id);
-        // Clear activeEnvironmentId to '' when the new project has no env
-        // (sentinel for "none selected" — useActiveEnvironment() will then
-        // return undefined and the TopBar trigger falls back to '—').
+        // 新项目没有环境时清成 `''`（"未选"哨兵），`useActiveEnvironment()` 返回
+        // undefined，顶栏触发器回落到 '—'。
         return {
           activeProjectId: id,
           activeEnvironmentId: env?.id ?? '',
         };
       });
-      // Response history deliberately does NOT load here. It is scoped to
-      // one endpoint, not to a project, and it is fired from
-      // `setActiveTab` — the event every path into an endpoint shares.
-      // Loading it per project meant fetching rows for endpoints the user
-      // was not looking at, sized by the project rather than by the strip.
+      // 刻意不在此加载响应历史：它按 endpoint 而非按项目作用域，由 `setActiveTab`
+      // —— 所有进入某接口的路径共享的事件 —— 触发。
     },
     setActiveEnvironment: (id) => set({ activeEnvironmentId: id }),
     openProject: (id) => {
-      // The tree is what the user is about to look at, so don't wait for
-      // the background pass to finish — kick it here and let the render
-      // land on `nodesLoaded === false` (the tree shows a loading state
-      // rather than a wrong "no modules" empty state).
+      // 树是用户马上要看的东西，不等后台那一趟：在这里触发，让渲染落在
+      // `nodesLoaded === false` 上（树显示加载态而非错误的"没有模块"空态）。
       void get().loadWorkspace();
-      // Swap the strip BEFORE the active project changes. Deciding what
-      // to set aside means asking which project owns each tab on screen,
-      // and that answer is only meaningful against the project currently
-      // in front — after `setActiveProject` there would be no "currently
-      // in front" left to attribute them to.
-      //
-      // This also replaces the old `openTab('project', id)`: the switch
-      // guarantees the incoming project owns a project tab, and decides
-      // whether the user lands on it or on whatever they had open here
-      // last time.
+      // 先换标签条再改 active project：判断该把哪些标签搁置，需要知道屏幕上每个
+      // 标签属于谁，而这个答案只对当前在前的项目成立 —— 过了 `setActiveProject`
+      // 就无从归属了。换条也顺带保证新项目一定拥有一个项目 tab，并决定用户落在它
+      // 身上还是落在上次在这里打开的那一个。
       get().switchProjectTabs(id);
       get().setActiveProject(id);
-      // The endpoint the tester was showing belongs to the project being
-      // left. Left in place, `useActiveEndpoint` would answer with an
-      // endpoint the new tree does not contain, and so would the last
-      // response — both of which describe somewhere the user no longer is.
+      // tester 正显示的接口属于被离开的项目；留着会让 `useActiveEndpoint` 和最后
+      // 一条响应都指向新树里不存在的接口。
       set({ activeEndpointId: null });
       get().setLastResponse(null);
     },
     leaveProject: () => {
-      // No-op when nothing is entered, so a stray click on the title while
-      // already on the welcome screen cannot disturb state.
+      // 已经不在项目里就空操作，欢迎页上误点标题不会扰动状态。
       if (get().activeProjectId === '') return;
-      // Same swap as `openProject`, in the other direction, and for the
-      // same ordering reason: stash while the project is still the one in
-      // front. Getting this after the `set` below would attribute every
-      // open tab to nobody and lose the strip.
+      // 与 `openProject` 同样的换条、同样的顺序理由：在项目仍是"在前的那个"时
+      // 搁置，否则每个打开的标签都无人归属，标签条会丢。
       get().switchProjectTabs('');
       set({ activeProjectId: '', activeEnvironmentId: '', activeEndpointId: null });
     },
     setActiveEndpoint: (id) => {
-      // `activeEndpointId` is owned by this slice; the workspace-tab side
-      // effects (openTabs / activeTabId) belong to ui-slice — route them
-      // through the canonical actions instead of writing across slice
-      // boundaries here. `lastResponse: null` likewise is owned by
-      // ui-slice (it's the last HTTP response, not the active-selection
-      // cache), so it goes through `setLastResponse`.
+      // `activeEndpointId` 归本切片；标签侧的副作用（openTabs / activeTabId）归
+      // ui-slice —— 走规范动作而不是跨切片写。`lastResponse: null` 同理归 ui-slice
+      // （它是最近一次 HTTP 响应，不是选择缓存），故走 `setLastResponse`。
       set({ activeEndpointId: id });
       if (id !== null) {
         get().openTab('endpoint', id);
@@ -340,21 +247,14 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       set({ loading: true, bootstrapError: null });
 
       try {
-        // Layer 1 — the only query the welcome screen needs. One indexed
-        // read of a handful of rows, and the moment it resolves the boot
-        // splash comes down and the user sees the project picker.
+        // 第 1 层 —— 欢迎页唯一需要的查询：一次带索引的少量行读取，一落地启动
+        // 闪屏即拆下，用户看到项目选择器。
         //
         // 列表命令在没有过滤条件时返回全量数据，避免把 project_id 误传为空。
         const projects = await invokeCmd<Project[]>(COMMANDS.projectsList);
 
-        // No selection is made here, deliberately. Bootstrap used to pick
-        // `projects[0]`, resolve its active environment, and open the
-        // first endpoint it contained — which meant the app never once
-        // showed the welcome screen on start, and a workspace with
-        // several projects silently dropped the user into whichever one
-        // happened to sort first. `activeProjectId` stays `''`, which is
-        // what the welcome picker and the tree's "no project" state both
-        // test; `openProject` is how a project gets entered.
+        // 刻意不选默认项目：`activeProjectId` 保持 `''`，欢迎页选择器与树的
+        // "无项目"状态都以此为准；进入项目只能走 `openProject`。
         set({
           projects,
           loaded: true,
@@ -369,21 +269,16 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         return;
       }
 
-      // Layer 2 — deliberately NOT awaited. Awaiting it would keep the boot
-      // splash on screen for three extra round-trips that the welcome
-      // screen never renders.
+      // 第 2 层刻意不 await：await 会让启动画面多等三趟欢迎页根本不渲染的往返。
       void get().loadWorkspace();
     },
 
     loadWorkspace: async () => {
-      // Idempotent on both flags — three call sites reach for this
-      // (`bootstrap`, `openProject`, and a retry) and none of them
-      // coordinate with each other.
+      // 两个 flag 都做幂等：三个调用方（`bootstrap`、`openProject`、重试）
+      // 互不协调。
       //
-      // The in-flight branch returns the *pending* promise rather than
-      // resolving immediately. That distinction is load-bearing: a caller
-      // that awaits this to sequence its own work after the tree is ready
-      // would otherwise continue at once and observe the pre-load state.
+      // 在途分支返回*未决*的 promise 而不是立即 resolve：这个区别是承重的 ——
+      // 否则 await 此处、以便在树就绪后接续工作的调用方会立刻继续，看到加载前状态。
       if (get().nodesLoaded) return;
       if (inFlight) return inFlight;
 
@@ -391,21 +286,17 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         set({ nodesLoading: true, nodesError: null });
 
         try {
-          // One tree read replaces the three unfiltered list calls the old
-          // layout issued; `endpointDetails` is then a second call for the
-          // configuration the tree itself never renders.
+          // 一次树读取覆盖全树；`endpointDetails` 是第二次调用，取树自身从不
+          // 渲染的请求配置。
           const [nodes, endpointDetails, environments] = await Promise.all([
             invokeCmd<ResourceNode[]>(COMMANDS.nodesList),
             loadEndpointDetails(),
             invokeCmd<Environment[]>(COMMANDS.environmentsList),
           ]);
 
-          // Re-resolve the active environment on commit. `setActiveProject`
-          // picks the project's active env from `s.environments`, but a
-          // user who clicks a project card while this pass is still in
-          // flight resolves against an empty list and lands on `''` — which
-          // the TopBar renders as "—". Doing the pick here as well closes
-          // that window, and is a no-op when the id is already correct.
+          // 提交时重解激活环境。用户在本趟仍在途时点项目卡，`setActiveProject` 会
+          // 对着空列表解析并落到 `''`，顶栏就显示 "—"。这里再挑一次补上这个窗口；
+          // id 已正确时是空操作。
           set((s) => {
             const current = s.activeEnvironmentId;
             const stillValid = environments.some(
@@ -429,10 +320,8 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
           set({ nodesError: message });
         } finally {
           set({ nodesLoading: false });
-          // Cleared last: every awaiter has already been handed this
-          // promise, and a retry issued from the `nodesError` banner below
-          // must be able to start a fresh pass rather than join a settled
-          // one.
+          // 最后清：每个 awaiter 都已拿到这个 promise，且从 `nodesError` 横幅发起的
+          // 重试必须能开新一趟，而不是并入已结算的那趟。
           inFlight = null;
         }
       })();
