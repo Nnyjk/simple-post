@@ -51,6 +51,113 @@ fn apikey_location_field_round_trips_without_a_rename() {
     assert_eq!(back["apikey"]["inLocation"], json!("header"));
 }
 
+/// `endpoint_details.auth_json` 里存着四年来的各代 `AuthConfig` 输出。新增鉴权方式时把
+/// 新变体的字段设成必填，就是 AGENTS.md 记的「`type` → `kind` 改名后旧行读不出来」的
+/// 同一类事故 —— 那次是靠 bump 版本删库才摆脱的。故每加一个 `AuthType` 变体都要过这一遍。
+#[test]
+fn every_auth_config_shape_written_before_today_still_deserialises() {
+    for raw in [
+        r#"{"kind":"none"}"#,
+        r#"{"kind":"bearer","bearer":"eyJhbGciOi"}"#,
+        r#"{"kind":"basic","basic":{"username":"u","password":"p"}}"#,
+        r#"{"kind":"apikey","apikey":{"key":"X-K","value":"v","inLocation":"query"}}"#,
+    ] {
+        let auth: AuthConfig =
+            serde_json::from_str(raw).unwrap_or_else(|e| panic!("{raw} 读不出来: {e}"));
+        assert!(auth.oauth2.is_none(), "{raw} 不该凭空长出 oauth2 载荷");
+    }
+}
+
+/// `'{}'` 仍是「读不出来」，这是 `schema.sql` 里写明的既定状态，**本改动不得顺手改掉
+/// 它**：`kind` 必填是当年把 `type` 改名成 `kind` 时的选择，而行映射器把解析失败变成
+/// 硬错误——放宽成「宽容读取」是一次独立的语义变更，不该被一个鉴权扩展顺带捎上。
+///
+/// 同时也是「新字段不得必填」的断言：`{}` 缺的是 `kind` 一个字段，若它开始报别的字段，
+/// 说明有人给某个新变体加了必填字段。
+#[test]
+fn the_empty_object_still_fails_on_kind_alone() {
+    let err = serde_json::from_str::<AuthConfig>("{}").unwrap_err().to_string();
+    assert!(
+        err.contains("missing field `kind`"),
+        "'{{}}' 只该缺 kind 一个字段，got: {err}"
+    );
+}
+
+/// 反过来也成立：只写 oauth2 的新行不该丢掉 `kind` —— 它是必填字段，正是当年因为
+/// `kind` 必填而读不出 `'{}'` 的那个教训。
+#[test]
+fn an_oauth2_payload_alone_still_serialises_back() {
+    let auth: AuthConfig = serde_json::from_value(json!({
+        "kind": "oauth2",
+        "oauth2": {
+            "grantType": "client_credentials",
+            "tokenUrl": "https://idp.example.com/token",
+            "clientId": "cid"
+        }
+    }))
+    .unwrap();
+    let cfg = auth.oauth2.clone().unwrap();
+    assert_eq!(cfg.grant_type, OAuth2GrantType::ClientCredentials);
+    // 未给的字段取默认值，而不是反序列化失败。
+    assert_eq!(cfg.client_auth, OAuth2ClientAuth::Basic);
+    assert_eq!(cfg.token_location, OAuth2TokenLocation::Header);
+    assert!(cfg.extra_params.is_empty());
+
+    let back = serde_json::to_value(&auth).unwrap();
+    assert_eq!(back["kind"], json!("oauth2"));
+    assert_eq!(back["oauth2"]["grantType"], json!("client_credentials"));
+    assert_eq!(back["oauth2"]["tokenUrl"], json!("https://idp.example.com/token"));
+}
+
+/// 线上取值就是用户在 JSON 里写的那个词。
+#[test]
+fn the_oauth2_wire_names_are_the_ones_a_user_writes() {
+    assert_eq!(serde_json::to_string(&AuthType::Oauth2).unwrap(), "\"oauth2\"");
+    assert_eq!(
+        serde_json::to_string(&OAuth2GrantType::AuthorizationCode).unwrap(),
+        "\"authorization_code\""
+    );
+    assert_eq!(
+        serde_json::to_string(&OAuth2GrantType::ClientCredentials).unwrap(),
+        "\"client_credentials\""
+    );
+    assert_eq!(
+        serde_json::to_string(&OAuth2GrantType::Password).unwrap(),
+        "\"password\""
+    );
+    assert_eq!(
+        serde_json::to_string(&OAuth2GrantType::Implicit).unwrap(),
+        "\"implicit\""
+    );
+    assert_eq!(serde_json::to_string(&OAuth2ClientAuth::Body).unwrap(), "\"body\"");
+    assert_eq!(
+        serde_json::to_string(&OAuth2TokenLocation::Query).unwrap(),
+        "\"query\""
+    );
+    for kind in ["none", "bearer", "basic", "apikey", "oauth2"] {
+        let parsed: AuthType = serde_json::from_str(&format!("\"{kind}\"")).unwrap();
+        assert_eq!(parsed.as_str(), kind, "as_str 与线格式必须互为逆映射");
+    }
+}
+
+/// 畸形流程值必须是错误，而不是退化成某个默认流程然后发出一条没人预期的请求。
+/// serde 的报错会列出全部合法取值，AI 客户端据此自我纠正。
+#[test]
+fn an_unknown_oauth2_field_is_an_error_not_a_silent_default() {
+    let err = serde_json::from_value::<OAuth2Auth>(json!({ "grantType": "teleport" }))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("teleport"), "报错要复述那个非法值，got: {err}");
+    for known in [
+        "authorization_code",
+        "client_credentials",
+        "password",
+        "implicit",
+    ] {
+        assert!(err.contains(known), "报错要列出合法取值 `{known}`，got: {err}");
+    }
+}
+
 #[test]
 fn endpoint_camel_case_field_names() {
     // 结构那一半与配置那一半现在是分开的两个类型，故这里检查两者都能从各自 TS 镜像预期的

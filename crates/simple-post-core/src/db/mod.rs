@@ -29,6 +29,7 @@ pub mod base_url_defs;
 pub mod endpoint_details;
 pub mod environments;
 pub mod nodes;
+pub mod oauth2_tokens;
 pub mod permissions;
 pub mod preferences;
 pub mod projects;

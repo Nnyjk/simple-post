@@ -4,9 +4,11 @@
 //! 打破了「若 `simple-post-mcp` 与 `db::` / `domain::` / `error::` 并列住在主 crate 里」
 //! 本会产生的依赖环。
 
+pub mod base64;
 pub mod db;
 pub mod domain;
 pub mod error;
 pub mod http_executor;
 pub mod mcp_metrics;
+pub mod oauth2;
 pub mod permissions;
