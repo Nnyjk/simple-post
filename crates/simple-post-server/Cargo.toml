@@ -1,0 +1,64 @@
+[package]
+name = "simple-post-server"
+version.workspace = true
+description = "Headless server host for Simple Post (serve-web + MCP daemon), free of the Tauri GUI runtime"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "simple_post_server"
+path = "src/lib.rs"
+
+# `simple-post-server` — the container entrypoint. `serve-web` is what
+# runs in Docker; `mcp` is the embedded MCP daemon, reachable from this
+# binary too so a container does not need the desktop executable to
+# serve AI clients.
+[[bin]]
+name = "simple-post-server"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace members
+simple-post-core = { path = "../simple-post-core" }
+simple-post-mcp = { path = "../simple-post-mcp" }
+
+# Shared workspace deps (resolved to the versions pinned at the root)
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_json_path = { workspace = true }
+tokio = { workspace = true }
+# Used by `port_registry`'s liveness probe and by the route tests.
+reqwest = { workspace = true }
+clap = { workspace = true }
+dirs = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# HTTP server (`serve-web` shape). `ServeDir` serves the SPA while
+# the same axum process fronts `/api/*` and `/mcp`.
+axum = { workspace = true }
+tower-http = { workspace = true }
+mime_guess = { workspace = true }
+
+# Optional GUI bindings. See the `gui` feature note below.
+tauri = { version = "2", optional = true, features = [] }
+
+[features]
+# `gui` re-attaches the three `AppHandle`-taking daemon verbs
+# (`ensure_started` / `start` / `restart`) that the desktop shell calls
+# so the crash event reaches the webview. `src-tauri` turns it on.
+#
+# The default build has NO Tauri, which is the whole point of the
+# split: the Docker image is built from this crate with default
+# features, so the binary and the runtime stage carry none of the
+# GTK/WebKit/X11 stack, and the `--lib` test binary does not drag the
+# Windows GUI runtime in either.
+#
+# Do not flip the default on to "share more code". That is the
+# failure this feature exists to avoid.
+gui = ["dep:tauri"]
+
+# NOTE: release profile lives at the workspace root (Cargo.toml) —
+# cargo warns "profiles for the non root package will be ignored"
+# if [profile.*] is declared here.

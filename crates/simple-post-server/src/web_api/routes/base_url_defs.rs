@@ -60,7 +60,7 @@ pub(crate) async fn base_url_defs_create(
 pub(crate) async fn base_url_defs_update(
     State(s): State<Arc<WebState>>,
     Path(def_id): Path<String>,
-    Json(patch): Json<crate::commands::BaseUrlDefPatch>,
+    Json(patch): Json<crate::dto::BaseUrlDefPatch>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
     // `BaseUrlDefPatch` lives in `commands/dto.rs` (not `domain`) because
     // it has no other callers. Reusing it here keeps the wire shape

@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "crates/simple-post-core",
     "crates/simple-post-mcp",
+    "crates/simple-post-server",
 ]
 
 [workspace.package]

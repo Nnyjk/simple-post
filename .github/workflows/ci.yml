@@ -76,3 +76,207 @@ jobs:
 
       - name: cargo test --workspace
         run: cargo test --workspace
+
+  docker:
+    # Container image + a smoke test against a *running* container.
+    # Additive job: `web` and `rust` above are untouched.
+    #
+    # The smoke test exists because "it compiled" and "it serves" are
+    # different claims. `--spa-dir`, the `0.0.0.0` bind, the named volume and
+    # the health probe are all wiring that only shows up at runtime, and all
+    # four have shipped broken in some form before.
+    name: Docker — image build + container smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 'Set up QEMU (linux/arm64 cross-build)'
+        uses: docker/setup-qemu-action@v3
+
+      - name: 'Set up Buildx'
+        uses: docker/setup-buildx-action@v3
+
+      - name: 'Build image (linux/amd64, loaded into the runner daemon)'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          # Same tag the two compose files reference, so this job exercises
+          # the exact image name the deployment docs tell users to build.
+          tags: simple-post:local
+          load: true
+
+      - name: 'Start container and wait for the image HEALTHCHECK'
+        run: |
+          set -euo pipefail
+
+          VOL=sp-smoke-data
+          # Start from an empty volume so a re-run can never pass on state
+          # left over by a previous one.
+          docker volume rm -f "$VOL" >/dev/null 2>&1 || true
+          docker volume create "$VOL" >/dev/null
+
+          docker run -d --name sp-smoke \
+            -p 4173:4173 \
+            -e SIMPLE_POST_WEB_PASSWORD=ci-secret-token \
+            -v "$VOL":/data \
+            simple-post:local
+
+          # Wait on the image's own HEALTHCHECK rather than on a sleep: it is
+          # the same probe Swarm/Compose will use, so this step also covers
+          # the probe itself.
+          for _ in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' sp-smoke 2>/dev/null || echo starting)
+            if [ "$status" = healthy ]; then
+              break
+            fi
+            if [ "$status" = unhealthy ]; then
+              echo "container went unhealthy:"
+              docker logs sp-smoke
+              exit 1
+            fi
+            sleep 2
+          done
+
+          if [ "$(docker inspect -f '{{.State.Health.Status}}' sp-smoke)" != healthy ]; then
+            echo "container never became healthy:"
+            docker logs sp-smoke
+            exit 1
+          fi
+          echo "HEALTHCHECK reports healthy"
+
+      - name: 'Probe: healthz, SPA shell, static assets, auth enforcement'
+        run: |
+          set -euo pipefail
+
+          BASE=http://127.0.0.1:4173
+
+          # `/healthz` is on the always-unauthenticated bypass list — that is
+          # exactly what makes it safe as a container probe.
+          health=$(curl -fsS "$BASE/healthz")
+          grep -q '"status":"ok"' <<<"$health"
+
+          # The SPA shell, and a real hashed asset behind it. Capturing into a
+          # variable instead of piping into `grep -q` avoids the pipefail +
+          # SIGPIPE trap on short responses.
+          shell=$(curl -fsS "$BASE/")
+          grep -q 'id="root"' <<<"$shell"
+          asset=$(grep -o '/assets/[A-Za-z0-9._-]*\.js' <<<"$shell" | head -n1)
+          if [ -z "$asset" ]; then
+            echo "no hashed asset found in the SPA shell — is dist/ laid out right?"
+            exit 1
+          fi
+          curl -fsS "$BASE$asset" -o /dev/null
+
+          # With a password configured, /api/* must reject an unauthenticated
+          # caller. This is the guard on the "omit the password and you just
+          # published the API" foot-gun the compose file warns about.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/projects")
+          if [ "$code" != 401 ]; then
+            echo "expected 401 without a bearer token, got $code"
+            exit 1
+          fi
+
+      - name: 'Create a project through the REST API'
+        run: |
+          set -euo pipefail
+
+          BASE=http://127.0.0.1:4173
+          created=$(curl -fsS -X POST "$BASE/api/projects" \
+            -H 'Authorization: Bearer ci-secret-token' \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"ci-smoke-project"}')
+
+          id=$(printf '%s' "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          if [ -z "$id" ]; then
+            echo "project create returned no id: $created"
+            exit 1
+          fi
+          echo "created project $id"
+
+      - name: 'Runtime is non-root and carries no GUI stack'
+        run: |
+          set -euo pipefail
+
+          uid=$(docker exec sp-smoke id -u)
+          if [ "$uid" != 10001 ]; then
+            echo "expected to run as uid 10001, got $uid"
+            exit 1
+          fi
+
+          # The property that makes this image ~60 MB instead of ~400 MB:
+          # simple-post-server is Tauri-free, so GTK/WebKit must be absent.
+          gui=$(docker exec sp-smoke sh -c 'ls /usr/lib/*/libgtk* /usr/lib/*/libwebkit* 2>/dev/null | wc -l')
+          if [ "$gui" -ne 0 ]; then
+            echo "GUI libraries found in the runtime stage — the Tauri split has been undone:"
+            docker exec sp-smoke sh -c 'ls /usr/lib/*/libgtk* /usr/lib/*/libwebkit*'
+            exit 1
+          fi
+          echo "runs as uid 10001, no libgtk/libwebkit present"
+
+      - name: 'Recreate the container against the same volume'
+        run: |
+          set -euo pipefail
+
+          # `docker restart` would only prove the process comes back. Removing
+          # the container outright and starting a *new* one against the same
+          # named volume is what actually proves the volume wiring.
+          docker rm -f sp-smoke
+          docker run -d --name sp-smoke \
+            -p 4173:4173 \
+            -e SIMPLE_POST_WEB_PASSWORD=ci-secret-token \
+            -v sp-smoke-data:/data \
+            simple-post:local
+
+          for _ in $(seq 1 60); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' sp-smoke 2>/dev/null || echo starting)
+            if [ "$status" = healthy ]; then
+              break
+            fi
+            if [ "$status" = unhealthy ]; then
+              echo "replacement container went unhealthy:"
+              docker logs sp-smoke
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$(docker inspect -f '{{.State.Health.Status}}' sp-smoke)" != healthy ]; then
+            echo "replacement container never became healthy:"
+            docker logs sp-smoke
+            exit 1
+          fi
+
+      - name: 'Assert the project survived the container replacement'
+        run: |
+          set -euo pipefail
+
+          list=$(curl -fsS http://127.0.0.1:4173/api/projects \
+            -H 'Authorization: Bearer ci-secret-token')
+          grep -q 'ci-smoke-project' <<<"$list"
+          echo "SQLite store survived in the named volume"
+
+      - name: 'Build image (linux/arm64 under QEMU — compile check only)'
+        # Best effort by design. `[profile.release]` is `lto = true` with
+        # `codegen-units = 1`, which is exactly the configuration QEMU
+        # emulation is worst at, so a full arm64 build can take longer than a
+        # reasonable CI budget. Its value is catching a target-specific
+        # compile error, not producing an artefact — a failure is reported in
+        # the log but must not gate the amd64 smoke test above.
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          tags: simple-post:arm64-ci
+          # `load: true` is impossible here (the runner daemon is amd64), so
+          # emit an OCI tarball instead and throw it away.
+          outputs: type=oci,dest=/tmp/simple-post-arm64.oci.tar
+
+      - name: 'Cleanup'
+        if: always()
+        run: |
+          docker rm -f sp-smoke >/dev/null 2>&1 || true
+          docker volume rm -f sp-smoke-data >/dev/null 2>&1 || true

@@ -8,14 +8,21 @@ Docs are partly Chinese (`README.md`, crate READMEs); code/identifiers are Engli
 
 ## Architecture & Data Flow
 
-Four runtime pieces:
+Five runtime pieces:
 
 | Piece | Path | Role |
 |---|---|---|
-| Tauri shell + CLI | `src-tauri/` | Desktop GUI, `serve-web` REST/SPA server, daemon supervisor, port registry |
+| Tauri shell + CLI | `src-tauri/` | Desktop GUI and the `#[tauri::command]` surface (`commands/`). Everything else is re-exported from the server crate below, so `crate::daemon_supervisor` / `crate::web_api` still resolve here |
+| Server host | `crates/simple-post-server/` | `serve-web` REST/SPA server, daemon supervisor, port registry, bearer auth, wire DTOs. **No Tauri by default** — this is what the Docker image builds |
 | Core library | `crates/simple-post-core/` | Domain models, SQLite (`db/`), `http_executor`, `permissions`, `mcp_metrics`, `error` — headless, no Tauri/axum dep |
 | MCP server | `crates/simple-post-mcp/` | JSON-RPC 2.0 dispatch (44 tools), axum HTTP daemon, stdio bridge |
 | Frontend | `src/` | React 18 + Vite 5 + Zustand 5 + Tailwind 3 + CodeMirror 6 |
+
+**The Tauri split, and why it exists.** `src-tauri` links `tauri` unconditionally, so a Linux build of it drags in `libwebkit2gtk` / GTK / X11 — which a container serving `serve-web` needs only to run a GUI it cannot display. The server half therefore lives in `crates/simple-post-server`, and the dependency points one way: `simple-post (Tauri) → simple-post-server → simple-post-core`. Three consequences worth respecting:
+
+1. **The `gui` feature is off by default.** It re-attaches only the three `AppHandle`-taking daemon verbs (`ensure_started` / `start` / `restart`) that emit `daemon://crashed` to the webview. `src-tauri` turns it on; the image build does not. Do **not** move it into `default` to "share more code" — that is the failure the feature exists to avoid.
+2. **Wire DTOs are not Tauri-specific.** `McpStatusDto`, `CreateEndpointDetailOpts`, `RestartResult` and friends live in `simple_post_server::dto`, and `http_config.rs` holds the shared read/write helpers. `src-tauri/src/commands/dto.rs` is a `pub use` compatibility surface, not a definition site. A DTO that lands there again re-couples the server to `tauri::State`.
+3. **Desktop `simple-post serve-web` still works** and delegates to the same implementation, so `npm run dev:split` and the documented LAN workflow do not regress. There is one implementation, not two.
 
 **Resource tree.** Modules, collections and endpoints all live in **one `nodes` table**, discriminated by `type`. Hierarchy is `parent_id`; the owning project is denormalised onto every row as `root_id` (one indexed read answers "which project", which is both the store's filter and the MCP permission gate's key). Endpoint request configuration — method, url, auth, body, headers, params, tags — is a separate `endpoint_details` row keyed by node id, because those fields are meaningless for a module and the tree never renders them. The logical shape is still Project → Module → **Collection (recursively nestable, unbounded depth)** → Endpoint — with the one relaxation that an endpoint may sit directly under a module, so a single endpoint needs no throwaway collection first — and UI renders it with a recursive component.
 
@@ -23,7 +30,7 @@ The parent/child relationship is an **enforced contract**, not a convention: `Re
 
 **CLI modes** (`src-tauri/src/main.rs`, clap): default → Tauri GUI; `mcp` → embedded MCP daemon; `mcp-proxy` → stdio bridge; `serve-web` → headless REST + static SPA.
 
-**CRUD flow** — component → Zustand slice (optimistic update) → `invokeCmd()` (`src/lib/tauri-commands.ts`) → Tauri IPC **or** `fetch('/api/…')` → `src-tauri/src/commands/` / `web_api/` → `simple_post_core::db` → `store.db` (WAL).
+**CRUD flow** — component → Zustand slice (optimistic update) → `invokeCmd()` (`src/lib/tauri-commands.ts`) → Tauri IPC **or** `fetch('<base>/api/…')` → `src-tauri/src/commands/` (desktop) / `crates/simple-post-server/src/web_api/` (browser) → `simple_post_core::db` → `store.db` (WAL).
 
 **HTTP requests** bypass webview CORS: `src/lib/http.ts::sendRequest` → `httpRequest` command → `http_executor.rs` (reqwest).
 
@@ -54,7 +61,8 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 - `src/types/domain.ts` — TS mirrors of Rust domain types
 - `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` holds the whole resource tree, `endpoint_details.rs` its endpoint-only configuration) + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
-- `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource + `dto.rs`), `web_api/`, `daemon_supervisor.rs`, `port_registry.rs`, `lib.rs`, `main.rs`
+- `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource; `dto.rs` is now only a re-export of the server crate's DTOs)
+- `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs`, `port_registry.rs`, `auth.rs`, `dto.rs`, `http_config.rs`, `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
 - `scripts/` — dev/test/build utilities (see below)
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
@@ -109,7 +117,7 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **Zustand selectors (infinite-loop hazard).** Equality is `Object.is`; a selector returning a fresh array/object (`.map`, `.filter`, spread) causes infinite re-render. Selectors must return stable references or `.find(...)`; derive filtered lists with `useMemo` in the component. Slices never import each other — they share state via the `AppState` interface and `get()`/`set()`. Verify with `npx tsx scripts/_verify_store.mjs`.
 
-**Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands/<resource>.rs` (re-exported by `commands/mod.rs`, which must use **glob** `pub use` — an item list drops the `#[macro_export]`ed `__cmd__<name>` macro and `generate_handler!` fails with E0433), registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `src-tauri/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently.
+**Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands/<resource>.rs` (re-exported by `commands/mod.rs`, which must use **glob** `pub use` — an item list drops the `#[macro_export]`ed `__cmd__<name>` macro and `generate_handler!` fails with E0433), registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `crates/simple-post-server/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently. A DTO both sides need belongs in `crates/simple-post-server/src/dto.rs`, **not** in `commands/` — see the Tauri split above.
 
 **Tauri macro gotcha.** `http_request` in `src-tauri/src/lib.rs` must stay **non-`pub`** — marking it `pub` triggers a `__cmd__http_request` identifier collision (E0255) between `#[tauri::command]` and `generate_handler!`.
 
@@ -146,7 +154,17 @@ Gate B has two ways to silently become a no-op, and both shipped:
 
 **Semantic token pairing — a `-foreground` token is a colour for text *on* the saturated fill, not on a surface.** `--destructive-foreground` is `0 0% 98%` in **both** theme scopes (`globals.css`), so pairing it with a light surface produces white-on-white: `bg-background/85 text-destructive-foreground` renders as an invisible badge in light mode and as colourless text with no error signal in dark. This shipped once on the body editor's pinned validation pill. Two correct shapes: **solid** `bg-destructive text-destructive-foreground` (identical in both themes, ~4.8:1, nothing overrides either token), or a tinted surface with the tokens the dark scope *does* lighten — `--success-foreground` / `--warning-foreground`, the convention the tab badges use. Note `.alert-error-inline` in `globals.css` still carries the broken combination; it is currently unused, so fix it if you wire it up rather than copying it.
 
-**OpenAPI.** `public_route_specs()` in `src-tauri/src/web_api/spec.rs` (re-exported from `web_api/mod.rs`) is the single source of truth; internal routes (`/api/mcp/*`, `/api/preferences`) are intentionally undocumented. `node scripts/dump-openapi.mjs` renders that table as an OpenAPI 3.1 document on stdout — pipe it wherever you want, e.g. `node scripts/dump-openapi.mjs > openapi.yaml`. It has no checked-in output since `docs/` was removed.
+**Reverse-proxy base path is a runtime fact, not a build constant.** `serve-web --public-base-path /sp` `nest`s the *entire* router under the prefix — `/api/*`, `/mcp`, and the three health probes all move to `/sp/…` together. Two consequences that are easy to get wrong:
+
+- `vite.config.ts` sets **no `base`**, so `vite build` emits root-absolute asset URLs (`<script src="/assets/index-<hash>.js">`), and every `WEB_ROUTES` path is root-absolute (`/api/projects`). Neither can be corrected at build time: in the container the prefix arrives as `SIMPLE_POST_PUBLIC_BASE_PATH` at **run** time and one image has to serve both shapes. So `static_files::shell_with_base` rewrites the shell's root-absolute `src`/`href` per response and injects `window.__SIMPLE_POST_BASE__`, which `readApiBase()` in `src/lib/tauri-commands.ts` reads to prefix API calls. **Never "fix" a base-path report by adding `base` to `vite.config.ts` or an nginx rewrite** — those reintroduce a second place that has to agree with the first.
+- `/healthz` moves with everything else, so any probe hardcoded to the bare root 404s in exactly the deployment that sets a prefix. The image's healthcheck script reads the same env var for this reason.
+- There is **no** `<base href>` tag, and there must not be one: it does not affect a root-absolute `src`, so it would look like a fix while changing nothing.
+
+The regression net is `scripts/test-web-basepath.mjs`, which parses the served shell and actually requests every URL it finds. Its earlier version only asserted the *server* nested correctly (`/sp/api/…` → 200, bare → 404) and never looked at what the browser would ask for — which is how a deployment where the shell loaded and every API call 404'd could pass. Assert on the shell's real references and their content-types; `200 text/html` for a `.js` file is the ServeDir fallback, not an asset.
+
+**A route named in `auth::is_public_path` but never registered answers `200` with the SPA shell.** The auth bypass list and the route tree are two places that have to agree, and nothing made them. `/healthz` sat in that list since the beginning (comment: "legacy, kept for backward compat") with **no `.route("/healthz", …)` anywhere** — so at the root it fell through to the ServeDir fallback and returned the index with `200 text/html`, and under a base path it 404'd. The container `HEALTHCHECK` passed the whole time, because it only grepped for `200 OK`. A probe that cannot fail is worse than no probe: **grep for the response body**, not the status line. Two assertions catch this class — `is_public_path` membership is not route existence, and a probe should assert the thing it is named after.
+
+**OpenAPI.** `public_route_specs()` in `crates/simple-post-server/src/web_api/spec.rs` (re-exported from `web_api/mod.rs`) is the single source of truth; internal routes (`/api/mcp/*`, `/api/preferences`) are intentionally undocumented. `node scripts/dump-openapi.mjs` renders that table as an OpenAPI 3.1 document on stdout — pipe it wherever you want, e.g. `node scripts/dump-openapi.mjs > openapi.yaml`. It has no checked-in output since `docs/` was removed.
 
 **Traps a generated spec cannot express**, kept here now that `docs/http-api-reference.md` is gone:
 
@@ -160,8 +178,9 @@ Gate B has two ways to silently become a no-op, and both shipped:
 - `src/main.tsx`, `src/App.tsx` — frontend entry; theme preload, global shortcuts, layout
 - `src/lib/tauri-commands.ts` — `IS_TAURI_SHELL` detection, `invokeCmd`, `COMMANDS`, `WEB_ROUTES`
 - `src/stores/app-store.ts` — store barrel + safe selector hooks
-- `src-tauri/src/main.rs` / `src-tauri/src/lib.rs` — CLI dispatch / Tauri `run()`
-- `src-tauri/src/web_api/` — REST surface for `serve-web`: router + spec re-exports in `mod.rs`, handlers in `routes/`, OpenAPI source in `spec.rs`
+- `src-tauri/src/main.rs` / `src-tauri/src/lib.rs` — CLI dispatch / Tauri `run()` (the `serve-web` and `mcp` arms forward into the server crate)
+- `crates/simple-post-server/src/web_api/` — REST surface for `serve-web`: router + spec re-exports in `mod.rs`, handlers in `routes/`, OpenAPI source in `spec.rs`, SPA shell rewriting in `static_files.rs`
+- `crates/simple-post-server/src/main.rs` — the Tauri-free CLI (`simple-post-server serve-web` / `mcp`); this is the container entrypoint
 - `crates/simple-post-core/src/db/mod.rs` + `schema.sql` — pool, transactions, migrations, seed
 - `crates/simple-post-core/src/db/nodes.rs` — the resource tree: CRUD, `list_children`, `move_many` (reparents + re-derives `root_id` across the subtree), `move_to_root` (cross-project), `duplicate`, `search`
 - `crates/simple-post-core/src/domain.rs`, `error.rs` — canonical types + wire errors
@@ -171,6 +190,7 @@ Gate B has two ways to silently become a no-op, and both shipped:
 - `src-tauri/app-icon.svg` — the **only** source of app-icon artwork; `npm run icons` runs `tauri icon` over it to regenerate all of `src-tauri/icons/`
 - `src-tauri/rust-toolchain.toml`, `src-tauri/capabilities/default.json`
 - `vite.config.ts` — alias, dev server, `/api` + `/mcp` proxy (ws disabled on `/mcp`)
+- `Dockerfile` / `.dockerignore` / `docker-compose.yml` / `docker-swarm.yml` — container deployment (issue #17). The Dockerfile's three stages are load-bearing: the **runtime stage installs no packages at all**, which is only true while `simple-post-server` stays Tauri-free. Both yml files use `image:` (never `build:`) and omit a top-level `version:` so one shape feeds `docker compose up` *and* `docker stack deploy`. In the swarm file `deploy.replicas` is pinned to `1` on purpose — the store is a single-writer SQLite file in WAL mode, and WAL's `-shm`/`-wal` sidecars only work on one filesystem. **That covers concurrency, not placement**: the volume has the `local` driver, so a reschedule onto another node would find no volume, get a fresh empty one, and start on a blank database. The `placement` constraint below the replicas block is what closes that hole, and it is on by default for that reason — `replicas: 1` is frequently mistaken for a substitute, and it is not. The image tag is `${SP_IMAGE:-simple-post:local}` because Swarm pulls the name written in the spec on every node; a bare local tag exists on one machine only.
 - `tsconfig.json`, `package.json`, `tailwind.config.js`
 - `eslint.config.js`, `.prettierrc`, `.prettierignore` — lint/format rules and scope
 - `.editorconfig`, `.gitattributes` — LF-everywhere policy (only `*.bat`/`*.cmd` are CRLF)
