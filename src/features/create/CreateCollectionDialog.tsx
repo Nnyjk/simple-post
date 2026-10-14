@@ -1,21 +1,11 @@
 /**
- * CreateCollectionDialog — mounted inside `ProjectTree`.
+ * CreateCollectionDialog —— 挂在 `ProjectTree` 内。
  *
- * THE PARENT IS USUALLY ALREADY DECIDED
- * ------------------------------------
- * Two thirds of the entry points are a row's `+` button, and the row you
- * clicked *is* the answer: the collection belongs under that module or
- * under that collection. Re-asking it in the dialog meant the draft could
- * disagree with the click — which is how 「新建子集合」 used to create a
- * sibling under the module instead of a child under the collection.
+ * 多数入口是某一行的 `+`，而那一行本身就是答案：集合要挂在那个模块或那个集合下。
+ * 故父级下拉仅在「未预选集合」时出现（树的 新建模块 式入口、命令面板）；预选时改为
+ * 陈述这行会落在哪，让嵌套层级可读。
  *
- * So the parent select only appears when the dialog was opened with no
- * collection preselected (the tree's own 「新建模块」-style entry points
- * and the command palette). When a collection *was* preselected the form
- * states where the row will land instead of offering to change it.
- *
- * That also means the module shown in that hint is context, not a second
- * input: `submitNewItem` resolves `parentCollectionId` first.
+ * 提示里那个模块是上下文而非第二个输入：`submitNewItem` 先解析 `parentCollectionId`。
  */
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -49,8 +39,7 @@ export function CreateCollectionDialog() {
     [projectModules],
   );
 
-  // The collection the click site preselected, plus the module that owns
-  // it — the hint names both so the nesting is legible ("… / 订单 / 退款").
+  // 点击处预选的集合，以及它所属的模块 —— 提示同时点出两者，嵌套层级才读得出来。
   const preselected = useMemo(() => {
     if (!draft.parentCollectionId) return null;
     const col = nodes.find((n) => n.id === draft.parentCollectionId);
@@ -64,9 +53,8 @@ export function CreateCollectionDialog() {
     return { collection: col, module: cur && cur.kind === 'module' ? cur : null };
   }, [nodes, draft.parentCollectionId]);
 
-  // Default to the project's first module so the create button is
-  // reachable without touching the select. Guarded on `!open` so it can
-  // never write to a draft that isn't on screen.
+  // 默认选项目第一个模块，不动下拉也能直接点创建。`!open` 守卫确保绝不写到
+  // 屏幕上看不见的草稿。
   useEffect(() => {
     if (!open || preselected) return;
     if (draft.parentModuleId) return;

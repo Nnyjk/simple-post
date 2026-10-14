@@ -1,23 +1,13 @@
 /**
- * The add control must be the same control whether the list is empty or
- * not.
+ * 无论列表为空与否，新增控件都必须是同一个控件。
  *
- * It used to be two. `KeyValueTable` rendered a centred solid
- * `variant="default"` button inside the empty state and a hairline-divided
- * text button at the foot of a populated list, so the two `添加服务` /
- * `添加变量` buttons sitting a few centimetres apart in the environment
- * panel had different weight, padding and colour. Whichever state you
- * happened to be in decided which control you were looking at.
+ * 做法是把控件提成一个由两个分支共用的元素。这些用例在标记层断言这种一致，而不是复述
+ * 类名清单，故日后调整样式这条守卫仍然成立 —— 只有真的多出第二个控件才会破它。
  *
- * The fix hoists the control into a single element shared by both branches.
- * These tests assert that parity at the markup level rather than by
- * re-stating the class list, so the guard keeps holding if the styling is
- * retuned — only a real second control can break it.
+ * 渲染走 `react-dom/server`；本仓库没有 DOM 测试环境（没有 Vitest / RTL，见 AGENTS.md），
+ * 且这里没有任何东西依赖 effect。
  *
- * Rendering goes through `react-dom/server`; the repo has no DOM harness
- * (no Vitest / RTL — see AGENTS.md) and nothing here depends on effects.
- *
- * Run via:
+ * 运行：
  *   npx tsx --test src/features/settings/sections/rows/__tests__/key-value-table.test.ts
  */
 import assert from 'node:assert/strict';
@@ -31,15 +21,11 @@ const ADD_TEXT = '添加变量';
 const EMPTY_TEXT = '暂无变量';
 
 /**
- * `KeyValueTable` is generic in its row type, and routing it through
- * `createElement` erases that generic — it lands on `unknown` and every
- * typed prop then fails to assign. Calling it directly keeps `T` pinned at
- * the call site.
+ * `KeyValueTable` 的行类型是泛型的，而经 `createElement` 走一遍会把那个泛型抹掉 ——
+ * 它落到 `unknown`，此后每个带类型的 prop 都无法赋值。直接调用它能把 `T` 钉在调用点上。
  *
- * Safe here specifically because `KeyValueTable` uses no hooks; it is a
- * pure function of its props that hands `renderRow`'s output straight back
- * to the renderer. If it ever grows a hook, this has to become real
- * mounting rather than a direct call.
+ * 之所以在这里这样做是安全的：`KeyValueTable` 不用任何 hook，它是 props 的纯函数，把
+ * `renderRow` 的产出原样交回渲染器。它一旦长出 hook，这里就得改成真正的挂载而非直接调用。
  */
 function renderTable(items: string[]): string {
   return renderToStaticMarkup(
@@ -54,7 +40,7 @@ function renderTable(items: string[]): string {
   );
 }
 
-/** The markup of the control labelled `addText`, for a direct comparison. */
+/** 标签为 `addText` 的那个控件的标记，供直接比对。 */
 function addControl(html: string): string {
   const re = new RegExp(
     `<button[^>]*>(?:(?!</button>)[\\s\\S])*${ADD_TEXT}(?:(?!</button>)[\\s\\S])*</button>`,
@@ -82,22 +68,19 @@ describe('KeyValueTable — add control parity', () => {
   });
 
   it('places the control after the hairline divider in both states', () => {
-    // The divider is what makes it read as "the foot of the list" rather
-    // than a floating action, so it has to be there when empty as well.
+    // 正是那条分隔线让它读作「列表末尾」而非一个浮空的动作，故为空时也得有。
     for (const html of [emptyHtml, filledHtml]) {
       assert.match(addControl(html), /border-t border-border\/60/);
     }
   });
 
   it('does not fall back to a filled primary button when empty', () => {
-    // The drift's signature: `variant="default"` renders the primary
-    // background. Neither state should carry it now.
+    // 漂移的特征：`variant="default"` 会渲染出主色底。现在两种状态都不该带它。
     assert.doesNotMatch(emptyHtml, /bg-primary/);
   });
 
   it('still renders its rows and the control when populated', () => {
-    // Guards the refactor's other half: hoisting the control must not have
-    // dropped it from the populated branch.
+    // 守住这次重构的另一半：把控件提上去不能顺手把它从有内容的分支里弄丢。
     assert.match(filledHtml, /token/);
     assert.match(filledHtml, /baseUrl/);
     assert.match(filledHtml, new RegExp(ADD_TEXT));

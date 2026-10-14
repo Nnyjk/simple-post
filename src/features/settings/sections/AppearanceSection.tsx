@@ -10,15 +10,11 @@ interface ThemeOption {
   icon: React.ReactNode;
   label: string;
   value: Theme;
-  // A short hint that shows the *practical* difference between modes —
-  // not a marketing blurb.
+  // 说明各模式之间*实际*的差别，不是营销话术。
   hint: string;
-  // 4 colours the swatch uses to preview the theme. These read the
-  // `--swatch-*` tokens in globals.css rather than carrying hexes of their
-  // own: they have to render *both* themes at once, so they cannot use the
-  // live `--background` / `--card` (those resolve to whichever theme is
-  // active), and when they carried literals instead they silently went on
-  // showing the old palette after dark mode moved off #0A0A0A.
+  // 色板预览用的四个颜色。读 globals.css 里的 `--swatch-*` token，而不是各自带一份
+  // hex：它得同时渲染两个主题，故用不了会随当前主题解算的 `--background` / `--card`；
+  // 改用字面量则会在暗色底色从 #0A0A0A 移走之后继续显示旧配色。
   preview: { bg: string; panel: string; text: string; accent: string };
 }
 
@@ -49,8 +45,8 @@ const THEME_OPTIONS: ThemeOption[] = [
     label: '跟随系统',
     value: 'system',
     hint: 'Windows 主题切换时自动跟随',
-    // Half of each, so the option reads as "both" rather than as one of
-    // them. The gradient is a CSS string, so it cannot be a bare `hsl(var(…))`.
+    // 各占一半，让这一项读起来像「两者」而不是其中之一。渐变是 CSS 字符串，
+    // 故不能写成裸的 `hsl(var(…))`。
     preview: {
       bg: 'linear-gradient(135deg, hsl(var(--swatch-dark-bg)) 50%, hsl(var(--swatch-light-bg)) 50%)',
       panel: 'hsl(var(--muted-foreground))',
@@ -70,12 +66,10 @@ const KEYBOARD_SHORTCUTS: ReadonlyArray<readonly [string, readonly string[]]> = 
 ];
 
 /**
- * Visual preferences — theme + keyboard shortcuts.
+ * 外观偏好 —— 主题 + 快捷键。
  *
- * Theme selection is rendered as a 3-card grid so the user can preview
- * the *actual* look of each option (panel + text + accent) instead of
- * guessing from a one-word label. Keyboard shortcuts get a small filter
- * input so muscle-memory lookups don't require scrolling.
+ * 主题渲染成三张卡片网格，让用户预览每项*真实*的样子（面板 + 文字 + 强调色），而不是
+ * 从一个词的标签去猜。快捷键配一个小过滤框，凭肌肉记忆查的组合不必滚动。
  */
 export function AppearanceSection() {
   const theme = useAppStore((s) => s.theme);
@@ -118,8 +112,7 @@ export function AppearanceSection() {
                     : 'border-border/70 hover:border-border hover:bg-background/60',
                 )}
               >
-                {/* Mini preview — a small panel painted with the option's
-                    palette so the user sees what they're committing to. */}
+                {/* 迷你预览 —— 用该项的配色画一块小面板，让用户看见自己将要选的东西。 */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span

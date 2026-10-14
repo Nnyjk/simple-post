@@ -8,38 +8,26 @@ import { useAppStore } from '@/stores/app-store';
 import { useMcpStatus } from '@/lib/use-mcp-status';
 import type { McpRuntimeStatus, McpUiState } from '@/lib/mcp-types';
 
-// Re-export so existing callers (ConnectionSection, Settings tab etc.)
-// don't need to learn about the internal split between the panel and
-// the shared mcp-types module.
+// 再导出，好让既有调用方（ConnectionSection、设置标签页等）不必知道面板与共享的
+// mcp-types 模块之间的内部切分。
 export type { McpRuntimeStatus, McpUiState };
 
-/**
- * Grace period after a restart invoke before we re-enable the button.
- * Keeps the UI from flashing "clickable" during a flaky round-trip.
- */
+/** 重启 invoke 之后到按钮重新可点之间的宽限期，避免往返抖动时按钮闪成可点。 */
 const RESTART_GRACE_MS = 2000;
 
 /**
- * Restart control for the MCP daemon.
+ * MCP daemon 的重启控件。
  *
- * Source-of-truth ownership:
- *   - The 3-second polling loop lives in the Zustand store
- *     (`useAppStore.startMcpPolling` / `refreshMcpStatus`). Any
- *     component mounting `useMcpStatus` participates in the same
- *     singleton loop, so there is no duplicate `setInterval` here.
- *   - This panel keeps ONE piece of daemon-local logic: the
- *     `daemon://crashed` event listener. When Rust emits the event
- *     we eagerly call `refreshMcpStatus` so the badge flips to
- *     `crashed` immediately (not on the next 3s tick).
- *   - The button itself calls `useAppStore.getState().restartMcp()`
- *     — the optimistic "restarting" flip lives in the store so a
- *     concurrent restart from the dialog button produces the same
- *     visible state.
+ * 真相各归其位：
+ *   - 3 秒轮询循环在 Zustand store 里（`useAppStore.startMcpPolling` / `refreshMcpStatus`）。
+ *     任何挂载 `useMcpStatus` 的组件都参与同一个单例循环，本面板不再另起 `setInterval`。
+ *   - 本面板只留一份 daemon 局部逻辑：`daemon://crashed` 事件监听。Rust 发出该事件时
+ *     立即调 `refreshMcpStatus`，徽标当场翻成 `crashed`，不等下一个 3 秒 tick。
+ *   - 按钮本身调 `useAppStore.getState().restartMcp()` —— 乐观的「重启中」翻转放在 store，
+ *     这样对话框按钮发起的并发重启会呈现同一个可见状态。
  *
- * The local `restarting` state is purely cosmetic (keeps the button
- * disabled while the invoke is in flight and during the grace
- * period) — it does NOT shadow `mcpStatus.status === 'restarting'`
- * from the daemon, which is what the badge renders.
+ * 本地的 `restarting` 只是观感状态（invoke 在途及宽限期内禁用按钮），**不**遮蔽
+ * 徽标所渲染的 daemon 侧 `mcpStatus.status === 'restarting'`。
  */
 export function McpStatusPanel() {
   const mcpStatus = useMcpStatus();
@@ -47,31 +35,23 @@ export function McpStatusPanel() {
   const startMcp = useAppStore((s) => s.startMcp);
   const stopMcp = useAppStore((s) => s.stopMcp);
 
-  // Cosmetic local state — debounces the button's click → disable
-  // transition so a flaky invoke doesn't cause flicker. Mirrors the
-  // grace window the original implementation used.
+  // 纯观感的本地状态 —— 把「点击 → 禁用」这一下做个去抖，免得抖动往返时闪。
   const [isRestartingLocal, setIsRestartingLocal] = useState(false);
   const [isTogglingLocal, setIsTogglingLocal] = useState(false);
   const graceRef = useRef<number | null>(null);
 
-  // Event-driven refresh + grace-timer cleanup, hosted in a single
-  // effect. Subscribes to `daemon://crashed` once on mount and
-  // unsubscribes on unmount; the listener is idempotent — Rust
-  // publishes the event, we just call `refreshMcpStatus` to pick up
-  // the new (crashed) state without waiting for the next 3s tick.
+  // 事件驱动的刷新与宽限计时器清理放在同一个 effect。挂载时订阅一次 `daemon://crashed`，
+  // 卸载时退订；监听本身是幂等的 —— Rust 只负责发布，我们调 `refreshMcpStatus` 取新的
+  // （崩溃）状态，不必等下一个 3 秒 tick。
   useEffect(() => {
     let cancelled = false;
     const unlistenRefs: UnlistenFn[] = [];
 
     listen<{ lastError?: string }>('daemon://crashed', (e) => {
-      // Eager refresh — don't wait for the next 3s tick — and surface
-      // the daemon-supplied error string immediately so the
-      // crashed/restart dialog can show it without waiting for the
-      // next daemon poll. The `lastError` write goes through the
-      // slice's `recordLastError` action (no direct `setState`), which
-      // keeps the renderer from bypassing the slice invariants the
-      // mcp-slice doc-comment promises (no-op when no snapshot yet,
-      // short-circuit when the value hasn't changed).
+      // 立刻刷新，不等下一个 3 秒 tick，并马上把 daemon 给的错误串亮出来，好让
+      // 崩溃 / 重启对话框不必等下一次轮询就能显示它。`lastError` 走 slice 的
+      // `recordLastError` 动作（不直接 `setState`），渲染层才不会绕过 slice 文档注释
+      // 承诺的不变量（尚无快照时为空操作，值没变则短路）。
       const lastError = e.payload?.lastError ?? null;
       void useAppStore
         .getState()
@@ -94,8 +74,7 @@ export function McpStatusPanel() {
     return () => {
       cancelled = true;
       for (const u of unlistenRefs) u();
-      // Clear any pending grace timer so an unmount mid-restart
-      // doesn't toggle the button state on a dead instance.
+      // 清掉待触发的宽限计时器，否则重启途中卸载会把这个已死的实例也翻成可点。
       if (graceRef.current !== null) {
         window.clearTimeout(graceRef.current);
         graceRef.current = null;
@@ -109,9 +88,8 @@ export function McpStatusPanel() {
     try {
       await restartMcp();
     } catch {
-      // restartMcp already logged + flipped the badge to `crashed`.
-      // We just want the button to become clickable again so the
-      // user can retry from the same place.
+      // restartMcp 已经记了日志并把徽标翻成 `crashed`。这里只要让按钮重新可点，
+      // 用户能在原地重试。
     } finally {
       if (graceRef.current !== null) window.clearTimeout(graceRef.current);
       graceRef.current = window.setTimeout(() => {
@@ -123,12 +101,9 @@ export function McpStatusPanel() {
 
   const status: McpRuntimeStatus = mcpStatus?.status ?? 'stopped';
   const isRunning = status === 'running';
-  // Drives the destructive tint on the restart icon — a daemon that is
-  // down / crashed / unhealthy is exactly the case where "restart" is
-  // the recovery action the user wants.
+  // 驱动重启图标的危险色 —— daemon 停掉 / 崩溃 / 不健康，正是用户想要「重启」的时刻。
   const isStopped = status === 'stopped' || status === 'crashed' || status === 'unhealthy';
-  // Disable the button during the local grace period OR while the
-  // daemon itself says it is restarting.
+  // 本地宽限期内，或 daemon 自己说正在重启时，禁用按钮。
   const disabled = isRestartingLocal || status === 'restarting' || status === 'starting';
   const toggleDisabled = isTogglingLocal || status === 'restarting' || status === 'starting';
 
@@ -136,18 +111,15 @@ export function McpStatusPanel() {
     if (isTogglingLocal) return;
     setIsTogglingLocal(true);
     try {
-      // The server decides what a toggle means: `stop` when it believes
-      // we are up, `start` otherwise. Guessing from a possibly-stale
-      // polled status is how you end up restarting what you meant to
-      // leave alone.
+      // 「切换」到底是什么意思由服务端决定：它认为我们在跑就 `stop`，否则 `start`。
+      // 拿可能已经过时的轮询状态去猜，就会重启掉本来只想留着的东西。
       if (isRunning) {
         await stopMcp();
       } else {
         await startMcp();
       }
     } catch {
-      // Both actions already logged and flipped the badge. Re-enable
-      // so the user can retry from the same place.
+      // 两个动作都已记日志并翻了徽标。恢复可点，让用户能在原地重试。
     } finally {
       if (graceRef.current !== null) window.clearTimeout(graceRef.current);
       graceRef.current = window.setTimeout(() => {
@@ -227,9 +199,8 @@ export function StatusBadge({ status }: { status: McpRuntimeStatus }) {
   return <Badge variant="muted">stopped</Badge>;
 }
 
-/** Tiny `<StateSummary>` helper that consumes an `McpUiState` snapshot
- *  directly. ConnectionSection passes the store-fed state. Tolerates
- *  `null` for the brief window before the first daemon poll completes. */
+/** 直接消费 `McpUiState` 快照的精简 `<StateSummary>`。ConnectionSection 传的是 store 喂进来的
+ *  状态。容忍 `null`，对应首次 daemon 轮询完成前的那一小段时间。 */
 export function StateSummary({ state }: { state: McpUiState | null }) {
   if (!state) {
     return (

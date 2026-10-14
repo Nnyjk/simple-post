@@ -17,11 +17,9 @@ import {
 import type { McpHttpConfig } from '@/types/domain';
 
 /**
- * The listener form's rules, tested without a DOM (the repo has no
- * Vitest / RTL — see AGENTS.md). Each of these guards a mistake that
- * would be silent: a whitelist that silently drops an entry looks like
- * a working allow-list, and a port that silently coerces to 0 asks the
- * OS for a fresh port the user's client config has never heard of.
+ * 监听表单的规则，不依赖 DOM 测试（本仓库没有 Vitest / RTL，见 AGENTS.md）。每一条都在
+ * 守一个会静默出错的点：悄悄丢掉一条的白名单看着仍像一份能用的允许列表，而悄悄变成 0
+ * 的端口等于向系统要一个用户客户端配置里从来没有的新端口。
  */
 
 function draft(overrides: Partial<McpHttpConfigDraft> = {}): McpHttpConfigDraft {
@@ -47,8 +45,7 @@ describe('defaults', () => {
   });
 
   it('round-trips a config through the draft form unchanged', () => {
-    // A draft that does not round-trip reports "unsaved changes" on a
-    // freshly loaded page, which is how users learn to distrust the flag.
+    // 草稿若不能原样往返，刚加载的页面就会报「有未保存修改」，用户于是不再信这个标志。
     assert.deepEqual(configFromDraft(draftFromConfig(SAVED)), SAVED);
   });
 });
@@ -63,8 +60,7 @@ describe('parsePort', () => {
   });
 
   it('rejects an empty field rather than reading it as 0', () => {
-    // An empty number input means "the user is mid-edit", and silently
-    // turning that into 0 would change which port the daemon binds.
+    // 空数字输入框的意思是「用户正在编辑」，悄悄当成 0 会换掉 daemon 绑定的端口。
     assert.equal(parsePort(''), null);
     assert.equal(parsePort('   '), null);
   });
@@ -118,8 +114,7 @@ describe('draftError', () => {
   });
 
   it('does not require whitelists while remote access is off', () => {
-    // The loopback default must be savable with zero extra input —
-    // otherwise the safe state is the one that blocks first-run setup.
+    // 回环默认值必须零输入即可保存 —— 否则最安全的那个状态反倒最挡住首次配置。
     assert.equal(draftError(draft({ allowedHosts: '', allowedOrigins: '' })), null);
   });
 
@@ -194,8 +189,7 @@ describe('isDraftDirty', () => {
   });
 
   it('is true when the port field cannot be parsed at all', () => {
-    // Reporting "no changes" beside an invalid field is how a save
-    // silently discards what the user typed.
+    // 在一个非法字段旁边显示「无修改」，正是保存悄悄丢掉用户输入的方式。
     assert.equal(isDraftDirty(draft({ port: '' }), SAVED), true);
   });
 

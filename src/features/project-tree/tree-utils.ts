@@ -3,10 +3,9 @@ import { indexByParent } from '@/lib/tree-index';
 import type { CollectionBranch, DragPayload, TreeBranch } from './tree-types';
 
 /**
- * Custom mime type used for the in-app drag payload. We shove the dragged
- * kind + ids into the dataTransfer as JSON so a single drop can resolve
- * to `moveNodes` without any extra context. Using a vendor-prefixed type
- * means other apps / the OS can't accidentally pick the data up as text.
+ * 应用内拖拽负载的 mime 类型。把被拖的 kind + ids 以 JSON 塞进 dataTransfer，
+ * 一次 drop 就能解析成 `moveNodes`，无需额外上下文。用带厂商前缀的类型，
+ * 别的应用 / 操作系统就不会把它当文本捡走。
  */
 export const DND_MIME = 'application/x-simple-post-tree';
 
@@ -32,23 +31,19 @@ export function decodeDrag(raw: string): DragPayload | null {
 }
 
 /**
- * Turn the flat node list into the nested shape the rows render.
+ * 把打平的节点列表变成行渲染所用的嵌套形状，一趟建完。
  *
- * One pass. Every node names its own parent, so the whole tree is a
- * single `parentId → children` index — the old version needed three
- * because a collection's owner and its parent lived in different
- * columns, and a module's project was a fourth thing to look up.
+ * 每个节点都指明自己的父节点，整棵树就是单个 `parentId → children` 索引。
  *
- * `projectId` narrows to one project's tree; nodes from other projects
- * are dropped rather than rendered under a module that is not theirs.
+ * `projectId` 收窄到一个项目的树；其他项目的节点直接丢弃，而不是渲染到不属于自己的
+ * 模块底下。
  */
 export function buildTree(
   nodes: readonly ResourceNode[],
   endpointDetails: Record<string, EndpointDetail>,
   projectId: string,
 ): TreeBranch[] {
-  // The bucketing itself is shared with the store — same index, narrowed
-  // to this project rather than the whole workspace.
+  // 分桶本身与 store 共用同一个索引，只是收窄到本项目而非整个工作区。
   const byParent = indexByParent(nodes, projectId);
 
   const childrenOf = (
@@ -56,16 +51,14 @@ export function buildTree(
   ): { endpoints: ResourceNode[]; collections: ResourceNode[] } => {
     const kids = byParent.get(parentId) ?? [];
     return {
-      // One filter covers both container types: a module holds
-      // collections *and* endpoints (the folderless case), and a
-      // collection holds endpoints and further collections. Nothing else
-      // can appear under either, so this needs no per-type query.
+      // 一次过滤覆盖两种容器类型：模块下可放集合*和*接口（即无文件夹的情形），集合下可放
+      // 接口和更多集合。别的类型都进不来，故无需按类型分别查询。
       endpoints: kids.filter((k) => k.kind === 'endpoint'),
       collections: kids.filter((k) => k.kind === 'collection'),
     };
   };
 
-  /** The subset of the store's detail map covering `endpoints`. */
+  /** store 的 detail map 中覆盖 `endpoints` 的那一部分。 */
   const detailsFor = (endpoints: readonly ResourceNode[]): Record<string, EndpointDetail> => {
     const out: Record<string, EndpointDetail> = {};
     for (const e of endpoints) {
@@ -77,8 +70,7 @@ export function buildTree(
 
   const buildCollectionBranch = (c: ResourceNode): CollectionBranch => {
     const { endpoints, collections } = childrenOf(c.id);
-    // Only this branch's own endpoints, not the whole subtree — the
-    // rows render exactly these.
+    // 只取本分支自己的接口，不含整棵子树，行渲染的就是这些。
     return {
       collection: c,
       endpoints,
@@ -87,8 +79,7 @@ export function buildTree(
     };
   };
 
-  // A module's parent is the project, so top-level modules are the nodes
-  // with no `parentId` in this project.
+  // 模块的父节点是项目，故顶层模块就是本项目里没有 `parentId` 的那些节点。
   return (byParent.get(null) ?? [])
     .filter((n) => n.kind === 'module')
     .map((m) => {
@@ -103,12 +94,10 @@ export function buildTree(
 }
 
 /**
- * Does this endpoint match the search? Name, url or any tag — url and
- * tags live in the detail row, so a name-only match over the node would
- * silently stop finding endpoints by path.
+ * 该接口是否命中搜索：名称、url 或任一 tag。url 与 tag 都在 detail 行里，
+ * 只在节点上匹配名称会让「按路径找接口」悄悄失效。
  *
- * Shared by the module-level and collection-level filters so the two
- * levels can never drift into matching different things.
+ * 模块级与集合级过滤共用它，两个层级不会漂移成匹配不同的东西。
  */
 function endpointMatches(
   e: ResourceNode,
@@ -121,7 +110,7 @@ function endpointMatches(
   return d.url.toLowerCase().includes(q) || d.tags.some((t) => t.toLowerCase().includes(q));
 }
 
-/** Keep only the matched endpoints, with the detail rows that back them. */
+/** 只留命中的接口，以及支撑它们的 detail 行。 */
 function filterEndpoints(
   endpoints: ResourceNode[],
   q: string,
@@ -145,13 +134,11 @@ export function filterTree(
     tree
       .map((m) => {
         const collections = filterCollectionBranch(m.collections, q, details);
-        // A module can own endpoints directly, so filtering its
-        // collections alone would make them unfindable.
+        // 模块可以直接持有接口，故只过滤它的集合会让这些接口再也搜不到。
         const { endpoints, endpointDetails } = filterEndpoints(m.endpoints, q, details);
         return { ...m, collections, endpoints, endpointDetails };
       })
-      // A module survives on a matched collection *or* a matched endpoint
-      // of its own.
+      // 模块只要有命中的集合*或*自己名下命中的接口就留下。
       .filter((m) => m.collections.length > 0 || m.endpoints.length > 0)
   );
 }
@@ -165,8 +152,7 @@ function filterCollectionBranch(
     .map((b) => {
       const { endpoints, endpointDetails } = filterEndpoints(b.endpoints, q, details);
       const filteredChildren = filterCollectionBranch(b.children, q, details);
-      // Keep a collection in the result if it has matched endpoints,
-      // matched sub-collections, or its own name matches the query.
+      // 集合有命中的接口、命中的子集合、或自身名称命中，三者之一即保留。
       const nameMatches = b.collection.name.toLowerCase().includes(q);
       if (endpoints.length === 0 && filteredChildren.length === 0 && !nameMatches) {
         return null;

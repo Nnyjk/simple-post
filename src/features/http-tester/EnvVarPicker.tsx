@@ -1,14 +1,12 @@
 /**
- * EnvVarPicker — small popover that lists the active environment's variables
- * for quick insertion into a URL input as `{{key}}`.
+ * EnvVarPicker —— 列出当前环境变量、供 URL 输入框快速插入 `{{key}}` 的小浮层。
  *
- * This is a controlled (presentational) component. The parent owns:
- *  - the `entries` to show (typically filtered by the partially-typed var name)
- *  - the `selected` row index and how to mutate it (`onSelectedChange`)
- *  - the open / close state
+ * 纯展示的受控组件，父组件掌管：
+ *  - 要显示的 `entries`（通常已按用户输入的半个变量名过滤）
+ *  - 选中行下标及其变更方式（`onSelectedChange`）
+ *  - 打开 / 关闭状态
  *
- * Positioning is anchored to `anchorRef`. The popover is placed at
- * `top: input.bottom + 4px`, `left: input.left`, width >= 240px.
+ * 位置锚在 `anchorRef`：落在 `top: 输入框底 + 4px`、`left: 输入框左`，宽度 >= 240px。
  */
 
 import { useEffect, useRef } from 'react';
@@ -27,9 +25,9 @@ interface EnvVarPickerProps {
   selected: number;
   onSelectedChange: (next: number) => void;
   onSelect: (key: string) => void;
-  /** Anchor element (the URL input) used to position the popover. */
+  /** 定位浮层的锚元素（URL 输入框）。 */
   anchorRef: React.RefObject<HTMLElement | null>;
-  /** Optional caption shown in the header (e.g. active env name). */
+  /** 头部标题，可选，如当前环境名。 */
   envName?: string;
 }
 
@@ -50,7 +48,7 @@ export function EnvVarPicker({
 }: EnvVarPickerProps) {
   const popRef = useRef<HTMLDivElement>(null);
 
-  // Reposition whenever the popover opens or the window scrolls / resizes.
+  // 打开、窗口滚动或缩放时都重新定位。
   useEffect(() => {
     if (!open) return;
     const setPos = () => {
@@ -71,7 +69,7 @@ export function EnvVarPicker({
     };
   }, [open, anchorRef, entries.length]);
 
-  // Click outside closes (but clicks inside the URL input should not).
+  // 点外部关闭，但点在 URL 输入框内不算。
   useEffect(() => {
     if (!open) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -84,7 +82,7 @@ export function EnvVarPicker({
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [open, onClose, anchorRef]);
 
-  // Keep selection in range when the entry list shrinks.
+  // 条目变少时把选中项收回范围。
   useEffect(() => {
     if (entries.length === 0) return;
     if (selected < 0 || selected >= entries.length) onSelectedChange(0);
@@ -99,7 +97,7 @@ export function EnvVarPicker({
       aria-label="环境变量"
       data-testid="env-var-picker"
       className="fixed z-50 max-h-64 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg animate-fade-in"
-      onMouseDown={(e) => e.preventDefault() /* keep input focused */}
+      onMouseDown={(e) => e.preventDefault() /* 保持输入框聚焦 */}
     >
       <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 label-caps">
         <ChevronRight className="h-3 w-3" />
@@ -142,10 +140,8 @@ export function EnvVarPicker({
   );
 }
 
-/** Helper for HttpTester: given the current draft URL, extract the partial
- *  variable name the user is currently typing (i.e. text after the last `{{`
- *  and before any `}}`). Returns `''` if the user isn't inside an
- *  unclosed `{{…}}` block. */
+/** 给 HttpTester 用：从当前草稿 URL 里取出用户正在输入的半个变量名，即最后一个 `{{` 之后、
+ *  任何 `}}` 之前的文本。不在未闭合的 `{{…}}` 块里则返回 `''`。 */
 export function extractPartialVar(url: string): string {
   const lastOpen = url.lastIndexOf('{{');
   if (lastOpen < 0) return '';
@@ -155,8 +151,7 @@ export function extractPartialVar(url: string): string {
   return match ? match[1] : '';
 }
 
-/** Helper for HttpTester: return true iff the user is inside an unclosed
- *  `{{…}}` block — i.e. the picker should be visible. */
+/** 给 HttpTester 用：用户是否正处在一个未闭合的 `{{…}}` 块里，即浮层该不该可见。 */
 export function shouldShowVarPicker(url: string): boolean {
   const lastOpen = url.lastIndexOf('{{');
   if (lastOpen < 0) return false;

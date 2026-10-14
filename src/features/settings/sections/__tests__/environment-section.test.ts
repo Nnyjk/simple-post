@@ -1,29 +1,16 @@
 /**
- * Cold-start guards for the settings → environment section.
+ * 设置 → 环境 分区的冷启动守卫。
  *
- * The bug this file exists for: the whole header block was wrapped in
- * `environments.length === 0 ? <EmptyHint/> : <EnvSwitcher …/>`, and
- * `EnvSwitcher` is the only component carrying the `新建环境` button.
- * A project with zero environments therefore rendered a bare hint
- * string and *no way to create its first environment* — a dead end that
- * no unit test noticed, because there was no test and nothing in the
- * store changed shape.
+ * 这里要守的不变式是「新增控件存在」：`新建环境` 按钮只由 `EnvSwitcher` 承载，故环境
+ * 条在任何情况下都必须在场，包括零环境的新项目 —— 否则用户连创建第一个环境都做不到。
+ * 它只能通过用户真正看到的那棵树来断言，故这些断言刻意针对零环境情形的渲染输出。
  *
- * So these assertions are deliberately about the rendered output of the
- * zero-env case, not about a helper: the invariant that matters is
- * "the add control exists", and that can only be checked through the
- * tree the user actually sees.
+ * 渲染走 `react-dom/server` 的静态标记。本仓库没有 DOM 测试环境（没有 Vitest / RTL，
+ * 见 AGENTS.md），但 `renderToStaticMarkup` 只需要一张模块图，而该分区的每个组件在模块
+ * 作用域就已把 portal 收口（`Dialog` 在 `!open` 时返回 null），故可以无头服务端渲染。
+ * 交互（点 新建环境、提交改名）由主会话的端到端流程覆盖，这里不假装测它们。
  *
- * Rendering goes through `react-dom/server`'s static markup. The repo
- * has no DOM test harness (no Vitest / RTL — see AGENTS.md), but
- * `renderToStaticMarkup` needs nothing but a module graph, and every
- * component in this section is portal-closed at module scope
- * (`Dialog` returns null when `!open`), so the section server-renders
- * headless. Interactions (clicking 新建环境, committing a rename) are
- * covered by the main session's end-to-end pass; nothing here pretends
- * to test them.
- *
- * Run via:
+ * 运行：
  *   npx tsx --test src/features/settings/sections/__tests__/environment-section.test.ts
  */
 import assert from 'node:assert/strict';
@@ -37,7 +24,7 @@ import { EnvBody } from '../rows/EnvBody';
 import { EnvSwitcher } from '../rows/EnvSwitcher';
 import type { Environment } from '@/types/domain';
 
-/** Minimal env — the section only reads id / name / isActive / the maps. */
+/** 最小环境 —— 该分区只读 id / name / isActive 以及那几个 map。 */
 function makeEnv(overrides: Partial<Environment> = {}): Environment {
   return {
     id: 'env-1',
@@ -82,8 +69,7 @@ describe('nextEnvironmentName', () => {
   });
 
   it('derives a free name from the names already taken', () => {
-    // The old hardcoded literal made every env read `new-env`, so the
-    // second and third were indistinguishable from the first.
+    // 名字必须是拿已占用的名字推出来的固定写法，否则第二、第三个环境跟第一个分不出来。
     assert.equal(nextEnvironmentName(['新环境']), '新环境 2');
     assert.equal(nextEnvironmentName(['新环境', '新环境 2']), '新环境 3');
   });
@@ -105,8 +91,7 @@ describe('EnvironmentSection cold start (zero environments)', () => {
   const html = render(makeProps());
 
   it('still renders the 新建环境 add control', () => {
-    // The regression in one assertion: no env, but the only add
-    // affordance in the section is present and enabled.
+    // 一条断言守住这条回归：一个环境都没有，但分区里唯一的添加入口在场且可用。
     assert.match(html, /新建环境/);
     assert.doesNotMatch(html, /disabled=""/);
   });
@@ -118,14 +103,11 @@ describe('EnvironmentSection cold start (zero environments)', () => {
 });
 
 describe('EnvironmentSection with a single environment', () => {
-  // The case that regresses easily: it is the first env of a fresh
-  // project, so the tab strip must survive the move away from the
-  // conditional.
+  // 容易回归的情形：新项目的第一个环境，故环境条必须扛得住离开那个条件渲染。
   //
-  // Note what this cannot assert: the env *body*. The section resolves
-  // its active env in a `useEffect`, and static markup runs no effects,
-  // so `activeId` is still `null` here. That is why the rename affordance
-  // is checked through `EnvSwitcher` below instead.
+  // 注意这里断言不了什么：环境*正文*。该分区在一个 `useEffect` 里解析激活环境，而静态
+  // 标记不跑 effect，故此刻 `activeId` 仍是 `null`。这正是重命名入口改在下面经
+  // `EnvSwitcher` 检查的原因。
   const html = render(makeProps({ environments: [makeEnv()] }));
 
   it('drops the empty hint', () => {
@@ -142,9 +124,7 @@ describe('EnvironmentSection with a single environment', () => {
 });
 
 describe('EnvSwitcher — the env name lives here, and so does its rename', () => {
-  // The name row that used to open the env body is gone; the strip is now
-  // the only place a name appears, which means the rename had to come with
-  // it or the section would have silently lost the ability to rename.
+  // 这条选择带是名字唯一出现的地方，故重命名必须跟着搬过来，否则分区会悄悄失去改名能力。
   const props = {
     environments: [makeEnv()],
     activeId: 'env-1',
@@ -157,9 +137,8 @@ describe('EnvSwitcher — the env name lives here, and so does its rename', () =
   );
 
   it('renders the active chip as a click-to-edit cell, not static text', () => {
-    // `InlineNameCell` renders a button when closed and an input when
-    // open, so the button is what proves rename is still one click away
-    // for the first env of a single-env project.
+    // `InlineNameCell` 关闭时渲染按钮、打开时渲染输入框，故那个按钮正能证明：在只有
+    // 一个环境的项目里，改名仍是一次点击的事。
     assert.match(renameable, /<button/);
     assert.match(renameable, />dev</);
     assert.match(renameable, /lucide-pencil/);
@@ -170,16 +149,14 @@ describe('EnvSwitcher — the env name lives here, and so does its rename', () =
   });
 
   it('keeps the chip a tab for assistive tech after the swap away from <button>', () => {
-    // The name cell is a button, so the chip had to stop being one. These
-    // are the semantics the old element gave for free.
+    // 名称单元格本身是个按钮，故 chip 不能再是按钮。这几条正是原先那个元素免费提供的语义。
     assert.match(renameable, /role="tab"/);
     assert.match(renameable, /aria-selected="true"/);
     assert.match(renameable, /tabindex="0"/);
   });
 
   it('drops the rename affordance when the host does not offer it', () => {
-    // The module layer omits `onRename`: renaming a project-level
-    // environment from inside a module tab is not its business.
+    // 模块层不传 `onRename`：在模块标签里改一个项目级的环境不是它该管的事。
     const readOnly = renderToStaticMarkup(createElement(EnvSwitcher, props));
     assert.match(readOnly, />dev</);
     assert.doesNotMatch(readOnly, /lucide-pencil/);
@@ -207,10 +184,8 @@ describe('EnvBody — no name row of its own', () => {
   );
 
   it('never spells the env name, which the switcher directly above already says', () => {
-    // The regression this file grew a case for: the body opened with its
-    // own icon + name header row, so the active env was named twice within
-    // a few centimetres — and the module layer, which never had that row,
-    // was the only view that read as one thing.
+    // 正文曾以自己的一行图标 + 名字开头，于是激活环境在几厘米内被叫了两次；而模块层
+    // 从来没有那一行，反倒只有它是唯一读起来像一回事的视图。
     assert.doesNotMatch(html, />dev</);
   });
 
