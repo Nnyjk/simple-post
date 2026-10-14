@@ -1,7 +1,7 @@
 name: 功能请求
 description: 提一个新能力、新改进，或按路线图拆一个子任务
-title: ""
-labels: ["enhancement"]
+title: ''
+labels: ['enhancement']
 body:
   - type: markdown
     attributes:
