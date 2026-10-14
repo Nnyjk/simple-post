@@ -1,0 +1,94 @@
+name: 缺陷报告
+description: 报告一个可复现的错误行为
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢发现问题。请先确认它不是已知问题（看已关闭的 issue）。
+
+        下面几个字段看起来啰嗦，但它们对应本仓库真实踩过的坑——填了能省掉一轮来回。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 应用版本号，或容器镜像 tag。
+      placeholder: v0.1.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shape
+    attributes:
+      label: 运行形态
+      description: 同一个缺陷在不同形态下的表现可能完全不同（桌面 / Web / 容器走的是同一套 Rust 核心，但入口不同）。
+      options:
+        - 桌面应用（Tauri）
+        - serve-web 无头 Web
+        - 容器（docker compose / swarm）
+        - MCP 客户端（stdio 桥 / HTTP）
+        - CI 或构建
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 实际发生了什么
+      description: 描述你看到的行为，不要写你期望的行为（那是下一栏）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 你期望什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 编号列出，从空状态开始更好。如果涉及请求，请贴 curl 或 `Copy as cURL` 的输出。
+      placeholder: |
+        1. 新建项目「demo」
+        2. 新建模块「user」
+        3. 在模块下新建接口，URL 填 {{base}}/list
+        4. 点 Send
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或响应
+      description: 报错原文、响应体片段、控制台输出。设了 `SIMPLE_POST_WEB_PASSWORD` 时请**先删掉口令**再贴。
+      render: text
+
+  - type: checkboxes
+    id: hazard
+    attributes:
+      label: 这个缺陷触及以下哪条红线？（可多选）
+      options:
+        - label: 数据结构 / schema
+          description: 新增或修改了表、列、迁移。改动可能涉及 SCHEMA_VERSION——注意 bump 会删掉每个用户的 store.db。
+        - label: MCP 工具注册或权限
+          description: 涉及 tool_table() / REQUIRED_CAPABILITY / 项目权限闸。工具「看起来注册正常但永远被拒绝」是这一类的典型症状。
+        - label: 前后端命令
+          description: 涉及 Tauri command 与 web_api 路由两侧。少改一侧会让桌面端或 Web 端静默失效。
+        - label: 反向代理 / base path
+          description: 涉及 /sp 之类的挂载前缀。注意前缀只能由服务端处理，不要在 vite.config.ts 或 nginx 侧再动一次。
+        - label: 容器 / 部署
+          description: 涉及 Dockerfile、compose、swarm、命名卷或数据持久化。
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前自查
+      options:
+        - label: 我搜索过已有的 issue，没有重复
+        - label: 如果改动得动代码，我已在本地跑过 npm run check（纯文档改动可跳过）
+        - label: 我没有把口令、token 或内网地址贴进本 issue

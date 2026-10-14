@@ -1,0 +1,14 @@
+# Default owner for everything in this repository.
+#
+# Single-maintainer repo today, so one catch-all line is the whole file.
+# Split it out when a second maintainer lands — the useful shape is per-area
+# (`/crates/`, `/src/`, `/.github/workflows/`), because those areas carry
+# different risk and a review of one is not a review of the others.
+* @Nnyjk
+
+# Areas that carry the highest blast radius, listed explicitly so a future
+# split has them already named. Uncomment and point at real people once there
+# is more than one.
+/Dockerfile              @Nnyjk
+/docker-compose.yml      @Nnyjk
+/docker-swarm.yml        @Nnyjk

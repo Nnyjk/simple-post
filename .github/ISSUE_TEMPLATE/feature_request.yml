@@ -1,0 +1,75 @@
+name: 功能请求
+description: 提一个新能力、新改进，或按路线图拆一个子任务
+title: ""
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        四段结构：**现状 / 合理性 / 改动范围 / 验收**。
+
+        「合理性」是必填的，写给未来的你和维护者看：这个需求为什么值得做、不做会怎样。
+        写清楚通常能避免范围在实施阶段才发现没对齐。
+
+  - type: textarea
+    id: current
+    attributes:
+      label: 现状
+      description: 现在是什么样。要具体到文件、表、命令或接口名，不要写「不太好用」。
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: 合理性
+      description: 为什么值得做。不做的代价是什么。
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 改动范围
+      description: |
+        用表格列出会动到的文件，以及每个文件是新增、修改还是删除。
+
+        另起一段写**明确不涉及**什么——这一栏比「改动范围」更能防止范围蔓延。
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 一组可以逐条打勾、且能真正判定通过/失败的条目。「代码更清晰了」不是验收标准。
+      render: markdown
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: hazard
+    attributes:
+      label: 这个改动触及以下哪条红线？（可多选，据此决定改动量）
+      options:
+        - label: 数据结构 / schema
+          description: 新字段必须走 db::ADDED_COLUMNS，不能 bump SCHEMA_VERSION——bump 会删掉每个用户的 store.db。
+        - label: MCP 工具注册或权限
+          description: 新增工具要同时改 tool_table() 和 REQUIRED_CAPABILITY，且要带上正确的 Capability（Read < Create < Update < Delete < Send）。
+        - label: 前后端命令
+          description: 新增后端命令需要五处协同：commands/ handler、lib.rs 注册、COMMANDS、web_api 路由、WEB_ROUTES。
+        - label: 反向代理 / base path
+          description: 前缀由服务端 nest 处理，不要在 vite.config.ts 加 base，也不要在 nginx 侧剥离。
+        - label: 回归网测试
+          description: mcp/mod_test.rs 与 web_api/ 里有读源码文本的 source-level 测试，改动可能让它们误报——不要删测试或放宽判据。
+        - label: CI / 门禁
+          description: 涉及 workflow。提速只能来自少跑不相关的组合，不得删掉任何既有断言。
+        - label: 纯文档
+          description: 不涉及代码逻辑。
+
+  - type: textarea
+    id: deps
+    attributes:
+      label: 依赖
+      description: 依赖哪些 issue 或 PR 必须先合并？没有就填「无」。
