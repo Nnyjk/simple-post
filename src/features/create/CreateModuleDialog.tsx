@@ -1,10 +1,8 @@
 /**
- * CreateModuleDialog — mounted inside `ProjectTree`.
+ * CreateModuleDialog —— 挂在 `ProjectTree` 内。
  *
- * A module is always a direct child of the active project, so this form
- * has nothing to ask beyond the name: no parent picker (there is only one
- * possible parent), no colour (nothing shows it), no baseUrl (that
- * belongs to a project or to an environment).
+ * 模块永远是当前项目的直接子级，故本表单除了名字无处可问：没有父级选择器（可能的父级
+ * 只有一个）、没有颜色（无处显示它）、没有 baseUrl（那属于项目或环境）。
  */
 
 import { useRef } from 'react';

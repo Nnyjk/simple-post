@@ -6,17 +6,16 @@ import { ModuleBaseUrlTable } from './ModuleBaseUrlTable';
 import { VariableTable } from './VariableTable';
 
 /**
- * EnvBody — one env's tables (前置 URL rows + variable rows).
+ * EnvBody —— 单个环境的各张表（前置 URL 行 + 变量行）。
  *
- * No name row. The switcher above this already says which environment is
- * open and owns the rename; repeating it here is what made the project /
- * settings env view look different from the module one, which has never
- * had the row. Keyed by env id, so it remounts per environment.
+ * 没有名字行。上方的切换器已经说明了当前打开的是哪个环境并持有重命名；在这里重复一遍，
+ * 正是让项目 / 设置里的环境视图看起来与模块那边不一致的原因 —— 而模块那边从来没有这一行。
+ * 以 env id 为 key，故每个环境各自重挂载。
  */
 interface EnvBodyProps {
   env: Environment;
   projectId: string;
-  /** This project's modules — the grouping axis of the 前置 URL table. */
+  /** 本项目的模块 —— 前置 URL 表的分组轴。 */
   modules: readonly ResourceNode[];
 
   setEnvironmentVar: EnvironmentSectionProps['setEnvironmentVar'];
@@ -52,10 +51,8 @@ export function EnvBody({
       <GroupHeader
         icon={<Globe className="h-3.5 w-3.5" />}
         title="前置 URL"
-        // Describes the model as it is: the service list belongs to the
-        // project and every module sees all of it, while the address in
-        // the third column is this module's own value for that service in
-        // this environment.
+        // 按实际的样子描述这个模型：服务清单属于项目、每个模块都看得见全部，而第三列的
+        // 地址是本模块在此环境下对该服务自己的取值。
         description="项目共用一份服务清单，每个模块各填各的前置 URL"
         meta={baseUrlDefinitions.length > 0 ? `${baseUrlDefinitions.length} 个服务` : undefined}
       />

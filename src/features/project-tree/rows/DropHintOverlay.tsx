@@ -2,9 +2,8 @@ import type { CSSProperties } from 'react';
 import type { DropZone } from '../tree-types';
 
 /**
- * Visual indicator for the current drop position on a row. Drawn as a
- * 2px line for `above` / `below` and a colored ring for `into` (the
- * row itself already tints its background in that case).
+ * 行上当前放置位置的可视指示。`above` / `below` 画成 2px 横线；`into` 由该行自身的
+ * 背景染色与描边表示，故此处不画。
  */
 export function DropHintOverlay({ zone }: { zone: DropZone | null }) {
   if (!zone) return null;

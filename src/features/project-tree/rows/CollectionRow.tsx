@@ -65,7 +65,7 @@ export function CollectionRow({
             }
           }}
           className={cn(
-            // Name in `--foreground` — see the note in `ModuleRow.tsx`.
+            // 名字用 `--foreground` —— 见 `ModuleRow.tsx` 的说明。
             'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-foreground transition-colors',
             'hover:bg-overlay-hover',
           )}
@@ -76,14 +76,13 @@ export function CollectionRow({
               collection.expanded && 'rotate-90 text-muted-foreground',
             )}
           />
-          {/* No type icon and no size badge — see the note in
-              `ModuleRow.tsx`. The chevron carries the expand state. */}
+          {/* 没有类型图标、也没有数量徽标 —— 见 `ModuleRow.tsx` 的说明。展开状态由那个
+              箭头承担。 */}
           <InlineEdit
             value={collection.name}
             onSave={onSaveEdit}
-            // Controlled by the tree's `editing` target so a collection
-            // created from a dialog lands straight in rename. See the
-            // same note in `EndpointRow.tsx`.
+            // 由树的 `editing` 目标受控，好让从对话框创建的集合直接进入重命名。见
+            // `EndpointRow.tsx` 处的同一条说明。
             editing={isEditing}
             onEditingChange={(open) => {
               if (!open) onCancelEdit();

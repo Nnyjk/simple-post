@@ -2,10 +2,8 @@ import { useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useAppStore } from '@/stores/app-store';
 
 /**
- * Click handlers that open the right-hand tab for a tree node, plus the
- * endpoint multi-select used by drag-and-drop. Owns no store selectors
- * that build new arrays/objects — all values below are raw store
- * references or `.find()` results (stable).
+ * 为树节点打开右栏标签的点击处理器，外加供拖放使用的接口多选。不持有会新建数组 /
+ * 对象的 store selector —— 下面的取值都是原始 store 引用或 `.find()` 的结果（稳定）。
  */
 export function useTreeSelection() {
   // ---------- store actions ----------
@@ -14,18 +12,14 @@ export function useTreeSelection() {
   const toggleNodeExpanded = useAppStore((s) => s.toggleNodeExpanded);
 
   // ---------- click handlers (open tab + activate) ----------
-  // No `openProjectTab` here any more: the project is not a row in this
-  // tree, so nothing in it can be clicked to enter a project. Entering
-  // one is `openProject` in the store, called from the welcome picker,
-  // the top-bar selector, the command palette and the breadcrumb.
+  // 这里没有 `openProjectTab`：项目不是这棵树里的一行，故树内没有任何可点击进入项目的
+  // 元素。进入项目是 store 里的 `openProject`，由欢迎页选择器、顶栏选择器、命令面板与
+  // 面包屑调用。
   const openModuleTab = (id: string) => {
     openTab('module', id);
-    // Toggle the row's expanded state on every click. Earlier this
-    // only expanded (skipped the toggle when already open), which
-    // meant clicking an expanded module to a it open in the right pane
-    // also collapsed it on the tree — but the user couldn't tell why
-    // "收缩" never worked from the row click. Unconditional toggle
-    // makes the row behave like every other tree widget.
+    // 每次点击都切换该行的展开状态。只做展开（已展开时跳过）时，点一个已展开的模块会同时
+    // 在树上把它折叠掉，而用户无从判断为什么「收缩」从行点击上不起作用。无条件切换让这一
+    // 行的行为与其他树控件一致。
     toggleNodeExpanded(id);
   };
   const openCollectionTab = (id: string) => {
@@ -37,11 +31,8 @@ export function useTreeSelection() {
   };
 
   /**
-   * Multi-select for endpoints. Ctrl+click toggles membership, plain
-   * click on an endpoint clears the selection and selects only that
-   * one. We only multi-select endpoints — multi-selecting modules or
-   * collections is overkill for v1 of the DnD work and the rules
-   * don't ask for it.
+   * 接口的多选。Ctrl+点击切换成员，普通点击清空选区并只选这一个。只对接口做多选 —— 对
+   * 模块或集合做多选对拖放的 v1 而言是过度设计，规则也没要求。
    */
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<Set<string>>(() => new Set());
 

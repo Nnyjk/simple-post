@@ -1,47 +1,32 @@
 /**
- * BaseUrlPicker — the dropdown that sits between the method picker and
- * the URL field in HttpTester.
+ * BaseUrlPicker —— HttpTester 里位于方法选择器与 URL 输入框之间的下拉。
  *
- * The picker drives a baseUrl *service* (named slot like "鉴权服务" /
- * "数据服务") plus an optional per-endpoint override. The actual URL is
- * looked up from `env.moduleBaseUrls[defId][moduleId]` at resolve time
- * (see lib/url.ts), so flipping the active env changes the URL
- * automatically without touching the endpoint's selection.
+ * 它驱动的是一个 baseUrl *服务*（像「鉴权服务」/「数据服务」这样的命名槽位）加一个可选的
+ * 按接口 override。实际 URL 在解析时从 `env.moduleBaseUrls[defId][moduleId]` 查得
+ * （见 lib/url.ts），故切换当前环境会自动换 URL，而不必改动接口的选择。
  *
- * `definitions` is the project's whole service list — services belong to
- * the project, so every module sees all of them and every one of them is a
- * real choice here. `defaultDefinitionId` is therefore the project-wide ★
- * (`Project.defaultBaseUrlDefinitionId`), not a module's.
+ * `definitions` 是项目的完整服务列表 —— 服务属于项目，每个模块都看得见全部，故这里每一个
+ * 都是真实可选项。`defaultDefinitionId` 因此是项目级的 ★
+ * （`Project.defaultBaseUrlDefinitionId`），不是某个模块的。
  *
- * The component is fully controlled. The parent owns:
- *   - `selection`  — which named slot is active (or "default" / "override")
+ * 组件完全受控，由父级持有：
+ *   - `selection` —— 当前激活的是哪个命名槽位（或「默认」/「override」）
  *
- * The list holds the project's services and 自定义, and nothing else.
- * There used to be a 项目默认 row above the definitions plus a "BaseUrl 定义"
- * section header: both duplicated what the row carrying the 默认 badge
- * already said, so "follow the project default" is now that row
- * itself (see the `isProjectDefault` branch in the map below).
+ * 列表里只有项目的服务与 自定义，别无其他。「跟随项目默认」就是带 默认 徽标的那一行
+ * 本身（见下方 map 里的 `isProjectDefault` 分支）。
  *
- * 自定义 (override) deliberately has **no input of its own**: picking it
- * hands the URL field over to the user as the whole address, so a second
- * host box here would be a second source of truth for the same request.
- * An override that carries a host (rows saved before this split) still
- * resolves as that host prefix — `resolvedBaseUrl` is non-empty in that
- * case — and the trigger's sub-label shows it.
+ * 自定义 (override) 刻意**没有自己的输入框**：选中它就把完整地址交给 URL 栏，在这里再加
+ * 一个 host 框会为同一个请求制造第二个真相来源。带 host 的 override 仍按该 host 前缀解析
+ * —— 此时 `resolvedBaseUrl` 非空 —— 并显示在触发器的副标签上。
  *
- * The parent also passes the resolved baseUrl for the trigger label;
- * we don't compute it here to keep the picker dumb.
+ * 父级同时传入已解析的 baseUrl 供触发器标签使用；此处不算，以保持选择器无知。
  *
- * Visual style: card-style trigger (rounded-lg + accent icon container),
- * SettingRow-style dropdown rows (icon container + label + sub-label +
- * trailing badge), matching the new Settings category aesthetic.
+ * 视觉风格：卡片式触发器（rounded-lg + 强调色图标容器），下移行采用 SettingRow 风格
+ * （图标容器 + 主标签 + 副标签 + 末尾徽标），与新的设置分类观感一致。
  *
- * LOCATION: this lives in `features/http-tester/` rather than
- * `components/ui/` because it is not a primitive — it imports the
- * `BaseUrlDefinition` domain type, hard-codes "which named slot is
- * active" semantics, and has exactly one consumer (HttpTester). Its
- * three former siblings in `components/ui/` are the genuine primitives
- * it composes.
+ * 位置：本组件住在 `features/http-tester/` 而非 `components/ui/`，因为它不是基础件 ——
+ * 它导入 `BaseUrlDefinition` 领域类型、写死了「哪个命名槽位激活」的语义，且只有一个
+ * 消费方（HttpTester）。它组合的那三个基础件才是 `components/ui/` 里货真价实的 primitive。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -53,26 +38,23 @@ import type { HueConcept } from '@/lib/hue';
 import type { BaseUrlDefinition } from '@/types/domain';
 
 /**
- * What the trigger is currently showing. The `default` variant means
- * "follow the project's default def"; `definition` is an explicit
- * named slot; `override` is the per-endpoint custom URL.
+ * 触发器此刻显示什么。`default` 变体表示「跟随项目默认定义」；`definition` 是显式
+ * 指定的命名槽位；`override` 是按接口的自定义 URL。
  */
 export type BaseUrlSelection =
   { kind: 'default' } | { kind: 'definition'; definitionId: string } | { kind: 'override' };
 
 export interface BaseUrlPickerProps {
   /**
-   * The project's services — drives the dropdown rows. Not filtered by the
-   * endpoint's module: the list is project-level, so every module's
-   * endpoints can point at any of them.
+   * 项目的服务列表 —— 驱动下拉的各行。不按接口所属模块过滤：列表是项目级的，每个模块
+   * 的接口都可以指向其中任意一个。
    */
   definitions: readonly BaseUrlDefinition[];
-  /** The project-wide default service id (may be null when it has none). */
+  /** 项目级默认服务 id（项目没有默认时可为 null）。 */
   defaultDefinitionId: string | null;
   /**
-   * The currently resolved baseUrl. Used only for the trigger's
-   * secondary label (e.g. "· api.demo.dev") so the user can confirm
-   * the actual host at a glance.
+   * 当前已解析的 baseUrl。只用于触发器的副标签（如「· api.demo.dev」），让用户一眼
+   * 确认实际 host。
    */
   resolvedBaseUrl: string;
   selection: BaseUrlSelection;
@@ -95,8 +77,7 @@ export function BaseUrlPicker({
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // Close on outside click — mousedown so a click that lands on a row
-  // is detected by the row first.
+  // 点击外部关闭 —— 用 mousedown，好让落在某一行上的点击先被那一行捕获。
   useEffect(() => {
     if (!open) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -108,7 +89,7 @@ export function BaseUrlPicker({
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, [open]);
 
-  // Esc closes.
+  // Esc 关闭。
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -121,9 +102,8 @@ export function BaseUrlPicker({
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Default-row label: the project ★ by name when it has one, otherwise an
-  // explicit "无" so the empty case is obvious rather than reading as a
-  // name. The custom row always shows "自定义".
+  // 默认行的标签：项目 ★ 有名字时用它的名字，否则显式写「无」，让空态明显而不是读起来
+  // 像某个名字。自定义行始终显示「自定义」。
   const defaultDef = useMemo(
     () => definitions.find((d) => d.id === defaultDefinitionId) ?? null,
     [definitions, defaultDefinitionId],
@@ -136,15 +116,13 @@ export function BaseUrlPicker({
   const triggerLabel = useMemo(() => {
     if (selection.kind === 'definition' && selectedDef) return selectedDef.name;
     if (selection.kind === 'override') return '自定义';
-    // Following the project default reads as *that service*, not as a
-    // separate "项目默认" choice: the list has no such row, and the
-    // trigger has to name the same thing the list highlights.
+    // 「跟随项目默认」读起来就该是*那个服务*，而不是一个单独的「项目默认」选项：列表里
+    //   没有这一行，触发器必须点名列表所高亮的同一个东西。
     return defaultDef ? defaultDef.name : '项目无默认服务';
   }, [selection, selectedDef, defaultDef]);
 
-  // The sub-label answers "what host will actually be used?". In
-  // 自定义 mode there may be no host at all — the URL field holds the
-  // whole address — so say that instead of rendering an empty row.
+  // 副标签回答「实际会用哪个 host？」。自定义 模式下可能根本没有 host —— URL 栏承载
+  // 完整地址 —— 故明说这一点，而不是渲染一行空的。
   const triggerSubLabel = useMemo(() => {
     if (selection.kind === 'override') {
       return resolvedBaseUrl ? `· ${hostOf(resolvedBaseUrl)}` : '· URL 栏直填完整地址';
@@ -153,11 +131,9 @@ export function BaseUrlPicker({
     return `· ${hostOf(resolvedBaseUrl)}`;
   }, [selection, resolvedBaseUrl]);
 
-  // The accent used for the icon container and the "selected" hint.
-  // baseUrl owns its own hue now, so it can no longer be confused with
-  // the collection colour it used to share. The "自定义" row uses
-  // `variable` — a value the user supplies — rather than borrowing
-  // `module`'s amber, which would drag a tree concept into a picker.
+  // 图标容器与「选中」提示所用的强调色。baseUrl 自有色相，不会再与它曾共用的集合色
+  // 混淆。「自定义」行用 `variable` —— 一个由用户提供的值 —— 而不是借 `module` 的琥珀色，
+  // 后者会把树的概念拖进选择器。
   return (
     <div ref={rootRef} className={cn('relative inline-block', className)}>
       <button
@@ -169,9 +145,8 @@ export function BaseUrlPicker({
         data-testid="baseurl-trigger"
         title={resolvedBaseUrl || '点击选择 baseUrl 来源'}
         className={cn(
-          // Card-style trigger — matches the SettingsRow outline. We
-          // nest an icon container so the affordance reads as "this is
-          // the baseUrl selector", not "this is a chevron dropdown".
+          // 卡片式触发器 —— 与 SettingsRow 的描边一致。嵌一个图标容器，使这个便利性读起来
+          // 是「这是 baseUrl 选择器」而非「这是一个带箭头的下拉」。
           'flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-2 text-xs transition-colors',
           'hover:bg-accent/40',
           TRIGGER_WIDTH,
@@ -207,13 +182,8 @@ export function BaseUrlPicker({
         >
           <ul className="max-h-80 overflow-auto p-1">
             {definitions.map((def) => {
-              // The row carrying the 默认 badge *is* the "follow the
-              // project default" choice — a separate row used to sit
-              // above it and say the same thing, so picking that row and
-              // picking this one resolved to the same host. Selecting
-              // this row therefore stores no definition id at all, which
-              // keeps the endpoint tracking whichever service the project
-              // stars later.
+              // 带 默认 徽标的那一行**就是**「跟随项目默认」这个选项：选它不存任何 definition
+              // id，故接口会继续跟随项目此后加星的那个服务。
               const isProjectDefault = def.id === defaultDefinitionId;
               return (
                 <Row
@@ -240,10 +210,8 @@ export function BaseUrlPicker({
               );
             })}
             {selection.kind === 'default' && !defaultDef && (
-              // Only reachable when the project has no starred service at
-              // all: the endpoint is following the default, but there is
-              // no default to follow. Without this the list would open
-              // with nothing selected and no explanation.
+              // 仅当项目根本没有带星服务时才走到这里：接口在跟随默认，却没有默认可跟随。
+              // 没有这句，列表会打开成什么都没选中且毫无解释。
               <li className="px-2 py-1.5 text-[11px] text-muted-foreground">
                 该项目尚未设置默认服务
               </li>
@@ -252,10 +220,8 @@ export function BaseUrlPicker({
               selected={selection.kind === 'override'}
               onSelect={() => {
                 onSelectionChange({ kind: 'override' });
-                // Close: the row's whole job is to hand the URL field to
-                // the user, and they are about to type into it — leaving a
-                // popover open over the URL bar is what made this feel
-                // inert before.
+                // 关掉：这一行的全部职责就是把 URL 栏交给用户，而用户马上就要往里打字 ——
+                // 把 popover 留在 URL 栏上方只会让整个动作显得没反应。
                 setOpen(false);
               }}
               concept="variable"
@@ -274,12 +240,12 @@ export function BaseUrlPicker({
 interface RowProps {
   selected: boolean;
   onSelect: () => void;
-  /** Semantic hue for this row's icon tile. */
+  /** 本行图标块的语义色相。 */
   concept: HueConcept;
   icon: React.ReactNode;
   primary: string;
   secondary?: string;
-  /** "默认" badge shown on the row that resolves to the project default. */
+  /** 显示在解析为项目默认那一行上的「默认」徽标。 */
   selectedHint?: string | null;
 }
 
@@ -315,7 +281,7 @@ function Row({ selected, onSelect, concept, icon, primary, secondary, selectedHi
 
 function hostOf(url: string): string {
   if (!url) return '';
-  // Strip scheme + path, keep the host[:port] portion for display.
+  // 去掉 scheme 与 path，只留 host[:port] 部分用于显示。
   const m = url.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i);
   if (m) return m[1];
   return url.length > 28 ? `${url.slice(0, 28)}…` : url;

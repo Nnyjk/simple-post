@@ -12,41 +12,29 @@ const THEME_ICON: Record<Theme, string> = {
 };
 
 /**
- * Welcome — the standalone start screen.
+ * Welcome —— 独立的起始界面。
  *
- * Shown whenever `activeProjectId === ''`, which is the app's startup
- * state: `bootstrap()` loads the project list and deliberately selects
- * nothing (see `stores/bootstrap-slice.ts`), so opening the app in either
- * transport lands here rather than inside whichever project happened to
- * sort first.
+ * `activeProjectId === ''` 时显示，也就是应用的启动态：`bootstrap()` 只加载项目列表、
+ * 刻意不选中任何项目（见 `stores/bootstrap-slice.ts`），故两种传输下打开应用都落在这里，
+ * 而不是落进恰好排在最前的那个项目。
  *
- * A FULL-WINDOW SURFACE, NOT A PANE
+ * 全窗口界面，不是面板
  * ---------------------------------
- * `App.tsx` renders this screen *instead of* the workspace frame, so the
- * chrome around it does not exist while it is up. Without a project the
- * tree had nothing to show but a "尚未选择项目" placeholder, the env
- * switcher had no project to scope to, and the tab strip was empty. See
- * `features/workspace/WorkspaceShell.tsx` for the other half.
+ * `App.tsx` 是用它*替代*工作区框架渲染的，故它在位时周围的 chrome 根本不存在：没有项目时
+ * 树里只有「尚未选择项目」占位、环境切换器没有可归属的项目、标签条是空的。另一半见
+ * `features/workspace/WorkspaceShell.tsx`。
  *
- * The consequence for state is small and worth stating: `openProject()`
- * flips `activeProjectId` and the swap is immediate. There is no
- * transition to animate across, because there is no shared layout to
- * transition within.
+ * 由此带来的状态结论值得说一句：`openProject()` 翻 `activeProjectId`，切换是瞬时的。
+ * 没有可跨越的过渡，因为没有共享布局可供过渡。
  *
- * WHAT IT DOES NOT SHOW
+ * 它不显示什么
  * ---------------------
- * Per-project node counts. Those would mean reading `s.nodes` and running a
- * `useMemo` over the entire tree on a screen whose only job is to let the
- * user pick a project — and since the tree is layer 2 of the bootstrap, it
- * has usually not arrived when this screen paints, so the counts would read
- * as a confident zero. The card shows the name and description, which is
- * what the user is actually choosing between.
+ * 各项目的节点数。那意味着要读 `s.nodes` 并在一块唯一职责是「让用户挑项目」的屏幕上对
+ * 整棵树跑 `useMemo` —— 而树是 bootstrap 的第二层，此屏绘制时通常还没到，计数会读成一个
+ * 笃定的零。卡片显示名称与描述，那才是用户真正在比较的东西。
  *
- * The component is "visibility-self-managed": it returns `null` whenever
- * a project is active, so it can be safely rendered in App.tsx without
- * extra conditional logic at the call-site. (Defence-in-depth — App.tsx
- * also short-circuits the render, but this guard makes the contract
- * explicit.)
+ * 本组件「自我管理可见性」：项目激活时返回 `null`，故在 App.tsx 里可直接渲染而无需在
+ * 调用处再写条件（纵深防御 —— App.tsx 也会短路渲染，但这道守卫把契约写明了）。
  */
 export function WelcomeScreen() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
@@ -59,19 +47,15 @@ export function WelcomeScreen() {
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Hero stagger — CSS, not GSAP.
+  // 主视觉的错峰入场 —— 走 CSS，不用 GSAP。
   //
-  // This screen is the startup surface, so anything it statically imports
-  // lands in the entry chunk. `gsap.from()` over `[data-welcome-stagger]`
-  // meant a static `@/lib/gsap` import, which put GSAP core + CSSPlugin
-  // (~60 kB raw) on the critical path of every cold start to animate six
-  // elements that then sit still. The animation is pure decoration, so it
-  // is expressed in CSS instead (see `globals.css`, `.welcome-enter`).
-  // `@/lib/gsap` stays reachable from the workspace shell, where it is
-  // already behind a lazy boundary.
+  // 本屏是启动界面，静态 import 的任何东西都会进 entry chunk。用 `gsap.from()` 作用在
+  // `[data-welcome-stagger]` 上就得静态引入 `@/lib/gsap`，那会把 GSAP core + CSSPlugin
+  // （约 60 kB 未压缩）放到每次冷启动的关键路径上，只为让六个随后静止的元素动起来。
+  // 该动画纯属装饰，故改用 CSS 表达（见 `globals.css` 的 `.welcome-enter`）。
+  // `@/lib/gsap` 仍可从 workspace shell 触达，那边本来就在 lazy 边界之后。
   useEffect(() => {
-    // Runs once per mount, which is also once per entry: the component
-    // re-mounts when `activeProjectId` flips back to ''.
+    // 每次挂载跑一次，也就是每次进入跑一次：`activeProjectId` 翻回 '' 时组件会重挂载。
     const el = containerRef.current;
     if (!el) return;
     el.classList.add('welcome-enter');
@@ -81,7 +65,7 @@ export function WelcomeScreen() {
   if (activeProjectId !== '') return null;
 
   const handleDocs = () => {
-    // placeholder — full docs are planned for v0.2
+    // 占位 —— 完整文档计划在 v0.2 推出
     window.alert('文档中心：敬请期待\n\nv0.2 上线后将提供完整使用指南与快捷键手册。');
   };
 
@@ -93,15 +77,13 @@ export function WelcomeScreen() {
       data-testid="welcome-screen"
       className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background"
     >
-      {/* Minimal chrome. This screen has no top bar of its own, but the
-          window is undecorated (`decorations: false` in tauri.conf.json),
-          so without a drag region and these three buttons the app could
-          not be moved, maximised or closed from here. Everything else the
-          workspace header carries — project switcher, env switcher, search,
-          MCP pill — is unreachable without a project, which is the point.
+      {/* 极简 chrome。本屏自己没有顶栏，但窗口无边框（tauri.conf.json 里
+          `decorations: false`），故没有拖拽区和这三个按钮，应用就无法从这里移动、最大化
+          或关闭。工作区表头里的其余部分 —— 项目切换、环境切换、搜索、MCP 药丸 —— 在没有
+          项目时本就无从触达，而这正是本意。
 
-          `WindowControls` opts each of its buttons out of the drag region
-          itself, so nothing else here needs `data-tauri-drag-region`. */}
+          `WindowControls` 自己就把每个按钮排除在拖拽区之外，故这里别的元素都不必写
+          `data-tauri-drag-region`。 */}
       <header
         data-tauri-drag-region="true"
         className="flex h-11 shrink-0 select-none items-center gap-2 border-b border-border bg-card/50 px-3"
@@ -116,11 +98,10 @@ export function WelcomeScreen() {
       </header>
 
       <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
-        {/* Wider than the hero's measure and left-aligned below it: the
-            project list is a column of names, not prose, so it wants the
-            room and the ragged-right edge that reads as a list. */}
+        {/* 比上方 hero 更宽，且在其下左对齐：项目列表是一列名字而非正文，它需要这份
+            宽度，以及读起来像列表的参差右缘。 */}
         <div className="w-full max-w-xl space-y-8 text-center">
-          {/* Hero */}
+          {/* 主视觉 */}
           <div className="space-y-3">
             <div
               data-welcome-stagger
@@ -140,7 +121,7 @@ export function WelcomeScreen() {
             </p>
           </div>
 
-          {/* Project picker */}
+          {/* 项目选择器 */}
           {!loaded ? (
             <p data-welcome-stagger className="text-sm text-muted-foreground">
               加载中…
@@ -159,26 +140,21 @@ export function WelcomeScreen() {
                   type="button"
                   onClick={() => openProject(p.id)}
                   className={cn(
-                    // The name is what the user is choosing between, so the
-                    // card is built around it: a full-width row, name
-                    // promoted, colour chip demoted to a leading accent,
-                    // description as secondary text below.
+                    // 用户在比较的是名字，故卡片围绕它构造：整宽一行、名字突出、颜色条降级
+                    // 为前导强调、描述作为下方次级文字。
                     'group flex w-full items-center gap-3.5 rounded-lg border border-border bg-card/40 px-4 py-3.5 text-left transition-colors',
                     'hover:border-primary hover:bg-accent/40',
                     focusRing,
                   )}
                 >
-                  {/* The colour chip lives in a fixed 32px slot rather than
-                      being its own 6px-wide flex child.
+                  {/* 颜色条住在一个固定 32px 的槽位里，而不是作为自身宽 6px 的 flex
+                      子项。
 
-                      This list is a single column of cards and the eye reads
-                      the labels as one left edge, but the leading slots are
-                      not the same width: the chip is `w-1.5` and the 新建项目
-                      card below leads with a `w-8` icon badge. Sizing the chip
-                      to itself therefore pushed every project label 26px
-                      right of the 新建项目 label in the same list — measured at
-                      x=389 vs x=415. Reserving the slot fixes the edge without
-                      giving up either the thin bar or the round badge. */}
+                      本列表是单列卡片，眼睛把各标签读成同一条左缘，但前导槽位宽度并不相同：
+                      颜色条是 `w-1.5`，下方的 新建项目 卡片则以 `w-8` 图标徽标起头。让颜色条
+                      按自身宽度排版，会把同一列表里每个项目标签比 新建项目 标签右推 26px ——
+                      实测 x=389 vs x=415。预留槽位即可修正这条边缘，又不必在细色条与圆形徽标
+                      之间二选一。 */}
                   <span className="flex h-8 w-8 shrink-0 items-center" aria-hidden>
                     <span className="h-8 w-1.5 rounded-full" style={{ backgroundColor: p.color }} />
                   </span>
@@ -195,7 +171,7 @@ export function WelcomeScreen() {
                       </span>
                     )}
                   </span>
-                  {/* Affordance, not data — the card's whole job is "enter this". */}
+                  {/* 这是便利性提示而非数据 —— 卡片全部职责就是「进入这个」。 */}
                   <ArrowRight
                     className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
                     aria-hidden
@@ -206,7 +182,7 @@ export function WelcomeScreen() {
             </div>
           )}
 
-          {/* Secondary actions */}
+          {/* 次要操作 */}
           <div data-welcome-stagger className="flex items-center justify-center gap-2">
             <button
               type="button"
@@ -232,7 +208,7 @@ export function WelcomeScreen() {
             </button>
           </div>
 
-          {/* Footnote with current theme indicator */}
+          {/* 页脚，显示当前主题 */}
           <div
             data-welcome-stagger
             className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground/70"
@@ -254,19 +230,15 @@ export function WelcomeScreen() {
 }
 
 /**
- * First-run state: no project exists yet. The create path is the only
- * thing to offer, so it gets the whole card rather than a row among
- * projects that aren't there.
+ * 首次运行态：还没有任何项目。可提供的只有创建这一条路径，故给它整张卡片，而不是让它
+ * 成为一列并不存在的项目中的一行。
  */
 function EmptyWorkspace({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="space-y-3" data-welcome-stagger>
-      {/* Same measure as the list it replaces, deliberately. The card used
-          to be wrapped in `mx-auto max-w-sm` so the lone first-run control
-          would "centre itself" — but the width belongs to the container
-          (`max-w-xl` above), not to the one card currently on screen, so
-          that wrapper made a single button two sizes depending on whether
-          a second project existed. See the `w-full` on `NewProjectCard`. */}
+      {/* 刻意与它所替换的列表同宽。宽度属于容器（上方的 `max-w-xl`），不属于屏幕上
+          这唯一一张卡片，故不要给它另加 `mx-auto max-w-sm` 之类的包裹。见 `NewProjectCard`
+          上的 `w-full`。 */}
       <NewProjectCard onClick={onCreate} primary />
       <p className="text-xs text-muted-foreground">还没有任何项目，先创建一个开始使用。</p>
     </div>
@@ -279,13 +251,9 @@ function NewProjectCard({ onClick, primary }: { onClick: () => void; primary?: b
       type="button"
       onClick={onClick}
       className={cn(
-        // Same row shape as a project card so the two read as one list.
+        // 与项目卡片同形，好让两者读起来是同一个列表。
         //
-        // `w-full` is explicit on both sides of that promise: as a grid
-        // item the list-stretched this card by accident, while the
-        // first-run state stretched it by wrapping it in a `max-w-sm`
-        // box. Naming the width here means the control keeps one size
-        // whichever state renders it.
+        // `w-full` 在这里显式写出：这个控件无论被哪个状态渲染，都保持同一尺寸。
         'group flex w-full items-center gap-3.5 rounded-lg border px-4 py-3.5 text-left transition-colors',
         focusRing,
         primary

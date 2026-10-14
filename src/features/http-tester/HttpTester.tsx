@@ -36,9 +36,8 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 ];
 
 /**
- * Stand-ins for a missing `endpoint_details` row, so the effective-request
- * memo has something typed to read. Shared by reference on purpose: every
- * editor spreads before writing, so nothing can mutate them.
+ * 缺失 `endpoint_details` 行时的占位，让 effective 请求 memo 有类型可读。
+ * 按引用共享：所有编辑器都是先展开再写，不会就地修改。
  */
 const EMPTY_BODY: RequestBody = { mode: 'none', content: '' };
 const EMPTY_AUTH: AuthConfig = { kind: 'none' };
@@ -46,34 +45,27 @@ const EMPTY_AUTH: AuthConfig = { kind: 'none' };
 type TabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'tests';
 
 export function HttpTester() {
-  // The endpoint is a `ResourceNode` (identity + position) and its
-  // request configuration is a separate `EndpointDetail` row. Both
-  // selectors return stable store references, so neither allocates.
+  // 接口是 `ResourceNode`（身份 + 位置），请求配置是独立的 `EndpointDetail` 行；
+  // 两个 selector 都返回 store 里的稳定引用，不会新建对象。
   //
-  // `useActiveEndpointResource` answers for a *draft* endpoint too: an
-  // unsaved one has neither row, and the hook synthesises both from the
-  // `DraftEndpoint`. Everything below this line is therefore written once
-  // for "an endpoint the user is looking at", not once per storage form.
+  // `useActiveEndpointResource` 对草稿接口同样有答案：未保存的接口两行都没有，
+  // hook 从 `DraftEndpoint` 合成二者。故以下代码只写一遍「用户正在看的接口」，
+  // 不按存储形式各写一份。
   const resource = useActiveEndpointResource();
   const endpoint = resource?.node ?? null;
   const detail = resource?.detail;
-  /** True while the endpoint has never been written to the database. */
+  /** 接口尚未写入数据库。 */
   const isDraft = resource?.isDraft ?? false;
-  // Workspace-wide active env (the "ENV dev" pill in the top bar).
-  // Used as the fallback env when the endpoint hasn't picked one of
-  // its own — that way the baseUrl + variable resolution "just works"
-  // for a fresh endpoint without forcing the user through a picker
-  // first.
+  // 工作区当前环境（顶栏的 ENV dev 药丸）。接口未自选环境时作兜底，让新建接口的
+  // baseUrl + 变量解析直接可用，不必先走一遍选择器。
   const workspaceEnv = useActiveEnvironment();
-  // Raw store slices — we'll derive the endpoint's project / ancestors
-  // locally with useMemo. Going through `useAppStore` for each one keeps
-  // the Zustand v5 "no allocation in selectors" rule intact.
+  // 原始 store slice —— 接口的 project / ancestors 在本地用 useMemo 派生。
+  // 逐个 `useAppStore` 取用，保持 Zustand v5「selector 不新建对象」规则。
   const allNodes = useAppStore((s) => s.nodes);
   const allProjects = useAppStore((s) => s.projects);
   const allEnvironments = useAppStore((s) => s.environments);
-  // Pulled for the Header key autocomplete — we want the user's own
-  // recently-used header names to surface in the datalist alongside
-  // the built-in common list (see buildHeaderSuggestions).
+  // 供 Header 键补全：把用户自己用过的 header 名与内置常见列表一起喂给 datalist
+  // （见 buildHeaderSuggestions）。
   const allEndpointDetails = useAppStore((s) => s.endpointDetails);
   const updateNode = useAppStore((s) => s.updateNode);
   const updateEndpointDetail = useAppStore((s) => s.updateEndpointDetail);
@@ -91,46 +83,33 @@ export function HttpTester() {
   const [tab, setTab] = useState<TabId>('params');
   const [curlFlash, setCurlFlash] = useState(false);
 
-  // URL/method drafts live in the store (`endpointDrafts[endpointId]`)
-  // rather than in local state — that way switching tabs and switching
-  // back preserves the user's pending edits. The store auto-mirrors the
-  // presence of a draft into `dirtyTabIds`, so the tab strip's dirty
-  // dot updates for free.
+  // URL/method 草稿存在 store（`endpointDrafts[endpointId]`）而非本地 state，切走再
+  // 切回标签才留住未提交的编辑。store 会把草稿的存在同步镜像进 `dirtyTabIds`，
+  // 标签条的脏点因此自动更新。
   //
-  // We read the draft with a dedicated selector so HttpTester only
-  // re-renders when *its own* endpoint's draft changes (a draft on
-  // endpoint B while endpoint A is active should be invisible to us).
+  // 用专用 selector 读草稿，使 HttpTester 只在**自己**接口的草稿变化时重渲染
+  // （A 激活时 B 上的草稿不该影响这里）。
   const draft = useAppStore((s) => (endpoint ? s.endpointDrafts[endpoint.id] : undefined));
-  // Name / description editing is owned by `<InlineEdit>` (keyed by
-  // `endpoint.id` so the editor unmounts and resets whenever the active
-  // endpoint changes — no manual "clear edit state on tab switch"
-  // bookkeeping needed here).
+  // 名称 / 描述的编辑归 `<InlineEdit>`（以 `endpoint.id` 为 key，激活接口一变编辑器
+  // 即卸载重置，无需在这里手动「切标签时清编辑状态」）。
 
-  // EnvVarPicker state — opens when the user types `{{` in the URL input.
-  // The picker is presentational: HttpTester owns the selected index and the
-  // filtered entries (derived from the active environment + the partial name
-  // the user has typed after the last `{{`).
+  // EnvVarPicker 状态 —— 用户在 URL 输入框敲 `{{` 时打开。选择器是纯展示：选中项与
+  // 过滤条目由 HttpTester 自己持有（据当前环境 + 最后一个 `{{` 之后输入的片段派生）。
   const [varPickerOpen, setVarPickerOpen] = useState(false);
   const [varSelected, setVarSelected] = useState(0);
   const urlInputRef = useRef<HTMLInputElement>(null);
 
-  // Live URL — what's actually in the input box right now. Normally that
-  // is just the path (the part after baseUrl); in 自定义 mode it is the
-  // whole address. Sourced from the store-side draft (so it survives tab
-  // switches) and falling back to the persisted detail URL.
+  // 实时的 URL —— 输入框此刻的内容。通常只是 path（baseUrl 之后那段），自定义模式下
+  // 是完整地址。取自 store 侧的草稿（切标签不丢），回落到已持久化的 detail URL。
   const liveUrl = draft?.url ?? detail?.url ?? '';
 
-  // The endpoint's project, straight off the denormalised `rootId`.
-  // The old three-table model needed collection → module → project;
-  // the single tree carries the answer on every row.
+  // 接口所属项目，直接取反规范化的 `rootId`：单棵树上每行都带着这个答案。
   const project = useMemo(
     () => (endpoint ? allProjects.find((p) => p.id === endpoint.rootId) : undefined),
     [endpoint, allProjects],
   );
-  // Ancestors for the `项目 › 模块 › 集合` breadcrumb at the top of the
-  // page — same anchoring pattern the Settings panel uses
-  // (`设置 › 连接`). Collected root-first by walking `parentId` up, so
-  // nesting deeper than one collection needs no extra case here.
+  // 页面顶部 `项目 › 模块 › 集合` 面包屑的祖先链，与设置面板（`设置 › 连接`）同一套
+  // 锚定写法。沿 `parentId` 向上收集、根在前，故集合嵌套超过一层也无需额外分支。
   const ancestors = useMemo(() => {
     if (!endpoint) return [];
     const chain: { id: string; name: string; type: string }[] = [];
@@ -143,11 +122,8 @@ export function HttpTester() {
     }
     return chain;
   }, [endpoint, allNodes]);
-  // The env that owns the baseUrl for this endpoint. Honors the
-  // detail's `environmentId` if set; otherwise falls back to the
-  // workspace-wide active env (the "ENV dev" pill in the top bar) so
-  // a fresh endpoint isn't left baseUrl-less just because it hasn't
-  // been told to prefer a specific env yet.
+  // 该接口 baseUrl 所属的环境：优先 detail 的 `environmentId`，否则回落到工作区当前
+  // 环境（顶栏 ENV dev 药丸），免得新建接口因为还没指定环境就没有 baseUrl。
   const endpointEnv = useMemo(() => {
     if (detail?.environmentId) {
       return allEnvironments.find((e) => e.id === detail.environmentId);
@@ -155,19 +131,14 @@ export function HttpTester() {
     return workspaceEnv;
   }, [detail, allEnvironments, workspaceEnv]);
 
-  // Effective baseUrl for this endpoint — drives both the picker label
-  // and the join at send time.
+  // 该接口的有效 baseUrl —— 同时驱动选择器标签与发送时的拼接。
   //
-  // The service list is the project's, so the picker offers all of it; what
-  // is per-module is the *cell* the URL is read from. `moduleId` is
-  // therefore still needed — it selects the row of
-  // `env.moduleBaseUrls[defId]` this endpoint reads — but it no longer
-  // narrows which services are on offer.
+  // 服务列表属于项目，故选择器给出全部；按模块区分的是读 URL 的**单元格**。
+  // `moduleId` 仍必需：它挑出本接口读的那一行 `env.moduleBaseUrls[defId]`，但不再
+  // 收窄可选服务。
   //
-  // `endpoint` is passed as the walk's starting row rather than looked up
-  // by id: a draft endpoint has no `nodes` row, so an id-only lookup
-  // answered "no module" for it and the cell was never read (see
-  // `moduleIdOfEndpoint`'s `self`).
+  // `endpoint` 作为向上遍历的起始行传入而非按 id 查：草稿接口没有 `nodes` 行，只按
+  // id 查会得到「无模块」而永远读不到该单元格（见 `moduleIdOfEndpoint` 的 `self`）。
   const moduleId = useMemo(
     () => moduleIdOfEndpoint(allNodes, endpoint?.id, endpoint),
     [allNodes, endpoint],
@@ -183,19 +154,13 @@ export function HttpTester() {
     [detail, endpointEnv, project, moduleId],
   );
 
-  // Drive the picker: reflect what's currently stored on the endpoint.
-  // When the user picks a different source, `commitBaseUrl` puts it where
-  // this endpoint keeps its baseUrl choice — the row for a saved one, the
-  // draft document for an unsaved one. A saved endpoint persists that
-  // immediately (there is no Save button for this choice); a draft
-  // carries it until Save folds it into the row.
+  // 驱动选择器：反映接口上现存的选择。用户改选时 `commitBaseUrl` 写到这个接口存放
+  // baseUrl 选择的位置 —— 已保存的写该行，未保存的写草稿文档。已保存的立即落库
+  // （此选择没有 Save 按钮），草稿则带到 Save 时并入该行。
   //
-  // `baseUrlOverride` is three-state and the empty string is the point of
-  // 自定义: `null` means "not in custom mode", `''` means "custom mode,
-  // URL field carries the whole address". Testing it for truthiness (as
-  // this used to) collapsed those two together, so clicking 自定义 wrote
-  // `''`, the next render read it back as falsy, and the picker snapped
-  // straight back to 项目默认 — the click appeared to do nothing.
+  // `baseUrlOverride` 是三态，空串正是自定义的意义：`null` = 非自定义模式，
+  // `''` = 自定义模式、URL 框承载完整地址。按真值判断会把两者混同：点自定义写入
+  // `''` 后下次渲染读成 falsy，选择器弹回 项目默认，点击看起来毫无效果。
   const selection: BaseUrlSelection = useMemo(() => {
     if (!detail) return { kind: 'default' };
     if (detail.baseUrlOverride !== null && detail.baseUrlOverride !== undefined) {
@@ -206,24 +171,19 @@ export function HttpTester() {
     }
     return { kind: 'default' };
   }, [detail]);
-  // 自定义 hands the URL field the whole address, so nothing may be
-  // prepended to it. This is also what `resolved.baseUrl` collapses to —
-  // an empty string joins to the path unchanged (see joinBaseUrl) — but
-  // read it off the selection so the intent survives a legacy override
-  // that still carries a host.
+  // 自定义 让 URL 框承载完整地址，故不得再给它加任何前缀。`resolved.baseUrl` 也
+  // 收敛为空串（拼接时 path 原样不变，见 joinBaseUrl），但这里读 selection，好让仍
+  // 带 host 的历史 override 不掩盖这个意图。
   const isCustomUrl = selection.kind === 'override';
 
   // ---------------------------------------------------------------------------
-  // The effective request: the stored detail with the draft layered on top.
+  // 有效请求：已存的 detail 叠上草稿。
   //
-  // Every request-config editor writes to the draft instead of the row, so
-  // this is the single place that decides what "what the user sees" means.
-  // Send, Save, the cURL preview and validation all read it — deriving it
-  // once is what keeps those four from disagreeing about the request.
+  // 所有请求配置编辑器都写草稿而非该行，故这里是唯一决定「用户所见即为何」的地方。
+  // 发送、保存、cURL 预览与校验都读它 —— 只派生一次，才不会让这四者对请求各说各话。
   //
-  // URL / method are read the same way (see `liveUrl` / `method` above) and
-  // are kept out of this object because the URL bar also needs the raw
-  // values for its own picker and caret logic.
+  // URL / method 同理（见上方 `liveUrl` / `method`），但不放进本对象：URL 栏还要原始值
+  // 做自己的选择器与光标逻辑。
   // ---------------------------------------------------------------------------
   const effective = useMemo(
     () => ({
@@ -237,7 +197,7 @@ export function HttpTester() {
     [draft, detail],
   );
 
-  /** Route one editor's output into the draft (and thus the dirty flag). */
+  /** 把某个编辑器的产出写进草稿（从而置脏）。 */
   const patchDraft = useCallback(
     (patch: Partial<EndpointDraft>) => {
       if (!endpoint) return;
@@ -247,13 +207,11 @@ export function HttpTester() {
   );
 
   // ---------------------------------------------------------------------------
-  // A draft's document fields vs a saved node's
+  // 草稿的文档字段 vs 已保存节点的
   //
-  // A draft has no `nodes` row, so `updateNode` on one would fail against a
-  // row that does not exist — its document fields live in `draftEndpoints`
-  // and reach the database through `saveDraftEndpoint`, not here. Routing
-  // both spellings through one callback is what keeps the rename controls
-  // from having to know which kind of endpoint they are sitting on.
+  // 草稿没有 `nodes` 行，对它 `updateNode` 会打在不存在的行上 —— 其文档字段存在
+  // `draftEndpoints`，经 `saveDraftEndpoint` 落库，不走这里。两种写法都收敛到一个
+  // callback，重命名控件就不必知道自己坐在哪类接口上。
   // ---------------------------------------------------------------------------
   const saveEndpointName = useCallback(
     (next: string) => {
@@ -274,20 +232,15 @@ export function HttpTester() {
   );
 
   /**
-   * Commit one baseUrl choice to wherever this endpoint keeps it.
+   * 把一次 baseUrl 选择提交到这个接口存放它的位置。
    *
-   * `baseUrlDefinitionId` / `baseUrlOverride` are draft *document* fields
-   * (see `slices/ui-draft-endpoints.ts`), so an unsaved endpoint has to
-   * write them through `updateDraftEndpoint` — `saveDraftEndpoint` already
-   * folds them into the single row it persists. Writing them with
-   * `updateEndpointDetail` instead was a silent no-op for a draft: that
-   * action returns early when there is no `endpoint_details` row yet, so
-   * the picker snapped straight back to the project's default and the URL
-   * stayed unprefixed — the click looked like it had done nothing.
+   * `baseUrlDefinitionId` / `baseUrlOverride` 是草稿的**文档**字段
+   * （见 `slices/ui-draft-endpoints.ts`），未保存的接口须用 `updateDraftEndpoint` 写，
+   * `saveDraftEndpoint` 会把它们并进它持久化的那一行。改用 `updateEndpointDetail`
+   * 对草稿是静默空操作：该动作在没有 `endpoint_details` 行时提前返回，选择器会弹回
+   * 项目默认、URL 保持无前缀，点击看起来毫无效果。
    *
-   * A saved endpoint keeps persisting immediately, as before: there is no
-   * Save button for this choice, and the endpoint row is the only place
-   * it can live.
+   * 已保存的接口仍立即落库：此选择没有 Save 按钮，接口行是它唯一能待的地方。
    */
   const commitBaseUrl = useCallback(
     (patch: { baseUrlDefinitionId: string | null; baseUrlOverride: string | null }) => {
@@ -298,18 +251,13 @@ export function HttpTester() {
     [endpoint, isDraft, updateDraftEndpoint, updateEndpointDetail],
   );
 
-  // "新建即命名" — a fresh draft opens with its title already selected.
+  // 新建即命名 —— 新草稿打开时标题已选中。
   //
-  // The tree used to express this by pointing its `editing` state at the
-  // row it had just written. There is no row any more, so the affordance
-  // moved here, into the surface where the name is actually read. Without
-  // it, "新建接口" would land on a tab reading 未命名接口 and put one more
-  // click between the user and every endpoint they create.
+  // 草稿没有行可供树把 `editing` 指向，故该便利性搬到这里、搬进真正读名称的界面；
+  // 否则「新建接口」会落在写着 未命名接口 的标签上，每个新建接口都多一次点击。
   //
-  // Latched by draft id rather than driven by the name: the condition is
-  // "this draft still has the placeholder", so it would otherwise re-open
-  // the editor every time the user navigates back to a draft they chose
-  // to leave unnamed.
+  // 按草稿 id 上闩而非按名称驱动：条件是「这个草稿仍是占位名」，否则用户回到一个
+  // 故意不命名的草稿时编辑器会反复弹出。
   const [namingDraft, setNamingDraft] = useState(false);
   const autoNameOpenedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -320,19 +268,16 @@ export function HttpTester() {
     setNamingDraft(true);
   }, [isDraft, endpoint]);
 
-  // Pinned format error. See `lib/request-validation`: validation is an
-  // action run by Send / Save / 格式化, and a passing run clears it. Local
-  // to this component on purpose — it survives switching between Params /
-  // Body / Auth (BodyEditor remounts, this does not), and the next
-  // send/save re-checks whatever is on screen at that point.
+  // 钉住的格式错误。见 `lib/request-validation`：校验是 发送 / 保存 / 格式化 触发的
+  // 动作，通过即清除。刻意留在本组件：Params / Body / Auth 之间切换时它存活
+  // （BodyEditor 会重挂载而它不会），下次发送/保存重新检查当时的界面内容。
   const [validationError, setValidationError] = useState<string | null>(null);
 
   /**
-   * Run validation, pin or clear the badge, and report whether it passed.
+   * 跑校验，钉住或清除徽标，并回报是否通过。
    *
-   * On failure it also moves the user to the tab that owns the problem —
-   * pinning an error inside the body editor while they sit on Params is the
-   * same invisibility the badge was introduced to end.
+   * 失败时顺带切到出问题的那一页 —— 用户停在 Params 时把错误钉在 body 编辑器里，
+   * 正是这个徽标要终结的那种看不见。
    */
   const runValidation = useCallback((): boolean => {
     const issue = validateRequest({ body: effective.body });
@@ -344,9 +289,8 @@ export function HttpTester() {
     return true;
   }, [effective.body]);
 
-  // Entries for the env-var picker, derived from the endpoint's own
-  // env (the one whose variables this endpoint resolves `{{x}}` against)
-  // + the partial variable name the user has typed after the last `{{`.
+  // env 变量选择器的条目：接口自己的环境（即本接口解析 `{{x}}` 所依据的那份变量）
+  // + 用户在最后一个 `{{` 之后输入的片段。
   const allEnvEntries = useMemo(
     () =>
       endpointEnv
@@ -362,9 +306,8 @@ export function HttpTester() {
     if (!q) return allEnvEntries;
     return allEnvEntries.filter((e) => (e.key ?? '').toLowerCase().includes(q));
   }, [allEnvEntries, partialVar]);
-  // Header autocomplete harvests the user's own header names from every
-  // loaded detail. `Object.values` allocates, so it's memoized against
-  // the map's identity instead of being rebuilt on every render.
+  // Header 补全从每个已加载 detail 收拢用户自己的 header 名。`Object.values` 会新建
+  // 对象，故按该 map 的引用 memo，而不是每次渲染重建。
   const headerSuggestions = useMemo(
     () => buildHeaderSuggestions(Object.values(allEndpointDetails)),
     [allEndpointDetails],
@@ -378,15 +321,15 @@ export function HttpTester() {
   };
 
   const insertVar = (key: string) => {
-    // Replace the last `{{` and any partial variable name (up to `}}`,
-    // whitespace, or another `{`) with the chosen key, closing the braces.
+    // 把最后一个 `{{` 及其后的变量名片段（截至 `}}`、空白或又一个 `{`）替换为选中的
+    // 键，并补上闭合大括号。
     if (!endpoint) return;
     const base = draft?.url ?? detail?.url ?? '';
     const next = base.replace(/\{\{[^}\s]*$/, `{{${key}}}`);
     setEndpointDraft(endpoint.id, { url: next });
     setVarPickerOpen(false);
     setVarSelected(0);
-    // Restore focus + move caret to end of the inserted token.
+    // 恢复焦点并把光标移到插入 token 的末尾。
     window.setTimeout(() => {
       const el = urlInputRef.current;
       if (!el) return;
@@ -395,15 +338,13 @@ export function HttpTester() {
       try {
         el.setSelectionRange(caret, caret);
       } catch {
-        /* number inputs etc. — not relevant for type=text */
+        /* 数字输入框之类 —— type=text 用不到 */
       }
     }, 0);
   };
 
-  // 自定义 turns the URL bar into the whole address, so put the caret
-  // there with the old content selected — typing then replaces the old
-  // path instead of appending to it. Deferred one tick so it runs after
-  // the re-render that switches the mode (and after the popover closes).
+  // 自定义 把 URL 栏变成完整地址，故把光标放过去并全选旧内容 —— 直接输入即替换旧
+  // path 而非追加。延后一拍执行，使其发生在切换模式的重渲染（以及 popover 关闭）之后。
   const focusUrlForFullAddress = () => {
     window.setTimeout(() => {
       const el = urlInputRef.current;
@@ -412,14 +353,14 @@ export function HttpTester() {
       try {
         el.select();
       } catch {
-        /* not a text input — nothing to select */
+        /* 不是文本输入框 —— 无内容可全选 */
       }
     }, 0);
   };
 
   const handleUrlKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (!varPickerOpen) return;
-    // Let modifier-combos through so global hotkeys (Ctrl+Enter, Ctrl+S) still fire.
+    // 放过带修饰键的组合，全局快捷键（Ctrl+Enter、Ctrl+S）才仍能触发。
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -441,25 +382,13 @@ export function HttpTester() {
     }
   };
 
-  // sync draft with active endpoint
+  // 草稿与当前激活的接口同步
   const method = draft?.method ?? detail?.method ?? 'GET';
 
-  // The request as it will actually go on the wire, assembled **once**.
+  // 请求的最终线上形态，只组装**一次**。
   //
-  // Send and the cURL preview both read this same object, which is the
-  // entire point of the arrangement. They used to build the URL
-  // independently — Send in Rust (`variable_fill::resolve_endpoint`,
-  // keyed off `endpointId`) and the preview here in TypeScript — and the
-  // two had to be kept in step by hand. `handleCopyCurl` carried an
-  // explicit workaround for the divergence: it had to pass the
-  // hand-joined `resolvedUrl` into the overrides because
-  // `buildCurlCommand` never joined a base URL on its own, so passing
-  // the draft's raw path produced `curl -X POST '/cashier'` — a command
-  // that cannot run.
-  //
-  // One construction core doesn't document that risk away, it deletes
-  // the place it lived: the preview is now a serialisation of precisely
-  // the bytes Send ships.
+  // 发送与 cURL 预览读同一个对象 —— 这正是此安排的全部意义：预览现在是发送所发字节的
+  // 序列化，不可能描述出另一个请求。
   const prepared = useMemo(
     () =>
       prepareRequest({
@@ -476,18 +405,14 @@ export function HttpTester() {
   );
 
   // ---------------------------------------------------------------------------
-  // Hooks that MUST run unconditionally. They used to sit after the
-  // `if (!endpoint)` early return below, which is a rules-of-hooks
-  // violation: switching away from an endpoint re-rendered this
-  // component with fewer hooks and React threw "Rendered fewer hooks
-  // than expected". Keep every hook above any early return.
+  // 必须无条件运行的 hook。切走接口会让本组件以更少的 hook 重渲染、React 抛
+  // "Rendered fewer hooks than expected"（违反 rules-of-hooks）。所有 hook 都要放在
+  // 下方 `if (!endpoint)` 提前返回之上。
   // ---------------------------------------------------------------------------
 
-  // Abort any in-flight send when this component unmounts (tab
-  // switch, project change, etc.) so the pending Promise can't
-  // outlive the UI that requested it. `handleSend` reuses the same
-  // ref so a second-click-while-pending becomes "cancel the previous
-  // and start over" instead of a no-op race.
+  // 组件卸载（切标签、换项目等）时中止在途请求，免得挂起的 Promise 比发起它的 UI
+  // 活得更久。`handleSend` 复用同一个 ref，故 pending 期间再次点击 = 取消上一次重来，
+  // 而不是无操作的竞态。
   const inFlightRef = useRef<AbortController | null>(null);
   useEffect(() => {
     return () => {
@@ -496,19 +421,13 @@ export function HttpTester() {
     };
   }, []);
 
-  // C2: Send button morph.
-  // `playIconRef` wraps the Play icon in an `inline-flex` span so we can
-  // rotate it in place without disturbing the button text width.
-  // `sendBtnRef` is the whole Button element — used for the micro-bounce
-  // after a pending request resolves.
+  // C2：Send 按钮形变。`playIconRef` 是包住 Play 图标的 `inline-flex` span，就地
+  // 旋转而不动按钮文字宽度；`sendBtnRef` 是整个 Button，用于请求返回后的微弹。
   const sendBtnRef = useRef<HTMLButtonElement>(null);
   const playIconRef = useRef<HTMLSpanElement>(null);
-  // Whether a request was actually in flight the last time this ran.
-  // `useGSAP` fires once on mount as well as on every dep change, and at
-  // mount `requestPending` is false — so without this the button bounced
-  // every time an endpoint tab was opened, meaning nothing. The bounce is
-  // supposed to say "your response arrived", so it must be gated on there
-  // having been a request to arrive from.
+  // 上一次运行时是否真的有请求在途。`useGSAP` 挂载时也会跑一次，而挂载时
+  // `requestPending` 为 false —— 不加这个门，每次打开接口标签都会弹一下，毫无意义。
+  // 微弹要表达「响应到了」，故须以确实有请求可到达为前提。
   const wasPendingRef = useRef(false);
 
   useGSAP(() => {
@@ -516,16 +435,12 @@ export function HttpTester() {
 
     if (requestPending) {
       wasPendingRef.current = true;
-      // Kill any leftover rotation (e.g. from a previous cancel) before
-      // starting a fresh spin. gsap.fromTo with rotation +=360 +
-      // repeat:-1 gives a continuous linear spin.
+      // 重新起转前先杀掉残留旋转（例如上次取消留下的）。gsap.fromTo 配 rotation +=360
+      // + repeat:-1 得到连续匀速旋转。
       //
-      // Gated on reduced motion because this one never stops: an
-      // indefinite loop is the strongest vestibular trigger there is, and
-      // it is also the only animation here that runs while the user is
-      // just waiting. Nothing is lost by not spinning — while a request is
-      // in flight the button is already `disabled` and its label reads
-      // 发送中…, so the state never depended on the rotation.
+      // 受 reduced motion 限制，因为这个动画不会停：无尽循环是最强的前庭触发器，也是
+      // 此处唯一在用户纯等待时运行的动画。不转不损失信息 —— 请求在途时按钮已
+      // `disabled` 且标签是 发送中…，状态从不依赖旋转。
       gsap.killTweensOf(playIconRef.current);
       return motionSafe(() => {
         gsap.fromTo(
@@ -536,15 +451,14 @@ export function HttpTester() {
       });
     }
 
-    // Resolve path: kill the spin and snap the icon back upright so
-    // the next render starts at rotation 0.
+    // 结束路径：杀掉旋转并把图标复位竖直，使下次渲染从 rotation 0 起。
     const requestArrived = wasPendingRef.current;
     wasPendingRef.current = false;
     gsap.killTweensOf(playIconRef.current);
     gsap.set(playIconRef.current, { rotation: 0 });
     if (!requestArrived) return;
 
-    // Micro-bounce the button to confirm the response arrived.
+    // 微弹按钮，确认响应已到。
     return motionSafe(() => {
       gsap.killTweensOf(sendBtnRef.current);
       gsap.fromTo(
@@ -560,9 +474,8 @@ export function HttpTester() {
     });
   }, [requestPending]);
 
-  // C3: Copy-as-cURL feedback bounce. Fires when curlFlash transitions
-  // false → true; the false transition is intentionally a no-op so the
-  // already-swapped "已复制" label doesn't get an extra blip on its way out.
+  // C3：复制 cURL 的反馈弹跳。仅在 curlFlash 由 false → true 时触发；false 那一跳
+  // 刻意为空操作，免得已换成「已复制」的标签退出时再多闪一下。
   const copyCurlBtnRef = useRef<HTMLButtonElement>(null);
   useGSAP(() => {
     if (!curlFlash || !copyCurlBtnRef.current) return;
@@ -581,29 +494,22 @@ export function HttpTester() {
     });
   }, [curlFlash]);
 
-  // The breadcrumb answers "where am I in the tree" — but the moment the
-  // endpoint owns a workspace tab, that tab is already showing the name
-  // and the collection hint, so the path above it repeats what is one row
-  // higher on the same screen. Read as a boolean out of the selector (so
-  // no allocation) rather than derived from "is the tester being
-  // rendered", so the crumb stays available on the path that has no tab
-  // to carry the answer. Above the early return for the same
-  // rules-of-hooks reason as everything else in this block.
+  // 面包屑回答「我在树的哪里」，但接口一旦拥有工作区标签，那标签已显示名称与集合
+  // hint，面包屑重复的是同一屏上一行高的信息。直接从 selector 读成布尔（避免新建
+  // 对象）而非由「tester 是否在渲染」推导，好让没有标签可承载答案的路径上仍能显示。
+  // 置于提前返回之上，理由同本块其余 hook。
   const endpointHasTab = useAppStore(
     (s) =>
       !!endpoint &&
       s.openTabs.some(
-        // Both endpoint kinds count. A draft endpoint owns a tab exactly
-        // like a saved one, and that tab is just as visible in the strip —
-        // so matching on `'endpoint'` alone would have left the crumb on
-        // screen for the one endpoint type most likely to be brand new.
+        // 两种接口都算。草稿接口同样拥有标签、同样显示在条上 —— 只匹配 `'endpoint'`
+        // 会让最可能刚新建的那类接口仍留着面包屑。
         (t) => (t.kind === 'endpoint' || t.kind === 'endpoint-draft') && t.id === endpoint.id,
       ),
   );
 
-  // A node with no detail row is a hole in the data, not a normal state
-  // (every endpoint is created with one). Bail with the same empty
-  // state rather than rendering a half-broken tester.
+  // 没有 detail 行的节点是数据漏洞而非正常态（每个接口创建时都带一行）。返回同样的
+  // 空态，而不是渲染半残的 tester。
   if (!endpoint || !detail) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -634,25 +540,20 @@ export function HttpTester() {
 
   const handleSend = async () => {
     if (!endpoint) return;
-    // Validation gates the request. An unparseable json body is not
-    // something the server should be asked to interpret, and sending it
-    // anyway would leave the user staring at a server-side parse error
-    // instead of the one naming the character they mistyped.
+    // 校验是请求的前置门。解析不了的 json body 不该让服务端去猜；照发只会让用户对着
+    // 服务端解析错误，而这个错误本可以指出他敲错的那个字符。
     if (!runValidation()) return;
-    // Cancel any in-flight send first.
+    // 先取消任何在途请求。
     inFlightRef.current?.abort();
     const ctrl = new AbortController();
     inFlightRef.current = ctrl;
     setRequestPending(true);
     try {
-      // Everything about the request is already in `prepared` — the
-      // backend is a pure executor and is never told which endpoint this
-      // came from. That is what lets an unsaved draft send: there is no
-      // `endpointId` to look up, so there is nothing to persist first.
+      // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
+      // 这正是未保存的草稿也能发送的原因：没有 `endpointId` 要查，也没有东西要先持久化。
       //
-      // The ENV pill is Zustand-only and the database's `is_active` never
-      // follows it, so resolution has to happen against what is on screen
-      // (`endpointEnv`) — which `prepareRequest` already folded in.
+      // ENV 药丸只存在于 Zustand，数据库的 `is_active` 不跟随它，故解析必须基于界面上的
+      // `endpointEnv` —— `prepareRequest` 已经折进去了。
       const resp = await sendPreparedRequest({
         request: prepared,
         settings: requestSettings,
@@ -661,12 +562,11 @@ export function HttpTester() {
       setLastResponse(resp);
       addResponseHistory(endpoint.id, resp);
     } catch (e) {
-      // sendRequest is documented to never throw — this catch is a
-      // defensive net in case buildFetchInit or similar misbehaves.
+      // sendRequest 有文档保证不抛 —— 这个 catch 是防御网，兜住 buildFetchInit 之类
+      // 的意外。
       console.error('[HttpTester] sendRequest threw:', e);
     } finally {
-      // Only clear if we're still the active controller (a newer
-      // send may have replaced us mid-flight).
+      // 只有仍是当前 controller 才清空（途中可能被更新的发送顶替）。
       if (inFlightRef.current === ctrl) inFlightRef.current = null;
       setRequestPending(false);
     }
@@ -674,17 +574,13 @@ export function HttpTester() {
 
   const handleSave = () => {
     if (!endpoint) return;
-    // Same gate as Send: persisting a json body that does not parse would
-    // store a broken request on purpose. A failed run leaves the draft in
-    // place — nothing is written, nothing is cleared.
+    // 与发送同门：持久化一个解析不了的 json body 等于故意存下坏请求。校验失败时草稿
+    // 原样留着 —— 不写不清。
     if (!runValidation()) return;
 
-    // An unsaved endpoint has no row to patch, so the whole write is one
-    // step: `saveDraftEndpoint` merges the document fields and the pending
-    // request-config edits into a single `detail`, writes it, and swaps
-    // the draft tab for the real endpoint tab. It keeps the draft (and
-    // this tab) when the write fails, so retrying is just pressing Save
-    // again — the error surfaces as `draftSaveError`.
+    // 未保存的接口没有可 patch 的行，故整次写入一步完成：`saveDraftEndpoint` 把文档
+    // 字段与待存的请求配置编辑并成一个 `detail` 写入，并把草稿标签换成真实接口标签。
+    // 写入失败时保留草稿（与本标签），重试就是再按一次保存，错误经 `draftSaveError` 呈现。
     if (isDraft) {
       void saveDraftEndpoint(endpoint.id);
       return;
@@ -696,37 +592,29 @@ export function HttpTester() {
   };
 
   const handleCopyCurl = async () => {
-    // One line, because there is nothing left to line up. The command is
-    // rendered from `prepared` — the object Send ships — so it cannot
-    // describe a different request than the one the user just watched
-    // fire. Copying is not one of the validating paths, so an unparseable
-    // body still yields a command: it is a copy, not a request, and
-    // refusing to copy would only be in the way.
+    // 命令由 `prepared`（发送所用的那个对象）渲染，故不可能描述另一个请求。复制不属
+    // 于校验路径，body 解析不了也照样给命令 —— 这是复制而非请求，拒绝只会碍事。
     const curl = preparedToCurl(prepared);
     try {
       await navigator.clipboard.writeText(curl);
       setCurlFlash(true);
       window.setTimeout(() => setCurlFlash(false), 1500);
     } catch (err) {
-      // Permissions denied, insecure context, etc. — surface to the console
-      // (no toast component yet) so the user can fall back to selecting text.
+      // 权限被拒、非安全上下文等 —— 先打到 console（还没有 toast 组件），用户可退而
+      // 手动选中文本。
       console.error('[HttpTester] copy as cURL failed:', err);
     }
   };
 
-  // A draft is unsaved by construction, so the button has to stay live even
-  // when no editor has fired yet. Gating on `draft !== undefined` alone
-  // would strand exactly the endpoint this feature exists for: one the
-  // user created, typed a URL into, sent, and now wants to keep — with no
-  // params / headers / body edits to make it dirty.
+  // 草稿天生未保存，故即使还没有任何编辑器触发过，按钮也必须可用。只按
+  // `draft !== undefined` 判定，恰好会卡住这个功能要服务的接口：用户新建、输了 URL、
+  // 发了请求，现在想留下它 —— 却没有任何 params / headers / body 编辑把它变脏。
   const dirty = isDraft || draft !== undefined;
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
-      {/* Breadcrumb — mirrors the `设置 › 连接` pattern in the Settings
-          panel. Gives the user a single-screen answer to "where am I in
-          the tree". Hidden while a workspace tab carries the same
-          information (see `endpointHasTab`). */}
+      {/* 面包屑 —— 与设置面板的 `设置 › 连接` 同一写法，在一屏内回答「我在树的哪里」。
+          工作区标签承载同样信息时隐藏（见 `endpointHasTab`）。 */}
       {!endpointHasTab && (
         <nav
           aria-label="接口所属路径"
@@ -738,10 +626,8 @@ export function HttpTester() {
                 type="button"
                 onClick={() => {
                   const id = useAppStore.getState().activeProjectId;
-                  // `openProject` rather than `setActiveProject`: the
-                  // breadcrumb's first crumb is a link to the project, so
-                  // it should bring up the project pane (and re-scope the
-                  // tree), not just re-resolve the environment.
+                  // 用 `openProject` 而非 `setActiveProject`：面包屑首节是到项目的链接，
+                  // 应带出项目面板（并重新界定树的范围），而不只是重解析环境。
                   if (id) useAppStore.getState().openProject(id);
                 }}
                 className="truncate hover:text-foreground"
@@ -777,10 +663,8 @@ export function HttpTester() {
               value={endpoint.name}
               onSave={saveEndpointName}
               testId="endpoint-name-input"
-              // Controlled only for a draft, where `namingDraft` is what
-              // opens the editor on a freshly created endpoint. Passing
-              // `undefined` leaves a saved endpoint on the editor's own
-              // double-click behaviour, untouched.
+              // 只对草稿受控，由 `namingDraft` 在新建接口时打开编辑器。传 `undefined` 则
+              // 已保存的接口维持编辑器自身的双击行为，不受影响。
               editing={isDraft ? namingDraft : undefined}
               onEditingChange={(next) => {
                 if (isDraft) setNamingDraft(next);
@@ -806,9 +690,7 @@ export function HttpTester() {
             key={`desc-${endpoint.id}`}
             value={endpoint.description ?? ''}
             onSave={saveEndpointDescription}
-            // Description legitimately allows clearing — without this, an
-            // empty draft is treated as a cancel and the field keeps its old
-            // value instead of going back to "no description".
+            // 描述允许清空 —— 否则空草稿会被当成取消，字段保留旧值而不是回到「无描述」。
             commitEmpty
             testId="endpoint-description-input"
             className="mt-0.5 h-6 max-w-2xl text-xs"
@@ -839,9 +721,8 @@ export function HttpTester() {
           className="border-0"
         />
         <BaseUrlPicker
-          // The project's whole service list — services are project-level,
-          // so every one of them is a real choice here. What differs per
-          // service is the *cell* the URL is read from, not eligibility.
+          // 项目的完整服务列表 —— 服务属于项目级，故每一个都是这里真实可选项。按服务不同的
+          // 是读 URL 的**单元格**，不是可选性。
           definitions={project?.baseUrlDefinitions ?? []}
           defaultDefinitionId={project?.defaultBaseUrlDefinitionId ?? null}
           resolvedBaseUrl={resolved.baseUrl}
@@ -849,8 +730,8 @@ export function HttpTester() {
           onSelectionChange={(next) => {
             if (!endpoint) return;
             if (next.kind === 'default') {
-              // Clear both — null on baseUrlDefinitionId makes
-              // resolveEndpointBaseUrl fall back to the project ★.
+              // 两者都清 —— baseUrlDefinitionId 为 null 会让 resolveEndpointBaseUrl 回落到
+              // 项目 ★。
               commitBaseUrl({
                 baseUrlDefinitionId: null,
                 baseUrlOverride: null,
@@ -861,13 +742,10 @@ export function HttpTester() {
                 baseUrlOverride: null,
               });
             } else {
-              // 自定义 — `''` is the mode marker, not a cleared value:
-              // it is exactly what stops resolveEndpointBaseUrl (and the
-              // Rust resolver) from falling back to the environment's
-              // base URL and prefixing the address the user is about to
-              // type. A row saved before this shipped may already carry a
-              // host; keep it so re-picking 自定义 doesn't retarget an
-              // existing request by surprise.
+              // 自定义 —— `''` 是模式标记而非「清空后的值」：正是它阻止
+              // resolveEndpointBaseUrl（以及 Rust 侧解析器）回落到环境 base URL、给用户
+              // 即将输入的地址加前缀。既存的行可能已带 host，保留它，以免重选 自定义 时
+              // 意外改指已有请求。
               const alreadyCustom = selection.kind === 'override';
               commitBaseUrl({
                 baseUrlOverride: detail?.baseUrlOverride ?? '',
@@ -883,10 +761,8 @@ export function HttpTester() {
             value={liveUrl}
             onChange={(e) => handleUrlChange(e.target.value)}
             onKeyDown={handleUrlKeyDown}
-            // 自定义 makes this field the whole address, so it has to say so: the
-            // placeholder switches to a full URL and the ring marks the
-            // mode — the picker sits to the left of the field the user is
-            // actually focused on, so its label alone isn't the cue.
+            // 自定义 让本框承载完整地址，故须明示：placeholder 换成完整 URL、ring 标出
+            // 模式 —— 选择器位于用户实际聚焦的框左侧，光靠它的标签不够。
             className={cn(
               'h-9 w-full font-mono text-sm',
               isCustomUrl && 'border-primary/40 ring-1 ring-inset ring-primary/40',
@@ -941,11 +817,9 @@ export function HttpTester() {
         </Button>
       </div>
 
-      {/* A failed draft save keeps the draft and the tab, so retrying is
-          just another Save — but the user has to know the first press did
-          nothing, or the click reads as broken. `addNode` swallows the
-          real error into `null` after logging it, so this is the only
-          signal the UI can give; the retry affordance is the button. */}
+      {/* 草稿保存失败会保留草稿与标签，重试就是再按一次保存 —— 但用户必须知道刚才那下
+          什么都没做，否则点击看起来是坏的。`addNode` 把真实错误吞成 `null` 只记日志，
+          故这是 UI 能给的唯一信号，重试入口就是这个按钮。 */}
       {draftSaveError && (
         <div
           role="alert"
@@ -963,15 +837,11 @@ export function HttpTester() {
         </div>
       )}
 
-      {/* Tabs — connected to the panel below: this row owns the only
-          separator (no inner one on the strip), and the active tab fills
-          itself with the panel's background so it covers that separator
-          and curves into it. `bg-card/30` matches the URL bar above, and
-          is what gives the active tab something to stand out from —
-          without it the tab and the panel are the same colour and the
-          whole effect is a missing line rather than a merged tab.
-          `pt-1.5` with no `pb` keeps the strip's bottom edge flush with
-          the separator, so `-mb-px` on the tab lands it on top. */}
+      {/* Tabs —— 与下方面板相连：本行独占那条分隔线（条内不再有），激活标签以面板底色
+          填充自己，盖住分隔线并与之圆角相接。`bg-card/30` 与上方 URL 栏一致，也是
+          激活标签得以凸显的背景 —— 少了它标签与面板同色，效果就成了「少一条线」而非
+          「标签并入面板」。`pt-1.5` 不配 `pb`，使条的下沿与分隔线齐平，标签上的
+          `-mb-px` 才能正好压在其上。 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 pt-1.5">
         <Tabs
           variant="connected"
@@ -1001,8 +871,8 @@ export function HttpTester() {
             onChange={(items) => patchDraft({ headers: items })}
             keyPlaceholder="Header 名"
             valuePlaceholder="值"
-            // Recent (project-wide harvest) merged with the built-in
-            // list — see common-headers.ts::buildHeaderSuggestions.
+            // 最近使用（项目范围收拢）与内置列表合并 —— 见
+            // common-headers.ts::buildHeaderSuggestions。
             keySuggestions={headerSuggestions}
           />
         )}
@@ -1010,13 +880,11 @@ export function HttpTester() {
           <BodyEditor
             value={effective.body}
             onChange={(body) => patchDraft({ body })}
-            // Pinned by the parent, because validation is an action run
-            // on Send / Save / 格式化 — not a value derived from typing.
+            // 错误由父组件钉住：校验是 发送 / 保存 / 格式化 触发的动作，而非从输入派生
+            // 出的值。
             validationError={validationError}
-            // 格式化 already parsed the content, so its result settles the
-            // badge directly. Re-running `runValidation` here would check
-            // the pre-format draft (this render's closure), which is the
-            // content the user just failed to parse.
+            // 格式化 已经解析过内容，其结果直接定徽标。此处再跑 `runValidation` 检查的
+            // 是格式化前的草稿（本次渲染的闭包），即用户刚解析失败的那份内容。
             onFormatResult={(result) => setValidationError(result.ok ? null : result.error)}
           />
         )}
@@ -1033,9 +901,8 @@ export function HttpTester() {
         )}
       </div>
 
-      {/* Env var picker — anchored to the URL input. Positioned via
-          getBoundingClientRect inside the picker so it follows the input
-          on scroll / resize. */}
+      {/* Env 变量选择器 —— 锚在 URL 输入框上，在选择器内部用 getBoundingClientRect
+          定位，故滚动 / resize 时跟随输入框。 */}
       <EnvVarPicker
         open={varPickerOpen}
         onClose={() => setVarPickerOpen(false)}

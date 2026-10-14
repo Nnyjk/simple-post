@@ -3,21 +3,18 @@ import { Button } from '@/components/ui/button';
 import { Server } from 'lucide-react';
 
 /**
- * Blocking confirm that surfaces when the MCP daemon transitions to a
- * `crashed` / `unhealthy` state. Offers two actions:
- *   - Close — dismiss the dialog without restarting; the polling loop
- *     in McpStatusPanel will keep checking, and reopen this dialog if
- *     the daemon stays crashed.
- *   - Restart — invoke the same restart path as McpStatusPanel's
- *     button. The parent passes the handle so we don't duplicate the
- *     "how to restart" logic.
+ * MCP daemon 转入 `crashed` / `unhealthy` 时弹出的阻塞式确认框。两个动作：
+ *   - 关闭 —— 不重启就关掉；McpStatusPanel 里的轮询会继续检查，daemon 持续崩溃时会再次
+ *     弹出本框。
+ *   - 重启 —— 走与 McpStatusPanel 按钮相同的重启路径。句柄由父级传入，好让「怎么重启」
+ *     的逻辑不被复制。
  */
 export interface DaemonRestartDialogProps {
   open: boolean;
   onClose: () => void;
-  /** Wired to McpStatusPanel.handleRef.restart. */
+  /** 接到 McpStatusPanel.handleRef.restart。 */
   onRestart: () => Promise<void> | void;
-  /** Optional lastError from the daemon, surfaced in the description. */
+  /** daemon 的可选 lastError，显示在描述里。 */
   lastError?: string;
 }
 

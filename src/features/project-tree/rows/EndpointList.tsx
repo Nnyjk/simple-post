@@ -5,7 +5,7 @@ import { EndpointRow } from './EndpointRow';
 
 export interface EndpointListProps {
   endpoints: ResourceNode[];
-  /** Detail rows for `endpoints`, already narrowed to the same set. */
+  /** `endpoints` 对应的详情行，已收窄到同一集合。 */
   details: Record<string, EndpointDetail>;
   editing: { kind: TargetKind; id: string } | null;
   selectedEndpointIds: Set<string>;
@@ -19,14 +19,10 @@ export interface EndpointListProps {
 }
 
 /**
- * One container's own endpoint rows, wired for selection, rename,
- * context menu and drag-and-drop.
+ * 单个容器自己的接口行，接好选中、重命名、右键菜单与拖放。
  *
- * Both kinds of container need this: a collection holds endpoints, and a
- * module holds them too when they need no collection of their own. Keeping
- * the wiring here rather than in each caller means the multi-select drag
- * gesture and the missing-detail guard cannot drift between the two
- * levels.
+ * 两类容器都需要它：集合装接口，模块在接口不需要自己的集合时也装。把接线放在这里而不是
+ * 各调用方，好让多选拖动手势与「缺详情行」的守卫不会在两个层级之间走样。
  */
 export function EndpointList({
   endpoints,
@@ -44,10 +40,8 @@ export function EndpointList({
   return (
     <div className="ml-3 border-l border-border/60 pl-1">
       {endpoints.map((ep) => {
-        // An endpoint with no detail row is a tree the backend would
-        // refuse to create, so a missing one here means the two tables
-        // disagree. Skip the row rather than render a method pill off
-        // `undefined`.
+        // 没有详情行的接口，后端根本不会创建这样的树，故这里缺一行意味着两张表不一致。
+        // 跳过该行，而不是拿 `undefined` 去渲染 method pill。
         const epDetail = details[ep.id];
         if (!epDetail) return null;
         return (
@@ -65,9 +59,7 @@ export function EndpointList({
             onCancelEdit={onCancelEdit}
             onContextMenu={(e) => onEndpointContextMenu(e, ep.id)}
             onDragStart={(e) => {
-              // When the user starts dragging a single endpoint that is
-              // part of a multi-selection, drag the whole selection.
-              // Otherwise drag just the one row.
+              // 拖拽一个属于多选集合的接口时，拖的是整个选区；否则只拖这一行。
               const ids =
                 selectedEndpointIds.has(ep.id) && selectedEndpointIds.size > 1
                   ? Array.from(selectedEndpointIds)

@@ -4,21 +4,16 @@ import type { DragPayload, DropZone, TargetKind } from '../tree-types';
 import { DND_MIME, decodeDrag, encodeDrag } from '../tree-utils';
 
 /**
- * Module-level scratchpad for the in-flight drag. Some synthetic
- * event drivers (notably Playwright's `dragAndDrop`) fire the HTML5
- * dragstart / dragover / drop sequence but don't propagate the
- * `DataTransfer` payload that `setData` writes during dragstart. We
- * mirror the payload here so `makeDropHandler` can still recover the
- * drag context on drop. Real browsers populate dataTransfer normally
- * — this is purely a fallback for environments that drop it.
+ * 模块级的在途拖拽暂存。部分合成事件驱动（尤其是 Playwright 的 `dragAndDrop`）会触发
+ * HTML5 的 dragstart / dragover / drop 序列，却不传递 dragstart 期间 `setData` 写入的
+ * `DataTransfer` 载荷。这里镜像一份载荷，使 `makeDropHandler` 在 drop 时仍能取回拖拽上下文。
+ * 真实浏览器会正常填充 dataTransfer，这里纯粹是给会丢数据的环境兜底。
  */
 let lastDragPayload: DragPayload | null = null;
 
 /**
- * Set the in-app drag payload on the native dataTransfer. Also sets
- * a `text/plain` fallback because some browsers refuse to start a
- * drag without ANY text payload, and our custom mime alone isn't
- * always enough.
+ * 把应用内的拖拽载荷写到原生 dataTransfer。同时写一份 `text/plain` 兜底：某些浏览器在
+ * 完全没有文本载荷时拒绝启动拖拽，单靠自定义 mime 并不总是够。
  */
 function setDataTransfer(e: ReactDragEvent, payload: DragPayload) {
   const json = encodeDrag(payload);
@@ -29,22 +24,18 @@ function setDataTransfer(e: ReactDragEvent, payload: DragPayload) {
 }
 
 /**
- * The zone math, as a pure function of (row rect, cursor, whether the
- * dragged kind may nest here).
+ * 区域计算，写成 (行矩形, 光标, 拖拽类型能否嵌于此) 的纯函数。
  *
- * Split out from `computeZoneFromEvent` so the 25/50/25 vs 50/50 rule is
- * testable without a DOM — this is the one piece of the drop decision
- * that can silently collapse without anyone noticing (see the note in
- * `computeZoneFromEvent` about where the rect comes from).
+ * 从 `computeZoneFromEvent` 中拆出，使 25/50/25 与 50/50 的规则无需 DOM 即可测试 ——
+ * 这是放置判定中唯一会静默退化而无人察觉的一环（见 `computeZoneFromEvent` 关于矩形来源
+ * 的说明）。
  *
- * `rect` is the row's own client rect; `supportsInto` is
- * `canNestInto(dragKind, targetKind)`. Without it — a leaf row, or a
- * drag whose kind may not nest here — the row keeps a plain 50/50
- * split and can never answer `into`.
+ * `rect` 是行自身的 client rect；`supportsInto` 是 `canNestInto(dragKind, targetKind)`。
+ * 没有它时 —— 叶节点行，或拖拽类型不能嵌在此处 —— 该行保持朴素 50/50，永远不会答出
+ * `into`。
  *
- * A missing or zero-height rect has no ratio to speak of, so it
- * resolves to `above`: the one zone that is meaningful in every
- * context, and the only one that can't nest a node somewhere invalid.
+ * 矩形缺失或高度为 0 时谈比例没有意义，故解析为 `above`：它是在任何语境下都有意义、
+ * 也是唯一不会把节点嵌到非法位置的那个区域。
  */
 export function zoneFromRowPosition(
   rect: { top: number; height: number } | null | undefined,
@@ -67,22 +58,16 @@ export interface TreeDndBindings {
 }
 
 /**
- * All drag-and-drop plumbing for the tree: payload encoding, the
- * cross-project guard, drop-index computation, the above/into/below
- * zone resolution and the live drop hint. State and store values are
- * passed in by `ProjectTree` — this hook owns no store selectors.
+ * 树的全部拖放管线：载荷编码、跨项目守卫、放置索引计算、above/into/below 区域解析与
+ * 实时放置提示。状态与 store 值由 `ProjectTree` 传入 —— 本 hook 不持有任何 store
+ * selector。
  *
- * One node array and one move action replaced three of each. The
- * per-kind branches that used to pick a destination are gone: where a
- * node lands is decided by the target's `parentId` plus the type matrix
- * the server enforces.
+ * 节点落到哪，由目标的 `parentId` 加上服务端强制执行的类型矩阵决定。
  */
 export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBindings) {
   /**
-   * Live indicator of the current drop target while a drag is in
-   * flight. `null` when nothing is being dragged. Keyed by
-   * `${kind}:${id}` so multiple targets can highlight at once (e.g.
-   * an `into` highlight on the parent + a line on the target row).
+   * 拖拽进行中当前放置目标的实时指示器。无拖拽时为 `null`。以 `${kind}:${id}` 为键，
+   * 故多个目标可同时高亮（例如父节点的 `into` 高亮 + 目标行上的一条线）。
    */
   const [dropHint, setDropHint] = useState<{
     key: string;
@@ -90,9 +75,8 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   } | null>(null);
 
   /**
-   * Resolve the `(source, target)` pair of project ids for a potential
-   * drop. Returns `null` if the drop would cross project boundaries
-   * (rule: "任何拖拽都不能使目标脱离项目").
+   * 解析潜在放置的 (源, 目标) 项目 id 对。放置会跨越项目边界时返回 false
+   * （规则：「任何拖拽都不能使目标脱离项目」）。
    */
   const sameProjectGuard = (
     drag: DragPayload,
@@ -100,9 +84,7 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   ): boolean => {
     const projectIdOf = (kind: TargetKind, id: string): string | undefined => {
       if (kind === 'project') return id;
-      // Every other kind is a node, and every node records its own
-      // owner — so the whole ladder is one lookup where it used to be
-      // endpoint → collection → module → project.
+      // 其余类型都是节点，而每个节点都记着自己的归属项目 —— 整条阶梯只是一次查找。
       return nodes.find((n) => n.id === id)?.rootId;
     };
     const targetProject = projectIdOf(target.kind, target.id);
@@ -114,11 +96,10 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   };
 
   /**
-   * Siblings of `parentId` within this project, in display order.
+   * 本项目内 `parentId` 的兄弟节点，按显示顺序。
    *
-   * `parentId: null` means the project's top level — the modules. That
-   * is scoped by `rootId` too, because `null` is every project's top
-   * level at once.
+   * `parentId: null` 是项目顶层 —— 即模块。须同时按 `rootId` 收窄，因为 `null` 是所有
+   * 项目共用的顶层。
    */
   const siblingsOf = (parentId: string | null): ResourceNode[] =>
     nodes
@@ -126,10 +107,8 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
       .sort((a, b) => a.sortOrder - b.sortOrder);
 
   /**
-   * Compute the index at which the dragged items should be inserted
-   * inside the new parent. Walks the visible tree to find the right
-   * sibling, since `index` in our move actions refers to position
-   * inside the destination's sorted children list.
+   * 计算被拖拽项应插入到新父级里的索引。需沿可见树找到正确的兄弟项，因为 move 动作里
+   * 的 `index` 指的是目标已排序子列表内的位置。
    */
   const computeTargetIndex = (
     drag: DragPayload,
@@ -137,17 +116,14 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
     zone: DropZone,
   ): number | null => {
     if (zone === 'into') {
-      // Insert at the end of the destination's children list. A module
-      // holds collections and endpoints; a collection holds endpoints and
-      // further collections — one count either way, because the move
-      // action re-numbers only the rows it inserts among.
+      // 插到目标子列表末尾。模块装集合与接口，集合装接口与更多集合 —— 两种情形都只需一个
+      // 计数，因为 move 动作只重排它插入其中的那几行。
       if (target.kind === 'module' || target.kind === 'collection') {
         return siblingsOf(target.id).length;
       }
       return null;
     }
-    // above / below: insert before/after the target row, among the
-    // target's own siblings.
+    // above / below：插到目标行之前 / 之后，位于目标自己的兄弟之中。
     if (target.kind === 'module' || target.kind === 'collection' || target.kind === 'endpoint') {
       const targetNode = nodes.find((n) => n.id === target.id);
       if (!targetNode) return null;
@@ -160,13 +136,10 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   };
 
   /**
-   * Cycle guard: the target must not be the source itself or any
-   * descendant, or we'd nest a node inside itself.
+   * 成环守卫：目标不能是源本身或其任何后代，否则会把节点嵌进自己。
    *
-   * Walks `parentId` rather than special-casing collections: a module
-   * dragged onto a collection inside it is the same loop as a
-   * collection dragged onto its own child, and the old guard only
-   * caught the second.
+   * 沿 `parentId` 遍历而不特判集合：模块被拖到其内部的集合上，与集合被拖到自己的子节点
+   * 上是同一种环。
    */
   const wouldCycleInto = (movingIds: string[], targetId: string): boolean => {
     if (movingIds.includes(targetId)) return true;
@@ -193,18 +166,15 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   };
 
   /**
-   * Drop handler factory. Bound per-row so each row can decide whether
-   * to accept the drop (and which index to insert at).
+   * drop 处理器工厂。按行绑定，好让每一行自己决定是否接受放置（以及插到哪个索引）。
    */
   const makeDropHandler = (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const raw = e.dataTransfer.getData(DND_MIME) || e.dataTransfer.getData('text/plain');
     let drag = decodeDrag(raw);
-    // Fallback: some synthetic drag drivers (Playwright) don't
-    // propagate dataTransfer across dragstart → drop. The
-    // `lastDragPayload` mirror written in `setDataTransfer` covers
-    // that case.
+    // 兜底：部分合成拖拽驱动（Playwright）不会在 dragstart → drop 之间传递
+    // dataTransfer，由 `setDataTransfer` 写入的 `lastDragPayload` 镜像覆盖这种情形。
     if (!drag) drag = lastDragPayload;
     setDropHint(null);
     lastDragPayload = null;
@@ -212,8 +182,7 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
     if (drag.ids.includes(target.id) && drag.kind === target.kind) return;
     if (!sameProjectGuard(drag, target)) return;
 
-    // A module is the top of a project; it has no node parent, so it
-    // can only be reordered among its siblings.
+    // 模块是项目顶层，没有节点父级，故只能在兄弟之间重排。
     if (drag.kind === 'module') {
       if (target.kind !== 'module') return;
       const idx = computeTargetIndex(drag, target, computeZoneFromEvent(e, drag, target));
@@ -223,11 +192,8 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
     }
 
     if (target.kind === 'module') {
-      // A module takes collections *and* endpoints — an endpoint that
-      // needs no collection of its own lands straight on it. Anything
-      // else (another module) the server's type matrix refuses, so
-      // refusing here keeps the optimistic state from showing a move
-      // that 400s.
+      // 模块同时接受集合**和**接口 —— 不需要自己集合的接口直接落在它上面。其余（另一个
+      // 模块）服务端的类型矩阵会拒绝，故在这里先拒，免得乐观状态显示一个必然 400 的移动。
       if (drag.kind !== 'collection' && drag.kind !== 'endpoint') return;
       const zone = computeZoneFromEvent(e, drag, target);
       const idx =
@@ -244,14 +210,11 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
         moveNodes(drag.ids, target.id, siblingsOf(target.id).length);
         return;
       }
-      // above/below: drop as a sibling of the target, keeping the
-      // target's parent. This is the "脱离集合" gesture — a nested
-      // collection dragged next to its parent lands beside it.
+      // above/below：作为目标的兄弟落下，保留目标的父级。这是「脱离集合」的手势 —— 嵌套
+      // 集合被拖到其父级旁边时落在其侧。
       //
-      // `parentId` covers both cases with no branch: a top-level
-      // collection's parent *is* its module node, and a nested one's
-      // is the collection above it. That is the whole point of the
-      // unified parent column.
+      // `parentId` 一个分支都不用就覆盖两种情形：顶层集合的父级*就是*它的模块节点，嵌套
+      // 集合的父级是它上面那个集合。这正是统一 parent 列的意义。
       const targetNode = nodes.find((n) => n.id === target.id);
       if (!targetNode || !targetNode.parentId) return;
       if (drag.kind === 'collection' && wouldCycleInto(drag.ids, target.id)) return;
@@ -261,12 +224,9 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
       return;
     }
 
-    // target.kind === 'endpoint' — dropping beside an endpoint. Only
-    // an endpoint goes here: the move makes the dragged row a sibling
-    // of the target, and the gesture this branch implements ("reorder
-    // among a collection's endpoints") has no meaning for a container.
-    // A collection whose sibling slot is a module-level endpoint is
-    // reachable by dropping onto the module row instead.
+    // target.kind === 'endpoint' —— 落在某个接口旁边。只有接口走这里：move 会让被拖行
+    // 成为目标的兄弟，而本分支实现的手势（「在集合的接口之间重排」）对容器没有意义。想把
+    // 集合挪到模块级接口旁，改为拖到模块行上即可。
     if (drag.kind !== 'endpoint') return;
     const targetNode = nodes.find((n) => n.id === target.id);
     if (!targetNode || !targetNode.parentId) return;
@@ -276,16 +236,13 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   };
 
   /**
-   * Whether the dragged kind can be **nested into** the given target
-   * kind. Drives the 25/50/25 (vs 50/50) split on container rows.
+   * 被拖拽类型能否**嵌套进**给定目标类型。驱动容器行上的 25/50/25（对比 50/50）分档。
    *
-   * Rules — the mirror of `ResourceNodeType::may_under`:
-   *   - Modules can never be embedded (per the user's "模块无法被嵌
-   *     入集合" rule), so `into` is never valid when the dragged kind
-   *     is a module.
-   *   - Collections can be embedded under a module or another
-   *     collection.
-   *   - Endpoints can be embedded under a module or a collection.
+   * 规则 —— `ResourceNodeType::may_under` 的镜像：
+   *   - 模块永不可嵌入（用户定的「模块无法被嵌入集合」规则），故拖拽类型是模块时
+   *     `into` 永不成立。
+   *   - 集合可嵌在模块或另一个集合之下。
+   *   - 接口可嵌在模块或集合之下。
    */
   const canNestInto = (dragKind: TargetKind, targetKind: TargetKind): boolean => {
     if (targetKind === 'module') return dragKind === 'collection' || dragKind === 'endpoint';
@@ -294,20 +251,13 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   };
 
   /**
-   * Compute the DropZone from a DragEvent, based on cursor Y relative
-   * to the row. When the dragged kind can be nested into the target
-   * (see `canNestInto`), containers use a 25/50/25 split; otherwise
-   * (or for leaves like endpoints) the row uses a plain 50/50 split.
+   * 由 DragEvent 计算 DropZone，依据光标 Y 相对该行的位置。被拖拽类型能嵌进目标时
+   * （见 `canNestInto`）容器用 25/50/25 分档；否则（或对接口这类叶行）用朴素 50/50。
    *
-   * The rect is read off `e.currentTarget` — the row element the
-   * handler is bound to — rather than threaded in as an argument. That
-   * is deliberate: the row only exists at render time, so a caller
-   * passing an element would have had to build the closure after mount
-   * and could easily pass `null` instead. When that happened the split
-   * silently degraded to a constant `'above'`, which took out both
-   * "drop into a module / collection" and downward reordering with no
-   * error anywhere. Reading it from the event means there is no
-   * argument to forget.
+   * rect 取自 `e.currentTarget` —— 处理器所绑定的那个行元素 —— 而非当参数传进来。
+   * 这是刻意的：行只在渲染期存在，调用方若传元素就得在挂载后才构造闭包，很容易传成
+   * `null`；那会让分档静默退化成恒定的 `'above'`，同时废掉「拖进模块 / 集合」与向下
+   * 重排，且任何地方都不报错。从事件里读就没有可忘记的参数。
    */
   const computeZoneFromEvent = (
     e: ReactDragEvent,
@@ -325,13 +275,10 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
     e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
     const raw = e.dataTransfer.getData(DND_MIME);
-    // Browsers refuse to hand back drag data during `dragover` — the
-    // spec only lets `drop` and `dragstart` read it — so `decodeDrag`
-    // is null on every hover and `canNestInto` would never be consulted.
-    // That is enough to hide the middle band of a container row, which
-    // is the only thing telling the user "this row will take the node
-    // as a child rather than reorder beside it". The mirror written by
-    // `setDataTransfer` at dragstart is what makes the hint honest.
+    // 浏览器在 `dragover` 期间不交回拖拽数据 —— 规范只允许 `drop` 和 `dragstart` 读它 ——
+    // 故每次悬停 `decodeDrag` 都是 null，`canNestInto` 永远不会被问到。那足以隐藏容器行的
+    // 中间一带，而那正是唯一在告诉用户「这一行会把节点收作子节点、而非在其旁重排」的信号。
+    // dragstart 时 `setDataTransfer` 写入的镜像让这个提示说真话。
     const drag = decodeDrag(raw) ?? lastDragPayload;
     const zone = computeZoneFromEvent(e, drag, target);
     const hint = { key: `${target.kind}:${target.id}`, zone };
@@ -340,9 +287,8 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
 
   const makeDragLeaveHandler =
     (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => {
-      // Only clear the hint when we actually leave the row (not when
-      // moving over a child element). relatedTarget tells us where the
-      // pointer went; if it's still inside our subtree, ignore.
+      // 只在真正离开这一行时才清提示（移过子元素不算）。relatedTarget 告诉我们指针去了哪；
+      // 仍在自身子树内就忽略。
       const next = e.relatedTarget as Node | null;
       if (next && e.currentTarget.contains(next)) return;
       setDropHint((prev) => (prev && prev.key === `${target.kind}:${target.id}` ? null : prev));

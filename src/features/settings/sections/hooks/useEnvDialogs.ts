@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-/** Identifies the row a delete-confirmation dialog is pending on. */
+/** 标识删除确认对话框正在等待的那一行。 */
 export interface PendingDelete {
   id: string;
   name: string;
@@ -13,12 +13,11 @@ interface UseEnvDialogsArgs {
 }
 
 /**
- * Confirmation-dialog state for the environment section: which BaseUrl
- * definition / environment is pending deletion, plus the confirm +
- * dismiss handlers the shell wires into `ConfirmDialog`.
+ * 环境分区的确认对话框状态：哪个 BaseUrl 定义 / 环境待删除，外加外壳接进
+ * `ConfirmDialog` 的确认与取消处理器。
  *
- * Split out of `EnvironmentSection` so the shell reads as layout only —
- * the state itself is props-driven and touches no store.
+ * 从 `EnvironmentSection` 拆出，好让外壳读起来只有布局 —— 这些状态由 props 驱动，不碰
+ * store。
  */
 export function useEnvDialogs({
   projectId,

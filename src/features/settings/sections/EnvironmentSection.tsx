@@ -12,11 +12,9 @@ export interface EnvironmentSectionProps {
   environments: Environment[];
   projectId: string;
   /**
-   * This project's modules, already filtered and `sortOrder`-sorted by the
-   * host. They are the row axis of the 前置 URL table: the row set is
-   * (every module × every project service), so a project with no modules
-   * has nothing to configure and the table says so instead of rendering an
-   * empty grid.
+   * 本项目的模块，已由宿主过滤并按 `sortOrder` 排序。它们是 前置 URL 表的行轴：行集是
+   * （每个模块 × 每个项目服务），故没有模块的项目无从配置，表格会说明这一点而不是渲染
+   * 一张空网格。
    */
   modules: readonly ResourceNode[];
 
@@ -24,8 +22,8 @@ export interface EnvironmentSectionProps {
   setEnvironmentVar: (envId: string, key: string, value: string | null) => void;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
   /**
-   * Set (or with `null` clear) one cell of the value layer: what service
-   * `defId` points at, for module `moduleId`, in this environment.
+   * 设定（或用 `null` 清除）值层的一个单元格：在此环境中，模块 `moduleId` 上服务
+   * `defId` 指向的地址。
    */
   setEnvironmentModuleBaseUrl: (
     envId: string,
@@ -33,14 +31,14 @@ export interface EnvironmentSectionProps {
     moduleId: string,
     url: string | null,
   ) => void;
-  /** Resolves the new env's id, or `null` when the create failed. */
+  /** 解析出新环境的 id；创建失败时为 `null`。 */
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   deleteEnvironment: (envId: string) => void;
   updateEnvironment: (envId: string, patch: Partial<Environment>) => void;
 
   // ---- project-scoped service definitions ----
   baseUrlDefinitions: readonly BaseUrlDefinition[];
-  /** The project's ★. Project-wide — there is no per-module default. */
+  /** 项目 ★。项目级 —— 没有按模块的默认。 */
   defaultBaseUrlDefinitionId: string | null;
   addBaseUrlDefinition: (projectId: string, name: string) => string;
   updateBaseUrlDefinition: (
@@ -49,20 +47,16 @@ export interface EnvironmentSectionProps {
     patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>,
   ) => void;
   deleteBaseUrlDefinition: (projectId: string, defId: string) => void;
-  /** Star a service as the project default, or pass `null` to unstar. */
+  /** 把某个服务加星为项目默认；传 `null` 取消加星。 */
   setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => void;
 }
 
 /**
- * Default name for a freshly created environment.
+ * 新建环境的默认名称。
  *
- * This used to be the hardcoded literal `'new-env'`, so every env a
- * project owned beyond the first was born with the same name — in a
- * section where environments are addressed by name, two tabs reading
- * `new-env` are indistinguishable. Deriving from the names already in
- * the project keeps the generated label unique and in the panel's
- * Chinese voice (the same reasoning gives baseUrl definitions their
- * `新服务` default).
+ * 从项目已有的名字推导，保证生成的名字唯一，且与本面板的中文口吻一致（baseUrl 定义
+ * 默认叫 `新服务` 是同一套理由）—— 在一个靠名字指认环境的分区里，两个同名标签无法
+ * 区分。
  */
 export function nextEnvironmentName(existingNames: readonly string[]): string {
   const taken = new Set(existingNames.map((n) => n.trim()));
@@ -96,10 +90,8 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  *   │                  + 添加变量                            │
  *   └────────────────────────────────────────────────────────┘
  *
- * There is no per-env header row: the switcher above already names every
- * environment, and naming the active one again a few pixels lower was pure
- * duplication. Its rename moved into the switcher with it — see
- * `EnvSwitcher`.
+ * 没有按环境的表头行：上方的切换器已经点名了每个环境，几像素之下再把当前环境
+ * 重复一遍纯属冗余。重命名随之搬进切换器 —— 见 `EnvSwitcher`。
  *
  * Visually it inherits the new SettingsCategory aesthetic — coloured
  * icon containers, SettingRow-style padded rows, badge trailing
@@ -110,11 +102,10 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  * per module: every module group lists the project's whole service list and
  * fills in its own cells. The ★ is per project, not per module.
  *
- * The switcher strip owns the `新建环境` control, so it renders even with
- * zero environments — the empty state is a hint under the strip, never a
- * replacement for it. A **module** tab shows the same environment list for
- * a narrower purpose (see `ModuleServiceSection`), so this is not the only
- * host of the list; it is the one host of the project-level writes on it.
+ * 切换器条持有 `新建环境` 控件，故即使一个环境都没有也要渲染 —— 空态是条下方的一句
+ * 提示，绝不替代这条。**模块** 标签为更窄的用途展示同一份环境列表（见
+ * `ModuleServiceSection`），故本组件不是该列表的唯一宿主，而是它上面项目级写入的唯一
+ * 宿主。
  *
  * This file is the shell only: it owns the active-env selection, the
  * delete-confirmation state, and the layout. Every presentational part
@@ -139,8 +130,7 @@ export function EnvironmentSection({
   setDefaultBaseUrlDefinition,
 }: EnvironmentSectionProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  // Create is in flight, and the env (if any) whose name should be
-  // opened for rename once it lands.
+  // 创建进行中，以及（若有）落库后应打开重命名的那个环境 id。
   const [creatingEnv, setCreatingEnv] = useState(false);
   const [pendingRenameEnvId, setPendingRenameEnvId] = useState<string | null>(null);
 
@@ -182,9 +172,8 @@ export function EnvironmentSection({
         projectId,
         nextEnvironmentName(environments.map((e) => e.name)),
       );
-      // `addEnvironment` swallows the IPC failure and resolves `null`;
-      // in that case nothing is added, nothing is selected, and the
-      // strip is left exactly as the user saw it — no phantom tab.
+      // `addEnvironment` 会吞掉 IPC 失败并解析为 `null`；此时什么都不新增、什么都不选中，
+      // 条保持用户看到的样子 —— 不产生幽灵标签。
       if (id) {
         setActiveId(id);
         setPendingRenameEnvId(id);
@@ -194,8 +183,7 @@ export function EnvironmentSection({
     }
   };
 
-  // Switching envs or arming a delete abandons a pending auto-rename:
-  // the flag must not follow the user to a different row.
+  // 切换环境或开始一次删除都会放弃待执行的自动重命名 —— 该标志不能跟着用户走到别行。
   const handlePick = (id: string) => {
     setPendingRenameEnvId(null);
     setActiveId(id);
@@ -215,25 +203,21 @@ export function EnvironmentSection({
 
   const handleAddVar = () => {
     if (!activeEnv) return;
-    // Inline empty-row append — same as the old card-based UX.
+    // 就地追加一个空行。
     setEnvironmentVar(activeEnv.id, '', '');
   };
 
   return (
     <SettingsCategory
       hideDivider
-      // `stacked` so each panel (env switcher + per-env body) reads as
-      // its own self-contained surface — same as before, no extra card
-      // shell around everything.
+      // 用 `stacked`，让每块面板（环境切换器 + 单环境内容）读起来都是自足的界面，
+      // 外面不再套一层卡片壳。
       variant="stacked"
     >
       <div className="space-y-3">
-        {/* ----- Env switcher (top tab strip) ----------------- */}
-        {/* Unconditional, and that is the whole point: the trailing
-            `新建环境` button lives in this strip, so gating the strip
-            behind a non-empty list left a project with zero envs
-            showing a bare hint string and no way to create its first
-            environment. */}
+        {/* ----- 环境切换器（顶部标签条） ----------------- */}
+        {/* 无条件渲染，而这正是重点：末尾的 `新建环境` 按钮就住在这条里，故把这条挂在
+            「列表非空」之后，会让零环境的项目只剩一句提示、没有创建第一个环境的途径。 */}
         <EnvSwitcher
           environments={environments}
           activeId={activeId}
@@ -241,9 +225,8 @@ export function EnvironmentSection({
           onRequestDelete={handleRequestEnvDelete}
           onAdd={handleNewEnv}
           addDisabled={creatingEnv}
-          // Renaming lives on the switcher now — see `EnvSwitcher`. The
-          // auto-open latch is the same one the removed header row used, so
-          // create-and-name is still a single gesture.
+          // 重命名现在住在切换器上 —— 见 `EnvSwitcher`。自动打开的闩与原先表头行用的是
+          // 同一个，故「新建并命名」仍是一个动作。
           onRename={handleRenameEnv}
           autoRenameId={pendingRenameEnvId}
           onAutoRenameEnd={handleRenameEnd}
@@ -256,9 +239,8 @@ export function EnvironmentSection({
         ) : (
           activeEnv && (
             <div className="overflow-hidden rounded-lg border border-border/70 bg-card/40 shadow-[0_1px_0_0_rgba(255,255,255,0.02)_inset]">
-              {/* Keyed by env id so switching tabs resets the body's own
-                  transient state — an input left mid-edit on the previous
-                  env, and the auto-rename latch, cannot bleed across. */}
+              {/* 以 env id 为 key，切换标签即重置内容自身的临时状态 —— 上一个环境里编辑到
+                  一半的输入框、自动重命名的闩，都不会串到这边来。 */}
               <EnvBody
                 key={activeEnv.id}
                 env={activeEnv}

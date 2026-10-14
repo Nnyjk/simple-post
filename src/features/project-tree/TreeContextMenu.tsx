@@ -8,9 +8,9 @@ export type ContextMenuItem =
       label: string;
       icon?: ReactNode;
       onClick: () => void;
-      /** Highlight in red (e.g. delete). */
+      /** 高亮为红色（如删除）。 */
       danger?: boolean;
-      /** Render as non-interactive (greyed out). */
+      /** 渲染为不可交互（灰显）。 */
       disabled?: boolean;
     }
   | { kind: 'divider' };
@@ -24,17 +24,17 @@ interface TreeContextMenuProps {
 }
 
 /**
- * Lightweight right-click menu, portaled to `document.body`.
+ * 轻量右键菜单，portal 挂到 `document.body`。
  *
- * - Auto-flips to stay within the viewport (clamps to right / bottom edge).
- * - Closes on outside mousedown, Escape, or selecting any item.
- * - The browser's native context menu is suppressed on the menu root.
+ * - 自动翻转以留在视口内（必要时贴住右缘 / 下缘）。
+ * - 点击外部、Escape 或选中任意项时关闭。
+ * - 菜单根上屏蔽浏览器原生右键菜单。
  */
 export function TreeContextMenu({ open, x, y, items, onClose }: TreeContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
 
-  // After mount, adjust position so the menu stays inside the viewport.
+  // 挂载后调整位置，使菜单留在视口内。
   useLayoutEffect(() => {
     if (!open) return;
     const el = ref.current;

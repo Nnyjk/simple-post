@@ -5,12 +5,11 @@ import type { ContextMenuItem } from '../TreeContextMenu';
 import type { NewDraftKind } from '@/stores/app-store';
 
 export interface InlineMenuBindings {
-  /** Every node of the active project, any type, any depth. */
+  /** 当前项目的全部节点，不论类型与深度。 */
   nodes: ResourceNode[];
   /**
-   * Opens the create *dialog* for the kinds that still have one.
-   * Endpoints are deliberately absent — they are created by
-   * `createEndpointAt`, not by a form.
+   * 为仍有对话框的各类打开创建*对话框*。接口刻意缺席 —— 它们由 `createEndpointAt`
+   * 创建，而非通过表单。
    */
   openNewItemWithIntent: (opts: {
     type: NewDraftKind;
@@ -18,24 +17,19 @@ export interface InlineMenuBindings {
     parentCollectionId?: string;
   }) => void;
   /**
-   * Create an endpoint under `parentId` and drop it into inline rename.
-   * Resolves once the row exists; the caller owns the rename target, so
-   * it can be the tree row it just added.
+   * 在 `parentId` 下创建接口并丢进就地重命名。行存在后 resolve；重命名目标归调用方所有，
+   * 故它可以是刚加的那一行树节点。
    */
   createEndpointAt: (parentId: string) => Promise<void>;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;
 }
 
 /**
- * The inline "+" menus attached to the module / collection rows. Each
- * builds its items lazily at click time (the first module / collection
- * of the project can change between renders), so no derived arrays are
- * memoized here.
+ * 挂在模块 / 集合行上的就地「+」菜单。各自在点击时才惰性构造条目（项目中第一个模块 /
+ * 集合在两次渲染之间可能变），故这里不 memo 任何派生数组。
  *
- * There is no project-level "+" any more: the project used to be a row
- * in this tree, and that row owned the "create the first module of this
- * project" entry point. With the project gone from the tree, that entry
- * point is the 「新建模块」 row at the top of the list.
+ * 已经没有项目级的「+」了：项目曾是一行，那一行持有「为本项目创建第一个模块」的入口。项目
+ * 离开树后，那个入口就是列表顶部的「新建模块」一行。
  */
 export function useInlineMenus({
   nodes,
@@ -57,8 +51,7 @@ export function useInlineMenus({
         kind: 'item',
         label: '新建接口',
         icon: <FilePlus className="h-3.5 w-3.5" />,
-        // The module *is* the parent — an endpoint may sit directly under
-        // one — so this needs no collection to exist first and no dialog.
+        // 模块*就是*父级 —— 接口可以直接挂在它下面 —— 故无需先存在某个集合，也无需对话框。
         onClick: () => {
           void createEndpointAt(moduleId);
         },
@@ -72,9 +65,8 @@ export function useInlineMenus({
     e.stopPropagation();
     const col = nodes.find((c) => c.id === collectionId && c.kind === 'collection');
     if (!col) return;
-    // A collection's parent can be another collection, so the owning
-    // module is an ancestor, not `col.parentId`. The dialog only uses it
-    // to name where the row will land; the write target is the collection.
+    // 集合的父级可能是另一个集合，故所属模块是祖先而非 `col.parentId`。对话框只用它来说明
+    // 新行会落在哪里；真正的写入目标是这个集合。
     const moduleId = owningModuleId(nodes, collectionId);
     const items: ContextMenuItem[] = [
       {
@@ -104,9 +96,8 @@ export function useInlineMenus({
 }
 
 /**
- * Walk up `parentId` until a module row is found. Cycles are impossible
- * in a healthy tree, but the `seen` guard keeps a corrupted one from
- * spinning forever inside a click handler.
+ * 沿 `parentId` 向上走，直到找到模块行。健康的树里不可能成环，但 `seen` 守卫能防止一棵
+ * 被损坏的树在点击处理器里无限打转。
  */
 function owningModuleId(nodes: ResourceNode[], collectionId: string): string | undefined {
   const seen = new Set<string>();
