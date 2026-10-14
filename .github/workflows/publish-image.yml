@@ -38,7 +38,7 @@ jobs:
       # not a gate — `lto = true` with `codegen-units = 1` is slow under
       # QEMU, which is why the timeout is generous.
       - name: 'Set up QEMU (linux/arm64 cross-build)'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: 'Set up Buildx'
         uses: docker/setup-buildx-action@v3
