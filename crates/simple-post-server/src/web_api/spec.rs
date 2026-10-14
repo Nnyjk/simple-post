@@ -20,7 +20,7 @@ use serde::Serialize;
 pub struct RouteSpec {
     /// HTTP 方法（GET / POST / PUT / PATCH / DELETE）。
     pub method: &'static str,
-    /// 路径模板（axum 语法：`/api/projects/:id`）。
+    /// 路径模板（axum 语法：`/api/projects/{id}`，同时是合法的 OpenAPI 模板）。
     pub path: &'static str,
     /// OpenAPI 文档里的简短说明。
     pub summary: &'static str,
@@ -65,7 +65,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "GET",
-            path: "/api/projects/:id",
+            path: "/api/projects/{id}",
             summary: "Get one project",
             stability: "public",
             request: None,
@@ -73,7 +73,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "PATCH",
-            path: "/api/projects/:id",
+            path: "/api/projects/{id}",
             summary: "Patch a project",
             stability: "public",
             request: Some("ProjectPatch"),
@@ -81,7 +81,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "DELETE",
-            path: "/api/projects/:id",
+            path: "/api/projects/{id}",
             summary: "Delete a project",
             stability: "public",
             request: None,
@@ -108,7 +108,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "GET",
-            path: "/api/nodes/:id",
+            path: "/api/nodes/{id}",
             summary: "Get one node",
             stability: "public",
             request: None,
@@ -116,7 +116,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "PATCH",
-            path: "/api/nodes/:id",
+            path: "/api/nodes/{id}",
             summary: "Partially update a node's structural fields",
             stability: "public",
             request: Some("ResourceNodePatch"),
@@ -124,7 +124,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "DELETE",
-            path: "/api/nodes/:id",
+            path: "/api/nodes/{id}",
             summary: "Delete a node and its whole subtree",
             stability: "public",
             request: None,
@@ -148,7 +148,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "GET",
-            path: "/api/nodes/:id/endpoint-detail",
+            path: "/api/nodes/{id}/endpoint-detail",
             summary: "Get an endpoint's request configuration",
             stability: "public",
             request: None,
@@ -156,7 +156,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "PATCH",
-            path: "/api/nodes/:id/endpoint-detail",
+            path: "/api/nodes/{id}/endpoint-detail",
             summary: "Partially update an endpoint's request configuration",
             stability: "public",
             request: Some("EndpointDetailPatch"),
@@ -164,19 +164,19 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/nodes/:id/duplicate",
+            path: "/api/nodes/{id}/duplicate",
             summary: "Copy an endpoint (endpoints only); an optional newId names the copy",
             stability: "public",
             request: Some("NodeDuplicate"),
             response: Some("ResourceNode"),
         },
         // ---- baseUrl definitions ----------------------------------------
-        // 服务属于项目，故读与两个写挂在 `/api/projects/:projectId/baseurls`。
-        // 只有按 id 的动词留在 `/api/baseurl-defs/:defId`：改名或删除点名的是服务
+        // 服务属于项目，故读与两个写挂在 `/api/projects/{projectId}/baseurls`。
+        // 只有按 id 的动词留在 `/api/baseurl-defs/{defId}`：改名或删除点名的是服务
         // 本身，不需要项目上下文就能找到它。
         RouteSpec {
             method: "GET",
-            path: "/api/projects/:projectId/baseurls",
+            path: "/api/projects/{projectId}/baseurls",
             summary: "List a project's services; every module can resolve every one",
             stability: "public",
             request: None,
@@ -184,7 +184,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/projects/:projectId/baseurls",
+            path: "/api/projects/{projectId}/baseurls",
             summary: "Add a service to the project",
             stability: "public",
             request: Some("BaseUrlDefCreate"),
@@ -192,7 +192,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/projects/:projectId/baseurls/default",
+            path: "/api/projects/{projectId}/baseurls/default",
             summary:
                 "Set (or clear) the project's star default service; answers the updated Project",
             stability: "public",
@@ -201,7 +201,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "PATCH",
-            path: "/api/baseurl-defs/:defId",
+            path: "/api/baseurl-defs/{defId}",
             summary: "Rename or re-describe a service",
             stability: "public",
             request: Some("BaseUrlDefPatch"),
@@ -209,7 +209,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "DELETE",
-            path: "/api/baseurl-defs/:defId",
+            path: "/api/baseurl-defs/{defId}",
             summary: "Delete a service; the star pointer is cleared with it if it named this one",
             stability: "public",
             request: None,
@@ -234,7 +234,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "PATCH",
-            path: "/api/environments/:envId",
+            path: "/api/environments/{envId}",
             summary: "Update an environment (null clears a field)",
             stability: "public",
             request: Some("EnvironmentPatch"),
@@ -242,7 +242,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "DELETE",
-            path: "/api/environments/:envId",
+            path: "/api/environments/{envId}",
             summary: "Delete an environment",
             stability: "public",
             request: None,
@@ -258,7 +258,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/environments/:envId/vars",
+            path: "/api/environments/{envId}/vars",
             summary: "Set one environment variable (null deletes it)",
             stability: "public",
             request: Some("EnvSetVar"),
@@ -266,7 +266,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/environments/:envId/vars/rename",
+            path: "/api/environments/{envId}/vars/rename",
             summary: "Rename an environment variable in one step",
             stability: "public",
             request: Some("EnvRenameVar"),
@@ -274,7 +274,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/environments/:envId/module-baseurls",
+            path: "/api/environments/{envId}/module-baseurls",
             summary: "Set one service's URL for one module in this environment \
                       (the only layer; null clears that one cell)",
             stability: "public",
@@ -289,7 +289,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         // 只有追加是集合级的，它点的 id 在 body 里，见 `routes/response_history.rs`。
         RouteSpec {
             method: "GET",
-            path: "/api/response-history/:endpointId",
+            path: "/api/response-history/{endpointId}",
             summary: "Stored responses for one endpoint; newest first, at most the endpoint's \
                       10 kept rows. An endpoint with nothing stored answers []",
             stability: "public",
@@ -306,7 +306,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "DELETE",
-            path: "/api/response-history/:endpointId",
+            path: "/api/response-history/{endpointId}",
             summary: "Clear one endpoint's stored responses; answers how many rows were removed",
             stability: "public",
             request: None,
