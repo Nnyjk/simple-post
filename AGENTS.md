@@ -99,10 +99,19 @@ node scripts/dump-openapi.mjs > openapi.yaml      # render the OpenAPI spec from
 
 Lint/format tooling: **ESLint 10 (flat config) + Prettier 3**. ESLint owns correctness (`rules-of-hooks`, unused vars, …); style belongs to Prettier (`eslint-config-prettier` sits last in the config). Rust side: `cargo fmt`, `cargo clippy` with `-D warnings`.
 
-**CI quality gate** — `.github/workflows/ci.yml` runs on every push to `main` and every PR (`release.yml` only publishes):
-- `web` (ubuntu, Node 22): `format:check` → `lint` → `typecheck` → `npm test` → `vite build`
-- `rust` (windows-latest): `cargo fmt --check` → `clippy -D warnings` → `cargo test --workspace`
-- `docker` (ubuntu, 75 min budget): builds `linux/amd64`, then runs a **running-container** smoke test — HEALTHCHECK wait, `/healthz` body assertion, SPA shell + hashed asset fetch, unauthenticated `/api/*` → 401, project create over REST, `id -u == 10001`, no `libgtk`/`libwebkit`, and a *replaced* container against the same named volume. A `linux/arm64` QEMU cross-build is appended as `continue-on-error` — it is a compile check, not an artefact, and must never gate the amd64 smoke test.
+**CI quality gate** — `.github/workflows/ci.yml`, on every push to `main`, every PR, a weekly schedule and manual dispatch:
+
+- `Web — format, lint, typecheck, test, build` (ubuntu, Node 22): `format:check` → `lint` → `typecheck` → `npm test` → `vite build`
+- `Rust — fmt, clippy, test` (windows-latest): `cargo fmt --check` → `clippy -D warnings` → `cargo test --workspace`. `swatinem/rust-cache` runs with `cache-target: true`, because three separate cargo invocations each cold-compiling the same `target/` was the expensive half.
+- `Docker — image build + container smoke test` (ubuntu, 75 min budget): builds `linux/amd64`, then runs a **running-container** smoke test — HEALTHCHECK wait, `/healthz` body assertion, SPA shell + hashed asset fetch, unauthenticated `/api/*` → 401, project create over REST, `id -u == 10001`, no `libgtk`/`libwebkit`, and a *replaced* container against the same named volume.
+
+Those three display names are the **required status checks** configured on `main` (see #25). Renaming a job is therefore a settings change, not just a YAML edit.
+
+`web` and `rust` are unconditional — measured at 37s and 1m57s, they cost nothing to always run, and keeping them unconditional is what makes "a skipped required check means passed" safe. `docker` was 18m14s, 98.7% of a full run, so it alone is scope-gated by a `changes` job using `dorny/paths-filter`: a README-only PR skips it. Its `if` is `!cancelled() && outputs.docker != 'false'` — the fail-closed half, so a broken filter runs the gate instead of reporting green. A skipped job is reported successful, which is why a skipped required check is acceptable.
+
+`Docker — linux/arm64 compile check (advisory)` is a separate job running only on `main`, the weekly schedule, or manual dispatch, with `continue-on-error` at job level. It was never a gate; it just should not have run on every PR.
+
+Publishing: `release.yml` (desktop installers, draft) and `publish-image.yml` (GHCR, `linux/amd64` + `linux/arm64`) both trigger on `v*`. Both use `cancel-in-progress: false` — cancelling a publish halfway leaves a partial release, which is worse than the duplicate it prevents.
 
 The smoke test asserts the **response body**, not the status line: an unrouted path falls through to the ServeDir SPA fallback and returns `200 text/html`, so a status-only assertion cannot fail. See the `is_public_path` entry under Code Conventions.
 
@@ -206,7 +215,8 @@ The regression net is `scripts/test-web-basepath.mjs`, which parses the served s
 - `tsconfig.json`, `package.json`, `tailwind.config.js`
 - `eslint.config.js`, `.prettierrc`, `.prettierignore` — lint/format rules and scope
 - `.editorconfig`, `.gitattributes` — LF-everywhere policy (only `*.bat`/`*.cmd` are CRLF)
-- `.github/workflows/ci.yml` — the push/PR quality gate; `release.yml` only publishes
+- `.github/workflows/ci.yml` — the push/PR quality gate; `release.yml` publishes desktop installers on a `v*` tag, `publish-image.yml` publishes the matching multi-arch container image
+- `.github/dependabot.yml` — github-actions / npm / cargo, weekly, minor+patch grouped
 - `scripts/run-tests.mjs` — test discovery runner behind `npm test`
 
 ## Runtime/Tooling Preferences

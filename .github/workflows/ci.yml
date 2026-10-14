@@ -1,13 +1,20 @@
 name: CI
 
 # Quality gate — every push to main and every PR must clear the same
-# six checks `npm run check` runs locally, plus a production build.
-# The release workflow stays independent of this one.
+# checks `npm run check` runs locally, plus a production build and a
+# running-container smoke test. The release workflow stays independent
+# of this one.
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Weekly arm64 compile check. It is deliberately not a required
+    # check, so a scheduled run is its one chance to catch a
+    # target-specific break before the next release.
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -17,6 +24,54 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # Actions has no per-job path filter: `paths` is workflow-level, and
+    # a workflow-level filter would take `web` and `rust` down with it —
+    # those two are the required checks set in #25, so skipping them would
+    # report "nothing ran" instead of "passed". Compute the scope here and
+    # let `docker` read it through `needs` instead.
+    #
+    # A skipped job is reported as successful, which is what a skipped
+    # required check needs, so `docker` going idle on a docs-only PR is
+    # safe. `!cancelled()` in its `if` is the fail-closed half: if this
+    # job errors, `docker` runs anyway rather than silently reporting green.
+    name: Change scope
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      # On `pull_request` this reads the file list from the API; on
+      # `push`/`schedule` it diffs, which needs more than the shallow
+      # default. Repo is small, so a full fetch costs little.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'docker-compose.yml'
+              - 'docker-swarm.yml'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'crates/**'
+              - 'src-tauri/**'
+              - 'src/**'
+              - 'scripts/**'
+              - 'index.html'
+              - 'vite.config.ts'
+              - 'public/**'
+              - '.github/workflows/ci.yml'
+
   web:
     name: Web — format, lint, typecheck, test, build
     runs-on: ubuntu-latest
@@ -65,8 +120,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Rust dependencies
+      - name: Cache Rust dependencies and build output
         uses: swatinem/rust-cache@v2
+        with:
+          # Registry deps alone are the coarse half: `fmt`, `clippy` and
+          # `test` are three separate cargo invocations that would each
+          # cold-compile the same target/ from nothing.
+          cache-target: true
 
       - name: cargo fmt (check only)
         run: cargo fmt --all --check
@@ -79,20 +139,18 @@ jobs:
 
   docker:
     # Container image + a smoke test against a *running* container.
-    # Additive job: `web` and `rust` above are untouched.
-    #
-    # The smoke test exists because "it compiled" and "it serves" are
-    # different claims. `--spa-dir`, the `0.0.0.0` bind, the named volume and
-    # the health probe are all wiring that only shows up at runtime, and all
-    # four have shipped broken in some form before.
+    # Gated on change scope: measured on main at 18m14s, this job was
+    # 98.7% of a full CI run's wall clock, and a README-only PR does not
+    # change a single byte of it. Every assertion below is untouched —
+    # each is the regression net for a defect that shipped (#17 / #19 /
+    # #20), and none of them is traded for speed.
     name: Docker — image build + container smoke test
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docker != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
-
-      - name: 'Set up QEMU (linux/arm64 cross-build)'
-        uses: docker/setup-qemu-action@v3
 
       - name: 'Set up Buildx'
         uses: docker/setup-buildx-action@v3
@@ -153,8 +211,11 @@ jobs:
 
           BASE=http://127.0.0.1:4173
 
-          # `/healthz` is on the always-unauthenticated bypass list — that is
-          # exactly what makes it safe as a container probe.
+          # Assert the *body*, not just the status line: an unrouted path
+          # falls through to the ServeDir SPA fallback and answers
+          # `200 text/html`, so a status-only assertion passes on a route
+          # that does not exist. This is the defect the container
+          # HEALTHCHECK shipped with.
           health=$(curl -fsS "$BASE/healthz")
           grep -q '"status":"ok"' <<<"$health"
 
@@ -257,14 +318,39 @@ jobs:
           grep -q 'ci-smoke-project' <<<"$list"
           echo "SQLite store survived in the named volume"
 
+      - name: 'Cleanup'
+        if: always()
+        run: |
+          docker rm -f sp-smoke >/dev/null 2>&1 || true
+          docker volume rm -f sp-smoke-data >/dev/null 2>&1 || true
+
+  docker-arm64:
+    # Compile check only, split out of `docker`. It was `continue-on-error`
+    # inside that job already, so it never gated anything — but it consumed
+    # most of the wall clock, because `[profile.release]` is `lto = true`
+    # with `codegen-units = 1`, which is exactly the configuration QEMU
+    # emulation handles worst. A check that does not gate should not run on
+    # every PR; main pushes and the weekly schedule are where it earns its
+    # keep.
+    #
+    # `continue-on-error` stays at job level so this stays non-gating even
+    # now that it is a job of its own — a target-specific break must never
+    # block the amd64 smoke test.
+    name: Docker — linux/arm64 compile check (advisory)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 'Set up QEMU (linux/arm64 cross-build)'
+        uses: docker/setup-qemu-action@v3
+
+      - name: 'Set up Buildx'
+        uses: docker/setup-buildx-action@v3
+
       - name: 'Build image (linux/arm64 under QEMU — compile check only)'
-        # Best effort by design. `[profile.release]` is `lto = true` with
-        # `codegen-units = 1`, which is exactly the configuration QEMU
-        # emulation is worst at, so a full arm64 build can take longer than a
-        # reasonable CI budget. Its value is catching a target-specific
-        # compile error, not producing an artefact — a failure is reported in
-        # the log but must not gate the amd64 smoke test above.
-        continue-on-error: true
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -274,9 +360,3 @@ jobs:
           # `load: true` is impossible here (the runner daemon is amd64), so
           # emit an OCI tarball instead and throw it away.
           outputs: type=oci,dest=/tmp/simple-post-arm64.oci.tar
-
-      - name: 'Cleanup'
-        if: always()
-        run: |
-          docker rm -f sp-smoke >/dev/null 2>&1 || true
-          docker volume rm -f sp-smoke-data >/dev/null 2>&1 || true
