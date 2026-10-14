@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
-use simple_post_core::domain::EndpointDetail;
+use simple_post_core::domain::{EndpointDetail, OAuth2GrantType};
 use simple_post_core::error::AppError;
 
 // =========================================================================
@@ -306,6 +306,47 @@ fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
             }
             if val_missing {
                 issues.push(json!({ "field": "auth.apikey.value", "message": "required" }));
+            }
+        }
+        AuthType::Oauth2 => {
+            let Some(o) = endpoint.auth.oauth2.as_ref() else {
+                issues.push(json!({
+                    "field": "auth.oauth2",
+                    "message": "auth_type=oauth2 requires an `oauth2` config object"
+                }));
+                return issues;
+            };
+            // 只报「缺哪个字段」，不代填也不拒收：真正的判定在取 token 时
+            // (`oauth2::validate`)，那里才知道该流程的完整要求。
+            let mut need = |field: &str, ok: bool| {
+                if !ok {
+                    issues.push(json!({ "field": field, "message": "required" }));
+                }
+            };
+            match o.grant_type {
+                OAuth2GrantType::Implicit => {
+                    need(
+                        "auth.oauth2.authorizationUrl",
+                        !o.authorization_url.trim().is_empty(),
+                    );
+                }
+                OAuth2GrantType::ClientCredentials => {
+                    need("auth.oauth2.tokenUrl", !o.token_url.trim().is_empty());
+                    need("auth.oauth2.clientId", !o.client_id.trim().is_empty());
+                }
+                OAuth2GrantType::Password => {
+                    need("auth.oauth2.tokenUrl", !o.token_url.trim().is_empty());
+                    need("auth.oauth2.clientId", !o.client_id.trim().is_empty());
+                    need("auth.oauth2.username", !o.username.trim().is_empty());
+                }
+                OAuth2GrantType::AuthorizationCode => {
+                    need("auth.oauth2.tokenUrl", !o.token_url.trim().is_empty());
+                    need("auth.oauth2.clientId", !o.client_id.trim().is_empty());
+                    // 这里只看非空：粘进来的是一条回调 URL 时，真正的 `code` 要等
+                    // `oauth2::extract_code` 才解析得出来，而那条路径在取 token 时。
+                    // 提前报「缺授权码」只会把一条有效的粘贴判成无效。
+                    need("auth.oauth2.authCode", !o.auth_code.trim().is_empty());
+                }
             }
         }
     }

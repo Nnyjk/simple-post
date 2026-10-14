@@ -80,7 +80,10 @@ fn a_null_expires_at_is_kept_as_unknown_rather_than_coerced_to_zero() {
     t.expires_at = None;
     db::with_tx(&pool, |c| upsert(c, "k1", &t)).unwrap();
     let got = db::with_conn(&pool, |c| get(c, "k1")).unwrap().unwrap();
-    assert_eq!(got.expires_at, None, "IdP 没给 expires_in 时不能当成「1970 年就过期」");
+    assert_eq!(
+        got.expires_at, None,
+        "IdP 没给 expires_in 时不能当成「1970 年就过期」"
+    );
 }
 
 #[test]

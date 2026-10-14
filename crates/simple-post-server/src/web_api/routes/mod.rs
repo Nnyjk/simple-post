@@ -5,6 +5,7 @@ pub(crate) mod base_url_defs;
 pub(crate) mod environments;
 pub(crate) mod mcp;
 pub(crate) mod nodes;
+pub(crate) mod oauth2;
 pub(crate) mod permissions;
 pub(crate) mod preferences;
 pub(crate) mod projects;
@@ -32,6 +33,7 @@ pub(crate) use nodes::{
     node_endpoint_detail_patch, nodes_create, nodes_delete, nodes_get, nodes_list, nodes_move,
     nodes_update,
 };
+pub(crate) use oauth2::oauth2_token;
 pub(crate) use permissions::{permissions_get, permissions_set};
 pub(crate) use preferences::{preferences_get, preferences_put};
 pub(crate) use projects::{

@@ -39,7 +39,7 @@ pub mod web_api;
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /
 // `crate::permissions::*` / `crate::http_executor::*` /
 // `crate::mcp_metrics::*` / `crate::mcp::*`。
-pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, permissions};
+pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, oauth2, permissions};
 
 // 再导出独立 `simple-post-mcp` crate 的 MCP 模块。之所以也再导出 `daemon_http`，
 // 是因为 `run_mcp` 需要 `serve_with_config` 把监听配置（挂载路径 + Host/Origin

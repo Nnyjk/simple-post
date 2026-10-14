@@ -107,6 +107,13 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
                 .delete(projects_delete),
         )
         .route("/api/http/send", post(http_send))
+        // ---- oauth2 ----
+        //
+        // 取 token 是**发请求之前**的一步，所以它是独立动词而不是 `/api/http/send`
+        // 的参数：渲染层先拿到 access token 自己拼好 `Authorization`，再走既有的
+        // 发送路径，于是 cURL 预览与真实发送仍是同一个组装核。必须落在
+        // `auth::is_public_path` 名单**之外**——它按请求体里的 URL 出一趟站请求。
+        .route("/api/oauth2/token", post(oauth2_token))
         // ---- resource tree ----
         //
         // 字面量动词必须注册在 `/{id}` 之前，否则在 radix tree 里被参数段吃掉。

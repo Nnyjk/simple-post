@@ -250,9 +250,7 @@ pub fn validate(cfg: &OAuth2Auth) -> Result<(), AppError> {
         OAuth2GrantType::Password => {
             require_token_url(cfg)?;
             if cfg.client_id.trim().is_empty() {
-                return Err(AppError::Validation(
-                    "password 流程需要 Client ID".into(),
-                ));
+                return Err(AppError::Validation("password 流程需要 Client ID".into()));
             }
             // 密码允许为空：是否接受空密码是 IdP 的决定，不该由本应用替它答。
             if cfg.username.trim().is_empty() {
@@ -387,7 +385,10 @@ async fn refresh_via_http(cfg: &OAuth2Auth, refresh_token: &str) -> Result<OAuth
     token_request(cfg, &form).await
 }
 
-async fn token_request(cfg: &OAuth2Auth, form: &[(String, String)]) -> Result<OAuth2Token, AppError> {
+async fn token_request(
+    cfg: &OAuth2Auth,
+    form: &[(String, String)],
+) -> Result<OAuth2Token, AppError> {
     let mut headers: Vec<(String, String)> = vec![
         (
             "Content-Type".into(),
@@ -402,7 +403,11 @@ async fn token_request(cfg: &OAuth2Auth, form: &[(String, String)]) -> Result<OA
         && !cfg.client_id.trim().is_empty()
         && !cfg.client_secret.is_empty()
     {
-        let raw = format!("{}:{}", form_encode(cfg.client_id.trim()), form_encode(&cfg.client_secret));
+        let raw = format!(
+            "{}:{}",
+            form_encode(cfg.client_id.trim()),
+            form_encode(&cfg.client_secret)
+        );
         headers.push((
             "Authorization".into(),
             format!("Basic {}", crate::base64::encode(raw.as_bytes())),
@@ -457,9 +462,7 @@ fn parse_token_response(
 
     let access_token = lookup(&pairs, "access_token").unwrap_or_default();
     if access_token.is_empty() {
-        return Err(AppError::Validation(
-            "token 响应里没有 access_token".into(),
-        ));
+        return Err(AppError::Validation("token 响应里没有 access_token".into()));
     }
     Ok(OAuth2Token {
         access_token,
@@ -504,8 +507,7 @@ fn parse_pasted(pasted: &str) -> Result<PastedToken, AppError> {
                 token_type: lookup(&pairs, "token_type")
                     .filter(|v| !v.trim().is_empty())
                     .unwrap_or_else(|| "Bearer".into()),
-                expires_in: lookup(&pairs, "expires_in")
-                    .and_then(|v| v.trim().parse::<i64>().ok()),
+                expires_in: lookup(&pairs, "expires_in").and_then(|v| v.trim().parse::<i64>().ok()),
             });
         }
     }
@@ -569,6 +571,39 @@ pub fn auth_query_value(token: &OAuth2Token) -> String {
 /// token 该放哪（`tokenLocation` 为 query 时调用方改走 URL 追加）。
 pub fn goes_in_query(cfg: &OAuth2Auth) -> bool {
     cfg.token_location == OAuth2TokenLocation::Query
+}
+
+/// 把 token 挂到一份**已解析好**的请求上，就地改 `headers` / `url`。
+///
+/// 放在 core 而非各调用方，是为了让「query 位置用 `&` 还是 `?`」「参数名空白时回落」
+/// 这些只有一处能定对的细节不被复制两份。渲染进程另有一份 TS 实现（`src/lib/oauth2.ts`），
+/// 那是跨语言无法共享的部分，本函数刻意保持「纯数据 → 纯数据」。
+///
+/// 用户手写过 `Authorization` 时不覆盖：那与
+/// `variable_fill::build_headers` 对 bearer / basic 的处理一致，也免掉「两个
+/// Authorization」—— 服务端看到的是列表而非覆盖。
+pub fn inject(
+    cfg: &OAuth2Auth,
+    token: &OAuth2Token,
+    headers: &mut Vec<(String, String)>,
+    url: &mut String,
+) {
+    if goes_in_query(cfg) {
+        let glue = if url.contains('?') { '&' } else { '?' };
+        *url = format!(
+            "{url}{glue}{}={}",
+            form_encode(cfg.token_param_or_default()),
+            form_encode(&auth_query_value(token))
+        );
+        return;
+    }
+    if headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+    {
+        return;
+    }
+    headers.push(("Authorization".to_string(), auth_header_value(token)));
 }
 
 // ---------------------------------------------------------------------------
@@ -662,18 +697,16 @@ fn form_decode(s: &str) -> String {
                 out.push(b' ');
                 i += 1;
             }
-            b'%' if i + 2 < bytes.len() => {
-                match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                    (Some(hi), Some(lo)) => {
-                        out.push(hi << 4 | lo);
-                        i += 3;
-                    }
-                    _ => {
-                        out.push(bytes[i]);
-                        i += 1;
-                    }
+            b'%' if i + 2 < bytes.len() => match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                (Some(hi), Some(lo)) => {
+                    out.push(hi << 4 | lo);
+                    i += 3;
                 }
-            }
+                _ => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            },
             other => {
                 out.push(other);
                 i += 1;
@@ -684,7 +717,9 @@ fn form_decode(s: &str) -> String {
 }
 
 fn hex_upper(nibble: u8) -> char {
-    char::from_digit(nibble as u32, 16).unwrap_or('0').to_ascii_uppercase()
+    char::from_digit(nibble as u32, 16)
+        .unwrap_or('0')
+        .to_ascii_uppercase()
 }
 
 fn hex_val(b: u8) -> Option<u8> {

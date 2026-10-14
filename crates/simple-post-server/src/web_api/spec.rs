@@ -322,6 +322,20 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             request: Some("HttpRequestInput"),
             response: Some("HttpResult"),
         },
+        // ---- oauth2 -----------------------------------------------------
+        // 取 token 是发请求**之前**的一步，故独立成动词而不是 `/api/http/send` 的
+        // 参数。返回的 `accessToken` 要由调用方拼进 `Authorization`；响应刻意不含
+        // `refresh_token`，它只在服务端的 `oauth2_tokens` 表里续期。
+        RouteSpec {
+            method: "POST",
+            path: "/api/oauth2/token",
+            summary: "Resolve an OAuth2 access token for one auth config \
+                      (cached, refreshed on expiry, or fetched); the caller \
+                      injects it into the request it is about to send",
+            stability: "public",
+            request: Some("OAuth2TokenRequest"),
+            response: Some("OAuth2TokenDto"),
+        },
         // ---- mcp daemon lifecycle (manual switch) ----------------------
         // 登记而非留作 internal：`start` / `stop` 是 renderer 侧的 daemon 开关，
         // 与 Tauri 命令 `mcp_daemon_start` / `mcp_daemon_stop` 同源，也是第三方

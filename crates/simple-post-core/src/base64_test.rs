@@ -19,7 +19,10 @@ fn the_http_basic_shapes_round_trip_through_a_known_value() {
     // `user:pass` 是 HTTP Basic 最常见的字面量；`aladdin:open sesame` 是 RFC 7617
     // 的例子。两者都必须与 OpenSSL 的输出一致，否则服务端解出的不是同一组凭据。
     assert_eq!(encode(b"user:pass"), "dXNlcjpwYXNz");
-    assert_eq!(encode(b"Aladdin:open sesame"), "QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
+    assert_eq!(
+        encode(b"Aladdin:open sesame"),
+        "QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
+    );
 }
 
 #[test]
@@ -36,6 +39,9 @@ fn every_byte_value_survives_a_length_that_straddles_the_block() {
         let input: Vec<u8> = (0..len).map(|i| (i * 7 % 256) as u8).collect();
         let out = encode(&input);
         assert_eq!(out.len() % 4, 0, "len={len} out={out}");
-        assert!(out.ends_with('=') || out.is_empty() || len % 3 == 0, "len={len}");
+        assert!(
+            out.ends_with('=') || out.is_empty() || len % 3 == 0,
+            "len={len}"
+        );
     }
 }

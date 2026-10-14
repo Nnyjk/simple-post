@@ -98,9 +98,15 @@ fn every_flow_rejects_its_own_missing_fields() {
         grant_type: OAuth2GrantType::ClientCredentials,
         ..OAuth2Auth::default()
     };
-    assert!(validate(&cfg).unwrap_err().to_string().contains("Token URL"));
+    assert!(validate(&cfg)
+        .unwrap_err()
+        .to_string()
+        .contains("Token URL"));
     cfg.token_url = "https://idp.example.com/token".into();
-    assert!(validate(&cfg).unwrap_err().to_string().contains("Client ID"));
+    assert!(validate(&cfg)
+        .unwrap_err()
+        .to_string()
+        .contains("Client ID"));
 
     let mut code = OAuth2Auth {
         grant_type: OAuth2GrantType::AuthorizationCode,
@@ -118,7 +124,10 @@ fn every_flow_rejects_its_own_missing_fields() {
         client_id: "cid".into(),
         ..OAuth2Auth::default()
     };
-    assert!(validate(&ropc).unwrap_err().to_string().contains("Username"));
+    assert!(validate(&ropc)
+        .unwrap_err()
+        .to_string()
+        .contains("Username"));
     ropc.username = "u".into();
     ropc.password = "p".into();
     validate(&ropc).expect("补上用户名后应通过");
@@ -214,11 +223,7 @@ fn form_encoding_runs_before_base64_for_http_basic_client_credentials() {
     // 被服务端解出另一组凭据。
     assert_eq!(form_encode("Aladdin"), "Aladdin");
     assert_eq!(form_encode("open sesame"), "open+sesame");
-    let header = format!(
-        "{}:{}",
-        form_encode("Aladdin"),
-        form_encode("open sesame")
-    );
+    let header = format!("{}:{}", form_encode("Aladdin"), form_encode("open sesame"));
     assert_eq!(
         crate::base64::encode(header.as_bytes()),
         "QWxhZGRpbjpvcGVuK3Nlc2FtZQ=="
@@ -284,19 +289,25 @@ fn a_json_token_response_is_understood() {
 #[test]
 fn a_form_encoded_token_response_is_also_understood() {
     // 少数 IdP 至今仍回 x-www-form-urlencoded。
-    let t =
-        parse_token_response(200, "access_token=AT&expires_in=60", "application/x-www-form-urlencoded")
-            .unwrap();
+    let t = parse_token_response(
+        200,
+        "access_token=AT&expires_in=60",
+        "application/x-www-form-urlencoded",
+    )
+    .unwrap();
     assert_eq!(t.access_token, "AT");
-    assert_eq!(t.token_type, "Bearer", "没给 token_type 时按 RFC 的默认补齐");
+    assert_eq!(
+        t.token_type, "Bearer",
+        "没给 token_type 时按 RFC 的默认补齐"
+    );
 }
 
 #[test]
 fn an_error_response_carries_the_idp_s_own_words_to_the_caller() {
     let body = r#"{"error":"invalid_client","error_description":"client authentication failed"}"#;
     let err = parse_token_response(401, body, "application/json")
-            .unwrap_err()
-            .to_string();
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("invalid_client"), "got: {err}");
     assert!(err.contains("client authentication failed"), "got: {err}");
 }
@@ -304,7 +315,9 @@ fn an_error_response_carries_the_idp_s_own_words_to_the_caller() {
 #[test]
 fn a_html_error_page_does_not_become_a_wall_of_text() {
     let body = format!("<html><body>{}</body></html>", "x".repeat(5000));
-    let err = parse_token_response(502, &body, "text/html").unwrap_err().to_string();
+    let err = parse_token_response(502, &body, "text/html")
+        .unwrap_err()
+        .to_string();
     assert!(err.len() < 400, "错误信息被裁到 {}", err.len());
 }
 
@@ -320,7 +333,10 @@ fn a_200_without_an_access_token_is_an_error() {
 fn an_absent_expires_in_leaves_the_expiry_unknown() {
     let t = parse_token_response(200, r#"{"access_token":"AT"}"#, "application/json").unwrap();
     assert_eq!(t.expires_at, None);
-    assert!(!is_expired(&t), "不知道过期时间时必须继续用着，否则每个请求都重取一次");
+    assert!(
+        !is_expired(&t),
+        "不知道过期时间时必须继续用着，否则每个请求都重取一次"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -471,7 +487,11 @@ struct FakeIdp {
 }
 
 impl FakeIdp {
-    async fn start(status_line: &'static str, content_type: &'static str, body: &'static str) -> Self {
+    async fn start(
+        status_line: &'static str,
+        content_type: &'static str,
+        body: &'static str,
+    ) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let handle = tokio::spawn(async move {
@@ -634,7 +654,10 @@ async fn an_expired_token_without_a_refresh_token_is_refetched() {
     assert_eq!(token.access_token, "AT-NEW");
     assert_eq!(token.refresh_token.as_deref(), Some("RT-NEW"));
     let request = idp.received().await;
-    assert!(request.contains("grant_type=client_credentials"), "got: {request}");
+    assert!(
+        request.contains("grant_type=client_credentials"),
+        "got: {request}"
+    );
 }
 
 #[tokio::test]

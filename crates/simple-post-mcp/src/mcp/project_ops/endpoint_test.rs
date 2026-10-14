@@ -21,7 +21,8 @@ use super::*;
 use crate::mcp::AppState;
 use simple_post_core::db::{endpoint_details, nodes, permissions, projects};
 use simple_post_core::domain::{
-    BodyMode, EndpointDetail, HttpMethod, Project, RequestBody, ResourceNode, ResourceNodeType,
+    BodyMode, EndpointDetail, HttpMethod, OAuth2ClientAuth, OAuth2GrantType, OAuth2TokenLocation,
+    Project, RequestBody, ResourceNode, ResourceNodeType,
 };
 use simple_post_core::error::AppError;
 use simple_post_core::permissions::Permission;
@@ -237,6 +238,12 @@ async fn endpoint_update_rejects_an_unknown_body_mode() {
     assert!(msg.contains("'body'"), "got: {msg}");
 }
 
+/// An unknown `auth.kind` must be an error. These go through serde,
+/// which reports the variant list.
+///
+/// The payload is a name that never existed rather than `oauth2`: that
+/// one is a supported kind since #2, so reusing it here would leave the
+/// assertion testing nothing.
 #[tokio::test]
 async fn endpoint_update_rejects_an_unknown_auth_kind() {
     let (st, id) = fixture();
@@ -244,7 +251,7 @@ async fn endpoint_update_rejects_an_unknown_auth_kind() {
         &st,
         serde_json::json!({
             "endpoint_id": id,
-            "patch": { "auth": { "kind": "oauth2" } }
+            "patch": { "auth": { "kind": "bearerish" } }
         }),
     )
     .await;
@@ -252,6 +259,149 @@ async fn endpoint_update_rejects_an_unknown_auth_kind() {
         panic!("expected a Validation error, got {res:?}");
     };
     assert!(msg.contains("'auth'"), "got: {msg}");
+}
+
+/// An `oauth2` payload with a malformed field aborts the **whole**
+/// patch. `grantType` goes through serde, so an invented flow must be
+/// reported rather than quietly defaulting to `authorization_code` and
+/// then failing against a real IdP much later.
+#[tokio::test]
+async fn endpoint_update_rejects_a_malformed_oauth2_payload() {
+    let (st, id) = fixture();
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": {
+                "auth": {
+                    "kind": "oauth2",
+                    "oauth2": { "grantType": "teleport", "tokenUrl": "https://idp.example.com/token" }
+                }
+            }
+        }),
+    )
+    .await;
+    let Err(AppError::Validation(msg)) = res else {
+        panic!("expected a Validation error, got {res:?}");
+    };
+    assert!(msg.contains("teleport"), "got: {msg}");
+    assert_eq!(
+        detail_of(&st, &id).auth.kind,
+        simple_post_core::domain::AuthType::None,
+        "a rejected auth must leave the stored one untouched"
+    );
+}
+
+/// The acceptance path: an agent writes a full oauth2 config and it
+/// lands in the stored row, not merely in the echoed response.
+#[tokio::test]
+async fn an_agent_can_store_a_complete_oauth2_config() {
+    let (st, id) = fixture();
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": {
+                "auth": {
+                    "kind": "oauth2",
+                    "oauth2": {
+                        "grantType": "client_credentials",
+                        "tokenUrl": "https://idp.example.com/oauth/token",
+                        "clientId": "cid",
+                        "clientSecret": "csecret",
+                        "clientAuth": "body",
+                        "scope": "read write",
+                        "extraParams": [
+                            { "id": "kv1", "key": "audience", "value": "https://api.example.com", "enabled": true }
+                        ],
+                        "tokenLocation": "query",
+                        "tokenParam": "jwt"
+                    }
+                }
+            }
+        }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+
+    let stored = detail_of(&st, &id).auth;
+    assert_eq!(stored.kind, simple_post_core::domain::AuthType::Oauth2);
+    let o = stored.oauth2.expect("oauth2 payload");
+    assert_eq!(o.grant_type, OAuth2GrantType::ClientCredentials);
+    assert_eq!(o.token_url, "https://idp.example.com/oauth/token");
+    assert_eq!(o.client_id, "cid");
+    assert_eq!(o.client_secret, "csecret");
+    assert_eq!(o.client_auth, OAuth2ClientAuth::Body);
+    assert_eq!(o.scope, "read write");
+    assert_eq!(o.token_location, OAuth2TokenLocation::Query);
+    assert_eq!(o.token_param, "jwt");
+    assert_eq!(o.extra_params.len(), 1);
+    assert_eq!(o.extra_params[0].key, "audience");
+}
+
+/// `endpoint_create` 的 `auth_type` 也得认识 oauth2 —— 它走的是另一条解析路径
+/// (`build_auth` 的字符串匹配)，漏掉它会让 create 与 update 对同一个鉴权方案
+/// 给出不同的答案。
+#[tokio::test]
+async fn endpoint_create_accepts_the_oauth2_auth_type() {
+    let (st, _existing) = fixture();
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "project_id": "p_ep_fix",
+            "module_id": "m_ep_fix",
+            "collection_id": "c_ep_fix",
+            "name": "oauth ep",
+            "url": "/x",
+            "method": "GET",
+            "auth_type": "oauth2",
+            "auth_config": {
+                "oauth2": {
+                    "grantType": "client_credentials",
+                    "tokenUrl": "https://idp.example.com/oauth/token",
+                    "clientId": "cid"
+                }
+            }
+        }),
+    )
+    .await;
+    let created = res.expect("create 应成功");
+    // `CallToolResult` 的载荷包在 text content 里，故从序列化后的形状取回 id。
+    let envelope = serde_json::to_value(&created).unwrap();
+    let text = envelope["content"][0]["text"]
+        .as_str()
+        .expect("text content");
+    let body: serde_json::Value = serde_json::from_str(text).expect("content 是 JSON");
+    let id = body["id"].as_str().expect("create 回显里带 id").to_string();
+    assert_eq!(
+        detail_of(&st, &id).auth.kind,
+        simple_post_core::domain::AuthType::Oauth2,
+        "auth_type=oauth2 必须真的落到存储行，不能只出现在回显里"
+    );
+}
+
+/// 一个 `auth_type` 未知的请求，错误信息要列出全部合法取值 —— agent 据此自我纠正，
+/// 而不是去猜大小写或拼写。
+#[tokio::test]
+async fn endpoint_create_rejects_an_unknown_auth_type_and_lists_the_known_ones() {
+    let (st, _existing) = fixture();
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "project_id": "p_ep_fix",
+            "module_id": "m_ep_fix",
+            "collection_id": "c_ep_fix",
+            "name": "bad ep",
+            "url": "/x",
+            "method": "GET",
+            "auth_type": "oauth-2"
+        }),
+    )
+    .await;
+    let Err(AppError::Validation(msg)) = res else {
+        panic!("expected a Validation error, got {res:?}");
+    };
+    assert!(msg.contains("oauth2"), "got: {msg}");
 }
 
 /// A malformed field must abort the **whole** patch, including the
@@ -873,9 +1023,11 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
         props["body_mode"]["enum"],
         serde_json::json!(["none", "json", "form", "raw"])
     );
+    // 与解析器实际接受的那一份常量比对，而不是在这里再抄一遍：抄一份就多一个
+    // 「加了变体却忘了改这里」的地方，而那种不一致对 agent 是静默的。
     assert_eq!(
         props["auth_type"]["enum"],
-        serde_json::json!(["none", "bearer", "basic", "apikey"])
+        serde_json::json!(AUTH_TYPE_VALUES)
     );
     // schema 声明的每个取值都必须能解析。
     for mode in props["body_mode"]["enum"].as_array().expect("enum") {
@@ -936,8 +1088,44 @@ fn endpoint_update_schema_documents_every_patchable_field() {
     );
     assert_eq!(
         patch_props["auth"]["properties"]["kind"]["enum"],
-        serde_json::json!(["none", "bearer", "basic", "apikey"])
+        serde_json::json!(AUTH_TYPE_VALUES)
     );
+    // oauth2 的载荷必须登记进 schema。`auth` 上有 `additionalProperties: false`，
+    // 漏掉它不是「宽松一点」，而是 agent 根本传不进来——一个看着正常却永远收不到
+    // 配置的端点。
+    let oauth2 = &patch_props["auth"]["properties"]["oauth2"];
+    assert_eq!(oauth2["type"], "object");
+    assert_eq!(
+        oauth2["properties"]["grantType"]["enum"],
+        serde_json::json!([
+            "authorization_code",
+            "client_credentials",
+            "password",
+            "implicit"
+        ])
+    );
+    for field in [
+        "tokenUrl",
+        "clientId",
+        "clientSecret",
+        "clientAuth",
+        "scope",
+        "authorizationUrl",
+        "redirectUri",
+        "codeVerifier",
+        "authCode",
+        "username",
+        "password",
+        "extraParams",
+        "tokenLocation",
+        "tokenParam",
+    ] {
+        assert!(
+            oauth2["properties"].get(field).is_some(),
+            "oauth2 载荷漏登记了 `{field}`"
+        );
+    }
+    assert_eq!(oauth2["additionalProperties"], false);
     // 可空字段必须写明 `null` 表示清空 ——
     // three-state meaning is invisible on the wire otherwise.
     assert_eq!(patch_props["environment_id"]["type"][1], "null");

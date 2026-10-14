@@ -76,7 +76,9 @@ fn every_auth_config_shape_written_before_today_still_deserialises() {
 /// 说明有人给某个新变体加了必填字段。
 #[test]
 fn the_empty_object_still_fails_on_kind_alone() {
-    let err = serde_json::from_str::<AuthConfig>("{}").unwrap_err().to_string();
+    let err = serde_json::from_str::<AuthConfig>("{}")
+        .unwrap_err()
+        .to_string();
     assert!(
         err.contains("missing field `kind`"),
         "'{{}}' 只该缺 kind 一个字段，got: {err}"
@@ -106,13 +108,19 @@ fn an_oauth2_payload_alone_still_serialises_back() {
     let back = serde_json::to_value(&auth).unwrap();
     assert_eq!(back["kind"], json!("oauth2"));
     assert_eq!(back["oauth2"]["grantType"], json!("client_credentials"));
-    assert_eq!(back["oauth2"]["tokenUrl"], json!("https://idp.example.com/token"));
+    assert_eq!(
+        back["oauth2"]["tokenUrl"],
+        json!("https://idp.example.com/token")
+    );
 }
 
 /// 线上取值就是用户在 JSON 里写的那个词。
 #[test]
 fn the_oauth2_wire_names_are_the_ones_a_user_writes() {
-    assert_eq!(serde_json::to_string(&AuthType::Oauth2).unwrap(), "\"oauth2\"");
+    assert_eq!(
+        serde_json::to_string(&AuthType::Oauth2).unwrap(),
+        "\"oauth2\""
+    );
     assert_eq!(
         serde_json::to_string(&OAuth2GrantType::AuthorizationCode).unwrap(),
         "\"authorization_code\""
@@ -129,7 +137,10 @@ fn the_oauth2_wire_names_are_the_ones_a_user_writes() {
         serde_json::to_string(&OAuth2GrantType::Implicit).unwrap(),
         "\"implicit\""
     );
-    assert_eq!(serde_json::to_string(&OAuth2ClientAuth::Body).unwrap(), "\"body\"");
+    assert_eq!(
+        serde_json::to_string(&OAuth2ClientAuth::Body).unwrap(),
+        "\"body\""
+    );
     assert_eq!(
         serde_json::to_string(&OAuth2TokenLocation::Query).unwrap(),
         "\"query\""
@@ -154,7 +165,10 @@ fn an_unknown_oauth2_field_is_an_error_not_a_silent_default() {
         "password",
         "implicit",
     ] {
-        assert!(err.contains(known), "报错要列出合法取值 `{known}`，got: {err}");
+        assert!(
+            err.contains(known),
+            "报错要列出合法取值 `{known}`，got: {err}"
+        );
     }
 }
 
