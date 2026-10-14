@@ -38,11 +38,11 @@
  *   npx tsx --test src/lib/tauri-commands.test.ts
  */
 
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-import { COMMANDS, IS_TAURI_SHELL, TauriCommand, invokeCmd } from '../tauri-commands';
+import { COMMANDS, IS_TAURI_SHELL, TauriCommand, invokeCmd, readApiBase } from '../tauri-commands';
 
 // ---------------------------------------------------------------------------
 // Fetch mock plumbing.
@@ -656,5 +656,88 @@ describe('invokeCmd (web shape) — error path', () => {
     // before any network activity, otherwise the error from a 404
     // would be misleading.
     assert.equal(calls.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reverse-proxy base path.
+//
+// `serve-web` can nest its whole router under a prefix
+// (`--public-base-path` / `SIMPLE_POST_PUBLIC_BASE_PATH`), and it injects
+// that value into the SPA shell as `window.__SIMPLE_POST_BASE__` before
+// the module entry runs. The renderer has to read it, because every
+// `WEB_ROUTES` path is root-absolute (`/api/projects`) and a nested
+// router never serves the bare root.
+//
+// This is the half the previous test file could not see: the integration
+// test (`scripts/test-web-basepath.mjs`) asserted the *server* nests
+// correctly, and this one asserted the renderer maps commands to paths.
+// Neither asserted the URL the two of them actually agree on.
+// ---------------------------------------------------------------------------
+
+describe('readApiBase', () => {
+  const realWindow = (globalThis as { window?: unknown }).window;
+
+  afterEach(() => {
+    if (realWindow === undefined) delete (globalThis as { window?: unknown }).window;
+    else (globalThis as { window?: unknown }).window = realWindow;
+  });
+
+  it('is empty in Node, where there is no window at all', () => {
+    delete (globalThis as { window?: unknown }).window;
+    assert.equal(readApiBase(), '');
+  });
+
+  it('is empty for a root deployment that injects nothing', () => {
+    (globalThis as { window?: unknown }).window = {};
+    assert.equal(readApiBase(), '');
+  });
+
+  it('returns the injected prefix', () => {
+    (globalThis as { window?: unknown }).window = { __SIMPLE_POST_BASE__: '/sp' };
+    assert.equal(readApiBase(), '/sp');
+  });
+
+  // `nest` strips the trailing slash, so an operator writing
+  // `SIMPLE_POST_PUBLIC_BASE_PATH=/sp/` must not produce `/sp//api/...`.
+  it('normalises a trailing slash so URLs do not gain a double slash', () => {
+    (globalThis as { window?: unknown }).window = { __SIMPLE_POST_BASE__: '/sp/' };
+    assert.equal(readApiBase(), '/sp');
+  });
+
+  it('ignores a non-string injection', () => {
+    (globalThis as { window?: unknown }).window = { __SIMPLE_POST_BASE__: 42 };
+    assert.equal(readApiBase(), '');
+  });
+});
+
+describe('invokeCmd (web shape) under a reverse-proxy base path', () => {
+  const realWindow = (globalThis as { window?: unknown }).window;
+
+  beforeEach(() => {
+    installFetchMock({ json: [], status: 200 });
+    (globalThis as { window?: unknown }).window = { __SIMPLE_POST_BASE__: '/sp' };
+  });
+  after(() => {
+    restoreFetchMock();
+    if (realWindow === undefined) delete (globalThis as { window?: unknown }).window;
+    else (globalThis as { window?: unknown }).window = realWindow;
+  });
+
+  it('requests the prefixed URL, not the bare root', async () => {
+    await invokeCmd(COMMANDS.projectsList);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, '/sp/api/projects');
+  });
+
+  it('prefixes path params too', async () => {
+    await invokeCmd(COMMANDS.projectsGet, { id: 'proj_1' });
+    assert.equal(calls[0].url, '/sp/api/projects/proj_1');
+  });
+
+  it('falls back to the bare root when no prefix is injected', async () => {
+    (globalThis as { window?: unknown }).window = {};
+    await invokeCmd(COMMANDS.projectsList);
+    assert.equal(calls[0].url, '/api/projects');
   });
 });
