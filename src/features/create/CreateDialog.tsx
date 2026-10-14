@@ -24,7 +24,7 @@ interface CreateDialogProps {
   canSubmit: boolean;
   onSubmit: () => void;
   /** 打开即聚焦 —— 名称是唯一每次都要填的字段。 */
-  nameInputRef: RefObject<HTMLInputElement>;
+  nameInputRef: RefObject<HTMLInputElement | null>;
   children: ReactNode;
 }
 
@@ -108,7 +108,7 @@ export function NameField({
 }: {
   value: string;
   onChange: (next: string) => void;
-  inputRef: RefObject<HTMLInputElement>;
+  inputRef: RefObject<HTMLInputElement | null>;
   placeholder?: string;
 }) {
   return (

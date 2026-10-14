@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 interface SplitterProps {
   direction: 'vertical' | 'horizontal';
   /** 父容器 ref，用于在 mousemove 中读取实际位置和限制 */
-  containerRef: RefObject<HTMLElement>;
+  containerRef: RefObject<HTMLElement | null>;
   /** 当前上半/左半的 flex-basis 字符串，如 "50%" */
   basis: string;
   /** 拖动时持续调用，参数是新的 flex-basis 字符串 */
