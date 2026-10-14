@@ -29,6 +29,12 @@ updates:
         update-types:
           - minor
           - patch
+    # typescript-eslint 还没支持 TS 7（peer 仍是 `>=4.8.4 <6.1.0`），
+    # 升上去 `npm ci` 就 ERESOLVE，Web job 连 lint 都跑不起来。
+    # 只挡 7.x：6.0.3 落在 `<6.1.0` 里，仍可正常升级。
+    ignore:
+      - dependency-name: 'typescript'
+        versions: ['>=7.0.0']
     labels:
       - dependencies
       - frontend
