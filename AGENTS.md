@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-`simple-post` is a desktop API client/debugger (Postman-like, Windows-first) whose core differentiator is a **built-in MCP server**: external AI clients (Claude Desktop, Cursor, Cline) can list/search/run/mutate endpoints through 44 MCP tools. Stack: **Tauri 2 + React 18 + TypeScript** frontend over a **Cargo workspace** (SQLite via `rusqlite`, `reqwest`, `axum`), shipping both a desktop app and a standalone npm-distributed MCP binary.
+`simple-post` is a desktop API client/debugger (Postman-like, Windows-first) whose core differentiator is a **built-in MCP server**: external AI clients (Claude Desktop, Cursor, Cline) can list/search/run/mutate endpoints through 44 MCP tools. Stack: **Tauri 2 + React 18 + TypeScript** frontend over a **Cargo workspace** (SQLite via `rusqlite`, `reqwest`, `axum`), shipping three shapes off one Rust core — the Tauri desktop app, the headless `serve-web` REST+SPA host, and the `simple-post-mcp` bridge. The bridge ships as a **compiled binary only** (release artefact / `cargo install`); there is no npm package for it — see Runtime/Tooling Preferences.
 
-Docs are partly Chinese (`README.md`, crate READMEs); code/identifiers are English.
+Docs are partly Chinese (`README.md`, the two crate READMEs); code/identifiers are English. Division of labour: `README.md` is the human-facing product doc (positioning, distribution shapes, deployment constraints, roadmap); this file is the **agent runtime contract** (invariants, traps, file map). When the two would repeat each other, a fact belongs here only if an agent would break it by not knowing it.
 
 ## Architecture & Data Flow
 
@@ -102,6 +102,9 @@ Lint/format tooling: **ESLint 10 (flat config) + Prettier 3**. ESLint owns corre
 **CI quality gate** — `.github/workflows/ci.yml` runs on every push to `main` and every PR (`release.yml` only publishes):
 - `web` (ubuntu, Node 22): `format:check` → `lint` → `typecheck` → `npm test` → `vite build`
 - `rust` (windows-latest): `cargo fmt --check` → `clippy -D warnings` → `cargo test --workspace`
+- `docker` (ubuntu, 75 min budget): builds `linux/amd64`, then runs a **running-container** smoke test — HEALTHCHECK wait, `/healthz` body assertion, SPA shell + hashed asset fetch, unauthenticated `/api/*` → 401, project create over REST, `id -u == 10001`, no `libgtk`/`libwebkit`, and a *replaced* container against the same named volume. A `linux/arm64` QEMU cross-build is appended as `continue-on-error` — it is a compile check, not an artefact, and must never gate the amd64 smoke test.
+
+The smoke test asserts the **response body**, not the status line: an unrouted path falls through to the ServeDir SPA fallback and returns `200 text/html`, so a status-only assertion cannot fail. See the `is_public_path` entry under Code Conventions.
 
 Keep `npm run check` green locally before pushing — CI runs the same checks.
 
@@ -207,7 +210,7 @@ The regression net is `scripts/test-web-basepath.mjs`, which parses the served s
 - **Line endings: LF everywhere** — `.gitattributes` (`* text=auto eol=lf`) overrides `core.autocrlf`; `.editorconfig` mirrors it for editors (UTF-8, final newline, trim whitespace, 2-space default / 4 for `*.rs`, Markdown keeps trailing spaces). Only `*.bat` / `*.cmd` stay CRLF.
 - **Prettier scope**: `*.md` and lockfiles are in `.prettierignore` — hand-maintained prose stays byte-stable. There is no longer a generated `docs/openapi.yaml` in the tree (`docs/` was removed); if you render one, put it outside the repo or add it to `.prettierignore` yourself.
 - Windows-first: PowerShell helpers in `scripts/*.ps1`. When writing UTF-8 files from PowerShell, specify `-Encoding utf8NoBOM` — 5.1's default ANSI encoding corrupts UTF-8 and can break `rustc`.
-- Multi-worker convention (per `README.md`): parallel workers deliver code only; end-to-end/browser verification is done once by the main session.
+- Multi-worker convention: parallel workers deliver code only; end-to-end/browser verification is done once by the main session. The reason is shared-resource contention — several agents on one dev server, one browser session and one writable file collide, and the symptom looks like a flaky failure rather than a conflict.
 
 ## Testing & QA
 
