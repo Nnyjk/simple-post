@@ -12,7 +12,6 @@
 //! 只产出一份任何 UI 都能渲染的结构摘要（新增 / 删除 / 变更三个列表）。
 
 use serde_json::Value;
-use serde_json_path::JsonPathExt;
 
 use serde::Serialize;
 use simple_post_core::domain::ApiResponse;
@@ -343,9 +342,8 @@ pub fn extract_jsonpath(body: &str, content_type: &str, path: &str) -> Option<Va
     {
         return None;
     }
-    // 防的是 `serde_json_path` 0.1 那个宽松解析器：它会把 "$$ bad path" / "@@nope"
-    // 也变成一条能匹配到根的查询。RFC 9535 要求 JSONPath 以 `$` 开头；路径里出现裸
-    // 空白也一并拒绝，免得把用户笔误静默解析成「全都匹配」。
+    // RFC 9535 要求 JSONPath 以 `$` 开头；路径里出现裸空白也一并拒绝，
+    // 免得把用户笔误静默解析成「全都匹配」。
     let trimmed = path.trim();
     if !trimmed.starts_with('$') {
         return None;
@@ -354,14 +352,9 @@ pub fn extract_jsonpath(body: &str, content_type: &str, path: &str) -> Option<Va
         return None;
     }
     let value: Value = serde_json::from_str(body).ok()?;
-    let query = value.json_path(trimmed).ok()?;
-    // `as_node` 只有恰好一个匹配时才返回 Some；零个或多个都落到 `as_node_list`，
-    // 好让调用方仍拿到东西，而不是一个静默的空结果。
-    if let Some(node) = query.as_node() {
-        return Some(node.clone());
-    }
-    let list = query.as_node_list()?;
-    list.first().map(|n| (*n).clone())
+    let query = serde_json_path::JsonPath::parse(trimmed).ok()?;
+    // 调用方要的是「首个匹配」；零匹配返回 None。
+    query.query(&value).first().map(|n| (*n).clone())
 }
 
 // -------------------------------------------------------------------------

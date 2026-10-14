@@ -248,10 +248,10 @@ fn extract_jsonpath_no_match_returns_none() {
 
 #[test]
 fn extract_jsonpath_invalid_path_returns_none() {
-    // serde_json_path 0.1 会宽松接受大量「垃圾」字符串（如 `$$ bad path`、`@@nope`），
-    // 并悄悄把它们解析成根文档。要在不引入更严格解析器的前提下守住「路径非法 ⇒ None」
-    // 这条契约，就要求路径以 `$` 开头且不含裸空白 —— RFC 9535 只允许空白充当 SEGMENT
-    // 分隔符，这里不支持。过不了这道关（或底层解析器拒绝）的路径一律返回 None。
+    // 契约是「路径非法 ⇒ None」。底层已是 RFC 9535 严格解析器，
+    // 但入口仍先自检两条：`$` 开头、且路径里不含裸空白
+    // （RFC 9535 只允许空白充当 SEGMENT 分隔符，这里不支持）。
+    // 自检与底层拒绝任一命中，都返回 None。
     let v = extract_jsonpath(r#"{"a":1}"#, "application/json", "$$ bad path");
     assert!(v.is_none(), "expected None, got {v:?}");
     let v = extract_jsonpath(r#"{"a":1}"#, "application/json", "totally not a path");
