@@ -11,158 +11,120 @@ import type {
 } from '../store-types';
 
 /**
- * ui-tabs — the workspace tab strip and the per-endpoint edit drafts.
+ * ui-tabs —— 工作区标签条与每个 endpoint 的编辑草稿。
  *
- * WHY THIS IS ONE CONCERN
- * -----------------------
- * `endpointDrafts` looks like a separate feature from `openTabs`, but the
- * two are the same feature seen from two sides: a draft is *why* a tab is
- * dirty, and the dirty dot is *how* a tab reports having one. Every
- * action here that touches `openTabs` also maintains `dirtyTabIds`, and
- * every action that touches `endpointDrafts` mirrors into
- * `dirtyTabIds`. Splitting them across files would scatter one invariant
- * across two modules — which is the failure mode the sub-factory split
- * is supposed to prevent, not create.
+ * 为什么合成一个关注点：`endpointDrafts` 与 `openTabs` 是同一件事的两面：
+ * 草稿是标签变脏的**原因**，脏点是标签报告自己有草稿的**方式**。本文件里
+ * 每个动 `openTabs` 的动作都同步维护 `dirtyTabIds`，每个动 `endpointDrafts`
+ * 的动作也镜像进 `dirtyTabIds`；拆到两个文件会把这一条不变量摊开。
  *
- * `dirty-tabs-slice` is a different thing: it owns the *close* guard
- * (the queue that asks the user what to do with unsaved changes), not
- * the flag itself. It reads `dirtyTabIds` through the shared `AppState`.
+ * `dirty-tabs-slice` 是另一回事：它管的是**关闭**时的守卫（未保存改动询问
+ * 用户的那个队列），不是脏标记本身，通过共享的 `AppState` 读 `dirtyTabIds`。
  *
- * The whole group is spread by concern, not by slice, because several
- * actions below write state owned elsewhere (`activeTabId` transitions
- * must be atomic with the tab list they refer to). See the note in
- * `../ui-slice.ts`.
+ * 按关注点而非按 slice 分文件，是因为下面多个动作会写别人的 state
+ * （`activeTabId` 的切换必须与它所指的标签表原子完成），见 `../ui-slice.ts`。
  */
 
 export interface UiTabsState {
   /**
-   * Open tabs in the right-pane workspace. A tab is identified by the
-   * underlying entity id, so duplicate `openTab` calls for the same entity
-   * just activate the existing tab rather than creating a new one.
+   * 右栏工作区的已打开标签。标签按底层实体 id 标识，所以对同一实体重复
+   * `openTab` 只会激活已有标签，不会新开一个。
    */
   openTabs: OpenTab[];
   activeTabId: string | null;
   /**
-   * Tab ids the caller has flagged as "dirty" (have unsaved changes). The
-   * WorkspaceTabs strip reads this to draw a "•" indicator and the
-   * "Close Saved" right-click action uses it to decide which tabs to keep.
+   * 调用方标记为"脏"（有未保存改动）的标签 id。WorkspaceTabs 读它画"•"，
+   * "关闭已保存"右键项用它决定保留哪些标签。
    *
-   * Source of dirtiness:
-   *   - HttpTester pushes the endpoint's id into this set whenever
-   *     `endpointDrafts[id]` is non-empty.
-   *   - EntitySettings increments a counter per in-flight
-   *     `InlineEditableName` (title or sub-list rename) and calls
-   *     `markTabDirty` on its parent tab.
+   * 脏的来源：HttpTester 在 `endpointDrafts[id]` 非空时把 id 推进这个集合；
+   * EntitySettings 为每个在途的 `InlineEditableName`（标题或子列表改名）
+   * 递增计数，并对其父标签调 `markTabDirty`。
    */
   dirtyTabIds: Set<string>;
   /**
-   * Per-endpoint unsaved URL/method drafts. Lives in the store (not
-   * HttpTester local state) so that switching tabs and switching back
-   * preserves the user's pending edits — without this, a typed URL on
-   * endpoint A would vanish the moment the user clicked endpoint B in
-   * the tab strip. A tab id appearing as a key here is also what makes
-   * WorkspaceTabs treat it as dirty.
+   * 每个 endpoint 未保存的 URL / method 草稿。放在 store 而不是 HttpTester
+   * 的局部 state，切走标签再切回来才留得住用户正在输入的内容——否则在 A 上
+   * 输入的 URL 会在点开 B 的瞬间消失。这里的 key 也正是 WorkspaceTabs
+   * 判定该标签为脏的依据。
    */
   endpointDrafts: Record<string, EndpointDraft | undefined>;
   /**
-   * Active section inside the settings tab (left rail selection).
-   * Persisted in the store so a deep link from the TopBar ("新建环境"
-   * in the env switcher) can land directly on the right section even
-   * if the settings tab wasn't open yet.
+   * 设置标签内部当前的分节（左栏选中项）。存进 store 是为了让 TopBar 的
+   * 深链（环境切换器里的"新建环境"）在设置标签尚未打开时也能直接落到对应分节。
    */
   activeSettingsSection: SettingsCategoryId;
   /**
-   * Per-project tab strips, set aside for the duration of this app run
-   * whenever the user works in a different project.
+   * 每个项目各自的标签条，在本次运行内为"用户正在别处干活"而暂存起来。
    *
-   * The strip shows one project's tabs at a time; this is where the
-   * others wait. Unsaved work survives a switch for free — see
-   * {@link ProjectTabSet} for why nothing else has to be copied.
+   * 标签条一次只显示一个项目的标签，其余在这里等着。未保存的工作因此天然
+   * 扛过一次切换，无需另行拷贝，原因见 {@link ProjectTabSet}。
    */
   projectTabs: Record<string, ProjectTabSet>;
 }
 
 export interface UiTabsActions {
   /**
-   * Open a tab for the given entity (or activate the existing one). If no
-   * tabs are open yet, the new tab becomes active automatically.
+   * 为给定实体打开标签（或激活已有的）。当前没有任何标签时，新标签自动成为
+   * 活动标签。
    */
   openTab: (kind: TabKind, refId: string) => void;
-  /** Close a tab. If it was active, falls back to the previous tab or null. */
+  /** 关闭一个标签。若它是活动标签，则回退到前一个标签或 null。 */
   closeTab: (tabId: string) => void;
-  /** Switch which tab is shown in the right pane. No-op for unknown ids. */
+  /** 切换右栏显示的标签。未知 id 是空操作。 */
   setActiveTab: (tabId: string | null) => void;
-  /**
-   * Flag a tab as having unsaved changes (`true`) or not (`false`). Drives
-   * the dirty indicator on the tab strip and the "Close Saved" action.
-   */
+  /** 标记标签有无未保存改动，驱动标签条的脏指示与"关闭已保存"动作。 */
   markTabDirty: (tabId: string, dirty: boolean) => void;
   /**
-   * Persist unsaved edits for an endpoint. Passing an empty patch is a
-   * no-op; pass an explicit `null` to clear the draft. Mirrors the dirty
-   * flag automatically — an empty draft is clean, any non-empty draft is
-   * dirty. Every request-config editor (URL bar, method picker, params,
-   * headers, body, auth, docs, tags) routes through here.
+   * 保存一个 endpoint 的未保存编辑。传空 patch 是空操作；传 `null` 显式清空
+   * 草稿。脏标记自动镜像——空草稿即干净，非空即脏。所有请求配置编辑器
+   * （URL 栏、method 选择、params、headers、body、auth、文档、tags）都走这里。
    */
   setEndpointDraft: (endpointId: string, draft: Partial<EndpointDraft> | null) => void;
-  /** Drop the draft for an endpoint (called on Save). */
+  /** 丢掉一个 endpoint 的草稿（保存时调用）。 */
   clearEndpointDraft: (endpointId: string) => void;
   /**
-   * Internal: drop every tab whose underlying entity no longer exists (or
-   * whose ancestry was removed). Called from the delete* actions so the UI
-   * never lands on a dangling tab. Exposed as an action for the cleanup
-   * useEffect in WorkspaceTabs to recover from any missed edges.
+   * 内部使用：丢掉底层实体已不存在（或祖先已被删）的标签。由各 delete* 动作
+   * 调用，避免 UI 停在悬空标签上。暴露成动作是给 WorkspaceTabs 的清理
+   * useEffect 兜底遗漏的边界。
    */
   pruneStaleTabs: () => void;
-  /** Close every open tab in one go. Used by the right-click menu. */
+  /** 一次关掉所有已打开标签。右键菜单使用。 */
   closeAllTabs: () => void;
   /**
-   * Close every tab that is **not** in `dirtyTabIds` (i.e. every "saved"
-   * tab). If a dirty tab is the only one open, it stays. Returns the
-   * number of tabs closed — callers can use it for a toast if needed.
+   * 关掉所有**不在** `dirtyTabIds` 里的（即所有"已保存"的）标签。若唯一的
+   * 标签是脏的，它会留下。返回关掉的标签数，调用方可用它出 toast。
    */
   closeSavedTabs: () => number;
   /**
-   * Make `projectId`'s tab set the visible one, setting the outgoing
-   * project's aside in `projectTabs`.
+   * 让 `projectId` 的标签集成为可见的，并把当前项目的那份暂存进 `projectTabs`。
    *
-   * Called by `openProject` / `leaveProject` **before** the active project
-   * changes, because deciding what to stash means asking "which project
-   * owns each tab I am showing right now" — and that answer is only
-   * meaningful against the project currently in front.
+   * 由 `openProject` / `leaveProject` 在活动项目**改变之前**调用，因为"暂存什么"
+   * 要先回答"我现在显示的每个标签属于哪个项目"，而这个答案只有对着当前在前的
+   * 项目才有意义。
    *
-   * Passing `''` (leaving for the welcome screen) stashes and empties the
-   * strip. The settings tab is never stashed: it is a global singleton
-   * panel, not something project A borrowed and project B must not see.
+   * 传 `''`（退回欢迎页）会暂存并清空标签条。设置标签永远不暂存：它是全局单例
+   * 面板，不是项目 A 借给项目 B 又不能让 B 看见的东西。
    */
   switchProjectTabs: (projectId: string) => void;
-  /**
-   * Open the (singleton) settings tab and select a section. Idempotent
-   * — calling it when the tab is already open just switches the
-   * active section and makes the tab active.
-   */
+  /** 打开（单例的）设置标签并选中某一节。幂等——已打开就只切换活动节并激活标签。 */
   openSettingsTab: (section?: SettingsCategoryId) => void;
-  /** Update which section of the settings tab is active. */
+  /** 更新设置标签的活动分节。 */
   setActiveSettingsSection: (section: SettingsCategoryId) => void;
 }
 
 export type UiTabs = UiTabsState & UiTabsActions;
 
 export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) => ({
-  // Workspace starts with no tabs — the bootstrap sequence activates the
-  // first endpoint (if any) once the daemon returns data.
+  // 启动时没有标签——bootstrap 序列会在后端返回数据后激活第一个 endpoint。
   openTabs: [],
   activeTabId: null,
-  // Seeded empty — the first endpoint has nothing unsaved, so the strip
-  // should not show a dirty dot on it. Children push into this set as
-  // drafts are created (e.g. URL bar edits, inline title rename).
+  // 初始为空：第一个 endpoint 没有任何未保存内容，标签条不该给它画脏点。
+  // 子组件在草稿产生时（如 URL 栏编辑、行内标题改名）推进这个集合。
   dirtyTabIds: new Set<string>(),
-  // Empty at boot. HttpTester writes into this map on every URL/method
-  // edit; it stays populated across tab switches so a draft typed
-  // for endpoint A is still there when the user comes back to A.
+  // 启动时为空。HttpTester 每次编辑 URL / method 都写入这张表，切标签时保留，
+  // 所以在 A 上输入的草稿回到 A 时还在。
   endpointDrafts: {},
-  // Settings tab defaults to "环境" — that's where most users expect to
-  // land when they hit the settings button in the top bar.
+  // 设置标签默认落在"环境"——多数用户点顶栏设置按钮时最期待这里。
   activeSettingsSection: 'env',
   projectTabs: {},
 
@@ -183,17 +145,14 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       const nextTabs = s.openTabs.filter((t) => t.id !== tabId);
       let nextActive = s.activeTabId;
       if (s.activeTabId === tabId) {
-        // Pick the previous tab, then next, then null. Mirrors what most IDE
-        // tab strips do (Chrome, VS Code).
+        // 先选前一个，再选后一个，最后 null。多数 IDE 标签条（Chrome、VS Code）都是这个次序。
         const fallback = s.openTabs[idx - 1] ?? s.openTabs[idx + 1] ?? null;
         nextActive = fallback ? fallback.id : null;
       }
-      // Drop the endpoint's draft + dirty flag if we're closing an
-      // endpoint tab — otherwise the draft would linger forever. A draft
-      // endpoint tab qualifies: its id is not in `nodes`, so this is the
-      // only place the `endpointDrafts` entry can be reclaimed. Closing
-      // the tab still writes nothing to the database; discarding the
-      // `DraftEndpoint` itself is `discardDraftEndpoint`'s job.
+      // 关掉 endpoint 标签时一并丢掉它的草稿与脏标记，否则草稿永远留着。
+      // draft endpoint 标签同样适用：它的 id 不在 `nodes` 里，这里是唯一能回收
+      // 该 `endpointDrafts` 条目的地方。关标签本身仍不写数据库，丢弃
+      // `DraftEndpoint` 是 `discardDraftEndpoint` 的事。
       const closing = s.openTabs[idx];
       let endpointDrafts = s.endpointDrafts;
       let dirtyTabIds = s.dirtyTabIds;
@@ -209,14 +168,11 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         }
       }
       if (closing && closing.kind === 'endpoint-draft' && closing.id in draftEndpoints) {
-        // A draft endpoint lives *only* in `draftEndpoints`, so closing its
-        // tab is the single moment its row can be reclaimed. Dropping only
-        // `endpointDrafts` (above) would leave the document fields behind
-        // under an id nothing references any more — a draft that has
-        // outlived its tab, can no longer be saved, and would resurrect if
-        // that id were ever reused. Reclaimed in the same `set` rather than
-        // via a follow-up `discardDraftEndpoint` call, so a failure cannot
-        // leave the map and the tab disagreeing about each other.
+        // draft endpoint 只活在 `draftEndpoints` 里，关掉它的标签就是回收那一行的唯一
+        // 时刻。只删上面的 `endpointDrafts` 会把文档字段留在这个再没人引用的 id
+        // 下——草稿活得比标签还久、已经存不下去，而该 id 一旦被复用它就会诈尸。
+        // 在同一次 `set` 里回收，而不是事后补一次 `discardDraftEndpoint`，
+        // 这样失败也不会让这张表与标签对不上。
         draftEndpoints = { ...draftEndpoints };
         delete draftEndpoints[closing.id];
       }
@@ -233,7 +189,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (tabId === null) {
         return { activeTabId: null };
       }
-      // Reject unknown ids — don't let the UI land on a dangling tab.
+      // 拒绝未知 id——不能让 UI 停在悬空标签上。
       if (!s.openTabs.some((t) => t.id === tabId)) return {};
       return { activeTabId: tabId };
     }),
@@ -257,28 +213,25 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       const current = s.endpointDrafts[endpointId];
       let next: EndpointDraft | undefined;
       if (draft === null) {
-        // Explicit clear.
+        // 显式清空。
         next = undefined;
       } else {
-        // Merge patch with existing draft; if everything is undefined,
-        // collapse to undefined so dirty tracking can flip to clean.
+        // patch 与现有草稿合并；全为 undefined 时收成 undefined，脏标记才能翻回干净。
         const merged: EndpointDraft = { ...current, ...draft };
-        // Generic emptiness test rather than a hand-written list: adding a
-        // draft field must not also mean remembering to extend this line,
-        // or the field would silently never mark the tab dirty.
+        // 用通用的"是否为空"判断而不是手写字段表：新增草稿字段不该顺带要求改这一行，
+        // 否则那个字段会静悄悄地永远不把标签标脏。
         next = Object.values(merged).some((v) => v !== undefined) ? merged : undefined;
       }
-      // No-op when the new draft matches the existing one. Returning
-      // `{}` (instead of the raw `s` reference) keeps Zustand's shallow
-      // equality stable — returning `s` is fine semantically but trips
-      // the strict-mode ref-equality checks that some consumers rely on.
+      // 新草稿与现有相同时是空操作。返回 `{}` 而非 `s` 引用，是为了让 Zustand
+      // 的浅比较保持稳定——返回 `s` 语义上没错，但会触发部分消费者依赖的
+      // 严格模式下引用相等检查。
       if (next === undefined && !(endpointId in s.endpointDrafts)) return {};
       if (next !== undefined && sameDraft(current, next)) return {};
-      // Mirror into dirtyTabIds so the tab strip + "Close Saved" see it.
+      // 同步镜像到 dirtyTabIds，标签条与"关闭已保存"才看得见。
       const nextDirty = new Set(s.dirtyTabIds);
       if (next) nextDirty.add(endpointId);
       else nextDirty.delete(endpointId);
-      // Build the new endpointDrafts map immutably.
+      // 以不可变方式重建 endpointDrafts。
       const nextDrafts: Record<string, EndpointDraft | undefined> = { ...s.endpointDrafts };
       if (next) nextDrafts[endpointId] = next;
       else delete nextDrafts[endpointId];
@@ -295,25 +248,21 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
     }),
   pruneStaleTabs: () =>
     set((s) => {
-      // Layer 2 has not landed yet, so `s.nodes` is empty — which reads
-      // exactly like "every tree node was deleted". Running the filter
-      // now would close every module / collection / endpoint tab the
-      // user has. Bail instead; the effect that calls this re-runs when
-      // `nodesLoaded` flips, and that is the first moment the answer is
-      // trustworthy.
+      // 第二层 bootstrap 还没落地，`s.nodes` 是空的——这读起来和"所有树节点都被删了"
+      // 一模一样。此刻跑过滤会把用户所有 module / collection / endpoint 标签关掉。
+      // 直接返回；调用它的 effect 会在 `nodesLoaded` 翻成 true 时重跑，
+      // 那是答案第一次可信的时刻。
       if (!s.nodesLoaded) return {};
       const valid = s.openTabs.filter((t) => {
-        if (t.kind === 'settings') return true; // singleton — never stale
-        // A draft endpoint has no `nodes` row by construction — that is
-        // the whole point of it — so the lookup below would read "deleted"
-        // and close the tab the instant this runs. It is exempt until the
-        // user saves it (which opens a real `endpoint` tab) or discards it.
+        if (t.kind === 'settings') return true; // 单例，永不失效
+        // draft endpoint 按定义就没有 `nodes` 行——那正是它的意义——
+        // 下面的查找会读成"已删除"，于是标签一开就被关掉。保存（会开出真正的
+        // `endpoint` 标签）或丢弃之前一律豁免。
         if (t.kind === 'endpoint-draft') return true;
         if (t.kind === 'project') return s.projects.some((p) => p.id === t.id);
-        // Every other tab is a tree node, and the tab's `kind` is the
-        // node's `type` — so one lookup answers module, collection and
-        // endpoint at once. Checking the type too means a tab can never
-        // survive because some *other* node happens to share its id.
+        // 其余标签都是树节点，且标签的 `kind` 就是节点的 `type`——一次查找同时
+        // 覆盖 module、collection、endpoint。连 type 一起比，标签才不会因为别的
+        // 节点恰好同 id 而侥幸存活。
         return s.nodes.some((n) => n.id === t.id && n.kind === t.kind);
       });
       if (valid.length === s.openTabs.length) return {};
@@ -321,16 +270,13 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (nextActive !== null && !valid.some((t) => t.id === nextActive)) {
         nextActive = valid[valid.length - 1]?.id ?? null;
       }
-      // Also drop dirty flags for tabs that no longer exist — prevents the
-      // set from growing unbounded across deletes.
+      // 同时丢掉已不存在标签的脏标记——否则这个集合会随删除操作无限膨胀。
       const nextDirty = new Set<string>();
       for (const t of valid) {
         if (s.dirtyTabIds.has(t.id)) nextDirty.add(t.id);
       }
-      // Also drop endpoint drafts whose endpoint is gone. A draft
-      // endpoint's own id is not in `nodes`, so it is kept by tab kind
-      // rather than by lookup — otherwise the edits would vanish from a
-      // tab that is still open.
+      // 同时丢掉 endpoint 已消失的草稿。draft endpoint 自己的 id 不在 `nodes` 里，
+      // 所以按标签种类而不是按查找保留——否则用户仍开着的标签上编辑的内容会凭空消失。
       const nextDrafts: Record<string, EndpointDraft | undefined> = {};
       for (const t of valid) {
         if (carriesEndpointDraft(t.kind) && s.endpointDrafts[t.id]) {
@@ -350,9 +296,8 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       activeTabId: null,
       dirtyTabIds: new Set(),
       endpointDrafts: {},
-      // Same reason as above, one level up: a closed draft tab is a draft
-      // with no way to be saved, so "close everything" has to take the
-      // documents with it.
+      // 与上面同一条理由、上一级：关掉的 draft 标签就是一份再也存不下去的草稿，
+      // 所以"全关"必须把文档一起带走。
       draftEndpoints: {},
     }),
   closeSavedTabs: () => {
@@ -366,15 +311,12 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (nextActive !== null && closeSet.has(nextActive)) {
         nextActive = nextTabs[nextTabs.length - 1]?.id ?? null;
       }
-      // Drop endpoint drafts for closed endpoint tabs. Draft-endpoint
-      // tabs count: they are ordinary tabs, and the edits under their
-      // id have to go when the tab does.
+      // 丢掉被关掉的 endpoint 标签的草稿。draft-endpoint 标签也算：它们就是普通标签，
+      // 标签关掉时那个 id 下的编辑也该一起走。
       const nextDrafts: Record<string, EndpointDraft | undefined> = {};
-      // …and their documents, for the same reason: a draft whose tab is
-      // gone can never be saved. This sweep is reachable in practice —
-      // a draft tab is marked dirty on creation precisely so this action
-      // leaves it alone, but a draft can also become clean if the user
-      // clears every edit back to the stored default.
+      // ……以及它们的文档，同一条理由：标签没了的草稿永远存不下去。这次清扫确实
+      // 会发生——draft 标签在创建时就被标脏所以本动作会绕开它，但用户把编辑清回
+      // 存储默认值时草稿也会变干净。
       const nextDraftEndpoints: Record<string, DraftEndpoint> = {};
       for (const t of nextTabs) {
         if (carriesEndpointDraft(t.kind) && s.endpointDrafts[t.id]) {
@@ -397,16 +339,13 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
   switchProjectTabs: (projectId) =>
     set((s) => {
       const current = s.activeProjectId;
-      // Re-entering the project already in front is not a switch. Without
-      // this guard, opening the same project twice would stash its tabs
-      // and then restore them from the cache — a no-op that still churns
-      // every reference and can drop the active tab.
+      // 重新进入已经在前的项目不算切换。没有这道守卫，把同一个项目开两次就会
+      // 先暂存它的标签、再从缓存取回来——空转一圈还会抖遍所有引用，可能丢掉活动标签。
       if (current === projectId) return {};
 
       const ownerOf = (t: OpenTab) => tabOwningProject(t, s);
-      // `current !== ''` is what keeps the settings singleton out of the
-      // stash on the way to the welcome screen: with no project in front
-      // its owner would otherwise match the empty string.
+      // `current !== ''` 正是让设置单例在退回欢迎页时不被暂存的条件：
+      // 没有项目在前时，它的 owner 会匹配到空字符串。
       const stashed = s.openTabs.filter((t) => current !== '' && ownerOf(t) === current);
       const staying = s.openTabs.filter((t) => !(current !== '' && ownerOf(t) === current));
 
@@ -414,31 +353,26 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (current !== '' && stashed.length > 0) {
         projectTabs[current] = {
           tabs: stashed,
-          // Only remember an active tab we are actually stashing —
-          // otherwise the restored strip would select a tab that was
-          // already closed before the switch.
+          // 只记住确实被暂存的那个活动标签——否则取回时标签条会选中一个
+          // 切换前就已经关掉的标签。
           activeTabId:
             s.activeTabId && stashed.some((t) => t.id === s.activeTabId) ? s.activeTabId : null,
         };
       }
 
       if (projectId === '') {
-        // Leaving for the welcome screen: the strip goes empty, the
-        // stashes stay put.
+        // 退回欢迎页：标签条清空，暂存的份原样留着。
         return { projectTabs, openTabs: staying, activeTabId: null };
       }
 
       const remembered = projectTabs[projectId];
       const tabs = [...staying, ...(remembered?.tabs ?? [])];
-      // Every project owes the strip one tab of its own — that is what
-      // lets "which project am I in" be read off the strip at a glance.
-      // A project with nothing cached gets one now; a returning one keeps
-      // the tab it already had.
+      // 每个项目都得给标签条留一个自己的标签——这样"我在哪个项目"才能一眼从
+      // 标签条读出来。没有缓存的项目现在就补一个；回来的项目保留原有那个。
       if (!tabs.some((t) => t.kind === 'project' && t.id === projectId)) {
         tabs.push({ id: projectId, kind: 'project' });
       }
-      // Coming back to a project puts the user where they left, not on
-      // its project card — that would make switching feel like it forgot.
+      // 回到项目应该落在离开时的位置，而不是它的项目卡片上——否则切换会显得失忆。
       const restored = remembered?.activeTabId ?? null;
       const activeTabId = restored && tabs.some((t) => t.id === restored) ? restored : projectId;
 
@@ -463,44 +397,36 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
 });
 
 /**
- * Does a tab of this kind own an entry in `endpointDrafts`?
+ * 该种类的标签是否拥有 `endpointDrafts` 里的一条目。
  *
- * True for both `endpoint` and `endpoint-draft`, because a draft endpoint
- * is written through the *same* request-config editors as a saved one —
- * `endpointDrafts` is keyed by the tab id either way, and the two differ
- * only in whether `nodes` has a row behind them. Kept as one helper so the
- * three sweeps that rebuild that map cannot drift: each one that quietly
- * skipped the draft kind would drop a user's in-flight edits the first time
- * the tree refreshed.
+ * `endpoint` 与 `endpoint-draft` 都为真：draft endpoint 走的是与已存 endpoint
+ * **同一套**请求配置编辑器，`endpointDrafts` 两种情况都按标签 id 作键，
+ * 区别只在 `nodes` 里有没有行。合成一个 helper，是为了让重建那张表的三次清扫
+ * 不会各自走偏——任何一次悄悄漏掉 draft 种类，都会在树刷新时丢掉用户正在输入的编辑。
  */
 function carriesEndpointDraft(kind: TabKind): boolean {
   return kind === 'endpoint' || kind === 'endpoint-draft';
 }
 
 /**
- * Owner marker for a tab that belongs to no project.
+ * 不属于任何项目的标签所用的 owner 标记。
  *
- * Distinct from `''`, which means "the welcome screen, no project open".
- * Collapsing the two would make the settings tab stashable: on the way out
- * its owner would compare equal to the empty project id and it would be
- * swept into a project cache, closing the panel the user had open.
+ * 与 `''`（欢迎页、未开项目）区分开。混为一谈会让设置标签变成可暂存的：
+ * 退出时它的 owner 会等于空项目 id，于是被扫进某个项目缓存，用户正开着的面板被关掉。
  */
 const GLOBAL_TAB_OWNER = '*';
 
 /**
- * Which project owns a tab.
+ * 一个标签属于哪个项目。
  *
- * Everything with an entity behind it resolves through the one key the
- * tree already denormalises onto every row: `rootId`. A draft endpoint
- * has no row to read it from, so it carries the same key on
- * `DraftEndpoint` — snapshotted at birth, which is good enough for
- * choosing a strip and cannot go stale for the reason that matters
- * (a draft whose parent moved still belongs where it was created).
+ * 凡是背后有实体的，都通过树已经反规范化到每一行上的那个键解析：`rootId`。
+ * draft endpoint 没有行可读，所以在 `DraftEndpoint` 上带着同一个键——出生时
+ * 快照，选哪条标签条够用，而且不会因为要紧的理由变陈旧（父节点搬走了的草稿
+ * 仍属于它创建时所在的项目）。
  *
- * A node that cannot be found reports `''`. In practice `pruneStaleTabs`
- * retires such a tab first, so this is a transient answer at worst — and
- * treating "unknown" as "belongs to nobody" keeps a half-loaded tree from
- * dragging another project's tabs along with it.
+ * 找不到的节点返回 `''`。实际上 `pruneStaleTabs` 会先退役这样的标签，所以这
+ * 最多是瞬时答案——而把"未知"当成"不属于任何人"，可以防止半加载的树把另一个
+ * 项目的标签一起带走。
  */
 function tabOwningProject(tab: OpenTab, state: AppState): string {
   if (tab.kind === 'settings') return GLOBAL_TAB_OWNER;
@@ -510,14 +436,12 @@ function tabOwningProject(tab: OpenTab, state: AppState): string {
 }
 
 /**
- * Field-by-field draft equality.
+ * 逐字段比较草稿是否相等。
  *
- * Reference comparison is the honest signal here: the editors hand us a
- * fresh array / object exactly when the user changed something, so a
- * structural walk would cost more than it buys on every keystroke. The
- * field list is read off `next` rather than hardcoded, for the same
- * reason the emptiness check is generic — a new draft field must not
- * require a second edit in this file to stop producing no-op churn.
+ * 这里引用比较就是诚实的信号：编辑器只在用户真的改了东西时才交出新的数组 /
+ * 对象，所以结构化遍历在每次击键上花的钱多于它买的东西。字段表从 `next` 读出
+ * 而非硬编码，和上面"是否为空"的通用判断是同一个理由——新增草稿字段不该
+ * 要求再改本文件一处来避免无操作的抖动。
  */
 function sameDraft(a: EndpointDraft | undefined, b: EndpointDraft): boolean {
   if (!a) return false;

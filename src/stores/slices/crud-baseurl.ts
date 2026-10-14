@@ -1,19 +1,15 @@
 /**
- * CRUD sub-factory — project-scoped baseUrl service definitions.
+ * CRUD 子工厂 —— 项目级的 baseUrl 服务定义。
  *
- * One of five sub-factories composed by `createCrudSlice` (see
- * `../crud-slice.ts` for the slice-wide contract: optimistic `set()` →
- * `invokeCmd` → snapshot-and-rollback).
+ * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
+ * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
  *
- * A service belongs to the **project**, not to a module — every module
- * sees the same list, so these actions are all keyed by `projectId`. The
- * per-module part of the model is the URL, which lives in
- * `environment.moduleBaseUrls[defId][moduleId]` and is written by
- * `crud-environment.ts`.
+ * 服务属于**项目**，不属于 module——每个 module 看到同一份列表，所以下面这些
+ * 动作全都以 `projectId` 为键。模型里的按 module 部分是 URL，住在
+ * `environment.moduleBaseUrls[defId][moduleId]`，由 `crud-environment.ts` 写入。
  *
- * Deleting a definition still has to null out the endpoints pointing at
- * it; see the comment on `deleteBaseUrlDefinition` for why the orphaned
- * per-env URLs are not cleaned up.
+ * 删除定义仍要把指向它的 endpoint 置空；至于那些变成孤儿的按环境 URL 为什么
+ * 不清理，见 `deleteBaseUrlDefinition` 上的说明。
  */
 import type { StateCreator } from 'zustand';
 import type { BaseUrlDefinition, EndpointDetail, Project } from '@/types/domain';
@@ -22,11 +18,11 @@ import { uid } from '@/lib/utils';
 import type { AppState } from '../app-store';
 import { invokeWithRollback } from './crud-helpers';
 
-/** baseUrl-definition actions owned by the CRUD slice. */
+/** CRUD 切片拥有的 baseUrl 定义动作。 */
 export interface BaseUrlCrudActions {
   /**
-   * Add a service to `projectId`. Returns its id synchronously so the
-   * caller can seed an env cell for it without a round trip.
+   * 往 `projectId` 加一个服务。同步返回它的 id，好让调用方无需往返就能为它
+   * 填一个环境单元格。
    */
   addBaseUrlDefinition: (projectId: string, name: string) => string;
   updateBaseUrlDefinition: (
@@ -36,11 +32,9 @@ export interface BaseUrlCrudActions {
   ) => Promise<void>;
   deleteBaseUrlDefinition: (projectId: string, defId: string) => Promise<void>;
   /**
-   * Star a service as the **project's** default, or clear the star with
-   * `null`. The star is project-wide — there is no per-module default —
-   * so it is what an endpoint with no `baseUrlDefinitionId` resolves
-   * through. Clearing it is a real (if intentional) way to leave those
-   * endpoints with no baseUrl.
+   * 把某个服务设为**项目**默认，或用 `null` 清掉 ★。★ 是项目级的——没有按 module
+   * 的默认值——所以没设 `baseUrlDefinitionId` 的 endpoint 就通过它解析。清掉 ★
+   * 是一种真实的（虽然是有意的）做法：让那些 endpoint 没有 baseUrl。
    */
   setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => Promise<void>;
 }
@@ -50,25 +44,17 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
   get,
 ) => ({
   /**
-   * Optimistic local add + background invoke. Returns the id
-   * synchronously because the settings table passes it straight into
-   * `setEnvironmentModuleBaseUrl` to seed an env cell.
+   * 乐观本地新增 + 后台 invoke。同步返回 id，因为设置表会把它直接传给
+   * `setEnvironmentModuleBaseUrl` 去填一个环境单元格。
    *
-   * The id is minted **here** and the backend adopts it (`opts.id`), which
-   * is the whole point. Two things in this slice are keyed by a service id
-   * before the row is ever persisted — the project's ★ and every
-   * `env.moduleBaseUrls[defId][moduleId]` cell — so a backend-minted id
-   * turns both into keys that name a row nobody has: the cell write has
-   * already gone to the database under the old key, and swapping the row
-   * afterwards cannot move it. `resolveEndpointBaseUrl` then reads a cell
-   * that does not exist and yields `''`, which is why a brand-new service
-   * could be selected but never applied. `duplicateEndpoint` already
-   * mints its id this way for the same class of reason.
+   * id 在**这里**铸造、后端采纳（`opts.id`），这正是重点。本切片里有两处在
+   * 这一行落盘之前就按服务 id 作键——项目的 ★ 和每个
+   * `env.moduleBaseUrls[defId][moduleId]` 单元格——后端铸的 id 会把两者都变成
+   * 指向不存在行的键：单元格写入已经按旧键进了数据库，事后再换掉这行也搬不动
+   * 它。`resolveEndpointBaseUrl` 于是读到一个不存在的单元格并返回 `''`。
    *
-   * The project's first service becomes its default here. The backend
-   * does the same, but mirroring it locally is what stops the ★ from
-   * appearing a moment late in the one place it is load-bearing: an
-   * endpoint that picked no service resolves through it.
+   * 项目的第一个服务在这里成为默认。后端也这么做，但本地镜像一下能挡住 ★ 在
+   * 唯一要紧的地方迟到一瞬——没选服务的 endpoint 就是通过它解析的。
    */
   addBaseUrlDefinition: (projectId, name) => {
     const defId = uid();
@@ -80,8 +66,7 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
         return {
           ...p,
           baseUrlDefinitions: [...p.baseUrlDefinitions, { id: defId, name: label }],
-          // Convenience: with no ★ the picker would have nothing to
-          // offer as the project default.
+          // 方便起见：没有 ★ 时选择器就没有任何东西能作为项目默认。
           defaultBaseUrlDefinitionId: wasEmpty ? defId : p.defaultBaseUrlDefinitionId,
         };
       }),
@@ -110,12 +95,10 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
             return {
               ...p,
               baseUrlDefinitions: p.baseUrlDefinitions.filter((d) => d.id !== defId),
-              // The row is gone, so a ★ naming it is a dangling pointer:
-              // `resolveEndpointBaseUrl` would look it up, miss, and hand
-              // every endpoint in the project an empty base URL — a
-              // failure the create attempt already caused once. Take the
-              // ★ back to nothing rather than promote a service the user
-              // never chose.
+              // 这一行没了，所以指着它的 ★ 是悬空指针：`resolveEndpointBaseUrl` 会去查它、
+              // 查不到，然后给项目里每个 endpoint 一个空 base URL——正是这次创建
+              // 已经造成过一次的故障。把 ★ 收回空，而不是去顶替一个用户从未
+              // 选过的服务。
               defaultBaseUrlDefinitionId:
                 p.defaultBaseUrlDefinitionId === defId ? null : p.defaultBaseUrlDefinitionId,
             };
@@ -152,11 +135,9 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
       endpointDetails: get().endpointDetails,
     };
     set((s) => {
-      // Cascade: any endpoint that pointed at this def falls back to the
-      // project default. We don't bother removing the now-orphan cells
-      // from each env's `moduleBaseUrls` — the resolution function never
-      // reads an entry under a dead defId, so the stale data is harmless
-      // and self-cleans on next save.
+      // 级联：任何指向这个 def 的 endpoint 都退回项目默认。不去清各环境
+      // `moduleBaseUrls` 里那些变成孤儿的单元格——解析函数从不读已死 defId
+      // 名下的条目，所以陈旧数据无害，且下次保存时会自愈。
       const nextDetails: Record<string, EndpointDetail> = {};
       for (const [id, d] of Object.entries(s.endpointDetails)) {
         nextDetails[id] = d.baseUrlDefinitionId === defId ? { ...d, baseUrlDefinitionId: null } : d;
@@ -167,9 +148,8 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
           return {
             ...p,
             baseUrlDefinitions: p.baseUrlDefinitions.filter((d) => d.id !== defId),
-            // The ★ pointed at a row that no longer exists; leaving it
-            // would make the settings table highlight nothing and the
-            // resolver look a def up that misses forever.
+            // ★ 指着的一行已经不存在了；留着会让设置表高亮不到任何东西，
+            // 也会让解析器去查一个永远查不到的 def。
             defaultBaseUrlDefinitionId:
               p.defaultBaseUrlDefinitionId === defId ? null : p.defaultBaseUrlDefinitionId,
           };
@@ -186,9 +166,8 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
   setDefaultBaseUrlDefinition: async (projectId, defId) => {
     const prevProject = get().projects.find((p) => p.id === projectId);
     if (!prevProject) return;
-    // One field, one `set()`: the star is a single id rather than a
-    // flag spread across rows, so there is no intermediate state in which
-    // two services are both default.
+    // 一个字段、一次 `set()`：★ 是单个 id 而不是散在各行上的标记，
+    // 所以不存在"两个服务同时是默认"的中间态。
     const optimistic: Project = { ...prevProject, defaultBaseUrlDefinitionId: defId };
     set((s) => ({
       projects: s.projects.map((p) => (p.id === projectId ? optimistic : p)),

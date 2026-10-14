@@ -1,19 +1,16 @@
 /**
- * Tests for `src/stores/slices/ui-tabs.ts` — specifically the draft /
- * dirty-flag coupling, which is the invariant the whole "edits are unsaved
- * until Save" model rests on.
+ * `src/stores/slices/ui-tabs.ts` 的测试——具体是草稿 / 脏标记的耦合，
+ * 整个"编辑在 Save 之前都算未保存"模型就架在这条不变量上。
  *
- * What is protected here:
- *   - **Every** draft field marks the tab dirty, not just url/method. The
- *     emptiness check used to be `url !== undefined || method !== undefined`
- *     written out by hand, so adding `body` to `EndpointDraft` would have
- *     silently left body edits invisible to the dirty dot — the exact bug
- *     this suite is here to prevent.
- *   - A draft is a *merge*, so editing body then params keeps both.
- *   - Re-writing the same value is a no-op (no churn, no infinite render).
- *   - `clearEndpointDraft` / `null` returns the tab to clean.
+ * 这里保护的是：
+ *   - **每一个**草稿字段都会把标签标脏，不只是 url / method。"是否为空"的判断
+ *     一旦是手写的那份，给 `EndpointDraft` 加上 `body` 就会让 body 的编辑对脏点
+ *     静默不可见——这正是本套件要防的那类 bug。
+ *   - 草稿是**合并**，所以先编辑 body 再编辑 params 两个都会留下。
+ *   - 重写同一个值是空操作（无抖动，无无限渲染）。
+ *   - `clearEndpointDraft` / `null` 把标签变回干净。
  *
- * Run via: npx tsx --test src/stores/__tests__/ui-tabs-draft.test.ts
+ * 运行：npx tsx --test src/stores/__tests__/ui-tabs-draft.test.ts
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +29,7 @@ interface Bag {
   activeSettingsSection: string;
 }
 
-/** Minimal state bag — `setEndpointDraft` touches nothing else. */
+/** 最小 state 包——`setEndpointDraft` 碰不到别的任何东西。 */
 function makeHarness() {
   const bag: Bag = {
     openTabs: [{ id: 'ep1', kind: 'endpoint' }],
@@ -60,15 +57,15 @@ const kv = (key: string, value = 'v'): KeyValue => ({
 });
 const jsonBody = (content: string): RequestBody => ({ mode: 'json', content });
 
-/** Draft keys the harness can see, for readable failure messages. */
+/** harness 能看到的草稿键，让失败信息可读。 */
 function draftKeys(bag: Bag, id = 'ep1'): string[] {
   return Object.keys((bag.endpointDrafts[id] ?? {}) as object).sort();
 }
 
 describe('ui-tabs: every request-config edit marks the tab dirty', () => {
   it('marks dirty for a body edit alone', () => {
-    // The regression: `hasAny` used to be hand-written over url/method, so
-    // a body edit produced a draft that never reached `dirtyTabIds`.
+    // 回归点：如果 `hasAny` 是手写的 url/method 判断，一次 body 编辑就会产出一个
+    // 永远进不了 `dirtyTabIds` 的草稿。
     const h = makeHarness();
     h.slice.setEndpointDraft('ep1', { body: jsonBody('{"a":1}') });
     assert.equal(h.bag.dirtyTabIds.has('ep1'), true);
@@ -94,8 +91,8 @@ describe('ui-tabs: every request-config edit marks the tab dirty', () => {
   });
 
   it('merges patches instead of replacing them', () => {
-    // Editing body then params must not drop the body edit — the draft is
-    // the accumulated set of unsaved changes, not the last one.
+    // 先编辑 body 再编辑 params 不能丢掉 body 那次——草稿是累积的未保存改动集合，
+    // 不是最后一次。
     const h = makeHarness();
     h.slice.setEndpointDraft('ep1', { url: '/a' });
     h.slice.setEndpointDraft('ep1', { body: jsonBody('{}') });
@@ -131,8 +128,8 @@ describe('ui-tabs: every request-config edit marks the tab dirty', () => {
 });
 
 describe('draftToPatch — the shared draft → persistence mapping', () => {
-  // Lives in crud-helpers but is the contract both save paths depend on,
-  // so it is asserted here next to the draft shape it consumes.
+  // 它住在 crud-helpers 里，却是两条保存路径都依赖的契约，所以就在这里、
+  // 紧挨它所消费的草稿形状来断言。
   it('maps every defined draft field and drops undefined ones', async () => {
     const { draftToPatch } = await import('../slices/crud-helpers');
     const draft = {

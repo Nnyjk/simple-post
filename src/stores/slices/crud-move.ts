@@ -1,18 +1,15 @@
 /**
- * CRUD sub-factory — drag-and-drop moves.
+ * CRUD 子工厂 —— 拖放移动。
  *
- * One of five sub-factories composed by `createCrudSlice` (see
- * `../crud-slice.ts` for the slice-wide contract: optimistic `set()` →
- * `invokeCmd` → snapshot-and-rollback).
+ * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
+ * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
  *
- * Moving is one action, not three, and it cannot be expressed as a plain
- * field write: the local `set()` re-derives `sortOrder` across the
- * destination siblings and drags every descendant's `rootId` along with
- * the subtree it moves. The `ResourceNodeType::may_under` contract —
- * module → top level only, endpoint → under a collection or a module,
- * collection → module or collection — is enforced in Rust by a trigger;
- * the guards below are the optimistic mirror of it, so a rejected drop
- * never renders state the backend would have refused.
+ * 移动是一个动作而不是三个，而且无法表达成一次普通的字段写入：本地 `set()`
+ * 会重算目标同级节点的 `sortOrder`，并把被移动子树里每个后代的 `rootId`
+ * 一起带走。`ResourceNodeType::may_under` 这条契约——module 只能顶层、endpoint
+ * 只能挂在 collection 或 module 下、collection 只能挂在 module 或 collection
+ * 下——由 Rust 里的触发器强制；下面的守卫是它的乐观镜像，所以被拒的拖放
+ * 绝不会渲染出后端本来就不会接受的状态。
  */
 import type { StateCreator } from 'zustand';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
@@ -20,14 +17,13 @@ import { indexByParent } from '@/lib/tree-index';
 import type { AppState } from '../app-store';
 import { collectSubtree, renumber } from './crud-helpers';
 
-/** Move action owned by the CRUD slice. */
+/** CRUD 切片拥有的移动动作。 */
 export interface MoveCrudActions {
   /**
-   * Move one or many nodes under `parentId` at sibling slot `index`.
+   * 把一个或多个节点移到 `parentId` 下的同级槽位 `index`。
    *
-   * `parentId: null` means "top of the project" and is legal only for a
-   * module. `nodeIds` is in the order the nodes should land, so a
-   * multi-select drag keeps the user's pick order.
+   * `parentId: null` 表示"项目顶层"，且只对 module 合法。`nodeIds` 按节点应当
+   * 落地的先后排列，所以多选拖放会保持用户挑选的顺序。
    */
   moveNodes: (nodeIds: string[], parentId: string | null, index: number) => Promise<void>;
 }
@@ -42,12 +38,11 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
       const sources = s.nodes.filter((n) => idSet.has(n.id));
       if (sources.length === 0) return {};
 
-      // The destination parent, and the project it puts the nodes in.
-      // `rootId` rides on every node, so the project-boundary check is a
-      // string compare instead of the old walk up to the module.
+      // 目标父节点，以及这些节点将落入的项目。`rootId` 就在每个节点身上，
+      // 所以项目边界检查是一次字符串比较，不用像以前那样一路向上走到 module。
       let targetRootId: string;
       if (parentId === null) {
-        // "Top of the project" — legal only for a module.
+        // "项目顶层"——只对 module 合法。
         if (sources.some((n) => n.kind !== 'module')) return {};
         targetRootId = sources[0].rootId;
       } else {
@@ -56,29 +51,24 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
         targetRootId = targetParent.rootId;
       }
 
-      // Cycle guard: a node cannot be moved under itself or any
-      // descendant. The UI disables those drop targets, but a stale
-      // drag payload can still name one.
+      // 防环：节点不能被移到它自己或它的任何后代之下。UI 会禁用这类落点，
+      // 但陈旧的拖放载荷仍可能报出这样一个 id。
       const movedSubtrees = new Set<string>();
       for (const src of sources) {
         for (const nid of collectSubtree(src.id, childrenIndex)) movedSubtrees.add(nid);
       }
       if (parentId !== null && movedSubtrees.has(parentId)) return {};
 
-      // Every source must already belong to the destination's project.
-      // The server refuses the move otherwise; refusing locally keeps
-      // the optimistic state from showing something that will 400.
+      // 每个源节点必须已经属于目标所在的项目。服务端否则会拒绝这次移动；
+      // 在本地就拒绝，免得乐观状态显示出将会 400 的东西。
       for (const src of sources) {
         if (src.rootId !== targetRootId) return {};
       }
 
-      // Destination siblings with the movers removed — they are
-      // reinserted at `index` below.
+      // 剔掉被移动者的目标同级节点——它们会在下方重新插到 `index` 处。
       //
-      // For a top-level drop the siblings are the destination project's
-      // modules, which are the nodes with no parent; scoping by
-      // `parentId === null` alone would sweep in every project's
-      // top level at once.
+      // 落到顶层时，同级就是目标项目的 module，也就是那些没有父节点的节点；
+      // 只按 `parentId === null` 界定会把所有项目的顶层一次性扫进来。
       const siblings =
         parentId === null
           ? s.nodes
@@ -86,8 +76,7 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
               .sort((a, b) => a.sortOrder - b.sortOrder)
           : (childrenIndex.get(parentId) ?? []).filter((n) => !idSet.has(n.id));
 
-      // The moved rows keep the caller's order, so a multi-select drag
-      // lands the way the user picked them.
+      // 被移动的行保持调用方给的顺序，所以多选拖放会按用户挑选的次序落地。
       const movedRows = sources
         .slice()
         .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id))
@@ -101,11 +90,9 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
       ]);
       const renumberedById = new Map(renumbered.map((n) => [n.id, n] as const));
 
-      // Every node either keeps its slot (outside the destination), is
-      // one of the renumbered rows, or is a descendant of a moved row
-      // whose `rootId` has to follow. The last case is the one that used
-      // to drift: the old store fixed a collection's `moduleId` here
-      // while the database left the descendants alone.
+      // 每个节点要么保住原槽位（在目标之外），要么是被重新编号的行，
+      // 要么是某个被移动行的后代——后者的 `rootId` 必须跟着走。只重排目标
+      // 那一层会漏掉最后这一类，导致跨项目移动子树的乐观状态与数据库不一致。
       const next = s.nodes.map((n) => {
         const renamed = renumberedById.get(n.id);
         if (renamed) return renamed;

@@ -1,43 +1,29 @@
 /**
- * Pure helpers shared by the CRUD sub-factories in this directory.
+ * 本目录下 CRUD 各子工厂共用的纯助手。
  *
- * They live here — store-side — rather than in `@/lib/tree-index` on
- * purpose: every one of them has exactly one or two callers, all inside
- * the CRUD slice, and promoting a single-use helper into a shared module
- * inflates that module's surface for every other importer. `indexByParent`
- * is the opposite case: it genuinely is shared, so the sub-factories keep
- * importing it from `@/lib/tree-index`.
+ * 它们刻意放在 store 侧而不是 `@/lib/tree-index`：每一个都只有一两个调用方，
+ * 且全在 CRUD 切片内部，把只用一次的助手提升成共享模块只会给其他所有导入方
+ * 扩大那个模块的表面积。`indexByParent` 相反——它确实共用，所以子工厂仍从
+ * `@/lib/tree-index` 导入它。
  *
- * Everything below except `invokeWithRollback` is a pure
- * compute-over-arguments with no store access, which is what makes them
- * safe to call from inside a `set()` callback.
+ * 除了 `invokeWithRollback` 之外，下面所有东西都是不碰 store 的纯计算，
+ * 这正是它们能在 `set()` 回调里安全调用的原因。
  */
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import type { OpenTab, EndpointDraft } from '../store-types';
 
 /**
- * The tail of every optimistic write: invoke the daemon, and on failure
- * log and roll the local state back.
+ * 每次乐观写入的尾巴：调守护进程，失败时记日志并把本地 state 回滚。
  *
- * All ~15 write actions had this shape open-coded —
+ * 日志前缀和"你记得回滚了吗？"这个问题由这里统一回答，调用方只提供这一次
+ * 写入的"回滚"具体是什么。
  *
- *     try { await invokeCmd(COMMANDS.x, args); }
- *     catch (e) { console.error('[store] x failed', e); set(rollback); }
+ * `rollback` 是回调而不是值，因为回滚形状确实不同：有些是必须跑在**当前**
+ * state 上的 updater（`set((s) => …)`），有些是乐观写入之前捕获的快照对象。
+ * 只接受单一形式的助手会迫使另一类改写。
  *
- * — which meant the log prefix and the "did you remember to roll back?"
- * question had to be re-answered at every site. This owns the try/catch
- * and the message format; the caller supplies only what "roll back"
- * means for that particular write.
- *
- * `rollback` is a callback rather than a value because the rollback
- * shapes genuinely differ: some are an updater (`set((s) => …)`) that has
- * to run against the *current* state, and some are a literal snapshot
- * object captured before the optimistic write. A helper that accepted a
- * single form would have forced the other kind to be rewritten.
- *
- * Note this deliberately does NOT swallow the error into a return value —
- * callers that need a value on failure (the create actions) keep their
- * own try/catch and return `null`.
+ * 注意它刻意**不**把错误吞成返回值——需要在失败时拿到值的调用方（各 create
+ * 动作）保留自己的 try/catch 并返回 `null`。
  */
 export async function invokeWithRollback(
   label: string,
@@ -52,18 +38,17 @@ export async function invokeWithRollback(
   }
 }
 
-/** Re-number sortOrder for a slice after a reorder. */
+/** 重排后重新编号一个切片的 sortOrder。 */
 export function renumber<T extends { sortOrder: number }>(items: readonly T[]): T[] {
   return items.map((it, idx) => ({ ...it, sortOrder: idx }));
 }
 
 /**
- * A node and every descendant beneath it.
+ * 一个节点及其下方所有后代。
  *
- * BFS over `parentId` with a visited set. The set is not defensive
- * padding: a cycle in the data would otherwise spin here forever, and
- * the UI is the only thing standing between the store and a
- * hand-edited `store.db`.
+ * 沿 `parentId` 做 BFS，带一个已访问集合。这个集合不是防御性冗余：数据里出现
+ * 环会让这里永远转下去，而 UI 是 store 与手工编辑过的 `store.db` 之间唯一的
+ * 屏障。
  */
 export function collectSubtree(
   rootId: string,
@@ -81,9 +66,8 @@ export function collectSubtree(
 }
 
 /**
- * Drop tabs whose underlying entity was removed. Returns the new tab list,
- * the new active tab id (picking the previous neighbor if the active one
- * was removed), and a flag indicating whether anything changed.
+ * 丢掉底层实体已被移除的标签。返回新的标签表、新的活动标签 id（活动标签被移除
+ * 时取前一个邻居），以及一个"是否有变化"的标记。
  */
 export function filterTabsAfterRemoval(
   tabs: readonly OpenTab[],
@@ -102,7 +86,7 @@ export function filterTabsAfterRemoval(
   let nextActive = activeId;
   if (activeId !== null && !nextTabs.some((t) => t.id === activeId)) {
     const oldIdx = tabs.findIndex((t) => t.id === activeId);
-    // Prefer the previous tab (left neighbor), fall back to next, then null.
+    // 优先前一个标签（左邻居），再退到后一个，最后 null。
     const fallback = tabs[oldIdx - 1] ?? tabs[oldIdx + 1] ?? nextTabs[nextTabs.length - 1] ?? null;
     nextActive = fallback ? fallback.id : null;
   }
@@ -110,12 +94,11 @@ export function filterTabsAfterRemoval(
 }
 
 /**
- * The tab keys to close when a subtree is deleted.
+ * 删除一棵子树时该关掉的标签键。
  *
- * A tab is keyed by the id of whatever it shows, and a `module` /
- * `collection` / `endpoint` tab's id is its node id — so one pass over
- * the removed ids answers all three at once. Projects are separate:
- * they are not nodes, so they are closed by the project action.
+ * 标签按它所显示的东西的 id 作键，而 `module` / `collection` / `endpoint`
+ * 标签的 id 就是它的节点 id——所以扫一遍被移除的 id 就同时回答了三者。project
+ * 是另一回事：它们不是节点，由 project 动作负责关。
  */
 export function tabKeysForSubtree(
   nodes: readonly ResourceNode[],
@@ -132,18 +115,14 @@ export function tabKeysForSubtree(
 }
 
 /**
- * Turn an endpoint draft into the `updateEndpointDetail` patch that
- * persists it.
+ * 把 endpoint 草稿转成落盘它的 `updateEndpointDetail` 补丁。
  *
- * Shared by the two save paths — HttpTester's Save button and the
- * dirty-close dialog's 保存 — so they cannot drift: a field added to
- * `EndpointDraft` is picked up by both, because the mapping is driven
- * off the draft's own keys rather than a hand-written list.
+ * 两条保存路径共用——HttpTester 的 Save 按钮与脏关闭对话框的"保存"——所以
+ * 它们不会分叉：给 `EndpointDraft` 新增的字段两边都自动带上，因为这个映射由
+ * 草稿自身的键驱动，而不是手写的字段表。
  *
- * Every draft field is also an `EndpointDetail` field under the same
- * name; that 1:1 correspondence is what makes the cast sound. It would
- * not survive a field that needs transforming on the way in, and that
- * field would want an explicit entry here.
+ * 每个草稿字段在 `EndpointDetail` 里都有同名对应，正是这个 1:1 让强制转换成立。
+ * 若某字段需要在进来的路上做转换，这个前提就不成立，那时该字段应在这里显式列出。
  */
 export function draftToPatch(draft: EndpointDraft): Partial<EndpointDetail> {
   const patch: Record<string, unknown> = {};
@@ -153,7 +132,7 @@ export function draftToPatch(draft: EndpointDraft): Partial<EndpointDetail> {
   return patch as Partial<EndpointDetail>;
 }
 
-/** The `EndpointDetail` an optimistic endpoint create starts from. */
+/** 乐观新建 endpoint 时起步用的 `EndpointDetail`。 */
 export function blankDetail(
   nodeId: string,
   partial?: Partial<Omit<EndpointDetail, 'nodeId'>>,

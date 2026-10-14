@@ -1,49 +1,32 @@
 /**
- * ui-draft-endpoints — the endpoint that exists only in the renderer.
+ * ui-draft-endpoints —— 只存在于渲染侧的 endpoint。
  *
- * WHY A DRAFT IS NOT A NODE
- * -------------------------
- * Creating an endpoint used to write a `nodes` row immediately and open its
- * tab. That made "新建" a commit: a user who clicked it by accident, or who
- * opened one only to poke a URL and press Send, left a permanent `未命名接口`
- * row behind — and the tree gave no way to tell those apart from the ones
- * they meant to keep.
+ * **为什么草稿不是节点。** 新建 endpoint 会立刻写一行 `nodes` 并打开它的标签，
+ * 那让"新建"变成了一次提交：误点一次的用户、或只想戳个 URL 按下 Send 就走的人，
+ * 会留下一行永久的 `未命名接口`——而树没有任何办法把那些和他们真想留下的区分开。
+ * 草稿把这件事反过来：在 `saveDraftEndpoint` 跑之前什么都不会触及 SQLite，所以
+ * 整条创建流程（起名、输 URL、发一次、丢弃）零写入、随时可放弃。代价是草稿不是
+ * 树行：它不在 `nodes` 里，没有 `endpoint_details` 行，无论重载工作区多少次也
+ * 不会凭空出现。任何遍历树的东西都没东西可遍历。
  *
- * A draft reverses that. Nothing reaches SQLite until `saveDraftEndpoint`
- * runs, so the whole create flow (name it, type a URL, Send it, discard it)
- * costs zero writes and is free to abandon. The price is that a draft is not
- * a tree row: it is not in `nodes`, it has no `endpoint_details` row, and no
- * amount of reloading the workspace will produce it. Anything that walks the
- * tree has nothing to walk.
+ * **草稿的两半。** 字段住在两个地方，这个划分不是巧合：
  *
- * THE TWO HALVES OF A DRAFT
- * -------------------------
- * The fields live in two places, and that split is not an accident:
+ *   draftEndpoints[id]   整份文档字段——name / method / url / auth /
+ *                        environmentId / baseUrl* / tags / docs。按文档读是因为
+ *                        草稿没有已存储的行可供补丁，否则"未设置"与"默认为空"
+ *                        就无从分辨。
+ *   endpointDrafts[id]   params / headers / body——请求配置编辑器写在这里，且是
+ *                        补丁语义，因为写已存 endpoint 编辑的就是**同一批**编辑器。
  *
- *   draftEndpoints[id]   whole-document fields — name / method / url / auth /
- *                        environmentId / baseUrl* / tags / docs. They are read
- *                        as a document because a draft has no stored row to
- *                        patch against, so "unset" would otherwise be
- *                        indistinguishable from "unset by default".
- *   endpointDrafts[id]   params / headers / body — the request-config
- *                        editors write here, and they are patch-semantics
- *                        because they are the *same* editors that write a
- *                        saved endpoint's edits.
+ * 复用 `endpointDrafts` 正是 HTTP 测试器能用一条代码路径对待草稿与已存 endpoint
+ * 的原因：它画的叠加层完全一样，未保存的 endpoint 也能用与已存的一样 UI 调试。
+ * 保存时把两半合并成一次 `detail` 写入。
  *
- * Reusing `endpointDrafts` is what lets the HTTP tester treat a draft and a
- * saved endpoint with one code path: the overlay it draws is identical, so
- * an unsaved endpoint is debuggable with the same UI as a saved one. The
- * save merges the two halves into one `detail` write.
- *
- * FAILURE IS NOT DESTRUCTIVE
- * --------------------------
- * `saveDraftEndpoint` keeps the draft (and its tab, and its pending edits)
- * when the write fails and returns `null`, because the alternative — dropping
- * an endpoint the user may have spent minutes on because one IPC call failed
- * — is the worst outcome available. `addNode` already logs the underlying
- * error and swallows it into `null`, so the message here is necessarily
- * generic; `draftSaveError` exists so the UI can *show* something and offer a
- * retry rather than appearing to do nothing at all.
+ * **失败不具破坏性。** `saveDraftEndpoint` 在写入失败并返回 `null` 时保留草稿
+ * （以及它的标签和待保存的编辑），因为另一个选项——因为一次 IPC 失败就丢掉用户
+ * 可能已经花了几分钟的 endpoint——是最糟的结果。`addNode` 已经记下底层错误并
+ * 把它吞成 `null`，所以这里的消息必然是通用的；`draftSaveError` 的存在是为了让
+ * UI 能**显示**点什么并给出重试，而不是看起来什么都没发生。
  */
 import type { StateCreator } from 'zustand';
 import type { EndpointDetail } from '@/types/domain';
@@ -55,49 +38,44 @@ import { draftToPatch } from './crud-helpers';
 
 export interface UiDraftEndpointsState {
   /**
-   * Every open draft endpoint, keyed by its `draft:`-prefixed id — which is
-   * also its tab id, so "the endpoint this tab shows" is one map read.
+   * 所有打开着的草稿 endpoint，以带 `draft:` 前缀的 id 作键——它同时也是标签 id，
+   * 所以"这个标签显示的是哪个 endpoint"就是一次映射读取。
    */
   draftEndpoints: Record<string, DraftEndpoint>;
   /**
-   * Why the last `saveDraftEndpoint` failed, or `null`. Separate from
-   * `bootstrapError` / `nodesError` for the same reason those are separate:
-   * a failed save must not read as a failed startup or a broken tree.
+   * 上一次 `saveDraftEndpoint` 失败的原因，或 `null`。与 `bootstrapError` /
+   * `nodesError` 分开，理由和那两者彼此分开一样：保存失败不该读成启动失败或
+   * 树坏了。
    */
   draftSaveError: string | null;
 }
 
 export interface UiDraftEndpointsActions {
   /**
-   * Create a draft endpoint under `parentId` and open its tab. Returns the
-   * draft id. Writes nothing — not to SQLite, not to `nodes`.
+   * 在 `parentId` 下建一个草稿 endpoint 并打开它的标签。返回草稿 id。什么都不写
+   * ——既不写 SQLite，也不写 `nodes`。
    *
-   * Opening the tab here rather than in the caller is deliberate: a draft
-   * only exists to be debugged, and every entry point (the tree menu, the
-   * command palette, `createEndpointAt`) wants the same thing from it. The
-   * alternative is three call sites each remembering to open one, which is
-   * how a draft ends up invisible in the tab strip.
+   * 刻意在这里而不是在调用方开标签：草稿存在的意义就是被调试，而每一个入口
+   * （树菜单、命令面板、`createEndpointAt`）对它的要求都一样。另一种做法是三个
+   * 调用点各自记得开一个，那正是草稿在标签条里看不见的原因。
    *
-   * The parent is *not* validated here, unlike `createEndpointAt`: this is
-   * pure memory, so an unknown parent costs the user nothing until they
-   * press Save — at which point the write fails and the draft survives.
-   * Validating at the entry point that knows the user's intent is enough.
+   * 这里**不**校验父节点（与 `createEndpointAt` 不同）：这纯粹是内存操作，未知父
+   * 节点在用户按 Save 之前不花任何代价——到那时写入失败、草稿还在。在知道用户
+   * 意图的那个入口校验一次就够了。
    */
   createEndpointDraft: (parentId: string) => string;
-  /** Patch a draft in place (rename, new url, …). Unknown ids are a no-op. */
+  /** 就地打草稿的补丁（改名、新 url…）。未知 id 是空操作。 */
   updateDraftEndpoint: (
     draftId: string,
     patch: Partial<Omit<DraftEndpoint, 'id' | 'parentId' | 'createdAt'>>,
   ) => void;
   /**
-   * Drop a draft and every trace of its pending edits. Never touches the
-   * database — there is nothing there to touch.
+   * 丢掉一个草稿及其待保存编辑的所有痕迹。绝不碰数据库——那里本来就没东西可碰。
    */
   discardDraftEndpoint: (draftId: string) => void;
   /**
-   * Persist a draft as a real endpoint. Returns the new endpoint id, or
-   * `null` if the draft is gone or the write failed (the draft is kept
-   * either way, so the caller can show an error and let the user retry).
+   * 把草稿持久化成真正的 endpoint。返回新的 endpoint id；草稿已消失或写入失败时
+   * 返回 `null`（两种情况草稿都保留，好让调用方显示错误并让用户重试）。
    */
   saveDraftEndpoint: (draftId: string) => Promise<string | null>;
 }
@@ -118,13 +96,12 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     const draft: DraftEndpoint = {
       id,
       parentId,
-      // Fall back to the active project so a draft created under a parent
-      // the store has not loaded yet still knows where it will land.
+      // 父节点还没加载进来时退回活动项目，让这种草稿也知道自己最终会落在哪。
       rootId: parent?.rootId ?? state.activeProjectId,
       name: UNTITLED_ENDPOINT_NAME,
       description: '',
-      // Same defaults `blankDetail` would have written, so a draft that is
-      // saved without a single edit produces a byte-identical endpoint.
+      // 与 `blankDetail` 本该写的默认值相同，所以一个一次都没编辑就被保存的
+      // 草稿产出的是逐字节相同的 endpoint。
       method: 'GET',
       url: '',
       auth: { kind: 'none' },
@@ -137,12 +114,10 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     };
     set((s) => ({
       draftEndpoints: { ...s.draftEndpoints, [id]: draft },
-      // Dirty from the moment it exists. A draft has no row in the
-      // database and cannot be recovered from any other place, so
-      // leaving it clean would let "关闭已保存" — an action whose whole
-      // promise is that it only closes what has nothing to lose — throw
-      // away work the user cannot get back. The dot is also the honest
-      // description: nothing about this tab is saved yet.
+      // 从存在那一刻起就是脏的。草稿在数据库里没有行，也无法从别处恢复，
+      // 所以让它保持干净会让"关闭已保存"——一个它全部的承诺就是只关掉那些
+      // 没有可失之物的动作——丢掉用户再也拿不回来的工作。这个点同时也是诚实的
+      // 描述：这个标签还没有任何东西被保存。
       dirtyTabIds: new Set(s.dirtyTabIds).add(id),
     }));
     state.openTab('endpoint-draft', id);
@@ -152,9 +127,8 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
   updateDraftEndpoint: (draftId, patch) =>
     set((s) => {
       const current = s.draftEndpoints[draftId];
-      // Unknown id: silent no-op. An editor can fire a patch after the tab
-      // closed (debounce, blur, an async save landing) and throwing here
-      // would take down the tab it was meant to update.
+      // 未知 id：静默空操作。编辑器可能在标签关闭之后才发出补丁（debounce、blur、
+      // 某个异步保存落地），在这里抛错会把它本该更新的那个标签弄崩。
       if (!current) return {};
       return { draftEndpoints: { ...s.draftEndpoints, [draftId]: { ...current, ...patch } } };
     }),
@@ -167,8 +141,8 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
       if (!hasDraft && !hasPatch && !isDirty) return {};
       const draftEndpoints = { ...s.draftEndpoints };
       delete draftEndpoints[draftId];
-      // The request-config edits live under the draft id too, and the ids
-      // are never reused — leaving them behind is a leak, not a cache.
+      // 请求配置的编辑也挂在草稿 id 下，而 id 从不复用——把它们留在原地是泄漏，
+      // 不是缓存。
       const endpointDrafts = { ...s.endpointDrafts };
       delete endpointDrafts[draftId];
       const dirtyTabIds = new Set(s.dirtyTabIds);
@@ -181,14 +155,13 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     const draft = state.draftEndpoints[draftId];
     if (!draft) return null;
 
-    // Read the pending request-config edits BEFORE discarding: they are
-    // keyed by the draft id and `discardDraftEndpoint` drops them.
+    // 在丢弃**之前**读待保存的请求配置编辑：它们以草稿 id 作键，
+    // 而 `discardDraftEndpoint` 会把它们一起丢掉。
     const pending = state.endpointDrafts[draftId];
 
-    // Document fields first, then the patch on top. The patch wins where
-    // they overlap (url / method / auth / docs / tags) because those are
-    // what the tester has been writing while the document copy went stale,
-    // and it is the only source of params / headers / body at all.
+    // 先文档字段，再把补丁盖在上面。重叠处（url / method / auth / docs / tags）
+    // 以补丁为准，因为那是文档副本变陈旧期间测试器一直在写的东西，而且它还是
+    // params / headers / body 的唯一来源。
     const detail: Partial<Omit<EndpointDetail, 'nodeId'>> = {
       method: draft.method,
       url: draft.url,
@@ -202,40 +175,35 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     };
 
     set({ draftSaveError: null });
-    // Deliberately no `rootId`: `nodes_create` derives it from the parent,
-    // and `db::nodes::create` *rejects* one that disagrees with the
-    // parent's. Replaying the snapshot taken when the draft was born would
-    // therefore turn "the parent was moved while I was editing" — a real
-    // thing to do in a drag-and-drop tree — into a hard validation
-    // failure. The derived answer is the correct one by construction.
+    // 刻意不带 `rootId`：`nodes_create` 从父节点推导它，而 `db::nodes::create`
+    // 会**拒绝**一个与父节点不一致的值。重放草稿出生时拍下的快照会把
+    // "我编辑期间父节点被搬走了"——在可拖放的树里这是常事——变成一次硬校验失败。
+    // 推导出来的答案天然是正确的。
     const endpointId = await state.addNode({
       parentId: draft.parentId,
       kind: 'endpoint',
-      // A draft the user never named must not persist as an empty name.
+      // 用户从未起名的草稿不该以空名字落盘。
       name: draft.name.trim() || UNTITLED_ENDPOINT_NAME,
       description: draft.description,
       detail,
     });
 
     if (!endpointId) {
-      // Everything stays: draft, tab, pending edits. `addNode` has already
-      // logged the real error — it returns null rather than rethrowing.
+      // 一切原样保留：草稿、标签、待保存的编辑。`addNode` 已经记下了真正的错误
+      // ——它返回 null 而不是重新抛出。
       set({ draftSaveError: '接口草稿保存失败，请重试' });
       return null;
     }
 
-    // Order matters. Discard first so the draft is gone even if a later
-    // step throws; then swap the tab over. Opening the endpoint tab last
-    // means the draft tab is the one `closeTab` retires, and its
-    // neighbour-fallback for `activeTabId` is immediately overwritten.
+    // 顺序有意义。先丢弃，这样即使后面某一步抛错草稿也已经没了；再把标签换过去。
+    // 最后才打开 endpoint 标签，意味着被 `closeTab` 退役的是草稿标签，而它对
+    // `activeTabId` 的邻居回退会立刻被覆盖。
     //
-    // `pending` is deliberately NOT carried across. It was already merged
-    // into `detail` above, which is the whole content of the write, so
-    // re-seeding it under the new id would recreate the very state Save is
-    // supposed to end: a `•` on the tab, "关闭已保存" declining to close
-    // it, and a second Save that writes nothing new. A saved endpoint's
-    // tab is clean — see `HttpTester`'s own `handleSave`, which calls
-    // `clearEndpointDraft` for the same reason.
+    // `pending` 刻意**不**带过去。它上面已经合并进 `detail`，那就是这次写入的
+    // 全部内容，所以在新 id 下重新种一遍恰恰会重建 Save 本该终结的那个状态：
+    // 标签上挂一个 `•`、"关闭已保存"不肯关它、第二次 Save 又写不出新东西。
+    // 已保存 endpoint 的标签是干净的——见 `HttpTester` 自己的 `handleSave`，
+    // 出于同样的理由它调了 `clearEndpointDraft`。
     get().discardDraftEndpoint(draftId);
     get().closeTab(draftId);
     get().openTab('endpoint', endpointId);

@@ -1,27 +1,20 @@
 /**
- * Tests for the persisted half of `src/stores/slices/ui-response.ts` —
- * `addResponseHistory` / `loadResponseHistory` / `clearResponseHistory`.
+ * `src/stores/slices/ui-response.ts` 落盘那一半的测试——`addResponseHistory` /
+ * `loadResponseHistory` / `clearResponseHistory`。
  *
- * These run against the **real composed store**, same as
- * `ui-draft-endpoints.test.ts`: the contract they protect is a contract
- * *across* slices (`setActiveProject` is what triggers the load) and
- * *with* the IPC boundary, and a hand-built harness would stub away the
- * half most likely to break.
+ * 与 `ui-draft-endpoints.test.ts` 一样跑在**真实组合 store** 上：它们保护的是
+ * **跨**切片的契约（`setActiveProject` 才是触发加载的那个）**并**跨越 IPC 边界，
+ * 手搭的 harness 恰好会把最容易坏的那一半 stub 掉。
  *
- * The interesting assertions are all about things a caller gets wrong
- * silently:
- *   - a `draft:` endpoint is never written, because it has no `nodes` row
- *     for the foreign key to hold the row against;
- *   - the provisional row is *replaced* by the server's, because only the
- *     stored entry knows the body was clipped;
- *   - a failed append leaves the row in place and does not reject —
- *     the send already succeeded, and a history write is not a send;
- *   - a read is merged, never assigned over: it is a snapshot from before
- *     the user pressed Send, so it is blind to that send, and the store's
- *     newest-last order is the one `appendCapped` and the strip agree on
- *     rather than the reply's `created_at DESC`.
+ * 有意思的断言都关于调用方会悄无声息搞错的事：
+ *   - `draft:` endpoint 永不写入，因为它没有 `nodes` 行给外键挂这一行；
+ *   - 乐观行被服务端的行**替换**，因为只有已存那条知道 body 被截断过；
+ *   - 写入失败时行留在原地且不 reject——发送已经成功了，历史写入不是发送；
+ *   - 读取是合并而非覆盖：它是用户按下 Send **之前**的快照，所以对那次发送
+ *     一无所知；store 的 newest-last 才是 `appendCapped` 与历史条共同的次序，
+ *     而不是回包的 `created_at DESC`。
  *
- * Run via: npx tsx --test src/stores/__tests__/ui-response-history.test.ts
+ * 运行：npx tsx --test src/stores/__tests__/ui-response-history.test.ts
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -63,17 +56,17 @@ function makeEntry(endpointId: string, id: string, over: Partial<ResponseHistory
   } satisfies ResponseHistoryEntry;
 }
 
-/** Every IPC call the store made, in order. The "did it write?" oracle. */
+/** store 发出过的每次 IPC 调用，按顺序。"写没写？"的裁判。 */
 let calls: IpcCall[] = [];
-/** What `response_history_append` resolves to, when it resolves at all. */
+/** `response_history_append` resolve 成什么（如果它 resolve 的话）。 */
 let appendResult: ResponseHistoryEntry | null = null;
-/** Make `response_history_append` reject, the way a daemon failure would. */
+/** 让 `response_history_append` reject，就像守护进程失败那样。 */
 let appendFails = false;
-/** Gate the list command so a load can be caught mid-flight. */
+/** 给 list 命令设闸，好让一次加载能在半途被抓住。 */
 let listGate: Promise<void> | null = null;
-/** What `response_history_list` resolves to. */
+/** `response_history_list` resolve 成什么。 */
 let listResult: ResponseHistoryEntry[] = [];
-/** Make `response_history_list` reject. */
+/** 让 `response_history_list` reject。 */
 let listFails = false;
 
 let origWarn: typeof console.warn;
@@ -86,8 +79,7 @@ beforeEach(() => {
   listGate = null;
   listResult = [];
   listFails = false;
-  // The store logs (not throws) on both failure paths; silence it so the
-  // test output only shows real failures.
+  // store 在两条失败路径上都是记日志而不是抛出；静音它，好让测试输出只显示真失败。
   origWarn = console.warn.bind(console);
   console.warn = () => {};
 
@@ -95,9 +87,8 @@ beforeEach(() => {
     calls.push({ cmd, args: args ?? {} });
     if (cmd === 'response_history_append') {
       if (appendFails) throw new Error('append failed');
-      // A real command always returns the row it stored. Falling back to
-      // echoing the request keeps a test that forgets to set
-      // `appendResult` honest rather than crashing on undefined.
+      // 真实命令总会返回它存下的那一行。退回回显请求，是让忘了设
+      // `appendResult` 的测试老老实实失败，而不是崩在 undefined 上。
       return appendResult ?? makeEntry(args.endpointId, 'rh-fallback');
     }
     if (cmd === 'response_history_list') {
@@ -135,7 +126,7 @@ describe('addResponseHistory 的落盘与乐观行', () => {
       endpointId: REAL_ID,
       response: makeResponse(),
     });
-    // Both still accumulate locally — that is what the strip renders.
+    // 两者仍在本地累积——那是历史条渲染的东西。
     assert.equal(useAppStore.getState().responseHistory[REAL_ID]?.length, 1);
     assert.equal(useAppStore.getState().responseHistory[DRAFT_ID]?.length, 1);
   });
@@ -148,8 +139,8 @@ describe('addResponseHistory 的落盘与乐观行', () => {
     const before = useAppStore.getState().responseHistory[REAL_ID] ?? [];
     assert.equal(before.length, 1, 'the row is there before the IPC is even awaited');
 
-    // Drain the fire-and-forget promise. An unhandled rejection here
-    // would fail the run rather than the assertion.
+    // 把 fire-and-forget 的 promise 排空。这里的未处理 rejection 会让整轮失败，
+    // 而不是让断言失败。
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const after = useAppStore.getState().responseHistory[REAL_ID] ?? [];
@@ -179,9 +170,8 @@ describe('addResponseHistory 的落盘与乐观行', () => {
   });
 
   it('两条同时在途的落盘各替换自己的乐观行', async () => {
-    // Distinct ids per call, and the second append resolves *first* — the
-    // shape that breaks any implementation keying the swap on something
-    // weaker than the provisional row's own id.
+    // 每次调用用不同的 id，且第二次追加**先** resolve——这正是任何把替换键设在比
+    // 乐观行自身 id 更弱的依据上的实现会被打乱的形状。
     let n = 0;
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });
@@ -189,8 +179,8 @@ describe('addResponseHistory 的落盘与乐观行', () => {
         n += 1;
         const id = `rh-${n}`;
         await new Promise((resolve) => setTimeout(resolve, n === 2 ? 0 : 5));
-        // Echo the payload the way the real command does, so a crossed
-        // swap shows up as a wrong status rather than two identical rows.
+        // 像真实命令那样回显 payload，好让串位的替换表现为状态不对，
+        // 而不是两行一模一样。
         return makeEntry(args.endpointId, id, { response: args.response as ApiResponse });
       }
       throw new Error(`unexpected command: ${cmd}`);
@@ -214,7 +204,7 @@ describe('addResponseHistory 的落盘与乐观行', () => {
   });
 
   it('内存 FIFO 上限仍是 10，落盘不改变它', () => {
-    appendFails = true; // keep the store-side append on the optimistic path
+    appendFails = true; // 让 store 侧走乐观路径
     const { addResponseHistory } = useAppStore.getState();
     for (let i = 0; i < 12; i++) {
       addResponseHistory(REAL_ID, makeResponse({ status: 200 + i }));
@@ -231,7 +221,7 @@ describe('addResponseHistory 的落盘与乐观行', () => {
 
 describe('loadResponseHistory 按接口加载', () => {
   it('只写自己那个接口的键，并把服务端的 newest-first 归一成 newest-last', async () => {
-    // `list_by_endpoint` answers `created_at DESC, rowid DESC`.
+    // `list_by_endpoint` 回答的是 `created_at DESC, rowid DESC`。
     listResult = [
       makeEntry('epA', 'a3', { createdAt: 3 }),
       makeEntry('epA', 'a2', { createdAt: 2 }),
@@ -250,7 +240,7 @@ describe('loadResponseHistory 按接口加载', () => {
   });
 
   it('重开后下一次发送淘汰的仍是与 SQLite 同一条：最旧的', async () => {
-    // Ten rows, as the database would answer them.
+    // 十行，就像数据库会回答的那样。
     listResult = Array.from({ length: 10 }, (_, i) =>
       makeEntry('epA', `rh-${i + 1}`, { createdAt: 1_000 + i }),
     ).reverse();
@@ -283,7 +273,7 @@ describe('loadResponseHistory 按接口加载', () => {
       calls.push({ cmd, args: args ?? {} });
       if (cmd === 'response_history_list') {
         await listGateP;
-        // The snapshot the server took before the user pressed Send.
+        // 用户按下 Send 之前服务端拍下的快照。
         return [makeEntry(REAL_ID, 'rh-old', { createdAt: 1_000 })];
       }
       if (cmd === 'response_history_append') {
@@ -296,7 +286,7 @@ describe('loadResponseHistory 按接口加载', () => {
     const loading = useAppStore.getState().loadResponseHistory(REAL_ID);
     useAppStore.getState().addResponseHistory(REAL_ID, makeResponse({ body: 'fresh' }));
 
-    // The read answers while the optimistic row is still provisional.
+    // 读取回来时乐观行还在途。
     releaseList();
     await loading;
 
@@ -323,8 +313,8 @@ describe('loadResponseHistory 按接口加载', () => {
       makeEntry('epA', 'a1', { createdAt: 1 }),
     ];
     await useAppStore.getState().loadResponseHistory('epA');
-    // Re-reading the same snapshot — the guard in `ResponseHistory` skips
-    // this in the app, but a duplicate row is still the wrong answer.
+    // 重读同一份快照——应用里 `ResponseHistory` 会跳过这一次，
+    // 但一行重复终归是错的答案。
     await useAppStore.getState().loadResponseHistory('epA');
 
     const rows = useAppStore.getState().responseHistory.epA ?? [];
@@ -343,7 +333,7 @@ describe('loadResponseHistory 按接口加载', () => {
     listResult = [makeEntry('epA', 'a1')];
 
     const loading = useAppStore.getState().loadResponseHistory('epA');
-    // The user moves on to another endpoint while the read is in flight.
+    // 读取在途时用户切到了另一个 endpoint。
     useAppStore.setState({ activeEndpointId: 'epB' });
     release();
     await loading;

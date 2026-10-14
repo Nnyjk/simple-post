@@ -1,24 +1,21 @@
 /**
- * CRUD sub-factory — environments.
+ * CRUD 子工厂 —— 环境。
  *
- * One of five sub-factories composed by `createCrudSlice` (see
- * `../crud-slice.ts` for the slice-wide contract: optimistic `set()` →
- * `invokeCmd` → snapshot-and-rollback).
+ * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
+ * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
  *
- * `null` is the delete sentinel on both a variable and a baseUrl slot, and
- * an empty string is a real value — the tests in
- * `../../__tests__/crud-slice.test.ts` pin that distinction, so the
- * `value === null` checks below are load-bearing, not style.
+ * 变量和 baseUrl 槽位上都用 `null` 作删除哨兵，而空串是真实取值——这个区别由
+ * `../../__tests__/crud-slice.test.ts` 钉住，所以下面那些 `value === null` 判断
+ * 是承重的，不是风格。
  *
- * `moduleBaseUrls[defId][moduleId]` is the only place a service's URL
- * lives: one independent cell per (module, service) pair, no inheritance
- * and no fallback. `resolveEndpointBaseUrl` reads exactly one of them.
- * The flat `baseUrls` map is deprecated and deliberately not written.
+ * `moduleBaseUrls[defId][moduleId]` 是服务 URL 唯一存放的地方：每个
+ * (module × 服务) 一个独立单元格，没有继承也没有回退。
+ * `resolveEndpointBaseUrl` 只读其中恰好一个。那张扁平的 `baseUrls` 映射已废弃，
+ * 刻意不再写入。
  *
- * `deleteEnvironment` and `setEnvironmentActive` write keys owned by
- * other slices (`activeEnvironmentId`, `endpointDetails`) in the same
- * atomic `set()` as their own. Splitting those into separate calls would
- * change what the IPC-failure rollback restores.
+ * `deleteEnvironment` 与 `setEnvironmentActive` 会在与自身键同一次原子 `set()`
+ * 里写别的切片拥有的键（`activeEnvironmentId`、`endpointDetails`）；拆成多次调用
+ * 会改变 IPC 失败时回滚的内容。
  */
 import type { StateCreator } from 'zustand';
 import type { Environment, EndpointDetail } from '@/types/domain';
@@ -26,16 +23,15 @@ import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import { invokeWithRollback } from './crud-helpers';
 
-/** Environment actions owned by the CRUD slice. */
+/** CRUD 切片拥有的 environment 动作。 */
 export interface EnvironmentCrudActions {
   setEnvironmentVar: (envId: string, key: string, value: string | null) => Promise<void>;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => Promise<void>;
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => Promise<void>;
   /**
-   * Set (or with `null` clear) one cell: what service `defId` points at,
-   * for module `moduleId`, in this environment. Each cell is an
-   * independent value — clearing one must not touch its neighbours.
+   * 设定（或用 `null` 清空）一个单元格：本环境下服务 `defId` 对 module `moduleId`
+   * 的 URL。每个单元格都是独立取值——清一个不能碰到它的邻居。
    */
   setEnvironmentModuleBaseUrl: (
     envId: string,
@@ -78,9 +74,8 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     if (!prev) return;
     if (fromKey === toKey) return;
 
-    // Optimistic single-step swap: the old key disappears and the new
-    // one appears in the same state write, so no intermediate render
-    // ever shows the variable missing. The value moves with the key.
+    // 乐观的单步交换：旧键消失与新键出现发生在同一次 state 写入里，
+    // 所以任何中间渲染都不会显示"变量不见了"。值跟着键走。
     const { [fromKey]: value, ...rest } = prev.variables;
     if (value === undefined) return;
     const optimistic: Environment = {
@@ -92,19 +87,16 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     }));
 
     try {
-      // One command, one transaction. The previous shape — two
-      // `environments_set_var` calls — left the variable deleted for
-      // the window between them, and if the second call failed the
-      // rollback below restored only the UI while the backend had
-      // already committed the delete.
+      // 一条命令、一个事务。拆成两次 `environments_set_var` 会在两次调用之间
+      // 让变量处于已删除状态，而第二次调用失败时下面的回滚只还原了 UI，
+      // 后端却已经把删除提交了。
       const updated = await invokeCmd<Environment>(COMMANDS.environmentsRenameVar, {
         envId,
         fromKey,
         toKey,
       });
-      // The backend echoes the authoritative post-rename env, so a
-      // concurrent edit from another window isn't clobbered by the
-      // optimistic guess.
+      // 后端回显的是改名后权威的环境，所以另一个窗口的并发编辑不会被这份
+      // 乐观猜测覆盖。
       set((s) => ({
         environments: s.environments.map((env) => (env.id === envId ? updated : env)),
       }));
@@ -144,17 +136,14 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
   setEnvironmentModuleBaseUrl: async (envId, defId, moduleId, url) => {
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return;
-    // Copy both levels: the inner map is shared with every other module's
-    // row, so mutating it in place would write this cell into modules the
-    // caller never named.
+    // 两层都要拷贝：内层映射与其他所有 module 的行共享，原地改它会把这一格
+    // 写进调用方根本没提过的 module。
     const nextByModule = { ...(prev.moduleBaseUrls[defId] ?? {}) };
     if (url === null) delete nextByModule[moduleId];
     else nextByModule[moduleId] = url;
     const nextModuleBaseUrls = { ...prev.moduleBaseUrls, [defId]: nextByModule };
-    // Drop the whole service row once its last cell is gone, so an env
-    // that has been cleared does not carry a hollow `defId → {}` shell
-    // that reads as "this service is configured here" in any UI diffing
-    // the object by key.
+    // 最后一个格子没了就把整个服务行删掉，免得已清空的环境还留着一个空的
+    // `defId → {}` 外壳，在任何按键比对环境对象的 UI 里都读作"这里配了服务"。
     if (Object.keys(nextByModule).length === 0) delete nextModuleBaseUrls[defId];
     const optimistic: Environment = { ...prev, moduleBaseUrls: nextModuleBaseUrls };
     set((s) => ({
@@ -182,10 +171,9 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
       activeEnvironmentId: get().activeEnvironmentId,
     };
     set((s) => {
-      // Clear `environmentId` on any endpoint that pointed at the deleted
-      // env so it stops resolving against it. We don't have a selector
-      // that re-resolves baseUrl on the fly, so the explicit null-out is
-      // what keeps the URL bar honest.
+      // 把指向被删环境的 endpoint 的 `environmentId` 清空，让它不再对它解析。
+      // 没有会在飞行动态重算 baseUrl 的选择器，所以这个显式置空是让 URL 栏
+      // 保持诚实的关键。
       const nextDetails: Record<string, EndpointDetail> = {};
       for (const [id, d] of Object.entries(s.endpointDetails)) {
         nextDetails[id] = d.environmentId === envId ? { ...d, environmentId: null } : d;
@@ -193,8 +181,7 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
       return {
         environments: s.environments.filter((env) => env.id !== envId),
         endpointDetails: nextDetails,
-        // If the active environment was the one we just deleted, fall
-        // back to the next sibling (or the project default).
+        // 活动环境正好就是刚删掉的那个时，置空（无活动环境）。
         activeEnvironmentId: s.activeEnvironmentId === envId ? '' : s.activeEnvironmentId,
       };
     });
