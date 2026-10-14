@@ -47,7 +47,7 @@
     "clsx": "^2.1.1",
     "gsap": "^3.15.0",
     "lucide-react": "^0.460.0",
-    "marked": "^14.1.1",
+    "marked": "^18.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwind-merge": "^2.5.4",
