@@ -3577,6 +3577,7 @@ dependencies = [
 name = "simple-post-core"
 version = "0.1.1"
 dependencies = [
+ "base64 0.22.1",
  "dirs",
  "r2d2",
  "r2d2_sqlite",
@@ -3596,6 +3597,7 @@ name = "simple-post-mcp"
 version = "0.1.1"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "clap",
  "dirs",
  "r2d2",

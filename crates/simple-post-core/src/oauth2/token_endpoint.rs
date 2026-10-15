@@ -4,10 +4,18 @@ use crate::domain::{OAuth2Auth, OAuth2ClientAuth, OAuth2GrantType};
 use crate::error::AppError;
 use crate::http_executor::{self, HttpRequestInput};
 
+use base64::Engine as _;
+
 use super::form::{encode_form, form_encode};
 use super::parse::parse_token_response;
 use super::OAuth2Token;
 use super::{TOKEN_MAX_RESPONSE_KB, TOKEN_TIMEOUT_MS};
+
+/// 标准字母表（`A-Z a-z 0-9 + /`），`=` 补齐，即 RFC 4648 §4。`client_secret_basic`
+/// 要的就是这个变体，不是 URL-safe 那个。
+fn b64_standard(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
 
 /// 按当前流程拼出一次完整取 token 的 form 字段。
 pub(super) fn build_grant_form(cfg: &OAuth2Auth) -> Vec<(String, String)> {
@@ -120,7 +128,7 @@ async fn token_request(
         );
         headers.push((
             "Authorization".into(),
-            format!("Basic {}", crate::base64::encode(raw.as_bytes())),
+            format!("Basic {}", b64_standard(raw.as_bytes())),
         ));
     }
 

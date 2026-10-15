@@ -1,3 +1,4 @@
+use base64::Engine as _;
 // 纯函数层：缓存键、校验、粘贴解析、form 编解码、应答解析、过期判断与注入。
 
 use super::form::{form_decode, form_encode};
@@ -199,7 +200,7 @@ fn form_encoding_runs_before_base64_for_http_basic_client_credentials() {
     assert_eq!(form_encode("open sesame"), "open+sesame");
     let header = format!("{}:{}", form_encode("Aladdin"), form_encode("open sesame"));
     assert_eq!(
-        crate::base64::encode(header.as_bytes()),
+        base64::engine::general_purpose::STANDARD.encode(header.as_bytes()),
         "QWxhZGRpbjpvcGVuK3Nlc2FtZQ=="
     );
 }

@@ -1,3 +1,4 @@
+use base64::Engine as _;
 // 真的发一次 HTTP：form 体、`Authorization: Basic`、刷新与错误应答在真实 socket 上成立。
 
 use super::store::unix_secs;
@@ -38,7 +39,7 @@ async fn a_client_credentials_grant_reaches_the_token_endpoint_over_http() {
     assert!(
         request.contains(&format!(
             "authorization: Basic {}",
-            crate::base64::encode(b"cid:open+sesame")
+            base64::engine::general_purpose::STANDARD.encode(b"cid:open+sesame")
         )),
         "got: {request}"
     );

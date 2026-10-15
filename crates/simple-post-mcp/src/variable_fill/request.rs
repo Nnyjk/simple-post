@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use base64::Engine as _;
+
 use simple_post_core::domain::{ApiKeyLocation, AuthConfig, AuthType};
 
 use super::template::resolve_template;
@@ -156,36 +158,6 @@ fn url_encode(s: &str) -> String {
 /// 的约定一致（把请求头当裸字节解码）。
 fn b64_basic(user: &str, pass: &str) -> String {
     let combined = format!("{user}:{pass}");
-    base64_encode(combined.as_bytes())
-}
-
-/// 极简 base64 编码器，标准字母表（`A-Z a-z 0-9 + /`）、`=` 补齐。只为
-/// `Authorization: Basic` 而存在 —— 为此拉一个 `base64` crate 不如手写这 30 行。
-fn base64_encode(input: &[u8]) -> String {
-    const ALPHA: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    let mut i = 0;
-    while i + 3 <= input.len() {
-        let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8) | (input[i + 2] as u32);
-        out.push(ALPHA[((n >> 18) & 0x3F) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3F) as usize] as char);
-        out.push(ALPHA[((n >> 6) & 0x3F) as usize] as char);
-        out.push(ALPHA[(n & 0x3F) as usize] as char);
-        i += 3;
-    }
-    let rem = input.len() - i;
-    if rem == 1 {
-        let n = (input[i] as u32) << 16;
-        out.push(ALPHA[((n >> 18) & 0x3F) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3F) as usize] as char);
-        out.push('=');
-        out.push('=');
-    } else if rem == 2 {
-        let n = ((input[i] as u32) << 16) | ((input[i + 1] as u32) << 8);
-        out.push(ALPHA[((n >> 18) & 0x3F) as usize] as char);
-        out.push(ALPHA[((n >> 12) & 0x3F) as usize] as char);
-        out.push(ALPHA[((n >> 6) & 0x3F) as usize] as char);
-        out.push('=');
-    }
-    out
+    // 标准字母表而非 URL-safe：`Authorization: Basic` 的 RFC 7617 没有 -_ 那两个。
+    base64::engine::general_purpose::STANDARD.encode(combined.as_bytes())
 }
