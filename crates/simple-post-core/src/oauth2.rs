@@ -132,9 +132,27 @@ pub async fn resolve(pool: &DbPool, req: &OAuth2TokenRequest) -> Result<OAuth2To
     })
 }
 
+/// 取 token 的单飞闸。
+///
+/// 全局一把锁而不是按 `auth_key` 分桶：取 token 是秒级低频操作，串行化不产生可感知的
+/// 竞争，而分桶要维护一张只增不减的表。
+///
+/// 它挡的是一个具体的失败，而不是泛泛的「线程安全」：同一份配置的两次并发发送都发现
+/// 缓存过期，于是都拿同一个**一次性** `refresh_token` 去换。轮换 refresh token 的
+/// IdP 会让第二次失败，而我们「刷新失败就整取」的兜底会拿**已消费**的授权码再换一次，
+/// 于是用户看到一句完全无从排查的失败。闸内重读缓存让第二次直接复用第一次的结果。
+static REFRESH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// 缓存里有一份且还没过期就直接用；过期则先试刷新，刷新不成再整取。发送路径的唯一入口。
+///
+/// 整段「查缓存 → 刷新 → 落库」在 [`REFRESH_GATE`] 里，并在拿到闸之后**重读**缓存：
+/// 并发调用者在这里看到的是前一个刚写下的 token，而不是又去刷新一遍。
+///
+/// UI 的 `force` 路径（[`fetch_and_store`]）不经过这把闸——它要的就是忽略缓存重取，
+/// 与并发重复发请求是两种不同的意图，串行化它只会让「重新获取」按下去没反应。
 pub async fn ensure_token(pool: &DbPool, cfg: &OAuth2Auth) -> Result<OAuth2Token, AppError> {
     validate(cfg)?;
+    let _gate = REFRESH_GATE.lock().await;
     let key = auth_key(cfg);
     let cached = db::with_conn(pool, |c| db::oauth2_tokens::get(c, &key))?;
 
@@ -420,8 +438,11 @@ async fn token_request(
         headers,
         body: Some(encode_form(form)),
         timeout_ms: TOKEN_TIMEOUT_MS,
-        // IdP 用 302 把用户送回 IdP 域的登录页是正常交互，不该在这里撞墙。
-        follow_redirects: true,
+        // 这次请求带着 `client_secret` / 用户密码 / 授权码，跟随重定向等于把它们再寄给
+        // 一个未校验的目标——`OutboundPolicy` 只挡私有网段，挡不住 302 到另一个公网主机。
+        // token 端点本就不该重定向（RFC 6749 §3.2 的 back-channel POST），所以 3xx 由
+        // `parse_token_response` 按非 2xx 报错，比悄悄换主机发出去好。
+        follow_redirects: false,
         max_response_size_kb: TOKEN_MAX_RESPONSE_KB,
     };
 

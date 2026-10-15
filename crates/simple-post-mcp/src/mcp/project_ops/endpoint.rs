@@ -1057,7 +1057,9 @@ fn patch_shape_hint(field: &str) -> String {
              depends on kind: bearer → {{\"bearer\":\"<token>\"}}, basic → \
              {{\"basic\":{{\"username\":\"u\",\"password\":\"p\"}}}}, apikey → \
              {{\"apikey\":{{\"key\":\"<header name>\",\"value\":\"<key>\",\
-             \"inLocation\":\"header\"|\"query\"}}}}",
+             \"inLocation\":\"header\"|\"query\"}}}}, oauth2 → \
+             {{\"oauth2\":{{\"grantType\":\"client_credentials\",\
+             \"tokenUrl\":\"<url>\",\"clientId\":\"<id>\"}}}}",
             AUTH_TYPE_VALUES.join("|")
         ),
         "tags" => "an array of strings, e.g. [\"smoke\",\"user\"]".to_string(),

@@ -486,6 +486,58 @@ async fn a_hand_written_authorization_header_survives_the_injection() {
     );
 }
 
+/// 用户把鉴权从 oauth2 切成 bearer 之后，那份 oauth2 载荷仍在（`resolve_auth` 对未
+/// 选中的方案原样保留），但**不应**再有人去取 token。
+///
+/// query 档是这条的刀刃：header 档会被 `build_headers` 已写好的 `Authorization` 挡住，
+/// 而 query 档不挡——一个用户已经不再选择的 token 会被拼进 URL 发出去。
+#[tokio::test]
+async fn an_unselected_oauth2_payload_never_reaches_the_token_endpoint() {
+    use simple_post_core::domain::OAuth2TokenLocation;
+
+    let idp = stub(
+        "200 OK",
+        "application/json",
+        r#"{"access_token":"AT-SHOULD-NOT-APPEAR","token_type":"Bearer","expires_in":3600}"#,
+    )
+    .await;
+    let api = stub("200 OK", "application/json", r#"{"ok":true}"#).await;
+
+    let st = mcp_state("unselected");
+    let id = oauth2_endpoint(
+        &st,
+        &format!("{}/oauth/token", idp.url),
+        &api.url,
+        // query 档：注入不做重名检查，是唯一能把未选中的 token 送出去的形状。
+        OAuth2TokenLocation::Query,
+    );
+
+    // 把 kind 改成 bearer，同时保留那份 oauth2 载荷。
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        c.execute(
+            "UPDATE endpoint_details SET auth_json = ?1 WHERE node_id = 'e_oauth'",
+            [r#"{"kind":"bearer","bearer":"USER-TOKEN","oauth2":{"grantType":"client_credentials","tokenUrl":"http://127.0.0.1:1/token","clientId":"cid","tokenLocation":"query"}}"#],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    tool_api_call_endpoint(&st, json!({ "endpoint_id": id }))
+        .await
+        .expect("call");
+
+    assert_eq!(idp.count(), 0, "未选中的 oauth2 载荷不该触发取 token");
+    let api_request = api.nth(0);
+    assert!(
+        !api_request.contains("AT-SHOULD-NOT-APPEAR"),
+        "未选中的 token 绝不能拼进 URL，got: {api_request}"
+    );
+    assert!(
+        api_request.contains("authorization: Bearer USER-TOKEN"),
+        "选中的 bearer 方案不受影响，got: {api_request}"
+    );
+}
+
 /// `endpoint_details.headers_json` 的编码与 `db::endpoint_details::update` 一致，
 /// 这里直接借它，免得测试里再抄一份 serde 调用。
 fn headers_json(rows: &[simple_post_core::domain::KeyValue]) -> String {

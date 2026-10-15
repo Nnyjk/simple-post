@@ -216,8 +216,8 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
   -- 是因为刷新响应**可能**不重复它，届时仍要用旧值拼 `Authorization`。
   token_type     TEXT NOT NULL DEFAULT 'Bearer',
   scope          TEXT,
-  -- Unix 秒。NULL = 不知道何时过期（IdP 没给 `expires_in`），此时靠缓存行存在
-  -- 就当作一直有效，直到某次请求 401 才由 `oauth2` 层重新取。
+  -- Unix 秒。NULL = 不知道何时过期（IdP 没给 `expires_in`），此时一直视为有效，
+  -- 只能由 UI 的「重新获取」替换。
   expires_at     INTEGER,
   obtained_at    INTEGER NOT NULL
 );

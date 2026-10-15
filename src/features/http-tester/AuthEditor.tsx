@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import {
   type AuthConfig,
@@ -191,9 +191,20 @@ function OAuth2Fields({
   const [token, setToken] = useState<OAuth2TokenResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * 在途取 token 的序号。改配置与发起取 token 都让它自增，结果回来时只有序号仍是
+   * 当前值才写 state。
+   *
+   * 少了它就会出现这一串：点「获取 Token」→ 在返回前改掉 `tokenUrl` → 晚到的响应
+   * 按旧配置 setToken → 界面对**新**配置显示「刚获取」。`pending` 挡不住这个，它只
+   * 管按钮点两下。
+   */
+  const reqSeq = useRef(0);
+
   // 改配置即作废上一次的结果：那个 token 是**改之前**的配置拿到的，继续显示会让人
-  // 以为新配置已经生效。
+  // 以为新配置已经生效。同时作废在途的那一次，否则它的晚到结果会绕过上面那句。
   const patch = (next: Partial<OAuth2Auth>) => {
+    reqSeq.current += 1;
     setToken(null);
     setError(null);
     onChange({ ...value, oauth2: { ...cfg, ...next } });
@@ -205,6 +216,7 @@ function OAuth2Fields({
 
   const acquire = async () => {
     if (pending) return;
+    const seq = ++reqSeq.current;
     setPending(true);
     setError(null);
     try {
@@ -213,14 +225,17 @@ function OAuth2Fields({
       const auth: AuthConfig = { kind: 'oauth2', oauth2: cfg };
       // 隐式流程没有 token 端点可调，token 由用户从浏览器粘回来；其余流程走
       // `force` 让后端忽略缓存重取一次。
-      setToken(
-        await fetchOAuth2Token(auth, isImplicit ? { manual: cfg.authCode } : { force: true }),
+      const t = await fetchOAuth2Token(
+        auth,
+        isImplicit ? { manual: cfg.authCode } : { force: true },
       );
+      if (seq === reqSeq.current) setToken(t);
     } catch (err) {
+      if (seq !== reqSeq.current) return;
       setToken(null);
       setError((err as Error)?.message ?? String(err));
     } finally {
-      setPending(false);
+      if (seq === reqSeq.current) setPending(false);
     }
   };
 
