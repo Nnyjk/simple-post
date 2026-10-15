@@ -60,13 +60,13 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 
 - `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/` (incl. `WorkspaceShell.tsx`), `response-viewer/`, `welcome/`
 - `src/stores/` — Zustand: `app-store.ts` barrel composing `bootstrap-slice`, `crud-slice`, `ui-slice`, `mcp-slice`, `dirty-tabs-slice` + `store-types.ts`
-- `src/lib/` — `tauri-commands.ts` (dual-transport IPC + `COMMANDS` registry), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`
+- `src/lib/` — `tauri-commands.ts` (dual-transport dispatch) + `tauri-commands/` (`commands.ts` holds the `COMMANDS` registry, `web-routes.ts` the `WEB_ROUTES` specs, `bearer.ts` the localStorage bearer), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`
 - `src/components/ui/` — shared primitives (`method-picker`, `tabs`, `dialog`, …)
 - `src/types/domain.ts` — TS mirrors of Rust domain types
-- `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` holds the whole resource tree, `endpoint_details.rs` its endpoint-only configuration) + `schema.sql` + `fixtures.json` (test-only)
+- `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` is a facade over `nodes/{read,write,tree,placement}.rs`, which together hold the whole resource tree; `endpoint_details.rs` its endpoint-only configuration) + `pool.rs` / `schema.rs` + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
 - `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource; `dto.rs` is now only a re-export of the server crate's DTOs)
-- `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs`, `port_registry.rs`, `auth.rs`, `dto.rs`, `http_config.rs`, `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
+- `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs` + `port_registry.rs` (both facades over same-named module dirs), `auth.rs`, `dto.rs`, `http_config.rs`, `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
 - `scripts/` — dev/test/build utilities (see below)
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
@@ -157,6 +157,10 @@ Two hazards specific to this repo. Several regression tests read the source **as
 
 Do not loosen either test or delete it to make a comment edit pass. The assertions are worth more than the prose is.
 
+That second test also **pins two functions to one file**, which constrains how `daemon_supervisor.rs` may be split: it brace-matches `ensure_started_with` and `ensure_started` out of `include_str!("daemon_supervisor.rs")`, so both must stay **whole functions in that file**. Moving either one panics the test with "must exist in daemon_supervisor.rs". Extracting `ensure_started_with`'s body into a helper *elsewhere* is worse than failing: the scan would pass vacuously while the real invariant rotted. The invariant is that the shared spawn path never touches a Tauri type — otherwise the `--lib` test binary gains `comctl32!TaskDialogIndirect` and fails to load with `0xc0000139`. Any helper split out of it must be `AppHandle`-free too.
+
+**Oversized files are facades over same-named module directories.** A file that once exceeded ~500 lines now keeps only its module map and `pub use` re-exports; the bodies live in `<name>/<unit>.rs` (Rust 2018 resolves `mod unit;` inside `foo.rs` to `foo/unit.rs`, so the file grows a directory without moving). Import paths are unchanged, which is what lets `simple-post-mcp` / `simple-post-server` / `src-tauri` keep compiling against a refactored `simple-post-core`. **When splitting, a facade must re-export the public surface, not move it** — and a `#[path]` test mount keeps pointing at the file that declares the `mod`, so a split test file needs its own mount rather than being merged into a neighbour.
+
 **Async/concurrency.** tokio multi-thread runtime; metrics via `AtomicU64` with `Ordering::Relaxed`; `port_registry.rs` uses OS atomic file creation (`create_new`) to prevent multi-instance races.
 
 **MCP stdout discipline.** In `simple-post-mcp`, stdout carries *only* JSON-RPC frames; all logging, panics, and `__mcp_metrics__{…}` telemetry go to **stderr**. Non-JSON on stdout crashes AI clients.
@@ -206,14 +210,14 @@ The regression net is `scripts/test-web-basepath.mjs`, which parses the served s
 ## Important Files
 
 - `src/main.tsx`, `src/App.tsx` — frontend entry; theme preload, global shortcuts, layout
-- `src/lib/tauri-commands.ts` — `IS_TAURI_SHELL` detection, `invokeCmd`, `COMMANDS`, `WEB_ROUTES`
+- `src/lib/tauri-commands.ts` + `src/lib/tauri-commands/` — `IS_TAURI_SHELL` detection and `invokeCmd` dispatch in the facade; `COMMANDS` in `commands.ts`, `WEB_ROUTES` in `web-routes.ts`, bearer storage in `bearer.ts` (all three re-exported from the facade, so import paths are unchanged)
 - `src/stores/app-store.ts` — store barrel + safe selector hooks
 - `src-tauri/src/main.rs` / `src-tauri/src/lib.rs` — CLI dispatch / Tauri `run()` (the `serve-web` and `mcp` arms forward into the server crate)
 - `crates/simple-post-server/src/web_api/` — REST surface for `serve-web`: router + spec re-exports in `mod.rs`, handlers in `routes/`, OpenAPI source in `spec.rs`, SPA shell rewriting in `static_files.rs`
 - `crates/simple-post-server/src/main.rs` — the Tauri-free CLI (`simple-post-server serve-web` / `mcp`); this is the container entrypoint
-- `crates/simple-post-core/src/db/mod.rs` + `schema.sql` — pool, transactions, migrations, seed
-- `crates/simple-post-core/src/db/nodes.rs` — the resource tree: CRUD, `list_children`, `move_many` (reparents + re-derives `root_id` across the subtree), `move_to_root` (cross-project), `duplicate`, `search`
-- `crates/simple-post-core/src/domain.rs`, `error.rs` — canonical types + wire errors
+- `crates/simple-post-core/src/db/mod.rs` facade + `db/{pool,schema}.rs` + `schema.sql` — pool, transactions, migrations, seed
+- `crates/simple-post-core/src/db/nodes.rs` facade + `db/nodes/` — the resource tree: CRUD and `list_children` in `read.rs`, create/update/delete/duplicate in `write.rs`, `move_many` (reparents + re-derives `root_id` across the subtree) and `move_to_root` (cross-project) in `tree.rs`, placement validation in `placement.rs`
+- `crates/simple-post-core/src/domain.rs` facade + `domain/` + `error.rs` — canonical types + wire errors
 - `crates/simple-post-mcp/src/mcp/mod.rs` — 44-tool registry, `REQUIRED_CAPABILITY`, `dispatch`
 - `Cargo.toml` — workspace root (members, shared deps, release profile)
 - `src-tauri/tauri.conf.json` — window, NSIS bundle, build hooks, CSP (intentionally `null`)
@@ -258,7 +262,7 @@ The regression net is `scripts/test-web-basepath.mjs`, which parses the served s
 Key facts:
 
 - **Test file placement — frontend.** Every test lives in a `__tests__/` directory beside the code it covers: `src/lib/__tests__/*.test.ts` and `src/stores/__tests__/*.test.ts`. The file is still named after the module (`http.test.ts` for `http.ts`), not after the folder. `__tests__` is a recognised convention (Create React App / Angular lineage) rather than *the* standard — co-location is the more common modern React default — but it is a legitimate one, and consistency inside this repo is what matters. The double underscore marks the directory as non-shippable without relying on a bundler honouring any name.
-- **Test file placement — Rust.** There is no `__tests__` equivalent and no way to add one: Rust's module system resolves a file's location from the module path, so a test-only directory is not discoverable. The two options are the inline `#[cfg(test)] mod tests { … }` and a sibling file reached through `#[path]`. This repo uses the sibling form everywhere except a handful still inline under `src-tauri/` (`auth.rs`, `daemon_supervisor.rs`, `port_registry.rs`) — match the dominant form when you add tests:
+- **Test file placement — Rust.** There is no `__tests__` equivalent and no way to add one: Rust's module system resolves a file's location from the module path, so a test-only directory is not discoverable. The two options are the inline `#[cfg(test)] mod tests { … }` and a sibling file reached through `#[path]`. This repo uses the sibling form everywhere except four files still inline (`src-tauri/src/main.rs`, `crates/simple-post-server/src/{auth,main}.rs`, `crates/simple-post-server/src/web_api/static_files.rs`) — match the dominant form when you add tests:
   ```rust
   #[cfg(test)]
   #[path = "projects_test.rs"]
@@ -266,7 +270,7 @@ Key facts:
   ```
   `super` resolves identically from a `#[path]` module, so the extracted body keeps its `use super::*;` unchanged and `cargo fmt --all` re-indents it. `#[path]` rather than the Rust 2018 `projects/tests.rs` submodule directory, so the pairing stays visible in directories that are otherwise flat `*.rs` files. When splitting one, **match the braces — do not assume the block's closing brace is the last line**: `db/mod.rs` has `pub mod test_counter` *after* its `mod tests`, and swallowing that tail would compile a `#[cfg(test)]` test helper into the library.
 - **`npm test` auto-discovers `src/**/*.test.ts`** through `scripts/run-tests.mjs` — no hardcoded list, new test files are picked up automatically. In `--watch` mode the list is captured at spawn time: restart `npm run test:watch` after adding/renaming a test file. Single file: `npx tsx --test path/to/foo.test.ts`.
-- **A test that resolves the module under test at runtime survives neither a move nor a rename.** `tauri-commands.test.ts` probes `IS_TAURI_SHELL` in a `spawnSync` child because that flag is frozen at module-eval time, and resolves the module with `new URL('./tauri-commands.ts', import.meta.url).href`. That URL is relative to the *test file*, so moving the test into `__tests__/` silently broke it until the path gained its `../`. Typecheck and lint both passed on the broken version — only the child process failed. Grep for `import.meta.url` and `__dirname` whenever a test file changes directory.
+- **A test that resolves the module under test at runtime survives neither a move nor a rename.** `tauri-commands-shell.test.ts` probes `IS_TAURI_SHELL` in a `spawnSync` child because that flag is frozen at module-eval time, and resolves the module with `new URL('../tauri-commands.ts', import.meta.url).href`. That URL is relative to the *test file*, so moving the test silently broke it until the path gained its `../`. Typecheck and lint both passed on the broken version — only the child process failed. Grep for `import.meta.url` and `__dirname` whenever a test file changes directory.
 - ESLint scoping decisions (in `eslint.config.js`): `no-explicit-any` off under `**/*.test.ts` and `**/__tests__/` (deliberately loose mocks); `no-require-imports` off for `.mjs`/`.cjs` tooling; names starting with `_` are sanctioned unused placeholders; `react-hooks/rules-of-hooks` is **error** — `HttpTester`'s hooks were hoisted above its `if (!endpoint)` early return to satisfy it (never put hooks after an early return).
 - Headless store tests need `src/stores/__tests__/_browser-shim.ts`: installs Map-backed `localStorage` (Node 22 ships a methodless native `localStorage` that crashes otherwise), `document.visibilityState` emitter, timers, and `mockIPC`, and sets `window.__TAURI_INTERNALS__ = {}` *before* module eval so `IS_TAURI_SHELL === true`.
 - **No seed data ships with the app.** `db::init` runs `schema.sql` and stops — a fresh install is empty. `crates/simple-post-core/src/db/fixtures.json` is **test-only**: it is reachable solely through `#[cfg(test)] pub(crate) mod test_support` (`init_seeded` / `seed`), which does not exist in a production build. Because `test_support` is `pub(crate)`, sibling crates cannot use it — the `endpoint_send_tests` module in `src-tauri/src/commands/endpoint_send_tests.rs` builds its own rows through the public CRUD API instead. There is **no** TS mock-data module; store tests build their own fixtures inline.

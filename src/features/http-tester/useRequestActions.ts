@@ -1,0 +1,145 @@
+/**
+ * 请求栏的三个动作：发送、保存、复制 cURL。
+ *
+ * 三者共用同一个 `prepared`（请求的最终线上形态），故「用户复制到的就是服务端
+ * 收到的」这条不变式在这里成立。本模块只编排顺序——校验门、在途请求的取消与清空、
+ * 复制 cURL 的反馈；状态与 store 写入全部由调用点持有。
+ */
+import { useCallback, type RefObject } from 'react';
+import { sendPreparedRequest } from '@/lib/http';
+import { preparedToCurl, type PreparedRequest } from '@/lib/http-build';
+import { draftToPatch } from '@/stores/slices/crud-helpers';
+import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
+import type { ApiResponse, AuthConfig } from '@/types/domain';
+
+/** 与 store 里 `setLastResponse` / `addResponseHistory` 相同的形状。 */
+
+/**
+ * 返回发送 / 保存 / 复制三个处理器。必须无条件调用——它是 hook。
+ */
+export function useRequestActions({
+  endpointId,
+  isDraft,
+  draft,
+  prepared,
+  auth,
+  settings,
+  runValidation,
+  setRequestPending,
+  setLastResponse,
+  addResponseHistory,
+  saveDraftEndpoint,
+  updateEndpointDetail,
+  clearEndpointDraft,
+  inFlightRef,
+  setCurlFlash,
+}: {
+  endpointId: string | undefined;
+  isDraft: boolean;
+  draft: EndpointDraft | undefined;
+  prepared: PreparedRequest;
+  auth: AuthConfig;
+  settings: RequestSettings;
+  /** 跑校验并回报是否通过；失败时它已把界面切到出问题的页签。 */
+  runValidation: () => boolean;
+  setRequestPending: (v: boolean) => void;
+  setLastResponse: (resp: ApiResponse | null) => void;
+  addResponseHistory: (endpointId: string, response: ApiResponse) => void;
+  saveDraftEndpoint: (id: string) => Promise<string | null>;
+  updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
+  clearEndpointDraft: (id: string) => void;
+  /** 在途请求的 ref：pending 期间再次点击发送 = 取消上一次重来。 */
+  inFlightRef: RefObject<AbortController | null>;
+  setCurlFlash: (v: boolean) => void;
+}) {
+  const handleSend = useCallback(async () => {
+    if (!endpointId) return;
+    // 校验是请求的前置门。解析不了的 json body 不该让服务端去猜；照发只会让用户对着
+    // 服务端解析错误，而这个错误本可以指出他敲错的那个字符。
+    if (!runValidation()) return;
+    // 先取消任何在途请求。
+    inFlightRef.current?.abort();
+    const ctrl = new AbortController();
+    inFlightRef.current = ctrl;
+    setRequestPending(true);
+    try {
+      // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
+      // 这正是未保存的草稿也能发送的原因：没有 `endpointId` 要查，也没有东西要先持久化。
+      //
+      // ENV 药丸只存在于 Zustand，数据库的 `is_active` 不跟随它，故解析必须基于界面上的
+      // `endpointEnv` —— `prepareRequest` 已经折进去了。
+      const resp = await sendPreparedRequest({
+        request: prepared,
+        // 与 `prepared` 用的是同一份 auth：OAuth2 要靠它取 token，`prepared` 本身
+        // 不含（token 只有发出去的那一刻才拿得到）。
+        auth,
+        settings,
+        signal: ctrl.signal,
+      });
+      setLastResponse(resp);
+      addResponseHistory(endpointId, resp);
+    } catch (e) {
+      // sendRequest 有文档保证不抛 —— 这个 catch 是防御网，兜住 buildFetchInit 之类
+      // 的意外。
+      console.error('[HttpTester] sendRequest threw:', e);
+    } finally {
+      // 只有仍是当前 controller 才清空（途中可能被更新的发送顶替）。
+      if (inFlightRef.current === ctrl) inFlightRef.current = null;
+      setRequestPending(false);
+    }
+  }, [
+    endpointId,
+    runValidation,
+    inFlightRef,
+    prepared,
+    auth,
+    settings,
+    setRequestPending,
+    setLastResponse,
+    addResponseHistory,
+  ]);
+
+  const handleSave = useCallback(() => {
+    if (!endpointId) return;
+    // 与发送同门：持久化一个解析不了的 json body 等于故意存下坏请求。校验失败时草稿
+    // 原样留着 —— 不写不清。
+    if (!runValidation()) return;
+
+    // 未保存的接口没有可 patch 的行，故整次写入一步完成：`saveDraftEndpoint` 把文档
+    // 字段与待存的请求配置编辑并成一个 `detail` 写入，并把草稿标签换成真实接口标签。
+    // 写入失败时保留草稿（与本标签），重试就是再按一次保存，错误经 `draftSaveError` 呈现。
+    if (isDraft) {
+      void saveDraftEndpoint(endpointId);
+      return;
+    }
+
+    const patch = draft ? draftToPatch(draft) : {};
+    if (Object.keys(patch).length > 0) updateEndpointDetail(endpointId, patch);
+    clearEndpointDraft(endpointId);
+  }, [
+    endpointId,
+    runValidation,
+    isDraft,
+    draft,
+    saveDraftEndpoint,
+    updateEndpointDetail,
+    clearEndpointDraft,
+  ]);
+
+  const handleCopyCurl = useCallback(async () => {
+    // 命令由 `prepared`（发送所用的那个对象）渲染，故不可能描述另一个请求。复制不属
+    // 于校验路径，body 解析不了也照样给命令 —— 这是复制而非请求，拒绝只会碍事。
+    const curl = preparedToCurl(prepared);
+    try {
+      await navigator.clipboard.writeText(curl);
+      setCurlFlash(true);
+      window.setTimeout(() => setCurlFlash(false), 1500);
+    } catch (err) {
+      // 权限被拒、非安全上下文等 —— 先打到 console（还没有 toast 组件），用户可退而
+      // 手动选中文本。
+      console.error('[HttpTester] copy as cURL failed:', err);
+    }
+  }, [prepared, setCurlFlash]);
+
+  return { handleSend, handleSave, handleCopyCurl };
+}
