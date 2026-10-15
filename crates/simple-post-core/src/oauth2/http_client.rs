@@ -81,11 +81,41 @@ async fn exchange(request: HttpRequest) -> Result<HttpResponse, AppError> {
     if !(200..300).contains(&resp.status) {
         return Err(error_response(resp.status, &resp.body, &resp.content_type));
     }
+    ok_response(&resp.body, &resp.content_type)
+}
 
-    let status = resp.status;
-    let body = normalize_success_body(&resp.body, &resp.content_type);
-    let mut out = HttpResponse::new(body.into_bytes());
-    *out.status_mut() = oauth2::http::StatusCode::from_u16(status)
-        .map_err(|e| AppError::Http(format!("token 响应状态码非法: {e}")))?;
+/// 2xx 应答的 body → crate 看得懂的那份响应。
+///
+/// 状态码一律报 **200**：crate 的 `check_response_status` 只认 200，而本项目一直
+/// 接受整个 2xx（201 / 202 也放过）。把原样状态码转交，crate 会对 201 报一句
+/// `token 请求失败` —— 那是从宽变严的回归，而 RFC 6749 §5.1 本来就规定 token
+/// 端点回 200，放宽只是本项目一贯的容忍。
+///
+/// 调用方必须先确认状态码落在 2xx，否则这里会替非 2xx 撒谎。
+fn ok_response(body: &str, content_type: &str) -> Result<HttpResponse, AppError> {
+    let normalized = normalize_success_body(body, content_type);
+    let mut out = HttpResponse::new(normalized.into_bytes());
+    *out.status_mut() = oauth2::http::StatusCode::OK;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ok_response;
+
+    /// 201 / 202 是非 2xx 之外最常见的越界成功码：旧解析器照单全收，crate 只认 200。
+    /// 不在这里抹平，交给 crate 的就是一句无从排查的「token 请求失败」。
+    #[test]
+    fn every_accepted_success_status_is_handed_over_as_ok() {
+        let out = ok_response(r#"{"access_token":"AT"}"#, "application/json").unwrap();
+        assert_eq!(out.status(), 200);
+    }
+
+    #[test]
+    fn the_body_is_normalized_on_the_way_out() {
+        let out = ok_response("access_token=AT&expires_in=60", "text/plain").unwrap();
+        assert!(String::from_utf8(out.body().to_vec())
+            .unwrap()
+            .contains(r#""expires_in":60"#));
+    }
 }
