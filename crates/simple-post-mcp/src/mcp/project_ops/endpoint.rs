@@ -270,7 +270,7 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
                 },
                 "auth_config": {
                     "type": "object",
-                    "description": "Scheme-specific credentials: {\"bearer\":\"<token>\"} for bearer, {\"basic\":{\"username\":\"u\",\"password\":\"p\"}} for basic, {\"apikey\":{\"key\":\"<header name>\",\"value\":\"<key>\",\"inLocation\":\"header\"|\"query\"}} for apikey."
+                    "description": "Scheme-specific credentials: {\"bearer\":\"<token>\"} for bearer, {\"basic\":{\"username\":\"u\",\"password\":\"p\"}} for basic, {\"apikey\":{\"key\":\"<header name>\",\"value\":\"<key>\",\"inLocation\":\"header\"|\"query\"}} for apikey, {\"oauth2\":{\"grantType\":\"client_credentials\",\"tokenUrl\":\"https://idp.example.com/oauth/token\",\"clientId\":\"<id>\"}} for oauth2 (see auth.oauth2 in endpoint_update for the full shape)."
                 },
                 "tags": { "type": "array", "items": { "type": "string" } },
                 "environment_id": {
@@ -374,7 +374,8 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
                                         "inLocation": { "type": "string", "enum": ["header", "query"] }
                                     },
                                     "additionalProperties": false
-                                }
+                                },
+                                "oauth2": oauth2_config_schema()
                             },
                             "required": ["kind"],
                             "additionalProperties": false
@@ -877,7 +878,64 @@ const BODY_MODE_VALUES: &[&str] = &["none", "json", "form", "raw"];
 
 /// 线上接受的 `auth_type` 取值，对应 [`simple_post_core::domain::AuthType`] 的小写
 /// 变体名。
-const AUTH_TYPE_VALUES: &[&str] = &["none", "bearer", "basic", "apikey"];
+const AUTH_TYPE_VALUES: &[&str] = &["none", "bearer", "basic", "apikey", "oauth2"];
+
+/// OAuth2 载荷的 JSON Schema。两处用它（`endpoint_update` 的 `auth.oauth2` 与
+/// `endpoint_create` 的 `auth_config` 说明），故 AI 客户端在两条路上看到同一份形状。
+///
+/// `additionalProperties: false` 是承重的：`endpoint_update` 的 `auth` 上有它，
+/// 而 agent 是这里最主要的外部写路径。漏登记一个字段不是「宽松一点」，而是那个字段
+/// **根本传不进来**——一个仍然看着正确注册的工具却永远收不到配置。
+fn oauth2_config_schema() -> Value {
+    json!({
+        "type": "object",
+        "description": "OAuth2 settings. The token is fetched on demand and \
+                        refreshed when it expires; authorization_code needs \
+                        authCode pasted after the user authorises in a browser, \
+                        and implicit has no token endpoint at all (the token \
+                        comes back in the redirect fragment).",
+        "properties": {
+            "grantType": {
+                "type": "string",
+                "enum": ["authorization_code", "client_credentials", "password", "implicit"]
+            },
+            "tokenUrl": { "type": "string" },
+            "clientId": { "type": "string" },
+            "clientSecret": { "type": "string" },
+            "clientAuth": {
+                "type": "string",
+                "enum": ["basic", "body"],
+                "description": "Where the client credentials go: an HTTP Basic header (default) or the form body."
+            },
+            "scope": { "type": "string", "description": "Space separated." },
+            "authorizationUrl": { "type": "string" },
+            "redirectUri": { "type": "string" },
+            "codeVerifier": { "type": "string", "description": "PKCE verifier. Must match the challenge registered with the IdP; this app never generates one." },
+            "authCode": { "type": "string", "description": "One-shot authorization code, or the whole redirect URL carrying ?code=." },
+            "username": { "type": "string" },
+            "password": { "type": "string" },
+            "extraParams": {
+                "type": "array",
+                "description": "Extra form fields appended to the token request (e.g. audience).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "key": { "type": "string" },
+                        "value": { "type": "string" },
+                        "enabled": { "type": "boolean" }
+                    },
+                    "required": ["key", "value"],
+                    "additionalProperties": false
+                }
+            },
+            "tokenLocation": { "type": "string", "enum": ["header", "query"] },
+            "tokenParam": { "type": "string", "description": "Query parameter name for tokenLocation=query. Defaults to access_token." }
+        },
+        "required": ["grantType"],
+        "additionalProperties": false
+    })
+}
 
 fn build_auth(
     auth_type: Option<&str>,
@@ -889,6 +947,7 @@ fn build_auth(
         "bearer" => AuthType::Bearer,
         "basic" => AuthType::Basic,
         "apikey" => AuthType::Apikey,
+        "oauth2" => AuthType::Oauth2,
         other => {
             return Err(AppError::Validation(format!(
                 "unknown auth_type {other:?}; expected one of: {}",
@@ -914,7 +973,10 @@ fn build_auth(
                      {{\"bearer\":\"<token>\"}} for bearer, \
                      {{\"basic\":{{\"username\":\"u\",\"password\":\"p\"}}}} for basic, \
                      {{\"apikey\":{{\"key\":\"X-Api-Key\",\"value\":\"<key>\",\
-                     \"inLocation\":\"header\"}}}} for apikey"
+                     \"inLocation\":\"header\"}}}} for apikey, \
+                     {{\"oauth2\":{{\"grantType\":\"client_credentials\",\
+                     \"tokenUrl\":\"https://idp.example.com/oauth/token\",\
+                     \"clientId\":\"<id>\"}}}} for oauth2"
                 ))
             })?;
             wire.into_auth_config()
@@ -936,6 +998,8 @@ struct AuthConfigWire {
     basic: Option<simple_post_core::domain::BasicAuth>,
     #[serde(default)]
     apikey: Option<simple_post_core::domain::ApiKeyAuth>,
+    #[serde(default)]
+    oauth2: Option<simple_post_core::domain::OAuth2Auth>,
 }
 
 impl AuthConfigWire {
@@ -947,6 +1011,7 @@ impl AuthConfigWire {
             bearer: self.bearer,
             basic: self.basic,
             apikey: self.apikey,
+            oauth2: self.oauth2,
         }
     }
 }
@@ -992,7 +1057,9 @@ fn patch_shape_hint(field: &str) -> String {
              depends on kind: bearer → {{\"bearer\":\"<token>\"}}, basic → \
              {{\"basic\":{{\"username\":\"u\",\"password\":\"p\"}}}}, apikey → \
              {{\"apikey\":{{\"key\":\"<header name>\",\"value\":\"<key>\",\
-             \"inLocation\":\"header\"|\"query\"}}}}",
+             \"inLocation\":\"header\"|\"query\"}}}}, oauth2 → \
+             {{\"oauth2\":{{\"grantType\":\"client_credentials\",\
+             \"tokenUrl\":\"<url>\",\"clientId\":\"<id>\"}}}}",
             AUTH_TYPE_VALUES.join("|")
         ),
         "tags" => "an array of strings, e.g. [\"smoke\",\"user\"]".to_string(),

@@ -14,6 +14,7 @@ path = "src/lib.rs"
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_json_path = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }

@@ -18,7 +18,7 @@ use tauri::Manager;
 
 pub mod commands;
 
-pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, permissions};
+pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, oauth2, permissions};
 pub use simple_post_mcp::{daemon_http, mcp};
 
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
@@ -134,6 +134,9 @@ pub fn run() {
             crate::commands::response_history_list,
             crate::commands::response_history_append,
             crate::commands::response_history_clear,
+            // OAuth2 取 token。取 token 是发请求**之前**的一步，故与 `http_request`
+            // 是两个命令而不是它的参数：web 形态下前端据此先把 Authorization 组装好。
+            crate::commands::oauth2_token,
             crate::commands::permissions_get,
             crate::commands::permissions_set,
             crate::commands::mcp_status,

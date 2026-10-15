@@ -556,6 +556,9 @@ export function HttpTester() {
       // `endpointEnv` —— `prepareRequest` 已经折进去了。
       const resp = await sendPreparedRequest({
         request: prepared,
+        // 与 `prepared` 用的是同一份 auth：OAuth2 要靠它取 token，`prepared` 本身
+        // 不含（token 只有发出去的那一刻才拿得到）。
+        auth: effective.auth,
         settings: requestSettings,
         signal: ctrl.signal,
       });

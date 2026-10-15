@@ -32,6 +32,7 @@ import type {
 import type { RequestSettings } from '@/stores/app-store';
 import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
 import { buildFetchInit, type PreparedRequest } from './http-build';
+import { applyOAuth2Token, fetchOAuth2Token } from './oauth2';
 
 export interface SendInput {
   method: HttpMethod;
@@ -115,6 +116,22 @@ function networkErrorResponse(
     statusText: 'Network Error',
     error: message,
     durationMs,
+    sizeBytes: 0,
+    headers: {},
+    body: '',
+    contentType: '',
+    method: input.method,
+    url,
+  };
+}
+
+/** OAuth2 取 token 失败：不发请求，把后端的 message 交给 UI 的响应区横幅。 */
+function oauth2ErrorResponse(input: SendInput, url: string, message: string): ApiResponse {
+  return {
+    status: 0,
+    statusText: 'OAuth2 Error',
+    error: message,
+    durationMs: 0,
     sizeBytes: 0,
     headers: {},
     body: '',
@@ -278,6 +295,11 @@ export interface SendPreparedInput {
    * `{{var}}` 解析、header 排序、auth 归约），本函数只负责执行。
    */
   request: PreparedRequest;
+  /**
+   * `prepareRequest` 用的那份 auth。只为 OAuth2 而读：token 要发网络请求才拿得到，
+   * 没法在那个纯函数里取，故注入发生在发送这一刻（见本函数的实现）。
+   */
+  auth?: AuthConfig;
   settings: RequestSettings;
   signal?: AbortSignal;
 }
@@ -293,6 +315,11 @@ export interface SendPreparedInput {
  * header 走元组列表而非 `Record`：Rust 反序列化 `Vec<(String, String)>`，
  * web 桥（`POST /api/http/send`）对元组列表原样 JSON 编码，这是两侧唯一都能用
  * 的形状；`Record` 还会丢掉重名 header。
+ *
+ * OAuth2 是这里唯一在发送前还要做事的一档：token 那时才取得到，而把它写进
+ * `prepared` 会让 `preparedToCurl` 把一个活凭据渲染进可复制的命令行、随剪贴板
+ * 和工单流出去。故预览**刻意**不含 token —— 两者只差这一项，URL / header / body
+ * 仍同源。
  *
  * ⚠️ 与 [`sendRequest`] 同一条注意事项：URL 由调用方提供，服务端因此成了它的
  * 代理，`OutboundPolicy` 依然生效。
@@ -315,18 +342,42 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Api
   };
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
 
+  // 真正发出去的那一份：`request` 是 cURL 预览共享的 `useMemo` 产物，注入只改副本。
+  //
+  // 不传 `force`：发请求走后端按需刷新（命中缓存就复用，过期才换），只有 UI 的
+  // 「获取 Token」按钮才强制重取。
+  let outbound = request;
+  const auth = input.auth;
+  if (auth?.kind === 'oauth2' && auth.oauth2) {
+    try {
+      const token = await fetchOAuth2Token(auth, { signal: input.signal });
+      outbound = applyOAuth2Token(request, auth, token);
+    } catch (err) {
+      const name = (err as { name?: string })?.name;
+      const msg = (err as Error)?.message ?? String(err);
+      // 中止仍是中止：取 token 这一步被取消不该弹成 OAuth2 错误。
+      if (name === 'AbortError' || /abort/i.test(msg)) {
+        return abortedResponse(shape, request.url, 0);
+      }
+      console.error('[http.ts] oauth2 token fetch failed:', err);
+      return oauth2ErrorResponse(shape, request.url, msg);
+    }
+  }
+
   return invokeAndMap(
     {
-      method: request.method,
-      url: request.url,
-      // `request.headers` 已是 `[name, value][]`，原样传
-      headers: request.headers,
-      body: request.body,
+      method: outbound.method,
+      url: outbound.url,
+      // `outbound.headers` 已是 `[name, value][]`，原样传
+      headers: outbound.headers,
+      body: outbound.body,
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
     },
     shape,
+    // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的
+    // token 就写在这个 URL 里。
     request.url,
     options,
   );

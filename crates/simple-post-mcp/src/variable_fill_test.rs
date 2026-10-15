@@ -1,6 +1,7 @@
 use super::*;
 use simple_post_core::domain::{
-    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, KeyValue, RequestBody,
+    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, KeyValue, OAuth2Auth,
+    OAuth2GrantType, RequestBody,
 };
 
 /// 被测端点所在的模块。之所以设两个模块，是为了让测试能证明模块选的是**格子** ——
@@ -772,6 +773,7 @@ fn resolve_endpoint_collects_missing_vars_across_url_headers_body_auth() {
         bearer: Some("Bearer {{token}}".into()),
         basic: None,
         apikey: None,
+        oauth2: None,
     };
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
@@ -802,6 +804,7 @@ fn resolve_endpoint_bearer_auth_injects_authorization_header() {
         bearer: Some("{{token}}".into()),
         basic: None,
         apikey: None,
+        oauth2: None,
     };
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
@@ -830,6 +833,7 @@ fn resolve_endpoint_basic_auth_injects_authorization_header() {
             password: "{{p}}".into(),
         }),
         apikey: None,
+        oauth2: None,
     };
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
@@ -860,6 +864,7 @@ fn resolve_endpoint_apikey_header_injects_custom_header() {
             value: "{{k}}".into(),
             in_location: ApiKeyLocation::Header,
         }),
+        oauth2: None,
     };
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
@@ -890,6 +895,7 @@ fn resolve_endpoint_apikey_query_appends_to_url() {
             value: "{{k}}".into(),
             in_location: ApiKeyLocation::Query,
         }),
+        oauth2: None,
     };
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
@@ -930,6 +936,7 @@ fn resolve_endpoint_user_authorization_wins_over_auth_config() {
         bearer: Some("{{token}}".into()),
         basic: None,
         apikey: None,
+        oauth2: None,
     };
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
@@ -1112,4 +1119,74 @@ fn resolve_endpoint_applies_url_override() {
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&overrides)).unwrap();
     // 完整路径的覆盖值（自带 scheme）压过 baseUrl + path。
     assert_eq!(r.url, "https://override.example.com/custom");
+}
+
+// ---- oauth2 ------------------------------------------------------
+
+/// OAuth2 配置里 `{{var}}` 的替换是**有选择的**：地址与标识替换，密钥不替换。
+///
+/// 密钥那半边不是省事。`resolve_auth` 的返回值进 `ResolvedEndpoint.auth`，而
+/// `api_resolve_endpoint` 会把整个 auth 回显给 agent —— 一旦 `clientSecret` 也被解出来，
+/// 环境变量表里那份 secret 就会被复制进一次工具响应。
+#[test]
+fn oauth2_substitutes_addresses_and_identifiers_but_not_secrets() {
+    let mut env = empty_env();
+    env.variables.insert("idp".into(), "idp.example.com".into());
+    env.variables.insert("cid".into(), "my-client".into());
+    env.variables.insert("secret".into(), "SUPER-SECRET".into());
+    env.variables.insert("pw".into(), "hunter2".into());
+
+    let mut ep = minimal_endpoint();
+    ep.auth = AuthConfig {
+        kind: AuthType::Oauth2,
+        oauth2: Some(OAuth2Auth {
+            grant_type: OAuth2GrantType::Password,
+            token_url: "https://{{idp}}/oauth/token".into(),
+            client_id: "{{cid}}".into(),
+            client_secret: "{{secret}}".into(),
+            password: "{{pw}}".into(),
+            scope: "{{idp}}.read".into(),
+            username: "u".into(),
+            ..OAuth2Auth::default()
+        }),
+        ..AuthConfig::default()
+    };
+
+    let r = resolve_endpoint(&ep, Some(&env), &project_with_defs(), None).unwrap();
+    let o = r.auth.oauth2.expect("oauth2 载荷要被透传");
+    assert_eq!(o.token_url, "https://idp.example.com/oauth/token");
+    assert_eq!(o.client_id, "my-client");
+    assert_eq!(o.scope, "idp.example.com.read");
+    assert_eq!(o.client_secret, "{{secret}}", "密钥不参与替换");
+    assert_eq!(o.password, "{{pw}}", "密码不参与替换");
+    assert!(
+        !r.missing_vars.contains(&"secret".to_string()),
+        "没被解析的字段不该报缺变量（它压根没参与解析），got: {:?}",
+        r.missing_vars
+    );
+}
+
+/// `kind` 不是 oauth2 时，那份 oauth2 载荷原样留着不动（不解析、不报错），与
+/// bearer/basic 的处理一致：只处理选中的那一种。
+#[test]
+fn an_unselected_oauth2_payload_is_left_alone() {
+    let mut env = empty_env();
+    env.variables.insert("idp".into(), "idp.example.com".into());
+    let mut ep = minimal_endpoint();
+    ep.auth = AuthConfig {
+        kind: AuthType::Bearer,
+        bearer: Some("tok".into()),
+        oauth2: Some(OAuth2Auth {
+            token_url: "https://{{idp}}/token".into(),
+            ..OAuth2Auth::default()
+        }),
+        ..AuthConfig::default()
+    };
+    let r = resolve_endpoint(&ep, Some(&env), &project_with_defs(), None).unwrap();
+    let o = r.auth.oauth2.expect("载荷仍在");
+    assert_eq!(o.token_url, "https://{{idp}}/token");
+    assert!(
+        !r.missing_vars.contains(&"idp".to_string()),
+        "未选中的方案里的变量不算这次请求的问题"
+    );
 }

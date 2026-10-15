@@ -63,6 +63,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # JSON path (variable interpolation)
 serde_json_path = "0.7"
 
+# 配置哈希（oauth2 token 缓存的主键）。已经因 Tauri 侧 `soup3` 的传递依赖进了
+# Cargo.lock 并在 Windows 上参与编译，故这里不会多拉一个新 crate。
+sha2 = "0.10"
+
 # Cross-platform paths
 dirs = "7"
 

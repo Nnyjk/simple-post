@@ -3585,6 +3585,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_path",
+ "sha2",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

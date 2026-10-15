@@ -194,6 +194,34 @@ CREATE INDEX IF NOT EXISTS idx_response_history_endpoint
 -- `user_version` 不动，`ensure_current_schema` 也不参与。
 DROP INDEX IF EXISTS idx_response_history_root;
 
+-- ---------------------------------------------------------------------------
+-- oauth2_tokens —— 换来的 access token 落在这里，让「按需刷新」跨进程成立
+-- ---------------------------------------------------------------------------
+--
+-- 主键刻意是配置的哈希（`oauth2::auth_key`）而不是 `endpoint_id`：token 属于**这份
+-- OAuth2 配置**，不属于某个端点。两个端点填同一份配置共用一个 token；改了
+-- token URL / scope / client secret 则哈希变、拿不到旧 token，于是不会把一个 scope
+-- 不同的旧 token 发给新的服务端——按 endpoint_id 存就会踩这个坑。
+--
+-- 表里**只有** token 本身。取 token 所需的凭据在 `endpoint_details.auth_json` 里，
+-- 这里不复制一份，故也不存在两处凭据漂移的可能。
+--
+-- 纯增量新表：不 bump `SCHEMA_VERSION`（理由同上面 `response_history` 一段），
+-- 既有库在下次 `db::migrate` 白得它。
+CREATE TABLE IF NOT EXISTS oauth2_tokens (
+  auth_key       TEXT PRIMARY KEY,
+  access_token   TEXT NOT NULL,
+  refresh_token  TEXT,
+  -- RFC 6749 §7.1 的 `token_type`，多数 IdP 回 `Bearer`，少数回 `MAC`。写进表里
+  -- 是因为刷新响应**可能**不重复它，届时仍要用旧值拼 `Authorization`。
+  token_type     TEXT NOT NULL DEFAULT 'Bearer',
+  scope          TEXT,
+  -- Unix 秒。NULL = 不知道何时过期（IdP 没给 `expires_in`），此时一直视为有效，
+  -- 只能由 UI 的「重新获取」替换。
+  expires_at     INTEGER,
+  obtained_at    INTEGER NOT NULL
+);
+
 -- 父子矩阵的第二道防线。
 --
 -- `db::nodes` 用 `ResourceNodeType::may_under` 检查每一次写入，但 MCP 工具是本项目主要的
@@ -273,4 +301,6 @@ END;
 -- `response_history` 落地后**仍是**版本 3：新表是最纯粹的增量改动——上面每个 `CREATE`
 -- 都是 `IF NOT EXISTS`，故既有库在下次 `db::migrate` 白得它，既不需要 `ADDED_COLUMNS`
 -- 条目（那份列表是给「给已存在的表加列」用的）也不需要 bump 版本。
+--
+-- `oauth2_tokens` 同理：新表，无新列，故仍是版本 3。
 PRAGMA user_version = 3;

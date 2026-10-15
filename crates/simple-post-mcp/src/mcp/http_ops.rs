@@ -232,10 +232,29 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     let method_str = format_method(&endpoint.method);
     let (timeout_ms, follow_redirects, max_kb) = extract_endpoint_settings(&a.settings_override);
 
+    // oauth2 的 token 是发请求之前才取到的，`resolve_endpoint`（纯函数）拿不到它，
+    // 故注入放在这里而不是那里——`build_headers` 对 bearer/basic/apikey 的处理不受影响。
+    //
+    // **必须同时匹配 `kind`**：`resolve_auth` 对未选中的方案原样保留载荷，所以一个从
+    // oauth2 切到 bearer 的端点仍带着 `oauth2: Some(..)`。只匹配载荷时 header 档碰巧
+    // 被 `build_headers` 已写好的 `Authorization` 挡住，而 query 档**不挡**——一个用户
+    // 已经不再选择的 token 会被拼进 URL 发出去。
+    let mut url = resolved.url.clone();
+    let mut headers = resolved.headers.clone();
+    if let simple_post_core::domain::AuthConfig {
+        kind: simple_post_core::domain::AuthType::Oauth2,
+        oauth2: Some(cfg),
+        ..
+    } = &resolved.auth
+    {
+        let token = simple_post_core::oauth2::ensure_token(&state.pool, cfg).await?;
+        simple_post_core::oauth2::inject(cfg, &token, &mut headers, &mut url);
+    }
+
     let input = HttpRequestInput {
         method: method_str.clone(),
-        url: resolved.url.clone(),
-        headers: resolved.headers.clone(),
+        url: url.clone(),
+        headers: headers.clone(),
         body: resolved.body.clone(),
         timeout_ms: timeout_ms.unwrap_or(30_000),
         follow_redirects: follow_redirects.unwrap_or(true),
@@ -246,7 +265,7 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     let result = http_executor::execute(&input).await;
     Ok(build_result_envelope(
         &method_str,
-        &resolved.url,
+        &url,
         &result,
         None,
         Some(resolved.missing_vars),
