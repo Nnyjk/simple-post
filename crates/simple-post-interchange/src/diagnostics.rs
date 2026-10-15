@@ -36,6 +36,15 @@ pub enum Severity {
 }
 
 impl Diagnostic {
+    pub fn info(pointer: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Info,
+            pointer: pointer.into(),
+            message: message.into(),
+            dropped: None,
+        }
+    }
+
     pub fn warn(pointer: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             severity: Severity::Warn,
