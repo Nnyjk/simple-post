@@ -30,6 +30,7 @@ rusqlite = { workspace = true }
 r2d2 = { workspace = true }
 r2d2_sqlite = { workspace = true }
 dirs = { workspace = true }
+base64 = { workspace = true }
 # `daemon_http` runs the axum MCP router that the Tauri shell and `serve-web`
 # both consume. Lives here (not in core) because the router directly uses
 # `mcp::dispatch` / `mcp::AppState`.

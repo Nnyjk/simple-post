@@ -11,6 +11,10 @@
 //! 需要真实进程的（spawn 路径、有界 teardown 等待）按设计不在此列，宁可不测也不伪造。
 
 use super::*;
+// 这三个纯函数随职责拆进了子模块；测试的断言与拆分前逐字相同，只是改从那里取。
+use super::probe::start_is_noop;
+use super::reap::teardown_targets;
+use super::watcher::watcher_owns_state;
 
 #[test]
 fn owned_child_is_killed_through_its_handle() {

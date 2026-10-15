@@ -1,0 +1,358 @@
+//! 请求配置面必须完整且写得进去，外加端点 id 的唯一性。
+//!
+//! 每个字段都断言在**存储行**里，而不是只看回显的响应。
+
+use super::test_support::{bare_project, detail_of, fixture, node, state};
+use super::write::{tool_endpoint_create, tool_endpoint_update};
+use simple_post_core::db::{nodes, permissions, projects};
+use simple_post_core::domain::{BodyMode, HttpMethod, ResourceNodeType};
+use simple_post_core::error::AppError;
+use simple_post_core::permissions::Permission;
+// =========================================================================
+// 2. The "接口参数" build surface must be complete and writable
+// =========================================================================
+
+/// The acceptance test for the whole point of the change: one agent can
+/// build an endpoint's complete request configuration through
+/// `endpoint_create` + `endpoint_update`, and every field is verified in
+/// the stored row rather than in the echoed response.
+#[tokio::test]
+async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
+    let (st, id) = fixture();
+
+    // --- via endpoint_update: the full configuration surface ---------
+    tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": {
+                "method": "POST",
+                "url": "/api/users/{id}",
+                "params": [
+                    { "key": "page", "value": "1" },
+                    { "key": "size", "value": "20", "enabled": false }
+                ],
+                "headers": [
+                    { "key": "Content-Type", "value": "application/json" },
+                    { "key": "X-Trace", "value": "abc" }
+                ],
+                "body": {
+                    "mode": "json",
+                    "content": "{\"name\":\"ada\"}",
+                    "schema": "{\"name\":\"string\"}"
+                },
+                "auth": {
+                    "kind": "bearer",
+                    "bearer": "tok-123"
+                },
+                "tags": ["smoke", "user"],
+                "environment_id": "env_dev",
+                "base_url_definition_id": "svc_api",
+                "base_url_override": "https://staging.example.com",
+                "docs": "Creates a user.",
+                "notes": "checked by hand",
+                "name": "create user"
+            }
+        }),
+    )
+    .await
+    .expect("a well-formed full patch must be accepted");
+
+    let d = detail_of(&st, &id);
+
+    assert_eq!(d.method, HttpMethod::Post);
+    assert_eq!(d.url, "/api/users/{id}");
+
+    // Query 参数。这些行没写 `id`/`enabled`，正是 agent 会写出的形状 ——
+    // two fields `KeyValue` requires and an agent has no reason to know
+    // 转换器补铸前者、把后者默认成
+    // `true`（存成禁用的请求头就是一个永远发不出去的请求头）。
+    assert_eq!(d.params.len(), 2);
+    let page = d.params.iter().find(|kv| kv.key == "page").expect("page");
+    assert_eq!(page.value, "1");
+    assert!(page.enabled, "an omitted `enabled` must default to true");
+    assert!(!page.id.is_empty(), "a row id must be minted");
+    let size = d.params.iter().find(|kv| kv.key == "size").expect("size");
+    assert!(
+        !size.enabled,
+        "an explicit `enabled: false` must still be honoured"
+    );
+
+    assert_eq!(d.headers.len(), 2);
+    assert!(d.headers.iter().all(|kv| kv.enabled));
+    assert!(d
+        .headers
+        .iter()
+        .any(|kv| kv.key == "Content-Type" && kv.value == "application/json"));
+
+    // Body：mode、content、schema 三项都要写，不能只前两个。
+    // `endpoint_create` could reach.
+    assert_eq!(d.body.mode, BodyMode::Json);
+    assert_eq!(d.body.content, "{\"name\":\"ada\"}");
+    assert_eq!(d.body.schema.as_deref(), Some("{\"name\":\"string\"}"));
+
+    // Auth: type + config.
+    assert_eq!(
+        d.auth.kind,
+        simple_post_core::domain::AuthType::Bearer,
+        "auth type must be settable"
+    );
+    assert_eq!(d.auth.bearer.as_deref(), Some("tok-123"));
+
+    assert_eq!(d.tags, vec!["smoke".to_string(), "user".to_string()]);
+
+    // Environment binding + base-url definition binding.
+    assert_eq!(d.environment_id.as_deref(), Some("env_dev"));
+    assert_eq!(d.base_url_definition_id.as_deref(), Some("svc_api"));
+    assert_eq!(
+        d.base_url_override.as_deref(),
+        Some("https://staging.example.com")
+    );
+
+    // docs / notes 在旧 patch 构造器里被写死成 `None`，于是没有任何工具写得动它们。
+
+    assert_eq!(d.docs.as_deref(), Some("Creates a user."));
+    assert_eq!(d.notes.as_deref(), Some("checked by hand"));
+
+    let n = simple_post_core::db::with_conn(&st.pool, |c| nodes::get(c, &id)).expect("node");
+    assert_eq!(n.name, "create user");
+}
+
+/// `Some(None)` must keep meaning "clear" for the `double_option`
+/// fields. A patch that could only ever *set* would make
+/// `environment_id` / `base_url_override` / `notes` one-way.
+#[tokio::test]
+async fn an_explicit_null_clears_a_nullable_patch_field() {
+    let (st, id) = fixture();
+    tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "environment_id": "env_dev", "notes": "first" }
+        }),
+    )
+    .await
+    .expect("setting the fields");
+    assert_eq!(
+        detail_of(&st, &id).environment_id.as_deref(),
+        Some("env_dev")
+    );
+
+    tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "environment_id": null, "notes": null }
+        }),
+    )
+    .await
+    .expect("clearing the fields must be a supported write, not an error");
+
+    let d = detail_of(&st, &id);
+    assert_eq!(d.environment_id, None, "null must clear, not be rejected");
+    assert_eq!(d.notes, None);
+}
+
+/// An omitted field must still mean "leave unchanged" — the property
+/// that made `.ok()` so tempting in the first place.
+#[tokio::test]
+async fn an_omitted_field_is_left_unchanged() {
+    let (st, id) = fixture();
+    tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "url": "/v2/only-the-url" }
+        }),
+    )
+    .await
+    .expect("patch must apply");
+    let d = detail_of(&st, &id);
+    assert_eq!(d.url, "/v2/only-the-url");
+    assert_eq!(d.method, HttpMethod::Get, "method must be untouched");
+    assert!(d.params.is_empty(), "params must be untouched");
+}
+
+/// A round-trip through `endpoint_get` must preserve the client-supplied
+/// `id`, so an agent can read-modify-write a header list without
+/// orphaning rows.
+#[tokio::test]
+async fn a_supplied_row_id_is_preserved() {
+    let (st, id) = fixture();
+    tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": {
+                "headers": [{ "key": "A", "value": "1", "id": "row-stable-id" }]
+            }
+        }),
+    )
+    .await
+    .expect("patch must apply");
+    assert_eq!(detail_of(&st, &id).headers[0].id, "row-stable-id");
+}
+
+// =========================================================================
+// 4. Endpoint id uniqueness
+// =========================================================================
+
+/// `endpoint_create` minted `format!("ep_{now}")` from a **millisecond**
+/// clock, so two creates in the same millisecond collided on the primary
+/// key. Minting a batch back-to-back is the reliable way to hit it.
+#[tokio::test]
+async fn two_endpoint_creates_in_the_same_millisecond_get_distinct_ids() {
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(c, &bare_project("p_id", "I"))?;
+        nodes::create(
+            c,
+            &node("p_id", "m_id", ResourceNodeType::Module, None),
+            None,
+        )?;
+        permissions::set(c, "p_id", Permission::Full)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let mut ids = Vec::new();
+    for i in 0..8 {
+        let res = tool_endpoint_create(
+            &st,
+            serde_json::json!({
+                "module_id": "m_id",
+                "name": format!("e{i}"),
+                "method": "GET",
+                "url": "/x"
+            }),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("create #{i} must succeed, got {e}"));
+        let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+        let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+        ids.push(created["id"].as_str().expect("id").to_string());
+    }
+
+    let unique: std::collections::HashSet<&String> = ids.iter().collect();
+    assert_eq!(
+        unique.len(),
+        ids.len(),
+        "every create must get its own id; got {ids:?}"
+    );
+    // `ep_` 前缀是同级创建工具遵循的约定的一部分，所以放宽 id 也不能丢掉它。
+
+    assert!(
+        ids.iter().all(|id| id.starts_with("ep_")),
+        "endpoint ids must keep the ep_ prefix; got {ids:?}"
+    );
+}
+
+// =========================================================================
+// 5. `endpoint_create` 一次调用即可接受完整配置
+// =========================================================================
+
+/// `endpoint_create` previously hardcoded `environment_id`,
+/// `base_url_definition_id`, `base_url_override`, `body_schema`, `docs`,
+/// `notes` and `description` to their defaults, so building a fully
+/// configured endpoint took a mandatory second `endpoint_update` call.
+#[tokio::test]
+async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(c, &bare_project("p_c", "C"))?;
+        nodes::create(c, &node("p_c", "m_c", ResourceNodeType::Module, None), None)?;
+        permissions::set(c, "p_c", Permission::Full)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_c",
+            "name": "list orders",
+            "description": "Orders for the current user",
+            "method": "POST",
+            "url": "/api/orders",
+            "params": [{ "key": "page", "value": "1" }],
+            "headers": [{ "key": "Accept", "value": "application/json" }],
+            "body_mode": "json",
+            "body_content": "{\"limit\":10}",
+            "body_schema": "{\"limit\":\"number\"}",
+            "auth_type": "bearer",
+            "auth_config": { "bearer": "tok" },
+            "tags": ["orders"],
+            "environment_id": "env_dev",
+            "base_url_definition_id": "svc_api",
+            "base_url_override": "https://api.example.com",
+            "docs": "Lists orders.",
+            "notes": "n"
+        }),
+    )
+    .await
+    .expect("a fully specified create must succeed");
+
+    let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+    let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+    let id = created["id"].as_str().expect("id").to_string();
+
+    let d = detail_of(&st, &id);
+    assert_eq!(d.method, HttpMethod::Post);
+    assert_eq!(d.params.len(), 1);
+    assert!(d.params[0].enabled);
+    assert_eq!(d.headers.len(), 1);
+    assert_eq!(d.body.mode, BodyMode::Json);
+    assert_eq!(d.body.schema.as_deref(), Some("{\"limit\":\"number\"}"));
+    assert_eq!(d.auth.kind, simple_post_core::domain::AuthType::Bearer);
+    assert_eq!(d.auth.bearer.as_deref(), Some("tok"));
+    assert_eq!(d.environment_id.as_deref(), Some("env_dev"));
+    assert_eq!(d.base_url_definition_id.as_deref(), Some("svc_api"));
+    assert_eq!(
+        d.base_url_override.as_deref(),
+        Some("https://api.example.com")
+    );
+    assert_eq!(d.docs.as_deref(), Some("Lists orders."));
+    assert_eq!(d.notes.as_deref(), Some("n"));
+
+    let n = simple_post_core::db::with_conn(&st.pool, |c| nodes::get(c, &id)).expect("node");
+    assert_eq!(
+        n.description.as_deref(),
+        Some("Orders for the current user")
+    );
+}
+
+/// A typo'd `auth_config` used to be swallowed into an all-default
+/// `AuthConfig` via `unwrap_or_default()`, so the create succeeded and
+/// described an endpoint whose bearer token did not exist.
+#[tokio::test]
+async fn endpoint_create_rejects_a_malformed_auth_config() {
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(c, &bare_project("p_ac", "AC"))?;
+        nodes::create(
+            c,
+            &node("p_ac", "m_ac", ResourceNodeType::Module, None),
+            None,
+        )?;
+        permissions::set(c, "p_ac", Permission::Full)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ac",
+            "name": "n",
+            "method": "GET",
+            "url": "/x",
+            "auth_type": "bearer",
+            "auth_config": { "bearer": { "tok": 1 } }
+        }),
+    )
+    .await;
+    assert!(
+        matches!(res, Err(AppError::Validation(_))),
+        "a malformed auth_config must be rejected, got {res:?}"
+    );
+}
