@@ -17,6 +17,7 @@
 
 mod api;
 mod form;
+mod http_client;
 mod inject;
 mod parse;
 mod store;
