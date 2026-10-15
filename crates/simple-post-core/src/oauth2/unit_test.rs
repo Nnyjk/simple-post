@@ -1,13 +1,62 @@
 use base64::Engine as _;
 // 纯函数层：缓存键、校验、粘贴解析、form 编解码、应答解析、过期判断与注入。
 
+use oauth2::basic::{BasicErrorResponseType, BasicTokenResponse};
+use oauth2::{HttpRequest, HttpResponse, StandardErrorResponse, SyncHttpClient};
+
 use super::form::{form_decode, form_encode};
 use super::parse::{extract_code, parse_pasted, parse_token_response};
 use super::store::{is_expired, unix_secs};
 use super::test_fixtures::{client_credentials, kv};
-use super::token_endpoint::build_grant_form;
+use super::token_endpoint::{client_for, decorate};
 use super::*;
 use crate::domain::{OAuth2Auth, OAuth2ClientAuth, OAuth2GrantType, OAuth2TokenLocation};
+
+/// 抓下 crate 真正发出的请求、回一句 canned 200 的 sync client。
+///
+/// 有了它，断言就能落在**线上的字节**上，而不是某个中间结构体——协议机制归 crate
+/// 之后，中间结构体已经不是本项目的东西了。
+#[derive(Default)]
+struct CaptureClient {
+    body: std::cell::RefCell<String>,
+    headers: std::cell::RefCell<Vec<(String, String)>>,
+}
+
+impl SyncHttpClient for CaptureClient {
+    type Error = std::convert::Infallible;
+
+    fn call(&self, request: HttpRequest) -> Result<HttpResponse, Self::Error> {
+        *self.body.borrow_mut() = String::from_utf8_lossy(request.body()).into_owned();
+        *self.headers.borrow_mut() = request
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+        Ok(HttpResponse::new(br#"{"access_token":"AT"}"#.to_vec()))
+    }
+}
+
+/// 按生产路径组出 client_credentials 请求：同一个 `client_for` + 同一个 `decorate`。
+fn capture_client_credentials(cfg: &OAuth2Auth) -> (String, Vec<(String, String)>) {
+    let client = client_for(cfg).expect("client_for");
+    let mut r: oauth2::ClientCredentialsTokenRequest<
+        '_,
+        StandardErrorResponse<BasicErrorResponseType>,
+        BasicTokenResponse,
+    > = client.exchange_client_credentials();
+    decorate!(r, cfg, scope);
+    let transport = CaptureClient::default();
+    // 不看应答内容，只看发出去的字节。
+    let _ = r.request(&transport);
+    let body = transport.body.borrow().clone();
+    let headers = transport.headers.borrow().clone();
+    (body, headers)
+}
 
 // ---------------------------------------------------------------------------
 // 缓存键
@@ -236,13 +285,50 @@ fn extra_params_and_client_body_auth_reach_the_form() {
         d.enabled = false;
         d
     }];
-    let form = build_grant_form(&cfg);
-    assert!(form.contains(&("client_id".into(), "cid".into())));
-    assert!(form.contains(&("client_secret".into(), "csecret".into())));
-    assert!(form.contains(&("audience".into(), "https://api.example.com".into())));
+    let (form, headers) = capture_client_credentials(&cfg);
+    assert!(form.contains("client_id=cid"), "form={form}");
+    assert!(form.contains("client_secret=csecret"), "form={form}");
     assert!(
-        !form.iter().any(|(k, _)| k == "resource"),
-        "停用的 extra param 不该发出"
+        form.contains("audience=https%3A%2F%2Fapi.example.com"),
+        "form={form}"
+    );
+    assert!(
+        !form.contains("resource"),
+        "停用的 extra param 不该发出：{form}"
+    );
+    // 凭据放 body 时不该再出现在 Authorization 头里。
+    assert!(
+        !headers.iter().any(|(k, _)| k == "authorization"),
+        "headers={headers:?}"
+    );
+}
+
+#[test]
+fn client_secret_basic_form_encodes_before_base64() {
+    // RFC 6749 §2.3.1：id 与 secret 先各做一次 form 编码，**再**把 `id:secret` 拼起来
+    // 做 base64。故 secret 里的空格在 header 里是 `+`（`QWxhZGRpbjpvcGVuK3Nlc2FtZQ==`），
+    // 而 RFC 7617 Basic 的例子（`QWxhZGRpbjpvcGVuIHNlc2FtZQ==`）编码的是**未**做 form
+    // 编码的原文——直接 base64 原文会在 secret 含 `:` / `+` / 空格时被服务端解出另
+    // 一组凭据。这条断言打在 crate 真正发出的 header 上。
+    let mut cfg = client_credentials();
+    cfg.client_auth = OAuth2ClientAuth::Basic;
+    cfg.client_id = "Aladdin".into();
+    cfg.client_secret = "open sesame".into();
+
+    let (_, headers) = capture_client_credentials(&cfg);
+    let auth = headers
+        .iter()
+        .find(|(k, _)| k == "authorization")
+        .map(|(_, v)| v.as_str())
+        .expect("Basic 档必须带 Authorization 头");
+    assert_eq!(auth, "Basic QWxhZGRpbjpvcGVuK3Nlc2FtZQ==");
+    // base64 解回来必须是 form 编码后的 `Aladdin:open+sesame`。
+    use base64::Engine as _;
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(auth.trim_start_matches("Basic "))
+            .map(|b| String::from_utf8(b).unwrap()),
+        Ok("Aladdin:open+sesame".to_string())
     );
 }
 

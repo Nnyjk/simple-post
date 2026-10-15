@@ -1,17 +1,7 @@
 //! `application/x-www-form-urlencoded` 的编解码原语。
-
-pub(super) fn encode_form(form: &[(String, String)]) -> String {
-    let mut out = String::new();
-    for (k, v) in form {
-        if !out.is_empty() {
-            out.push('&');
-        }
-        out.push_str(&form_encode(k));
-        out.push('=');
-        out.push_str(&form_encode(v));
-    }
-    out
-}
+//!
+//! 编码只服务 query 档的 token 注入（[`super::inject`]`::auth_query_value`）；
+//! token 请求的 form 编码由 `oauth2` crate 做，故这里没有整表序列化。
 
 /// `application/x-www-form-urlencoded` 编码：未保留字符一律 `%XX`，空格是 `+`。
 /// 与 `url::form_urlencoded` 的输出逐字节一致——不引 `url` crate 只为这 20 行。

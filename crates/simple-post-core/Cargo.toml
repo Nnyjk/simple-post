@@ -24,3 +24,4 @@ r2d2_sqlite = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 dirs = { workspace = true }
+oauth2 = { workspace = true }
