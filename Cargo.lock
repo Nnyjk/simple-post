@@ -3654,6 +3654,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "simple-post-interchange"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "simple-post-core",
+]
+
+[[package]]
 name = "simple-post-mcp"
 version = "0.1.1"
 dependencies = [

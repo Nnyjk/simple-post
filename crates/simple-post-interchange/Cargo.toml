@@ -1,0 +1,16 @@
+[package]
+name = "simple-post-interchange"
+description = "Import/export conversion layer: foreign formats <-> the simple-post domain model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "simple_post_interchange"
+path = "src/lib.rs"
+
+[dependencies]
+# 标准格式与落库路径都在这里。本 crate 不持有自己的持久化模型。
+simple-post-core = { path = "../simple-post-core" }
+serde = { workspace = true }
