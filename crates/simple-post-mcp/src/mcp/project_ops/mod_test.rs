@@ -377,6 +377,7 @@ fn parse_body_mode_known_values() {
     assert!(super::endpoint::__test_parse_body_mode("json").is_ok());
     assert!(super::endpoint::__test_parse_body_mode("form").is_ok());
     assert!(super::endpoint::__test_parse_body_mode("raw").is_ok());
+    assert!(super::endpoint::__test_parse_body_mode("multipart").is_ok());
     assert!(super::endpoint::__test_parse_body_mode("none").is_ok());
     assert!(super::endpoint::__test_parse_body_mode("wat").is_err());
 }

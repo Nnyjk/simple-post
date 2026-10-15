@@ -19,6 +19,12 @@ import type {
   RequestBody,
 } from '@/types/domain';
 import { collapseUrlSlashes, joinBaseUrl, resolveVarsWithMissing } from './url';
+import {
+  buildMultipartBody,
+  multipartContentType,
+  newMultipartBoundary,
+  parseMultipartParts,
+} from './multipart';
 
 /**
  * 影响请求**线上形态**的入参。设置项（超时 / 重定向 / 体积上限）与调用方的
@@ -95,6 +101,9 @@ export interface PreparedRequest {
    *
    * 判空跑在**用户写的原文**上、模板化之前，与 Rust 的 `resolve_endpoint`
    * 同序；所以内容只有一个变量且解析为 `""` 的 body 照样发空串而不被丢掉。
+   *
+   * `multipart` 下这里已是**装配好的** body（`content` 里的分片数组变成了
+   * 带 boundary 的 multipart 文本），与 `headers` 里那条 Content-Type 同源。
    */
   body: string | null;
   /**
@@ -203,13 +212,21 @@ function resolveAuth(
   return auth;
 }
 
-/** 按 body mode 自动补 Content-Type（`none` 返回 `null`）。 */
-function autoContentType(mode: BodyMode): string | null {
+/**
+ * 按 body mode 自动补 Content-Type（`none` 返回 `null`）。
+ *
+ * multipart 的值含 boundary，故必须现传进来而不是在这里生成——生成点只有一个
+ * （`prepareRequest`），它把同一个字符串同时交给 Content-Type 与 body。
+ */
+function autoContentType(mode: BodyMode, boundary: string | null): string | null {
   switch (mode) {
     case 'json':
       return 'application/json';
     case 'form':
       return 'application/x-www-form-urlencoded';
+    case 'multipart':
+      // boundary 只在 multipart 模式下生成，调用方保证它非空
+      return boundary === null ? null : multipartContentType(boundary);
     case 'raw':
       return 'text/plain';
     default:
@@ -218,8 +235,8 @@ function autoContentType(mode: BodyMode): string | null {
 }
 
 /**
- * 有序 header 列表：先是用户 header，再是自动 Content-Type（缺失时）与
- * Accept，最后是 auth 派生的 header（`Authorization` 或 header 位置的
+ * 有序 header 列表：先是用户 header，再是自动 Content-Type（缺失才补，multipart
+ * 例外）与 Accept，最后是 auth 派生的 header（`Authorization` 或 header 位置的
  * apikey）。查重大小写不敏感——HTTP header 名本就大小写不敏感。
  *
  * `apikey.inLocation === 'query'` 不出 header，调用方通过
@@ -231,6 +248,7 @@ function buildOrderedHeaders(
   auth: AuthConfig,
   env: Environment | undefined,
   missing: MissingTracker,
+  boundary: string | null,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const h of headers) {
@@ -240,11 +258,21 @@ function buildOrderedHeaders(
     out.push([h.key, r.value]);
   }
 
-  // 按 body.mode 自动补 Content-Type。用户已设过（不分大小写）就不加；
-  // 只要 mode 蕴含 body 就补，内容空不空由 `init.body` 那一步单独管
-  const ct = autoContentType(bodyMode);
-  if (ct && !out.some(([k]) => k.toLowerCase() === 'content-type')) {
-    out.push(['Content-Type', ct]);
+  // 按 body.mode 自动补 Content-Type。默认用户已设过（不分大小写）就不加；
+  // 只要 mode 蕴含 body 就补，内容空不空由 `init.body` 那一步单独管。
+  // multipart 例外，见下。
+  const ct = autoContentType(bodyMode, boundary);
+  if (ct) {
+    const existing = out.findIndex(([k]) => k.toLowerCase() === 'content-type');
+    if (existing === -1) {
+      out.push(['Content-Type', ct]);
+    } else if (bodyMode === 'multipart') {
+      // 覆盖的是**值**，header 名保留用户的大小写。其余模式的 body 是用户手写的，
+      // 用户那条 Content-Type 有机会描述它；multipart 的 body 是上面那个 boundary
+      // 框出来的，boundary 是生成物的一部分，用户那条值在结构上描述不了它——
+      // 留着就是「发得错」：请求发得出去、服务端解析不出分片，而用户看不出异常。
+      out[existing] = [out[existing]![0], ct];
+    }
   }
 
   // 默认 Accept，让服务端知道我们要干净地解析 JSON
@@ -325,6 +353,9 @@ function hasBody(body: RequestBody): boolean {
  *   5. 构造有序 header 列表；
  *   6. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再模板化 body。
  *
+ * multipart 的 boundary 在第 5 步之前生成：Content-Type 与 body 用同一个值，
+ * 两者不在同一步生成就会对不上。
+ *
  * 每个写下的 `{{var}}`，无论落在 URL、参数值、header、auth 还是 body，解析
  * 不到就记录；每个上线的字段都被模板化，body 也不例外。
  */
@@ -344,18 +375,41 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const withParams = appendQueryString(normalized, input.params, input.env, missing);
   const finalUrl = appendApikeyToQuery(withParams, auth);
 
-  const headers = buildOrderedHeaders(input.headers, input.body.mode, auth, input.env, missing);
+  // boundary 必须在建 header 之前生成：Content-Type 里的 boundary 与 body 里的
+  // 分隔符不是同一个字符串时，请求看起来成功而服务端解析失败
+  const boundary = input.body.mode === 'multipart' ? newMultipartBoundary() : null;
+
+  const headers = buildOrderedHeaders(
+    input.headers,
+    input.body.mode,
+    auth,
+    input.env,
+    missing,
+    boundary,
+  );
 
   // 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。
   // 先模板化再判断会静默丢掉 body 只是一个解析为空串的变量的请求
-  const body = hasBody(input.body) ? resolveVarsWithMissing(input.body.content, input.env) : null;
-  if (body !== null) missing.add(body.missing);
+  const templated = hasBody(input.body)
+    ? resolveVarsWithMissing(input.body.content, input.env)
+    : null;
+  if (templated !== null) missing.add(templated.missing);
+
+  // multipart 在模板化之后才装配：`content` 存的就是分片数组的 JSON 文本，
+  // 与其它 mode 共用同一条模板化路径
+  let body: string | null = null;
+  if (templated !== null) {
+    body =
+      boundary === null
+        ? templated.value
+        : buildMultipartBody(parseMultipartParts(templated.value), boundary);
+  }
 
   return {
     method: input.method,
     url: finalUrl,
     headers,
-    body: body === null ? null : body.value,
+    body,
     missingVars: missing.list(),
   };
 }
