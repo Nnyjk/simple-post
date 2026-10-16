@@ -4,12 +4,15 @@
 //! 必须回诊断（见 [`Document::diagnostics`]）——「导出成功」四个字会让用户看不见
 //! 自己少了什么。
 //!
-//! 两个约定是决策，不是实现细节：
+//! 三个约定是决策，不是实现细节：
 //!
 //! - **`responses` 合成默认，不猜。** `StoredResponse` 存的是实际响应，里面没有响应
 //!   schema；`RequestBody.schema` UI 从不写。故每个 operation 输出一个 `200: OK`。
 //! - **`servers` 逐模块取，不回退。** 该模块没配就是没有 URL：不借用别的模块的，
 //!   也不落回项目 ★。
+//! - **`tags` 就是集合名。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这层就在产物里
+//!   消失，重新导入时全部塌成一个分组。tag 是扁平字符串，故只落**最外层**集合——
+//!   见 [`document_tags`]。
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -177,6 +180,9 @@ struct Pending<'a> {
     servers: &'a [IrServer],
     endpoints: &'a [IrEndpoint],
     collections: &'a [IrCollection],
+    /// 本层 endpoint 最外层集合的名字，即导出时当 tag 用的那个。模块直接挂着的
+    /// endpoint 没有它，于是导出后不带 tag。
+    group: Option<&'a str>,
 }
 
 impl<'a> Pending<'a> {
@@ -185,16 +191,39 @@ impl<'a> Pending<'a> {
             servers: &m.servers,
             endpoints: &m.endpoints,
             collections: &m.collections,
+            group: None,
         }
     }
 
-    fn collection(c: &'a IrCollection, servers: &'a [IrServer]) -> Self {
+    /// `group` 是**最外层**那个集合的名字，从栈顶继承而来：已经在一层集合里时
+    /// 继续沿用它，不被更内层的名字覆盖。
+    fn collection(c: &'a IrCollection, servers: &'a [IrServer], group: Option<&'a str>) -> Self {
+        let group = group.or(Some(c.name.as_str()));
         Self {
             servers,
             endpoints: &c.endpoints,
             collections: &c.collections,
+            group,
         }
     }
+}
+
+/// 一个 operation 在文档里该带的 tag。
+///
+/// **端点自己的 tags 优先**：那是用户在请求上填的分类，与树结构无关；自己填了就
+/// 不动它。空的时候用最外层集合的名字补上——tag 是 OpenAPI 里唯一的分组机制，不补
+/// 的话集合这一层在产物里彻底消失。
+///
+/// **只落最外层**，因为 tag 是扁平字符串，集合的嵌套没有对应构造。取最内层的话，两个
+/// 不同的顶层集合下各有一个同名子集合时会被写成同一个 tag，重新导入就并成一处。
+fn document_tags(ep: &IrEndpoint, group: Option<&str>) -> Vec<String> {
+    if !ep.tags.is_empty() {
+        return ep.tags.clone();
+    }
+    group
+        .filter(|g| !g.trim().is_empty())
+        .map(|g| vec![g.to_string()])
+        .unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -212,7 +241,7 @@ struct Builder {
 }
 
 impl Builder {
-    fn operation(&mut self, ep: &IrEndpoint, servers: &[IrServer]) {
+    fn operation(&mut self, ep: &IrEndpoint, servers: &[IrServer], group: Option<&str>) {
         let verb = ep.method.as_str().to_ascii_lowercase();
         let pointer = format!("/paths/{}/{}", escape(&ep.path), verb);
         if !PATH_METHODS.contains(&verb.as_str()) {
@@ -297,11 +326,12 @@ impl Builder {
                 op.insert("security".into(), Value::Array(Vec::new()));
             }
         }
-        if !ep.tags.is_empty() {
-            for t in &ep.tags {
+        let tags = document_tags(ep, group);
+        if !tags.is_empty() {
+            for t in &tags {
                 self.tags.insert(t.clone());
             }
-            op.insert("tags".into(), json!(ep.tags));
+            op.insert("tags".into(), json!(tags));
         }
 
         let item = self
@@ -420,13 +450,13 @@ pub fn to_document(ex: &Exchange, format: DocFormat) -> Result<Document, AppErro
     let mut stack: Vec<Pending> = ex.modules.iter().rev().map(Pending::module).collect();
     while let Some(p) = stack.pop() {
         for ep in p.endpoints {
-            b.operation(ep, p.servers);
+            b.operation(ep, p.servers, p.group);
         }
         stack.extend(
             p.collections
                 .iter()
                 .rev()
-                .map(|c| Pending::collection(c, p.servers)),
+                .map(|c| Pending::collection(c, p.servers, p.group)),
         );
     }
 

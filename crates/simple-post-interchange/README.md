@@ -153,7 +153,7 @@ Postman 的每个 environment 落成一个新 `Environment`，变量进 `variabl
 `BodyMode` 加变体对已存的 `body_json` 是向后兼容的（旧值继续反序列化成功），
 **不要**为此 bump `SCHEMA_VERSION` —— 那会让 `ensure_current_schema` 删掉用户的库。
 
-## 导出的两个约定
+## 导出的三个约定
 
 **`responses`：合成默认，不猜。** 每个 operation 输出一个 `200: {description: "OK"}`。
 `StoredResponse` 存的是实际响应，没有响应 schema；而 `RequestBody.schema` 那个字段
@@ -166,6 +166,17 @@ JSON Schema。所以没有可信数据源，猜出来的 schema 看不出不可�
 
 因为这条，文档**根上没有 `servers`** —— 提到根就成了全局默认，等于让没配的模块借到
 兄弟模块的地址。`servers` 逐 operation 携带。
+
+**`tags`：就是最外层集合的名字。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这一层
+在产物里就彻底消失，「导出再导入」会把所有接口压平进一个分组（`roundtrip_test.rs`
+里那条 `a_collection_comes_back_as_a_tag_named_group` 就是钉这个的）。
+
+两条限定：
+
+- **端点自己填了 tags 就不动。** 那是用户在请求上写的分类，与树结构无关。
+- **只落最外层，因为 tag 是扁平字符串。** 集合的嵌套在 OpenAPI 里没有对应构造，
+  `订单/明细` 导出成 tag `订单`，多出来那层读不回来。取最外层而不是最内层，是因为
+  两个不同的顶层集合下各有一个同名子集合时，取内层会让它们在重新导入时并成一处。
 
 ## 产物怎么被校验：两层，都不是自家解析器
 

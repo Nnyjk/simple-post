@@ -26,8 +26,9 @@ rules:
   # 猜一个比不写更糟。
   info-license: off
 
-  # `tags` 的描述在 IR 里没有对应字段——`IrEndpoint.tags` 只有名字。凭空写一句
-  # 「用户相关接口」是编造。要有描述得先给 `tags` 加上描述这一层，那是另一个决定。
+  # tag 有两个来源：用户在请求上手填的 `EndpointDetail.tags`（只有名字），与集合名。
+  # 集合那一侧其实有 `description`，但搬过来就得先定「用户自己填了一个与某个集合同名的
+  # tag 时听谁的」——那是另一个决定。故产物里统一只写 `name`。
   tag-description: off
 
   # ---- 刻意保留（`recommended` 原样）---------------------------------

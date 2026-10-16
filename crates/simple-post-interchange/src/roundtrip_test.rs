@@ -18,10 +18,11 @@ use crate::Severity;
 ///
 /// 方法覆盖 `paths` 的两种键位——直接挂在模块上的 `get`，与集合里带路径参数的 `delete`。
 ///
-/// **集合那一层往返后不保留**：导出器只写端点自己的 `tags`（`project.rs` 里
-/// `tags: d.tags.clone()`），集合名不会变成 tag，故读回来时这五个接口一起落进以
-/// `info.title` 命名的那个无 tag 分组。故本文件只断言 `(method, path)` 集合——那是
-/// 往返真正承诺的部分；把集合名写成 tag 会改掉交给第三方的产物，是另一项决定。
+/// **只有最外层集合能往返回来。** tag 是 OpenAPI 里唯一的分组机制，且是扁平字符串，
+/// 故导出时集合名落成 tag、导入时 tag 落成分组：`详情` 里的那个 `delete` 读回来仍在
+/// 名为 `详情` 的分组里，而模块直接挂着的两个接口落进以 `info.title`（`示例`）命名
+/// 的无 tag 分组。`订单/明细` 这样的两层会压成 `订单`——多出来的那层在格式里没有
+/// 位置，这是决策而不是缺陷。
 fn round_trip_tree() -> Exchange {
     Exchange {
         project_name: "示例".into(),
@@ -182,6 +183,39 @@ fn trace_survives_the_round_trip_as_a_custom_verb() {
         "trace 读回来应当还是 TRACE; sigs={:?}",
         endpoint_signatures(&reparsed.exchange)
     );
+}
+
+#[test]
+fn a_collection_comes_back_as_a_tag_named_group() {
+    // 导出侧把集合名写成 tag，导入侧把 tag 落成同名分组。少了导出那一步，读回来的是
+    // 三个接口挤在一个以文档名命名的分组里——树的那一层就这样没了。
+    let ex = round_trip_tree();
+    let doc = to_document(&ex, DocFormat::Json).expect("generate");
+    let reparsed = import::parse_text(Format::OpenApi3, &doc.content).expect("parse");
+    let back = &reparsed.exchange;
+
+    let detail = back
+        .modules
+        .iter()
+        .find(|m| m.name == "详情")
+        .unwrap_or_else(|| {
+            panic!(
+                "集合名没有回来成分组，分组是 {:?}",
+                back.modules.iter().map(|m| &m.name).collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(detail.endpoint_count(), 1, "「详情」里只有那个 delete");
+    assert_eq!(detail.endpoints[0].method, HttpMethod::Delete);
+    assert_eq!(detail.endpoints[0].path, "/users/{id}");
+
+    // 挂在模块上的两个没有 tag，落在以 `info.title` 命名的那个分组里。
+    let untagged = back
+        .modules
+        .iter()
+        .find(|m| m.name == "示例")
+        .expect("无 tag 的分组以文档名命名");
+    assert_eq!(untagged.endpoint_count(), 2);
+    assert_eq!(back.endpoint_count(), 3, "一个都不能少");
 }
 
 /// 把一棵 IR 压成排序后的 `(method, path)` 列表。顺序在两侧都可能变（导出按路径分组、
