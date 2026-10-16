@@ -10,7 +10,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildFetchInit, buildCurlCommand, prepareRequest } from '../http-build';
-import { parseMultipartParts, newMultipartBoundary } from '../multipart';
+import { parseMultipartParts, buildMultipartBody, newMultipartBoundary } from '../multipart';
 import { headerMap, input, prep, ENV } from './http-build-fixtures';
 
 const PARTS = JSON.stringify([
@@ -225,5 +225,34 @@ describe('http-build: multipart does not disturb the other modes', () => {
     );
     assert.match(prepared.body!, /\r\n\r\nu_demo\r\n/);
     assert.deepEqual(prepared.missingVars, ['nope']);
+  });
+
+  it('produces the same bytes as the Rust implementation', () => {
+    // 跨语言 golden：`mcp/http_ops/multipart_test.rs` 里的
+    // the_body_matches_the_typescript_implementation_byte_for_byte 断言同一份期望值。
+    //
+    // 两套实现是各自写一遍的规则，而它们的产物一旦不同，两侧会各自信任自己那份、
+    // 服务端只认其中一个。同一份 golden 被两侧断言，任何一边改动都会红，
+    // 不必靠人记得同步。
+    const B = '----SimplePostFormBoundaryFIXED';
+    const content = JSON.stringify([
+      { name: 'title', value: '报告' },
+      { name: 'file', value: 'binary-ish', filename: 'a.txt' },
+      { name: 'note', value: '', contentType: 'text/plain' },
+      // 分片名里的引号与反斜杠被转义，CR/LF 整个被剥掉——留着就是往头里注入一个新头。
+      { name: 'we"ird\\name\r\ninjected', value: 'v' },
+      { name: 'emptyFile', value: 'x', filename: 'b.bin' },
+    ]);
+
+    const expected =
+      [
+        `--${B}\r\nContent-Disposition: form-data; name="title"\r\n\r\n报告`,
+        `--${B}\r\nContent-Disposition: form-data; name="file"; filename="a.txt"\r\nContent-Type: application/octet-stream\r\n\r\nbinary-ish`,
+        `--${B}\r\nContent-Disposition: form-data; name="note"\r\nContent-Type: text/plain\r\n\r\n`,
+        `--${B}\r\nContent-Disposition: form-data; name="we\\"ird\\\\nameinjected"\r\n\r\nv`,
+        `--${B}\r\nContent-Disposition: form-data; name="emptyFile"; filename="b.bin"\r\nContent-Type: application/octet-stream\r\n\r\nx`,
+      ].join('\r\n') + `\r\n--${B}--\r\n`;
+
+    assert.equal(buildMultipartBody(parseMultipartParts(content), B), expected);
   });
 });
