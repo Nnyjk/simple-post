@@ -1,8 +1,10 @@
-//! 编排层：内容来源、IR → 线形状的投影、文件名、往返。
+//! 编排层：内容来源、IR → 线形状的投影、文件名、往返，以及**真的发一次 HTTP 请求**。
 
 use std::collections::BTreeSet;
+use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::{
@@ -12,9 +14,13 @@ use simple_post_core::error::AppError;
 use simple_post_interchange::fingerprint::FingerprintSet;
 use simple_post_interchange::ir::{Exchange, IrEndpoint, IrModule};
 use simple_post_interchange::Diagnostic;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use crate::dto::{ImportCommitOpts, ImportPreviewOpts, TransferNode};
 
 use super::{
-    all_endpoints, count_groups, diagnostics_of, file_name, mark_duplicates, project_modules,
+    all_endpoints, count_groups, diagnostics_of, file_name, import_commit, import_preview,
+    mark_duplicates, project_modules, FETCH_MAX_KB,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -218,7 +224,387 @@ fn an_import_preview_never_books_the_fingerprint_ledger() {
     assert_eq!(again, dup, "预览不记账：连问两次答案一样");
 }
 
+// --- URL 分支：真发一次请求 ------------------------------------------------
+//
+// #68：整条 URL 分支此前 0 个测试覆盖，而这些性质**只有真的发一次请求才会验出来**。
+// 上限抬到了 8 MB、截断被拦下了，这些都是读代码得出的结论；「一份 3 MB 的文档
+// 能不能真的走完拉取 → 解析 → 预览」不是。下面每条都对着本机 loopback 上的一台
+// 临时服务器跑，故 CI 的 ubuntu 与 Windows 都不需要外网。
+
+/// `import_preview` 自己调 [`simple_post_core::http_executor::OutboundPolicy::from_env`]，
+/// 所以策略只能经环境变量改——而环境变量是**整个进程共享的一个槽位**。
+///
+/// 持锁是必须的，且本文件里**每一个发请求的测试都要走这里**：否则一个正在跑
+/// `with(true)` 的测试会把另一个指望放行的测试一起拒掉。手法照 `port_registry_test.rs`。
+static POLICY_LOCK: Mutex<()> = Mutex::new(());
+
+const POLICY_ENV: &str = "SIMPLE_POST_BLOCK_PRIVATE_NET";
+
+struct ScopedPolicy {
+    _guard: MutexGuard<'static, ()>,
+    prev: Option<std::ffi::OsString>,
+}
+
+impl ScopedPolicy {
+    fn with(block_private_net: bool) -> Self {
+        // 先拿锁，*再*换变量。顺序反了就会出现「换了变量、锁还没拿到」的那个窗口。
+        let guard = POLICY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os(POLICY_ENV);
+        // 显式写 `0` 而不只是删掉：本机若本来就设了这个变量，「放行」那几条也得成立。
+        // SAFETY：锁保证没有别的线程看得见中间状态。
+        unsafe { std::env::set_var(POLICY_ENV, if block_private_net { "1" } else { "0" }) };
+        Self {
+            _guard: guard,
+            prev,
+        }
+    }
+}
+
+impl Drop for ScopedPolicy {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(v) => unsafe { std::env::set_var(POLICY_ENV, v) },
+            None => unsafe { std::env::remove_var(POLICY_ENV) },
+        }
+        // `_guard` 在本方法之后才 drop，把锁让给下一个测试。
+    }
+}
+
+/// 一台只回固定 body 的 loopback 服务器，外加一个请求计数器。
+///
+/// 用裸 [`tokio::net::TcpListener`] 而不是 axum：这里要伺服的是**几 MB**的单个响应，
+/// 路由与状态机都是多余的，而「它被请求了几次」正是本节要断言的东西之一。
+struct DocServer {
+    addr: SocketAddr,
+    hits: Arc<AtomicU32>,
+}
+
+impl DocServer {
+    fn url(&self, path: &str) -> String {
+        format!("http://{}{path}", self.addr)
+    }
+
+    fn hits(&self) -> u32 {
+        self.hits.load(Ordering::Relaxed)
+    }
+}
+
+async fn serve_doc(body: String) -> DocServer {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let hits = Arc::new(AtomicU32::new(0));
+    let counter = Arc::clone(&hits);
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            counter.fetch_add(1, Ordering::Relaxed);
+            // 读完请求头就回。请求行是什么在这里不影响任何断言。
+            let mut head = Vec::new();
+            let mut buf = [0u8; 2048];
+            loop {
+                match sock.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        head.extend_from_slice(&buf[..n]);
+                        if head.windows(4).any(|w| w == b"\r\n\r\n") || head.len() >= 2048 {
+                            break;
+                        }
+                    }
+                }
+            }
+            let mut out = Vec::with_capacity(body.len() + 256);
+            out.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/yaml\r\n");
+            out.extend_from_slice(format!("Content-Length: {}\r\n", body.len()).as_bytes());
+            out.extend_from_slice(b"Connection: close\r\n\r\n");
+            out.extend_from_slice(body.as_bytes());
+            let _ = sock.write_all(&out).await;
+            let _ = sock.shutdown().await;
+        }
+    });
+    DocServer { addr, hits }
+}
+
+/// 一份**合法**的 OpenAPI 文档：`n` 个 operation，每个描述长 `pad`。
+///
+/// 用体积而不是 operation 数量去顶大小：200 个 operation 配 16 KB 描述既是 3.3 MB，
+/// 解析侧的耗时却仍由 operation 数决定，故「>3 MB」这件事不会顺带把这条测试拖慢。
+///
+/// **顶层键必须各占一行**：`import::sniff` 的 `has_top_level_key` 只看行首（那是为了
+/// 不让 `{"a": {"item": 1}}` 里的内层同名键误判），故单行压缩过的 JSON 认不出来。
+fn big_openapi(n: usize, pad: usize) -> String {
+    let filler = "x".repeat(pad);
+    let mut s = String::with_capacity(n * (pad + 400) + 1024);
+    s.push_str(
+        "{\n\"openapi\":\"3.0.3\",\n\"info\":{\"title\":\"大文档\",\"version\":\"1\"},\n\
+         \"servers\":[{\"url\":\"https://api.example.com/v1\"}],\n\"paths\":{\n",
+    );
+    for i in 0..n {
+        if i > 0 {
+            s.push_str(",\n");
+        }
+        // 路径名必须唯一，否则 JSON 里同一个键出现两次。
+        // 收尾 4 个 `}`：200 → responses → get → 本条 path。paths 与根由下面那行收。
+        s.push_str(&format!(
+            "\"/p{i}\":{{\"get\":{{\"tags\":[\"t{}\"],\"summary\":\"s{i}\",\"description\":\"{filler}\",\"responses\":{{\"200\":{{\"description\":\"ok\"}}}}}}}}",
+            i % 4
+        ));
+    }
+    s.push_str("\n}}");
+    s
+}
+
+/// 编排层把用户能读懂的理由装在 `Validation` 里，传输层失败也在那儿。
+fn message_of(err: &AppError) -> String {
+    match err {
+        AppError::Validation(m) => m.clone(),
+        other => panic!("应是一个用户能读懂的 validation 错, got: {other:?}"),
+    }
+}
+
+fn tree_keys(node: &TransferNode, out: &mut Vec<String>) {
+    out.extend(node.endpoints.iter().map(|e| e.key.clone()));
+    for c in &node.children {
+        tree_keys(c, out);
+    }
+}
+
+fn all_tree_keys(nodes: &[TransferNode]) -> Vec<String> {
+    let mut out = Vec::new();
+    for n in nodes {
+        tree_keys(n, &mut out);
+    }
+    out
+}
+
+#[tokio::test]
+async fn a_multi_megabyte_document_survives_the_url_branch_intact() {
+    let _policy = ScopedPolicy::with(false);
+    let doc = big_openapi(200, 16_000);
+    assert!(
+        doc.len() > 3_000_000,
+        "这份文档必须真的是 >3 MB, got {} 字节",
+        doc.len()
+    );
+    let server = serve_doc(doc.clone()).await;
+    let pool = temp_pool("large-url");
+    let project_id = seed_project_with_module(&pool).0;
+
+    let preview = import_preview(
+        &pool,
+        &ImportPreviewOpts {
+            project_id,
+            module_id: "m1".into(),
+            content: None,
+            url: Some(server.url("/openapi.yaml")),
+        },
+    )
+    .await
+    .expect(">3 MB 的合法文档必须能走完 URL 分支并解析出来");
+
+    assert_eq!(
+        preview.counts.endpoints, 200,
+        "全部 operation 都要解析出来，一个都不能少"
+    );
+    assert_eq!(preview.format, "openapi-3");
+    assert_eq!(
+        preview.resolved_content.as_deref(),
+        Some(doc.as_str()),
+        "回传的原文必须与服务端拉到的是同一份字节"
+    );
+    assert_eq!(server.hits(), 1);
+}
+
+#[tokio::test]
+async fn an_oversized_document_is_refused_by_a_message_naming_the_cap() {
+    let _policy = ScopedPolicy::with(false);
+    let doc = big_openapi(200, 44_000);
+    assert!(
+        doc.len() as u64 > FETCH_MAX_KB * 1024,
+        "这份文档必须真的超过 {FETCH_MAX_KB} KB 上限, got {} 字节",
+        doc.len()
+    );
+    let server = serve_doc(doc).await;
+    let pool = temp_pool("oversize-url");
+    let project_id = seed_project_with_module(&pool).0;
+
+    let err = import_preview(
+        &pool,
+        &ImportPreviewOpts {
+            project_id,
+            module_id: "m1".into(),
+            content: None,
+            url: Some(server.url("/openapi.yaml")),
+        },
+    )
+    .await
+    .expect_err("超过上限的文档必须被拒");
+
+    let msg = message_of(&err);
+    assert!(
+        msg.contains("上限") && msg.contains(&FETCH_MAX_KB.to_string()),
+        "错误要指向那条大小上限并带上它的值, got: {msg}"
+    );
+    // 关键在「不是解析失败」：若不拦，用户看到的是一句「YAML 解析失败」，
+    // 真正的原因（我们自己把它砍了）在任何地方都不会出现。
+    assert!(
+        !msg.contains("expected") && !msg.contains("解析失败"),
+        "这不该是一条解析器的报错, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn the_commit_never_refetches_what_the_preview_already_read() {
+    let _policy = ScopedPolicy::with(false);
+    let doc = big_openapi(12, 400);
+    let server = serve_doc(doc.clone()).await;
+    let pool = temp_pool("refetch-url");
+    let (project_id, module_id) = seed_project_with_module(&pool);
+
+    let preview = import_preview(
+        &pool,
+        &ImportPreviewOpts {
+            project_id: project_id.clone(),
+            module_id: module_id.clone(),
+            content: None,
+            url: Some(server.url("/openapi.yaml")),
+        },
+    )
+    .await
+    .expect("preview");
+    assert_eq!(server.hits(), 1, "预览只该拉一次");
+
+    // 渲染层把预览回传的原文原样送回 commit。
+    let content = preview
+        .resolved_content
+        .clone()
+        .expect("URL 模式必须回传原文，否则 commit 会再去拉一次");
+    assert_eq!(content, doc, "送回去的必须就是刚拉到的那份字节");
+    let selected = all_tree_keys(&preview.groups);
+    assert_eq!(selected.len(), 12);
+
+    let result = import_commit(
+        &pool,
+        &ImportCommitOpts {
+            project_id,
+            module_id,
+            content,
+            selected,
+            apply_service: None,
+        },
+    )
+    .expect("commit");
+
+    assert_eq!(result.created_endpoints, 12);
+    assert_eq!(
+        server.hits(),
+        1,
+        "commit 必须用送回来的那份原文，不能再拉一次；再拉一次的后果是两次拉到的 \
+         可能已经不是同一份文件了"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_url_is_reported_without_ever_dialling() {
+    let _policy = ScopedPolicy::with(true);
+    let server = serve_doc(big_openapi(2, 100)).await;
+    let pool = temp_pool("refused-url");
+    let project_id = seed_project_with_module(&pool).0;
+
+    let err = import_preview(
+        &pool,
+        &ImportPreviewOpts {
+            project_id,
+            module_id: "m1".into(),
+            content: None,
+            url: Some(server.url("/openapi.yaml")),
+        },
+    )
+    .await
+    .expect_err("严格策略下 loopback 必须被拒");
+
+    let msg = message_of(&err);
+    assert!(
+        msg.contains(POLICY_ENV),
+        "错误要说得出是哪条策略拒的，否则用户只会看到一个没有下一步的失败, got: {msg}"
+    );
+    assert_eq!(
+        server.hits(),
+        0,
+        "被拒的 URL 一次都不该拨出去——`check_url` 在建客户端之前就短路了"
+    );
+}
+
+#[tokio::test]
+async fn the_declared_server_is_never_the_one_dialled() {
+    // `servers[0]` 是文档**声明**的服务器，`url` 才是抓取目标。这两者混起来就会把
+    // 「文档里写了个私网地址」误当成一次 SSRF 尝试——它不是，那只是一个要被记录成
+    // 服务的字符串。默认策略下这一条真的能拉通，正说明声明的地址从未被访问。
+    let _policy = ScopedPolicy::with(false);
+    let doc = "{\n\"openapi\":\"3.0.3\",\n\"info\":{\"title\":\"云元数据\",\"version\":\"1\"},\n\
+               \"servers\":[{\"url\":\"http://169.254.169.254/latest\"}],\n\
+               \"paths\":{\"/ping\":{\"get\":{\"responses\":{\"200\":{\"description\":\"ok\"}}}}}}\n"
+        .to_string();
+    let server = serve_doc(doc).await;
+    let pool = temp_pool("declared-server");
+    let project_id = seed_project_with_module(&pool).0;
+
+    let preview = import_preview(
+        &pool,
+        &ImportPreviewOpts {
+            project_id,
+            module_id: "m1".into(),
+            content: None,
+            url: Some(server.url("/openapi.json")),
+        },
+    )
+    .await
+    .expect("声明了一个私网 server 的文档照样应当拉得下来");
+
+    assert_eq!(server.hits(), 1, "抓取目标只有那台 loopback");
+    let svc = preview.service.expect("声明的 server 应当落成一个服务预告");
+    assert_eq!(svc.service, "169.254.169.254");
+}
+
 // --- 测试脚手架 ---------------------------------------------------------
+
+/// 一个项目 + 一个模块，别的什么都没有。`seed_one_endpoint` 那份预置了一个
+/// `GET /users`，拿来跑大文档会把它标成重复。
+fn seed_project_with_module(pool: &DbPool) -> (String, String) {
+    db::with_tx(pool, |conn| {
+        let project = db::projects::create_with_defaults(
+            conn,
+            &Project {
+                id: "p1".into(),
+                name: "示例".into(),
+                description: None,
+                base_url: None,
+                base_url_definitions: Vec::new(),
+                default_base_url_definition_id: None,
+                color: "#3b82f6".into(),
+                created_at: 0,
+                updated_at: 0,
+            },
+        )?;
+        db::nodes::create(
+            conn,
+            &ResourceNode {
+                id: "m1".into(),
+                root_id: project.id.clone(),
+                parent_id: None,
+                kind: ResourceNodeType::Module,
+                name: "用户".into(),
+                description: None,
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+            },
+            None,
+        )?;
+        Ok((project.id, "m1".to_string()))
+    })
+    .expect("seed")
+}
 
 fn temp_pool(tag: &str) -> DbPool {
     let dir = std::env::temp_dir().join(format!(
