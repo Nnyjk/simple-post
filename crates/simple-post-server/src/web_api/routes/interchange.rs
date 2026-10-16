@@ -50,3 +50,7 @@ pub async fn interchange_export_document(
     let out = interchange_api::export_document(&state.pool, &opts).map_err(map_app_error)?;
     Ok(Json(out))
 }
+
+#[cfg(test)]
+#[path = "interchange_test.rs"]
+mod tests;
