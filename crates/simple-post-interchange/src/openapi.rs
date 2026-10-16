@@ -90,6 +90,87 @@ fn media_type_of(mode: &BodyMode) -> Option<&'static str> {
     }
 }
 
+/// 路径里的 `{占位符}`，按出现顺序，不重复。
+fn path_placeholders(path: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while let Some(open) = path[i..].find('{') {
+        let start = i + open;
+        // 没闭合的 `{` 不是模板，原样留给调用方当普通字符。
+        let Some(len) = path[start..].find('}') else {
+            break;
+        };
+        let name = &path[start + 1..start + len];
+        if !name.is_empty() && !out.contains(&name) {
+            out.push(name);
+        }
+        i = start + len + 1;
+    }
+    out
+}
+
+/// `动词 + 路径` → 一个合法的 `operationId`。
+///
+/// 路径分隔符与花括号换成下划线：`operationId` 在多数代码生成器里会被直接变成方法名，
+/// 而 `/` 与 `{}` 都不是标识符字符。不做大小写变换——那会抹掉用户路径里的区分信息。
+fn operation_id(verb: &str, path: &str) -> String {
+    let mut out = String::with_capacity(verb.len() + path.len() + 1);
+    out.push_str(verb);
+    out.push('_');
+    for c in path.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+/// 这个接口的 `parameters` 数组。
+///
+/// **路径模板里的每个 `{占位符}` 都必须声明成 `in: path`**，否则 OpenAPI 工具读不出
+/// 路径参数（Redocly 的 `path-parameters-defined` 会报错，代码生成器会漏掉那个参数）。
+/// 两件事要一起做：
+///
+/// 1. 参数名命中占位符的，`in` 写 `path` 而不是 `query` —— 把 `/users/{id}` 的 `id`
+///    写成 query 参数是最常见的错法，工具会认为 URL 里那个 `{id}` 无人认领。
+/// 2. 占位符没有对应参数行的，**照样声明**。用户删了那一行参数但 URL 里占位符还在；
+///    那时缺声明的是这份文档，不是用户的配置。
+fn parameters(ep: &IrEndpoint) -> Vec<Value> {
+    let placeholders = path_placeholders(&ep.path);
+    let mut out: Vec<Value> = Vec::new();
+
+    for p in ep.params.iter().filter(|p| p.enabled) {
+        // 值的实际形态不猜：启用即视为必填，schema 一律按 string 写。
+        let location = if placeholders.contains(&p.key.as_str()) {
+            "path"
+        } else {
+            "query"
+        };
+        out.push(json!({
+            "name": p.key,
+            "in": location,
+            "required": true,
+            "schema": { "type": "string" },
+        }));
+    }
+
+    for name in &placeholders {
+        if ep.params.iter().any(|p| p.enabled && &p.key == name) {
+            continue;
+        }
+        out.push(json!({
+            "name": name,
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+        }));
+    }
+
+    out
+}
+
 /// 一层待写的内容。`servers` 随栈一起下潜：URL 是 per 模块的，分组里的 endpoint
 /// 不能借用兄弟模块的那一份。
 struct Pending<'a> {
@@ -163,6 +244,10 @@ impl Builder {
         if !ep.name.is_empty() {
             op.insert("summary".into(), json!(ep.name));
         }
+        // 由 `动词 + 路径` 拼，不取接口名：改名是用户随手做的事，而 operationId 是
+        // 代码生成器拿来给方法取名的，它变了等于换了一个方法。`动词 + 路径` 只在
+        // 同一路径同一动词下唯一——那正是上面 `taken` 守住的那一格。
+        op.insert("operationId".into(), json!(operation_id(&verb, &ep.path)));
         if let Some(d) = &ep.description {
             op.insert("description".into(), json!(d));
         }
@@ -174,15 +259,7 @@ impl Builder {
             );
         }
 
-        let params: Vec<Value> = ep
-            .params
-            .iter()
-            .filter(|p| p.enabled)
-            // 值的实际形态不猜：启用即视为必填，schema 一律按 string 写。
-            .map(|p| {
-                json!({ "name": p.key, "in": "query", "required": true, "schema": { "type": "string" } })
-            })
-            .collect();
+        let params = parameters(ep);
         if !params.is_empty() {
             op.insert("parameters".into(), Value::Array(params));
         }
@@ -201,13 +278,24 @@ impl Builder {
             json!({ "200": { "description": "OK" } }),
         );
 
-        if let Some(name) = self.register_scheme(&ep.auth, &pointer) {
-            let mut requirement = Map::new();
-            requirement.insert(name, Value::Array(Vec::new()));
-            op.insert(
-                "security".into(),
-                Value::Array(vec![Value::Object(requirement)]),
-            );
+        match self.register_scheme(&ep.auth, &pointer) {
+            Some(name) => {
+                let mut requirement = Map::new();
+                requirement.insert(name, Value::Array(Vec::new()));
+                op.insert(
+                    "security".into(),
+                    Value::Array(vec![Value::Object(requirement)]),
+                );
+            }
+            // 显式写「这条不要求任何凭据」。`register_scheme` 只对 `AuthType::None`
+            // 返回 None，所以这里写空数组是**真话**而不是「表达不出来」——
+            // OAuth2 会拿到一条 flows 为空的 scheme，不会落到这个分支。
+            //
+            // 顺带消掉 `security-defined`：没有它，读者得自己推断「既没有根级
+            // security、这条也没有」等于不需要凭据。
+            None => {
+                op.insert("security".into(), Value::Array(Vec::new()));
+            }
         }
         if !ep.tags.is_empty() {
             for t in &ep.tags {

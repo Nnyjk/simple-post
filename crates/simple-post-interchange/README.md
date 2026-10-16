@@ -154,6 +154,44 @@ JSON Schema。所以没有可信数据源，猜出来的 schema 看不出不可�
 回退层**。导出必须先选定一个环境，然后每个模块各取各的；该模块没配就是没有 URL，
 不写 `servers` 条目，不借用别的模块的，也不落回项目 ★。
 
+因为这条，文档**根上没有 `servers`** —— 提到根就成了全局默认，等于让没配的模块借到
+兄弟模块的地址。`servers` 逐 operation 携带。
+
+## 产物怎么被校验：两层，都不是自家解析器
+
+自家导入器对自家产物永远宽容：导出器漏写 `responses`，导入器不会报错，它只是安静地
+少一个响应，而那份文档已经不合法了。故校验走两个外部视角：
+
+| 层 | 工具 | 跑在哪 | 查什么 |
+|---|---|---|---|
+| 模型 | `openapiv3`（dev-dep） | `cargo test`（`src/openapi_model_test.rs`） | OpenAPI 3.0 的 REQUIRED：`info.title`/`version`、每个 operation 的 `responses` 与 response 的 `description` |
+| 规则 | Redocly | `npm run lint:openapi` → CI 的 web job | `path-parameters-defined`、`operation-operationId`、`security-defined`、`no-server-example.com` 等 |
+
+**两层读的是同一棵树**：`fixtures/sample-exchange.json`。Rust 测试与
+`examples/export_sample.rs` 都从它出发，故 linter 看到的与 `cargo test` 校验过的是
+同一份东西。两边各写一份构造的话，它们迟早只覆盖一半。
+
+Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
+`cargo run -p simple-post-interchange --example export_sample` 现场生成——**不提交
+快照**，快照会长过期。规则取舍在仓库根的 `redocly.yaml`，**关掉的每一条都写了理由**；
+关规则不是消错音的手段，下一个报错该去改生成器。
+
+## Redocly 抓出来的三处真缺陷（都已修）
+
+接 linter 之前，单测全绿、自家导入器也读得回自己的产物：
+
+1. **路径模板参数一律写成 `in: query`。** `/users/{id}` 的 `id` 被当成 query 参数，
+   工具会认为 URL 里那个 `{id}` 无人认领，生成的客户端也就不会把它当路径参数
+   （`path-parameters-defined` 报 4 处）。
+2. **占位符没有对应参数行时完全不声明。** 用户删了参数行但 URL 里占位符还在——
+   缺声明的是文档，不是用户的配置。
+3. **operation 没有 `operationId`**（`operation-operationId` 报 17 处）。现在由
+   `动词 + 路径` 拼，**不取接口名**：改名是用户随手做的事，而 operationId 是代码
+   生成器拿来给方法取名的。
+
+另外把「没有 auth 就不写 `security`」改成**显式写空数组**。语义等价（都不要求凭据），
+但缺席要读者自己推断一遍，且 `security-defined` 只认显式的那种。
+
 ## 已核实的陷阱
 
 带 `file:line` 的都是实测，不是推测。

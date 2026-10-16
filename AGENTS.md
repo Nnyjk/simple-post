@@ -72,7 +72,7 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 - `src/types/domain.ts` — TS mirrors of Rust domain types
 - `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` is a facade over `nodes/{read,write,tree,placement}.rs`, which together hold the whole resource tree; `endpoint_details.rs` its endpoint-only configuration) + `pool.rs` / `schema.rs` + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
-- `crates/simple-post-interchange/src/` — `ir.rs` / `fingerprint.rs` / `commit.rs` / `project.rs` / `diagnostics.rs`; `import/{mod,postman,openapi}.rs` parse, `openapi.rs` generates the exported document
+- `crates/simple-post-interchange/src/` — `ir.rs` / `fingerprint.rs` / `commit.rs` / `project.rs` / `diagnostics.rs`; `import/{mod,postman,openapi}.rs` parse, `openapi.rs` generates the exported document, `openapi_model_test.rs` checks it against the official OpenAPI 3.0 model; `fixtures/sample-exchange.json` is the one tree both that test and `examples/export_sample.rs` read
 - `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource; `dto.rs` is now only a re-export of the server crate's DTOs)
 - `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs` + `port_registry.rs` (both facades over same-named module dirs), `auth.rs`, `dto.rs`, `http_config.rs`, `interchange_api.rs` (the import/export orchestration both transports share), `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
 - `scripts/` — dev/test/build utilities (see below)
@@ -85,7 +85,8 @@ npm run dev            # Vite dev server → http://127.0.0.1:5173
 npm run dev:split      # Vite + `cargo run -- serve-web` (4173) concurrently — use this for full-backend work
 npm run build          # tsc -b && vite build → dist/
 npm run typecheck      # tsc -b only (no bundle)
-npm run check          # one-shot quality gate: format:check → lint → typecheck → test → fmt:check → clippy
+npm run check          # one-shot quality gate: format:check → lint → typecheck → test → lint:openapi → fmt:check → clippy
+npm run lint:openapi   # regenerate an exported OpenAPI doc via the cargo example, then Redocly-lint it
 npm run lint[:fix]     # ESLint 10 flat config (eslint.config.js)
 npm run format         # Prettier --write (.prettierrc + .prettierignore); `format:check` for CI
 npm run fmt[:check]    # cargo fmt --all [--check]
@@ -144,6 +145,8 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 **Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands/<resource>.rs` (re-exported by `commands/mod.rs`, which must use **glob** `pub use` — an item list drops the `#[macro_export]`ed `__cmd__<name>` macro and `generate_handler!` fails with E0433), registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `crates/simple-post-server/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently. A DTO both sides need belongs in `crates/simple-post-server/src/dto.rs`, **not** in `commands/` — see the Tauri split above.
 
 **The transfer dialog is one component, not two.** Import and export share `TransferDialog` / `TransferTree` / `TransferNode` / `TransferEndpoint`; the modes differ in the source picker, two export-only settings, and the confirming action. Don't fork the tree or the types per mode — a shared filename is not a shared component. Its state lives in the `useTransfer` hook, **not** a Zustand slice: only `ProjectTree` can open it, so there is no second reader.
+
+**Exported OpenAPI is checked by two outsiders, not by our own parser.** The importer in `simple-post-interchange` is ours too, so it is permanently lenient about its own generator's output — a missing `responses` yields no error, just one silently-absent field in an already-invalid document. So: `openapiv3` (dev-dep) validates against the official model inside `cargo test`, and Redocly (`npm run lint:openapi`, wired into the CI web job) checks rules. **Both read `crates/simple-post-interchange/fixtures/sample-exchange.json`** — the Rust test and `examples/export_sample.rs` start from the same tree, so two hand-written specimens would each cover half of it. `npm run lint:openapi` regenerates the document through the cargo example rather than committing a snapshot, because snapshots go stale. Rule opt-outs live in `redocly.yaml` and each one states why; silencing a rule is not how the next finding gets fixed.
 
 **Export save is native-only, and the split is deliberate.** Tauri goes through `tauri-plugin-dialog` + `tauri-plugin-fs` (dynamically imported — they have no browser implementation, so a static import would make `serve-web` bundle dead Tauri code and throw at runtime); the browser falls back to a Blob + `<a download>`. The `fs` capability is granted **per verb and scoped to `$HOME/**/*`** — `fs:default` would open read and write over the whole user directory for a feature that writes one text file.
 

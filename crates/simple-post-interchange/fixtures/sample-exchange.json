@@ -1,0 +1,204 @@
+{
+  "projectName": "样例 API",
+  "projectDescription": "导出器的全部构造都在这棵树里。每加一个可导出的字段，就往这里加一条——Rust 侧读它做模型校验，Redocly 读它的产物做规则校验。",
+  "modules": [
+    {
+      "key": "m0",
+      "name": "用户",
+      "description": "配了服务 URL 的模块",
+      "servers": [
+        { "service": "网关", "url": "https://api.acme.test/v1" },
+        { "service": "上传", "url": "https://upload.acme.test" }
+      ],
+      "endpoints": [
+        {
+          "key": "m0e0",
+          "name": "用户列表",
+          "description": "分页列出用户",
+          "method": "GET",
+          "path": "/users",
+          "params": [
+            { "id": "kv1", "key": "page", "value": "1", "enabled": true },
+            { "id": "kv2", "key": "size", "value": "20", "enabled": true }
+          ],
+          "headers": [{ "id": "kv3", "key": "X-Trace", "value": "{{traceId}}", "enabled": true }],
+          "auth": { "kind": "bearer", "bearer": "{{token}}" },
+          "tags": ["用户"]
+        },
+        {
+          "key": "m0e1",
+          "name": "单个用户",
+          "method": "GET",
+          "path": "/users/{id}",
+          "params": [{ "id": "kv4", "key": "id", "value": "{{id}}", "enabled": true }],
+          "auth": { "kind": "bearer", "bearer": "{{token}}" },
+          "tags": ["用户"]
+        },
+        {
+          "key": "m0e2",
+          "name": "新建用户",
+          "method": "POST",
+          "path": "/users",
+          "body": {
+            "mode": "json",
+            "content": "{\"name\":\"{{name}}\",\"email\":\"{{email}}\"}"
+          },
+          "auth": { "kind": "bearer", "bearer": "{{token}}" },
+          "tags": ["用户"]
+        },
+        {
+          "key": "m0e3",
+          "name": "替换用户",
+          "method": "PUT",
+          "path": "/users/{id}",
+          "params": [{ "id": "kv5", "key": "id", "value": "{{id}}", "enabled": true }],
+          "body": { "mode": "json", "content": "{\"name\":\"{{name}}\"}" },
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e4",
+          "name": "删除用户",
+          "method": "DELETE",
+          "path": "/users/{id}",
+          "params": [{ "id": "kv6", "key": "id", "value": "{{id}}", "enabled": true }],
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e5",
+          "name": "探测用户",
+          "method": "HEAD",
+          "path": "/users",
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e6",
+          "name": "用户可用性",
+          "method": "OPTIONS",
+          "path": "/users",
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e7",
+          "name": "用户回声",
+          "method": "TRACE",
+          "path": "/users",
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e8",
+          "name": "部分更新用户",
+          "description": "覆盖 PUT 的那一类",
+          "method": "PATCH",
+          "path": "/users/{id}",
+          "params": [{ "id": "kv7", "key": "id", "value": "{{id}}", "enabled": true }],
+          "body": { "mode": "json", "content": "{\"nickname\":\"{{nick}}\"}" },
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        }
+      ],
+      "collections": [
+        {
+          "key": "m0c0",
+          "name": "凭据",
+          "endpoints": [
+            {
+              "key": "m0c0e0",
+              "name": "表单登录",
+              "method": "POST",
+              "path": "/login",
+              "body": { "mode": "form", "content": "username={{u}}&password={{p}}" },
+              "auth": { "kind": "none" },
+              "tags": ["凭据"]
+            },
+            {
+              "key": "m0c0e1",
+              "name": "上传头像",
+              "method": "POST",
+              "path": "/avatar",
+              "body": { "mode": "multipart", "content": "[]" },
+              "auth": { "kind": "bearer", "bearer": "{{token}}" },
+              "tags": ["凭据"]
+            },
+            {
+              "key": "m0c0e2",
+              "name": "导出原始字节",
+              "method": "POST",
+              "path": "/dump",
+              "body": { "mode": "raw", "content": "原始文本" },
+              "auth": { "kind": "bearer", "bearer": "{{token}}" }
+            },
+            {
+              "key": "m0c0e3",
+              "name": "基础鉴权示例",
+              "method": "GET",
+              "path": "/whoami",
+              "auth": {
+                "kind": "basic",
+                "basic": { "username": "{{u}}", "password": "{{p}}" }
+              }
+            },
+            {
+              "key": "m0c0e4",
+              "name": "密钥鉴权示例",
+              "method": "GET",
+              "path": "/secret",
+              "params": [{ "id": "kv8", "key": "apiKey", "value": "{{k}}", "enabled": true }],
+              "auth": {
+                "kind": "apikey",
+                "apikey": {
+                  "key": "apiKey",
+                  "value": "{{k}}",
+                  "inLocation": "query"
+                }
+              }
+            },
+            {
+              "key": "m0c0e5",
+              "name": "嵌套集合里的接口",
+              "method": "GET",
+              "path": "/nested/deep",
+              "auth": { "kind": "bearer", "bearer": "{{token}}" }
+            }
+          ],
+          "collections": [
+            {
+              "key": "m0c0c0",
+              "name": "更深的分组",
+              "endpoints": [
+                {
+                  "key": "m0c0c0e0",
+                  "name": "最深处的接口",
+                  "method": "GET",
+                  "path": "/nested/deeper/still",
+                  "auth": { "kind": "bearer", "bearer": "{{token}}" }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "m1",
+      "name": "无服务模块",
+      "description": "这个模块在选定环境里没有配任何 URL，导出时不得借到 m0 的地址",
+      "endpoints": [
+        {
+          "key": "m1e0",
+          "name": "本地健康检查",
+          "method": "GET",
+          "path": "/health",
+          "auth": { "kind": "none" }
+        },
+        {
+          "key": "m1e1",
+          "name": "集合外的动词",
+          "description": "PROPFIND 会带诊断被跳过，且不写进产物",
+          "method": "PROPFIND",
+          "path": "/files",
+          "auth": { "kind": "none" }
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}
