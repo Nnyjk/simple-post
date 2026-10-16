@@ -114,6 +114,16 @@ Tauri command 与 REST route 都退化成薄壳。
 - Postman 的 `auth` 方案里 oauth2 / digest —— `AuthConfig` 只有四种。
 - OpenAPI 的 `apiKey` `in: cookie` —— `ApiKeyLocation` 只有 `Header | Query`。
 - OpenAPI `paths` 里固定动词键集以外的动词 —— 塞进去会让整份文档不合法。
+- OpenAPI operation 的 `tags[1..]` —— 一个接口只归第一个 tag（见下）。
+
+**分组只认 `tags[0]`，没打 tag 的整份归到一个以 `info.title` 命名的分组里。**
+落进已有模块时 IR 顶层模块一律降级成集合，故这条同时就是「OpenAPI tag → 目标模块下的
+集合」。曾经按「一个 operation 一个模块」实现，于是**一个 tag 都不打的文档**（Apifox、
+SpringDoc 导出的文件很常见）会变成 87 个同名集合——用户看到的是一屏重复的名字。
+复制到第二个 tag 下同样不行：那是两条指纹相同的接口，落库时第二条被当成重复跳过，
+预览里看起来像自己导了两份。多出来的 tag 全部留在端点的 `tags` 上，只是不再各自成组。
+
+按路径前缀切分组是另一条路，但那是**猜**：文档没给的信息不猜。
 
 反过来也一样：`AuthConfig` 是「判别字段 + 可选载荷」的**扁平**结构，解析器只在
 `kind` 匹配时才读对应载荷。未选中方案的载荷同样为 `Some`，按载荷存在性分派会把

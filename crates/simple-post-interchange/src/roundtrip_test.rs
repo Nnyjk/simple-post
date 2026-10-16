@@ -17,8 +17,11 @@ use crate::Severity;
 /// 一棵有代表性的树：一个模块、两个直接接口、一个嵌套集合、集合里一个接口。
 ///
 /// 方法覆盖 `paths` 的两种键位——直接挂在模块上的 `get`，与集合里带路径参数的 `delete`。
-/// 嵌套集合是为了让「分组」这条边也参与往返：它落在 OpenAPI 的 tag 上，读回来时
-/// 变成模块下的集合而不是模块下的接口。
+///
+/// **集合那一层往返后不保留**：导出器只写端点自己的 `tags`（`project.rs` 里
+/// `tags: d.tags.clone()`），集合名不会变成 tag，故读回来时这五个接口一起落进以
+/// `info.title` 命名的那个无 tag 分组。故本文件只断言 `(method, path)` 集合——那是
+/// 往返真正承诺的部分；把集合名写成 tag 会改掉交给第三方的产物，是另一项决定。
 fn round_trip_tree() -> Exchange {
     Exchange {
         project_name: "示例".into(),
