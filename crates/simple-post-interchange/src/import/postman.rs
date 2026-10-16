@@ -21,6 +21,7 @@ use simple_post_core::domain::{
     Environment, KeyValue, RequestBody,
 };
 use simple_post_core::error::AppError;
+use simple_post_core::template::is_word;
 
 use crate::diagnostics::Diagnostic;
 use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrServer};
@@ -447,7 +448,7 @@ impl UrlParts {
                 path: path_part.to_string(),
                 params,
                 server: Some(IrServer {
-                    service: service_name(host),
+                    service: super::service_name(host),
                     url: match protocol.filter(|p| !p.is_empty()) {
                         Some(p) => format!("{p}://{host}"),
                         None => format!("//{host}"),
@@ -469,16 +470,6 @@ impl UrlParts {
                 }
             }
         }
-    }
-}
-
-/// 服务名。端口不算名字的一部分；带变量或空 host 回落成 `default`。
-fn service_name(host: &str) -> String {
-    let bare = host.split(':').next().unwrap_or(host);
-    if bare.is_empty() || bare.contains("{{") || bare.contains('/') {
-        "default".to_string()
-    } else {
-        bare.to_string()
     }
 }
 
@@ -782,8 +773,7 @@ fn auth_param(pairs: &[(String, String)], key: &str) -> String {
 
 /// 扫一个 endpoint 所有落库字段里的 `{{...}}`。
 ///
-/// 只认 `\w+`（`core::template::is_word` 是同一个判据）：其余两种形状都会被发送链路
-/// 原样放过，不出声就是「导入成功、发送时不替换」。
+/// 只认 `\w+`：其余两种形状都会被发送链路原样放过，不出声就是「导入成功、发送时不替换」。
 fn scan_templates(ep: &IrEndpoint, ptr: &str, ctx: &mut Ctx) {
     let url_ptr = format!("{ptr}/request/url");
     let header_ptr = format!("{ptr}/request/header");
@@ -824,6 +814,8 @@ fn scan_templates(ep: &IrEndpoint, ptr: &str, ctx: &mut Ctx) {
 }
 
 /// 一个字段里的 `{{...}}`。同一个坏 token 在一份文件里只报一次。
+///
+/// 标记名的判据走 [`is_word`]——与发送链路同一份，所以诊断说的话和实际行为不会分家。
 fn scan_template(text: &str, ptr: &str, ctx: &mut Ctx) {
     if text.is_empty() {
         return;
@@ -870,10 +862,6 @@ fn find_close(s: &str, from: usize) -> Option<usize> {
         i += 1;
     }
     None
-}
-
-fn is_word(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // -------------------------------------------------------------------------

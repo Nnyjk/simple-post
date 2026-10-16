@@ -22,6 +22,7 @@ use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
 use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrServer};
+use crate::spec::{escape_pointer_token, PATH_METHODS};
 
 /// 产出的文档格式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,12 +75,6 @@ pub struct Document {
     /// 跳过 / 降级映射的那些构造。它们不构成错误——文档仍然是合法的。
     pub diagnostics: Vec<Diagnostic>,
 }
-
-/// OpenAPI 3.0 `paths` 的固定动词键集。集合外的动词塞进去会让整份文档不合法，
-/// 故导出方必须挡住它，而不是「尽量映射」。
-const PATH_METHODS: [&str; 8] = [
-    "get", "put", "post", "delete", "options", "head", "patch", "trace",
-];
 
 /// `IrEndpoint.body.mode` → OpenAPI media type。`BodyMode::None` 没有 media type，
 /// 故返回 `None` 且不写 `requestBody`。
@@ -243,7 +238,7 @@ struct Builder {
 impl Builder {
     fn operation(&mut self, ep: &IrEndpoint, servers: &[IrServer], group: Option<&str>) {
         let verb = ep.method.as_str().to_ascii_lowercase();
-        let pointer = format!("/paths/{}/{}", escape(&ep.path), verb);
+        let pointer = format!("/paths/{}/{}", escape_pointer_token(&ep.path), verb);
         if !PATH_METHODS.contains(&verb.as_str()) {
             self.diagnostics.push(
                 Diagnostic::warn(
@@ -435,11 +430,6 @@ fn component_key(raw: &str) -> String {
             }
         })
         .collect()
-}
-
-/// JSON Pointer 转义：`/` 与 `~` 不能原样出现在指针里。
-fn escape(token: &str) -> String {
-    token.replace('~', "~0").replace('/', "~1")
 }
 
 /// 把一份 [`Exchange`] 落成 OpenAPI 3.0 文档。

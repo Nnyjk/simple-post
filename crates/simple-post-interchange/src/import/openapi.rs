@@ -31,13 +31,9 @@ use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
 use crate::ir::{Exchange, IrEndpoint, IrModule, IrServer};
+use crate::spec::{escape_pointer_token, PATH_METHODS};
 
 use super::ParsedExchange;
-
-/// OpenAPI 3.x `paths` 的固定动词键集。`x-` 扩展键因为不在这个集合里而被自然跳过。
-const PATH_METHODS: [&str; 8] = [
-    "get", "put", "post", "delete", "options", "head", "patch", "trace",
-];
 
 /// `requestBody.content` 的偏好序：先到先得。`RequestBody` 只有一个 `content`，
 /// 装不下第二个。
@@ -120,7 +116,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
     let mut modules: Vec<IrModule> = Vec::new();
     let mut group_at: HashMap<String, usize> = HashMap::new();
     for (raw_path, item) in paths {
-        let pointer = format!("/paths/{}", escape(raw_path));
+        let pointer = format!("/paths/{}", escape_pointer_token(raw_path));
         let Some(item) = item.as_object() else {
             ctx.diagnostics.push(Diagnostic::error(
                 &pointer,
@@ -196,7 +192,7 @@ fn group_of(
     }
 
     let (key, name) = match tags.first() {
-        Some(tag) => (format!("/tags/{}", escape(tag)), tag.clone()),
+        Some(tag) => (format!("/tags/{}", escape_pointer_token(tag)), tag.clone()),
         None => (
             UNTAGGED_KEY.to_string(),
             view.title.unwrap_or(DEFAULT_NAME).to_string(),
@@ -227,7 +223,7 @@ fn endpoint_of(
     item: &Map<String, Value>,
     ctx: &mut Ctx,
 ) -> IrEndpoint {
-    let key = format!("/paths/{}/{}", escape(raw_path), verb);
+    let key = format!("/paths/{}/{}", escape_pointer_token(raw_path), verb);
     let path = format!("{}{raw_path}", view.servers.base_path);
     let tags = string_list(operation.get("tags"));
 
@@ -283,7 +279,7 @@ fn parameters(
                 .push(Diagnostic::warn(&at, "参数没有 name，已跳过").dropping(value.to_string()));
             continue;
         };
-        let at = format!("{at}/{}", escape(&name));
+        let at = format!("{at}/{}", escape_pointer_token(&name));
         // 只有显式 `required: false` 才禁用；3.1 的联合类型数组等价于可选。
         let enabled = !matches!(p.get("required"), Some(Value::Bool(false)));
         let default = p
@@ -414,7 +410,7 @@ fn request_body(
         if key != &picked {
             ctx.diagnostics.push(
                 Diagnostic::warn(
-                    format!("{at_ptr}/content/{}", escape(key)),
+                    format!("{at_ptr}/content/{}", escape_pointer_token(key)),
                     "一个请求体只装得下一种 media type，其余的无法导入",
                 )
                 .dropping(key.clone()),
@@ -469,7 +465,7 @@ fn auth_of(
 
 /// 一条 securityScheme → [`AuthConfig`]。映射不了返回 `None`，诊断已报在里面。
 fn scheme_of(ctx: &mut Ctx, view: &DocView, name: &str, pointer: &str) -> Option<AuthConfig> {
-    let at = format!("{pointer}/{}", escape(name));
+    let at = format!("{pointer}/{}", escape_pointer_token(name));
     let raw = view
         .root
         .get("components")
@@ -594,7 +590,7 @@ fn doc_servers(value: Option<&Value>, ctx: &mut Ctx) -> DocServers {
         Vec::new()
     } else {
         vec![IrServer {
-            service: service_name(&host),
+            service: super::service_name(&host),
             url: host,
         }]
     };
@@ -614,20 +610,6 @@ fn split_server_url(url: &str) -> (String, String) {
         without_query[..scheme_end + end].to_string(),
         rest[end..].trim_end_matches('/').to_string(),
     )
-}
-
-/// 服务名。端口与 scheme 不算名字的一部分；带变量的 host 回落成 `default`。
-fn service_name(host: &str) -> String {
-    let without_scheme = match host.find("://") {
-        Some(at) => &host[at + 3..],
-        None => host,
-    };
-    let bare = without_scheme.split(':').next().unwrap_or(without_scheme);
-    if bare.is_empty() || bare.contains('{') || bare.contains('/') {
-        "default".to_string()
-    } else {
-        bare.to_string()
-    }
 }
 
 // `$ref` 展开
@@ -706,7 +688,7 @@ fn deref(ctx: &mut Ctx, root: &Value, input: &Value, pointer: &str) -> Option<Va
                         for (index, (key, child)) in children.into_iter().enumerate() {
                             stack.push(Frame::Task(Task {
                                 input: child,
-                                pointer: format!("{}/{}", task.pointer, escape(&key)),
+                                pointer: format!("{}/{}", task.pointer, escape_pointer_token(&key)),
                                 depth: task.depth + 1,
                                 id: ids[index],
                             }));
@@ -883,11 +865,6 @@ fn normalize_media(raw: &str) -> String {
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase()
-}
-
-/// JSON Pointer 转义：`/` 与 `~` 不能原样出现在指针里。
-fn escape(token: &str) -> String {
-    token.replace('~', "~0").replace('/', "~1")
 }
 
 // 测试——$ref 展开、servers 拆分、多 media type 与诊断。

@@ -18,6 +18,7 @@ pub mod import;
 pub mod ir;
 pub mod openapi;
 pub mod project;
+mod spec;
 
 pub use diagnostics::{Diagnostic, Severity};
 pub use ir::Exchange;
