@@ -22,6 +22,9 @@ path = "src/main.rs"
 # Workspace members
 simple-post-core = { path = "../simple-post-core" }
 simple-post-mcp = { path = "../simple-post-mcp" }
+# 导入 / 导出转换层。只被 REST 路由与 Tauri 薄壳命令调用，故 MCP 二进制不会
+# 因为这个依赖背上 YAML 解析器与两套外来格式模型。
+simple-post-interchange = { path = "../simple-post-interchange" }
 
 # Shared workspace deps (resolved to the versions pinned at the root)
 serde = { workspace = true }

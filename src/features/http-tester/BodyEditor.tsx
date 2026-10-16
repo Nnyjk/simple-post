@@ -39,6 +39,7 @@ const BODY_TABS: { id: BodyMode; label: string }[] = [
   { id: 'none', label: 'none' },
   { id: 'json', label: 'json' },
   { id: 'form', label: 'form' },
+  { id: 'multipart', label: 'multipart' },
   { id: 'raw', label: 'raw' },
 ];
 
@@ -65,6 +66,9 @@ export function BodyEditor({ value, onChange, validationError, onFormatResult }:
         <span className="text-[10px] text-muted-foreground">
           {value.mode === 'json' && 'Content-Type: application/json'}
           {value.mode === 'form' && 'Content-Type: application/x-www-form-urlencoded'}
+          {/* boundary 每次发送现生成，故这里不能写死整条 Content-Type */}
+          {value.mode === 'multipart' &&
+            'Content-Type: multipart/form-data（boundary 发送时生成）· 分片填 JSON 数组'}
           {value.mode === 'raw' && 'Content-Type: text/plain'}
         </span>
         <Button
@@ -137,7 +141,8 @@ function BodyContent({ value, onChange, validationError }: Props) {
         <CodeMirror
           value={value.content}
           onChange={(v) => onChange({ ...value, content: v })}
-          extensions={value.mode === 'json' ? [json()] : []}
+          // multipart 的 `content` 也是一个 JSON 文本（分片数组），同样要 json 高亮
+          extensions={value.mode === 'json' || value.mode === 'multipart' ? [json()] : []}
           theme={isDark ? oneDark : lightCodeTheme}
           basicSetup={{
             lineNumbers: true,

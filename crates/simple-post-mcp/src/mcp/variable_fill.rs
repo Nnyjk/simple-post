@@ -355,7 +355,7 @@ fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
 
     match endpoint.body.mode {
         BodyMode::None => {}
-        BodyMode::Json | BodyMode::Form | BodyMode::Raw => {
+        BodyMode::Json | BodyMode::Form | BodyMode::Multipart | BodyMode::Raw => {
             if endpoint.body.content.trim().is_empty() {
                 issues.push(json!({
                     "field": "body.content",

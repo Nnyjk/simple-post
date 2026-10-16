@@ -188,6 +188,30 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/response-history/{endpointId}",
             get(response_history_list).delete(response_history_clear),
         )
+        // ---- interchange（导入 / 导出）----
+        //
+        // **必须落在 `auth::is_public_path` 名单之外**，理由与 `/api/oauth2/token`
+        // 同族：commit 写库，且 import/preview 的 URL 模式会按用户给的地址出站请求。
+        // 浏览器形态下这些是唯一一条能读任意用户指定 URL 的通道。
+        //
+        // 全部 POST：请求体装得下整份文档（一份 3 MB 的 OpenAPI yaml），而这四个
+        // 动词里没有一个是「按 id 取一行」。
+        .route(
+            "/api/interchange/import/preview",
+            post(interchange_import_preview),
+        )
+        .route(
+            "/api/interchange/import/commit",
+            post(interchange_import_commit),
+        )
+        .route(
+            "/api/interchange/export/preview",
+            post(interchange_export_preview),
+        )
+        .route(
+            "/api/interchange/export/document",
+            post(interchange_export_document),
+        )
         // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))
         .route("/api/mcp/start", post(mcp_start))

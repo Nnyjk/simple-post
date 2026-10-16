@@ -251,6 +251,71 @@ async fn two_endpoint_creates_in_the_same_millisecond_get_distinct_ids() {
 // 5. `endpoint_create` 一次调用即可接受完整配置
 // =========================================================================
 
+/// `body_mode` 只在 `parse_body_mode` 的表里逐个字面量列着，所以 multipart 存得进
+/// `BodyMode` 并不等于 agent 写得进来。这里断言的是**往返**：经 `endpoint_create`
+/// 写入后从存储行读回来仍是 multipart——只测解析成功会让一个写进去却退化成别的
+/// 模式（于是发出去的 body 与建它的那个请求不同）的缺陷看起来是绿的。
+#[tokio::test]
+async fn endpoint_create_round_trips_a_multipart_body_mode() {
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(c, &bare_project("p_mp", "MP"))?;
+        nodes::create(
+            c,
+            &node("p_mp", "m_mp", ResourceNodeType::Module, None),
+            None,
+        )?;
+        permissions::set(c, "p_mp", Permission::Full)?;
+        Ok(())
+    })
+    .unwrap();
+
+    // 分片数组的 JSON 文本就是 body_content —— 与其余 mode 共用同一个字段
+    let content = r#"[{"name":"file","value":"BINARY","filename":"a.txt"}]"#;
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_mp",
+            "name": "upload",
+            "method": "POST",
+            "url": "/api/upload",
+            "body_mode": "multipart",
+            "body_content": content,
+        }),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("a multipart body_mode must be accepted, got {e}"));
+
+    let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+    let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+    let id = created["id"].as_str().expect("id");
+
+    let d = detail_of(&st, id);
+    assert_eq!(d.body.mode, BodyMode::Multipart);
+    assert_eq!(d.body.content, content);
+}
+
+/// `endpoint_update` 走 `RequestBody` 的 serde 反序列化而非 `parse_body_mode`，所以
+/// multipart 能被 patch 是加变体的直接后果。断言一次，免得日后有人改 patch 读取器
+/// 时把这条悄悄弄丢。
+#[tokio::test]
+async fn endpoint_update_can_patch_a_body_into_multipart() {
+    let (st, id) = fixture();
+
+    tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "body": { "mode": "multipart", "content": "[]" } }
+        }),
+    )
+    .await
+    .expect("a multipart body patch must be accepted");
+
+    assert_eq!(detail_of(&st, &id).body.mode, BodyMode::Multipart);
+}
+
 /// `endpoint_create` previously hardcoded `environment_id`,
 /// `base_url_definition_id`, `base_url_override`, `body_schema`, `docs`,
 /// `notes` and `description` to their defaults, so building a fully

@@ -256,6 +256,27 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     body: (a) => ({ permission: a.permission }),
   },
 
+  // ----- interchange (import / export) -----
+  // 请求体就是 args 本身：opts 的键名与 `InvokePreviewOpts` 等 Rust 结构体的
+  // `camelCase` 字段一一对应，无需 `body` 覆写。四条全是 POST —— 请求体装得下
+  // 整份文档（一份 3 MB 的 OpenAPI yaml），而它们里没有一个是「按 id 取一行」。
+  [COMMANDS.interchangeImportPreview]: {
+    method: 'POST',
+    path: () => '/api/interchange/import/preview',
+  },
+  [COMMANDS.interchangeImportCommit]: {
+    method: 'POST',
+    path: () => '/api/interchange/import/commit',
+  },
+  [COMMANDS.interchangeExportPreview]: {
+    method: 'POST',
+    path: () => '/api/interchange/export/preview',
+  },
+  [COMMANDS.interchangeExportDocument]: {
+    method: 'POST',
+    path: () => '/api/interchange/export/document',
+  },
+
   // ----- OAuth 2.0 -----
   // 与 Tauri 命令同一个 `OAuth2TokenRequest`（`{ auth, manual?, force? }`），
   // 故请求体就是 args 本身，两种形态无需翻译。

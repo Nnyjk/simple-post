@@ -109,11 +109,16 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
                 "body_mode": {
                     "type": "string",
                     "enum": json!(BODY_MODE_VALUES),
-                    "description": "How to interpret body_content when sending. \"none\" sends no body."
+                    "description": "How to interpret body_content when sending. \"none\" sends no body. \
+\"multipart\" builds the body itself, so for that mode it also replaces a Content-Type header you set."
                 },
                 "body_content": {
                     "type": "string",
-                    "description": "Raw request body, interpreted according to body_mode (JSON text when mode is \"json\")."
+                    "description": "Raw request body, interpreted according to body_mode: verbatim text when \
+\"raw\", JSON text when \"json\", urlencoded text when \"form\". When mode is \"multipart\", a JSON array \
+of parts, each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string} — \
+contentType defaults to application/octet-stream for a part that has a filename. \
+Unparsable multipart content yields zero parts rather than an error."
                 },
                 "body_schema": {
                     "type": "string",

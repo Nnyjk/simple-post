@@ -50,6 +50,16 @@ export const COMMANDS = {
   baseUrlDefsDelete: 'base_url_defs_delete',
   baseUrlDefsSetDefault: 'base_url_defs_set_default',
 
+  // ----- interchange (import / export) -----
+  // 两条边各两步：**先预览后落定**。预览只读，它回答「这份文件里有哪些条目、有哪些
+  // 已经在项目里了、有哪些构造会丢」；用户勾完才提交。导出侧对称：先看候选清单，
+  // 再产文档。中间态**不**存在服务端——落库那一步重新解析同一份原文，故不需要
+  // 临时表、TTL 与清理路径，而解析是纯函数，两次结果必然一致。
+  interchangeImportPreview: 'interchange_import_preview',
+  interchangeImportCommit: 'interchange_import_commit',
+  interchangeExportPreview: 'interchange_export_preview',
+  interchangeExportDocument: 'interchange_export_document',
+
   // ----- request settings -----
   requestSettingsGet: 'request_settings_get',
   requestSettingsUpdate: 'request_settings_update',

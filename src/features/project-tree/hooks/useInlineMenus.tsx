@@ -1,4 +1,4 @@
-import { CornerDownRight, FilePlus, FolderPlus } from 'lucide-react';
+import { CornerDownRight, FileInput, FileOutput, FilePlus, FolderPlus } from 'lucide-react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { ResourceNode } from '@/types/domain';
 import type { ContextMenuItem } from '../TreeContextMenu';
@@ -21,6 +21,11 @@ export interface InlineMenuBindings {
    * 故它可以是刚加的那一行树节点。
    */
   createEndpointAt: (parentId: string) => Promise<void>;
+  /**
+   * 打开导入 / 导出弹窗，落点是 `module`。集合没有这个入口：外来文档的顶层分组一律落成
+   * 该模块下的集合，落点是模块才不用问「往哪一层插」。
+   */
+  startTransfer: (mode: 'import' | 'export', module: { id: string; name: string }) => void;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;
 }
 
@@ -35,11 +40,13 @@ export function useInlineMenus({
   nodes,
   openNewItemWithIntent,
   createEndpointAt,
+  startTransfer,
   setMenu,
 }: InlineMenuBindings) {
   const openModulePlusMenu = (moduleId: string) => (e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const module = nodes.find((n) => n.id === moduleId && n.kind === 'module');
     const items: ContextMenuItem[] = [
       {
         kind: 'item',
@@ -55,6 +62,23 @@ export function useInlineMenus({
         onClick: () => {
           void createEndpointAt(moduleId);
         },
+      },
+      { kind: 'divider' },
+      {
+        kind: 'item',
+        label: '导入（Postman / OpenAPI）',
+        icon: <FileInput className="h-3.5 w-3.5" />,
+        // 模块行可能在两次渲染之间从 `nodes` 里消失（删除后菜单还开着）；找不到就不给入口，
+        // 而不是拿一个空模块名去开弹窗。
+        disabled: !module,
+        onClick: () => module && startTransfer('import', { id: module.id, name: module.name }),
+      },
+      {
+        kind: 'item',
+        label: '导出 OpenAPI',
+        icon: <FileOutput className="h-3.5 w-3.5" />,
+        disabled: !module,
+        onClick: () => module && startTransfer('export', { id: module.id, name: module.name }),
       },
     ];
     setMenu({ x: e.clientX, y: e.clientY, items });

@@ -1,6 +1,6 @@
 //! JSON Schema 必须自描述 —— agent 只读 `tools/list` 就得能写对请求。
 
-use super::input::{parse_body_mode, AUTH_TYPE_VALUES};
+use super::input::{parse_body_mode, AUTH_TYPE_VALUES, BODY_MODE_VALUES};
 // =========================================================================
 // 6. The JSON Schema is self-describing
 // =========================================================================
@@ -48,7 +48,7 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
     // derived from `domain::BodyMode` / `domain::AuthType`.
     assert_eq!(
         props["body_mode"]["enum"],
-        serde_json::json!(["none", "json", "form", "raw"])
+        serde_json::json!(BODY_MODE_VALUES)
     );
     // 与解析器实际接受的那一份常量比对，而不是在这里再抄一遍：抄一份就多一个
     // 「加了变体却忘了改这里」的地方，而那种不一致对 agent 是静默的。
@@ -62,6 +62,37 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
         assert!(
             parse_body_mode(s).is_ok(),
             "schema advertises body_mode {s:?} but the parser rejects it"
+        );
+    }
+}
+
+/// An agent writing `body_content` has nothing but the enum and the prose.
+/// A mode the prose never names is one it will fill with the wrong shape —
+/// and a mode whose content is parsed rather than sent (multipart) then
+/// yields zero parts with no error, so nothing downstream complains.
+#[test]
+fn every_advertised_body_mode_is_described_in_prose() {
+    let descriptor = crate::mcp::tool_table()
+        .iter()
+        .find(|e| e.name == "endpoint_create")
+        .map(|e| e.schema.clone())
+        .expect("endpoint_create must be registered");
+    let props = &descriptor["properties"];
+
+    let prose = format!(
+        "{} {}",
+        props["body_mode"]["description"]
+            .as_str()
+            .unwrap_or_default(),
+        props["body_content"]["description"]
+            .as_str()
+            .unwrap_or_default()
+    );
+    for mode in props["body_mode"]["enum"].as_array().expect("enum") {
+        let s = mode.as_str().expect("string");
+        assert!(
+            prose.contains(s),
+            "body_mode {s:?} is advertised but neither body_mode nor body_content describes it"
         );
     }
 }
@@ -111,7 +142,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
 
     assert_eq!(
         patch_props["body"]["properties"]["mode"]["enum"],
-        serde_json::json!(["none", "json", "form", "raw"])
+        serde_json::json!(BODY_MODE_VALUES)
     );
     assert_eq!(
         patch_props["auth"]["properties"]["kind"]["enum"],
