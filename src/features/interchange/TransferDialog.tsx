@@ -320,11 +320,18 @@ function DoneStep({ result }: { result: NonNullable<TransferController['result']
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           {result.service.created ? '新建' : '复用'}服务{' '}
           <span className="font-mono text-foreground">{result.service.name}</span>
-          ，地址 <span className="font-mono text-foreground">{result.service.url}</span>
           {result.service.environmentName ? (
-            <> 写入环境「{result.service.environmentName}」，接口按它解析。</>
+            <>
+              ，地址 <span className="font-mono text-foreground">{result.service.url}</span>{' '}
+              已写入环境「
+              {result.service.environmentName}」，接口按它解析。
+            </>
           ) : (
-            <>。项目没有激活环境，地址没有落进任何一格，接口仍按项目的 ★ 解析。</>
+            <>
+              。项目没有激活环境，地址{' '}
+              <span className="font-mono text-foreground">{result.service.url}</span>{' '}
+              没有落进任何一格，接口仍按项目的 ★ 解析。
+            </>
           )}
         </p>
       )}
