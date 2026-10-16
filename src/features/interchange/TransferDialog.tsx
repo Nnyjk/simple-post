@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { TransferTree } from './TransferTree';
 import type { TransferController } from './useTransfer';
 
@@ -149,13 +150,18 @@ function PreviewStep({
     selected,
     environmentId,
     format,
+    applyService,
     setEnvironmentId,
     setFormat,
+    setApplyService,
   } = controller;
   const counts = preview?.counts;
   const warned = diagnostics.filter((d) => d.severity !== 'info');
   const [showInfo, setShowInfo] = useState(false);
   const info = diagnostics.filter((d) => d.severity === 'info');
+
+  // 缺席是真实答案：没有 host、或多于一个 host（后者另有诊断说明），都不建服务。
+  const proposedService = isImport ? (preview as ImportPreview | null)?.service : undefined;
 
   const missingServers = useMemo(
     () =>
@@ -214,6 +220,30 @@ function PreviewStep({
           {missingServers.join('、')}。这些模块不会输出 <code className="font-mono">servers</code>
           ，也不会借用别的模块的地址或项目的 ★。
         </p>
+      )}
+
+      {proposedService && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">服务</span>
+          <Switch
+            checked={applyService}
+            onCheckedChange={setApplyService}
+            aria-label="把文档里的地址落成服务"
+          />
+          <span className="truncate text-[11px] text-foreground">{proposedService.service}</span>
+          <span className="truncate font-mono text-[10px] text-faint">{proposedService.url}</span>
+          <div className="flex-1" />
+          {proposedService.existing ? (
+            <Badge variant="muted">复用已有服务</Badge>
+          ) : (
+            <Badge variant="outline">将新建服务</Badge>
+          )}
+          {proposedService.environmentName ? (
+            <Badge variant="muted">写入环境「{proposedService.environmentName}」</Badge>
+          ) : (
+            <Badge variant="warning">没有激活环境，地址无处可写</Badge>
+          )}
+        </div>
       )}
 
       <div className="max-h-[52vh] overflow-y-auto rounded-md border border-border bg-background/40">
@@ -284,6 +314,18 @@ function DoneStep({ result }: { result: NonNullable<TransferController['result']
       {result.environmentsCreated.length > 0 && (
         <p className="text-[11px] text-muted-foreground">
           新建环境：{result.environmentsCreated.join('、')}
+        </p>
+      )}
+      {result.service && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {result.service.created ? '新建' : '复用'}服务{' '}
+          <span className="font-mono text-foreground">{result.service.name}</span>
+          ，地址 <span className="font-mono text-foreground">{result.service.url}</span>
+          {result.service.environmentName ? (
+            <> 写入环境「{result.service.environmentName}」，接口按它解析。</>
+          ) : (
+            <>。项目没有激活环境，地址没有落进任何一格，接口仍按项目的 ★ 解析。</>
+          )}
         </p>
       )}
       {result.diagnostics.filter((d) => d.severity !== 'info').length > 0 && (

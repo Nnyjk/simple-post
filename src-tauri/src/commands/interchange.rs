@@ -57,6 +57,7 @@ pub fn interchange_import_commit(
     module_id: String,
     content: String,
     selected: Option<Vec<String>>,
+    apply_service: Option<bool>,
 ) -> Result<ImportCommitDto, AppError> {
     crate::interchange_api::import_commit(
         &state,
@@ -65,6 +66,7 @@ pub fn interchange_import_commit(
             module_id,
             content,
             selected: selected.unwrap_or_default(),
+            apply_service,
         },
     )
 }

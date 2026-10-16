@@ -37,6 +37,31 @@ const POSTMAN: &str = r#"{
   ]
 }"#;
 
+/// 同一份集合，但 host 写成了字面量。`{{baseUrl}}` 那种变量 host 拆不出服务，
+/// 所以这份才带得出 `service`。
+const POSTMAN_WITH_HOST: &str = r#"{
+  "info": { "name": "demo", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  "item": [
+    {
+      "name": "users",
+      "item": [
+        {
+          "name": "list users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "https://api.example.com/users",
+              "protocol": "https",
+              "host": ["api", "example", "com"],
+              "path": ["users"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}"#;
+
 /// 建一个 `WebState`：一次性的 SQLite 文件 + 空 SPA 目录，router 绑在 loopback 上一个
 /// 临时端口。
 ///
@@ -105,6 +130,17 @@ async fn post_json(addr: SocketAddr, path: &str, body: Value) -> (reqwest::Statu
     let res = reqwest::Client::new()
         .post(format!("http://{addr}{path}"))
         .json(&body)
+        .send()
+        .await
+        .expect("request completes");
+    let status = res.status();
+    let body = res.json().await.unwrap_or(Value::Null);
+    (status, body)
+}
+
+async fn get_json(addr: SocketAddr, path: &str) -> (reqwest::StatusCode, Value) {
+    let res = reqwest::Client::new()
+        .get(format!("http://{addr}{path}"))
         .send()
         .await
         .expect("request completes");
@@ -265,5 +301,104 @@ async fn a_wrapped_opts_body_is_rejected() {
         "the wire shape is the flat body; a wrapped one must be rejected by the \
          extractor itself, not reach the handler: got {status}: {body}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn a_literal_host_becomes_a_service_row_and_apply_service_defaults_to_true() {
+    // 这条盯的是**线上的默认值**：`applyService` 缺席必须等于真。缺席若等于假，
+    // 用户在预览里看到的「将新建服务」到落库时就消失了，而两边都是 200。
+    let (addr, dir) = serve_test_router().await;
+    let (status, preview) = post_json(
+        addr,
+        "/api/interchange/import/preview",
+        json!({ "projectId": "p1", "moduleId": "mod_a", "content": POSTMAN_WITH_HOST }),
+    )
+    .await;
+    assert_eq!(status, 200, "{preview}");
+    assert_eq!(preview["service"]["service"], "api.example.com");
+    assert_eq!(preview["service"]["url"], "https://api.example.com");
+    assert_eq!(preview["service"]["existing"], false, "种子项目没有服务");
+    // 种子项目 p1 是裸插的，没有激活环境。
+    assert!(
+        preview["service"].get("environmentName").is_none(),
+        "没有激活环境就不该报出一个环境: {preview}"
+    );
+
+    let mut keys = Vec::new();
+    for group in preview["groups"].as_array().into_iter().flatten() {
+        endpoint_keys(group, &mut keys);
+    }
+    let (status, committed) = post_json(
+        addr,
+        "/api/interchange/import/commit",
+        json!({
+            "projectId": "p1",
+            "moduleId": "mod_a",
+            "content": POSTMAN_WITH_HOST,
+            "selected": keys,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{committed}");
+    assert_eq!(committed["service"]["name"], "api.example.com");
+    assert_eq!(committed["service"]["created"], true);
+    assert_eq!(
+        committed["service"]["assigned"], false,
+        "没有激活环境就没有格子，URL 与端点都无处可落: {committed}"
+    );
+
+    // 光看报告不够——服务得真的在表里。
+    let (status, defs) = get_json(addr, "/api/projects/p1/baseurls").await;
+    assert_eq!(status, 200, "{defs}");
+    assert_eq!(
+        defs.as_array().map(Vec::len),
+        Some(1),
+        "导入应当建出且只建出一台服务: {defs}"
+    );
+    assert_eq!(defs[0]["name"], "api.example.com");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn apply_service_false_leaves_the_service_table_alone() {
+    let (addr, dir) = serve_test_router().await;
+    let (status, preview) = post_json(
+        addr,
+        "/api/interchange/import/preview",
+        json!({ "projectId": "p1", "moduleId": "mod_a", "content": POSTMAN_WITH_HOST }),
+    )
+    .await;
+    assert_eq!(status, 200, "{preview}");
+    let mut keys = Vec::new();
+    for group in preview["groups"].as_array().into_iter().flatten() {
+        endpoint_keys(group, &mut keys);
+    }
+
+    let (status, committed) = post_json(
+        addr,
+        "/api/interchange/import/commit",
+        json!({
+            "projectId": "p1",
+            "moduleId": "mod_a",
+            "content": POSTMAN_WITH_HOST,
+            "selected": keys,
+            "applyService": false,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{committed}");
+    assert!(
+        committed.get("service").is_none(),
+        "关掉之后报告里不该有服务: {committed}"
+    );
+    let (status, defs) = get_json(addr, "/api/projects/p1/baseurls").await;
+    assert_eq!(status, 200, "{defs}");
+    assert!(
+        defs.as_array().is_some_and(|d| d.is_empty()),
+        "关掉之后服务表必须一行未动: {defs}"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }

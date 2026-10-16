@@ -20,7 +20,7 @@ use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::uid;
 use simple_post_core::error::AppError;
 use simple_post_core::http_executor::{self, HttpRequestInput, OutboundPolicy};
-use simple_post_interchange::commit::{commit_in_tx, CommitTarget};
+use simple_post_interchange::commit::{commit_in_tx, plan_service, CommitTarget};
 use simple_post_interchange::fingerprint::{FingerprintSet, RequestIdentity};
 use simple_post_interchange::import;
 use simple_post_interchange::ir::{Exchange, IrCollection, IrEndpoint, IrModule};
@@ -28,9 +28,9 @@ use simple_post_interchange::openapi::DocFormat;
 use simple_post_interchange::project::module_to_ir;
 
 use crate::dto::{
-    ExportDocumentDto, ExportDocumentOpts, ExportPreviewDto, ExportPreviewOpts, ImportCommitDto,
-    ImportCommitOpts, ImportPreviewDto, ImportPreviewOpts, ImportedEnvironmentDto,
-    ModuleServersDto, TransferCounts, TransferEndpoint, TransferNode,
+    AppliedServiceDto, ExportDocumentDto, ExportDocumentOpts, ExportPreviewDto, ExportPreviewOpts,
+    ImportCommitDto, ImportCommitOpts, ImportPreviewDto, ImportPreviewOpts, ImportedEnvironmentDto,
+    ModuleServersDto, ProposedServiceDto, TransferCounts, TransferEndpoint, TransferNode,
 };
 
 /// 拉 OpenAPI / Postman 文档时的大小上限。
@@ -60,11 +60,14 @@ pub async fn import_preview(
     // 去重账本只灌**已落库**的行：预览要回答的是「这些条目项目里已经有了吗」，
     // 而这个答案必须与真正落库时用的是同一本账。用 `contains`（不记账），
     // 否则这份预览会替落库先把账记上一遍。
-    let duplicates = db::with_conn(pool, |conn| {
+    //
+    // 「这个项目能不能接住这份文档」是同一批只读，搭同一次连接走完。
+    let (duplicates, plan) = db::with_conn(pool, |conn| {
         let existing = db::endpoint_details::list_by_root(conn, &opts.project_id)?;
         let mut set = FingerprintSet::new();
         set.absorb_details(existing.iter());
-        Ok(mark_duplicates(&parsed.exchange, &set))
+        let dup = mark_duplicates(&parsed.exchange, &set);
+        Ok((dup, plan_service(conn, &opts.project_id, &parsed.exchange)?))
     })?;
 
     let groups = project_modules(&parsed.exchange.modules, &duplicates, &parsed.exchange);
@@ -74,6 +77,10 @@ pub async fn import_preview(
         duplicates: duplicates.len(),
     };
 
+    // 多 host 的理由在预览里就得说，否则用户勾完才发现服务没建。
+    let mut diagnostics = parsed.exchange.diagnostics.clone();
+    diagnostics.extend(plan.ambiguous_diagnostic());
+
     Ok(ImportPreviewDto {
         format: format.as_str().to_string(),
         format_label: format.label().to_string(),
@@ -82,7 +89,13 @@ pub async fn import_preview(
         source_name: source.name,
         groups,
         counts,
-        diagnostics: parsed.exchange.diagnostics.clone(),
+        diagnostics,
+        service: plan.server.as_ref().map(|s| ProposedServiceDto {
+            service: s.service.clone(),
+            url: s.url.clone(),
+            existing: plan.existing_id.is_some(),
+            environment_name: plan.environment.as_ref().map(|e| e.name.clone()),
+        }),
         environments: parsed
             .environments
             .iter()
@@ -115,6 +128,8 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
             },
             &parsed.exchange,
             &selected,
+            // 缺席为真：文档带了 host 就该有服务，用户在预览里可以逐次取消。
+            opts.apply_service.unwrap_or(true),
         )?;
 
         // 环境与树同事务：一次导入要么全进去，要么一行不进。半棵树加半份环境比
@@ -139,6 +154,13 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
             created_collection_ids: report.created_collection_ids,
             created_endpoint_ids: report.created_endpoint_ids,
             environments_created,
+            service: report.service.map(|s| AppliedServiceDto {
+                name: s.name,
+                url: s.url,
+                created: s.created,
+                assigned: s.assigned,
+                environment_name: s.environment_name,
+            }),
             diagnostics: report.diagnostics,
         })
     })

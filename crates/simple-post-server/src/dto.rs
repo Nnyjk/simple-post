@@ -250,6 +250,40 @@ pub struct ImportedEnvironmentDto {
     pub disabled_variable_count: usize,
 }
 
+/// 预览里「这份文档会落成一个服务」的预告。
+///
+/// **缺席是一个真实答案**，不是「待定」：文档没给 host、或给了多于一个 host 时就是
+/// 缺席（后者附一条 `Warn` 诊断说明为什么）。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposedServiceDto {
+    /// 服务名，即 host。项目内唯一。
+    pub service: String,
+    /// 文档给出的那个 URL。落库时它会被写进目标模块在这个环境下的那一格。
+    pub url: String,
+    /// 项目里已有同名服务，落库时复用而不是新建。URL 不在服务行上，复用不会改动
+    /// 别的模块的地址。
+    pub existing: bool,
+    /// URL 会写进哪个环境。项目没有激活环境时为 `None`——服务仍然建，只是格子无处可填。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_name: Option<String>,
+}
+
+/// 落库报告里已经落下的服务。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedServiceDto {
+    pub name: String,
+    pub url: String,
+    /// 服务定义是新建的（`false` = 复用了项目里已有的同名服务）。
+    pub created: bool,
+    /// 端点有没有被指向它。为 `false` 只有一种情形：项目没有激活环境。
+    pub assigned: bool,
+    /// URL 写进了哪个环境。为 `None` 表示没写进去。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPreviewDto {
@@ -265,6 +299,9 @@ pub struct ImportPreviewDto {
     pub counts: TransferCounts,
     pub diagnostics: Vec<Diagnostic>,
     pub environments: Vec<ImportedEnvironmentDto>,
+    /// 文档恰好给出一个 host 时有值：会新建（或复用）这个服务并把 URL 填进目标模块。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<ProposedServiceDto>,
     /// **仅 URL 模式**回传：拉到的原文。前端原样送回 commit，故一次导入只拉一次
     /// 文档，且 commit 的行为不取决于那之后源站有没有变。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -280,6 +317,9 @@ pub struct ImportCommitDto {
     pub created_endpoint_ids: Vec<String>,
     pub environments_created: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
+    /// 实际落下的服务。为 `None` 表示这一次没碰服务表。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service: Option<AppliedServiceDto>,
 }
 
 /// 一个模块在所选环境下的服务 URL。
@@ -343,6 +383,10 @@ pub struct ImportCommitOpts {
     /// 勾中的端点 key。空集表示「一个都不导」——那是用户的选择，不是失败。
     #[serde(default)]
     pub selected: Vec<String>,
+    /// 是否把文档里的 host 落成服务。**缺席为真**：文档带了 host 就该有服务，
+    /// 用户要的是「地址别丢」；关掉它是一种明确的取舍，不是默认值。
+    #[serde(default)]
+    pub apply_service: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -57,6 +57,35 @@ export interface ImportedEnvironment {
   disabledVariableCount: number;
 }
 
+/**
+ * 预览里「这份文档会落成一个服务」的预告。
+ *
+ * **缺席是真实答案**，不是「待定」：文档没给 host、或给了多于一个 host 就是缺席
+ * （后者附一条 `warn` 诊断说明为什么）。
+ */
+export interface ProposedService {
+  /** 服务名，即 host。项目内唯一。 */
+  service: string;
+  /** 落库时写进目标模块那一格的 URL。 */
+  url: string;
+  /** 项目里已有同名服务，复用而不是新建。URL 不在服务行上，故复用不动别的模块的地址。 */
+  existing: boolean;
+  /** URL 会写进哪个环境。缺席 = 项目没有激活环境，服务仍然建，只是格子无处可填。 */
+  environmentName?: string;
+}
+
+/** 落库报告里已经落下的服务。 */
+export interface AppliedService {
+  name: string;
+  url: string;
+  /** 服务定义是新建的；`false` 表示复用了项目里已有的同名服务。 */
+  created: boolean;
+  /** 端点有没有被指向它。为 `false` 只有一种情形：项目没有激活环境。 */
+  assigned: boolean;
+  /** URL 写进了哪个环境。 */
+  environmentName?: string;
+}
+
 export interface ImportPreview {
   /** `postman-collection-v2.1` / `openapi-3`。给程序用的线上名。 */
   format: string;
@@ -68,6 +97,7 @@ export interface ImportPreview {
   counts: TransferCounts;
   diagnostics: TransferDiagnostic[];
   environments: ImportedEnvironment[];
+  service?: ProposedService;
   /** 仅 URL 模式回传：拉到的原文。提交时原样送回，故一次导入只拉一次。 */
   resolvedContent?: string;
 }
@@ -78,6 +108,7 @@ export interface ImportCommitResult {
   createdCollectionIds: string[];
   createdEndpointIds: string[];
   environmentsCreated: string[];
+  service?: AppliedService;
   diagnostics: TransferDiagnostic[];
 }
 
