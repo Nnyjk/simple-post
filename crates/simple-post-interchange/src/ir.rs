@@ -17,6 +17,14 @@
 //! `base_url_definition_id` 三个此刻要么不存在、要么属于标准格式而非外来格式的身份字段。
 //! 外来格式给的是整条 URL，host 的部分要么成为服务、要么成为诊断，两件事都在
 //! `format → ir` 这一侧发生，所以 `ir` 存路径。
+//!
+//! ## `key` 是「IR 还没成为节点」的那一半身份
+//!
+//! 勾选是前端行为，而前端要能把「第几行」换回「第几个 IR 节点」。落库前没有
+//! `nodes.id`，故每个 IR 节点带一个 [`IrEndpoint::key`]：导入时是外来格式里的位置指针
+//! （与 [`Diagnostic::pointer`] 同一套寻址纪律），导出时是 `nodes.id`。
+
+use std::collections::BTreeSet;
 
 use simple_post_core::domain::{AuthConfig, HttpMethod, KeyValue, RequestBody, ResourceNodeType};
 
@@ -43,6 +51,9 @@ pub struct Exchange {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IrModule {
+    /// 稳定标识：导入时是源格式里的位置指针，导出时是 `nodes.id`。
+    #[serde(default)]
+    pub key: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -76,6 +87,9 @@ pub struct IrServer {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IrCollection {
+    /// 同 [`IrModule::key`]：导入时是源格式里的位置指针，导出时是 `nodes.id`。
+    #[serde(default)]
+    pub key: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -90,6 +104,10 @@ pub struct IrCollection {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IrEndpoint {
+    /// 稳定标识，供前端勾选与落库时回传。导入时是源格式里的位置指针
+    /// （`/item/2`、`/paths/~1users/get`），导出时是 `nodes.id`。
+    #[serde(default)]
+    pub key: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -168,9 +186,47 @@ impl IrModule {
     }
 }
 
+/// 这个模块子树里所有端点的 [`IrEndpoint::key`]。落库方据此判断「这个容器还有没有
+/// 要写的东西」——空容器不写，否则树里会留下一排什么都没有的分组。
+pub fn subtree_keys(module: &IrModule) -> BTreeSet<String> {
+    endpoint_keys_of(&module.endpoints, &module.collections)
+}
+
+/// 一组「本层端点 + 下层分组」里的全部端点 key。模块与集合形状相同，只是模块多一个
+/// `servers` 字段，故共这一个走查器。
+///
+/// **显式工作栈而非递归**：IR 的 collection 嵌套深度无上限，递归会让一棵畸形外来
+/// 文件靠栈深度把预览或写路径带走。
+pub(crate) fn endpoint_keys_of(
+    endpoints: &[IrEndpoint],
+    collections: &[IrCollection],
+) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for ep in endpoints {
+        out.insert(ep.key.clone());
+    }
+    let mut stack: Vec<&IrCollection> = collections.iter().rev().collect();
+    while let Some(c) = stack.pop() {
+        for ep in &c.endpoints {
+            out.insert(ep.key.clone());
+        }
+        stack.extend(c.collections.iter().rev());
+    }
+    out
+}
+
 impl Exchange {
     pub fn endpoint_count(&self) -> usize {
         self.modules.iter().map(IrModule::endpoint_count).sum()
+    }
+
+    /// 整份交换里所有端点的 key，即「预览默认勾满」的那一份选择集。
+    pub fn endpoint_keys(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for m in &self.modules {
+            out.extend(subtree_keys(m));
+        }
+        out
     }
 
     /// 按 `severity` 挑诊断。三个格式实现共用同一形状，故筛选也只有一处。

@@ -14,3 +14,9 @@ path = "src/lib.rs"
 # 标准格式与落库路径都在这里。本 crate 不持有自己的持久化模型。
 simple-post-core = { path = "../simple-post-core" }
 serde = { workspace = true }
+# 外来格式一律先解析成 `serde_json::Value` 再走 IR：OpenAPI 的键本来就得是字符串，
+# 故 YAML 与 JSON 在解析器眼里是同一种东西，`$ref` 也因此只是 JSON Pointer 走查。
+serde_json = { workspace = true }
+# 维护中的 `serde_yaml` fork。上游 serde_yaml 0.9 已弃用，而依赖一个弃用 crate
+# 需要解释为什么还留着它——那个理由不成立。MSRV 1.71.1 ≤ workspace 的 1.77.2。
+serde_norway = "0.9"
