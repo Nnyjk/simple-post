@@ -57,25 +57,31 @@ OpenAPI 导一次，第二次能认出是同一个 endpoint。指纹若按格式
 
 ```
 src/
-├── lib.rs           # 本文件所述契约
-├── diagnostics.rs   # Severity + Diagnostic —— 已定，三种实现共用
-├── ir.rs            # 交换格式：ir::Exchange / IrModule / IrCollection / IrEndpoint
+├── lib.rs            # 本文件所述契约
+├── diagnostics.rs    # Severity + Diagnostic —— 已定，三种实现共用
+├── spec.rs           # 两侧共用的词汇表：PATH_METHODS、JSON Pointer 转义
+├── ir.rs             # 交换格式：ir::Exchange / IrModule / IrCollection / IrEndpoint
 ├── ir_test.rs
-├── fingerprint.rs   # 稳定请求指纹
-├── commit.rs        # ir → db::with_tx：补 id、校验放置、指纹去重
-├── commit_in_tx     # 同上，但调用方自己开事务（编排层要用它把环境一起写）
-├── project.rs       # domain → ir 投影（导出侧的四表 join）+ module_to_ir
-├── openapi.rs       # 导出生成器：ir → OpenAPI 3.0 文档（JSON / YAML）
-├── openapi_test.rs
+├── fingerprint.rs    # 稳定请求指纹
+├── project.rs        # domain → ir 投影（导出侧的四表 join）+ module_to_ir
+├── commit/
+│   ├── mod.rs        # ir → db::with_tx：补 id、校验放置；commit_in_tx 在此
+│   ├── service.rs    # plan_service —— 预览与落库共用的那一个服务判定
+│   └── dedupe.rs     # decide —— 按指纹裁定新增 / 重复 / 被勾选裁掉
+├── openapi/
+│   ├── mod.rs        # 导出生成器：ir → OpenAPI 3.0 文档（JSON / YAML）
+│   └── builder.rs    # 持有跨 operation 状态的 Builder
 ├── roundtrip_test.rs # 导出产物被同一个 crate 的导入器读回
-├── import/
-│   ├── mod.rs       # 按内容嗅探格式 + 分派
-│   ├── postman.rs   # Postman v2.1
-│   └── openapi.rs   # OpenAPI 3.0（含 $ref 展开）
-└── import/*_test.rs
+└── import/
+    ├── mod.rs        # 按内容嗅探格式 + 分派
+    ├── postman/      # Postman v2.1：tree / request / body / auth / template
+    └── openapi/      # OpenAPI 3.0：refs（$ref 展开）/ params / auth / servers
 ```
 
-`commit.rs` 住在本 crate 而不是 Tauri command 里，是刻意的：AGENTS.md 的
+测试与源文件同目录同名前缀（`mod_test.rs` / `tree_test.rs` …），跨文件共用的夹具
+放 `support.rs`：`collection_fixture`、`nested_exchange`、`commit_all` 这类只留一份。
+
+`commit/` 住在本 crate 而不是 Tauri command 里，是刻意的：AGENTS.md 的
 dual-transport invariant 说的就是逻辑泄漏到传输层的代价。落库逻辑只有一份，
 Tauri command 与 REST route 都退化成薄壳。
 

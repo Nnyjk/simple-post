@@ -20,3 +20,7 @@ pub(crate) const PATH_METHODS: [&str; 8] = [
 pub(crate) fn escape_pointer_token(token: &str) -> String {
     token.replace('~', "~0").replace('/', "~1")
 }
+
+#[cfg(test)]
+#[path = "spec_test.rs"]
+mod tests;
