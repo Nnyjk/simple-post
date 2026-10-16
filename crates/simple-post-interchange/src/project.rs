@@ -293,5 +293,13 @@ fn module_servers(
 // 测试——投影的跨表取值与「不回退」。
 
 #[cfg(test)]
-#[path = "project_test.rs"]
-mod tests;
+#[path = "project_test/support.rs"]
+mod support;
+
+#[cfg(test)]
+#[path = "project_test/projection_test.rs"]
+mod projection_tests;
+
+#[cfg(test)]
+#[path = "project_test/module_test.rs"]
+mod module_tests;
