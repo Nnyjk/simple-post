@@ -104,224 +104,239 @@ pub fn commit(
     selected: &BTreeSet<String>,
 ) -> Result<CommitReport, AppError> {
     db::with_tx(pool, |conn| {
-        let mut report = CommitReport {
-            diagnostics: ex.diagnostics.clone(),
-            ..Default::default()
-        };
-
-        // 目标项目必须存在。`validate_placement` 也会查，但那次查以 `NotFound` 报一个
-        // 「project」的错，而这里的调用方传的是一个自己选的落点。
-        db::projects::get(conn, project_id)?;
-
-        // 落进已有模块时，先把那个锚点验一遍：它可能是一个已经被删掉的 id，
-        // 也可能是一个集合（界面上换了个入口就有可能点到）。两种情况都得报得出。
-        let anchor_id = match target {
-            CommitTarget::ProjectRoot => None,
-            CommitTarget::Module { module_id } => {
-                let kind = db::nodes::type_of(conn, module_id)?;
-                if kind != ResourceNodeType::Module {
-                    return Err(AppError::Validation(format!(
-                        "导入落点必须是模块，而 {module_id} 是一个 {}",
-                        kind.as_str()
-                    )));
-                }
-                if db::nodes::root_id_of(conn, module_id)? != project_id {
-                    return Err(AppError::Validation("导入落点不属于该项目".into()));
-                }
-                Some(module_id.to_string())
-            }
-        };
-
-        // 去重账本先灌入**已落库**的 endpoint，故「同一份 IR 落两次」第二次只跳过不新增。
-        let existing = db::endpoint_details::list_by_root(conn, project_id)?;
-        let mut fingerprints = FingerprintSet::new();
-        fingerprints.absorb_details(existing.iter());
-
-        // 第一遍：在**一份克隆**上判定每个端点的下场，据此决定哪些容器值得建。
-        //
-        // 只按 `selected` 判空是不够的——用户可能把一整份文件都勾上了，却因为它们
-        // 全都在项目里已经有了而被指纹全部跳过。那种情况下按 `selected` 判出来的
-        // 每个容器都「有人」，于是树里落下一排点开什么都没有的集合。故判据是
-        // 「会被写入」。
-        //
-        // 去重是**有状态**的（[`FingerprintSet::seen`] 记账，故同一份 IR 里重复粘贴
-        // 的条目只有第一个会写），所以判定只能走一遍：写在第二遍再判一次，同一个
-        // 端点会得到两个不同答案，而第二个答案才是错的。
-        //
-        // 「跳过了几个」也在这里出，不在写入遍：全被去重时一个容器都不建，写入遍
-        // 压根不会走到那些端点，跳过记录会跟着一起消失，用户就看到「新增 0、
-        // 跳过 0」而不知道东西去哪了。
-        let fate = decide(&ex.modules, &mut fingerprints.clone(), selected);
-        let writable = &fate.writable;
-
-        for dup in &fate.duplicates {
-            report.skipped_duplicates.push(dup.name.clone());
-            report.diagnostics.push(
-                Diagnostic::info(format!("/{}", dup.path), "项目里已有同一个接口，按指纹跳过")
-                    .dropping(format!("{} {}", dup.method, dup.path)),
-            );
-        }
-
-        let now = now_ms();
-        let mut written: BTreeSet<String> = BTreeSet::new();
-        let mut stack: Vec<Pending<'_>> = Vec::new();
-        // 逆序入栈 → 出栈顺序与 IR 声明顺序一致，行号（sort_order）因此可预期。
-        for (i, m) in ex.modules.iter().enumerate().rev() {
-            stack.push(Pending::Group {
-                ir: m,
-                sort: i as i64,
-                anchor: anchor_id.clone(),
-                keep: has_any(m, writable),
-            });
-        }
-
-        while let Some(item) = stack.pop() {
-            match item {
-                Pending::Group {
-                    ir,
-                    sort,
-                    anchor,
-                    keep,
-                } => {
-                    if !keep {
-                        continue;
-                    }
-                    // 模块的父是项目本身。`nodes` 里没有项目行，故顶层模块的父存为 NULL，
-                    // 由 `root_id` 说明它归哪个项目所有。有锚点时它是集合，父就是锚点。
-                    let as_module = anchor.is_none();
-                    let node = ResourceNode {
-                        id: uid(),
-                        root_id: project_id.to_string(),
-                        parent_id: anchor.clone(),
-                        kind: if as_module {
-                            ResourceNodeType::Module
-                        } else {
-                            ResourceNodeType::Collection
-                        },
-                        name: ir.name.clone(),
-                        description: ir.description.clone(),
-                        sort_order: sort,
-                        created_at: now,
-                        updated_at: now,
-                    };
-                    let group_id = db::nodes::create(conn, &node, None)?.id;
-                    if !as_module {
-                        report.created_collection_ids.push(group_id.clone());
-                    }
-
-                    // 先压 collection 再压 endpoint：栈是后进先出，故这样出栈顺序才是
-                    // 「先本层的 endpoint，再各 collection」，与 IR 的声明顺序一致。
-                    // 树的显示顺序由 `sort_order` 决定，但报告里的 id 顺序也该可预期。
-                    for (i, c) in ir.collections.iter().enumerate().rev() {
-                        stack.push(Pending::Collection {
-                            ir: c,
-                            parent_id: group_id.clone(),
-                            sort: i as i64,
-                            keep: has_any_collection(c, writable),
-                        });
-                    }
-                    for (i, ep) in ir.endpoints.iter().enumerate().rev() {
-                        stack.push(Pending::Endpoint {
-                            ir: ep,
-                            parent_id: group_id.clone(),
-                            sort: i as i64,
-                        });
-                    }
-                }
-                Pending::Collection {
-                    ir,
-                    parent_id,
-                    sort,
-                    keep,
-                } => {
-                    if !keep {
-                        continue;
-                    }
-                    let node = ResourceNode {
-                        id: uid(),
-                        root_id: project_id.to_string(),
-                        parent_id: Some(parent_id.clone()),
-                        kind: ResourceNodeType::Collection,
-                        name: ir.name.clone(),
-                        description: ir.description.clone(),
-                        sort_order: sort,
-                        created_at: now,
-                        updated_at: now,
-                    };
-                    let collection_id = db::nodes::create(conn, &node, None)?.id;
-                    report.created_collection_ids.push(collection_id.clone());
-
-                    for (i, c) in ir.collections.iter().enumerate().rev() {
-                        stack.push(Pending::Collection {
-                            ir: c,
-                            parent_id: collection_id.clone(),
-                            sort: i as i64,
-                            keep: has_any_collection(c, writable),
-                        });
-                    }
-                    for (i, ep) in ir.endpoints.iter().enumerate().rev() {
-                        stack.push(Pending::Endpoint {
-                            ir: ep,
-                            parent_id: collection_id.clone(),
-                            sort: i as i64,
-                        });
-                    }
-                }
-                Pending::Endpoint {
-                    ir,
-                    parent_id,
-                    sort,
-                } => {
-                    // 没被判定为「会写」的（没勾选、或已被指纹认出）整条不写。
-                    // 两者的区别只体现在第一遍报出的跳过记录上，不落到树里。
-                    if !writable.contains(&ir.key) {
-                        continue;
-                    }
-                    // 同一个 key 只写一次。`key` 按约定是「一个 IR 节点一个」，
-                    // 故这条在真实外来文件里永不触发——但它把「解析器给出重复 key」
-                    // 的失败形态从「写进去两份」变成「写一份」，而后者不会有人发现。
-                    if !written.insert(ir.key.clone()) {
-                        continue;
-                    }
-
-                    let node = ResourceNode {
-                        id: uid(),
-                        root_id: project_id.to_string(),
-                        parent_id: Some(parent_id),
-                        kind: ResourceNodeType::Endpoint,
-                        name: ir.name.clone(),
-                        description: ir.description.clone(),
-                        sort_order: sort,
-                        created_at: now,
-                        updated_at: now,
-                    };
-                    let detail = EndpointDetail {
-                        node_id: node.id.clone(),
-                        method: ir.method.clone(),
-                        // `ir` 存的是 path-only，`domain` 这一列同样是 path，故这是一次改名。
-                        url: ir.path.clone(),
-                        environment_id: None,
-                        // 服务与环境是本仓库的概念，外来格式给不出。写 `None` 的含义是
-                        // 「用项目的 ★」，那是一个**真实答案**，不是「还没定」——故不猜。
-                        base_url_definition_id: None,
-                        base_url_override: None,
-                        params: ir.params.clone(),
-                        headers: ir.headers.clone(),
-                        body: ir.body.clone(),
-                        auth: ir.auth.clone(),
-                        docs: ir.docs.clone(),
-                        notes: ir.notes.clone(),
-                        tags: ir.tags.clone(),
-                    };
-
-                    db::nodes::create(conn, &node, Some(&detail))?;
-                    report.created_endpoint_ids.push(node.id);
-                }
-            }
-        }
-
-        Ok(report)
+        commit_in_tx(conn, project_id, target, ex, selected)
     })
+}
+
+/// [`commit`] 的事务内版本。调用方**自己**开事务。
+///
+/// 存在的理由：一次导入要写的不止树——Postman 的环境是项目级的另一张表，它必须与树
+/// 同生共死。而 [`db::with_tx`] 的闭包拿不到另一个连接（`BEGIN IMMEDIATE` 会与外层
+/// 那个自己死锁），所以编排层拿到的是这一个「已持有连接」的版本。
+pub fn commit_in_tx(
+    conn: &mut simple_post_core::db::Connection,
+    project_id: &str,
+    target: CommitTarget<'_>,
+    ex: &Exchange,
+    selected: &BTreeSet<String>,
+) -> Result<CommitReport, AppError> {
+    let mut report = CommitReport {
+        diagnostics: ex.diagnostics.clone(),
+        ..Default::default()
+    };
+
+    // 目标项目必须存在。`validate_placement` 也会查，但那次查以 `NotFound` 报一个
+    // 「project」的错，而这里的调用方传的是一个自己选的落点。
+    db::projects::get(conn, project_id)?;
+
+    // 落进已有模块时，先把那个锚点验一遍：它可能是一个已经被删掉的 id，
+    // 也可能是一个集合（界面上换了个入口就有可能点到）。两种情况都得报得出。
+    let anchor_id = match target {
+        CommitTarget::ProjectRoot => None,
+        CommitTarget::Module { module_id } => {
+            let kind = db::nodes::type_of(conn, module_id)?;
+            if kind != ResourceNodeType::Module {
+                return Err(AppError::Validation(format!(
+                    "导入落点必须是模块，而 {module_id} 是一个 {}",
+                    kind.as_str()
+                )));
+            }
+            if db::nodes::root_id_of(conn, module_id)? != project_id {
+                return Err(AppError::Validation("导入落点不属于该项目".into()));
+            }
+            Some(module_id.to_string())
+        }
+    };
+
+    // 去重账本先灌入**已落库**的 endpoint，故「同一份 IR 落两次」第二次只跳过不新增。
+    let existing = db::endpoint_details::list_by_root(conn, project_id)?;
+    let mut fingerprints = FingerprintSet::new();
+    fingerprints.absorb_details(existing.iter());
+
+    // 第一遍：在**一份克隆**上判定每个端点的下场，据此决定哪些容器值得建。
+    //
+    // 只按 `selected` 判空是不够的——用户可能把一整份文件都勾上了，却因为它们
+    // 全都在项目里已经有了而被指纹全部跳过。那种情况下按 `selected` 判出来的
+    // 每个容器都「有人」，于是树里落下一排点开什么都没有的集合。故判据是
+    // 「会被写入」。
+    //
+    // 去重是**有状态**的（[`FingerprintSet::seen`] 记账，故同一份 IR 里重复粘贴
+    // 的条目只有第一个会写），所以判定只能走一遍：写在第二遍再判一次，同一个
+    // 端点会得到两个不同答案，而第二个答案才是错的。
+    //
+    // 「跳过了几个」也在这里出，不在写入遍：全被去重时一个容器都不建，写入遍
+    // 压根不会走到那些端点，跳过记录会跟着一起消失，用户就看到「新增 0、
+    // 跳过 0」而不知道东西去哪了。
+    let fate = decide(&ex.modules, &mut fingerprints.clone(), selected);
+    let writable = &fate.writable;
+
+    for dup in &fate.duplicates {
+        report.skipped_duplicates.push(dup.name.clone());
+        report.diagnostics.push(
+            Diagnostic::info(format!("/{}", dup.path), "项目里已有同一个接口，按指纹跳过")
+                .dropping(format!("{} {}", dup.method, dup.path)),
+        );
+    }
+
+    let now = now_ms();
+    let mut written: BTreeSet<String> = BTreeSet::new();
+    let mut stack: Vec<Pending<'_>> = Vec::new();
+    // 逆序入栈 → 出栈顺序与 IR 声明顺序一致，行号（sort_order）因此可预期。
+    for (i, m) in ex.modules.iter().enumerate().rev() {
+        stack.push(Pending::Group {
+            ir: m,
+            sort: i as i64,
+            anchor: anchor_id.clone(),
+            keep: has_any(m, writable),
+        });
+    }
+
+    while let Some(item) = stack.pop() {
+        match item {
+            Pending::Group {
+                ir,
+                sort,
+                anchor,
+                keep,
+            } => {
+                if !keep {
+                    continue;
+                }
+                // 模块的父是项目本身。`nodes` 里没有项目行，故顶层模块的父存为 NULL，
+                // 由 `root_id` 说明它归哪个项目所有。有锚点时它是集合，父就是锚点。
+                let as_module = anchor.is_none();
+                let node = ResourceNode {
+                    id: uid(),
+                    root_id: project_id.to_string(),
+                    parent_id: anchor.clone(),
+                    kind: if as_module {
+                        ResourceNodeType::Module
+                    } else {
+                        ResourceNodeType::Collection
+                    },
+                    name: ir.name.clone(),
+                    description: ir.description.clone(),
+                    sort_order: sort,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let group_id = db::nodes::create(conn, &node, None)?.id;
+                if !as_module {
+                    report.created_collection_ids.push(group_id.clone());
+                }
+
+                // 先压 collection 再压 endpoint：栈是后进先出，故这样出栈顺序才是
+                // 「先本层的 endpoint，再各 collection」，与 IR 的声明顺序一致。
+                // 树的显示顺序由 `sort_order` 决定，但报告里的 id 顺序也该可预期。
+                for (i, c) in ir.collections.iter().enumerate().rev() {
+                    stack.push(Pending::Collection {
+                        ir: c,
+                        parent_id: group_id.clone(),
+                        sort: i as i64,
+                        keep: has_any_collection(c, writable),
+                    });
+                }
+                for (i, ep) in ir.endpoints.iter().enumerate().rev() {
+                    stack.push(Pending::Endpoint {
+                        ir: ep,
+                        parent_id: group_id.clone(),
+                        sort: i as i64,
+                    });
+                }
+            }
+            Pending::Collection {
+                ir,
+                parent_id,
+                sort,
+                keep,
+            } => {
+                if !keep {
+                    continue;
+                }
+                let node = ResourceNode {
+                    id: uid(),
+                    root_id: project_id.to_string(),
+                    parent_id: Some(parent_id.clone()),
+                    kind: ResourceNodeType::Collection,
+                    name: ir.name.clone(),
+                    description: ir.description.clone(),
+                    sort_order: sort,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let collection_id = db::nodes::create(conn, &node, None)?.id;
+                report.created_collection_ids.push(collection_id.clone());
+
+                for (i, c) in ir.collections.iter().enumerate().rev() {
+                    stack.push(Pending::Collection {
+                        ir: c,
+                        parent_id: collection_id.clone(),
+                        sort: i as i64,
+                        keep: has_any_collection(c, writable),
+                    });
+                }
+                for (i, ep) in ir.endpoints.iter().enumerate().rev() {
+                    stack.push(Pending::Endpoint {
+                        ir: ep,
+                        parent_id: collection_id.clone(),
+                        sort: i as i64,
+                    });
+                }
+            }
+            Pending::Endpoint {
+                ir,
+                parent_id,
+                sort,
+            } => {
+                // 没被判定为「会写」的（没勾选、或已被指纹认出）整条不写。
+                // 两者的区别只体现在第一遍报出的跳过记录上，不落到树里。
+                if !writable.contains(&ir.key) {
+                    continue;
+                }
+                // 同一个 key 只写一次。`key` 按约定是「一个 IR 节点一个」，
+                // 故这条在真实外来文件里永不触发——但它把「解析器给出重复 key」
+                // 的失败形态从「写进去两份」变成「写一份」，而后者不会有人发现。
+                if !written.insert(ir.key.clone()) {
+                    continue;
+                }
+
+                let node = ResourceNode {
+                    id: uid(),
+                    root_id: project_id.to_string(),
+                    parent_id: Some(parent_id),
+                    kind: ResourceNodeType::Endpoint,
+                    name: ir.name.clone(),
+                    description: ir.description.clone(),
+                    sort_order: sort,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let detail = EndpointDetail {
+                    node_id: node.id.clone(),
+                    method: ir.method.clone(),
+                    // `ir` 存的是 path-only，`domain` 这一列同样是 path，故这是一次改名。
+                    url: ir.path.clone(),
+                    environment_id: None,
+                    // 服务与环境是本仓库的概念，外来格式给不出。写 `None` 的含义是
+                    // 「用项目的 ★」，那是一个**真实答案**，不是「还没定」——故不猜。
+                    base_url_definition_id: None,
+                    base_url_override: None,
+                    params: ir.params.clone(),
+                    headers: ir.headers.clone(),
+                    body: ir.body.clone(),
+                    auth: ir.auth.clone(),
+                    docs: ir.docs.clone(),
+                    notes: ir.notes.clone(),
+                    tags: ir.tags.clone(),
+                };
+
+                db::nodes::create(conn, &node, Some(&detail))?;
+                report.created_endpoint_ids.push(node.id);
+            }
+        }
+    }
+
+    Ok(report)
 }
 
 /// 一个被指纹认出来而跳过的请求。名字与请求描述给报告用。

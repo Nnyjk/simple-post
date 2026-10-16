@@ -239,6 +239,75 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(calls.filter((c) => c === 'nodes_list').length, 1);
   });
 
+  it('reloadWorkspace 绕过幂等早退：树已加载后仍重新拉取', async () => {
+    const bag = makeBootstrapHarness();
+    const calls: string[] = [];
+    // 第一次读回旧的树。
+    installIpcMock(async (cmd) => {
+      calls.push(cmd);
+      if (cmd === 'nodes_list') return [moduleNode];
+      return [];
+    });
+    await bag.loadWorkspace();
+    assert.equal(bag.nodesLoaded, true);
+    assert.equal((bag.nodes as ResourceNode[])[0].name, '模块');
+
+    // 导入之后树里多了一批行。`loadWorkspace` 在 `nodesLoaded` 上早退，
+    // 拿它刷新会让刚导入的东西在 store 里永远不出现。
+    installIpcMock(async (cmd) => {
+      calls.push(cmd);
+      if (cmd === 'nodes_list')
+        return [moduleNode, { ...moduleNode, id: 'c1', kind: 'collection' }];
+      return [];
+    });
+    await bag.reloadWorkspace();
+
+    assert.deepEqual(
+      calls.filter((c) => c === 'nodes_list'),
+      ['nodes_list', 'nodes_list'],
+      'reloadWorkspace 必须真发第二轮 nodes_list',
+    );
+    assert.equal((bag.nodes as ResourceNode[]).length, 2);
+  });
+
+  it('reloadWorkspace 之后 loadWorkspace 重新变回幂等', async () => {
+    const bag = makeBootstrapHarness();
+    let trees: ResourceNode[] = [moduleNode];
+    const calls: string[] = [];
+    installIpcMock(async (cmd) => {
+      calls.push(cmd);
+      if (cmd === 'nodes_list') return trees;
+      return [];
+    });
+
+    await bag.reloadWorkspace();
+    trees = [moduleNode, { ...moduleNode, id: 'c1', kind: 'collection' }];
+    await bag.reloadWorkspace();
+    // 重载已把 `nodesLoaded` 置真，故随后的 `loadWorkspace` 仍应早退。
+    await bag.loadWorkspace();
+
+    assert.equal(calls.filter((c) => c === 'nodes_list').length, 2);
+    assert.equal((bag.nodes as ResourceNode[]).length, 2);
+  });
+
+  it('reloadWorkspace 失败落 nodesError，不 reject 也不清空已有的树', async () => {
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => (cmd === 'nodes_list' ? [moduleNode] : []));
+    await bag.loadWorkspace();
+
+    installIpcMock(async (cmd) => {
+      if (cmd === 'nodes_list') throw new Error('读树失败');
+      return [];
+    });
+    await bag.reloadWorkspace();
+
+    assert.equal(bag.nodesError, '读树失败');
+    // 已有的树仍可读 —— 刷新失败不该让整个工作区变成空白。
+    assert.equal((bag.nodes as ResourceNode[]).length, 1);
+    assert.equal(bag.nodesLoaded, true);
+    assert.equal(bag.nodesLoading, false);
+  });
+
   it('启动不预选任何项目或接口，把选择权留给欢迎页', async () => {
     const bag = makeBootstrapHarness();
     const otherProject: Project = { ...project, id: 'p2', name: '别的项目' };

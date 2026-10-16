@@ -21,6 +21,9 @@ mod base_url_defs;
 // 必须对「创建带什么」达成一致，各存一份 DTO 正是本文件开头警告的漂移。
 pub(crate) mod dto;
 mod environments;
+// 导入 / 导出的四个入口。逻辑在 `crate::interchange_api`（server crate），这里只是
+// Tauri 侧的薄壳——REST 路由调的是同一批函数。
+mod interchange;
 mod mcp_auto_start;
 mod mcp_capability;
 mod mcp_http_config;
@@ -39,6 +42,7 @@ mod response_history;
 pub use base_url_defs::*;
 pub use dto::*;
 pub use environments::*;
+pub use interchange::*;
 pub use mcp_auto_start::*;
 pub use mcp_capability::*;
 pub use mcp_http_config::*;

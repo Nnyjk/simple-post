@@ -37,6 +37,11 @@ simple-post-server = { path = "../crates/simple-post-server", features = ["gui"]
 
 # Tauri shell
 tauri = { version = "2", features = [] }
+# 导出的「另存为」：保存对话框选路径，`fs` 按该路径写文本。
+# 两者都只在桌面壳注册，且权限是**按需列举**的，见 capabilities/default.json ——
+# `fs:default` 会把读写整个用户目录一并打开，本项目只需要写一个文本文件。
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
 
 # Shared workspace deps (resolved to the versions pinned at the root)
 serde = { workspace = true }

@@ -63,18 +63,70 @@ src/
 ├── ir_test.rs
 ├── fingerprint.rs   # 稳定请求指纹
 ├── commit.rs        # ir → db::with_tx：补 id、校验放置、指纹去重
-├── project.rs       # domain → ir 投影（导出侧的四表 join）
+├── commit_in_tx     # 同上，但调用方自己开事务（编排层要用它把环境一起写）
+├── project.rs       # domain → ir 投影（导出侧的四表 join）+ module_to_ir
+├── openapi.rs       # 导出生成器：ir → OpenAPI 3.0 文档（JSON / YAML）
+├── openapi_test.rs
+├── roundtrip_test.rs # 导出产物被同一个 crate 的导入器读回
 ├── import/
-│   ├── mod.rs       # 按内容嗅探格式
-│   ├── postman.rs
-│   └── openapi.rs
-└── export/
-    └── openapi.rs
+│   ├── mod.rs       # 按内容嗅探格式 + 分派
+│   ├── postman.rs   # Postman v2.1
+│   └── openapi.rs   # OpenAPI 3.0（含 $ref 展开）
+└── import/*_test.rs
 ```
 
 `commit.rs` 住在本 crate 而不是 Tauri command 里，是刻意的：AGENTS.md 的
 dual-transport invariant 说的就是逻辑泄漏到传输层的代价。落库逻辑只有一份，
 Tauri command 与 REST route 都退化成薄壳。
+
+`commit_in_tx` 单独暴露的理由是事务边界：一次导入要写的不止树，Postman 的环境是
+项目级的另一张表，它必须与树同生共死；而 `db::with_tx` 的闭包拿不到第二个连接
+（`BEGIN IMMEDIATE` 会与外层那个自己死锁）。编排层拿到的是「已持有连接」的那一版。
+
+## `key`：IR 还没成为节点的那一半身份
+
+`IrModule` / `IrCollection` / `IrEndpoint` 各有一个 `#[serde(default)] key: String`：
+
+- **导入时**是源格式的位置指针（`/item/0/item/2/request`），与 `Diagnostic::pointer`
+  同一套寻址纪律，故诊断能按前缀挂回它所在的行；
+- **导出时**是 `nodes.id`。
+
+它是勾选集的成员身份，也是两侧引用同一个条目的唯一句柄。`#[serde(default)]` 是为了
+让没有 `key` 的旧 IR 仍能反序列化——新增字段不该让存量序列化数据失效。
+
+集合树深度**没有上限**（外来文件可以套一百层 folder），故凡是**只读走查**它的代码一律
+用显式栈而不是递归：`endpoint_keys_of`、`all_endpoints`、`mark_duplicates`、
+`diagnostics_of`，以及两个解析器都是。`retain_module` / `retain_collection`
+是唯一两个递归的：它们在下降的同时就把空分支剪掉了，深度上限就是输入深度本身，
+而剪不剪得动与走不走得完是两件事。
+
+## 导出侧的两个形状裁剪不是同一份
+
+`Exchange::retain_selected` 与 `commit` 都接受一个选择集，但**刻意是两份**：
+前者只需要形状裁剪（导出的文档里只留勾中的），后者要问指纹并记诊断（落库时要告诉
+用户「按指纹跳过了 N 个」）。把它们合并会让导出侧背上指纹账本，而导出根本不查重。
+
+## 导入的四个「不猜」
+
+解析器遇到本仓库表达不了的构造时，一律出诊断 + 丢弃，**不静默降级**：
+
+- Postman `formdata` 里 `type: file` 的分片 —— multipart 分片结构存不下文件内容。
+- Postman 的 `auth` 方案里 oauth2 / digest —— `AuthConfig` 只有四种。
+- OpenAPI 的 `apiKey` `in: cookie` —— `ApiKeyLocation` 只有 `Header | Query`。
+- OpenAPI `paths` 里固定动词键集以外的动词 —— 塞进去会让整份文档不合法。
+
+反过来也一样：`AuthConfig` 是「判别字段 + 可选载荷」的**扁平**结构，解析器只在
+`kind` 匹配时才读对应载荷。未选中方案的载荷同样为 `Some`，按载荷存在性分派会把
+用户没选中的凭据注入请求。
+
+## 环境与 baseUrl 的分工
+
+Postman 的每个 environment 落成一个新 `Environment`，变量进 `variables`，
+`is_active` 恒 `false`（导入一个环境不等于切换当前环境）。
+
+**不导成 baseUrl**：服务的*列表*是项目级事实（`base_url_definitions.project_id`），
+而*取值*是 per (环境 × 模块 × 服务)。外来格式给不出「模块 × 服务」这一层，硬塞会
+造出一堆项目里并不存在的服务定义。
 
 ## 域模型加宽契约
 

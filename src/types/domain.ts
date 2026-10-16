@@ -1,6 +1,6 @@
 // 领域类型，与 simple_post_core::domain 一一对应
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
 
 export const HTTP_METHODS: HttpMethod[] = [
   'GET',
@@ -10,6 +10,7 @@ export const HTTP_METHODS: HttpMethod[] = [
   'DELETE',
   'HEAD',
   'OPTIONS',
+  'TRACE',
 ];
 
 export interface KeyValue {

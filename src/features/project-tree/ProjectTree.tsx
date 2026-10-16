@@ -1,4 +1,4 @@
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useMemo, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { useEditMenu } from './hooks/useEditMenu';
 import { useInlineMenus } from './hooks/useInlineMenus';
 import { useNewItemFlow } from './hooks/useNewItemFlow';
 import { useTreeSelection } from './hooks/useTreeSelection';
+import { useTransfer } from '@/features/interchange/useTransfer';
 import { ModuleRow } from './rows/ModuleRow';
 import { TreeChildren } from './rows/TreeChildren';
 import { EndpointList } from './rows/EndpointList';
@@ -28,6 +29,13 @@ const CreateModuleDialog = lazy(() =>
 const CreateCollectionDialog = lazy(() =>
   import('@/features/create/CreateCollectionDialog').then((m) => ({
     default: m.CreateCollectionDialog,
+  })),
+);
+
+// 导入 / 导出弹窗同理：勾选树可能有几百行，不该在打开项目时就进包。
+const TransferDialogLazy = lazy(() =>
+  import('@/features/interchange/TransferDialog-lazy').then((m) => ({
+    default: m.TransferDialogLazy,
   })),
 );
 
@@ -105,11 +113,40 @@ export function ProjectTree() {
   const newItemOpen = useAppStore((s) => s.newItem.open);
   const newItemType = useAppStore((s) => s.newItem.type);
 
+  // ---------- 导入 / 导出 ----------
+  // 弹窗状态住在 hook 里而非 store：只有本组件能打开它，不存在第二个入口要读它的状态。
+  const transfer = useTransfer({
+    onImported: async (moduleId) => {
+      await useAppStore.getState().reloadWorkspace();
+      // 展开落点模块：新集合挂在它下面，父级折叠着的话用户看不到自己刚导入了什么。
+      // 新建的集合本身保持折叠 —— 一次导入几十个分组，全展开等于把树推到看不见底。
+      useAppStore.setState((s) => ({
+        nodes: s.nodes.map((n) => (n.id === moduleId ? { ...n, expanded: true } : n)),
+      }));
+    },
+  });
+
+  const { session: transferSession, openImport, openExport } = transfer;
+
+  const startTransfer = useCallback(
+    (mode: 'import' | 'export', module: { id: string; name: string }) => {
+      const session = {
+        projectId: activeProjectId,
+        moduleId: module.id,
+        moduleName: module.name,
+      };
+      if (mode === 'import') openImport(session);
+      else void openExport(session);
+    },
+    [activeProjectId, openImport, openExport],
+  );
+
   // ---------- inline "+" menus ----------
   const { openModulePlusMenu, openCollectionPlusMenu } = useInlineMenus({
     nodes: projectNodes,
     openNewItemWithIntent,
     createEndpointAt: createEndpoint,
+    startTransfer,
     setMenu,
   });
 
@@ -390,6 +427,13 @@ export function ProjectTree() {
       {newItemOpen && newItemType === 'collection' && (
         <Suspense fallback={null}>
           <CreateCollectionDialog />
+        </Suspense>
+      )}
+      {/* 导入 / 导出。挂在 `session` 上而非常驻：这块面板可能几百行，而绝大多数会话
+          从不打开它。 */}
+      {transferSession && (
+        <Suspense fallback={null}>
+          <TransferDialogLazy controller={transfer} />
         </Suspense>
       )}
     </aside>

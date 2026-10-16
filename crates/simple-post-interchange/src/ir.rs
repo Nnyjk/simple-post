@@ -215,6 +215,19 @@ pub(crate) fn endpoint_keys_of(
     out
 }
 
+/// 就地裁剪一个模块。返回它裁剪后是否还有东西——全空的模块该被丢掉而不是留个空壳。
+fn retain_module(m: &mut IrModule, selected: &BTreeSet<String>) -> bool {
+    m.endpoints.retain(|e| selected.contains(&e.key));
+    m.collections.retain_mut(|c| retain_collection(c, selected));
+    !m.endpoints.is_empty() || !m.collections.is_empty()
+}
+
+fn retain_collection(c: &mut IrCollection, selected: &BTreeSet<String>) -> bool {
+    c.endpoints.retain(|e| selected.contains(&e.key));
+    c.collections.retain_mut(|k| retain_collection(k, selected));
+    !c.endpoints.is_empty() || !c.collections.is_empty()
+}
+
 impl Exchange {
     pub fn endpoint_count(&self) -> usize {
         self.modules.iter().map(IrModule::endpoint_count).sum()
@@ -226,6 +239,20 @@ impl Exchange {
         for m in &self.modules {
             out.extend(subtree_keys(m));
         }
+        out
+    }
+
+    /// 只留下 `selected` 里的端点，**以及通往它们的全部祖先**。
+    ///
+    /// 导出侧用：那里没有指纹可去重，勾选就是唯一的过滤。取消勾选的分组连同整棵
+    /// 子树一起消失，产物里不会留下一个空分组。
+    ///
+    /// 与 [`crate::commit`] 的裁剪**刻意**是两份：落库那份还要问指纹、并把「为什么
+    /// 少写了几个」记成诊断，这里只需要纯粹的形状裁剪。共用一份就得让不落库的路径
+    /// 也背上一个它用不到的账本。
+    pub fn retain_selected(&self, selected: &BTreeSet<String>) -> Exchange {
+        let mut out = self.clone();
+        out.modules.retain_mut(|m| retain_module(m, selected));
         out
     }
 
