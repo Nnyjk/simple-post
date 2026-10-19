@@ -170,3 +170,34 @@ fn apply_matches_the_wire_mode_by_a_case_insensitive_header_name() {
     assert_eq!(headers.len(), 1);
     assert!(headers[0].1.starts_with("multipart/form-data; boundary="));
 }
+
+/// 跨语言 golden：这一份期望值是 `src/lib/multipart.ts` 的实际产物，TS 侧
+/// `http-build-multipart.test.ts` 断言同一份字符串。
+///
+/// 两套实现是各自写一遍的规则（边界字符集、转义、缺省 Content-Type、畸形输入的
+/// 处理），而它们的产物一旦不同，两侧会各自信任自己那份，服务端却只认其中一个。
+/// 同一个 golden 被两侧断言，任何一边改动都会红，不必靠人记得同步。
+#[test]
+fn the_body_matches_the_typescript_implementation_byte_for_byte() {
+    const B: &str = "----SimplePostFormBoundaryFIXED";
+    let content = concat!(
+        r#"[{"name":"title","value":"报告"},"#,
+        r#"{"name":"file","value":"binary-ish","filename":"a.txt"},"#,
+        r#"{"name":"note","value":"","contentType":"text/plain"},"#,
+        r#"{"name":"we\"ird\\name\r\ninjected","value":"v"},"#,
+        r#"{"name":"emptyFile","value":"x","filename":"b.bin"}]"#
+    );
+
+    let expected = [
+        format!("--{B}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\n报告"),
+        format!("--{B}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: application/octet-stream\r\n\r\nbinary-ish"),
+        format!("--{B}\r\nContent-Disposition: form-data; name=\"note\"\r\nContent-Type: text/plain\r\n\r\n"),
+        // 分片名里的引号与反斜杠被转义，CR/LF 整个被剥掉——留着就是往头里注入一个新头。
+        format!("--{B}\r\nContent-Disposition: form-data; name=\"we\\\"ird\\\\nameinjected\"\r\n\r\nv"),
+        format!("--{B}\r\nContent-Disposition: form-data; name=\"emptyFile\"; filename=\"b.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nx"),
+    ]
+    .join("\r\n")
+        + &format!("\r\n--{B}--\r\n");
+
+    assert_eq!(build_body(&parts(content), B), expected);
+}
