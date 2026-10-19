@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities granted to the main window of Simple Post. The custom `http_request` command does not need an explicit permission entry — Tauri 2 allows invoke-handler-registered commands by default.",
+  "description": "Capabilities granted to the main window of Simple Post. The custom `http_request` command does not need an explicit permission entry — Tauri 2 allows invoke-handler-registered commands by default. `fs` is granted per-verb and scoped to `$HOME/**/*` rather than via `fs:default`, which would open read and write over the whole user directory; export only writes one text file to a path the user just picked in the save dialog.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,11 @@
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    "dialog:allow-save",
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "$HOME/**/*" }]
+    }
   ]
 }

@@ -16,7 +16,14 @@ pub mod diagnostics;
 pub mod fingerprint;
 pub mod import;
 pub mod ir;
+pub mod openapi;
 pub mod project;
 
 pub use diagnostics::{Diagnostic, Severity};
 pub use ir::Exchange;
+
+// 导出产物被同一个 crate 的导入器读回。两侧各有自己的测试，但那些各自对着自己的
+// 期望值自洽——互相不认得时没有一个会红。
+#[cfg(test)]
+#[path = "roundtrip_test.rs"]
+mod roundtrip;

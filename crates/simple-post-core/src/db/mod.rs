@@ -35,6 +35,12 @@ mod schema;
 pub use pool::{init, ping, with_conn, with_tx, DbPool};
 pub use schema::migrate;
 
+/// CRUD 函数收的连接类型。**再导出而非让调用方各自依赖 `rusqlite`**：编排层
+/// （`simple-post-server`、`simple-post-interchange`）要写一个自己的私有取数函数时，
+/// 它需要能写出 `&mut Connection` 的签名，又不该为此在 Cargo.toml 里加一条 rusqlite——
+/// 那会让「转换层依赖了持久化实现」这件事在依赖图上变成真的。
+pub use rusqlite::Connection;
+
 // 仅测试。整个模块是 `#[cfg(test)]`，只编进 `cargo test`，别处不存在。
 // `db::init` 没有进这里的路径，故生产构建永远插不进种子行——全新安装是空库。
 // `fixtures.json` 留在仓库里纯粹作为测试数据。

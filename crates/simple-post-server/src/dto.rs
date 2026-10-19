@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::*;
 use crate::permissions::CapabilityPolicy;
+use simple_post_interchange::ir::IrServer;
+use simple_post_interchange::Diagnostic;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -187,4 +189,179 @@ pub struct RestartResult {
     pub ok: bool,
     pub pid: Option<u32>,
     pub port: Option<u16>,
+}
+
+// ---------------------------------------------------------------------------
+// interchange —— 导入 / 导出共用的线形状
+// ---------------------------------------------------------------------------
+
+/// 勾选树上的一个分组（导入时是「将要落成集合的那一层」，导出时是集合）。
+///
+/// **导入与导出共用同一个节点类型**是刻意的：一个组件一份类型，才能真正做到
+/// 「共用一个弹窗」，而不是两套形状在组件里各写一半再凑合渲染。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferNode {
+    /// 稳定标识。导入时回传给落库接口当选择集，导出时是 `nodes.id`。
+    pub key: String,
+    pub name: String,
+    pub endpoints: Vec<TransferEndpoint>,
+    pub children: Vec<TransferNode>,
+    /// 本子树里的端点总数（含所有层级）。勾选计数与「全选」都读它。
+    pub endpoint_total: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferEndpoint {
+    pub key: String,
+    pub name: String,
+    /// 大写动词。`TRACE` 之类是 `HttpMethod::Custom`，`as_str()` 原样返回。
+    pub method: String,
+    /// 只有路径。host 不在这里——它住在分组那一层的 `servers` 上。
+    pub path: String,
+    pub body_mode: BodyMode,
+    pub auth: AuthType,
+    /// 导入时：该请求与目标项目里已有的某个接口指纹相同。默认**仍然勾上**——
+    /// 用户勾的是这份文件而不是某几行，而它在落库时会被跳过（报告里会说）。
+    /// 导出时恒为 false。
+    pub duplicate: bool,
+    /// 落在这一条上的诊断在 `diagnostics` 里的下标。诊断按端点归属，
+    /// 否则同一条 pointer 在两个分组下会各显示一次。
+    pub diagnostic_indexes: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferCounts {
+    pub groups: usize,
+    pub endpoints: usize,
+    pub duplicates: usize,
+}
+
+/// Postman 环境在预览里的一行。它此刻还只是「这个文件里有个叫这个名字的环境」，
+/// 真正创建发生在 commit 那一步。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedEnvironmentDto {
+    pub name: String,
+    pub variable_count: usize,
+    /// 源环境里被停用的变量数。它们照样导入，只是不预填。
+    pub disabled_variable_count: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewDto {
+    /// `Format::as_str()`，即 `postman-collection-v2.1` / `openapi-3`。
+    pub format: String,
+    /// 人读的名字。线上名带版本号与连字符，是给程序用的。
+    pub format_label: String,
+    /// Postman `info.name` / OpenAPI `info.title`。**不落成节点**，只做副标题。
+    pub title: Option<String>,
+    /// 文件名或 URL 末段。
+    pub source_name: String,
+    pub groups: Vec<TransferNode>,
+    pub counts: TransferCounts,
+    pub diagnostics: Vec<Diagnostic>,
+    pub environments: Vec<ImportedEnvironmentDto>,
+    /// **仅 URL 模式**回传：拉到的原文。前端原样送回 commit，故一次导入只拉一次
+    /// 文档，且 commit 的行为不取决于那之后源站有没有变。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCommitDto {
+    pub created_endpoints: usize,
+    pub skipped_duplicates: usize,
+    pub created_collection_ids: Vec<String>,
+    pub created_endpoint_ids: Vec<String>,
+    pub environments_created: Vec<String>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// 一个模块在所选环境下的服务 URL。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleServersDto {
+    pub module_key: String,
+    pub module_name: String,
+    /// **空数组是真实答案**：该模块在此环境下没有配 URL，导出时就不写 `servers`，
+    /// 不借用别的模块的，也不落回项目 ★。
+    pub servers: Vec<IrServer>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPreviewDto {
+    pub groups: Vec<TransferNode>,
+    pub counts: TransferCounts,
+    /// 实际用到的环境 id。为 `None` 表示没选出环境（或该项目没有激活环境），
+    /// 那时每个模块的 `servers` 都是空的——这是忠实答案，不是「待补」。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_id: Option<String>,
+    pub servers: Vec<ModuleServersDto>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDocumentDto {
+    pub file_name: String,
+    /// `application/json` / `application/yaml`。渲染层按它选保存对话框的过滤器。
+    pub media_type: String,
+    pub content: String,
+    /// 落文档期间新增的诊断（集合外的动词、手写的 schema 不合法等）。
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+// ---- 入参 ----
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewOpts {
+    pub project_id: String,
+    /// 落点：挂进这个已存在的模块。
+    pub module_id: String,
+    /// 文件内容。与 `url` 二选一；两个都给时 `content` 优先。
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCommitOpts {
+    pub project_id: String,
+    pub module_id: String,
+    /// **始终**是文件原文，不重跑 URL 拉取。预览阶段已经把 URL 模式的原文回传过来，
+    /// 故这里再解析一次得到的一定是同一棵树。
+    pub content: String,
+    /// 勾中的端点 key。空集表示「一个都不导」——那是用户的选择，不是失败。
+    #[serde(default)]
+    pub selected: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPreviewOpts {
+    pub project_id: String,
+    pub module_id: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportDocumentOpts {
+    pub project_id: String,
+    pub module_id: String,
+    /// 空串 = 不选环境。此时 `servers` 恒为空，导出的文档不带 `servers`。
+    #[serde(default)]
+    pub environment_id: String,
+    #[serde(default)]
+    pub selected: Vec<String>,
+    /// `"json"` / `"yaml"`。认不出的值报 `AppError::Validation`，不静默回退成 JSON。
+    pub format: String,
 }

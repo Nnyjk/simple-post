@@ -1,4 +1,4 @@
-//! `domain → ir` 投影：把一个项目读成 IR，供导出。
+//! `domain → ir` 投影：把资源树读成 IR，供导出。
 //!
 //! ## 为什么这里要跨四张表
 //!
@@ -9,12 +9,12 @@
 //! 任何一行都不足以回答「这个接口该打到哪里去」。
 //!
 //! **先选定环境，再逐模块取，不回退。** 该模块没配就是没有 URL——不借用别的模块的，
-//! 也不落回项目 ★。故 [`project_to_ir`] 要求调用方指名 `environment_id`：
+//! 也不落回项目 ★。故两个入口都要求调用方指名 `environment_id`（`None` 表示取激活环境）：
 //! 让「用哪个环境」成为一次显式的决定，而不是本模块替用户挑一个。
 
 use std::collections::HashMap;
 
-use simple_post_core::db::{self, DbPool};
+use simple_post_core::db::{self, Connection, DbPool};
 use simple_post_core::domain::{
     BaseUrlDefinition, EndpointDetail, Environment, Project, ResourceNode, ResourceNodeType,
 };
@@ -22,6 +22,75 @@ use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
 use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrServer};
+
+/// 一次投影读回来的全部上下文。两个导出入口的差别只在「取哪些根节点」，
+/// 故四张表的读与「不回落」的服务解析都共用这一份。
+struct Projection {
+    project: Project,
+    env: Option<Environment>,
+    details: HashMap<String, EndpointDetail>,
+    children_of: HashMap<Option<String>, Vec<ResourceNode>>,
+}
+
+impl Projection {
+    /// 组装最终那份 [`Exchange`]。`environment_id` 是**实际用到的**那个环境的 id：
+    /// 指名的环境不属于该项目时 `env` 为 `None`，这份 IR 里每个模块的 `servers` 都是空的
+    /// ——那正是「这些模块没有 URL」的忠实答案，而不是「环境没选」。
+    fn into_exchange(self, modules: Vec<IrModule>, diagnostics: Vec<Diagnostic>) -> Exchange {
+        Exchange {
+            project_name: self.project.name,
+            project_description: self.project.description,
+            environment_id: self.env.as_ref().map(|e| e.id.clone()),
+            modules,
+            diagnostics,
+        }
+    }
+}
+
+/// 四张表读成一份投影。
+fn load_projection(
+    conn: &mut Connection,
+    project_id: &str,
+    environment_id: Option<&str>,
+) -> Result<Projection, AppError> {
+    let project = db::projects::get(conn, project_id)?;
+
+    // 指名的环境可能不属于该项目：那会让 URL 跨项目串过来，故只接受本项目的环境。
+    let env = match environment_id {
+        Some(id) => Some(db::environments::get(conn, id)?),
+        None => db::environments::get_active(conn, project_id)?,
+    };
+    let env = env.filter(|e| e.project_id == project_id);
+
+    // 一次读回整棵树，内存里按 parent_id 分桶：导出是一次投影，
+    // 逐节点发查询会让一棵大树变成 N 次往返。
+    let nodes = db::nodes::list_by_root(conn, project_id)?;
+    let mut children_of: HashMap<Option<String>, Vec<ResourceNode>> = HashMap::new();
+    for n in nodes {
+        children_of.entry(n.parent_id.clone()).or_default().push(n);
+    }
+    // 每桶内的顺序即显示顺序，与 `list_by_root` 的 ORDER BY 保持一致。
+    for list in children_of.values_mut() {
+        list.sort_by(|a, b| {
+            a.sort_order
+                .cmp(&b.sort_order)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+    }
+
+    let details: HashMap<String, EndpointDetail> =
+        db::endpoint_details::list_by_root(conn, project_id)?
+            .into_iter()
+            .map(|d| (d.node_id.clone(), d))
+            .collect();
+
+    Ok(Projection {
+        project,
+        env,
+        details,
+        children_of,
+    })
+}
 
 /// 把项目 `project_id` 在环境 `environment_id` 下的样子投影成一份 [`Exchange`]。
 ///
@@ -34,61 +103,63 @@ pub fn project_to_ir(
     environment_id: Option<&str>,
 ) -> Result<Exchange, AppError> {
     db::with_conn(pool, |conn| {
-        let project = db::projects::get(conn, project_id)?;
-
-        // 指名的环境可能不属于该项目：那会让 URL 跨项目串过来，故只接受本项目的环境。
-        let env = match environment_id {
-            Some(id) => Some(db::environments::get(conn, id)?),
-            None => db::environments::get_active(conn, project_id)?,
-        };
-        let env = env.filter(|e| e.project_id == project_id);
-
-        // 一次读回整棵树，内存里按 parent_id 分桶：导出是一次投影，
-        // 逐节点发查询会让一棵大树变成 N 次往返。
-        let nodes = db::nodes::list_by_root(conn, project_id)?;
-        let mut children_of: HashMap<Option<String>, Vec<ResourceNode>> = HashMap::new();
-        for n in nodes {
-            children_of.entry(n.parent_id.clone()).or_default().push(n);
-        }
-        // 每桶内的顺序即显示顺序，与 `list_by_root` 的 ORDER BY 保持一致。
-        for list in children_of.values_mut() {
-            list.sort_by(|a, b| {
-                a.sort_order
-                    .cmp(&b.sort_order)
-                    .then_with(|| a.id.cmp(&b.id))
-            });
-        }
-
-        let details: HashMap<String, EndpointDetail> =
-            db::endpoint_details::list_by_root(conn, project_id)?
-                .into_iter()
-                .map(|d| (d.node_id.clone(), d))
-                .collect();
-
+        let p = load_projection(conn, project_id, environment_id)?;
+        let roots = p.children_of.get(&None).cloned().unwrap_or_default();
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
-        let roots = children_of.remove(&None).unwrap_or_default();
         let modules = roots
             .iter()
             .filter(|n| n.kind == ResourceNodeType::Module)
             .map(|m| {
                 project_module(
                     m,
-                    &project,
-                    env.as_ref(),
-                    &details,
-                    &children_of,
+                    &p.project,
+                    p.env.as_ref(),
+                    &p.details,
+                    &p.children_of,
                     &mut diagnostics,
                 )
             })
             .collect();
+        Ok(p.into_exchange(modules, diagnostics))
+    })
+}
 
-        Ok(Exchange {
-            project_name: project.name,
-            project_description: project.description,
-            environment_id: env.as_ref().map(|e| e.id.clone()),
-            modules,
-            diagnostics,
-        })
+/// 把**一个模块**的整棵子树投影成一份只含一个模块的 [`Exchange`]。导出入口用这个：
+/// 落点是模块行上的 `+`，范围就是那棵子树。
+///
+/// `module_id` 必须属于 `project_id` 且必须是模块——两种错都要报得出，因为调用方传的是
+/// 一个界面上选的 id，而它可能已经被删掉，或根本不是模块。
+pub fn module_to_ir(
+    pool: &DbPool,
+    project_id: &str,
+    module_id: &str,
+    environment_id: Option<&str>,
+) -> Result<Exchange, AppError> {
+    db::with_conn(pool, |conn| {
+        let node = db::nodes::get(conn, module_id)?;
+        if node.root_id != project_id {
+            return Err(AppError::NotFound(format!(
+                "模块 {module_id} 不属于项目 {project_id}"
+            )));
+        }
+        if node.kind != ResourceNodeType::Module {
+            return Err(AppError::Validation(format!(
+                "导出落点必须是模块，而 {module_id} 是一个 {}",
+                node.kind.as_str()
+            )));
+        }
+
+        let p = load_projection(conn, project_id, environment_id)?;
+        let mut diagnostics: Vec<Diagnostic> = Vec::new();
+        let modules = vec![project_module(
+            &node,
+            &p.project,
+            p.env.as_ref(),
+            &p.details,
+            &p.children_of,
+            &mut diagnostics,
+        )];
+        Ok(p.into_exchange(modules, diagnostics))
     })
 }
 
@@ -103,6 +174,8 @@ fn project_module(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> IrModule {
     IrModule {
+        // 导出侧的 `key` 就是节点 id：勾选集要能换回具体是哪一行。
+        key: node.id.clone(),
         name: node.name.clone(),
         description: node.description.clone(),
         servers: module_servers(&project.base_url_definitions, env, node, diagnostics),
@@ -142,6 +215,7 @@ fn project_collections(
             c.iter()
                 .filter(|n| n.kind == ResourceNodeType::Collection)
                 .map(|n| IrCollection {
+                    key: n.id.clone(),
                     name: n.name.clone(),
                     description: n.description.clone(),
                     endpoints: project_endpoints(&n.id, details, children_of, diagnostics),
@@ -168,6 +242,7 @@ fn project_endpoint(
         return None;
     }
     Some(IrEndpoint {
+        key: node.id.clone(),
         name: node.name.clone(),
         description: node.description.clone(),
         method: d.method.clone(),

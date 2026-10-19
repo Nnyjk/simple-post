@@ -147,7 +147,7 @@ fn normalize_path(path: &str) -> String {
 
 /// 一次导入内的指纹账本。跨导入识别靠它：`commit` 先把目标项目里**已落库**的
 /// endpoint 全部灌进来，再逐个问 [`Self::seen`]。
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FingerprintSet {
     seen: HashMap<String, RequestIdentity>,
 }
@@ -174,6 +174,14 @@ impl FingerprintSet {
         }
         self.seen.insert(fp, id.clone());
         false
+    }
+
+    /// 只问，不记。**预览走这条**：预览要标出「这些条目在项目里已经有了」，标完之后
+    /// 同一批数据还要原样交给落库方，那里的 [`Self::seen`] 才负责去重。预览若用
+    /// `seen`，一份预览就会把本次导入的账先记上一遍，于是落库时第一个条目就被自己的
+    /// 预览当成重复跳过。
+    pub fn contains(&self, id: &RequestIdentity) -> bool {
+        self.seen.contains_key(&id.fingerprint())
     }
 }
 

@@ -130,6 +130,17 @@ export interface BootstrapSliceActions {
   loadWorkspace: () => Promise<void>;
 
   /**
+   * 强制重跑第二层，绕过 `loadWorkspace` 那两条幂等早退。
+   *
+   * 导入一次会写进几十上百行，而它们**不是**逐条 `addNode` 进去的（落库在 Rust 侧一次
+   * 事务完成，回来的只有 id 列表）。让 store 自己补齐等于把导入的写入顺序复制一份到
+   * 前端；重取一趟树代价只是一次 IPC。
+   *
+   * 同样永不 reject：失败落 `nodesError`，已有的树保持可读，只是不更新。
+   */
+  reloadWorkspace: () => Promise<void>;
+
+  /**
    * 关掉启动加载错误横幅（`features/top-bar/BootstrapErrorBanner`）而不重试。
    * 只清消息，`loaded` / `loading` 不动，故后续 `bootstrap()` 重试仍会跑。
    */
@@ -281,7 +292,12 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // 否则 await 此处、以便在树就绪后接续工作的调用方会立刻继续，看到加载前状态。
       if (get().nodesLoaded) return;
       if (inFlight) return inFlight;
+      return get().reloadWorkspace();
+    },
 
+    // 加载本体。`loadWorkspace` 是它加两条幂等早退的包装：两者必须跑同一段代码，
+    // 否则「先加载后重载」与「直接重载」会在 `nodesLoaded` 的置位时机上分叉。
+    reloadWorkspace: async () => {
       inFlight = (async () => {
         set({ nodesLoading: true, nodesError: null });
 

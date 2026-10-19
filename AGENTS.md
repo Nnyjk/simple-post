@@ -21,6 +21,10 @@ Six runtime pieces:
 
 **Interchange: `ir` 不是 `domain` 的别名。** 三条边性质不同：`format → ir` **有损**（故必须走 `Diagnostic`，不能静默丢）；`ir → domain` 无损全函数（补 id / `root_id` / 时间戳）；`domain → ir` 是投影（host 不在 endpoint 上，导出得自己选环境）。IR 必须自有的三条理由：预览阶段节点**还没有 id**、`domain` 无处安放诊断、导出需跨 `nodes`/`endpoint_details`/`projects`/`environments` 四表。指纹去重算在 IR 上，故两种导入器互相认得。**不要**为它加 `SCHEMA_VERSION`。
 
+**Interchange 的依赖方向是 `server → interchange → core`**，它自己不含 Tauri 也不含 axum。导入 / 导出的**编排**（取内容、折成线形状、落库、产出文档）住在 `crates/simple-post-server/src/interchange_api.rs`，**不是**在 Tauri command 里 —— 这是 dual-transport invariant 的直接后果：那一层若写在某一侧，另一侧会静默少一半。四个薄壳入口两处都有（`src-tauri/src/commands/interchange.rs` 与 `web_api/routes/interchange.rs`），它们都只调 `interchange_api` 的四个函数。`interchange_api::import_commit` 走 `commit_in_tx` 而不是 `commit`：环境必须与树同事务，而 `with_tx` 闭包拿不到第二个连接（`BEGIN IMMEDIATE` 会自死锁）。
+
+**Interchange 的 `IrNode.key` 是「IR 还没成为节点」的那一半身份**：导入 = 源格式的位置指针（与 `Diagnostic::pointer` 同一套寻址纪律），导出 = `nodes.id`。它是勾选集的成员身份，也是跨两侧引用一个条目的唯一句柄。`#[serde(default)]` 保证没有 `key` 的旧 IR 仍能反序列化。
+
 **The Tauri split, and why it exists.** `src-tauri` links `tauri` unconditionally, so a Linux build of it drags in `libwebkit2gtk` / GTK / X11 — which a container serving `serve-web` needs only to run a GUI it cannot display. The server half therefore lives in `crates/simple-post-server`, and the dependency points one way: `simple-post (Tauri) → simple-post-server → simple-post-core`. Three consequences worth respecting:
 
 1. **The `gui` feature is off by default.** It re-attaches only the three `AppHandle`-taking daemon verbs (`ensure_started` / `start` / `restart`) that emit `daemon://crashed` to the webview. `src-tauri` turns it on; the image build does not. Do **not** move it into `default` to "share more code" — that is the failure the feature exists to avoid.
@@ -61,15 +65,16 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 
 ## Key Directories
 
-- `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/` (incl. `WorkspaceShell.tsx`), `response-viewer/`, `welcome/`
+- `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/` (incl. `WorkspaceShell.tsx`), `response-viewer/`, `welcome/`, `interchange/` (the import/export dialog: `useTransfer` session state, `TransferTree`, `TransferDialog` + the `TransferDialog-lazy.tsx` shell `ProjectTree` lazy-loads)
 - `src/stores/` — Zustand: `app-store.ts` barrel composing `bootstrap-slice`, `crud-slice`, `ui-slice`, `mcp-slice`, `dirty-tabs-slice` + `store-types.ts`
-- `src/lib/` — `tauri-commands.ts` (dual-transport dispatch) + `tauri-commands/` (`commands.ts` holds the `COMMANDS` registry, `web-routes.ts` the `WEB_ROUTES` specs, `bearer.ts` the localStorage bearer), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`
+- `src/lib/` — `tauri-commands.ts` (dual-transport dispatch) + `tauri-commands/` (`commands.ts` holds the `COMMANDS` registry, `web-routes.ts` the `WEB_ROUTES` specs, `bearer.ts` the localStorage bearer), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`, `interchange-types.ts` (transfer wire types), `transfer-file-save.ts` (export save: native dialog under Tauri, Blob in the browser)
 - `src/components/ui/` — shared primitives (`method-picker`, `tabs`, `dialog`, …)
 - `src/types/domain.ts` — TS mirrors of Rust domain types
 - `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` is a facade over `nodes/{read,write,tree,placement}.rs`, which together hold the whole resource tree; `endpoint_details.rs` its endpoint-only configuration) + `pool.rs` / `schema.rs` + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
+- `crates/simple-post-interchange/src/` — `ir.rs` / `fingerprint.rs` / `commit.rs` / `project.rs` / `diagnostics.rs`; `import/{mod,postman,openapi}.rs` parse, `openapi.rs` generates the exported document
 - `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource; `dto.rs` is now only a re-export of the server crate's DTOs)
-- `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs` + `port_registry.rs` (both facades over same-named module dirs), `auth.rs`, `dto.rs`, `http_config.rs`, `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
+- `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs` + `port_registry.rs` (both facades over same-named module dirs), `auth.rs`, `dto.rs`, `http_config.rs`, `interchange_api.rs` (the import/export orchestration both transports share), `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
 - `scripts/` — dev/test/build utilities (see below)
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
@@ -137,6 +142,12 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 **Zustand selectors (infinite-loop hazard).** Equality is `Object.is`; a selector returning a fresh array/object (`.map`, `.filter`, spread) causes infinite re-render. Selectors must return stable references or `.find(...)`; derive filtered lists with `useMemo` in the component. Slices never import each other — they share state via the `AppState` interface and `get()`/`set()`. Verify with `npx tsx scripts/_verify_store.mjs`.
 
 **Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands/<resource>.rs` (re-exported by `commands/mod.rs`, which must use **glob** `pub use` — an item list drops the `#[macro_export]`ed `__cmd__<name>` macro and `generate_handler!` fails with E0433), registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `crates/simple-post-server/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently. A DTO both sides need belongs in `crates/simple-post-server/src/dto.rs`, **not** in `commands/` — see the Tauri split above.
+
+**The transfer dialog is one component, not two.** Import and export share `TransferDialog` / `TransferTree` / `TransferNode` / `TransferEndpoint`; the modes differ in the source picker, two export-only settings, and the confirming action. Don't fork the tree or the types per mode — a shared filename is not a shared component. Its state lives in the `useTransfer` hook, **not** a Zustand slice: only `ProjectTree` can open it, so there is no second reader.
+
+**Export save is native-only, and the split is deliberate.** Tauri goes through `tauri-plugin-dialog` + `tauri-plugin-fs` (dynamically imported — they have no browser implementation, so a static import would make `serve-web` bundle dead Tauri code and throw at runtime); the browser falls back to a Blob + `<a download>`. The `fs` capability is granted **per verb and scoped to `$HOME/**/*`** — `fs:default` would open read and write over the whole user directory for a feature that writes one text file.
+
+**`reloadWorkspace` vs `loadWorkspace`.** The second layer is idempotent (`nodesLoaded` / in-flight guard) so `bootstrap`, `openProject` and the retry button can each call it uncoordinated. An import writes dozens of rows in one transaction and gets back only ids, so refreshing with the idempotent one silently leaves the tree stale. Use `reloadWorkspace` there; do not remove the guard from `loadWorkspace` to "fix" it, or a tree failure strands the boot splash.
 
 **Tauri macro gotcha.** `http_request` in `src-tauri/src/lib.rs` must stay **non-`pub`** — marking it `pub` triggers a `__cmd__http_request` identifier collision (E0255) between `#[tauri::command]` and `generate_handler!`.
 

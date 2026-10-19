@@ -32,6 +32,9 @@ pub mod auth;
 pub mod daemon_supervisor;
 pub mod dto;
 pub mod http_config;
+/// 导入 / 导出的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必
+/// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
+pub mod interchange_api;
 pub mod port_registry;
 pub mod web_api;
 
@@ -40,6 +43,10 @@ pub mod web_api;
 // `crate::permissions::*` / `crate::http_executor::*` /
 // `crate::mcp_metrics::*` / `crate::mcp::*`。
 pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, oauth2, permissions};
+
+// 转换层本身也再导出一次，好让调用点写 `crate::interchange::…` 而不是
+// `simple_post_interchange::…`——与上面那两行的理由相同。
+pub use simple_post_interchange as interchange;
 
 // 再导出独立 `simple-post-mcp` crate 的 MCP 模块。之所以也再导出 `daemon_http`，
 // 是因为 `run_mcp` 需要 `serve_with_config` 把监听配置（挂载路径 + Host/Origin

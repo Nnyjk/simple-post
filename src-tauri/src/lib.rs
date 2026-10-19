@@ -22,7 +22,11 @@ pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, oauth2
 pub use simple_post_mcp::{daemon_http, mcp};
 
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
-pub use simple_post_server::{auth, daemon_supervisor, dto, http_config, port_registry, web_api};
+// `interchange_api` 在其中：导入 / 导出的逻辑住在 server crate，好让 Tauri 命令与
+// REST 路由调同一个函数。
+pub use simple_post_server::{
+    auth, daemon_supervisor, dto, http_config, interchange_api, port_registry, web_api,
+};
 
 // CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
 // `cargo run -- serve-web`（即 `npm run dev:split`）行为不变。
@@ -94,6 +98,11 @@ pub fn run() {
     let daemon_handle = McpDaemonHandle::with_pool(pool.clone());
 
     tauri::Builder::default()
+        // 导出的「另存为」。`serve-web` 形态没有 Tauri，前端在浏览器里退回 Blob 下载，
+        // 故这两个插件只在桌面壳注册，且前端侧是动态 import——见
+        // `src/lib/transfer-file-save.ts`。
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(pool)
         .manage(daemon_handle)
         .invoke_handler(tauri::generate_handler![
@@ -151,6 +160,12 @@ pub fn run() {
             crate::commands::mcp_capability_list_tools,
             crate::commands::mcp_http_config_get,
             crate::commands::mcp_http_config_set,
+            // 导入 / 导出（Postman v2.1 ↔ OpenAPI 3.0）。四个命令全是薄壳，REST 侧同名
+            // 路由调的是同一批函数。
+            crate::commands::interchange_import_preview,
+            crate::commands::interchange_import_commit,
+            crate::commands::interchange_export_preview,
+            crate::commands::interchange_export_document,
         ])
         .setup(|app| {
             // 先读持久化的 mcp.auto_start（默认 false，需用户在设置里开启）再拉 supervisor。
