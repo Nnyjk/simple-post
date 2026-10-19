@@ -254,11 +254,20 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         simple_post_core::oauth2::inject(cfg, &token, &mut headers, &mut url);
     }
 
+    // multipart 在这里才成形：boundary 必须现生成，Content-Type 与 body 用同一个值。
+    // `resolve_endpoint` 只做变量替换，故它给不出带 boundary 的 Content-Type。
+    let mut body = resolved.body.clone();
+    if endpoint.body.mode == simple_post_core::domain::BodyMode::Multipart {
+        body = body
+            .take()
+            .map(|content| multipart::apply(&mut headers, &content));
+    }
+
     let input = HttpRequestInput {
         method: method_str.clone(),
         url: url.clone(),
         headers: headers.clone(),
-        body: resolved.body.clone(),
+        body,
         timeout_ms: timeout_ms.unwrap_or(30_000),
         follow_redirects: follow_redirects.unwrap_or(true),
         max_response_size_kb: max_kb.unwrap_or(10_240),
@@ -301,6 +310,7 @@ static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::doma
 
 mod envelope;
 mod input;
+mod multipart;
 
 pub(crate) use input::flatten_string_map;
 

@@ -15,13 +15,17 @@
 //!
 //! ```text
 //!   variable_fill.rs   ← 当前文件（门面与再导出）
-//!     template.rs      ← {{var}} 替换与缺变量清单
+//!     template.rs      ← {{var}} 替换与缺变量清单（转发到 core）
 //!     base_url.rs      ← baseUrl 解析 / 拼接 / 收斜杠
 //!     auth.rs          ← bearer / basic / apikey / oauth2 字段替换
 //!     request.rs       ← 请求头排序、query 追加、Basic 的 base64
 //!     resolve.rs       ← resolve_endpoint（主 API）
 //!     types.rs         ← EndpointOverrides / ResolvedEndpoint
 //! ```
+//!
+//! `{{var}}` 的实现住在 `simple_post_core::template`：导入器要按同一套语法判定外来格式里
+//! 的变量标记，而依赖方向是 `interchange → core`。此处只转发，`crate::variable_fill::` 下
+//! 的路径保持不变。
 
 mod auth;
 mod base_url;
@@ -42,16 +46,12 @@ pub use types::{EndpointOverrides, ResolvedEndpoint};
 // =========================================================================
 //
 // 兄弟 `#[path]` 模块，遵循本 crate 的惯例：Rust 按模块路径找文件，所以测试专用
-// *目录* 是找不到的。四块按被测的模块切分，共用的环境 / 项目 / 端点 fixture 在
-// `test_support.rs`。
+// *目录* 是找不到的。`template` 的测试随实现一起搬到了 core，按剩下的三块切分，
+// 共用的环境 / 项目 / 端点 fixture 在 `test_support.rs`。
 
 #[cfg(test)]
 #[path = "variable_fill/test_support.rs"]
 mod test_support;
-
-#[cfg(test)]
-#[path = "variable_fill/template_test.rs"]
-mod template_tests;
 
 #[cfg(test)]
 #[path = "variable_fill/base_url_test.rs"]

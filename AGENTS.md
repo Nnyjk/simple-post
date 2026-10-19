@@ -8,15 +8,18 @@ Docs are partly Chinese (`README.md`, the two crate READMEs); code/identifiers a
 
 ## Architecture & Data Flow
 
-Five runtime pieces:
+Six runtime pieces:
 
 | Piece | Path | Role |
 |---|---|---|
 | Tauri shell + CLI | `src-tauri/` | Desktop GUI and the `#[tauri::command]` surface (`commands/`). Everything else is re-exported from the server crate below, so `crate::daemon_supervisor` / `crate::web_api` still resolve here |
 | Server host | `crates/simple-post-server/` | `serve-web` REST/SPA server, daemon supervisor, port registry, bearer auth, wire DTOs. **No Tauri by default** — this is what the Docker image builds |
 | Core library | `crates/simple-post-core/` | Domain models, SQLite (`db/`), `http_executor`, `permissions`, `mcp_metrics`, `error` — headless, no Tauri/axum dep |
+| Interchange | `crates/simple-post-interchange/` | 导入导出转换层：外来格式 ↔ `domain` 标准格式。**`simple-post-mcp` 刻意不依赖它**（scope 内无 MCP 导入导出工具），故 MCP 二进制不必背上 YAML 解析器与两套外来格式模型。契约与已核实的陷阱见其 `README.md` |
 | MCP server | `crates/simple-post-mcp/` | JSON-RPC 2.0 dispatch (44 tools), axum HTTP daemon, stdio bridge |
 | Frontend | `src/` | React 18 + Vite 5 + Zustand 5 + Tailwind 3 + CodeMirror 6 |
+
+**Interchange: `ir` 不是 `domain` 的别名。** 三条边性质不同：`format → ir` **有损**（故必须走 `Diagnostic`，不能静默丢）；`ir → domain` 无损全函数（补 id / `root_id` / 时间戳）；`domain → ir` 是投影（host 不在 endpoint 上，导出得自己选环境）。IR 必须自有的三条理由：预览阶段节点**还没有 id**、`domain` 无处安放诊断、导出需跨 `nodes`/`endpoint_details`/`projects`/`environments` 四表。指纹去重算在 IR 上，故两种导入器互相认得。**不要**为它加 `SCHEMA_VERSION`。
 
 **The Tauri split, and why it exists.** `src-tauri` links `tauri` unconditionally, so a Linux build of it drags in `libwebkit2gtk` / GTK / X11 — which a container serving `serve-web` needs only to run a GUI it cannot display. The server half therefore lives in `crates/simple-post-server`, and the dependency points one way: `simple-post (Tauri) → simple-post-server → simple-post-core`. Three consequences worth respecting:
 

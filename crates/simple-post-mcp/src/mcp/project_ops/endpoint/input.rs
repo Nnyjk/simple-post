@@ -16,6 +16,7 @@ pub(super) fn parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyM
         "none" => BodyMode::None,
         "json" => BodyMode::Json,
         "form" => BodyMode::Form,
+        "multipart" => BodyMode::Multipart,
         "raw" => BodyMode::Raw,
         other => {
             return Err(AppError::Validation(format!(
@@ -28,7 +29,7 @@ pub(super) fn parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyM
 
 /// 线上接受的 `body_mode` 取值，与 [`simple_post_core::domain::BodyMode`] 的变体
 /// 一一对应；JSON Schema 与解析器共用这一份，改一处即可。
-pub(super) const BODY_MODE_VALUES: &[&str] = &["none", "json", "form", "raw"];
+pub(super) const BODY_MODE_VALUES: &[&str] = &["none", "json", "form", "multipart", "raw"];
 
 /// 线上接受的 `auth_type` 取值，对应 [`simple_post_core::domain::AuthType`] 的小写
 /// 变体名。

@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use super::{list_missing_vars, resolve_template};
+
 // ---- resolve_template --------------------------------------------
 
 #[test]
@@ -42,18 +43,17 @@ fn resolve_template_empty_input_returns_empty() {
 fn resolve_template_chinese_var_name_and_value() {
     let mut vars = HashMap::new();
     vars.insert("名字".into(), "小明".into());
-    // 注意：`\w+` 即 `[A-Za-z0-9_]+`，所以非 ASCII 名字不匹配标记语法，原样穿过。
+    // `\w+` 即 `[A-Za-z0-9_]+`，非 ASCII 名字不匹配标记语法；带空白的同样不算。
 
     let r = resolve_template("hi {{名字}}", &vars);
     assert_eq!(r.resolved, "hi {{名字}}");
-    // 标记内部的空白同样不算 word。
     let r = resolve_template("hi {{ name }}", &vars);
     assert_eq!(r.resolved, "hi {{ name }}");
 }
 
 #[test]
 fn resolve_template_empty_value_is_kept() {
-    // 空字符串条目**算命中**；替换必须产出空片段，而不是留下标记。
+    // 空字符串条目算命中，替换产出空片段而不是留下标记。
 
     let mut vars = HashMap::new();
     vars.insert("empty".into(), "".into());
@@ -64,35 +64,20 @@ fn resolve_template_empty_value_is_kept() {
 
 #[test]
 fn resolve_template_doubled_marker_does_not_recurse() {
-    // "No recursion" property: a substitution result that itself
-    // contains `{{...}}` markers must NOT be re-scanned in the
-    // same pass.
-    //
-    // The single-pass scanner finds the first `}}` it sees in
-    // `{{{{a}}}}`, considers the interior `{{a` a malformed token
-    // (because it contains `{`), and emits the marker verbatim. So
-    // the assertion below confirms two things at once:
-    //   1. Substituting `a = "{{b}}"` for an outer `{{a}}` produces
-    //      a string that still contains `{{b}}` (no second scan
-    //      pulled it in).
-    //   2. Running resolve_template on the already-expanded string
-    //      does NOT behave any differently —proving the resolver
-    //      is a pure single pass, idempotent on its own output.
+    // 替换结果里再出现的 `{{...}}` 不会被同一趟扫到：`a = "{{b}}"` 展开后仍是 `{{b}}`，
+    // 且对已展开的串再跑一次结果不变。
     let mut vars = HashMap::new();
     vars.insert("a".into(), "{{b}}".into());
     let r = resolve_template("{{a}}", &vars);
     assert_eq!(r.resolved, "{{b}}");
     assert!(r.missing.is_empty(), "missing = {:?}", r.missing);
 
-    // And the doubled-up case stays verbatim —the first `}}`
-    // wins, the marker is left untouched, and the input does not
-    // mutate at all.
+    // 叠写形状原样保留：第一个 `}}` 就截断，内层标记不算 word。
     let mut vars2 = HashMap::new();
     vars2.insert("a".into(), "X".into());
     let r2 = resolve_template("{{{{a}}}}", &vars2);
     assert_eq!(r2.resolved, "{{{{a}}}}");
     assert!(r2.missing.is_empty());
-    // No second pass swallowed the inner braces either.
     assert!(!r2.resolved.contains("X"));
 }
 
