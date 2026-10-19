@@ -1,0 +1,40 @@
+# Redocly 规则配置。`npm run lint:openapi` 用它。
+#
+# 原则：**关掉的每一条都要在这里写清为什么**，否则「关规则」会变成消错音的手段——
+# 下一个报错也会被加进这个文件，而不是去改生成器。本文件里关掉的三条都对应一个
+# 写在 issue #5 里的明确决策，其余一律按 `recommended` 原样执行。
+
+extends:
+  - recommended
+
+rules:
+  # ---- 刻意关闭 ------------------------------------------------------
+
+  # URL 是 per (环境 × 模块 × 服务) 的单元格，且**刻意没有任何回退层**：
+  # 该模块没配就是没有 URL。写到文档根就成了全局默认，等于让没配的模块借到兄弟模块
+  # 的地址——那正是这套模型要避免的跨模块串味。故 `servers` 逐 operation 携带，
+  # 文档根没有 `servers`。这条规则要求的正是我们不要的那个形状。
+  no-empty-servers: off
+
+  # `responses` 每个 operation 恒为 `200: {description: "OK"}`。本仓库没有响应
+  # schema 的可信数据源（`StoredResponse` 只存实际响应，`body.schema` UI 从不写），
+  # 编一个 `4XX` 出来看起来更完整，但它是**假的**：声称的响应范围没有依据。
+  # 见 issue #5 的「`responses` 合成默认，不猜」。
+  operation-4xx-response: off
+
+  # 我们不知道用户项目的许可证。`info.license` 只能由用户自己声明，导出器替他们
+  # 猜一个比不写更糟。
+  info-license: off
+
+  # tag 有两个来源：用户在请求上手填的 `EndpointDetail.tags`（只有名字），与集合名。
+  # 集合那一侧其实有 `description`，但搬过来就得先定「用户自己填了一个与某个集合同名的
+  # tag 时听谁的」——那是另一个决定。故产物里统一只写 `name`。
+  tag-description: off
+
+  # ---- 刻意保留（`recommended` 原样）---------------------------------
+  #
+  # 这一侧是真在查东西的，且都真的抓到过缺陷：
+  #   path-parameters-defined —— 曾报 4 处：路径模板参数一律被写成 `in: query`。
+  #   operation-operationId   —— 曾报 17 处：operation 完全没有 operationId。
+  #   security-defined        —— 曾报 2 处：无凭据的接口没有显式声明 `security: []`。
+  #   no-server-example.com   —— 会把 `example.com` 这类占位域名指出来。

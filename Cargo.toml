@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "src-tauri",
     "crates/simple-post-core",
+    "crates/simple-post-interchange",
     "crates/simple-post-mcp",
     "crates/simple-post-server",
 ]

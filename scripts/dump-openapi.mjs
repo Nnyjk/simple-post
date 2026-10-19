@@ -2,7 +2,7 @@
 // scripts/dump-openapi.mjs
 //
 // Generate an OpenAPI 3.1 document from the canonical
-// `public_route_specs()` table in `src-tauri/src/web_api/spec.rs`.
+// `public_route_specs()` table in `crates/simple-post-server/src/web_api/spec.rs`.
 //
 // Why parse Rust source instead of calling the binary?
 //   - The OpenAPI doc should stay valid even when the Rust crate fails
@@ -34,7 +34,9 @@ import { dirname, join } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
-const SRC_DIR = join(ROOT, 'src-tauri', 'src');
+// web_api moved to the headless server crate when the Tauri split happened;
+// the table moved with it.
+const SRC_DIR = join(ROOT, 'crates', 'simple-post-server', 'src');
 const WEB_API_FILE = join(SRC_DIR, 'web_api.rs');
 const WEB_API_DIR = join(SRC_DIR, 'web_api');
 
@@ -66,7 +68,7 @@ function findSpecSource() {
     if (text.includes(SPEC_FN)) return text;
   }
   throw new Error(
-    'public_route_specs() not found in src-tauri/src/web_api{.rs,/} — has the function been renamed?',
+    'public_route_specs() not found in crates/simple-post-server/src/web_api{.rs,/} — has the function been renamed?',
   );
 }
 
@@ -203,7 +205,9 @@ out.push('  - PUT    /api/preferences');
 out.push('x-shape-references:');
 out.push('  note: |');
 out.push('    Request / response shapes referenced via `x-request-shape` / `x-response-shape`');
-out.push('    are domain types defined in `src-tauri/src/domain.rs` and serialised with');
+out.push(
+  '    are domain types defined in `crates/simple-post-core/src/domain.rs` and serialised with',
+);
 out.push('    `#[serde(rename_all = "camelCase")]`.');
 out.push('    Worked curl examples: see the README `serve-web` section.');
 

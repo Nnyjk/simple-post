@@ -102,6 +102,23 @@ jobs:
       - name: Unit tests (auto-discovered *.test.ts)
         run: npm test
 
+      # 导出的 OpenAPI 文档要过第三方 linter。文档由 Rust 生成，所以这一步要先跑
+      # 一次 `cargo run --example export_sample`——**不是**提交一份会长过期的快照，
+      # 也不是提交一份只在本地跑过的命令。规则取舍写在仓库根的 `redocly.yaml` 里，
+      # 每关掉一条都有理由。
+      #
+      # 工具链装在这里而不是复用 rust job：那样要么 web job 要单独编一遍（它只有三个
+      # crate 进了这个 example），要么 linter 得用 npx 现拉、版本与本地漂移。留在这里
+      # 的代价是 web job 多一次 rust 工具链安装，但它换来的是 CI 与本地跑**同一条命令**。
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          cache-target: true
+
+      - name: OpenAPI lint (Redocly, over a freshly generated document)
+        run: npm run lint:openapi
+
       - name: Production build (vite)
         run: npm run build
 

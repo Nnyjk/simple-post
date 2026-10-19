@@ -1,6 +1,6 @@
 // 领域类型，与 simple_post_core::domain 一一对应
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS' | 'TRACE';
 
 export const HTTP_METHODS: HttpMethod[] = [
   'GET',
@@ -10,6 +10,7 @@ export const HTTP_METHODS: HttpMethod[] = [
   'DELETE',
   'HEAD',
   'OPTIONS',
+  'TRACE',
 ];
 
 export interface KeyValue {
@@ -20,11 +21,26 @@ export interface KeyValue {
   description?: string;
 }
 
-export type BodyMode = 'none' | 'json' | 'form' | 'raw';
+export type BodyMode = 'none' | 'json' | 'form' | 'multipart' | 'raw';
+
+/**
+ * `multipart` 模式下的一个分片。
+ *
+ * 分片数组存在 `RequestBody.content` 里（序列化后的 JSON），而不是另开一个字段——
+ * 那会改动 `body_json` 的形状，而这里复用既有的 `content` 就够了。
+ */
+export interface MultipartPart {
+  name: string;
+  value: string;
+  /** 有值即文件分片：`Content-Disposition` 带上 `filename=`，并默认 `application/octet-stream`。 */
+  filename?: string;
+  /** 分片自己的 Content-Type；文件分片缺省为 `application/octet-stream`。 */
+  contentType?: string;
+}
 
 export interface RequestBody {
   mode: BodyMode;
-  // json / form / raw 模式下的原始内容
+  // json / form / raw 模式下的原始内容；multipart 模式下是一个 MultipartPart[] 的 JSON 文本
   content: string;
   // json 模式可选：序列化后的 JSON Schema
   schema?: string;

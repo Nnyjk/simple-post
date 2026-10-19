@@ -8,15 +8,22 @@ Docs are partly Chinese (`README.md`, the two crate READMEs); code/identifiers a
 
 ## Architecture & Data Flow
 
-Five runtime pieces:
+Six runtime pieces:
 
 | Piece | Path | Role |
 |---|---|---|
 | Tauri shell + CLI | `src-tauri/` | Desktop GUI and the `#[tauri::command]` surface (`commands/`). Everything else is re-exported from the server crate below, so `crate::daemon_supervisor` / `crate::web_api` still resolve here |
 | Server host | `crates/simple-post-server/` | `serve-web` REST/SPA server, daemon supervisor, port registry, bearer auth, wire DTOs. **No Tauri by default** — this is what the Docker image builds |
 | Core library | `crates/simple-post-core/` | Domain models, SQLite (`db/`), `http_executor`, `permissions`, `mcp_metrics`, `error` — headless, no Tauri/axum dep |
+| Interchange | `crates/simple-post-interchange/` | 导入导出转换层：外来格式 ↔ `domain` 标准格式。**`simple-post-mcp` 刻意不依赖它**（scope 内无 MCP 导入导出工具），故 MCP 二进制不必背上 YAML 解析器与两套外来格式模型。契约与已核实的陷阱见其 `README.md` |
 | MCP server | `crates/simple-post-mcp/` | JSON-RPC 2.0 dispatch (44 tools), axum HTTP daemon, stdio bridge |
 | Frontend | `src/` | React 18 + Vite 5 + Zustand 5 + Tailwind 3 + CodeMirror 6 |
+
+**Interchange: `ir` 不是 `domain` 的别名。** 三条边性质不同：`format → ir` **有损**（故必须走 `Diagnostic`，不能静默丢）；`ir → domain` 无损全函数（补 id / `root_id` / 时间戳）；`domain → ir` 是投影（host 不在 endpoint 上，导出得自己选环境）。IR 必须自有的三条理由：预览阶段节点**还没有 id**、`domain` 无处安放诊断、导出需跨 `nodes`/`endpoint_details`/`projects`/`environments` 四表。指纹去重算在 IR 上，故两种导入器互相认得。**不要**为它加 `SCHEMA_VERSION`。
+
+**Interchange 的依赖方向是 `server → interchange → core`**，它自己不含 Tauri 也不含 axum。导入 / 导出的**编排**（取内容、折成线形状、落库、产出文档）住在 `crates/simple-post-server/src/interchange_api.rs`，**不是**在 Tauri command 里 —— 这是 dual-transport invariant 的直接后果：那一层若写在某一侧，另一侧会静默少一半。四个薄壳入口两处都有（`src-tauri/src/commands/interchange.rs` 与 `web_api/routes/interchange.rs`），它们都只调 `interchange_api` 的四个函数。`interchange_api::import_commit` 走 `commit_in_tx` 而不是 `commit`：环境必须与树同事务，而 `with_tx` 闭包拿不到第二个连接（`BEGIN IMMEDIATE` 会自死锁）。
+
+**Interchange 的 `IrNode.key` 是「IR 还没成为节点」的那一半身份**：导入 = 源格式的位置指针（与 `Diagnostic::pointer` 同一套寻址纪律），导出 = `nodes.id`。它是勾选集的成员身份，也是跨两侧引用一个条目的唯一句柄。`#[serde(default)]` 保证没有 `key` 的旧 IR 仍能反序列化。
 
 **The Tauri split, and why it exists.** `src-tauri` links `tauri` unconditionally, so a Linux build of it drags in `libwebkit2gtk` / GTK / X11 — which a container serving `serve-web` needs only to run a GUI it cannot display. The server half therefore lives in `crates/simple-post-server`, and the dependency points one way: `simple-post (Tauri) → simple-post-server → simple-post-core`. Three consequences worth respecting:
 
@@ -58,15 +65,16 @@ Dev split: Vite `5173` proxies `/api` + `/mcp` to axum `4173`.
 
 ## Key Directories
 
-- `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/` (incl. `WorkspaceShell.tsx`), `response-viewer/`, `welcome/`
+- `src/features/` — feature panels: `http-tester/`, `project-tree/`, `settings/`, `command-palette/`, `top-bar/`, `workspace/` (incl. `WorkspaceShell.tsx`), `response-viewer/`, `welcome/`, `interchange/` (the import/export dialog: `useTransfer` session state, `TransferTree`, `TransferDialog` + the `TransferDialog-lazy.tsx` shell `ProjectTree` lazy-loads)
 - `src/stores/` — Zustand: `app-store.ts` barrel composing `bootstrap-slice`, `crud-slice`, `ui-slice`, `mcp-slice`, `dirty-tabs-slice` + `store-types.ts`
-- `src/lib/` — `tauri-commands.ts` (dual-transport dispatch) + `tauri-commands/` (`commands.ts` holds the `COMMANDS` registry, `web-routes.ts` the `WEB_ROUTES` specs, `bearer.ts` the localStorage bearer), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`
+- `src/lib/` — `tauri-commands.ts` (dual-transport dispatch) + `tauri-commands/` (`commands.ts` holds the `COMMANDS` registry, `web-routes.ts` the `WEB_ROUTES` specs, `bearer.ts` the localStorage bearer), `http.ts`, `http-build.ts`, `tree-index.ts` (the shared `parentId → children` index), `mcp-types.ts`, `use-mcp-status.ts`, `interchange-types.ts` (transfer wire types), `transfer-file-save.ts` (export save: native dialog under Tauri, Blob in the browser)
 - `src/components/ui/` — shared primitives (`method-picker`, `tabs`, `dialog`, …)
 - `src/types/domain.ts` — TS mirrors of Rust domain types
 - `crates/simple-post-core/src/db/` — per-entity SQL modules (`nodes.rs` is a facade over `nodes/{read,write,tree,placement}.rs`, which together hold the whole resource tree; `endpoint_details.rs` its endpoint-only configuration) + `pool.rs` / `schema.rs` + `schema.sql` + `fixtures.json` (test-only)
 - `crates/simple-post-mcp/src/mcp/` — tool handlers (`project_ops/`, `env_ops.rs`, `http_ops.rs`)
+- `crates/simple-post-interchange/src/` — `ir.rs` / `fingerprint.rs` / `project.rs` / `diagnostics.rs` / `spec.rs` (the vocabulary both directions must agree on); `commit/` (`mod.rs` the transaction, `service.rs` `plan_service`, `dedupe.rs` the fingerprint fate), `import/{postman,openapi}/` parse, `openapi/` generates the exported document, `openapi_model_test.rs` checks it against the official OpenAPI 3.0 model; `fixtures/sample-exchange.json` is the one tree both that test and `examples/export_sample.rs` read. Tests sit beside their source as `mod_test.rs` / `tree_test.rs` / …; anything shared across several of them lives in one `support.rs` next to them
 - `src-tauri/src/` — `commands/` (Tauri handlers, one module per resource; `dto.rs` is now only a re-export of the server crate's DTOs)
-- `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs` + `port_registry.rs` (both facades over same-named module dirs), `auth.rs`, `dto.rs`, `http_config.rs`, `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
+- `crates/simple-post-server/src/` — `web_api/` (REST + SPA host), `daemon_supervisor.rs` + `port_registry.rs` (both facades over same-named module dirs), `auth.rs`, `dto.rs`, `http_config.rs`, `interchange_api.rs` (the import/export orchestration both transports share), `lib.rs` (`run_mcp` / `run_serve_web`), `main.rs` (the Tauri-free CLI)
 - `scripts/` — dev/test/build utilities (see below)
 - `.scratch/` — gitignored agent scratch space (session state, JSON-RPC fixtures)
 
@@ -77,7 +85,8 @@ npm run dev            # Vite dev server → http://127.0.0.1:5173
 npm run dev:split      # Vite + `cargo run -- serve-web` (4173) concurrently — use this for full-backend work
 npm run build          # tsc -b && vite build → dist/
 npm run typecheck      # tsc -b only (no bundle)
-npm run check          # one-shot quality gate: format:check → lint → typecheck → test → fmt:check → clippy
+npm run check          # one-shot quality gate: format:check → lint → typecheck → test → lint:openapi → fmt:check → clippy
+npm run lint:openapi   # regenerate an exported OpenAPI doc via the cargo example, then Redocly-lint it
 npm run lint[:fix]     # ESLint 10 flat config (eslint.config.js)
 npm run format         # Prettier --write (.prettierrc + .prettierignore); `format:check` for CI
 npm run fmt[:check]    # cargo fmt --all [--check]
@@ -135,6 +144,14 @@ Keep `npm run check` green locally before pushing — CI runs the same checks.
 
 **Dual-transport invariant.** Any new backend command needs **five** coordinated edits: handler in `src-tauri/src/commands/<resource>.rs` (re-exported by `commands/mod.rs`, which must use **glob** `pub use` — an item list drops the `#[macro_export]`ed `__cmd__<name>` macro and `generate_handler!` fails with E0433), registration in `src-tauri/src/lib.rs`, a `COMMANDS` constant in `src/lib/tauri-commands.ts`, a route in `crates/simple-post-server/src/web_api/` (the `.route()` registrations live in `mod.rs::build_router`, the handler in the matching `web_api/routes/<resource>.rs`), and a `WEB_ROUTES` entry (if browser-callable). Missing one side breaks either desktop or web mode silently. A DTO both sides need belongs in `crates/simple-post-server/src/dto.rs`, **not** in `commands/` — see the Tauri split above.
 
+**The transfer dialog is one component, not two.** Import and export share `TransferDialog` / `TransferTree` / `TransferNode` / `TransferEndpoint`; the modes differ in the source picker, two export-only settings, and the confirming action. Don't fork the tree or the types per mode — a shared filename is not a shared component. Its state lives in the `useTransfer` hook, **not** a Zustand slice: only `ProjectTree` can open it, so there is no second reader.
+
+**Exported OpenAPI is checked by two outsiders, not by our own parser.** The importer in `simple-post-interchange` is ours too, so it is permanently lenient about its own generator's output — a missing `responses` yields no error, just one silently-absent field in an already-invalid document. So: `openapiv3` (dev-dep) validates against the official model inside `cargo test`, and Redocly (`npm run lint:openapi`, wired into the CI web job) checks rules. **Both read `crates/simple-post-interchange/fixtures/sample-exchange.json`** — the Rust test and `examples/export_sample.rs` start from the same tree, so two hand-written specimens would each cover half of it. `npm run lint:openapi` regenerates the document through the cargo example rather than committing a snapshot, because snapshots go stale. Rule opt-outs live in `redocly.yaml` and each one states why; silencing a rule is not how the next finding gets fixed.
+
+**Export save is native-only, and the split is deliberate.** Tauri goes through `tauri-plugin-dialog` + `tauri-plugin-fs` (dynamically imported — they have no browser implementation, so a static import would make `serve-web` bundle dead Tauri code and throw at runtime); the browser falls back to a Blob + `<a download>`. The `fs` capability is granted **per verb and scoped to `$HOME/**/*`** — `fs:default` would open read and write over the whole user directory for a feature that writes one text file.
+
+**`reloadWorkspace` vs `loadWorkspace`.** The second layer is idempotent (`nodesLoaded` / in-flight guard) so `bootstrap`, `openProject` and the retry button can each call it uncoordinated. An import writes dozens of rows in one transaction and gets back only ids, so refreshing with the idempotent one silently leaves the tree stale. Use `reloadWorkspace` there; do not remove the guard from `loadWorkspace` to "fix" it, or a tree failure strands the boot splash.
+
 **Tauri macro gotcha.** `http_request` in `src-tauri/src/lib.rs` must stay **non-`pub`** — marking it `pub` triggers a `__cmd__http_request` identifier collision (E0255) between `#[tauri::command]` and `generate_handler!`.
 
 **App / window icons have no config knob.** There is no `icon` field on `WindowConfig` and no `defaultWindowIcon` under `app` in Tauri 2 — adding one fails the build with `unknown field` at `tauri-build`. The single lever is `bundle.icon`: `tauri-build` picks the first `.ico` from it and embeds it into the exe as resource `32512`, and tao registers window classes with a null icon, so Windows resolves the taskbar icon from that executable resource. Changing the taskbar icon therefore means **editing `src-tauri/app-icon.svg` and re-running `npm run icons`** — not editing `tauri.conf.json`. Two gotchas in that pipeline: `icon.icns` is not byte-reproducible (`tauri icon` stamps it, so it always diffs), and `tauri icon` parses its SVG with a strict XML parser whose comments may not contain `--`, which makes writing CSS custom-property names like `--primary` in a doc comment fail the whole run.
@@ -186,7 +203,9 @@ Gate B has two ways to silently become a no-op, and both shipped:
 
 **The tab strip's active-indicator is derived per frame, never measured once.** `WorkspaceTabs.tsx` keeps one persistent bar at strip level and, while anything that can move a tab may be animating, re-reads the active tab's *live* rect every animation frame and eases toward it (`BAR_APPROACH` / `BAR_SETTLE_MS`). Do not "simplify" this back to `offsetLeft` + `gsap.to`. Three things move those tabs and all three can be mid-flight at the moment a one-shot measurement is taken: the Flip tween (with `absolute: true` every tweened tab reports its **pre-commit** position), the CSS width transition on tab mode change (200ms, changes widths *and* every neighbour's offset), and the strip's `scrollLeft`. Measuring once is what produced the bar drifting to the wrong x and keeping a stale width when tabs were closed. The bar's x is in **content** coordinates — add `strip.scrollLeft` back, or it drifts by exactly the amount scrolled.
 
-**Semantic token pairing — a `-foreground` token is a colour for text *on* the saturated fill, not on a surface.** `--destructive-foreground` is `0 0% 98%` in **both** theme scopes (`globals.css`), so pairing it with a light surface produces white-on-white: `bg-background/85 text-destructive-foreground` renders as an invisible badge in light mode and as colourless text with no error signal in dark. This shipped once on the body editor's pinned validation pill. Two correct shapes: **solid** `bg-destructive text-destructive-foreground` (identical in both themes, ~4.8:1, nothing overrides either token), or a tinted surface with the tokens the dark scope *does* lighten — `--success-foreground` / `--warning-foreground`, the convention the tab badges use. Note `.alert-error-inline` in `globals.css` still carries the broken combination; it is currently unused, so fix it if you wire it up rather than copying it.
+**A Tauri command's args are the REST body, flattened field by field.** `#[tauri::command]` binds each parameter **by name** (the macro runs it through `to_lower_camel_case` to get the payload key) — it never deserializes the payload. The renderer sends one flat camelCase object in both shapes, and the REST side feeds the whole thing to `Json<SomeOpts>`, so the parameter list must spell out that struct's fields one by one. Writing `opts: ImportPreviewOpts` instead compiles, leaves every Rust test green, and keeps the web shape perfect — then fails *every* desktop call with `invalid args … missing required key opts`. The regression guards are `src-tauri/src/commands/interchange_test.rs` (source shape, renderer keys, and serde's view of the names, all compared against `dto.rs`) and `crates/simple-post-server/src/web_api/routes/interchange_test.rs` (real requests).
+
+**Semantic token pairing — a `-foreground` token is a colour for text *on* the saturated fill, not on a surface.** `--destructive-foreground` exists to sit on the solid `--destructive` fill, and it **swaps polarity** between scopes: `0 0% 100%` (white) in light, `0 0% 10%` (near-black) in dark, because `--destructive` itself swaps with it (`5 59% 44%` dark red ↔ `354 100% 80%` light pink). Pairing it with a *tint* of that fill therefore breaks one scope: `bg-destructive/10 text-destructive-foreground` is white-on-pale-pink in light mode and merely acceptable in dark. Two correct shapes: **solid** `bg-destructive text-destructive-foreground` (both tokens together, ~4.8:1, nothing overrides either), or a tinted surface with `--destructive` as the text — it is the only token that lightens in the dark scope, so it reads on a 5–10% tint in both. `success` / `warning` are the opposite case: their `-foreground` **is** the text tier (30% light / 75% dark) and the base value only reads as a border, which is why those badges use `bg-success/15 text-success-foreground`. `.alert-error-inline` in `globals.css` and `IconTile`'s `danger` tone both carry the second shape; copy either, not the pairing.
 
 **Reverse-proxy base path is a runtime fact, not a build constant.** `serve-web --public-base-path /sp` `nest`s the *entire* router under the prefix — `/api/*`, `/mcp`, and the three health probes all move to `/sp/…` together. Two consequences that are easy to get wrong:
 

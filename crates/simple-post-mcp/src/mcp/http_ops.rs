@@ -254,11 +254,26 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         simple_post_core::oauth2::inject(cfg, &token, &mut headers, &mut url);
     }
 
+    // multipart 在这里才成形：boundary 必须现生成，Content-Type 与 body 用同一个值。
+    // `resolve_endpoint` 只做变量替换，故它给不出带 boundary 的 Content-Type。
+    //
+    // 判据读 `resolved.body_mode`（**套过 overrides 的那个 mode**），不读端点行里存的那个：
+    // 调用方给 `overrides.body` 就能换掉 mode，而 Content-Type 那边读的是
+    // `resolve_endpoint` 内部同一个 eff_body.mode。两边读不同的值会出两种坏结果——
+    // 存 json / 覆盖 multipart 时整条请求没有 Content-Type 且分片原样发出；存 multipart /
+    // 覆盖 json 时 body 被换成只有收尾分隔符的壳，调用方传的内容静默消失。
+    let mut body = resolved.body.clone();
+    if resolved.body_mode == simple_post_core::domain::BodyMode::Multipart {
+        body = body
+            .take()
+            .map(|content| multipart::apply(&mut headers, &content));
+    }
+
     let input = HttpRequestInput {
         method: method_str.clone(),
         url: url.clone(),
         headers: headers.clone(),
-        body: resolved.body.clone(),
+        body,
         timeout_ms: timeout_ms.unwrap_or(30_000),
         follow_redirects: follow_redirects.unwrap_or(true),
         max_response_size_kb: max_kb.unwrap_or(10_240),
@@ -301,6 +316,7 @@ static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::doma
 
 mod envelope;
 mod input;
+mod multipart;
 
 pub(crate) use input::flatten_string_map;
 
@@ -319,3 +335,7 @@ mod tests;
 #[cfg(test)]
 #[path = "http_ops/oauth2_test.rs"]
 mod oauth2_tests;
+
+#[cfg(test)]
+#[path = "http_ops/multipart_mode_test.rs"]
+mod multipart_mode_tests;

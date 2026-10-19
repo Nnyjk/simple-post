@@ -3,6 +3,7 @@
 
 pub(crate) mod base_url_defs;
 pub(crate) mod environments;
+pub(crate) mod interchange;
 pub(crate) mod mcp;
 pub(crate) mod nodes;
 pub(crate) mod oauth2;
@@ -20,6 +21,10 @@ pub(crate) use environments::{
     environments_create, environments_delete, environments_list, environments_rename_var,
     environments_set_active, environments_set_module_baseurl, environments_set_var,
     environments_update,
+};
+pub(crate) use interchange::{
+    interchange_export_document, interchange_export_preview, interchange_import_commit,
+    interchange_import_preview,
 };
 pub(crate) use mcp::{
     mcp_capability_get, mcp_capability_list_tools, mcp_capability_put, mcp_healthz,

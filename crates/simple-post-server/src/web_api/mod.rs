@@ -83,6 +83,12 @@ async fn healthz() -> Json<HealthDto> {
 /// `state.password` 为 `Some` 时给除 `auth::is_public_path` 公开名单外的
 /// 全部路由装上 bearer 中间件。`state.base_path` 为 `Some` 时把整棵 router
 /// `nest` 到该前缀下，供反代把 SPA 挂在 `https://host/sp/`。两者默认 `None`。
+/// 导入导出四条路由的请求体上限。只给这四条，不给整棵 `api` router——其余动词都是
+/// 「按 id 取一行」，抬它们的全局上限只会扩大暴露面。
+fn body_limit() -> axum::extract::DefaultBodyLimit {
+    axum::extract::DefaultBodyLimit::max(crate::interchange_api::TRANSFER_BODY_LIMIT_BYTES)
+}
+
 pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // 先取出 auth 字段，`Arc::new` 之后结构体就被移走了。
     let password = state.password.clone();
@@ -187,6 +193,35 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route(
             "/api/response-history/{endpointId}",
             get(response_history_list).delete(response_history_clear),
+        )
+        // ---- interchange（导入 / 导出）----
+        //
+        // **必须落在 `auth::is_public_path` 名单之外**，理由与 `/api/oauth2/token`
+        // 同族：commit 写库，且 import/preview 的 URL 模式会按用户给的地址出站请求。
+        // 浏览器形态下这些是唯一一条能读任意用户指定 URL 的通道。
+        //
+        // 全部 POST：请求体装得下整份文档（一份 3 MB 的 OpenAPI yaml），而这四个
+        // 动词里没有一个是「按 id 取一行」。
+        //
+        // 故四条都要显式抬 `DefaultBodyLimit`：axum 的默认值是 2 MB，而它们的请求体
+        // 装的是整份文档。少了这一层，超大文档在浏览器形态下回的是 413（传输层错误，
+        // 读不出「文档太大」），桌面形态却能正常导入——**两侧行为分叉且无一声报错**。
+        // 上限值与 `FETCH_MAX_KB` 同源，见 `interchange_api::TRANSFER_BODY_LIMIT_BYTES`。
+        .route(
+            "/api/interchange/import/preview",
+            post(interchange_import_preview).layer(body_limit()),
+        )
+        .route(
+            "/api/interchange/import/commit",
+            post(interchange_import_commit).layer(body_limit()),
+        )
+        .route(
+            "/api/interchange/export/preview",
+            post(interchange_export_preview).layer(body_limit()),
+        )
+        .route(
+            "/api/interchange/export/document",
+            post(interchange_export_document).layer(body_limit()),
         )
         // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))

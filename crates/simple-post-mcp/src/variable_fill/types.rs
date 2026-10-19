@@ -5,7 +5,7 @@
 
 use serde::Deserialize;
 
-use simple_post_core::domain::{AuthConfig, HttpMethod, RequestBody};
+use simple_post_core::domain::{AuthConfig, BodyMode, HttpMethod, RequestBody};
 /// 调用方在发送时给出的覆盖值。每个字段都是 `Option<T>`，于是「没覆盖」与「覆盖成
 /// None / 空」是两回事。让渲染进程能做 curl 式的临时改动而不改写已存的端点。
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -46,6 +46,13 @@ pub struct ResolvedEndpoint {
     pub headers: Vec<(String, String)>,
     pub params: Vec<(String, String)>,
     pub body: Option<String>,
+    /// **套用过 `overrides` 之后**的请求体模式，不是端点行里存的那个。
+    ///
+    /// multipart 的装配要靠它：`auto_content_type` 对 `Multipart` 返回 `None`
+    /// （boundary 只能现生成），由发送方在 execute 之前补上。而调用方给 `overrides.body`
+    /// 就能换掉 mode，所以发送方若回头读库里的 `endpoint.body.mode`，同一个请求里
+    /// Content-Type 依据的 mode 与装配依据的 mode 就可能不是同一个。
+    pub body_mode: BodyMode,
     pub auth: AuthConfig,
     pub missing_vars: Vec<String>,
 }

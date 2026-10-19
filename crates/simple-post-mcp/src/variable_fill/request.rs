@@ -103,6 +103,10 @@ fn auto_content_type(mode: &simple_post_core::domain::BodyMode) -> Option<&'stat
         BodyMode::Form => Some("application/x-www-form-urlencoded"),
         BodyMode::Raw => Some("text/plain"),
         BodyMode::None => None,
+        // multipart 的 Content-Type 必须带 boundary，而 boundary 每次请求现生成，
+        // 纯函数给不出来。返回不带 boundary 的值等于发出一个服务端解析不了的请求，
+        // 故这条留空，由发送方（`mcp::http_ops`）在 execute 之前补上。
+        BodyMode::Multipart => None,
     }
 }
 

@@ -25,7 +25,15 @@ pub enum BodyMode {
     #[default]
     None,
     Json,
+    /// `application/x-www-form-urlencoded`。不是 multipart。
     Form,
+    /// `multipart/form-data`。线上是 `multipart`。
+    ///
+    /// 与 [`BodyMode::Form`] 是两种东西：multipart 的 Content-Type 必须带 boundary，
+    /// 而 boundary 每次请求现生成，所以 Content-Type 不可能是静态返回值。分片结构存
+    /// 在 [`RequestBody::content`] 里，是一个 JSON 数组；装配在
+    /// `src/lib/multipart.ts` 与 `mcp/http_ops/multipart.rs`。
+    Multipart,
     Raw,
 }
 

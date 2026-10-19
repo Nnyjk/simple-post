@@ -39,9 +39,10 @@ const SIZE_CLASS: Record<IconTileSize, string> = {
  * 也正是 `Badge` 的 success / warning 变体在同一淡色底上用的。见 AGENTS.md 的语义
  * token 配对说明。
  *
- * `danger` 刻意不守这条规则：`--destructive-foreground` 在*两个*作用域里都是
- * `0 0% 100%`，配淡色底在亮色模式下就是白底白字；而 `--destructive` 的 5 59% 44%
- * 在该淡色底上两种主题都过 ~5:1。
+ * `danger` 刻意不守这条规则：`--destructive-foreground` 是**实心**填色上的文字档，
+ * 亮色纯白 `0 0% 100%` / 暗色近黑 `0 0% 10%`；配淡色底在亮色模式下就是白底白字。
+ * 而 `--destructive`（亮色 5 59% 44% / 暗色 354 100% 80%）是该作用域里唯一被提亮的
+ * token，在该淡色底上两种主题都过 ~5:1。
  */
 const TONE: Record<NonNullable<IconTileProps['tone']>, { bg: string; text: string }> = {
   default: { bg: 'bg-muted/60', text: 'text-muted-foreground' },
