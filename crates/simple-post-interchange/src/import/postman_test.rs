@@ -8,6 +8,24 @@ use simple_post_core::domain::{ApiKeyLocation, AuthType, BodyMode};
 
 use super::*;
 use crate::diagnostics::Severity;
+use crate::ir::IrEndpoint;
+
+/// 把一棵交换里的端点展平，顺序 = 模块顺序 + 其内声明顺序。
+///
+/// 顶层散落的请求现在**共用一个模块**（见 `LOOSE_KEY`），所以按 `modules[i].endpoints[0]`
+/// 读会反复读到同一个请求。用这个走查器才不会把「形状变了」误读成「用例坏了」。
+fn endpoints_in_order(ex: &Exchange) -> Vec<&IrEndpoint> {
+    let mut out = Vec::new();
+    let mut stack: Vec<&IrCollection> = ex.modules.iter().flat_map(|m| &m.collections).collect();
+    for m in &ex.modules {
+        out.extend(m.endpoints.iter());
+    }
+    while let Some(c) = stack.pop() {
+        out.extend(c.endpoints.iter());
+        stack.extend(c.collections.iter().rev());
+    }
+    out
+}
 
 /// 一份真实形状的集合：一个顶层 folder（内含 sub-folder 与请求）、一个直接挂顶层的请求。
 fn collection_fixture() -> Value {
@@ -104,7 +122,7 @@ fn a_real_collection_lands_as_modules_collections_and_endpoints() {
         ex.diagnostics
     );
 
-    // 顶层每个 item 各成一个模块。
+    // 顶层每个 **folder** 各成一个模块。
     assert_eq!(ex.modules.len(), 2);
     let m = &ex.modules[0];
     assert_eq!(m.key, "/item/0");
@@ -142,9 +160,10 @@ fn a_real_collection_lands_as_modules_collections_and_endpoints() {
     assert_eq!(create.auth.kind, AuthType::Bearer);
     assert_eq!(create.auth.bearer.as_deref(), Some("{{api_token}}"));
 
-    // 直接挂顶层的请求也成一个模块。
+    // 直接挂在顶层的请求并进**同一个**模块，名字取集合名 —— 不是各自一个集合。
     let root_module = &ex.modules[1];
-    assert_eq!(root_module.key, "/item/1");
+    assert_eq!(root_module.key, "/item");
+    assert_eq!(root_module.name, "订单服务");
     assert_eq!(root_module.endpoints.len(), 1);
     assert_eq!(root_module.endpoints[0].key, "/item/1/request");
     assert_eq!(root_module.endpoints[0].path, "/healthz");
@@ -328,12 +347,14 @@ fn other_body_modes_land_where_the_sender_expects_them() {
     }));
 
     let ex = &parsed.exchange;
-    assert_eq!(ex.modules[0].endpoints[0].body.mode, BodyMode::Form);
-    assert_eq!(ex.modules[0].endpoints[0].body.content, "a=1&b=2");
-    assert_eq!(ex.modules[1].endpoints[0].body.mode, BodyMode::Raw);
-    assert_eq!(ex.modules[1].endpoints[0].body.content, "hello");
-    assert_eq!(ex.modules[2].endpoints[0].body.mode, BodyMode::None);
-    assert_eq!(ex.modules[3].endpoints[0].body.mode, BodyMode::None);
+    let eps = endpoints_in_order(ex);
+    assert_eq!(eps.len(), 4, "四条顶层散落的请求都进了同一个模块");
+    assert_eq!(eps[0].body.mode, BodyMode::Form);
+    assert_eq!(eps[0].body.content, "a=1&b=2");
+    assert_eq!(eps[1].body.mode, BodyMode::Raw);
+    assert_eq!(eps[1].body.content, "hello");
+    assert_eq!(eps[2].body.mode, BodyMode::None);
+    assert_eq!(eps[3].body.mode, BodyMode::None);
 
     // graphql 没有对应形态，必须出声。
     assert_eq!(ex.diagnostics.len(), 1);
@@ -398,12 +419,14 @@ fn auth_payloads_are_only_read_for_the_selected_scheme() {
     }));
 
     let ex = &parsed.exchange;
-    let basic = &ex.modules[0].endpoints[0].auth;
+    let eps = endpoints_in_order(ex);
+    assert_eq!(eps.len(), 4);
+    let basic = &eps[0].auth;
     assert_eq!(basic.kind, AuthType::Basic);
     assert_eq!(basic.basic.as_ref().unwrap().username, "u");
     assert_eq!(basic.basic.as_ref().unwrap().password, "p");
 
-    let apikey = &ex.modules[1].endpoints[0].auth;
+    let apikey = &eps[1].auth;
     assert_eq!(apikey.kind, AuthType::Apikey);
     let ak = apikey.apikey.as_ref().unwrap();
     assert_eq!(ak.key, "X-Key");
@@ -411,7 +434,7 @@ fn auth_payloads_are_only_read_for_the_selected_scheme() {
     assert_eq!(ak.in_location, ApiKeyLocation::Query);
 
     // cookie 位置表达不了：整段丢弃 + 出声，不猜成 header。
-    assert_eq!(ex.modules[2].endpoints[0].auth.kind, AuthType::None);
+    assert_eq!(eps[2].auth.kind, AuthType::None);
     assert_eq!(ex.diagnostics.len(), 1);
     assert_eq!(ex.diagnostics[0].severity, Severity::Warn);
     assert_eq!(
@@ -419,7 +442,7 @@ fn auth_payloads_are_only_read_for_the_selected_scheme() {
         Some("apikey auth（in: cookie）")
     );
 
-    assert_eq!(ex.modules[3].endpoints[0].auth.kind, AuthType::None);
+    assert_eq!(eps[3].auth.kind, AuthType::None);
 }
 
 #[test]
@@ -584,14 +607,59 @@ fn an_unnamed_item_falls_back_to_its_url_then_to_placeholder() {
         ]
     }));
     let ex = &parsed.exchange;
-    // 缺 name 时退回请求的 raw URL。
-    assert_eq!(ex.modules[0].name, "https://api.example.com/nameless");
-    assert_eq!(ex.modules[1].name, "https://api.example.com/x");
+    let eps = endpoints_in_order(ex);
+    // 两条顶层散落的请求并进同一个模块，模块名取集合名；**接口**自己的名字仍按 raw URL 兜底。
+    assert_eq!(ex.modules.len(), 2, "两个散落请求并一个，再加那个文件夹");
+    assert_eq!(ex.modules[0].key, LOOSE_KEY);
+    assert_eq!(ex.modules[0].name, "n");
+    assert_eq!(eps[0].name, "https://api.example.com/nameless");
+    assert_eq!(eps[1].name, "https://api.example.com/x");
     // 文件夹没有请求可退，只能叫「未命名」。
-    assert_eq!(ex.modules[2].name, "未命名");
-    assert_eq!(ex.modules[2].endpoints[0].name, "x");
+    assert_eq!(ex.modules[1].name, "未命名");
+    assert_eq!(eps[2].name, "x");
     // 空容器不进树：预览里挂一个什么都没有的模块只会让人以为少导了东西。
-    assert_eq!(ex.modules.len(), 3);
+    assert_eq!(ex.endpoint_count(), 3);
+}
+
+/// 顶层散落的请求共用一个分组；folder 仍各成一个。
+///
+/// 这条与 `import::openapi::tests::each_tag_becomes_one_group_and_the_untagged_ones_share_another`
+/// 是同一条纪律的两侧。曾经的形状是「每个顶层 item 一个模块」，于是一份把请求平铺在根上的
+/// 集合（Postman 里很常见）导入后变成 N 个各含 1 个接口的集合。
+#[test]
+fn loose_top_level_requests_share_one_group_while_folders_stay_apart() {
+    let parsed = parse_ok(&json!({
+        "info": { "name": "订单服务" },
+        "item": [
+            { "name": "散落一", "request": { "method": "GET", "url": "/a" } },
+            {
+                "name": "文件夹甲",
+                "item": [{ "name": "甲里的", "request": { "method": "GET", "url": "/b" } }]
+            },
+            { "name": "散落二", "request": { "method": "POST", "url": "/c" } },
+            { "name": "文件夹乙", "item": [] }
+        ]
+    }));
+    let ex = &parsed.exchange;
+
+    assert_eq!(ex.modules.len(), 2, "散落的一组 + 文件夹甲；空文件夹不进树");
+    assert_eq!(ex.modules[0].key, LOOSE_KEY);
+    assert_eq!(ex.modules[0].name, "订单服务");
+    assert_eq!(
+        ex.modules[0].endpoints.len(),
+        2,
+        "两条散落请求在同一个分组里"
+    );
+    assert_eq!(ex.modules[0].endpoints[0].path, "/a");
+    assert_eq!(ex.modules[0].endpoints[1].path, "/c");
+    // 分组位置取**第一条**散落请求出现的地方，后面的 folder 排在它之后。
+    assert_eq!(ex.modules[1].key, "/item/1");
+    assert_eq!(ex.modules[1].name, "文件夹甲");
+    assert!(
+        ex.modules[1].collections.is_empty(),
+        "这个 folder 里全是请求，没有更深的层级"
+    );
+    assert_eq!(ex.modules[1].endpoints.len(), 1);
     assert_eq!(ex.endpoint_count(), 3);
 }
 

@@ -12,13 +12,15 @@
 
 use std::collections::BTreeSet;
 
-use simple_post_core::db::{self, DbPool};
-use simple_post_core::domain::{now_ms, uid, EndpointDetail, ResourceNode, ResourceNodeType};
+use simple_post_core::db::{self, Connection, DbPool};
+use simple_post_core::domain::{
+    now_ms, uid, BaseUrlDefinition, EndpointDetail, Environment, ResourceNode, ResourceNodeType,
+};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::fingerprint::{FingerprintSet, RequestIdentity};
-use crate::ir::{endpoint_keys_of, Exchange, IrCollection, IrEndpoint, IrModule};
+use crate::ir::{endpoint_keys_of, Exchange, IrCollection, IrEndpoint, IrModule, IrServer};
 
 /// 一次落库的结果。调用方据此回报「新增几个、跳过几个、丢了什么」。
 #[derive(Debug, Clone, Default)]
@@ -34,6 +36,25 @@ pub struct CommitReport {
     /// IR 自带的诊断加上本次落库新增的诊断，一并带回。预览与落库是两次调用，
     /// 各自持有自己的那份，外不该假设它们是同一个对象。
     pub diagnostics: Vec<Diagnostic>,
+    /// 顺带落下的服务。为 `None` 表示这一次没有服务可落：文档没给 host、给了多个 host，
+    /// 或调用方关掉了它。
+    pub service: Option<AppliedService>,
+}
+
+/// 一次导入落下的那个服务。用户要知道「建了什么、URL 去了哪」——否则他打开
+/// 目标模块看到一排 `{{baseUrl}}` 形式的路径，却没有任何地方写着 baseUrl 是多少。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppliedService {
+    /// `base_url_definitions.name`。项目内唯一。
+    pub name: String,
+    /// 写进 URL 单元格的那个值。
+    pub url: String,
+    /// 服务定义是新建的（`false` = 复用了项目里已有的同名服务）。
+    pub created: bool,
+    /// 端点是否被指向了它。为 `false` 的情形只有一种：没有激活环境，URL 无处可放。
+    pub assigned: bool,
+    /// URL 写进了哪个环境。项目没有激活环境时为 `None`。
+    pub environment_name: Option<String>,
 }
 
 impl CommitReport {
@@ -96,15 +117,19 @@ enum Pending<'a> {
 /// [`Exchange::endpoint_keys`] 即全选。
 ///
 /// 全程一个 `BEGIN IMMEDIATE` 事务；中途任何一条被拒，整棵都不落。
+///
+/// `apply_service` 为假时完全不碰服务表：文档里的 host 就当没看见，与本次导入之前
+/// 的行为逐字节相同。
 pub fn commit(
     pool: &DbPool,
     project_id: &str,
     target: CommitTarget<'_>,
     ex: &Exchange,
     selected: &BTreeSet<String>,
+    apply_service: bool,
 ) -> Result<CommitReport, AppError> {
     db::with_tx(pool, |conn| {
-        commit_in_tx(conn, project_id, target, ex, selected)
+        commit_in_tx(conn, project_id, target, ex, selected, apply_service)
     })
 }
 
@@ -114,11 +139,12 @@ pub fn commit(
 /// 同生共死。而 [`db::with_tx`] 的闭包拿不到另一个连接（`BEGIN IMMEDIATE` 会与外层
 /// 那个自己死锁），所以编排层拿到的是这一个「已持有连接」的版本。
 pub fn commit_in_tx(
-    conn: &mut simple_post_core::db::Connection,
+    conn: &mut Connection,
     project_id: &str,
     target: CommitTarget<'_>,
     ex: &Exchange,
     selected: &BTreeSet<String>,
+    apply_service: bool,
 ) -> Result<CommitReport, AppError> {
     let mut report = CommitReport {
         diagnostics: ex.diagnostics.clone(),
@@ -146,6 +172,21 @@ pub fn commit_in_tx(
             }
             Some(module_id.to_string())
         }
+    };
+
+    // 服务与它的 URL 单元格。**只在挂进已有模块时做**：URL 的唯一住址是
+    // `env.module_base_urls[def_id][module_id]`，那个 `module_id` 必须是一个已经在树里的
+    // 模块。落项目顶层时每个模块都是下面这几行刚建的，「新建的模块要不要顺手配 URL」
+    // 是另一个决定，不在这里替用户做。
+    let wiring = match (apply_service, anchor_id.as_deref()) {
+        (true, Some(module_id)) => {
+            let plan = plan_service(conn, project_id, ex)?;
+            if let Some(d) = plan.ambiguous_diagnostic() {
+                report.diagnostics.push(d);
+            }
+            wire_service(conn, project_id, module_id, &plan, &mut report)?
+        }
+        _ => None,
     };
 
     // 去重账本先灌入**已落库**的 endpoint，故「同一份 IR 落两次」第二次只跳过不新增。
@@ -316,10 +357,12 @@ pub fn commit_in_tx(
                     method: ir.method.clone(),
                     // `ir` 存的是 path-only，`domain` 这一列同样是 path，故这是一次改名。
                     url: ir.path.clone(),
-                    environment_id: None,
-                    // 服务与环境是本仓库的概念，外来格式给不出。写 `None` 的含义是
-                    // 「用项目的 ★」，那是一个**真实答案**，不是「还没定」——故不猜。
-                    base_url_definition_id: None,
+                    // 服务与环境都取自上面那一次 `wire_service`。两者缺席不是「还没定」：
+                    // 没有服务时写 `None` 的含义是「用项目的 ★」，而 URL 解析链把它当成
+                    // 一个**真实答案**——故那次判定要么给出这两个 id，要么明确告诉我们它
+                    // 什么都没做。
+                    environment_id: wiring.as_ref().map(|w| w.environment_id.clone()),
+                    base_url_definition_id: wiring.as_ref().map(|w| w.definition_id.clone()),
                     base_url_override: None,
                     params: ir.params.clone(),
                     headers: ir.headers.clone(),
@@ -337,6 +380,166 @@ pub fn commit_in_tx(
     }
 
     Ok(report)
+}
+
+// -------------------------------------------------------------------------
+// 服务解析
+// -------------------------------------------------------------------------
+
+/// 「整份文档」这一事实的 pointer。多个 host 时没有单一位置能指过去——它们散在文件
+/// 各处，指任何一个都是撒谎，故指根。
+const DOC_ROOT: &str = "/";
+
+/// 一份外来文档给出的服务，撞上目标项目之后长什么样。
+///
+/// 预览与落库**共用 [`plan_service`]**：两处各写一份的话，用户会在预览里看到
+/// 「将新建服务 A」而落库时得到 B，而中间没有任何一步会报错。落库那一次必须在事务里
+/// 重算（复用与否是事务内的读），但规则是这个函数。
+#[derive(Debug, Clone, Default)]
+pub struct ServicePlan {
+    /// 恰好一个 host 时是它。为 `None` 表示**不做**逐接口指派，理由见 `candidates`。
+    pub server: Option<IrServer>,
+    /// 全部候选，按首次出现顺序、逐个 (服务名, URL) 去重。
+    ///
+    /// 同一 host 在多个模块里各写一遍只算一个候选；同名服务挂两个协议则是两个——
+    /// 服务表按名字唯一，同名两条落不进去。
+    pub candidates: Vec<IrServer>,
+    /// 项目里已存在的同名服务定义。有它就复用，没有就新建。
+    pub existing_id: Option<String>,
+    /// 项目的**激活**环境。URL 只能住进一个环境单元格，而「哪个环境」只有一个可答的
+    /// 来源：用户当前正在用的那个。为 `None` 时服务仍然建，只是 URL 无处可放。
+    pub environment: Option<Environment>,
+}
+
+impl ServicePlan {
+    /// 多于一个 host 时的那条说明。
+    ///
+    /// 没有 host 是什么都没发生，不出诊断；多于一个才需要解释「为什么没建服务」。
+    pub fn ambiguous_diagnostic(&self) -> Option<Diagnostic> {
+        if self.candidates.len() < 2 {
+            return None;
+        }
+        let listed: Vec<String> = self
+            .candidates
+            .iter()
+            .map(|c| format!("{} → {}", c.service, c.url))
+            .collect();
+        Some(
+            Diagnostic::warn(
+                DOC_ROOT,
+                format!(
+                    "这份文档有 {} 台服务，无法逐个接口指派，未创建服务",
+                    self.candidates.len()
+                ),
+            )
+            .dropping(listed.join("；")),
+        )
+    }
+}
+
+/// 解析这份文档的服务，并查清目标项目能不能接住它。**只读**，故预览可以直接调。
+pub fn plan_service(
+    conn: &mut Connection,
+    project_id: &str,
+    ex: &Exchange,
+) -> Result<ServicePlan, AppError> {
+    let mut candidates: Vec<IrServer> = Vec::new();
+    for m in &ex.modules {
+        for s in &m.servers {
+            if !candidates
+                .iter()
+                .any(|c| c.service == s.service && c.url == s.url)
+            {
+                candidates.push(s.clone());
+            }
+        }
+    }
+    let server = (candidates.len() == 1).then(|| candidates[0].clone());
+
+    // 只在「恰好一个」时才去查复用与激活环境：其余分支不会写这两个字段，查了也丢。
+    let (existing_id, environment) = match &server {
+        Some(s) => {
+            let existing_id = db::base_url_defs::list_by_project(conn, project_id)?
+                .into_iter()
+                .find(|d| d.name == s.service)
+                .map(|d| d.id);
+            (existing_id, db::environments::get_active(conn, project_id)?)
+        }
+        None => (None, None),
+    };
+    Ok(ServicePlan {
+        server,
+        candidates,
+        existing_id,
+        environment,
+    })
+}
+
+/// 端点要指过去的那一对 id。**两个都齐**才会构造出来：没有激活环境就没有格子可填，
+/// 于是端点也不指过去。
+struct ServiceWiring {
+    definition_id: String,
+    environment_id: String,
+}
+
+/// 把 [`ServicePlan::server`] 落进项目，并回报。多个 host 时什么都不做。
+///
+/// 复用同名服务是安全的：服务行本身**不持有 URL**，URL 只在
+/// `env.module_base_urls[def_id][module_id]` 那一个格子里，故填自己这一格不会毁掉
+/// 任何别的模块的地址。
+fn wire_service(
+    conn: &mut Connection,
+    project_id: &str,
+    module_id: &str,
+    plan: &ServicePlan,
+    report: &mut CommitReport,
+) -> Result<Option<ServiceWiring>, AppError> {
+    let Some(srv) = &plan.server else {
+        return Ok(None);
+    };
+    let created = plan.existing_id.is_none();
+    let definition_id = match &plan.existing_id {
+        Some(id) => id.clone(),
+        None => {
+            let id = uid();
+            db::base_url_defs::create(
+                conn,
+                &BaseUrlDefinition {
+                    id: id.clone(),
+                    name: srv.service.clone(),
+                    description: None,
+                },
+                project_id,
+            )?;
+            id
+        }
+    };
+
+    if let Some(env) = &plan.environment {
+        db::environments::set_module_base_url(
+            conn,
+            &env.id,
+            &definition_id,
+            module_id,
+            Some(&srv.url),
+        )?;
+    }
+
+    // 没有激活环境就没有格子可填，于是端点**也不指过去**：指过去会让 URL 解析链走到一个
+    // 空格子，那是一个静默的空，而「用项目的 ★」是一个真实答案——项目有 ★ 时这一改
+    // 就是一次静默的降级。服务本身仍然建着，用户补上地址与指派即可。
+    let wiring = plan.environment.as_ref().map(|env| ServiceWiring {
+        definition_id,
+        environment_id: env.id.clone(),
+    });
+    report.service = Some(AppliedService {
+        name: srv.service.clone(),
+        url: srv.url.clone(),
+        created,
+        assigned: wiring.is_some(),
+        environment_name: plan.environment.as_ref().map(|e| e.name.clone()),
+    });
+    Ok(wiring)
 }
 
 /// 一个被指纹认出来而跳过的请求。名字与请求描述给报告用。

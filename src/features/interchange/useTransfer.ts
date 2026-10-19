@@ -60,6 +60,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
   const [result, setResult] = useState<ImportCommitResult | null>(null);
   const [environmentId, setEnvironmentId] = useState('');
   const [format, setFormat] = useState<DocFormat>('json');
+  // 默认开着：文档带了 host 却不落成服务，用户打开模块看到的是一排没有地址的路径。
+  // 取消它是一次明确取舍，不是默认值 —— 故这是预览里的一个勾，不是隐藏的默认。
+  const [applyService, setApplyService] = useState(true);
 
   const groups: TransferNode[] = useMemo(
     () => (preview ? (preview.groups as TransferNode[]) : []),
@@ -80,6 +83,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
     setSelected(new Set());
     setSourceText('');
     setResult(null);
+    setApplyService(true);
   }, []);
 
   const openImport = useCallback(
@@ -160,6 +164,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
         moduleId: session.moduleId,
         content: sourceText,
         selected: [...selected],
+        applyService,
       });
       setResult(r);
       setPhase('done');
@@ -168,7 +173,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
       setError(errorText(e));
       setPhase('preview');
     }
-  }, [session, sourceText, selected, options]);
+  }, [session, sourceText, selected, applyService, options]);
 
   /** 产出文档并交给用户。`copy` 为真时只复制，不弹保存对话框。 */
   const save = useCallback(
@@ -217,6 +222,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
     result,
     environmentId,
     format,
+    applyService,
 
     openImport,
     openExport,
@@ -228,6 +234,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
 
     setEnvironmentId,
     setFormat,
+    setApplyService,
     selectAll: useCallback(() => setSelected((s) => selectAll(s, groups)), [groups]),
     selectNone: useCallback(() => setSelected((s) => selectNone(s, groups)), [groups]),
     invert: useCallback(() => setSelected((s) => invert(s, groups)), [groups]),

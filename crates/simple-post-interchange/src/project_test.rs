@@ -178,6 +178,7 @@ fn domain_to_ir_to_domain_keeps_the_request() {
         crate::commit::CommitTarget::ProjectRoot,
         &ex,
         &ex.endpoint_keys(),
+        true,
     )
     .expect("recommit");
 

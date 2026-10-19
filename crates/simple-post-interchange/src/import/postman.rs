@@ -59,6 +59,11 @@ enum Class<'a> {
     Malformed,
 }
 
+/// 顶层散落请求共用的那个模块的 key。指「整份 `item[]`」这一个位置，与 OpenAPI 侧无 tag
+/// 分组用的 `/paths` 同一套纪律：文档没给这批请求分组信息，而分组是要摆到用户面前的
+/// 一层树，凭空按路径切一刀就是猜。
+const LOOSE_KEY: &str = "/item";
+
 /// 把一份 Postman v2.1 文档翻成 IR。
 pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
     let root = value
@@ -82,6 +87,13 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
     // 顶层每个 item 各成一个模块。落进已有模块时它们会被降级成集合
     // （commit.rs 的 `CommitTarget::Module`），故「Postman 顶层 folder → 模块下的
     // 集合」不需要额外映射。
+    // 顶层散落的请求（不是 folder 的 item）归到**同一个**模块里，名字取 `info.name`。
+    // 每个顶层 item 各成一个模块的话，一份「请求平铺在根上」的集合会变成 N 个各含 1 个
+    // 接口的集合 —— 与 OpenAPI 侧「无 tag 归到一个分组」是同一条路，见
+    // `import/openapi.rs::group_of`。folder 仍各自成一个模块：Postman 的 folder 树
+    // 是有意义的分组，不能压平。
+    let mut loose_at: Option<usize> = None;
+
     if let Some(top) = top {
         for (i, item) in top.iter().enumerate() {
             let ptr = format!("/item/{i}");
@@ -92,7 +104,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
             };
 
             let mut servers: Vec<IrServer> = Vec::new();
-            let (endpoints, collections) = match classify(obj, &ptr, &mut ctx) {
+            match classify(obj, &ptr, &mut ctx) {
                 Class::Request(req) => {
                     let mut endpoints = Vec::new();
                     if let Some(ep) =
@@ -100,29 +112,50 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                     {
                         endpoints.push(ep);
                     }
-                    (endpoints, Vec::new())
+                    if endpoints.is_empty() {
+                        continue;
+                    }
+                    let at = match loose_at {
+                        Some(at) => at,
+                        None => {
+                            modules.push(IrModule {
+                                key: LOOSE_KEY.to_string(),
+                                name: project_name.clone(),
+                                description: None,
+                                servers: Vec::new(),
+                                endpoints: Vec::new(),
+                                collections: Vec::new(),
+                            });
+                            modules.len() - 1
+                        }
+                    };
+                    loose_at = Some(at);
+                    modules[at].endpoints.extend(endpoints);
+                    // 散落请求可能各带各的 host；按服务名去重后并进去。
+                    for s in servers {
+                        if !modules[at].servers.iter().any(|e| e.service == s.service) {
+                            modules[at].servers.push(s);
+                        }
+                    }
                 }
                 Class::Folder(items) => {
                     let c = walk_children(items, &ptr, &mut servers, &mut ctx);
-                    (c.endpoints, c.collections)
+                    // 空容器不进树：预览里挂一个什么都没有的模块，只会让人以为少导了东西
+                    // （落库侧同样跳过空容器，见 `ir::subtree_keys`）。
+                    if c.endpoints.is_empty() && c.collections.is_empty() {
+                        continue;
+                    }
+                    modules.push(IrModule {
+                        key: ptr,
+                        name: item_name(obj),
+                        description: description_text(obj.get("description")),
+                        servers,
+                        endpoints: c.endpoints,
+                        collections: c.collections,
+                    });
                 }
                 Class::Malformed => continue,
-            };
-
-            // 空容器不进树：预览里挂一个什么都没有的模块，只会让人以为少导了东西
-            // （落库侧同样跳过空容器，见 `ir::subtree_keys`）。
-            if endpoints.is_empty() && collections.is_empty() {
-                continue;
             }
-
-            modules.push(IrModule {
-                key: ptr,
-                name: item_name(obj),
-                description: description_text(obj.get("description")),
-                servers,
-                endpoints,
-                collections,
-            });
         }
     }
 

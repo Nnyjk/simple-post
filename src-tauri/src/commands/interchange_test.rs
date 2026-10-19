@@ -272,10 +272,17 @@ fn the_wire_keys_are_the_camel_case_field_names() {
         "moduleId": "m1",
         "content": "{}",
         "selected": ["a", "b"],
+        "applyService": false,
     }))
     .expect("commit body deserializes");
     assert_eq!(commit.project_id, "p1");
     assert_eq!(commit.selected, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!(
+        commit.apply_service,
+        Some(false),
+        "`false` must reach the field; a body that drops it would silently read as \
+         the default, and the desktop path would build a service the browser path does not"
+    );
 
     let export_preview: ExportPreviewOpts =
         serde_json::from_value(json!({ "projectId": "p1", "moduleId": "m1" }))
