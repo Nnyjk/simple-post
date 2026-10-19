@@ -95,7 +95,11 @@ fn find_close(s: &str, from: usize) -> Option<usize> {
     None
 }
 
-fn is_word(s: &str) -> bool {
+/// 标记名是不是裸标识符，即 `[A-Za-z0-9_]`。
+///
+/// 导入器要用**同一套**判据去判断外来文档里的 `{{var}}` 发送时会不会被替换。这份判据
+/// 只有一份实现：两份各自漂移了，`{{my-var}}` 会在发送时才静默地原样发出去。
+pub fn is_word(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 

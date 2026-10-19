@@ -96,6 +96,24 @@ pub fn parse(format: Format, value: &serde_json::Value) -> Result<ParsedExchange
     }
 }
 
+/// 从 host 推服务名。端口与 scheme 不算名字的一部分；带变量的 host 回落成 `default`。
+///
+/// 两种外来格式的 host 形状不同——Postman 的 `host` 字段不带 scheme，OpenAPI 的
+/// `servers[].url` 带——所以先剥 scheme 再判，两侧共用这一份。
+pub(crate) fn service_name(host: &str) -> String {
+    let without_scheme = match host.find("://") {
+        Some(at) => &host[at + 3..],
+        None => host,
+    };
+    let bare = without_scheme.split(':').next().unwrap_or(without_scheme);
+    // `{` 一次收口两种写法：OpenAPI 的 `{var}` 与 Postman 的 `{{var}}`。
+    if bare.is_empty() || bare.contains('{') || bare.contains('/') {
+        "default".to_string()
+    } else {
+        bare.to_string()
+    }
+}
+
 /// 顶层有没有这个键。
 ///
 /// **只看行首**是有意的：JSON 的键在自己的行首，YAML 的顶层键也在行首（缩进的键属于
