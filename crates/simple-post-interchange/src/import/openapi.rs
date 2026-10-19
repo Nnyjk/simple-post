@@ -11,6 +11,11 @@
 //! - **外来文档不受本仓库约束。** `$ref` 展开走 JSON Pointer，显式工作栈 + 访问栈 +
 //!   深度上限，故一份畸形文档只会拿到一堆诊断，不会把预览进程带走。
 //!
+//! 分组只有一个依据：**operation 的 `tags[0]`**。没打 tag 的归到一个以 `info.title`
+//! 命名的分组里——文档没给的信息不猜，而「每个 operation 一个分组」会把一份 87 个接口
+//! 的文档变成 87 个同名集合。落进已有模块时 IR 顶层模块一律降级成集合，故「tag → 目标
+//! 模块下的集合」不需要额外映射，与 `postman.rs` 同一条路。
+//!
 //! 结构兼容的 3.1 文档也收：联合类型数组（`["string","null"]`）按可选处理，`$ref`
 //! 旁边的兄弟字段按覆盖处理。不做 JSON Schema 2020-12 求值，也不碰
 //! `webhooks` / `jsonSchemaDialect` / `components.pathItems`。
@@ -47,6 +52,12 @@ const MAX_REF_DEPTH: usize = 24;
 
 /// 既没有 tag 也没有 `info.title` 时的名字。
 const DEFAULT_NAME: &str = "默认";
+
+/// 没有 tag 的 operation 归处的那个分组。
+///
+/// 它指「整份 `paths`」这一个位置，而不是某个 operation 的指针：文档根本没给分组信息，
+/// 而分组是要摆到用户面前的一层树，凭空按路径前缀切一刀就是**猜**。
+const UNTAGGED_KEY: &str = "/paths";
 
 /// 解析期的累积状态。
 #[derive(Default)]
@@ -105,7 +116,9 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
         servers: &servers,
     };
 
-    let mut modules = Vec::new();
+    // 分组按首次出现排序，故顺序由 `paths` 的键序与固定动词序决定，是确定的。
+    let mut modules: Vec<IrModule> = Vec::new();
+    let mut group_at: HashMap<String, usize> = HashMap::new();
     for (raw_path, item) in paths {
         let pointer = format!("/paths/{}", escape(raw_path));
         let Some(item) = item.as_object() else {
@@ -127,7 +140,15 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                 ));
                 continue;
             };
-            modules.push(operation_module(
+            let at = group_of(
+                &mut modules,
+                &mut group_at,
+                &view,
+                operation,
+                &op_pointer,
+                &mut ctx,
+            );
+            modules[at].endpoints.push(endpoint_of(
                 &view, raw_path, verb, operation, item, &mut ctx,
             ));
         }
@@ -150,15 +171,62 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
     })
 }
 
-/// 一个 operation 落成一个模块。落库时它会被降级成 collection。
-fn operation_module(
+/// 这个 operation 落进哪个分组，分组不存在就建。返回它在 `modules` 里的下标。
+///
+/// **只认 `tags[0]`。** 同一个 operation 复制到第二个 tag 下会造出两条指纹相同的接口，
+/// 落库时第二条被当成重复跳过——预览里看起来像「自己导了两份」。故只归第一处，并把
+/// 多余的 tag 点名丢掉。
+fn group_of(
+    modules: &mut Vec<IrModule>,
+    group_at: &mut HashMap<String, usize>,
+    view: &DocView,
+    operation: &Map<String, Value>,
+    pointer: &str,
+    ctx: &mut Ctx,
+) -> usize {
+    let tags = string_list(operation.get("tags"));
+    for extra in tags.iter().skip(1) {
+        ctx.diagnostics.push(
+            Diagnostic::warn(
+                format!("{pointer}/tags"),
+                "一个接口只归第一个 tag，其余的 tag 不生成分组",
+            )
+            .dropping(extra.clone()),
+        );
+    }
+
+    let (key, name) = match tags.first() {
+        Some(tag) => (format!("/tags/{}", escape(tag)), tag.clone()),
+        None => (
+            UNTAGGED_KEY.to_string(),
+            view.title.unwrap_or(DEFAULT_NAME).to_string(),
+        ),
+    };
+    if let Some(&at) = group_at.get(&key) {
+        return at;
+    }
+    let at = modules.len();
+    modules.push(IrModule {
+        key: key.clone(),
+        name,
+        description: None,
+        servers: view.servers.hosts.clone(),
+        endpoints: Vec::new(),
+        collections: Vec::new(),
+    });
+    group_at.insert(key, at);
+    at
+}
+
+/// 一个 operation → 一个 endpoint。
+fn endpoint_of(
     view: &DocView,
     raw_path: &str,
     verb: &str,
     operation: &Map<String, Value>,
     item: &Map<String, Value>,
     ctx: &mut Ctx,
-) -> IrModule {
+) -> IrEndpoint {
     let key = format!("/paths/{}/{}", escape(raw_path), verb);
     let path = format!("{}{raw_path}", view.servers.base_path);
     let tags = string_list(operation.get("tags"));
@@ -173,29 +241,19 @@ fn operation_module(
     let body = request_body(ctx, view, operation, &key);
     let auth = auth_of(ctx, view, operation, &key);
 
-    IrModule {
-        key: key.clone(),
-        name: tags
-            .first()
-            .cloned()
-            .unwrap_or_else(|| view.title.unwrap_or(DEFAULT_NAME).to_string()),
-        description: None,
-        servers: view.servers.hosts.clone(),
-        endpoints: vec![IrEndpoint {
-            key,
-            name,
-            description: text(operation, "description"),
-            method,
-            path,
-            params,
-            headers,
-            body,
-            auth,
-            docs: None,
-            notes: None,
-            tags,
-        }],
-        collections: Vec::new(),
+    IrEndpoint {
+        key,
+        name,
+        description: text(operation, "description"),
+        method,
+        path,
+        params,
+        headers,
+        body,
+        auth,
+        docs: None,
+        notes: None,
+        tags,
     }
 }
 

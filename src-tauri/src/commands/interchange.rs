@@ -9,6 +9,12 @@
 //!
 //! 线格式在 [`crate::dto`]：两侧共用同一组 DTO，故「桌面发出去的 body」与「浏览器发
 //! 出去的 body」逐字节相同，`src/lib/tauri-commands.ts` 的双派发才不用分叉。
+//!
+//! **命令参数是扁平的，不是 `opts: ImportPreviewOpts` 一个包装。** `#[tauri::command]`
+//! 按参数名去 payload 里取值，而 REST 侧 `Json<ImportPreviewOpts>` 直接吃整个 body；
+//! 渲染层两边发的是同一个扁平对象，于是参数名必须就是那些 camelCase 字段名本身。
+//! 取 `opts:` 包装的话桌面侧会报 `missing required key opts`——只坏桌面、不坏浏览器，
+//! 正是这条不变量想消灭的那类半失效。同样的形状见 [`crate::commands::oauth2_token`]。
 
 use tauri::State;
 
@@ -26,27 +32,57 @@ use crate::error::AppError;
 #[tauri::command]
 pub async fn interchange_import_preview(
     state: State<'_, DbPool>,
-    opts: ImportPreviewOpts,
+    project_id: String,
+    module_id: String,
+    content: Option<String>,
+    url: Option<String>,
 ) -> Result<ImportPreviewDto, AppError> {
-    crate::interchange_api::import_preview(&state, &opts).await
+    crate::interchange_api::import_preview(
+        &state,
+        &ImportPreviewOpts {
+            project_id,
+            module_id,
+            content,
+            url,
+        },
+    )
+    .await
 }
 
 /// 把勾中的条目落进目标模块。树与 Postman 环境在**同一个事务**里。
 #[tauri::command]
 pub fn interchange_import_commit(
     state: State<'_, DbPool>,
-    opts: ImportCommitOpts,
+    project_id: String,
+    module_id: String,
+    content: String,
+    selected: Option<Vec<String>>,
 ) -> Result<ImportCommitDto, AppError> {
-    crate::interchange_api::import_commit(&state, &opts)
+    crate::interchange_api::import_commit(
+        &state,
+        &ImportCommitOpts {
+            project_id,
+            module_id,
+            content,
+            selected: selected.unwrap_or_default(),
+        },
+    )
 }
 
 /// 导出候选清单。**不写库。**
 #[tauri::command]
 pub fn interchange_export_preview(
     state: State<'_, DbPool>,
-    opts: ExportPreviewOpts,
+    project_id: String,
+    module_id: String,
 ) -> Result<ExportPreviewDto, AppError> {
-    crate::interchange_api::export_preview(&state, &opts)
+    crate::interchange_api::export_preview(
+        &state,
+        &ExportPreviewOpts {
+            project_id,
+            module_id,
+        },
+    )
 }
 
 /// 按选定的环境与勾选的条目产出 OpenAPI 文档。**不写库。**
@@ -56,7 +92,24 @@ pub fn interchange_export_preview(
 #[tauri::command]
 pub fn interchange_export_document(
     state: State<'_, DbPool>,
-    opts: ExportDocumentOpts,
+    project_id: String,
+    module_id: String,
+    environment_id: Option<String>,
+    selected: Option<Vec<String>>,
+    format: String,
 ) -> Result<ExportDocumentDto, AppError> {
-    crate::interchange_api::export_document(&state, &opts)
+    crate::interchange_api::export_document(
+        &state,
+        &ExportDocumentOpts {
+            project_id,
+            module_id,
+            environment_id: environment_id.unwrap_or_default(),
+            selected: selected.unwrap_or_default(),
+            format,
+        },
+    )
 }
+
+#[cfg(test)]
+#[path = "interchange_test.rs"]
+mod interchange_test;

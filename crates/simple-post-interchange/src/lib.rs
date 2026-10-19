@@ -27,3 +27,8 @@ pub use ir::Exchange;
 #[cfg(test)]
 #[path = "roundtrip_test.rs"]
 mod roundtrip;
+
+// 导出产物过 OpenAPI 3.0 的官方模型。自家导入器永远宽容，故那一条不算数。
+#[cfg(test)]
+#[path = "openapi_model_test.rs"]
+mod openapi_model;

@@ -114,6 +114,16 @@ Tauri command 与 REST route 都退化成薄壳。
 - Postman 的 `auth` 方案里 oauth2 / digest —— `AuthConfig` 只有四种。
 - OpenAPI 的 `apiKey` `in: cookie` —— `ApiKeyLocation` 只有 `Header | Query`。
 - OpenAPI `paths` 里固定动词键集以外的动词 —— 塞进去会让整份文档不合法。
+- OpenAPI operation 的 `tags[1..]` —— 一个接口只归第一个 tag（见下）。
+
+**分组只认 `tags[0]`，没打 tag 的整份归到一个以 `info.title` 命名的分组里。**
+落进已有模块时 IR 顶层模块一律降级成集合，故这条同时就是「OpenAPI tag → 目标模块下的
+集合」。曾经按「一个 operation 一个模块」实现，于是**一个 tag 都不打的文档**（Apifox、
+SpringDoc 导出的文件很常见）会变成 87 个同名集合——用户看到的是一屏重复的名字。
+复制到第二个 tag 下同样不行：那是两条指纹相同的接口，落库时第二条被当成重复跳过，
+预览里看起来像自己导了两份。多出来的 tag 全部留在端点的 `tags` 上，只是不再各自成组。
+
+按路径前缀切分组是另一条路，但那是**猜**：文档没给的信息不猜。
 
 反过来也一样：`AuthConfig` 是「判别字段 + 可选载荷」的**扁平**结构，解析器只在
 `kind` 匹配时才读对应载荷。未选中方案的载荷同样为 `Some`，按载荷存在性分派会把
@@ -143,7 +153,7 @@ Postman 的每个 environment 落成一个新 `Environment`，变量进 `variabl
 `BodyMode` 加变体对已存的 `body_json` 是向后兼容的（旧值继续反序列化成功），
 **不要**为此 bump `SCHEMA_VERSION` —— 那会让 `ensure_current_schema` 删掉用户的库。
 
-## 导出的两个约定
+## 导出的三个约定
 
 **`responses`：合成默认，不猜。** 每个 operation 输出一个 `200: {description: "OK"}`。
 `StoredResponse` 存的是实际响应，没有响应 schema；而 `RequestBody.schema` 那个字段
@@ -153,6 +163,55 @@ JSON Schema。所以没有可信数据源，猜出来的 schema 看不出不可�
 **`servers`：逐模块取，不回退。** URL 是 per (环境 × 模块 × 服务) 且**刻意没有任何
 回退层**。导出必须先选定一个环境，然后每个模块各取各的；该模块没配就是没有 URL，
 不写 `servers` 条目，不借用别的模块的，也不落回项目 ★。
+
+因为这条，文档**根上没有 `servers`** —— 提到根就成了全局默认，等于让没配的模块借到
+兄弟模块的地址。`servers` 逐 operation 携带。
+
+**`tags`：就是最外层集合的名字。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这一层
+在产物里就彻底消失，「导出再导入」会把所有接口压平进一个分组（`roundtrip_test.rs`
+里那条 `a_collection_comes_back_as_a_tag_named_group` 就是钉这个的）。
+
+两条限定：
+
+- **端点自己填了 tags 就不动。** 那是用户在请求上写的分类，与树结构无关。
+- **只落最外层，因为 tag 是扁平字符串。** 集合的嵌套在 OpenAPI 里没有对应构造，
+  `订单/明细` 导出成 tag `订单`，多出来那层读不回来。取最外层而不是最内层，是因为
+  两个不同的顶层集合下各有一个同名子集合时，取内层会让它们在重新导入时并成一处。
+
+## 产物怎么被校验：两层，都不是自家解析器
+
+自家导入器对自家产物永远宽容：导出器漏写 `responses`，导入器不会报错，它只是安静地
+少一个响应，而那份文档已经不合法了。故校验走两个外部视角：
+
+| 层 | 工具 | 跑在哪 | 查什么 |
+|---|---|---|---|
+| 模型 | `openapiv3`（dev-dep） | `cargo test`（`src/openapi_model_test.rs`） | OpenAPI 3.0 的 REQUIRED：`info.title`/`version`、每个 operation 的 `responses` 与 response 的 `description` |
+| 规则 | Redocly | `npm run lint:openapi` → CI 的 web job | `path-parameters-defined`、`operation-operationId`、`security-defined`、`no-server-example.com` 等 |
+
+**两层读的是同一棵树**：`fixtures/sample-exchange.json`。Rust 测试与
+`examples/export_sample.rs` 都从它出发，故 linter 看到的与 `cargo test` 校验过的是
+同一份东西。两边各写一份构造的话，它们迟早只覆盖一半。
+
+Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
+`cargo run -p simple-post-interchange --example export_sample` 现场生成——**不提交
+快照**，快照会长过期。规则取舍在仓库根的 `redocly.yaml`，**关掉的每一条都写了理由**；
+关规则不是消错音的手段，下一个报错该去改生成器。
+
+## Redocly 抓出来的三处真缺陷（都已修）
+
+接 linter 之前，单测全绿、自家导入器也读得回自己的产物：
+
+1. **路径模板参数一律写成 `in: query`。** `/users/{id}` 的 `id` 被当成 query 参数，
+   工具会认为 URL 里那个 `{id}` 无人认领，生成的客户端也就不会把它当路径参数
+   （`path-parameters-defined` 报 4 处）。
+2. **占位符没有对应参数行时完全不声明。** 用户删了参数行但 URL 里占位符还在——
+   缺声明的是文档，不是用户的配置。
+3. **operation 没有 `operationId`**（`operation-operationId` 报 17 处）。现在由
+   `动词 + 路径` 拼，**不取接口名**：改名是用户随手做的事，而 operationId 是代码
+   生成器拿来给方法取名的。
+
+另外把「没有 auth 就不写 `security`」改成**显式写空数组**。语义等价（都不要求凭据），
+但缺席要读者自己推断一遍，且 `security-defined` 只认显式的那种。
 
 ## 已核实的陷阱
 

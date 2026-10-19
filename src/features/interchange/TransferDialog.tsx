@@ -49,7 +49,7 @@ export function TransferDialog({ controller, environments, onClose }: TransferDi
       footer={<Footer controller={controller} isImport={isImport} />}
     >
       {error && (
-        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive-foreground">
+        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
           {error}
         </p>
       )}

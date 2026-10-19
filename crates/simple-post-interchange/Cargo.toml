@@ -20,3 +20,12 @@ serde_json = { workspace = true }
 # 维护中的 `serde_yaml` fork。上游 serde_yaml 0.9 已弃用，而依赖一个弃用 crate
 # 需要解释为什么还留着它——那个理由不成立。MSRV 1.71.1 ≤ workspace 的 1.77.2。
 serde_norway = "0.9"
+
+[dev-dependencies]
+# OpenAPI 3.0 的官方数据模型，用来在测试里**反序列化自己导出的产物**。
+#
+# 为什么值得多一个依赖：本仓库的导入器是自己写的，它对自家产物永远宽容——导出器写错
+# 一个键名，导入器读不回来，但导入器也不会报错，它只会少一个接口。拿第三方模型解析
+# 一遍才是外部视角的检查。`rust-version: unknown` ⇒ 不会被 workspace 的 MSRV 静默降级。
+openapiv3 = "2.2"
+

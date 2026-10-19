@@ -4,12 +4,15 @@
 //! 必须回诊断（见 [`Document::diagnostics`]）——「导出成功」四个字会让用户看不见
 //! 自己少了什么。
 //!
-//! 两个约定是决策，不是实现细节：
+//! 三个约定是决策，不是实现细节：
 //!
 //! - **`responses` 合成默认，不猜。** `StoredResponse` 存的是实际响应，里面没有响应
 //!   schema；`RequestBody.schema` UI 从不写。故每个 operation 输出一个 `200: OK`。
 //! - **`servers` 逐模块取，不回退。** 该模块没配就是没有 URL：不借用别的模块的，
 //!   也不落回项目 ★。
+//! - **`tags` 就是集合名。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这层就在产物里
+//!   消失，重新导入时全部塌成一个分组。tag 是扁平字符串，故只落**最外层**集合——
+//!   见 [`document_tags`]。
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -90,12 +93,96 @@ fn media_type_of(mode: &BodyMode) -> Option<&'static str> {
     }
 }
 
+/// 路径里的 `{占位符}`，按出现顺序，不重复。
+fn path_placeholders(path: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while let Some(open) = path[i..].find('{') {
+        let start = i + open;
+        // 没闭合的 `{` 不是模板，原样留给调用方当普通字符。
+        let Some(len) = path[start..].find('}') else {
+            break;
+        };
+        let name = &path[start + 1..start + len];
+        if !name.is_empty() && !out.contains(&name) {
+            out.push(name);
+        }
+        i = start + len + 1;
+    }
+    out
+}
+
+/// `动词 + 路径` → 一个合法的 `operationId`。
+///
+/// 路径分隔符与花括号换成下划线：`operationId` 在多数代码生成器里会被直接变成方法名，
+/// 而 `/` 与 `{}` 都不是标识符字符。不做大小写变换——那会抹掉用户路径里的区分信息。
+fn operation_id(verb: &str, path: &str) -> String {
+    let mut out = String::with_capacity(verb.len() + path.len() + 1);
+    out.push_str(verb);
+    out.push('_');
+    for c in path.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+/// 这个接口的 `parameters` 数组。
+///
+/// **路径模板里的每个 `{占位符}` 都必须声明成 `in: path`**，否则 OpenAPI 工具读不出
+/// 路径参数（Redocly 的 `path-parameters-defined` 会报错，代码生成器会漏掉那个参数）。
+/// 两件事要一起做：
+///
+/// 1. 参数名命中占位符的，`in` 写 `path` 而不是 `query` —— 把 `/users/{id}` 的 `id`
+///    写成 query 参数是最常见的错法，工具会认为 URL 里那个 `{id}` 无人认领。
+/// 2. 占位符没有对应参数行的，**照样声明**。用户删了那一行参数但 URL 里占位符还在；
+///    那时缺声明的是这份文档，不是用户的配置。
+fn parameters(ep: &IrEndpoint) -> Vec<Value> {
+    let placeholders = path_placeholders(&ep.path);
+    let mut out: Vec<Value> = Vec::new();
+
+    for p in ep.params.iter().filter(|p| p.enabled) {
+        // 值的实际形态不猜：启用即视为必填，schema 一律按 string 写。
+        let location = if placeholders.contains(&p.key.as_str()) {
+            "path"
+        } else {
+            "query"
+        };
+        out.push(json!({
+            "name": p.key,
+            "in": location,
+            "required": true,
+            "schema": { "type": "string" },
+        }));
+    }
+
+    for name in &placeholders {
+        if ep.params.iter().any(|p| p.enabled && &p.key == name) {
+            continue;
+        }
+        out.push(json!({
+            "name": name,
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+        }));
+    }
+
+    out
+}
+
 /// 一层待写的内容。`servers` 随栈一起下潜：URL 是 per 模块的，分组里的 endpoint
 /// 不能借用兄弟模块的那一份。
 struct Pending<'a> {
     servers: &'a [IrServer],
     endpoints: &'a [IrEndpoint],
     collections: &'a [IrCollection],
+    /// 本层 endpoint 最外层集合的名字，即导出时当 tag 用的那个。模块直接挂着的
+    /// endpoint 没有它，于是导出后不带 tag。
+    group: Option<&'a str>,
 }
 
 impl<'a> Pending<'a> {
@@ -104,16 +191,39 @@ impl<'a> Pending<'a> {
             servers: &m.servers,
             endpoints: &m.endpoints,
             collections: &m.collections,
+            group: None,
         }
     }
 
-    fn collection(c: &'a IrCollection, servers: &'a [IrServer]) -> Self {
+    /// `group` 是**最外层**那个集合的名字，从栈顶继承而来：已经在一层集合里时
+    /// 继续沿用它，不被更内层的名字覆盖。
+    fn collection(c: &'a IrCollection, servers: &'a [IrServer], group: Option<&'a str>) -> Self {
+        let group = group.or(Some(c.name.as_str()));
         Self {
             servers,
             endpoints: &c.endpoints,
             collections: &c.collections,
+            group,
         }
     }
+}
+
+/// 一个 operation 在文档里该带的 tag。
+///
+/// **端点自己的 tags 优先**：那是用户在请求上填的分类，与树结构无关；自己填了就
+/// 不动它。空的时候用最外层集合的名字补上——tag 是 OpenAPI 里唯一的分组机制，不补
+/// 的话集合这一层在产物里彻底消失。
+///
+/// **只落最外层**，因为 tag 是扁平字符串，集合的嵌套没有对应构造。取最内层的话，两个
+/// 不同的顶层集合下各有一个同名子集合时会被写成同一个 tag，重新导入就并成一处。
+fn document_tags(ep: &IrEndpoint, group: Option<&str>) -> Vec<String> {
+    if !ep.tags.is_empty() {
+        return ep.tags.clone();
+    }
+    group
+        .filter(|g| !g.trim().is_empty())
+        .map(|g| vec![g.to_string()])
+        .unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -131,7 +241,7 @@ struct Builder {
 }
 
 impl Builder {
-    fn operation(&mut self, ep: &IrEndpoint, servers: &[IrServer]) {
+    fn operation(&mut self, ep: &IrEndpoint, servers: &[IrServer], group: Option<&str>) {
         let verb = ep.method.as_str().to_ascii_lowercase();
         let pointer = format!("/paths/{}/{}", escape(&ep.path), verb);
         if !PATH_METHODS.contains(&verb.as_str()) {
@@ -163,6 +273,10 @@ impl Builder {
         if !ep.name.is_empty() {
             op.insert("summary".into(), json!(ep.name));
         }
+        // 由 `动词 + 路径` 拼，不取接口名：改名是用户随手做的事，而 operationId 是
+        // 代码生成器拿来给方法取名的，它变了等于换了一个方法。`动词 + 路径` 只在
+        // 同一路径同一动词下唯一——那正是上面 `taken` 守住的那一格。
+        op.insert("operationId".into(), json!(operation_id(&verb, &ep.path)));
         if let Some(d) = &ep.description {
             op.insert("description".into(), json!(d));
         }
@@ -174,15 +288,7 @@ impl Builder {
             );
         }
 
-        let params: Vec<Value> = ep
-            .params
-            .iter()
-            .filter(|p| p.enabled)
-            // 值的实际形态不猜：启用即视为必填，schema 一律按 string 写。
-            .map(|p| {
-                json!({ "name": p.key, "in": "query", "required": true, "schema": { "type": "string" } })
-            })
-            .collect();
+        let params = parameters(ep);
         if !params.is_empty() {
             op.insert("parameters".into(), Value::Array(params));
         }
@@ -201,19 +307,31 @@ impl Builder {
             json!({ "200": { "description": "OK" } }),
         );
 
-        if let Some(name) = self.register_scheme(&ep.auth, &pointer) {
-            let mut requirement = Map::new();
-            requirement.insert(name, Value::Array(Vec::new()));
-            op.insert(
-                "security".into(),
-                Value::Array(vec![Value::Object(requirement)]),
-            );
+        match self.register_scheme(&ep.auth, &pointer) {
+            Some(name) => {
+                let mut requirement = Map::new();
+                requirement.insert(name, Value::Array(Vec::new()));
+                op.insert(
+                    "security".into(),
+                    Value::Array(vec![Value::Object(requirement)]),
+                );
+            }
+            // 显式写「这条不要求任何凭据」。`register_scheme` 只对 `AuthType::None`
+            // 返回 None，所以这里写空数组是**真话**而不是「表达不出来」——
+            // OAuth2 会拿到一条 flows 为空的 scheme，不会落到这个分支。
+            //
+            // 顺带消掉 `security-defined`：没有它，读者得自己推断「既没有根级
+            // security、这条也没有」等于不需要凭据。
+            None => {
+                op.insert("security".into(), Value::Array(Vec::new()));
+            }
         }
-        if !ep.tags.is_empty() {
-            for t in &ep.tags {
+        let tags = document_tags(ep, group);
+        if !tags.is_empty() {
+            for t in &tags {
                 self.tags.insert(t.clone());
             }
-            op.insert("tags".into(), json!(ep.tags));
+            op.insert("tags".into(), json!(tags));
         }
 
         let item = self
@@ -332,13 +450,13 @@ pub fn to_document(ex: &Exchange, format: DocFormat) -> Result<Document, AppErro
     let mut stack: Vec<Pending> = ex.modules.iter().rev().map(Pending::module).collect();
     while let Some(p) = stack.pop() {
         for ep in p.endpoints {
-            b.operation(ep, p.servers);
+            b.operation(ep, p.servers, p.group);
         }
         stack.extend(
             p.collections
                 .iter()
                 .rev()
-                .map(|c| Pending::collection(c, p.servers)),
+                .map(|c| Pending::collection(c, p.servers, p.group)),
         );
     }
 
