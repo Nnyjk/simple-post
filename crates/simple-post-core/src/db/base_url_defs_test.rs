@@ -122,6 +122,103 @@ fn delete_missing_returns_not_found_and_changes_nothing() {
 }
 
 #[test]
+fn delete_clears_the_service_cells_in_every_environment() {
+    // 服务删了，它在各环境里填过的地址也必须一起失效。留着就是孤儿键：解析读不到
+    // 它们（服务已死），JSON 却只增不减——而删除确认框答应过「一并失效」。
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| delete(c, "def_default")).unwrap();
+    for env_id in ["env_dev", "env_staging", "env_prod"] {
+        let env = db::with_conn(&pool, |c| db::environments::get(c, env_id)).unwrap();
+        assert!(
+            !env.module_base_urls.contains_key("def_default"),
+            "{env_id} still holds a cell for the deleted service"
+        );
+    }
+}
+
+#[test]
+fn delete_keeps_the_cells_of_other_services() {
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| {
+        create(
+            c,
+            &BaseUrlDefinition {
+                id: "def_alt".into(),
+                name: "Alt".into(),
+                description: None,
+            },
+            "p_demo",
+        )?;
+        db::environments::set_module_base_url(
+            c,
+            "env_dev",
+            "def_alt",
+            "m_auth",
+            Some("http://alt"),
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    db::with_tx(&pool, |c| delete(c, "def_default")).unwrap();
+    let env = db::with_conn(&pool, |c| db::environments::get(c, "env_dev")).unwrap();
+    assert_eq!(
+        env.module_base_urls
+            .get("def_alt")
+            .and_then(|m| m.get("m_auth")),
+        Some(&"http://alt".to_string()),
+        "the surviving service keeps its own cell"
+    );
+    assert!(!env.module_base_urls.contains_key("def_default"));
+}
+
+#[test]
+fn delete_does_not_touch_another_projects_environments() {
+    // 清理按项目找环境：别的项目的环境里即使有同名服务的格子也不该被牵动。
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| {
+        create(
+            c,
+            &BaseUrlDefinition {
+                id: "def_invoice".into(),
+                name: "发票服务".into(),
+                description: None,
+            },
+            "p_invoice",
+        )?;
+        db::environments::create(
+            c,
+            &crate::domain::Environment {
+                id: "env_invoice".into(),
+                project_id: "p_invoice".into(),
+                name: "prod".into(),
+                base_urls: Default::default(),
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                is_active: false,
+            },
+        )?;
+        db::environments::set_module_base_url(
+            c,
+            "env_invoice",
+            "def_invoice",
+            "m_auth",
+            Some("http://invoice"),
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    db::with_tx(&pool, |c| delete(c, "def_default")).unwrap();
+    let env = db::with_conn(&pool, |c| db::environments::get(c, "env_invoice")).unwrap();
+    assert_eq!(
+        env.module_base_urls
+            .get("def_invoice")
+            .and_then(|m| m.get("m_auth")),
+        Some(&"http://invoice".to_string()),
+        "another project's environment is none of this project's business"
+    );
+}
+
+#[test]
 fn set_default_updates_project_pointer() {
     let pool = fresh_pool();
     // Add a second def under p_demo, then point at it.

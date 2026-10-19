@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { useAppStore } from '@/stores/app-store';
 import type {
   DocFormat,
   ExportDocument,
@@ -168,6 +169,10 @@ export function useTransfer(options: UseTransferOptions = {}) {
       });
       setResult(r);
       setPhase('done');
+      // 导入会在服务端建服务，而服务住在项目行上（`projects[].baseUrlDefinitions`）——
+      // 客户端那份项目行副本是 bootstrap 第一层留下的，不刷新就看不见新服务，
+      // 接口工具栏也会显示成「项目无默认服务」。
+      await useAppStore.getState().refreshProjects();
       await options.onImported?.(session.moduleId, r.createdCollectionIds);
     } catch (e) {
       setError(errorText(e));

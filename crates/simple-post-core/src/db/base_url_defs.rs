@@ -13,6 +13,8 @@
 //! bump `SCHEMA_VERSION` = `ensure_current_schema` 删掉用户的库。[`list_by_project`] 与
 //! [`get`] 刻意不读它们，此处也没有任何地方写它们。
 
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, Row};
 
 use crate::domain::BaseUrlDefinition;
@@ -123,6 +125,14 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     // 「没有 base URL」——但项目会继续宣传一个已不存在的默认，★ 菜单里会渲染出一个幽灵条目
     // 直到有人点了它。一次 `UPDATE`，不做提升：每项目只有一个 ★，没有可提升的对象。
     let mut tx = conn.savepoint()?;
+    // 项目 id 要在删行**之前**问：行没了就没处问了，而环境里的格子是按项目找的。
+    let project_id: Option<String> = tx
+        .query_row(
+            "SELECT project_id FROM base_url_definitions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .ok();
     let removed = tx.execute(
         "DELETE FROM base_url_definitions WHERE id = ?1",
         params![id],
@@ -139,6 +149,34 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
          WHERE default_base_url_definition_id = ?1",
         params![id],
     )?;
+    // 环境里为它填过的地址一并失效。它们住在 `module_base_urls[def_id]` 下，
+    // 留着就是孤儿键：解析从不读它们（服务已死），但每次删服务都留一份，JSON 只增不减，
+    // 而删除确认框答应过「所有模块里为它填写的地址也会一并失效」。
+    //
+    // 走裸 SQL 而不调 `environments::update`：后者要 `&mut Connection`，而 savepoint
+    // 只实现了 `Deref`（没有 `DerefMut`），借不出可变引用。读-改-写都在同一个
+    // savepoint 内，故要么全成要么全不成。
+    if let Some(project_id) = project_id {
+        let mut stmt =
+            tx.prepare("SELECT id, module_base_urls_json FROM environments WHERE project_id = ?1")?;
+        let rows = stmt
+            .query_map(params![project_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<(String, String)>, _>>()?;
+        drop(stmt);
+        for (env_id, json) in rows {
+            let mut module_base_urls: HashMap<String, HashMap<String, String>> =
+                serde_json::from_str(&json)?;
+            if module_base_urls.remove(id).is_none() {
+                continue;
+            }
+            tx.execute(
+                "UPDATE environments SET module_base_urls_json = ?1 WHERE id = ?2",
+                params![serde_json::to_string(&module_base_urls)?, env_id],
+            )?;
+        }
+    }
     tx.commit()?;
     Ok(())
 }

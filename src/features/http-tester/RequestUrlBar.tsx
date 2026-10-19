@@ -129,7 +129,7 @@ export function RequestUrlBar({
         data-testid="save-btn"
       >
         <Save className="h-3.5 w-3.5" />
-        {isDraft ? '保存接口' : 'Save'}
+        {isDraft ? '保存接口' : '保存'}
       </Button>
     </div>
   );
