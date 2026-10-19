@@ -74,6 +74,96 @@ fn a_verb_outside_the_fixed_key_set_is_dropped_with_a_warning() {
     assert_eq!(warns[0].dropped.as_deref(), Some("PROPFIND /files"));
 }
 
+/// Postman 的 `{{name}}` 换写成 OpenAPI 的 `{name}`，占位符照常被声明成 path 参数。
+///
+/// **不做换写会怎样**：文档里留着双花括号，`paths` 键不合法，而 `path_placeholders`
+/// 取第一个 `{` 到其后第一个 `}` 之间，得出 `{userId`（多带一个左括号）——一个对应不
+/// 上任何模板变量的参数名。这条会挂在本 crate 给自己建的那道 openapiv3 / Redocly 校验
+/// 上，而导出照样报成功、不出任何诊断。
+#[test]
+fn a_postman_template_in_the_path_becomes_an_openapi_path_parameter() {
+    let ex = one_module(
+        "m",
+        vec![ep("a", HttpMethod::Get, "/users/{{userId}}/detail")],
+    );
+    let out = to_document(&ex, DocFormat::Json).expect("导出应成功");
+    let doc: Value = serde_json::from_str(&out.content).expect("合法 JSON");
+
+    let key = "/users/{userId}/detail";
+    assert!(
+        doc["paths"].get(key).is_some(),
+        "换写后的键必须在：{:?}",
+        doc["paths"]
+    );
+    assert!(
+        doc["paths"]
+            .as_object()
+            .unwrap()
+            .get("/users/{{userId}}/detail")
+            .is_none(),
+        "双花括号那个键不能留着：{:?}",
+        doc["paths"]
+    );
+
+    let params = doc["paths"][key]["get"]["parameters"]
+        .as_array()
+        .expect("声明了参数");
+    assert_eq!(
+        params,
+        &vec![json!({
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+        })],
+        "参数名里不能多一个左括号"
+    );
+    assert!(
+        out.diagnostics.iter().all(|d| d.severity != Severity::Warn),
+        "换写之后不该有告警：{:?}",
+        out.diagnostics
+    );
+}
+
+/// 「整个 host 是一个变量」的 path 跳过整条操作，并说明原因。
+///
+/// 导入时那条 path 本来就因为拆不出稳定服务名而原样留着（`{{baseUrl}}/users`，并出了
+/// 一条诊断）。导出时它换不成以 `/` 开头的 OpenAPI 键——**本仓库没有能表达它的形状**。
+/// 与其产出一份不合法的文档，不如跳过并出声：这正是本 crate「有损的一侧必须出诊断」
+/// 那条规则。
+#[test]
+fn a_path_that_cannot_become_an_openapi_key_is_skipped_with_a_warning() {
+    let ex = one_module(
+        "m",
+        vec![
+            ep("placeholder host", HttpMethod::Get, "{{baseUrl}}/users"),
+            ep("fine", HttpMethod::Get, "/users"),
+        ],
+    );
+    let out = to_document(&ex, DocFormat::Json).expect("导出应成功");
+    let doc: Value = serde_json::from_str(&out.content).expect("合法 JSON");
+
+    assert_eq!(
+        doc["paths"].as_object().expect("paths").len(),
+        1,
+        "只有那条能表达的留下了：{:?}",
+        doc["paths"]
+    );
+    assert!(
+        doc["paths"]["/users"]["get"].is_object(),
+        "留下的必须是可表达的那条：{:?}",
+        doc["paths"]
+    );
+
+    let warns: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warn)
+        .collect();
+    assert_eq!(warns.len(), 1, "{:?}", out.diagnostics);
+    assert_eq!(warns[0].dropped.as_deref(), Some("GET {{baseUrl}}/users"));
+}
+
 #[test]
 fn servers_are_taken_per_module_and_never_borrowed() {
     let ex = Exchange {

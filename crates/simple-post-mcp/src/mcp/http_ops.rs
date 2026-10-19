@@ -256,8 +256,14 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
 
     // multipart 在这里才成形：boundary 必须现生成，Content-Type 与 body 用同一个值。
     // `resolve_endpoint` 只做变量替换，故它给不出带 boundary 的 Content-Type。
+    //
+    // 判据读 `resolved.body_mode`（**套过 overrides 的那个 mode**），不读端点行里存的那个：
+    // 调用方给 `overrides.body` 就能换掉 mode，而 Content-Type 那边读的是
+    // `resolve_endpoint` 内部同一个 eff_body.mode。两边读不同的值会出两种坏结果——
+    // 存 json / 覆盖 multipart 时整条请求没有 Content-Type 且分片原样发出；存 multipart /
+    // 覆盖 json 时 body 被换成只有收尾分隔符的壳，调用方传的内容静默消失。
     let mut body = resolved.body.clone();
-    if endpoint.body.mode == simple_post_core::domain::BodyMode::Multipart {
+    if resolved.body_mode == simple_post_core::domain::BodyMode::Multipart {
         body = body
             .take()
             .map(|content| multipart::apply(&mut headers, &content));
@@ -329,3 +335,7 @@ mod tests;
 #[cfg(test)]
 #[path = "http_ops/oauth2_test.rs"]
 mod oauth2_tests;
+
+#[cfg(test)]
+#[path = "http_ops/multipart_mode_test.rs"]
+mod multipart_mode_tests;

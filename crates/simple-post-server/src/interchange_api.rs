@@ -41,6 +41,17 @@ use crate::dto::{
 /// 而错误信息只会说「JSON 解析失败」，看不出真正的原因是「被我们自己砍了」。
 const FETCH_MAX_KB: u64 = 8 * 1024;
 
+/// 这四个端点的 HTTP 请求体上限，与 [`FETCH_MAX_KB`] 挨着放，因为两者讲的是同一件事。
+///
+/// **不给就是 axum 的 2 MB 默认值**，而导入导出恰恰是唯一一类「请求体装着整份文档」的动词。
+/// 那时超限回的是 `413 Failed to buffer the request body`，用户看到的是传输层错误而不是
+/// 「文档太大」，且桌面形态（Tauri IPC 无此限制）同一份文件能正常导入——两侧行为分叉，
+/// 没有任何一层会报错。
+///
+/// 取两倍余量：URL 模式下原文要在 preview 与 commit 之间来回传两次，而 JSON 字符串的
+/// 转义会让同样的字节数再涨一截。两倍仍是**有界**缓冲，不是无上限。
+pub(crate) const TRANSFER_BODY_LIMIT_BYTES: usize = (FETCH_MAX_KB * 1024 * 2) as usize;
+
 /// 内容来源。`from_url` 为真时，预览要把原文回传给前端，让提交那一步不必再拉一次。
 struct Resolved {
     text: String,

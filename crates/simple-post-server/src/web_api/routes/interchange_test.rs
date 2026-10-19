@@ -402,3 +402,66 @@ async fn apply_service_false_leaves_the_service_table_alone() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 一份超过 axum 默认 2 MB 上限的集合。
+///
+/// **靠体积顶上去，不靠 operation 数**——这里要验的是路由与请求体上限，不是解析器的吞吐，
+/// 所以 operation 保持两位数，体积靠长 description 撑。
+fn big_postman() -> Value {
+    let pad = "x".repeat(20_000);
+    let items: Vec<Value> = (0..120)
+        .map(|i| {
+            json!({
+                "name": format!("ep{i}"),
+                "request": {
+                    "method": "GET",
+                    "url": { "path": ["users", i.to_string()] },
+                    "description": pad,
+                }
+            })
+        })
+        .collect();
+    json!({
+        "info": { "name": "big", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+        "item": items,
+    })
+}
+
+/// 一份比 axum 默认上限大得多的文档必须真的进得来。
+///
+/// 这条钉的是**部署形态之间的一致性**：这四个端点的请求体装的是整份文档，而
+/// `DefaultBodyLimit` 不给就是 2 MB。少了那层，超大文档在浏览器 / Docker 形态回 413
+/// （传输层错误，读不出「文档太大」），桌面 Tauri 形态同一份文件却能导入——两边都不
+/// 报错，只有用户看得见。
+///
+/// 与 `interchange_api_test.rs` 里那份 3 MB 用例互补：那份直接调函数，根本不过 HTTP。
+#[tokio::test]
+async fn a_document_far_over_the_default_body_limit_still_reaches_the_handler() {
+    let (addr, dir) = serve_test_router().await;
+    let doc = big_postman();
+    // 缩进打印：格式嗅探只看顶层键所在的**行首**，压成单行它就认不出来了
+    // （那是 #70，单行压缩 JSON 认不出，与这条测试要钉的上限无关）。
+    let doc_text = serde_json::to_string_pretty(&doc).expect("serialise");
+    assert!(
+        doc_text.len() > 2 * 1024 * 1024,
+        "这份集合必须真的超过 axum 的 2 MB 默认值，否则这条测试什么也没钉住：{} 字节",
+        doc_text.len()
+    );
+
+    let (status, preview) = post_json(
+        addr,
+        "/api/interchange/import/preview",
+        json!({ "projectId": "p1", "moduleId": "mod_a", "content": doc_text }),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "浏览器形态必须能吃下与桌面同样大的文档：{preview}"
+    );
+    assert!(
+        preview["groups"].is_array(),
+        "拿到的是预览而不是 413 的错误体：{preview}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

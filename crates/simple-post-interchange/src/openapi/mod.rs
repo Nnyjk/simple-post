@@ -126,7 +126,46 @@ fn operation_id(verb: &str, path: &str) -> String {
     out
 }
 
-/// 这个接口的 `parameters` 数组。
+/// OpenAPI 路径模板写 `{name}`，Postman 模板写 `{{name}}`。两者讲的是同一件事
+/// ——「这一段替换成变量」，故直接换写，不是猜。
+///
+/// **不做换写会怎样**：`path_placeholders` 取第一个 `{` 到其后第一个 `}` 之间，于是
+/// `/users/{{userId}}` 得出 `{userId`（多带一个左括号），产出一份「参数名对应不上任何
+/// 模板变量」的文档；而 `paths` 键里留着双花括号，这份文档过不了它自己的
+/// `openapiv3` / Redocly 校验。
+///
+/// 配不上 `}}` 的原样留着，交给 [`path_key_is_expressible`] 去拒绝。
+fn normalize_path_template(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some(at) = rest.find("{{") {
+        let (head, tail) = rest.split_at(at);
+        out.push_str(head);
+        let Some(len) = tail[2..].find("}}") else {
+            out.push_str(tail);
+            return out;
+        };
+        out.push('{');
+        out.push_str(&tail[2..2 + len]);
+        out.push('}');
+        rest = &tail[2 + len + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// 换写之后，这个 path 能不能当 OpenAPI 3.0 的 `paths` 键。
+///
+/// 规范要求键以 `/` 开头。Postman 的 `{{baseUrl}}/users` 是「整个 host 是一个变量」，
+/// 导入时本来就因为拆不出稳定服务名而把整串留在 path 里（并出了一条诊断），换写之后
+/// 它仍不以 `/` 开头——这份 path 里没有可导出的地址，本仓库也没有能表达它的形状。
+/// 与其产出一份不合法的文档，不如跳过这条操作并说明原因。
+fn path_key_is_expressible(path: &str) -> bool {
+    path.starts_with('/') && !path.contains("{{")
+}
+
+/// 这个接口的 `parameters` 数组。`path` 是**换写后**的那一条（见
+/// [`normalize_path_template`]），不是端点行里的原样。
 ///
 /// **路径模板里的每个 `{占位符}` 都必须声明成 `in: path`**，否则 OpenAPI 工具读不出
 /// 路径参数（Redocly 的 `path-parameters-defined` 会报错，代码生成器会漏掉那个参数）。
@@ -136,8 +175,8 @@ fn operation_id(verb: &str, path: &str) -> String {
 ///    写成 query 参数是最常见的错法，工具会认为 URL 里那个 `{id}` 无人认领。
 /// 2. 占位符没有对应参数行的，**照样声明**。用户删了那一行参数但 URL 里占位符还在；
 ///    那时缺声明的是这份文档，不是用户的配置。
-fn parameters(ep: &IrEndpoint) -> Vec<Value> {
-    let placeholders = path_placeholders(&ep.path);
+fn parameters(ep: &IrEndpoint, path: &str) -> Vec<Value> {
+    let placeholders = path_placeholders(path);
     let mut out: Vec<Value> = Vec::new();
 
     for p in ep.params.iter().filter(|p| p.enabled) {

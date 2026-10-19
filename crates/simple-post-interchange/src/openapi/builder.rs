@@ -9,7 +9,10 @@ use crate::diagnostics::Diagnostic;
 use crate::ir::{IrCollection, IrEndpoint, IrModule, IrServer};
 use crate::spec::{escape_pointer_token, PATH_METHODS};
 
-use super::{component_key, document_tags, media_type_of, operation_id, parameters};
+use super::{
+    component_key, document_tags, media_type_of, normalize_path_template, operation_id, parameters,
+    path_key_is_expressible,
+};
 
 /// 一层待写的内容。`servers` 随栈一起下潜：URL 是 per 模块的，分组里的 endpoint
 /// 不能借用兄弟模块的那一份。
@@ -78,7 +81,21 @@ impl Builder {
             return;
         }
 
-        let slot = format!("{} {}", verb, ep.path);
+        // `{{name}}` → `{name}`：两种方言的路径模板讲的是同一件事，换完才谈得上
+        // 「这个键合不合规范」。指针仍指向原 path——那才是用户在预览里看到的那一行。
+        let path = normalize_path_template(&ep.path);
+        if !path_key_is_expressible(&path) {
+            self.diagnostics.push(
+                Diagnostic::warn(
+                    &pointer,
+                    "OpenAPI 的 paths 键必须以 / 开头，这条地址里没有一个可导出的路径",
+                )
+                .dropping(format!("{} {}", ep.method.as_str(), ep.path)),
+            );
+            return;
+        }
+
+        let slot = format!("{} {}", verb, path);
         if let Some(kept) = self.taken.get(&slot) {
             self.diagnostics.push(
                 Diagnostic::warn(&pointer, "同一路径与动词下已经有另一个操作，只能留一个")
@@ -99,7 +116,7 @@ impl Builder {
         // 由 `动词 + 路径` 拼，不取接口名：改名是用户随手做的事，而 operationId 是
         // 代码生成器拿来给方法取名的，它变了等于换了一个方法。`动词 + 路径` 只在
         // 同一路径同一动词下唯一——那正是上面 `taken` 守住的那一格。
-        op.insert("operationId".into(), json!(operation_id(&verb, &ep.path)));
+        op.insert("operationId".into(), json!(operation_id(&verb, &path)));
         if let Some(d) = &ep.description {
             op.insert("description".into(), json!(d));
         }
@@ -111,7 +128,7 @@ impl Builder {
             );
         }
 
-        let params = parameters(ep);
+        let params = parameters(ep, &path);
         if !params.is_empty() {
             op.insert("parameters".into(), Value::Array(params));
         }
@@ -159,7 +176,7 @@ impl Builder {
 
         let item = self
             .paths
-            .entry(ep.path.clone())
+            .entry(path)
             .or_insert_with(|| Value::Object(Map::new()));
         if let Some(map) = item.as_object_mut() {
             map.insert(verb, Value::Object(op));

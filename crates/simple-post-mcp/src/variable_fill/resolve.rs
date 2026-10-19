@@ -156,6 +156,7 @@ pub fn resolve_endpoint(
         headers,
         params: params_subst,
         body,
+        body_mode: eff_body.mode,
         auth: resolved_auth,
         missing_vars: missing,
     })
