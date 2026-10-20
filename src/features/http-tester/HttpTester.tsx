@@ -24,7 +24,7 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
   { id: 'body', label: 'Body' },
   { id: 'auth', label: 'Auth' },
   { id: 'docs', label: 'Docs' },
-  { id: 'tests', label: 'Tests', disabled: true },
+  { id: 'script', label: '脚本' },
 ];
 
 /**
@@ -34,7 +34,7 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 const EMPTY_BODY: RequestBody = { mode: 'none', content: '' };
 const EMPTY_AUTH: AuthConfig = { kind: 'none' };
 
-type TabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'tests';
+type TabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
 
 export function HttpTester() {
   // 接口是 `ResourceNode`（身份 + 位置），请求配置是独立的 `EndpointDetail` 行；
@@ -56,6 +56,7 @@ export function HttpTester() {
   const setRequestPending = useAppStore((s) => s.setRequestPending);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
   const setLastScriptOutcome = useAppStore((s) => s.setLastScriptOutcome);
+  const applyEnvWrites = useAppStore((s) => s.applyEnvWrites);
   const addResponseHistory = useAppStore((s) => s.addResponseHistory);
   const setEndpointDraft = useAppStore((s) => s.setEndpointDraft);
   const clearEndpointDraft = useAppStore((s) => s.clearEndpointDraft);
@@ -115,6 +116,9 @@ export function HttpTester() {
       auth: draft?.auth ?? detail?.auth ?? EMPTY_AUTH,
       docs: draft?.docs ?? detail?.docs ?? '',
       tags: draft?.tags ?? detail?.tags ?? [],
+      // 两段脚本。草稿优先，回落到已存的那份。
+      preRequestScript: draft?.preRequestScript ?? detail?.preRequestScript ?? '',
+      testScript: draft?.testScript ?? detail?.testScript ?? '',
     }),
     [draft, detail],
   );
@@ -341,6 +345,7 @@ export function HttpTester() {
     setRequestPending,
     setLastResponse,
     setLastScriptOutcome,
+    applyEnvWrites,
     addResponseHistory,
     saveDraftEndpoint,
     updateEndpointDetail,
@@ -362,6 +367,7 @@ export function HttpTester() {
   const enabledHeaders = effective.headers.filter((h) => h.enabled && h.key).length;
   const hasBody = effective.body.mode !== 'none' && effective.body.content;
   const hasAuth = effective.auth.kind !== 'none';
+  const hasScript = Boolean(effective.preRequestScript || effective.testScript);
 
   const tabItems = TABS.map((t) => {
     let badge: React.ReactNode = null;
@@ -375,6 +381,8 @@ export function HttpTester() {
       badge = (
         <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>
       );
+    if (t.id === 'script' && hasScript)
+      badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;
     return { id: t.id, label: t.label, badge, disabled: t.disabled };
   });
 
@@ -478,6 +486,8 @@ export function HttpTester() {
           body={effective.body}
           auth={effective.auth}
           docs={effective.docs}
+          preRequestScript={effective.preRequestScript}
+          testScript={effective.testScript}
           headerSuggestions={headerSuggestions}
           validationError={validationError}
           patchDraft={patchDraft}

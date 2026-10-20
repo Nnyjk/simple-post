@@ -62,6 +62,10 @@ export function useEditMenu({
   const nodes = useAppStore((s) => s.nodes);
 
   const [toDelete, setToDelete] = useState<DeleteTarget | null>(null);
+  // 正在编辑脚本的集合。`null` = 没有集合的脚本对话框打开着。
+  const [scriptCollection, setScriptCollection] = useState<{ id: string; name: string } | null>(
+    null,
+  );
 
   /**
    * 一个节点及其下所有后代，沿 `parentId` 做 BFS。
@@ -210,6 +214,12 @@ export function useEditMenu({
           icon: <Pencil className="h-3.5 w-3.5" />,
           onClick: () => startEdit('collection', id),
         },
+        {
+          kind: 'item',
+          label: '脚本',
+          icon: <Terminal className="h-3.5 w-3.5" />,
+          onClick: () => setScriptCollection({ id, name: col.name }),
+        },
         ...(isTopLevel || !col.parentId
           ? []
           : [
@@ -308,5 +318,7 @@ export function useEditMenu({
     saveEdit,
     openMenu,
     handleDeleteConfirm,
+    scriptCollection,
+    closeCollectionScripts: () => setScriptCollection(null),
   };
 }

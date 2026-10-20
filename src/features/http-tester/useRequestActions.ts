@@ -10,7 +10,7 @@ import { sendPreparedRequest } from '@/lib/http';
 import { preparedToCurl, type PreparedRequest } from '@/lib/http-build';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
 import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
-import type { ApiResponse, AuthConfig, EnvSnapshot, ScriptOutcome } from '@/types/domain';
+import type { ApiResponse, AuthConfig, EnvSnapshot, EnvWrite, ScriptOutcome } from '@/types/domain';
 
 /** 与 store 里 `setLastResponse` / `addResponseHistory` 相同的形状。 */
 
@@ -29,6 +29,7 @@ export function useRequestActions({
   setRequestPending,
   setLastResponse,
   setLastScriptOutcome,
+  applyEnvWrites,
   addResponseHistory,
   saveDraftEndpoint,
   updateEndpointDetail,
@@ -50,6 +51,8 @@ export function useRequestActions({
   setLastResponse: (resp: ApiResponse | null) => void;
   /** 记下这次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。 */
   setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
+  /** 把脚本写回的环境变量并进本地副本（落库由后端做）。 */
+  applyEnvWrites: (envId: string, writes: EnvWrite[]) => void;
   addResponseHistory: (endpointId: string, response: ApiResponse) => void;
   saveDraftEndpoint: (id: string) => Promise<string | null>;
   updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
@@ -90,6 +93,11 @@ export function useRequestActions({
       setLastResponse(resp);
       setLastScriptOutcome(script);
       addResponseHistory(endpointId, resp);
+      // 脚本写回的环境变量：**后端已落库**（那是唯一那条持久化路径），这里只把
+      // 本地副本同步过来，于是下一个请求立刻能解析到新变量。
+      if (script && script.envWrites.length > 0 && env?.id) {
+        applyEnvWrites(env.id, script.envWrites);
+      }
     } catch (e) {
       // sendRequest 有文档保证不抛 —— 这个 catch 是防御网，兜住 buildFetchInit 之类
       // 的意外。
@@ -111,6 +119,7 @@ export function useRequestActions({
     setRequestPending,
     setLastResponse,
     setLastScriptOutcome,
+    applyEnvWrites,
     addResponseHistory,
   ]);
 

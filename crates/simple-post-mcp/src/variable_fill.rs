@@ -62,5 +62,9 @@ mod base_url_tests;
 mod resolve_tests;
 
 #[cfg(test)]
+#[path = "variable_fill/resolve_parity_test.rs"]
+mod resolve_parity_tests;
+
+#[cfg(test)]
 #[path = "variable_fill/auth_test.rs"]
 mod auth_tests;
