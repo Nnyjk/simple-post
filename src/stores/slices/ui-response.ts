@@ -231,7 +231,10 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
       };
     }),
 
-  setLastResponse: (resp) => set({ lastResponse: resp }),
+  // 换响应就换掉脚本产出：脚本产出**属于**那一次响应，回看一条历史响应时它并不存在
+  // （历史表里不存脚本结果），留着上一次发送的产出只会让人把两件事看成一件。
+  // 发送路径因此先 `setLastResponse` 再 `setLastScriptOutcome`。
+  setLastResponse: (resp) => set({ lastResponse: resp, lastScriptOutcome: null }),
   setLastScriptOutcome: (outcome) => set({ lastScriptOutcome: outcome }),
   setRequestPending: (pending) => set({ requestPending: pending }),
 });

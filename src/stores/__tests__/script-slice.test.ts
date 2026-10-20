@@ -87,4 +87,30 @@ describe('脚本的产出落进 store', () => {
     harness.slice.setLastScriptOutcome(null);
     assert.equal(harness.bag.lastScriptOutcome, null);
   });
+
+  it('换响应就换掉脚本产出——回看历史时它并不存在', () => {
+    const harness = makeUiResponseHarness();
+    const outcome: ScriptOutcome = {
+      logs: [],
+      assertions: [],
+      errors: [],
+      envWrites: [],
+    };
+    harness.slice.setLastScriptOutcome(outcome);
+    assert.equal(harness.bag.lastScriptOutcome, outcome);
+
+    // 回看一条历史响应：脚本结果不随之而来，故必须一起清掉。
+    harness.slice.setLastResponse({
+      status: 200,
+      statusText: 'OK',
+      durationMs: 1,
+      sizeBytes: 0,
+      headers: {},
+      body: '',
+      contentType: '',
+      method: 'GET',
+      url: 'http://x.test/y',
+    } as never);
+    assert.equal(harness.bag.lastScriptOutcome, null);
+  });
 });
