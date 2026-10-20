@@ -169,9 +169,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
       });
       setResult(r);
       setPhase('done');
-      // 导入会在服务端建服务，而服务住在项目行上（`projects[].baseUrlDefinitions`）——
-      // 客户端那份项目行副本是 bootstrap 第一层留下的，不刷新就看不见新服务，
-      // 接口工具栏也会显示成「项目无默认服务」。
+      // 导入在服务端建服务，而项目行只在 bootstrap 第一层加载过一次——不刷新就看不见它。
       await useAppStore.getState().refreshProjects();
       await options.onImported?.(session.moduleId, r.createdCollectionIds);
     } catch (e) {

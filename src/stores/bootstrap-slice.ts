@@ -149,17 +149,8 @@ export interface BootstrapSliceActions {
   /**
    * 重新取一次项目清单，整份替换 `projects`。
    *
-   * 服务定义住在**项目行**上（`projects[].baseUrlDefinitions`），而项目行是
-   * bootstrap 第一层加载后就没有人再更新的那份副本。导入会在服务端建服务
-   * （一次事务完成，回来的只有回报），客户端这边没人更新那份副本——界面上
-   * 就看不到新服务，接口工具栏也显示成「项目无默认服务」，直到整页刷新。
-   *
-   * 整份替换而不是逐字段补丁：服务清单、★、项目名都在项目行上，换掉整行最省心，
-   * 也顺手自愈别的漂移。服务增删改走 `crud-baseurl.ts`，那边本地已经维护了
-   * `projects`，不归这里管。
-   *
-   * 永不 reject：失败只记日志——导入已经成功落库，不能因为一次刷新失败把导入
-   * 报成失败；界面上顶多仍旧看不见新服务，刷新一次就好。
+   * 服务定义住在项目行上，而项目行只在 bootstrap 第一层加载过一次——导入在服务端
+   * 建服务后不刷新它，界面上就看不见那个服务。
    */
   refreshProjects: () => Promise<void>;
 }
@@ -185,9 +176,7 @@ async function loadEndpointDetails(): Promise<Record<string, EndpointDetail>> {
 /**
  * 把旧节点的展开状态按 id 合进新取回的节点列表。
  *
- * `expanded` 只活在渲染器里（服务端不存它），故任何一次「整份替换 `nodes`」都会把
- * 用户打开的分支全部收起——导入一次就足以看见。按 id 合并：新出现的节点保持服务端
- * 那份（未展开），旧节点保留自己原来的展开与否。
+ * `expanded` 只活在渲染器里（服务端不存它），故整份替换 `nodes` 会把用户打开的分支全收起。
  */
 function mergeExpanded(
   prev: readonly ResourceNode[],
@@ -358,9 +347,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
               : (environments.find((e) => e.projectId === s.activeProjectId && e.isActive) ??
                 environments.find((e) => e.projectId === s.activeProjectId));
             return {
-              // 展开状态是渲染器自己的，不落库：整份替换 `nodes` 会把它抹成
-              // `undefined`，用户此前打开的分支就全塌了。按 id 把旧的合回去，
-              // 新出现的节点保持服务端那份（未展开）。
+              // 展开状态不在服务端，整份替换会抹掉它。
               nodes: mergeExpanded(s.nodes, nodes),
               endpointDetails,
               environments,
@@ -388,6 +375,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     refreshProjects: async () => {
       try {
         const projects = await invokeCmd<Project[]>(COMMANDS.projectsList);
+        // 整份替换：服务清单、★、项目名都在项目行上。
         set({ projects });
       } catch (e) {
         // 不抛出：调用方是「导入已经落库」之后才来刷新的，一次刷新失败不该把导入

@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::BaseUrlDefinition;
 use crate::error::AppError;
@@ -126,13 +126,15 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     // 直到有人点了它。一次 `UPDATE`，不做提升：每项目只有一个 ★，没有可提升的对象。
     let mut tx = conn.savepoint()?;
     // 项目 id 要在删行**之前**问：行没了就没处问了，而环境里的格子是按项目找的。
+    // `optional` 而不是 `ok`：只让「没有这一行」变成 None，别的错误得冒出来回滚，
+    // 否则删行成功而格子没清，孤儿键就留下了。
     let project_id: Option<String> = tx
         .query_row(
             "SELECT project_id FROM base_url_definitions WHERE id = ?1",
             params![id],
             |row| row.get(0),
         )
-        .ok();
+        .optional()?;
     let removed = tx.execute(
         "DELETE FROM base_url_definitions WHERE id = ?1",
         params![id],
@@ -149,13 +151,10 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
          WHERE default_base_url_definition_id = ?1",
         params![id],
     )?;
-    // 环境里为它填过的地址一并失效。它们住在 `module_base_urls[def_id]` 下，
-    // 留着就是孤儿键：解析从不读它们（服务已死），但每次删服务都留一份，JSON 只增不减，
-    // 而删除确认框答应过「所有模块里为它填写的地址也会一并失效」。
+    // 环境里为它填过的地址一并失效：它们是 `module_base_urls[def_id]` 下的条目，
+    // 留着就是指向已删服务的孤儿键——解析读不到它们，JSON 却只增不减。
     //
-    // 走裸 SQL 而不调 `environments::update`：后者要 `&mut Connection`，而 savepoint
-    // 只实现了 `Deref`（没有 `DerefMut`），借不出可变引用。读-改-写都在同一个
-    // savepoint 内，故要么全成要么全不成。
+    // 走裸 SQL：`environments::update` 要 `&mut Connection`，而 savepoint 只有 `Deref`。
     if let Some(project_id) = project_id {
         let mut stmt =
             tx.prepare("SELECT id, module_base_urls_json FROM environments WHERE project_id = ?1")?;
