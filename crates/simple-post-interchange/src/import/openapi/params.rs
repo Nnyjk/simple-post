@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use simple_post_core::domain::{BodyMode, KeyValue, RequestBody};
 
 use crate::diagnostics::Diagnostic;
-use crate::spec::escape_pointer_token;
+use crate::spec::{escape_pointer_token, MultipartPart};
 
 use super::refs::deref;
 use super::{normalize_media, scalar_text, text, Ctx, DocView, CONTENT_PREFERENCE};
@@ -176,14 +176,103 @@ pub(super) fn request_body(
         }
     }
 
-    let sample = content[&picked]
+    let picked_media = &content[&picked];
+    let media = normalize_media(&picked);
+    let mode = mode_of(&media);
+    if mode == BodyMode::Multipart {
+        return multipart_body(ctx, picked_media, &at_ptr);
+    }
+    let sample = picked_media
         .get("example")
-        .or_else(|| content[&picked].get("default"));
+        .or_else(|| picked_media.get("default"));
     RequestBody {
-        mode: mode_of(&normalize_media(&picked)),
+        mode,
         content: sample.map(scalar_text).unwrap_or_default(),
         schema: None,
     }
+}
+
+/// multipart 请求体 → 分片数组。
+///
+/// `BodyMode::Multipart` 的 `content` 装的是**分片数组的 JSON 文本**，不是样例原文：
+/// 装错的话发送路径解析不出数组，得到零分片，样例静默消失。
+///
+/// 分片从两处来，先到先得：
+///   * media type 上的 `example` / `default` 对象——它就是这份 body 的样例，键是字段名；
+///   * `schema.properties`——没有样例时按字段名合成，值取该 property 的
+///     `example` → `default` → 标量文本。
+///
+/// `filename` 留空：JSON schema 表达不了文件名，本仓库只存文本分片。
+///
+/// 两处都取不到分片时降级成 `BodyMode::Raw` 并出诊断：保守，但**不静默**——
+/// 声称自己能发 multipart 却发不出分片，就是「存得对、发得错」。
+fn multipart_body(ctx: &mut Ctx, media: &Value, at_ptr: &str) -> RequestBody {
+    let mut parts = parts_from_example(media);
+    if parts.is_empty() {
+        parts = parts_from_properties(media);
+    }
+    if parts.is_empty() {
+        ctx.diagnostics.push(
+            Diagnostic::warn(
+                at_ptr,
+                "multipart 请求体既没有样例也没有 schema 字段，已按原始文本导入",
+            )
+            .dropping("multipart 分片"),
+        );
+        return RequestBody {
+            mode: BodyMode::Raw,
+            content: media
+                .get("example")
+                .or_else(|| media.get("default"))
+                .map(scalar_text)
+                .unwrap_or_default(),
+            schema: None,
+        };
+    }
+    RequestBody {
+        mode: BodyMode::Multipart,
+        content: serde_json::to_string(&parts).unwrap_or_default(),
+        schema: None,
+    }
+}
+
+/// media type 上的样例对象 → 分片。键是表单字段名。
+fn parts_from_example(media: &Value) -> Vec<MultipartPart> {
+    let Some(sample) = media.get("example").or_else(|| media.get("default")) else {
+        return Vec::new();
+    };
+    let Some(map) = sample.as_object() else {
+        return Vec::new();
+    };
+    map.iter()
+        .map(|(name, value)| MultipartPart {
+            name: name.clone(),
+            value: scalar_text(value),
+            filename: None,
+            content_type: None,
+        })
+        .collect()
+}
+
+/// `schema.properties` → 分片。值取该 property 的 `example` → `default` → 标量文本。
+fn parts_from_properties(media: &Value) -> Vec<MultipartPart> {
+    let Some(Value::Object(properties)) = media.get("schema").and_then(|s| s.get("properties"))
+    else {
+        return Vec::new();
+    };
+    properties
+        .iter()
+        .map(|(name, prop)| MultipartPart {
+            name: name.clone(),
+            value: prop
+                .get("example")
+                .or_else(|| prop.get("default"))
+                .map(scalar_text)
+                .unwrap_or_default(),
+            filename: None,
+            content_type: None,
+        })
+        .collect()
 }
 
 /// media type → [`BodyMode`]。`application/json` 与 `*+json` 都算 JSON。
