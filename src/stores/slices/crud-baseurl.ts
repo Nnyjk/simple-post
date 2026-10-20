@@ -8,8 +8,8 @@
  * 动作全都以 `projectId` 为键。模型里的按 module 部分是 URL，住在
  * `environment.moduleBaseUrls[defId][moduleId]`，由 `crud-environment.ts` 写入。
  *
- * 删除定义仍要把指向它的 endpoint 置空；至于那些变成孤儿的按环境 URL 为什么
- * 不清理，见 `deleteBaseUrlDefinition` 上的说明。
+ * 删除定义仍要把指向它的 endpoint 置空；环境里为它填过的地址由服务端一并清掉
+ * （`db::base_url_defs::delete` 在同一个事务里删掉那些格子），前端这边不必再管。
  */
 import type { StateCreator } from 'zustand';
 import type { BaseUrlDefinition, EndpointDetail, Project } from '@/types/domain';
@@ -135,9 +135,9 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
       endpointDetails: get().endpointDetails,
     };
     set((s) => {
-      // 级联：任何指向这个 def 的 endpoint 都退回项目默认。不去清各环境
-      // `moduleBaseUrls` 里那些变成孤儿的单元格——解析函数从不读已死 defId
-      // 名下的条目，所以陈旧数据无害，且下次保存时会自愈。
+      // 级联：任何指向这个 def 的 endpoint 都退回项目默认。各环境里为它填过的
+      // 地址由服务端在同一个事务里删掉（`db::base_url_defs::delete`），所以这里
+      // 不用管 `moduleBaseUrls`——那些格子连同孤儿键一起消失。
       const nextDetails: Record<string, EndpointDetail> = {};
       for (const [id, d] of Object.entries(s.endpointDetails)) {
         nextDetails[id] = d.baseUrlDefinitionId === defId ? { ...d, baseUrlDefinitionId: null } : d;

@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { useAppStore } from '@/stores/app-store';
 import type {
   DocFormat,
   ExportDocument,
@@ -168,6 +169,8 @@ export function useTransfer(options: UseTransferOptions = {}) {
       });
       setResult(r);
       setPhase('done');
+      // 导入在服务端建服务，而项目行只在 bootstrap 第一层加载过一次——不刷新就看不见它。
+      await useAppStore.getState().refreshProjects();
       await options.onImported?.(session.moduleId, r.createdCollectionIds);
     } catch (e) {
       setError(errorText(e));

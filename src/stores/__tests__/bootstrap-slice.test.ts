@@ -308,6 +308,56 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(bag.nodesLoading, false);
   });
 
+  it('reloadWorkspace 保留展开状态：整份替换节点不该把用户打开的分支收起', async () => {
+    // 展开状态只活在渲染器里，服务端不存它。故重取一趟树若直接替换，用户此前
+    // 打开的分支就全塌了——导入一次就足以看见。
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => (cmd === 'nodes_list' ? [moduleNode] : []));
+    await bag.loadWorkspace();
+
+    // 用户展开了这个模块。
+    bag.toggleNodeExpanded('m1');
+    assert.equal((bag.nodes as ResourceNode[])[0].expanded, true);
+
+    // 导入之后重取一趟树：服务端那份不带 `expanded`（它不落库），新集合也没有。
+    installIpcMock(async (cmd) =>
+      cmd === 'nodes_list' ? [moduleNode, { ...moduleNode, id: 'c1', kind: 'collection' }] : [],
+    );
+    await bag.reloadWorkspace();
+
+    const nodes = bag.nodes as ResourceNode[];
+    assert.equal(nodes[0].expanded, true, '展开状态按 id 合回去了');
+    assert.equal(nodes[1].expanded, undefined, '新出现的节点保持收起');
+  });
+
+  it('refreshProjects 整份替换项目清单：导入建的服务要立刻看得见', async () => {
+    // 服务定义住在项目行上，而项目行是 bootstrap 第一层加载后就没有人再更新的
+    // 那份副本。导入在服务端建服务后不刷新它，新服务在界面上就是不存在。
+    const bag = makeBootstrapHarness();
+    const withService: Project = {
+      ...project,
+      baseUrlDefinitions: [{ id: 'd1', name: '127.0.0.1' }],
+    };
+    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [withService] : []));
+
+    await bag.refreshProjects();
+
+    assert.deepEqual(bag.projects, [withService]);
+  });
+
+  it('refreshProjects 失败不 reject：导入已经落库，不能因为一次刷新失败被报成失败', async () => {
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') throw new Error('读项目失败');
+      return [];
+    });
+
+    await bag.refreshProjects();
+
+    // 失败只记日志：项目清单保持原样，导入的结果仍然是真的。
+    assert.deepEqual(bag.projects, []);
+  });
+
   it('启动不预选任何项目或接口，把选择权留给欢迎页', async () => {
     const bag = makeBootstrapHarness();
     const otherProject: Project = { ...project, id: 'p2', name: '别的项目' };
