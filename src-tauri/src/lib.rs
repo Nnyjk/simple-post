@@ -18,6 +18,11 @@ use tauri::Manager;
 
 pub mod commands;
 
+/// `http_request` 的参数面与 REST body 的一致性。源码形状的断言，故放在这里。
+#[cfg(test)]
+#[path = "http_request_test.rs"]
+mod http_request_tests;
+
 pub use simple_post_core::{
     db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script,
 };
