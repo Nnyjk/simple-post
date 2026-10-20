@@ -38,6 +38,7 @@ export function makeEnvironment(overrides: Partial<Environment> = {}): Environme
     baseUrls: {},
     moduleBaseUrls: {},
     variables: {},
+    disabledVariables: [],
     isActive: true,
     ...overrides,
   };

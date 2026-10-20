@@ -350,6 +350,28 @@ describe('resolveVars — 自定义 does not disable environment variables', () 
   });
 });
 
+describe('resolveVars — 停用的变量不参与替换', () => {
+  // `baseUrls` 在这里是承重的：它把 `Environment` 与裸的 `Record<string,string>` 区分开，
+  // 而只有前者才带「哪些变量被停用」这层信息。
+  const env = {
+    variables: { token: 'abc123', name: 'ada' },
+    disabledVariables: ['token'],
+    baseUrls: {},
+  } as unknown as Environment;
+
+  it('leaves a disabled variable intact and reports it as missing', () => {
+    // 停用的变量照样存、照样显示，但不参与替换：`{{x}}` 留在原样并进 missing，
+    // 用户看得见「这个变量没被替换」，而不是静默被替掉。
+    const r = resolveVarsWithMissing('/u/{{token}}/{{name}}', env);
+    assert.equal(r.value, '/u/{{token}}/ada');
+    assert.deepEqual(r.missing, ['token']);
+  });
+
+  it('does not touch its enabled siblings', () => {
+    assert.equal(resolveVars('/u/{{name}}', env), '/u/ada');
+  });
+});
+
 /**
  * `resolveVarsWithMissing` 让请求层不必手工重扫字符串，就能回答「还有哪些变量没
  * 解析出来」。它必须守住的规则与 Rust 的 `resolve_template` /

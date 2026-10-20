@@ -20,7 +20,7 @@ pub(crate) use base_url_defs::{
 pub(crate) use environments::{
     environments_create, environments_delete, environments_list, environments_rename_var,
     environments_set_active, environments_set_module_baseurl, environments_set_var,
-    environments_update,
+    environments_set_var_disabled, environments_update,
 };
 pub(crate) use interchange::{
     interchange_export_document, interchange_export_preview, interchange_import_commit,

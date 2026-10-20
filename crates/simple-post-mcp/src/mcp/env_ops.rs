@@ -97,7 +97,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_update",
-            description: "Update an environment's name/moduleBaseUrls/variables. moduleBaseUrls replaces the whole map and is keyed by service id then module id.",
+            description: "Update an environment's name/moduleBaseUrls/variables/disabledVariables. moduleBaseUrls replaces the whole map and is keyed by service id then module id. disabledVariables replaces the whole set of disabled variable names; a disabled variable is stored and shown but does not take part in substitution.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -107,7 +107,8 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                         "properties": {
                             "name": { "type": "string" },
                             "moduleBaseUrls": { "type": "object" },
-                            "variables": { "type": "object" }
+                            "variables": { "type": "object" },
+                            "disabledVariables": { "type": "array", "items": { "type": "string" } }
                         },
                         "additionalProperties": true
                     }
@@ -212,6 +213,7 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
         base_urls: std::collections::HashMap::new(),
         module_base_urls: std::collections::HashMap::new(),
         variables: std::collections::HashMap::new(),
+        disabled_variables: Vec::new(),
         is_active: false,
     };
     let id = env.id.clone();
@@ -255,6 +257,11 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .patch
             .as_ref()
             .and_then(|p| p.get("variables"))
+            .and_then(|v| serde_json::from_value(v.clone()).ok()),
+        disabled_variables: a
+            .patch
+            .as_ref()
+            .and_then(|p| p.get("disabledVariables"))
             .and_then(|v| serde_json::from_value(v.clone()).ok()),
         is_active: a
             .patch

@@ -162,6 +162,7 @@ const ENV: Environment = {
     userId: 'u_42',
     token: 'eyJ.e2e',
   },
+  disabledVariables: [],
   isActive: true,
 };
 

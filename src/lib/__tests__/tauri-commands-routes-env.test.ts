@@ -81,6 +81,18 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { name: 'Renamed' });
   });
 
+  it('environmentsSetVarDisabled → POST /api/environments/{envId}/vars/disabled', async () => {
+    await invokeCmd(COMMANDS.environmentsSetVarDisabled, {
+      envId: 'env 1',
+      key: 'token',
+      disabled: true,
+    });
+    const c = last();
+    assert.equal(c.method, 'POST');
+    assert.equal(c.url, '/api/environments/env%201/vars/disabled');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { key: 'token', disabled: true });
+  });
+
   it('environmentsRenameVar → POST /api/environments/{envId}/vars/rename with flat body', async () => {
     await invokeCmd(COMMANDS.environmentsRenameVar, {
       envId: 'env 1',

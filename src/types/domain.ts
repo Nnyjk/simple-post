@@ -284,6 +284,14 @@ export interface Environment {
   moduleBaseUrls: Record<string, Record<string, string>>;
   /** 自由模板变量（如 `token`、`apiKey`）。baseUrl 值在 `moduleBaseUrls`，不在这里。 */
   variables: Record<string, string>;
+  /**
+   * 被停用的变量名。**照样存、照样显示，但不参与替换。**
+   *
+   * 与 `variables` 平行，而不是把值改成 `{value, enabled}`：后者会改掉
+   * `environments.variables_json` 列的既有格式，旧行读不回来，就成了要数据迁移的地带。
+   * 平行集合是纯增量：旧行读回来是空集合，语义等价于「全部启用」。
+   */
+  disabledVariables: string[];
   isActive: boolean;
 }
 

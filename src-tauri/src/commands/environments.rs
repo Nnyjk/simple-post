@@ -38,6 +38,7 @@ pub fn environments_create(
         base_urls: opts.base_urls.unwrap_or_default(),
         module_base_urls: HashMap::new(),
         variables: opts.variables.unwrap_or_default(),
+        disabled_variables: Vec::new(),
         is_active: opts.make_active.unwrap_or(false),
     };
     crate::db::with_tx(&state, |c| {
@@ -71,6 +72,22 @@ pub fn environments_set_var(
 ) -> Result<Environment, AppError> {
     crate::db::with_tx(&state, |c| {
         crate::db::environments::set_var(c, &env_id, &key, value.as_deref())
+    })
+}
+
+/// 停用或启用一个环境变量。
+///
+/// 停用的变量**照样存、照样显示，但不参与替换**——`{{x}}` 留在原样并进缺失变量报告，
+/// 用户看得见「这个变量没被替换」，而不是静默被替掉。
+#[tauri::command]
+pub fn environments_set_var_disabled(
+    state: State<DbPool>,
+    env_id: String,
+    key: String,
+    disabled: bool,
+) -> Result<Environment, AppError> {
+    crate::db::with_tx(&state, |c| {
+        crate::db::environments::set_var_disabled(c, &env_id, &key, disabled)
     })
 }
 

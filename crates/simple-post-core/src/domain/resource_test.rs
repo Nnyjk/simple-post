@@ -26,6 +26,7 @@ fn environment_base_urls_round_trip() {
         variables: [("token".to_string(), "abc".to_string())]
             .into_iter()
             .collect(),
+        disabled_variables: Vec::new(),
         is_active: true,
     };
     let s = serde_json::to_string(&env).unwrap();

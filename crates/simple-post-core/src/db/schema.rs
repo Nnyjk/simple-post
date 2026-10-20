@@ -44,6 +44,12 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "TEXT NOT NULL DEFAULT '{}'",
     ),
     (
+        // 停用的变量名。纯增量：旧行读回来是空集合，语义等价于「全部启用」。
+        "environments",
+        "disabled_variables_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    ),
+    (
         "base_url_definitions",
         "module_id",
         // 可空：`ALTER TABLE ... ADD COLUMN` 只能追加带默认值的列，而外键需要默认值；

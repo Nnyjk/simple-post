@@ -32,6 +32,7 @@ export function ProjectEnvSection() {
   const nodes = useAppStore((s) => s.nodes);
 
   const setEnvironmentVar = useAppStore((s) => s.setEnvironmentVar);
+  const setEnvironmentVarDisabled = useAppStore((s) => s.setEnvironmentVarDisabled);
   const renameEnvironmentVar = useAppStore((s) => s.renameEnvironmentVar);
   const setEnvironmentModuleBaseUrl = useAppStore((s) => s.setEnvironmentModuleBaseUrl);
   const deleteEnvironment = useAppStore((s) => s.deleteEnvironment);
@@ -79,6 +80,7 @@ export function ProjectEnvSection() {
       projectId={activeProjectId}
       modules={modules}
       setEnvironmentVar={setEnvironmentVar}
+      setEnvironmentVarDisabled={setEnvironmentVarDisabled}
       renameEnvironmentVar={renameEnvironmentVar}
       setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
       deleteEnvironment={deleteEnvironment}

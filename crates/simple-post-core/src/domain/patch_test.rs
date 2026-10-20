@@ -192,6 +192,11 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
     };
     assert!(!e.is_empty(), "EnvironmentPatch::variables");
     let e = EnvironmentPatch {
+        disabled_variables: Some(vec!["token".into()]),
+        ..Default::default()
+    };
+    assert!(!e.is_empty(), "EnvironmentPatch::disabled_variables");
+    let e = EnvironmentPatch {
         is_active: Some(false),
         ..Default::default()
     };

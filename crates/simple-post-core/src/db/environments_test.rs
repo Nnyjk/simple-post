@@ -19,6 +19,7 @@ fn sample_env(id: &str, project_id: &str, name: &str) -> Environment {
         base_urls: HashMap::new(),
         module_base_urls: HashMap::new(),
         variables: HashMap::new(),
+        disabled_variables: Vec::new(),
         is_active: false,
     }
 }
@@ -347,4 +348,114 @@ fn rename_var_missing_environment_is_not_found() {
     let pool = fresh_pool();
     let err = db::with_tx(&pool, |c| rename_var(c, "env_ghost", "a", "b")).unwrap_err();
     assert_eq!(err.code(), "not_found");
+}
+
+#[test]
+fn a_disabled_variable_survives_the_round_trip() {
+    let pool = fresh_pool();
+    let env = db::with_tx(&pool, |c| set_var_disabled(c, "env_dev", "token", true)).unwrap();
+    assert_eq!(env.disabled_variables, vec!["token".to_string()]);
+    // 值还在：停用的是「不参与替换」，不是「删掉」。
+    assert_eq!(
+        env.variables.get("token").unwrap(),
+        "eyJhbGciOiJIUzI1NiJ9.dev"
+    );
+
+    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
+    assert_eq!(got.disabled_variables, vec!["token".to_string()]);
+}
+
+#[test]
+fn enabling_a_variable_removes_it_from_the_disabled_set() {
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| set_var_disabled(c, "env_dev", "token", true)).unwrap();
+    let env = db::with_tx(&pool, |c| set_var_disabled(c, "env_dev", "token", false)).unwrap();
+    assert!(env.disabled_variables.is_empty());
+    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
+    assert!(got.disabled_variables.is_empty());
+}
+
+#[test]
+fn renaming_a_variable_carries_its_disabled_flag_along() {
+    // 改名后它若静默变成启用的，就等于「改个名字就把它放开了」。
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| set_var_disabled(c, "env_dev", "token", true)).unwrap();
+    let env = db::with_tx(&pool, |c| rename_var(c, "env_dev", "token", "access_token")).unwrap();
+    assert_eq!(
+        env.disabled_variables,
+        vec!["access_token".to_string()],
+        "停用状态跟着键一起搬"
+    );
+}
+
+#[test]
+fn deleting_a_variable_drops_it_from_the_disabled_set() {
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| set_var_disabled(c, "env_dev", "token", true)).unwrap();
+    let env = db::with_tx(&pool, |c| set_var(c, "env_dev", "token", None)).unwrap();
+    assert!(env.disabled_variables.is_empty());
+    assert!(!env.variables.contains_key("token"));
+}
+
+#[test]
+fn disabling_a_variable_that_does_not_exist_is_a_validation_error() {
+    // 静默成功会让调用方以为它生效了。
+    let pool = fresh_pool();
+    let err = db::with_tx(&pool, |c| set_var_disabled(c, "env_dev", "nope", true)).unwrap_err();
+    assert_eq!(err.code(), "validation");
+}
+
+#[test]
+fn an_environment_without_the_column_reads_back_an_empty_disabled_set() {
+    // 老库没有这一列：`db::ADDED_COLUMNS` 补上，语义等价于「全部启用」。
+    let pool = fresh_pool();
+    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
+    assert!(
+        got.disabled_variables.is_empty(),
+        "一个没有被停用的环境读回来是空集合"
+    );
+}
+
+#[test]
+fn the_patch_can_replace_the_whole_disabled_set() {
+    let pool = fresh_pool();
+    let env = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "env_dev",
+            EnvironmentPatch {
+                disabled_variables: Some(vec!["token".into(), "env".into()]),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        env.disabled_variables,
+        vec!["env".to_string(), "token".to_string()]
+    );
+}
+
+#[test]
+fn a_patch_without_the_field_leaves_the_disabled_set_alone() {
+    // 部分更新：缺席 = 不碰。
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| set_var_disabled(c, "env_dev", "token", true)).unwrap();
+    let env = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "env_dev",
+            EnvironmentPatch {
+                name: Some("renamed".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(env.name, "renamed");
+    assert_eq!(
+        env.disabled_variables,
+        vec!["token".to_string()],
+        "改名字不该动停用集合"
+    );
 }

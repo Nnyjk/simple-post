@@ -39,6 +39,7 @@ export const COMMANDS = {
   environmentsUpdate: 'environments_update',
   environmentsDelete: 'environments_delete',
   environmentsSetVar: 'environments_set_var',
+  environmentsSetVarDisabled: 'environments_set_var_disabled',
   environmentsRenameVar: 'environments_rename_var',
   environmentsSetModuleBaseurl: 'environments_set_module_baseurl',
   environmentsSetActive: 'environments_set_active',

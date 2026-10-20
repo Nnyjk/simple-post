@@ -14,7 +14,8 @@ use crate::error::AppError;
 use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState};
 
 use super::super::dto::{
-    EnvRenameVarBody, EnvSetModuleBaseUrlBody, EnvSetVarBody, SetActiveEnvBody,
+    EnvRenameVarBody, EnvSetModuleBaseUrlBody, EnvSetVarBody, EnvSetVarDisabledBody,
+    SetActiveEnvBody,
 };
 
 // ----- environments -------------------------------------------------------
@@ -81,6 +82,18 @@ pub(crate) async fn environments_set_var(
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 
+pub(crate) async fn environments_set_var_disabled(
+    State(s): State<Arc<WebState>>,
+    Path(env_id): Path<String>,
+    Json(body): Json<EnvSetVarDisabledBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let row = db::with_tx(&s.pool, |c| {
+        db::environments::set_var_disabled(c, &env_id, &body.key, body.disabled)
+    })
+    .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
+}
+
 pub(crate) async fn environments_rename_var(
     State(s): State<Arc<WebState>>,
     Path(env_id): Path<String>,
@@ -125,3 +138,7 @@ pub(crate) async fn environments_set_active(
         .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
+
+#[cfg(test)]
+#[path = "environments_test.rs"]
+mod tests;

@@ -195,6 +195,7 @@ pub fn create_with_defaults(conn: &mut Connection, project: &Project) -> Result<
         base_urls: Default::default(),
         module_base_urls: Default::default(),
         variables: Default::default(),
+        disabled_variables: Default::default(),
         is_active: true,
     };
     super::environments::create(conn, &env)?;

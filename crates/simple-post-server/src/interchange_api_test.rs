@@ -224,6 +224,40 @@ fn an_import_preview_never_books_the_fingerprint_ledger() {
     assert_eq!(again, dup, "预览不记账：连问两次答案一样");
 }
 
+#[tokio::test]
+async fn the_preview_counts_the_variables_the_source_disabled() {
+    // `disabledVariableCount` 曾经是字面量 0：一个承诺了意义的公开契约字段，产不出那个数。
+    let pool = temp_pool("disabled-vars");
+    let project_id = seed_project_with_module(&pool).0;
+    let content = r#"{
+      "info": { "name": "demo" },
+      "item": [],
+      "variable": [
+        { "key": "token", "value": "abc" },
+        { "key": "secret", "value": "s3cr3t", "disabled": true }
+      ]
+    }"#;
+
+    let preview = import_preview(
+        &pool,
+        &ImportPreviewOpts {
+            project_id,
+            module_id: "m1".into(),
+            content: Some(content.into()),
+            url: None,
+        },
+    )
+    .await
+    .expect("预览");
+
+    assert_eq!(preview.environments.len(), 1);
+    assert_eq!(preview.environments[0].variable_count, 2);
+    assert_eq!(
+        preview.environments[0].disabled_variable_count, 1,
+        "源文档里被停用的变量要数出来"
+    );
+}
+
 // --- URL 分支：真发一次请求 ------------------------------------------------
 //
 // #68：整条 URL 分支此前 0 个测试覆盖，而这些性质**只有真的发一次请求才会验出来**。
