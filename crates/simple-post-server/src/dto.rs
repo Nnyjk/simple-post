@@ -158,6 +158,26 @@ pub struct McpStatusDto {
     pub last_error: Option<String>,
 }
 
+/// daemon 的日志 tail。设置页用它显示「最近日志」。
+///
+/// 缓冲是**有界**的（最近 500 行），故这份东西永远不长。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpLogTailDto {
+    /// 最近若干行日志。**不含**指标行——那些是机器读的数字，混进来只会碍眼。
+    pub lines: Vec<String>,
+    /// 本次 daemon 启动的 Unix 毫秒时间戳。重启后它变，故它就是日志的「分界」。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<u64>,
+    /// 缓冲是否因超出容量而丢过行。用户据此知道「上面还有更早的日志，但已经没了」。
+    pub truncated: bool,
+    /// 本监管者是否持有这个 daemon 的 stderr 管道。
+    ///
+    /// 复用一个**外部启动**的 daemon 时没有管道，那种情况下缓冲永远是空的。
+    /// 用户看到的应该是「无日志捕获」而不是「没有日志」。
+    pub capturing: bool,
+}
+
 impl McpStatusDto {
     /// 安全的「未运行」快照。`registered_tools` 为空是因为没有 daemon 就没有工具可
     /// 暴露——调用方会在 daemon 回来后的下一次轮询拿到工具列表。

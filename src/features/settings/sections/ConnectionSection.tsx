@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { IconTile } from '@/components/ui/icon-tile';
 import { Switch } from '@/components/ui/switch';
 import { McpStatusPanel, StateSummary, type McpRuntimeStatus } from './McpStatusPanel';
+import { McpLogPanel } from './McpLogPanel';
 import { CopyConfigTile } from './CopyConfigTile';
 import { AgentPermissionsTable } from './AgentPermissionsTable';
 import { DaemonRestartDialog } from './DaemonRestartDialog';
@@ -172,6 +173,10 @@ export function ConnectionSection() {
             aria-label="随应用启动 MCP 进程"
           />
         </div>
+
+        {/* 日志区：默认折叠，且折叠时不拉日志——日志可能有几百行，每 3s 拉一次
+            是白花的带宽。 */}
+        <McpLogPanel />
 
         <div className="grid grid-cols-1 gap-3 border-t border-border/60 p-3 sm:grid-cols-2">
           <div className="flex items-start gap-3 px-1">

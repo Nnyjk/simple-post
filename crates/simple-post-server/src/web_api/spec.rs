@@ -420,6 +420,7 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         // 以下端点刻意不登记：它们是 supervisor / UI 的投影，无版本承诺。它们
         // 在 `WEB_ROUTES` 里可供运行时访问，但 OpenAPI v1 文档省略。
         //   GET  /api/mcp/status             - daemon status (UI)
+        //   GET  /api/mcp/logs               - daemon log tail (UI)
         //   POST /api/mcp/restart            - daemon restart
         //   GET  /api/mcp/proxy-path         - mcp_proxy binary path
         //   GET  /api/mcp/capability         - capability policy

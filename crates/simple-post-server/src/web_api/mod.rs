@@ -229,6 +229,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         )
         // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))
+        .route("/api/mcp/logs", get(mcp_log_tail))
         .route("/api/mcp/start", post(mcp_start))
         .route("/api/mcp/stop", post(mcp_stop))
         .route("/api/mcp/restart", post(mcp_restart))

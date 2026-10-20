@@ -51,6 +51,14 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.equal(c.url, '/api/mcp/restart');
   });
 
+  it('mcpDaemonLogTail → GET /api/mcp/logs', async () => {
+    await invokeCmd(COMMANDS.mcpDaemonLogTail);
+    const c = last();
+    assert.equal(c.method, 'GET');
+    assert.equal(c.url, '/api/mcp/logs');
+    assert.equal(c.body, undefined);
+  });
+
   it('mcpDaemonProxyPath → GET /api/mcp/proxy-path', async () => {
     await invokeCmd(COMMANDS.mcpDaemonProxyPath);
     const c = last();

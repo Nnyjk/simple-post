@@ -294,6 +294,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
 
   // ----- MCP daemon -----
   [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },
+  [COMMANDS.mcpDaemonLogTail]: { method: 'GET', path: () => '/api/mcp/logs' },
   // 三个生命周期动词共用一个 `{ ok, pid, port }` 信封，渲染层的判别联合处理
   // 因此只在一处。`start` 在服务端是幂等的 —— 返回既有 daemon 而非重开一个。
   [COMMANDS.mcpDaemonStart]: {
