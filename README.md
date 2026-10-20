@@ -217,15 +217,17 @@ v0.1.x 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 MCP 二�
 
 ### v0.2
 
+已全部交付。
+
 - [x] 鉴权扩展：Bearer / Basic / API Key（含 apikey 的 header / query 注入）
-- [ ] 鉴权扩展：OAuth2 简化版（#2）
+- [x] 鉴权扩展：OAuth2 简化版（#2）
 - [x] 响应历史持久化到 SQLite（#1）
 - [x] MCP 进程可视化补齐：daemon 日志 tail（PID / 状态已实现）（#6）
-- [ ] 导入 Postman v2.1（#3）
-- [ ] 导入 OpenAPI 3.0 文档（#4）
-- [ ] 导出 OpenAPI 3.0（#5）
+- [x] 导入 Postman v2.1（#3）
+- [x] 导入 OpenAPI 3.0 文档（#4）
+- [x] 导出 OpenAPI 3.0（#5）
 - [x] MCP 写工具：`endpoint_create` / `endpoint_update` / `endpoint_search` / `endpoint_delete`
-- [ ] 仓库治理：说明内容 / CI 提速与镜像发布 / 协作规范 / 注释中文化（#23 #24 #25 #26）
+- [x] 仓库治理：说明内容 / CI 提速与镜像发布 / 协作规范 / 注释中文化（#23 #24 #25 #26）
 
 ### v0.3
 
