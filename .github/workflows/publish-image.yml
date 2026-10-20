@@ -59,6 +59,10 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
+            # `{{version}}` 把 git tag 的 `v` 去掉（`v0.1.2` → `0.1.2`），而
+            # release.yml 的说明里写的是 `:${{ github.ref_name }}`，那带 `v`。
+            # 两种拼法都推一份，说明里的命令才是真的能拉下来的那一条。
+            type=raw,value=${{ github.ref_name }}
 
       - name: 'Build and push'
         uses: docker/build-push-action@v7

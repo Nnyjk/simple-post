@@ -92,12 +92,16 @@ jobs:
             - **Windows**: run the `Simple_Post_*_x64-setup.exe` NSIS installer
 
             ### Container image
-            A matching multi-arch image is published to GitHub Container
-            Registry by `.github/workflows/publish-image.yml` on the same tag:
+            A matching multi-arch image (`linux/amd64` + `linux/arm64`) is published
+            to GitHub Container Registry by `.github/workflows/publish-image.yml`
+            on the same tag:
 
             ```
             docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ```
+
+            The same image is also tagged without the `v` (`0.1.2`), plus
+            `:0.1` (rolling minor) and `:latest` (rolling latest).
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
