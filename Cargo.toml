@@ -11,7 +11,10 @@ members = [
 [workspace.package]
 version = "0.1.2"
 edition = "2021"
-rust-version = "1.77.2"
+# 1.87：请求脚本的沙箱引擎 rquickjs 要求它。选它是因为只有它同时给出
+# 「真墙钟打断 + 内存上限 + 栈上限」，而本项目 Windows 端已因 Tauri 需要 MSVC、
+# Docker 构建阶段已带 gcc，故不新增任何工具链要求。
+rust-version = "1.87"
 license = "MIT"
 
 [workspace.dependencies]
@@ -63,6 +66,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # JSON path (variable interpolation)
 serde_json_path = "0.7"
+
+# 请求脚本的沙箱引擎（QuickJS-NG）。选它是因为只有它同时给出「真墙钟打断
+# （set_interrupt_handler）+ 内存上限（set_memory_limit）+ 栈上限（set_max_stack_size）」，
+# 而 issue 要求「超时要能中断执行而不是等它自己跑完」。
+#
+# **不要开 `rust-alloc` / `allocator`**：`set_memory_limit` 在使用自定义分配器时是
+# no-op，内存上限会静默失效，而那正是本项目对沙箱的硬承诺。
+rquickjs = { version = "0.12", default-features = false, features = ["std"] }
 
 # 配置哈希（oauth2 token 缓存的主键）。已经因 Tauri 侧 `soup3` 的传递依赖进了
 # Cargo.lock 并在 Windows 上参与编译，故这里不会多拉一个新 crate。

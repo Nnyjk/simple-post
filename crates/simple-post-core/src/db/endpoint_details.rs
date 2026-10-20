@@ -46,8 +46,7 @@ pub fn list_by_node_ids(
     if node_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let placeholders = std::iter::repeat("?")
-        .take(node_ids.len())
+    let placeholders = std::iter::repeat_n("?", node_ids.len())
         .collect::<Vec<_>>()
         .join(",");
     let sql = format!(
