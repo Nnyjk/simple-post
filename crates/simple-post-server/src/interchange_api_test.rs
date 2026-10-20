@@ -330,18 +330,18 @@ async fn serve_doc(body: String) -> DocServer {
 /// 用体积而不是 operation 数量去顶大小：200 个 operation 配 16 KB 描述既是 3.3 MB，
 /// 解析侧的耗时却仍由 operation 数决定，故「>3 MB」这件事不会顺带把这条测试拖慢。
 ///
-/// **顶层键必须各占一行**：`import::sniff` 的 `has_top_level_key` 只看行首（那是为了
-/// 不让 `{"a": {"item": 1}}` 里的内层同名键误判），故单行压缩过的 JSON 认不出来。
+/// **单行压缩**：CDN 上的 spec 与 `JSON.stringify` 的产物都是这个形状，
+/// 格式识别必须认得出它。
 fn big_openapi(n: usize, pad: usize) -> String {
     let filler = "x".repeat(pad);
     let mut s = String::with_capacity(n * (pad + 400) + 1024);
     s.push_str(
-        "{\n\"openapi\":\"3.0.3\",\n\"info\":{\"title\":\"大文档\",\"version\":\"1\"},\n\
-         \"servers\":[{\"url\":\"https://api.example.com/v1\"}],\n\"paths\":{\n",
+        "{\"openapi\":\"3.0.3\",\"info\":{\"title\":\"大文档\",\"version\":\"1\"},\
+         \"servers\":[{\"url\":\"https://api.example.com/v1\"}],\"paths\":{",
     );
     for i in 0..n {
         if i > 0 {
-            s.push_str(",\n");
+            s.push(',');
         }
         // 路径名必须唯一，否则 JSON 里同一个键出现两次。
         // 收尾 4 个 `}`：200 → responses → get → 本条 path。paths 与根由下面那行收。
@@ -350,7 +350,7 @@ fn big_openapi(n: usize, pad: usize) -> String {
             i % 4
         ));
     }
-    s.push_str("\n}}");
+    s.push_str("}}");
     s
 }
 

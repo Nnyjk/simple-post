@@ -62,6 +62,10 @@ const POSTMAN_WITH_HOST: &str = r#"{
   ]
 }"#;
 
+/// 同一份集合的单行压缩形态。CDN 上的 spec 与 `JSON.stringify` 的产物都是这个形状，
+/// 格式识别必须认得出它。
+const POSTMAN_COMPRESSED: &str = r#"{"info":{"name":"demo","schema":"https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},"item":[{"name":"users","item":[{"name":"list users","request":{"method":"GET","url":{"raw":"/users","host":["{{baseUrl}}"],"path":["users"]}}}]}]}"#;
+
 /// 建一个 `WebState`：一次性的 SQLite 文件 + 空 SPA 目录，router 绑在 loopback 上一个
 /// 临时端口。
 ///
@@ -301,6 +305,28 @@ async fn a_wrapped_opts_body_is_rejected() {
         "the wire shape is the flat body; a wrapped one must be rejected by the \
          extractor itself, not reach the handler: got {status}: {body}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn a_compressed_collection_is_accepted() {
+    // 单行压缩过的 JSON 认不出来 = 导入完全不可用。这是格式识别的第一道门，
+    // 走的是真实的 HTTP 路径。
+    let (addr, dir) = serve_test_router().await;
+    let (status, preview) = post_json(
+        addr,
+        "/api/interchange/import/preview",
+        json!({ "projectId": "p1", "moduleId": "mod_a", "content": POSTMAN_COMPRESSED }),
+    )
+    .await;
+    assert_eq!(status, 200, "{preview}");
+    assert_eq!(preview["format"], "postman-collection-v2.1");
+
+    let mut keys = Vec::new();
+    for group in preview["groups"].as_array().into_iter().flatten() {
+        endpoint_keys(group, &mut keys);
+    }
+    assert!(!keys.is_empty(), "压缩形态的集合也必须选出端点: {preview}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
