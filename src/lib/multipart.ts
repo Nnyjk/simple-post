@@ -52,6 +52,10 @@ function str(v: unknown): string | null {
  *
  * 任一分片的字段类型不对就整份作废，与 Rust 侧 serde 反序列化失败后丢弃整份一致；
  * 逐字段兜底会让同一个畸形输入在两侧得到不同的分片。
+ *
+ * **显式 `null` 视为缺省**，与 Rust 侧 serde 的 `Option` 语义对齐：`#[serde(default)]`
+ * 只覆盖缺键，JSON `null` 反序列化成 `None`——分片留着，只是那个字段没有值。
+ * 两侧对 `null` 的判断若不同，同一个 body 会在 MCP 与 UI 上发成两份。
  */
 export function parseMultipartParts(content: string): MultipartPart[] {
   let parsed: unknown;
@@ -72,12 +76,12 @@ export function parseMultipartParts(content: string): MultipartPart[] {
     if (name === null || value === null) return [];
 
     const part: MultipartPart = { name, value };
-    if (r.filename !== undefined) {
+    if (r.filename !== undefined && r.filename !== null) {
       const filename = str(r.filename);
       if (filename === null) return [];
       part.filename = filename;
     }
-    if (r.contentType !== undefined) {
+    if (r.contentType !== undefined && r.contentType !== null) {
       const contentType = str(r.contentType);
       if (contentType === null) return [];
       part.contentType = contentType;

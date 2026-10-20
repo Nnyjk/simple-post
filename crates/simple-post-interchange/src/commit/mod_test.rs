@@ -97,6 +97,29 @@ fn endpoint_details_land_with_their_nodes() {
 }
 
 #[test]
+fn a_multipart_body_lands_as_the_parts_array_the_senders_parse() {
+    // 「存得对、发得错」是这条线上最贵的缺陷：分片数组落库时被压成别的东西，
+    // 发送路径解析不出数组，线上收到一个空 body，而界面上看不出任何异常。
+    let (pool, project_id) = fresh_project();
+    let mut ex = nested_exchange();
+    let parts = r#"[{"name":"file","value":"x"}]"#;
+    ex.modules[0].endpoints[0].body = RequestBody {
+        mode: BodyMode::Multipart,
+        content: parts.into(),
+        schema: None,
+    };
+
+    let report = commit_all(&pool, &project_id, &ex).expect("commit");
+    let detail = db::with_conn(&pool, |c| {
+        db::endpoint_details::get(c, &report.created_endpoint_ids[0])
+    })
+    .expect("detail");
+
+    assert_eq!(detail.body.mode, BodyMode::Multipart);
+    assert_eq!(detail.body.content, parts);
+}
+
+#[test]
 fn an_illegal_placement_is_rejected_and_names_the_conflict() {
     let (pool, project_id) = fresh_project();
 

@@ -153,6 +153,19 @@ describe('http-build: malformed multipart content', () => {
     assert.deepEqual(parseMultipartParts('nope'), []);
   });
 
+  it('an explicit null optional field is the same as omitting it', () => {
+    // Rust 侧的 `Option` 把 JSON `null` 读成 `None`——与「不写这个键」同义。
+    // 两侧必须同形：否则 agent 写 `"filename": null` 时，MCP 发一个分片、
+    // UI 发零分片，同一个 body 成了两份。
+    const parsed = parseMultipartParts(
+      '[{"name":"f","value":"v","filename":null,"contentType":null}]',
+    );
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0].name, 'f');
+    assert.equal(parsed[0].filename, undefined);
+    assert.equal(parsed[0].contentType, undefined);
+  });
+
   it('empty content sends no body at all (hasBody is false)', () => {
     const { init } = buildFetchInit(input({ body: { mode: 'multipart', content: '' } }));
     assert.equal(init.body, undefined);
@@ -242,6 +255,9 @@ describe('http-build: multipart does not disturb the other modes', () => {
       // 分片名里的引号与反斜杠被转义，CR/LF 整个被剥掉——留着就是往头里注入一个新头。
       { name: 'we"ird\\name\r\ninjected', value: 'v' },
       { name: 'emptyFile', value: 'x', filename: 'b.bin' },
+      // 显式 null 是缺省：分片留着，那两个字段没有值。Rust 侧 serde 的 `Option`
+      // 是同一个语义——两侧对 null 的判断若不同，同一个 body 会发成两份。
+      { name: 'nullFields', value: 'v', filename: null, contentType: null },
     ]);
 
     const expected =
@@ -251,6 +267,7 @@ describe('http-build: multipart does not disturb the other modes', () => {
         `--${B}\r\nContent-Disposition: form-data; name="note"\r\nContent-Type: text/plain\r\n\r\n`,
         `--${B}\r\nContent-Disposition: form-data; name="we\\"ird\\\\nameinjected"\r\n\r\nv`,
         `--${B}\r\nContent-Disposition: form-data; name="emptyFile"; filename="b.bin"\r\nContent-Type: application/octet-stream\r\n\r\nx`,
+        `--${B}\r\nContent-Disposition: form-data; name="nullFields"\r\n\r\nv`,
       ].join('\r\n') + `\r\n--${B}--\r\n`;
 
     assert.equal(buildMultipartBody(parseMultipartParts(content), B), expected);

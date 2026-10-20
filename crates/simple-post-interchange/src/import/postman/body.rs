@@ -1,28 +1,12 @@
 //! `body.mode` 的降级映射：表达不了的形态出诊断，能表达的落到 `RequestBody`。
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use simple_post_core::domain::{BodyMode, RequestBody};
 
 use crate::diagnostics::Diagnostic;
+use crate::spec::MultipartPart;
 
 use super::{field_text, kv_list, Ctx};
-
-/// 一个 multipart 分片。与 `src/lib/multipart.ts` 的 `MultipartPart`、
-/// `mcp/http_ops/multipart.rs` 同一套线格式。
-///
-/// `filename` / `contentType` 带 `skip_serializing_if`：写出的 `null` 会被前两者的
-/// 逐字段校验判成非法输入，于是整个分片数组被丢成空数组。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MultipartPart {
-    name: String,
-    value: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    filename: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    content_type: Option<String>,
-}
 
 pub(super) fn parse_body(req: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> RequestBody {
     let Some(body) = req.get("body") else {

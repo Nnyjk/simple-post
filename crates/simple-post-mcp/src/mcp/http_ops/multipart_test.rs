@@ -124,6 +124,22 @@ fn camel_case_content_type_is_the_wire_field() {
     assert_eq!(parsed[0].content_type.as_deref(), Some("image/png"));
 }
 
+#[test]
+fn an_explicit_null_optional_field_is_the_same_as_omitting_it() {
+    // serde 的 `Option` 把 JSON `null` 读成 `None`——与「不写这个键」同义。
+    // TS 侧必须同形：否则 agent 写 `"filename": null` 时，MCP 发一个分片、
+    // UI 发零分片，同一个 body 成了两份。
+    let parsed = parts(r#"[{"name":"f","value":"v","filename":null,"contentType":null}]"#);
+    assert_eq!(parsed.len(), 1);
+    assert!(parsed[0].filename.is_none());
+    assert!(parsed[0].content_type.is_none());
+
+    let body = build_body(&parsed, "B");
+    assert!(body.contains("name=\"f\""));
+    assert!(!body.contains("filename="));
+    assert!(!body.contains("Content-Type:"));
+}
+
 // ============================================================
 // apply：Content-Type 覆盖 + body 装配
 // ============================================================
@@ -185,7 +201,8 @@ fn the_body_matches_the_typescript_implementation_byte_for_byte() {
         r#"{"name":"file","value":"binary-ish","filename":"a.txt"},"#,
         r#"{"name":"note","value":"","contentType":"text/plain"},"#,
         r#"{"name":"we\"ird\\name\r\ninjected","value":"v"},"#,
-        r#"{"name":"emptyFile","value":"x","filename":"b.bin"}]"#
+        r#"{"name":"emptyFile","value":"x","filename":"b.bin"},"#,
+        r#"{"name":"nullFields","value":"v","filename":null,"contentType":null}]"#
     );
 
     let expected = [
@@ -195,6 +212,8 @@ fn the_body_matches_the_typescript_implementation_byte_for_byte() {
         // 分片名里的引号与反斜杠被转义，CR/LF 整个被剥掉——留着就是往头里注入一个新头。
         format!("--{B}\r\nContent-Disposition: form-data; name=\"we\\\"ird\\\\nameinjected\"\r\n\r\nv"),
         format!("--{B}\r\nContent-Disposition: form-data; name=\"emptyFile\"; filename=\"b.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nx"),
+        // 显式 null 是缺省：分片留着，那两个字段没有值。TS 侧是同一个语义。
+        format!("--{B}\r\nContent-Disposition: form-data; name=\"nullFields\"\r\n\r\nv"),
     ]
     .join("\r\n")
         + &format!("\r\n--{B}--\r\n");

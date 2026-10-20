@@ -20,6 +20,10 @@ const DEFAULT_FILE_CONTENT_TYPE: &str = "application/octet-stream";
 
 /// 一个分片。字段类型不对就整份反序列化失败 → 零分片，与 TS 侧逐字段校验后
 /// 丢弃整份的行为一致。
+///
+/// **显式 `null` 是缺省**，与 TS 侧一致：`#[serde(default)]` 只覆盖缺键，JSON `null`
+/// 反序列化成 `None`，分片留着而那个字段没有值。两侧对 `null` 的判断若不同，
+/// 同一个 body 会在 MCP 与 UI 上发成两份。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MultipartPart {
