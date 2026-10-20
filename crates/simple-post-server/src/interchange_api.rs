@@ -65,8 +65,7 @@ pub async fn import_preview(
     opts: &ImportPreviewOpts,
 ) -> Result<ImportPreviewDto, AppError> {
     let source = resolve_content(opts.content.as_deref(), opts.url.as_deref()).await?;
-    let format = import::sniff(&source.text)?;
-    let parsed = import::parse_text(format, &source.text)?;
+    let (format, parsed) = import::sniff_and_parse(&source.text)?;
 
     // 去重账本只灌**已落库**的行：预览要回答的是「这些条目项目里已经有了吗」，
     // 而这个答案必须与真正落库时用的是同一本账。用 `contains`（不记账），
@@ -126,8 +125,7 @@ pub async fn import_preview(
 /// 前端原样送到这里。缓存解析结果意味着要加临时表 + TTL + 清理路径，而解析是纯函数：
 /// 重跑一次的成本远低于那套复杂度，换来的是「预览里看到的和落下去的一定是同一棵树」。
 pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCommitDto, AppError> {
-    let format = import::sniff(&opts.content)?;
-    let parsed = import::parse_text(format, &opts.content)?;
+    let (_format, parsed) = import::sniff_and_parse(&opts.content)?;
     let selected: BTreeSet<String> = opts.selected.iter().cloned().collect();
 
     db::with_tx(pool, |conn| {
