@@ -60,6 +60,10 @@ pub(super) fn deref(ctx: &mut Ctx, root: &Value, input: &Value, pointer: &str) -
                 else {
                     continue;
                 };
+                // 本帧压进去的 ref 指针：非空对象/数组由下面的 Merge 帧弹回，标量就地弹回。
+                // 两侧必须对称——少弹一次会提前清掉祖先帧的「正在展开」，那棵子树里
+                // 真的成环时就认不出来了，只能靠深度上限兜，报错会指向错误的方向。
+                ctx.active.extend(opened.iter().cloned());
                 match node {
                     Value::Object(map) if !map.is_empty() => {
                         let children: Vec<(String, Value)> = map.into_iter().collect();
@@ -68,7 +72,6 @@ pub(super) fn deref(ctx: &mut Ctx, root: &Value, input: &Value, pointer: &str) -
                             slots.push((Slot::Key(key.clone()), results.len()));
                             results.push(None);
                         }
-                        ctx.active.extend(opened.iter().cloned());
                         // Merge 先入栈：栈是后进先出，故它落在**所有**子任务之下，
                         // 也就是它们都回来之后才轮到它。
                         let ids: Vec<usize> = slots.iter().map(|(_, id)| *id).collect();
@@ -93,7 +96,6 @@ pub(super) fn deref(ctx: &mut Ctx, root: &Value, input: &Value, pointer: &str) -
                             slots.push((Slot::Index, results.len()));
                             results.push(None);
                         }
-                        ctx.active.extend(opened.iter().cloned());
                         let ids: Vec<usize> = slots.iter().map(|(_, id)| *id).collect();
                         stack.push(Frame::Merge {
                             id: task.id,

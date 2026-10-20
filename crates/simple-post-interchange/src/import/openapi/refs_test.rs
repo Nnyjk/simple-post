@@ -1,8 +1,12 @@
 //! `$ref` 展开：本地引用、成环截断与 3.1 的兄弟字段覆盖。
 
+use serde_json::Value;
+
 use crate::diagnostics::Severity;
 
+use super::refs::deref;
 use super::support::{first_endpoint, ir_of, warns};
+use super::Ctx;
 
 #[test]
 fn a_local_ref_is_expanded_for_both_parameters_and_schemas() {
@@ -74,6 +78,87 @@ fn a_self_referencing_schema_reports_a_cycle_and_stops() {
     );
     // 外层参数本身还在：被截断的是 schema 那一支，不是整个操作。
     assert_eq!(first_endpoint(&ex).params[0].key, "root");
+}
+
+#[test]
+fn a_ref_to_an_empty_object_leaves_the_ancestor_frame_on_the_stack() {
+    // 访问栈是成环判定的依据。祖先帧的「正在展开」被提前弹掉，那棵子树里真的成环时
+    // 就只剩深度上限兜底，报错会指向错误的方向。
+    //
+    // 这里直接盯栈：祖先帧压着的指针必须原封不动地留在栈上。
+    let root: Value = serde_json::from_str(
+        r##"{
+          "components": {
+            "schemas": {
+              "Empty": {},
+              "Outer": { "type": "object", "properties": { "inner": { "$ref": "#/components/schemas/Empty" } } }
+            }
+          }
+        }"##,
+    )
+    .expect("json");
+
+    let mut ctx = Ctx::default();
+    ctx.active.push("#/components/schemas/Ancestor".to_string());
+    let input = root
+        .pointer("/components/schemas/Outer")
+        .expect("Outer 在文档里");
+    deref(&mut ctx, &root, input, "/outer");
+
+    assert_eq!(
+        ctx.active,
+        vec!["#/components/schemas/Ancestor".to_string()],
+        "祖先帧压进去的指针不该被弹掉：{:?}",
+        ctx.active
+    );
+}
+
+#[test]
+fn a_cycle_after_an_empty_ref_is_reported_as_a_cycle_not_as_a_depth_limit() {
+    // 「trailingEmpty」先被展开（`Empty` 是空对象，落进标量分支），「self」后被展开。
+    // 前者若把祖先帧弹掉，后者的真成环就认不出来，只能一路套到深度上限。
+    //
+    // 属性名决定顺序：键按字典序入栈，工作栈是后进先出，故**排在后面的先展开**。
+    let ex = ir_of(
+        r##"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "components": {
+            "schemas": {
+              "Empty": {},
+              "Node": {
+                "type": "object",
+                "properties": {
+                  "self": { "$ref": "#/components/schemas/Node" },
+                  "trailingEmpty": { "$ref": "#/components/schemas/Empty" }
+                }
+              }
+            }
+          },
+          "paths": {
+            "/tree": {
+              "get": {
+                "parameters": [
+                  { "name": "root", "in": "query", "schema": { "$ref": "#/components/schemas/Node" } }
+                ],
+                "responses": { "200": {} }
+              }
+            }
+          }
+        }"##,
+    );
+    assert!(
+        ex.diagnostics.iter().any(|d| d.message.contains("成环")),
+        "该报成环：{:?}",
+        ex.diagnostics
+    );
+    assert!(
+        !ex.diagnostics
+            .iter()
+            .any(|d| d.message.contains("嵌套太深")),
+        "不该报成嵌套太深：{:?}",
+        ex.diagnostics
+    );
 }
 
 #[test]
