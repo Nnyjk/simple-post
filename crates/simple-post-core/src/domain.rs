@@ -18,6 +18,7 @@ mod oauth2;
 mod project;
 mod resource;
 mod response;
+mod script;
 mod settings;
 mod util;
 
@@ -34,6 +35,10 @@ pub use resource::{
 pub use response::{
     ApiResponse, ResponseHistoryEntry, StoredResponse, RESPONSE_HISTORY_MAX_BODY_BYTES,
     RESPONSE_HISTORY_PER_ENDPOINT,
+};
+pub use script::{
+    AssertionResult, EnvWrite, NodeScripts, NodeScriptsPatch, ScriptError, ScriptErrorKind,
+    ScriptLog, ScriptOutcome, ScriptPhase,
 };
 pub use settings::{
     is_loopback_host, McpHttpConfig, Permission, RequestSettings, DEFAULT_MCP_HOST,

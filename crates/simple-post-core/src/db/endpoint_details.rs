@@ -19,7 +19,7 @@ use super::json_col_err;
 
 const COLUMNS: &str = "node_id, method, url, environment_id, base_url_definition_id, \
                        base_url_override, params_json, headers_json, body_json, auth_json, \
-                       docs, notes, tags_json";
+                       docs, notes, tags_json, pre_request_script, test_script";
 
 // 读。
 
@@ -67,7 +67,7 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
     // 列清单在此写出而非复用 COLUMNS：这些列要用 `e` 别名限定，`nodes` 才能 join 进来。
     let sql = "SELECT e.node_id, e.method, e.url, e.environment_id, e.base_url_definition_id, \
                   e.base_url_override, e.params_json, e.headers_json, e.body_json, e.auth_json, \
-                  e.docs, e.notes, e.tags_json \
+                  e.docs, e.notes, e.tags_json, e.pre_request_script, e.test_script \
          FROM endpoint_details e \
          JOIN nodes n ON n.id = e.node_id \
          WHERE n.root_id = ?1 AND n.type = 'endpoint' \
@@ -88,8 +88,8 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
         "INSERT INTO endpoint_details \
          (node_id, method, url, environment_id, base_url_definition_id, \
           base_url_override, params_json, headers_json, body_json, auth_json, \
-          docs, notes, tags_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+          docs, notes, tags_json, pre_request_script, test_script) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             d.node_id,
             d.method.as_str(),
@@ -104,6 +104,8 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
             d.docs,
             d.notes,
             serde_json::to_string(&d.tags)?,
+            d.pre_request_script,
+            d.test_script,
         ],
     )?;
     Ok(())
@@ -165,6 +167,14 @@ pub fn update(
         sets.push(format!("tags_json = ?{}", binds.len() + 1));
         binds.push(json(&t)?);
     }
+    if let Some(s) = &patch.pre_request_script {
+        sets.push(format!("pre_request_script = ?{}", binds.len() + 1));
+        binds.push(optional_text(s));
+    }
+    if let Some(s) = &patch.test_script {
+        sets.push(format!("test_script = ?{}", binds.len() + 1));
+        binds.push(optional_text(s));
+    }
 
     if sets.is_empty() {
         return get(conn, node_id);
@@ -207,6 +217,14 @@ fn push_optional(
     }
 }
 
+/// 脚本列的值：清空写 NULL，保留写文本。
+fn optional_text(value: &Option<String>) -> rusqlite::types::Value {
+    match value {
+        Some(s) => rusqlite::types::Value::Text(s.clone()),
+        None => rusqlite::types::Value::Null,
+    }
+}
+
 fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
     let method_str: String = row.get(1)?;
     let params_json: String = row.get(6)?;
@@ -244,6 +262,8 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
         notes: row.get(11)?,
         tags: serde_json::from_str::<Vec<String>>(&tags_json)
             .map_err(|e| json_col_err("tags_json", e))?,
+        pre_request_script: row.get(13)?,
+        test_script: row.get(14)?,
     })
 }
 

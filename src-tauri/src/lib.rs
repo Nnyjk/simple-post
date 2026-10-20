@@ -124,6 +124,8 @@ pub fn run() {
             crate::commands::endpoint_detail_get,
             crate::commands::endpoint_details_list,
             crate::commands::endpoint_detail_update,
+            crate::commands::node_scripts_get,
+            crate::commands::node_scripts_update,
             crate::commands::environments_list,
             crate::commands::environments_create,
             crate::commands::environments_update,

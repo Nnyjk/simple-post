@@ -107,6 +107,8 @@ fn rich_detail(node_id: String, def_id: &str) -> EndpointDetail {
         docs: Some("doc".into()),
         notes: Some("note".into()),
         tags: vec!["用户".into()],
+        pre_request_script: None,
+        test_script: None,
     }
 }
 

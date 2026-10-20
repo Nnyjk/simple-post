@@ -21,10 +21,8 @@ use serde_json::{Map, Value as Json};
 
 use super::limits::ScriptLimits;
 use super::prelude::PRELUDE;
-use super::types::{
-    AssertionResult, EnvSnapshot, EnvWrite, ScriptErrorKind, ScriptLog, ScriptRequest,
-    ScriptResponse,
-};
+use super::types::{EnvSnapshot, ScriptRequest, ScriptResponse};
+use crate::domain::{AssertionResult, EnvWrite, ScriptErrorKind, ScriptLog};
 
 /// 一段脚本跑完后的产出。
 #[derive(Debug, Clone, Default)]

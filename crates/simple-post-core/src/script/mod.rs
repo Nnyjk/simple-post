@@ -18,19 +18,23 @@
 //! 限额在 [`DEFAULT_SCRIPT_LIMITS`]：墙钟截止、内存、栈、日志与断言条数。墙钟是**真
 //! 打断**——引擎的中断处理被触发时抛不可捕获的异常，死循环不会把宿主拖住。
 
+mod chain;
 mod engine;
 mod limits;
 mod prelude;
 mod run;
 mod types;
 
+// 线上类型住在 `domain`（要与渲染层的 TS 镜像放在一起），这里转出一次，
+// 让 `simple_post_core::script::` 一个入口拿全。
+pub use crate::domain::{
+    AssertionResult, EnvWrite, ScriptError, ScriptErrorKind, ScriptLog, ScriptOutcome, ScriptPhase,
+};
+pub use chain::{collect_chain, merge_env};
 pub use engine::{Sandbox, ScriptEffects, ScriptFailure, ScriptRun};
 pub use limits::{ScriptLimits, DEFAULT_SCRIPT_LIMITS};
 pub use run::run_phase;
-pub use types::{
-    AssertionResult, EnvSnapshot, EnvWrite, ScriptError, ScriptErrorKind, ScriptLog, ScriptOutcome,
-    ScriptPhase, ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit,
-};
+pub use types::{EnvSnapshot, ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit};
 
 // 测试。兄弟 `#[path]` 模块，遵循本 crate 的惯例：Rust 按模块路径找文件，测试专用
 // *目录* 是找不到的。
@@ -46,3 +50,7 @@ mod run_tests;
 #[cfg(test)]
 #[path = "stdout_test.rs"]
 mod stdout_tests;
+
+#[cfg(test)]
+#[path = "chain_test.rs"]
+mod chain_tests;

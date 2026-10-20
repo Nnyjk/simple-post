@@ -1,7 +1,7 @@
-//! 沙箱两侧的数据形状：进（请求 / 响应 / 环境）、出（改动 / 写入 / 日志 / 断言）。
+//! 沙箱内部的数据形状：进去的（请求 / 响应 / 环境）与出来的（改过的请求）。
 //!
-//! 这些类型是**宿主与脚本之间唯一的契约**：宿主把它们序列化成 JSON 交给沙箱，沙箱把
-//! 改动后的同一批 JSON 交回来。脚本本身拿不到数据库句柄、拿不到网络、拿不到宿主函数。
+//! 线上类型（脚本结果、断言、日志、错误、环境变量写入）在 [`crate::domain::script`] ——
+//! 它们要跨 IPC 与 MCP 边界，故与渲染层的 TS 镜像放在一起。
 
 use std::collections::BTreeMap;
 
@@ -43,80 +43,6 @@ pub struct EnvSnapshot {
     pub variables: BTreeMap<String, String>,
 }
 
-/// 一条环境变量写入。`value` 为 `None` 表示删除该变量。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EnvWrite {
-    pub key: String,
-    pub value: Option<String>,
-}
-
-/// 一条脚本日志。`level` 是 `log` / `info` / `warn` / `error`。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptLog {
-    pub level: String,
-    pub message: String,
-}
-
-/// 一条命名断言的结果。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AssertionResult {
-    pub name: String,
-    pub passed: bool,
-    /// 失败时的消息；通过时为 `None`。
-    pub error: Option<String>,
-}
-
-/// 脚本失败的原因分类。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScriptErrorKind {
-    /// 语法错误，脚本根本没跑起来。
-    Compile,
-    /// 运行时抛错。
-    Runtime,
-    /// 超过墙钟截止，被引擎中断。
-    Timeout,
-    /// 超过内存上限。
-    Memory,
-    /// 超过栈上限。
-    Stack,
-}
-
-impl ScriptErrorKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ScriptErrorKind::Compile => "compile",
-            ScriptErrorKind::Runtime => "runtime",
-            ScriptErrorKind::Timeout => "timeout",
-            ScriptErrorKind::Memory => "memory",
-            ScriptErrorKind::Stack => "stack",
-        }
-    }
-}
-
-/// 一个脚本的失败。`source` 指明是哪一段脚本出的问题。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptError {
-    pub kind: ScriptErrorKind,
-    pub message: String,
-    /// 出问题的那段脚本的来源描述（collection 名 / 端点名）。
-    pub source: String,
-}
-
-/// 脚本在哪个阶段跑。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ScriptPhase {
-    /// 请求发出之前。
-    Pre,
-    /// 响应回来之后。
-    Test,
-}
-
 /// 一段脚本的来源。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
@@ -147,37 +73,4 @@ pub struct ScriptUnit {
     pub source: ScriptSource,
     pub pre_request: Option<String>,
     pub test: Option<String>,
-}
-
-/// 一个阶段的执行结果。
-///
-/// 脚本失败**不影响请求的成败**：错误进 `errors`，请求照发。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptOutcome {
-    pub phase: ScriptPhase,
-    pub logs: Vec<ScriptLog>,
-    pub assertions: Vec<AssertionResult>,
-    /// 每个失败脚本一条。
-    pub errors: Vec<ScriptError>,
-    /// 脚本写下的环境变量（已由宿主落库的那些）。
-    pub env_writes: Vec<EnvWrite>,
-}
-
-impl ScriptOutcome {
-    /// 一个没有产出也没有失败的阶段。
-    pub fn empty(phase: ScriptPhase) -> Self {
-        Self {
-            phase,
-            logs: Vec::new(),
-            assertions: Vec::new(),
-            errors: Vec::new(),
-            env_writes: Vec::new(),
-        }
-    }
-
-    /// 断言有失败的吗？失败**不**改变请求的成败，只在这里呈现。
-    pub fn has_failed_assertions(&self) -> bool {
-        self.assertions.iter().any(|a| !a.passed)
-    }
 }

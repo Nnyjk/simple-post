@@ -61,6 +61,13 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "is_default",
         "INTEGER NOT NULL DEFAULT 0",
     ),
+    (
+        // 端点的两段请求脚本。纯增量：旧行读回来是 NULL（= 没有脚本）。
+        "endpoint_details",
+        "pre_request_script",
+        "TEXT",
+    ),
+    ("endpoint_details", "test_script", "TEXT"),
 ];
 
 /// 为 [`ADDED_COLUMNS`] 中缺列的表补上该列。

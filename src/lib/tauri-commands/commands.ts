@@ -32,6 +32,10 @@ export const COMMANDS = {
   endpointDetailsList: 'endpoint_details_list',
   endpointDetailGet: 'endpoint_detail_get',
   endpointDetailUpdate: 'endpoint_detail_update',
+  // collection 上的两段脚本。端点的脚本随 `endpointDetailUpdate` 一起改（它们住在
+  // 同一行配置里），这一对只管 collection。
+  nodeScriptsGet: 'node_scripts_get',
+  nodeScriptsUpdate: 'node_scripts_update',
 
   // ----- environments -----
   environmentsList: 'environments_list',

@@ -15,6 +15,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("script/prelude.rs", include_str!("prelude.rs")),
     ("script/engine.rs", include_str!("engine.rs")),
     ("script/run.rs", include_str!("run.rs")),
+    ("script/chain.rs", include_str!("chain.rs")),
 ];
 
 /// 这一行是不是注释。

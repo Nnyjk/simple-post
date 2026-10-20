@@ -212,6 +212,29 @@ export interface EndpointDetail {
   /** Markdown 笔记。与 `docs` 分开存放：整页文档保持不动，描述就地填写。 */
   notes?: string;
   tags: string[];
+  /**
+   * 请求发出之前跑的那段脚本。`null`（或缺省）= 没有脚本。
+   *
+   * 与 body / headers 同级：它们都是这个端点自己的请求配置。collection 的脚本在
+   * {@link NodeScripts} 里。
+   */
+  preRequestScript?: string | null;
+  /**
+   * 响应回来之后跑的那段脚本。`null`（或缺省）= 没有脚本。
+   */
+  testScript?: string | null;
+}
+
+/**
+ * 一个节点上的两段脚本。collection 的脚本住这里；端点的脚本在
+ * {@link EndpointDetail} 上（与 body / headers 同级）。
+ */
+export interface NodeScripts {
+  nodeId: string;
+  /** 请求发出之前跑的那段。`null`（或缺省）= 没有脚本。 */
+  preRequestScript?: string | null;
+  /** 响应回来之后跑的那段。`null`（或缺省）= 没有脚本。 */
+  testScript?: string | null;
 }
 
 /** endpoint 节点 join 上它的 {@link EndpointDetail}——HTTP 测试器与响应查看器工作的形状，需要 method / url 连同节点身份。 */

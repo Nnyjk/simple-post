@@ -88,6 +88,8 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         docs: a.docs,
         notes: a.notes,
         tags: a.tags.unwrap_or_default(),
+        pre_request_script: None,
+        test_script: None,
     };
     // node 与 detail 一起落库：没有配置行的端点是一棵打不开的树。
     simple_post_core::db::with_tx(&state.pool, |c| {
@@ -146,6 +148,9 @@ pub(super) async fn tool_endpoint_update(
         docs: patch_field::<String>(&patch_obj, "docs")?,
         notes: patch_field::<String>(&patch_obj, "notes")?,
         tags: patch_value_field::<Vec<String>>(&patch_obj, "tags")?,
+        // 两段脚本同样要能从这里读进来：写死 `None` 等于让 agent 永远配不了脚本。
+        pre_request_script: patch_field::<String>(&patch_obj, "pre_request_script")?,
+        test_script: patch_field::<String>(&patch_obj, "test_script")?,
     };
     if node_patch.is_empty() && detail_patch.is_empty() {
         return Err(AppError::Validation(
@@ -153,7 +158,8 @@ pub(super) async fn tool_endpoint_update(
              field to change, e.g. {\"patch\":{\"url\":\"/v2/users\"}}. \
              Accepted fields: method, url, params, headers, body, auth, \
              tags, environment_id, base_url_definition_id, \
-             base_url_override, docs, notes, name, description, sort_order"
+             base_url_override, docs, notes, pre_request_script, \
+             test_script, name, description, sort_order"
                 .into(),
         ));
     }

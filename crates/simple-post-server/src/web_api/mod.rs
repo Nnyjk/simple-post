@@ -136,6 +136,12 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // renderer bootstrap 的批量读。独立路径而非 `/api/nodes` 的过滤：它回答的
         // 是「配置」，不是「结构」。
         .route("/api/endpoint-details", get(endpoint_details_list))
+        // collection 上的两段脚本。端点的脚本在 endpoint-detail 里（同一行配置），
+        // 这一对只管 collection——它住在自己的表里。
+        .route(
+            "/api/nodes/{id}/scripts",
+            get(node_scripts_get).patch(node_scripts_patch),
+        )
         .route("/api/nodes/{id}/duplicate", post(node_duplicate))
         // ---- environments ----
         .route(

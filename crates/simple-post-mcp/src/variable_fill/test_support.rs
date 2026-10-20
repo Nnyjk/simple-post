@@ -86,6 +86,8 @@ pub(super) fn minimal_endpoint() -> EndpointDetail {
         docs: None,
         notes: None,
         tags: vec![],
+        pre_request_script: None,
+        test_script: None,
     }
 }
 

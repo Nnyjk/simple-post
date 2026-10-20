@@ -169,6 +169,15 @@ pub struct EndpointDetail {
     pub notes: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 请求发出之前跑的那段脚本。`None` = 没有脚本。
+    ///
+    /// 住在 `endpoint_details` 而不是 `nodes`：脚本对模块与 collection 没有意义，
+    /// 而这一行只对 endpoint 存在。collection 的脚本在 `node_scripts` 表。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_request_script: Option<String>,
+    /// 响应回来之后跑的那段脚本。`None` = 没有脚本。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_script: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -203,6 +212,14 @@ pub struct EndpointDetailPatch {
     pub notes: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// 缺席 = 不动，`null` = 清除，设值 = 写入。
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pre_request_script: Option<Option<String>>,
+    /// 缺席 = 不动，`null` = 清除，设值 = 写入。
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_script: Option<Option<String>>,
 }
 
 impl EndpointDetailPatch {

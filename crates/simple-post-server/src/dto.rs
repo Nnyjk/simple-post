@@ -43,6 +43,10 @@ pub struct CreateEndpointDetailOpts {
     pub params: Option<Vec<KeyValue>>,
     pub docs: Option<String>,
     pub notes: Option<String>,
+    /// 请求发出之前跑的那段脚本。缺席 = 没有脚本。
+    pub pre_request_script: Option<String>,
+    /// 响应回来之后跑的那段脚本。缺席 = 没有脚本。
+    pub test_script: Option<String>,
 }
 
 impl CreateEndpointDetailOpts {
@@ -67,6 +71,8 @@ impl CreateEndpointDetailOpts {
             docs: self.docs,
             notes: self.notes,
             tags: self.tags.unwrap_or_default(),
+            pre_request_script: self.pre_request_script,
+            test_script: self.test_script,
         }
     }
 }

@@ -246,7 +246,15 @@ Unparsable multipart content yields zero parts rather than an error."
                         "base_url_definition_id": { "type": ["string", "null"] },
                         "base_url_override": { "type": ["string", "null"] },
                         "docs": { "type": ["string", "null"] },
-                        "notes": { "type": ["string", "null"] }
+                        "notes": { "type": ["string", "null"] },
+                        "pre_request_script": {
+                            "type": ["string", "null"],
+                            "description": "JavaScript run after variable resolution and before the request is sent. It may rewrite the request (pm.request). null clears it."
+                        },
+                        "test_script": {
+                            "type": ["string", "null"],
+                            "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set). null clears it."
+                        }
                     },
                     "additionalProperties": false
                 }

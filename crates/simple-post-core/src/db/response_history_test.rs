@@ -54,6 +54,8 @@ fn detail(node_id: &str) -> EndpointDetail {
         docs: None,
         notes: None,
         tags: vec![],
+        pre_request_script: None,
+        test_script: None,
     }
 }
 

@@ -8,9 +8,8 @@
 
 use super::engine::Sandbox;
 use super::limits::ScriptLimits;
-use super::types::{
-    EnvSnapshot, ScriptError, ScriptOutcome, ScriptPhase, ScriptRequest, ScriptResponse, ScriptUnit,
-};
+use super::types::{EnvSnapshot, ScriptRequest, ScriptResponse, ScriptUnit};
+use crate::domain::{ScriptError, ScriptOutcome, ScriptPhase};
 
 /// 跑一个阶段。
 ///

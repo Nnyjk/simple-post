@@ -130,6 +130,15 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: (a) => `/api/nodes/${encodeURIComponent(String(a.nodeId))}/endpoint-detail`,
     body: (a) => a.patch,
   },
+  [COMMANDS.nodeScriptsGet]: {
+    method: 'GET',
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.nodeId))}/scripts`,
+  },
+  [COMMANDS.nodeScriptsUpdate]: {
+    method: 'PATCH',
+    path: (a) => `/api/nodes/${encodeURIComponent(String(a.nodeId))}/scripts`,
+    body: (a) => a.patch,
+  },
 
   // ----- environments -----
   [COMMANDS.environmentsList]: {
