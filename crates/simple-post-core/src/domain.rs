@@ -37,8 +37,8 @@ pub use response::{
     RESPONSE_HISTORY_PER_ENDPOINT,
 };
 pub use script::{
-    AssertionResult, EnvWrite, NodeScripts, NodeScriptsPatch, ScriptError, ScriptErrorKind,
-    ScriptLog, ScriptOutcome, ScriptPhase,
+    AssertionResult, EnvSnapshot, EnvWrite, NodeScripts, NodeScriptsPatch, ScriptError,
+    ScriptErrorKind, ScriptLog, ScriptOutcome, ScriptPhase,
 };
 pub use settings::{
     is_loopback_host, McpHttpConfig, Permission, RequestSettings, DEFAULT_MCP_HOST,

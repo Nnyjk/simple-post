@@ -23,18 +23,21 @@ mod engine;
 mod limits;
 mod prelude;
 mod run;
+mod send;
 mod types;
 
 // 线上类型住在 `domain`（要与渲染层的 TS 镜像放在一起），这里转出一次，
 // 让 `simple_post_core::script::` 一个入口拿全。
 pub use crate::domain::{
-    AssertionResult, EnvWrite, ScriptError, ScriptErrorKind, ScriptLog, ScriptOutcome, ScriptPhase,
+    AssertionResult, EnvSnapshot, EnvWrite, ScriptError, ScriptErrorKind, ScriptLog, ScriptOutcome,
+    ScriptPhase,
 };
 pub use chain::{collect_chain, merge_env};
 pub use engine::{Sandbox, ScriptEffects, ScriptFailure, ScriptRun};
 pub use limits::{ScriptLimits, DEFAULT_SCRIPT_LIMITS};
 pub use run::run_phase;
-pub use types::{EnvSnapshot, ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit};
+pub use send::{send_with_scripts, ScriptedSendInput, ScriptedSendOutcome};
+pub use types::{ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit};
 
 // 测试。兄弟 `#[path]` 模块，遵循本 crate 的惯例：Rust 按模块路径找文件，测试专用
 // *目录* 是找不到的。

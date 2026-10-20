@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { ApiResponse, ResponseHistoryEntry } from '@/types/domain';
+import type { ApiResponse, ResponseHistoryEntry, ScriptOutcome } from '@/types/domain';
 import { uid } from '@/lib/utils';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
@@ -68,6 +68,12 @@ function mergeLoaded(
 
 export interface UiResponseState {
   lastResponse: ApiResponse | null;
+  /**
+   * 最近一次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。
+   *
+   * 与 `lastResponse` 同一刻写入，故两者永远描述同一次发送。没有脚本时为 null。
+   */
+  lastScriptOutcome: ScriptOutcome | null;
   requestPending: boolean;
   /**
    * 每个 endpoint 的发送历史，**最新在末尾**——`appendCapped` 写这个次序，
@@ -104,6 +110,8 @@ export interface UiResponseActions {
   addResponseExample: (endpointId: string, response: ApiResponse) => string;
   deleteResponseExample: (endpointId: string, exampleId: string) => void;
   setLastResponse: (resp: ApiResponse | null) => void;
+  /** 记下最近一次发送的脚本产出。 */
+  setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
   setRequestPending: (pending: boolean) => void;
 }
 
@@ -111,6 +119,7 @@ export type UiResponse = UiResponseState & UiResponseActions;
 
 export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set) => ({
   lastResponse: null,
+  lastScriptOutcome: null,
   requestPending: false,
   responseHistory: {},
   responseExamples: {},
@@ -223,5 +232,6 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
     }),
 
   setLastResponse: (resp) => set({ lastResponse: resp }),
+  setLastScriptOutcome: (outcome) => set({ lastScriptOutcome: outcome }),
   setRequestPending: (pending) => set({ requestPending: pending }),
 });

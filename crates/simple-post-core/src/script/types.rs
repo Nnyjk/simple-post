@@ -3,9 +3,10 @@
 //! 线上类型（脚本结果、断言、日志、错误、环境变量写入）在 [`crate::domain::script`] ——
 //! 它们要跨 IPC 与 MCP 边界，故与渲染层的 TS 镜像放在一起。
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
+
+/// 环境快照是线上类型，住在 `domain`（要与渲染层的 TS 镜像放在一起），这里转出一次。
+pub use crate::domain::EnvSnapshot;
 
 /// 一份待发请求的线上形状。脚本看到它，也能改它。
 ///
@@ -30,17 +31,6 @@ pub struct ScriptResponse {
     pub body: String,
     /// 往返耗时（毫秒）。
     pub response_time_ms: u64,
-}
-
-/// 脚本执行时看到的环境快照。
-///
-/// `id` 决定 `pm.environment.set` 往哪写；`None` 表示没有环境，那种写入会被丢弃
-/// 并记一条警告——无处可写时静默丢弃比报错更让人困惑。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct EnvSnapshot {
-    pub id: Option<String>,
-    pub variables: BTreeMap<String, String>,
 }
 
 /// 一段脚本的来源。

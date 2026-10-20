@@ -10,7 +10,7 @@ import { sendPreparedRequest } from '@/lib/http';
 import { preparedToCurl, type PreparedRequest } from '@/lib/http-build';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
 import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
-import type { ApiResponse, AuthConfig } from '@/types/domain';
+import type { ApiResponse, AuthConfig, EnvSnapshot, ScriptOutcome } from '@/types/domain';
 
 /** 与 store 里 `setLastResponse` / `addResponseHistory` 相同的形状。 */
 
@@ -23,10 +23,12 @@ export function useRequestActions({
   draft,
   prepared,
   auth,
+  env,
   settings,
   runValidation,
   setRequestPending,
   setLastResponse,
+  setLastScriptOutcome,
   addResponseHistory,
   saveDraftEndpoint,
   updateEndpointDetail,
@@ -39,11 +41,15 @@ export function useRequestActions({
   draft: EndpointDraft | undefined;
   prepared: PreparedRequest;
   auth: AuthConfig;
+  /** 脚本看得到的环境。与解析用的是同一份变量池。 */
+  env: EnvSnapshot | undefined;
   settings: RequestSettings;
   /** 跑校验并回报是否通过；失败时它已把界面切到出问题的页签。 */
   runValidation: () => boolean;
   setRequestPending: (v: boolean) => void;
   setLastResponse: (resp: ApiResponse | null) => void;
+  /** 记下这次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。 */
+  setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
   addResponseHistory: (endpointId: string, response: ApiResponse) => void;
   saveDraftEndpoint: (id: string) => Promise<string | null>;
   updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
@@ -68,15 +74,21 @@ export function useRequestActions({
       //
       // ENV 药丸只存在于 Zustand，数据库的 `is_active` 不跟随它，故解析必须基于界面上的
       // `endpointEnv` —— `prepareRequest` 已经折进去了。
-      const resp = await sendPreparedRequest({
+      const { response: resp, script } = await sendPreparedRequest({
         request: prepared,
         // 与 `prepared` 用的是同一份 auth：OAuth2 要靠它取 token，`prepared` 本身
         // 不含（token 只有发出去的那一刻才拿得到）。
         auth,
         settings,
         signal: ctrl.signal,
+        // 端点 id：后端据此装配脚本链（collection 的两段 + 端点自己的两段）。
+        // 草稿接口没有落库的行，故没有链可跑。
+        endpointId: isDraft ? undefined : endpointId,
+        // 脚本看得到的环境。与解析用的是同一份变量池。
+        env,
       });
       setLastResponse(resp);
+      setLastScriptOutcome(script);
       addResponseHistory(endpointId, resp);
     } catch (e) {
       // sendRequest 有文档保证不抛 —— 这个 catch 是防御网，兜住 buildFetchInit 之类
@@ -89,13 +101,16 @@ export function useRequestActions({
     }
   }, [
     endpointId,
+    isDraft,
     runValidation,
     inFlightRef,
     prepared,
     auth,
+    env,
     settings,
     setRequestPending,
     setLastResponse,
+    setLastScriptOutcome,
     addResponseHistory,
   ]);
 

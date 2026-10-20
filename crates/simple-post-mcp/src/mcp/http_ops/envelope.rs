@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::mcp::CallToolResult;
 use simple_post_core::domain::ApiResponse;
+use simple_post_core::domain::ScriptOutcome;
 use simple_post_core::http_executor::{HttpResponse, HttpResult};
 /// `HttpResult` → `CallToolResult`。成功给干净的 JSON 信封（必要时附
 /// `_base_url` / `_missing_vars`）；失败走 `is_error: true`，LLM 读得到消息才能恢复。
@@ -16,6 +17,7 @@ pub(super) fn build_result_envelope(
     result: &HttpResult,
     base_url: Option<String>,
     missing: Option<Vec<String>>,
+    script: Option<ScriptOutcome>,
 ) -> CallToolResult {
     match &result.response {
         Some(resp) => {
@@ -55,6 +57,16 @@ pub(super) fn build_result_envelope(
                             serde_json::to_value(m).unwrap_or(Value::Null),
                         );
                     }
+                }
+            }
+            // 脚本的产出：断言、日志、错误与写回的环境变量。
+            // 脚本失败**不**改写 `ok` —— 请求本身成了就是成了，脚本的事单独说。
+            if let Some(s) = script {
+                if let Value::Object(map) = &mut val {
+                    map.insert(
+                        "_script".into(),
+                        serde_json::to_value(s).unwrap_or(Value::Null),
+                    );
                 }
             }
             CallToolResult::json(val)

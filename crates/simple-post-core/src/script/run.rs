@@ -22,7 +22,7 @@ pub fn run_phase(
     env: &EnvSnapshot,
     limits: &ScriptLimits,
 ) -> ScriptOutcome {
-    let mut outcome = ScriptOutcome::empty(phase);
+    let mut outcome = ScriptOutcome::empty();
 
     let scripts: Vec<(&str, &str)> = units
         .iter()
@@ -48,6 +48,7 @@ pub fn run_phase(
                 kind: failure.kind,
                 message: failure.message,
                 source: String::new(),
+                phase,
             });
             return outcome;
         }
@@ -57,6 +58,7 @@ pub fn run_phase(
             kind: failure.kind,
             message: failure.message,
             source: String::new(),
+            phase,
         });
         return outcome;
     }
@@ -71,6 +73,7 @@ pub fn run_phase(
                 kind: failure.kind,
                 message: failure.message,
                 source: label.to_string(),
+                phase,
             }),
             // 成功才应用改动。失败时 `effects.request` 已是回滚后的形状，不动它。
             None => *request = run.effects.request,

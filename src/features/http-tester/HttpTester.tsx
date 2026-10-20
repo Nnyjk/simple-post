@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { type BaseUrlSelection } from '@/features/http-tester/BaseUrlPicker';
-import { type AuthConfig, type RequestBody } from '@/types/domain';
+import { type AuthConfig, type EnvSnapshot, type RequestBody } from '@/types/domain';
 import { validateRequest } from '@/lib/request-validation';
 import { prepareRequest } from '@/lib/http-build';
+import { enabledVars } from '@/lib/url';
 import { UNTITLED_ENDPOINT_NAME, type EndpointDraft } from '@/stores/store-types';
 import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { EndpointHeader } from './EndpointHeader';
@@ -54,6 +55,7 @@ export function HttpTester() {
   const updateEndpointDetail = useAppStore((s) => s.updateEndpointDetail);
   const setRequestPending = useAppStore((s) => s.setRequestPending);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
+  const setLastScriptOutcome = useAppStore((s) => s.setLastScriptOutcome);
   const addResponseHistory = useAppStore((s) => s.addResponseHistory);
   const setEndpointDraft = useAppStore((s) => s.setEndpointDraft);
   const clearEndpointDraft = useAppStore((s) => s.clearEndpointDraft);
@@ -88,6 +90,13 @@ export function HttpTester() {
     endpoint,
     detail,
   );
+
+  // 脚本看得到的环境。与解析用的是**同一份变量池**（停用的变量不参与），
+  // 否则 `pm.environment.get('token')` 读到的与请求里替换进去的不是同一个值。
+  const scriptEnv = useMemo<EnvSnapshot | undefined>(() => {
+    if (!endpointEnv) return undefined;
+    return { id: endpointEnv.id, variables: enabledVars(endpointEnv) };
+  }, [endpointEnv]);
 
   // ---------------------------------------------------------------------------
   // 有效请求：已存的 detail 叠上草稿。
@@ -326,10 +335,12 @@ export function HttpTester() {
     draft,
     prepared,
     auth: effective.auth,
+    env: scriptEnv,
     settings: requestSettings,
     runValidation,
     setRequestPending,
     setLastResponse,
+    setLastScriptOutcome,
     addResponseHistory,
     saveDraftEndpoint,
     updateEndpointDetail,

@@ -2,6 +2,8 @@
 //!
 //! 这些是跨 IPC / MCP 边界的线格式，字段名一律 camelCase，渲染层无需翻译。
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::util::serialises_to_empty_object;
@@ -104,6 +106,8 @@ pub struct ScriptError {
     pub message: String,
     /// 出问题的那段脚本的来源描述（collection 名 / 端点名）。
     pub source: String,
+    /// 出问题的是哪个阶段。
+    pub phase: ScriptPhase,
 }
 
 /// 一条环境变量写入。`value` 为 `None` 表示删除该变量。
@@ -114,13 +118,23 @@ pub struct EnvWrite {
     pub value: Option<String>,
 }
 
-/// 一个阶段的执行结果。
+/// 脚本执行时看到的环境快照。
+///
+/// `id` 决定 `pm.environment.set` 往哪写；`None` 表示没有环境，那种写入会被丢弃
+/// 并记一条警告——无处可写时静默丢弃比报错更让人困惑。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvSnapshot {
+    pub id: Option<String>,
+    pub variables: BTreeMap<String, String>,
+}
+
+/// 一次发送里脚本的全部产出。
 ///
 /// 脚本失败**不影响请求的成败**：错误进 `errors`，请求照发。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScriptOutcome {
-    pub phase: ScriptPhase,
     pub logs: Vec<ScriptLog>,
     pub assertions: Vec<AssertionResult>,
     /// 每个失败脚本一条。
@@ -131,18 +145,20 @@ pub struct ScriptOutcome {
 
 impl ScriptOutcome {
     /// 一个没有产出也没有失败的阶段。
-    pub fn empty(phase: ScriptPhase) -> Self {
-        Self {
-            phase,
-            logs: Vec::new(),
-            assertions: Vec::new(),
-            errors: Vec::new(),
-            env_writes: Vec::new(),
-        }
+    pub fn empty() -> Self {
+        Self::default()
     }
 
     /// 断言有失败的吗？失败**不**改变请求的成败，只在这里呈现。
     pub fn has_failed_assertions(&self) -> bool {
         self.assertions.iter().any(|a| !a.passed)
+    }
+
+    /// 把另一个阶段的产出并进来。一次发送跑两个阶段（前置与测试），结果合成一份。
+    pub fn merge(&mut self, other: ScriptOutcome) {
+        self.logs.extend(other.logs);
+        self.assertions.extend(other.assertions);
+        self.errors.extend(other.errors);
+        self.env_writes.extend(other.env_writes);
     }
 }
