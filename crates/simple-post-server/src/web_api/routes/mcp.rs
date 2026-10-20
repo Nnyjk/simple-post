@@ -15,6 +15,16 @@ pub(crate) async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<McpStatus
     Json(s.daemon.snapshot().into())
 }
 
+/// `GET /api/mcp/logs` —— daemon 最近若干行日志。
+///
+/// 缓冲是**有界**的，故这份东西永远不长。被复用的（外部启动的）daemon 没有 stderr
+/// 管道，那种情况下 `capturing` 为假、`lines` 为空。
+pub(crate) async fn mcp_log_tail(
+    State(s): State<Arc<WebState>>,
+) -> Json<crate::dto::McpLogTailDto> {
+    Json(s.daemon.log_tail())
+}
+
 // =========================================================================
 // MCP HTTP 监听配置
 // =========================================================================
@@ -296,3 +306,7 @@ pub(crate) async fn mcp_tools(state: Arc<McpAppState>) -> axum::Json<serde_json:
     let _ = state;
     axum::Json(serde_json::json!({ "tools": crate::mcp::registered_tool_names() }))
 }
+
+#[cfg(test)]
+#[path = "mcp_test.rs"]
+mod tests;

@@ -201,7 +201,7 @@ MCP 写操作的授权要同时过两道闸，任何一道缺失都是**拒绝**
 
 - 服务（baseUrl）：项目级共享清单，每个模块每个环境各填各的地址，表头按「模块 × 服务」逐格展开，空格即无地址、不继承
 - 环境变量 `{{var}}` 实时编辑，随项目创建，可重命名 / 删除
-- MCP Server 状态：运行指示 + daemon 上报的已注册工具列表（数量随当前策略变化）
+- MCP Server 状态：运行指示 + daemon 上报的已注册工具列表（数量随当前策略变化）+ daemon 日志 tail（最近 500 行，可折叠）
 - 主题、请求设置（超时 / 跟随重定向 / 最大响应体积）、快捷键速查（`src/features/settings/`）
 
 **关于数据**
@@ -220,7 +220,7 @@ v0.1.x 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 MCP 二�
 - [x] 鉴权扩展：Bearer / Basic / API Key（含 apikey 的 header / query 注入）
 - [ ] 鉴权扩展：OAuth2 简化版（#2）
 - [x] 响应历史持久化到 SQLite（#1）
-- [ ] MCP 进程可视化补齐：daemon 日志 tail（PID / 状态已实现）（#6）
+- [x] MCP 进程可视化补齐：daemon 日志 tail（PID / 状态已实现）（#6）
 - [ ] 导入 Postman v2.1（#3）
 - [ ] 导入 OpenAPI 3.0 文档（#4）
 - [ ] 导出 OpenAPI 3.0（#5）

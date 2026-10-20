@@ -6,7 +6,7 @@ use tauri::State;
 
 use crate::error::AppError;
 
-use super::dto::{McpStatusDto, RestartResult};
+use super::dto::{McpLogTailDto, McpStatusDto, RestartResult};
 
 /// MCP daemon 快照。读 Tauri state 里的内存 handle，完全不碰 DB。
 /// `snapshot()` 必须返回 [`McpStatusDto`]。
@@ -15,6 +15,16 @@ pub fn mcp_status(
     state: State<crate::daemon_supervisor::McpDaemonHandle>,
 ) -> Result<McpStatusDto, AppError> {
     Ok(state.snapshot())
+}
+
+/// daemon 最近若干行日志。读内存里的环形缓冲，完全不碰 DB。
+///
+/// 缓冲是**有界**的（最近 500 行），故这份东西永远不长。
+#[tauri::command]
+pub fn mcp_daemon_log_tail(
+    state: State<crate::daemon_supervisor::McpDaemonHandle>,
+) -> Result<McpLogTailDto, AppError> {
+    Ok(state.log_tail())
 }
 
 /// AI 客户端在 `mcpServers` 里启动的 `simple-post-mcp` 绝对路径，供连接面板的

@@ -51,6 +51,7 @@ use tokio::time::sleep;
 use crate::port_registry::{self, PortRecord};
 
 mod listen_config;
+mod log_buffer;
 mod probe;
 mod reap;
 mod state;
@@ -59,6 +60,7 @@ mod stderr;
 mod watcher;
 
 use listen_config::daemon_cli_args;
+use log_buffer::LogBuffer;
 use state::DaemonState;
 use stderr::forward_stderr_and_parse_metrics;
 use watcher::watch_exit_no_app;
@@ -151,6 +153,11 @@ pub struct McpDaemonHandle {
     ///
     /// `r2d2::Pool` 底层是 `Arc`，故此克隆廉价。
     pool: Option<crate::db::DbPool>,
+    /// daemon 的日志环形缓冲。
+    ///
+    /// **刻意放在状态锁之外**：读日志不必抢那把锁，故它永远不会被「监管者正忙」挡住。
+    /// 缓冲自己的互斥量只护住那几百行字符串，临界区是微秒级。
+    logs: Arc<LogBuffer>,
 }
 
 impl Default for McpDaemonHandle {
@@ -166,6 +173,7 @@ impl McpDaemonHandle {
         Self {
             inner: Arc::new(Mutex::new(DaemonState::empty())),
             pool: None,
+            logs: Arc::new(LogBuffer::new()),
         }
     }
 
@@ -174,6 +182,18 @@ impl McpDaemonHandle {
         Self {
             inner: Arc::new(Mutex::new(DaemonState::empty())),
             pool: Some(pool),
+            logs: Arc::new(LogBuffer::new()),
+        }
+    }
+
+    /// daemon 的日志 tail。廉价——复制一份缓冲里的字符串列表。
+    pub fn log_tail(&self) -> crate::dto::McpLogTailDto {
+        let tail = self.logs.snapshot();
+        crate::dto::McpLogTailDto {
+            lines: tail.lines,
+            started_at_ms: tail.started_at_ms,
+            truncated: tail.truncated,
+            capturing: tail.capturing,
         }
     }
 
@@ -225,6 +245,8 @@ impl McpDaemonHandle {
                 g.port_record = Some(rec.clone());
                 g.status = DaemonStatus::Running;
                 g.started_at = Some(Instant::now());
+                // 被复用的 daemon 是外部启动的：我们没有它的 stderr 管道，故没有日志可捕获。
+                self.logs.stop_capture();
                 return Ok(Started {
                     port: rec.port,
                     watch: None,
@@ -246,6 +268,8 @@ impl McpDaemonHandle {
                 g.port_record = Some(rec.clone());
                 g.status = DaemonStatus::Running;
                 g.started_at = Some(Instant::now());
+                // 同上：被复用的 daemon 没有 stderr 管道。
+                self.logs.stop_capture();
                 return Ok(Started {
                     port: rec.port,
                     watch: None,
@@ -316,6 +340,8 @@ impl McpDaemonHandle {
             // 注意：保留此前的 `g.metrics`——它可能已被更早的一轮更新过，长驻运行中复用
             // 本 handle 重启时还要继续用。
         }
+        // 每次 spawn 换一份日志：重启后的日志不该与上一轮混在一起。
+        self.logs.start_capture();
 
         // ----- 等 healthz --------------------------------------------
         let mut healthy = false;
@@ -351,7 +377,11 @@ impl McpDaemonHandle {
             Arc::clone(&g.metrics)
         };
         if let Some(stderr) = stderr {
-            tokio::spawn(forward_stderr_and_parse_metrics(stderr, metrics));
+            tokio::spawn(forward_stderr_and_parse_metrics(
+                stderr,
+                metrics,
+                Arc::clone(&self.logs),
+            ));
         }
         {
             let mut g = self.inner.lock().await;

@@ -150,6 +150,7 @@ pub fn run() {
             crate::commands::permissions_get,
             crate::commands::permissions_set,
             crate::commands::mcp_status,
+            crate::commands::mcp_daemon_log_tail,
             crate::commands::mcp_daemon_start,
             crate::commands::mcp_daemon_stop,
             crate::commands::mcp_daemon_restart,

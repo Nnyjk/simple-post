@@ -18,6 +18,7 @@ import type { StateCreator } from 'zustand';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type {
   DaemonControlResult,
+  McpLogTail,
   McpRuntimeStatus,
   McpUiState,
   RestartResult,
@@ -137,6 +138,18 @@ export interface McpSliceActions {
    */
   mcpAutoStart: boolean | null;
   /**
+   * daemon 最近若干行日志。首次拉取前为 `null`。
+   *
+   * **刻意不并进 3s 轮询**：状态快照很小，日志可能有几百行，每 3s 拉一次是白花的
+   * 带宽。日志区展开时才拉。
+   */
+  daemonLogs: McpLogTail | null;
+  /**
+   * 重新拉一次 daemon 日志。失败时保留上一次的好内容——瞬时的 IPC 失败不该把用户
+   * 正在读的日志清空。
+   */
+  refreshDaemonLogs: () => Promise<void>;
+  /**
    * 落盘 `mcp.auto_start`。用户打开开关时顺便让守护进程启动（幂等），省得再点
    * 一次；关掉时对正在运行的守护进程不动——auto_start 管的是启动时起不起，
    * 不是运行时杀进程的开关。
@@ -190,6 +203,19 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
    * 所以还没碰过开关的用户读一次之后看到的就是 `false`。
    */
   mcpAutoStart: null,
+  /**
+   * daemon 日志。首次 `refreshDaemonLogs` 之前为 null。
+   */
+  daemonLogs: null,
+  refreshDaemonLogs: async () => {
+    try {
+      const dto = await invokeCmd<McpLogTail>(COMMANDS.mcpDaemonLogTail);
+      set({ daemonLogs: dto });
+    } catch (e) {
+      // 失败时保留上一次的好内容：瞬时的 IPC 失败不该把用户正在读的日志清空。
+      console.warn('[store] mcp_daemon_log_tail failed', e);
+    }
+  },
 
   // ---------- MCP 守护进程轮询 ----------
   // 单例 3s tick 有三个协作方：

@@ -81,6 +81,8 @@ export const COMMANDS = {
 
   // ----- MCP daemon -----
   mcpStatus: 'mcp_status',
+  /** daemon 最近若干行日志。有界的（最近 500 行），故永远不长。 */
+  mcpDaemonLogTail: 'mcp_daemon_log_tail',
   /**
    * 幂等启动。已有 daemon 在跑时直接返回其 `{ok, pid, port}` 而不杀进程重启 ——
    * 与 restart 同一个信封，渲染层只需处理一种形状。

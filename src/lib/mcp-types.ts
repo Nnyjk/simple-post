@@ -63,3 +63,22 @@ export interface RestartResult {
  * 接口，两个方向的结构类型完全相同。
  */
 export type DaemonControlResult = RestartResult;
+
+/**
+ * `mcp_daemon_log_tail` 的线格式。形状镜像 Rust 的 `McpLogTailDto`。
+ *
+ *   - `lines` —— 最近若干行日志。**不含**指标行：那些是机器读的数字，混进来只会碍眼
+ *   - `startedAtMs` —— 本次 daemon 启动的 Unix 毫秒时间戳。重启后它变，故它就是
+ *     日志的「分界」：看到它变了就知道 daemon 换过一次
+ *   - `truncated` —— 缓冲因超出容量而丢过行；用户据此知道「上面还有更早的日志，
+ *     但已经没了」
+ *   - `capturing` —— 本监管者是否持有这个 daemon 的 stderr 管道。复用一个**外部
+ *     启动**的 daemon 时没有管道，那种情况下 `lines` 永远是空的——用户看到的应该是
+ *     「无日志捕获」而不是「没有日志」
+ */
+export interface McpLogTail {
+  lines: string[];
+  startedAtMs?: number | null;
+  truncated: boolean;
+  capturing: boolean;
+}
