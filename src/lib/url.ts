@@ -166,6 +166,9 @@ export interface ResolvedVars {
  * 未知变量原样保留（如 `{{missing}}` 仍是 `{{missing}}`），让用户在请求预览里
  * 看得见缺什么，而不是静默变成 `undefined`。
  *
+ * **停用的变量不参与替换**：它们照样存、照样显示，但 `{{x}}` 留在原样并进
+ * `missing` 报告——用户看得见「这个变量没被替换」，而不是静默被替掉。
+ *
  * 变量名只接受 `\w+`（`[A-Za-z0-9_]+`）；`{{ my-var }}`、`{{ a.b }}` 原样穿过。
  * 替换是**单趟、非递归**的——`{{{{a}}}}` 变成 `{{a}}`，不会再展开一次。这与
  * Rust 解析器的 `template_replace` / `is_word` 一致，也是变量值里恰好含 `{{`
@@ -179,7 +182,7 @@ export function resolveVarsWithMissing(
   // `Environment` 的变量在 `.variables` 下，裸 record 本身就是映射。用
   // `Environment.baseUrls`（嵌套对象）区分——裸 `Record<string,string>` 在那里
   // 会得到 `string`
-  const map: Record<string, string> | undefined = isEnvironment(vars) ? vars.variables : vars;
+  const map: Record<string, string> | undefined = isEnvironment(vars) ? enabledVars(vars) : vars;
   const missing: string[] = [];
   const seen = new Set<string>();
   const value = input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
@@ -214,6 +217,22 @@ function isEnvironment(v: Environment | Record<string, string> | undefined): v i
     typeof (v as Environment).baseUrls === 'object' &&
     !Array.isArray((v as Environment).baseUrls)
   );
+}
+
+/**
+ * 参与替换的变量：环境里**没有**被停用的那些。
+ *
+ * 停用的变量照样存、照样显示，但不参与替换——`{{x}}` 留在原样并进 `missing` 报告，
+ * 用户看得见「这个变量没被替换」，而不是静默被替掉。
+ */
+function enabledVars(env: Environment): Record<string, string> {
+  const disabled = env.disabledVariables ?? [];
+  if (disabled.length === 0) return env.variables;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env.variables)) {
+    if (!disabled.includes(key)) out[key] = value;
+  }
+  return out;
 }
 
 // 重导出面向选择器的类型，调用方就不必再引第二条路径

@@ -20,6 +20,7 @@ export const ENV: Environment = {
     apiKey: 'k_123',
     site: 'cn',
   },
+  disabledVariables: [],
   isActive: true,
 };
 

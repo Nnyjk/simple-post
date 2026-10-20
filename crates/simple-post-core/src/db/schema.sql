@@ -69,7 +69,11 @@ CREATE TABLE IF NOT EXISTS environments (
   -- def_id -> module_id -> url。**base URL 唯一所在的一层。**
   -- 每个单元格独立：某模块对一个服务没有条目即对它没有 URL，且不会继承别的模块的或项目的。
   module_base_urls_json TEXT NOT NULL DEFAULT '{}',
-  variables_json TEXT NOT NULL DEFAULT '{}'
+  variables_json TEXT NOT NULL DEFAULT '{}',
+  -- 被停用的变量名。停用的变量照样存、照样显示，但不参与替换。
+  -- 独立一列而不是并进 variables_json：后者会改掉那一列的既有格式，
+  -- 旧行读不回来，就成了要数据迁移的地带。
+  disabled_variables_json TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_envs_project ON environments(project_id);
 
@@ -303,4 +307,7 @@ END;
 -- 条目（那份列表是给「给已存在的表加列」用的）也不需要 bump 版本。
 --
 -- `oauth2_tokens` 同理：新表，无新列，故仍是版本 3。
+--
+-- `environments.disabled_variables_json` 同理：新列，经 `db::ADDED_COLUMNS` 到达，
+-- 旧行读回来是空集合（= 全部启用），故仍是版本 3。
 PRAGMA user_version = 3;

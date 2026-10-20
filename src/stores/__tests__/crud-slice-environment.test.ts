@@ -245,4 +245,58 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     assert.deepEqual(calls, [], '源 key 不存在时不应打扰后端');
     assert.deepEqual(harness.bag.environments[0].variables, { keep: 'yes' });
   });
+
+  it('停用一个变量：乐观加入集合并发出一次命令', async () => {
+    const original = makeEnvironment({ variables: { token: 'abc', keep: 'yes' } });
+    const harness = makeCrudHarness({}, [original]);
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    await harness.slice.setEnvironmentVarDisabled('env-1', 'token', true);
+
+    assert.deepEqual(harness.bag.environments[0].disabledVariables, ['token']);
+    assert.deepEqual(
+      harness.bag.environments[0].variables,
+      original.variables,
+      '停用不删值：照样存、照样显示，只是不参与替换',
+    );
+    assert.deepEqual(calls, [
+      {
+        cmd: 'environments_set_var_disabled',
+        args: { envId: 'env-1', key: 'token', disabled: true },
+      },
+    ]);
+  });
+
+  it('启用一个变量：从集合里移除', async () => {
+    const original = makeEnvironment({
+      variables: { token: 'abc' },
+      disabledVariables: ['token'],
+    });
+    const harness = makeCrudHarness({}, [original]);
+    installIpcMock(async () => null);
+
+    await harness.slice.setEnvironmentVarDisabled('env-1', 'token', false);
+
+    assert.deepEqual(harness.bag.environments[0].disabledVariables, []);
+  });
+
+  it('停用失败时恢复原集合', async () => {
+    const original = makeEnvironment({
+      variables: { token: 'abc' },
+      disabledVariables: ['token'],
+    });
+    const harness = makeCrudHarness({}, [original]);
+    installIpcMock(async () => {
+      throw new Error('disable failed');
+    });
+
+    await harness.slice.setEnvironmentVarDisabled('env-1', 'token', false);
+
+    assert.deepEqual(harness.bag.environments[0].disabledVariables, ['token']);
+    assert.strictEqual(harness.bag.environments[0], original);
+  });
 });

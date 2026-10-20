@@ -169,16 +169,23 @@ fn parse_variables(root: &Map<String, Value>, name: &str) -> Vec<Environment> {
         return Vec::new();
     };
     let mut variables = HashMap::new();
+    let mut disabled_variables: Vec<String> = Vec::new();
     for entry in arr {
         let Some(o) = entry.as_object() else { continue };
         let Some(k) = field_text(o, "key").filter(|k| !k.is_empty()) else {
             continue;
         };
+        // `disabled: true` 是作者刻意关掉这个变量：不参与替换。丢掉它的话，导入后这个变量
+        // 变成启用的，开始替换本该被遮住的值。
+        if o.get("disabled").and_then(Value::as_bool) == Some(true) {
+            disabled_variables.push(k.clone());
+        }
         variables.insert(k, field_text(o, "value").unwrap_or_default());
     }
     if variables.is_empty() {
         return Vec::new();
     }
+    disabled_variables.sort();
     vec![Environment {
         id: uid(),
         project_id: String::new(),
@@ -186,6 +193,7 @@ fn parse_variables(root: &Map<String, Value>, name: &str) -> Vec<Environment> {
         base_urls: HashMap::new(),
         module_base_urls: HashMap::new(),
         variables,
+        disabled_variables,
         is_active: false,
     }]
 }

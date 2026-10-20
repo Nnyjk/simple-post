@@ -112,6 +112,16 @@ pub struct EnvRenameVarBody {
     pub to_key: String,
 }
 
+/// `POST /api/environments/:envId/vars/disabled` 的 body。
+///
+/// 停用的变量照样存、照样显示，但不参与替换。`disabled = false` 是启用。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvSetVarDisabledBody {
+    pub key: String,
+    pub disabled: bool,
+}
+
 /// `POST /api/environments/:envId/module-baseurls` 的 body。`url = null` 清空这一格。
 /// 这是 URL 唯一所在的一层——上面没有别的层，也不向别的模块的值回落。
 #[derive(Debug, Deserialize)]

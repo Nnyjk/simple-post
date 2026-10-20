@@ -101,6 +101,7 @@ const environment: Environment = {
   baseUrls: {},
   moduleBaseUrls: {},
   variables: {},
+  disabledVariables: [],
   isActive: true,
 };
 const endpointDetail: EndpointDetail = {

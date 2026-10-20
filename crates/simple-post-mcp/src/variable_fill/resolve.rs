@@ -82,7 +82,17 @@ pub fn resolve_endpoint(
     }
 
     // ---- 变量池 ------------------------------------------------
-    let vars: HashMap<String, String> = env.map(|e| e.variables.clone()).unwrap_or_default();
+    // 停用的变量**不参与替换**：`{{x}}` 留在原样并进 `missing_vars`，用户看得见
+    // 「这个变量没被替换」，而不是静默被替掉。
+    let vars: HashMap<String, String> = env
+        .map(|e| {
+            e.variables
+                .iter()
+                .filter(|(k, _)| !e.disabled_variables.iter().any(|d| d == *k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     // ---- params：先替换变量，再拼 URL。
     // 分两步做，missing 追踪与回显用的 params_out 列表才共用同一份真相。

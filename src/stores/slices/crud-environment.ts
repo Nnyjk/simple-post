@@ -26,6 +26,10 @@ import { invokeWithRollback } from './crud-helpers';
 /** CRUD 切片拥有的 environment 动作。 */
 export interface EnvironmentCrudActions {
   setEnvironmentVar: (envId: string, key: string, value: string | null) => Promise<void>;
+  /**
+   * 停用或启用一个变量。停用的变量**照样存、照样显示，但不参与替换**。
+   */
+  setEnvironmentVarDisabled: (envId: string, key: string, disabled: boolean) => Promise<void>;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => Promise<void>;
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => Promise<void>;
@@ -63,6 +67,28 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     await invokeWithRollback(
       'environments_set_var',
       () => invokeCmd<Environment>(COMMANDS.environmentsSetVar, { envId, key, value }),
+      () =>
+        set((s) => ({
+          environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+        })),
+    );
+  },
+  setEnvironmentVarDisabled: async (envId, key, disabled) => {
+    const prev = get().environments.find((e) => e.id === envId);
+    if (!prev) return;
+    const disabledVariables = prev.disabledVariables ?? [];
+    const optimistic: Environment = {
+      ...prev,
+      disabledVariables: disabled
+        ? Array.from(new Set([...disabledVariables, key])).sort()
+        : disabledVariables.filter((k) => k !== key),
+    };
+    set((s) => ({
+      environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
+    }));
+    await invokeWithRollback(
+      'environments_set_var_disabled',
+      () => invokeCmd<Environment>(COMMANDS.environmentsSetVarDisabled, { envId, key, disabled }),
       () =>
         set((s) => ({
           environments: s.environments.map((env) => (env.id === envId ? prev : env)),

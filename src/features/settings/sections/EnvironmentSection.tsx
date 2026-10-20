@@ -20,6 +20,10 @@ export interface EnvironmentSectionProps {
 
   // ---- env-scoped actions ----
   setEnvironmentVar: (envId: string, key: string, value: string | null) => void;
+  /**
+   * 停用或启用一个变量。停用的变量**照样存、照样显示，但不参与替换**。
+   */
+  setEnvironmentVarDisabled: (envId: string, key: string, disabled: boolean) => void;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
   /**
    * 设定（或用 `null` 清除）值层的一个单元格：在此环境中，模块 `moduleId` 上服务
@@ -117,6 +121,7 @@ export function EnvironmentSection({
   projectId,
   modules,
   setEnvironmentVar,
+  setEnvironmentVarDisabled,
   renameEnvironmentVar,
   setEnvironmentModuleBaseUrl,
   addEnvironment,
@@ -247,6 +252,7 @@ export function EnvironmentSection({
                 projectId={projectId}
                 modules={modules}
                 setEnvironmentVar={setEnvironmentVar}
+                setEnvironmentVarDisabled={setEnvironmentVarDisabled}
                 renameEnvironmentVar={renameEnvironmentVar}
                 setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
                 onAddVar={handleAddVar}

@@ -93,6 +93,7 @@ fn apply_base_url_handles_env_and_override() {
         base_urls: HashMap::new(),
         module_base_urls,
         variables: HashMap::new(),
+        disabled_variables: Vec::new(),
         is_active: true,
     };
     let (joined, base) = apply_base_url("/login", Some(&env), Some("auth"), Some("mod_a"));

@@ -129,6 +129,7 @@ pub fn run() {
             crate::commands::environments_update,
             crate::commands::environments_delete,
             crate::commands::environments_set_var,
+            crate::commands::environments_set_var_disabled,
             crate::commands::environments_rename_var,
             crate::commands::environments_set_module_baseurl,
             crate::commands::environments_set_active,

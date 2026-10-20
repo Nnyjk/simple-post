@@ -94,6 +94,14 @@ pub struct Environment {
     pub module_base_urls: HashMap<String, HashMap<String, String>>,
     #[serde(default)]
     pub variables: HashMap<String, String>,
+    /// 被停用的变量名。**照样存、照样显示，但不参与替换。**
+    ///
+    /// 与 `variables` 平行，而不是把值改成 `{value, enabled}`：后者会改掉
+    /// `environments.variables_json` 列的既有格式，读路径
+    /// `serde_json::from_str::<HashMap<String,String>>` 就会在旧行上失败——那是要数据
+    /// 迁移的地带。平行集合是纯增量：旧行读回来是空集合，语义等价于「全部启用」。
+    #[serde(default)]
+    pub disabled_variables: Vec<String>,
     #[serde(default)]
     pub is_active: bool,
 }
@@ -113,6 +121,12 @@ pub struct EnvironmentPatch {
     pub module_base_urls: Option<HashMap<String, HashMap<String, String>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variables: Option<HashMap<String, String>>,
+    /// 整份停用集合替换。缺席 = 不碰，值 = 替换成那份集合。
+    ///
+    /// 逐个变量的停用 / 启用走 `db::environments::set_var_disabled`：那是**一个**变量
+    /// 的一次原子写，而整份替换会让「启用了谁」这件事看不见中间态。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_variables: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_active: Option<bool>,
 }

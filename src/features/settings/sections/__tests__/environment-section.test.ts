@@ -33,6 +33,7 @@ function makeEnv(overrides: Partial<Environment> = {}): Environment {
     baseUrls: {},
     moduleBaseUrls: {},
     variables: {},
+    disabledVariables: [],
     isActive: true,
     ...overrides,
   };
@@ -44,6 +45,7 @@ function makeProps(overrides: Partial<EnvironmentSectionProps> = {}): Environmen
     projectId: 'proj-1',
     modules: [],
     setEnvironmentVar: () => {},
+    setEnvironmentVarDisabled: () => {},
     renameEnvironmentVar: () => {},
     setEnvironmentModuleBaseUrl: () => {},
     addEnvironment: async () => 'env-new',
@@ -171,6 +173,7 @@ describe('EnvBody — no name row of its own', () => {
       projectId: p.projectId,
       modules: p.modules,
       setEnvironmentVar: p.setEnvironmentVar,
+      setEnvironmentVarDisabled: p.setEnvironmentVarDisabled,
       renameEnvironmentVar: p.renameEnvironmentVar,
       setEnvironmentModuleBaseUrl: p.setEnvironmentModuleBaseUrl,
       onAddVar: () => {},

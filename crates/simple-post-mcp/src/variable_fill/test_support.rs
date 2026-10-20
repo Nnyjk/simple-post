@@ -24,6 +24,7 @@ pub(super) fn empty_env() -> Environment {
         base_urls: HashMap::new(),
         module_base_urls: HashMap::new(),
         variables: HashMap::new(),
+        disabled_variables: Vec::new(),
         is_active: true,
     }
 }

@@ -146,6 +146,40 @@ fn resolve_endpoint_substitutes_vars_in_url_path() {
 }
 
 #[test]
+fn a_disabled_variable_is_not_substituted() {
+    // 停用的变量照样存、照样显示，但不参与替换：`{{id}}` 留在原样并进 `missing_vars`，
+    // 用户看得见「这个变量没被替换」，而不是静默被替掉。
+    let mut env = empty_env();
+    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    env.variables.insert("id".into(), "42".into());
+    env.disabled_variables.push("id".into());
+    let mut ep = minimal_endpoint();
+    ep.url = "/users/{{id}}".into();
+    ep.base_url_definition_id = Some("data".into());
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "https://api.example.com/users/{{id}}");
+    assert_eq!(r.missing_vars, vec!["id".to_string()]);
+}
+
+#[test]
+fn an_enabled_sibling_variable_is_still_substituted() {
+    // 停用一个变量不能碰到它的邻居。
+    let mut env = empty_env();
+    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    env.variables.insert("id".into(), "42".into());
+    env.variables.insert("name".into(), "ada".into());
+    env.disabled_variables.push("id".into());
+    let mut ep = minimal_endpoint();
+    ep.url = "/users/{{id}}/{{name}}".into();
+    ep.base_url_definition_id = Some("data".into());
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "https://api.example.com/users/{{id}}/ada");
+    assert_eq!(r.missing_vars, vec!["id".to_string()]);
+}
+
+#[test]
 fn resolve_endpoint_collects_missing_vars_across_url_headers_body_auth() {
     let mut env = empty_env();
     set_cell(&mut env, "data", MOD_A, "https://api.example.com");

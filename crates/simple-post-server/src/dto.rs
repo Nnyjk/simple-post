@@ -246,7 +246,7 @@ pub struct TransferCounts {
 pub struct ImportedEnvironmentDto {
     pub name: String,
     pub variable_count: usize,
-    /// 源环境里被停用的变量数。它们照样导入，只是不预填。
+    /// 源环境里被停用的变量数。它们照样导入并显示，但不参与变量替换。
     pub disabled_variable_count: usize,
 }
 

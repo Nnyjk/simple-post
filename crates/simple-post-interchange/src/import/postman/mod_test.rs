@@ -40,3 +40,38 @@ fn collection_variables_become_an_environment_not_a_service() {
     let bare = parse_ok(&json!({ "info": { "name": "n" }, "item": [] }));
     assert!(bare.environments.is_empty());
 }
+
+#[test]
+fn a_disabled_collection_variable_stays_disabled() {
+    // Postman 里作者刻意关掉的变量，导入后若变成启用的，就开始替换本该被遮住的值。
+    let parsed = parse_ok(&json!({
+        "info": { "name": "n" },
+        "item": [],
+        "variable": [
+            { "key": "token", "value": "abc" },
+            { "key": "secret", "value": "s3cr3t", "disabled": true }
+        ]
+    }));
+    assert_eq!(parsed.environments.len(), 1);
+    let env = &parsed.environments[0];
+    assert_eq!(env.disabled_variables, vec!["secret".to_string()]);
+    // 值照样导入：停用的是「不参与替换」，不是「删掉」。
+    assert_eq!(
+        env.variables.get("secret").map(String::as_str),
+        Some("s3cr3t")
+    );
+}
+
+#[test]
+fn an_enabled_collection_variable_is_not_in_the_disabled_set() {
+    let parsed = parse_ok(&json!({
+        "info": { "name": "n" },
+        "item": [],
+        "variable": [
+            { "key": "token", "value": "abc" },
+            { "key": "secret", "value": "s3cr3t", "disabled": false }
+        ]
+    }));
+    let env = &parsed.environments[0];
+    assert!(env.disabled_variables.is_empty());
+}

@@ -112,7 +112,7 @@ pub async fn import_preview(
             .map(|e| ImportedEnvironmentDto {
                 name: e.name.clone(),
                 variable_count: e.variables.len(),
-                disabled_variable_count: 0,
+                disabled_variable_count: e.disabled_variables.len(),
             })
             .collect(),
         resolved_content: source.from_url.then_some(source.text),

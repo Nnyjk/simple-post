@@ -154,6 +154,11 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars`,
     body: (a) => ({ key: a.key, value: a.value }),
   },
+  [COMMANDS.environmentsSetVarDisabled]: {
+    method: 'POST',
+    path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars/disabled`,
+    body: (a) => ({ key: a.key, disabled: a.disabled }),
+  },
   [COMMANDS.environmentsRenameVar]: {
     method: 'POST',
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars/rename`,

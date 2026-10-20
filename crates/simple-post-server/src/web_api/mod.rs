@@ -150,6 +150,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         )
         .route("/api/environments/{envId}/vars", post(environments_set_var))
         .route(
+            "/api/environments/{envId}/vars/disabled",
+            post(environments_set_var_disabled),
+        )
+        .route(
             "/api/environments/{envId}/vars/rename",
             post(environments_rename_var),
         )

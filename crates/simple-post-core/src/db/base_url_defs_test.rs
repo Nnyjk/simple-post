@@ -194,6 +194,7 @@ fn delete_does_not_touch_another_projects_environments() {
                 base_urls: Default::default(),
                 module_base_urls: Default::default(),
                 variables: Default::default(),
+                disabled_variables: Default::default(),
                 is_active: false,
             },
         )?;

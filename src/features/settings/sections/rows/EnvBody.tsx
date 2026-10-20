@@ -19,6 +19,7 @@ interface EnvBodyProps {
   modules: readonly ResourceNode[];
 
   setEnvironmentVar: EnvironmentSectionProps['setEnvironmentVar'];
+  setEnvironmentVarDisabled: EnvironmentSectionProps['setEnvironmentVarDisabled'];
   renameEnvironmentVar: EnvironmentSectionProps['renameEnvironmentVar'];
   setEnvironmentModuleBaseUrl: EnvironmentSectionProps['setEnvironmentModuleBaseUrl'];
   onAddVar: () => void;
@@ -36,6 +37,7 @@ export function EnvBody({
   projectId,
   modules,
   setEnvironmentVar,
+  setEnvironmentVarDisabled,
   renameEnvironmentVar,
   setEnvironmentModuleBaseUrl,
   onAddVar,
@@ -82,6 +84,7 @@ export function EnvBody({
       <VariableTable
         env={env}
         setEnvironmentVar={setEnvironmentVar}
+        setEnvironmentVarDisabled={setEnvironmentVarDisabled}
         renameEnvironmentVar={renameEnvironmentVar}
         onAddVar={onAddVar}
       />

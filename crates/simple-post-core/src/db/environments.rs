@@ -20,8 +20,7 @@ use crate::error::AppError;
 ///
 /// 用一个字符串而非四份拷贝：两个 URL 列彼此相邻，只点名其中一个的读会静默产出一个所有模块
 /// 都解析成 `''` 的环境。
-const COLUMNS: &str =
-    "id, project_id, name, is_active, base_urls_json, module_base_urls_json, variables_json";
+const COLUMNS: &str = "id, project_id, name, is_active, base_urls_json, module_base_urls_json, variables_json, disabled_variables_json";
 
 // 读。
 
@@ -107,13 +106,14 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
 pub fn create(conn: &mut Connection, e: &Environment) -> Result<(), AppError> {
     let module_base_urls_json = serde_json::to_string(&e.module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
+    let disabled_variables_json = serde_json::to_string(&e.disabled_variables)?;
     // `base_urls_json` 刻意不在这个列表里。点名它会继续写一个无人读的列，而把调用方的遗留
     // `baseUrls` 带进去会留下一个在下一个读者眼里像是活的 blob。不写它就让 schema 默认值
     // 生效，那正是本构建写的每一行上它所承载的空值。
     conn.execute(
         "INSERT INTO environments \
-         (id, project_id, name, is_active, module_base_urls_json, variables_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+         (id, project_id, name, is_active, module_base_urls_json, variables_json, disabled_variables_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             e.id,
             e.project_id,
@@ -121,6 +121,7 @@ pub fn create(conn: &mut Connection, e: &Environment) -> Result<(), AppError> {
             e.is_active as i64,
             module_base_urls_json,
             variables_json,
+            disabled_variables_json,
         ],
     )?;
     Ok(())
@@ -151,6 +152,16 @@ pub fn update(
     if let Some(v) = &patch.variables {
         sets.push(format!("variables_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(v)?));
+    }
+    if let Some(d) = &patch.disabled_variables {
+        // 存成排序后的形状：集合的两种写法（逐个 toggle 与整份替换）落到同一份规范形状，
+        // 读回来时不会因为调用方给的顺序不同而变。
+        let mut sorted = d.clone();
+        sorted.sort();
+        sets.push(format!("disabled_variables_json = ?{}", binds.len() + 1));
+        binds.push(rusqlite::types::Value::Text(serde_json::to_string(
+            &sorted,
+        )?));
     }
     if let Some(a) = patch.is_active {
         sets.push(format!("is_active = ?{}", binds.len() + 1));
@@ -228,12 +239,50 @@ pub fn set_var(
         }
         None => {
             env.variables.remove(key);
+            // 键没了，「它被停用」这件事也就没了。
+            env.disabled_variables.retain(|k| k != key);
         }
     }
     let variables_json = serde_json::to_string(&env.variables)?;
+    let disabled_variables_json = serde_json::to_string(&env.disabled_variables)?;
     let rows = conn.execute(
-        "UPDATE environments SET variables_json = ?1 WHERE id = ?2",
-        params![variables_json, env_id],
+        "UPDATE environments SET variables_json = ?1, disabled_variables_json = ?2 WHERE id = ?3",
+        params![variables_json, disabled_variables_json, env_id],
+    )?;
+    if rows == 0 {
+        return Err(AppError::NotFound(format!("environment {env_id}")));
+    }
+    Ok(env)
+}
+
+/// 停用或启用一个环境变量。**必须在 `db::with_tx` 内调用。**
+///
+/// 停用的变量**照样存、照样显示，但不参与替换**——`{{x}}` 留在原样并进
+/// `missing_vars`，用户看得见「这个变量没被替换」，而不是静默被替掉。
+///
+/// 键不存在时返回 [`AppError::Validation`]：停用一个不存在的变量没有意义，而静默成功会让
+/// 调用方以为它生效了。
+pub fn set_var_disabled(
+    conn: &mut Connection,
+    env_id: &str,
+    key: &str,
+    disabled: bool,
+) -> Result<Environment, AppError> {
+    let mut env = get(conn, env_id)?;
+    if !env.variables.contains_key(key) {
+        return Err(AppError::Validation(format!(
+            "set_var_disabled: environment {env_id} has no variable {key:?}"
+        )));
+    }
+    env.disabled_variables.retain(|k| k != key);
+    if disabled {
+        env.disabled_variables.push(key.to_string());
+        env.disabled_variables.sort();
+    }
+    let disabled_variables_json = serde_json::to_string(&env.disabled_variables)?;
+    let rows = conn.execute(
+        "UPDATE environments SET disabled_variables_json = ?1 WHERE id = ?2",
+        params![disabled_variables_json, env_id],
     )?;
     if rows == 0 {
         return Err(AppError::NotFound(format!("environment {env_id}")));
@@ -275,13 +324,21 @@ pub fn rename_var(
         )));
     }
     env.variables.insert(to_key.to_string(), value);
+    // 改名连同「它被停用」这件事一起搬过去，否则改完名的变量会静默变成启用的。
+    let was_disabled = env.disabled_variables.iter().any(|k| k == from_key);
+    env.disabled_variables.retain(|k| k != from_key);
+    if was_disabled {
+        env.disabled_variables.push(to_key.to_string());
+        env.disabled_variables.sort();
+    }
 
     // 与 `set_var` 同一个单次 UPDATE 形状：`variables_json` 整列写入，是原子的，故改名
     // 没有中间状态。
     let variables_json = serde_json::to_string(&env.variables)?;
+    let disabled_variables_json = serde_json::to_string(&env.disabled_variables)?;
     let rows = conn.execute(
-        "UPDATE environments SET variables_json = ?1 WHERE id = ?2",
-        params![variables_json, env_id],
+        "UPDATE environments SET variables_json = ?1, disabled_variables_json = ?2 WHERE id = ?3",
+        params![variables_json, disabled_variables_json, env_id],
     )?;
     if rows == 0 {
         return Err(AppError::NotFound(format!("environment {env_id}")));
@@ -342,6 +399,7 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
     let base_urls_json: String = row.get(4)?;
     let module_base_urls_json: String = row.get(5)?;
     let variables_json: String = row.get(6)?;
+    let disabled_variables_json: String = row.get(7)?;
     let parse_err = |e: serde_json::Error, col: &str| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
@@ -358,6 +416,8 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
             .map_err(|e| parse_err(e, "module_base_urls_json"))?;
     let variables: HashMap<String, String> =
         serde_json::from_str(&variables_json).map_err(|e| parse_err(e, "variables_json"))?;
+    let disabled_variables: Vec<String> = serde_json::from_str(&disabled_variables_json)
+        .map_err(|e| parse_err(e, "disabled_variables_json"))?;
     Ok(Environment {
         id: row.get(0)?,
         project_id: row.get(1)?,
@@ -366,6 +426,7 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
         base_urls,
         module_base_urls,
         variables,
+        disabled_variables,
     })
 }
 
