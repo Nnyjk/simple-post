@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::domain::{RequestSettings, ResourceNodeType};
 use crate::error::AppError;
-use crate::script::{send_with_scripts, ScriptRequest, ScriptedSendInput};
+use crate::script::{send_with_scripts, ScriptOverride, ScriptRequest, ScriptedSendInput};
 
 use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState};
 
@@ -54,6 +54,11 @@ pub(crate) async fn http_send(
                 follow_redirects: body.follow_redirects,
                 max_response_size_kb: body.max_response_size_kb,
             },
+            // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
+            script_override: Some(ScriptOverride {
+                pre_request: body.pre_request_script,
+                test: body.test_script,
+            }),
         },
     )
     .await

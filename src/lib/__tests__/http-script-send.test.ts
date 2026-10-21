@@ -94,12 +94,17 @@ describe('发送时带上脚本上下文', () => {
       settings: SETTINGS,
       endpointId: 'ep-1',
       env: { id: ENV.id, variables: ENV.variables },
+      preRequestScript: "pm.environment.set('a','1');",
+      testScript: "pm.test('t', function () {});",
     });
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].cmd, 'http_request');
     assert.equal(calls[0].args.endpointId, 'ep-1');
     assert.deepEqual(calls[0].args.env, { id: 'env-1', variables: { token: 'abc' } });
+    // 端点自己那两段脚本：送的是界面上此刻生效的那份，后端拿它覆盖存的那份。
+    assert.equal(calls[0].args.preRequestScript, "pm.environment.set('a','1');");
+    assert.equal(calls[0].args.testScript, "pm.test('t', function () {});");
 
     assert.equal(result.response.status, 200);
     assert.equal(result.script, script);
@@ -126,6 +131,8 @@ describe('发送时带上脚本上下文', () => {
 
     assert.equal(calls[0].args.endpointId, null);
     assert.equal(calls[0].args.env, null);
+    assert.equal(calls[0].args.preRequestScript, null);
+    assert.equal(calls[0].args.testScript, null);
     assert.equal(result.script, null);
   });
 });

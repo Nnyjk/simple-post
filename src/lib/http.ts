@@ -327,6 +327,15 @@ export interface SendPreparedInput {
    * `pm.environment.get('token')` 读到的与请求里替换进去的会不是同一个值。
    */
   env?: EnvSnapshot;
+  /**
+   * 端点自己的前置脚本，**覆盖**存的那份。空串 = 没有脚本。
+   *
+   * 送的是界面上此刻生效的那份（草稿优先）：否则用户改完脚本还没保存就发送，跑的
+   * 却是旧脚本，「所见」与「所发」就分叉了。
+   */
+  preRequestScript?: string;
+  /** 端点自己的测试脚本，覆盖规则同上。 */
+  testScript?: string;
 }
 
 /** 一次发送的结果：响应 + 脚本的产出（没有脚本时 `script` 为 null）。 */
@@ -408,6 +417,9 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
       // 端点 id 与环境：脚本链的装配与变量回写都靠它们。缺席时后端没有脚本链可跑。
       endpointId: input.endpointId ?? null,
       env: input.env ?? null,
+      // 端点自己那两段脚本：界面上此刻生效的那份，覆盖后端存的那份。
+      preRequestScript: input.preRequestScript ?? null,
+      testScript: input.testScript ?? null,
     },
     shape,
     // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的

@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use rusqlite::params;
 
+use super::send::ScriptOverride;
 use super::types::{ScriptSource, ScriptUnit};
 use crate::db;
 use crate::domain::EnvWrite;
@@ -19,9 +20,14 @@ use crate::error::AppError;
 ///
 /// 端点自己的脚本在 `endpoint_details` 里，祖先 collection 的在 `node_scripts` 里。
 /// 没有配置脚本的节点不进链。
+///
+/// `endpoint_override` 覆盖**端点自己**那两段脚本：`None` = 用存的那份；`Some` = 用这份
+/// （空串 = 没有脚本）。渲染层送的是界面上此刻生效的那份，故未保存的编辑也会跑到；
+/// 祖先 collection 的脚本仍从库里读——它们不在端点编辑器里改。
 pub fn collect_chain(
     conn: &mut rusqlite::Connection,
     endpoint_node_id: &str,
+    endpoint_override: Option<&ScriptOverride>,
 ) -> Result<Vec<ScriptUnit>, AppError> {
     let mut units: Vec<ScriptUnit> = Vec::new();
 
@@ -74,20 +80,29 @@ pub fn collect_chain(
         });
     }
 
-    // 端点自己的脚本。没有 detail 行 = 这个端点没有配置，不算错误。
-    let detail = match db::endpoint_details::get(conn, endpoint_node_id) {
-        Ok(detail) => detail,
-        Err(AppError::NotFound(_)) => return Ok(units),
+    // 端点自己的脚本。覆盖优先，且**逐字段**覆盖：payload 里没提到的那个字段仍用存的那份。
+    //
+    // 没有 detail 行不算错误——草稿接口就没落库这一行；此时存的那份不存在。
+    let (saved_pre, saved_test) = match db::endpoint_details::get(conn, endpoint_node_id) {
+        Ok(detail) => (detail.pre_request_script, detail.test_script),
+        Err(AppError::NotFound(_)) => (None, None),
         Err(e) => return Err(e),
     };
-    if detail.pre_request_script.is_some() || detail.test_script.is_some() {
+    let (pre_request, test) = match endpoint_override {
+        Some(override_) => (
+            override_.pre_request.clone().or(saved_pre),
+            override_.test.clone().or(saved_test),
+        ),
+        None => (saved_pre, saved_test),
+    };
+    if pre_request.is_some() || test.is_some() {
         units.push(ScriptUnit {
             source: ScriptSource::Endpoint {
                 id: endpoint_node_id.to_string(),
                 name: endpoint_name,
             },
-            pre_request: detail.pre_request_script,
-            test: detail.test_script,
+            pre_request,
+            test,
         });
     }
 

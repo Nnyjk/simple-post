@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { NodeScripts } from '@/types/domain';
 import { ScriptPanel } from '@/features/http-tester/ScriptPanel';
+import { buildScriptsPatch } from './scripts-patch';
 
 /**
  * collection 上的两段脚本。
@@ -29,20 +30,25 @@ export function CollectionScriptDialog({
   const [test, setTest] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // 已存的两段脚本读到了没有。没读到就保存，会把存的那份抹成空的。
+  const [loaded, setLoaded] = useState(false);
 
   // 打开时读一次。没配置过脚本不是错误：后端回一份全空的。
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setError(null);
+    setLoaded(false);
     void (async () => {
       try {
         const scripts = await invokeCmd<NodeScripts>(COMMANDS.nodeScriptsGet, { nodeId });
         if (cancelled) return;
         setPreRequest(scripts.preRequestScript ?? '');
         setTest(scripts.testScript ?? '');
+        setLoaded(true);
       } catch (err) {
-        if (!cancelled) setError((err as Error)?.message ?? String(err));
+        if (cancelled) return;
+        setError((err as Error)?.message ?? String(err));
       }
     })();
     return () => {
@@ -56,7 +62,8 @@ export function CollectionScriptDialog({
     try {
       await invokeCmd(COMMANDS.nodeScriptsUpdate, {
         nodeId,
-        patch: { preRequestScript: preRequest, testScript: test },
+        // 空脚本按「清除」发（`null`），而不是存一个空串——后者会让那行一直存在。
+        patch: buildScriptsPatch(preRequest, test),
       });
       onOpenChange(false);
     } catch (err) {
@@ -78,7 +85,7 @@ export function CollectionScriptDialog({
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button size="sm" onClick={() => void save()} disabled={saving}>
+          <Button size="sm" onClick={() => void save()} disabled={saving || !loaded}>
             {saving ? '保存中…' : '保存'}
           </Button>
         </>

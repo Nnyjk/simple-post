@@ -340,6 +340,8 @@ export function HttpTester() {
     prepared,
     auth: effective.auth,
     env: scriptEnv,
+    preRequestScript: effective.preRequestScript,
+    testScript: effective.testScript,
     settings: requestSettings,
     runValidation,
     setRequestPending,

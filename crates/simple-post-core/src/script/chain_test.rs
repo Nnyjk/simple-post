@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use super::send::ScriptOverride;
 use super::*;
 use crate::db;
 use crate::db::nodes;
@@ -129,7 +130,7 @@ fn the_chain_runs_outermost_collection_first_and_the_endpoint_last() {
     set_scripts(&pool, "c2", "inner-pre", "inner-test");
     set_endpoint_scripts(&pool, "endpoint-pre", "endpoint-test");
 
-    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1")).expect("chain");
+    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1", None)).expect("chain");
 
     let labels: Vec<&str> = chain.iter().map(|u| u.source.label()).collect();
     assert_eq!(labels, vec!["c1", "c2", "e1"]);
@@ -146,7 +147,7 @@ fn nodes_without_scripts_stay_out_of_the_chain() {
     let (pool, _dir) = fresh_pool();
     set_scripts(&pool, "c2", "inner-pre", "inner-test");
 
-    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1")).expect("chain");
+    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1", None)).expect("chain");
 
     let labels: Vec<&str> = chain.iter().map(|u| u.source.label()).collect();
     assert_eq!(labels, vec!["c2"]);
@@ -157,7 +158,7 @@ fn a_module_never_appears_in_the_chain() {
     let (pool, _dir) = fresh_pool();
     set_scripts(&pool, "c1", "pre", "test");
 
-    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1")).expect("chain");
+    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1", None)).expect("chain");
 
     let labels: Vec<&str> = chain.iter().map(|u| u.source.label()).collect();
     assert_eq!(labels, vec!["c1"], "模块没有脚本，不该进链");
@@ -166,8 +167,87 @@ fn a_module_never_appears_in_the_chain() {
 #[test]
 fn an_endpoint_without_scripts_yields_no_chain() {
     let (pool, _dir) = fresh_pool();
-    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1")).expect("chain");
+    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1", None)).expect("chain");
     assert!(chain.is_empty());
+}
+
+#[test]
+fn the_override_replaces_the_endpoints_own_scripts() {
+    let (pool, _dir) = fresh_pool();
+    // 端点存的那份…
+    db::with_tx(&pool, |c| {
+        db::endpoint_details::update(
+            c,
+            "e1",
+            crate::domain::EndpointDetailPatch {
+                pre_request_script: Some(Some("stored".into())),
+                test_script: Some(Some("stored-test".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("store the endpoint scripts");
+
+    // …被请求里带来的那份覆盖。
+    let override_ = ScriptOverride {
+        pre_request: Some("from the payload".into()),
+        test: None,
+    };
+    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1", Some(&override_))).expect("chain");
+
+    let endpoint = chain.last().expect("端点在链的最后");
+    assert_eq!(endpoint.pre_request.as_deref(), Some("from the payload"));
+    // 覆盖**逐字段**生效：没提到的那个字段仍用存的那份。
+    assert_eq!(endpoint.test.as_deref(), Some("stored-test"));
+}
+
+#[test]
+fn an_empty_override_means_no_script() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| {
+        db::endpoint_details::update(
+            c,
+            "e1",
+            crate::domain::EndpointDetailPatch {
+                pre_request_script: Some(Some("stored".into())),
+                test_script: Some(Some("stored-test".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("store the endpoint scripts");
+
+    // 空串 = 没有脚本（用户在界面上清掉了它）。
+    let override_ = ScriptOverride {
+        pre_request: Some(String::new()),
+        test: Some(String::new()),
+    };
+    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1", Some(&override_))).expect("chain");
+
+    let endpoint = chain.last().expect("端点在链的最后");
+    assert_eq!(endpoint.pre_request.as_deref(), Some(""));
+    assert_eq!(endpoint.test.as_deref(), Some(""));
+}
+
+#[test]
+fn a_draft_endpoint_still_runs_the_scripts_from_the_payload() {
+    let (pool, _dir) = fresh_pool();
+    // 端点没有 detail 行（草稿接口就是这个样子）。
+    db::with_tx(&pool, |c| {
+        c.execute("DELETE FROM endpoint_details WHERE node_id = 'e1'", [])
+            .map_err(crate::error::AppError::Sqlite)?;
+        Ok(())
+    })
+    .expect("drop the detail row");
+
+    let override_ = ScriptOverride {
+        pre_request: Some("draft script".into()),
+        test: None,
+    };
+    let chain = db::with_conn(&pool, |c| collect_chain(c, "e1", Some(&override_))).expect("chain");
+
+    let endpoint = chain.last().expect("端点在链的最后");
+    assert_eq!(endpoint.pre_request.as_deref(), Some("draft script"));
 }
 
 #[test]

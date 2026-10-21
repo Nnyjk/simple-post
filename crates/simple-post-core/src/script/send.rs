@@ -18,7 +18,7 @@ use crate::http_executor::{self, HttpRequestInput, HttpResult};
 use super::chain::{collect_chain, merge_env};
 use super::limits::DEFAULT_SCRIPT_LIMITS;
 use super::run::run_phase;
-use super::types::{EnvSnapshot, ScriptRequest, ScriptResponse, ScriptUnit};
+use super::types::{EnvSnapshot, ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit};
 
 /// 一次「带脚本的发送」的输入。
 pub struct ScriptedSendInput {
@@ -29,6 +29,20 @@ pub struct ScriptedSendInput {
     /// 脚本看得到的环境。`id` 决定变量往哪写。
     pub env: EnvSnapshot,
     pub settings: RequestSettings,
+    /// 端点自己那两段脚本的覆盖。
+    ///
+    /// `None` = 用存的那份；`Some` = 用这份（空串 = 没有脚本）。
+    ///
+    /// 渲染层送的是**界面上此刻生效的那份**（草稿优先，回落到已存的那份），
+    /// 否则「所见」与「所发」会分叉：用户改完脚本还没保存就发送，跑的却是旧脚本。
+    pub script_override: Option<ScriptOverride>,
+}
+
+/// 端点自己那两段脚本的覆盖。
+#[derive(Debug, Clone, Default)]
+pub struct ScriptOverride {
+    pub pre_request: Option<String>,
+    pub test: Option<String>,
 }
 
 /// 一次「带脚本的发送」的结果。
@@ -47,8 +61,26 @@ pub async fn send_with_scripts(
     input: ScriptedSendInput,
 ) -> Result<ScriptedSendOutcome, AppError> {
     let chain = match input.endpoint_id.as_deref() {
-        Some(id) => db::with_conn(pool, |c| collect_chain(c, id))?,
-        None => Vec::new(),
+        Some(id) => db::with_conn(pool, |c| {
+            collect_chain(c, id, input.script_override.as_ref())
+        })?,
+        None => match &input.script_override {
+            // 没有端点 id，但请求里带了两段脚本：照样要跑。
+            //
+            // 草稿接口就是走这条路的——它没落库的行，故没有集合链，但它自己的那两段
+            // 脚本是在界面上写出来的，照样该跑。
+            Some(override_) if override_.pre_request.is_some() || override_.test.is_some() => {
+                vec![ScriptUnit {
+                    source: ScriptSource::Endpoint {
+                        id: String::new(),
+                        name: String::new(),
+                    },
+                    pre_request: override_.pre_request.clone(),
+                    test: override_.test.clone(),
+                }]
+            }
+            _ => Vec::new(),
+        },
     };
     if chain.is_empty() {
         // 没有脚本：与今天完全同路径。
@@ -74,13 +106,18 @@ pub async fn send_with_scripts(
     let http = http_executor::execute(&to_http_input(&pre.request, &input.settings)).await;
 
     // 测试脚本：响应回来之后。
+    //
+    // 环境快照要先并上前置阶段的写入：Postman 让测试脚本看得到前置脚本写下的变量，
+    // 否则「前置写 token、测试读 token」这种最常见的组合读到的还是旧值。
     let response = ScriptResponse::from_http(&http);
+    let mut test_env = input.env.clone();
+    merge_env(&mut test_env.variables, &pre.outcome.env_writes);
     let test = run_phase_off_thread(
         ScriptPhase::Test,
         chain,
         pre.request.clone(),
         Some(response),
-        input.env.clone(),
+        test_env,
     )
     .await;
 
@@ -89,8 +126,22 @@ pub async fn send_with_scripts(
     outcome.merge(test.outcome);
 
     // 变量回写。落库在这里，故只有一条持久化路径。
-    let applied = apply_env_writes(pool, &input.env, &outcome.env_writes)?;
-    outcome.env_writes = applied;
+    //
+    // 写不进去**不能**让整次发送失败：请求已经发出去了，脚本的产出也已经在手，
+    // 丢掉它们只因为一个环境写失败，是把「脚本的事」升级成「请求的事」。
+    // 故失败被记成一条脚本错误，请求的成败照旧。
+    match apply_env_writes(pool, &input.env, &outcome.env_writes) {
+        Ok(applied) => outcome.env_writes = applied,
+        Err(e) => {
+            outcome.env_writes.clear();
+            outcome.errors.push(ScriptError {
+                kind: ScriptErrorKind::Runtime,
+                message: format!("cannot persist the environment writes: {e}"),
+                source: String::new(),
+                phase: ScriptPhase::Test,
+            });
+        }
+    }
 
     Ok(ScriptedSendOutcome {
         http,

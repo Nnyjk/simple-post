@@ -36,7 +36,7 @@ pub use chain::{collect_chain, merge_env};
 pub use engine::{Sandbox, ScriptEffects, ScriptFailure, ScriptRun};
 pub use limits::{ScriptLimits, DEFAULT_SCRIPT_LIMITS};
 pub use run::run_phase;
-pub use send::{send_with_scripts, ScriptedSendInput, ScriptedSendOutcome};
+pub use send::{send_with_scripts, ScriptOverride, ScriptedSendInput, ScriptedSendOutcome};
 pub use types::{ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit};
 
 // 测试。兄弟 `#[path]` 模块，遵循本 crate 的惯例：Rust 按模块路径找文件，测试专用
@@ -57,3 +57,7 @@ mod stdout_tests;
 #[cfg(test)]
 #[path = "chain_test.rs"]
 mod chain_tests;
+
+#[cfg(test)]
+#[path = "send_test.rs"]
+mod send_tests;

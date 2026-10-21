@@ -305,6 +305,8 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
                 follow_redirects: follow_redirects.unwrap_or(true),
                 max_response_size_kb: max_kb.unwrap_or(10_240),
             },
+            // MCP 端没有「界面上未保存的草稿」这回事，用的就是存的那份脚本。
+            script_override: None,
         },
     )
     .await?;

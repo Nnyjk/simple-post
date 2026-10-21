@@ -24,6 +24,8 @@ export function useRequestActions({
   prepared,
   auth,
   env,
+  preRequestScript,
+  testScript,
   settings,
   runValidation,
   setRequestPending,
@@ -44,6 +46,10 @@ export function useRequestActions({
   auth: AuthConfig;
   /** 脚本看得到的环境。与解析用的是同一份变量池。 */
   env: EnvSnapshot | undefined;
+  /** 端点自己的前置脚本（界面上此刻生效的那份）。 */
+  preRequestScript: string;
+  /** 端点自己的测试脚本（界面上此刻生效的那份）。 */
+  testScript: string;
   settings: RequestSettings;
   /** 跑校验并回报是否通过；失败时它已把界面切到出问题的页签。 */
   runValidation: () => boolean;
@@ -85,10 +91,14 @@ export function useRequestActions({
         settings,
         signal: ctrl.signal,
         // 端点 id：后端据此装配脚本链（collection 的两段 + 端点自己的两段）。
-        // 草稿接口没有落库的行，故没有链可跑。
-        endpointId: isDraft ? undefined : endpointId,
+        // 草稿接口没有落库的行，故没有集合链可跑——但它自己的那两段脚本照样跑。
+        endpointId,
         // 脚本看得到的环境。与解析用的是同一份变量池。
         env,
+        // 端点自己那两段脚本：界面上此刻生效的那份（草稿优先），
+        // 后端用它覆盖存的那份，故未保存的编辑也会跑到。
+        preRequestScript,
+        testScript,
       });
       setLastResponse(resp);
       setLastScriptOutcome(script);
@@ -115,6 +125,8 @@ export function useRequestActions({
     prepared,
     auth,
     env,
+    preRequestScript,
+    testScript,
     settings,
     setRequestPending,
     setLastResponse,

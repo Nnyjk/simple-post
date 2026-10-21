@@ -71,6 +71,8 @@ async fn http_request(
     max_response_size_kb: u64,
     endpoint_id: Option<String>,
     env: Option<crate::domain::EnvSnapshot>,
+    pre_request_script: Option<String>,
+    test_script: Option<String>,
 ) -> Result<crate::dto::SendOutcomeDto, crate::error::AppError> {
     let outcome = crate::script::send_with_scripts(
         &state,
@@ -88,6 +90,11 @@ async fn http_request(
                 follow_redirects,
                 max_response_size_kb,
             },
+            // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
+            script_override: Some(crate::script::ScriptOverride {
+                pre_request: pre_request_script,
+                test: test_script,
+            }),
         },
     )
     .await?;

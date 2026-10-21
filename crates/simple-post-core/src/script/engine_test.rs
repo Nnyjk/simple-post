@@ -266,6 +266,50 @@ fn headers_the_script_did_not_touch_keep_their_order_and_duplicates() {
 }
 
 #[test]
+fn a_script_can_clear_the_request_body() {
+    let limits = limits(5_000);
+    let request = ScriptRequest {
+        method: "POST".to_string(),
+        url: "http://example.test/".to_string(),
+        headers: vec![],
+        body: Some("{\"a\":1}".to_string()),
+    };
+    let sandbox = sandbox(&limits, &request);
+
+    let run = sandbox.run("pm.request.body = null;", &request);
+
+    assert!(run.failure.is_none());
+    assert_eq!(
+        run.effects.request.body, None,
+        "body 置空 → 请求就没有 body"
+    );
+}
+
+#[test]
+fn a_non_string_header_value_becomes_its_text_form() {
+    let limits = limits(5_000);
+    let request = request();
+    let sandbox = sandbox(&limits, &request);
+
+    // 直接往 headers 上塞非字符串：这条路绕过 `normalizeHeaders`。
+    let run = sandbox.run("pm.request.headers['X-Count'] = 5;", &request);
+
+    assert!(run.failure.is_none());
+    let count = run
+        .effects
+        .request
+        .headers
+        .iter()
+        .find(|(k, _)| k == "X-Count")
+        .map(|(_, v)| v.clone());
+    assert_eq!(
+        count.as_deref(),
+        Some("5"),
+        "非字符串的值要转成文本，而不是空串"
+    );
+}
+
+#[test]
 fn the_response_is_visible_to_a_test_script() {
     let limits = limits(5_000);
     let request = request();

@@ -24,6 +24,18 @@ fn endpoint(pre: Option<&str>, test: Option<&str>) -> ScriptUnit {
     }
 }
 
+/// 链上的一段脚本，`label` 是它在链里的名字。
+fn unit(label: &str, pre: Option<&str>, test: Option<&str>) -> ScriptUnit {
+    ScriptUnit {
+        source: ScriptSource::Collection {
+            id: label.to_string(),
+            name: label.to_string(),
+        },
+        pre_request: pre.map(str::to_string),
+        test: test.map(str::to_string),
+    }
+}
+
 fn request() -> ScriptRequest {
     ScriptRequest {
         method: "GET".to_string(),
@@ -177,6 +189,69 @@ fn a_chain_without_scripts_produces_nothing() {
     assert!(outcome.assertions.is_empty());
     assert!(outcome.errors.is_empty());
     assert!(outcome.env_writes.is_empty());
+}
+
+#[test]
+fn a_failed_script_does_not_leak_its_environment_writes_to_the_next_script() {
+    // 链上的脚本共用一个沙箱：失败脚本留下的变量会被下一段读到，并可能随它的写入落库。
+    let units = vec![
+        unit(
+            "A",
+            Some("pm.environment.set('leaked', 'yes'); throw new Error('boom');"),
+            None,
+        ),
+        unit(
+            "B",
+            Some("console.log(String(pm.environment.get('leaked')));"),
+            None,
+        ),
+    ];
+
+    let mut request = request();
+    let outcome = run_phase(
+        ScriptPhase::Pre,
+        &units,
+        &mut request,
+        None,
+        &EnvSnapshot::default(),
+        &limits(),
+    );
+
+    assert_eq!(outcome.errors.len(), 1);
+    // 失败脚本的写入被丢弃：下一段脚本读到的仍是「没有这个变量」。
+    assert_eq!(outcome.logs[0].message, "undefined");
+    assert!(
+        outcome.env_writes.is_empty(),
+        "失败脚本的变量写入不该被记成产出"
+    );
+}
+
+#[test]
+fn a_failing_script_does_not_leak_its_request_scoped_variables_either() {
+    let units = vec![
+        unit(
+            "A",
+            Some("pm.variables.set('leaked', 'yes'); throw new Error('boom');"),
+            None,
+        ),
+        unit(
+            "B",
+            Some("console.log(String(pm.variables.get('leaked')));"),
+            None,
+        ),
+    ];
+
+    let mut request = request();
+    let outcome = run_phase(
+        ScriptPhase::Pre,
+        &units,
+        &mut request,
+        None,
+        &EnvSnapshot::default(),
+        &limits(),
+    );
+
+    assert_eq!(outcome.logs[0].message, "undefined");
 }
 
 #[test]

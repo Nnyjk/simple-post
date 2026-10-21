@@ -42,16 +42,18 @@ pub enum ScriptSource {
 }
 
 impl ScriptSource {
-    /// 出错时给人看的名字。名字为空（新建未命名节点）时退回 id。
+    /// 出错时给人看的名字。名字为空（新建未命名节点）时退回 id，再空就是「未命名」。
     pub fn label(&self) -> &str {
         let (id, name) = match self {
             ScriptSource::Collection { id, name } => (id, name),
             ScriptSource::Endpoint { id, name } => (id, name),
         };
-        if name.is_empty() {
+        if !name.is_empty() {
+            name
+        } else if !id.is_empty() {
             id
         } else {
-            name
+            "未命名的节点"
         }
     }
 }

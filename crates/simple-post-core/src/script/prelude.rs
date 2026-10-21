@@ -353,6 +353,26 @@ pub const PRELUDE: &str = r##"
     return true;
   };
 
+  // 同样要回滚的还有环境变量与请求作用域变量：链上的脚本共用一个沙箱，
+  // 失败脚本留下的值会被下一段脚本读到，并可能随它的写入落库。
+  var stateSnapshot = { env: {}, vars: {} };
+
+  globalThis.__SP_SNAPSHOT_STATE__ = function () {
+    stateSnapshot.env = Object.assign({}, envState.values);
+    stateSnapshot.vars = Object.assign({}, varState.values);
+    return true;
+  };
+
+  globalThis.__SP_RESTORE_STATE__ = function () {
+    clearMap(envState.values);
+    var ek = Object.keys(stateSnapshot.env);
+    for (var i = 0; i < ek.length; i++) envState.values[ek[i]] = stateSnapshot.env[ek[i]];
+    clearMap(varState.values);
+    var vk = Object.keys(stateSnapshot.vars);
+    for (var j = 0; j < vk.length; j++) varState.values[vk[j]] = stateSnapshot.vars[vk[j]];
+    return true;
+  };
+
   // 取走本段脚本的产出，并把累积区清空：下一段脚本的产出因此只含它自己的。
   globalThis.__SP_DRAIN__ = function () {
     var payload = {

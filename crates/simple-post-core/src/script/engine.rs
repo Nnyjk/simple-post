@@ -149,6 +149,8 @@ impl Sandbox {
     /// `request_before` 是脚本执行前的请求：**失败时用它回滚**，故部分生效的请求
     /// 不会出现——那比完全没生效更难排查。
     pub fn run(&self, script: &str, request_before: &ScriptRequest) -> ScriptRun {
+        // 先拍下环境与请求作用域变量：失败时要连同请求一起换回去。
+        let _ = self.snapshot_state();
         let outcome = self.eval(script);
         let drained = self.drain();
 
@@ -169,11 +171,24 @@ impl Sandbox {
                 effects.env_writes.clear();
                 // 引擎里的请求状态也要换回来，否则下一段脚本会看到失败脚本的改动。
                 let _ = self.restore_request(request_before);
+                // 环境与请求作用域变量同样要换回来：链上的脚本共用一个沙箱，
+                // 失败脚本留下的值会被下一段脚本读到，并可能随它的写入落库。
+                let _ = self.restore_state();
                 Some(failure)
             }
         };
 
         ScriptRun { effects, failure }
+    }
+
+    /// 拍下环境与请求作用域变量的当前值，供失败时回滚。
+    fn snapshot_state(&self) -> Result<(), ScriptFailure> {
+        self.eval("globalThis.__SP_SNAPSHOT_STATE__();")
+    }
+
+    /// 把环境与请求作用域变量换回快照里的那份。
+    fn restore_state(&self) -> Result<(), ScriptFailure> {
+        self.eval("globalThis.__SP_RESTORE_STATE__();")
     }
 
     /// 把沙箱里的请求状态换回给定的那一份（回滚失败脚本的改动）。
@@ -338,6 +353,9 @@ fn merge_request(before: &ScriptRequest, after: Option<Json>) -> ScriptRequest {
         headers,
         body: match obj.get("body") {
             Some(Json::String(s)) => Some(s.clone()),
+            // 脚本把 body 置空 → 请求就没有 body。空串与 null 是两回事：
+            // 前者是「有一个空的 body」，后者是「没有 body」。
+            Some(Json::Null) => None,
             _ => before.body.clone(),
         },
     }
@@ -355,16 +373,31 @@ fn headers_to_list(
             continue;
         }
         if let Some(v) = headers.get(k) {
-            out.push((k.clone(), v.as_str().unwrap_or_default().to_string()));
+            out.push((k.clone(), json_to_string(v)));
         }
     }
     for (k, v) in headers {
         if seen.contains(k) {
             continue;
         }
-        out.push((k.clone(), v.as_str().unwrap_or_default().to_string()));
+        out.push((k.clone(), json_to_string(v)));
     }
     out
+}
+
+/// header 的值转成文本。
+///
+/// 脚本可以直接往 `pm.request.headers` 上塞非字符串（`pm.request.headers['X-Count'] = 5`），
+/// 那条路绕过 `normalizeHeaders`，故这里要自己转——JS 的 `String(5)` 是 `"5"`，
+/// 直接当成空串会让这个 header 静默变成空的。
+fn json_to_string(value: &Json) -> String {
+    match value {
+        Json::String(s) => s.clone(),
+        Json::Null => String::new(),
+        Json::Bool(b) => b.to_string(),
+        Json::Number(n) => n.to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// 把 JS 值转成可读文本。用 `Coerced` 走 JS 的 `ToString` 语义——`Error` 对象的
