@@ -10,7 +10,7 @@ use super::super::{map_app_error, HttpErrorResponse, WebState};
 // ----- request settings（preferences KV 里的单例行）-----------------
 
 /// 存放 `RequestSettings` 单例的偏好键。与 Tauri 命令同一个键——两种形态共用一行。
-const REQUEST_SETTINGS_KEY: &str = "request_settings";
+const REQUEST_SETTINGS_KEY: &str = crate::db::preferences::keys::REQUEST_SETTINGS;
 
 pub(crate) async fn request_settings_get(
     State(s): State<Arc<WebState>>,

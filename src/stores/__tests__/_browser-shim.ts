@@ -73,7 +73,11 @@ export function installBrowserShim(): ShimGlobals {
 
   // localStorage — backing Map so ui-slice's `loadPrefs` doesn't throw
   // when it tries to read prefs during module evaluation.
-  if (!g.localStorage) {
+  //
+  // Node 自带一个 `localStorage` 全局变量，但它是个**空壳**（没有 getItem /
+  // setItem），所以判据是「有没有那些方法」而不是「存不存在」—— 否则这个 shim
+  // 会被 Node 的空壳挡住，而它装的那份 Map 从来没被用上。
+  if (typeof g.localStorage?.getItem !== 'function') {
     const backing = new Map<string, string>();
     g.localStorage = {
       getItem(k: string) {

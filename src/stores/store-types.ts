@@ -14,7 +14,12 @@ import type { AuthConfig, HttpMethod, KeyValue, RequestBody } from '@/types/doma
 /** 视觉主题预设。驱动 document 根节点上的 CSS 变量。 */
 export type Theme = 'dark' | 'light' | 'system';
 
-/** HTTP 执行器的可调项。落 localStorage，免得每次会话都要重设。 */
+/**
+ * HTTP 执行器的可调项。
+ *
+ * 存在后端 `preferences` 表的 `request_settings` 行里（不是 localStorage）：MCP 侧
+ * 发请求时读的是同一行，故界面上改的超时对 AI 客户端同样生效。
+ */
 export interface RequestSettings {
   timeoutMs: number;
   followRedirects: boolean;

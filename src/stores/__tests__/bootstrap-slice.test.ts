@@ -129,7 +129,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     clearIpcMock();
   });
 
-  it('第一层只读 projects：欢迎页不必等树那一组', async () => {
+  it('第一层只读 projects 与请求旋钮：欢迎页不必等树那一组', async () => {
     const bag = makeBootstrapHarness();
     const calls: CapturedCall[] = [];
     const responses: Record<string, unknown> = {
@@ -145,9 +145,12 @@ describe('bootstrap-slice 聚合加载契约', () => {
     const treeGate = new Promise<void>((resolve) => {
       releaseTree = resolve;
     });
+    // 只有树那一组等闸。第 1 层读的那两条（项目清单与请求旋钮）必须立刻落地，
+    // 否则欢迎页会跟着树一起等 —— 那正是这次拆分要消除的事。
+    const TREE_COMMANDS = new Set(['nodes_list', 'endpoint_details_list', 'environments_list']);
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args });
-      if (cmd !== 'projects_list') await treeGate;
+      if (TREE_COMMANDS.has(cmd)) await treeGate;
       return responses[cmd];
     });
 
@@ -165,7 +168,13 @@ describe('bootstrap-slice 聚合加载契约', () => {
     // `nodesLoaded` 为 false 已经证明了这一点。
     assert.deepEqual(
       calls.map((c) => c.cmd),
-      ['projects_list', 'nodes_list', 'endpoint_details_list', 'environments_list'],
+      [
+        'projects_list',
+        'request_settings_get',
+        'nodes_list',
+        'endpoint_details_list',
+        'environments_list',
+      ],
       'layer 2 is dispatched, just never awaited by bootstrap',
     );
 
@@ -181,7 +190,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(bag.nodesLoading, false);
     assert.equal(bag.bootstrapError, null);
     assert.equal(bag.nodesError, null);
-    assert.deepEqual(calls.slice(1), [
+    assert.deepEqual(calls.slice(2), [
       { cmd: 'nodes_list', args: {} },
       { cmd: 'endpoint_details_list', args: {} },
       { cmd: 'environments_list', args: {} },
