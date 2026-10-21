@@ -77,6 +77,8 @@ fn detail(node_id: &str) -> EndpointDetail {
         docs: None,
         notes: None,
         tags: vec![],
+        pre_request_script: None,
+        test_script: None,
     }
 }
 
@@ -135,6 +137,64 @@ fn get_missing_reports_not_found() {
     let (pool, _dir) = fresh_pool();
     let err = db::with_conn(&pool, |c| get(c, "nope")).unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)), "got {err:?}");
+}
+
+#[test]
+fn the_script_columns_survive_a_round_trip() {
+    let (pool, _dir) = fresh_pool();
+    let patch =
+        r##"{"preRequestScript":"pm.request.url = 'x';","testScript":"pm.test('t', () => {});"}"##;
+    db::with_tx(&pool, |c| {
+        update(c, "e1", serde_json::from_str(patch).unwrap())
+    })
+    .unwrap();
+
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(
+        got.pre_request_script.as_deref(),
+        Some("pm.request.url = 'x';")
+    );
+    assert_eq!(got.test_script.as_deref(), Some("pm.test('t', () => {});"));
+}
+
+#[test]
+fn an_older_store_gains_the_script_columns_without_a_version_bump() {
+    let (pool, dir) = fresh_pool();
+    // 造一个「版本号是当前的、但还没有脚本列」的库——既有库在这次改动之前就是这个形状。
+    db::with_conn(&pool, |c| {
+        Ok(c.execute_batch(
+            "ALTER TABLE endpoint_details DROP COLUMN pre_request_script;\
+             ALTER TABLE endpoint_details DROP COLUMN test_script;",
+        )?)
+    })
+    .unwrap();
+    drop(pool);
+
+    let pool = db::init(&dir).expect("re-init");
+
+    // 列被补上。
+    let columns: i64 = db::with_conn(&pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('endpoint_details') \
+             WHERE name IN ('pre_request_script','test_script')",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap();
+    assert_eq!(columns, 2, "脚本列应由 ADDED_COLUMNS 补齐");
+
+    // 旧行读回来是「没有脚本」，不是坏行。
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert!(got.pre_request_script.is_none());
+    assert!(got.test_script.is_none());
+
+    // 版本号没动：bump 会让 `ensure_current_schema` 删掉每个用户的库。
+    let version: i64 = db::with_conn(&pool, |c| {
+        Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(version, crate::db::SCHEMA_VERSION);
 }
 
 // -------------------------------------------------------------------------

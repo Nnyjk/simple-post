@@ -39,6 +39,13 @@ const TransferDialogLazy = lazy(() =>
   })),
 );
 
+// 集合的脚本对话框：它牵着 CodeMirror（应用最大的依赖），故同样懒加载。
+const CollectionScriptDialog = lazy(() =>
+  import('@/features/scripts/CollectionScriptDialog').then((m) => ({
+    default: m.CollectionScriptDialog,
+  })),
+);
+
 const kindLabel: Record<TargetKind, string> = {
   project: '项目',
   module: '模块',
@@ -151,14 +158,23 @@ export function ProjectTree() {
   });
 
   // ---------- edit / context menu / delete ----------
-  const { toDelete, cancelDelete, startEdit, cancelEdit, saveEdit, openMenu, handleDeleteConfirm } =
-    useEditMenu({
-      setEditing,
-      openNewItemWithIntent,
-      createEndpointAt: createEndpoint,
-      openEndpointTab,
-      setMenu,
-    });
+  const {
+    toDelete,
+    cancelDelete,
+    startEdit,
+    cancelEdit,
+    saveEdit,
+    openMenu,
+    handleDeleteConfirm,
+    scriptCollection,
+    closeCollectionScripts,
+  } = useEditMenu({
+    setEditing,
+    openNewItemWithIntent,
+    createEndpointAt: createEndpoint,
+    openEndpointTab,
+    setMenu,
+  });
 
   // ---------- drag-and-drop helpers ----------
   const {
@@ -414,6 +430,17 @@ export function ProjectTree() {
           confirmLabel="删除"
           onConfirm={handleDeleteConfirm}
         />
+      )}
+      {/* 集合的脚本对话框 —— 同样只在打开时挂载，编辑器那块的 CodeMirror 不进常驻 chunk。 */}
+      {scriptCollection && (
+        <Suspense fallback={null}>
+          <CollectionScriptDialog
+            open
+            onOpenChange={(o) => !o && closeCollectionScripts()}
+            nodeId={scriptCollection.id}
+            nodeName={scriptCollection.name}
+          />
+        </Suspense>
       )}
 
       {/* ---- 创建对话框，每类一个 ----

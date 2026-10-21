@@ -170,6 +170,7 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
         &result,
         Some(base_url_used),
         Some(substituted.missing),
+        None,
     ))
 }
 
@@ -269,24 +270,55 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
             .map(|content| multipart::apply(&mut headers, &content));
     }
 
-    let input = HttpRequestInput {
-        method: method_str.clone(),
-        url: url.clone(),
-        headers: headers.clone(),
-        body,
-        timeout_ms: timeout_ms.unwrap_or(30_000),
-        follow_redirects: follow_redirects.unwrap_or(true),
-        max_response_size_kb: max_kb.unwrap_or(10_240),
-    };
+    // 脚本链跑在同一条序列里：前置脚本改写请求 → 发出 → 测试脚本断言并写回变量。
+    // 整条序列由 core 一处实现，故桌面端与 MCP 端不会分叉。
+    //
+    // 变量池与 `resolve_endpoint` 同一套规则：**停用的变量不参与**，脚本看到的
+    // 环境与这次请求看到的是同一个。
+    let variables: std::collections::BTreeMap<String, String> = env
+        .as_ref()
+        .map(|e| {
+            e.variables
+                .iter()
+                .filter(|(k, _)| !e.disabled_variables.iter().any(|d| d == *k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let outcome = simple_post_core::script::send_with_scripts(
+        &state.pool,
+        simple_post_core::script::ScriptedSendInput {
+            endpoint_id: Some(endpoint.node_id.clone()),
+            request: simple_post_core::script::ScriptRequest {
+                method: method_str.clone(),
+                url: url.clone(),
+                headers: headers.clone(),
+                body,
+            },
+            env: simple_post_core::script::EnvSnapshot {
+                id: env.as_ref().map(|e| e.id.clone()),
+                variables,
+            },
+            settings: simple_post_core::domain::RequestSettings {
+                timeout_ms: timeout_ms.unwrap_or(30_000),
+                follow_redirects: follow_redirects.unwrap_or(true),
+                max_response_size_kb: max_kb.unwrap_or(10_240),
+            },
+            // MCP 端没有「界面上未保存的草稿」这回事，用的就是存的那份脚本。
+            script_override: None,
+        },
+    )
+    .await?;
 
     state.metrics.inc();
-    let result = http_executor::execute(&input).await;
     Ok(build_result_envelope(
         &method_str,
-        &url,
-        &result,
+        &outcome.request.url,
+        &outcome.http,
         None,
         Some(resolved.missing_vars),
+        outcome.script,
     ))
 }
 
@@ -339,3 +371,7 @@ mod oauth2_tests;
 #[cfg(test)]
 #[path = "http_ops/multipart_mode_test.rs"]
 mod multipart_mode_tests;
+
+#[cfg(test)]
+#[path = "http_ops/script_test.rs"]
+mod script_tests;

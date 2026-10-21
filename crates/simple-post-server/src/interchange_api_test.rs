@@ -665,6 +665,8 @@ fn endpoint_detail(node_id: &str, method: HttpMethod, url: &str) -> EndpointDeta
         docs: None,
         notes: None,
         tags: Vec::new(),
+        pre_request_script: None,
+        test_script: None,
     }
 }
 

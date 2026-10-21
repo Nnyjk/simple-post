@@ -5,6 +5,7 @@ pub(crate) mod base_url_defs;
 pub(crate) mod environments;
 pub(crate) mod interchange;
 pub(crate) mod mcp;
+pub(crate) mod node_scripts;
 pub(crate) mod nodes;
 pub(crate) mod oauth2;
 pub(crate) mod permissions;
@@ -31,6 +32,7 @@ pub(crate) use mcp::{
     mcp_http_config_get, mcp_http_config_put, mcp_json_rpc_post, mcp_log_tail, mcp_proxy_path,
     mcp_restart, mcp_start, mcp_status, mcp_stop, mcp_tools,
 };
+pub(crate) use node_scripts::{node_scripts_get, node_scripts_patch};
 // `http_send` 从这里而非某个独立的 `endpoints` 模块再导出：它现在挂在节点之下，
 // 模块归属随地址走。
 pub(crate) use nodes::{

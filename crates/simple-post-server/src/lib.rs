@@ -42,7 +42,9 @@ pub mod web_api;
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /
 // `crate::permissions::*` / `crate::http_executor::*` /
 // `crate::mcp_metrics::*` / `crate::mcp::*`。
-pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, oauth2, permissions};
+pub use simple_post_core::{
+    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script,
+};
 
 // 转换层本身也再导出一次，好让调用点写 `crate::interchange::…` 而不是
 // `simple_post_interchange::…`——与上面那两行的理由相同。

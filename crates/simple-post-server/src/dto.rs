@@ -25,6 +25,27 @@ pub struct McpCapabilityDto {
     pub policy: CapabilityPolicy,
 }
 
+/// 一次发送的结果：传输层的信封 + 脚本的产出。
+///
+/// **脚本结果可选**：链上没有脚本时它缺席，旧的调用方只读 `http` 那一半即可。
+/// 脚本失败**不改变** `http` 里的成败——失败信息在 `script` 里单独呈现。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendOutcomeDto {
+    pub http: crate::http_executor::HttpResult,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script: Option<ScriptOutcome>,
+}
+
+impl From<simple_post_core::script::ScriptedSendOutcome> for SendOutcomeDto {
+    fn from(outcome: simple_post_core::script::ScriptedSendOutcome) -> Self {
+        Self {
+            http: outcome.http,
+            script: outcome.script,
+        }
+    }
+}
+
 /// `nodes_create` 随结构节点一并携带的 endpoint 请求配置。
 ///
 /// 整块可选、字段全可选：从树上的「新建请求」建出来的 endpoint 起始为空、事后
@@ -43,6 +64,10 @@ pub struct CreateEndpointDetailOpts {
     pub params: Option<Vec<KeyValue>>,
     pub docs: Option<String>,
     pub notes: Option<String>,
+    /// 请求发出之前跑的那段脚本。缺席 = 没有脚本。
+    pub pre_request_script: Option<String>,
+    /// 响应回来之后跑的那段脚本。缺席 = 没有脚本。
+    pub test_script: Option<String>,
 }
 
 impl CreateEndpointDetailOpts {
@@ -67,6 +92,8 @@ impl CreateEndpointDetailOpts {
             docs: self.docs,
             notes: self.notes,
             tags: self.tags.unwrap_or_default(),
+            pre_request_script: self.pre_request_script,
+            test_script: self.test_script,
         }
     }
 }

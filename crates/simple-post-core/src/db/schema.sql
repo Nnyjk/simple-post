@@ -152,8 +152,46 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   auth_json              TEXT NOT NULL DEFAULT '{}',
   docs                   TEXT,
   notes                  TEXT,
-  tags_json              TEXT NOT NULL DEFAULT '[]'
+  tags_json              TEXT NOT NULL DEFAULT '[]',
+  -- 请求脚本。端点的两段脚本住在这一行（与 body / headers 同级），collection 的住在
+  -- `node_scripts` 表。放这里而不是 `nodes`：脚本对模块没有意义，而 `nodes` 同时装
+  -- module / collection / endpoint。
+  --
+  -- NULL = 没有脚本。空串在链装配时同样视作「没有」。
+  --
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这两列，故不 bump `SCHEMA_VERSION`。
+  pre_request_script     TEXT,
+  test_script            TEXT
 );
+
+-- collection 节点上的两段脚本。
+--
+-- 端点的脚本在 `endpoint_details` 里（那里只对 endpoint 存在一行），collection 塞不进去，
+-- 故另起一张表。`node_id` 既是主键也是回到 `nodes` 的连接键，级联删除：删掉一个
+-- collection，它的脚本随之消失。
+--
+-- 纯增量新表：`CREATE TABLE IF NOT EXISTS` 已覆盖既有库，不需要 `ADDED_COLUMNS` 条目，
+-- 也不 bump `SCHEMA_VERSION`。
+CREATE TABLE IF NOT EXISTS node_scripts (
+  node_id            TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
+  pre_request_script TEXT,
+  test_script        TEXT
+);
+
+-- 只有 collection 能带脚本。
+--
+-- `db::node_scripts::set` 已经查过一次节点类型，这是第二道防线：MCP 工具与将来的调用者
+-- 都可能绕过应用层，故把规则也放进库里。
+--
+-- 刻意**不**在此覆盖的：脚本内容本身。空串与 NULL 都表示「没有脚本」，由应用层归一。
+DROP TRIGGER IF EXISTS trg_node_scripts_collection_only;
+
+CREATE TRIGGER trg_node_scripts_collection_only
+BEFORE INSERT ON node_scripts
+WHEN (SELECT type FROM nodes WHERE id = NEW.node_id) IS NOT 'collection'
+BEGIN
+  SELECT RAISE(ABORT, 'node_scripts: only collections carry scripts');
+END;
 
 -- 一条已持久化的 HTTP 响应，按 endpoint 保留，好让响应历史条带挺过重启。
 --
@@ -310,4 +348,8 @@ END;
 --
 -- `environments.disabled_variables_json` 同理：新列，经 `db::ADDED_COLUMNS` 到达，
 -- 旧行读回来是空集合（= 全部启用），故仍是版本 3。
+--
+-- 请求脚本落地后**仍是**版本 3：`endpoint_details` 的两列是可空新列（经
+-- `db::ADDED_COLUMNS` 到达），`node_scripts` 是新表（`IF NOT EXISTS` 已覆盖）。
+-- bump 版本 = `ensure_current_schema` 删掉每个用户的库，而脚本功能不值得这个代价。
 PRAGMA user_version = 3;

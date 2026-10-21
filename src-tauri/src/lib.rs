@@ -18,7 +18,14 @@ use tauri::Manager;
 
 pub mod commands;
 
-pub use simple_post_core::{db, domain, error, http_executor, mcp_metrics, oauth2, permissions};
+/// `http_request` 的参数面与 REST body 的一致性。源码形状的断言，故放在这里。
+#[cfg(test)]
+#[path = "http_request_test.rs"]
+mod http_request_tests;
+
+pub use simple_post_core::{
+    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script,
+};
 pub use simple_post_mcp::{daemon_http, mcp};
 
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
@@ -40,11 +47,21 @@ pub use simple_post_server::{init_tracing, run_mcp, run_mcp_proxy, run_serve_web
 /// 经 `reqwest` 发真实请求，绕过浏览器 CORS。Tauri 外壳内走此路，纯 Vite 下前端退回
 /// `fetch`，改 UI 无需重编 Rust。
 ///
-/// 必须保持非 `pub`：`#[tauri::command]` 与 `generate_handler!` 都会生成内部的
+/// 带 `endpoint_id` 时，请求会按脚本链走一遍：前置脚本在发出之前改写它，测试脚本在
+/// 响应回来之后断言并写回环境变量。整条序列由
+/// `simple_post_core::script::send_with_scripts` 一处实现，故桌面端与 MCP 端不会分叉。
+///
+/// **必须保持非 `pub`**：`#[tauri::command]` 与 `generate_handler!` 都会生成内部的
 /// `__cmd__http_request` 宏，`pub` 时在同一 crate 根文件撞名（E0255）。
 /// 见 https://v2.tauri.app/develop/calling-rust/ 。
+///
+/// 参数多：它们**必须**逐字段对应 REST body 的字段名（dual-transport invariant），
+/// 故不能塞进一个 opts 结构体——那会让桌面侧的 payload 变成 `{ opts: {...} }`，
+/// 与浏览器侧发出去的扁平对象对不上，只坏一端。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn http_request(
+    state: tauri::State<'_, crate::db::DbPool>,
     method: String,
     url: String,
     headers: Vec<(String, String)>,
@@ -52,17 +69,36 @@ async fn http_request(
     timeout_ms: u64,
     follow_redirects: bool,
     max_response_size_kb: u64,
-) -> crate::http_executor::HttpResult {
-    let input = crate::http_executor::HttpRequestInput {
-        method,
-        url,
-        headers,
-        body,
-        timeout_ms,
-        follow_redirects,
-        max_response_size_kb,
-    };
-    crate::http_executor::execute(&input).await
+    endpoint_id: Option<String>,
+    env: Option<crate::domain::EnvSnapshot>,
+    pre_request_script: Option<String>,
+    test_script: Option<String>,
+) -> Result<crate::dto::SendOutcomeDto, crate::error::AppError> {
+    let outcome = crate::script::send_with_scripts(
+        &state,
+        crate::script::ScriptedSendInput {
+            endpoint_id,
+            request: crate::script::ScriptRequest {
+                method,
+                url,
+                headers,
+                body,
+            },
+            env: env.unwrap_or_default(),
+            settings: crate::domain::RequestSettings {
+                timeout_ms,
+                follow_redirects,
+                max_response_size_kb,
+            },
+            // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
+            script_override: Some(crate::script::ScriptOverride {
+                pre_request: pre_request_script,
+                test: test_script,
+            }),
+        },
+    )
+    .await?;
+    Ok(crate::dto::SendOutcomeDto::from(outcome))
 }
 
 // ----- Tauri entry point ----------------------------------------------------
@@ -124,6 +160,8 @@ pub fn run() {
             crate::commands::endpoint_detail_get,
             crate::commands::endpoint_details_list,
             crate::commands::endpoint_detail_update,
+            crate::commands::node_scripts_get,
+            crate::commands::node_scripts_update,
             crate::commands::environments_list,
             crate::commands::environments_create,
             crate::commands::environments_update,

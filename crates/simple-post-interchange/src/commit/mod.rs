@@ -378,6 +378,9 @@ pub fn commit_in_tx(
                     docs: ir.docs.clone(),
                     notes: ir.notes.clone(),
                     tags: ir.tags.clone(),
+                    // 外来格式里的脚本暂不导入：IR 还没有承载它们的字段。
+                    pre_request_script: None,
+                    test_script: None,
                 };
 
                 db::nodes::create(conn, &node, Some(&detail))?;

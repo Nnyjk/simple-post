@@ -197,6 +197,21 @@ MCP 写操作的授权要同时过两道闸，任何一道缺失都是**拒绝**
 - `Ctrl+K` 命令面板：跨项目 / 模块 / 集合 / 接口模糊搜索 + 内置命令（切换环境、切换主题、打开设置、新建项目、复制 URL）
 - 主题 dark / light / system 三选一，`<html>` 上切 class，刷新保留且无白屏闪烁（`src/styles/globals.css`）
 
+**请求脚本（沙箱隔离）**
+
+- 端点与集合都能配**前置脚本**（pre-request）与**测试脚本**（test）：端点的住在 `endpoint_details` 行里，集合的住在 `node_scripts` 表（`db/endpoint_details.rs`、`db/node_scripts.rs`）
+- 前置脚本在变量替换之后、请求发出之前跑，可改写 URL / headers / body；**发出去的就是改写后的那个请求**，请求日志里看到的也是它
+- 测试脚本在响应回来之后跑，可断言并写回环境变量（`pm.environment.set`），下一个请求立刻能读到
+- 脚本顺序对齐 Postman 官方文档：集合 → 嵌套集合 → 接口，前置与测试同序
+- 每段脚本是原子的：抛错或被中断时，它对请求、对环境变量与请求作用域变量的改动都被丢弃，日志与断言作为诊断保留
+- **发送时跑的是界面上此刻生效的那一段脚本**（草稿优先），故改完还没保存就发送，跑的也是新脚本；集合那两段仍从库里读
+- 前置脚本写下的环境变量，测试脚本读得到（Postman 就是这个行为）
+- 脚本在**嵌入式 QuickJS 沙箱**里跑（`simple-post-core/src/script/`）：宿主能力只有一段固定 JS 前导给出的那几样（`pm.request` / `pm.environment` / `pm.response` / `pm.test` / `pm.expect` / `console.log`），**够不到文件、网络与进程**
+- 硬限额：每阶段 1000 ms 墙钟（超时真的打断死循环，不等它跑完）、32 MB 内存、256 KB 栈；日志与断言条数有上限
+- 脚本失败**不影响这次请求的成败**：失败脚本的改动被丢弃、变量写入不落库，失败信息在响应面板的「脚本」页里单独呈现；环境变量写不回库同样只记一条错误，不改写请求的结果
+- 整条执行序列（装配链 → 前置脚本 → 发出 → 测试脚本 → 变量回写）只在 `core::script::send_with_scripts` 一处实现，桌面端与 MCP 端共用，故两侧不可能分叉
+
+
 **设置**
 
 - 服务（baseUrl）：项目级共享清单，每个模块每个环境各填各的地址，表头按「模块 × 服务」逐格展开，空格即无地址、不继承
@@ -233,7 +248,7 @@ v0.1.x 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 MCP 二�
 
 - [ ] AI 文档生成（端点 → Markdown）（#9）
 - [ ] AI 测试用例生成（schema → 测试）（#10）
-- [ ] 请求脚本（pre-request / test 脚本，沙箱隔离）（#7）
+- [x] 请求脚本（pre-request / test 脚本，沙箱隔离）（#7）
 - [ ] 集合批量运行 + 简易报告（#8）
 - [ ] 团队协作（Git 同步 JSON 工作区，可选）（#11）
 
@@ -259,6 +274,11 @@ v0.1.x 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 MCP 二�
 - **MCP 模式**：stdio 子进程桥（本地客户端）+ HTTP `POST /mcp`（`serve-web` 暴露，支持 Bearer 鉴权与反代 base path）
 - **UI 风格**：语义 token 层，双主题作用域（`globals.css` 的 `:root` 与 `.dark`），Tailwind 变量消费；dark / light / system 三态，切换作用于 `<html>` 的 class
 - **数据位置**：三种分发形态共用一套 Rust 核心与同一个数据目录（`SIMPLE_POST_DATA_DIR`，未设时 `%APPDATA%/simple-post`）
+- **请求脚本的沙箱**：嵌入式 QuickJS（`rquickjs`），不是独立受限进程、也不是纯 Rust 的 boa。
+  - 只有它同时给出**真墙钟打断**（`set_interrupt_handler` → 抛不可捕获异常）、**内存上限**（`set_memory_limit`）与**栈上限**（`set_max_stack_size`）。issue 要求「超时要能中断执行而不是等它自己跑完」，boa 的循环计数兜得住 `while(true)` 却兜不住无循环的长计算，也没有内存上限
+  - 不新增工具链要求：Windows 端已因 Tauri 需要 MSVC，Docker 构建阶段（`rust:bookworm`）已带 gcc，rquickjs 的预生成绑定覆盖 windows-msvc / linux-gnu / aarch64-linux-gnu
+  - 宿主能力只有一段固定 JS 前导给出的那几样，故「脚本够不到文件 / 网络 / 进程」不靠逐个禁用，而靠根本没有那条路
+  - 代价：workspace 的 MSRV 从 1.77.2 抬到 1.87（rquickjs 的要求；CI 用 `stable`，无 MSRV 门禁 job）
 
 ---
 

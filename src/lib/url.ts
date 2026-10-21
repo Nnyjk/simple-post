@@ -224,8 +224,11 @@ function isEnvironment(v: Environment | Record<string, string> | undefined): v i
  *
  * 停用的变量照样存、照样显示，但不参与替换——`{{x}}` 留在原样并进 `missing` 报告，
  * 用户看得见「这个变量没被替换」，而不是静默被替掉。
+ *
+ * 导出是因为脚本看到的变量池必须是**同一份**：`pm.environment.get('token')` 读到的
+ * 必须是这次请求替换进去的那个值。
  */
-function enabledVars(env: Environment): Record<string, string> {
+export function enabledVars(env: Environment): Record<string, string> {
   const disabled = env.disabledVariables ?? [];
   if (disabled.length === 0) return env.variables;
   const out: Record<string, string> = {};

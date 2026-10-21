@@ -16,36 +16,59 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::db;
-use crate::domain::ResourceNodeType;
+use crate::domain::{RequestSettings, ResourceNodeType};
 use crate::error::AppError;
-use crate::http_executor::{self, HttpRequestInput, HttpResult};
+use crate::script::{send_with_scripts, ScriptOverride, ScriptRequest, ScriptedSendInput};
 
 use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState};
 
 use super::super::dto::{HttpSendBody, NodeCreateBody, NodeMoveBody};
+use crate::dto::SendOutcomeDto;
 
 /// `POST /api/http/send` —— 裸 URL 逃生口。
 ///
 /// **这是本 crate 唯一对外发请求的路由**：URL 完全由 body 决定，绕过端点配置的
 /// base URL 解析，出站策略只在 `http_executor` 执行层把关。节点级的 `/send` 不再
 /// 存在，否则就是第二条不受管辖的出站通道——`base_url_defs_test` 盯住它不可路由。
+///
+/// body 里带 `endpointId` 时，请求会按脚本链走一遍：前置脚本在发出之前改写它，
+/// 测试脚本在响应回来之后断言并写回环境变量。整条序列由
+/// `simple_post_core::script::send_with_scripts` 一处实现，故桌面端与 MCP 端不会分叉。
 pub(crate) async fn http_send(
-    State(_s): State<Arc<WebState>>,
+    State(s): State<Arc<WebState>>,
     Json(body): Json<HttpSendBody>,
-) -> Result<Json<HttpResult>, HttpErrorResponse> {
-    let input = HttpRequestInput {
-        method: body.method,
-        url: body.url,
-        headers: body.headers,
-        body: body.body,
-        timeout_ms: body.timeout_ms,
-        follow_redirects: body.follow_redirects,
-        max_response_size_kb: body.max_response_size_kb,
-    };
-    // 返回值是 `HttpResult`（成功或传输层失败都包在 `ok=false` 里），两者都能干净地
-    // 序列化成 JSON。
-    Ok(Json(http_executor::execute(&input).await))
+) -> Result<Json<SendOutcomeDto>, HttpErrorResponse> {
+    let outcome = send_with_scripts(
+        &s.pool,
+        ScriptedSendInput {
+            endpoint_id: body.endpoint_id,
+            request: ScriptRequest {
+                method: body.method,
+                url: body.url,
+                headers: body.headers,
+                body: body.body,
+            },
+            env: body.env.unwrap_or_default(),
+            settings: RequestSettings {
+                timeout_ms: body.timeout_ms,
+                follow_redirects: body.follow_redirects,
+                max_response_size_kb: body.max_response_size_kb,
+            },
+            // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
+            script_override: Some(ScriptOverride {
+                pre_request: body.pre_request_script,
+                test: body.test_script,
+            }),
+        },
+    )
+    .await
+    .map_err(map_app_error)?;
+    Ok(Json(SendOutcomeDto::from(outcome)))
 }
+
+#[cfg(test)]
+#[path = "http_send_test.rs"]
+mod http_send_tests;
 
 /// `GET /api/nodes`
 ///

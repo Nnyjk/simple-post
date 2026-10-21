@@ -122,18 +122,21 @@ async function mockBridgeFetch(
 
   return new Response(
     JSON.stringify({
-      ok: true,
-      response: {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        durationMs: 0,
-        sizeBytes: new Blob([text]).size,
-        headers: [...upstream.headers.entries()],
-        body: text,
-        contentType: upstream.headers.get('content-type') ?? '',
-        method: sendBody.method,
-        url: upstream.url,
-        truncated: false,
+      // 后端的返回形状：传输层的信封 + 脚本的产出。桩不跑脚本，故 script 缺席。
+      http: {
+        ok: true,
+        response: {
+          status: upstream.status,
+          statusText: upstream.statusText,
+          durationMs: 0,
+          sizeBytes: new Blob([text]).size,
+          headers: [...upstream.headers.entries()],
+          body: text,
+          contentType: upstream.headers.get('content-type') ?? '',
+          method: sendBody.method,
+          url: upstream.url,
+          truncated: false,
+        },
       },
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
@@ -190,7 +193,7 @@ function prep(overrides: Partial<PrepareRequestInput> = {}): PrepareRequestInput
 /** 用生产构造核组装，然后发送那个确切的对象。 */
 async function send(overrides: Partial<PrepareRequestInput> = {}) {
   const request = prepareRequest(prep(overrides));
-  const response = await sendPreparedRequest({ request, settings: SETTINGS });
+  const { response } = await sendPreparedRequest({ request, settings: SETTINGS });
   assert.equal(response.status, 200, `send failed: ${response.statusText}`);
   const last = captured[captured.length - 1];
   assert.ok(last, 'server captured nothing');

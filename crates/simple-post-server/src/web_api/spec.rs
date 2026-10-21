@@ -163,6 +163,23 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             response: Some("EndpointDetail"),
         },
         RouteSpec {
+            method: "GET",
+            path: "/api/nodes/{id}/scripts",
+            summary: "A collection's pre-request and test scripts; a collection without \
+                      scripts answers an empty pair rather than 404",
+            stability: "public",
+            request: None,
+            response: Some("NodeScripts"),
+        },
+        RouteSpec {
+            method: "PATCH",
+            path: "/api/nodes/{id}/scripts",
+            summary: "Partially update a collection's pre-request and test scripts",
+            stability: "public",
+            request: Some("NodeScriptsPatch"),
+            response: Some("NodeScripts"),
+        },
+        RouteSpec {
             method: "POST",
             path: "/api/nodes/{id}/duplicate",
             summary: "Copy an endpoint (endpoints only); an optional newId names the copy",

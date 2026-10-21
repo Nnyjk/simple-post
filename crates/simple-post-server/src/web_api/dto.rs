@@ -24,6 +24,22 @@ pub struct HttpSendBody {
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
+    /// 端点 id。有它才装配得到脚本链（collection + 端点自己的两段脚本）。
+    /// 缺席 = 临时请求，没有脚本。
+    #[serde(default)]
+    pub endpoint_id: Option<String>,
+    /// 脚本看得到的环境。`id` 决定 `pm.environment.set` 往哪写。
+    #[serde(default)]
+    pub env: Option<simple_post_core::domain::EnvSnapshot>,
+    /// 端点自己的前置脚本，**覆盖**存的那份。缺席 = 用存的那份；空串 = 没有脚本。
+    ///
+    /// 渲染层送的是界面上此刻生效的那份（草稿优先），故未保存的编辑也会跑到——
+    /// 否则「所见」与「所发」会分叉。
+    #[serde(default)]
+    pub pre_request_script: Option<String>,
+    /// 端点自己的测试脚本，覆盖规则同上。
+    #[serde(default)]
+    pub test_script: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

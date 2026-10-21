@@ -25,9 +25,11 @@ import type {
   ApiResponse,
   AuthConfig,
   Environment,
+  EnvSnapshot,
   HttpMethod,
   KeyValue,
   RequestBody,
+  ScriptOutcome,
 } from '@/types/domain';
 import type { RequestSettings } from '@/stores/app-store';
 import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
@@ -169,6 +171,16 @@ interface RustHttpResult {
   error?: RustHttpErr;
 }
 
+/**
+ * 后端一次发送的返回：传输层的信封 + 脚本的产出。
+ *
+ * `script` 缺席 = 链上没有任何脚本。脚本失败**不**改写 `http` 里的成败。
+ */
+interface RustSendOutcome {
+  http: RustHttpResult;
+  script?: ScriptOutcome | null;
+}
+
 /** 把任意 `HeadersInit` 形状转成 `[name, value]` 元组列表。 */
 function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
   if (Array.isArray(h)) return h as Array<[string, string]>;
@@ -215,16 +227,16 @@ function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string)
   };
 }
 
-/** 分发一次 `invokeCmd` 调用并把结果折成 `ApiResponse`，绝不抛异常。 */
+/** 分发一次 `invokeCmd` 调用并把结果折成 `ApiResponse` + 脚本产出，绝不抛异常。 */
 async function invokeAndMap(
   args: Record<string, unknown>,
   input: SendInput,
   url: string,
   options: CallApiOptions,
-): Promise<ApiResponse> {
+): Promise<{ response: ApiResponse; script: ScriptOutcome | null }> {
   try {
-    const r = await invokeCmd<RustHttpResult>(COMMANDS.httpRequest, args, options);
-    return envelopeToApiResponse(r, input, url);
+    const r = await invokeCmd<RustSendOutcome>(COMMANDS.httpRequest, args, options);
+    return { response: envelopeToApiResponse(r.http, input, url), script: r.script ?? null };
   } catch (err) {
     // `invokeCmd` 会 reject 的情形：
     //   - Tauri IPC 失败（如 devtools 没接上）
@@ -235,10 +247,10 @@ async function invokeAndMap(
     const name = (err as { name?: string })?.name;
     const msg = (err as Error)?.message ?? String(err);
     if (name === 'AbortError' || /abort/i.test(msg)) {
-      return abortedResponse(input, url, 0);
+      return { response: abortedResponse(input, url, 0), script: null };
     }
     console.error('[http.ts] backend invoke failed:', err);
-    return networkErrorResponse(input, url, 0, msg);
+    return { response: networkErrorResponse(input, url, 0, msg), script: null };
   }
 }
 
@@ -269,7 +281,7 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
     typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
 
-  return invokeAndMap(
+  const { response } = await invokeAndMap(
     {
       method: input.method,
       url: built.url,
@@ -283,6 +295,7 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
     built.url,
     options,
   );
+  return response;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,6 +315,33 @@ export interface SendPreparedInput {
   auth?: AuthConfig;
   settings: RequestSettings;
   signal?: AbortSignal;
+  /**
+   * 端点 id。有它才装配得到脚本链（collection 的两段 + 端点自己的两段）；
+   * 缺席 = 临时请求，没有脚本。
+   */
+  endpointId?: string;
+  /**
+   * 脚本看得到的环境。
+   *
+   * **与解析用的是同一份变量池**——脚本看到的必须是这次请求看到的那份，否则
+   * `pm.environment.get('token')` 读到的与请求里替换进去的会不是同一个值。
+   */
+  env?: EnvSnapshot;
+  /**
+   * 端点自己的前置脚本，**覆盖**存的那份。空串 = 没有脚本。
+   *
+   * 送的是界面上此刻生效的那份（草稿优先）：否则用户改完脚本还没保存就发送，跑的
+   * 却是旧脚本，「所见」与「所发」就分叉了。
+   */
+  preRequestScript?: string;
+  /** 端点自己的测试脚本，覆盖规则同上。 */
+  testScript?: string;
+}
+
+/** 一次发送的结果：响应 + 脚本的产出（没有脚本时 `script` 为 null）。 */
+export interface SendPreparedResult {
+  response: ApiResponse;
+  script: ScriptOutcome | null;
 }
 
 /**
@@ -327,7 +367,7 @@ export interface SendPreparedInput {
  * 绝不抛异常——失败以 `status: 0` 加可区分的 `statusText` 返回，与 `sendRequest`
  * 完全一致。
  */
-export async function sendPreparedRequest(input: SendPreparedInput): Promise<ApiResponse> {
+export async function sendPreparedRequest(input: SendPreparedInput): Promise<SendPreparedResult> {
   const { request } = input;
   // 信封映射器与错误构造器只从这个形状读 `method` 与 `settings.timeoutMs`；
   // params/headers/body/auth 都已并入 `request`，所以下面的占位值永不被查
@@ -357,10 +397,10 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Api
       const msg = (err as Error)?.message ?? String(err);
       // 中止仍是中止：取 token 这一步被取消不该弹成 OAuth2 错误。
       if (name === 'AbortError' || /abort/i.test(msg)) {
-        return abortedResponse(shape, request.url, 0);
+        return { response: abortedResponse(shape, request.url, 0), script: null };
       }
       console.error('[http.ts] oauth2 token fetch failed:', err);
-      return oauth2ErrorResponse(shape, request.url, msg);
+      return { response: oauth2ErrorResponse(shape, request.url, msg), script: null };
     }
   }
 
@@ -374,6 +414,12 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Api
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
+      // 端点 id 与环境：脚本链的装配与变量回写都靠它们。缺席时后端没有脚本链可跑。
+      endpointId: input.endpointId ?? null,
+      env: input.env ?? null,
+      // 端点自己那两段脚本：界面上此刻生效的那份，覆盖后端存的那份。
+      preRequestScript: input.preRequestScript ?? null,
+      testScript: input.testScript ?? null,
     },
     shape,
     // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的

@@ -162,6 +162,10 @@ export interface EndpointDraft {
   auth?: AuthConfig;
   docs?: string;
   tags?: string[];
+  /** 请求发出之前跑的那段脚本。 */
+  preRequestScript?: string;
+  /** 响应回来之后跑的那段脚本。 */
+  testScript?: string;
 }
 
 /** 某个新建对话框的内存草稿。 */

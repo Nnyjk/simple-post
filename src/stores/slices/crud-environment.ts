@@ -18,7 +18,7 @@
  * 会改变 IPC 失败时回滚的内容。
  */
 import type { StateCreator } from 'zustand';
-import type { Environment, EndpointDetail } from '@/types/domain';
+import type { Environment, EndpointDetail, EnvWrite } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import { invokeWithRollback } from './crud-helpers';
@@ -45,6 +45,15 @@ export interface EnvironmentCrudActions {
   ) => Promise<void>;
   deleteEnvironment: (envId: string) => Promise<void>;
   setEnvironmentActive: (envId: string) => Promise<void>;
+  /**
+   * 把脚本写下的变量并进**本地副本**。
+   *
+   * **不发 IPC**：落库由后端做（它是唯一那条持久化路径），这里只把后端回传的
+   * 「已应用」写入并进副本，于是下一个请求立刻能解析到新变量——不必等一次重新读取。
+   *
+   * `value` 为 `null` 的写入表示删除该变量。
+   */
+  applyEnvWrites: (envId: string, writes: EnvWrite[]) => void;
 }
 
 export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCrudActions> = (
@@ -235,5 +244,19 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
       () => invokeCmd<Environment>(COMMANDS.environmentsSetActive, { envId }),
       () => set({ environments: prev }),
     );
+  },
+  applyEnvWrites: (envId, writes) => {
+    if (writes.length === 0) return;
+    set((s) => ({
+      environments: s.environments.map((env) => {
+        if (env.id !== envId) return env;
+        const variables = { ...env.variables };
+        for (const write of writes) {
+          if (write.value === null) delete variables[write.key];
+          else variables[write.key] = write.value;
+        }
+        return { ...env, variables };
+      }),
+    }));
   },
 });

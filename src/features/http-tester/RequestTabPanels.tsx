@@ -2,12 +2,13 @@ import { KeyValueEditor, type KeySuggestion } from './KeyValueEditor';
 import { BodyEditor } from './BodyEditor-lazy';
 import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor-lazy';
+import { ScriptPanel } from './ScriptPanel';
 import type { EndpointDraft } from '@/stores/store-types';
 import type { FormatResult } from '@/lib/utils';
 import type { AuthConfig, KeyValue, RequestBody } from '@/types/domain';
 
-/** 请求配置编辑器的页签 id。`tests` 尚未实现，先占位。 */
-export type TesterTabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'tests';
+/** 请求配置编辑器的页签 id。`script` 是请求脚本（前置 / 测试两段）。 */
+export type TesterTabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
 
 /**
  * 页签内容区 —— 只渲染当前那一页编辑器。
@@ -22,6 +23,8 @@ export function RequestTabPanels({
   body,
   auth,
   docs,
+  preRequestScript,
+  testScript,
   headerSuggestions,
   validationError,
   patchDraft,
@@ -33,6 +36,10 @@ export function RequestTabPanels({
   body: RequestBody;
   auth: AuthConfig;
   docs: string;
+  /** 前置脚本的当前文本。 */
+  preRequestScript: string;
+  /** 测试脚本的当前文本。 */
+  testScript: string;
   headerSuggestions: KeySuggestion[];
   validationError: string | null;
   patchDraft: (patch: Partial<EndpointDraft>) => void;
@@ -73,10 +80,13 @@ export function RequestTabPanels({
       )}
       {tab === 'auth' && <AuthEditor value={auth} onChange={(auth) => patchDraft({ auth })} />}
       {tab === 'docs' && <DocsEditor value={docs} onChange={(docs) => patchDraft({ docs })} />}
-      {tab === 'tests' && (
-        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-          Tests 将在 v0.3 推出
-        </div>
+      {tab === 'script' && (
+        <ScriptPanel
+          preRequest={preRequestScript}
+          test={testScript}
+          onPreRequestChange={(preRequestScript) => patchDraft({ preRequestScript })}
+          onTestChange={(testScript) => patchDraft({ testScript })}
+        />
       )}
     </div>
   );

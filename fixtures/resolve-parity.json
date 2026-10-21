@@ -1,0 +1,104 @@
+{
+  "$comment": "两侧请求准备规则的一致性样本。Rust 的 `resolve_endpoint`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。",
+  "cases": [
+    {
+      "name": "变量替换 + query + bearer 鉴权 + json body",
+      "env": {
+        "host": "api.example.test",
+        "token": "abc",
+        "userId": "42"
+      },
+      "input": {
+        "method": "POST",
+        "urlPath": "/users/{{userId}}",
+        "baseUrl": "https://{{host}}/v1",
+        "params": [
+          { "id": "p1", "key": "page", "value": "1", "enabled": true },
+          { "id": "p2", "key": "skip", "value": "x", "enabled": false }
+        ],
+        "headers": [{ "id": "h1", "key": "X-Token", "value": "Bearer {{token}}", "enabled": true }],
+        "body": { "mode": "json", "content": "{\"id\":\"{{userId}}\"}" },
+        "auth": { "kind": "bearer", "bearer": "{{token}}" }
+      },
+      "expected": {
+        "url": "https://api.example.test/v1/users/42?page=1",
+        "headers": [
+          ["X-Token", "Bearer abc"],
+          ["Content-Type", "application/json"],
+          ["Accept", "application/json"],
+          ["Authorization", "Bearer abc"]
+        ],
+        "body": "{\"id\":\"42\"}"
+      }
+    },
+    {
+      "name": "apikey 落在 query 上 + form body",
+      "env": {
+        "key": "k-1"
+      },
+      "input": {
+        "method": "POST",
+        "urlPath": "/items",
+        "baseUrl": "https://api.example.test",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "form", "content": "name=ada" },
+        "auth": {
+          "kind": "apikey",
+          "apikey": { "key": "api_key", "value": "{{key}}", "inLocation": "query" }
+        }
+      },
+      "expected": {
+        "url": "https://api.example.test/items?api_key=k-1",
+        "headers": [
+          ["Content-Type", "application/x-www-form-urlencoded"],
+          ["Accept", "application/json"]
+        ],
+        "body": "name=ada"
+      }
+    },
+    {
+      "name": "body 只有一个解析成空串的变量（先判空后模板化）",
+      "env": {
+        "empty": ""
+      },
+      "input": {
+        "method": "POST",
+        "urlPath": "/x",
+        "baseUrl": "https://h.test",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "json", "content": "{{empty}}" },
+        "auth": { "kind": "none" }
+      },
+      "expected": {
+        "url": "https://h.test/x",
+        "headers": [
+          ["Content-Type", "application/json"],
+          ["Accept", "application/json"]
+        ],
+        "body": ""
+      }
+    },
+    {
+      "name": "路径里的变量解析成以斜杠开头时，拼接出的双斜杠要被收掉",
+      "env": {
+        "seg": "/api"
+      },
+      "input": {
+        "method": "GET",
+        "urlPath": "/v1{{seg}}",
+        "baseUrl": "https://h.test",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": {
+        "url": "https://h.test/v1/api",
+        "headers": [["Accept", "application/json"]],
+        "body": null
+      }
+    }
+  ]
+}

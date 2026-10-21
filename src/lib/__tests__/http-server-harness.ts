@@ -137,19 +137,22 @@ async function mockBridgeFetch(
       text = `${rawText.slice(0, cut)}\n\n[truncated at ${maxBytes} bytes by Tauri HTTP layer]`;
       truncated = true;
     }
+    // 后端的返回形状：传输层的信封 + 脚本的产出。harness 不跑脚本，故 script 缺席。
     const result = {
-      ok: true,
-      response: {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        durationMs: 0,
-        sizeBytes: new Blob([text]).size,
-        headers: [...upstream.headers.entries()],
-        body: text,
-        contentType: upstream.headers.get('content-type') ?? '',
-        method: sendBody.method,
-        url: upstream.url,
-        truncated,
+      http: {
+        ok: true,
+        response: {
+          status: upstream.status,
+          statusText: upstream.statusText,
+          durationMs: 0,
+          sizeBytes: new Blob([text]).size,
+          headers: [...upstream.headers.entries()],
+          body: text,
+          contentType: upstream.headers.get('content-type') ?? '',
+          method: sendBody.method,
+          url: upstream.url,
+          truncated,
+        },
       },
     };
     return new Response(JSON.stringify(result), {
@@ -160,10 +163,12 @@ async function mockBridgeFetch(
     if (timedOut) {
       // Rust 在 reqwest 超时时返回 ok:false / error.kind=timeout。
       const result = {
-        ok: false,
-        error: {
-          kind: 'timeout',
-          message: `Request timeout after ${sendBody.timeoutMs}ms`,
+        http: {
+          ok: false,
+          error: {
+            kind: 'timeout',
+            message: `Request timeout after ${sendBody.timeoutMs}ms`,
+          },
         },
       };
       return new Response(JSON.stringify(result), {
@@ -178,10 +183,12 @@ async function mockBridgeFetch(
     }
     // 传输失败 —— kind=network 的信封（镜像 Rust）。
     const result = {
-      ok: false,
-      error: {
-        kind: 'network',
-        message: (err as Error)?.message ?? String(err),
+      http: {
+        ok: false,
+        error: {
+          kind: 'network',
+          message: (err as Error)?.message ?? String(err),
+        },
       },
     };
     return new Response(JSON.stringify(result), {

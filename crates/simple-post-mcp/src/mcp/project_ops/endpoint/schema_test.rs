@@ -133,8 +133,10 @@ fn endpoint_update_schema_documents_every_patchable_field() {
             "name",
             "notes",
             "params",
+            "pre_request_script",
             "sort_order",
             "tags",
+            "test_script",
             "url",
         ],
         "the documented patch fields must match the fields the handler reads"

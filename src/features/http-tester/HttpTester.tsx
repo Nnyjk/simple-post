@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { type BaseUrlSelection } from '@/features/http-tester/BaseUrlPicker';
-import { type AuthConfig, type RequestBody } from '@/types/domain';
+import { type AuthConfig, type EnvSnapshot, type RequestBody } from '@/types/domain';
 import { validateRequest } from '@/lib/request-validation';
 import { prepareRequest } from '@/lib/http-build';
+import { enabledVars } from '@/lib/url';
 import { UNTITLED_ENDPOINT_NAME, type EndpointDraft } from '@/stores/store-types';
 import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { EndpointHeader } from './EndpointHeader';
@@ -23,7 +24,7 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
   { id: 'body', label: 'Body' },
   { id: 'auth', label: 'Auth' },
   { id: 'docs', label: 'Docs' },
-  { id: 'tests', label: 'Tests', disabled: true },
+  { id: 'script', label: '脚本' },
 ];
 
 /**
@@ -33,7 +34,7 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 const EMPTY_BODY: RequestBody = { mode: 'none', content: '' };
 const EMPTY_AUTH: AuthConfig = { kind: 'none' };
 
-type TabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'tests';
+type TabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
 
 export function HttpTester() {
   // 接口是 `ResourceNode`（身份 + 位置），请求配置是独立的 `EndpointDetail` 行；
@@ -54,6 +55,8 @@ export function HttpTester() {
   const updateEndpointDetail = useAppStore((s) => s.updateEndpointDetail);
   const setRequestPending = useAppStore((s) => s.setRequestPending);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
+  const setLastScriptOutcome = useAppStore((s) => s.setLastScriptOutcome);
+  const applyEnvWrites = useAppStore((s) => s.applyEnvWrites);
   const addResponseHistory = useAppStore((s) => s.addResponseHistory);
   const setEndpointDraft = useAppStore((s) => s.setEndpointDraft);
   const clearEndpointDraft = useAppStore((s) => s.clearEndpointDraft);
@@ -89,6 +92,13 @@ export function HttpTester() {
     detail,
   );
 
+  // 脚本看得到的环境。与解析用的是**同一份变量池**（停用的变量不参与），
+  // 否则 `pm.environment.get('token')` 读到的与请求里替换进去的不是同一个值。
+  const scriptEnv = useMemo<EnvSnapshot | undefined>(() => {
+    if (!endpointEnv) return undefined;
+    return { id: endpointEnv.id, variables: enabledVars(endpointEnv) };
+  }, [endpointEnv]);
+
   // ---------------------------------------------------------------------------
   // 有效请求：已存的 detail 叠上草稿。
   //
@@ -106,6 +116,9 @@ export function HttpTester() {
       auth: draft?.auth ?? detail?.auth ?? EMPTY_AUTH,
       docs: draft?.docs ?? detail?.docs ?? '',
       tags: draft?.tags ?? detail?.tags ?? [],
+      // 两段脚本。草稿优先，回落到已存的那份。
+      preRequestScript: draft?.preRequestScript ?? detail?.preRequestScript ?? '',
+      testScript: draft?.testScript ?? detail?.testScript ?? '',
     }),
     [draft, detail],
   );
@@ -326,10 +339,15 @@ export function HttpTester() {
     draft,
     prepared,
     auth: effective.auth,
+    env: scriptEnv,
+    preRequestScript: effective.preRequestScript,
+    testScript: effective.testScript,
     settings: requestSettings,
     runValidation,
     setRequestPending,
     setLastResponse,
+    setLastScriptOutcome,
+    applyEnvWrites,
     addResponseHistory,
     saveDraftEndpoint,
     updateEndpointDetail,
@@ -351,6 +369,7 @@ export function HttpTester() {
   const enabledHeaders = effective.headers.filter((h) => h.enabled && h.key).length;
   const hasBody = effective.body.mode !== 'none' && effective.body.content;
   const hasAuth = effective.auth.kind !== 'none';
+  const hasScript = Boolean(effective.preRequestScript || effective.testScript);
 
   const tabItems = TABS.map((t) => {
     let badge: React.ReactNode = null;
@@ -364,6 +383,8 @@ export function HttpTester() {
       badge = (
         <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>
       );
+    if (t.id === 'script' && hasScript)
+      badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;
     return { id: t.id, label: t.label, badge, disabled: t.disabled };
   });
 
@@ -467,6 +488,8 @@ export function HttpTester() {
           body={effective.body}
           auth={effective.auth}
           docs={effective.docs}
+          preRequestScript={effective.preRequestScript}
+          testScript={effective.testScript}
           headerSuggestions={headerSuggestions}
           validationError={validationError}
           patchDraft={patchDraft}
