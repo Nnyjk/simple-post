@@ -44,6 +44,7 @@ async fn stub() -> (String, Arc<Mutex<Vec<String>>>) {
     (format!("http://127.0.0.1:{port}"), seen)
 }
 
+/// 每个用例一份干净的库。
 fn mcp_state(tag: &str) -> Arc<AppState> {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let id = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -161,6 +162,7 @@ fn seed(st: &AppState, base_url: &str) -> String {
     "e_env".to_string()
 }
 
+/// 端点没绑环境时，MCP 侧要按项目激活的环境解析，与界面那侧一致。
 #[tokio::test]
 async fn an_endpoint_without_its_own_environment_falls_back_to_the_active_one() {
     let (api, seen) = stub().await;

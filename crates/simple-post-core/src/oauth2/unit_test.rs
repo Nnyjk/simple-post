@@ -236,6 +236,7 @@ fn an_empty_paste_is_an_error_not_an_empty_token() {
 // form 解码与 query 档的百分号编码
 // ---------------------------------------------------------------------------
 
+/// query 档的 token 用 `percent_encode`，与渲染进程那份 TS 实现同字符集。
 #[test]
 fn the_query_token_is_percent_encoded_like_the_renderer_does() {
     // query 档的 token 走 `crate::url::percent_encode`（与渲染进程的
@@ -248,6 +249,7 @@ fn the_query_token_is_percent_encoded_like_the_renderer_does() {
     assert_eq!(crate::url::percent_encode("a+b"), "a%2Bb");
 }
 
+/// 少数 IdP 回的 token 应答是 form 编码，解码器要认它。
 #[test]
 fn form_decoding_reads_the_idp_response_encoding() {
     // 少数 IdP 回的 token 应答是这个编码：`+` 是空格，`%XX` 是字节。

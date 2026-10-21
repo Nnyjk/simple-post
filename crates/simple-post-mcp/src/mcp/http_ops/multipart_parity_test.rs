@@ -108,6 +108,7 @@ fn normalize(text: &str, boundary: &str) -> String {
     text.replace(boundary, BOUNDARY_PLACEHOLDER)
 }
 
+/// 两侧对同一份 multipart 请求要装配出逐字节相同的结果。
 #[test]
 fn every_multipart_parity_case_assembles_the_same_way() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("parity fixture");

@@ -14,6 +14,7 @@ import type { RequestSettings } from '../store-types';
 
 type CapturedCall = { cmd: string; args: Record<string, unknown> };
 
+/** 一个最小的 store：只带 `ui-prefs` 那一片，够切片读写。 */
 function makePrefsHarness() {
   const bag: Record<string, unknown> = {};
   const set = (partial: unknown) =>

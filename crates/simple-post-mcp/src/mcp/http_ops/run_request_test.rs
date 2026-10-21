@@ -41,6 +41,7 @@ async fn stub() -> (String, Arc<Mutex<Vec<String>>>) {
     (format!("http://127.0.0.1:{port}"), seen)
 }
 
+/// 每个用例一份干净的库。
 fn mcp_state(tag: &str) -> Arc<AppState> {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let id = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -120,6 +121,7 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
     ("p_run".into(), "env_run".into(), "m_run".into())
 }
 
+/// 临时请求要按端点那套规则组装：base URL 前置、变量替换、查询参数、鉴权派生的头。
 #[tokio::test]
 async fn a_run_request_gets_the_same_treatment_as_a_stored_endpoint() {
     let (api, seen) = stub().await;
@@ -185,6 +187,7 @@ async fn a_stale_environment_id_degrades_instead_of_failing_the_call() {
     assert!(outcome.is_ok(), "环境已被删不该让整次调用失败：{outcome:?}");
 }
 
+/// 解析不到的变量要报进结果，调用方才知道 URL 里留着 `{{...}}`。
 #[tokio::test]
 async fn a_run_request_reports_the_variables_it_could_not_resolve() {
     let (api, seen) = stub().await;

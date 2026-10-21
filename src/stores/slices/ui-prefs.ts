@@ -110,10 +110,17 @@ export const createUiPrefs: StateCreator<AppState, [], [], UiPrefs> = (set, get)
   theme: initialTheme,
   requestSettings: REQUEST_SETTINGS_DEFAULTS,
 
+  /**
+   * 换主题。只写 localStorage —— 主题是渲染层的事，后端读不到也不需要。
+   */
   setTheme: (t) => {
     set({ theme: t });
     savePrefs({ theme: t });
   },
+  /**
+   * 改请求旋钮。本地副本立刻更新（界面不等 IPC），同时把**完整三项**写进后端
+   * —— web 形态的 `/api/request-settings` 是全量替换语义，发补丁会丢掉另外两项。
+   */
   updateRequestSettings: (patch) => {
     const next = { ...get().requestSettings, ...patch };
     set({ requestSettings: next });

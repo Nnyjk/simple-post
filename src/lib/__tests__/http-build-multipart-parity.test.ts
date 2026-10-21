@@ -45,6 +45,7 @@ const FIXTURE: ParityFixture = JSON.parse(
   readFileSync(new URL('../../../fixtures/multipart-parity.json', import.meta.url), 'utf8'),
 );
 
+/** 样本里的环境：变量就是 `env` 那张表，其余字段用占位值。 */
 function envOf(variables: Record<string, string>): Environment {
   return {
     id: 'env1',

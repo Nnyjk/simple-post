@@ -44,6 +44,7 @@ fn flatten_rejects_bad_shape() {
     assert!(flatten_string_map(Some(&v), "h").is_err());
 }
 
+/// 三种键值对形状（对象映射 / 键值对数组 / 端点那套对象）都要收下。
 #[test]
 fn key_values_accept_the_three_shapes() {
     // 对象映射。
@@ -68,12 +69,14 @@ fn key_values_accept_the_three_shapes() {
     assert!(!from_objects[0].enabled, "enabled: false 必须被尊重");
 }
 
+/// 既不是对象也不是数组的形状要报错，不能凭空造一个空列表。
 #[test]
 fn key_values_reject_a_shape_that_is_neither() {
     assert!(flatten_key_values(Some(&json!("nope")), "params").is_err());
     assert!(flatten_key_values(Some(&json!([1, 2])), "params").is_err());
 }
 
+/// 鉴权载荷用端点那套形状；方案选错要报错，载荷缺了则按端点同一套宽松度处理。
 #[test]
 fn auth_uses_the_endpoint_shape() {
     let bearer = parse_auth(Some(&json!({ "kind": "bearer", "bearer": "tok" }))).unwrap();
@@ -97,6 +100,7 @@ fn auth_uses_the_endpoint_shape() {
     assert_eq!(bare.bearer, None);
 }
 
+/// 有 body 而没给模式时算 `raw`，没给 body 时算 `none`。
 #[test]
 fn body_mode_defaults_to_raw_when_a_body_is_given() {
     assert_eq!(parse_body_mode(None, true).unwrap(), BodyMode::Raw);
@@ -172,6 +176,7 @@ fn header_pairs_round_trip() {
 }
 
 /// 环境行里那个 (服务 × 模块) 的格子：base URL 唯一的住址。
+/// base URL 唯一的住址：(环境 × 服务 × 模块) 的那个格子。
 #[test]
 fn a_service_url_lives_in_the_env_cell() {
     let mut module_base_urls = HashMap::new();
