@@ -1,10 +1,9 @@
-use base64::Engine as _;
-// 纯函数层：缓存键、校验、粘贴解析、form 编解码、应答解析、过期判断与注入。
+// 纯函数层：缓存键、校验、粘贴解析、form 解码、应答解析、过期判断与注入。
 
 use oauth2::basic::{BasicErrorResponseType, BasicTokenResponse};
 use oauth2::{HttpRequest, HttpResponse, StandardErrorResponse, SyncHttpClient};
 
-use super::form::{form_decode, form_encode};
+use super::form::form_decode;
 use super::parse::{extract_code, parse_pasted, parse_token_response};
 use super::store::{is_expired, unix_secs};
 use super::test_fixtures::{client_credentials, kv};
@@ -234,38 +233,28 @@ fn an_empty_paste_is_an_error_not_an_empty_token() {
 }
 
 // ---------------------------------------------------------------------------
-// form 编解码
+// form 解码与 query 档的百分号编码
 // ---------------------------------------------------------------------------
 
 #[test]
-fn form_encoding_runs_before_base64_for_http_basic_client_credentials() {
-    // RFC 6749 §2.3.1：id 与 secret 先各做一次
-    // `application/x-www-form-urlencoded` 编码，**再**把 `id:secret` 拼起来做
-    // base64。故 secret 里的空格在 header 里是 `+`（`QWxhZGRpbjpvcGVuK3Nlc2FtZQ==`），
-    // 而 RFC 7617 的 Basic 例子（`QWxhZGRpbjpvcGVuIHNlc2FtZQ==`）编码的是**未**做
-    // form 编码的原文——直接把原文塞进 base64 会在 secret 含 `:` / `+` / 空格时
-    // 被服务端解出另一组凭据。
-    assert_eq!(form_encode("Aladdin"), "Aladdin");
-    assert_eq!(form_encode("open sesame"), "open+sesame");
-    let header = format!("{}:{}", form_encode("Aladdin"), form_encode("open sesame"));
-    assert_eq!(
-        base64::engine::general_purpose::STANDARD.encode(header.as_bytes()),
-        "QWxhZGRpbjpvcGVuK3Nlc2FtZQ=="
-    );
+fn the_query_token_is_percent_encoded_like_the_renderer_does() {
+    // query 档的 token 走 `crate::url::percent_encode`（与渲染进程的
+    // `encodeURIComponent` 同字符集），不是 form 编码 —— 空格是 `%20` 而不是 `+`。
+    //
+    // client 凭据放 Basic 头时的 form 编码（RFC 6749 §2.3.1）是 `oauth2` crate 的
+    // 职责，不在本项目里，故此处不测。
+    assert_eq!(crate::url::percent_encode("Aladdin"), "Aladdin");
+    assert_eq!(crate::url::percent_encode("open sesame"), "open%20sesame");
+    assert_eq!(crate::url::percent_encode("a+b"), "a%2Bb");
 }
 
 #[test]
-fn form_round_trips_through_the_decoder() {
-    for raw in [
-        "",
-        "plain",
-        "with space",
-        "sym+/=&?#%",
-        "中文 with space",
-        "a+b",
-    ] {
-        assert_eq!(form_decode(&form_encode(raw)), raw, "raw={raw:?}");
-    }
+fn form_decoding_reads_the_idp_response_encoding() {
+    // 少数 IdP 回的 token 应答是这个编码：`+` 是空格，`%XX` 是字节。
+    assert_eq!(form_decode("a+b"), "a b");
+    assert_eq!(form_decode("a%20b"), "a b");
+    assert_eq!(form_decode("access_token=AT"), "access_token=AT");
+    assert_eq!(form_decode("中文%20%E4%B8%AD"), "中文 中");
 }
 
 #[test]
