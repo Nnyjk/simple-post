@@ -16,12 +16,13 @@ use std::collections::HashMap;
 
 use simple_post_core::db::{self, Connection, DbPool};
 use simple_post_core::domain::{
-    BaseUrlDefinition, EndpointDetail, Environment, Project, ResourceNode, ResourceNodeType,
+    BaseUrlDefinition, EndpointDetail, Environment, NodeScripts, Project, ResourceNode,
+    ResourceNodeType,
 };
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrServer};
+use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
 
 /// 一次投影读回来的全部上下文。两个导出入口的差别只在「取哪些根节点」，
 /// 故四张表的读与「不回落」的服务解析都共用这一份。
@@ -29,6 +30,9 @@ struct Projection {
     project: Project,
     env: Option<Environment>,
     details: HashMap<String, EndpointDetail>,
+    /// 集合上的脚本，按 `node_id` 索引。端点的脚本在 `details` 里（与 body / headers 同级），
+    /// 集合的脚本在 `node_scripts` 表，故要分开读。
+    scripts: HashMap<String, NodeScripts>,
     children_of: HashMap<Option<String>, Vec<ResourceNode>>,
 }
 
@@ -84,10 +88,18 @@ fn load_projection(
             .map(|d| (d.node_id.clone(), d))
             .collect();
 
+    // 集合的脚本在另一张表里。一次读回整棵树的脚本：逐节点发查询会让一棵大树
+    // 变成 N 次往返，那正是这里一次读四张表要避开的事。
+    let scripts: HashMap<String, NodeScripts> = db::node_scripts::list_by_root(conn, project_id)?
+        .into_iter()
+        .map(|s| (s.node_id.clone(), s))
+        .collect();
+
     Ok(Projection {
         project,
         env,
         details,
+        scripts,
         children_of,
     })
 }
@@ -115,6 +127,7 @@ pub fn project_to_ir(
                     &p.project,
                     p.env.as_ref(),
                     &p.details,
+                    &p.scripts,
                     &p.children_of,
                     &mut diagnostics,
                 )
@@ -156,6 +169,7 @@ pub fn module_to_ir(
             &p.project,
             p.env.as_ref(),
             &p.details,
+            &p.scripts,
             &p.children_of,
             &mut diagnostics,
         )];
@@ -170,6 +184,7 @@ fn project_module(
     project: &Project,
     env: Option<&Environment>,
     details: &HashMap<String, EndpointDetail>,
+    scripts: &HashMap<String, NodeScripts>,
     children_of: &HashMap<Option<String>, Vec<ResourceNode>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> IrModule {
@@ -180,7 +195,15 @@ fn project_module(
         description: node.description.clone(),
         servers: module_servers(&project.base_url_definitions, env, node, diagnostics),
         endpoints: project_endpoints(node.id.as_str(), details, children_of, diagnostics),
-        collections: project_collections(node.id.as_str(), details, children_of, diagnostics),
+        collections: project_collections(
+            node.id.as_str(),
+            details,
+            scripts,
+            children_of,
+            diagnostics,
+        ),
+        // 模块不能存脚本，故这里恒为空。
+        scripts: IrScripts::default(),
     }
 }
 
@@ -206,6 +229,7 @@ fn project_endpoints(
 fn project_collections(
     parent_id: &str,
     details: &HashMap<String, EndpointDetail>,
+    scripts: &HashMap<String, NodeScripts>,
     children_of: &HashMap<Option<String>, Vec<ResourceNode>>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<IrCollection> {
@@ -219,9 +243,27 @@ fn project_collections(
                     name: n.name.clone(),
                     description: n.description.clone(),
                     endpoints: project_endpoints(&n.id, details, children_of, diagnostics),
-                    collections: project_collections(&n.id, details, children_of, diagnostics),
+                    collections: project_collections(
+                        &n.id,
+                        details,
+                        scripts,
+                        children_of,
+                        diagnostics,
+                    ),
+                    scripts: collection_scripts(scripts, &n.id),
                 })
                 .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 一个集合上的两段脚本。**没有行就是没有脚本**——那与「有行但两段都是空」是同一件事。
+fn collection_scripts(scripts: &HashMap<String, NodeScripts>, node_id: &str) -> IrScripts {
+    scripts
+        .get(node_id)
+        .map(|s| IrScripts {
+            pre_request_script: s.pre_request_script.clone(),
+            test_script: s.test_script.clone(),
         })
         .unwrap_or_default()
 }
@@ -233,14 +275,17 @@ fn project_endpoint(
     details: &HashMap<String, EndpointDetail>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<IrEndpoint> {
-    let d = details.get(&node.id)?;
-    if d.node_id != node.id {
+    // `details` 以 `node_id` 为键，故查到的那一行必然属于这个节点——原先那句
+    // 「键与 `node_id` 对不上」的检查恒为假，它守的是一件不可能发生的事；真正会
+    // 发生的那一件（根本没有 detail 行）却被 `?` 静默吞掉，用户只看到「导出的
+    // 文档里少了几个接口」，没有任何线索。
+    let Some(d) = details.get(&node.id) else {
         diagnostics.push(Diagnostic::error(
             format!("/nodes/{}", node.id),
-            "节点与它的 endpoint detail 对不上，该接口无法导出",
+            "这个接口节点没有对应的请求配置行，两张表不一致，该接口无法导出",
         ));
         return None;
-    }
+    };
     Some(IrEndpoint {
         key: node.id.clone(),
         name: node.name.clone(),
@@ -254,6 +299,11 @@ fn project_endpoint(
         docs: d.docs.clone(),
         notes: d.notes.clone(),
         tags: d.tags.clone(),
+        // 端点的脚本与 body / headers 同级，故就在 detail 行里。
+        scripts: IrScripts {
+            pre_request_script: d.pre_request_script.clone(),
+            test_script: d.test_script.clone(),
+        },
     })
 }
 

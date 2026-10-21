@@ -4,7 +4,9 @@ use simple_post_core::db;
 use simple_post_core::error::AppError;
 
 use super::project_to_ir;
-use super::support::{add_endpoint, add_module, seed_project, temp_pool};
+use super::support::{
+    add_endpoint, add_endpoint_without_detail, add_module, seed_project, temp_pool,
+};
 use crate::ir::{IrEndpoint, IrServer};
 
 #[test]
@@ -150,4 +152,35 @@ fn a_project_with_no_active_environment_projects_empty_servers() {
     assert!(ex.modules.iter().all(|m| m.servers.is_empty()));
     // 树本身照常投影出来：没有 URL 不影响接口清单。
     assert_eq!(ex.endpoint_count(), 1);
+}
+
+/// 两表不一致时导出要**出声**，不是把那个接口悄悄丢掉。
+///
+/// 节点在、detail 行不在，这个接口就打不出请求。原先那条路径是
+/// `details.get(&node.id)?` —— `None` 分支上没有任何诊断，于是用户只看到
+/// 「导出的文档里少了几个接口」，没有任何线索指向少了谁。
+///
+/// 旁边那句「键与 `node_id` 对不上」的检查恒为假（`details` 就是按 `node_id`
+/// 建的键），守的是一件不可能发生的事；真正会发生的这件被 `?` 吞了。
+#[test]
+fn an_endpoint_without_a_detail_row_is_reported_not_dropped_silently() {
+    let pool = temp_pool("nodetail");
+    let s = seed_project(&pool);
+    let orphan = add_endpoint_without_detail(&pool, &s, &s.module_id);
+
+    let ex = project_to_ir(&pool, &s.project_id, Some(&s.env_id)).expect("project");
+
+    assert!(
+        ex.modules
+            .iter()
+            .all(|m| m.endpoints.iter().all(|e| e.key != orphan)),
+        "缺 detail 行的接口不该出现在导出结果里"
+    );
+    let errors: Vec<_> = ex
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == crate::diagnostics::Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "{:?}", ex.diagnostics);
+    assert_eq!(errors[0].pointer, format!("/nodes/{orphan}"));
 }

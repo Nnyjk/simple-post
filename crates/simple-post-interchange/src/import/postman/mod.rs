@@ -15,6 +15,7 @@
 mod auth;
 mod body;
 mod request;
+mod script;
 mod template;
 mod tree;
 
@@ -25,11 +26,12 @@ use simple_post_core::domain::{uid, Environment, KeyValue};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{Exchange, IrModule, IrServer};
+use crate::ir::{Exchange, IrModule, IrScripts, IrServer};
 
 // `request.rs` 里的 `super::service_name` 要落到这条绑定上，故它得挂在 `postman` 而非
 // `request` 自己的 `use` 里。
 use self::request::{build_endpoint, rebuild_raw};
+use self::script::{parse_scripts, Place};
 use self::tree::{classify, walk_children, Class};
 use super::{service_name, ParsedExchange};
 
@@ -90,8 +92,10 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
             match classify(obj, &ptr, &mut ctx) {
                 Class::Request(req) => {
                     let mut endpoints = Vec::new();
+                    // 脚本挂在**条目**上，不在 `request` 里。
+                    let scripts = parse_scripts(obj, &ptr, Place::Node, &mut ctx);
                     if let Some(ep) =
-                        build_endpoint(req, item_name(obj), &ptr, &mut servers, &mut ctx)
+                        build_endpoint(req, item_name(obj), &ptr, scripts, &mut servers, &mut ctx)
                     {
                         endpoints.push(ep);
                     }
@@ -108,6 +112,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                                 servers: Vec::new(),
                                 endpoints: Vec::new(),
                                 collections: Vec::new(),
+                                scripts: IrScripts::default(),
                             });
                             modules.len() - 1
                         }
@@ -122,6 +127,9 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                     }
                 }
                 Class::Folder(items) => {
+                    // 顶层 folder 会落成**模块**（挂进已有模块时降级成集合）。模块不能存
+                    // 脚本，故脚本先读出来带着，落库侧再按落点决定写不写。
+                    let scripts = parse_scripts(obj, &ptr, Place::Node, &mut ctx);
                     let c = walk_children(items, &ptr, &mut servers, &mut ctx);
                     // 空容器不进树：预览里挂一个什么都没有的模块，只会让人以为少导了东西
                     // （落库侧同样跳过空容器，见 `ir::subtree_keys`）。
@@ -135,6 +143,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                         servers,
                         endpoints: c.endpoints,
                         collections: c.collections,
+                        scripts,
                     });
                 }
                 Class::Malformed => continue,
@@ -143,6 +152,13 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
     }
 
     let environments = parse_variables(root, &project_name);
+
+    // 整份集合根上的 `event[]`（整个集合的前置 / 测试脚本）**没有落点**。
+    //
+    // 本仓库的脚本住在端点与集合上，而「整份集合」不是一个节点：顶层条目各自成一个
+    // 模块，挂进已有模块时那些模块降级成集合。故根上的脚本挂不到任何一个上——
+    // 逐条出诊断说明，不静默丢。
+    parse_scripts(root, "", Place::CollectionRoot, &mut ctx);
 
     Ok(ParsedExchange {
         exchange: Exchange {
@@ -292,3 +308,7 @@ mod auth_tests;
 #[cfg(test)]
 #[path = "template_test.rs"]
 mod template_tests;
+
+#[cfg(test)]
+#[path = "script_test.rs"]
+mod script_tests;

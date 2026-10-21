@@ -133,6 +133,21 @@ pub(super) fn add_endpoint(pool: &DbPool, s: &Seeded, parent: &str) -> String {
     .expect("create endpoint")
 }
 
+/// 一个**没有** detail 行的 endpoint 节点。
+///
+/// 两张表由不同事务写入，正常路径下不会不一致，故这里直接造出那个状态：先照常
+/// 建出节点与它的 detail 行，再把 detail 行删掉。`db::nodes::create` 本身拒绝
+/// 「endpoint 没有 detail」（那是另一道防线），故只能这样造。
+pub(super) fn add_endpoint_without_detail(pool: &DbPool, s: &Seeded, parent: &str) -> String {
+    let id = add_endpoint(pool, s, parent);
+    db::with_tx(pool, |conn| {
+        conn.execute("DELETE FROM endpoint_details WHERE node_id = ?1", [&id])?;
+        Ok::<(), AppError>(())
+    })
+    .expect("delete detail row");
+    id
+}
+
 pub(super) fn add_module(pool: &DbPool, project_id: &str, name: &str) -> String {
     db::with_tx(pool, |conn| {
         let node = ResourceNode {

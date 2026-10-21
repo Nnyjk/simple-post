@@ -14,6 +14,8 @@
 //! 夹具覆盖面：八个合法动词 + 一个集合外的动词、四种 body mode、三种可映射的鉴权、
 //! 两层嵌套集合、路径参数、配了服务与没配服务的两个模块。
 
+use std::collections::BTreeMap;
+
 use crate::import::Format;
 use crate::ir::Exchange;
 use crate::openapi::{to_document, DocFormat};
@@ -25,7 +27,7 @@ fn sample() -> Exchange {
 }
 
 /// 夹具里的接口数，以及其中被导出的那部分。少改一处就会在这里红。
-const FIXTURE_ENDPOINTS: usize = 18;
+const FIXTURE_ENDPOINTS: usize = 20;
 /// `PROPFIND` 在固定动词键集之外，被带诊断跳过，故产物里比夹具少一个。
 const SKIPPED_VERBS: usize = 1;
 
@@ -207,6 +209,30 @@ fn the_model_agrees_with_our_own_importer() {
         parse_model(&doc.content, format);
         crate::import::parse_text(Format::OpenApi3, &doc.content)
             .unwrap_or_else(|e| panic!("自家导入器读不回 {format:?} 产物：{e}"));
+    }
+}
+
+/// 文档里的 `operationId` 必须互不相同。
+///
+/// 规范要求 `operationId` 在文档内唯一，而「动词 + 路径」的映射不是单射：
+/// `/api/user-info` 与 `/api/user/info` 曾经都映成 `get__api_user_info`。撞名之后多数
+/// 代码生成器会把 `operationId` 直接变成方法名，于是生成出两个同名方法。
+///
+/// `openapiv3` 校验的是**模型**（不校验唯一性），Redocly 也没开那条规则，故这条
+/// 测试就是那道门。夹具里放了一对这样的路径（`m0e9` 与 `m0e10`）。
+#[test]
+fn every_operation_id_is_unique_in_the_document() {
+    let ex = sample();
+    let doc = to_document(&ex, DocFormat::Json).expect("json");
+    let api = parse_model(&doc.content, DocFormat::Json);
+
+    let mut seen: BTreeMap<String, String> = BTreeMap::new();
+    for (path, method, op) in api.operations() {
+        let id = op.operation_id.clone().unwrap_or_default();
+        assert!(!id.is_empty(), "{method} {path} 没有 operationId");
+        if let Some(previous) = seen.insert(id.clone(), format!("{method} {path}")) {
+            panic!("operationId 撞名了：{id} 同时属于「{previous}」与「{method} {path}」");
+        }
     }
 }
 

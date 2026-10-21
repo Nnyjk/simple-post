@@ -40,7 +40,10 @@ pub(super) fn parse_body(req: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> 
             }
         }
         "urlencoded" => {
-            let parts = kv_list(b.get("urlencoded"), ptr, ctx);
+            // 指针指到 `urlencoded` 那一层：body 的下一层就是它。指 body 本身的话，
+            // 用户看到的 `/item/0/request/body/2` 在源文件里指向一个**数组**，而那一项
+            // 其实住在 `body/urlencoded/2` —— 对不上就是定位不到。
+            let parts = kv_list(b.get("urlencoded"), &format!("{ptr}/urlencoded"), ctx);
             // 不做百分号编码：值里常有 `{{var}}`，编码后模板化就匹配不到了。
             let content = parts
                 .iter()

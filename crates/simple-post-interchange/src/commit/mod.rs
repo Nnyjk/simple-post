@@ -16,12 +16,14 @@ mod service;
 use std::collections::BTreeSet;
 
 use simple_post_core::db::{self, Connection, DbPool};
-use simple_post_core::domain::{now_ms, uid, EndpointDetail, ResourceNode, ResourceNodeType};
+use simple_post_core::domain::{
+    now_ms, uid, EndpointDetail, NodeScriptsPatch, ResourceNode, ResourceNodeType,
+};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::fingerprint::FingerprintSet;
-use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule};
+use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts};
 
 use self::dedupe::{decide, has_any, has_any_collection};
 use self::service::wire_service;
@@ -221,7 +223,10 @@ pub fn commit_in_tx(
     for dup in &fate.duplicates {
         report.skipped_duplicates.push(dup.name.clone());
         report.diagnostics.push(
-            Diagnostic::info(format!("/{}", dup.path), "项目里已有同一个接口，按指纹跳过")
+            // 指针是端点在 IR 里的 key（导入时形如 `/item/3/request`，导出时是 `nodes.id`），
+            // 不是它的 path：path 是地址，在源文件里未必指得到任何一行，而渲染层把
+            // pointer 原样显示给用户——一个指向不存在位置的指针等于没给。
+            Diagnostic::info(dup.key.clone(), "项目里已有同一个接口，按指纹跳过")
                 .dropping(format!("{} {}", dup.method, dup.path)),
         );
     }
@@ -272,6 +277,17 @@ pub fn commit_in_tx(
                 if !as_module {
                     report.created_collection_ids.push(group_id.clone());
                 }
+                // 模块**不能**存脚本（`node_scripts` 只认 collection）。落进已有模块时
+                // 这一层降级成了集合，脚本就有归宿了；落到项目顶层时它只能是模块，
+                // 脚本无处可去——说出来，不静默丢。
+                write_scripts(
+                    conn,
+                    &group_id,
+                    as_module,
+                    &ir.scripts,
+                    &ir.key,
+                    &mut report.diagnostics,
+                )?;
 
                 // 先压 collection 再压 endpoint：栈是后进先出，故这样出栈顺序才是
                 // 「先本层的 endpoint，再各 collection」，与 IR 的声明顺序一致。
@@ -314,6 +330,15 @@ pub fn commit_in_tx(
                 };
                 let collection_id = db::nodes::create(conn, &node, None)?.id;
                 report.created_collection_ids.push(collection_id.clone());
+                // 集合能存脚本，故直接写。
+                write_scripts(
+                    conn,
+                    &collection_id,
+                    false,
+                    &ir.scripts,
+                    &ir.key,
+                    &mut report.diagnostics,
+                )?;
 
                 for (i, c) in ir.collections.iter().enumerate().rev() {
                     stack.push(Pending::Collection {
@@ -378,9 +403,9 @@ pub fn commit_in_tx(
                     docs: ir.docs.clone(),
                     notes: ir.notes.clone(),
                     tags: ir.tags.clone(),
-                    // 外来格式里的脚本暂不导入：IR 还没有承载它们的字段。
-                    pre_request_script: None,
-                    test_script: None,
+                    // 端点的脚本住在 `endpoint_details`，与 body / headers 同级。
+                    pre_request_script: ir.scripts.pre_request_script.clone(),
+                    test_script: ir.scripts.test_script.clone(),
                 };
 
                 db::nodes::create(conn, &node, Some(&detail))?;
@@ -390,6 +415,42 @@ pub fn commit_in_tx(
     }
 
     Ok(report)
+}
+
+/// 把一个节点上的两段脚本写进 `node_scripts`。
+///
+/// `as_module` 为真表示这个节点落成了**模块**——而模块不能存脚本（`node_scripts`
+/// 只认 collection，应用层与 SQLite 触发器各查一次）。那种情况下脚本无处可去，
+/// 出诊断说明，不静默丢。
+fn write_scripts(
+    conn: &mut Connection,
+    node_id: &str,
+    as_module: bool,
+    scripts: &IrScripts,
+    key: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), AppError> {
+    if scripts.is_empty() {
+        return Ok(());
+    }
+    if as_module {
+        diagnostics.push(Diagnostic::warn(
+            // 指针是端点在 IR 里的 key，即源文件里的位置指针（导入时形如
+            // `/item/3`）——那才是用户能对着源文件找到的地方。
+            key.to_string(),
+            "这个分组落成了模块，而模块不能存脚本，这两段脚本没有导入",
+        ));
+        return Ok(());
+    }
+    db::node_scripts::set(
+        conn,
+        node_id,
+        NodeScriptsPatch {
+            pre_request_script: scripts.pre_request_script.clone().map(Some),
+            test_script: scripts.test_script.clone().map(Some),
+        },
+    )?;
+    Ok(())
 }
 
 /// 「整份文档」这一事实的 pointer。多个 host 时没有单一位置能指过去——它们散在文件
@@ -416,3 +477,7 @@ mod selection_tests;
 #[cfg(test)]
 #[path = "service_test.rs"]
 mod service_tests;
+
+#[cfg(test)]
+#[path = "script_test.rs"]
+mod script_tests;

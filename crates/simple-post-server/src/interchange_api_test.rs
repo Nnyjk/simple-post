@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::{
-    EndpointDetail, HttpMethod, Project, ResourceNode, ResourceNodeType,
+    BaseUrlDefinition, EndpointDetail, Environment, HttpMethod, Project, ResourceNode,
+    ResourceNodeType,
 };
 use simple_post_core::error::AppError;
 use simple_post_interchange::fingerprint::FingerprintSet;
@@ -16,11 +17,11 @@ use simple_post_interchange::ir::{Exchange, IrEndpoint, IrModule};
 use simple_post_interchange::Diagnostic;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::dto::{ImportCommitOpts, ImportPreviewOpts, TransferNode};
+use crate::dto::{ExportPreviewOpts, ImportCommitOpts, ImportPreviewOpts, TransferNode};
 
 use super::{
-    all_endpoints, count_groups, diagnostics_of, file_name, import_commit, import_preview,
-    mark_duplicates, project_modules, FETCH_MAX_KB,
+    all_endpoints, count_groups, diagnostics_of, export_preview, file_name, import_commit,
+    import_preview, mark_duplicates, project_modules, FETCH_MAX_KB,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -600,6 +601,71 @@ async fn the_declared_server_is_never_the_one_dialled() {
     assert_eq!(svc.service, "169.254.169.254");
 }
 
+// --- 导出预览按「所选环境」解析服务 URL ----------------------------------
+
+/// 导出预览的 `servers` 必须按**指名的那个环境**解析。
+///
+/// 渲染层在下拉里换了环境就会重取一趟预览，那一趟带着 `environmentId`。若服务端
+/// 仍按激活环境解析，界面上的「该环境下没有配置服务 URL」就会按**旧环境**点名：
+/// 在新环境里其实配好 URL 的模块被要求去配置，真正缺 URL 的模块反而不被提示。
+#[test]
+fn the_export_preview_resolves_servers_by_the_named_environment() {
+    let pool = temp_pool("export-env");
+    let (project_id, module_id) = seed_two_environments(&pool);
+
+    // 激活环境是「无 URL」那个：不给 environmentId 时按它算。
+    let by_active = export_preview(
+        &pool,
+        &ExportPreviewOpts {
+            project_id: project_id.clone(),
+            module_id: module_id.clone(),
+            environment_id: None,
+        },
+    )
+    .expect("预览");
+    assert_eq!(by_active.environment_id.as_deref(), Some("env-a"));
+    assert!(
+        by_active.servers[0].servers.is_empty(),
+        "激活环境里没配 URL，就该是空的：{:?}",
+        by_active.servers
+    );
+
+    // 指名「有 URL」那个环境：同一批模块，这一次有地址了。
+    let by_named = export_preview(
+        &pool,
+        &ExportPreviewOpts {
+            project_id: project_id.clone(),
+            module_id: module_id.clone(),
+            environment_id: Some("env-b".into()),
+        },
+    )
+    .expect("预览");
+    assert_eq!(by_named.environment_id.as_deref(), Some("env-b"));
+    assert_eq!(
+        by_named.servers[0]
+            .servers
+            .iter()
+            .map(|s| s.url.as_str())
+            .collect::<Vec<_>>(),
+        vec!["https://b.example.com"],
+        "指名的环境里配了 URL，就该读得到：{:?}",
+        by_named.servers
+    );
+
+    // 空串 ≡ 没传：都退回激活环境。渲染层「不选环境」那一项送来的就是空串。
+    let by_empty = export_preview(
+        &pool,
+        &ExportPreviewOpts {
+            project_id,
+            module_id,
+            environment_id: Some("   ".into()),
+        },
+    )
+    .expect("预览");
+    assert_eq!(by_empty.environment_id.as_deref(), Some("env-a"));
+    assert!(by_empty.servers[0].servers.is_empty());
+}
+
 // --- 测试脚手架 ---------------------------------------------------------
 
 /// 一个项目 + 一个模块，别的什么都没有。`seed_one_endpoint` 那份预置了一个
@@ -648,6 +714,81 @@ fn temp_pool(tag: &str) -> DbPool {
     ));
     let _ = std::fs::remove_dir_all(&dir);
     db::init(Path::new(&dir)).expect("init")
+}
+
+/// 一个项目 + 一个模块 + 一个服务定义 + 两个环境。
+///
+/// `env-a` 是激活环境，且**没有**给这个模块配 URL；`env-b` 配了。两个环境在
+/// 「这个模块有没有地址」这件事上答案相反，故指错环境就会看得见。
+fn seed_two_environments(pool: &DbPool) -> (String, String) {
+    db::with_tx(pool, |conn| {
+        let project = db::projects::create_with_defaults(
+            conn,
+            &Project {
+                id: "p1".into(),
+                name: "示例".into(),
+                description: None,
+                base_url: None,
+                base_url_definitions: Vec::new(),
+                default_base_url_definition_id: None,
+                color: "#3b82f6".into(),
+                created_at: 0,
+                updated_at: 0,
+            },
+        )?;
+        db::nodes::create(
+            conn,
+            &ResourceNode {
+                id: "m1".into(),
+                root_id: project.id.clone(),
+                parent_id: None,
+                kind: ResourceNodeType::Module,
+                name: "用户".into(),
+                description: None,
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+            },
+            None,
+        )?;
+        db::base_url_defs::create(
+            conn,
+            &BaseUrlDefinition {
+                id: "d1".into(),
+                name: "网关".into(),
+                description: None,
+            },
+            &project.id,
+        )?;
+        for (id, name, active) in [("env-a", "甲", true), ("env-b", "乙", false)] {
+            db::environments::create(
+                conn,
+                &Environment {
+                    id: id.into(),
+                    project_id: project.id.clone(),
+                    name: name.into(),
+                    base_urls: Default::default(),
+                    module_base_urls: Default::default(),
+                    variables: Default::default(),
+                    disabled_variables: Default::default(),
+                    is_active: active,
+                },
+            )?;
+        }
+        // 只有乙给这个模块配了地址。
+        db::environments::set_module_base_url(
+            conn,
+            "env-b",
+            "d1",
+            "m1",
+            Some("https://b.example.com"),
+        )?;
+        // 项目自带的那个默认环境也是激活的，故显式指明「甲」是激活的那个——
+        // 否则「不给 environmentId 时按谁算」这件事就没有确定的答案。
+        db::environments::set_active(conn, "env-a")?;
+        Ok((project.id, "m1".to_string()))
+    })
+    .expect("seed")
 }
 
 fn endpoint_detail(node_id: &str, method: HttpMethod, url: &str) -> EndpointDetail {

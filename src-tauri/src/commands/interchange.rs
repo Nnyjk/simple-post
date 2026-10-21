@@ -72,17 +72,23 @@ pub fn interchange_import_commit(
 }
 
 /// 导出候选清单。**不写库。**
+///
+/// `environment_id` 缺席或空串 = 按激活环境解析 `servers`（与今天一致）；给了 id
+/// 就按那个环境解析——渲染层换了环境会重取一趟。Tauri 2 把 payload 里的 camelCase
+/// 键映到本形参，故渲染层送的是 `environmentId`。
 #[tauri::command]
 pub fn interchange_export_preview(
     state: State<'_, DbPool>,
     project_id: String,
     module_id: String,
+    environment_id: Option<String>,
 ) -> Result<ExportPreviewDto, AppError> {
     crate::interchange_api::export_preview(
         &state,
         &ExportPreviewOpts {
             project_id,
             module_id,
+            environment_id,
         },
     )
 }

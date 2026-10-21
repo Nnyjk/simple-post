@@ -93,6 +93,22 @@
           "params": [{ "id": "kv7", "key": "id", "value": "{{id}}", "enabled": true }],
           "body": { "mode": "json", "content": "{\"nickname\":\"{{nick}}\"}" },
           "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e9",
+          "name": "用户信息（短横线）",
+          "description": "与下一条撞出同一个 operationId——夹具要盖住这件事",
+          "method": "GET",
+          "path": "/api/user-info",
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e10",
+          "name": "用户信息（斜杠）",
+          "description": "与上一条撞出同一个 operationId——夹具要盖住这件事",
+          "method": "GET",
+          "path": "/api/user/info",
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
         }
       ],
       "collections": [

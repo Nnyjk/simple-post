@@ -1,12 +1,12 @@
 //! 文档的装配：`Pending` 是显式工作栈，`Builder` 累积 paths / components / tags。
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde_json::{json, Map, Value};
 use simple_post_core::domain::{ApiKeyLocation, AuthConfig, AuthType};
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{IrCollection, IrEndpoint, IrModule, IrServer};
+use crate::ir::{IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
 use crate::spec::{escape_pointer_token, PATH_METHODS};
 
 use super::{
@@ -60,6 +60,9 @@ pub(super) struct Builder {
     /// `path + verb` → 已写入的端点名。同一对只能有一个 operation，故第二次撞上时
     /// 丢弃而不是覆盖：覆盖没有任何人看得见。
     taken: HashMap<String, String>,
+    /// 已用过的 `operationId`。规范要求它在整份文档里唯一，而「动词 + 路径」的映射
+    /// 不是单射，故撞上时给后来的那个编号。
+    used_operation_ids: HashSet<String>,
     /// 手写 schema 的去重账本（按原文），同名 schema 只写一份。
     schema_seen: HashMap<String, String>,
     pub(super) tags: BTreeSet<String>,
@@ -113,10 +116,20 @@ impl Builder {
         if !ep.name.is_empty() {
             op.insert("summary".into(), json!(ep.name));
         }
+        // OpenAPI 没有脚本的对应构造。IR 里有而文档表达不了的，必须回诊断——
+        // 「导出成功」四个字会让用户看不见自己少了什么。
+        self.report_scripts(&ep.scripts, &pointer, "操作");
         // 由 `动词 + 路径` 拼，不取接口名：改名是用户随手做的事，而 operationId 是
         // 代码生成器拿来给方法取名的，它变了等于换了一个方法。`动词 + 路径` 只在
         // 同一路径同一动词下唯一——那正是上面 `taken` 守住的那一格。
-        op.insert("operationId".into(), json!(operation_id(&verb, &path)));
+        //
+        // 但那**一格**之外还有撞名（`/a-b` 与 `/a_b`），故落笔前再过一次文档内的
+        // 唯一性检查：规范要求 `operationId` 在文档内唯一，撞名会让代码生成器生成
+        // 两个同名方法。
+        op.insert(
+            "operationId".into(),
+            json!(self.claim_operation_id(&operation_id(&verb, &path))),
+        );
         if let Some(d) = &ep.description {
             op.insert("description".into(), json!(d));
         }
@@ -128,18 +141,29 @@ impl Builder {
             );
         }
 
-        let params = parameters(ep, &path);
+        let params = parameters(ep, &path, &pointer, &mut self.diagnostics);
         if !params.is_empty() {
             op.insert("parameters".into(), Value::Array(params));
         }
 
+        // 请求体的 schema。端点自己带了就 `$ref` 到 `components.schemas` 里那一份；
+        // 没带就只声明「这是一个 object」——字段**不猜**。
+        //
+        // `collect_schema` 必须**先**跑：它决定这份 schema 在 components 里叫什么，
+        // `$ref` 要指的就是那个名字。先写 requestBody 再收集的话，收集到的定义就
+        // 成了没人引用的孤儿：`components.schemas` 里躺着一堆 `Schema1`…，而每个
+        // requestBody 都宣称自己是一个 object。
+        let schema_name = self.collect_schema(ep, &pointer);
         if let Some(media) = media_type_of(&ep.body.mode) {
+            let schema = match &schema_name {
+                Some(name) => json!({ "$ref": format!("#/components/schemas/{name}") }),
+                None => json!({ "type": "object" }),
+            };
             op.insert(
                 "requestBody".into(),
-                json!({ "content": { media: { "schema": { "type": "object" } } } }),
+                json!({ "content": { media: { "schema": schema } } }),
             );
         }
-        self.collect_schema(ep, &pointer);
 
         // 合成默认：响应历史可能被截断，猜出来的 schema 看不出不可靠，比不猜更糟。
         op.insert(
@@ -235,31 +259,69 @@ impl Builder {
         Some(name)
     }
 
-    /// 手写的 `body.schema` 透传到 `components.schemas`。
+    /// 手写的 `body.schema` 透传到 `components.schemas`，返回它在 components 里的名字。
     ///
     /// 它是一个 `Option<String>`（JSON 文本）且没有名字，故按出现顺序编号。解析不成
     /// 合法 JSON Schema 就忽略 + `Info`，**不报错**：UI 从不写这个字段，一份畸形
     /// schema 不该让整次导出失败。
-    pub(super) fn collect_schema(&mut self, ep: &IrEndpoint, pointer: &str) {
-        let Some(raw) = ep.body.schema.as_ref().filter(|s| !s.trim().is_empty()) else {
-            return;
-        };
+    ///
+    /// **返回名字而不只是收集**：调用方拿它写 `requestBody` 里的 `$ref`。收集了却
+    /// 不被引用是三种选择里最差的一种——`components.schemas` 里躺着一堆没人引用的
+    /// 定义（读文档的人看到 `Schema1`…`Schema9` 会以为它们有意义），而每个
+    /// requestBody 都在宣称一个错的请求体形状。
+    pub(super) fn collect_schema(&mut self, ep: &IrEndpoint, pointer: &str) -> Option<String> {
+        let raw = ep.body.schema.as_ref().filter(|s| !s.trim().is_empty())?;
         match serde_json::from_str::<Value>(raw) {
             Ok(v) if v.is_object() => {
                 let text = v.to_string();
-                if !self.schema_seen.contains_key(&text) {
-                    let name = format!("Schema{}", self.schemas.len() + 1);
-                    self.schemas.insert(name.clone(), v);
-                    self.schema_seen.insert(text, name);
+                if let Some(name) = self.schema_seen.get(&text) {
+                    // 同一份 schema 只写一份，两个端点引同一个名字。
+                    return Some(name.clone());
                 }
+                let name = format!("Schema{}", self.schemas.len() + 1);
+                self.schemas.insert(name.clone(), v);
+                self.schema_seen.insert(text, name.clone());
+                Some(name)
             }
-            _ => self.diagnostics.push(
-                Diagnostic::info(
-                    pointer,
-                    "请求体上这个 schema 不是合法的 JSON Schema 对象，没有写进 components.schemas",
-                )
-                .dropping(raw.clone()),
-            ),
+            _ => {
+                self.diagnostics.push(
+                    Diagnostic::info(
+                        pointer,
+                        "请求体上这个 schema 不是合法的 JSON Schema 对象，没有写进 components.schemas",
+                    )
+                    .dropping(raw.clone()),
+                );
+                None
+            }
         }
+    }
+
+    /// OpenAPI 没有脚本的对应构造，故 IR 里有脚本就要说出来。
+    ///
+    /// 「导出成功」四个字会让用户看不见自己少了什么。`what` 是这个节点在文档里的
+    /// 身份（操作 / 集合 / 模块），指针指到它在文档或树里的位置。
+    pub(super) fn report_scripts(&mut self, scripts: &IrScripts, pointer: &str, what: &str) {
+        if scripts.is_empty() {
+            return;
+        }
+        self.diagnostics.push(Diagnostic::warn(
+            pointer,
+            format!("这个{what}上配了脚本，OpenAPI 没有对应构造，这两段脚本没有写进文档"),
+        ));
+    }
+
+    /// 给这个 operation 找一个文档内唯一的 `operationId`。
+    ///
+    /// [`operation_id`] 的映射不是单射：`/a-b` 与 `/a_b` 都映成同一个名字，而规范
+    /// 要求 `operationId` 在整份文档里唯一。撞上时给后来的那个加编号后缀。
+    fn claim_operation_id(&mut self, base: &str) -> String {
+        let mut candidate = base.to_string();
+        let mut n = 2u32;
+        while self.used_operation_ids.contains(&candidate) {
+            candidate = format!("{base}_{n}");
+            n += 1;
+        }
+        self.used_operation_ids.insert(candidate.clone());
+        candidate
     }
 }

@@ -147,3 +147,37 @@ fn other_body_modes_land_where_the_sender_expects_them() {
     assert_eq!(ex.diagnostics[0].severity, Severity::Warn);
     assert_eq!(ex.diagnostics[0].dropped.as_deref(), Some("graphql 请求体"));
 }
+
+/// 畸形条目的指针要指到它真正住的那一层。
+///
+/// `urlencoded[]` 的每一项住在 `body/urlencoded/` 下面。指 body 本身的话，用户
+/// 看到的 `/item/0/request/body/1` 在源文件里指向一个**数组**，点不出那一行。
+/// 同族的 `formdata` 与 `header` 本来就指对了，故这是 `urlencoded` 一处单独的错。
+#[test]
+fn a_malformed_urlencoded_entry_points_at_the_urlencoded_level() {
+    let parsed = parse_ok(&json!({
+        "info": { "name": "n" },
+        "item": [{
+            "name": "表单",
+            "request": {
+                "method": "POST",
+                "body": {
+                    "mode": "urlencoded",
+                    "urlencoded": [
+                        { "key": "a", "value": "1" },
+                        "不是对象"
+                    ]
+                },
+                "url": "https://api.example.com/a"
+            }
+        }]
+    }));
+
+    let ex = &parsed.exchange;
+    assert_eq!(ex.diagnostics.len(), 1);
+    assert_eq!(ex.diagnostics[0].severity, Severity::Warn);
+    assert_eq!(
+        ex.diagnostics[0].pointer,
+        "/item/0/request/body/urlencoded/1"
+    );
+}

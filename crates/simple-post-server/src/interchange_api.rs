@@ -175,13 +175,22 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
     })
 }
 
-/// 导出候选预览。此刻**还没选环境**：先用激活环境把清单给出来，让用户看见有哪些接口
-/// 可选，环境那一项由渲染层在同一屏里改。
+/// 导出候选预览。
+///
+/// `opts.environment_id` 指名按**哪个环境**解析 `servers`：缺席或空串取激活环境，
+/// 给了 id 就按那个环境解析——渲染层在下拉里换了环境就会重取一趟，否则那份清单
+/// 仍是旧环境下的事实，界面上的提示会按旧环境点名。
 pub fn export_preview(
     pool: &DbPool,
     opts: &ExportPreviewOpts,
 ) -> Result<ExportPreviewDto, AppError> {
-    let ex = module_to_ir(pool, &opts.project_id, &opts.module_id, None)?;
+    // 空串 = 渲染层「不选环境」那一项，与「没传」等价：都退回激活环境。
+    let env = opts
+        .environment_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let ex = module_to_ir(pool, &opts.project_id, &opts.module_id, env)?;
     let duplicates: BTreeSet<String> = BTreeSet::new();
     let groups = project_modules(&ex.modules, &duplicates, &ex);
 

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { useAppStore } from '@/stores/app-store';
+import type { Environment } from '@/types/domain';
 import type {
   DocFormat,
   ExportDocument,
@@ -12,6 +13,7 @@ import type {
   TransferNode,
 } from '@/lib/interchange-types';
 import { copyGeneratedDocument, saveGeneratedDocument } from '@/lib/transfer-file-save';
+import { createLatestRequest } from './latest-request';
 import {
   allKeys,
   countSelected,
@@ -47,6 +49,51 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * 导出预览里「这个环境下没有配服务 URL」的模块名。
+ *
+ * 空数组是真实答案：那个环境里每个模块都配了 URL。模块名取自**这一趟预览**，
+ * 故换过环境之后它讲的是新环境下的事实。
+ */
+export function missingServerModules(preview: ImportPreview | ExportPreview | null): string[] {
+  if (!preview || !('servers' in preview)) return [];
+  return preview.servers.filter((m) => m.servers.length === 0).map((m) => m.moduleName);
+}
+
+/**
+ * 提示里点名的环境。
+ *
+ * 按**所选**环境取名字：下拉里选的是哪个环境，提示就该说哪个环境——原先写死的
+ * 「该环境」在换过环境之后指的是旧环境，说的与做的不一致。
+ *
+ * `selectedId` 为空（「不选环境」那一项）时没有环境可点，故不给名字。
+ */
+export function missingServerEnvironmentName(
+  environments: Environment[],
+  selectedId: string,
+): string | null {
+  if (!selectedId) return null;
+  return environments.find((e) => e.id === selectedId)?.name ?? selectedId;
+}
+
+/**
+ * 取一趟导出预览。
+ *
+ * `environmentId` 决定 `servers` 按哪个环境解析：空串与「没传」等价，服务端那侧
+ * 都退回激活环境——「不选环境」那一项送来的就是空串。
+ */
+export async function fetchExportPreview(args: {
+  projectId: string;
+  moduleId: string;
+  environmentId: string;
+}): Promise<ExportPreview> {
+  return invokeCmd<ExportPreview>(COMMANDS.interchangeExportPreview, {
+    projectId: args.projectId,
+    moduleId: args.moduleId,
+    environmentId: args.environmentId,
+  });
+}
+
 export function useTransfer(options: UseTransferOptions = {}) {
   const [session, setSession] = useState<TransferSession | null>(null);
   const [phase, setPhase] = useState<TransferPhase>('source');
@@ -64,6 +111,8 @@ export function useTransfer(options: UseTransferOptions = {}) {
   // 默认开着：文档带了 host 却不落成服务，用户打开模块看到的是一排没有地址的路径。
   // 取消它是一次明确取舍，不是默认值 —— 故这是预览里的一个勾，不是隐藏的默认。
   const [applyService, setApplyService] = useState(true);
+  // 换环境的请求号。每次换环境领一个，回来时号对不上就丢弃。
+  const [envRequest] = useState(createLatestRequest);
 
   const groups: TransferNode[] = useMemo(
     () => (preview ? (preview.groups as TransferNode[]) : []),
@@ -77,6 +126,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
     [preview],
   );
 
+  /** 导出预览里缺服务 URL 的模块。导入模式恒为空。 */
+  const missingServers: string[] = useMemo(() => missingServerModules(preview), [preview]);
+
   const reset = useCallback(() => {
     setPhase('source');
     setError(null);
@@ -85,7 +137,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
     setSourceText('');
     setResult(null);
     setApplyService(true);
-  }, []);
+    // 作废在途的换环境请求：弹窗关掉后它回来，不该再往这个会话里写预览。
+    envRequest.invalidate();
+  }, [envRequest]);
 
   const openImport = useCallback(
     (s: Omit<TransferSession, 'mode'>) => {
@@ -101,6 +155,8 @@ export function useTransfer(options: UseTransferOptions = {}) {
       reset();
       setPhase('working');
       try {
+        // 此刻**还没选环境**，故不送 `environmentId`：服务端按激活环境解析，返回值
+        // 里的 `environmentId` 正是下拉里该显示的那一个。
         const p = await invokeCmd<ExportPreview>(COMMANDS.interchangeExportPreview, {
           projectId: s.projectId,
           moduleId: s.moduleId,
@@ -121,6 +177,40 @@ export function useTransfer(options: UseTransferOptions = {}) {
     setSession(null);
     reset();
   }, [reset]);
+
+  /**
+   * 换导出环境。
+   *
+   * 环境一变，「哪些模块没有服务 URL」就是**那个环境**下的事实，故要重取一趟预览：
+   * 沿用打开弹窗时那一趟（按激活环境算的）会把已经配好 URL 的模块点成缺 URL，
+   * 真正缺 URL 的模块反而不被点名。
+   *
+   * 勾选**不重置**：勾选集的成员是节点 id，换环境不产生新节点，用户勾过的东西
+   * 不该因为换了个环境就消失。
+   */
+  const changeEnvironment = useCallback(
+    async (id: string) => {
+      setEnvironmentId(id);
+      if (!session || session.mode !== 'export') return;
+      // 每次换环境领一个号，回来时号对不上就是过期的那一趟，丢弃。
+      // 连着换两个环境时，先发的那一趟可能后到——它写进去的 servers 属于旧环境。
+      const ticket = envRequest.next();
+      setError(null);
+      try {
+        const p = await fetchExportPreview({
+          projectId: session.projectId,
+          moduleId: session.moduleId,
+          environmentId: id,
+        });
+        if (!envRequest.isCurrent(ticket)) return;
+        setPreview(p);
+      } catch (e) {
+        if (!envRequest.isCurrent(ticket)) return;
+        setError(errorText(e));
+      }
+    },
+    [session, envRequest],
+  );
 
   /** 走预览。`text` 为空表示让它自己从链接拉。 */
   const runPreview = useCallback(
@@ -226,6 +316,8 @@ export function useTransfer(options: UseTransferOptions = {}) {
     environmentId,
     format,
     applyService,
+    /** 导出预览里缺服务 URL 的模块名。导入模式恒为空数组。 */
+    missingServers,
 
     openImport,
     openExport,
@@ -235,7 +327,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
     commit,
     save,
 
-    setEnvironmentId,
+    changeEnvironment,
     setFormat,
     setApplyService,
     selectAll: useCallback(() => setSelected((s) => selectAll(s, groups)), [groups]),

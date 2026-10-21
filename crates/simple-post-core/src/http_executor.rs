@@ -116,6 +116,9 @@ pub(crate) fn parse_method(method: &str) -> reqwest::Method {
 
 /// 把 body 字符串裁到至多 `max_bytes` 字节（落在 UTF-8 安全的字符边界上）。被裁时加上一个
 /// 标记。与原 fetch 路径的截断契约一致。
+///
+/// 这条契约同时是**流式读取路径**的裁剪判据：流式路径把「读到的原始字节」解码成字符串后
+/// 交给本函数，故裁剪点与标记文案只有这一个产生点，不会出现两条路径各裁各的。
 pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
     if max_bytes == 0 {
         return (body, false);
@@ -136,6 +139,49 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
         max_bytes
     ));
     (out, true)
+}
+
+/// 上限之上多读 4 字节：保证起始于上限之前的 rune 完整，[`truncate_body`] 的字符边界
+/// 回退才与整读落在同一个偏移上。
+const BOUNDARY_LOOKAHEAD_BYTES: u64 = 4;
+
+/// 流式读取响应体：边读边计数，累计到上限就停，剩下的字节直接丢弃。
+///
+/// 缓冲区的大小只与上限有关，与响应大小无关。
+///
+/// `max_bytes == 0` 表示不设上限，整个 body 都要读进来。
+///
+/// 解码须与未开 `charset` 的 `Response::text()` 一致（UTF-8 宽松解码）。
+///
+/// 不用 `Content-Length` 判截断：它描述的是编码后的长度，与 [`truncate_body`] 的判据
+/// 分叉，同一个响应会在两种形态下给出不同的 `truncated`。
+async fn read_body_capped(
+    mut res: reqwest::Response,
+    max_bytes: u64,
+) -> Result<String, reqwest::Error> {
+    let cap = if max_bytes == 0 {
+        u64::MAX
+    } else {
+        max_bytes.saturating_add(BOUNDARY_LOOKAHEAD_BYTES)
+    };
+
+    let mut buf: Vec<u8> = Vec::new();
+    let mut len: u64 = 0;
+    while let Some(chunk) = res.chunk().await? {
+        let take = std::cmp::min(chunk.len() as u64, cap - len) as usize;
+        buf.extend_from_slice(&chunk[..take]);
+        len += take as u64;
+        if len >= cap {
+            // 读够了：剩下的字节直接丢弃，连接随之关闭，服务端不会把剩下的内容继续推过来。
+            break;
+        }
+    }
+
+    // 合法 UTF-8 时 `String::from_utf8` 原地校验、不复制（`from_utf8_lossy` 要复制一份）。
+    match String::from_utf8(buf) {
+        Ok(text) => Ok(text),
+        Err(e) => Ok(String::from_utf8_lossy(e.as_bytes()).into_owned()),
+    }
 }
 
 // 出站 URL 策略。
@@ -353,7 +399,11 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         .map(|(k, v)| [k.to_string(), v.to_str().unwrap_or("").to_string()])
         .collect();
 
-    let body_text = match res.text().await {
+    // 响应体上限。必须在读 body **之前**算好：流式读取要靠它决定读多少就停。
+    let max_bytes = input.max_response_size_kb.saturating_mul(1024);
+
+    // 读取时护栏：缓冲区上限与响应大小无关，超出的部分直接丢弃。
+    let body_text = match read_body_capped(res, max_bytes).await {
         Ok(t) => t,
         Err(e) => {
             let kind = if e.is_timeout() { "timeout" } else { "network" };
@@ -362,7 +412,6 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     };
 
     let elapsed = start.elapsed().as_millis();
-    let max_bytes = input.max_response_size_kb.saturating_mul(1024);
     let (final_body, truncated) = truncate_body(body_text, max_bytes);
 
     HttpResult::ok(HttpResponse {

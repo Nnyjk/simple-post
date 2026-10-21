@@ -34,6 +34,9 @@ pub async fn interchange_import_commit(
 }
 
 /// 导出候选清单。**不写库。**
+///
+/// 请求体整个就是 `ExportPreviewOpts`：`environment_id` 之类的字段加进那个结构体
+/// 即刻生效，本 handler 不必改——它只把 opts 原样交给编排层。
 pub async fn interchange_export_preview(
     State(state): State<Arc<WebState>>,
     Json(opts): Json<ExportPreviewOpts>,

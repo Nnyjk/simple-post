@@ -9,7 +9,7 @@ use simple_post_core::error::AppError;
 use super::support::{doc_of, ep, one_module};
 use super::{to_document, DocFormat};
 use crate::diagnostics::Severity;
-use crate::ir::{Exchange, IrEndpoint, IrModule, IrServer};
+use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
 
 #[test]
 fn every_operation_gets_exactly_one_synthetic_200() {
@@ -300,8 +300,8 @@ fn body_mode_picks_the_matching_media_type() {
     let doc = doc_of(&ex);
 
     assert_eq!(
-        doc["paths"]["/a"]["post"]["requestBody"]["content"]["application/json"]["schema"]["type"],
-        "object"
+        doc["paths"]["/a"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/Schema1"
     );
     assert!(doc["paths"]["/a"]["post"]["requestBody"]["content"]
         .get("multipart/form-data")
@@ -309,10 +309,79 @@ fn body_mode_picks_the_matching_media_type() {
     assert!(doc["paths"]["/b"]["post"]["requestBody"]["content"]
         .get("multipart/form-data")
         .is_some());
+    // 没有 schema 的那条只声明「这是一个 object」——字段不猜。
+    assert_eq!(
+        doc["paths"]["/b"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
+            ["type"],
+        "object"
+    );
     assert!(doc["paths"]["/c"]["get"].get("requestBody").is_none());
 
     // 手写且合法的 schema 原样透传
     assert_eq!(doc["components"]["schemas"]["Schema1"]["type"], "object");
+}
+
+/// 端点带了 `body.schema` 时，`requestBody` 必须**引用**它，而不是另写一个。
+///
+/// 曾经 `requestBody` 恒写死 `{"type": "object"}`，而 `collect_schema` 把 schema 收进
+/// `components.schemas` 却不生成任何 `$ref`——于是产物里躺着一堆没人引用的
+/// `Schema1`…，而每个 requestBody 都在宣称一个错的请求体形状。
+#[test]
+fn a_body_schema_is_referenced_from_the_request_body() {
+    let ex = one_module(
+        "m",
+        vec![IrEndpoint {
+            body: RequestBody {
+                mode: BodyMode::Json,
+                content: String::new(),
+                schema: Some(r#"{"type":"object","properties":{"id":{"type":"string"}}}"#.into()),
+            },
+            ..ep("a", HttpMethod::Post, "/a")
+        }],
+    );
+    let doc = doc_of(&ex);
+
+    let reference =
+        &doc["paths"]["/a"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"];
+    let reference = reference.as_str().expect("requestBody 必须是一个 $ref");
+    // `$ref` 要能在文档里解析到。
+    let name = reference
+        .rsplit('/')
+        .next()
+        .expect("$ref 的末段是 component 名字");
+    assert_eq!(
+        doc["components"]["schemas"][name]["properties"]["id"]["type"], "string",
+        "$ref 必须解析得到：{reference}"
+    );
+    assert!(
+        doc["paths"]["/a"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+            .get("type")
+            .is_none(),
+        "引用之后不再内联一个形状"
+    );
+}
+
+/// 没有 `body.schema` 的端点不得在 `components.schemas` 里留下孤儿定义。
+#[test]
+fn an_endpoint_without_a_body_schema_leaves_no_orphan_component() {
+    let ex = one_module(
+        "m",
+        vec![IrEndpoint {
+            body: RequestBody {
+                mode: BodyMode::Json,
+                content: "{}".into(),
+                schema: None,
+            },
+            ..ep("a", HttpMethod::Post, "/a")
+        }],
+    );
+    let doc = doc_of(&ex);
+
+    assert!(
+        doc["components"].get("schemas").is_none(),
+        "没有 schema 就不该有 components.schemas：{:?}",
+        doc["components"]
+    );
 }
 
 #[test]
@@ -401,6 +470,54 @@ fn both_formats_round_trip_through_their_own_parser() {
             .len(),
         2
     );
+}
+
+/// OpenAPI 没有脚本的对应构造，故 IR 里有脚本就要**说出来**。
+///
+/// 「导出成功」四个字会让用户看不见自己少了什么。端点、集合、模块三处各出一条。
+#[test]
+fn scripts_are_reported_because_openapi_cannot_express_them() {
+    let ex = Exchange {
+        project_name: "demo".into(),
+        modules: vec![IrModule {
+            key: "m0".into(),
+            name: "带脚本的模块".into(),
+            scripts: IrScripts {
+                pre_request_script: Some("模块前置".into()),
+                test_script: None,
+            },
+            collections: vec![IrCollection {
+                key: "m0c0".into(),
+                name: "带脚本的集合".into(),
+                scripts: IrScripts {
+                    pre_request_script: None,
+                    test_script: Some("集合测试".into()),
+                },
+                endpoints: vec![IrEndpoint {
+                    scripts: IrScripts {
+                        pre_request_script: Some("接口前置".into()),
+                        test_script: None,
+                    },
+                    ..ep("接口", HttpMethod::Get, "/a")
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let out = to_document(&ex, DocFormat::Json).expect("导出应成功");
+
+    let warns: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warn)
+        .collect();
+    assert_eq!(warns.len(), 3, "{:?}", out.diagnostics);
+    let pointers: Vec<&str> = warns.iter().map(|d| d.pointer.as_str()).collect();
+    assert!(pointers.contains(&"/paths/~1a/get"), "{pointers:?}");
+    assert!(pointers.contains(&"/nodes/m0c0"), "{pointers:?}");
+    assert!(pointers.contains(&"/nodes/m0"), "{pointers:?}");
 }
 
 #[test]
