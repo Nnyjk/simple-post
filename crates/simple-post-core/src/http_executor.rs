@@ -116,6 +116,9 @@ pub(crate) fn parse_method(method: &str) -> reqwest::Method {
 
 /// 把 body 字符串裁到至多 `max_bytes` 字节（落在 UTF-8 安全的字符边界上）。被裁时加上一个
 /// 标记。与原 fetch 路径的截断契约一致。
+///
+/// 这条契约同时是**流式读取路径**的裁剪判据：流式路径把「读到的原始字节」解码成字符串后
+/// 交给本函数，故裁剪点与标记文案只有这一个产生点，不会出现两条路径各裁各的。
 pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
     if max_bytes == 0 {
         return (body, false);
@@ -136,6 +139,71 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
         max_bytes
     ));
     (out, true)
+}
+
+/// 上限之上多读的字节数。
+///
+/// 一个 UTF-8 rune 最多 4 字节：上限处的切点可能正落在一个 rune 中间，而 [`truncate_body`]
+/// 的字符边界回退需要知道这个 rune 的完整长度，才能把切点退到 rune 之前。
+const BOUNDARY_LOOKAHEAD_BYTES: u64 = 4;
+
+/// 流式读取响应体：边读边计数，累计到上限就停，剩下的字节直接丢弃。
+///
+/// **为什么不能「先读完再裁」**：一个 2 GB 的响应会先以 2 GB 的形式进内存，然后才被裁成上限
+/// 那几 KB。`execute_with_policy` 是桌面 `http_request` 与 MCP `http_request` 共用的那条
+/// 路径，`serve-web` 形态下它跑在服务端进程里——一次请求就能把进程的驻留内存顶上去。这里把
+/// 上限从「事后裁剪」改成「读取时护栏」：缓冲区的大小只与上限有关，与响应大小无关。
+///
+/// **上限之上为什么多读几个字节**：上限处的切点可能落在一个多字节 rune 中间，而
+/// [`truncate_body`] 的字符边界回退需要知道这个 rune 的完整长度，才能把切点退到 rune 之前。
+/// 多读的这几个字节是一次性的常数开销（不随响应大小增长），却让裁剪结果与「先把整个 body
+/// 读进内存再裁」的旧行为逐字节一致——多读 4 个字节可保证任何「起始于上限之前」的 rune
+/// 都是完整的，于是缓冲区解码出的前缀与整个 body 解码出的前缀在上限以内逐字节相同。
+///
+/// **`max_bytes == 0` 表示不设上限**（与 [`truncate_body`] 的约定一致），此时整个 body 都要
+/// 读进来——那是调用方显式关掉上限的结果，不是本层的默认行为。
+///
+/// **解码规则**与 `reqwest` 的 `Response::text()` 一致：UTF-8 宽松解码（非法序列替换成
+/// U+FFFD）。本仓库的 `reqwest` 关掉了 `charset` feature（见工作区 `Cargo.toml`），
+/// `text()` 走的正是这条路径；若将来有人打开 `charset`，`text()` 会改按 `Content-Type` 里的
+/// charset 解码，这里必须同步改——`http_executor_test.rs` 里「与旧行为逐字节一致」那条
+/// 测试会立刻变红。
+///
+/// **为什么没有另开一条 `Content-Length` 快路径**：裁剪判据只有一个——「解码后的字节数是否
+/// 超过上限」——它必须与 [`truncate_body`] 一致；而 `Content-Length` 描述的是**编码后**的长度：
+/// reqwest 自动解压时会连同 `Content-Encoding` 一起摘掉这个头，即便它还在，解码后的字节数
+/// 也可能大于它（非法 UTF-8 会被替换成 3 字节的 U+FFFD）。拿它当「必定被裁」的判据，会让同一
+/// 个响应在两种形态下给出不同的 `truncated`。「边读边计数」这一段代码对带 `Content-Length` 与
+/// chunked 两种响应是同一段，且同样在上限处收手——快路径真正想要的东西（不把整个 body 收进
+/// 内存）已经拿到了。
+async fn read_body_capped(
+    mut res: reqwest::Response,
+    max_bytes: u64,
+) -> Result<String, reqwest::Error> {
+    let cap = if max_bytes == 0 {
+        u64::MAX
+    } else {
+        max_bytes.saturating_add(BOUNDARY_LOOKAHEAD_BYTES)
+    };
+
+    let mut buf: Vec<u8> = Vec::new();
+    let mut len: u64 = 0;
+    while let Some(chunk) = res.chunk().await? {
+        let take = std::cmp::min(chunk.len() as u64, cap - len) as usize;
+        buf.extend_from_slice(&chunk[..take]);
+        len += take as u64;
+        if len >= cap {
+            // 读够了：剩下的字节直接丢弃。响应体被丢弃时连接也随之关闭，服务端不会把剩下
+            // 的几百 MB 继续推过来——这正是「读取时护栏」与「事后截断」的区别所在。
+            break;
+        }
+    }
+
+    // 合法 UTF-8 时 `String::from_utf8` 原地校验、不复制（`from_utf8_lossy` 要复制一份）。
+    match String::from_utf8(buf) {
+        Ok(text) => Ok(text),
+        Err(e) => Ok(String::from_utf8_lossy(e.as_bytes()).into_owned()),
+    }
 }
 
 // 出站 URL 策略。
@@ -353,7 +421,11 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         .map(|(k, v)| [k.to_string(), v.to_str().unwrap_or("").to_string()])
         .collect();
 
-    let body_text = match res.text().await {
+    // 响应体上限。必须在读 body **之前**算好：流式读取要靠它决定读多少就停。
+    let max_bytes = input.max_response_size_kb.saturating_mul(1024);
+
+    // 读取时护栏：缓冲区上限与响应大小无关，超出的部分直接丢弃。
+    let body_text = match read_body_capped(res, max_bytes).await {
         Ok(t) => t,
         Err(e) => {
             let kind = if e.is_timeout() { "timeout" } else { "network" };
@@ -362,7 +434,6 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     };
 
     let elapsed = start.elapsed().as_millis();
-    let max_bytes = input.max_response_size_kb.saturating_mul(1024);
     let (final_body, truncated) = truncate_body(body_text, max_bytes);
 
     HttpResult::ok(HttpResponse {
