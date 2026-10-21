@@ -104,7 +104,7 @@ mod tests {
     use super::ok_response;
 
     /// 201 / 202 是非 2xx 之外最常见的越界成功码：旧解析器照单全收，crate 只认 200。
-    /// 不在这里抹平，交给 crate 的就是一句无从排查的「token 请求失败」。
+    /// 不在这里统一处理，交给 crate 的就是一句无从排查的「token 请求失败」。
     #[test]
     fn every_accepted_success_status_is_handed_over_as_ok() {
         let out = ok_response(r#"{"access_token":"AT"}"#, "application/json").unwrap();

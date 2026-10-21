@@ -64,7 +64,7 @@ use log_buffer::LogBuffer;
 use state::DaemonState;
 use stderr::forward_stderr_and_parse_metrics;
 use watcher::watch_exit_no_app;
-// 线格式类型是本模块的公开面；其余子模块的东西一律只经 `pub(super)` 可见。
+// 线格式类型是本模块的公开接口；其余子模块的东西一律只经 `pub(super)` 可见。
 pub use status::{DaemonCrashedPayload, DaemonStatus};
 // 保持 `crate::daemon_supervisor::TeardownTarget` 这条 crate 内路径不变。生产的 lib
 // 构建里没有别的引用方，故显式压掉未用告警——它是被测试用的导出面。

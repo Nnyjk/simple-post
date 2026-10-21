@@ -59,7 +59,7 @@ where
 /// `Some(None)`（清空该列）序列化为显式 `null`，键存在，patch 正确地*不*算空。
 ///
 /// 这些类型不会序列化失败（字段只有标量、`Option`、`Vec`，或本身 `Serialize` 的嵌套结构），
-/// 但兜底取 `false` 而非 `true` 是刻意的：偏向「非空」意味着意外失败会让写入照常发生、
+/// 但序列化失败时返回 `false` 而非 `true` 是刻意的：偏向「非空」意味着意外失败会让写入照常发生、
 /// 真实错误在 DB 层暴露，而不是被吞成一次静默的空操作。
 pub(crate) fn serialises_to_empty_object<T: Serialize>(value: &T) -> bool {
     serde_json::to_value(value)

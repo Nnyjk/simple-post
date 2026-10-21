@@ -10,7 +10,7 @@ static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 /// 测试用的廉价假连接池。`r2d2::Pool` 对 manager 泛型，没有真实
 /// `SqliteConnectionManager` 就构造不出来 —— 需要真库的单测改用 `db::init` 开临时
-/// 文件；只跑 dispatch 与参数解析的冒烟测试用这个空壳足够。
+/// 文件；只跑 dispatch 与参数解析的快速验证用这个空壳足够。
 ///
 /// **临时目录必须逐次调用唯一。** 用固定的 `simple-post-mcp-test` 会读起来像不相干的
 /// 偶发失败：`db::init` → `ensure_current_schema` 会先删掉它即将替换的 `store.db`，

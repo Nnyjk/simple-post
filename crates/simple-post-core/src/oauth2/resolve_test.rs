@@ -167,7 +167,7 @@ async fn redirecting_idp(location: &str) -> String {
 /// 两次并发 `ensure_token` 只应换一次 token。
 ///
 /// 没有单飞闸时，两个并发者都看到缓存过期、都拿同一个一次性 `refresh_token` 去换；
-/// 轮换 refresh token 的 IdP 会让第二次失败，而我们「刷新失败就整取」的兜底会拿已消费
+/// 轮换 refresh token 的 IdP 会让第二次失败，而我们「刷新失败就整取」的回退路径会拿已消费
 /// 的授权码再换一次，用户看到一句无从排查的失败。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_callers_refresh_the_expired_token_only_once() {

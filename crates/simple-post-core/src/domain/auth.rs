@@ -106,7 +106,7 @@ pub struct ApiKeyAuth {
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfig {
     /// 用的是哪种方案。线上叫 `kind`，因为这里字段就叫 `kind`：`type` 在 Rust 里同样是
-    /// 关键字，用 serde `rename` 遮掩只会在 Tauri command 参数与 REST body 之间重新撕开一道缝。
+    /// 关键字，用 serde `rename` 遮掩会让 Tauri command 参数与 REST body 各用一套名字。
     pub kind: AuthType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bearer: Option<String>,

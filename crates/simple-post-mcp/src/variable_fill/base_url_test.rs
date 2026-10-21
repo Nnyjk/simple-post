@@ -84,9 +84,7 @@ fn a_project_with_no_star_resolves_to_nothing() {
 
 #[test]
 fn no_module_context_resolves_to_nothing() {
-    // 调用方没说端点在哪个模块，所以没有格子可读 ——
-    // is no cell to read — and no cell is not a licence to read another
-    // module's.
+    // 调用方没说端点在哪个模块，所以没有格子可读。找不到格子并不构成去读别的模块的理由。
     let env = env_with_two_modules();
     let project = project_with_defs();
     let (url, src, _) =

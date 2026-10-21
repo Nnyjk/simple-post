@@ -76,7 +76,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
     // 每个顶层 item 各成一个模块的话，一份「请求平铺在根上」的集合会变成 N 个各含 1 个
     // 接口的集合 —— 与 OpenAPI 侧「无 tag 归到一个分组」是同一条路，见
     // `import/openapi` 的 `group_of`。folder 仍各自成一个模块：Postman 的 folder 树
-    // 是有意义的分组，不能压平。
+    // 是有意义的分组，不能合并成一层。
     let mut loose_at: Option<usize> = None;
 
     if let Some(top) = top {

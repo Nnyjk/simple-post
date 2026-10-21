@@ -323,7 +323,7 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
 }
 
 // =========================================================================
-// Project 占位兜底
+// Project 占位回退
 // =========================================================================
 
 // `resolve_endpoint` 要一个 `&Project`，而项目不一定查得到；查不到就用这个空壳，

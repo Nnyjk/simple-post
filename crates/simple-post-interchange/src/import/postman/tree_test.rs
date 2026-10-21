@@ -76,7 +76,7 @@ fn a_real_collection_lands_as_modules_collections_and_endpoints() {
 
 #[test]
 fn deep_folder_nesting_does_not_exhaust_the_stack() {
-    // 12 层：递归也能扛，但工作栈是这里的不变量，故探到明显更深。
+    // 12 层：递归本身能承受，但工作栈是这里的不变量，故探到明显更深。
     const DEPTH: usize = 12;
     let mut node = json!({
         "name": "最底",
@@ -145,7 +145,7 @@ fn an_unnamed_item_falls_back_to_its_url_then_to_placeholder() {
     }));
     let ex = &parsed.exchange;
     let eps = endpoints_in_order(ex);
-    // 两条顶层散落的请求并进同一个模块，模块名取集合名；**接口**自己的名字仍按 raw URL 兜底。
+    // 两条顶层散落的请求并进同一个模块，模块名取集合名；**接口**自己的名字仍按 raw URL 回退。
     assert_eq!(ex.modules.len(), 2, "两个散落请求并一个，再加那个文件夹");
     assert_eq!(ex.modules[0].key, LOOSE_KEY);
     assert_eq!(ex.modules[0].name, "n");

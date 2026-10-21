@@ -96,7 +96,7 @@ pub struct HttpRequestInput {
     pub max_response_size_kb: u64,
 }
 
-// 内部实现——小到把它们内联为 `pub(crate)` 能保持公开面干净。lib.rs 里的 Tauri command 与
+// 内部实现——小到把它们内联为 `pub(crate)` 能保持公开接口干净。lib.rs 里的 Tauri command 与
 // 将来的 MCP 守护进程都调 `execute`；别的都不需要碰这些。
 
 /// 把文本形式的 HTTP 方法解析成 `reqwest::Method`，未知动词回退 GET（前端已经在已知列表上

@@ -104,7 +104,7 @@ pub struct OAuth2Auth {
 }
 
 impl OAuth2Auth {
-    /// `token_param` 为空时的兜底名。
+    /// `token_param` 为空时使用的参数名。
     pub const DEFAULT_TOKEN_PARAM: &'static str = "access_token";
 
     /// 实际使用的 query 参数名。

@@ -18,7 +18,7 @@ pub enum BaseUrlSource {
     Definition,
     /// 项目 ★（`Project.defaultBaseUrlDefinitionId`）胜出。
     Default,
-    /// 谁都没匹配上；兜底由调用方负责（通常是 `""`）。
+    /// 谁都没匹配上；此时返回什么由调用方决定（通常是 `""`）。
     None,
 }
 
@@ -201,7 +201,7 @@ fn scheme_prefix_len(s: &str) -> Option<usize> {
 ///   - 无 scheme 的前导 `//` 是协议相对引用（`//cdn.example.com/x`），斜杠有意义
 ///   - `?query` / `#fragment` 是数据不是路径：参数里嵌套的 URL
 ///     （`?redirect=https://x//y`）必须原样穿过
-///   - 未解析的 `{{var}}` 是文本不是分隔符，它该进 `missing_vars` 而不是被抹平
+///   - 未解析的 `{{var}}` 是文本不是分隔符，它该进 `missing_vars` 而不是被当作多余字符删掉
 ///
 /// 与 `src/lib/url.ts` 的 `collapseUrlSlashes` 对应；两边必须一致，否则预览与真正发
 /// 出的请求描述的是两个 URL。

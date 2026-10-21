@@ -46,8 +46,8 @@ impl ModuleRow {
 /// `module_base_urls_json`——shape A 的覆盖层是答案的一部分。
 struct EnvRow {
     id: String,
-    /// `def_id -> url`。作为 shape A 的兜底与 shape B 的来源来读；只在 shape B 走完后
-    /// 被清空一次（见 [`migrate_project`]）。
+    /// `def_id -> url`。shape A 的值缺失时从这一列回退读取，shape B 的值由这一列迁移而来；
+    /// 它只在 shape B 走完后被清空一次（见 [`migrate_project`]）。
     base_urls: std::collections::BTreeMap<String, String>,
     /// `def_id -> module_id -> url`，现役值层。
     module_base_urls:

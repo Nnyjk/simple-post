@@ -9,7 +9,7 @@
 //   simple-post-mcp --transport=http --port=4333         # expose /mcp over HTTP
 //   simple-post-mcp --capability=read_only               # belt-and-suspenders filter
 //
-// 每个 flag 都有环境变量兜底（SIMPLE_POST_WEB_URL /
+// 每个 flag 都能用环境变量代替（SIMPLE_POST_WEB_URL /
 // SIMPLE_POST_WEB_PASSWORD / SIMPLE_POST_MCP_CAPABILITY），两者同时给时 flag 优先。
 
 use std::io::IsTerminal;
@@ -112,7 +112,7 @@ async fn main() -> ExitCode {
             }
         }
         "http" => {
-            // 起一个极小的 axum 面，让 curl / Node 冒烟测试不必拉起整套
+            // 起一个极小的 axum 服务，让 curl / Node 的快速验证不必拉起整套
             // `serve-web` + daemon 就能 POST /mcp。转发用的是与 stdio 模式
             // 同一个 `WebClient`。
             run_http_transport(client, cap_override, cli.port).await

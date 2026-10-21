@@ -83,7 +83,7 @@ fn a_self_referencing_schema_reports_a_cycle_and_stops() {
 #[test]
 fn a_ref_to_an_empty_object_leaves_the_ancestor_frame_on_the_stack() {
     // 访问栈是成环判定的依据。祖先帧的「正在展开」被提前弹掉，那棵子树里真的成环时
-    // 就只剩深度上限兜底，报错会指向错误的方向。
+    // 就只剩深度上限在起作用，报错会指向错误的方向。
     //
     // 这里直接盯栈：祖先帧压着的指针必须原封不动地留在栈上。
     let root: Value = serde_json::from_str(

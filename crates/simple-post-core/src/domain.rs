@@ -7,11 +7,11 @@
 //! JSON TEXT 列，往返见 `db/endpoint_details.rs`。
 //!
 //! **本模块不允许出现逐字段 `#[serde(rename)]`。** Rust 字段名**就是**线名。逐字段 rename 是
-//! 字段名的第二处真相，也正是两种语言开始分叉的缝：TypeScript 侧 `in` 是保留字，写不出来。
+//! 字段名的第二处真相，也正是两种语言开始出现分歧的地方：TypeScript 侧 `in` 是保留字，写不出来。
 //! 线名确需不同于 Rust 名时，扩展 Rust 名——故用 `in_location` 而非 `in`；加下划线后缀没用，
 //! `in_` camelCase 之后又变回 `in`。
 
-// 按职责分文件；本文件只声明子模块并把公开面板面重新导出，故 `domain::Project` 这类旧路径不变。
+// 按职责分文件；本文件只声明子模块并把公开接口重新导出，故 `domain::Project` 这类旧路径不变。
 mod auth;
 mod http;
 mod oauth2;
