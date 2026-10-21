@@ -168,6 +168,24 @@ async fn a_run_request_gets_the_same_treatment_as_a_stored_endpoint() {
 }
 
 #[tokio::test]
+async fn a_stale_environment_id_degrades_instead_of_failing_the_call() {
+    // 调用方手里可能留着一个已经被删掉的环境 id。这不该让整次调用失败 ——
+    // 降级成「这次请求不做变量替换」，与 `api_call_endpoint` 同一套规则
+    // （`mcp::resolve_env`）。
+    let st = mcp_state("stale-env");
+    let outcome = tool_api_run_request(
+        &st,
+        json!({
+            "method": "GET",
+            "url": "http://127.0.0.1:1/x",
+            "env_id": "env_already_gone",
+        }),
+    )
+    .await;
+    assert!(outcome.is_ok(), "环境已被删不该让整次调用失败：{outcome:?}");
+}
+
+#[tokio::test]
 async fn a_run_request_reports_the_variables_it_could_not_resolve() {
     let (api, seen) = stub().await;
     let st = mcp_state("missing");

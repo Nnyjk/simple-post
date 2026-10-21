@@ -200,21 +200,31 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
     let content = a.body.clone().unwrap_or_default();
     let body_mode = parse_body_mode(a.body_mode.as_deref(), !content.is_empty())?;
 
-    // 环境：给了 id 就用它。取不到（环境已被删）时降级成「这次请求不做变量替换」。
-    let env: Option<Environment> = match a.env_id.as_deref() {
-        Some(env_id) => Some(simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::environments::get(c, env_id)
+    // 项目 id：base URL 的取值住在 (环境 × 服务 × 模块) 交叉的格子里，而服务属于项目，
+    // 故要知道项目才能读那张表。给了服务 id 就按它找，只给了环境就按环境找。
+    let project_id: Option<String> = match a.base_url_definition_id.as_deref() {
+        Some(def_id) => Some(simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::base_url_defs::project_id_of(c, def_id)
         })?),
-        None => None,
+        None => match a.env_id.as_deref() {
+            Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::environments::lookup_project_id(c, env_id)
+            })
+            .ok(),
+            None => None,
+        },
     };
 
-    // 项目：base URL 的取值住在 (环境 × 服务 × 模块) 交叉的格子里，而服务属于项目，
-    // 故要知道项目才能读那张表。给了服务 id 就按它找，只给了环境就按环境找。
-    let project = project_for(
+    // 环境：给了 id 就用它；没给就取项目当前激活的那个 —— 与 `api_call_endpoint`
+    // 同一套规则（`mcp::resolve_env`）。取不到（环境已被删）时降级成「这次请求不做
+    // 变量替换」，而不是让整次调用失败。
+    let env = crate::mcp::resolve_env(
         &state.pool,
-        a.base_url_definition_id.as_deref(),
-        env.as_ref(),
+        a.env_id.as_deref(),
+        project_id.as_deref().unwrap_or(""),
     )?;
+
+    let project = project_for(&state.pool, project_id.as_deref());
 
     // 临时请求没有 `nodes` 行，故 `node_id` 是占位值 —— 解析器不用它。
     let detail = EndpointDetail {
@@ -485,26 +495,14 @@ fn resolve_settings(
 /// 临时请求要用的项目行。
 ///
 /// base URL 的取值住在 (环境 × 服务 × 模块) 交叉的格子里，而服务属于项目，故要知道
-/// 项目才能读那张表。给了服务 id 就按它找，只给了环境就按环境找；都没有就用空壳
-/// （解析出空 base URL，不猜）。
-fn project_for(
-    pool: &DbPool,
-    def_id: Option<&str>,
-    env: Option<&Environment>,
-) -> Result<Project, AppError> {
-    let project_id = match def_id {
-        Some(def_id) => Some(simple_post_core::db::with_conn(pool, |c| {
-            simple_post_core::db::base_url_defs::project_id_of(c, def_id)
-        })?),
-        None => env.map(|e| e.project_id.clone()),
-    };
+/// 项目才能读那张表。项目 id 的来源（服务 id / 环境 id）在调用处定好了，这里只负责
+/// 取那一行；取不到就用空壳（解析出空 base URL，不猜）。
+fn project_for(pool: &DbPool, project_id: Option<&str>) -> Project {
     let Some(project_id) = project_id.filter(|id| !id.is_empty()) else {
-        return Ok(EMPTY_PROJECT.clone());
+        return EMPTY_PROJECT.clone();
     };
-    Ok(simple_post_core::db::with_conn(pool, |c| {
-        simple_post_core::db::projects::get(c, &project_id)
-    })
-    .unwrap_or_else(|_| EMPTY_PROJECT.clone()))
+    simple_post_core::db::with_conn(pool, |c| simple_post_core::db::projects::get(c, project_id))
+        .unwrap_or_else(|_| EMPTY_PROJECT.clone())
 }
 
 // =========================================================================
