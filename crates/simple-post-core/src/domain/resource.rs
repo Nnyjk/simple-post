@@ -102,7 +102,7 @@ pub struct ResourceNode {
     /// `None` 表示模块，其父是项目。
     pub parent_id: Option<String>,
     /// 这一行是三种里的哪一种。线上叫 `kind`，理由同 [`AuthConfig::kind`]：`type` 是 Rust
-    /// 关键字，把它在线上叫 `type` 只会重开 Tauri command 参数与 REST body 之间的缝。
+    /// 关键字，把它在线上叫 `type` 会让 Tauri command 参数与 REST body 各用一套名字。
     pub kind: ResourceNodeType,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

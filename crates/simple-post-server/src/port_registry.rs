@@ -33,7 +33,7 @@ mod paths;
 mod proc;
 mod record;
 
-// 门面即公开面：子模块的私有性不该改变调用方的路径写法，`port_registry::write` /
+// 门面即对外接口：子模块的私有性不该改变调用方的路径写法，`port_registry::write` /
 // `port_registry::read` / … 在 `src-tauri` 与 daemon CLI 里都按原样解析。
 pub use claim::write;
 pub use health::healthz;

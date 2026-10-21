@@ -84,8 +84,8 @@ export interface UiTabsActions {
   clearEndpointDraft: (endpointId: string) => void;
   /**
    * 内部使用：丢掉底层实体已不存在（或祖先已被删）的标签。由各 delete* 动作
-   * 调用，避免 UI 停在悬空标签上。暴露成动作是给 WorkspaceTabs 的清理
-   * useEffect 兜底遗漏的边界。
+   * 调用，避免 UI 停在悬空标签上。暴露成动作是为了覆盖 WorkspaceTabs 的清理
+   * useEffect 可能漏掉的边界。
    */
   pruneStaleTabs: () => void;
   /** 一次关掉所有已打开标签。右键菜单使用。 */

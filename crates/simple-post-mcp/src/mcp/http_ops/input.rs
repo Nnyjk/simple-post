@@ -96,7 +96,7 @@ pub(super) fn extract_endpoint_settings(
 /// 从活的取值层读一个 base URL 前置上去。
 ///
 /// `module_base_urls[def_id][module_id]` 是 URL 唯一住址（见
-/// `variable_fill::resolve_base_url_with`），两个键都必须给，且**刻意没有兜底**：
+/// `variable_fill::resolve_base_url_with`），两个键都必须给，且**刻意没有回退**：
 /// 回退到 `env.base_urls` 那列死列、或「取第一个能用的键」，都等于把一个任意的
 /// 服务怼到这次请求上。env、服务、模块、格子缺任意一个都表示「没有 base URL」，
 /// 按调用方给的路径原样发出。

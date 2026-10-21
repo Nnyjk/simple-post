@@ -96,7 +96,7 @@ fn malformed_json_yields_zero_parts() {
 
 #[test]
 fn a_wrongly_typed_field_discards_the_whole_list() {
-    // 与 TS 侧同形：逐字段兜底会让同一个畸形输入在两侧得到不同的分片
+    // 与 TS 侧同形：逐字段回退会让同一个畸形输入在两侧得到不同的分片
     assert!(parse_parts(r#"[{"name":"a","value":10}]"#).is_empty());
     assert!(parse_parts(r#"[{"name":1,"value":"x"}]"#).is_empty());
     assert!(parse_parts(r#"["a"]"#).is_empty());

@@ -119,7 +119,7 @@ fn path_placeholders(path: &str) -> Vec<&str> {
 /// 分隔符要与其余字符区分开，否则 `/api/user-info` 与 `/api/user/info` 撞名
 /// （现在分别是 `get___api__user_info` 与 `get___api__user__info`）。
 ///
-/// 映射仍不是**单射**（`/a-b` 与 `/a_b` 撞名），故另有一道编号兜底（见
+/// 映射仍不是**单射**（`/a-b` 与 `/a_b` 撞名），故另有一道编号回退（见
 /// [`Builder::claim_operation_id`]）：规范要的是「文档内唯一」，不是「映射可逆」。
 fn operation_id(verb: &str, path: &str) -> String {
     let mut out = String::with_capacity(verb.len() + path.len() + 1);

@@ -103,7 +103,7 @@ fn apply_base_url_handles_env_and_override() {
     let (passthru, _) = apply_base_url("/login", None, None, None);
     assert_eq!(passthru, "/login");
 
-    // 没有模块就没有格子：同一个服务只有 `mod_a` 有 URL，且不向它或别的服务兜底。
+    // 没有模块就没有格子：同一个服务只有 `mod_a` 有 URL，且不回退到它或别的服务。
     let (no_module, empty) = apply_base_url("/login", Some(&env), Some("auth"), None);
     assert_eq!(no_module, "/login");
     assert_eq!(empty, "");

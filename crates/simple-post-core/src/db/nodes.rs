@@ -25,7 +25,7 @@ mod read;
 mod tree;
 mod write;
 
-// 公开面板面：定义在按职责分开的子模块里，这里重新导出，故 `nodes::create` 等旧路径不变。
+// 公开接口：定义在按职责分开的子模块里，这里重新导出，故 `nodes::create` 等旧路径不变。
 pub use read::{
     get, list_all, list_by_root, list_by_root_and_type, list_children, module_id_of, root_id_of,
     search, subtree_ids, type_of,

@@ -41,7 +41,7 @@ function _getVisibilityHandler(): ((this: Document, ev: Event) => unknown) | nul
 
 /**
  * MCP 守护进程"没在跑"的标准快照。`restartMcp` 里每个新建 `McpUiState`
- * 的兜底分支（因为轮询快照还没落地）都展开这个常量再覆盖 `status`
+ * 的默认分支（因为轮询快照还没返回）都展开这个常量再覆盖 `status`
  * （失败路径上还覆盖 `lastError`）。把字段表收在一处，新增 `McpUiState`
  * 字段时只需改这个常量加上 `@/lib/mcp-types` 里的类型声明，
  * 而不是在下面散落的三个动作体里各改一次。

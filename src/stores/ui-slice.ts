@@ -1,5 +1,5 @@
 /**
- * ui-slice 的公开面。实现按关注点拆到 `./slices/`，在这里组合，
+ * ui-slice 的公开接口。实现按关注点拆到 `./slices/`，在这里组合，
  * 不在 `app-store.ts` 里注册为独立 slice。
  *
  * 多个 action 刻意在同一次 `set()` 里写别的 slice 的键——`submitNewItem` 写

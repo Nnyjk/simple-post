@@ -28,7 +28,7 @@ pub mod preferences;
 pub mod projects;
 pub mod response_history;
 
-// 内部子模块：定义在这些文件里，面板面（`db::init` / `db::migrate` / …）由本文件重导出。
+// 内部子模块：定义在这些文件里，对外接口（`db::init` / `db::migrate` / …）由本文件重导出。
 mod base_url_migration;
 mod pool;
 mod schema;

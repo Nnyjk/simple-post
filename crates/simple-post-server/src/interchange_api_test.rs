@@ -574,7 +574,7 @@ async fn a_refused_url_is_reported_without_ever_dialling() {
 async fn the_declared_server_is_never_the_one_dialled() {
     // `servers[0]` 是文档**声明**的服务器，`url` 才是抓取目标。这两者混起来就会把
     // 「文档里写了个私网地址」误当成一次 SSRF 尝试——它不是，那只是一个要被记录成
-    // 服务的字符串。默认策略下这一条真的能拉通，正说明声明的地址从未被访问。
+    // 服务的字符串。默认策略下这一条真的能访问成功，正说明声明的地址从未被访问。
     let _policy = ScopedPolicy::with(false);
     let doc = "{\n\"openapi\":\"3.0.3\",\n\"info\":{\"title\":\"云元数据\",\"version\":\"1\"},\n\
                \"servers\":[{\"url\":\"http://169.254.169.254/latest\"}],\n\

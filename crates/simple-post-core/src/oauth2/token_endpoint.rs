@@ -32,7 +32,7 @@ use super::OAuth2Token;
 /// crate 的错误应答类型。
 type ErrorResp = StandardErrorResponse<BasicErrorResponseType>;
 
-/// crate 的 `Client` 有 9 个必填泛型参数，别在签名里铺开。
+/// crate 的 `Client` 有 9 个必填泛型参数，别在签名里逐个写出来。
 ///
 /// 第 10 位是 token 端点的状态：`set_token_uri` 之后就是 [`EndpointSet`]，故四个
 /// `exchange_*` 是不带 `Result` 的那组。中间四位是 auth / device / introspection /

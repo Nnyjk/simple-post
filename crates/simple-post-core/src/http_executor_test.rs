@@ -366,7 +366,7 @@ fn http_result_err_carries_error_only() {
 const TRUNCATION_MARKER_1KB: &str = "\n\n[truncated at 1024 bytes by Tauri HTTP layer]";
 
 /// 响应头里怎么声明长度。两条路都要覆盖：声明了长度的响应服务端**知道**自己会发多少，
-/// chunked 的响应完全不声明——后者只能靠边读边计数来兜底。
+/// chunked 的响应完全不声明——后者只能靠边读边计数来统计长度。
 #[derive(Clone, Debug)]
 enum BodyFraming {
     /// `Content-Length: N`。

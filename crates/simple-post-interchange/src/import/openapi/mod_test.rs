@@ -88,7 +88,7 @@ fn each_tag_becomes_one_group_and_the_untagged_ones_share_another() {
         "第二个 tag 没有生成分组，必须点名丢掉：{:?}",
         ex.diagnostics
     );
-    // 端点名的兜底顺序：summary → operationId → `METHOD path`
+    // 端点名取不到时依次回退：summary → operationId → `METHOD path`
     assert_eq!(ep_of("/health", HttpMethod::Get).name, "GET /health");
     assert_eq!(ex.endpoint_keys().len(), 5);
 }

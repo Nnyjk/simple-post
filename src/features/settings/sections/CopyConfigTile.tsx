@@ -55,7 +55,7 @@ export function CopyConfigTile({ icon, name, description, configJson }: CopyConf
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(configJson);
       } else {
-        // 无异步剪贴板的环境的兜底（较旧的 Tauri webview）。
+        // 没有异步剪贴板时改用临时 textarea（较旧的 Tauri webview）。
         const ta = document.createElement('textarea');
         ta.value = configJson;
         ta.style.position = 'fixed';

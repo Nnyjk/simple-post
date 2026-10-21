@@ -102,7 +102,7 @@ pub async fn resolve(pool: &DbPool, req: &OAuth2TokenRequest) -> Result<OAuth2To
 ///
 /// 它挡的是一个具体的失败，而不是泛泛的「线程安全」：同一份配置的两次并发发送都发现
 /// 缓存过期，于是都拿同一个**一次性** `refresh_token` 去换。轮换 refresh token 的
-/// IdP 会让第二次失败，而我们「刷新失败就整取」的兜底会拿**已消费**的授权码再换一次，
+/// IdP 会让第二次失败，而我们「刷新失败就整取」的回退路径会拿**已消费**的授权码再换一次，
 /// 于是用户看到一句完全无从排查的失败。闸内重读缓存让第二次直接复用第一次的结果。
 static REFRESH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 

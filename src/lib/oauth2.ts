@@ -35,7 +35,7 @@ export const DEFAULT_OAUTH2: OAuth2Auth = {
   tokenParam: '',
 };
 
-/** query 档的参数名兜底，与 Rust 的 `OAuth2Auth::DEFAULT_TOKEN_PARAM` 同名同值。 */
+/** query 档的参数名默认值，与 Rust 的 `OAuth2Auth::DEFAULT_TOKEN_PARAM` 同名同值。 */
 export const DEFAULT_TOKEN_PARAM = 'access_token';
 
 /** header 大小写不敏感，故查重按小写比；与 `http-build` 的 auth 派生 header 同一规则。 */

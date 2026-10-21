@@ -169,7 +169,7 @@ fn two_paths_that_used_to_collapse_get_different_operation_ids() {
         .as_str()
         .expect("operationId");
     assert_ne!(a, b, "两条路径撞了同一个 operationId：{a}");
-    // 路径分隔符要能**穿过**映射：撞名不靠事后编号解决——编号只是兜底，那条路
+    // 路径分隔符要能**穿过**映射：撞名不靠事后编号解决——编号只是最后一道回退，那条路
     // 生成出来的名字看不出它对应哪条路径。
     //
     // 确切的值钉在这里：README 与文档注释里举的例子必须与它一致，抄错的名字会
