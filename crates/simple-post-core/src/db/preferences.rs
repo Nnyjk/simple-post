@@ -93,6 +93,13 @@ pub mod keys {
     /// 默认值。由 `daemon_supervisor`（`daemon_cli_args`）与守护进程的 Host/Origin 守卫读，
     /// 由 `mcp_http_config_set` / `PUT /api/mcp/http-config` 写。
     pub const MCP_HTTP_CONFIG: &str = "mcp.http_config";
+
+    /// `"request_settings"` → object。**用户可配置的出站请求旋钮**（超时 / 跟随重定向 /
+    /// 最大响应体积），值是 JSON 编码的 [`crate::domain::RequestSettings`]。
+    ///
+    /// 桌面端在设置面板里改的就是这一行，故 MCP 侧与界面用的是同一份取值 —— 界面把超时
+    /// 调成 5 秒而 MCP 仍用 30 秒，就是两份取值各说各话。
+    pub const REQUEST_SETTINGS: &str = "request_settings";
 }
 
 /// 读 `mcp.auto_start` 偏好，取文档化的默认值（`false`）。桌面 `.setup()` 与 Web 服务端的
@@ -142,6 +149,22 @@ pub fn set_mcp_http_config(
     config: &crate::domain::McpHttpConfig,
 ) -> Result<(), AppError> {
     set(conn, keys::MCP_HTTP_CONFIG, config)
+}
+
+/// 读用户可配置的出站请求旋钮，行缺失时退回 [`crate::domain::RequestSettings::default`]。
+///
+/// 桌面端在设置面板里改的就是这一行，故 MCP 侧与界面用的是同一份取值。
+pub fn request_settings(conn: &mut Connection) -> Result<crate::domain::RequestSettings, AppError> {
+    let raw: Option<crate::domain::RequestSettings> = get(conn, keys::REQUEST_SETTINGS)?;
+    Ok(raw.unwrap_or_default())
+}
+
+/// 持久化出站请求旋钮。
+pub fn set_request_settings(
+    conn: &mut Connection,
+    settings: &crate::domain::RequestSettings,
+) -> Result<(), AppError> {
+    set(conn, keys::REQUEST_SETTINGS, settings)
 }
 
 // 测试。

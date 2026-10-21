@@ -1,4 +1,4 @@
-//! 工具入参 → 请求形状：键值对压平、设置覆盖、base URL 前置与 verb 还原。
+//! 工具入参 → 请求形状：键值对压平、鉴权与 body 模式解析、设置覆盖、verb 还原。
 //!
 //! `flatten_string_map` 给 `response_parse` 也用，所以是 `pub(crate)`，并由门面
 //! 重新导出在 `crate::mcp::http_ops::flatten_string_map`。
@@ -6,7 +6,7 @@
 use serde_json::Value;
 
 use super::RunRequestArgs;
-use simple_post_core::domain::{Environment, HttpMethod};
+use simple_post_core::domain::{AuthConfig, BodyMode, KeyValue};
 use simple_post_core::error::AppError;
 // =========================================================================
 // 共享辅助函数
@@ -43,7 +43,9 @@ pub(crate) fn flatten_string_map(
         for item in arr {
             if let Value::Array(pair) = item {
                 if pair.len() >= 2 {
-                    out.push((pair[0].to_string(), pair[1].to_string()));
+                    // 键与值都走标量转换：`Value::String("X").to_string()` 会带上引号，
+                    // header 名就成了 `"X"` —— 服务端看到的是一个不存在的头。
+                    out.push((scalar_to_string(&pair[0]), scalar_to_string(&pair[1])));
                 }
             } else {
                 return Err(AppError::Validation(format!(
@@ -56,6 +58,127 @@ pub(crate) fn flatten_string_map(
     Err(AppError::Validation(format!(
         "{label}: must be object or array of pairs"
     )))
+}
+
+/// 把 JSON 压成请求用的键值对列表（`KeyValue`）。
+///
+/// 接受三种形状，因为 AI 客户端写哪种都有：
+///   - `{"Foo": "bar"}` —— 对象映射
+///   - `[["Foo","bar"]]` —— 键值对数组
+///   - `[{"key": "Foo", "value": "bar", "enabled": false}]` —— 端点那套形状
+///
+/// `id` 由这里按序号生成：它只用于让同一批键值对在编辑器里各自可寻，解析请求时
+/// 不用它。
+pub(crate) fn flatten_key_values(
+    v: Option<&Value>,
+    label: &str,
+) -> Result<Vec<KeyValue>, AppError> {
+    let Some(v) = v else { return Ok(Vec::new()) };
+    if v.is_null() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let mut push = |key: String, value: String, enabled: Option<bool>| {
+        let id = format!("{label}_{}", out.len());
+        out.push(KeyValue {
+            id,
+            key,
+            value,
+            enabled: enabled.unwrap_or(true),
+            description: None,
+        });
+    };
+    match v {
+        Value::Object(map) => {
+            for (k, val) in map {
+                let s = match val {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    Value::Null => continue,
+                    other => other.to_string(),
+                };
+                push(k.clone(), s, None);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                match item {
+                    Value::Array(pair) if pair.len() >= 2 => {
+                        let key = scalar_to_string(&pair[0]);
+                        let value = scalar_to_string(&pair[1]);
+                        push(key, value, None);
+                    }
+                    Value::Object(obj) => {
+                        let key = obj.get("key").map(scalar_to_string).unwrap_or_default();
+                        let value = obj.get("value").map(scalar_to_string).unwrap_or_default();
+                        let enabled = obj.get("enabled").and_then(Value::as_bool);
+                        push(key, value, enabled);
+                    }
+                    _ => {
+                        return Err(AppError::Validation(format!(
+                            "{label}: array items must be [key, value] pairs or {{key, value}} objects"
+                        )));
+                    }
+                }
+            }
+        }
+        _ => {
+            return Err(AppError::Validation(format!(
+                "{label}: must be an object, an array of pairs, or an array of {{key, value}} objects"
+            )));
+        }
+    }
+    Ok(out)
+}
+
+/// JSON 标量 → 字符串。对象与数组不转（它们不是请求里能出现的值）。
+fn scalar_to_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+/// 鉴权载荷 → [`AuthConfig`]。形状与端点存的那份一致
+/// （`{"kind": "bearer", "bearer": "…"}` / `{"kind": "basic", "basic": {…}}` /
+/// `{"kind": "apikey", "apikey": {…}}` / `{"kind": "oauth2", "oauth2": {…}}`）。
+///
+/// 载荷缺席 = 不用鉴权。形状不对就报错：静默当成「不用鉴权」会发出一个缺了凭据的
+/// 请求，而调用方以为它带上了。
+pub(super) fn parse_auth(v: Option<&Value>) -> Result<AuthConfig, AppError> {
+    let Some(v) = v else {
+        return Ok(AuthConfig::default());
+    };
+    if v.is_null() {
+        return Ok(AuthConfig::default());
+    }
+    serde_json::from_value::<AuthConfig>(v.clone())
+        .map_err(|e| AppError::Validation(format!("auth: {e}")))
+}
+
+/// body 模式名 → [`BodyMode`]。缺席时：有 body 就算 `raw`，没有就算 `none`。
+pub(super) fn parse_body_mode(v: Option<&str>, has_body: bool) -> Result<BodyMode, AppError> {
+    let Some(raw) = v else {
+        return Ok(if has_body {
+            BodyMode::Raw
+        } else {
+            BodyMode::None
+        });
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "none" => Ok(BodyMode::None),
+        "json" => Ok(BodyMode::Json),
+        "form" => Ok(BodyMode::Form),
+        "raw" | "text" => Ok(BodyMode::Raw),
+        "multipart" => Ok(BodyMode::Multipart),
+        other => Err(AppError::Validation(format!(
+            "body_mode: unknown mode {other:?} (expected none|json|form|raw|multipart)"
+        ))),
+    }
 }
 
 pub(super) fn extract_settings(
@@ -93,40 +216,7 @@ pub(super) fn extract_endpoint_settings(
     (t, r, m)
 }
 
-/// 从活的取值层读一个 base URL 前置上去。
-///
-/// `module_base_urls[def_id][module_id]` 是 URL 唯一住址（见
-/// `variable_fill::resolve_base_url_with`），两个键都必须给，且**刻意没有回退**：
-/// 回退到 `env.base_urls` 那列死列、或「取第一个能用的键」，都等于把一个任意的
-/// 服务怼到这次请求上。env、服务、模块、格子缺任意一个都表示「没有 base URL」，
-/// 按调用方给的路径原样发出。
-pub(super) fn apply_base_url(
-    url: &str,
-    env: Option<&Environment>,
-    def_id: Option<&str>,
-    module_id: Option<&str>,
-) -> (String, String) {
-    let (Some(env), Some(def_id), Some(module_id)) = (env, def_id, module_id) else {
-        return (url.to_string(), String::new());
-    };
-    match env
-        .module_base_urls
-        .get(def_id)
-        .and_then(|cells| cells.get(module_id))
-    {
-        Some(base) => {
-            let combined = if url.starts_with('/') {
-                format!("{}{}", base.trim_end_matches('/'), url)
-            } else {
-                format!("{}/{}", base.trim_end_matches('/'), url)
-            };
-            (combined, base.clone())
-        }
-        None => (url.to_string(), String::new()),
-    }
-}
-
 /// `HttpMethod` 还原成线上字符串。
-pub(super) fn format_method(m: &HttpMethod) -> String {
+pub(super) fn format_method(m: &simple_post_core::domain::HttpMethod) -> String {
     m.as_str().to_string()
 }

@@ -145,14 +145,8 @@ async fn tool_api_resolve_endpoint(
     let project_id = endpoint_project_id(&state.pool, &endpoint.node_id);
     crate::mcp::check_permission(&state.pool, &project_id, "api_resolve_endpoint").await?;
 
-    let env = if let Some(env_id) = endpoint.environment_id.as_deref() {
-        simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::environments::get(c, env_id)
-        })
-        .ok()
-    } else {
-        None
-    };
+    let env =
+        crate::mcp::resolve_env(&state.pool, endpoint.environment_id.as_deref(), &project_id)?;
     let project = if !project_id.is_empty() {
         simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::projects::get(c, &project_id)

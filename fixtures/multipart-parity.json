@@ -1,0 +1,50 @@
+{
+  "$comment": "multipart 装配的一致性样本。Rust 的 `resolve_endpoint` + `multipart::apply`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。boundary 每次请求现生成（两侧各生成各的），故样本里写占位符 `<BOUNDARY>`：两侧读取时各自把自己那个 boundary 换成占位符再比对。",
+  "cases": [
+    {
+      "name": "multipart 的 Content-Type 追加在 header 列表末尾，body 用同一个 boundary 框住分片",
+      "env": {},
+      "input": {
+        "method": "POST",
+        "urlPath": "/upload",
+        "baseUrl": "https://h.test",
+        "params": [],
+        "headers": [{ "id": "h1", "key": "X-Trace", "value": "t1", "enabled": true }],
+        "body": { "mode": "multipart", "content": "[{\"name\":\"field\",\"value\":\"v1\"}]" },
+        "auth": { "kind": "none" }
+      },
+      "expected": {
+        "url": "https://h.test/upload",
+        "headers": [
+          ["X-Trace", "t1"],
+          ["Accept", "application/json"],
+          ["Content-Type", "multipart/form-data; boundary=<BOUNDARY>"]
+        ],
+        "body": "--<BOUNDARY>\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nv1\r\n--<BOUNDARY>--\r\n"
+      }
+    },
+    {
+      "name": "用户自己写过的 Content-Type 就地替换值，位置不动",
+      "env": {},
+      "input": {
+        "method": "POST",
+        "urlPath": "/upload",
+        "baseUrl": "https://h.test",
+        "params": [],
+        "headers": [
+          { "id": "h1", "key": "Content-Type", "value": "application/json", "enabled": true }
+        ],
+        "body": { "mode": "multipart", "content": "[{\"name\":\"field\",\"value\":\"v1\"}]" },
+        "auth": { "kind": "none" }
+      },
+      "expected": {
+        "url": "https://h.test/upload",
+        "headers": [
+          ["Content-Type", "multipart/form-data; boundary=<BOUNDARY>"],
+          ["Accept", "application/json"]
+        ],
+        "body": "--<BOUNDARY>\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nv1\r\n--<BOUNDARY>--\r\n"
+      }
+    }
+  ]
+}
