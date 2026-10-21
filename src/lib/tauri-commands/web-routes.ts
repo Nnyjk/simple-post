@@ -116,8 +116,8 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'POST',
     path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}/duplicate`,
     // 路径已消费 `id`，故显式投影请求体，不让默认的 `body = args` 把 `{ id }` 泄进线上。
-    // `newId` 是副本落库所用的 id —— SPA 乐观地铸好它，需要服务端照用；`null` 是
-    // handler 已理解的"服务端自选"兜底。
+    // `newId` 是副本落库所用的 id —— SPA 乐观地铸好它，需要服务端照用；`null` 表示
+    // 由服务端自己生成。
     body: (a) => ({ newId: a.newId ?? null }),
   },
   [COMMANDS.endpointDetailsList]: { method: 'GET', path: () => '/api/endpoint-details' },

@@ -72,7 +72,7 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
   // ---------- 带脏守卫的关闭路径 ----------
   // 上面那些不带守卫的 closeTab / closeAllTabs / closeSavedTabs 仍然导出，因为：
   //   - `closeTab` 是"真的关掉"那个内部原语，对话框和 delete* 动作都调它。
-  //   - `closeAllTabs` 在我们**确定**没有脏标签时很方便（例如新导入的数据把一切抹平）。
+  //   - `closeAllTabs` 在我们**确定**没有脏标签时很方便（例如新导入的数据把一切清空）。
   // 而 WorkspaceTabs 标签条与右键菜单用的是 `requestClose*`，走脏守卫。
 
   /**

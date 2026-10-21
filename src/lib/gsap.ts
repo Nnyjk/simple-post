@@ -15,8 +15,8 @@ import { useGSAP } from '@gsap/react';
 import { Flip } from 'gsap/Flip';
 
 // 模块求值时注册一次。插件注册是幂等的（`registerPlugin` 调两次是空操作），
-// 但放在这里能让每个消费方的心智模型只有一句话：「我从 '@/lib/gsap' 导入，拿到的
-// 是接好线的插件。」
+// 但放在这里能让每个消费方只需记住一件事：「我从 '@/lib/gsap' 导入，拿到的
+// 是已经注册好的插件。」
 gsap.registerPlugin(useGSAP, Flip);
 
 /**

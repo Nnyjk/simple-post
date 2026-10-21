@@ -96,7 +96,7 @@ export interface UiNewItemActions {
 
 export type UiNewItem = UiNewItemState & UiNewItemActions;
 
-/** 用户留空时，各对话框种类的兜底名字。 */
+/** 用户留空时，各对话框种类使用的默认名字。 */
 const DEFAULT_NAME: Record<NewDraftKind, string> = {
   project: '新项目',
   module: '新模块',

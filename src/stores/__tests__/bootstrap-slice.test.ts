@@ -546,7 +546,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     await bag.bootstrap();
     await bag.loadWorkspace();
 
-    // 这正是拆分的分水岭：第一层成功就足以撑起欢迎页，所以即便树那一层失败，
+    // 这正是这次拆分的分界点：第一层成功就足以撑起欢迎页，所以即便树那一层失败，
     // `loaded` 仍为 true。把两个 flag 重新合在一起，要么会把启动画面卡住，
     // 要么会掩盖一次真实的树失败。
     assert.equal(bag.loaded, true, 'welcome screen still paints');

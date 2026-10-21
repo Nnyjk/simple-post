@@ -45,7 +45,7 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
   const nodes = useAppStore((s) => s.nodes);
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   // 未保存接口只住在这里，永远不进 `nodes`。没有它，条会把它们渲染成"已删除"
-  // 兜底 —— 而那恰恰是草稿确定不是的东西。
+  // 的样子 —— 而那恰恰是草稿确定不是的东西。
   const draftEndpoints = useAppStore((s) => s.draftEndpoints);
 
   // 手写循环而非 .map().filter()，实体缺失时形状保持稳定（回落到"已删除"

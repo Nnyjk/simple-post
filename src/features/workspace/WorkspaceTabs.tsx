@@ -54,7 +54,7 @@ export function WorkspaceTabs() {
   // 关闭由外部点击 / Esc 处理。
   const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
 
-  // 兜底清理，覆盖所有绕过 delete* 动作的变更路径。代价可接受：数据量以
+  // 额外的一轮清理，覆盖所有绕过 delete* 动作的变更路径。代价可接受：数据量以
   // 工作区规模为界。
   //
   // `nodesLoaded` 是依赖而非顺带捕获：`pruneStaleTabs` 在树加载完之前空操作

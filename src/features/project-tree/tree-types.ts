@@ -55,7 +55,7 @@ export type TreeBranch = {
 };
 
 /**
- * 行组件接好拖拽所需的全部东西。由 `ProjectTree` 用 `useTreeDnd` 的 helper 建一次，
+ * 行组件拖拽所需的全部数据。由 `ProjectTree` 用 `useTreeDnd` 的 helper 建一次，
  * 再作为普通 prop 往下传给 `CollectionBranch`（不走 React context），这样 `rows/*` 与
  * `hooks/*` 之间不会互相 import。
  */

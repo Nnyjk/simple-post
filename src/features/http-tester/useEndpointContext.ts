@@ -41,7 +41,7 @@ export function useEndpointContext(
   const allNodes = useAppStore((s) => s.nodes);
   const allProjects = useAppStore((s) => s.projects);
   const allEnvironments = useAppStore((s) => s.environments);
-  // 工作区当前环境（顶栏的 ENV dev 药丸）。接口未自选环境时作兜底，让新建接口的
+  // 工作区当前环境（顶栏的 ENV dev 药丸）。接口未自选环境时用它，让新建接口的
   // baseUrl + 变量解析直接可用，不必先走一遍选择器。
   const workspaceEnv = useActiveEnvironment();
 
@@ -50,8 +50,8 @@ export function useEndpointContext(
     () => (endpoint ? allProjects.find((p) => p.id === endpoint.rootId) : undefined),
     [endpoint, allProjects],
   );
-  // 页面顶部 `项目 › 模块 › 集合` 面包屑的祖先链，与设置面板（`设置 › 连接`）同一套
-  // 锚定写法。沿 `parentId` 向上收集、根在前，故集合嵌套超过一层也无需额外分支。
+  // 页面顶部 `项目 › 模块 › 集合` 面包屑的祖先链，与设置面板（`设置 › 连接`）用同一套
+  // 写法。沿 `parentId` 向上收集、根在前，故集合嵌套超过一层也无需额外分支。
   const ancestors = useMemo(() => {
     if (!endpoint) return [];
     const chain: Ancestor[] = [];

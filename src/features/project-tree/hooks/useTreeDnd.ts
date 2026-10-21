@@ -7,12 +7,12 @@ import { DND_MIME, decodeDrag, encodeDrag } from '../tree-utils';
  * 模块级的在途拖拽暂存。部分合成事件驱动（尤其是 Playwright 的 `dragAndDrop`）会触发
  * HTML5 的 dragstart / dragover / drop 序列，却不传递 dragstart 期间 `setData` 写入的
  * `DataTransfer` 载荷。这里镜像一份载荷，使 `makeDropHandler` 在 drop 时仍能取回拖拽上下文。
- * 真实浏览器会正常填充 dataTransfer，这里纯粹是给会丢数据的环境兜底。
+ * 真实浏览器会正常填充 dataTransfer，这里只用于那些会丢数据的环境。
  */
 let lastDragPayload: DragPayload | null = null;
 
 /**
- * 把应用内的拖拽载荷写到原生 dataTransfer。同时写一份 `text/plain` 兜底：某些浏览器在
+ * 把应用内的拖拽载荷写到原生 dataTransfer。同时写一份 `text/plain`：某些浏览器在
  * 完全没有文本载荷时拒绝启动拖拽，单靠自定义 mime 并不总是够。
  */
 function setDataTransfer(e: ReactDragEvent, payload: DragPayload) {
@@ -173,8 +173,9 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
     e.stopPropagation();
     const raw = e.dataTransfer.getData(DND_MIME) || e.dataTransfer.getData('text/plain');
     let drag = decodeDrag(raw);
-    // 兜底：部分合成拖拽驱动（Playwright）不会在 dragstart → drop 之间传递
-    // dataTransfer，由 `setDataTransfer` 写入的 `lastDragPayload` 镜像覆盖这种情形。
+    // 载入 dataTransfer 失败时改用镜像：部分合成拖拽驱动（Playwright）不会在
+    // dragstart → drop 之间传递 dataTransfer，由 `setDataTransfer` 写入的
+    // `lastDragPayload` 镜像覆盖这种情形。
     if (!drag) drag = lastDragPayload;
     setDropHint(null);
     lastDragPayload = null;

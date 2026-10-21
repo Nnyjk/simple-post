@@ -105,7 +105,7 @@ describe('EnvironmentSection cold start (zero environments)', () => {
 });
 
 describe('EnvironmentSection with a single environment', () => {
-  // 容易回归的情形：新项目的第一个环境，故环境条必须扛得住离开那个条件渲染。
+  // 容易回归的情形：新项目的第一个环境，故环境条必须能承受离开那个条件渲染。
   //
   // 注意这里断言不了什么：环境*正文*。该分区在一个 `useEffect` 里解析激活环境，而静态
   // 标记不跑 effect，故此刻 `activeId` 仍是 `null`。这正是重命名入口改在下面经
