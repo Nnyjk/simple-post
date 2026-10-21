@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { FileInput, Link2 } from 'lucide-react';
 
 import type { Environment } from '@/types/domain';
@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { TransferTree } from './TransferTree';
+import { missingServerEnvironmentName } from './useTransfer';
 import type { TransferController } from './useTransfer';
 
 interface TransferDialogProps {
@@ -151,7 +152,8 @@ function PreviewStep({
     environmentId,
     format,
     applyService,
-    setEnvironmentId,
+    missingServers,
+    changeEnvironment,
     setFormat,
     setApplyService,
   } = controller;
@@ -163,15 +165,9 @@ function PreviewStep({
   // 缺席是真实答案：没有 host、或多于一个 host（后者另有诊断说明），都不建服务。
   const proposedService = isImport ? (preview as ImportPreview | null)?.service : undefined;
 
-  const missingServers = useMemo(
-    () =>
-      isImport
-        ? []
-        : ((preview as ExportPreview | null)?.servers ?? [])
-            .filter((m) => m.servers.length === 0)
-            .map((m) => m.moduleName),
-    [isImport, preview],
-  );
+  // 提示按**所选**环境点名：预览已按那个环境重取过，模块缺不缺 URL 是那个环境
+  // 下的事实。「不选环境」时没有环境可点，只说「没有配置服务 URL」。
+  const missingEnvName = missingServerEnvironmentName(environments, environmentId);
 
   return (
     <div className="space-y-3">
@@ -202,7 +198,7 @@ function PreviewStep({
           <span className="text-[11px] text-muted-foreground">环境</span>
           <Select
             value={environmentId}
-            onChange={(e) => setEnvironmentId(e.target.value)}
+            onChange={(e) => void changeEnvironment(e.target.value)}
             options={[
               { value: '', label: '不选环境（不输出 servers）' },
               ...environments.map((e) => ({ value: e.id, label: e.name })),
@@ -216,8 +212,10 @@ function PreviewStep({
 
       {!isImport && missingServers.length > 0 && (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          <span className="text-warning-foreground">该环境下没有配置服务 URL</span>：
-          {missingServers.join('、')}。这些模块不会输出 <code className="font-mono">servers</code>
+          <span className="text-warning-foreground">
+            {missingEnvName ? `环境「${missingEnvName}」下没有配置服务 URL` : '没有配置服务 URL'}
+          </span>
+          ：{missingServers.join('、')}。这些模块不会输出 <code className="font-mono">servers</code>
           ，也不会借用别的模块的地址或项目的 ★。
         </p>
       )}

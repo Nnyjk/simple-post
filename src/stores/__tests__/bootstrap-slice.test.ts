@@ -309,6 +309,49 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(bag.nodesLoading, false);
   });
 
+  it('两趟 reloadWorkspace 重叠时，先结束的那趟不清掉在途槽位', async () => {
+    // 槽位（`inFlight`）只有一个，先结束的那趟若无条件清空，后面那一趟明明还在
+    // 跑，下一个 `loadWorkspace` 却会以为没人占用槽位，再发一轮同样的 IPC。
+    const bag = makeBootstrapHarness();
+    let nodesCalls = 0;
+    let releaseSecond: () => void = () => undefined;
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    installIpcMock(async (cmd) => {
+      if (cmd !== 'nodes_list') return [];
+      nodesCalls += 1;
+      // 第一趟失败（落 `nodesError`，`nodesLoaded` 保持 false），第二趟慢。
+      if (nodesCalls === 1) throw new Error('读树失败');
+      await secondGate;
+      return [];
+    });
+
+    const first = bag.reloadWorkspace();
+    const second = bag.reloadWorkspace();
+    await first;
+
+    assert.equal(bag.nodesError, '读树失败');
+    assert.equal(bag.nodesLoaded, false, '失败的那一趟不置位 nodesLoaded');
+
+    // 此刻第二趟还在途。槽位若已被第一趟清掉，这一句会再开一趟，IPC 就多一轮。
+    const third = bag.loadWorkspace();
+    let thirdSettled = false;
+    void third.then(() => {
+      thirdSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(nodesCalls, 2, '在途槽位仍被第二趟占着，不该发出第三轮 IPC');
+    assert.equal(thirdSettled, false, 'loadWorkspace 应当接着第二趟，而不是新开一趟');
+
+    releaseSecond();
+    await Promise.all([second, third]);
+
+    assert.equal(bag.nodesLoaded, true);
+    assert.equal(nodesCalls, 2);
+  });
+
   it('reloadWorkspace 保留展开状态：整份替换节点不该把用户打开的分支收起', async () => {
     // 展开状态只活在渲染器里，服务端不存它。故重取一趟树若直接替换，用户此前
     // 打开的分支就全塌了——导入一次就足以看见。

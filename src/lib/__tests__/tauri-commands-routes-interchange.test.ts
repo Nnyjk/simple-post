@@ -93,6 +93,21 @@ describe('invokeCmd (web shape) — interchange', () => {
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/interchange/export/preview');
+    // 打开弹窗那一趟还没选环境，故这个键缺席而不是 null。
+    const body = JSON.parse(c.body ?? 'null') as Record<string, unknown>;
+    assert.ok(!('environmentId' in body), 'environmentId 缺席而不是 null');
+  });
+
+  it('导出预览带上所选环境：environmentId 原样送出', async () => {
+    // 换环境后重取的那一趟必须带上环境 id：服务端按它解析 `servers`，送不到就仍
+    // 按激活环境算，提示于是按旧环境点名。
+    await invokeCmd(COMMANDS.interchangeExportPreview, {
+      projectId: 'p-1',
+      moduleId: 'm-1',
+      environmentId: 'env-2',
+    });
+    const body = JSON.parse(last().body ?? 'null') as Record<string, unknown>;
+    assert.equal(body.environmentId, 'env-2');
   });
 
   it('interchangeExportDocument → environmentId 与 format 原样送出', async () => {

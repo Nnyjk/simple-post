@@ -322,7 +322,11 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     // 加载本体。`loadWorkspace` 是它加两条幂等早退的包装：两者必须跑同一段代码，
     // 否则「先加载后重载」与「直接重载」会在 `nodesLoaded` 的置位时机上分叉。
     reloadWorkspace: async () => {
-      inFlight = (async () => {
+      // 每一趟持有自己的 promise：结束时**只有自己仍是当前那趟**才把槽位清掉。
+      // 无条件清会让先结束的那趟把后面那一趟的在途标记抹掉——那一趟明明还在跑，
+      // 下一个 `loadWorkspace` 却会以为没人占用槽位，再发一轮同样的 IPC。
+      let local: Promise<void> | null = null;
+      local = (async () => {
         set({ nodesLoading: true, nodesError: null });
 
         try {
@@ -360,14 +364,19 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
           console.error('[store] workspace load failed', error);
           set({ nodesError: message });
         } finally {
-          set({ nodesLoading: false });
-          // 最后清：每个 awaiter 都已拿到这个 promise，且从 `nodesError` 横幅发起的
-          // 重试必须能开新一趟，而不是并入已结算的那趟。
-          inFlight = null;
+          // 加载标志与槽位都归「当前那一趟」所有：不是它就别动，否则会把还在跑的
+          // 那一趟说成已经结束。
+          if (inFlight === local) {
+            set({ nodesLoading: false });
+            // 最后清：每个 awaiter 都已拿到这个 promise，且从 `nodesError` 横幅发起的
+            // 重试必须能开新一趟，而不是并入已结算的那趟。
+            inFlight = null;
+          }
         }
       })();
+      inFlight = local;
 
-      return inFlight;
+      return local;
     },
 
     clearBootstrapError: () => set({ bootstrapError: null }),

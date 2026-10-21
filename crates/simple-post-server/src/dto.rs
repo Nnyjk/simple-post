@@ -441,6 +441,12 @@ pub struct ImportCommitOpts {
 pub struct ExportPreviewOpts {
     pub project_id: String,
     pub module_id: String,
+    /// 按哪个环境解析 `servers`。**缺席或空串 = 取激活环境**（与今天一致）。
+    ///
+    /// 空串必须与「没传」等价：渲染层「不选环境」那一项送来的就是空串，而空串
+    /// 不是一个环境 id——按 id 去查会得到「环境不存在」。
+    #[serde(default)]
+    pub environment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
