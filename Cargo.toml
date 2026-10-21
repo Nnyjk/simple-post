@@ -77,7 +77,7 @@ rquickjs = { version = "0.12", default-features = false, features = ["std"] }
 
 # 配置哈希（oauth2 token 缓存的主键）。已经因 Tauri 侧 `soup3` 的传递依赖进了
 # Cargo.lock 并在 Windows 上参与编译，故这里不会多拉一个新 crate。
-sha2 = "0.10"
+sha2 = "0.11"
 
 # base64（`Authorization: Basic` 用）。已由 `reqwest` / `hyper-util` 传递依赖进来
 # 并参与编译，所以显式加依赖的边际成本是零 —— 不再手写两份编码器。
