@@ -358,8 +358,7 @@ fn http_result_err_carries_error_only() {
 
 // 响应体读取——「读取时护栏」
 //
-// 改动的核心：响应体超过上限时，进程不能先把整个响应收进内存再裁（issue #71）。
-// 下面这几条分别钉住：裁剪结果与旧行为逐字节一致、上限处的 UTF-8 字符边界回退、
+// 下面这几条分别钉住：裁剪结果与整读逐字节一致、上限处的 UTF-8 字符边界回退、
 // 带 Content-Length 与 chunked 两条路都在上限处收手。
 
 /// 截断标记文案。它是前后端都看得见的契约（前端响应视图会显示它），故测试直接写死一份，
@@ -383,12 +382,8 @@ enum BodyPlan {
     Fixed { framing: BodyFraming, body: Vec<u8> },
     /// 永远发下去，服务端不结束响应：只有客户端主动收手（断开连接），服务器才会停下来。
     ///
-    /// 这条计划用来证明「客户端在上限处收手」：旧的实现会把整个流读完，于是永远等不到
-    /// 响应结束，只能等到请求超时——那正是本条断言要区分的两种结局。
-    ///
-    /// 不用「服务器写出去多少字节」当证据：Windows 的 TCP 接收缓冲区会自动扩容（可以到
-    /// 几 MB），8 MB 的响应可能整个被内核收下，服务器一次写错都没有，字节数这条证据在
-    /// Windows 上不成立。「客户端在超时之前就拿到了响应」才是不依赖平台行为的证据。
+    /// 证据是「客户端在超时之前就拿到了响应」。不用「服务器写出去多少字节」当证据：
+    /// Windows 的 TCP 接收缓冲区会自动扩容，字节数那条证据在 Windows 上不成立。
     Endless {
         framing: BodyFraming,
         /// 循环发送的这一块。
@@ -410,8 +405,8 @@ struct ServerStats {
 /// 「响应头长什么样」与「body 怎么分块送过去」——`Content-Length` 与 chunked 两条路的
 /// 差异全在这些细节里，测试框架会把它们藏起来。
 ///
-/// 只统计**第一个**连接的写入量：后来的连接是同一台服务器上另一次请求（例如旧行为对照
-/// 用的那次），不该混进统计。
+/// 只统计**第一个**连接的写入量：后来的连接是同一台服务器上另一次请求（例如
+/// `legacy_fetch` 对照用的那次），不该混进统计。
 async fn spawn_body_server(plan: BodyPlan) -> (u16, oneshot::Receiver<ServerStats>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -575,20 +570,19 @@ async fn write_response(sock: &mut TcpStream, plan: BodyPlan) -> ServerStats {
     }
 }
 
-/// 旧行为的读法：把整个 body 读进内存，再交给 `truncate_body` 裁。
+/// 对照读法：把整个 body 读进内存，再交给 `truncate_body` 裁。
 ///
-/// 这是改动前那条路径的逐字复刻，测试拿它当对照——「流式读取的裁剪结果必须与它逐字节
-/// 相同」是这次改动的核心契约。
+/// 测试拿它当基线：流式读取的裁剪结果必须与它逐字节相同。
 async fn legacy_fetch(url: &str, max_bytes: u64) -> (String, bool) {
     let res = reqwest::Client::new().get(url).send().await.unwrap();
     let text = res.text().await.unwrap();
     truncate_body(text, max_bytes)
 }
 
-/// 流式读取的裁剪结果必须与旧行为（`res.text()` 之后交给 `truncate_body`）逐字节一致。
+/// 流式读取的裁剪结果必须与对照读法（`res.text()` 之后交给 `truncate_body`）逐字节一致。
 ///
-/// 上限之内的内容、UTF-8 字符边界的回退位置、以及 `truncated` 标记，三样都必须与改动前
-/// 相同：同一个响应在桌面形态与 web 形态下必须长得一模一样，而这两条形态走的是同一个
+/// 上限之内的内容、UTF-8 字符边界的回退位置、以及 `truncated` 标记，三样都要对上：同一个
+/// 响应在桌面形态与 web 形态下必须长得一模一样，而这两条形态走的是同一个
 /// `execute_with_policy`。
 ///
 /// 用的样本覆盖了几种容易出错的切点：多字节 rune 正好压在上限上、4 字节的 emoji 压在上限
@@ -651,10 +645,13 @@ async fn streamed_body_matches_legacy_truncation_byte_for_byte() {
             .unwrap_or_else(|| panic!("{name}: 期望拿到一个响应，实际是 {:?}", out.error));
 
         let legacy = legacy_fetch(&url, 1024).await;
-        assert_eq!(resp.body, legacy.0, "{name}: 裁剪后的 body 与旧行为不一致");
+        assert_eq!(
+            resp.body, legacy.0,
+            "{name}: 裁剪后的 body 与对照读法不一致"
+        );
         assert_eq!(
             resp.truncated, legacy.1,
-            "{name}: truncated 标记与旧行为不一致"
+            "{name}: truncated 标记与对照读法不一致"
         );
     }
 }
@@ -736,8 +733,7 @@ async fn body_exactly_at_the_limit_is_not_truncated() {
 /// 带 `Content-Length` 的超大响应：客户端必须在上限处收手，不能把整个 body 收进内存。
 ///
 /// 服务端**不结束**响应（一直发下去），于是「客户端收手了」有了一个不依赖平台行为的证据：
-/// 客户端在请求超时（3 秒）之前就拿到了响应。旧的实现会把整个流读完，只能等到超时并拿到
-/// 一个错误信封——这条断言会变红。
+/// 客户端在请求超时（3 秒）之前就拿到了响应。
 ///
 /// 请求超时故意设成 3 秒：它比「读完上限」所需的时间长得多，却比测试愿意等的时间短。
 #[tokio::test]
@@ -782,10 +778,7 @@ async fn oversized_content_length_response_stops_reading_at_the_limit() {
     );
 }
 
-/// chunked 的超大响应：服务端不声明长度，只能靠边读边计数兜底。
-///
-/// 这条与上一条的区别在于「客户端事先不知道要读多少」：没有 `Content-Length` 可供快路径
-/// 使用，收手的判据只能是边读边数的计数。
+/// chunked 的超大响应：服务端不声明长度，收手的判据只能是边读边数的计数。
 #[tokio::test]
 async fn oversized_chunked_response_stops_reading_at_the_limit() {
     let chunk = b"a".repeat(64 * 1024);

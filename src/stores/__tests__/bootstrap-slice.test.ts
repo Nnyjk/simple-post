@@ -321,7 +321,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     installIpcMock(async (cmd) => {
       if (cmd !== 'nodes_list') return [];
       nodesCalls += 1;
-      // 第一趟失败（落 `nodesError`，`nodesLoaded` 保持 false），第二趟慢。
+      // 第一趟失败（`nodesLoaded` 保持 false），第二趟慢。
       if (nodesCalls === 1) throw new Error('读树失败');
       await secondGate;
       return [];
@@ -331,7 +331,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     const second = bag.reloadWorkspace();
     await first;
 
-    assert.equal(bag.nodesError, '读树失败');
+    assert.equal(bag.nodesError, null, '被后一趟取代的失败是过期消息，不该挂在屏幕上');
     assert.equal(bag.nodesLoaded, false, '失败的那一趟不置位 nodesLoaded');
 
     // 此刻第二趟还在途。槽位若已被第一趟清掉，这一句会再开一趟，IPC 就多一轮。
@@ -349,6 +349,8 @@ describe('bootstrap-slice 聚合加载契约', () => {
     await Promise.all([second, third]);
 
     assert.equal(bag.nodesLoaded, true);
+    // 树读回来了，那条过期的失败消息不该还挂着。
+    assert.equal(bag.nodesError, null, '成功之后不留过期错误');
     assert.equal(nodesCalls, 2);
   });
 

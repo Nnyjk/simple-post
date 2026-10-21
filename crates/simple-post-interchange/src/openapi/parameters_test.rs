@@ -171,15 +171,16 @@ fn two_paths_that_used_to_collapse_get_different_operation_ids() {
     assert_ne!(a, b, "两条路径撞了同一个 operationId：{a}");
     // 路径分隔符要能**穿过**映射：撞名不靠事后编号解决——编号只是兜底，那条路
     // 生成出来的名字看不出它对应哪条路径。
-    assert!(
-        b.contains("__user__info"),
-        "路径的层级应当在 operationId 里看得见：{b}"
-    );
+    //
+    // 确切的值钉在这里：README 与文档注释里举的例子必须与它一致，抄错的名字会
+    // 变成代码生成器里的方法名。
+    assert_eq!(a, "get___api__user_info");
+    assert_eq!(b, "get___api__user__info");
 }
 
 /// 映射不是单射时，后来的那个要编号，而不是撞名。
 ///
-/// `/a-b` 与 `/a_b` 都是合法路径，但都映成 `get__a_b`。规范要的是「文档内唯一」，
+/// `/a-b` 与 `/a_b` 都是合法路径，但都映成 `get___a_b`。规范要的是「文档内唯一」，
 /// 故后者拿到 `_2` 后缀。
 #[test]
 fn a_path_that_maps_to_the_same_name_gets_a_numbered_suffix() {

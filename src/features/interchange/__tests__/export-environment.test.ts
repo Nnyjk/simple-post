@@ -206,4 +206,21 @@ describe('导出预览：环境与提示', () => {
       '重跑预览不能整份重置勾选：勾选集的成员是节点 id，换环境不产生新节点',
     );
   });
+
+  it('换环境时丢弃过期的那一趟预览', () => {
+    // 连着换两个环境时先发的那一趟可能后到，它带回来的 `servers` 属于旧环境。
+    const src = readFileSync(new URL('../useTransfer.ts', import.meta.url), 'utf8');
+    const start = src.indexOf('const changeEnvironment');
+    assert.ok(start >= 0, '没能定位到换环境的回调，源文件形状变了？');
+    const end = src.indexOf('\n  const ', start + 1);
+    const block = src.slice(start, end > 0 ? end : undefined);
+
+    assert.ok(block.includes('envRequest.next()'), '每次换环境要领一个号');
+    assert.ok(
+      block.includes('envRequest.isCurrent(ticket)'),
+      '回来时号对不上就丢弃：写进去的是旧环境的 servers',
+    );
+    // 成功的重取不该留着上一趟的错误消息。
+    assert.ok(block.includes('setError(null)'), '重取之前先清掉上一趟的错误');
+  });
 });

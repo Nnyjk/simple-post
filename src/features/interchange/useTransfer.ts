@@ -13,6 +13,7 @@ import type {
   TransferNode,
 } from '@/lib/interchange-types';
 import { copyGeneratedDocument, saveGeneratedDocument } from '@/lib/transfer-file-save';
+import { createLatestRequest } from './latest-request';
 import {
   allKeys,
   countSelected,
@@ -110,6 +111,8 @@ export function useTransfer(options: UseTransferOptions = {}) {
   // 默认开着：文档带了 host 却不落成服务，用户打开模块看到的是一排没有地址的路径。
   // 取消它是一次明确取舍，不是默认值 —— 故这是预览里的一个勾，不是隐藏的默认。
   const [applyService, setApplyService] = useState(true);
+  // 换环境的请求号。每次换环境领一个，回来时号对不上就丢弃。
+  const [envRequest] = useState(createLatestRequest);
 
   const groups: TransferNode[] = useMemo(
     () => (preview ? (preview.groups as TransferNode[]) : []),
@@ -134,7 +137,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
     setSourceText('');
     setResult(null);
     setApplyService(true);
-  }, []);
+    // 作废在途的换环境请求：弹窗关掉后它回来，不该再往这个会话里写预览。
+    envRequest.invalidate();
+  }, [envRequest]);
 
   const openImport = useCallback(
     (s: Omit<TransferSession, 'mode'>) => {
@@ -187,18 +192,24 @@ export function useTransfer(options: UseTransferOptions = {}) {
     async (id: string) => {
       setEnvironmentId(id);
       if (!session || session.mode !== 'export') return;
+      // 每次换环境领一个号，回来时号对不上就是过期的那一趟，丢弃。
+      // 连着换两个环境时，先发的那一趟可能后到——它写进去的 servers 属于旧环境。
+      const ticket = envRequest.next();
+      setError(null);
       try {
         const p = await fetchExportPreview({
           projectId: session.projectId,
           moduleId: session.moduleId,
           environmentId: id,
         });
+        if (!envRequest.isCurrent(ticket)) return;
         setPreview(p);
       } catch (e) {
+        if (!envRequest.isCurrent(ticket)) return;
         setError(errorText(e));
       }
     },
-    [session],
+    [session, envRequest],
   );
 
   /** 走预览。`text` 为空表示让它自己从链接拉。 */

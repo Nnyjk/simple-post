@@ -82,11 +82,12 @@ fn a_nested_folder_script_lands_on_the_collection() {
     assert!(collection.scripts.test_script.is_none());
 }
 
-/// 同一相位的多项脚本**拼成一段**，不是只留第一项。
+/// 同一相位的多项脚本**分块**拼成一段，不是只留第一项。
 ///
-/// Postman 里它们依次执行，只留第一项等于悄悄改掉了用户的集合行为。
+/// Postman 里它们依次执行，只留第一项等于悄悄改掉了用户的集合行为。分块是为了
+/// 各自有独立的作用域：同名 `const` 在同一层会撞成 `SyntaxError`，两段都不跑。
 #[test]
-fn several_scripts_of_the_same_phase_are_joined_in_order() {
+fn several_scripts_of_the_same_phase_are_joined_as_independent_blocks() {
     let parsed = parse_ok(&json!({
         "info": { "name": "n" },
         "item": [{
@@ -105,8 +106,69 @@ fn several_scripts_of_the_same_phase_are_joined_in_order() {
             .scripts
             .pre_request_script
             .as_deref(),
-        Some("a();\nb();\nc();")
+        Some("{\na();\nb();\n}\n{\nc();\n}")
     );
+}
+
+/// 只有一段时不包块：多余的括号会让人在预览里读不懂脚本。
+#[test]
+fn a_single_script_is_kept_verbatim() {
+    let parsed = parse_ok(&json!({
+        "info": { "name": "n" },
+        "item": [{
+            "name": "一段前置脚本",
+            "event": [
+                { "listen": "prerequest", "script": { "exec": ["a();"] } }
+            ],
+            "request": { "method": "GET", "url": "https://api.example.com/a" }
+        }]
+    }));
+
+    let ex = &parsed.exchange;
+    assert_eq!(
+        ex.modules[0].endpoints[0]
+            .scripts
+            .pre_request_script
+            .as_deref(),
+        Some("a();")
+    );
+}
+
+/// 被 Postman 禁用的脚本不导入。
+///
+/// `disabled: true` 的 event 在 Postman 里不跑；导入后它若变成会跑的，就能改写请求、
+/// 能写环境变量——那是把作者特意关掉的东西打开了。
+#[test]
+fn a_disabled_event_is_not_imported() {
+    let parsed = parse_ok(&json!({
+        "info": { "name": "n" },
+        "item": [{
+            "name": "禁用的脚本",
+            "event": [
+                { "listen": "prerequest", "script": { "exec": ["a();"] } },
+                { "listen": "test", "script": { "exec": ["b();"] }, "disabled": true }
+            ],
+            "request": { "method": "GET", "url": "https://api.example.com/a" }
+        }]
+    }));
+
+    let ex = &parsed.exchange;
+    let ep = &ex.modules[0].endpoints[0];
+    assert_eq!(ep.scripts.pre_request_script.as_deref(), Some("a();"));
+    assert!(
+        ep.scripts.test_script.is_none(),
+        "被禁用的脚本不能变成会跑的：{:?}",
+        ep.scripts
+    );
+
+    let infos: Vec<_> = ex
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Info)
+        .collect();
+    assert_eq!(infos.len(), 1, "{:?}", ex.diagnostics);
+    assert_eq!(infos[0].pointer, "/item/0/event/1");
+    assert_eq!(infos[0].dropped.as_deref(), Some("禁用的脚本"));
 }
 
 /// 整份集合根上的脚本**没有归宿**，逐条出诊断。
@@ -213,6 +275,35 @@ fn an_unreadable_script_is_reported_with_its_own_pointer() {
         Some("a();")
     );
     assert!(ex.modules[0].endpoints[0].scripts.test_script.is_none());
+}
+
+/// 同一段脚本重复出现只报一次。
+///
+/// 同一段源码出现十次是一个问题，不是十个——与 `Ctx::seen_bad_tokens` 那套去重纪律一样。
+#[test]
+fn the_same_script_reported_twice_is_reported_once() {
+    let parsed = parse_ok(&json!({
+        "info": { "name": "n" },
+        "event": [
+            { "listen": "prerequest", "script": { "exec": ["console.log('同一段')"] } },
+            { "listen": "prerequest", "script": { "exec": ["console.log('同一段')"] } },
+            { "listen": "prerequest", "script": { "exec": ["console.log('另一段')"] } }
+        ],
+        "item": [{
+            "name": "请求",
+            "request": { "method": "GET", "url": "https://api.example.com/a" }
+        }]
+    }));
+
+    let ex = &parsed.exchange;
+    let warns: Vec<_> = ex
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warn)
+        .collect();
+    assert_eq!(warns.len(), 2, "同一段只报一次：{:?}", ex.diagnostics);
+    assert_eq!(warns[0].pointer, "/event/0");
+    assert_eq!(warns[1].pointer, "/event/2");
 }
 
 /// 没有 `event[]` 的集合不受影响。

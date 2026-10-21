@@ -244,10 +244,10 @@ Postman → 本仓库的导入是保真的。
 
 **`operationId`：`动词 + 路径`，路径分隔符落成双下划线。**
 `operationId` 在多数代码生成器里会被直接变成方法名，而 `/` 与 `{}` 都不是标识符
-字符，故它们都要换掉。**分隔符必须能穿过那层映射**：曾经「一切非法字符换 `_`」，
-于是 `/api/user-info` 与 `/api/user/info` 撞成同一个 `get__api_user_info` —— 规范要求
-`operationId` 在文档内唯一，撞名之后代码生成器会生成两个同名方法。现在路径分隔符
-换成 `__`，两者分别是 `get__api_user_info` 与 `get__api__user__info`。
+字符，故它们都要换掉。**分隔符必须与其余字符区分开**：否则 `/api/user-info` 与
+`/api/user/info` 撞成同一个名字 —— 规范要求 `operationId` 在文档内唯一，撞名之后
+代码生成器会生成两个同名方法。现在两者分别是 `get___api__user_info` 与
+`get___api__user__info`（确切的值由 `parameters_test.rs` 钉住）。
 
 这仍不是**单射**（`/a-b` 与 `/a_b` 还是撞），故另有一道编号兜底：撞上时后一个拿
 `_2` 后缀。规范要的是「文档内唯一」，不是「映射可逆」。

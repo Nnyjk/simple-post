@@ -2,13 +2,15 @@
 //!
 //! Postman 把脚本挂在 `event[]` 上，每一项有 `listen`（相位）与 `script.exec`
 //! （源码）：`prerequest` 是请求发出前跑的那段，`test` 是响应回来后跑的那段。
-//! 同一个相位可以有**多项**，它们依次执行，故拼成一段源码。
+//! 同一个相位可以有**多项**，它们依次执行。
 //!
 //! **只认这两个相位。** 别的 `listen`（典型是测试运行器的监听器）在本仓库没有
 //! 对应构造，出诊断说明，不静默丢。
 //!
 //! 脚本源码**不写进诊断**：用户的脚本里常有 token 与环境变量名，诊断是要显示给人
 //! 看的，不该把源码带出去。
+
+use std::collections::HashSet;
 
 use serde_json::{Map, Value};
 
@@ -47,6 +49,9 @@ pub(super) fn parse_scripts(
 
     let mut pre: Vec<String> = Vec::new();
     let mut test: Vec<String> = Vec::new();
+    // 已经报过的脚本源码。同一段脚本出现十次是一个问题，不是十个——与
+    // `Ctx::seen_bad_tokens` 那套去重纪律一样。
+    let mut reported: HashSet<String> = HashSet::new();
     for (i, event) in events.iter().enumerate() {
         let at = format!("{ptr}/event/{i}");
         let Some(event) = event.as_object() else {
@@ -55,6 +60,16 @@ pub(super) fn parse_scripts(
             );
             continue;
         };
+
+        // `disabled: true` 是作者关掉了这段脚本：它在 Postman 里不跑，导入后也不能
+        // 变成会跑的（它能改写请求、能写环境变量）。
+        if event.get("disabled").and_then(Value::as_bool) == Some(true) {
+            ctx.diagnostics.push(
+                Diagnostic::info(&at, "这一条 event 在 Postman 里是禁用的，未导入")
+                    .dropping("禁用的脚本"),
+            );
+            continue;
+        }
 
         let Some(source) = exec_source(event, &at, ctx) else {
             continue;
@@ -65,13 +80,15 @@ pub(super) fn parse_scripts(
         }
 
         if place == Place::CollectionRoot {
-            ctx.diagnostics.push(
-                Diagnostic::warn(
-                    &at,
-                    "整份集合上的脚本没有落点：顶层条目各自成一个分组，而本仓库的脚本只挂在接口与集合上",
-                )
-                .dropping("集合级脚本"),
-            );
+            if reported.insert(source) {
+                ctx.diagnostics.push(
+                    Diagnostic::warn(
+                        &at,
+                        "整份集合上的脚本没有落点：顶层条目各自成一个分组，而本仓库的脚本只挂在接口与集合上",
+                    )
+                    .dropping("集合级脚本"),
+                );
+            }
             continue;
         }
 
@@ -144,11 +161,21 @@ fn exec_source(event: &Map<String, Value>, at: &str, ctx: &mut Ctx) -> Option<St
 
 /// 同一相位的多项脚本拼成一段。
 ///
-/// 拼接而不是只留第一项：Postman 里它们**依次执行**，只留第一项等于悄悄改掉了
-/// 用户的集合行为。
+/// 每一项各自**分块**包起来：Postman 里它们是各自独立的脚本，同名 `const` / `let`
+/// 在同一层作用域里撞上会让整段抛 `SyntaxError`（两段都不跑），而一段不以分号结尾
+/// 加上下一段以 `(` 或 `[` 开头会被自动分号插入并成一句。
 fn join(sources: Vec<String>) -> Option<String> {
     if sources.is_empty() {
         return None;
     }
-    Some(sources.join("\n"))
+    if sources.len() == 1 {
+        return sources.into_iter().next();
+    }
+    Some(
+        sources
+            .iter()
+            .map(|s| format!("{{\n{s}\n}}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }

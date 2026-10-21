@@ -167,6 +167,36 @@ fn a_failing_script_writes_no_environment_variables() {
     assert!(run.effects.env_writes.is_empty());
 }
 
+/// 分块里的同名声明互不冲突，两块都跑。
+///
+/// 导入器把同一相位的多项脚本各自分块再拼起来（Postman 里它们是各自独立的脚本）。
+/// 不分块的话同名 `const` 在同一层会撞成 `SyntaxError`，两段都不跑。
+#[test]
+fn two_blocks_may_declare_the_same_name() {
+    let limits = limits(5_000);
+    let request = request();
+    let sandbox = sandbox(&limits, &request);
+
+    let run = sandbox.run(
+        "{ const x = 'a'; pm.environment.set('first', x); }\n\
+         { const x = 'b'; pm.environment.set('second', x); }",
+        &request,
+    );
+
+    assert!(run.failure.is_none(), "{:?}", run.failure);
+    let written: Vec<(&str, Option<&str>)> = run
+        .effects
+        .env_writes
+        .iter()
+        .map(|w| (w.key.as_str(), w.value.as_deref()))
+        .collect();
+    assert_eq!(
+        written,
+        vec![("first", Some("a")), ("second", Some("b"))],
+        "两块都要跑：{written:?}"
+    );
+}
+
 #[test]
 fn environment_variables_can_be_read_and_written() {
     let limits = limits(5_000);

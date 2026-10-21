@@ -116,12 +116,10 @@ fn path_placeholders(path: &str) -> Vec<&str> {
 /// 生成器里会被直接变成方法名，而 `/` 与 `{}` 都不是标识符字符。不做大小写变换——
 /// 那会抹掉用户路径里的区分信息。
 ///
-/// **分隔符必须能穿过映射。** 曾经「一切非法字符换 `_`」，于是 `/api/user-info` 与
-/// `/api/user/info` 撞成同一个 `get__api_user_info`：规范要求 `operationId` 在文档内
-/// 唯一，撞名之后多数代码生成器会生成两个同名方法。路径分隔符换成 `__` 之后两者
-/// 分别是 `get__api_user_info` 与 `get__api__user__info`。
+/// 分隔符要与其余字符区分开，否则 `/api/user-info` 与 `/api/user/info` 撞名
+/// （现在分别是 `get___api__user_info` 与 `get___api__user__info`）。
 ///
-/// 这仍不是**单射**（`/a-b` 与 `/a_b` 还是撞），故另有一道编号兜底（见
+/// 映射仍不是**单射**（`/a-b` 与 `/a_b` 撞名），故另有一道编号兜底（见
 /// [`Builder::claim_operation_id`]）：规范要的是「文档内唯一」，不是「映射可逆」。
 fn operation_id(verb: &str, path: &str) -> String {
     let mut out = String::with_capacity(verb.len() + path.len() + 1);

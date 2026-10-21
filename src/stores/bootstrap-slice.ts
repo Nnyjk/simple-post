@@ -356,13 +356,19 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
               endpointDetails,
               environments,
               nodesLoaded: true,
+              // 树已经读回来了，先前那一趟的失败说明已经过期。
+              nodesError: null,
               ...(env ? { activeEnvironmentId: env.id } : {}),
             };
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           console.error('[store] workspace load failed', error);
-          set({ nodesError: message });
+          // 只有当前那一趟才报它的失败：被后一趟取代的失败是过期消息，
+          // 写上去会让「树已读回来」与「读取失败」同时挂在屏幕上。
+          if (inFlight === local) {
+            set({ nodesError: message });
+          }
         } finally {
           // 加载标志与槽位都归「当前那一趟」所有：不是它就别动，否则会把还在跑的
           // 那一趟说成已经结束。
