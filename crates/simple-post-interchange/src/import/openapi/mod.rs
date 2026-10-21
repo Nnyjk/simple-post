@@ -32,7 +32,7 @@ use simple_post_core::domain::{parse_http_method, HttpMethod};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{Exchange, IrEndpoint, IrModule, IrServer};
+use crate::ir::{Exchange, IrEndpoint, IrModule, IrScripts, IrServer};
 use crate::spec::{escape_pointer_token, PATH_METHODS};
 
 use self::auth::auth_of;
@@ -216,6 +216,7 @@ fn group_of(
         servers: view.servers.hosts.clone(),
         endpoints: Vec::new(),
         collections: Vec::new(),
+        scripts: IrScripts::default(),
     });
     group_at.insert(key, at);
     at
@@ -257,6 +258,7 @@ fn endpoint_of(
         docs: None,
         notes: None,
         tags,
+        scripts: IrScripts::default(),
     }
 }
 

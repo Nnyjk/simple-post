@@ -3,9 +3,10 @@
 use serde_json::{Map, Value};
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{IrCollection, IrEndpoint, IrServer};
+use crate::ir::{IrCollection, IrEndpoint, IrScripts, IrServer};
 
 use super::request::build_endpoint;
+use super::script::{parse_scripts, Place};
 use super::{description_text, item_name, Ctx};
 
 /// 一个条目在源文件里的形状。
@@ -31,6 +32,8 @@ struct Frame<'a> {
     key: String,
     name: String,
     description: Option<String>,
+    /// 这个容器上的两段脚本（folder 的 `event[]`）。集合能存脚本，故有归宿。
+    scripts: IrScripts,
     /// 拥有本层的那一层的栈下标，`None` 为根层。
     ///
     /// 必须记下标而不是收尾时取 `last_mut()`：一个 folder 没走完时栈顶是**它自己**，
@@ -53,6 +56,7 @@ pub(super) fn walk_children<'a>(
         key: ptr.to_string(),
         name: String::new(),
         description: None,
+        scripts: IrScripts::default(),
         parent: None,
         items,
         idx: 0,
@@ -75,6 +79,7 @@ pub(super) fn walk_children<'a>(
                 description: done.description,
                 endpoints: done.endpoints,
                 collections: done.collections,
+                scripts: done.scripts,
             };
             match done.parent {
                 Some(owner) => stack[owner].collections.push(child),
@@ -104,20 +109,27 @@ pub(super) fn walk_children<'a>(
         match classify(obj, &item_ptr, ctx) {
             Class::Request(req) => {
                 let name = item_name(obj);
-                if let Some(ep) = build_endpoint(req, name, &item_ptr, servers, ctx) {
+                // 脚本挂在**条目**上，不在 `request` 里。
+                let scripts = parse_scripts(obj, &item_ptr, Place::Node, ctx);
+                if let Some(ep) = build_endpoint(req, name, &item_ptr, scripts, servers, ctx) {
                     stack[owner].endpoints.push(ep);
                 }
             }
-            Class::Folder(children) => stack.push(Frame {
-                key: item_ptr,
-                name: item_name(obj),
-                description: description_text(obj.get("description")),
-                parent: Some(owner),
-                items: children,
-                idx: 0,
-                endpoints: Vec::new(),
-                collections: Vec::new(),
-            }),
+            Class::Folder(children) => {
+                // 脚本挂在**条目**上，不在 `request` 里。
+                let scripts = parse_scripts(obj, &item_ptr, Place::Node, ctx);
+                stack.push(Frame {
+                    key: item_ptr,
+                    name: item_name(obj),
+                    description: description_text(obj.get("description")),
+                    scripts,
+                    parent: Some(owner),
+                    items: children,
+                    idx: 0,
+                    endpoints: Vec::new(),
+                    collections: Vec::new(),
+                })
+            }
             Class::Malformed => {}
         }
     }

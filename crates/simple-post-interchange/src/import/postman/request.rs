@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use simple_post_core::domain::{parse_http_method, KeyValue};
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{IrEndpoint, IrServer};
+use crate::ir::{IrEndpoint, IrScripts, IrServer};
 
 use super::auth::parse_auth;
 use super::body::parse_body;
@@ -15,6 +15,7 @@ pub(super) fn build_endpoint(
     req: &Map<String, Value>,
     name: String,
     ptr: &str,
+    scripts: IrScripts,
     servers: &mut Vec<IrServer>,
     ctx: &mut Ctx,
 ) -> Option<IrEndpoint> {
@@ -60,6 +61,7 @@ pub(super) fn build_endpoint(
         body: parse_body(req, &format!("{ptr}/request/body"), ctx),
         auth: parse_auth(req, &format!("{ptr}/request/auth"), ctx),
         tags: Vec::new(),
+        scripts,
         ..Default::default()
     };
     scan_templates(&endpoint, ptr, ctx);

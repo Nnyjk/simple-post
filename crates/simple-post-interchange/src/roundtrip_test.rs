@@ -7,7 +7,7 @@
 //! 这也是唯一能覆盖 `paths` 键的：OpenAPI 的 `paths` 是固定动词键集，写错键名不会被
 //! 任何 schema 校验拦住，只会在下一次导入时静默少掉一整个接口。
 
-use simple_post_core::domain::HttpMethod;
+use simple_post_core::domain::{HttpMethod, KeyValue};
 
 use crate::import::{self, Format};
 use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule};
@@ -216,6 +216,37 @@ fn a_collection_comes_back_as_a_tag_named_group() {
         .expect("无 tag 的分组以文档名命名");
     assert_eq!(untagged.endpoint_count(), 2);
     assert_eq!(back.endpoint_count(), 3, "一个都不能少");
+}
+
+/// 请求头在往返之后还在。
+///
+/// 导出侧写 `in: header`，导入侧按 `in: header` 映回 `headers`——两侧必须接得上。
+/// 曾经导出侧根本不读 `headers`，于是「导出再导入」这条回路上所有请求头都没了，
+/// 且没有任何诊断说过这件事。
+#[test]
+fn request_headers_survive_the_round_trip() {
+    let mut ex = round_trip_tree();
+    ex.modules[0].endpoints[0].headers = vec![KeyValue {
+        id: "h1".into(),
+        key: "X-Trace".into(),
+        value: "{{traceId}}".into(),
+        enabled: true,
+        description: None,
+    }];
+
+    let doc = to_document(&ex, DocFormat::Json).expect("导出");
+    let back = import::parse_text(Format::OpenApi3, &doc.content).expect("读回");
+
+    let headers = back
+        .exchange
+        .modules
+        .iter()
+        .flat_map(|m| &m.endpoints)
+        .find(|e| e.path == "/users")
+        .map(|e| e.headers.clone())
+        .expect("那个接口还在");
+    assert_eq!(headers.len(), 1, "请求头要跟着回来：{headers:?}");
+    assert_eq!(headers[0].key, "X-Trace");
 }
 
 /// 把一棵 IR 压成排序后的 `(method, path)` 列表。顺序在两侧都可能变（导出按路径分组、

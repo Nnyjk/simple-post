@@ -94,6 +94,27 @@ fn empty(node_id: &str) -> NodeScripts {
     }
 }
 
+/// 一个项目里所有集合的脚本。
+///
+/// **一次读回整棵树的脚本**，与 [`super::endpoint_details::list_by_root`] 同一条纪律：
+/// 导出是一次投影，逐节点发查询会让一棵大树变成 N 次往返。
+///
+/// 只有**有脚本**的节点在结果里——没配过脚本是正常状态，不该占一行。
+pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<NodeScripts>, AppError> {
+    let sql = "SELECT s.node_id, s.pre_request_script, s.test_script \
+               FROM node_scripts s \
+               JOIN nodes n ON n.id = s.node_id \
+               WHERE n.root_id = ?1 \
+               ORDER BY n.sort_order ASC, s.node_id ASC";
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map(params![root_id], row_to_scripts)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(AppError::Sqlite)?);
+    }
+    Ok(out)
+}
+
 fn row_to_scripts(row: &Row<'_>) -> Result<NodeScripts, rusqlite::Error> {
     Ok(NodeScripts {
         node_id: row.get(0)?,

@@ -73,3 +73,35 @@ fn a_duplicate_inside_one_ir_lands_once() {
     assert_eq!(report.created_endpoint_ids.len(), 3, "重复项第二次被跳过");
     assert_eq!(report.skipped_duplicates, vec!["直挂的接口"]);
 }
+
+/// 跳过诊断的指针要指得到源文件里的那一行。
+///
+/// 指针曾经是 `format!("/{}", dup.path)`，而 `path` 本身以 `/` 开头，于是拼出
+/// `//ping` —— 源文件里没有任何东西在那个位置。渲染层把 pointer 原样显示出来，
+/// 用户看到的指向等于没给。真正能定位的是端点的 `key`。
+#[test]
+fn the_skip_diagnostic_points_at_the_duplicate_endpoint_key() {
+    let (pool, project_id) = fresh_project();
+    let ex = nested_exchange();
+    commit_all(&pool, &project_id, &ex).expect("first");
+
+    let second = commit_all(&pool, &project_id, &ex).expect("second");
+    let skips: Vec<_> = second
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("按指纹跳过"))
+        .collect();
+    assert_eq!(skips.len(), 3, "三个重复各报一次");
+    for d in skips {
+        assert!(
+            !d.pointer.starts_with("//"),
+            "指针不能是双斜杠，那是源文件里不存在的位置：{}",
+            d.pointer
+        );
+        assert!(
+            ex.endpoint_keys().contains(&d.pointer),
+            "指针必须精确等于某个端点的 key：{}",
+            d.pointer
+        );
+    }
+}

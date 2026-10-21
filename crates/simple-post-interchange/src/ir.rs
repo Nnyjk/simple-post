@@ -70,6 +70,13 @@ pub struct IrModule {
     pub endpoints: Vec<IrEndpoint>,
     #[serde(default)]
     pub collections: Vec<IrCollection>,
+    /// 这个模块上的两段脚本。
+    ///
+    /// **模块本身不能存脚本**（`node_scripts` 只认 collection），故这一段只在
+    /// 「落进已有模块」时用得上：那时 IR 顶层的模块会降级成集合。落到项目顶层时
+    /// 它无处可去，落库侧会出一条诊断说明。
+    #[serde(default)]
+    pub scripts: IrScripts,
 }
 
 /// 一个 (模块 × 环境) 单元格的实际取值。键是服务名而不是 id：IR 是无 id 的中间态，
@@ -97,6 +104,34 @@ pub struct IrCollection {
     pub endpoints: Vec<IrEndpoint>,
     #[serde(default)]
     pub collections: Vec<IrCollection>,
+    /// 这个集合上的两段脚本。集合能存脚本，故这两个字段在这里是有归宿的。
+    #[serde(default)]
+    pub scripts: IrScripts,
+}
+
+/// 一个节点上的两段脚本。
+///
+/// 与 `domain::NodeScripts` 同形，但**没有 `node_id`**：IR 里的节点还没有 id。
+/// 端点的脚本落进 `endpoint_details`（与 body / headers 同级），集合的脚本落进
+/// `node_scripts` 表。
+///
+/// `None` = 没有脚本。两个字段都是**源码**，不是路径：外来格式给的就是内联的文本。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IrScripts {
+    /// 请求发出之前跑的那段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_request_script: Option<String>,
+    /// 响应回来之后跑的那段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_script: Option<String>,
+}
+
+impl IrScripts {
+    /// 两段都没有。
+    pub fn is_empty(&self) -> bool {
+        self.pre_request_script.is_none() && self.test_script.is_none()
+    }
 }
 
 /// 一个请求。`method` / `path` 之外的字段与 `EndpointDetail` 同名同义，
@@ -129,6 +164,9 @@ pub struct IrEndpoint {
     pub notes: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 这个接口上的两段脚本。
+    #[serde(default)]
+    pub scripts: IrScripts,
 }
 
 impl IrEndpoint {

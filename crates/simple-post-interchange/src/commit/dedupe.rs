@@ -6,10 +6,15 @@ use crate::fingerprint::{FingerprintSet, RequestIdentity};
 use crate::ir::{endpoint_keys_of, IrCollection, IrEndpoint, IrModule};
 
 /// 一个被指纹认出来而跳过的请求。名字与请求描述给报告用。
+///
+/// `key` 是这个端点在 IR 里的身份（导入时是源格式里的位置指针，导出时是 `nodes.id`）。
+/// 诊断的 `pointer` 用它而**不用** path：path 是地址，在源文件里未必能定位到一行；
+/// `key` 才是「这一行在源文件里的哪儿」，与 `Diagnostic::pointer` 的其余用法同一条纪律。
 pub(super) struct SkippedDuplicate {
     pub(super) name: String,
     pub(super) method: String,
     pub(super) path: String,
+    pub(super) key: String,
 }
 
 /// 每个端点的下场：会被写入，还是已被认出而跳过。
@@ -38,6 +43,7 @@ pub(super) fn decide(
                 name: ep.name.clone(),
                 method: ep.method.as_str().to_string(),
                 path: ep.path.clone(),
+                key: ep.key.clone(),
             });
         } else {
             writable.insert(ep.key.clone());

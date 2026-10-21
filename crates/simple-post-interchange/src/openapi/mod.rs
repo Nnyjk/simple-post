@@ -16,6 +16,8 @@
 
 mod builder;
 
+use std::collections::BTreeSet;
+
 use serde_json::{json, Map, Value};
 use simple_post_core::domain::BodyMode;
 use simple_post_core::error::AppError;
@@ -110,17 +112,26 @@ fn path_placeholders(path: &str) -> Vec<&str> {
 
 /// `动词 + 路径` → 一个合法的 `operationId`。
 ///
-/// 路径分隔符与花括号换成下划线：`operationId` 在多数代码生成器里会被直接变成方法名，
-/// 而 `/` 与 `{}` 都不是标识符字符。不做大小写变换——那会抹掉用户路径里的区分信息。
+/// 路径分隔符换成**双**下划线，其余非法字符换成单下划线：`operationId` 在多数代码
+/// 生成器里会被直接变成方法名，而 `/` 与 `{}` 都不是标识符字符。不做大小写变换——
+/// 那会抹掉用户路径里的区分信息。
+///
+/// **分隔符必须能穿过映射。** 曾经「一切非法字符换 `_`」，于是 `/api/user-info` 与
+/// `/api/user/info` 撞成同一个 `get__api_user_info`：规范要求 `operationId` 在文档内
+/// 唯一，撞名之后多数代码生成器会生成两个同名方法。路径分隔符换成 `__` 之后两者
+/// 分别是 `get__api_user_info` 与 `get__api__user__info`。
+///
+/// 这仍不是**单射**（`/a-b` 与 `/a_b` 还是撞），故另有一道编号兜底（见
+/// [`Builder::claim_operation_id`]）：规范要的是「文档内唯一」，不是「映射可逆」。
 fn operation_id(verb: &str, path: &str) -> String {
     let mut out = String::with_capacity(verb.len() + path.len() + 1);
     out.push_str(verb);
     out.push('_');
     for c in path.chars() {
-        if c.is_ascii_alphanumeric() || c == '_' {
-            out.push(c);
-        } else {
-            out.push('_');
+        match c {
+            '/' => out.push_str("__"),
+            c if c.is_ascii_alphanumeric() || c == '_' => out.push(c),
+            _ => out.push('_'),
         }
     }
     out
@@ -175,7 +186,20 @@ fn path_key_is_expressible(path: &str) -> bool {
 ///    写成 query 参数是最常见的错法，工具会认为 URL 里那个 `{id}` 无人认领。
 /// 2. 占位符没有对应参数行的，**照样声明**。用户删了那一行参数但 URL 里占位符还在；
 ///    那时缺声明的是这份文档，不是用户的配置。
-fn parameters(ep: &IrEndpoint, path: &str) -> Vec<Value> {
+///
+/// **请求头也在这里**，落成 `in: header` 的参数条目。OpenAPI 没有独立的「请求头」
+/// 段落，头就是参数的一种位置；导入侧正是按 `in: header` 把它映回 `headers`
+/// （见 `import/openapi/params.rs`），故导出侧写 `in: header`，「导出再导入」这条路
+/// 才接得上——否则头在往返里整个消失。
+///
+/// **不写头的值。** 值里常有凭据与 `{{变量}}`，一份面向人的契约文档不该带它们；
+/// query 参数同样只写名字（见上）。头**在不在**这件事由条目本身表达了。
+fn parameters(
+    ep: &IrEndpoint,
+    path: &str,
+    pointer: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<Value> {
     let placeholders = path_placeholders(path);
     let mut out: Vec<Value> = Vec::new();
 
@@ -201,6 +225,36 @@ fn parameters(ep: &IrEndpoint, path: &str) -> Vec<Value> {
         out.push(json!({
             "name": name,
             "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+        }));
+    }
+
+    // 同一个头名只能写一条：OpenAPI 要求 `(name, in)` 唯一，重复的条目会让文档不合规。
+    // 留下的是第一条，被丢的那条要**说出来**——不说是静默丢弃。
+    let mut written: BTreeSet<&str> = BTreeSet::new();
+    for h in ep.headers.iter().filter(|h| h.enabled) {
+        let name = h.key.trim();
+        if name.is_empty() {
+            diagnostics.push(
+                Diagnostic::warn(pointer, "这个请求头没有名字，无法写进文档")
+                    .dropping("无名请求头"),
+            );
+            continue;
+        }
+        if !written.insert(name) {
+            diagnostics.push(
+                Diagnostic::info(
+                    pointer,
+                    "同一个请求头出现了多次，OpenAPI 的参数名必须唯一，只写了第一条",
+                )
+                .dropping(format!("请求头 {name}")),
+            );
+            continue;
+        }
+        out.push(json!({
+            "name": name,
+            "in": "header",
             "required": true,
             "schema": { "type": "string" },
         }));
@@ -250,12 +304,20 @@ pub fn to_document(ex: &Exchange, format: DocFormat) -> Result<Document, AppErro
         for ep in p.endpoints {
             b.operation(ep, p.servers, p.group);
         }
+        // 集合与模块上的脚本同样表达不了。集合没有文档位置（它落成 tag），故指针
+        // 指回它在树里的身份——导出侧的 `key` 就是 `nodes.id`。
+        for c in p.collections {
+            b.report_scripts(&c.scripts, &format!("/nodes/{}", c.key), "集合");
+        }
         stack.extend(
             p.collections
                 .iter()
                 .rev()
                 .map(|c| Pending::collection(c, p.servers, p.group)),
         );
+    }
+    for m in &ex.modules {
+        b.report_scripts(&m.scripts, &format!("/nodes/{}", m.key), "模块");
     }
 
     let mut doc = Map::new();
