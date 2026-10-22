@@ -73,7 +73,7 @@ serde_json_path = "0.7"
 #
 # **不要开 `rust-alloc` / `allocator`**：`set_memory_limit` 在使用自定义分配器时是
 # no-op，内存上限会静默失效，而那正是本项目对沙箱的硬承诺。
-rquickjs = { version = "0.12", default-features = false, features = ["std"] }
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 
 # 配置哈希（oauth2 token 缓存的主键）。已经因 Tauri 侧 `soup3` 的传递依赖进了
 # Cargo.lock 并在 Windows 上参与编译，故这里不会多拉一个新 crate。
