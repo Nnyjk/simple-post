@@ -33,6 +33,15 @@ updates:
     # 升上去 `npm ci` 就 ERESOLVE，Web job 连 lint 都跑不起来。
     # 只挡 7.x：6.0.3 落在 `<6.1.0` 里，仍可正常升级。
     #
+    # 下面两条挡的是「Tailwind v4 的迁移」，不是挡「Tailwind v4 本身」。
+    # `ignore` 只让 Dependabot 不再自动提这次升级，人工开的迁移 PR 不受影响——
+    # 它决定的是「谁来提出这次升级」，不是「能不能升级」。
+    #
+    # **迁移完成后必须删掉这两条。** 迁移把 tailwindcss 提到 4.x 之后，
+    # `>=4.0.0` 会继续挡住 4.x 的补丁升级；`>=3.0.0` 会继续挡住
+    # tailwind-merge 3.x 的补丁升级。删掉它们，Dependabot 才能重新跟上
+    # 这两个包的常规升级。
+    #
     # tailwindcss 4.x 是 CSS-first 的大版本：配置从 `tailwind.config.js` 搬进
     # CSS 的 `@theme`，`@tailwind base/components/utilities` 改成 `@import`，
     # PostCSS 插件拆到 `@tailwindcss/postcss`，`darkMode: 'class'` 改成
