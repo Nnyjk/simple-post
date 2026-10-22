@@ -1,8 +1,72 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 的入口。`@tailwind base/components/utilities` 三个指令在 v4
+ * 里换成了 `@import "tailwindcss"`——它把 base、components、utilities 三层
+ * 一次引入，并开启 v4 的自动源码探测（不再需要 `content` 数组）。
+ *
+ * `@config` 把主题继续留在 `tailwind.config.js` 里，不搬进 CSS。原因：
+ * 本项目覆盖了整套 `borderRadius`（`rounded` = 4px、`rounded-sm` = 3px、
+ * `rounded-md` = 4px、`rounded-lg` = 6px），而 v4 把圆角刻度改了名
+ * （v3 的 `rounded-sm` 在 v4 里叫 `rounded-xs`，`rounded` 变成 `rounded-sm`）。
+ * 配置留在 JS 里，这些名字与数值就与 v3 完全一致，不必逐个改名。
+ */
+@import 'tailwindcss';
+@config "../../tailwind.config.js";
+
+/* Tailwind v4 的渐变默认在 oklab 空间插值：原生名 `bg-linear-to-br` 在支持
+ * `linear-gradient(in lab, …)` 的浏览器里把方向写成 `to bottom right in oklab`，
+ * 旧浏览器才回退到 sRGB。v3 全程是 sRGB。
+ *
+ * 两者在同一对颜色之间混出来的中间色不同：欢迎页那个品牌色块
+ * （`bg-linear-to-br from-primary to-hue-project`）中段在 oklab 下偏亮约
+ * 10/255（红通道 61 → 71），蓝紫之间的过渡也不同。
+ *
+ * 项目对这个色块的颜色是手工调过的，故这里把插值固定回 sRGB，迁移前后颜色
+ * 完全一致。删掉这一段就会回到 v4 的默认（现代浏览器走 oklab）。
+ */
+@layer utilities {
+  .bg-linear-to-br {
+    --tw-gradient-position: to bottom right;
+  }
+}
 
 @layer base {
+  /* Tailwind v3 的 preflight 有 `button, [role=button] { cursor: pointer }`
+   * 与 `:disabled { cursor: default }`，v4 的 preflight 删掉了这两条。
+   *
+   * 本项目大量使用原生 `<button>`（命令面板、项目树、标签页、顶栏下拉、
+   * 导入导出工具条等），全项目只有 8 处显式写了 `cursor-pointer`。少了上面
+   * 那条规则，所有可点区域都会退回默认箭头——这是迁移必须补回来的一处。
+   */
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+
+  :disabled {
+    cursor: default;
+  }
+
+  /* v3 的 preflight 归一化过这三个浏览器内建控件，v4 删掉了。
+   *
+   * - 搜索框：v3 用 `-webkit-appearance: textfield` 去掉 Chrome 给
+   *   `input[type=search]` 的圆角外观，并把聚焦描边内收 2px。
+   *   项目里有一处搜索框（设置 → 外观）。
+   * - 文件选择按钮：v3 让 `input[type=file]` 的「选择文件」按钮继承应用字体。
+   *   项目里有一处文件输入（导入 / 导出对话框）。
+   */
+  input[type='search'] {
+    -webkit-appearance: textfield;
+    outline-offset: -2px;
+  }
+
+  ::-webkit-search-decoration {
+    -webkit-appearance: none;
+  }
+
+  ::-webkit-file-upload-button {
+    -webkit-appearance: button;
+    font: inherit;
+  }
+
   :root {
     /* ------------------------------------------------------------------
      * Surfaces are a LIGHTNESS LADDER, not a set of near-identical

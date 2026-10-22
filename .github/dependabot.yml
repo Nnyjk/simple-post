@@ -32,36 +32,9 @@ updates:
     # typescript-eslint 还没支持 TS 7（peer 仍是 `>=4.8.4 <6.1.0`），
     # 升上去 `npm ci` 就 ERESOLVE，Web job 连 lint 都跑不起来。
     # 只挡 7.x：6.0.3 落在 `<6.1.0` 里，仍可正常升级。
-    #
-    # 下面两条挡的是「Tailwind v4 的迁移」，不是挡「Tailwind v4 本身」。
-    # `ignore` 只让 Dependabot 不再自动提这次升级，人工开的迁移 PR 不受影响——
-    # 它决定的是「谁来提出这次升级」，不是「能不能升级」。
-    #
-    # **迁移完成后必须删掉这两条。** 迁移把 tailwindcss 提到 4.x 之后，
-    # `>=4.0.0` 会继续挡住 4.x 的补丁升级；`>=3.0.0` 会继续挡住
-    # tailwind-merge 3.x 的补丁升级。删掉它们，Dependabot 才能重新跟上
-    # 这两个包的常规升级。
-    #
-    # tailwindcss 4.x 是 CSS-first 的大版本：配置从 `tailwind.config.js` 搬进
-    # CSS 的 `@theme`，`@tailwind base/components/utilities` 改成 `@import`，
-    # PostCSS 插件拆到 `@tailwindcss/postcss`，`darkMode: 'class'` 改成
-    # `@custom-variant dark`。这些改动要一次做完并逐屏核对样式，不能由依赖
-    # 升级带进来 —— PR #56 就是这么把 `vite build` 弄红的（PostCSS 直接报
-    # 「tailwindcss 的 PostCSS 插件已拆到 @tailwindcss/postcss」）。
-    #
-    # tailwind-merge 3.x 只认 Tailwind v4 的类名表。上游 README 写明
-    # 「用 Tailwind v3 请留在 2.6.0」。本项目的 tailwindcss 还停在 3.x，
-    # 两者必须同进同出：v3 把 `bg-gradient-to-br` 与 `bg-<颜色>` 判成互相
-    # 覆盖，而 Tailwind v3 里这两者本该共存（前者是 `background-image`，
-    # 后者是 `background-color`）。今天没有调用点撞上，但一旦撞上渐变会
-    # 静默消失，而 CI 抓不到这种回归。
     ignore:
       - dependency-name: 'typescript'
         versions: ['>=7.0.0']
-      - dependency-name: 'tailwindcss'
-        versions: ['>=4.0.0']
-      - dependency-name: 'tailwind-merge'
-        versions: ['>=3.0.0']
     labels:
       - dependencies
       - frontend

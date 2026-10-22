@@ -105,7 +105,7 @@ export function WelcomeScreen() {
           <div className="space-y-3">
             <div
               data-welcome-stagger
-              className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-hue-project shadow-lg"
+              className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br from-primary to-hue-project shadow-lg"
             >
               <AppIcon className="h-7 w-7" />
             </div>
