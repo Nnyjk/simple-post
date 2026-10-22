@@ -1,19 +1,31 @@
 //! HTTP 执行类 MCP 工具 —— 共 2 个：`api_run_request`（临时请求，不挂端点）与
 //! `api_call_endpoint`（按 id 解析并发出端点）。
 //!
-//! 两者汇到同一条执行与结果封装路径，所以不论来源，输出形状一致。本文件只放登记、
-//! 入参形状与两个 handler；入参的压平在 `input.rs`，结果信封在 `envelope.rs`。
+//! 两者汇到同一条执行与结果封装路径，所以不论来源，输出形状一致。**两者也走同一个
+//! 解析器**：`variable_fill::resolve_endpoint`。临时请求先被拼成一份内存里的
+//! `EndpointDetail`，再交给它解析，故「变量替换 / base URL 拼接 / 鉴权派生 /
+//! header 排序 / body 判空」这些规则只有一份实现 —— 不会因为「发临时请求」而另有一套
+//! 拼接规则。
+//!
+//! 本文件只放登记、入参形状与两个 handler；入参的压平在 `input.rs`，结果信封在
+//! `envelope.rs`。
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::mcp::{AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
-use simple_post_core::domain::{EndpointDetail, Environment};
+use crate::variable_fill::ResolvedEndpoint;
+use simple_post_core::db::DbPool;
+use simple_post_core::domain::{
+    EndpointDetail, Environment, Project, RequestBody, RequestSettings,
+};
 use simple_post_core::error::AppError;
-use simple_post_core::http_executor::{self, HttpRequestInput};
 
 use self::envelope::build_result_envelope;
-use self::input::{apply_base_url, extract_endpoint_settings, extract_settings, format_method};
+use self::input::{
+    extract_endpoint_settings, extract_settings, flatten_key_values, format_method, parse_auth,
+    parse_body_mode,
+};
 
 // =========================================================================
 // Args 形状
@@ -23,16 +35,23 @@ use self::input::{apply_base_url, extract_endpoint_settings, extract_settings, f
 struct RunRequestArgs {
     method: String,
     url: String,
+    /// 请求头。接受 `{"Foo": "bar"}`、`[["Foo","bar"]]`、
+    /// `[{"key": "Foo", "value": "bar", "enabled": false}]` 三种形状。
     #[serde(default)]
-    #[allow(dead_code)] // JSON Schema 为向前兼容而接受，当前未实现
     headers: Option<Value>,
+    /// 查询参数。形状与请求头相同。
     #[serde(default)]
-    #[allow(dead_code)] // JSON Schema 为向前兼容而接受，当前未实现
     params: Option<Value>,
     #[serde(default)]
     body: Option<String>,
+    /// body 的模式（`none` / `json` / `form` / `raw` / `multipart`）。
+    /// 给了 body 而没给模式时算 `raw`。
     #[serde(default)]
-    #[allow(dead_code)] // JSON Schema 为向前兼容而接受，当前未实现
+    body_mode: Option<String>,
+    /// 鉴权方案，形状与端点存的那份一致：
+    /// `{"kind": "bearer", "bearer": "…"}` / `{"kind": "basic", "basic": {…}}` /
+    /// `{"kind": "apikey", "apikey": {…}}` / `{"kind": "oauth2", "oauth2": {…}}`。
+    #[serde(default)]
     auth: Option<Value>,
     #[serde(default)]
     env_id: Option<String>,
@@ -71,16 +90,66 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         ToolEntry {
             name: "api_run_request",
             description:
-                "Run an ad-hoc HTTP request. Supports env/baseUrl resolution, auth, and settings overrides. A base URL is read from moduleBaseUrls[base_url_definition_id][module_id], so both ids are needed to prepend one.",
+                "Run an ad-hoc HTTP request. The request is assembled by the same resolver the stored endpoints use: env variables, baseUrl, auth, params and body all follow the endpoint rules. A base URL is read from moduleBaseUrls[base_url_definition_id][module_id], so both ids are needed to prepend one.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "method": { "type": "string" },
                     "url": { "type": "string" },
-                    "headers": { "type": "object" },
-                    "params": { "type": "object" },
+                    "headers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
+                    "params": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
                     "body": { "type": "string" },
-                    "auth": { "type": "object" },
+                    "body_mode": {
+                        "type": "string",
+                        "enum": ["none", "json", "form", "raw", "multipart"],
+                        "description": "How to frame the body. Defaults to raw when a body is given, none otherwise. multipart takes the same JSON array of parts the endpoint body stores."
+                    },
+                    "auth": {
+                        "type": "object",
+                        "properties": {
+                            "kind": { "type": "string", "enum": ["none", "bearer", "basic", "apikey", "oauth2"] },
+                            "bearer": { "type": "string" },
+                            "basic": {
+                                "type": "object",
+                                "properties": {
+                                    "username": { "type": "string" },
+                                    "password": { "type": "string" }
+                                }
+                            },
+                            "apikey": {
+                                "type": "object",
+                                "properties": {
+                                    "key": { "type": "string" },
+                                    "value": { "type": "string" },
+                                    "inLocation": { "type": "string", "enum": ["header", "query"] }
+                                }
+                            },
+                            "oauth2": { "type": "object" }
+                        },
+                        "required": ["kind"]
+                    },
                     "env_id": { "type": "string" },
                     "base_url_definition_id": { "type": "string" },
                     "module_id": { "type": "string" },
@@ -124,54 +193,84 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
         return Err(AppError::Validation("url must not be empty".into()));
     }
 
-    // 解析 URL：取 env 变量并前置选定的 baseUrl。解析器本体在 variable_fill，
-    // 这里复用它的底层原语，好让同一次 env 驱动的替换在 Tauri 命令与本工具
-    // 两条路上跑出一致结果。
-    let env: Option<Environment> = if let Some(env_id) = a.env_id.as_deref() {
-        Some(simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::environments::get(c, env_id)
-        })?)
-    } else {
-        None
+    let method = simple_post_core::domain::parse_http_method(&a.method)?;
+    let headers = flatten_key_values(a.headers.as_ref(), "headers")?;
+    let params = flatten_key_values(a.params.as_ref(), "params")?;
+    let auth = parse_auth(a.auth.as_ref())?;
+    let content = a.body.clone().unwrap_or_default();
+    let body_mode = parse_body_mode(a.body_mode.as_deref(), !content.is_empty())?;
+
+    // 项目 id：base URL 的取值住在 (环境 × 服务 × 模块) 交叉的格子里，而服务属于项目，
+    // 故要知道项目才能读那张表。给了服务 id 就按它找，只给了环境就按环境找。
+    let project_id: Option<String> = match a.base_url_definition_id.as_deref() {
+        Some(def_id) => Some(simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::base_url_defs::project_id_of(c, def_id)
+        })?),
+        None => match a.env_id.as_deref() {
+            Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::environments::lookup_project_id(c, env_id)
+            })
+            .ok(),
+            None => None,
+        },
     };
 
-    let var_map = env
-        .as_ref()
-        .map(|e| e.variables.clone())
-        .unwrap_or_default();
-    let substituted = crate::variable_fill::resolve_template(&a.url, &var_map);
-    let (final_url, base_url_used) = apply_base_url(
-        &substituted.resolved,
-        env.as_ref(),
-        a.base_url_definition_id.as_deref(),
-        a.module_id.as_deref(),
+    // 环境：给了 id 就用它；没给就取项目当前激活的那个 —— 与 `api_call_endpoint`
+    // 同一套规则（`mcp::resolve_env`）。取不到（环境已被删）时降级成「这次请求不做
+    // 变量替换」，而不是让整次调用失败。
+    let env = crate::mcp::resolve_env(
+        &state.pool,
+        a.env_id.as_deref(),
+        project_id.as_deref().unwrap_or(""),
+    )?;
+
+    let project = project_for(&state.pool, project_id.as_deref());
+
+    // 临时请求没有 `nodes` 行，故 `node_id` 是占位值 —— 解析器不用它。
+    let detail = EndpointDetail {
+        node_id: String::new(),
+        method: method.clone(),
+        url: a.url.clone(),
+        environment_id: a.env_id.clone(),
+        base_url_definition_id: a.base_url_definition_id.clone(),
+        base_url_override: None,
+        params,
+        headers,
+        body: RequestBody {
+            mode: body_mode,
+            content,
+            schema: None,
+        },
+        auth,
+        docs: None,
+        notes: None,
+        tags: vec![],
+        pre_request_script: None,
+        test_script: None,
+    };
+
+    let overrides = crate::variable_fill::EndpointOverrides {
+        module_id: a.module_id.clone(),
+        ..Default::default()
+    };
+    let resolved =
+        crate::variable_fill::resolve_endpoint(&detail, env.as_ref(), &project, Some(&overrides))?;
+
+    let settings = resolve_settings(
+        &state.pool,
+        extract_settings(&a.settings_override, &a),
+        a.settings_override.as_ref(),
     );
 
-    let headers = flatten_string_map(a.headers.as_ref(), "headers")?;
-    let body = a.body.clone();
-
-    let (timeout_ms, follow_redirects, max_kb) = extract_settings(&a.settings_override, &a);
-
-    let input = HttpRequestInput {
-        method: a.method.to_ascii_uppercase(),
-        url: final_url.clone(),
-        headers: headers.clone(),
-        body: body.clone(),
-        timeout_ms: timeout_ms.unwrap_or(30_000),
-        follow_redirects: follow_redirects.unwrap_or(true),
-        max_response_size_kb: max_kb.unwrap_or(10_240),
-    };
-
-    state.metrics.inc();
-    let result = http_executor::execute(&input).await;
-    Ok(build_result_envelope(
-        &a.method,
-        &final_url,
-        &result,
-        Some(base_url_used),
-        Some(substituted.missing),
+    send_resolved(
+        state,
+        &format_method(&method),
+        resolved,
+        env.as_ref(),
         None,
-    ))
+        settings,
+    )
+    .await
 }
 
 async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
@@ -187,16 +286,11 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint").await?;
 
-    // env / project 取不到就降级：悬空的 env id（例如环境已被删）不至于让调用
-    // 失败，只是这次请求不做变量替换。
-    let env: Option<Environment> = if let Some(env_id) = endpoint.environment_id.as_deref() {
-        simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::environments::get(c, env_id)
-        })
-        .ok()
-    } else {
-        None
-    };
+    // 环境：端点自己绑定的优先；没绑定就取项目当前激活的那个 —— 与界面那侧一致
+    // （界面用的是工作区当前环境，而工作区的切换会写 `environments.is_active`）。
+    let env =
+        crate::mcp::resolve_env(&state.pool, endpoint.environment_id.as_deref(), &project_id)?;
+
     let project = if !project_id.is_empty() {
         simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::projects::get(c, &project_id)
@@ -224,8 +318,7 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         .flatten();
     }
 
-    let project_ref: &simple_post_core::domain::Project =
-        project.as_ref().unwrap_or(&EMPTY_PROJECT);
+    let project_ref: &Project = project.as_ref().unwrap_or(&EMPTY_PROJECT);
     let resolved = crate::variable_fill::resolve_endpoint(
         &endpoint,
         env.as_ref(),
@@ -233,8 +326,53 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         Some(&overrides),
     )?;
 
-    let method_str = format_method(&endpoint.method);
-    let (timeout_ms, follow_redirects, max_kb) = extract_endpoint_settings(&a.settings_override);
+    let settings = resolve_settings(
+        &state.pool,
+        extract_endpoint_settings(&a.settings_override),
+        a.settings_override.as_ref(),
+    );
+
+    send_resolved(
+        state,
+        &format_method(&endpoint.method),
+        resolved,
+        env.as_ref(),
+        Some(endpoint.node_id.clone()),
+        settings,
+    )
+    .await
+}
+
+// =========================================================================
+// 两个工具共用的发送路径
+// =========================================================================
+
+/// 一份已解析好的请求 → 发出 → 结果信封。
+///
+/// 两个发送工具共用它，故「解析之后发生什么」只有一份实现：oauth2 的 token 注入、
+/// multipart 的装配、脚本链、发送、结果封装。
+///
+/// `endpoint_id` 决定脚本链能不能装配（有它才有 collection 那几段）；临时请求没有
+/// 端点，故传 `None` —— 它的请求里没有脚本可跑。
+async fn send_resolved(
+    state: &AppState,
+    method: &str,
+    resolved: ResolvedEndpoint,
+    env: Option<&Environment>,
+    endpoint_id: Option<String>,
+    settings: RequestSettings,
+) -> Result<CallToolResult, AppError> {
+    let ResolvedEndpoint {
+        url,
+        headers,
+        body,
+        body_mode,
+        auth,
+        missing_vars,
+        ..
+    } = resolved;
+    let mut url = url;
+    let mut headers = headers;
 
     // oauth2 的 token 是发请求之前才取到的，`resolve_endpoint`（纯函数）拿不到它，
     // 故注入放在这里而不是那里——`build_headers` 对 bearer/basic/apikey 的处理不受影响。
@@ -243,13 +381,11 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     // oauth2 切到 bearer 的端点仍带着 `oauth2: Some(..)`。只匹配载荷时 header 档碰巧
     // 被 `build_headers` 已写好的 `Authorization` 挡住，而 query 档**不挡**——一个用户
     // 已经不再选择的 token 会被拼进 URL 发出去。
-    let mut url = resolved.url.clone();
-    let mut headers = resolved.headers.clone();
     if let simple_post_core::domain::AuthConfig {
         kind: simple_post_core::domain::AuthType::Oauth2,
         oauth2: Some(cfg),
         ..
-    } = &resolved.auth
+    } = &auth
     {
         let token = simple_post_core::oauth2::ensure_token(&state.pool, cfg).await?;
         simple_post_core::oauth2::inject(cfg, &token, &mut headers, &mut url);
@@ -263,8 +399,8 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     // `resolve_endpoint` 内部同一个 eff_body.mode。两边读不同的值会出两种坏结果——
     // 存 json / 覆盖 multipart 时整条请求没有 Content-Type 且分片原样发出；存 multipart /
     // 覆盖 json 时 body 被换成只有收尾分隔符的壳，调用方传的内容静默消失。
-    let mut body = resolved.body.clone();
-    if resolved.body_mode == simple_post_core::domain::BodyMode::Multipart {
+    let mut body = body;
+    if body_mode == simple_post_core::domain::BodyMode::Multipart {
         body = body
             .take()
             .map(|content| multipart::apply(&mut headers, &content));
@@ -272,39 +408,18 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
 
     // 脚本链跑在同一条序列里：前置脚本改写请求 → 发出 → 测试脚本断言并写回变量。
     // 整条序列由 core 一处实现，故桌面端与 MCP 端不会分叉。
-    //
-    // 变量池与 `resolve_endpoint` 同一套规则：**停用的变量不参与**，脚本看到的
-    // 环境与这次请求看到的是同一个。
-    let variables: std::collections::BTreeMap<String, String> = env
-        .as_ref()
-        .map(|e| {
-            e.variables
-                .iter()
-                .filter(|(k, _)| !e.disabled_variables.iter().any(|d| d == *k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
-
     let outcome = simple_post_core::script::send_with_scripts(
         &state.pool,
         simple_post_core::script::ScriptedSendInput {
-            endpoint_id: Some(endpoint.node_id.clone()),
+            endpoint_id,
             request: simple_post_core::script::ScriptRequest {
-                method: method_str.clone(),
+                method: method.to_string(),
                 url: url.clone(),
                 headers: headers.clone(),
                 body,
             },
-            env: simple_post_core::script::EnvSnapshot {
-                id: env.as_ref().map(|e| e.id.clone()),
-                variables,
-            },
-            settings: simple_post_core::domain::RequestSettings {
-                timeout_ms: timeout_ms.unwrap_or(30_000),
-                follow_redirects: follow_redirects.unwrap_or(true),
-                max_response_size_kb: max_kb.unwrap_or(10_240),
-            },
+            env: env_snapshot(env),
+            settings,
             // MCP 端没有「界面上未保存的草稿」这回事，用的就是存的那份脚本。
             script_override: None,
         },
@@ -313,13 +428,81 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
 
     state.metrics.inc();
     Ok(build_result_envelope(
-        &method_str,
+        method,
         &outcome.request.url,
         &outcome.http,
         None,
-        Some(resolved.missing_vars),
+        Some(missing_vars),
         outcome.script,
     ))
+}
+
+/// 脚本看得到的环境。**与解析用的是同一套变量池**：停用的变量不参与，脚本看到的
+/// 环境与这次请求看到的是同一个。
+fn env_snapshot(env: Option<&Environment>) -> simple_post_core::script::EnvSnapshot {
+    let variables = env
+        .map(|e| {
+            e.variables
+                .iter()
+                .filter(|(k, _)| !e.disabled_variables.iter().any(|d| d == *k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    simple_post_core::script::EnvSnapshot {
+        id: env.map(|e| e.id.clone()),
+        variables,
+    }
+}
+
+/// 本次发送用的出站旋钮（超时 / 跟随重定向 / 最大响应体积）。
+///
+/// 起点是**用户配置的那一份**（`preferences` 的 `request_settings` 行，桌面端在设置
+/// 面板里改的就是它），调用方的覆盖值再盖上去。故界面上把超时调成 5 秒，MCP 侧也是
+/// 5 秒；行缺失时用 `RequestSettings::default()`。
+fn resolve_settings(
+    pool: &DbPool,
+    flat: (Option<u64>, Option<bool>, Option<u64>),
+    override_: Option<&Value>,
+) -> RequestSettings {
+    let mut settings = simple_post_core::db::with_conn(pool, |c| {
+        simple_post_core::db::preferences::request_settings(c)
+    })
+    .unwrap_or_default();
+    if let Some(t) = flat.0 {
+        settings.timeout_ms = t;
+    }
+    if let Some(r) = flat.1 {
+        settings.follow_redirects = r;
+    }
+    if let Some(m) = flat.2 {
+        settings.max_response_size_kb = m;
+    }
+    if let Some(v) = override_ {
+        if let Some(n) = v.get("timeout_ms").and_then(Value::as_u64) {
+            settings.timeout_ms = n;
+        }
+        if let Some(b) = v.get("follow_redirects").and_then(Value::as_bool) {
+            settings.follow_redirects = b;
+        }
+        if let Some(n) = v.get("max_response_size_kb").and_then(Value::as_u64) {
+            settings.max_response_size_kb = n;
+        }
+    }
+    settings
+}
+
+/// 临时请求要用的项目行。
+///
+/// base URL 的取值住在 (环境 × 服务 × 模块) 交叉的格子里，而服务属于项目，故要知道
+/// 项目才能读那张表。项目 id 的来源（服务 id / 环境 id）在调用处定好了，这里只负责
+/// 取那一行；取不到就用空壳（解析出空 base URL，不猜）。
+fn project_for(pool: &DbPool, project_id: Option<&str>) -> Project {
+    let Some(project_id) = project_id.filter(|id| !id.is_empty()) else {
+        return EMPTY_PROJECT.clone();
+    };
+    simple_post_core::db::with_conn(pool, |c| simple_post_core::db::projects::get(c, project_id))
+        .unwrap_or_else(|_| EMPTY_PROJECT.clone())
 }
 
 // =========================================================================
@@ -330,7 +513,7 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
 // 免得解析这一步去 borrow 一个 `None`。
 // 必须是 `static` 而非 `const`：`&EMPTY_PROJECT` 要拿到的是 `&'static Project`，
 // 引用 `const` 会产生语句结束即释放的临时值，存活的 `&Project` 会触发 E0716。
-static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::domain::Project {
+static EMPTY_PROJECT: Project = Project {
     id: String::new(),
     name: String::new(),
     description: None,
@@ -371,6 +554,18 @@ mod oauth2_tests;
 #[cfg(test)]
 #[path = "http_ops/multipart_mode_test.rs"]
 mod multipart_mode_tests;
+
+#[cfg(test)]
+#[path = "http_ops/multipart_parity_test.rs"]
+mod multipart_parity_tests;
+
+#[cfg(test)]
+#[path = "http_ops/run_request_test.rs"]
+mod run_request_tests;
+
+#[cfg(test)]
+#[path = "http_ops/env_fallback_test.rs"]
+mod env_fallback_tests;
 
 #[cfg(test)]
 #[path = "http_ops/script_test.rs"]

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Hourglass, Repeat, Database, RotateCcw, Send } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
+import { REQUEST_SETTINGS_DEFAULTS } from '@/stores/slices/ui-prefs';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -9,11 +10,10 @@ import { SettingsCategory, SettingRow } from '../SettingsCategory';
 
 // 「恢复默认恢复到哪里」的唯一真相。做成常量，好让「恢复默认」处理器与禁用态判定对
 // 「什么算被改动过」保持一致。
-const REQUEST_DEFAULTS = {
-  timeoutMs: 30_000,
-  followRedirects: true,
-  maxResponseSizeKb: 5_120,
-} as const;
+//
+// 取自 store 切片里的那一份：后端 `RequestSettings::default()` 与它是同一个数，
+// 界面与 MCP 侧的缺省值因此一致。
+const REQUEST_DEFAULTS = REQUEST_SETTINGS_DEFAULTS;
 
 /**
  * 请求行为 —— 作用于每一次外发 HTTP 调用。

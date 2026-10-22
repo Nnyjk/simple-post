@@ -1,8 +1,8 @@
 //! 把 token 挂到一份已解析好的请求上。
 
 use crate::domain::{OAuth2Auth, OAuth2TokenLocation};
+use crate::url::percent_encode;
 
-use super::form::form_encode;
 use super::OAuth2Token;
 
 /// `Authorization` 的完整取值：`<token_type> <access_token>`（RFC 6749 §7.1）。
@@ -38,6 +38,10 @@ pub fn goes_in_query(cfg: &OAuth2Auth) -> bool {
 /// 用户手写过 `Authorization` 时不覆盖：那与
 /// `variable_fill::build_headers` 对 bearer / basic 的处理一致，也免掉「两个
 /// Authorization」—— 服务端看到的是列表而非覆盖。
+///
+/// query 档的 token 用 [`crate::url::percent_encode`] 编码，与渲染进程那份 TS 实现
+/// 同用一套字符集（JS 的 `encodeURIComponent`）；两边编码不同则同一个 token 在界面
+/// 与 MCP 侧会落到两个 URL 上。
 pub fn inject(
     cfg: &OAuth2Auth,
     token: &OAuth2Token,
@@ -48,8 +52,8 @@ pub fn inject(
         let glue = if url.contains('?') { '&' } else { '?' };
         *url = format!(
             "{url}{glue}{}={}",
-            form_encode(cfg.token_param_or_default()),
-            form_encode(&auth_query_value(token))
+            percent_encode(cfg.token_param_or_default()),
+            percent_encode(&auth_query_value(token))
         );
         return;
     }

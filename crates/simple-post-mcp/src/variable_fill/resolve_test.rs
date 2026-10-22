@@ -348,7 +348,8 @@ fn resolve_endpoint_appends_enabled_params_to_url() {
     ];
     let project = project_with_defs();
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
-    assert!(r.url.contains("q=hello+world"));
+    // 空格是 `%20`（与渲染进程的 `encodeURIComponent` 同字符集），不是 form 编码的 `+`。
+    assert!(r.url.contains("q=hello%20world"));
     assert!(!r.url.contains("disabled="));
     assert!(!r.url.contains("empty="));
 }

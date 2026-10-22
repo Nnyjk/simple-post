@@ -1,5 +1,5 @@
 {
-  "$comment": "两侧请求准备规则的一致性样本。Rust 的 `resolve_endpoint`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。",
+  "$comment": "两侧请求准备规则的一致性样本。Rust 的 `resolve_endpoint`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。`expected.missingVars` 比的是**集合**而非顺序：两侧收集未解析变量的次序各自是本地的（渲染层按它渲染告警胶囊，MCP 侧按它报 `_missing_vars`），契约只承诺「哪些变量没解析出来」。multipart 另有一份样本（`multipart-parity.json`），因为它的 boundary 每次现生成、值无法写死。",
   "cases": [
     {
       "name": "变量替换 + query + bearer 鉴权 + json body",
@@ -28,7 +28,8 @@
           ["Accept", "application/json"],
           ["Authorization", "Bearer abc"]
         ],
-        "body": "{\"id\":\"42\"}"
+        "body": "{\"id\":\"42\"}",
+        "missingVars": []
       }
     },
     {
@@ -54,7 +55,8 @@
           ["Content-Type", "application/x-www-form-urlencoded"],
           ["Accept", "application/json"]
         ],
-        "body": "name=ada"
+        "body": "name=ada",
+        "missingVars": []
       }
     },
     {
@@ -77,7 +79,8 @@
           ["Content-Type", "application/json"],
           ["Accept", "application/json"]
         ],
-        "body": ""
+        "body": "",
+        "missingVars": []
       }
     },
     {
@@ -97,7 +100,97 @@
       "expected": {
         "url": "https://h.test/v1/api",
         "headers": [["Accept", "application/json"]],
-        "body": null
+        "body": null,
+        "missingVars": []
+      }
+    },
+    {
+      "name": "参数值里的空格编码成 %20（不是 form 编码的 +）",
+      "env": {
+        "q": "a b"
+      },
+      "input": {
+        "method": "GET",
+        "urlPath": "/search",
+        "baseUrl": "https://h.test",
+        "params": [{ "id": "p1", "key": "q", "value": "{{q}}", "enabled": true }],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": {
+        "url": "https://h.test/search?q=a%20b",
+        "headers": [["Accept", "application/json"]],
+        "body": null,
+        "missingVars": []
+      }
+    },
+    {
+      "name": "空 key 的参数不进查询串，其中的变量也不报缺失",
+      "env": {},
+      "input": {
+        "method": "GET",
+        "urlPath": "/x",
+        "baseUrl": "https://h.test",
+        "params": [{ "id": "p1", "key": "", "value": "{{unknown}}", "enabled": true }],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": {
+        "url": "https://h.test/x",
+        "headers": [["Accept", "application/json"]],
+        "body": null,
+        "missingVars": []
+      }
+    },
+    {
+      "name": "basic 鉴权：用户名与密码各自模板化，base64 按 UTF-8 字节",
+      "env": {
+        "u": "ada",
+        "p": "s3cret"
+      },
+      "input": {
+        "method": "GET",
+        "urlPath": "/me",
+        "baseUrl": "https://h.test",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "basic", "basic": { "username": "{{u}}", "password": "{{p}}" } }
+      },
+      "expected": {
+        "url": "https://h.test/me",
+        "headers": [
+          ["Accept", "application/json"],
+          ["Authorization", "Basic YWRhOnMzY3JldA=="]
+        ],
+        "body": null,
+        "missingVars": []
+      }
+    },
+    {
+      "name": "apikey 落在 query 上，值里的空格同样编码成 %20",
+      "env": {
+        "k": "a b"
+      },
+      "input": {
+        "method": "GET",
+        "urlPath": "/items",
+        "baseUrl": "https://h.test",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": {
+          "kind": "apikey",
+          "apikey": { "key": "api_key", "value": "{{k}}", "inLocation": "query" }
+        }
+      },
+      "expected": {
+        "url": "https://h.test/items?api_key=a%20b",
+        "headers": [["Accept", "application/json"]],
+        "body": null,
+        "missingVars": []
       }
     }
   ]

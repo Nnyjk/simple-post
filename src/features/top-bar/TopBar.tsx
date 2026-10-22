@@ -32,7 +32,7 @@ export function TopBar() {
   const activeEnv = useActiveEnvironment();
   const openProject = useAppStore((s) => s.openProject);
   const loaded = useAppStore((s) => s.loaded);
-  const setActiveEnvironment = useAppStore((s) => s.setActiveEnvironment);
+  const setEnvironmentActive = useAppStore((s) => s.setEnvironmentActive);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
   const leaveProject = useAppStore((s) => s.leaveProject);
@@ -232,7 +232,10 @@ export function TopBar() {
                       type="button"
                       key={env.id}
                       onClick={() => {
-                        setActiveEnvironment(env.id);
+                        // 写库，不只是改本地状态：「当前环境」是整个工作区共享的一个事实，
+                        // 而 MCP 侧读的是库里那行 `environments.is_active`。只改本地的话，
+                        // 界面按 dev 发请求而 AI 客户端按 prod 发 —— 同一份数据两个答案。
+                        void setEnvironmentActive(env.id);
                         setEnvOpen(false);
                       }}
                       className={cn(

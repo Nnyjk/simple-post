@@ -48,6 +48,11 @@ struct Expected {
     url: String,
     headers: Vec<(String, String)>,
     body: Option<String>,
+    /// 未解析出来的变量名。比的是**集合**而非顺序：两侧收集的次序各自是本地的
+    /// （渲染层按它渲染告警胶囊，MCP 侧按它报 `_missing_vars`），契约只承诺
+    /// 「哪些变量没解析出来」。
+    #[serde(default)]
+    missing_vars: Vec<String>,
 }
 
 fn fixture() -> Fixture {
@@ -131,6 +136,12 @@ fn every_parity_case_resolves_the_same_way() {
             case.name
         );
         assert_eq!(resolved.body, case.expected.body, "{}: body", case.name);
+
+        let mut got = resolved.missing_vars.clone();
+        let mut want = case.expected.missing_vars.clone();
+        got.sort();
+        want.sort();
+        assert_eq!(got, want, "{}: 未解析的变量", case.name);
     }
 }
 

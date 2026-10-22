@@ -162,10 +162,14 @@ function appendQueryString(
   const parts: string[] = [];
   for (const p of params) {
     if (!p.enabled) continue;
+    // 空 key 的参数不会发出，其中的变量不算这次请求的问题，报出来是误报
+    // （与 header 同一条纪律）。故先判 key，再解析值 —— 与 Rust 的
+    // `variable_fill::resolve_endpoint` 同序。
+    if (!p.key) continue;
     const value = resolveVarsWithMissing(p.value, env);
     missing.add(value.missing);
     // 空值判断跑在*解析后*的值上：解析为 "" 的变量与手输的空值同样丢掉该参数
-    if (!p.key || value.value === '') continue; // spec: skip empty keys/values
+    if (value.value === '') continue; // spec: skip empty keys/values
     parts.push(`${encodeURIComponent(p.key)}=${encodeURIComponent(value.value)}`);
   }
   if (parts.length === 0) return url;
@@ -213,20 +217,17 @@ function resolveAuth(
 }
 
 /**
- * 按 body mode 自动补 Content-Type（`none` 返回 `null`）。
+ * 按 body mode 自动补 Content-Type（`none` 与 `multipart` 返回 `null`）。
  *
- * multipart 的值含 boundary，故必须现传进来而不是在这里生成——生成点只有一个
- * （`prepareRequest`），它把同一个字符串同时交给 Content-Type 与 body。
+ * multipart 的 Content-Type 含 boundary，而 boundary 在 `prepareRequest` 里现生成，
+ * 故它由那条路径单独处理（见 `buildOrderedHeaders`）。
  */
-function autoContentType(mode: BodyMode, boundary: string | null): string | null {
+function autoContentType(mode: BodyMode): string | null {
   switch (mode) {
     case 'json':
       return 'application/json';
     case 'form':
       return 'application/x-www-form-urlencoded';
-    case 'multipart':
-      // boundary 只在 multipart 模式下生成，调用方保证它非空
-      return boundary === null ? null : multipartContentType(boundary);
     case 'raw':
       return 'text/plain';
     default:
@@ -241,6 +242,13 @@ function autoContentType(mode: BodyMode, boundary: string | null): string | null
  *
  * `apikey.inLocation === 'query'` 不出 header，调用方通过
  * `appendApikeyToQuery` 拼到 URL 上。
+ *
+ * **multipart 的 Content-Type 位置与其它模式不同。** 它的值含 boundary，而 boundary
+ * 每次请求现生成，故它不能与别的自动 Content-Type 那样在 header 阶段决定位置。
+ * Rust 侧（`variable_fill::build_headers` + `mcp::http_ops::multipart::apply`）的做法是：
+ * multipart 模式在 header 阶段**不**补 Content-Type；装配 body 的那一步若发现用户
+ * 写过 Content-Type 就地替换它的值，没写过就追加到列表**末尾**。本函数照同一规则做，
+ * 故两侧的头部顺序逐条相同。
  */
 function buildOrderedHeaders(
   headers: readonly KeyValue[],
@@ -258,20 +266,24 @@ function buildOrderedHeaders(
     out.push([h.key, r.value]);
   }
 
-  // 按 body.mode 自动补 Content-Type。默认用户已设过（不分大小写）就不加；
-  // 只要 mode 蕴含 body 就补，内容空不空由 `init.body` 那一步单独管。
-  // multipart 例外，见下。
-  const ct = autoContentType(bodyMode, boundary);
-  if (ct) {
-    const existing = out.findIndex(([k]) => k.toLowerCase() === 'content-type');
-    if (existing === -1) {
+  const isMultipart = bodyMode === 'multipart';
+  const multipartCt = isMultipart && boundary !== null ? multipartContentType(boundary) : null;
+  const existingCt = out.findIndex(([k]) => k.toLowerCase() === 'content-type');
+
+  if (multipartCt !== null) {
+    // 用户自己写过 Content-Type：就地替换它的**值**，header 名保留用户的大小写。
+    // 其余模式的 body 是用户手写的，用户那条 Content-Type 有机会描述它；multipart 的
+    // body 是上面那个 boundary 框出来的，用户那条值在结构上描述不了它 ——
+    // 留着就是「发得错」：请求发得出去、服务端解析不出分片，而用户看不出异常。
+    if (existingCt !== -1) {
+      out[existingCt] = [out[existingCt]![0], multipartCt];
+    }
+  } else {
+    // 按 body.mode 自动补 Content-Type。默认用户已设过（不分大小写）就不加；
+    // 只要 mode 蕴含 body 就补，内容空不空由 `init.body` 那一步单独管。
+    const ct = autoContentType(bodyMode);
+    if (ct && existingCt === -1) {
       out.push(['Content-Type', ct]);
-    } else if (bodyMode === 'multipart') {
-      // 覆盖的是**值**，header 名保留用户的大小写。其余模式的 body 是用户手写的，
-      // 用户那条 Content-Type 有机会描述它；multipart 的 body 是上面那个 boundary
-      // 框出来的，boundary 是生成物的一部分，用户那条值在结构上描述不了它——
-      // 留着就是「发得错」：请求发得出去、服务端解析不出分片，而用户看不出异常。
-      out[existing] = [out[existing]![0], ct];
     }
   }
 
@@ -296,6 +308,12 @@ function buildOrderedHeaders(
     if (!out.some(([k]) => k.toLowerCase() === auth.apikey!.key.toLowerCase())) {
       out.push([auth.apikey.key, auth.apikey.value]);
     }
+  }
+
+  // multipart 且用户没写过 Content-Type：追加到末尾，与 Rust 侧
+  // `multipart::apply` 的追加位置一致。
+  if (multipartCt !== null && existingCt === -1) {
+    out.push(['Content-Type', multipartCt]);
   }
 
   return out;

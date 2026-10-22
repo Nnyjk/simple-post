@@ -12,6 +12,7 @@ import type { StateCreator } from 'zustand';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from './app-store';
+import { loadRequestSettings } from './slices/ui-prefs';
 
 /** 状态部分。 */
 export interface BootstrapSliceState {
@@ -288,10 +289,18 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         // 列表命令在没有过滤条件时返回全量数据，避免把 project_id 误传为空。
         const projects = await invokeCmd<Project[]>(COMMANDS.projectsList);
 
+        // 请求旋钮也在第 1 层读：它存在后端的 `preferences` 表里，而设置面板在欢迎页
+        // 上就能打开 —— 旋钮必须在那之前就位，否则面板先显示的是默认值，而用户在
+        // 面板上改的值也会被随后落地的第二层覆盖掉。
+        //
+        // 顺序而非并发：并发时两条命令的发出次序不确定，测试与日志都难读。
+        const requestSettings = await loadRequestSettings();
+
         // 刻意不选默认项目：`activeProjectId` 保持 `''`，欢迎页选择器与树的
         // "无项目"状态都以此为准；进入项目只能走 `openProject`。
         set({
           projects,
+          requestSettings,
           loaded: true,
           bootstrapError: null,
           loading: false,

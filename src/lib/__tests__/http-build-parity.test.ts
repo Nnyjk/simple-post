@@ -21,6 +21,12 @@ interface ParityCase {
     url: string;
     headers: Array<[string, string]>;
     body: string | null;
+    /**
+     * 未解析出来的变量名。比的是**集合**而非顺序：两侧收集的次序各自是本地的
+     * （渲染层按它渲染告警胶囊，MCP 侧按它报 `_missing_vars`），契约只承诺
+     * 「哪些变量没解析出来」。
+     */
+    missingVars?: string[];
   };
 }
 
@@ -59,6 +65,11 @@ describe('prepareRequest 与 Rust 的 resolve_endpoint 产出一致', () => {
       assert.equal(prepared.url, testCase.expected.url, 'URL');
       assert.deepEqual(prepared.headers, testCase.expected.headers, 'header');
       assert.equal(prepared.body, testCase.expected.body, 'body');
+      assert.deepEqual(
+        [...prepared.missingVars].sort(),
+        [...(testCase.expected.missingVars ?? [])].sort(),
+        '未解析的变量',
+      );
     });
   }
 });

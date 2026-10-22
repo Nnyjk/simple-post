@@ -522,6 +522,38 @@ pub async fn check_permission(
 }
 
 // =========================================================================
+// 环境解析 —— 「这次请求按哪个环境解析」的唯一定义
+// =========================================================================
+
+/// 这次发送用哪个环境。
+///
+/// 端点自己绑定的环境优先；没绑定就取项目当前激活的那个 —— 与界面那侧一致：界面用的
+/// 是工作区当前环境，而顶栏的环境切换会写 `environments.is_active`，故两处读到的是
+/// 同一个环境。
+///
+/// 两者都取不到时没有环境：变量不替换，base URL 的格子也无从读。
+pub(crate) fn resolve_env(
+    pool: &simple_post_core::db::DbPool,
+    env_id: Option<&str>,
+    project_id: &str,
+) -> Result<Option<simple_post_core::domain::Environment>, simple_post_core::error::AppError> {
+    if let Some(env_id) = env_id {
+        // 悬空的 env id（例如环境已被删）不至于让调用失败，只是这次请求不做变量替换。
+        return Ok(simple_post_core::db::with_conn(pool, |c| {
+            simple_post_core::db::environments::get(c, env_id)
+        })
+        .ok());
+    }
+    if project_id.is_empty() {
+        return Ok(None);
+    }
+    Ok(simple_post_core::db::with_conn(pool, |c| {
+        simple_post_core::db::environments::get_active(c, project_id)
+    })
+    .unwrap_or(None))
+}
+
+// =========================================================================
 // 测试
 // =========================================================================
 

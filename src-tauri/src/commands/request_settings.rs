@@ -11,7 +11,7 @@ use crate::error::AppError;
 use super::dto::RequestSettingsPatch;
 
 /// 单例 `RequestSettings` 在 `preferences` 里的 KV key；值是 `serde_json` 编码的 JSON。
-const REQUEST_SETTINGS_KEY: &str = "request_settings";
+const REQUEST_SETTINGS_KEY: &str = crate::db::preferences::keys::REQUEST_SETTINGS;
 
 /// 缺行时回退 `RequestSettings::default()`，保证总有值可给。
 #[tauri::command]

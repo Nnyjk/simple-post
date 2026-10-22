@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use base64::Engine as _;
 
 use simple_post_core::domain::{ApiKeyLocation, AuthConfig, AuthType};
+use simple_post_core::url::percent_encode;
 
 use super::template::resolve_template;
 // -------------------------------------------------------------------------
@@ -119,7 +120,11 @@ pub(super) fn append_apikey_query(url: String, auth: &AuthConfig) -> String {
     {
         if a.in_location == ApiKeyLocation::Query && !a.key.is_empty() {
             let glue = if url.contains('?') { '&' } else { '?' };
-            return format!("{url}{glue}{}={}", url_encode(&a.key), url_encode(&a.value));
+            return format!(
+                "{url}{glue}{}={}",
+                percent_encode(&a.key),
+                percent_encode(&a.value)
+            );
         }
     }
     url
@@ -133,28 +138,12 @@ pub(super) fn append_query_string(mut url: String, params: &[(String, String)]) 
         }
         let glue = if first { '?' } else { '&' };
         url.push(glue);
-        url.push_str(&url_encode(k));
+        url.push_str(&percent_encode(k));
         url.push('=');
-        url.push_str(&url_encode(v));
+        url.push_str(&percent_encode(v));
         first = false;
     }
     url
-}
-
-fn url_encode(s: &str) -> String {
-    // 按 `application/x-www-form-urlencoded` 编码（与 TS 侧的 `encodeURIComponent`
-    // 一致）：空格 → `+`，unreserved 集合之外一律 → 大写十六进制 `%XX`。
-    let mut out = String::with_capacity(s.len());
-    for &b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
 }
 
 /// 为 HTTP Basic 鉴权把 `user:pass` 做 base64。先过 UTF-8 字节，所以含非 ASCII 的
