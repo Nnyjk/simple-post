@@ -81,7 +81,7 @@ sha2 = "0.11"
 
 # base64（`Authorization: Basic` 用）。已由 `reqwest` / `hyper-util` 传递依赖进来
 # 并参与编译，所以显式加依赖的边际成本是零 —— 不再手写两份编码器。
-base64 = "0.22"
+base64 = "0.23"
 
 # OAuth2 的 grant / refresh 请求构造（`grant_type`、client 凭据放置、PKCE、
 # `extra_params`、form 编码）。自研这套时 crate 还没进依赖树，所以那笔账不成立；
