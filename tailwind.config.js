@@ -1,4 +1,21 @@
-/** @type {import('tailwindcss').Config} */
+/**
+ * Tailwind v4 的主题配置。
+ *
+ * v4 把主题搬进了 CSS 的 `@theme`，本项目用 `src/styles/globals.css` 里的
+ * `@config "../../tailwind.config.js"` 继续读这个文件——原因见该文件顶部的
+ * 注释（v4 改了圆角刻度的名字，配置留在 JS 里就不必逐个改名）。
+ *
+ * **tailwind-merge 与本文件是配对的，改一个必须改另一个。**
+ * tailwind-merge 2.x 只认 Tailwind v3 的类名表，3.x 只认 Tailwind v4 的类名表。
+ * 配错的后果是 `cn()` 用错规则表判定「谁覆盖谁」，而这种错误不报任何错。
+ *
+ * 具体一例：tailwind-merge 3.x 认为 v3 的兼容名 `bg-gradient-to-br` 与
+ * `bg-<颜色>` 互相覆盖（`cn('bg-gradient-to-br', 'bg-primary')` 只剩
+ * `bg-primary`，渐变被丢掉），而 v4 的原生名 `bg-linear-to-br` 不与颜色冲突。
+ * 两个名字在 v4 的 CSS 里都还能用，故本项目一律用 `bg-linear-*`。
+ *
+ * @type {import('tailwindcss').Config}
+ */
 export default {
   darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
