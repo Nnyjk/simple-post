@@ -21,12 +21,12 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod dynamic_ops;
 pub mod env_ops;
 pub mod http_ops;
 pub mod project_ops;
 pub mod response_parse;
 pub mod variable_fill;
-
 use simple_post_core::permissions::{resolve_capability, Capability, CapabilityPolicy};
 
 // =========================================================================
@@ -298,6 +298,9 @@ fn tool_table() -> &'static [ToolEntry] {
         // response_parse（MCP 适配层）：3 个
         v.extend(response_parse::table());
 
+        // dynamic_ops：动态变量 7 个
+        v.extend(dynamic_ops::table());
+
         v
     })
 }
@@ -374,6 +377,14 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("api_parse_response", Capability::Read),
     ("api_diff_responses", Capability::Read),
     ("api_extract_jsonpath", Capability::Read),
+    // 动态变量。`dynamic_var_resolve` 会真的发出站请求，故与 `api_call_endpoint` 同级。
+    ("dynamic_var_list", Capability::Read),
+    ("dynamic_var_get", Capability::Read),
+    ("dynamic_var_create", Capability::Create),
+    ("dynamic_var_update", Capability::Update),
+    ("dynamic_var_delete", Capability::Delete),
+    ("dynamic_var_resolve", Capability::Send),
+    ("dynamic_var_set_override", Capability::Update),
 ];
 
 /// 在小表 `REQUIRED_CAPABILITY` 上线性查。未知名返回 `None`，调用方必须自己
