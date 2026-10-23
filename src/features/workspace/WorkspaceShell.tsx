@@ -49,6 +49,13 @@ const EntitySettings = lazy(() =>
   import('@/features/workspace/EntitySettings').then((m) => ({ default: m.EntitySettings })),
 );
 
+// 动态变量面板：项目级页面，只在用户打开那个标签时才需要。
+const DynamicVariablesPanel = lazy(() =>
+  import('@/features/dynamic-variables/DynamicVariablesPanel').then((m) => ({
+    default: m.DynamicVariablesPanel,
+  })),
+);
+
 // 对话框：在树里挂载，但只对用户动作有反应，故启动时纯属死重。
 //
 // `NewItemModal` 与 `BootstrapErrorBanner` **不**在这里 —— 两者从欢迎页也触达得到，故由
@@ -153,6 +160,14 @@ export function WorkspaceShell() {
       return (
         <Suspense fallback={<PanelFallback />}>
           <SettingsPanel />
+        </Suspense>
+      );
+    }
+    // 动态变量是项目级的页面，标签 id 就是项目 id。
+    if (activeTab.kind === 'dynamic-variables') {
+      return (
+        <Suspense fallback={<PanelFallback />}>
+          <DynamicVariablesPanel projectId={activeTab.id} />
         </Suspense>
       );
     }

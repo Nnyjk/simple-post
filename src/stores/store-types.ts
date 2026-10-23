@@ -47,7 +47,13 @@ export type NewDraftKind = 'project' | 'module' | 'collection';
  * 在树一刷新的瞬间就被关掉。
  */
 export type TabKind =
-  'project' | 'module' | 'collection' | 'endpoint' | 'endpoint-draft' | 'settings';
+  | 'project'
+  | 'module'
+  | 'collection'
+  | 'endpoint'
+  | 'endpoint-draft'
+  | 'settings'
+  | 'dynamic-variables';
 
 /**
  * 只存在于内存的东西所用的 id 前缀。真实节点 id 是裸 `uid()`，所以 `draft:`

@@ -16,6 +16,15 @@ import { cn } from '@/lib/utils';
 export interface VarEntry {
   key: string;
   value: string;
+  /**
+   * 这一项来自哪里。环境变量没有这个字段（它们是默认的那一半）。
+   *
+   * 动态变量与环境变量并进同一份候选（不新开页签），故用户要能一眼分出哪个是自动取回
+   * 的、哪个是自己填的。
+   */
+  origin?: 'environment' | 'dynamic';
+  /** 动态变量的取值来源与缓存年龄，供悬停时显示。 */
+  hint?: string;
 }
 
 interface EnvVarPickerProps {
@@ -94,19 +103,17 @@ export function EnvVarPicker({
     <div
       ref={popRef}
       role="listbox"
-      aria-label="环境变量"
+      aria-label="变量"
       data-testid="env-var-picker"
       className="fixed z-50 max-h-64 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg animate-fade-in"
       onMouseDown={(e) => e.preventDefault() /* 保持输入框聚焦 */}
     >
       <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 label-caps">
         <ChevronRight className="h-3 w-3" />
-        插入环境变量{envName ? ` · ${envName}` : ''}
+        插入变量{envName ? ` · ${envName}` : ''}
       </div>
       {entries.length === 0 && (
-        <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-          没有匹配的环境变量
-        </div>
+        <div className="px-3 py-6 text-center text-xs text-muted-foreground">没有匹配的变量</div>
       )}
       {entries.map((e, idx) => {
         const active = idx === selected;
@@ -128,6 +135,9 @@ export function EnvVarPicker({
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {truncate(e.value, 60)}
             </span>
+            {e.hint && (
+              <span className="shrink-0 text-[10px] text-muted-foreground/80">{e.hint}</span>
+            )}
           </button>
         );
       })}

@@ -9,6 +9,7 @@ import { useCallback, type RefObject } from 'react';
 import { sendPreparedRequest } from '@/lib/http';
 import { preparedToCurl, type PreparedRequest } from '@/lib/http-build';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
+import { useAppStore } from '@/stores/app-store';
 import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
 import type { ApiResponse, AuthConfig, EnvSnapshot, EnvWrite, ScriptOutcome } from '@/types/domain';
 
@@ -22,6 +23,9 @@ export function useRequestActions({
   isDraft,
   draft,
   prepared,
+  prepareWithDynamic,
+  dynamicNames,
+  environmentId,
   auth,
   env,
   preRequestScript,
@@ -43,6 +47,20 @@ export function useRequestActions({
   isDraft: boolean;
   draft: EndpointDraft | undefined;
   prepared: PreparedRequest;
+  /**
+   * 用给定的动态变量值重新组装请求。
+   *
+   * 发送前若解析出了新的动态变量值，就要用它们重新组装一次——预览用的是 store 里
+   * 上一批值，而发出去的那份必须是刚解析出来的那一份。
+   */
+  prepareWithDynamic: (dynamicVars: Record<string, string>) => PreparedRequest;
+  /** 本次请求引用到的动态变量名。 */
+  dynamicNames: string[];
+  /**
+   * 这次请求解析 `{{x}}` 所依据的环境 id。动态变量的缓存键含环境，故它必须与
+   * `prepareRequest` 用的那份环境是同一份。
+   */
+  environmentId?: string;
   auth: AuthConfig;
   /** 脚本看得到的环境。与解析用的是同一份变量池。 */
   env: EnvSnapshot | undefined;
@@ -67,6 +85,9 @@ export function useRequestActions({
   inFlightRef: RefObject<AbortController | null>;
   setCurlFlash: (v: boolean) => void;
 }) {
+  const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
+
   const handleSend = useCallback(async () => {
     if (!endpointId) return;
     // 校验是请求的前置门。解析不了的 json body 不该让服务端去猜；照发只会让用户对着
@@ -78,13 +99,25 @@ export function useRequestActions({
     inFlightRef.current = ctrl;
     setRequestPending(true);
     try {
+      // 动态变量的值必须在**替换之前**到手：替换一旦发生，变量池里就没有同名变量的
+      // 概念了，而「动态变量压过同名环境变量」这条规则正是在替换之前生效的。
+      // TTL 内命中缓存时后端不发取数请求，故这一步通常是廉价的一次 IPC。
+      let request = prepared;
+      if (dynamicNames.length > 0) {
+        const { values } = await resolveDynamicVariables(
+          activeProjectId,
+          dynamicNames,
+          environmentId || undefined,
+        );
+        request = prepareWithDynamic(values);
+      }
       // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
       // 这正是未保存的草稿也能发送的原因：没有 `endpointId` 要查，也没有东西要先持久化。
       //
       // ENV 药丸只存在于 Zustand，数据库的 `is_active` 不跟随它，故解析必须基于界面上的
       // `endpointEnv` —— `prepareRequest` 已经折进去了。
       const { response: resp, script } = await sendPreparedRequest({
-        request: prepared,
+        request,
         // 与 `prepared` 用的是同一份 auth：OAuth2 要靠它取 token，`prepared` 本身
         // 不含（token 只有发出去的那一刻才拿得到）。
         auth,
@@ -123,6 +156,11 @@ export function useRequestActions({
     runValidation,
     inFlightRef,
     prepared,
+    prepareWithDynamic,
+    dynamicNames,
+    environmentId,
+    resolveDynamicVariables,
+    activeProjectId,
     auth,
     env,
     preRequestScript,

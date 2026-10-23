@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, Suspense } from 'react';
-import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Loader2 } from 'lucide-react';
+import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Loader2, Braces } from 'lucide-react';
 import { useAppStore, useActiveProject, useActiveEnvironment } from '@/stores/app-store';
 import { useMcpStatus } from '@/lib/use-mcp-status';
 import { AppIcon } from '@/components/ui/app-icon';
@@ -34,6 +34,7 @@ export function TopBar() {
   const loaded = useAppStore((s) => s.loaded);
   const setEnvironmentActive = useAppStore((s) => s.setEnvironmentActive);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
+  const openTab = useAppStore((s) => s.openTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
   const leaveProject = useAppStore((s) => s.leaveProject);
 
@@ -276,6 +277,21 @@ export function TopBar() {
             </div>
           )}
         </div>
+      )}
+
+      {/* 动态变量入口。项目级页面：标签 id 就是项目 id，故这里点的是当前项目。 */}
+      {activeProjectId !== '' && (
+        <Tooltip content="动态变量" side="bottom">
+          <Button
+            {...NO_DRAG}
+            variant="ghost"
+            size="icon"
+            onClick={() => openTab('dynamic-variables', activeProjectId)}
+            aria-label="动态变量"
+          >
+            <Braces className="h-4 w-4" />
+          </Button>
+        </Tooltip>
       )}
 
       {/* 搜索框 —— 点击打开命令面板。 */}

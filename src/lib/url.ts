@@ -200,6 +200,29 @@ export function resolveVarsWithMissing(
 }
 
 /**
+ * 列出字符串里出现的**全部** `{{name}}` 标记名，按首次出现去重。
+ *
+ * 与 [`resolveVarsWithMissing`] 的区别是：那个只报告**没解析出来**的名字，这个报告
+ * **出现过**的名字。动态变量要知道自己有没有被请求引用，就得问这个——一个同名的环境变量
+ * 会让 `{{name}}` 解析成功，于是「没解析出来」那个清单里根本没有它。
+ *
+ * 名字只接受 `\w+`（`[A-Za-z0-9_]+`），与 Rust 的 `core::template::list_missing_vars`
+ * 是同一套判据。
+ */
+export function listVars(input: string): string[] {
+  if (!input) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const match of input.matchAll(/\{\{(\w+)\}\}/g)) {
+    const name = match[1]!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/**
  * `resolveVarsWithMissing`，丢弃 missing 列表。保留这个名字是因为既有调用方都
  * import 它——两者同一实现，`{{x}}` 不可能在这里存活却被那里报出来。
  */

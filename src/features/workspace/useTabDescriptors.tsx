@@ -1,4 +1,4 @@
-import { Package, FolderOpen, FolderClosed, Hash, Settings2 } from 'lucide-react';
+import { Package, FolderOpen, FolderClosed, Hash, Settings2, Braces } from 'lucide-react';
 import { useAppStore, type OpenTab, type TabKind } from '@/stores/app-store';
 import { MethodPill } from '@/components/ui/method-pill';
 import { HUE } from '@/lib/hue';
@@ -11,6 +11,7 @@ export const KIND_LABEL: Record<TabKind, string> = {
   // `missingDescriptor`，唯一诚实的标签是"未保存"而不是"已删除"。
   'endpoint-draft': '未保存',
   settings: '设置',
+  'dynamic-variables': '动态变量',
 };
 export interface TabDescriptor {
   tab: OpenTab;
@@ -59,6 +60,17 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         tab: t,
         title: '设置',
         icon: <Settings2 className="h-3.5 w-3.5" />,
+        iconColor: 'text-muted-foreground',
+      });
+      continue;
+    }
+    if (t.kind === 'dynamic-variables') {
+      // 动态变量是项目级的页面，标签 id 就是项目 id——标题固定，页面上列的是
+      // 该项目的全部定义。
+      out.push({
+        tab: t,
+        title: '动态变量',
+        icon: <Braces className="h-3.5 w-3.5" />,
         iconColor: 'text-muted-foreground',
       });
       continue;

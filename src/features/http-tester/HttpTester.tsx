@@ -16,7 +16,8 @@ import { useUrlVarPicker } from './useUrlVarPicker';
 import { useRequestActions } from './useRequestActions';
 import { RequestTabPanels } from './RequestTabPanels';
 import { useEndpointContext } from './useEndpointContext';
-import { EnvVarPicker } from './EnvVarPicker';
+import { EnvVarPicker, type VarEntry } from './EnvVarPicker';
+import { listDynamicNames } from '@/lib/dynamic-vars';
 
 const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
   { id: 'params', label: 'Params' },
@@ -65,6 +66,13 @@ export function HttpTester() {
   const draftSaveError = useAppStore((s) => s.draftSaveError);
   const requestPending = useAppStore((s) => s.requestPending);
   const requestSettings = useAppStore((s) => s.requestSettings);
+  // 动态变量：本项目的定义与它们当前的取值。
+  const dynamicVariables = useAppStore((s) => s.dynamicVariables);
+  const dynamicValues = useAppStore((s) => s.dynamicValues);
+  const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
+  const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
+  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
 
   const [tab, setTab] = useState<TabId>('params');
   const [curlFlash, setCurlFlash] = useState(false);
@@ -91,6 +99,10 @@ export function HttpTester() {
     endpoint,
     detail,
   );
+
+  // 动态变量的缓存键含环境，故这里用的是**这个接口**解析 `{{x}}` 所依据的那份环境
+  // （接口自选的环境，没有就用工作区当前环境）——与 `endpointEnv` 同一个来源。
+  const dynamicEnvId = endpointEnv?.id ?? activeEnvironmentId;
 
   // 脚本看得到的环境。与解析用的是**同一份变量池**（停用的变量不参与），
   // 否则 `pm.environment.get('token')` 读到的与请求里替换进去的不是同一个值。
@@ -222,6 +234,29 @@ export function HttpTester() {
     [allEndpointDetails],
   );
 
+  // 变量选择器的条目：环境变量与动态变量并进同一份候选（不新开页签）。
+  const dynamicEntries = useMemo<VarEntry[]>(() => {
+    const bucket = dynamicValues[dynamicEnvId] ?? {};
+    return dynamicVariables.map((v) => {
+      const status = bucket[v.name];
+      const source = status?.source ?? v.source;
+      const fetchedAt = status?.fetchedAt ?? v.fetchedAt;
+      return {
+        key: v.name,
+        value: status?.value ?? v.value ?? '',
+        origin: 'dynamic' as const,
+        hint:
+          source === 'override'
+            ? '手动改的'
+            : source === 'stale'
+              ? '已过期'
+              : fetchedAt
+                ? `${Math.max(0, Math.round((Date.now() - fetchedAt) / 1000))} 秒前取回`
+                : undefined,
+      };
+    });
+  }, [dynamicVariables, dynamicValues, dynamicEnvId]);
+
   // EnvVarPicker 状态 —— 用户在 URL 输入框敲 `{{` 时打开。选择器是纯展示：选中项与
   // 过滤条目据当前环境 + 最后一个 `{{` 之后输入的片段派生，写回仍由本组件的草稿完成。
   const {
@@ -236,6 +271,7 @@ export function HttpTester() {
     focusUrlForFullAddress,
   } = useUrlVarPicker({
     endpointEnv,
+    dynamicEntries,
     liveUrl,
     urlInputRef,
     onUrlChange: (next) => {
@@ -277,12 +313,57 @@ export function HttpTester() {
   // 草稿与当前激活的接口同步
   const method = draft?.method ?? detail?.method ?? 'GET';
 
-  // 请求的最终线上形态，只组装**一次**。
+  // ---------------------------------------------------------------------------
+  // 动态变量
+  // ---------------------------------------------------------------------------
+
+  // 本项目的动态变量定义。面板与请求编辑器都读同一份，故两处看到的东西一样。
+  useEffect(() => {
+    if (activeProjectId === '') return;
+    void loadDynamicVariables(activeProjectId, dynamicEnvId || undefined);
+  }, [activeProjectId, dynamicEnvId, loadDynamicVariables]);
+
+  // 这个请求引用了哪些动态变量。
   //
-  // 发送与 cURL 预览读同一个对象 —— 这正是此安排的全部意义：预览现在是发送所发字节的
-  // 序列化，不可能描述出另一个请求。
-  const prepared = useMemo(
-    () =>
+  // 扫的是**未替换**的模板，故同名环境变量也会被扫出来——动态变量在替换时压过环境变量
+  // （见 `mergePool`），故名单里只留本项目有定义且已启用的那些。
+  const dynamicNames = useMemo(() => {
+    const defined = new Set(dynamicVariables.filter((v) => v.enabled).map((v) => v.name));
+    if (defined.size === 0) return [];
+    return listDynamicNames({
+      baseUrl: resolved.baseUrl,
+      url: liveUrl,
+      params: effective.params,
+      headers: effective.headers,
+      body: effective.body,
+      auth: effective.auth,
+    }).filter((name) => defined.has(name));
+  }, [dynamicVariables, resolved.baseUrl, liveUrl, effective]);
+
+  // 模板或环境变化时重新解析（防抖 300 ms）。TTL 内命中缓存时后端不发取数请求，
+  // 故这一步通常只是一次廉价的 IPC；预览里的 `{{name}}` 也因此很快变成真值。
+  useEffect(() => {
+    if (dynamicNames.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void resolveDynamicVariables(activeProjectId, dynamicNames, dynamicEnvId || undefined);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [dynamicNames, activeProjectId, dynamicEnvId, resolveDynamicVariables]);
+
+  // 当前生效的动态变量值。它们在变量池的最后一步并入，故同名时压过环境变量；
+  // 被停用的环境变量也不影响它们（停用过滤只作用于环境变量）。
+  const dynamicVars = useMemo(() => {
+    const bucket = dynamicValues[dynamicEnvId] ?? {};
+    const out: Record<string, string> = {};
+    for (const [name, status] of Object.entries(bucket)) {
+      if (status.value !== null && status.value !== undefined) out[name] = status.value;
+    }
+    return out;
+  }, [dynamicValues, dynamicEnvId]);
+
+  // 组装请求的唯一入口。发送前若解析出了新的值，用新值再组装一次。
+  const prepare = useCallback(
+    (dynamic: Record<string, string>) =>
       prepareRequest({
         method,
         urlPath: liveUrl,
@@ -292,9 +373,16 @@ export function HttpTester() {
         body: effective.body,
         auth: effective.auth,
         env: endpointEnv,
+        dynamicVars: dynamic,
       }),
     [method, liveUrl, resolved.baseUrl, effective, endpointEnv],
   );
+
+  // 请求的最终线上形态，只组装**一次**。
+  //
+  // 发送与 cURL 预览读同一个对象 —— 这正是此安排的全部意义：预览现在是发送所发字节的
+  // 序列化，不可能描述出另一个请求。
+  const prepared = useMemo(() => prepare(dynamicVars), [prepare, dynamicVars]);
 
   // ---------------------------------------------------------------------------
   // 必须无条件运行的 hook。切走接口会让本组件以更少的 hook 重渲染、React 抛
@@ -338,6 +426,9 @@ export function HttpTester() {
     isDraft,
     draft,
     prepared,
+    prepareWithDynamic: prepare,
+    dynamicNames,
+    environmentId: dynamicEnvId,
     auth: effective.auth,
     env: scriptEnv,
     preRequestScript: effective.preRequestScript,
