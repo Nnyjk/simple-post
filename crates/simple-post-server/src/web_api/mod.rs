@@ -262,16 +262,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // `daemon_http::build_router`：它的内层路由自带 `/mcp` 前缀，再挂一次就成了
     // `/mcp/mcp`。这里直接对共享的 `mcp_state` 注册——与 daemon 子进程同一
     // pool + metrics。
-    let mcp_app_state = state_arc.mcp_state.clone();
-    let mcp_app_state_2 = mcp_app_state.clone();
-    let mcp_app_state_3 = mcp_app_state.clone();
-    let mcp_routes = Router::new()
-        .route(
-            "/mcp",
-            post(move |body: String| mcp_json_rpc_post(mcp_app_state, body)),
-        )
-        .route("/mcp/healthz", get(move || mcp_healthz(mcp_app_state_2)))
-        .route("/mcp/tools", get(move || mcp_tools(mcp_app_state_3)));
+    let mcp_routes = build_mcp_routes(state_arc.mcp_state.clone());
 
     // 静态 SPA。`ServeDir` 给 `/assets/*` 正确的 Range / ETag / Last-Modified，
     // fallback 交给 `index.html` 以支持前端路由。
@@ -343,6 +334,42 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     }
 }
 
+/// 组装 MCP 那三条路由：`/mcp` JSON-RPC、`/mcp/healthz`、`/mcp/tools`。
+///
+/// 主 router 与专用 MCP 监听器共用这一份路由，所以「同一套 dispatch、同一份库、
+/// 同一道权限闸」在两个端口上是同一段代码，而不是两份长得像的实现。
+fn build_mcp_routes(mcp_state: Arc<McpAppState>) -> Router {
+    let json_rpc_state = mcp_state.clone();
+    let healthz_state = mcp_state.clone();
+    let tools_state = mcp_state;
+    Router::new()
+        .route(
+            "/mcp",
+            post(move |body: String| mcp_json_rpc_post(json_rpc_state, body)),
+        )
+        .route("/mcp/healthz", get(move || mcp_healthz(healthz_state)))
+        .route("/mcp/tools", get(move || mcp_tools(tools_state)))
+}
+
+/// 组装只服务 MCP 的 router：挂载路径与 Host/Origin 白名单都取自用户的
+/// `mcp.http_config`。
+///
+/// 复用 [`daemon_http::build_router_with_config`]，而不是自己再拼一套路由：那份
+/// router 带着 MCP 的挂载路径（配置里的路径 + `/mcp` 别名）与 Host/Origin 守卫，
+/// 于是这个专用端口上的 MCP 端点与 daemon 端点行为一致——同一套 dispatch、
+/// 同一份库、同一道白名单。外面再叠主端口那一道 bearer 鉴权，于是两个端口
+/// 对客户端是同一回事：设置面板「连接 → HTTP 服务配置」里写的地址、端口、
+/// 路径、白名单，对这两个端口同时生效。
+pub fn build_mcp_only_router(state: WebState, config: &crate::domain::McpHttpConfig) -> Router {
+    let password = state.password.clone();
+    let router = crate::daemon_http::build_router_with_config(state.mcp_state.clone(), config);
+    let auth_state = crate::auth::AuthState::new(password.as_deref());
+    router.layer(axum::middleware::from_fn_with_state(
+        auth_state,
+        crate::auth::auth_middleware,
+    ))
+}
+
 // -------------------------------------------------------------------------
 // Entry point used by `lib.rs::run_serve_web`.
 // -------------------------------------------------------------------------
@@ -356,6 +383,14 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
 /// `auto_start_daemon` 为 `Some(bool)` 时 CLI 已给定答案，`None` 时由持久化的
 /// `mcp.auto_start` 行决定。在这里解析而非在 `main.rs`：那边会另开一个
 /// `db::init()` 池只为读一个 preference，冷启动就付两次 schema 检查与两个连接池。
+///
+/// **MCP 专用端口由持久化的 `mcp.http_config` 决定**：`port` 非 0 时额外开一个
+/// 只服务 MCP 的监听器（见 [`build_mcp_only_router`]），那个端口上没有 REST、
+/// 没有 SPA，只有 MCP 自己的那组路由；`port` 为 0 时不开，主端口上的 `/mcp`
+/// 照旧可用。
+///
+/// 端口取设置里的那一个，而不是另设一个环境变量：设置面板「连接 → HTTP 服务
+/// 配置」里写的端口，就是对外暴露的那个端口。两处各写一个数字，迟早会对不上。
 pub async fn serve(
     bind_addr: std::net::SocketAddr,
     data_dir: PathBuf,
@@ -383,6 +418,12 @@ pub async fn serve(
         metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
     });
 
+    // MCP 专用监听器的配置：与设置面板那张「HTTP 服务配置」卡片读的是同一行。
+    //
+    // **读不出来就当没配**（端口 0 → 不开）：这一行坏了不该让整个 Web 主机起不来，
+    // 主端口上的 `/mcp` 仍然照常工作。
+    let mcp_config = db::with_conn(&pool, db::preferences::mcp_http_config).unwrap_or_default();
+
     let state = WebState {
         pool,
         daemon: daemon.clone(),
@@ -391,6 +432,9 @@ pub async fn serve(
         password,
         base_path,
     };
+    // 专用 MCP 监听器的 router 必须在 `state` 被 `build_router` 移走之前做好。
+    let mcp_only_router =
+        (mcp_config.port > 0).then(|| build_mcp_only_router(state.clone(), &mcp_config));
     let router = build_router(state, spa_dir);
 
     eprintln!("[serve-web] listening on http://{bind_addr}");
@@ -406,6 +450,39 @@ pub async fn serve(
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
         .map_err(|e| AppError::Validation(format!("bind {bind_addr}: {e}")))?;
+
+    // 第二个监听器：只服务 MCP。两个监听器都在 daemon 预热之前 bind 好，
+    // 所以「端口起不来」是一次启动期的硬错误，而不是运行期某个请求才发现的意外。
+    //
+    // 绑定失败即整体失败：设置里明确写了这个端口，起不来就该在启动时喊出来，
+    // 而不是让容器以「起来了但少了那个端口」的样子被健康检查判为正常。
+    //
+    // 绑定地址取主监听器的地址，不取设置里的 `host`：设置里的那个地址是
+    // **MCP daemon** 的绑定地址，而 daemon 在容器里拿不到宿主网卡的地址
+    // （填宿主 IP 会 bind 失败）。专用端口与 Web 主机绑在同一个地址上，
+    // 谁该访问它由 Host/Origin 守卫决定——那才是访问控制该待的地方。
+    let mcp_listener = match mcp_only_router {
+        Some(mcp_router) => {
+            let mcp_addr = std::net::SocketAddr::new(bind_addr.ip(), mcp_config.port);
+            let listener = tokio::net::TcpListener::bind(mcp_addr)
+                .await
+                .map_err(|e| AppError::Validation(format!("bind MCP listener {mcp_addr}: {e}")))?;
+            eprintln!(
+                "[serve-web] MCP-only listener on http://{mcp_addr}{} (from mcp.http_config)",
+                mcp_config.normalized_path()
+            );
+            Some((listener, mcp_router))
+        }
+        None => None,
+    };
+
+    if let Some((listener, mcp_router)) = mcp_listener {
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, mcp_router).await {
+                eprintln!("[serve-web] MCP-only listener exited with error: {e}");
+            }
+        });
+    }
 
     if want_daemon {
         let dir = data_dir.clone();
@@ -457,3 +534,7 @@ pub fn default_data_dir() -> Result<PathBuf, AppError> {
 // 占位：`Method` 目前未用于按方法分路由，保留以备扩展。
 #[allow(dead_code)]
 const _UNUSED_METHOD: Method = Method::GET;
+
+#[cfg(test)]
+#[path = "mod_test.rs"]
+mod tests;

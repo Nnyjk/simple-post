@@ -70,6 +70,12 @@ curl http://localhost:4173/api/healthz
 
 MCP 客户端接到 `http://host:4173/mcp`，带 `Authorization: Bearer <密码>`。
 
+要**给 MCP 一个自己的端口**，在设置面板「连接 → HTTP 服务配置」里把**端口**填成一个具体数字（如 4174）：服务端会另开一个只服务 MCP 的监听器，那个端口上只有 `/mcp`、`/mcp/healthz`、`/mcp/tools`，没有 REST、没有 SPA。端口填 0 时不单独开端口，MCP 只走主端口。改动要重启服务才生效。
+
+**这是多一个入口，不是搬走原来的那个。** 填了端口之后，主端口上的 `/mcp` 照旧可用——专用端口是额外的一条入口。两者的差别：专用端口走 MCP 自己的 Host / Origin 白名单（见同一张卡片里的那两栏），主端口上的 `/mcp` 不做 Host 校验，只受 Bearer 口令约束。
+
+这个端口就是对外暴露 MCP 的端口，没有第二个地方可以再写一遍——部署侧要发布它时，发布的目标端口必须与设置里写的数字一致。
+
 数据落在 `SIMPLE_POST_DATA_DIR`（未设时为 `%APPDATA%/simple-post`），把它挂到持久卷即可。SQLite 跑在 WAL 模式下，能安全落盘。
 
 #### 反向代理
