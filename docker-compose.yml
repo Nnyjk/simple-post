@@ -28,22 +28,21 @@ services:
     # The MCP endpoint lives on this same port by default (path /mcp).
     ports:
       - '${SP_WEB_BIND:-4173}:4173'
-
-    # OPTIONAL: a dedicated port for MCP only.
-    #
-    # The port number here is the **container-side** port, and it must equal
-    # the port configured in the app (Settings → 连接 → HTTP 服务配置 →
-    # 端口). That field is the single source of truth: a non-zero value makes
-    # the server open a second listener that serves nothing but MCP (no REST,
-    # no SPA), and the published port below has to point at it. With the app
-    # left at 0 (the default), there is no such listener and the mapping
-    # below would point at nothing.
-    #
-    #   ports:
-    #     - target: 4174
-    #       published: 4174
-    #       protocol: tcp
-    #       mode: host
+      # OPTIONAL: a dedicated port for MCP only — uncomment the two lines below
+      # and the server will serve MCP on the container port 4174 as well.
+      #
+      # The `target` is the **container-side** port, and it must equal the
+      # port configured in the app (Settings → 连接 → HTTP 服务配置 → 端口).
+      # That field is the single source of truth: a non-zero value makes the
+      # server open a second listener that serves nothing but MCP (no REST,
+      # no SPA), and the mapping has to point at it. With the app left at 0
+      # (the default), there is no such listener and the mapping would point
+      # at nothing.
+      #
+      # - target: 4174
+      #   published: 4174
+      #   protocol: tcp
+      #   mode: host
 
     environment:
       # Volume mount target. Matches the image's ENV and its `--data-dir`,
