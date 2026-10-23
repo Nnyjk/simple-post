@@ -132,7 +132,7 @@ export function McpHttpConfigSection() {
               disabled={loading}
             />
           </Field>
-          <Field label="端口" hint="0 = 系统分配">
+          <Field label="端口" hint="0 = 不单独开 MCP 端口">
             <Input
               type="number"
               min={0}
@@ -155,6 +155,12 @@ export function McpHttpConfigSection() {
             />
           </Field>
         </div>
+        <p className="text-[11px] text-muted-foreground/80">
+          端口写 0 时，MCP 只走主端口上的 /mcp；写一个具体端口时，服务端会另开一个 只服务 MCP
+          的监听器（那个端口上没有管理平台，也没有 REST 接口），这个端口 就是对外暴露 MCP
+          的端口，改动要重启服务才生效。桌面形态下 MCP 由后台守护
+          进程应答，它的端口始终由系统分配，这一栏只对 Web 与容器形态有意义。
+        </p>
       </div>
 
       {/* ----- 远程访问 --------------------------------------- */}

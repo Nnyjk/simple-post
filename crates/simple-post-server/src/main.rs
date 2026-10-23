@@ -139,7 +139,7 @@ fn main() {
             mcp_auto_start,
             web_password,
             public_base_path,
-        } => serve_web(
+        } => serve_web(ServeWebOptions {
             bind,
             port,
             spa_dir,
@@ -147,7 +147,7 @@ fn main() {
             mcp_auto_start,
             web_password,
             public_base_path,
-        ),
+        }),
 
         Cmd::Mcp {
             transport,
@@ -185,8 +185,12 @@ fn split_allow_list(raw: Option<String>) -> Vec<String> {
         .collect()
 }
 
-/// 把 `serve-web` 的 flag 解析成具体路径并跑起服务器。
-fn serve_web(
+/// `serve-web` 的全部开关。
+///
+/// 打包成一个结构体再往下传：位置参数排到八个之后，调用点只能靠顺序认哪一个
+/// 是端口、哪一个是口令，而 `Option<bool>` 这种「`None` 走持久化值、`Some`
+/// 走本次覆盖」的开关混在中间尤其容易接错位。
+struct ServeWebOptions {
     bind: String,
     port: u16,
     spa_dir: Option<String>,
@@ -194,7 +198,19 @@ fn serve_web(
     mcp_auto_start: Option<bool>,
     web_password: Option<String>,
     public_base_path: Option<String>,
-) {
+}
+
+/// 把 `serve-web` 的 flag 解析成具体路径并跑起服务器。
+fn serve_web(opts: ServeWebOptions) {
+    let ServeWebOptions {
+        bind,
+        port,
+        spa_dir,
+        data_dir,
+        mcp_auto_start,
+        web_password,
+        public_base_path,
+    } = opts;
     let bind_addr: std::net::SocketAddr = match format!("{bind}:{port}").parse() {
         Ok(a) => a,
         Err(e) => {
@@ -325,6 +341,17 @@ mod tests {
             }
             other => panic!("expected the serve-web subcommand, got {other:?}"),
         }
+    }
+
+    /// 专用 MCP 端口**没有命令行开关**：它由持久化的 `mcp.http_config.port`
+    /// 决定（设置面板「连接 → HTTP 服务配置」里的那一栏）。另设一个 flag 就会
+    /// 有两个地方能写这个端口，而它们迟早会对不上——所以这里刻意只有一条路。
+    #[test]
+    fn the_mcp_port_is_not_a_command_line_flag() {
+        assert!(
+            Cli::try_parse_from(["simple-post-server", "serve-web", "--mcp-port=4174"]).is_err(),
+            "专用 MCP 端口应当只能由 mcp.http_config 决定"
+        );
     }
 
     /// 容器每个 flag 都是显式传的。clap 的名字一旦漂移，镜像就会静默按默认值启动——最
