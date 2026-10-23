@@ -233,6 +233,49 @@ async fn an_override_is_written_and_cleared() {
 }
 
 #[tokio::test]
+async fn an_override_written_without_an_environment_lands_on_the_key_the_resolve_reads() {
+    // 写与读必须落在同一个环境键上：都没给环境 id 时，那个键是**项目当前激活的环境**，
+    // 不是空串。否则手动指定的值落在别处，解析看不见它。
+    let state = test_state(Permission::Full);
+    dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({
+            "project_id": "p1",
+            "name": "sns",
+            "source_inline_json": INLINE_SOURCE
+        }),
+    )
+    .await
+    .expect("创建");
+    let created = dispatch(&state, "dynamic_var_list", json!({ "project_id": "p1" }))
+        .await
+        .expect("列出");
+    let listed = serde_json::from_str::<serde_json::Value>(&text_of(created)).expect("json");
+    let id = listed[0]["id"].as_str().expect("id").to_string();
+
+    crate::dynamic::ops::set_override(
+        &state.pool,
+        &id,
+        None,
+        Some("[{\"code\":\"Z999\"}]".to_string()),
+        None,
+        true,
+    )
+    .expect("写覆盖值");
+
+    let resolution =
+        crate::dynamic::ops::resolve(&state.pool, "p1", None, &["sns".to_string()], false)
+            .await
+            .expect("解析");
+    assert_eq!(
+        resolution.values.get("sns").map(String::as_str),
+        Some("[{\"code\":\"Z999\"}]"),
+        "解析应当拿到手动指定的值"
+    );
+}
+
+#[tokio::test]
 async fn a_resolve_with_a_broken_source_reports_the_reason() {
     let state = test_state(Permission::Full);
     // 数据源是一份**不是 JSON** 的内联请求：取数器解析它时失败，故报 `source_error`，

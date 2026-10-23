@@ -53,6 +53,23 @@ pub struct DynamicVariableView {
     pub error: Option<DynamicError>,
 }
 
+/// 一次解析/读写用的环境键。
+///
+/// 环境 id 的取法在**所有**路径上必须一致：`None` = 用项目当前激活的那个环境。这与变量替换
+/// 用的那一份环境是同一条规则（`mcp::resolve_env`）。
+///
+/// 两条路径若各取各的，缓存的键就会在「写」与「读」之间漂移：覆盖值落到空键上，而解析去
+/// 读激活环境那一行，于是手动指定的值看不见自己。
+fn environment_key(
+    pool: &DbPool,
+    project_id: &str,
+    environment_id: Option<&str>,
+) -> Result<String, AppError> {
+    Ok(crate::mcp::resolve_env(pool, environment_id, project_id)?
+        .map(|e| e.id)
+        .unwrap_or_default())
+}
+
 /// 列出本项目的全部定义，带当前值与缓存状态。
 ///
 /// **不取数**：读的是缓存行。取数可能发出站请求，而这是一次纯读。
@@ -64,12 +81,12 @@ pub fn list(
     let definitions = db::with_conn(pool, |c| {
         db::dynamic_variables::list_by_project(c, project_id)
     })?;
-    let env_key = environment_id.unwrap_or("");
+    let env_key = environment_key(pool, project_id, environment_id)?;
     let now = now_ms();
     let mut out = Vec::with_capacity(definitions.len());
     for definition in definitions {
         let entry = db::with_conn(pool, |c| {
-            db::dynamic_variable_cache::get(c, &definition.id, env_key)
+            db::dynamic_variable_cache::get(c, &definition.id, &env_key)
         })?;
         out.push(view_of(definition, entry.as_ref(), now));
     }
@@ -83,9 +100,9 @@ pub fn get(
     environment_id: Option<&str>,
 ) -> Result<DynamicVariableView, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    let env_key = environment_id.unwrap_or("");
+    let env_key = environment_key(pool, &definition.project_id, environment_id)?;
     let entry = db::with_conn(pool, |c| {
-        db::dynamic_variable_cache::get(c, definition_id, env_key)
+        db::dynamic_variable_cache::get(c, definition_id, &env_key)
     })?;
     Ok(view_of(definition, entry.as_ref(), now_ms()))
 }
@@ -194,15 +211,17 @@ pub fn set_override(
     expires_at: Option<i64>,
     forever: bool,
 ) -> Result<(), AppError> {
-    let env_key = environment_id.unwrap_or("");
+    let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
+    // 环境键与解析用的那一份一致（见 `environment_key`）：否则覆盖值会落到另一个键上，
+    // 手动指定的值看不见自己。
+    let env_key = environment_key(pool, &definition.project_id, environment_id)?;
     let Some(text) = value else {
         // 清除覆盖值：整行删掉，下一次解析重新取数。
         db::with_tx(pool, |c| {
-            db::dynamic_variable_cache::delete(c, definition_id, env_key)
+            db::dynamic_variable_cache::delete(c, definition_id, &env_key)
         })?;
         return Ok(());
     };
-    let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
     let now = now_ms();
     let deadline = if forever {
         None
@@ -211,7 +230,7 @@ pub fn set_override(
     };
     let entry = DynamicCacheEntry {
         definition_id: definition_id.to_string(),
-        environment_id: env_key.to_string(),
+        environment_id: env_key.clone(),
         value_json: Some(text),
         fetched_at: now,
         expires_at: deadline.unwrap_or(now + definition.ttl_seconds * 1000),
