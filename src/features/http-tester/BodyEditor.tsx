@@ -7,6 +7,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Wand2 } from 'lucide-react';
 import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
+import { listVars } from '@/lib/url';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
@@ -45,6 +46,13 @@ const BODY_TABS: { id: BodyMode; label: string }[] = [
 
 export function BodyEditor({ value, onChange, validationError, onFormatResult }: Props) {
   const handleFormat = () => {
+    // 带占位符的模板**不能**格式化：格式化会把文本改写成解析出来的值，而占位符在
+    // 模板阶段根本不是 JSON。故这里直接说清楚，而不是拿 JSON 解析器的原话去说一件
+    // 不是 JSON 的事。
+    if (listVars(value.content).length > 0) {
+      onFormatResult?.({ ok: false, error: '带 {{变量}} 的模板不能格式化' });
+      return;
+    }
     const result = tryFormatJson(value.content);
     if (result.ok) {
       onChange({ ...value, content: result.formatted });
