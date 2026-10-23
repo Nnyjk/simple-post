@@ -65,6 +65,20 @@ export const COMMANDS = {
   interchangeExportPreview: 'interchange_export_preview',
   interchangeExportDocument: 'interchange_export_document',
 
+  // ----- dynamic variables -----
+  // 一条声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里写 `{{sns}}`，
+  // 发送时程序取数、抽取、缓存并替换。
+  //
+  // `dynamicVariablesList` 只读缓存行，**不取数**；`dynamicVariablesResolve` 才会真的
+  // 发出站请求（去数据源取数）。
+  dynamicVariablesList: 'dynamic_variables_list',
+  dynamicVariablesCreate: 'dynamic_variables_create',
+  dynamicVariablesUpdate: 'dynamic_variables_update',
+  dynamicVariablesDelete: 'dynamic_variables_delete',
+  dynamicVariablesResolve: 'dynamic_variables_resolve',
+  dynamicVariablesSetOverride: 'dynamic_variables_set_override',
+  dynamicVariablesRefresh: 'dynamic_variables_refresh',
+
   // ----- request settings -----
   requestSettingsGet: 'request_settings_get',
   requestSettingsUpdate: 'request_settings_update',
