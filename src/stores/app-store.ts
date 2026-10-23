@@ -240,4 +240,10 @@ export type { Theme, RequestSettings } from './store-types';
 export type { NewDraftKind, TabKind, SettingsCategoryId } from './store-types';
 export type { OpenTab, EndpointDraft, NewItemDraft, ApiResponseExample } from './store-types';
 export type { DraftEndpoint } from './store-types';
-export { SETTINGS_TAB_ID, DRAFT_ID_PREFIX, UNTITLED_ENDPOINT_NAME } from './store-types';
+export {
+  SETTINGS_TAB_ID,
+  DRAFT_ID_PREFIX,
+  DYNAMIC_TAB_PREFIX,
+  dynamicTabProjectId,
+  UNTITLED_ENDPOINT_NAME,
+} from './store-types';

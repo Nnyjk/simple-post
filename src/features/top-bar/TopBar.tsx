@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, Suspense } from 'react';
 import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Loader2, Braces } from 'lucide-react';
 import { useAppStore, useActiveProject, useActiveEnvironment } from '@/stores/app-store';
+import { DYNAMIC_TAB_PREFIX } from '@/stores/store-types';
 import { useMcpStatus } from '@/lib/use-mcp-status';
 import { AppIcon } from '@/components/ui/app-icon';
 import { Button } from '@/components/ui/button';
@@ -286,7 +287,7 @@ export function TopBar() {
             {...NO_DRAG}
             variant="ghost"
             size="icon"
-            onClick={() => openTab('dynamic-variables', activeProjectId)}
+            onClick={() => openTab('dynamic-variables', `${DYNAMIC_TAB_PREFIX}${activeProjectId}`)}
             aria-label="动态变量"
           >
             <Braces className="h-4 w-4" />
