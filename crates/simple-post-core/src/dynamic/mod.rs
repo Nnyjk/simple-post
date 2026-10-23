@@ -222,11 +222,11 @@ pub enum Decision {
 ///
 /// | 情形 | 决定 |
 /// |---|---|
+/// | `force` 为真 | 重新取数，跳过缓存里的一切（包括手动指定的值） |
 /// | 有覆盖值且没过期 | 用覆盖值 |
-/// | 有覆盖值但已过期 | 重新取数（覆盖值过期不等于取数失败，不走 `stale_fallback`） |
-/// | 无覆盖值，`force` 为真 | 重新取数 |
+/// | 有覆盖值但已过期 | 重新取数；过期值留作取数失败时的回退候选（定义允许时） |
 /// | 无覆盖值，缓存没过期 | 用缓存值 |
-/// | 无覆盖值，缓存过期了 | 重新取数；过期值留作取数失败时的回退候选 |
+/// | 无覆盖值，缓存过期了 | 重新取数；过期值留作取数失败时的回退候选（定义允许时） |
 /// | 没有缓存行 | 重新取数 |
 pub fn decide(
     def: &DynamicVariable,
@@ -239,6 +239,14 @@ pub fn decide(
             stale_fallback: None,
         };
     };
+    if force {
+        // 强制：跳过缓存里的**一切**——包括用户手动指定的值——重新取数。
+        // 一个叫「刷新」却什么都不做的按钮比它丢掉的那份手动值更糟；丢掉的动作是可见的
+        // （来源徽标从「手动改的」变回「自动取回」），且用户可以再写一次。
+        return Decision::Fetch {
+            stale_fallback: stale_candidate(def, entry),
+        };
+    }
     if entry.is_override {
         let alive = entry.override_expires_at.map(|t| t > now).unwrap_or(true);
         if alive {
@@ -249,7 +257,7 @@ pub fn decide(
             }
         }
         return Decision::Fetch {
-            stale_fallback: None,
+            stale_fallback: stale_candidate(def, entry),
         };
     }
     if !force && entry.expires_at > now {
@@ -259,12 +267,17 @@ pub fn decide(
             };
         }
     }
-    let stale_fallback = if def.stale_fallback {
-        entry.value_json.clone()
-    } else {
-        None
-    };
-    Decision::Fetch { stale_fallback }
+    Decision::Fetch {
+        stale_fallback: stale_candidate(def, entry),
+    }
+}
+
+/// 过期值兜底候选：定义允许时才给。
+fn stale_candidate(def: &DynamicVariable, entry: &DynamicCacheEntry) -> Option<String> {
+    if !def.stale_fallback {
+        return None;
+    }
+    entry.value_json.clone()
 }
 
 // -------------------------------------------------------------------------

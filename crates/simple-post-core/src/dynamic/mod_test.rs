@@ -222,10 +222,20 @@ fn a_fresh_override_is_used_and_never_expires_when_it_has_no_deadline() {
 
 #[test]
 fn an_expired_override_goes_back_to_fetching() {
+    // 覆盖值过期了 → 重新取数。定义允许过期值兜底时，那个过期的覆盖值就是兜底候选。
     let def = definition(60, true);
     let e = entry(true, 1_000, Some(500));
     assert_eq!(
         decide(&def, Some(&e), 900, false),
+        Decision::Fetch {
+            stale_fallback: Some("\"v\"".to_string())
+        }
+    );
+
+    // 定义不允许兜底时没有候选。
+    let strict = definition(60, false);
+    assert_eq!(
+        decide(&strict, Some(&e), 900, false),
         Decision::Fetch {
             stale_fallback: None
         }
@@ -264,6 +274,20 @@ fn force_ignores_a_fresh_cache_entry() {
         decide(&def, Some(&e), 500, true),
         Decision::Fetch { .. }
     ));
+}
+
+#[test]
+fn force_also_drops_a_live_override() {
+    // 「刷新」是强制重新取数：它跳过缓存里的一切，包括用户手动指定的值。
+    // 一个什么都不做的按钮比丢掉一份手动值更糟——丢掉是可见的（徽标变回「自动取回」）。
+    let def = definition(60, false);
+    let e = entry(true, 1_000, Some(9_999));
+    assert_eq!(
+        decide(&def, Some(&e), 500, true),
+        Decision::Fetch {
+            stale_fallback: None
+        }
+    );
 }
 
 #[test]

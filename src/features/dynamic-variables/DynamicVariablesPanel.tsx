@@ -270,7 +270,13 @@ function DynamicVariableCard({
         </code>
         <StatusBadge source={variable.source} />
         <span className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="xs" onClick={onRefresh} disabled={resolving}>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={onRefresh}
+            disabled={resolving}
+            title={variable.isOverride ? '重新取数会放弃手动指定的值' : '跳过缓存，重新取一次数'}
+          >
             刷新
           </Button>
           {variable.isOverride && (
