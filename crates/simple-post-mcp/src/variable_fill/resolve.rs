@@ -45,6 +45,23 @@ pub fn resolve_endpoint(
     project: &Project,
     overrides: Option<&EndpointOverrides>,
 ) -> Result<ResolvedEndpoint, AppError> {
+    resolve_endpoint_with(detail, env, project, overrides, &HashMap::new())
+}
+
+/// [`resolve_endpoint`] 加上动态变量的值。
+///
+/// 动态变量的值必须**在替换之前**并进变量池：合并规则是「动态变量的值优先于同名环境
+/// 变量；被停用的环境变量不影响动态变量」，替换一旦发生，池里就没有同名变量的概念了。
+///
+/// 合并规则本身住在 `simple_post_core::dynamic::merge_pool`，与渲染进程的
+/// `src/lib/dynamic-vars.ts` 的 `mergePool` 同一套，由 `fixtures/dynamic-parity.json` 钉住。
+pub fn resolve_endpoint_with(
+    detail: &EndpointDetail,
+    env: Option<&Environment>,
+    project: &Project,
+    overrides: Option<&EndpointOverrides>,
+    dynamic: &HashMap<String, String>,
+) -> Result<ResolvedEndpoint, AppError> {
     let mut missing: Vec<String> = Vec::new();
     let mut seen: HashMap<String, ()> = HashMap::new();
     let record_missing =
@@ -82,17 +99,15 @@ pub fn resolve_endpoint(
     }
 
     // ---- 变量池 ------------------------------------------------
-    // 停用的变量**不参与替换**：`{{x}}` 留在原样并进 `missing_vars`，用户看得见
-    // 「这个变量没被替换」，而不是静默被替掉。
-    let vars: HashMap<String, String> = env
-        .map(|e| {
-            e.variables
-                .iter()
-                .filter(|(k, _)| !e.disabled_variables.iter().any(|d| d == *k))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
+    // 环境变量（去掉被停用的那些）+ 动态变量的值。动态变量在最后并入，故同名时压过环境
+    // 变量；停用过滤只作用于环境变量，故被停用的同名变量不影响动态变量。
+    let empty_vars = HashMap::new();
+    let (env_vars, disabled) = match env {
+        Some(e) => (&e.variables, e.disabled_variables.as_slice()),
+        None => (&empty_vars, &[][..]),
+    };
+    let vars: HashMap<String, String> =
+        simple_post_core::dynamic::merge_pool(env_vars, disabled, dynamic);
 
     // ---- params：先替换变量，再拼 URL。
     // 分两步做，missing 追踪与回显用的 params_out 列表才共用同一份真相。

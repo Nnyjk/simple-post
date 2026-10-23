@@ -253,8 +253,23 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
         module_id: a.module_id.clone(),
         ..Default::default()
     };
-    let resolved =
-        crate::variable_fill::resolve_endpoint(&detail, env.as_ref(), &project, Some(&overrides))?;
+    // 动态变量：值必须在**替换之前**到手。取到的值并进变量池，故同名时压过环境变量。
+    let dynamic = resolve_dynamic_values(
+        state,
+        project_id.as_deref().unwrap_or(""),
+        env.as_ref(),
+        &project,
+        &detail,
+        &overrides,
+    )
+    .await?;
+    let resolved = crate::variable_fill::resolve_endpoint_with(
+        &detail,
+        env.as_ref(),
+        &project,
+        Some(&overrides),
+        &dynamic,
+    )?;
 
     let settings = resolve_settings(
         &state.pool,
@@ -319,11 +334,22 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
     }
 
     let project_ref: &Project = project.as_ref().unwrap_or(&EMPTY_PROJECT);
-    let resolved = crate::variable_fill::resolve_endpoint(
+    // 动态变量：值必须在**替换之前**到手。取到的值并进变量池，故同名时压过环境变量。
+    let dynamic = resolve_dynamic_values(
+        state,
+        &project_id,
+        env.as_ref(),
+        project_ref,
+        &endpoint,
+        &overrides,
+    )
+    .await?;
+    let resolved = crate::variable_fill::resolve_endpoint_with(
         &endpoint,
         env.as_ref(),
         project_ref,
         Some(&overrides),
+        &dynamic,
     )?;
 
     let settings = resolve_settings(
@@ -341,6 +367,62 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         settings,
     )
     .await
+}
+
+// =========================================================================
+// 动态变量：请求引用到的那些，取数后并进变量池
+// =========================================================================
+
+/// 解析这个请求引用到的动态变量，返回它们的值（变量名 → 替换用的文本）。
+///
+/// 只挑「请求里出现过」且「本项目有定义且已启用」的名字——未被引用的定义不参与这次
+/// 发送，也不产生错误。
+///
+/// 取数失败**不让整次调用失败**：该变量按缺失处理（`{{name}}` 原样留在请求里），错误
+/// 由动态变量面板与 `dynamic_var_resolve` 呈现。这与脚本失败不影响请求成败是同一条取舍。
+async fn resolve_dynamic_values(
+    state: &AppState,
+    project_id: &str,
+    env: Option<&Environment>,
+    project: &Project,
+    detail: &EndpointDetail,
+    overrides: &crate::variable_fill::EndpointOverrides,
+) -> Result<std::collections::HashMap<String, String>, AppError> {
+    let empty = std::collections::HashMap::new();
+    if project_id.is_empty() {
+        return Ok(empty);
+    }
+    // 扫的是**未替换**的模板：base URL 也扫（它可能自身带变量）。
+    let (base_url, _source, _def_id) = crate::variable_fill::resolve_base_url_with(
+        detail,
+        env,
+        project,
+        overrides.base_url_definition_id.as_deref(),
+        overrides.module_id.as_deref(),
+    );
+    let parts = simple_post_core::dynamic::TemplateParts {
+        base_url: &base_url,
+        url: &detail.url,
+        params: &detail.params,
+        headers: &detail.headers,
+        body: &detail.body,
+        auth: &detail.auth,
+    };
+    let names = simple_post_core::dynamic::list_names(&parts);
+    if names.is_empty() {
+        return Ok(empty);
+    }
+    let ctx = simple_post_core::dynamic::ResolveContext {
+        pool: state.pool.clone(),
+        project_id: project_id.to_string(),
+        environment_id: env.map(|e| e.id.clone()),
+        env: env.cloned(),
+        project: project.clone(),
+    };
+    let resolution =
+        simple_post_core::dynamic::resolve_names(&ctx, &names, false, &crate::dynamic::fetcher())
+            .await?;
+    Ok(resolution.values)
 }
 
 // =========================================================================
@@ -439,7 +521,7 @@ async fn send_resolved(
 
 /// 脚本看得到的环境。**与解析用的是同一套变量池**：停用的变量不参与，脚本看到的
 /// 环境与这次请求看到的是同一个。
-fn env_snapshot(env: Option<&Environment>) -> simple_post_core::script::EnvSnapshot {
+pub(crate) fn env_snapshot(env: Option<&Environment>) -> simple_post_core::script::EnvSnapshot {
     let variables = env
         .map(|e| {
             e.variables
@@ -460,7 +542,7 @@ fn env_snapshot(env: Option<&Environment>) -> simple_post_core::script::EnvSnaps
 /// 起点是**用户配置的那一份**（`preferences` 的 `request_settings` 行，桌面端在设置
 /// 面板里改的就是它），调用方的覆盖值再盖上去。故界面上把超时调成 5 秒，MCP 侧也是
 /// 5 秒；行缺失时用 `RequestSettings::default()`。
-fn resolve_settings(
+pub(crate) fn resolve_settings(
     pool: &DbPool,
     flat: (Option<u64>, Option<bool>, Option<u64>),
     override_: Option<&Value>,
@@ -513,7 +595,7 @@ fn project_for(pool: &DbPool, project_id: Option<&str>) -> Project {
 // 免得解析这一步去 borrow 一个 `None`。
 // 必须是 `static` 而非 `const`：`&EMPTY_PROJECT` 要拿到的是 `&'static Project`，
 // 引用 `const` 会产生语句结束即释放的临时值，存活的 `&Project` 会触发 E0716。
-static EMPTY_PROJECT: Project = Project {
+pub(crate) static EMPTY_PROJECT: Project = Project {
     id: String::new(),
     name: String::new(),
     description: None,
@@ -531,7 +613,7 @@ static EMPTY_PROJECT: Project = Project {
 
 mod envelope;
 mod input;
-mod multipart;
+pub(crate) mod multipart;
 
 pub(crate) use input::flatten_string_map;
 
@@ -546,6 +628,10 @@ pub(crate) use input::flatten_string_map;
 #[cfg(test)]
 #[path = "http_ops_test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "http_ops/dynamic_test.rs"]
+mod dynamic_tests;
 
 #[cfg(test)]
 #[path = "http_ops/oauth2_test.rs"]
