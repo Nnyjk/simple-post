@@ -175,8 +175,15 @@ pub async fn refresh(
     environment_id: Option<&str>,
 ) -> Result<DynamicValueStatus, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
+    // 项目用**定义自己的**那个：调用方传的项目若被拿去解析，会按那个项目去找同名定义——
+    // 找的是另一条，或根本找不到，于是这次刷新静默地什么都没做。
+    if !project_id.is_empty() && project_id != definition.project_id {
+        return Err(AppError::Validation(format!(
+            "动态变量 {definition_id} 不在项目 {project_id} 里"
+        )));
+    }
     let names = vec![definition.name.clone()];
-    let resolution = resolve(pool, project_id, environment_id, &names, true).await?;
+    let resolution = resolve(pool, &definition.project_id, environment_id, &names, true).await?;
     Ok(resolution
         .statuses
         .into_iter()
@@ -253,10 +260,9 @@ fn context(
     Ok(ResolveContext {
         pool: pool.clone(),
         project_id: project_id.to_string(),
-        environment_id: env
-            .as_ref()
-            .map(|e| e.id.clone())
-            .or_else(|| environment_id.map(str::to_string)),
+        // 缓存键用 [`environment_key`] 算出来的那一个，与写覆盖值、读缓存完全同源。
+        // 环境取不到时它给空串，故 `None` 与「环境已被删」落在同一个键上，不会分叉。
+        environment_id: Some(environment_key(pool, project_id, environment_id)?),
         env,
         project,
     })

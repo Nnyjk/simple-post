@@ -302,3 +302,96 @@ async fn a_resolve_with_a_broken_source_reports_the_reason() {
     let text = text_of(resolved);
     assert!(text.contains("source_error"), "{text}");
 }
+
+#[tokio::test]
+async fn an_override_written_with_a_dangling_environment_lands_on_the_key_the_resolve_reads() {
+    // 显式传一个**不存在**的环境 id 时，写与读仍须落在同一个键上：环境取不到，那个键就是
+    // 空串，不是那个 id。否则手动指定的值落在别处，解析看不见它——面板却显示已生效。
+    let state = test_state(Permission::Full);
+    dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({
+            "project_id": "p1",
+            "name": "sns",
+            "source_inline_json": INLINE_SOURCE
+        }),
+    )
+    .await
+    .expect("创建");
+    let listed = dispatch(&state, "dynamic_var_list", json!({ "project_id": "p1" }))
+        .await
+        .expect("列出");
+    let id = serde_json::from_str::<serde_json::Value>(&text_of(listed)).expect("json")[0]["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+
+    crate::dynamic::ops::set_override(
+        &state.pool,
+        &id,
+        Some("env-gone"),
+        Some("[{\"code\":\"Z999\"}]".to_string()),
+        None,
+        true,
+    )
+    .expect("写覆盖值");
+
+    let resolution = crate::dynamic::ops::resolve(
+        &state.pool,
+        "p1",
+        Some("env-gone"),
+        &["sns".to_string()],
+        false,
+    )
+    .await
+    .expect("解析");
+    assert_eq!(
+        resolution.values.get("sns").map(String::as_str),
+        Some("[{\"code\":\"Z999\"}]"),
+        "解析应当拿到手动指定的值"
+    );
+}
+
+#[tokio::test]
+async fn a_refresh_with_a_mismatched_project_is_refused() {
+    // 刷新用**定义自己的**项目：调用方传错项目时，解析会按那个项目去找同名定义——找的是
+    // 另一条，或根本找不到，于是这次刷新静默地什么都没做。
+    let state = test_state(Permission::Full);
+    dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({
+            "project_id": "p1",
+            "name": "sns",
+            "source_inline_json": "not json"
+        }),
+    )
+    .await
+    .expect("创建");
+    let listed = dispatch(&state, "dynamic_var_list", json!({ "project_id": "p1" }))
+        .await
+        .expect("列出");
+    let id = serde_json::from_str::<serde_json::Value>(&text_of(listed)).expect("json")[0]["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+
+    let err = crate::dynamic::ops::refresh(&state.pool, "p2", &id, None)
+        .await
+        .expect_err("项目对不上应该被拒");
+    assert!(matches!(
+        err,
+        simple_post_core::error::AppError::Validation(_)
+    ));
+
+    // 项目对得上时，刷新真的去取数了：数据源不是合法 JSON，故有错。
+    let status = crate::dynamic::ops::refresh(&state.pool, "p1", &id, None)
+        .await
+        .expect("刷新");
+    assert_eq!(status.name, "sns");
+    assert!(
+        status.error.is_some(),
+        "应当真的取过一次数（内联数据源不是合法 JSON，故有错）"
+    );
+}
