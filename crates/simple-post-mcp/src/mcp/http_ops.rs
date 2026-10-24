@@ -400,12 +400,28 @@ async fn resolve_dynamic_values(
         overrides.base_url_definition_id.as_deref(),
         overrides.module_id.as_deref(),
     );
+    // 扫的是**生效后**的模板：调用方的覆盖值会替换端点里的那一份，而替换发生在变量池
+    // 合并之后，故扫描必须看生效的那一份——否则覆盖值里写的 `{{name}}` 不会触发取数，
+    // 原样发出去。
+    let eff_url = overrides.url.clone().unwrap_or_else(|| detail.url.clone());
+    let eff_params = overrides
+        .params
+        .clone()
+        .unwrap_or_else(|| detail.params.clone());
+    let eff_headers = overrides
+        .headers
+        .clone()
+        .unwrap_or_else(|| detail.headers.clone());
+    let eff_body = overrides
+        .body
+        .clone()
+        .unwrap_or_else(|| detail.body.clone());
     let parts = simple_post_core::dynamic::TemplateParts {
         base_url: &base_url,
-        url: &detail.url,
-        params: &detail.params,
-        headers: &detail.headers,
-        body: &detail.body,
+        url: &eff_url,
+        params: &eff_params,
+        headers: &eff_headers,
+        body: &eff_body,
         auth: &detail.auth,
     };
     let names = simple_post_core::dynamic::list_names(&parts);
