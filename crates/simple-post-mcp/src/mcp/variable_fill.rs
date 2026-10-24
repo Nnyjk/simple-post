@@ -359,6 +359,18 @@ fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
         }
     }
 
+    // 载荷与定义写反了：body.content 看起来是一份 JSON Schema，而 body.schema 还是空的。
+    // 与 `endpoint_create` / `endpoint_update` 那道门同一个判据，故三处对同一个端点
+    // 的结论一致。
+    if endpoint.body.payload_may_be_a_schema() {
+        issues.push(json!({
+            "field": "body.content",
+            "message": "body.content looks like a JSON Schema, not a request payload. \
+                        body.content is what is actually sent; the documented parameter \
+                        definition belongs in body.schema."
+        }));
+    }
+
     issues
 }
 

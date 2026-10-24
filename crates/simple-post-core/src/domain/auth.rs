@@ -46,6 +46,41 @@ pub struct RequestBody {
     pub schema: Option<String>,
 }
 
+impl RequestBody {
+    /// 这份 body 的内容看起来是一份 JSON Schema，而不是一份请求实例。
+    ///
+    /// 两者都是 JSON 对象，而 JSON Schema 惯用的顶层键（`type` / `properties` /
+    /// `$schema` / `items` / `allOf` …）恰好也是业务载荷可能用的键，故这是启发式
+    /// 判定，不是类型判定。它要挡的是一次具体的错位：把「这个接口接受什么参数」
+    /// 写进了「这一次发什么」。
+    ///
+    /// 判据刻意收窄：只有当顶层同时出现 `type` 与 `properties`（或出现 `$schema`）
+    /// 才算 schema。只出现 `type` 的载荷（`{"type":"order"}`）太常见，不能算。
+    pub fn content_looks_like_schema(&self) -> bool {
+        if self.mode != BodyMode::Json {
+            return false;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&self.content) else {
+            return false;
+        };
+        let Some(object) = value.as_object() else {
+            return false;
+        };
+        if object.contains_key("$schema") {
+            return true;
+        }
+        object.contains_key("type") && object.contains_key("properties")
+    }
+
+    /// 载荷与定义写反了：这份 body 的 `content` 看起来是一份 Schema，而 `schema` 还是空的。
+    ///
+    /// 填了 `schema` 就不算写反 —— 那时这份内容是有意选定的（真要把一份 Schema 当
+    /// 载荷发的接口就是这种情况）。
+    pub fn payload_may_be_a_schema(&self) -> bool {
+        self.schema.as_deref().unwrap_or("").trim().is_empty() && self.content_looks_like_schema()
+    }
+}
+
 // auth
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

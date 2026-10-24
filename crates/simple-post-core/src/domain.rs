@@ -59,3 +59,7 @@ mod resource_tests;
 #[cfg(test)]
 #[path = "domain/patch_test.rs"]
 mod patch_tests;
+
+#[cfg(test)]
+#[path = "domain/body_test.rs"]
+mod body_tests;

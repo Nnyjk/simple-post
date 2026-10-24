@@ -421,3 +421,107 @@ async fn endpoint_create_rejects_a_malformed_auth_config() {
         "a malformed auth_config must be rejected, got {res:?}"
     );
 }
+
+/// 载荷与定义写反了：`body_content` 里放的是一份 JSON Schema。
+///
+/// 写错的代价是每次调试都把一份 Schema 当请求体发出去，而接口的文档里空无一物。
+/// 两份内容都是 JSON 对象，凭内容分不出来；但顶层同时有 `type` 与 `properties` 时，
+/// 几乎只有一种解释：这份是定义。
+#[tokio::test]
+async fn endpoint_create_rejects_a_schema_written_into_the_payload_slot() {
+    let (st, _) = fixture();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "name": "n",
+            "method": "POST",
+            "url": "/api/users",
+            "body_mode": "json",
+            "body_content": "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}"
+        }),
+    )
+    .await;
+
+    let Err(AppError::Validation(message)) = res else {
+        panic!("a schema written into the payload slot must be rejected, got {res:?}");
+    };
+    assert!(
+        message.contains("body_schema"),
+        "the message must name the field the definition belongs in: {message}"
+    );
+}
+
+/// 确实要把一份 Schema 当载荷发时，把同样的内容也写进 `body_schema` 即可 ——
+/// 那时这份内容是有意选定的，不是写反了。
+#[tokio::test]
+async fn endpoint_create_accepts_a_schema_payload_when_the_schema_is_declared() {
+    let (st, _) = fixture();
+    const SCHEMA: &str = "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}";
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "name": "n",
+            "method": "POST",
+            "url": "/api/schemas",
+            "body_mode": "json",
+            "body_content": SCHEMA,
+            "body_schema": SCHEMA
+        }),
+    )
+    .await
+    .expect("a declared schema payload must be accepted");
+
+    let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+    let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+    let id = created["id"].as_str().expect("id").to_string();
+    assert_eq!(detail_of(&st, &id).body.schema.as_deref(), Some(SCHEMA));
+}
+
+/// patch 里写反了同样要拦：agent 常常先建一个空端点，再用 `endpoint_update` 填 body。
+#[tokio::test]
+async fn endpoint_update_rejects_a_schema_written_into_the_payload_slot() {
+    let (st, id) = fixture();
+
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": {
+                "body": {
+                    "mode": "json",
+                    "content": "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}"
+                }
+            }
+        }),
+    )
+    .await;
+
+    assert!(
+        matches!(res, Err(AppError::Validation(_))),
+        "a schema written into the payload slot must be rejected, got {res:?}"
+    );
+}
+
+/// 只带 `type` 的载荷不能被拦下来：`{"type":"order"}` 是很普通的业务数据。
+#[tokio::test]
+async fn a_payload_with_only_a_type_key_is_accepted() {
+    let (st, _) = fixture();
+
+    tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "name": "n",
+            "method": "POST",
+            "url": "/api/orders",
+            "body_mode": "json",
+            "body_content": "{\"type\":\"order\"}"
+        }),
+    )
+    .await
+    .expect("an ordinary payload must not be rejected");
+}
