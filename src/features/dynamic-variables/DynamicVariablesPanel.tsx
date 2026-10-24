@@ -97,7 +97,10 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
   const handleResolveAll = useCallback(async () => {
     const names = variables.map((v) => v.name);
     await resolveDynamicVariables(projectId, names, activeEnvironmentId || undefined);
-  }, [variables, projectId, activeEnvironmentId, resolveDynamicVariables]);
+    // 解析的结果落在 store 的取值桶里，而卡片读的是列表——故这里要重载一次列表，
+    // 否则值、来源徽标与取数时间都不动，看着像按钮坏了。
+    await loadDynamicVariables(projectId, activeEnvironmentId || undefined);
+  }, [variables, projectId, activeEnvironmentId, resolveDynamicVariables, loadDynamicVariables]);
 
   const handleRefresh = useCallback(
     async (variable: DynamicVariableView) => {
@@ -243,6 +246,9 @@ function DynamicVariableCard({
   const [draft, setDraft] = useState(variable.value ?? '');
   const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
   const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
+  // 取数失败的原因。列表视图本身不带它（那是一次纯读），故取数时记进 store 的那份。
+  const dynamicError = useAppStore((s) => s.dynamicErrors[variable.name]);
+  const error = variable.error ?? dynamicError;
 
   /** 打开编辑器时把草稿重置成当前值——否则上一次没保存的编辑会留在框里。 */
   const openEditor = () => {
@@ -353,8 +359,8 @@ function DynamicVariableCard({
         {variable.fetchedAt ? `取数于 ${formatTime(variable.fetchedAt)}` : '尚未取数'}
         {variable.expiresAt ? ` · 过期于 ${formatTime(variable.expiresAt)}` : ''}
       </p>
-      {variable.error && (
-        <p className="mt-1 text-[11px] text-destructive">{`${variable.error.kind}：${variable.error.message}`}</p>
+      {error && (
+        <p className="mt-1 text-[11px] text-destructive">{`${error.kind}：${error.message}`}</p>
       )}
 
       {editing && (

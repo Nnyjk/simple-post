@@ -71,6 +71,8 @@ export function HttpTester() {
   const dynamicValues = useAppStore((s) => s.dynamicValues);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
+  // 动态变量的定义没加载上来 / 取数调用失败时的原因。
+  const dynamicError = useAppStore((s) => s.dynamicError);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
 
@@ -238,6 +240,10 @@ export function HttpTester() {
   const dynamicEntries = useMemo<VarEntry[]>(() => {
     const bucket = dynamicValues[dynamicEnvId] ?? {};
     return dynamicVariables.map((v) => {
+      // 停用的定义不参与替换，故它不显示值——显示一个用不上的值会误导。
+      if (!v.enabled) {
+        return { key: v.name, value: '', origin: 'dynamic' as const, hint: '已停用' };
+      }
       const status = bucket[v.name];
       const source = status?.source ?? v.source;
       const fetchedAt = status?.fetchedAt ?? v.fetchedAt;
@@ -323,13 +329,22 @@ export function HttpTester() {
     void loadDynamicVariables(activeProjectId, dynamicEnvId || undefined);
   }, [activeProjectId, dynamicEnvId, loadDynamicVariables]);
 
+  // 本项目**已启用且仍存在**的动态变量名。
+  //
+  // `dynamicNames`（扫出谁被引用了）与 `dynamicVars`（把值并进变量池）共用它：停用或删除
+  // 之后，那个名字既不算被引用，它的旧值也不进变量池——否则「停用后不参与替换」是假的，
+  // 界面预览与真正发出的请求还会描述两个不同的请求。
+  const enabledDynamicNames = useMemo(
+    () => new Set(dynamicVariables.filter((v) => v.enabled).map((v) => v.name)),
+    [dynamicVariables],
+  );
+
   // 这个请求引用了哪些动态变量。
   //
   // 扫的是**未替换**的模板，故同名环境变量也会被扫出来——动态变量在替换时压过环境变量
   // （见 `mergePool`），故名单里只留本项目有定义且已启用的那些。
   const dynamicNames = useMemo(() => {
-    const defined = new Set(dynamicVariables.filter((v) => v.enabled).map((v) => v.name));
-    if (defined.size === 0) return [];
+    if (enabledDynamicNames.size === 0) return [];
     return listDynamicNames({
       baseUrl: resolved.baseUrl,
       url: liveUrl,
@@ -337,8 +352,8 @@ export function HttpTester() {
       headers: effective.headers,
       body: effective.body,
       auth: effective.auth,
-    }).filter((name) => defined.has(name));
-  }, [dynamicVariables, resolved.baseUrl, liveUrl, effective]);
+    }).filter((name) => enabledDynamicNames.has(name));
+  }, [enabledDynamicNames, resolved.baseUrl, liveUrl, effective]);
 
   // 模板或环境变化时重新解析（防抖 300 ms）。TTL 内命中缓存时后端不发取数请求，
   // 故这一步通常只是一次廉价的 IPC；预览里的 `{{name}}` 也因此很快变成真值。
@@ -352,14 +367,18 @@ export function HttpTester() {
 
   // 当前生效的动态变量值。它们在变量池的最后一步并入，故同名时压过环境变量；
   // 被停用的环境变量也不影响它们（停用过滤只作用于环境变量）。
+  //
+  // 桶里只留下**已启用且仍存在**的那些名字：桶是累加的，停用或删除之后旧条目还在，
+  // 直接并进去就等于停用之后仍然在替换。
   const dynamicVars = useMemo(() => {
     const bucket = dynamicValues[dynamicEnvId] ?? {};
     const out: Record<string, string> = {};
     for (const [name, status] of Object.entries(bucket)) {
+      if (!enabledDynamicNames.has(name)) continue;
       if (status.value !== null && status.value !== undefined) out[name] = status.value;
     }
     return out;
-  }, [dynamicValues, dynamicEnvId]);
+  }, [dynamicValues, dynamicEnvId, enabledDynamicNames]);
 
   // 组装请求的唯一入口。发送前若解析出了新的值，用新值再组装一次。
   const prepare = useCallback(
@@ -549,6 +568,18 @@ export function HttpTester() {
           >
             重试
           </button>
+        </div>
+      )}
+
+      {/* 动态变量的定义没加载上来时，请求里那些 `{{name}}` 不会被替换，而界面上没有任何
+          提示——用户只看到服务端回了一个与真实原因无关的错误。故这里把那条原因摆出来。 */}
+      {dynamicError && (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-destructive/10 px-4 py-1.5 text-xs text-destructive"
+          data-testid="dynamic-error"
+        >
+          <span>{dynamicError}</span>
         </div>
       )}
 

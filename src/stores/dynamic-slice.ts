@@ -44,6 +44,8 @@ export interface DynamicSliceState {
   dynamicVariables: DynamicVariableView[];
   /** 环境 id → 变量名 → 当前值。 */
   dynamicValues: Record<string, Record<string, DynamicValueStatus>>;
+  /** 变量名 → 最近一次取数失败的原因。取数成功时该条目被清掉。 */
+  dynamicErrors: Record<string, DynamicError>;
   /** 正在取数。界面上据此显示「正在取数…」。 */
   dynamicResolving: boolean;
   /** 最近一次取数或写操作失败的原因。 */
@@ -59,8 +61,8 @@ export interface DynamicSliceActions {
     projectId: string,
     input: CreateDynamicVariableInput,
   ) => Promise<string | null>;
-  /** 改一条定义。 */
-  updateDynamicVariable: (id: string, patch: Partial<DynamicVariable>) => Promise<void>;
+  /** 改一条定义。成功返回 true，失败返回 false（原因在 `dynamicError` 里）。 */
+  updateDynamicVariable: (id: string, patch: Partial<DynamicVariable>) => Promise<boolean>;
   /** 删一条定义。 */
   deleteDynamicVariable: (id: string) => Promise<void>;
   /**
@@ -83,6 +85,12 @@ export interface DynamicSliceActions {
   ) => Promise<void>;
   /** 强制重新取一次数。 */
   refreshDynamicVariable: (projectId: string, id: string, environmentId?: string) => Promise<void>;
+  /**
+   * 把一个变量名从所有环境的桶里剔除。
+   *
+   * 停用或删除之后调用它：留着旧值就等于停用之后仍然在替换。
+   */
+  dropDynamicValue: (name: string) => void;
 }
 
 /** 切片。 */
@@ -91,8 +99,32 @@ export type DynamicSlice = DynamicSliceState & DynamicSliceActions;
 export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = (set, get) => ({
   dynamicVariables: [],
   dynamicValues: {},
+  dynamicErrors: {},
   dynamicResolving: false,
   dynamicError: null,
+
+  /**
+   * 把一个变量名从所有环境的桶里剔除。
+   *
+   * 停用或删除之后，它在别的环境里的旧值也不该留着：请求编辑器把桶里的值并进变量池，
+   * 留着就等于停用之后仍然在替换。
+   */
+  dropDynamicValue: (name) =>
+    set((s) => {
+      const values: Record<string, Record<string, DynamicValueStatus>> = {};
+      for (const [envId, bucket] of Object.entries(s.dynamicValues)) {
+        if (!(name in bucket)) {
+          values[envId] = bucket;
+          continue;
+        }
+        const rest = { ...bucket };
+        delete rest[name];
+        values[envId] = rest;
+      }
+      const errors = { ...s.dynamicErrors };
+      delete errors[name];
+      return { dynamicValues: values, dynamicErrors: errors };
+    }),
 
   loadDynamicVariables: async (projectId, environmentId) => {
     try {
@@ -133,19 +165,26 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 
   updateDynamicVariable: async (id, patch) => {
     const projectId = get().activeProjectId;
+    // 改之前的名字：改名之后旧名下的值与错误都不再有意义。
+    const before = get().dynamicVariables.find((v) => v.id === id);
     try {
       await invokeCmd<DynamicVariable>(COMMANDS.dynamicVariablesUpdate, { id, patch });
+      if (before) get().dropDynamicValue(before.name);
       await get().loadDynamicVariables(projectId, get().activeEnvironmentId || undefined);
+      return true;
     } catch (e) {
       console.error('[store] dynamic_variables_update failed', e);
       set({ dynamicError: messageOf(e) });
+      return false;
     }
   },
 
   deleteDynamicVariable: async (id) => {
     const projectId = get().activeProjectId;
+    const before = get().dynamicVariables.find((v) => v.id === id);
     try {
       await invokeCmd<void>(COMMANDS.dynamicVariablesDelete, { id });
+      if (before) get().dropDynamicValue(before.name);
       await get().loadDynamicVariables(projectId, get().activeEnvironmentId || undefined);
     } catch (e) {
       console.error('[store] dynamic_variables_delete failed', e);
@@ -174,7 +213,15 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         for (const status of resolution.statuses) {
           bucket[status.name] = status;
         }
-        return { dynamicValues: { ...s.dynamicValues, [envId]: bucket } };
+        // 失败原因按变量名记下来，面板要能说清「为什么这个变量没有值」。
+        const errors = { ...s.dynamicErrors };
+        for (const error of resolution.errors) {
+          errors[error.name] = error;
+        }
+        for (const status of resolution.statuses) {
+          if (!status.error) delete errors[status.name];
+        }
+        return { dynamicValues: { ...s.dynamicValues, [envId]: bucket }, dynamicErrors: errors };
       });
       return { values: resolution.values, errors: resolution.errors };
     } catch (e) {
@@ -197,6 +244,15 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         expiresAt: options?.expiresAt ?? null,
         forever: options?.forever ?? false,
       });
+      // 覆盖值在手就不用再取数，上一次取数失败的原因随之作废。
+      const name = get().dynamicVariables.find((v) => v.id === id)?.name;
+      if (name) {
+        set((s) => {
+          const errors = { ...s.dynamicErrors };
+          delete errors[name];
+          return { dynamicErrors: errors };
+        });
+      }
       await get().loadDynamicVariables(projectId, environmentId || undefined);
     } catch (e) {
       console.error('[store] dynamic_variables_set_override failed', e);
@@ -208,10 +264,22 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     const envId = environmentId ?? get().activeEnvironmentId ?? '';
     set({ dynamicResolving: true });
     try {
-      await invokeCmd(COMMANDS.dynamicVariablesRefresh, {
+      const status = await invokeCmd<DynamicValueStatus>(COMMANDS.dynamicVariablesRefresh, {
         projectId,
         id,
         environmentId: envId || null,
+      });
+      // 这次强制重取的结果（值与失败原因）写进 store，面板立刻能显示。
+      set((s) => {
+        const bucket = { ...(s.dynamicValues[envId] ?? {}) };
+        if (status.name) bucket[status.name] = status;
+        const errors = { ...s.dynamicErrors };
+        if (status.error) {
+          errors[status.name] = status.error;
+        } else {
+          delete errors[status.name];
+        }
+        return { dynamicValues: { ...s.dynamicValues, [envId]: bucket }, dynamicErrors: errors };
       });
       await get().loadDynamicVariables(projectId, envId || undefined);
     } catch (e) {
