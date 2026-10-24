@@ -367,7 +367,9 @@ export function HttpTester() {
 
   const enabledParams = effective.params.filter((p) => p.enabled && p.key).length;
   const enabledHeaders = effective.headers.filter((h) => h.enabled && h.key).length;
-  const hasBody = effective.body.mode !== 'none' && effective.body.content;
+  // 只有 schema 的接口也算「body 页有东西」：那份定义同样要看得到。
+  const hasBody =
+    effective.body.mode !== 'none' && !!(effective.body.content || effective.body.schema);
   const hasAuth = effective.auth.kind !== 'none';
   const hasScript = Boolean(effective.preRequestScript || effective.testScript);
 
