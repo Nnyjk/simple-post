@@ -119,7 +119,9 @@ export function EnvVarPicker({
         const active = idx === selected;
         return (
           <button
-            key={e.key}
+            // key 里带上来源：环境变量与动态变量可能同名，两个同 key 的元素会让 React
+            // 复用错行。
+            key={`${e.origin ?? 'environment'}:${e.key}`}
             type="button"
             role="option"
             aria-selected={active}
@@ -132,6 +134,11 @@ export function EnvVarPicker({
             )}
           >
             <span className="shrink-0 font-mono text-primary">{`{{${e.key}}}`}</span>
+            {e.origin && (
+              <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
+                {e.origin === 'dynamic' ? '动态' : '环境'}
+              </span>
+            )}
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {truncate(e.value, 60)}
             </span>

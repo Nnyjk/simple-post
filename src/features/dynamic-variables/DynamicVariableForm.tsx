@@ -32,6 +32,8 @@ export function DynamicVariableForm({
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   const createDynamicVariable = useAppStore((s) => s.createDynamicVariable);
   const updateDynamicVariable = useAppStore((s) => s.updateDynamicVariable);
+  // 保存失败的原因。表单就地显示它，免得用户只看到表单凭空消失。
+  const saveError = useAppStore((s) => s.dynamicError);
 
   const [name, setName] = useState(variable?.name ?? '');
   const [description, setDescription] = useState(variable?.description ?? '');
@@ -67,30 +69,37 @@ export function DynamicVariableForm({
   const handleSubmit = async () => {
     setBusy(true);
     try {
+      // 缓存时长：0 是有意义的（不缓存，每次重新取数），故不能用 `|| 60`——那会把 0
+      // 变成假值再兜成 60。
+      const ttl = Number(ttlSeconds);
+      const ttlValue = Number.isFinite(ttl) ? ttl : 60;
       if (variable) {
-        await updateDynamicVariable(variable.id, {
+        const ok = await updateDynamicVariable(variable.id, {
           name,
           description: description || null,
           sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
           sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
           extractPath,
           valueMode,
-          ttlSeconds: Number(ttlSeconds) || 60,
+          ttlSeconds: ttlValue,
           staleFallback,
           enabled,
         });
+        // 保存失败时表单留着：用户填的内容不丢。
+        if (!ok) return;
       } else {
-        await createDynamicVariable(projectId, {
+        const created = await createDynamicVariable(projectId, {
           name,
           description: description || undefined,
           sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
           sourceInlineJson: usesEndpoint ? undefined : sourceInlineJson || undefined,
           extractPath,
           valueMode,
-          ttlSeconds: Number(ttlSeconds) || 60,
+          ttlSeconds: ttlValue,
           staleFallback,
           enabled,
         });
+        if (!created) return;
       }
       onDone();
     } finally {
@@ -240,6 +249,11 @@ export function DynamicVariableForm({
             </Button>
           )}
         </div>
+        {saveError && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {saveError}
+          </p>
+        )}
       </div>
     </div>
   );
