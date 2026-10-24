@@ -75,7 +75,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         ToolEntry {
             name: "api_validate_endpoint",
             description:
-                "Static check that an endpoint is runnable (URL non-empty, auth fields filled, etc). Returns `{ok, issues}`.",
+                "Static check that an endpoint is ready to use: the URL is non-empty, the auth fields are filled, the body is present when the mode needs one, and the payload is not a JSON Schema written into the payload slot. Returns `{ok, issues}` — `ok` is false when any issue was found; an issue means \"fix this\", not \"this endpoint cannot run\".",
             schema: json!({
                 "type": "object",
                 "properties": { "endpoint_id": { "type": "string" } },
