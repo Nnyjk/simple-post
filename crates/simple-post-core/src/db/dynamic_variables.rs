@@ -130,6 +130,7 @@ pub fn create(
             "动态变量的数据源只能是其中一种：引用接口，或内联请求".to_string(),
         ));
     }
+    check_source_endpoint_project(conn, project_id, def.source_endpoint_id.as_deref())?;
     if let Some(existing) = get_by_name(conn, project_id, &def.name)? {
         if existing.id != def.id {
             return Err(AppError::Validation(format!(
@@ -163,11 +164,27 @@ pub fn create(
     );
     if let Err(e) = result {
         // 唯一索引兜底：并发写入时上面的检查可能刚被别人抢先。
-        if is_unique_violation(&e) {
-            return Err(AppError::Validation(format!(
-                "本项目已有一个叫 '{}' 的动态变量",
-                def.name
-            )));
+        match unique_violation_columns(&e) {
+            Some("name") => {
+                return Err(AppError::Validation(format!(
+                    "本项目已有一个叫 '{}' 的动态变量",
+                    def.name
+                )));
+            }
+            Some("id") => {
+                return Err(AppError::Validation(format!(
+                    "动态变量的 id '{}' 已被占用",
+                    def.id
+                )));
+            }
+            Some(_) => {}
+            None if is_unique_violation(&e) => {
+                return Err(AppError::Validation(format!(
+                    "本项目已有一个叫 '{}' 的动态变量",
+                    def.name
+                )));
+            }
+            None => {}
         }
         return Err(AppError::Sqlite(e));
     }
@@ -214,6 +231,7 @@ pub fn update(
             "动态变量必须有一个数据源：引用一个接口，或给一份内联请求".to_string(),
         ));
     }
+    check_source_endpoint_project(conn, &current.project_id, next_endpoint_id.as_deref())?;
 
     let mut sets: Vec<String> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
@@ -405,6 +423,49 @@ fn is_unique_violation(e: &rusqlite::Error) -> bool {
         }
         _ => false,
     }
+}
+
+/// 冲突的是哪一条唯一约束：主键，还是「项目内变量名」那条索引。
+///
+/// SQLite 只给出「UNIQUE constraint failed: <表>.<列>…」这样一条消息，故按列名分辨。
+/// 分不出来时返回 `None`，调用方给一句不含糊的总错误。
+fn unique_violation_columns(e: &rusqlite::Error) -> Option<&'static str> {
+    let rusqlite::Error::SqliteFailure(inner, Some(message)) = e else {
+        return None;
+    };
+    if inner.code != rusqlite::ErrorCode::ConstraintViolation {
+        return None;
+    }
+    if message.contains("dynamic_variables.name") {
+        Some("name")
+    } else if message.contains("dynamic_variables.id") {
+        Some("id")
+    } else {
+        None
+    }
+}
+
+/// 数据源端点必须属于同一个项目。
+///
+/// 跨项目引用会绕过逐项目权限门：取数时那个端点自己的项目从来没有人查过，于是拿着项目 A
+/// 权限的调用方能调用项目 B 的端点（用它自己的 base URL 与鉴权）并读到响应。故这条检查
+/// 住在写路径上，两条 transport 都经过这里。
+fn check_source_endpoint_project(
+    conn: &mut Connection,
+    project_id: &str,
+    endpoint_id: Option<&str>,
+) -> Result<(), AppError> {
+    let Some(endpoint_id) = endpoint_id else {
+        return Ok(());
+    };
+    let root_id = super::nodes::root_id_of(conn, endpoint_id)
+        .map_err(|_| AppError::Validation(format!("数据源接口 {endpoint_id} 不存在")))?;
+    if root_id != project_id {
+        return Err(AppError::Validation(format!(
+            "数据源接口 {endpoint_id} 不在本项目里"
+        )));
+    }
+    Ok(())
 }
 
 /// 行映射器。

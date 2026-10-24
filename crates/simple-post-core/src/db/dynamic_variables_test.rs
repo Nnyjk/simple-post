@@ -297,3 +297,94 @@ fn an_unknown_definition_is_not_found() {
     let err = db::with_conn(&pool, |c| get(c, "nope")).expect_err("未知定义");
     assert!(matches!(err, crate::error::AppError::NotFound(_)));
 }
+
+/// 另一个项目，以及它的一个接口。
+fn seed_another_project(pool: &db::DbPool) {
+    db::with_tx(pool, |c| {
+        db::projects::create(
+            c,
+            &Project {
+                id: "p2".into(),
+                name: "Second".into(),
+                description: None,
+                default_base_url_definition_id: None,
+                base_url_definitions: vec![],
+                base_url: None,
+                color: "#000000".into(),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )?;
+        nodes::create(
+            c,
+            &ResourceNode {
+                root_id: "p2".into(),
+                ..node("m2", ResourceNodeType::Module, None, 0)
+            },
+            None,
+        )?;
+        nodes::create(
+            c,
+            &ResourceNode {
+                root_id: "p2".into(),
+                ..node("e9", ResourceNodeType::Endpoint, Some("m2"), 0)
+            },
+            Some(&detail("e9", "/other-project")),
+        )?;
+        Ok(())
+    })
+    .expect("seed second project");
+}
+
+#[test]
+fn a_data_source_endpoint_from_another_project_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+
+    let mut def = definition("d1", "sns");
+    def.source_endpoint_id = Some("e9".into());
+    def.source_inline_json = None;
+    let err = db::with_tx(&pool, |c| create(c, &def, "p1")).expect_err("跨项目的数据源应该被拒");
+    assert!(matches!(err, crate::error::AppError::Validation(_)));
+}
+
+#[test]
+fn pointing_an_existing_definition_at_another_projects_endpoint_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
+
+    let err = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                source_endpoint_id: Some(Some("e9".into())),
+                source_inline_json: Some(None),
+                ..Default::default()
+            },
+        )
+    })
+    .expect_err("改到跨项目的数据源应该被拒");
+    assert!(matches!(err, crate::error::AppError::Validation(_)));
+
+    // 原来的数据源没被动过。
+    let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
+    assert!(got.source_inline_json.is_some());
+}
+
+#[test]
+fn a_duplicate_id_is_reported_as_an_id_conflict() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
+
+    // id 重复但名字不重复：真正的原因是主键冲突，故不能说成「重名」。
+    let err = db::with_tx(&pool, |c| create(c, &definition("d1", "other"), "p1"))
+        .expect_err("id 重复应该被拒");
+    let message = match err {
+        crate::error::AppError::Validation(message) => message,
+        other => panic!("期望一条校验错误，实际是 {other:?}"),
+    };
+    assert!(message.contains("id"), "实际消息是：{message}");
+    assert!(!message.contains("已有一个叫"), "不该报成重名：{message}");
+}
