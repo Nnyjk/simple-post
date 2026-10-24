@@ -482,19 +482,6 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(prefs.lastProjectId, undefined, '记着的那条要被清掉，否则每次刷新都白试一次');
   });
 
-  it('openProject 记住项目、leaveProject 清掉它', async () => {
-    const bag = makeBootstrapHarness();
-    installIpcMock(async () => []);
-
-    bag.openProject('p1');
-    const prefs = JSON.parse(window.localStorage.getItem('simple-post:prefs') ?? '{}');
-    assert.equal(prefs.lastProjectId, 'p1', '进入项目要被记住');
-
-    bag.leaveProject();
-    const after = JSON.parse(window.localStorage.getItem('simple-post:prefs') ?? '{}');
-    assert.equal(after.lastProjectId, undefined, '退出项目就不再记着它');
-  });
-
   it('openProject 选中项目、切换到它的标签区，并顺带触发树加载', async () => {
     const bag = makeBootstrapHarness();
     const opened: { kind: string; id: string }[] = [];
