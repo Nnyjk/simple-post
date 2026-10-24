@@ -189,6 +189,18 @@
         "auth": { "kind": "none" }
       },
       "expected": ["dup"]
+    },
+    {
+      "name": "叠写的大括号不算标记",
+      "parts": {
+        "baseUrl": "",
+        "url": "/{{{{nested}}}}",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "json", "content": "{\"x\": {{{triple}}}}" },
+        "auth": { "kind": "none" }
+      },
+      "expected": []
     }
   ]
 }
