@@ -85,9 +85,20 @@ export function BodyEditor({ value, onChange, validationError, onFormatResult }:
       </div>
 
       {value.mode === 'none' ? (
-        <div className="flex h-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
-          此请求无 body
-        </div>
+        <>
+          <div className="flex h-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+            此请求无 body
+          </div>
+          {/* 切成 none 之后残留的 schema 仍要看得见、删得掉：模式切换保留了整个
+              body（含 schema），它又进 OpenAPI 导出的 components.schemas。藏起来
+              就没人能改它。 */}
+          {value.schema?.trim() ? (
+            <SchemaSection
+              value={value.schema}
+              onChange={(schema) => onChange({ ...value, schema: schema || undefined })}
+            />
+          ) : null}
+        </>
       ) : (
         <>
           <BodyContent value={value} onChange={onChange} validationError={validationError} />
