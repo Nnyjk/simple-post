@@ -45,6 +45,7 @@ import { createUiSlice } from './ui-slice';
 import { createMcpSlice } from './mcp-slice';
 import type { DraftEndpoint } from './store-types';
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
+import { saveLastProjectId } from './slices/ui-prefs';
 
 // 由各切片的交集组合出 AppState。各切片工厂同时导出自己的 `*Slice` 类型与
 // `create*` 函数；这里用 `*Slice` 类型（而非 `ReturnType<typeof create*>`）
@@ -77,6 +78,24 @@ export const useAppStore = create<AppState>()((set, get, store) => ({
   ...createUiSlice(set, get, store),
   ...createMcpSlice(set, get, store),
 }));
+
+/**
+ * 「我正在哪个项目里干活」是渲染层的会话事实：刷新后据此回到那个项目。
+ *
+ * **订阅而不是在各个动作里写。** `activeProjectId` 有三条改法：`openProject` /
+ * `setActiveProject`（命令面板跨项目跳接口走的是后者）与 `deleteProject`（删掉在前面的
+ * 项目时把用户送到幸存的那个）。漏掉任何一条，记住的项目就会与实际所在的项目脱节 ——
+ * 用户在 B 里干活，刷新却回到 A。
+ *
+ * 订阅还顺带把**回滚**算进去：`deleteProject` 失败时 `set(snapshot)` 把
+ * `activeProjectId` 改回去，这里跟着写回记住的值；写在乐观 `set()` 里则做不到 ——
+ * 那次写入发生在 IPC 成功之前，回滚不会把它改回来。
+ */
+useAppStore.subscribe((state, prev) => {
+  if (state.activeProjectId !== prev.activeProjectId) {
+    saveLastProjectId(state.activeProjectId);
+  }
+});
 
 // ---------- 选择器 ----------
 // 重要：下面每个选择器都返回 state 原始引用或单个 `.find()` 的结果。

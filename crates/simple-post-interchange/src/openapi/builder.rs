@@ -149,12 +149,14 @@ impl Builder {
         // 请求体的 schema。端点自己带了就 `$ref` 到 `components.schemas` 里那一份；
         // 没带就只声明「这是一个 object」——字段**不猜**。
         //
-        // `collect_schema` 必须**先**跑：它决定这份 schema 在 components 里叫什么，
-        // `$ref` 要指的就是那个名字。先写 requestBody 再收集的话，收集到的定义就
-        // 成了没人引用的孤儿：`components.schemas` 里躺着一堆 `Schema1`…，而每个
-        // requestBody 都宣称自己是一个 object。
-        let schema_name = self.collect_schema(ep, &pointer);
+        // 收集与引用必须**同进同出**：`mode = none` 的端点没有 requestBody，收集了
+        // 却没人引用，`components.schemas` 里就留下一堆没人引用的定义（读文档的人
+        // 看到 `Schema1`… 会以为它们有意义）。故收集放在 media type 判定的里面 ——
+        // 没有 requestBody 就没有 schema 可引。
         if let Some(media) = media_type_of(&ep.body.mode) {
+            // `collect_schema` 必须**先**跑：它决定这份 schema 在 components 里叫什么，
+            // `$ref` 要指的就是那个名字。
+            let schema_name = self.collect_schema(ep, &pointer);
             let schema = match &schema_name {
                 Some(name) => json!({ "$ref": format!("#/components/schemas/{name}") }),
                 None => json!({ "type": "object" }),
@@ -262,13 +264,14 @@ impl Builder {
     /// 手写的 `body.schema` 透传到 `components.schemas`，返回它在 components 里的名字。
     ///
     /// 它是一个 `Option<String>`（JSON 文本）且没有名字，故按出现顺序编号。解析不成
-    /// 合法 JSON Schema 就忽略 + `Info`，**不报错**：UI 从不写这个字段，一份畸形
-    /// schema 不该让整次导出失败。
+    /// 合法 JSON Schema 就忽略 + `Info`，**不报错**：界面的 schema 编辑区手写的那份
+    /// 可能正写到一半，一份畸形 schema 不该让整次导出失败。
     ///
     /// **返回名字而不只是收集**：调用方拿它写 `requestBody` 里的 `$ref`。收集了却
     /// 不被引用是三种选择里最差的一种——`components.schemas` 里躺着一堆没人引用的
     /// 定义（读文档的人看到 `Schema1`…`Schema9` 会以为它们有意义），而每个
-    /// requestBody 都在宣称一个错的请求体形状。
+    /// requestBody 都在宣称一个错的请求体形状。故调用方只在真的要写 `requestBody`
+    /// 时才收集（见上）。
     pub(super) fn collect_schema(&mut self, ep: &IrEndpoint, pointer: &str) -> Option<String> {
         let raw = ep.body.schema.as_ref().filter(|s| !s.trim().is_empty())?;
         match serde_json::from_str::<Value>(raw) {

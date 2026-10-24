@@ -384,6 +384,33 @@ fn an_endpoint_without_a_body_schema_leaves_no_orphan_component() {
     );
 }
 
+/// 没有请求体的端点不得在 `components.schemas` 里留下孤儿定义。
+///
+/// 模式切成 `none` 之后残留的 schema 正是这种状态：界面上它还看得见（所以用户能
+/// 删掉它），而导出时它没有 requestBody 可引用 —— 收集了却没人引用，
+/// `components.schemas` 里就多出一份没人引用的定义。
+#[test]
+fn an_endpoint_without_a_request_body_leaves_no_orphan_component() {
+    let ex = one_module(
+        "m",
+        vec![IrEndpoint {
+            body: RequestBody {
+                mode: BodyMode::None,
+                content: String::new(),
+                schema: Some("{\"type\":\"object\"}".into()),
+            },
+            ..ep("a", HttpMethod::Post, "/a")
+        }],
+    );
+    let doc = doc_of(&ex);
+
+    assert!(
+        doc["components"].get("schemas").is_none(),
+        "没有 requestBody 就没有 schema 可引，不该留下孤儿定义：{:?}",
+        doc["components"]
+    );
+}
+
 #[test]
 fn an_unparseable_body_schema_is_reported_but_never_fails_the_export() {
     let ex = one_module(

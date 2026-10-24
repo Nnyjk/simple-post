@@ -120,7 +120,10 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "required": ["key", "value"]
                         }
                     },
-                    "body": { "type": "string" },
+                    "body": {
+                        "type": "string",
+                        "description": "The request payload to send, as text. For body_mode=json this is a JSON instance with values (a value position may hold a {{var}} placeholder, replaced with that variable's value when the request is sent) — a JSON Schema (the documented parameter definition) belongs on the endpoint as body_schema, and is never sent."
+                    },
                     "body_mode": {
                         "type": "string",
                         "enum": ["none", "json", "form", "raw", "multipart"],
