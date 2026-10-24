@@ -30,6 +30,9 @@ crates/simple-post-mcp/
     ├── http_client.rs         # reqwest::Client wrapper with optional bearer auth
     ├── stdio_loop.rs          # line-oriented JSON-RPC ↔ HTTP bridge
     ├── capability.rs          # --capability local tool-list filter
+    ├── dynamic/               # dynamic variables: the shared operations
+    │   ├── mod.rs             #   (ops.rs) + the SourceFetcher implementation
+    │   ├── ops.rs             #   (source.rs)
     └── mcp/                   # the JSON-RPC dispatcher + tool implementations
         ├── mod.rs             # AppState, dispatch, tool_descriptors,
         │                       # REQUIRED_CAPABILITY table, tool_fn! macro
@@ -38,6 +41,7 @@ crates/simple-post-mcp/
         ├── project_ops/       # project / collection / module / endpoint /
         │                       # base_url_def CRUD tools
         ├── response_parse.rs  # JSON-path response parsing tools
+        ├── dynamic_ops.rs     # dynamic-variable tools
         └── variable_fill.rs   # variable interpolation tools
 ```
 

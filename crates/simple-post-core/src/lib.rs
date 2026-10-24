@@ -6,6 +6,7 @@
 
 pub mod db;
 pub mod domain;
+pub mod dynamic;
 pub mod error;
 pub mod http_executor;
 pub mod mcp_metrics;

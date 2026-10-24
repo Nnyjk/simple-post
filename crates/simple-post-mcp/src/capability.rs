@@ -73,6 +73,9 @@ pub fn filter_tools(name: &str, cap: CapabilityOverride) -> bool {
                 && !name.contains("api_call_endpoint")
                 && !name.contains("api_resolve_endpoint")
                 && !name.contains("api_validate_endpoint")
+                // `dynamic_var_resolve` 会真的发出站请求（去数据源取数），故与
+                // `api_call_endpoint` 同等对待。
+                && !name.contains("dynamic_var_resolve")
         }
     }
 }
@@ -81,6 +84,9 @@ fn is_destructive(name: &str) -> bool {
     DESTRUCTIVE_SUFFIXES.iter().any(|s| name.ends_with(s))
         || name == "api_diff_responses"
         || name == "api_extract_jsonpath"
+        // `dynamic_var_set_override` 以 `_override` 结尾，匹配不到上面那张后缀表，
+        // 但它写的是状态，故显式列出来。
+        || name == "dynamic_var_set_override"
 }
 
 #[cfg(test)]

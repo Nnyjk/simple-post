@@ -114,11 +114,21 @@ try {
     'api_parse_response',
     'api_diff_responses',
     'api_extract_jsonpath',
+    'dynamic_var_list',
+    'dynamic_var_get',
   ];
   for (const name of readonlyTools) {
     assert(names.has(name), `tools/list exposes read-only tool ${name}`);
   }
-  for (const name of ['env_create', 'env_set_var', 'api_run_request', 'api_call_endpoint']) {
+  for (const name of [
+    'env_create',
+    'env_set_var',
+    'api_run_request',
+    'api_call_endpoint',
+    // `dynamic_var_resolve` 会真的发出站请求（去数据源取数），与 api_call_endpoint 同级。
+    'dynamic_var_resolve',
+    'dynamic_var_set_override',
+  ]) {
     assert(!names.has(name), `read_only policy hides ${name}`);
   }
 

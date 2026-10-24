@@ -200,6 +200,45 @@ export function resolveVarsWithMissing(
 }
 
 /**
+ * 列出字符串里出现的**全部** `{{name}}` 标记名，按首次出现去重。
+ *
+ * 与 [`resolveVarsWithMissing`] 的区别是：那个只报告**没解析出来**的名字，这个报告
+ * **出现过**的名字。动态变量要知道自己有没有被请求引用，就得问这个——一个同名的环境变量
+ * 会让 `{{name}}` 解析成功，于是「没解析出来」那个清单里根本没有它。
+ *
+ * 判据与 Rust 的 `core::template::list_missing_vars` 同一套：找**配对**的 `}}`，中间的内容
+ * 必须是裸标识符（`[A-Za-z0-9_]+`）。故叠写的形状（`{{{{a}}}}`）不算标记——它先遇到的
+ * 那对 `}}` 截出的是 `{{a`，不是标识符。两侧必须逐条相同，故这份判据由
+ * `fixtures/dynamic-parity.json` 的 `scanCases` 钉住。
+ */
+export function listVars(input: string): string[] {
+  if (!input) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] === '{' && input[i + 1] === '{') {
+      const close = input.indexOf('}}', i + 2);
+      if (close !== -1) {
+        const inner = input.slice(i + 2, close);
+        if (WORD.test(inner) && !seen.has(inner)) {
+          seen.add(inner);
+          out.push(inner);
+        }
+        // 跳过整个标记（含那对配对的大括号），与 Rust 侧一样。
+        i = close + 2;
+        continue;
+      }
+    }
+    i += 1;
+  }
+  return out;
+}
+
+/** 裸标识符：字母、数字与下划线，且非空。与 Rust 的 `template::is_word` 同一套判据。 */
+const WORD = /^[A-Za-z0-9_]+$/;
+
+/**
  * `resolveVarsWithMissing`，丢弃 missing 列表。保留这个名字是因为既有调用方都
  * import 它——两者同一实现，`{{x}}` 不可能在这里存活却被那里报出来。
  */

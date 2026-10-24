@@ -315,6 +315,96 @@ export interface BaseUrlDefinition {
   description?: string;
 }
 
+/**
+ * 值的序列化形态。与 Rust 的 `domain::ValueMode` 一一对应。
+ *
+ * `auto` 与 `text` 的输出完全一致：对象与数组给裸 JSON 片段，标量给纯文本。
+ * `text` 是用户的声明（值会被放进请求体的字符串位置，转义由用户承担），不是另一种形态。
+ */
+export type ValueMode = 'auto' | 'json' | 'text';
+
+/**
+ * 一条动态变量的定义：变量名 → 数据源 → 抽取规则 → 缓存时长。
+ *
+ * 数据源二选一：`sourceEndpointId` 引用树里的一个端点，`sourceInlineJson` 是一份内联请求。
+ * 对应 `crates/simple-post-core/src/domain/dynamic.rs` 的 `DynamicVariable`。
+ */
+export interface DynamicVariable {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  /** 数据源端点（`nodes.id`）。端点被删后这一项为 null，定义本身仍在。 */
+  sourceEndpointId?: string | null;
+  /** 数据源端点的名字。界面直接显示它，不必自己再查一次树。 */
+  sourceEndpointName?: string | null;
+  /** 内联请求（method / url / headers / body / auth 的 JSON 文本）。 */
+  sourceInlineJson?: string | null;
+  /** JSONPath 表达式。`$` 表示整段响应。 */
+  extractPath: string;
+  valueMode: ValueMode;
+  /** 缓存有效期（秒）。 */
+  ttlSeconds: number;
+  /** 取数失败时是否允许用已过期的缓存值兜底。 */
+  staleFallback: boolean;
+  /** 是否参与解析。停用的定义不参与替换。 */
+  enabled: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 当前值是从哪来的。 */
+export type DynamicValueSource = 'auto' | 'override' | 'stale' | 'missing';
+
+/** 取数或解析失败的原因。 */
+export type DynamicErrorKind =
+  | 'network'
+  | 'timeout'
+  | 'status'
+  | 'not_json'
+  | 'no_match'
+  | 'source_missing'
+  | 'source_error'
+  | 'too_large';
+
+/** 一条动态变量的错误。`name` 是出错的变量名。 */
+export interface DynamicError {
+  name: string;
+  kind: DynamicErrorKind;
+  message: string;
+}
+
+/** 一条动态变量的当前状态。 */
+export interface DynamicValueStatus {
+  name: string;
+  /** 当前生效的值（已按 `valueMode` 序列化）。 */
+  value?: string | null;
+  source: DynamicValueSource;
+  fetchedAt?: number | null;
+  expiresAt?: number | null;
+  isOverride: boolean;
+  error?: DynamicError | null;
+}
+
+/** 一条定义 + 它的当前值与缓存状态。 */
+export interface DynamicVariableView extends DynamicVariable {
+  value?: string | null;
+  source: DynamicValueSource;
+  fetchedAt?: number | null;
+  expiresAt?: number | null;
+  isOverride: boolean;
+  error?: DynamicError | null;
+}
+
+/** 一次解析的结果：值、状态与错误。 */
+export interface DynamicResolution {
+  /** 变量名 → 生效的值。缺席的名字按缺失处理。 */
+  values: Record<string, string>;
+  statuses: DynamicValueStatus[];
+  errors: DynamicError[];
+}
+
 export interface Project {
   id: string;
   name: string;

@@ -193,6 +193,94 @@ pub struct BaseUrlDefSetDefaultBody {
     pub def_id: Option<String>,
 }
 
+// ----- 动态变量 -----------------------------------------------------------
+
+/// `GET /api/dynamic-variables` 的查询串。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicVariableListQuery {
+    pub project_id: String,
+    /// 当前环境。缺席时用项目当前激活的环境。
+    #[serde(default)]
+    pub environment_id: Option<String>,
+}
+
+/// `POST /api/dynamic-variables` 的 body。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicVariableCreateBody {
+    pub project_id: String,
+    pub name: String,
+    /// 客户端自铸的 id，非空白时照单采纳——与 `BaseUrlDefCreateBody::id` 同一理由：
+    /// renderer 在这一行持久化之前就拿这个 id 当键。
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// 数据源端点（`nodes.id`）。与 `source_inline_json` 二选一。
+    #[serde(default)]
+    pub source_endpoint_id: Option<String>,
+    /// 内联请求（method / url / headers / body / auth 的 JSON 文本）。
+    #[serde(default)]
+    pub source_inline_json: Option<String>,
+    /// JSONPath 表达式。`$` 表示整段响应。
+    #[serde(default)]
+    pub extract_path: Option<String>,
+    /// 值的序列化形态：`auto` / `json` / `text`。
+    #[serde(default)]
+    pub value_mode: Option<crate::domain::ValueMode>,
+    /// 缓存有效期（秒）。
+    #[serde(default)]
+    pub ttl_seconds: Option<i64>,
+    /// 取数失败时是否允许用已过期的缓存值兜底。
+    #[serde(default)]
+    pub stale_fallback: Option<bool>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub sort_order: Option<i64>,
+}
+
+/// `POST /api/dynamic-variables/resolve` 的 body。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicVariableResolveBody {
+    pub project_id: String,
+    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。
+    pub names: Vec<String>,
+    #[serde(default)]
+    pub environment_id: Option<String>,
+    /// 真 = 跳过缓存，强制重新取数。
+    #[serde(default)]
+    pub force: Option<bool>,
+}
+
+/// `POST /api/dynamic-variables/{id}/override` 的 body。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicVariableOverrideBody {
+    /// 覆盖值。`null` 或缺席表示清除覆盖值（下次解析重新取数）。
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub environment_id: Option<String>,
+    /// 覆盖值的到期时间（unix 毫秒）。缺席且 `forever` 为假时沿用定义的 TTL。
+    #[serde(default)]
+    pub expires_at: Option<i64>,
+    /// 真 = 一直有效，直到手动清除。
+    #[serde(default)]
+    pub forever: Option<bool>,
+}
+
+/// `POST /api/dynamic-variables/{id}/refresh` 的 body。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicVariableRefreshBody {
+    pub project_id: String,
+    #[serde(default)]
+    pub environment_id: Option<String>,
+}
+
 // ----- 资源树 -----------------------------------------------------------
 
 /// `POST /api/nodes` 的 body。

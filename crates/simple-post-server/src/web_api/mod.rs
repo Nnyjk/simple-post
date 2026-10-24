@@ -233,6 +233,30 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/interchange/export/document",
             post(interchange_export_document).layer(body_limit()),
         )
+        // ---- dynamic variables ----
+        //
+        // `/api/dynamic-variables/resolve` 是**字面量**段，必须注册在 `/{id}` 之前，
+        // 否则在 axum 的 radix tree 里被参数段吃掉。
+        .route(
+            "/api/dynamic-variables",
+            get(dynamic_variables_list).post(dynamic_variables_create),
+        )
+        .route(
+            "/api/dynamic-variables/resolve",
+            post(dynamic_variables_resolve),
+        )
+        .route(
+            "/api/dynamic-variables/{id}",
+            patch(dynamic_variables_update).delete(dynamic_variables_delete),
+        )
+        .route(
+            "/api/dynamic-variables/{id}/override",
+            post(dynamic_variables_set_override),
+        )
+        .route(
+            "/api/dynamic-variables/{id}/refresh",
+            post(dynamic_variables_refresh),
+        )
         // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))
         .route("/api/mcp/logs", get(mcp_log_tail))

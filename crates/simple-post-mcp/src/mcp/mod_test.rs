@@ -54,6 +54,7 @@ fn tools_list_returns_all_registered_tools() {
     assert!(has("api_parse_response"), "missing api_parse_response");
     assert!(has("api_diff_responses"), "missing api_diff_responses");
     assert!(has("api_extract_jsonpath"), "missing api_extract_jsonpath");
+    assert!(has("dynamic_var_"), "missing dynamic_var_* tools");
 
     // 工具总数抽查 —— 断言刻意放宽，好让后来加工具不必改测试，但紧到能抓到整个
     // 类别被弄丢。
@@ -84,17 +85,17 @@ fn every_registered_tool_has_a_capability() {
 
 /// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` 与 `README.md` 都写着「44 tools」。上面的双射测试在「工具连同它的
+/// `AGENTS.md` 与 `README.md` 都写着「51 tools」。上面的双射测试在「工具连同它的
 /// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
 /// 里要改这个常量，同一个 commit 也应更新那两份文档。
-const EXPECTED_TOOL_COUNT: usize = 44;
+const EXPECTED_TOOL_COUNT: usize = 51;
 
 #[test]
 fn registered_tool_count_matches_the_documented_figure() {
     assert_eq!(
         tool_table().len(),
         EXPECTED_TOOL_COUNT,
-        "tool count changed; update EXPECTED_TOOL_COUNT and the '44 tools' \
+        "tool count changed; update EXPECTED_TOOL_COUNT and the '51 tools' \
              claims in AGENTS.md and README.md"
     );
 }

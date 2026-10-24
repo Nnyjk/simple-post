@@ -37,7 +37,7 @@ mod types;
 pub use base_url::{
     collapse_url_slashes, join_base_url, resolve_base_url, resolve_base_url_with, BaseUrlSource,
 };
-pub use resolve::resolve_endpoint;
+pub use resolve::{resolve_endpoint, resolve_endpoint_with};
 pub use template::{list_missing_vars, resolve_template, ResolvedTemplate};
 pub use types::{EndpointOverrides, ResolvedEndpoint};
 

@@ -1,0 +1,206 @@
+{
+  "$comment": "动态变量规则的跨语言样本。Rust 的 `core::dynamic`（合并、序列化、名字扫描）与 TS 的 `src/lib/dynamic-vars.ts`（同一组规则的镜像）读同一份本文件，产出必须逐条相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。样本只覆盖「值拿到之后怎么进池、怎么变成字符串、哪些名字算被引用」，不覆盖取数本身——取数是网络行为，不是纯函数。数值只用整数：Rust 的 `serde_json::Number` 保留 `1.0` 的浮点写法，JavaScript 的 `JSON.parse` 把它归一成 `1`，两者在小数上本就不同，而生产路径上序列化只发生在 Rust 侧。",
+  "mergeCases": [
+    {
+      "name": "动态变量的值覆盖同名环境变量",
+      "env": { "sns": "env-value", "token": "t" },
+      "disabled": [],
+      "dynamic": { "sns": "dynamic-value" },
+      "expected": { "sns": "dynamic-value", "token": "t" }
+    },
+    {
+      "name": "被停用的同名环境变量不影响动态变量",
+      "env": { "sns": "env-value" },
+      "disabled": ["sns"],
+      "dynamic": { "sns": "dynamic-value" },
+      "expected": { "sns": "dynamic-value" }
+    },
+    {
+      "name": "被停用的环境变量不参与替换",
+      "env": { "sns": "env-value", "token": "t" },
+      "disabled": ["token"],
+      "dynamic": {},
+      "expected": { "sns": "env-value" }
+    },
+    {
+      "name": "停用名单里的环境变量与动态变量同名时，动态变量照常生效",
+      "env": { "sns": "env-value" },
+      "disabled": ["sns"],
+      "dynamic": { "sns": "dynamic-value" },
+      "expected": { "sns": "dynamic-value" }
+    },
+    {
+      "name": "动态变量的值不进环境变量集合本身",
+      "env": { "token": "t" },
+      "disabled": [],
+      "dynamic": { "sns": "dynamic-value" },
+      "expected": { "sns": "dynamic-value", "token": "t" }
+    }
+  ],
+  "serializeCases": [
+    {
+      "name": "auto 对数组给裸 JSON 片段",
+      "mode": "auto",
+      "value": [{ "code": "A001" }],
+      "expected": "[{\"code\":\"A001\"}]"
+    },
+    {
+      "name": "auto 对对象给裸 JSON 片段",
+      "mode": "auto",
+      "value": { "code": "A001" },
+      "expected": "{\"code\":\"A001\"}"
+    },
+    {
+      "name": "auto 对字符串给纯文本",
+      "mode": "auto",
+      "value": "A001",
+      "expected": "A001"
+    },
+    {
+      "name": "auto 对数字给纯文本",
+      "mode": "auto",
+      "value": 42,
+      "expected": "42"
+    },
+    {
+      "name": "auto 对布尔给纯文本",
+      "mode": "auto",
+      "value": true,
+      "expected": "true"
+    },
+    {
+      "name": "auto 对 null 给 null",
+      "mode": "auto",
+      "value": null,
+      "expected": "null"
+    },
+    {
+      "name": "json 对数组给裸 JSON 片段",
+      "mode": "json",
+      "value": [{ "code": "A001" }],
+      "expected": "[{\"code\":\"A001\"}]"
+    },
+    {
+      "name": "json 对字符串给带引号的 JSON 文本",
+      "mode": "json",
+      "value": "A001",
+      "expected": "\"A001\""
+    },
+    {
+      "name": "json 对数字给数字文本",
+      "mode": "json",
+      "value": 42,
+      "expected": "42"
+    },
+    {
+      "name": "json 对布尔给布尔文本",
+      "mode": "json",
+      "value": true,
+      "expected": "true"
+    },
+    {
+      "name": "text 对数组给裸 JSON 片段（与 auto 相同）",
+      "mode": "text",
+      "value": [{ "code": "A001" }],
+      "expected": "[{\"code\":\"A001\"}]"
+    },
+    {
+      "name": "text 对对象给裸 JSON 片段（与 auto 相同）",
+      "mode": "text",
+      "value": { "code": "A001" },
+      "expected": "{\"code\":\"A001\"}"
+    },
+    {
+      "name": "text 对字符串给纯文本（与 auto 相同）",
+      "mode": "text",
+      "value": "A001",
+      "expected": "A001"
+    },
+    {
+      "name": "text 对数字给纯文本（与 auto 相同）",
+      "mode": "text",
+      "value": 42,
+      "expected": "42"
+    },
+    {
+      "name": "text 对布尔给纯文本（与 auto 相同）",
+      "mode": "text",
+      "value": true,
+      "expected": "true"
+    }
+  ],
+  "scanCases": [
+    {
+      "name": "每个会被替换的字段里的标记都被扫到",
+      "parts": {
+        "baseUrl": "https://{{host}}/v1",
+        "url": "/x/{{pathVar}}",
+        "params": [{ "id": "p1", "key": "q", "value": "{{paramVar}}", "enabled": true }],
+        "headers": [{ "id": "h1", "key": "X-Token", "value": "{{headerVar}}", "enabled": true }],
+        "body": { "mode": "json", "content": "{\"bodyVar\": {{bodyVar}}}" },
+        "auth": { "kind": "bearer", "bearer": "{{authVar}}" }
+      },
+      "expected": ["host", "pathVar", "paramVar", "headerVar", "bodyVar", "authVar"]
+    },
+    {
+      "name": "未启用的参数与 header 不算被引用",
+      "parts": {
+        "baseUrl": "",
+        "url": "/x",
+        "params": [{ "id": "p1", "key": "q", "value": "{{offParam}}", "enabled": false }],
+        "headers": [{ "id": "h1", "key": "X", "value": "{{offHeader}}", "enabled": false }],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": []
+    },
+    {
+      "name": "key 为空的参数与 header 不算被引用",
+      "parts": {
+        "baseUrl": "",
+        "url": "/x",
+        "params": [{ "id": "p1", "key": "", "value": "{{emptyKey}}", "enabled": true }],
+        "headers": [{ "id": "h1", "key": "", "value": "{{emptyKey}}", "enabled": true }],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": []
+    },
+    {
+      "name": "鉴权的三种方案都扫到",
+      "parts": {
+        "baseUrl": "",
+        "url": "/x",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "basic", "basic": { "username": "{{user}}", "password": "{{pass}}" } }
+      },
+      "expected": ["user", "pass"]
+    },
+    {
+      "name": "同一个名字只出现一次",
+      "parts": {
+        "baseUrl": "",
+        "url": "/{{dup}}",
+        "params": [{ "id": "p1", "key": "q", "value": "{{dup}}", "enabled": true }],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": ["dup"]
+    },
+    {
+      "name": "叠写的大括号不算标记",
+      "parts": {
+        "baseUrl": "",
+        "url": "/{{{{nested}}}}",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "json", "content": "{\"x\": {{{triple}}}}" },
+        "auth": { "kind": "none" }
+      },
+      "expected": []
+    }
+  ]
+}

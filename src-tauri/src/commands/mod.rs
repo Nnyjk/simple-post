@@ -20,6 +20,9 @@ mod base_url_defs;
 // `pub(crate)`：REST 路由反序列化的是 Tauri 命令同一个 `CreateProjectOpts`，两个传输
 // 必须对「创建带什么」达成一致，各存一份 DTO 正是本文件开头警告的漂移。
 pub(crate) mod dto;
+// 动态变量的八个入口。逻辑在 `crate::dynamic_api`（server crate），这里只是 Tauri 侧的
+// 薄壳——REST 路由调的是同一批函数。
+mod dynamic_variables;
 mod environments;
 // 导入 / 导出的四个入口。逻辑在 `crate::interchange_api`（server crate），这里只是
 // Tauri 侧的薄壳——REST 路由调的是同一批函数。
@@ -42,6 +45,7 @@ mod response_history;
 // 的调用，是经该路径所在模块解析宏，而非经 crate 根的别名。列条目会把宏留在子模块，E0433 随后而来。
 pub use base_url_defs::*;
 pub use dto::*;
+pub use dynamic_variables::*;
 pub use environments::*;
 pub use interchange::*;
 pub use mcp_auto_start::*;

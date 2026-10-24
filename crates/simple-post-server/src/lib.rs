@@ -31,6 +31,9 @@
 pub mod auth;
 pub mod daemon_supervisor;
 pub mod dto;
+/// 动态变量的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必各写一遍
+/// ——见 AGENTS.md 的 dual-transport invariant。
+pub mod dynamic_api;
 pub mod http_config;
 /// 导入 / 导出的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。

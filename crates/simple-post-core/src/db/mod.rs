@@ -18,6 +18,8 @@ use std::sync::Arc;
 
 // 子模块：对外公开，让编排层 / Tauri commands 可直接调用单个 CRUD 函数。
 pub mod base_url_defs;
+pub mod dynamic_variable_cache;
+pub mod dynamic_variables;
 pub mod endpoint_details;
 pub mod environments;
 pub mod node_scripts;

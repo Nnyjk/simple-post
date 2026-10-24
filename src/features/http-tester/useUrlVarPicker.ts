@@ -5,7 +5,7 @@
  * 派生；真正的写回由调用点给的 `onUrlChange` 完成，故本 hook 不碰 store。
  */
 import { useMemo, useState, type KeyboardEvent, type RefObject } from 'react';
-import { extractPartialVar, shouldShowVarPicker } from './EnvVarPicker';
+import { extractPartialVar, shouldShowVarPicker, type VarEntry } from './EnvVarPicker';
 import type { Environment } from '@/types/domain';
 
 /**
@@ -16,11 +16,18 @@ import type { Environment } from '@/types/domain';
  */
 export function useUrlVarPicker({
   endpointEnv,
+  dynamicEntries,
   liveUrl,
   urlInputRef,
   onUrlChange,
 }: {
   endpointEnv: Environment | undefined;
+  /**
+   * 动态变量的候选条目。它们与环境变量并进同一份列表——不新开页签。
+   *
+   * 由调用点给（它读 store），故本 hook 仍不碰 store。
+   */
+  dynamicEntries?: VarEntry[];
   liveUrl: string;
   urlInputRef: RefObject<HTMLInputElement | null>;
   /** 把新 URL 写回草稿；返回是否真的写了（没有接口可写时为 false）。 */
@@ -31,15 +38,19 @@ export function useUrlVarPicker({
 
   // env 变量选择器的条目：接口自己的环境（即本接口解析 `{{x}}` 所依据的那份变量）
   // + 用户在最后一个 `{{` 之后输入的片段。
-  const allEnvEntries = useMemo(
-    () =>
-      endpointEnv
-        ? Object.entries(endpointEnv.variables)
-            .map(([k, v]) => ({ key: k, value: v }))
-            .sort((a, b) => a.key.localeCompare(b.key))
-        : [],
-    [endpointEnv],
-  );
+  const allEnvEntries = useMemo(() => {
+    const env = endpointEnv
+      ? Object.entries(endpointEnv.variables).map(([k, v]) => ({
+          key: k,
+          value: v,
+          origin: 'environment' as const,
+        }))
+      : [];
+    const dynamic = dynamicEntries ?? [];
+    // 同名时动态变量排前面：它在替换时压过环境变量（见 `mergePool`），
+    // 故列表里的先后顺序要与替换时的优先级一致。
+    return [...dynamic, ...env].sort((a, b) => a.key.localeCompare(b.key));
+  }, [endpointEnv, dynamicEntries]);
   const partialVar = extractPartialVar(liveUrl);
   const filteredEntries = useMemo(() => {
     const q = (partialVar ?? '').toLowerCase();

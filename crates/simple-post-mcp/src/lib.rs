@@ -13,6 +13,7 @@
 
 pub mod capability;
 pub mod daemon_http;
+pub mod dynamic;
 pub mod error;
 pub mod http_client;
 pub mod mcp;

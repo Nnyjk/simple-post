@@ -227,6 +227,73 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     body: (a) => ({ defId: a.defId }),
   },
 
+  // ----- dynamic variables -----
+  // 列表只读缓存行，不取数；`/resolve` 才会真的发出站请求。
+  [COMMANDS.dynamicVariablesList]: {
+    method: 'GET',
+    path: (a) =>
+      `/api/dynamic-variables${buildQuery({
+        projectId: a.projectId,
+        environmentId: a.environmentId,
+      })}`,
+  },
+  [COMMANDS.dynamicVariablesCreate]: {
+    method: 'POST',
+    path: () => '/api/dynamic-variables',
+    // 显式投影：下面这些键就是全部线上契约，调用方多带的键不能跟着上车。
+    body: (a) => ({
+      projectId: a.projectId,
+      name: a.name,
+      id: a.id ?? null,
+      description: a.description ?? null,
+      sourceEndpointId: a.sourceEndpointId ?? null,
+      sourceInlineJson: a.sourceInlineJson ?? null,
+      extractPath: a.extractPath ?? null,
+      valueMode: a.valueMode ?? null,
+      ttlSeconds: a.ttlSeconds ?? null,
+      staleFallback: a.staleFallback ?? null,
+      enabled: a.enabled ?? null,
+      sortOrder: a.sortOrder ?? null,
+    }),
+  },
+  [COMMANDS.dynamicVariablesUpdate]: {
+    method: 'PATCH',
+    path: (a) => `/api/dynamic-variables/${encodeURIComponent(String(a.id))}`,
+    body: (a) => a.patch,
+  },
+  [COMMANDS.dynamicVariablesDelete]: {
+    method: 'DELETE',
+    path: (a) => `/api/dynamic-variables/${encodeURIComponent(String(a.id))}`,
+  },
+  [COMMANDS.dynamicVariablesResolve]: {
+    method: 'POST',
+    path: () => '/api/dynamic-variables/resolve',
+    body: (a) => ({
+      projectId: a.projectId,
+      names: a.names,
+      environmentId: a.environmentId ?? null,
+      force: a.force ?? false,
+    }),
+  },
+  [COMMANDS.dynamicVariablesSetOverride]: {
+    method: 'POST',
+    path: (a) => `/api/dynamic-variables/${encodeURIComponent(String(a.id))}/override`,
+    body: (a) => ({
+      value: a.value ?? null,
+      environmentId: a.environmentId ?? null,
+      expiresAt: a.expiresAt ?? null,
+      forever: a.forever ?? false,
+    }),
+  },
+  [COMMANDS.dynamicVariablesRefresh]: {
+    method: 'POST',
+    path: (a) => `/api/dynamic-variables/${encodeURIComponent(String(a.id))}/refresh`,
+    body: (a) => ({
+      projectId: a.projectId,
+      environmentId: a.environmentId ?? null,
+    }),
+  },
+
   // ----- request settings -----
   // Web 形态提供专用的 `/api/request-settings`（PUT 为全量替换语义）。
   // Tauri 命令吃的是 `patch`，所以调用点必须自己合并成全量。

@@ -29,10 +29,10 @@ pub use simple_post_core::{
 pub use simple_post_mcp::{daemon_http, mcp};
 
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
-// `interchange_api` 在其中：导入 / 导出的逻辑住在 server crate，好让 Tauri 命令与
-// REST 路由调同一个函数。
+// `interchange_api` 与 `dynamic_api` 在其中：导入 / 导出与动态变量的逻辑住在 server crate，
+// 好让 Tauri 命令与 REST 路由调同一个函数。
 pub use simple_post_server::{
-    auth, daemon_supervisor, dto, http_config, interchange_api, port_registry, web_api,
+    auth, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry, web_api,
 };
 
 // CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
@@ -176,6 +176,15 @@ pub fn run() {
             crate::commands::base_url_defs_update,
             crate::commands::base_url_defs_delete,
             crate::commands::base_url_defs_set_default,
+            // 动态变量：定义 CRUD、解析、写覆盖值、强制重取。逻辑在 `crate::dynamic_api`，
+            // REST 路由调的是同一批函数。
+            crate::commands::dynamic_variables_list,
+            crate::commands::dynamic_variables_create,
+            crate::commands::dynamic_variables_update,
+            crate::commands::dynamic_variables_delete,
+            crate::commands::dynamic_variables_resolve,
+            crate::commands::dynamic_variables_set_override,
+            crate::commands::dynamic_variables_refresh,
             crate::commands::request_settings_get,
             crate::commands::request_settings_update,
             // 响应历史：按 endpoint 的 FIFO，上限在 db 写入侧截断。

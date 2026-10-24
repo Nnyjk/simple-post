@@ -19,6 +19,7 @@ import type {
   RequestBody,
 } from '@/types/domain';
 import { collapseUrlSlashes, joinBaseUrl, resolveVarsWithMissing } from './url';
+import { mergePool } from './dynamic-vars';
 import {
   buildMultipartBody,
   multipartContentType,
@@ -77,6 +78,14 @@ export interface PrepareRequestInput {
   body: RequestBody;
   auth: AuthConfig;
   env?: Environment;
+  /**
+   * 动态变量的当前值：变量名 → 替换用的文本。
+   *
+   * 它们在变量池的**最后一步**并入，故同名时压过环境变量；被停用的环境变量也不影响它们
+   * （停用过滤只作用于环境变量）。合并规则见 `src/lib/dynamic-vars.ts` 的 `mergePool`，
+   * 与 Rust 的 `core::dynamic::merge_pool` 同一套，由 `fixtures/dynamic-parity.json` 钉住。
+   */
+  dynamicVars?: Record<string, string>;
 }
 
 export interface PreparedRequest {
@@ -143,6 +152,19 @@ function createMissingTracker(): MissingTracker {
 }
 
 /**
+ * 合成变量池：环境变量（去掉停用的那些）+ 动态变量的值。
+ *
+ * 合并规则只有一份实现，在 `src/lib/dynamic-vars.ts` 的 `mergePool`——它与 Rust 的
+ * `core::dynamic::merge_pool` 同一套，由 `fixtures/dynamic-parity.json` 钉住。
+ */
+function buildPool(
+  env: Environment | undefined,
+  dynamicVars: Record<string, string> | undefined,
+): Record<string, string> {
+  return mergePool(env?.variables ?? {}, env?.disabledVariables ?? [], dynamicVars ?? {});
+}
+
+/**
  * 把启用的非空参数拼成 `?k=v&...` 查询串。
  *
  * 参数值与其他字段一样是模板：`{{userId}}` 在编码前对当前环境解析。
@@ -156,7 +178,7 @@ function createMissingTracker(): MissingTracker {
 function appendQueryString(
   url: string,
   params: readonly KeyValue[],
-  env: Environment | undefined,
+  pool: Record<string, string>,
   missing: MissingTracker,
 ): string {
   const parts: string[] = [];
@@ -166,7 +188,7 @@ function appendQueryString(
     // （与 header 同一条纪律）。故先判 key，再解析值 —— 与 Rust 的
     // `variable_fill::resolve_endpoint` 同序。
     if (!p.key) continue;
-    const value = resolveVarsWithMissing(p.value, env);
+    const value = resolveVarsWithMissing(p.value, pool);
     missing.add(value.missing);
     // 空值判断跑在*解析后*的值上：解析为 "" 的变量与手输的空值同样丢掉该参数
     if (value.value === '') continue; // spec: skip empty keys/values
@@ -185,17 +207,17 @@ function appendQueryString(
  */
 function resolveAuth(
   auth: AuthConfig,
-  env: Environment | undefined,
+  pool: Record<string, string>,
   missing: MissingTracker,
 ): AuthConfig {
   if (auth.kind === 'bearer') {
-    const r = resolveVarsWithMissing(auth.bearer ?? '', env);
+    const r = resolveVarsWithMissing(auth.bearer ?? '', pool);
     missing.add(r.missing);
     return { ...auth, bearer: r.value };
   }
   if (auth.kind === 'basic' && auth.basic) {
-    const u = resolveVarsWithMissing(auth.basic.username, env);
-    const p = resolveVarsWithMissing(auth.basic.password, env);
+    const u = resolveVarsWithMissing(auth.basic.username, pool);
+    const p = resolveVarsWithMissing(auth.basic.password, pool);
     missing.add(u.missing);
     missing.add(p.missing);
     return {
@@ -204,8 +226,8 @@ function resolveAuth(
     };
   }
   if (auth.kind === 'apikey' && auth.apikey) {
-    const k = resolveVarsWithMissing(auth.apikey.key, env);
-    const v = resolveVarsWithMissing(auth.apikey.value, env);
+    const k = resolveVarsWithMissing(auth.apikey.key, pool);
+    const v = resolveVarsWithMissing(auth.apikey.value, pool);
     missing.add(k.missing);
     missing.add(v.missing);
     return {
@@ -254,14 +276,14 @@ function buildOrderedHeaders(
   headers: readonly KeyValue[],
   bodyMode: BodyMode,
   auth: AuthConfig,
-  env: Environment | undefined,
+  pool: Record<string, string>,
   missing: MissingTracker,
   boundary: string | null,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const h of headers) {
     if (!h.enabled || !h.key) continue;
-    const r = resolveVarsWithMissing(h.value, env);
+    const r = resolveVarsWithMissing(h.value, pool);
     missing.add(r.missing);
     out.push([h.key, r.value]);
   }
@@ -380,17 +402,21 @@ function hasBody(body: RequestBody): boolean {
 export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const missing = createMissingTracker();
 
-  const auth = resolveAuth(input.auth, input.env, missing);
+  // 变量池 = 环境变量（去掉停用的那些）+ 动态变量的值。合成在一处，故 URL、参数、header、
+  // body 与鉴权看到的是同一份池。
+  const pool = buildPool(input.env, input.dynamicVars);
+
+  const auth = resolveAuth(input.auth, pool, missing);
 
   const joined = joinBaseUrl(input.baseUrl, input.urlPath);
-  const url = resolveVarsWithMissing(joined, input.env);
+  const url = resolveVarsWithMissing(joined, pool);
   missing.add(url.missing);
   // 折叠放在替换之后、绝不之前：`{{var}}` → `/api` 才会把 `joinBaseUrl`
   // 插入的分隔符变成 `//`，到这里真实 path 才确定。`collapseUrlSlashes` 不碰
   // query/fragment，所以参数还能在它之后追加
   const normalized = collapseUrlSlashes(url.value);
 
-  const withParams = appendQueryString(normalized, input.params, input.env, missing);
+  const withParams = appendQueryString(normalized, input.params, pool, missing);
   const finalUrl = appendApikeyToQuery(withParams, auth);
 
   // boundary 必须在建 header 之前生成：Content-Type 里的 boundary 与 body 里的
@@ -401,16 +427,14 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
     input.headers,
     input.body.mode,
     auth,
-    input.env,
+    pool,
     missing,
     boundary,
   );
 
   // 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。
   // 先模板化再判断会静默丢掉 body 只是一个解析为空串的变量的请求
-  const templated = hasBody(input.body)
-    ? resolveVarsWithMissing(input.body.content, input.env)
-    : null;
+  const templated = hasBody(input.body) ? resolveVarsWithMissing(input.body.content, pool) : null;
   if (templated !== null) missing.add(templated.missing);
 
   // multipart 在模板化之后才装配：`content` 存的就是分片数组的 JSON 文本，
