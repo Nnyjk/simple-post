@@ -231,7 +231,13 @@ async fn send(
     body: Option<String>,
 ) -> Result<RawSource, DynamicError> {
     let settings = crate::mcp::http_ops::resolve_settings(&ctx.pool, (None, None, None), None);
-    let env = crate::mcp::http_ops::env_snapshot(ctx.env.as_ref());
+    // 脚本仍能读到环境变量，但写不进去：取数是一次「读」，不该顺手改写项目的环境。
+    // 快照里没有环境 id，`apply_env_writes` 便没有落点，脚本的写入只活在这一趟里
+    // （前置脚本写的值，测试脚本仍读得到）。
+    let env = simple_post_core::script::EnvSnapshot {
+        id: None,
+        ..crate::mcp::http_ops::env_snapshot(ctx.env.as_ref())
+    };
 
     let outcome = simple_post_core::script::send_with_scripts(
         &ctx.pool,
