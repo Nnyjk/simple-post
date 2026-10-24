@@ -115,12 +115,13 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
                 "body_content": {
                     "type": "string",
                     "description": "The request payload actually sent on the wire, interpreted according to \
-body_mode: verbatim text when \"raw\", a JSON *instance* (values) when \"json\", urlencoded text when \
-\"form\". When mode is \"multipart\", a JSON array of parts, each {\"name\": string, \"value\": string, \
-\"filename\"?: string, \"contentType\"?: string} — contentType defaults to application/octet-stream for \
-a part that has a filename. Unparsable multipart content yields zero parts rather than an error. \
-This is the field for \"what to send when testing\"; the documented parameter definition goes in \
-body_schema, never here."
+body_mode: verbatim text when \"raw\", a JSON *instance* when \"json\" (a value position may hold a \
+{{var}} placeholder, which is replaced with that variable's value when the request is sent), \
+urlencoded text when \"form\". When mode is \"multipart\", a JSON array of parts, each {\"name\": string, \
+\"value\": string, \"filename\"?: string, \"contentType\"?: string} — contentType defaults to \
+application/octet-stream for a part that has a filename. Unparsable multipart content yields zero \
+parts rather than an error. This is the field for \"what to send when testing\"; the documented \
+parameter definition goes in body_schema, never here."
                 },
                 "body_schema": {
                     "type": "string",
@@ -215,7 +216,7 @@ body_content, never here."
                                 "mode": { "type": "string", "enum": json!(BODY_MODE_VALUES) },
                                 "content": {
                                     "type": "string",
-                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values, not a JSON Schema — the definition goes in `schema`."
+                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values (a value position may hold a {{var}} placeholder), not a JSON Schema — the definition goes in `schema`."
                                 },
                                 "schema": {
                                     "type": ["string", "null"],
