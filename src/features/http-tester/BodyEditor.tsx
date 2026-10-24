@@ -1,11 +1,11 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { BodyMode, RequestBody } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, Wand2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Wand2 } from 'lucide-react';
 import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
@@ -85,11 +85,33 @@ export function BodyEditor({ value, onChange, validationError, onFormatResult }:
       </div>
 
       {value.mode === 'none' ? (
-        <div className="flex h-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
-          此请求无 body
-        </div>
+        <>
+          <div className="flex h-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+            此请求无 body
+          </div>
+          {/* 切成 none 之后残留的 schema 仍要看得见、删得掉：模式切换保留了整个
+              body（含 schema），它又进 OpenAPI 导出的 components.schemas。藏起来
+              就没人能改它。 */}
+          {value.schema?.trim() ? (
+            <SchemaSection
+              value={value.schema}
+              onChange={(schema) => onChange({ ...value, schema: schema || undefined })}
+            />
+          ) : null}
+        </>
       ) : (
-        <BodyContent value={value} onChange={onChange} validationError={validationError} />
+        <>
+          <BodyContent value={value} onChange={onChange} validationError={validationError} />
+          {/* Schema 与载荷分成两个编辑器：两者回答的是不同的问题，挤在同一段 JSON 里
+              就没有「这份是定义、那份是取值」的分别。
+
+              清空时写 `undefined` 而不是空串：空串会被存成 `Some("")`，导出 OpenAPI
+              时它就是一份「解析不了的 schema」，于是每次导出都报一条没意义的诊断。 */}
+          <SchemaSection
+            value={value.schema ?? ''}
+            onChange={(schema) => onChange({ ...value, schema: schema || undefined })}
+          />
+        </>
       )}
     </div>
   );
@@ -178,6 +200,122 @@ function BodyContent({ value, onChange, validationError }: Props) {
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
           <span className="truncate font-mono">{hintText}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 请求体的 Schema 编辑区 —— 文档里那份「参数长什么样」的定义。
+ *
+ * 为什么与载荷编辑器分开
+ * ----------------------
+ * 两者回答的是不同的问题：上面的编辑器是**这一次发什么**，本编辑器是**这个接口接受
+ * 什么**。合成一个编辑器时，两种内容只能挤在同一段 JSON 里，于是「写接口定义」与
+ * 「调试一次请求」在同一个输入框里互相覆盖 —— AI 定义接口时把 Schema 写进了载荷，
+ * 调试时又把取值写成了定义。分开之后，两个字段各有一个编辑器、两句说明。
+ *
+ * Schema 不参与发包（导出 OpenAPI 时才读它），故它写坏了不阻止发送与保存：导出那侧
+ * 遇到不可解析的 schema 会自己报一条诊断，导出不会因此失败。
+ *
+ * 折叠而非常驻：绝大多数接口只调试、不写文档，常驻一块编辑器只是噪音。已经写了
+ * schema 的接口默认展开 —— 那份定义必须看得见，否则它就成了一个只有 MCP 侧能碰的
+ * 隐藏字段。
+ */
+function SchemaSection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const isDark = useIsDark();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // 已经有 schema 就展开：AI 通过 MCP 写进来的定义，用户必须看得见。
+  useEffect(() => {
+    if (value.trim()) setOpen(true);
+  }, [value]);
+
+  /** 这段文本是不是合法 JSON。空文本不算错 —— 那表示「没写」。 */
+  const parseError = (text: string): string | null => {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    try {
+      JSON.parse(trimmed);
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        title="请求体的 Schema：文档里这份接口接受什么参数。不参与发送。"
+        data-testid="body-schema-toggle"
+        className={cn(
+          'flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-xs transition-colors',
+          'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
+        )}
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        )}
+        <span>Schema（文档定义，不参与发送）</span>
+        {!open && value.trim() && (
+          <span className="ml-auto rounded bg-muted px-1 text-[10px]">已填写</span>
+        )}
+      </button>
+
+      {open && (
+        <div className="mt-1.5">
+          <p className="mb-1.5 text-[11px] text-muted-foreground">
+            上一块是这一次发送的载荷；这一块是这份接口的参数定义（JSON Schema），只用于文档与导出。
+          </p>
+          <div className="relative">
+            <div className="overflow-hidden rounded-md border border-border">
+              <CodeMirror
+                value={value}
+                onChange={(v) => {
+                  onChange(v);
+                  // 改对了就消掉上一轮的结论；还没改对时保留它，直到下一次离开编辑器。
+                  const next = parseError(v);
+                  if (!next) setError(null);
+                }}
+                // 离开编辑器时判一次合法性。逐键判会让编辑到一半的 JSON 一直亮着错误，
+                // 那正是载荷编辑器不采用实时校验的原因。
+                onBlur={() => setError(parseError(value))}
+                extensions={[json()]}
+                theme={isDark ? oneDark : lightCodeTheme}
+                basicSetup={{
+                  lineNumbers: true,
+                  foldGutter: true,
+                  highlightActiveLine: true,
+                  highlightActiveLineGutter: true,
+                }}
+                height="200px"
+                className="text-sm"
+              />
+            </div>
+            {error && (
+              <div
+                role="status"
+                aria-live="polite"
+                className={cn(
+                  'absolute right-2 top-2 z-10 flex max-w-[min(420px,60%)] items-center gap-1.5',
+                  'rounded-full border px-2.5 py-1 text-[11px] shadow-md',
+                  'border-destructive bg-destructive text-destructive-foreground',
+                )}
+                title={error}
+                data-testid="schema-status-pill"
+              >
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="truncate font-mono">Schema JSON 格式有误：{error}</span>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

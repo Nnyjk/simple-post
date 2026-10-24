@@ -1,15 +1,21 @@
 /**
- * `ui-prefs` 的请求旋钮契约：旋钮存在后端，不在 localStorage。
+ * `ui-prefs` 的两份本地偏好：请求旋钮存在后端，不在 localStorage；上次停留的项目
+ * 记在 localStorage，刷新后据此回到那个项目。
  *
- * 覆盖三件事：改旋钮会把**完整三项**发给后端（web 形态的 `/api/request-settings`
- * 是全量替换语义，发补丁会丢掉另外两项）、读旋钮时用后端的值、以及旧版本留在
- * localStorage 的那份被一次性迁进库后删掉。
+ * 覆盖四件事：改旋钮会把**完整三项**发给后端（web 形态的 `/api/request-settings`
+ * 是全量替换语义，发补丁会丢掉另外两项）、读旋钮时用后端的值、旧版本留在
+ * localStorage 的那份被一次性迁进库后删掉、以及换主题不抹掉记住的项目。
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { clearIpcMock, installBrowserShim, installIpcMock } from './_browser-shim';
-import { createUiPrefs, loadRequestSettings } from '../slices/ui-prefs';
+import {
+  createUiPrefs,
+  loadRequestSettings,
+  readLastProjectId,
+  saveLastProjectId,
+} from '../slices/ui-prefs';
 import type { RequestSettings } from '../store-types';
 
 type CapturedCall = { cmd: string; args: Record<string, unknown> };
@@ -127,5 +133,39 @@ describe('ui-prefs: 请求旋钮存在后端', () => {
       undefined,
       '旧字段必须删掉，否则下一次启动它会盖掉用户新选的值',
     );
+  });
+});
+
+describe('ui-prefs: 记住上次停留的项目', () => {
+  beforeEach(() => {
+    installBrowserShim();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    clearIpcMock();
+  });
+
+  it('记住与读回走的是同一个键', () => {
+    saveLastProjectId('p1');
+    assert.equal(readLastProjectId(), 'p1');
+  });
+
+  it('空串表示「不在任何项目里」，于是删掉那个键', () => {
+    saveLastProjectId('p1');
+    saveLastProjectId('');
+
+    assert.equal(readLastProjectId(), '');
+    const prefs = JSON.parse(window.localStorage.getItem('simple-post:prefs') ?? '{}');
+    assert.equal(prefs.lastProjectId, undefined, '空值与「没记过」读回来时不该有分别');
+  });
+
+  it('换主题不抹掉记住的项目', () => {
+    const harness = makePrefsHarness();
+    saveLastProjectId('p1');
+
+    harness.slice.setTheme('light');
+
+    assert.equal(readLastProjectId(), 'p1', '换一次主题不该把刷新后的落点退回欢迎页');
   });
 });

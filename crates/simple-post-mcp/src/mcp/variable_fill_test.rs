@@ -147,6 +147,36 @@ fn validate_endpoint_flags_empty_body_when_required() {
     assert!(issues.iter().any(|i| i["field"] == "body.content"));
 }
 
+/// 载荷与定义写反了要报出来：payload 里放着一份 JSON Schema，而 schema 还是空的。
+///
+/// 与 `endpoint_create` / `endpoint_update` 那两道门同一个判据，故三处对同一个
+/// 端点的结论一致。
+#[test]
+fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
+    let mut endpoint = ep(
+        "/x",
+        AuthConfig::default(),
+        BodyMode::Json,
+        "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}",
+    );
+    let issues = validate(&endpoint);
+    assert!(
+        issues.iter().any(|i| i["field"] == "body.content"
+            && i["message"].as_str().unwrap().contains("JSON Schema")),
+        "the misplaced schema must be reported: {issues:?}"
+    );
+
+    // 填了 schema 就不算写反 —— 那时这份内容是有意选定的。
+    endpoint.body.schema = Some("{\"type\":\"object\"}".into());
+    let issues = validate(&endpoint);
+    assert!(
+        !issues
+            .iter()
+            .any(|i| i["message"].as_str().unwrap().contains("JSON Schema")),
+        "a declared schema is not a defect: {issues:?}"
+    );
+}
+
 #[test]
 fn arg_str_opt_returns_none_for_missing() {
     let v = json!({});

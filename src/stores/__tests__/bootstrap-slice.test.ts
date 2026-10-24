@@ -120,6 +120,9 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
   beforeEach(() => {
     installBrowserShim();
+    // localStorage 里存着「上次停留的项目」。不清它，一个测试记下的项目会漏进下一个
+    // 测试的启动流程，于是「启动不预选项目」那条断言会被前一个测试的残留改写。
+    window.localStorage.clear();
     originalError = console.error;
     console.error = () => undefined;
   });
@@ -435,6 +438,48 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(bag.activeEnvironmentId, '', 'and therefore no environment');
     assert.equal(bag.activeEndpointId, null);
     assert.deepEqual(opened, [], 'no tab is opened behind the welcome screen');
+  });
+
+  it('刷新后回到上次停留的项目', async () => {
+    // 刷新丢的是「我在哪个项目里干活」，不是项目本身。故它记在 localStorage 里，
+    // 启动时据此回到那个项目，而不是回到欢迎页。
+    const bag = makeBootstrapHarness();
+    window.localStorage.setItem('simple-post:prefs', JSON.stringify({ lastProjectId: 'p1' }));
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      return [];
+    });
+
+    await bag.bootstrap();
+
+    assert.equal(bag.activeProjectId, 'p1', '刷新后回到上次停留的项目');
+  });
+
+  it('没有记住的项目时仍然留在欢迎页', async () => {
+    const bag = makeBootstrapHarness();
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      return [];
+    });
+
+    await bag.bootstrap();
+
+    assert.equal(bag.activeProjectId, '', '没记住项目就不进项目');
+  });
+
+  it('记住的项目已不存在时清掉那条记录并留在欢迎页', async () => {
+    const bag = makeBootstrapHarness();
+    window.localStorage.setItem('simple-post:prefs', JSON.stringify({ lastProjectId: 'gone' }));
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      return [];
+    });
+
+    await bag.bootstrap();
+
+    assert.equal(bag.activeProjectId, '', '进不去的项目不该被恢复');
+    const prefs = JSON.parse(window.localStorage.getItem('simple-post:prefs') ?? '{}');
+    assert.equal(prefs.lastProjectId, undefined, '记着的那条要被清掉，否则每次刷新都白试一次');
   });
 
   it('openProject 选中项目、切换到它的标签区，并顺带触发树加载', async () => {

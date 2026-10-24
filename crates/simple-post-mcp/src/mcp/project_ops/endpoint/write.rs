@@ -9,7 +9,9 @@ use super::args::{
     mint_endpoint_id, EndpointCreateArgs, EndpointDeleteArgs, EndpointDuplicateArgs,
     EndpointMoveArgs,
 };
-use super::input::{build_auth, coerce_key_values, parse_body_mode, KeyValueInput};
+use super::input::{
+    build_auth, coerce_key_values, parse_body_mode, reject_schema_shaped_payload, KeyValueInput,
+};
 use super::patch::{patch_field, patch_value_field};
 use super::resource::endpoint_resource;
 use crate::mcp::{arg_str, AppState, CallToolResult};
@@ -59,6 +61,9 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         content: a.body_content.clone().unwrap_or_default(),
         schema: a.body_schema.clone(),
     };
+    // 载荷与定义写反了就地拒绝：两份内容都是 JSON 对象，凭内容分不出来，但写错的
+    // 后果是发出去的 body 是一份 Schema，而接口的文档里什么都没有。
+    reject_schema_shaped_payload(&body)?;
     let auth = build_auth(a.auth_type.as_deref(), a.auth_config.clone())?;
 
     let now = simple_post_core::domain::now_ms();
@@ -152,6 +157,11 @@ pub(super) async fn tool_endpoint_update(
         pre_request_script: patch_field::<String>(&patch_obj, "pre_request_script")?,
         test_script: patch_field::<String>(&patch_obj, "test_script")?,
     };
+    // 载荷与定义写反了就地拒绝 —— 与 `endpoint_create` 同一道门。只查这次 patch
+    // 点名的 body：没点名 body 的 patch 不该因为端点早就存着的那份载荷被拒。
+    if let Some(body) = detail_patch.body.as_ref() {
+        reject_schema_shaped_payload(body)?;
+    }
     if node_patch.is_empty() && detail_patch.is_empty() {
         return Err(AppError::Validation(
             "endpoint_update was given an empty patch: name at least one \

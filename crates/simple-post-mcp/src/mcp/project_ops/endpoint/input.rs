@@ -222,3 +222,29 @@ pub(super) fn coerce_key_values(
         .map(KeyValueInput::into_key_value)
         .collect()
 }
+
+/// 载荷与定义写反了就地拒绝。
+///
+/// 请求体有两个字段：`content` 是这一次发出的载荷，`schema` 是文档里那份参数定义。
+/// 两者都是 JSON 对象，形状接近，于是 agent 写接口定义时容易把 Schema 塞进
+/// `content` —— 每次调试都把一份 Schema 当请求体发出去，而接口的文档里空空如也。
+///
+/// 判据是启发式的（见 [`simple_post_core::domain::RequestBody::content_looks_like_schema`]），
+/// 故只在「这份 body 看起来是 Schema、且还没填 `schema`」时才拒绝：确实要把一份
+/// Schema 当载荷发的接口，可以把同样的内容也写进 `schema`，把这份意图写明。
+pub(super) fn reject_schema_shaped_payload(
+    body: &simple_post_core::domain::RequestBody,
+) -> Result<(), AppError> {
+    if !body.payload_may_be_a_schema() {
+        return Ok(());
+    }
+    Err(AppError::Validation(
+        "body_content looks like a JSON Schema (a top-level \"type\" together with \
+         \"properties\"), not a request payload. body_content is the body that is \
+         actually sent; the documented parameter definition belongs in body_schema. \
+         If this was the definition, pass it as body_schema and leave body_content \
+         empty. If the payload really is a schema document, set body_schema as well \
+         so the intent is explicit."
+            .into(),
+    ))
+}

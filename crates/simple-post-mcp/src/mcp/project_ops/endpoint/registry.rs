@@ -114,15 +114,21 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
                 },
                 "body_content": {
                     "type": "string",
-                    "description": "Raw request body, interpreted according to body_mode: verbatim text when \
-\"raw\", JSON text when \"json\", urlencoded text when \"form\". When mode is \"multipart\", a JSON array \
-of parts, each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string} — \
-contentType defaults to application/octet-stream for a part that has a filename. \
-Unparsable multipart content yields zero parts rather than an error."
+                    "description": "The request payload actually sent on the wire, interpreted according to \
+body_mode: verbatim text when \"raw\", a JSON *instance* (values) when \"json\", urlencoded text when \
+\"form\". When mode is \"multipart\", a JSON array of parts, each {\"name\": string, \"value\": string, \
+\"filename\"?: string, \"contentType\"?: string} — contentType defaults to application/octet-stream for \
+a part that has a filename. Unparsable multipart content yields zero parts rather than an error. \
+This is the field for \"what to send when testing\"; the documented parameter definition goes in \
+body_schema, never here."
                 },
                 "body_schema": {
                     "type": "string",
-                    "description": "Optional schema hint stored alongside the body; not sent on the wire."
+                    "description": "JSON Schema describing the request body — the *documented* parameter \
+definition of this endpoint (which fields it accepts, their types, whether they are required). Stored \
+alongside the body and never sent on the wire; it is what an OpenAPI export publishes. This is the \
+field for \"what parameters does this endpoint accept\"; the value to send when testing goes in \
+body_content, never here."
                 },
                 "auth_type": {
                     "type": "string",
@@ -204,11 +210,17 @@ Unparsable multipart content yields zero parts rather than an error."
                         },
                         "body": {
                             "type": "object",
-                            "description": "Replaces the whole body.",
+                            "description": "Replaces the whole body. `content` is the payload actually sent (a JSON *instance* when mode is \"json\"); `schema` is the JSON Schema describing the documented parameters, never sent on the wire.",
                             "properties": {
                                 "mode": { "type": "string", "enum": json!(BODY_MODE_VALUES) },
-                                "content": { "type": "string" },
-                                "schema": { "type": ["string", "null"] }
+                                "content": {
+                                    "type": "string",
+                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values, not a JSON Schema — the definition goes in `schema`."
+                                },
+                                "schema": {
+                                    "type": ["string", "null"],
+                                    "description": "JSON Schema describing the request body: the documented parameter definition of this endpoint. Never sent on the wire. null clears it."
+                                }
                             },
                             "required": ["mode"],
                             "additionalProperties": false
