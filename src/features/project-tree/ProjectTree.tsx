@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useMemo, useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, RefreshCw, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -64,12 +64,17 @@ export function ProjectTree() {
   // 见 `stores/bootstrap-slice.ts`。
   const nodesLoaded = useAppStore((s) => s.nodesLoaded);
   const nodesError = useAppStore((s) => s.nodesError);
+  // 手动刷新树的进行中标志。`reloadWorkspace` 自己也会置它，但这里要用它转圈。
+  const nodesLoading = useAppStore((s) => s.nodesLoading);
   const activeProject = useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
 
   // ---------- store actions ----------
   const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
   const moveNodes = useAppStore((s) => s.moveNodes);
   const openTab = useAppStore((s) => s.openTab);
+  // 刷新树用 `reloadWorkspace` 而不是 `loadWorkspace`：后者在 `nodesLoaded` 上早退，
+  // 树已经加载过时按它等于什么都不做。
+  const reloadWorkspace = useAppStore((s) => s.reloadWorkspace);
   /**
    * 项目标签是否在前台？刻意写成把整个答案折叠成 **boolean** 的 selector：返回
    * `s.openTabs.find(...)` 的 selector 每次调用都会交出新的引用，导致每次 store 写入都
@@ -242,6 +247,24 @@ export function ProjectTree() {
         ) : (
           <span className="label-caps">工作区</span>
         )}
+        {/* 刷新按钮 —— 重取一趟树、接口配置与环境。
+            用 `reloadWorkspace` 而不是 `loadWorkspace`：后者在 `nodesLoaded` 上早退，
+            树已经加载过时按它等于什么都不做。 */}
+        <button
+          type="button"
+          onClick={() => void reloadWorkspace()}
+          disabled={nodesLoading}
+          title="刷新项目树"
+          aria-label="刷新项目树"
+          data-testid="tree-refresh-btn"
+          className={cn(
+            'shrink-0 rounded p-1 text-muted-foreground transition-colors',
+            'hover:bg-overlay-hover hover:text-foreground disabled:opacity-50',
+            focusRing,
+          )}
+        >
+          <RefreshCw className={cn('h-3.5 w-3.5', nodesLoading && 'animate-spin')} />
+        </button>
       </div>
 
       {/* 搜索 */}
