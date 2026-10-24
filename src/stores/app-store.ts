@@ -40,6 +40,7 @@ import { create } from 'zustand';
 import { createBootstrapSlice } from './bootstrap-slice';
 import { createCrudSlice } from './crud-slice';
 import { createDirtyTabsSlice } from './dirty-tabs-slice';
+import { createDynamicSlice } from './dynamic-slice';
 import { createUiSlice } from './ui-slice';
 import { createMcpSlice } from './mcp-slice';
 import type { DraftEndpoint } from './store-types';
@@ -51,11 +52,17 @@ import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import type { BootstrapSlice } from './bootstrap-slice';
 import type { CrudSlice } from './crud-slice';
 import type { DirtyTabsSlice } from './dirty-tabs-slice';
+import type { DynamicSlice } from './dynamic-slice';
 import type { UiSlice } from './ui-slice';
 import type { McpSlice } from './mcp-slice';
 
-/** 组合后的 AppState —— 五个切片的交集。 */
-export type AppState = BootstrapSlice & CrudSlice & DirtyTabsSlice & UiSlice & McpSlice;
+/** 组合后的 AppState —— 六个切片的交集。 */
+export type AppState = BootstrapSlice &
+  CrudSlice &
+  DirtyTabsSlice &
+  DynamicSlice &
+  UiSlice &
+  McpSlice;
 
 /**
  * 组合后的 Zustand store。各切片工厂拿到同一个 `(set, get, store)` 三元组，
@@ -66,6 +73,7 @@ export const useAppStore = create<AppState>()((set, get, store) => ({
   ...createBootstrapSlice(set, get, store),
   ...createCrudSlice(set, get, store),
   ...createDirtyTabsSlice(set, get, store),
+  ...createDynamicSlice(set, get, store),
   ...createUiSlice(set, get, store),
   ...createMcpSlice(set, get, store),
 }));
@@ -232,4 +240,10 @@ export type { Theme, RequestSettings } from './store-types';
 export type { NewDraftKind, TabKind, SettingsCategoryId } from './store-types';
 export type { OpenTab, EndpointDraft, NewItemDraft, ApiResponseExample } from './store-types';
 export type { DraftEndpoint } from './store-types';
-export { SETTINGS_TAB_ID, DRAFT_ID_PREFIX, UNTITLED_ENDPOINT_NAME } from './store-types';
+export {
+  SETTINGS_TAB_ID,
+  DRAFT_ID_PREFIX,
+  DYNAMIC_TAB_PREFIX,
+  dynamicTabProjectId,
+  UNTITLED_ENDPOINT_NAME,
+} from './store-types';

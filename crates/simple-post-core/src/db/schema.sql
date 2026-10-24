@@ -264,6 +264,79 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
   obtained_at    INTEGER NOT NULL
 );
 
+-- ---------------------------------------------------------------------------
+-- dynamic_variables —— 一条动态变量的定义
+-- ---------------------------------------------------------------------------
+--
+-- 一条声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里写 `{{sns}}`，
+-- 发送时程序按本表取数、抽取并替换。
+--
+-- 作用域是**项目**：同一项目内的全部端点都能引用它，同一项目内变量名唯一（下面那条
+-- 唯一索引）。理由与服务表同级——服务（base URL）是项目级资产，数据源同样是。
+--
+-- 数据源二选一：`source_endpoint_id` 引用树里的一个端点（复用那个端点自己的 base URL、
+-- 鉴权与前置脚本），`source_inline_json` 是一份内联请求。两个都为空即「没有数据源」，
+-- 解析时报 `source_error`。
+--
+-- `source_endpoint_id` 用 `ON DELETE SET NULL` 而不是 `CASCADE`：数据源端点被删掉时，
+-- 定义本身要留下来并标成「数据源已删除」，而不是跟着消失——用户删错一个端点不该连带
+-- 丢掉一份定义。
+--
+-- 纯增量新表：`CREATE TABLE IF NOT EXISTS` 已覆盖既有库，不 bump `SCHEMA_VERSION`
+-- （理由同上面 `response_history` / `oauth2_tokens` 两段）。
+CREATE TABLE IF NOT EXISTS dynamic_variables (
+  id                 TEXT PRIMARY KEY,
+  project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name               TEXT NOT NULL,
+  description        TEXT,
+  -- 数据源：引用树里的一个端点，或内联一份请求。两者二选一。
+  source_endpoint_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+  source_inline_json TEXT,
+  -- JSONPath 表达式。`$` 表示整段响应。
+  extract_path       TEXT NOT NULL DEFAULT '$',
+  -- 值的序列化形态：`auto` / `json` / `text`。
+  value_mode         TEXT NOT NULL DEFAULT 'auto',
+  -- 缓存有效期（秒）。
+  ttl_seconds        INTEGER NOT NULL DEFAULT 60,
+  -- 取数失败时是否允许用已过期的缓存值兜底。默认不用。
+  stale_fallback     INTEGER NOT NULL DEFAULT 0,
+  enabled            INTEGER NOT NULL DEFAULT 1,
+  sort_order         INTEGER NOT NULL DEFAULT 0,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dynamic_vars_project
+  ON dynamic_variables(project_id, sort_order);
+-- 同一项目内变量名唯一：冲突要在写入处报错，而不是静默覆盖另一条定义。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_vars_name
+  ON dynamic_variables(project_id, name);
+
+-- ---------------------------------------------------------------------------
+-- dynamic_variable_cache —— 动态变量的当前值
+-- ---------------------------------------------------------------------------
+--
+-- 一行 = 一个（定义 × 环境）。`environment_id` 为空串表示「没有环境」。
+--
+-- 存放位置是 SQLite 而不是进程内存：桌面端、`serve-web`、MCP 守护进程是三个独立进程，
+-- 各自的内存缓存互不可见；持久化之后三者读写同一份缓存。
+--
+-- 表里不记 `value_mode`：值的序列化形态由定义决定，与缓存无关，故改 `value_mode`
+-- 不必让缓存失效。
+--
+-- `is_override = 1` 表示这个值是用户手动改的，不是自动取回来的。覆盖值带自己的过期
+-- 时间；`override_expires_at` 为 NULL 表示「一直有效，直到手动清除」。
+CREATE TABLE IF NOT EXISTS dynamic_variable_cache (
+  definition_id       TEXT NOT NULL REFERENCES dynamic_variables(id) ON DELETE CASCADE,
+  environment_id      TEXT NOT NULL DEFAULT '',
+  value_json          TEXT,
+  fetched_at          INTEGER NOT NULL,
+  expires_at          INTEGER NOT NULL,
+  is_override         INTEGER NOT NULL DEFAULT 0,
+  override_expires_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_cache_key
+  ON dynamic_variable_cache(definition_id, environment_id);
+
 -- 父子矩阵的第二道防线。
 --
 -- `db::nodes` 用 `ResourceNodeType::may_under` 检查每一次写入，但 MCP 工具是本项目主要的
@@ -352,4 +425,6 @@ END;
 -- 请求脚本落地后**仍是**版本 3：`endpoint_details` 的两列是可空新列（经
 -- `db::ADDED_COLUMNS` 到达），`node_scripts` 是新表（`IF NOT EXISTS` 已覆盖）。
 -- bump 版本 = `ensure_current_schema` 删掉每个用户的库，而脚本功能不值得这个代价。
+--
+-- `dynamic_variables` 与 `dynamic_variable_cache` 同理：两张都是新表，故仍是版本 3。
 PRAGMA user_version = 3;

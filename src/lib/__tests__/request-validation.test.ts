@@ -54,3 +54,36 @@ describe('validateRequest', () => {
     assert.strictEqual(result, null);
   });
 });
+
+describe('validateRequest 认得带占位符的模板', () => {
+  it('值位置的占位符不算 JSON 坏了', () => {
+    // 动态变量的用法就是这一种：值位置不带引号，模板阶段本来就不是合法 JSON。
+    assert.equal(validateRequest({ body: body('{"sns": {{sns}}}') }), null);
+    assert.equal(validateRequest({ body: body('{"a": {{x}}, "b": [1,2]}') }), null);
+    assert.equal(validateRequest({ body: body('{{whole}}') }), null);
+  });
+
+  it('键位置的占位符也不算 JSON 坏了', () => {
+    // 键位置有两种写法：带引号的（本来就是合法 JSON）与不带引号的（需要换成带引号的
+    // token 才合法）。
+    assert.equal(validateRequest({ body: body('{"{{key}}": 1}') }), null);
+    assert.equal(validateRequest({ body: body('{ {{key}}: 1 }') }), null);
+  });
+
+  it('字符串里的占位符不算 JSON 坏了', () => {
+    assert.equal(validateRequest({ body: body('{"a": "x{{v}}y"}') }), null);
+  });
+
+  it('占位符不认得的名字照旧算非法（替换原语也只认 \\w+）', () => {
+    // `{{my-var}}` 在发送时不会被替换，故它照旧是「非法的 JSON」。
+    const issue = validateRequest({ body: body('{"a": {{my-var}}}') });
+    assert.ok(issue, 'expected an issue');
+    assert.equal(issue.tab, 'body');
+  });
+
+  it('占位符之外的坏 JSON 照旧被报出来', () => {
+    const issue = validateRequest({ body: body('{"a": {{x}},}') });
+    assert.ok(issue, 'expected an issue');
+    assert.equal(issue.tab, 'body');
+  });
+});

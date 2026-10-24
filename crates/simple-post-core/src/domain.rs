@@ -13,6 +13,7 @@
 
 // 按职责分文件；本文件只声明子模块并把公开接口重新导出，故 `domain::Project` 这类旧路径不变。
 mod auth;
+mod dynamic;
 mod http;
 mod oauth2;
 mod project;
@@ -24,6 +25,10 @@ mod util;
 
 pub use auth::{
     ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, KeyValue, RequestBody,
+};
+pub use dynamic::{
+    DynamicCacheEntry, DynamicError, DynamicErrorKind, DynamicResolution, DynamicValueSource,
+    DynamicValueStatus, DynamicVariable, DynamicVariablePatch, ValueMode,
 };
 pub use http::{parse_http_method, HttpMethod};
 pub use oauth2::{OAuth2Auth, OAuth2ClientAuth, OAuth2GrantType, OAuth2TokenLocation};

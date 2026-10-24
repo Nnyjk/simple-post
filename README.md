@@ -33,7 +33,7 @@
 | Tauri 外壳 + CLI | `src-tauri/` | 桌面 GUI、`#[tauri::command]` 表面、clap 子命令分发 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST/SPA、daemon 监管、端口注册、Bearer 鉴权、wire DTO |
 | 核心库 | `crates/simple-post-core/` | 领域模型、SQLite（`db/`）、HTTP 执行器、权限、MCP 指标、错误类型。无 Tauri / axum 依赖 |
-| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（44 个工具）、axum HTTP daemon、stdio 桥 |
+| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（51 个工具）、axum HTTP daemon、stdio 桥 |
 | 前端 | `src/` | React + Vite + Zustand + Tailwind + CodeMirror 6 |
 
 依赖方向是单向的：`simple-post (Tauri) → simple-post-server → simple-post-core`。
@@ -146,7 +146,7 @@ Swarm 部署时有两个**不要动**的约束：
 
 ### 自带 MCP Server，AI 直接读写接口
 
-44 个 MCP 工具（由 `crates/simple-post-mcp/src/mcp/mod.rs` 的 `every_registered_tool_has_a_capability` 测试守护数量与权限行的对应关系）。AI 客户端能列项目、搜接口、查环境变量、发起调用、创建和改写接口定义——不是只读，是真的能改。
+51 个 MCP 工具（由 `crates/simple-post-mcp/src/mcp/mod.rs` 的 `every_registered_tool_has_a_capability` 测试守护数量与权限行的对应关系）。AI 客户端能列项目、搜接口、查环境变量、发起调用、创建和改写接口定义——不是只读，是真的能改。
 
 两种接法：stdio 子进程桥（`mcp-proxy`，本地客户端用）或 HTTP `POST /mcp`（`serve-web` 暴露，远程 / 远程调试用）。
 
@@ -203,7 +203,20 @@ MCP 写操作的授权要同时过两道闸，任何一道缺失都是**拒绝**
 - `Ctrl+K` 命令面板：跨项目 / 模块 / 集合 / 接口模糊搜索 + 内置命令（切换环境、切换主题、打开设置、新建项目、复制 URL）
 - 主题 dark / light / system 三选一，`<html>` 上切 class，刷新保留且无白屏闪烁（`src/styles/globals.css`）
 
+**动态变量（声明一次，到处能用）**
+
+- 一条动态变量 = 变量名 → 数据源 → 抽取规则 → 缓存时长；请求体里写 `{{sns}}`，发送时程序自动取数、抽取、缓存并替换（`crates/simple-post-core/src/dynamic/`、`crates/simple-post-mcp/src/dynamic/`）
+- 数据源有两种形态：**引用树里的一个接口**（复用它自己的 base URL、鉴权与前置脚本）或**一份内联请求**；引用的接口必须与动态变量在同一个项目里，否则那条定义会被拒
+- 缓存按（定义 × 环境）存放，落在 SQLite 里，故桌面端、`serve-web` 与 MCP 守护进程三个进程看到的是同一份值；同一时刻的并发取数只发一次请求
+- 取数失败**不影响这次请求的成败**：变量按缺失处理（`{{sns}}` 原样留在 body 里），失败原因在面板与响应区里明说
+- 取数是一次「读」：数据源端点的前置脚本照跑，但它写的环境变量**不落库**——取数不该顺手改写项目的环境
+- 界面上有一个「动态变量」面板：新建 / 编辑定义、看当前值与缓存年龄、手动改值（覆盖值优先于自动取回的值）、一键刷新、恢复自动获取；并能回答「这个变量被哪些接口引用了」与「你是不是把名字写错了」
+- 请求编辑器的变量选择浮层把环境变量与动态变量并进同一份候选，标出「自动取回 / 手动改写」与缓存年龄
+- MCP 侧有 7 个工具（`dynamic_var_*`），Agent 可以自己声明、取数与改值；`dynamic_var_resolve` 会真的发出站请求，故与 `api_call_endpoint` 同级信任
+
 **请求脚本（沙箱隔离）**
+
+
 
 - 端点与集合都能配**前置脚本**（pre-request）与**测试脚本**（test）：端点的住在 `endpoint_details` 行里，集合的住在 `node_scripts` 表（`db/endpoint_details.rs`、`db/node_scripts.rs`）
 - 前置脚本在变量替换之后、请求发出之前跑，可改写 URL / headers / body；**发出去的就是改写后的那个请求**，请求日志里看到的也是它
@@ -256,6 +269,7 @@ v0.1.x 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 MCP 二�
 - [ ] AI 文档生成（端点 → Markdown）（#9）
 - [ ] AI 测试用例生成（schema → 测试）（#10）
 - [x] 请求脚本（pre-request / test 脚本，沙箱隔离）（#7）
+- [x] 动态变量（声明一次 → 取数 → 缓存 → 手动编辑）（#109）
 - [ ] 集合批量运行 + 简易报告（#8）
 - [ ] 团队协作（Git 同步 JSON 工作区，可选）（#11）
 

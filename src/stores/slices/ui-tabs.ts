@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { AppState } from '../app-store';
-import { SETTINGS_TAB_ID } from '../store-types';
+import { SETTINGS_TAB_ID, dynamicTabProjectId } from '../store-types';
 import type {
   DraftEndpoint,
   EndpointDraft,
@@ -260,6 +260,10 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         // `endpoint` 标签）或丢弃之前一律豁免。
         if (t.kind === 'endpoint-draft') return true;
         if (t.kind === 'project') return s.projects.some((p) => p.id === t.id);
+        // 动态变量是**项目级**的页面，标签 id 带自己的前缀，里面包着项目 id。
+        if (t.kind === 'dynamic-variables') {
+          return s.projects.some((p) => p.id === dynamicTabProjectId(t.id));
+        }
         // 其余标签都是树节点，且标签的 `kind` 就是节点的 `type`——一次查找同时
         // 覆盖 module、collection、endpoint。连 type 一起比，标签才不会因为别的
         // 节点恰好同 id 而侥幸存活。
@@ -431,6 +435,8 @@ const GLOBAL_TAB_OWNER = '*';
 function tabOwningProject(tab: OpenTab, state: AppState): string {
   if (tab.kind === 'settings') return GLOBAL_TAB_OWNER;
   if (tab.kind === 'project') return tab.id;
+  // 动态变量页面属于它标签 id 里包着的那个项目。
+  if (tab.kind === 'dynamic-variables') return dynamicTabProjectId(tab.id);
   if (tab.kind === 'endpoint-draft') return state.draftEndpoints[tab.id]?.rootId ?? '';
   return state.nodes.find((n) => n.id === tab.id)?.rootId ?? '';
 }

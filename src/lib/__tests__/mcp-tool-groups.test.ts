@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { groupTools, OTHER_GROUP_KEY } from '@/lib/mcp-tool-groups';
 
 /**
- * daemon 今天实际注册的 44 个工具。逐字照抄（而非推导）是有意的：给 Rust 注册表加了
+ * daemon 今天实际注册的 51 个工具。逐字照抄（而非推导）是有意的：给 Rust 注册表加了
  * 工具却没教 `groupTools` 它的前缀时，它会变成一条失败的「其他」断言，而不是表格里
  * 悄悄少一行。
  */
@@ -52,6 +52,13 @@ const REGISTERED_TOOLS = [
   'api_parse_response',
   'api_diff_responses',
   'api_extract_jsonpath',
+  'dynamic_var_list',
+  'dynamic_var_get',
+  'dynamic_var_create',
+  'dynamic_var_update',
+  'dynamic_var_delete',
+  'dynamic_var_resolve',
+  'dynamic_var_set_override',
 ];
 
 test('groupTools: every registered tool lands in its prefix family', () => {
@@ -64,7 +71,16 @@ test('groupTools: every registered tool lands in its prefix family', () => {
     false,
     `未归类: ${JSON.stringify(groups.find((g) => g.key === OTHER_GROUP_KEY)?.items)}`,
   );
-  assert.deepEqual(keys, ['env', 'project', 'module', 'collection', 'endpoint', 'baseUrl', 'api']);
+  assert.deepEqual(keys, [
+    'env',
+    'project',
+    'module',
+    'collection',
+    'endpoint',
+    'baseUrl',
+    'dynamic',
+    'api',
+  ]);
 });
 
 test('groupTools: per-family counts match the registry', () => {
@@ -78,9 +94,10 @@ test('groupTools: per-family counts match the registry', () => {
     collection: 5,
     endpoint: 8,
     baseUrl: 5,
+    dynamic: 7,
     api: 8,
   });
-  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 44);
+  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 51);
 });
 
 test('groupTools: no tool is dropped or duplicated', () => {

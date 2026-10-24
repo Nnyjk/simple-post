@@ -2,7 +2,7 @@
 
 use simple_post_core::domain::{AuthConfig, AuthType, BodyMode, HttpMethod, KeyValue, RequestBody};
 
-use super::resolve::resolve_endpoint;
+use super::resolve::{resolve_endpoint, resolve_endpoint_with};
 use super::test_support::{
     empty_env, in_module_a, minimal_endpoint, project_with_defs, set_cell, MOD_A,
 };
@@ -390,4 +390,83 @@ fn resolve_endpoint_applies_url_override() {
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&overrides)).unwrap();
     // 完整路径的覆盖值（自带 scheme）压过 baseUrl + path。
     assert_eq!(r.url, "https://override.example.com/custom");
+}
+
+// ---- 动态变量的值进池 ---------------------------------------------
+//
+// 动态变量的值必须在**替换之前**并进变量池：合并规则是「动态变量的值优先于同名环境
+// 变量；被停用的环境变量不影响动态变量」，替换一旦发生，池里就没有同名变量的概念了。
+
+#[test]
+fn the_dynamic_value_replaces_the_marker() {
+    let env = empty_env();
+    let mut ep = minimal_endpoint();
+    ep.url = "/points/{{sns}}".into();
+    let project = project_with_defs();
+    let dynamic =
+        std::collections::HashMap::from([("sns".to_string(), "[{\"code\":\"A001\"}]".to_string())]);
+    let r =
+        resolve_endpoint_with(&ep, Some(&env), &project, Some(&in_module_a()), &dynamic).unwrap();
+    assert_eq!(r.url, "/points/[{\"code\":\"A001\"}]");
+    assert!(r.missing_vars.is_empty(), "已解析的动态变量不该报缺失");
+}
+
+#[test]
+fn the_dynamic_value_wins_over_the_environment_variable_of_the_same_name() {
+    let mut env = empty_env();
+    env.variables.insert("sns".into(), "env-value".into());
+    let mut ep = minimal_endpoint();
+    ep.url = "/points/{{sns}}".into();
+    let project = project_with_defs();
+    let dynamic = std::collections::HashMap::from([("sns".to_string(), "dyn-value".to_string())]);
+    let r =
+        resolve_endpoint_with(&ep, Some(&env), &project, Some(&in_module_a()), &dynamic).unwrap();
+    assert_eq!(r.url, "/points/dyn-value");
+}
+
+#[test]
+fn a_disabled_environment_variable_does_not_block_the_dynamic_value() {
+    let mut env = empty_env();
+    env.variables.insert("sns".into(), "env-value".into());
+    env.disabled_variables.push("sns".into());
+    let mut ep = minimal_endpoint();
+    ep.url = "/points/{{sns}}".into();
+    let project = project_with_defs();
+    let dynamic = std::collections::HashMap::from([("sns".to_string(), "dyn-value".to_string())]);
+    let r =
+        resolve_endpoint_with(&ep, Some(&env), &project, Some(&in_module_a()), &dynamic).unwrap();
+    assert_eq!(r.url, "/points/dyn-value");
+    assert!(r.missing_vars.is_empty());
+}
+
+#[test]
+fn a_disabled_environment_variable_stays_unresolved() {
+    let mut env = empty_env();
+    env.variables.insert("token".into(), "abc".into());
+    env.disabled_variables.push("token".into());
+    let mut ep = minimal_endpoint();
+    ep.url = "/x?token={{token}}".into();
+    let project = project_with_defs();
+    let r = resolve_endpoint_with(
+        &ep,
+        Some(&env),
+        &project,
+        Some(&in_module_a()),
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    assert_eq!(r.url, "/x?token={{token}}");
+    assert_eq!(r.missing_vars, vec!["token".to_string()]);
+}
+
+#[test]
+fn the_four_argument_form_behaves_as_before() {
+    // 保留 4 参包装：没有动态变量时行为与从前一致。
+    let env = empty_env();
+    let mut ep = minimal_endpoint();
+    ep.url = "/x/{{a}}".into();
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "/x/{{a}}");
+    assert_eq!(r.missing_vars, vec!["a".to_string()]);
 }

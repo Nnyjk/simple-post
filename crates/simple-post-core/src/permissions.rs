@@ -131,10 +131,12 @@ pub fn required_permission(tool_name: &str) -> Permission {
         | "api_validate_endpoint"
         | "api_parse_response"
         | "api_diff_responses"
-        | "api_extract_jsonpath" => Permission::Read,
+        | "api_extract_jsonpath"
+        | "dynamic_var_list"
+        | "dynamic_var_get" => Permission::Read,
 
         // ReadCall——Read 加上真的去调一个外部服务。
-        "api_run_request" | "api_call_endpoint" => Permission::ReadCall,
+        "api_run_request" | "api_call_endpoint" | "dynamic_var_resolve" => Permission::ReadCall,
 
         // Full——任何写入/改动操作的默认值。新的写入工具**不要**加到上面的匹配里，
         // 让它们落到这里。

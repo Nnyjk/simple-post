@@ -28,6 +28,7 @@ import { HttpTester } from '@/features/http-tester/HttpTester';
 import { WorkspaceTabs } from '@/features/workspace/WorkspaceTabs';
 import { Splitter } from '@/components/ui/splitter';
 import { useAppStore } from '@/stores/app-store';
+import { dynamicTabProjectId } from '@/stores/store-types';
 
 // ---------------------------------------------------------------------------
 // 代码分割 —— 每个 lazy 边界的原因见其上方的说明。
@@ -47,6 +48,13 @@ const SettingsPanel = lazy(() =>
 );
 const EntitySettings = lazy(() =>
   import('@/features/workspace/EntitySettings').then((m) => ({ default: m.EntitySettings })),
+);
+
+// 动态变量面板：项目级页面，只在用户打开那个标签时才需要。
+const DynamicVariablesPanel = lazy(() =>
+  import('@/features/dynamic-variables/DynamicVariablesPanel').then((m) => ({
+    default: m.DynamicVariablesPanel,
+  })),
 );
 
 // 对话框：在树里挂载，但只对用户动作有反应，故启动时纯属死重。
@@ -153,6 +161,14 @@ export function WorkspaceShell() {
       return (
         <Suspense fallback={<PanelFallback />}>
           <SettingsPanel />
+        </Suspense>
+      );
+    }
+    // 动态变量是项目级的页面，标签 id 里包着项目 id。
+    if (activeTab.kind === 'dynamic-variables') {
+      return (
+        <Suspense fallback={<PanelFallback />}>
+          <DynamicVariablesPanel projectId={dynamicTabProjectId(activeTab.id)} />
         </Suspense>
       );
     }

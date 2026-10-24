@@ -17,9 +17,10 @@
  *
  * 范围
  * ----
- * 只管格式。唯一的规则是「json 模式的 body 必须能解析」。空内容、参数/header 的
- * key 是否合理、URL 形状都刻意不在这里查——那些该由后端回答，擅自发明用户没要求
- * 的阻塞规则，正是校验器开始和用它的人对着干的方式。
+ * 只管格式。唯一的规则是「json 模式的 body 必须能解析」——**模板里的 `{{name}}`
+ * 占位符除外**，那不是「坏了」，只是还没替换（见下面的 `substitutesForValidation`）。
+ * 空内容、参数/header 的 key 是否合理、URL 形状都刻意不在这里查——那些该由后端回答，
+ * 擅自发明用户没要求的阻塞规则，正是校验器开始和用它的人对着干的方式。
  */
 import type { RequestBody } from '@/types/domain';
 
@@ -42,6 +43,28 @@ export interface RequestValidationInput {
 }
 
 /**
+ * `{{name}}` 占位符。与替换原语（`src/lib/url.ts` 的 `resolveVarsWithMissing`、
+ * Rust 的 `core::template::is_word`）认的是同一套名字：`\w+`。
+ */
+const PLACEHOLDER = /\{\{\w+\}\}/g;
+
+/**
+ * 把占位符换成一段无害的文本，让**模板**能被当成 JSON 看。
+ *
+ * 动态变量的用法就是往 json body 里写 `{"sns": {{sns}}}`——占位符在**值的位置**且
+ * 不带引号。那不是合法 JSON（模板阶段本来就不是），但它是合法的请求模板：发送时
+ * 占位符会被替换成取回的值。
+ *
+ * 两趟替换，因为占位符可能出现在两个位置，而两处的合法形态不同：
+ *   - 值的位置（`{"sns": {{sns}}}`）→ 换成裸数字 `0`；
+ *   - 键的位置（`{{key}}: 1`）→ 换成带引号的字符串 `"0"`。
+ * 两趟都能过不了的，才是真坏了的 JSON。
+ */
+function substitutesForValidation(content: string): string[] {
+  return [content.replace(PLACEHOLDER, '0'), content.replace(PLACEHOLDER, '"0"')];
+}
+
+/**
  * 校验生效后的请求。没问题时返回 `null`。
  *
  * 调用方把 `null` 当作「清掉钉住的错误」，所以一次通过与一次失败同样有意义——
@@ -58,6 +81,17 @@ export function validateRequest(input: RequestValidationInput): ValidationIssue 
     JSON.parse(content);
     return null;
   } catch (e) {
-    return { tab: 'body', message: (e as Error).message };
+    const message = (e as Error).message;
+    // 带占位符的模板不是「JSON 坏了」——它只是还没替换。两趟都替不出合法 JSON 时，
+    // 才是真的坏了，此时报解析器原话。
+    for (const candidate of substitutesForValidation(content)) {
+      try {
+        JSON.parse(candidate);
+        return null;
+      } catch {
+        // 换下一趟
+      }
+    }
+    return { tab: 'body', message };
   }
 }
