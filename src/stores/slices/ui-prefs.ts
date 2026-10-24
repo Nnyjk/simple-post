@@ -22,6 +22,13 @@ const PREFS_KEY = 'simple-post:prefs';
 interface PersistedPrefs {
   theme?: Theme;
   /**
+   * 用户上次停留的项目 id。
+   *
+   * 「我正在看哪个项目」是渲染层的会话事实，与项目本身无关，故存在 localStorage 而
+   * 不是数据库。刷新后据此回到那个项目，而不是回到欢迎页。
+   */
+  lastProjectId?: string;
+  /**
    * 旧版本把请求旋钮存在这里。升级后它们在 `preferences` 表里，故这个字段只用于
    * 一次性迁移（见 [`loadRequestSettings`]），迁移完成后即被删掉。
    */
@@ -51,6 +58,31 @@ function savePrefs(prefs: PersistedPrefs): void {
 
 const initialPrefs = loadPrefs();
 const initialTheme: Theme = initialPrefs.theme ?? 'dark';
+
+/**
+ * 读出上次停留的项目 id。
+ *
+ * 空串表示「上次不在任何项目里」，刷新后因此回到欢迎页。
+ */
+export function readLastProjectId(): string {
+  return loadPrefs().lastProjectId ?? '';
+}
+
+/**
+ * 记住用户当前停留的项目。
+ *
+ * 空串是「不在任何项目里」，故它删掉这个键而不是存一个空值——空值与「没记过」
+ * 在读回来时无法区分。
+ */
+export function saveLastProjectId(id: string): void {
+  const prefs = loadPrefs();
+  if (id) {
+    prefs.lastProjectId = id;
+  } else {
+    delete prefs.lastProjectId;
+  }
+  savePrefs(prefs);
+}
 
 /**
  * 请求旋钮的默认值。**与后端 `RequestSettings::default()` 相同**（超时 30 秒、
@@ -112,10 +144,13 @@ export const createUiPrefs: StateCreator<AppState, [], [], UiPrefs> = (set, get)
 
   /**
    * 换主题。只写 localStorage —— 主题是渲染层的事，后端读不到也不需要。
+   *
+   * 合并而不是整份替换：这份偏好里还有「上次停留的项目」，整份替换会把它抹掉，
+   * 于是换一次主题就把刷新后的落点退回欢迎页。
    */
   setTheme: (t) => {
     set({ theme: t });
-    savePrefs({ theme: t });
+    savePrefs({ ...loadPrefs(), theme: t });
   },
   /**
    * 改请求旋钮。本地副本立刻更新（界面不等 IPC），同时把**完整三项**写进后端

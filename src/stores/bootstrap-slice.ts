@@ -12,7 +12,7 @@ import type { StateCreator } from 'zustand';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from './app-store';
-import { loadRequestSettings } from './slices/ui-prefs';
+import { loadRequestSettings, readLastProjectId, saveLastProjectId } from './slices/ui-prefs';
 
 /** 状态部分。 */
 export interface BootstrapSliceState {
@@ -87,6 +87,9 @@ export interface BootstrapSliceActions {
    *
    * 与 `setActiveProject` 的分工：后者不换条，因为命令面板的"跳到另一项目的接口"
    * 紧接着就打开那个接口标签，换条会把它顶掉。
+   *
+   * 本动作同时把项目 id 记进 localStorage：刷新后据此回到这个项目，而不是回到
+   * 欢迎页。记住的是「用户在哪个项目里干活」，与项目本身无关。
    */
   openProject: (id: string) => void;
   /**
@@ -97,6 +100,8 @@ export interface BootstrapSliceActions {
    * 刻意不关标签、不清树：它们是按项目的产物，用户可能马上点回来，`openProject`
    * 时 `nodesLoaded` 会短路重载。只重置选择 —— `activeEnvironmentId` 一并清空，
    * 因为无项目时环境无意义。
+   *
+   * 同时清掉记住的项目 id：不在任何项目里，刷新后因此回欢迎页。
    */
   leaveProject: () => void;
   setActiveEnvironment: (id: string) => void;
@@ -117,6 +122,9 @@ export interface BootstrapSliceActions {
    *
    * 第 2 步立即开始，只是不在关键路径上。`openProject` 也会触发它，故在后台
    * 那一趟落地前就点开项目卡的用户仍能拿到完整的树。
+   *
+   * 第 1 层落地后若 localStorage 里记着上次停留的项目，本函数进入那个项目 ——
+   * 刷新后回到原处，而不是回到欢迎页。项目已不存在时清掉那条记录并留在欢迎页。
    */
   bootstrap: () => Promise<void>;
 
@@ -248,6 +256,8 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // 身上还是落在上次在这里打开的那一个。
       get().switchProjectTabs(id);
       get().setActiveProject(id);
+      // 记住这个项目：刷新后回到它，而不是回到欢迎页。
+      saveLastProjectId(id);
       // tester 正显示的接口属于被离开的项目；留着会让 `useActiveEndpoint` 和最后
       // 一条响应都指向新树里不存在的接口。
       set({ activeEndpointId: null });
@@ -259,6 +269,8 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // 与 `openProject` 同样的换条、同样的顺序理由：在项目仍是"在前的那个"时
       // 搁置，否则每个打开的标签都无人归属，标签条会丢。
       get().switchProjectTabs('');
+      // 清掉记住的项目 id：不在任何项目里，刷新后因此回欢迎页。
+      saveLastProjectId('');
       set({ activeProjectId: '', activeEnvironmentId: '', activeEndpointId: null });
     },
     setActiveEndpoint: (id) => {
@@ -296,8 +308,24 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         // 顺序而非并发：并发时两条命令的发出次序不确定，测试与日志都难读。
         const requestSettings = await loadRequestSettings();
 
-        // 刻意不选默认项目：`activeProjectId` 保持 `''`，欢迎页选择器与树的
-        // "无项目"状态都以此为准；进入项目只能走 `openProject`。
+        // 恢复上次停留的项目：刷新后回到它，而不是回到欢迎页。
+        //
+        // 项目可能已被删除，这时清掉记住的值并留在欢迎页 —— 否则每次刷新都要先试
+        // 一次、进不去、再退回。
+        const remembered = readLastProjectId();
+        const rememberedExists = remembered !== '' && projects.some((p) => p.id === remembered);
+        if (remembered !== '' && !rememberedExists) {
+          saveLastProjectId('');
+        }
+
+        // 恢复发生在 `loaded` 翻真**之前**：`App.tsx` 按 `activeProjectId` 选界面，
+        // 故先恢复再放行，欢迎页就不会先画一帧再被换成工作区。
+        if (rememberedExists) {
+          get().openProject(remembered);
+        }
+
+        // 刻意不选默认项目：`activeProjectId` 只由上面那次恢复或用户的 `openProject`
+        // 决定；没有记住的项目时它保持 `''`，欢迎页选择器与树的"无项目"状态都以它为准。
         set({
           projects,
           requestSettings,
