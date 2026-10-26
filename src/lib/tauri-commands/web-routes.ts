@@ -243,7 +243,8 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // 列表只读缓存行，不取数；`/resolve` 才会真的发出站请求。
   [COMMANDS.dynamicVariablesList]: {
     method: 'GET',
-    path: () => '/api/dynamic-variables',
+    // `includeReferences=false` 时后端不算引用关系（那要扫一遍全部端点）。
+    path: (a) => `/api/dynamic-variables${buildQuery({ includeReferences: a.includeReferences })}`,
   },
   [COMMANDS.dynamicVariablesCreate]: {
     method: 'POST',

@@ -60,8 +60,16 @@ export interface DynamicSliceState {
 
 /** action 部分。 */
 export interface DynamicSliceActions {
-  /** 载入全部定义。 */
-  loadDynamicVariables: () => Promise<void>;
+  /**
+   * 载入全部定义。
+   *
+   * `includeReferences` 决定要不要算「哪些端点引用了它」——算它要扫一遍全部端点，故
+   * 只要当前值与缓存状态的调用方（请求编辑器每次挂载都调一次）传 `false`。
+   *
+   * 不带引用关系的加载**不会清空**已有的引用关系：面板算过一次之后，请求页的那次便宜
+   * 加载不该把面板上的「被引用」抹掉。
+   */
+  loadDynamicVariables: (options?: { includeReferences?: boolean }) => Promise<void>;
   /** 新建一条定义，返回它的 id（失败返回 null）。 */
   createDynamicVariable: (input: CreateDynamicVariableInput) => Promise<string | null>;
   /** 改一条定义。成功返回 true，失败返回 false（原因在 `dynamicError` 里）。 */
@@ -119,10 +127,18 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       return { dynamicValues: values, dynamicErrors: errors };
     }),
 
-  loadDynamicVariables: async () => {
+  loadDynamicVariables: async (options) => {
+    const includeReferences = options?.includeReferences ?? true;
     try {
-      const views = await invokeCmd<DynamicVariableView[]>(COMMANDS.dynamicVariablesList, {});
-      set({ dynamicVariables: views, dynamicError: null });
+      const views = await invokeCmd<DynamicVariableView[]>(COMMANDS.dynamicVariablesList, {
+        includeReferences,
+      });
+      set((s) => ({
+        dynamicVariables: includeReferences
+          ? views
+          : keepKnownReferences(s.dynamicVariables, views),
+        dynamicError: null,
+      }));
     } catch (e) {
       console.error('[store] dynamic_variables_list failed', e);
       set({ dynamicError: messageOf(e) });
@@ -272,4 +288,21 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 /** 错误消息。`invokeCmd` 抛的是 Error，但外部来源的载荷未必是。 */
 function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * 把上一次已知的引用关系搬到新载入的列表上。
+ *
+ * 不带引用关系的加载拿回来的 `referencedBy` 一定是空的：后端没算。若直接覆盖，面板上
+ * 已经算出来的「被引用」就被这次便宜加载抹掉了。故按 id 把旧值搬过来。
+ */
+function keepKnownReferences(
+  previous: DynamicVariableView[],
+  incoming: DynamicVariableView[],
+): DynamicVariableView[] {
+  const known = new Map(previous.map((v) => [v.id, v.referencedBy]));
+  return incoming.map((view) => {
+    const refs = known.get(view.id);
+    return refs && refs.length > 0 ? { ...view, referencedBy: refs } : view;
+  });
 }

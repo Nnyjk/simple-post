@@ -202,7 +202,9 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             method: "GET",
             path: "/api/dynamic-variables",
             summary: "List the workspace's dynamic variables with their current value and \
-                      cache state; reads the cache only and never fetches",
+                      cache state; reads the cache only and never fetches. Pass \
+                      includeReferences=false to skip the endpoint scan that computes \
+                      which endpoints use each name",
             stability: "public",
             request: None,
             response: Some("DynamicVariableView[]"),

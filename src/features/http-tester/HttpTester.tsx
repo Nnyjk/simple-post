@@ -318,8 +318,10 @@ export function HttpTester() {
 
   // 全部动态变量定义。定义是全局的，故这里没有项目维度；面板与请求编辑器读同一份，
   // 故两处看到的东西一样。
+  //
+  // 这里只要当前值，故不算引用关系——算它要扫一遍全部端点，而这一行每次挂载都跑。
   useEffect(() => {
-    void loadDynamicVariables();
+    void loadDynamicVariables({ includeReferences: false });
   }, [loadDynamicVariables]);
 
   // **已启用且仍存在**的动态变量名。
