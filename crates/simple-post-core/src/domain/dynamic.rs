@@ -74,7 +74,8 @@ pub struct DynamicVariable {
     /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_environment_id: Option<String>,
-    /// 取数用的服务（`base_url_definitions.id`）。`None` = 数据源端点所属项目的默认服务。
+    /// 取数用的服务（`base_url_definitions.id`）。`None` = 数据源接口自己绑的服务，它没绑
+    /// 就用数据源接口所属项目的默认服务。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。

@@ -45,7 +45,8 @@ struct CreateArgs {
     /// 取数用的环境。缺席 = 数据源端点所属项目的第一个可用环境。
     #[serde(default)]
     source_environment_id: Option<String>,
-    /// 取数用的服务（`base_url_definitions.id`）。缺席 = 数据源端点所属项目的默认服务。
+    /// 取数用的服务（`base_url_definitions.id`）。缺席 = 数据源接口自己绑的服务，它没绑
+    /// 就用项目的默认服务。
     #[serde(default)]
     source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
@@ -132,7 +133,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_create",
-            description: "Create a dynamic variable: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique in the whole workspace. The environment and the service are optional: omitted, the fetch uses the source endpoint's first available environment and its project's default service.",
+            description: "Create a dynamic variable: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique in the whole workspace. The environment and the service are optional: omitted, the fetch uses the source endpoint's first available environment, the service the source endpoint itself binds, and otherwise the project's default service.",
             schema: json!({
                 "type": "object",
                 "properties": {

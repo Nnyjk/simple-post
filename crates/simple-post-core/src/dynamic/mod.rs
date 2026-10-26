@@ -69,7 +69,8 @@ pub struct SourceContext {
     pub project: Project,
     /// 数据源端点所在的模块。base URL 的取值住在 (环境 × 服务 × 模块) 的格子里。
     pub module_id: Option<String>,
-    /// 取数用的服务。定义点名了就用它，否则用项目的默认服务。
+    /// 取数用的服务。定义点名了就用它；没点名就用数据源端点自己绑的服务，它没绑就用
+    /// 数据源端点所属项目的默认服务（★）。
     pub base_url_definition_id: Option<String>,
 }
 
@@ -80,7 +81,8 @@ pub struct SourceContext {
 /// - 数据源是内联请求：没有项目、没有环境、没有服务——内联请求自带完整地址。
 /// - 环境：定义点名的那个；没点名就用数据源端点所属项目的**第一个可用环境**
 ///   （按名字排序，与选择器里看到的顺序一致）。
-/// - 服务：定义点名的那个；没点名就用数据源端点所属项目的默认服务（★）。
+/// - 服务：定义点名的那个；没点名就用数据源端点自己绑的服务；它也没绑就用数据源端点
+///   所属项目的默认服务（★）。
 pub fn source_context(pool: &db::DbPool, def: &DynamicVariable) -> Result<SourceContext, AppError> {
     let Some(endpoint_id) = def.source_endpoint_id.as_deref() else {
         return Ok(SourceContext {

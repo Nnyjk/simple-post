@@ -29,7 +29,7 @@ pub struct CreateOpts {
     pub source_inline_json: Option<String>,
     /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
     pub source_environment_id: Option<String>,
-    /// 取数用的服务。`None` = 数据源端点所属项目的默认服务。
+    /// 取数用的服务。`None` = 数据源接口自己绑的服务，它没绑就用项目的默认服务。
     pub source_base_url_definition_id: Option<String>,
     pub extract_path: Option<String>,
     pub value_mode: Option<ValueMode>,
@@ -80,7 +80,7 @@ pub struct DynamicVariableView {
     pub effective_environment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_environment_name: Option<String>,
-    /// 实际取数用的服务。定义点名的那个，或数据源项目里的默认服务。
+    /// 实际取数用的服务：定义点名的那个，或数据源接口自己绑的，或数据源项目的默认服务。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_base_url_definition_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

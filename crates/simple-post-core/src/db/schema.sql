@@ -284,7 +284,8 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
 -- 丢掉一份定义。
 --
 -- 取数用的环境与服务由定义自己点名：`source_environment_id` 为空表示用数据源接口所属
--- 项目的第一个可用环境，`source_base_url_definition_id` 为空表示用该项目的默认服务（★）。
+-- 项目的第一个可用环境，`source_base_url_definition_id` 为空表示用数据源接口自己绑的
+-- 服务，它也没绑就用该项目的默认服务（★）。
 -- 取数上下文于是只由定义决定，与谁消费它无关——同一个 `{{name}}` 在任何项目里取到的值
 -- 都一样。
 CREATE TABLE IF NOT EXISTS dynamic_variables (
@@ -296,7 +297,7 @@ CREATE TABLE IF NOT EXISTS dynamic_variables (
   source_inline_json TEXT,
   -- 取数用的环境。为空 = 数据源接口所属项目的第一个可用环境。
   source_environment_id TEXT REFERENCES environments(id) ON DELETE SET NULL,
-  -- 取数用的服务。为空 = 数据源接口所属项目的默认服务（★）。
+  -- 取数用的服务。为空 = 数据源接口自己绑的服务；它也没绑就用数据源接口所属项目的默认服务（★）。
   source_base_url_definition_id TEXT REFERENCES base_url_definitions(id) ON DELETE SET NULL,
   -- JSONPath 表达式。`$` 表示整段响应。
   extract_path       TEXT NOT NULL DEFAULT '$',
