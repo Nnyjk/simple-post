@@ -201,6 +201,99 @@ pub fn list_children(
     })
 }
 
+/// 跨全部项目按名字/描述/URL 搜索**接口**，并带上它所在的完整路径。
+///
+/// 只搜接口：动态变量的数据源只可能是一个接口，故选择器只需要这一类命中。路径是
+/// 「项目 / 模块 / 集合…」，用户在一个很大的工作区里找一条接口时需要知道它在谁底下。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub node: ResourceNode,
+    /// 从项目到直接父节点的名字，自上而下。
+    pub path: Vec<String>,
+}
+
+/// 搜索接口并返回它们的路径。最多返回 `limit` 条。
+pub fn search_paths(
+    conn: &mut Connection,
+    q: &str,
+    limit: usize,
+) -> Result<Vec<SearchHit>, AppError> {
+    let pattern = format!("%{q}%");
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS_N} FROM nodes n \
+         LEFT JOIN endpoint_details e ON e.node_id = n.id \
+         WHERE n.type = 'endpoint' \
+           AND (n.name LIKE ?1 OR n.description LIKE ?1 OR e.url LIKE ?1) \
+         ORDER BY n.root_id ASC, n.sort_order ASC, n.id ASC \
+         LIMIT {}",
+        limit.clamp(1, 200)
+    ))?;
+    let nodes = stmt
+        .query_map(params![pattern], row_to_node)?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    let mut out = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let path = ancestors(conn, &node)?;
+        out.push(SearchHit { node, path });
+    }
+    Ok(out)
+}
+
+/// 一个节点的祖先名字，自上而下：先是项目名，再是模块与集合的名字。
+///
+/// 上溯有深度上限：数据里的环会让无上限的循环永远转下去，而一次失败的查找不该拖垮
+/// 整个界面。
+fn ancestors(conn: &mut Connection, node: &ResourceNode) -> Result<Vec<String>, AppError> {
+    const MAX_DEPTH: usize = 64;
+
+    let mut names: Vec<String> = Vec::new();
+    let project_name: Option<String> = conn
+        .query_row(
+            "SELECT name FROM projects WHERE id = ?1",
+            params![node.root_id],
+            |r| r.get(0),
+        )
+        .ok();
+    if let Some(name) = project_name {
+        names.push(name);
+    }
+
+    let mut chain: Vec<String> = Vec::new();
+    let mut parent_id = node.parent_id.clone();
+    let mut depth = 0;
+    while let Some(id) = parent_id {
+        depth += 1;
+        if depth > MAX_DEPTH {
+            break;
+        }
+        let parent: Option<(String, Option<String>)> = conn
+            .query_row(
+                "SELECT id, parent_id FROM nodes WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+        let Some((id, next_parent)) = parent else {
+            break;
+        };
+        let name: Option<String> = conn
+            .query_row("SELECT name FROM nodes WHERE id = ?1", params![id], |r| {
+                r.get(0)
+            })
+            .ok();
+        if let Some(name) = name {
+            chain.push(name);
+        }
+        parent_id = next_parent;
+    }
+    chain.reverse();
+    names.extend(chain);
+    Ok(names)
+}
+
 pub(crate) fn row_to_node(row: &Row<'_>) -> Result<ResourceNode, rusqlite::Error> {
     let type_str: String = row.get(3)?;
     let kind = ResourceNodeType::parse(&type_str).ok_or_else(|| {

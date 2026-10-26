@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 use super::schema::remove_db_files;
 use super::test_helpers::{fresh_empty_pool, fresh_pool, temp_dir};
@@ -147,4 +147,91 @@ fn remove_db_files_tolerates_absent_sidecars() {
     // 没有 -wal，没有 -shm。别处的打开失败就可能留下这种状态。
     remove_db_files(&dir.join("store.db")).expect("missing sidecar is not an error");
     assert!(!dir.join("store.db").exists());
+}
+
+/// 种一个**旧形状**的动态变量表：定义属于项目，故表里有 `project_id` 列。
+///
+/// 这是动态变量还是项目级资产时写下的形状。它与当前形状同名同表，`CREATE TABLE IF NOT
+/// EXISTS` 对它是空操作——故 `migrate` 必须自己认出它并丢掉重建。
+fn plant_project_scoped_dynamic_variables(pool: &DbPool) {
+    with_tx(pool, |c| {
+        c.execute_batch(
+            "DROP TABLE dynamic_variable_cache;
+             DROP TABLE dynamic_variables;
+             CREATE TABLE dynamic_variables (
+                 id TEXT PRIMARY KEY,
+                 project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                 name TEXT NOT NULL,
+                 description TEXT,
+                 source_endpoint_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+                 source_inline_json TEXT,
+                 extract_path TEXT NOT NULL DEFAULT '$',
+                 value_mode TEXT NOT NULL DEFAULT 'auto',
+                 ttl_seconds INTEGER NOT NULL DEFAULT 60,
+                 stale_fallback INTEGER NOT NULL DEFAULT 0,
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 sort_order INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );
+             CREATE UNIQUE INDEX idx_dynamic_vars_name ON dynamic_variables(project_id, name);
+             INSERT INTO dynamic_variables
+                 (id, project_id, name, extract_path, value_mode, ttl_seconds,
+                  stale_fallback, enabled, sort_order, created_at, updated_at)
+             VALUES ('d_old', 'p_demo', 'sns', '$', 'auto', 60, 0, 1, 0, 1, 1);",
+        )
+        .map_err(AppError::Sqlite)
+    })
+    .expect("plant the old shape");
+}
+
+/// 一张表里有没有某一列。
+fn column_count(pool: &DbPool, table: &str, column: &str) -> i64 {
+    with_conn(pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+            params![table, column],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap()
+}
+
+#[test]
+fn the_project_scoped_dynamic_variable_tables_are_replaced_by_the_global_ones() {
+    let (pool, dir) = fresh_pool();
+    let projects_before: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    plant_project_scoped_dynamic_variables(&pool);
+    drop(pool);
+
+    // 重新打开同一个库。`SCHEMA_VERSION` 没变，故 `ensure_current_schema` 不删它；
+    // `migrate` 认出旧形状并把两张动态变量表丢掉重建。
+    let pool = init(&dir).expect("second init");
+
+    let old_rows: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM dynamic_variables", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(old_rows, 0, "旧形状的定义应当被丢掉");
+
+    assert_eq!(
+        column_count(&pool, "dynamic_variables", "project_id"),
+        0,
+        "重建后的表不该再有 project_id 列"
+    );
+    assert_eq!(
+        column_count(&pool, "dynamic_variables", "source_environment_id"),
+        1,
+        "重建后的表应当有取数环境那一列"
+    );
+
+    // 其余数据不动：丢的只是那两张表。
+    let projects_after: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(projects_after, projects_before, "项目不该被这次迁移牵连");
 }

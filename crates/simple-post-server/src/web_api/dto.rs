@@ -195,21 +195,10 @@ pub struct BaseUrlDefSetDefaultBody {
 
 // ----- 动态变量 -----------------------------------------------------------
 
-/// `GET /api/dynamic-variables` 的查询串。
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DynamicVariableListQuery {
-    pub project_id: String,
-    /// 当前环境。缺席时用项目当前激活的环境。
-    #[serde(default)]
-    pub environment_id: Option<String>,
-}
-
 /// `POST /api/dynamic-variables` 的 body。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariableCreateBody {
-    pub project_id: String,
     pub name: String,
     /// 客户端自铸的 id，非空白时照单采纳——与 `BaseUrlDefCreateBody::id` 同一理由：
     /// renderer 在这一行持久化之前就拿这个 id 当键。
@@ -223,6 +212,12 @@ pub struct DynamicVariableCreateBody {
     /// 内联请求（method / url / headers / body / auth 的 JSON 文本）。
     #[serde(default)]
     pub source_inline_json: Option<String>,
+    /// 取数用的环境。缺席 = 数据源端点所属项目的第一个可用环境。
+    #[serde(default)]
+    pub source_environment_id: Option<String>,
+    /// 取数用的服务（`base_url_definitions.id`）。缺席 = 数据源接口所属项目的默认服务。
+    #[serde(default)]
+    pub source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
     #[serde(default)]
     pub extract_path: Option<String>,
@@ -245,11 +240,8 @@ pub struct DynamicVariableCreateBody {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariableResolveBody {
-    pub project_id: String,
-    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。
+    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。名字是全局的。
     pub names: Vec<String>,
-    #[serde(default)]
-    pub environment_id: Option<String>,
     /// 真 = 跳过缓存，强制重新取数。
     #[serde(default)]
     pub force: Option<bool>,
@@ -262,23 +254,12 @@ pub struct DynamicVariableOverrideBody {
     /// 覆盖值。`null` 或缺席表示清除覆盖值（下次解析重新取数）。
     #[serde(default)]
     pub value: Option<String>,
-    #[serde(default)]
-    pub environment_id: Option<String>,
     /// 覆盖值的到期时间（unix 毫秒）。缺席且 `forever` 为假时沿用定义的 TTL。
     #[serde(default)]
     pub expires_at: Option<i64>,
     /// 真 = 一直有效，直到手动清除。
     #[serde(default)]
     pub forever: Option<bool>,
-}
-
-/// `POST /api/dynamic-variables/{id}/refresh` 的 body。
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DynamicVariableRefreshBody {
-    pub project_id: String,
-    #[serde(default)]
-    pub environment_id: Option<String>,
 }
 
 // ----- 资源树 -----------------------------------------------------------

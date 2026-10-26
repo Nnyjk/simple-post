@@ -3,15 +3,19 @@
 //! 放在 mcp crate 而不是 server crate：MCP 工具在本 crate 内，它不能依赖上层；而 REST 与
 //! Tauri 两侧都能依赖本 crate。故公共操作住在这一层，server crate 的 `dynamic_api` 只是
 //! 它的一层薄壳。
+//!
+//! 定义是**全局**的：不属于任何项目，任何项目的端点都能引用它。取数用的环境与服务由
+//! 定义自己决定（点名的那个，或数据源端点所属项目的首个环境与默认服务），故同一个
+//! `{{name}}` 在任何项目里取到的值都一样。
 
 use serde::Serialize;
 
 use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::{
     now_ms, uid, DynamicCacheEntry, DynamicError, DynamicResolution, DynamicValueSource,
-    DynamicValueStatus, DynamicVariable, DynamicVariablePatch, ValueMode,
+    DynamicValueStatus, DynamicVariable, DynamicVariablePatch, Environment, ValueMode,
 };
-use simple_post_core::dynamic::{parse_raw, serialize_value, ResolveContext};
+use simple_post_core::dynamic::{parse_raw, serialize_value, ResolveContext, SourceContext};
 use simple_post_core::error::AppError;
 
 /// 新建一条定义时要填的字段。缺席的字段取默认值。
@@ -23,12 +27,26 @@ pub struct CreateOpts {
     pub description: Option<String>,
     pub source_endpoint_id: Option<String>,
     pub source_inline_json: Option<String>,
+    /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
+    pub source_environment_id: Option<String>,
+    /// 取数用的服务。`None` = 数据源接口所属项目的默认服务。
+    pub source_base_url_definition_id: Option<String>,
     pub extract_path: Option<String>,
     pub value_mode: Option<ValueMode>,
     pub ttl_seconds: Option<i64>,
     pub stale_fallback: Option<bool>,
     pub enabled: Option<bool>,
     pub sort_order: Option<i64>,
+}
+
+/// 哪些端点引用了这个变量名。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceDto {
+    pub endpoint_id: String,
+    pub endpoint_name: String,
+    pub project_id: String,
+    pub project_name: String,
 }
 
 /// 一条定义 + 它的当前值与缓存状态。
@@ -51,77 +69,107 @@ pub struct DynamicVariableView {
     pub is_override: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<DynamicError>,
+    /// 数据源端点所属的项目。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_project_id: Option<String>,
+    /// 数据源端点所属项目的名字。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_project_name: Option<String>,
+    /// 实际取数用的环境。定义点名的那个，或数据源项目里的第一个可用环境。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_environment_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_environment_name: Option<String>,
+    /// 实际取数用的服务：定义点名的那个，或数据源项目的默认服务。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_base_url_definition_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_base_url_definition_name: Option<String>,
+    /// 哪些端点的请求里写了这个变量名。跨全部项目——定义是全局的，引用它的端点可能
+    /// 散在基线项目与各个分发项目里。
+    pub referenced_by: Vec<ReferenceDto>,
 }
 
-/// 一次解析/读写用的环境键。
-///
-/// 环境 id 的取法在**所有**路径上必须一致：`None` = 用项目当前激活的那个环境。这与变量替换
-/// 用的那一份环境是同一条规则（`mcp::resolve_env`）。
-///
-/// 两条路径若各取各的，缓存的键就会在「写」与「读」之间漂移：覆盖值落到空键上，而解析去
-/// 读激活环境那一行，于是手动指定的值看不见自己。
-fn environment_key(
-    pool: &DbPool,
-    project_id: &str,
-    environment_id: Option<&str>,
-) -> Result<String, AppError> {
-    Ok(crate::mcp::resolve_env(pool, environment_id, project_id)?
-        .map(|e| e.id)
-        .unwrap_or_default())
-}
-
-/// 列出本项目的全部定义，带当前值与缓存状态。
+/// 列出全部定义，带当前值与缓存状态。
 ///
 /// **不取数**：读的是缓存行。取数可能发出站请求，而这是一次纯读。
-pub fn list(
-    pool: &DbPool,
-    project_id: &str,
-    environment_id: Option<&str>,
-) -> Result<Vec<DynamicVariableView>, AppError> {
-    let definitions = db::with_conn(pool, |c| {
-        db::dynamic_variables::list_by_project(c, project_id)
-    })?;
-    let env_key = environment_key(pool, project_id, environment_id)?;
+///
+/// `include_references` 决定要不要带上「哪些端点引用了它」。那一列是**别的项目的
+/// 接口名与 id**，故 MCP 那条路（无按项目的门）不带走它——否则一个只读档位的客户端
+/// 就能借这条工具枚举所有项目的接口名，而 `endpoint_list` / `endpoint_search` 恰恰
+/// 拒绝无项目地扫全部项目。桌面端与 REST 那条路是用户自己的工作区，带上它。
+pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariableView>, AppError> {
+    let definitions = db::with_conn(pool, db::dynamic_variables::list)?;
     let now = now_ms();
+    // 引用关系一次算出来：逐条定义各查一次会在 N 条定义时扫 N 遍全表。
+    let references = if include_references {
+        let names: Vec<String> = definitions.iter().map(|d| d.name.clone()).collect();
+        db::with_conn(pool, |c| {
+            db::dynamic_variables::referencing_endpoints(c, &names)
+        })?
+    } else {
+        std::collections::HashMap::new()
+    };
     let mut out = Vec::with_capacity(definitions.len());
     for definition in definitions {
+        let source = simple_post_core::dynamic::source_context(pool, &definition)?;
+        let env_key = source.environment_id.clone().unwrap_or_default();
         let entry = db::with_conn(pool, |c| {
             db::dynamic_variable_cache::get(c, &definition.id, &env_key)
         })?;
-        out.push(view_of(definition, entry.as_ref(), now));
+        let referenced_by = references
+            .get(&definition.name)
+            .map(|refs| {
+                refs.iter()
+                    .map(|r| ReferenceDto {
+                        endpoint_id: r.endpoint_id.clone(),
+                        endpoint_name: r.endpoint_name.clone(),
+                        project_id: r.project_id.clone(),
+                        project_name: r.project_name.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.push(view_of(
+            definition,
+            &source,
+            entry.as_ref(),
+            now,
+            referenced_by,
+        ));
     }
     Ok(out)
 }
 
 /// 读一条定义，带当前值与缓存状态。
-pub fn get(
-    pool: &DbPool,
-    definition_id: &str,
-    environment_id: Option<&str>,
-) -> Result<DynamicVariableView, AppError> {
+pub fn get(pool: &DbPool, definition_id: &str) -> Result<DynamicVariableView, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    let env_key = environment_key(pool, &definition.project_id, environment_id)?;
+    let source = simple_post_core::dynamic::source_context(pool, &definition)?;
+    let env_key = source.environment_id.clone().unwrap_or_default();
     let entry = db::with_conn(pool, |c| {
         db::dynamic_variable_cache::get(c, definition_id, &env_key)
     })?;
-    Ok(view_of(definition, entry.as_ref(), now_ms()))
+    Ok(view_of(
+        definition,
+        &source,
+        entry.as_ref(),
+        now_ms(),
+        Vec::new(),
+    ))
 }
 
 /// 新建一条定义。
-pub fn create(
-    pool: &DbPool,
-    project_id: &str,
-    opts: CreateOpts,
-) -> Result<DynamicVariable, AppError> {
+pub fn create(pool: &DbPool, opts: CreateOpts) -> Result<DynamicVariable, AppError> {
     let now = now_ms();
     let definition = DynamicVariable {
         id: opts.id.unwrap_or_else(uid),
-        project_id: project_id.to_string(),
         name: opts.name,
         description: opts.description,
         source_endpoint_id: opts.source_endpoint_id,
         source_endpoint_name: None,
         source_inline_json: opts.source_inline_json,
+        source_environment_id: opts.source_environment_id,
+        source_base_url_definition_id: opts.source_base_url_definition_id,
         extract_path: opts.extract_path.unwrap_or_else(|| "$".to_string()),
         value_mode: opts.value_mode.unwrap_or_default(),
         ttl_seconds: opts.ttl_seconds.unwrap_or(60),
@@ -131,9 +179,7 @@ pub fn create(
         created_at: now,
         updated_at: now,
     };
-    db::with_tx(pool, |c| {
-        db::dynamic_variables::create(c, &definition, project_id)
-    })?;
+    db::with_tx(pool, |c| db::dynamic_variables::create(c, &definition))?;
     db::with_conn(pool, |c| db::dynamic_variables::get(c, &definition.id))
 }
 
@@ -155,35 +201,21 @@ pub fn delete(pool: &DbPool, definition_id: &str) -> Result<(), AppError> {
 
 /// 解析一批名字，返回它们的值、状态与错误。
 ///
-/// `environment_id` 缺席时取项目当前激活的环境 —— 与界面那侧同一套规则。
+/// 名字是全局的：同一个名字在任何项目里都指向同一条定义。
 pub async fn resolve(
     pool: &DbPool,
-    project_id: &str,
-    environment_id: Option<&str>,
     names: &[String],
     force: bool,
 ) -> Result<DynamicResolution, AppError> {
-    let ctx = context(pool, project_id, environment_id)?;
+    let ctx = ResolveContext { pool: pool.clone() };
     simple_post_core::dynamic::resolve_names(&ctx, names, force, &crate::dynamic::fetcher()).await
 }
 
 /// 强制重新取一条定义。
-pub async fn refresh(
-    pool: &DbPool,
-    project_id: &str,
-    definition_id: &str,
-    environment_id: Option<&str>,
-) -> Result<DynamicValueStatus, AppError> {
+pub async fn refresh(pool: &DbPool, definition_id: &str) -> Result<DynamicValueStatus, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    // 项目用**定义自己的**那个：调用方传的项目若被拿去解析，会按那个项目去找同名定义——
-    // 找的是另一条，或根本找不到，于是这次刷新静默地什么都没做。
-    if !project_id.is_empty() && project_id != definition.project_id {
-        return Err(AppError::Validation(format!(
-            "动态变量 {definition_id} 不在项目 {project_id} 里"
-        )));
-    }
     let names = vec![definition.name.clone()];
-    let resolution = resolve(pool, &definition.project_id, environment_id, &names, true).await?;
+    let resolution = resolve(pool, &names, true).await?;
     Ok(resolution
         .statuses
         .into_iter()
@@ -202,7 +234,7 @@ pub async fn refresh(
 /// 写覆盖值。
 ///
 /// `value` 的两态：`None` = 清除覆盖值（下次解析重新取数），`Some(text)` = 写入。
-/// 覆盖值按（定义 × 环境）存放，故测试环境改了值不影响生产环境。
+/// 覆盖值按（定义 × 取数环境）存放，故换环境改了值不影响另一个环境。
 ///
 /// 过期时间有三种可能，故线上多带一个 `forever` 开关——一个可空的时间戳表达不了
 /// 「沿用定义的 TTL」与「一直有效」这两者：
@@ -213,15 +245,15 @@ pub async fn refresh(
 pub fn set_override(
     pool: &DbPool,
     definition_id: &str,
-    environment_id: Option<&str>,
     value: Option<String>,
     expires_at: Option<i64>,
     forever: bool,
 ) -> Result<(), AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    // 环境键与解析用的那一份一致（见 `environment_key`）：否则覆盖值会落到另一个键上，
+    // 缓存键用定义自己的取数环境，与解析时用的那一个同源：否则覆盖值会落到另一个键上，
     // 手动指定的值看不见自己。
-    let env_key = environment_key(pool, &definition.project_id, environment_id)?;
+    let source = simple_post_core::dynamic::source_context(pool, &definition)?;
+    let env_key = source.environment_id.clone().unwrap_or_default();
     let Some(text) = value else {
         // 清除覆盖值：整行删掉，下一次解析重新取数。
         db::with_tx(pool, |c| {
@@ -248,33 +280,15 @@ pub fn set_override(
     Ok(())
 }
 
-/// 一次解析的上下文。
-fn context(
-    pool: &DbPool,
-    project_id: &str,
-    environment_id: Option<&str>,
-) -> Result<ResolveContext, AppError> {
-    let env = crate::mcp::resolve_env(pool, environment_id, project_id)?;
-    let project = db::with_conn(pool, |c| db::projects::get(c, project_id))
-        .unwrap_or_else(|_| crate::mcp::http_ops::EMPTY_PROJECT.clone());
-    Ok(ResolveContext {
-        pool: pool.clone(),
-        project_id: project_id.to_string(),
-        // 缓存键用 [`environment_key`] 算出来的那一个，与写覆盖值、读缓存完全同源。
-        // 环境取不到时它给空串，故 `None` 与「环境已被删」落在同一个键上，不会分叉。
-        environment_id: Some(environment_key(pool, project_id, environment_id)?),
-        env,
-        project,
-    })
-}
-
 /// 一条定义 + 它的缓存行 → 视图。
 fn view_of(
     definition: DynamicVariable,
+    source: &SourceContext,
     entry: Option<&DynamicCacheEntry>,
     now: i64,
+    referenced_by: Vec<ReferenceDto>,
 ) -> DynamicVariableView {
-    let (value, source, fetched_at, expires_at, is_override) = match entry {
+    let (value, source_kind, fetched_at, expires_at, is_override) = match entry {
         None => (None, DynamicValueSource::Missing, None, None, false),
         Some(e) if e.is_override => {
             let alive = e.override_expires_at.map(|t| t > now).unwrap_or(true);
@@ -316,13 +330,33 @@ fn view_of(
             )
         }
     };
+    let environment: Option<&Environment> = source.env.as_ref();
+    let service_name = source.base_url_definition_id.as_ref().and_then(|id| {
+        source
+            .project
+            .base_url_definitions
+            .iter()
+            .find(|d| &d.id == id)
+            .map(|d| d.name.clone())
+    });
     DynamicVariableView {
         definition,
         value,
-        source,
+        source: source_kind,
         fetched_at,
         expires_at,
         is_override,
         error: None,
+        source_project_id: source.project_id.clone(),
+        source_project_name: if source.project_id.is_some() {
+            Some(source.project.name.clone())
+        } else {
+            None
+        },
+        effective_environment_id: source.environment_id.clone(),
+        effective_environment_name: environment.map(|e| e.name.clone()),
+        effective_base_url_definition_id: source.base_url_definition_id.clone(),
+        effective_base_url_definition_name: service_name,
+        referenced_by,
     }
 }

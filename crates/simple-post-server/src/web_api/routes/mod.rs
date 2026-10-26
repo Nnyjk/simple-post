@@ -43,8 +43,8 @@ pub(crate) use node_scripts::{node_scripts_get, node_scripts_patch};
 // 模块归属随地址走。
 pub(crate) use nodes::{
     endpoint_details_list, http_send, node_duplicate, node_endpoint_detail_get,
-    node_endpoint_detail_patch, nodes_create, nodes_delete, nodes_get, nodes_list, nodes_move,
-    nodes_update,
+    node_endpoint_detail_patch, nodes_children, nodes_create, nodes_delete, nodes_get, nodes_list,
+    nodes_move, nodes_search_paths, nodes_update,
 };
 pub(crate) use oauth2::oauth2_token;
 pub(crate) use permissions::{permissions_get, permissions_set};

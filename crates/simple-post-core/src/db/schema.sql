@@ -271,8 +271,9 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
 -- 一条声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里写 `{{sns}}`，
 -- 发送时程序按本表取数、抽取并替换。
 --
--- 作用域是**项目**：同一项目内的全部端点都能引用它，同一项目内变量名唯一（下面那条
--- 唯一索引）。理由与服务表同级——服务（base URL）是项目级资产，数据源同样是。
+-- 作用域是**全局**：定义不属于任何项目，任何项目的端点都能引用它，整个工作区里变量名
+-- 唯一（下面那条唯一索引）。理由是基础数据源不该在每个项目里各写一遍——基线项目取到的
+-- 那份站点清单，多客户分发项目直接引用同一条定义即可。
 --
 -- 数据源二选一：`source_endpoint_id` 引用树里的一个端点（复用那个端点自己的 base URL、
 -- 鉴权与前置脚本），`source_inline_json` 是一份内联请求。两个都为空即「没有数据源」，
@@ -282,16 +283,21 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
 -- 定义本身要留下来并标成「数据源已删除」，而不是跟着消失——用户删错一个端点不该连带
 -- 丢掉一份定义。
 --
--- 纯增量新表：`CREATE TABLE IF NOT EXISTS` 已覆盖既有库，不 bump `SCHEMA_VERSION`
--- （理由同上面 `response_history` / `oauth2_tokens` 两段）。
+-- 取数用的环境与服务由定义自己点名：`source_environment_id` 为空表示用数据源接口所属
+-- 项目的第一个可用环境，`source_base_url_definition_id` 为空表示用该项目的默认服务（★）。
+-- 取数上下文于是只由定义决定，与谁消费它无关——同一个 `{{name}}` 在任何项目里取到的值
+-- 都一样。
 CREATE TABLE IF NOT EXISTS dynamic_variables (
   id                 TEXT PRIMARY KEY,
-  project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name               TEXT NOT NULL,
   description        TEXT,
   -- 数据源：引用树里的一个端点，或内联一份请求。两者二选一。
   source_endpoint_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
   source_inline_json TEXT,
+  -- 取数用的环境。为空 = 数据源接口所属项目的第一个可用环境。
+  source_environment_id TEXT REFERENCES environments(id) ON DELETE SET NULL,
+  -- 取数用的服务。为空 = 数据源接口所属项目的默认服务（★）。
+  source_base_url_definition_id TEXT REFERENCES base_url_definitions(id) ON DELETE SET NULL,
   -- JSONPath 表达式。`$` 表示整段响应。
   extract_path       TEXT NOT NULL DEFAULT '$',
   -- 值的序列化形态：`auto` / `json` / `text`。
@@ -305,17 +311,19 @@ CREATE TABLE IF NOT EXISTS dynamic_variables (
   created_at         INTEGER NOT NULL,
   updated_at         INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_dynamic_vars_project
-  ON dynamic_variables(project_id, sort_order);
--- 同一项目内变量名唯一：冲突要在写入处报错，而不是静默覆盖另一条定义。
+-- 变量名在整个工作区里唯一：冲突要在写入处报错，而不是静默覆盖另一条定义。
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_vars_name
-  ON dynamic_variables(project_id, name);
+  ON dynamic_variables(name);
 
 -- ---------------------------------------------------------------------------
 -- dynamic_variable_cache —— 动态变量的当前值
 -- ---------------------------------------------------------------------------
 --
--- 一行 = 一个（定义 × 环境）。`environment_id` 为空串表示「没有环境」。
+-- 一行 = 一个（定义 × 取数环境）。`environment_id` 为空串表示「没有环境」。
+--
+-- 取数环境由定义自己决定（点名的那个，或数据源接口所属项目的第一个可用环境），
+-- 故一条定义只在一个环境上取值。这一列仍在键里：定义改了环境之后，旧环境上取到的那份
+-- 值留在原处，用户改回去时那份值还在。
 --
 -- 存放位置是 SQLite 而不是进程内存：桌面端、`serve-web`、MCP 守护进程是三个独立进程，
 -- 各自的内存缓存互不可见；持久化之后三者读写同一份缓存。
@@ -427,4 +435,8 @@ END;
 -- bump 版本 = `ensure_current_schema` 删掉每个用户的库，而脚本功能不值得这个代价。
 --
 -- `dynamic_variables` 与 `dynamic_variable_cache` 同理：两张都是新表，故仍是版本 3。
+--
+-- 动态变量改为全局作用域后，这两张表的形状变了（去掉 `project_id`，加上环境与服务两列）。
+-- 版本仍是 3：`db::schema` 在 `migrate` 里认出旧形状并把两张表丢掉重建，故旧的定义不会
+-- 残留，而用户的项目、接口与环境不受影响。
 PRAGMA user_version = 3;

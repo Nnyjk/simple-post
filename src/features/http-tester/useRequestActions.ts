@@ -25,7 +25,6 @@ export function useRequestActions({
   prepared,
   prepareWithDynamic,
   dynamicNames,
-  environmentId,
   auth,
   env,
   preRequestScript,
@@ -56,11 +55,6 @@ export function useRequestActions({
   prepareWithDynamic: (dynamicVars: Record<string, string>) => PreparedRequest;
   /** 本次请求引用到的动态变量名。 */
   dynamicNames: string[];
-  /**
-   * 这次请求解析 `{{x}}` 所依据的环境 id。动态变量的缓存键含环境，故它必须与
-   * `prepareRequest` 用的那份环境是同一份。
-   */
-  environmentId?: string;
   auth: AuthConfig;
   /** 脚本看得到的环境。与解析用的是同一份变量池。 */
   env: EnvSnapshot | undefined;
@@ -86,7 +80,6 @@ export function useRequestActions({
   setCurlFlash: (v: boolean) => void;
 }) {
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
-  const activeProjectId = useAppStore((s) => s.activeProjectId);
 
   const handleSend = useCallback(async () => {
     if (!endpointId) return;
@@ -104,11 +97,7 @@ export function useRequestActions({
       // TTL 内命中缓存时后端不发取数请求，故这一步通常是廉价的一次 IPC。
       let request = prepared;
       if (dynamicNames.length > 0) {
-        const { values } = await resolveDynamicVariables(
-          activeProjectId,
-          dynamicNames,
-          environmentId || undefined,
-        );
+        const { values } = await resolveDynamicVariables(dynamicNames);
         request = prepareWithDynamic(values);
       }
       // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
@@ -152,15 +141,12 @@ export function useRequestActions({
     }
   }, [
     endpointId,
-    isDraft,
     runValidation,
     inFlightRef,
     prepared,
     prepareWithDynamic,
     dynamicNames,
-    environmentId,
     resolveDynamicVariables,
-    activeProjectId,
     auth,
     env,
     preRequestScript,

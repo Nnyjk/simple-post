@@ -1,9 +1,12 @@
 /**
- * 动态变量面板 —— 项目视图里的独立页面。
+ * 动态变量面板 —— 全局页面。
  *
  * 一条动态变量是一份声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里
  * 写 `{{sns}}`，发送时程序取数、抽取、缓存并替换。这个面板负责声明它、显示它当前的
  * 值、并在取数失败时把原因说清楚。
+ *
+ * 定义**不属于任何项目**：任何项目的端点都能引用同一条定义，故这个面板列的是整个
+ * 工作区的定义，而不是某个项目的。
  *
  * 面板读的是 store 里的 `dynamicVariables`（列表命令一次带回定义 + 当前值 + 缓存状态），
  * 故它不自己发请求；取数与写覆盖值都走 store 动作。
@@ -16,12 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DynamicVariableForm } from './DynamicVariableForm';
 
-/** 面板的属性。标签 id 就是项目 id，故项目由标签带来。 */
-export interface DynamicVariablesPanelProps {
-  projectId: string;
-}
-
-export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps) {
+export function DynamicVariablesPanel() {
   const variables = useAppStore((s) => s.dynamicVariables);
   const resolving = useAppStore((s) => s.dynamicResolving);
   const error = useAppStore((s) => s.dynamicError);
@@ -34,21 +32,22 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   const nodes = useAppStore((s) => s.nodes);
   const environments = useAppStore((s) => s.environments);
-  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    void loadDynamicVariables(projectId, activeEnvironmentId || undefined);
-  }, [projectId, activeEnvironmentId, loadDynamicVariables]);
+    void loadDynamicVariables();
+  }, [loadDynamicVariables]);
 
-  // 哪些变量名出现在本项目的请求里。界面上没有每个端点解析出的 base URL，故这里
+  // 哪些变量名出现在当前项目的请求里。界面上没有每个端点解析出的 base URL，故这里
   // 只扫端点自己的字段；base URL 里的标记极少，且那是环境的内容。
   const referencedBy = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const node of nodes) {
       if (node.kind !== 'endpoint') continue;
+      if (node.rootId !== activeProjectId) continue;
       const detail = endpointDetails[node.id];
       if (!detail) continue;
       const names = listDynamicNames({
@@ -66,9 +65,9 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
       }
     }
     return map;
-  }, [nodes, endpointDetails]);
+  }, [nodes, endpointDetails, activeProjectId]);
 
-  // 请求里出现、但本项目没有定义的变量名。给出一个最接近的动态变量名，供一键改名。
+  // 请求里出现、但没有定义的变量名。给出一个最接近的动态变量名，供一键改名。
   const suggestions = useMemo(() => {
     const defined = new Set(variables.map((v) => v.name));
     const envNames = new Set<string>();
@@ -96,26 +95,24 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
 
   const handleResolveAll = useCallback(async () => {
     const names = variables.map((v) => v.name);
-    await resolveDynamicVariables(projectId, names, activeEnvironmentId || undefined);
+    await resolveDynamicVariables(names);
     // 解析的结果落在 store 的取值桶里，而卡片读的是列表——故这里要重载一次列表，
     // 否则值、来源徽标与取数时间都不动，看着像按钮坏了。
-    await loadDynamicVariables(projectId, activeEnvironmentId || undefined);
-  }, [variables, projectId, activeEnvironmentId, resolveDynamicVariables, loadDynamicVariables]);
+    await loadDynamicVariables();
+  }, [variables, resolveDynamicVariables, loadDynamicVariables]);
 
   const handleRefresh = useCallback(
     async (variable: DynamicVariableView) => {
-      await refreshDynamicVariable(projectId, variable.id, activeEnvironmentId || undefined);
+      await refreshDynamicVariable(variable.id);
     },
-    [projectId, activeEnvironmentId, refreshDynamicVariable],
+    [refreshDynamicVariable],
   );
 
   const handleClearOverride = useCallback(
     async (variable: DynamicVariableView) => {
-      await setDynamicOverride(variable.id, null, {
-        environmentId: activeEnvironmentId || undefined,
-      });
+      await setDynamicOverride(variable.id, null);
     },
-    [activeEnvironmentId, setDynamicOverride],
+    [setDynamicOverride],
   );
 
   const handleRename = useCallback(
@@ -131,7 +128,7 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
         <header className="flex items-center gap-2">
           <h2 className="text-sm font-medium">动态变量</h2>
           <span className="text-xs text-muted-foreground">
-            在请求里写 {'{{变量名}}'}，发送时自动取数并替换。
+            在请求里写 {'{{变量名}}'}，发送时自动取数并替换。任何项目都能引用同一条定义。
           </span>
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => void handleResolveAll()}>
@@ -151,7 +148,7 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
 
         {variables.length === 0 && !creating && (
           <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-            本项目还没有动态变量。新建一条：给它一个名字、一个数据源（引用树里的接口，或一份内联请求）、
+            还没有动态变量。新建一条：给它一个名字、一个数据源（引用树里的接口，或一份内联请求）、
             一条 JSONPath 抽取规则与一个缓存时长。
           </p>
         )}
@@ -161,7 +158,6 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
             key={variable.id}
             variable={variable}
             resolving={resolving}
-            referencedBy={referencedBy.get(variable.name) ?? []}
             editing={editingId === variable.id}
             onEdit={() => setEditingId(variable.id)}
             onCancelEdit={() => setEditingId(null)}
@@ -174,7 +170,6 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
 
         {creating && (
           <DynamicVariableForm
-            projectId={projectId}
             onCancel={() => setCreating(false)}
             onDone={() => setCreating(false)}
           />
@@ -182,10 +177,10 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
 
         {suggestions.length > 0 && (
           <section className="rounded-md border border-border p-3">
-            <h3 className="text-xs font-medium">请求里出现、但本项目没有定义的名字</h3>
+            <h3 className="text-xs font-medium">当前项目的请求里出现、但没有定义的名字</h3>
             <ul className="mt-2 flex flex-col gap-1">
               {suggestions.map((item) => {
-                // 建议的名字取自本项目的定义集合，故必然找得到；找不到就不给建议。
+                // 建议的名字取自全部定义的集合，故必然找得到；找不到就不给建议。
                 const target = item.suggestion
                   ? variables.find((v) => v.name === item.suggestion)
                   : undefined;
@@ -194,7 +189,7 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
                     <code className="font-mono text-muted-foreground">{`{{${item.used}}}`}</code>
                     {target ? (
                       <>
-                        <span className="text-muted-foreground">本项目有个叫</span>
+                        <span className="text-muted-foreground">有个叫</span>
                         <code className="font-mono">{target.name}</code>
                         <RenameButton
                           variable={target}
@@ -202,7 +197,7 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
                         />
                       </>
                     ) : (
-                      <span className="text-muted-foreground">本项目没有相近的动态变量。</span>
+                      <span className="text-muted-foreground">没有相近的动态变量。</span>
                     )}
                   </li>
                 );
@@ -219,7 +214,6 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
 interface DynamicVariableCardProps {
   variable: DynamicVariableView;
   resolving: boolean;
-  referencedBy: string[];
   editing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
@@ -233,7 +227,6 @@ interface DynamicVariableCardProps {
 function DynamicVariableCard({
   variable,
   resolving,
-  referencedBy,
   editing,
   onEdit,
   onCancelEdit,
@@ -245,7 +238,6 @@ function DynamicVariableCard({
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(variable.value ?? '');
   const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
-  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   // 取数失败的原因。列表视图本身不带它（那是一次纯读），故取数时记进 store 的那份。
   const dynamicError = useAppStore((s) => s.dynamicErrors[variable.name]);
   const error = variable.error ?? dynamicError;
@@ -261,7 +253,9 @@ function DynamicVariableCard({
   const sourceMissing = !variable.sourceEndpointId && !variable.sourceInlineJson;
   const source = variable.sourceEndpointId
     ? variable.sourceEndpointName
-      ? `引用接口：${variable.sourceEndpointName}`
+      ? `引用接口：${variable.sourceEndpointName}${
+          variable.sourceProjectName ? `（${variable.sourceProjectName}）` : ''
+        }`
       : '引用接口（已被删除）'
     : variable.sourceInlineJson
       ? '内联请求'
@@ -302,14 +296,32 @@ function DynamicVariableCard({
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">数据源</dt>
         <dd className={sourceMissing ? 'text-destructive' : undefined}>{source}</dd>
+        {variable.effectiveEnvironmentName && (
+          <>
+            <dt className="text-muted-foreground">取数环境</dt>
+            <dd>{variable.effectiveEnvironmentName}</dd>
+          </>
+        )}
+        {variable.effectiveBaseUrlDefinitionName && (
+          <>
+            <dt className="text-muted-foreground">取数服务</dt>
+            <dd>{variable.effectiveBaseUrlDefinitionName}</dd>
+          </>
+        )}
         <dt className="text-muted-foreground">抽取规则</dt>
         <dd className="font-mono">{variable.extractPath}</dd>
         <dt className="text-muted-foreground">缓存时长</dt>
         <dd>{variable.ttlSeconds} 秒</dd>
-        {referencedBy.length > 0 && (
+        {variable.referencedBy.length > 0 && (
           <>
             <dt className="text-muted-foreground">被引用</dt>
-            <dd>{referencedBy.join('、')}</dd>
+            <dd>
+              {variable.referencedBy
+                .map((r) =>
+                  r.projectName ? `${r.endpointName}（${r.projectName}）` : r.endpointName,
+                )
+                .join('、')}
+            </dd>
           </>
         )}
       </dl>
@@ -337,14 +349,7 @@ function DynamicVariableCard({
               spellCheck={false}
             />
             <div className="flex items-center gap-2">
-              <Button
-                size="xs"
-                onClick={() =>
-                  void setDynamicOverride(variable.id, draft, {
-                    environmentId: activeEnvironmentId || undefined,
-                  })
-                }
-              >
+              <Button size="xs" onClick={() => void setDynamicOverride(variable.id, draft)}>
                 保存为覆盖值
               </Button>
               <span className="text-[11px] text-muted-foreground">
@@ -365,7 +370,6 @@ function DynamicVariableCard({
 
       {editing && (
         <DynamicVariableForm
-          projectId={variable.projectId}
           variable={variable}
           onCancel={onCancelEdit}
           onDone={onCancelEdit}

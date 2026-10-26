@@ -6,6 +6,9 @@
 //!
 //! 为何不把逻辑直接写在 Tauri 命令里：那样 web 形态就没有对应的那一半——这正是
 //! AGENTS.md 的 dual-transport invariant 要消灭的事。
+//!
+//! 定义是**全局**的，故这些操作都不按项目作用域：名字在整个工作区里唯一，任何项目的
+//! 端点都能引用同一条定义。
 
 use simple_post_core::db::DbPool;
 use simple_post_core::domain::{
@@ -15,31 +18,23 @@ use simple_post_core::error::AppError;
 
 pub use simple_post_mcp::dynamic::ops::{CreateOpts, DynamicVariableView};
 
-/// 列出本项目的全部定义，带当前值与缓存状态。
-pub fn list(
-    pool: &DbPool,
-    project_id: &str,
-    environment_id: Option<&str>,
-) -> Result<Vec<DynamicVariableView>, AppError> {
-    simple_post_mcp::dynamic::ops::list(pool, project_id, environment_id)
+/// 列出全部定义，带当前值与缓存状态。
+///
+/// `include_references` 决定要不要带上「哪些端点引用了它」。桌面端与 REST 那条路是
+/// 用户自己的工作区，带上它；MCP 那条路不带（那边的 `dynamic_var_list` 没有按项目的门，
+/// 带走它等于开了一条枚举别项目接口名的旁路）。
+pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariableView>, AppError> {
+    simple_post_mcp::dynamic::ops::list(pool, include_references)
 }
 
 /// 读一条定义，带当前值与缓存状态。
-pub fn get(
-    pool: &DbPool,
-    definition_id: &str,
-    environment_id: Option<&str>,
-) -> Result<DynamicVariableView, AppError> {
-    simple_post_mcp::dynamic::ops::get(pool, definition_id, environment_id)
+pub fn get(pool: &DbPool, definition_id: &str) -> Result<DynamicVariableView, AppError> {
+    simple_post_mcp::dynamic::ops::get(pool, definition_id)
 }
 
 /// 新建一条定义。
-pub fn create(
-    pool: &DbPool,
-    project_id: &str,
-    opts: CreateOpts,
-) -> Result<DynamicVariable, AppError> {
-    simple_post_mcp::dynamic::ops::create(pool, project_id, opts)
+pub fn create(pool: &DbPool, opts: CreateOpts) -> Result<DynamicVariable, AppError> {
+    simple_post_mcp::dynamic::ops::create(pool, opts)
 }
 
 /// 改一条定义。
@@ -59,22 +54,15 @@ pub fn delete(pool: &DbPool, definition_id: &str) -> Result<(), AppError> {
 /// 解析一批名字。
 pub async fn resolve(
     pool: &DbPool,
-    project_id: &str,
-    environment_id: Option<&str>,
     names: &[String],
     force: bool,
 ) -> Result<DynamicResolution, AppError> {
-    simple_post_mcp::dynamic::ops::resolve(pool, project_id, environment_id, names, force).await
+    simple_post_mcp::dynamic::ops::resolve(pool, names, force).await
 }
 
 /// 强制重新取一条定义。
-pub async fn refresh(
-    pool: &DbPool,
-    project_id: &str,
-    definition_id: &str,
-    environment_id: Option<&str>,
-) -> Result<DynamicValueStatus, AppError> {
-    simple_post_mcp::dynamic::ops::refresh(pool, project_id, definition_id, environment_id).await
+pub async fn refresh(pool: &DbPool, definition_id: &str) -> Result<DynamicValueStatus, AppError> {
+    simple_post_mcp::dynamic::ops::refresh(pool, definition_id).await
 }
 
 /// 写覆盖值。`value` 缺席 = 清除，有值 = 写入。
@@ -84,17 +72,9 @@ pub async fn refresh(
 pub fn set_override(
     pool: &DbPool,
     definition_id: &str,
-    environment_id: Option<&str>,
     value: Option<String>,
     expires_at: Option<i64>,
     forever: bool,
 ) -> Result<(), AppError> {
-    simple_post_mcp::dynamic::ops::set_override(
-        pool,
-        definition_id,
-        environment_id,
-        value,
-        expires_at,
-        forever,
-    )
+    simple_post_mcp::dynamic::ops::set_override(pool, definition_id, value, expires_at, forever)
 }

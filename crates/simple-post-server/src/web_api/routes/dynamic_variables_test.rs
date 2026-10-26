@@ -101,7 +101,7 @@ async fn creating_and_listing_a_definition_round_trips() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns", "extractPath": "$.list", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "name": "sns", "extractPath": "$.list", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     assert_eq!(created.status(), 201);
@@ -109,7 +109,7 @@ async fn creating_and_listing_a_definition_round_trips() {
     assert_eq!(created_body["name"], "sns");
     let id = created_body["id"].as_str().expect("id").to_string();
 
-    let listed = get_json(addr, "/api/dynamic-variables?projectId=p1").await;
+    let listed = get_json(addr, "/api/dynamic-variables").await;
     assert_eq!(listed.status(), 200);
     let listed_body: serde_json::Value = listed.json().await.expect("json body");
     let items = listed_body.as_array().expect("数组");
@@ -132,7 +132,7 @@ async fn the_literal_resolve_route_is_not_swallowed_by_the_id_route() {
     let resolved = post_json(
         addr,
         "/api/dynamic-variables/resolve",
-        serde_json::json!({ "projectId": "p1", "names": ["sns"] }),
+        serde_json::json!({ "names": ["sns"] }),
     )
     .await;
     assert_eq!(resolved.status(), 200);
@@ -149,7 +149,7 @@ async fn an_override_is_written_and_cleared() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     let created_body: serde_json::Value = created.json().await.expect("json body");
@@ -189,7 +189,7 @@ async fn a_patch_changes_the_definition_and_a_delete_removes_it() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     let created_body: serde_json::Value = created.json().await.expect("json body");
@@ -213,7 +213,7 @@ async fn a_patch_changes_the_definition_and_a_delete_removes_it() {
         .expect("request completes");
     assert_eq!(deleted.status(), 204);
 
-    let listed = get_json(addr, "/api/dynamic-variables?projectId=p1").await;
+    let listed = get_json(addr, "/api/dynamic-variables").await;
     let listed_body: serde_json::Value = listed.json().await.expect("json body");
     assert!(listed_body.as_array().expect("数组").is_empty());
 }
@@ -226,10 +226,100 @@ async fn an_illegal_name_is_a_validation_error() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns-list" }),
+        serde_json::json!({ "name": "sns-list" }),
     )
     .await;
     assert_eq!(created.status(), 400);
     let body: serde_json::Value = created.json().await.expect("json body");
     assert_eq!(body["code"], "validation");
+}
+
+#[tokio::test]
+async fn skipping_the_references_leaves_them_out() {
+    let (addr, dir) = serve_test_router().await;
+    seed(&dir);
+    seed_an_endpoint_that_uses_sns(&dir);
+
+    let created = post_json(
+        addr,
+        "/api/dynamic-variables",
+        serde_json::json!({ "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+    )
+    .await;
+    assert_eq!(created.status(), 201);
+
+    // 默认带上引用关系。
+    let listed = get_json(addr, "/api/dynamic-variables").await;
+    assert_eq!(listed.status(), 200);
+    let body: serde_json::Value = listed.json().await.expect("json body");
+    let items = body.as_array().expect("数组");
+    assert_eq!(items[0]["referencedBy"].as_array().expect("引用").len(), 1);
+
+    // 传 `includeReferences=false` 就不带它：算引用关系要扫一遍全部端点。
+    let skipped = get_json(addr, "/api/dynamic-variables?includeReferences=false").await;
+    assert_eq!(skipped.status(), 200);
+    let body: serde_json::Value = skipped.json().await.expect("json body");
+    let items = body.as_array().expect("数组");
+    assert!(items[0]["referencedBy"]
+        .as_array()
+        .expect("引用")
+        .is_empty());
+}
+
+/// 种下一个模块、一个 collection 与一个请求体里写了 `{{sns}}` 的接口。
+fn seed_an_endpoint_that_uses_sns(dir: &std::path::Path) {
+    use crate::domain::{
+        AuthConfig, BodyMode, EndpointDetail, HttpMethod, RequestBody, ResourceNode,
+        ResourceNodeType,
+    };
+
+    let pool = crate::db::init(dir).expect("db init");
+    crate::db::with_tx(&pool, |c| {
+        let node =
+            |id: &str, kind: ResourceNodeType, parent: Option<&str>, sort: i64| ResourceNode {
+                id: id.into(),
+                root_id: "p1".into(),
+                parent_id: parent.map(str::to_string),
+                kind,
+                name: id.into(),
+                description: None,
+                sort_order: sort,
+                created_at: 1,
+                updated_at: 1,
+            };
+        crate::db::nodes::create(c, &node("m1", ResourceNodeType::Module, None, 0), None)?;
+        crate::db::nodes::create(
+            c,
+            &node("c1", ResourceNodeType::Collection, Some("m1"), 0),
+            None,
+        )?;
+        let detail = EndpointDetail {
+            node_id: "e1".into(),
+            method: HttpMethod::Post,
+            url: "/consume".into(),
+            environment_id: None,
+            base_url_definition_id: None,
+            base_url_override: None,
+            params: vec![],
+            headers: vec![],
+            body: RequestBody {
+                mode: BodyMode::Json,
+                content: "{\"sns\": {{sns}}}".into(),
+                schema: None,
+            },
+            auth: AuthConfig::default(),
+            docs: None,
+            notes: None,
+            tags: vec![],
+            pre_request_script: None,
+            test_script: None,
+        };
+        crate::db::nodes::create(
+            c,
+            &node("e1", ResourceNodeType::Endpoint, Some("c1"), 0),
+            Some(&detail),
+        )?;
+        Ok(())
+    })
+    .expect("seed tree");
 }

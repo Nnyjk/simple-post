@@ -13,8 +13,9 @@ use super::*;
 const INLINE_SOURCE: &str = r#"{"method":"GET","url":"http://127.0.0.1:9/points"}"#;
 use crate::db;
 use crate::domain::{
-    AuthConfig, AuthType, DynamicCacheEntry, DynamicErrorKind, DynamicValueSource, DynamicVariable,
-    KeyValue, Project, RequestBody, ValueMode,
+    AuthConfig, AuthType, BaseUrlDefinition, DynamicCacheEntry, DynamicErrorKind,
+    DynamicValueSource, DynamicVariable, EndpointDetail, HttpMethod, KeyValue, Project,
+    RequestBody, ResourceNode, ResourceNodeType, ValueMode,
 };
 
 // -------------------------------------------------------------------------
@@ -163,12 +164,13 @@ fn a_disabled_parameter_is_not_referenced() {
 fn definition(ttl_seconds: i64, stale_fallback: bool) -> DynamicVariable {
     DynamicVariable {
         id: "d1".into(),
-        project_id: "p1".into(),
         name: "sns".into(),
         description: None,
         source_endpoint_id: None,
         source_endpoint_name: None,
         source_inline_json: Some(INLINE_SOURCE.to_string()),
+        source_environment_id: None,
+        source_base_url_definition_id: None,
         extract_path: "$".into(),
         value_mode: ValueMode::Auto,
         ttl_seconds,
@@ -388,6 +390,7 @@ impl SourceFetcher for CountingFetcher {
         &'a self,
         def: &'a DynamicVariable,
         _ctx: &'a ResolveContext,
+        _source: &'a SourceContext,
     ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -433,7 +436,7 @@ fn seeded_pool() -> (db::DbPool, std::path::PathBuf) {
                 updated_at: 1,
             },
         )?;
-        db::dynamic_variables::create(c, &definition(60, false), "p1")?;
+        db::dynamic_variables::create(c, &definition(60, false))?;
         Ok(())
     })
     .expect("seed");
@@ -441,23 +444,7 @@ fn seeded_pool() -> (db::DbPool, std::path::PathBuf) {
 }
 
 fn context(pool: &db::DbPool) -> ResolveContext {
-    ResolveContext {
-        pool: pool.clone(),
-        project_id: "p1".into(),
-        environment_id: Some("env1".into()),
-        env: None,
-        project: Project {
-            id: "p1".into(),
-            name: "First".into(),
-            description: None,
-            base_url: None,
-            base_url_definitions: vec![],
-            default_base_url_definition_id: None,
-            color: "#000000".into(),
-            created_at: 1,
-            updated_at: 1,
-        },
-    }
+    ResolveContext { pool: pool.clone() }
 }
 
 #[tokio::test]
@@ -580,8 +567,11 @@ async fn a_value_that_is_too_large_is_not_written_to_the_cache() {
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::TooLarge);
 
-    let cached =
-        db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", "env1")).expect("read");
+    // 内联数据源没有环境，缓存键的环境段就是空串。
+    let cached = db::with_conn(&pool, |c| {
+        db::dynamic_variable_cache::get(c, "d1", crate::db::dynamic_variable_cache::NO_ENVIRONMENT)
+    })
+    .expect("read");
     assert!(cached.is_none());
 }
 
@@ -689,4 +679,120 @@ async fn a_stale_value_is_used_when_the_fetch_fails_and_the_definition_allows_it
     assert_eq!(out.values.get("sns").map(String::as_str), Some("[1]"));
     assert_eq!(out.errors.len(), 1);
     assert_eq!(out.statuses[0].source, DynamicValueSource::Stale);
+}
+
+// -------------------------------------------------------------------------
+// 取数上下文
+// -------------------------------------------------------------------------
+
+/// 一个项目，两个服务（★ 与另一个），一个绑了「另一个」服务的接口。
+fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!(
+        "simple-post-dynamic-ctx-test-{}-{}",
+        std::process::id(),
+        crate::db::test_counter::next()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let pool = db::init(&dir).expect("init");
+    db::with_tx(&pool, |c| {
+        db::projects::create(
+            c,
+            &Project {
+                id: "p1".into(),
+                name: "First".into(),
+                description: None,
+                default_base_url_definition_id: None,
+                base_url_definitions: vec![],
+                base_url: None,
+                color: "#000000".into(),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )?;
+        for (id, name) in [("star", "主服务"), ("own", "接口自绑的服务")] {
+            db::base_url_defs::create(
+                c,
+                &BaseUrlDefinition {
+                    id: id.into(),
+                    name: name.into(),
+                    description: None,
+                },
+                "p1",
+            )?;
+        }
+        db::base_url_defs::set_default(c, "p1", Some("star"))?;
+        db::nodes::create(
+            c,
+            &ResourceNode {
+                id: "m1".into(),
+                root_id: "p1".into(),
+                parent_id: None,
+                kind: ResourceNodeType::Module,
+                name: "模块".into(),
+                description: None,
+                sort_order: 0,
+                created_at: 1,
+                updated_at: 1,
+            },
+            None,
+        )?;
+        db::nodes::create(
+            c,
+            &ResourceNode {
+                id: "e1".into(),
+                root_id: "p1".into(),
+                parent_id: Some("m1".into()),
+                kind: ResourceNodeType::Endpoint,
+                name: "取数接口".into(),
+                description: None,
+                sort_order: 0,
+                created_at: 1,
+                updated_at: 1,
+            },
+            Some(&EndpointDetail {
+                node_id: "e1".into(),
+                method: HttpMethod::Get,
+                url: "/points".into(),
+                environment_id: None,
+                base_url_definition_id: Some("own".into()),
+                base_url_override: None,
+                params: vec![],
+                headers: vec![],
+                body: RequestBody::default(),
+                auth: AuthConfig::default(),
+                docs: None,
+                notes: None,
+                tags: vec![],
+                pre_request_script: None,
+                test_script: None,
+            }),
+        )?;
+        Ok(())
+    })
+    .expect("seed");
+    (pool, dir)
+}
+
+#[test]
+fn a_definition_that_names_no_service_fetches_through_the_project_star() {
+    // 数据源接口自己绑的服务不在回退链上：定义没点名服务时一律走项目的 ★。
+    let (pool, _dir) = pool_with_a_bound_service();
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+
+    let ctx = source_context(&pool, &def).expect("取数上下文");
+    assert_eq!(ctx.base_url_definition_id.as_deref(), Some("star"));
+}
+
+#[test]
+fn a_definition_that_names_a_service_uses_it() {
+    let (pool, _dir) = pool_with_a_bound_service();
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+    def.source_base_url_definition_id = Some("own".into());
+
+    let ctx = source_context(&pool, &def).expect("取数上下文");
+    assert_eq!(ctx.base_url_definition_id.as_deref(), Some("own"));
 }

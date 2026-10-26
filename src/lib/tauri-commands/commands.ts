@@ -24,6 +24,10 @@ export const COMMANDS = {
   // 接口的请求配置另有一对命令：`method` / `url` 对模块无意义。
   nodesList: 'nodes_list',
   nodesGet: 'nodes_get',
+  /** 一个节点的直接子节点。懒加载层级树的一节：展开时才取。 */
+  nodesChildren: 'nodes_children',
+  /** 跨全部项目搜接口，带它所在的路径（项目 / 模块 / 集合…）。 */
+  nodesSearchPaths: 'nodes_search_paths',
   nodesCreate: 'nodes_create',
   nodesUpdate: 'nodes_update',
   nodesDelete: 'nodes_delete',

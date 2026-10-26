@@ -65,8 +65,8 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       continue;
     }
     if (t.kind === 'dynamic-variables') {
-      // 动态变量是项目级的页面，标签 id 就是项目 id——标题固定，页面上列的是
-      // 该项目的全部定义。
+      // 动态变量是全局页面：定义不属于任何项目，故标题固定，页面上列的是整个工作区的
+      // 全部定义。
       out.push({
         tab: t,
         title: '动态变量',

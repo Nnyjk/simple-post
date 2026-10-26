@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { AppState } from '../app-store';
-import { SETTINGS_TAB_ID, dynamicTabProjectId } from '../store-types';
+import { SETTINGS_TAB_ID, DYNAMIC_TAB_ID } from '../store-types';
 import type {
   DraftEndpoint,
   EndpointDraft,
@@ -108,6 +108,13 @@ export interface UiTabsActions {
   switchProjectTabs: (projectId: string) => void;
   /** 打开（单例的）设置标签并选中某一节。幂等——已打开就只切换活动节并激活标签。 */
   openSettingsTab: (section?: SettingsCategoryId) => void;
+  /**
+   * 打开（单例的）动态变量标签。幂等——已打开就只激活它。
+   *
+   * 动态变量是全局的，故这个标签属于用户而不属于项目：切项目时它留在原地，且没有
+   * 项目时也能打开（欢迎页的入口，见 `features/welcome/WelcomeScreen.tsx`）。
+   */
+  openDynamicVariablesTab: () => void;
   /** 更新设置标签的活动分节。 */
   setActiveSettingsSection: (section: SettingsCategoryId) => void;
 }
@@ -255,15 +262,13 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (!s.nodesLoaded) return {};
       const valid = s.openTabs.filter((t) => {
         if (t.kind === 'settings') return true; // 单例，永不失效
+        // 动态变量是全局单例：定义不属于任何项目，故它也不随项目消失。
+        if (t.kind === 'dynamic-variables') return true;
         // draft endpoint 按定义就没有 `nodes` 行——那正是它的意义——
         // 下面的查找会读成"已删除"，于是标签一开就被关掉。保存（会开出真正的
         // `endpoint` 标签）或丢弃之前一律豁免。
         if (t.kind === 'endpoint-draft') return true;
         if (t.kind === 'project') return s.projects.some((p) => p.id === t.id);
-        // 动态变量是**项目级**的页面，标签 id 带自己的前缀，里面包着项目 id。
-        if (t.kind === 'dynamic-variables') {
-          return s.projects.some((p) => p.id === dynamicTabProjectId(t.id));
-        }
         // 其余标签都是树节点，且标签的 `kind` 就是节点的 `type`——一次查找同时
         // 覆盖 module、collection、endpoint。连 type 一起比，标签才不会因为别的
         // 节点恰好同 id 而侥幸存活。
@@ -398,6 +403,19 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
   },
 
   setActiveSettingsSection: (section) => set({ activeSettingsSection: section }),
+
+  openDynamicVariablesTab: () => {
+    const state = get();
+    const existing = state.openTabs.find((t) => t.kind === 'dynamic-variables');
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return;
+    }
+    set({
+      openTabs: [...state.openTabs, { id: DYNAMIC_TAB_ID, kind: 'dynamic-variables' }],
+      activeTabId: DYNAMIC_TAB_ID,
+    });
+  },
 });
 
 /**
@@ -434,9 +452,9 @@ const GLOBAL_TAB_OWNER = '*';
  */
 function tabOwningProject(tab: OpenTab, state: AppState): string {
   if (tab.kind === 'settings') return GLOBAL_TAB_OWNER;
+  // 动态变量是全局单例：它不属于任何项目。
+  if (tab.kind === 'dynamic-variables') return GLOBAL_TAB_OWNER;
   if (tab.kind === 'project') return tab.id;
-  // 动态变量页面属于它标签 id 里包着的那个项目。
-  if (tab.kind === 'dynamic-variables') return dynamicTabProjectId(tab.id);
   if (tab.kind === 'endpoint-draft') return state.draftEndpoints[tab.id]?.rootId ?? '';
   return state.nodes.find((n) => n.id === tab.id)?.rootId ?? '';
 }
