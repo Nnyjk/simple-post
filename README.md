@@ -2,7 +2,7 @@
 
 一款面向 Windows 10/11 的桌面 API 调试 / 管理工具（Postman 类），核心差异化是**自带 MCP Server**——Claude Desktop、Cursor、Cline 等外部 AI 客户端可以直接列出、检索、调用、改写这里的接口定义。
 
-> 当前阶段：**v0.1.2**（版本号以根 `package.json` 与 `Cargo.toml` 为准）。数据持久化在本地 SQLite。
+> 当前阶段：**v0.1.21**（版本号以根 `package.json` 与 `Cargo.toml` 为准）。数据持久化在本地 SQLite。
 
 ---
 

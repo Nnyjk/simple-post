@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.21"
 edition = "2021"
 # 1.87：请求脚本的沙箱引擎 rquickjs 要求它。选它是因为只有它同时给出
 # 「真墙钟打断 + 内存上限 + 栈上限」，而本项目 Windows 端已因 Tauri 需要 MSVC、
