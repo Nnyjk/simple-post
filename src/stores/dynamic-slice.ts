@@ -1,14 +1,16 @@
 /**
- * 动态变量切片 —— 项目级的「变量名 → 数据源 → 抽取规则 → 缓存时长」声明，以及它们
+ * 动态变量切片 —— 全局作用域的「变量名 → 数据源 → 抽取规则 → 缓存时长」声明，以及它们
  * 当前的取值。
+ *
+ * 定义**不属于任何项目**：任何项目的端点都能引用同一条定义，故这个切片里没有项目维度。
+ * 变量名在整个工作区里唯一。
  *
  * 状态分两半：
  *
- *   - `dynamicVariables`：本项目的定义列表。列表命令一次带回定义 + 当前值 + 缓存
- *     状态，面板直接渲染它，不必再拼。
- *   - `dynamicValues`：按环境 id 分桶的当前值。缓存键含环境——同一个定义在不同环境
- *     取到的值不同（数据源端点的 base URL 随环境变，测试环境与生产环境的站点清单
- *     本来就不是一回事）。
+ *   - `dynamicVariables`：全部定义的列表。列表命令一次带回定义 + 当前值 + 缓存状态，
+ *     面板直接渲染它，不必再拼。
+ *   - `dynamicValues`：变量名 → 当前值。取数用的环境由定义自己决定（点名的那个，或数据源
+ *     接口所属项目的第一个可用环境），故同一个名字只有一个当前值——不按环境分桶。
  *
  * 取数在**渲染进程**发起（`resolveDynamicVariables`），因为变量的值必须在
  * `prepareRequest` 替换 `{{var}}` 之前就到手——替换一旦发生，变量池里就没有同名变量
@@ -31,6 +33,10 @@ export interface CreateDynamicVariableInput {
   description?: string;
   sourceEndpointId?: string | null;
   sourceInlineJson?: string | null;
+  /** 取数用的环境。空 = 数据源接口所属项目的第一个可用环境。 */
+  sourceEnvironmentId?: string | null;
+  /** 取数用的服务。空 = 数据源接口所属项目的默认服务。 */
+  sourceBaseUrlDefinitionId?: string | null;
   extractPath?: string;
   valueMode?: ValueMode;
   ttlSeconds?: number;
@@ -40,10 +46,10 @@ export interface CreateDynamicVariableInput {
 
 /** 状态部分。 */
 export interface DynamicSliceState {
-  /** 本项目的定义列表（带当前值与缓存状态）。 */
+  /** 全部定义（带当前值与缓存状态）。 */
   dynamicVariables: DynamicVariableView[];
-  /** 环境 id → 变量名 → 当前值。 */
-  dynamicValues: Record<string, Record<string, DynamicValueStatus>>;
+  /** 变量名 → 当前值。 */
+  dynamicValues: Record<string, DynamicValueStatus>;
   /** 变量名 → 最近一次取数失败的原因。取数成功时该条目被清掉。 */
   dynamicErrors: Record<string, DynamicError>;
   /** 正在取数。界面上据此显示「正在取数…」。 */
@@ -54,13 +60,10 @@ export interface DynamicSliceState {
 
 /** action 部分。 */
 export interface DynamicSliceActions {
-  /** 载入本项目的定义。 */
-  loadDynamicVariables: (projectId: string, environmentId?: string) => Promise<void>;
+  /** 载入全部定义。 */
+  loadDynamicVariables: () => Promise<void>;
   /** 新建一条定义，返回它的 id（失败返回 null）。 */
-  createDynamicVariable: (
-    projectId: string,
-    input: CreateDynamicVariableInput,
-  ) => Promise<string | null>;
+  createDynamicVariable: (input: CreateDynamicVariableInput) => Promise<string | null>;
   /** 改一条定义。成功返回 true，失败返回 false（原因在 `dynamicError` 里）。 */
   updateDynamicVariable: (id: string, patch: Partial<DynamicVariable>) => Promise<boolean>;
   /** 删一条定义。 */
@@ -72,21 +75,19 @@ export interface DynamicSliceActions {
    * 时后端不发取数请求，故这一步通常是廉价的。
    */
   resolveDynamicVariables: (
-    projectId: string,
     names: string[],
-    environmentId?: string,
     force?: boolean,
   ) => Promise<{ values: Record<string, string>; errors: DynamicError[] }>;
   /** 写覆盖值。`value` 为 null 表示清除。 */
   setDynamicOverride: (
     id: string,
     value: string | null,
-    options?: { environmentId?: string; expiresAt?: number | null; forever?: boolean },
+    options?: { expiresAt?: number | null; forever?: boolean },
   ) => Promise<void>;
   /** 强制重新取一次数。 */
-  refreshDynamicVariable: (projectId: string, id: string, environmentId?: string) => Promise<void>;
+  refreshDynamicVariable: (id: string) => Promise<void>;
   /**
-   * 把一个变量名从所有环境的桶里剔除。
+   * 把一个变量名从取值桶里剔除。
    *
    * 停用或删除之后调用它：留着旧值就等于停用之后仍然在替换。
    */
@@ -104,34 +105,23 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
   dynamicError: null,
 
   /**
-   * 把一个变量名从所有环境的桶里剔除。
+   * 把一个变量名从取值桶里剔除。
    *
-   * 停用或删除之后，它在别的环境里的旧值也不该留着：请求编辑器把桶里的值并进变量池，
+   * 停用或删除之后，它残留的旧值不该留着：请求编辑器把桶里的值并进变量池，
    * 留着就等于停用之后仍然在替换。
    */
   dropDynamicValue: (name) =>
     set((s) => {
-      const values: Record<string, Record<string, DynamicValueStatus>> = {};
-      for (const [envId, bucket] of Object.entries(s.dynamicValues)) {
-        if (!(name in bucket)) {
-          values[envId] = bucket;
-          continue;
-        }
-        const rest = { ...bucket };
-        delete rest[name];
-        values[envId] = rest;
-      }
+      const values = { ...s.dynamicValues };
+      delete values[name];
       const errors = { ...s.dynamicErrors };
       delete errors[name];
       return { dynamicValues: values, dynamicErrors: errors };
     }),
 
-  loadDynamicVariables: async (projectId, environmentId) => {
+  loadDynamicVariables: async () => {
     try {
-      const views = await invokeCmd<DynamicVariableView[]>(COMMANDS.dynamicVariablesList, {
-        projectId,
-        environmentId: environmentId ?? null,
-      });
+      const views = await invokeCmd<DynamicVariableView[]>(COMMANDS.dynamicVariablesList, {});
       set({ dynamicVariables: views, dynamicError: null });
     } catch (e) {
       console.error('[store] dynamic_variables_list failed', e);
@@ -139,14 +129,15 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     }
   },
 
-  createDynamicVariable: async (projectId, input) => {
+  createDynamicVariable: async (input) => {
     try {
       const created = await invokeCmd<DynamicVariable>(COMMANDS.dynamicVariablesCreate, {
-        projectId,
         name: input.name,
         description: input.description ?? null,
         sourceEndpointId: input.sourceEndpointId ?? null,
         sourceInlineJson: input.sourceInlineJson ?? null,
+        sourceEnvironmentId: input.sourceEnvironmentId ?? null,
+        sourceBaseUrlDefinitionId: input.sourceBaseUrlDefinitionId ?? null,
         extractPath: input.extractPath ?? null,
         valueMode: input.valueMode ?? null,
         ttlSeconds: input.ttlSeconds ?? null,
@@ -154,7 +145,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         enabled: input.enabled ?? null,
       });
       // 列表随即重载：面板要显示的当前值与缓存状态都在列表里。
-      await get().loadDynamicVariables(projectId, get().activeEnvironmentId || undefined);
+      await get().loadDynamicVariables();
       return created.id;
     } catch (e) {
       console.error('[store] dynamic_variables_create failed', e);
@@ -164,13 +155,12 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
   },
 
   updateDynamicVariable: async (id, patch) => {
-    const projectId = get().activeProjectId;
     // 改之前的名字：改名之后旧名下的值与错误都不再有意义。
     const before = get().dynamicVariables.find((v) => v.id === id);
     try {
       await invokeCmd<DynamicVariable>(COMMANDS.dynamicVariablesUpdate, { id, patch });
       if (before) get().dropDynamicValue(before.name);
-      await get().loadDynamicVariables(projectId, get().activeEnvironmentId || undefined);
+      await get().loadDynamicVariables();
       return true;
     } catch (e) {
       console.error('[store] dynamic_variables_update failed', e);
@@ -180,21 +170,19 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
   },
 
   deleteDynamicVariable: async (id) => {
-    const projectId = get().activeProjectId;
     const before = get().dynamicVariables.find((v) => v.id === id);
     try {
       await invokeCmd<void>(COMMANDS.dynamicVariablesDelete, { id });
       if (before) get().dropDynamicValue(before.name);
-      await get().loadDynamicVariables(projectId, get().activeEnvironmentId || undefined);
+      await get().loadDynamicVariables();
     } catch (e) {
       console.error('[store] dynamic_variables_delete failed', e);
       set({ dynamicError: messageOf(e) });
     }
   },
 
-  resolveDynamicVariables: async (projectId, names, environmentId, force) => {
+  resolveDynamicVariables: async (names, force) => {
     if (names.length === 0) return { values: {}, errors: [] };
-    const envId = environmentId ?? get().activeEnvironmentId ?? '';
     set({ dynamicResolving: true });
     try {
       const resolution = await invokeCmd<{
@@ -202,14 +190,12 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         statuses: DynamicValueStatus[];
         errors: DynamicError[];
       }>(COMMANDS.dynamicVariablesResolve, {
-        projectId,
         names,
-        environmentId: envId || null,
         force: force ?? false,
       });
       // 值写进 store：请求编辑器下一次 `prepareRequest` 会用上它们。
       set((s) => {
-        const bucket = { ...(s.dynamicValues[envId] ?? {}) };
+        const bucket = { ...s.dynamicValues };
         for (const status of resolution.statuses) {
           bucket[status.name] = status;
         }
@@ -221,7 +207,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         for (const status of resolution.statuses) {
           if (!status.error) delete errors[status.name];
         }
-        return { dynamicValues: { ...s.dynamicValues, [envId]: bucket }, dynamicErrors: errors };
+        return { dynamicValues: bucket, dynamicErrors: errors };
       });
       return { values: resolution.values, errors: resolution.errors };
     } catch (e) {
@@ -234,13 +220,10 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
   },
 
   setDynamicOverride: async (id, value, options) => {
-    const projectId = get().activeProjectId;
-    const environmentId = options?.environmentId ?? get().activeEnvironmentId ?? '';
     try {
       await invokeCmd(COMMANDS.dynamicVariablesSetOverride, {
         id,
         value,
-        environmentId: environmentId || null,
         expiresAt: options?.expiresAt ?? null,
         forever: options?.forever ?? false,
       });
@@ -253,25 +236,20 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
           return { dynamicErrors: errors };
         });
       }
-      await get().loadDynamicVariables(projectId, environmentId || undefined);
+      await get().loadDynamicVariables();
     } catch (e) {
       console.error('[store] dynamic_variables_set_override failed', e);
       set({ dynamicError: messageOf(e) });
     }
   },
 
-  refreshDynamicVariable: async (projectId, id, environmentId) => {
-    const envId = environmentId ?? get().activeEnvironmentId ?? '';
+  refreshDynamicVariable: async (id) => {
     set({ dynamicResolving: true });
     try {
-      const status = await invokeCmd<DynamicValueStatus>(COMMANDS.dynamicVariablesRefresh, {
-        projectId,
-        id,
-        environmentId: envId || null,
-      });
+      const status = await invokeCmd<DynamicValueStatus>(COMMANDS.dynamicVariablesRefresh, { id });
       // 这次强制重取的结果（值与失败原因）写进 store，面板立刻能显示。
       set((s) => {
-        const bucket = { ...(s.dynamicValues[envId] ?? {}) };
+        const bucket = { ...s.dynamicValues };
         if (status.name) bucket[status.name] = status;
         const errors = { ...s.dynamicErrors };
         if (status.error) {
@@ -279,9 +257,9 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         } else {
           delete errors[status.name];
         }
-        return { dynamicValues: { ...s.dynamicValues, [envId]: bucket }, dynamicErrors: errors };
+        return { dynamicValues: bucket, dynamicErrors: errors };
       });
-      await get().loadDynamicVariables(projectId, envId || undefined);
+      await get().loadDynamicVariables();
     } catch (e) {
       console.error('[store] dynamic_variables_refresh failed', e);
       set({ dynamicError: messageOf(e) });

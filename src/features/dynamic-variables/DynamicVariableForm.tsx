@@ -4,15 +4,18 @@
  * 数据源二选一：引用树里的一个接口（界面优先推荐这个形态——那个接口自己的 base URL、
  * 鉴权与前置脚本都会生效），或一份内联请求（method / url / headers / body / auth 的
  * JSON 文本，URL 必须写完整）。
+ *
+ * 引用接口时，表单还会给出**取数用的环境与服务**：默认取那个接口所属项目的第一个可用
+ * 环境与默认服务，用户可以改。两者都跟着数据源走，故选了接口之后它们才有意义。
  */
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import type { DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EndpointTreePicker } from './EndpointTreePicker';
 
 export interface DynamicVariableFormProps {
-  projectId: string;
   /** 传了就走编辑模式，不传就是新建。 */
   variable?: DynamicVariableView;
   onCancel: () => void;
@@ -21,14 +24,21 @@ export interface DynamicVariableFormProps {
   onRename?: (name: string) => void;
 }
 
+/** 按代码点比两个字符串。SQLite 的 `ORDER BY name` 比的是 UTF-8 字节，JS 的 `<` 比的是
+ * UTF-16 码元 —— 对 BMP 里的常用字符两者一致，故这里直接用 `<`。 */
+function cmp(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 export function DynamicVariableForm({
-  projectId,
   variable,
   onCancel,
   onDone,
   onRename,
 }: DynamicVariableFormProps) {
-  const nodes = useAppStore((s) => s.nodes);
+  const projects = useAppStore((s) => s.projects);
+  const environments = useAppStore((s) => s.environments);
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   const createDynamicVariable = useAppStore((s) => s.createDynamicVariable);
   const updateDynamicVariable = useAppStore((s) => s.updateDynamicVariable);
@@ -39,11 +49,21 @@ export function DynamicVariableForm({
   const [description, setDescription] = useState(variable?.description ?? '');
   // 数据源有两种形态，故形态本身是状态：它不能从「当前选中的端点」推出来——用户从
   // 「引用端点」切回「内联请求」时端点 id 还在，但它已经不生效了。
+  //
+  // 「数据源接口已被删除」的定义落在**引用接口**形态：那条路是唯一能救它的（重新挑一个
+  // 接口），而内联形态会让用户以为要手写一份请求。
+  const sourceDeleted = !!variable && !variable.sourceEndpointId && !variable.sourceInlineJson;
   const [sourceKind, setSourceKind] = useState<'endpoint' | 'inline'>(
-    variable?.sourceEndpointId ? 'endpoint' : 'inline',
+    variable ? (variable.sourceEndpointId || sourceDeleted ? 'endpoint' : 'inline') : 'inline',
   );
   const [sourceEndpointId, setSourceEndpointId] = useState(variable?.sourceEndpointId ?? '');
+  const [sourceProjectId, setSourceProjectId] = useState(variable?.sourceProjectId ?? '');
+  // 数据源接口的名字。树上点一下就有，不必再查一次树。
+  const [sourceEndpointName, setSourceEndpointName] = useState(variable?.sourceEndpointName ?? '');
   const [sourceInlineJson, setSourceInlineJson] = useState(variable?.sourceInlineJson ?? '');
+  // 取数用的环境与服务。空串 = 跟随默认（数据源接口所属项目的首个可用环境 / 默认服务）。
+  const [environmentId, setEnvironmentId] = useState(variable?.sourceEnvironmentId ?? '');
+  const [serviceId, setServiceId] = useState(variable?.sourceBaseUrlDefinitionId ?? '');
   const [extractPath, setExtractPath] = useState(variable?.extractPath ?? '$');
   const [valueMode, setValueMode] = useState<ValueMode>(variable?.valueMode ?? 'auto');
   const [ttlSeconds, setTtlSeconds] = useState(String(variable?.ttlSeconds ?? 60));
@@ -51,16 +71,40 @@ export function DynamicVariableForm({
   const [enabled, setEnabled] = useState(variable?.enabled ?? true);
   const [busy, setBusy] = useState(false);
 
-  // 本项目的接口列表，供「引用端点」形态挑选。
-  const endpoints = useMemo(
-    () =>
-      nodes
-        .filter((n) => n.kind === 'endpoint' && n.rootId === projectId)
-        .map((n) => ({ id: n.id, name: n.name, url: endpointDetails[n.id]?.url ?? '' })),
-    [nodes, endpointDetails, projectId],
-  );
-
   const usesEndpoint = sourceKind === 'endpoint';
+
+  // 数据源接口所属的项目。它决定有哪些环境可用、有哪些服务可选。
+  const sourceProject = useMemo(
+    () => projects.find((p) => p.id === sourceProjectId),
+    [projects, sourceProjectId],
+  );
+  // 项目里的环境，按名字排序 —— 「第一个可用环境」就是列表里的头一个。
+  //
+  // 后端 `core::dynamic::source_context` 选默认环境时用的是 `list_by_project` 的
+  // `ORDER BY name ASC, id ASC`，故这里必须按同一套顺序排：界面上写的「默认（X）」
+  // 与真正生效的那个是同一个，否则标签与行为各说各话。
+  const projectEnvironments = useMemo(
+    () =>
+      environments
+        .filter((e) => e.projectId === sourceProjectId)
+        .sort((a, b) => (a.name === b.name ? cmp(a.id, b.id) : cmp(a.name, b.name))),
+    [environments, sourceProjectId],
+  );
+  const firstEnvironment = projectEnvironments[0];
+  // 服务的默认值：数据源接口自己绑的服务优先，它没绑就用项目的默认服务（★）。
+  const endpointOwnService = endpointDetails[sourceEndpointId]?.baseUrlDefinitionId ?? null;
+  const defaultServiceId = endpointOwnService ?? sourceProject?.defaultBaseUrlDefinitionId ?? null;
+  const defaultServiceName =
+    sourceProject?.baseUrlDefinitions.find((d) => d.id === defaultServiceId)?.name ?? null;
+
+  const handleSelectEndpoint = (endpointId: string, projectId: string, endpointName: string) => {
+    setSourceKind('endpoint');
+    setSourceEndpointId(endpointId);
+    setSourceProjectId(projectId);
+    setSourceEndpointName(endpointName);
+    setEnvironmentId('');
+    setServiceId('');
+  };
 
   // 没有数据源的定义永远解析不出值，故界面不让人存：引用形态要选了接口，内联形态
   // 要填了请求。
@@ -79,6 +123,8 @@ export function DynamicVariableForm({
           description: description || null,
           sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
           sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
+          sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
+          sourceBaseUrlDefinitionId: usesEndpoint ? serviceId || null : null,
           extractPath,
           valueMode,
           ttlSeconds: ttlValue,
@@ -88,11 +134,13 @@ export function DynamicVariableForm({
         // 保存失败时表单留着：用户填的内容不丢。
         if (!ok) return;
       } else {
-        const created = await createDynamicVariable(projectId, {
+        const created = await createDynamicVariable({
           name,
           description: description || undefined,
           sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
-          sourceInlineJson: usesEndpoint ? undefined : sourceInlineJson || undefined,
+          sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
+          sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
+          sourceBaseUrlDefinitionId: usesEndpoint ? serviceId || null : null,
           extractPath,
           valueMode,
           ttlSeconds: ttlValue,
@@ -134,26 +182,29 @@ export function DynamicVariableForm({
         <label className="flex items-start gap-2 text-xs">
           <span className="w-20 shrink-0 pt-1.5 text-muted-foreground">数据源</span>
           <div className="flex flex-1 flex-col gap-1">
-            <select
-              value={usesEndpoint ? sourceEndpointId : ''}
-              onChange={(e) => {
-                if (e.target.value === '') {
-                  setSourceKind('inline');
-                  setSourceEndpointId('');
-                  return;
-                }
-                setSourceKind('endpoint');
-                setSourceEndpointId(e.target.value);
-              }}
-              className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-            >
-              <option value="">内联请求</option>
-              {endpoints.map((e) => (
-                <option key={e.id} value={e.id}>
-                  引用接口：{e.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                value={sourceKind}
+                onChange={(e) => setSourceKind(e.target.value as 'endpoint' | 'inline')}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="endpoint">引用接口</option>
+                <option value="inline">内联请求</option>
+              </select>
+              {usesEndpoint && sourceEndpointId && (
+                <span className="truncate text-[11px] text-muted-foreground">
+                  已选接口 {sourceEndpointName || sourceEndpointId}
+                </span>
+              )}
+            </div>
+            {sourceDeleted && (
+              <p className="text-[11px] text-destructive">
+                这条定义引用的接口已被删除，故它现在没有数据源。挑一个接口替上它即可救回这条定义。
+              </p>
+            )}
+            {usesEndpoint && (
+              <EndpointTreePicker value={sourceEndpointId} onSelect={handleSelectEndpoint} />
+            )}
             {!usesEndpoint && (
               <textarea
                 value={sourceInlineJson}
@@ -165,6 +216,51 @@ export function DynamicVariableForm({
             )}
           </div>
         </label>
+
+        {usesEndpoint && sourceEndpointId !== '' && (
+          <>
+            <label className="flex items-center gap-2 text-xs">
+              <span className="w-20 shrink-0 text-muted-foreground">取数环境</span>
+              <select
+                value={environmentId}
+                onChange={(e) => setEnvironmentId(e.target.value)}
+                className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">
+                  默认（{firstEnvironment ? `${firstEnvironment.name}` : '该项目没有环境'}）
+                </option>
+                {projectEnvironments.map((env) => (
+                  <option key={env.id} value={env.id}>
+                    {env.name}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-muted-foreground">
+                决定取数时用哪个环境的 base URL 与变量。
+              </span>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs">
+              <span className="w-20 shrink-0 text-muted-foreground">取数服务</span>
+              <select
+                value={serviceId}
+                onChange={(e) => setServiceId(e.target.value)}
+                className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">默认（{defaultServiceName ?? '该项目没有默认服务'}）</option>
+                {(sourceProject?.baseUrlDefinitions ?? []).map((def) => (
+                  <option key={def.id} value={def.id}>
+                    {def.name}
+                    {def.id === sourceProject?.defaultBaseUrlDefinitionId ? '（★）' : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-muted-foreground">
+                决定取数时用哪个服务。默认取数据源接口自己绑的服务，它没绑就用项目的 ★。
+              </span>
+            </label>
+          </>
+        )}
 
         <label className="flex items-center gap-2 text-xs">
           <span className="w-20 shrink-0 text-muted-foreground">抽取规则</span>
@@ -218,12 +314,6 @@ export function DynamicVariableForm({
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
           <span>启用（停用后不参与替换）</span>
         </label>
-
-        {variable?.sourceEndpointName && (
-          <p className="text-[11px] text-muted-foreground">
-            当前数据源：{variable.sourceEndpointName}
-          </p>
-        )}
 
         <div className="mt-1 flex items-center gap-2">
           <Button

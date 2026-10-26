@@ -73,8 +73,6 @@ export function HttpTester() {
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
   // 动态变量的定义没加载上来 / 取数调用失败时的原因。
   const dynamicError = useAppStore((s) => s.dynamicError);
-  const activeProjectId = useAppStore((s) => s.activeProjectId);
-  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
 
   const [tab, setTab] = useState<TabId>('params');
   const [curlFlash, setCurlFlash] = useState(false);
@@ -101,10 +99,6 @@ export function HttpTester() {
     endpoint,
     detail,
   );
-
-  // 动态变量的缓存键含环境，故这里用的是**这个接口**解析 `{{x}}` 所依据的那份环境
-  // （接口自选的环境，没有就用工作区当前环境）——与 `endpointEnv` 同一个来源。
-  const dynamicEnvId = endpointEnv?.id ?? activeEnvironmentId;
 
   // 脚本看得到的环境。与解析用的是**同一份变量池**（停用的变量不参与），
   // 否则 `pm.environment.get('token')` 读到的与请求里替换进去的不是同一个值。
@@ -238,13 +232,12 @@ export function HttpTester() {
 
   // 变量选择器的条目：环境变量与动态变量并进同一份候选（不新开页签）。
   const dynamicEntries = useMemo<VarEntry[]>(() => {
-    const bucket = dynamicValues[dynamicEnvId] ?? {};
     return dynamicVariables.map((v) => {
       // 停用的定义不参与替换，故它不显示值——显示一个用不上的值会误导。
       if (!v.enabled) {
         return { key: v.name, value: '', origin: 'dynamic' as const, hint: '已停用' };
       }
-      const status = bucket[v.name];
+      const status = dynamicValues[v.name];
       const source = status?.source ?? v.source;
       const fetchedAt = status?.fetchedAt ?? v.fetchedAt;
       return {
@@ -261,7 +254,7 @@ export function HttpTester() {
                 : undefined,
       };
     });
-  }, [dynamicVariables, dynamicValues, dynamicEnvId]);
+  }, [dynamicVariables, dynamicValues]);
 
   // EnvVarPicker 状态 —— 用户在 URL 输入框敲 `{{` 时打开。选择器是纯展示：选中项与
   // 过滤条目据当前环境 + 最后一个 `{{` 之后输入的片段派生，写回仍由本组件的草稿完成。
@@ -323,13 +316,13 @@ export function HttpTester() {
   // 动态变量
   // ---------------------------------------------------------------------------
 
-  // 本项目的动态变量定义。面板与请求编辑器都读同一份，故两处看到的东西一样。
+  // 全部动态变量定义。定义是全局的，故这里没有项目维度；面板与请求编辑器读同一份，
+  // 故两处看到的东西一样。
   useEffect(() => {
-    if (activeProjectId === '') return;
-    void loadDynamicVariables(activeProjectId, dynamicEnvId || undefined);
-  }, [activeProjectId, dynamicEnvId, loadDynamicVariables]);
+    void loadDynamicVariables();
+  }, [loadDynamicVariables]);
 
-  // 本项目**已启用且仍存在**的动态变量名。
+  // **已启用且仍存在**的动态变量名。
   //
   // `dynamicNames`（扫出谁被引用了）与 `dynamicVars`（把值并进变量池）共用它：停用或删除
   // 之后，那个名字既不算被引用，它的旧值也不进变量池——否则「停用后不参与替换」是假的，
@@ -342,7 +335,7 @@ export function HttpTester() {
   // 这个请求引用了哪些动态变量。
   //
   // 扫的是**未替换**的模板，故同名环境变量也会被扫出来——动态变量在替换时压过环境变量
-  // （见 `mergePool`），故名单里只留本项目有定义且已启用的那些。
+  // （见 `mergePool`），故名单里只留有定义且已启用的那些。
   const dynamicNames = useMemo(() => {
     if (enabledDynamicNames.size === 0) return [];
     return listDynamicNames({
@@ -355,15 +348,15 @@ export function HttpTester() {
     }).filter((name) => enabledDynamicNames.has(name));
   }, [enabledDynamicNames, resolved.baseUrl, liveUrl, effective]);
 
-  // 模板或环境变化时重新解析（防抖 300 ms）。TTL 内命中缓存时后端不发取数请求，
+  // 模板变化时重新解析（防抖 300 ms）。TTL 内命中缓存时后端不发取数请求，
   // 故这一步通常只是一次廉价的 IPC；预览里的 `{{name}}` 也因此很快变成真值。
   useEffect(() => {
     if (dynamicNames.length === 0) return;
     const timer = window.setTimeout(() => {
-      void resolveDynamicVariables(activeProjectId, dynamicNames, dynamicEnvId || undefined);
+      void resolveDynamicVariables(dynamicNames);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [dynamicNames, activeProjectId, dynamicEnvId, resolveDynamicVariables]);
+  }, [dynamicNames, resolveDynamicVariables]);
 
   // 当前生效的动态变量值。它们在变量池的最后一步并入，故同名时压过环境变量；
   // 被停用的环境变量也不影响它们（停用过滤只作用于环境变量）。
@@ -371,14 +364,13 @@ export function HttpTester() {
   // 桶里只留下**已启用且仍存在**的那些名字：桶是累加的，停用或删除之后旧条目还在，
   // 直接并进去就等于停用之后仍然在替换。
   const dynamicVars = useMemo(() => {
-    const bucket = dynamicValues[dynamicEnvId] ?? {};
     const out: Record<string, string> = {};
-    for (const [name, status] of Object.entries(bucket)) {
+    for (const [name, status] of Object.entries(dynamicValues)) {
       if (!enabledDynamicNames.has(name)) continue;
       if (status.value !== null && status.value !== undefined) out[name] = status.value;
     }
     return out;
-  }, [dynamicValues, dynamicEnvId, enabledDynamicNames]);
+  }, [dynamicValues, enabledDynamicNames]);
 
   // 组装请求的唯一入口。发送前若解析出了新的值，用新值再组装一次。
   const prepare = useCallback(
@@ -447,7 +439,6 @@ export function HttpTester() {
     prepared,
     prepareWithDynamic: prepare,
     dynamicNames,
-    environmentId: dynamicEnvId,
     auth: effective.auth,
     env: scriptEnv,
     preRequestScript: effective.preRequestScript,

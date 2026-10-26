@@ -262,7 +262,6 @@ export type { DraftEndpoint } from './store-types';
 export {
   SETTINGS_TAB_ID,
   DRAFT_ID_PREFIX,
-  DYNAMIC_TAB_PREFIX,
-  dynamicTabProjectId,
+  DYNAMIC_TAB_ID,
   UNTITLED_ENDPOINT_NAME,
 } from './store-types';

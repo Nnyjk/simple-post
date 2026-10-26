@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { FilePlus, Settings as SettingsIcon, BookOpen, Package, ArrowRight } from 'lucide-react';
+import {
+  FilePlus,
+  Settings as SettingsIcon,
+  BookOpen,
+  Package,
+  ArrowRight,
+  Braces,
+} from 'lucide-react';
 import { useAppStore, type Theme } from '@/stores/app-store';
 import { cn, focusRing } from '@/lib/utils';
 import { AppIcon } from '@/components/ui/app-icon';
@@ -43,6 +50,7 @@ export function WelcomeScreen() {
   const theme = useAppStore((s) => s.theme);
   const openProject = useAppStore((s) => s.openProject);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
+  const openDynamicVariablesTab = useAppStore((s) => s.openDynamicVariablesTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -194,6 +202,19 @@ export function WelcomeScreen() {
             >
               <SettingsIcon className="h-3.5 w-3.5" />
               打开设置
+            </button>
+            {/* 动态变量是全局的：一条定义不属于任何项目，故没有打开项目时也要能
+                触达它 —— 这正是「先把基础数据源定义好，再在各项目里引用」的入口。 */}
+            <button
+              type="button"
+              onClick={() => openDynamicVariablesTab()}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground',
+                focusRing,
+              )}
+            >
+              <Braces className="h-3.5 w-3.5" />
+              动态变量
             </button>
             <button
               type="button"

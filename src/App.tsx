@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { WelcomeScreen } from '@/features/welcome/WelcomeScreen';
-import { useAppStore, SETTINGS_TAB_ID } from '@/stores/app-store';
+import { useAppStore, SETTINGS_TAB_ID, DYNAMIC_TAB_ID } from '@/stores/app-store';
 import { BootSplashGate } from '@/features/welcome/BootSplashGate';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +36,14 @@ const WorkspaceShell = lazy(() =>
 // 面板体共用，只有外壳不同（见 `features/settings/SettingsSurface.tsx`）。
 const SettingsSurface = lazy(() =>
   import('@/features/settings/SettingsSurface').then((m) => ({ default: m.SettingsSurface })),
+);
+
+// 动态变量同样是全局资产，故同样需要一个无项目宿主。面板体与 workspace 里的是同一份
+// （见 `features/dynamic-variables/DynamicVariablesSurface.tsx`）。
+const DynamicVariablesSurface = lazy(() =>
+  import('@/features/dynamic-variables/DynamicVariablesSurface').then((m) => ({
+    default: m.DynamicVariablesSurface,
+  })),
 );
 
 // 启动失败可能落在任一 surface，故置于两者之上，而非嵌在某个 shell 里。
@@ -129,9 +137,10 @@ function App() {
   }, []);
 
   const onWelcome = activeProjectId === '';
-  // 设置是唯一不需要项目的 surface。在此判断（而非放进 `WelcomeScreen`），
-  // 才能让两个宿主共用一份面板实现。
+  // 设置与动态变量都是全局资产，不需要项目也能触达。在此判断（而非放进
+  // `WelcomeScreen`），才能让两个宿主共用一份面板实现。
   const onWelcomeSettings = onWelcome && activeTabId === SETTINGS_TAB_ID;
+  const onWelcomeDynamic = onWelcome && activeTabId === DYNAMIC_TAB_ID;
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
@@ -148,6 +157,10 @@ function App() {
       {onWelcomeSettings ? (
         <Suspense fallback={<SurfaceFallback label="加载设置…" />}>
           <SettingsSurface />
+        </Suspense>
+      ) : onWelcomeDynamic ? (
+        <Suspense fallback={<SurfaceFallback label="加载动态变量…" />}>
+          <DynamicVariablesSurface />
         </Suspense>
       ) : onWelcome ? (
         <WelcomeScreen />

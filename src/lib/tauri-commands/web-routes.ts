@@ -75,6 +75,17 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'GET',
     path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}`,
   },
+  // 懒加载层级树：展开一个节点只取它的直接孩子；给项目 id 则取那个项目的模块。
+  [COMMANDS.nodesChildren]: {
+    method: 'GET',
+    path: (a) =>
+      `/api/nodes/children${buildQuery({ parentId: a.parentId, projectId: a.projectId })}`,
+  },
+  // 筛选：跨全部项目搜接口，带它所在的路径。
+  [COMMANDS.nodesSearchPaths]: {
+    method: 'GET',
+    path: (a) => `/api/nodes/search${buildQuery({ q: a.query, limit: a.limit })}`,
+  },
   [COMMANDS.nodesCreate]: {
     method: 'POST',
     path: () => '/api/nodes',
@@ -228,26 +239,24 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
 
   // ----- dynamic variables -----
+  // 定义是全局的，故这组路由都不带项目参数：名字在整个工作区里唯一。
   // 列表只读缓存行，不取数；`/resolve` 才会真的发出站请求。
   [COMMANDS.dynamicVariablesList]: {
     method: 'GET',
-    path: (a) =>
-      `/api/dynamic-variables${buildQuery({
-        projectId: a.projectId,
-        environmentId: a.environmentId,
-      })}`,
+    path: () => '/api/dynamic-variables',
   },
   [COMMANDS.dynamicVariablesCreate]: {
     method: 'POST',
     path: () => '/api/dynamic-variables',
     // 显式投影：下面这些键就是全部线上契约，调用方多带的键不能跟着上车。
     body: (a) => ({
-      projectId: a.projectId,
       name: a.name,
       id: a.id ?? null,
       description: a.description ?? null,
       sourceEndpointId: a.sourceEndpointId ?? null,
       sourceInlineJson: a.sourceInlineJson ?? null,
+      sourceEnvironmentId: a.sourceEnvironmentId ?? null,
+      sourceBaseUrlDefinitionId: a.sourceBaseUrlDefinitionId ?? null,
       extractPath: a.extractPath ?? null,
       valueMode: a.valueMode ?? null,
       ttlSeconds: a.ttlSeconds ?? null,
@@ -269,9 +278,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'POST',
     path: () => '/api/dynamic-variables/resolve',
     body: (a) => ({
-      projectId: a.projectId,
       names: a.names,
-      environmentId: a.environmentId ?? null,
       force: a.force ?? false,
     }),
   },
@@ -280,7 +287,6 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: (a) => `/api/dynamic-variables/${encodeURIComponent(String(a.id))}/override`,
     body: (a) => ({
       value: a.value ?? null,
-      environmentId: a.environmentId ?? null,
       expiresAt: a.expiresAt ?? null,
       forever: a.forever ?? false,
     }),
@@ -288,10 +294,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.dynamicVariablesRefresh]: {
     method: 'POST',
     path: (a) => `/api/dynamic-variables/${encodeURIComponent(String(a.id))}/refresh`,
-    body: (a) => ({
-      projectId: a.projectId,
-      environmentId: a.environmentId ?? null,
-    }),
+    body: () => ({}),
   },
 
   // ----- request settings -----

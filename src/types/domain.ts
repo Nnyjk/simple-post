@@ -326,12 +326,13 @@ export type ValueMode = 'auto' | 'json' | 'text';
 /**
  * 一条动态变量的定义：变量名 → 数据源 → 抽取规则 → 缓存时长。
  *
+ * 作用域是全局的：定义不属于任何项目，任何项目的端点都能引用它，整个工作区里变量名唯一。
+ *
  * 数据源二选一：`sourceEndpointId` 引用树里的一个端点，`sourceInlineJson` 是一份内联请求。
  * 对应 `crates/simple-post-core/src/domain/dynamic.rs` 的 `DynamicVariable`。
  */
 export interface DynamicVariable {
   id: string;
-  projectId: string;
   name: string;
   description?: string | null;
   /** 数据源端点（`nodes.id`）。端点被删后这一项为 null，定义本身仍在。 */
@@ -340,6 +341,10 @@ export interface DynamicVariable {
   sourceEndpointName?: string | null;
   /** 内联请求（method / url / headers / body / auth 的 JSON 文本）。 */
   sourceInlineJson?: string | null;
+  /** 取数用的环境。空 = 数据源端点所属项目的第一个可用环境。 */
+  sourceEnvironmentId?: string | null;
+  /** 取数用的服务。空 = 数据源端点所属项目的默认服务。 */
+  sourceBaseUrlDefinitionId?: string | null;
   /** JSONPath 表达式。`$` 表示整段响应。 */
   extractPath: string;
   valueMode: ValueMode;
@@ -352,6 +357,14 @@ export interface DynamicVariable {
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
+}
+
+/** 哪些端点的请求里写了这个变量名。跨全部项目——定义是全局的。 */
+export interface DynamicVariableReference {
+  endpointId: string;
+  endpointName: string;
+  projectId: string;
+  projectName: string;
 }
 
 /** 当前值是从哪来的。 */
@@ -395,6 +408,24 @@ export interface DynamicVariableView extends DynamicVariable {
   expiresAt?: number | null;
   isOverride: boolean;
   error?: DynamicError | null;
+  /** 数据源端点所属的项目。内联请求没有项目。 */
+  sourceProjectId?: string | null;
+  sourceProjectName?: string | null;
+  /** 实际取数用的环境：定义点名的那个，或数据源项目里的第一个可用环境。 */
+  effectiveEnvironmentId?: string | null;
+  effectiveEnvironmentName?: string | null;
+  /** 实际取数用的服务：定义点名的那个，或数据源项目里的默认服务。 */
+  effectiveBaseUrlDefinitionId?: string | null;
+  effectiveBaseUrlDefinitionName?: string | null;
+  /** 哪些端点的请求里写了这个变量名。 */
+  referencedBy: DynamicVariableReference[];
+}
+
+/** 跨项目搜到的一条接口，带它所在的路径。 */
+export interface NodeSearchHit {
+  node: ResourceNode;
+  /** 从项目到直接父节点的名字，自上而下。 */
+  path: string[];
 }
 
 /** 一次解析的结果：值、状态与错误。 */

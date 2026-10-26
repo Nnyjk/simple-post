@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo, Suspense } from 'react';
 import { Settings2, ChevronDown, Circle, Cpu, Plus, Search, Loader2, Braces } from 'lucide-react';
 import { useAppStore, useActiveProject, useActiveEnvironment } from '@/stores/app-store';
-import { DYNAMIC_TAB_PREFIX } from '@/stores/store-types';
 import { useMcpStatus } from '@/lib/use-mcp-status';
 import { AppIcon } from '@/components/ui/app-icon';
 import { Button } from '@/components/ui/button';
@@ -35,7 +34,7 @@ export function TopBar() {
   const loaded = useAppStore((s) => s.loaded);
   const setEnvironmentActive = useAppStore((s) => s.setEnvironmentActive);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
-  const openTab = useAppStore((s) => s.openTab);
+  const openDynamicVariablesTab = useAppStore((s) => s.openDynamicVariablesTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
   const leaveProject = useAppStore((s) => s.leaveProject);
 
@@ -280,20 +279,18 @@ export function TopBar() {
         </div>
       )}
 
-      {/* 动态变量入口。项目级页面：标签 id 就是项目 id，故这里点的是当前项目。 */}
-      {activeProjectId !== '' && (
-        <Tooltip content="动态变量" side="bottom">
-          <Button
-            {...NO_DRAG}
-            variant="ghost"
-            size="icon"
-            onClick={() => openTab('dynamic-variables', `${DYNAMIC_TAB_PREFIX}${activeProjectId}`)}
-            aria-label="动态变量"
-          >
-            <Braces className="h-4 w-4" />
-          </Button>
-        </Tooltip>
-      )}
+      {/* 动态变量入口。定义是全局的，故这个入口一直都在——没有打开项目时也能用。 */}
+      <Tooltip content="动态变量" side="bottom">
+        <Button
+          {...NO_DRAG}
+          variant="ghost"
+          size="icon"
+          onClick={() => openDynamicVariablesTab()}
+          aria-label="动态变量"
+        >
+          <Braces className="h-4 w-4" />
+        </Button>
+      </Tooltip>
 
       {/* 搜索框 —— 点击打开命令面板。 */}
       <button
