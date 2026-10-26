@@ -11,6 +11,8 @@ import { listVars } from '@/lib/url';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
+import { parseSchemaView } from '@/lib/schema-view';
+import { SchemaTable } from './SchemaTable';
 
 interface Props {
   value: RequestBody;
@@ -214,6 +216,20 @@ function BodyContent({ value, onChange, validationError }: Props) {
   );
 }
 
+/** Schema 编辑区的两个视图。 */
+type SchemaViewMode = 'structure' | 'json';
+
+/**
+ * Schema 编辑区初次打开时显示哪个视图。
+ *
+ * 文本能解析成结构、且不是空的，就落在「结构」视图 —— 读定义靠的是那张表，
+ * 不是一坨 JSON。解析不出来或还没写，就落在「JSON」视图，因为那里才写得下去。
+ */
+function initialSchemaView(text: string): SchemaViewMode {
+  const parsed = parseSchemaView(text);
+  return parsed.ok && text.trim() ? 'structure' : 'json';
+}
+
 /**
  * 请求体的 Schema 编辑区 —— 文档里那份「参数长什么样」的定义。
  *
@@ -230,16 +246,39 @@ function BodyContent({ value, onChange, validationError }: Props) {
  * 折叠而非常驻：绝大多数接口只调试、不写文档，常驻一块编辑器只是噪音。已经写了
  * schema 的接口默认展开 —— 那份定义必须看得见，否则它就成了一个只有 MCP 侧能碰的
  * 隐藏字段。
+ *
+ * 为什么有两个视图
+ * --------------
+ * 「结构」视图把定义画成一张属性表，读参数时不必逐字读 JSON；「JSON」视图保留编辑器，
+ * 供用户继续改这段文本。两个视图读写的是同一份文本（`value.schema`），故它们不可能
+ * 各说各话：用户在 JSON 视图改完，结构视图随即按新文本重画。
  */
 function SchemaSection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const isDark = useIsDark();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<SchemaViewMode>(() => initialSchemaView(value));
+  // 用户是否自己选过视图。用户选过之后，视图就不再由文本的解析状态决定 —— 否则用户
+  // 正在 JSON 视图里改字，文本一改合法就被拽去结构视图，编辑器会从眼皮底下消失。
+  const userPickedView = useRef(false);
 
   // 已经有 schema 就展开：AI 通过 MCP 写进来的定义，用户必须看得见。
   useEffect(() => {
     if (value.trim()) setOpen(true);
   }, [value]);
+
+  const parsed = useMemo(() => parseSchemaView(value), [value]);
+
+  // 文本改动后重新决定视图。
+  useEffect(() => {
+    if (!parsed.ok) {
+      // 解析不出来时只有 JSON 视图有东西可改，视图落回 JSON。
+      setView('json');
+      return;
+    }
+    if (userPickedView.current) return;
+    setView(value.trim() ? 'structure' : 'json');
+  }, [parsed, value]);
 
   /** 这段文本是不是合法 JSON。空文本不算错 —— 那表示「没写」。 */
   const parseError = (text: string): string | null => {
@@ -282,48 +321,73 @@ function SchemaSection({ value, onChange }: { value: string; onChange: (v: strin
           <p className="mb-1.5 text-[11px] text-muted-foreground">
             上一块是这一次发送的载荷；这一块是这份接口的参数定义（JSON Schema），只用于文档与导出。
           </p>
-          <div className="relative">
-            <div className="overflow-hidden rounded-md border border-border">
-              <CodeMirror
-                value={value}
-                onChange={(v) => {
-                  onChange(v);
-                  // 改对了就消掉上一轮的结论；还没改对时保留它，直到下一次离开编辑器。
-                  const next = parseError(v);
-                  if (!next) setError(null);
-                }}
-                // 离开编辑器时判一次合法性。逐键判会让编辑到一半的 JSON 一直亮着错误，
-                // 那正是载荷编辑器不采用实时校验的原因。
-                onBlur={() => setError(parseError(value))}
-                extensions={[json()]}
-                theme={isDark ? oneDark : lightCodeTheme}
-                basicSetup={{
-                  lineNumbers: true,
-                  foldGutter: true,
-                  highlightActiveLine: true,
-                  highlightActiveLineGutter: true,
-                }}
-                height="200px"
-                className="text-sm"
-              />
-            </div>
-            {error && (
-              <div
-                role="status"
-                aria-live="polite"
-                className={cn(
-                  'absolute right-2 top-2 z-10 flex max-w-[min(420px,60%)] items-center gap-1.5',
-                  'rounded-full border px-2.5 py-1 text-[11px] shadow-md',
-                  'border-destructive bg-destructive text-destructive-foreground',
-                )}
-                title={error}
-                data-testid="schema-status-pill"
-              >
-                <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span className="truncate font-mono">Schema JSON 格式有误：{error}</span>
-              </div>
-            )}
+          <div className="mb-1.5 flex items-center gap-2">
+            <Tabs
+              variant="segmented"
+              items={[
+                { id: 'structure', label: '结构' },
+                { id: 'json', label: 'JSON' },
+              ]}
+              value={view}
+              onChange={(id) => {
+                userPickedView.current = true;
+                setView(id as SchemaViewMode);
+              }}
+            />
+            <span className="text-[10px] text-muted-foreground">
+              {view === 'structure' ? '按字段列出这份定义' : '直接编辑这段 JSON'}
+            </span>
           </div>
+
+          {view === 'structure' ? (
+            <SchemaTable result={parsed} />
+          ) : (
+            <div className="relative">
+              <div className="overflow-hidden rounded-md border border-border">
+                <CodeMirror
+                  value={value}
+                  onChange={(v) => {
+                    onChange(v);
+                    // 用户在这个视图里改字，视图就以这里为准：文本一改合法，结构视图
+                    // 也不该把编辑器从眼皮底下拽走。
+                    userPickedView.current = true;
+                    // 改对了就消掉上一轮的结论；还没改对时保留它，直到下一次离开编辑器。
+                    const next = parseError(v);
+                    if (!next) setError(null);
+                  }}
+                  // 离开编辑器时判一次合法性。逐键判会让编辑到一半的 JSON 一直亮着错误，
+                  // 那正是载荷编辑器不采用实时校验的原因。
+                  onBlur={() => setError(parseError(value))}
+                  extensions={[json()]}
+                  theme={isDark ? oneDark : lightCodeTheme}
+                  basicSetup={{
+                    lineNumbers: true,
+                    foldGutter: true,
+                    highlightActiveLine: true,
+                    highlightActiveLineGutter: true,
+                  }}
+                  height="200px"
+                  className="text-sm"
+                />
+              </div>
+              {error && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className={cn(
+                    'absolute right-2 top-2 z-10 flex max-w-[min(420px,60%)] items-center gap-1.5',
+                    'rounded-full border px-2.5 py-1 text-[11px] shadow-md',
+                    'border-destructive bg-destructive text-destructive-foreground',
+                  )}
+                  title={error}
+                  data-testid="schema-status-pill"
+                >
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="truncate font-mono">Schema JSON 格式有误：{error}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
