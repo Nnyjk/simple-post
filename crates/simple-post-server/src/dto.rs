@@ -62,6 +62,8 @@ pub struct CreateEndpointDetailOpts {
     pub tags: Option<Vec<String>>,
     pub headers: Option<Vec<KeyValue>>,
     pub params: Option<Vec<KeyValue>>,
+    /// URL 路径里的占位符与它们各自的值。它们替换进路径本身，不进查询串。
+    pub path_params: Option<Vec<KeyValue>>,
     pub docs: Option<String>,
     pub notes: Option<String>,
     /// 请求发出之前跑的那段脚本。缺席 = 没有脚本。
@@ -86,6 +88,7 @@ impl CreateEndpointDetailOpts {
             base_url_definition_id: self.base_url_definition_id,
             base_url_override: None,
             params: self.params.unwrap_or_default(),
+            path_params: self.path_params.unwrap_or_default(),
             headers: self.headers.unwrap_or_default(),
             body: self.body.unwrap_or_default(),
             auth: self.auth.unwrap_or_default(),

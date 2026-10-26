@@ -11,6 +11,7 @@ pub mod error;
 pub mod http_executor;
 pub mod mcp_metrics;
 pub mod oauth2;
+pub mod path_params;
 pub mod permissions;
 pub mod script;
 pub mod template;

@@ -241,7 +241,7 @@ fn endpoint_of(
         .or_else(|| text(operation, "operationId"))
         .unwrap_or_else(|| format!("{} {path}", verb.to_ascii_uppercase()));
 
-    let (params, headers) = parameters(ctx, view, item, operation, &key);
+    let (params, path_params, headers) = parameters(ctx, view, item, operation, &key);
     let body = request_body(ctx, view, operation, &key);
     let auth = auth_of(ctx, view, operation, &key);
 
@@ -252,6 +252,7 @@ fn endpoint_of(
         method,
         path,
         params,
+        path_params,
         headers,
         body,
         auth,

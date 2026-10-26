@@ -1,0 +1,248 @@
+{
+  "$comment": "路径占位符（`/users/{id}`）的识别范围与替换规则。Rust 侧 `crates/simple-post-core/src/path_params.rs` 与渲染进程侧 `src/lib/path-params.ts` 读同一份文件。两份实现各写一遍规则，只有共享样本能钉住它们没分叉。`values` 是「占位符名 → 取到的值」，`expectedUrl` 与 `expectedMissing` 是替换后的 URL 与取不到值的占位符名单。",
+  "cases": [
+    {
+      "name": "路径里的一对大括号就是一个占位符",
+      "url": "/users/{id}",
+      "placeholders": ["id"],
+      "values": [["id", "42"]],
+      "expectedUrl": "/users/42",
+      "expectedMissing": []
+    },
+    {
+      "name": "多个占位符按出现的先后排列",
+      "url": "/a/{x}/b/{y}/c",
+      "placeholders": ["x", "y"],
+      "values": [
+        ["x", "1"],
+        ["y", "2"]
+      ],
+      "expectedUrl": "/a/1/b/2/c",
+      "expectedMissing": []
+    },
+    {
+      "name": "同一个占位符出现两次只列一次",
+      "url": "/{a}/{a}",
+      "placeholders": ["a"],
+      "values": [["a", "1"]],
+      "expectedUrl": "/1/1",
+      "expectedMissing": []
+    },
+    {
+      "name": "双大括号是环境变量的写法，不是路径占位符",
+      "url": "/users/{{userId}}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{{userId}}",
+      "expectedMissing": []
+    },
+    {
+      "name": "双大括号与普通占位符混排时，只认后者",
+      "url": "/users/{{userId}}/x/{id}",
+      "placeholders": ["id"],
+      "values": [["id", "42"]],
+      "expectedUrl": "/users/{{userId}}/x/42",
+      "expectedMissing": []
+    },
+    {
+      "name": "查询串里的占位符不是路径占位符",
+      "url": "/users?filter={status}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users?filter={status}",
+      "expectedMissing": []
+    },
+    {
+      "name": "主机名里的占位符不是路径占位符",
+      "url": "https://{tenant}.example.com/users/{id}",
+      "placeholders": ["id"],
+      "values": [["id", "42"]],
+      "expectedUrl": "https://{tenant}.example.com/users/42",
+      "expectedMissing": []
+    },
+    {
+      "name": "只有主机名时没有路径段",
+      "url": "https://api.example.com",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "https://api.example.com",
+      "expectedMissing": []
+    },
+    {
+      "name": "主机名后面只有一个斜杠时也没有路径段",
+      "url": "https://api.example.com/",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "https://api.example.com/",
+      "expectedMissing": []
+    },
+    {
+      "name": "未闭合的大括号不算占位符",
+      "url": "/users/{id",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{id",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字为空不算占位符",
+      "url": "/users/{}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有空格不算占位符",
+      "url": "/users/{a b}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a b}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有制表符不算占位符",
+      "url": "/users/{a\tb}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a\tb}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有不换行空格不算占位符",
+      "url": "/users/{a\u00a0b}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a\u00a0b}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有 NEL 不算占位符",
+      "url": "/users/{a\u0085b}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a\u0085b}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有斜杠不算占位符",
+      "url": "/users/{a/b}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a/b}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有问号不算占位符（问号同时截断了路径段）",
+      "url": "/users/{a?b}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a?b}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有井号不算占位符（井号同时截断了路径段）",
+      "url": "/users/{a#b}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a#b}",
+      "expectedMissing": []
+    },
+    {
+      "name": "名字里有与号不算占位符",
+      "url": "/users/{a&b}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{a&b}",
+      "expectedMissing": []
+    },
+    {
+      "name": "U+FEFF 不在 Unicode 空白集合里，两侧都把它当名字的一部分",
+      "url": "/users/{a\ufeffb}",
+      "placeholders": ["a\ufeffb"],
+      "values": [["a\ufeffb", "1"]],
+      "expectedUrl": "/users/1",
+      "expectedMissing": []
+    },
+    {
+      "name": "值按路径段编码（空格是 %20）",
+      "url": "/files/{n}",
+      "placeholders": ["n"],
+      "values": [["n", "a b"]],
+      "expectedUrl": "/files/a%20b",
+      "expectedMissing": []
+    },
+    {
+      "name": "值按路径段编码（斜杠是 %2F）",
+      "url": "/files/{n}",
+      "placeholders": ["n"],
+      "values": [["n", "a/b"]],
+      "expectedUrl": "/files/a%2Fb",
+      "expectedMissing": []
+    },
+    {
+      "name": "值里的非 ASCII 按 UTF-8 百分号编码",
+      "url": "/files/{n}",
+      "placeholders": ["n"],
+      "values": [["n", "中"]],
+      "expectedUrl": "/files/%E4%B8%AD",
+      "expectedMissing": []
+    },
+    {
+      "name": "取不到值的占位符原样留着，并被报出来",
+      "url": "/users/{id}",
+      "placeholders": ["id"],
+      "values": [],
+      "expectedUrl": "/users/{id}",
+      "expectedMissing": ["id"]
+    },
+    {
+      "name": "空值按缺值处理",
+      "url": "/users/{id}",
+      "placeholders": ["id"],
+      "values": [["id", ""]],
+      "expectedUrl": "/users/{id}",
+      "expectedMissing": ["id"]
+    },
+    {
+      "name": "只有空白的值按缺值处理",
+      "url": "/users/{id}",
+      "placeholders": ["id"],
+      "values": [["id", " "]],
+      "expectedUrl": "/users/{id}",
+      "expectedMissing": ["id"]
+    },
+    {
+      "name": "查询串里的占位符原样不动",
+      "url": "/users/{id}?filter={status}",
+      "placeholders": ["id"],
+      "values": [["id", "42"]],
+      "expectedUrl": "/users/42?filter={status}",
+      "expectedMissing": []
+    },
+    {
+      "name": "双大括号标记在替换之后仍然存在",
+      "url": "/users/{{userId}}",
+      "placeholders": [],
+      "values": [],
+      "expectedUrl": "/users/{{userId}}",
+      "expectedMissing": []
+    },
+    {
+      "name": "完整 URL 的路径段照样被替换",
+      "url": "https://api.example.com/users/{id}",
+      "placeholders": ["id"],
+      "values": [["id", "42"]],
+      "expectedUrl": "https://api.example.com/users/42",
+      "expectedMissing": []
+    },
+    {
+      "name": "没有占位符的地址原样回来",
+      "url": "/users",
+      "placeholders": [],
+      "values": [["id", "42"]],
+      "expectedUrl": "/users",
+      "expectedMissing": []
+    }
+  ]
+}

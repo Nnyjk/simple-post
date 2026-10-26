@@ -43,6 +43,8 @@ struct Input {
     #[serde(default)]
     params: Vec<KeyValue>,
     #[serde(default)]
+    path_params: Vec<KeyValue>,
+    #[serde(default)]
     headers: Vec<KeyValue>,
     body: RequestBody,
     auth: AuthConfig,
@@ -65,6 +67,7 @@ fn detail(input: &Input) -> EndpointDetail {
         base_url_definition_id: None,
         base_url_override: Some(input.base_url.clone()),
         params: input.params.clone(),
+        path_params: input.path_params.clone(),
         headers: input.headers.clone(),
         body: input.body.clone(),
         auth: input.auth.clone(),

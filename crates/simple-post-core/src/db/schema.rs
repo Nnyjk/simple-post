@@ -68,6 +68,13 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "TEXT",
     ),
     ("endpoint_details", "test_script", "TEXT"),
+    (
+        // URL 路径里的占位符与它们各自的值。纯增量：旧行读回来是空列表，
+        // 语义等价于「这个接口没有路径参数」。
+        "endpoint_details",
+        "path_params_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    ),
 ];
 
 /// 为 [`ADDED_COLUMNS`] 中缺列的表补上该列。

@@ -157,6 +157,13 @@ pub struct EndpointDetail {
     pub base_url_override: Option<String>,
     #[serde(default)]
     pub params: Vec<KeyValue>,
+    /// URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
+    ///
+    /// 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，
+    /// 路径参数要被替换进路径本身。混在一份列表里，「这个参数进哪儿」就取决于
+    /// URL 文本，改一个占位符的名字会静默改变一个参数的归属。
+    #[serde(default)]
+    pub path_params: Vec<KeyValue>,
     #[serde(default)]
     pub headers: Vec<KeyValue>,
     #[serde(default)]
@@ -198,6 +205,9 @@ pub struct EndpointDetailPatch {
     pub base_url_override: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<Vec<KeyValue>>,
+    /// 缺席 = 不动，`null` = 清空，设值 = 写入。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_params: Option<Vec<KeyValue>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<Vec<KeyValue>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

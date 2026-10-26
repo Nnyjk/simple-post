@@ -26,14 +26,14 @@ fn param_of<'a>(doc: &'a Value, path: &str, verb: &str, name: &str) -> Option<&'
 }
 
 #[test]
-fn a_path_placeholder_is_declared_as_a_path_parameter() {
+fn a_path_parameter_is_declared_as_a_path_parameter() {
     // `/users/{id}` 的 `id` 写成 `in: query` 是最常见的错法：工具会认为 URL 里那个
     // `{id}` 无人认领，生成的客户端也就不会把它当成路径参数。
     let ep = IrEndpoint {
-        params: vec![KeyValue {
+        path_params: vec![KeyValue {
             id: "k".into(),
             key: "id".into(),
-            value: "{{id}}".into(),
+            value: "42".into(),
             enabled: true,
             description: None,
         }],
@@ -59,8 +59,72 @@ fn a_placeholder_without_a_matching_param_row_is_still_declared() {
     assert_eq!(p["in"], "path");
 }
 
+/// 路径模板里没有的占位符**不写进文档**。
+///
+/// 用户改过占位符的名字之后，存储里会留下旧的路径参数条目。OpenAPI 规定
+/// `in: path` 的参数名必须对应路径字段里的一个模板表达式，故写一个路径里没有的
+/// 参数会让文档不合规，Swagger Codegen 一类工具读它会报错或丢掉那个参数。
+#[test]
+fn a_path_parameter_without_a_placeholder_in_the_path_is_not_declared() {
+    let ep = IrEndpoint {
+        path_params: vec![
+            KeyValue {
+                id: "k1".into(),
+                key: "id".into(),
+                value: "42".into(),
+                enabled: true,
+                description: None,
+            },
+            KeyValue {
+                id: "k2".into(),
+                key: "oldName".into(),
+                value: "7".into(),
+                enabled: true,
+                description: None,
+            },
+        ],
+        ..ep("单个用户", HttpMethod::Get, "/users/{id}")
+    };
+    let doc = doc_of(&one_module("m", vec![ep]));
+
+    assert!(
+        param_of(&doc, "/users/{id}", "get", "id").is_some(),
+        "{{id}} 在路径里，它要被声明"
+    );
+    assert!(
+        param_of(&doc, "/users/{id}", "get", "oldName").is_none(),
+        "路径里没有的占位符不该被声明：{doc}"
+    );
+}
+
+/// 被丢掉的那个路径参数要**说出来** —— 不说是静默丢弃。
+#[test]
+fn a_path_parameter_without_a_placeholder_is_reported_as_dropped() {
+    let ep = IrEndpoint {
+        path_params: vec![KeyValue {
+            id: "k2".into(),
+            key: "oldName".into(),
+            value: "7".into(),
+            enabled: true,
+            description: None,
+        }],
+        ..ep("单个用户", HttpMethod::Get, "/users/{id}")
+    };
+    let out = to_document(&ex_with(ep), DocFormat::Json).expect("导出应成功");
+
+    let infos: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == crate::diagnostics::Severity::Info)
+        .collect();
+    assert_eq!(infos.len(), 1, "{:?}", out.diagnostics);
+    assert_eq!(infos[0].dropped.as_deref(), Some("路径参数 oldName"));
+}
+
 #[test]
 fn a_query_parameter_stays_a_query_parameter() {
+    // 查询参数与路径参数是**两份数据**：一个叫 `id` 的查询参数不因为路径里也有
+    // `{id}` 就变成路径参数 —— 否则它在请求里会同时出现在路径与查询串中。
     let ep = IrEndpoint {
         params: vec![
             KeyValue {
@@ -86,10 +150,14 @@ fn a_query_parameter_stays_a_query_parameter() {
         param_of(&doc, "/users/{id}", "get", "page").expect("page")["in"],
         "query"
     );
-    assert_eq!(
-        param_of(&doc, "/users/{id}", "get", "id").expect("id")["in"],
-        "path"
-    );
+    // 同名的查询参数仍是 query；路径里的 `{id}` 另外声明成 path —— 两者靠 `in` 区分。
+    let id_param = doc["paths"]["/users/{id}"]["get"]["parameters"]
+        .as_array()
+        .expect("parameters 数组");
+    let id_entries: Vec<&Value> = id_param.iter().filter(|p| p["name"] == "id").collect();
+    assert_eq!(id_entries.len(), 2, "查询参数与路径参数各一条");
+    assert!(id_entries.iter().any(|p| p["in"] == "query"));
+    assert!(id_entries.iter().any(|p| p["in"] == "path"));
 }
 
 #[test]

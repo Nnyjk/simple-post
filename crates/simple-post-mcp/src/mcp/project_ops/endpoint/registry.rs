@@ -106,6 +106,13 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
                     "description": "Query-string parameters.",
                     "items": { "$ref": "#/$defs/keyValue" }
                 },
+                "path_params": {
+                    "type": "array",
+                    "description": "Values for the path placeholders in `url` (e.g. the `id` of \"/api/users/{id}\"). \
+They are substituted into the path itself, not appended to the query string. The key of each entry must match a \
+placeholder name in `url`; a placeholder without an entry keeps its literal braces and blocks the send.",
+                    "items": { "$ref": "#/$defs/keyValue" }
+                },
                 "body_mode": {
                     "type": "string",
                     "enum": json!(BODY_MODE_VALUES),
@@ -202,6 +209,12 @@ body_content, never here."
                         "params": {
                             "type": "array",
                             "description": "Replaces the whole query-parameter list.",
+                            "items": { "$ref": "#/$defs/keyValue" }
+                        },
+                        "path_params": {
+                            "type": "array",
+                            "description": "Replaces the whole path-parameter list — the values for the `{placeholder}` \
+segments in `url`. They are substituted into the path itself, not appended to the query string.",
                             "items": { "$ref": "#/$defs/keyValue" }
                         },
                         "headers": {

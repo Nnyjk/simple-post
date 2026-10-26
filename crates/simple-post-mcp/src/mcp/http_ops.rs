@@ -42,6 +42,11 @@ struct RunRequestArgs {
     /// 查询参数。形状与请求头相同。
     #[serde(default)]
     params: Option<Value>,
+    /// URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。形状与请求头相同。
+    ///
+    /// 它们替换进路径本身，不像 `params` 那样进查询串。
+    #[serde(default)]
+    path_params: Option<Value>,
     #[serde(default)]
     body: Option<String>,
     /// body 的模式（`none` / `json` / `form` / `raw` / `multipart`）。
@@ -120,6 +125,19 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "required": ["key", "value"]
                         }
                     },
+                    "path_params": {
+                        "type": "array",
+                        "description": "Values for the path placeholders in `url` (e.g. the `id` of \"/api/users/{id}\"). They are substituted into the path itself, not appended to the query string.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
                     "body": {
                         "type": "string",
                         "description": "The request payload to send, as text. For body_mode=json this is a JSON instance with values (a value position may hold a {{var}} placeholder, replaced with that variable's value when the request is sent) — a JSON Schema (the documented parameter definition) belongs on the endpoint as body_schema, and is never sent."
@@ -174,7 +192,34 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "endpoint_id": { "type": "string" },
-                    "overrides": { "type": "object" },
+                    // 覆盖值要写进 schema：路径参数缺值时发送那侧会拦下请求并说
+                    // 「or pass overrides.pathParams when calling」，而调用方只能从
+                    // schema 里知道这个入参的名字。schema 不写它，工具就在骗人。
+                    "overrides": {
+                        "type": "object",
+                        "properties": {
+                            "url": { "type": "string" },
+                            "method": { "type": "string" },
+                            "headers": {
+                                "type": "array",
+                                "items": { "$ref": "#/$defs/keyValue" }
+                            },
+                            "params": {
+                                "type": "array",
+                                "items": { "$ref": "#/$defs/keyValue" }
+                            },
+                            "pathParams": {
+                                "type": "array",
+                                "description": "Values for the `{placeholder}` segments in the url. They are \
+substituted into the path itself, not appended to the query string. The key of each entry must match a \
+placeholder name; a placeholder without an entry keeps its literal braces and blocks the send.",
+                                "items": { "$ref": "#/$defs/keyValue" }
+                            },
+                            "baseUrlDefinitionId": { "type": "string" },
+                            "moduleId": { "type": "string" }
+                        },
+                        "additionalProperties": true
+                    },
                     "settings_override": { "type": "object" }
                 },
                 "required": ["endpoint_id"],
@@ -199,6 +244,7 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
     let headers = flatten_key_values(a.headers.as_ref(), "headers")?;
     let params = flatten_key_values(a.params.as_ref(), "params")?;
+    let path_params = flatten_key_values(a.path_params.as_ref(), "path_params")?;
     let auth = parse_auth(a.auth.as_ref())?;
     let content = a.body.clone().unwrap_or_default();
     let body_mode = parse_body_mode(a.body_mode.as_deref(), !content.is_empty())?;
@@ -238,6 +284,7 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
         base_url_definition_id: a.base_url_definition_id.clone(),
         base_url_override: None,
         params,
+        path_params,
         headers,
         body: RequestBody {
             mode: body_mode,
@@ -470,8 +517,19 @@ async fn send_resolved(
         body_mode,
         auth,
         missing_vars,
+        missing_path_params,
         ..
     } = resolved;
+
+    // 路径参数缺值就不发：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
+    // 含义不明的 404，而用户看不出是自己漏填了一个值。
+    if !missing_path_params.is_empty() {
+        return Err(AppError::Validation(format!(
+            "path parameter(s) have no value: {}. Set them on the endpoint's path \
+             parameters, or pass overrides.pathParams when calling.",
+            missing_path_params.join(", ")
+        )));
+    }
     let mut url = url;
     let mut headers = headers;
 

@@ -87,6 +87,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         base_url_definition_id: a.base_url_definition_id,
         base_url_override: a.base_url_override,
         params: coerce_key_values(a.params.unwrap_or_default()),
+        path_params: coerce_key_values(a.path_params.unwrap_or_default()),
         headers: coerce_key_values(a.headers.unwrap_or_default()),
         body,
         auth,
@@ -143,6 +144,8 @@ pub(super) async fn tool_endpoint_update(
         base_url_definition_id: patch_field::<String>(&patch_obj, "base_url_definition_id")?,
         base_url_override: patch_field::<String>(&patch_obj, "base_url_override")?,
         params: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "params")?
+            .map(coerce_key_values),
+        path_params: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "path_params")?
             .map(coerce_key_values),
         headers: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "headers")?
             .map(coerce_key_values),

@@ -7,7 +7,7 @@
 //! ## 排除什么，为什么
 //!
 //! 指纹回答的是「这是不是同一个接口」，不是「这两份配置逐字节一样吗」。故取
-//! **method + path + 启用的 query 参数 + body**：
+//! **method + path + 启用的 query 参数 + 启用的路径参数 + body**：
 //!
 //! - **name / description / tags** —— 改名不该造出副本；用户改个名再导一次应当被认出来。
 //! - **auth** —— 认证方案随环境变，同一个接口在两份文件里用不同的 auth 是常态。
@@ -36,6 +36,11 @@ pub struct RequestIdentity {
     pub path: String,
     /// 启用的 query 参数，按 `key=value` 排序，故书写顺序不影响身份。
     pub query: Vec<String>,
+    /// 启用的路径参数（URL 里那些 `{占位符}` 的值），同样按 `key=value` 排序。
+    ///
+    /// **值要算进去**，理由与 body 一样：同一组接口里 `/users/{id}` 配两个不同的 id
+    /// 是常见写法，排除值会把第二个判成重复而跳过——那是丢请求，不是去重。
+    pub path_params: Vec<String>,
     /// body 的身份片段：模式 + 原文。模式要算进去——`raw` 的 `{` 与 `json` 的 `{`
     /// 发出去是两种请求。
     pub body: String,
@@ -43,26 +48,39 @@ pub struct RequestIdentity {
 
 impl RequestIdentity {
     pub fn of_ir(ep: &IrEndpoint) -> Self {
-        Self::new(&ep.method, &ep.path, &ep.params, &ep.body)
+        Self::new(&ep.method, &ep.path, &ep.params, &ep.path_params, &ep.body)
     }
 
     /// 已落库的行。落库只补 id / `root_id` / 时间戳，不碰这几个字段，
     /// 故同一份请求在两侧算出同一个身份。
     pub fn of_detail(d: &EndpointDetail) -> Self {
-        Self::new(&d.method, &d.url, &d.params, &d.body)
+        Self::new(&d.method, &d.url, &d.params, &d.path_params, &d.body)
     }
 
-    fn new(method: &HttpMethod, path: &str, params: &[KeyValue], body: &RequestBody) -> Self {
+    fn new(
+        method: &HttpMethod,
+        path: &str,
+        params: &[KeyValue],
+        path_params: &[KeyValue],
+        body: &RequestBody,
+    ) -> Self {
         let mut query: Vec<String> = params
             .iter()
             .filter(|p| p.enabled)
             .map(|p| format!("{}={}", p.key, p.value))
             .collect();
         query.sort();
+        let mut path_values: Vec<String> = path_params
+            .iter()
+            .filter(|p| p.enabled)
+            .map(|p| format!("{}={}", p.key, p.value))
+            .collect();
+        path_values.sort();
         Self {
             method: method.as_str().to_ascii_uppercase(),
             path: normalize_path(path),
             query,
+            path_params: path_values,
             body: format!("{}:{}", body_mode_tag(&body.mode), body.content),
         }
     }

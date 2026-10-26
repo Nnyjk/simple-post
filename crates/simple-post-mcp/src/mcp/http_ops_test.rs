@@ -125,6 +125,7 @@ fn settings_override_extracts_values() {
         url: "/x".into(),
         headers: None,
         params: None,
+        path_params: None,
         body: None,
         body_mode: None,
         auth: None,

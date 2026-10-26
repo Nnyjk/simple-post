@@ -91,25 +91,6 @@ fn media_type_of(mode: &BodyMode) -> Option<&'static str> {
     }
 }
 
-/// 路径里的 `{占位符}`，按出现顺序，不重复。
-fn path_placeholders(path: &str) -> Vec<&str> {
-    let mut out: Vec<&str> = Vec::new();
-    let mut i = 0;
-    while let Some(open) = path[i..].find('{') {
-        let start = i + open;
-        // 没闭合的 `{` 不是模板，原样留给调用方当普通字符。
-        let Some(len) = path[start..].find('}') else {
-            break;
-        };
-        let name = &path[start + 1..start + len];
-        if !name.is_empty() && !out.contains(&name) {
-            out.push(name);
-        }
-        i = start + len + 1;
-    }
-    out
-}
-
 /// `动词 + 路径` → 一个合法的 `operationId`。
 ///
 /// 路径分隔符换成**双**下划线，其余非法字符换成单下划线：`operationId` 在多数代码
@@ -138,10 +119,10 @@ fn operation_id(verb: &str, path: &str) -> String {
 /// OpenAPI 路径模板写 `{name}`，Postman 模板写 `{{name}}`。两者讲的是同一件事
 /// ——「这一段替换成变量」，故直接换写，不是猜。
 ///
-/// **不做换写会怎样**：`path_placeholders` 取第一个 `{` 到其后第一个 `}` 之间，于是
-/// `/users/{{userId}}` 得出 `{userId`（多带一个左括号），产出一份「参数名对应不上任何
-/// 模板变量」的文档；而 `paths` 键里留着双花括号，这份文档过不了它自己的
-/// `openapiv3` / Redocly 校验。
+/// **不做换写会怎样**：`simple_post_core::path_params::placeholders` 取第一个 `{` 到
+/// 其后第一个 `}` 之间，于是 `/users/{{userId}}` 得出 `{userId`（多带一个左括号），产出
+/// 一份「参数名对应不上任何模板变量」的文档；而 `paths` 键里留着双花括号，这份文档过不了
+/// 它自己的 `openapiv3` / Redocly 校验。
 ///
 /// 配不上 `}}` 的原样留着，交给 [`path_key_is_expressible`] 去拒绝。
 fn normalize_path_template(path: &str) -> String {
@@ -178,11 +159,12 @@ fn path_key_is_expressible(path: &str) -> bool {
 ///
 /// **路径模板里的每个 `{占位符}` 都必须声明成 `in: path`**，否则 OpenAPI 工具读不出
 /// 路径参数（Redocly 的 `path-parameters-defined` 会报错，代码生成器会漏掉那个参数）。
-/// 两件事要一起做：
+/// 三件事要一起做：
 ///
-/// 1. 参数名命中占位符的，`in` 写 `path` 而不是 `query` —— 把 `/users/{id}` 的 `id`
-///    写成 query 参数是最常见的错法，工具会认为 URL 里那个 `{id}` 无人认领。
-/// 2. 占位符没有对应参数行的，**照样声明**。用户删了那一行参数但 URL 里占位符还在；
+/// 1. 端点自己的**路径参数**（`IrEndpoint::path_params`）写成 `in: path`。
+/// 2. 端点的**查询参数**（`IrEndpoint::params`）一律写成 `in: query` —— 两份数据
+///    各有各的位置，不靠「参数名是否与占位符相同」来猜一个参数进哪儿。
+/// 3. 占位符没有对应路径参数行的，**照样声明**。用户删了那一行但 URL 里占位符还在；
 ///    那时缺声明的是这份文档，不是用户的配置。
 ///
 /// **请求头也在这里**，落成 `in: header` 的参数条目。OpenAPI 没有独立的「请求头」
@@ -198,26 +180,49 @@ fn parameters(
     pointer: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Vec<Value> {
-    let placeholders = path_placeholders(path);
+    let placeholders = simple_post_core::path_params::placeholders(path);
     let mut out: Vec<Value> = Vec::new();
 
     for p in ep.params.iter().filter(|p| p.enabled) {
         // 值的实际形态不猜：启用即视为必填，schema 一律按 string 写。
-        let location = if placeholders.contains(&p.key.as_str()) {
-            "path"
-        } else {
-            "query"
-        };
         out.push(json!({
             "name": p.key,
-            "in": location,
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+        }));
+    }
+
+    for p in ep.path_params.iter().filter(|p| p.enabled) {
+        // 只写路径模板里真的存在的占位符。OpenAPI 规定 `in: path` 的参数名必须对应
+        // 路径字段里的一个模板表达式，故写一个路径里没有的参数会让文档不合规，
+        // Swagger Codegen 一类工具读它会报错或丢掉那个参数。
+        //
+        // 路径里没人认领的占位符由下面那段补声明，故这里不写「模板里没有」的条目：
+        // 那是用户改过占位符名字之后留下的旧条目，它不进请求。
+        if !placeholders.contains(&p.key) {
+            diagnostics.push(
+                Diagnostic::info(
+                    pointer,
+                    format!(
+                        "路径参数 {} 在当前路径里没有对应的占位符，没有写进文档",
+                        p.key
+                    ),
+                )
+                .dropping(format!("路径参数 {}", p.key)),
+            );
+            continue;
+        }
+        out.push(json!({
+            "name": p.key,
+            "in": "path",
             "required": true,
             "schema": { "type": "string" },
         }));
     }
 
     for name in &placeholders {
-        if ep.params.iter().any(|p| p.enabled && &p.key == name) {
+        if ep.path_params.iter().any(|p| p.enabled && &p.key == name) {
             continue;
         }
         out.push(json!({

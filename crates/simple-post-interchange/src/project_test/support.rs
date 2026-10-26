@@ -80,6 +80,7 @@ fn rich_detail(node_id: String, def_id: &str) -> EndpointDetail {
         environment_id: Some("e".into()),
         base_url_definition_id: Some(def_id.into()),
         base_url_override: None,
+        path_params: vec![],
         params: vec![KeyValue {
             id: "p1".into(),
             key: "dry".into(),

@@ -181,6 +181,7 @@ fn the_set_recognises_an_already_stored_endpoint() {
         method: HttpMethod::Post,
         url: "/users".into(),
         params: vec![],
+        path_params: vec![],
         headers: vec![kv("X-Trace", "abc")],
         // 与 `fully_decorated_ep` 的 body 一致：落库不改 body，两侧才算出同一个身份。
         body: RequestBody {

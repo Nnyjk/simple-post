@@ -21,6 +21,12 @@ pub(super) struct EndpointCreateArgs {
     pub headers: Option<Vec<KeyValueInput>>,
     #[serde(default)]
     pub params: Option<Vec<KeyValueInput>>,
+    /// URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
+    ///
+    /// 它们替换进路径本身，不像 `params` 那样进查询串；占位符的名字要与 `url` 里
+    /// 那一段对上。
+    #[serde(default)]
+    pub path_params: Option<Vec<KeyValueInput>>,
     #[serde(default)]
     pub body_mode: Option<String>,
     #[serde(default)]

@@ -102,6 +102,7 @@ fn seed(st: &AppState, base_url: &str) -> String {
         base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
+        path_params: vec![],
         headers: vec![],
         body: RequestBody {
             mode: simple_post_core::domain::BodyMode::None,

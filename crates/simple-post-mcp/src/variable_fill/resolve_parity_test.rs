@@ -38,12 +38,15 @@ struct Input {
     #[serde(default)]
     params: Vec<KeyValue>,
     #[serde(default)]
+    path_params: Vec<KeyValue>,
+    #[serde(default)]
     headers: Vec<KeyValue>,
     body: RequestBody,
     auth: AuthConfig,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Expected {
     url: String,
     headers: Vec<(String, String)>,
@@ -53,6 +56,9 @@ struct Expected {
     /// 「哪些变量没解析出来」。
     #[serde(default)]
     missing_vars: Vec<String>,
+    /// URL 路径里没取到值的占位符名。比的是**集合**而非顺序，与未解析变量同一条纪律。
+    #[serde(default)]
+    missing_path_params: Vec<String>,
 }
 
 fn fixture() -> Fixture {
@@ -70,6 +76,7 @@ fn detail(input: &Input) -> EndpointDetail {
         base_url_definition_id: None,
         base_url_override: Some(input.base_url.clone()),
         params: input.params.clone(),
+        path_params: input.path_params.clone(),
         headers: input.headers.clone(),
         body: input.body.clone(),
         auth: input.auth.clone(),
@@ -142,6 +149,12 @@ fn every_parity_case_resolves_the_same_way() {
         got.sort();
         want.sort();
         assert_eq!(got, want, "{}: 未解析的变量", case.name);
+
+        let mut got_params = resolved.missing_path_params.clone();
+        let mut want_params = case.expected.missing_path_params.clone();
+        got_params.sort();
+        want_params.sort();
+        assert_eq!(got_params, want_params, "{}: 缺值的路径参数", case.name);
     }
 }
 

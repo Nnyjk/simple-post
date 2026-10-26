@@ -15,6 +15,8 @@ pub struct EndpointOverrides {
     pub method: Option<HttpMethod>,
     pub headers: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub params: Option<Vec<simple_post_core::domain::KeyValue>>,
+    /// URL 路径里的占位符与它们各自的值。它们替换进路径本身，不进查询串。
+    pub path_params: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub body: Option<RequestBody>,
     /// 覆盖端点上已存的 base URL 定义，改用这个去解析。
     ///
@@ -55,4 +57,10 @@ pub struct ResolvedEndpoint {
     pub body_mode: BodyMode,
     pub auth: AuthConfig,
     pub missing_vars: Vec<String>,
+    /// URL 路径里没取到值的占位符名（`/users/{id}` 的 `id`）。
+    ///
+    /// 与 `missing_vars` 是两回事：那边是「变量池里没有这个变量」，这边是
+    /// 「端点自己的路径参数没有填值」。发送方按这份清单拦下请求——路径参数
+    /// 按 OpenAPI 惯例是必填的，缺值发出去只会换一个含义不明的 404。
+    pub missing_path_params: Vec<String>,
 }

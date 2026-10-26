@@ -102,6 +102,7 @@ fn test_state(base_url: &str) -> Arc<AppState> {
                 base_url_definition_id: None,
                 base_url_override: Some(base_url.to_string()),
                 params: vec![],
+                path_params: vec![],
                 headers: vec![],
                 body: simple_post_core::domain::RequestBody {
                     mode: simple_post_core::domain::BodyMode::Json,
