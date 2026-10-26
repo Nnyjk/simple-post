@@ -88,7 +88,7 @@ Two more rules the sequence obeys: the **test phase sees the pre-request phase's
 **The fetch context comes from the definition, not from the consumer.** `core::dynamic::source_context` derives it, so the same `{{name}}` resolves to the same value in every project:
 
 - environment: the one the definition names → otherwise the **first available environment** of the source endpoint's project (ordered by name, so the dropdown's first entry is the one that takes effect);
-- service: the one the definition names → otherwise the service the source endpoint itself binds → otherwise the project's ★ (default service);
+- service: the one the definition names → otherwise the project's ★ (default service). The service the source endpoint itself binds is **not** in this chain — a definition that names no service always fetches through the project's ★;
 - module: the module the source endpoint sits in, because the base URL lives in the (environment × service × module) cell.
 
 `detail.base_url_override` still wins over all three. The form stores `null` for "follow the default" rather than freezing today's value, so renaming a project's first environment does not silently repoint every definition that uses it.
