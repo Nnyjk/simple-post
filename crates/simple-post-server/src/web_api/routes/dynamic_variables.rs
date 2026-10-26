@@ -2,11 +2,14 @@
 //!
 //! 七条路由：列表、新建、改、删、解析、写覆盖值、强制重取。逻辑全部在
 //! `crate::dynamic_api`，故 Tauri 命令与这些路由走同一套实现。
+//!
+//! 定义是**全局**的，故这些路由都不带项目参数：名字在整个工作区里唯一，任何项目的
+//! 端点都能引用同一条定义。
 
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::StatusCode,
     Json,
 };
@@ -15,21 +18,17 @@ use serde_json::Value;
 use crate::domain::DynamicVariablePatch;
 
 use super::super::dto::{
-    DynamicVariableCreateBody, DynamicVariableListQuery, DynamicVariableOverrideBody,
-    DynamicVariableRefreshBody, DynamicVariableResolveBody,
+    DynamicVariableCreateBody, DynamicVariableOverrideBody, DynamicVariableResolveBody,
 };
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
-/// `GET /api/dynamic-variables?projectId=` —— 列出定义，带当前值与缓存状态。
+/// `GET /api/dynamic-variables` —— 列出定义，带当前值与缓存状态。
 ///
 /// **不取数**：读的是缓存行。取数会发出站请求，而这是一次纯读。
 pub(crate) async fn dynamic_variables_list(
     State(s): State<Arc<WebState>>,
-    Query(query): Query<DynamicVariableListQuery>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let rows =
-        crate::dynamic_api::list(&s.pool, &query.project_id, query.environment_id.as_deref())
-            .map_err(map_app_error)?;
+    let rows = crate::dynamic_api::list(&s.pool, true).map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&rows).unwrap_or(Value::Null)))
 }
 
@@ -44,6 +43,8 @@ pub(crate) async fn dynamic_variables_create(
         description: body.description,
         source_endpoint_id: body.source_endpoint_id,
         source_inline_json: body.source_inline_json,
+        source_environment_id: body.source_environment_id,
+        source_base_url_definition_id: body.source_base_url_definition_id,
         extract_path: body.extract_path,
         value_mode: body.value_mode,
         ttl_seconds: body.ttl_seconds,
@@ -51,8 +52,7 @@ pub(crate) async fn dynamic_variables_create(
         enabled: body.enabled,
         sort_order: body.sort_order,
     };
-    let stored =
-        crate::dynamic_api::create(&s.pool, &body.project_id, opts).map_err(map_app_error)?;
+    let stored = crate::dynamic_api::create(&s.pool, opts).map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
         Json(serde_json::to_value(&stored).unwrap_or(Value::Null)),
@@ -85,15 +85,9 @@ pub(crate) async fn dynamic_variables_resolve(
     State(s): State<Arc<WebState>>,
     Json(body): Json<DynamicVariableResolveBody>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let resolution = crate::dynamic_api::resolve(
-        &s.pool,
-        &body.project_id,
-        body.environment_id.as_deref(),
-        &body.names,
-        body.force.unwrap_or(false),
-    )
-    .await
-    .map_err(map_app_error)?;
+    let resolution = crate::dynamic_api::resolve(&s.pool, &body.names, body.force.unwrap_or(false))
+        .await
+        .map_err(map_app_error)?;
     Ok(Json(
         serde_json::to_value(&resolution).unwrap_or(Value::Null),
     ))
@@ -108,14 +102,12 @@ pub(crate) async fn dynamic_variables_set_override(
     crate::dynamic_api::set_override(
         &s.pool,
         &id,
-        body.environment_id.as_deref(),
         body.value,
         body.expires_at,
         body.forever.unwrap_or(false),
     )
     .map_err(map_app_error)?;
-    let view = crate::dynamic_api::get(&s.pool, &id, body.environment_id.as_deref())
-        .map_err(map_app_error)?;
+    let view = crate::dynamic_api::get(&s.pool, &id).map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&view).unwrap_or(Value::Null)))
 }
 
@@ -123,16 +115,10 @@ pub(crate) async fn dynamic_variables_set_override(
 pub(crate) async fn dynamic_variables_refresh(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
-    Json(body): Json<DynamicVariableRefreshBody>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let status = crate::dynamic_api::refresh(
-        &s.pool,
-        &body.project_id,
-        &id,
-        body.environment_id.as_deref(),
-    )
-    .await
-    .map_err(map_app_error)?;
+    let status = crate::dynamic_api::refresh(&s.pool, &id)
+        .await
+        .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&status).unwrap_or(Value::Null)))
 }
 

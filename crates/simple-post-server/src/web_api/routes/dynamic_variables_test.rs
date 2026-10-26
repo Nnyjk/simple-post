@@ -101,7 +101,7 @@ async fn creating_and_listing_a_definition_round_trips() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns", "extractPath": "$.list", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "name": "sns", "extractPath": "$.list", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     assert_eq!(created.status(), 201);
@@ -109,7 +109,7 @@ async fn creating_and_listing_a_definition_round_trips() {
     assert_eq!(created_body["name"], "sns");
     let id = created_body["id"].as_str().expect("id").to_string();
 
-    let listed = get_json(addr, "/api/dynamic-variables?projectId=p1").await;
+    let listed = get_json(addr, "/api/dynamic-variables").await;
     assert_eq!(listed.status(), 200);
     let listed_body: serde_json::Value = listed.json().await.expect("json body");
     let items = listed_body.as_array().expect("数组");
@@ -132,7 +132,7 @@ async fn the_literal_resolve_route_is_not_swallowed_by_the_id_route() {
     let resolved = post_json(
         addr,
         "/api/dynamic-variables/resolve",
-        serde_json::json!({ "projectId": "p1", "names": ["sns"] }),
+        serde_json::json!({ "names": ["sns"] }),
     )
     .await;
     assert_eq!(resolved.status(), 200);
@@ -149,7 +149,7 @@ async fn an_override_is_written_and_cleared() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     let created_body: serde_json::Value = created.json().await.expect("json body");
@@ -189,7 +189,7 @@ async fn a_patch_changes_the_definition_and_a_delete_removes_it() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     let created_body: serde_json::Value = created.json().await.expect("json body");
@@ -213,7 +213,7 @@ async fn a_patch_changes_the_definition_and_a_delete_removes_it() {
         .expect("request completes");
     assert_eq!(deleted.status(), 204);
 
-    let listed = get_json(addr, "/api/dynamic-variables?projectId=p1").await;
+    let listed = get_json(addr, "/api/dynamic-variables").await;
     let listed_body: serde_json::Value = listed.json().await.expect("json body");
     assert!(listed_body.as_array().expect("数组").is_empty());
 }
@@ -226,7 +226,7 @@ async fn an_illegal_name_is_a_validation_error() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "projectId": "p1", "name": "sns-list" }),
+        serde_json::json!({ "name": "sns-list" }),
     )
     .await;
     assert_eq!(created.status(), 400);

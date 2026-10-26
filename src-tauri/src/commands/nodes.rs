@@ -55,6 +55,39 @@ pub fn nodes_get(state: State<DbPool>, id: String) -> Result<ResourceNode, AppEr
     crate::db::with_conn(&state, |c| crate::db::nodes::get(c, &id))
 }
 
+/// 一个节点的直接子节点。懒加载层级树的一节：展开时才取，不预先拉整棵树。
+///
+/// `parent_id` 给一个节点就取它的孩子；`project_id` 给一个项目就取那个项目的模块
+/// （模块的父是项目，而项目不是节点，故不能按 `parent_id` 找）。
+#[tauri::command]
+pub fn nodes_children(
+    state: State<DbPool>,
+    parent_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Vec<ResourceNode>, AppError> {
+    crate::db::with_conn(&state, |c| match (parent_id, project_id) {
+        (Some(parent), _) => crate::db::nodes::list_children(c, &parent, None),
+        (None, Some(project)) => {
+            crate::db::nodes::list_by_root_and_type(c, &project, ResourceNodeType::Module)
+        }
+        (None, None) => Err(AppError::Validation(
+            "parentId or projectId is required".into(),
+        )),
+    })
+}
+
+/// 跨全部项目搜接口，带它所在的路径（项目 / 模块 / 集合…）。
+#[tauri::command]
+pub fn nodes_search_paths(
+    state: State<DbPool>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<crate::db::nodes::SearchHit>, AppError> {
+    crate::db::with_conn(&state, |c| {
+        crate::db::nodes::search_paths(c, &query, limit.unwrap_or(50))
+    })
+}
+
 /// 建节点。endpoint 一次调用带上两半（结构节点 + 请求配置）：两者写在同一个事务里，
 /// 而任何一半可能缺失的树是打不开的树。
 ///

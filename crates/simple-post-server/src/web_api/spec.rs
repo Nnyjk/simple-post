@@ -35,6 +35,10 @@ pub struct RouteSpec {
 
 /// 公共 HTTP API 的唯一事实来源。**手工维护**——任何应进入 v1 稳定契约的新
 /// 端点都必须在此登记。缺席者按 `internal` 处理，不进 OpenAPI。
+///
+/// 已知按 `internal` 处理的：`GET /api/nodes/children` 与 `GET /api/nodes/search`
+/// （懒加载层级树的两节，供动态变量的数据源选择器跨项目挑接口）。它们的形状跟着那个
+/// 界面的需求走，还不承诺 v1 稳定。
 pub fn public_route_specs() -> Vec<RouteSpec> {
     vec![
         // ---- health -----------------------------------------------------
@@ -191,11 +195,13 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         // 一条声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里写
         // `{{sns}}`，发送时程序取数、抽取、缓存并替换。
         //
+        // 定义是**全局**的：不属于任何项目，任何项目的端点都能引用同一条定义。
+        //
         // 列表只读缓存行，**不取数**；`/resolve` 才会真的发出站请求。
         RouteSpec {
             method: "GET",
             path: "/api/dynamic-variables",
-            summary: "List a project's dynamic variables with their current value and \
+            summary: "List the workspace's dynamic variables with their current value and \
                       cache state; reads the cache only and never fetches",
             stability: "public",
             request: None,
@@ -204,7 +210,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/dynamic-variables",
-            summary: "Create a dynamic variable in a project",
+            summary: "Create a dynamic variable (definitions are global: any project's \
+                      endpoint may use them)",
             stability: "public",
             request: Some("DynamicVariableCreate"),
             response: Some("DynamicVariable"),
@@ -248,7 +255,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             path: "/api/dynamic-variables/{id}/refresh",
             summary: "Force a dynamic variable to be fetched again",
             stability: "public",
-            request: Some("DynamicVariableRefresh"),
+            // 刷新不需要请求体：取数上下文由定义自己决定。
+            request: None,
             response: Some("DynamicValueStatus"),
         },
         // ---- baseUrl definitions ----------------------------------------
