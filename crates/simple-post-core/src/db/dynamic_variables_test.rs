@@ -474,6 +474,29 @@ fn clearing_both_sources_explicitly_is_still_refused() {
 }
 
 #[test]
+fn a_database_failure_is_not_reported_as_a_definition_without_a_project() {
+    // MCP 工具靠 `source_project_id_of` 的返回值决定要不要过按项目的权限门，故「数据库
+    // 坏了」不能被读成「这条定义没有数据源项目」——那等于把门关掉。
+    let (pool, dir) = fresh_pool();
+    let mut def = definition("d1", "sns");
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+
+    // 删掉 nodes 表，制造一次真正的数据库错误。
+    {
+        let conn = rusqlite::Connection::open(dir.join("store.db")).expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = OFF; DROP TABLE nodes;")
+            .expect("drop nodes");
+    }
+
+    let mut conn = rusqlite::Connection::open(dir.join("store.db")).expect("open");
+    let err = source_project_id_of(&mut conn, "d1")
+        .expect_err("数据库出错不该被读成「这条定义没有数据源项目」");
+    assert!(matches!(err, crate::error::AppError::Sqlite(_)), "{err:?}");
+}
+
+#[test]
 fn a_duplicate_id_is_reported_as_an_id_conflict() {
     let (pool, _dir) = fresh_pool();
     db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");

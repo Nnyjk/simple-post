@@ -82,10 +82,14 @@ pub fn source_project_id_of(conn: &mut Connection, id: &str) -> Result<Option<St
     let Some(endpoint_id) = endpoint_id else {
         return Ok(None);
     };
+    // 端点已被删：外键把这一列置成了 NULL，故这里拿不到项目。
+    //
+    // 别的错误（数据库或连接池出问题）不能读成「没有项目」——调用方靠这个返回值决定
+    // 要不要过按项目的权限门，读错等于把门关掉。
     match super::nodes::root_id_of(conn, &endpoint_id) {
         Ok(root) => Ok(Some(root)),
-        // 端点已被删：外键把这一列置成了 NULL，故这里拿不到项目。
-        Err(_) => Ok(None),
+        Err(AppError::NotFound(_)) => Ok(None),
+        Err(other) => Err(other),
     }
 }
 
@@ -209,14 +213,11 @@ pub fn update(
     }
 
     // 数据源仍须二选一，但**只在 patch 真的动了来源字段时**才校验。
-    //
-    // 「两个来源字段都为空」是「数据源接口被删了」（外键把它置成 NULL）——那是一种
-    // 真实状态，不是数据写坏了。这种定义仍应允许改别的字段：改个名、改个描述、停用
-    // 它。若在这里也校验，用户点一次「只改名」就会收到「必须有一个数据源」，而真正
-    // 的原因（接口被删了）被这句话盖住了。
-    //
-    // patch 的三态：缺席 = 不动，`null` = 清除，有值 = 写入。
+    // 「两个来源字段都为空」是「数据源接口被删了」（外键把它置成 NULL），那是一种真实状态，
+    // 故这种定义仍应允许改别的字段——否则改个名就会收到一句盖住真因的报错。
     let touches_source = patch.source_endpoint_id.is_some() || patch.source_inline_json.is_some();
+
+    // patch 的三态：缺席 = 不动，`null` = 清除，有值 = 写入。
     let next_endpoint_id = match &patch.source_endpoint_id {
         None => current.source_endpoint_id.clone(),
         Some(value) => value.clone(),
