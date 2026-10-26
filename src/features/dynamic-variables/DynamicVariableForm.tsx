@@ -39,7 +39,6 @@ export function DynamicVariableForm({
 }: DynamicVariableFormProps) {
   const projects = useAppStore((s) => s.projects);
   const environments = useAppStore((s) => s.environments);
-  const endpointDetails = useAppStore((s) => s.endpointDetails);
   const createDynamicVariable = useAppStore((s) => s.createDynamicVariable);
   const updateDynamicVariable = useAppStore((s) => s.updateDynamicVariable);
   // 保存失败的原因。表单就地显示它，免得用户只看到表单凭空消失。
@@ -91,9 +90,9 @@ export function DynamicVariableForm({
     [environments, sourceProjectId],
   );
   const firstEnvironment = projectEnvironments[0];
-  // 服务的默认值：数据源接口自己绑的服务优先，它没绑就用项目的默认服务（★）。
-  const endpointOwnService = endpointDetails[sourceEndpointId]?.baseUrlDefinitionId ?? null;
-  const defaultServiceId = endpointOwnService ?? sourceProject?.defaultBaseUrlDefinitionId ?? null;
+  // 服务的默认值：数据源接口所属项目的默认服务（★）。数据源接口自己绑的服务不在
+  // 这条链上——定义没点名服务时一律走项目的 ★。
+  const defaultServiceId = sourceProject?.defaultBaseUrlDefinitionId ?? null;
   const defaultServiceName =
     sourceProject?.baseUrlDefinitions.find((d) => d.id === defaultServiceId)?.name ?? null;
 
@@ -256,7 +255,7 @@ export function DynamicVariableForm({
                 ))}
               </select>
               <span className="text-[11px] text-muted-foreground">
-                决定取数时用哪个服务。默认取数据源接口自己绑的服务，它没绑就用项目的 ★。
+                决定取数时用哪个服务。默认取数据源接口所属项目的默认服务。
               </span>
             </label>
           </>
