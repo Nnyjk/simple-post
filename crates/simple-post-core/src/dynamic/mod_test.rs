@@ -163,12 +163,13 @@ fn a_disabled_parameter_is_not_referenced() {
 fn definition(ttl_seconds: i64, stale_fallback: bool) -> DynamicVariable {
     DynamicVariable {
         id: "d1".into(),
-        project_id: "p1".into(),
         name: "sns".into(),
         description: None,
         source_endpoint_id: None,
         source_endpoint_name: None,
         source_inline_json: Some(INLINE_SOURCE.to_string()),
+        source_environment_id: None,
+        source_base_url_definition_id: None,
         extract_path: "$".into(),
         value_mode: ValueMode::Auto,
         ttl_seconds,
@@ -388,6 +389,7 @@ impl SourceFetcher for CountingFetcher {
         &'a self,
         def: &'a DynamicVariable,
         _ctx: &'a ResolveContext,
+        _source: &'a SourceContext,
     ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -433,7 +435,7 @@ fn seeded_pool() -> (db::DbPool, std::path::PathBuf) {
                 updated_at: 1,
             },
         )?;
-        db::dynamic_variables::create(c, &definition(60, false), "p1")?;
+        db::dynamic_variables::create(c, &definition(60, false))?;
         Ok(())
     })
     .expect("seed");
@@ -441,23 +443,7 @@ fn seeded_pool() -> (db::DbPool, std::path::PathBuf) {
 }
 
 fn context(pool: &db::DbPool) -> ResolveContext {
-    ResolveContext {
-        pool: pool.clone(),
-        project_id: "p1".into(),
-        environment_id: Some("env1".into()),
-        env: None,
-        project: Project {
-            id: "p1".into(),
-            name: "First".into(),
-            description: None,
-            base_url: None,
-            base_url_definitions: vec![],
-            default_base_url_definition_id: None,
-            color: "#000000".into(),
-            created_at: 1,
-            updated_at: 1,
-        },
-    }
+    ResolveContext { pool: pool.clone() }
 }
 
 #[tokio::test]
@@ -580,8 +566,11 @@ async fn a_value_that_is_too_large_is_not_written_to_the_cache() {
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::TooLarge);
 
-    let cached =
-        db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", "env1")).expect("read");
+    // 内联数据源没有环境，缓存键的环境段就是空串。
+    let cached = db::with_conn(&pool, |c| {
+        db::dynamic_variable_cache::get(c, "d1", crate::db::dynamic_variable_cache::NO_ENVIRONMENT)
+    })
+    .expect("read");
     assert!(cached.is_none());
 }
 

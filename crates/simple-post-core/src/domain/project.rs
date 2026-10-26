@@ -38,6 +38,24 @@ pub struct Project {
     pub updated_at: i64,
 }
 
+impl Project {
+    /// 空壳。查不到项目时用它占位：解析器要一个 `&Project`，而「没有项目」是一个
+    /// 真实答案——解析出空 base URL，不猜。
+    pub fn empty() -> Project {
+        Project {
+            id: String::new(),
+            name: String::new(),
+            description: None,
+            base_url: None,
+            base_url_definitions: Vec::new(),
+            default_base_url_definition_id: None,
+            color: super::default_project_color(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectPatch {

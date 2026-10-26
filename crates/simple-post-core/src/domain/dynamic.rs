@@ -3,8 +3,9 @@
 //! 消费端点的请求体里写 `{{sns}}`，发送时程序按 [`DynamicVariable`] 取数、抽取、缓存并替换。
 //! 人工调试与 Agent 通过 MCP 调试都不再手工搬运 JSON。
 //!
-//! 作用域是**项目**：一条定义属于一个项目，项目内的全部端点都能引用它，同一项目内变量名
-//! 唯一。理由与服务（base URL）同级——两者都是项目级资产。
+//! 作用域是**全局**：一条定义不属于任何项目，任何项目的端点都能引用它，整个工作区里
+//! 变量名唯一。理由是基础数据源不该在每个项目里各写一遍——基线项目取到的那份数据，
+//! 多客户分发项目直接引用同一条定义即可。
 
 use std::collections::HashMap;
 
@@ -56,7 +57,6 @@ impl ValueMode {
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariable {
     pub id: String,
-    pub project_id: String,
     /// 变量名，请求体里写 `{{name}}` 用的那个。必须匹配 `^[A-Za-z0-9_]+$`。
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,6 +71,12 @@ pub struct DynamicVariable {
     /// 内联请求（method / url / headers / body / auth 的 JSON 文本）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_inline_json: Option<String>,
+    /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_environment_id: Option<String>,
+    /// 取数用的服务（`base_url_definitions.id`）。`None` = 数据源端点所属项目的默认服务。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
     pub extract_path: String,
     pub value_mode: ValueMode,
@@ -101,6 +107,12 @@ pub struct DynamicVariablePatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_inline_json: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_environment_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_base_url_definition_id: Option<Option<String>>,
     pub extract_path: Option<String>,
     pub value_mode: Option<ValueMode>,
     pub ttl_seconds: Option<i64>,
