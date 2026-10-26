@@ -23,7 +23,7 @@ use simple_post_core::domain::{
     parse_http_method, AuthConfig, BodyMode, DynamicError, DynamicErrorKind, DynamicVariable,
     EndpointDetail, KeyValue, RequestBody,
 };
-use simple_post_core::dynamic::{RawSource, ResolveContext, SourceFetcher};
+use simple_post_core::dynamic::{RawSource, ResolveContext, SourceContext, SourceFetcher};
 
 use crate::variable_fill::EndpointOverrides;
 
@@ -57,13 +57,14 @@ impl SourceFetcher for EndpointSourceFetcher {
         &'a self,
         def: &'a DynamicVariable,
         ctx: &'a ResolveContext,
+        source: &'a SourceContext,
     ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>> {
         Box::pin(async move {
             if let Some(endpoint_id) = def.source_endpoint_id.as_deref() {
-                return fetch_from_endpoint(def, endpoint_id, ctx).await;
+                return fetch_from_endpoint(def, endpoint_id, ctx, source).await;
             }
             if let Some(inline) = def.source_inline_json.as_deref() {
-                return fetch_from_inline(def, inline, ctx).await;
+                return fetch_from_inline(def, inline, ctx, source).await;
             }
             Err(DynamicError {
                 name: def.name.clone(),
@@ -79,6 +80,7 @@ async fn fetch_from_endpoint(
     def: &DynamicVariable,
     endpoint_id: &str,
     ctx: &ResolveContext,
+    source: &SourceContext,
 ) -> Result<RawSource, DynamicError> {
     let detail: EndpointDetail = simple_post_core::db::with_conn(&ctx.pool, |c| {
         simple_post_core::db::endpoint_details::get(c, endpoint_id)
@@ -89,22 +91,18 @@ async fn fetch_from_endpoint(
         message: format!("数据源端点 {endpoint_id} 已被删除"),
     })?;
 
-    // 模块 id：base URL 的取值住在 (环境 × 服务 × 模块) 的格子里，故要知道它落在哪个模块。
-    let module_id = simple_post_core::db::with_conn(&ctx.pool, |c| {
-        simple_post_core::db::nodes::module_id_of(c, endpoint_id)
-    })
-    .ok()
-    .flatten();
-
+    // 模块与服务来自取数上下文：模块决定读哪一格 base URL，服务决定读哪个服务。
+    // 两者都由定义自己推导，与谁消费这个变量无关。
     let overrides = EndpointOverrides {
-        module_id,
+        module_id: source.module_id.clone(),
+        base_url_definition_id: source.base_url_definition_id.clone(),
         ..Default::default()
     };
 
     let resolved = crate::variable_fill::resolve_endpoint(
         &detail,
-        ctx.env.as_ref(),
-        &ctx.project,
+        source.env.as_ref(),
+        &source.project,
         Some(&overrides),
     )
     .map_err(|e| DynamicError {
@@ -144,11 +142,14 @@ async fn fetch_from_endpoint(
     send(
         def,
         ctx,
-        Some(endpoint_id.to_string()),
-        resolved.method,
-        url,
-        headers,
-        body,
+        source,
+        Outgoing {
+            endpoint_id: Some(endpoint_id.to_string()),
+            method: resolved.method,
+            url,
+            headers,
+            body,
+        },
     )
     .await
 }
@@ -158,6 +159,7 @@ async fn fetch_from_inline(
     def: &DynamicVariable,
     inline: &str,
     ctx: &ResolveContext,
+    source: &SourceContext,
 ) -> Result<RawSource, DynamicError> {
     let spec: InlineSource = serde_json::from_str(inline).map_err(|e| DynamicError {
         name: def.name.clone(),
@@ -195,8 +197,8 @@ async fn fetch_from_inline(
     let overrides = EndpointOverrides::default();
     let resolved = crate::variable_fill::resolve_endpoint(
         &detail,
-        ctx.env.as_ref(),
-        &ctx.project,
+        source.env.as_ref(),
+        &source.project,
         Some(&overrides),
     )
     .map_err(|e| DynamicError {
@@ -215,7 +217,32 @@ async fn fetch_from_inline(
             .map(|content| crate::mcp::http_ops::multipart::apply(&mut headers, &content));
     }
 
-    send(def, ctx, None, resolved.method, url, headers, body).await
+    send(
+        def,
+        ctx,
+        source,
+        Outgoing {
+            endpoint_id: None,
+            method: resolved.method,
+            url,
+            headers,
+            body,
+        },
+    )
+    .await
+}
+
+/// 一次取数请求的最终形状。
+///
+/// `send` 的参数超过七个时 clippy 会报 `too_many_arguments`，故把请求本身收进一个结构体：
+/// 它的字段就是「这次到底发什么」。
+struct Outgoing {
+    /// 数据源端点 id。有它才装配集合脚本链；内联请求没有。
+    endpoint_id: Option<String>,
+    method: String,
+    url: String,
+    headers: Vec<(String, String)>,
+    body: Option<String>,
 }
 
 /// 把组装好的请求发出去，并把传输层的结果折成 [`RawSource`]。
@@ -224,19 +251,23 @@ async fn fetch_from_inline(
 async fn send(
     def: &DynamicVariable,
     ctx: &ResolveContext,
-    endpoint_id: Option<String>,
-    method: String,
-    url: String,
-    headers: Vec<(String, String)>,
-    body: Option<String>,
+    source: &SourceContext,
+    outgoing: Outgoing,
 ) -> Result<RawSource, DynamicError> {
+    let Outgoing {
+        endpoint_id,
+        method,
+        url,
+        headers,
+        body,
+    } = outgoing;
     let settings = crate::mcp::http_ops::resolve_settings(&ctx.pool, (None, None, None), None);
     // 脚本仍能读到环境变量，但写不进去：取数是一次「读」，不该顺手改写项目的环境。
     // 快照里没有环境 id，`apply_env_writes` 便没有落点，脚本的写入只活在这一趟里
     // （前置脚本写的值，测试脚本仍读得到）。
     let env = simple_post_core::script::EnvSnapshot {
         id: None,
-        ..crate::mcp::http_ops::env_snapshot(ctx.env.as_ref())
+        ..crate::mcp::http_ops::env_snapshot(source.env.as_ref())
     };
 
     let outcome = simple_post_core::script::send_with_scripts(
