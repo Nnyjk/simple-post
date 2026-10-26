@@ -179,7 +179,7 @@ export function DynamicVariableForm({
           />
         </label>
 
-        <label className="flex items-start gap-2 text-xs">
+        <div className="flex items-start gap-2 text-xs">
           <span className="w-20 shrink-0 pt-1.5 text-muted-foreground">数据源</span>
           <div className="flex flex-1 flex-col gap-1">
             <div className="flex items-center gap-2">
@@ -215,7 +215,7 @@ export function DynamicVariableForm({
               />
             )}
           </div>
-        </label>
+        </div>
 
         {usesEndpoint && sourceEndpointId !== '' && (
           <>

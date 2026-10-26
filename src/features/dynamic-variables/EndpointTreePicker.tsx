@@ -61,9 +61,13 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
   const [searching, setSearching] = useState(false);
 
   // 筛选：输入停下 250 ms 才发一次请求，免得每敲一个字就跨库搜一遍。
+  //
+  // 每次输入都起一个新 effect。旧的那次可能已经把请求发出去了，它的回调若照写状态，
+  // 就会把上一轮的结果盖到这一轮上——故用 `cancelled` 标出「我这一轮已经过期」。
   const searchTimer = useRef<number | null>(null);
   useEffect(() => {
     const text = query.trim();
+    let cancelled = false;
     if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
     if (text === '') {
       setHits([]);
@@ -73,14 +77,19 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
     setSearching(true);
     searchTimer.current = window.setTimeout(() => {
       void invokeCmd<NodeSearchHit[]>(COMMANDS.nodesSearchPaths, { query: text, limit: 50 })
-        .then((rows) => setHits(rows))
+        .then((rows) => {
+          if (!cancelled) setHits(rows);
+        })
         .catch((e: unknown) => {
           console.error('[dynamic-variables] node search failed', e);
-          setHits([]);
+          if (!cancelled) setHits([]);
         })
-        .finally(() => setSearching(false));
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
     }, 250);
     return () => {
+      cancelled = true;
       if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
     };
   }, [query]);

@@ -1,23 +1,6 @@
 /**
- * DynamicVariablesSurface —— 动态变量面板的**无项目**宿主。
- *
- * 为什么需要第二个宿主
- * -----------------
- * 动态变量是全局的：一条定义不属于任何项目，任何项目的端点都能引用它。故用户在没有
- * 打开项目时也要能触达它——那正是「先把一条基础数据源定义好，再去各个项目里引用」的
- * 场景。若只能作为*标签*触达，欢迎页就够不到它：那里的按钮调用
- * `openDynamicVariablesTab()`，store 加了个标签，而 `App.tsx` 因为界面切换以
- * `activeProjectId` 为准，仍在渲染 `WelcomeScreen`，点击完全没反应。
- *
- * 修法不是第二份实现，而是第二个*挂载点*：
- *
- *   WelcomeScreen  ─┐
- *                   ├─→ DynamicVariablesPanel（一个文件、一份实现）
- *   WorkspaceShell ─┘        ↑
- *                             └ DynamicVariablesSurface（本文件）补上一个独立界面所需的 chrome
- *
- * `App.tsx` 既按 `activeProjectId === ''` 也按动态变量标签是否为当前标签来挑选界面。
- * 项目外没有标签条，故由这个表头提供返回的路。
+ * 无项目时承载 `DynamicVariablesPanel` 的界面；`App.tsx` 按 `DYNAMIC_TAB_ID` 选择它。
+ * 无标签条，故由本组件的表头提供「返回」。
  */
 
 import { ArrowLeft, Braces } from 'lucide-react';
