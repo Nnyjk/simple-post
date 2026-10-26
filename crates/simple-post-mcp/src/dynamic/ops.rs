@@ -29,7 +29,7 @@ pub struct CreateOpts {
     pub source_inline_json: Option<String>,
     /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
     pub source_environment_id: Option<String>,
-    /// 取数用的服务。`None` = 数据源接口自己绑的服务，它没绑就用项目的默认服务。
+    /// 取数用的服务。`None` = 数据源接口所属项目的默认服务。
     pub source_base_url_definition_id: Option<String>,
     pub extract_path: Option<String>,
     pub value_mode: Option<ValueMode>,
@@ -80,7 +80,7 @@ pub struct DynamicVariableView {
     pub effective_environment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_environment_name: Option<String>,
-    /// 实际取数用的服务：定义点名的那个，或数据源接口自己绑的，或数据源项目的默认服务。
+    /// 实际取数用的服务：定义点名的那个，或数据源项目的默认服务。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_base_url_definition_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,6 +101,15 @@ pub struct DynamicVariableView {
 pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariableView>, AppError> {
     let definitions = db::with_conn(pool, db::dynamic_variables::list)?;
     let now = now_ms();
+    // 引用关系一次算出来：逐条定义各查一次会在 N 条定义时扫 N 遍全表。
+    let references = if include_references {
+        let names: Vec<String> = definitions.iter().map(|d| d.name.clone()).collect();
+        db::with_conn(pool, |c| {
+            db::dynamic_variables::referencing_endpoints(c, &names)
+        })?
+    } else {
+        std::collections::HashMap::new()
+    };
     let mut out = Vec::with_capacity(definitions.len());
     for definition in definitions {
         let source = simple_post_core::dynamic::source_context(pool, &definition)?;
@@ -108,21 +117,19 @@ pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariab
         let entry = db::with_conn(pool, |c| {
             db::dynamic_variable_cache::get(c, &definition.id, &env_key)
         })?;
-        let referenced_by = if include_references {
-            db::with_conn(pool, |c| {
-                db::dynamic_variables::referencing_endpoints(c, &definition.name)
-            })?
-            .into_iter()
-            .map(|r| ReferenceDto {
-                endpoint_id: r.endpoint_id,
-                endpoint_name: r.endpoint_name,
-                project_id: r.project_id,
-                project_name: r.project_name,
+        let referenced_by = references
+            .get(&definition.name)
+            .map(|refs| {
+                refs.iter()
+                    .map(|r| ReferenceDto {
+                        endpoint_id: r.endpoint_id.clone(),
+                        endpoint_name: r.endpoint_name.clone(),
+                        project_id: r.project_id.clone(),
+                        project_name: r.project_name.clone(),
+                    })
+                    .collect()
             })
-            .collect()
-        } else {
-            Vec::new()
-        };
+            .unwrap_or_default();
         out.push(view_of(
             definition,
             &source,

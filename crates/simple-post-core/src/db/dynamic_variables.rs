@@ -9,6 +9,8 @@
 //!
 //! 数据源的当前值不在本表，在 `super::dynamic_variable_cache`。
 
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::{DynamicVariable, DynamicVariablePatch, ValueMode};
@@ -383,30 +385,40 @@ pub struct Reference {
     pub project_name: String,
 }
 
-/// 哪些端点的请求里出现了 `{{name}}`。跨全部项目——定义是全局的，引用它的端点可能
-/// 散在基线项目与各个分发项目里。
+/// 哪些端点引用了哪些变量名。跨全部项目——定义是全局的，引用它的端点可能散在基线项目
+/// 与各个分发项目里。
 ///
-/// 粗筛用 SQL 的 `LIKE`（请求体、header、参数、鉴权四段拼起来查），细查用
-/// `crate::template::list_missing_vars` 逐行确认——`LIKE` 会把 `{{name}}` 当普通子串命中，
-/// 但也可能命中 `{{name}}` 之外的东西（例如值里恰好含这段文本），故粗筛之后还要细查。
+/// 一次遍历回答所有名字：逐条定义各查一次会在 N 条定义时扫 N 遍全表，故这里把
+/// 「哪个端点引用了哪些名字」一次算出来。返回的 map 里每个被问的名字都有一项（可能
+/// 是空列表）。
+///
+/// 粗筛是「这一行里有没有 `{{`」——多数端点不引用任何变量，故不必解析它的 JSON；细查用
+/// `crate::template::list_missing_vars` 逐个字符串确认，因为值里可能恰好含 `{{` 却没有
+/// 真正的标记。
 pub fn referencing_endpoints(
     conn: &mut Connection,
-    name: &str,
-) -> Result<Vec<Reference>, AppError> {
-    let needle = format!("%{{{{{name}}}}}%");
+    names: &[String],
+) -> Result<HashMap<String, Vec<Reference>>, AppError> {
+    let mut out: HashMap<String, Vec<Reference>> = HashMap::new();
+    if names.is_empty() {
+        return Ok(out);
+    }
+    let wanted: HashSet<&str> = names.iter().map(String::as_str).collect();
+    // 每个被问的名字都先进 map（列表为空）：调用方按名字取即可，不必区分
+    // 「没有引用」与「这个名字根本没被问过」。
+    for name in names {
+        out.entry(name.clone()).or_default();
+    }
+
     let mut stmt = conn.prepare(
         "SELECT d.node_id, n.name, n.root_id, COALESCE(p.name, ''), \
                 d.url, d.params_json, d.headers_json, d.body_json, d.auth_json \
          FROM endpoint_details d \
          JOIN nodes n ON n.id = d.node_id \
          LEFT JOIN projects p ON p.id = n.root_id \
-         WHERE d.url LIKE ?1 ESCAPE '\\' \
-            OR d.params_json LIKE ?1 ESCAPE '\\' \
-            OR d.headers_json LIKE ?1 ESCAPE '\\' \
-            OR d.body_json LIKE ?1 ESCAPE '\\' \
-            OR d.auth_json LIKE ?1 ESCAPE '\\'",
+         ORDER BY n.root_id, n.sort_order, n.id",
     )?;
-    let rows = stmt.query_map(params![needle], |row| {
+    let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -420,7 +432,6 @@ pub fn referencing_endpoints(
         ))
     })?;
 
-    let mut out = Vec::new();
     for r in rows {
         let (
             node_id,
@@ -433,22 +444,34 @@ pub fn referencing_endpoints(
             body_json,
             auth_json,
         ) = r.map_err(AppError::Sqlite)?;
+        if !url.contains("{{")
+            && !params_json.contains("{{")
+            && !headers_json.contains("{{")
+            && !body_json.contains("{{")
+            && !auth_json.contains("{{")
+        {
+            continue;
+        }
         let mut texts: Vec<String> = vec![url];
         for json in [params_json, headers_json, body_json, auth_json] {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
                 collect_markers_from_json(&value, &mut texts);
             }
         }
-        if texts.iter().any(|t| {
-            crate::template::list_missing_vars(t)
-                .iter()
-                .any(|m| m == name)
-        }) {
-            out.push(Reference {
-                endpoint_id: node_id,
-                endpoint_name: node_name,
-                project_id,
-                project_name,
+        let mut hits: Vec<String> = Vec::new();
+        for text in &texts {
+            for name in crate::template::list_missing_vars(text) {
+                if wanted.contains(name.as_str()) && !hits.contains(&name) {
+                    hits.push(name);
+                }
+            }
+        }
+        for name in hits {
+            out.entry(name).or_default().push(Reference {
+                endpoint_id: node_id.clone(),
+                endpoint_name: node_name.clone(),
+                project_id: project_id.clone(),
+                project_name: project_name.clone(),
             });
         }
     }

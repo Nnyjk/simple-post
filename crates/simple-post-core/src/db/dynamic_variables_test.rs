@@ -284,14 +284,80 @@ fn the_endpoints_referencing_a_name_are_listed() {
     })
     .expect("update detail");
 
-    let refs = db::with_conn(&pool, |c| referencing_endpoints(c, "sns")).expect("scan");
+    let map = db::with_conn(&pool, |c| {
+        referencing_endpoints(c, &["sns".to_string(), "other".to_string()])
+    })
+    .expect("scan");
+    let refs = map.get("sns").expect("sns 的引用");
     let ids: Vec<String> = refs.iter().map(|r| r.endpoint_id.clone()).collect();
     assert_eq!(ids, vec!["e1".to_string()]);
     assert_eq!(refs[0].project_id, "p1");
     assert_eq!(refs[0].project_name, "First");
 
-    let none = db::with_conn(&pool, |c| referencing_endpoints(c, "other")).expect("scan");
-    assert!(none.is_empty());
+    assert!(map.get("other").expect("other 的引用").is_empty());
+}
+
+#[test]
+fn one_scan_answers_every_name() {
+    let (pool, _dir) = fresh_pool();
+    // e1 引用 `{{sns}}`，e2 引用 `{{token}}`。
+    db::with_tx(&pool, |c| {
+        db::endpoint_details::update(
+            c,
+            "e1",
+            crate::domain::EndpointDetailPatch {
+                body: Some(RequestBody {
+                    mode: crate::domain::BodyMode::Json,
+                    content: "{\"sns\": {{sns}}}".into(),
+                    schema: None,
+                }),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("update e1");
+    db::with_tx(&pool, |c| {
+        db::endpoint_details::update(
+            c,
+            "e2",
+            crate::domain::EndpointDetailPatch {
+                body: Some(RequestBody {
+                    mode: crate::domain::BodyMode::Json,
+                    content: "{\"token\": {{token}}}".into(),
+                    schema: None,
+                }),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("update e2");
+
+    // 一次遍历同时回答两个名字：端点各自只落到自己引用的那个名字下。
+    let map = db::with_conn(&pool, |c| {
+        referencing_endpoints(c, &["sns".to_string(), "token".to_string()])
+    })
+    .expect("scan");
+    let sns_ids: Vec<String> = map
+        .get("sns")
+        .expect("sns 的引用")
+        .iter()
+        .map(|r| r.endpoint_id.clone())
+        .collect();
+    assert_eq!(sns_ids, vec!["e1".to_string()]);
+    let token_ids: Vec<String> = map
+        .get("token")
+        .expect("token 的引用")
+        .iter()
+        .map(|r| r.endpoint_id.clone())
+        .collect();
+    assert_eq!(token_ids, vec!["e2".to_string()]);
+}
+
+#[test]
+fn an_empty_name_list_scans_nothing() {
+    let (pool, _dir) = fresh_pool();
+    let map = db::with_conn(&pool, |c| referencing_endpoints(c, &[])).expect("scan");
+    assert!(map.is_empty());
 }
 
 #[test]
