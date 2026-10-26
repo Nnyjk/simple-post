@@ -1,86 +1,215 @@
+<div align="center">
+
+<img src="public/favicon.svg" width="64" alt="Simple Post 图标" />
+
 # Simple Post
 
-一款面向 Windows 10/11 的桌面 API 调试 / 管理工具（Postman 类），核心差异化是**自带 MCP Server**——Claude Desktop、Cursor、Cline 等外部 AI 客户端可以直接列出、检索、调用、改写这里的接口定义。
+**本地优先的桌面 API 调试工具，同时是一个 MCP Server**
 
-> 当前阶段：**v0.1.21**（版本号以根 `package.json` 与 `Cargo.toml` 为准）。数据持久化在本地 SQLite。
+Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这里的接口定义，读到的就是用户正在维护的那份数据。
+
+[![版本](https://img.shields.io/badge/version-v0.1.21-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
+[![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
+[![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
+[![MCP 工具](https://img.shields.io/badge/MCP-51%20tools-8A2BE2?style=flat-square)](#mcp-server)
+[![许可](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+
+</div>
 
 ---
 
-## 项目说明
+<div align="center">
 
-### 定位
+<img src="docs/screenshots/workspace-request-response-dark.png" width="960" alt="工作区：左侧接口树，中间请求编辑器，下方响应视图" />
 
-本地优先的 API 客户端：接口树、请求构造、响应查看都在一个桌面应用里完成，不依赖任何 SaaS 后端。同时它是一个 MCP server，让 AI 客户端在**同一份数据**上工作，而不是让 AI 去猜接口长什么样。
+<sub>工作区：左侧是接口树，中间是请求编辑器，下方是响应视图。截图中的接口是 `GET /v1/orders/10086`，响应由本地服务返回。</sub>
 
-### 三种分发形态
+</div>
+
+## 这是什么
+
+Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、请求构造、响应查看都在同一个应用里完成，业务数据保存在本机的 SQLite 文件中，不依赖任何 SaaS 后端。
+
+与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 51 个 MCP 工具读取和修改接口定义、环境变量与服务地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
+
+## 界面
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/request-body-json-schema-dark.png" alt="请求体编辑器：载荷与 Schema 分开" /><br /><sub><b>请求体</b>：载荷区与 Schema 区各管一件事，载荷是这一次发出的内容，Schema 是文档里的参数定义。</sub></td>
+<td width="50%"><img src="docs/screenshots/mcp-connection-settings-dark.png" alt="设置里的连接页：MCP 进程状态与接入配置" /><br /><sub><b>连接</b>：MCP 进程的运行状态、已注册工具数量，以及可直接粘贴给客户端的接入配置。</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/dynamic-variables-dark.png" alt="动态变量面板：数据源、抽取规则、缓存时长与当前值" /><br /><sub><b>动态变量</b>：一条声明包含数据源、抽取规则、缓存时长，面板显示取回的值与过期时间。</sub></td>
+<td width="50%"><img src="docs/screenshots/command-palette-dark.png" alt="命令面板：跨项目搜索接口" /><br /><sub><b>命令面板</b>：<code>Ctrl+K</code> 打开，跨项目、模块、集合、接口搜索。</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/interchange-import-preview-light.png" alt="导入 OpenAPI 文档的预览对话框" /><br /><sub><b>导入</b>：先预览将要写入的树，再逐项勾选。</sub></td>
+<td width="50%"><img src="docs/screenshots/request-settings-light.png" alt="设置里的请求行为：超时、跟随重定向、最大响应体积" /><br /><sub><b>请求设置</b>：超时、跟随重定向、最大响应体积，三个旋钮对桌面端与 MCP 端同时生效。</sub></td>
+</tr>
+</table>
+
+## 核心能力
+
+### 接口树：模块 → 集合 → 接口，集合可以继续嵌套集合
+
+资源的层级是 Project → Module → Collection → Endpoint。集合下面还能建集合，嵌套深度不设上限，界面的面包屑按真实深度逐级显示。
+
+模块、集合、接口存在同一张 `nodes` 表里，用 `type` 区分，父子关系由 `parent_id` 表达。层级规则是强制执行的契约：模块只能放在顶层，接口可以挂在集合下、也可以直接挂在模块下（单个接口不需要先建一个一次性集合），集合可以挂在模块或另一个集合下。SQLite 触发器与应用层检查同时校验，拖拽落点遵守同一张矩阵。
+
+### 服务地址按「环境 × 模块 × 服务」逐格隔离
+
+服务清单是项目级的：整个项目只有一份清单，每个模块都能看到清单里的全部服务，也不会出现两个同名服务。每个服务的地址是一个独立的问题：`环境 × 模块 × 服务` 三个维度各自一格。
+
+某一格没有填写，表示该模块在此环境下没有这个服务的地址，并且不继承任何值——既不继承项目默认服务，也不继承别的模块。地址存放在 `environments.module_base_urls_json` 里，结构是 `服务 id → 模块 id → URL`。
+
+### 请求体分两栏：载荷与定义
+
+请求体的 `content` 是这一次发出的载荷，`schema` 是文档里这份接口接受什么参数的定义（JSON Schema，只用于文档与 OpenAPI 导出，从不参与发送）。两者都是 JSON 对象，形状接近，所以界面给它们两个编辑器：`content` 一个，`schema` 一个折叠在下面。
+
+MCP 侧的工具描述写明哪个字段放什么，并且设了一道门：载荷看起来是一份 Schema、而 `schema` 还空着时，`endpoint_create` 与 `endpoint_update` 都会拒绝这次提交。
+
+### 请求脚本运行在嵌入式 QuickJS 沙箱里
+
+接口与集合都可以配置前置脚本（pre-request）与测试脚本（test）。前置脚本在变量替换之后、请求发出之前运行，可以改写 URL、请求头与请求体，发出去的就是改写后的那个请求。测试脚本在响应返回后运行，可以断言并写回环境变量。
+
+脚本运行在嵌入式 QuickJS（`rquickjs`）里，宿主能力只有一段固定 JavaScript 前导给出的那几样：`pm.request`、`pm.environment`、`pm.response`、`pm.test`、`pm.expect`、`console.log`。脚本访问不到文件系统、网络与进程，因为代码里不存在通向它们的路径。硬限额是每阶段 1000 ms 墙钟、32 MB 内存、256 KB 栈；超时真的会打断死循环。
+
+脚本失败不影响这次请求的成败：失败脚本的改动被丢弃，失败原因单独显示在响应区的「脚本」页里。
+
+### 动态变量：声明一次，发送时自动取数
+
+一条动态变量等于「变量名 → 数据源 → 抽取规则 → 缓存时长」。请求体里写 `{{sns}}`，发送时程序自动取数、抽取、缓存并替换。
+
+数据源有两种形态：引用接口树里的一个接口（复用它的基础地址、鉴权与前置脚本），或者一份内联请求。缓存按「定义 × 环境」存放在 SQLite 里，因此桌面应用、`serve-web` 与 MCP 守护进程三个进程看到的是同一份值。取数失败不影响这次请求的成败：变量按缺失处理，`{{sns}}` 原样留在请求体里，失败原因在面板与响应区里说明。
+
+### 导入与导出
+
+| 方向 | 格式 | 说明 |
+| --- | --- | --- |
+| 导入 | Postman v2.1 集合 | 文件夹变成集合，条目变成接口，条目上的 `event[]` 落成对应接口或集合的脚本。 |
+| 导入 | OpenAPI 3.0 文档 | 按 `tags[0]` 分成集合，路径变成接口；没有 tag 的接口归进以文档名命名的集合。全部写进导入时选定的模块。 |
+| 导出 | OpenAPI 3.0 文档 | 按勾选的集合与接口生成文档，可选 JSON 或 YAML。 |
+
+导入与导出都是先预览、再写入。预览对话框列出将要写入的树，用户逐项勾选，并能看到转换过程中产生的诊断。
+
+### MCP Server
+
+51 个 MCP 工具，覆盖项目、模块、集合、接口、服务地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
+
+写操作的授权要同时通过两道检查，任何一道缺失都是拒绝而不是放行：
+
+1. **全局能力策略**：用户在设置里选择的 `read_only` / `safe_write` / `full_access` 决定可见的工具集合。能力等级是全序 `Read < Create < Update < Delete < Send`，其中 `Send`（发起出站请求）只有 `full_access` 才覆盖——允许写入不等于允许发请求。
+2. **项目权限**：按项目在 `permissions` 表里授权，默认 `ReadCall`。没有分类的工具按最严格的一档处理。
+
+两道检查的关系是「与」，取更严格的一项。默认策略是 `read_only`，AI 写入默认关闭，需要用户在设置里显式调整。
+
+## 三种分发形态
 
 同一套 Rust 核心，三种入口：
 
 | 形态 | 命令 | 说明 |
-|---|---|---|
-| 桌面应用 | `simple-post`（默认） | Tauri GUI，`tauri:build` 打 NSIS / dmg / deb |
-| 无头 Web | `simple-post serve-web` | REST + SPA，默认 4173 端口，可挂反向代理、可进容器 |
-| MCP 桥 | `simple-post mcp-proxy` | stdio ↔ daemon 桥，供 Claude Desktop / Cursor / Cline 挂载 |
+| --- | --- | --- |
+| 桌面应用 | `simple-post` | Tauri 图形界面，`tauri build` 产出 NSIS / dmg / deb 安装包。 |
+| 无头 Web | `simple-post serve-web` | REST 接口 + 单页应用，默认 4173 端口，可挂反向代理，可放进容器。 |
+| MCP 桥接 | `simple-post-mcp` | 独立二进制，把标准输入输出上的 JSON-RPC 转发给运行中的 `serve-web`，供 AI 客户端以 stdio 方式挂载。 |
 
-其中 `serve-web` 还有一条**不含 Tauri** 的构建路径：`cargo build --release -p simple-post-server` 产出 `simple-post-server`，具备同样的 `serve-web` / `mcp` 子命令但不链接 GUI 运行时。容器镜像用的就是它——这是镜像只有几十 MB、且不需要 GTK / WebKit 的原因（`src-tauri/Cargo.toml` 的 `gui` feature 默认关闭）。
+`simple-post-server` 是另一条**不链接 Tauri** 的构建路径，产出物具备 `serve-web` 与 `mcp` 两个子命令，但不携带 GUI 运行时。容器镜像构建的就是它，因此镜像里没有 GTK、WebKit 与 X11。
 
-### 架构一句话
+MCP 桥接二进制只以编译产物的形式发布（release 产物或 `cargo install simple-post-mcp`），没有 npm 包。`simple-post mcp-proxy` 这个子命令会提示改用独立二进制并以退出码 2 结束。
 
-前端（React 18 + Vite 5 + Zustand 5）通过 Tauri IPC **或** `fetch('/api/…')` 两条等价通道调用同一套 Rust 命令；Rust 侧是一个 Cargo workspace，SQLite（`rusqlite`，WAL）作为唯一存储。
+## 快速开始
 
-| 部件 | 路径 | 职责 |
-|---|---|---|
-| Tauri 外壳 + CLI | `src-tauri/` | 桌面 GUI、`#[tauri::command]` 表面、clap 子命令分发 |
-| 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST/SPA、daemon 监管、端口注册、Bearer 鉴权、wire DTO |
-| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite（`db/`）、HTTP 执行器、权限、MCP 指标、错误类型。无 Tauri / axum 依赖 |
-| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（51 个工具）、axum HTTP daemon、stdio 桥 |
-| 前端 | `src/` | React + Vite + Zustand + Tailwind + CodeMirror 6 |
+### 本地开发
 
-依赖方向是单向的：`simple-post (Tauri) → simple-post-server → simple-post-core`。
-
-### 跑起来
+需要 Node.js 20–22（`package.json` 的 `engines` 声明为 `>=20 <23`）与 Rust 1.87 及以上。
 
 ```bash
 npm install
-npm run dev            # Vite dev server → http://127.0.0.1:5173（已绑定 0.0.0.0，局域网可访问）
-npm run dev:split      # Vite + cargo run -- serve-web(4173)，前后端联调用这个
+npm run dev            # Vite 开发服务器 → http://127.0.0.1:5173
+npm run dev:split      # 同时启动 Vite 与 cargo run -- serve-web（4173），前后端联调用这个
 npm run build          # tsc -b && vite build → dist/
-npm run check          # 一键本地门禁：Prettier → ESLint → tsc → 单测 → cargo fmt → clippy
+npm run check          # 本地门禁：Prettier → ESLint → tsc → 单测 → OpenAPI lint → cargo fmt → clippy
 ```
 
 Rust 侧：
 
 ```bash
-cargo build --release                      # 桌面 + 全部子命令
-cargo build --release -p simple-post-server # 仅无头 server（容器用）
+cargo build --release                      # 桌面应用与全部子命令
+cargo build --release -p simple-post-server # 仅无头服务（容器用）
 cargo test --workspace                     # 全部 Rust 测试
 ```
 
-> `npm run check` 与 CI 跑的是同一套检查。推 PR 前本地跑一次即可。
+`npm run check` 与 CI 执行的是同一套检查。提交前本地跑一次即可。
 
-### 部署路径
-
-#### 无头 Web
+### 容器
 
 ```bash
-./target/release/simple-post-server serve-web
+docker build -t simple-post:local .
+docker compose up -d          # → http://localhost:4173
+```
+
+镜像里只有 `simple-post-server`（不含 Tauri）、单页应用的静态产物与一个数据目录。SQLite 使用 `rusqlite` 的 `bundled` 静态编译，TLS 使用 rustls 内置的根证书集，因此镜像不安装 GTK、WebKit、X11 与 OpenSSL。镜像内单页应用在 `/app/spa`，数据在 `/data`。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SP_WEB_PASSWORD` | 空 | 映射到 `SIMPLE_POST_WEB_PASSWORD`：`/api/*` 与 `/mcp` 的 Bearer 口令。留空即完全不鉴权。 |
+| `SP_WEB_BIND` | `4173` | 宿主机映射的端口，容器内固定为 4173。 |
+| `SP_RUST_LOG` | `info` | 映射到 `RUST_LOG`，是 tracing 的日志过滤级别。 |
+| `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反向代理前缀，必须以 `/` 开头。 |
+| `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置为 `1` 后，`/api/http/send` 拒绝回环、私网与链路本地地址（含云厂商 metadata）。 |
+
+`SP_*` 是 compose 的插值变量名，写在 `.env` 里（见 `.env.example`），由 compose 文件转成程序认识的 `SIMPLE_POST_*`。
+
+Swarm 部署时有两个不要改动的约束：
+
+- `replicas: 1`——数据落在一个 WAL 模式的 SQLite 文件里，WAL 依赖同机共享内存，多写进程会互相 `SQLITE_BUSY`，`mcp.port` 也只能有一个属主。
+- `placement`——命名卷是 `local` 驱动，只存在于一个节点。`replicas: 1` 挡不住这个问题：更新后重新调度会把任务放到别的节点，Docker 在那里建一个空卷，服务照样健康起来，数据却没有迁移过去。把 `placement` 注释掉会让部署直接失败，这正是期望的失败方式。
+
+镜像 tag 写 `${SP_IMAGE:-simple-post:local}`，因为 Swarm 按 spec 里写的名字在每个节点上拉镜像，多节点部署时必须用 `SP_IMAGE` 指向真正推送上去的 tag。
+
+### 让 AI 客户端连上
+
+设置面板的「连接 → 接入配置」会生成一份可以直接粘贴的片段，形如：
+
+```json
+{
+  "mcpServers": {
+    "simple-post": {
+      "type": "http",
+      "url": "http://127.0.0.1:<daemon 端口>/mcp"
+    }
+  }
+}
+```
+
+客户端不安装任何东西。客户端所在机器不能运行 `simple-post-mcp` 时，也可以直接指向 `simple-post serve-web` 暴露的 `POST /mcp`，传输的是同一套 JSON-RPC。
+
+不要把 daemon 端口写死在客户端配置里。`simple-post mcp` 默认使用 `--port=0`，端口由操作系统分配，每次重启都会变化，写死的地址会在下次重启时失效。
+
+## 部署到服务器
+
+### 无头 Web
+
+```bash
+./target/release/simple-post-server serve-web --bind 0.0.0.0 --port 4173
 curl http://localhost:4173/api/healthz
 # {"status":"ok","version":"…","shape":"server"}
 ```
 
-MCP 客户端接到 `http://host:4173/mcp`，带 `Authorization: Bearer <密码>`。
+MCP 客户端连接 `http://host:4173/mcp`，并带上 `Authorization: Bearer <口令>`。
 
-要**给 MCP 一个自己的端口**，在设置面板「连接 → HTTP 服务配置」里把**端口**填成一个具体数字（如 4174）：服务端会另开一个只服务 MCP 的监听器，那个端口上只有 `/mcp`、`/mcp/healthz`、`/mcp/tools`，没有 REST、没有 SPA。端口填 0 时不单独开端口，MCP 只走主端口。改动要重启服务才生效。
+需要给 MCP 分配独立端口时，在设置面板的「连接 → HTTP 服务配置」里把「端口」填成一个具体数字（例如 4174）。服务端会另外开一个只提供 MCP 的监听器，那个端口上只有 `/mcp`、`/mcp/healthz` 与 `/mcp/tools`，没有 REST 接口与单页应用。端口填 0 时不单独开端口，MCP 只走主端口。改动需要重启服务才生效。
 
-**这是多一个入口，不是搬走原来的那个。** 填了端口之后，主端口上的 `/mcp` 照旧可用——专用端口是额外的一条入口。两者的差别：专用端口走 MCP 自己的 Host / Origin 白名单（见同一张卡片里的那两栏），主端口上的 `/mcp` 不做 Host 校验，只受 Bearer 口令约束。
+独立端口是新增的一条入口，主端口上的 `/mcp` 照旧可用。两者的差别在于：独立端口按 MCP 自己的 Host 与 Origin 白名单校验，主端口上的 `/mcp` 不做 Host 校验，只受 Bearer 口令约束。
 
-这个端口就是对外暴露 MCP 的端口，没有第二个地方可以再写一遍——部署侧要发布它时，发布的目标端口必须与设置里写的数字一致。
+这个端口是唯一对外暴露 MCP 的位置，部署侧发布它时，发布的目标端口必须与设置里填写的数字一致。
 
-数据落在 `SIMPLE_POST_DATA_DIR`（未设时为 `%APPDATA%/simple-post`），把它挂到持久卷即可。SQLite 跑在 WAL 模式下，能安全落盘。
+数据保存在 `SIMPLE_POST_DATA_DIR`（未设置时为 `%APPDATA%/simple-post`），把该目录挂到持久卷即可。SQLite 运行在 WAL 模式下，可以安全落盘。
 
-#### 反向代理
+### 反向代理
 
-要让服务挂在 `https://host/sp/` 下，用 `--public-base-path /sp`（或 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`）启动，然后**原样转发，不要剥离前缀**——前缀由服务端自己处理。
+要让服务挂在 `https://host/sp/` 下，用 `--public-base-path /sp`（或 `SIMPLE_POST_PUBLIC_BASE_PATH=/sp`）启动，并且原样转发，不要剥离前缀——前缀由服务端自己处理。
 
 nginx：
 
@@ -102,210 +231,104 @@ sp.example.com {
 }
 ```
 
-**前缀只能由一处处理。** 服务端会把整个 router（`/api/*`、`/mcp` 与三个健康探针）一起 `nest` 到 `/sp` 下，并按实际前缀改写 SPA 外壳里的资源引用、注入 `window.__SIMPLE_POST_BASE__`。nginx 若再剥一次，两边就对不上了。设了前缀后健康检查也移到 `/sp/healthz`，探针要跟着改。
-
-#### Docker
-
-```bash
-docker build -t simple-post:local .
-docker compose up -d          # → http://localhost:4173
-```
-
-镜像里只有 `simple-post-server`（无 Tauri）+ SPA 静态产物 + 一个数据目录。不装 GTK / WebKit / X11，也不装 OpenSSL：SQLite 走 `rusqlite` 的 `bundled` 静态编译，TLS 走 rustls 内置根证书集。镜像内 SPA 在 `/app/spa`，数据在 `/data`。
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `SP_WEB_PASSWORD` | 空 | 映射到 `SIMPLE_POST_WEB_PASSWORD`：`/api/*` + `/mcp` 的 Bearer 口令，**留空即完全不鉴权** |
-| `SP_WEB_BIND` | `4173` | 宿主机映射端口（容器内固定 4173） |
-| `SP_RUST_LOG` | `info` | 映射到 `RUST_LOG` |
-| `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反代前缀，**必须以 `/` 开头** |
-| `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置 `1` 后 `/api/http/send` 拒绝回环 / 私网 / 链路本地（含云 metadata） |
-
-`SP_*` 是 compose 的插值变量名（写在 `.env`，见 `.env.example`），由 yml 转成 binary 认识的 `SIMPLE_POST_*`。
-
-Swarm 部署时有两个**不要动**的约束：
-
-- `replicas: 1` —— 数据落在一个 WAL 模式的 SQLite 文件里，WAL 依赖同机共享内存，多写进程会互相 `SQLITE_BUSY`，`mcp.port` 也只能有一个属主。
-- `placement` —— 命名卷是 `local` 驱动，只存在于一个节点。`replicas: 1` **挡不住**这个问题：更新后重调度会把任务放到别的节点，Docker 在那儿建一个空卷，服务照样 healthy 起来，但数据全没了。把 `placement` 注释掉部署会直接失败（"no suitable node"），这正是想要的失败方式。
-
-镜像 tag 写 `${SP_IMAGE:-simple-post:local}`，因为 Swarm 按 spec 里写的名字在**每个节点**上拉镜像，多节点必须用 `SP_IMAGE` 指向你真正 `docker push` 上去的 tag。
+前缀只由一处处理。服务端会把整个路由（`/api/*`、`/mcp` 与三个健康探针）一起放进 `/sp` 下，并按实际前缀改写单页应用外壳里的资源引用。nginx 若再剥一次，两边就对不上。设置前缀后健康检查也移到 `/sp/healthz`，探针要跟着改。
 
 ### 安全约束
 
-这几条是部署时最容易踩的，改配置前先读一遍。
+改配置前先读一遍这几条。
 
-- **`SIMPLE_POST_WEB_PASSWORD` 必须设。** 为空时 `auth_middleware` 是 no-op，`/api/*` 和 `/mcp` 对整个网络裸奔。容器监听 `0.0.0.0`，这不是"可以不配的保险"，是唯一的门。
-- 健康检查 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证（方便探针）；`/assets/*` 与 SPA 外壳同样免认证——浏览器无法给 `<script type="module">` 挂 `Authorization` 头，对它们鉴权会让带密码的部署直接白屏。
-- **两条出站通道，权限不同**：
-  - `POST /api/nodes/:id/send`（UI 的 Send 按钮走这条）只接受 endpoint id + 相对路径，base URL、路径、`{{var}}`、鉴权全部由服务端按数据库配置拼装。**浏览器无法指定目标地址**，传入绝对 URL 会被 400 拒绝，因此没有 SSRF 面。
-  - `POST /api/http/send` 是**原始 URL 逃生舱**，调用方可以指定任意地址（仅允许 `http` / `https`）。默认**不**拦截私网地址——桌面端用户常常就是要打 `localhost:3000`，默认拦会砸掉产品的主要用途。公网 / 共享部署请设 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段。
+- **`SIMPLE_POST_WEB_PASSWORD` 必须设置。** 口令为空时鉴权中间件不生效，`/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。容器监听 `0.0.0.0`，因此这个口令是唯一的访问控制。
+- 健康检查 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便探针使用；`/assets/*` 与单页应用外壳同样免认证——浏览器无法给 `<script type="module">` 附加 `Authorization` 头，对它们鉴权会让带口令的部署无法打开页面。
+- **两条出站通道的权限不同**：
+  - `POST /api/nodes/:id/send`（界面的 Send 按钮走这条）只接受接口 id 与相对路径，基础地址、路径、`{{var}}` 替换与鉴权全部由服务端按数据库里的配置组装。浏览器无法指定目标地址，传入绝对 URL 会被 400 拒绝，因此这条通道没有 SSRF 面。
+  - `POST /api/http/send` 是原始 URL 通道，调用方可以指定任意地址（仅允许 `http` 与 `https`）。默认不拦截私网地址——桌面端用户经常要访问 `localhost:3000`，默认拦截会破坏主要用途。公网或共享部署请设置 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段。
 
----
+## 技术结构
 
-## 项目亮点
+前端（React 19 + Vite 8 + Zustand 5 + Tailwind 4）通过 Tauri IPC 或 `fetch('/api/…')` 两条等价通道调用同一套 Rust 命令。Rust 侧是一个 Cargo workspace，SQLite（`rusqlite`，WAL 模式）是唯一的存储。
 
-### 自带 MCP Server，AI 直接读写接口
+| 部件 | 路径 | 职责 |
+| --- | --- | --- |
+| Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
+| 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
+| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、MCP 指标、错误类型。不依赖 Tauri 与 axum。 |
+| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（51 个工具）、axum HTTP daemon、标准输入输出桥接。 |
+| 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
+| 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
 
-51 个 MCP 工具（由 `crates/simple-post-mcp/src/mcp/mod.rs` 的 `every_registered_tool_has_a_capability` 测试守护数量与权限行的对应关系）。AI 客户端能列项目、搜接口、查环境变量、发起调用、创建和改写接口定义——不是只读，是真的能改。
-
-两种接法：stdio 子进程桥（`mcp-proxy`，本地客户端用）或 HTTP `POST /mcp`（`serve-web` 暴露，远程 / 远程调试用）。
-
-> 端口不要写死。`simple-post mcp` 默认 `--port=0`，OS 分配的端口每次重启都变，写死的 `http://127.0.0.1:<port>/mcp` 会在下次重启时静默失效。**没有活动部件的接法是：stdio 桥 → 固定 4173 端口的 `serve-web`**，客户端配置里只有 `command` + `args`，没有端口可漂移。
-
-### 一套 Rust 核心，三种形态
-
-桌面应用、无头 Web、容器镜像跑的是同一份实现。桌面版的 `serve-web` 依然可用（内部转调同一个 router），不存在"两份行为"。新增后端命令时前端不需要区分自己在哪个形态里——这也是 dual-transport 设计的前提。
-
-### 递归嵌套的集合树
-
-Project → Module → Collection（**可无限递归嵌套**）→ Endpoint。集合下面还能建集合，面包屑逐级显示真实深度。落库时模块、集合、接口在同一张 `nodes` 表里用 `type` 区分，父子关系由 `parent_id` 表达。
-
-层级的合法性是**被强制的契约**而不是约定：模块只能在顶层，接口可以挂在集合下、也可以直接挂在模块下（单个接口不需要先建一个一次性集合），集合可以挂在模块或另一个集合下。SQLite trigger 与应用层检查双重把关，拖拽落点也遵守同一矩阵。
-
-### 服务地址按「模块 × 环境」逐格隔离
-
-服务清单是**项目级**的（所以两个模块不可能有同名服务，每个模块都看得到全部服务），但每个服务的**地址**是逐格独立的：`环境 × 模块 × 服务` 三个维度各自一格。
-
-某模块没填这一格，就是它在这个环境下没有这个服务的地址——**不继承任何东西**，既不继承项目默认，也不继承别的模块。`environments.module_base_urls_json` 是 `service_id → module_id → url` 的嵌套结构，这正是为了消灭"看起来生效、实际串到别的模块去了"这类静默错误。
-
-### 两道权限闸，都 fail-closed
-
-MCP 写操作的授权要同时过两道闸，任何一道缺失都是**拒绝**而不是放行：
-
-- **全局能力闸**：用户选的策略（`read_only` / `safe_write` / `full_access`）决定可见工具集。`Capability` 是全序 `Read < Create < Update < Delete < Send`，其中 **`Send`（出站 HTTP）只有 `full_access` 覆盖**——"允许写"不等于"允许随便发请求"。
-- **项目权限闸**：按项目在 `permissions` 表里授权，默认 `ReadCall`。未分类的工具按最严格处理。
-
-两道闸的关系是"与"，取更严格者。默认策略是 `read_only`，AI 写入默认关闭，需要用户在设置里显式调档。
-
----
+依赖方向是单向的：`simple-post`（Tauri）→ `simple-post-server` → `simple-post-core`。`src-tauri` 无条件链接 `tauri`，会把 GTK 与 WebKit 拖进 Linux 构建，服务宿主因此单独拆成一个 crate。
 
 ## 已实现
 
-每条都能指到具体代码。
-
 **数据与资源树**
 
-- Project → Module → Collection（可递归，深度不限）→ Endpoint，外加 Environment / Response（`crates/simple-post-core/src/domain.rs`）
-- 整棵树存在一张 `nodes` 表，用 `type` 区分；所属项目以 `root_id` 落在每一行上，一次索引读即可回答"这是哪个项目的"（`crates/simple-post-core/src/db/schema.sql`、`db/nodes.rs`）
-- 接口的请求配置（method / url / auth / body / headers / params / tags）单独放 `endpoint_details` 侧表——这些字段对模块和集合没有意义（`db/endpoint_details.rs`）
-- 层级合法性由 SQLite trigger + 应用层检查双重强制（`ResourceNodeType::may_under`、`db::nodes::move_many`）
-- 完整 CRUD + 复制接口 + 级联清理（级联由 schema 外键保证，客户端只提交要删的 id）+ 模块 / 集合 / 接口上下移排序（`db/nodes.rs`）
-- **响应历史持久化到 SQLite**（`db/response_history.rs`）：每个接口最多 10 条，超出由 `append` 裁掉最旧的；响应体有大小上限，被截断时记 `body_truncated`，查看器据此明说而不是把半个文档当完整的显示
+- Project → Module → Collection（可递归，深度不限）→ Endpoint，以及 Environment 与 Response（`crates/simple-post-core/src/domain.rs`）
+- 整棵树存在一张 `nodes` 表里，用 `type` 区分；所属项目以 `root_id` 写在每一行上，一次索引读即可回答「这条记录属于哪个项目」（`crates/simple-post-core/src/db/schema.sql`）
+- 接口的请求配置（method、url、auth、body、headers、params、tags）单独放在 `endpoint_details` 表里，这些字段对模块与集合没有意义（`db/endpoint_details.rs`）
+- 层级合法性由 SQLite 触发器与应用层检查同时强制（`ResourceNodeType::may_under`、`db::nodes::move_many`）
+- 完整增删改查、复制接口、级联清理，以及模块、集合、接口的上下移排序（`db/nodes.rs`）
+- 响应历史持久化在 SQLite 里，每个接口最多保留 10 条；响应体超过上限时记 `body_truncated`，查看器据此说明，而不是把半个文档当成完整内容显示（`db/response_history.rs`）
 
 **桌面与界面**
 
-- 项目 / 环境切换、全局搜索（`Ctrl+K`）、MCP Server 状态指示器、设置入口（`src/features/top-bar/`）
-- 侧边树：递归渲染集合层、method 彩色徽标、双击改名、右键菜单（新建 / 重命名 / 上下移 / 删除 / 复制）、删除确认（`src/features/project-tree/`）
-- 拖拽三种落点：集合正中间 = 移进该子树，上 / 下边缘 = 同级前后插入（`src/lib/tree-index.ts`）
-- 请求测试器：method / URL（`{{var}}` 高亮 + 变量选择浮层）/ Params / Headers / Body / Auth / Docs / Tests，CodeMirror 6 JSON 编辑器带实时校验，Markdown 分屏预览，Auth 支持 None / Bearer / Basic / API Key，Tag chips（`src/features/http-tester/`）
-- 复制为 cURL、保存为接口示例（`src/lib/http-build.ts`）
-- 响应区：状态码 / 耗时 / 大小、Pretty / Raw / Headers 三视图、复制与下载、历史折叠条可点击重放（`src/features/response-viewer/`）
-- `Ctrl+K` 命令面板：跨项目 / 模块 / 集合 / 接口模糊搜索 + 内置命令（切换环境、切换主题、打开设置、新建项目、复制 URL）
-- 主题 dark / light / system 三选一，`<html>` 上切 class，刷新保留且无白屏闪烁（`src/styles/globals.css`）
-
-**动态变量（声明一次，到处能用）**
-
-- 一条动态变量 = 变量名 → 数据源 → 抽取规则 → 缓存时长；请求体里写 `{{sns}}`，发送时程序自动取数、抽取、缓存并替换（`crates/simple-post-core/src/dynamic/`、`crates/simple-post-mcp/src/dynamic/`）
-- 数据源有两种形态：**引用树里的一个接口**（复用它自己的 base URL、鉴权与前置脚本）或**一份内联请求**；引用的接口必须与动态变量在同一个项目里，否则那条定义会被拒
-- 缓存按（定义 × 环境）存放，落在 SQLite 里，故桌面端、`serve-web` 与 MCP 守护进程三个进程看到的是同一份值；同一时刻的并发取数只发一次请求
-- 取数失败**不影响这次请求的成败**：变量按缺失处理（`{{sns}}` 原样留在 body 里），失败原因在面板与响应区里明说
-- 取数是一次「读」：数据源端点的前置脚本照跑，但它写的环境变量**不落库**——取数不该顺手改写项目的环境
-- 界面上有一个「动态变量」面板：新建 / 编辑定义、看当前值与缓存年龄、手动改值（覆盖值优先于自动取回的值）、一键刷新、恢复自动获取；并能回答「这个变量被哪些接口引用了」与「你是不是把名字写错了」
-- 请求编辑器的变量选择浮层把环境变量与动态变量并进同一份候选，标出「自动取回 / 手动改写」与缓存年龄
-- MCP 侧有 7 个工具（`dynamic_var_*`），Agent 可以自己声明、取数与改值；`dynamic_var_resolve` 会真的发出站请求，故与 `api_call_endpoint` 同级信任
-
-**请求脚本（沙箱隔离）**
-
-
-
-- 端点与集合都能配**前置脚本**（pre-request）与**测试脚本**（test）：端点的住在 `endpoint_details` 行里，集合的住在 `node_scripts` 表（`db/endpoint_details.rs`、`db/node_scripts.rs`）
-- 前置脚本在变量替换之后、请求发出之前跑，可改写 URL / headers / body；**发出去的就是改写后的那个请求**，请求日志里看到的也是它
-- 测试脚本在响应回来之后跑，可断言并写回环境变量（`pm.environment.set`），下一个请求立刻能读到
-- 脚本顺序对齐 Postman 官方文档：集合 → 嵌套集合 → 接口，前置与测试同序
-- 每段脚本是原子的：抛错或被中断时，它对请求、对环境变量与请求作用域变量的改动都被丢弃，日志与断言作为诊断保留
-- **发送时跑的是界面上此刻生效的那一段脚本**（草稿优先），故改完还没保存就发送，跑的也是新脚本；集合那两段仍从库里读
-- 前置脚本写下的环境变量，测试脚本读得到（Postman 就是这个行为）
-- 脚本在**嵌入式 QuickJS 沙箱**里跑（`simple-post-core/src/script/`）：宿主能力只有一段固定 JS 前导给出的那几样（`pm.request` / `pm.environment` / `pm.response` / `pm.test` / `pm.expect` / `console.log`），**够不到文件、网络与进程**
-- 硬限额：每阶段 1000 ms 墙钟（超时真的打断死循环，不等它跑完）、32 MB 内存、256 KB 栈；日志与断言条数有上限
-- 脚本失败**不影响这次请求的成败**：失败脚本的改动被丢弃、变量写入不落库，失败信息在响应面板的「脚本」页里单独呈现；环境变量写不回库同样只记一条错误，不改写请求的结果
-- 整条执行序列（装配链 → 前置脚本 → 发出 → 测试脚本 → 变量回写）只在 `core::script::send_with_scripts` 一处实现，桌面端与 MCP 端共用，故两侧不可能分叉
-- **导入 Postman 集合时脚本跟着进来**：条目上的 `event[]`（前置 / 测试）落成该接口或该集合的脚本，嵌套 folder 上的落成集合的脚本；整份集合根上的脚本在本仓库没有落点（顶层条目各自成一个分组），导入时逐条出诊断说明
-
+- 项目与环境切换、全局搜索（`Ctrl+K`）、MCP 进程状态指示器、设置入口（`src/features/top-bar/`）
+- 侧边树递归渲染集合层级、method 彩色徽标、双击改名、右键菜单、删除确认（`src/features/project-tree/`）
+- 拖拽支持三种落点：集合正中间是移进该子树，上边缘与下边缘是同级前后插入（`src/lib/tree-index.ts`）
+- 请求测试器提供 method、URL（`{{var}}` 高亮与变量选择浮层）、Params、Headers、Body、Auth、Docs、脚本六个标签页；CodeMirror 6 的 JSON 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
+- 复制为 cURL、保存接口定义（`src/lib/http-build.ts`）
+- 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers 三种视图，支持复制与下载，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
+- 命令面板跨项目、模块、集合、接口模糊搜索，并内置切换环境、切换主题、打开设置、新建项目、新建模块、复制当前接口 URL 等命令
+- 主题支持 dark、light、system 三种，在 `<html>` 上切换 class，刷新后保留且没有白屏闪烁（`src/styles/globals.css`）
 
 **设置**
 
-- 服务（baseUrl）：项目级共享清单，每个模块每个环境各填各的地址，表头按「模块 × 服务」逐格展开，空格即无地址、不继承
-- 环境变量 `{{var}}` 实时编辑，随项目创建，可重命名 / 删除
-- MCP Server 状态：运行指示 + daemon 上报的已注册工具列表（数量随当前策略变化）+ daemon 日志 tail（最近 500 行，可折叠）
-- 主题、请求设置（超时 / 跟随重定向 / 最大响应体积）、快捷键速查（`src/features/settings/`）
+- 服务（baseUrl）：项目级共享清单，每个模块在每个环境各填各的地址，表头按「模块 × 服务」逐格展开，空格即无地址、不继承
+- 环境变量 `{{var}}` 实时编辑，随项目创建，可以重命名与删除
+- MCP 进程状态：运行指示、daemon 上报的已注册工具列表、daemon 日志尾部（最近 500 行，可折叠）
+- 主题、请求设置（超时、跟随重定向、最大响应体积）、快捷键速查（`src/features/settings/`）
 
 **关于数据**
 
-- 首次启动**不注入任何演示数据**，只建表，项目树是空的。`crates/simple-post-core/src/db/fixtures.json` 仅是 Rust 测试夹具，只能通过 `#[cfg(test)] pub(crate) mod test_support` 触达，生产构建里不存在这个路径。
-- 偏好（主题 / 请求设置）持久化在 localStorage，业务数据在 SQLite。
-
----
+- 首次启动不写入任何演示数据，只创建数据库表，项目树是空的。`crates/simple-post-core/src/db/fixtures.json` 仅供 Rust 测试使用，只能通过 `#[cfg(test)] pub(crate) mod test_support` 访问，生产构建里不存在这个路径。
+- 偏好设置（主题）保存在 localStorage，业务数据保存在 SQLite。
 
 ## 路线图
 
-v0.1.x 已交付：Tauri 桌面应用 + `serve-web` 无头 Web + 独立 MCP 二进制，共用一套 Rust 核心。勾选状态以对应 issue 的状态为准。
+v0.1.x 已交付：Tauri 桌面应用、`serve-web` 无头 Web 与独立 MCP 二进制，三者共用一套 Rust 核心。勾选状态以对应 issue 的状态为准。
 
 ### v0.2
 
 已全部交付。
 
-- [x] 鉴权扩展：Bearer / Basic / API Key（含 apikey 的 header / query 注入）
+- [x] 鉴权扩展：Bearer、Basic、API Key（含 apikey 的 header 与 query 注入）
 - [x] 鉴权扩展：OAuth2 简化版（#2）
 - [x] 响应历史持久化到 SQLite（#1）
-- [x] MCP 进程可视化补齐：daemon 日志 tail（PID / 状态已实现）（#6）
+- [x] MCP 进程可视化补齐：daemon 日志尾部（PID 与状态已实现）（#6）
 - [x] 导入 Postman v2.1（#3）
 - [x] 导入 OpenAPI 3.0 文档（#4）
 - [x] 导出 OpenAPI 3.0（#5）
-- [x] MCP 写工具：`endpoint_create` / `endpoint_update` / `endpoint_search` / `endpoint_delete`
-- [x] 仓库治理：说明内容 / CI 提速与镜像发布 / 协作规范 / 注释中文化（#23 #24 #25 #26）
+- [x] MCP 写工具：`endpoint_create`、`endpoint_update`、`endpoint_search`、`endpoint_delete`
+- [x] 仓库治理：说明内容、CI 提速与镜像发布、协作规范、注释中文化（#23 #24 #25 #26）
 
 ### v0.3
 
-- [ ] AI 文档生成（端点 → Markdown）（#9）
-- [ ] AI 测试用例生成（schema → 测试）（#10）
-- [x] 请求脚本（pre-request / test 脚本，沙箱隔离）（#7）
+- [ ] AI 文档生成（接口转 Markdown）（#9）
+- [ ] AI 测试用例生成（schema 转测试）（#10）
+- [x] 请求脚本（pre-request 与 test 脚本，沙箱隔离）（#7）
 - [x] 动态变量（声明一次 → 取数 → 缓存 → 手动编辑）（#109）
-- [ ] 集合批量运行 + 简易报告（#8）
+- [ ] 集合批量运行与简易报告（#8）
 - [ ] 团队协作（Git 同步 JSON 工作区，可选）（#11）
 
 ### v1.0
 
-- [ ] WebSocket / SSE / GraphQL 协议支持（#12）
-- [ ] Mock Server（从集合生成 mock 服务 + 故障注入）（#13）
-- [ ] 性能压测（简易，与 `npm run perf:bench` 的开发期基准区分）（#14）
-- [ ] 插件系统：第三方 MCP 工具注册（须保住双闸 fail-closed）（#15）
+- [ ] WebSocket、SSE 与 GraphQL 协议支持（#12）
+- [ ] Mock Server（从集合生成 mock 服务，支持故障注入）（#13）
+- [ ] 性能压测（与开发期的 `npm run perf:bench` 基准区分）（#14）
+- [ ] 插件系统：第三方 MCP 工具注册（须保住两道校验的 fail-closed 行为）（#15）
 
----
+## 贡献
 
-## 决策记录
-
-- **技术栈**：Tauri 2 + React 18 + TypeScript（前端） + Cargo workspace（后端）。四个 crate：
-  - `simple-post`（`src-tauri/`）—— Tauri 外壳与 CLI
-  - `simple-post-server`（`crates/simple-post-server/`）—— `serve-web` 宿主，无 Tauri 依赖，容器镜像构建的就是它
-  - `simple-post-core`（`crates/simple-post-core/`）—— 领域模型与 SQLite，无头
-  - `simple-post-mcp`（`crates/simple-post-mcp/`）—— MCP 工具与 daemon
-
-  依赖单向：`simple-post → simple-post-server → simple-post-core`。`src-tauri` 无条件链接 `tauri`，会把 GTK / WebKit 拖进 Linux 构建——服务半个进程拆出去正是为了这个。
-- **存储**：SQLite（`rusqlite` + `r2d2`），整个 workspace 通过 `simple-post-core::db` 共享连接池。WAL + `foreign_keys=ON` + `busy_timeout=3000`
-- **MCP 模式**：stdio 子进程桥（本地客户端）+ HTTP `POST /mcp`（`serve-web` 暴露，支持 Bearer 鉴权与反代 base path）
-- **UI 风格**：语义 token 层，双主题作用域（`globals.css` 的 `:root` 与 `.dark`），Tailwind 变量消费；dark / light / system 三态，切换作用于 `<html>` 的 class
-- **数据位置**：三种分发形态共用一套 Rust 核心与同一个数据目录（`SIMPLE_POST_DATA_DIR`，未设时 `%APPDATA%/simple-post`）
-- **请求脚本的沙箱**：嵌入式 QuickJS（`rquickjs`），不是独立受限进程、也不是纯 Rust 的 boa。
-  - 只有它同时给出**真墙钟打断**（`set_interrupt_handler` → 抛不可捕获异常）、**内存上限**（`set_memory_limit`）与**栈上限**（`set_max_stack_size`）。issue 要求「超时要能中断执行而不是等它自己跑完」，boa 的循环计数兜得住 `while(true)` 却兜不住无循环的长计算，也没有内存上限
-  - 不新增工具链要求：Windows 端已因 Tauri 需要 MSVC，Docker 构建阶段（`rust:bookworm`）已带 gcc，rquickjs 的预生成绑定覆盖 windows-msvc / linux-gnu / aarch64-linux-gnu
-  - 宿主能力只有一段固定 JS 前导给出的那几样，故「脚本够不到文件 / 网络 / 进程」不靠逐个禁用，而靠根本没有那条路
-  - 代价：workspace 的 MSRV 从 1.77.2 抬到 1.87（rquickjs 的要求；CI 用 `stable`，无 MSRV 门禁 job）
-
----
-
-## 贡献与工具链
-
-开发规范、架构约定、高风险点（schema 迁移、MCP 双闸、dual-transport 五处协同）见 [`AGENTS.md`](AGENTS.md)。协作流程见 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)。
+开发规范、架构约定与高风险点（数据库迁移、MCP 两道校验、双通道实现的五处协同）写在 [`AGENTS.md`](AGENTS.md) 里。协作流程见 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)。
 
 ```bash
 npm run check   # 提交前跑这一条即可覆盖全部本地门禁
