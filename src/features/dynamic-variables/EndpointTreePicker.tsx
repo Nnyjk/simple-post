@@ -8,13 +8,14 @@
  * 筛选框走另一条路：跨全部项目搜接口名、URL 与描述，回来的是命中项与它所在的路径
  * （项目 / 模块 / 集合…）——在大工作区里按名字找一条接口比一层层展开快得多。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronRight, FolderTree, Loader2, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import type { NodeSearchHit, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { cn, focusRing } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { createNodeSearch, type NodeSearch } from './node-search';
 
 export interface EndpointTreePickerProps {
   /** 选中的接口 id。空串 = 没选。 */
@@ -62,37 +63,30 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
 
   // 筛选：输入停下 250 ms 才发一次请求，免得每敲一个字就跨库搜一遍。
   //
-  // 每次输入都起一个新 effect。旧的那次可能已经把请求发出去了，它的回调若照写状态，
-  // 就会把上一轮的结果盖到这一轮上——故用 `cancelled` 标出「我这一轮已经过期」。
-  const searchTimer = useRef<number | null>(null);
+  // 防抖与「旧一轮的结果不覆盖新一轮」由 `createNodeSearch` 管（`node-search.ts`）：
+  // 它给每一轮编号，只有最新的一轮才写状态。组件只负责把结果放进 state。
+  //
+  // 控制器在首次渲染时造一次（`useState` 的惰性初始化），之后一直用同一个。
+  const [search] = useState<NodeSearch>(() =>
+    createNodeSearch<NodeSearchHit>({
+      run: (text) =>
+        invokeCmd<NodeSearchHit[]>(COMMANDS.nodesSearchPaths, { query: text, limit: 50 }),
+      onSearching: setSearching,
+      onResults: setHits,
+      onError: (e) => {
+        console.error('[dynamic-variables] node search failed', e);
+        // 搜索失败时把上一轮的结果清掉：留着它会让人以为当前这轮搜到了它。
+        setHits([]);
+      },
+    }),
+  );
+
   useEffect(() => {
-    const text = query.trim();
-    let cancelled = false;
-    if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
-    if (text === '') {
-      setHits([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    searchTimer.current = window.setTimeout(() => {
-      void invokeCmd<NodeSearchHit[]>(COMMANDS.nodesSearchPaths, { query: text, limit: 50 })
-        .then((rows) => {
-          if (!cancelled) setHits(rows);
-        })
-        .catch((e: unknown) => {
-          console.error('[dynamic-variables] node search failed', e);
-          if (!cancelled) setHits([]);
-        })
-        .finally(() => {
-          if (!cancelled) setSearching(false);
-        });
-    }, 250);
-    return () => {
-      cancelled = true;
-      if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
-    };
-  }, [query]);
+    search.start(query.trim());
+  }, [query, search]);
+
+  // 组件卸载时作废在途的请求：它回来之后不该再写 state。
+  useEffect(() => () => search.cancel(), [search]);
 
   /** 展开一行：第一次展开才去取孩子。 */
   const toggle = useCallback((key: string, load: () => Promise<void>) => {
