@@ -69,8 +69,7 @@ pub struct SourceContext {
     pub project: Project,
     /// 数据源端点所在的模块。base URL 的取值住在 (环境 × 服务 × 模块) 的格子里。
     pub module_id: Option<String>,
-    /// 取数用的服务。定义点名了就用它；没点名就用数据源端点自己绑的服务，它没绑就用
-    /// 数据源端点所属项目的默认服务（★）。
+    /// 取数用的服务。定义点名了就用它；没点名就用数据源端点所属项目的默认服务（★）。
     pub base_url_definition_id: Option<String>,
 }
 
@@ -81,8 +80,8 @@ pub struct SourceContext {
 /// - 数据源是内联请求：没有项目、没有环境、没有服务——内联请求自带完整地址。
 /// - 环境：定义点名的那个；没点名就用数据源端点所属项目的**第一个可用环境**
 ///   （按名字排序，与选择器里看到的顺序一致）。
-/// - 服务：定义点名的那个；没点名就用数据源端点自己绑的服务；它也没绑就用数据源端点
-///   所属项目的默认服务（★）。
+/// - 服务：定义点名的那个；没点名就用数据源端点所属项目的默认服务（★）。数据源端点
+///   自己绑的服务不在这条链上。
 pub fn source_context(pool: &db::DbPool, def: &DynamicVariable) -> Result<SourceContext, AppError> {
     let Some(endpoint_id) = def.source_endpoint_id.as_deref() else {
         return Ok(SourceContext {
@@ -111,19 +110,13 @@ pub fn source_context(pool: &db::DbPool, def: &DynamicVariable) -> Result<Source
             .and_then(|list| list.into_iter().next()),
     };
 
-    // 服务：定义点名的那个优先。没点名就用数据源端点自己绑的服务；它也没绑就用项目的
-    // 默认服务（★）。
+    // 服务：定义点名的那个优先。没点名就用数据源端点所属项目的默认服务（★）。
+    //
+    // 数据源端点自己绑的服务**不在**这条链上：定义没点名服务时一律用项目的 ★，
+    // 否则取数会打到那个端点自己绑的 host 上，而那条绑定是端点自己的选择。
     let base_url_definition_id = match def.source_base_url_definition_id.as_deref() {
         Some(def_id) => Some(def_id.to_string()),
-        None => {
-            let own = db::with_conn(pool, |c| db::endpoint_details::get(c, endpoint_id))
-                .ok()
-                .and_then(|detail| detail.base_url_definition_id.clone());
-            match own {
-                Some(def_id) => Some(def_id),
-                None => project.default_base_url_definition_id.clone(),
-            }
-        }
+        None => project.default_base_url_definition_id.clone(),
     };
 
     Ok(SourceContext {
