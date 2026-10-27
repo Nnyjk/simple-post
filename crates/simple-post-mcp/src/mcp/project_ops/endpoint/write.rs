@@ -144,8 +144,11 @@ pub(super) async fn tool_endpoint_update(
         base_url_override: patch_field::<String>(&patch_obj, "base_url_override")?,
         params: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "params")?
             .map(coerce_key_values),
-        path_params: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "path_params")?
-            .map(|rows| Some(coerce_key_values(rows))),
+        // 路径参数是域类型里的 `double_option` 字段（缺席 = 不动，`null` = 清空），
+        // 故这里走 `patch_field` 而不是 `patch_value_field`：同一个字段在 REST / Tauri
+        // 与 MCP 两条路上必须是同一个意思，否则调用方会一边清得掉、一边报 Validation。
+        path_params: patch_field::<Vec<KeyValueInput>>(&patch_obj, "path_params")?
+            .map(|rows| rows.map(coerce_key_values)),
         headers: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "headers")?
             .map(coerce_key_values),
         body: patch_value_field(&patch_obj, "body")?,

@@ -184,7 +184,7 @@ body_content, never here."
                 "endpoint_id": { "type": "string" },
                 "patch": {
                     "type": "object",
-                    "description": "Fields to change. Omit a field to leave it as-is; send null to clear it.",
+                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `environment_id`, `base_url_definition_id`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script` and `test_script` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
                     "properties": {
                         "name": { "type": "string" },
                         "description": { "type": ["string", "null"] },

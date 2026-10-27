@@ -294,6 +294,70 @@ async fn a_malformed_field_aborts_the_whole_patch() {
     );
 }
 
+/// 路径参数的 patch 是域类型里的 `double_option` 字段：缺席 = 不动，`null` = 清空。
+///
+/// 同一个字段在 REST / Tauri 与 MCP 两条路上必须是同一个意思，故 MCP 侧也接受
+/// `null` 清空 —— 否则调用方会一边清得掉、一边拿到 Validation 错误。
+#[tokio::test]
+async fn endpoint_update_clears_the_path_parameters_with_null() {
+    let (st, id) = fixture();
+
+    // 先写进去一条。
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "path_params": [{ "key": "id", "value": "42" }] }
+        }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+    assert_eq!(
+        detail_of(&st, &id).path_params.len(),
+        1,
+        "路径参数应当真的落库了"
+    );
+
+    // 再用 null 清空。
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({ "endpoint_id": id, "patch": { "path_params": null } }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+    assert!(
+        detail_of(&st, &id).path_params.is_empty(),
+        "`path_params: null` 应当清空这一列"
+    );
+}
+
+/// 缺席 = 不动：没点名 `path_params` 的 patch 不该动那一列。
+#[tokio::test]
+async fn endpoint_update_leaves_the_path_parameters_alone_when_the_field_is_absent() {
+    let (st, id) = fixture();
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "path_params": [{ "key": "id", "value": "42" }] }
+        }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({ "endpoint_id": id, "patch": { "url": "/y" } }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+    assert_eq!(
+        detail_of(&st, &id).path_params.len(),
+        1,
+        "没点名 `path_params` 的 patch 不该动那一列"
+    );
+}
+
 /// An empty patch used to be a silent success that wrote nothing and
 /// returned the unchanged endpoint, which reads as "it worked".
 #[tokio::test]
