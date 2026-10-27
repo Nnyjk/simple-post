@@ -95,7 +95,7 @@ pub struct EndpointSpec {
     /// 端点本身。
     pub endpoint: EndpointDefinition,
     /// 同一个父下已经有同名同 method 同 url 的端点时怎么办。缺省是 `reuse`。
-    #[serde(default)]
+    #[serde(default, alias = "ifExists")]
     pub if_exists: Option<String>,
 }
 
@@ -166,7 +166,7 @@ pub struct EndpointDefinition {
     ///
     /// 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，路径参数要被
     /// 替换进路径本身。
-    #[serde(default)]
+    #[serde(default, alias = "pathParams")]
     pub path_params: Option<Vec<KeyValueInput>>,
     #[serde(default)]
     pub headers: Option<Vec<KeyValueInput>>,
@@ -332,6 +332,16 @@ pub fn upsert_endpoint_spec(
     // 那是一次显式的决定，不该由一份接口规格顺带做掉。
     let project = db::projects::get(conn, project_id)?;
 
+    // 端点自绑的环境与服务必须属于这份规格指名的项目：环境里的变量与
+    // (环境 × 服务 × 模块) 那一格 URL 都属于那个项目，绑一个别的项目的等于让这个
+    // 项目去读另一个项目的值。校验放在最前面，不通过就整份规格不落库。
+    check_endpoint_bindings(
+        conn,
+        &project.id,
+        spec.endpoint.environment_id.as_deref(),
+        spec.endpoint.base_url_definition_id.as_deref(),
+    )?;
+
     let if_exists = EndpointIfExists::parse(spec.if_exists.as_deref().unwrap_or(""))?;
 
     // ---- 模块 ----
@@ -370,6 +380,35 @@ pub fn upsert_endpoint_spec(
         service,
         endpoint,
     })
+}
+
+/// 端点自绑的环境与服务必须属于这份规格指名的项目。
+///
+/// 环境里的变量与 (环境 × 服务 × 模块) 那一格 URL 都属于那个项目，所以绑一个别的
+/// 项目的环境或服务，等于让这个项目读另一个项目的值。
+fn check_endpoint_bindings(
+    conn: &mut Connection,
+    project_id: &str,
+    environment_id: Option<&str>,
+    base_url_definition_id: Option<&str>,
+) -> Result<(), AppError> {
+    if let Some(env_id) = environment_id {
+        let owner = db::environments::get(conn, env_id)?.project_id;
+        if owner != project_id {
+            return Err(AppError::Validation(format!(
+                "环境 '{env_id}' 属于项目 '{owner}'，不属于这份规格指名的项目 '{project_id}'"
+            )));
+        }
+    }
+    if let Some(def_id) = base_url_definition_id {
+        let owner = db::base_url_defs::project_id_of(conn, def_id)?;
+        if owner != project_id {
+            return Err(AppError::Validation(format!(
+                "服务 '{def_id}' 属于项目 '{owner}'，不属于这份规格指名的项目 '{project_id}'"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// 模块：给 `module_id` 就是用它（必须属于这个项目且确实是模块），
@@ -432,6 +471,16 @@ fn resolve_parent_of(
             if node.kind != ResourceNodeType::Collection {
                 return Err(AppError::Validation(format!(
                     "'{id}' 是一个模块或端点，不是集合"
+                )));
+            }
+            // 集合必须挂在这个模块下。base URL 住在 (环境 × 服务 × 模块) 那一格，
+            // 端点挂在别的模块下时，那一格就写错了地方。
+            let owner = db::nodes::module_id_of(conn, &node.id)?;
+            if owner.as_deref() != Some(module_id) {
+                return Err(AppError::Validation(format!(
+                    "集合 '{id}' 挂在模块 '{}' 下，而这份规格指名的是 '{module_id}'；\
+                     base URL 那一格按模块写，两者必须一致",
+                    owner.as_deref().unwrap_or("（没有模块）")
                 )));
             }
             Ok((node.id, Vec::new()))

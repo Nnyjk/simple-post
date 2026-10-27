@@ -764,6 +764,131 @@ fn an_unknown_verb_is_refused() {
 }
 
 // =========================================================================
+// 两种拼写
+// =========================================================================
+
+/// 多词字段两种拼写都收：`ifExists` 与 `pathParams` 与 snake_case 落在同一个类型上。
+///
+/// REST 路由与桌面 command 那条线通篇用 camelCase，MCP 那条线用 snake_case，而
+/// `deny_unknown_fields` 会把少一个别名变成整份规格被拒。
+#[test]
+fn the_camel_case_spelling_of_multi_word_fields_is_accepted() {
+    let (pool, _dir) = fresh_pool();
+    let spec = json!({
+        "projectId": "p_demo",
+        "module": "营销",
+        "ifExists": "duplicate",
+        "endpoint": {
+            "name": "查订单",
+            "method": "GET",
+            "url": "/api/orders/{id}",
+            "pathParams": [{ "key": "id", "value": "42" }]
+        }
+    });
+
+    let first = apply_ok(&pool, spec.clone());
+    let second = apply_ok(&pool, spec);
+
+    assert_eq!(
+        first.endpoint.resource.detail.path_params.len(),
+        1,
+        "pathParams 必须落进路径参数那一份"
+    );
+    assert_eq!(first.endpoint.resource.detail.path_params[0].key, "id");
+    assert_ne!(
+        first.endpoint.resource.node.id, second.endpoint.resource.node.id,
+        "ifExists=duplicate 每次都另建一个端点"
+    );
+}
+
+// =========================================================================
+// 跨模块与跨项目
+// =========================================================================
+
+/// 集合必须挂在规格指名的那个模块下。
+///
+/// base URL 住在 (环境 × 服务 × 模块) 那一格：集合在别的模块下时，规格把那一格写进
+/// 一个模块，端点却挂在另一个模块下，发送时读的是另一个格子。
+#[test]
+fn a_collection_under_another_module_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    // fixture 里 `c_order_crud` 挂在 `m_order` 之下，而这份规格指名的是「支付」模块。
+    let e = apply(
+        &pool,
+        json!({
+            "project_id": "p_demo",
+            "module": "支付",
+            "collection_id": "c_order_crud",
+            "endpoint": { "name": "查询活动", "method": "GET", "url": "/api/campaigns" }
+        }),
+    );
+    assert!(e.to_string().contains("c_order_crud"), "{e}");
+    assert!(e.to_string().contains("m_order"), "{e}");
+}
+
+/// 端点自绑的环境必须属于规格指名的项目。
+///
+/// 环境里的变量属于那个项目，绑一个别的项目的环境等于让这个项目去读那个项目的值。
+#[test]
+fn an_endpoint_bound_to_another_projects_environment_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    // fixture 里的环境都属于 p_demo，所以先在另一个项目里造一个。
+    let foreign_env_id = db::with_conn(&pool, |c| {
+        let env = crate::domain::Environment {
+            id: "env_invoice".to_string(),
+            project_id: "p_invoice".to_string(),
+            name: "dev".to_string(),
+            base_urls: Default::default(),
+            module_base_urls: Default::default(),
+            variables: Default::default(),
+            disabled_variables: Vec::new(),
+            is_active: false,
+        };
+        db::environments::create(c, &env)?;
+        Ok(env.id)
+    })
+    .unwrap();
+
+    let e = apply(
+        &pool,
+        json!({
+            "project_id": "p_demo",
+            "module": "营销",
+            "endpoint": {
+                "name": "查询活动",
+                "method": "GET",
+                "url": "/api/campaigns",
+                "environment_id": foreign_env_id
+            }
+        }),
+    );
+    assert!(e.to_string().contains("env_invoice"), "{e}");
+    assert!(e.to_string().contains("p_invoice"), "{e}");
+}
+
+/// 端点自绑的服务必须属于规格指名的项目。
+#[test]
+fn an_endpoint_bound_to_another_projects_service_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    // fixture 里 `def_invoice_default` 属于 `p_invoice`。
+    let e = apply(
+        &pool,
+        json!({
+            "project_id": "p_demo",
+            "module": "营销",
+            "endpoint": {
+                "name": "查询活动",
+                "method": "GET",
+                "url": "/api/campaigns",
+                "base_url_definition_id": "def_invoice_default"
+            }
+        }),
+    );
+    assert!(e.to_string().contains("def_invoice_default"), "{e}");
+    assert!(e.to_string().contains("p_invoice"), "{e}");
+}
+
+// =========================================================================
 // 落库的原子性
 // =========================================================================
 
