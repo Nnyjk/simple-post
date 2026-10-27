@@ -14,6 +14,7 @@ pub(crate) mod preferences;
 pub(crate) mod projects;
 pub(crate) mod request_settings;
 pub(crate) mod response_history;
+pub(crate) mod spec;
 
 pub(crate) use base_url_defs::{
     base_url_defs_create, base_url_defs_delete, base_url_defs_list, base_url_defs_set_default,
@@ -56,3 +57,4 @@ pub(crate) use request_settings::{request_settings_get, request_settings_put};
 pub(crate) use response_history::{
     response_history_append, response_history_clear, response_history_list,
 };
+pub(crate) use spec::spec_upsert;

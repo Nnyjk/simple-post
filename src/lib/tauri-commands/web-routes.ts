@@ -362,6 +362,17 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: () => '/api/interchange/export/document',
   },
 
+  // ----- interface specs -----
+  // 请求体就是那份规格本身，不带外层包装：它与 MCP 工具 `spec_upsert` 的参数
+  // 逐字段相同，故一份规格可以从 MCP 客户端原样搬到 HTTP 调用方。
+  //
+  // 字段名两种拼写都收（`project_id` 与 `projectId`）：服务端落在同一个类型上。
+  [COMMANDS.specUpsert]: {
+    method: 'POST',
+    path: () => '/api/spec/upsert',
+    body: (a) => a.spec,
+  },
+
   // ----- OAuth 2.0 -----
   // 与 Tauri 命令同一个 `OAuth2TokenRequest`（`{ auth, manual?, force? }`），
   // 故请求体就是 args 本身，两种形态无需翻译。

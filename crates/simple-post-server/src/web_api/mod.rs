@@ -261,6 +261,14 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/dynamic-variables/{id}/refresh",
             post(dynamic_variables_refresh),
         )
+        // ---- 一份接口规格 ----
+        //
+        // 一次调用落一整份规格：模块、集合路径上的每一级、环境、服务与端点。
+        // 与 MCP 工具 `spec_upsert` 落的是同一份东西（逻辑在 `crate::spec_api`）。
+        //
+        // 请求体是整份规格，但一份规格只有几 KB —— axum 的默认上限 2 MB 绰绰有余，
+        // 故不必像 interchange 那四条那样显式抬一次上限。
+        .route("/api/spec/upsert", post(spec_upsert))
         // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))
         .route("/api/mcp/logs", get(mcp_log_tail))

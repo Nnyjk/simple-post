@@ -69,6 +69,13 @@ export const COMMANDS = {
   interchangeExportPreview: 'interchange_export_preview',
   interchangeExportDocument: 'interchange_export_document',
 
+  // ----- interface specs -----
+  // 一份接口规格：模块、集合路径上的每一级、环境、服务与端点，一次调用落完。
+  // 每一部分按名字找、找不到就建，故反复应用同一份规格不改变任何东西。
+  //
+  // 参数是**一份规格**（`spec`），不是一堆零散字段——那是这条命令存在的理由。
+  specUpsert: 'spec_upsert',
+
   // ----- dynamic variables -----
   // 一条声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里写 `{{sns}}`，
   // 发送时程序取数、抽取、缓存并替换。
