@@ -90,35 +90,48 @@ impl RequestIdentity {
     /// 刻意不用 `std::collections::hash_map::DefaultHasher`：它明确不保证跨版本稳定，
     /// 换个 Rust 版本重编就会让全部历史指纹失效——而指纹的用处恰恰是跨时间比对。
     /// 也刻意不用 `sha2`：为一个短 id 拖一个哈希依赖不划算，这里要的只是稳定的短标识。
+    ///
+    /// **每一段都先写自己的长度再写原文**：长度是这一段的终止标记，故两段不同的分法
+    /// 不可能拼出同一条字节流。少了它，query 段与 path_params 段的分界就说不清——
+    /// query 是 `a=1,b=2`、path_params 是 `b=2` 的两个请求会拼出同一条字节流，拿到
+    /// 同一个指纹，导入时第二个被当成重复而跳过。那是丢请求，不是去重。
     pub fn fingerprint(&self) -> String {
         const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
         const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
 
-        let mut hash = OFFSET;
-        let mut eat = |bytes: &[u8]| {
-            for b in bytes {
-                hash ^= *b as u128;
-                hash = hash.wrapping_mul(PRIME);
-            }
-        };
-        eat(self.method.as_bytes());
-        eat(b"\n");
-        eat(self.path.as_bytes());
+        let mut buf: Vec<u8> = Vec::new();
+        push_field(&mut buf, &self.method);
+        push_field(&mut buf, &self.path);
+        // 两段参数各自带自己的条数：条数说清这一段有几个条目，故 query 段与
+        // path_params 段的分界不会串到一处去。
+        push_field(&mut buf, &self.query.len().to_string());
         for q in &self.query {
-            eat(b"\n");
-            eat(q.as_bytes());
+            push_field(&mut buf, q);
         }
-        // 路径参数的值同样要算进去。`path` 里留着 `{id}` 这个占位符，两个 `/users/{id}`
-        // 只差 id 的值时，路径文本一模一样 —— 不把值算进去，这两个请求就得到同一个
-        // 指纹，导入时第二个会被当成重复而跳过。那是丢请求，不是去重。
+        push_field(&mut buf, &self.path_params.len().to_string());
         for p in &self.path_params {
-            eat(b"\n");
-            eat(p.as_bytes());
+            push_field(&mut buf, p);
         }
-        eat(b"\n");
-        eat(self.body.as_bytes());
+        push_field(&mut buf, &self.body);
+
+        let mut hash = OFFSET;
+        for b in &buf {
+            hash ^= *b as u128;
+            hash = hash.wrapping_mul(PRIME);
+        }
         format!("{hash:032x}")[..16].to_string()
     }
+}
+
+/// 把一段文本写进指纹的字节流：先写长度，再写 `:`，最后写原文。
+///
+/// 长度是这一段的终止标记，故字节流可以被唯一地拆回原来那几段。少了它，一个
+/// 值里带换行的参数就能伪装成两个参数（`a=1\nb=2` 与 `a=1` + `b=2` 拼出同一条
+/// 字节流），两个不同的请求就撞成同一个指纹。
+fn push_field(buf: &mut Vec<u8>, text: &str) {
+    buf.extend_from_slice(text.len().to_string().as_bytes());
+    buf.push(b':');
+    buf.extend_from_slice(text.as_bytes());
 }
 
 /// `BodyMode` 的线上取值。它没有 `as_str()`（不像 `AuthType`），而为一个短标签
