@@ -15,18 +15,37 @@ crates/simple-post-core/
     │   ├── mod.rs             # init, with_conn, with_tx, schema
     │   ├── schema.sql         # CREATE TABLE statements (no rows)
     │   ├── fixtures.json      # test-only fixture data (#[cfg(test)])
-    │   ├── base_url_defs.rs
-    │   ├── collections.rs
-    │   ├── endpoints.rs
+    │   ├── base_url_defs.rs   # the project-level service list
+    │   ├── base_url_migration.rs
+    │   ├── dynamic_variable_cache.rs
+    │   ├── dynamic_variables/ # the global definition table
+    │   │   ├── mod.rs         #   facade
+    │   │   ├── read.rs        #   list / get / get_by_name / source_project_id_of
+    │   │   ├── write.rs       #   create / update / delete
+    │   │   ├── references.rs  #   which endpoints reference a definition
+    │   │   ├── validation.rs  #   source bindings, name shape
+    │   │   └── mapping.rs     #   row → domain
+    │   ├── endpoint_details.rs
     │   ├── environments.rs
-    │   ├── modules.rs
     │   ├── node_scripts.rs    # collection-level pre-request / test scripts
+    │   ├── nodes.rs           # facade over nodes/
+    │   ├── nodes/             # the whole resource tree
+    │   │   ├── read.rs        #   CRUD + list_children
+    │   │   ├── write.rs       #   create / update / delete / duplicate
+    │   │   ├── tree.rs        #   move_many, move_to_root
+    │   │   └── placement.rs   #   the parent/child contract
+    │   ├── oauth2_tokens.rs
     │   ├── permissions.rs
     │   ├── preferences.rs
-    │   └── projects.rs
-    ├── domain.rs              # Project / Permission / Endpoint / Environment / …
+    │   ├── projects.rs
+    │   └── response_history.rs
+    ├── domain.rs              # facade over domain/ — Project / Permission /
+    │                          # Endpoint / Environment / …
     ├── domain/                # one file per concern (script.rs holds the
     │                          # request-script wire types)
+    ├── dynamic/               # the dynamic-variable engine, one file per
+    │                          # concern (merge / serialize / names / cache /
+    │                          # extract / source / flight / fetcher / resolve)
     ├── error.rs               # AppError enum
     ├── http_executor.rs       # reqwest-based HTTP executor (used by
     │                          # `http_request` Tauri command)
@@ -43,6 +62,14 @@ crates/simple-post-core/
     │   │                      # drift apart
     │   ├── limits.rs          # the timeout / memory / stack ceilings
     │   └── types.rs           # the sandbox's own shapes
+    ├── spec/                  # the one-call interface specification
+    │   ├── mod.rs             # the addressing primitives + the facade
+    │   ├── input.rs           # the shared input coercion
+    │   └── upsert/            # the transactional write
+    │       ├── mod.rs         #   facade
+    │       ├── types.rs       #   the wire shapes
+    │       ├── resolve.rs     #   module / collection / service / environment
+    │       └── write.rs       #   the endpoint write + the whole transaction
     └── permissions.rs         # per-project Permission enum + global
                                # CapabilityPolicy (read_only/safe_write/
                                # full_access)
@@ -50,7 +77,7 @@ crates/simple-post-core/
 
 ## Why this crate exists
 
-The modules above used to live inside `src-tauri`. The MCP
+The modules above live here rather than inside `src-tauri`. The MCP
 module (`src-tauri::mcp`) consumed them via `use crate::db::*` /
 `use crate::domain::*` / `use crate::error::*` / etc. Pulling the MCP
 module into its own `simple-post-mcp` crate would have created a

@@ -249,7 +249,7 @@ Postman → 本仓库的导入是保真的。
 代码生成器会生成两个同名方法。现在两者分别是 `get___api__user_info` 与
 `get___api__user__info`（确切的值由 `parameters_test.rs` 钉住）。
 
-这仍不是**单射**（`/a-b` 与 `/a_b` 还是撞），故另有一道编号兜底：撞上时后一个拿
+这仍不是**单射**（`/a-b` 与 `/a_b` 仍会得到同一个名字），故另有一道编号规则：撞上时后一个拿
 `_2` 后缀。规范要的是「文档内唯一」，不是「映射可逆」。
 
 `openapiv3` 校验的是模型（不校验唯一性），Redocly 也没开那条规则，故这条由
@@ -332,17 +332,17 @@ Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
 
 带 `file:line` 的都是实测，不是推测。
 
-- **`body_schema` 不是一列。** `schema.sql:147` 只有 `body_json`，整个 `RequestBody`
-  （含 `schema`）塞在里面。全仓库三个写入点：`domain/auth.rs:38`（定义）、
-  `src/types/domain.ts:30`（TS 镜像）、MCP 的 `body_schema` 入参
+- **`body_schema` 不是一列。** `schema.sql:155` 只有 `body_json`，整个 `RequestBody`
+  （含 `schema`）塞在里面。全仓库三个写入点：`domain/auth.rs:42`（定义）、
+  `src/types/domain/request.ts:37`（TS 镜像）、MCP 的 `body_schema` 入参
   （`project_ops/endpoint/args.rs:30` → `write.rs:60`）。**UI 从不写它。**
   按列名去找会找不到。
-- **模板语法两边同形。** `variable_fill/template.rs:93-95` 的 `is_word` 只认
+- **模板语法两边同形。** `crates/simple-post-core/src/template.rs:102` 的 `is_word` 只认
   `[A-Za-z0-9_]`，Postman 的 `{{var}}` 同形，所以转换基本白送。但 Postman 实际会写
   `{{my-var}}`（连字符）与 `{{$timestamp}}`（动态变量）——两者都被现有解析器**原样
   放过**，既不报错也不解析。**这必须变成诊断**，否则就是静默失效。
   注意解析器住在 `simple-post-mcp`，而依赖方向不能反过来，所以它要被提升到 core。
-- **`ApiKeyLocation` 只有 `Header | Query`**（`domain/auth.rs:72-78`），OpenAPI 的
+- **`ApiKeyLocation` 只有 `Header | Query`**（`domain/auth.rs:117`），OpenAPI 的
   apiKey 还允许 `cookie`。导入遇到 `in: cookie` 出诊断。
 - **`HttpMethod::Custom` 导不出 OpenAPI。** `domain/http.rs:22-27` 能装 `PROPFIND`，
   但 OpenAPI 3.0 的 `paths` 是固定键集（get/put/post/delete/options/head/patch/trace）。
@@ -351,7 +351,7 @@ Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
 - **URL 拉取文档要显式抬高体积上限。** `http_executor::HttpRequestInput`
   的 `max_response_size_kb`（`http_executor.rs:96`）由调用方给，一份 3 MB 的
   OpenAPI yaml 会撞上 UI 的默认值。走 `execute_with_policy` 以保留 SSRF 防护
-  （`check_url`，`http_executor.rs:226`）——不要另开一条裸 `reqwest` 通道。
+  （`check_url`，`http_executor.rs:272`）——不要另开一条裸 `reqwest` 通道。
 
 ## YAML 依赖（已核实，勿重新推导）
 
