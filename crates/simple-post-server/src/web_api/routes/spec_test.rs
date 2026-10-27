@@ -211,3 +211,31 @@ async fn a_missing_project_is_rejected() {
 
     assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
 }
+
+/// 一份超过 axum 默认上限（2 MB）的规格必须真的进得来。
+///
+/// `body.schema` 可以是一份很大的 JSON Schema。少了显式的 `DefaultBodyLimit`，这份
+/// 规格在浏览器形态下回的是 413（传输层错误，读不出「规格太大」），而桌面形态的
+/// 同一份规格能落库 —— 两侧行为分叉且无一声报错。
+#[tokio::test]
+async fn a_spec_larger_than_the_default_body_limit_is_accepted() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project(&dir);
+
+    let mut spec = camel_case_spec();
+    // 一份 3 MB 的 schema：正文用一段重复的描述撑出来。
+    let filler = "x".repeat(3 * 1024 * 1024);
+    spec["endpoint"]["body"] = serde_json::json!({
+        "mode": "json",
+        "content": "{}",
+        "schema": format!("{{\"type\":\"object\",\"description\":\"{filler}\"}}")
+    });
+
+    let response = post_json(addr, "/api/spec/upsert", spec).await;
+
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::OK,
+        "超大规格必须进得来：axum 的默认上限 2 MB 会把它挡在传输层"
+    );
+}

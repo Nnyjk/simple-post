@@ -496,7 +496,8 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
             summary: "Apply one interface spec in a single call: the module, the \
                       collections on its path, the environment, the service and the \
                       endpoint. Each part is found by name and created when missing, \
-                      so applying the same spec twice changes nothing",
+                      so a second call reuses them all; only if_exists=duplicate adds \
+                      a second endpoint",
             stability: "public",
             request: Some("EndpointSpec"),
             response: Some("SpecUpsertResult"),

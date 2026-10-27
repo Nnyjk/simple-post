@@ -19,6 +19,16 @@ use simple_post_core::spec::upsert::EndpointSpec;
 
 pub use simple_post_mcp::spec::ops::SpecUpsertResult;
 
+/// 一份接口规格的请求体上限（字节）。
+///
+/// 一份规格只描述一个端点，但 `body.schema` 可以是一份很大的 JSON Schema，两段脚本
+/// 也可以很长，故 2 MB 不够用。上限取 8 MB：装得下任何一份真实规格，同时仍是
+/// **有界**的缓冲。
+///
+/// 这条上限只管 REST 路由的传输层。桌面 command 走 IPC，没有这一层限制，故这个值
+/// 要大到「没有任何一份真实规格会撞上它」，否则两侧行为会分叉。
+pub const SPEC_BODY_LIMIT_BYTES: usize = 8 * 1024 * 1024;
+
 /// 落一份接口规格，回「落了什么」与「端点还缺什么」。
 ///
 /// 整个落库过程在**一个事务**里：规格写到一半失败时，库里不留半截状态。
