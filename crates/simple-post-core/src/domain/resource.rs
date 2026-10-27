@@ -206,8 +206,12 @@ pub struct EndpointDetailPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params: Option<Vec<KeyValue>>,
     /// 缺席 = 不动，`null` = 清空，设值 = 写入。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub path_params: Option<Vec<KeyValue>>,
+    ///
+    /// 走 `double_option`：内建的 `Option<Vec<KeyValue>>` 把「键缺席」与「值是 `null`」
+    /// 折叠成同一件事，于是 `{"pathParams": null}` 清不掉任何东西。
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path_params: Option<Option<Vec<KeyValue>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<Vec<KeyValue>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

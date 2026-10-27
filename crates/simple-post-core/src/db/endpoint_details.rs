@@ -154,7 +154,9 @@ pub fn update(
     }
     if let Some(p) = &patch.path_params {
         sets.push(format!("path_params_json = ?{}", binds.len() + 1));
-        binds.push(json(&p)?);
+        // `Some(None)` 是「清空」。这一列非空（`NOT NULL DEFAULT '[]'`），故清空写成
+        // 空列表，而不是 NULL。
+        binds.push(json(&p.as_deref().unwrap_or(&[]))?);
     }
     if let Some(h) = &patch.headers {
         sets.push(format!("headers_json = ?{}", binds.len() + 1));
