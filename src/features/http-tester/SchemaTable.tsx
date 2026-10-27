@@ -14,16 +14,17 @@
  * 表格的取值全部来自 `lib/schema-view` 的解析结果：这个组件不自己读 JSON，
  * 故「界面显示的字段」与「解析规则」永远是同一套结论。
  */
-import { Fragment, useState } from 'react';
+import { Fragment } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
 import type { SchemaField, SchemaViewResult } from '@/lib/schema-view';
+import { useLocalExpansion } from '@/hooks/useLocalExpansion';
 
 /** 字段在表格里的缩进宽度（像素）。 */
 const INDENT = 14;
 
 export function SchemaTable({ result }: { result: SchemaViewResult }) {
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const { isExpanded, toggle } = useLocalExpansion();
 
   if (!result.ok) {
     return (
@@ -57,15 +58,6 @@ export function SchemaTable({ result }: { result: SchemaViewResult }) {
       </div>
     );
   }
-
-  const toggle = (path: string) => {
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
 
   return (
     <div className="overflow-hidden rounded-md border border-border">
@@ -102,7 +94,7 @@ export function SchemaTable({ result }: { result: SchemaViewResult }) {
             fields={view.fields}
             depth={0}
             pathPrefix=""
-            expanded={expanded}
+            isExpanded={isExpanded}
             onToggle={toggle}
           />
         </tbody>
@@ -117,19 +109,20 @@ interface RowsProps {
   depth: number;
   /** 当前这一层的路径前缀，用来给展开状态一个唯一键。 */
   pathPrefix: string;
-  expanded: ReadonlySet<string>;
+  /** 这一行的路径是不是展开着。 */
+  isExpanded: (path: string) => boolean;
   onToggle: (path: string) => void;
 }
 
 /** 一层字段行。嵌套字段展开时，递归渲染下一层。 */
-function SchemaRows({ fields, depth, pathPrefix, expanded, onToggle }: RowsProps) {
+function SchemaRows({ fields, depth, pathPrefix, isExpanded, onToggle }: RowsProps) {
   return (
     <>
       {fields.map((field) => {
         const path = pathPrefix ? `${pathPrefix}/${field.name}` : field.name;
         const children = field.children ?? [];
         const hasChildren = children.length > 0;
-        const open = expanded.has(path);
+        const open = isExpanded(path);
 
         return (
           <Fragment key={path}>
@@ -218,7 +211,7 @@ function SchemaRows({ fields, depth, pathPrefix, expanded, onToggle }: RowsProps
                 fields={children}
                 depth={depth + 1}
                 pathPrefix={path}
-                expanded={expanded}
+                isExpanded={isExpanded}
                 onToggle={onToggle}
               />
             ) : null}
