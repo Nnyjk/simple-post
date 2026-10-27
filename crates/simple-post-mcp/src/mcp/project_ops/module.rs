@@ -150,9 +150,7 @@ pub(super) async fn tool_module_create(
     let if_exists = simple_post_core::spec::IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "module_create").await?;
 
-    // 「按名找或建」住在 `core::spec`：REST 路由与桌面 command 侧要的是同一套语义，
-    // 所以它不写在工具这一层。id 也由那一层铸 —— 「前缀 + 毫秒时钟」这种写法在
-    // 同一毫秒内两次创建会撞 `nodes.id` 主键。
+    // 「按名找或建」与 id 的生成都在 `core::spec`，REST 路由与桌面 command 共用。
     let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::spec::resolve_module(c, &a.project_id, &a.name, if_exists)
     })?;

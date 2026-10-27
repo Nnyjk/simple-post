@@ -9,12 +9,8 @@ use crate::mcp::key_value::KeyValueInput;
 
 /// `endpoint_create` 的入参。
 ///
-/// **`deny_unknown_fields` 不是苛刻，是堵一个洞。** 早先这个结构体没有这个属性，
-/// 而 schema 又写着 `additionalProperties: true` —— 于是 agent 传了一个后端不读的
-/// 字段（`pre_request_script` 就是其中之一），serde 静默忽略，工具返回成功，
-/// 那个字段就这么没了，全程没有任何提示。schema 说「可以传」而实现不读，
-/// 等于工具描述在撒谎。改成「不认识的字段直接报错」之后，agent 立刻知道
-/// 自己拼错了字段名，而不会拿着一个缺了脚本的端点继续往下走。
+/// `deny_unknown_fields`：schema 只声明 `additionalProperties: true` 时，serde 会静默丢掉
+/// 后端不读的字段。不认识的字段改为报错，调用方才能发现字段名拼错。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct EndpointCreateArgs {

@@ -1,14 +1,11 @@
 //! 「一次调用把接口规范建出来」这条路上的四件事：
 //!
-//! 1. 两段脚本能在**创建**时一次写进去（早先 `endpoint_create` 把它们写死成
-//!    `None`，于是带脚本的接口必然要再调一次 `endpoint_update`）。
+//! 1. 两段脚本能在**创建**时一次写进去。
 //! 2. `collection_path` 能把路径上的集合逐级建出来，末级就是端点的父。
 //! 3. `if_exists=reuse` 让重复调用不再造出第二份。
 //! 4. 响应里的 `missing` 说清这个端点还差什么。
 //!
-//! 另有一条：`endpoint_create` 遇到不认识的字段必须**报错**，而不是静默丢掉 ——
-//! 早先 schema 写着 `additionalProperties: true` 而结构体没有 `deny_unknown_fields`，
-//! 于是 agent 传了 `pre_request_script` 会被忽略，工具还返回成功。
+//! 另有一条：`endpoint_create` 遇到不认识的字段必须**报错**，而不是静默丢掉。
 
 use super::test_support::{detail_of, fixture, state};
 use super::write::tool_endpoint_create;
@@ -29,9 +26,8 @@ fn body(res: crate::mcp::CallToolResult) -> serde_json::Value {
 
 /// 两段脚本必须在**创建**时就能写进去。
 ///
-/// 早先 `tool_endpoint_create` 把 `pre_request_script` / `test_script` 写死成
-/// `None`，而它们只有 `endpoint_update` 的 patch 才收 —— 于是「创建带脚本的接口」
-/// 必然是两次调用，agent 得多走一轮。
+/// `tool_endpoint_create` 一次就把 `pre_request_script` 与 `test_script` 写进请求
+/// 配置，创建带脚本的接口不必再调一次 `endpoint_update`。
 #[tokio::test]
 async fn endpoint_create_stores_both_scripts_in_one_call() {
     let (st, _) = fixture();
@@ -212,9 +208,8 @@ async fn a_different_method_is_a_different_endpoint() {
 
 /// 不认识的字段必须报错。
 ///
-/// 早先 schema 写着 `additionalProperties: true` 而结构体没有 `deny_unknown_fields`，
-/// 于是 agent 传了一个后端不读的字段，serde 静默忽略，工具返回成功 —— 那个字段
-/// 就这么没了，全程没有任何提示。
+/// `EndpointCreateArgs` 带 `deny_unknown_fields`，后端不读的字段不会被静默丢掉，
+/// 工具会把它当拼错的字段名报回来。
 #[tokio::test]
 async fn an_unknown_field_is_rejected_instead_of_being_dropped() {
     let (st, _) = fixture();
@@ -433,7 +428,7 @@ async fn collection_create_builds_the_path_and_is_idempotent() {
             .expect("a repeated create must be accepted"),
     );
 
-    assert_eq!(first["id"], second["id"], "同一���路径不该建出第二份");
+    assert_eq!(first["id"], second["id"], "同一条路径不该建出第二份");
     assert_eq!(first["created"], serde_json::json!(true));
     assert_eq!(second["created"], serde_json::json!(false));
 

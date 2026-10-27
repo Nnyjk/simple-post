@@ -211,8 +211,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         docs: a.docs,
         notes: a.notes,
         tags: a.tags.unwrap_or_default(),
-        // 两段脚本与请求配置一起落。写死成 `None` 等于「任何工具都配不了脚本」，
-        // 而创建带脚本的接口就必须再补一次 `endpoint_update`。
+        // 两段脚本随请求配置一次写入，创建后不需要再调 `endpoint_update`。
         pre_request_script: a.pre_request_script,
         test_script: a.test_script,
     };

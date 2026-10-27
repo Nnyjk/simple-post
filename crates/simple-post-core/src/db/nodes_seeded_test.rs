@@ -15,9 +15,8 @@ use crate::error::AppError;
 
 /// 播种出来的每一个端点，它的配置行都必须**读得出来**。
 ///
-/// `fixtures.json` 里的 `auth` 一度写成旧形状 `{"type": ...}`，而域模型要的是
-/// `{"kind": ...}` —— 于是 `auth_json` 整列反序列化失败，播种出来的每个端点
-/// 都读不出配置。树形测试只看 `nodes` 表，看不出这一列坏了，于是它一直没人发现。
+/// `fixtures.json` 的 `auth` 必须用 `kind` 字段：`AuthConfig` 按 `kind` 反序列化
+/// `auth_json`。树形测试只读 `nodes` 表，不读 `auth_json`，故本测试逐个读出配置行。
 #[test]
 fn every_seeded_endpoint_has_a_readable_detail_row() {
     let (pool, _dir) = seeded_pool();

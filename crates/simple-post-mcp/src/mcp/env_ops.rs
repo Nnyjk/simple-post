@@ -225,8 +225,7 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
     let if_exists = simple_post_core::spec::IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "env_create").await?;
 
-    // 「按名找或建」住在 `core::spec`，REST 路由与桌面 command 侧用的是同一套。
-    // id 也由那一层铸 —— 早先这里用毫秒时钟当 id，同一毫秒内建两个环境会撞主键。
+    // 「按名找或建」与 id 的生成都在 `core::spec`，REST 路由与桌面 command 共用。
     let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::spec::resolve_environment(c, &a.project_id, &a.name, if_exists)
     })?;
