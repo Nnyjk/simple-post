@@ -12,7 +12,7 @@ use simple_post_core::spec::upsert::{upsert_endpoint_spec, EndpointSpec, SpecOut
 
 /// 一次落库的结果：落了什么 + 端点还缺什么。
 ///
-/// `outcome` 被摊平，故线上的键就是它自己的键（`projectId` / `module` / `endpoint` …），
+/// `outcome` 的字段被直接放在最外层，故线上的键就是它自己的键（`projectId` / `module` / `endpoint` …），
 /// `missing` 与它们平级。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

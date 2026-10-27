@@ -56,7 +56,7 @@ struct CreateArgs {
     value_mode: Option<ValueMode>,
     #[serde(default)]
     ttl_seconds: Option<i64>,
-    /// 取数失败时是否允许用已过期的缓存值兜底。
+    /// 取数失败时是否允许用已过期的缓存值回退。
     #[serde(default)]
     stale_fallback: Option<bool>,
     #[serde(default)]

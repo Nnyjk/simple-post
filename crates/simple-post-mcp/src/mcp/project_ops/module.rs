@@ -214,11 +214,8 @@ pub(super) async fn tool_module_move(
         .map_err(|e| AppError::Validation(format!("module_move args: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.new_project_id, "module_move").await?;
 
-    // 跨项目移动是真正的搬迁，不是「删掉再建一个」。
-    //
-    // 曾经的删了重建会把数据一起带走：旧 schema 里 `ON DELETE CASCADE` 从模块一路
-    // 串到集合再到端点，删模块就等于删掉它下面所有集合与端点。`nodes` 布局让这个
-    // 错误无处落脚 —— 没有级联可踩，也没有第二张表可以只搬一半。
+    // 跨项目移动是改写归属，不是「删掉再建一个」：`move_to_root` 重写整棵子树的
+    // `root_id`，而删除会把模块下面的集合与端点一起带走。
     let module = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::get(c, &a.module_id)
     })?;

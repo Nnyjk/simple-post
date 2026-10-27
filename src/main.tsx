@@ -44,23 +44,17 @@ function resolveInitialTheme(): Theme {
 }
 
 // ---------------------------------------------------------------------------
-// Start the backend round-trip BEFORE React mounts.
+// 在 React 挂载之前发起后端往返。
 //
-// `bootstrap()` used to be triggered from `TopBar`'s mount effect, which runs
-// only after React has parsed and executed the whole initial module graph and
-// committed the tree. That serialised the two biggest startup costs — fetching
-// the workspace and rendering the shell — when they have no dependency on each
-// other.
+// `bootstrap()` 放在这里而不是某个组件的挂载副作用里：组件挂载要等 React 解析并执行
+// 完整个初始模块图再提交树，那会把「取工作区」与「渲染外壳」两段互不依赖的开销串成
+// 先后。这里提前发起，IPC 与 `createRoot`、与 `App` 挂载时预热的编辑器块重叠执行。
 //
-// Firing it here overlaps the IPC with `createRoot` and with the editor chunks
-// that `App` warms up on mount. `bootstrap()` is idempotent and returns
-// immediately when `loaded || loading`, so a later call is a no-op rather than
-// a duplicate fetch; the store is a module singleton, so the state this
-// writes is the same one the tree reads.
+// `bootstrap()` 是幂等的，`loaded || loading` 时立即返回，所以后面再调用一次是空操作
+// 而不是重复取数；store 是模块单例，这里写入的状态就是组件树读到的同一份。
 //
-// Both transports are ready at module-eval time: web mode uses `fetch`, and
-// Tauri mode uses `window.__TAURI_INTERNALS__`, which Tauri injects before any
-// user script runs.
+// 两种传输在模块求值时就绪：web 模式用 `fetch`，Tauri 模式用
+// `window.__TAURI_INTERNALS__`（Tauri 在任何用户脚本之前注入它）。
 // ---------------------------------------------------------------------------
 void useAppStore.getState().bootstrap();
 

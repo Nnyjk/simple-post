@@ -31,7 +31,9 @@ export function McpLogPanel() {
   const [copied, setCopied] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  const lines = daemonLogs?.lines ?? [];
+  // 日志还没拉上来时给一个空数组。用 `useMemo` 固定住这个空数组的引用，否则每次渲染
+  // 都是新数组，下面那个 `useMemo` 的依赖每帧都在变。
+  const lines = useMemo(() => daemonLogs?.lines ?? [], [daemonLogs]);
   const visible = useMemo(() => {
     if (hiddenFrom === null) return lines;
     // 缓冲转过了：行数变少即说明左移了，这时从头显示。

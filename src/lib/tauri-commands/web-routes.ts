@@ -89,7 +89,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.nodesCreate]: {
     method: 'POST',
     path: () => '/api/nodes',
-    // `NodeCreateBody` 把节点摊平，所以请求体就是节点自身字段 —— 不是
+    // `NodeCreateBody` 把节点字段直接放在最外层，所以请求体就是节点自身字段 —— 不是
     // `{ node: {…} }` 的包装。Tauri 命令同样吃扁平 args，故这里只需补上服务端
     // 自己盖章的部分：id 与 detail 行的键。`sortOrder` 在线上必填且无默认，
     // 缺省必须变成 0 而不是 `undefined`。

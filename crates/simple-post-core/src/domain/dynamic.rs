@@ -82,7 +82,7 @@ pub struct DynamicVariable {
     pub value_mode: ValueMode,
     /// 缓存有效期（秒）。
     pub ttl_seconds: i64,
-    /// 取数失败时是否允许用已过期的缓存值兜底。
+    /// 取数失败时是否允许用已过期的缓存值回退。
     pub stale_fallback: bool,
     /// 是否参与解析。停用的定义不参与替换，`{{name}}` 原样留着。
     pub enabled: bool,

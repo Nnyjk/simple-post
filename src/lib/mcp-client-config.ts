@@ -1,15 +1,11 @@
 /**
  * 生成设置页「连接」里展示的 MCP 客户端配置片段。
  *
- * ## 为什么对字段名这么较真
+ * **为什么对字段名这么较真**：不存在统一的「MCP 客户端配置 schema」，每个客户端都
+ * 自创一套，而且差异是**静默**的——根键写错或 `type` 值写错不会报错，只是服务端
+ * 永远不出现在该客户端的工具列表里。这是「复制这份配置」按钮最坏的失败方式。
  *
- * 不存在统一的「MCP 客户端配置 schema」，每个客户端都自创一套，而且差异是**静默**
- * 的——根键写错或 `type` 值写错不会报错，只是服务端永远不出现在该客户端的工具列表
- * 里。这是「复制这份配置」按钮最坏的失败方式。
- *
- * ## 为什么只有一个预设
- *
- * 当前表里只有 Claude Code 的 HTTP 一项。再加行之前请记住两条理由：
+ * **为什么只有一个预设**：再加行之前请记住两条理由。
  *
  * 1. **stdio 那几列对本应用是死重量。** 桥接二进制（`simple-post-mcp`）不由这些
  *    客户端的安装器装上，生成的 `command` 路径还得用户手改。HTTP 在客户端机器上
@@ -19,11 +15,8 @@
  *    `context_servers`、`servers`…），会静默过期。过期的行比没有更糟，因为用户分辨
  *    不出它已经过期。
  *
- * 已验证的 Claude Code HTTP 形状，原样保留：
- *
- * | Client      | root key     | http                                 |
- * |-------------|--------------|--------------------------------------|
- * | Claude Code | `mcpServers` | `type: "http"` + `url`               |
+ * 已验证的 Claude Code HTTP 形状：根键 `mcpServers`，http 项写 `type: "http"` 加
+ * `url`。
  *
  * 保持为纯模块（无 React、无 IPC），以便直接单测，面板里则不留业务逻辑。
  */
@@ -95,7 +88,7 @@ export function daemonMcpUrl(port: number | null): string | null {
   return `http://127.0.0.1:${port}/mcp`;
 }
 
-/** One entry of a client's server map. */
+/** 客户端 server map 里的一个条目。 */
 export type ServerEntry = Record<string, unknown>;
 
 /**

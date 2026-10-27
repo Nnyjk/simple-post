@@ -9,9 +9,9 @@
 //! (环境 × 模块 × 服务) 单元格；★ 住在项目上（`projects.default_base_url_definition_id`），
 //! 而不在某一行上。
 //!
-//! `module_id` 与 `is_default` 仍是表里的列，因为带它们的构建曾经发布过，而删列 = 重建表 =
+//! `module_id` 与 `is_default` 仍是表里的列，且刻意不读不写：删列 = 重建表 =
 //! bump `SCHEMA_VERSION` = `ensure_current_schema` 删掉用户的库。[`list_by_project`] 与
-//! [`get`] 刻意不读它们，此处也没有任何地方写它们。
+//! [`get`] 不读它们，代码里也没有任何地方写它们。
 
 use std::collections::HashMap;
 

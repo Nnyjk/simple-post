@@ -1,4 +1,4 @@
-//! MCP server module for Simple Post.
+//! Simple Post 的 MCP 服务端模块。
 //!
 //! JSON-RPC tool dispatcher + daemon HTTP transport，Tauri shell 与 `serve-web`
 //! 都内嵌它；拆成独立 crate 是为了让 `simple-post-mcp` 二进制不必带上 Tauri shell。
