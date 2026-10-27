@@ -63,23 +63,12 @@ export type TabKind =
 export const DRAFT_ID_PREFIX = 'draft:';
 
 /**
- * 动态变量标签的 id 前缀。
+ * 动态变量标签的 id。
  *
- * 动态变量页面是**项目级**的，但它不能直接用项目 id 当标签 id：项目标签（`kind:
- * 'project'`）已经用了那个 id，两者撞在一起会让标签条上出现两个 id 相同的标签，且
- * `activeTabId` 同时点亮两个——右栏按 id 找标签，先找到的是项目标签，于是动态变量
- * 面板永远不显示。故这里给它一个自己的前缀，形状与 `DRAFT_ID_PREFIX` 同款。
+ * 动态变量是**全局**的：一条定义不属于任何项目，任何项目的端点都能引用它。故这个页面
+ * 是单例，像设置那样属于用户而不属于项目——标签 id 用固定值，与设置标签同一形状。
  */
-export const DYNAMIC_TAB_PREFIX = 'dynamic-variables:';
-
-/**
- * 从动态变量标签的 id 里取回项目 id。
- *
- * 不是动态变量标签时原样返回，故调用方不必先判种类。
- */
-export function dynamicTabProjectId(tabId: string): string {
-  return tabId.startsWith(DYNAMIC_TAB_PREFIX) ? tabId.slice(DYNAMIC_TAB_PREFIX.length) : tabId;
-}
+export const DYNAMIC_TAB_ID = '__dynamic_variables__';
 
 /**
  * 只存在于渲染侧的 endpoint。

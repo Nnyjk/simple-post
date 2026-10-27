@@ -152,6 +152,8 @@ pub fn run() {
             crate::commands::projects_delete,
             crate::commands::nodes_list,
             crate::commands::nodes_get,
+            crate::commands::nodes_children,
+            crate::commands::nodes_search_paths,
             crate::commands::nodes_create,
             crate::commands::nodes_update,
             crate::commands::nodes_delete,

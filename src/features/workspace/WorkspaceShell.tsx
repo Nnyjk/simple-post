@@ -28,7 +28,6 @@ import { HttpTester } from '@/features/http-tester/HttpTester';
 import { WorkspaceTabs } from '@/features/workspace/WorkspaceTabs';
 import { Splitter } from '@/components/ui/splitter';
 import { useAppStore } from '@/stores/app-store';
-import { dynamicTabProjectId } from '@/stores/store-types';
 
 // ---------------------------------------------------------------------------
 // 代码分割 —— 每个 lazy 边界的原因见其上方的说明。
@@ -164,11 +163,11 @@ export function WorkspaceShell() {
         </Suspense>
       );
     }
-    // 动态变量是项目级的页面，标签 id 里包着项目 id。
+    // 动态变量是全局页面：定义不属于任何项目，故它没有项目参数。
     if (activeTab.kind === 'dynamic-variables') {
       return (
         <Suspense fallback={<PanelFallback />}>
-          <DynamicVariablesPanel projectId={dynamicTabProjectId(activeTab.id)} />
+          <DynamicVariablesPanel />
         </Suspense>
       );
     }

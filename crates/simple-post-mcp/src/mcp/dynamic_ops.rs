@@ -4,6 +4,11 @@
 //! `simple_post_core::permissions::require` → 委托 `crate::dynamic::ops` → 用
 //! `CallToolResult::json` 包成单个 text content 块回给 LLM。
 //!
+//! 定义是**全局**的：不属于任何项目，任何项目的端点都能引用它，整个工作区里变量名唯一。
+//! 故权限不落在「调用方在哪个项目」上，而落在**数据源接口所属的项目**上——取数会真的用到
+//! 那个项目的 base URL 与鉴权。数据源是内联请求时没有项目可落，此时只由全局能力档位
+//! 裁决（与 `project_list` 同理）。
+//!
 //! `dynamic_var_resolve` 会真的发出站请求，故它的 capability 是 `Send`（与
 //! `api_call_endpoint` 同级），逐项目权限是 `ReadCall`。
 
@@ -20,22 +25,12 @@ use simple_post_core::error::AppError;
 // =========================================================================
 
 #[derive(Debug, Deserialize)]
-struct ListArgs {
-    project_id: String,
-    #[serde(default)]
-    environment_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct GetArgs {
     definition_id: String,
-    #[serde(default)]
-    environment_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreateArgs {
-    project_id: String,
     name: String,
     #[serde(default)]
     id: Option<String>,
@@ -47,6 +42,12 @@ struct CreateArgs {
     /// 内联请求（method / url / headers / body / auth 的 JSON 文本）。
     #[serde(default)]
     source_inline_json: Option<String>,
+    /// 取数用的环境。缺席 = 数据源端点所属项目的第一个可用环境。
+    #[serde(default)]
+    source_environment_id: Option<String>,
+    /// 取数用的服务（`base_url_definitions.id`）。缺席 = 数据源接口所属项目的默认服务。
+    #[serde(default)]
+    source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
     #[serde(default)]
     extract_path: Option<String>,
@@ -77,11 +78,8 @@ struct DeleteArgs {
 
 #[derive(Debug, Deserialize)]
 struct ResolveArgs {
-    project_id: String,
-    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。
+    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。名字是全局的。
     names: Vec<String>,
-    #[serde(default)]
-    environment_id: Option<String>,
     /// 真 = 跳过缓存，强制重新取数。
     #[serde(default)]
     force: Option<bool>,
@@ -93,8 +91,6 @@ struct SetOverrideArgs {
     /// 覆盖值。`null` 表示清除覆盖值（下次解析重新取数）。
     #[serde(default)]
     value: Option<String>,
-    #[serde(default)]
-    environment_id: Option<String>,
     /// 覆盖值的到期时间（unix 毫秒）。缺席且 `forever` 为假时沿用定义的 TTL。
     #[serde(default)]
     expires_at: Option<i64>,
@@ -112,14 +108,11 @@ pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "dynamic_var_list",
-            description: "List a project's dynamic variables with their current value and cache state. Reads the cache only; it never fetches.",
+            description: "List every dynamic variable in the workspace with its current value, cache state, and the environment and service it fetches from. Definitions are global: any project's endpoint may use them. Reads the cache only; it never fetches. It does not list the endpoints that reference a definition — query those per project with endpoint_list or endpoint_search.",
             schema: json!({
                 "type": "object",
-                "properties": {
-                    "project_id": { "type": "string" },
-                    "environment_id": { "type": "string" }
-                },
-                "required": ["project_id"],
+                "properties": {},
+                "required": [],
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_dynamic_var_list),
@@ -130,8 +123,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
             schema: json!({
                 "type": "object",
                 "properties": {
-                    "definition_id": { "type": "string" },
-                    "environment_id": { "type": "string" }
+                    "definition_id": { "type": "string" }
                 },
                 "required": ["definition_id"],
                 "additionalProperties": false,
@@ -140,15 +132,16 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_create",
-            description: "Create a dynamic variable in a project: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique inside the project.",
+            description: "Create a dynamic variable: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique in the whole workspace. The environment and the service are optional: omitted, the fetch uses the source endpoint's first available environment and its project's default service.",
             schema: json!({
                 "type": "object",
                 "properties": {
-                    "project_id": { "type": "string" },
                     "name": { "type": "string" },
                     "description": { "type": "string" },
                     "source_endpoint_id": { "type": "string" },
                     "source_inline_json": { "type": "string" },
+                    "source_environment_id": { "type": "string" },
+                    "source_base_url_definition_id": { "type": "string" },
                     "extract_path": { "type": "string" },
                     "value_mode": { "type": "string", "enum": ["auto", "json", "text"] },
                     "ttl_seconds": { "type": "integer" },
@@ -156,7 +149,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "enabled": { "type": "boolean" },
                     "sort_order": { "type": "integer" }
                 },
-                "required": ["project_id", "name"],
+                "required": ["name"],
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_dynamic_var_create),
@@ -175,6 +168,8 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "description": { "type": ["string", "null"] },
                             "sourceEndpointId": { "type": ["string", "null"] },
                             "sourceInlineJson": { "type": ["string", "null"] },
+                            "sourceEnvironmentId": { "type": ["string", "null"] },
+                            "sourceBaseUrlDefinitionId": { "type": ["string", "null"] },
                             "extractPath": { "type": "string" },
                             "valueMode": { "type": "string", "enum": ["auto", "json", "text"] },
                             "ttlSeconds": { "type": "integer" },
@@ -207,12 +202,10 @@ pub(crate) fn table() -> Vec<ToolEntry> {
             schema: json!({
                 "type": "object",
                 "properties": {
-                    "project_id": { "type": "string" },
                     "names": { "type": "array", "items": { "type": "string" } },
-                    "environment_id": { "type": "string" },
                     "force": { "type": "boolean" }
                 },
-                "required": ["project_id", "names"],
+                "required": ["names"],
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_dynamic_var_resolve),
@@ -225,7 +218,6 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "properties": {
                     "definition_id": { "type": "string" },
                     "value": { "type": ["string", "null"] },
-                    "environment_id": { "type": "string" },
                     "expires_at": { "type": "integer" },
                     "forever": { "type": "boolean" }
                 },
@@ -241,23 +233,57 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 // Handlers
 // =========================================================================
 
-async fn tool_dynamic_var_list(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
-    let a: ListArgs = serde_json::from_value(args)
-        .map_err(|e| AppError::Validation(format!("dynamic_var_list args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, &a.project_id, "dynamic_var_list").await?;
-    let views = crate::dynamic::ops::list(&state.pool, &a.project_id, a.environment_id.as_deref())?;
+/// 一条定义的数据源接口所属的项目。没有数据源接口（内联请求）时为 `None`。
+async fn scope_of(state: &AppState, definition_id: &str) -> Result<Option<String>, AppError> {
+    simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::dynamic_variables::source_project_id_of(c, definition_id)
+    })
+}
+
+/// 一个接口所属的项目。查不到这个接口就是没有项目可落。
+///
+/// 这里丢弃的是「接口不存在」这一个错误，不是权限判定：接口不存在时随后的写入会撞上
+/// 外键约束并报出来，而权限判定发生在 `require_scope` 里，用 `?` 传播。
+fn project_of_endpoint(state: &AppState, endpoint_id: &str) -> Option<String> {
+    let found = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::root_id_of(c, endpoint_id)
+    });
+    found.ok()
+}
+
+/// 按「定义的数据源所在的项目」过逐项目权限门。没有项目可落时只由全局能力档位裁决。
+async fn require_scope(
+    state: &AppState,
+    project_id: Option<String>,
+    tool_name: &str,
+) -> Result<(), AppError> {
+    let Some(project_id) = project_id else {
+        return Ok(());
+    };
+    crate::mcp::check_permission(&state.pool, &project_id, tool_name).await
+}
+
+async fn tool_dynamic_var_list(state: &AppState, _args: Value) -> Result<CallToolResult, AppError> {
+    // 无按项目的门：动态变量是全局的，列全部没有单一归属行可查，由 Gate A（全局
+    // `CapabilityPolicy`）裁决。
+    //
+    // 但「哪些端点引用了它」不带走：那是别的项目的接口名与 id，而 `endpoint_list` /
+    // `endpoint_search` 恰恰拒绝无项目地扫全部项目（那串接口没有单一归属项目可查门）。
+    // 要看引用关系，按项目查那个项目的接口即可。
+    let views = crate::dynamic::ops::list(&state.pool, false)?;
     Ok(CallToolResult::json(views))
 }
 
 async fn tool_dynamic_var_get(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: GetArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_get args: {e}")))?;
-    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::dynamic_variables::project_id_of(c, &a.definition_id)
-    })?;
-    crate::mcp::check_permission(&state.pool, &project_id, "dynamic_var_get").await?;
-    let view =
-        crate::dynamic::ops::get(&state.pool, &a.definition_id, a.environment_id.as_deref())?;
+    require_scope(
+        state,
+        scope_of(state, &a.definition_id).await?,
+        "dynamic_var_get",
+    )
+    .await?;
+    let view = crate::dynamic::ops::get(&state.pool, &a.definition_id)?;
     Ok(CallToolResult::json(view))
 }
 
@@ -267,13 +293,20 @@ async fn tool_dynamic_var_create(
 ) -> Result<CallToolResult, AppError> {
     let a: CreateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_create args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, &a.project_id, "dynamic_var_create").await?;
+    // 权限落在数据源接口所属的项目上：取数会用到那个项目的 base URL 与鉴权。
+    let scope = a
+        .source_endpoint_id
+        .as_deref()
+        .and_then(|endpoint_id| project_of_endpoint(state, endpoint_id));
+    require_scope(state, scope, "dynamic_var_create").await?;
     let opts = crate::dynamic::CreateOpts {
         id: a.id,
         name: a.name,
         description: a.description,
         source_endpoint_id: a.source_endpoint_id,
         source_inline_json: a.source_inline_json,
+        source_environment_id: a.source_environment_id,
+        source_base_url_definition_id: a.source_base_url_definition_id,
         extract_path: a.extract_path,
         value_mode: a.value_mode,
         ttl_seconds: a.ttl_seconds,
@@ -281,7 +314,7 @@ async fn tool_dynamic_var_create(
         enabled: a.enabled,
         sort_order: a.sort_order,
     };
-    let definition = crate::dynamic::ops::create(&state.pool, &a.project_id, opts)?;
+    let definition = crate::dynamic::ops::create(&state.pool, opts)?;
     Ok(CallToolResult::json(definition))
 }
 
@@ -291,10 +324,19 @@ async fn tool_dynamic_var_update(
 ) -> Result<CallToolResult, AppError> {
     let a: UpdateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_update args: {e}")))?;
-    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::dynamic_variables::project_id_of(c, &a.definition_id)
-    })?;
-    crate::mcp::check_permission(&state.pool, &project_id, "dynamic_var_update").await?;
+    require_scope(
+        state,
+        scope_of(state, &a.definition_id).await?,
+        "dynamic_var_update",
+    )
+    .await?;
+    // patch 可能把数据源改指到**别的**项目的接口：那个项目的 base URL 与凭据会被用到，
+    // 故那个项目的权限也得查。只查改之前的那个项目，等于给「搬走数据源」留了一条
+    // 不经门的路。
+    if let Some(new_endpoint_id) = a.patch.source_endpoint_id.as_ref().and_then(|v| v.as_ref()) {
+        let new_scope = project_of_endpoint(state, new_endpoint_id);
+        require_scope(state, new_scope, "dynamic_var_update").await?;
+    }
     let definition = crate::dynamic::ops::update(&state.pool, &a.definition_id, a.patch)?;
     Ok(CallToolResult::json(definition))
 }
@@ -305,10 +347,12 @@ async fn tool_dynamic_var_delete(
 ) -> Result<CallToolResult, AppError> {
     let a: DeleteArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_delete args: {e}")))?;
-    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::dynamic_variables::project_id_of(c, &a.definition_id)
-    })?;
-    crate::mcp::check_permission(&state.pool, &project_id, "dynamic_var_delete").await?;
+    require_scope(
+        state,
+        scope_of(state, &a.definition_id).await?,
+        "dynamic_var_delete",
+    )
+    .await?;
     crate::dynamic::ops::delete(&state.pool, &a.definition_id)?;
     Ok(CallToolResult::json(json!({ "deleted": a.definition_id })))
 }
@@ -319,15 +363,24 @@ async fn tool_dynamic_var_resolve(
 ) -> Result<CallToolResult, AppError> {
     let a: ResolveArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_resolve args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, &a.project_id, "dynamic_var_resolve").await?;
-    let resolution = crate::dynamic::ops::resolve(
-        &state.pool,
-        &a.project_id,
-        a.environment_id.as_deref(),
-        &a.names,
-        a.force.unwrap_or(false),
-    )
-    .await?;
+    // 逐个名字找到它指向的定义，再按那个定义的数据源项目过门：名字是全局的，
+    // 一批名字可能分属不同项目。
+    for name in &a.names {
+        let definition = simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::dynamic_variables::get_by_name(c, name)
+        })?;
+        let Some(definition) = definition else {
+            continue;
+        };
+        require_scope(
+            state,
+            scope_of(state, &definition.id).await?,
+            "dynamic_var_resolve",
+        )
+        .await?;
+    }
+    let resolution =
+        crate::dynamic::ops::resolve(&state.pool, &a.names, a.force.unwrap_or(false)).await?;
     Ok(CallToolResult::json(resolution))
 }
 
@@ -337,20 +390,20 @@ async fn tool_dynamic_var_set_override(
 ) -> Result<CallToolResult, AppError> {
     let a: SetOverrideArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_set_override args: {e}")))?;
-    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::dynamic_variables::project_id_of(c, &a.definition_id)
-    })?;
-    crate::mcp::check_permission(&state.pool, &project_id, "dynamic_var_set_override").await?;
+    require_scope(
+        state,
+        scope_of(state, &a.definition_id).await?,
+        "dynamic_var_set_override",
+    )
+    .await?;
     crate::dynamic::ops::set_override(
         &state.pool,
         &a.definition_id,
-        a.environment_id.as_deref(),
         a.value,
         a.expires_at,
         a.forever.unwrap_or(false),
     )?;
-    let view =
-        crate::dynamic::ops::get(&state.pool, &a.definition_id, a.environment_id.as_deref())?;
+    let view = crate::dynamic::ops::get(&state.pool, &a.definition_id)?;
     Ok(CallToolResult::json(view))
 }
 

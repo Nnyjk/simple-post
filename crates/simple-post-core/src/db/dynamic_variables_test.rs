@@ -94,12 +94,13 @@ fn detail(node_id: &str, url: &str) -> EndpointDetail {
 fn definition(id: &str, name: &str) -> DynamicVariable {
     DynamicVariable {
         id: id.into(),
-        project_id: "p1".into(),
         name: name.into(),
         description: None,
         source_endpoint_id: None,
         source_endpoint_name: None,
         source_inline_json: Some(INLINE_SOURCE.to_string()),
+        source_environment_id: None,
+        source_base_url_definition_id: None,
         extract_path: "$".into(),
         value_mode: ValueMode::Auto,
         ttl_seconds: 60,
@@ -114,11 +115,10 @@ fn definition(id: &str, name: &str) -> DynamicVariable {
 #[test]
 fn a_definition_round_trips() {
     let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
 
     let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
     assert_eq!(got.name, "sns");
-    assert_eq!(got.project_id, "p1");
     assert_eq!(got.extract_path, "$");
     assert_eq!(got.value_mode, ValueMode::Auto);
     assert_eq!(got.ttl_seconds, 60);
@@ -132,7 +132,7 @@ fn the_source_endpoint_name_is_joined_in() {
     def.source_endpoint_id = Some("e2".into());
     // 数据源二选一：引用接口时不能同时带内联请求。
     def.source_inline_json = None;
-    db::with_tx(&pool, |c| create(c, &def, "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
 
     let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
     assert_eq!(got.source_endpoint_id.as_deref(), Some("e2"));
@@ -140,18 +140,18 @@ fn the_source_endpoint_name_is_joined_in() {
 }
 
 #[test]
-fn two_definitions_in_one_project_cannot_share_a_name() {
+fn two_definitions_cannot_share_a_name() {
     let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
-    let err = db::with_tx(&pool, |c| create(c, &definition("d2", "sns"), "p1"))
-        .expect_err("同名应该被拒");
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
+    let err =
+        db::with_tx(&pool, |c| create(c, &definition("d2", "sns"))).expect_err("同名应该被拒");
     assert!(matches!(err, crate::error::AppError::Validation(_)));
 }
 
 #[test]
 fn an_illegal_name_is_refused() {
     let (pool, _dir) = fresh_pool();
-    let err = db::with_tx(&pool, |c| create(c, &definition("d1", "sns-list"), "p1"))
+    let err = db::with_tx(&pool, |c| create(c, &definition("d1", "sns-list")))
         .expect_err("带连字符的名字应该被拒");
     assert!(matches!(err, crate::error::AppError::Validation(_)));
     assert!(!is_valid_name("sns-list"));
@@ -161,7 +161,7 @@ fn an_illegal_name_is_refused() {
 #[test]
 fn a_patch_leaves_absent_fields_alone() {
     let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
     db::with_tx(&pool, |c| {
         update(
             c,
@@ -185,7 +185,7 @@ fn an_explicit_null_clears_the_description() {
     let (pool, _dir) = fresh_pool();
     let mut def = definition("d1", "sns");
     def.description = Some("站点清单".into());
-    db::with_tx(&pool, |c| create(c, &def, "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
     db::with_tx(&pool, |c| {
         update(
             c,
@@ -208,7 +208,7 @@ fn deleting_the_source_endpoint_keeps_the_definition() {
     let mut def = definition("d1", "sns");
     def.source_endpoint_id = Some("e2".into());
     def.source_inline_json = None;
-    db::with_tx(&pool, |c| create(c, &def, "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
     db::with_tx(&pool, |c| nodes::delete(c, "e2")).expect("delete endpoint");
 
     let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
@@ -221,7 +221,7 @@ fn a_definition_without_a_source_is_refused() {
     let (pool, _dir) = fresh_pool();
     let mut def = definition("d1", "sns");
     def.source_inline_json = None;
-    let err = db::with_tx(&pool, |c| create(c, &def, "p1")).expect_err("没有数据源应该被拒");
+    let err = db::with_tx(&pool, |c| create(c, &def)).expect_err("没有数据源应该被拒");
     assert!(matches!(err, crate::error::AppError::Validation(_)));
 }
 
@@ -230,14 +230,14 @@ fn a_definition_with_two_sources_is_refused() {
     let (pool, _dir) = fresh_pool();
     let mut def = definition("d1", "sns");
     def.source_endpoint_id = Some("e2".into());
-    let err = db::with_tx(&pool, |c| create(c, &def, "p1")).expect_err("两个数据源应该被拒");
+    let err = db::with_tx(&pool, |c| create(c, &def)).expect_err("两个数据源应该被拒");
     assert!(matches!(err, crate::error::AppError::Validation(_)));
 }
 
 #[test]
 fn deleting_a_definition_removes_its_cache_rows() {
     let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
     db::with_tx(&pool, |c| {
         crate::db::dynamic_variable_cache::upsert(
             c,
@@ -285,11 +285,80 @@ fn the_endpoints_referencing_a_name_are_listed() {
     })
     .expect("update detail");
 
-    let refs = db::with_conn(&pool, |c| referencing_endpoints(c, "p1", "sns")).expect("scan");
-    assert_eq!(refs, vec!["e1".to_string()]);
+    let map = db::with_conn(&pool, |c| {
+        referencing_endpoints(c, &["sns".to_string(), "other".to_string()])
+    })
+    .expect("scan");
+    let refs = map.get("sns").expect("sns 的引用");
+    let ids: Vec<String> = refs.iter().map(|r| r.endpoint_id.clone()).collect();
+    assert_eq!(ids, vec!["e1".to_string()]);
+    assert_eq!(refs[0].project_id, "p1");
+    assert_eq!(refs[0].project_name, "First");
 
-    let none = db::with_conn(&pool, |c| referencing_endpoints(c, "p1", "other")).expect("scan");
-    assert!(none.is_empty());
+    assert!(map.get("other").expect("other 的引用").is_empty());
+}
+
+#[test]
+fn one_scan_answers_every_name() {
+    let (pool, _dir) = fresh_pool();
+    // e1 引用 `{{sns}}`，e2 引用 `{{token}}`。
+    db::with_tx(&pool, |c| {
+        db::endpoint_details::update(
+            c,
+            "e1",
+            crate::domain::EndpointDetailPatch {
+                body: Some(RequestBody {
+                    mode: crate::domain::BodyMode::Json,
+                    content: "{\"sns\": {{sns}}}".into(),
+                    schema: None,
+                }),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("update e1");
+    db::with_tx(&pool, |c| {
+        db::endpoint_details::update(
+            c,
+            "e2",
+            crate::domain::EndpointDetailPatch {
+                body: Some(RequestBody {
+                    mode: crate::domain::BodyMode::Json,
+                    content: "{\"token\": {{token}}}".into(),
+                    schema: None,
+                }),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("update e2");
+
+    // 一次遍历同时回答两个名字：端点各自只落到自己引用的那个名字下。
+    let map = db::with_conn(&pool, |c| {
+        referencing_endpoints(c, &["sns".to_string(), "token".to_string()])
+    })
+    .expect("scan");
+    let sns_ids: Vec<String> = map
+        .get("sns")
+        .expect("sns 的引用")
+        .iter()
+        .map(|r| r.endpoint_id.clone())
+        .collect();
+    assert_eq!(sns_ids, vec!["e1".to_string()]);
+    let token_ids: Vec<String> = map
+        .get("token")
+        .expect("token 的引用")
+        .iter()
+        .map(|r| r.endpoint_id.clone())
+        .collect();
+    assert_eq!(token_ids, vec!["e2".to_string()]);
+}
+
+#[test]
+fn an_empty_name_list_scans_nothing() {
+    let (pool, _dir) = fresh_pool();
+    let map = db::with_conn(&pool, |c| referencing_endpoints(c, &[])).expect("scan");
+    assert!(map.is_empty());
 }
 
 #[test]
@@ -338,24 +407,39 @@ fn seed_another_project(pool: &db::DbPool) {
 }
 
 #[test]
-fn a_data_source_endpoint_from_another_project_is_refused() {
+fn a_data_source_endpoint_from_another_project_is_allowed() {
     let (pool, _dir) = fresh_pool();
     seed_another_project(&pool);
 
     let mut def = definition("d1", "sns");
     def.source_endpoint_id = Some("e9".into());
     def.source_inline_json = None;
-    let err = db::with_tx(&pool, |c| create(c, &def, "p1")).expect_err("跨项目的数据源应该被拒");
-    assert!(matches!(err, crate::error::AppError::Validation(_)));
+    db::with_tx(&pool, |c| create(c, &def)).expect("跨项目的数据源是允许的");
+
+    let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
+    assert_eq!(got.source_endpoint_id.as_deref(), Some("e9"));
+
+    // 权限范围落在数据源接口所属的项目上。
+    let scope = db::with_conn(&pool, |c| source_project_id_of(c, "d1")).expect("scope");
+    assert_eq!(scope.as_deref(), Some("p2"));
 }
 
 #[test]
-fn pointing_an_existing_definition_at_another_projects_endpoint_is_refused() {
+fn an_inline_source_has_no_project_scope() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
+
+    let scope = db::with_conn(&pool, |c| source_project_id_of(c, "d1")).expect("scope");
+    assert_eq!(scope, None);
+}
+
+#[test]
+fn pointing_an_existing_definition_at_another_projects_endpoint_is_allowed() {
     let (pool, _dir) = fresh_pool();
     seed_another_project(&pool);
-    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
 
-    let err = db::with_tx(&pool, |c| {
+    db::with_tx(&pool, |c| {
         update(
             c,
             "d1",
@@ -366,22 +450,127 @@ fn pointing_an_existing_definition_at_another_projects_endpoint_is_refused() {
             },
         )
     })
-    .expect_err("改到跨项目的数据源应该被拒");
-    assert!(matches!(err, crate::error::AppError::Validation(_)));
+    .expect("改到跨项目的数据源");
 
-    // 原来的数据源没被动过。
     let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
-    assert!(got.source_inline_json.is_some());
+    assert_eq!(got.source_endpoint_id.as_deref(), Some("e9"));
+    assert!(got.source_inline_json.is_none());
+}
+
+#[test]
+fn an_environment_from_another_project_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    db::with_tx(&pool, |c| {
+        db::environments::create(
+            c,
+            &crate::domain::Environment {
+                id: "env-p2".into(),
+                project_id: "p2".into(),
+                name: "prod".into(),
+                is_active: false,
+                base_urls: Default::default(),
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                disabled_variables: vec![],
+            },
+        )
+    })
+    .expect("seed env");
+
+    let mut def = definition("d1", "sns");
+    def.source_endpoint_id = Some("e2".into());
+    def.source_inline_json = None;
+    def.source_environment_id = Some("env-p2".into());
+    let err = db::with_tx(&pool, |c| create(c, &def)).expect_err("别的项目的环境应该被拒");
+    assert!(matches!(err, crate::error::AppError::Validation(_)));
+}
+
+#[test]
+fn a_definition_whose_source_endpoint_was_deleted_can_still_be_renamed() {
+    // 外键把 `source_endpoint_id` 置成 NULL，故两个来源字段都空了——那是「接口被删了」，
+    // 不是「这条定义没有数据源」。这种定义仍应允许改别的字段，否则用户改个名就会收到
+    // 一句「必须有一个数据源」，而真正的原因（接口被删了）被这句话盖住了。
+    let (pool, _dir) = fresh_pool();
+    let mut def = definition("d1", "sns");
+    def.source_endpoint_id = Some("e2".into());
+    def.source_inline_json = None;
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+    db::with_tx(&pool, |c| nodes::delete(c, "e2")).expect("delete endpoint");
+
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                name: Some("points".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("改名不该被「必须有一个数据源」挡住");
+
+    let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
+    assert_eq!(got.name, "points");
+    assert!(got.source_endpoint_id.is_none());
+}
+
+#[test]
+fn clearing_both_sources_explicitly_is_still_refused() {
+    // 上面那条放的是「改别的字段」；把两个来源字段**都**清空是另一回事：那是用户
+    // 亲手把定义写成没有数据源的状态，故仍要拒。
+    let (pool, _dir) = fresh_pool();
+    let mut def = definition("d1", "sns");
+    def.source_endpoint_id = Some("e2".into());
+    def.source_inline_json = None;
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+
+    let err = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                source_endpoint_id: Some(None),
+                source_inline_json: Some(None),
+                ..Default::default()
+            },
+        )
+    })
+    .expect_err("两个来源都被清空应该被拒");
+    assert!(matches!(err, crate::error::AppError::Validation(_)));
+}
+
+#[test]
+fn a_database_failure_is_not_reported_as_a_definition_without_a_project() {
+    // MCP 工具靠 `source_project_id_of` 的返回值决定要不要过按项目的权限门，故「数据库
+    // 坏了」不能被读成「这条定义没有数据源项目」——那等于把门关掉。
+    let (pool, dir) = fresh_pool();
+    let mut def = definition("d1", "sns");
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+
+    // 删掉 nodes 表，制造一次真正的数据库错误。
+    {
+        let conn = rusqlite::Connection::open(dir.join("store.db")).expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = OFF; DROP TABLE nodes;")
+            .expect("drop nodes");
+    }
+
+    let mut conn = rusqlite::Connection::open(dir.join("store.db")).expect("open");
+    let err = source_project_id_of(&mut conn, "d1")
+        .expect_err("数据库出错不该被读成「这条定义没有数据源项目」");
+    assert!(matches!(err, crate::error::AppError::Sqlite(_)), "{err:?}");
 }
 
 #[test]
 fn a_duplicate_id_is_reported_as_an_id_conflict() {
     let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"), "p1")).expect("create");
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
 
     // id 重复但名字不重复：真正的原因是主键冲突，故不能说成「重名」。
-    let err = db::with_tx(&pool, |c| create(c, &definition("d1", "other"), "p1"))
-        .expect_err("id 重复应该被拒");
+    let err =
+        db::with_tx(&pool, |c| create(c, &definition("d1", "other"))).expect_err("id 重复应该被拒");
     let message = match err {
         crate::error::AppError::Validation(message) => message,
         other => panic!("期望一条校验错误，实际是 {other:?}"),

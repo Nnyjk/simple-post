@@ -125,6 +125,10 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // 字面量动词必须注册在 `/{id}` 之前，否则在 radix tree 里被参数段吃掉。
         .route("/api/nodes", get(nodes_list).post(nodes_create))
         .route("/api/nodes/move", post(nodes_move))
+        // 懒加载层级树的两节：展开一个节点只取它的直接孩子；筛选时跨全部项目搜接口，
+        // 并带回它所在的路径。
+        .route("/api/nodes/children", get(nodes_children))
+        .route("/api/nodes/search", get(nodes_search_paths))
         .route(
             "/api/nodes/{id}",
             get(nodes_get).patch(nodes_update).delete(nodes_delete),

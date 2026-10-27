@@ -3,6 +3,8 @@
  *
  * 与 `tauri-commands-routes-env.test.ts` 同构，断言 `(method, url, body)`，好让路由的
  * 静默漂移响亮地失败。
+ *
+ * 定义是全局的，故这组路由都不带项目参数：名字在整个工作区里唯一。
  */
 import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,25 +31,15 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     return calls[calls.length - 1] as CapturedCall;
   }
 
-  it('dynamicVariablesList → GET /api/dynamic-variables with query', async () => {
-    await invokeCmd(COMMANDS.dynamicVariablesList, { projectId: 'p1' });
+  it('dynamicVariablesList → GET /api/dynamic-variables with no query', async () => {
+    await invokeCmd(COMMANDS.dynamicVariablesList, {});
     const c = last();
     assert.equal(c.method, 'GET');
-    assert.equal(c.url, '/api/dynamic-variables?projectId=p1');
-  });
-
-  it('dynamicVariablesList 带环境时把 environmentId 也放进查询串', async () => {
-    await invokeCmd(COMMANDS.dynamicVariablesList, {
-      projectId: 'p1',
-      environmentId: 'env 1',
-    });
-    const c = last();
-    assert.equal(c.url, '/api/dynamic-variables?environmentId=env%201&projectId=p1');
+    assert.equal(c.url, '/api/dynamic-variables');
   });
 
   it('dynamicVariablesCreate → POST /api/dynamic-variables with a flat body', async () => {
     await invokeCmd(COMMANDS.dynamicVariablesCreate, {
-      projectId: 'p1',
       name: 'sns',
       sourceEndpointId: 'e1',
       extractPath: '$.list',
@@ -57,7 +49,6 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/dynamic-variables');
     const body = JSON.parse(c.body ?? 'null');
-    assert.equal(body.projectId, 'p1');
     assert.equal(body.name, 'sns');
     assert.equal(body.sourceEndpointId, 'e1');
     assert.equal(body.extractPath, '$.list');
@@ -65,6 +56,10 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     // 缺席的字段也要显式发 null：服务端按「null = 清除」解释它。
     assert.equal(body.sourceInlineJson, null);
     assert.equal(body.valueMode, null);
+    assert.equal(body.sourceEnvironmentId, null);
+    assert.equal(body.sourceBaseUrlDefinitionId, null);
+    // 定义是全局的，线上契约里没有项目这一维。
+    assert.equal(body.projectId, undefined);
   });
 
   it('dynamicVariablesUpdate → PATCH /api/dynamic-variables/{id} with the patch as body', async () => {
@@ -87,7 +82,6 @@ describe('invokeCmd (web shape) — 动态变量', () => {
 
   it('dynamicVariablesResolve → POST /api/dynamic-variables/resolve', async () => {
     await invokeCmd(COMMANDS.dynamicVariablesResolve, {
-      projectId: 'p1',
       names: ['sns'],
     });
     const c = last();
@@ -96,6 +90,9 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     const body = JSON.parse(c.body ?? 'null');
     assert.deepEqual(body.names, ['sns']);
     assert.equal(body.force, false);
+    // 名字是全局的：解析不带项目，也不带环境。
+    assert.equal(body.projectId, undefined);
+    assert.equal(body.environmentId, undefined);
   });
 
   it('dynamicVariablesSetOverride → POST /api/dynamic-variables/{id}/override', async () => {
@@ -118,11 +115,11 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     assert.equal(body.value, null);
   });
 
-  it('dynamicVariablesRefresh → POST /api/dynamic-variables/{id}/refresh', async () => {
-    await invokeCmd(COMMANDS.dynamicVariablesRefresh, { projectId: 'p1', id: 'd1' });
+  it('dynamicVariablesRefresh → POST /api/dynamic-variables/{id}/refresh with an empty body', async () => {
+    await invokeCmd(COMMANDS.dynamicVariablesRefresh, { id: 'd1' });
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/dynamic-variables/d1/refresh');
-    assert.equal(JSON.parse(c.body ?? 'null').projectId, 'p1');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), {});
   });
 });

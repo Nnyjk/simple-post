@@ -9,6 +9,13 @@
 //! 动态变量。这两条只有在替换之前并池才成立——替换一旦发生，池里已经没有同名变量的概念了。
 //! 故本模块的产出是**一个变量名到值的映射**，由调用方在替换之前并进池。
 //!
+//! ## 取数上下文由定义自己决定
+//!
+//! 定义是全局的，故同一个 `{{name}}` 在任何项目里都指向同一条定义。取数要用的项目、
+//! 环境、服务与模块因此全部由那条定义推导（见 [`source_context`]），而不是由「谁在
+//! 消费这个变量」决定：数据源端点落在哪个项目就用哪个项目的服务与模块，定义点名的
+//! 环境就是那个环境，没点名就用该项目的第一个可用环境。
+//!
 //! ## 分层
 //!
 //! 本模块住在 core，因为它只需要 core 的 db / http_executor / template。但「引用端点」形态的
@@ -44,13 +51,82 @@ pub const MAX_VALUE_BYTES: usize = 256 * 1024;
 /// 解析的上下文。一次解析里的所有动态变量共享它。
 pub struct ResolveContext {
     pub pool: db::DbPool,
-    pub project_id: String,
-    /// 当前环境。`None` = 没有环境（缓存键用空串占位）。
+}
+
+/// 一条定义取数时用的上下文。
+///
+/// 它只由定义自己决定：数据源端点落在哪个项目就用哪个项目的服务与模块，定义点名的
+/// 环境就是那个环境，没点名就用该项目的第一个可用环境。故同一个 `{{name}}` 在任何
+/// 项目里取到的值都一样——这正是定义做成全局作用域的前提。
+pub struct SourceContext {
+    /// 数据源端点所属的项目。内联请求没有项目。
+    pub project_id: Option<String>,
+    /// 取数用的环境。`None` = 没有环境（内联请求，或该项目一个环境都没有）。
     pub environment_id: Option<String>,
-    /// 当前环境的内容。数据源端点用它解析 base URL、鉴权与变量替换。
+    /// 取数用的环境的内容。数据源端点用它解析 base URL、鉴权与变量替换。
     pub env: Option<Environment>,
-    /// 当前项目。数据源端点用它解析 ★ 服务与模块的服务列表。
+    /// 数据源端点所属的项目。它的 ★ 服务与服务清单都在上面。
     pub project: Project,
+    /// 数据源端点所在的模块。base URL 的取值住在 (环境 × 服务 × 模块) 的格子里。
+    pub module_id: Option<String>,
+    /// 取数用的服务。定义点名了就用它；没点名就用数据源端点所属项目的默认服务（★）。
+    pub base_url_definition_id: Option<String>,
+}
+
+/// 算出这条定义的取数上下文。
+///
+/// 规则：
+///
+/// - 数据源是内联请求：没有项目、没有环境、没有服务——内联请求自带完整地址。
+/// - 环境：定义点名的那个；没点名就用数据源端点所属项目的**第一个可用环境**
+///   （按名字排序，与选择器里看到的顺序一致）。
+/// - 服务：定义点名的那个；没点名就用数据源端点所属项目的默认服务（★）。数据源端点
+///   自己绑的服务不在这条链上。
+pub fn source_context(pool: &db::DbPool, def: &DynamicVariable) -> Result<SourceContext, AppError> {
+    let Some(endpoint_id) = def.source_endpoint_id.as_deref() else {
+        return Ok(SourceContext {
+            project_id: None,
+            environment_id: None,
+            env: None,
+            project: Project::empty(),
+            module_id: None,
+            base_url_definition_id: None,
+        });
+    };
+
+    let project_id = db::with_conn(pool, |c| db::nodes::root_id_of(c, endpoint_id))?;
+    let module_id = db::with_conn(pool, |c| db::nodes::module_id_of(c, endpoint_id))
+        .ok()
+        .flatten();
+    let project = db::with_conn(pool, |c| db::projects::get(c, &project_id))
+        .unwrap_or_else(|_| Project::empty());
+
+    // 环境：点名的那个优先。没点名就用项目里的第一个——环境按名字排序，故「第一个」
+    // 与用户在选择器里看到的头一个一致。
+    let env = match def.source_environment_id.as_deref() {
+        Some(env_id) => db::with_conn(pool, |c| db::environments::get(c, env_id)).ok(),
+        None => db::with_conn(pool, |c| db::environments::list_by_project(c, &project_id))
+            .ok()
+            .and_then(|list| list.into_iter().next()),
+    };
+
+    // 服务：定义点名的那个优先。没点名就用数据源端点所属项目的默认服务（★）。
+    //
+    // 数据源端点自己绑的服务**不在**这条链上：定义没点名服务时一律用项目的 ★，
+    // 否则取数会打到那个端点自己绑的 host 上，而那条绑定是端点自己的选择。
+    let base_url_definition_id = match def.source_base_url_definition_id.as_deref() {
+        Some(def_id) => Some(def_id.to_string()),
+        None => project.default_base_url_definition_id.clone(),
+    };
+
+    Ok(SourceContext {
+        environment_id: env.as_ref().map(|e| e.id.clone()),
+        project_id: Some(project_id),
+        env,
+        project,
+        module_id,
+        base_url_definition_id,
+    })
 }
 
 /// 数据源取回来的原始响应。
@@ -69,6 +145,7 @@ pub trait SourceFetcher: Send + Sync {
         &'a self,
         def: &'a DynamicVariable,
         ctx: &'a ResolveContext,
+        source: &'a SourceContext,
     ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>>;
 }
 
@@ -323,6 +400,9 @@ pub fn extract_value(body: &str, extract_path: &str) -> Result<Value, DynamicErr
 ///
 /// 名字里没有对应定义的（那是环境变量，或者是拼错的名字）直接跳过——它们由变量替换那一步
 /// 按缺失处理。停用的定义也跳过：`{{name}}` 原样留着并进未解析变量列表。
+///
+/// 定义是全局的，故同一个名字在任何项目里都指向同一条定义；取数上下文由那条定义自己
+/// 决定，与调用方是哪个项目无关。
 pub async fn resolve_names(
     ctx: &ResolveContext,
     names: &[String],
@@ -333,16 +413,15 @@ pub async fn resolve_names(
     let mut resolution = DynamicResolution::default();
 
     for name in names {
-        let Some(def) = db::with_conn(&ctx.pool, |c| {
-            db::dynamic_variables::get_by_name(c, &ctx.project_id, name)
-        })?
+        let Some(def) = db::with_conn(&ctx.pool, |c| db::dynamic_variables::get_by_name(c, name))?
         else {
             continue;
         };
         if !def.enabled {
             continue;
         }
-        let outcome = resolve_one(ctx, &def, now, force, fetcher).await?;
+        let source = source_context(&ctx.pool, &def)?;
+        let outcome = resolve_one(ctx, &def, &source, now, force, fetcher).await?;
         if let Some(value) = &outcome.value {
             resolution.values.insert(name.clone(), value.clone());
         }
@@ -390,11 +469,12 @@ impl OneOutcome {
 async fn resolve_one(
     ctx: &ResolveContext,
     def: &DynamicVariable,
+    source: &SourceContext,
     now: i64,
     force: bool,
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
-    let env_key = ctx.environment_id.clone().unwrap_or_default();
+    let env_key = source.environment_id.clone().unwrap_or_default();
     let entry = db::with_conn(&ctx.pool, |c| {
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
@@ -423,7 +503,7 @@ async fn resolve_one(
             })
         }
         Decision::Fetch { stale_fallback } => {
-            fetch_one(ctx, def, now, force, env_key, stale_fallback, fetcher).await
+            fetch_one(ctx, def, source, now, force, stale_fallback, fetcher).await
         }
     }
 }
@@ -435,12 +515,14 @@ async fn resolve_one(
 async fn fetch_one(
     ctx: &ResolveContext,
     def: &DynamicVariable,
+    source: &SourceContext,
     now: i64,
     force: bool,
-    env_key: String,
     stale_fallback: Option<String>,
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
+    // 缓存键的环境段由取数上下文决定：定义点名的环境，或它所属项目的第一个可用环境。
+    let env_key = source.environment_id.clone().unwrap_or_default();
     let lock = flight_lock(&(def.id.clone(), env_key.clone()));
     let _guard = lock.lock().await;
 
@@ -466,7 +548,7 @@ async fn fetch_one(
         }
     }
 
-    let raw = match fetcher.fetch(def, ctx).await {
+    let raw = match fetcher.fetch(def, ctx, source).await {
         Ok(raw) => raw,
         Err(error) => {
             // 取数失败：先看能不能用过期值兜底。

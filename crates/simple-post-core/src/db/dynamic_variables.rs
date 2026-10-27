@@ -1,6 +1,6 @@
 //! `dynamic_variables` 表的 CRUD —— 一条动态变量的定义。
 //!
-//! 定义属于**项目**：同一项目内的全部端点都能引用它，同一项目内变量名唯一。数据源二选一：
+//! 定义是**全局**的：任何项目的端点都能引用它，整个工作区里变量名唯一。数据源二选一：
 //! 引用树里的一个端点，或一份内联请求。
 //!
 //! 变量名的判据是 `^[A-Za-z0-9_]+$`——与 `{{var}}` 替换原语的 `\w+` 一致
@@ -9,37 +9,25 @@
 //!
 //! 数据源的当前值不在本表，在 `super::dynamic_variable_cache`。
 
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::{DynamicVariable, DynamicVariablePatch, ValueMode};
 use crate::error::AppError;
 
-/// 变量名是否合法：只允许字母、数字与下划线，且非空。
-///
-/// 与 `crate::template::is_word` 同一套判据——`{{my-var}}` 这样的名字替换原语认不出来，
-/// 存进去就等于存了一条永远不生效的定义。
-pub fn is_valid_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-/// 读一个项目的全部定义，按 `sort_order` 排序。
+/// 列出全部定义，按 `sort_order` 排序。
 ///
 /// `source_endpoint_name` 由一次 LEFT JOIN 顺带取回：界面要显示「数据源：站点清单」，
 /// 让调用方自己再查一次树是多余的往返。
-pub fn list_by_project(
-    conn: &mut Connection,
-    project_id: &str,
-) -> Result<Vec<DynamicVariable>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT v.id, v.project_id, v.name, v.description, v.source_endpoint_id, \
-                n.name, v.source_inline_json, v.extract_path, v.value_mode, v.ttl_seconds, \
-                v.stale_fallback, v.enabled, v.sort_order, v.created_at, v.updated_at \
-         FROM dynamic_variables v \
+pub fn list(conn: &mut Connection) -> Result<Vec<DynamicVariable>, AppError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM dynamic_variables v \
          LEFT JOIN nodes n ON n.id = v.source_endpoint_id \
-         WHERE v.project_id = ?1 \
          ORDER BY v.sort_order ASC, v.id ASC",
-    )?;
-    let rows = stmt.query_map(params![project_id], row_to_var)?;
+        COLUMNS
+    ))?;
+    let rows = stmt.query_map([], row_to_var)?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r.map_err(AppError::Sqlite)?);
@@ -49,14 +37,12 @@ pub fn list_by_project(
 
 /// 读一条定义。读不到即 `NotFound`——调用方需要区分「没有这条」与「这条坏了」。
 pub fn get(conn: &mut Connection, id: &str) -> Result<DynamicVariable, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT v.id, v.project_id, v.name, v.description, v.source_endpoint_id, \
-                n.name, v.source_inline_json, v.extract_path, v.value_mode, v.ttl_seconds, \
-                v.stale_fallback, v.enabled, v.sort_order, v.created_at, v.updated_at \
-         FROM dynamic_variables v \
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM dynamic_variables v \
          LEFT JOIN nodes n ON n.id = v.source_endpoint_id \
          WHERE v.id = ?1",
-    )?;
+        COLUMNS
+    ))?;
     let mut rows = stmt.query(params![id])?;
     match rows.next()? {
         Some(row) => row_to_var(row).map_err(AppError::Sqlite),
@@ -65,51 +51,56 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<DynamicVariable, AppError>
 }
 
 /// 按名字读一条定义。解析阶段用它把 `{{sns}}` 里的名字对上定义。
-pub fn get_by_name(
-    conn: &mut Connection,
-    project_id: &str,
-    name: &str,
-) -> Result<Option<DynamicVariable>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT v.id, v.project_id, v.name, v.description, v.source_endpoint_id, \
-                n.name, v.source_inline_json, v.extract_path, v.value_mode, v.ttl_seconds, \
-                v.stale_fallback, v.enabled, v.sort_order, v.created_at, v.updated_at \
-         FROM dynamic_variables v \
+pub fn get_by_name(conn: &mut Connection, name: &str) -> Result<Option<DynamicVariable>, AppError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM dynamic_variables v \
          LEFT JOIN nodes n ON n.id = v.source_endpoint_id \
-         WHERE v.project_id = ?1 AND v.name = ?2",
-    )?;
-    let mut rows = stmt.query(params![project_id, name])?;
+         WHERE v.name = ?1",
+        COLUMNS
+    ))?;
+    let mut rows = stmt.query(params![name])?;
     match rows.next()? {
         Some(row) => Ok(Some(row_to_var(row).map_err(AppError::Sqlite)?)),
         None => Ok(None),
     }
 }
 
-/// 一条定义所属的项目。调用方需要它来把改动关在所属项目内。
-pub fn project_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
-    let pid: Option<String> = conn
+/// 一条定义的数据源端点所属的项目。数据源是内联请求时没有项目。
+///
+/// MCP 工具用它决定「这次操作算在哪个项目的权限下」——定义本身是全局的，但取数会真的
+/// 用到那个项目的 base URL 与鉴权。
+pub fn source_project_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, AppError> {
+    let endpoint_id: Option<Option<String>> = conn
         .query_row(
-            "SELECT project_id FROM dynamic_variables WHERE id = ?1",
+            "SELECT source_endpoint_id FROM dynamic_variables WHERE id = ?1",
             params![id],
             |r| r.get(0),
         )
         .optional()?;
-    match pid {
-        Some(p) => Ok(p),
-        None => Err(AppError::NotFound(format!("dynamic_variable {id}"))),
+    let Some(endpoint_id) = endpoint_id else {
+        return Err(AppError::NotFound(format!("dynamic_variable {id}")));
+    };
+    // 列为空 = 数据源是内联请求（或端点已被删），故没有项目。
+    let Some(endpoint_id) = endpoint_id else {
+        return Ok(None);
+    };
+    // 端点已被删：外键把这一列置成了 NULL，故这里拿不到项目。
+    //
+    // 别的错误（数据库或连接池出问题）不能读成「没有项目」——调用方靠这个返回值决定
+    // 要不要过按项目的权限门，读错等于把门关掉。
+    match super::nodes::root_id_of(conn, &endpoint_id) {
+        Ok(root) => Ok(Some(root)),
+        Err(AppError::NotFound(_)) => Ok(None),
+        Err(other) => Err(other),
     }
 }
 
 /// 新建一条定义。
 ///
-/// 变量名非法或与同项目的另一条定义重名时返回 `Validation`——重名会撞上
+/// 变量名非法或与另一条定义重名时返回 `Validation`——重名会撞上
 /// `idx_dynamic_vars_name` 那条唯一索引，与其把数据库的约束错误泄给用户，不如在这里
 /// 说清是哪个名字撞了。
-pub fn create(
-    conn: &mut Connection,
-    def: &DynamicVariable,
-    project_id: &str,
-) -> Result<(), AppError> {
+pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppError> {
     if !is_valid_name(&def.name) {
         return Err(AppError::Validation(format!(
             "变量名 '{}' 非法：只能用字母、数字与下划线",
@@ -130,28 +121,34 @@ pub fn create(
             "动态变量的数据源只能是其中一种：引用接口，或内联请求".to_string(),
         ));
     }
-    check_source_endpoint_project(conn, project_id, def.source_endpoint_id.as_deref())?;
-    if let Some(existing) = get_by_name(conn, project_id, &def.name)? {
+    if let Some(existing) = get_by_name(conn, &def.name)? {
         if existing.id != def.id {
             return Err(AppError::Validation(format!(
-                "本项目已有一个叫 '{}' 的动态变量",
+                "已有一个叫 '{}' 的动态变量",
                 def.name
             )));
         }
     }
+    let (environment_id, base_url_definition_id) = check_source_bindings(
+        conn,
+        def.source_endpoint_id.as_deref(),
+        def.source_environment_id.as_deref(),
+        def.source_base_url_definition_id.as_deref(),
+    )?;
     let result = conn.execute(
         "INSERT INTO dynamic_variables \
-           (id, project_id, name, description, source_endpoint_id, source_inline_json, \
-            extract_path, value_mode, ttl_seconds, stale_fallback, enabled, sort_order, \
-            created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+           (id, name, description, source_endpoint_id, source_inline_json, \
+            source_environment_id, source_base_url_definition_id, extract_path, value_mode, \
+            ttl_seconds, stale_fallback, enabled, sort_order, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             def.id,
-            project_id,
             def.name,
             def.description,
             def.source_endpoint_id,
             def.source_inline_json,
+            environment_id,
+            base_url_definition_id,
             def.extract_path,
             def.value_mode.as_str(),
             def.ttl_seconds,
@@ -167,7 +164,7 @@ pub fn create(
         match unique_violation_columns(&e) {
             Some("name") => {
                 return Err(AppError::Validation(format!(
-                    "本项目已有一个叫 '{}' 的动态变量",
+                    "已有一个叫 '{}' 的动态变量",
                     def.name
                 )));
             }
@@ -180,7 +177,7 @@ pub fn create(
             Some(_) => {}
             None if is_unique_violation(&e) => {
                 return Err(AppError::Validation(format!(
-                    "本项目已有一个叫 '{}' 的动态变量",
+                    "已有一个叫 '{}' 的动态变量",
                     def.name
                 )));
             }
@@ -207,17 +204,22 @@ pub fn update(
             )));
         }
         if name != &current.name {
-            if let Some(existing) = get_by_name(conn, &current.project_id, name)? {
+            if let Some(existing) = get_by_name(conn, name)? {
                 if existing.id != id {
                     return Err(AppError::Validation(format!(
-                        "本项目已有一个叫 '{name}' 的动态变量"
+                        "已有一个叫 '{name}' 的动态变量"
                     )));
                 }
             }
         }
     }
 
-    // 数据源仍须二选一。patch 的三态：缺席 = 不动，`null` = 清除，有值 = 写入。
+    // 数据源仍须二选一，但**只在 patch 真的动了来源字段时**才校验。
+    // 「两个来源字段都为空」是「数据源接口被删了」（外键把它置成 NULL），那是一种真实状态，
+    // 故这种定义仍应允许改别的字段——否则改个名就会收到一句盖住真因的报错。
+    let touches_source = patch.source_endpoint_id.is_some() || patch.source_inline_json.is_some();
+
+    // patch 的三态：缺席 = 不动，`null` = 清除，有值 = 写入。
     let next_endpoint_id = match &patch.source_endpoint_id {
         None => current.source_endpoint_id.clone(),
         Some(value) => value.clone(),
@@ -226,12 +228,26 @@ pub fn update(
         None => current.source_inline_json.clone(),
         Some(value) => value.clone(),
     };
-    if next_endpoint_id.is_none() == next_inline_json.is_none() {
+    if touches_source && next_endpoint_id.is_none() == next_inline_json.is_none() {
         return Err(AppError::Validation(
             "动态变量必须有一个数据源：引用一个接口，或给一份内联请求".to_string(),
         ));
     }
-    check_source_endpoint_project(conn, &current.project_id, next_endpoint_id.as_deref())?;
+
+    let next_environment_id = match &patch.source_environment_id {
+        None => current.source_environment_id.clone(),
+        Some(value) => value.clone(),
+    };
+    let next_base_url_definition_id = match &patch.source_base_url_definition_id {
+        None => current.source_base_url_definition_id.clone(),
+        Some(value) => value.clone(),
+    };
+    let (environment_id, base_url_definition_id) = check_source_bindings(
+        conn,
+        next_endpoint_id.as_deref(),
+        next_environment_id.as_deref(),
+        next_base_url_definition_id.as_deref(),
+    )?;
 
     let mut sets: Vec<String> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
@@ -280,6 +296,26 @@ pub fn update(
             },
         );
     }
+    // 环境与服务跟着数据源走：数据源换成内联请求时它们一并清空——内联请求自带完整
+    // 地址，没有 base URL 可谈。
+    push(
+        &mut sets,
+        &mut binds,
+        "source_environment_id",
+        match environment_id {
+            Some(v) => v.into(),
+            None => rusqlite::types::Value::Null,
+        },
+    );
+    push(
+        &mut sets,
+        &mut binds,
+        "source_base_url_definition_id",
+        match base_url_definition_id {
+            Some(v) => v.into(),
+            None => rusqlite::types::Value::Null,
+        },
+    );
     if let Some(extract_path) = patch.extract_path {
         push(&mut sets, &mut binds, "extract_path", extract_path.into());
     }
@@ -340,31 +376,49 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// 哪些端点的请求里出现了 `{{name}}`。
+/// 一条动态变量被哪些端点引用。
+#[derive(Debug, Clone)]
+pub struct Reference {
+    pub endpoint_id: String,
+    pub endpoint_name: String,
+    pub project_id: String,
+    pub project_name: String,
+}
+
+/// 哪些端点引用了哪些变量名。跨全部项目——定义是全局的，引用它的端点可能散在基线项目
+/// 与各个分发项目里。
 ///
-/// 粗筛用 SQL 的 `LIKE`（请求体、header、参数、鉴权四段拼起来查），细查用
-/// `crate::template::list_missing_vars` 逐行确认——`LIKE` 会把 `{{name}}` 当普通子串命中，
-/// 但也可能命中 `{{name}}` 之外的东西（例如值里恰好含这段文本），故粗筛之后还要细查。
+/// 一次遍历回答所有名字：逐条定义各查一次会在 N 条定义时扫 N 遍全表，故这里把
+/// 「哪个端点引用了哪些名字」一次算出来。返回的 map 里每个被问的名字都有一项（可能
+/// 是空列表）。
 ///
-/// 返回端点 id 列表。
+/// 粗筛是「这一行里有没有 `{{`」——多数端点不引用任何变量，故不必解析它的 JSON；细查用
+/// `crate::template::list_missing_vars` 逐个字符串确认，因为值里可能恰好含 `{{` 却没有
+/// 真正的标记。
 pub fn referencing_endpoints(
     conn: &mut Connection,
-    project_id: &str,
-    name: &str,
-) -> Result<Vec<String>, AppError> {
-    let needle = format!("%{{{{{name}}}}}%");
+    names: &[String],
+) -> Result<HashMap<String, Vec<Reference>>, AppError> {
+    let mut out: HashMap<String, Vec<Reference>> = HashMap::new();
+    if names.is_empty() {
+        return Ok(out);
+    }
+    let wanted: HashSet<&str> = names.iter().map(String::as_str).collect();
+    // 每个被问的名字都先进 map（列表为空）：调用方按名字取即可，不必区分
+    // 「没有引用」与「这个名字根本没被问过」。
+    for name in names {
+        out.entry(name.clone()).or_default();
+    }
+
     let mut stmt = conn.prepare(
-        "SELECT d.node_id, d.url, d.params_json, d.headers_json, d.body_json, d.auth_json \
+        "SELECT d.node_id, n.name, n.root_id, COALESCE(p.name, ''), \
+                d.url, d.params_json, d.headers_json, d.body_json, d.auth_json \
          FROM endpoint_details d \
          JOIN nodes n ON n.id = d.node_id \
-         WHERE n.root_id = ?1 \
-           AND (d.url LIKE ?2 ESCAPE '\\' \
-             OR d.params_json LIKE ?2 ESCAPE '\\' \
-             OR d.headers_json LIKE ?2 ESCAPE '\\' \
-             OR d.body_json LIKE ?2 ESCAPE '\\' \
-             OR d.auth_json LIKE ?2 ESCAPE '\\')",
+         LEFT JOIN projects p ON p.id = n.root_id \
+         ORDER BY n.root_id, n.sort_order, n.id",
     )?;
-    let rows = stmt.query_map(params![project_id, needle], |row| {
+    let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -372,25 +426,53 @@ pub fn referencing_endpoints(
             row.get::<_, String>(3)?,
             row.get::<_, String>(4)?,
             row.get::<_, String>(5)?,
+            row.get::<_, String>(6)?,
+            row.get::<_, String>(7)?,
+            row.get::<_, String>(8)?,
         ))
     })?;
 
-    let mut out = Vec::new();
     for r in rows {
-        let (node_id, url, params_json, headers_json, body_json, auth_json) =
-            r.map_err(AppError::Sqlite)?;
+        let (
+            node_id,
+            node_name,
+            project_id,
+            project_name,
+            url,
+            params_json,
+            headers_json,
+            body_json,
+            auth_json,
+        ) = r.map_err(AppError::Sqlite)?;
+        if !url.contains("{{")
+            && !params_json.contains("{{")
+            && !headers_json.contains("{{")
+            && !body_json.contains("{{")
+            && !auth_json.contains("{{")
+        {
+            continue;
+        }
         let mut texts: Vec<String> = vec![url];
         for json in [params_json, headers_json, body_json, auth_json] {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
                 collect_markers_from_json(&value, &mut texts);
             }
         }
-        if texts.iter().any(|t| {
-            crate::template::list_missing_vars(t)
-                .iter()
-                .any(|m| m == name)
-        }) {
-            out.push(node_id);
+        let mut hits: Vec<String> = Vec::new();
+        for text in &texts {
+            for name in crate::template::list_missing_vars(text) {
+                if wanted.contains(name.as_str()) && !hits.contains(&name) {
+                    hits.push(name);
+                }
+            }
+        }
+        for name in hits {
+            out.entry(name).or_default().push(Reference {
+                endpoint_id: node_id.clone(),
+                endpoint_name: node_name.clone(),
+                project_id: project_id.clone(),
+                project_name: project_name.clone(),
+            });
         }
     }
     Ok(out)
@@ -425,7 +507,7 @@ fn is_unique_violation(e: &rusqlite::Error) -> bool {
     }
 }
 
-/// 冲突的是哪一条唯一约束：主键，还是「项目内变量名」那条索引。
+/// 冲突的是哪一条唯一约束：主键，还是「变量名」那条索引。
 ///
 /// SQLite 只给出「UNIQUE constraint failed: <表>.<列>…」这样一条消息，故按列名分辨。
 /// 分不出来时返回 `None`，调用方给一句不含糊的总错误。
@@ -445,48 +527,82 @@ fn unique_violation_columns(e: &rusqlite::Error) -> Option<&'static str> {
     }
 }
 
-/// 数据源端点必须属于同一个项目。
+/// 校验取数用的环境与服务，并给出真正落库的两个 id。
 ///
-/// 跨项目引用会绕过逐项目权限门：取数时那个端点自己的项目从来没有人查过，于是拿着项目 A
-/// 权限的调用方能调用项目 B 的端点（用它自己的 base URL 与鉴权）并读到响应。故这条检查
-/// 住在写路径上，两条 transport 都经过这里。
-fn check_source_endpoint_project(
+/// 两者都必须属于数据源端点所属的项目：环境的格子按 (环境 × 服务 × 模块) 寻址，服务
+/// 住在项目里，故拿别的项目的环境或服务去取数会取到别处的内容。
+///
+/// 数据源是内联请求时两者都清空——内联请求自带完整地址，没有 base URL 可谈。
+fn check_source_bindings(
     conn: &mut Connection,
-    project_id: &str,
     endpoint_id: Option<&str>,
-) -> Result<(), AppError> {
+    environment_id: Option<&str>,
+    base_url_definition_id: Option<&str>,
+) -> Result<(Option<String>, Option<String>), AppError> {
     let Some(endpoint_id) = endpoint_id else {
-        return Ok(());
+        return Ok((None, None));
     };
-    let root_id = super::nodes::root_id_of(conn, endpoint_id)
+    let project_id = super::nodes::root_id_of(conn, endpoint_id)
         .map_err(|_| AppError::Validation(format!("数据源接口 {endpoint_id} 不存在")))?;
-    if root_id != project_id {
-        return Err(AppError::Validation(format!(
-            "数据源接口 {endpoint_id} 不在本项目里"
-        )));
+    if let Some(env_id) = environment_id {
+        let owner = super::environments::lookup_project_id(conn, env_id)
+            .map_err(|_| AppError::Validation(format!("环境 {env_id} 不存在")))?;
+        if owner != project_id {
+            return Err(AppError::Validation(format!(
+                "环境 {env_id} 不在数据源接口所属的项目里"
+            )));
+        }
     }
-    Ok(())
+    if let Some(def_id) = base_url_definition_id {
+        let owner = super::base_url_defs::project_id_of(conn, def_id)
+            .map_err(|_| AppError::Validation(format!("服务 {def_id} 不存在")))?;
+        if owner != project_id {
+            return Err(AppError::Validation(format!(
+                "服务 {def_id} 不在数据源接口所属的项目里"
+            )));
+        }
+    }
+    Ok((
+        environment_id.map(str::to_string),
+        base_url_definition_id.map(str::to_string),
+    ))
 }
+
+/// 变量名是否合法：只允许字母、数字与下划线，且非空。
+///
+/// 与 `crate::template::is_word` 同一套判据——`{{my-var}}` 这样的名字替换原语认不出来，
+/// 存进去就等于存了一条永远不生效的定义。
+pub fn is_valid_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// 选出列表与单行读取共用的列。
+const COLUMNS: &str = "v.id, v.name, v.description, v.source_endpoint_id, n.name, \
+                       v.source_inline_json, v.source_environment_id, \
+                       v.source_base_url_definition_id, v.extract_path, v.value_mode, \
+                       v.ttl_seconds, v.stale_fallback, v.enabled, v.sort_order, \
+                       v.created_at, v.updated_at";
 
 /// 行映射器。
 fn row_to_var(row: &Row<'_>) -> Result<DynamicVariable, rusqlite::Error> {
-    let value_mode_raw: String = row.get(8)?;
+    let value_mode_raw: String = row.get(9)?;
     Ok(DynamicVariable {
         id: row.get(0)?,
-        project_id: row.get(1)?,
-        name: row.get(2)?,
-        description: row.get(3)?,
-        source_endpoint_id: row.get(4)?,
-        source_endpoint_name: row.get(5)?,
-        source_inline_json: row.get(6)?,
-        extract_path: row.get(7)?,
+        name: row.get(1)?,
+        description: row.get(2)?,
+        source_endpoint_id: row.get(3)?,
+        source_endpoint_name: row.get(4)?,
+        source_inline_json: row.get(5)?,
+        source_environment_id: row.get(6)?,
+        source_base_url_definition_id: row.get(7)?,
+        extract_path: row.get(8)?,
         value_mode: ValueMode::parse(&value_mode_raw).unwrap_or_default(),
-        ttl_seconds: row.get(9)?,
-        stale_fallback: row.get(10)?,
-        enabled: row.get(11)?,
-        sort_order: row.get(12)?,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        ttl_seconds: row.get(10)?,
+        stale_fallback: row.get(11)?,
+        enabled: row.get(12)?,
+        sort_order: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 

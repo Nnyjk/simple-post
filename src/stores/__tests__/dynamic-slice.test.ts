@@ -2,11 +2,13 @@
  * `src/stores/dynamic-slice.ts` 的切片级测试。
  *
  * 覆盖的职责：
- *   - `dropDynamicValue` 把一个变量名从**所有**环境的桶里剔除，并清掉它的失败原因。
+ *   - `dropDynamicValue` 把一个变量名从取值桶里剔除，并清掉它的失败原因。
  *     留着旧值就等于停用或删除之后仍然在替换。
  *   - `deleteDynamicVariable` 与 `updateDynamicVariable` 在改动之后剔除旧名字的值。
  *   - `resolveDynamicVariables` 按变量名记下取数失败的原因，成功时清掉。
  *   - `updateDynamicVariable` 失败时返回 false（表单据此不关闭，用户输入不丢）。
+ *
+ * 取值桶不按环境分桶：定义是全局的，取数环境由定义自己决定，故同一个名字只有一个当前值。
  *
  * 运行：
  *   npx tsx --test src/stores/__tests__/dynamic-slice.test.ts
@@ -17,7 +19,13 @@ import assert from 'node:assert/strict';
 import { installBrowserShim, installIpcMock, clearIpcMock } from './_browser-shim';
 
 import { createDynamicSlice } from '../dynamic-slice';
-import type { DynamicError, DynamicValueStatus, DynamicVariable } from '@/types/domain';
+import type {
+  DynamicError,
+  DynamicValueStatus,
+  DynamicVariable,
+  DynamicVariableReference,
+  DynamicVariableView,
+} from '@/types/domain';
 
 // ---------- harness ----------
 
@@ -25,7 +33,7 @@ import type { DynamicError, DynamicValueStatus, DynamicVariable } from '@/types/
 function makeHarness() {
   const bag: Record<string, any> = {
     dynamicVariables: [] as DynamicVariable[],
-    dynamicValues: {} as Record<string, Record<string, DynamicValueStatus>>,
+    dynamicValues: {} as Record<string, DynamicValueStatus>,
     dynamicErrors: {} as Record<string, DynamicError>,
     dynamicResolving: false,
     dynamicError: null as string | null,
@@ -48,12 +56,13 @@ function makeHarness() {
 function definition(name: string, id = `d-${name}`): DynamicVariable {
   return {
     id,
-    projectId: 'p1',
     name,
     description: null,
     sourceEndpointId: null,
     sourceEndpointName: null,
     sourceInlineJson: '{"method":"GET","url":"http://127.0.0.1:9/points"}',
+    sourceEnvironmentId: null,
+    sourceBaseUrlDefinitionId: null,
     extractPath: '$',
     valueMode: 'auto',
     ttlSeconds: 60,
@@ -63,6 +72,30 @@ function definition(name: string, id = `d-${name}`): DynamicVariable {
     createdAt: 1,
     updatedAt: 1,
   } as DynamicVariable;
+}
+
+/** 一条定义 + 它的当前值与引用关系。 */
+function view(name: string, referencedBy: DynamicVariableReference[] = []): DynamicVariableView {
+  return {
+    ...definition(name),
+    value: null,
+    source: 'missing',
+    fetchedAt: null,
+    expiresAt: null,
+    isOverride: false,
+    error: null,
+    referencedBy,
+  } as DynamicVariableView;
+}
+
+/** 一条引用关系。 */
+function reference(endpointName: string): DynamicVariableReference {
+  return {
+    endpointId: `e-${endpointName}`,
+    endpointName,
+    projectId: 'p1',
+    projectName: 'First',
+  };
 }
 
 /** 一次解析的结果。 */
@@ -96,18 +129,16 @@ describe('dynamic slice', () => {
     shim.teardown();
   });
 
-  it('dropDynamicValue 清掉所有环境里的那个名字与它的失败原因', () => {
+  it('dropDynamicValue 清掉那个名字与它的失败原因', () => {
     const bag = makeHarness();
     bag.dynamicValues = {
-      env1: { sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus },
-      env2: { sns: { name: 'sns', value: '[2]', source: 'auto' } as DynamicValueStatus },
+      sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus,
     };
     bag.dynamicErrors = { sns: { name: 'sns', kind: 'network', message: '断了' } };
 
     bag.dropDynamicValue('sns');
 
-    assert.deepEqual(bag.dynamicValues.env1, {});
-    assert.deepEqual(bag.dynamicValues.env2, {});
+    assert.deepEqual(bag.dynamicValues, {});
     assert.deepEqual(bag.dynamicErrors, {});
   });
 
@@ -129,7 +160,7 @@ describe('dynamic slice', () => {
     const bag = makeHarness();
     bag.dynamicVariables = [definition('sns')];
     bag.dynamicValues = {
-      env1: { sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus },
+      sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus,
     };
     installIpcMock((cmd) => {
       if (cmd === 'dynamic_variables_update') return definition('points');
@@ -139,7 +170,7 @@ describe('dynamic slice', () => {
 
     await bag.updateDynamicVariable('d-sns', { name: 'points' });
 
-    assert.deepEqual(bag.dynamicValues.env1, {}, '旧名字的值应当被剔除');
+    assert.deepEqual(bag.dynamicValues, {}, '旧名字的值应当被剔除');
   });
 
   it('取数失败的原因按变量名记下来，取数成功后清掉', async () => {
@@ -155,13 +186,31 @@ describe('dynamic slice', () => {
       return null;
     });
 
-    const failed = await bag.resolveDynamicVariables('p1', ['sns'], 'env1');
+    const failed = await bag.resolveDynamicVariables(['sns']);
     assert.equal(failed.errors.length, 1);
     assert.equal(bag.dynamicErrors.sns?.kind, 'timeout');
 
     phase = 'ok';
-    await bag.resolveDynamicVariables('p1', ['sns'], 'env1');
+    await bag.resolveDynamicVariables(['sns']);
     assert.equal(bag.dynamicErrors.sns, undefined, '取数成功后原因应当被清掉');
+  });
+
+  it('解析不带项目与环境参数', async () => {
+    // 定义是全局的：解析按名字找定义，取数环境由定义自己决定。
+    const bag = makeHarness();
+    const seen: any[] = [];
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        seen.push(args);
+        return resolution(['sns'], { sns: '[1]' });
+      }
+      return null;
+    });
+
+    await bag.resolveDynamicVariables(['sns']);
+
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0], { names: ['sns'], force: false });
   });
 
   it('保存失败时 updateDynamicVariable 返回 false', async () => {
@@ -174,5 +223,54 @@ describe('dynamic slice', () => {
     const ok = await bag.updateDynamicVariable('d-sns', { name: 'sns' });
     assert.equal(ok, false);
     assert.match(bag.dynamicError ?? '', /名字重复/);
+  });
+
+  it('加载时把要不要算引用关系告诉后端', async () => {
+    const bag = makeHarness();
+    const seen: any[] = [];
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_list') {
+        seen.push(args);
+        return [];
+      }
+      return null;
+    });
+
+    await bag.loadDynamicVariables();
+    await bag.loadDynamicVariables({ includeReferences: false });
+
+    assert.deepEqual(seen[0], { includeReferences: true });
+    assert.deepEqual(seen[1], { includeReferences: false });
+  });
+
+  it('不算引用关系的加载不清空已知的引用关系', async () => {
+    const bag = makeHarness();
+    // 面板算过一次引用关系：这条列表里带着它。
+    bag.dynamicVariables = [view('sns', [reference('消费接口')])];
+    installIpcMock((cmd) => {
+      // 后端不算引用关系时带回来的 `referencedBy` 是空的。
+      if (cmd === 'dynamic_variables_list') return [view('sns')];
+      return null;
+    });
+
+    await bag.loadDynamicVariables({ includeReferences: false });
+
+    assert.equal(bag.dynamicVariables.length, 1);
+    assert.equal(bag.dynamicVariables[0].referencedBy.length, 1);
+    assert.equal(bag.dynamicVariables[0].referencedBy[0].endpointName, '消费接口');
+  });
+
+  it('算引用关系的加载用后端给的新值', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('sns', [reference('旧接口')])];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_list') return [view('sns', [reference('新接口')])];
+      return null;
+    });
+
+    await bag.loadDynamicVariables({ includeReferences: true });
+
+    assert.equal(bag.dynamicVariables[0].referencedBy.length, 1);
+    assert.equal(bag.dynamicVariables[0].referencedBy[0].endpointName, '新接口');
   });
 });

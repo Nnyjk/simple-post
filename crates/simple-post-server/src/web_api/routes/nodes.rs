@@ -107,6 +107,49 @@ pub(crate) async fn nodes_list(
     ))
 }
 
+/// `GET /api/nodes/children?parentId=&projectId=` —— 一层的子节点。
+///
+/// `parentId` 给一个节点就取它的孩子；`projectId` 给一个项目就取那个项目的模块
+/// （模块的父是项目，而项目不是节点，故不能按 `parentId` 找）。
+pub(crate) async fn nodes_children(
+    State(s): State<Arc<WebState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let rows = match (params.get("parentId"), params.get("projectId")) {
+        (Some(parent), _) => db::with_conn(&s.pool, |c| db::nodes::list_children(c, parent, None)),
+        (None, Some(project)) => db::with_conn(&s.pool, |c| {
+            db::nodes::list_by_root_and_type(c, project, ResourceNodeType::Module)
+        }),
+        (None, None) => Err(AppError::Validation(
+            "parentId or projectId is required".into(),
+        )),
+    }
+    .map_err(map_app_error)?;
+    Ok(Json(
+        serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
+    ))
+}
+
+/// `GET /api/nodes/search?q=&limit=` —— 跨全部项目搜接口，带它所在的路径。
+///
+/// 路径是「项目 / 模块 / 集合…」：用户在一个很大的工作区里找一条接口时，需要知道
+/// 它在谁底下。
+pub(crate) async fn nodes_search_paths(
+    State(s): State<Arc<WebState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let q = params.get("q").map(String::as_str).unwrap_or("");
+    let limit = params
+        .get("limit")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50);
+    let rows =
+        db::with_conn(&s.pool, |c| db::nodes::search_paths(c, q, limit)).map_err(map_app_error)?;
+    Ok(Json(
+        serde_json::to_value(&rows).unwrap_or_else(|_| json!([])),
+    ))
+}
+
 /// `GET /api/nodes/:id`
 pub(crate) async fn nodes_get(
     State(s): State<Arc<WebState>>,

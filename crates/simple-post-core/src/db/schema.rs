@@ -15,6 +15,9 @@ use super::SCHEMA_VERSION;
 /// 先 DROP 再建——触发器体**就是**契约，`IF NOT EXISTS` 会让老库继续执行应用层已放弃的矩阵。
 /// **不插入任何行**：全新安装是空库，由用户或 MCP 客户端填充；测试种子在 `test_support`。
 pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
+    // 必须在 `SCHEMA_SQL` 之前：旧形状的动态变量表带着 `project_id` 列，
+    // `CREATE TABLE IF NOT EXISTS` 对它是空操作，旧行会留在一张形状已经不同的表里。
+    drop_obsolete_dynamic_variable_tables(conn)?;
     conn.execute_batch(SCHEMA_SQL)?;
     // 必须在数据迁移之前、且不能放进 `SCHEMA_SQL`：那个 pass 要读写的
     // `module_base_urls_json` / `module_id` / `is_default` 在够旧的库里根本不存在，
@@ -22,6 +25,26 @@ pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
     // 所以列只能在这里补。
     add_missing_columns(conn)?;
     migrate_base_urls_into_value_layer(conn)
+}
+
+/// 旧形状的动态变量表直接丢掉。
+///
+/// 旧形状是「定义属于项目」：表里有 `project_id` 列。当前形状没有这一列，故
+/// `CREATE TABLE IF NOT EXISTS` 对旧文件是空操作——旧行会留在形状已经不同的表里，
+/// 读出来的是缺列的行。丢掉两张表即可，下一次 `SCHEMA_SQL` 会把它们按当前形状建回来。
+///
+/// 只丢这两张表：项目、接口、环境等其余数据不动。
+fn drop_obsolete_dynamic_variable_tables(conn: &mut Connection) -> Result<(), AppError> {
+    if !table_has_column(conn, "dynamic_variables", "project_id")? {
+        return Ok(());
+    }
+    // 缓存表的外键指向定义表，故先丢缓存表。
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS dynamic_variable_cache;\
+         DROP TABLE IF EXISTS dynamic_variables;",
+    )?;
+    tracing::info!("schema: dropped the project-scoped dynamic variable tables");
+    Ok(())
 }
 
 /// 本项目某个构建写过、但并非每个构建都有的列。

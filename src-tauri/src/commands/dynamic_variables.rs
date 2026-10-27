@@ -6,6 +6,8 @@
 //! **命令参数是扁平的**，不是一个 `opts: …` 包装：`#[tauri::command]` 按参数名去 payload
 //! 里取值，而 REST 侧 `Json<…>` 直接吃整个 body；渲染层两边发的是同一个扁平对象，于是
 //! 参数名必须就是那些 camelCase 字段名本身。
+//!
+//! 定义是**全局**的，故这些命令都不带项目参数。
 
 use tauri::State;
 
@@ -17,16 +19,18 @@ use crate::error::AppError;
 
 use crate::dynamic_api::DynamicVariableView;
 
-/// 列出本项目的全部动态变量，带当前值与缓存状态。
+/// 列出全部动态变量，带当前值与缓存状态。
 ///
 /// 只读缓存行，**不取数**。
+///
+/// `include_references` 缺席时带上「哪些端点引用了它」；传 `false` 则不算——算它要扫
+/// 一遍全部端点，而只要当前值的调用方不需要它。
 #[tauri::command]
 pub fn dynamic_variables_list(
     state: State<DbPool>,
-    project_id: String,
-    environment_id: Option<String>,
+    include_references: Option<bool>,
 ) -> Result<Vec<DynamicVariableView>, AppError> {
-    crate::dynamic_api::list(&state, &project_id, environment_id.as_deref())
+    crate::dynamic_api::list(&state, include_references.unwrap_or(true))
 }
 
 /// 新建一条动态变量定义。
@@ -38,12 +42,13 @@ pub fn dynamic_variables_list(
 #[tauri::command]
 pub fn dynamic_variables_create(
     state: State<DbPool>,
-    project_id: String,
     name: String,
     id: Option<String>,
     description: Option<String>,
     source_endpoint_id: Option<String>,
     source_inline_json: Option<String>,
+    source_environment_id: Option<String>,
+    source_base_url_definition_id: Option<String>,
     extract_path: Option<String>,
     value_mode: Option<ValueMode>,
     ttl_seconds: Option<i64>,
@@ -57,6 +62,8 @@ pub fn dynamic_variables_create(
         description,
         source_endpoint_id,
         source_inline_json,
+        source_environment_id,
+        source_base_url_definition_id,
         extract_path,
         value_mode,
         ttl_seconds,
@@ -64,7 +71,7 @@ pub fn dynamic_variables_create(
         enabled,
         sort_order,
     };
-    crate::dynamic_api::create(&state, &project_id, opts)
+    crate::dynamic_api::create(&state, opts)
 }
 
 /// 改一条动态变量定义。
@@ -87,19 +94,10 @@ pub fn dynamic_variables_delete(state: State<DbPool>, id: String) -> Result<(), 
 #[tauri::command]
 pub async fn dynamic_variables_resolve(
     state: State<'_, DbPool>,
-    project_id: String,
     names: Vec<String>,
-    environment_id: Option<String>,
     force: Option<bool>,
 ) -> Result<DynamicResolution, AppError> {
-    crate::dynamic_api::resolve(
-        &state,
-        &project_id,
-        environment_id.as_deref(),
-        &names,
-        force.unwrap_or(false),
-    )
-    .await
+    crate::dynamic_api::resolve(&state, &names, force.unwrap_or(false)).await
 }
 
 /// 写覆盖值。`value` 缺席 = 清除，有值 = 写入。
@@ -111,28 +109,18 @@ pub fn dynamic_variables_set_override(
     state: State<DbPool>,
     id: String,
     value: Option<String>,
-    environment_id: Option<String>,
     expires_at: Option<i64>,
     forever: Option<bool>,
 ) -> Result<DynamicVariableView, AppError> {
-    crate::dynamic_api::set_override(
-        &state,
-        &id,
-        environment_id.as_deref(),
-        value,
-        expires_at,
-        forever.unwrap_or(false),
-    )?;
-    crate::dynamic_api::get(&state, &id, environment_id.as_deref())
+    crate::dynamic_api::set_override(&state, &id, value, expires_at, forever.unwrap_or(false))?;
+    crate::dynamic_api::get(&state, &id)
 }
 
 /// 强制重新取一次数。
 #[tauri::command]
 pub async fn dynamic_variables_refresh(
     state: State<'_, DbPool>,
-    project_id: String,
     id: String,
-    environment_id: Option<String>,
 ) -> Result<DynamicValueStatus, AppError> {
-    crate::dynamic_api::refresh(&state, &project_id, &id, environment_id.as_deref()).await
+    crate::dynamic_api::refresh(&state, &id).await
 }
