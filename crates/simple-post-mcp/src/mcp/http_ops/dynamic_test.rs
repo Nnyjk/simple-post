@@ -20,10 +20,14 @@ use simple_post_core::permissions::CapabilityPolicy;
 /// 每次调用自增，用来在同毫秒内构造多个 state() 时区分临时目录。
 static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// 起一个 loopback 服务：`GET /points` 回站点清单，`POST /consume` 记下收到的 body。
+/// 收到的请求：请求路径与 body。
+type Received = Arc<Mutex<Option<(String, String)>>>;
+
+/// 起一个 loopback 服务：`GET /points` 回站点清单，`POST /consume` 记下收到的路径与 body。
 ///
-/// 记下来的 body 放进 `Arc<Mutex<Option<String>>>`，测试在请求发完后读它。
-async fn serve() -> (String, Arc<Mutex<Option<String>>>) {
+/// 记下来的东西放进 `Arc<Mutex<Option<(String, String)>>>`，测试在请求发完后读它：
+/// 第一项是请求路径，第二项是 body。
+async fn serve() -> (String, Received) {
     use axum::{
         body::Bytes,
         extract::State as AxumState,
@@ -31,22 +35,28 @@ async fn serve() -> (String, Arc<Mutex<Option<String>>>) {
         Json, Router,
     };
 
-    let received: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let received: Received = Arc::new(Mutex::new(None));
 
     async fn points() -> Json<serde_json::Value> {
         Json(json!([{ "code": "A001" }]))
     }
     async fn consume(
-        AxumState(received): AxumState<Arc<Mutex<Option<String>>>>,
+        AxumState(received): AxumState<Received>,
+        uri: axum::http::Uri,
         body: Bytes,
     ) -> &'static str {
-        *received.lock().expect("锁") = Some(String::from_utf8_lossy(&body).to_string());
+        *received.lock().expect("锁") = Some((
+            uri.path().to_string(),
+            String::from_utf8_lossy(&body).to_string(),
+        ));
         "ok"
     }
 
     let router = Router::new()
         .route("/points", get(points))
         .route("/consume", post(consume))
+        // 路径参数那一档：路径里带一个 `{code}` 段。
+        .route("/consume/{code}", post(consume))
         .with_state(received.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -61,6 +71,11 @@ async fn serve() -> (String, Arc<Mutex<Option<String>>>) {
 
 /// 一个含项目、消费端点与一条动态变量定义的库。
 fn test_state(base_url: &str) -> Arc<AppState> {
+    test_state_with(base_url, "/consume", "{\"sns\": {{sns}}}")
+}
+
+/// 与 [`test_state`] 相同，只是端点的 path 与 body 可以换。
+fn test_state_with(base_url: &str, url: &str, body_content: &str) -> Arc<AppState> {
     let id = STATE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
         "simple-post-mcp-dynamic-send-{}-{}-{}",
@@ -97,7 +112,7 @@ fn test_state(base_url: &str) -> Arc<AppState> {
             &simple_post_core::domain::EndpointDetail {
                 node_id: "e1".into(),
                 method: simple_post_core::domain::HttpMethod::Post,
-                url: "/consume".into(),
+                url: url.into(),
                 environment_id: None,
                 base_url_definition_id: None,
                 base_url_override: Some(base_url.to_string()),
@@ -106,7 +121,7 @@ fn test_state(base_url: &str) -> Arc<AppState> {
                 headers: vec![],
                 body: simple_post_core::domain::RequestBody {
                     mode: simple_post_core::domain::BodyMode::Json,
-                    content: "{\"sns\": {{sns}}}".into(),
+                    content: body_content.into(),
                     schema: None,
                 },
                 auth: simple_post_core::domain::AuthConfig::default(),
@@ -162,7 +177,7 @@ async fn the_consumer_request_carries_the_fetched_value() {
         .to_string();
     assert!(text.contains("200"), "调用应当成功：{text}");
 
-    let body = received.lock().expect("锁").clone().expect("收到过请求");
+    let (_, body) = received.lock().expect("锁").clone().expect("收到过请求");
     assert!(
         body.contains("A001"),
         "消费端点收到的 body 里应当是取回的数组：{body}"
@@ -172,4 +187,60 @@ async fn the_consumer_request_carries_the_fetched_value() {
         "未解析的标记不该原样发出：{body}"
     );
     let _ = created;
+}
+
+/// 路径参数值里的 `{{sns}}` 也要被取数并替换。
+///
+/// 路径参数的值在替换时同样会解 `{{var}}`，故扫描「这个请求引用了哪些动态变量」时
+/// 必须把它算进去 —— 不算的话这个变量永远不会被取数，替换后仍是字面量。
+///
+/// **body 里不能出现 `{{sns}}`**：body 里出现的话，变量名照样会被扫到，fetch 照样发生，
+/// 于是这条用例在「没扫路径参数」的实现下也会通过 —— 它证明不了自己。
+#[tokio::test]
+async fn a_path_parameter_value_carries_the_fetched_value() {
+    let (base_url, received) = serve().await;
+    let state = test_state_with(&base_url, "/consume/{code}", "{\"x\": 1}");
+
+    dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({
+            "project_id": "p1",
+            "name": "sns",
+            "extract_path": "$[0].code",
+            "source_inline_json": json!({
+                "method": "GET",
+                "url": format!("{base_url}/points"),
+                "headers": [],
+                "body": { "mode": "none", "content": "" },
+                "auth": { "kind": "none" }
+            })
+            .to_string(),
+        }),
+    )
+    .await
+    .expect("建定义");
+
+    // 调用时把路径参数的值交给它 —— 值里写的是动态变量的标记。
+    let called = dispatch(
+        &state,
+        "api_call_endpoint",
+        json!({
+            "endpoint_id": "e1",
+            "overrides": { "pathParams": [{ "key": "code", "value": "{{sns}}" }] }
+        }),
+    )
+    .await
+    .expect("调用消费端点");
+    let text = serde_json::to_value(&called).expect("序列化")["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(text.contains("200"), "调用应当成功：{text}");
+
+    let (path, _) = received.lock().expect("锁").clone().expect("收到过请求");
+    assert_eq!(
+        path, "/consume/A001",
+        "路径参数的值应当被取回的动态变量替掉"
+    );
 }

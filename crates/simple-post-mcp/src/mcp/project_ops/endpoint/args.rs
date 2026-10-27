@@ -5,7 +5,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::input::KeyValueInput;
+use crate::mcp::key_value::KeyValueInput;
 #[derive(Debug, Deserialize)]
 pub(super) struct EndpointCreateArgs {
     /// 父集合。端点现在可以直接挂在模块下，所以它与 `module_id` 二选一即可。

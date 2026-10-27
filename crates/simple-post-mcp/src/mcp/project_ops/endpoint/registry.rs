@@ -165,19 +165,7 @@ body_content, never here."
                 "notes": { "type": "string", "description": "Free-form notes." }
             },
             "$defs": {
-                "keyValue": {
-                    "type": "object",
-                    "description": "One key/value row. `id` is optional bookkeeping (minted when omitted); `enabled` defaults to true.",
-                    "properties": {
-                        "key": { "type": "string", "description": "Header or parameter name." },
-                        "value": { "type": "string", "description": "Header or parameter value." },
-                        "enabled": { "type": "boolean", "description": "Send this row. Defaults to true; set false to keep it without sending." },
-                        "description": { "type": "string", "description": "Optional note about this row." },
-                        "id": { "type": "string", "description": "Stable row id, used to update a row in place. Omit when creating." }
-                    },
-                    "required": ["key", "value"],
-                    "additionalProperties": false
-                }
+                "keyValue": crate::mcp::key_value::key_value_schema(),
             },
             "required": ["name", "method", "url"],
             "additionalProperties": true,
@@ -286,19 +274,7 @@ segments in `url`. They are substituted into the path itself, not appended to th
                 }
             },
             "$defs": {
-                "keyValue": {
-                    "type": "object",
-                    "description": "One key/value row. `id` is optional bookkeeping (minted when omitted); `enabled` defaults to true.",
-                    "properties": {
-                        "key": { "type": "string", "description": "Header or parameter name." },
-                        "value": { "type": "string", "description": "Header or parameter value." },
-                        "enabled": { "type": "boolean", "description": "Send this row. Defaults to true; set false to keep it without sending." },
-                        "description": { "type": "string", "description": "Optional note about this row." },
-                        "id": { "type": "string", "description": "Stable row id, used to update a row in place. Omit when creating." }
-                    },
-                    "required": ["key", "value"],
-                    "additionalProperties": false
-                }
+                "keyValue": crate::mcp::key_value::key_value_schema(),
             },
             "required": ["endpoint_id", "patch"],
             "additionalProperties": false,

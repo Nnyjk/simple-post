@@ -113,6 +113,72 @@ fn body_mode_defaults_to_raw_when_a_body_is_given() {
     assert!(parse_body_mode(Some("yaml"), true).is_err());
 }
 
+/// `api_call_endpoint` 的 `overrides` 引用的 `#/$defs/keyValue` 必须有定义。
+///
+/// 少了定义，跟着 `$ref` 走的 agent 就落到一个空处，只能自己猜这一行长什么样 ——
+/// 于是它多半猜成带 `id` 的域类型形状，而解析器要的是「只要 `key` 与 `value`」。
+#[test]
+fn the_call_endpoint_schema_defines_the_key_value_it_refers_to() {
+    let descriptor = crate::mcp::tool_table()
+        .iter()
+        .find(|e| e.name == "api_call_endpoint")
+        .map(|e| e.schema.clone())
+        .expect("api_call_endpoint must be registered");
+    let overrides = &descriptor["properties"]["overrides"]["properties"];
+
+    for field in ["headers", "params", "pathParams"] {
+        let r = overrides[field]["items"]["$ref"]
+            .as_str()
+            .expect("条目按 $ref 引用");
+        assert_eq!(r, "#/$defs/keyValue", "{field} 的 $ref");
+    }
+
+    let item_props = &descriptor["$defs"]["keyValue"]["properties"];
+    assert_eq!(item_props["key"]["type"], "string");
+    assert_eq!(item_props["value"]["type"], "string");
+    assert_eq!(item_props["enabled"]["type"], "boolean");
+}
+
+/// `overrides` 里的一行只写 `key` 与 `value` 就能用。
+///
+/// 工具描述与 JSON Schema 文档化的就是这种形状，而域类型 `KeyValue` 要求 `id` 与
+/// `enabled` 都在。按域类型直接反序列化，`{"key":"id","value":"42"}` 会因缺字段而
+/// 失败 —— 而那一层曾经用 `.ok()` 把整份覆盖值换成空值，调用方看不出出了什么事。
+#[test]
+fn overrides_accept_a_key_value_only_row() {
+    let o: crate::variable_fill::EndpointOverrides = serde_json::from_value(json!({
+        "pathParams": [{ "key": "id", "value": "42" }]
+    }))
+    .expect("只要 key 与 value 的那一行应当被收下");
+
+    let rows = o.path_params.expect("pathParams");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].key, "id");
+    assert_eq!(rows[0].value, "42");
+    assert!(rows[0].enabled, "没写 enabled 时默认启用");
+    assert!(!rows[0].id.is_empty(), "没写 id 时另铸一个");
+}
+
+/// 形状不对的覆盖值要报错，不能被静默换成空值。
+#[test]
+fn overrides_reject_a_row_without_a_key() {
+    let err = serde_json::from_value::<crate::variable_fill::EndpointOverrides>(json!({
+        "pathParams": [{ "value": "42" }]
+    }));
+    assert!(err.is_err(), "缺 key 的那一行应当被拒下");
+}
+
+/// `enabled` 显式写成 `false` 仍然照办：那对应「留着但先关掉」。
+#[test]
+fn overrides_respect_an_explicitly_disabled_row() {
+    let o: crate::variable_fill::EndpointOverrides = serde_json::from_value(json!({
+        "pathParams": [{ "key": "id", "value": "42", "enabled": false }]
+    }))
+    .expect("形状对就该收下");
+    let rows = o.path_params.expect("pathParams");
+    assert!(!rows[0].enabled, "显式的 false 不会被默认的 true 盖掉");
+}
+
 #[test]
 fn settings_override_extracts_values() {
     let so = json!({

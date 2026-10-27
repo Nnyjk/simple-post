@@ -157,11 +157,14 @@ async fn tool_api_resolve_endpoint(
     };
     let project_ref = project.as_ref().unwrap_or(&EMPTY_PROJECT);
 
-    let overrides: crate::variable_fill::EndpointOverrides = a
-        .overrides
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    // 覆盖值反序列化失败是**错误**，不是「当作没传」。`.ok()` 会把一整份覆盖值悄悄
+    // 换成空值，于是调用方看到的是「按端点自己那份解析出来的请求」，而不是
+    // 「你传的 overrides 格式不对」。
+    let overrides: crate::variable_fill::EndpointOverrides = match a.overrides.as_ref() {
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| AppError::Validation(format!("api_resolve_endpoint overrides: {e}")))?,
+        None => Default::default(),
+    };
 
     // 与 `api_call_endpoint` 同一套按模块查找：预览与真正发送必须对「这个端点解析
     // 到哪个 host」达成一致，否则 AI 客户端预览一个、实际打到另一个。

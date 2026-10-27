@@ -222,6 +222,14 @@ placeholder name; a placeholder without an entry keeps its literal braces and bl
                     },
                     "settings_override": { "type": "object" }
                 },
+                "$defs": {
+                    // `overrides` 的三个数组按 `#/$defs/keyValue` 引用条目形状。少了这个
+                    // 定义，跟着 `$ref` 走的 agent 就落到一个空处，只能自己猜这一行长
+                    // 什么样 —— 于是它多半猜成带 `id` 的域类型形状，而解析器要的是
+                    // 「只要 key 与 value」。定义放在共享的地方（`mcp::key_value`），
+                    // 与 `endpoint_create` / `endpoint_update` 用的是同一份。
+                    "keyValue": crate::mcp::key_value::key_value_schema(),
+                },
                 "required": ["endpoint_id"],
                 "additionalProperties": true,
             }),
@@ -365,11 +373,14 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         None
     };
 
-    let overrides: crate::variable_fill::EndpointOverrides = a
-        .overrides
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    // 覆盖值反序列化失败是**错误**，不是「当作没传」。`.ok()` 会把一整份覆盖值悄悄
+    // 换成空值，于是调用方看到的是「按端点自己那份发出去的请求」，而不是
+    // 「你传的 overrides 格式不对」。
+    let overrides: crate::variable_fill::EndpointOverrides = match a.overrides.as_ref() {
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| AppError::Validation(format!("api_call_endpoint overrides: {e}")))?,
+        None => Default::default(),
+    };
 
     // 端点属于哪个模块只在树里，detail 行上没有，得查 `nodes` 补齐；但调用方
     // 自己指定了就不覆盖 —— `resolve_endpoint` 是纯函数，别让它被一次查库改写。
@@ -458,6 +469,11 @@ async fn resolve_dynamic_values(
         .params
         .clone()
         .unwrap_or_else(|| detail.params.clone());
+    // 路径参数的值同样会被 `{{var}}` 替换，故它们里的标记同样要参与扫描。
+    let eff_path_params = overrides
+        .path_params
+        .clone()
+        .unwrap_or_else(|| detail.path_params.clone());
     let eff_headers = overrides
         .headers
         .clone()
@@ -470,6 +486,7 @@ async fn resolve_dynamic_values(
         base_url: &base_url,
         url: &eff_url,
         params: &eff_params,
+        path_params: &eff_path_params,
         headers: &eff_headers,
         body: &eff_body,
         auth: &detail.auth,
@@ -725,6 +742,10 @@ mod multipart_parity_tests;
 #[cfg(test)]
 #[path = "http_ops/run_request_test.rs"]
 mod run_request_tests;
+
+#[cfg(test)]
+#[path = "http_ops/overrides_test.rs"]
+mod overrides_tests;
 
 #[cfg(test)]
 #[path = "http_ops/env_fallback_test.rs"]
