@@ -13,5 +13,6 @@ pub mod mcp_metrics;
 pub mod oauth2;
 pub mod permissions;
 pub mod script;
+pub mod spec;
 pub mod template;
 pub mod url;

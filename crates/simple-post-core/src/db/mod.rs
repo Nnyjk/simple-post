@@ -100,7 +100,7 @@ pub(crate) fn json_col_err(col: &str, e: serde_json::Error) -> rusqlite::Error {
 #[cfg(test)]
 mod migration_fixtures;
 #[cfg(test)]
-mod test_helpers;
+pub(crate) mod test_helpers;
 
 #[cfg(test)]
 #[path = "mod_test.rs"]
