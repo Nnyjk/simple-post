@@ -1,7 +1,7 @@
 {
   "name": "simple-post",
   "private": true,
-  "version": "0.1.21",
+  "version": "0.1.22",
   "type": "module",
   "description": "Modern desktop API tool with built-in MCP for AI collaboration",
   "engines": {
