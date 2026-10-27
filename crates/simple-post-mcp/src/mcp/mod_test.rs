@@ -122,16 +122,9 @@ fn every_capability_row_names_a_registered_tool() {
 /// 「会话数」。详细的解释属于 `simple-post://spec-authoring` 那份按需读取的指南，
 /// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
 ///
-/// **上限怎么算出来的。** 早先这里用「字符数 ÷ 3」估 token 数，于是 39 642 字符
-/// 被说成 13 214 tokens —— 那个数高估了六成：JSON 的标点碎，一个 token 覆盖四个
-/// 多字符。实测（`tiktoken` 的 `cl100k_base`，对**紧凑** JSON，即真正上线的形状）
-/// 是 40 702 字符 ≈ **8 652 tokens**，比值约 **4.70 字符 / token**。
-/// 故这个上限按字符写：**41 400 字符 ≈ 8 800 tokens**，留一点余量给下一个工具。
-///
-/// 上限第一次重标定，是因为路径参数（`path_params`）进了三个工具的契约：
-/// `endpoint_create`、`endpoint_update` 与 `spec_upsert` 各自多出一段说明，而
-/// `api_call_endpoint` 的 `overrides` 也要写清那几个字段。契约变大，体积就变大 ——
-/// 这时候该做的是把新增的那几段写短，而不是砍掉契约本身。
+/// **上限怎么算出来的。** 紧凑 JSON 约 **4.70 字符 / token**（`cl100k_base` 实测；
+/// 「字符数 ÷ 3」高估六成），40 718 字符 ≈ **8 672 tokens**，故上限取 41 400 字符。
+/// 超限时把长说明移到 `simple-post://spec-authoring`，不要扩大工具描述。
 const TOOLS_LIST_BUDGET_CHARS: usize = 41_400;
 
 #[test]
@@ -160,8 +153,10 @@ fn the_tools_list_payload_stays_under_its_budget() {
 /// 打印 `tools/list` 的体积与逐条分布，供调整描述时对照。
 ///
 /// 这个测试不做断言，只报告数字，并把整份负载写到 `target/tools-list.json`，
-/// 好让外面的分词器量真实 token 数。用 `cargo test -p simple-post-mcp -- --nocapture` 跑。
+/// 好让外面的分词器量真实 token 数。用
+/// `cargo test -p simple-post-mcp -- --ignored --nocapture report_the_tools_list_size` 跑。
 #[test]
+#[ignore = "只在调整描述时手动跑：写 target/tools-list.json"]
 fn report_the_tools_list_size() {
     let mut rows: Vec<(String, usize, usize)> = tool_table()
         .iter()
