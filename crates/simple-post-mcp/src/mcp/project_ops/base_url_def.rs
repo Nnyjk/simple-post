@@ -14,7 +14,6 @@ use serde_json::{json, Value};
 
 use crate::mcp::{AppState, CallToolResult};
 use crate::tool_fn;
-use simple_post_core::domain::BaseUrlDefinition;
 use simple_post_core::error::AppError;
 
 /// 解析服务所属项目，供按项目的那扇门使用。
@@ -38,6 +37,9 @@ pub(super) struct BaseUrlDefCreateArgs {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// 项目里已经有同名服务时怎么办。缺省是 `reuse`。
+    #[serde(default)]
+    pub if_exists: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,13 +85,18 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
     });
     v.push(crate::mcp::ToolEntry {
         name: "base_url_def_create",
-        description: "Create a baseUrl service in a project. Services belong to the project, not to a module, so every module of it can resolve the service; the URL per (environment x module) is set separately.",
+        description: "Create a baseUrl service in a project. Services belong to the project, not to a module, so every module of it can resolve the service; the URL per (environment x module) is set separately. if_exists=reuse (the default) returns the existing service with the same name.",
         schema: json!({
             "type": "object",
             "properties": {
                 "project_id": { "type": "string" },
                 "name": { "type": "string" },
-                "description": { "type": "string" }
+                "description": { "type": "string" },
+                "if_exists": {
+                    "type": "string",
+                    "enum": ["reuse", "error", "duplicate"],
+                    "description": "What to do when the project already has a service with this name. \"reuse\" (default) returns the existing one; \"error\" refuses; \"duplicate\" creates a second one."
+                }
             },
             "required": ["project_id", "name"],
             "additionalProperties": false,
@@ -124,7 +131,7 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
     });
     v.push(crate::mcp::ToolEntry {
         name: "base_url_def_set_default",
-        description: "Mark one of a project's services as the project ★ (the one its endpoints resolve against when they name no service). Pass definition_id: null to leave the project with no ★ — those endpoints then resolve to an empty base URL.",
+        description: "Mark one of a project's services as the project ★ (the one its endpoints resolve against when they name no service). Pass definition_id: null to leave the project with no ★.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -166,16 +173,25 @@ pub(super) async fn tool_base_url_def_create(
     // 服务建进调用方指名的那个项目，所以管它的是那个项目的权限行。
     crate::mcp::check_permission(&state.pool, &a.project_id, "base_url_def_create").await?;
 
-    let def = BaseUrlDefinition {
-        id: format!("def_{}", simple_post_core::domain::now_ms()),
-        name: a.name,
-        description: a.description,
-    };
-    let stored = def.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::base_url_defs::create(c, &def, &a.project_id)
+    // 「按名找或建」住在 `core::spec`。服务名在项目内本该唯一，而表上没有唯一约束，
+    // 于是建两次不会报错，只会留下两个同名服务 —— 挑哪个当默认值就成了运气。
+    let if_exists = simple_post_core::spec::IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
+    let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::spec::resolve_base_url_def(
+            c,
+            &a.project_id,
+            &a.name,
+            a.description.as_deref(),
+            if_exists,
+        )
     })?;
-    Ok(CallToolResult::json(stored))
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::base_url_defs::get(c, &resolved.id)
+    })?;
+    let mut out = serde_json::to_value(&stored)
+        .map_err(|e| AppError::Validation(format!("service response: {e}")))?;
+    out["created"] = json!(resolved.created);
+    Ok(CallToolResult::json(out))
 }
 
 pub(super) async fn tool_base_url_def_update(

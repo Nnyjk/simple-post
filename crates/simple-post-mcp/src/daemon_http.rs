@@ -331,6 +331,8 @@ pub async fn dispatch_mcp_request(state: Arc<AppState>, body: String) -> Respons
         "ping" => JsonRpcResponse::ok(request.id, json!({})),
         "tools/list" => handle_tools_list(state.clone(), request.id).await,
         "tools/call" => handle_tools_call(state, request.id, request.params).await,
+        "resources/list" => JsonRpcResponse::ok(request.id, mcp::resources::list()),
+        "resources/read" => handle_resources_read(request.id, request.params),
         "notifications/initialized" | "notifications/cancelled" => {
             return StatusCode::NO_CONTENT.into_response();
         }
@@ -357,7 +359,10 @@ fn handle_initialize(id: Option<Value>, _params: Option<Value>) -> JsonRpcRespon
         json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {
-                "tools": { "listChanged": false }
+                "tools": { "listChanged": false },
+                // resources 是**按需读**的静态说明：客户端在动手之前拉一次，
+                // agent 就拿到跨工具的上下文，而 tools/list 的体积不变。
+                "resources": { "subscribe": false, "listChanged": false }
             },
             "serverInfo": {
                 "name": "simple-post-mcp",
@@ -365,6 +370,22 @@ fn handle_initialize(id: Option<Value>, _params: Option<Value>) -> JsonRpcRespon
             }
         }),
     )
+}
+
+/// 处理 `resources/read`。
+///
+/// uri 不认识时回 `-32602`（参数不合法），而不是回一个空 contents —— 空内容会被
+/// 客户端当成「这份 resource 是空的」，而真相是「没有这份 resource」。
+fn handle_resources_read(id: Option<Value>, params: Option<Value>) -> JsonRpcResponse {
+    let uri = params
+        .as_ref()
+        .and_then(|p| p.get("uri"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match mcp::resources::read(uri) {
+        Some(content) => JsonRpcResponse::ok(id, content),
+        None => json_rpc_error(id, -32602, format!("unknown resource uri: {uri}")),
+    }
 }
 
 async fn handle_tools_list(state: Arc<AppState>, id: Option<Value>) -> JsonRpcResponse {

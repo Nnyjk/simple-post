@@ -25,6 +25,7 @@ pub mod dynamic_ops;
 pub mod env_ops;
 pub mod http_ops;
 pub mod project_ops;
+pub mod resources;
 pub mod response_parse;
 pub mod variable_fill;
 use simple_post_core::permissions::{resolve_capability, Capability, CapabilityPolicy};
@@ -367,6 +368,9 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("base_url_def_update", Capability::Update),
     ("base_url_def_delete", Capability::Delete),
     ("base_url_def_set_default", Capability::Update),
+    // 整份接口规格。取 `Update` 而不是 `Create`：它不但建节点，还会改环境变量、
+    // 改 base URL 那一格，`if_exists=update` 时还会覆盖已有端点的字段。
+    ("spec_upsert", Capability::Update),
     // HTTP 执行 —— 唯二会发外网请求的工具，信任级别最高。
     ("api_run_request", Capability::Send),
     ("api_call_endpoint", Capability::Send),
@@ -571,3 +575,7 @@ pub(crate) fn resolve_env(
 #[cfg(test)]
 #[path = "mod_test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "resources_test.rs"]
+mod resources_tests;

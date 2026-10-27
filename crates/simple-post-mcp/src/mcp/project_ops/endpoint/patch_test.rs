@@ -210,7 +210,6 @@ async fn endpoint_create_accepts_the_oauth2_auth_type() {
     let res = tool_endpoint_create(
         &st,
         serde_json::json!({
-            "project_id": "p_ep_fix",
             "module_id": "m_ep_fix",
             "collection_id": "c_ep_fix",
             "name": "oauth ep",
@@ -250,7 +249,6 @@ async fn endpoint_create_rejects_an_unknown_auth_type_and_lists_the_known_ones()
     let res = tool_endpoint_create(
         &st,
         serde_json::json!({
-            "project_id": "p_ep_fix",
             "module_id": "m_ep_fix",
             "collection_id": "c_ep_fix",
             "name": "bad ep",

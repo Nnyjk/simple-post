@@ -12,6 +12,7 @@ use super::args::{
 use super::input::{
     build_auth, coerce_key_values, parse_body_mode, reject_schema_shaped_payload, KeyValueInput,
 };
+use super::missing::{missing_pieces, project_of};
 use super::patch::{patch_field, patch_value_field};
 use super::resource::endpoint_resource;
 use crate::mcp::{arg_str, AppState, CallToolResult};
@@ -19,6 +20,103 @@ use simple_post_core::domain::{
     EndpointDetail, EndpointDetailPatch, RequestBody, ResourceNode, ResourceNodeType,
 };
 use simple_post_core::error::AppError;
+use simple_post_core::spec::{self, IfExists};
+
+/// 端点的父节点从哪儿来 —— **只读**地看一眼，用来定归属项目。
+///
+/// 三种写法给出同一个答案：
+///
+/// - `collection_id`：直接建在那个集合下。
+/// - `collection_path` + `module_id`：路径相对模块，中途缺的集合会被逐级建出来。
+/// - `module_id`：直接建在模块下（端点允许不占一个集合）。
+///
+/// 这一步**不建任何东西**：建出来之前要先过权限门，顺序反了就是权限门形同虚设 ——
+/// 没权限的调用方照样能在别人的项目里建出集合。
+fn anchor_of(a: &EndpointCreateArgs) -> Result<String, AppError> {
+    // `collection_id` 与 `collection_path` 都在说「挂在哪」，两个一起给就是两种说法
+    // 打架。悄悄挑一个会让调用方以为建在它说的那个父下 —— 所以直接拒。
+    if a.collection_id.is_some()
+        && a.collection_path
+            .as_deref()
+            .is_some_and(|p| !p.trim().is_empty())
+    {
+        return Err(AppError::Validation(
+            "endpoint_create: `collection_id` 与 `collection_path` 二选一 —— \
+             path 自己就说明了挂在哪"
+                .into(),
+        ));
+    }
+    if let Some(cid) = a.collection_id.as_deref().filter(|s| !s.is_empty()) {
+        return Ok(cid.to_string());
+    }
+    if let Some(path) = a.collection_path.as_deref() {
+        if !path.trim().is_empty() {
+            let module_id = a
+                .module_id
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AppError::Validation(
+                        "collection_path is relative to a module: pass module_id together with it"
+                            .into(),
+                    )
+                })?;
+            return Ok(module_id.to_string());
+        }
+    }
+    a.module_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            AppError::Validation(
+                "endpoint_create needs a parent: pass collection_id to put the \
+                 endpoint inside a collection, collection_path (with module_id) to \
+                 create the collections on the way, or module_id to put it directly \
+                 under a module"
+                    .into(),
+            )
+        })
+}
+
+/// 把路径上的集合逐级建出来，返回末级那个集合的 id。
+///
+/// 路径上的每一级都**复用**已有的同名集合 —— 路径是「去哪儿」的定位，不是「建什么」
+/// 的声明，所以中途遇到已存在的层级是常态而不是冲突。
+fn materialize_parent(
+    state: &AppState,
+    a: &EndpointCreateArgs,
+) -> Result<(String, Vec<spec::Resolved>), AppError> {
+    if let Some(cid) = a.collection_id.as_deref().filter(|s| !s.is_empty()) {
+        return Ok((cid.to_string(), Vec::new()));
+    }
+    if let Some(path) = a
+        .collection_path
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        let module_id = a
+            .module_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .expect("anchor_of 已经检查过 module_id 在场");
+        let segments = spec::split_path(path)?;
+        let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
+            spec::resolve_collection_path(c, module_id, &segments, IfExists::Reuse)
+        })?;
+        let last = resolved
+            .last()
+            .ok_or_else(|| AppError::Validation("集合路径不能为空".into()))?;
+        return Ok((last.id.clone(), resolved));
+    }
+    let module_id = a
+        .module_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .expect("anchor_of 已经检查过 module_id 在场");
+    Ok((module_id.to_string(), Vec::new()))
+}
+
 pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
     state: &AppState,
     args: Value,
@@ -33,27 +131,47 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
     }
     // 先验 HTTP 动词再碰权限表：输入级错误很便宜，不该被误报成权限拒绝。
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
-    // 端点的父级是集合，或者调用方没建文件夹时直接是模块。`collection_id` 与
-    // `module_id` 是同一关系的两个名字（`collection_create` 用的也是同一形状），
-    // 取客户端给的那个，不成对的组合交给约束矩阵去拒。
-    let parent_id = a
-        .collection_id
-        .clone()
-        .or_else(|| a.module_id.clone())
-        .ok_or_else(|| {
-            AppError::Validation(
-                "endpoint_create needs a parent: pass collection_id to put the \
-                 endpoint inside a collection, or module_id to put it directly \
-                 under a module"
-                    .into(),
-            )
-        })?;
-    // 按父节点的真实项目过门。写死字面量 "global" 不是项目 id，过门时只能拿默认的
-    // `ReadCall` 去比创建工具要求的 `Full`，于是每次调用都被拒。
+    let if_exists = IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
+
+    // 归属项目从「锚点」读 —— 锚点是只读的，过门之后才允许建路径上的集合。
+    let anchor = anchor_of(&a)?;
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::nodes::root_id_of(c, &parent_id)
+        simple_post_core::db::nodes::root_id_of(c, &anchor)
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "endpoint_create").await?;
+
+    // 过门之后才建路径上的集合。
+    let (parent_id, created_collections) = materialize_parent(state, &a)?;
+
+    // 同一个父下已经有「同名 + 同 method + 同 url」的端点时按 if_exists 处置。
+    let existing = simple_post_core::db::with_conn(&state.pool, |c| {
+        spec::find_endpoint_by_identity(c, &parent_id, &a.name, &a.method, &a.url)
+    })?;
+    if let Some(existing_id) = existing {
+        match if_exists {
+            IfExists::Reuse => {
+                // 直接返回它，**一个字段都不写**。要改字段用 `endpoint_update` ——
+                // 那个工具只改它点名的字段，不会抹掉别的。
+                return endpoint_response(
+                    state,
+                    &existing_id,
+                    &project_id,
+                    false,
+                    Some(created_collections),
+                );
+            }
+            IfExists::Error => {
+                return Err(AppError::Validation(format!(
+                    "an endpoint named '{}' with {} {} already exists under this parent; \
+                     use endpoint_update to change it, or if_exists=duplicate to create a second one",
+                    a.name,
+                    method.as_str(),
+                    a.url
+                )));
+            }
+            IfExists::Duplicate => {}
+        }
+    }
 
     let body_mode_str = a.body_mode.clone().unwrap_or_else(|| "none".into());
     let body = RequestBody {
@@ -70,7 +188,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
     let id = mint_endpoint_id();
     let node = ResourceNode {
         id: id.clone(),
-        root_id: project_id,
+        root_id: project_id.clone(),
         parent_id: Some(parent_id),
         kind: ResourceNodeType::Endpoint,
         name: a.name,
@@ -93,15 +211,53 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         docs: a.docs,
         notes: a.notes,
         tags: a.tags.unwrap_or_default(),
-        pre_request_script: None,
-        test_script: None,
+        // 两段脚本与请求配置一起落。写死成 `None` 等于「任何工具都配不了脚本」，
+        // 而创建带脚本的接口就必须再补一次 `endpoint_update`。
+        pre_request_script: a.pre_request_script,
+        test_script: a.test_script,
     };
     // node 与 detail 一起落库：没有配置行的端点是一棵打不开的树。
     simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::nodes::create(c, &node, Some(&detail))
     })?;
-    let stored = endpoint_resource(&state.pool, &node.id)?;
-    Ok(CallToolResult::json(stored))
+    endpoint_response(
+        state,
+        &node.id,
+        &project_id,
+        true,
+        Some(created_collections),
+    )
+}
+
+/// 组装写工具的响应：端点本体 + 「这次新建了哪些集合」 + 「它还缺什么」。
+///
+/// 三个字段都是**加**上去的，端点本体的形状不变，所以已经在读这个响应的客户端
+/// 不受影响。
+fn endpoint_response(
+    state: &AppState,
+    endpoint_id: &str,
+    project_id: &str,
+    created: bool,
+    created_collections: Option<Vec<spec::Resolved>>,
+) -> Result<CallToolResult, AppError> {
+    let stored = endpoint_resource(&state.pool, endpoint_id)?;
+    let mut out = serde_json::to_value(&stored)
+        .map_err(|e| AppError::Validation(format!("endpoint response: {e}")))?;
+    out["created"] = json!(created);
+    if let Some(collections) = created_collections {
+        out["created_collections"] = json!(collections
+            .into_iter()
+            .map(|r| json!({ "id": r.id, "created": r.created }))
+            .collect::<Vec<_>>());
+    }
+    // 「还缺什么」让 agent 一次就知道要补什么，而不用先发一次请求、看报错、再回头补。
+    if let Ok(project) = project_of(&state.pool, project_id) {
+        let detail = simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::endpoint_details::get(c, endpoint_id)
+        })?;
+        out["missing"] = json!(missing_pieces(&state.pool, endpoint_id, &detail, &project));
+    }
+    Ok(CallToolResult::json(out))
 }
 
 pub(super) async fn tool_endpoint_update(
@@ -183,8 +339,9 @@ pub(super) async fn tool_endpoint_update(
         }
         Ok(())
     })?;
-    let updated = endpoint_resource(&state.pool, &endpoint_id)?;
-    Ok(CallToolResult::json(updated))
+    // 改完照样回报「还缺什么」：改 url 常常改出新的缺口（新的路径参数没有对应的
+    // 变量、新的服务没有配 base URL）。
+    endpoint_response(state, &endpoint_id, &node.root_id, false, None)
 }
 
 pub(super) async fn tool_endpoint_delete(

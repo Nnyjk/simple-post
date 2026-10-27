@@ -317,6 +317,61 @@ fn the_router_builds_for_every_mount_shape() {
     }
 }
 
+/// `resources/list` 要把指南列出来，且 `resources/read` 能把它读回来。
+///
+/// 这两个方法是 MCP 协议里的标准方法，客户端按 uri 拉资源时走的就是它们。
+#[test]
+fn the_resources_methods_serve_the_authoring_guide() {
+    let listed = handle_resources_read(
+        None,
+        Some(serde_json::json!({ "uri": crate::mcp::resources::SPEC_AUTHORING_URI })),
+    );
+    let payload = listed.result.expect("resources/read must succeed");
+    let contents = payload
+        .get("contents")
+        .and_then(|c| c.as_array())
+        .expect("contents array");
+    assert_eq!(contents.len(), 1);
+    let text = contents[0]["text"].as_str().expect("text");
+    let guide: serde_json::Value = serde_json::from_str(text).expect("the guide is JSON");
+    assert!(
+        guide["calls"].as_array().is_some_and(|c| !c.is_empty()),
+        "指南要给出调用顺序：{guide}"
+    );
+}
+
+/// 不认识的 uri 必须回「参数不合法」，而不是回一份空内容。
+#[test]
+fn reading_an_unknown_resource_uri_is_refused() {
+    let res = handle_resources_read(
+        None,
+        Some(serde_json::json!({ "uri": "simple-post://nope" })),
+    );
+    let err = res.error.expect("an unknown uri must be an error");
+    assert_eq!(err.code, -32602);
+    assert!(
+        err.message.contains("simple-post://nope"),
+        "错误信息要点名那个 uri：{}",
+        err.message
+    );
+}
+
+/// `initialize` 必须声明 resources 能力，否则客户端不会去调 `resources/list`。
+#[test]
+fn initialize_declares_the_resources_capability() {
+    let res = handle_initialize(None, None);
+    let caps = res
+        .result
+        .expect("initialize must succeed")
+        .get("capabilities")
+        .cloned()
+        .expect("capabilities");
+    assert!(
+        caps.get("resources").is_some(),
+        "capabilities 里必须有 resources：{caps}"
+    );
+}
+
 /// `AppState`，它的池只被 router 构建类测试**借用** —— 不会跑任何 handler，所以内存
 /// 数据库根本没被碰到。
 fn test_state() -> AppState {

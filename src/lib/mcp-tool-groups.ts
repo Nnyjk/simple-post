@@ -18,6 +18,8 @@ export interface ToolGroup {
 }
 
 const CATEGORIES: ReadonlyArray<{ key: string; label: string; prefix: string }> = [
+  // 「接口规格」排在最前：它是写侧的总入口，一次调用落一整份接口规范。
+  { key: 'spec', label: '接口规格', prefix: 'spec_' },
   { key: 'env', label: '环境变量', prefix: 'env_' },
   { key: 'project', label: '项目', prefix: 'project_' },
   { key: 'module', label: '模块', prefix: 'module_' },

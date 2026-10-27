@@ -108,7 +108,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "dynamic_var_list",
-            description: "List every dynamic variable in the workspace with its current value, cache state, and the environment and service it fetches from. Definitions are global: any project's endpoint may use them. Reads the cache only; it never fetches. It does not list the endpoints that reference a definition — query those per project with endpoint_list or endpoint_search.",
+            description: "List every dynamic variable in the workspace with its current value and cache state. Definitions are global: any project's endpoint may use them. Reads the cache only; it never fetches.",
             schema: json!({
                 "type": "object",
                 "properties": {},
@@ -132,7 +132,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_create",
-            description: "Create a dynamic variable: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique in the whole workspace. The environment and the service are optional: omitted, the fetch uses the source endpoint's first available environment and its project's default service.",
+            description: "Create a dynamic variable: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique in the whole workspace. Omit the environment and the service to use the source endpoint's first environment and its project's default service.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -198,7 +198,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_resolve",
-            description: "Resolve dynamic variables by name: fetch from their data source when the cache is cold or expired, extract the value and return it. This really sends HTTP requests, so it needs the same trust level as api_call_endpoint.",
+            description: "Resolve dynamic variables by name: fetch from their data source when the cache is cold or expired, extract the value and return it. This really sends HTTP requests, so it needs the trust level of api_call_endpoint.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -212,7 +212,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_set_override",
-            description: "Set a dynamic variable's value by hand; it wins over the automatically fetched value until it expires or is cleared. A null value clears the override so the next resolution fetches again.",
+            description: "Set a dynamic variable's value by hand; it wins over the fetched value until it expires or is cleared. A null value clears the override.",
             schema: json!({
                 "type": "object",
                 "properties": {

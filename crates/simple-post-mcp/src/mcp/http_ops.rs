@@ -90,7 +90,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         ToolEntry {
             name: "api_run_request",
             description:
-                "Run an ad-hoc HTTP request. The request is assembled by the same resolver the stored endpoints use: env variables, baseUrl, auth, params and body all follow the endpoint rules. A base URL is read from moduleBaseUrls[base_url_definition_id][module_id], so both ids are needed to prepend one.",
+                "Run an ad-hoc HTTP request, assembled by the same resolver the stored endpoints use: env variables, baseUrl, auth, params and body all follow the endpoint rules. A base URL is read from moduleBaseUrls[base_url_definition_id][module_id], so both ids are needed.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -122,12 +122,12 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     },
                     "body": {
                         "type": "string",
-                        "description": "The request payload to send, as text. For body_mode=json this is a JSON instance with values (a value position may hold a {{var}} placeholder, replaced with that variable's value when the request is sent) — a JSON Schema (the documented parameter definition) belongs on the endpoint as body_schema, and is never sent."
+                        "description": "The request payload to send, as text. For body_mode=json this is a JSON instance with values, not a JSON Schema."
                     },
                     "body_mode": {
                         "type": "string",
                         "enum": ["none", "json", "form", "raw", "multipart"],
-                        "description": "How to frame the body. Defaults to raw when a body is given, none otherwise. multipart takes the same JSON array of parts the endpoint body stores."
+                        "description": "How to frame the body. Defaults to raw when a body is given, none otherwise."
                     },
                     "auth": {
                         "type": "object",

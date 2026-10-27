@@ -6,7 +6,16 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::input::KeyValueInput;
+/// `endpoint_create` 的入参。
+///
+/// **`deny_unknown_fields` 不是苛刻，是堵一个洞。** 早先这个结构体没有这个属性，
+/// 而 schema 又写着 `additionalProperties: true` —— 于是 agent 传了一个后端不读的
+/// 字段（`pre_request_script` 就是其中之一），serde 静默忽略，工具返回成功，
+/// 那个字段就这么没了，全程没有任何提示。schema 说「可以传」而实现不读，
+/// 等于工具描述在撒谎。改成「不认识的字段直接报错」之后，agent 立刻知道
+/// 自己拼错了字段名，而不会拿着一个缺了脚本的端点继续往下走。
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct EndpointCreateArgs {
     /// 父集合。端点现在可以直接挂在模块下，所以它与 `module_id` 二选一即可。
     #[serde(default)]
@@ -14,6 +23,14 @@ pub(super) struct EndpointCreateArgs {
     /// 父模块，给不需要自己集合的端点用。
     #[serde(default)]
     pub module_id: Option<String>,
+    /// 相对模块的集合路径，如 `订单/明细`。给了它就不用给 `collection_id`：
+    /// 中间缺的集合会被逐级建出来，末级就是端点的父。
+    #[serde(default)]
+    pub collection_path: Option<String>,
+    /// 同一个父下已经有 method 与 url 都相同的端点时怎么办。
+    /// 缺省是 `reuse`：直接返回那个端点，一个字段都不写。
+    #[serde(default)]
+    pub if_exists: Option<String>,
     pub name: String,
     pub method: String,
     pub url: String,
@@ -48,6 +65,12 @@ pub(super) struct EndpointCreateArgs {
     pub docs: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// 前置脚本：在变量替换之后、请求发出之前运行，可以改写请求本身。
+    #[serde(default)]
+    pub pre_request_script: Option<String>,
+    /// 测试脚本：响应到达之后运行，可以断言并写环境变量。
+    #[serde(default)]
+    pub test_script: Option<String>,
 }
 
 /// 生成唯一的端点 id。

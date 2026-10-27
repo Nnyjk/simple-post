@@ -1,4 +1,4 @@
-﻿//! `module_*` MCP 工具 —— 项目内的模块 CRUD，共 5 个。
+//! `module_*` MCP 工具 —— 项目内的模块 CRUD，共 5 个。
 //!
 //! 工具名与参数名沿用三表时期的老名字：对 LLM 客户端而言 `module_id` 仍然是
 //! 「模块的 id」，改名只会白白打断所有已配置的客户端。变的只有存储 —— 模块现在是
@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
-use simple_post_core::domain::{ResourceNode, ResourceNodePatch, ResourceNodeType};
+use simple_post_core::domain::{ResourceNodePatch, ResourceNodeType};
 use simple_post_core::error::AppError;
 
 /// 解析模块所属项目，供按项目的那扇门使用。模块是 `nodes` 行，所属项目就是反规范化
@@ -26,6 +26,9 @@ fn owning_project(pool: &simple_post_core::db::DbPool, node_id: &str) -> Result<
 pub(super) struct ModuleCreateArgs {
     pub project_id: String,
     pub name: String,
+    /// 项目里已经有同名模块时怎么办。缺省是 `reuse`。
+    #[serde(default)]
+    pub if_exists: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,12 +60,19 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
     });
     v.push(crate::mcp::ToolEntry {
         name: "module_create",
-        description: "Create a module in a project.",
+        description: "Create a module in a project. When the project already has a \
+                       module with the same name, `if_exists=reuse` (the default) returns \
+                       it instead of creating a second one.",
         schema: json!({
             "type": "object",
             "properties": {
                 "project_id": { "type": "string" },
-                "name": { "type": "string" }
+                "name": { "type": "string" },
+                "if_exists": {
+                    "type": "string",
+                    "enum": ["reuse", "error", "duplicate"],
+                    "description": "What to do when the project already has a module with this name. \"reuse\" (default) returns the existing one; \"error\" refuses; \"duplicate\" creates a second one."
+                }
             },
             "required": ["project_id", "name"],
             "additionalProperties": false,
@@ -137,27 +147,22 @@ pub(super) async fn tool_module_create(
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
     }
+    let if_exists = simple_post_core::spec::IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "module_create").await?;
-    let now = simple_post_core::domain::now_ms();
-    let m = ResourceNode {
-        id: format!("mod_{now}"),
-        root_id: a.project_id.clone(),
-        // 模块的父级是项目本身，不是另一个节点。
-        parent_id: None,
-        kind: ResourceNodeType::Module,
-        name: a.name,
-        description: None,
-        sort_order: 0,
-        created_at: now,
-        updated_at: now,
-    };
-    let id = m.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::nodes::create(c, &m, None)
+
+    // 「按名找或建」住在 `core::spec`：REST 路由与桌面 command 侧要的是同一套语义，
+    // 所以它不写在工具这一层。id 也由那一层铸 —— 「前缀 + 毫秒时钟」这种写法在
+    // 同一毫秒内两次创建会撞 `nodes.id` 主键。
+    let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::spec::resolve_module(c, &a.project_id, &a.name, if_exists)
     })?;
-    let stored =
-        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::nodes::get(c, &id))?;
-    Ok(CallToolResult::json(stored))
+    let stored = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::get(c, &resolved.id)
+    })?;
+    let mut out = serde_json::to_value(&stored)
+        .map_err(|e| AppError::Validation(format!("module response: {e}")))?;
+    out["created"] = json!(resolved.created);
+    Ok(CallToolResult::json(out))
 }
 
 pub(super) async fn tool_module_update(

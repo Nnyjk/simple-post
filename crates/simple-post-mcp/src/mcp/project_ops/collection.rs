@@ -1,4 +1,4 @@
-﻿//! `collection_*` MCP 工具 —— 集合 CRUD 与在模块内的移动，共 5 个。
+//! `collection_*` MCP 工具 —— 集合 CRUD 与在模块内的移动，共 5 个。
 //!
 //! `collection_list` 复用 `super::ModuleIdArgs`；其余 Args 私有于本模块。
 
@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use crate::tool_fn;
-use simple_post_core::domain::{ResourceNode, ResourceNodePatch, ResourceNodeType};
+use simple_post_core::domain::{ResourceNodePatch, ResourceNodeType};
 use simple_post_core::error::AppError;
 
 /// 解析节点所属项目，供按项目的那扇门使用。
@@ -26,7 +26,16 @@ pub(super) struct CollectionCreateArgs {
     pub module_id: String,
     #[serde(default)]
     pub parent_collection_id: Option<String>,
-    pub name: String,
+    /// 集合名。给了 `path` 就不用它。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 相对模块的集合路径，段与段之间一个斜杠，如 `订单/明细`。路径上的每一级
+    /// 缺了就建、有了就复用。
+    #[serde(default)]
+    pub path: Option<String>,
+    /// 同一个父下已经有同名集合时怎么办。缺省是 `reuse`。
+    #[serde(default)]
+    pub if_exists: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,15 +70,27 @@ pub(super) fn register(v: &mut Vec<crate::mcp::ToolEntry>) {
     });
     v.push(crate::mcp::ToolEntry {
         name: "collection_create",
-        description: "Create a collection (top-level if parent_collection_id is omitted).",
+        description: "Create a collection. Give it a `name` for one collection under \
+                       the module (or under `parent_collection_id`), or a `path` like \
+                       \"订单/明细\" to create the whole chain at once. Every level on the \
+                       way is created when missing and reused when it already exists.",
         schema: json!({
             "type": "object",
             "properties": {
                 "module_id": { "type": "string" },
                 "parent_collection_id": { "type": "string" },
-                "name": { "type": "string" }
+                "name": { "type": "string", "description": "Name of the collection. Not needed when `path` is given." },
+                "path": {
+                    "type": "string",
+                    "description": "Collection path relative to module_id, segments separated by '/', e.g. \"订单/明细\". Every level on the way is created when missing and reused when it already exists."
+                },
+                "if_exists": {
+                    "type": "string",
+                    "enum": ["reuse", "error", "duplicate"],
+                    "description": "What to do when the target parent already has a collection with this name. \"reuse\" (default) returns the existing one; \"error\" refuses; \"duplicate\" creates a second one."
+                }
             },
-            "required": ["module_id", "name"],
+            "required": ["module_id"],
             "additionalProperties": false,
         }),
         func: tool_fn!(tool_collection_create),
@@ -166,9 +187,18 @@ pub(super) async fn tool_collection_create(
 ) -> Result<CallToolResult, AppError> {
     let a: CollectionCreateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("collection_create args: {e}")))?;
-    if a.name.trim().is_empty() {
-        return Err(AppError::Validation("name must not be empty".into()));
+    let if_exists = simple_post_core::spec::IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
+
+    // `path` 与 `parent_collection_id` 都在说「挂在哪」，两个一起给就是两种说法打架。
+    // 悄悄挑一个会让调用方以为建在它说的那个父下 —— 所以直接拒。
+    if a.path.as_deref().is_some_and(|p| !p.trim().is_empty()) && a.parent_collection_id.is_some() {
+        return Err(AppError::Validation(
+            "collection_create: `path` 与 `parent_collection_id` 二选一 —— \
+             path 自己就说明了挂在哪"
+                .into(),
+        ));
     }
+
     // 集合的父级要么是模块（顶层）要么是集合（嵌套）。`new_module_id` 与
     // `parent_collection_id` 是同一关系的两个名字，取调用方给的那个；`root_id`
     // 由胜出的那个节点推导。
@@ -183,28 +213,58 @@ pub(super) async fn tool_collection_create(
         "collection_create",
     )
     .await?;
-    let now = simple_post_core::domain::now_ms();
-    let mut c = ResourceNode {
-        id: format!("col_{now}"),
-        root_id: String::new(),
-        parent_id,
-        kind: ResourceNodeType::Collection,
-        name: a.name,
-        description: None,
-        sort_order: 0,
-        created_at: now,
-        updated_at: now,
+
+    // 两条写法：给 `path` 就按路径逐级找或建；给 `name` 就建一个。
+    let (id, created_collections) = match a.path.as_deref().filter(|p| !p.trim().is_empty()) {
+        Some(path) => {
+            let segments = simple_post_core::spec::split_path(path)?;
+            let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
+                simple_post_core::spec::resolve_collection_path(
+                    c,
+                    &a.module_id,
+                    &segments,
+                    if_exists,
+                )
+            })?;
+            let last = resolved
+                .last()
+                .ok_or_else(|| AppError::Validation("集合路径不能为空".into()))?;
+            (last.id.clone(), resolved)
+        }
+        None => {
+            let name = a
+                .name
+                .as_deref()
+                .filter(|n| !n.trim().is_empty())
+                .ok_or_else(|| {
+                    AppError::Validation("collection_create needs a `name` or a `path`".into())
+                })?;
+            let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
+                simple_post_core::spec::resolve_collection(
+                    c,
+                    &a.module_id,
+                    a.parent_collection_id.as_deref(),
+                    name,
+                    if_exists,
+                )
+            })?;
+            (resolved.id.clone(), vec![resolved])
+        }
     };
-    let root_id = owning_project(&state.pool, c.parent_id.as_deref().unwrap_or_default())?;
-    c.root_id = root_id;
-    let id = c.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c2| {
-        simple_post_core::db::nodes::create(c2, &c, None)
-    })?;
-    let stored = simple_post_core::db::with_conn(&state.pool, |c2| {
-        simple_post_core::db::nodes::get(c2, &id)
-    })?;
-    Ok(CallToolResult::json(stored))
+
+    let stored =
+        simple_post_core::db::with_conn(&state.pool, |c| simple_post_core::db::nodes::get(c, &id))?;
+    let mut out = serde_json::to_value(&stored)
+        .map_err(|e| AppError::Validation(format!("collection response: {e}")))?;
+    out["created"] = json!(created_collections
+        .last()
+        .map(|r| r.created)
+        .unwrap_or(false));
+    out["created_collections"] = json!(created_collections
+        .into_iter()
+        .map(|r| json!({ "id": r.id, "created": r.created }))
+        .collect::<Vec<_>>());
+    Ok(CallToolResult::json(out))
 }
 
 pub(super) async fn tool_collection_update(
