@@ -1,7 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import CodeMirror from '@uiw/react-codemirror';
-import { json } from '@codemirror/lang-json';
-import { oneDark } from '@codemirror/theme-one-dark';
 import {
   Copy,
   Download,
@@ -14,21 +11,21 @@ import {
   Wand2,
 } from 'lucide-react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
-import type { ScriptOutcome } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { formatBytes, formatDuration, statusColorVar, cn, tryFormatJson } from '@/lib/utils';
-import { useIsDark } from '@/lib/theme';
-import { lightCodeTheme } from '@/lib/codemirror-themes';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { ResponseHistory } from './ResponseHistory';
+import { PrettyView } from './PrettyView';
+import { HeadersView } from './HeadersView';
+import { ScriptView } from './ScriptView';
+import { PendingState } from './PendingState';
 
 export function ResponseViewer() {
   const response = useAppStore((s) => s.lastResponse);
   const pending = useAppStore((s) => s.requestPending);
-  // 最近一次发送的脚本产出。失败信息与断言在这里单独呈现——脚本的成败**不**改写
-  // 请求本身的成败。
+  // 最近一次发送的脚本产出。脚本的成败不改写请求本身的成败，故失败信息与断言在这里单独呈现。
   const scriptOutcome = useAppStore((s) => s.lastScriptOutcome);
   // 取资源形式而非行形式：响应可能属于从未保存过的接口，而「保存为示例」以此 id 为键，
   // 对 `draft:` 前缀的 id 同样成立。
@@ -48,12 +45,10 @@ export function ResponseViewer() {
   const formatResult = useMemo(() => tryFormatJson(response?.body ?? ''), [response?.body]);
   const canFormat = formatResult.ok;
 
-  // C1：状态药丸的脉冲 + 数字滚动。
-  // `statusPillRef` 指向「图标 + 状态码 + statusText」整行，使整个药丸作为一个整体形变。
-  // 两个可变计数对象放在 ref（而非 state）里，gsap 才能逐帧改 `.val` 而不为此数值单独
-  // 重渲染；再把取整后的快照推进 `displayDuration` / `displaySize` state 交给 React 渲染。
-  // 初始 `.val` 为 0，故第一个响应从 0 滚到目标；此后的响应保留上一次的取值，下一段动画
-  // 从那里滑向新目标 —— 可见的「爬升」只出现在药丸挂载后的第一帧。
+  // 状态药丸的脉冲 + 数字滚动。`statusPillRef` 指向「图标 + 状态码 + statusText」整行，
+  // 使整个药丸作为一个整体形变。两个可变计数对象放在 ref 里，gsap 才能逐帧改 `.val`
+  // 而不为此数值单独重渲染；取整后的快照再进 `displayDuration` / `displaySize` state。
+  // 计数对象的初始 `.val` 为 0 且不重置，故第一个响应从 0 滚起，此后的响应接着上一段继续。
   const statusPillRef = useRef<HTMLDivElement>(null);
   const durObjRef = useRef({ val: 0 });
   const sizeObjRef = useRef({ val: 0 });
@@ -61,26 +56,24 @@ export function ResponseViewer() {
   const [displaySize, setDisplaySize] = useState(0);
 
   useGSAP(() => {
-    // PendingState 会隐藏药丸，故等完整响应 UI 挂载后再动。`pending` 在依赖数组里，是为了
-    // pending 翻回 false 时重跑（请求**进行中**到达的响应还没动画过 —— handleSend 先写
-    // lastResponse 再清 pending，第二次跃迁才是动画浮现的那一次）。
+    // PendingState 会隐藏药丸，故等完整响应 UI 挂载后再动。`pending` 进依赖数组是为了
+    // pending 翻回 false 时重跑：handleSend 先写 lastResponse 再清 pending，第二次跃迁
+    // 才是动画浮现的那一次。
     if (pending || !response || !statusPillRef.current) return;
 
-    // 杀掉在途 tween 是状态卫生而非动效本身：不做的话连续两个响应会把重叠的 tween 堆到
-    // 同一个对象上，数字跟自己打架。此句留在守卫之外。
+    // 杀掉在途 tween 是状态卫生：连续两个响应会把重叠的 tween 堆到同一个对象上，数字
+    // 跟自己打架。这一句必须留在守卫之外。
     gsap.killTweensOf(durObjRef.current);
     gsap.killTweensOf(sizeObjRef.current);
 
     return motionSafe(
       () => {
-        // Pulse the status pill.
         gsap.fromTo(
           statusPillRef.current,
           { scale: 0.92, opacity: 0 },
           { scale: 1, opacity: 1, duration: 0.28, ease: 'power2.out' },
         );
 
-        // Count-up duration.
         gsap.to(durObjRef.current, {
           val: response.durationMs,
           duration: 0.4,
@@ -88,7 +81,6 @@ export function ResponseViewer() {
           onUpdate: () => setDisplayDuration(Math.round(durObjRef.current.val)),
         });
 
-        // Count-up size.
         gsap.to(sizeObjRef.current, {
           val: response.sizeBytes,
           duration: 0.4,
@@ -96,9 +88,8 @@ export function ResponseViewer() {
           onUpdate: () => setDisplaySize(Math.round(sizeObjRef.current.val)),
         });
       },
-      // 数字滚动不是装饰。`displayDuration` / `displaySize` **只**由 `onUpdate` 写入，跳过
-      // tween 会让响应面板对每个请求都显示 `0 ms` / `0 B` —— 降低动效就会静默地让用户
-      // 失去测量值。此处直接落终值而非补间过去。
+      // 数字滚动不是装饰：`displayDuration` / `displaySize` 只由 `onUpdate` 写入，跳过
+      // tween 会让每个请求都显示 `0 ms` / `0 B`。此处直接落终值。
       () => {
         durObjRef.current.val = response.durationMs;
         sizeObjRef.current.val = response.sizeBytes;
@@ -115,7 +106,7 @@ export function ResponseViewer() {
     window.setTimeout(() => setSavedFlash(false), 1500);
   };
 
-  // C3：保存为示例的弹跳。仅在 savedFlash 由 false → true 时触发；下一次变回 false 刻意
+  // 保存为示例的弹跳。仅在 savedFlash 由 false → true 时触发；下一次变回 false 刻意
   // 为空操作 —— 那时 tooltip 文案早已换成「已保存」。
   const saveExampleBtnRef = useRef<HTMLButtonElement>(null);
   useGSAP(() => {
@@ -140,13 +131,9 @@ export function ResponseViewer() {
   }
 
   if (!response) {
-    // 历史条也在这里渲染，故本分支必须与下方有数据分支一样是 **flex 纵向**容器。
-    //
-    // `WorkspaceShell` 把 viewer 包在 `min-h-0 flex-1` 里，而那本身不是 flex 容器，
-    // 故 fragment 的子元素走普通块级流：`h-full` 的 `<section>` 占满整个盒子，紧随其后的
-    // `shrink-0` 历史条就落到下边缘之外 —— 不崩溃、不打日志，条在 DOM 里、完整渲染、只是
-    // 跑到屏幕外，DOM 查询照样查得到。这类问题单元测试抓不到（本 runner 无 DOM），故
-    // `__tests__/response-viewer-layout.test.ts` 在源码层面钉住容器形状。
+    // 历史条也在这里渲染，故本分支必须与下方有数据分支一样是 **flex 纵向**容器：
+    // `WorkspaceShell` 把 viewer 包在 `min-h-0 flex-1` 里而那不是 flex 容器，`h-full`
+    // 的 section 会吃光整个盒子，随后的历史条落到屏幕外（DOM 里查得到，只是看不见）。
     return (
       <section className="flex h-full min-h-0 flex-col">
         <EmptyState />
@@ -160,7 +147,7 @@ export function ResponseViewer() {
 
   return (
     <section className="flex h-full min-h-0 flex-col border-t border-border bg-card/30">
-      {/* Status bar */}
+      {/* 状态栏 */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2">
         <div ref={statusPillRef} className="flex items-center gap-2 will-change-transform">
           {isError ? (
@@ -242,7 +229,7 @@ export function ResponseViewer() {
         </div>
       )}
 
-      {/* Tabs */}
+      {/* 页签条 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
         <Tabs
           variant="segmented"
@@ -295,7 +282,7 @@ export function ResponseViewer() {
         )}
       </div>
 
-      {/* Body */}
+      {/* 响应体 */}
       <div className="min-h-0 flex-1 overflow-auto">
         {view === 'pretty' && (
           <PrettyView body={response.body} formatted={formatted} formatResult={formatResult} />
@@ -309,213 +296,22 @@ export function ResponseViewer() {
         {view === 'script' && <ScriptView outcome={scriptOutcome} />}
       </div>
 
-      {/* History (collapsible) */}
+      {/* 历史条（可折叠） */}
       <ResponseHistory />
     </section>
-  );
-}
-
-function PrettyView({
-  body,
-  formatted,
-  formatResult,
-}: {
-  body: string;
-  formatted: boolean;
-  formatResult: ReturnType<typeof tryFormatJson>;
-}) {
-  const isJson = formatResult.ok;
-  const isDark = useIsDark();
-
-  const displayed = useMemo(() => {
-    if (formatted && formatResult.ok) return formatResult.formatted;
-    return body;
-  }, [formatted, formatResult, body]);
-
-  const showInvalidNotice = formatted && !isJson;
-
-  if (!isJson) {
-    return (
-      <div className="flex h-full flex-col">
-        {showInvalidNotice && (
-          <div className="alert-warning-inline">响应不是合法 JSON，仅展示原文</div>
-        )}
-        <pre className="m-0 min-h-0 flex-1 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
-          {body}
-        </pre>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full flex-col">
-      {showInvalidNotice && (
-        <div className="alert-warning-inline">响应不是合法 JSON，仅展示原文</div>
-      )}
-      <div className="min-h-0 flex-1">
-        <CodeMirror
-          value={displayed}
-          extensions={[json()]}
-          theme={isDark ? oneDark : lightCodeTheme}
-          editable={false}
-          basicSetup={{
-            lineNumbers: true,
-            foldGutter: true,
-            highlightActiveLine: false,
-          }}
-          height="100%"
-          className="text-xs"
-        />
-      </div>
-    </div>
-  );
-}
-
-function HeadersView({ headers }: { headers: Record<string, string> }) {
-  return (
-    <div className="p-4">
-      <table className="w-full text-sm">
-        <tbody>
-          {Object.entries(headers).map(([k, v]) => (
-            <tr key={k} className="border-b border-border/50 last:border-0">
-              <td className="w-1/3 py-1.5 pr-4 align-top font-mono text-xs text-muted-foreground">
-                {k}
-              </td>
-              <td className="py-1.5 align-top font-mono text-xs text-foreground/90 break-all">
-                {v}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/**
- * 脚本的产出：断言、日志、错误、写回的环境变量。
- *
- * **脚本的成败与请求的成败分开呈现**：断言失败在这里列出，不改写上方状态药丸——
- * 请求成了就是成了，脚本的事是脚本的事。
- */
-function ScriptView({ outcome }: { outcome: ScriptOutcome | null }) {
-  if (!outcome) {
-    return (
-      <div className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">
-        这次请求没有跑脚本
-      </div>
-    );
-  }
-  const failed = outcome.assertions.filter((a) => !a.passed);
-  return (
-    <div className="space-y-4 p-4 text-xs">
-      {outcome.errors.length > 0 && (
-        <section>
-          <h4 className="mb-1.5 font-medium text-destructive">脚本失败</h4>
-          <ul className="space-y-1">
-            {outcome.errors.map((err, i) => (
-              <li
-                key={i}
-                className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] uppercase text-destructive">
-                    {err.kind}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {err.phase === 'pre' ? '前置' : '测试'}阶段
-                    {err.source ? ` · ${err.source}` : ''}
-                  </span>
-                </div>
-                <div className="mt-0.5 break-all text-foreground/90">{err.message}</div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {outcome.assertions.length > 0 && (
-        <section>
-          <h4 className="mb-1.5 font-medium">
-            断言
-            {failed.length > 0 && (
-              <span className="ml-1 text-destructive">{failed.length} 条失败</span>
-            )}
-          </h4>
-          <ul className="space-y-1">
-            {outcome.assertions.map((a, i) => (
-              <li key={i} className="flex items-start gap-1.5">
-                {a.passed ? (
-                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
-                ) : (
-                  <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
-                )}
-                <span className="min-w-0">
-                  <span className="break-words">{a.name}</span>
-                  {a.error && <span className="ml-1 text-destructive">{a.error}</span>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {outcome.envWrites.length > 0 && (
-        <section>
-          <h4 className="mb-1.5 font-medium">写回的环境变量</h4>
-          <ul className="space-y-0.5 font-mono">
-            {outcome.envWrites.map((w, i) => (
-              <li key={i} className="break-all">
-                <span className="text-muted-foreground">{w.key}</span>
-                <span className="mx-1 text-muted-foreground">=</span>
-                {w.value === null ? <span className="text-destructive">（已删除）</span> : w.value}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {outcome.logs.length > 0 && (
-        <section>
-          <h4 className="mb-1.5 font-medium">日志</h4>
-          <pre className="m-0 whitespace-pre-wrap break-all rounded border border-border/60 bg-muted/20 p-2 font-mono text-[11px] leading-relaxed">
-            {outcome.logs.map((l) => `[${l.level}] ${l.message}`).join('\n')}
-          </pre>
-        </section>
-      )}
-
-      {outcome.errors.length === 0 &&
-        outcome.assertions.length === 0 &&
-        outcome.logs.length === 0 &&
-        outcome.envWrites.length === 0 && (
-          <div className="text-muted-foreground">脚本跑完了，没有产出。</div>
-        )}
-    </div>
   );
 }
 
 function EmptyState() {
   return (
     // 用 `flex-1` 而非 `h-full`：本 section 在 flex 纵向容器里与历史条平级，`h-full` 会
-    // 占满整个盒子把历史条挤出视野；`flex-1` 取的是**剩余**空间 —— 在下方有历史条时，
-    // 「填满响应面板」真正的意思就是这个。
+    // 占满整个盒子把历史条挤出视野；`flex-1` 取的是历史条落位后**剩余**的空间。
     <section className="flex min-h-0 flex-1 flex-col items-center justify-center border-t border-border bg-card/30 px-4 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40">
         <CheckCircle2 className="h-6 w-6 text-muted-foreground/50" />
       </div>
       <p className="mt-3 text-sm text-muted-foreground">点击「Send」发起请求</p>
       <p className="mt-1 text-[11px] text-muted-foreground/70">响应会显示在这里</p>
-    </section>
-  );
-}
-
-function PendingState() {
-  return (
-    <section className="flex h-full min-h-0 flex-col items-center justify-center border-t border-border bg-card/30">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-        <span>请求中…</span>
-      </div>
     </section>
   );
 }
