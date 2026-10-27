@@ -11,19 +11,22 @@ use crate::spec::{escape_pointer_token, MultipartPart};
 use super::refs::deref;
 use super::{normalize_media, scalar_text, text, Ctx, DocView, CONTENT_PREFERENCE};
 
-/// path-item 级 + operation 级的 `parameters`，后者覆盖前者。返回 (query, header)。
+/// path-item 级 + operation 级的 `parameters`，后者覆盖前者。
+/// 返回 (query, path, header)。
 ///
-/// `in: path` 的参数已经在路径模板里，`in: cookie` 在 `ApiKeyLocation` 里没有对应变体，
-/// 两者都出诊断后跳过。
+/// `in: path` 的参数变成端点自己的**路径参数**：它们替换进路径本身
+/// （`/users/{id}` 的 `id`），不像 query 参数那样进查询串。`in: cookie` 在
+/// `ApiKeyLocation` 里没有对应变体，出诊断后跳过。
 pub(super) fn parameters(
     ctx: &mut Ctx,
     view: &DocView,
     item: &Map<String, Value>,
     operation: &Map<String, Value>,
     pointer: &str,
-) -> (Vec<KeyValue>, Vec<KeyValue>) {
+) -> (Vec<KeyValue>, Vec<KeyValue>, Vec<KeyValue>) {
     let merged = merged_parameters(ctx, view, item, operation, pointer);
     let mut params = Vec::new();
+    let mut path_params = Vec::new();
     let mut headers = Vec::new();
     for (i, value) in merged.iter().enumerate() {
         let at = format!("{pointer}/parameters/{i}");
@@ -62,10 +65,23 @@ pub(super) fn parameters(
                 description,
                 ..Default::default()
             }),
-            "path" => ctx.diagnostics.push(Diagnostic::info(
-                &at,
-                "path 参数已经在路径模板里，不需要单独导入",
-            )),
+            "path" => {
+                if default.is_empty() {
+                    // 文档没给默认值时，路径参数的值是空的：导入后要自己填。
+                    // 不说一声，用户看到的是一条发不出去的请求。
+                    ctx.diagnostics.push(Diagnostic::info(
+                        &at,
+                        format!("路径参数 {name} 没有默认值，导入后需要自己填值"),
+                    ));
+                }
+                path_params.push(KeyValue {
+                    key: name,
+                    value: default,
+                    enabled,
+                    description,
+                    ..Default::default()
+                })
+            }
             "cookie" => ctx.diagnostics.push(
                 Diagnostic::warn(
                     &at,
@@ -79,7 +95,7 @@ pub(super) fn parameters(
             ),
         }
     }
-    (params, headers)
+    (params, path_params, headers)
 }
 
 /// 两级 `parameters` 合并成一份，同名同 `in` 算同一个参数。

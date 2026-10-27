@@ -1,4 +1,5 @@
 import { KeyValueEditor, type KeySuggestion } from './KeyValueEditor';
+import { PathParamsEditor } from './PathParamsEditor';
 import { BodyEditor } from './BodyEditor-lazy';
 import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor-lazy';
@@ -7,8 +8,8 @@ import type { EndpointDraft } from '@/stores/store-types';
 import type { FormatResult } from '@/lib/utils';
 import type { AuthConfig, KeyValue, RequestBody } from '@/types/domain';
 
-/** 请求配置编辑器的页签 id。`script` 是请求脚本（前置 / 测试两段）。 */
-export type TesterTabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
+/** 请求配置编辑器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段）。 */
+export type TesterTabId = 'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
 
 /**
  * 页签内容区 —— 只渲染当前那一页编辑器。
@@ -19,6 +20,8 @@ export type TesterTabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'scr
 export function RequestTabPanels({
   tab,
   params,
+  pathParams,
+  url,
   headers,
   body,
   auth,
@@ -27,11 +30,15 @@ export function RequestTabPanels({
   testScript,
   headerSuggestions,
   validationError,
+  pathParamError,
   patchDraft,
   onFormatResult,
 }: {
   tab: TesterTabId;
   params: KeyValue[];
+  pathParams: KeyValue[];
+  /** 当前生效的 URL 文本。路径参数的名单从它派生。 */
+  url: string;
   headers: KeyValue[];
   body: RequestBody;
   auth: AuthConfig;
@@ -42,6 +49,8 @@ export function RequestTabPanels({
   testScript: string;
   headerSuggestions: KeySuggestion[];
   validationError: string | null;
+  /** 路径参数缺值时拦下发送的原因。 */
+  pathParamError: string | null;
   patchDraft: (patch: Partial<EndpointDraft>) => void;
   onFormatResult: (result: FormatResult) => void;
 }) {
@@ -53,6 +62,14 @@ export function RequestTabPanels({
           onChange={(items) => patchDraft({ params: items })}
           keyPlaceholder="query 参数名"
           valuePlaceholder="值（支持 {{var}}）"
+        />
+      )}
+      {tab === 'path' && (
+        <PathParamsEditor
+          url={url}
+          items={pathParams}
+          error={pathParamError}
+          onChange={(items) => patchDraft({ pathParams: items })}
         />
       )}
       {tab === 'headers' && (

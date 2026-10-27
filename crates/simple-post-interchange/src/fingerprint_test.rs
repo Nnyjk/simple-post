@@ -144,6 +144,95 @@ fn a_disabled_param_does_not_count_but_a_differing_value_does() {
 }
 
 #[test]
+fn a_differing_path_param_value_makes_a_different_request() {
+    // `path` 里留着 `{id}` 这个占位符，两个请求只差 id 的值时路径文本一模一样。
+    // 不把路径参数的值算进指纹，第二个就会被当成重复而跳过 —— 那是丢请求，不是去重。
+    let mut first = fully_decorated_ep();
+    first.path = "/users/{id}".into();
+    first.path_params = vec![kv("id", "1")];
+
+    let mut second = first.clone();
+    second.path_params = vec![kv("id", "2")];
+
+    assert_ne!(
+        RequestIdentity::of_ir(&first).fingerprint(),
+        RequestIdentity::of_ir(&second).fingerprint(),
+        "路径参数的值不同就是不同的请求"
+    );
+
+    let mut set = FingerprintSet::new();
+    assert!(!set.seen(&RequestIdentity::of_ir(&first)));
+    assert!(
+        !set.seen(&RequestIdentity::of_ir(&second)),
+        "只差路径参数值的第二个请求不该被当成重复"
+    );
+}
+
+#[test]
+fn a_disabled_path_param_does_not_count() {
+    // 停用的路径参数不进请求，故它不该改变身份。
+    let mut base = fully_decorated_ep();
+    base.path = "/users/{id}".into();
+
+    let mut disabled = base.clone();
+    disabled.path_params = vec![KeyValue {
+        enabled: false,
+        ..kv("id", "1")
+    }];
+
+    assert_eq!(
+        RequestIdentity::of_ir(&base).fingerprint(),
+        RequestIdentity::of_ir(&disabled).fingerprint()
+    );
+}
+
+#[test]
+fn a_query_param_and_a_path_param_do_not_collide() {
+    // query 段与 path_params 段是**两段**，不是一段。分界说不清时，query 是
+    // `a=1,b=2`、path_params 是 `b=2` 的两个请求会拼出同一条字节流，拿到同一个
+    // 指纹 —— 导入时第二个被当成重复而跳过，那是丢请求，不是去重。
+    let mut as_query = fully_decorated_ep();
+    as_query.path = "/items".into();
+    as_query.params = vec![kv("a", "1"), kv("b", "2")];
+
+    let mut as_path_param = fully_decorated_ep();
+    as_path_param.path = "/items".into();
+    as_path_param.params = vec![kv("a", "1")];
+    as_path_param.path_params = vec![kv("b", "2")];
+
+    assert_ne!(
+        RequestIdentity::of_ir(&as_query).fingerprint(),
+        RequestIdentity::of_ir(&as_path_param).fingerprint(),
+        "同一个值放在 query 里与放在路径参数里，是两个不同的请求"
+    );
+
+    let mut set = FingerprintSet::new();
+    assert!(!set.seen(&RequestIdentity::of_ir(&as_query)));
+    assert!(
+        !set.seen(&RequestIdentity::of_ir(&as_path_param)),
+        "放在路径参数里的那个请求不该被当成重复而跳过"
+    );
+}
+
+#[test]
+fn a_param_value_containing_a_newline_does_not_collide() {
+    // 值里带换行时，一个参数能伪装成两个参数：按换行切开是 `a=1` 与 `b=2`。
+    // 每一段都带自己的长度时，长度就是这一段的终止标记，故这两种写法算出不同的
+    // 指纹。
+    let mut one_param = fully_decorated_ep();
+    one_param.params = vec![kv("a", "1\nb=2")];
+
+    let mut two_params = fully_decorated_ep();
+    two_params.params = vec![kv("a", "1"), kv("b", "2")];
+
+    assert_ne!(
+        RequestIdentity::of_ir(&one_param).fingerprint(),
+        RequestIdentity::of_ir(&two_params).fingerprint(),
+        "一个值里带换行的参数不该与两个参数撞成同一个指纹"
+    );
+}
+
+#[test]
 fn normalize_path_is_idempotent_and_keeps_case() {
     for raw in [
         "users",
@@ -181,6 +270,7 @@ fn the_set_recognises_an_already_stored_endpoint() {
         method: HttpMethod::Post,
         url: "/users".into(),
         params: vec![],
+        path_params: vec![],
         headers: vec![kv("X-Trace", "abc")],
         // 与 `fully_decorated_ep` 的 body 一致：落库不改 body，两侧才算出同一个身份。
         body: RequestBody {

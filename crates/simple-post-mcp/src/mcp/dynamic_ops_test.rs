@@ -110,6 +110,7 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 base_url_definition_id: None,
                 base_url_override: None,
                 params: vec![],
+                path_params: vec![],
                 headers: vec![],
                 body: RequestBody::default(),
                 auth: AuthConfig::default(),
@@ -170,6 +171,7 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 base_url_definition_id: None,
                 base_url_override: None,
                 params: vec![],
+                path_params: vec![],
                 headers: vec![],
                 body: RequestBody::default(),
                 auth: AuthConfig::default(),
@@ -647,6 +649,7 @@ async fn the_list_tool_does_not_carry_the_referencing_endpoints() {
                 base_url_definition_id: None,
                 base_url_override: None,
                 params: vec![],
+                path_params: vec![],
                 headers: vec![],
                 body: RequestBody {
                     mode: BodyMode::Json,

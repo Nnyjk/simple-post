@@ -42,6 +42,11 @@ struct RunRequestArgs {
     /// 查询参数。形状与请求头相同。
     #[serde(default)]
     params: Option<Value>,
+    /// URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。形状与请求头相同。
+    ///
+    /// 它们替换进路径本身，不像 `params` 那样进查询串。
+    #[serde(default)]
+    path_params: Option<Value>,
     #[serde(default)]
     body: Option<String>,
     /// body 的模式（`none` / `json` / `form` / `raw` / `multipart`）。
@@ -120,6 +125,19 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "required": ["key", "value"]
                         }
                     },
+                    "path_params": {
+                        "type": "array",
+                        "description": "Values for the path placeholders in `url` (e.g. the `id` of \"/api/users/{id}\"). They are substituted into the path itself, not appended to the query string.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
                     "body": {
                         "type": "string",
                         "description": "The request payload to send, as text. For body_mode=json this is a JSON instance with values (a value position may hold a {{var}} placeholder, replaced with that variable's value when the request is sent) — a JSON Schema (the documented parameter definition) belongs on the endpoint as body_schema, and is never sent."
@@ -174,8 +192,43 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "endpoint_id": { "type": "string" },
-                    "overrides": { "type": "object" },
+                    // 覆盖值要写进 schema：路径参数缺值时发送那侧会拦下请求并说
+                    // 「or pass overrides.pathParams when calling」，而调用方只能从
+                    // schema 里知道这个入参的名字。schema 不写它，工具就在骗人。
+                    "overrides": {
+                        "type": "object",
+                        "properties": {
+                            "url": { "type": "string" },
+                            "method": { "type": "string" },
+                            "headers": {
+                                "type": "array",
+                                "items": { "$ref": "#/$defs/keyValue" }
+                            },
+                            "params": {
+                                "type": "array",
+                                "items": { "$ref": "#/$defs/keyValue" }
+                            },
+                            "pathParams": {
+                                "type": "array",
+                                "description": "Values for the `{placeholder}` segments in the url. They are \
+substituted into the path itself, not appended to the query string. The key of each entry must match a \
+placeholder name; a placeholder without an entry keeps its literal braces and blocks the send.",
+                                "items": { "$ref": "#/$defs/keyValue" }
+                            },
+                            "baseUrlDefinitionId": { "type": "string" },
+                            "moduleId": { "type": "string" }
+                        },
+                        "additionalProperties": true
+                    },
                     "settings_override": { "type": "object" }
+                },
+                "$defs": {
+                    // `overrides` 的三个数组按 `#/$defs/keyValue` 引用条目形状。少了这个
+                    // 定义，跟着 `$ref` 走的 agent 就落到一个空处，只能自己猜这一行长
+                    // 什么样 —— 于是它多半猜成带 `id` 的域类型形状，而解析器要的是
+                    // 「只要 key 与 value」。定义放在共享的地方（`mcp::key_value`），
+                    // 与 `endpoint_create` / `endpoint_update` 用的是同一份。
+                    "keyValue": crate::mcp::key_value::key_value_schema(),
                 },
                 "required": ["endpoint_id"],
                 "additionalProperties": true,
@@ -199,6 +252,7 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
     let headers = flatten_key_values(a.headers.as_ref(), "headers")?;
     let params = flatten_key_values(a.params.as_ref(), "params")?;
+    let path_params = flatten_key_values(a.path_params.as_ref(), "path_params")?;
     let auth = parse_auth(a.auth.as_ref())?;
     let content = a.body.clone().unwrap_or_default();
     let body_mode = parse_body_mode(a.body_mode.as_deref(), !content.is_empty())?;
@@ -238,6 +292,7 @@ async fn tool_api_run_request(state: &AppState, args: Value) -> Result<CallToolR
         base_url_definition_id: a.base_url_definition_id.clone(),
         base_url_override: None,
         params,
+        path_params,
         headers,
         body: RequestBody {
             mode: body_mode,
@@ -311,11 +366,14 @@ async fn tool_api_call_endpoint(state: &AppState, args: Value) -> Result<CallToo
         None
     };
 
-    let overrides: crate::variable_fill::EndpointOverrides = a
-        .overrides
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    // 覆盖值反序列化失败是**错误**，不是「当作没传」。`.ok()` 会把一整份覆盖值悄悄
+    // 换成空值，于是调用方看到的是「按端点自己那份发出去的请求」，而不是
+    // 「你传的 overrides 格式不对」。
+    let overrides: crate::variable_fill::EndpointOverrides = match a.overrides.as_ref() {
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| AppError::Validation(format!("api_call_endpoint overrides: {e}")))?,
+        None => Default::default(),
+    };
 
     // 端点属于哪个模块只在树里，detail 行上没有，得查 `nodes` 补齐；但调用方
     // 自己指定了就不覆盖 —— `resolve_endpoint` 是纯函数，别让它被一次查库改写。
@@ -399,6 +457,11 @@ async fn resolve_dynamic_values(
         .params
         .clone()
         .unwrap_or_else(|| detail.params.clone());
+    // 路径参数的值同样会被 `{{var}}` 替换，故它们里的标记同样要参与扫描。
+    let eff_path_params = overrides
+        .path_params
+        .clone()
+        .unwrap_or_else(|| detail.path_params.clone());
     let eff_headers = overrides
         .headers
         .clone()
@@ -411,6 +474,7 @@ async fn resolve_dynamic_values(
         base_url: &base_url,
         url: &eff_url,
         params: &eff_params,
+        path_params: &eff_path_params,
         headers: &eff_headers,
         body: &eff_body,
         auth: &detail.auth,
@@ -472,8 +536,19 @@ async fn send_resolved(
         body_mode,
         auth,
         missing_vars,
+        missing_path_params,
         ..
     } = resolved;
+
+    // 路径参数缺值就不发：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
+    // 含义不明的 404，而用户看不出是自己漏填了一个值。
+    if !missing_path_params.is_empty() {
+        return Err(AppError::Validation(format!(
+            "path parameter(s) have no value: {}. Set them on the endpoint's path \
+             parameters, or pass overrides.pathParams when calling.",
+            missing_path_params.join(", ")
+        )));
+    }
     let mut url = url;
     let mut headers = headers;
 
@@ -669,6 +744,10 @@ mod multipart_parity_tests;
 #[cfg(test)]
 #[path = "http_ops/run_request_test.rs"]
 mod run_request_tests;
+
+#[cfg(test)]
+#[path = "http_ops/overrides_test.rs"]
+mod overrides_tests;
 
 #[cfg(test)]
 #[path = "http_ops/env_fallback_test.rs"]

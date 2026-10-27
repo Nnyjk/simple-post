@@ -58,6 +58,8 @@ struct ScanParts {
     #[serde(default)]
     params: Vec<KeyValue>,
     #[serde(default)]
+    path_params: Vec<KeyValue>,
+    #[serde(default)]
     headers: Vec<KeyValue>,
     #[serde(default)]
     body: RequestBody,
@@ -132,6 +134,7 @@ fn every_scan_case_finds_the_same_names() {
             base_url: &case.parts.base_url,
             url: &case.parts.url,
             params: &case.parts.params,
+            path_params: &case.parts.path_params,
             headers: &case.parts.headers,
             body: &case.parts.body,
             auth: &case.parts.auth,

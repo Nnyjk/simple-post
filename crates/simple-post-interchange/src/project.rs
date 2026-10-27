@@ -293,6 +293,7 @@ fn project_endpoint(
         method: d.method.clone(),
         path: d.url.clone(),
         params: d.params.clone(),
+        path_params: d.path_params.clone(),
         headers: d.headers.clone(),
         body: d.body.clone(),
         auth: d.auth.clone(),

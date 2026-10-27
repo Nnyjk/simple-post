@@ -9,11 +9,10 @@ use super::args::{
     mint_endpoint_id, EndpointCreateArgs, EndpointDeleteArgs, EndpointDuplicateArgs,
     EndpointMoveArgs,
 };
-use super::input::{
-    build_auth, coerce_key_values, parse_body_mode, reject_schema_shaped_payload, KeyValueInput,
-};
+use super::input::{build_auth, parse_body_mode, reject_schema_shaped_payload};
 use super::patch::{patch_field, patch_value_field};
 use super::resource::endpoint_resource;
+use crate::mcp::key_value::{coerce_key_values, KeyValueInput};
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use simple_post_core::domain::{
     EndpointDetail, EndpointDetailPatch, RequestBody, ResourceNode, ResourceNodeType,
@@ -87,6 +86,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         base_url_definition_id: a.base_url_definition_id,
         base_url_override: a.base_url_override,
         params: coerce_key_values(a.params.unwrap_or_default()),
+        path_params: coerce_key_values(a.path_params.unwrap_or_default()),
         headers: coerce_key_values(a.headers.unwrap_or_default()),
         body,
         auth,
@@ -144,6 +144,11 @@ pub(super) async fn tool_endpoint_update(
         base_url_override: patch_field::<String>(&patch_obj, "base_url_override")?,
         params: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "params")?
             .map(coerce_key_values),
+        // 路径参数是域类型里的 `double_option` 字段（缺席 = 不动，`null` = 清空），
+        // 故这里走 `patch_field` 而不是 `patch_value_field`：同一个字段在 REST / Tauri
+        // 与 MCP 两条路上必须是同一个意思，否则调用方会一边清得掉、一边报 Validation。
+        path_params: patch_field::<Vec<KeyValueInput>>(&patch_obj, "path_params")?
+            .map(|rows| rows.map(coerce_key_values)),
         headers: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "headers")?
             .map(coerce_key_values),
         body: patch_value_field(&patch_obj, "body")?,

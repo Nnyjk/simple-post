@@ -80,6 +80,7 @@ pub(super) fn minimal_endpoint() -> EndpointDetail {
         base_url_definition_id: None,
         base_url_override: None,
         params: Vec::new(),
+        path_params: Vec::new(),
         headers: Vec::new(),
         body: RequestBody::default(),
         auth: AuthConfig::default(),

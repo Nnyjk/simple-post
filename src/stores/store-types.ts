@@ -176,6 +176,10 @@ export interface EndpointDraft {
   url?: string;
   method?: HttpMethod;
   params?: KeyValue[];
+  /**
+   * URL 路径里的占位符与它们各自的值。它们替换进路径本身，不进查询串。
+   */
+  pathParams?: KeyValue[];
   headers?: KeyValue[];
   body?: RequestBody;
   auth?: AuthConfig;

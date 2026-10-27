@@ -37,6 +37,7 @@ fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> E
         base_url_definition_id: None,
         base_url_override: None,
         params: Vec::<KeyValue>::new(),
+        path_params: Vec::<KeyValue>::new(),
         headers: Vec::<KeyValue>::new(),
         body: RequestBody {
             mode: body_mode,
@@ -85,14 +86,14 @@ fn validate_endpoint_passes_for_well_formed_endpoint() {
         BodyMode::None,
         "",
     );
-    let issues = validate(&endpoint);
+    let issues = validate(&endpoint, &endpoint.url);
     assert!(issues.is_empty(), "expected no issues, got {issues:?}");
 }
 
 #[test]
 fn validate_endpoint_flags_empty_url() {
     let endpoint = ep("", AuthConfig::default(), BodyMode::None, "");
-    assert!(!validate(&endpoint).is_empty());
+    assert!(!validate(&endpoint, &endpoint.url).is_empty());
 }
 
 #[test]
@@ -103,7 +104,7 @@ fn validate_endpoint_flags_missing_bearer() {
         ..Default::default()
     };
     let endpoint = ep("/x", auth, BodyMode::None, "");
-    let issues = validate(&endpoint);
+    let issues = validate(&endpoint, &endpoint.url);
     assert!(issues.iter().any(|i| i["field"] == "auth.bearer"));
 }
 
@@ -118,7 +119,7 @@ fn validate_endpoint_flags_missing_basic() {
         ..Default::default()
     };
     let endpoint = ep("/x", auth, BodyMode::None, "");
-    let issues = validate(&endpoint);
+    let issues = validate(&endpoint, &endpoint.url);
     assert!(issues.iter().any(|i| i["field"] == "auth.basic.username"));
     assert!(issues.iter().any(|i| i["field"] == "auth.basic.password"));
 }
@@ -135,7 +136,7 @@ fn validate_endpoint_flags_missing_apikey() {
         ..Default::default()
     };
     let endpoint = ep("/x", auth, BodyMode::None, "");
-    let issues = validate(&endpoint);
+    let issues = validate(&endpoint, &endpoint.url);
     assert!(issues.iter().any(|i| i["field"] == "auth.apikey.key"));
     assert!(issues.iter().any(|i| i["field"] == "auth.apikey.value"));
 }
@@ -143,7 +144,7 @@ fn validate_endpoint_flags_missing_apikey() {
 #[test]
 fn validate_endpoint_flags_empty_body_when_required() {
     let endpoint = ep("/x", AuthConfig::default(), BodyMode::Json, "");
-    let issues = validate(&endpoint);
+    let issues = validate(&endpoint, &endpoint.url);
     assert!(issues.iter().any(|i| i["field"] == "body.content"));
 }
 
@@ -159,7 +160,7 @@ fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
         BodyMode::Json,
         "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}",
     );
-    let issues = validate(&endpoint);
+    let issues = validate(&endpoint, &endpoint.url);
     assert!(
         issues.iter().any(|i| i["field"] == "body.content"
             && i["message"].as_str().unwrap().contains("JSON Schema")),
@@ -168,7 +169,7 @@ fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
 
     // 填了 schema 就不算写反 —— 那时这份内容是有意选定的。
     endpoint.body.schema = Some("{\"type\":\"object\"}".into());
-    let issues = validate(&endpoint);
+    let issues = validate(&endpoint, &endpoint.url);
     assert!(
         !issues
             .iter()
@@ -181,4 +182,45 @@ fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
 fn arg_str_opt_returns_none_for_missing() {
     let v = json!({});
     assert_eq!(arg_str_opt(&v, "x"), None);
+}
+
+/// 路径参数缺值：URL 里留着 `{id}`，端点没有给它赋值。发送那侧会因此拦下请求，
+/// 故静态检查要在这里先点出来。
+#[test]
+fn validate_endpoint_flags_a_path_parameter_without_a_value() {
+    let mut endpoint = ep("/users/{id}", AuthConfig::default(), BodyMode::None, "");
+    let issues = validate(&endpoint, &endpoint.url);
+    assert!(
+        issues.iter().any(|i| i["field"] == "pathParams.id"),
+        "the missing path parameter must be reported: {issues:?}"
+    );
+
+    // 填上值之后它就不再是缺陷。
+    endpoint.path_params = vec![KeyValue {
+        id: "pp1".into(),
+        key: "id".into(),
+        value: "42".into(),
+        enabled: true,
+        description: None,
+    }];
+    let issues = validate(&endpoint, &endpoint.url);
+    assert!(
+        !issues.iter().any(|i| i["field"] == "pathParams.id"),
+        "a filled path parameter is not a defect: {issues:?}"
+    );
+}
+
+/// 前置 URL 里的占位符也要报出来。
+///
+/// 静态检查按**拼接后**的 URL 找占位符，而发送那侧也是在拼接后的 URL 上做替换。
+/// 只看端点自己的 URL 会漏掉前置 URL 里的那个，于是静态检查说「没问题」、真发出去
+/// 却被拦下 —— 工具就在骗调用方。
+#[test]
+fn validate_endpoint_flags_a_path_parameter_that_lives_in_the_base_url() {
+    let endpoint = ep("/users", AuthConfig::default(), BodyMode::None, "");
+    let issues = validate(&endpoint, "https://api.example.com/{version}/users");
+    assert!(
+        issues.iter().any(|i| i["field"] == "pathParams.version"),
+        "the path parameter in the base url must be reported: {issues:?}"
+    );
 }

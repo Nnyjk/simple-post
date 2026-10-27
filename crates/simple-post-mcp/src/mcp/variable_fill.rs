@@ -157,11 +157,14 @@ async fn tool_api_resolve_endpoint(
     };
     let project_ref = project.as_ref().unwrap_or(&EMPTY_PROJECT);
 
-    let overrides: crate::variable_fill::EndpointOverrides = a
-        .overrides
-        .as_ref()
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    // 覆盖值反序列化失败是**错误**，不是「当作没传」。`.ok()` 会把一整份覆盖值悄悄
+    // 换成空值，于是调用方看到的是「按端点自己那份解析出来的请求」，而不是
+    // 「你传的 overrides 格式不对」。
+    let overrides: crate::variable_fill::EndpointOverrides = match a.overrides.as_ref() {
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| AppError::Validation(format!("api_resolve_endpoint overrides: {e}")))?,
+        None => Default::default(),
+    };
 
     // 与 `api_call_endpoint` 同一套按模块查找：预览与真正发送必须对「这个端点解析
     // 到哪个 host」达成一致，否则 AI 客户端预览一个、实际打到另一个。
@@ -189,6 +192,9 @@ async fn tool_api_resolve_endpoint(
         "body": resolved.body,
         "auth": resolved.auth,
         "missing_vars": resolved.missing_vars,
+        // 路径参数缺值时 `url` 里留着 `{id}` 这样的占位符。这一份清单告诉调用方
+        // 缺的是哪个，发送那侧会因此拦下请求。
+        "missing_path_params": resolved.missing_path_params,
     })))
 }
 
@@ -203,7 +209,37 @@ async fn tool_api_validate_endpoint(
     let project_id = endpoint_project_id(&state.pool, &endpoint.node_id);
     crate::mcp::check_permission(&state.pool, &project_id, "api_validate_endpoint").await?;
 
-    let issues = validate(&endpoint);
+    // 静态检查要按**拼接后**的 URL 找路径占位符：base URL 里也可能有 `{version}` 这样的
+    // 占位符，而发送那侧是在拼接后的 URL 上做替换。只看端点自己的 URL，会让静态检查说
+    // 「没问题」、真发出去却被拦下 —— 工具就在骗调用方。
+    let env =
+        crate::mcp::resolve_env(&state.pool, endpoint.environment_id.as_deref(), &project_id)?;
+    let project = if !project_id.is_empty() {
+        simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::projects::get(c, &project_id)
+        })
+        .ok()
+    } else {
+        None
+    };
+    let project_ref = project.as_ref().unwrap_or(&EMPTY_PROJECT);
+    // 与发送那侧同一套按模块查找：预览、检查与真正发送必须对「这个端点解析到哪个
+    // host」达成一致。
+    let module_id = simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::nodes::module_id_of(c, &endpoint.node_id)
+    })
+    .ok()
+    .flatten();
+    let (base_url, _src, _def_id) = crate::variable_fill::resolve_base_url_with(
+        &endpoint,
+        env.as_ref(),
+        project_ref,
+        None,
+        module_id.as_deref(),
+    );
+    let joined = crate::variable_fill::join_base_url(&base_url, &endpoint.url);
+
+    let issues = validate(&endpoint, &joined);
     let ok = issues.is_empty();
     Ok(CallToolResult::json(json!({
         "ok": ok,
@@ -229,7 +265,12 @@ fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> St
 }
 
 /// 静态检查：端点看起来跑不跑得起来。返回 `{field, message}` 形式的 issues 列表。
-fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
+/// 静态检查这个端点。
+///
+/// `url` 是**拼接后**的 URL（base URL + 端点自己的路径），路径占位符从它里面取：
+/// base URL 里也可能有 `{version}` 这样的占位符，而发送那侧是在拼接后的 URL 上做
+/// 替换，只看端点自己的 URL 会漏掉它。
+fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
     use simple_post_core::domain::{AuthType, BodyMode};
     let mut issues = Vec::new();
 
@@ -244,6 +285,23 @@ fn validate(endpoint: &EndpointDetail) -> Vec<Value> {
             "field": "url",
             "message": "url should start with http(s):// or be a path or a template"
         }));
+    }
+
+    // 路径参数缺值：路径里留着 `{id}` 这样的占位符，而端点没有给它赋值。发送那侧
+    // 会因此拦下请求，故静态检查在这里先点出来。
+    for name in simple_post_core::path_params::placeholders(url) {
+        let has_value = endpoint
+            .path_params
+            .iter()
+            .any(|p| p.enabled && p.key == name && !p.value.trim().is_empty());
+        if !has_value {
+            issues.push(json!({
+                "field": format!("pathParams.{name}"),
+                "message": format!(
+                    "path parameter '{name}' has no value; the url keeps the literal {{{name}}}"
+                )
+            }));
+        }
     }
 
     match endpoint.auth.kind {

@@ -150,6 +150,7 @@ async fn module_move_preserves_collections_and_endpoints() {
                 base_url_definition_id: None,
                 base_url_override: None,
                 params: vec![],
+                path_params: vec![],
                 headers: vec![],
                 body: RequestBody::default(),
                 auth: Default::default(),

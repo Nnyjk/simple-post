@@ -218,6 +218,12 @@ pub struct TemplateParts<'a> {
     /// 端点的 path。
     pub url: &'a str,
     pub params: &'a [KeyValue],
+    /// URL 路径里的占位符与它们各自的值。它们替换进路径本身。
+    ///
+    /// 值里的 `{{var}}` 照样会被替换（见 `variable_fill::resolve_endpoint`），故它们
+    /// 里的标记同样算被引用 —— 不扫的话，只在路径参数值里出现的动态变量永远不会被
+    /// 取数，替换后仍是字面量 `{{name}}`。
+    pub path_params: &'a [KeyValue],
     pub headers: &'a [KeyValue],
     pub body: &'a RequestBody,
     pub auth: &'a AuthConfig,
@@ -225,9 +231,10 @@ pub struct TemplateParts<'a> {
 
 /// 模板里出现的全部 `{{name}}` 名字，按首次出现排序。
 ///
-/// 只扫**会被替换**的字段：启用的且 key 非空的参数值、启用的且 key 非空的 header 值、body
-/// 内容、以及鉴权里那三种方案（bearer / basic / apikey）。OAuth2 的配置字段不被变量替换，
-/// 故不在扫描范围内——扫了会让一条根本没被用到的定义去取数。
+/// 只扫**会被替换**的字段：启用的且 key 非空的参数值、启用的且 key 非空的路径参数值、
+/// 启用的且 key 非空的 header 值、body 内容、以及鉴权里那三种方案（bearer / basic /
+/// apikey）。OAuth2 的配置字段不被变量替换，故不在扫描范围内——扫了会让一条根本没被
+/// 用到的定义去取数。
 ///
 /// 未启用的参数与 header 里的变量不算被引用：它们不会发出，其中的变量不是这次请求的问题。
 pub fn list_names(parts: &TemplateParts<'_>) -> Vec<String> {
@@ -244,6 +251,11 @@ pub fn list_names(parts: &TemplateParts<'_>) -> Vec<String> {
     add(parts.base_url);
     add(parts.url);
     for p in parts.params {
+        if p.enabled && !p.key.is_empty() {
+            add(&p.value);
+        }
+    }
+    for p in parts.path_params {
         if p.enabled && !p.key.is_empty() {
             add(&p.value);
         }

@@ -18,7 +18,8 @@ import type {
   KeyValue,
   RequestBody,
 } from '@/types/domain';
-import { collapseUrlSlashes, joinBaseUrl, resolveVarsWithMissing } from './url';
+import { collapseUrlSlashes, joinBaseUrl, listVars, resolveVarsWithMissing } from './url';
+import { pathPlaceholders, substitutePathParams } from './path-params';
 import { mergePool } from './dynamic-vars';
 import {
   buildMultipartBody,
@@ -43,6 +44,10 @@ export interface BuildInput {
   body: RequestBody;
   auth: AuthConfig;
   env?: Environment;
+  /**
+   * URL 路径里的占位符与它们各自的值。它们替换进路径本身，不进查询串。
+   */
+  pathParams?: KeyValue[];
 }
 
 export interface BuiltFetch {
@@ -79,6 +84,12 @@ export interface PrepareRequestInput {
   auth: AuthConfig;
   env?: Environment;
   /**
+   * URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
+   *
+   * 它们替换进路径本身，不像 `params` 那样进查询串。
+   */
+  pathParams?: KeyValue[];
+  /**
    * 动态变量的当前值：变量名 → 替换用的文本。
    *
    * 它们在变量池的**最后一步**并入，故同名时压过环境变量；被停用的环境变量也不影响它们
@@ -91,8 +102,8 @@ export interface PrepareRequestInput {
 export interface PreparedRequest {
   method: HttpMethod;
   /**
-   * 完整 URL：`join(baseUrl, urlPath)` → 解析 `{{var}}` → 折叠 path 斜杠 →
-   * 解析并追加参数值 → 追加 query 位置的 apikey，顺序如列。
+   * 完整 URL：`join(baseUrl, urlPath)` → 替换路径里的 `{占位符}` → 解析 `{{var}}` →
+   * 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的 apikey，顺序如列。
    * 先 join 再解析，环境自身的 base URL 里的变量才解析得到；折叠放在解析
    * 之后，因为把变量替换成以 `/` 开头的值才会把 join 的分隔符变成 `//`；
    * 参数放最后，因为它们的值在进来时已解析（见 `appendQueryString`）。
@@ -121,6 +132,14 @@ export interface PreparedRequest {
    * *顺序*是渲染器本地的，只有本应用的告警提示消费它。
    */
   missingVars: string[];
+  /**
+   * URL 路径里没取到值的占位符名（`/users/{id}` 的 `id`）。
+   *
+   * 与 `missingVars` 是两回事：那边是「变量池里没有这个变量」，这边是「端点自己的
+   * 路径参数没有填值」。发送那侧按这份清单拦下请求——路径参数按 OpenAPI 惯例是必填的，
+   * 缺值发出去只会换一个含义不明的 404。
+   */
+  missingPathParams: string[];
 }
 
 // ---- 内部辅助 ----
@@ -386,12 +405,14 @@ function hasBody(body: RequestBody): boolean {
  *
  *   1. join `baseUrl` + `urlPath`——自带 scheme 的 path 优先，「自定义」的
  *      完整 URL 因此不会被前缀；
- *   2. 在 join 后的 URL 上解析 `{{var}}`，环境自身 base URL 里的变量才解析得到；
- *   3. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL
+ *   2. 把路径里的 `{占位符}` 换成端点自己的路径参数——它们的值先解析 `{{var}}`，
+ *      再按路径段编码；
+ *   3. 在 join 后的 URL 上解析 `{{var}}`，环境自身 base URL 里的变量才解析得到；
+ *   4. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL
  *      选 `?` 还是 `&`）；
- *   4. 追加 query 位置的 apikey；
- *   5. 构造有序 header 列表；
- *   6. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再模板化 body。
+ *   5. 追加 query 位置的 apikey；
+ *   6. 构造有序 header 列表；
+ *   7. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再模板化 body。
  *
  * multipart 的 boundary 在第 5 步之前生成：Content-Type 与 body 用同一个值，
  * 两者不在同一步生成就会对不上。
@@ -409,7 +430,27 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const auth = resolveAuth(input.auth, pool, missing);
 
   const joined = joinBaseUrl(input.baseUrl, input.urlPath);
-  const url = resolveVarsWithMissing(joined, pool);
+
+  // 路径参数：把 URL 路径里的 {占位符} 换成端点自己的值。
+  //
+  // 替换发生在下面那趟 `{{var}}` 替换**之前**：路径参数的值要先编码，编码过的
+  // `{{var}}` 就再也认不出来了，故值里的变量在这一步就地解析。
+  //
+  // 值里仍有没解析出来的 `{{var}}` 时，这个路径参数按「还没准备好」处理（不替换、
+  // 计入缺值）：把 `%7B%7Btoken%7D%7D` 塞进路径，用户看不出缺的是哪个变量。
+  const pathValues: Array<readonly [string, string]> = [];
+  for (const name of pathPlaceholders(joined)) {
+    const p = (input.pathParams ?? []).find((it) => it.enabled && it.key === name);
+    // 只有空白的值按「还没填」处理：界面上的「必填」也是这么判的，三处说法要一致。
+    if (!p || !p.value.trim()) continue;
+    const r = resolveVarsWithMissing(p.value, pool);
+    missing.add(r.missing);
+    if (listVars(r.value).length > 0) continue;
+    pathValues.push([name, r.value]);
+  }
+  const substituted = substitutePathParams(joined, pathValues);
+
+  const url = resolveVarsWithMissing(substituted.url, pool);
   missing.add(url.missing);
   // 折叠放在替换之后、绝不之前：`{{var}}` → `/api` 才会把 `joinBaseUrl`
   // 插入的分隔符变成 `//`，到这里真实 path 才确定。`collapseUrlSlashes` 不碰
@@ -453,6 +494,7 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
     headers,
     body,
     missingVars: missing.list(),
+    missingPathParams: substituted.missing,
   };
 }
 
@@ -472,6 +514,7 @@ function fromBuildInput(input: BuildInput): PrepareRequestInput {
     body: input.body,
     auth: input.auth,
     env: input.env,
+    pathParams: input.pathParams,
   };
 }
 

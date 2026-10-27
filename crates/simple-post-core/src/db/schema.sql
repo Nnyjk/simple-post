@@ -147,6 +147,10 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   base_url_definition_id TEXT,
   base_url_override      TEXT,
   params_json            TEXT NOT NULL DEFAULT '[]',
+  -- URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。与 `params_json` 分开：
+  -- 查询参数进查询串，路径参数要替换进路径本身。
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`。
+  path_params_json       TEXT NOT NULL DEFAULT '[]',
   headers_json           TEXT NOT NULL DEFAULT '[]',
   body_json              TEXT NOT NULL DEFAULT '{}',
   auth_json              TEXT NOT NULL DEFAULT '{}',

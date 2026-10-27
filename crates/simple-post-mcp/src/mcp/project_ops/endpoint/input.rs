@@ -171,58 +171,6 @@ impl AuthConfigWire {
     }
 }
 
-/// agent 手写的一行 `KeyValue` 的线上形状。
-///
-/// [`simple_post_core::domain::KeyValue`] 的 `id` 与 `enabled` 没有 serde 默认值，
-/// 于是最自然的写法 `{"key":"page","value":"1"}` 反序列化失败。两处放宽的理由不同：
-///
-/// * `id` 可选，缺失时另铸。纯簿记字段 —— UI 拿它在 React 里做行 key，请求组装不读。
-///   客户端真传了就保留，于是把上一行原样回传的编辑是就地更新，不会把它变成孤儿。
-/// * `enabled` 可选，且**默认 `true`**，不是 `KeyValue` 自己的 `Default`（`false`）。
-///   存成禁用的请求头就是一个永远发不出去的请求头；agent 点名一个请求头就是要发它。
-///   显式 `false` 仍然照办，那对应「留着但先关掉」。
-///
-/// `value` 用同样方式放宽，因为「故意发一个空请求头值」是真事，不是笔误。
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct KeyValueInput {
-    #[serde(default)]
-    id: Option<String>,
-    key: String,
-    #[serde(default)]
-    value: String,
-    #[serde(default)]
-    enabled: Option<bool>,
-    #[serde(default)]
-    description: Option<String>,
-}
-
-impl KeyValueInput {
-    fn into_key_value(self) -> simple_post_core::domain::KeyValue {
-        let id = match self.id {
-            Some(id) if !id.trim().is_empty() => id,
-            _ => simple_post_core::domain::uid(),
-        };
-        simple_post_core::domain::KeyValue {
-            id,
-            key: self.key,
-            value: self.value,
-            enabled: self.enabled.unwrap_or(true),
-            description: self.description,
-        }
-    }
-}
-
-/// 反序列化 `params` / `headers` 数组，并补齐 `KeyValue` 要求、而 agent 没有理由
-/// 知道的那些簿记字段。
-pub(super) fn coerce_key_values(
-    rows: Vec<KeyValueInput>,
-) -> Vec<simple_post_core::domain::KeyValue> {
-    rows.into_iter()
-        .map(KeyValueInput::into_key_value)
-        .collect()
-}
-
 /// 载荷与定义写反了就地拒绝。
 ///
 /// 请求体有两个字段：`content` 是这一次发出的载荷，`schema` 是文档里那份参数定义。
