@@ -12,9 +12,12 @@ use serde_json::json;
 // =========================================================================
 // 从 core 转发过来的转换规则
 // =========================================================================
+//
+// 一行键值对（`KeyValueInput` / `coerce_key_values`）不在这一组里：它们经
+// `crate::mcp::key_value` 转发，那一处也服务 `api_call_endpoint` 的 `overrides`。
 
 pub(super) use simple_post_core::spec::input::{
-    build_auth, coerce_key_values, parse_body_mode, reject_schema_shaped_payload, KeyValueInput,
+    build_auth, parse_body_mode, reject_schema_shaped_payload,
 };
 pub(super) use simple_post_core::spec::input::{AUTH_TYPE_VALUES, BODY_MODE_VALUES};
 

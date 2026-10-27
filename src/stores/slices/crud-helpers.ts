@@ -145,6 +145,7 @@ export function blankDetail(
     baseUrlDefinitionId: null,
     baseUrlOverride: null,
     params: [],
+    pathParams: [],
     headers: [],
     body: { mode: 'none', content: '' },
     auth: { kind: 'none' },

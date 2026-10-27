@@ -116,6 +116,13 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
                     "description": "Query-string parameters.",
                     "items": { "$ref": "#/$defs/keyValue" }
                 },
+                "path_params": {
+                    "type": "array",
+                    "description": "Values for the path placeholders in `url` (e.g. the `id` of \"/api/users/{id}\"). \
+They are substituted into the path itself, not appended to the query string. The key of each entry must match a \
+placeholder name in `url`; a placeholder without an entry keeps its literal braces and blocks the send.",
+                    "items": { "$ref": "#/$defs/keyValue" }
+                },
                 "body_mode": {
                     "type": "string",
                     "enum": json!(BODY_MODE_VALUES),
@@ -174,19 +181,7 @@ to send when testing goes in body_content, never here."
                 }
             },
             "$defs": {
-                "keyValue": {
-                    "type": "object",
-                    "description": "One key/value row. `id` is optional bookkeeping (minted when omitted); `enabled` defaults to true.",
-                    "properties": {
-                        "key": { "type": "string" },
-                        "value": { "type": "string" },
-                        "enabled": { "type": "boolean" },
-                        "description": { "type": "string" },
-                        "id": { "type": "string" }
-                    },
-                    "required": ["key", "value"],
-                    "additionalProperties": false
-                }
+                "keyValue": crate::mcp::key_value::key_value_schema(),
             },
             "required": ["name", "method", "url"],
             "additionalProperties": false,
@@ -205,7 +200,7 @@ to send when testing goes in body_content, never here."
                 "endpoint_id": { "type": "string" },
                 "patch": {
                     "type": "object",
-                    "description": "Fields to change. Omit a field to leave it as-is; send null to clear it.",
+                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `environment_id`, `base_url_definition_id`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script` and `test_script` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
                     "properties": {
                         "name": { "type": "string" },
                         "description": { "type": ["string", "null"] },
@@ -218,6 +213,12 @@ to send when testing goes in body_content, never here."
                         "params": {
                             "type": "array",
                             "description": "Replaces the whole query-parameter list.",
+                            "items": { "$ref": "#/$defs/keyValue" }
+                        },
+                        "path_params": {
+                            "type": "array",
+                            "description": "Replaces the whole path-parameter list — the values for the `{placeholder}` \
+segments in `url`. They are substituted into the path itself, not appended to the query string.",
                             "items": { "$ref": "#/$defs/keyValue" }
                         },
                         "headers": {
@@ -289,19 +290,7 @@ to send when testing goes in body_content, never here."
                 }
             },
             "$defs": {
-                "keyValue": {
-                    "type": "object",
-                    "description": "One key/value row. `id` is optional bookkeeping (minted when omitted); `enabled` defaults to true.",
-                    "properties": {
-                        "key": { "type": "string" },
-                        "value": { "type": "string" },
-                        "enabled": { "type": "boolean" },
-                        "description": { "type": "string" },
-                        "id": { "type": "string" }
-                    },
-                    "required": ["key", "value"],
-                    "additionalProperties": false
-                }
+                "keyValue": crate::mcp::key_value::key_value_schema(),
             },
             "required": ["endpoint_id", "patch"],
             "additionalProperties": false,

@@ -397,6 +397,7 @@ pub fn commit_in_tx(
                     base_url_definition_id: wiring.as_ref().map(|w| w.definition_id.clone()),
                     base_url_override: None,
                     params: ir.params.clone(),
+                    path_params: ir.path_params.clone(),
                     headers: ir.headers.clone(),
                     body: ir.body.clone(),
                     auth: ir.auth.clone(),

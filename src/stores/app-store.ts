@@ -230,7 +230,8 @@ function draftNode(d: DraftEndpoint): ResourceNode {
  *
  * `params` / `headers` / `body` 故意从空开始——见 `useActiveEndpointResource`
  * 的说明。它们并没有"丢"：请求配置编辑器会写进同一 id 下的 `endpointDrafts`，
- * 而 `saveDraftEndpoint` 把两半合并成它最终写入的那一行。
+ * 而 `saveDraftEndpoint` 把两半合并成它最终写入的那一行。路径参数
+ * （`pathParams`）同理。
  */
 function draftDetail(d: DraftEndpoint): EndpointDetail {
   return {
@@ -241,6 +242,7 @@ function draftDetail(d: DraftEndpoint): EndpointDetail {
     baseUrlDefinitionId: d.baseUrlDefinitionId,
     baseUrlOverride: d.baseUrlOverride,
     params: [],
+    pathParams: [],
     headers: [],
     body: { mode: 'none', content: '' },
     auth: d.auth,

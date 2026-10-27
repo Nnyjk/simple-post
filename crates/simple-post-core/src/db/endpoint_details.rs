@@ -18,8 +18,9 @@ use crate::error::AppError;
 use super::json_col_err;
 
 const COLUMNS: &str = "node_id, method, url, environment_id, base_url_definition_id, \
-                       base_url_override, params_json, headers_json, body_json, auth_json, \
-                       docs, notes, tags_json, pre_request_script, test_script";
+                       base_url_override, params_json, path_params_json, headers_json, \
+                       body_json, auth_json, docs, notes, tags_json, pre_request_script, \
+                       test_script";
 
 // 读。
 
@@ -66,8 +67,9 @@ pub fn list_by_node_ids(
 pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<EndpointDetail>, AppError> {
     // 列清单在此写出而非复用 COLUMNS：这些列要用 `e` 别名限定，`nodes` 才能 join 进来。
     let sql = "SELECT e.node_id, e.method, e.url, e.environment_id, e.base_url_definition_id, \
-                  e.base_url_override, e.params_json, e.headers_json, e.body_json, e.auth_json, \
-                  e.docs, e.notes, e.tags_json, e.pre_request_script, e.test_script \
+                  e.base_url_override, e.params_json, e.path_params_json, e.headers_json, \
+                  e.body_json, e.auth_json, e.docs, e.notes, e.tags_json, e.pre_request_script, \
+                  e.test_script \
          FROM endpoint_details e \
          JOIN nodes n ON n.id = e.node_id \
          WHERE n.root_id = ?1 AND n.type = 'endpoint' \
@@ -87,9 +89,9 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
     conn.execute(
         "INSERT INTO endpoint_details \
          (node_id, method, url, environment_id, base_url_definition_id, \
-          base_url_override, params_json, headers_json, body_json, auth_json, \
-          docs, notes, tags_json, pre_request_script, test_script) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+          base_url_override, params_json, path_params_json, headers_json, body_json, \
+          auth_json, docs, notes, tags_json, pre_request_script, test_script) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             d.node_id,
             d.method.as_str(),
@@ -98,6 +100,7 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
             d.base_url_definition_id,
             d.base_url_override,
             serde_json::to_string(&d.params)?,
+            serde_json::to_string(&d.path_params)?,
             serde_json::to_string(&d.headers)?,
             serde_json::to_string(&d.body)?,
             serde_json::to_string(&d.auth)?,
@@ -148,6 +151,12 @@ pub fn update(
     if let Some(p) = &patch.params {
         sets.push(format!("params_json = ?{}", binds.len() + 1));
         binds.push(json(&p)?);
+    }
+    if let Some(p) = &patch.path_params {
+        sets.push(format!("path_params_json = ?{}", binds.len() + 1));
+        // `Some(None)` 是「清空」。这一列非空（`NOT NULL DEFAULT '[]'`），故清空写成
+        // 空列表，而不是 NULL。
+        binds.push(json(&p.as_deref().unwrap_or(&[]))?);
     }
     if let Some(h) = &patch.headers {
         sets.push(format!("headers_json = ?{}", binds.len() + 1));
@@ -228,10 +237,11 @@ fn optional_text(value: &Option<String>) -> rusqlite::types::Value {
 fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
     let method_str: String = row.get(1)?;
     let params_json: String = row.get(6)?;
-    let headers_json: String = row.get(7)?;
-    let body_json: String = row.get(8)?;
-    let auth_json: String = row.get(9)?;
-    let tags_json: String = row.get(12)?;
+    let path_params_json: String = row.get(7)?;
+    let headers_json: String = row.get(8)?;
+    let body_json: String = row.get(9)?;
+    let auth_json: String = row.get(10)?;
+    let tags_json: String = row.get(13)?;
 
     // 一个存下来的动词若被解析器拒绝，本会是一个 `AppError::Validation` 从一个欠调用方一个
     // `rusqlite::Error` 的行映射器里逃出去；重新包一层，好让失败指明列名。
@@ -252,18 +262,20 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
         base_url_override: row.get(5)?,
         params: serde_json::from_str::<Vec<KeyValue>>(&params_json)
             .map_err(|e| json_col_err("params_json", e))?,
+        path_params: serde_json::from_str::<Vec<KeyValue>>(&path_params_json)
+            .map_err(|e| json_col_err("path_params_json", e))?,
         headers: serde_json::from_str::<Vec<KeyValue>>(&headers_json)
             .map_err(|e| json_col_err("headers_json", e))?,
         body: serde_json::from_str::<RequestBody>(&body_json)
             .map_err(|e| json_col_err("body_json", e))?,
         auth: serde_json::from_str::<AuthConfig>(&auth_json)
             .map_err(|e| json_col_err("auth_json", e))?,
-        docs: row.get(10)?,
-        notes: row.get(11)?,
+        docs: row.get(11)?,
+        notes: row.get(12)?,
         tags: serde_json::from_str::<Vec<String>>(&tags_json)
             .map_err(|e| json_col_err("tags_json", e))?,
-        pre_request_script: row.get(13)?,
-        test_script: row.get(14)?,
+        pre_request_script: row.get(14)?,
+        test_script: row.get(15)?,
     })
 }
 

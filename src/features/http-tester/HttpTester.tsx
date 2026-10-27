@@ -18,9 +18,11 @@ import { RequestTabPanels } from './RequestTabPanels';
 import { useEndpointContext } from './useEndpointContext';
 import { EnvVarPicker, type VarEntry } from './EnvVarPicker';
 import { listDynamicNames } from '@/lib/dynamic-vars';
+import { pathPlaceholders } from '@/lib/path-params';
 
 const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
   { id: 'params', label: 'Params' },
+  { id: 'path', label: '路径参数' },
   { id: 'headers', label: 'Headers' },
   { id: 'body', label: 'Body' },
   { id: 'auth', label: 'Auth' },
@@ -35,7 +37,7 @@ const TABS: { id: TabId; label: string; disabled?: boolean }[] = [
 const EMPTY_BODY: RequestBody = { mode: 'none', content: '' };
 const EMPTY_AUTH: AuthConfig = { kind: 'none' };
 
-type TabId = 'params' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
+type TabId = 'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
 
 export function HttpTester() {
   // 接口是 `ResourceNode`（身份 + 位置），请求配置是独立的 `EndpointDetail` 行；
@@ -119,6 +121,7 @@ export function HttpTester() {
   const effective = useMemo(
     () => ({
       params: draft?.params ?? detail?.params ?? [],
+      pathParams: draft?.pathParams ?? detail?.pathParams ?? [],
       headers: draft?.headers ?? detail?.headers ?? [],
       body: draft?.body ?? detail?.body ?? EMPTY_BODY,
       auth: draft?.auth ?? detail?.auth ?? EMPTY_AUTH,
@@ -139,6 +142,11 @@ export function HttpTester() {
     },
     [endpoint, setEndpointDraft],
   );
+
+  // URL 路径里有几个占位符 —— 路径参数那一页要列几行。
+  // 这个 useMemo 必须在提前返回**之上**：条件调用的 hook 会让 React 在切换接口时
+  // 抛「Rendered fewer hooks than expected」。
+  const pathParamCount = useMemo(() => pathPlaceholders(liveUrl).length, [liveUrl]);
 
   // ---------------------------------------------------------------------------
   // 草稿的文档字段 vs 已保存节点的
@@ -206,6 +214,22 @@ export function HttpTester() {
   // 动作，通过即清除。刻意留在本组件：Params / Body / Auth 之间切换时它存活
   // （BodyEditor 会重挂载而它不会），下次发送/保存重新检查当时的界面内容。
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  /**
+   * 上一次发送是不是被路径参数缺值拦下了。
+   *
+   * 只记「拦下过」这一件事，缺哪几个由**当下**的请求状态算出来：用户补上值之后提示
+   * 立刻消失，改 URL 让占位符对不上时提示也跟着改。另存一份文案就会留下过期提示。
+   */
+  const [sendBlocked, setSendBlocked] = useState(false);
+
+  /**
+   * 路径参数的闸门开了还是关了。闸门关着时切到路径参数那一页，用户一眼看得见缺哪个。
+   */
+  const handlePathParamGate = useCallback((missing: string[]) => {
+    setSendBlocked(missing.length > 0);
+    if (missing.length > 0) setTab('path');
+  }, []);
 
   /**
    * 跑校验，钉住或清除徽标，并回报是否通过。
@@ -344,6 +368,7 @@ export function HttpTester() {
       baseUrl: resolved.baseUrl,
       url: liveUrl,
       params: effective.params,
+      pathParams: effective.pathParams,
       headers: effective.headers,
       body: effective.body,
       auth: effective.auth,
@@ -382,6 +407,7 @@ export function HttpTester() {
         urlPath: liveUrl,
         baseUrl: resolved.baseUrl,
         params: effective.params,
+        pathParams: effective.pathParams,
         headers: effective.headers,
         body: effective.body,
         auth: effective.auth,
@@ -447,6 +473,7 @@ export function HttpTester() {
     testScript: effective.testScript,
     settings: requestSettings,
     runValidation,
+    onPathParamGate: handlePathParamGate,
     setRequestPending,
     setLastResponse,
     setLastScriptOutcome,
@@ -476,10 +503,30 @@ export function HttpTester() {
   const hasAuth = effective.auth.kind !== 'none';
   const hasScript = Boolean(effective.preRequestScript || effective.testScript);
 
+  // 路径参数缺值的提示。文案按当下的请求状态算，闸门开着（没被拦下）时没有提示。
+  //
+  // 缺值可能来自两处：端点自己的路径（「路径参数」那一页有对应的行可填），或前置
+  // URL（服务地址）。后者在那一页没有行可填，提示必须说清去哪儿改 —— 否则用户被
+  // 拦在一扇打不开的门外面。
+  const ownPathParams = pathPlaceholders(liveUrl);
+  const basePathParams = pathPlaceholders(resolved.baseUrl ?? '');
+  const missingInBase = prepared.missingPathParams.filter(
+    (n) => !ownPathParams.includes(n) && basePathParams.includes(n),
+  );
+  const missingInPath = prepared.missingPathParams.filter((n) => !missingInBase.includes(n));
+  const pathParamError =
+    sendBlocked && prepared.missingPathParams.length > 0
+      ? missingInBase.length > 0
+        ? `前置 URL 里的 ${missingInBase.join('、')} 不是端点自己的路径参数，请把前置 URL 改成 {{变量}} 或直接写死`
+        : `路径参数 ${missingInPath.join('、')} 没有填值，填好才能发送`
+      : null;
+
   const tabItems = TABS.map((t) => {
     let badge: React.ReactNode = null;
     if (t.id === 'params' && enabledParams)
       badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledParams}</span>;
+    if (t.id === 'path' && pathParamCount)
+      badge = <span className="rounded bg-muted px-1 text-[10px]">{pathParamCount}</span>;
     if (t.id === 'headers' && enabledHeaders)
       badge = <span className="rounded bg-muted px-1 text-[10px]">{enabledHeaders}</span>;
     if (t.id === 'body' && hasBody)
@@ -601,6 +648,8 @@ export function HttpTester() {
         <RequestTabPanels
           tab={tab}
           params={effective.params}
+          pathParams={effective.pathParams}
+          url={liveUrl}
           headers={effective.headers}
           body={effective.body}
           auth={effective.auth}
@@ -609,6 +658,7 @@ export function HttpTester() {
           testScript={effective.testScript}
           headerSuggestions={headerSuggestions}
           validationError={validationError}
+          pathParamError={pathParamError}
           patchDraft={patchDraft}
           onFormatResult={(result) => setValidationError(result.ok ? null : result.error)}
         />

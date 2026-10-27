@@ -26,23 +26,6 @@ use simple_post_core::spec::upsert::EndpointSpec;
 use super::endpoint::oauth2_config_schema;
 use simple_post_core::spec::input::{AUTH_TYPE_VALUES, BODY_MODE_VALUES};
 
-/// 一行键值对的 JSON Schema。
-fn key_value_schema() -> Value {
-    json!({
-        "type": "object",
-        "description": "One key/value row. `id` is optional bookkeeping (minted when omitted); `enabled` defaults to true.",
-        "properties": {
-            "key": { "type": "string" },
-            "value": { "type": "string" },
-            "enabled": { "type": "boolean" },
-            "description": { "type": "string" },
-            "id": { "type": "string" }
-        },
-        "required": ["key", "value"],
-        "additionalProperties": false
-    })
-}
-
 /// 请求体的 JSON Schema。
 fn body_schema() -> Value {
     json!({
@@ -157,6 +140,11 @@ fn endpoint_schema() -> Value {
                 "description": "Query-string parameters.",
                 "items": { "$ref": "#/$defs/keyValue" }
             },
+            "path_params": {
+                "type": "array",
+                "description": "Values for the `{placeholder}` segments in the url. They are substituted into the path itself, not the query string; each key must match a placeholder name.",
+                "items": { "$ref": "#/$defs/keyValue" }
+            },
             "headers": {
                 "type": "array",
                 "description": "Request headers.",
@@ -232,7 +220,7 @@ fn spec_schema() -> Value {
                 "enum": ["reuse", "error", "duplicate", "update"],
                 "description": "What to do when an endpoint with the same name, method and url already exists under that parent. \"reuse\" (default) returns it unchanged and writes nothing; \"error\" refuses; \"duplicate\" creates a second one; \"update\" overwrites the fields this spec names. It governs the endpoint only — the environment and the service are always applied."            }        },
         "$defs": {
-            "keyValue": key_value_schema()
+            "keyValue": crate::mcp::key_value::key_value_schema()
         },
         "required": ["project_id", "endpoint"],
         "additionalProperties": false,

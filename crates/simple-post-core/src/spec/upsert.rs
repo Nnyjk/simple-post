@@ -162,6 +162,12 @@ pub struct EndpointDefinition {
     pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub params: Option<Vec<KeyValueInput>>,
+    /// 路径参数（`/api/orders/{id}` 的 `id`）与它们各自的值。
+    ///
+    /// 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，路径参数要被
+    /// 替换进路径本身。
+    #[serde(default)]
+    pub path_params: Option<Vec<KeyValueInput>>,
     #[serde(default)]
     pub headers: Option<Vec<KeyValueInput>>,
     /// 请求体。`content` 是这一次发出去的载荷，`schema` 是文档里那份参数定义。
@@ -731,6 +737,7 @@ fn upsert_endpoint_of(
         base_url_definition_id,
         base_url_override: def.base_url_override.clone(),
         params: coerce_key_values(def.params.clone().unwrap_or_default()),
+        path_params: coerce_key_values(def.path_params.clone().unwrap_or_default()),
         headers: coerce_key_values(def.headers.clone().unwrap_or_default()),
         body,
         auth,
@@ -785,6 +792,12 @@ fn apply_endpoint_patch(
         base_url_definition_id: base_url_definition_id.clone().map(Some),
         base_url_override: def.base_url_override.clone().map(Some),
         params: def.params.clone().map(coerce_key_values),
+        // 路径参数走 `double_option`：缺席 = 不动，`null` = 清空，设值 = 写入。
+        // 规格点名了它就写它，规格没点名就一个字段都不碰。
+        path_params: def
+            .path_params
+            .clone()
+            .map(|rows| Some(coerce_key_values(rows))),
         headers: def.headers.clone().map(coerce_key_values),
         body: def.body.as_ref().map(|_| body.clone()),
         auth: def.auth.as_ref().map(|_| auth.clone()),

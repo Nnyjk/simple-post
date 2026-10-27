@@ -125,9 +125,14 @@ fn every_capability_row_names_a_registered_tool() {
 /// **上限怎么算出来的。** 早先这里用「字符数 ÷ 3」估 token 数，于是 39 642 字符
 /// 被说成 13 214 tokens —— 那个数高估了六成：JSON 的标点碎，一个 token 覆盖四个
 /// 多字符。实测（`tiktoken` 的 `cl100k_base`，对**紧凑** JSON，即真正上线的形状）
-/// 是 38 081 字符 ≈ **8 057 tokens**，比值约 **4.73 字符 / token**。
-/// 故这个上限按字符写：**38 800 字符 ≈ 8 200 tokens**，留一点余量给下一个工具。
-const TOOLS_LIST_BUDGET_CHARS: usize = 38_800;
+/// 是 40 702 字符 ≈ **8 652 tokens**，比值约 **4.70 字符 / token**。
+/// 故这个上限按字符写：**41 400 字符 ≈ 8 800 tokens**，留一点余量给下一个工具。
+///
+/// 上限第一次重标定，是因为路径参数（`path_params`）进了三个工具的契约：
+/// `endpoint_create`、`endpoint_update` 与 `spec_upsert` 各自多出一段说明，而
+/// `api_call_endpoint` 的 `overrides` 也要写清那几个字段。契约变大，体积就变大 ——
+/// 这时候该做的是把新增的那几段写短，而不是砍掉契约本身。
+const TOOLS_LIST_BUDGET_CHARS: usize = 41_400;
 
 #[test]
 fn the_tools_list_payload_stays_under_its_budget() {

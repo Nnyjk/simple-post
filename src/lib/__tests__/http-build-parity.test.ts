@@ -27,6 +27,10 @@ interface ParityCase {
      * 「哪些变量没解析出来」。
      */
     missingVars?: string[];
+    /**
+     * URL 路径里没取到值的占位符名。比的是**集合**而非顺序，与未解析变量同一条纪律。
+     */
+    missingPathParams?: string[];
   };
 }
 
@@ -69,6 +73,11 @@ describe('prepareRequest 与 Rust 的 resolve_endpoint 产出一致', () => {
         [...prepared.missingVars].sort(),
         [...(testCase.expected.missingVars ?? [])].sort(),
         '未解析的变量',
+      );
+      assert.deepEqual(
+        [...prepared.missingPathParams].sort(),
+        [...(testCase.expected.missingPathParams ?? [])].sort(),
+        '缺值的路径参数',
       );
     });
   }

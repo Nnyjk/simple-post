@@ -26,6 +26,14 @@ export interface DynamicTemplateParts {
   /** 端点的 path。 */
   url: string;
   params: KeyValue[];
+  /**
+   * URL 路径里的占位符与它们各自的值。它们替换进路径本身。
+   *
+   * 值里的 `{{var}}` 照样会被替换（见 `prepareRequest`），故它们里的标记同样算被
+   * 引用 —— 不扫的话，只在路径参数值里出现的动态变量永远不会被取数，替换后仍是
+   * 字面量 `{{name}}`。
+   */
+  pathParams?: KeyValue[];
   headers: KeyValue[];
   body: RequestBody;
   auth: AuthConfig;
@@ -58,9 +66,10 @@ export function mergePool(
 /**
  * 模板里出现的全部 `{{name}}` 名字，按首次出现排序。
  *
- * 只扫**会被替换**的字段：启用的且 key 非空的参数值、启用的且 key 非空的 header 值、
- * body 内容、以及鉴权里那三种方案（bearer / basic / apikey）。OAuth2 的配置字段不被变量
- * 替换，故不在扫描范围内——扫了会让一条根本没被用到的定义去取数。
+ * 只扫**会被替换**的字段：启用的且 key 非空的参数值、启用的且 key 非空的路径参数值、
+ * 启用的且 key 非空的 header 值、body 内容、以及鉴权里那三种方案（bearer / basic /
+ * apikey）。OAuth2 的配置字段不被变量替换，故不在扫描范围内——扫了会让一条根本没被
+ * 用到的定义去取数。
  */
 export function listDynamicNames(parts: DynamicTemplateParts): string[] {
   const out: string[] = [];
@@ -76,6 +85,10 @@ export function listDynamicNames(parts: DynamicTemplateParts): string[] {
   add(parts.baseUrl);
   add(parts.url);
   for (const param of parts.params) {
+    if (!param.enabled || !param.key) continue;
+    add(param.value);
+  }
+  for (const param of parts.pathParams ?? []) {
     if (!param.enabled || !param.key) continue;
     add(param.value);
   }

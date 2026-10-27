@@ -118,6 +118,7 @@ fn seed(dir: &std::path::Path, api_url: &str) {
         base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
+        path_params: vec![],
         headers: vec![],
         body: RequestBody::default(),
         auth: AuthConfig::default(),

@@ -71,6 +71,7 @@ fn detail(node_id: &str) -> EndpointDetail {
         base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
+        path_params: vec![],
         headers: vec![],
         body: RequestBody::default(),
         auth: AuthConfig::default(),
@@ -98,6 +99,7 @@ fn json_columns_round_trip() {
         "baseUrlDefinitionId": "def1",
         "baseUrlOverride": "https://mirror.example",
         "params": [{"id":"k1","key":"page","value":"1","enabled":true,"description":"分页"}],
+        "pathParams": [{"id":"k3","key":"id","value":"42","enabled":true}],
         "headers": [{"id":"k2","key":"X-Trace","value":"on","enabled":true}],
         "body": {"mode":"json","content":"{\"a\":1}","schema":"{}"},
         "auth": {"kind":"apikey","apikey":{"key":"X-API-Key","value":"{{apiKey}}","inLocation":"query"}},
@@ -122,6 +124,9 @@ fn json_columns_round_trip() {
     assert_eq!(got.params.len(), 1);
     assert_eq!(got.params[0].key, "page");
     assert_eq!(got.params[0].description.as_deref(), Some("分页"));
+    assert_eq!(got.path_params.len(), 1);
+    assert_eq!(got.path_params[0].key, "id");
+    assert_eq!(got.path_params[0].value, "42");
     assert_eq!(got.headers[0].key, "X-Trace");
     assert_eq!(got.body.content, r#"{"a":1}"#);
     assert_eq!(got.body.schema.as_deref(), Some("{}"));
@@ -241,6 +246,64 @@ fn absent_and_explicit_null_differ() {
             .docs
             .as_deref(),
         Some("keep me")
+    );
+}
+
+/// 路径参数这一列的三态：缺席 = 不动，`null` = 清空，写值 = 写入。
+///
+/// `path_params_json` 是 `NOT NULL` 的列，故「清空」写成空列表而不是 NULL。
+#[test]
+fn the_path_params_column_distinguishes_absent_from_null() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            serde_json::from_str(
+                r#"{"pathParams":[{"id":"k1","key":"id","value":"42","enabled":true}]}"#,
+            )
+            .unwrap(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "e1"))
+            .unwrap()
+            .path_params
+            .len(),
+        1
+    );
+
+    // 缺席：这一列不动。
+    db::with_tx(&pool, |c| {
+        update(c, "e1", serde_json::from_str(r#"{"url": "/x"}"#).unwrap())
+    })
+    .unwrap();
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "e1"))
+            .unwrap()
+            .path_params
+            .len(),
+        1,
+        "缺席的键不该动这一列"
+    );
+
+    // `null`：清空。内建的 `Option<Vec<KeyValue>>` 把缺席与 `null` 折叠成一件事，
+    // 于是清空请求被当成「别动」而静默失效。
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            serde_json::from_str(r#"{"pathParams":null}"#).unwrap(),
+        )
+    })
+    .unwrap();
+    assert!(
+        db::with_conn(&pool, |c| get(c, "e1"))
+            .unwrap()
+            .path_params
+            .is_empty(),
+        "显式的 null 应当清空这一列"
     );
 }
 

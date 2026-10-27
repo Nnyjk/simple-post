@@ -205,6 +205,14 @@ export interface EndpointDetail {
    */
   baseUrlOverride?: string | null;
   params: KeyValue[];
+  /**
+   * URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
+   *
+   * 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，
+   * 路径参数要被替换进路径本身。混在一份列表里，「这个参数进哪儿」就取决于
+   * URL 文本，改一个占位符的名字会静默改变一个参数的归属。
+   */
+  pathParams?: KeyValue[];
   headers: KeyValue[];
   body: RequestBody;
   auth: AuthConfig;

@@ -31,6 +31,7 @@ export function useRequestActions({
   testScript,
   settings,
   runValidation,
+  onPathParamGate,
   setRequestPending,
   setLastResponse,
   setLastScriptOutcome,
@@ -65,6 +66,13 @@ export function useRequestActions({
   settings: RequestSettings;
   /** 跑校验并回报是否通过；失败时它已把界面切到出问题的页签。 */
   runValidation: () => boolean;
+  /**
+   * 路径参数的闸门开了还是关了。
+   *
+   * 收到非空名单 = 闸门关了（缺那几个值，发送已经停下）；收到空名单 = 闸门开了。
+   * 界面据此显示提示并切到路径参数那一页。
+   */
+  onPathParamGate: (missing: string[]) => void;
   setRequestPending: (v: boolean) => void;
   setLastResponse: (resp: ApiResponse | null) => void;
   /** 记下这次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。 */
@@ -99,6 +107,16 @@ export function useRequestActions({
       if (dynamicNames.length > 0) {
         const { values } = await resolveDynamicVariables(dynamicNames);
         request = prepareWithDynamic(values);
+      }
+      // 路径参数缺值就不发：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
+      // 含义不明的 404，而用户看不出是自己漏填了一个值。
+      //
+      // 这一步在动态变量解析**之后**：路径参数的值可能就是一个动态变量，它取不到值时
+      // 这个路径参数同样算「还没准备好」。
+      const missingPathParams = request.missingPathParams;
+      onPathParamGate(missingPathParams);
+      if (missingPathParams.length > 0) {
+        return;
       }
       // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
       // 这正是未保存的草稿也能发送的原因：没有 `endpointId` 要查，也没有东西要先持久化。
@@ -143,6 +161,7 @@ export function useRequestActions({
     endpointId,
     runValidation,
     inFlightRef,
+    onPathParamGate,
     prepared,
     prepareWithDynamic,
     dynamicNames,

@@ -133,6 +133,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
             "name",
             "notes",
             "params",
+            "path_params",
             "pre_request_script",
             "sort_order",
             "tags",

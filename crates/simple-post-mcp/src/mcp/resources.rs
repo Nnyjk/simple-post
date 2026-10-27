@@ -77,6 +77,7 @@ fn guide() -> Value {
                     "method": "GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS",
                     "url": "<路径，如 /api/orders；host 在发送时由环境的服务 URL 决定>",
                     "params": [{ "key": "<参数名>", "value": "<值>", "enabled": true }],
+                    "path_params": [{ "key": "<路径占位符名，如 id>", "value": "<值>", "enabled": true }],
                     "headers": [{ "key": "<头名>", "value": "<值>", "enabled": true }],
                     "body": {
                         "mode": "none | json | form | multipart | raw",
@@ -185,6 +186,7 @@ fn guide() -> Value {
             "body_content is the payload that goes on the wire; body_schema is the documented parameter definition. They are different things — a JSON Schema written into body_content is rejected, and the error names body_schema.",
             "body_mode says how body_content is framed: \"none\" sends no body, \"raw\" sends the text verbatim, \"json\" sends a JSON instance, \"form\" sends urlencoded text, and \"multipart\" sends a JSON array of parts — each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string}, where contentType defaults to application/octet-stream for a part that has a filename.",
             "A {{var}} in the url, params, headers, body or auth is replaced from the environment's variables. A name that is not there is listed in missing.",
+            "Path parameters are separate from query parameters: `params` goes into the query string, `path_params` fills the `{placeholder}` segments in the path itself, and the key of each path parameter must match a placeholder name.",
             "Dynamic variables are global and their values are resolved before substitution, so a name that is a dynamic variable is not reported in missing.",
             "An endpoint without a collection is fine: give module_id only and it sits directly under the module.",
             "endpoint_update changes only the fields its patch names. Use it to change an existing endpoint; endpoint_create with if_exists=reuse never writes anything.",

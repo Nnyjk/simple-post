@@ -30,6 +30,22 @@ fn endpoint_patch_distinguishes_absent_from_null() {
 }
 
 #[test]
+fn the_path_params_patch_distinguishes_absent_from_null() {
+    // `pathParams` 缺席 → 该列不动。
+    let p: EndpointDetailPatch = serde_json::from_value(json!({ "url": "/renamed" })).unwrap();
+    assert!(p.path_params.is_none());
+
+    // `pathParams: null` → Some(None)：清空这一列。内建的 `Option<Vec<KeyValue>>` 把
+    // 缺席与 `null` 折叠成同一件事，于是清空请求被当成「别动」而静默失效。
+    let p: EndpointDetailPatch = serde_json::from_value(json!({ "pathParams": null })).unwrap();
+    assert_eq!(p.path_params, Some(None));
+
+    // `pathParams: []` → Some(Some([]))：写入空列表。
+    let p: EndpointDetailPatch = serde_json::from_value(json!({ "pathParams": [] })).unwrap();
+    assert_eq!(p.path_params, Some(Some(vec![])));
+}
+
+#[test]
 fn node_patch_distinguishes_absent_from_null() {
     // `parentId` 缺席 → 节点原地不动
     let p: ResourceNodePatch = serde_json::from_value(json!({ "name": "renamed" })).unwrap();
@@ -116,6 +132,11 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
         ..Default::default()
     };
     assert!(!d.is_empty(), "EndpointDetailPatch::headers");
+    let d = EndpointDetailPatch {
+        path_params: Some(Some(vec![])),
+        ..Default::default()
+    };
+    assert!(!d.is_empty(), "EndpointDetailPatch::path_params");
     let d = EndpointDetailPatch {
         body: Some(RequestBody::default()),
         ..Default::default()

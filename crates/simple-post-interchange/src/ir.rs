@@ -152,6 +152,11 @@ pub struct IrEndpoint {
     pub path: String,
     #[serde(default)]
     pub params: Vec<KeyValue>,
+    /// URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
+    ///
+    /// 与 `params` 分开：`params` 进查询串，路径参数要替换进路径本身。
+    #[serde(default)]
+    pub path_params: Vec<KeyValue>,
     #[serde(default)]
     pub headers: Vec<KeyValue>,
     #[serde(default)]

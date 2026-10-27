@@ -301,6 +301,7 @@ fn seed_an_endpoint_that_uses_sns(dir: &std::path::Path) {
             base_url_definition_id: None,
             base_url_override: None,
             params: vec![],
+            path_params: vec![],
             headers: vec![],
             body: RequestBody {
                 mode: BodyMode::Json,

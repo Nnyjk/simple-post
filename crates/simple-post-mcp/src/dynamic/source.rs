@@ -184,6 +184,7 @@ async fn fetch_from_inline(
         // 空串 = 自定义模式但不加前缀：URL 字段本身就是完整地址。
         base_url_override: Some(String::new()),
         params: spec.params,
+        path_params: vec![],
         headers: spec.headers,
         body: spec.body,
         auth: spec.auth,

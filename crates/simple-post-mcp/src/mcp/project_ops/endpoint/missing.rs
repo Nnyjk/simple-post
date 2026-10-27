@@ -74,6 +74,8 @@ pub(crate) fn missing_pieces(
         base_url: &base_url,
         url: &detail.url,
         params: &detail.params,
+        // 路径参数值里的 `{{var}}` 照样会被替换，故它们同样参与扫描。
+        path_params: &detail.path_params,
         headers: &detail.headers,
         body: &detail.body,
         auth: &detail.auth,

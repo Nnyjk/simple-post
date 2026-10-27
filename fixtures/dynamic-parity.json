@@ -201,6 +201,45 @@
         "auth": { "kind": "none" }
       },
       "expected": []
+    },
+    {
+      "name": "路径参数值里的标记也算被引用",
+      "parts": {
+        "baseUrl": "",
+        "url": "/users/{id}",
+        "params": [],
+        "pathParams": [{ "id": "pp1", "key": "id", "value": "{{pathParamVar}}", "enabled": true }],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": ["pathParamVar"]
+    },
+    {
+      "name": "未启用的路径参数不算被引用",
+      "parts": {
+        "baseUrl": "",
+        "url": "/users/{id}",
+        "params": [],
+        "pathParams": [{ "id": "pp1", "key": "id", "value": "{{offPathParam}}", "enabled": false }],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": []
+    },
+    {
+      "name": "key 为空的路径参数不算被引用",
+      "parts": {
+        "baseUrl": "",
+        "url": "/users/{id}",
+        "params": [],
+        "pathParams": [{ "id": "pp1", "key": "", "value": "{{emptyPathKey}}", "enabled": true }],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": []
     }
   ]
 }

@@ -34,7 +34,7 @@ fn patch_shape_hint(field: &str) -> String {
                      9110 token such as \"PROPFIND\")"
             .to_string(),
         "url" => "a string, e.g. \"/api/users/{id}\"".to_string(),
-        "params" | "headers" => "an array of objects shaped \
+        "params" | "headers" | "path_params" => "an array of objects shaped \
              {\"key\":\"<name>\",\"value\":\"<value>\",\"enabled\":true} \
              — note the field names are `key` and `value`, not `k`/`v`/`name`"
             .to_string(),

@@ -125,6 +125,7 @@ fn seed(st: &AppState, api_url: &str, stored: RequestBody) -> String {
         base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
+        path_params: vec![],
         headers: vec![],
         body: stored,
         auth: AuthConfig::default(),

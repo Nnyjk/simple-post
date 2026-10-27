@@ -76,6 +76,7 @@ pub fn resolve_endpoint_with(
     let mut eff_method = detail.method.clone();
     let mut eff_headers = detail.headers.clone();
     let mut eff_params = detail.params.clone();
+    let mut eff_path_params = detail.path_params.clone();
     let mut eff_body = detail.body.clone();
     let eff_auth = detail.auth.clone();
     // 调用方的选择压过端点自带的定义 —— 渲染进程未保存的 base URL 选择正是靠这条生效。
@@ -92,6 +93,9 @@ pub fn resolve_endpoint_with(
         }
         if let Some(p) = o.params.clone() {
             eff_params = p;
+        }
+        if let Some(p) = o.path_params.clone() {
+            eff_path_params = p;
         }
         if let Some(b) = o.body.clone() {
             eff_body = b;
@@ -132,6 +136,35 @@ pub fn resolve_endpoint_with(
         overrides.and_then(|o| o.module_id.as_deref()),
     );
     let joined = join_base_url(&base_url, &eff_url);
+
+    // ---- 路径参数：把 URL 路径里的 {占位符} 换成端点自己的值 ---------
+    // 替换发生在下面那趟 `{{var}}` 替换**之前**：路径参数的值要先编码，编码过的
+    // `{{var}}` 就再也认不出来了，故值里的变量在这一步就地解析。
+    //
+    // 值里仍有没解析出来的 `{{var}}` 时，这个路径参数按「还没准备好」处理（不替换、
+    // 计入缺值）：把 `%7B%7Btoken%7D%7D` 塞进路径，用户看不出缺的是哪个变量。
+    let mut path_values: Vec<(String, String)> = Vec::with_capacity(eff_path_params.len());
+    for name in simple_post_core::path_params::placeholders(&joined) {
+        let Some(p) = eff_path_params.iter().find(|p| p.enabled && p.key == name) else {
+            continue;
+        };
+        // 只有空白的值按「还没填」处理：界面上的「必填」与静态检查都是这么判的，
+        // 三处说法要一致。
+        if p.value.trim().is_empty() {
+            continue;
+        }
+        let r = resolve_template(&p.value, &vars);
+        for m in r.missing {
+            record_missing(&mut missing, &mut seen, m);
+        }
+        if !simple_post_core::template::list_missing_vars(&r.resolved).is_empty() {
+            continue;
+        }
+        path_values.push((name, r.resolved));
+    }
+    let (joined, missing_path_params) =
+        simple_post_core::path_params::substitute(&joined, &path_values);
+
     let url_r = resolve_template(&joined, &vars);
     for m in url_r.missing {
         record_missing(&mut missing, &mut seen, m);
@@ -184,5 +217,6 @@ pub fn resolve_endpoint_with(
         body_mode: eff_body.mode,
         auth: resolved_auth,
         missing_vars: missing,
+        missing_path_params,
     })
 }

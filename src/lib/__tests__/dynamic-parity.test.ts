@@ -34,6 +34,7 @@ interface ScanCase {
     baseUrl: string;
     url: string;
     params: KeyValue[];
+    pathParams?: KeyValue[];
     headers: KeyValue[];
     body: RequestBody;
     auth: AuthConfig;

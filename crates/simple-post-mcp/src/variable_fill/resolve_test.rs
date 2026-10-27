@@ -1,6 +1,8 @@
 //! `resolve_endpoint` 的拼接/替换顺序、baseUrl 优先级、body 与 query 的取舍。
 
-use simple_post_core::domain::{AuthConfig, AuthType, BodyMode, HttpMethod, KeyValue, RequestBody};
+use simple_post_core::domain::{
+    AuthConfig, AuthType, BodyMode, EndpointDetail, HttpMethod, KeyValue, RequestBody,
+};
 
 use super::resolve::{resolve_endpoint, resolve_endpoint_with};
 use super::test_support::{
@@ -469,4 +471,92 @@ fn the_four_argument_form_behaves_as_before() {
     let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
     assert_eq!(r.url, "/x/{{a}}");
     assert_eq!(r.missing_vars, vec!["a".to_string()]);
+}
+
+// ---- 路径参数 -------------------------------------------------------
+//
+// URL 路径里的 `{占位符}` 取端点自己的路径参数：替换进路径本身，不进查询串。
+
+/// 一个带路径参数的端点。
+fn endpoint_with_path_param(url: &str, key: &str, value: &str) -> EndpointDetail {
+    let mut ep = minimal_endpoint();
+    ep.url = url.into();
+    ep.path_params = vec![KeyValue {
+        id: "pp1".into(),
+        key: key.into(),
+        value: value.into(),
+        enabled: true,
+        description: None,
+    }];
+    ep
+}
+
+#[test]
+fn resolve_endpoint_substitutes_a_path_parameter_into_the_path() {
+    let mut env = empty_env();
+    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    let mut ep = endpoint_with_path_param("/users/{id}", "id", "42");
+    ep.base_url_definition_id = Some("data".into());
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "https://api.example.com/users/42");
+    assert!(r.missing_path_params.is_empty());
+}
+
+#[test]
+fn resolve_endpoint_reports_a_path_parameter_without_a_value() {
+    // 缺值的占位符原样留在 URL 里，并被报出来 —— 发送那侧据此拦下请求。
+    let mut env = empty_env();
+    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    let mut ep = minimal_endpoint();
+    ep.url = "/users/{id}".into();
+    ep.base_url_definition_id = Some("data".into());
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "https://api.example.com/users/{id}");
+    assert_eq!(r.missing_path_params, vec!["id".to_string()]);
+}
+
+#[test]
+fn resolve_endpoint_encodes_a_path_parameter_value() {
+    // 与查询参数同一套字符集：空格是 %20，斜杠是 %2F。
+    let mut env = empty_env();
+    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    let mut ep = endpoint_with_path_param("/files/{name}", "name", "a b/c");
+    ep.base_url_definition_id = Some("data".into());
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "https://api.example.com/files/a%20b%2Fc");
+}
+
+#[test]
+fn resolve_endpoint_keeps_a_query_parameter_out_of_the_path() {
+    // 同名的查询参数仍然进查询串：路径参数与查询参数是两份数据。
+    let mut env = empty_env();
+    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    let mut ep = endpoint_with_path_param("/users/{id}", "id", "42");
+    ep.base_url_definition_id = Some("data".into());
+    ep.params = vec![KeyValue {
+        id: "p1".into(),
+        key: "id".into(),
+        value: "7".into(),
+        enabled: true,
+        description: None,
+    }];
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "https://api.example.com/users/42?id=7");
+}
+
+#[test]
+fn resolve_endpoint_treats_an_unresolved_variable_in_a_path_parameter_as_missing() {
+    // 值里的 `{{var}}` 解析不出来时，这个路径参数算「还没准备好」：
+    // 编码过的 `%7B%7B…%7D%7D` 塞进路径，用户看不出缺的是哪个变量。
+    let env = empty_env();
+    let ep = endpoint_with_path_param("/users/{id}", "id", "{{uid}}");
+    let project = project_with_defs();
+    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    assert_eq!(r.url, "/users/{id}");
+    assert_eq!(r.missing_path_params, vec!["id".to_string()]);
+    assert_eq!(r.missing_vars, vec!["uid".to_string()]);
 }
