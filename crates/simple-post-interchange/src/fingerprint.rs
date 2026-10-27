@@ -108,6 +108,13 @@ impl RequestIdentity {
             eat(b"\n");
             eat(q.as_bytes());
         }
+        // 路径参数的值同样要算进去。`path` 里留着 `{id}` 这个占位符，两个 `/users/{id}`
+        // 只差 id 的值时，路径文本一模一样 —— 不把值算进去，这两个请求就得到同一个
+        // 指纹，导入时第二个会被当成重复而跳过。那是丢请求，不是去重。
+        for p in &self.path_params {
+            eat(b"\n");
+            eat(p.as_bytes());
+        }
         eat(b"\n");
         eat(self.body.as_bytes());
         format!("{hash:032x}")[..16].to_string()

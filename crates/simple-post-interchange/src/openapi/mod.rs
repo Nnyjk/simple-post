@@ -193,6 +193,9 @@ fn parameters(
         }));
     }
 
+    // 同一个路径参数名只能写一条：OpenAPI 要求 `(name, in)` 唯一，重复的条目会让
+    // 文档不合规。留下的是第一条，被丢的那条要**说出来**——不说是静默丢弃。
+    let mut written_paths: BTreeSet<&str> = BTreeSet::new();
     for p in ep.path_params.iter().filter(|p| p.enabled) {
         // 只写路径模板里真的存在的占位符。OpenAPI 规定 `in: path` 的参数名必须对应
         // 路径字段里的一个模板表达式，故写一个路径里没有的参数会让文档不合规，
@@ -208,6 +211,16 @@ fn parameters(
                         "路径参数 {} 在当前路径里没有对应的占位符，没有写进文档",
                         p.key
                     ),
+                )
+                .dropping(format!("路径参数 {}", p.key)),
+            );
+            continue;
+        }
+        if !written_paths.insert(p.key.as_str()) {
+            diagnostics.push(
+                Diagnostic::info(
+                    pointer,
+                    "同一个路径参数出现了多次，OpenAPI 的参数名必须唯一，只写了第一条",
                 )
                 .dropping(format!("路径参数 {}", p.key)),
             );

@@ -144,6 +144,49 @@ fn a_disabled_param_does_not_count_but_a_differing_value_does() {
 }
 
 #[test]
+fn a_differing_path_param_value_makes_a_different_request() {
+    // `path` 里留着 `{id}` 这个占位符，两个请求只差 id 的值时路径文本一模一样。
+    // 不把路径参数的值算进指纹，第二个就会被当成重复而跳过 —— 那是丢请求，不是去重。
+    let mut first = fully_decorated_ep();
+    first.path = "/users/{id}".into();
+    first.path_params = vec![kv("id", "1")];
+
+    let mut second = first.clone();
+    second.path_params = vec![kv("id", "2")];
+
+    assert_ne!(
+        RequestIdentity::of_ir(&first).fingerprint(),
+        RequestIdentity::of_ir(&second).fingerprint(),
+        "路径参数的值不同就是不同的请求"
+    );
+
+    let mut set = FingerprintSet::new();
+    assert!(!set.seen(&RequestIdentity::of_ir(&first)));
+    assert!(
+        !set.seen(&RequestIdentity::of_ir(&second)),
+        "只差路径参数值的第二个请求不该被当成重复"
+    );
+}
+
+#[test]
+fn a_disabled_path_param_does_not_count() {
+    // 停用的路径参数不进请求，故它不该改变身份。
+    let mut base = fully_decorated_ep();
+    base.path = "/users/{id}".into();
+
+    let mut disabled = base.clone();
+    disabled.path_params = vec![KeyValue {
+        enabled: false,
+        ..kv("id", "1")
+    }];
+
+    assert_eq!(
+        RequestIdentity::of_ir(&base).fingerprint(),
+        RequestIdentity::of_ir(&disabled).fingerprint()
+    );
+}
+
+#[test]
 fn normalize_path_is_idempotent_and_keeps_case() {
     for raw in [
         "users",

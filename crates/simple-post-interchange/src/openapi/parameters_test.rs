@@ -121,6 +121,50 @@ fn a_path_parameter_without_a_placeholder_is_reported_as_dropped() {
     assert_eq!(infos[0].dropped.as_deref(), Some("路径参数 oldName"));
 }
 
+/// 同名的路径参数只能写一条，但被丢的那条要**说出来**。
+///
+/// OpenAPI 要求 `(name, in)` 唯一，重复的条目会让文档不合规；不说是静默丢弃。
+#[test]
+fn a_duplicated_path_parameter_is_written_once_and_reported() {
+    let ep = IrEndpoint {
+        path_params: vec![
+            KeyValue {
+                id: "k1".into(),
+                key: "id".into(),
+                value: "1".into(),
+                enabled: true,
+                description: None,
+            },
+            KeyValue {
+                id: "k2".into(),
+                key: "id".into(),
+                value: "2".into(),
+                enabled: true,
+                description: None,
+            },
+        ],
+        ..ep("单个用户", HttpMethod::Get, "/users/{id}")
+    };
+    let out = to_document(&ex_with(ep), DocFormat::Json).expect("导出应成功");
+    let doc: Value = serde_json::from_str(&out.content).expect("合法 JSON");
+
+    let params = doc["paths"]["/users/{id}"]["get"]["parameters"]
+        .as_array()
+        .expect("声明了参数");
+    assert_eq!(
+        params.iter().filter(|p| p["in"] == "path").count(),
+        1,
+        "同名的路径参数只写一条：{params:?}"
+    );
+    let infos: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == crate::diagnostics::Severity::Info)
+        .collect();
+    assert_eq!(infos.len(), 1, "{:?}", out.diagnostics);
+    assert_eq!(infos[0].dropped.as_deref(), Some("路径参数 id"));
+}
+
 #[test]
 fn a_query_parameter_stays_a_query_parameter() {
     // 查询参数与路径参数是**两份数据**：一个叫 `id` 的查询参数不因为路径里也有
