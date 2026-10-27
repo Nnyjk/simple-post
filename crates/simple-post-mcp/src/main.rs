@@ -4,8 +4,8 @@
 // `simple-post serve-web`。
 //
 // 用法：
-//   simple-post-mcp                                       # stdio to localhost:4224
-//   simple-post-mcp --url=http://B:4224 --password=<tok>  # cross-machine
+//   simple-post-mcp                                       # stdio to localhost:4173
+//   simple-post-mcp --url=http://B:4173 --password=<tok>  # cross-machine
 //   simple-post-mcp --transport=http --port=4333         # expose /mcp over HTTP
 //   simple-post-mcp --capability=read_only               # belt-and-suspenders filter
 //
@@ -33,7 +33,7 @@ struct Cli {
     #[arg(
         long,
         env = "SIMPLE_POST_WEB_URL",
-        default_value = "http://localhost:4224"
+        default_value = "http://localhost:4173"
     )]
     url: String,
 

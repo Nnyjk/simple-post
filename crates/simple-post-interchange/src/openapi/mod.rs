@@ -184,7 +184,7 @@ fn parameters(
     let mut out: Vec<Value> = Vec::new();
 
     for p in ep.params.iter().filter(|p| p.enabled) {
-        // 值的实际形态不猜：启用即视为必填，schema 一律按 string 写。
+        // 导出器不猜值的实际形态：启用即视为必填，schema 一律按 string 写。
         out.push(json!({
             "name": p.key,
             "in": "query",
@@ -194,14 +194,14 @@ fn parameters(
     }
 
     // 同一个路径参数名只能写一条：OpenAPI 要求 `(name, in)` 唯一，重复的条目会让
-    // 文档不合规。留下的是第一条，被丢的那条要**说出来**——不说是静默丢弃。
+    // 文档不合规。导出器留下第一条，被丢的那条要**说出来**——不说是静默丢弃。
     let mut written_paths: BTreeSet<&str> = BTreeSet::new();
     for p in ep.path_params.iter().filter(|p| p.enabled) {
-        // 只写路径模板里真的存在的占位符。OpenAPI 规定 `in: path` 的参数名必须对应
+        // 导出器只写路径模板里真的存在的占位符。OpenAPI 规定 `in: path` 的参数名必须对应
         // 路径字段里的一个模板表达式，故写一个路径里没有的参数会让文档不合规，
         // Swagger Codegen 一类工具读它会报错或丢掉那个参数。
         //
-        // 路径里没人认领的占位符由下面那段补声明，故这里不写「模板里没有」的条目：
+        // 路径里没人认领的占位符由下面那段补声明，故导出器不写「模板里没有」的条目：
         // 那是用户改过占位符名字之后留下的旧条目，它不进请求。
         if !placeholders.contains(&p.key) {
             diagnostics.push(
@@ -247,7 +247,7 @@ fn parameters(
     }
 
     // 同一个头名只能写一条：OpenAPI 要求 `(name, in)` 唯一，重复的条目会让文档不合规。
-    // 留下的是第一条，被丢的那条要**说出来**——不说是静默丢弃。
+    // 导出器留下第一条，被丢的那条要**说出来**——不说是静默丢弃。
     let mut written: BTreeSet<&str> = BTreeSet::new();
     for h in ep.headers.iter().filter(|h| h.enabled) {
         let name = h.key.trim();

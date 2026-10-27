@@ -13,9 +13,9 @@ fn ex_with(endpoint: IrEndpoint) -> crate::ir::Exchange {
 }
 
 // -------------------------------------------------------------------------
-// 路径参数与 operationId —— 两条都是 Redocly 抓出来的（`path-parameters-defined`
-// 报过 4 处、`operation-operationId` 报过 17 处）。linter 是 CI 里的一道门，
-// 但那道门只在夹具那一份树上生效，故这两条也要各自钉住。
+// 路径参数与 operationId —— Redocly 的 `path-parameters-defined` 与
+// `operation-operationId` 两条规则查的就是这两处。linter 是 CI 里的一道门，但那道门
+// 只在夹具那一份树上生效，故这两条也要各自钉住。
 // -------------------------------------------------------------------------
 
 fn param_of<'a>(doc: &'a Value, path: &str, verb: &str, name: &str) -> Option<&'a Value> {
@@ -258,9 +258,9 @@ fn operation_id_is_the_verb_plus_the_path_with_identifier_safe_characters() {
 
 /// 两条不同的路径不能撞出同一个 `operationId`。
 ///
-/// 规范要求 `operationId` 在文档内唯一，而「动词 + 路径」曾经把一切非法字符都换成
-/// `_`，于是 `/api/user-info` 与 `/api/user/info` 都成了 `get__api_user_info`。撞名
-/// 之后多数代码生成器会把 `operationId` 直接变成方法名，于是生成出两个同名方法。
+/// 规范要求 `operationId` 在文档内唯一，而「动词 + 路径」把一切非法字符都换成 `_`，
+/// 于是 `/api/user-info` 与 `/api/user/info` 都成了 `get__api_user_info`。撞名之后多数
+/// 代码生成器会把 `operationId` 直接变成方法名，于是生成出两个同名方法。
 ///
 /// 现有两层外部门禁都看不见这件事（`openapiv3` 校验的是模型，不校验唯一性；
 /// Redocly 也没开那条规则），故这条测试就是那道门。
@@ -327,10 +327,9 @@ fn header_of<'a>(doc: &'a Value, path: &str, verb: &str, name: &str) -> Option<&
 
 /// 请求头要落在文档里。
 ///
-/// 曾经 IR 里的 `headers` 被整个丢掉，且不出任何诊断——「导出再导入」这条回路上，
-/// 所有请求头都没了，而用户看不到任何线索。OpenAPI 没有独立的请求头段落，头就是
-/// `in: header` 的参数，导入侧正是按 `in: header` 映回 `headers`，故导出侧写
-/// `in: header` 才接得上。
+/// IR 里的 `headers` 若被整个丢掉且不出任何诊断，「导出再导入」这条回路上所有请求头
+/// 都会消失，而用户看不到任何线索。OpenAPI 没有独立的请求头段落，头就是 `in: header`
+/// 的参数，导入侧正是按 `in: header` 映回 `headers`，故导出侧写 `in: header` 才接得上。
 #[test]
 fn an_enabled_request_header_becomes_a_header_parameter() {
     let ep = IrEndpoint {

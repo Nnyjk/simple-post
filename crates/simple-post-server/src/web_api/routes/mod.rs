@@ -1,5 +1,5 @@
 //! 每类 REST 资源一个 handler 模块。每个文件拥有自己那族 handler；路由注册本身留在
-//! `super::build_router`，好让整张路由表在一处读完。
+//! `web_api/router.rs::build_router`，好让整张路由表在一处读完。
 
 pub(crate) mod base_url_defs;
 pub(crate) mod dynamic_variables;

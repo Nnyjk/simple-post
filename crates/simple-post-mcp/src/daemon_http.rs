@@ -453,7 +453,7 @@ fn json_rpc_error(id: Option<Value>, code: i64, message: String) -> JsonRpcRespo
 // =========================================================================
 
 /// 只被测试与 `tools/call` 用。之所以不叫 `ok`，是为了收强类型的
-/// `CallToolResult`；原来的 `ok` 仍收裸 `Value`，供 `tools/list`、`ping` 等使用。
+/// `CallToolResult`；同名的 `ok` 收裸 `Value`，供 `tools/list`、`ping` 等使用。
 pub trait JsonRpcResponseExt {
     fn ok_with_result(id: Option<Value>, result: CallToolResult) -> Self;
 }

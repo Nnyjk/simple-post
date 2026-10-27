@@ -39,7 +39,7 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
       if (sources.length === 0) return {};
 
       // 目标父节点，以及这些节点将落入的项目。`rootId` 就在每个节点身上，
-      // 所以项目边界检查是一次字符串比较，不用像以前那样一路向上走到 module。
+      // 所以项目边界检查是一次字符串比较。
       let targetRootId: string;
       if (parentId === null) {
         // "项目顶层"——只对 module 合法。

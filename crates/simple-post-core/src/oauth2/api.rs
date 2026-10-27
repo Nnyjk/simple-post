@@ -58,9 +58,8 @@ pub struct OAuth2TokenDto {
 pub async fn resolve(pool: &DbPool, req: &OAuth2TokenRequest) -> Result<OAuth2TokenDto, AppError> {
     let cfg = match (&req.auth.kind, req.auth.oauth2.as_ref()) {
         (AuthType::Oauth2, Some(cfg)) => cfg,
-        // 载荷与 `kind` 不一致时按「没配 oauth2」报，而不是替它猜一个——MCP 侧
-        // `{"kind": "oauth2"}`（无载荷）曾经是「被拒绝」的形状，现在它是「配到一半」，
-        // 错误信息要能指出缺的是载荷。
+        // 载荷与 `kind` 不一致时按「配到一半」报，而不是替它猜一个——MCP 侧
+        // `{"kind": "oauth2"}`（无载荷）就是这个形状，错误信息要能指出缺的是载荷。
         (AuthType::Oauth2, None) => {
             return Err(AppError::Validation(
                 "auth.kind 是 oauth2，但缺少 oauth2 载荷".into(),

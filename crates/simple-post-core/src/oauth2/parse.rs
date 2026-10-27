@@ -35,7 +35,7 @@ pub(super) fn error_response(status: u16, body: &str, content_type: &str) -> App
 /// 另有一处：少数 IdP 回 `application/x-www-form-urlencoded`，而 crate 只解 JSON，
 /// 原样透传会让那批 IdP 直接解析失败，故折一次。
 ///
-/// 刻意**不做**递归摊平：§5.1 的响应是扁平的，摊平只会多出一批取用不到的 `a.b` 键。
+/// 刻意**不做**递归扁平化：§5.1 的响应是扁平的，再拆一层只会多出一批取用不到的 `a.b` 键。
 pub(super) fn normalize_success_body(body: &str, content_type: &str) -> String {
     let parsed = serde_json::from_str::<serde_json::Value>(body).ok();
     let mut map = match parsed {
@@ -175,8 +175,7 @@ fn read_response_pairs(body: &str, content_type: &str) -> Vec<(String, String)> 
     form_pairs(body.trim())
 }
 
-/// 只取标量。对象 / 数组没有「字符串值」可言，摊平它们（曾经的 `a.b` 写法）只会
-/// 造出取用不到的键。
+/// 只取标量。对象 / 数组没有「字符串值」可言，再拆一层只会造出取用不到的键。
 fn json_scalar_to_string(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::String(s) => s.clone(),

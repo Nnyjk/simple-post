@@ -95,7 +95,7 @@ pub struct Environment {
     pub name: String,
     /// **已废弃——仅为线兼容而读，无人写入。**
     ///
-    /// 它曾是 `def_id -> url`，即 URL 还不关心 endpoint 挂在哪个模块时的值层。现役层是
+    /// 该列的值是 `def_id -> url`，即 URL 还不关心 endpoint 挂在哪个模块时的值层。现役层是
     /// [`Self::module_base_urls`]；`db::migrate` 已把每个值搬过去，且是本 crate 里仅剩的
     /// 该列读者。
     ///

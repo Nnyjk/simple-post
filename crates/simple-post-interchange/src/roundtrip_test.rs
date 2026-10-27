@@ -221,8 +221,8 @@ fn a_collection_comes_back_as_a_tag_named_group() {
 /// 请求头在往返之后还在。
 ///
 /// 导出侧写 `in: header`，导入侧按 `in: header` 映回 `headers`——两侧必须接得上。
-/// 曾经导出侧根本不读 `headers`，于是「导出再导入」这条回路上所有请求头都没了，
-/// 且没有任何诊断说过这件事。
+/// 导出侧若不读 `headers`，「导出再导入」这条回路上所有请求头都会消失，且没有任何
+/// 诊断说过这件事。
 #[test]
 fn request_headers_survive_the_round_trip() {
     let mut ex = round_trip_tree();

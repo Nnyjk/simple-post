@@ -1,0 +1,391 @@
+//! `serve-web` 的路由树。
+//!
+//! `build_router` 在这里注册整棵 `/api/*` 路由，是全仓库路由表的唯一事实来源。
+//! handler 按资源拆到 `routes/`，本文件只负责把 handler 挂到路径上。
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use axum::{
+    http::Method,
+    routing::{get, patch, post},
+    Json, Router,
+};
+use tower_http::services::ServeDir;
+
+use crate::daemon_supervisor::McpDaemonHandle;
+use crate::db::DbPool;
+use crate::mcp::AppState as McpAppState;
+
+use super::dto::HealthDto;
+use super::routes::*;
+use super::static_files::spa_index;
+
+/// `Clone` 廉价（`DbPool` 是 `Arc<Pool>` 克隆，daemon handle 是
+/// `Arc<Mutex<…>>` 克隆）。
+#[derive(Clone)]
+pub struct WebState {
+    pub pool: DbPool,
+    pub daemon: McpDaemonHandle,
+    pub data_dir: PathBuf,
+    /// `/mcp` JSON-RPC 用的 MCP 状态：与 daemon 子进程共用同一 pool 与
+    /// metrics，所以指向 `http://server:4173/mcp` 的 AI 客户端与浏览器 SPA
+    /// 落在同一份数据上。
+    pub mcp_state: Arc<crate::mcp::AppState>,
+    /// 可选 bearer 口令。`None` 保持整棵路由树不鉴权；`Some(_)` 则对每个
+    /// `/api/*` 与 `/mcp` 请求强制 `auth_middleware`。前端把 bearer 存在
+    /// `localStorage`，由 `webFetch()` 带上。
+    pub password: Option<String>,
+    /// 可选反代 base path（如 `"/sp"`）。设置后整棵 router（含 `/mcp` 与
+    /// 三个健康探针）都 `nest` 到该前缀下：`curl /api/projects` 404，
+    /// `curl /sp/api/projects` 200。
+    pub base_path: Option<String>,
+}
+
+async fn healthz() -> Json<HealthDto> {
+    Json(HealthDto {
+        status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
+        shape: "server",
+    })
+}
+
+/// 导入导出四条路由的请求体上限。只给这四条，不给整棵 `api` router——其余动词都是
+/// 「按 id 取一行」，抬它们的全局上限只会扩大暴露面。
+fn body_limit() -> axum::extract::DefaultBodyLimit {
+    axum::extract::DefaultBodyLimit::max(crate::interchange_api::TRANSFER_BODY_LIMIT_BYTES)
+}
+
+/// 组装 axum router。`spa_dir` 是 `dist/` 的**绝对**路径，由调用方解析一次传入。
+///
+/// `state.password` 为 `Some` 时给除 `auth::is_public_path` 公开名单外的
+/// 全部路由装上 bearer 中间件。`state.base_path` 为 `Some` 时把整棵 router
+/// `nest` 到该前缀下，供反代把 SPA 挂在 `https://host/sp/`。两者默认 `None`。
+pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
+    // `build_router` 在 `Arc::new(state)` 之前复制 `password` 与 `base_path`：
+    // `state` 随即被移走，之后只能读这两个副本。
+    let password = state.password.clone();
+    let base_path = state.base_path.clone();
+    let state_arc = Arc::new(state);
+
+    let api = Router::new()
+        .route("/api/healthz", get(healthz))
+        // 无前缀的探针别名。`auth::is_public_path` 名单里也有它，但
+        // **名单成员 ≠ 路由已注册**：漏注册时请求落到 SPA fallback，根路径
+        // 回 `200 text/html`、带 base path 时回 404——只 grep `200 OK` 的探针
+        // 分不出这两种。健康探针要断言响应体，不能只看状态行。
+        //
+        // 两条路径共用 `healthz`，不会各自漂移。
+        .route("/healthz", get(healthz))
+        // ---- projects ----
+        .route("/api/projects", get(projects_list).post(projects_create))
+        .route(
+            "/api/projects/{id}",
+            get(projects_get)
+                .patch(projects_update)
+                .delete(projects_delete),
+        )
+        .route("/api/http/send", post(http_send))
+        // ---- oauth2 ----
+        //
+        // 取 token 是**发请求之前**的一步，所以它是独立动词而不是 `/api/http/send`
+        // 的参数：渲染层先拿到 access token 自己拼好 `Authorization`，再走既有的
+        // 发送路径，于是 cURL 预览与真实发送仍是同一个组装核。必须落在
+        // `auth::is_public_path` 名单**之外**——它按请求体里的 URL 出一趟站请求。
+        .route("/api/oauth2/token", post(oauth2_token))
+        // ---- resource tree ----
+        //
+        // 字面量动词必须注册在 `/{id}` 之前，否则在 radix tree 里被参数段吃掉。
+        .route("/api/nodes", get(nodes_list).post(nodes_create))
+        .route("/api/nodes/move", post(nodes_move))
+        // 懒加载层级树的两节：展开一个节点只取它的直接孩子；筛选时跨全部项目搜接口，
+        // 并带回它所在的路径。
+        .route("/api/nodes/children", get(nodes_children))
+        .route("/api/nodes/search", get(nodes_search_paths))
+        .route(
+            "/api/nodes/{id}",
+            get(nodes_get).patch(nodes_update).delete(nodes_delete),
+        )
+        .route(
+            "/api/nodes/{id}/endpoint-detail",
+            get(node_endpoint_detail_get).patch(node_endpoint_detail_patch),
+        )
+        // renderer bootstrap 的批量读。独立路径而非 `/api/nodes` 的过滤：这条路由
+        // 回答的是「配置」，不是「结构」。
+        .route("/api/endpoint-details", get(endpoint_details_list))
+        // collection 上的两段脚本。端点的脚本在 endpoint-detail 里（同一行配置），
+        // 这一对路由只管 collection——collection 住在自己的表里。
+        .route(
+            "/api/nodes/{id}/scripts",
+            get(node_scripts_get).patch(node_scripts_patch),
+        )
+        .route("/api/nodes/{id}/duplicate", post(node_duplicate))
+        // ---- environments ----
+        .route(
+            "/api/environments",
+            get(environments_list).post(environments_create),
+        )
+        // 同样的 radix tree 优先级：`/active`（字面量）注册在 `/{envId}`（参数）之前。
+        .route("/api/environments/active", post(environments_set_active))
+        .route(
+            "/api/environments/{envId}",
+            patch(environments_update).delete(environments_delete),
+        )
+        .route("/api/environments/{envId}/vars", post(environments_set_var))
+        .route(
+            "/api/environments/{envId}/vars/disabled",
+            post(environments_set_var_disabled),
+        )
+        .route(
+            "/api/environments/{envId}/vars/rename",
+            post(environments_rename_var),
+        )
+        .route(
+            "/api/environments/{envId}/module-baseurls",
+            post(environments_set_module_baseurl),
+        )
+        // ---- baseUrlDefs ----
+        // 服务属于项目，故三个 project 级动词挂在 `/api/projects/{projectId}/baseurls`。
+        // `/baseurls/default` 与 `/api/baseurl-defs/{defId}` 前缀不同，不存在 radix
+        // tree 优先级问题；`base_url_defs_test` 盯住每一条都仍可达。
+        .route(
+            "/api/projects/{projectId}/baseurls",
+            get(base_url_defs_list).post(base_url_defs_create),
+        )
+        .route(
+            "/api/projects/{projectId}/baseurls/default",
+            post(base_url_defs_set_default),
+        )
+        .route(
+            "/api/baseurl-defs/{defId}",
+            patch(base_url_defs_update).delete(base_url_defs_delete),
+        )
+        // ---- request settings (singleton) ----
+        .route(
+            "/api/request-settings",
+            get(request_settings_get).put(request_settings_put),
+        )
+        // ---- permissions (per project) ----
+        .route(
+            "/api/permissions/{projectId}",
+            get(permissions_get).put(permissions_set),
+        )
+        // ---- response history ----
+        //
+        // 每个动词都指向单个 endpoint。`/api/response-history` 与
+        // `/api/response-history/{endpointId}` 必须在 axum 的 radix tree 里共存：
+        // 抢优先级失败的那条会落到 SPA fallback，回 `200` + HTML，curl 看着就像
+        // 一个正常工作的端点。`response_history_test.rs` 用真实 listener 盯这一条。
+        .route("/api/response-history", post(response_history_append))
+        .route(
+            "/api/response-history/{endpointId}",
+            get(response_history_list).delete(response_history_clear),
+        )
+        // ---- interchange（导入 / 导出）----
+        //
+        // **必须落在 `auth::is_public_path` 名单之外**，理由与 `/api/oauth2/token`
+        // 同族：commit 写库，且 import/preview 的 URL 模式会按用户给的地址出站请求。
+        // 浏览器形态下这些是唯一一条能读任意用户指定 URL 的通道。
+        //
+        // 全部 POST：请求体装得下整份文档（一份 3 MB 的 OpenAPI yaml），而这四个
+        // 动词里没有一个是「按 id 取一行」。
+        //
+        // 故四条都要显式抬 `DefaultBodyLimit`：axum 的默认值是 2 MB，而它们的请求体
+        // 装的是整份文档。少了这一层，超大文档在浏览器形态下回的是 413（传输层错误，
+        // 读不出「文档太大」），桌面形态却能正常导入——**两侧行为分叉且无一声报错**。
+        // 上限值与 `FETCH_MAX_KB` 同源，见 `interchange_api::TRANSFER_BODY_LIMIT_BYTES`。
+        .route(
+            "/api/interchange/import/preview",
+            post(interchange_import_preview).layer(body_limit()),
+        )
+        .route(
+            "/api/interchange/import/commit",
+            post(interchange_import_commit).layer(body_limit()),
+        )
+        .route(
+            "/api/interchange/export/preview",
+            post(interchange_export_preview).layer(body_limit()),
+        )
+        .route(
+            "/api/interchange/export/document",
+            post(interchange_export_document).layer(body_limit()),
+        )
+        // ---- dynamic variables ----
+        //
+        // `/api/dynamic-variables/resolve` 是**字面量**段，必须注册在 `/{id}` 之前，
+        // 否则在 axum 的 radix tree 里被参数段吃掉。
+        .route(
+            "/api/dynamic-variables",
+            get(dynamic_variables_list).post(dynamic_variables_create),
+        )
+        .route(
+            "/api/dynamic-variables/resolve",
+            post(dynamic_variables_resolve),
+        )
+        .route(
+            "/api/dynamic-variables/{id}",
+            patch(dynamic_variables_update).delete(dynamic_variables_delete),
+        )
+        .route(
+            "/api/dynamic-variables/{id}/override",
+            post(dynamic_variables_set_override),
+        )
+        .route(
+            "/api/dynamic-variables/{id}/refresh",
+            post(dynamic_variables_refresh),
+        )
+        // ---- 一份接口规格 ----
+        //
+        // 一次调用落一整份规格：模块、集合路径上的每一级、环境、服务与端点。
+        // 与 MCP 工具 `spec_upsert` 落的是同一份东西（逻辑在 `crate::spec_api`）。
+        //
+        // 请求体是整份规格，故显式抬一次 `DefaultBodyLimit`：axum 的默认值是 2 MB，
+        // 而 `body.schema` 可以是一份很大的 JSON Schema、两段脚本也可以很长。少了
+        // 这一层，超大规格在浏览器形态下回的是 413（传输层错误，读不出「规格太大」），
+        // 桌面形态的同一份规格却能落库——两侧行为分叉。上限见
+        // `crate::spec_api::SPEC_BODY_LIMIT_BYTES`。
+        .route(
+            "/api/spec/upsert",
+            post(spec_upsert).layer(axum::extract::DefaultBodyLimit::max(
+                crate::spec_api::SPEC_BODY_LIMIT_BYTES,
+            )),
+        )
+        // ---- mcp (existing + new verbs) ----
+        .route("/api/mcp/status", get(mcp_status))
+        .route("/api/mcp/logs", get(mcp_log_tail))
+        .route("/api/mcp/start", post(mcp_start))
+        .route("/api/mcp/stop", post(mcp_stop))
+        .route("/api/mcp/restart", post(mcp_restart))
+        .route("/api/mcp/proxy-path", get(mcp_proxy_path))
+        // ---- mcp capability policy ----
+        .route(
+            "/api/mcp/capability",
+            get(mcp_capability_get).put(mcp_capability_put),
+        )
+        .route("/api/mcp/capability/tools", get(mcp_capability_list_tools))
+        // ---- mcp http listener config (daemon bind/path/allowlists) ----
+        .route(
+            "/api/mcp/http-config",
+            get(mcp_http_config_get).put(mcp_http_config_put),
+        )
+        // ---- preferences ----
+        .route(
+            "/api/preferences",
+            get(preferences_get).put(preferences_put),
+        )
+        .with_state(state_arc.clone());
+
+    // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools`。不复用
+    // `daemon_http::build_router`：它的内层路由自带 `/mcp` 前缀，再挂一次就成了
+    // `/mcp/mcp`。这里直接对共享的 `mcp_state` 注册——与 daemon 子进程同一
+    // pool + metrics。
+    let mcp_routes = build_mcp_routes(state_arc.mcp_state.clone());
+
+    // 静态 SPA。`ServeDir` 给 `/assets/*` 正确的 Range / ETag / Last-Modified，
+    // fallback 交给 `index.html` 以支持前端路由。
+    //
+    // 根是 `spa_dir` 本身而非 `spa_dir/assets`：请求路径已带 `/assets/` 前缀，
+    // 指到 `spa_dir/assets` 会去找 `dist/assets/assets/…` 而 miss，落进
+    // `index.html` fallback，于是每个 JS/CSS 都回 `200 text/html`。状态码看不出
+    // 问题，要看 body 的 content-type。
+    //
+    // fallback 是带 base 的 shell 而非裸 `ServeFile`：深链 `/sp/some/route`
+    // 必须带浏览器能解析的 asset URL，否则在该 URL 上刷新即白屏。
+    let serve_dir = ServeDir::new(spa_dir.clone()).fallback(axum::routing::any({
+        let spa_fallback = spa_dir.clone();
+        let base_fallback = base_path.clone();
+        move || {
+            let spa = spa_fallback.clone();
+            let base = base_fallback.clone();
+            async move { spa_index(spa, base).await }
+        }
+    }));
+
+    let auth_state = crate::auth::AuthState::new(password.as_deref());
+
+    // 只给这一棵 router 装鉴权层；shell 与静态树挂在外面。浏览器无法给
+    // `<script type="module">` 或样式表请求附 `Authorization: Bearer`，
+    // 把 `/assets/*` 拦在层内会让每个 JS/CSS 都 401，页面全白。
+    let guarded = {
+        let spa_root = spa_dir.clone();
+        let base_root = base_path.clone();
+        Router::new()
+            .merge(api)
+            .merge(mcp_routes)
+            .route(
+                "/",
+                get(move || spa_index(spa_root.clone(), base_root.clone())),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                auth_state,
+                crate::auth::auth_middleware,
+            ))
+    };
+
+    // 其余（`/assets/*`、`/favicon.svg`、以及回落 shell 的前端路由）一律公开，
+    // 与 `/` 同等待遇。fallback 只能挂在外层 router：merge 链里只允许一个。
+    let inner = Router::new().merge(guarded).fallback_service(serve_dir);
+
+    // 可选地把整棵 router（含 SPA fallback）nest 到 `base_path` 下，供
+    // nginx / Caddy 等把应用挂在 `https://server/sp/`。前缀之外不再重复发布：
+    // shell 自带前缀的 asset URL 并把前缀交给 renderer，见
+    // `static_files::shell_with_base`。未设置时按根路径服务。
+    match base_path.as_deref() {
+        Some(p) if !p.is_empty() => {
+            eprintln!("[serve-web] base_path: {p}");
+            // axum 的 `nest` 只匹配裸前缀 `/sp`，`/sp/` 不会转发给内层的 `/`（会 404）。
+            // 反代示例常把 `/sp` 重定向到 `/sp/`，所以尾斜杠形式同样返回 shell。
+            // 刻意不加鉴权层：这就是 `/sp` 已在发的同一份公开静态内容（见
+            // `auth::is_public_path` 名单里的 `/`），其下的 API 仍受保护。
+            let prefix = p.trim_end_matches('/');
+            let spa_shell = spa_dir.clone();
+            let base_shell = base_path.clone();
+            Router::new().nest(prefix, inner).route(
+                &format!("{prefix}/"),
+                get(move || spa_index(spa_shell.clone(), base_shell.clone())),
+            )
+        }
+        _ => inner,
+    }
+}
+
+/// 组装 MCP 那三条路由：`/mcp` JSON-RPC、`/mcp/healthz`、`/mcp/tools`。
+///
+/// 主 router 与专用 MCP 监听器共用这一份路由，所以「同一套 dispatch、同一份库、
+/// 同一道权限闸」在两个端口上是同一段代码，而不是两份长得像的实现。
+fn build_mcp_routes(mcp_state: Arc<McpAppState>) -> Router {
+    let json_rpc_state = mcp_state.clone();
+    let healthz_state = mcp_state.clone();
+    let tools_state = mcp_state;
+    Router::new()
+        .route(
+            "/mcp",
+            post(move |body: String| mcp_json_rpc_post(json_rpc_state, body)),
+        )
+        .route("/mcp/healthz", get(move || mcp_healthz(healthz_state)))
+        .route("/mcp/tools", get(move || mcp_tools(tools_state)))
+}
+
+/// 组装只服务 MCP 的 router：挂载路径与 Host/Origin 白名单都取自用户的
+/// `mcp.http_config`。
+///
+/// 复用 [`daemon_http::build_router_with_config`]，而不是自己再拼一套路由：那份
+/// router 带着 MCP 的挂载路径（配置里的路径 + `/mcp` 别名）与 Host/Origin 守卫，
+/// 于是这个专用端口上的 MCP 端点与 daemon 端点行为一致——同一套 dispatch、
+/// 同一份库、同一道白名单。外面再叠主端口那一道 bearer 鉴权，于是两个端口
+/// 对客户端是同一回事：设置面板「连接 → HTTP 服务配置」里写的地址、端口、
+/// 路径、白名单，对这两个端口同时生效。
+pub fn build_mcp_only_router(state: WebState, config: &crate::domain::McpHttpConfig) -> Router {
+    let password = state.password.clone();
+    let router = crate::daemon_http::build_router_with_config(state.mcp_state.clone(), config);
+    let auth_state = crate::auth::AuthState::new(password.as_deref());
+    router.layer(axum::middleware::from_fn_with_state(
+        auth_state,
+        crate::auth::auth_middleware,
+    ))
+}
+
+// `Method` 不参与按方法分发的路由表；这个常量只为让 `axum::http::Method` 的导入
+// 不被判为未使用。
+#[allow(dead_code)]
+const _UNUSED_METHOD: Method = Method::GET;

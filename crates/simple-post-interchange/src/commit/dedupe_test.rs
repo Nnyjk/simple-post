@@ -76,9 +76,9 @@ fn a_duplicate_inside_one_ir_lands_once() {
 
 /// 跳过诊断的指针要指得到源文件里的那一行。
 ///
-/// 指针曾经是 `format!("/{}", dup.path)`，而 `path` 本身以 `/` 开头，于是拼出
-/// `//ping` —— 源文件里没有任何东西在那个位置。渲染层把 pointer 原样显示出来，
-/// 用户看到的指向等于没给。真正能定位的是端点的 `key`。
+/// 指针是端点的 `key`（外来格式里的位置指针），不是 `path`：`path` 本身以 `/` 开头，
+/// 拼上去会得到 `//ping` 这样的位置，源文件里没有任何东西在那个位置。渲染层把
+/// pointer 原样显示出来，用户看到的指向等于没给。
 #[test]
 fn the_skip_diagnostic_points_at_the_duplicate_endpoint_key() {
     let (pool, project_id) = fresh_project();

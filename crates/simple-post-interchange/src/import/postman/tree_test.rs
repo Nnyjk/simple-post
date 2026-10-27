@@ -161,8 +161,8 @@ fn an_unnamed_item_falls_back_to_its_url_then_to_placeholder() {
 /// 顶层散落的请求共用一个分组；folder 仍各成一个。
 ///
 /// 这条与 `import::openapi::tests::each_tag_becomes_one_group_and_the_untagged_ones_share_another`
-/// 是同一条纪律的两侧。曾经的形状是「每个顶层 item 一个模块」，于是一份把请求平铺在根上的
-/// 集合（Postman 里很常见）导入后变成 N 个各含 1 个接口的集合。
+/// 是同一条纪律的两侧：一份把请求平铺在根上的集合（Postman 里很常见）导入后，散落的
+/// 请求必须落在同一个分组里，而不是每个顶层 item 各成一个、各含 1 个接口的集合。
 #[test]
 fn loose_top_level_requests_share_one_group_while_folders_stay_apart() {
     let parsed = parse_ok(&json!({

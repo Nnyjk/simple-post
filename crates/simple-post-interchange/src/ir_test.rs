@@ -109,8 +109,8 @@ fn a_key_survives_the_serde_round_trip() {
 
 #[test]
 fn an_ir_without_keys_still_deserialises() {
-    // `key` 是后加的字段，故任何一份不带它的 IR 仍必须读得进来——否则把一个
-    // 换过构建的桌面端连到一份老缓存上就会整份失败。
+    // `key` 可以缺席：任何一份不带 `key` 的 IR 仍必须读得进来——否则换过构建的
+    // 桌面端连到一份老缓存上就会整份失败。
     let legacy = r#"{
       "projectName": "p",
       "modules": [

@@ -30,18 +30,34 @@ crates/simple-post-mcp/
     ├── http_client.rs         # reqwest::Client wrapper with optional bearer auth
     ├── stdio_loop.rs          # line-oriented JSON-RPC ↔ HTTP bridge
     ├── capability.rs          # --capability local tool-list filter
+    ├── daemon_http.rs         # the daemon's axum listener
     ├── dynamic/               # dynamic variables: the shared operations
-    │   ├── mod.rs             #   (ops.rs) + the SourceFetcher implementation
-    │   ├── ops.rs             #   (source.rs)
+    │   ├── mod.rs             #   module map
+    │   ├── ops.rs             #   the operations all three consumers share
+    │   └── source.rs          #   the SourceFetcher implementation
+    ├── spec/                  # the OpenAPI spec upsert tool
+    │   ├── mod.rs
+    │   └── ops.rs
+    ├── variable_fill.rs       # facade over variable_fill/ (the interpolation rules)
+    ├── variable_fill/         # the interpolation rules, one file per concern
+    ├── response_parse.rs      # response parsing + diff + JSONPath extraction
     └── mcp/                   # the JSON-RPC dispatcher + tool implementations
-        ├── mod.rs             # AppState, dispatch, tool_descriptors,
+        ├── mod.rs             # facade: AppState, dispatch, tool_descriptors,
         │                       # REQUIRED_CAPABILITY table, tool_fn! macro
-        ├── env_ops.rs         # environment CRUD tools
-        ├── http_ops.rs        # HTTP send + variable resolution tools
+        ├── protocol.rs        #   the wire shapes
+        ├── registry.rs        #   tool_table() + REQUIRED_CAPABILITY
+        ├── dispatch.rs        #   the JSON-RPC dispatcher
+        ├── permissions.rs     #   the capability gate
+        ├── args.rs            #   the JSON-RPC argument readers
+        ├── state.rs           #   AppState + serve_http
+        ├── http_ops/          # HTTP send + variable resolution tools
         ├── project_ops/       # project / collection / module / endpoint /
         │                       # base_url_def CRUD tools
-        ├── response_parse.rs  # JSON-path response parsing tools
+        ├── env_ops.rs         # environment CRUD tools
         ├── dynamic_ops.rs     # dynamic-variable tools
+        ├── response_parse.rs  # JSON-path response parsing tools
+        ├── resources.rs       # the cross-tool guide
+        ├── key_value.rs       # the shared KeyValue helpers
         └── variable_fill.rs   # variable interpolation tools
 ```
 
@@ -49,7 +65,7 @@ crates/simple-post-mcp/
 
 ```
 simple-post-mcp
-  --url=<SIMPLE_POST_WEB_URL>          (default: http://localhost:4224)
+  --url=<SIMPLE_POST_WEB_URL>          (default: http://localhost:4173)
   --password=<SIMPLE_POST_WEB_PASSWORD>   (optional, sent as `Authorization: Bearer …`)
   --transport=stdio|http               (default: stdio)
   --port=<number>                       (only for --transport=http, default 4333)
@@ -72,7 +88,7 @@ connects straight to the daemon over HTTP instead — start
   "mcpServers": {
     "simple-post": {
       "type": "http",
-      "url": "http://<host>:4224/mcp"
+      "url": "http://<host>:4173/mcp"
     }
   }
 }

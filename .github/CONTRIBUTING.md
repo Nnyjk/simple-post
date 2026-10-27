@@ -10,7 +10,7 @@
 npm run check
 ```
 
-它依次执行 `format:check` → `lint` → `typecheck` → `npm test` → `fmt:check` → `clippy`，与 CI 的 Web 与 Rust 两个 job 是同一套。CI 另外还会跑生产构建与容器冒烟测试——那部分本地用 `npm run build` 和 `docker build` 覆盖。
+它依次执行 `format:check` → `lint` → `typecheck` → `npm test` → `lint:openapi` → `fmt:check` → `clippy`，与 CI 的 Web 与 Rust 两个 job 是同一套。CI 另外还会跑生产构建与容器冒烟测试——那部分本地用 `npm run build` 和 `docker build` 覆盖。
 
 需要 Rust 侧完整测试时单独跑 `cargo test --workspace`。
 
@@ -54,7 +54,7 @@ npm run check
 1. `src-tauri/src/commands/<resource>.rs` 里的 handler
 2. `src-tauri/src/lib.rs` 里的注册
 3. `src/lib/tauri-commands.ts` 的 `COMMANDS` 常量
-4. `crates/simple-post-server/src/web_api/` 的路由（`.route()` 注册在 `mod.rs::build_router`，handler 在 `web_api/routes/<resource>.rs`）
+4. `crates/simple-post-server/src/web_api/` 的路由（`.route()` 注册在 `web_api/router.rs::build_router`，handler 在 `web_api/routes/<resource>.rs`）
 5. `WEB_ROUTES` 条目（如果浏览器侧要用）
 
 两侧都需要的 DTO 放 `crates/simple-post-server/src/dto.rs`，**不要**放回 `commands/`——那会把服务端重新耦合到 `tauri::State`。
@@ -91,10 +91,12 @@ npm run check
 
 ## 注释怎么写
 
-两条规则，详见 `AGENTS.md` → *Source comments*：
+四条规则，详见 `AGENTS.md` → *Source comments*：
 
 1. **只写当下成立的东西。** 删掉过去时的缺陷叙事（「以前这里坏过」「这个曾经上线过」），保留现行约束与不变量。
 2. **中文、简练、一句一事。** 压成结论加必要理由，只留「不这么写会出错」的部分。不要复述代码。
+3. **每个分句点名执行者。** 声明上方的注释可以省主语；函数体内的行内注释必须点名是哪个执行者做的。
+4. **不用借代词。** 「兜底」写成「回退」，「面板面」写成「公开接口」，「心智模型」写成「理解方式」，「锚定」写成「保持一致」——一句话要指向具体的代码路径、值或规则，而不是一个画面。
 
 标识符、关键字、API 名、列名保持原样——那不是可翻译的散文。
 

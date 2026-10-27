@@ -56,8 +56,8 @@ export interface UiTabsState {
   /**
    * 每个项目各自的标签条，在本次运行内为"用户正在别处干活"而暂存起来。
    *
-   * 标签条一次只显示一个项目的标签，其余在这里等着。未保存的工作因此天然
-   * 扛过一次切换，无需另行拷贝，原因见 {@link ProjectTabSet}。
+   * 标签条一次只显示一个项目的标签，其余在这里等着。未保存的工作因此在切换项目后
+   * 原样保留，无需另行拷贝，原因见 {@link ProjectTabSet}。
    */
   projectTabs: Record<string, ProjectTabSet>;
 }

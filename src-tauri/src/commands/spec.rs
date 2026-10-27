@@ -18,7 +18,7 @@ use crate::spec_api::SpecUpsertResult;
 /// 端点都在里面。每一部分都按名字找，找不到就建出来，故反复应用同一份规格不改变
 /// 任何东西。
 ///
-/// 返回值摊平：线上的键就是结果自己的键（`projectId` / `module` / `endpoint` …），
+/// 返回值不做嵌套包装：线上的键就是结果自己的键（`projectId` / `module` / `endpoint` …），
 /// `missing` 与它们平级 —— 那是「这个端点还缺什么才能发出去」。
 ///
 /// ## 权限

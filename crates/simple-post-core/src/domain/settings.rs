@@ -114,9 +114,9 @@ impl Default for McpHttpConfig {
     }
 }
 
-/// Default bind address for the MCP HTTP daemon — loopback only.
+/// MCP HTTP 守护进程的默认监听地址——只监听回环地址。
 pub const DEFAULT_MCP_HOST: &str = "127.0.0.1";
-/// Default mount path for the MCP JSON-RPC endpoint.
+/// MCP JSON-RPC 端点的默认挂载路径。
 pub const DEFAULT_MCP_PATH: &str = "/mcp";
 
 impl McpHttpConfig {

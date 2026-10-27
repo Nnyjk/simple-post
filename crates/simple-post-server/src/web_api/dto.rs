@@ -227,7 +227,7 @@ pub struct DynamicVariableCreateBody {
     /// 缓存有效期（秒）。
     #[serde(default)]
     pub ttl_seconds: Option<i64>,
-    /// 取数失败时是否允许用已过期的缓存值兜底。
+    /// 取数失败时是否允许用已过期的缓存值回退。
     #[serde(default)]
     pub stale_fallback: Option<bool>,
     #[serde(default)]

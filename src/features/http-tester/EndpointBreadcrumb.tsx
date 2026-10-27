@@ -5,7 +5,7 @@ import type { ResourceNode, Project } from '@/types/domain';
 /**
  * 接口的面包屑 —— 回答「我在树的哪里」。
  *
- * 与设置面板的 `设置 › 连接` 同一套锚定写法。工作区标签承载同样信息时隐藏
+ * 与设置面板的 `设置 › 连接` 用同一套分隔符写法。工作区标签承载同样信息时隐藏
  * （由调用方按 `endpointHasTab` 决定）。
  */
 export function EndpointBreadcrumb({

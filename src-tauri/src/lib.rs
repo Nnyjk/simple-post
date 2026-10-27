@@ -40,7 +40,7 @@ pub use simple_post_server::{
 // `cargo run -- serve-web`（即 `npm run dev:split`）行为不变。
 pub use simple_post_server::{init_tracing, run_mcp, run_mcp_proxy, run_serve_web};
 
-// ----- HTTP request command ------------------------------------------------
+// ----- HTTP 请求命令 --------------------------------------------------------
 //
 // 实际 I/O 在 `crate::http_executor::execute`；这里只是转发，让 `generate_handler!`
 // 能在 `lib.rs` 里找到 `http_request`。
@@ -102,7 +102,7 @@ async fn http_request(
     Ok(crate::dto::SendOutcomeDto::from(outcome))
 }
 
-// ----- Tauri entry point ----------------------------------------------------
+// ----- Tauri 入口 -----------------------------------------------------------
 
 /// Tauri GUI 入口：把 `McpDaemonHandle` 与 DB pool 放进 managed state（供
 /// `State<…>` 读取）、注册全部命令、在 `.setup()` 里异步拉起 daemon 子进程。

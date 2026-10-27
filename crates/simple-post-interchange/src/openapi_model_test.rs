@@ -215,7 +215,7 @@ fn the_model_agrees_with_our_own_importer() {
 /// 文档里的 `operationId` 必须互不相同。
 ///
 /// 规范要求 `operationId` 在文档内唯一，而「动词 + 路径」的映射不是单射：
-/// `/api/user-info` 与 `/api/user/info` 曾经都映成 `get__api_user_info`。撞名之后多数
+/// `/api/user-info` 与 `/api/user/info` 都可能映成 `get__api_user_info`。撞名之后多数
 /// 代码生成器会把 `operationId` 直接变成方法名，于是生成出两个同名方法。
 ///
 /// `openapiv3` 校验的是**模型**（不校验唯一性），Redocly 也没开那条规则，故这条
