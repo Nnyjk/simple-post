@@ -13,7 +13,7 @@
 //! （`http://{tenant}.example.com` 属于主机模板，不归路径参数管）。
 //!
 //! 对应渲染进程的 `src/lib/path-params.ts`；两侧的规则由
-//! `fixtures/resolve-parity.json` 里的路径参数用例钉住。
+//! `fixtures/path-params-parity.json` 里的路径参数用例钉住。
 
 use std::collections::HashMap;
 

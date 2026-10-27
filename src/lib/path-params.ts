@@ -14,7 +14,7 @@
  * （`http://{tenant}.example.com` 属于主机模板，不归路径参数管）。
  *
  * 对应 Rust 侧的 `crates/simple-post-core/src/path_params.rs`；两侧的规则由
- * `fixtures/resolve-parity.json` 里的路径参数用例钉住。
+ * `fixtures/path-params-parity.json` 里的路径参数用例钉住。
  */
 
 import type { KeyValue } from '@/types/domain';
