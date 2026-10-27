@@ -25,9 +25,7 @@ impl Captured {
     fn header(&self, name: &str) -> Option<&str> {
         self.head.lines().find_map(|line| {
             let (k, v) = line.split_once(':')?;
-            k.trim()
-                .eq_ignore_ascii_case(name)
-                .then(|| v.trim())
+            k.trim().eq_ignore_ascii_case(name).then(|| v.trim())
         })
     }
 }
@@ -93,9 +91,7 @@ fn content_length(head: &str) -> Option<usize> {
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// 跑一次真实的发送，返回服务端收到的字节。`parts_json` 就是 `RequestBody.content`。
@@ -120,7 +116,9 @@ fn capture(parts_json: &str) -> Captured {
     let mut headers: Vec<(String, String)> = vec![("Accept".into(), "application/json".into())];
     let body = apply(&mut headers, parts_json);
     assert!(
-        headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")),
+        headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-type")),
         "`apply` must have put a Content-Type on the request"
     );
 
@@ -156,10 +154,9 @@ fn capture(parts_json: &str) -> Captured {
 
 /// 把收到的 body 按它自己声明的 boundary 切开，还原成分片。这是独立于实现的解析，
 /// 所以「我们以为的分片」与「服务端会读到的分片」不一致时，它会报出来。
-fn split_parts<'a>(captured: &'a Captured) -> Vec<(Vec<(&'a str, String)>, String)> {
+fn split_parts(captured: &Captured) -> Vec<(Vec<(&str, String)>, String)> {
     let boundary = declared_boundary(captured);
     let delimiter = format!("--{boundary}");
-    let closing = format!("{delimiter}--");
 
     let body = captured
         .body
@@ -208,7 +205,11 @@ fn a_multipart_request_that_reaches_a_socket_is_parsable() {
     );
 
     let parts = split_parts(&captured);
-    assert_eq!(parts.len(), 3, "all three parts must survive the wire: {parts:?}");
+    assert_eq!(
+        parts.len(),
+        3,
+        "all three parts must survive the wire: {parts:?}"
+    );
 
     let names: Vec<String> = parts
         .iter()
@@ -216,12 +217,18 @@ fn a_multipart_request_that_reaches_a_socket_is_parsable() {
             h.iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case("content-disposition"))
                 .and_then(|(_, v)| {
-                    v.split("name=\"").nth(1).and_then(|s| s.split('"').next().map(String::from))
+                    v.split("name=\"")
+                        .nth(1)
+                        .and_then(|s| s.split('"').next().map(String::from))
                 })
                 .unwrap_or_default()
         })
         .collect();
-    assert_eq!(names, vec!["title", "file", "note"], "part names and order must be kept");
+    assert_eq!(
+        names,
+        vec!["title", "file", "note"],
+        "part names and order must be kept"
+    );
 
     // 文件分片带 filename，且缺省 content-type 落到二进制流类型。
     let file_disposition = parts[1]
@@ -254,12 +261,17 @@ fn a_multipart_request_that_reaches_a_socket_is_parsable() {
         "a plain field must not carry its own Content-Type"
     );
 
-    assert_eq!(parts[0].1, "报告", "a non-ASCII value must survive byte-for-byte");
+    assert_eq!(
+        parts[0].1, "报告",
+        "a non-ASCII value must survive byte-for-byte"
+    );
     assert_eq!(parts[2].1, "");
 
     // 收尾分隔符：服务端据此知道没有更多分片了。
     assert!(
-        captured.body.ends_with(&format!("--{}--\r\n", declared_boundary(&captured))),
+        captured
+            .body
+            .ends_with(&format!("--{}--\r\n", declared_boundary(&captured))),
         "the closing delimiter is missing: {:?}",
         &captured.body[captured.body.len().saturating_sub(48)..]
     );
@@ -271,14 +283,19 @@ fn a_user_set_content_type_is_replaced_but_keeps_its_name() {
     let mut headers = vec![("content-type".to_string(), "application/json".to_string())];
     let body = apply(&mut headers, r#"[{"name":"a","value":"1"}]"#);
 
-    let ct_headers: Vec<&(String, String)> =
-        headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("content-type")).collect();
+    let ct_headers: Vec<&(String, String)> = headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        .collect();
     assert_eq!(
         ct_headers.len(),
         1,
         "a replaced Content-Type must be overwritten in place, not appended: {headers:?}"
     );
-    assert_eq!(ct_headers[0].0, "content-type", "the header name keeps the user's casing");
+    assert_eq!(
+        ct_headers[0].0, "content-type",
+        "the header name keeps the user's casing"
+    );
     let boundary = ct_headers[0]
         .1
         .strip_prefix("multipart/form-data; boundary=")
@@ -294,7 +311,10 @@ fn a_malformed_parts_payload_still_reaches_the_socket_as_valid_multipart() {
     // 零分片仍是格式合法的 body（只有收尾分隔符）。宁可让服务端报「没有分片」，
     // 也不要发一个内容被静默改写的 body。
     let captured = capture("{ not json");
-    assert!(split_parts(&captured).is_empty(), "no part should be invented");
+    assert!(
+        split_parts(&captured).is_empty(),
+        "no part should be invented"
+    );
     assert!(
         captured
             .body
