@@ -190,7 +190,8 @@ fn spec_schema() -> Value {
     json!({
         "type": "object",
         "description": "One interface spec, applied in a single call. Each part is \
-    found by name and created when missing, so applying the same spec twice changes nothing.",
+    found by name and created when missing, so a second call reuses them all; only \
+    if_exists=duplicate adds a second endpoint.",
         "properties": {
             "project_id": {
                 "type": "string",
@@ -234,7 +235,8 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
         description: "Apply one interface spec in a single call: the module, the \
                        collections on its path, the environment, the service and the \
                        endpoint. Each part is found by name and created when missing, so \
-                       applying the same spec twice changes nothing. Use it instead of \
+                       a second call reuses them all; only if_exists=duplicate adds a \
+                       second endpoint. Use it instead of \
                        chaining the project/module/collection/env/baseUrl/endpoint tools, \
                        which costs one round trip per link in the chain.",
         schema: spec_schema(),

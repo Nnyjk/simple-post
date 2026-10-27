@@ -57,7 +57,7 @@ fn guide() -> Value {
 
         "fastPath": {
             "tool": "spec_upsert",
-            "note": "One call lands the whole spec: the module, the collections on the path, the environment, the service and the endpoint, in one transaction. Each part is found by name and created when missing, so applying the same spec twice changes nothing.",
+            "note": "One call lands the whole spec: the module, the collections on the path, the environment, the service and the endpoint, in one transaction. Each part is found by name and created when missing, so a second call reuses them all; only if_exists=duplicate adds a second endpoint.",
             "arguments": {
                 "project_id": "<项目 id；必须已经存在>",
                 "module": "<模块名，不存在就建；用 module_id 指认已有模块>",
