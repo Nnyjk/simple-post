@@ -11,7 +11,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 [![版本](https://img.shields.io/badge/version-v0.1.21-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
 [![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
 [![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
-[![MCP 工具](https://img.shields.io/badge/MCP-51%20tools-8A2BE2?style=flat-square)](#mcp-server)
+[![MCP 工具](https://img.shields.io/badge/MCP-52%20tools-8A2BE2?style=flat-square)](#mcp-server)
 [![许可](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 </div>
@@ -30,7 +30,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 
 Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、请求构造、响应查看都在同一个应用里完成，业务数据保存在本机的 SQLite 文件中，不依赖任何 SaaS 后端。
 
-与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 51 个 MCP 工具读取和修改接口定义、环境变量与服务地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
+与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 52 个 MCP 工具读取和修改接口定义、环境变量与服务地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
 
 ## 界面
 
@@ -97,7 +97,17 @@ MCP 侧的工具描述写明哪个字段放什么，并且设了一道门：载�
 
 ### MCP Server
 
-51 个 MCP 工具，覆盖项目、模块、集合、接口、服务地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
+52 个 MCP 工具，覆盖项目、模块、集合、接口、服务地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
+
+工具是按「一次调用建好一个接口」设计的，而不只是 CRUD：
+
+- **一份规格一次落库。** `spec_upsert` 收一份声明式规格：模块、集合路径、环境、服务与端点。它在一个事务里把这一整份写进库里——缺的模块与集合逐级建出来，缺的环境与服务按名字建出来，URL 写进（环境 × 服务 × 模块）那一格。建一份接口规范不必再按「先查一遍、再建一下」串七八次调用。
+- **同一份规格有三个入口。** MCP 工具 `spec_upsert`、REST 路由 `POST /api/spec/upsert` 与桌面端命令 `spec_upsert` 落的是同一份规格，落库逻辑只有一份实现。REST 请求体就是那份规格本身，不带外层包装；字段名的两种拼写（`project_id` 与 `projectId`）都收，因此同一份规格可以在 AI 客户端与 HTTP 调用方之间原样搬运。
+- **按路径寻址。** `collection_create` 与 `endpoint_create` 接受 `collection_path`（如 `订单/明细`），路径上缺的集合会被逐级建出来，已有的同名集合直接复用。建一个接口不必先查一遍树。
+- **创建是幂等的。** 所有 `*_create` 工具接受 `if_exists`（`reuse` / `error` / `duplicate`，默认 `reuse`）。重复调用同一个接口定义不会造出第二份。`spec_upsert` 另有一档 `update`：它覆盖规格里点名的字段，没点名的字段保持原样。
+- **一次调用写全。** `endpoint_create` 一次收下 method、url、参数、请求头、请求体的载荷与定义、鉴权、前置脚本与测试脚本，不需要再补一次 `endpoint_update`。
+- **写完就告诉你还缺什么。** 写工具的响应里带 `missing`：base URL 那一格没有值，或者环境里没有它引用的变量，都会点名说出来。agent 不必先发一次请求、看报错、再回头补。
+- **一份可按需读取的指南。** MCP 的 `resources/list` 与 `resources/read` 提供 `simple-post://spec-authoring`，里面是「建一个接口规范」的完整调用顺序与参数形状。客户端在动手前读一次即可，不必把它塞进每一条工具描述里。
 
 写操作的授权要同时通过两道检查，任何一道缺失都是拒绝而不是放行：
 
@@ -201,6 +211,8 @@ curl http://localhost:4173/api/healthz
 
 MCP 客户端连接 `http://host:4173/mcp`，并带上 `Authorization: Bearer <口令>`。
 
+同一套 REST 接口也开放给脚本与自动化工具，其中 `POST /api/spec/upsert` 一次调用落一份完整的接口规格（模块、集合路径、环境、服务与端点），与 MCP 工具 `spec_upsert` 落的是同一份东西。
+
 需要给 MCP 分配独立端口时，在设置面板的「连接 → HTTP 服务配置」里把「端口」填成一个具体数字（例如 4174）。服务端会另外开一个只提供 MCP 的监听器，那个端口上只有 `/mcp`、`/mcp/healthz` 与 `/mcp/tools`，没有 REST 接口与单页应用。端口填 0 时不单独开端口，MCP 只走主端口。改动需要重启服务才生效。
 
 独立端口是新增的一条入口，主端口上的 `/mcp` 照旧可用。两者的差别在于：独立端口按 MCP 自己的 Host 与 Origin 白名单校验，主端口上的 `/mcp` 不做 Host 校验，只受 Bearer 口令约束。
@@ -254,7 +266,7 @@ sp.example.com {
 | Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
 | 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、MCP 指标、错误类型。不依赖 Tauri 与 axum。 |
-| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（51 个工具）、axum HTTP daemon、标准输入输出桥接。 |
+| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（52 个工具）、axum HTTP daemon、标准输入输出桥接。 |
 | 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
 | 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
 
