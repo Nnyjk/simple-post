@@ -55,6 +55,7 @@ export function DynamicVariablesPanel({ projectId }: DynamicVariablesPanelProps)
         baseUrl: '',
         url: detail.url,
         params: detail.params,
+        pathParams: detail.pathParams,
         headers: detail.headers,
         body: detail.body,
         auth: detail.auth,

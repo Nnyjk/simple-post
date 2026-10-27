@@ -373,6 +373,7 @@ export function HttpTester() {
       baseUrl: resolved.baseUrl,
       url: liveUrl,
       params: effective.params,
+      pathParams: effective.pathParams,
       headers: effective.headers,
       body: effective.body,
       auth: effective.auth,
