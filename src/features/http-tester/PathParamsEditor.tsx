@@ -48,7 +48,8 @@ export function PathParamsEditor({
     [items, placeholders],
   );
 
-  const valueOf = (name: string): string => items.find((it) => it.key === name)?.value ?? '';
+  /** 那一行在存储里的条目（没填过的占位符没有条目）。 */
+  const itemOf = (name: string): KeyValue | undefined => items.find((it) => it.key === name);
 
   /**
    * 写一个占位符的值。
@@ -64,9 +65,23 @@ export function PathParamsEditor({
     onChange(items.filter((it) => it.id !== id));
   };
 
+  // 发送被拦下的原因。空状态里也要出现：占位符可能只存在于前置 URL 里，这时
+  // 本页一行都没有，不显示这句话，用户就不知道该去哪里改。
+  const errorBanner = error ? (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="path-params-error"
+      className="mb-2 rounded-md border border-destructive bg-destructive px-2.5 py-1.5 text-[11px] text-destructive-foreground"
+    >
+      {error}
+    </div>
+  ) : null;
+
   if (placeholders.length === 0 && items.length === 0) {
     return (
       <div className="px-4 py-3">
+        {errorBanner}
         <div className="flex h-24 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
           URL 里没有 {'{占位符}'}，因此没有路径参数
         </div>
@@ -79,16 +94,7 @@ export function PathParamsEditor({
 
   return (
     <div className="px-4 py-3">
-      {error && (
-        <div
-          role="status"
-          aria-live="polite"
-          data-testid="path-params-error"
-          className="mb-2 rounded-md border border-destructive bg-destructive px-2.5 py-1.5 text-[11px] text-destructive-foreground"
-        >
-          {error}
-        </div>
-      )}
+      {errorBanner}
 
       <table className="w-full table-fixed border-collapse text-sm">
         <thead>
@@ -100,8 +106,12 @@ export function PathParamsEditor({
         </thead>
         <tbody>
           {placeholders.map((name) => {
-            const value = valueOf(name);
+            const item = itemOf(name);
+            const value = item?.value ?? '';
+            // 缺值有两种：根本没填，或填了但那一条是停用的。`prepareRequest` 只认
+            // 启用的那一条，停用的条目即便有值也不算填了。
             const missing = value.trim() === '';
+            const disabled = !missing && item?.enabled === false;
             return (
               <tr key={name}>
                 <td className="px-2 py-1 font-mono text-xs text-muted-foreground">
@@ -121,6 +131,10 @@ export function PathParamsEditor({
                 <td className="px-2 py-1 text-[11px]">
                   {missing ? (
                     <span className="text-destructive">必填，填了才能发送</span>
+                  ) : disabled ? (
+                    <span className="text-muted-foreground">
+                      已停用，不会进入请求；改一下这个值就会启用它
+                    </span>
                   ) : (
                     <span className="text-muted-foreground">已填写</span>
                   )}

@@ -60,6 +60,7 @@ describe('样本覆盖住了识别范围', () => {
     '路径里的一对大括号就是一个占位符',
     '双大括号是环境变量的写法，不是路径占位符',
     '查询串里的占位符不是路径占位符',
+    '查询串里的 :// 不是 scheme 分隔符',
     '主机名里的占位符不是路径占位符',
     '未闭合的大括号不算占位符',
     '名字为空不算占位符',
@@ -141,6 +142,30 @@ describe('写一个占位符的值', () => {
     const items = [item('a', 'id', '42')];
     const next = applyPathParamValue(items, ['id'], 'id', '');
     assert.deepEqual(next, []);
+  });
+
+  it('被改的那一条同时被启用', () => {
+    // 导入进来的路径参数可能是停用的（OpenAPI 里 `required: false` 的路径参数就是）。
+    // 用户在界面上填了值，界面也说「已填写」，`prepareRequest` 却仍按缺值处理 ——
+    // 它只认启用的那一条。改过值就把它启用。
+    const items = [{ id: 'a', key: 'id', value: '', enabled: false }];
+    const next = applyPathParamValue(items, ['id'], 'id', '42');
+    assert.equal(next[0].enabled, true);
+    assert.equal(next[0].value, '42');
+  });
+
+  it('其余条目的启用状态不动', () => {
+    const items = [
+      { id: 'a', key: 'id', value: '1', enabled: false },
+      { id: 'b', key: 'postId', value: '7', enabled: false },
+    ];
+    const next = applyPathParamValue(items, ['id', 'postId'], 'id', '2');
+    assert.equal(next.find((it) => it.key === 'id')?.enabled, true, '被改的那一条被启用');
+    assert.equal(
+      next.find((it) => it.key === 'postId')?.enabled,
+      false,
+      '其余条目的启用状态原样保留',
+    );
   });
 
   it('落单的存有条目保留在末尾', () => {

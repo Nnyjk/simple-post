@@ -31,12 +31,18 @@ interface Found {
  * URL 文本里「路径段」的下标范围：起点在主机名之后，终点在第一个 `?` 或 `#` 之前。
  *
  * 没有 `://` 的文本（相对路径）整段都是路径段。
+ *
+ * `://` 只有在**第一个 `?` / `#` 之前**、且**它前面没有 `/`** 时才是 scheme 分隔符。
+ * `/users/{id}?next=https://x.com` 里的 `://` 属于查询串：认成 scheme 会把路径段
+ * 算成空，于是 `{id}` 既不被替换也不被报出来，请求带着字面量 `{id}` 就发出去了。
  */
 function pathScope(url: string): { start: number; end: number } {
   const q = url.search(/[?#]/);
   const end = q === -1 ? url.length : q;
   const scheme = url.indexOf('://');
-  if (scheme === -1) return { start: 0, end };
+  if (scheme === -1 || scheme >= end || url.slice(0, scheme).includes('/')) {
+    return { start: 0, end };
+  }
   const afterScheme = scheme + 3;
   if (afterScheme >= end) {
     // `https://?x` 这种形状：主机名后面没有路径段。
@@ -139,7 +145,11 @@ export function pathPlaceholders(url: string): string[] {
  * 2. **被改的占位符还没有存有条目时新建一条**。新建接口的用户第一次填 `{id}` 时，
  *    存储里并没有 `id` 这一条；若这里只更新已有条目，用户的按键会被回滚，而界面上
  *    看不出任何异常 —— 那一行的输入框永远写不进东西。
- * 3. **值被清空时把条目删掉**：「只有填过值的占位符才进存储」，空值留在存储里只会
+ * 3. **被改的那一条同时被启用**。导入进来的路径参数可能是停用的（OpenAPI 里
+ *    `required: false` 的路径参数就是），而 `prepareRequest` 只认启用的那一条：
+ *    用户在界面上填了值，界面也说「已填写」，请求却仍按缺值处理。用户在那一行
+ *    敲了字，就是要用它，故此处把它启用；其余条目的启用状态原样保留。
+ * 4. **值被清空时把条目删掉**：「只有填过值的占位符才进存储」，空值留在存储里只会
  *    让「有没有填」这件事在两处说法不一。
  *
  * 落单的存有条目（在当前 URL 里找不到对应占位符的那些）原样保留在末尾：它们不进请求，
@@ -156,7 +166,11 @@ export function applyPathParamValue(
     const existing = items.find((it) => it.key === p);
     if (p === name) {
       if (value.trim() === '') continue;
-      next.push(existing ? { ...existing, value } : { id: uid(), key: p, value, enabled: true });
+      next.push(
+        existing
+          ? { ...existing, value, enabled: true }
+          : { id: uid(), key: p, value, enabled: true },
+      );
       continue;
     }
     if (!existing) continue;

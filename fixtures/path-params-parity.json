@@ -221,6 +221,22 @@
       "expectedMissing": []
     },
     {
+      "name": "查询串里的 :// 不是 scheme 分隔符",
+      "url": "/users/{id}?next=https://x.com",
+      "placeholders": ["id"],
+      "values": [["id", "42"]],
+      "expectedUrl": "/users/42?next=https://x.com",
+      "expectedMissing": []
+    },
+    {
+      "name": "完整 URL 的查询串里带 :// 时路径段照样被替换",
+      "url": "https://api.example.com/users/{id}?next=https://x.com",
+      "placeholders": ["id"],
+      "values": [["id", "42"]],
+      "expectedUrl": "https://api.example.com/users/42?next=https://x.com",
+      "expectedMissing": []
+    },
+    {
       "name": "双大括号标记在替换之后仍然存在",
       "url": "/users/{{userId}}",
       "placeholders": [],

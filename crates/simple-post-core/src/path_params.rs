@@ -22,9 +22,16 @@ use crate::url::percent_encode;
 /// URL 文本里「路径段」的字节范围：起点在主机名之后，终点在第一个 `?` 或 `#` 之前。
 ///
 /// 没有 `://` 的文本（相对路径）整段都是路径段。
+///
+/// `://` 只有在**第一个 `?` / `#` 之前**、且**它前面没有 `/`** 时才是 scheme 分隔符。
+/// `/users/{id}?next=https://x.com` 里的 `://` 属于查询串：认成 scheme 会把路径段
+/// 算成空，于是 `{id}` 既不被替换也不被报出来，请求带着字面量 `{id}` 就发出去了。
 fn path_scope(url: &str) -> (usize, usize) {
     let end = url.find(['?', '#']).unwrap_or(url.len());
-    let start = match url.find("://") {
+    let start = match url
+        .find("://")
+        .filter(|at| *at < end && !url[..*at].contains('/'))
+    {
         Some(at) => {
             let after_scheme = at + 3;
             if after_scheme >= end {
