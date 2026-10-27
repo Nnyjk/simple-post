@@ -44,6 +44,48 @@ fn apply_ok(pool: &DbPool, v: serde_json::Value) -> crate::spec::upsert::SpecOut
 }
 
 // =========================================================================
+// 路径参数
+// =========================================================================
+
+/// 路径参数与查询参数分开存：查询参数进查询串，路径参数进路径本身。
+///
+/// 两者混在一份列表里，「这个参数进哪儿」就取决于 URL 文本 —— 改一个占位符的名字
+/// 会静默改变一个参数的归属。故规格把它们分成两段，落到 detail 的两处。
+#[test]
+fn path_parameters_land_in_their_own_list() {
+    let (pool, _dir) = fresh_pool();
+    let outcome = apply_ok(
+        &pool,
+        json!({
+            "project_id": "p_demo",
+            "module": "营销",
+            "endpoint": {
+                "name": "查订单",
+                "method": "GET",
+                "url": "/api/orders/{id}",
+                "params": [{ "key": "page", "value": "1" }],
+                "path_params": [{ "key": "id", "value": "42" }]
+            }
+        }),
+    );
+
+    let detail = &outcome.endpoint.resource.detail;
+    assert_eq!(
+        detail.path_params.len(),
+        1,
+        "路径参数要落进自己的那一份，不能混进查询参数"
+    );
+    assert_eq!(detail.path_params[0].key, "id");
+    assert_eq!(detail.path_params[0].value, "42");
+    assert!(
+        detail.path_params[0].enabled,
+        "路径参数缺省是启用的 —— 存成禁用就是一条永远发不出去的路径"
+    );
+    assert_eq!(detail.params.len(), 1, "查询参数那一份不受影响");
+    assert_eq!(detail.params[0].key, "page");
+}
+
+// =========================================================================
 // 一份完整的规格
 // =========================================================================
 
