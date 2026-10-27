@@ -36,7 +36,7 @@ pub fn nodes_list(
         ),
         None => None,
     };
-    // 只有类型过滤而无 root 会扫全库再丢掉大半；直接报错，免得悄悄返回
+    // 只有类型过滤而无 root 时，查询会扫全库再丢掉大半；命令直接报错，免得悄悄返回
     // 另一个项目的树。
     if kind.is_some() && root_id.is_none() {
         return Err(AppError::Validation("type filter requires rootId".into()));
@@ -45,7 +45,7 @@ pub fn nodes_list(
         (Some(k), Some(root)) => crate::db::nodes::list_by_root_and_type(c, root, k),
         (None, Some(root)) => crate::db::nodes::list_by_root(c, root),
         (None, None) => crate::db::nodes::list_all(c),
-        // Unreachable: guarded above.
+        // 上面已拦下这组组合（给了 kind 必给 root_id），这个分支走不到。
         (Some(_), None) => Ok(Vec::new()),
     })
 }
@@ -139,7 +139,7 @@ pub fn nodes_update(
     crate::db::with_tx(&state, |c| crate::db::nodes::update(c, &id, patch.clone()))
 }
 
-/// Delete a node and its whole subtree.
+/// 删一个节点与它整棵子树。
 #[tauri::command]
 pub fn nodes_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
     crate::db::with_tx(&state, |c| crate::db::nodes::delete(c, &id))
@@ -179,7 +179,7 @@ pub fn nodes_duplicate(
     })
 }
 
-/// The request configuration of one endpoint node.
+/// 一个 endpoint 节点的请求配置。
 #[tauri::command]
 pub fn endpoint_detail_get(
     state: State<DbPool>,

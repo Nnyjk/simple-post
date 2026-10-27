@@ -95,9 +95,9 @@ fn each_tag_becomes_one_group_and_the_untagged_ones_share_another() {
 
 /// 一份**没有 tag** 的大文档只能落成一个分组。
 ///
-/// 这是真实文档的形状（大量 Apifox / SpringDoc 导出的文件一个 tag 都不打）。曾经
-/// 每个 operation 各成一个模块，于是 87 个接口变成 87 个同名集合——用户看到的是
-/// 一屏重复的名字，看不出这份文档到底是什么。
+/// 这是真实文档的形状（大量 Apifox / SpringDoc 导出的文件一个 tag 都不打）。文档没给
+/// tag 时导入器不能按 operation 各建一个分组，否则 87 个接口会变成 87 个同名集合
+/// ——用户看到的是一屏重复的名字，看不出这份文档到底是什么。
 #[test]
 fn a_document_without_any_tag_yields_a_single_group() {
     let paths: Vec<String> = (0..87)

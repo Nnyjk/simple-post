@@ -275,10 +275,9 @@ fn project_endpoint(
     details: &HashMap<String, EndpointDetail>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<IrEndpoint> {
-    // `details` 以 `node_id` 为键，故查到的那一行必然属于这个节点——原先那句
-    // 「键与 `node_id` 对不上」的检查恒为假，它守的是一件不可能发生的事；真正会
-    // 发生的那一件（根本没有 detail 行）却被 `?` 静默吞掉，用户只看到「导出的
-    // 文档里少了几个接口」，没有任何线索。
+    // `details` 以 `node_id` 为键，故查到的那一行必然属于这个节点。真正会发生的
+    // 异常是根本没有 detail 行——那要让调用方报出来，不能被 `?` 静默吞掉，否则用户
+    // 只看到「导出的文档里少了几个接口」，没有任何线索。
     let Some(d) = details.get(&node.id) else {
         diagnostics.push(Diagnostic::error(
             format!("/nodes/{}", node.id),

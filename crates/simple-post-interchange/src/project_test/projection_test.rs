@@ -156,12 +156,10 @@ fn a_project_with_no_active_environment_projects_empty_servers() {
 
 /// 两表不一致时导出要**出声**，不是把那个接口悄悄丢掉。
 ///
-/// 节点在、detail 行不在，这个接口就打不出请求。原先那条路径是
-/// `details.get(&node.id)?` —— `None` 分支上没有任何诊断，于是用户只看到
-/// 「导出的文档里少了几个接口」，没有任何线索指向少了谁。
+/// 节点在、detail 行不在，这个接口就打不出请求。导出侧要把这件事报成一条 Error：
+/// 静默丢掉只会让用户看到「导出的文档里少了几个接口」，没有任何线索指向少了谁。
 ///
-/// 旁边那句「键与 `node_id` 对不上」的检查恒为假（`details` 就是按 `node_id`
-/// 建的键），守的是一件不可能发生的事；真正会发生的这件被 `?` 吞了。
+/// 诊断的指针是 `/nodes/<节点 id>`，用户据此能定位到是哪一个接口出的问题。
 #[test]
 fn an_endpoint_without_a_detail_row_is_reported_not_dropped_silently() {
     let pool = temp_pool("nodetail");

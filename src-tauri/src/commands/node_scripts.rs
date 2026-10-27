@@ -8,9 +8,9 @@
 // 端点的脚本不在这里：它们住在 `endpoint_details` 行里，随 `endpoint_detail_update`
 // 一起改。
 //
-// patch 整体作为一个参数（而非逐字段摊平）：脚本的「清空」与「不动」靠缺席与显式
-// `null` 区分，而那只有在整个结构体被反序列化时才成立——逐字段摊平会让 Tauri 逐个
-// 取值，serde 内建的 `Option<Option<T>>` 把缺席与 `null` 折叠成同一件事。
+// patch 整体作为一个参数（而不是逐字段展开）：脚本的「清空」与「不动」靠「字段缺席」与
+// 「显式 `null`」区分，而这个区分只有在整个结构体被反序列化时才成立——逐字段展开会让
+// Tauri 逐个取值，serde 内建的 `Option<Option<T>>` 把缺席与 `null` 折叠成同一件事。
 
 use tauri::State;
 

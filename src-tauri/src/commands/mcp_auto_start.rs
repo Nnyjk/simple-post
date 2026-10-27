@@ -1,5 +1,5 @@
 // ===========================================================================
-// region: mcp_auto_start (preference flag)
+// region: mcp_auto_start（偏好开关）
 // ===========================================================================
 
 use tauri::State;
@@ -36,7 +36,7 @@ pub async fn mcp_auto_start_set(
         crate::db::preferences::set(c, crate::db::preferences::keys::MCP_AUTO_START, &value)
     })?;
     if value {
-        // 尽力拉起；错误要抛出去，UI 才能把开关翻回去。
+        // 命令尽力拉起 daemon；错误要抛出去，UI 才能把开关翻回去。
         daemon.start(&app_handle).await?;
     }
     Ok(value)

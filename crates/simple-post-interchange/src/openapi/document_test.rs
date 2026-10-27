@@ -323,9 +323,9 @@ fn body_mode_picks_the_matching_media_type() {
 
 /// 端点带了 `body.schema` 时，`requestBody` 必须**引用**它，而不是另写一个。
 ///
-/// 曾经 `requestBody` 恒写死 `{"type": "object"}`，而 `collect_schema` 把 schema 收进
-/// `components.schemas` 却不生成任何 `$ref`——于是产物里躺着一堆没人引用的
-/// `Schema1`…，而每个 requestBody 都在宣称一个错的请求体形状。
+/// `collect_schema` 把 schema 收进 `components.schemas`，故 `requestBody` 必须生成
+/// 对应的 `$ref`。若 `requestBody` 恒写死 `{"type": "object"}`，产物里会躺着一堆没人
+/// 引用的 `Schema1`…，而每个 requestBody 都在宣称一个错的请求体形状。
 #[test]
 fn a_body_schema_is_referenced_from_the_request_body() {
     let ex = one_module(
