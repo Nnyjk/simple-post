@@ -49,6 +49,10 @@ use call_endpoint::tool_api_call_endpoint;
 #[cfg(test)]
 use run_request::tool_api_run_request;
 
+// `multipart_wire_test.rs` 同样按 `super::apply` 取 multipart 装配。
+#[cfg(test)]
+use multipart::apply;
+
 // =========================================================================
 // 测试
 // =========================================================================
@@ -75,6 +79,13 @@ mod multipart_mode_tests;
 #[cfg(test)]
 #[path = "multipart_parity_test.rs"]
 mod multipart_parity_tests;
+
+// 真实抓包：起一个 TCP 监听器，用产品自己的 `http_executor` 发一次 multipart，
+// 把服务端收到的原始字节读回来解析。同目录其它用例断言的是「我们拼出的字符串长
+// 什么样」，这一组断言「socket 上真的过去的是这个」。
+#[cfg(test)]
+#[path = "multipart_wire_test.rs"]
+mod multipart_wire_tests;
 
 #[cfg(test)]
 #[path = "run_request_test.rs"]

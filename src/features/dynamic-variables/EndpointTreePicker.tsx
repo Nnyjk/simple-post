@@ -15,6 +15,7 @@ import type { NodeSearchHit, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { cn, focusRing } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { useLocalExpansion } from '@/hooks/useLocalExpansion';
 import { createNodeSearch, type NodeSearch } from './node-search';
 
 export interface EndpointTreePickerProps {
@@ -54,7 +55,7 @@ function nodeKey(nodeId: string): string {
 
 export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps) {
   const projects = useAppStore((s) => s.projects);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { isExpanded, toggle: toggleExpansion } = useLocalExpansion();
   const [children, setChildren] = useState<Record<string, ResourceNode[]>>({});
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -89,18 +90,13 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
   useEffect(() => () => search.cancel(), [search]);
 
   /** 展开一行：第一次展开才去取孩子。 */
-  const toggle = useCallback((key: string, load: () => Promise<void>) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-        return next;
-      }
-      next.add(key);
-      return next;
-    });
-    void load();
-  }, []);
+  const toggleRow = useCallback(
+    (key: string, load: () => Promise<void>) => {
+      toggleExpansion(key);
+      void load();
+    },
+    [toggleExpansion],
+  );
 
   const loadProjectChildren = useCallback(
     async (projectIdToLoad: string, key: string) => {
@@ -162,7 +158,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
         projectId: node.rootId,
         expandable: node.kind !== 'endpoint',
       });
-      if (!expanded.has(key)) return;
+      if (!isExpanded(key)) return;
       for (const child of children[key] ?? []) pushNode(child, depth + 1);
     };
     for (const project of projects) {
@@ -176,11 +172,11 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
         projectId: project.id,
         expandable: true,
       });
-      if (!expanded.has(key)) continue;
+      if (!isExpanded(key)) continue;
       for (const child of children[key] ?? []) pushNode(child, 1);
     }
     return out;
-  }, [projects, expanded, children]);
+  }, [projects, isExpanded, children]);
 
   const filtering = query.trim() !== '';
 
@@ -234,7 +230,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
         ) : (
           <ul>
             {rows.map((row) => {
-              const isExpanded = expanded.has(row.key);
+              const open = isExpanded(row.key);
               const busy = loading.has(row.key);
               const kids = children[row.key];
               return (
@@ -247,7 +243,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
                       <button
                         type="button"
                         onClick={() =>
-                          toggle(row.key, () =>
+                          toggleRow(row.key, () =>
                             row.kind === 'project'
                               ? loadProjectChildren(row.id, row.key)
                               : loadNodeChildren(row.id, row.key),
@@ -257,16 +253,13 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
                           'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-faint transition-colors hover:bg-accent hover:text-foreground',
                           focusRing,
                         )}
-                        aria-label={isExpanded ? '收起' : '展开'}
+                        aria-label={open ? '收起' : '展开'}
                       >
                         {busy ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
                         ) : (
                           <ChevronRight
-                            className={cn(
-                              'h-3 w-3 transition-transform',
-                              isExpanded && 'rotate-90',
-                            )}
+                            className={cn('h-3 w-3 transition-transform', open && 'rotate-90')}
                           />
                         )}
                       </button>
@@ -290,7 +283,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
                         {row.name}
                       </span>
                     )}
-                    {isExpanded && kids && kids.length === 0 && (
+                    {open && kids && kids.length === 0 && (
                       <span className="pr-1 text-[11px] text-faint">（空）</span>
                     )}
                   </div>
