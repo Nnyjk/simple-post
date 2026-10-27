@@ -39,14 +39,18 @@ pub mod http_config;
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod interchange_api;
 pub mod port_registry;
+/// 一份接口规格的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必
+/// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
+pub mod spec_api;
 pub mod web_api;
 
 // 再导出共享的底层，好让调用点在 workspace 抽取与本次 crate 拆分之后继续使用
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /
 // `crate::permissions::*` / `crate::http_executor::*` /
 // `crate::mcp_metrics::*` / `crate::mcp::*`。
+// `spec` 也在其中：一份接口规格的线格式与落库编排在 core，三个宿主都认它。
 pub use simple_post_core::{
-    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script,
+    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script, spec,
 };
 
 // 转换层本身也再导出一次，好让调用点写 `crate::interchange::…` 而不是

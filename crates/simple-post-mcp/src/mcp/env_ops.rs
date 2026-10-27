@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
-use simple_post_core::domain::{Environment, EnvironmentPatch};
+use simple_post_core::domain::EnvironmentPatch;
 use simple_post_core::error::AppError;
 
 // =========================================================================
@@ -26,6 +26,9 @@ struct ProjectIdArgs {
 struct CreateEnvArgs {
     project_id: String,
     name: String,
+    /// 已经有同名环境时怎么办。缺省是 `reuse`。
+    #[serde(default)]
+    if_exists: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,12 +86,17 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_create",
-            description: "Create a new environment in a project. Returns the new Environment.",
+            description: "Create an environment in a project. if_exists=reuse (the default) returns the existing environment with the same name instead of creating a second one.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "project_id": { "type": "string" },
-                    "name": { "type": "string" }
+                    "name": { "type": "string" },
+                    "if_exists": {
+                        "type": "string",
+                        "enum": ["reuse", "error", "duplicate"],
+                        "description": "What to do when the project already has an environment with this name. \"reuse\" (default) returns the existing one; \"error\" refuses; \"duplicate\" creates a second one."
+                    }
                 },
                 "required": ["project_id", "name"],
                 "additionalProperties": false,
@@ -97,7 +105,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_update",
-            description: "Update an environment's name/moduleBaseUrls/variables/disabledVariables. moduleBaseUrls replaces the whole map and is keyed by service id then module id. disabledVariables replaces the whole set of disabled variable names; a disabled variable is stored and shown but does not take part in substitution.",
+            description: "Update an environment's name, moduleBaseUrls, variables and disabledVariables. Each map is replaced as a whole, not merged: send the complete set the environment should end up with. To change one variable use env_set_var.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -106,9 +114,19 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                         "type": "object",
                         "properties": {
                             "name": { "type": "string" },
-                            "moduleBaseUrls": { "type": "object" },
-                            "variables": { "type": "object" },
-                            "disabledVariables": { "type": "array", "items": { "type": "string" } }
+                            "moduleBaseUrls": {
+                                "type": "object",
+                                "description": "Replaces the whole map, keyed by service id then module id. Each leaf is that (environment x service x module) cell's URL; an absent cell means no base URL, because that cell never inherits."
+                            },
+                            "variables": {
+                                "type": "object",
+                                "description": "Replaces the whole variable map. A variable that is absent here is removed."
+                            },
+                            "disabledVariables": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Replaces the whole set of disabled variable names. A disabled variable is still stored and shown but does not take part in substitution."
+                            }
                         },
                         "additionalProperties": true
                     }
@@ -146,7 +164,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_set_baseurl",
-            description: "Set the URL one service has for one module in one environment. That (environment x service x module) cell is the only place a base URL lives and it never inherits, so an unconfigured cell means the request goes out without a base URL. url must not be empty.",
+            description: "Set the URL one service has for one module in one environment — the (environment x service x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -204,26 +222,20 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
     }
+    let if_exists = simple_post_core::spec::IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "env_create").await?;
 
-    let env = Environment {
-        id: simple_post_core::domain::now_ms().to_string(),
-        project_id: a.project_id.clone(),
-        name: a.name,
-        base_urls: std::collections::HashMap::new(),
-        module_base_urls: std::collections::HashMap::new(),
-        variables: std::collections::HashMap::new(),
-        disabled_variables: Vec::new(),
-        is_active: false,
-    };
-    let id = env.id.clone();
-    simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::environments::create(c, &env)
+    // 「按名找或建」与 id 的生成都在 `core::spec`，REST 路由与桌面 command 共用。
+    let resolved = simple_post_core::db::with_tx(&state.pool, |c| {
+        simple_post_core::spec::resolve_environment(c, &a.project_id, &a.name, if_exists)
     })?;
     let stored = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::environments::get(c, &id)
+        simple_post_core::db::environments::get(c, &resolved.id)
     })?;
-    Ok(CallToolResult::json(stored))
+    let mut out = serde_json::to_value(&stored)
+        .map_err(|e| AppError::Validation(format!("environment response: {e}")))?;
+    out["created"] = json!(resolved.created);
+    Ok(CallToolResult::json(out))
 }
 
 async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {

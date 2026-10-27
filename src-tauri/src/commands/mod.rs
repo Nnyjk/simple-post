@@ -38,6 +38,7 @@ mod permissions;
 mod projects;
 mod request_settings;
 mod response_history;
+mod spec;
 
 // 必须是 glob，不能列条目：`#[tauri::command]` 除函数外还生成两个
 // `#[macro_export]` 宏（`__cmd__<name>`、`__tauri_command_name_<name>`），
@@ -59,3 +60,4 @@ pub use permissions::*;
 pub use projects::*;
 pub use request_settings::*;
 pub use response_history::*;
+pub use spec::*;

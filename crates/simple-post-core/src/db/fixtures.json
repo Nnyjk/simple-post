@@ -152,7 +152,7 @@
         "mode": "json",
         "content": "{\n  \"phone\": \"13800138000\",\n  \"code\": \"654321\",\n  \"deviceId\": \"web-{{env}}\"\n}"
       },
-      "auth": { "type": "none" },
+      "auth": { "kind": "none" },
       "docs": "## 短信登录\n\n使用手机号 + 短信验证码完成登录。\n\n- 验证码 5 分钟内有效\n- 同一手机号 1 分钟内只能发 1 条",
       "notes": null,
       "tags": ["登录", "公开"],
@@ -176,7 +176,7 @@
         "mode": "json",
         "content": "{\n  \"username\": \"\",\n  \"password\": \"\"\n}"
       },
-      "auth": { "type": "none" },
+      "auth": { "kind": "none" },
       "docs": null,
       "notes": null,
       "tags": ["登录"],
@@ -205,7 +205,7 @@
       ],
       "headers": [],
       "body": { "mode": "none", "content": "" },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": ["用户"],
@@ -226,7 +226,7 @@
       "params": [],
       "headers": [],
       "body": { "mode": "json", "content": "{\n  \"nickname\": \"\",\n  \"avatar\": \"\"\n}" },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": ["用户"],
@@ -257,7 +257,7 @@
       ],
       "headers": [],
       "body": { "mode": "none", "content": "" },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": "## 订单列表\n分页参数 `page` 从 1 开始。",
       "notes": null,
       "tags": ["订单", "分页"],
@@ -281,7 +281,7 @@
         "mode": "json",
         "content": "{\n  \"skuId\": \"sku_123\",\n  \"quantity\": 1,\n  \"addressId\": \"addr_001\",\n  \"couponId\": null\n}"
       },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": ["订单"],
@@ -302,7 +302,7 @@
       "params": [],
       "headers": [],
       "body": { "mode": "none", "content": "" },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": ["订单"],
@@ -326,7 +326,7 @@
         "mode": "json",
         "content": "{\n  \"orderId\": \"\",\n  \"amount\": 0,\n  \"reason\": \"\"\n}"
       },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": ["订单", "退款"],
@@ -350,7 +350,7 @@
         "mode": "json",
         "content": "{\n  \"orderId\": \"\",\n  \"channel\": \"WECHAT\"\n}"
       },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": ["支付"],
@@ -371,7 +371,7 @@
       "params": [],
       "headers": [],
       "body": { "mode": "none", "content": "" },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": [],
@@ -395,7 +395,7 @@
         "mode": "json",
         "content": "{\n  \"orderId\": \"\",\n  \"titleId\": \"\",\n  \"email\": \"\"\n}"
       },
-      "auth": { "type": "bearer", "bearer": "{{token}}" },
+      "auth": { "kind": "bearer", "bearer": "{{token}}" },
       "docs": null,
       "notes": null,
       "tags": ["发票"],
@@ -417,8 +417,8 @@
       "headers": [],
       "body": { "mode": "none", "content": "" },
       "auth": {
-        "type": "apikey",
-        "apikey": { "key": "X-API-Key", "value": "{{apiKey}}", "in": "header" }
+        "kind": "apikey",
+        "apikey": { "key": "X-API-Key", "value": "{{apiKey}}", "inLocation": "header" }
       },
       "docs": null,
       "notes": null,
@@ -441,8 +441,8 @@
       "headers": [],
       "body": { "mode": "json", "content": "{\n  \"switch\": true,\n  \"brightness\": 80\n}" },
       "auth": {
-        "type": "apikey",
-        "apikey": { "key": "X-API-Key", "value": "{{apiKey}}", "in": "header" }
+        "kind": "apikey",
+        "apikey": { "key": "X-API-Key", "value": "{{apiKey}}", "inLocation": "header" }
       },
       "docs": null,
       "notes": null,

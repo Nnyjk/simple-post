@@ -26,6 +26,7 @@ pub mod env_ops;
 pub mod http_ops;
 pub(crate) mod key_value;
 pub mod project_ops;
+pub mod resources;
 pub mod response_parse;
 pub mod variable_fill;
 use simple_post_core::permissions::{resolve_capability, Capability, CapabilityPolicy};
@@ -368,6 +369,9 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("base_url_def_update", Capability::Update),
     ("base_url_def_delete", Capability::Delete),
     ("base_url_def_set_default", Capability::Update),
+    // 整份接口规格。取 `Update` 而不是 `Create`：它不但建节点，还会改环境变量、
+    // 改 base URL 那一格，`if_exists=update` 时还会覆盖已有端点的字段。
+    ("spec_upsert", Capability::Update),
     // HTTP 执行 —— 唯二会发外网请求的工具，信任级别最高。
     ("api_run_request", Capability::Send),
     ("api_call_endpoint", Capability::Send),
@@ -543,6 +547,9 @@ pub async fn check_permission(
 /// 是工作区当前环境，而顶栏的环境切换会写 `environments.is_active`，故两处读到的是
 /// 同一个环境。
 ///
+/// 端点绑定的环境必须属于端点所在的项目：环境里的变量属于那个项目，拿别的项目的
+/// 环境来替换，等于把那个项目的值读进这个项目的请求。
+///
 /// 两者都取不到时没有环境：变量不替换，base URL 的格子也无从读。
 pub(crate) fn resolve_env(
     pool: &simple_post_core::db::DbPool,
@@ -551,10 +558,20 @@ pub(crate) fn resolve_env(
 ) -> Result<Option<simple_post_core::domain::Environment>, simple_post_core::error::AppError> {
     if let Some(env_id) = env_id {
         // 悬空的 env id（例如环境已被删）不至于让调用失败，只是这次请求不做变量替换。
-        return Ok(simple_post_core::db::with_conn(pool, |c| {
+        let found = simple_post_core::db::with_conn(pool, |c| {
             simple_post_core::db::environments::get(c, env_id)
-        })
-        .ok());
+        });
+        let env = found.ok();
+        // `project_id` 为空表示这次请求没有项目归属（如临时的 `api_run_request`），
+        // 那时无从判断，故照旧返回那个环境。
+        let belongs_to_another_project = env
+            .as_ref()
+            .is_some_and(|e| !project_id.is_empty() && e.project_id != project_id);
+        return Ok(if belongs_to_another_project {
+            None
+        } else {
+            env
+        });
     }
     if project_id.is_empty() {
         return Ok(None);
@@ -572,3 +589,11 @@ pub(crate) fn resolve_env(
 #[cfg(test)]
 #[path = "mod_test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "env_resolve_test.rs"]
+mod env_resolve_tests;
+
+#[cfg(test)]
+#[path = "resources_test.rs"]
+mod resources_tests;

@@ -50,8 +50,7 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
         name: "endpoint_search",
         description: "Search endpoints by free-text query, method, or tags. \
                        One of project_id, module_id or collection_id is \
-                       required — an unscoped search spans every project and \
-                       has no single project permission to check.",
+                       required — an unscoped search spans every project.",
         schema: json!({
             "type": "object",
             "properties": {
@@ -73,28 +72,39 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
     });
     v.push(crate::mcp::ToolEntry {
         name: "endpoint_create",
-        description: "Create a new endpoint inside a collection, or directly \
-                       under a module (pass module_id when no collection is \
-                       wanted).",
+        description: "Create an endpoint. Give it a parent: `collection_id` to put it \
+                       inside an existing collection, `collection_path` (together with \
+                       `module_id`) to create the collections on the way, or `module_id` \
+                       to put it directly under a module. if_exists=reuse (the default) \
+                       returns an existing endpoint with the same name, method and url \
+                       unchanged. For a whole spec in one call, use spec_upsert.",
         schema: json!({
             "type": "object",
             "properties": {
                 "collection_id": {
                     "type": "string",
-                    "description": "Parent collection id. Required unless module_id is given."
+                    "description": "Parent collection id. Required unless module_id or collection_path is given."
                 },
                 "module_id": {
                     "type": "string",
-                    "description": "Parent module id, to create the endpoint directly under a module."
+                    "description": "Parent module id. Required together with collection_path, since that path is relative to the module."
                 },
-                "name": { "type": "string" },
+                "collection_path": {
+                    "type": "string",
+                    "description": "Collection path relative to module_id, e.g. \"订单/明细\". The collections on the way are created when missing; existing ones with the same name are reused."
+                },
+                "if_exists": {
+                    "type": "string",
+                    "enum": ["reuse", "error", "duplicate"],
+                    "description": "What to do when an endpoint with the same name, method and url already exists under that parent. \"reuse\" (default) returns it unchanged and writes nothing; \"error\" refuses; \"duplicate\" creates a second one."
+                },                "name": { "type": "string" },
                 "method": {
                     "type": "string",
-                    "description": "HTTP verb. Standard verbs: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS. Any RFC 9110 token (e.g. PROPFIND) is also accepted."
+                    "description": "HTTP verb: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, or any RFC 9110 token."
                 },
                 "url": {
                     "type": "string",
-                    "description": "Path only, e.g. \"/api/users/{id}\". The host is resolved at send time from the active environment's service URLs."
+                    "description": "Path only, e.g. \"/api/users/{id}\". The host comes from the environment's service URL at send time."
                 },
                 "headers": {
                     "type": "array",
@@ -116,27 +126,22 @@ placeholder name in `url`; a placeholder without an entry keeps its literal brac
                 "body_mode": {
                     "type": "string",
                     "enum": json!(BODY_MODE_VALUES),
-                    "description": "How to interpret body_content when sending. \"none\" sends no body. \
-\"multipart\" builds the body itself, so for that mode it also replaces a Content-Type header you set."
+                    "description": "How to interpret body_content when sending. \"none\" sends no \
+body; \"raw\" sends the text verbatim; \"json\" sends a JSON instance; \"form\" sends urlencoded \
+text; \"multipart\" sends a JSON array of parts, each {\"name\": string, \"value\": string, \
+\"filename\"?: string, \"contentType\"?: string}, and it also replaces a Content-Type header you set."
                 },
                 "body_content": {
                     "type": "string",
                     "description": "The request payload actually sent on the wire, interpreted according to \
-body_mode: verbatim text when \"raw\", a JSON *instance* when \"json\" (a value position may hold a \
-{{var}} placeholder, which is replaced with that variable's value when the request is sent), \
-urlencoded text when \"form\". When mode is \"multipart\", a JSON array of parts, each {\"name\": string, \
-\"value\": string, \"filename\"?: string, \"contentType\"?: string} — contentType defaults to \
-application/octet-stream for a part that has a filename. Unparsable multipart content yields zero \
-parts rather than an error. This is the field for \"what to send when testing\"; the documented \
-parameter definition goes in body_schema, never here."
+body_mode. This is the field for \"what to send when testing\"; the documented parameter definition \
+goes in body_schema."
                 },
                 "body_schema": {
                     "type": "string",
                     "description": "JSON Schema describing the request body — the *documented* parameter \
-definition of this endpoint (which fields it accepts, their types, whether they are required). Stored \
-alongside the body and never sent on the wire; it is what an OpenAPI export publishes. This is the \
-field for \"what parameters does this endpoint accept\"; the value to send when testing goes in \
-body_content, never here."
+definition of this endpoint. Never sent on the wire; it is what an OpenAPI export publishes. The value \
+to send when testing goes in body_content, never here."
                 },
                 "auth_type": {
                     "type": "string",
@@ -145,7 +150,10 @@ body_content, never here."
                 },
                 "auth_config": {
                     "type": "object",
-                    "description": "Scheme-specific credentials: {\"bearer\":\"<token>\"} for bearer, {\"basic\":{\"username\":\"u\",\"password\":\"p\"}} for basic, {\"apikey\":{\"key\":\"<header name>\",\"value\":\"<key>\",\"inLocation\":\"header\"|\"query\"}} for apikey, {\"oauth2\":{\"grantType\":\"client_credentials\",\"tokenUrl\":\"https://idp.example.com/oauth/token\",\"clientId\":\"<id>\"}} for oauth2 (see auth.oauth2 in endpoint_update for the full shape)."
+                    "description": "Credentials for the chosen scheme: {\"bearer\":\"<token>\"}, \
+{\"basic\":{\"username\":\"u\",\"password\":\"p\"}}, \
+{\"apikey\":{\"key\":\"X-Api-Key\",\"value\":\"<key>\",\"inLocation\":\"header\"|\"query\"}}, or \
+{\"oauth2\":{...}} (see auth.oauth2 in endpoint_update)."
                 },
                 "tags": { "type": "array", "items": { "type": "string" } },
                 "environment_id": {
@@ -162,13 +170,21 @@ body_content, never here."
                 },
                 "description": { "type": "string" },
                 "docs": { "type": "string", "description": "Free-form documentation." },
-                "notes": { "type": "string", "description": "Free-form notes." }
+                "notes": { "type": "string", "description": "Free-form notes." },
+                "pre_request_script": {
+                    "type": "string",
+                    "description": "JavaScript run after variable resolution and before the request is sent. It may rewrite the request (pm.request)."
+                },
+                "test_script": {
+                    "type": "string",
+                    "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set)."
+                }
             },
             "$defs": {
                 "keyValue": crate::mcp::key_value::key_value_schema(),
             },
             "required": ["name", "method", "url"],
-            "additionalProperties": true,
+            "additionalProperties": false,
         }),
         func: tool_fn!(tool_endpoint_create),
     });
@@ -191,7 +207,7 @@ body_content, never here."
                         "sort_order": { "type": "integer" },
                         "method": {
                             "type": "string",
-                            "description": "HTTP verb. Standard verbs: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS. Any RFC 9110 token is also accepted."
+                            "description": "HTTP verb: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, or any RFC 9110 token."
                         },
                         "url": { "type": "string", "description": "Path only, e.g. \"/api/users/{id}\"." },
                         "params": {
@@ -217,11 +233,11 @@ segments in `url`. They are substituted into the path itself, not appended to th
                                 "mode": { "type": "string", "enum": json!(BODY_MODE_VALUES) },
                                 "content": {
                                     "type": "string",
-                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values (a value position may hold a {{var}} placeholder), not a JSON Schema — the definition goes in `schema`."
+                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values, not a JSON Schema — the definition goes in `schema`."
                                 },
                                 "schema": {
                                     "type": ["string", "null"],
-                                    "description": "JSON Schema describing the request body: the documented parameter definition of this endpoint. Never sent on the wire. null clears it."
+                                    "description": "JSON Schema describing the request body. Never sent on the wire. null clears it."
                                 }
                             },
                             "required": ["mode"],
@@ -229,7 +245,7 @@ segments in `url`. They are substituted into the path itself, not appended to th
                         },
                         "auth": {
                             "type": "object",
-                            "description": "Replaces the whole auth config.",
+                            "description": "Replaces the whole auth config. A scheme without its credential is rejected.",
                             "properties": {
                                 "kind": { "type": "string", "enum": json!(AUTH_TYPE_VALUES) },
                                 "bearer": { "type": "string" },

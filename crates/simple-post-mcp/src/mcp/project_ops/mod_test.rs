@@ -25,8 +25,8 @@ fn state() -> std::sync::Arc<AppState> {
 }
 
 #[test]
-fn table_count_is_28() {
-    assert_eq!(table().len(), 28);
+fn table_count_is_29() {
+    assert_eq!(table().len(), 29);
 }
 
 #[tokio::test]

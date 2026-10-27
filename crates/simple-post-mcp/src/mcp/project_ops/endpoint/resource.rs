@@ -8,7 +8,7 @@ use simple_post_core::error::AppError;
 ///
 /// AI 客户端问「把这个端点给我」要的是 method 与 url，而它们现在在
 /// `endpoint_details` 里；只回 node 只会得到一个名字和一个类型。
-pub(super) fn endpoint_resource(
+pub(in crate::mcp::project_ops) fn endpoint_resource(
     pool: &simple_post_core::db::DbPool,
     node_id: &str,
 ) -> Result<EndpointResource, AppError> {

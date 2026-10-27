@@ -14,5 +14,6 @@ pub mod oauth2;
 pub mod path_params;
 pub mod permissions;
 pub mod script;
+pub mod spec;
 pub mod template;
 pub mod url;

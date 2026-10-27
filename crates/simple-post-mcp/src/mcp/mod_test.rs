@@ -55,6 +55,7 @@ fn tools_list_returns_all_registered_tools() {
     assert!(has("api_diff_responses"), "missing api_diff_responses");
     assert!(has("api_extract_jsonpath"), "missing api_extract_jsonpath");
     assert!(has("dynamic_var_"), "missing dynamic_var_* tools");
+    assert!(has("spec_"), "missing spec_* tools");
 
     // 工具总数抽查 —— 断言刻意放宽，好让后来加工具不必改测试，但紧到能抓到整个
     // 类别被弄丢。
@@ -85,17 +86,17 @@ fn every_registered_tool_has_a_capability() {
 
 /// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` 与 `README.md` 都写着「51 tools」。上面的双射测试在「工具连同它的
+/// `AGENTS.md` 与 `README.md` 都写着「52 tools」。上面的双射测试在「工具连同它的
 /// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
 /// 里要改这个常量，同一个 commit 也应更新那两份文档。
-const EXPECTED_TOOL_COUNT: usize = 51;
+const EXPECTED_TOOL_COUNT: usize = 52;
 
 #[test]
 fn registered_tool_count_matches_the_documented_figure() {
     assert_eq!(
         tool_table().len(),
         EXPECTED_TOOL_COUNT,
-        "tool count changed; update EXPECTED_TOOL_COUNT and the '51 tools' \
+        "tool count changed; update EXPECTED_TOOL_COUNT and the '52 tools' \
              claims in AGENTS.md and README.md"
     );
 }
@@ -113,6 +114,85 @@ fn every_capability_row_names_a_registered_tool() {
         stale.is_empty(),
         "REQUIRED_CAPABILITY rows with no matching tool: {stale:?}"
     );
+}
+
+/// `tools/list` 的体积有一个上限，理由是**它每一次会话都要付钱**。
+///
+/// 客户端在动手之前要先把整份清单读进上下文，于是 52 条描述符的每一个字节都乘以
+/// 「会话数」。详细的解释属于 `simple-post://spec-authoring` 那份按需读取的指南，
+/// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
+///
+/// **上限怎么算出来的。** 紧凑 JSON 约 **4.70 字符 / token**（`cl100k_base` 实测；
+/// 「字符数 ÷ 3」高估六成），40 718 字符 ≈ **8 672 tokens**，故上限取 41 400 字符。
+/// 超限时把长说明移到 `simple-post://spec-authoring`，不要扩大工具描述。
+const TOOLS_LIST_BUDGET_CHARS: usize = 41_400;
+
+#[test]
+fn the_tools_list_payload_stays_under_its_budget() {
+    let descriptors: Vec<ToolDescriptor> = tool_table()
+        .iter()
+        .map(|e| ToolDescriptor {
+            name: e.name.to_string(),
+            description: e.description.to_string(),
+            input_schema: e.schema.clone(),
+        })
+        .collect();
+    // 紧凑序列化：真正上线的形状。`serde_json::to_string` 不加空格，与
+    // `tools/list` 响应里 axum 的 `Json` 响应体一致。
+    let payload = serde_json::to_string(&descriptors).expect("描述符序列化成 JSON");
+    assert!(
+        payload.len() <= TOOLS_LIST_BUDGET_CHARS,
+        "tools/list 是 {} 字符（约 {} tokens），超过上限 {} 字符。\
+         详细的规则与例子放 `simple-post://spec-authoring` 那份指南，别往工具描述里塞。",
+        payload.len(),
+        payload.len() * 100 / 473,
+        TOOLS_LIST_BUDGET_CHARS
+    );
+}
+
+/// 打印 `tools/list` 的体积与逐条分布，供调整描述时对照。
+///
+/// 这个测试不做断言，只报告数字，并把整份负载写到 `target/tools-list.json`，
+/// 好让外面的分词器量真实 token 数。用
+/// `cargo test -p simple-post-mcp -- --ignored --nocapture report_the_tools_list_size` 跑。
+#[test]
+#[ignore = "只在调整描述时手动跑：写 target/tools-list.json"]
+fn report_the_tools_list_size() {
+    let mut rows: Vec<(String, usize, usize)> = tool_table()
+        .iter()
+        .map(|e| {
+            let schema = serde_json::to_string(&e.schema).unwrap_or_default().len();
+            let description = e.description.len();
+            (e.name.to_string(), schema, description)
+        })
+        .collect();
+    rows.sort_by_key(|(_, schema, _)| std::cmp::Reverse(*schema));
+    let total_schema: usize = rows.iter().map(|(_, s, _)| *s).sum();
+    let total_description: usize = rows.iter().map(|(_, _, d)| *d).sum();
+    for (name, schema, description) in &rows {
+        println!("{name:28} schema {schema:6}  description {description:5}");
+    }
+    println!(
+        "TOTAL schema {total_schema} + description {total_description} = {}",
+        total_schema + total_description
+    );
+
+    let descriptors: Vec<ToolDescriptor> = tool_table()
+        .iter()
+        .map(|e| ToolDescriptor {
+            name: e.name.to_string(),
+            description: e.description.to_string(),
+            input_schema: e.schema.clone(),
+        })
+        .collect();
+    let payload = serde_json::to_string_pretty(&descriptors).expect("描述符序列化成 JSON");
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tools-list.json");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, payload).expect("写下 tools-list.json");
+    println!("wrote {}", path.display());
 }
 
 /// Gate B 回归网 —— 权限检查结果绝不丢弃。

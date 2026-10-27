@@ -13,6 +13,30 @@ use crate::db;
 use crate::domain::ResourceNodeType;
 use crate::error::AppError;
 
+/// 播种出来的每一个端点，它的配置行都必须**读得出来**。
+///
+/// `fixtures.json` 的 `auth` 必须用 `kind` 字段：`AuthConfig` 按 `kind` 反序列化
+/// `auth_json`。树形测试只读 `nodes` 表，不读 `auth_json`，故本测试逐个读出配置行。
+#[test]
+fn every_seeded_endpoint_has_a_readable_detail_row() {
+    let (pool, _dir) = seeded_pool();
+
+    let endpoints = db::with_conn(&pool, |c| {
+        list_by_root_and_type(c, "p_demo", ResourceNodeType::Endpoint)
+    })
+    .unwrap();
+    assert!(
+        !endpoints.is_empty(),
+        "fixture 里得有端点，否则这条断言什么也验不到"
+    );
+
+    for node in endpoints {
+        let detail = db::with_conn(&pool, |c| crate::db::endpoint_details::get(c, &node.id))
+            .unwrap_or_else(|e| panic!("端点 {} 的配置行读不出来：{e}", node.id));
+        assert!(!detail.url.is_empty(), "{} 的 url 不该是空的", node.id);
+    }
+}
+
 #[test]
 fn seeded_nested_collection_sits_one_level_below_its_parent() {
     // The two depths must be distinguishable: the nested collection is

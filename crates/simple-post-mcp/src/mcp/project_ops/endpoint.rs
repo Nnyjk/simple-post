@@ -13,6 +13,7 @@ use simple_post_core::error::AppError;
 
 mod args;
 mod input;
+mod missing;
 mod patch;
 mod read;
 mod registry;
@@ -22,6 +23,16 @@ mod write;
 pub(super) use registry::register;
 #[cfg(test)]
 pub(super) use write::tool_endpoint_create;
+
+// `spec_upsert` 也要用这两样：「它还缺什么」的判据，以及 OAuth2 载荷的 JSON Schema。
+// 它们本来只服务 `endpoint_*` 那 8 个工具，现在同一个 `project_ops` 下的另一个
+// 工具也要用，故在这里再导出一次。
+//
+// `missing_pieces` 另有一处调用方：`crate::spec::ops` —— REST 路由与桌面 command
+// 落同一份规格时也要算「还缺什么」，而那条判据住在 mcp crate 里（它要用
+// `variable_fill::resolve_base_url_with`），故它得能走出 `project_ops`。
+pub(in crate::mcp::project_ops) use input::oauth2_config_schema;
+pub(crate) use missing::{missing_pieces, project_of};
 
 // =========================================================================
 // 仅测试用的再导出
@@ -78,6 +89,10 @@ mod patch_tests;
 #[cfg(test)]
 #[path = "endpoint/create_test.rs"]
 mod create_tests;
+
+#[cfg(test)]
+#[path = "endpoint/authoring_test.rs"]
+mod authoring_tests;
 
 #[cfg(test)]
 #[path = "endpoint/gate_test.rs"]

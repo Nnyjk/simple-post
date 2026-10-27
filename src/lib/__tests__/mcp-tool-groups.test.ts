@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { groupTools, OTHER_GROUP_KEY } from '@/lib/mcp-tool-groups';
 
 /**
- * daemon 今天实际注册的 51 个工具。逐字照抄（而非推导）是有意的：给 Rust 注册表加了
+ * daemon 今天实际注册的 52 个工具。逐字照抄（而非推导）是有意的：给 Rust 注册表加了
  * 工具却没教 `groupTools` 它的前缀时，它会变成一条失败的「其他」断言，而不是表格里
  * 悄悄少一行。
  */
 const REGISTERED_TOOLS = [
+  'spec_upsert',
   'env_list',
   'env_get_active',
   'env_create',
@@ -72,6 +73,7 @@ test('groupTools: every registered tool lands in its prefix family', () => {
     `未归类: ${JSON.stringify(groups.find((g) => g.key === OTHER_GROUP_KEY)?.items)}`,
   );
   assert.deepEqual(keys, [
+    'spec',
     'env',
     'project',
     'module',
@@ -88,6 +90,7 @@ test('groupTools: per-family counts match the registry', () => {
     groupTools(REGISTERED_TOOLS).map((g) => [g.key, g.items.length]),
   );
   assert.deepEqual(byKey, {
+    spec: 1,
     env: 8,
     project: 5,
     module: 5,
@@ -97,7 +100,7 @@ test('groupTools: per-family counts match the registry', () => {
     dynamic: 7,
     api: 8,
   });
-  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 51);
+  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 52);
 });
 
 test('groupTools: no tool is dropped or duplicated', () => {

@@ -1,5 +1,11 @@
 //! MCP 入参里的一行键值对。
 //!
+//! **类型住在 core，不在这里**：`simple_post_core::spec::input::KeyValueInput` 是那一处
+//! 唯一的实现（`id` 缺失时另铸、`enabled` 缺省为 `true`、`value` 可为空），因为
+//! `endpoint_create` / `endpoint_update` 与 `spec_upsert` 必须对「一行键值对怎么读」
+//! 有同一个答案。规则写两遍就会漂移，而漂移的表现是「同一个字段在两条路上行为不同」
+//! —— 那是最难查的一类缺陷。
+//!
 //! 域类型 [`KeyValue`](simple_post_core::domain::KeyValue) 的 `id` 与 `enabled` 没有
 //! serde 默认值，于是最自然的写法 `{"key":"page","value":"1"}` 反序列化失败 —— 而
 //! 这正是工具描述与 JSON Schema 文档化的形状。两处放宽的理由不同：
@@ -15,65 +21,30 @@
 //! 这一份类型服务两处入参：`endpoint_create` / `endpoint_update` 的键值对数组，以及
 //! `api_call_endpoint` / `api_resolve_endpoint` 的 `overrides`。两处放宽的规则相同，
 //! 各写一份就会漂 —— 而漂掉的那一处表现为「工具描述说能传，调用却报字段缺失」。
-use serde::Deserialize;
+pub(crate) use simple_post_core::spec::input::{coerce_key_values, KeyValueInput};
+
 use serde_json::{json, Value};
-
-use simple_post_core::domain::KeyValue;
-
-/// agent 手写的一行 `KeyValue` 的线上形状。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct KeyValueInput {
-    #[serde(default)]
-    pub(crate) id: Option<String>,
-    pub(crate) key: String,
-    #[serde(default)]
-    pub(crate) value: String,
-    #[serde(default)]
-    pub(crate) enabled: Option<bool>,
-    #[serde(default)]
-    pub(crate) description: Option<String>,
-}
-
-impl KeyValueInput {
-    pub(crate) fn into_key_value(self) -> KeyValue {
-        let id = match self.id {
-            Some(id) if !id.trim().is_empty() => id,
-            _ => simple_post_core::domain::uid(),
-        };
-        KeyValue {
-            id,
-            key: self.key,
-            value: self.value,
-            enabled: self.enabled.unwrap_or(true),
-            description: self.description,
-        }
-    }
-}
-
-/// 反序列化键值对数组，并补齐 `KeyValue` 要求、而调用方没有理由知道的那些簿记字段。
-pub(crate) fn coerce_key_values(rows: Vec<KeyValueInput>) -> Vec<KeyValue> {
-    rows.into_iter()
-        .map(KeyValueInput::into_key_value)
-        .collect()
-}
 
 /// 一行键值对的 JSON Schema。
 ///
-/// `endpoint_create` / `endpoint_update` 与 `api_call_endpoint` 的 `overrides`
-/// 都用 `#/$defs/keyValue` 引用它，故它住在共享的地方：两处各写一份，改了一处就有
-/// 一处引着一个**没有定义**的 `$ref` —— 跟着 `$ref` 走的 agent 落到空处，只能自己猜
-/// 这一行长什么样。
+/// `endpoint_create` / `endpoint_update` / `spec_upsert` 与 `api_call_endpoint` 的
+/// `overrides` 都用 `#/$defs/keyValue` 引用它，故它住在共享的地方：两处各写一份，
+/// 改了一处就有一处引着一个**没有定义**的 `$ref` —— 跟着 `$ref` 走的 agent 落到空处，
+/// 只能自己猜这一行长什么样。
+///
+/// 逐个属性的说明一律省掉，只留名字、类型与取值范围：这一行的形状是协议定的，说明
+/// 文字对 agent 没有帮助，而 `tools/list` 的每一个字节都要乘以会话数。对象级的说明
+/// 保留了两条承重的事实（`id` 可选、`enabled` 缺省为 `true`）。
 pub(crate) fn key_value_schema() -> Value {
     json!({
         "type": "object",
         "description": "One key/value row. `id` is optional bookkeeping (minted when omitted); `enabled` defaults to true.",
         "properties": {
-            "key": { "type": "string", "description": "Header or parameter name." },
-            "value": { "type": "string", "description": "Header or parameter value." },
-            "enabled": { "type": "boolean", "description": "Send this row. Defaults to true; set false to keep it without sending." },
-            "description": { "type": "string", "description": "Optional note about this row." },
-            "id": { "type": "string", "description": "Stable row id, used to update a row in place. Omit when creating." }
+            "key": { "type": "string" },
+            "value": { "type": "string" },
+            "enabled": { "type": "boolean" },
+            "description": { "type": "string" },
+            "id": { "type": "string" }
         },
         "required": ["key", "value"],
         "additionalProperties": false

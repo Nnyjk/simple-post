@@ -1,54 +1,43 @@
-//! 把 agent 的输入强制转换成域类型：`body_mode`、`auth_config`、`KeyValue` 行。
+//! `endpoint_*` 工具的输入形状。
 //!
-//! 三处放宽的理由各不相同：body 与 auth 用真 `Result` 解析（写错必须响亮报错），
-//! 而 `KeyValue` 的 `id` / `enabled` 是 agent 没理由知道的簿记字段，给默认值即可。
+//! **转换规则住在 core**，不在这里：`simple_post_core::spec::input` 是那一处唯一的
+//! 实现（`KeyValue` 的 `id` 缺失怎么办、`enabled` 缺省是什么、载荷长得像一份
+//! Schema 怎么办），因为 `spec_upsert` 也要用同一套。规则写两遍就会漂移，而漂移
+//! 的表现是「同一个字段在两条路上行为不同」——那是最难查的一类缺陷。
+//!
+//! 本文件留下的是**只属于 MCP 的那一部分**：给 AI 客户端看的 JSON Schema 字面量。
 
-use serde_json::{json, Value};
+use serde_json::json;
 
-use simple_post_core::error::AppError;
 // =========================================================================
-// 私有辅助函数（只被上面的 endpoint_* 工具使用）
+// 从 core 转发过来的转换规则
 // =========================================================================
+//
+// 一行键值对（`KeyValueInput` / `coerce_key_values`）不在这一组里：它们经
+// `crate::mcp::key_value` 转发，那一处也服务 `api_call_endpoint` 的 `overrides`。
 
-pub(super) fn parse_body_mode(s: &str) -> Result<simple_post_core::domain::BodyMode, AppError> {
-    use simple_post_core::domain::BodyMode;
-    Ok(match s.to_ascii_lowercase().as_str() {
-        "none" => BodyMode::None,
-        "json" => BodyMode::Json,
-        "form" => BodyMode::Form,
-        "multipart" => BodyMode::Multipart,
-        "raw" => BodyMode::Raw,
-        other => {
-            return Err(AppError::Validation(format!(
-                "unknown body_mode {other:?}; expected one of: {}",
-                BODY_MODE_VALUES.join(", ")
-            )))
-        }
-    })
-}
+pub(super) use simple_post_core::spec::input::{
+    build_auth, parse_body_mode, reject_schema_shaped_payload,
+};
+pub(super) use simple_post_core::spec::input::{AUTH_TYPE_VALUES, BODY_MODE_VALUES};
 
-/// 线上接受的 `body_mode` 取值，与 [`simple_post_core::domain::BodyMode`] 的变体
-/// 一一对应；JSON Schema 与解析器共用这一份，改一处即可。
-pub(super) const BODY_MODE_VALUES: &[&str] = &["none", "json", "form", "multipart", "raw"];
-
-/// 线上接受的 `auth_type` 取值，对应 [`simple_post_core::domain::AuthType`] 的小写
-/// 变体名。
-pub(super) const AUTH_TYPE_VALUES: &[&str] = &["none", "bearer", "basic", "apikey", "oauth2"];
+// =========================================================================
+// 只属于 MCP 的那一部分：JSON Schema 字面量
+// =========================================================================
 
 /// OAuth2 载荷的 JSON Schema。两处用它（`endpoint_update` 的 `auth.oauth2` 与
-/// `endpoint_create` 的 `auth_config` 说明），故 AI 客户端在两条路上看到同一份形状。
+/// `spec_upsert` 的 `endpoint.auth.oauth2`），故 AI 客户端在两条路上看到同一份形状。
 ///
 /// `additionalProperties: false` 是承重的：`endpoint_update` 的 `auth` 上有它，
 /// 而 agent 是这里最主要的外部写路径。漏登记一个字段不是「宽松一点」，而是那个字段
 /// **根本传不进来**——一个仍然看着正确注册的工具却永远收不到配置。
-pub(super) fn oauth2_config_schema() -> Value {
+///
+/// 逐个属性的说明一律省掉，只留名字、类型与取值范围：OAuth2 的字段名是协议定的，
+/// 说明文字对 agent 没有帮助，而每一个字节都要乘以会话数。
+pub(in crate::mcp::project_ops) fn oauth2_config_schema() -> serde_json::Value {
     json!({
         "type": "object",
-        "description": "OAuth2 settings. The token is fetched on demand and \
-                        refreshed when it expires; authorization_code needs \
-                        authCode pasted after the user authorises in a browser, \
-                        and implicit has no token endpoint at all (the token \
-                        comes back in the redirect fragment).",
+        "description": "OAuth2 settings. The token is fetched on demand and refreshed when it expires; authorization_code needs authCode pasted after the user authorises in a browser, and implicit has no token endpoint at all.",
         "properties": {
             "grantType": {
                 "type": "string",
@@ -59,19 +48,17 @@ pub(super) fn oauth2_config_schema() -> Value {
             "clientSecret": { "type": "string" },
             "clientAuth": {
                 "type": "string",
-                "enum": ["basic", "body"],
-                "description": "Where the client credentials go: an HTTP Basic header (default) or the form body."
+                "enum": ["basic", "body"]
             },
-            "scope": { "type": "string", "description": "Space separated." },
+            "scope": { "type": "string" },
             "authorizationUrl": { "type": "string" },
             "redirectUri": { "type": "string" },
-            "codeVerifier": { "type": "string", "description": "PKCE verifier. Must match the challenge registered with the IdP; this app never generates one." },
-            "authCode": { "type": "string", "description": "One-shot authorization code, or the whole redirect URL carrying ?code=." },
+            "codeVerifier": { "type": "string" },
+            "authCode": { "type": "string" },
             "username": { "type": "string" },
             "password": { "type": "string" },
             "extraParams": {
                 "type": "array",
-                "description": "Extra form fields appended to the token request (e.g. audience).",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -85,114 +72,9 @@ pub(super) fn oauth2_config_schema() -> Value {
                 }
             },
             "tokenLocation": { "type": "string", "enum": ["header", "query"] },
-            "tokenParam": { "type": "string", "description": "Query parameter name for tokenLocation=query. Defaults to access_token." }
+            "tokenParam": { "type": "string" }
         },
         "required": ["grantType"],
         "additionalProperties": false
     })
-}
-
-pub(super) fn build_auth(
-    auth_type: Option<&str>,
-    auth_config: Option<Value>,
-) -> Result<simple_post_core::domain::AuthConfig, AppError> {
-    use simple_post_core::domain::{AuthConfig, AuthType};
-    let kind = match auth_type.unwrap_or("none").to_ascii_lowercase().as_str() {
-        "none" => AuthType::None,
-        "bearer" => AuthType::Bearer,
-        "basic" => AuthType::Basic,
-        "apikey" => AuthType::Apikey,
-        "oauth2" => AuthType::Oauth2,
-        other => {
-            return Err(AppError::Validation(format!(
-                "unknown auth_type {other:?}; expected one of: {}",
-                AUTH_TYPE_VALUES.join(", ")
-            )))
-        }
-    };
-    let cfg = auth_config.unwrap_or(Value::Null);
-    // `auth_config` 用真 `Result` 反序列化，绝不 `unwrap_or_default()`：配置写错时
-    // 静默退化成全空 `AuthConfig`，agent 会拿到一个 SUCCESS 响应，里面描述的却是
-    // 根本没有 token 的 bearer。
-    //
-    // `kind` 经 `AuthConfigWire` 而不是直接进 `AuthConfig`：域类型在 `kind` 上没有
-    // serde 默认值，于是 `{"bearer":"tok"}` —— JSON Schema 文档化的、agent 实际会
-    // 写的那种形状 —— 会因缺字段而失败。方案真正是在 `auth_type` 里选的，下面会
-    // 写回结果，所以 config 里的 `kind` 是冗余而非必需。
-    let mut out: AuthConfig = match cfg {
-        Value::Null => AuthConfig::default(),
-        other => {
-            let wire: AuthConfigWire = serde_json::from_value(other).map_err(|e| {
-                AppError::Validation(format!(
-                    "auth_config is malformed ({e}); expected an object like \
-                     {{\"bearer\":\"<token>\"}} for bearer, \
-                     {{\"basic\":{{\"username\":\"u\",\"password\":\"p\"}}}} for basic, \
-                     {{\"apikey\":{{\"key\":\"X-Api-Key\",\"value\":\"<key>\",\
-                     \"inLocation\":\"header\"}}}} for apikey, \
-                     {{\"oauth2\":{{\"grantType\":\"client_credentials\",\
-                     \"tokenUrl\":\"https://idp.example.com/oauth/token\",\
-                     \"clientId\":\"<id>\"}}}} for oauth2"
-                ))
-            })?;
-            wire.into_auth_config()
-        }
-    };
-    out.kind = kind;
-    Ok(out)
-}
-
-/// `kind` 可选的 `AuthConfig` —— 理由见 [`build_auth`]。
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AuthConfigWire {
-    #[serde(default)]
-    kind: Option<simple_post_core::domain::AuthType>,
-    #[serde(default)]
-    bearer: Option<String>,
-    #[serde(default)]
-    basic: Option<simple_post_core::domain::BasicAuth>,
-    #[serde(default)]
-    apikey: Option<simple_post_core::domain::ApiKeyAuth>,
-    #[serde(default)]
-    oauth2: Option<simple_post_core::domain::OAuth2Auth>,
-}
-
-impl AuthConfigWire {
-    fn into_auth_config(self) -> simple_post_core::domain::AuthConfig {
-        simple_post_core::domain::AuthConfig {
-            // 由调用方按 `auth_type` 覆写；保留它只为让「完全不带 `auth_type`、
-            // 但 config 自带 `kind`」的形状能原样往返。
-            kind: self.kind.unwrap_or_default(),
-            bearer: self.bearer,
-            basic: self.basic,
-            apikey: self.apikey,
-            oauth2: self.oauth2,
-        }
-    }
-}
-
-/// 载荷与定义写反了就地拒绝。
-///
-/// 请求体有两个字段：`content` 是这一次发出的载荷，`schema` 是文档里那份参数定义。
-/// 两者都是 JSON 对象，形状接近，于是 agent 写接口定义时容易把 Schema 塞进
-/// `content` —— 每次调试都把一份 Schema 当请求体发出去，而接口的文档里空空如也。
-///
-/// 判据是启发式的（见 [`simple_post_core::domain::RequestBody::content_looks_like_schema`]），
-/// 故只在「这份 body 看起来是 Schema、且还没填 `schema`」时才拒绝：确实要把一份
-/// Schema 当载荷发的接口，可以把同样的内容也写进 `schema`，把这份意图写明。
-pub(super) fn reject_schema_shaped_payload(
-    body: &simple_post_core::domain::RequestBody,
-) -> Result<(), AppError> {
-    if !body.payload_may_be_a_schema() {
-        return Ok(());
-    }
-    Err(AppError::Validation(
-        "body_content looks like a JSON Schema (a top-level \"type\" together with \
-         \"properties\"), not a request payload. body_content is the body that is \
-         actually sent; the documented parameter definition belongs in body_schema. \
-         If this was the definition, pass it as body_schema and leave body_content \
-         empty. If the payload really is a schema document, set body_schema as well \
-         so the intent is explicit."
-            .into(),
-    ))
 }

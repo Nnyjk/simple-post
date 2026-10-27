@@ -18,5 +18,7 @@ pub mod error;
 pub mod http_client;
 pub mod mcp;
 pub mod response_parse;
+/// 一份接口规格的落库 —— MCP 工具、REST 路由与桌面 command 共用的那一层。
+pub mod spec;
 pub mod stdio_loop;
 pub mod variable_fill;

@@ -24,15 +24,16 @@ pub mod commands;
 mod http_request_tests;
 
 pub use simple_post_core::{
-    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script,
+    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script, spec,
 };
 pub use simple_post_mcp::{daemon_http, mcp};
 
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
 // `interchange_api` 与 `dynamic_api` 在其中：导入 / 导出与动态变量的逻辑住在 server crate，
-// 好让 Tauri 命令与 REST 路由调同一个函数。
+// 好让 Tauri 命令与 REST 路由调同一个函数。`spec_api` 同理 —— 一份接口规格的落库编排。
 pub use simple_post_server::{
-    auth, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry, web_api,
+    auth, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry,
+    spec_api, web_api,
 };
 
 // CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
@@ -217,6 +218,9 @@ pub fn run() {
             crate::commands::interchange_import_commit,
             crate::commands::interchange_export_preview,
             crate::commands::interchange_export_document,
+            // 一份接口规格：一次调用落一整份（模块 / 集合路径 / 环境 / 服务 / 端点）。
+            // 逻辑在 `crate::spec_api`，REST 侧同名路由调的是同一批函数。
+            crate::commands::spec_upsert,
         ])
         .setup(|app| {
             // 先读持久化的 mcp.auto_start（默认 false，需用户在设置里开启）再拉 supervisor。

@@ -1,5 +1,5 @@
-//! project / module / collection / endpoint / baseUrlDef MCP 工具，共
-//! 5 + 5 + 5 + 8 + 5 = **28 个**。
+//! project / module / collection / endpoint / baseUrlDef / spec MCP 工具，共
+//! 5 + 5 + 5 + 8 + 5 + 1 = **29 个**。
 //!
 //! ## 命名
 //!
@@ -23,9 +23,12 @@ use crate::mcp::ToolEntry;
 
 pub(super) mod base_url_def;
 pub(super) mod collection;
-pub(super) mod endpoint;
+// `pub(crate)`：`crate::spec::ops` 要用 `endpoint::missing_pieces` —— 那条判据要调
+// `variable_fill::resolve_base_url_with`，而它在 mcp crate 里，故这条判据不能住在 core。
+pub(crate) mod endpoint;
 pub(super) mod module;
 pub(super) mod project;
+pub(super) mod spec;
 
 // =========================================================================
 // 跨子模块共用的 Args 形状
@@ -50,8 +53,8 @@ pub(super) struct ModuleIdArgs {
 // =========================================================================
 
 /// 拼好的 dispatch 表，顺序固定：projects (5) → modules (5) → collections (5)
-/// → endpoints (8) → base_url_defs (5)。各子模块的 `register()` 只推自己那一段，
-/// 这里拼起来，调用方拿到含全部 28 条的单个 `table()`。
+/// → endpoints (8) → base_url_defs (5) → spec (1)。各子模块的 `register()` 只推自己那一段，
+/// 这里拼起来，调用方拿到含全部 29 条的单个 `table()`。
 pub(crate) fn table() -> Vec<ToolEntry> {
     let mut v = Vec::with_capacity(32);
 
@@ -69,6 +72,9 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 
     // ---- base_url_defs (5) ----
     base_url_def::register(&mut v);
+
+    // ---- spec (1) ----
+    spec::register(&mut v);
 
     v
 }

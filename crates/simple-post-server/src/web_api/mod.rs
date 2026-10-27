@@ -261,6 +261,22 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/dynamic-variables/{id}/refresh",
             post(dynamic_variables_refresh),
         )
+        // ---- 一份接口规格 ----
+        //
+        // 一次调用落一整份规格：模块、集合路径上的每一级、环境、服务与端点。
+        // 与 MCP 工具 `spec_upsert` 落的是同一份东西（逻辑在 `crate::spec_api`）。
+        //
+        // 请求体是整份规格，故显式抬一次 `DefaultBodyLimit`：axum 的默认值是 2 MB，
+        // 而 `body.schema` 可以是一份很大的 JSON Schema、两段脚本也可以很长。少了
+        // 这一层，超大规格在浏览器形态下回的是 413（传输层错误，读不出「规格太大」），
+        // 桌面形态的同一份规格却能落库——两侧行为分叉。上限见
+        // `crate::spec_api::SPEC_BODY_LIMIT_BYTES`。
+        .route(
+            "/api/spec/upsert",
+            post(spec_upsert).layer(axum::extract::DefaultBodyLimit::max(
+                crate::spec_api::SPEC_BODY_LIMIT_BYTES,
+            )),
+        )
         // ---- mcp (existing + new verbs) ----
         .route("/api/mcp/status", get(mcp_status))
         .route("/api/mcp/logs", get(mcp_log_tail))
