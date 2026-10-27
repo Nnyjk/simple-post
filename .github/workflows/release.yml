@@ -100,7 +100,7 @@ jobs:
             docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ```
 
-            The same image is also tagged without the `v` (`0.1.2`), plus
+            The same image is also tagged without the `v` (`__VERSION__`), plus
             `:0.1` (rolling minor) and `:latest` (rolling latest).
           releaseDraft: true
           prerelease: false
