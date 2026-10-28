@@ -70,6 +70,10 @@ pub(crate) async fn http_send(
 #[path = "http_send_test.rs"]
 mod http_send_tests;
 
+#[cfg(test)]
+#[path = "nodes_test.rs"]
+mod tests;
+
 /// `GET /api/nodes`
 ///
 /// `rootId` 把结果收窄到一个项目——SPA 总有且只有一个当前项目，故这一个参数就能覆盖

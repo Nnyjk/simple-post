@@ -103,3 +103,7 @@ pub(crate) async fn projects_delete(
     db::with_tx(&s.pool, |c| db::projects::delete(c, &id)).map_err(map_app_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[cfg(test)]
+#[path = "projects_test.rs"]
+mod tests;

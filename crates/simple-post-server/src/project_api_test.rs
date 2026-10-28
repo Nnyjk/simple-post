@@ -119,6 +119,24 @@ fn a_project_with_an_empty_id_gets_a_fresh_one() {
 }
 
 #[test]
+fn a_project_keeps_a_blank_id_the_caller_gave() {
+    let pool = temp_pool("blank-id");
+
+    let project = create_project(
+        &pool,
+        Some("   ".to_string()),
+        "示例".to_string(),
+        CreateProjectOpts::default(),
+    )
+    .expect("建项目");
+
+    // 项目 id 是调用方给的标识，它给什么就是什么。服务 id 那套「空白按缺失」的规矩
+    // （`adopt_or_mint_id`）不套在项目上——两套策略唯一的差别就是纯空白算不算缺失，
+    // 断言「纯空白照用」才把这条差别钉住。
+    assert_eq!(project.id, "   ", "纯空白也是调用方给的 id，要照用");
+}
+
+#[test]
 fn a_new_project_gets_a_default_environment_and_a_default_module() {
     let pool = temp_pool("defaults");
     let project_id = seed_project(&pool, "p_defaults");
@@ -357,21 +375,18 @@ fn a_child_node_takes_the_project_of_its_parent() {
 fn a_node_keeps_the_root_id_the_caller_gave() {
     let pool = temp_pool("explicit-root");
     let project_id = seed_project(&pool, "p_explicit");
-    let module_id = default_module_id(&pool, &project_id);
 
+    // 顶层模块：没有父节点可推导，故调用方给的 root_id 是唯一的依据。若这一层改成
+    // 一律从父节点推导，root_id 会是空串，落库时会被 `validate_placement` 拒掉
+    // （「顶层节点要说出它的项目」）。
     let created = create_node(
         &pool,
         NodeCreateInput {
-            node: node(
-                "e_explicit",
-                ResourceNodeType::Endpoint,
-                &project_id,
-                Some(&module_id),
-            ),
-            detail: Some(CreateEndpointDetailOpts::default()),
+            node: node("m_explicit", ResourceNodeType::Module, &project_id, None),
+            detail: None,
         },
     )
-    .expect("建 endpoint");
+    .expect("建顶层模块");
 
     assert_eq!(created.root_id, project_id);
 }
@@ -381,9 +396,14 @@ fn resolving_the_root_id_answers_the_same_way_whichever_way_it_is_asked() {
     let pool = temp_pool("resolve");
     let project_id = seed_project(&pool, "p_resolve");
     let module_id = default_module_id(&pool, &project_id);
+    // 另一个项目：它的模块当父节点，而调用方点名的是上面那个项目。两者不同时，
+    // 「照用调用方给的」与「一律从父节点查」才是两个不同的答案——父节点与调用方
+    // 点名的项目相同时，两条路算出来一样，断言就没有分辨力。
+    let other_project_id = seed_project(&pool, "p_resolve_other");
+    let other_module_id = default_module_id(&pool, &other_project_id);
 
     assert_eq!(
-        resolve_root_id(&pool, Some(&project_id), Some(&module_id)).expect("读项目"),
+        resolve_root_id(&pool, Some(&project_id), Some(&other_module_id)).expect("读项目"),
         project_id,
         "调用方点名了项目就用它，不去查父节点"
     );
