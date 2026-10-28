@@ -69,7 +69,7 @@ The parent/child relationship is an **enforced contract**, not a convention: `Re
 
 **自定义 CA 是**追加**到内置根证书集，不是替换它。** `add_root_certificate` 只是把证书推进 `config.root_certs`，而 reqwest 在 `build()` 时把 `webpki_roots::TLS_SERVER_ROOTS` 一起 extend 进同一个 root store —— 本仓库从未调 `tls_built_in_root_certs(false)`。故「只信任这张 CA」是**错的说法**：内置的公共根证书集照样有效，界面与文档都要写「额外信任」。另一层：这套客户端用的是 reqwest **内置的 Mozilla 根证书列表**（工作区 `Cargo.toml` 里 `reqwest` 开着 `rustls-tls`），**本机证书库不参与** —— 把公司根证书装进 Windows 证书库不会让它被信任。
 
-**证书路径字段要在写入口校验，否则「只存路径」会被用户手滑破掉。** 类型层面挡住了应用自己写证书内容（那几个字段只有路径），但挡不住用户把私钥正文**粘进**路径输入框 —— 那段文本会原样落进 `preferences` 的 `request_settings` 行或 `endpoint_details.tls_json`，而 `GET /api/preferences` 把整行原样返回。故 `TlsSettings::validate()` 拒绝含 `-----BEGIN` / `-----END` 或换行的值，`db::preferences::set_request_settings` 与 `db::endpoint_details::{create,update}` 都在写之前调它。
+**证书路径字段要在写入口校验，否则「只存路径」会被用户手滑破掉。** 类型层面挡住了应用自己写证书内容（那几个字段只有路径），但挡不住用户把私钥正文**粘进**路径输入框 —— 那段文本会原样落进 `preferences` 的 `request_settings` 行或 `endpoint_details.tls_json`，而 `GET /api/preferences` 把整行原样返回。故 `TlsSettings::validate()` 拒绝含 `-----BEGIN` / `-----END` 或换行的值。**校验放在写入口，不放在类型上**：`request_settings` 那一行有三条写路径（桌面端的专用命令、`PUT /api/request-settings`、`PUT /api/preferences` 这个通用入口），故 `db::preferences::set` 在键是 `request_settings` 时调它 —— 放在通用写入口，三条路径才都拦得住；`db::endpoint_details::{create,update}` 各调一次。
 
 **MCP 的两个发送工具走同一个解析器.** `api_call_endpoint` 按 id 读库再解析；`api_run_request` 把入参拼成一份内存里的 `EndpointDetail`，交给同一个 `variable_fill::resolve_endpoint`。故「调用已存端点」与「发临时请求」不会长出两种请求形状 —— 早先的 `api_run_request` 自带一套拼接规则（先替换后拼接、不认自带 scheme 的 URL），且声明了 `params` / `auth` 却从不读它们，工具描述因此在撒谎。
 

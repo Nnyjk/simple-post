@@ -32,8 +32,21 @@ pub fn get<T: DeserializeOwned>(conn: &mut Connection, key: &str) -> Result<Opti
 // 写。
 
 /// Upsert 一个偏好。值经 serde 做 JSON 编码，故任何 `Serialize` 类型都能存。
+///
+/// **`request_settings` 这一行要额外校验。** 它带着 HTTPS 出站的三个证书路径字段，而
+/// `GET /api/preferences` 把整行原样返回 —— 用户把私钥正文粘进路径输入框，那段文本就会
+/// 原样落进这一行。校验放在这里（而不是各个写入口）是因为这一行有三条写路径：桌面端的
+/// 专用命令、`PUT /api/request-settings`，以及 `PUT /api/preferences` 这个通用入口。
+/// 放在一处，三条路径都拦得住。
 pub fn set<T: Serialize>(conn: &mut Connection, key: &str, value: &T) -> Result<(), AppError> {
     let raw = serde_json::to_string(value)?;
+    if key == keys::REQUEST_SETTINGS {
+        // 读不出 `RequestSettings` 的值不是这一行的形状（这一行只存这一份设置），
+        // 那种值照旧存下去 —— 这一条只管「证书路径必须是路径」。
+        if let Ok(settings) = serde_json::from_str::<crate::domain::RequestSettings>(&raw) {
+            settings.tls.validate()?;
+        }
+    }
     conn.execute(
         "INSERT INTO preferences (key, value) VALUES (?1, ?2) \
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -161,14 +174,13 @@ pub fn request_settings(conn: &mut Connection) -> Result<crate::domain::RequestS
 
 /// 持久化出站请求旋钮。
 ///
-/// 写之前校验 TLS 那三个路径字段：它们必须真的是路径。用户把证书正文粘进设置面板的
-/// 输入框，那段文本会原样落进这一行，而 `GET /api/preferences` 把整行原样返回 ——
-/// 「证书只存路径，不存内容」要在写入口守住。
+/// TLS 那三个路径字段的校验在 [`set`] 里做：那一行有三条写路径（桌面端的专用命令、
+/// `PUT /api/request-settings` 与 `PUT /api/preferences` 这个通用入口），把校验放在
+/// [`set`] 那一处，三条路径都拦得住。
 pub fn set_request_settings(
     conn: &mut Connection,
     settings: &crate::domain::RequestSettings,
 ) -> Result<(), AppError> {
-    settings.tls.validate()?;
     set(conn, keys::REQUEST_SETTINGS, settings)
 }
 

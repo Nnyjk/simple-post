@@ -124,3 +124,51 @@ async fn an_object_preference_round_trips_as_an_object() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `request_settings` 这一行带着证书路径，而 `GET /api/preferences` 把整行原样返回。
+///
+/// 这一行有三条写路径，`PUT /api/preferences` 是其中最宽的一条（它能写任何键）。校验放在
+/// core 的 `preferences::set` 里，故这条路径同样拦得住 —— 拦不住的话，用户把私钥正文
+/// 粘进路径输入框，那段文本就会原样落进这一行，而这一行能被任何人读走。
+#[tokio::test]
+async fn writing_request_settings_through_the_raw_route_rejects_a_pasted_certificate_body() {
+    let (addr, dir) = serve_test_router().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .put(format!("http://{addr}/api/preferences"))
+        .json(&serde_json::json!({
+            "key": "request_settings",
+            "value": {
+                "timeoutMs": 30000,
+                "followRedirects": true,
+                "maxResponseSizeKb": 5120,
+                "tls": {
+                    "caCertificatePath":
+                        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+                }
+            }
+        }))
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "粘进来的证书正文必须被拒"
+    );
+
+    // 写不进去的那一行也不能留下半截。
+    let response = client
+        .get(format!("http://{addr}/api/preferences"))
+        .send()
+        .await
+        .expect("request completes");
+    let body: serde_json::Value = response.json().await.expect("json body");
+    assert!(
+        body.get("request_settings").is_none(),
+        "被拒的写入不许在库里留下那一行，got: {body}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

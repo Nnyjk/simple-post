@@ -251,3 +251,65 @@ fn mcp_http_config_reports_an_unparseable_row_instead_of_hiding_it() {
     db::with_tx(&pool, |c| set(c, keys::MCP_HTTP_CONFIG, &"0.0.0.0")).unwrap();
     assert!(db::with_conn(&pool, mcp_http_config).is_err());
 }
+
+/// `request_settings` 这一行带着证书路径，而 `GET /api/preferences` 把整行原样返回。
+///
+/// 用户把私钥正文粘进路径输入框，那段文本就会原样落进这一行。这一行有三条写路径
+/// （桌面端的专用命令、`PUT /api/request-settings`、`PUT /api/preferences`），故校验放在
+/// [`set`] 里，三条路径才都拦得住。
+#[test]
+fn writing_request_settings_rejects_a_pasted_certificate_body() {
+    let pool = fresh_pool();
+    let settings = crate::domain::RequestSettings {
+        timeout_ms: 30_000,
+        follow_redirects: true,
+        max_response_size_kb: 5120,
+        tls: crate::domain::TlsSettings {
+            skip_verify: false,
+            ca_certificate_path: Some(
+                "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----".into(),
+            ),
+            client_certificate_path: None,
+            client_key_path: None,
+        },
+    };
+
+    let err = db::with_tx(&pool, |c| set(c, keys::REQUEST_SETTINGS, &settings)).unwrap_err();
+    assert!(
+        err.to_string().contains("自定义 CA 证书"),
+        "报错要点名是哪一个字段，got: {err}"
+    );
+
+    // 写不进去的那一行也不能留下半截。
+    let stored: Option<crate::domain::RequestSettings> =
+        db::with_conn(&pool, |c| get(c, keys::REQUEST_SETTINGS)).unwrap();
+    assert!(
+        stored.is_none(),
+        "被拒的写入不许在库里留下那一行，got: {stored:?}"
+    );
+}
+
+/// 正常路径照旧写得进去 —— 上面那条校验拦的是证书正文，不是路径。
+#[test]
+fn writing_request_settings_accepts_an_ordinary_path() {
+    let pool = fresh_pool();
+    let settings = crate::domain::RequestSettings {
+        timeout_ms: 30_000,
+        follow_redirects: true,
+        max_response_size_kb: 5120,
+        tls: crate::domain::TlsSettings {
+            skip_verify: true,
+            ca_certificate_path: Some("C:\\certs\\company-ca.pem".into()),
+            client_certificate_path: None,
+            client_key_path: None,
+        },
+    };
+    db::with_tx(&pool, |c| set_request_settings(c, &settings)).unwrap();
+
+    let back = db::with_conn(&pool, request_settings).unwrap();
+    assert_eq!(
+        back.tls.ca_certificate_path.as_deref(),
+        Some("C:\\certs\\company-ca.pem")
+    );
+    assert!(back.tls.skip_verify);
+}
