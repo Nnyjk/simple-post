@@ -54,8 +54,9 @@ export function buildTokenQuery(url: string, param: string, token: OAuth2TokenRe
 
 /**
  * `Authorization` 的取值：`<tokenType> <accessToken>`（RFC 6749 §7.1）。
- * `tokenType` 原样透传 IdP 回的值——少数是 `MAC` / `Token`，替它改成 `Bearer`
- * 就是打错请求；空串则只给裸 token，与 Rust 的 `auth_header_value` 同一条规则。
+ * `tokenType` 去掉首尾空白后透传 IdP 回的值——少数是 `MAC` / `Token`，替它改成
+ * `Bearer` 就是打错请求；去空白后是空串则只给裸 token，与 Rust 的
+ * `auth_header_value` 同一条规则。
  */
 export function buildAuthHeaderValue(token: OAuth2TokenResult): string {
   const type = token.tokenType.trim();
