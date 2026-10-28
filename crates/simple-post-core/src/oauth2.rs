@@ -62,6 +62,10 @@ mod test_fixtures;
 mod unit_tests;
 
 #[cfg(test)]
+#[path = "oauth2/inject_parity_test.rs"]
+mod inject_parity_tests;
+
+#[cfg(test)]
 #[path = "oauth2/live_test.rs"]
 mod live_tests;
 

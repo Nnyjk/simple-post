@@ -1,0 +1,137 @@
+{
+  "$comment": "OAuth2 token 怎么挂到一份已解析好的请求上。Rust 侧 `crates/simple-post-core/src/oauth2/inject.rs` 的 `inject` 与渲染进程侧 `src/lib/oauth2.ts` 的 `applyOAuth2Token` 读同一份文件。两份实现各写一遍规则，只有共享样本能钉住它们没分叉。样本比的是**结果**（注入后的 URL 与请求头列表），不是写法——Rust 侧就地改，渲染进程侧返回新对象，形状本来就不同。",
+  "cases": [
+    {
+      "name": "header 档补一条 Authorization",
+      "tokenLocation": "header",
+      "tokenParam": "",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users",
+        "headers": [["Authorization", "Bearer abc123"]]
+      }
+    },
+    {
+      "name": "header 档的 token 类型是空串时只放裸 token",
+      "tokenLocation": "header",
+      "tokenParam": "",
+      "token": { "accessToken": "abc123", "tokenType": "" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users",
+        "headers": [["Authorization", "abc123"]]
+      }
+    },
+    {
+      "name": "header 档原样透传 token 类型不改成 Bearer",
+      "tokenLocation": "header",
+      "tokenParam": "",
+      "token": { "accessToken": "abc123", "tokenType": "MAC" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users",
+        "headers": [["Authorization", "MAC abc123"]]
+      }
+    },
+    {
+      "name": "header 档不覆盖用户自己写的 Authorization",
+      "tokenLocation": "header",
+      "tokenParam": "",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [["Authorization", "Bearer keep-me"]],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users",
+        "headers": [["Authorization", "Bearer keep-me"]]
+      }
+    },
+    {
+      "name": "header 档认大小写不敏感的 authorization",
+      "tokenLocation": "header",
+      "tokenParam": "",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [["authorization", "keep-me"]],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users",
+        "headers": [["authorization", "keep-me"]]
+      }
+    },
+    {
+      "name": "query 档把 token 追加到已有的查询串后面",
+      "tokenLocation": "query",
+      "tokenParam": "",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [],
+      "url": "https://api.example.com/users?page=2",
+      "expected": {
+        "url": "https://api.example.com/users?page=2&access_token=abc123",
+        "headers": []
+      }
+    },
+    {
+      "name": "query 档给没有查询串的地址起一个查询串",
+      "tokenLocation": "query",
+      "tokenParam": "",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users?access_token=abc123",
+        "headers": []
+      }
+    },
+    {
+      "name": "query 档的参数名是空白时回落成 access_token",
+      "tokenLocation": "query",
+      "tokenParam": "   ",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users?access_token=abc123",
+        "headers": []
+      }
+    },
+    {
+      "name": "query 档用配置的那个参数名",
+      "tokenLocation": "query",
+      "tokenParam": "id_token",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users?id_token=abc123",
+        "headers": []
+      }
+    },
+    {
+      "name": "query 档的 token 值按查询串的字符集编码",
+      "tokenLocation": "query",
+      "tokenParam": "",
+      "token": { "accessToken": "a+b=c.d e中", "tokenType": "Bearer" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users?access_token=a%2Bb%3Dc.d%20e%E4%B8%AD",
+        "headers": []
+      }
+    },
+    {
+      "name": "query 档的参数名也按查询串的字符集编码",
+      "tokenLocation": "query",
+      "tokenParam": "to ken&x",
+      "token": { "accessToken": "abc123", "tokenType": "Bearer" },
+      "headers": [],
+      "url": "https://api.example.com/users",
+      "expected": {
+        "url": "https://api.example.com/users?to%20ken%26x=abc123",
+        "headers": []
+      }
+    }
+  ]
+}
