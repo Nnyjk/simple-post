@@ -92,6 +92,9 @@ pub fn nodes_search_paths(
 /// 而任何一半可能缺失的树是打不开的树。
 ///
 /// 只有 module 需要 `root_id`；collection / endpoint 从父节点推出，两者不可能打架。
+///
+/// 编排住在 `crate::project_api`（server crate），REST 路由调的是同一个函数。命令这一
+/// 侧只负责线格式：`kind` 是字符串，在这里解析成枚举。
 #[tauri::command]
 pub fn nodes_create(
     state: State<DbPool>,
@@ -105,7 +108,7 @@ pub fn nodes_create(
     let kind = ResourceNodeType::parse(&kind)
         .ok_or_else(|| AppError::Validation(format!("unknown node type {kind:?}")))?;
     let now = crate::domain::now_ms();
-    let mut node = ResourceNode {
+    let node = ResourceNode {
         id: uid(),
         root_id: root_id.unwrap_or_default(),
         parent_id,
@@ -116,16 +119,7 @@ pub fn nodes_create(
         created_at: now,
         updated_at: now,
     };
-    if node.root_id.is_empty() {
-        if let Some(parent) = node.parent_id.clone() {
-            node.root_id =
-                crate::db::with_conn(&state, |c| crate::db::nodes::root_id_of(c, &parent))?;
-        }
-    }
-    let detail = detail.map(|d| d.into_detail(&node.id));
-    crate::db::with_tx(&state, |c| {
-        crate::db::nodes::create(c, &node, detail.as_ref())
-    })
+    crate::project_api::create_node(&state, crate::project_api::NodeCreateInput { node, detail })
 }
 
 /// 改名 / 改描述 / 改顺序。移动另立一个命令（见 [`nodes_move`]），因为它得保住

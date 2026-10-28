@@ -32,25 +32,23 @@ pub(crate) async fn base_url_defs_list(
 }
 
 /// 往项目的服务列表里加一个。
+///
+/// 编排住在 `crate::project_api`（server crate），Tauri 命令调的是同一个函数，故两条
+/// transport 不会对「服务 id 归谁」各说各话。这一侧只负责线格式。
 pub(crate) async fn base_url_defs_create(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
     Json(body): Json<BaseUrlDefCreateBody>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
-    let def = crate::domain::BaseUrlDefinition {
-        // 与 Tauri 命令同一套 id 策略，两边共用一个辅助函数（见
-        // `crate::dto::adopt_or_mint_id`）：renderer 在这一行存在之前就拿这个 id 当
-        // 项目 ★ 与每格（环境 × 模块）URL 单元格的键。
-        id: crate::dto::adopt_or_mint_id(body.id),
-        name: body.name,
-        description: body.description,
-    };
     // 回存下的行而不是请求里那份副本：renderer 要拿它换掉自己手上已有的项目列表里的
     // 那一条。
-    let stored = db::with_tx(&s.pool, |c| {
-        db::base_url_defs::create(c, &def, &project_id)?;
-        db::base_url_defs::get(c, &def.id)
-    })
+    let stored = crate::project_api::create_base_url_def(
+        &s.pool,
+        &project_id,
+        body.id,
+        body.name,
+        body.description,
+    )
     .map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
@@ -84,16 +82,16 @@ pub(crate) async fn base_url_defs_delete(
 ///
 /// ★ 就是 `Project.defaultBaseUrlDefinitionId`——任何没点名服务的 endpoint 都拿它
 /// 解析——故直接回传更新后的值，而不是 `204` 加一次重读。
+///
+/// 编排住在 `crate::project_api`（server crate），Tauri 命令调的是同一个函数。
 pub(crate) async fn base_url_defs_set_default(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
     Json(body): Json<BaseUrlDefSetDefaultBody>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let project = db::with_tx(&s.pool, |c| {
-        db::base_url_defs::set_default(c, &project_id, body.def_id.as_deref())?;
-        db::projects::get(c, &project_id)
-    })
-    .map_err(map_app_error)?;
+    let project =
+        crate::project_api::set_default_base_url_def(&s.pool, &project_id, body.def_id.as_deref())
+            .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&project).unwrap_or(Value::Null)))
 }
 

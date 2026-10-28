@@ -166,3 +166,7 @@ fn adopt_non_empty(id: Option<String>) -> String {
 #[cfg(test)]
 #[path = "project_api_test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "project_api_shells_test.rs"]
+mod shells_tests;

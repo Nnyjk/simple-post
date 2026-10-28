@@ -45,6 +45,10 @@ pub(crate) async fn projects_get(
 ///
 /// `opts` 在场时优先，否则从打平的字段里读。base URL 不在其中：它不是项目属性，
 /// `Project.base_url` 是遗留字段且从不持久化。
+///
+/// 编排住在 `crate::project_api`（server crate），Tauri 命令调的是同一个函数，故两条
+/// transport 不会对「建项目种了什么」各说各话。这一侧只负责线格式：两种 body 形状的
+/// 挑选、`name` 缺席时的报错，以及 `ensure_server_id` 补 id。
 pub(crate) async fn projects_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
@@ -69,33 +73,11 @@ pub(crate) async fn projects_create(
         .map(str::to_string)
         .ok_or_else(|| map_app_error(AppError::Validation("missing field 'name'".to_string())))?;
 
-    let now = crate::domain::now_ms();
-    let mut project: crate::domain::Project = crate::domain::Project {
-        id: String::new(),
-        name,
-        description: opts.description,
-        base_url: None,
-        base_url_definitions: Vec::new(),
-        default_base_url_definition_id: None,
-        color: opts
-            .color
-            .unwrap_or_else(crate::domain::default_project_color),
-        created_at: now,
-        updated_at: now,
-    };
     ensure_server_id(&mut body);
-    if let Some(id) = body.get("id").and_then(Value::as_str) {
-        if !id.is_empty() {
-            project.id = id.to_string();
-        } else {
-            project.id = crate::domain::uid();
-        }
-    } else {
-        project.id = crate::domain::uid();
-    }
+    let id = body.get("id").and_then(Value::as_str).map(str::to_string);
 
-    let created = db::with_tx(&s.pool, |c| db::projects::create_with_defaults(c, &project))
-        .map_err(map_app_error)?;
+    let created =
+        crate::project_api::create_project(&s.pool, id, name, opts).map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
         Json(serde_json::to_value(&created).unwrap_or(Value::Null)),

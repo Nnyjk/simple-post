@@ -20,30 +20,18 @@ pub fn projects_get(state: State<DbPool>, id: String) -> Result<Project, AppErro
     crate::db::with_conn(&state, |c| crate::db::projects::get(c, &id))
 }
 
+/// 建项目，并种下它的默认环境。
+///
+/// 编排住在 `crate::project_api`（server crate），REST 路由调的是同一个函数，故两条
+/// transport 不会对「建项目种了什么」各说各话。命令这一侧只负责线格式：`name` 必填
+/// 由 IPC 层保证，`opts` 缺席即全空。
 #[tauri::command]
 pub fn projects_create(
     state: State<DbPool>,
     name: String,
     opts: Option<CreateProjectOpts>,
 ) -> Result<Project, AppError> {
-    let opts = opts.unwrap_or_default();
-    let now = crate::domain::now_ms();
-    let project = Project {
-        id: uid(),
-        name,
-        description: opts.description,
-        base_url: None,
-        base_url_definitions: Vec::new(),
-        default_base_url_definition_id: None,
-        color: opts
-            .color
-            .unwrap_or_else(crate::domain::default_project_color),
-        created_at: now,
-        updated_at: now,
-    };
-    crate::db::with_tx(&state, |c| {
-        crate::db::projects::create_with_defaults(c, &project)
-    })
+    crate::project_api::create_project(&state, None, name, opts.unwrap_or_default())
 }
 
 #[tauri::command]
