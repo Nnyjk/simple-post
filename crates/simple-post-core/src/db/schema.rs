@@ -19,12 +19,43 @@ pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
     // `CREATE TABLE IF NOT EXISTS` 对它是空操作，旧行会留在一张形状已经不同的表里。
     drop_obsolete_dynamic_variable_tables(conn)?;
     conn.execute_batch(SCHEMA_SQL)?;
+    // 必须在 `SCHEMA_SQL` 之后：那张表不该存在，而 `schema.sql` 里已经没有它的 `CREATE`。
+    // 放在之后才能保证它不会因为有人把 `CREATE` 抄回 `schema.sql` 而重新出现。
+    drop_obsolete_request_settings_table(conn)?;
     // 必须在数据迁移之前、且不能放进 `SCHEMA_SQL`：那个 pass 要读写的
     // `module_base_urls_json` / `module_id` / `is_default` 在够旧的库里根本不存在，
     // 而 `SCHEMA_SQL` 的 `CREATE TABLE IF NOT EXISTS` 对这些库正是空操作——
     // 所以列只能在这里补。
     add_missing_columns(conn)?;
     migrate_base_urls_into_value_layer(conn)
+}
+
+/// 丢掉已经没有读者的 `request_settings` 表。
+///
+/// 这张表是出站请求旋钮的**旧**容器：单例行（`CHECK id=1`），三列是超时 / 跟随重定向 /
+/// 响应体积上限。现役容器是 `preferences` 表里的 `request_settings` **行**
+/// （[`crate::db::preferences::keys::REQUEST_SETTINGS`]）——界面在设置面板里改它，MCP 侧
+/// 发请求时读它，两边用的是同一份取值。这张表从建立起就没有任何读者，故只是一处残留。
+///
+/// **刻意不 bump `SCHEMA_VERSION`**：版本号不是迁移计数器，它只回答「本构建读不读得懂这个
+/// 文件」。这张表没有读者，删掉它不改变任何一行数据的可读性；而 bump 版本会让
+/// [`ensure_current_schema`] 删掉每个用户的库——为清一张空表赔上全部项目、环境与资源树。
+/// 做法与 [`drop_obsolete_dynamic_variable_tables`] 同源：打开时丢掉，不需要版本号事件。
+///
+/// **只丢这一张表**：项目、接口、环境、偏好等其余数据一概不动——尤其 `preferences` 表本身
+/// 不能碰，设置旋钮就住在它里面。
+fn drop_obsolete_request_settings_table(conn: &mut Connection) -> Result<(), AppError> {
+    let existed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='request_settings'",
+        [],
+        |r| r.get(0),
+    )?;
+    if existed == 0 {
+        return Ok(());
+    }
+    conn.execute_batch("DROP TABLE request_settings;")?;
+    tracing::info!("schema: dropped the obsolete request_settings table");
+    Ok(())
 }
 
 /// 旧形状的动态变量表直接丢掉。
