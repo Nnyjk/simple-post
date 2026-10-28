@@ -13,35 +13,12 @@ import './styles/globals.css';
 ingestBearerFromUrl();
 
 // ---------------------------------------------------------------------------
-// Apply the persisted theme to <html> before React mounts. The store loads
-// preferences synchronously from localStorage at module init, so we can
-// read the resolved theme here and toggle the `.dark` class without
-// causing a dark → light flash for users with light/system saved.
+// 主题由 `index.html` 的 `<head>` 里那段内联脚本在 HTML 解析期就写到 `<html>` 上了。
+//
+// 那段脚本是构建期注入的，源码在 `src/lib/theme-boot/index.ts`（见 `vite.config.ts` 的
+// `themeBootPlugin`）——偏好键与主题规则在整个仓库只有那一处。`App.tsx` 的挂载副作用会
+// 再写一次，那一次管的是「用户在设置里改了主题」之后的那次写入。
 // ---------------------------------------------------------------------------
-const PREFS_KEY = 'simple-post:prefs';
-type Theme = 'dark' | 'light' | 'system';
-function resolveInitialTheme(): Theme {
-  try {
-    const raw = window.localStorage.getItem(PREFS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as { theme?: Theme };
-      if (parsed?.theme === 'dark' || parsed?.theme === 'light' || parsed?.theme === 'system') {
-        return parsed.theme;
-      }
-    }
-  } catch {
-    // ignore — fall back to default
-  }
-  return 'dark';
-}
-{
-  const theme = resolveInitialTheme();
-  const root = document.documentElement;
-  const wantDark =
-    theme === 'dark' ||
-    (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  root.classList.toggle('dark', wantDark);
-}
 
 // ---------------------------------------------------------------------------
 // 在 React 挂载之前发起后端往返。

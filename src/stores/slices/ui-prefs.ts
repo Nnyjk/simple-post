@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand';
+import themeBoot from '@/lib/theme-boot';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import type { RequestSettings, Theme } from '../store-types';
@@ -14,50 +15,50 @@ import type { RequestSettings, Theme } from '../store-types';
  *   读的是同一行，故界面上把超时调成 5 秒，AI 客户端发出去也是 5 秒；旋钮只落在
  *   localStorage 的话，后端只知道一个写死的默认值。
  *
- * localStorage 助手保持模块私有：store 之外不该写这个 key。
+ * localStorage 助手保持模块私有：store 之外不该写这个 key。**读**的那一半与「什么算合法
+ * 主题」在 `src/lib/theme-boot/index.ts`——那里同时被 `index.html` 的首帧脚本与界面读，
+ * 写不出第二份去。
  */
 
-const PREFS_KEY = 'simple-post:prefs';
-
-interface PersistedPrefs {
-  theme?: Theme;
-  /**
-   * 用户上次停留的项目 id。
-   *
-   * 「我正在看哪个项目」是渲染层的会话事实，与项目本身无关，故存在 localStorage 而
-   * 不是数据库。刷新后据此回到那个项目，而不是回到欢迎页。
-   */
+/**
+ * store 读到的偏好。
+ *
+ * `theme` 存的是 localStorage 里的原始取值，**未经校验**：用户可以手改 localStorage，
+ * 旧版本也可能留下别的名字。合不合法由 `themeBoot.resolveTheme` 判定。
+ */
+interface StorePrefs {
+  theme?: string;
   lastProjectId?: string;
-  /**
-   * 旧版本把请求旋钮存在这里。升级后它们在 `preferences` 表里，故这个字段只用于
-   * 一次性迁移（见 [`loadRequestSettings`]），迁移完成后即被删掉。
-   */
   requestSettings?: Partial<RequestSettings>;
 }
 
-function loadPrefs(): PersistedPrefs {
+function loadPrefs(): StorePrefs {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = window.localStorage.getItem(PREFS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as PersistedPrefs;
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    return themeBoot.parsePrefs(window.localStorage.getItem(themeBoot.PREFS_KEY)) as StorePrefs;
   } catch {
     return {};
   }
 }
 
-function savePrefs(prefs: PersistedPrefs): void {
+function savePrefs(prefs: StorePrefs): void {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    window.localStorage.setItem(themeBoot.PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // localStorage 可能被禁用（隐私模式、配额）；静默忽略。
   }
 }
 
 const initialPrefs = loadPrefs();
-const initialTheme: Theme = initialPrefs.theme ?? 'dark';
+/**
+ * 初始主题。
+ *
+ * 存下来的取值先经 `resolveTheme` 校验，非法值（手改坏的、旧版本留下的）回落成缺省的
+ * `dark`。**校验不能省**：少了它，store 会把非法取值当主题存下，而 `useIsDark` 只认
+ * `dark` 与 `light`，其余一律按「跟系统」处理——于是首帧画深色、随后 React 画系统色。
+ */
+const initialTheme: Theme = themeBoot.resolveTheme(initialPrefs.theme);
 
 /**
  * 读出上次停留的项目 id。

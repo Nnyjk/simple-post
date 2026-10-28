@@ -9,8 +9,13 @@
  */
 import type { AuthConfig, HttpMethod, KeyValue, RequestBody } from '@/types/domain';
 
-/** 视觉主题预设。驱动 document 根节点上的 CSS 变量。 */
-export type Theme = 'dark' | 'light' | 'system';
+/**
+ * 视觉主题预设。驱动 document 根节点上的 CSS 变量。
+ *
+ * 定义在 `src/lib/theme-boot/index.ts` —— 那里同时被 `index.html` 的首帧脚本与 store 用，
+ * 两边对「什么算合法主题」必须给出同一个答案。类型在这里再导出一次，别处照旧 import。
+ */
+export type { Theme } from '@/lib/theme-boot';
 
 /**
  * HTTP 执行器的可调项。

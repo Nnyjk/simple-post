@@ -11,11 +11,14 @@
       Cold-start budget: everything in this <head> is render-blocking and
       runs before the first paint. Two jobs:
 
-        1. Resolve the persisted theme *synchronously*. `main.tsx` does the
-           same thing, but it is a `type="module"` script, which is deferred
-           until after HTML parsing — long enough for a light-theme user to
-           get a dark first frame (or, before this block existed, a white
-           one). ~0.3 kB of inline JS is cheaper than that flash.
+        1. Resolve the persisted theme *synchronously*. The inline script that
+           does it is **injected at build time** by the `themeBootPlugin` in
+           `vite.config.ts`, generated from `src/lib/theme-boot/index.ts` —
+           the one place the prefs key and the theme rules are written down.
+           It has to be inline: `main.tsx` is a `type="module"` script, which
+           is deferred until after HTML parsing — long enough for a light-theme
+           user to get a dark first frame (or, before this block existed, a
+           white one). ~1.5 kB of inline JS is cheaper than that flash.
         2. Paint the app background from inline CSS. `bg-background` is a
            Tailwind utility, so until `index-<hash>.css` arrives the body has
            no background at all and the browser paints default white. This
@@ -25,29 +28,7 @@
       `src/styles/globals.css` (`.dark { --background: 240 10% 3.9% }`,
       `:root { --background: 0 0% 100% }`) or the app jumps on hydration.
     -->
-    <script>
-      (function () {
-        try {
-          var raw = localStorage.getItem('simple-post:prefs');
-          var theme = raw ? (JSON.parse(raw) || {}).theme : null;
-          // Must mirror `resolveInitialTheme()` in `main.tsx` exactly:
-          //   no stored pref / unrecognised value -> 'dark'  (the app default)
-          //   'system'                            -> OS preference
-          //   'light'                              -> light
-          // An earlier version treated "nothing stored" as "follow the OS",
-          // which painted a light splash for a user whose app was about to
-          // mount dark — a flash, on a screen that exists precisely so there
-          // is no flash.
-          var dark =
-            theme === 'system'
-              ? window.matchMedia('(prefers-color-scheme: dark)').matches
-              : theme !== 'light';
-          document.documentElement.classList.toggle('dark', dark);
-        } catch (e) {
-          /* private mode / disabled storage — keep the `dark` default */
-        }
-      })();
-    </script>
+    <!--theme-boot-->
     <style>
       html.dark,
       html.dark body {
