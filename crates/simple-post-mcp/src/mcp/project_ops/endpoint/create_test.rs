@@ -623,3 +623,48 @@ async fn endpoint_create_rejects_a_misspelled_tls_key() {
         "报错要点名那个不认识的键，got: {msg}"
     );
 }
+
+/// TLS 载荷里粘了证书正文时，**树上不能留下集合**。
+///
+/// 路径上的集合是逐级建出来的，每一级都单独提交。若 TLS 的校验留到写
+/// `endpoint_details` 那一行才做（那里也校验），那么「集合建好了、TLS 被拒、端点没
+/// 建成」就会留下一串没人要的集合。故 TLS 要在建集合之前就校验。
+#[tokio::test]
+async fn endpoint_create_rejects_a_pasted_certificate_body_without_leaving_collections_behind() {
+    let (st, _) = fixture();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "collection_path": "订单/明细",
+            "name": "bad tls endpoint",
+            "method": "GET",
+            "url": "/api/bad-tls",
+            "tls": {
+                "caCertificatePath":
+                    "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+            }
+        }),
+    )
+    .await;
+
+    let Err(err) = res else {
+        panic!("a pasted certificate body must be rejected, got {res:?}");
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("自定义 CA 证书"),
+        "报错要点名是哪一个字段，got: {msg}"
+    );
+
+    let collections = simple_post_core::db::with_conn(&st.pool, |c| {
+        nodes::list_by_root_and_type(c, "p_ep_fix", ResourceNodeType::Collection)
+    })
+    .expect("list collections");
+    let names: Vec<&str> = collections.iter().map(|c| c.name.as_str()).collect();
+    assert!(
+        !names.contains(&"订单") && !names.contains(&"明细"),
+        "校验失败不许在树上留下集合，got: {names:?}"
+    );
+}

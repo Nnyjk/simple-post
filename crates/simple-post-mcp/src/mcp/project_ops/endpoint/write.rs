@@ -16,7 +16,7 @@ use super::resource::endpoint_resource;
 use crate::mcp::key_value::{coerce_key_values, KeyValueInput};
 use crate::mcp::{arg_str, AppState, CallToolResult};
 use simple_post_core::domain::{
-    EndpointDetail, EndpointDetailPatch, RequestBody, ResourceNode, ResourceNodeType,
+    EndpointDetail, EndpointDetailPatch, RequestBody, ResourceNode, ResourceNodeType, TlsSettings,
 };
 use simple_post_core::error::AppError;
 use simple_post_core::spec::{self, IfExists};
@@ -120,7 +120,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
     state: &AppState,
     args: Value,
 ) -> Result<CallToolResult, AppError> {
-    let a: EndpointCreateArgs = serde_json::from_value(args)
+    let mut a: EndpointCreateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("endpoint_create args: {e}")))?;
     if a.name.trim().is_empty() {
         return Err(AppError::Validation("name must not be empty".into()));
@@ -131,6 +131,16 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
     // 先验 HTTP 动词再碰权限表：输入级错误很便宜，不该被误报成权限拒绝。
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
     let if_exists = IfExists::parse(a.if_exists.as_deref().unwrap_or(""))?;
+
+    // 端点自己那份 HTTPS 出站设置在这里转成域类型并校验，**在建集合之前**。
+    //
+    // 路径上的集合是逐级建出来的，每一级都单独提交。若这项校验留到写
+    // `endpoint_details` 那一行才做（那里也校验），那么「集合建好了、TLS 被拒、
+    // 端点没建成」就会留下一串没人要的集合。输入级的错误要在任何副作用之前报出来。
+    let tls: Option<TlsSettings> = a.tls.take().map(Into::into);
+    if let Some(t) = &tls {
+        t.validate()?;
+    }
 
     // 归属项目从「锚点」读 —— 锚点是只读的，过门之后才允许建路径上的集合。
     let anchor = anchor_of(&a)?;
@@ -215,7 +225,8 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         pre_request_script: a.pre_request_script,
         test_script: a.test_script,
         // 端点自己的 HTTPS 出站设置。`None` = 继承全局默认。
-        tls: a.tls.map(Into::into),
+        // 上面已经转成域类型并校验过，这里直接用那一份。
+        tls,
     };
     // node 与 detail 一起落库：没有配置行的端点是一棵打不开的树。
     simple_post_core::db::with_tx(&state.pool, |c| {
