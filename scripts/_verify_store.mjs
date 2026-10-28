@@ -89,6 +89,24 @@ mockIPC(async (cmd, args) => {
   return null;
 });
 
+// ---------- import the shared module first ----------
+//
+// The prefs key comes from the shared module — the one place it is written
+// down. `index.html`'s first-frame script and the store both read it there.
+//
+// It is read *before* the store, because the store computes its initial
+// state while its module is evaluated: whatever the store should see has
+// to be in localStorage by then.
+const { default: themeBoot } = await import('../src/lib/theme-boot/index.ts');
+const KEY = themeBoot.PREFS_KEY;
+
+// Seed a theme the shared resolver rejects. With an empty store the
+// check below compares 'dark' with 'dark' and passes even if the store
+// ignored the resolver; with a rejected value the store has to have run
+// that value through it. The key comes from the shared module, so this
+// harness does not write a second copy of it.
+g.localStorage.setItem(KEY, JSON.stringify({ theme: 'blue' }));
+
 // ---------- import the store ----------
 const { useAppStore, useActiveProject } = await import('../src/stores/app-store.ts');
 
@@ -97,12 +115,7 @@ const { useAppStore, useActiveProject } = await import('../src/stores/app-store.
 // Captured right after the import, before any section below mutates it:
 // the persistence-init assertions are about the **initial** state, and the
 // sections that follow change it.
-//
-// The prefs key comes from the shared module — the one place it is written
-// down. `index.html`'s first-frame script and the store both read it there.
 const ls = g.localStorage;
-const { default: themeBoot } = await import('../src/lib/theme-boot/index.ts');
-const KEY = themeBoot.PREFS_KEY;
 const initialState = useAppStore.getState();
 const initialPrefs = themeBoot.parsePrefs(ls.getItem(KEY));
 
@@ -378,6 +391,11 @@ console.log('\n=== (D) Persistence init ===');
   line(
     'the store seeds its theme through the shared resolver',
     state.theme === themeBoot.resolveTheme(stored.theme),
+    `theme=${state.theme} stored=${JSON.stringify(stored.theme ?? null)}`,
+  );
+  line(
+    'a stored theme the resolver rejects does not become the store theme',
+    stored.theme === 'blue' && state.theme === 'dark',
     `theme=${state.theme} stored=${JSON.stringify(stored.theme ?? null)}`,
   );
   line(
