@@ -20,11 +20,9 @@ pub use simple_post_mcp::dynamic::ops::{CreateOpts, DynamicVariableView};
 
 /// 列出全部定义，带当前值与缓存状态。
 ///
-/// `include_references` 决定要不要带上「哪些端点引用了它」。桌面端与 REST 那条路是
-/// 用户自己的工作区，带上它；MCP 那条路不带（那边的 `dynamic_var_list` 没有按项目的门，
-/// 带走它等于开了一条枚举别项目接口名的旁路）。
-pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariableView>, AppError> {
-    simple_post_mcp::dynamic::ops::list(pool, include_references)
+/// 不带「哪些端点引用了它」：那条信息只在接口那侧存在，变量这一侧不维护反向索引。
+pub fn list(pool: &DbPool) -> Result<Vec<DynamicVariableView>, AppError> {
+    simple_post_mcp::dynamic::ops::list(pool)
 }
 
 /// 读一条定义，带当前值与缓存状态。

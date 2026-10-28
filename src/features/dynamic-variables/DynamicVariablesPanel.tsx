@@ -11,12 +11,10 @@
  * 面板读的是 store 里的 `dynamicVariables`（列表命令一次带回定义 + 当前值 + 缓存状态），
  * 故它不自己发请求；取数与写覆盖值都走 store 动作。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import type { DynamicVariableView, ValueMode } from '@/types/domain';
-import { listDynamicNames } from '@/lib/dynamic-vars';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { DynamicVariableForm } from './DynamicVariableForm';
 
 export function DynamicVariablesPanel() {
@@ -29,10 +27,6 @@ export function DynamicVariablesPanel() {
   const refreshDynamicVariable = useAppStore((s) => s.refreshDynamicVariable);
   const deleteDynamicVariable = useAppStore((s) => s.deleteDynamicVariable);
   const updateDynamicVariable = useAppStore((s) => s.updateDynamicVariable);
-  const endpointDetails = useAppStore((s) => s.endpointDetails);
-  const nodes = useAppStore((s) => s.nodes);
-  const environments = useAppStore((s) => s.environments);
-  const activeProjectId = useAppStore((s) => s.activeProjectId);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -40,59 +34,6 @@ export function DynamicVariablesPanel() {
   useEffect(() => {
     void loadDynamicVariables();
   }, [loadDynamicVariables]);
-
-  // 哪些变量名出现在当前项目的请求里。界面上没有每个端点解析出的 base URL，故这里
-  // 只扫端点自己的字段；base URL 里的标记极少，且那是环境的内容。
-  const referencedBy = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const node of nodes) {
-      if (node.kind !== 'endpoint') continue;
-      if (node.rootId !== activeProjectId) continue;
-      const detail = endpointDetails[node.id];
-      if (!detail) continue;
-      const names = listDynamicNames({
-        baseUrl: '',
-        url: detail.url,
-        params: detail.params,
-        pathParams: detail.pathParams,
-        headers: detail.headers,
-        body: detail.body,
-        auth: detail.auth,
-      });
-      for (const name of names) {
-        const list = map.get(name) ?? [];
-        list.push(node.name);
-        map.set(name, list);
-      }
-    }
-    return map;
-  }, [nodes, endpointDetails, activeProjectId]);
-
-  // 请求里出现、但没有定义的变量名。给出一个最接近的动态变量名，供一键改名。
-  const suggestions = useMemo(() => {
-    const defined = new Set(variables.map((v) => v.name));
-    const envNames = new Set<string>();
-    for (const env of environments) {
-      for (const key of Object.keys(env.variables)) envNames.add(key);
-    }
-    const out: { used: string; suggestion: string | null }[] = [];
-    for (const name of referencedBy.keys()) {
-      if (defined.has(name) || envNames.has(name)) continue;
-      let best: string | null = null;
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (const candidate of defined) {
-        const d = editDistance(name, candidate);
-        if (d < bestDistance) {
-          bestDistance = d;
-          best = candidate;
-        }
-      }
-      // 差得太多就不提了——那不是「写错了一个字母」，是另一个东西。
-      const limit = Math.max(2, Math.floor(name.length / 2));
-      out.push({ used: name, suggestion: best !== null && bestDistance <= limit ? best : null });
-    }
-    return out;
-  }, [referencedBy, variables, environments]);
 
   const handleResolveAll = useCallback(async () => {
     const names = variables.map((v) => v.name);
@@ -174,37 +115,6 @@ export function DynamicVariablesPanel() {
             onCancel={() => setCreating(false)}
             onDone={() => setCreating(false)}
           />
-        )}
-
-        {suggestions.length > 0 && (
-          <section className="rounded-md border border-border p-3">
-            <h3 className="text-xs font-medium">当前项目的请求里出现、但没有定义的名字</h3>
-            <ul className="mt-2 flex flex-col gap-1">
-              {suggestions.map((item) => {
-                // 建议的名字取自全部定义的集合，故必然找得到；找不到就不给建议。
-                const target = item.suggestion
-                  ? variables.find((v) => v.name === item.suggestion)
-                  : undefined;
-                return (
-                  <li key={item.used} className="flex items-center gap-2 text-xs">
-                    <code className="font-mono text-muted-foreground">{`{{${item.used}}}`}</code>
-                    {target ? (
-                      <>
-                        <span className="text-muted-foreground">有个叫</span>
-                        <code className="font-mono">{target.name}</code>
-                        <RenameButton
-                          variable={target}
-                          onRename={(name) => void handleRename(target, name)}
-                        />
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">没有相近的动态变量。</span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
         )}
       </div>
     </div>
@@ -313,18 +223,6 @@ function DynamicVariableCard({
         <dd className="font-mono">{variable.extractPath}</dd>
         <dt className="text-muted-foreground">缓存时长</dt>
         <dd>{variable.ttlSeconds} 秒</dd>
-        {variable.referencedBy.length > 0 && (
-          <>
-            <dt className="text-muted-foreground">被引用</dt>
-            <dd>
-              {variable.referencedBy
-                .map((r) =>
-                  r.projectName ? `${r.endpointName}（${r.projectName}）` : r.endpointName,
-                )
-                .join('、')}
-            </dd>
-          </>
-        )}
       </dl>
 
       <div className="mt-2">
@@ -381,30 +279,6 @@ function DynamicVariableCard({
   );
 }
 
-/** 一键把引用它的请求改成正确的名字。 */
-function RenameButton({
-  variable,
-  onRename,
-}: {
-  variable: DynamicVariableView | undefined;
-  onRename: (name: string) => void;
-}) {
-  const [name, setName] = useState(variable?.name ?? '');
-  if (!variable) return null;
-  return (
-    <span className="flex items-center gap-1">
-      <Input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        className="h-6 w-28 font-mono text-xs"
-      />
-      <Button variant="ghost" size="xs" onClick={() => onRename(name)}>
-        改名
-      </Button>
-    </span>
-  );
-}
-
 /** 当前值的来源。 */
 function StatusBadge({ source }: { source: DynamicVariableView['source'] }) {
   const label =
@@ -433,26 +307,6 @@ function formatTime(ms: number): string {
   const d = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-/** 两个名字的编辑距离。用来判断「用户是不是把名字写错了一个字母」。 */
-function editDistance(a: string, b: string): number {
-  const rows = a.length + 1;
-  const cols = b.length + 1;
-  const table: number[] = new Array(rows * cols).fill(0);
-  for (let i = 0; i < rows; i++) table[i * cols] = i;
-  for (let j = 0; j < cols; j++) table[j] = j;
-  for (let i = 1; i < rows; i++) {
-    for (let j = 1; j < cols; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      table[i * cols + j] = Math.min(
-        table[(i - 1) * cols + j] + 1,
-        table[i * cols + (j - 1)] + 1,
-        table[(i - 1) * cols + (j - 1)] + cost,
-      );
-    }
-  }
-  return table[(rows - 1) * cols + (cols - 1)];
 }
 
 export type { ValueMode };

@@ -43,14 +43,6 @@ export interface DynamicVariable {
   updatedAt: number;
 }
 
-/** 哪些端点的请求里写了这个变量名。跨全部项目——定义是全局的。 */
-export interface DynamicVariableReference {
-  endpointId: string;
-  endpointName: string;
-  projectId: string;
-  projectName: string;
-}
-
 /** 当前值是从哪来的。 */
 export type DynamicValueSource = 'auto' | 'override' | 'stale' | 'missing';
 
@@ -101,8 +93,6 @@ export interface DynamicVariableView extends DynamicVariable {
   /** 实际取数用的服务：定义点名的那个，或数据源项目的默认服务。 */
   effectiveBaseUrlDefinitionId?: string | null;
   effectiveBaseUrlDefinitionName?: string | null;
-  /** 哪些端点的请求里写了这个变量名。 */
-  referencedBy: DynamicVariableReference[];
 }
 
 /** 跨项目搜到的一条接口，带它所在的路径。 */

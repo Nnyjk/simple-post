@@ -6,11 +6,10 @@
 //! 定义是**全局**的，故这些路由都不带项目参数：名字在整个工作区里唯一，任何项目的
 //! 端点都能引用同一条定义。
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::StatusCode,
     Json,
 };
@@ -26,19 +25,10 @@ use super::super::{map_app_error, HttpErrorResponse, WebState};
 /// `GET /api/dynamic-variables` —— 列出定义，带当前值与缓存状态。
 ///
 /// **不取数**：读的是缓存行。取数会发出站请求，而这是一次纯读。
-///
-/// `includeReferences` 缺席时带上引用关系；传 `false` 则不算——算它要扫一遍全部端点，
-/// 而只要当前值的调用方不需要它。
 pub(crate) async fn dynamic_variables_list(
     State(s): State<Arc<WebState>>,
-    Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    // 解析不出布尔值时按「带引用关系」处理：那是这条路原本的代价。
-    let include_references = params
-        .get("includeReferences")
-        .and_then(|raw| raw.parse::<bool>().ok())
-        .unwrap_or(true);
-    let rows = crate::dynamic_api::list(&s.pool, include_references).map_err(map_app_error)?;
+    let rows = crate::dynamic_api::list(&s.pool).map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&rows).unwrap_or(Value::Null)))
 }
 

@@ -244,9 +244,9 @@ export function HttpTester() {
   /** 关掉变量选择器。 */
   const closeVarPicker = () => setVarPickerOpen(false);
 
-  // 全部动态变量定义。定义是全局的，故这里没有项目维度；这里只要当前值，故不算引用关系。
+  // 全部动态变量定义。这里只要当前值。
   useEffect(() => {
-    void loadDynamicVariables({ includeReferences: false });
+    void loadDynamicVariables();
   }, [loadDynamicVariables]);
 
   const enabledDynamicNames = useMemo(

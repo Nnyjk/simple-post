@@ -23,7 +23,6 @@ import type {
   DynamicError,
   DynamicValueStatus,
   DynamicVariable,
-  DynamicVariableReference,
   DynamicVariableView,
 } from '@/types/domain';
 
@@ -74,8 +73,8 @@ function definition(name: string, id = `d-${name}`): DynamicVariable {
   } as DynamicVariable;
 }
 
-/** 一条定义 + 它的当前值与引用关系。 */
-function view(name: string, referencedBy: DynamicVariableReference[] = []): DynamicVariableView {
+/** 一条定义 + 它的当前值。 */
+function view(name: string): DynamicVariableView {
   return {
     ...definition(name),
     value: null,
@@ -84,18 +83,7 @@ function view(name: string, referencedBy: DynamicVariableReference[] = []): Dyna
     expiresAt: null,
     isOverride: false,
     error: null,
-    referencedBy,
   } as DynamicVariableView;
-}
-
-/** 一条引用关系。 */
-function reference(endpointName: string): DynamicVariableReference {
-  return {
-    endpointId: `e-${endpointName}`,
-    endpointName,
-    projectId: 'p1',
-    projectName: 'First',
-  };
 }
 
 /** 一次解析的结果。 */
@@ -225,52 +213,22 @@ describe('dynamic slice', () => {
     assert.match(bag.dynamicError ?? '', /名字重复/);
   });
 
-  it('加载时把要不要算引用关系告诉后端', async () => {
+  it('加载列表不带任何参数', async () => {
     const bag = makeHarness();
     const seen: any[] = [];
     installIpcMock((cmd, args) => {
       if (cmd === 'dynamic_variables_list') {
         seen.push(args);
-        return [];
+        return [view('sns')];
       }
       return null;
     });
 
     await bag.loadDynamicVariables();
-    await bag.loadDynamicVariables({ includeReferences: false });
 
-    assert.deepEqual(seen[0], { includeReferences: true });
-    assert.deepEqual(seen[1], { includeReferences: false });
-  });
-
-  it('不算引用关系的加载不清空已知的引用关系', async () => {
-    const bag = makeHarness();
-    // 面板算过一次引用关系：这条列表里带着它。
-    bag.dynamicVariables = [view('sns', [reference('消费接口')])];
-    installIpcMock((cmd) => {
-      // 后端不算引用关系时带回来的 `referencedBy` 是空的。
-      if (cmd === 'dynamic_variables_list') return [view('sns')];
-      return null;
-    });
-
-    await bag.loadDynamicVariables({ includeReferences: false });
-
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0], {}, '列表不带引用关系开关：那一列已经没有了');
     assert.equal(bag.dynamicVariables.length, 1);
-    assert.equal(bag.dynamicVariables[0].referencedBy.length, 1);
-    assert.equal(bag.dynamicVariables[0].referencedBy[0].endpointName, '消费接口');
-  });
-
-  it('算引用关系的加载用后端给的新值', async () => {
-    const bag = makeHarness();
-    bag.dynamicVariables = [view('sns', [reference('旧接口')])];
-    installIpcMock((cmd) => {
-      if (cmd === 'dynamic_variables_list') return [view('sns', [reference('新接口')])];
-      return null;
-    });
-
-    await bag.loadDynamicVariables({ includeReferences: true });
-
-    assert.equal(bag.dynamicVariables[0].referencedBy.length, 1);
-    assert.equal(bag.dynamicVariables[0].referencedBy[0].endpointName, '新接口');
+    assert.equal(bag.dynamicVariables[0].name, 'sns');
   });
 });

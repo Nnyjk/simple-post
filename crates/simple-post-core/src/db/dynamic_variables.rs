@@ -13,19 +13,20 @@
 //!
 //! - `read.rs`：列表、单行读取、按名字读取、数据源端点所属的项目
 //! - `write.rs`：新建、改、删
-//! - `references.rs`：哪些端点引用了哪些变量名
 //! - `validation.rs`：变量名与数据源绑定的校验、唯一约束冲突的判别
 //! - `mapping.rs`：行到结构体的映射
+//!
+//! **没有「哪些端点引用了它」这一层**：引用关系只存在于接口那侧（接口知道自己配了
+//! 哪些变量），变量这一侧不维护反向索引——一个被几乎每个接口用到的通用变量会把
+//! 这张列表撑爆，而那条信息对维护变量本身没有用。
 
 mod mapping;
 mod read;
-mod references;
 mod validation;
 mod write;
 
 // 公开接口：定义在按职责分开的子模块里，这里重新导出，故 `dynamic_variables::create` 等旧路径不变。
 pub use read::{get, get_by_name, list, source_project_id_of};
-pub use references::{referencing_endpoints, Reference};
 pub use validation::is_valid_name;
 pub use write::{create, delete, update};
 

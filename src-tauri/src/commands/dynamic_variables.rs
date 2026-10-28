@@ -23,14 +23,10 @@ use crate::dynamic_api::DynamicVariableView;
 ///
 /// 只读缓存行，**不取数**。
 ///
-/// `include_references` 缺席时带上「哪些端点引用了它」；传 `false` 则不算——算它要扫
-/// 一遍全部端点，而只要当前值的调用方不需要它。
+/// 不带「哪些端点引用了它」：那条信息只在接口那侧存在，变量这一侧不维护反向索引。
 #[tauri::command]
-pub fn dynamic_variables_list(
-    state: State<DbPool>,
-    include_references: Option<bool>,
-) -> Result<Vec<DynamicVariableView>, AppError> {
-    crate::dynamic_api::list(&state, include_references.unwrap_or(true))
+pub fn dynamic_variables_list(state: State<DbPool>) -> Result<Vec<DynamicVariableView>, AppError> {
+    crate::dynamic_api::list(&state)
 }
 
 /// 新建一条动态变量定义。

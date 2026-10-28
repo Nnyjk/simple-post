@@ -14,8 +14,8 @@ use super::super::{
 };
 use simple_post_core::db;
 use simple_post_core::domain::{
-    AuthConfig, BodyMode, EndpointDetail, Environment, HttpMethod, Permission, Project,
-    RequestBody, ResourceNode, ResourceNodeType,
+    AuthConfig, EndpointDetail, Environment, HttpMethod, Permission, Project, RequestBody,
+    ResourceNode, ResourceNodeType,
 };
 use simple_post_core::permissions::Capability;
 
@@ -616,9 +616,8 @@ async fn a_definition_whose_source_endpoint_was_deleted_can_still_be_renamed() {
 
 #[tokio::test]
 async fn the_list_tool_does_not_carry_the_referencing_endpoints() {
-    // 「哪些端点引用了它」是**别的项目的**接口名与 id。`dynamic_var_list` 没有按项目的门
-    // （定义是全局的，没有单一归属行可查），带上它就成了一条枚举所有项目接口名的旁路，
-    // 而 `endpoint_list` / `endpoint_search` 恰恰拒绝无项目地扫全部项目。
+    // 「哪些端点引用了它」这条信息整体没有了：它只在接口那侧存在，变量这一侧不维护
+    // 反向索引。一个被几乎每个接口用到的通用变量会把这条列表撑爆。
     let state = test_state(Permission::Full);
     dispatch(
         &state,
@@ -628,57 +627,12 @@ async fn the_list_tool_does_not_carry_the_referencing_endpoints() {
     .await
     .expect("创建");
 
-    // p2 里放一个引用了 {{sns}} 的接口：REST 那条路会把它列出来，MCP 这条路不列。
-    db::with_tx(&state.pool, |c| {
-        db::nodes::create(
-            c,
-            &ResourceNode {
-                id: "e3".into(),
-                root_id: "p2".into(),
-                parent_id: Some("m2".into()),
-                kind: ResourceNodeType::Endpoint,
-                name: "引用了变量的接口".into(),
-                description: None,
-                sort_order: 1,
-                created_at: 1,
-                updated_at: 1,
-            },
-            Some(&EndpointDetail {
-                node_id: "e3".into(),
-                method: HttpMethod::Post,
-                url: "/orders".into(),
-                environment_id: None,
-                base_url_definition_id: None,
-                base_url_override: None,
-                params: vec![],
-                path_params: vec![],
-                headers: vec![],
-                body: RequestBody {
-                    mode: BodyMode::Json,
-                    content: r#"{"q":"{{sns}}"}"#.to_string(),
-                    schema: None,
-                },
-                auth: AuthConfig::default(),
-                docs: None,
-                notes: None,
-                tags: vec![],
-                pre_request_script: None,
-                test_script: None,
-                tls: None,
-            }),
-        )
-    })
-    .expect("建接口");
-
     let listed = dispatch(&state, "dynamic_var_list", json!({}))
         .await
         .expect("列出");
     let entries = listed_of(listed);
-    let references = entries[0]["referencedBy"]
-        .as_array()
-        .expect("referencedBy 数组");
     assert!(
-        references.is_empty(),
-        "MCP 的列表不该带上别的项目的接口名：{references:?}"
+        entries[0].get("referencedBy").is_none(),
+        "列表不该带引用关系：{entries:?}"
     );
 }

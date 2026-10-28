@@ -39,16 +39,6 @@ pub struct CreateOpts {
     pub sort_order: Option<i64>,
 }
 
-/// 哪些端点引用了这个变量名。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReferenceDto {
-    pub endpoint_id: String,
-    pub endpoint_name: String,
-    pub project_id: String,
-    pub project_name: String,
-}
-
 /// 一条定义 + 它的当前值与缓存状态。
 ///
 /// 列表与详情都用它：面板要显示「当前值」与「缓存状态」，故读的时候一并算出来。
@@ -85,31 +75,18 @@ pub struct DynamicVariableView {
     pub effective_base_url_definition_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_base_url_definition_name: Option<String>,
-    /// 哪些端点的请求里写了这个变量名。跨全部项目——定义是全局的，引用它的端点可能
-    /// 散在基线项目与各个分发项目里。
-    pub referenced_by: Vec<ReferenceDto>,
 }
 
 /// 列出全部定义，带当前值与缓存状态。
 ///
 /// **不取数**：读的是缓存行。取数可能发出站请求，而这是一次纯读。
 ///
-/// `include_references` 决定要不要带上「哪些端点引用了它」。那一列是**别的项目的
-/// 接口名与 id**，故 MCP 那条路（无按项目的门）不带走它——否则一个只读档位的客户端
-/// 就能借这条工具枚举所有项目的接口名，而 `endpoint_list` / `endpoint_search` 恰恰
-/// 拒绝无项目地扫全部项目。桌面端与 REST 那条路是用户自己的工作区，带上它。
-pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariableView>, AppError> {
+/// **不带「哪些端点引用了它」**：那条信息只在接口那侧存在——接口知道自己配了哪些变量，
+/// 变量这一侧不维护反向索引。一个被几乎每个接口用到的通用变量会把这条列表撑爆，
+/// 而那条信息对维护变量本身没有用。
+pub fn list(pool: &DbPool) -> Result<Vec<DynamicVariableView>, AppError> {
     let definitions = db::with_conn(pool, db::dynamic_variables::list)?;
     let now = now_ms();
-    // 引用关系一次算出来：逐条定义各查一次会在 N 条定义时扫 N 遍全表。
-    let references = if include_references {
-        let names: Vec<String> = definitions.iter().map(|d| d.name.clone()).collect();
-        db::with_conn(pool, |c| {
-            db::dynamic_variables::referencing_endpoints(c, &names)
-        })?
-    } else {
-        std::collections::HashMap::new()
-    };
     let mut out = Vec::with_capacity(definitions.len());
     for definition in definitions {
         let source = simple_post_core::dynamic::source_context(pool, &definition)?;
@@ -117,26 +94,7 @@ pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariab
         let entry = db::with_conn(pool, |c| {
             db::dynamic_variable_cache::get(c, &definition.id, &env_key)
         })?;
-        let referenced_by = references
-            .get(&definition.name)
-            .map(|refs| {
-                refs.iter()
-                    .map(|r| ReferenceDto {
-                        endpoint_id: r.endpoint_id.clone(),
-                        endpoint_name: r.endpoint_name.clone(),
-                        project_id: r.project_id.clone(),
-                        project_name: r.project_name.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        out.push(view_of(
-            definition,
-            &source,
-            entry.as_ref(),
-            now,
-            referenced_by,
-        ));
+        out.push(view_of(definition, &source, entry.as_ref(), now));
     }
     Ok(out)
 }
@@ -149,13 +107,7 @@ pub fn get(pool: &DbPool, definition_id: &str) -> Result<DynamicVariableView, Ap
     let entry = db::with_conn(pool, |c| {
         db::dynamic_variable_cache::get(c, definition_id, &env_key)
     })?;
-    Ok(view_of(
-        definition,
-        &source,
-        entry.as_ref(),
-        now_ms(),
-        Vec::new(),
-    ))
+    Ok(view_of(definition, &source, entry.as_ref(), now_ms()))
 }
 
 /// 新建一条定义。
@@ -286,7 +238,6 @@ fn view_of(
     source: &SourceContext,
     entry: Option<&DynamicCacheEntry>,
     now: i64,
-    referenced_by: Vec<ReferenceDto>,
 ) -> DynamicVariableView {
     let (value, source_kind, fetched_at, expires_at, is_override) = match entry {
         None => (None, DynamicValueSource::Missing, None, None, false),
@@ -357,6 +308,5 @@ fn view_of(
         effective_environment_name: environment.map(|e| e.name.clone()),
         effective_base_url_definition_id: source.base_url_definition_id.clone(),
         effective_base_url_definition_name: service_name,
-        referenced_by,
     }
 }

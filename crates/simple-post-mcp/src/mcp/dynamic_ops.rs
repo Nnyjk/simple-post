@@ -264,13 +264,9 @@ async fn require_scope(
 }
 
 async fn tool_dynamic_var_list(state: &AppState, _args: Value) -> Result<CallToolResult, AppError> {
-    // 无按项目的门：动态变量是全局的，列全部没有单一归属行可查，由 Gate A（全局
-    // `CapabilityPolicy`）裁决。
-    //
-    // 但「哪些端点引用了它」不带走：那是别的项目的接口名与 id，而 `endpoint_list` /
-    // `endpoint_search` 恰恰拒绝无项目地扫全部项目（那串接口没有单一归属项目可查门）。
-    // 要看引用关系，按项目查那个项目的接口即可。
-    let views = crate::dynamic::ops::list(&state.pool, false)?;
+    // 无按项目的门：动态变量跨项目可见，列全部没有单一归属行可查，由 Gate A（全局
+    // `CapabilityPolicy`）裁决——与 `project_list` 同理。
+    let views = crate::dynamic::ops::list(&state.pool)?;
     Ok(CallToolResult::json(views))
 }
 
