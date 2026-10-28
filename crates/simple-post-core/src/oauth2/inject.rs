@@ -7,8 +7,8 @@ use super::OAuth2Token;
 
 /// `Authorization` 的完整取值：`<token_type> <access_token>`（RFC 6749 §7.1）。
 ///
-/// `token_type` 原样透传 IdP 回的值：它多数是 `Bearer`，少数是 `MAC` / `Token`，
-/// 由服务端定义，替它改成 `Bearer` 会打错请求。
+/// `token_type` 去掉首尾空白后透传 IdP 回的值：它多数是 `Bearer`，少数是 `MAC` / `Token`，
+/// 由服务端定义，替它改成 `Bearer` 会打错请求。去空白后是空串则只给裸 token。
 pub fn auth_header_value(token: &OAuth2Token) -> String {
     let ty = token.token_type.trim();
     if ty.is_empty() {

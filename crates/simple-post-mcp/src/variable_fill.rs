@@ -58,6 +58,10 @@ mod test_support;
 mod base_url_tests;
 
 #[cfg(test)]
+#[path = "variable_fill/base_url_parity_test.rs"]
+mod base_url_parity_tests;
+
+#[cfg(test)]
 #[path = "variable_fill/resolve_test.rs"]
 mod resolve_tests;
 
