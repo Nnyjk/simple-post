@@ -163,7 +163,7 @@ export function WorkspaceShell() {
         </Suspense>
       );
     }
-    // 动态变量是全局页面：定义不属于任何项目，故它没有项目参数。
+    // 动态变量是项目内的一页：面板自己按当前项目过滤，它不需要这里传项目。
     if (activeTab.kind === 'dynamic-variables') {
       return (
         <Suspense fallback={<PanelFallback />}>

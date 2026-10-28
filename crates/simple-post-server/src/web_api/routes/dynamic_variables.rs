@@ -3,13 +3,14 @@
 //! 七条路由：列表、新建、改、删、解析、写覆盖值、强制重取。逻辑全部在
 //! `crate::dynamic_api`，故 Tauri 命令与这些路由走同一套实现。
 //!
-//! 定义是**全局**的，故这些路由都不带项目参数：名字在整个工作区里唯一，任何项目的
-//! 端点都能引用同一条定义。
+//! 定义挂在**项目**里：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。
+//! 列表与解析带一个可选的项目参数：不带就是跨项目那一路。
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -25,10 +26,15 @@ use super::super::{map_app_error, HttpErrorResponse, WebState};
 /// `GET /api/dynamic-variables` —— 列出定义，带当前值与缓存状态。
 ///
 /// **不取数**：读的是缓存行。取数会发出站请求，而这是一次纯读。
+///
+/// `projectId` 缺席时列出全部项目；给了就只列那个项目里的。
 pub(crate) async fn dynamic_variables_list(
     State(s): State<Arc<WebState>>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let rows = crate::dynamic_api::list(&s.pool).map_err(map_app_error)?;
+    let project_id = params.get("projectId").filter(|id| !id.is_empty());
+    let rows =
+        crate::dynamic_api::list(&s.pool, project_id.map(String::as_str)).map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&rows).unwrap_or(Value::Null)))
 }
 
@@ -39,6 +45,7 @@ pub(crate) async fn dynamic_variables_create(
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
     let opts = crate::dynamic_api::CreateOpts {
         id: body.id,
+        project_id: Some(body.project_id),
         name: body.name,
         description: body.description,
         source_endpoint_id: body.source_endpoint_id,
@@ -46,6 +53,7 @@ pub(crate) async fn dynamic_variables_create(
         source_environment_id: body.source_environment_id,
         source_base_url_definition_id: body.source_base_url_definition_id,
         extract_path: body.extract_path,
+        transform_script: body.transform_script,
         value_mode: body.value_mode,
         ttl_seconds: body.ttl_seconds,
         stale_fallback: body.stale_fallback,
@@ -81,13 +89,20 @@ pub(crate) async fn dynamic_variables_delete(
 /// `POST /api/dynamic-variables/resolve` —— 解析一批名字。
 ///
 /// 这一步会真的发出站请求（去数据源取数），故它与「读」是两种不同的代价。
+///
+/// `projectId` 缺席时跨项目找：同名定义出现在多个项目里时，按歧义处理，不猜。
 pub(crate) async fn dynamic_variables_resolve(
     State(s): State<Arc<WebState>>,
     Json(body): Json<DynamicVariableResolveBody>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let resolution = crate::dynamic_api::resolve(&s.pool, &body.names, body.force.unwrap_or(false))
-        .await
-        .map_err(map_app_error)?;
+    let resolution = crate::dynamic_api::resolve(
+        &s.pool,
+        body.project_id.as_deref(),
+        &body.names,
+        body.force.unwrap_or(false),
+    )
+    .await
+    .map_err(map_app_error)?;
     Ok(Json(
         serde_json::to_value(&resolution).unwrap_or(Value::Null),
     ))

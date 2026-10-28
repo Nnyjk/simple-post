@@ -3,9 +3,13 @@
 //! 消费端点的请求体里写 `{{sns}}`，发送时程序按 [`DynamicVariable`] 取数、抽取、缓存并替换。
 //! 人工调试与 Agent 通过 MCP 调试都不再手工搬运 JSON。
 //!
-//! 作用域是**全局**：一条定义不属于任何项目，任何项目的端点都能引用它，整个工作区里
-//! 变量名唯一。理由是基础数据源不该在每个项目里各写一遍——基线项目取到的那份数据，
-//! 多客户分发项目直接引用同一条定义即可。
+//! 作用域是**项目**：一条定义挂在一个项目里，变量名在项目内唯一。不同项目可以有同名变量
+//! 而互不覆盖——基线项目与各个客户分发项目各自取自己的那份数据，正因为它们的名字一样、
+//! 取值不同。
+//!
+//! **取值只认消费方所在的项目。** 请求里的 `{{name}}` 在项目 A 里找不到定义时，它就是
+//! 缺失的，不会退到项目 B 去拿同名的那条。跨项目取值是**调用接口**的事（那条接口可以
+//! 点名项目），不是替换规则的事。
 
 use std::collections::HashMap;
 
@@ -57,6 +61,9 @@ impl ValueMode {
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariable {
     pub id: String,
+    /// 归属项目。`None` = 未归属：迁移遗留的定义在归位之前没有项目。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
     /// 变量名，请求体里写 `{{name}}` 用的那个。必须匹配 `^[A-Za-z0-9_]+$`。
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,6 +86,9 @@ pub struct DynamicVariable {
     pub source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
     pub extract_path: String,
+    /// 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform_script: Option<String>,
     pub value_mode: ValueMode,
     /// 缓存有效期（秒）。
     pub ttl_seconds: i64,
@@ -97,6 +107,8 @@ pub struct DynamicVariable {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariablePatch {
+    /// 归属项目。有值 = 移到那个项目（也用来认领未归属的定义）。
+    pub project_id: Option<String>,
     pub name: Option<String>,
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,6 +126,9 @@ pub struct DynamicVariablePatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_base_url_definition_id: Option<Option<String>>,
     pub extract_path: Option<String>,
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transform_script: Option<Option<String>>,
     pub value_mode: Option<ValueMode>,
     pub ttl_seconds: Option<i64>,
     pub stale_fallback: Option<bool>,
@@ -166,6 +181,12 @@ pub enum DynamicErrorKind {
     SourceError,
     /// 值超过大小上限。
     TooLarge,
+    /// 同一个名字在多个项目里都有定义，跨项目取值时不知道该用哪一条。
+    ///
+    /// 只在**跨项目**取值时出现：点名了项目就不会有歧义。
+    Ambiguous,
+    /// 处理脚本跑失败（语法错、超时、抛异常等）。
+    ScriptError,
 }
 
 /// 一条动态变量的错误。`name` 是出错的变量名，故调用方不必自己猜是谁坏了。

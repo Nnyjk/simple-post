@@ -5,22 +5,27 @@ use rusqlite::{params, Connection};
 use crate::domain::{DynamicVariable, DynamicVariablePatch};
 use crate::error::AppError;
 
-use super::read::{get, get_by_name};
+use super::read::{get, get_by_name_in_project};
 use super::validation::{
     check_source_bindings, is_unique_violation, is_valid_name, unique_violation_columns,
 };
 
 /// 新建一条定义。
 ///
-/// 变量名非法或与另一条定义重名时返回 `Validation`——重名会撞上
-/// `idx_dynamic_vars_name` 那条唯一索引，与其把数据库的约束错误泄给用户，不如在这里
-/// 说清是哪个名字撞了。
+/// 变量名非法、与同项目里的另一条定义重名、或归属项目不存在时返回 `Validation`。
+///
+/// 重名会撞上 `idx_dynamic_vars_project_name` 那条唯一索引，与其把数据库的约束错误泄给
+/// 用户，不如在这里说清是哪个名字撞了。
 pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppError> {
     if !is_valid_name(&def.name) {
         return Err(AppError::Validation(format!(
             "变量名 '{}' 非法：只能用字母、数字与下划线",
             def.name
         )));
+    }
+    // 归属项目必须存在：定义挂在项目里，指向一个不存在的项目等于挂在虚空里。
+    if let Some(project_id) = def.project_id.as_deref() {
+        check_project_exists(conn, project_id)?;
     }
     // 数据源二选一，且**必须有一个**：没有数据源的定义永远解析不出值。
     //
@@ -36,12 +41,14 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
             "动态变量的数据源只能是其中一种：引用接口，或内联请求".to_string(),
         ));
     }
-    if let Some(existing) = get_by_name(conn, &def.name)? {
-        if existing.id != def.id {
-            return Err(AppError::Validation(format!(
-                "已有一个叫 '{}' 的动态变量",
-                def.name
-            )));
+    if let Some(project_id) = def.project_id.as_deref() {
+        if let Some(existing) = get_by_name_in_project(conn, project_id, &def.name)? {
+            if existing.id != def.id {
+                return Err(AppError::Validation(format!(
+                    "项目里已有一个叫 '{}' 的动态变量",
+                    def.name
+                )));
+            }
         }
     }
     let (environment_id, base_url_definition_id) = check_source_bindings(
@@ -52,12 +59,13 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
     )?;
     let result = conn.execute(
         "INSERT INTO dynamic_variables \
-           (id, name, description, source_endpoint_id, source_inline_json, \
-            source_environment_id, source_base_url_definition_id, extract_path, value_mode, \
-            ttl_seconds, stale_fallback, enabled, sort_order, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+           (id, project_id, name, description, source_endpoint_id, source_inline_json, \
+            source_environment_id, source_base_url_definition_id, extract_path, transform_script, \
+            value_mode, ttl_seconds, stale_fallback, enabled, sort_order, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             def.id,
+            def.project_id,
             def.name,
             def.description,
             def.source_endpoint_id,
@@ -65,6 +73,7 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
             environment_id,
             base_url_definition_id,
             def.extract_path,
+            def.transform_script,
             def.value_mode.as_str(),
             def.ttl_seconds,
             def.stale_fallback,
@@ -79,7 +88,7 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
         match unique_violation_columns(&e) {
             Some("name") => {
                 return Err(AppError::Validation(format!(
-                    "已有一个叫 '{}' 的动态变量",
+                    "项目里已有一个叫 '{}' 的动态变量",
                     def.name
                 )));
             }
@@ -92,7 +101,7 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
             Some(_) => {}
             None if is_unique_violation(&e) => {
                 return Err(AppError::Validation(format!(
-                    "已有一个叫 '{}' 的动态变量",
+                    "项目里已有一个叫 '{}' 的动态变量",
                     def.name
                 )));
             }
@@ -105,13 +114,22 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
 
 /// 改一条定义。
 ///
-/// 改 `name` 时同样要过合法性检查与重名检查。
+/// 改 `name` 时同样要过合法性检查与重名检查；改归属项目时，新项目里也不能有同名
+/// 的定义。
 pub fn update(
     conn: &mut Connection,
     id: &str,
     patch: DynamicVariablePatch,
 ) -> Result<DynamicVariable, AppError> {
     let current = get(conn, id)?;
+    // 改完之后这条定义会落在哪个项目里。归属项目变了，重名检查就得在新项目里做。
+    let next_project_id = match patch.project_id.as_deref() {
+        None => current.project_id.clone(),
+        Some(project_id) => {
+            check_project_exists(conn, project_id)?;
+            Some(project_id.to_string())
+        }
+    };
     if let Some(name) = patch.name.as_ref() {
         if !is_valid_name(name) {
             return Err(AppError::Validation(format!(
@@ -119,11 +137,13 @@ pub fn update(
             )));
         }
         if name != &current.name {
-            if let Some(existing) = get_by_name(conn, name)? {
-                if existing.id != id {
-                    return Err(AppError::Validation(format!(
-                        "已有一个叫 '{name}' 的动态变量"
-                    )));
+            if let Some(project_id) = next_project_id.as_deref() {
+                if let Some(existing) = get_by_name_in_project(conn, project_id, name)? {
+                    if existing.id != id {
+                        return Err(AppError::Validation(format!(
+                            "项目里已有一个叫 '{name}' 的动态变量"
+                        )));
+                    }
                 }
             }
         }
@@ -175,6 +195,9 @@ pub fn update(
         binds.push(value);
     };
 
+    if let Some(project_id) = patch.project_id {
+        push(&mut sets, &mut binds, "project_id", project_id.into());
+    }
     if let Some(name) = patch.name {
         push(&mut sets, &mut binds, "name", name.into());
     }
@@ -234,6 +257,17 @@ pub fn update(
     if let Some(extract_path) = patch.extract_path {
         push(&mut sets, &mut binds, "extract_path", extract_path.into());
     }
+    if let Some(transform_script) = patch.transform_script {
+        push(
+            &mut sets,
+            &mut binds,
+            "transform_script",
+            match transform_script {
+                Some(v) => v.into(),
+                None => rusqlite::types::Value::Null,
+            },
+        );
+    }
     if let Some(value_mode) = patch.value_mode {
         push(
             &mut sets,
@@ -287,6 +321,19 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     let rows = conn.execute("DELETE FROM dynamic_variables WHERE id = ?1", params![id])?;
     if rows == 0 {
         return Err(AppError::NotFound(format!("dynamic_variable {id}")));
+    }
+    Ok(())
+}
+
+/// 归属项目必须存在。
+fn check_project_exists(conn: &mut Connection, project_id: &str) -> Result<(), AppError> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM projects WHERE id = ?1",
+        params![project_id],
+        |row| row.get(0),
+    )?;
+    if exists == 0 {
+        return Err(AppError::Validation(format!("项目 {project_id} 不存在")));
     }
     Ok(())
 }

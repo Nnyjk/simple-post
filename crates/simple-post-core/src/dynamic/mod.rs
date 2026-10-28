@@ -50,6 +50,7 @@ mod names;
 mod resolve;
 mod serialize;
 mod source;
+mod transform;
 
 // 公开接口：定义在按职责分开的子模块里，这里重新导出，故 `dynamic::merge_pool` 等旧路径不变。
 pub use cache::{decide, Decision};
@@ -57,9 +58,10 @@ pub use extract::extract_value;
 pub use fetcher::{RawSource, ResolveContext, SourceFetcher};
 pub use merge::merge_pool;
 pub use names::{list_names, TemplateParts};
-pub use resolve::{resolve_names, MAX_VALUE_BYTES};
+pub use resolve::{resolve_definition, resolve_names, MAX_VALUE_BYTES};
 pub use serialize::{parse_raw, serialize_value};
 pub use source::{source_context, SourceContext};
+pub use transform::apply as apply_transform;
 
 // `SourceFetcher` 的签名里出现 `DynamicError`，测试模块靠 `use super::*` 拿到这个类型。
 // 只在测试构建里重导出，生产构建的公开接口与拆分前一致。

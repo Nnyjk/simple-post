@@ -49,6 +49,20 @@ pub struct ScriptRun {
     pub failure: Option<ScriptFailure>,
 }
 
+/// 一段**处理脚本**跑完的产出。
+///
+/// 处理脚本与请求脚本不同：它不改请求，而是给出一个值——动态变量取回数据之后用它
+/// 加工（取值、拼接、算账）。
+#[derive(Debug, Clone)]
+pub struct TransformRun {
+    /// 脚本 `return` 出来的值（已是 JSON）。失败时为 `None`。
+    pub value: Option<Json>,
+    /// 脚本写的日志。失败时也保留——诊断比值更要紧。
+    pub logs: Vec<ScriptLog>,
+    /// 失败原因。失败时 `value` 为 `None`。
+    pub failure: Option<ScriptFailure>,
+}
+
 /// 沙箱。持有一次执行所需的全部状态。
 pub struct Sandbox {
     /// 上下文。它内部持有一份运行时的克隆，故运行时比它活得久——中断处理挂在运行时上，
@@ -108,11 +122,14 @@ impl Sandbox {
     }
 
     /// 把输入注入沙箱：请求、响应、环境、限额。
+    ///
+    /// `data` 是**处理脚本**看到的那份数据（`pm.data`）。请求脚本不用它，传 `None`。
     pub fn init(
         &self,
         request: &ScriptRequest,
         response: Option<&ScriptResponse>,
         env: &EnvSnapshot,
+        data: Option<&Json>,
         limits: &ScriptLimits,
     ) -> Result<(), ScriptFailure> {
         let payload = serde_json::json!({
@@ -123,6 +140,7 @@ impl Sandbox {
                 "variables": env.variables,
             },
             "variables": {},
+            "data": data.cloned().unwrap_or(Json::Null),
         });
         // 经 JSON 字符串字面量再 parse：JSON 文本直接内联进 JS 源码要操心
         // U+2028 / U+2029 之类的边角，转成字符串字面量则万无一失。
@@ -179,6 +197,64 @@ impl Sandbox {
         };
 
         ScriptRun { effects, failure }
+    }
+
+    /// 跑一段处理脚本，取回它 `return` 的值。
+    ///
+    /// 脚本包在一个函数体里跑，故 `return` 是合法的——用户写
+    /// `return pm.data.items[0].id;` 就能给出最终值。脚本看到的是 `pm.data`
+    /// （抽取结果）与 `pm.response`（原始响应）。
+    ///
+    /// 没有返回值（`undefined`）算失败：处理脚本的唯一产出就是那个值，没给值等于
+    /// 脚本什么也没做，而用户以为它做了。
+    pub fn run_transform(&self, script: &str) -> TransformRun {
+        let outcome = self.eval_transform(script);
+        let drained = self.drain();
+        match outcome {
+            Ok(value) => TransformRun {
+                value: Some(value),
+                logs: drained.logs,
+                failure: None,
+            },
+            Err(failure) => TransformRun {
+                value: None,
+                logs: drained.logs,
+                failure: Some(failure),
+            },
+        }
+    }
+
+    /// 执行处理脚本，把它 `return` 的值取回来。
+    fn eval_transform(&self, script: &str) -> Result<Json, ScriptFailure> {
+        // 包一层函数：顶层的 `return` 在普通脚本里是语法错误，包起来之后它就是
+        // 「这段脚本的返回值」这一条最直白的写法。
+        let source = format!("(function () {{\n{script}\n}})()");
+        self.context
+            .with(|ctx| match ctx.eval::<Value, _>(source.as_str()) {
+                Ok(value) => {
+                    if value.is_undefined() {
+                        return Err(ScriptFailure {
+                            kind: ScriptErrorKind::Runtime,
+                            message: "处理脚本没有返回值：要用 return 给出最终值".to_string(),
+                        });
+                    }
+                    match ctx.json_stringify(value) {
+                        Ok(Some(text)) => {
+                            let text = text.to_string().unwrap_or_default();
+                            serde_json::from_str::<Json>(&text).map_err(|e| ScriptFailure {
+                                kind: ScriptErrorKind::Runtime,
+                                message: format!("处理脚本的返回值不是合法 JSON：{e}"),
+                            })
+                        }
+                        Ok(None) => Err(ScriptFailure {
+                            kind: ScriptErrorKind::Runtime,
+                            message: "处理脚本的返回值无法序列化成 JSON".to_string(),
+                        }),
+                        Err(err) => Err(self.classify(&ctx, err)),
+                    }
+                }
+                Err(err) => Err(self.classify(&ctx, err)),
+            })
     }
 
     /// 拍下环境与请求作用域变量的当前值，供失败时回滚。

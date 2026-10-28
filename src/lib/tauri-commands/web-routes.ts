@@ -239,17 +239,18 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
 
   // ----- dynamic variables -----
-  // 定义是全局的，故这组路由都不带项目参数：名字在整个工作区里唯一。
+  // 定义挂在项目里，故这组路由带一个可选的项目参数：不带就是跨项目那一路。
   // 列表只读缓存行，不取数；`/resolve` 才会真的发出站请求。
   [COMMANDS.dynamicVariablesList]: {
     method: 'GET',
-    path: () => '/api/dynamic-variables',
+    path: (a) => `/api/dynamic-variables${buildQuery({ projectId: a.projectId })}`,
   },
   [COMMANDS.dynamicVariablesCreate]: {
     method: 'POST',
     path: () => '/api/dynamic-variables',
     // 显式投影：下面这些键就是全部线上契约，调用方多带的键不能跟着上车。
     body: (a) => ({
+      projectId: a.projectId ?? null,
       name: a.name,
       id: a.id ?? null,
       description: a.description ?? null,
@@ -258,6 +259,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
       sourceEnvironmentId: a.sourceEnvironmentId ?? null,
       sourceBaseUrlDefinitionId: a.sourceBaseUrlDefinitionId ?? null,
       extractPath: a.extractPath ?? null,
+      transformScript: a.transformScript ?? null,
       valueMode: a.valueMode ?? null,
       ttlSeconds: a.ttlSeconds ?? null,
       staleFallback: a.staleFallback ?? null,
@@ -279,6 +281,8 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: () => '/api/dynamic-variables/resolve',
     body: (a) => ({
       names: a.names,
+      // 不点名项目就是跨项目取值。
+      projectId: a.projectId || null,
       force: a.force ?? false,
     }),
   },

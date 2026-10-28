@@ -153,6 +153,7 @@ async fn the_consumer_request_carries_the_fetched_value() {
         &state,
         "dynamic_var_create",
         json!({
+            "project_id": "p1",
             "name": "sns",
             "source_inline_json": json!({
                 "method": "GET",
@@ -295,11 +296,14 @@ async fn a_send_cannot_borrow_another_projects_data_source() {
     // 定义是全局的，故 `{{sns}}` 可能指向别的项目的接口。取数用的是**那个项目**的
     // base URL 与鉴权，故那个项目的权限决定这次取数能不能做。少了这道门，一个只读
     // 项目的客户端就能借本项目的接口把别的项目的凭据用出去。
+    //
+    // 定义自己挂在 p1（消费方项目）名下，数据源接口在 p2 —— 数据源可跨项目，
+    // 但取数花的是 p2 的凭据，故门看的是 p2。
     let state = two_project_state();
     dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_endpoint_id": "e2" }),
+        json!({ "project_id": "p1", "name": "sns", "source_endpoint_id": "e2" }),
     )
     .await
     .expect("建定义");
@@ -322,7 +326,7 @@ async fn a_send_may_use_a_data_source_whose_project_is_read_call() {
     dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_endpoint_id": "e2" }),
+        json!({ "project_id": "p1", "name": "sns", "source_endpoint_id": "e2" }),
     )
     .await
     .expect("建定义");
@@ -360,12 +364,12 @@ async fn a_path_parameter_value_carries_the_fetched_value() {
     let (base_url, received) = serve().await;
     let state = test_state_with(&base_url, "/consume/{code}", "{\"x\": 1}");
 
-    // 定义是全局的，故建它时不带项目 —— 权限由数据源接口所属的项目决定，这里是内联
-    // 请求，没有项目可落，只由全局能力档位裁决。
+    // 定义挂在 p1 名下（内联请求没有别的项目可依），权限由归属项目决定。
     dispatch(
         &state,
         "dynamic_var_create",
         json!({
+            "project_id": "p1",
             "name": "sns",
             "extract_path": "$[0].code",
             "source_inline_json": json!({

@@ -4,13 +4,14 @@
 //! `simple_post_core::permissions::require` → 委托 `crate::dynamic::ops` → 用
 //! `CallToolResult::json` 包成单个 text content 块回给 LLM。
 //!
-//! 定义是**全局**的：不属于任何项目，任何项目的端点都能引用它，整个工作区里变量名唯一。
-//! 故权限不落在「调用方在哪个项目」上，而落在**数据源接口所属的项目**上——取数会真的用到
-//! 那个项目的 base URL 与鉴权。数据源是内联请求时没有项目可落，此时只由全局能力档位
-//! 裁决（与 `project_list` 同理）。
+//! 定义挂在**项目**里：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。故权限
+//! 落在两处：**归属项目**（谁拥有这条定义）与**数据源接口所属的项目**（取数会真的用到
+//! 那个项目的 base URL 与鉴权）。数据源是内联请求时没有第二个项目可落。
 //!
 //! `dynamic_var_resolve` 会真的发出站请求，故它的 capability 是 `Send`（与
-//! `api_call_endpoint` 同级），逐项目权限是 `ReadCall`。
+//! `api_call_endpoint` 同级），逐项目权限是 `ReadCall`。它可以跨项目取值：点名
+//! `project_id` 就是那个项目里的定义，不点名就是全部项目——同名定义出现在多个项目里
+//! 时记一条「歧义」错误，不猜。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -30,7 +31,16 @@ struct GetArgs {
 }
 
 #[derive(Debug, Deserialize)]
+struct ListArgs {
+    /// 只列这个项目里的定义。缺席 = 列出全部项目。
+    #[serde(default)]
+    project_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct CreateArgs {
+    /// 归属项目。定义挂在项目里，故它必填。
+    project_id: String,
     name: String,
     #[serde(default)]
     id: Option<String>,
@@ -51,6 +61,10 @@ struct CreateArgs {
     /// JSONPath 表达式。`$` 表示整段响应。
     #[serde(default)]
     extract_path: Option<String>,
+    /// 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工。脚本拿得到抽取结果
+    /// （`pm.data`）与原始响应（`pm.response`），用 `return` 给出最终值。
+    #[serde(default)]
+    transform_script: Option<String>,
     /// 值的序列化形态：`auto` / `json` / `text`。
     #[serde(default)]
     value_mode: Option<ValueMode>,
@@ -78,8 +92,12 @@ struct DeleteArgs {
 
 #[derive(Debug, Deserialize)]
 struct ResolveArgs {
-    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。名字是全局的。
+    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。
     names: Vec<String>,
+    /// 在哪个项目里找这些名字。缺席 = 跨项目找（同名定义出现在多个项目里时按歧义
+    /// 处理，不猜）。
+    #[serde(default)]
+    project_id: Option<String>,
     /// 真 = 跳过缓存，强制重新取数。
     #[serde(default)]
     force: Option<bool>,
@@ -108,11 +126,12 @@ pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "dynamic_var_list",
-            description: "List every dynamic variable in the workspace with its current value and cache state. Definitions are global: any project's endpoint may use them. Reads the cache only; it never fetches.",
+            description: "List dynamic variables with their current value and cache state. Pass project_id for one project, omit it for every project. Reads the cache only; it never fetches.",
             schema: json!({
                 "type": "object",
-                "properties": {},
-                "required": [],
+                "properties": {
+                    "project_id": { "type": "string" }
+                },
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_dynamic_var_list),
@@ -132,10 +151,11 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_create",
-            description: "Create a dynamic variable: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique in the whole workspace. Omit the environment and the service to use the source endpoint's first environment and its project's default service.",
+            description: "Create a dynamic variable in a project: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule, a transform script and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique within the project. Omit the environment and the service to use the source endpoint's first environment and its project's default service.",
             schema: json!({
                 "type": "object",
                 "properties": {
+                    "project_id": { "type": "string" },
                     "name": { "type": "string" },
                     "description": { "type": "string" },
                     "source_endpoint_id": { "type": "string" },
@@ -143,13 +163,14 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "source_environment_id": { "type": "string" },
                     "source_base_url_definition_id": { "type": "string" },
                     "extract_path": { "type": "string" },
+                    "transform_script": { "type": "string" },
                     "value_mode": { "type": "string", "enum": ["auto", "json", "text"] },
                     "ttl_seconds": { "type": "integer" },
                     "stale_fallback": { "type": "boolean" },
                     "enabled": { "type": "boolean" },
                     "sort_order": { "type": "integer" }
                 },
-                "required": ["name"],
+                "required": ["project_id", "name"],
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_dynamic_var_create),
@@ -164,6 +185,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "patch": {
                         "type": "object",
                         "properties": {
+                            "projectId": { "type": "string" },
                             "name": { "type": "string" },
                             "description": { "type": ["string", "null"] },
                             "sourceEndpointId": { "type": ["string", "null"] },
@@ -171,6 +193,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "sourceEnvironmentId": { "type": ["string", "null"] },
                             "sourceBaseUrlDefinitionId": { "type": ["string", "null"] },
                             "extractPath": { "type": "string" },
+                            "transformScript": { "type": ["string", "null"] },
                             "valueMode": { "type": "string", "enum": ["auto", "json", "text"] },
                             "ttlSeconds": { "type": "integer" },
                             "staleFallback": { "type": "boolean" },
@@ -198,11 +221,12 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_resolve",
-            description: "Resolve dynamic variables by name: fetch from their data source when the cache is cold or expired, extract the value and return it. This really sends HTTP requests, so it needs the trust level of api_call_endpoint.",
+            description: "Resolve dynamic variables by name: fetch from their data source when the cache is cold or expired, extract the value, run the optional transform script and return it. Pass project_id for one project, omit it for all projects, where a name in several projects is ambiguous. This really sends HTTP requests, so it needs the trust level of api_call_endpoint.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "names": { "type": "array", "items": { "type": "string" } },
+                    "project_id": { "type": "string" },
                     "force": { "type": "boolean" }
                 },
                 "required": ["names"],
@@ -233,8 +257,18 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 // Handlers
 // =========================================================================
 
-/// 一条定义的数据源接口所属的项目。没有数据源接口（内联请求）时为 `None`。
-async fn scope_of(state: &AppState, definition_id: &str) -> Result<Option<String>, AppError> {
+/// 一条定义的**归属项目**。未归属的定义（迁移遗留，等用户认领）为 `None`。
+async fn owner_of(state: &AppState, definition_id: &str) -> Result<Option<String>, AppError> {
+    simple_post_core::db::with_conn(&state.pool, |c| {
+        simple_post_core::db::dynamic_variables::project_id_of(c, definition_id)
+    })
+}
+
+/// 一条定义的**数据源接口所属的项目**。数据源是内联请求时为 `None`。
+async fn source_scope_of(
+    state: &AppState,
+    definition_id: &str,
+) -> Result<Option<String>, AppError> {
     simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::dynamic_variables::source_project_id_of(c, definition_id)
     })
@@ -251,7 +285,7 @@ fn project_of_endpoint(state: &AppState, endpoint_id: &str) -> Option<String> {
     found.ok()
 }
 
-/// 按「定义的数据源所在的项目」过逐项目权限门。没有项目可落时只由全局能力档位裁决。
+/// 按项目过逐项目权限门。没有项目可落时只由全局能力档位裁决。
 async fn require_scope(
     state: &AppState,
     project_id: Option<String>,
@@ -263,10 +297,15 @@ async fn require_scope(
     crate::mcp::check_permission(&state.pool, &project_id, tool_name).await
 }
 
-async fn tool_dynamic_var_list(state: &AppState, _args: Value) -> Result<CallToolResult, AppError> {
-    // 无按项目的门：动态变量跨项目可见，列全部没有单一归属行可查，由 Gate A（全局
-    // `CapabilityPolicy`）裁决——与 `project_list` 同理。
-    let views = crate::dynamic::ops::list(&state.pool)?;
+async fn tool_dynamic_var_list(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
+    let a: ListArgs = serde_json::from_value(args)
+        .map_err(|e| AppError::Validation(format!("dynamic_var_list args: {e}")))?;
+    // 列全部项目时不按项目设门（与 `project_list` 同理）：那串定义没有单一的归属行可查。
+    // 点了名要列某个项目时，那个项目的读权限就是那道门。
+    if let Some(project_id) = a.project_id.as_deref() {
+        require_scope(state, Some(project_id.to_string()), "dynamic_var_list").await?;
+    }
+    let views = crate::dynamic::ops::list(&state.pool, a.project_id.as_deref())?;
     Ok(CallToolResult::json(views))
 }
 
@@ -275,7 +314,7 @@ async fn tool_dynamic_var_get(state: &AppState, args: Value) -> Result<CallToolR
         .map_err(|e| AppError::Validation(format!("dynamic_var_get args: {e}")))?;
     require_scope(
         state,
-        scope_of(state, &a.definition_id).await?,
+        owner_of(state, &a.definition_id).await?,
         "dynamic_var_get",
     )
     .await?;
@@ -289,14 +328,17 @@ async fn tool_dynamic_var_create(
 ) -> Result<CallToolResult, AppError> {
     let a: CreateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_create args: {e}")))?;
-    // 权限落在数据源接口所属的项目上：取数会用到那个项目的 base URL 与鉴权。
-    let scope = a
+    // 归属项目：定义写进那个项目，故那个项目的权限决定这次写入。
+    require_scope(state, Some(a.project_id.clone()), "dynamic_var_create").await?;
+    // 数据源接口所属的项目：取数会用到那个项目的 base URL 与鉴权。
+    let source_scope = a
         .source_endpoint_id
         .as_deref()
         .and_then(|endpoint_id| project_of_endpoint(state, endpoint_id));
-    require_scope(state, scope, "dynamic_var_create").await?;
+    require_scope(state, source_scope, "dynamic_var_create").await?;
     let opts = crate::dynamic::CreateOpts {
         id: a.id,
+        project_id: Some(a.project_id),
         name: a.name,
         description: a.description,
         source_endpoint_id: a.source_endpoint_id,
@@ -304,6 +346,7 @@ async fn tool_dynamic_var_create(
         source_environment_id: a.source_environment_id,
         source_base_url_definition_id: a.source_base_url_definition_id,
         extract_path: a.extract_path,
+        transform_script: a.transform_script,
         value_mode: a.value_mode,
         ttl_seconds: a.ttl_seconds,
         stale_fallback: a.stale_fallback,
@@ -320,12 +363,17 @@ async fn tool_dynamic_var_update(
 ) -> Result<CallToolResult, AppError> {
     let a: UpdateArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_update args: {e}")))?;
+    // 改之前的归属项目。
     require_scope(
         state,
-        scope_of(state, &a.definition_id).await?,
+        owner_of(state, &a.definition_id).await?,
         "dynamic_var_update",
     )
     .await?;
+    // 改之后的归属项目：patch 可能把它搬到别的项目去。
+    if let Some(new_owner) = a.patch.project_id.as_deref() {
+        require_scope(state, Some(new_owner.to_string()), "dynamic_var_update").await?;
+    }
     // patch 可能把数据源改指到**别的**项目的接口：那个项目的 base URL 与凭据会被用到，
     // 故那个项目的权限也得查。只查改之前的那个项目，等于给「搬走数据源」留了一条
     // 不经门的路。
@@ -345,7 +393,7 @@ async fn tool_dynamic_var_delete(
         .map_err(|e| AppError::Validation(format!("dynamic_var_delete args: {e}")))?;
     require_scope(
         state,
-        scope_of(state, &a.definition_id).await?,
+        owner_of(state, &a.definition_id).await?,
         "dynamic_var_delete",
     )
     .await?;
@@ -359,24 +407,41 @@ async fn tool_dynamic_var_resolve(
 ) -> Result<CallToolResult, AppError> {
     let a: ResolveArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("dynamic_var_resolve args: {e}")))?;
-    // 逐个名字找到它指向的定义，再按那个定义的数据源项目过门：名字是全局的，
-    // 一批名字可能分属不同项目。
+    // 逐个名字找到它指向的定义，再过两道门：归属项目（谁拥有这条定义）与数据源项目
+    // （取数会花谁的钱）。一批名字可能分属不同项目。
     for name in &a.names {
-        let definition = simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::dynamic_variables::get_by_name(c, name)
-        })?;
-        let Some(definition) = definition else {
-            continue;
+        let definitions = match a.project_id.as_deref() {
+            Some(project_id) => simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::dynamic_variables::get_by_name_in_project(c, project_id, name)
+            })?
+            .into_iter()
+            .collect::<Vec<_>>(),
+            None => simple_post_core::db::with_conn(&state.pool, |c| {
+                simple_post_core::db::dynamic_variables::get_by_name_across(c, name)
+            })?,
         };
-        require_scope(
-            state,
-            scope_of(state, &definition.id).await?,
-            "dynamic_var_resolve",
-        )
-        .await?;
+        for definition in definitions {
+            require_scope(
+                state,
+                owner_of(state, &definition.id).await?,
+                "dynamic_var_resolve",
+            )
+            .await?;
+            require_scope(
+                state,
+                source_scope_of(state, &definition.id).await?,
+                "dynamic_var_resolve",
+            )
+            .await?;
+        }
     }
-    let resolution =
-        crate::dynamic::ops::resolve(&state.pool, &a.names, a.force.unwrap_or(false)).await?;
+    let resolution = crate::dynamic::ops::resolve(
+        &state.pool,
+        a.project_id.as_deref(),
+        &a.names,
+        a.force.unwrap_or(false),
+    )
+    .await?;
     Ok(CallToolResult::json(resolution))
 }
 
@@ -388,7 +453,7 @@ async fn tool_dynamic_var_set_override(
         .map_err(|e| AppError::Validation(format!("dynamic_var_set_override args: {e}")))?;
     require_scope(
         state,
-        scope_of(state, &a.definition_id).await?,
+        owner_of(state, &a.definition_id).await?,
         "dynamic_var_set_override",
     )
     .await?;

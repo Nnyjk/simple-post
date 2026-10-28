@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { AppState } from '../app-store';
-import { SETTINGS_TAB_ID, DYNAMIC_TAB_ID } from '../store-types';
+import { SETTINGS_TAB_ID, dynamicTabId, dynamicTabProjectId } from '../store-types';
 import type {
   DraftEndpoint,
   EndpointDraft,
@@ -109,10 +109,10 @@ export interface UiTabsActions {
   /** 打开（单例的）设置标签并选中某一节。幂等——已打开就只切换活动节并激活标签。 */
   openSettingsTab: (section?: SettingsCategoryId) => void;
   /**
-   * 打开（单例的）动态变量标签。幂等——已打开就只激活它。
+   * 打开当前项目的动态变量标签。幂等——已打开就只激活它。
    *
-   * 动态变量是全局的，故这个标签属于用户而不属于项目：切项目时它留在原地，且没有
-   * 项目时也能打开（欢迎页的入口，见 `features/welcome/WelcomeScreen.tsx`）。
+   * 动态变量挂在项目里，故这个标签是**项目内**的标签页：每个项目有自己的一条，标签
+   * id 里带着项目 id。没有活动项目时开不了（欢迎页只提示「先打开一个项目」）。
    */
   openDynamicVariablesTab: () => void;
   /** 更新设置标签的活动分节。 */
@@ -262,8 +262,11 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (!s.nodesLoaded) return {};
       const valid = s.openTabs.filter((t) => {
         if (t.kind === 'settings') return true; // 单例，永不失效
-        // 动态变量是全局单例：定义不属于任何项目，故它也不随项目消失。
-        if (t.kind === 'dynamic-variables') return true;
+        // 动态变量标签属于项目：项目还在它就还在，项目没了它跟着走。
+        if (t.kind === 'dynamic-variables') {
+          const projectId = dynamicTabProjectId(t.id);
+          return projectId !== '' && s.projects.some((p) => p.id === projectId);
+        }
         // draft endpoint 按定义就没有 `nodes` 行——那正是它的意义——
         // 下面的查找会读成"已删除"，于是标签一开就被关掉。保存（会开出真正的
         // `endpoint` 标签）或丢弃之前一律豁免。
@@ -406,14 +409,18 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
 
   openDynamicVariablesTab: () => {
     const state = get();
-    const existing = state.openTabs.find((t) => t.kind === 'dynamic-variables');
+    // 没有活动项目就没有可看的动态变量：定义挂在项目里。
+    const projectId = state.activeProjectId;
+    if (!projectId) return;
+    const tabId = dynamicTabId(projectId);
+    const existing = state.openTabs.find((t) => t.id === tabId);
     if (existing) {
       set({ activeTabId: existing.id });
       return;
     }
     set({
-      openTabs: [...state.openTabs, { id: DYNAMIC_TAB_ID, kind: 'dynamic-variables' }],
-      activeTabId: DYNAMIC_TAB_ID,
+      openTabs: [...state.openTabs, { id: tabId, kind: 'dynamic-variables' }],
+      activeTabId: tabId,
     });
   },
 });
@@ -452,8 +459,8 @@ const GLOBAL_TAB_OWNER = '*';
  */
 function tabOwningProject(tab: OpenTab, state: AppState): string {
   if (tab.kind === 'settings') return GLOBAL_TAB_OWNER;
-  // 动态变量是全局单例：它不属于任何项目。
-  if (tab.kind === 'dynamic-variables') return GLOBAL_TAB_OWNER;
+  // 动态变量标签是项目内的：项目 id 就在标签 id 里。
+  if (tab.kind === 'dynamic-variables') return dynamicTabProjectId(tab.id);
   if (tab.kind === 'project') return tab.id;
   if (tab.kind === 'endpoint-draft') return state.draftEndpoints[tab.id]?.rootId ?? '';
   return state.nodes.find((n) => n.id === tab.id)?.rootId ?? '';

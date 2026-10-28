@@ -1,24 +1,25 @@
 /**
- * 动态变量面板 —— 全局页面。
+ * 动态变量面板 —— 项目内的一页。
  *
  * 一条动态变量是一份声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里
  * 写 `{{sns}}`，发送时程序取数、抽取、缓存并替换。这个面板负责声明它、显示它当前的
  * 值、并在取数失败时把原因说清楚。
  *
- * 定义**不属于任何项目**：任何项目的端点都能引用同一条定义，故这个面板列的是整个
- * 工作区的定义，而不是某个项目的。
+ * 定义**挂在项目里**：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。故这个
+ * 面板只列**当前项目**的定义——它是项目内的一个标签页，不是整个工作区的一份清单。
  *
  * 面板读的是 store 里的 `dynamicVariables`（列表命令一次带回定义 + 当前值 + 缓存状态），
  * 故它不自己发请求；取数与写覆盖值都走 store 动作。
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import type { DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { DynamicVariableForm } from './DynamicVariableForm';
 
 export function DynamicVariablesPanel() {
-  const variables = useAppStore((s) => s.dynamicVariables);
+  const projectId = useAppStore((s) => s.activeProjectId);
+  const loaded = useAppStore((s) => s.dynamicVariables);
   const resolving = useAppStore((s) => s.dynamicResolving);
   const error = useAppStore((s) => s.dynamicError);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
@@ -31,17 +32,23 @@ export function DynamicVariablesPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
+  // 只列当前项目的定义：别的项目的同名变量不归这条标签管。
+  const variables = useMemo(
+    () => loaded.filter((v) => v.projectId === projectId),
+    [loaded, projectId],
+  );
+
   useEffect(() => {
-    void loadDynamicVariables();
-  }, [loadDynamicVariables]);
+    void loadDynamicVariables(projectId);
+  }, [loadDynamicVariables, projectId]);
 
   const handleResolveAll = useCallback(async () => {
     const names = variables.map((v) => v.name);
-    await resolveDynamicVariables(names);
+    await resolveDynamicVariables(names, projectId);
     // 解析的结果落在 store 的取值桶里，而卡片读的是列表——故这里要重载一次列表，
     // 否则值、来源徽标与取数时间都不动，看着像按钮坏了。
-    await loadDynamicVariables();
-  }, [variables, resolveDynamicVariables, loadDynamicVariables]);
+    await loadDynamicVariables(projectId);
+  }, [variables, projectId, resolveDynamicVariables, loadDynamicVariables]);
 
   const handleRefresh = useCallback(
     async (variable: DynamicVariableView) => {
@@ -70,7 +77,7 @@ export function DynamicVariablesPanel() {
         <header className="flex items-center gap-2">
           <h2 className="text-sm font-medium">动态变量</h2>
           <span className="text-xs text-muted-foreground">
-            在请求里写 {'{{变量名}}'}，发送时自动取数并替换。任何项目都能引用同一条定义。
+            在请求里写 {'{{变量名}}'}，发送时自动取数并替换。变量名在本项目内唯一。
           </span>
           <div className="ml-auto flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => void handleResolveAll()}>
@@ -99,6 +106,7 @@ export function DynamicVariablesPanel() {
           <DynamicVariableCard
             key={variable.id}
             variable={variable}
+            projectId={projectId}
             resolving={resolving}
             editing={editingId === variable.id}
             onEdit={() => setEditingId(variable.id)}
@@ -112,6 +120,7 @@ export function DynamicVariablesPanel() {
 
         {creating && (
           <DynamicVariableForm
+            projectId={projectId}
             onCancel={() => setCreating(false)}
             onDone={() => setCreating(false)}
           />
@@ -124,6 +133,8 @@ export function DynamicVariablesPanel() {
 /** 一条定义 + 它的当前值与缓存状态。 */
 interface DynamicVariableCardProps {
   variable: DynamicVariableView;
+  /** 归属项目。取值桶按项目分，故查失败原因时要用它当键。 */
+  projectId: string;
   resolving: boolean;
   editing: boolean;
   onEdit: () => void;
@@ -137,6 +148,7 @@ interface DynamicVariableCardProps {
 
 function DynamicVariableCard({
   variable,
+  projectId,
   resolving,
   editing,
   onEdit,
@@ -150,7 +162,7 @@ function DynamicVariableCard({
   const [draft, setDraft] = useState(variable.value ?? '');
   const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
   // 取数失败的原因。列表视图本身不带它（那是一次纯读），故取数时记进 store 的那份。
-  const dynamicError = useAppStore((s) => s.dynamicErrors[variable.name]);
+  const dynamicError = useAppStore((s) => s.dynamicErrors[projectId]?.[variable.name]);
   const error = variable.error ?? dynamicError;
 
   /** 打开编辑器时把草稿重置成当前值——否则上一次没保存的编辑会留在框里。 */
@@ -221,6 +233,12 @@ function DynamicVariableCard({
         )}
         <dt className="text-muted-foreground">抽取规则</dt>
         <dd className="font-mono">{variable.extractPath}</dd>
+        {variable.transformScript && (
+          <>
+            <dt className="text-muted-foreground">处理脚本</dt>
+            <dd className="font-mono text-[11px]">抽取之后跑，用 `return` 给出最终值</dd>
+          </>
+        )}
         <dt className="text-muted-foreground">缓存时长</dt>
         <dd>{variable.ttlSeconds} 秒</dd>
       </dl>
@@ -270,6 +288,7 @@ function DynamicVariableCard({
       {editing && (
         <DynamicVariableForm
           variable={variable}
+          projectId={projectId}
           onCancel={onCancelEdit}
           onDone={onCancelEdit}
           onRename={onRename}

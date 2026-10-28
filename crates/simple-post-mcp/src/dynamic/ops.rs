@@ -4,9 +4,9 @@
 //! Tauri 两侧都能依赖本 crate。故公共操作住在这一层，server crate 的 `dynamic_api` 只是
 //! 它的一层薄壳。
 //!
-//! 定义是**全局**的：不属于任何项目，任何项目的端点都能引用它。取数用的环境与服务由
-//! 定义自己决定（点名的那个，或数据源端点所属项目的首个环境与默认服务），故同一个
-//! `{{name}}` 在任何项目里取到的值都一样。
+//! 定义挂在**项目**里：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。取数用的
+//! 环境与服务由定义自己决定（点名的那个，或数据源端点所属项目的首个环境与默认服务），
+//! 故同一个 `{{name}}` 在不同项目里取到的值可以不同——那正是分项目的意义。
 
 use serde::Serialize;
 
@@ -23,6 +23,8 @@ use simple_post_core::error::AppError;
 pub struct CreateOpts {
     /// 渲染层自己铸的 id。`None` = 由服务端铸。
     pub id: Option<String>,
+    /// 归属项目。定义挂在项目里，故不同项目可以有同名变量而互不覆盖。
+    pub project_id: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub source_endpoint_id: Option<String>,
@@ -32,6 +34,8 @@ pub struct CreateOpts {
     /// 取数用的服务。`None` = 数据源接口所属项目的默认服务。
     pub source_base_url_definition_id: Option<String>,
     pub extract_path: Option<String>,
+    /// 处理脚本。抽取之后跑。
+    pub transform_script: Option<String>,
     pub value_mode: Option<ValueMode>,
     pub ttl_seconds: Option<i64>,
     pub stale_fallback: Option<bool>,
@@ -77,15 +81,23 @@ pub struct DynamicVariableView {
     pub effective_base_url_definition_name: Option<String>,
 }
 
-/// 列出全部定义，带当前值与缓存状态。
+/// 列出定义，带当前值与缓存状态。
+///
+/// `project_id` 决定列哪个范围：给了就只列那个项目里的，不给就列全部项目——跨项目
+/// 调用接口要靠后者。
 ///
 /// **不取数**：读的是缓存行。取数可能发出站请求，而这是一次纯读。
 ///
 /// **不带「哪些端点引用了它」**：那条信息只在接口那侧存在——接口知道自己配了哪些变量，
 /// 变量这一侧不维护反向索引。一个被几乎每个接口用到的通用变量会把这条列表撑爆，
 /// 而那条信息对维护变量本身没有用。
-pub fn list(pool: &DbPool) -> Result<Vec<DynamicVariableView>, AppError> {
-    let definitions = db::with_conn(pool, db::dynamic_variables::list)?;
+pub fn list(pool: &DbPool, project_id: Option<&str>) -> Result<Vec<DynamicVariableView>, AppError> {
+    let definitions = match project_id {
+        Some(project_id) => db::with_conn(pool, |c| {
+            db::dynamic_variables::list_by_project(c, project_id)
+        })?,
+        None => db::with_conn(pool, db::dynamic_variables::list)?,
+    };
     let now = now_ms();
     let mut out = Vec::with_capacity(definitions.len());
     for definition in definitions {
@@ -115,6 +127,7 @@ pub fn create(pool: &DbPool, opts: CreateOpts) -> Result<DynamicVariable, AppErr
     let now = now_ms();
     let definition = DynamicVariable {
         id: opts.id.unwrap_or_else(uid),
+        project_id: opts.project_id,
         name: opts.name,
         description: opts.description,
         source_endpoint_id: opts.source_endpoint_id,
@@ -123,6 +136,7 @@ pub fn create(pool: &DbPool, opts: CreateOpts) -> Result<DynamicVariable, AppErr
         source_environment_id: opts.source_environment_id,
         source_base_url_definition_id: opts.source_base_url_definition_id,
         extract_path: opts.extract_path.unwrap_or_else(|| "$".to_string()),
+        transform_script: opts.transform_script,
         value_mode: opts.value_mode.unwrap_or_default(),
         ttl_seconds: opts.ttl_seconds.unwrap_or(60),
         stale_fallback: opts.stale_fallback.unwrap_or(false),
@@ -153,34 +167,39 @@ pub fn delete(pool: &DbPool, definition_id: &str) -> Result<(), AppError> {
 
 /// 解析一批名字，返回它们的值、状态与错误。
 ///
-/// 名字是全局的：同一个名字在任何项目里都指向同一条定义。
+/// `project_id` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走
+/// 的就是这条）；不给就是跨项目取值，同一个名字在多个项目里都有定义时记一条「歧义」
+/// 错误并按缺失处理。
 pub async fn resolve(
     pool: &DbPool,
+    project_id: Option<&str>,
     names: &[String],
     force: bool,
 ) -> Result<DynamicResolution, AppError> {
     let ctx = ResolveContext { pool: pool.clone() };
-    simple_post_core::dynamic::resolve_names(&ctx, names, force, &crate::dynamic::fetcher()).await
+    simple_post_core::dynamic::resolve_names(
+        &ctx,
+        project_id,
+        names,
+        force,
+        &crate::dynamic::fetcher(),
+    )
+    .await
 }
 
 /// 强制重新取一条定义。
+///
+/// 按 id 解析，不按名字：按名字找会撞上同名定义在别的项目里的那种歧义。
 pub async fn refresh(pool: &DbPool, definition_id: &str) -> Result<DynamicValueStatus, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    let names = vec![definition.name.clone()];
-    let resolution = resolve(pool, &names, true).await?;
-    Ok(resolution
-        .statuses
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| DynamicValueStatus {
-            name: definition.name.clone(),
-            value: None,
-            source: DynamicValueSource::Missing,
-            fetched_at: None,
-            expires_at: None,
-            is_override: false,
-            error: None,
-        }))
+    let ctx = ResolveContext { pool: pool.clone() };
+    simple_post_core::dynamic::resolve_definition(
+        &ctx,
+        &definition,
+        true,
+        &crate::dynamic::fetcher(),
+    )
+    .await
 }
 
 /// 写覆盖值。

@@ -8,7 +8,8 @@
  *   - `resolveDynamicVariables` 按变量名记下取数失败的原因，成功时清掉。
  *   - `updateDynamicVariable` 失败时返回 false（表单据此不关闭，用户输入不丢）。
  *
- * 取值桶不按环境分桶：定义是全局的，取数环境由定义自己决定，故同一个名字只有一个当前值。
+ * 取值桶**按项目分桶**（`dynamicValues[projectId][name]`）：定义挂在项目里，不同项目
+ * 可以有同名变量而取值不同，故一份桶装不下它们两个。
  *
  * 运行：
  *   npx tsx --test src/stores/__tests__/dynamic-slice.test.ts
@@ -32,8 +33,8 @@ import type {
 function makeHarness() {
   const bag: Record<string, any> = {
     dynamicVariables: [] as DynamicVariable[],
-    dynamicValues: {} as Record<string, DynamicValueStatus>,
-    dynamicErrors: {} as Record<string, DynamicError>,
+    dynamicValues: {} as Record<string, Record<string, DynamicValueStatus>>,
+    dynamicErrors: {} as Record<string, Record<string, DynamicError>>,
     dynamicResolving: false,
     dynamicError: null as string | null,
     activeProjectId: 'p1',
@@ -52,9 +53,10 @@ function makeHarness() {
 }
 
 /** 一条定义。 */
-function definition(name: string, id = `d-${name}`): DynamicVariable {
+function definition(name: string, id = `d-${name}`, projectId = 'p1'): DynamicVariable {
   return {
     id,
+    projectId,
     name,
     description: null,
     sourceEndpointId: null,
@@ -63,6 +65,7 @@ function definition(name: string, id = `d-${name}`): DynamicVariable {
     sourceEnvironmentId: null,
     sourceBaseUrlDefinitionId: null,
     extractPath: '$',
+    transformScript: null,
     valueMode: 'auto',
     ttlSeconds: 60,
     staleFallback: false,
@@ -74,9 +77,9 @@ function definition(name: string, id = `d-${name}`): DynamicVariable {
 }
 
 /** 一条定义 + 它的当前值。 */
-function view(name: string): DynamicVariableView {
+function view(name: string, projectId = 'p1'): DynamicVariableView {
   return {
-    ...definition(name),
+    ...definition(name, `d-${name}`, projectId),
     value: null,
     source: 'missing',
     fetchedAt: null,
@@ -120,14 +123,28 @@ describe('dynamic slice', () => {
   it('dropDynamicValue 清掉那个名字与它的失败原因', () => {
     const bag = makeHarness();
     bag.dynamicValues = {
-      sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus,
+      p1: { sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus },
     };
-    bag.dynamicErrors = { sns: { name: 'sns', kind: 'network', message: '断了' } };
+    bag.dynamicErrors = { p1: { sns: { name: 'sns', kind: 'network', message: '断了' } } };
 
-    bag.dropDynamicValue('sns');
+    bag.dropDynamicValue('p1', 'sns');
 
     assert.deepEqual(bag.dynamicValues, {});
     assert.deepEqual(bag.dynamicErrors, {});
+  });
+
+  it('dropDynamicValue 不动别的项目里的同名变量', () => {
+    // 同名变量在两个项目里是两条不同的定义，故一个项目的值不能被另一个项目顺手删掉。
+    const bag = makeHarness();
+    bag.dynamicValues = {
+      p1: { sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus },
+      p2: { sns: { name: 'sns', value: '[2]', source: 'auto' } as DynamicValueStatus },
+    };
+
+    bag.dropDynamicValue('p1', 'sns');
+
+    assert.equal(bag.dynamicValues.p1, undefined, 'p1 那一格应当被清空');
+    assert.equal(bag.dynamicValues.p2?.sns?.value, '[2]', 'p2 那一格不该被动');
   });
 
   it('删掉一条定义之后它的旧值不再留在桶里', async () => {
@@ -148,7 +165,7 @@ describe('dynamic slice', () => {
     const bag = makeHarness();
     bag.dynamicVariables = [definition('sns')];
     bag.dynamicValues = {
-      sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus,
+      p1: { sns: { name: 'sns', value: '[1]', source: 'auto' } as DynamicValueStatus },
     };
     installIpcMock((cmd) => {
       if (cmd === 'dynamic_variables_update') return definition('points');
@@ -174,17 +191,57 @@ describe('dynamic slice', () => {
       return null;
     });
 
-    const failed = await bag.resolveDynamicVariables(['sns']);
+    const failed = await bag.resolveDynamicVariables(['sns'], 'p1');
     assert.equal(failed.errors.length, 1);
-    assert.equal(bag.dynamicErrors.sns?.kind, 'timeout');
+    assert.equal(bag.dynamicErrors.p1?.sns?.kind, 'timeout');
 
     phase = 'ok';
-    await bag.resolveDynamicVariables(['sns']);
-    assert.equal(bag.dynamicErrors.sns, undefined, '取数成功后原因应当被清掉');
+    await bag.resolveDynamicVariables(['sns'], 'p1');
+    assert.equal(bag.dynamicErrors.p1?.sns, undefined, '取数成功后原因应当被清掉');
   });
 
-  it('解析不带项目与环境参数', async () => {
-    // 定义是全局的：解析按名字找定义，取数环境由定义自己决定。
+  it('同名变量在两个项目里各有一份，取值桶不互相覆盖', async () => {
+    // 这正是「挂到项目」要解决的那件事：两个项目各有一个 `sns`，取值不同，
+    // 切到另一个项目时不能把上一个项目的值带过去。
+    const bag = makeHarness();
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        const projectId = (args as { projectId?: string | null }).projectId ?? '';
+        return resolution(['sns'], { sns: `[${projectId}]` });
+      }
+      return null;
+    });
+
+    await bag.resolveDynamicVariables(['sns'], 'p1');
+    await bag.resolveDynamicVariables(['sns'], 'p2');
+
+    assert.equal(bag.dynamicValues.p1?.sns?.value, '[p1]');
+    assert.equal(bag.dynamicValues.p2?.sns?.value, '[p2]');
+    assert.notEqual(
+      bag.dynamicValues.p1,
+      bag.dynamicValues.p2,
+      '两个项目的取值桶必须是两份，而不是同一个对象',
+    );
+  });
+
+  it('解析带上项目：请求侧只认消费方项目', async () => {
+    const bag = makeHarness();
+    const seen: any[] = [];
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        seen.push(args);
+        return resolution(['sns'], { sns: '[1]' });
+      }
+      return null;
+    });
+
+    await bag.resolveDynamicVariables(['sns'], 'p1');
+
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0], { names: ['sns'], projectId: 'p1', force: false });
+  });
+
+  it('解析不带项目就是跨项目取值', async () => {
     const bag = makeHarness();
     const seen: any[] = [];
     installIpcMock((cmd, args) => {
@@ -198,7 +255,7 @@ describe('dynamic slice', () => {
     await bag.resolveDynamicVariables(['sns']);
 
     assert.equal(seen.length, 1);
-    assert.deepEqual(seen[0], { names: ['sns'], force: false });
+    assert.deepEqual(seen[0], { names: ['sns'], projectId: null, force: false });
   });
 
   it('保存失败时 updateDynamicVariable 返回 false', async () => {
@@ -213,7 +270,26 @@ describe('dynamic slice', () => {
     assert.match(bag.dynamicError ?? '', /名字重复/);
   });
 
-  it('加载列表不带任何参数', async () => {
+  it('加载列表带上项目', async () => {
+    const bag = makeHarness();
+    const seen: any[] = [];
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_list') {
+        seen.push(args);
+        return [view('sns')];
+      }
+      return null;
+    });
+
+    await bag.loadDynamicVariables('p1');
+
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0], { projectId: 'p1' });
+    assert.equal(bag.dynamicVariables.length, 1);
+    assert.equal(bag.dynamicVariables[0].name, 'sns');
+  });
+
+  it('加载列表不带项目就是跨项目那一路', async () => {
     const bag = makeHarness();
     const seen: any[] = [];
     installIpcMock((cmd, args) => {
@@ -226,9 +302,28 @@ describe('dynamic slice', () => {
 
     await bag.loadDynamicVariables();
 
-    assert.equal(seen.length, 1);
-    assert.deepEqual(seen[0], {}, '列表不带引用关系开关：那一列已经没有了');
-    assert.equal(bag.dynamicVariables.length, 1);
-    assert.equal(bag.dynamicVariables[0].name, 'sns');
+    assert.deepEqual(seen[0], { projectId: null });
+  });
+
+  it('新建定义带上归属项目', async () => {
+    const bag = makeHarness();
+    const seen: any[] = [];
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_create') {
+        seen.push(args);
+        return definition('sns');
+      }
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const created = await bag.createDynamicVariable({
+      projectId: 'p2',
+      name: 'sns',
+      sourceInlineJson: '{"method":"GET","url":"http://127.0.0.1:9/points"}',
+    });
+
+    assert.equal(created, 'd-sns');
+    assert.equal(seen[0].projectId, 'p2');
   });
 });

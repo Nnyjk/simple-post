@@ -149,10 +149,12 @@ fn remove_db_files_tolerates_absent_sidecars() {
     assert!(!dir.join("store.db").exists());
 }
 
-/// 种一个**旧形状**的动态变量表：定义属于项目，故表里有 `project_id` 列。
+/// 种一个**旧预览形状**的动态变量表：定义属于项目，故表里有 `project_id` 列，
+/// 且**没有** `source_environment_id`（取数环境是后来才加的）。
 ///
-/// 这是动态变量还是项目级资产时写下的形状。它与当前形状同名同表，`CREATE TABLE IF NOT
-/// EXISTS` 对它是空操作——故 `migrate` 必须自己认出它并丢掉重建。
+/// 这个形状与当前形状同名同表，`CREATE TABLE IF NOT EXISTS` 对它是空操作——故 `migrate`
+/// 必须自己认出它并丢掉重建。认出的判据是「有 `project_id` 且没有 `source_environment_id`」：
+/// 当前形状同样带 `project_id`，只看那一列会把现役的表也丢掉。
 fn plant_project_scoped_dynamic_variables(pool: &DbPool) {
     with_tx(pool, |c| {
         c.execute_batch(
@@ -197,8 +199,77 @@ fn column_count(pool: &DbPool, table: &str, column: &str) -> i64 {
     .unwrap()
 }
 
+/// 种一个**发布形状**的动态变量表：作用域是全局，表里没有 `project_id`，
+/// 也没有 `transform_script`，但有后加的 `source_environment_id`。
+///
+/// 这是 v1 发布过的形状。它与当前形状同名同表，`CREATE TABLE IF NOT EXISTS` 对它是空操作
+/// —— 故 `add_missing_columns` 要给既有行补上归属项目与处理脚本两列，
+/// `backfill_dynamic_variable_projects` 再给这些行定下归属项目。
+fn plant_shipped_dynamic_variables(pool: &DbPool) {
+    with_tx(pool, |c| {
+        c.execute_batch(
+            "DROP TABLE dynamic_variable_cache;
+             DROP TABLE dynamic_variables;
+             CREATE TABLE dynamic_variables (
+                 id                 TEXT PRIMARY KEY,
+                 name               TEXT NOT NULL,
+                 description        TEXT,
+                 source_endpoint_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
+                 source_inline_json TEXT,
+                 source_environment_id TEXT REFERENCES environments(id) ON DELETE SET NULL,
+                 source_base_url_definition_id TEXT REFERENCES base_url_definitions(id) ON DELETE SET NULL,
+                 extract_path       TEXT NOT NULL DEFAULT '$',
+                 value_mode         TEXT NOT NULL DEFAULT 'auto',
+                 ttl_seconds        INTEGER NOT NULL DEFAULT 60,
+                 stale_fallback     INTEGER NOT NULL DEFAULT 0,
+                 enabled            INTEGER NOT NULL DEFAULT 1,
+                 sort_order         INTEGER NOT NULL DEFAULT 0,
+                 created_at         INTEGER NOT NULL,
+                 updated_at         INTEGER NOT NULL
+             );
+             CREATE UNIQUE INDEX idx_dynamic_vars_name ON dynamic_variables(name);
+             -- 数据源是接口：归位时应当落到那个接口所属的项目。
+             INSERT INTO dynamic_variables
+                 (id, name, source_endpoint_id, extract_path, value_mode, ttl_seconds,
+                  stale_fallback, enabled, sort_order, created_at, updated_at)
+             VALUES ('d_ep', 'site_list', 'e_title_list', '$', 'auto', 60, 0, 1, 0, 1, 1);
+             -- 数据源是内联请求：没有接口可依，归到工作区里最早建的那个项目。
+             INSERT INTO dynamic_variables
+                 (id, name, source_inline_json, extract_path, value_mode, ttl_seconds,
+                  stale_fallback, enabled, sort_order, created_at, updated_at)
+             VALUES ('d_inline', 'site_inline', '{\"a\":1}', '$', 'auto', 60, 0, 1, 1, 1, 1);",
+        )
+        .map_err(AppError::Sqlite)
+    })
+    .expect("plant the shipped shape");
+}
+
+/// 某一条索引存在吗？
+fn index_exists(pool: &DbPool, name: &str) -> bool {
+    with_conn(pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            params![name],
+            |r| r.get::<_, i64>(0),
+        )? > 0)
+    })
+    .unwrap()
+}
+
+/// 一条动态变量归属哪个项目？
+fn owner_project_of(pool: &DbPool, id: &str) -> Option<String> {
+    with_conn(pool, |c| {
+        Ok(c.query_row(
+            "SELECT project_id FROM dynamic_variables WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, Option<String>>(0),
+        )?)
+    })
+    .unwrap()
+}
+
 #[test]
-fn the_project_scoped_dynamic_variable_tables_are_replaced_by_the_global_ones() {
+fn the_obsolete_preview_dynamic_variable_tables_are_replaced_by_the_current_ones() {
     let (pool, dir) = fresh_pool();
     let projects_before: i64 = with_conn(&pool, |c| {
         Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
@@ -208,7 +279,7 @@ fn the_project_scoped_dynamic_variable_tables_are_replaced_by_the_global_ones() 
     drop(pool);
 
     // 重新打开同一个库。`SCHEMA_VERSION` 没变，故 `ensure_current_schema` 不删它；
-    // `migrate` 认出旧形状并把两张动态变量表丢掉重建。
+    // `migrate` 认出旧预览形状并把两张动态变量表丢掉重建。
     let pool = init(&dir).expect("second init");
 
     let old_rows: i64 = with_conn(&pool, |c| {
@@ -219,13 +290,18 @@ fn the_project_scoped_dynamic_variable_tables_are_replaced_by_the_global_ones() 
 
     assert_eq!(
         column_count(&pool, "dynamic_variables", "project_id"),
-        0,
-        "重建后的表不该再有 project_id 列"
+        1,
+        "重建后的表应当有归属项目那一列"
     );
     assert_eq!(
         column_count(&pool, "dynamic_variables", "source_environment_id"),
         1,
         "重建后的表应当有取数环境那一列"
+    );
+    assert_eq!(
+        column_count(&pool, "dynamic_variables", "transform_script"),
+        1,
+        "重建后的表应当有处理脚本那一列"
     );
 
     // 其余数据不动：丢的只是那两张表。
@@ -234,6 +310,42 @@ fn the_project_scoped_dynamic_variable_tables_are_replaced_by_the_global_ones() 
     })
     .unwrap();
     assert_eq!(projects_after, projects_before, "项目不该被这次迁移牵连");
+}
+
+#[test]
+fn the_shipped_dynamic_variables_are_assigned_an_owning_project() {
+    let (pool, dir) = fresh_pool();
+    plant_shipped_dynamic_variables(&pool);
+    drop(pool);
+
+    let pool = init(&dir).expect("second init");
+
+    // 数据源是接口 → 落到那个接口所属的项目（`e_title_list` 属于发票服务项目）。
+    assert_eq!(
+        owner_project_of(&pool, "d_ep").as_deref(),
+        Some("p_invoice"),
+        "数据源接口所属的项目就是这条定义的归属项目"
+    );
+    // 数据源是内联请求 → 没有接口可依，归到工作区里最早建的项目。
+    assert_eq!(
+        owner_project_of(&pool, "d_inline").as_deref(),
+        Some("p_demo"),
+        "内联数据源归到最早建的项目"
+    );
+
+    // 旧形状的「名字全局唯一」那条索引必须消失：留着它，新项目里的同名变量存不进去。
+    assert!(
+        !index_exists(&pool, "idx_dynamic_vars_name"),
+        "旧形状的名字全局唯一索引应当被丢掉"
+    );
+    assert!(
+        index_exists(&pool, "idx_dynamic_vars_project_name"),
+        "新形状的项目内唯一索引应当在"
+    );
+    assert!(
+        index_exists(&pool, "idx_dynamic_vars_orphan_name"),
+        "未归属那些行的名字唯一索引应当在"
+    );
 }
 
 /// 种一张建了却没人用过的 `request_settings` 表，并放一行进去。

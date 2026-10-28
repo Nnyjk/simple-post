@@ -251,6 +251,7 @@ async fn creating_and_listing_a_definition_round_trips() {
         &state,
         "dynamic_var_create",
         json!({
+            "project_id": "p1",
             "name": "sns",
             "extract_path": "$.list",
             "source_inline_json": INLINE_SOURCE,
@@ -271,13 +272,13 @@ async fn creating_and_listing_a_definition_round_trips() {
 }
 
 #[tokio::test]
-async fn a_definition_is_not_belonged_to_a_project() {
-    // 定义里没有项目这一层：创建时不给项目，列出来时也不带项目。
+async fn a_definition_belongs_to_its_project() {
+    // 定义挂在项目里：创建时点名项目，列出来时也带着它。
     let state = test_state(Permission::Full);
     dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_inline_json": INLINE_SOURCE }),
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
     )
     .await
     .expect("创建");
@@ -287,35 +288,74 @@ async fn a_definition_is_not_belonged_to_a_project() {
         .expect("列出");
     let entries = listed_of(listed);
     assert_eq!(entries.len(), 1);
-    assert!(entries[0].get("projectId").is_none(), "{:?}", entries[0]);
+    assert_eq!(entries[0]["projectId"], "p1", "{:?}", entries[0]);
 }
 
 #[tokio::test]
-async fn a_definition_in_one_project_is_visible_from_another() {
-    // 全局作用域的意义：一条定义写一次，任何项目的端点都能引用它。
+async fn the_same_name_can_live_in_two_projects() {
+    // 项目作用域的意义：不同项目可以有同名变量而互不覆盖。
     let state = test_state(Permission::Full);
-    dispatch(
-        &state,
-        "dynamic_var_create",
-        json!({ "name": "sns", "source_inline_json": INLINE_SOURCE }),
-    )
-    .await
-    .expect("创建");
+    for project_id in ["p1", "p2"] {
+        dispatch(
+            &state,
+            "dynamic_var_create",
+            json!({
+                "project_id": project_id,
+                "name": "sns",
+                "source_inline_json": INLINE_SOURCE,
+            }),
+        )
+        .await
+        .expect("创建");
+    }
 
     let listed = dispatch(&state, "dynamic_var_list", json!({}))
         .await
         .expect("列出");
     let entries = listed_of(listed);
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0]["name"], "sns");
+    assert_eq!(entries.len(), 2, "两个项目各有一条同名定义：{entries:?}");
+
+    // 按项目列：各自只看到自己那条。
+    let only_p1 = dispatch(&state, "dynamic_var_list", json!({ "project_id": "p1" }))
+        .await
+        .expect("列出 p1");
+    let p1_entries = listed_of(only_p1);
+    assert_eq!(p1_entries.len(), 1);
+    assert_eq!(p1_entries[0]["projectId"], "p1");
+}
+
+#[tokio::test]
+async fn the_same_name_twice_in_one_project_is_refused() {
+    // 项目内名字唯一：第二次创建该被拒，而不是覆盖第一条。
+    let state = test_state(Permission::Full);
+    dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
+    )
+    .await
+    .expect("创建");
+
+    let err = dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
+    )
+    .await
+    .expect_err("同名不该能存两条");
+    assert!(err.to_string().contains("validation"), "{err}");
 }
 
 #[tokio::test]
 async fn an_illegal_name_is_refused() {
     let state = test_state(Permission::Full);
-    let err = dispatch(&state, "dynamic_var_create", json!({ "name": "sns-list" }))
-        .await
-        .expect_err("带连字符的名字应该被拒");
+    let err = dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({ "project_id": "p1", "name": "sns-list" }),
+    )
+    .await
+    .expect_err("带连字符的名字应该被拒");
     assert!(err.to_string().contains("validation"), "{err}");
 }
 
@@ -326,7 +366,7 @@ async fn a_read_only_project_cannot_create_a_definition_over_its_own_endpoint() 
     let err = dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_endpoint_id": "e1" }),
+        json!({ "project_id": "p1", "name": "sns", "source_endpoint_id": "e1" }),
     )
     .await
     .expect_err("只读项目不该能写");
@@ -334,16 +374,18 @@ async fn a_read_only_project_cannot_create_a_definition_over_its_own_endpoint() 
 }
 
 #[tokio::test]
-async fn an_inline_source_has_no_project_to_gate_on() {
-    // 内联请求没有项目可落，故只由全局能力档位裁决：只读的项目挡不住它。
+async fn an_inline_source_still_needs_the_owning_project_to_allow_it() {
+    // 内联请求没有**数据源**项目可落，但定义仍挂在项目里，故归属项目那道门照旧：
+    // 只读项目里写不了定义。
     let state = test_state(Permission::Read);
-    dispatch(
+    let err = dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_inline_json": INLINE_SOURCE }),
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
     )
     .await
-    .expect("内联数据源没有项目可落");
+    .expect_err("只读项目不该能写");
+    assert!(err.to_string().contains("permission denied"), "{err}");
 }
 
 #[tokio::test]
@@ -352,7 +394,7 @@ async fn updating_and_deleting_a_definition_work() {
     let created = dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_inline_json": INLINE_SOURCE }),
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
     )
     .await
     .expect("创建");
@@ -390,7 +432,7 @@ async fn an_override_is_written_and_cleared() {
     let created = dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_inline_json": INLINE_SOURCE }),
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
     )
     .await
     .expect("创建");
@@ -430,6 +472,7 @@ async fn an_override_of_an_inline_definition_lands_on_the_key_the_resolve_reads(
         &state,
         "dynamic_var_create",
         json!({
+            "project_id": "p1",
             "name": "sns",
             "source_inline_json": INLINE_SOURCE
         }),
@@ -451,9 +494,10 @@ async fn an_override_of_an_inline_definition_lands_on_the_key_the_resolve_reads(
     )
     .expect("写覆盖值");
 
-    let resolution = crate::dynamic::ops::resolve(&state.pool, &["sns".to_string()], false)
-        .await
-        .expect("解析");
+    let resolution =
+        crate::dynamic::ops::resolve(&state.pool, Some("p1"), &["sns".to_string()], false)
+            .await
+            .expect("解析");
     assert_eq!(
         resolution.values.get("sns").map(String::as_str),
         Some("[{\"code\":\"Z999\"}]"),
@@ -470,6 +514,7 @@ async fn an_override_lands_on_the_definitions_own_environment() {
         &state,
         "dynamic_var_create",
         json!({
+            "project_id": "p1",
             "name": "sns",
             "source_endpoint_id": "e1"
         }),
@@ -492,9 +537,10 @@ async fn an_override_lands_on_the_definitions_own_environment() {
     )
     .expect("写覆盖值");
 
-    let resolution = crate::dynamic::ops::resolve(&state.pool, &["sns".to_string()], false)
-        .await
-        .expect("解析");
+    let resolution =
+        crate::dynamic::ops::resolve(&state.pool, Some("p1"), &["sns".to_string()], false)
+            .await
+            .expect("解析");
     assert_eq!(
         resolution.values.get("sns").map(String::as_str),
         Some("[{\"code\":\"Z999\"}]"),
@@ -511,6 +557,7 @@ async fn a_resolve_with_a_broken_source_reports_the_reason() {
         &state,
         "dynamic_var_create",
         json!({
+            "project_id": "p1",
             "name": "sns",
             "source_inline_json": "not json"
         }),
@@ -533,6 +580,7 @@ async fn a_refresh_really_fetches_the_value() {
         &state,
         "dynamic_var_create",
         json!({
+            "project_id": "p1",
             "name": "sns",
             "source_inline_json": "not json"
         }),
@@ -565,7 +613,7 @@ async fn pointing_a_definition_at_another_projects_endpoint_checks_that_project_
     let created = dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_inline_json": INLINE_SOURCE }),
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
     )
     .await
     .expect("创建");
@@ -592,7 +640,7 @@ async fn a_definition_whose_source_endpoint_was_deleted_can_still_be_renamed() {
     let created = dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_endpoint_id": "e1" }),
+        json!({ "project_id": "p1", "name": "sns", "source_endpoint_id": "e1" }),
     )
     .await
     .expect("创建");
@@ -622,7 +670,7 @@ async fn the_list_tool_does_not_carry_the_referencing_endpoints() {
     dispatch(
         &state,
         "dynamic_var_create",
-        json!({ "name": "sns", "source_inline_json": INLINE_SOURCE }),
+        json!({ "project_id": "p1", "name": "sns", "source_inline_json": INLINE_SOURCE }),
     )
     .await
     .expect("创建");
@@ -635,4 +683,42 @@ async fn the_list_tool_does_not_carry_the_referencing_endpoints() {
         entries[0].get("referencedBy").is_none(),
         "列表不该带引用关系：{entries:?}"
     );
+}
+
+#[tokio::test]
+async fn a_cross_project_resolve_of_an_ambiguous_name_reports_it() {
+    // 跨项目取值时，同一个名字在多个项目里都有定义 → 不知道该用哪一条，故报「歧义」
+    // 并按缺失处理，不猜。
+    let state = test_state(Permission::Full);
+    for project_id in ["p1", "p2"] {
+        dispatch(
+            &state,
+            "dynamic_var_create",
+            json!({
+                "project_id": project_id,
+                "name": "sns",
+                "source_inline_json": INLINE_SOURCE,
+            }),
+        )
+        .await
+        .expect("创建");
+    }
+
+    // 不点项目：跨项目找，同名两条 → 歧义。
+    let resolved = dispatch(&state, "dynamic_var_resolve", json!({ "names": ["sns"] }))
+        .await
+        .expect("解析");
+    let text = text_of(resolved);
+    assert!(text.contains("ambiguous"), "{text}");
+
+    // 点名项目：只有那个项目里的那条，没有歧义。
+    let resolved = dispatch(
+        &state,
+        "dynamic_var_resolve",
+        json!({ "names": ["sns"], "project_id": "p1" }),
+    )
+    .await
+    .expect("解析");
+    let text = text_of(resolved);
+    assert!(!text.contains("ambiguous"), "{text}");
 }

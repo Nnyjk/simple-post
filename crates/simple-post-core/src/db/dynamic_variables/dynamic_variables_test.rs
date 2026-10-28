@@ -95,6 +95,7 @@ fn detail(node_id: &str, url: &str) -> EndpointDetail {
 fn definition(id: &str, name: &str) -> DynamicVariable {
     DynamicVariable {
         id: id.into(),
+        project_id: Some("p1".into()),
         name: name.into(),
         description: None,
         source_endpoint_id: None,
@@ -103,6 +104,7 @@ fn definition(id: &str, name: &str) -> DynamicVariable {
         source_environment_id: None,
         source_base_url_definition_id: None,
         extract_path: "$".into(),
+        transform_script: None,
         value_mode: ValueMode::Auto,
         ttl_seconds: 60,
         stale_fallback: false,

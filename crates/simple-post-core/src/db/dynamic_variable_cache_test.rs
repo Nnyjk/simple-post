@@ -46,6 +46,7 @@ fn fresh_pool() -> (db::DbPool, std::path::PathBuf) {
                 c,
                 &DynamicVariable {
                     id: id.into(),
+                    project_id: Some("p1".into()),
                     name: name.into(),
                     description: None,
                     source_endpoint_id: None,
@@ -54,6 +55,7 @@ fn fresh_pool() -> (db::DbPool, std::path::PathBuf) {
                     source_environment_id: None,
                     source_base_url_definition_id: None,
                     extract_path: "$".into(),
+                    transform_script: None,
                     value_mode: ValueMode::Auto,
                     ttl_seconds: 60,
                     stale_fallback: false,

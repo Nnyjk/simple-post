@@ -101,15 +101,16 @@ async fn creating_and_listing_a_definition_round_trips() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "name": "sns", "extractPath": "$.list", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "projectId": "p1", "name": "sns", "extractPath": "$.list", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     assert_eq!(created.status(), 201);
     let created_body: serde_json::Value = created.json().await.expect("json body");
     assert_eq!(created_body["name"], "sns");
+    assert_eq!(created_body["projectId"], "p1");
     let id = created_body["id"].as_str().expect("id").to_string();
 
-    let listed = get_json(addr, "/api/dynamic-variables").await;
+    let listed = get_json(addr, "/api/dynamic-variables?projectId=p1").await;
     assert_eq!(listed.status(), 200);
     let listed_body: serde_json::Value = listed.json().await.expect("json body");
     let items = listed_body.as_array().expect("数组");
@@ -120,6 +121,47 @@ async fn creating_and_listing_a_definition_round_trips() {
     assert!(items[0]["value"].is_null());
 
     let _ = id;
+}
+
+#[tokio::test]
+async fn the_list_filters_by_project() {
+    // 定义挂在项目里，故列表按项目过滤：列 p1 拿不到 p2 的定义。
+    // 不带过滤参数时列的是全部项目——那是「调用接口跨项目取值」那条路的读侧。
+    let (addr, dir) = serve_test_router().await;
+    seed(&dir);
+    let pool = crate::db::init(&dir).expect("db init");
+    crate::db::with_tx(&pool, |c| {
+        c.execute_batch(
+            "INSERT INTO projects (id, name, color, created_at, updated_at) \
+             VALUES ('p2', 'other', '#000', 2, 2)",
+        )?;
+        Ok(())
+    })
+    .expect("seed second project");
+
+    for (project_id, name) in [("p1", "sns"), ("p2", "sns")] {
+        let created = post_json(
+            addr,
+            "/api/dynamic-variables",
+            serde_json::json!({ "projectId": project_id, "name": name, "sourceInlineJson": INLINE_SOURCE }),
+        )
+        .await;
+        assert_eq!(created.status(), 201, "同名变量在两个项目里都该建得出来");
+    }
+
+    let listed = get_json(addr, "/api/dynamic-variables?projectId=p1").await;
+    let items: serde_json::Value = listed.json().await.expect("json body");
+    let items = items.as_array().expect("数组");
+    assert_eq!(items.len(), 1, "只该列 p1 的那一条");
+    assert_eq!(items[0]["projectId"], "p1");
+
+    let all = get_json(addr, "/api/dynamic-variables").await;
+    let all: serde_json::Value = all.json().await.expect("json body");
+    assert_eq!(
+        all.as_array().expect("数组").len(),
+        2,
+        "不带过滤参数时列的是全部项目"
+    );
 }
 
 #[tokio::test]
@@ -149,7 +191,7 @@ async fn an_override_is_written_and_cleared() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "projectId": "p1", "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     let created_body: serde_json::Value = created.json().await.expect("json body");
@@ -189,7 +231,7 @@ async fn a_patch_changes_the_definition_and_a_delete_removes_it() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+        serde_json::json!({ "projectId": "p1", "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
     )
     .await;
     let created_body: serde_json::Value = created.json().await.expect("json body");
@@ -226,11 +268,10 @@ async fn an_illegal_name_is_a_validation_error() {
     let created = post_json(
         addr,
         "/api/dynamic-variables",
-        serde_json::json!({ "name": "sns-list" }),
+        serde_json::json!({ "projectId": "p1", "name": "sns-list" }),
     )
     .await;
     assert_eq!(created.status(), 400);
     let body: serde_json::Value = created.json().await.expect("json body");
     assert_eq!(body["code"], "validation");
 }
-

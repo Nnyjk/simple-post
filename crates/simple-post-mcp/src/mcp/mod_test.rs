@@ -134,9 +134,19 @@ fn every_capability_row_names_a_registered_tool() {
 /// 那台机器解析），再删就变成「工具描述在骗人」。测量值从 40 718 涨到 42 735，
 /// 故上限同步提高，余量（665 字节）仍与原来的（682 字节）同一量级。
 ///
+/// **上限从 43 400 提到 44 100 的原因**：动态变量挂到项目上，外加处理脚本。
+/// 契约长大的是 `dynamic_var_*` 这七条工具的 schema：`dynamic_var_list` 与
+/// `dynamic_var_resolve` 各多一个 `project_id`，`dynamic_var_create` 多一个
+/// 必填的 `project_id` 与一个 `transform_script`，`dynamic_var_update` 的 patch
+/// 多 `projectId` 与 `transformScript`。契约里长的字段删不掉，于是上限同步提高：
+/// 测量值从 42 735 涨到 43 401，余量（699 字节）与原来的（665 字节）同一量级。
+/// 新增的三段说明都已压到一行：「定义挂在项目里、名字项目内唯一」「抽取之后跑脚本、
+/// 用 `return` 给出最终值」「同名定义出现在多个项目里按歧义处理」——每一条都是调用方
+/// 不知道就会调错的那一条。
+///
 /// **上限量的是字节**：载荷里含中文描述，`String::len()` 按 UTF-8 字节算，
 /// 故同一份载荷是 42 673 字符、42 735 字节。
-const TOOLS_LIST_BUDGET_BYTES: usize = 43_400;
+const TOOLS_LIST_BUDGET_BYTES: usize = 44_100;
 
 #[test]
 fn the_tools_list_payload_stays_under_its_budget() {

@@ -283,9 +283,12 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
 -- 一条声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里写 `{{sns}}`，
 -- 发送时程序按本表取数、抽取并替换。
 --
--- 作用域是**全局**：定义不属于任何项目，任何项目的端点都能引用它，整个工作区里变量名
--- 唯一（下面那条唯一索引）。理由是基础数据源不该在每个项目里各写一遍——基线项目取到的
--- 那份站点清单，多客户分发项目直接引用同一条定义即可。
+-- 作用域是**项目**：一条定义挂在一个项目里，变量名在**项目内**唯一（下面那条唯一索引）。
+-- 不同项目可以有同名变量而互不覆盖——基线项目与各个客户分发项目各自取自己的那份数据，
+-- 正因为它们的名字一样、取值不同。
+--
+-- `project_id` 可空：迁移遗留的定义在归位之前是「未归属」，等用户认领后才落定。空值
+-- 不参与项目内的名字唯一性之外的那一层（见下面那条 `IS NULL` 的部分索引）。
 --
 -- 数据源二选一：`source_endpoint_id` 引用树里的一个端点（复用那个端点自己的 base URL、
 -- 鉴权与前置脚本），`source_inline_json` 是一份内联请求。两个都为空即「没有数据源」，
@@ -301,6 +304,9 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
 -- 都一样。
 CREATE TABLE IF NOT EXISTS dynamic_variables (
   id                 TEXT PRIMARY KEY,
+  -- 归属项目。定义挂在项目里，故不同项目可以有同名变量而互不覆盖。
+  -- 可空 = 未归属：迁移遗留的定义在归位之前没有项目。
+  project_id         TEXT REFERENCES projects(id) ON DELETE CASCADE,
   name               TEXT NOT NULL,
   description        TEXT,
   -- 数据源：引用树里的一个端点，或内联一份请求。两者二选一。
@@ -312,6 +318,9 @@ CREATE TABLE IF NOT EXISTS dynamic_variables (
   source_base_url_definition_id TEXT REFERENCES base_url_definitions(id) ON DELETE SET NULL,
   -- JSONPath 表达式。`$` 表示整段响应。
   extract_path       TEXT NOT NULL DEFAULT '$',
+  -- 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工（取值、拼接、算账）。
+  -- 为空 = 不跑脚本，抽取结果就是最终值。
+  transform_script   TEXT,
   -- 值的序列化形态：`auto` / `json` / `text`。
   value_mode         TEXT NOT NULL DEFAULT 'auto',
   -- 缓存有效期（秒）。
@@ -323,9 +332,15 @@ CREATE TABLE IF NOT EXISTS dynamic_variables (
   created_at         INTEGER NOT NULL,
   updated_at         INTEGER NOT NULL
 );
--- 变量名在整个工作区里唯一：冲突要在写入处报错，而不是静默覆盖另一条定义。
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_vars_name
-  ON dynamic_variables(name);
+-- 变量名在**项目内**唯一：冲突要在写入处报错，而不是静默覆盖另一条定义。
+--
+-- 两条索引分别管两种行：有项目归属的按 (项目, 名字) 唯一，未归属的按名字唯一。
+-- `project_id` 可空，故 SQLite 的多列唯一索引认不出 NULL——它把多行 NULL 视为互不相同，
+-- 未归属的行得另有一条索引管着。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_vars_project_name
+  ON dynamic_variables(project_id, name) WHERE project_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_vars_orphan_name
+  ON dynamic_variables(name) WHERE project_id IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- dynamic_variable_cache —— 动态变量的当前值

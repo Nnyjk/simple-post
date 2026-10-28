@@ -38,11 +38,21 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     assert.equal(c.url, '/api/dynamic-variables');
   });
 
+  it('dynamicVariablesList → GET /api/dynamic-variables?projectId=…', async () => {
+    // 定义挂在项目里，故列表带一个可选的项目过滤。不带就是跨项目那一路。
+    await invokeCmd(COMMANDS.dynamicVariablesList, { projectId: 'p1' });
+    const c = last();
+    assert.equal(c.method, 'GET');
+    assert.equal(c.url, '/api/dynamic-variables?projectId=p1');
+  });
+
   it('dynamicVariablesCreate → POST /api/dynamic-variables with a flat body', async () => {
     await invokeCmd(COMMANDS.dynamicVariablesCreate, {
+      projectId: 'p1',
       name: 'sns',
       sourceEndpointId: 'e1',
       extractPath: '$.list',
+      transformScript: 'return pm.data.list;',
       ttlSeconds: 120,
     });
     const c = last();
@@ -52,14 +62,15 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     assert.equal(body.name, 'sns');
     assert.equal(body.sourceEndpointId, 'e1');
     assert.equal(body.extractPath, '$.list');
+    assert.equal(body.transformScript, 'return pm.data.list;');
     assert.equal(body.ttlSeconds, 120);
     // 缺席的字段也要显式发 null：服务端按「null = 清除」解释它。
     assert.equal(body.sourceInlineJson, null);
     assert.equal(body.valueMode, null);
     assert.equal(body.sourceEnvironmentId, null);
     assert.equal(body.sourceBaseUrlDefinitionId, null);
-    // 定义是全局的，线上契约里没有项目这一维。
-    assert.equal(body.projectId, undefined);
+    // 归属项目是必填的那一维。
+    assert.equal(body.projectId, 'p1');
   });
 
   it('dynamicVariablesUpdate → PATCH /api/dynamic-variables/{id} with the patch as body', async () => {
@@ -90,9 +101,20 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     const body = JSON.parse(c.body ?? 'null');
     assert.deepEqual(body.names, ['sns']);
     assert.equal(body.force, false);
-    // 名字是全局的：解析不带项目，也不带环境。
-    assert.equal(body.projectId, undefined);
+    // 不点名项目就是跨项目取值，故那一维发 null。
+    assert.equal(body.projectId, null);
     assert.equal(body.environmentId, undefined);
+  });
+
+  it('dynamicVariablesResolve → POST /api/dynamic-variables/resolve with a project', async () => {
+    // 点名项目就是「只在这个项目里找」——请求发送走的就是这一路。
+    await invokeCmd(COMMANDS.dynamicVariablesResolve, {
+      names: ['sns'],
+      projectId: 'p1',
+    });
+    const c = last();
+    const body = JSON.parse(c.body ?? 'null');
+    assert.equal(body.projectId, 'p1');
   });
 
   it('dynamicVariablesSetOverride → POST /api/dynamic-variables/{id}/override', async () => {
