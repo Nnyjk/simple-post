@@ -8,7 +8,7 @@ use crate::db::DbPool;
 use crate::domain::*;
 use crate::error::AppError;
 
-use super::dto::{adopt_or_mint_id, BaseUrlDefPatch, CreateBaseUrlDefOpts};
+use super::dto::{BaseUrlDefPatch, CreateBaseUrlDefOpts};
 
 /// 项目全部服务，扁平。
 ///
@@ -31,8 +31,7 @@ pub fn base_url_defs_list(
 /// 项目即作用域。项目里还没有 ★ 就仍是 `None`：建服务不等于选一个，用户没挑过默认的项目
 /// 就该在没有 base URL 的状态下发出去，而不是带上一个他从未选过的地址。
 ///
-/// 调用方给了 id 就用它，见 `simple_post_server::dto::adopt_or_mint_id`；本命令与
-/// REST handler 共用它，两个传输才对「服务 id 归谁」达成一致。
+/// 命令这一侧只负责线格式：`opts.id` 是调用方铸的 id。
 #[tauri::command]
 pub fn base_url_defs_create(
     state: State<DbPool>,
@@ -41,17 +40,7 @@ pub fn base_url_defs_create(
     opts: Option<CreateBaseUrlDefOpts>,
 ) -> Result<BaseUrlDefinition, AppError> {
     let opts = opts.unwrap_or_default();
-    let def = BaseUrlDefinition {
-        id: adopt_or_mint_id(opts.id),
-        name,
-        description: opts.description,
-    };
-    crate::db::with_tx(&state, |c| {
-        crate::db::base_url_defs::create(c, &def, &project_id)?;
-        // 返回库里那一行而非入参：渲染侧要把它换进自己的列表，只有重读才与
-        // 数据库此刻持有的内容一致。
-        crate::db::base_url_defs::get(c, &def.id)
-    })
+    crate::project_api::create_base_url_def(&state, &project_id, opts.id, name, opts.description)
 }
 
 #[tauri::command]
@@ -81,8 +70,5 @@ pub fn base_url_defs_set_default(
     project_id: String,
     def_id: Option<String>,
 ) -> Result<Project, AppError> {
-    crate::db::with_tx(&state, |c| {
-        crate::db::base_url_defs::set_default(c, &project_id, def_id.as_deref())?;
-        crate::db::projects::get(c, &project_id)
-    })
+    crate::project_api::set_default_base_url_def(&state, &project_id, def_id.as_deref())
 }

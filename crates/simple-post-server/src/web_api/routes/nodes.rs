@@ -70,6 +70,10 @@ pub(crate) async fn http_send(
 #[path = "http_send_test.rs"]
 mod http_send_tests;
 
+#[cfg(test)]
+#[path = "nodes_test.rs"]
+mod tests;
+
 /// `GET /api/nodes`
 ///
 /// `rootId` 把结果收窄到一个项目——SPA 总有且只有一个当前项目，故这一个参数就能覆盖
@@ -164,6 +168,8 @@ pub(crate) async fn nodes_get(
 /// endpoint 以一次 body 带来两半：结构节点与它的 `detail`。两者在一个事务里写入，
 /// `db::nodes::create` 拒绝不匹配的配对——endpoint 没有 payload、或集合带着
 /// payload，都不行——而不是留下一棵读者打不开的树。
+///
+/// 这一侧只负责线格式：`ensure_server_id` 补 id，`kind` 由 body 直接反序列化成枚举。
 pub(crate) async fn nodes_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
@@ -172,24 +178,26 @@ pub(crate) async fn nodes_create(
     let parsed: NodeCreateBody = serde_json::from_value(body)
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
 
-    let node = parsed.node;
     // 子节点的归属由父节点蕴含。故在此推导，调用方只需点名父节点，两者不可能矛盾——
     // 规则与理由都和 Tauri 命令里 root_id 为空的分支相同。
-    let mut root_id = node.root_id.clone().unwrap_or_default();
-    if root_id.is_empty() {
-        if let Some(parent) = &node.parent_id {
-            root_id = db::with_conn(&s.pool, |c| db::nodes::root_id_of(c, parent))
-                .map_err(map_app_error)?;
-        }
-    }
-    let node = node.into_node(&root_id);
+    let root_id = crate::project_api::resolve_root_id(
+        &s.pool,
+        parsed.node.root_id.as_deref(),
+        parsed.node.parent_id.as_deref(),
+    )
+    .map_err(map_app_error)?;
+    let node = parsed.node.into_node(&root_id);
 
     // 在此展开可选的 detail 块而不是在 DTO 里，好让半填的 endpoint（"新建请求"只发
     // 一个 url）采用与 Tauri 命令相同的默认值。
-    let detail = parsed.detail.map(|d| d.into_detail(&node.id));
-
-    let created = db::with_tx(&s.pool, |c| db::nodes::create(c, &node, detail.as_ref()))
-        .map_err(map_app_error)?;
+    let created = crate::project_api::create_node(
+        &s.pool,
+        crate::project_api::NodeCreateInput {
+            node,
+            detail: parsed.detail,
+        },
+    )
+    .map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
         Json(serde_json::to_value(&created).unwrap_or(Value::Null)),

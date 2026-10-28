@@ -1,10 +1,24 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
+
+import { themeBootPlugin } from './src/lib/theme-boot/plugin';
+
+/**
+ * 首帧主题脚本的源文件。
+ *
+ * 插件自己不做 I/O：它只把拿到的源码编译成内联脚本。故这里读文件，插件收文本——这样插件
+ * 能在测试里直接 import 并断言它的行为，不必去碰文件系统。
+ */
+const themeBootSource = readFileSync(
+  path.resolve(__dirname, 'src/lib/theme-boot/index.ts'),
+  'utf8',
+);
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), themeBootPlugin(themeBootSource)],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
