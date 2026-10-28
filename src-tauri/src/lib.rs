@@ -31,9 +31,10 @@ pub use simple_post_mcp::{daemon_http, mcp};
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
 // `interchange_api` 与 `dynamic_api` 在其中：导入 / 导出与动态变量的逻辑住在 server crate，
 // 好让 Tauri 命令与 REST 路由调同一个函数。`spec_api` 同理 —— 一份接口规格的落库编排。
+// `project_api` 也是 —— 项目、服务与资源树节点的创建编排。
 pub use simple_post_server::{
     auth, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry,
-    spec_api, web_api,
+    project_api, spec_api, web_api,
 };
 
 // CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
