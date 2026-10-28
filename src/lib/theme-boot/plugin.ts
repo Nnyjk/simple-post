@@ -132,7 +132,9 @@ export function themeBootPlugin(source: string): Plugin {
           );
         }
         const script = await buildThemeBootScript(source);
-        return html.replace(THEME_BOOT_MARKER, `<script>${script}</script>`);
+        // 替换串用函数形式：字符串形式会把替换文本里的 `$&` 之类当成替换记号展开，
+        // 脚本文本里出现它们时，注入的脚本就被改坏了。
+        return html.replace(THEME_BOOT_MARKER, () => `<script>${script}</script>`);
       },
     },
   };

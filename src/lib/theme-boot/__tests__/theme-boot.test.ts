@@ -133,6 +133,15 @@ describe('偏好原文的解析', () => {
       lastProjectId: 'p1',
     });
   });
+
+  it('项目 id 不是字符串时丢掉那个键', () => {
+    // `as` 只是类型断言，运行时给不出保证。这个值会被当作项目 id 拿去比对，
+    // 故非字符串的值直接丢掉，不让它冒充一个 id。
+    assert.deepEqual(themeBoot.parsePrefs('{"lastProjectId":5}'), {});
+    assert.deepEqual(themeBoot.parsePrefs('{"theme":"light","lastProjectId":5}'), {
+      theme: 'light',
+    });
+  });
 });
 
 describe('读偏好', () => {

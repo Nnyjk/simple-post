@@ -28,8 +28,8 @@ function handlerOf(plugin: ReturnType<typeof themeBootPlugin>): (html: string) =
   return (html: string) => fn(html, {});
 }
 
-async function inject(html: string): Promise<string> {
-  const plugin = themeBootPlugin(SOURCE);
+async function inject(html: string, source: string = SOURCE): Promise<string> {
+  const plugin = themeBootPlugin(source);
   const result = await handlerOf(plugin)(html);
   if (typeof result === 'string') return result;
   return (result as { html: string }).html;
@@ -184,5 +184,15 @@ describe('形状不对时构建期就失败', () => {
 
   it('index.html 里没有标记会被拒', async () => {
     await assert.rejects(() => inject('<!doctype html><html></html>'), /标记/);
+  });
+});
+
+describe('替换记号', () => {
+  it('脚本文本里的 $& 原样留在脚本里', async () => {
+    // `String.prototype.replace` 的字符串形式会把替换文本里的 `$&` 展开成匹配到的
+    // 那段标记。脚本文本里出现它时，注入的脚本就被改坏了——故替换用函数形式。
+    const source = ["const marker = '$&';", 'export default { marker };'].join('\n');
+    const html = await inject(HTML, source);
+    assert.ok(scriptOf(html).includes('$&'), '脚本文本里的 $& 要原样保留');
   });
 });

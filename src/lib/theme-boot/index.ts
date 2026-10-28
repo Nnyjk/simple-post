@@ -1,21 +1,15 @@
 /**
  * 偏好键与主题解析的唯一来源。
  *
- * 三处用到本模块：
+ * 用它的两处：`index.html` 的首帧脚本（由 `plugin.ts` 在构建期从本文件的源码生成）与
+ * `src/stores/slices/ui-prefs.ts`（store 读偏好、写偏好都用本文件提供的键与解析函数）。
  *
- * - `index.html` 的 `<head>` 里那段同步脚本。它由 `vite.config.ts` 里的插件在**构建期**
- *   从本文件的源码生成（见同目录的 `plugin.ts`），故本文件是那段脚本的唯一来源。
- * - `src/stores/slices/ui-prefs.ts`。store 读偏好、写偏好都用本文件提供的键与解析函数。
+ * 两条构建期约束：运行时**不能有任何 import**（内联脚本是 classic script，浏览器不允许它
+ * import），运行时**只能有一个默认导出**（`plugin.ts` 把它改写成给全局对象赋值）。多一条
+ * import 或多一个导出，`plugin.ts` 在构建期报错，而不是让注入的脚本少一段东西。
  *
- * `src/main.tsx` 不再自己解析主题：`App.tsx` 的挂载副作用本来就会把主题写到 `<html>` 上，
- * 而构建期注入的那段脚本在 HTML 解析期就做完了同一件事，比 React 挂载更早。
- *
- * **本文件的运行时不能有任何 import 语句。** 内联脚本是 classic script，浏览器不允许它
- * import 别的模块。故本文件不引入任何运行时依赖，类型也只在本文件里就地定义。
- *
- * **本文件的运行时只能有一个默认导出。** 插件把本文件转成 JavaScript 之后，把那一行默认
- * 导出改写成 `globalThis.__simplePostTheme =`（内联脚本拿不到模块系统的导出）。多一个导出
- * 或多一条 import，插件会在构建期报错，而不是让注入的脚本少东西。
+ * `src/main.tsx` 不解析初始主题：构建期注入的那段脚本在 HTML 解析期就把主题写到 `<html>`
+ * 上，比 React 挂载更早。
  */
 
 /** 视觉主题预设。驱动 document 根节点上的 CSS 变量。 */
@@ -29,7 +23,11 @@ export type Theme = 'dark' | 'light' | 'system';
  */
 export interface PersistedPrefs {
   theme?: string;
-  /** 用户上次停留的项目 id。空串表示「不在任何项目里」。 */
+  /**
+   * 用户上次停留的项目 id。空串表示「不在任何项目里」。
+   *
+   * [`parsePrefs`] 保证它是字符串或不存在。
+   */
   lastProjectId?: string;
   /** 旧版本把请求旋钮存在这里。升级后它们在 `preferences` 表里，故只用于一次性迁移。 */
   requestSettings?: unknown;
@@ -43,6 +41,11 @@ const PREFS_KEY = 'simple-post:prefs';
  *
  * 解析失败一律当作「什么都没有」：localStorage 里的内容可能被人手改坏，应用不该因此
  * 起不来。数组与 `null` 同样当作空对象——它们不是偏好的形状。
+ *
+ * `lastProjectId` 另有一条检查：它的值会被当作项目 id 拿去比对，非字符串的值直接丢掉。
+ * `as` 只是类型断言，运行时给不出任何保证——不检查的话，读它的调用方拿到的就是一个
+ * 类型上是 `string`、运行时是数字的值。`theme` 不在这里丢：它存的是原始取值，合不合法
+ * 由 [`resolveTheme`] 判定。
  */
 function parsePrefs(raw: string | null): PersistedPrefs {
   if (typeof raw !== 'string' || raw === '') return {};
@@ -53,7 +56,9 @@ function parsePrefs(raw: string | null): PersistedPrefs {
     return {};
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-  return parsed as PersistedPrefs;
+  const prefs = parsed as PersistedPrefs;
+  if (typeof prefs.lastProjectId !== 'string') delete prefs.lastProjectId;
+  return prefs;
 }
 
 /**
