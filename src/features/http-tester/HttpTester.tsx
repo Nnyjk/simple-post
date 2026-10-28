@@ -8,13 +8,13 @@ import { enabledVars } from '@/lib/url';
 import { UNTITLED_ENDPOINT_NAME, type EndpointDraft } from '@/stores/store-types';
 import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { useHttpTesterMotion } from './useHttpTesterMotion';
-import { useUrlVarPicker } from './useUrlVarPicker';
 import { useRequestActions } from './useRequestActions';
 import { useEndpointContext } from './useEndpointContext';
-import { type VarEntry } from './EnvVarPicker';
+import { useVarHint, type VarEntry } from './var-hint';
 import { pathPlaceholders } from '@/lib/path-params';
 import { buildEffectiveRequest } from './model/effectiveRequest';
 import { buildRequestInput } from './model/requestInput';
+import { buildVarEntries } from './model/varEntries';
 import {
   buildDynamicEntries,
   buildDynamicNames,
@@ -174,34 +174,44 @@ export function HttpTester() {
     [allEndpointDetails],
   );
 
-  // 变量选择器的条目：环境变量与动态变量并进同一份候选（不新开页签）。
+  // 变量候选：环境变量与动态变量并进同一份候选（不新开页签）。
   const dynamicEntries = useMemo<VarEntry[]>(
     () => buildDynamicEntries(dynamicVariables, dynamicValues),
     [dynamicVariables, dynamicValues],
   );
 
-  // EnvVarPicker 状态 —— 用户在 URL 输入框敲 `{{` 时打开；选择器是纯展示。
-  const {
-    varPickerOpen,
-    varSelected,
-    filteredEntries,
-    setVarSelected,
-    setVarPickerOpen,
-    handleUrlChange,
-    handleUrlKeyDown,
-    insertVar,
-    focusUrlForFullAddress,
-  } = useUrlVarPicker({
-    endpointEnv,
-    dynamicEntries,
-    liveUrl,
-    urlInputRef,
-    onUrlChange: (next) => {
-      if (!endpoint) return false;
+  // 全部候选（环境 + 动态）。URL 栏与各输入框共用同一份，故候选只在这里算一次。
+  const varEntries = useMemo<VarEntry[]>(
+    () => buildVarEntries(endpointEnv, dynamicEntries),
+    [endpointEnv, dynamicEntries],
+  );
+
+  // URL 输入框里的变量提示。用户敲 `{{` 时浮出候选，选中即写进草稿。
+  const urlHint = useVarHint({
+    value: liveUrl,
+    onChange: (next) => {
+      if (!endpoint) return;
       setEndpointDraft(endpoint.id, { url: next });
-      return true;
     },
+    entries: varEntries,
   });
+
+  /**
+   * 自定义 把 URL 栏变成完整地址，故把光标放过去并全选旧内容 —— 直接输入即替换旧
+   * path 而非追加。延后一拍执行，使其发生在切换模式的重渲染（以及浮层关闭）之后。
+   */
+  const focusUrlForFullAddress = useCallback(() => {
+    window.setTimeout(() => {
+      const el = urlInputRef.current;
+      if (!el) return;
+      el.focus();
+      try {
+        el.select();
+      } catch {
+        /* 不是文本输入框 —— 无内容可全选 */
+      }
+    }, 0);
+  }, []);
 
   /** baseUrl 选择器的变更 —— 落点由 `commitBaseUrl` 决定（草稿写文档，已存写行）。 */
   const handleBaseUrlSelectionChange = (next: BaseUrlSelection) => {
@@ -240,9 +250,6 @@ export function HttpTester() {
   const handleFormatResult = (result: FormatResult) => {
     setValidationError(result.ok ? null : result.error);
   };
-
-  /** 关掉变量选择器。 */
-  const closeVarPicker = () => setVarPickerOpen(false);
 
   // 全部动态变量定义。定义是全局的，故这里没有项目维度；这里只要当前值，故不算引用关系。
   useEffect(() => {
@@ -382,8 +389,8 @@ export function HttpTester() {
       {...{ patchDraft, effective, method, resolvedBaseUrl: resolved.baseUrl }}
       {...{ selection, isCustomUrl, liveUrl, urlInputRef }}
       {...{ sendBtnRef, playIconRef, copyCurlBtnRef, requestPending, curlFlash }}
-      {...{ dirty, onMethodChange: handleMethodChange, onUrlChange: handleUrlChange }}
-      {...{ onUrlKeyDown: handleUrlKeyDown, onSend: handleSend, onSave: handleSave }}
+      {...{ dirty, onMethodChange: handleMethodChange, onUrlChange: urlHint.change }}
+      {...{ onSend: handleSend, onSave: handleSave }}
       {...{ onCopyCurl: handleCopyCurl, onSelectionChange: handleBaseUrlSelectionChange }}
       {...{ draftSaveError, dynamicError, tabItems, tab, onTabChange: setTab }}
       {...{
@@ -392,9 +399,7 @@ export function HttpTester() {
         pathParamError,
         onFormatResult: handleFormatResult,
       }}
-      {...{ varPickerOpen, onCloseVarPicker: closeVarPicker, varEntries: filteredEntries }}
-      {...{ varSelected, onVarSelectedChange: setVarSelected, onInsertVar: insertVar }}
-      {...{ envName: endpointEnv?.name }}
+      {...{ varEntries, envName: endpointEnv?.name }}
     />
   );
 }

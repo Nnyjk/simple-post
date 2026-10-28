@@ -1,6 +1,6 @@
 import { listDynamicNames } from '@/lib/dynamic-vars';
 import type { DynamicValueStatus, DynamicVariableView } from '@/types/domain';
-import type { VarEntry } from '../EnvVarPicker';
+import type { VarEntry } from '../var-hint';
 import type { EffectiveRequest } from './effectiveRequest';
 
 /**

@@ -1,10 +1,10 @@
 import { Play, Save, Copy, Check } from 'lucide-react';
-import type { KeyboardEvent, RefObject } from 'react';
+import type { RefObject } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { MethodPicker } from '@/components/ui/method-picker';
 import { Tooltip } from '@/components/ui/tooltip';
 import { BaseUrlPicker, type BaseUrlSelection } from './BaseUrlPicker';
+import { VarHintInput, type VarEntry } from './var-hint';
 import { cn, methodColorVar } from '@/lib/utils';
 import type { BaseUrlDefinition, HttpMethod } from '@/types/domain';
 
@@ -13,6 +13,9 @@ import type { BaseUrlDefinition, HttpMethod } from '@/types/domain';
  *
  * 它渲染**当前有效**的请求（草稿叠已存的 detail）；编辑经回调回写草稿。请求本身的
  * 组装不在这里——它要与发送和 cURL 预览共用同一个对象，故留在 `HttpTester`。
+ *
+ * URL 输入框带变量候选提示：用户敲 `{{` 时浮出环境变量与动态变量，选中即插入
+ * `{{key}}`（见 `var-hint`）。
  */
 export function RequestUrlBar({
   method,
@@ -30,10 +33,11 @@ export function RequestUrlBar({
   curlFlash,
   dirty,
   isDraft,
+  varEntries,
+  envName,
   onMethodChange,
   onSelectionChange,
   onUrlChange,
-  onUrlKeyDown,
   onSend,
   onSave,
   onCopyCurl,
@@ -53,10 +57,13 @@ export function RequestUrlBar({
   curlFlash: boolean;
   dirty: boolean;
   isDraft: boolean;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
+  varEntries: VarEntry[];
+  /** 当前环境名，显示在候选浮层的标题上。 */
+  envName?: string;
   onMethodChange: (m: HttpMethod) => void;
   onSelectionChange: (next: BaseUrlSelection) => void;
   onUrlChange: (next: string) => void;
-  onUrlKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
   onSend: () => void;
   onSave: () => void;
   onCopyCurl: () => void;
@@ -74,11 +81,12 @@ export function RequestUrlBar({
         onSelectionChange={onSelectionChange}
       />
       <div className="relative flex min-w-0 flex-1 items-center">
-        <Input
-          ref={urlInputRef}
+        <VarHintInput
+          inputRef={urlInputRef}
           value={liveUrl}
-          onChange={(e) => onUrlChange(e.target.value)}
-          onKeyDown={onUrlKeyDown}
+          onChange={onUrlChange}
+          entries={varEntries}
+          envName={envName}
           // 自定义 让本框承载完整地址，故须明示：placeholder 换成完整 URL、ring 标出
           // 模式 —— 选择器位于用户实际聚焦的框左侧，光靠它的标签不够。
           className={cn(
