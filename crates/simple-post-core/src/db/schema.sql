@@ -82,13 +82,13 @@ CREATE TABLE IF NOT EXISTS agent_permissions (
   permission TEXT NOT NULL CHECK(permission IN ('read','read_call','full'))
 );
 
--- 单例行（CHECK id=1）。存设置 UI 里露出的全局 HTTP 客户端旋钮。
-CREATE TABLE IF NOT EXISTS request_settings (
-  id INTEGER PRIMARY KEY CHECK(id=1),
-  timeout_ms INTEGER NOT NULL DEFAULT 30000,
-  follow_redirects INTEGER NOT NULL DEFAULT 1,
-  max_response_size_kb INTEGER NOT NULL DEFAULT 5120
-);
+-- 设置旋钮（超时 / 跟随重定向 / 响应体积上限）的现役容器是下面这张 `preferences` 表里的
+-- `request_settings` **行**，见 `db::preferences::keys::REQUEST_SETTINGS`。
+--
+-- 这里曾有过一张同名的 `request_settings` **表**（单例行，`CHECK id=1`，三列即上述旋钮）。
+-- 它从建立起就没有任何读者——界面与 MCP 侧读写的一直是 `preferences` 里的那一行，故那张表
+-- 只是一处残留。它已被清除：`schema.sql` 里不再有它的 `CREATE`，`db::schema::migrate` 在
+-- `SCHEMA_SQL` 之后无条件丢掉既有文件里的它。
 
 -- 自由键值对袋子，用于渲染层的上次打开项目、UI 偏好、最近环境等。值经 JSON 编码，故
 -- schema 不必预先知道具体有哪些键。
@@ -443,4 +443,11 @@ END;
 -- 动态变量改为全局作用域后，这两张表的形状变了（去掉 `project_id`，加上环境与服务两列）。
 -- 版本仍是 3：`db::schema` 在 `migrate` 里认出旧形状并把两张表丢掉重建，故旧的定义不会
 -- 残留，而用户的项目、接口与环境不受影响。
+--
+-- 残留的 `request_settings` **表**被清掉后**仍是**版本 3。那张表（单例行，`CHECK id=1`，
+-- 三列即超时 / 跟随重定向 / 响应体积上限）从建立起就没有任何读者：设置旋钮的现役容器是
+-- `preferences` 表里的 `request_settings` **行**（`db::preferences::keys::REQUEST_SETTINGS`），
+-- 界面与 MCP 侧读写的都是那一行。删掉一张没有读者的表不改变任何一行的可读性，故不需要
+-- 版本事件；而 bump 版本会让 `ensure_current_schema` 删掉每个用户的库——为清一张空表赔上
+-- 全部项目、环境与资源树。既有文件里的它由 `db::schema::migrate` 在 `SCHEMA_SQL` 之后丢掉。
 PRAGMA user_version = 3;

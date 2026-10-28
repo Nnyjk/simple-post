@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::schema::remove_db_files;
 use super::test_helpers::{fresh_empty_pool, fresh_pool, temp_dir};
@@ -234,4 +234,211 @@ fn the_project_scoped_dynamic_variable_tables_are_replaced_by_the_global_ones() 
     })
     .unwrap();
     assert_eq!(projects_after, projects_before, "项目不该被这次迁移牵连");
+}
+
+/// 种一张建了却没人用过的 `request_settings` 表，并放一行进去。
+///
+/// 它是单例行（`CHECK id=1`），三列是超时 / 跟随重定向 / 响应体积上限。请求旋钮的现役
+/// 容器是 `preferences` 表里的同名**行**（`db::preferences::keys::REQUEST_SETTINGS`），
+/// 故这张表从建立起就没有读者，也从来没有一行被写进去过。
+fn plant_obsolete_request_settings_table(pool: &DbPool) {
+    with_tx(pool, |c| {
+        c.execute_batch(
+            "CREATE TABLE request_settings (
+                 id INTEGER PRIMARY KEY CHECK(id=1),
+                 timeout_ms INTEGER NOT NULL DEFAULT 30000,
+                 follow_redirects INTEGER NOT NULL DEFAULT 1,
+                 max_response_size_kb INTEGER NOT NULL DEFAULT 5120
+             );
+             INSERT INTO request_settings VALUES (1, 12345, 0, 999);",
+        )
+        .map_err(AppError::Sqlite)
+    })
+    .expect("plant the obsolete table");
+}
+
+/// 库里有几张叫这个名字的表。
+fn table_count(pool: &DbPool, name: &str) -> i64 {
+    with_conn(pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            params![name],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap()
+}
+
+/// `preferences` 表里某个键的原始值。键不在时是 `None`。
+fn preference_value(pool: &DbPool, key: &str) -> Option<String> {
+    with_conn(pool, |c| {
+        Ok(c.query_row(
+            "SELECT value FROM preferences WHERE key = ?1",
+            params![key],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?)
+    })
+    .unwrap()
+}
+
+#[test]
+fn a_fresh_store_has_no_request_settings_table() {
+    let (pool, _dir) = fresh_empty_pool();
+
+    assert_eq!(
+        table_count(&pool, "request_settings"),
+        0,
+        "新库不该再建这张没有人读的表"
+    );
+    // 现役容器得在：`preferences` 表是设置旋钮住的地方。
+    assert_eq!(
+        table_count(&pool, "preferences"),
+        1,
+        "`preferences` 表是设置旋钮的现役容器，不该被牵连"
+    );
+}
+
+#[test]
+fn the_obsolete_request_settings_table_is_dropped_on_open() {
+    let (pool, dir) = fresh_pool();
+    let projects_before: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    plant_obsolete_request_settings_table(&pool);
+    drop(pool);
+
+    // 重新打开同一个库。`SCHEMA_VERSION` 没变，故 `ensure_current_schema` 不删它；
+    // `migrate` 把那张没有人读的表丢掉。
+    let pool = init(&dir).expect("second init");
+
+    assert_eq!(
+        table_count(&pool, "request_settings"),
+        0,
+        "残留表应当被清除"
+    );
+
+    // 其余数据不动：丢的只是那一张表。
+    let projects_after: i64 = with_conn(&pool, |c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(projects_after, projects_before, "项目不该被这次清理牵连");
+}
+
+#[test]
+fn the_request_settings_preference_row_survives_the_cleanup() {
+    let (pool, dir) = fresh_empty_pool();
+    let written = crate::domain::RequestSettings {
+        timeout_ms: 5_000,
+        follow_redirects: false,
+        max_response_size_kb: 2_048,
+    };
+    with_tx(&pool, |c| {
+        crate::db::preferences::set_request_settings(c, &written)
+    })
+    .expect("write the preference row");
+    plant_obsolete_request_settings_table(&pool);
+    drop(pool);
+
+    let pool = init(&dir).expect("second init");
+
+    // 表名与行名同名，故这条断言是必要的：清理那张**表**不能连**行**一起清掉。
+    let read_back = with_conn(&pool, crate::db::preferences::request_settings).unwrap();
+    assert_eq!(
+        read_back.timeout_ms, 5_000,
+        "设置旋钮的行不该被这次清理牵连"
+    );
+    assert!(
+        !read_back.follow_redirects,
+        "设置旋钮的行不该被这次清理牵连"
+    );
+    assert_eq!(
+        read_back.max_response_size_kb, 2_048,
+        "设置旋钮的行不该被这次清理牵连"
+    );
+}
+
+#[test]
+fn the_other_preference_keys_survive_the_cleanup() {
+    let (pool, dir) = fresh_empty_pool();
+    let seeded = [
+        ("mcp.auto_start", "true"),
+        ("mcp.policy", "\"full_access\""),
+        ("mcp.http_config", "{\"host\":\"127.0.0.1\",\"port\":4173}"),
+    ];
+    with_tx(&pool, |c| {
+        for (key, value) in seeded {
+            c.execute(
+                "INSERT INTO preferences (key, value) VALUES (?1, ?2)",
+                params![key, value],
+            )
+            .map_err(AppError::Sqlite)?;
+        }
+        Ok(())
+    })
+    .expect("seed the preference rows");
+    plant_obsolete_request_settings_table(&pool);
+    drop(pool);
+
+    let pool = init(&dir).expect("second init");
+
+    // 丢的是一张**表**，不是 `preferences` 表本身——那几个键一个字都不该变。
+    for (key, value) in seeded {
+        assert_eq!(
+            preference_value(&pool, key).as_deref(),
+            Some(value),
+            "`{key}` 不该被这次清理牵连"
+        );
+    }
+}
+
+#[test]
+fn the_cleanup_is_a_no_op_when_the_table_is_already_gone() {
+    // 另一个进程可能已经删掉了它：GUI、守护进程与 `serve-web` 各自打开同一个
+    // `store.db`，第二个打开者看到的就是一张已经没有那张表的库。那一步清理必须是
+    // 空操作，不能让 `migrate` 失败——`db::init` 失败会让 GUI 与守护进程直接退出。
+    let dir = temp_dir("already-gone");
+    let pool = init(&dir).expect("init");
+    plant_obsolete_request_settings_table(&pool);
+    with_tx(&pool, |c| {
+        c.execute_batch("DROP TABLE request_settings;")
+            .map_err(AppError::Sqlite)
+    })
+    .expect("another opener dropped it");
+    drop(pool);
+
+    let pool = init(&dir).expect("second init");
+
+    assert_eq!(
+        table_count(&pool, "request_settings"),
+        0,
+        "表已经不在，清理必须是空操作"
+    );
+}
+
+#[test]
+fn a_second_opener_sees_a_store_it_can_still_migrate() {
+    let dir = temp_dir("second-opener");
+    let pool = init(&dir).expect("first init");
+    plant_obsolete_request_settings_table(&pool);
+    drop(pool);
+
+    // 第一个打开者清掉它。
+    let pool = init(&dir).expect("second init");
+    assert_eq!(
+        table_count(&pool, "request_settings"),
+        0,
+        "残留表应当被清除"
+    );
+    drop(pool);
+
+    // 第二个打开者看到的是一张已经没有那张表的库，同样不该失败。
+    let pool = init(&dir).expect("third init");
+    assert_eq!(
+        table_count(&pool, "request_settings"),
+        0,
+        "残留表应当被清除"
+    );
 }

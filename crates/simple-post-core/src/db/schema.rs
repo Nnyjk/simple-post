@@ -19,12 +19,37 @@ pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
     // `CREATE TABLE IF NOT EXISTS` 对它是空操作，旧行会留在一张形状已经不同的表里。
     drop_obsolete_dynamic_variable_tables(conn)?;
     conn.execute_batch(SCHEMA_SQL)?;
+    // 必须在 `SCHEMA_SQL` 之后：那张表不该存在，而 `schema.sql` 里已经没有它的 `CREATE`。
+    // 放在之后，于是有人把 `CREATE` 抄回 `schema.sql` 时，那张表会被建出来又被紧接着
+    // 删掉——顺序的正确用法是「不要抄」，不是「抄了也安全」。
+    drop_obsolete_request_settings_table(conn)?;
     // 必须在数据迁移之前、且不能放进 `SCHEMA_SQL`：那个 pass 要读写的
     // `module_base_urls_json` / `module_id` / `is_default` 在够旧的库里根本不存在，
     // 而 `SCHEMA_SQL` 的 `CREATE TABLE IF NOT EXISTS` 对这些库正是空操作——
     // 所以列只能在这里补。
     add_missing_columns(conn)?;
     migrate_base_urls_into_value_layer(conn)
+}
+
+/// 丢掉那张建了却没人用过的 `request_settings` 表。
+///
+/// 它是单例行（`CHECK id=1`），三列是超时 / 跟随重定向 / 响应体积上限，但从建立起就没有
+/// 任何一行被写进去、也没有任何读者。请求旋钮的现役容器是 `preferences` 表里的
+/// `request_settings` **行**（[`crate::db::preferences::keys::REQUEST_SETTINGS`]）。
+///
+/// **刻意不 bump `SCHEMA_VERSION`**：删掉一张没人读的表不改变任何一行的可读性，而 bump
+/// 版本会让 [`ensure_current_schema`] 删掉每个用户的库——为清一张空表赔上全部项目、
+/// 环境与资源树。做法与 [`drop_obsolete_dynamic_variable_tables`] 同源：打开时丢掉。
+///
+/// **只丢这一张表**：`preferences` 表本身不能碰，请求旋钮就住在它里面。
+fn drop_obsolete_request_settings_table(conn: &mut Connection) -> Result<(), AppError> {
+    // 一条语句，不先查再删：GUI、守护进程与 `serve-web` 各自打开同一个 `store.db`，两个
+    // 进程同时走到这里时，先查后删的写法会让其中一个撞上「no such table」——那会让
+    // `migrate` 失败、`db::init` 失败，于是 GUI 与守护进程直接退出。`IF EXISTS` 让这句
+    // 在表已经被别人删掉时是空操作。
+    conn.execute_batch("DROP TABLE IF EXISTS request_settings;")?;
+    tracing::debug!("schema: the obsolete request_settings table is absent");
+    Ok(())
 }
 
 /// 旧形状的动态变量表直接丢掉。
