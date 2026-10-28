@@ -1,12 +1,34 @@
 import { useMemo } from 'react';
-import { Hourglass, Repeat, Database, RotateCcw, Send } from 'lucide-react';
+import {
+  Hourglass,
+  Repeat,
+  Database,
+  RotateCcw,
+  Send,
+  ShieldCheck,
+  ShieldAlert,
+  FileKey,
+  KeyRound,
+  LockKeyhole,
+} from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { REQUEST_SETTINGS_DEFAULTS } from '@/stores/slices/ui-prefs';
+import type { RequestSettings } from '@/stores/store-types';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SettingsCategory, SettingRow } from '../SettingsCategory';
+import { GroupHeader } from './rows/GroupHeader';
+import { SkipVerifyWarning } from '@/components/tls/skip-verify-warning';
+import {
+  TLS_PATH_FIELDS,
+  TLS_PATH_NOTE,
+  TLS_SKIP_VERIFY,
+  setTlsPath,
+  tlsEquals,
+  tlsPathValue,
+} from '@/lib/tls';
 
 // 「恢复默认恢复到哪里」的唯一真相。做成常量，好让「恢复默认」处理器与禁用态判定对
 // 「什么算被改动过」保持一致。
@@ -16,9 +38,40 @@ import { SettingsCategory, SettingRow } from '../SettingsCategory';
 const REQUEST_DEFAULTS = REQUEST_SETTINGS_DEFAULTS;
 
 /**
+ * 小节里的设置项数：三项出站旋钮 + HTTPS 出站的四项。
+ *
+ * 不从 `REQUEST_DEFAULTS` 的键数算——`tls` 是四个字段的一组，算成一项会让页面上
+ * 少报三项。
+ */
+const SETTING_COUNT = 7;
+
+/** 三个证书路径输入框的前导图标，按它们在出站请求里各管的事区分。 */
+const PATH_ICONS = {
+  caCertificatePath: <FileKey className="h-3.5 w-3.5" />,
+  clientCertificatePath: <KeyRound className="h-3.5 w-3.5" />,
+  clientKeyPath: <LockKeyhole className="h-3.5 w-3.5" />,
+} as const;
+
+/**
+ * 这一小节是否已偏离缺省值。
+ *
+ * 提成纯函数是为了能单独测它：「恢复默认」按钮的可用状态就是它的取反，而那一段
+ * 判断原先只长在组件里，改了哪一项都要靠人肉读组件才知道有没有被算进去。
+ */
+export function isRequestSettingsDirty(settings: RequestSettings): boolean {
+  return (
+    settings.timeoutMs !== REQUEST_DEFAULTS.timeoutMs ||
+    settings.followRedirects !== REQUEST_DEFAULTS.followRedirects ||
+    settings.maxResponseSizeKb !== REQUEST_DEFAULTS.maxResponseSizeKb ||
+    !tlsEquals(settings.tls, REQUEST_DEFAULTS.tls)
+  );
+}
+
+/**
  * 请求行为 —— 作用于每一次外发 HTTP 调用。
  *
- * 三行，各带标签、一句说明默认值*为何*重要的描述，以及右侧的控件。「恢复默认」按钮放在
+ * 七行，各带标签、一句说明默认值*为何*重要的描述，以及右侧的控件。前三行是出站
+ * 旋钮，后四行是 HTTPS 出站设置（一个开关 + 三个证书路径）。「恢复默认」按钮放在
  * 小节表头，且只有当至少一行已偏离 `REQUEST_DEFAULTS` 时才可用，免得这个便利性一直引诱
  * 用户去「重置」本来就已是默认值的东西。
  */
@@ -26,13 +79,7 @@ export function RequestSection() {
   const settings = useAppStore((s) => s.requestSettings);
   const updateRequestSettings = useAppStore((s) => s.updateRequestSettings);
 
-  const isDirty = useMemo(
-    () =>
-      settings.timeoutMs !== REQUEST_DEFAULTS.timeoutMs ||
-      settings.followRedirects !== REQUEST_DEFAULTS.followRedirects ||
-      settings.maxResponseSizeKb !== REQUEST_DEFAULTS.maxResponseSizeKb,
-    [settings],
-  );
+  const isDirty = useMemo(() => isRequestSettingsDirty(settings), [settings]);
 
   const resetToDefaults = () => updateRequestSettings({ ...REQUEST_DEFAULTS });
 
@@ -41,7 +88,7 @@ export function RequestSection() {
       title="请求行为"
       description="应用到所有 HTTP 发送（v0.2 由 Rust 端消费）"
       icon={<Send className="h-3.5 w-3.5" />}
-      meta={`${Object.keys(REQUEST_DEFAULTS).length} 项`}
+      meta={`${SETTING_COUNT} 项`}
       actions={
         <Button
           variant="ghost"
@@ -114,13 +161,69 @@ export function RequestSection() {
         }
       />
 
+      {/* HTTPS 出站 —— 一个分组副标题把下面四行与上面三项出站旋钮分开。 */}
+      <GroupHeader
+        icon={<ShieldCheck className="h-3.5 w-3.5" />}
+        title="HTTPS 出站"
+        description="出站请求怎么校验服务端证书、出示什么客户端证书"
+      />
+
+      <SettingRow
+        icon={<ShieldAlert className="h-3.5 w-3.5" />}
+        label={TLS_SKIP_VERIFY.label}
+        description={TLS_SKIP_VERIFY.description}
+        hint={settings.tls.skipVerify ? '已开启 · 不再校验服务端证书' : '关闭 · 校验服务端证书'}
+        flush
+        control={
+          <Switch
+            checked={settings.tls.skipVerify}
+            onCheckedChange={(v) =>
+              updateRequestSettings({ tls: { ...settings.tls, skipVerify: v } })
+            }
+            aria-label={TLS_SKIP_VERIFY.label}
+          />
+        }
+      />
+
+      {/* 警示只在开关打开时出现：开关关着时面板不该断言一个并不存在的中间人风险。
+          端点那侧的「证书」页签用同一个组件（见 `SkipVerifyWarning`）。 */}
+      <SkipVerifyWarning skipVerify={settings.tls.skipVerify} className="mx-4" />
+
+      {TLS_PATH_FIELDS.map((field) => (
+        <SettingRow
+          key={field.key}
+          icon={PATH_ICONS[field.key]}
+          label={field.label}
+          description={field.description}
+          control={
+            <Input
+              value={settings.tls[field.key] ?? ''}
+              onChange={(e) =>
+                updateRequestSettings({
+                  tls: setTlsPath(settings.tls, field.key, tlsPathValue(e.target.value)),
+                })
+              }
+              placeholder={field.placeholder}
+              spellCheck={false}
+              aria-label={field.label}
+              className="h-8 w-72 font-mono text-xs"
+            />
+          }
+        />
+      ))}
+
+      <p className="px-4 py-2 text-[11px] text-muted-foreground/80">{TLS_PATH_NOTE}</p>
+
       {/* 同一张卡片内的页脚 —— 一句小提醒，说明这里的取值在当前管线中才真正起作用。
           让用户不至于跑去看文档也知道自己身在何处。 */}
       <div className="flex items-center gap-2 border-t border-border/60 bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
         <Badge variant="muted" className="font-mono">
           v0.2
         </Badge>
-        <span>以下设置（超时 / 跟随重定向 / 最大响应体积）仅在真实请求模式下生效。</span>
+        <span>
+          以下设置（超时 / 跟随重定向 / 最大响应体积 / HTTPS 出站）仅在真实请求模式下生效；HTTPS
+          出站那几项同时决定 MCP 侧发请求时怎么校验证书。
+        </span>
       </div>
     </SettingsCategory>
   );

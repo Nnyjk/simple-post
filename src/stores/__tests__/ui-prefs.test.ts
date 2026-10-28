@@ -2,9 +2,10 @@
  * `ui-prefs` 的两份本地偏好：请求旋钮存在后端，不在 localStorage；上次停留的项目
  * 记在 localStorage，刷新后据此回到那个项目。
  *
- * 覆盖四件事：改旋钮会把**完整三项**发给后端（web 形态的 `/api/request-settings`
- * 是全量替换语义，发补丁会丢掉另外两项）、读旋钮时用后端的值、旧版本留在
- * localStorage 的那份被一次性迁进库后删掉、以及换主题不抹掉记住的项目。
+ * 覆盖五件事：改旋钮会把**完整设置**发给后端（web 形态的 `/api/request-settings`
+ * 是全量替换语义，发补丁会丢掉其它项）、读旋钮时用后端的值、后端没给 TLS 那一组时
+ * 用缺省值补上、旧版本留在 localStorage 的那份被一次性迁进库后删掉、以及换主题不抹掉
+ * 记住的项目。
  */
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,10 +16,19 @@ import {
   loadRequestSettings,
   readLastProjectId,
   saveLastProjectId,
+  REQUEST_SETTINGS_DEFAULTS,
 } from '../slices/ui-prefs';
 import type { RequestSettings } from '../store-types';
 
 type CapturedCall = { cmd: string; args: Record<string, unknown> };
+
+/** 缺省的 TLS 设置——全局默认那份的缺省值，后端 `TlsSettings::default()` 的镜像。 */
+const TLS_DEFAULTS = {
+  skipVerify: false,
+  caCertificatePath: null,
+  clientCertificatePath: null,
+  clientKeyPath: null,
+};
 
 /** 一个最小的 store：只带 `ui-prefs` 那一片，够切片读写。 */
 function makePrefsHarness() {
@@ -44,7 +54,15 @@ describe('ui-prefs: 请求旋钮存在后端', () => {
     clearIpcMock();
   });
 
-  it('改一项也要把完整三项发出去', async () => {
+  it('缺省值里带着 TLS 那一组', () => {
+    assert.deepEqual(
+      REQUEST_SETTINGS_DEFAULTS.tls,
+      TLS_DEFAULTS,
+      '缺省值必须与后端 RequestSettings::default() 一致，否则界面与 MCP 侧发出的请求不同',
+    );
+  });
+
+  it('改一项也要把完整设置发出去', async () => {
     const harness = makePrefsHarness();
     const calls: CapturedCall[] = [];
     installIpcMock(async (cmd, args) => {
@@ -69,10 +87,44 @@ describe('ui-prefs: 请求旋钮存在后端', () => {
             timeoutMs: 5000,
             followRedirects: true,
             maxResponseSizeKb: 5120,
+            tls: TLS_DEFAULTS,
           },
         },
       },
     ]);
+  });
+
+  it('改 TLS 那一组时，四个字段整组写出去', async () => {
+    const harness = makePrefsHarness();
+    const calls: CapturedCall[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    harness.slice.updateRequestSettings({
+      tls: {
+        skipVerify: true,
+        caCertificatePath: 'C:\\certs\\ca.pem',
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(calls[0]?.args, {
+      patch: {
+        timeoutMs: 30_000,
+        followRedirects: true,
+        maxResponseSizeKb: 5120,
+        tls: {
+          skipVerify: true,
+          caCertificatePath: 'C:\\certs\\ca.pem',
+          clientCertificatePath: null,
+          clientKeyPath: null,
+        },
+      },
+    });
   });
 
   it('读的是后端存的那份', async () => {
@@ -90,6 +142,8 @@ describe('ui-prefs: 请求旋钮存在后端', () => {
       timeoutMs: 1234,
       followRedirects: false,
       maxResponseSizeKb: 999,
+      // 后端那一行没有 TLS 字段（旧的行 / 手改过的行），缺省值补上。
+      tls: TLS_DEFAULTS,
     });
     assert.deepEqual(
       calls.map((c) => c.cmd),
@@ -107,6 +161,30 @@ describe('ui-prefs: 请求旋钮存在后端', () => {
       timeoutMs: 30_000,
       followRedirects: true,
       maxResponseSizeKb: 5_120,
+      tls: TLS_DEFAULTS,
+    });
+  });
+
+  it('后端给的 TLS 那一组缺字段时逐字段补上', async () => {
+    installIpcMock(async (cmd) => {
+      if (cmd === 'request_settings_get') {
+        // 后端只存了「跳过校验」与一个证书路径，另外两项缺省。
+        return {
+          timeoutMs: 1000,
+          followRedirects: true,
+          maxResponseSizeKb: 5120,
+          tls: { skipVerify: true, caCertificatePath: 'C:\\certs\\ca.pem' },
+        };
+      }
+      return null;
+    });
+
+    const settings = await loadRequestSettings();
+    assert.deepEqual(settings.tls, {
+      skipVerify: true,
+      caCertificatePath: 'C:\\certs\\ca.pem',
+      clientCertificatePath: null,
+      clientKeyPath: null,
     });
   });
 
