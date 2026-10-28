@@ -21,6 +21,7 @@ fn http_response_serialises_camel_case() {
         duration_ms: 42,
         size_bytes: 7,
         headers: vec![],
+        request_headers: vec![],
         body: "{}".into(),
         content_type: "application/json".into(),
         method: "GET".into(),
@@ -245,6 +246,196 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
     );
 }
 
+// 线上那一份请求头
+//
+// 下面这一组把「上报的请求头」与「线路上的原始字节」逐条比对。响应详情页要展示的是
+// 线上那一份，故这两者必须一致：传输层补的 `host` / `content-length` /
+// `accept-encoding` 若漏报或写错，界面展示的就是一份假的请求。
+
+/// 起一个服务器，把这次请求的**原始字节**原样交回来。
+///
+/// 用裸 TCP：只有原始字节能回答「线上到底发了哪些头」，任何 HTTP 框架都会把它们
+/// 解析后重新组织，那样就问不到原问题了。
+async fn spawn_raw_request_capture() -> (u16, oneshot::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
+        let raw = read_raw_request(&mut sock).await;
+        let _ = sock
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{}",
+            )
+            .await;
+        let _ = tx.send(raw);
+    });
+    (port, rx)
+}
+
+/// 把请求读到完：请求头读到 `\r\n\r\n`，再按 `content-length` 补上请求体。
+///
+/// 请求体必须一并读完：服务端提前回响应而客户端还在写 body 时，那次请求会以
+/// 连接错误收场，测的就不是请求头了。
+async fn read_raw_request(sock: &mut TcpStream) -> String {
+    let mut seen: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut head_end: Option<usize> = None;
+    while head_end.is_none() {
+        let Ok(n) = sock.read(&mut buf).await else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        seen.extend_from_slice(&buf[..n]);
+        head_end = seen
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|p| p + 4);
+    }
+    let Some(head_end) = head_end else {
+        return String::from_utf8_lossy(&seen).to_string();
+    };
+    let head = String::from_utf8_lossy(&seen[..head_end]).to_string();
+    let want = head
+        .lines()
+        .find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            if k.trim().eq_ignore_ascii_case("content-length") {
+                v.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    while seen.len() - head_end < want {
+        let Ok(n) = sock.read(&mut buf).await else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        seen.extend_from_slice(&buf[..n]);
+    }
+    String::from_utf8_lossy(&seen).to_string()
+}
+
+/// 把原始请求头解析成 `(小写名字, 值)` 的列表。
+fn parse_raw_headers(raw: &str) -> Vec<(String, String)> {
+    raw.lines()
+        .skip(1)
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            Some((k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        })
+        .collect()
+}
+
+/// 上报的请求头必须与线路上的原始字节逐条相同。
+///
+/// 传输层会补 `host`、`content-length` 与 `accept-encoding`，调用方看不见它们；
+/// 响应详情页要展示「实际发出去的请求」，故 executor 必须把它们一并报上来。
+#[tokio::test]
+async fn the_reported_request_headers_are_the_ones_on_the_wire() {
+    let (port, raw_rx) = spawn_raw_request_capture().await;
+    let input = HttpRequestInput {
+        method: "POST".into(),
+        url: format!("http://127.0.0.1:{port}/api/orders?page=1"),
+        headers: vec![
+            ("X-Token".into(), "demo-token-001".into()),
+            ("Content-Type".into(), "application/json".into()),
+        ],
+        body: Some("{\"orderId\":\"42\"}".into()),
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+    };
+
+    let out = execute_with_policy(&input, OutboundPolicy::default()).await;
+    let raw = raw_rx.await.expect("the server must capture the request");
+    let wire = parse_raw_headers(&raw);
+    let reported = out
+        .response
+        .expect("a response")
+        .request_headers
+        .iter()
+        .map(|e| (e[0].to_ascii_lowercase(), e[1].clone()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        reported, wire,
+        "the reported request headers must be the ones on the wire.\n\
+         raw request:\n{raw}"
+    );
+}
+
+/// 没有请求体时线上没有 `content-length`，上报的那一份也不该有。
+#[tokio::test]
+async fn a_request_without_a_body_reports_no_content_length() {
+    let (port, raw_rx) = spawn_raw_request_capture().await;
+    let input = HttpRequestInput {
+        method: "GET".into(),
+        url: format!("http://127.0.0.1:{port}/health"),
+        headers: vec![],
+        body: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+    };
+
+    let out = execute_with_policy(&input, OutboundPolicy::default()).await;
+    let raw = raw_rx.await.expect("the server must capture the request");
+    let reported = out
+        .response
+        .expect("a response")
+        .request_headers
+        .iter()
+        .map(|e| (e[0].to_ascii_lowercase(), e[1].clone()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(reported, parse_raw_headers(&raw), "raw request:\n{raw}");
+    assert!(
+        !reported.iter().any(|(k, _)| k == "content-length"),
+        "there is no body, so there is no content-length on the wire"
+    );
+}
+
+/// 调用方自己写过的头不再补第二条：线路上发出去的是调用方那一份。
+#[tokio::test]
+async fn a_caller_supplied_host_header_is_not_duplicated() {
+    let (port, raw_rx) = spawn_raw_request_capture().await;
+    let input = HttpRequestInput {
+        method: "GET".into(),
+        url: format!("http://127.0.0.1:{port}/health"),
+        headers: vec![("Host".into(), "example.test".into())],
+        body: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+    };
+
+    let out = execute_with_policy(&input, OutboundPolicy::default()).await;
+    let raw = raw_rx.await.expect("the server must capture the request");
+    let reported = out
+        .response
+        .expect("a response")
+        .request_headers
+        .iter()
+        .map(|e| (e[0].to_ascii_lowercase(), e[1].clone()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(reported, parse_raw_headers(&raw), "raw request:\n{raw}");
+    assert_eq!(
+        reported.iter().filter(|(k, _)| k == "host").count(),
+        1,
+        "the caller's host header is the only one on the wire"
+    );
+}
+
 // parse_method
 
 #[test]
@@ -335,6 +526,7 @@ fn http_result_ok_carries_response_only() {
         duration_ms: 12,
         size_bytes: 3,
         headers: vec![["content-type".into(), "text/plain".into()]],
+        request_headers: vec![],
         body: "hi!".into(),
         content_type: "text/plain".into(),
         method: "GET".into(),

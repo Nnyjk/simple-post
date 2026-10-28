@@ -11,7 +11,15 @@ import { preparedToCurl, type PreparedRequest } from '@/lib/http-build';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
 import { useAppStore } from '@/stores/app-store';
 import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
-import type { ApiResponse, AuthConfig, EnvSnapshot, EnvWrite, ScriptOutcome } from '@/types/domain';
+import type {
+  ApiResponse,
+  AuthConfig,
+  EnvSnapshot,
+  EnvWrite,
+  ScriptOutcome,
+  StoredRequestSnapshot,
+} from '@/types/domain';
+import { toRequestSnapshot } from './model/requestInput';
 
 /** 与 store 里 `setLastResponse` / `addResponseHistory` 相同的形状。 */
 
@@ -74,12 +82,16 @@ export function useRequestActions({
    */
   onPathParamGate: (missing: string[]) => void;
   setRequestPending: (v: boolean) => void;
-  setLastResponse: (resp: ApiResponse | null) => void;
+  setLastResponse: (resp: ApiResponse | null, request?: StoredRequestSnapshot | null) => void;
   /** 记下这次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。 */
   setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
   /** 把脚本写回的环境变量并进本地副本（落库由后端做）。 */
   applyEnvWrites: (envId: string, writes: EnvWrite[]) => void;
-  addResponseHistory: (endpointId: string, response: ApiResponse) => void;
+  addResponseHistory: (
+    endpointId: string,
+    response: ApiResponse,
+    request?: StoredRequestSnapshot,
+  ) => void;
   saveDraftEndpoint: (id: string) => Promise<string | null>;
   updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
   clearEndpointDraft: (id: string) => void;
@@ -123,7 +135,11 @@ export function useRequestActions({
       //
       // ENV 药丸只存在于 Zustand，数据库的 `is_active` 不跟随它，故解析必须基于界面上的
       // `endpointEnv` —— `prepareRequest` 已经折进去了。
-      const { response: resp, script } = await sendPreparedRequest({
+      const {
+        response: resp,
+        script,
+        outbound,
+      } = await sendPreparedRequest({
         request,
         // 与 `prepared` 用的是同一份 auth：OAuth2 要靠它取 token，`prepared` 本身
         // 不含（token 只有发出去的那一刻才拿得到）。
@@ -140,9 +156,13 @@ export function useRequestActions({
         preRequestScript,
         testScript,
       });
-      setLastResponse(resp);
+      // 存的是 `outbound`（发出去的那一份），不是 `prepared`（预览那份）：OAuth2 的
+      // token 只在 `outbound` 里，历史行要显示的就是它。请求头取后端报上来的线上那
+      // 一份（含传输层补的 `host` / `content-length` 等），它缺席时才回落到本地拼的。
+      const snapshot = toRequestSnapshot(outbound, resp.requestHeaders);
+      setLastResponse(resp, snapshot);
       setLastScriptOutcome(script);
-      addResponseHistory(endpointId, resp);
+      addResponseHistory(endpointId, resp, snapshot);
       // 脚本写回的环境变量：**后端已落库**（那是唯一那条持久化路径），这里只把
       // 本地副本同步过来，于是下一个请求立刻能解析到新变量。
       if (script && script.envWrites.length > 0 && env?.id) {
