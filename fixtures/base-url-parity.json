@@ -1,0 +1,213 @@
+{
+  "$comment": "base URL 的服务链解析：override → 点名服务 → 项目 ★ → (环境 × 服务 × 模块) 那一格。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url_with` 与渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 读同一份文件。两份实现各写一遍规则，只有共享样本能钉住它们没分叉。`endpoint` 只带解析真正读的那两个字段（`baseUrlDefinitionId` 与 `baseUrlOverride`）——环境由调用方给出，不从端点上取。`expected` 比三样：`baseUrl`、`source`（哪一行选中了服务）与 `definitionId`（服务 id）。",
+  "cases": [
+    {
+      "name": "端点带自定义主机时用自己的地址",
+      "endpoint": {
+        "baseUrlDefinitionId": "data",
+        "baseUrlOverride": "https://custom.example.com"
+      },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": {
+        "baseUrl": "https://custom.example.com",
+        "source": "override",
+        "definitionId": null
+      }
+    },
+    {
+      "name": "端点的 override 是空串时表示自定义但不加前缀",
+      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": "" },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "override", "definitionId": null }
+    },
+    {
+      "name": "端点没给 override 时走服务链",
+      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": {
+        "baseUrl": "https://mod-a.example.com",
+        "source": "definition",
+        "definitionId": "data"
+      }
+    },
+    {
+      "name": "端点点名的服务项目里没有时不回退到项目星标",
+      "endpoint": { "baseUrlDefinitionId": "ghost", "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "端点点名的服务项目里没有时即使环境里有那一格也不解析",
+      "endpoint": { "baseUrlDefinitionId": "ghost", "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "data": { "mod_a": "https://mod-a.example.com" },
+          "ghost": { "mod_a": "https://ghost.example.com" }
+        }
+      },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "端点没点名服务时用项目星标",
+      "endpoint": { "baseUrlDefinitionId": null, "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": {
+        "baseUrl": "https://mod-a.example.com",
+        "source": "default",
+        "definitionId": "data"
+      }
+    },
+    {
+      "name": "项目星标指向的服务项目里没有时解析不出东西",
+      "endpoint": { "baseUrlDefinitionId": null, "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "ghost"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "项目没有星标且端点没点名服务时解析不出东西",
+      "endpoint": { "baseUrlDefinitionId": null, "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": null
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "那一格是空串时解析不出东西",
+      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "服务存在但环境里没有那一格时解析不出东西",
+      "endpoint": { "baseUrlDefinitionId": "auth", "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [
+          { "id": "auth", "name": "auth" },
+          { "id": "data", "name": "data" }
+        ],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "端点自己点名的服务胜过项目星标",
+      "endpoint": { "baseUrlDefinitionId": "auth", "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "data": { "mod_a": "https://mod-a.example.com" },
+          "auth": { "mod_a": "https://auth.example.com" }
+        }
+      },
+      "project": {
+        "baseUrlDefinitions": [
+          { "id": "auth", "name": "auth" },
+          { "id": "data", "name": "data" }
+        ],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": {
+        "baseUrl": "https://auth.example.com",
+        "source": "definition",
+        "definitionId": "auth"
+      }
+    },
+    {
+      "name": "同一个服务在两个模块指向两个主机",
+      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "data": { "mod_a": "https://mod-a.example.com", "mod_b": "https://mod-b.example.com" }
+        }
+      },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_b",
+      "expected": {
+        "baseUrl": "https://mod-b.example.com",
+        "source": "definition",
+        "definitionId": "data"
+      }
+    },
+    {
+      "name": "模块未知时没有格子可读",
+      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": null,
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "环境缺席时解析不出东西",
+      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
+      "env": null,
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    },
+    {
+      "name": "端点点名的服务是空串时解析不出东西",
+      "endpoint": { "baseUrlDefinitionId": "", "baseUrlOverride": null },
+      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
+      "project": {
+        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
+        "defaultBaseUrlDefinitionId": "data"
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+    }
+  ]
+}
