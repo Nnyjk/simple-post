@@ -313,3 +313,85 @@ fn writing_request_settings_accepts_an_ordinary_path() {
     );
     assert!(back.tls.skip_verify);
 }
+
+/// 通用写入口（`PUT /api/preferences`）写来的值若读不出 `RequestSettings`，那不是「这一行
+/// 不归我管」——它是一个形状不对的请求体，必须被拒。
+///
+/// 放过解析失败就留下一条绕路：`timeoutMs` 的类型写错让整体反序列化失败，校验因此根本没
+/// 跑，而同一个请求体里的 `tls.clientKeyPath` 正粘着私钥正文。
+#[test]
+fn writing_request_settings_with_a_broken_shape_is_rejected() {
+    let pool = fresh_pool();
+    // 先落一行正常的设置，好断言被拒的写入没有把它改掉。
+    let original = crate::domain::RequestSettings {
+        timeout_ms: 12_345,
+        follow_redirects: false,
+        max_response_size_kb: 2048,
+        tls: crate::domain::TlsSettings::default(),
+    };
+    db::with_tx(&pool, |c| set_request_settings(c, &original)).unwrap();
+
+    let smuggled = serde_json::json!({
+        "timeoutMs": "invalid",
+        "tls": {
+            "clientKeyPath": "-----BEGIN PRIVATE KEY-----\nexample\n-----END PRIVATE KEY-----"
+        }
+    });
+    let err = db::with_tx(&pool, |c| set(c, keys::REQUEST_SETTINGS, &smuggled)).unwrap_err();
+    assert!(
+        err.to_string().contains("request_settings"),
+        "报错要点明是哪一行出了形状问题，got: {err}"
+    );
+
+    let back = db::with_conn(&pool, request_settings).unwrap();
+    assert_eq!(back.timeout_ms, 12_345);
+    assert_eq!(back.max_response_size_kb, 2048);
+    assert!(!back.follow_redirects);
+    assert_eq!(back.tls.client_key_path, None);
+
+    // 整行文本里不许出现私钥正文 —— `GET /api/preferences` 把整行原样返回。
+    let raw = db::with_conn(&pool, list_all)
+        .unwrap()
+        .into_iter()
+        .find(|(k, _)| k == keys::REQUEST_SETTINGS)
+        .map(|(_, v)| v)
+        .expect("row must be present");
+    assert!(
+        !raw.contains("BEGIN PRIVATE KEY"),
+        "那一行里不许出现私钥正文，got: {raw}"
+    );
+}
+
+/// 域类型不收的陌生键不许留在这一行里 —— 它们连同其中的证书正文会被 `GET /api/preferences`
+/// 原样返回。故这一行存的是重新序列化后的那份，不是请求体原样。
+#[test]
+fn writing_request_settings_drops_unknown_fields() {
+    let pool = fresh_pool();
+    let smuggled = serde_json::json!({
+        "timeoutMs": 30000,
+        "tls": {
+            "caCertificatePathX": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+        }
+    });
+    db::with_tx(&pool, |c| set(c, keys::REQUEST_SETTINGS, &smuggled)).unwrap();
+
+    let raw = db::with_conn(&pool, list_all)
+        .unwrap()
+        .into_iter()
+        .find(|(k, _)| k == keys::REQUEST_SETTINGS)
+        .map(|(_, v)| v)
+        .expect("row must be present");
+    assert!(
+        !raw.contains("BEGIN CERTIFICATE"),
+        "陌生键连同其中的证书正文不许留在这一行，got: {raw}"
+    );
+    assert!(
+        !raw.contains("caCertificatePathX"),
+        "陌生键不许留在这一行，got: {raw}"
+    );
+
+    // 认识的那几个字段照旧落库。
+    let back = db::with_conn(&pool, request_settings).unwrap();
+    assert_eq!(back.timeout_ms, 30_000);
+    assert_eq!(back.tls.ca_certificate_path, None);
+}
