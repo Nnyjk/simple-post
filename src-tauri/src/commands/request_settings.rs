@@ -39,7 +39,11 @@ pub fn request_settings_update(
         if let Some(m) = patch.max_response_size_kb {
             settings.max_response_size_kb = m;
         }
-        crate::db::preferences::set(c, REQUEST_SETTINGS_KEY, &settings)?;
+        if let Some(t) = &patch.tls {
+            settings.tls = t.clone();
+        }
+        // 走专用的写入口：它会校验 TLS 那三个路径字段（通用写入口不会）。
+        crate::db::preferences::set_request_settings(c, &settings)?;
         Ok(settings)
     })
 }

@@ -91,4 +91,71 @@ describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () =>
 
     assert.deepEqual(calls, [], '没有 detail 行就不该打扰后端');
   });
+
+  it('端点自己那份 HTTPS 设置随补丁写给后端', async () => {
+    const original = makeDetail({ nodeId: 'ep-tls' });
+    const harness = makeCrudHarness({ 'ep-tls': original });
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    await harness.slice.updateEndpointDetail('ep-tls', {
+      tls: {
+        skipVerify: true,
+        caCertificatePath: 'C:\\certs\\ca.pem',
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+    });
+
+    assert.deepEqual(
+      (calls[0]?.args.patch as { tls?: unknown } | undefined)?.tls,
+      {
+        skipVerify: true,
+        caCertificatePath: 'C:\\certs\\ca.pem',
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+      '补丁里带着端点自己那份设置',
+    );
+    assert.deepEqual(
+      harness.bag.endpointDetails['ep-tls'].tls,
+      {
+        skipVerify: true,
+        caCertificatePath: 'C:\\certs\\ca.pem',
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+      '本地副本立刻更新',
+    );
+  });
+
+  it('回到继承全局时写 null，而不是把字段从补丁里删掉', async () => {
+    const original = makeDetail({
+      nodeId: 'ep-tls-clear',
+      tls: {
+        skipVerify: true,
+        caCertificatePath: null,
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+    });
+    const harness = makeCrudHarness({ 'ep-tls-clear': original });
+    const calls: CapturedInvoke[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return null;
+    });
+
+    await harness.slice.updateEndpointDetail('ep-tls-clear', { tls: null });
+
+    assert.equal(
+      (calls[0]?.args.patch as { tls?: unknown } | undefined)?.tls,
+      null,
+      'null = 清除端点自己那份设置，回到继承全局',
+    );
+    assert.equal(harness.bag.endpointDetails['ep-tls-clear'].tls, null);
+  });
 });

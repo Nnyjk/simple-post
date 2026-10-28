@@ -18,6 +18,13 @@ const SETTINGS: RequestSettings = {
   timeoutMs: 5000,
   followRedirects: true,
   maxResponseSizeKb: 1024,
+  // HTTPS 出站的全局默认。这份缺省值原样发给后端即可。
+  tls: {
+    skipVerify: false,
+    caCertificatePath: null,
+    clientCertificatePath: null,
+    clientKeyPath: null,
+  },
 };
 
 const ENV: Environment = {
@@ -134,5 +141,62 @@ describe('发送时带上脚本上下文', () => {
     assert.equal(calls[0].args.preRequestScript, null);
     assert.equal(calls[0].args.testScript, null);
     assert.equal(result.script, null);
+  });
+});
+
+describe('发送时带上 HTTPS 出站设置', () => {
+  /** 一份请求对象——本组用例只关心送出去的那几个字段。 */
+  function prepared() {
+    return prepareRequest({
+      method: 'GET',
+      urlPath: '/y',
+      baseUrl: 'http://x.test',
+      params: [],
+      headers: [],
+      body: { mode: 'none', content: '' },
+      auth: { kind: 'none' },
+    });
+  }
+
+  it('把全局默认那份与端点自己那份一起送过去', async () => {
+    const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return serverResponse(null);
+    });
+
+    await sendPreparedRequest({
+      request: prepared(),
+      settings: SETTINGS,
+      tlsOverride: {
+        skipVerify: true,
+        caCertificatePath: 'C:\\certs\\ca.pem',
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+    });
+
+    // 全局默认那份：设置面板里改的那一份。
+    assert.deepEqual(calls[0].args.tls, SETTINGS.tls);
+    // 端点自己那份：整体取代全局默认，故它是完整的一份而不是补丁。
+    assert.deepEqual(calls[0].args.tlsOverride, {
+      skipVerify: true,
+      caCertificatePath: 'C:\\certs\\ca.pem',
+      clientCertificatePath: null,
+      clientKeyPath: null,
+    });
+  });
+
+  it('端点没有自己那份时送 null，即继承全局默认', async () => {
+    const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      return serverResponse(null);
+    });
+
+    await sendPreparedRequest({ request: prepared(), settings: SETTINGS, tlsOverride: null });
+
+    assert.deepEqual(calls[0].args.tls, SETTINGS.tls);
+    assert.equal(calls[0].args.tlsOverride, null);
   });
 });

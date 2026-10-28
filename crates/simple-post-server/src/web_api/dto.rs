@@ -24,6 +24,18 @@ pub struct HttpSendBody {
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
+    /// HTTPS 出站的**全局默认**（设置面板里改的那份）。
+    ///
+    /// `Option` 而非直接一个 `TlsSettings`：桌面端那个命令收的是 `Option<TlsSettings>`，
+    /// 故 `"tls": null` 在桌面端被收下、在 REST 端被拒 —— 同一份 JSON 两条 transport
+    /// 判定不同。取 `Option` 后两侧的判定一致（`null` 与缺席都得到缺省值）。
+    #[serde(default)]
+    pub tls: Option<simple_post_core::domain::TlsSettings>,
+    /// 该端点自己的 HTTPS 出站设置。`null` = 继承全局默认。
+    ///
+    /// 端点给了设置就**整体**取代全局那份，故它不是逐字段的覆盖。
+    #[serde(default)]
+    pub tls_override: Option<simple_post_core::domain::TlsSettings>,
     /// 端点 id。有它才装配得到脚本链（collection + 端点自己的两段脚本）。
     /// 缺席 = 临时请求，没有脚本。
     #[serde(default)]

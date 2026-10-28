@@ -181,6 +181,7 @@ async fn execute_refuses_before_dialing() {
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
+        tls: TlsSettings::default(),
     };
     let out = execute_with_policy(&input, OutboundPolicy::default()).await;
     assert!(!out.ok);
@@ -225,6 +226,7 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
+        tls: TlsSettings::default(),
     };
 
     let out = execute_with_policy(
@@ -638,6 +640,7 @@ async fn streamed_body_matches_legacy_truncation_byte_for_byte() {
             timeout_ms: 10_000,
             follow_redirects: true,
             max_response_size_kb: 1,
+            tls: TlsSettings::default(),
         };
         let out = execute_with_policy(&input, OutboundPolicy::default()).await;
         let resp = out
@@ -680,6 +683,7 @@ async fn cut_at_the_limit_backs_off_to_the_rune_boundary() {
         timeout_ms: 10_000,
         follow_redirects: true,
         max_response_size_kb: 1,
+        tls: TlsSettings::default(),
     };
     let out = execute_with_policy(&input, OutboundPolicy::default()).await;
     let resp = out.response.expect("期望拿到一个响应");
@@ -721,6 +725,7 @@ async fn body_exactly_at_the_limit_is_not_truncated() {
         timeout_ms: 10_000,
         follow_redirects: true,
         max_response_size_kb: 1,
+        tls: TlsSettings::default(),
     };
     let out = execute_with_policy(&input, OutboundPolicy::default()).await;
     let resp = out.response.expect("期望拿到一个响应");
@@ -752,6 +757,7 @@ async fn oversized_content_length_response_stops_reading_at_the_limit() {
         timeout_ms: 3_000,
         follow_redirects: true,
         max_response_size_kb: 1,
+        tls: TlsSettings::default(),
     };
     let out = execute_with_policy(&input, OutboundPolicy::default()).await;
     let resp = out
@@ -795,6 +801,7 @@ async fn oversized_chunked_response_stops_reading_at_the_limit() {
         timeout_ms: 3_000,
         follow_redirects: true,
         max_response_size_kb: 1,
+        tls: TlsSettings::default(),
     };
     let out = execute_with_policy(&input, OutboundPolicy::default()).await;
     let resp = out

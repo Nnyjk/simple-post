@@ -62,6 +62,11 @@ fn patch_shape_hint(field: &str) -> String {
         | "notes" => "a string, or null to clear the field".to_string(),
         "name" => "a non-empty string".to_string(),
         "sort_order" => "an integer".to_string(),
+        "tls" => "an object shaped {\"skipVerify\":<bool>,\
+             \"caCertificatePath\":\"<path>\",\"clientCertificatePath\":\"<path>\",\
+             \"clientKeyPath\":\"<path>\"}, or null to clear the endpoint's own \
+             HTTPS settings"
+            .to_string(),
         _ => String::new(),
     }
 }

@@ -1,7 +1,9 @@
 use super::*;
 use crate::db;
 use crate::db::nodes;
-use crate::domain::{AuthType, HttpMethod, Project, RequestBody, ResourceNode, ResourceNodeType};
+use crate::domain::{
+    AuthType, HttpMethod, Project, RequestBody, ResourceNode, ResourceNodeType, TlsSettings,
+};
 use std::path::PathBuf;
 
 fn node(id: &str, kind: ResourceNodeType, parent: Option<&str>, sort: i64) -> ResourceNode {
@@ -80,6 +82,7 @@ fn detail(node_id: &str) -> EndpointDetail {
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     }
 }
 
@@ -193,6 +196,41 @@ fn an_older_store_gains_the_script_columns_without_a_version_bump() {
     let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
     assert!(got.pre_request_script.is_none());
     assert!(got.test_script.is_none());
+
+    // 版本号没动：bump 会让 `ensure_current_schema` 删掉每个用户的库。
+    let version: i64 = db::with_conn(&pool, |c| {
+        Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(version, crate::db::SCHEMA_VERSION);
+}
+
+#[test]
+fn an_older_store_gains_the_https_settings_column_without_a_version_bump() {
+    let (pool, dir) = fresh_pool();
+    // 造一个「版本号是当前的、但还没有 HTTPS 设置列」的库——既有库在这次改动之前就是这个形状。
+    db::with_conn(&pool, |c| {
+        Ok(c.execute_batch("ALTER TABLE endpoint_details DROP COLUMN tls_json;")?)
+    })
+    .unwrap();
+    drop(pool);
+
+    let pool = db::init(&dir).expect("re-init");
+
+    // 列被补上。
+    let columns: i64 = db::with_conn(&pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('endpoint_details') WHERE name = 'tls_json'",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap();
+    assert_eq!(columns, 1, "HTTPS 设置列应由 ADDED_COLUMNS 补齐");
+
+    // 旧行读回来是「继承全局」，不是坏行。
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert!(got.tls.is_none());
 
     // 版本号没动：bump 会让 `ensure_current_schema` 删掉每个用户的库。
     let version: i64 = db::with_conn(&pool, |c| {
@@ -383,4 +421,137 @@ fn a_detail_row_cannot_outlive_its_node() {
         matches!(err, AppError::NotFound(_)),
         "endpoint_details cascades with its node, got {err:?}"
     );
+}
+
+// -------------------------------------------------------------------------
+// 端点自己的 HTTPS 出站设置
+// -------------------------------------------------------------------------
+
+/// 一份端点自带的 HTTPS 设置。
+fn endpoint_tls() -> TlsSettings {
+    TlsSettings {
+        skip_verify: true,
+        ca_certificate_path: Some("C:/certs/ca.pem".into()),
+        client_certificate_path: Some("C:/certs/client.pem".into()),
+        client_key_path: Some("C:/certs/client.key".into()),
+    }
+}
+
+#[test]
+fn an_endpoint_without_its_own_https_settings_inherits_the_global_ones() {
+    let (pool, _dir) = fresh_pool();
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert!(
+        got.tls.is_none(),
+        "没配过的端点读回来必须是 None（= 继承全局），got {:?}",
+        got.tls
+    );
+}
+
+#[test]
+fn the_endpoints_own_https_settings_round_trip() {
+    let (pool, _dir) = fresh_pool();
+    let tls = endpoint_tls();
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            EndpointDetailPatch {
+                tls: Some(Some(tls.clone())),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(got.tls.as_ref(), Some(&tls));
+}
+
+#[test]
+fn clearing_the_endpoints_own_https_settings_puts_it_back_to_inheriting() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            EndpointDetailPatch {
+                tls: Some(Some(endpoint_tls())),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    // `null` = 清除端点自带的那份，回到继承全局默认。
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            EndpointDetailPatch {
+                tls: Some(None),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert!(
+        got.tls.is_none(),
+        "清除后读回来必须是 None（= 继承全局），got {:?}",
+        got.tls
+    );
+}
+
+#[test]
+fn a_patch_without_the_https_settings_leaves_them_alone() {
+    let (pool, _dir) = fresh_pool();
+    let tls = endpoint_tls();
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            EndpointDetailPatch {
+                tls: Some(Some(tls.clone())),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    // 一次与 HTTPS 无关的更新不该动它。
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            EndpointDetailPatch {
+                notes: Some(Some("n".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(got.tls.as_ref(), Some(&tls));
+}
+
+#[test]
+fn the_endpoints_own_https_settings_survive_a_reload_of_several_rows() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e2",
+            EndpointDetailPatch {
+                tls: Some(Some(endpoint_tls())),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    let got = db::with_conn(&pool, |c| {
+        list_by_node_ids(c, &["e2".to_string(), "e1".to_string()])
+    })
+    .unwrap();
+    let e2 = got.iter().find(|d| d.node_id == "e2").unwrap();
+    assert_eq!(e2.tls.as_ref(), Some(&endpoint_tls()));
+    let e1 = got.iter().find(|d| d.node_id == "e1").unwrap();
+    assert!(e1.tls.is_none(), "没配过的端点仍应是 None");
 }

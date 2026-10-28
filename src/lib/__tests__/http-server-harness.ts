@@ -274,6 +274,13 @@ export function settings(overrides: Partial<RequestSettings> = {}): RequestSetti
     timeoutMs: 5000,
     followRedirects: true,
     maxResponseSizeKb: 5120,
+    // HTTPS 出站的全局默认。测试服务端跑在 http 上，故这份缺省值原样发出去即可。
+    tls: {
+      skipVerify: false,
+      caCertificatePath: null,
+      clientCertificatePath: null,
+      clientKeyPath: null,
+    },
     ...overrides,
   };
 }

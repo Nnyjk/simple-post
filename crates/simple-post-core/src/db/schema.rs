@@ -123,6 +123,13 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "path_params_json",
         "TEXT NOT NULL DEFAULT '[]'",
     ),
+    (
+        // 端点自己的 HTTPS 出站设置。纯增量：旧行读回来是 NULL，
+        // 语义等价于「继承全局默认」。
+        "endpoint_details",
+        "tls_json",
+        "TEXT",
+    ),
 ];
 
 /// 为 [`ADDED_COLUMNS`] 中缺列的表补上该列。

@@ -314,6 +314,7 @@ fn seed_an_endpoint_that_uses_sns(dir: &std::path::Path) {
             tags: vec![],
             pre_request_script: None,
             test_script: None,
+            tls: None,
         };
         crate::db::nodes::create(
             c,

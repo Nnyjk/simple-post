@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::mcp::key_value::KeyValueInput;
+use simple_post_core::domain::TlsSettings;
 
 /// `endpoint_create` 的入参。
 ///
@@ -74,6 +75,50 @@ pub(super) struct EndpointCreateArgs {
     /// 测试脚本：响应到达之后运行，可以断言并写环境变量。
     #[serde(default)]
     pub test_script: Option<String>,
+    /// 该端点自己的 HTTPS 出站设置。`None` = 继承全局默认。
+    ///
+    /// 给了设置就**整体**取代全局那份，不做逐字段合并。证书只存文件路径，路径由
+    /// 运行请求的那台机器解析。
+    #[serde(default)]
+    pub tls: Option<TlsSettingsInput>,
+}
+
+/// `tls` 载荷的线格式。
+///
+/// **与 `simple_post_core::domain::TlsSettings` 分开是刻意的。** 域类型要负责读回库里
+/// 存的那一行，给它加 `deny_unknown_fields` 会让存着别的键名的旧行读不出来。而线上给
+/// agent 的载荷**必须**把拼错的键名报出来：静默丢掉一个键会写进一份「看起来设好了、
+/// 其实没有」的设置 —— 而端点自带的那份整体取代全局默认，于是全局的「跳过校验」与
+/// CA 路径在这个端点上全部失效，请求报「certificate signed by unknown authority」，
+/// 调用方却以为自己已经打开了跳过校验。
+///
+/// 键名是 camelCase，与 `TlsSettings` 的 serde 键名一致。
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(super) struct TlsSettingsInput {
+    /// 跳过服务端证书校验，主机名一并跳过。
+    #[serde(default)]
+    pub skip_verify: bool,
+    /// 自定义 CA 证书的 PEM 文件路径。
+    #[serde(default)]
+    pub ca_certificate_path: Option<String>,
+    /// 客户端证书的 PEM 文件路径（mTLS）。
+    #[serde(default)]
+    pub client_certificate_path: Option<String>,
+    /// 客户端私钥的 PEM 文件路径。
+    #[serde(default)]
+    pub client_key_path: Option<String>,
+}
+
+impl From<TlsSettingsInput> for TlsSettings {
+    fn from(v: TlsSettingsInput) -> Self {
+        TlsSettings {
+            skip_verify: v.skip_verify,
+            ca_certificate_path: v.ca_certificate_path,
+            client_certificate_path: v.client_certificate_path,
+            client_key_path: v.client_key_path,
+        }
+    }
 }
 
 /// 生成唯一的端点 id。

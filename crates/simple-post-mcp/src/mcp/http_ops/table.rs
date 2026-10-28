@@ -96,7 +96,10 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "env_id": { "type": "string" },
                     "base_url_definition_id": { "type": "string" },
                     "module_id": { "type": "string" },
-                    "settings_override": { "type": "object" },
+                    "settings_override": {
+                        "type": "object",
+                        "description": "Outbound knobs for this call. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path. Those four keys are one group: giving `tls` replaces the endpoint's own HTTPS settings as a whole, not field by field, so resend every key you want to keep."
+                    },
                     "timeout_ms": { "type": "integer" },
                     "follow_redirects": { "type": "boolean" },
                     "max_response_size_kb": { "type": "integer" }
@@ -142,7 +145,10 @@ placeholder name; a placeholder without an entry keeps its literal braces and bl
                         },
                         "additionalProperties": true
                     },
-                    "settings_override": { "type": "object" }
+                    "settings_override": {
+                        "type": "object",
+                        "description": "Outbound knobs for this call. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path. Those four keys are one group: giving `tls` replaces the global default HTTPS settings as a whole, not field by field, so resend every key you want to keep."
+                    }
                 },
                 "$defs": {
                     // `overrides` 的三个数组按 `#/$defs/keyValue` 引用条目形状。少了这个

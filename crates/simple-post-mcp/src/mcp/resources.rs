@@ -171,6 +171,12 @@ fn guide() -> Value {
             "tags": ["<标签>"],
             "pre_request_script": "<发请求之前跑的 JavaScript>",
             "test_script": "<响应到达之后跑的 JavaScript>",
+            "tls": {
+                "skipVerify": false,
+                "caCertificatePath": "<自定义 CA 证书的 PEM 文件路径>",
+                "clientCertificatePath": "<客户端证书的 PEM 文件路径>",
+                "clientKeyPath": "<客户端私钥的 PEM 文件路径>"
+            },
             "if_exists": "reuse"
         },
 

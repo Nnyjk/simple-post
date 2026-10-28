@@ -45,7 +45,11 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/interchange-import-preview-light.png" alt="导入 OpenAPI 文档的预览对话框" /><br /><sub><b>导入</b>：先预览将要写入的树，再逐项勾选。</sub></td>
-<td width="50%"><img src="docs/screenshots/request-settings-light.png" alt="设置里的请求行为：超时、跟随重定向、最大响应体积" /><br /><sub><b>请求设置</b>：超时、跟随重定向、最大响应体积，三个旋钮对桌面端与 MCP 端同时生效。</sub></td>
+<td width="50%"><img src="docs/screenshots/request-settings-light.png" alt="设置里的请求行为：超时、跟随重定向、最大响应体积、HTTPS 出站" /><br /><sub><b>请求设置</b>：超时、跟随重定向、最大响应体积，以及 HTTPS 出站的全局默认，对桌面端与 MCP 端同时生效。</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/tls-endpoint-panel-light.png" alt="端点编辑器的证书页签：继承全局设置与四个证书字段" /><br /><sub><b>证书</b>：端点自己那份 HTTPS 出站设置。一个「继承全局设置」开关加四个字段，给了自己那份就整体顶掉全局默认。</sub></td>
+<td width="50%"><img src="docs/screenshots/tls-settings-outbound-dark.png" alt="设置里的 HTTPS 出站：跳过证书校验与三个证书路径" /><br /><sub><b>HTTPS 出站</b>：全局默认的证书校验方式。跳过校验、自定义 CA、客户端证书与私钥。</sub></td>
 </tr>
 </table>
 
@@ -76,6 +80,14 @@ MCP 侧的工具描述写明哪个字段放什么，并且设了一道门：载�
 脚本运行在嵌入式 QuickJS（`rquickjs`）里，宿主能力只有一段固定 JavaScript 前导给出的那几样：`pm.request`、`pm.environment`、`pm.response`、`pm.test`、`pm.expect`、`console.log`。脚本访问不到文件系统、网络与进程，因为代码里不存在通向它们的路径。硬限额是每阶段 1000 ms 墙钟、32 MB 内存、256 KB 栈；超时真的会打断死循环。
 
 脚本失败不影响这次请求的成败：失败脚本的改动被丢弃，失败原因单独显示在响应区的「脚本」页里。
+
+### HTTPS 出站：自定义 CA、客户端证书与跳过校验
+
+出站请求怎么校验服务端证书、出示什么客户端身份，是两层设置：全局默认写在设置面板的「请求行为」里，端点自己那份写在端点编辑器的「证书」页签里。端点给了自己那份就**整体取代**全局默认，不做逐字段合并——界面上只有一个「继承全局设置」开关，没有「逐项覆盖」的中间态。
+
+全局默认那一份管三件事：跳过服务端证书校验（连主机名一起跳过）、额外信任一张自定义 CA 证书（在内置的公共根证书集之外追加，不是替换它）、出示客户端证书与私钥（mTLS）。跳过校验打开时，界面上会明写这件事的后果。
+
+自定义 CA 与客户端证书都只存文件路径，不存内容：私钥一旦进库，偏好设置的导出接口会把整行原样返回。路径由**运行请求的那台机器**解析：桌面端是本机路径，`serve-web` 与容器部署时是服务端容器里的路径。MCP 侧发请求读同一份设置，桌面端与 MCP 端不会对「这次请求用哪份证书」各说各话。
 
 ### 动态变量：声明一次，发送时自动取数
 
@@ -288,7 +300,7 @@ sp.example.com {
 - 项目与环境切换、全局搜索（`Ctrl+K`）、MCP 进程状态指示器、设置入口（`src/features/top-bar/`）
 - 侧边树递归渲染集合层级、method 彩色徽标、双击改名、右键菜单、删除确认（`src/features/project-tree/`）
 - 拖拽支持三种落点：集合正中间是移进该子树，上边缘与下边缘是同级前后插入（`src/lib/tree-index.ts`）
-- 请求测试器提供 method、URL（`{{var}}` 高亮与变量选择浮层）、Params、Headers、Body、Auth、Docs、脚本六个标签页；CodeMirror 6 的 JSON 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
+- 请求测试器提供 method、URL（`{{var}}` 高亮与变量选择浮层）、Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页；CodeMirror 6 的 JSON 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
 - 复制为 cURL、保存接口定义（`src/lib/http-build.ts`）
 - 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers 三种视图，支持复制与下载，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
 - 命令面板跨项目、模块、集合、接口模糊搜索，并内置切换环境、切换主题、打开设置、新建项目、新建模块、复制当前接口 URL 等命令
@@ -299,7 +311,7 @@ sp.example.com {
 - 服务（baseUrl）：项目级共享清单，每个模块在每个环境各填各的地址，表头按「模块 × 服务」逐格展开，空格即无地址、不继承
 - 环境变量 `{{var}}` 实时编辑，随项目创建，可以重命名与删除
 - MCP 进程状态：运行指示、daemon 上报的已注册工具列表、daemon 日志尾部（最近 500 行，可折叠）
-- 主题、请求设置（超时、跟随重定向、最大响应体积）、快捷键速查（`src/features/settings/`）
+- 主题、请求设置（超时、跟随重定向、最大响应体积、HTTPS 出站）、快捷键速查（`src/features/settings/`）
 
 **关于数据**
 

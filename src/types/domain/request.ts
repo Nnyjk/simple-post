@@ -45,6 +45,33 @@ export interface RequestBody {
   schema?: string;
 }
 
+/**
+ * HTTPS 出站的一组开关与证书位置，对应 Rust 的
+ * `simple_post_core::domain::TlsSettings`（字段名 camelCase）。
+ *
+ * **证书只存文件路径，不存内容。** 私钥一旦进库，`GET /api/preferences` 会把整行原样
+ * 返回（Web 形态下那是给任何持有 bearer 口令的客户端看的），而 SQLite 文件本身也是
+ * 一份用户没预期的备份。路径则随时可以被删掉或换掉，这是可接受的。
+ *
+ * 路径由**运行请求的那台机器**解析：桌面端是本机路径，serve-web / Docker 端是服务端
+ * 容器里的路径，故 Web 形态下运维需要把证书挂进容器才能用。
+ */
+export interface TlsSettings {
+  /**
+   * 跳过服务端证书校验，主机名一并跳过。
+   *
+   * 关闭时服务端证书的过期、自签名、签发者一律不查，故这条请求会被任何一个中间人
+   * 截获与改写。默认 `false`——只有用户明确打开才生效。
+   */
+  skipVerify: boolean;
+  /** 自定义 CA 证书的 PEM 文件路径。`null` = 用内置的公共根证书集。 */
+  caCertificatePath: string | null;
+  /** 客户端证书的 PEM 文件路径（mTLS）。`null` = 不挂客户端证书。 */
+  clientCertificatePath: string | null;
+  /** 客户端私钥的 PEM 文件路径。`null` = 从 `clientCertificatePath` 指向的文件里一起读。 */
+  clientKeyPath: string | null;
+}
+
 export type AuthType = 'none' | 'bearer' | 'basic' | 'apikey' | 'oauth2';
 
 export interface AuthConfig {

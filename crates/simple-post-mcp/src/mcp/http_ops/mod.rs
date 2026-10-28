@@ -102,3 +102,7 @@ mod env_fallback_tests;
 #[cfg(test)]
 #[path = "script_test.rs"]
 mod script_tests;
+
+#[cfg(test)]
+#[path = "tls_test.rs"]
+mod tls_tests;

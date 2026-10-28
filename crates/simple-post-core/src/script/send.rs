@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::db;
 use crate::domain::{
     EnvWrite, EnvironmentPatch, RequestSettings, ScriptError, ScriptErrorKind, ScriptOutcome,
-    ScriptPhase,
+    ScriptPhase, TlsSettings,
 };
 use crate::error::AppError;
 use crate::http_executor::{self, HttpRequestInput, HttpResult};
@@ -29,6 +29,12 @@ pub struct ScriptedSendInput {
     /// 脚本看得到的环境。`id` 决定变量往哪写。
     pub env: EnvSnapshot,
     pub settings: RequestSettings,
+    /// 该端点自己的 HTTPS 出站设置。`None` = 继承全局默认。
+    ///
+    /// 全局默认与端点的覆盖在 [`crate::tls::resolve`] 里合成，故调用方只管
+    /// 交出端点这一份，不必自己读库、也不必自己合成——桌面端、`serve-web` 端与 MCP 端
+    /// 于是不会对「这次请求用哪份证书」各说各话。
+    pub tls_override: Option<TlsSettings>,
     /// 端点自己那两段脚本的覆盖。
     ///
     /// `None` = 用存的那份；`Some` = 用这份（空串 = 没有脚本）。
@@ -60,6 +66,10 @@ pub async fn send_with_scripts(
     pool: &db::DbPool,
     input: ScriptedSendInput,
 ) -> Result<ScriptedSendOutcome, AppError> {
+    // HTTPS 出站设置：全局默认（`settings.tls`）与端点自己的那份（`tls_override`）合成。
+    // 合成只有这一处，故桌面端、`serve-web` 端与 MCP 端对「这次请求用哪份证书」不会各说各话。
+    let tls = crate::tls::resolve(&input.settings.tls, input.tls_override.as_ref());
+
     let chain = match input.endpoint_id.as_deref() {
         Some(id) => db::with_conn(pool, |c| {
             collect_chain(c, id, input.script_override.as_ref())
@@ -84,7 +94,8 @@ pub async fn send_with_scripts(
     };
     if chain.is_empty() {
         // 没有脚本：与今天完全同路径。
-        let http = http_executor::execute(&to_http_input(&input.request, &input.settings)).await;
+        let http =
+            http_executor::execute(&to_http_input(&input.request, &input.settings, &tls)).await;
         return Ok(ScriptedSendOutcome {
             http,
             script: None,
@@ -103,7 +114,7 @@ pub async fn send_with_scripts(
     .await;
 
     // 发出去的是脚本改写后的请求。
-    let http = http_executor::execute(&to_http_input(&pre.request, &input.settings)).await;
+    let http = http_executor::execute(&to_http_input(&pre.request, &input.settings, &tls)).await;
 
     // 测试脚本：响应回来之后。
     //
@@ -235,7 +246,11 @@ fn apply_env_writes(
 }
 
 /// 脚本的请求形状 → 发送器的输入形状。
-fn to_http_input(request: &ScriptRequest, settings: &RequestSettings) -> HttpRequestInput {
+fn to_http_input(
+    request: &ScriptRequest,
+    settings: &RequestSettings,
+    tls: &TlsSettings,
+) -> HttpRequestInput {
     HttpRequestInput {
         method: request.method.clone(),
         url: request.url.clone(),
@@ -244,6 +259,7 @@ fn to_http_input(request: &ScriptRequest, settings: &RequestSettings) -> HttpReq
         timeout_ms: settings.timeout_ms,
         follow_redirects: settings.follow_redirects,
         max_response_size_kb: settings.max_response_size_kb,
+        tls: tls.clone(),
     }
 }
 

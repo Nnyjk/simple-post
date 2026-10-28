@@ -70,6 +70,10 @@ pub struct CreateEndpointDetailOpts {
     pub pre_request_script: Option<String>,
     /// 响应回来之后跑的那段脚本。缺席 = 没有脚本。
     pub test_script: Option<String>,
+    /// 该端点自己的 HTTPS 出站设置。缺席 = 继承全局默认。
+    ///
+    /// 端点给了这份设置就**整体**取代全局那份，故它不是逐字段的覆盖。
+    pub tls: Option<TlsSettings>,
 }
 
 impl CreateEndpointDetailOpts {
@@ -97,6 +101,7 @@ impl CreateEndpointDetailOpts {
             tags: self.tags.unwrap_or_default(),
             pre_request_script: self.pre_request_script,
             test_script: self.test_script,
+            tls: self.tls,
         }
     }
 }
@@ -146,6 +151,8 @@ pub struct RequestSettingsPatch {
     pub timeout_ms: Option<u64>,
     pub follow_redirects: Option<bool>,
     pub max_response_size_kb: Option<u64>,
+    /// HTTPS 出站的**全局默认**。缺席 = 不动。
+    pub tls: Option<simple_post_core::domain::TlsSettings>,
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import type { KeyboardEvent, RefObject } from 'react';
 import { Tabs, type TabItem } from '@/components/ui/tabs';
-import type { HttpMethod, Project, ResourceNode } from '@/types/domain';
+import type { HttpMethod, Project, ResourceNode, TlsSettings } from '@/types/domain';
 import type { EndpointDraft } from '@/stores/store-types';
 import type { FormatResult } from '@/lib/utils';
 import { EndpointBreadcrumb } from '../EndpointBreadcrumb';
@@ -32,6 +32,7 @@ export function TesterShell({
   saveEndpointDescription,
   patchDraft,
   effective,
+  globalTls,
   method,
   resolvedBaseUrl,
   selection,
@@ -81,6 +82,8 @@ export function TesterShell({
   patchDraft: (patch: Partial<EndpointDraft>) => void;
   /** 当前生效的请求配置：已存的 detail 叠上草稿。 */
   effective: EffectiveRequest;
+  /** 全局默认那份 HTTPS 出站设置（设置面板里改的那份）。 */
+  globalTls: TlsSettings;
   method: HttpMethod;
   resolvedBaseUrl: string;
   selection: BaseUrlSelection;
@@ -228,6 +231,9 @@ export function TesterShell({
           docs={effective.docs}
           preRequestScript={effective.preRequestScript}
           testScript={effective.testScript}
+          // 端点自己那份 HTTPS 出站设置（`null` = 继承全局）与全局默认那份。
+          tls={effective.tls}
+          globalTls={globalTls}
           headerSuggestions={headerSuggestions}
           validationError={validationError}
           pathParamError={pathParamError}

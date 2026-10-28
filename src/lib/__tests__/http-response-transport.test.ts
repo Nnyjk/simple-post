@@ -147,7 +147,17 @@ describe('sendRequest: network error', () => {
       headers: [],
       body: { mode: 'none', content: '' },
       auth: { kind: 'none' },
-      settings: { timeoutMs: 1500, followRedirects: true, maxResponseSizeKb: 5120 },
+      settings: {
+        timeoutMs: 1500,
+        followRedirects: true,
+        maxResponseSizeKb: 5120,
+        tls: {
+          skipVerify: false,
+          caCertificatePath: null,
+          clientCertificatePath: null,
+          clientKeyPath: null,
+        },
+      },
     });
     assert.equal(resp.status, 0);
     assert.equal(resp.statusText, 'Network Error');

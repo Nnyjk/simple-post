@@ -237,6 +237,8 @@ fn upsert_endpoint_of(
         tags: def.tags.clone().unwrap_or_default(),
         pre_request_script: def.pre_request_script.clone(),
         test_script: def.test_script.clone(),
+        // 接口规格里没有 HTTPS 出站设置这一项：证书是本机的东西，不随规格走。
+        tls: None,
     };
     // `db::nodes::create` 一次写入节点与请求配置：只建节点会留下一个没有配置行的端点。
     db::nodes::create(conn, &node, Some(&detail))?;
@@ -297,6 +299,8 @@ fn apply_endpoint_patch(
         tags: def.tags.clone(),
         pre_request_script: def.pre_request_script.clone().map(Some),
         test_script: def.test_script.clone().map(Some),
+        // 接口规格里没有 HTTPS 出站设置这一项：证书是本机的东西，不随规格走。
+        tls: None,
     };
     if !node_patch.is_empty() {
         db::nodes::update(conn, endpoint_id, node_patch)?;

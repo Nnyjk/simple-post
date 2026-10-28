@@ -50,6 +50,7 @@ fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> E
         tags: Vec::new(),
         pre_request_script: None,
         test_script: None,
+        tls: None,
     }
 }
 

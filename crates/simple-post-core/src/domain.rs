@@ -46,7 +46,7 @@ pub use script::{
     ScriptErrorKind, ScriptLog, ScriptOutcome, ScriptPhase,
 };
 pub use settings::{
-    is_loopback_host, McpHttpConfig, Permission, RequestSettings, DEFAULT_MCP_HOST,
+    is_loopback_host, McpHttpConfig, Permission, RequestSettings, TlsSettings, DEFAULT_MCP_HOST,
     DEFAULT_MCP_PATH,
 };
 pub use util::{default_project_color, double_option, now_ms, uid};

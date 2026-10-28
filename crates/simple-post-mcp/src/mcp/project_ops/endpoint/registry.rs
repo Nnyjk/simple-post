@@ -5,7 +5,10 @@
 
 use serde_json::json;
 
-use super::input::{oauth2_config_schema, AUTH_TYPE_VALUES, BODY_MODE_VALUES};
+use super::input::{
+    oauth2_config_schema, tls_settings_patch_schema, tls_settings_schema, AUTH_TYPE_VALUES,
+    BODY_MODE_VALUES,
+};
 use super::read::{tool_endpoint_get, tool_endpoint_list, tool_endpoint_search};
 use super::write::{
     tool_endpoint_create, tool_endpoint_delete, tool_endpoint_duplicate, tool_endpoint_move,
@@ -178,7 +181,8 @@ to send when testing goes in body_content, never here."
                 "test_script": {
                     "type": "string",
                     "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set)."
-                }
+                },
+                "tls": tls_settings_schema()
             },
             "$defs": {
                 "keyValue": crate::mcp::key_value::key_value_schema(),
@@ -200,7 +204,7 @@ to send when testing goes in body_content, never here."
                 "endpoint_id": { "type": "string" },
                 "patch": {
                     "type": "object",
-                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `environment_id`, `base_url_definition_id`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script` and `test_script` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
+                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `environment_id`, `base_url_definition_id`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script` and `tls` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
                     "properties": {
                         "name": { "type": "string" },
                         "description": { "type": ["string", "null"] },
@@ -284,7 +288,8 @@ segments in `url`. They are substituted into the path itself, not appended to th
                         "test_script": {
                             "type": ["string", "null"],
                             "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set). null clears it."
-                        }
+                        },
+                        "tls": tls_settings_patch_schema()
                     },
                     "additionalProperties": false
                 }

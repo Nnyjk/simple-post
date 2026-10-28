@@ -115,6 +115,7 @@ fn seed(st: &AppState, base_url: &str) -> String {
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     };
     let env = Environment {
         id: "env_env".into(),

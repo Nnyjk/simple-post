@@ -525,3 +525,146 @@ async fn a_payload_with_only_a_type_key_is_accepted() {
     .await
     .expect("an ordinary payload must not be rejected");
 }
+
+/// 端点自己的 HTTPS 出站设置要能一次建好，不必再补一次 `endpoint_update`。
+///
+/// 键名是 camelCase（`skipVerify` / `caCertificatePath`），与 `TlsSettings` 自己的
+/// serde 键名一致 —— 故这份载荷直接反序列化成那个类型。
+#[tokio::test]
+async fn endpoint_create_stores_the_tls_settings_in_one_call() {
+    let (st, _) = fixture();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "name": "mtls endpoint",
+            "method": "GET",
+            "url": "/api/secure",
+            "tls": {
+                "skipVerify": true,
+                "caCertificatePath": "/etc/ca.pem",
+                "clientCertificatePath": "/etc/client.pem",
+                "clientKeyPath": "/etc/client.key"
+            }
+        }),
+    )
+    .await
+    .expect("a create carrying tls settings must succeed");
+
+    let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+    let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+    let id = created["id"].as_str().expect("id").to_string();
+
+    let stored = detail_of(&st, &id)
+        .tls
+        .expect("端点自带的 HTTPS 设置应当落库");
+    assert!(stored.skip_verify);
+    assert_eq!(stored.ca_certificate_path.as_deref(), Some("/etc/ca.pem"));
+    assert_eq!(
+        stored.client_certificate_path.as_deref(),
+        Some("/etc/client.pem")
+    );
+    assert_eq!(stored.client_key_path.as_deref(), Some("/etc/client.key"));
+}
+
+/// 不给 `tls` 的端点继承全局默认：存储行里那一列是空的。
+#[tokio::test]
+async fn endpoint_create_without_tls_leaves_the_column_empty() {
+    let (st, _) = fixture();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "name": "plain endpoint",
+            "method": "GET",
+            "url": "/api/plain"
+        }),
+    )
+    .await
+    .expect("create must succeed");
+
+    let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+    let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+    let id = created["id"].as_str().expect("id").to_string();
+    assert!(
+        detail_of(&st, &id).tls.is_none(),
+        "没给 `tls` 的端点继承全局默认，存储行里那一列应当是空的"
+    );
+}
+
+/// **键名拼错**的 `tls` 载荷必须报错，不能被静默丢掉。
+///
+/// 丢掉的后果比丢掉一个普通字段更重：整份设置会反序列化成「什么都没设」的值 ——
+/// 而端点自带的那份**整体**取代全局默认，于是全局的「跳过校验」与 CA 路径在这个端点
+/// 上全部失效。调用方却以为跳过校验已经打开。
+#[tokio::test]
+async fn endpoint_create_rejects_a_misspelled_tls_key() {
+    let (st, _) = fixture();
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "name": "bad tls endpoint",
+            "method": "GET",
+            "url": "/api/bad-tls",
+            // `skip_verify` 是**发送工具**那个对象里的键名；写工具这一侧用 camelCase。
+            "tls": { "skip_verify": true }
+        }),
+    )
+    .await;
+    let Err(err) = res else {
+        panic!("expected the create to fail, got {res:?}");
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("skip_verify"),
+        "报错要点名那个不认识的键，got: {msg}"
+    );
+}
+
+/// TLS 载荷里粘了证书正文时，**树上不能留下集合**。
+///
+/// 路径上的集合是逐级建出来的，每一级都单独提交。若 TLS 的校验留到写
+/// `endpoint_details` 那一行才做（那里也校验），那么「集合建好了、TLS 被拒、端点没
+/// 建成」就会留下一串没人要的集合。故 TLS 要在建集合之前就校验。
+#[tokio::test]
+async fn endpoint_create_rejects_a_pasted_certificate_body_without_leaving_collections_behind() {
+    let (st, _) = fixture();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_ep_fix",
+            "collection_path": "订单/明细",
+            "name": "bad tls endpoint",
+            "method": "GET",
+            "url": "/api/bad-tls",
+            "tls": {
+                "caCertificatePath":
+                    "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+            }
+        }),
+    )
+    .await;
+
+    let Err(err) = res else {
+        panic!("a pasted certificate body must be rejected, got {res:?}");
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("自定义 CA 证书"),
+        "报错要点名是哪一个字段，got: {msg}"
+    );
+
+    let collections = simple_post_core::db::with_conn(&st.pool, |c| {
+        nodes::list_by_root_and_type(c, "p_ep_fix", ResourceNodeType::Collection)
+    })
+    .expect("list collections");
+    let names: Vec<&str> = collections.iter().map(|c| c.name.as_str()).collect();
+    assert!(
+        !names.contains(&"订单") && !names.contains(&"明细"),
+        "校验失败不许在树上留下集合，got: {names:?}"
+    );
+}

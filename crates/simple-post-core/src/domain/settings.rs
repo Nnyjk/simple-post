@@ -41,6 +41,90 @@ impl Permission {
 
 // 请求设置
 
+/// HTTPS 出站的一组开关与证书位置。
+///
+/// **证书只存文件路径，不存内容。** 私钥一旦进库，`GET /api/preferences` 会把整行原样
+/// 返回（Web 形态下那是给任何持有 bearer 口令的客户端看的），而 SQLite 文件本身也是一份
+/// 用户没预期的备份。路径则随时可以被删掉或换掉，这是可接受的。
+///
+/// 路径由**运行请求的那台机器**解析：桌面端是本机路径，serve-web / Docker 端是服务端容器
+/// 里的路径，故 Web 形态下运维需要把证书挂进容器才能用。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TlsSettings {
+    /// 跳过服务端证书校验，主机名一并跳过。
+    ///
+    /// 关闭时服务端证书的过期、自签名、签发者一律不查，故这条请求会被任何一个中间人
+    /// 截获与改写。默认值是 `false`——**只有用户明确打开才生效**。
+    pub skip_verify: bool,
+    /// 自定义 CA 证书的 PEM 文件路径。空 = 用 `reqwest` 内置的公共根证书集。
+    ///
+    /// 一个 PEM 文件里可以含多张证书（bundle），`reqwest` 会把它们逐张加进信任链。
+    pub ca_certificate_path: Option<String>,
+    /// 客户端证书的 PEM 文件路径（mTLS）。空 = 不挂客户端证书。
+    pub client_certificate_path: Option<String>,
+    /// 客户端私钥的 PEM 文件路径。空 = 从 `client_certificate_path` 指向的文件里一起读。
+    ///
+    /// 单独给私钥路径而无证书路径是非法组合：客户端证书要连着私钥一起出示，只有私钥
+    /// 发不出去。
+    pub client_key_path: Option<String>,
+}
+
+impl TlsSettings {
+    /// 这组设置是否会让某次请求挂上客户端证书。
+    pub fn has_client_certificate(&self) -> bool {
+        self.client_certificate_path
+            .as_ref()
+            .map(|p| !p.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    /// 这组设置是否会让某次请求带上自定义 CA 证书。
+    pub fn has_ca_certificate(&self) -> bool {
+        self.ca_certificate_path
+            .as_ref()
+            .map(|p| !p.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    /// 校验这三个路径字段：它们必须真的是路径，不能是粘进来的证书正文。
+    ///
+    /// 类型层面已经挡住了应用自己写证书内容（这三个字段只有路径），但挡不住**用户**把
+    /// 私钥正文粘进「客户端私钥」那个输入框 —— 那段文本会原样落进
+    /// `preferences` 的 `request_settings` 行或 `endpoint_details.tls_json`，而
+    /// `GET /api/preferences` 把整行原样返回。这正是「证书只存路径，不存内容」要防的
+    /// 暴露面，故在这里把那条口子堵上。
+    ///
+    /// 判据：值里出现 PEM 的区块标记，或出现换行 —— 路径两者都不会有。
+    pub fn validate(&self) -> Result<(), crate::error::AppError> {
+        for (label, value) in [
+            ("自定义 CA 证书", &self.ca_certificate_path),
+            ("客户端证书", &self.client_certificate_path),
+            ("客户端私钥", &self.client_key_path),
+        ] {
+            let Some(raw) = value.as_deref() else {
+                continue;
+            };
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.contains("-----BEGIN") || trimmed.contains("-----END") {
+                return Err(crate::error::AppError::Validation(format!(
+                    "{label}填的是证书正文，不是文件路径。证书只存路径：把 PEM 文件存到磁盘上，\
+                     这里填那个文件的路径"
+                )));
+            }
+            if trimmed.contains('\n') || trimmed.contains('\r') {
+                return Err(crate::error::AppError::Validation(format!(
+                    "{label}的路径里不能有换行。它是一个文件路径，不是一段文本"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// 出站请求旋钮。单例，作为 JSON blob 存在 `preferences` KV 表里，而非自成一表。
 ///
 /// 容器级 `#[serde(default)]` 的分量在**读**侧而非写侧：存下的 blob 是某个更早构建写的，
@@ -54,6 +138,8 @@ pub struct RequestSettings {
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
+    /// HTTPS 出站的**全局默认**。端点可以整体覆盖它，见 [`crate::tls::resolve`]。
+    pub tls: TlsSettings,
 }
 
 impl Default for RequestSettings {
@@ -62,6 +148,7 @@ impl Default for RequestSettings {
             timeout_ms: 30_000,
             follow_redirects: true,
             max_response_size_kb: 5120,
+            tls: TlsSettings::default(),
         }
     }
 }

@@ -138,6 +138,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
             "sort_order",
             "tags",
             "test_script",
+            "tls",
             "url",
         ],
         "the documented patch fields must match the fields the handler reads"
@@ -191,4 +192,46 @@ fn endpoint_update_schema_documents_every_patchable_field() {
     // three-state meaning is invisible on the wire otherwise.
     assert_eq!(patch_props["environment_id"]["type"][1], "null");
     assert_eq!(patch_props["base_url_override"]["type"][1], "null");
+    // `tls` 是端点自己的 HTTPS 出站设置：它有三档（缺席 = 不动、`null` = 清除、
+    // 设值 = 写入），故 `null` 必须登记进 schema。
+    assert_eq!(patch_props["tls"]["type"][0], "object");
+    assert_eq!(patch_props["tls"]["type"][1], "null");
+    // 证书的键名是 camelCase，与 `TlsSettings` 自己的 serde 键名一致 ——
+    // 与 `settings_override.tls` 的 snake_case 是两套约定，别写混。
+    for field in [
+        "skipVerify",
+        "caCertificatePath",
+        "clientCertificatePath",
+        "clientKeyPath",
+    ] {
+        assert!(
+            patch_props["tls"]["properties"].get(field).is_some(),
+            "`tls` 漏登记了 `{field}`"
+        );
+    }
+}
+
+/// `endpoint_create` 的 `tls` 与 `endpoint_update` 的 `patch.tls` 描述的是同一份
+/// 东西，故两处的键名必须一致 —— 否则同一个 agent 在两条路上会写出两种拼法。
+#[test]
+fn endpoint_create_and_endpoint_update_describe_the_same_tls_shape() {
+    let table = crate::mcp::tool_table();
+    let create = table
+        .iter()
+        .find(|e| e.name == "endpoint_create")
+        .map(|e| e.schema.clone())
+        .expect("endpoint_create must be registered");
+    let update = table
+        .iter()
+        .find(|e| e.name == "endpoint_update")
+        .map(|e| e.schema.clone())
+        .expect("endpoint_update must be registered");
+
+    let create_props = &create["properties"]["tls"]["properties"];
+    let update_props = &update["properties"]["patch"]["properties"]["tls"]["properties"];
+    assert_eq!(
+        create_props, update_props,
+        "两处 `tls` 的属性表必须一致，否则 agent 会写出两种拼法"
+    );
+    assert_eq!(create["properties"]["tls"]["type"], "object");
 }
