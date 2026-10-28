@@ -132,11 +132,13 @@ describe('bootstrap-slice 聚合加载契约', () => {
     clearIpcMock();
   });
 
-  it('第一层只读 projects 与请求旋钮：欢迎页不必等树那一组', async () => {
+  it('第一层只读 projects 与两条全局偏好：欢迎页不必等树那一组', async () => {
     const bag = makeBootstrapHarness();
     const calls: CapturedCall[] = [];
     const responses: Record<string, unknown> = {
       projects_list: [project],
+      request_settings_get: { timeoutMs: 30_000, followRedirects: true, maxResponseSizeKb: 5_120 },
+      response_history_keep_get: 10,
       // 一棵扁平的树取代了原来的 module / collection / endpoint 三件套。
       nodes_list: [moduleNode, collectionNode, endpointNode],
       endpoint_details_list: [endpointDetail],
@@ -148,7 +150,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     const treeGate = new Promise<void>((resolve) => {
       releaseTree = resolve;
     });
-    // 只有树那一组等闸。第 1 层读的那两条（项目清单与请求旋钮）必须立刻落地，
+    // 只有树那一组等闸。第 1 层读的那三条（项目清单与两条全局偏好）必须立刻落地，
     // 否则欢迎页会跟着树一起等 —— 那正是这次拆分要消除的事。
     const TREE_COMMANDS = new Set(['nodes_list', 'endpoint_details_list', 'environments_list']);
     installIpcMock(async (cmd, args) => {
@@ -174,6 +176,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
       [
         'projects_list',
         'request_settings_get',
+        'response_history_keep_get',
         'nodes_list',
         'endpoint_details_list',
         'environments_list',
@@ -193,7 +196,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(bag.nodesLoading, false);
     assert.equal(bag.bootstrapError, null);
     assert.equal(bag.nodesError, null);
-    assert.deepEqual(calls.slice(2), [
+    assert.deepEqual(calls.slice(3), [
       { cmd: 'nodes_list', args: {} },
       { cmd: 'endpoint_details_list', args: {} },
       { cmd: 'environments_list', args: {} },

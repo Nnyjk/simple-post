@@ -100,7 +100,20 @@ pub mod keys {
     /// 桌面端在设置面板里改的就是这一行，故 MCP 侧与界面用的是同一份取值 —— 界面把超时
     /// 调成 5 秒而 MCP 仍用 30 秒，就是两份取值各说各话。
     pub const REQUEST_SETTINGS: &str = "request_settings";
+
+    /// `"response_history.keep"` → number。**每个 endpoint 保留多少条未收藏的发送历史。**
+    ///
+    /// 收藏的行不计入这个条数（用户标出的那一行永久保存，见
+    /// `db::response_history::set_favorite`）。这是全局设置：一次修改对所有项目、所有
+    /// 接口都生效，故它住在 `preferences` 这个跨项目的袋子里，而不是某个项目上。
+    pub const RESPONSE_HISTORY_KEEP: &str = "response_history.keep";
 }
+
+/// 每个 endpoint 最多保留多少条未收藏历史的天花板。
+///
+/// 用户在设置里能改这个数，但再大的值也没有意义：历史条带一次也显示不完那么多行，
+/// 而每一行都在用户的 `store.db` 里占着地方。
+pub const RESPONSE_HISTORY_KEEP_MAX: i64 = 500;
 
 /// 读 `mcp.auto_start` 偏好，取文档化的默认值（`false`）。桌面 `.setup()` 与 Web 服务端的
 /// 启动路径都用它，故两种形态对同一行达成一致。
@@ -165,6 +178,34 @@ pub fn set_request_settings(
     settings: &crate::domain::RequestSettings,
 ) -> Result<(), AppError> {
     set(conn, keys::REQUEST_SETTINGS, settings)
+}
+
+/// 读「每个 endpoint 保留多少条未收藏历史」，行缺失时退回缺省值。
+///
+/// 读不出来（行里的值不是合法 JSON）时同样退回缺省值：这个数只是裁剪历史的上限，
+/// 退到缺省值比让每一次发送都写不进历史更合算。
+pub fn response_history_keep(conn: &mut Connection) -> Result<i64, AppError> {
+    let raw: Option<i64> = match get(conn, keys::RESPONSE_HISTORY_KEEP) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "preferences: response_history.keep is unreadable, using the default: {e}"
+            );
+            None
+        }
+    };
+    Ok(raw
+        .unwrap_or(crate::domain::RESPONSE_HISTORY_KEEP_DEFAULT)
+        .clamp(1, RESPONSE_HISTORY_KEEP_MAX))
+}
+
+/// 持久化那个条数。写入前先夹到 `[1, RESPONSE_HISTORY_KEEP_MAX]`。
+pub fn set_response_history_keep(conn: &mut Connection, keep: i64) -> Result<(), AppError> {
+    set(
+        conn,
+        keys::RESPONSE_HISTORY_KEEP,
+        &keep.clamp(1, RESPONSE_HISTORY_KEEP_MAX),
+    )
 }
 
 // 测试。

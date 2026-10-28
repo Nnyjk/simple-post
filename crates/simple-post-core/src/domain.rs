@@ -38,8 +38,8 @@ pub use resource::{
     ResourceNodePatch, ResourceNodeType,
 };
 pub use response::{
-    ApiResponse, ResponseHistoryEntry, StoredResponse, RESPONSE_HISTORY_MAX_BODY_BYTES,
-    RESPONSE_HISTORY_PER_ENDPOINT,
+    ApiResponse, ResponseHistoryEntry, StoredRequestSnapshot, StoredResponse,
+    RESPONSE_HISTORY_KEEP_DEFAULT, RESPONSE_HISTORY_MAX_BODY_BYTES,
 };
 pub use script::{
     AssertionResult, EnvSnapshot, EnvWrite, NodeScripts, NodeScriptsPatch, ScriptError,

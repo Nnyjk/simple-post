@@ -195,6 +195,9 @@ pub fn run() {
             crate::commands::response_history_list,
             crate::commands::response_history_append,
             crate::commands::response_history_clear,
+            crate::commands::response_history_set_favorite,
+            crate::commands::response_history_keep_get,
+            crate::commands::response_history_keep_set,
             // OAuth2 取 token。取 token 是发请求**之前**的一步，故与 `http_request`
             // 是两个命令而不是它的参数：web 形态下前端据此先把 Authorization 组装好。
             crate::commands::oauth2_token,
