@@ -4,13 +4,15 @@ import { BodyEditor } from './BodyEditor-lazy';
 import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor-lazy';
 import { ScriptPanel } from './ScriptPanel';
+import { TlsPanel } from './TlsPanel';
 import type { EndpointDraft } from '@/stores/store-types';
 import type { FormatResult } from '@/lib/utils';
-import type { AuthConfig, KeyValue, RequestBody } from '@/types/domain';
+import type { AuthConfig, KeyValue, RequestBody, TlsSettings } from '@/types/domain';
 import type { VarEntry } from './var-hint';
 
 /** 请求配置编辑器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段）。 */
-export type TesterTabId = 'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'script';
+export type TesterTabId =
+  'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'script' | 'tls';
 
 /**
  * 页签内容区 —— 只渲染当前那一页编辑器。
@@ -29,6 +31,8 @@ export function RequestTabPanels({
   docs,
   preRequestScript,
   testScript,
+  tls,
+  globalTls,
   headerSuggestions,
   validationError,
   pathParamError,
@@ -50,6 +54,10 @@ export function RequestTabPanels({
   preRequestScript: string;
   /** 测试脚本的当前文本。 */
   testScript: string;
+  /** 端点自己那份 HTTPS 出站设置。`null` = 继承全局默认。 */
+  tls: TlsSettings | null;
+  /** 全局默认那份 HTTPS 出站设置。 */
+  globalTls: TlsSettings;
   headerSuggestions: KeySuggestion[];
   validationError: string | null;
   /** 路径参数缺值时拦下发送的原因。 */
@@ -123,6 +131,13 @@ export function RequestTabPanels({
           test={testScript}
           onPreRequestChange={(preRequestScript) => patchDraft({ preRequestScript })}
           onTestChange={(testScript) => patchDraft({ testScript })}
+        />
+      )}
+      {tab === 'tls' && (
+        <TlsPanel
+          value={tls}
+          globalSettings={globalTls}
+          onChange={(next) => patchDraft({ tls: next })}
         />
       )}
     </div>

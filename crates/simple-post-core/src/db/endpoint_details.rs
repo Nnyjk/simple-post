@@ -12,7 +12,9 @@
 
 use rusqlite::{params, Connection, Row};
 
-use crate::domain::{AuthConfig, EndpointDetail, EndpointDetailPatch, KeyValue, RequestBody};
+use crate::domain::{
+    AuthConfig, EndpointDetail, EndpointDetailPatch, KeyValue, RequestBody, TlsSettings,
+};
 use crate::error::AppError;
 
 use super::json_col_err;
@@ -20,7 +22,7 @@ use super::json_col_err;
 const COLUMNS: &str = "node_id, method, url, environment_id, base_url_definition_id, \
                        base_url_override, params_json, path_params_json, headers_json, \
                        body_json, auth_json, docs, notes, tags_json, pre_request_script, \
-                       test_script";
+                       test_script, tls_json";
 
 // 读。
 
@@ -69,7 +71,7 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
     let sql = "SELECT e.node_id, e.method, e.url, e.environment_id, e.base_url_definition_id, \
                   e.base_url_override, e.params_json, e.path_params_json, e.headers_json, \
                   e.body_json, e.auth_json, e.docs, e.notes, e.tags_json, e.pre_request_script, \
-                  e.test_script \
+                  e.test_script, e.tls_json \
          FROM endpoint_details e \
          JOIN nodes n ON n.id = e.node_id \
          WHERE n.root_id = ?1 AND n.type = 'endpoint' \
@@ -85,13 +87,21 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
 
 // 写。
 
+/// 建一行端点的配置。
+///
+/// 写之前校验 TLS 那三个路径字段：它们必须真的是路径 —— 用户把证书正文粘进输入框，
+/// 那段文本会原样落进 `tls_json` 列，而这一列会被 `GET /api/nodes/:id/endpoint-detail`
+/// 原样返回。「证书只存路径，不存内容」要在写入口守住。
 pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError> {
+    if let Some(tls) = &d.tls {
+        tls.validate()?;
+    }
     conn.execute(
         "INSERT INTO endpoint_details \
          (node_id, method, url, environment_id, base_url_definition_id, \
           base_url_override, params_json, path_params_json, headers_json, body_json, \
-          auth_json, docs, notes, tags_json, pre_request_script, test_script) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+          auth_json, docs, notes, tags_json, pre_request_script, test_script, tls_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             d.node_id,
             d.method.as_str(),
@@ -109,16 +119,34 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
             serde_json::to_string(&d.tags)?,
             d.pre_request_script,
             d.test_script,
+            // 端点没有自己的 HTTPS 设置时写 NULL（= 继承全局默认），不写 "{}"——
+            // 后者反序列化出来是一个「全空的设置」，它会整体取代全局那份，
+            // 于是「继承全局」与「清空全局」两种情形在存储上变得无法区分。
+            // 空串同样不行：它不是合法 JSON，读回来会报列解析失败。
+            match &d.tls {
+                Some(t) => Some(serde_json::to_string(t)?),
+                None => None,
+            },
         ],
     )?;
     Ok(())
 }
 
+/// 改一行端点的配置。
+///
+/// 写之前校验 TLS 那三个路径字段：它们必须真的是路径 —— 用户把证书正文粘进输入框，
+/// 那段文本会原样落进 `tls_json` 列，而这一列会被 `GET /api/nodes/:id/endpoint-detail`
+/// 原样返回。「证书只存路径，不存内容」要在写入口守住。
 pub fn update(
     conn: &mut Connection,
     node_id: &str,
     patch: EndpointDetailPatch,
 ) -> Result<EndpointDetail, AppError> {
+    // `Some(None)` = 清除端点自带的那份，没有路径要校验。
+    if let Some(Some(tls)) = &patch.tls {
+        tls.validate()?;
+    }
+
     let mut sets: Vec<String> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -184,6 +212,14 @@ pub fn update(
         sets.push(format!("test_script = ?{}", binds.len() + 1));
         binds.push(optional_text(s));
     }
+    if let Some(t) = &patch.tls {
+        sets.push(format!("tls_json = ?{}", binds.len() + 1));
+        // `Some(None)` = 清除端点自己的设置（回到继承全局），故写 NULL。
+        binds.push(match t {
+            Some(v) => json(v)?,
+            None => rusqlite::types::Value::Null,
+        });
+    }
 
     if sets.is_empty() {
         return get(conn, node_id);
@@ -242,6 +278,8 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
     let body_json: String = row.get(9)?;
     let auth_json: String = row.get(10)?;
     let tags_json: String = row.get(13)?;
+    // NULL = 端点没有自己的 HTTPS 设置（继承全局默认）。
+    let tls_json: Option<String> = row.get(16)?;
 
     // 一个存下来的动词若被解析器拒绝，本会是一个 `AppError::Validation` 从一个欠调用方一个
     // `rusqlite::Error` 的行映射器里逃出去；重新包一层，好让失败指明列名。
@@ -276,6 +314,13 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
             .map_err(|e| json_col_err("tags_json", e))?,
         pre_request_script: row.get(14)?,
         test_script: row.get(15)?,
+        tls: match &tls_json {
+            Some(raw) => Some(
+                serde_json::from_str::<TlsSettings>(raw)
+                    .map_err(|e| json_col_err("tls_json", e))?,
+            ),
+            None => None,
+        },
     })
 }
 

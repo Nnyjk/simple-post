@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use crate::domain::TlsSettings;
+
 // 线类型——镜像 TS 侧的 `ApiResponse` / `HttpError`。
 
 /// 成功的 HTTP 响应。字段名与 `ApiResponse` 一致，故 React 侧可以复用它现有的响应视图代码
@@ -100,6 +102,9 @@ pub struct HttpRequestInput {
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
+    /// HTTPS 出站设置。**已经是合成过的那一份**：全局默认与端点覆盖的合成由
+    /// [`crate::tls::resolve`] 完成，不在这里做，故执行层没有第二套合并规则。
+    pub tls: TlsSettings,
 }
 
 // 内部实现——小到把它们内联为 `pub(crate)` 能保持公开接口干净。lib.rs 里的 Tauri command 与
@@ -429,13 +434,20 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         reqwest::redirect::Policy::none()
     };
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_millis(input.timeout_ms))
-        .redirect(redirect)
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => return HttpResult::err("network", format!("client build: {e}")),
+    // 客户端构造分两步：先施加 HTTPS 设置（证书、跳过校验），再真正建出客户端。
+    // 两步都可能失败，错误都归到 `network` 这一档——前端只按 `timeout` 与 `network` 分派，
+    // 证书读不到与连不上都是「请求没发出去」。
+    let client = match crate::tls::apply_to_builder(
+        reqwest::Client::builder()
+            .timeout(Duration::from_millis(input.timeout_ms))
+            .redirect(redirect),
+        &input.tls,
+    ) {
+        Ok(builder) => match builder.build() {
+            Ok(c) => c,
+            Err(e) => return HttpResult::err("network", format!("client build: {e}")),
+        },
+        Err(e) => return HttpResult::err("network", e.to_string()),
     };
 
     let mut req = client.request(parse_method(&input.method), &input.url);

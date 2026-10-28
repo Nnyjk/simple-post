@@ -36,8 +36,13 @@ pub(crate) async fn request_settings_put(
     // 被重置为默认值而非被拒。这是为了读取旧版本写下的 blob 而刻意做的取舍；见该字段
     // 自己的文档。要整体替换请把三个字段都发上。
     db::with_tx(&s.pool, |c| {
-        db::preferences::set(c, REQUEST_SETTINGS_KEY, &body)
+        // 走专用的写入口：它会校验 TLS 那三个路径字段（通用写入口不会）。
+        db::preferences::set_request_settings(c, &body)
     })
     .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&body).unwrap_or(Value::Null)))
 }
+
+#[cfg(test)]
+#[path = "request_settings_test.rs"]
+mod tests;

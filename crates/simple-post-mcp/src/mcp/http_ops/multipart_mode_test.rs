@@ -134,6 +134,7 @@ fn seed(st: &AppState, api_url: &str, stored: RequestBody) -> String {
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     };
     simple_post_core::db::with_tx(&st.pool, |c| {
         projects::create(c, &project)?;

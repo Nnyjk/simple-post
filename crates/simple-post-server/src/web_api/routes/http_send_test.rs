@@ -127,6 +127,7 @@ fn seed(dir: &std::path::Path, api_url: &str) {
         tags: vec![],
         pre_request_script: Some("pm.request.url = pm.request.url + '/rewritten';".into()),
         test_script: None,
+        tls: None,
     };
     crate::db::with_tx(&pool, |c| {
         crate::db::projects::create(c, &project)?;

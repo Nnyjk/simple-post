@@ -89,6 +89,7 @@ pub(super) fn minimal_endpoint() -> EndpointDetail {
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     }
 }
 

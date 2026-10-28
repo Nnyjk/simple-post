@@ -78,3 +78,67 @@ pub(in crate::mcp::project_ops) fn oauth2_config_schema() -> serde_json::Value {
         "additionalProperties": false
     })
 }
+
+// =========================================================================
+// HTTPS 出站设置的 JSON Schema
+// =========================================================================
+
+/// HTTPS 出站设置的属性表。`endpoint_create` 的 `tls` 与 `endpoint_update` 的
+/// `patch.tls` 描述的是同一份东西，故属性表只写一遍，两处引用它。
+///
+/// 键名是 camelCase（`skipVerify` / `caCertificatePath` / `clientCertificatePath` /
+/// `clientKeyPath`），与 `simple_post_core::domain::TlsSettings` 自己的 serde 键名
+/// 一致 —— 故这两个工具的 `tls` 载荷可以直接反序列化成那个类型，不需要转换。
+///
+/// 注意这与 `api_run_request` / `api_call_endpoint` 的 `settings_override.tls` 用的
+/// **snake_case** 不同：那两个工具的 `settings_override` 里既有的键都是 snake_case，
+/// 转换函数在 `mcp::http_ops::input::parse_tls_settings`。
+fn tls_settings_properties() -> serde_json::Value {
+    json!({
+        "skipVerify": {
+            "type": "boolean",
+            "description": "Skip server certificate verification, hostname included."
+        },
+        "caCertificatePath": {
+            "type": ["string", "null"],
+            "description": "PEM file path of the trusted CA certificate(s)."
+        },
+        "clientCertificatePath": {
+            "type": ["string", "null"],
+            "description": "PEM file path of the client certificate (mTLS)."
+        },
+        "clientKeyPath": {
+            "type": ["string", "null"],
+            "description": "PEM file path of the client private key. Omit it to read the key from the client certificate file."
+        }
+    })
+}
+
+/// HTTPS 出站设置的 JSON Schema，`endpoint_create` 用它。
+///
+/// **这份设置整体取代全局默认**，不是逐字段覆盖：端点给了设置就用自己的那份
+/// （含「什么都不改」的那份），没给才用全局默认。
+///
+/// **证书只存文件路径**，文件内容不进数据库；路径由**运行请求的那台机器**解析
+/// ——桌面端是本机路径，`serve-web` / Docker 端是服务端容器里的路径。
+pub(in crate::mcp::project_ops) fn tls_settings_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "description": "This endpoint's own HTTPS outbound settings. They replace the global default settings as a whole, not field by field. Only file paths are stored, and the paths are resolved on the machine that runs the request.",
+        "properties": tls_settings_properties(),
+        "additionalProperties": false
+    })
+}
+
+/// HTTPS 出站设置的 JSON Schema，`endpoint_update` 的 `patch.tls` 用它。
+///
+/// 与 [`tls_settings_schema`] 的差别只有一处：`null` 在这里是**清除端点自带的那份**，
+/// 于是端点回到继承全局默认。
+pub(in crate::mcp::project_ops) fn tls_settings_patch_schema() -> serde_json::Value {
+    json!({
+        "type": ["object", "null"],
+        "description": "This endpoint's own HTTPS outbound settings. They replace the global default settings as a whole, not field by field. Only file paths are stored, and the paths are resolved on the machine that runs the request. null clears them, so the endpoint inherits the global default again.",
+        "properties": tls_settings_properties(),
+        "additionalProperties": false
+    })
+}

@@ -18,6 +18,7 @@ import type {
   EnvWrite,
   ScriptOutcome,
   StoredRequestSnapshot,
+  TlsSettings,
 } from '@/types/domain';
 import { toRequestSnapshot } from './model/requestInput';
 
@@ -38,6 +39,7 @@ export function useRequestActions({
   preRequestScript,
   testScript,
   settings,
+  tlsOverride,
   runValidation,
   onPathParamGate,
   setRequestPending,
@@ -72,6 +74,12 @@ export function useRequestActions({
   /** 端点自己的测试脚本（界面上此刻生效的那份）。 */
   testScript: string;
   settings: RequestSettings;
+  /**
+   * 端点自己的 HTTPS 出站设置。`null` = 继承全局默认（`settings.tls`）。
+   *
+   * 送的是界面上此刻生效的那份（草稿优先），故未保存的证书设置也会跑到。
+   */
+  tlsOverride: TlsSettings | null;
   /** 跑校验并回报是否通过；失败时它已把界面切到出问题的页签。 */
   runValidation: () => boolean;
   /**
@@ -155,6 +163,8 @@ export function useRequestActions({
         // 后端用它覆盖存的那份，故未保存的编辑也会跑到。
         preRequestScript,
         testScript,
+        // 端点自己的 HTTPS 出站设置：`null` = 继承全局默认那份。
+        tlsOverride,
       });
       // 存的是 `outbound`（发出去的那一份），不是 `prepared`（预览那份）：OAuth2 的
       // token 只在 `outbound` 里，历史行要显示的就是它。请求头取后端报上来的线上那
@@ -191,6 +201,7 @@ export function useRequestActions({
     preRequestScript,
     testScript,
     settings,
+    tlsOverride,
     setRequestPending,
     setLastResponse,
     setLastScriptOutcome,

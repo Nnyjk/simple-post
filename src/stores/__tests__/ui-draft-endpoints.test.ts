@@ -301,6 +301,68 @@ describe('draft endpoints: Save is the only thing that writes', () => {
   });
 });
 
+describe('draft endpoints: the endpoint TLS settings travel with the row', () => {
+  it('keeps the endpoint own TLS settings and writes them with the row', async () => {
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+    const store = useAppStore.getState();
+    store.setEndpointDraft(draftId, {
+      tls: {
+        skipVerify: true,
+        caCertificatePath: 'C:\\certs\\ca.pem',
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+    });
+    // 设置还在草稿里，什么都没落到数据库。
+    assert.equal(ipcCalls.length, 0, 'no command may reach the daemon before Save');
+
+    await store.saveDraftEndpoint(draftId);
+
+    const detail = useAppStore.getState().endpointDetails[SERVER_ID];
+    assert.deepEqual(detail?.tls, {
+      skipVerify: true,
+      caCertificatePath: 'C:\\certs\\ca.pem',
+      clientCertificatePath: null,
+      clientKeyPath: null,
+    });
+    // 写给后端的那一次请求里也带着它。
+    assert.deepEqual((ipcCalls[0].args.detail as { tls?: unknown } | undefined)?.tls, {
+      skipVerify: true,
+      caCertificatePath: 'C:\\certs\\ca.pem',
+      clientCertificatePath: null,
+      clientKeyPath: null,
+    });
+  });
+
+  it('writes null when the endpoint goes back to inheriting the global default', async () => {
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+    const store = useAppStore.getState();
+    store.setEndpointDraft(draftId, {
+      tls: {
+        skipVerify: true,
+        caCertificatePath: null,
+        clientCertificatePath: null,
+        clientKeyPath: null,
+      },
+    });
+    // 用户把「继承全局设置」打开：端点不再带自己那份设置。
+    store.setEndpointDraft(draftId, { tls: null });
+
+    await store.saveDraftEndpoint(draftId);
+
+    assert.equal(
+      useAppStore.getState().endpointDetails[SERVER_ID]?.tls,
+      null,
+      'null = 回到继承全局默认',
+    );
+    assert.equal(
+      (ipcCalls[0].args.detail as { tls?: unknown } | undefined)?.tls,
+      null,
+      'null 必须写进补丁，否则已存的那份设置清不掉',
+    );
+  });
+});
+
 describe('draft endpoints: the tab survives the sweeps that prune dead tabs', () => {
   it('pruneStaleTabs cannot mistake "not written yet" for "deleted"', () => {
     // 旁边还有一个真实的 endpoint：清扫必须**两个都**留下，所以这条豁免

@@ -407,6 +407,9 @@ pub fn commit_in_tx(
                     // 端点的脚本住在 `endpoint_details`，与 body / headers 同级。
                     pre_request_script: ir.scripts.pre_request_script.clone(),
                     test_script: ir.scripts.test_script.clone(),
+                    // 导入进来的接口不带 HTTPS 出站设置：证书路径是本机的东西，导到另一台
+                    // 机器上没有意义。故导入的端点一律继承全局默认。
+                    tls: None,
                 };
 
                 db::nodes::create(conn, &node, Some(&detail))?;

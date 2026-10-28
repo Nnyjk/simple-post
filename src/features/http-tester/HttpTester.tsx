@@ -331,6 +331,8 @@ export function HttpTester() {
     preRequestScript: effective.preRequestScript,
     testScript: effective.testScript,
     settings: requestSettings,
+    // 端点自己那份 HTTPS 出站设置：`null` = 继承全局默认那份。
+    tlsOverride: effective.tls,
     runValidation,
     onPathParamGate: handlePathParamGate,
     setRequestPending,
@@ -360,6 +362,8 @@ export function HttpTester() {
     effective.body.mode !== 'none' && !!(effective.body.content || effective.body.schema);
   const hasAuth = effective.auth.kind !== 'none';
   const hasScript = Boolean(effective.preRequestScript || effective.testScript);
+  // 端点带着自己那份 HTTPS 出站设置时，证书那一页挂一枚圆点徽标。
+  const hasOwnTls = effective.tls !== null;
 
   const pathParamError = buildPathParamError({
     sendBlocked,
@@ -375,6 +379,7 @@ export function HttpTester() {
     body: hasBody,
     auth: hasAuth,
     script: hasScript,
+    tls: hasOwnTls,
   });
 
   // 草稿天生未保存，故即使还没有任何编辑器触发过，按钮也必须可用（只按 `draft !== undefined`
@@ -386,7 +391,13 @@ export function HttpTester() {
     <TesterShell
       {...{ project, ancestors, endpoint, endpointHasTab, isDraft, namingDraft }}
       {...{ onNamingDraftChange: setNamingDraft, saveEndpointName, saveEndpointDescription }}
-      {...{ patchDraft, effective, method, resolvedBaseUrl: resolved.baseUrl }}
+      {...{
+        patchDraft,
+        effective,
+        globalTls: requestSettings.tls,
+        method,
+        resolvedBaseUrl: resolved.baseUrl,
+      }}
       {...{ selection, isCustomUrl, liveUrl, urlInputRef }}
       {...{ sendBtnRef, playIconRef, copyCurlBtnRef, requestPending, curlFlash }}
       {...{ dirty, onMethodChange: handleMethodChange, onUrlChange: urlHint.change }}

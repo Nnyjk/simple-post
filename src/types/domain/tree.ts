@@ -1,4 +1,4 @@
-import type { AuthConfig, HttpMethod, KeyValue, RequestBody } from './request';
+import type { AuthConfig, HttpMethod, KeyValue, RequestBody, TlsSettings } from './request';
 
 /**
  * 资源树的三种行：module 在项目下顶层，collection 可在 module 或 collection 下
@@ -97,6 +97,14 @@ export interface EndpointDetail {
   preRequestScript?: string | null;
   /** 响应回来之后跑的那段脚本。`null`（或缺省）= 没有脚本。 */
   testScript?: string | null;
+  /**
+   * 该端点自己的 HTTPS 出站设置。`null`（或缺省）= 继承全局默认
+   * （`RequestSettings.tls`）。
+   *
+   * 端点给了设置就**整体**取代全局那份，不是逐字段合并，故这一个字段足以表达
+   * 「这个接口用另一套证书」。
+   */
+  tls?: TlsSettings | null;
 }
 
 /** endpoint 节点 join 上它的 `EndpointDetail`——HTTP 测试器与响应查看器工作的形状，需要 method / url 连同节点身份。 */

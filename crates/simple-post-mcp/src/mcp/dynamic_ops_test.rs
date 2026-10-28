@@ -119,6 +119,7 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 tags: vec![],
                 pre_request_script: None,
                 test_script: None,
+                tls: None,
             }),
         )?;
         db::environments::create(
@@ -180,6 +181,7 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 tags: vec![],
                 pre_request_script: None,
                 test_script: None,
+                tls: None,
             }),
         )?;
         Ok(())
@@ -662,6 +664,7 @@ async fn the_list_tool_does_not_carry_the_referencing_endpoints() {
                 tags: vec![],
                 pre_request_script: None,
                 test_script: None,
+                tls: None,
             }),
         )
     })

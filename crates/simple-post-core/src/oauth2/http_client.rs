@@ -21,25 +21,32 @@ use std::pin::Pin;
 
 use oauth2::{AsyncHttpClient, HttpRequest, HttpResponse};
 
+use crate::domain::TlsSettings;
 use crate::error::AppError;
 use crate::http_executor::{self, HttpRequestInput};
 
 use super::parse::{error_response, normalize_success_body};
 use super::{TOKEN_MAX_RESPONSE_KB, TOKEN_TIMEOUT_MS};
 
-/// 无状态客户端。零大小，每次换 token 现建一个。
-pub(super) struct ExecutorClient;
+/// 无状态客户端。每次换 token 现建一个。
+///
+/// 带一份 HTTPS 出站设置：token 端点也是一次出站，故它与普通请求走同一道 TLS 规则——
+/// 用户给内部 IdP 配的 CA 证书与客户端证书，对 token 端点同样有效。
+pub(super) struct ExecutorClient {
+    /// 这次出站生效的 HTTPS 设置。由调用方合成好传进来，本模块不读库。
+    pub(super) tls: TlsSettings,
+}
 
 impl<'c> AsyncHttpClient<'c> for ExecutorClient {
     type Error = AppError;
     type Future = Pin<Box<dyn Future<Output = Result<HttpResponse, AppError>> + Send + 'c>>;
 
     fn call(&'c self, request: HttpRequest) -> Self::Future {
-        Box::pin(exchange(request))
+        Box::pin(exchange(request, self.tls.clone()))
     }
 }
 
-async fn exchange(request: HttpRequest) -> Result<HttpResponse, AppError> {
+async fn exchange(request: HttpRequest, tls: TlsSettings) -> Result<HttpResponse, AppError> {
     let (parts, body) = request.into_parts();
     // 非 UTF-8 的 body 直接报错，不静默发空 body：crate 组的是 form 编码的
     // UTF-8，真出现非 UTF-8 说明有别的东西坏了，而空 body 会让 IdP 报一个
@@ -66,6 +73,7 @@ async fn exchange(request: HttpRequest) -> Result<HttpResponse, AppError> {
         // token 端点本就不该重定向（RFC 6749 §3.2 的 back-channel POST）。
         follow_redirects: false,
         max_response_size_kb: TOKEN_MAX_RESPONSE_KB,
+        tls,
     };
 
     let result = http_executor::execute(&input).await;

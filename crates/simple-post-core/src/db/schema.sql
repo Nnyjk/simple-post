@@ -165,7 +165,15 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   --
   -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这两列，故不 bump `SCHEMA_VERSION`。
   pre_request_script     TEXT,
-  test_script            TEXT
+  test_script            TEXT,
+  -- 该端点自己的 HTTPS 出站设置（客户端证书、自定义 CA、跳过校验）。存的是 JSON 编码的
+  -- `domain::TlsSettings`。
+  --
+  -- NULL = 继承全局默认（`preferences` 的 `request_settings` 行里的 `tls`）。端点给了设置
+  -- 就整体取代全局那份，故这一列非空即端点自带一整套 HTTPS 设置。
+  --
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`。
+  tls_json               TEXT
 );
 
 -- collection 节点上的两段脚本。

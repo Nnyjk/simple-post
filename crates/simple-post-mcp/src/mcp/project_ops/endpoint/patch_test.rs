@@ -371,3 +371,154 @@ async fn endpoint_update_rejects_an_empty_patch() {
         "the error should say the patch was empty, got: {msg}"
     );
 }
+
+/// 端点自己的 HTTPS 出站设置要能写进存储行。
+///
+/// 键名是 camelCase（`skipVerify` / `caCertificatePath`），与 `TlsSettings` 自己的
+/// serde 键名一致 —— 故这份载荷直接反序列化成那个类型。
+#[tokio::test]
+async fn endpoint_update_stores_the_tls_settings() {
+    let (st, id) = fixture();
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": {
+                "tls": {
+                    "skipVerify": true,
+                    "caCertificatePath": "/etc/ca.pem",
+                    "clientCertificatePath": "/etc/client.pem",
+                    "clientKeyPath": "/etc/client.key"
+                }
+            }
+        }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+
+    let stored = detail_of(&st, &id)
+        .tls
+        .expect("端点自带的 HTTPS 设置应当落库");
+    assert!(stored.skip_verify);
+    assert_eq!(stored.ca_certificate_path.as_deref(), Some("/etc/ca.pem"));
+    assert_eq!(
+        stored.client_certificate_path.as_deref(),
+        Some("/etc/client.pem")
+    );
+    assert_eq!(stored.client_key_path.as_deref(), Some("/etc/client.key"));
+}
+
+/// 显式 `null` 清掉端点自带的 HTTPS 设置，于是它回到继承全局默认。
+///
+/// 这是域类型上的 `double_option` 字段（缺席 = 不动，`null` = 清空），故与
+/// `path_params` 的三档语义是同一套。
+#[tokio::test]
+async fn endpoint_update_clears_the_endpoints_own_tls_settings_with_null() {
+    let (st, id) = fixture();
+
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "tls": { "caCertificatePath": "/etc/ca.pem" } }
+        }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+    assert!(
+        detail_of(&st, &id).tls.is_some(),
+        "端点自带的 HTTPS 设置应当先写进去"
+    );
+
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({ "endpoint_id": id, "patch": { "tls": null } }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+    assert!(
+        detail_of(&st, &id).tls.is_none(),
+        "`tls: null` 应当清掉端点自带的那份，回到继承全局默认"
+    );
+}
+
+/// 缺席 = 不动：没点名 `tls` 的 patch 不该动那一列。
+#[tokio::test]
+async fn endpoint_update_leaves_the_tls_settings_alone_when_the_field_is_absent() {
+    let (st, id) = fixture();
+
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "tls": { "skipVerify": true } }
+        }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({ "endpoint_id": id, "patch": { "url": "/y" } }),
+    )
+    .await;
+    assert!(res.is_ok(), "{res:?}");
+    let stored = detail_of(&st, &id)
+        .tls
+        .expect("没点名 `tls` 就不该动那一列");
+    assert!(stored.skip_verify);
+}
+
+/// 形状不对的 `tls` 载荷必须报错并点名那个键，不能被静默丢掉 ——
+/// 丢掉的话，调用方会以为「跳过校验」已经生效，而请求仍然被服务端证书挡下。
+#[tokio::test]
+async fn endpoint_update_rejects_a_malformed_tls_payload() {
+    let (st, id) = fixture();
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            "patch": { "tls": { "skipVerify": "yes" } }
+        }),
+    )
+    .await;
+    let Err(AppError::Validation(msg)) = res else {
+        panic!("expected a Validation error, got {res:?}");
+    };
+    assert!(msg.contains("'tls'"), "got: {msg}");
+    assert!(
+        detail_of(&st, &id).tls.is_none(),
+        "被拒的 patch 不该写进任何东西"
+    );
+}
+
+/// **键名拼错**也要报错，不能被静默丢掉。
+///
+/// 丢掉的后果比丢掉一个普通字段更重：`skip_verify` 被当成不认识而丢掉时，整份设置
+/// 反序列化成一份「什么都没设」的值 —— 而端点自带的那份**整体**取代全局默认，于是
+/// 全局的「跳过校验」与 CA 路径在这个端点上全部失效。调用方却以为跳过校验已经打开，
+/// 请求却报「certificate signed by unknown authority」。
+#[tokio::test]
+async fn endpoint_update_rejects_a_misspelled_tls_key() {
+    let (st, id) = fixture();
+    let res = tool_endpoint_update(
+        &st,
+        serde_json::json!({
+            "endpoint_id": id,
+            // `skip_verify` 是**发送工具**那个对象里的键名；写工具这一侧用 camelCase。
+            "patch": { "tls": { "skip_verify": true } }
+        }),
+    )
+    .await;
+    let Err(AppError::Validation(msg)) = res else {
+        panic!("expected a Validation error, got {res:?}");
+    };
+    assert!(
+        msg.contains("skip_verify"),
+        "报错要点名那个不认识的键，got: {msg}"
+    );
+    assert!(
+        detail_of(&st, &id).tls.is_none(),
+        "被拒的 patch 不该写进任何东西"
+    );
+}

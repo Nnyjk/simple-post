@@ -124,3 +124,122 @@ async fn an_object_preference_round_trips_as_an_object() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `request_settings` 这一行带着证书路径，而 `GET /api/preferences` 把整行原样返回。
+///
+/// 这一行有三条写路径，`PUT /api/preferences` 是其中最宽的一条（它能写任何键）。校验放在
+/// core 的 `preferences::set` 里，故这条路径同样拦得住 —— 拦不住的话，用户把私钥正文
+/// 粘进路径输入框，那段文本就会原样落进这一行，而这一行能被任何人读走。
+#[tokio::test]
+async fn writing_request_settings_through_the_raw_route_rejects_a_pasted_certificate_body() {
+    let (addr, dir) = serve_test_router().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .put(format!("http://{addr}/api/preferences"))
+        .json(&serde_json::json!({
+            "key": "request_settings",
+            "value": {
+                "timeoutMs": 30000,
+                "followRedirects": true,
+                "maxResponseSizeKb": 5120,
+                "tls": {
+                    "caCertificatePath":
+                        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----"
+                }
+            }
+        }))
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "粘进来的证书正文必须被拒"
+    );
+
+    // 写不进去的那一行也不能留下半截。
+    let response = client
+        .get(format!("http://{addr}/api/preferences"))
+        .send()
+        .await
+        .expect("request completes");
+    let body: serde_json::Value = response.json().await.expect("json body");
+    assert!(
+        body.get("request_settings").is_none(),
+        "被拒的写入不许在库里留下那一行，got: {body}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 形状不对的请求体必须被拒，且那一行保持原样。
+///
+/// 这一行只存出站请求设置，故通用写入口写来的值若读不出 `RequestSettings`，它就是一个
+/// 形状不对的请求体 —— 不是「这一行不归我管」。放过它就留下一条绕路：`timeoutMs` 的类型
+/// 写错让整体反序列化失败，证书路径的校验因此根本没跑，而同一个请求体里的
+/// `tls.clientKeyPath` 正粘着私钥正文。
+#[tokio::test]
+async fn writing_request_settings_through_the_raw_route_rejects_a_broken_shape() {
+    let (addr, dir) = serve_test_router().await;
+    let client = reqwest::Client::new();
+
+    // 先落一行正常的设置，好断言被拒的写入没有把它改掉。
+    let response = client
+        .put(format!("http://{addr}/api/request-settings"))
+        .json(&serde_json::json!({
+            "timeoutMs": 12345,
+            "followRedirects": false,
+            "maxResponseSizeKb": 2048,
+            "tls": { "skipVerify": false }
+        }))
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let response = client
+        .put(format!("http://{addr}/api/preferences"))
+        .json(&serde_json::json!({
+            "key": "request_settings",
+            "value": {
+                "timeoutMs": "invalid",
+                "tls": {
+                    "clientKeyPath":
+                        "-----BEGIN PRIVATE KEY-----\nexample\n-----END PRIVATE KEY-----"
+                }
+            }
+        }))
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "形状不对的请求体必须被拒"
+    );
+
+    // 那一行保持原样，且整行文本里没有私钥正文。
+    let response = client
+        .get(format!("http://{addr}/api/preferences"))
+        .send()
+        .await
+        .expect("request completes");
+    let body: serde_json::Value = response.json().await.expect("json body");
+    assert_eq!(
+        body["request_settings"]["timeoutMs"],
+        serde_json::json!(12345),
+        "被拒的写入不许改动那一行，got: {body}"
+    );
+    assert_eq!(
+        body["request_settings"]["maxResponseSizeKb"],
+        serde_json::json!(2048),
+        "被拒的写入不许改动那一行，got: {body}"
+    );
+    assert!(
+        !body.to_string().contains("BEGIN PRIVATE KEY"),
+        "那一行里不许出现私钥正文，got: {body}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

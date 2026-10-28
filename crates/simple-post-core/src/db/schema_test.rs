@@ -334,6 +334,7 @@ fn the_request_settings_preference_row_survives_the_cleanup() {
         timeout_ms: 5_000,
         follow_redirects: false,
         max_response_size_kb: 2_048,
+        tls: crate::domain::TlsSettings::default(),
     };
     with_tx(&pool, |c| {
         crate::db::preferences::set_request_settings(c, &written)

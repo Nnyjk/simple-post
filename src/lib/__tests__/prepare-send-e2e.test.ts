@@ -151,6 +151,13 @@ const SETTINGS: RequestSettings = {
   timeoutMs: 5000,
   followRedirects: true,
   maxResponseSizeKb: 0,
+  // HTTPS 出站的全局默认。这份缺省值原样发给后端即可。
+  tls: {
+    skipVerify: false,
+    caCertificatePath: null,
+    clientCertificatePath: null,
+    clientKeyPath: null,
+  },
 };
 
 const ENV: Environment = {

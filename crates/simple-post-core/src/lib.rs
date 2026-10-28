@@ -16,4 +16,5 @@ pub mod permissions;
 pub mod script;
 pub mod spec;
 pub mod template;
+pub mod tls;
 pub mod url;

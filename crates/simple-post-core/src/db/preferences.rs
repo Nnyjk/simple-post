@@ -32,8 +32,34 @@ pub fn get<T: DeserializeOwned>(conn: &mut Connection, key: &str) -> Result<Opti
 // 写。
 
 /// Upsert 一个偏好。值经 serde 做 JSON 编码，故任何 `Serialize` 类型都能存。
+///
+/// **`request_settings` 这一行要额外校验。** 它带着 HTTPS 出站的三个证书路径字段，而
+/// `GET /api/preferences` 把整行原样返回 —— 用户把私钥正文粘进路径输入框，那段文本就会
+/// 原样落进这一行。校验放在这里（而不是各个写入口）是因为这一行有三条写路径：桌面端的
+/// 专用命令、`PUT /api/request-settings`，以及 `PUT /api/preferences` 这个通用入口。
+/// 放在一处，三条路径都拦得住。
+///
+/// 这一行还多两件事：
+///
+/// - **读不出 [`crate::domain::RequestSettings`] 的值一律报错**，不当作「这不是设置、照旧
+///   存下去」。放过它就留下一条绕路：请求体里 `timeoutMs` 的类型写错让整体反序列化失败，
+///   校验因此根本没跑，而同一个请求体里的 `tls.clientKeyPath` 正粘着私钥正文。
+/// - **存重新序列化后的那一份**，而不是请求体原样。域类型不收陌生键，原样存会把调用方
+///   塞进来的陌生键连同其中的证书正文留在这一行里。
 pub fn set<T: Serialize>(conn: &mut Connection, key: &str, value: &T) -> Result<(), AppError> {
     let raw = serde_json::to_string(value)?;
+    let raw = if key == keys::REQUEST_SETTINGS {
+        let settings: crate::domain::RequestSettings = serde_json::from_str(&raw).map_err(|e| {
+            AppError::Validation(format!(
+                "request_settings 这一行的形状不对：{e}。这一行只存出站请求设置，\
+                 字段名是 timeoutMs / followRedirects / maxResponseSizeKb / tls"
+            ))
+        })?;
+        settings.tls.validate()?;
+        serde_json::to_string(&settings)?
+    } else {
+        raw
+    };
     conn.execute(
         "INSERT INTO preferences (key, value) VALUES (?1, ?2) \
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -173,6 +199,11 @@ pub fn request_settings(conn: &mut Connection) -> Result<crate::domain::RequestS
 }
 
 /// 持久化出站请求旋钮。
+///
+/// TLS 那三个路径字段的校验在 [`set`] 里做：那一行有三条写路径（桌面端的专用命令、
+/// `PUT /api/request-settings` 与 `PUT /api/preferences` 这个通用入口），把校验放在
+/// [`set`] 那一处，三条路径都拦得住。形状不对的值与域类型不收的陌生键也在那里处理，
+/// 详见 [`set`] 自己的文档。
 pub fn set_request_settings(
     conn: &mut Connection,
     settings: &crate::domain::RequestSettings,

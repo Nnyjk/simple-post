@@ -122,10 +122,21 @@ fn every_capability_row_names_a_registered_tool() {
 /// 「会话数」。详细的解释属于 `simple-post://spec-authoring` 那份按需读取的指南，
 /// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
 ///
-/// **上限怎么算出来的。** 紧凑 JSON 约 **4.70 字符 / token**（`cl100k_base` 实测；
-/// 「字符数 ÷ 3」高估六成），40 718 字符 ≈ **8 672 tokens**，故上限取 41 400 字符。
+/// **上限怎么算出来的。** 紧凑 JSON 约 **4.71 字节 / token**（`cl100k_base` 实测；
+/// 「字符数 ÷ 3」高估六成），42 735 字节 ≈ **9 079 tokens**，故上限取 43 400 字节。
 /// 超限时把长说明移到 `simple-post://spec-authoring`，不要扩大工具描述。
-const TOOLS_LIST_BUDGET_CHARS: usize = 41_400;
+///
+/// **上限从 41 400 提到 43 400 的原因**：HTTPS 出站设置（`tls`）进了
+/// `endpoint_create` / `endpoint_update` 两个写工具的 schema，也进了
+/// `api_run_request` / `api_call_endpoint` 两个发送工具的 `settings_override`
+/// 说明。这几段说明都已压到一行，且每一段都带着一条调用方必须知道的规则
+/// （端点给了这份设置就**整体**取代全局默认；证书只存文件路径，路径由运行请求的
+/// 那台机器解析），再删就变成「工具描述在骗人」。测量值从 40 718 涨到 42 735，
+/// 故上限同步提高，余量（665 字节）仍与原来的（682 字节）同一量级。
+///
+/// **上限量的是字节**：载荷里含中文描述，`String::len()` 按 UTF-8 字节算，
+/// 故同一份载荷是 42 673 字符、42 735 字节。
+const TOOLS_LIST_BUDGET_BYTES: usize = 43_400;
 
 #[test]
 fn the_tools_list_payload_stays_under_its_budget() {
@@ -141,20 +152,24 @@ fn the_tools_list_payload_stays_under_its_budget() {
     // `tools/list` 响应里 axum 的 `Json` 响应体一致。
     let payload = serde_json::to_string(&descriptors).expect("描述符序列化成 JSON");
     assert!(
-        payload.len() <= TOOLS_LIST_BUDGET_CHARS,
-        "tools/list 是 {} 字符（约 {} tokens），超过上限 {} 字符。\
+        payload.len() <= TOOLS_LIST_BUDGET_BYTES,
+        "tools/list 是 {} 字节（约 {} tokens），超过上限 {} 字节。\
          详细的规则与例子放 `simple-post://spec-authoring` 那份指南，别往工具描述里塞。",
         payload.len(),
         payload.len() * 100 / 473,
-        TOOLS_LIST_BUDGET_CHARS
+        TOOLS_LIST_BUDGET_BYTES
     );
 }
 
 /// 打印 `tools/list` 的体积与逐条分布，供调整描述时对照。
 ///
-/// 这个测试不做断言，只报告数字，并把整份负载写到 `target/tools-list.json`，
-/// 好让外面的分词器量真实 token 数。用
+/// 这个测试不做断言，只报告数字，并把整份负载写到 `target/` 下，好让外面的分词器
+/// 量真实 token 数。用
 /// `cargo test -p simple-post-mcp -- --ignored --nocapture report_the_tools_list_size` 跑。
+///
+/// 写出**两份**：`tools-list.json` 是紧凑形式（真正上线的那份，也是上限量的那份），
+/// `tools-list.pretty.json` 是缩进形式（人读的）。**分词器要量紧凑那份** ——
+/// 缩进那份的字节数是紧凑那份的 1.7 倍，量它会得到一个与上限无关的数字。
 #[test]
 #[ignore = "只在调整描述时手动跑：写 target/tools-list.json"]
 fn report_the_tools_list_size() {
@@ -185,14 +200,18 @@ fn report_the_tools_list_size() {
             input_schema: e.schema.clone(),
         })
         .collect();
-    let payload = serde_json::to_string_pretty(&descriptors).expect("描述符序列化成 JSON");
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tools-list.json");
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    std::fs::write(&path, payload).expect("写下 tools-list.json");
-    println!("wrote {}", path.display());
+    // 紧凑形式：真正上线的形状，也是上限量的那份。
+    let compact = serde_json::to_string(&descriptors).expect("描述符序列化成 JSON");
+    let pretty = serde_json::to_string_pretty(&descriptors).expect("描述符序列化成 JSON");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+    let _ = std::fs::create_dir_all(&dir);
+    let compact_path = dir.join("tools-list.json");
+    let pretty_path = dir.join("tools-list.pretty.json");
+    std::fs::write(&compact_path, &compact).expect("写下 tools-list.json");
+    std::fs::write(&pretty_path, &pretty).expect("写下 tools-list.pretty.json");
+    println!("紧凑 {} 字节，缩进 {} 字节", compact.len(), pretty.len());
+    println!("wrote {}", compact_path.display());
+    println!("wrote {}", pretty_path.display());
 }
 
 /// Gate B 回归网 —— 权限检查结果绝不丢弃。

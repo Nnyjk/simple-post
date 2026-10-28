@@ -132,7 +132,10 @@ pub async fn ensure_token(pool: &DbPool, cfg: &OAuth2Auth) -> Result<OAuth2Token
     // 两种流程都换不了时才把原始错误交出去。
     if cfg.can_refresh() {
         if let Some(rt) = cached.refresh_token.as_deref() {
-            match refresh_via_http(cfg, rt).await {
+            // token 端点也是一次 HTTPS 出站，故它用**全局默认**的设置：token 端点不属于
+            // 某个端点，端点级的覆盖对它没有意义。
+            let tls = crate::tls::global_default(pool);
+            match refresh_via_http(cfg, rt, &tls).await {
                 Ok(fresh) => return store(pool, &key, fresh, Some(rt)),
                 Err(e) => tracing::debug!("oauth2: refresh_token grant failed, refetching: {e}"),
             }
@@ -148,7 +151,9 @@ pub async fn ensure_token(pool: &DbPool, cfg: &OAuth2Auth) -> Result<OAuth2Token
 pub async fn fetch_and_store(pool: &DbPool, cfg: &OAuth2Auth) -> Result<OAuth2Token, AppError> {
     validate(cfg)?;
     let key = auth_key(cfg);
-    let fresh = fetch_via_http(cfg).await?;
+    // token 端点用全局默认的 HTTPS 设置，理由同 [`ensure_token`]。
+    let tls = crate::tls::global_default(pool);
+    let fresh = fetch_via_http(cfg, &tls).await?;
     store(pool, &key, fresh, None)
 }
 

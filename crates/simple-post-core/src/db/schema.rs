@@ -124,6 +124,13 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "TEXT NOT NULL DEFAULT '[]'",
     ),
     (
+        // 端点自己的 HTTPS 出站设置。纯增量：旧行读回来是 NULL，
+        // 语义等价于「继承全局默认」。
+        "endpoint_details",
+        "tls_json",
+        "TEXT",
+    ),
+    (
         // 用户收藏了这条历史。纯增量：旧行读回来是「未收藏」，语义等价于裁剪规则
         // 只动未收藏的行。
         "response_history",

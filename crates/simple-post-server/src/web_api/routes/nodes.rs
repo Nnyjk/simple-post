@@ -53,7 +53,11 @@ pub(crate) async fn http_send(
                 timeout_ms: body.timeout_ms,
                 follow_redirects: body.follow_redirects,
                 max_response_size_kb: body.max_response_size_kb,
+                tls: body.tls.unwrap_or_default(),
             },
+            // 端点自己的 HTTPS 设置。`None` = 继承全局默认，合成在
+            // `script::send_with_scripts` 里做，故 REST 与 Tauri 两侧同一个算法。
+            tls_override: body.tls_override,
             // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
             script_override: Some(ScriptOverride {
                 pre_request: body.pre_request_script,

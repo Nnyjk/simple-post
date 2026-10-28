@@ -110,6 +110,7 @@ fn rich_detail(node_id: String, def_id: &str) -> EndpointDetail {
         tags: vec!["用户".into()],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     }
 }
 

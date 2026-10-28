@@ -30,6 +30,7 @@ import type {
   KeyValue,
   RequestBody,
   ScriptOutcome,
+  TlsSettings,
 } from '@/types/domain';
 import type { RequestSettings } from '@/stores/app-store';
 import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
@@ -297,6 +298,10 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
+      // HTTPS 出站的全局默认（设置面板里改的那份）。裸 URL 请求没有端点，
+      // 故它没有自己那份，端点级覆盖一律缺席。
+      tls: input.settings.tls,
+      tlsOverride: null,
     },
     input,
     built.url,
@@ -343,6 +348,13 @@ export interface SendPreparedInput {
   preRequestScript?: string;
   /** 端点自己的测试脚本，覆盖规则同上。 */
   testScript?: string;
+  /**
+   * 该端点自己的 HTTPS 出站设置。`null` 或缺席 = 继承全局默认
+   * （`settings.tls`）。
+   *
+   * 端点给了设置就**整体**取代全局那份，故后端收到的不是逐字段的补丁。
+   */
+  tlsOverride?: TlsSettings | null;
 }
 
 /** 一次发送的结果：响应 + 脚本的产出（没有脚本时 `script` 为 null）。 */
@@ -447,6 +459,9 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
       // 端点自己那两段脚本：界面上此刻生效的那份，覆盖后端存的那份。
       preRequestScript: input.preRequestScript ?? null,
       testScript: input.testScript ?? null,
+      // HTTPS 出站：全局默认那份 + 端点自己那份（`null` = 继承全局）。
+      tls: input.settings.tls,
+      tlsOverride: input.tlsOverride ?? null,
     },
     shape,
     // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的

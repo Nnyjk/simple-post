@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::mcp::{AppState, CallToolResult};
 use crate::variable_fill::ResolvedEndpoint;
 use simple_post_core::db::DbPool;
-use simple_post_core::domain::{Environment, RequestSettings};
+use simple_post_core::domain::{Environment, RequestSettings, TlsSettings};
 use simple_post_core::error::AppError;
 
 use super::envelope::build_result_envelope;
@@ -18,6 +18,11 @@ use super::multipart;
 ///
 /// `endpoint_id` 决定脚本链能不能装配（有它才有 collection 那几段）；临时请求没有
 /// 端点，故传 `None` —— 它的请求里没有脚本可跑。
+///
+/// `tls_override` 是这次请求生效的 HTTPS 设置里**端点以上的那一份**：全局默认由
+/// `settings.tls` 带来，端点自带的那份与本次调用的临时覆盖已在调用方合成好。
+/// `None` = 继承全局默认。合成由 core 的 `send_with_scripts` 完成（它在
+/// `crate::tls::resolve` 里把两档合起来），故 MCP 侧只交出该交的那一份。
 pub(super) async fn send_resolved(
     state: &AppState,
     method: &str,
@@ -25,6 +30,7 @@ pub(super) async fn send_resolved(
     env: Option<&Environment>,
     endpoint_id: Option<String>,
     settings: RequestSettings,
+    tls_override: Option<TlsSettings>,
 ) -> Result<CallToolResult, AppError> {
     let ResolvedEndpoint {
         url,
@@ -99,6 +105,9 @@ pub(super) async fn send_resolved(
             settings,
             // MCP 端没有「界面上未保存的草稿」这回事，用的就是存的那份脚本。
             script_override: None,
+            // HTTPS 出站设置：全局默认（`settings.tls`）与端点以上的那一份
+            // （`tls_override`）由 core 的 `send_with_scripts` 合成，MCP 侧不合成。
+            tls_override,
         },
     )
     .await?;
@@ -137,6 +146,11 @@ pub(crate) fn env_snapshot(env: Option<&Environment>) -> simple_post_core::scrip
 /// 起点是**用户配置的那一份**（`preferences` 的 `request_settings` 行，桌面端在设置
 /// 面板里改的就是它），调用方的覆盖值再盖上去。故界面上把超时调成 5 秒，MCP 侧也是
 /// 5 秒；行缺失时用 `RequestSettings::default()`。
+///
+/// **`settings.tls` 不在这里被覆盖**：它是 HTTPS 出站的**全局默认**，而本次调用的
+/// 临时覆盖要压过端点自带的那一份，故它走 `send_resolved` 的 `tls_override` 参数，
+/// 由 core 的 `send_with_scripts` 与全局默认合成。写进 `settings.tls` 的话，端点
+/// 自带的那份就被顶掉了。
 pub(crate) fn resolve_settings(
     pool: &DbPool,
     flat: (Option<u64>, Option<bool>, Option<u64>),

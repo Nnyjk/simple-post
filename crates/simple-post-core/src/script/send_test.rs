@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::*;
 use crate::db;
-use crate::domain::{EnvSnapshot, RequestSettings};
+use crate::domain::{EnvSnapshot, RequestSettings, TlsSettings};
 
 /// 回固定响应的假上游，并把收到的请求行记下。
 struct Stub {
@@ -65,6 +65,7 @@ fn settings() -> RequestSettings {
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 1_024,
+        tls: TlsSettings::default(),
     }
 }
 
@@ -93,6 +94,7 @@ async fn a_failed_environment_write_back_does_not_fail_the_send() {
                 variables: BTreeMap::new(),
             },
             settings: settings(),
+            tls_override: None,
             // 脚本确实写了变量，才会走到回写那一步。
             script_override: Some(ScriptOverride {
                 pre_request: Some("pm.environment.set('token', 'v');".to_string()),
@@ -138,6 +140,7 @@ async fn the_pre_request_writes_are_visible_to_the_test_phase() {
                 variables: BTreeMap::new(),
             },
             settings: settings(),
+            tls_override: None,
             script_override: Some(ScriptOverride {
                 pre_request: Some("pm.environment.set('token', 'from-pre');".to_string()),
                 test: Some(
@@ -174,6 +177,7 @@ async fn the_scripts_rewrite_the_request_that_is_actually_sent() {
             request: request(&format!("{}/x", upstream.url)),
             env: EnvSnapshot::default(),
             settings: settings(),
+            tls_override: None,
             script_override: Some(ScriptOverride {
                 pre_request: Some("pm.request.url = pm.request.url + '/rewritten';".to_string()),
                 test: None,

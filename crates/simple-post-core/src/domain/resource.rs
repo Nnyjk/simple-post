@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::auth::{AuthConfig, KeyValue, RequestBody};
 use super::http::HttpMethod;
+use super::settings::TlsSettings;
 use super::util::serialises_to_empty_object;
 
 // base url
@@ -185,6 +186,12 @@ pub struct EndpointDetail {
     /// 响应回来之后跑的那段脚本。`None` = 没有脚本。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_script: Option<String>,
+    /// 该端点自己的 HTTPS 出站设置。`None` = 继承全局默认（`RequestSettings::tls`）。
+    ///
+    /// 端点给了设置就**整体**取代全局那份，故这一个字段足以表达「这个接口用另一套证书」。
+    /// 合成规则见 [`crate::tls::resolve`]。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsSettings>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -234,6 +241,10 @@ pub struct EndpointDetailPatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test_script: Option<Option<String>>,
+    /// 缺席 = 不动，`null` = 清除（回到继承全局），设值 = 写入。
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls: Option<Option<TlsSettings>>,
 }
 
 impl EndpointDetailPatch {

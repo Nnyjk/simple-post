@@ -64,7 +64,7 @@ pub async fn import_preview(
     pool: &DbPool,
     opts: &ImportPreviewOpts,
 ) -> Result<ImportPreviewDto, AppError> {
-    let source = resolve_content(opts.content.as_deref(), opts.url.as_deref()).await?;
+    let source = resolve_content(pool, opts.content.as_deref(), opts.url.as_deref()).await?;
     let (format, parsed) = import::sniff_and_parse(&source.text)?;
 
     // 去重账本只灌**已落库**的行：预览要回答的是「这些条目项目里已经有了吗」，
@@ -250,7 +250,14 @@ pub fn export_document(
 
 /// 文件内容与 URL 二选一。URL 分支的出站请求**必须**经 `execute_with_policy`：
 /// 那里的 `check_url` 是本仓库唯一的 SSRF 防护，绕开它等于把服务端变成开放代理。
-async fn resolve_content(content: Option<&str>, url: Option<&str>) -> Result<Resolved, AppError> {
+///
+/// 这次出站用**全局默认**的 HTTPS 设置：拉文档这件事不属于某个端点，端点级的覆盖对它
+/// 没有意义；而用户给内部文档系统配的 CA 证书与跳过校验，对这一步同样有效。
+async fn resolve_content(
+    pool: &DbPool,
+    content: Option<&str>,
+    url: Option<&str>,
+) -> Result<Resolved, AppError> {
     if let Some(c) = content.filter(|c| !c.trim().is_empty()) {
         return Ok(Resolved {
             text: c.to_string(),
@@ -273,6 +280,7 @@ async fn resolve_content(content: Option<&str>, url: Option<&str>) -> Result<Res
             timeout_ms: 30_000,
             follow_redirects: true,
             max_response_size_kb: FETCH_MAX_KB,
+            tls: simple_post_core::tls::global_default(pool),
         },
         OutboundPolicy::from_env(),
     )

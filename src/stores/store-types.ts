@@ -7,7 +7,7 @@
  * 本文件只含类型加几个小的运行时常量。切片工厂只 import，从不调用它；运行时
  * 状态留在切片模块自己那里。
  */
-import type { AuthConfig, HttpMethod, KeyValue, RequestBody } from '@/types/domain';
+import type { AuthConfig, HttpMethod, KeyValue, RequestBody, TlsSettings } from '@/types/domain';
 
 /**
  * 视觉主题预设。驱动 document 根节点上的 CSS 变量。
@@ -16,6 +16,12 @@ import type { AuthConfig, HttpMethod, KeyValue, RequestBody } from '@/types/doma
  * 两边对「什么算合法主题」必须给出同一个答案。类型在这里再导出一次，别处照旧 import。
  */
 export type { Theme } from '@/lib/theme-boot';
+
+/**
+ * HTTPS 出站设置。定义在 `@/types/domain`（那里是 `simple_post_core::domain` 的镜像），
+ * 这里再导出一次，好让只关心 store 形状的调用方不必跨目录 import。
+ */
+export type { TlsSettings } from '@/types/domain';
 
 /**
  * HTTP 执行器的可调项。
@@ -27,6 +33,8 @@ export interface RequestSettings {
   timeoutMs: number;
   followRedirects: boolean;
   maxResponseSizeKb: number;
+  /** HTTPS 出站的**全局默认**。端点可以整体取代它，见 `EndpointDetail.tls`。 */
+  tls: TlsSettings;
 }
 
 /**
@@ -191,6 +199,14 @@ export interface EndpointDraft {
   preRequestScript?: string;
   /** 响应回来之后跑的那段脚本。 */
   testScript?: string;
+  /**
+   * 该端点自己的 HTTPS 出站设置。`null` = 回到继承全局默认
+   * （`RequestSettings.tls`）。
+   *
+   * 三态与其它字段不同：`undefined` = 用户没碰过这一项（保存时不动已存的那一行），
+   * `null` = 明确回到继承全局（保存时写 `null`），一份设置 = 端点自带的那份。
+   */
+  tls?: TlsSettings | null;
 }
 
 /** 某个新建对话框的内存草稿。 */

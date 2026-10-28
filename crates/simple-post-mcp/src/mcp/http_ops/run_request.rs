@@ -14,6 +14,7 @@ use super::args::RunRequestArgs;
 use super::dynamic::resolve_dynamic_values;
 use super::input::{
     extract_settings, flatten_key_values, format_method, parse_auth, parse_body_mode,
+    resolve_tls_override,
 };
 use super::project::project_for;
 use super::send::{resolve_settings, send_resolved};
@@ -85,6 +86,8 @@ pub(super) async fn tool_api_run_request(
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        // 临时请求没有端点，故它没有「端点自带的那份」HTTPS 设置。
+        tls: None,
     };
 
     let overrides = crate::variable_fill::EndpointOverrides {
@@ -108,6 +111,10 @@ pub(super) async fn tool_api_run_request(
         a.settings_override.as_ref(),
     );
 
+    // HTTPS 出站设置：临时请求没有端点，故只有本次调用的临时覆盖这一档；它缺席时
+    // 继承全局默认。
+    let tls_override = resolve_tls_override(a.settings_override.as_ref(), None)?;
+
     send_resolved(
         state,
         &format_method(&method),
@@ -115,6 +122,7 @@ pub(super) async fn tool_api_run_request(
         env.as_ref(),
         None,
         settings,
+        tls_override,
     )
     .await
 }
