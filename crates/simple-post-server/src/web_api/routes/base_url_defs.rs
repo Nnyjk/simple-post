@@ -33,8 +33,7 @@ pub(crate) async fn base_url_defs_list(
 
 /// 往项目的服务列表里加一个。
 ///
-/// 编排住在 `crate::project_api`（server crate），Tauri 命令调的是同一个函数，故两条
-/// transport 不会对「服务 id 归谁」各说各话。这一侧只负责线格式。
+/// 这一侧只负责线格式：`BaseUrlDefCreateBody` 的字段形状。
 pub(crate) async fn base_url_defs_create(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,
@@ -82,8 +81,6 @@ pub(crate) async fn base_url_defs_delete(
 ///
 /// ★ 就是 `Project.defaultBaseUrlDefinitionId`——任何没点名服务的 endpoint 都拿它
 /// 解析——故直接回传更新后的值，而不是 `204` 加一次重读。
-///
-/// 编排住在 `crate::project_api`（server crate），Tauri 命令调的是同一个函数。
 pub(crate) async fn base_url_defs_set_default(
     State(s): State<Arc<WebState>>,
     Path(project_id): Path<String>,

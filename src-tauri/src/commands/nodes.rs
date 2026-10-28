@@ -93,8 +93,7 @@ pub fn nodes_search_paths(
 ///
 /// 只有 module 需要 `root_id`；collection / endpoint 从父节点推出，两者不可能打架。
 ///
-/// 编排住在 `crate::project_api`（server crate），REST 路由调的是同一个函数。命令这一
-/// 侧只负责线格式：`kind` 是字符串，在这里解析成枚举。
+/// 命令这一侧只负责线格式：`kind` 是字符串，在这里解析成枚举。
 #[tauri::command]
 pub fn nodes_create(
     state: State<DbPool>,

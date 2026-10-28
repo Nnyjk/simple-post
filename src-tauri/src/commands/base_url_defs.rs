@@ -31,8 +31,7 @@ pub fn base_url_defs_list(
 /// 项目即作用域。项目里还没有 ★ 就仍是 `None`：建服务不等于选一个，用户没挑过默认的项目
 /// 就该在没有 base URL 的状态下发出去，而不是带上一个他从未选过的地址。
 ///
-/// 编排住在 `crate::project_api`（server crate），REST handler 共用它，两个传输才对
-/// 「服务 id 归谁」达成一致。命令这一侧只负责线格式：`opts.id` 是调用方铸的 id。
+/// 命令这一侧只负责线格式：`opts.id` 是调用方铸的 id。
 #[tauri::command]
 pub fn base_url_defs_create(
     state: State<DbPool>,
@@ -65,8 +64,6 @@ pub fn base_url_defs_delete(state: State<DbPool>, id: String) -> Result<(), AppE
 ///
 /// 返回 `Project` 而非空：`defaultBaseUrlDefinitionId` 是活的，没指名服务的 endpoint
 /// 按它解析，返回空会让调用方从「无」猜出新值，再重读一次确认写入。
-///
-/// 编排住在 `crate::project_api`（server crate），REST handler 共用它。
 #[tauri::command]
 pub fn base_url_defs_set_default(
     state: State<DbPool>,

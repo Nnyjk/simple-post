@@ -22,9 +22,7 @@ pub fn projects_get(state: State<DbPool>, id: String) -> Result<Project, AppErro
 
 /// 建项目，并种下它的默认环境。
 ///
-/// 编排住在 `crate::project_api`（server crate），REST 路由调的是同一个函数，故两条
-/// transport 不会对「建项目种了什么」各说各话。命令这一侧只负责线格式：`name` 必填
-/// 由 IPC 层保证，`opts` 缺席即全空。
+/// 命令这一侧只负责线格式：`name` 必填由 IPC 层保证，`opts` 缺席即全空。
 #[tauri::command]
 pub fn projects_create(
     state: State<DbPool>,

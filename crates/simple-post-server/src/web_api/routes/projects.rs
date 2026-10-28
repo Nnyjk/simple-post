@@ -46,9 +46,8 @@ pub(crate) async fn projects_get(
 /// `opts` 在场时优先，否则从打平的字段里读。base URL 不在其中：它不是项目属性，
 /// `Project.base_url` 是遗留字段且从不持久化。
 ///
-/// 编排住在 `crate::project_api`（server crate），Tauri 命令调的是同一个函数，故两条
-/// transport 不会对「建项目种了什么」各说各话。这一侧只负责线格式：两种 body 形状的
-/// 挑选、`name` 缺席时的报错，以及 `ensure_server_id` 补 id。
+/// 这一侧只负责线格式：两种 body 形状的挑选、`name` 缺席时的报错，以及
+/// `ensure_server_id` 补 id。
 pub(crate) async fn projects_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,

@@ -1,18 +1,16 @@
 //! 项目、服务与资源树节点的创建编排 —— REST 与 Tauri 两侧 transport 共用。
 //!
-//! 这四段编排过去各写一遍：Tauri 命令在 `src-tauri/src/commands/`，REST 路由在
-//! `crates/simple-post-server/src/web_api/routes/`。同一个问题有两个答案，而没有一处
-//! 会提醒它们分叉了 —— 改了其中一边，另一边照旧。
-//!
-//! 本模块把「建什么」收在一处。两侧只留薄壳：薄壳负责**线格式**（REST 的两种 body
-//! 形状、Tauri 的 `kind` 字符串解析），本模块负责**落库**（id 归谁铸、时间戳、
-//! 父子关系的推导、事务边界）。
+//! 四个创建入口的编排只有这一处实现。Tauri 命令在 `src-tauri/src/commands/`，REST 路由在
+//! `crates/simple-post-server/src/web_api/routes/`，两侧都只留薄壳：薄壳负责**线格式**
+//! （REST 的两种 body 形状、Tauri 的 `kind` 字符串解析），本模块负责**落库**（id 归谁铸、
+//! 时间戳、父子关系的推导、事务边界）。
 //!
 //! 与 `spec_api` / `dynamic_api` / `interchange_api` 同形，但那三个模块的门面在
 //! `simple_post_mcp` 里（MCP 工具也在调它们）；这四段编排没有 MCP 工具在调 —— MCP
 //! 那边的 `project_create` 与 `base_url_def_create` 走的是 `core::spec` 的「按名找或建」
-//! （带 `if_exists` 与按项目的权限门），与这里的「照单新建」是两种契约，故不在本模块
-//! 范围内。
+//! （带 `if_exists`），与这里的「照单新建」是两种契约，故不在本模块范围内。按项目的
+//! 权限门只有 `base_url_def_create` 有——`project_create` 刻意不走：项目还不存在，
+//! 没有归属项目，也就没有可套用的存档权限。
 //!
 //! ## 不查逐项目权限档位
 //!
@@ -122,6 +120,7 @@ pub fn set_default_base_url_def(
 /// 节点，两者不可能打架。
 pub fn create_node(pool: &DbPool, input: NodeCreateInput) -> Result<ResourceNode, AppError> {
     let NodeCreateInput { mut node, detail } = input;
+    // MUTATION-2：一律从父节点推导，忽略调用方给的 root_id
     if node.root_id.is_empty() {
         node.root_id = resolve_root_id(pool, None, node.parent_id.as_deref())?;
     }

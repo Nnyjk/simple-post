@@ -169,8 +169,7 @@ pub(crate) async fn nodes_get(
 /// `db::nodes::create` 拒绝不匹配的配对——endpoint 没有 payload、或集合带着
 /// payload，都不行——而不是留下一棵读者打不开的树。
 ///
-/// 编排住在 `crate::project_api`（server crate），Tauri 命令调的是同一个函数。这一侧只
-/// 负责线格式：`ensure_server_id` 补 id，`kind` 由 body 直接反序列化成枚举。
+/// 这一侧只负责线格式：`ensure_server_id` 补 id，`kind` 由 body 直接反序列化成枚举。
 pub(crate) async fn nodes_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
