@@ -21,7 +21,7 @@ use oauth2::{
     TokenUrl,
 };
 
-use crate::domain::{OAuth2Auth, OAuth2ClientAuth, OAuth2GrantType};
+use crate::domain::{OAuth2Auth, OAuth2ClientAuth, OAuth2GrantType, TlsSettings};
 use crate::error::AppError;
 
 use super::http_client::ExecutorClient;
@@ -124,14 +124,17 @@ macro_rules! decorate {
 pub(crate) use decorate;
 
 /// 一次换 token（三种有 token 端点的流程）。
-pub(super) async fn fetch_via_http(cfg: &OAuth2Auth) -> Result<OAuth2Token, AppError> {
+pub(super) async fn fetch_via_http(
+    cfg: &OAuth2Auth,
+    tls: &TlsSettings,
+) -> Result<OAuth2Token, AppError> {
     let client = client_for(cfg)?;
 
     let resp = match cfg.grant_type {
         OAuth2GrantType::ClientCredentials => {
             let mut r = client.exchange_client_credentials();
             decorate!(r, cfg, scope);
-            r.request_async(&ExecutorClient)
+            r.request_async(&ExecutorClient { tls: tls.clone() })
                 .await
                 .map_err(map_request_error)?
         }
@@ -152,7 +155,7 @@ pub(super) async fn fetch_via_http(cfg: &OAuth2Auth) -> Result<OAuth2Token, AppE
                 r = r.add_extra_param("scope", cfg.scope.trim().to_string());
             }
             decorate!(r, cfg, no_scope);
-            r.request_async(&ExecutorClient)
+            r.request_async(&ExecutorClient { tls: tls.clone() })
                 .await
                 .map_err(map_request_error)?
         }
@@ -162,7 +165,7 @@ pub(super) async fn fetch_via_http(cfg: &OAuth2Auth) -> Result<OAuth2Token, AppE
             let password = ResourceOwnerPassword::new(cfg.password.clone());
             let mut r = client.exchange_password(&username, &password);
             decorate!(r, cfg, scope);
-            r.request_async(&ExecutorClient)
+            r.request_async(&ExecutorClient { tls: tls.clone() })
                 .await
                 .map_err(map_request_error)?
         }
@@ -177,13 +180,14 @@ pub(super) async fn fetch_via_http(cfg: &OAuth2Auth) -> Result<OAuth2Token, AppE
 pub(super) async fn refresh_via_http(
     cfg: &OAuth2Auth,
     refresh_token: &str,
+    tls: &TlsSettings,
 ) -> Result<OAuth2Token, AppError> {
     let client = client_for(cfg)?;
     let token = RefreshToken::new(refresh_token.to_string());
     let mut r = client.exchange_refresh_token(&token);
     decorate!(r, cfg, scope);
     let resp = r
-        .request_async(&ExecutorClient)
+        .request_async(&ExecutorClient { tls: tls.clone() })
         .await
         .map_err(map_request_error)?;
     Ok(to_token(resp))

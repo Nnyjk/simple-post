@@ -76,6 +76,7 @@ fn detail(input: &Input) -> EndpointDetail {
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     }
 }
 

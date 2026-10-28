@@ -12,7 +12,7 @@ use simple_post_core::error::AppError;
 
 use super::args::CallEndpointArgs;
 use super::dynamic::resolve_dynamic_values;
-use super::input::{extract_endpoint_settings, format_method};
+use super::input::{extract_endpoint_settings, format_method, resolve_tls_override};
 use super::send::{resolve_settings, send_resolved};
 use super::EMPTY_PROJECT;
 
@@ -85,6 +85,10 @@ pub(super) async fn tool_api_call_endpoint(
         a.settings_override.as_ref(),
     );
 
+    // HTTPS 出站设置：本次调用的临时覆盖压过端点自带的那一份，两档都缺席时继承
+    // 全局默认。合成规则只有 `input::resolve_tls_override` 那一处。
+    let tls_override = resolve_tls_override(a.settings_override.as_ref(), endpoint.tls.clone())?;
+
     send_resolved(
         state,
         &format_method(&endpoint.method),
@@ -92,6 +96,7 @@ pub(super) async fn tool_api_call_endpoint(
         env.as_ref(),
         Some(endpoint.node_id.clone()),
         settings,
+        tls_override,
     )
     .await
 }

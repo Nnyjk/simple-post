@@ -768,6 +768,7 @@ fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
                 tags: vec![],
                 pre_request_script: None,
                 test_script: None,
+                tls: None,
             }),
         )?;
         Ok(())

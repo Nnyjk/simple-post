@@ -160,10 +160,15 @@ pub fn request_settings(conn: &mut Connection) -> Result<crate::domain::RequestS
 }
 
 /// 持久化出站请求旋钮。
+///
+/// 写之前校验 TLS 那三个路径字段：它们必须真的是路径。用户把证书正文粘进设置面板的
+/// 输入框，那段文本会原样落进这一行，而 `GET /api/preferences` 把整行原样返回 ——
+/// 「证书只存路径，不存内容」要在写入口守住。
 pub fn set_request_settings(
     conn: &mut Connection,
     settings: &crate::domain::RequestSettings,
 ) -> Result<(), AppError> {
+    settings.tls.validate()?;
     set(conn, keys::REQUEST_SETTINGS, settings)
 }
 

@@ -104,6 +104,7 @@ fn detail(case: &EndpointCase) -> EndpointDetail {
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     }
 }
 

@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use super::args::{
     mint_endpoint_id, EndpointCreateArgs, EndpointDeleteArgs, EndpointDuplicateArgs,
-    EndpointMoveArgs,
+    EndpointMoveArgs, TlsSettingsInput,
 };
 use super::input::{build_auth, parse_body_mode, reject_schema_shaped_payload};
 use super::missing::{missing_pieces, project_of};
@@ -214,6 +214,8 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         // 两段脚本随请求配置一次写入，创建后不需要再调 `endpoint_update`。
         pre_request_script: a.pre_request_script,
         test_script: a.test_script,
+        // 端点自己的 HTTPS 出站设置。`None` = 继承全局默认。
+        tls: a.tls.map(Into::into),
     };
     // node 与 detail 一起落库：没有配置行的端点是一棵打不开的树。
     simple_post_core::db::with_tx(&state.pool, |c| {
@@ -316,6 +318,13 @@ pub(super) async fn tool_endpoint_update(
         // 两段脚本同样要能从这里读进来：写死 `None` 等于让 agent 永远配不了脚本。
         pre_request_script: patch_field::<String>(&patch_obj, "pre_request_script")?,
         test_script: patch_field::<String>(&patch_obj, "test_script")?,
+        // HTTPS 出站设置走 `double_option`：缺席 = 不动，显式 `null` = 清除端点自带
+        // 那份（回到继承全局），设值 = 写入。`patch_field` 的三档语义与域类型上的
+        // `Option<Option<TlsSettings>>` 一一对应。
+        //
+        // 线格式用 `TlsSettingsInput` 而不是域类型：拼错的键名要报错，不能静默丢掉
+        // 一个键后写进一份「看起来设好了、其实没有」的设置。
+        tls: patch_field::<TlsSettingsInput>(&patch_obj, "tls")?.map(|inner| inner.map(Into::into)),
     };
     // 载荷与定义写反了就地拒绝 —— 与 `endpoint_create` 同一道门。只查这次 patch
     // 点名的 body：没点名 body 的 patch 不该因为端点早就存着的那份载荷被拒。
@@ -329,7 +338,7 @@ pub(super) async fn tool_endpoint_update(
              Accepted fields: method, url, params, headers, body, auth, \
              tags, environment_id, base_url_definition_id, \
              base_url_override, docs, notes, pre_request_script, \
-             test_script, name, description, sort_order"
+             test_script, tls, name, description, sort_order"
                 .into(),
         ));
     }

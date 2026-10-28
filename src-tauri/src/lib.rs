@@ -71,6 +71,11 @@ async fn http_request(
     timeout_ms: u64,
     follow_redirects: bool,
     max_response_size_kb: u64,
+    // HTTPS 出站的**全局默认**（设置面板里改的那份）。缺席 = 用缺省值。
+    tls: Option<crate::domain::TlsSettings>,
+    // 该端点自己的 HTTPS 出站设置。`None` = 继承全局默认。
+    // 端点给了设置就**整体**取代全局那份，故它不是逐字段的覆盖。
+    tls_override: Option<crate::domain::TlsSettings>,
     endpoint_id: Option<String>,
     env: Option<crate::domain::EnvSnapshot>,
     pre_request_script: Option<String>,
@@ -91,7 +96,11 @@ async fn http_request(
                 timeout_ms,
                 follow_redirects,
                 max_response_size_kb,
+                tls: tls.unwrap_or_default(),
             },
+            // 端点自己的 HTTPS 设置。`None` = 继承全局默认，合成在
+            // `script::send_with_scripts` 里做，故桌面侧与 REST 侧同一个算法。
+            tls_override,
             // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
             script_override: Some(crate::script::ScriptOverride {
                 pre_request: pre_request_script,

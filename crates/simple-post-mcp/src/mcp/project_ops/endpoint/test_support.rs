@@ -85,6 +85,7 @@ pub(super) fn bare_detail(node_id: &str) -> EndpointDetail {
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     }
 }
 

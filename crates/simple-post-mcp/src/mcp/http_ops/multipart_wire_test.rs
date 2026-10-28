@@ -130,6 +130,8 @@ fn capture(parts_json: &str) -> Captured {
         timeout_ms: 10_000,
         follow_redirects: false,
         max_response_size_kb: 1024,
+        // 这条用例验的是 multipart 的字节形状，HTTPS 设置用默认值。
+        tls: Default::default(),
     };
 
     // 显式给策略，别让 CI 环境变量决定这条测试的行为。

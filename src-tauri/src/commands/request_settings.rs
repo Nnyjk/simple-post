@@ -39,6 +39,9 @@ pub fn request_settings_update(
         if let Some(m) = patch.max_response_size_kb {
             settings.max_response_size_kb = m;
         }
+        if let Some(t) = &patch.tls {
+            settings.tls = t.clone();
+        }
         crate::db::preferences::set(c, REQUEST_SETTINGS_KEY, &settings)?;
         Ok(settings)
     })

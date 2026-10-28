@@ -149,6 +149,9 @@ async fn fetch_from_endpoint(
             url,
             headers,
             body,
+            // 数据源端点自带的 HTTPS 出站设置：整体取代全局默认那份，与「按这个端点
+            // 发请求」是同一套规则。
+            tls: detail.tls.clone(),
         },
     )
     .await
@@ -193,6 +196,7 @@ async fn fetch_from_inline(
         tags: vec![],
         pre_request_script: None,
         test_script: None,
+        tls: None,
     };
 
     let overrides = EndpointOverrides::default();
@@ -228,6 +232,8 @@ async fn fetch_from_inline(
             url,
             headers,
             body,
+            // 内联请求没有端点行可继承，故用全局默认那份。
+            tls: None,
         },
     )
     .await
@@ -244,6 +250,12 @@ struct Outgoing {
     url: String,
     headers: Vec<(String, String)>,
     body: Option<String>,
+    /// 数据源端点自带的 HTTPS 出站设置。`None` = 用全局默认那份。
+    ///
+    /// 它是**端点自带的那份**，故整体取代全局默认 —— 与「按这个端点发请求」是同一套
+    /// 规则：同一个端点用 `api_call_endpoint` 能发出去，被动态变量引用时也必须能发
+    /// 出去，否则取数失败会退化成 `{{name}}` 字面量。
+    tls: Option<simple_post_core::domain::TlsSettings>,
 }
 
 /// 把组装好的请求发出去，并把传输层的结果折成 [`RawSource`]。
@@ -261,6 +273,7 @@ async fn send(
         url,
         headers,
         body,
+        tls,
     } = outgoing;
     let settings = crate::mcp::http_ops::resolve_settings(&ctx.pool, (None, None, None), None);
     // 脚本仍能读到环境变量，但写不进去：取数是一次「读」，不该顺手改写项目的环境。
@@ -284,6 +297,9 @@ async fn send(
             env,
             settings,
             script_override: None,
+            // 数据源端点自带的 HTTPS 出站设置。端点形态带它，内联请求没有端点行可继承，
+            // 故传 `None`（回到全局默认那份）。
+            tls_override: tls,
         },
     )
     .await
