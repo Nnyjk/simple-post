@@ -16,10 +16,13 @@
  *       endpoint id in the subtree). One `deleteNode` action covers
  *       all three tree types; `deleteProject` is the `rootId` scope.
  *
- *   (C) Persistence — `setTheme`/`updateRequestSettings` must
- *       persist to localStorage under `simple-post:prefs`. The init
- *       path is verified by source review since re-importing the
- *       module in the same Node process wouldn't re-run the IIFE.
+ *   (C) Persistence — `setTheme` must persist to localStorage under the
+ *       prefs key, and `updateRequestSettings` must send the request knobs
+ *       to the **backend** (they live in the `preferences` table, not in
+ *       localStorage). The init path is asserted by behaviour: the store
+ *       seeds its state from localStorage when the module is evaluated, so
+ *       the assertions compare what the store holds against what the
+ *       shared module (`src/lib/theme-boot/index.ts`) resolves.
  *
  * Run:
  *   npx tsx scripts/_verify_store.mjs
@@ -76,10 +79,45 @@ if (!g.window.__TAURI_INTERNALS__) g.window.__TAURI_INTERNALS__ = {};
 // Other commands (e.g. addEndpoint) won't be invoked by this script.
 // Setting `undefined` triggers the catch branch; `null` resolves
 // successfully. We pick success.
-mockIPC(async () => null);
+//
+// The calls are captured so the persistence section can assert what the
+// store sent to the backend: the request knobs live there, not in
+// localStorage.
+const ipcCalls = [];
+mockIPC(async (cmd, args) => {
+  ipcCalls.push({ cmd, args });
+  return null;
+});
+
+// ---------- import the shared module first ----------
+//
+// The prefs key comes from the shared module — the one place it is written
+// down. `index.html`'s first-frame script and the store both read it there.
+//
+// It is read *before* the store, because the store computes its initial
+// state while its module is evaluated: whatever the store should see has
+// to be in localStorage by then.
+const { default: themeBoot } = await import('../src/lib/theme-boot/index.ts');
+const KEY = themeBoot.PREFS_KEY;
+
+// Seed a theme the shared resolver rejects. With an empty store the
+// check below compares 'dark' with 'dark' and passes even if the store
+// ignored the resolver; with a rejected value the store has to have run
+// that value through it. The key comes from the shared module, so this
+// harness does not write a second copy of it.
+g.localStorage.setItem(KEY, JSON.stringify({ theme: 'blue' }));
 
 // ---------- import the store ----------
 const { useAppStore, useActiveProject } = await import('../src/stores/app-store.ts');
+
+// ---------- the state the store starts with ----------
+//
+// Captured right after the import, before any section below mutates it:
+// the persistence-init assertions are about the **initial** state, and the
+// sections that follow change it.
+const ls = g.localStorage;
+const initialState = useAppStore.getState();
+const initialPrefs = themeBoot.parsePrefs(ls.getItem(KEY));
 
 // ---------- helpers ----------
 let pass = 0;
@@ -278,9 +316,6 @@ await seedAndDelete('deleteProject', 'p1', ['ep1', 'ep2']);
 // ---------- (C) persistence write ----------
 console.log('\n=== (C) Persistence write ===');
 
-const ls = g.localStorage;
-const KEY = 'simple-post:prefs';
-
 {
   useAppStore.getState().setTheme('light');
   const raw = ls.getItem(KEY);
@@ -291,8 +326,8 @@ const KEY = 'simple-post:prefs';
     /* ignore */
   }
   line(
-    'setTheme("light") writes {theme:"light", requestSettings:{…}} to localStorage',
-    parsed?.theme === 'light' && parsed?.requestSettings?.timeoutMs === 30000,
+    'setTheme("light") writes {theme:"light"} to localStorage, and no request knobs',
+    parsed?.theme === 'light' && parsed?.requestSettings === undefined,
     JSON.stringify(parsed),
   );
 }
@@ -314,7 +349,12 @@ const KEY = 'simple-post:prefs';
 }
 
 {
+  // The request knobs live in the backend's `preferences` table — that is
+  // where MCP reads them from too. So this one asserts the *command* the
+  // store sent, not what it wrote to localStorage.
+  ipcCalls.length = 0;
   useAppStore.getState().updateRequestSettings({ timeoutMs: 60000 });
+  const call = ipcCalls.find((c) => c.args?.patch?.timeoutMs === 60000);
   const raw = ls.getItem(KEY);
   let parsed = null;
   try {
@@ -323,49 +363,59 @@ const KEY = 'simple-post:prefs';
     /* ignore */
   }
   line(
-    'updateRequestSettings({ timeoutMs: 60000 }) persists',
-    parsed?.requestSettings?.timeoutMs === 60000,
-    JSON.stringify(parsed?.requestSettings),
+    'updateRequestSettings({ timeoutMs: 60000 }) sends all three knobs to the backend',
+    !!call &&
+      call.args.patch.followRedirects === true &&
+      call.args.patch.maxResponseSizeKb === 5120,
+    JSON.stringify(call?.args?.patch ?? null),
+  );
+  line(
+    'updateRequestSettings leaves the request knobs out of localStorage',
+    parsed?.requestSettings === undefined,
+    JSON.stringify(parsed),
   );
 }
 
-// ---------- (D) persistence init (code review) ----------
-console.log('\n=== (D) Persistence init (code review) ===');
-// `slices/ui-prefs.ts`, not `ui-slice.ts`: the ui slice was split into
-// sub-factories and the prefs seed moved with it, so reading the barrel
-// here reports "not found" for a contract that is still very much in
-// force one directory over.
-const uiSrc = readFileSync(new URL('../src/stores/slices/ui-prefs.ts', import.meta.url), 'utf8');
-const hasLoadPrefs = /function loadPrefs\(\)/.test(uiSrc);
-const readsKeyConst = /const PREFS_KEY = 'simple-post:prefs'/.test(uiSrc);
-const readsKey = /window\.localStorage\.getItem\(PREFS_KEY\)/.test(uiSrc);
-const initialThemeUses = /const initialTheme: Theme = initialPrefs\.theme/.test(uiSrc);
-const initialReqUses =
-  /const initialRequestSettings: RequestSettings = \{[^]*?initialPrefs\.requestSettings/m.test(
-    uiSrc,
+// ---------- (D) persistence init ----------
+console.log('\n=== (D) Persistence init ===');
+// The init path is asserted by **behaviour**, not by matching the source
+// text: the store seeds its state from localStorage when the module is
+// evaluated, and the shape of that code changes for unrelated reasons
+// often enough that a regex on it goes stale without anyone noticing.
+//
+// The shared module is where the key and the theme rules live; the store
+// and the first-frame script in `index.html` both read them from there.
+{
+  const state = initialState;
+  const stored = initialPrefs;
+  line(
+    'the store seeds its theme through the shared resolver',
+    state.theme === themeBoot.resolveTheme(stored.theme),
+    `theme=${state.theme} stored=${JSON.stringify(stored.theme ?? null)}`,
   );
-const initialRequestSettingsDefault =
-  /timeoutMs: initialPrefs\.requestSettings\?\.timeoutMs\s*\?\?\s*30000/.test(uiSrc);
-const followRedirectsDefault =
-  /followRedirects: initialPrefs\.requestSettings\?\.followRedirects\s*\?\?\s*true/.test(uiSrc);
-const maxSizeDefault =
-  /maxResponseSizeKb: initialPrefs\.requestSettings\?\.maxResponseSizeKb\s*\?\?\s*5120/.test(uiSrc);
-
-const allInitOk =
-  hasLoadPrefs &&
-  readsKeyConst &&
-  readsKey &&
-  initialThemeUses &&
-  initialReqUses &&
-  initialRequestSettingsDefault &&
-  followRedirectsDefault &&
-  maxSizeDefault;
-
-line(
-  'ui-slice reads localStorage once + seeds initial state',
-  allInitOk,
-  `loadPrefs=${hasLoadPrefs} key=${readsKeyConst} read=${readsKey} themeInit=${initialThemeUses} reqInit=${initialReqUses} defaults=${initialRequestSettingsDefault && followRedirectsDefault && maxSizeDefault}`,
-);
+  line(
+    'a stored theme the resolver rejects does not become the store theme',
+    stored.theme === 'blue' && state.theme === 'dark',
+    `theme=${state.theme} stored=${JSON.stringify(stored.theme ?? null)}`,
+  );
+  line(
+    'an unrecognised stored theme falls back to dark',
+    themeBoot.resolveTheme('blue') === 'dark' && themeBoot.resolveTheme(undefined) === 'dark',
+    `resolveTheme('blue')=${themeBoot.resolveTheme('blue')}`,
+  );
+  line(
+    "the store seeds the request knobs with the backend's defaults",
+    state.requestSettings.timeoutMs === 30000 &&
+      state.requestSettings.followRedirects === true &&
+      state.requestSettings.maxResponseSizeKb === 5120,
+    JSON.stringify(state.requestSettings),
+  );
+  line(
+    'the prefs key is still the one the first-frame script reads',
+    KEY === 'simple-post:prefs',
+    KEY,
+  );
+}
 
 console.log(`\n=== Summary: ${pass} PASS, ${fail} FAIL ===`);
 if (fail > 0) process.exitCode = 1;
