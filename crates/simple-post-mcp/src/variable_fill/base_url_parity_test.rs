@@ -150,6 +150,9 @@ fn every_case_matches_the_shared_sample() {
         "样本里必须有 case，否则这条测试是空的"
     );
 
+    // 先把全部不符收集起来再一次性断言：`assert_eq!` 失败就 panic，后面的 case 就不再
+    // 跑了——修的人会以为只坏了一处规则。收集完再报，改一处能看到全部受影响的地方。
+    let mut mismatches: Vec<String> = Vec::new();
     for case in &fixture.cases {
         // `forced_def_id` 传 `None`：渲染进程侧没有这个概念，样本覆盖的是两侧共有的规则。
         let (url, source, def) = resolve_base_url_with(
@@ -159,19 +162,30 @@ fn every_case_matches_the_shared_sample() {
             None,
             case.module_id.as_deref(),
         );
-        assert_eq!(
-            url, case.expected.base_url,
-            "{}: 解析出的 base URL",
-            case.name
-        );
-        assert_eq!(
-            source,
-            source_of(&case.expected.source),
-            "{}: 哪一行选中了服务",
-            case.name
-        );
-        assert_eq!(def, case.expected.definition_id, "{}: 服务 id", case.name);
+        if url != case.expected.base_url {
+            mismatches.push(format!(
+                "{}: base URL 是 {url}，样本要求 {}",
+                case.name, case.expected.base_url
+            ));
+        }
+        if source != source_of(&case.expected.source) {
+            mismatches.push(format!(
+                "{}: 选中的是 {:?}，样本要求 {}",
+                case.name, source, case.expected.source
+            ));
+        }
+        if def != case.expected.definition_id {
+            mismatches.push(format!(
+                "{}: 服务 id 是 {def:?}，样本要求 {:?}",
+                case.name, case.expected.definition_id
+            ));
+        }
     }
+    assert!(
+        mismatches.is_empty(),
+        "这些 case 与样本对不上：\n{}",
+        mismatches.join("\n")
+    );
 }
 
 /// 样本本身得覆盖得住服务链的每一条规则。
@@ -180,7 +194,7 @@ fn the_sample_covers_the_resolution_rules() {
     let fixture = fixture();
     let names: Vec<&str> = fixture.cases.iter().map(|c| c.name.as_str()).collect();
 
-    for needed in [
+    let needed = [
         "端点带自定义主机时用自己的地址",
         "端点的 override 是空串时表示自定义但不加前缀",
         "端点没给 override 时走服务链",
@@ -196,10 +210,25 @@ fn the_sample_covers_the_resolution_rules() {
         "模块未知时没有格子可读",
         "环境缺席时解析不出东西",
         "端点点名的服务是空串时解析不出东西",
-    ] {
+    ];
+
+    for one in needed {
         assert!(
-            names.contains(&needed),
-            "样本里缺了这条规则，两侧就可能在这里分叉：{needed}"
+            names.contains(&one),
+            "样本里缺了这条规则，两侧就可能在这里分叉：{one}"
         );
     }
+
+    // 反向也查一遍：新增一条 case 却忘了登记进上面那份名单时，样本与名单就会各说各话，
+    // 而这条用例仍然全绿。
+    let unregistered: Vec<&str> = names
+        .iter()
+        .filter(|n| !needed.contains(n))
+        .copied()
+        .collect();
+    assert!(
+        unregistered.is_empty(),
+        "样本里有未登记的 case：{}",
+        unregistered.join("、")
+    );
 }

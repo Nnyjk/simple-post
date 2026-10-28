@@ -59,7 +59,9 @@ describe('base URL 的服务链解析与 Rust 侧一致', () => {
 
       assert.equal(resolved.baseUrl, c.expected.baseUrl, '解析出的 base URL');
       assert.equal(resolved.source, c.expected.source, '哪一行选中了服务');
-      assert.equal(resolved.definitionId, c.expected.definitionId, '服务 id');
+      // `?? null`：样本里缺这个键时，Rust 侧读成 `None`，而 `assert/strict` 区分
+      // `null` 与 `undefined`——不归一的话，同一份样本在两侧的判定口径不一样。
+      assert.equal(resolved.definitionId, c.expected.definitionId ?? null, '服务 id');
     });
   }
 });
@@ -70,7 +72,7 @@ describe('base URL 的服务链解析与 Rust 侧一致', () => {
 describe('样本覆盖住了服务链的每一条规则', () => {
   const names = FIXTURE.cases.map((c) => c.name);
 
-  for (const needed of [
+  const needed = [
     '端点带自定义主机时用自己的地址',
     '端点的 override 是空串时表示自定义但不加前缀',
     '端点没给 override 时走服务链',
@@ -86,9 +88,21 @@ describe('样本覆盖住了服务链的每一条规则', () => {
     '模块未知时没有格子可读',
     '环境缺席时解析不出东西',
     '端点点名的服务是空串时解析不出东西',
-  ]) {
-    it(`样本里有「${needed}」这条规则`, () => {
-      assert.ok(names.includes(needed), '样本里缺了这条规则，两侧就可能在这里分叉');
+  ];
+
+  for (const one of needed) {
+    it(`样本里有「${one}」这条规则`, () => {
+      assert.ok(names.includes(one), '样本里缺了这条规则，两侧就可能在这里分叉');
     });
   }
+
+  it('样本里没有多出未登记的规则', () => {
+    // 反向也查一遍：新增一条 case 却忘了登记进上面那份名单时，样本与名单就会各说各话，
+    // 而这条用例仍然全绿。
+    assert.equal(
+      names.length,
+      needed.length,
+      `样本里有未登记的 case：${names.filter((n) => !needed.includes(n)).join('、')}`,
+    );
+  });
 });

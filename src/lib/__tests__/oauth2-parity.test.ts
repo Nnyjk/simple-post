@@ -81,21 +81,35 @@ describe('OAuth2 token 的注入与 Rust 侧一致', () => {
 describe('样本覆盖住了注入规则的每一条', () => {
   const names = FIXTURE.cases.map((c) => c.name);
 
-  for (const needed of [
+  const needed = [
     'header 档补一条 Authorization',
     'header 档的 token 类型是空串时只放裸 token',
-    'header 档原样透传 token 类型不改成 Bearer',
+    'header 档去掉 token 类型首尾空白后透传，不改成 Bearer',
+    'header 档的 token 类型带首尾空白时先去掉空白',
     'header 档不覆盖用户自己写的 Authorization',
     'header 档认大小写不敏感的 authorization',
     'query 档把 token 追加到已有的查询串后面',
     'query 档给没有查询串的地址起一个查询串',
     'query 档的参数名是空白时回落成 access_token',
     'query 档用配置的那个参数名',
+    'query 档的参数名带首尾空白时按原值当参数名',
     'query 档的 token 值按查询串的字符集编码',
     'query 档的参数名也按查询串的字符集编码',
-  ]) {
-    it(`样本里有「${needed}」这条规则`, () => {
-      assert.ok(names.includes(needed), '样本里缺了这条规则，两侧就可能在这里分叉');
+  ];
+
+  for (const one of needed) {
+    it(`样本里有「${one}」这条规则`, () => {
+      assert.ok(names.includes(one), '样本里缺了这条规则，两侧就可能在这里分叉');
     });
   }
+
+  it('样本里没有多出未登记的规则', () => {
+    // 反向也查一遍：新增一条 case 却忘了登记进上面那份名单时，样本与名单就会各说各话，
+    // 而这条用例仍然全绿。
+    assert.equal(
+      names.length,
+      needed.length,
+      `样本里有未登记的 case：${names.filter((n) => !needed.includes(n)).join('、')}`,
+    );
+  });
 });

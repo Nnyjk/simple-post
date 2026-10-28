@@ -88,18 +88,32 @@ fn every_case_matches_the_shared_sample() {
         "样本里必须有 case，否则这条测试是空的"
     );
 
+    // 先把全部不符收集起来再一次性断言：`assert_eq!` 失败就 panic，后面的 case 就不再
+    // 跑了——修的人会以为只坏了一处规则。收集完再报，改一处能看到全部受影响的地方。
+    let mut mismatches: Vec<String> = Vec::new();
     for case in &fixture.cases {
         let mut headers = case.headers.clone();
         let mut url = case.url.clone();
         inject(&auth(case), &token(&case.token), &mut headers, &mut url);
 
-        assert_eq!(url, case.expected.url, "{}: 注入后的 URL", case.name);
-        assert_eq!(
-            headers, case.expected.headers,
-            "{}: 注入后的请求头",
-            case.name
-        );
+        if url != case.expected.url {
+            mismatches.push(format!(
+                "{}: URL 是 {url}，样本要求 {}",
+                case.name, case.expected.url
+            ));
+        }
+        if headers != case.expected.headers {
+            mismatches.push(format!(
+                "{}: 请求头是 {headers:?}，样本要求 {:?}",
+                case.name, case.expected.headers
+            ));
+        }
     }
+    assert!(
+        mismatches.is_empty(),
+        "这些 case 与样本对不上：\n{}",
+        mismatches.join("\n")
+    );
 }
 
 /// 样本本身得覆盖得住注入规则的每一条。
@@ -108,22 +122,39 @@ fn the_sample_covers_the_injection_rules() {
     let fixture = fixture();
     let names: Vec<&str> = fixture.cases.iter().map(|c| c.name.as_str()).collect();
 
-    for needed in [
+    let needed = [
         "header 档补一条 Authorization",
         "header 档的 token 类型是空串时只放裸 token",
-        "header 档原样透传 token 类型不改成 Bearer",
+        "header 档去掉 token 类型首尾空白后透传，不改成 Bearer",
+        "header 档的 token 类型带首尾空白时先去掉空白",
         "header 档不覆盖用户自己写的 Authorization",
         "header 档认大小写不敏感的 authorization",
         "query 档把 token 追加到已有的查询串后面",
         "query 档给没有查询串的地址起一个查询串",
         "query 档的参数名是空白时回落成 access_token",
         "query 档用配置的那个参数名",
+        "query 档的参数名带首尾空白时按原值当参数名",
         "query 档的 token 值按查询串的字符集编码",
         "query 档的参数名也按查询串的字符集编码",
-    ] {
+    ];
+
+    for one in needed {
         assert!(
-            names.contains(&needed),
-            "样本里缺了这条规则，两侧就可能在这里分叉：{needed}"
+            names.contains(&one),
+            "样本里缺了这条规则，两侧就可能在这里分叉：{one}"
         );
     }
+
+    // 反向也查一遍：新增一条 case 却忘了登记进上面那份名单时，样本与名单就会各说各话，
+    // 而这条用例仍然全绿。
+    let unregistered: Vec<&str> = names
+        .iter()
+        .filter(|n| !needed.contains(n))
+        .copied()
+        .collect();
+    assert!(
+        unregistered.is_empty(),
+        "样本里有未登记的 case：{}",
+        unregistered.join("、")
+    );
 }
