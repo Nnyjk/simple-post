@@ -127,6 +127,13 @@ Tauri command 与 REST route 都退化成薄壳。
 - OpenAPI `paths` 里固定动词键集以外的动词 —— 塞进去会让整份文档不合法。
 - OpenAPI operation 的 `tags[1..]` —— 一个接口只归第一个 tag（见下）。
 
+**请求体上的 schema 读得进来。** OpenAPI 的 `requestBody.content[media].schema` 收进
+`body.schema`，本地 `$ref` **展开成内联内容** —— `body.schema` 存的是一段自足的文本，
+而导出时那份 `components` 是导出器自己生成的，存一段带 `$ref` 的文本进去，导出时那份引用
+指不到任何东西。布尔 schema（`true` / `false`）不是本仓库导出器认的那种（它要写成
+`components.schemas` 里的一个对象），故不收，并出一条 `Info` 说明。Postman 集合里没有
+请求体 schema 这个构造，那边没有可导入的东西。
+
 **分组只认 `tags[0]`，没打 tag 的整份归到一个以 `info.title` 命名的分组里。**
 落进已有模块时 IR 顶层模块一律降级成集合，故这条同时就是「OpenAPI tag → 目标模块下的
 集合」。曾经按「一个 operation 一个模块」实现，于是**一个 tag 都不打的文档**（Apifox、
@@ -189,9 +196,9 @@ Postman 的每个 environment 落成一个新 `Environment`，变量进 `variabl
 ## 导出的三个约定
 
 **`responses`：合成默认，不猜。** 每个 operation 输出一个 `200: {description: "OK"}`。
-`StoredResponse` 存的是实际响应，没有响应 schema；而 `RequestBody.schema` 那个字段
-UI 从不写、仓库自己的测试喂的也是 `{"limit":"number"}` 这种形状提示而非合法
-JSON Schema。所以没有可信数据源，猜出来的 schema 看不出不可靠，比不猜更糟。
+`StoredResponse` 存的是实际响应，里面没有响应 schema；请求体那份定义
+（`RequestBody.schema`）说的是**这个接口接受什么**，不能拿来当响应形状。所以没有可信
+数据源，猜出来的 schema 看不出不可靠，比不猜更糟。
 
 **`servers`：逐模块取，不回退。** URL 是 per (环境 × 模块 × 服务) 且**刻意没有任何
 回退层**。导出必须先选定一个环境，然后每个模块各取各的；该模块没配就是没有 URL，
@@ -265,13 +272,49 @@ Postman → 本仓库的导入是保真的。
 夹具里放了一对会撞的路径。
 
 **`requestBody`：端点带 `body.schema` 就 `$ref`，没带就只声明「这是一个 object」。**
-字段**不猜**：UI 从不写 `body.schema`，仓库自己的测试喂的也是 `{"limit":"number"}`
-这种形状提示而非合法 JSON Schema，所以没有可信数据源，猜出来的 schema 看不出不可靠。
+字段**不猜**：端点没写 `body.schema` 时，导出器不知道这个接口接受哪些参数，故只声明
+「这是一个 object」，不编一份形状出来。
 
-带 schema 时它进 `components.schemas`（按出现顺序编号 `Schema1`…），`requestBody`
-里写 `{"$ref": "#/components/schemas/Schema1"}`。**收集了却不被引用是三种选择里最差的
-一种**：读文档的人看到 `Schema1`…`Schema9` 会以为它们有意义，而每个 requestBody 都在
-宣称一个错的请求体形状。
+带 schema 时它进 `components.schemas`，`requestBody` 里写
+`{"$ref": "#/components/schemas/<名字>"}`。**收集了却不被引用是三种选择里最差的一种**：
+读文档的人看到一堆没人引用的定义会以为它们有意义，而每个 requestBody 都在宣称一个错的
+请求体形状。故收集与引用**同进同出** —— `mode = none` 的端点没有 requestBody，收集了也
+没人引用，导出器索性不收集。
+
+**名字由内容派生，不按出现顺序编号。** 位置编号（`Schema1`、`Schema2`…）有两个毛病：
+它与内容无关，读者什么也看不出来；而删掉一个接口之后，后面每一个的名字都往前挪，同一份
+文档在两次导出之间对不上号。派生规则：
+
+| 情况 | 名字 | 例子 |
+|---|---|---|
+| schema 里有非空 `title` | 用它，经 component key 规范化（非法字符换 `_`） | `{"title":"UserProfile",…}` → `UserProfile` |
+| 没有 `title` | `Schema_` + 该内容规范文本的短哈希 | `{"type":"object",…}` → `Schema_2d0515b0` |
+| 上面的名字已被**另一份内容**占用 | 追加 `_` + 内容短哈希 | 两份都叫 `User` → `User` 与 `User_5b1c…` |
+
+三点补充：
+
+- **`title` 是 JSON Schema 自己的字段**，用户在请求体的 Schema 编辑区里写它，就是在给
+  这份定义起名。界面上那份 Schema 区与载荷区并排常驻，写了 `title` 的定义导出后就是这个
+  可读的名字。
+- **没有 `title` 的那份一律带哈希。** 若给它一个裸的 `Schema`，「哪个拿到 `Schema`」就
+  取决于它在文档里的先后 —— 那还是按位置命名。
+- **同一份内容恒定同一个名字**：去重按**规范文本**（键序无关）比对，故同一份定义出现在
+  两个接口上时只写一份，两个 operation 都 `$ref` 它。
+
+两份内容不同的定义**绝不共用一个名字**：共用之后，后写的那份会覆盖前一份，产物里只剩一份
+定义而两个 operation 都指着它 —— 读到的是错的形状，比没有更糟。
+
+短哈希用 FNV-1a 128 位取前 8 个十六进制字符，与 `fingerprint.rs` 同一套算法：不依赖
+`DefaultHasher`（它不保证跨版本稳定），也不为一个短标识拖进哈希依赖。
+
+**「前端能不能写 `body.schema`」的结论：能写，已经实现了。**
+请求体编辑器分左右两栏 —— 左边是这一次发出去的**载荷**（`body.content`），右边是文档里
+那份**参数定义**（`body.schema`）—— 两者是两个字段，不是一份输入框（合成一个的话，写接口
+定义时会把 Schema 当载荷发出去）。界面上写的定义经 `endpoint_details` 落库，导出时读它。
+
+导入侧相应地也读它：OpenAPI 的 `requestBody.content[media].schema` 会被收进
+`body.schema`（本地 `$ref` 展开成内联内容），故「导出再导入」不会丢掉这份定义。
+Postman 集合里没有请求体 schema 这个构造，故那边没有可导入的东西。
 
 **请求头：写成 `in: header` 的参数条目，不写值。**
 OpenAPI 没有独立的「请求头」段落，头就是参数的一种位置；导入侧正是按 `in: header`
@@ -308,12 +351,19 @@ OpenAPI 没有独立的「请求头」段落，头就是参数的一种位置；
 
 | 层 | 工具 | 跑在哪 | 查什么 |
 |---|---|---|---|
-| 模型 | `openapiv3`（dev-dep） | `cargo test`（`src/openapi_model_test.rs`） | OpenAPI 3.0 的 REQUIRED：`info.title`/`version`、每个 operation 的 `responses` 与 response 的 `description` |
-| 规则 | Redocly | `npm run lint:openapi` → CI 的 web job | `path-parameters-defined`、`operation-operationId`、`security-defined`、`no-server-example.com` 等 |
+| 模型 | `openapiv3`（dev-dep） | `cargo test`（`src/openapi_model_test.rs`） | OpenAPI 3.0 的 REQUIRED：`info.title`/`version`、每个 operation 的 `responses` 与 response 的 `description`；请求体的 `$ref` 指得到 `components.schemas` 里那一份 |
+| 规则 | Redocly | `npm run lint:openapi` → CI 的 web job | `path-parameters-defined`、`operation-operationId`、`security-defined`、`no-server-example.com`、`no-unused-components` 等 |
 
 **两层读的是同一棵树**：`fixtures/sample-exchange.json`。Rust 测试与
 `examples/export_sample.rs` 都从它出发，故 linter 看到的与 `cargo test` 校验过的是
 同一份东西。两边各写一份构造的话，它们迟早只覆盖一半。
+
+**夹具里必须有带 `body.schema` 的接口。** 夹具是这两层唯一的输入，而 Redocly 的
+`no-unused-components`（`recommended` 里没有，故 `redocly.yaml` 显式打开）查的正是
+「`components.schemas` 里躺着没人引用的定义」。夹具里一个带 schema 的接口都没有时，
+那条规则看不见任何东西 —— 这条缺陷当初正是这样在门禁里全绿的。故夹具里放了两个用同一份
+定义的接口（只写一份、两个 operation 都 `$ref` 它）与一个没有 `title` 的定义
+（名字由内容派生）。
 
 Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
 `cargo run -p simple-post-interchange --example export_sample` 现场生成——**不提交
@@ -343,8 +393,8 @@ Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
 - **`body_schema` 不是一列。** `schema.sql:155` 只有 `body_json`，整个 `RequestBody`
   （含 `schema`）塞在里面。全仓库三个写入点：`domain/auth.rs:42`（定义）、
   `src/types/domain/request.ts:37`（TS 镜像）、MCP 的 `body_schema` 入参
-  （`project_ops/endpoint/args.rs:51` → `write.rs:189`）。**UI 从不写它。**
-  按列名去找会找不到。
+  （`project_ops/endpoint/args.rs:51` → `write.rs:189`）。**界面的请求体编辑器也写它**
+  （右栏那块 Schema 区，见 `src/features/http-tester/BodyEditor.tsx`）—— 按列名去找会找不到。
 - **模板语法两边同形。** `crates/simple-post-core/src/template.rs:102` 的 `is_word` 只认
   `[A-Za-z0-9_]`，Postman 的 `{{var}}` 同形，所以转换基本白送。但 Postman 实际会写
   `{{my-var}}`（连字符）与 `{{$timestamp}}`（动态变量）——两者都被现有解析器**原样
