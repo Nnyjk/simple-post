@@ -34,10 +34,7 @@ pub(super) struct RunRequestArgs {
     pub(super) auth: Option<Value>,
     #[serde(default)]
     pub(super) env_id: Option<String>,
-    #[serde(default)]
-    pub(super) base_url_definition_id: Option<String>,
-    /// `base_url_definition_id` 取值时读的是哪个模块的格子。URL 住在
-    /// (环境 × 服务 × 模块)，而本工具没有端点可借模块，不给就没有格子、没有
+    /// 取值时读的是哪个模块的格子。地址住在 (环境 × 模块)，不给就没有格子、没有
     /// base URL。
     #[serde(default)]
     pub(super) module_id: Option<String>,

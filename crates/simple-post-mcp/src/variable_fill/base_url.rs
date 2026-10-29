@@ -1,130 +1,134 @@
-//! base URL 解析、拼接与斜杠收拢 —— 对应 `src/lib/url.ts::resolveEndpointBaseUrl`。
+//! base URL 解析、代理前缀替换、拼接与斜杠收拢 —— 对应 `src/lib/url.ts`。
 //!
 //! 两边必须一致，否则屏幕上的预览与真正发出去的请求描述的是两个 URL。
 
-use simple_post_core::domain::{EndpointDetail, Environment, Project};
+use simple_post_core::domain::{EndpointDetail, Environment};
 // -------------------------------------------------------------------------
 // base URL 解析 —— 对应 src/lib/url.ts::resolveEndpointBaseUrl
 // -------------------------------------------------------------------------
 
-/// 最终 baseUrl 的来源。用来给选择器一类的界面标注当前选项（「模块默认」/「鉴权服务」
-/// /「自定义」）；MCP daemon 用同一个 enum 把自己选了哪一路解释回渲染进程。
+/// 最终 baseUrl 的来源。用来给选择器一类的界面标注当前选项（「跟随模块」/「自定义」）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum BaseUrlSource {
-    /// `detail.baseUrlOverride` 胜出。
+    /// `detail.base_url_override` 胜出。
     Override,
-    /// 明确点名了某个服务 —— 端点自己的 `baseUrlDefinitionId`，或调用方的
-    /// `forced_def_id`。
-    Definition,
-    /// 项目 ★（`Project.defaultBaseUrlDefinitionId`）胜出。
-    Default,
+    /// 环境里「模块 × 环境」那一格。
+    Module,
     /// 谁都没匹配上；此时返回什么由调用方决定（通常是 `""`）。
     None,
 }
 
-/// 给定提供 `moduleBaseUrls[defId][moduleId]` 的环境、以及声明服务的项目，算出端点
-/// 最终生效的 baseUrl。
+/// 解析出来的一组值：后端 api 地址、实际访问地址与来源。
+#[derive(Debug, Clone)]
+pub struct ResolvedBaseUrl {
+    /// 后端 api 地址——模块在环境里那一格的 `url`。
+    pub base_url: String,
+    /// 实际访问地址——那一格的 `proxy`。`None` = 没有代理，直接用 `base_url`。
+    pub proxy: Option<String>,
+    /// 这个结果是从哪来的。
+    pub source: BaseUrlSource,
+}
+
+/// 算出端点最终生效的 base URL。
 ///
 /// 优先级（从高到低）：
-///   1. `endpoint.base_url_override` —— 每端点的自定义模式。`None` 落到服务链；
+///   1. `endpoint.base_url_override` —— 每端点的自定义模式。`None` 落到模块那一格；
 ///      `Some(host)` 固定该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义
 ///      模式，URL 字段里已经是完整地址。
-///   2. `detail.base_url_definition_id`，再退到项目 ★
-///      （`project.default_base_url_definition_id`）。
+///   2. `env.module_base_urls[module_id]` —— 环境 × 模块那一格。它的 `url` 是后端
+///      api 地址，`proxy` 是实际访问地址。
 ///   3. `""` —— 什么都没有。
 ///
-/// 这个三参数形式不带模块上下文，所以第 2 步没有格子可读，除每端点 override 外一律
-/// 解析成 `""`。知道模块的调用方必须用 [`resolve_base_url_with`]。
+/// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子。格子缺失是
+/// 一个真实答案，不是一个洞。
 ///
-/// `env.module_base_urls` 按 `BaseUrlDefinition.id` 再按模块 id 建键，**不按名字**：
-/// 改名便宜，解析也确定 —— 即便两个服务同名。环境取自 `detail.environment_id`；
-/// 未选环境（None）时直接短路成 ""。
+/// `env.module_base_urls` 按 `module_id` 建键。环境取自 `detail.environment_id`；
+/// 未选环境（`None`）时直接短路成空。
 pub fn resolve_base_url(
     detail: &EndpointDetail,
     env: Option<&Environment>,
-    project: &Project,
-) -> (String, BaseUrlSource, Option<String>) {
-    resolve_base_url_with(detail, env, project, None, None)
-}
-
-/// [`resolve_base_url`] 再加上调用方指定的定义选择与模块。
-///
-/// `forced_def_id` 优先于 `detail.base_url_definition_id`，但仍让位给
-/// `detail.base_url_override` —— 那是每端点的 host（或明确的「不要前缀」），始终是
-/// 最强信号。`Some("")` 表示「没有 base URL」，渲染进程在用户清空选择器时就是这么
-/// 发的。
-///
-/// `module_id` 选的是这次调用读**取值层的哪一格**，不是「哪些服务存在」：服务是项目
-/// 级的，而 `env.module_base_urls[def_id][module_id]` 是 URL 唯一的住址。所以
-/// `None` 解析成 `""`，而不是替别的模块猜一格。
-///
-/// 由调用方传入而非在此推导，是为了保持本函数纯净：模块住在 `nodes` 表里，而本模块
-/// 刻意不认识 `nodes`。调用方经 [`EndpointOverrides::module_id`] 传下来。
-///
-/// 与 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 对应；两边必须一致，否则屏幕上的
-/// 预览与真正发出去的请求描述的是两个 URL。
-pub fn resolve_base_url_with(
-    detail: &EndpointDetail,
-    env: Option<&Environment>,
-    project: &Project,
-    forced_def_id: Option<&str>,
     module_id: Option<&str>,
-) -> (String, BaseUrlSource, Option<String>) {
+) -> ResolvedBaseUrl {
     // `Some("")` 是明确选择而不是缺省：端点处于自定义模式，URL 字段里就是完整地址，
     // 再前置环境的 base URL 会把它弄坏。与 src/lib/url.ts 的
     // `resolveEndpointBaseUrl` 对应 —— 两边不一致，前端预览与后端请求说的就是两个 URL。
     if let Some(ovr) = detail.base_url_override.as_deref() {
-        return (ovr.to_string(), BaseUrlSource::Override, None);
-    }
-    let forced = forced_def_id.map(|s| s.to_string());
-    if matches!(forced.as_deref(), Some("")) {
-        return (String::new(), BaseUrlSource::None, None);
+        return ResolvedBaseUrl {
+            base_url: ovr.to_string(),
+            proxy: None,
+            source: BaseUrlSource::Override,
+        };
     }
 
-    // 谁来应答：调用方的选择，否则端点自己的，否则项目 ★。端点没点名是常态，不是缺口 ——
-    // ★ 就是为此存在的。
-    let explicit = forced.or_else(|| detail.base_url_definition_id.clone());
-    // 必须在下面的 match 消费掉 `explicit` 之前定下来：这里关心的是*哪一行应答*，
-    // 不是哪个值，所以强制选择与端点自选都报 `Definition`。
-    let was_explicit = explicit.is_some();
-    let def_id = match explicit {
-        Some(def_id) => def_id,
-        None => match project.default_base_url_definition_id.clone() {
-            Some(def_id) => def_id,
-            // 没有 ★：端点就这么不带 base URL 发出，没有更上层可借，也没有服务可猜。
-            None => return (String::new(), BaseUrlSource::None, None),
+    // 没有模块就没有格子，模块的地址不是一个可以被借用的东西。
+    let Some(module_id) = module_id else {
+        return ResolvedBaseUrl {
+            base_url: String::new(),
+            proxy: None,
+            source: BaseUrlSource::None,
+        };
+    };
+
+    // 模块地址只存在 `env.module_base_urls[module_id]` 这一格里。缺失或为空表示这一格
+    // （环境 × 模块）没配，与「什么都没点名」是同一个答案：`source: none`。这一格不向
+    // 别的模块的格子回落 —— 空的格子是一个真实答案，不是一个洞。
+    let cell = env.and_then(|e| e.module_base_urls.get(module_id));
+    match cell {
+        Some(cell) if !cell.url.is_empty() => ResolvedBaseUrl {
+            base_url: cell.url.clone(),
+            proxy: cell.proxy.clone(),
+            source: BaseUrlSource::Module,
         },
-    };
-    // 这个 id 必须点名项目真实持有的服务。没命中可能是服务已删、id 从别的项目复制而来，
-    // 或端点上的指针过期 —— 三种都表示「没有 base URL」，而不是「悄悄换个 host」。
-    // 刻意**不**回退到 ★。
-    if !project.base_url_definitions.iter().any(|d| d.id == def_id) {
-        return (String::new(), BaseUrlSource::None, None);
+        _ => ResolvedBaseUrl {
+            base_url: String::new(),
+            proxy: None,
+            source: BaseUrlSource::None,
+        },
     }
+}
 
-    // 没有模块就没有格子。服务由每个模块共享，地址不是 —— 无从可读。
-    let module_id = match module_id {
-        Some(module_id) => module_id,
-        None => return (String::new(), BaseUrlSource::None, None),
+/// 用代理地址替换请求地址里的模块地址前缀。
+///
+/// 接口经代理网关转代时，后端 api 地址与实际访问地址不一致：模块那一格写的是
+/// `http://svc.internal:8080/api/a`（后端 api 地址），而真正要打的是
+/// `https://gw.corp.com/api/xxxx/a`（实际访问地址）。本函数把请求地址开头的那段
+/// 模块地址换成代理地址，其余部分原样保留：
+///
+///   apply_proxy("http://svc.internal:8080/api/a", Some("https://gw.corp.com/api/xxxx/a"),
+///               "http://svc.internal:8080/api/a/orders/list")
+///     → "https://gw.corp.com/api/xxxx/a/orders/list"
+///
+/// 规则：
+///
+/// - `proxy` 为空或只有空白 → 原样返回。
+/// - 前缀是 `base_url` 去掉尾部所有 `/`；前缀为空 → 原样返回。
+/// - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求地址
+///   恰好等于该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会命中
+///   `http://h/apixyz`。
+/// - 其余情况原样返回：请求打的是另一个主机，或那一格压根没有地址。
+///
+/// 与 `src/lib/url.ts` 的 `applyProxy` 对应；两边必须一致，否则预览与真正发出的请求
+/// 描述的是两个 URL。
+pub fn apply_proxy(base_url: &str, proxy: Option<&str>, url: &str) -> String {
+    let Some(proxy) = proxy else {
+        return url.to_string();
     };
-
-    // URL 唯一的住址。缺失或为空表示这一格 (环境 × 服务 × 模块) 没配，与「什么都没
-    // 点名」是同一个答案：`source: none`。刻意既不回退到 `env.base_urls`（死列），
-    // 也不借用别的模块的格子 —— 空格子是一个真实答案，不是一个洞。
-    match env
-        .and_then(|e| e.module_base_urls.get(&def_id))
-        .and_then(|cells| cells.get(module_id))
+    let proxy = proxy.trim();
+    if proxy.is_empty() {
+        return url.to_string();
+    }
+    let prefix = base_url.trim_end_matches('/');
+    if prefix.is_empty() {
+        return url.to_string();
+    }
+    let Some(rest) = url.strip_prefix(prefix) else {
+        return url.to_string();
+    };
+    if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('?') || rest.starts_with('#'))
     {
-        Some(u) if !u.is_empty() => {
-            let source = if was_explicit {
-                BaseUrlSource::Definition
-            } else {
-                BaseUrlSource::Default
-            };
-            (u.clone(), source, Some(def_id))
-        }
-        _ => (String::new(), BaseUrlSource::None, None),
+        return url.to_string();
     }
+    format!("{proxy}{rest}")
 }
 
 /// 安全地拼接 `base_url` 与 `path`。`path` 自带 scheme 时按已是绝对地址处理，拼接处

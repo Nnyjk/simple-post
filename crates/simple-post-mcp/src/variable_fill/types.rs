@@ -18,20 +18,10 @@ pub struct EndpointOverrides {
     /// URL 路径里的占位符与它们各自的值。它们替换进路径本身，不进查询串。
     pub path_params: Option<Vec<simple_post_core::domain::KeyValue>>,
     pub body: Option<RequestBody>,
-    /// 覆盖端点上已存的 base URL 定义，改用这个去解析。
-    ///
-    /// 渲染进程的 base URL 选择器是临时的：用户不保存端点也能切换定义，所以发送时
-    /// `detail.base_url_definition_id` 并不权威。没有这个字段，浏览器就得自己先拼
-    /// base URL，「URL 组装搬到服务端」这件事就白做了。
-    ///
-    /// `None` = 用端点自己的值；`Some(id)` = 覆盖；空串 = 「没有 base URL」，
-    /// 渲染进程用它表示「对着一条裸路径发请求」。
-    pub base_url_definition_id: Option<String>,
     /// 该端点读的是 `env.moduleBaseUrls` 里哪个模块的**格子**。
     ///
-    /// 服务属于项目而非模块，所以模块不是「哪些服务存在」的过滤器 —— 每个模块都看到
-    /// 全量列表。它选的是取值：URL 住在 `(环境 × 服务 × 模块)`，两个模块可以让同一个
-    /// 服务指向不同 host。
+    /// 模块决定取值：地址住在 `(环境 × 模块)`，两个模块可以指向不同 host，而任何一个
+    /// 模块的格子都不借用别的模块的。
     ///
     /// 由调用方传入而不是在这里推导，因为本函数是纯的、没有 DB 句柄，而模块住在
     /// `nodes` 表里。`None` 表示「没有树上下文」：没有格子可读，只剩每端点的
@@ -55,7 +45,6 @@ struct OverridesWire {
     params: Option<Vec<KeyValueInput>>,
     path_params: Option<Vec<KeyValueInput>>,
     body: Option<RequestBody>,
-    base_url_definition_id: Option<String>,
     module_id: Option<String>,
 }
 
@@ -72,7 +61,6 @@ impl<'de> Deserialize<'de> for EndpointOverrides {
             params: wire.params.map(coerce_key_values),
             path_params: wire.path_params.map(coerce_key_values),
             body: wire.body,
-            base_url_definition_id: wire.base_url_definition_id,
             module_id: wire.module_id,
         })
     }

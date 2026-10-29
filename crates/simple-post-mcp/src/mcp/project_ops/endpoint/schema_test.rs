@@ -122,7 +122,6 @@ fn endpoint_update_schema_documents_every_patchable_field() {
         documented,
         vec![
             "auth",
-            "base_url_definition_id",
             "base_url_override",
             "body",
             "description",

@@ -37,20 +37,14 @@ pub(super) async fn tool_api_run_request(
     let content = a.body.clone().unwrap_or_default();
     let body_mode = parse_body_mode(a.body_mode.as_deref(), !content.is_empty())?;
 
-    // `project_id` 的来源：base URL 的取值住在 (环境 × 服务 × 模块) 交叉的格子里，
-    // 而服务属于项目，故要知道项目才能读那张表。给了服务 id 就按它找，只给了环境
-    // 就按环境找。
-    let project_id: Option<String> = match a.base_url_definition_id.as_deref() {
-        Some(def_id) => Some(simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::base_url_defs::project_id_of(c, def_id)
-        })?),
-        None => match a.env_id.as_deref() {
-            Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
-                simple_post_core::db::environments::lookup_project_id(c, env_id)
-            })
-            .ok(),
-            None => None,
-        },
+    // `project_id` 的来源：环境属于项目，故给了环境 id 就知道项目。没给环境就没有
+    // 项目归属，base URL 那一格也无从读。
+    let project_id: Option<String> = match a.env_id.as_deref() {
+        Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::environments::lookup_project_id(c, env_id)
+        })
+        .ok(),
+        None => None,
     };
 
     // 环境：给了 id 就用它；没给就取项目当前激活的那个 —— 与 `api_call_endpoint`
@@ -70,7 +64,6 @@ pub(super) async fn tool_api_run_request(
         method: method.clone(),
         url: a.url.clone(),
         environment_id: a.env_id.clone(),
-        base_url_definition_id: a.base_url_definition_id.clone(),
         base_url_override: None,
         params,
         path_params,
@@ -100,7 +93,6 @@ pub(super) async fn tool_api_run_request(
     let resolved = crate::variable_fill::resolve_endpoint_with(
         &detail,
         env.as_ref(),
-        &project,
         Some(&overrides),
         &dynamic,
     )?;

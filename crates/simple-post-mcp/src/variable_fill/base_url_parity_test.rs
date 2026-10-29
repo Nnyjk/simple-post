@@ -1,74 +1,81 @@
-//! base URL 服务链解析的共享样本读取器。
+//! base URL 解析与代理前缀替换的共享样本读取器。
 //!
 //! 判据来自共享样本 `fixtures/base-url-parity.json`，渲染进程那一侧
 //! （`src/lib/__tests__/base-url-parity.test.ts`）读同一份文件。两份实现各写一遍规则，
 //! 只有共享样本能钉住它们没分叉：手写的镜像测试各有两份，改了一边就没人提醒另一边。
-//!
-//! 样本只覆盖两侧**共有**的那部分规则。Rust 侧多一个 `forced_def_id`（调用方点名服务，
-//! MCP 侧用得上），渲染进程侧没有这个概念，故它留在本 crate 自己的测试里，不进样本。
 
 use std::collections::HashMap;
 
 use serde::Deserialize;
 
 use simple_post_core::domain::{
-    AuthConfig, BaseUrlDefinition, EndpointDetail, Environment, HttpMethod, Project, RequestBody,
+    AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, RequestBody,
 };
 
-use super::base_url::{resolve_base_url_with, BaseUrlSource};
+use super::base_url::{apply_proxy, resolve_base_url, BaseUrlSource};
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
 const FIXTURE: &str = include_str!("../../../../fixtures/base-url-parity.json");
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Fixture {
+    /// 样本自己的说明文字，不是数据。渲染进程那一侧也把它列进顶层允许的键里。
+    #[serde(rename = "$comment", default)]
+    _comment: Option<String>,
     cases: Vec<Case>,
+    proxy_cases: Vec<ProxyCase>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Case {
     name: String,
     endpoint: EndpointCase,
     env: Option<EnvCase>,
-    project: ProjectCase,
     module_id: Option<String>,
     expected: Expected,
 }
 
-/// 端点上解析真正读的那两个字段。环境由调用方给出，不从端点上取。
+/// 端点上解析真正读的那一个字段。环境由调用方给出，不从端点上取。
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EndpointCase {
-    base_url_definition_id: Option<String>,
     base_url_override: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EnvCase {
-    module_base_urls: HashMap<String, HashMap<String, String>>,
+    module_base_urls: HashMap<String, CellCase>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectCase {
-    base_url_definitions: Vec<DefinitionCase>,
-    default_base_url_definition_id: Option<String>,
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CellCase {
+    url: String,
+    #[serde(default)]
+    proxy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct DefinitionCase {
-    id: String,
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Expected {
     base_url: String,
+    #[serde(default)]
+    proxy: Option<String>,
     source: String,
-    definition_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProxyCase {
+    name: String,
+    base_url: String,
+    #[serde(default)]
+    proxy: Option<String>,
+    url: String,
+    expected: String,
 }
 
 fn fixture() -> Fixture {
@@ -79,8 +86,7 @@ fn fixture() -> Fixture {
 fn source_of(name: &str) -> BaseUrlSource {
     match name {
         "override" => BaseUrlSource::Override,
-        "definition" => BaseUrlSource::Definition,
-        "default" => BaseUrlSource::Default,
+        "module" => BaseUrlSource::Module,
         "none" => BaseUrlSource::None,
         other => panic!("样本里的 source 取值不认识：{other}"),
     }
@@ -92,7 +98,6 @@ fn detail(case: &EndpointCase) -> EndpointDetail {
         method: HttpMethod::Get,
         url: "/users".into(),
         environment_id: None,
-        base_url_definition_id: case.base_url_definition_id.clone(),
         base_url_override: case.base_url_override.clone(),
         params: Vec::new(),
         path_params: Vec::new(),
@@ -113,34 +118,23 @@ fn env(case: Option<&EnvCase>) -> Option<Environment> {
         id: "e1".into(),
         project_id: "p1".into(),
         name: "dev".into(),
-        base_urls: HashMap::new(),
-        module_base_urls: c.module_base_urls.clone(),
+        module_base_urls: c
+            .module_base_urls
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    ModuleBaseUrl {
+                        url: v.url.clone(),
+                        proxy: v.proxy.clone(),
+                    },
+                )
+            })
+            .collect(),
         variables: HashMap::new(),
         disabled_variables: Vec::new(),
         is_active: true,
     })
-}
-
-fn project(case: &ProjectCase) -> Project {
-    Project {
-        id: "p1".into(),
-        name: "demo".into(),
-        description: None,
-        base_url: None,
-        base_url_definitions: case
-            .base_url_definitions
-            .iter()
-            .map(|d| BaseUrlDefinition {
-                id: d.id.clone(),
-                name: d.name.clone(),
-                description: None,
-            })
-            .collect(),
-        default_base_url_definition_id: case.default_base_url_definition_id.clone(),
-        color: "#000".into(),
-        created_at: 0,
-        updated_at: 0,
-    }
 }
 
 #[test]
@@ -155,30 +149,27 @@ fn every_case_matches_the_shared_sample() {
     // 跑了——修的人会以为只坏了一处规则。收集完再报，改一处能看到全部受影响的地方。
     let mut mismatches: Vec<String> = Vec::new();
     for case in &fixture.cases {
-        // `forced_def_id` 传 `None`：渲染进程侧没有这个概念，样本覆盖的是两侧共有的规则。
-        let (url, source, def) = resolve_base_url_with(
+        let got = resolve_base_url(
             &detail(&case.endpoint),
             env(case.env.as_ref()).as_ref(),
-            &project(&case.project),
-            None,
             case.module_id.as_deref(),
         );
-        if url != case.expected.base_url {
+        if got.base_url != case.expected.base_url {
             mismatches.push(format!(
-                "{}: base URL 是 {url}，样本要求 {}",
-                case.name, case.expected.base_url
+                "{}: base URL 是 {}，样本要求 {}",
+                case.name, got.base_url, case.expected.base_url
             ));
         }
-        if source != source_of(&case.expected.source) {
+        if got.proxy != case.expected.proxy {
             mismatches.push(format!(
-                "{}: 选中的是 {:?}，样本要求 {}",
-                case.name, source, case.expected.source
+                "{}: 代理是 {:?}，样本要求 {:?}",
+                case.name, got.proxy, case.expected.proxy
             ));
         }
-        if def != case.expected.definition_id {
+        if got.source != source_of(&case.expected.source) {
             mismatches.push(format!(
-                "{}: 服务 id 是 {def:?}，样本要求 {:?}",
-                case.name, case.expected.definition_id
+                "{}: 来源是 {:?}，样本要求 {}",
+                case.name, got.source, case.expected.source
             ));
         }
     }
@@ -189,47 +180,87 @@ fn every_case_matches_the_shared_sample() {
     );
 }
 
-/// 样本本身得覆盖得住服务链的每一条规则。
+#[test]
+fn every_proxy_case_matches_the_shared_sample() {
+    let fixture = fixture();
+    assert!(
+        !fixture.proxy_cases.is_empty(),
+        "样本里必须有 proxyCase，否则这条测试是空的"
+    );
+
+    let mut mismatches: Vec<String> = Vec::new();
+    for case in &fixture.proxy_cases {
+        let got = apply_proxy(&case.base_url, case.proxy.as_deref(), &case.url);
+        if got != case.expected {
+            mismatches.push(format!(
+                "{}: 得到 {got}，样本要求 {}",
+                case.name, case.expected
+            ));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "这些 proxyCase 与样本对不上：\n{}",
+        mismatches.join("\n")
+    );
+}
+
+/// 样本本身得覆盖得住每一条规则。
+///
+/// 这一条是防「读取器的键名与样本对不上」的那道防线：serde 遇到不认识的键会**静默
+/// 忽略**，于是 `expected.proxy` 永远读到 `None`，上面两条断言一条用例都没走到，却
+/// 一直是绿的。故这里数一遍样本里真正带代理的条目，为 0 就失败。
 #[test]
 fn the_sample_covers_the_resolution_rules() {
     let fixture = fixture();
-    let names: Vec<&str> = fixture.cases.iter().map(|c| c.name.as_str()).collect();
 
-    let needed = [
-        "端点带自定义主机时用自己的地址",
-        "端点的 override 是空串时表示自定义但不加前缀",
-        "端点没给 override 时走服务链",
-        "端点点名的服务项目里没有时不回退到项目星标",
-        "端点点名的服务项目里没有时即使环境里有那一格也不解析",
-        "端点没点名服务时用项目星标",
-        "项目星标指向的服务项目里没有时解析不出东西",
-        "项目没有星标且端点没点名服务时解析不出东西",
-        "那一格是空串时解析不出东西",
-        "服务存在但环境里没有那一格时解析不出东西",
-        "端点自己点名的服务胜过项目星标",
-        "同一个服务在两个模块指向两个主机",
-        "模块未知时没有格子可读",
-        "环境缺席时解析不出东西",
-        "端点点名的服务是空串时解析不出东西",
-    ];
-
-    for one in needed {
-        assert!(
-            names.contains(&one),
-            "样本里缺了这条规则，两侧就可能在这里分叉：{one}"
-        );
-    }
-
-    // 反向也查一遍：新增一条 case 却忘了登记进上面那份名单时，样本与名单就会各说各话，
-    // 而这条用例仍然全绿。
-    let unregistered: Vec<&str> = names
+    let with_proxy = fixture
+        .cases
         .iter()
-        .filter(|n| !needed.contains(n))
-        .copied()
-        .collect();
+        .filter(|c| c.expected.proxy.is_some())
+        .count();
     assert!(
-        unregistered.is_empty(),
-        "样本里有未登记的 case：{}",
-        unregistered.join("、")
+        with_proxy > 0,
+        "样本里没有一条带代理的 case，代理这一条规则就没人钉住"
+    );
+
+    let proxy_cases_with_proxy = fixture
+        .proxy_cases
+        .iter()
+        .filter(|c| c.proxy.is_some())
+        .count();
+    assert!(
+        proxy_cases_with_proxy > 0,
+        "样本里没有一条带代理的 proxyCase，前缀替换就没人钉住"
+    );
+
+    let override_cases = fixture
+        .cases
+        .iter()
+        .filter(|c| c.expected.source == "override")
+        .count();
+    assert!(
+        override_cases > 0,
+        "样本里没有一条端点自带地址的 case，override 那一档就没人钉住"
+    );
+
+    let module_cases = fixture
+        .cases
+        .iter()
+        .filter(|c| c.expected.source == "module")
+        .count();
+    assert!(
+        module_cases > 0,
+        "样本里没有一条走模块格子的 case，那一档就没人钉住"
+    );
+
+    let none_cases = fixture
+        .cases
+        .iter()
+        .filter(|c| c.expected.source == "none")
+        .count();
+    assert!(
+        none_cases > 0,
+        "样本里没有一条解析不出东西的 case，空格子那一档就没人钉住"
     );
 }

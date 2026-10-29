@@ -2,7 +2,7 @@
 //!
 //! 端点建好了不等于能发出去。两种最常见的缺口：
 //!
-//! 1. **base URL 那一格没填。** URL 住在 (环境 × 服务 × 模块) 的单元格里，那个格子
+//! 1. **base URL 那一格没填。** URL 住在 (环境 × 模块) 的单元格里，那个格子
 //!    **没有任何上层可借** —— 没填就是发出去一条裸路径。
 //! 2. **环境里没有它引用的变量。** `{{token}}` 原样发出去，服务端收到的是字面量。
 //!
@@ -10,7 +10,7 @@
 //! agent 一次就知道要补什么，而不用先发一次请求、看报错、再回头补一轮。
 //!
 //! 判据一律取自现成的实现，不另写一套：base URL 用
-//! [`crate::variable_fill::resolve_base_url_with`]，变量扫描用
+//! [`crate::variable_fill::resolve_base_url`]，变量扫描用
 //! [`simple_post_core::dynamic::list_names`] —— 后者是发送链路用的同一份「哪些字段
 //! 会被替换」的判据。
 
@@ -37,7 +37,7 @@ pub(crate) fn missing_pieces(
     let env = crate::mcp::resolve_env(pool, detail.environment_id.as_deref(), &project.id)
         .unwrap_or(None);
 
-    // 模块：base URL 住在 (环境 × 服务 × 模块) 的单元格里，所以要说清是哪个模块。
+    // 模块：base URL 住在 (环境 × 模块) 的单元格里，所以要说清是哪个模块。
     let module_id = simple_post_core::db::with_conn(pool, |c| {
         simple_post_core::db::nodes::module_id_of(c, node_id)
     })
@@ -50,23 +50,12 @@ pub(crate) fn missing_pieces(
     let base_url = if detail.base_url_override.is_some() {
         String::new()
     } else {
-        let (url, source, _) = crate::variable_fill::resolve_base_url_with(
-            detail,
-            env.as_ref(),
-            project,
-            None,
-            module_id.as_deref(),
-        );
-        if source == crate::variable_fill::BaseUrlSource::None {
-            out.push(base_url_gap(
-                pool,
-                env.as_ref(),
-                detail,
-                project,
-                module_id.as_deref(),
-            ));
+        let resolved =
+            crate::variable_fill::resolve_base_url(detail, env.as_ref(), module_id.as_deref());
+        if resolved.source == crate::variable_fill::BaseUrlSource::None {
+            out.push(base_url_gap(pool, env.as_ref(), module_id.as_deref()));
         }
-        url
+        resolved.base_url
     };
 
     // ---- 变量 ----
@@ -101,26 +90,13 @@ pub(crate) fn missing_pieces(
     out
 }
 
-/// base URL 那一格为什么空着。三种原因给三种说法，agent 才知道该做什么。
-fn base_url_gap(
-    pool: &DbPool,
-    env: Option<&Environment>,
-    detail: &EndpointDetail,
-    project: &Project,
-    module_id: Option<&str>,
-) -> String {
+/// base URL 那一格为什么空着。两种原因给两种说法，agent 才知道该做什么。
+fn base_url_gap(pool: &DbPool, env: Option<&Environment>, module_id: Option<&str>) -> String {
     let Some(env) = env else {
         return "no environment: the endpoint has no environment bound and the project has no active one, so there is nowhere to read a base URL from".to_string();
     };
-    let def_id = detail
-        .base_url_definition_id
-        .clone()
-        .or_else(|| project.default_base_url_definition_id.clone());
-    let Some(def_id) = def_id else {
-        return "no service to resolve against: the endpoint names no service and the project has no default service (★)".to_string();
-    };
     let Some(module_id) = module_id else {
-        return "the endpoint is not under any module, and a base URL lives in the (environment x service x module) cell".to_string();
+        return "the endpoint is not under any module, and a base URL lives in the (environment x module) cell".to_string();
     };
     let module_name = simple_post_core::db::with_conn(pool, |c| {
         Ok::<String, AppError>(
@@ -131,8 +107,8 @@ fn base_url_gap(
     })
     .unwrap_or_else(|_| module_id.to_string());
     format!(
-        "environment '{}' has no base URL for service '{}' on module '{}' — that cell never inherits",
-        env.name, def_id, module_name
+        "environment '{}' has no base URL for module '{}' — that cell never inherits",
+        env.name, module_name
     )
 }
 
@@ -166,7 +142,7 @@ fn enabled_dynamic_names(pool: &DbPool, project_id: &str) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// 这个 `missing_pieces` 需要 `Project` 才能判断「项目 ★」是谁。
+/// 这个 `missing_pieces` 需要 `Project`，才能知道端点没绑环境时该用哪个激活环境。
 pub(crate) fn project_of(pool: &DbPool, project_id: &str) -> Result<Project, AppError> {
     simple_post_core::db::with_conn(pool, |c| simple_post_core::db::projects::get(c, project_id))
 }

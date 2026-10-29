@@ -34,7 +34,6 @@ fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> E
         method: HttpMethod::Get,
         url: url.into(),
         environment_id: None,
-        base_url_definition_id: None,
         base_url_override: None,
         params: Vec::<KeyValue>::new(),
         path_params: Vec::<KeyValue>::new(),

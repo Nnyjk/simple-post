@@ -13,7 +13,7 @@ use serde::Deserialize;
 use super::multipart;
 use crate::variable_fill::{resolve_endpoint, EndpointOverrides};
 use simple_post_core::domain::{
-    AuthConfig, BodyMode, EndpointDetail, Environment, KeyValue, Project, RequestBody,
+    AuthConfig, BodyMode, EndpointDetail, Environment, KeyValue, RequestBody,
 };
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
@@ -64,7 +64,6 @@ fn detail(input: &Input) -> EndpointDetail {
             .expect("样本里的 method 必须是合法的 HTTP 动词"),
         url: input.url_path.clone(),
         environment_id: None,
-        base_url_definition_id: None,
         base_url_override: Some(input.base_url.clone()),
         params: input.params.clone(),
         path_params: input.path_params.clone(),
@@ -85,7 +84,6 @@ fn env(variables: &std::collections::BTreeMap<String, String>) -> Environment {
         id: "env1".into(),
         project_id: "p1".into(),
         name: "dev".into(),
-        base_urls: Default::default(),
         module_base_urls: Default::default(),
         variables: variables
             .iter()
@@ -124,25 +122,9 @@ fn every_multipart_parity_case_assembles_the_same_way() {
     for case in &fixture.cases {
         let detail = detail(&case.input);
         let env = env(&case.env);
-        let project = Project {
-            id: "p1".into(),
-            name: "P".into(),
-            description: None,
-            base_url: None,
-            base_url_definitions: vec![],
-            default_base_url_definition_id: None,
-            color: String::new(),
-            created_at: 0,
-            updated_at: 0,
-        };
 
-        let resolved = resolve_endpoint(
-            &detail,
-            Some(&env),
-            &project,
-            Some(&EndpointOverrides::default()),
-        )
-        .unwrap_or_else(|e| panic!("{}: 解析失败: {e}", case.name));
+        let resolved = resolve_endpoint(&detail, Some(&env), Some(&EndpointOverrides::default()))
+            .unwrap_or_else(|e| panic!("{}: 解析失败: {e}", case.name));
 
         assert_eq!(resolved.url, case.expected.url, "{}: URL", case.name);
 

@@ -6,19 +6,16 @@ use simple_post_core::domain::{
 };
 
 use super::resolve::resolve_endpoint;
-use super::test_support::{
-    empty_env, in_module_a, minimal_endpoint, project_with_defs, set_cell, MOD_A,
-};
+use super::test_support::{empty_env, in_module_a, minimal_endpoint, set_cell, MOD_A};
 // ---- auth injection ----------------------------------------------
 
 #[test]
 fn resolve_endpoint_bearer_auth_injects_authorization_header() {
     let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    set_cell(&mut env, MOD_A, "https://api.example.com");
     env.variables.insert("token".into(), "secret-xyz".into());
     let mut ep = minimal_endpoint();
     ep.url = "/me".into();
-    ep.base_url_definition_id = Some("data".into());
     ep.auth = AuthConfig {
         kind: AuthType::Bearer,
         bearer: Some("{{token}}".into()),
@@ -26,8 +23,7 @@ fn resolve_endpoint_bearer_auth_injects_authorization_header() {
         apikey: None,
         oauth2: None,
     };
-    let project = project_with_defs();
-    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
     let auth = r
         .headers
         .iter()
@@ -39,12 +35,11 @@ fn resolve_endpoint_bearer_auth_injects_authorization_header() {
 #[test]
 fn resolve_endpoint_basic_auth_injects_authorization_header() {
     let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    set_cell(&mut env, MOD_A, "https://api.example.com");
     env.variables.insert("u".into(), "alice".into());
     env.variables.insert("p".into(), "wonder".into());
     let mut ep = minimal_endpoint();
     ep.url = "/me".into();
-    ep.base_url_definition_id = Some("data".into());
     ep.auth = AuthConfig {
         kind: AuthType::Basic,
         bearer: None,
@@ -55,8 +50,7 @@ fn resolve_endpoint_basic_auth_injects_authorization_header() {
         apikey: None,
         oauth2: None,
     };
-    let project = project_with_defs();
-    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
     let auth = r
         .headers
         .iter()
@@ -70,11 +64,10 @@ fn resolve_endpoint_basic_auth_injects_authorization_header() {
 #[test]
 fn resolve_endpoint_apikey_header_injects_custom_header() {
     let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    set_cell(&mut env, MOD_A, "https://api.example.com");
     env.variables.insert("k".into(), "ABC123".into());
     let mut ep = minimal_endpoint();
     ep.url = "/me".into();
-    ep.base_url_definition_id = Some("data".into());
     ep.auth = AuthConfig {
         kind: AuthType::Apikey,
         bearer: None,
@@ -86,8 +79,7 @@ fn resolve_endpoint_apikey_header_injects_custom_header() {
         }),
         oauth2: None,
     };
-    let project = project_with_defs();
-    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
     let hit = r
         .headers
         .iter()
@@ -101,11 +93,10 @@ fn resolve_endpoint_apikey_header_injects_custom_header() {
 #[test]
 fn resolve_endpoint_apikey_query_appends_to_url() {
     let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    set_cell(&mut env, MOD_A, "https://api.example.com");
     env.variables.insert("k".into(), "Q-VAL".into());
     let mut ep = minimal_endpoint();
     ep.url = "/me".into();
-    ep.base_url_definition_id = Some("data".into());
     ep.auth = AuthConfig {
         kind: AuthType::Apikey,
         bearer: None,
@@ -117,8 +108,7 @@ fn resolve_endpoint_apikey_query_appends_to_url() {
         }),
         oauth2: None,
     };
-    let project = project_with_defs();
-    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
     assert!(r.url.contains("access_token=Q-VAL"));
     // And there's NO Authorization header.
     assert!(r
@@ -139,11 +129,10 @@ fn resolve_endpoint_user_authorization_wins_over_auth_config() {
 
     // 否则 cURL 会为同一个名字吐出两行 `-H`）。
     let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://api.example.com");
+    set_cell(&mut env, MOD_A, "https://api.example.com");
     env.variables.insert("token".into(), "from-env".into());
     let mut ep = minimal_endpoint();
     ep.url = "/me".into();
-    ep.base_url_definition_id = Some("data".into());
     ep.headers = vec![KeyValue {
         id: "h1".into(),
         key: "Authorization".into(),
@@ -158,8 +147,7 @@ fn resolve_endpoint_user_authorization_wins_over_auth_config() {
         apikey: None,
         oauth2: None,
     };
-    let project = project_with_defs();
-    let r = resolve_endpoint(&ep, Some(&env), &project, Some(&in_module_a())).unwrap();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
     // The user's "Bearer user-set" should win.
     let auth = r
         .headers
@@ -200,7 +188,7 @@ fn oauth2_substitutes_addresses_and_identifiers_but_not_secrets() {
         ..AuthConfig::default()
     };
 
-    let r = resolve_endpoint(&ep, Some(&env), &project_with_defs(), None).unwrap();
+    let r = resolve_endpoint(&ep, Some(&env), None).unwrap();
     let o = r.auth.oauth2.expect("oauth2 载荷要被透传");
     assert_eq!(o.token_url, "https://idp.example.com/oauth/token");
     assert_eq!(o.client_id, "my-client");
@@ -230,7 +218,7 @@ fn an_unselected_oauth2_payload_is_left_alone() {
         }),
         ..AuthConfig::default()
     };
-    let r = resolve_endpoint(&ep, Some(&env), &project_with_defs(), None).unwrap();
+    let r = resolve_endpoint(&ep, Some(&env), None).unwrap();
     let o = r.auth.oauth2.expect("载荷仍在");
     assert_eq!(o.token_url, "https://{{idp}}/token");
     assert!(

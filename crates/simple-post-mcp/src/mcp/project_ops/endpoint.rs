@@ -30,7 +30,7 @@ pub(super) use write::tool_endpoint_create;
 //
 // `missing_pieces` 另有一处调用方：`crate::spec::ops` —— REST 路由与桌面 command
 // 落同一份规格时也要算「还缺什么」，而那条判据住在 mcp crate 里（它要用
-// `variable_fill::resolve_base_url_with`），故它得能走出 `project_ops`。
+// `variable_fill::resolve_base_url`），故它得能走出 `project_ops`。
 pub(in crate::mcp::project_ops) use input::oauth2_config_schema;
 pub(crate) use missing::{missing_pieces, project_of};
 

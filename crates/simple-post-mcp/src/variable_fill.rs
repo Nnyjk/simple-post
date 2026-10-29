@@ -8,8 +8,7 @@
 //!
 //!   * [`resolve_template`] —— 对变量表做 `{{var}}` 替换，底层积木。
 //!   * [`resolve_endpoint`] —— 把 [`EndpointDetail`] + 当前 [`Environment`] +
-//!     [`Project`] + 可选 [`EndpointOverrides`] 合成为可直接交给发送器的
-//!     [`ResolvedEndpoint`]。
+//!     可选 [`EndpointOverrides`] 合成为可直接交给发送器的 [`ResolvedEndpoint`]。
 //!
 //! 本文件只做门面，调用方仍写 `simple_post_mcp::variable_fill::…`：
 //!
@@ -35,7 +34,8 @@ mod template;
 mod types;
 
 pub use base_url::{
-    collapse_url_slashes, join_base_url, resolve_base_url, resolve_base_url_with, BaseUrlSource,
+    apply_proxy, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
+    ResolvedBaseUrl,
 };
 pub use resolve::{resolve_endpoint, resolve_endpoint_with};
 pub use template::{list_missing_vars, resolve_template, ResolvedTemplate};

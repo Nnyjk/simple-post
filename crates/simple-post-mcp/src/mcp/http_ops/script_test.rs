@@ -92,9 +92,6 @@ fn script_endpoint(
         id: "p_script".into(),
         name: "P".into(),
         description: None,
-        base_url: None,
-        base_url_definitions: vec![],
-        default_base_url_definition_id: None,
         color: String::new(),
         created_at: 0,
         updated_at: 0,
@@ -115,7 +112,6 @@ fn script_endpoint(
         method: HttpMethod::Get,
         url: format!("{api_url}/me"),
         environment_id: Some("env_script".into()),
-        base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],
@@ -133,7 +129,6 @@ fn script_endpoint(
         id: "env_script".into(),
         project_id: "p_script".into(),
         name: "dev".into(),
-        base_urls: Default::default(),
         module_base_urls: Default::default(),
         variables: [("token".to_string(), "abc".to_string())]
             .into_iter()

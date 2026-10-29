@@ -17,7 +17,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         ToolEntry {
             name: "api_run_request",
             description:
-                "Run an ad-hoc HTTP request, assembled by the same resolver the stored endpoints use: env variables, baseUrl, auth, params and body all follow the endpoint rules. A base URL is read from moduleBaseUrls[base_url_definition_id][module_id], so both ids are needed.",
+                "Run an ad-hoc HTTP request, assembled by the same resolver the stored endpoints use: env variables, baseUrl, auth, params and body all follow the endpoint rules. A base URL is read from the (environment x module) cell, so env_id and module_id are needed.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -94,7 +94,6 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                         "required": ["kind"]
                     },
                     "env_id": { "type": "string" },
-                    "base_url_definition_id": { "type": "string" },
                     "module_id": { "type": "string" },
                     "settings_override": {
                         "type": "object",
@@ -140,7 +139,6 @@ substituted into the path itself, not appended to the query string. The key of e
 placeholder name; a placeholder without an entry keeps its literal braces and blocks the send.",
                                 "items": { "$ref": "#/$defs/keyValue" }
                             },
-                            "baseUrlDefinitionId": { "type": "string" },
                             "moduleId": { "type": "string" }
                         },
                         "additionalProperties": true

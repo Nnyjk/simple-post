@@ -72,9 +72,6 @@ fn seed_with_url(st: &AppState, base_url: &str, url: &str) -> String {
         id: "p_ovr".into(),
         name: "P".into(),
         description: None,
-        base_url: None,
-        base_url_definitions: vec![],
-        default_base_url_definition_id: None,
         color: String::new(),
         created_at: 0,
         updated_at: 0,
@@ -95,9 +92,8 @@ fn seed_with_url(st: &AppState, base_url: &str, url: &str) -> String {
         method: HttpMethod::Get,
         url: url.into(),
         environment_id: None,
-        base_url_definition_id: None,
         // 每端点自定义的 base URL 优先级最高，故直接钉住 stub 的地址：不必再为它
-        // 建服务定义与环境格子。
+        // 建环境格子。
         base_url_override: Some(base_url.to_string()),
         params: vec![],
         path_params: vec![],

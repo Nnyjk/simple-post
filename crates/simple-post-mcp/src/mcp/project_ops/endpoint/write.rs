@@ -211,7 +211,6 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         method,
         url: a.url,
         environment_id: a.environment_id,
-        base_url_definition_id: a.base_url_definition_id,
         base_url_override: a.base_url_override,
         params: coerce_key_values(a.params.unwrap_or_default()),
         path_params: coerce_key_values(a.path_params.unwrap_or_default()),
@@ -308,7 +307,6 @@ pub(super) async fn tool_endpoint_update(
         method: patch_value_field::<simple_post_core::domain::HttpMethod>(&patch_obj, "method")?,
         url: patch_value_field::<String>(&patch_obj, "url")?,
         environment_id: patch_field::<String>(&patch_obj, "environment_id")?,
-        base_url_definition_id: patch_field::<String>(&patch_obj, "base_url_definition_id")?,
         base_url_override: patch_field::<String>(&patch_obj, "base_url_override")?,
         params: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "params")?
             .map(coerce_key_values),
@@ -347,9 +345,8 @@ pub(super) async fn tool_endpoint_update(
             "endpoint_update was given an empty patch: name at least one \
              field to change, e.g. {\"patch\":{\"url\":\"/v2/users\"}}. \
              Accepted fields: method, url, params, headers, body, auth, \
-             tags, environment_id, base_url_definition_id, \
-             base_url_override, docs, notes, pre_request_script, \
-             test_script, tls, name, description, sort_order"
+             tags, environment_id, base_url_override, docs, notes, \
+             pre_request_script, test_script, tls, name, description, sort_order"
                 .into(),
         ));
     }
@@ -364,7 +361,7 @@ pub(super) async fn tool_endpoint_update(
         Ok(())
     })?;
     // 改完照样回报「还缺什么」：改 url 常常改出新的缺口（新的路径参数没有对应的
-    // 变量、新的服务没有配 base URL）。
+    // 变量、新的模块格子没有配 base URL）。
     endpoint_response(state, &endpoint_id, &node.root_id, false, None)
 }
 

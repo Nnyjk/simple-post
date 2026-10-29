@@ -12,7 +12,7 @@ use serde_json::json;
 use super::tool_api_call_endpoint;
 use crate::mcp::AppState;
 use simple_post_core::domain::{
-    AuthConfig, BaseUrlDefinition, EndpointDetail, Environment, HttpMethod, Project, RequestBody,
+    AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, Project, RequestBody,
     ResourceNodeType,
 };
 
@@ -63,7 +63,7 @@ fn mcp_state(tag: &str) -> Arc<AppState> {
 /// 种一个项目、模块、端点与一个**激活**的环境。端点的 `environment_id` 是空的
 /// ——界面自己建的接口就是这样。
 fn seed(st: &AppState, base_url: &str) -> String {
-    use simple_post_core::db::{base_url_defs, environments, nodes, permissions, projects};
+    use simple_post_core::db::{environments, nodes, permissions, projects};
     use simple_post_core::domain::ResourceNode;
     use simple_post_core::permissions::Permission;
 
@@ -71,13 +71,6 @@ fn seed(st: &AppState, base_url: &str) -> String {
         id: "p_env".into(),
         name: "P".into(),
         description: None,
-        base_url: None,
-        base_url_definitions: vec![BaseUrlDefinition {
-            id: "svc".into(),
-            name: "api".into(),
-            description: None,
-        }],
-        default_base_url_definition_id: Some("svc".into()),
         color: String::new(),
         created_at: 0,
         updated_at: 0,
@@ -99,7 +92,6 @@ fn seed(st: &AppState, base_url: &str) -> String {
         url: "/users/{{userId}}".into(),
         // 端点没绑环境 —— 界面那侧会回落到工作区当前环境。
         environment_id: None,
-        base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],
@@ -121,12 +113,12 @@ fn seed(st: &AppState, base_url: &str) -> String {
         id: "env_env".into(),
         project_id: "p_env".into(),
         name: "dev".into(),
-        base_urls: Default::default(),
         module_base_urls: [(
-            "svc".to_string(),
-            [("m_env".to_string(), base_url.to_string())]
-                .into_iter()
-                .collect(),
+            "m_env".to_string(),
+            ModuleBaseUrl {
+                url: base_url.to_string(),
+                proxy: None,
+            },
         )]
         .into_iter()
         .collect(),
@@ -139,7 +131,6 @@ fn seed(st: &AppState, base_url: &str) -> String {
     };
     simple_post_core::db::with_tx(&st.pool, |c| {
         projects::create(c, &project)?;
-        base_url_defs::create(c, &project.base_url_definitions[0], "p_env")?;
         nodes::create(c, &module, None)?;
         nodes::create(
             c,
@@ -176,7 +167,7 @@ async fn an_endpoint_without_its_own_environment_falls_back_to_the_active_one() 
         .expect("call");
 
     let wire = seen.lock().unwrap()[0].clone();
-    // base URL 来自 (环境 × 服务 × 模块) 的格子，变量也由那个环境替换。
+    // base URL 来自 (环境 × 模块) 的格子，变量也由那个环境替换。
     assert!(
         wire.contains("GET /users/42 HTTP/1.1"),
         "端点没绑环境时必须按项目激活的环境解析：{wire}"

@@ -1,126 +1,120 @@
-//! base URL 的解析优先级、拼接与斜杠收拢。
+//! base URL 的解析、代理前缀替换、拼接与斜杠收拢。
 
 use super::base_url::{
-    collapse_url_slashes, join_base_url, resolve_base_url, resolve_base_url_with, BaseUrlSource,
+    apply_proxy, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
 };
 use super::resolve::resolve_endpoint;
 use super::test_support::{
-    empty_env, env_with_two_modules, in_module_a, minimal_endpoint, project_with_defs, set_cell,
-    MOD_A, MOD_B,
+    empty_env, env_with_two_modules, in_module_a, minimal_endpoint, set_cell_with_proxy, MOD_A,
+    MOD_B,
 };
-// ---- project-scoped services, per-module values ---------------
-//
-// 服务应该绑定到项目，每个模块都看到全部。按模块区分的是**取值** —— 同一个服务可以在
-// 两个模块指向不同 host，而空格子是一个真实答案，不是可以穿过去的洞。
+
+// ---- 解析 ------------------------------------------------------------
 
 #[test]
-fn the_project_star_resolves_the_endpoints_own_module_cell() {
+fn the_module_cell_resolves_the_endpoints_own_address() {
     let env = env_with_two_modules();
-    let project = project_with_defs(); // ★ = "data"
-    let (url, src, def) =
-        resolve_base_url_with(&minimal_endpoint(), Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "https://mod-a.example.com");
-    assert_eq!(src, BaseUrlSource::Default);
-    assert_eq!(def.as_deref(), Some("data"));
+    let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
+    assert_eq!(got.base_url, "https://mod-a.example.com");
+    assert_eq!(got.proxy, None);
+    assert_eq!(got.source, BaseUrlSource::Module);
 }
 
 #[test]
-fn the_same_service_resolves_a_different_host_per_module() {
-    // 服务是共享的，按模块区分的只有它的地址。这个测试会在 `module_id` 被当成
-    // 「哪些服务存在」的过滤器（而不是取值层的键）时失败。
+fn two_modules_resolve_different_hosts() {
+    // 模块之间没有继承：MOD_B 的地址不能被 MOD_A 那格顶替。
 
     let env = env_with_two_modules();
-    let project = project_with_defs();
-    let (url, src, def) =
-        resolve_base_url_with(&minimal_endpoint(), Some(&env), &project, None, Some(MOD_B));
-    assert_eq!(url, "https://mod-b.example.com");
-    assert_eq!(src, BaseUrlSource::Default);
-    assert_eq!(def.as_deref(), Some("data"));
+    let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_B));
+    assert_eq!(got.base_url, "https://mod-b.example.com");
+    assert_eq!(got.source, BaseUrlSource::Module);
 }
 
 #[test]
-fn a_definition_id_the_project_does_not_hold_resolves_to_nothing() {
-    // 同一批覆盖服务已删、从别的项目复制来的 id、以及端点上的指针过期。
-    // 回退到 ★会把请求打到用户没选过的 host 上。
-
-    let env = env_with_two_modules();
-    let project = project_with_defs();
-    let mut ep = minimal_endpoint();
-    ep.base_url_definition_id = Some("ghost".into());
-    let (url, src, def) = resolve_base_url_with(&ep, Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::None);
-    assert_eq!(def, None);
-}
-
-#[test]
-fn a_forced_definition_the_project_does_not_hold_is_also_refused() {
-    // 调用方自己点名的那一个，同样要过这份项目列表的校验。
-    let env = env_with_two_modules();
-    let project = project_with_defs();
-    let (url, src, _) = resolve_base_url_with(
-        &minimal_endpoint(),
-        Some(&env),
-        &project,
-        Some("ghost"),
-        Some(MOD_A),
+fn a_cell_with_a_proxy_reports_both_addresses() {
+    let mut env = empty_env();
+    set_cell_with_proxy(
+        &mut env,
+        MOD_A,
+        "http://svc.internal:8080/api/a",
+        "https://gw.corp.com/api/xxxx/a",
     );
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::None);
-}
-
-#[test]
-fn a_project_with_no_star_resolves_to_nothing() {
-    // NULL 正是新建项目的状态。它的端点会不带 base URL 发出，而不是借用任何服务。
-
-    let env = env_with_two_modules();
-    let mut project = project_with_defs();
-    project.default_base_url_definition_id = None;
-    let (url, src, _) =
-        resolve_base_url_with(&minimal_endpoint(), Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::None);
+    let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
+    assert_eq!(got.base_url, "http://svc.internal:8080/api/a");
+    assert_eq!(got.proxy.as_deref(), Some("https://gw.corp.com/api/xxxx/a"));
+    assert_eq!(got.source, BaseUrlSource::Module);
 }
 
 #[test]
 fn no_module_context_resolves_to_nothing() {
     // 调用方没说端点在哪个模块，所以没有格子可读。找不到格子并不构成去读别的模块的理由。
     let env = env_with_two_modules();
-    let project = project_with_defs();
-    let (url, src, _) =
-        resolve_base_url_with(&minimal_endpoint(), Some(&env), &project, None, None);
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::None);
+    let got = resolve_base_url(&minimal_endpoint(), Some(&env), None);
+    assert_eq!(got.base_url, "");
+    assert_eq!(got.source, BaseUrlSource::None);
 }
 
 #[test]
 fn an_empty_cell_does_not_fall_back_to_another_module() {
-    // `data` 给 MOD_B 配了 URL 而没给 MOD_A 配。借用 MOD_B 的
-    // 会把一个 `air` 请求发到 `water` 的 host 上 —— 这正是
-    // 整个 (环境 × 模块 × 服务) 形状要防的错误。
-    let mut env = env_with_two_modules();
-    env.module_base_urls.get_mut("data").unwrap().remove(MOD_A);
-    let project = project_with_defs();
-    let (url, src, _) =
-        resolve_base_url_with(&minimal_endpoint(), Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::None);
+    // MOD_B 有地址而 MOD_A 没有。借用 MOD_B 的会把一个 `air` 请求发到 `water` 的 host 上。
+    let env = env_with_two_modules();
+    let mut env2 = env.clone();
+    env2.module_base_urls.remove(MOD_A);
+    let got = resolve_base_url(&minimal_endpoint(), Some(&env2), Some(MOD_A));
+    assert_eq!(got.base_url, "");
+    assert_eq!(got.source, BaseUrlSource::None);
 }
 
 #[test]
-fn the_deprecated_base_urls_column_is_never_read() {
-    // `Environment.baseUrls` 是 `db::migrate` 已清空的那层死列。留在那里的
-    // 值不该解析成功，否则 shape-B 迁移后就仍会走一条没人写的路径发请求。
-
+fn a_cell_with_only_a_proxy_resolves_to_nothing() {
+    // 没有地址就没有可替换的前缀，代理因此也不参与解析。
     let mut env = empty_env();
-    env.base_urls
-        .insert("data".into(), "https://stale.example.com".into());
-    let project = project_with_defs();
-    let (url, src, _) =
-        resolve_base_url_with(&minimal_endpoint(), Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "", "the dead baseUrls column must not resolve");
-    assert_eq!(src, BaseUrlSource::None);
+    set_cell_with_proxy(&mut env, MOD_A, "", "https://gw.corp.com");
+    let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
+    assert_eq!(got.base_url, "");
+    assert_eq!(got.proxy, None);
+    assert_eq!(got.source, BaseUrlSource::None);
 }
+
+#[test]
+fn no_env_resolves_to_nothing() {
+    // 没有选环境，就没有那张 map 可读。
+    let got = resolve_base_url(&minimal_endpoint(), None, Some(MOD_A));
+    assert_eq!(got.base_url, "");
+    assert_eq!(got.source, BaseUrlSource::None);
+}
+
+#[test]
+fn a_per_endpoint_override_still_beats_the_module_cell() {
+    // 自定义模式始终是最强信号：URL 字段里已经是完整地址，不能再前置模块的地址。
+    let env = env_with_two_modules();
+    let mut ep = minimal_endpoint();
+    ep.base_url_override = Some("".to_string());
+    let got = resolve_base_url(&ep, Some(&env), Some(MOD_A));
+    assert_eq!(got.base_url, "");
+    assert_eq!(got.proxy, None);
+    assert_eq!(got.source, BaseUrlSource::Override);
+}
+
+#[test]
+fn a_per_endpoint_override_does_not_pick_up_the_proxy() {
+    // 自定义意味着「地址由我自己填」，代理那一层不参与。
+    let mut env = empty_env();
+    set_cell_with_proxy(
+        &mut env,
+        MOD_A,
+        "http://svc.internal:8080/api/a",
+        "https://gw.corp.com/api/xxxx/a",
+    );
+    let mut ep = minimal_endpoint();
+    ep.base_url_override = Some("https://custom.example.com".into());
+    let got = resolve_base_url(&ep, Some(&env), Some(MOD_A));
+    assert_eq!(got.base_url, "https://custom.example.com");
+    assert_eq!(got.proxy, None);
+    assert_eq!(got.source, BaseUrlSource::Override);
+}
+
+// ---- resolve_endpoint -------------------------------------------------
 
 #[test]
 fn resolve_endpoint_applies_the_module_from_overrides() {
@@ -128,14 +122,8 @@ fn resolve_endpoint_applies_the_module_from_overrides() {
     // 真正跑到的形状。
 
     let env = env_with_two_modules();
-    let project = project_with_defs();
-    let r = resolve_endpoint(
-        &minimal_endpoint(),
-        Some(&env),
-        &project,
-        Some(&in_module_a()),
-    )
-    .expect("resolves");
+    let r =
+        resolve_endpoint(&minimal_endpoint(), Some(&env), Some(&in_module_a())).expect("resolves");
     assert!(
         r.url.starts_with("https://mod-a.example.com"),
         "got {}",
@@ -146,178 +134,110 @@ fn resolve_endpoint_applies_the_module_from_overrides() {
 #[test]
 fn resolve_endpoint_without_module_context_has_no_base_url() {
     let env = env_with_two_modules();
-    let project = project_with_defs();
-    let r = resolve_endpoint(&minimal_endpoint(), Some(&env), &project, None).expect("resolves");
+    let r = resolve_endpoint(&minimal_endpoint(), Some(&env), None).expect("resolves");
     assert_eq!(r.url, "/users/{{id}}", "no module, no cell, no prefix");
 }
 
 #[test]
-fn a_per_endpoint_override_still_beats_the_service_chain() {
-    // 自定义模式始终是最强信号；它之下的任何一层都不得改投一个 URL 字段里
-    // 已经是完整地址的请求。
-
-    let env = env_with_two_modules();
-    let project = project_with_defs();
-    let mut ep = minimal_endpoint();
-    ep.base_url_override = Some("".to_string());
-    let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::Override);
-}
-
-// ---- resolve_base_url --------------------------------------------
-
-/// The renderer's base-URL picker is ephemeral: it commits to the DB
-/// on change, but `resolve_endpoint` may still be handed a different
-/// choice (a draft, or a caller that resolved a default itself). The
-/// override has to win over the stored choice.
-#[test]
-fn resolve_base_url_forced_definition_wins() {
+fn resolve_endpoint_replaces_the_module_address_with_the_proxy() {
+    // 端到端：模块那一格是后端 api 地址，请求发出去时换成实际访问地址。
     let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://data.example.com");
-    set_cell(&mut env, "auth", MOD_A, "https://auth.example.com");
+    set_cell_with_proxy(
+        &mut env,
+        MOD_A,
+        "http://svc.internal:8080/api/a",
+        "https://gw.corp.com/api/xxxx/a",
+    );
     let mut ep = minimal_endpoint();
-    ep.base_url_definition_id = Some("data".into());
-    let project = project_with_defs();
-    let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, Some("auth"), Some(MOD_A));
-    assert_eq!(url, "https://auth.example.com");
-    assert_eq!(src, BaseUrlSource::Definition);
+    ep.url = "/orders/list".into();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
+    assert_eq!(r.url, "https://gw.corp.com/api/xxxx/a/orders/list");
 }
 
-/// An empty string means "no base URL" —the renderer sends that when
-/// the user cleared the picker. It must NOT silently fall back to the
-/// project ★ or clearing the picker would do nothing.
 #[test]
-fn resolve_base_url_empty_forced_id_means_none() {
+fn resolve_endpoint_leaves_the_url_alone_when_the_proxy_does_not_match() {
+    // 端点写的是另一个主机时，代理那一层不参与：它匹配的是模块地址那个前缀。
     let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://data.example.com");
-    let project = project_with_defs(); // ★ = "data"
-    let ep = minimal_endpoint();
-    let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, Some(""), Some(MOD_A));
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::None);
-    // 对照：没有覆盖值时项目 ★确实生效。
-    let (url2, src2, _) = resolve_base_url_with(&ep, Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url2, "https://data.example.com");
-    assert_eq!(src2, BaseUrlSource::Default);
-}
-
-/// 即便调用方同时点名了一个定义，每端点的硬 host 仍是最强信号。
-
-#[test]
-fn resolve_base_url_endpoint_host_still_wins_over_forced() {
-    let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://data.example.com");
+    set_cell_with_proxy(
+        &mut env,
+        MOD_A,
+        "http://svc.internal:8080/api/a",
+        "https://gw.corp.com/api/xxxx/a",
+    );
     let mut ep = minimal_endpoint();
-    ep.base_url_override = Some("https://custom.example.com".into());
-    let project = project_with_defs();
-    let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, Some("data"), Some(MOD_A));
-    assert_eq!(url, "https://custom.example.com");
-    assert_eq!(src, BaseUrlSource::Override);
+    ep.url = "https://other.example.com/orders".into();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
+    assert_eq!(r.url, "https://other.example.com/orders");
+}
+
+// ---- apply_proxy ------------------------------------------------------
+
+#[test]
+fn apply_proxy_replaces_the_prefix() {
+    assert_eq!(
+        apply_proxy(
+            "http://svc.internal:8080/api/a",
+            Some("https://gw.corp.com/api/xxxx/a"),
+            "http://svc.internal:8080/api/a/orders/list",
+        ),
+        "https://gw.corp.com/api/xxxx/a/orders/list"
+    );
 }
 
 #[test]
-fn resolve_base_url_override_wins() {
-    let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://data.example.com");
-    let mut ep = minimal_endpoint();
-    ep.base_url_override = Some("https://custom.example.com".into());
-    ep.base_url_definition_id = Some("data".into());
-    let project = project_with_defs();
-    // No module needed: an explicit per-endpoint host is decided before
-    // any service is looked up.
-    let (url, src, _) = resolve_base_url(&ep, Some(&env), &project);
-    assert_eq!(url, "https://custom.example.com");
-    assert_eq!(src, BaseUrlSource::Override);
+fn apply_proxy_without_a_proxy_changes_nothing() {
+    assert_eq!(
+        apply_proxy(
+            "http://svc.internal:8080/api/a",
+            None,
+            "http://svc.internal:8080/api/a/orders/list",
+        ),
+        "http://svc.internal:8080/api/a/orders/list"
+    );
+    assert_eq!(
+        apply_proxy(
+            "http://svc.internal:8080/api/a",
+            Some("  "),
+            "http://svc.internal:8080/api/a/orders/list",
+        ),
+        "http://svc.internal:8080/api/a/orders/list"
+    );
 }
 
 #[test]
-fn resolve_base_url_empty_override_is_a_choice_not_an_absence() {
-    // 自定义with no host typed yet. The renderer writes `Some("")` to
-    // *record the mode*; only `None` clears it. If an empty override fell
-    // through to the service chain, selecting 自定义would silently
-    // resolve the project's base URL again —the exact "the click did
-    // nothing" bug on the Rust side.
-    let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://data.example.com");
-    let mut ep = minimal_endpoint();
-    ep.base_url_override = Some(String::new());
-    let project = project_with_defs(); // ★ = "data"
-    let (url, src, _) = resolve_base_url(&ep, Some(&env), &project);
-    assert_eq!(url, "");
-    assert_eq!(src, BaseUrlSource::Override);
-
-    // End to end: the URL field's whole address survives the join, with
-    // no base URL prepended —including a path that carries no scheme.
-    let mut ep2 = minimal_endpoint();
-    ep2.base_url_override = Some(String::new());
-    ep2.url = "https://api.other.com/users/1".into();
-    let r = resolve_endpoint(&ep2, Some(&env), &project, Some(&in_module_a())).expect("resolves");
-    assert_eq!(r.url, "https://api.other.com/users/1");
-
-    let mut ep3 = minimal_endpoint();
-    ep3.base_url_override = Some(String::new());
-    ep3.url = "/users/1".into();
-    let r2 = resolve_endpoint(&ep3, Some(&env), &project, Some(&in_module_a())).expect("resolves");
-    assert_eq!(r2.url, "/users/1");
-
-    // 对照：清掉覆盖值后项目 ★回来
-    let cleared = minimal_endpoint();
-    let (url2, src2, _) = resolve_base_url_with(&cleared, Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url2, "https://data.example.com");
-    assert_eq!(src2, BaseUrlSource::Default);
+fn apply_proxy_only_matches_on_a_path_boundary() {
+    // `http://h/api` 不该命中 `http://h/apixyz`。
+    assert_eq!(
+        apply_proxy(
+            "http://svc.internal:8080/api",
+            Some("https://gw.corp.com"),
+            "http://svc.internal:8080/apixyz/orders",
+        ),
+        "http://svc.internal:8080/apixyz/orders"
+    );
 }
 
 #[test]
-fn resolve_base_url_definition_chosen() {
-    let mut env = empty_env();
-    set_cell(&mut env, "auth", MOD_A, "https://auth.example.com");
-    let mut ep = minimal_endpoint();
-    ep.base_url_definition_id = Some("auth".into());
-    let project = project_with_defs();
-    let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "https://auth.example.com");
-    assert_eq!(src, BaseUrlSource::Definition);
+fn apply_proxy_matches_the_url_exactly() {
+    assert_eq!(
+        apply_proxy(
+            "https://api.example.com",
+            Some("https://gw.corp.com"),
+            "https://api.example.com",
+        ),
+        "https://gw.corp.com"
+    );
 }
 
 #[test]
-fn resolve_base_url_falls_back_to_the_project_star() {
-    let mut env = empty_env();
-    set_cell(&mut env, "data", MOD_A, "https://data.example.com");
-    let ep = minimal_endpoint(); // base_url_definition_id = None
-    let project = project_with_defs(); // ★ = "data"
-    let (url, src, _) = resolve_base_url_with(&ep, Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(url, "https://data.example.com");
-    assert_eq!(src, BaseUrlSource::Default);
+fn apply_proxy_needs_a_base_url_to_match_against() {
+    assert_eq!(
+        apply_proxy("", Some("https://gw.corp.com"), "/orders"),
+        "/orders"
+    );
 }
 
-#[test]
-fn resolve_base_url_no_env_returns_empty() {
-    // No environment selected at all, so there is no `moduleBaseUrls` map
-    // to read and no value to resolve — even though the service and the
-    // project ★ both exist.
-    let project = project_with_defs();
-    let ep = minimal_endpoint();
-    let (u, src, _) = resolve_base_url_with(&ep, None, &project, None, Some(MOD_A));
-    assert_eq!(u, "");
-    assert_eq!(src, BaseUrlSource::None);
-}
-
-#[test]
-fn resolve_base_url_env_lacks_value_for_this_module() {
-    // The service is named and the project holds it, but this module has
-    // no cell for it —the slot exists and is empty, which is the same
-    // answer as naming nothing.
-    let env = empty_env();
-    let mut ep = minimal_endpoint();
-    ep.base_url_definition_id = Some("auth".into());
-    let project = project_with_defs();
-    let (u, src, _) = resolve_base_url_with(&ep, Some(&env), &project, None, Some(MOD_A));
-    assert_eq!(u, "");
-    assert_eq!(src, BaseUrlSource::None);
-}
-
-// ---- join_base_url -----------------------------------------------
+// ---- join_base_url ---------------------------------------------------
 
 #[test]
 fn join_base_url_strips_trailing_slash() {
