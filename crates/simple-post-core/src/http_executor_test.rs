@@ -527,6 +527,106 @@ fn truncate_body_exact_cap_is_not_truncated() {
     assert!(!truncated);
 }
 
+// 响应的形态判据
+
+/// `text/plain` 的响应即便字节非法 UTF-8，也仍是**文本形态**。
+///
+/// 读回来的字节是按体积上限裁过的，裁点落在某个多字节字符中间时，一个纯文本响应读回来
+/// 也是非法 UTF-8。只看字节会把这样的文本误判成二进制，于是界面给一段正文弹出「下载
+/// 文件」的卡片。故判据先问 Content-Type：它说这是文本，那就是文本。
+#[test]
+fn a_text_content_type_stays_text_even_when_the_bytes_are_not_utf8() {
+    // 「你」的前两个字节：单独放在一起不是合法 UTF-8。
+    let raw = vec![0xE4, 0xBD];
+    let payload = split_response_payload(raw, 1024, "text/plain; charset=utf-8");
+    assert!(
+        payload.base64.is_none(),
+        "Content-Type 说它是文本，就该给文本形态"
+    );
+}
+
+/// `application/octet-stream` 的响应字节非法 UTF-8 时是**二进制形态**。
+///
+/// 这是上条的反面：Content-Type 没说它是文本，字节也不是合法 UTF-8，两个判据都说不，
+/// 于是给 base64 那一份。
+#[test]
+fn a_binary_content_type_with_invalid_utf8_bytes_is_binary() {
+    let raw = vec![0x00, 0xFF, 0xFE];
+    let payload = split_response_payload(raw, 1024, "application/octet-stream");
+    let base64 = payload.base64.expect("非法 UTF-8 的字节该走 base64 形态");
+    assert_eq!(base64, "AP/+");
+    assert!(payload.text.is_empty());
+    assert_eq!(payload.bytes, 3);
+}
+
+/// `application/octet-stream` 的字节**恰好**是合法 UTF-8 时，给文本形态。
+///
+/// 判据的顺序是「先问 Content-Type，再问字节」：Content-Type 没说它是文本，才轮到字节
+/// 说话。字节说得清，那就是文本。
+#[test]
+fn a_binary_content_type_with_valid_utf8_bytes_is_text() {
+    let raw = b"plain ascii".to_vec();
+    let payload = split_response_payload(raw, 1024, "application/octet-stream");
+    assert!(payload.base64.is_none());
+    assert_eq!(payload.text, "plain ascii");
+}
+
+/// 哪些 Content-Type 算文本。
+///
+/// `application/octet-stream`、`image/*`、`application/pdf`、`application/zip` 都不算：它们的
+/// 内容是字节，宽松解码会把它们弄坏。
+///
+/// `image/svg+xml` **算**文本：它就是 XML，而 XML 是文本。后端因此把 SVG 放进文本形态，
+/// 界面仍按 Content-Type 把它当图片渲染——那两件事互不矛盾。
+#[test]
+fn textual_content_types_are_the_ones_that_carry_text() {
+    for ct in [
+        "text/plain",
+        "text/html; charset=utf-8",
+        "application/json",
+        "application/problem+json",
+        "application/xml",
+        "image/svg+xml",
+        "application/javascript",
+        "application/x-www-form-urlencoded",
+    ] {
+        assert!(is_textual_content_type(ct), "{ct} 该算文本");
+    }
+
+    for ct in [
+        "application/octet-stream",
+        "image/png",
+        "image/jpeg",
+        "application/pdf",
+        "application/zip",
+        "",
+    ] {
+        assert!(!is_textual_content_type(ct), "{ct} 不该算文本");
+    }
+}
+
+/// 二进制形态按**字节**裁，文本形态按**字符边界**裁。
+///
+/// 二进制给的是原始字节，字符边界对它没有意义；文本那份已经被宽松解码过，按字节裁会切出
+/// 半个字符。
+///
+/// 二进制形态的样本必须是非法 UTF-8：字节合法时后端给的是文本形态（见上一条规则），
+/// 裁法也就跟着变成按字符裁了。
+#[test]
+fn the_binary_form_is_truncated_by_bytes_and_the_text_form_by_characters() {
+    let binary_raw = vec![0xE4, 0xBD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+    let binary = split_response_payload(binary_raw, 5, "application/octet-stream");
+    assert!(binary.truncated);
+    assert_eq!(binary.bytes, 5, "二进制形态按字节裁，正好 5 字节");
+
+    let text_raw = "你好你好".as_bytes().to_vec(); // 12 字节
+    let text = split_response_payload(text_raw, 5, "text/plain");
+    assert!(text.truncated);
+    // 3 字节一个「你」：5 字节里放得下一个完整的字，按字节裁会切出半个字。
+    assert!(text.text.starts_with('你'), "got: {}", text.text);
+    assert!(text.text.contains("[truncated"));
+}
+
 // HttpResult 辅助函数
 
 #[test]

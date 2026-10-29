@@ -188,8 +188,9 @@ fn truncate_bytes(bytes: &[u8], max_bytes: u64) -> (Vec<u8>, bool) {
 
 /// 响应体的两种形态。
 ///
-/// 文本形态是宽松解码后的字符串；二进制形态是原始字节的 base64。**判据只有一条：字节
-/// 是不是合法 UTF-8**——是则只有文本形态，否则两种形态都给（文本那份已被破坏过）。
+/// 文本形态是宽松解码后的字符串；二进制形态是原始字节的 base64。**判据先问 Content-Type，
+/// 再问字节**：Content-Type 说它是文本就是文本（哪怕读到的字节非法 UTF-8——那是裁点切开
+/// 多字节字符造成的）；Content-Type 没说它是文本，才轮到字节说话。
 pub(crate) struct ResponsePayload {
     /// 文本形态。
     pub text: String,
