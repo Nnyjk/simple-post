@@ -67,19 +67,21 @@ src/
 ├── commit/
 │   ├── mod.rs        # ir → db::with_tx：补 id、校验放置；commit_in_tx 在此
 │   ├── service.rs    # plan_service —— 预览与落库共用的那一个服务判定
-│   └── dedupe.rs     # decide —— 按指纹裁定新增 / 重复 / 被勾选裁掉
+│   ├── dedupe.rs     # decide —— 按指纹裁定新增 / 重复 / 被勾选裁掉
+│   └── support.rs    # 测试夹具：commit_all / nested_exchange
 ├── openapi/
 │   ├── mod.rs        # 导出生成器：ir → OpenAPI 3.0 文档（JSON / YAML）
 │   └── builder.rs    # 持有跨 operation 状态的 Builder
 ├── roundtrip_test.rs # 导出产物被同一个 crate 的导入器读回
 └── import/
     ├── mod.rs        # 按内容嗅探格式 + 分派
-    ├── postman/      # Postman v2.1：tree / request / body / auth / template
+    ├── postman/      # Postman v2.1：tree / request / body / auth / template / script
     └── openapi/      # OpenAPI 3.0：refs（$ref 展开）/ params / auth / servers
 ```
 
 测试与源文件同目录同名前缀（`mod_test.rs` / `tree_test.rs` …），跨文件共用的夹具
-放 `support.rs`：`collection_fixture`、`nested_exchange`、`commit_all` 这类只留一份。
+放同目录的 `support.rs`：`commit/support.rs` 放 `commit_all` 与 `nested_exchange`，
+`import/postman/support.rs` 放 `collection_fixture`，这类夹具只留一份。
 
 `commit/` 住在本 crate 而不是 Tauri command 里，是刻意的：AGENTS.md 的
 dual-transport invariant 说的就是逻辑泄漏到传输层的代价。落库逻辑只有一份，
@@ -101,10 +103,12 @@ Tauri command 与 REST route 都退化成薄壳。
 让没有 `key` 的旧 IR 仍能反序列化——新增字段不该让存量序列化数据失效。
 
 集合树深度**没有上限**（外来文件可以套一百层 folder），故凡是**只读走查**它的代码一律
-用显式栈而不是递归：`endpoint_keys_of`、`all_endpoints`、`mark_duplicates`、
-`diagnostics_of`，以及两个解析器都是。`retain_module` / `retain_collection`
-是唯一两个递归的：它们在下降的同时就把空分支剪掉了，深度上限就是输入深度本身，
-而剪不剪得动与走不走得完是两件事。
+用显式栈而不是递归。本 crate 里的 `endpoint_keys_of`（`ir.rs`）与两个解析器
+（`import/postman/tree.rs`、`import/openapi/refs.rs`）都是显式工作栈；server crate 里的
+`all_endpoints` / `mark_duplicates`（`interchange_api.rs`）同样是。`retain_module` /
+`retain_collection` 是唯一两个递归的：它们在下降的同时就把空分支剪掉了，深度上限就是
+输入深度本身，而剪不剪得动与走不走得完是两件事。（`diagnostics_of` 不在这份名单上——
+它筛的是 IR 自带的扁平诊断列表，不走集合树。）
 
 ## 导出侧的两个形状裁剪不是同一份
 
@@ -117,7 +121,8 @@ Tauri command 与 REST route 都退化成薄壳。
 解析器遇到本仓库表达不了的构造时，一律出诊断 + 丢弃，**不静默降级**：
 
 - Postman `formdata` 里 `type: file` 的分片 —— multipart 分片结构存不下文件内容。
-- Postman 的 `auth` 方案里 oauth2 / digest —— `AuthConfig` 只有四种。
+- Postman 的 `auth` 方案里 oauth2 / digest —— 导入器只映射 noauth / basic / bearer /
+  apikey 四种，其余方案出诊断并按无 auth 处理（`import/postman/auth.rs`）。
 - OpenAPI 的 `apiKey` `in: cookie` —— `ApiKeyLocation` 只有 `Header | Query`。
 - OpenAPI `paths` 里固定动词键集以外的动词 —— 塞进去会让整份文档不合法。
 - OpenAPI operation 的 `tags[1..]` —— 一个接口只归第一个 tag（见下）。
@@ -171,9 +176,12 @@ Postman 的每个 environment 落成一个新 `Environment`，变量进 `variabl
 导入进来的 endpoint **存得对、发得错**。用户看不出任何异常，只会觉得「这个接口导入
 之后行为不一样了」。所以下面三处是**前置**，不是后续：
 
-- `src/lib/http-build.ts` —— 真正拼出 multipart body
+- `src/lib/multipart.ts` —— 真正拼出 multipart body（与 Rust 侧
+  `mcp/http_ops/multipart.rs` 是同一套规则的两份实现）
 - 请求体编辑器 —— 能渲染并编辑新模式
-- `variable_fill` —— 能填充 multipart 分片的变量
+- `variable_fill` —— `ResolvedEndpoint.body_mode`（`variable_fill/types.rs`）带着套用过
+  `overrides` 之后的 mode，`auto_content_type`（`variable_fill/request.rs`）对 `Multipart`
+  返回 `None`，boundary 由发送方在 execute 之前补上
 
 `BodyMode` 加变体对已存的 `body_json` 是向后兼容的（旧值继续反序列化成功），
 **不要**为此 bump `SCHEMA_VERSION` —— 那会让 `ensure_current_schema` 删掉用户的库。
@@ -335,7 +343,7 @@ Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
 - **`body_schema` 不是一列。** `schema.sql:155` 只有 `body_json`，整个 `RequestBody`
   （含 `schema`）塞在里面。全仓库三个写入点：`domain/auth.rs:42`（定义）、
   `src/types/domain/request.ts:37`（TS 镜像）、MCP 的 `body_schema` 入参
-  （`project_ops/endpoint/args.rs:30` → `write.rs:60`）。**UI 从不写它。**
+  （`project_ops/endpoint/args.rs:51` → `write.rs:189`）。**UI 从不写它。**
   按列名去找会找不到。
 - **模板语法两边同形。** `crates/simple-post-core/src/template.rs:102` 的 `is_word` 只认
   `[A-Za-z0-9_]`，Postman 的 `{{var}}` 同形，所以转换基本白送。但 Postman 实际会写
@@ -349,13 +357,15 @@ Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
   导出遇到集合外的动词出诊断。反向没问题：OpenAPI 的 `trace` 落成
   `HttpMethod::Custom("TRACE")`。
 - **URL 拉取文档要显式抬高体积上限。** `http_executor::HttpRequestInput`
-  的 `max_response_size_kb`（`http_executor.rs:96`）由调用方给，一份 3 MB 的
+  的 `max_response_size_kb`（`http_executor.rs:104`）由调用方给，一份 3 MB 的
   OpenAPI yaml 会撞上 UI 的默认值。走 `execute_with_policy` 以保留 SSRF 防护
-  （`check_url`，`http_executor.rs:272`）——不要另开一条裸 `reqwest` 通道。
+  （`check_url`，`http_executor.rs:349`）——不要另开一条裸 `reqwest` 通道。
 
 ## YAML 依赖（已核实，勿重新推导）
 
-`rust-version = "1.77.2"`。四个候选的 MSRV 都兼容，**不存在 MSRV 降级问题**：
+工作区的 MSRV 是 `rust-version = "1.87"`（根 `Cargo.toml`，本 crate 用
+`rust-version.workspace = true` 继承它）。四个候选的 MSRV 都低于它，**不存在 MSRV
+降级问题**：
 
 | crate | 最新版 | MSRV | 备注 |
 |---|---|---|---|

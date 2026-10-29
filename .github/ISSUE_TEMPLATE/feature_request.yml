@@ -62,7 +62,7 @@ body:
         - label: 反向代理 / base path
           description: 前缀由服务端 nest 处理，不要在 vite.config.ts 加 base，也不要在 nginx 侧剥离。
         - label: 回归网测试
-          description: mcp/mod_test.rs 与 web_api/ 里有读源码文本的 source-level 测试，改动可能让它们误报——不要删测试或放宽判据。
+          description: mcp/mod_test.rs、server crate 根目录的 project_api_shells_test.rs 与 daemon_supervisor_test.rs 里有读源码文本的 source-level 测试，改动可能让它们误报——不要删测试或放宽判据。
         - label: CI / 门禁
           description: 涉及 workflow。提速只能来自少跑不相关的组合，不得删掉任何既有断言。
         - label: 纯文档
