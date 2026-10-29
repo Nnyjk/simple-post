@@ -4,7 +4,8 @@
 //!   行只来自用户或 MCP 客户端。
 //! - 读用 `db::with_conn`，写用 `db::with_tx`；所有 CRUD 模块只能走这两者之一。
 //! - `init` 里启用 WAL：读者互不阻塞，单个写者也不阻塞读者。
-//! - 库文件在 `%APPDATA%\com.simple-post\store.db`（`dirs::data_dir()`），
+//! - 库文件在 `<data_dir>/store.db`；`data_dir` 由 `SIMPLE_POST_DATA_DIR` 或
+//!   `dirs::data_dir()` 解析出来（Windows 上即 `%APPDATA%\store.db`），
 //!   目录和文件缺失时自动创建；首次启动建完表即止。
 //! - `db::ping` 是廉价存活探针。
 //!
@@ -73,7 +74,7 @@ pub(crate) fn arc_str(s: impl Into<String>) -> Arc<str> {
 }
 
 /// JSON-in-TEXT 列解码失败时的错误类型。rusqlite 的 `FromSqlConversionFailure`
-/// 要 `Box<dyn StdError + Send + Sync + 'static>`，故用这个字符串承载类型把消息装下。
+/// 要 `Box<dyn StdError + Send + Sync + 'static>`，故用这个字符串类型把消息装下。
 #[derive(Debug)]
 pub(crate) struct JsonColError(pub String);
 

@@ -1,6 +1,6 @@
 /**
  * 自绘窗口控件——只在 Tauri shell（decorations: false）里有效。纯 Vite / 浏览器
- * dev 模式下照样渲染但不起作用，点它们是空操作（由 `safeCall` 里的 catch 兜住）。
+ * dev 模式下照样渲染但不起作用，点它们是空操作（`safeCall` 里的 catch 接住异常）。
  *
  * Win11 式的一组：最小化、最大化/还原、关闭。只有关闭用强调色（与资源管理器、
  * VS Code 以及用户已经信任的每个 Win11 应用一致）。
@@ -33,7 +33,7 @@ const WIN_BTN =
 async function safeCall(fn: () => Promise<void>) {
   if (typeof window === 'undefined') return;
   // 每一个 Tauri 2 webview window 上都有 `__TAURI_INTERNALS__`。这个廉价守卫是为了
-  // 让浏览器里的 dev 不会每次点按钮都撞上「ipc not available」。
+  // 让浏览器里的 dev 每次点按钮都不会报「ipc not available」。
   const tauriInternals = (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   if (!tauriInternals) return;
   try {

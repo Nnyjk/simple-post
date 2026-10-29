@@ -186,9 +186,8 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.environmentsSetModuleBaseurl]: {
     method: 'POST',
-    // 取值层是 (环境 × 模块 × 服务)，故单元格的两半都走请求体。字面量路径段让它
-    // 与已下线的 `/baseurls` 路由区分开 —— 那条路由没了，因为裸 `defId` 只能写
-    // 扁平的、不分模块的取值层。
+    // 取值层是 (环境 × 模块 × 服务)，故单元格的两半都走请求体。路径段用
+    // `module-baseurls` 而不是 `baseurls`：裸 `defId` 只能写扁平的、不分模块的取值层。
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/module-baseurls`,
     body: (a) => ({ defId: a.defId, moduleId: a.moduleId, url: a.url }),
   },
@@ -281,7 +280,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: () => '/api/dynamic-variables/resolve',
     body: (a) => ({
       names: a.names,
-      // 不点名项目就是跨项目取值。
+      // `projectId` 不传就是跨项目取值。
       projectId: a.projectId || null,
       force: a.force ?? false,
     }),

@@ -41,7 +41,7 @@ export interface TransferSession {
 export type TransferPhase = 'source' | 'working' | 'preview' | 'done';
 
 export interface UseTransferOptions {
-  /** 导入落库成功后由调用方刷新树并展开落点。 */
+  /** 导入落库成功后由调用方刷新树并展开目标模块。 */
   onImported?: (moduleId: string, createdCollectionIds: string[]) => void | Promise<void>;
 }
 
@@ -63,7 +63,7 @@ export function missingServerModules(preview: ImportPreview | ExportPreview | nu
 /**
  * 提示里点名的环境。
  *
- * 按**所选**环境取名字：下拉里选的是哪个环境，提示就该说哪个环境——原先写死的
+ * 按**所选**环境取名字：下拉里选的是哪个环境，提示就该说哪个环境——写死的
  * 「该环境」在换过环境之后指的是旧环境，说的与做的不一致。
  *
  * `selectedId` 为空（「不选环境」那一项）时没有环境可点，故不给名字。
@@ -102,13 +102,13 @@ export function useTransfer(options: UseTransferOptions = {}) {
   const [preview, setPreview] = useState<ImportPreview | ExportPreview | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
-  // 提交时要原样送回**同一份**原文，否则 URL 模式会再拉一次，且两次拉到的
-  // 可能已经不是同一份文件了。
+  // `commit` 要原样送回**同一份**原文，否则 URL 模式会再拉一次，且两次拉到的可能已经不是
+  // 同一份文件了。
   const [sourceText, setSourceText] = useState('');
   const [result, setResult] = useState<ImportCommitResult | null>(null);
   const [environmentId, setEnvironmentId] = useState('');
   const [format, setFormat] = useState<DocFormat>('json');
-  // 默认开着：文档带了 host 却不落成服务，用户打开模块看到的是一排没有地址的路径。
+  // 默认开着：文档带了 host 却不创建成服务，用户打开模块看到的是一排没有地址的路径。
   // 取消它是一次明确取舍，不是默认值 —— 故这是预览里的一个勾，不是隐藏的默认。
   const [applyService, setApplyService] = useState(true);
   // 换环境的请求号。每次换环境领一个，回来时号对不上就丢弃。
@@ -137,7 +137,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
     setSourceText('');
     setResult(null);
     setApplyService(true);
-    // 作废在途的换环境请求：弹窗关掉后它回来，不该再往这个会话里写预览。
+    // `reset` 作废在途的换环境请求：弹窗关掉后它回来，不该再往这个会话里写预览。
     envRequest.invalidate();
   }, [envRequest]);
 
@@ -155,7 +155,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
       reset();
       setPhase('working');
       try {
-        // 此刻**还没选环境**，故不送 `environmentId`：服务端按激活环境解析，返回值
+        // 此刻**还没选环境**，故这次请求不送 `environmentId`：服务端按激活环境解析，返回值
         // 里的 `environmentId` 正是下拉里该显示的那一个。
         const p = await invokeCmd<ExportPreview>(COMMANDS.interchangeExportPreview, {
           projectId: s.projectId,
@@ -192,7 +192,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
     async (id: string) => {
       setEnvironmentId(id);
       if (!session || session.mode !== 'export') return;
-      // 每次换环境领一个号，回来时号对不上就是过期的那一趟，丢弃。
+      // `changeEnvironment` 每次换环境领一个号，回来时号对不上就是过期的那一趟，丢弃。
       // 连着换两个环境时，先发的那一趟可能后到——它写进去的 servers 属于旧环境。
       const ticket = envRequest.next();
       setError(null);

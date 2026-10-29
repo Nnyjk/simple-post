@@ -55,7 +55,7 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
   for (const t of tabs) {
     if (t.kind === 'settings') {
       // 设置标签是单例 —— 没有底层实体可查。标题固定；分区选择住在面板内部，
-      // 不在标签条上呈现。
+      // 标签条不呈现它。
       out.push({
         tab: t,
         title: '设置',
@@ -131,7 +131,7 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       });
       continue;
     }
-    // endpoint-draft —— 与已保存接口同一套 pill 处理，就标签条而言它就是同一个
+    // endpoint-draft 标签与已保存接口共用同一套 pill 处理；就标签条而言它是同一个
     // 对象，唯一差别是标题还在输入中。
     if (t.kind === 'endpoint-draft') {
       const d = draftEndpoints[t.id];
@@ -184,7 +184,7 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
 function missingDescriptor(tab: OpenTab): TabDescriptor {
   return {
     tab,
-    // 草稿走到这里意味着它的文档在标签还开着时被丢弃了。"已删除"是错的 ——
+    // 草稿走到 `missingDescriptor` 意味着它的文档在标签还开着时被丢弃了。"已删除"是错的 ——
     // 从来没有保存过 —— 而标签是用户唯一拿到的信号，必须说出实际发生了什么。
     title: tab.kind === 'endpoint-draft' ? '（草稿已丢弃）' : `（${KIND_LABEL[tab.kind]}已删除）`,
     icon: <Hash className="h-3.5 w-3.5" />,

@@ -68,7 +68,7 @@ pub use simple_post_mcp::{daemon_http, mcp};
 /// CLI 子命令 `mcp` 的入口。负责数据目录解析、DB 初始化、axum serve、端口记录写入，
 /// 以及 SIGINT/SIGTERM 关闭。
 ///
-/// `http_config` 承载 router 需要的、超出 `bind` / `port` 之外的监听设置：挂载路径
+/// `http_config` 存放 router 需要的、超出 `bind` / `port` 之外的监听设置：挂载路径
 /// 与 Host/Origin 白名单。supervisor 从 `mcp.http_config` 偏好填它（见
 /// `daemon_cli_args`）；手工跑的 `simple-post mcp` 拿的是 clap 默认值，也就是出厂的
 /// 仅 loopback 配置。

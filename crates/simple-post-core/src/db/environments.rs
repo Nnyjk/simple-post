@@ -109,7 +109,7 @@ pub fn create(conn: &mut Connection, e: &Environment) -> Result<(), AppError> {
     let disabled_variables_json = serde_json::to_string(&e.disabled_variables)?;
     // `base_urls_json` 刻意不在这个列表里。点名它会继续写一个无人读的列，而把调用方的遗留
     // `baseUrls` 带进去会留下一个在下一个读者眼里像是活的 blob。不写它就让 schema 默认值
-    // 生效，那正是本构建写的每一行上它所承载的空值。
+    // 生效，那正是本构建写的每一行上 `base_urls_json` 取到的默认值。
     conn.execute(
         "INSERT INTO environments \
          (id, project_id, name, is_active, module_base_urls_json, variables_json, disabled_variables_json) \
@@ -188,7 +188,7 @@ pub fn update(
 /// `UPDATE` 必须一起拿到写锁，否则并发的 `set_active` 会留下两个激活环境。
 /// 返回更新后的环境，好让调用方直接回显给渲染层。
 pub fn set_active(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
-    // 先查项目，好给降级划定范围。必须在两条 UPDATE 之前，以便 id 不存在时直接短路。
+    // set_active 先查项目，好给降级划定范围。必须在两条 UPDATE 之前，以便 id 不存在时直接短路。
     let project_id: Option<String> = conn
         .query_row(
             "SELECT project_id FROM environments WHERE id = ?1",
@@ -239,7 +239,7 @@ pub fn set_var(
         }
         None => {
             env.variables.remove(key);
-            // 键没了，「它被停用」这件事也就没了。
+            // set_var 把键从 variables 里移除时，「它被停用」这件事也就没了。
             env.disabled_variables.retain(|k| k != key);
         }
     }
@@ -324,7 +324,7 @@ pub fn rename_var(
         )));
     }
     env.variables.insert(to_key.to_string(), value);
-    // 改名连同「它被停用」这件事一起搬过去，否则改完名的变量会静默变成启用的。
+    // rename 把「它被停用」这件事一起搬过去，否则改完名的变量会静默变成启用的。
     let was_disabled = env.disabled_variables.iter().any(|k| k == from_key);
     env.disabled_variables.retain(|k| k != from_key);
     if was_disabled {

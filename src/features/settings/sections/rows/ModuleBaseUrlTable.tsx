@@ -19,8 +19,8 @@ import { InlineNameCell } from './InlineNameCell';
  * `Environment.moduleBaseUrls` 按 `serviceId → moduleId` 作键而非扁平结构的原因。
  *
  * 因此单元格各持一个独立值，没有任何东西可继承：空单元格就是「此模块在此环境对此服务没有
- * 地址」，仅此而已。它刻意**不**把别的模块或项目默认的单元格显示成占位 —— 预填正是该
- * 模型所禁止的 偷偷借用。
+ * 地址」，仅此而已。它刻意**不**把别的模块或项目默认的单元格显示成占位 —— 该模型不允许
+ * 预填别的单元格的值。
  *
  * 服务按项目给出的顺序列出，而这个数组顺序*就是*排序：
  * `db::base_url_defs::list_by_project` 已按 `sort_order ASC, id ASC` 排序，故线上数组

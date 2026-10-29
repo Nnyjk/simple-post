@@ -12,10 +12,11 @@ client that cannot run a Rust binary should connect to the daemon's HTTP
 endpoint instead (start `simple-post serve-web`, point the client at
 `http://<host>:<port>/mcp`), which needs nothing installed client-side.
 
-The shared low-level layer (`db`, `domain`, `error`, `http_executor`,
-`permissions`, `mcp_metrics`) lives in the sibling `simple-post-core`
-crate so both this crate and the main Tauri crate can consume them
-without creating a cycle.
+The shared low-level layer (`db`, `domain`, `dynamic`, `error`,
+`http_executor`, `mcp_metrics`, `oauth2`, `path_params`, `permissions`,
+`script`, `spec`, `template`, `tls`, `url`) lives in the sibling
+`simple-post-core` crate so both this crate and the main Tauri crate can
+consume them without creating a cycle.
 
 ## Layout
 
@@ -40,6 +41,12 @@ crates/simple-post-mcp/
     │   └── ops.rs
     ├── variable_fill.rs       # facade over variable_fill/ (the interpolation rules)
     ├── variable_fill/         # the interpolation rules, one file per concern
+    │   ├── auth.rs            #   the bearer / basic / apikey / oauth2 fields
+    │   ├── base_url.rs        #   the base URL resolution + joining
+    │   ├── request.rs         #   the header order + the query append
+    │   ├── resolve.rs         #   resolve_endpoint (the main API)
+    │   ├── template.rs        #   the `{{name}}` substitution (forwards to core)
+    │   └── types.rs           #   EndpointOverrides / ResolvedEndpoint
     ├── response_parse.rs      # response parsing + diff + JSONPath extraction
     └── mcp/                   # the JSON-RPC dispatcher + tool implementations
         ├── mod.rs             # facade: AppState, dispatch, tool_descriptors,
@@ -51,8 +58,34 @@ crates/simple-post-mcp/
         ├── args.rs            #   the JSON-RPC argument readers
         ├── state.rs           #   AppState + serve_http
         ├── http_ops/          # HTTP send + variable resolution tools
+        │   ├── mod.rs         #   the module map
+        │   ├── args.rs        #   the two tools' argument shapes
+        │   ├── call_endpoint.rs # api_call_endpoint
+        │   ├── run_request.rs #   api_run_request
+        │   ├── dynamic.rs     #   the dynamic-variable lookup
+        │   ├── envelope.rs    #   the result envelope
+        │   ├── input.rs       #   the argument flattening + parsing
+        │   ├── multipart.rs   #   the multipart assembly
+        │   ├── project.rs     #   the project row of an ad-hoc request
+        │   ├── send.rs        #   the send path + the script env snapshot
+        │   └── table.rs       #   the dispatch table (the two schemas)
         ├── project_ops/       # project / collection / module / endpoint /
         │                       # base_url_def CRUD tools
+        │   ├── endpoint.rs    #   facade over endpoint/
+        │   ├── endpoint/      #   the endpoint tools, one file per concern
+        │   │   ├── args.rs    #     the argument shapes
+        │   │   ├── input.rs   #     the input coercion
+        │   │   ├── missing.rs #     the "what is still missing" rule
+        │   │   ├── patch.rs   #     the patch coercion
+        │   │   ├── read.rs    #     the read handlers
+        │   │   ├── registry.rs #    the JSON Schema
+        │   │   ├── resource.rs #    the node + detail composite read
+        │   │   └── write.rs   #     the write handlers
+        │   ├── base_url_def.rs
+        │   ├── collection.rs
+        │   ├── module.rs
+        │   ├── project.rs
+        │   └── spec.rs
         ├── env_ops.rs         # environment CRUD tools
         ├── dynamic_ops.rs     # dynamic-variable tools
         ├── response_parse.rs  # JSON-path response parsing tools
@@ -73,9 +106,10 @@ simple-post-mcp
   --log-level=info|debug
 ```
 
-Every flag also accepts an env-var override (`SIMPLE_POST_WEB_URL` /
-`SIMPLE_POST_WEB_PASSWORD` / `SIMPLE_POST_MCP_CAPABILITY`); the flag
-wins when both are set.
+Three of the six flags also accept an env-var override: `--url` reads
+`SIMPLE_POST_WEB_URL`, `--password` reads `SIMPLE_POST_WEB_PASSWORD`, and
+`--capability` reads `SIMPLE_POST_MCP_CAPABILITY`. The flag wins when both
+are set. `--transport`, `--port` and `--log-level` have no env-var override.
 
 ## Clients with no native binary
 

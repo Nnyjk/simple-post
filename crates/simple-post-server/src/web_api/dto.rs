@@ -181,7 +181,7 @@ pub struct PermissionPutBody {
 }
 
 /// `POST /api/projects/:projectId/baseurls` 的 body。项目放在路径里，因为服务列表属于
-/// 项目；body 里只承载单个服务的属性。
+/// 项目；body 里只放单个服务的属性。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BaseUrlDefCreateBody {

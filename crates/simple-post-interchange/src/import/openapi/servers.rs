@@ -34,7 +34,7 @@ pub(super) fn doc_servers(value: Option<&Value>, ctx: &mut Ctx) -> DocServers {
         return none;
     };
 
-    // 一个模块只能有一个服务，多服务器在这套模型里没有落点。
+    // 一个模块只能有一个服务，多服务器在这套模型里没有可写的位置。
     for extra in list.iter().skip(1) {
         ctx.diagnostics.push(
             Diagnostic::warn("/servers", "多服务器无法导入，只取第一个").dropping(

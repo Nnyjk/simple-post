@@ -261,7 +261,7 @@ describe('loadResponseHistory 按接口加载', () => {
     assert.equal(rows.at(-1)?.response.status, 201, '新发的那一条在最后');
   });
 
-  it('首次打开：读取晚于发送落地时，乐观行不能被吃掉', async () => {
+  it('首次打开：读取晚于发送完成时，乐观行不能被吃掉', async () => {
     let releaseList: () => void = () => undefined;
     let releaseAppend: () => void = () => undefined;
     const listGateP = new Promise<void>((resolve) => {

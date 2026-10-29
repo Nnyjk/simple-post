@@ -33,7 +33,7 @@ export function HttpTester() {
   const detail = resource?.detail;
   /** 接口尚未写入数据库。 */
   const isDraft = resource?.isDraft ?? false;
-  // 供 Header 键补全：把用户自己用过的 header 名与内置常见列表一起喂给 datalist。
+  // 供 Header 键补全：把用户自己用过的 header 名与内置常见列表一起作为 datalist 的候选。
   const allEndpointDetails = useAppStore((s) => s.endpointDetails);
   const updateNode = useAppStore((s) => s.updateNode);
   const updateEndpointDetail = useAppStore((s) => s.updateEndpointDetail);
@@ -228,7 +228,7 @@ export function HttpTester() {
     }, 0);
   }, []);
 
-  /** baseUrl 选择器的变更 —— 落点由 `commitBaseUrl` 决定（草稿写文档，已存写行）。 */
+  /** baseUrl 选择器的变更 —— 写到哪里由 `commitBaseUrl` 决定（草稿写文档，已存写行）。 */
   const handleBaseUrlSelectionChange = (next: BaseUrlSelection) => {
     if (!endpoint) return;
     if (next.kind === 'default') {
@@ -397,8 +397,8 @@ export function HttpTester() {
     tls: hasOwnTls,
   });
 
-  // 草稿天生未保存，故即使还没有任何编辑器触发过，按钮也必须可用（只按 `draft !== undefined`
-  // 判定，恰好会卡住「新建、输了 URL、发了请求，现在想留下它」这类接口）。
+  // 草稿天生未保存，故即使还没有任何编辑器触发过，按钮也必须可用。`dirty` 只按
+  // `draft !== undefined` 判定会漏掉「新建、输了 URL、发了请求，现在想留下它」这类接口。
   const dirty = isDraft || draft !== undefined;
 
   // 外壳只按显式 props 渲染，故这里把它的 props 按区域分组铺开。

@@ -199,7 +199,7 @@ export function StatusBadge({ status }: { status: McpRuntimeStatus }) {
   return <Badge variant="muted">stopped</Badge>;
 }
 
-/** 直接消费 `McpUiState` 快照的精简 `<StateSummary>`。ConnectionSection 传的是 store 喂进来的
+/** 直接消费 `McpUiState` 快照的精简 `<StateSummary>`。ConnectionSection 传的是 store 传入的
  *  状态。容忍 `null`，对应首次 daemon 轮询完成前的那一小段时间。 */
 export function StateSummary({ state }: { state: McpUiState | null }) {
   if (!state) {

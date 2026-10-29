@@ -1,8 +1,8 @@
 //! `api_run_request` 的端到端断言：临时请求也走端点那套解析规则。
 //!
-//! 这条工具此前既没有测试，也没有实现 `params` / `auth` —— 工具描述承诺了它们，
-//! 实现却只读了 `headers` 与 `body`。本文件用真实 socket 钉住它现在发出去的
-//! 是什么：变量替换、base URL 前置、查询参数与鉴权头。
+//! 这条工具要实现工具描述承诺的 `params` / `auth`，而不是只读 `headers` 与 `body`。
+//! 本文件用真实 socket 钉住它现在发出去的是什么：变量替换、base URL 前置、
+//! 查询参数与鉴权头。
 
 use std::sync::Arc;
 use std::sync::Mutex;

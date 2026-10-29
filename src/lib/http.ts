@@ -415,7 +415,7 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
 
   // 真正发出去的那一份：`request` 是 cURL 预览共享的 `useMemo` 产物，注入只改副本。
   //
-  // 不传 `force`：发请求走后端按需刷新（命中缓存就复用，过期才换），只有 UI 的
+  // 这里不传 `force`：发请求走后端按需刷新（命中缓存就复用，过期才换），只有 UI 的
   // 「获取 Token」按钮才强制重取。
   let outbound = request;
   const auth = input.auth;

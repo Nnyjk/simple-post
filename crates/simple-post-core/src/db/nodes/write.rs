@@ -49,7 +49,7 @@ pub fn create(
 /// 在同一父下复制一个 endpoint 及其配置。
 /// 只限 endpoint：模块或 collection 的「副本」是个空壳，UI 也没有表达它的方式。
 /// 复制子树是另一个功能，不是 duplicate。
-/// **必须在 `db::with_tx` 内调用**——节点与它的 detail 行必须一起落地，否则副本打不开。
+/// **必须在 `db::with_tx` 内调用**——节点与它的 detail 行必须一起写入，否则副本打不开。
 /// `new_id` 让调用方命名副本；`None` 在此生成一个，那正无状态调用方（MCP 工具）要的。
 /// 桌面 UI 传自己的 id，因为它做的是**乐观**复制：在本调用返回之前就把行写进 store、激活
 /// 标签页并把用户直接送进重命名。此处生成的 id 会来得太晚——标签页、选中项与进行中的
@@ -138,7 +138,7 @@ pub fn update(
     }
 
     match reparent_to {
-        // 缺席：没人要求移动。
+        // reparent_to 缺席：没人要求移动。
         None => {}
         Some(new_parent) => reparent(conn, id, new_parent.as_deref())?,
     }

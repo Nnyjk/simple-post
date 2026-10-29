@@ -78,7 +78,7 @@ export interface VarHintKeyEvent {
   altKey: boolean;
   /** 输入法正在组合。组合期间的 Enter 与方向键属于输入法候选，不是选变量。 */
   isComposing: boolean;
-  /** 老浏览器上 `isComposing` 取不到时的兜底：229 是 IME 专用的 keyCode。 */
+  /** 老浏览器上 `isComposing` 取不到时改用 keyCode 判定：229 是 IME 专用的 keyCode。 */
   keyCode: number;
 }
 

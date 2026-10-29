@@ -80,7 +80,7 @@ export function moduleIdOfEndpoint(
   for (const n of nodes) byId.set(n.id, n);
 
   // `kind` 是节点自身的类型；endpoint 可以直接挂在 module 下（无集合），
-  // 所以两种形态都在这里终止
+  // 所以这两种形态都由这个循环终止
   let cur = byId.get(endpointId) ?? (self?.id === endpointId ? self : undefined);
   let guard = 0;
   while (cur && guard++ < 64) {
@@ -88,7 +88,7 @@ export function moduleIdOfEndpoint(
     if (!cur.parentId) return null;
     cur = byId.get(cur.parentId);
   }
-  // 成环不可能——schema 的父子矩阵与移动守卫都禁止它——但一次有界遍历静默
+  // 成环不可能——schema 的父子矩阵与移动守卫都禁止它——但这个有界遍历静默
   // 返回 `null`，好过一次无界遍历把发送路径挂死
   return null;
 }

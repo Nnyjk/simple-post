@@ -143,7 +143,7 @@ fn the_call_endpoint_schema_defines_the_key_value_it_refers_to() {
 ///
 /// 工具描述与 JSON Schema 文档化的就是这种形状，而域类型 `KeyValue` 要求 `id` 与
 /// `enabled` 都在。按域类型直接反序列化，`{"key":"id","value":"42"}` 会因缺字段而
-/// 失败 —— 而那一层曾经用 `.ok()` 把整份覆盖值换成空值，调用方看不出出了什么事。
+/// 失败 —— 那一层若把整份覆盖值换成空值，调用方看不出出了什么事。
 #[test]
 fn overrides_accept_a_key_value_only_row() {
     let o: crate::variable_fill::EndpointOverrides = serde_json::from_value(json!({

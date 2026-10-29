@@ -8,7 +8,7 @@ pub struct AppState {
     /// DB 连接池。`r2d2::Pool` clone 廉价（内部是 Arc），`AppState` 外面还包了一层
     /// Arc，router 每个 handler 拿的是那一份的 clone；真正访问时再 clone 一次池。
     pub pool: simple_post_core::db::DbPool,
-    /// uptime 报告的墙钟锚点。
+    /// uptime 报告的墙钟起点。
     pub started_at: Instant,
     /// 实时计数器，每处理一个请求就自增，供 `/mcp/healthz` 与 `mcp_status` 展示。
     pub metrics: Arc<simple_post_core::mcp_metrics::McpMetrics>,

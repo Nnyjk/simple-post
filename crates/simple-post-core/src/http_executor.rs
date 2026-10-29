@@ -18,11 +18,11 @@ use crate::domain::TlsSettings;
 
 /// 成功的 HTTP 响应。字段名与 `ApiResponse` 一致，故 React 侧可以复用它现有的响应视图代码
 /// 而无需翻译层。
-/// `rename_all = "camelCase"` 是承重的，不是装饰：没有它 serde 会发出 `status_text` /
+/// `rename_all = "camelCase"` 是必需的属性，不是装饰：没有它 serde 会发出 `status_text` /
 /// `duration_ms` / `size_bytes` / `content_type`，而 `src/lib/http.ts` 读的是
 /// `statusText` / `durationMs` / `sizeBytes` / `contentType`——每一个都读回 `undefined`，
 /// 于是响应栏对每个请求都渲染成 `NaN s` 与 `0 B`，content type 也永远到不了阅读器。
-/// 下面的 `HttpResult` 本就有这个属性；本类型当时漏了。
+/// `HttpResult` 与 `HttpError` 都带同一个属性，故两个类型的线格式一致。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpResponse {
@@ -48,8 +48,8 @@ pub struct HttpResponse {
 
 /// 传输层失败。与 `HttpResponse.status == 0` 不同——后者是前端用来表示 HTTP 层的非 2xx。
 /// 本类型表示「请求从未抵达应用层」——DNS、连接、TLS、重置、中止、超时。
-/// `rename_all` 今天是空操作（两个字段都是单词），但它使本类型不会重新引入
-/// [`HttpResponse`] 曾有的那种不匹配。
+/// `rename_all` 当前是空操作（两个字段都是单词），但它必须与 [`HttpResponse`] 用同一个
+/// 属性，否则两个类型的线格式会不一致。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpError {
@@ -138,7 +138,7 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
         return (body, false);
     }
     let cap = (max_bytes as usize).min(body.len());
-    // 回退到最近的字符边界，免得把一个多字节 rune 切成两半。
+    // cut 回退到最近的字符边界，免得把一个多字节 rune 切成两半。
     let mut cut = cap;
     while cut > 0 && !body.is_char_boundary(cut) {
         cut -= 1;
@@ -183,7 +183,7 @@ async fn read_body_capped(
         buf.extend_from_slice(&chunk[..take]);
         len += take as u64;
         if len >= cap {
-            // 读够了：剩下的字节直接丢弃，连接随之关闭，服务端不会把剩下的内容继续推过来。
+            // read_body_capped 读够了：剩下的字节直接丢弃，连接随之关闭，服务端不会把剩下的内容继续推过来。
             break;
         }
     }
@@ -215,7 +215,7 @@ const TRANSPORT_ACCEPT_ENCODING: &str = "gzip,deflate,br";
 /// 这一次真正发出去的请求头。
 ///
 /// 调用方交下来的那些按原样保留（名字转小写，与线路上的写法一致），传输层补的几条
-/// 追加在后面。调用方自己写过的同名头不再补：线路上发出去的是调用方那一份。
+/// 追加在后面。调用方自己写过的同名头不补第二条：线路上发出去的是调用方那一份。
 pub(crate) fn effective_request_headers(input: &HttpRequestInput) -> Vec<[String; 2]> {
     let mut out: Vec<[String; 2]> = input
         .headers
@@ -224,7 +224,7 @@ pub(crate) fn effective_request_headers(input: &HttpRequestInput) -> Vec<[String
         .map(|(k, v)| [k.to_ascii_lowercase(), v.clone()])
         .collect();
 
-    // 先把已有的名字收成一份，后面要往 `out` 里 push，故判定不能借用 `out` 本身。
+    // 这段先把已有的名字收成一份，后面要往 `out` 里 push，故判定不能借用 `out` 本身。
     let present: Vec<String> = out.iter().map(|e| e[0].clone()).collect();
     let has = |name: &str| present.iter().any(|k| k == name);
 
@@ -400,7 +400,7 @@ pub async fn execute(input: &HttpRequestInput) -> HttpResult {
 pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolicy) -> HttpResult {
     let start = Instant::now();
 
-    // 在建客户端或碰网络之前就拒绝。
+    // check_url 在建客户端或碰网络之前就拒绝。
     if let UrlVerdict::Refused(reason) = check_url(&input.url, policy) {
         return HttpResult::err("network", reason);
     }
@@ -486,7 +486,7 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     // 响应体上限。必须在读 body **之前**算好：流式读取要靠它决定读多少就停。
     let max_bytes = input.max_response_size_kb.saturating_mul(1024);
 
-    // 读取时护栏：缓冲区上限与响应大小无关，超出的部分直接丢弃。
+    // 读取时的上限：缓冲区上限与响应大小无关，超出的部分直接丢弃。
     let body_text = match read_body_capped(res, max_bytes).await {
         Ok(t) => t,
         Err(e) => {

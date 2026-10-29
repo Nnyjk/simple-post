@@ -32,7 +32,7 @@ export {
  * store 读到的偏好。
  *
  * `theme` 存的是 localStorage 里的原始取值，**未经校验**：用户可以手改 localStorage，
- * 旧版本也可能留下别的名字。合不合法由 `themeBoot.resolveTheme` 判定。
+ * 存进来的名字也可能不在合法集合里。合不合法由 `themeBoot.resolveTheme` 判定。
  */
 interface StorePrefs {
   theme?: string;
@@ -62,7 +62,7 @@ const initialPrefs = loadPrefs();
 /**
  * 初始主题。
  *
- * 存下来的取值先经 `resolveTheme` 校验，非法值（手改坏的、旧版本留下的）回落成缺省的
+ * 存下来的取值先经 `resolveTheme` 校验，非法值（手改坏的、不在合法集合里的）回落成缺省的
  * `dark`。**校验不能省**：少了它，store 会把非法取值当主题存下，而 `useIsDark` 只认
  * `dark` 与 `light`，其余一律按「跟系统」处理——于是首帧画深色、随后 React 画系统色。
  */
@@ -196,7 +196,7 @@ export const createUiPrefs: StateCreator<AppState, [], [], UiPrefs> = (set, get)
    * 换主题。只写 localStorage —— 主题是渲染层的事，后端读不到也不需要。
    *
    * 合并而不是整份替换：这份偏好里还有「上次停留的项目」，整份替换会把它抹掉，
-   * 于是换一次主题就把刷新后的落点退回欢迎页。
+   * 于是换一次主题就让刷新后回到欢迎页。
    */
   setTheme: (t) => {
     set({ theme: t });

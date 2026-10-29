@@ -1,7 +1,7 @@
 /**
  * `multipart/form-data` 的装配与发送单测。
  *
- * 覆盖两条承重的性质：boundary 在 body 与 Content-Type 里是**同一个字符串**
+ * 覆盖两条必须成立的性质：boundary 在 body 与 Content-Type 里是**同一个字符串**
  * （对不上时请求看起来成功、服务端解析失败），以及既有行为没有被牵连：
  * `form` 仍是 `application/x-www-form-urlencoded`、用户已设的 Content-Type 不被覆盖、
  * `{{var}}` 模板化照旧作用在 `content` 上。

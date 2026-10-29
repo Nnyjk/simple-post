@@ -38,9 +38,9 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       });
       set((s) => ({ projects: [...s.projects, project] }));
       // 新项目会带一个默认环境**和**一个默认 module（见
-      // `db::projects::create_with_defaults`）。两者都不重新拉取：bootstrap 期间
-      // 第二层已经跑过，`openProject` 的 `loadWorkspace` 会提前返回，所以不补这
-      // 两步的话，环境切换器会显示"—"而 `{{var}}` 无从解析，树会对一个明明有
+      // `db::projects::create_with_defaults`）。两者都要在这里补拉一次：bootstrap 期间
+      // 第二层已经跑过，`openProject` 的 `loadWorkspace` 会提前返回，所以不补这两步的话，
+      // 环境切换器会显示"—"而 `{{var}}` 无从解析，树会对一个明明有
       // module 的项目显示「该项目还没有模块」——而且一直持续到应用重启。
       //
       // 两者都是不带过滤的整表读取（所有项目的环境、所有项目的节点），也正是
@@ -70,7 +70,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
     }
   },
   updateProject: async (id, patch) => {
-    // 乐观本地更新 + 后台 invoke；失败回滚。
+    // `updateProject` 先做乐观本地更新，再后台 invoke；失败回滚。
     const prev = get().projects.find((p) => p.id === id);
     if (!prev) return;
     const optimistic: Project = { ...prev, ...patch, updatedAt: Date.now() };
@@ -87,7 +87,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
     );
   },
   deleteProject: async (id) => {
-    // 回滚用的快照。
+    // `deleteProject` 回滚用的快照。
     const snapshot = {
       projects: get().projects,
       nodes: get().nodes,
@@ -132,7 +132,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         // 删掉在前面的项目时，把用户送到幸存的那个；它是最后一个时回欢迎页。
         //
         // 空串是切表面的开关（`App.tsx` 在 `activeProjectId === ''` 时渲染欢迎
-        // 选择器，而欢迎页有"新建项目"卡片兜住空状态）。把 `activeProjectId`
+        // 选择器，而欢迎页的"新建项目"卡片提供空状态下的入口）。把 `activeProjectId`
         // 留在刚删掉的 id 上会让 `App.tsx` 待在工作区分支里对着一个不存在的
         // 项目：树显示"尚未选择项目"，右侧显示"该项目已不存在"，整个画面没有一处
         // 说明该怎么办。

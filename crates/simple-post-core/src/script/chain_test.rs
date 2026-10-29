@@ -1,6 +1,6 @@
 //! 脚本链装配的单元测试：顺序与「谁带脚本」。
 //!
-//! 顺序是承重的：collection → 嵌套 collection → 端点，pre 与 test 同序。
+//! 顺序不能改：collection → 嵌套 collection → 端点，pre 与 test 同序。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

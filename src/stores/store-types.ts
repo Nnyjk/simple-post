@@ -68,7 +68,7 @@ export type TabKind =
 
 /**
  * 只存在于内存的东西所用的 id 前缀。真实节点 id 是裸 `uid()`，所以 `draft:`
- * 不可能与它相撞——草稿标签、草稿 endpoint 与真实 endpoint 因此能共用同一个
+ * 不可能与它重名——草稿标签、草稿 endpoint 与真实 endpoint 因此能共用同一个
  * `openTabs` 数组，而不必靠「猜」来判断持有的是哪一种。
  */
 export const DRAFT_ID_PREFIX = 'draft:';
@@ -85,7 +85,7 @@ export const DYNAMIC_TAB_ID_PREFIX = '__dynamic_variables__:';
 /**
  * 某个项目的动态变量标签 id。
  *
- * 前缀保证它与真实节点 id（裸 `uid()`）不会相撞——标签 id 直接当 `openTabs` 的键用。
+ * 前缀保证它与真实节点 id（裸 `uid()`）不会重名——标签 id 直接当 `openTabs` 的键用。
  */
 export function dynamicTabId(projectId: string): string {
   return `${DYNAMIC_TAB_ID_PREFIX}${projectId}`;

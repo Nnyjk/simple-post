@@ -92,7 +92,7 @@ afterEach(() => {
 });
 
 describe('duplicateEndpoint：id 与 name 两端一致', () => {
-  it('副本在同一个 id 下落地，tab 能查到那一行，detail 也跟着走', async () => {
+  it('副本在同一个 id 下写入，tab 能查到那一行，detail 也跟着走', async () => {
     const calls: CapturedInvoke[] = [];
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args: args ?? {} });

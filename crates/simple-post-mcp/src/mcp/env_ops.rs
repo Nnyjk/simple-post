@@ -248,7 +248,7 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // 逐个把可选字段从 patch 里取出来。
+    // patch 里没点名的字段一律留 None，故 update 只写被点名的那些列。
     let patch = EnvironmentPatch {
         name: a
             .patch

@@ -22,8 +22,8 @@ export interface InlineMenuBindings {
    */
   createEndpointAt: (parentId: string) => Promise<void>;
   /**
-   * 打开导入 / 导出弹窗，落点是 `module`。集合没有这个入口：外来文档的顶层分组一律落成
-   * 该模块下的集合，落点是模块才不用问「往哪一层插」。
+   * 打开导入 / 导出弹窗，目标层级是 `module`。集合没有这个入口：外来文档的顶层分组一律建成
+   * 该模块下的集合，目标层级是模块才不用问「往哪一层插」。
    */
   startTransfer: (mode: 'import' | 'export', module: { id: string; name: string }) => void;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;

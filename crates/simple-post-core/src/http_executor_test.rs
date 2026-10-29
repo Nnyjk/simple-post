@@ -192,7 +192,7 @@ async fn execute_refuses_before_dialing() {
 }
 
 /// 策略必须挺过一次重定向。
-/// 逐跳重检 `check_url` 是承重的：只查初始 URL 时，一个回答 `302` 指向被禁地址的 URL
+/// 逐跳重检 `check_url` 不能省：只查初始 URL 时，一个回答 `302` 指向被禁地址的 URL
 /// 照样能抵达它——正是这条策略存在的意义所要阻止的威胁。这里起一个真实的 loopback
 /// 服务器朝元数据地址回 `302`，并断言那一跳被拒绝。
 #[tokio::test]
@@ -408,7 +408,7 @@ async fn a_request_without_a_body_reports_no_content_length() {
     );
 }
 
-/// 调用方自己写过的头不再补第二条：线路上发出去的是调用方那一份。
+/// 调用方自己写过的头不补第二条：线路上发出去的是调用方那一份。
 #[tokio::test]
 async fn a_caller_supplied_host_header_is_not_duplicated() {
     let (port, raw_rx) = spawn_raw_request_capture().await;
@@ -553,7 +553,7 @@ fn http_result_err_carries_error_only() {
     assert_eq!(err.message, "dns blew up");
 }
 
-// 响应体读取——「读取时护栏」
+// 响应体读取——「读取时上限」
 //
 // 下面这几条分别钉住：裁剪结果与整读逐字节一致、上限处的 UTF-8 字符边界回退、
 // 带 Content-Length 与 chunked 两条路都在上限处收手。

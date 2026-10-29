@@ -65,7 +65,7 @@ pub use source::{source_context, SourceContext};
 pub use transform::apply as apply_transform;
 
 // `SourceFetcher` 的签名里出现 `DynamicError`，测试模块靠 `use super::*` 拿到这个类型。
-// 只在测试构建里重导出，生产构建的公开接口与拆分前一致。
+// 这个重导出只在测试构建里存在，生产构建的公开接口不含它。
 #[cfg(test)]
 pub use crate::domain::DynamicError;
 

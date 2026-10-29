@@ -91,7 +91,7 @@ export function WorkspaceShell() {
   const containerRef = useRef<HTMLDivElement>(null);
   const resetBasis = () => setBasis('50%');
 
-  // 在 bootstrap 窗口内预热编辑器 chunk。
+  // 这个 effect 在 bootstrap 窗口内预热编辑器 chunk。
   //
   // 本外壳本身是 lazy，所以它挂载时模块图已在解析中；发起与 lazy 组件相同的动态 import
   // 会填好注册表，等 store 有接口标签要渲染时，CodeMirror chunk 已解码完毕，`lazy()`
@@ -109,7 +109,7 @@ export function WorkspaceShell() {
     return () => clearTimeout(t);
   }, [activeTab?.kind]);
 
-  // 按当前标签类型决定右栏渲染什么。
+  // `renderActiveContent` 按当前标签类型决定右栏渲染什么。
   //   endpoint → 请求 / 响应上下分栏
   //   project / module / collection → EntitySettings：该实体自己的单列面板（基础信息，
   //     再是该类型所属的配置 —— 项目的环境、模块按环境的 baseUrls）。面板不点名实体，
@@ -117,8 +117,8 @@ export function WorkspaceShell() {
   //   settings → 设置面板（本身就是一个标签，不是抽屉）
   //
   // 「有项目但没有激活标签」正是关掉最后一个标签后的状态：项目本身就适合作为这块内容，
-  // 项目重命名 / 删除现在也住在那里，因为项目不再是树中的一行。「无项目且无标签」则没
-  // 东西可显示 —— 但那种状态由 `App.tsx` 渲染欢迎页，故永远不会走到这里。
+  // 项目重命名 / 删除也住在那里，因为项目不是树中的一行。「无项目且无标签」则没东西可显示
+  // —— 但那种状态由 `App.tsx` 渲染欢迎页，故永远不会走到这里。
   const renderActiveContent = () => {
     if (!activeTab) {
       return (

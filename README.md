@@ -133,7 +133,7 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 
 写操作的授权要同时通过两道检查，任何一道缺失都是拒绝而不是放行：
 
-1. **全局能力策略**：用户在设置里选择的 `read_only` / `safe_write` / `full_access` 决定可见的工具集合。能力等级是全序 `Read < Create < Update < Delete < Send`，其中 `Send`（发起出站请求）只有 `full_access` 才覆盖——允许写入不等于允许发请求。
+1. **全局能力策略**：用户在设置里选择的 `read_only` / `safe_write` / `full_access` 决定可见的工具集合。能力等级按枚举顺序 `Read < Create < Update < Delete < Send` 排列；策略比较时 `Delete` 与 `Send` 同级，而 `Send`（发起出站请求）只有 `full_access` 才覆盖——允许写入不等于允许发请求。
 2. **项目权限**：按项目在 `permissions` 表里授权，默认 `ReadCall`。没有分类的工具按最严格的一档处理。
 
 两道检查的关系是「与」，取更严格的一项。默认策略是 `read_only`，AI 写入默认关闭，需要用户在设置里显式调整。
@@ -174,7 +174,7 @@ cargo build --release -p simple-post-server # 仅无头服务（容器用）
 cargo test --workspace                     # 全部 Rust 测试
 ```
 
-`npm run check` 与 CI 执行的是同一套检查。提交前本地跑一次即可。
+`npm run check` 覆盖 CI 的 Web 与 Rust 两个 job 里的格式、静态检查、类型检查、前端单测、OpenAPI lint、`cargo fmt` 与 `cargo clippy`；CI 另跑生产构建（`vite build`）、Rust 测试（`cargo test --workspace`）与容器内的快速验证。提交前本地跑一次即可。
 
 ### 容器
 
@@ -185,15 +185,15 @@ docker compose up -d          # → http://localhost:4173
 
 镜像里只有 `simple-post-server`（不含 Tauri）、单页应用的静态产物与一个数据目录。SQLite 使用 `rusqlite` 的 `bundled` 静态编译，TLS 使用 rustls 内置的根证书集，因此镜像不安装 GTK、WebKit、X11 与 OpenSSL。镜像内单页应用在 `/app/spa`，数据在 `/data`。
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `SP_WEB_PASSWORD` | 空 | 映射到 `SIMPLE_POST_WEB_PASSWORD`：`/api/*` 与 `/mcp` 的 Bearer 口令。留空即完全不鉴权。 |
-| `SP_WEB_BIND` | `4173` | 宿主机映射的端口，容器内固定为 4173。 |
-| `SP_RUST_LOG` | `info` | 映射到 `RUST_LOG`，是 tracing 的日志过滤级别。 |
-| `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反向代理前缀，必须以 `/` 开头。 |
-| `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置为 `1` 后，`/api/http/send` 拒绝回环、私网与链路本地地址（含云厂商 metadata）。 |
+| compose 里的名字 | 程序读的名字 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `SP_WEB_PASSWORD` | `SIMPLE_POST_WEB_PASSWORD` | 空 | `/api/*` 与 `/mcp` 的 Bearer 口令。留空即完全不鉴权。 |
+| `SP_WEB_BIND` | 无 | `4173` | 宿主机映射的端口，容器内固定为 4173。 |
+| `SP_RUST_LOG` | `RUST_LOG` | `info` | tracing 的日志过滤级别。 |
+| `SP_PUBLIC_BASE_PATH` | `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反向代理前缀，必须以 `/` 开头。 |
+| 无 | `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置为 `1` 后，`/api/http/send` 拒绝回环、私网与链路本地地址（含云厂商 metadata）。这一项没有对应的 `SP_*` 变量，要在 compose 的 `environment` 里直接写 `SIMPLE_POST_BLOCK_PRIVATE_NET: 1`。 |
 
-`SP_*` 是 compose 的插值变量名，写在 `.env` 里（见 `.env.example`），由 compose 文件转成程序认识的 `SIMPLE_POST_*`。
+这四个 `SP_*` 变量写在 `.env` 里（见 `.env.example`），由 compose 文件转成程序认识的名字。`SP_PUBLIC_BASE_PATH` 在两个 compose 文件里都是注释掉的状态，只写进 `.env` 不生效，还要自己把那两行打开。
 
 Swarm 部署时有两个不要改动的约束：
 
@@ -241,7 +241,7 @@ MCP 客户端连接 `http://host:4173/mcp`，并带上 `Authorization: Bearer <�
 
 这个端口是唯一对外暴露 MCP 的位置，部署侧发布它时，发布的目标端口必须与设置里填写的数字一致。
 
-数据保存在 `SIMPLE_POST_DATA_DIR`（未设置时为 `%APPDATA%/simple-post`），把该目录挂到持久卷即可。SQLite 运行在 WAL 模式下，可以安全落盘。
+数据目录由环境变量 `SIMPLE_POST_DATA_DIR` 决定（未设置时是 `dirs::data_dir()`，Windows 上即 `%APPDATA%`）：SQLite 文件 `store.db` 直接落在该目录下，端口登记文件 `mcp.port` 落在该目录下的 `simple-post/` 子目录里。把该目录挂到持久卷即可。SQLite 运行在 WAL 模式下，可以安全落盘。
 
 ### 反向代理
 
@@ -287,7 +287,7 @@ sp.example.com {
 | --- | --- | --- |
 | Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
-| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、MCP 指标、错误类型。不依赖 Tauri 与 axum。 |
+| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、MCP 指标、错误类型，以及动态变量、OAuth2、路径参数、请求脚本、接口规格、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
 | MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（52 个工具）、axum HTTP daemon、标准输入输出桥接。 |
 | 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
 | 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
@@ -300,19 +300,19 @@ sp.example.com {
 
 - Project → Module → Collection（可递归，深度不限）→ Endpoint，以及 Environment 与 Response（`crates/simple-post-core/src/domain.rs`）
 - 整棵树存在一张 `nodes` 表里，用 `type` 区分；所属项目以 `root_id` 写在每一行上，一次索引读即可回答「这条记录属于哪个项目」（`crates/simple-post-core/src/db/schema.sql`）
-- 接口的请求配置（method、url、auth、body、headers、params、tags）单独放在 `endpoint_details` 表里，这些字段对模块与集合没有意义（`db/endpoint_details.rs`）
+- 接口的请求配置（method、url、auth、body、headers、params、tags）单独放在 `endpoint_details` 表里，这些字段对模块与集合没有意义（`crates/simple-post-core/src/db/endpoint_details.rs`）
 - 层级合法性由 SQLite 触发器与应用层检查同时强制（`ResourceNodeType::may_under`、`db::nodes::move_many`）
-- 完整增删改查、复制接口、级联清理，以及模块、集合、接口的上下移排序（`db/nodes.rs`）
-- 响应历史持久化在 SQLite 里，每个接口最多保留 10 条；响应体超过上限时记 `body_truncated`，查看器据此说明，而不是把半个文档当成完整内容显示（`db/response_history.rs`）
+- 完整增删改查、复制接口、级联清理，以及模块、集合、接口的上下移排序（`crates/simple-post-core/src/db/nodes.rs`）
+- 响应历史持久化在 SQLite 里，每个接口保留多少条**未收藏**的历史由全局偏好 `response_history.keep` 决定（缺省 10 条，可在设置里改）；收藏的行永久保留、不计入这个条数。响应体超过上限时记 `body_truncated`，查看器据此说明，而不是把半个文档当成完整内容显示（`crates/simple-post-core/src/db/response_history.rs`）
 
 **桌面与界面**
 
 - 项目与环境切换、全局搜索（`Ctrl+K`）、MCP 进程状态指示器、设置入口（`src/features/top-bar/`）
 - 侧边树递归渲染集合层级、method 彩色徽标、双击改名、右键菜单、删除确认（`src/features/project-tree/`）
 - 拖拽支持三种落点：集合正中间是移进该子树，上边缘与下边缘是同级前后插入（`src/lib/tree-index.ts`）
-- 请求测试器提供 method、URL（`{{var}}` 高亮与变量选择浮层）、Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页；CodeMirror 6 的 JSON 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
+- 请求测试器提供 Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页，method 与 URL 写在标签页上方的请求头与地址栏里（URL 栏带 `{{var}}` 高亮与变量选择浮层）；CodeMirror 6 的 JSON 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
 - 复制为 cURL、保存接口定义（`src/lib/http-build.ts`）
-- 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers 三种视图，支持复制与下载，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
+- 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers、脚本四种视图，支持复制与下载，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
 - 命令面板跨项目、模块、集合、接口模糊搜索，并内置切换环境、切换主题、打开设置、新建项目、新建模块、复制当前接口 URL 等命令
 - 主题支持 dark、light、system 三种，在 `<html>` 上切换 class，刷新后保留且没有白屏闪烁（`src/styles/globals.css`）
 

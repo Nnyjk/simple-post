@@ -127,8 +127,8 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
   updateDraftEndpoint: (draftId, patch) =>
     set((s) => {
       const current = s.draftEndpoints[draftId];
-      // 未知 id：静默空操作。编辑器可能在标签关闭之后才发出补丁（debounce、blur、
-      // 某个异步保存落地），在这里抛错会把它本该更新的那个标签弄崩。
+      // 未知 id：`updateDraftEndpoint` 静默空操作。编辑器可能在标签关闭之后才发出补丁
+      // （debounce、blur、某个异步保存完成），在这里抛错会把它本该更新的那个标签弄崩。
       if (!current) return {};
       return { draftEndpoints: { ...s.draftEndpoints, [draftId]: { ...current, ...patch } } };
     }),
@@ -200,7 +200,7 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     // `activeTabId` 的邻居回退会立刻被覆盖。
     //
     // `pending` 刻意**不**带过去。它上面已经合并进 `detail`，那就是这次写入的
-    // 全部内容，所以在新 id 下重新种一遍恰恰会重建 Save 本该终结的那个状态：
+    // 全部内容，所以在新 id 下重新种一遍恰恰会重建一个本该已经结束的状态：
     // 标签上挂一个 `•`、"关闭已保存"不肯关它、第二次 Save 又写不出新东西。
     // 已保存 endpoint 的标签是干净的——见 `HttpTester` 自己的 `handleSave`，
     // 出于同样的理由它调了 `clearEndpointDraft`。

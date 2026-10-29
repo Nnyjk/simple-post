@@ -10,7 +10,7 @@
 npm run check
 ```
 
-它依次执行 `format:check` → `lint` → `typecheck` → `npm test` → `lint:openapi` → `fmt:check` → `clippy`，与 CI 的 Web 与 Rust 两个 job 是同一套。CI 另外还会跑生产构建与容器冒烟测试——那部分本地用 `npm run build` 和 `docker build` 覆盖。
+它依次执行 `format:check` → `lint` → `typecheck` → `npm test` → `lint:openapi` → `fmt:check` → `clippy`。CI 的 Web 与 Rust 两个 job 跑的检查都在这条命令里，此外 CI 还多跑三样本地不跑的：`vite build` 生产构建、`cargo test --workspace` Rust 测试、容器内的快速验证（`docker build` 与 `docker compose up` 可在本地覆盖后两样的主要部分）。
 
 需要 Rust 侧完整测试时单独跑 `cargo test --workspace`。
 
@@ -30,11 +30,11 @@ npm run check
 
 ### 1. 不要 bump `SCHEMA_VERSION`
 
-`ensure_current_schema` 在版本号变化时会**删掉每个用户的整个 store.db**。新增字段一律走 `db::ADDED_COLUMNS`（加法式），并由 `db::migrate` 修复两种旧布局写入的行。`PRAGMA user_version` 至今仍是 `3`，正是这个原因。
+`ensure_current_schema` 在版本号变化时会**删掉每个用户的整个 store.db**。新增字段一律走 `db::schema::ADDED_COLUMNS`（加法式），并由 `db::migrate` 修复两种旧布局写入的行。`PRAGMA user_version` 至今仍是 `3`，正是这个原因。
 
 顺带：有三列是**故意留着的死列**（`environments.base_urls_json`、`base_url_definitions.module_id`、`base_url_definitions.is_default`），它们被新方案取代且不再读写。删列等于重建表，等于 bump 版本号，等于删用户数据。看到「未使用的列」不要顺手清理。
 
-出处：`AGENTS.md` → *Three columns are dead on purpose*。
+出处：`AGENTS.md` → *A dead table is dropped on open; a dead column has to stay*。
 
 ### 2. MCP 双闸 fail-closed
 
@@ -77,7 +77,7 @@ npm run check
 
 ### 6. 回归网测试不要删、不要放宽
 
-`crates/simple-post-mcp/src/mcp/mod_test.rs` 与 `web_api/` 里有几条**读源码文本**的测试（`include_str!`），它们守护的契约在功能测试里根本观察不到——被永久拒绝的工具照样返回格式正确的 `PermissionDenied`，功能测试看不出区别。改代码时如果这些测试红了，先怀疑自己，不要动判据。
+`crates/simple-post-mcp/src/mcp/mod_test.rs`、`crates/simple-post-server/src/project_api_shells_test.rs` 与 `crates/simple-post-server/src/daemon_supervisor_test.rs` 里有几条**读源码文本**的测试（`include_str!`），它们守护的契约在功能测试里根本观察不到——被永久拒绝的工具照样返回格式正确的 `PermissionDenied`，功能测试看不出区别。改代码时如果这些测试红了，先怀疑自己，不要动判据。
 
 出处：`AGENTS.md` → *MCP permissions — two gates*、*MCP wire-format field names*。
 
@@ -85,7 +85,7 @@ npm run check
 
 - `commands/mod.rs` 必须用 **glob** `pub use`——写成条目列表会丢掉 `#[macro_export]` 的 `__cmd__<name>` 宏，`generate_handler!` 报 E0433。
 - `src-tauri/src/lib.rs` 的 `http_request` 必须保持**非 `pub`**，标 `pub` 会和 `generate_handler!` 撞名（E0255）。
-- `gui` feature 不要移进 `default`。它关着正是为了不让容器构建拖进 GTK/WebKit。
+- `gui` feature（声明在 `crates/simple-post-server/Cargo.toml`）不要移进 `default`。它关着正是为了不让容器构建拖进 GTK/WebKit。
 - Zustand selector 不能返回新建的数组或对象（`.map` / `.filter` / 展开），`Object.is` 会导致无限重渲染。用 `.find(...)`，或在组件里 `useMemo`。
 - 写库走 `db::with_tx`，别自己拼事务。
 
@@ -102,7 +102,7 @@ npm run check
 
 ## Issue
 
-用模板。仓库的高风险点都做成了模板字段：涉及数据结构就填 schema 相关问题，涉及 MCP 工具就填双闸问题，涉及前后端同时改就填五处协同清单。
+用模板。仓库的高风险点都做成了模板字段：两个模板都列出「数据结构 / schema」与「MCP 工具注册或权限」两项，`feature_request.yml` 另外列出「前后端命令」（描述里点名五处协同）、「反向代理 / base path」、「回归网测试」与「CI / 门禁」，`bug_report.yml` 另外列出「容器 / 部署」。
 
 ## 发版
 
@@ -114,8 +114,8 @@ npm run check
    - 桌面应用启动一次，`npm run check` 不需要在安装包里跑，但要确认应用能开、能建项目
 3. **验证镜像**（需要 `docker login ghcr`）：
    ```bash
-   docker pull ghcr.io/nnyjk/simple-post:<tag>
-   docker buildx imagetools inspect ghcr.io/nnyjk/simple-post:<tag>
+   docker pull ghcr.io/Nnyjk/simple-post:<tag>
+   docker buildx imagetools inspect ghcr.io/Nnyjk/simple-post:<tag>
    ```
    确认 `linux/amd64` 与 `linux/arm64` 都在清单里。
 4. **验证 compose 部署**（对着刚拉的镜像，不带 `build:`）：

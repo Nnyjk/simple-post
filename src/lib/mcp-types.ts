@@ -23,8 +23,7 @@ export type McpRuntimeStatus =
  *   - `uptimeMs` —— daemon 已运行多久
  *   - `requestsHandled` —— 累计计数
  *   - `currentConnections` —— stdio / streamable-http 的汇入数
- *   - `registeredTools` —— MCP server 已宣告的工具；取代 ConnectionSection 里
- *     硬编码的 `REGISTERED_TOOLS` 常量
+ *   - `registeredTools` —— MCP server 已宣告的工具；连接页展示的就是这份列表
  *   - `lastError` —— 展示在崩溃对话框的描述里
  */
 export interface McpUiState {

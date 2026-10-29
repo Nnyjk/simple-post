@@ -2,7 +2,7 @@
  * Bootstrap 契约测试：锁定**两层**加载的时序，以及失败时的错误状态。
  *
  * 分层是这一版的核心，所以测试盯的不是"发了哪几个命令"，而是"欢迎页
- * 在哪一刻可以画"：`loaded` 必须在只有 `projects_list` 落地时就为 true，
+ * 在哪一刻可以画"：`loaded` 必须在只有 `projects_list` 返回时就为 true，
  * 而 `nodesLoaded` 要等到树那一组读完。后者若和前者一起翻 true，启动画面
  * 就又回到了"等最慢的那个查询"。
  */
@@ -139,19 +139,19 @@ describe('bootstrap-slice 聚合加载契约', () => {
       projects_list: [project],
       request_settings_get: { timeoutMs: 30_000, followRedirects: true, maxResponseSizeKb: 5_120 },
       response_history_keep_get: 10,
-      // 一棵扁平的树取代了原来的 module / collection / endpoint 三件套。
+      // 树是一张扁平的表：module / collection / endpoint 三种行都由 `nodes_list` 一次返回。
       nodes_list: [moduleNode, collectionNode, endpointNode],
       endpoint_details_list: [endpointDetail],
       environments_list: [environment],
     };
-    // 给树那一层设闸，好让我们能在 bootstrap 中途观察 store。这正是这次拆分的
-    // 重点：这些还在 pending 时 `loaded` 就必须已经是 true。
+    // 给树那一层设闸，好让我们能在 bootstrap 中途观察 store。树那三条还在 pending 时
+    // `loaded` 就必须已经是 true。
     let releaseTree: () => void = () => undefined;
     const treeGate = new Promise<void>((resolve) => {
       releaseTree = resolve;
     });
-    // 只有树那一组等闸。第 1 层读的那三条（项目清单与两条全局偏好）必须立刻落地，
-    // 否则欢迎页会跟着树一起等 —— 那正是这次拆分要消除的事。
+    // 只有树那一组等闸。第 1 层读的那三条（项目清单与两条全局偏好）必须立刻返回，
+    // 否则欢迎页会跟着树一起等。
     const TREE_COMMANDS = new Set(['nodes_list', 'endpoint_details_list', 'environments_list']);
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args });
@@ -161,7 +161,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     const booting = bag.bootstrap();
     // 不释放树闸就等第一层落定。一个宏任务 tick 会排空所有 pending 微任务，
-    // 而那正好是第一层 `set()` 落地的边界——数 `Promise.resolve()` 只会是对
+    // 而那正好是第一层 `set()` 执行的边界——数 `Promise.resolve()` 只会是对
     // `invokeCmd` 恰好含有几个 await 的猜测。
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -186,7 +186,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     releaseTree();
     await booting;
-    // `bootstrap()` 第一层一落地就返回——这正是这次拆分的全部意义。去 await
+    // `bootstrap()` 第一层一完成就返回——这正是这次拆分的全部意义。去 await
     // `loadWorkspace()` 反而会把这一趟并进 bootstrap 已经启动的那一趟，
     // 而后者之所以做得到，只是在于在途的加载交回它的 pending promise 而不是
     // 立即 resolve。
@@ -494,7 +494,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
     bag.switchProjectTabs = (id: string) => switched.push(id);
     bag.setActiveProject = (id: string) => selected.push(id);
-    // 用户在后台那一趟落地之前就点了项目卡片，也必须仍能拿到树，
+    // 用户在后台那一趟完成之前就点了项目卡片，也必须仍能拿到树，
     // 所以进入项目会重新请求。
     bag.loadWorkspace = async () => {
       workspaceLoads += 1;
@@ -615,7 +615,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.deepEqual(bag.environments, []);
   });
 
-  it('第二层在项目已进入后才落地时，补选该项目的 active 环境', async () => {
+  it('第二层在项目已进入后才返回时，补选该项目的 active 环境', async () => {
     const bag = makeBootstrapHarness();
     let releaseTree: () => void = () => undefined;
     const treeGate = new Promise<void>((resolve) => {

@@ -227,7 +227,8 @@ fn an_import_preview_never_books_the_fingerprint_ledger() {
 
 #[tokio::test]
 async fn the_preview_counts_the_variables_the_source_disabled() {
-    // `disabledVariableCount` 曾经是字面量 0：一个承诺了意义的公开契约字段，产不出那个数。
+    // `disabledVariableCount` 必须数出源里被禁用的变量：一个承诺了意义的公开契约字段，
+    // 写死 0 就是产不出那个数。
     let pool = temp_pool("disabled-vars");
     let project_id = seed_project_with_module(&pool).0;
     let content = r#"{
@@ -261,7 +262,7 @@ async fn the_preview_counts_the_variables_the_source_disabled() {
 
 // --- URL 分支：真发一次请求 ------------------------------------------------
 //
-// #68：整条 URL 分支此前 0 个测试覆盖，而这些性质**只有真的发一次请求才会验出来**。
+// #68：整条 URL 分支的性质**只有真的发一次请求才会验出来**。
 // 上限抬到了 8 MB、截断被拦下了，这些都是读代码得出的结论；「一份 3 MB 的文档
 // 能不能真的走完拉取 → 解析 → 预览」不是。下面每条都对着本机 loopback 上的一台
 // 临时服务器跑，故 CI 的 ubuntu 与 Windows 都不需要外网。

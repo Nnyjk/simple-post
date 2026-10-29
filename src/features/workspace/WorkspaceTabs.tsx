@@ -241,7 +241,7 @@ export function WorkspaceTabs() {
       role="tablist"
       aria-label="工作区标签"
       className={cn(
-        // 这里不用 `border-b`：分隔线是子元素（`below`）而不是边框，因为本条是
+        // 这条标签条不用 `border-b`：分隔线是子元素（`below`）而不是边框，因为本条是
         // `overflow-hidden`，它按 *padding* box 裁剪 —— 自带边框会落在裁剪之外，
         // 任何子元素都盖不到，激活标签就无法与下方面板融合。1px 子元素线在裁剪
         // 之内，标签的填充能把它擦掉。
@@ -392,7 +392,7 @@ export function WorkspaceTabs() {
           size="icon"
           className="h-6 w-6 text-faint"
           onClick={() => {
-            // 「关闭其他标签」—— 深潜树后攒下几十个标签时有用。走 dirty 守卫，
+            // 「关闭其他标签」—— 深潜树后攒下几十个标签时有用。这里走 dirty 守卫，
             // 让另一个标签里改到一半的命名有机会先落定。
             requestCloseOthers();
           }}

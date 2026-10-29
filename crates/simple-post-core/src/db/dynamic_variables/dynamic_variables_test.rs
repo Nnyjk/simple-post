@@ -514,7 +514,7 @@ fn moving_a_definition_into_a_project_that_already_has_that_name_is_refused() {
     };
     assert!(message.contains("已有一个叫"), "实际消息是：{message}");
 
-    // 被拒的定义留在原来的项目里。
+    // 被拒的定义留在原来那个项目里。
     let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
     assert_eq!(got.project_id.as_deref(), Some("p1"));
 }

@@ -186,7 +186,7 @@ fn migrate_project(conn: &mut Connection, project_id: &str) -> Result<(), AppErr
         params![star, project_id],
     )?;
 
-    // 先写值层再退场 clone：读的时候那些 id 还得可解析。
+    // 迁移先写值层再退场 clone：读的时候那些 id 还得可解析。
     for c in &canonical {
         for old in &c.replaced {
             conn.execute(
@@ -230,7 +230,7 @@ struct CanonicalService {
 ///
 /// - shape A：每行已是项目级，全部存活、无需合并，故重命名不是合并——同 `name` 两行
 ///   是应用层自己造不出的状态。
-/// - shape B：每 (模块 × name) 一行，须收敛为每 name 一行。存活者取**第一个**模块下的
+/// - shape B：每 (模块 × name) 一行，须合并为每 name 一行。存活者取**第一个**模块下的
 ///   那行（显示序 → 创建时间 → id）：那是项目配置最多的模块，换一个就得有一条
 ///   「哪个模块赢」的规则，而数据里没有依据。同模块内以该行自身显示序决胜。
 /// - 无模块的行排在所有真模块之后，只在该 name 仅剩它一行时胜出——混合库里模块持有版

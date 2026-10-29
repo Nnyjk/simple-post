@@ -70,7 +70,7 @@ export function buildTree(
 
   const buildCollectionBranch = (c: ResourceNode): CollectionBranch => {
     const { endpoints, collections } = childrenOf(c.id);
-    // 只取本分支自己的接口，不含整棵子树，行渲染的就是这些。
+    // `childrenOf` 只返回本分支自己的接口，不含整棵子树；集合行渲染的就是这些接口。
     return {
       collection: c,
       endpoints,

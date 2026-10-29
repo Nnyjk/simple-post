@@ -60,7 +60,7 @@ function stripBlockComments(code: string): string {
     .replace(MULTI_LINE_BLOCK_COMMENT, '');
   if (declarationNames(stripped) !== declarationNames(code)) return code;
   try {
-    // 只编译，不执行：这里要确认的是语法没被剥坏。
+    // `new vm.Script` 只编译不执行：这里要确认的是语法没被剥坏。
     new vm.Script(stripped);
     return stripped;
   } catch {
@@ -101,7 +101,7 @@ export async function buildThemeBootScript(source: string): Promise<string> {
 
   const body = code.replace(/^[ \t]*export\s+default\s+/m, `globalThis.${GLOBAL_NAME} = `);
 
-  // `</script` 出现在脚本文本里会提前结束 HTML 里的 script 标签，故转义掉。
+  // `</script` 出现在脚本文本里会提前结束 HTML 里的 script 标签，故这里把它转义掉。
   const safe = stripBlockComments(body).replace(/<\/script/gi, '<\\/script');
 
   return [
@@ -132,8 +132,8 @@ export function themeBootPlugin(source: string): Plugin {
           );
         }
         const script = await buildThemeBootScript(source);
-        // 替换串用函数形式：字符串形式会把替换文本里的 `$&` 之类当成替换记号展开，
-        // 脚本文本里出现它们时，注入的脚本就被改坏了。
+        // `html.replace` 的替换串用函数形式：字符串形式会把替换文本里的 `$&` 之类当成替换
+        // 记号展开，脚本文本里出现它们时，注入的脚本就被改坏了。
         return html.replace(THEME_BOOT_MARKER, () => `<script>${script}</script>`);
       },
     },

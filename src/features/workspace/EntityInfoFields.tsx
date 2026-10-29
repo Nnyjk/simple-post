@@ -121,7 +121,7 @@ export function AutoSaveTextarea({
         commit();
       }}
       onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
-        // 这里回车是换行 —— 描述是散文。Ctrl/⌘+Enter 才是提交，Esc 放弃本次编辑。
+        // 这个 textarea 里回车是换行 —— 描述是散文。Ctrl/⌘+Enter 才是提交，Esc 放弃本次编辑。
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
           e.currentTarget.blur();

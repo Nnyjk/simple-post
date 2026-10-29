@@ -88,7 +88,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
   it('treats an empty override as 自定义 with no prefix', () => {
     const r = resolveEndpointBaseUrl(endpoint({ baseUrlOverride: '' }), ENV, PROJECT, 'mod_a');
     assert.equal(r.source, 'override');
-    // 要点就在这里：环境 base URL 不得偷偷回来。
+    // 要点就在这里：`resolveEndpointBaseUrl` 不得回落到环境 base URL。
     assert.equal(r.baseUrl, '');
   });
 
@@ -123,8 +123,8 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
 
 // ---- 值层：(环境 × 模块 × 服务) -----------------------------------------
 //
-// 每个格子里的值对其他所有格子都是错的，所以项目级值或借来的邻居值都不可能在这里
-// 被当成正确答案蒙混过去。
+// 每个格子里的值对其他所有格子都是错的，所以项目级值与其它模块的值都不会在这里被当成
+// 该格子的地址。
 
 describe('resolveEndpointBaseUrl — one independent cell per (module, service)', () => {
   it('reads the module’s own cell, not another module’s', () => {
@@ -351,7 +351,7 @@ describe('resolveVars — 自定义 does not disable environment variables', () 
 });
 
 describe('resolveVars — 停用的变量不参与替换', () => {
-  // `baseUrls` 在这里是承重的：它把 `Environment` 与裸的 `Record<string,string>` 区分开，
+  // `baseUrls` 在这里是必需的：它把 `Environment` 与裸的 `Record<string,string>` 区分开，
   // 而只有前者才带「哪些变量被停用」这层信息。
   const env = {
     variables: { token: 'abc123', name: 'ada' },
@@ -387,7 +387,7 @@ describe('resolveVarsWithMissing — reports what it could not resolve', () => {
 
   it('keeps the marker in the value AND names it in missing', () => {
     const r = resolveVarsWithMissing('/u/{{a}}/{{gone}}', { a: '1' });
-    // 既不清空也不变成 'undefined'——用户必须看见那个洞。
+    // 既不清空也不变成 'undefined'——用户必须看见未替换的标记本身。
     assert.equal(r.value, '/u/1/{{gone}}');
     assert.deepEqual(r.missing, ['gone']);
   });
@@ -405,8 +405,8 @@ describe('resolveVarsWithMissing — reports what it could not resolve', () => {
   });
 
   it('treats a variable defined as the empty string as resolved, not missing', () => {
-    // 判空用 nullish 而非真值：把变量清成 '' 是用户有意的选择，报成「缺失」等于
-    // 纠缠一个他故意清空的值
+    // 判空用 nullish 而非真值：把变量清成 '' 是用户有意的选择，报成「缺失」等于把用户
+    // 故意清空的值当成没填
     const r = resolveVarsWithMissing('/u/{{a}}', { a: '' });
     assert.equal(r.value, '/u/');
     assert.deepEqual(r.missing, []);
@@ -414,7 +414,7 @@ describe('resolveVarsWithMissing — reports what it could not resolve', () => {
 
   it('leaves non-identifier markers alone and does not report them', () => {
     // 标记名只接受 `\w+`，与 Rust 的 `is_word` 一致。`{{ my-var }}` / `{{ a.b }}` 是
-    // 字面文本而非变量——报出来只是用户无从处理的噪声
+    // 字面文本而非变量——`resolveVarsWithMissing` 报出来只是用户无从处理的噪声
     const r = resolveVarsWithMissing('{{ my-var }} {{ a.b }} {{ok}}', { ok: '1' });
     assert.equal(r.value, '{{ my-var }} {{ a.b }} 1');
     assert.deepEqual(r.missing, []);
@@ -422,7 +422,7 @@ describe('resolveVarsWithMissing — reports what it could not resolve', () => {
 
   it('is a single non-recursive pass', () => {
     // `{{{{a}}}}` 在下标 2 处含一个格式良好的 `{{a}}`，所以被替换的是它——而*注入
-    // 进去*的文本永远不会被再扫一遍。没有这条，值本身是 `{{…}}` 标记的变量会再展开
+    // 进去*的文本永远不会再被扫一遍。少了这条判断，值本身是 `{{…}}` 标记的变量会再展开
     // 一次（或死循环）。
     const resolved = resolveVarsWithMissing('{{{{a}}}}', { a: 'x' });
     assert.equal(resolved.value, '{{x}}');

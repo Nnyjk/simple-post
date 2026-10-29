@@ -177,7 +177,7 @@ describe('tree-index: optional rootId filter', () => {
   });
 
   it('narrows the top-level bucket to the requested project’s modules only', () => {
-    // `buildTree` 读某个项目的模块列表正是读这个；而 `moveNodes` 划定顶层落点范围时不能这么做。
+    // `buildTree` 读某个项目的模块列表正是读这个；而 `moveNodes` 划定顶层范围时不能这么做。
     const p2 = indexByParent(crossProject, 'p2');
     assert.deepEqual(idsFor(p2, null), ['m9']);
     assert.deepEqual(idsFor(p2, 'm9'), ['c9']);

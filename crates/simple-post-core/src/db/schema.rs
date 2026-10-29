@@ -72,7 +72,7 @@ fn drop_obsolete_dynamic_variable_tables(conn: &mut Connection) -> Result<(), Ap
         return Ok(());
     }
     if table_has_column(conn, "dynamic_variables", "source_environment_id")? {
-        // 当前形状：带后加的列，保留。
+        // dynamic_variables 表已是当前形状（带后加的列），故保留。
         return Ok(());
     }
     // 缓存表的外键指向定义表，故先丢缓存表。
@@ -289,7 +289,7 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
 /// 把磁盘上的库升到 [`SCHEMA_VERSION`]，版本不符则替换。
 /// 返回 `true` 表示文件已被删除、将重建，由调用方告知数据丢失。
 ///
-/// **没有迁移路径。** v0.1 未曾发布给真实用户，数据迁移框架是守护一个人群的投机重量；
+/// **没有迁移路径。** 本项目还没有发布给真实用户，数据迁移框架是守护一个人群的投机重量；
 /// 版本号之前的三表布局（`modules` / `collections` / `endpoints`）文件直接替换而非升级。
 /// 这个判断一旦改变，只有本函数需要动。
 pub(super) fn ensure_current_schema(db_path: &Path) -> Result<bool, AppError> {

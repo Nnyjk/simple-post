@@ -3,7 +3,7 @@
 //! 驱动真实 listener，理由同 `response_history_test.rs`：axum 的 `Json` 提取器在 body
 //! 对不上字段时回的是 4xx 而不是 panic，这属于路由与 DTO 的性质，读 handler 读不出来。
 //!
-//! 这一层此前完全没有行为级覆盖：`interchange_api_test.rs` 直接调
+//! 这一层要有行为级覆盖：`interchange_api_test.rs` 直接调
 //! `crate::interchange_api::import_preview`，body 的形状在它上面根本没经过任何反序列化。
 //! 于是「Tauri 侧把 payload 包进 `opts`」这类改法在浏览器侧毫无症状——而它同时会让桌面
 //! 侧全挂。桌面那半由 `src-tauri/src/commands/interchange_test.rs` 从源码形状上钉住，
