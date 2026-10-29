@@ -7,7 +7,8 @@
 //! 三个约定是决策，不是实现细节：
 //!
 //! - **`responses` 合成默认，不猜。** `StoredResponse` 存的是实际响应，里面没有响应
-//!   schema；`RequestBody.schema` UI 从不写。故每个 operation 输出一个 `200: OK`。
+//!   schema；请求体那份定义（`RequestBody.schema`）说的是**请求**，不能拿来当响应形状。
+//!   故每个 operation 输出一个 `200: OK`。
 //! - **`servers` 逐模块取，不回退。** 该模块没配就是没有 URL：不借用别的模块的，
 //!   也不落回项目 ★。
 //! - **`tags` 就是集合名。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这层就在产物里
@@ -308,6 +309,66 @@ fn component_key(raw: &str) -> String {
             }
         })
         .collect()
+}
+
+/// 一份 JSON 的规范文本：对象的键按字典序排好，故键序不同的两份内容得到同一段文本。
+///
+/// **不能靠 `serde_json` 的默认行为**：`Value::Object` 的底层容器保不保序，取决于依赖
+/// 图里有没有人打开 `serde_json` 的 `preserve_order` 特性——那是特性统一的结果，本
+/// crate 管不到。键序一变，「同一份定义」的判断就变了，故这里自己排一遍序。
+fn canonical_json(value: &Value) -> String {
+    let mut out = String::new();
+    write_canonical(value, &mut out);
+    out
+}
+
+/// 规范文本的递归写法。对象按键序写，数组按原序写（数组的顺序是有意义的）。
+fn write_canonical(value: &Value, out: &mut String) {
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            out.push('{');
+            for (i, key) in keys.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&serde_json::to_string(key).unwrap_or_default());
+                out.push(':');
+                if let Some(child) = map.get(*key) {
+                    write_canonical(child, out);
+                }
+            }
+            out.push('}');
+        }
+        Value::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_canonical(item, out);
+            }
+            out.push(']');
+        }
+        scalar => out.push_str(&scalar.to_string()),
+    }
+}
+
+/// 规范文本的短标识：FNV-1a 128 位，取前 8 个十六进制字符。
+///
+/// 与 `fingerprint.rs` 用同一套算法与同样的两条理由：不依赖 `DefaultHasher`（它明确
+/// 不保证跨版本稳定），也不为一个短标识拖进哈希依赖。
+fn content_hash(canonical: &str) -> String {
+    const OFFSET: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+
+    let mut hash = OFFSET;
+    for b in canonical.as_bytes() {
+        hash ^= *b as u128;
+        hash = hash.wrapping_mul(PRIME);
+    }
+    format!("{hash:032x}")[..8].to_string()
 }
 
 /// 把一份 [`Exchange`] 落成 OpenAPI 3.0 文档。
