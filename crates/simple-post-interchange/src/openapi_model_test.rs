@@ -14,7 +14,9 @@
 //! 夹具覆盖面：八个合法动词 + 一个集合外的动词、四种 body mode、三种可映射的鉴权、
 //! 两层嵌套集合、路径参数、配了服务与没配服务的两个模块。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+use openapiv3::ReferenceOr;
 
 use crate::import::Format;
 use crate::ir::Exchange;
@@ -27,7 +29,7 @@ fn sample() -> Exchange {
 }
 
 /// 夹具里的接口数，以及其中被导出的那部分。少改一处就会在这里红。
-const FIXTURE_ENDPOINTS: usize = 20;
+const FIXTURE_ENDPOINTS: usize = 23;
 /// `PROPFIND` 在固定动词键集之外，被带诊断跳过，故产物里比夹具少一个。
 const SKIPPED_VERBS: usize = 1;
 
@@ -254,4 +256,109 @@ fn the_fixture_still_covers_every_path_method() {
             "夹具没覆盖 `{expected}`，linter 那一侧会看不见它。got: {verbs:?}"
         );
     }
+}
+
+/// 夹具里带 `body.schema` 的接口，导出后 `requestBody` 必须**引用** components 里那一份。
+///
+/// 三个视角都要认这条：
+///
+/// * `requestBody` 里是一个 `$ref`，不是内联的形状；
+/// * `components.schemas` 里那份定义**真的存在**，且 `$ref` 指得到它；
+/// * 两个用同一份定义的接口**共用一份**定义。
+///
+/// 少了任何一条，缺陷都还在：`components.schemas` 里躺着一份没人引用的定义，而每个
+/// requestBody 都在宣称一个错的请求体形状。
+#[test]
+fn a_body_schema_is_referenced_from_the_component_in_the_model() {
+    let ex = sample();
+    let doc = to_document(&ex, DocFormat::Json).expect("json");
+    let api = parse_model(&doc.content, DocFormat::Json);
+
+    let schemas = &api
+        .components
+        .as_ref()
+        .expect("夹具里有带 schema 的接口，components 不该缺席")
+        .schemas;
+
+    // 名字由内容派生：这份定义写了 title，就用它。
+    assert!(
+        schemas.contains_key("UserProfile"),
+        "components.schemas 里没有 UserProfile：{:?}",
+        schemas.keys().collect::<Vec<_>>()
+    );
+
+    let mut references = Vec::new();
+    for (path, method, op) in api.operations() {
+        if path != "/users/profile" {
+            continue;
+        }
+        let body = op
+            .request_body
+            .as_ref()
+            .and_then(|r| r.as_item())
+            .expect("这个接口带请求体");
+        let media = body.content.get("application/json").expect("json 请求体");
+        let schema = media.schema.as_ref().expect("请求体带 schema");
+        let ReferenceOr::Reference { reference } = schema else {
+            panic!("{method} {path} 的 requestBody 必须是 $ref，而不是内联形状");
+        };
+        references.push(reference.clone());
+    }
+
+    assert_eq!(references.len(), 2, "夹具里有两个接口用同一份定义");
+    assert_eq!(
+        references[0], references[1],
+        "同一份定义只写一份，两个 operation 指同一个名字"
+    );
+    assert_eq!(references[0], "#/components/schemas/UserProfile");
+
+    // 引用要指得到：components 里放的是定义本身，不是又一条 $ref。
+    let target = schemas.get("UserProfile").expect("components 里有那一份");
+    assert!(
+        target.as_item().is_some(),
+        "components 里放的是定义本身，不是又一条 $ref"
+    );
+}
+
+/// `components.schemas` 里不该有没人引用的定义。
+///
+/// 这条在 Rust 侧也钉一遍，是为了让**没有 Redocly 的环境**也能看出问题：Redocly 的
+/// `no-unused-components` 管的是同一件事，但它只在 `npm run lint:openapi` 里跑。
+#[test]
+fn every_component_schema_is_referenced_by_some_operation() {
+    let ex = sample();
+    let doc = to_document(&ex, DocFormat::Json).expect("json");
+    let api = parse_model(&doc.content, DocFormat::Json);
+
+    let schemas = &api
+        .components
+        .as_ref()
+        .expect("夹具里有带 schema 的接口，components 不该缺席")
+        .schemas;
+
+    let mut referenced = BTreeSet::new();
+    for (_, _, op) in api.operations() {
+        let Some(body) = op.request_body.as_ref().and_then(|r| r.as_item()) else {
+            continue;
+        };
+        for media in body.content.values() {
+            let Some(ReferenceOr::Reference { reference }) = &media.schema else {
+                continue;
+            };
+            let name = reference
+                .rsplit('/')
+                .next()
+                .expect("$ref 的末段是 component 名字");
+            referenced.insert(name.to_string());
+        }
+    }
+
+    let orphans: Vec<&String> = schemas
+        .keys()
+        .filter(|name| !referenced.contains(*name))
+        .collect();
+    assert!(
+        orphans.is_empty(),
+        "components.schemas 里有没人引用的定义：{orphans:?}"
+    );
 }
