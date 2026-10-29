@@ -50,5 +50,8 @@ export function toRequestSnapshot(
     url: request.url,
     headers: headers.map(([name, value]) => [name, value] as [string, string]),
     body: request.body,
+    // 二进制请求体的字节（`binary` 模式，或带文件分片的 multipart）走这一条通道：
+    // 没有它，历史行里的请求侧栏会显示成一个没有 body 的请求，而那次调用明明带着文件。
+    bodyBase64: request.bodyBase64,
   };
 }

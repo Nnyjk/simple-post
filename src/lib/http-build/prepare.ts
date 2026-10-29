@@ -1,10 +1,10 @@
 import { collapseUrlSlashes, joinBaseUrl, listVars, resolveVarsWithMissing } from '../url';
 import { pathPlaceholders, substitutePathParams } from '../path-params';
-import { buildMultipartBody, newMultipartBoundary, parseMultipartParts } from '../multipart';
+import { assembleMultipart, newMultipartBoundary } from '../multipart';
+import { binaryContentType, parseMultipartParts, resolveBody } from '../body';
 import { appendQueryString } from './query';
 import { appendApikeyToQuery, resolveAuth } from './auth';
 import { buildOrderedHeaders } from './headers';
-import { hasBody } from './body';
 import { buildPool, createMissingTracker } from './pool';
 import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
 
@@ -22,12 +22,16 @@ import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
  *      选 `?` 还是 `&`）；
  *   5. 追加 query 位置的 apikey；
  *   6. 构造有序 header 列表；
- *   7. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再模板化 body。
+ *   7. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再按模式解析 body。
  *
  * multipart 的 boundary 在第 5 步之前生成：Content-Type 与 body 用同一个值，
  * 两者不在同一步生成就会对不上。
  *
  * 每个上线的字段都被模板化，body 也不例外；每个写下的 `{{var}}` 解析不到就记录。
+ *
+ * body 的规则住在 `src/lib/body`：它与 Rust 的 `simple_post_core::body` 是同一套规则的
+ * 两份实现（模板化按字段做还是按整段做、空键算不算、产物是文本还是字节），改动两边
+ * 必须同步。
  */
 export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const missing = createMissingTracker();
@@ -70,6 +74,9 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   // 里的分隔符不是同一个字符串时，请求看起来成功而服务端解析失败
   const boundary = input.body.mode === 'multipart' ? newMultipartBoundary() : null;
 
+  // `binary` 模式的 Content-Type 取文件自己的类型，故在建 header 之前先读出来。
+  const binaryCt = input.body.mode === 'binary' ? binaryContentType(input.body.content) : null;
+
   const headers = buildOrderedHeaders(
     input.headers,
     input.body.mode,
@@ -77,21 +84,34 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
     pool,
     missing,
     boundary,
+    binaryCt,
   );
 
-  // `prepareRequest` 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。
-  // 先模板化再判断会静默丢掉 body 只是一个解析为空串的变量的请求
-  const templated = hasBody(input.body) ? resolveVarsWithMissing(input.body.content, pool) : null;
-  if (templated !== null) missing.add(templated.missing);
+  // `resolveBody` 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。
+  // 先模板化再判断会静默丢掉 body 只是一个解析为空串的变量的请求。
+  //
+  // `form` 与 `multipart` 逐个字段模板化，`json` / `xml` / `raw` 整段模板化，
+  // `binary` 不模板化（文件字节不是模板）。
+  const resolved = resolveBody(input.body, pool);
+  missing.add(resolved.missing);
 
   // multipart 在模板化之后才装配：`content` 存的就是分片数组的 JSON 文本，
   // 故它与其它 mode 共用同一条模板化路径
+  //
+  // 内容为空时**不装配**：那样会得到一个只有收尾分隔符的 body，而 Rust 侧在
+  // `resolve_body` 给出空 body 时根本不会走到装配那一步。两侧不一致时，
+  // 「空 body」在一边发出去是一条空 multipart、在另一边发出去是完全没有 body。
   let body: string | null = null;
-  if (templated !== null) {
-    body =
-      boundary === null
-        ? templated.value
-        : buildMultipartBody(parseMultipartParts(templated.value), boundary);
+  let bodyBase64: string | null = null;
+  if (resolved.text !== null || resolved.base64 !== null) {
+    if (input.body.mode === 'multipart' && boundary !== null) {
+      const assembled = assembleMultipart(parseMultipartParts(resolved.text ?? ''), boundary);
+      body = assembled.text;
+      bodyBase64 = assembled.base64;
+    } else {
+      body = resolved.text;
+      bodyBase64 = resolved.base64;
+    }
   }
 
   return {
@@ -99,6 +119,7 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
     url: finalUrl,
     headers,
     body,
+    bodyBase64,
     missingVars: missing.list(),
     missingPathParams: substituted.missing,
   };

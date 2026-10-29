@@ -32,6 +32,11 @@ export interface BuiltFetch {
   init: RequestInit;
   /** body 的字符串回显（form 模式已 URL/form 安全）。`sendRequest` 目前不用它。 */
   bodyForLog: string;
+  /**
+   * 请求体的**字节**（base64）。与 `init.body` 是同一份东西的两种形态：
+   * 后端收的是 JSON，故字节走 base64 这个字段。
+   */
+  bodyBase64: string | null;
 }
 
 /**
@@ -97,6 +102,17 @@ export interface PreparedRequest {
    * boundary 的 multipart 文本），与 `headers` 里那条 Content-Type 同源。
    */
   body: string | null;
+  /**
+   * 请求体的**字节**（base64）。
+   *
+   * 与 `body` 互斥：字节是合法 UTF-8 时走 `body`，否则走这里。`binary` 模式一律走
+   * 这里——用户选的是文件，发的是它的字节。multipart 里带了文件分片时也是这里。
+   *
+   * 两个字段而不是一个「文本或字节」的联合类型：传输层收的是 JSON，两种形态各有
+   * 自己的字段名才不会互相覆盖；Rust 侧的 `HttpRequestInput` 与 `ScriptRequest`
+   * 用的是同一对字段名。
+   */
+  bodyBase64: string | null;
   /**
    * URL / 参数值 / header / body / auth 里全部未解析的 `{{name}}`，去重且按
    * 首次出现排序。集合与 Rust `resolve_endpoint` 的 `missing_vars` 对齐；
