@@ -102,7 +102,7 @@ export function ProjectTree() {
     [tree, query, endpointDetails],
   );
   // `rootId` 反规范化地存在于每个节点上，故「属于当前打开的项目」只是一次过滤 ——
-  // 不必向上走到模块再去找项目 id。
+  // `projectNodes` 不必向上走到模块再去找项目 id。
   const projectNodes = useMemo(
     () => nodes.filter((n) => n.rootId === activeProjectId),
     [nodes, activeProjectId],
@@ -130,7 +130,7 @@ export function ProjectTree() {
   const transfer = useTransfer({
     onImported: async (moduleId) => {
       await useAppStore.getState().reloadWorkspace();
-      // 展开落点模块：新集合挂在它下面，父级折叠着的话用户看不到自己刚导入了什么。
+      // 展开目标模块：新集合挂在它下面，父级折叠着的话用户看不到自己刚导入了什么。
       // 新建的集合本身保持折叠 —— 一次导入几十个分组，全展开等于把树推到看不见底。
       useAppStore.setState((s) => ({
         nodes: s.nodes.map((n) => (n.id === moduleId ? { ...n, expanded: true } : n)),

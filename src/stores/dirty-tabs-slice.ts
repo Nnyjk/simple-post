@@ -130,11 +130,11 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
     const tab = state.openTabs.find((t) => t.id === tabId);
     if (!tab) return;
     if (tab.kind === 'endpoint' && state.endpointDrafts[tabId]) {
-      // 把草稿应用到已存的 endpoint，然后清掉草稿。逻辑与 HttpTester 的
+      // `saveDirtyTab` 把草稿应用到已存的 endpoint，然后清掉草稿。逻辑与 HttpTester 的
       // `handleSave` 相同，使对话框的"保存"与按钮的保存落出同样的结果。
       const draft = state.endpointDrafts[tabId]!;
-      // 每个草稿字段都住在 `endpoint_details`，所以草稿应用在那里而不是节点上。
-      // 一次跨两张表的 `updateEndpoint` 正是这次划分要避免的：重命名一个
+      // 每个草稿字段都住在 `endpoint_details`，所以 `updateEndpointDetail` 把草稿应用在
+      // 那里而不是节点上。一次跨两张表的 `updateEndpoint` 正是这次划分要避免的：重命名一个
       // endpoint 不该顺手改写请求配置。`draftToPatch` 与 HttpTester 的 Save
       // 按钮用的是同一份映射，所以对话框与按钮不可能落出不同的子集。
       const patch = draftToPatch(draft);
@@ -143,7 +143,8 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
       return;
     }
     // project / module / collection / settings —— 脏状态来自一次在途的行内改名。
-    // 关掉标签（下一步）会卸载编辑器，失焦就会触发它自己的提交，所以这里无事可做。
+    // 关掉标签（下一步）会卸载编辑器，失焦就会触发它自己的提交，所以 `saveDirtyTab`
+    // 无事可做。
   },
 
   resolveDirtyClose: (action) => {
@@ -156,7 +157,7 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
       return;
     }
     if (action === 'saveAll') {
-      // 提交队列里剩下的每一个标签，然后全部关掉并清空批次。这里用不带守卫的
+      // 这里提交队列里剩下的每一个标签，然后全部关掉并清空批次。用不带守卫的
       // `closeTab`，否则它会重入守卫把自己重新排进队列。
       for (let i = batch.index; i < batch.tabIds.length; i++) {
         state.saveDirtyTab(batch.tabIds[i]);
@@ -176,7 +177,7 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
       }
       return;
     }
-    // action === 'discard' —— 不保存直接关掉当前标签，并中止队列其余部分。
+    // action === 'discard' —— 这里不保存直接关掉当前标签，并中止队列其余部分。
     // 用户其他脏标签保持打开，免得别的内容没经过他同意就丢掉。
     state.closeTab(currentId);
     set({ pendingDirtyClose: null });

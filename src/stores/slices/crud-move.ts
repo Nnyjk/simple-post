@@ -23,7 +23,7 @@ export interface MoveCrudActions {
    * 把一个或多个节点移到 `parentId` 下的同级槽位 `index`。
    *
    * `parentId: null` 表示"项目顶层"，且只对 module 合法。`nodeIds` 按节点应当
-   * 落地的先后排列，所以多选拖放会保持用户挑选的顺序。
+   * 写入的先后排列，所以多选拖放会保持用户挑选的顺序。
    */
   moveNodes: (nodeIds: string[], parentId: string | null, index: number) => Promise<void>;
 }
@@ -51,7 +51,7 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
         targetRootId = targetParent.rootId;
       }
 
-      // 防环：节点不能被移到它自己或它的任何后代之下。UI 会禁用这类落点，
+      // 防环：节点不能被移到它自己或它的任何后代之下。UI 会禁用这类目标位置，
       // 但陈旧的拖放载荷仍可能报出这样一个 id。
       const movedSubtrees = new Set<string>();
       for (const src of sources) {
@@ -60,14 +60,14 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
       if (parentId !== null && movedSubtrees.has(parentId)) return {};
 
       // 每个源节点必须已经属于目标所在的项目。服务端否则会拒绝这次移动；
-      // 在本地就拒绝，免得乐观状态显示出将会 400 的东西。
+      // 本地检查在这里就拒绝，免得乐观状态显示出将会 400 的东西。
       for (const src of sources) {
         if (src.rootId !== targetRootId) return {};
       }
 
-      // 剔掉被移动者的目标同级节点——它们会在下方重新插到 `index` 处。
+      // `siblings` 剔掉被移动者的目标同级节点——它们会在下方重新插到 `index` 处。
       //
-      // 落到顶层时，同级就是目标项目的 module，也就是那些没有父节点的节点；
+      // 目标是顶层时，同级就是目标项目的 module，也就是那些没有父节点的节点；
       // 只按 `parentId === null` 界定会把所有项目的顶层一次性扫进来。
       const siblings =
         parentId === null
@@ -76,7 +76,7 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
               .sort((a, b) => a.sortOrder - b.sortOrder)
           : (childrenIndex.get(parentId) ?? []).filter((n) => !idSet.has(n.id));
 
-      // 被移动的行保持调用方给的顺序，所以多选拖放会按用户挑选的次序落地。
+      // 被移动的行保持调用方给的顺序，所以多选拖放会按用户挑选的次序依次插入。
       const movedRows = sources
         .slice()
         .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id))

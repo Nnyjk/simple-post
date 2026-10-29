@@ -17,7 +17,7 @@ import { CreateDialog, ColorPicker, DescriptionField, Field, NameField } from '.
  * `DEFAULT_ENVIRONMENT_NAME` 与 `DEFAULT_MODULE_NAME`。
  *
  * 刻意复制而非拉取，理由同 `lib/palette.ts` 镜像 `domain::default_project_color()`：
- * 后端是唯一真相源，这份只喂字段下方的提示；`projects_create` 的响应带着真值，故这里漂移
+ * 后端是唯一真相源，这份只用于字段下方的提示；`projects_create` 的响应带着真值，故这里漂移
  * 最多表现为提示写错，不会波及数据 —— 两边一起改。
  *
  * 刻意**不**给 baseUrl 提示：新项目不播种任何服务，`defaultBaseUrlDefinitionId` 回来是
@@ -37,7 +37,7 @@ export function CreateProjectDialog() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const open = draft.open && draft.type === 'project';
 
-  // 这里允许留空，另两个对话框不允许：`submitNewItem` 会回落到「新项目」，首次使用的
+  // 这个对话框允许留空，另两个对话框不允许：`submitNewItem` 会回落到「新项目」，首次使用的
   // 用户只想先有个项目，不该非得先起名才看得见它。
   const submit = () => {
     void submitNewItem();

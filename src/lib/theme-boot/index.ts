@@ -18,8 +18,8 @@ export type Theme = 'dark' | 'light' | 'system';
 /**
  * localStorage 里存的那份偏好。
  *
- * `theme` 存的是**未经校验**的原始取值：用户可以手改 localStorage，也可能留着旧版本写的
- * 值。什么算合法主题由 [`resolveTheme`] 判定，不由这份类型断言。
+ * `theme` 存的是**未经校验**的原始取值：用户可以手改 localStorage，存进来的名字可能
+ * 不在合法集合里。什么算合法主题由 [`resolveTheme`] 判定，不由这份类型断言。
  */
 export interface PersistedPrefs {
   theme?: string;
@@ -29,7 +29,7 @@ export interface PersistedPrefs {
    * [`parsePrefs`] 保证它是字符串或不存在。
    */
   lastProjectId?: string;
-  /** 旧版本把请求旋钮存在这里。升级后它们在 `preferences` 表里，故只用于一次性迁移。 */
+  /** 只为一次性迁移保留：请求旋钮现在存在 `preferences` 表里，迁移成功后这个字段从 localStorage 删除。 */
   requestSettings?: unknown;
 }
 
@@ -64,8 +64,8 @@ function parsePrefs(raw: string | null): PersistedPrefs {
 /**
  * 判定一个存下来的主题取值算不算合法主题。
  *
- * 只有 `dark` / `light` / `system` 三个取值合法，其余（空串、`null`、旧版本留下的别的名字、
- * 手改坏的值）一律回落到 `dark`——那是应用的缺省主题。
+ * 只有 `dark` / `light` / `system` 三个取值合法，其余（空串、`null`、任何不在这三个里的
+ * 名字、手改坏的值）一律回落到 `dark`——那是应用的缺省主题。
  *
  * **校验放在这里而不是各处各判一次**，是因为三处（构建期注入的脚本、store 的初值、
  * 界面读当前主题）必须对同一个取值给出同一个答案：首帧画深色、随后 React 画系统色，

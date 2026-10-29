@@ -85,7 +85,7 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   if (templated !== null) missing.add(templated.missing);
 
   // multipart 在模板化之后才装配：`content` 存的就是分片数组的 JSON 文本，
-  // 与其它 mode 共用同一条模板化路径
+  // 故它与其它 mode 共用同一条模板化路径
   let body: string | null = null;
   if (templated !== null) {
     body =

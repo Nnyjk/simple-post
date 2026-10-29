@@ -152,11 +152,12 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       const nextTabs = s.openTabs.filter((t) => t.id !== tabId);
       let nextActive = s.activeTabId;
       if (s.activeTabId === tabId) {
-        // 先选前一个，再选后一个，最后 null。多数 IDE 标签条（Chrome、VS Code）都是这个次序。
+        // `nextActive` 先取前一个，再取后一个，最后 null。多数 IDE 标签条（Chrome、VS Code）
+        // 都是这个次序。
         const fallback = s.openTabs[idx - 1] ?? s.openTabs[idx + 1] ?? null;
         nextActive = fallback ? fallback.id : null;
       }
-      // 关掉 endpoint 标签时一并丢掉它的草稿与脏标记，否则草稿永远留着。
+      // `closeTab` 关掉 endpoint 标签时一并丢掉它的草稿与脏标记，否则草稿永远留着。
       // draft endpoint 标签同样适用：它的 id 不在 `nodes` 里，这里是唯一能回收
       // 该 `endpointDrafts` 条目的地方。关标签本身仍不写数据库，丢弃
       // `DraftEndpoint` 是 `discardDraftEndpoint` 的事。
@@ -177,9 +178,9 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (closing && closing.kind === 'endpoint-draft' && closing.id in draftEndpoints) {
         // draft endpoint 只活在 `draftEndpoints` 里，关掉它的标签就是回收那一行的唯一
         // 时刻。只删上面的 `endpointDrafts` 会把文档字段留在这个再没人引用的 id
-        // 下——草稿活得比标签还久、已经存不下去，而该 id 一旦被复用它就会诈尸。
-        // 在同一次 `set` 里回收，而不是事后补一次 `discardDraftEndpoint`，
-        // 这样失败也不会让这张表与标签对不上。
+        // 下——草稿活得比标签还久、已经存不下去，而该 id 一旦被复用，那份草稿就会
+        // 出现在复用它的标签下。在同一次 `set` 里回收，而不是事后补一次
+        // `discardDraftEndpoint`，这样失败也不会让这张表与标签对不上。
         draftEndpoints = { ...draftEndpoints };
         delete draftEndpoints[closing.id];
       }
@@ -196,7 +197,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (tabId === null) {
         return { activeTabId: null };
       }
-      // 拒绝未知 id——不能让 UI 停在悬空标签上。
+      // `setActiveTab` 拒绝未知 id——不能让 UI 停在悬空标签上。
       if (!s.openTabs.some((t) => t.id === tabId)) return {};
       return { activeTabId: tabId };
     }),
@@ -220,25 +221,23 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       const current = s.endpointDrafts[endpointId];
       let next: EndpointDraft | undefined;
       if (draft === null) {
-        // 显式清空。
         next = undefined;
       } else {
-        // patch 与现有草稿合并；全为 undefined 时收成 undefined，脏标记才能翻回干净。
+        // 这里把 patch 与现有草稿合并；全为 undefined 时收成 undefined，脏标记才能翻回干净。
         const merged: EndpointDraft = { ...current, ...draft };
         // 用通用的"是否为空"判断而不是手写字段表：新增草稿字段不该顺带要求改这一行，
         // 否则那个字段会静悄悄地永远不把标签标脏。
         next = Object.values(merged).some((v) => v !== undefined) ? merged : undefined;
       }
-      // 新草稿与现有相同时是空操作。返回 `{}` 而非 `s` 引用，是为了让 Zustand
+      // `next` 与现有草稿相同时是空操作。返回 `{}` 而非 `s` 引用，是为了让 Zustand
       // 的浅比较保持稳定——返回 `s` 语义上没错，但会触发部分消费者依赖的
       // 严格模式下引用相等检查。
       if (next === undefined && !(endpointId in s.endpointDrafts)) return {};
       if (next !== undefined && sameDraft(current, next)) return {};
-      // 同步镜像到 dirtyTabIds，标签条与"关闭已保存"才看得见。
+      // 这里把结果同步镜像到 `dirtyTabIds`，标签条与"关闭已保存"才看得见。
       const nextDirty = new Set(s.dirtyTabIds);
       if (next) nextDirty.add(endpointId);
       else nextDirty.delete(endpointId);
-      // 以不可变方式重建 endpointDrafts。
       const nextDrafts: Record<string, EndpointDraft | undefined> = { ...s.endpointDrafts };
       if (next) nextDrafts[endpointId] = next;
       else delete nextDrafts[endpointId];
@@ -255,9 +254,9 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
     }),
   pruneStaleTabs: () =>
     set((s) => {
-      // 第二层 bootstrap 还没落地，`s.nodes` 是空的——这读起来和"所有树节点都被删了"
-      // 一模一样。此刻跑过滤会把用户所有 module / collection / endpoint 标签关掉。
-      // 直接返回；调用它的 effect 会在 `nodesLoaded` 翻成 true 时重跑，
+      // 第二层 bootstrap 还没返回，`s.nodes` 是空的——这读起来和"所有树节点都被删了"
+      // 一模一样。此刻跑过滤会把用户所有 module / collection / endpoint 标签关掉，
+      // 故这里直接返回；调用它的 effect 会在 `nodesLoaded` 翻成 true 时重跑，
       // 那是答案第一次可信的时刻。
       if (!s.nodesLoaded) return {};
       const valid = s.openTabs.filter((t) => {
@@ -282,12 +281,12 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (nextActive !== null && !valid.some((t) => t.id === nextActive)) {
         nextActive = valid[valid.length - 1]?.id ?? null;
       }
-      // 同时丢掉已不存在标签的脏标记——否则这个集合会随删除操作无限膨胀。
+      // 这里同时丢掉已不存在标签的脏标记——否则这个集合会随删除操作无限膨胀。
       const nextDirty = new Set<string>();
       for (const t of valid) {
         if (s.dirtyTabIds.has(t.id)) nextDirty.add(t.id);
       }
-      // 同时丢掉 endpoint 已消失的草稿。draft endpoint 自己的 id 不在 `nodes` 里，
+      // 这里同时丢掉 endpoint 已消失的草稿。draft endpoint 自己的 id 不在 `nodes` 里，
       // 所以按标签种类而不是按查找保留——否则用户仍开着的标签上编辑的内容会凭空消失。
       const nextDrafts: Record<string, EndpointDraft | undefined> = {};
       for (const t of valid) {
@@ -323,7 +322,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (nextActive !== null && closeSet.has(nextActive)) {
         nextActive = nextTabs[nextTabs.length - 1]?.id ?? null;
       }
-      // 丢掉被关掉的 endpoint 标签的草稿。draft-endpoint 标签也算：它们就是普通标签，
+      // 这里丢掉被关掉的 endpoint 标签的草稿。draft-endpoint 标签也算：它们就是普通标签，
       // 标签关掉时那个 id 下的编辑也该一起走。
       const nextDrafts: Record<string, EndpointDraft | undefined> = {};
       // ……以及它们的文档，同一条理由：标签没了的草稿永远存不下去。这次清扫确实
@@ -351,7 +350,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
   switchProjectTabs: (projectId) =>
     set((s) => {
       const current = s.activeProjectId;
-      // 重新进入已经在前的项目不算切换。没有这道守卫，把同一个项目开两次就会
+      // 这道守卫让重新进入已经在前的项目不算切换。没有它，把同一个项目开两次就会
       // 先暂存它的标签、再从缓存取回来——空转一圈还会抖遍所有引用，可能丢掉活动标签。
       if (current === projectId) return {};
 
@@ -365,7 +364,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (current !== '' && stashed.length > 0) {
         projectTabs[current] = {
           tabs: stashed,
-          // 只记住确实被暂存的那个活动标签——否则取回时标签条会选中一个
+          // 这里只记住确实被暂存的那个活动标签——否则取回时标签条会选中一个
           // 切换前就已经关掉的标签。
           activeTabId:
             s.activeTabId && stashed.some((t) => t.id === s.activeTabId) ? s.activeTabId : null,
@@ -373,7 +372,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       }
 
       if (projectId === '') {
-        // 退回欢迎页：标签条清空，暂存的份原样留着。
+        // 退回欢迎页时标签条清空，暂存的份原样留着。
         return { projectTabs, openTabs: staying, activeTabId: null };
       }
 

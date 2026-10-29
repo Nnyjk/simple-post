@@ -5,13 +5,12 @@
  * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
  *
  * 变量和 baseUrl 槽位上都用 `null` 作删除哨兵，而空串是真实取值——这个区别由
- * `../../__tests__/crud-slice.test.ts` 钉住，所以下面那些 `value === null` 判断
- * 是承重的，不是风格。
+ * `../../__tests__/crud-slice.test.ts` 钉住，所以下面那些 `value === null` 判断必须
+ * 写对，不能当作风格偏好。
  *
  * `moduleBaseUrls[defId][moduleId]` 是服务 URL 唯一存放的地方：每个
  * (module × 服务) 一个独立单元格，没有继承也没有回退。
- * `resolveEndpointBaseUrl` 只读其中恰好一个。那张扁平的 `baseUrls` 映射已废弃，
- * 刻意不再写入。
+ * `resolveEndpointBaseUrl` 只读其中恰好一个。那张扁平的 `baseUrls` 映射不再写入。
  *
  * `deleteEnvironment` 与 `setEnvironmentActive` 会在与自身键同一次原子 `set()`
  * 里写别的切片拥有的键（`activeEnvironmentId`、`endpointDetails`）；拆成多次调用

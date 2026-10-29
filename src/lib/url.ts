@@ -40,7 +40,7 @@ export interface ResolvedBaseUrl {
  * 取值的那个格子，所以 `moduleId` 是必填参数——同一服务在两个模块指向两个
  * 主机，正是这个模型要表达的。
  *
- * **没有回退层。** `baseUrls` 已废弃且从不读取；空格子给出 `''` / `'none'`，
+ * **没有回退层。** `baseUrls` 从不读取；空格子给出 `''` / `'none'`，
  * 绝不借用别的模块或别的服务的 URL。挂在无模块下的 endpoint（节点已删，或
  * 测试器的空状态）`moduleId` 为 `null`，这种模块没有格子，只有第 1 步能出值。
  *
@@ -68,7 +68,8 @@ export function resolveEndpointBaseUrl(
       definitionName: null,
     };
   }
-  // `null`（未选择）落到项目 ★。全应用只有这一处读项目默认服务，且只读一次。
+  // `null`（未选择）落到项目 ★。全应用只有 `resolveEndpointBaseUrl` 这一处读项目
+  // 默认服务，且只读一次。
   const defId = endpoint.baseUrlDefinitionId ?? project?.defaultBaseUrlDefinitionId ?? null;
   const def = defId ? project?.baseUrlDefinitions.find((d) => d.id === defId) : undefined;
   if (!def) return { baseUrl: '', source: 'none', definitionId: null, definitionName: null };
@@ -128,7 +129,7 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
  */
 export function collapseUrlSlashes(url: string): string {
   if (!url) return url ?? '';
-  // `scheme://` 与 protocol-relative 的 `//` 是头部，不是 path。
+  // `scheme://` 与 protocol-relative 的 `//` 归入 `head`，不是 path。
   const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(url);
   let head = '';
   let rest = url;
@@ -139,7 +140,7 @@ export function collapseUrlSlashes(url: string): string {
     head = '//';
     rest = url.slice(2);
   }
-  // authority 内不含 `/`（到第一个 `/` 就结束），所以头部之后可安全当 path。
+  // authority 内不含 `/`（到第一个 `/` 就结束），所以 `head` 之后可安全当 path。
   const cut = rest.search(/[?#]/);
   const path = cut === -1 ? rest : rest.slice(0, cut);
   const tail = cut === -1 ? '' : rest.slice(cut);
@@ -179,8 +180,8 @@ export function resolveVarsWithMissing(
   vars: Environment | Record<string, string> | undefined,
 ): ResolvedVars {
   if (!input) return { value: '', missing: [] };
-  // `Environment` 的变量在 `.variables` 下，裸 record 本身就是映射。用
-  // `Environment.baseUrls`（嵌套对象）区分——裸 `Record<string,string>` 在那里
+  // `Environment` 的变量在 `.variables` 下，裸 record 本身就是映射；`isEnvironment`
+  // 用 `Environment.baseUrls`（嵌套对象）区分两者——裸 `Record<string,string>` 在那里
   // 会得到 `string`
   const map: Record<string, string> | undefined = isEnvironment(vars) ? enabledVars(vars) : vars;
   const missing: string[] = [];
@@ -188,7 +189,7 @@ export function resolveVarsWithMissing(
   const value = input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     const v = map?.[key];
     // 判空用 nullish 而非真值：显式定义为空串的变量解析为 '' 且**不算**缺失，
-    // 只有键不存在才把标记留在原地
+    // 只有键不存在时替换回调才把标记原样留在原处
     if (v !== undefined && v !== null) return v;
     if (!seen.has(key)) {
       seen.add(key);
@@ -225,7 +226,7 @@ export function listVars(input: string): string[] {
           seen.add(inner);
           out.push(inner);
         }
-        // 跳过整个标记（含那对配对的大括号），与 Rust 侧一样。
+        // `listVars` 跳过整个标记（含那对配对的大括号），与 Rust 侧一样。
         i = close + 2;
         continue;
       }

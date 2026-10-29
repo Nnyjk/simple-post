@@ -68,7 +68,7 @@ export function buildOrderedHeaders(
     }
   } else {
     // `buildOrderedHeaders` 按 body.mode 补 Content-Type：用户已设过（不分大小写）就不加；
-    // 只要 mode 蕴含 body 就补，内容空不空由 `init.body` 那一步单独管。
+    // mode 蕴含 body 时它照补，内容空不空由 `init.body` 那一步单独管。
     const ct = autoContentType(bodyMode);
     if (ct && existingCt === -1) {
       out.push(['Content-Type', ct]);
@@ -98,8 +98,8 @@ export function buildOrderedHeaders(
     }
   }
 
-  // multipart 且用户没写过 Content-Type 时，`buildOrderedHeaders` 把它追加到列表**末尾**，
-  // 与 Rust 侧 `multipart::apply` 的追加位置一致。
+  // multipart 且用户没写过 Content-Type 时，`buildOrderedHeaders` 把 Content-Type 追加到
+  // 列表**末尾**，与 Rust 侧 `multipart::apply` 的追加位置一致。
   if (multipartCt !== null && existingCt === -1) {
     out.push(['Content-Type', multipartCt]);
   }

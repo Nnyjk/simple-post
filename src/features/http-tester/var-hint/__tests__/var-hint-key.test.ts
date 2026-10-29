@@ -46,7 +46,7 @@ describe('变量提示：按键该做什么', () => {
     }
   });
 
-  it('老浏览器上 isComposing 取不到时靠 keyCode 229 兜底', () => {
+  it('老浏览器上 isComposing 取不到时改用 keyCode 229 判定', () => {
     assert.equal(
       varHintKeyAction(key({ key: 'Enter', keyCode: 229 }), { open: true, hasEntry: true }),
       'none',

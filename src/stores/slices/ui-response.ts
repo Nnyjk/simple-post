@@ -161,7 +161,7 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
 
   addResponseHistory: (endpointId, response, request) => {
     // 乐观行，先于任何 await 插入。id 由渲染侧生成，明显不是服务端 id，
-    // 所以下面的替换不可能与已存行相撞。
+    // 所以下面的替换不可能与已存行用同一个 id。
     const provisional: ResponseHistoryEntry = {
       id: `pending:${uid()}`,
       endpointId,

@@ -222,7 +222,7 @@ function OAuth2Fields({
    */
   const reqSeq = useRef(0);
 
-  // 改配置即作废上一次的结果：那个 token 是**改之前**的配置拿到的，继续显示会让人
+  // 改配置即作废上一次的结果：那个 token 是上一份配置拿到的，继续显示会让人
   // 以为新配置已经生效。同时作废在途的那一次，否则它的晚到结果会绕过上面那句。
   const patch = (next: Partial<OAuth2Auth>) => {
     reqSeq.current += 1;

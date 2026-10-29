@@ -57,7 +57,7 @@ export function buildCommands(): Command[] {
       hint: '切换项目',
       section: '导航',
       keywords: ['project', '项目', p.description ?? ''],
-      // 用 `openProject` 而非 `setActiveProject`：从面板选项目与欢迎页选择器、顶栏
+      // 这里用 `openProject` 而非 `setActiveProject`：从面板选项目与欢迎页选择器、顶栏
       // 是同一个动作，三处必须落到同一状态（该项目的标签激活、树按它收窄）。
       run: () => useAppStore.getState().openProject(p.id),
     });

@@ -137,7 +137,7 @@ export const createBaseUrlCrud: StateCreator<AppState, [], [], BaseUrlCrudAction
     set((s) => {
       // 级联：任何指向这个 def 的 endpoint 都退回项目默认。各环境里为它填过的
       // 地址由服务端在同一个事务里删掉（`db::base_url_defs::delete`），所以这里
-      // 不用管 `moduleBaseUrls`——那些格子连同孤儿键一起消失。
+      // 这里不用管 `moduleBaseUrls`——那些格子连同孤儿键一起消失。
       const nextDetails: Record<string, EndpointDetail> = {};
       for (const [id, d] of Object.entries(s.endpointDetails)) {
         nextDetails[id] = d.baseUrlDefinitionId === defId ? { ...d, baseUrlDefinitionId: null } : d;

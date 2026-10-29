@@ -30,7 +30,7 @@ export function daemonTone(status: McpRuntimeStatus | null | undefined): DaemonT
       return 'danger';
     default:
       // `stopped`，加上 `null`（首次轮询未回）与 daemon 日后自创的任何字符串——
-      // 与 `StatusBadge` 一样的收敛
+      // `daemonTone` 与 `StatusBadge` 一样把它们都收敛到 `default`
       return 'default';
   }
 }

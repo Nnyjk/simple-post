@@ -151,7 +151,8 @@ describe('EnvSwitcher — the env name lives here, and so does its rename', () =
   });
 
   it('keeps the chip a tab for assistive tech after the swap away from <button>', () => {
-    // 名称单元格本身是个按钮，故 chip 不能再是按钮。这几条正是原先那个元素免费提供的语义。
+    // 名称单元格本身是个按钮，故 chip 不能再是按钮。这三条断言的是 chip 替 `<button>`
+    // 补齐的语义：角色、可选中状态与可聚焦。
     assert.match(renameable, /role="tab"/);
     assert.match(renameable, /aria-selected="true"/);
     assert.match(renameable, /tabindex="0"/);

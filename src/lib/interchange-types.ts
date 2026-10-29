@@ -35,7 +35,7 @@ export interface TransferEndpoint {
   diagnosticIndexes: number[];
 }
 
-/** 勾选树上的一个分组（导入时是「将要落成集合的那一层」，导出时是集合）。 */
+/** 勾选树上的一个分组（导入时是「将要创建成集合的那一层」，导出时是集合）。 */
 export interface TransferNode {
   key: string;
   name: string;
@@ -58,7 +58,7 @@ export interface ImportedEnvironment {
 }
 
 /**
- * 预览里「这份文档会落成一个服务」的预告。
+ * 预览里「这份文档会创建成一个服务」的预告。
  *
  * **缺席是真实答案**，不是「待定」：文档没给 host、或给了多于一个 host 就是缺席
  * （后者附一条 `warn` 诊断说明为什么）。

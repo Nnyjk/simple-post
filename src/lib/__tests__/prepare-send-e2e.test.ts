@@ -5,16 +5,16 @@
  *
  * 为什么要有这个文件
  * ------------------
- * 旁边两个文件各覆盖一半，都不覆盖这条接缝：
+ * 旁边两个文件各覆盖一半，都不覆盖这条边界：
  *
  *   - `http-build.test.ts` 钉住 `prepareRequest` *产出*什么——base URL join、
  *     `{{var}}` 解析、查询串拼装、header 排序、body 是否包含——但从不真的发出去，
  *     所以抓不到「值组装对了却在去往线上的路上丢掉」这种情况。
- *   - `http.test.ts` 确实对真实服务端跑 `fetch`，但它驱动的是旧的 `sendRequest`
+ *   - `http.test.ts` 确实对真实服务端跑 `fetch`，但它驱动的是 `sendRequest` 那条
  *     路径，那条路径把模板解析与查询串组装放在**后端**里。代码不同，规则也不同。
  *
  * `sendPreparedRequest` 才是 UI 用的那个，而它存在的全部理由就是发送端与 cURL 预览
- * 共用一个构造核。所以这条接缝值得对着一个服务端来钉：断言变成「服务端收到了 X」而
+ * 共用一个构造核。所以这条边界值得对着一个服务端来验证：断言变成「服务端收到了 X」而
  * 不是「构造器返回了 X」——只有后者能挡住活在两者之间的 bug。
  *
  * 覆盖矩阵：
@@ -185,7 +185,7 @@ function prep(overrides: Partial<PrepareRequestInput> = {}): PrepareRequestInput
     method: 'GET',
     urlPath: '/x',
     // 已存的 endpoint 总能解析出*某个* base URL，而空 base 会产出相对路径——对预览没
-    // 问题，但不是发送桥能交给服务端的东西。默认给测试服务端，好让每个用例都在跑
+    // 问题，但不是发送桥能交给服务端的东西。这里默认给测试服务端，好让每个用例都在跑
     // 一个真实的绝对地址请求。
     baseUrl,
     params: [],

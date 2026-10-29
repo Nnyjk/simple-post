@@ -127,7 +127,7 @@ export function DynamicVariableForm({
     setBusy(true);
     try {
       // 缓存时长：0 是有意义的（不缓存，每次重新取数），故不能用 `|| 60`——那会把 0
-      // 变成假值再兜成 60。
+      // 变成假值再回退成 60。
       const ttl = Number(ttlSeconds);
       const ttlValue = Number.isFinite(ttl) ? ttl : 60;
       if (variable) {

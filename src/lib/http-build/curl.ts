@@ -17,8 +17,8 @@ function shellQuote(s: string): string {
  */
 export function preparedToCurl(prepared: PreparedRequest): string {
   const lines: string[] = [`curl -X ${prepared.method.toUpperCase()} ${shellQuote(prepared.url)}`];
-  // 用列表而非 record：`prepared.headers` 保留重名，线上合法，且每行一个 `-H`
-  // 正好复现
+  // `preparedToCurl` 用列表而非 record：`prepared.headers` 保留重名，线上合法，且每行一个
+  // `-H` 正好复现
   for (const [k, v] of prepared.headers) {
     lines.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
   }

@@ -40,8 +40,8 @@ describe('Tauri IPC 入参契约', () => {
       [COMMANDS.environmentsDelete, { id: 'env-1' }],
       [COMMANDS.baseUrlDefsUpdate, { id: 'def-1', patch: { name: 'api' } }],
       [COMMANDS.baseUrlDefsDelete, { id: 'def-1' }],
-      // 树现在只有一种节点类型，所以移动就是父 id 加下标——没有 `parentKind`，
-      // 那个字段当初存在只是因为目的端可能在两张表里之一
+      // 树只有一种节点类型，所以移动就是父 id 加下标——没有 `parentKind`，
+      // 目的端只有 `nodes` 一张表
       [COMMANDS.nodesMove, { nodeIds: ['c1'], parentId: 'm1', index: 0 }],
     ];
 

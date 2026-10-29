@@ -41,7 +41,7 @@ export function EndpointList({
     <div className="ml-3 border-l border-border/60 pl-1">
       {endpoints.map((ep) => {
         // 没有详情行的接口，后端根本不会创建这样的树，故这里缺一行意味着两张表不一致。
-        // 跳过该行，而不是拿 `undefined` 去渲染 method pill。
+        // `EndpointList` 跳过该行，而不是拿 `undefined` 去渲染 method pill。
         const epDetail = details[ep.id];
         if (!epDetail) return null;
         return (

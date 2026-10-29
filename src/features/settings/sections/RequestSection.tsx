@@ -61,8 +61,8 @@ const PATH_ICONS = {
 /**
  * 这一小节是否已偏离缺省值。
  *
- * 提成纯函数是为了能单独测它：「恢复默认」按钮的可用状态就是它的取反，而那一段
- * 判断原先只长在组件里，改了哪一项都要靠人肉读组件才知道有没有被算进去。
+ * 提成纯函数是为了能单独测它：「恢复默认」按钮的可用状态就是它的取反，而「什么算被改动过」
+ * 这段判断必须逐项覆盖，改漏了哪一项只能靠人肉读组件才发现。
  */
 export function isRequestSettingsDirty(settings: RequestSettings): boolean {
   return (
@@ -94,13 +94,13 @@ export function RequestSection() {
 
   const resetToDefaults = () => updateRequestSettings({ ...REQUEST_DEFAULTS });
 
-  // 保留条数先落在草稿里，失焦或回车才写回。
+  // `keepDraft` 先接住保留条数，失焦或回车才写回。
   //
   // 每次按键就写回是不行的：写回会立刻按新条数裁库，而裁掉的行不会回来。用户把 100
   // 改成 50 时第一键送出的 5 已经把库裁到 5 条，第二键送出的 50 只是让剩下的更少。
   const [keepDraft, setKeepDraft] = useState(String(historyKeep));
 
-  // 别人改了保留条数时草稿跟着回到当前值，否则输入框里留着旧数字。
+  // `historyKeep` 变化时 `keepDraft` 跟着回到当前值，否则输入框里留着旧数字。
   useEffect(() => {
     setKeepDraft(String(historyKeep));
   }, [historyKeep]);

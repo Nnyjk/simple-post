@@ -12,11 +12,11 @@
  * 因此 `createEndpointAt` 不是"`submitNewItem` 的 endpoint 分支"——它接收显式的
  * 父节点 id、从不读草稿，而且什么都不写：它代表的那一行是由
  * `slices/ui-draft-endpoints.ts` 拥有的前端草稿，只有用户按 Save 才触及 SQLite。
- * 两条路径仍共享同一条首要不变量——展开所有祖先，让新行在它落地的位置可见——
+ * 两条路径仍共享同一条首要不变量——展开所有祖先，让新行在它被创建的那个位置可见——
  * 但只有对话框路径还以 `setActiveEndpoint` 收尾，因为只有它有已落盘的行可激活。
  *
  * 三种对话框种类共用一个 `submitNewItem` 而不是三个独立动作：`lastCreatedId`
- * 必须在创建 resolve **之后**落地，因为树盯着这个 id 进入重命名。拆开各分支只会
+ * 必须在创建 resolve **之后**才能写入，因为树盯着这个 id 进入重命名。拆开各分支只会
  * 白白多一跳 promise。
  */
 
@@ -148,8 +148,8 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
         color: draft.color,
       });
       // 进入新项目：`openProject` 既是选中它也是激活它的标签，所以树立刻收敛到
-      // 这个（空的）新项目，右侧显示它的卡片——名字仍可在那里编辑。项目已经
-      // 不再是树里的一行，所以这是唯一让"新建"感觉落地了的动作。
+      // 这个（空的）新项目，右侧显示它的卡片——名字仍可在那里编辑。项目不是树里的
+      // 一行，所以这是唯一让"新建"看起来生效了的动作。
       if (id) state.openProject(id);
       state.setActiveEndpoint(null);
       set({ lastCreatedId: id });

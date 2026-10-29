@@ -115,7 +115,7 @@ export function useRequestActions({
     // 校验是请求的前置门。解析不了的 json body 不该让服务端去猜；照发只会让用户对着
     // 服务端解析错误，而这个错误本可以指出他敲错的那个字符。
     if (!runValidation()) return;
-    // 先取消任何在途请求。
+    // `handleSend` 先取消任何在途请求。
     inFlightRef.current?.abort();
     const ctrl = new AbortController();
     inFlightRef.current = ctrl;
@@ -132,7 +132,7 @@ export function useRequestActions({
         const { values } = await resolveDynamicVariables(dynamicNames, activeProjectId);
         request = prepareWithDynamic(values);
       }
-      // 路径参数缺值就不发：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
+      // 路径参数缺值时这里不发出去：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
       // 含义不明的 404，而用户看不出是自己漏填了一个值。
       //
       // 这一步在动态变量解析**之后**：路径参数的值可能就是一个动态变量，它取不到值时
@@ -170,7 +170,7 @@ export function useRequestActions({
         // 端点自己的 HTTPS 出站设置：`null` = 继承全局默认那份。
         tlsOverride,
       });
-      // 存的是 `outbound`（发出去的那一份），不是 `prepared`（预览那份）：OAuth2 的
+      // 这里存的是 `outbound`（发出去的那一份），不是 `prepared`（预览那份）：OAuth2 的
       // token 只在 `outbound` 里，历史行要显示的就是它。请求头取后端报上来的线上那
       // 一份（含传输层补的 `host` / `content-length` 等），它缺席时才回落到本地拼的。
       const snapshot = toRequestSnapshot(outbound, resp.requestHeaders);
@@ -183,11 +183,10 @@ export function useRequestActions({
         applyEnvWrites(env.id, script.envWrites);
       }
     } catch (e) {
-      // sendRequest 有文档保证不抛 —— 这个 catch 是防御网，兜住 buildFetchInit 之类
-      // 的意外。
+      // sendRequest 有文档保证不抛 —— 这个 catch 接住 `buildFetchInit` 之类的意外。
       console.error('[HttpTester] sendRequest threw:', e);
     } finally {
-      // 只有仍是当前 controller 才清空（途中可能被更新的发送顶替）。
+      // `inFlightRef` 只有在仍是当前 controller 时才清空（途中可能被更新的发送顶替）。
       if (inFlightRef.current === ctrl) inFlightRef.current = null;
       setRequestPending(false);
     }

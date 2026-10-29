@@ -18,8 +18,8 @@ import { InlineNameCell } from './InlineNameCell';
  * 的环境不是谁需要的动作。
  *
  * 由此 chip 内部出现了按钮，故它改成带 `role="tab"`、`tabIndex` 与手写 Enter / Space
- * 的 `div`：那些是原先 `<button>` 免费提供的语义。`role` 与 `aria-selected` 未变，
- * 辅助技术看到的仍是同一条标签条。
+ * 的 `div`：`<button>` 自带的按钮语义由 `role="tab"`、`tabIndex` 与这段按键处理补齐。
+ * `role` 与 `aria-selected` 未变，辅助技术看到的仍是同一条标签条。
  *
  * `showAdd` / `showDelete` 是为**模块**层准备的：它展示同一批环境，但不能提供那两个
  * 项目级写入 —— 新建环境和删除环境都作用在项目上，而在模块标签里删掉一个环境会连带
@@ -44,7 +44,7 @@ export function EnvSwitcher({
   onPick: (id: string) => void;
   onRequestDelete: (env: Environment) => void;
   onAdd: () => void;
-  /** 新建在途 —— 挡住第二次提交直到它落地。 */
+  /** 新建进行中 —— 挡住第二次提交，直到新建请求结束。 */
   addDisabled?: boolean;
   /** 显示末尾的新建环境按钮。 */
   showAdd?: boolean;
@@ -88,8 +88,8 @@ export function EnvSwitcher({
             }}
             className={cn(
               'group relative flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
-              // 着色图标容器对应项目的档位语言（天蓝 = 基础 / 数据，琥珀 = 配置 / 构建，
-              // 紫 = 类生产）。按环境名自动挑，用户不必逐个打标。
+              // chip 的着色对应项目的档位语言（天蓝 = 基础 / 数据，琥珀 = 配置 / 构建，
+              // 紫 = 类生产）。`envIcon` 按环境名自动挑，用户不必逐个打标。
               isActive
                 ? 'border-primary/40 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.25)]'
                 : 'border-border bg-card/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground',
