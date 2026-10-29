@@ -38,12 +38,9 @@ pub struct EndpointSpec {
     /// 已有的集合 id。与 `collection_path` 二选一。
     #[serde(default, alias = "collectionId")]
     pub collection_id: Option<String>,
-    /// 环境这一段：环境本身、它的变量、它对某个服务在这个模块下的 URL。
+    /// 环境这一段：环境本身、它的变量、它对某个模块在这个环境下的地址。
     #[serde(default)]
     pub environment: Option<EnvironmentSpec>,
-    /// 服务这一段：服务本身，以及它是不是项目的 ★。
-    #[serde(default)]
-    pub service: Option<ServiceSpec>,
     /// 端点本身。
     pub endpoint: EndpointDefinition,
     /// 同一个父下已经有同名同 method 同 url 的端点时怎么办。缺省是 `reuse`。
@@ -68,30 +65,15 @@ pub struct EnvironmentSpec {
     /// 要停用的变量名。合并进已有的停用集合。
     #[serde(default, alias = "disabledVariables")]
     pub disabled_variables: Option<Vec<String>>,
-    /// 这个环境 × 服务 × 模块 那一格的 URL。没有服务就没有那一格，故它与服务同生共死。
+    /// 这个环境 × 模块 那一格的地址（后端 api 地址）。地址住在那一格，故它随模块走。
     #[serde(default, alias = "baseUrl")]
     pub base_url: Option<String>,
+    /// 那一格的实际访问地址——接口经代理网关转代后真正要打的那个地址。缺省 = 没有代理。
+    #[serde(default, alias = "baseUrlProxy")]
+    pub base_url_proxy: Option<String>,
     /// 落库后把这个环境设为项目的激活环境。
     #[serde(default)]
     pub activate: Option<bool>,
-}
-
-/// 规格里的服务那一段。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ServiceSpec {
-    /// 已有的服务 id。与 `name` 二选一。
-    #[serde(default)]
-    pub id: Option<String>,
-    /// 服务名。不存在就建出来。与 `id` 二选一。
-    #[serde(default)]
-    pub name: Option<String>,
-    /// 服务的说明。只在新建时写进去。
-    #[serde(default)]
-    pub description: Option<String>,
-    /// 落库后把这个服务设为项目的 ★（默认服务）。
-    #[serde(default)]
-    pub default: Option<bool>,
 }
 
 /// 规格里的端点那一段。
@@ -131,9 +113,6 @@ pub struct EndpointDefinition {
     /// 端点绑定哪个环境。规格里给了 `environment` 段而这里没给时，绑定那个环境。
     #[serde(default, alias = "environmentId")]
     pub environment_id: Option<String>,
-    /// 端点据以解析的服务。规格里给了 `service` 段而这里没给时，绑定那个服务。
-    #[serde(default, alias = "baseUrlDefinitionId")]
-    pub base_url_definition_id: Option<String>,
     /// 这个端点自己的 base URL，胜过环境里那一格。
     #[serde(default, alias = "baseUrlOverride")]
     pub base_url_override: Option<String>,
@@ -210,8 +189,6 @@ pub struct SpecOutcome {
     pub collections: Vec<NamedResolved>,
     /// 环境那一段的结果。规格没写环境时为 `None`。
     pub environment: Option<EnvironmentOutcome>,
-    /// 服务那一段的结果。规格没写服务时为 `None`。
-    pub service: Option<ServiceOutcome>,
     /// 端点的结果。
     pub endpoint: EndpointOutcome,
 }
@@ -235,17 +212,6 @@ pub struct EnvironmentOutcome {
     pub created: bool,
     /// 这次把它设成了项目的激活环境。
     pub activated: bool,
-}
-
-/// 服务那一段的结果。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServiceOutcome {
-    pub id: String,
-    pub name: String,
-    pub created: bool,
-    /// 这次把它设成了项目的 ★。
-    pub is_default: bool,
 }
 
 /// 端点的结果。

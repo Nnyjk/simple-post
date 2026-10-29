@@ -82,8 +82,8 @@ fn root_id_of_is_one_lookup_for_every_type() {
 
 #[test]
 fn module_id_of_walks_up_to_the_owning_module() {
-    // 值层是 `moduleBaseUrls[service][module]`，故这次查找决定一个 endpoint 拿到该服务的哪一个
-    // 地址——嵌套的 endpoint 必须穿过中间那个 collection 抵达它的模块。
+    // 值层是 `moduleBaseUrls[module]`，故这次查找决定一个 endpoint 取哪一格的地址
+    // ——嵌套的 endpoint 必须穿过中间那个 collection 抵达它的模块。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &module("p1", "m2", 1), None);

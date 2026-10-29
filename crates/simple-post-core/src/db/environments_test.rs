@@ -16,11 +16,18 @@ fn sample_env(id: &str, project_id: &str, name: &str) -> Environment {
         id: id.into(),
         project_id: project_id.into(),
         name: name.into(),
-        base_urls: HashMap::new(),
         module_base_urls: HashMap::new(),
         variables: HashMap::new(),
         disabled_variables: Vec::new(),
         is_active: false,
+    }
+}
+
+/// 一格地址。`proxy` 缺省表示这一格没有代理。
+fn cell(url: &str) -> ModuleBaseUrl {
+    ModuleBaseUrl {
+        url: url.into(),
+        proxy: None,
     }
 }
 
@@ -70,45 +77,48 @@ fn round_trip_preserves_hashmap() {
     let pool = fresh_pool();
     let mut env = sample_env("env1", "p_demo", "qa");
     env.module_base_urls
-        .entry("def_default".into())
-        .or_default()
-        .insert("m_auth".into(), "http://qa".into());
+        .insert("m_auth".into(), cell("http://qa"));
     env.variables.insert("token".into(), "abc".into());
     env.is_active = false;
     db::with_tx(&pool, |c| create(c, &env)).unwrap();
     let got = db::with_conn(&pool, |c| get(c, "env1")).unwrap();
-    assert_eq!(
-        got.module_base_urls
-            .get("def_default")
-            .unwrap()
-            .get("m_auth")
-            .unwrap(),
-        "http://qa"
-    );
+    assert_eq!(got.module_base_urls.get("m_auth").unwrap().url, "http://qa");
     assert_eq!(got.variables.get("token").unwrap(), "abc");
-    // The retired column must not be resurrected by a caller that still
-    // fills in the legacy field: it is written only by the schema default.
-    assert!(got.base_urls.is_empty());
 }
 
 #[test]
 fn seeded_module_base_urls_come_back_per_module() {
     let pool = fresh_pool();
     let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
-    let per_module = got.module_base_urls.get("def_default").unwrap();
     assert_eq!(
-        per_module.get("m_order").unwrap(),
+        got.module_base_urls.get("m_order").unwrap().url,
         "http://localhost:4000/demo/order",
-        "one service carries a different host per module — that is the \
-         whole reason the value layer is keyed by module"
+        "每个模块各自有一格地址，这正是值层按模块分格的原因"
     );
     assert_eq!(
-        per_module.get("m_auth").unwrap(),
+        got.module_base_urls.get("m_auth").unwrap().url,
         "http://localhost:4000/demo/auth"
     );
     assert!(
-        !got.module_base_urls.contains_key("def_invoice_default"),
-        "a project the fixture never gave an env must contribute nothing"
+        !got.module_base_urls.contains_key("m_title"),
+        "fixture 没给发票项目写过地址，那一格必须缺席"
+    );
+}
+
+#[test]
+fn the_seeded_proxy_comes_back_with_its_cell() {
+    let pool = fresh_pool();
+    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
+    let pay = got.module_base_urls.get("m_pay").unwrap();
+    assert_eq!(pay.url, "http://localhost:4000/demo/pay");
+    assert_eq!(
+        pay.proxy.as_deref(),
+        Some("https://gw.example.com/demo/pay"),
+        "格子里的代理地址要跟着格子一起存下来"
+    );
+    assert!(
+        got.module_base_urls.get("m_auth").unwrap().proxy.is_none(),
+        "没有代理的格子读回来是 None"
     );
 }
 
@@ -116,91 +126,120 @@ fn seeded_module_base_urls_come_back_per_module() {
 fn set_module_base_url_writes_one_cell_and_leaves_its_siblings() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_dev", "def_default", "m_pay", Some("http://pay"))
+        set_module_base_url(c, "env_dev", "m_pay", Some("http://pay"), None)
     })
     .unwrap();
-    let per_module = env.module_base_urls.get("def_default").unwrap();
-    assert_eq!(per_module.get("m_pay").unwrap(), "http://pay");
+    let pay = env.module_base_urls.get("m_pay").unwrap();
+    assert_eq!(pay.url, "http://pay");
     assert_eq!(
-        per_module.get("m_auth").unwrap(),
+        pay.proxy.as_deref(),
+        Some("https://gw.example.com/demo/pay"),
+        "只写地址时，这一格原有的代理地址必须保持不变"
+    );
+    assert_eq!(
+        env.module_base_urls.get("m_auth").unwrap().url,
         "http://localhost:4000/demo/auth",
-        "the other modules of the same service must be untouched"
+        "别的模块那一格必须不动"
     );
     // And durable, not merely echoed.
     let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
-    assert_eq!(
-        got.module_base_urls
-            .get("def_default")
-            .unwrap()
-            .get("m_pay")
-            .unwrap(),
-        "http://pay"
-    );
+    assert_eq!(got.module_base_urls.get("m_pay").unwrap().url, "http://pay");
 }
 
 #[test]
 fn set_module_base_url_overwrites_rather_than_appending() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_dev", "def_default", "m_auth", Some("http://v2"))
+        set_module_base_url(c, "env_dev", "m_auth", Some("http://v2"), None)
     })
     .unwrap();
-    let per_module = env.module_base_urls.get("def_default").unwrap();
-    assert_eq!(per_module.get("m_auth").unwrap(), "http://v2");
-    assert_eq!(per_module.len(), 3, "only the three fixture modules");
+    assert_eq!(env.module_base_urls.get("m_auth").unwrap().url, "http://v2");
+    assert_eq!(
+        env.module_base_urls.len(),
+        3,
+        "only the three fixture modules"
+    );
+}
+
+#[test]
+fn writing_only_the_proxy_leaves_the_address_alone() {
+    let pool = fresh_pool();
+    let env = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_auth", None, Some("https://gw/auth"))
+    })
+    .unwrap();
+    let auth = env.module_base_urls.get("m_auth").unwrap();
+    assert_eq!(
+        auth.url, "http://localhost:4000/demo/auth",
+        "只写代理时，这一格原有的地址必须保持不变"
+    );
+    assert_eq!(auth.proxy.as_deref(), Some("https://gw/auth"));
+}
+
+#[test]
+fn clearing_the_proxy_keeps_the_address() {
+    let pool = fresh_pool();
+    let env = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_pay", None, Some(""))
+    })
+    .unwrap();
+    let pay = env.module_base_urls.get("m_pay").unwrap();
+    assert_eq!(pay.url, "http://localhost:4000/demo/pay");
+    assert!(
+        pay.proxy.is_none(),
+        "空串清掉代理，但这一格还有地址，故这一格留着"
+    );
 }
 
 #[test]
 fn clearing_a_cell_does_not_borrow_a_sibling_modules_value() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_dev", "def_default", "m_pay", None)
+        set_module_base_url(c, "env_dev", "m_pay", Some(""), None)
     })
     .unwrap();
-    let per_module = env.module_base_urls.get("def_default").unwrap();
-    assert!(
-        !per_module.contains_key("m_pay"),
-        "an empty cell is the answer, not a pointer to m_auth's host"
+    let pay = env.module_base_urls.get("m_pay").unwrap();
+    assert_eq!(pay.url, "", "地址被清空，这一格没有地址可解析");
+    assert_eq!(
+        pay.proxy.as_deref(),
+        Some("https://gw.example.com/demo/pay"),
+        "清地址不动代理"
     );
-    assert!(per_module.contains_key("m_auth"));
-}
-
-#[test]
-fn clearing_the_last_cell_drops_the_service_key_entirely() {
-    let pool = fresh_pool();
-    // 一个环境里没任何人有地址的服务，不该作为空对象留在存下的 JSON 里——那正是让磁盘上的
-    // 「未设置」与「设为空」可区分的东西。
-    let env = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_dev", "def_default", "m_auth", None)?;
-        set_module_base_url(c, "env_dev", "def_default", "m_order", None)?;
-        set_module_base_url(c, "env_dev", "def_default", "m_pay", None)
-    })
-    .unwrap();
-    assert!(
-        !env.module_base_urls.contains_key("def_default"),
-        "the service key must disappear with its last cell"
+    assert_eq!(
+        env.module_base_urls.get("m_auth").unwrap().url,
+        "http://localhost:4000/demo/auth",
+        "别的模块那一格的值不能被借过来"
     );
 }
 
 #[test]
-fn set_module_base_url_can_add_a_service_the_environment_never_had() {
+fn clearing_the_last_cell_drops_the_module_entirely() {
+    let pool = fresh_pool();
+    // 一个既没有地址也没有代理的格子解析不出任何东西，留着只会让按键遍历的读法误判成
+    // 「此处已配置」。
+    let env = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_auth", Some(""), Some(""))?;
+        set_module_base_url(c, "env_dev", "m_order", Some(""), Some(""))?;
+        set_module_base_url(c, "env_dev", "m_pay", Some(""), Some(""))
+    })
+    .unwrap();
+    assert!(
+        !env.module_base_urls.contains_key("m_auth"),
+        "这一格的两个字段都空了，模块这一项必须一起消失"
+    );
+    assert!(!env.module_base_urls.contains_key("m_order"));
+    assert!(!env.module_base_urls.contains_key("m_pay"));
+}
+
+#[test]
+fn set_module_base_url_can_add_a_module_the_environment_never_had() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(
-            c,
-            "env_staging",
-            "def_default",
-            "m_auth",
-            Some("http://stage"),
-        )
+        set_module_base_url(c, "env_staging", "m_auth", Some("http://stage"), None)
     })
     .unwrap();
     assert_eq!(
-        env.module_base_urls
-            .get("def_default")
-            .unwrap()
-            .get("m_auth")
-            .unwrap(),
+        env.module_base_urls.get("m_auth").unwrap().url,
         "http://stage"
     );
 }
@@ -209,7 +248,7 @@ fn set_module_base_url_can_add_a_service_the_environment_never_had() {
 fn set_module_base_url_missing_environment_is_not_found() {
     let pool = fresh_pool();
     let err = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_ghost", "def_default", "m_auth", Some("http://x"))
+        set_module_base_url(c, "env_ghost", "m_auth", Some("http://x"), None)
     })
     .unwrap_err();
     assert_eq!(err.code(), "not_found");
@@ -221,42 +260,21 @@ fn update_can_replace_module_base_urls() {
     db::with_tx(&pool, |c| {
         let mut patch = EnvironmentPatch::default();
         let mut new_map = HashMap::new();
-        new_map.insert("m_auth".to_string(), "http://new".to_string());
-        let mut per_service = HashMap::new();
-        per_service.insert("def_default".to_string(), new_map);
-        patch.module_base_urls = Some(per_service);
+        new_map.insert("m_auth".to_string(), cell("http://new"));
+        patch.module_base_urls = Some(new_map);
         update(c, "env_dev", patch)?;
         Ok(())
     })
     .unwrap();
     let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
-    let per_module = got.module_base_urls.get("def_default").unwrap();
-    assert_eq!(per_module.len(), 1, "the patch replaces the whole map");
-    assert_eq!(per_module.get("m_auth").unwrap(), "http://new");
-}
-
-#[test]
-fn update_ignores_the_retired_base_urls_field() {
-    // `baseUrls` 仍能反序列化——旧客户端的载荷不能失败——但写它会复活一个已死的层，
-    // 故这个 patch 被收下并丢弃。
-    let pool = fresh_pool();
-    db::with_tx(&pool, |c| {
-        let mut patch = EnvironmentPatch::default();
-        let mut dead = HashMap::new();
-        dead.insert("def_default".to_string(), "http://ghost".to_string());
-        patch.base_urls = Some(dead);
-        update(c, "env_dev", patch)?;
-        Ok(())
-    })
-    .unwrap();
-    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
-    assert!(got.base_urls.is_empty(), "the dead column stays empty");
-    assert!(
-        got.module_base_urls
-            .get("def_default")
-            .unwrap()
-            .contains_key("m_auth"),
-        "the live layer must be untouched by a dead field"
+    assert_eq!(
+        got.module_base_urls.len(),
+        1,
+        "the patch replaces the whole map"
+    );
+    assert_eq!(
+        got.module_base_urls.get("m_auth").unwrap().url,
+        "http://new"
     );
 }
 

@@ -1,10 +1,11 @@
 //! `environments` 表的 CRUD。
 //!
-//! 每个环境持有一张按 (服务 × 模块) 的 URL map（`moduleBaseUrls`）和一个自由变量池。那张
-//! map 是**唯一**的 URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的
-//! 值，也不会回落到已下线的环境级 map。`base_urls_json` 列仍在表里——删列 = 重建表 =
-//! bump `SCHEMA_VERSION` = `ensure_current_schema` 删掉用户的库——但此处不读不写；唯一的
-//! 读者是 `db::migrate` 里的那个迁移。
+//! 每个环境持有一张按模块的地址 map（`moduleBaseUrls`）和一个自由变量池。那张 map 是
+//! **唯一**的 URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的值。
+//!
+//! 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问
+//! 地址——接口经代理网关转代后真正要打的那个地址。两者不一致时，请求发出前用 `proxy`
+//! 替换 `url` 这个前缀。
 //!
 //! `set_active` 是事务性的「降级其他、升级这个」——事务必须把写锁跨在两步上，否则两次并发
 //! 的 set_active 会留下两个激活环境。这里不取锁，调用方须把 `set_active` 包进 `db::with_tx`。
@@ -13,14 +14,14 @@ use std::collections::HashMap;
 
 use rusqlite::{params, Connection, Row};
 
-use crate::domain::{Environment, EnvironmentPatch};
+use crate::domain::{Environment, EnvironmentPatch, ModuleBaseUrl};
 use crate::error::AppError;
 
 /// 这里每次读共用的列清单，顺序同 [`row_to_env`]。
 ///
-/// 用一个字符串而非四份拷贝：两个 URL 列彼此相邻，只点名其中一个的读会静默产出一个所有模块
+/// 用一个字符串而非几份拷贝：URL 列与变量列相邻，只点名其中一个的读会静默产出一个所有模块
 /// 都解析成 `''` 的环境。
-const COLUMNS: &str = "id, project_id, name, is_active, base_urls_json, module_base_urls_json, variables_json, disabled_variables_json";
+const COLUMNS: &str = "id, project_id, name, is_active, module_base_urls_json, variables_json, disabled_variables_json";
 
 // 读。
 
@@ -48,7 +49,7 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
         "SELECT {COLUMNS} FROM environments \
          ORDER BY project_id ASC, name ASC, id ASC"
     ))?;
-    let rows = stmt.query_map(params![], row_to_env)?;
+    let rows = stmt.query_map([], row_to_env)?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r.map_err(AppError::Sqlite)?);
@@ -86,10 +87,6 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
 /// 查 `env_id` 所属的 `project_id`。env id 未知时返回 `NotFound`——调用方（会改动的 MCP
 /// 工具）需要这个解析结果来施加逐项目权限检查；把未知 id 当作静默的「global」就是一个
 /// 权限绕过。
-///
-/// 这正是补上那一环的工具：
-///   tool_env_update(env_id="e_unknown") ⇒ lookup_project_id 失败
-///   ⇒ NotFound ⇒ handler 在动任何东西之前就返回 NotFound。
 pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, AppError> {
     let pid: Option<String> = conn
         .query_row(
@@ -107,9 +104,6 @@ pub fn create(conn: &mut Connection, e: &Environment) -> Result<(), AppError> {
     let module_base_urls_json = serde_json::to_string(&e.module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
     let disabled_variables_json = serde_json::to_string(&e.disabled_variables)?;
-    // `base_urls_json` 刻意不在这个列表里。点名它会继续写一个无人读的列，而把调用方的遗留
-    // `baseUrls` 带进去会留下一个在下一个读者眼里像是活的 blob。不写它就让 schema 默认值
-    // 生效，那正是本构建写的每一行上 `base_urls_json` 取到的默认值。
     conn.execute(
         "INSERT INTO environments \
          (id, project_id, name, is_active, module_base_urls_json, variables_json, disabled_variables_json) \
@@ -146,9 +140,6 @@ pub fn update(
         sets.push(format!("module_base_urls_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(m)?));
     }
-    // `patch.base_urls` 收下但**忽略**——它背后的列已死（见模块文档）。写它会让一个已下线的
-    // 层在下一个读者眼里像是现役的；而把该字段从 patch 类型里删掉，则会让旧客户端的载荷
-    // 直接失败。故静默跳过是取舍。
     if let Some(v) = &patch.variables {
         sets.push(format!("variables_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(v)?));
@@ -311,11 +302,14 @@ pub fn rename_var(
         )));
     }
     let mut env = get(conn, env_id)?;
-    let value = env.variables.remove(from_key).ok_or_else(|| {
-        AppError::Validation(format!(
-            "rename_var: environment {env_id} has no variable {from_key:?}"
-        ))
-    })?;
+    let value = match env.variables.remove(from_key) {
+        Some(v) => v,
+        None => {
+            return Err(AppError::Validation(format!(
+                "rename_var: environment {env_id} has no variable {from_key:?}"
+            )))
+        }
+    };
     if env.variables.contains_key(to_key) {
         // 恢复刚移除的键，好让这次中止把 map 留在未改动状态。
         env.variables.insert(from_key.to_string(), value);
@@ -346,41 +340,45 @@ pub fn rename_var(
     Ok(env)
 }
 
-/// 设置或清除一个 `moduleBaseUrls[def_id][module_id]` 单元格。
+/// 写一个（环境 × 模块）格子的两个字段。
 ///
-/// `url = None` 移除该单元格，而这是真实答案而非一个洞：(服务 × 模块) 是唯一的一层，
-/// 故被清空的单元格意味着此模块对此服务无地址，解析到此为止。它不会回落到别的模块的值，
-/// 也不会回落到已下线的环境级 map——两个模块把同一个服务指向不同 host 是常态，不是该被统一处理的
-/// 错误。
-/// 此处不核对 endpoint 的模块是否属于该环境的项目：这一对只有在 endpoint 真的去解析它时才
-/// 成为 URL，而拦住跨项目服务被指名的是 `base_url_definitions.project_id_of`。
+/// 两个参数各自「写什么就是什么」：
+///
+/// - `url` 传 `Some(u)` 写入后端 api 地址，传 `None` 则**这一格不动**；传空串表示清空它。
+/// - `proxy` 传 `Some(p)` 写入实际访问地址，传 `None` 则**这一格不动**；传空串表示清空它。
+///
+/// 两个字段都空时整格删掉：一个既没有地址也没有代理的格子解析不出任何东西，留着只会
+/// 让按键遍历的读法误判为「此处已配置」。
+///
+/// 此处不核对模块是否属于该环境的项目：那一对只有在 endpoint 真的去解析它时才成为 URL，
+/// 而端点解析走的是端点所属项目的树。
 /// **必须在 `db::with_tx` 内调用。** 返回更新后的 [`Environment`] 供渲染层回显。
 pub fn set_module_base_url(
     conn: &mut Connection,
     env_id: &str,
-    def_id: &str,
     module_id: &str,
     url: Option<&str>,
+    proxy: Option<&str>,
 ) -> Result<Environment, AppError> {
     // 与 `set_var` 同样的「载入 → 改 → 写」形状，同一个理由：对 JSON 列的一次原子 UPDATE 使
-    // 读者看不到写了一半的 map。嵌套 map 只在确实要设值时才创建，故清掉某服务最后一个单元格
-    // 不会在它后面留下一个空 `{}`。
+    // 读者看不到写了一半的 map。
     let mut env = get(conn, env_id)?;
-    match url {
-        Some(u) => {
-            env.module_base_urls
-                .entry(def_id.to_string())
-                .or_default()
-                .insert(module_id.to_string(), u.to_string());
-        }
-        None => {
-            if let Some(per_module) = env.module_base_urls.get_mut(def_id) {
-                per_module.remove(module_id);
-                if per_module.is_empty() {
-                    env.module_base_urls.remove(def_id);
-                }
-            }
-        }
+    let cell = env.module_base_urls.get(module_id);
+    let mut next = cell.cloned().unwrap_or_default();
+    if let Some(u) = url {
+        next.url = u.to_string();
+    }
+    if let Some(p) = proxy {
+        next.proxy = if p.is_empty() {
+            None
+        } else {
+            Some(p.to_string())
+        };
+    }
+    if next.url.is_empty() && next.proxy.is_none() {
+        env.module_base_urls.remove(module_id);
+    } else {
+        env.module_base_urls.insert(module_id.to_string(), next);
     }
     let module_base_urls_json = serde_json::to_string(&env.module_base_urls)?;
     let rows = conn.execute(
@@ -396,10 +394,9 @@ pub fn set_module_base_url(
 // 行映射器。
 
 fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
-    let base_urls_json: String = row.get(4)?;
-    let module_base_urls_json: String = row.get(5)?;
-    let variables_json: String = row.get(6)?;
-    let disabled_variables_json: String = row.get(7)?;
+    let module_base_urls_json: String = row.get(4)?;
+    let variables_json: String = row.get(5)?;
+    let disabled_variables_json: String = row.get(6)?;
     let parse_err = |e: serde_json::Error, col: &str| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
@@ -407,11 +404,7 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
             Box::new(JsonColError(format!("{col}: {e}"))),
         )
     };
-    // `base_urls` 解析了但从不使用：该列只为存活而留，解析它是为了让仍会发来该字段的客户端在
-    // 线格式上仍然诚实。故一个畸形的 blob 仍会让这次读失败，而不是被静默报成空 map。
-    let base_urls: HashMap<String, String> =
-        serde_json::from_str(&base_urls_json).map_err(|e| parse_err(e, "base_urls_json"))?;
-    let module_base_urls: HashMap<String, HashMap<String, String>> =
+    let module_base_urls: HashMap<String, ModuleBaseUrl> =
         serde_json::from_str(&module_base_urls_json)
             .map_err(|e| parse_err(e, "module_base_urls_json"))?;
     let variables: HashMap<String, String> =
@@ -423,7 +416,6 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
         project_id: row.get(1)?,
         name: row.get(2)?,
         is_active: row.get::<_, i64>(3)? != 0,
-        base_urls,
         module_base_urls,
         variables,
         disabled_variables,

@@ -1,6 +1,6 @@
 use super::*;
 use crate::db;
-use crate::domain::{BaseUrlDefinition, ResourceNodeType};
+use crate::domain::ResourceNodeType;
 
 fn fresh_pool() -> db::DbPool {
     let dir = std::env::temp_dir().join(format!(
@@ -17,9 +17,6 @@ fn sample_project(id: &str, name: &str) -> Project {
         id: id.to_string(),
         name: name.to_string(),
         description: Some("desc".into()),
-        base_url: None,
-        base_url_definitions: Vec::new(),
-        default_base_url_definition_id: None,
         color: "#000".into(),
         created_at: 1000,
         updated_at: 2000,
@@ -55,17 +52,6 @@ fn list_returns_seeded_projects() {
     // fixtures.json seeds 3 projects
     assert_eq!(ps.len(), 3);
     assert_eq!(ps[0].id, "p_demo");
-}
-
-#[test]
-fn list_populates_base_url_definitions_from_join() {
-    let pool = fresh_pool();
-    let ps = db::with_conn(&pool, list).unwrap();
-    let demo = ps.iter().find(|p| p.id == "p_demo").unwrap();
-    // fixtures seed 1 default base_url_def for p_demo
-    assert_eq!(demo.base_url_definitions.len(), 1);
-    assert_eq!(demo.base_url_definitions[0].id, "def_default");
-    assert_eq!(demo.base_url_definitions[0].name, "默认");
 }
 
 #[test]
@@ -107,27 +93,6 @@ fn update_can_clear_a_nullable_field_via_double_none() {
 
     let got = db::with_conn(&pool, |c| get(c, "p1")).unwrap();
     assert!(got.description.is_none(), "explicit null clears the column");
-}
-
-#[test]
-fn update_sets_default_base_url_definition_id() {
-    let pool = fresh_pool();
-    db::with_tx(&pool, |c| {
-        create(c, &sample_project("p1", "x"))?;
-        update(
-            c,
-            "p1",
-            serde_json::from_str(r#"{"defaultBaseUrlDefinitionId": "def_new"}"#).unwrap(),
-        )?;
-        Ok(())
-    })
-    .unwrap();
-
-    let got = db::with_conn(&pool, |c| get(c, "p1")).unwrap();
-    assert_eq!(
-        got.default_base_url_definition_id.as_deref(),
-        Some("def_new")
-    );
 }
 
 #[test]
@@ -210,38 +175,23 @@ fn delete_missing_returns_not_found() {
 }
 
 #[test]
-fn get_returns_default_def_id_from_row() {
-    let pool = fresh_pool();
-    let got = db::with_conn(&pool, |c| get(c, "p_demo")).unwrap();
-    assert_eq!(
-        got.default_base_url_definition_id.as_deref(),
-        Some("def_default")
-    );
-}
-
-#[test]
-fn round_trip_via_base_url_definitions_struct() {
-    // Smoke test: serialise + deserialise a Project with defs and
-    // confirm the wire form matches the TS interface.
+fn round_trip_via_the_project_struct() {
+    // Smoke test: serialise + deserialise a Project and confirm the wire form
+    // matches the TS interface.
     let p = Project {
         id: "p1".into(),
         name: "x".into(),
-        description: None,
-        base_url: None,
-        base_url_definitions: vec![BaseUrlDefinition {
-            id: "d".into(),
-            name: "默认".into(),
-            description: None,
-        }],
-        default_base_url_definition_id: Some("d".into()),
+        description: Some("说明".into()),
         color: "#fff".into(),
         created_at: 1,
         updated_at: 2,
     };
     let s = serde_json::to_string(&p).unwrap();
     let back: Project = serde_json::from_str(&s).unwrap();
-    assert_eq!(back.base_url_definitions.len(), 1);
-    assert_eq!(back.base_url_definitions[0].name, "默认");
+    assert_eq!(back.name, "x");
+    assert_eq!(back.description.as_deref(), Some("说明"));
+    assert_eq!(back.color, "#fff");
+    assert_eq!(back.created_at, 1);
 }
 
 #[test]
@@ -253,15 +203,6 @@ fn create_with_defaults_seeds_a_project_and_one_environment() {
     .unwrap();
 
     assert_eq!(created.id, "p_new");
-    assert!(
-        created.base_url_definitions.is_empty(),
-        "no service is seeded: a URL belongs to (environment × module × \
-         service) and a new project has no modules to hang one on"
-    );
-    assert_eq!(
-        created.default_base_url_definition_id, None,
-        "no ★ until the user picks one in settings"
-    );
 
     let envs = db::with_conn(&pool, |c| db::environments::list_by_project(c, "p_new")).unwrap();
     assert_eq!(envs.len(), 1, "exactly the default environment");
@@ -282,9 +223,8 @@ fn create_with_defaults_seeds_a_project_and_one_environment() {
 
 #[test]
 fn create_with_defaults_seeds_one_module_at_the_project_root() {
-    // 模块既是 base URL 表格的行轴，又是模块工作区服务区的主题；没有它，一个全新项目会同时
-    // 摆出三个死路——树的「该项目还没有模块」、表格的「没有模块可归属」、空的服务区——
-    // 而这是一张用户反正会用到的形状。
+    // 模块既是 base URL 表格的行轴，又是模块工作区的主题；没有它，一个全新项目会同时摆出两个
+    // 死路——树的「该项目还没有模块」与表格的「没有模块可归属」——而这是一张用户反正会用到的形状。
     let pool = fresh_pool();
     db::with_tx(&pool, |c| {
         create_with_defaults(c, &sample_project("p_new", "New Project"))
@@ -328,37 +268,18 @@ fn create_with_defaults_seeds_the_environment_and_the_module_in_one_transaction(
 }
 
 #[test]
-fn create_with_defaults_ignores_optimistic_service_state_on_the_input() {
-    // 渲染层乐观地种下表单；把那份乐观状态回显，会让创建响应声称存在没有任何行支撑的服务。
-    let pool = fresh_pool();
-    let mut p = sample_project("p_new", "New Project");
-    p.base_url_definitions = vec![BaseUrlDefinition {
-        id: "d".into(),
-        name: "乐观".into(),
-        description: None,
-    }];
-    p.default_base_url_definition_id = Some("d".into());
-    let created = db::with_tx(&pool, |c| create_with_defaults(c, &p)).unwrap();
-    assert!(created.base_url_definitions.is_empty());
-    assert_eq!(created.default_base_url_definition_id, None);
-}
-
-#[test]
-fn update_ignores_the_legacy_base_url_field() {
-    // `projects` 没有 `base_url` 列。为它发出 `SET base_url = ?` 会把
-    // `PATCH {"baseUrl": "…"}` 变成一个 `no such column` 错误——把调用方的错误报成数据库故障。
+fn update_ignores_a_payload_that_carries_a_retired_key() {
+    // `ProjectPatch` 不收陌生键，故旧客户端载荷里的 `baseUrl` 不会变成一条
+    // `no such column` 的数据库故障——它只是被丢掉。
     let pool = fresh_pool();
     let patched = db::with_tx(&pool, |c| {
         update(
             c,
             "p_demo",
-            ProjectPatch {
-                base_url: Some(Some("http://ignored".into())),
-                ..Default::default()
-            },
+            serde_json::from_str(r#"{"baseUrl": "http://ignored"}"#).unwrap(),
         )
     })
     .unwrap();
     assert_eq!(patched.id, "p_demo");
-    assert_eq!(patched.base_url, None);
+    assert_eq!(patched.name, "Demo API");
 }

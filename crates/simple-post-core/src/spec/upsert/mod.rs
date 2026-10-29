@@ -2,9 +2,7 @@
 //!
 //! ## 这一层解决什么
 //!
-//! 「创建一个接口规范」这件事牵涉五类实体：模块、集合、环境、服务、端点，
-//! 而它们的落库顺序有依赖（端点要挂在集合下，URL 要写进环境 × 服务 × 模块
-//! 那一格）。拆成若干个 CRUD 工具之后，agent 要自己记住那个顺序、自己把上一步
+//! 「创建一个接口规范」这件事牵涉四类实体：模块、集合、环境、端点，\r\n//! 而它们的落库顺序有依赖（端点要挂在集合下，URL 要写进环境 × 模块那一格）。拆成若干个 CRUD 工具之后，agent 要自己记住那个顺序、自己把上一步
 //! 的 id 传给下一步，于是每一份规格要花掉七八轮往返。
 //!
 //! 本模块把「一份规格」当作一个整体来落：调用方给出一份声明式的 JSON，
@@ -19,7 +17,7 @@
 //!
 //! ## 幂等靠什么判定
 //!
-//! 容器类实体（模块、集合、环境、服务）一律**按名字找或建**：重复应用同一份规格
+//! 容器类实体（模块、集合、环境）一律**按名字找或建**：重复应用同一份规格
 //! 不会造出第二份模块。端点例外，它按「同一个父下 name + method + url 完全相同」
 //! 判定，理由见 [`crate::spec::find_endpoint_by_identity`]。
 //!
@@ -30,15 +28,14 @@
 //! `reuse` 一个字段都不写，`error` 报冲突，`duplicate` 另建一个，
 //! `update` 把规格里点名的字段覆盖到那个端点上。
 //!
-//! 环境与服务那两段**总是**落库，与端点的 `if_exists` 无关：它们说的是「装配」，
-//! 而端点的 `if_exists` 说的是「这个端点怎么办」。
+//! 环境那一段**总是**落库，与端点的 `if_exists` 无关：它说的是「装配」，\r\n//! 而端点的 `if_exists` 说的是「这个端点怎么办」。
 //!
 //! ## 模块地图
 //!
 //! | 文件 | 内容 |
 //! |---|---|
 //! | `types.rs` | 规格的线格式与落库后的结果形状 |
-//! | `resolve.rs` | 模块、集合、服务、环境怎么找到或建出来 |
+//! | `resolve.rs` | 模块、集合、环境怎么找到或建出来 |
 //! | `write.rs` | 端点怎么写，以及整份规格怎么落成一个事务 |
 
 mod resolve;
@@ -47,7 +44,7 @@ mod write;
 
 pub use types::{
     EndpointDefinition, EndpointIfExists, EndpointOutcome, EndpointSpec, EnvironmentOutcome,
-    EnvironmentSpec, NamedResolved, ServiceOutcome, ServiceSpec, SpecOutcome,
+    EnvironmentSpec, NamedResolved, SpecOutcome,
 };
 pub use write::upsert_endpoint_spec;
 

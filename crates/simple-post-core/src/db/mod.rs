@@ -18,7 +18,6 @@
 use std::sync::Arc;
 
 // 子模块：对外公开，让编排层 / Tauri commands 可直接调用单个 CRUD 函数。
-pub mod base_url_defs;
 pub mod dynamic_variable_cache;
 pub mod dynamic_variables;
 pub mod endpoint_details;
@@ -32,7 +31,6 @@ pub mod projects;
 pub mod response_history;
 
 // 内部子模块：定义在这些文件里，对外接口（`db::init` / `db::migrate` / …）由本文件重导出。
-mod base_url_migration;
 mod pool;
 mod schema;
 
@@ -63,7 +61,7 @@ pub(crate) mod test_support;
 /// 改名后旧行反序列化不出来，文件即不可读。
 ///
 /// 版本号历史写在 `schema.sql` 末尾，改动请同步。
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 // CRUD 模块共用的辅助类型与函数。
 
@@ -99,8 +97,6 @@ pub(crate) fn json_col_err(col: &str, e: serde_json::Error) -> rusqlite::Error {
 // 顶层表面积（pool / init / migrate / ping / with_tx 重试）的测试。
 
 #[cfg(test)]
-mod migration_fixtures;
-#[cfg(test)]
 pub(crate) mod test_helpers;
 
 #[cfg(test)]
@@ -110,10 +106,6 @@ mod tests;
 #[cfg(test)]
 #[path = "schema_test.rs"]
 mod schema_tests;
-
-#[cfg(test)]
-#[path = "base_url_migration_test.rs"]
-mod base_url_migration_tests;
 
 /// 每进程计数器，给每个测试一个唯一临时目录。独立成模块，免得测试文件在
 /// `mod tests` 里争同一个可变全局。

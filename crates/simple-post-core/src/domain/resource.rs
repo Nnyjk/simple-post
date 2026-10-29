@@ -7,26 +7,6 @@ use super::http::HttpMethod;
 use super::settings::TlsSettings;
 use super::util::serialises_to_empty_object;
 
-// base url
-
-/// 项目服务表里的一条具名服务。
-///
-/// 服务表是**项目级**的：每个模块都能看到全部服务。故本结构体没有模块字段，也没有逐行
-/// 默认标记——于是一个项目里两个服务不可能同名，endpoint 的 `baseUrlDefinitionId` 在整棵
-/// 树上无歧义。表中那两个为已下线的「模块持有」模型服务的列（`module_id` / `is_default`）
-/// 仍在表里但已被中和：删列 = 重建表 = bump `SCHEMA_VERSION` = 删掉用户的库。
-///
-/// 本行只指认服务，从不持有 URL。(服务 × 模块 × 环境) 的 URL 在
-/// [`super::Environment::module_base_urls`]。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BaseUrlDefinition {
-    pub id: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
 /// [`ResourceNode`] 的种类。项目不是节点——项目是隐式的根上下文，由 `root_id` 指名。
 ///
 /// 这个集合刻意封闭：`nodes.type` 上有配套的 CHECK 约束，`parse` 对其余值一律拒绝而不
@@ -149,11 +129,6 @@ pub struct EndpointDetail {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment_id: Option<String>,
-    /// 该 endpoint 解析所依据的服务。`None` 表示「用项目的 ★」
-    /// （`Project::default_base_url_definition_id`），这与指名某个服务不是一回事：区别要到
-    /// 读取该值的解析步骤才显形，故此处保持缺席，而不是在写入时就填上默认服务的 id。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url_definition_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_override: Option<String>,
     #[serde(default)]
@@ -204,9 +179,6 @@ pub struct EndpointDetailPatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment_id: Option<Option<String>>,
-    #[serde(default, deserialize_with = "super::double_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_url_definition_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url_override: Option<Option<String>>,

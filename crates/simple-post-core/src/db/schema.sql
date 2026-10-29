@@ -13,43 +13,10 @@ CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
-  -- 项目的 ★ 服务：未指名服务的 endpoint 所解析的对象。每项目一个而非每模块一个——
-  -- 服务表是项目级的，一个按模块划分的 ★ 会指名别的模块看不见的服务。NULL 是正常状态
-  -- （项目还没被给过默认服务），不是一个缺失的值。
-  default_base_url_definition_id TEXT,
   color TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-
--- 一条具名服务，由**项目**拥有。每个模块都能看到这份列表里的全部服务——没有按模块的服务表，
--- 故两个模块不可能持有同名的服务。这正是该模型的要义：
--- 「服务应该绑定到项目，这样每一个模块都会全部包含这些服务」。
---
--- 服务行不携带 URL。值住在 `environments.module_base_urls_json` 里，以 (服务 × 模块)
--- 为键，故这一行只回答「存在哪些服务」，别无其他。
---
--- 下面的 `module_id` 与 `is_default` 是**刻意保留的死列**。它们曾服务于本构建已推翻的
--- 「模块持有」模型（按模块的服务表与按模块的 ★）；`db::migrate` 把它们置空/置零，此后
--- 无人读写。留着是因为删列 = 重建表 = bump `SCHEMA_VERSION`，而 bump 会让
--- `ensure_current_schema` 删掉用户的库。`db::ADDED_COLUMNS` 同样把这两列补回那些早于它们的
--- 库，理由一致：迁移必须能**读**旧形状才能把它中和掉。
---
--- 这两列是本表首度发布之后才加的，故上面的 `CREATE TABLE IF NOT EXISTS` 对已有该表的库
--- 是无操作。
-CREATE TABLE IF NOT EXISTS base_url_definitions (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  -- 恒为 NULL。之所以可空而非 NOT NULL，是因为 `ADDED_COLUMNS` 只能给活着的表追加可空列。
-  module_id TEXT REFERENCES nodes(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  sort_order INTEGER NOT NULL DEFAULT 0,
-  -- 恒为 0。见上。
-  is_default INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_base_url_defs_project
-  ON base_url_definitions(project_id);
 
 -- 曾经住在这里的 `modules` / `collections` / `endpoints` 三张表已 gone，由下面的 `nodes` +
 -- `endpoint_details` 取代。为什么要拆成两张表而不是一张，见那里的小节头。
@@ -59,15 +26,12 @@ CREATE TABLE IF NOT EXISTS environments (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 0,
-  -- 已废弃，只为让该列存活。它曾是 `def_id -> url`，即服务还不携带模块之前的单一值层。
-  -- 现在无人读写；`db::migrate` 已把每个现役值复制进 `module_base_urls_json`，
-  -- 并是本 crate 里仅剩的读者。
+  -- module_id -> { "url": "...", "proxy": "..." }。**base URL 唯一所在的一层。**
   --
-  -- 迁移**不**清空它可能留下的那一种形状（见 `migrate_base_urls_into_value_layer`）：
-  -- 那些库在之后每次运行都重新推导出逐字节相同的值，故残留 blob 是惰性的。
-  base_urls_json TEXT NOT NULL DEFAULT '{}',
-  -- def_id -> module_id -> url。**base URL 唯一所在的一层。**
-  -- 每个单元格独立：某模块对一个服务没有条目即对它没有 URL，且不会继承别的模块的或项目的。
+  -- `url` 是后端 api 地址；`proxy` 是实际访问地址——接口经代理网关转代后真正要打的地址。
+  -- 两者不一致时，请求发出前用 `proxy` 替换 `url` 这个前缀。`proxy` 缺省 = 没有代理。
+  --
+  -- 每个格子独立：某模块没有条目即它没有地址，且不会继承别的模块的。
   module_base_urls_json TEXT NOT NULL DEFAULT '{}',
   variables_json TEXT NOT NULL DEFAULT '{}',
   -- 被停用的变量名。停用的变量照样存、照样显示，但不参与替换。
@@ -144,7 +108,6 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   -- 只有路径。host 在发送时取自环境的 moduleBaseUrls，故一个 endpoint 可改指向而无需重写。
   url                    TEXT NOT NULL,
   environment_id         TEXT,
-  base_url_definition_id TEXT,
   base_url_override      TEXT,
   params_json            TEXT NOT NULL DEFAULT '[]',
   -- URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。与 `params_json` 分开：
@@ -312,10 +275,9 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
 -- 定义本身要留下来并标成「数据源已删除」，而不是跟着消失——用户删错一个端点不该连带
 -- 丢掉一份定义。
 --
--- 取数用的环境与服务由定义自己点名：`source_environment_id` 为空表示用数据源接口所属
--- 项目的第一个可用环境，`source_base_url_definition_id` 为空表示用该项目的默认服务（★）。
--- 取数上下文于是只由定义决定，与谁消费它无关——同一个 `{{name}}` 在任何项目里取到的值
--- 都一样。
+-- 取数用的环境由定义自己点名：`source_environment_id` 为空表示用数据源接口所属
+-- 项目的第一个可用环境。取数上下文于是只由定义决定，与谁消费它无关——同一个 `{{name}}`
+-- 在任何项目里取到的值都一样。
 CREATE TABLE IF NOT EXISTS dynamic_variables (
   id                 TEXT PRIMARY KEY,
   -- 归属项目。定义挂在项目里，故不同项目可以有同名变量而互不覆盖。
@@ -328,8 +290,6 @@ CREATE TABLE IF NOT EXISTS dynamic_variables (
   source_inline_json TEXT,
   -- 取数用的环境。为空 = 数据源接口所属项目的第一个可用环境。
   source_environment_id TEXT REFERENCES environments(id) ON DELETE SET NULL,
-  -- 取数用的服务。为空 = 数据源接口所属项目的默认服务（★）。
-  source_base_url_definition_id TEXT REFERENCES base_url_definitions(id) ON DELETE SET NULL,
   -- JSONPath 表达式。`$` 表示整段响应。
   extract_path       TEXT NOT NULL DEFAULT '$',
   -- 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工（取值、拼接、算账）。
@@ -455,13 +415,6 @@ END;
 --      `in` → `inLocation`）意味着 v2 的行不再反序列化得出：`kind` 是必填字段，故连 `'{}'`
 --      默认值都失败。是不可读而非陈旧，故 bump 版本而不是在读者侧加兼容层。
 --
--- 3 之后：服务表移到了项目，值层变成
--- `environments.module_base_urls_json` 里的 (环境 × 模块 × 服务)。**仍是**版本 3——
--- `module_base_urls_json` 是增量的、经 `db::ADDED_COLUMNS` 到达，而该模型退役的两列
--- （`base_url_definitions.module_id` / `.is_default`）被保留并中和而非删除，因为 DROP =
--- 重建 = bump 版本 = `ensure_current_schema` 删掉每个用户的库。由两种前任布局之一写下的
--- 行由 `db::mod` 里的 `migrate_base_urls_into_value_layer` 修复。
---
 -- `response_history` 加入后**仍是**版本 3：新表是最纯粹的增量改动——上面每个 `CREATE`
 -- 都是 `IF NOT EXISTS`，故既有库在下次 `db::migrate` 白得它，既不需要 `ADDED_COLUMNS`
 -- 条目（那份列表是给「给已存在的表加列」用的）也不需要 bump 版本。
@@ -487,4 +440,9 @@ END;
 -- 界面与 MCP 侧读写的都是那一行。删掉一张没有读者的表不改变任何一行的可读性，故不需要
 -- 版本事件；而 bump 版本会让 `ensure_current_schema` 删掉每个用户的库——为清一张空表赔上
 -- 全部项目、环境与资源树。既有文件里的它由 `db::schema::migrate` 在 `SCHEMA_SQL` 之后丢掉。
-PRAGMA user_version = 3;
+-- 版本 4：地址层是「环境 → 模块 → (url, proxy)」——每一格一个模块，格里两个字段是
+-- 后端 api 地址与实际访问地址。`environments.module_base_urls_json` 的形状是
+-- `模块 id → { url, proxy }`。
+--
+-- 既有库由 `ensure_current_schema` 换新（版本号对不上就删库重建），故没有迁移路径。
+PRAGMA user_version = 4;

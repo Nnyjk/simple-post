@@ -1,14 +1,13 @@
-//! 规格里的模块、集合、服务与环境怎么找到或建出来。
+//! 规格里的模块、集合与环境怎么找到或建出来。
 
 use crate::db::{self, Connection};
 use crate::domain::ResourceNodeType;
 use crate::error::AppError;
 use crate::spec::{
-    resolve_base_url_def, resolve_collection_path, resolve_environment, resolve_module, split_path,
-    IfExists, Resolved,
+    resolve_collection_path, resolve_environment, resolve_module, split_path, IfExists, Resolved,
 };
 
-use super::types::{EndpointSpec, EnvironmentOutcome, NamedResolved, ServiceOutcome};
+use super::types::{EndpointSpec, EnvironmentOutcome, NamedResolved};
 
 /// 模块：给 `module_id` 就是用它（必须属于这个项目且确实是模块），
 /// 给 `module` 就是按名字找或建。
@@ -72,7 +71,7 @@ pub(super) fn resolve_parent_of(
                     "'{id}' 是一个模块或端点，不是集合"
                 )));
             }
-            // 集合必须挂在这个模块下：base URL 住在 (环境 × 服务 × 模块) 那一格，
+            // 集合必须挂在这个模块下：base URL 住在 (环境 × 模块) 那一格，
             // 端点挂在别的模块下时那一格就写错了地方。
             let owner = db::nodes::module_id_of(conn, &node.id)?;
             if owner.as_deref() != Some(module_id) {
@@ -104,66 +103,11 @@ pub(super) fn resolve_parent_of(
     }
 }
 
-/// 服务：给 `id` 就是用它（必须属于这个项目），给 `name` 就是按名字找或建。
-pub(super) fn resolve_service_of(
-    conn: &mut Connection,
-    project_id: &str,
-    spec: &EndpointSpec,
-) -> Result<Option<ServiceOutcome>, AppError> {
-    let Some(service) = spec.service.as_ref() else {
-        return Ok(None);
-    };
-    let resolved = match (service.id.as_deref(), service.name.as_deref()) {
-        (Some(_), Some(_)) => return Err(AppError::Validation(
-            "spec_upsert: `service.name` 与 `service.id` 二选一 —— 名字用来新建，id 用来指认已有的"
-                .into(),
-        )),
-        (Some(id), None) => {
-            let owner = db::base_url_defs::project_id_of(conn, id)?;
-            if owner != project_id {
-                return Err(AppError::Validation(format!(
-                    "服务 '{id}' 属于项目 '{owner}'，不属于这份规格指名的项目 '{project_id}'"
-                )));
-            }
-            let def = db::base_url_defs::get(conn, id)?;
-            Resolved {
-                id: def.id,
-                created: false,
-            }
-        }
-        (None, Some(name)) => resolve_base_url_def(
-            conn,
-            project_id,
-            name,
-            service.description.as_deref(),
-            IfExists::Reuse,
-        )?,
-        (None, None) => {
-            return Err(AppError::Validation(
-                "spec_upsert: `service` 需要 `name`（服务名，不存在就建）或 `id`".into(),
-            ))
-        }
-    };
-    let name = db::base_url_defs::get(conn, &resolved.id)?.name;
-    // 项目 ★ 只在规格明说时改：改了它，项目里所有没指名服务的端点的解析结果都会变。
-    let is_default = service.default.unwrap_or(false);
-    if is_default {
-        db::base_url_defs::set_default(conn, project_id, Some(&resolved.id))?;
-    }
-    Ok(Some(ServiceOutcome {
-        id: resolved.id,
-        name,
-        created: resolved.created,
-        is_default,
-    }))
-}
-
 /// 环境：找或建它、合并变量、写那一格 URL、按规格决定是否激活。
 pub(super) fn resolve_environment_of(
     conn: &mut Connection,
     project_id: &str,
     module_id: &str,
-    service: &Option<ServiceOutcome>,
     spec: &EndpointSpec,
 ) -> Result<Option<EnvironmentOutcome>, AppError> {
     let Some(env_spec) = spec.environment.as_ref() else {
@@ -233,27 +177,16 @@ pub(super) fn resolve_environment_of(
         db::environments::update(conn, &resolved.id, patch)?;
     }
 
-    // 那一格 URL：它住在 (环境 × 服务 × 模块) 上，故没有服务就没有这一格。
-    if let Some(url) = env_spec.base_url.as_deref() {
-        let service_id = service
-            .as_ref()
-            .map(|s| s.id.clone())
-            .or_else(|| spec.endpoint.base_url_definition_id.clone())
-            .ok_or_else(|| {
-                AppError::Validation(
-                    "`environment.base_url` 需要一个服务：base URL 住在 \
-                     (环境 × 服务 × 模块) 那一格，而那一格的第一维是服务。\
-                     在 `service` 里给出服务名，或在 `endpoint.base_url_definition_id` \
-                     里给出已有服务的 id"
-                        .into(),
-                )
-            })?;
+    // 那一格地址：它住在 (环境 × 模块) 上，故模块由调用方给出。
+    // `base_url` 是后端 api 地址，`base_url_proxy` 是实际访问地址；两者各自写自己的字段，
+    // 规格没点名的那个不动。
+    if env_spec.base_url.is_some() || env_spec.base_url_proxy.is_some() {
         db::environments::set_module_base_url(
             conn,
             &resolved.id,
-            &service_id,
             module_id,
-            Some(url),
+            env_spec.base_url.as_deref(),
+            env_spec.base_url_proxy.as_deref(),
         )?;
     }
 
