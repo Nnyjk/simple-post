@@ -142,7 +142,6 @@ export function blankDetail(
     method: 'GET',
     url: '',
     environmentId: null,
-    baseUrlDefinitionId: null,
     baseUrlOverride: null,
     params: [],
     pathParams: [],

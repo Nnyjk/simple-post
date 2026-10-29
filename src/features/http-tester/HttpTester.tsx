@@ -118,12 +118,12 @@ export function HttpTester() {
   );
 
   /**
-   * 把一次 baseUrl 选择提交到这个接口存放它的位置。`baseUrlDefinitionId` /
-   * `baseUrlOverride` 是草稿的**文档**字段，未保存的接口须用 `updateDraftEndpoint` 写：
-   * 改用 `updateEndpointDetail` 对草稿是静默空操作，选择器会弹回项目默认、URL 保持无前缀。
+   * 把一次 baseUrl 选择提交到这个接口存放它的位置。`baseUrlOverride` 是草稿的
+   * **文档**字段，未保存的接口须用 `updateDraftEndpoint` 写：改用
+   * `updateEndpointDetail` 对草稿是静默空操作，选择器会弹回 跟随模块、URL 保持无前缀。
    */
   const commitBaseUrl = useCallback(
-    (patch: { baseUrlDefinitionId: string | null; baseUrlOverride: string | null }) => {
+    (patch: { baseUrlOverride: string | null }) => {
       if (!endpoint) return;
       if (isDraft) updateDraftEndpoint(endpoint.id, patch);
       else updateEndpointDetail(endpoint.id, patch);
@@ -231,25 +231,14 @@ export function HttpTester() {
   /** baseUrl 选择器的变更 —— 写到哪里由 `commitBaseUrl` 决定（草稿写文档，已存写行）。 */
   const handleBaseUrlSelectionChange = (next: BaseUrlSelection) => {
     if (!endpoint) return;
-    if (next.kind === 'default') {
-      // 两者都清 —— baseUrlDefinitionId 为 null 会让 resolveEndpointBaseUrl 回落到项目 ★。
-      commitBaseUrl({
-        baseUrlDefinitionId: null,
-        baseUrlOverride: null,
-      });
-    } else if (next.kind === 'definition') {
-      commitBaseUrl({
-        baseUrlDefinitionId: next.definitionId,
-        baseUrlOverride: null,
-      });
+    if (next.kind === 'module') {
+      // 跟随模块 —— 清掉 override，接口改回读环境里本模块那一格。
+      commitBaseUrl({ baseUrlOverride: null });
     } else {
       // 自定义 —— `''` 是模式标记而非「清空后的值」：正是它阻止 resolveEndpointBaseUrl
-      // 回落到环境 base URL、给用户即将输入的地址加前缀。既存的行可能已带 host。
+      // 读模块那一格、给用户即将输入的地址加前缀。既存的行可能已带 host。
       const alreadyCustom = selection.kind === 'override';
-      commitBaseUrl({
-        baseUrlOverride: detail?.baseUrlOverride ?? '',
-        baseUrlDefinitionId: null,
-      });
+      commitBaseUrl({ baseUrlOverride: detail?.baseUrlOverride ?? '' });
       if (!alreadyCustom) focusUrlForFullAddress();
     }
   };
@@ -299,8 +288,16 @@ export function HttpTester() {
   // 组装请求的唯一入口。发送前若解析出了新的值，用新值再组装一次。
   const prepare = useCallback(
     (dynamic: Record<string, string>) =>
-      buildRequestInput(method, liveUrl, resolved.baseUrl, effective, endpointEnv, dynamic),
-    [method, liveUrl, resolved.baseUrl, effective, endpointEnv],
+      buildRequestInput(
+        method,
+        liveUrl,
+        resolved.baseUrl,
+        resolved.proxy,
+        effective,
+        endpointEnv,
+        dynamic,
+      ),
+    [method, liveUrl, resolved.baseUrl, resolved.proxy, effective, endpointEnv],
   );
 
   // 请求的最终线上形态，只组装**一次**：发送与 cURL 预览读同一个对象。

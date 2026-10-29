@@ -75,25 +75,17 @@ export function useEndpointContext(
 
   // 该接口的有效 baseUrl —— 同时驱动选择器标签与发送时的拼接。
   //
-  // 服务列表属于项目，故选择器给出全部；按模块区分的是读 URL 的**单元格**。
-  // `moduleId` 仍必需：它挑出本接口读的那一行 `env.moduleBaseUrls[defId]`，但不再
-  // 收窄可选服务。
+  // 地址住在环境里「模块 × 环境」那一格，故 `moduleId` 必需：它挑出本接口读的那一格。
   //
   // `endpoint` 作为向上遍历的起始行传入而非按 id 查：草稿接口没有 `nodes` 行，只按
-  // id 查会得到「无模块」而永远读不到该单元格（见 `moduleIdOfEndpoint` 的 `self`）。
+  // id 查会得到「无模块」而永远读不到该格（见 `moduleIdOfEndpoint` 的 `self`）。
   const moduleId = useMemo(
     () => moduleIdOfEndpoint(allNodes, endpoint?.id, endpoint),
     [allNodes, endpoint],
   );
   const resolved = useMemo(
-    () =>
-      resolveEndpointBaseUrl(
-        detail ?? { environmentId: null, baseUrlDefinitionId: null, baseUrlOverride: null },
-        endpointEnv,
-        project,
-        moduleId,
-      ),
-    [detail, endpointEnv, project, moduleId],
+    () => resolveEndpointBaseUrl(detail ?? { baseUrlOverride: null }, endpointEnv, moduleId),
+    [detail, endpointEnv, moduleId],
   );
 
   // 驱动选择器：反映接口上现存的选择。用户改选时 `commitBaseUrl` 写到这个接口存放
@@ -102,16 +94,13 @@ export function useEndpointContext(
   //
   // `baseUrlOverride` 是三态，空串正是自定义的意义：`null` = 非自定义模式，
   // `''` = 自定义模式、URL 框承载完整地址。按真值判断会把两者混同：点自定义写入
-  // `''` 后下次渲染读成 falsy，选择器弹回 项目默认，点击看起来毫无效果。
+  // `''` 后下次渲染读成 falsy，选择器弹回 跟随模块，点击看起来毫无效果。
   const selection: BaseUrlSelection = useMemo(() => {
-    if (!detail) return { kind: 'default' };
+    if (!detail) return { kind: 'module' };
     if (detail.baseUrlOverride !== null && detail.baseUrlOverride !== undefined) {
       return { kind: 'override' };
     }
-    if (detail.baseUrlDefinitionId) {
-      return { kind: 'definition', definitionId: detail.baseUrlDefinitionId };
-    }
-    return { kind: 'default' };
+    return { kind: 'module' };
   }, [detail]);
   // 自定义 让 URL 框承载完整地址，故不得再给它加任何前缀。`resolved.baseUrl` 也
   // 收敛为空串（拼接时 path 原样不变，见 joinBaseUrl），但这里读 selection，好让仍

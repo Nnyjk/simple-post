@@ -30,7 +30,6 @@ function makeEnv(overrides: Partial<Environment> = {}): Environment {
     id: 'env-1',
     projectId: 'proj-1',
     name: 'dev',
-    baseUrls: {},
     moduleBaseUrls: {},
     variables: {},
     disabledVariables: [],
@@ -51,12 +50,6 @@ function makeProps(overrides: Partial<EnvironmentSectionProps> = {}): Environmen
     addEnvironment: async () => 'env-new',
     deleteEnvironment: () => {},
     updateEnvironment: () => {},
-    baseUrlDefinitions: [],
-    defaultBaseUrlDefinitionId: null,
-    addBaseUrlDefinition: () => 'def-1',
-    updateBaseUrlDefinition: () => {},
-    deleteBaseUrlDefinition: () => {},
-    setDefaultBaseUrlDefinition: () => {},
     ...overrides,
   };
 }
@@ -171,19 +164,12 @@ describe('EnvBody — no name row of its own', () => {
   const html = renderToStaticMarkup(
     createElement(EnvBody, {
       env: makeEnv(),
-      projectId: p.projectId,
       modules: p.modules,
       setEnvironmentVar: p.setEnvironmentVar,
       setEnvironmentVarDisabled: p.setEnvironmentVarDisabled,
       renameEnvironmentVar: p.renameEnvironmentVar,
       setEnvironmentModuleBaseUrl: p.setEnvironmentModuleBaseUrl,
       onAddVar: () => {},
-      baseUrlDefinitions: p.baseUrlDefinitions,
-      defaultBaseUrlDefinitionId: p.defaultBaseUrlDefinitionId,
-      addBaseUrlDefinition: p.addBaseUrlDefinition,
-      updateBaseUrlDefinition: p.updateBaseUrlDefinition,
-      setDefaultBaseUrlDefinition: p.setDefaultBaseUrlDefinition,
-      onDeleteBaseUrl: () => {},
     }),
   );
 
@@ -194,8 +180,13 @@ describe('EnvBody — no name row of its own', () => {
   });
 
   it('still renders the groups that belong to the env', () => {
-    assert.match(html, /前置 URL/);
+    assert.match(html, /模块地址/);
     assert.match(html, /环境变量/);
+  });
+
+  it('never spells the word 服务 in this area', () => {
+    // 「服务」这一层已经不存在：地址住在 (环境 × 模块) 那一格。
+    assert.doesNotMatch(html, /服务/);
   });
 });
 

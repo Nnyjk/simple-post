@@ -68,7 +68,6 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     assert.equal(body.sourceInlineJson, null);
     assert.equal(body.valueMode, null);
     assert.equal(body.sourceEnvironmentId, null);
-    assert.equal(body.sourceBaseUrlDefinitionId, null);
     // 归属项目是必填的那一维。
     assert.equal(body.projectId, 'p1');
   });

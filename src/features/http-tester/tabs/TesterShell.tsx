@@ -134,11 +134,9 @@ export function TesterShell({
         patchDraft={patchDraft}
       />
 
-      {/* URL 栏：方法、baseUrl 选择器、地址输入框与发送 / 保存 / 复制 cURL。 */}
+      {/* URL 栏：方法、地址来源选择器、地址输入框与发送 / 保存 / 复制 cURL。 */}
       <RequestUrlBar
         method={method}
-        definitions={project?.baseUrlDefinitions ?? []}
-        defaultDefinitionId={project?.defaultBaseUrlDefinitionId ?? null}
         resolvedBaseUrl={resolvedBaseUrl}
         selection={selection}
         isCustomUrl={isCustomUrl}

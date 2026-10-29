@@ -1,4 +1,10 @@
-import { collapseUrlSlashes, joinBaseUrl, listVars, resolveVarsWithMissing } from '../url';
+import {
+  applyProxy,
+  collapseUrlSlashes,
+  joinBaseUrl,
+  listVars,
+  resolveVarsWithMissing,
+} from '../url';
 import { pathPlaceholders, substitutePathParams } from '../path-params';
 import { assembleMultipart, newMultipartBoundary } from '../multipart';
 import { binaryContentType, parseMultipartParts, resolveBody } from '../body';
@@ -17,14 +23,17 @@ import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
  *      因此不会被前缀；
  *   2. 把路径里的 `{占位符}` 换成端点自己的路径参数——它们的值先解析 `{{var}}`，
  *      再按路径段编码；
- *   3. 在 join 后的 URL 上解析 `{{var}}`，环境自身 base URL 里的变量才解析得到；
- *   4. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL
+ *   3. 在 join 后的 URL 上解析 `{{var}}`，模块地址里的变量才解析得到；
+ *   4. 模块地址与代理地址各再解析一趟 `{{var}}`——前缀匹配要拿解析后的文本；
+ *   5. 用代理地址替换请求地址开头那段模块地址——替换的是解析之后的前缀；
+ *   6. 折叠 URL path 里的重复斜杠；
+ *   7. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL
  *      选 `?` 还是 `&`）；
- *   5. 追加 query 位置的 apikey；
- *   6. 构造有序 header 列表；
- *   7. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再按模式解析 body。
+ *   8. 追加 query 位置的 apikey；
+ *   9. 构造有序 header 列表；
+ *  10. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再按模式解析 body。
  *
- * multipart 的 boundary 在第 5 步之前生成：Content-Type 与 body 用同一个值，
+ * multipart 的 boundary 在建 header 与 body 之前生成：Content-Type 与 body 用同一个值，
  * 两者不在同一步生成就会对不上。
  *
  * 每个上线的字段都被模板化，body 也不例外；每个写下的 `{{var}}` 解析不到就记录。
@@ -32,6 +41,10 @@ import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
  * body 的规则住在 `src/lib/body`：它与 Rust 的 `simple_post_core::body` 是同一套规则的
  * 两份实现（模板化按字段做还是按整段做、空键算不算、产物是文本还是字节），改动两边
  * 必须同步。
+ *
+ * 模块地址与代理地址各多走一趟 `{{var}}` 替换：代理地址不在 URL 里，模块地址的变量
+ * 则已经由 URL 那趟解析过，但两者的**前缀匹配**都要拿解析后的文本，故各自解析一次，
+ * 缺哪个变量都进同一份缺值报告。
  */
 export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const missing = createMissingTracker();
@@ -62,10 +75,22 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
 
   const url = resolveVarsWithMissing(substituted.url, pool);
   missing.add(url.missing);
+
+  // 模块地址与代理地址各自再解析一趟 `{{var}}`：代理地址不在 URL 里，模块地址的
+  // 变量则已经由上面那趟解析掉了，但两者的**前缀匹配**都要拿解析后的文本，故这里
+  // 各算一次。缺掉的变量同样进缺值报告。
+  const resolvedBase = resolveVarsWithMissing(input.baseUrl, pool);
+  missing.add(resolvedBase.missing);
+  const resolvedProxy = resolveVarsWithMissing(input.proxy ?? '', pool);
+  missing.add(resolvedProxy.missing);
+
+  // 代理替换放在模板替换之后：要换掉的正是解析出来的那个前缀。
+  const proxied = applyProxy(resolvedBase.value, resolvedProxy.value, url.value);
+
   // `collapseUrlSlashes` 放在替换之后、绝不之前：`{{var}}` → `/api` 才会把 `joinBaseUrl`
   // 插入的分隔符变成 `//`，到这里真实 path 才确定。`collapseUrlSlashes` 不碰
   // query/fragment，所以参数还能在它之后追加
-  const normalized = collapseUrlSlashes(url.value);
+  const normalized = collapseUrlSlashes(proxied);
 
   const withParams = appendQueryString(normalized, input.params, pool, missing);
   const finalUrl = appendApikeyToQuery(withParams, auth);

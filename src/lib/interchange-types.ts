@@ -58,31 +58,27 @@ export interface ImportedEnvironment {
 }
 
 /**
- * 预览里「这份文档会创建成一个服务」的预告。
+ * 预览里「这份文档会落成哪些地址」的预告。
  *
- * **缺席是真实答案**，不是「待定」：文档没给 host、或给了多于一个 host 就是缺席
- * （后者附一条 `warn` 诊断说明为什么）。
+ * **缺席是一个真实答案**，不是「待定」：文档没给 host 就是没有地址。一份文档可以
+ * 给出多个地址——它们分别落进各自的模块格子。
  */
-export interface ProposedService {
-  /** 服务名，即 host。项目内唯一。 */
-  service: string;
-  /** 落库时写进目标模块那一格的 URL。 */
+export interface ProposedBaseUrl {
+  /** 文档给出的那个地址。落库时它会被写进目标模块在这个环境下的那一格。 */
   url: string;
-  /** 项目里已有同名服务，复用而不是新建。URL 不在服务行上，故复用不动别的模块的地址。 */
-  existing: boolean;
-  /** URL 会写进哪个环境。缺席 = 项目没有激活环境，服务仍然建，只是格子无处可填。 */
+  /** 地址会写进哪个环境。缺席 = 项目没有激活环境，地址没有落进任何一格。 */
   environmentName?: string;
 }
 
-/** 落库报告里已经落下的服务。 */
-export interface AppliedService {
-  name: string;
+/** 落库报告里已经落下的地址。 */
+export interface AppliedBaseUrl {
+  /** 写进那一格的后端 api 地址。 */
   url: string;
-  /** 服务定义是新建的；`false` 表示复用了项目里已有的同名服务。 */
-  created: boolean;
-  /** 端点有没有被指向它。为 `false` 只有一种情形：项目没有激活环境。 */
-  assigned: boolean;
-  /** URL 写进了哪个环境。 */
+  /** 写进那一格的实际访问地址。外来文档给不出代理，故导入时恒为缺席。 */
+  proxy?: string;
+  /** 写进了哪个模块的格子。 */
+  moduleId: string;
+  /** 写进了哪个环境。缺席 = 项目没有激活环境。 */
   environmentName?: string;
 }
 
@@ -97,7 +93,8 @@ export interface ImportPreview {
   counts: TransferCounts;
   diagnostics: TransferDiagnostic[];
   environments: ImportedEnvironment[];
-  service?: ProposedService;
+  /** 文档给出的地址。空集表示这份文档没有地址可落。 */
+  baseUrls?: ProposedBaseUrl[];
   /** 仅 URL 模式回传：拉到的原文。提交时原样送回，故一次导入只拉一次。 */
   resolvedContent?: string;
 }
@@ -108,22 +105,24 @@ export interface ImportCommitResult {
   createdCollectionIds: string[];
   createdEndpointIds: string[];
   environmentsCreated: string[];
-  service?: AppliedService;
+  /** 实际落下的地址。空集表示这一次没有地址落进任何一格。 */
+  baseUrls?: AppliedBaseUrl[];
   diagnostics: TransferDiagnostic[];
 }
 
-export interface ModuleServers {
+/** 一个模块在所选环境下的那一格地址。 */
+export interface ModuleBaseUrlEntry {
   moduleKey: string;
   moduleName: string;
-  /** 空数组是真实答案：该模块在这个环境下没有配 URL，导出时不写 `servers`。 */
-  servers: { service: string; url: string }[];
+  /** 缺席是一个真实答案：该模块在此环境下没有配地址。 */
+  baseUrl?: { url: string; proxy?: string };
 }
 
 export interface ExportPreview {
   groups: TransferNode[];
   counts: TransferCounts;
   environmentId?: string;
-  servers: ModuleServers[];
+  baseUrls: ModuleBaseUrlEntry[];
   diagnostics: TransferDiagnostic[];
 }
 

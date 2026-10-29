@@ -30,8 +30,6 @@ export interface DynamicVariable {
   sourceInlineJson?: string | null;
   /** 取数用的环境。空 = 数据源端点所属项目的第一个可用环境。 */
   sourceEnvironmentId?: string | null;
-  /** 取数用的服务。空 = 数据源接口所属项目的默认服务。 */
-  sourceBaseUrlDefinitionId?: string | null;
   /** JSONPath 表达式。`$` 表示整段响应。 */
   extractPath: string;
   /**
@@ -104,9 +102,6 @@ export interface DynamicVariableView extends DynamicVariable {
   /** 实际取数用的环境：定义点名的那个，或数据源项目里的第一个可用环境。 */
   effectiveEnvironmentId?: string | null;
   effectiveEnvironmentName?: string | null;
-  /** 实际取数用的服务：定义点名的那个，或数据源项目的默认服务。 */
-  effectiveBaseUrlDefinitionId?: string | null;
-  effectiveBaseUrlDefinitionName?: string | null;
 }
 
 /** 跨项目搜到的一条接口，带它所在的路径。 */

@@ -108,8 +108,8 @@ export function SettingsPanel() {
   const activeSection = useAppStore((s) => s.activeSettingsSection);
   const setActiveSection = useAppStore((s) => s.setActiveSettingsSection);
 
-  // `SettingsPanel` 不再读别的。环境分区的 store 接线 —— 哪些环境属于当前项目、哪些模块是前置 URL
-  // 表的行轴，以及七个环境 / 四个服务动作 —— 住在 `ProjectEnvSection`，因为项目标签挂载的
+  // `SettingsPanel` 不再读别的。环境分区的 store 接线 —— 哪些环境属于当前项目、哪些模块是
+  // 模块地址表的行轴，以及那几组环境动作 —— 住在 `ProjectEnvSection`，因为项目标签挂载的
   // 正是同一份分区。改在这里拼这些 props，就等于让那些规则有第二份副本。
   const mainRef = useRef<HTMLElement>(null);
 

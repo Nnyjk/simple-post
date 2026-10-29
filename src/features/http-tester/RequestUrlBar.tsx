@@ -6,10 +6,10 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { BaseUrlPicker, type BaseUrlSelection } from './BaseUrlPicker';
 import { VarHintInput, type VarEntry } from './var-hint';
 import { cn, methodColorVar } from '@/lib/utils';
-import type { BaseUrlDefinition, HttpMethod } from '@/types/domain';
+import type { HttpMethod } from '@/types/domain';
 
 /**
- * 请求栏：方法、baseUrl 选择器、URL 输入框，以及发送 / 复制 cURL / 保存三个动作。
+ * 请求栏：方法、地址来源选择器、URL 输入框，以及发送 / 复制 cURL / 保存三个动作。
  *
  * 它渲染**当前有效**的请求（草稿叠已存的 detail）；编辑经回调回写草稿。请求本身的
  * 组装不在这里——它要与发送和 cURL 预览共用同一个对象，故留在 `HttpTester`。
@@ -19,8 +19,6 @@ import type { BaseUrlDefinition, HttpMethod } from '@/types/domain';
  */
 export function RequestUrlBar({
   method,
-  definitions,
-  defaultDefinitionId,
   resolvedBaseUrl,
   selection,
   isCustomUrl,
@@ -43,8 +41,6 @@ export function RequestUrlBar({
   onCopyCurl,
 }: {
   method: HttpMethod;
-  definitions: BaseUrlDefinition[];
-  defaultDefinitionId: string | null;
   resolvedBaseUrl: string;
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
@@ -72,10 +68,6 @@ export function RequestUrlBar({
     <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 py-2.5">
       <MethodPicker value={method} onChange={onMethodChange} className="border-0" />
       <BaseUrlPicker
-        // 项目的完整服务列表 —— 服务属于项目级，故每一个都是这里真实可选项。按服务不同的
-        // 是读 URL 的**单元格**，不是可选性。
-        definitions={definitions}
-        defaultDefinitionId={defaultDefinitionId}
         resolvedBaseUrl={resolvedBaseUrl}
         selection={selection}
         onSelectionChange={onSelectionChange}
@@ -96,7 +88,7 @@ export function RequestUrlBar({
           placeholder={isCustomUrl || !resolvedBaseUrl ? 'https://api.example.com/path' : '/path'}
           title={
             isCustomUrl
-              ? '自定义：直接使用这里填写的完整地址，不再拼接 baseUrl 前缀'
+              ? '自定义：直接使用这里填写的完整地址，不再拼接模块地址'
               : resolvedBaseUrl || undefined
           }
           data-testid="url-input"

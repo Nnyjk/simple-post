@@ -1,21 +1,16 @@
 /**
  * `crud-slice` 的环境值删除契约。
  *
- * 覆盖变量、模块 BaseUrl 单元格与项目默认服务的 null 删除：删除立即移除本地键并发
- * `null`（空串是真实值，不被当成删除），失败时整体回滚，以及重命名只发一次
- * `environments_rename_var` 而非拆成删除 + 写入。乐观回滚见
- * `crud-slice-endpoint-detail.test.ts`。
+ * 覆盖变量与模块地址格子的 null 语义：null = 该字段保持原值，空串 = 清空该字段，
+ * 两个字段都清空时整格消失；删除立即移除本地键并发 `null`（空串是真实值，不被当成
+ * 删除），失败时整体回滚，以及重命名只发一次 `environments_rename_var` 而非拆成
+ * 删除 + 写入。乐观回滚见 `crud-slice-endpoint-detail.test.ts`。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installIpcMock } from './_browser-shim';
-import {
-  makeCrudHarness,
-  makeEnvironment,
-  makeProject,
-  type CapturedInvoke,
-} from './crud-slice-harness';
+import { makeCrudHarness, makeEnvironment, type CapturedInvoke } from './crud-slice-harness';
 describe('crud-slice: 环境值的 null 删除契约', () => {
   it('变量删除立即移除本地键，发送 null，并在成功路径保留空字符串值', async () => {
     const original = makeEnvironment({
@@ -71,11 +66,11 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     assert.strictEqual(harness.bag.environments[0], original);
   });
 
-  it('模块 BaseUrl null 删除单元格并发送 null，空 URL 仍作为真实值保留', async () => {
+  it('模块地址的两个字段各自独立：null 保持原值，空串清空该字段', async () => {
     const original = makeEnvironment({
       moduleBaseUrls: {
-        api: { 'mod-1': 'https://api.example.test', 'mod-2': 'https://api2.example.test' },
-        empty: { 'mod-1': '' },
+        'mod-1': { url: 'https://api.example.test', proxy: 'https://gw.example.test' },
+        'mod-2': { url: 'https://api2.example.test' },
       },
     });
     const harness = makeCrudHarness({}, [original]);
@@ -85,91 +80,70 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
       return null;
     });
 
-    // 删掉 mod-1 的格子，mod-2 的同服务格子必须原样保留 ——
-    // 每个 (模块 × 服务) 都是独立值，没有共享。
-    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'api', 'mod-1', null);
-    assert.equal(
-      Object.hasOwn(harness.bag.environments[0].moduleBaseUrls.api ?? {}, 'mod-1'),
-      false,
-      'null 应从乐观状态移除该模块的单元格',
+    // 只改地址，代理保持原值（proxy 送 null）。
+    await harness.slice.setEnvironmentModuleBaseUrl(
+      'env-1',
+      'mod-1',
+      'https://api3.example.test',
+      null,
     );
-    assert.equal(
-      harness.bag.environments[0].moduleBaseUrls.api?.['mod-2'],
-      'https://api2.example.test',
-      '清除一个模块的格子不能动到同一服务的其它模块格子',
-    );
-    assert.equal(harness.bag.environments[0].moduleBaseUrls.empty?.['mod-1'], '');
+    assert.deepEqual(harness.bag.environments[0].moduleBaseUrls['mod-1'], {
+      url: 'https://api3.example.test',
+      proxy: 'https://gw.example.test',
+    });
 
-    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'empty', 'mod-1', '');
-    assert.equal(harness.bag.environments[0].moduleBaseUrls.empty?.['mod-1'], '');
+    // 只清代理，地址保持原值（url 送 null）。
+    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, '');
+    assert.deepEqual(harness.bag.environments[0].moduleBaseUrls['mod-1'], {
+      url: 'https://api3.example.test',
+      proxy: null,
+    });
+
+    // 两个字段都空了，这一格整个消失；别的模块的格子原样保留。
+    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', '', '');
+    assert.equal(
+      Object.hasOwn(harness.bag.environments[0].moduleBaseUrls, 'mod-1'),
+      false,
+      '两个字段都空了，这一格应从乐观状态移除',
+    );
+    assert.deepEqual(harness.bag.environments[0].moduleBaseUrls['mod-2'], {
+      url: 'https://api2.example.test',
+    });
+
     assert.deepEqual(calls, [
       {
         cmd: 'environments_set_module_baseurl',
-        args: { envId: 'env-1', defId: 'api', moduleId: 'mod-1', url: null },
+        args: {
+          envId: 'env-1',
+          moduleId: 'mod-1',
+          url: 'https://api3.example.test',
+          proxy: null,
+        },
       },
       {
         cmd: 'environments_set_module_baseurl',
-        args: { envId: 'env-1', defId: 'empty', moduleId: 'mod-1', url: '' },
+        args: { envId: 'env-1', moduleId: 'mod-1', url: null, proxy: '' },
+      },
+      {
+        cmd: 'environments_set_module_baseurl',
+        args: { envId: 'env-1', moduleId: 'mod-1', url: '', proxy: '' },
       },
     ]);
   });
 
-  it('模块 BaseUrl 删除失败时恢复原单元格和值', async () => {
+  it('模块地址写入失败时恢复原单元格和值', async () => {
     const original = makeEnvironment({
-      moduleBaseUrls: { api: { 'mod-1': 'https://api.example.test' } },
+      moduleBaseUrls: { 'mod-1': { url: 'https://api.example.test' } },
     });
     const harness = makeCrudHarness({}, [original]);
     installIpcMock(async () => {
-      throw new Error('base URL delete failed');
+      throw new Error('base URL write failed');
     });
 
-    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'api', 'mod-1', null);
+    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', '', null);
 
     assert.deepEqual(harness.bag.environments[0].moduleBaseUrls, original.moduleBaseUrls);
     assert.strictEqual(harness.bag.environments[0], original);
-  });
-
-  it('项目默认服务：写单个 id，null 清除默认', async () => {
-    const original = makeProject();
-    const harness = makeCrudHarness({}, [], [], [original]);
-    const calls: CapturedInvoke[] = [];
-    installIpcMock(async (cmd, args) => {
-      calls.push({ cmd, args: args ?? {} });
-      return null;
-    });
-
-    await harness.slice.setDefaultBaseUrlDefinition('project-1', 'd-2');
-
-    // ★ 是项目上的一个 id，不是每行上的一个标志位，所以不存在
-    // 「同时有两个 ★」的中间态。
-    assert.equal(harness.bag.projects[0].defaultBaseUrlDefinitionId, 'd-2');
-    // 服务列表本身一个字节都不该动。
-    assert.strictEqual(harness.bag.projects[0].baseUrlDefinitions, original.baseUrlDefinitions);
-
-    await harness.slice.setDefaultBaseUrlDefinition('project-1', null);
-    assert.equal(
-      harness.bag.projects[0].defaultBaseUrlDefinitionId,
-      null,
-      'null 表示项目刻意没有默认服务，而不是"恢复某个模块的 ★"',
-    );
-
-    assert.deepEqual(calls, [
-      { cmd: 'base_url_defs_set_default', args: { projectId: 'project-1', defId: 'd-2' } },
-      { cmd: 'base_url_defs_set_default', args: { projectId: 'project-1', defId: null } },
-    ]);
-  });
-
-  it('项目默认服务写入失败时整体回滚', async () => {
-    const original = makeProject();
-    const harness = makeCrudHarness({}, [], [], [original]);
-    installIpcMock(async () => {
-      throw new Error('set default failed');
-    });
-
-    await harness.slice.setDefaultBaseUrlDefinition('project-1', 'd-2');
-
-    assert.equal(harness.bag.projects[0].defaultBaseUrlDefinitionId, 'd-1');
-    assert.strictEqual(harness.bag.projects[0], original);
   });
 
   it('重命名只发一次 environments_rename_var，不再拆成删除+写入两次调用', async () => {

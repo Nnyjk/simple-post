@@ -25,7 +25,6 @@ const CATEGORIES: ReadonlyArray<{ key: string; label: string; prefix: string }> 
   { key: 'module', label: '模块', prefix: 'module_' },
   { key: 'collection', label: '集合', prefix: 'collection_' },
   { key: 'endpoint', label: '接口', prefix: 'endpoint_' },
-  { key: 'baseUrl', label: '服务地址', prefix: 'base_url_def_' },
   { key: 'dynamic', label: '动态变量', prefix: 'dynamic_var_' },
   { key: 'api', label: '请求执行', prefix: 'api_' },
 ];

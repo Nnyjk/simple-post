@@ -60,16 +60,10 @@ export interface EndpointDetail {
    */
   environmentId?: string | null;
   /**
-   * 本 endpoint 用的服务，id 指向**本项目**的 `baseUrlDefinitions` 行；
-   * 指向别的项目即为悬挂引用，不会退化成拿别的主机。
+   * 本 endpoint 的 baseUrl 覆盖，优先于模块那一格；用于不挂在任何环境里的一次性
+   * 主机。三态：`null` = 不在自定义模式，`''` = 自定义模式但不加前缀。
    *
-   * `null`（或缺省）表示跟随项目默认服务 `Project.defaultBaseUrlDefinitionId`，
-   * URL 取 `env.moduleBaseUrls[defId][moduleId]`。
-   */
-  baseUrlDefinitionId?: string | null;
-  /**
-   * 本 endpoint 的 baseUrl 覆盖，优先于模块的服务解析；用于不挂在任何
-   * 环境里的一次性主机。三态：`null` = 不在自定义模式。
+   * 覆盖生效时模块地址与代理都不参与，故这一项是这一整套地址解析的唯一出口。
    */
   baseUrlOverride?: string | null;
   params: KeyValue[];
@@ -110,18 +104,4 @@ export interface EndpointDetail {
 /** endpoint 节点 join 上它的 `EndpointDetail`——HTTP 测试器与响应查看器工作的形状，需要 method / url 连同节点身份。 */
 export interface EndpointResource extends ResourceNode {
   detail: EndpointDetail;
-}
-
-/**
- * 项目级的一个具名服务（"鉴权服务"、"数据服务"）。
- *
- * 列表归项目，所有模块都看得见全部服务；按模块各存一份会让两个用同一主机的
- * 模块重复维护。留在模块上的是**URL**，见 `Environment.moduleBaseUrls`：
- * 有哪些服务是项目问题，而某环境下"数据服务"指向哪里是
- * (环境 × 模块 × 服务) 问题。
- */
-export interface BaseUrlDefinition {
-  id: string;
-  name: string;
-  description?: string;
 }

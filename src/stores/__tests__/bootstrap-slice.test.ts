@@ -58,8 +58,6 @@ function makeBootstrapHarness() {
 const project: Project = {
   id: 'p1',
   name: '项目',
-  baseUrlDefinitions: [],
-  defaultBaseUrlDefinitionId: null,
   color: '#000000',
   createdAt: 1,
   updatedAt: 1,
@@ -98,7 +96,6 @@ const environment: Environment = {
   id: 'env1',
   projectId: 'p1',
   name: '开发',
-  baseUrls: {},
   moduleBaseUrls: {},
   variables: {},
   disabledVariables: [],
@@ -391,19 +388,20 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(nodes[1].expanded, undefined, '新出现的节点保持收起');
   });
 
-  it('refreshProjects 整份替换项目清单：导入建的服务要立刻看得见', async () => {
-    // 服务定义住在项目行上，而项目行是 bootstrap 第一层加载后就没有人再更新的
-    // 那份副本。导入在服务端建服务后不刷新它，新服务在界面上就是不存在。
+  it('refreshProjects 整份替换项目清单：导入后新建的项目要立刻看得见', async () => {
+    // 项目行是 bootstrap 第一层加载后就没有人再更新的那份副本。导入在服务端建项目后
+    // 不刷新它，新项目在界面上就是不存在。
     const bag = makeBootstrapHarness();
-    const withService: Project = {
+    const imported: Project = {
       ...project,
-      baseUrlDefinitions: [{ id: 'd1', name: '127.0.0.1' }],
+      id: 'p2',
+      name: '导入的项目',
     };
-    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [withService] : []));
+    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [imported] : []));
 
     await bag.refreshProjects();
 
-    assert.deepEqual(bag.projects, [withService]);
+    assert.deepEqual(bag.projects, [imported]);
   });
 
   it('refreshProjects 失败不 reject：导入已经落库，不能因为一次刷新失败被报成失败', async () => {

@@ -132,7 +132,6 @@ export interface DraftEndpoint {
   url: string;
   auth: AuthConfig;
   environmentId: string | null;
-  baseUrlDefinitionId: string | null;
   baseUrlOverride: string | null;
   tags: string[];
   docs: string;
@@ -196,8 +195,8 @@ export interface ProjectTabSet {
  * 所以整个标签遵循同一条规则：**编辑存在草稿里，Save 才落盘，在此之前标签一直是
  * 脏的。**
  *
- * 刻意**不**包含 `baseUrlDefinitionId` / `baseUrlOverride`：它们是连接配置，点中
- * 选择器那一行的瞬间就提交了——始终是那种「没有 Save 按钮」的行为。
+ * 刻意**不**包含 `baseUrlOverride`：它是连接配置，点中选择器那一行的瞬间就提交
+ * 了——始终是那种「没有 Save 按钮」的行为。
  */
 export interface EndpointDraft {
   url?: string;

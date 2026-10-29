@@ -225,12 +225,6 @@ function DynamicVariableCard({
             <dd>{variable.effectiveEnvironmentName}</dd>
           </>
         )}
-        {variable.effectiveBaseUrlDefinitionName && (
-          <>
-            <dt className="text-muted-foreground">取数服务</dt>
-            <dd>{variable.effectiveBaseUrlDefinitionName}</dd>
-          </>
-        )}
         <dt className="text-muted-foreground">抽取规则</dt>
         <dd className="font-mono">{variable.extractPath}</dd>
         {variable.transformScript && (

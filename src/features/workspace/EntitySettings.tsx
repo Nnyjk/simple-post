@@ -19,8 +19,8 @@
  * 此处没有重新实现的东西
  * -------------------------------
  * 环境 区块就是设置标签所挂载的**同一个** `EnvironmentSection`，经同一个 store 连接的
- * `ProjectEnvSection` 驱动；服务 区块是 `module` 模式的 `ModuleBaseUrlTable`。两个宿主，
- * 一份实现 —— 规则为何住在那里而非这里，见那些文件。
+ * `ProjectEnvSection` 驱动；模块地址 区块是 `module` 模式的 `ModuleBaseUrlTable`。两个
+ * 宿主，一份实现 —— 规则为何住在那里而非这里，见那些文件。
  *
  * 接口标签走 `HttpTester` 而非本组件，故 switch 的 default 分支返回 null。
  */
@@ -41,9 +41,9 @@ const ProjectEnvSection = lazy(() =>
     default: m.ProjectEnvSection,
   })),
 );
-const ModuleServiceSection = lazy(() =>
-  import('@/features/settings/sections/ModuleServiceSection').then((m) => ({
-    default: m.ModuleServiceSection,
+const ModuleBaseUrlSection = lazy(() =>
+  import('@/features/settings/sections/ModuleBaseUrlSection').then((m) => ({
+    default: m.ModuleBaseUrlSection,
   })),
 );
 
@@ -145,7 +145,7 @@ function ProjectInfo({ projectId }: { projectId: string }) {
         </InfoField>
         <InfoField label="描述" hint="记下这个项目是什么">
           <AutoSaveTextarea
-            value={project.description}
+            value={project.description ?? undefined}
             onSave={(description) => void updateProject(project.id, { description })}
             ariaLabel="项目描述"
             placeholder="添加描述…"
@@ -195,7 +195,7 @@ function ProjectDangerZone({ projectId }: { projectId: string }) {
 }
 
 // ----------------------------------------------------------------------------
-//  模块 — 基础信息 + 服务
+//  模块 — 基础信息 + 模块地址
 // ----------------------------------------------------------------------------
 
 function ModuleWorkspace({ moduleId }: { moduleId: string }) {
@@ -226,12 +226,9 @@ function ModuleWorkspace({ moduleId }: { moduleId: string }) {
         </InfoBlock>
       </EntitySection>
 
-      <EntitySection
-        title="服务"
-        hint="服务清单属于项目，这里填的是本模块自己的地址 · 各环境分别保存"
-      >
+      <EntitySection title="模块地址" hint="本模块在各环境下的地址与代理地址 · 各环境分别保存">
         <Suspense fallback={<BlockFallback />}>
-          <ModuleServiceSection moduleId={moduleId} />
+          <ModuleBaseUrlSection moduleId={moduleId} />
         </Suspense>
       </EntitySection>
     </div>

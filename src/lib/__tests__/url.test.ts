@@ -1,229 +1,200 @@
 /**
  * URL 解析测试 —— `src/lib/url.ts`。
  *
- * 被测行为是 baseUrl 选择器的「自定义」行。`baseUrlOverride` 是三态，只有该键
- * *存在*才选中这个模式：
+ * 被测行为是地址解析的两档：端点自己的 `baseUrlOverride`，与环境里「模块 × 环境」那一格。
+ * `baseUrlOverride` 是三态，只有该键*存在*才选中自定义这一档：
  *
- *   null / undefined → 走服务链
- *   ''               → 「自定义」但不加前缀：URL 字段就是完整地址
- *   'https://host'   → 「自定义」且带显式主机前缀
+ *   null / undefined → 读模块那一格
+ *   ''               → 自定义但不加前缀：URL 字段就是完整地址
+ *   'https://host'   → 自定义且带显式主机前缀
  *
- * 中间那档是本文件存在的理由：解析器一旦要求 override *非空*，选「自定义」写入的
- * `''` 在下一次渲染就会被读回成「没有 override」，选择器弹回项目默认，那一行看起来
- * 就像什么都没做。Rust 侧（`resolve_base_url_with`）有同样的收敛，两者必须一致，
+ * 中间那档是本文件存在的理由：解析器一旦要求 override *非空*，选自定义写入的
+ * `''` 在下一次渲染就会被读回成「没有 override」，选择器弹回跟随模块，那一行看起来
+ * 就像什么都没做。Rust 侧（`resolve_base_url`）有同样的收敛，两者必须一致，
  * 否则 cURL 预览与真正发出的请求对 URL 的说法不同。
  *
- * 后一半钉住值层：服务是项目全量列表，某个服务的 URL 是
- * `env.moduleBaseUrls[defId][moduleId]`，格子之间没有回退。
+ * 后一半钉住值层：地址是 `env.moduleBaseUrls[moduleId]`，格子之间没有回退。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyProxy,
   collapseUrlSlashes,
   joinBaseUrl,
   resolveEndpointBaseUrl,
   resolveVars,
   resolveVarsWithMissing,
 } from '../url';
-import type { BaseUrlDefinition, EndpointDetail, Environment, Project } from '@/types/domain';
-
-/** 项目的服务列表 —— 所有模块共享。 */
-const DEFINITIONS: BaseUrlDefinition[] = [
-  { id: 'a_data', name: '数据服务', description: '数据面' },
-  { id: 'a_auth', name: '鉴权服务', description: '鉴权面' },
-  { id: 'b_data', name: '数据服务', description: '数据面' },
-  { id: 'b_base', name: '基础服务', description: '基础面' },
-];
+import type { EndpointDetail, Environment } from '@/types/domain';
 
 /**
- * 一个服务，每个模块一个格子。同名的「数据服务」刻意指向两个不同主机——这正是
- * 两层 map 存在的理由，也是扁平的 `baseUrls[defId]` 表达不了的。
+ * 一个环境，每个模块一个格子。`mod_a` 与 `mod_b` 刻意指向两个不同主机——这正是
+ * 按模块建键的 map 存在的理由。
  */
 const ENV = {
   name: 'dev',
   variables: {},
-  baseUrls: {},
   moduleBaseUrls: {
-    a_data: { mod_a: 'https://a-data.example.com', mod_b: 'https://b-data.example.com' },
-    a_auth: { mod_a: 'https://a-auth.example.com' },
-    b_base: { mod_b: 'https://b-base.example.com' },
+    mod_a: { url: 'https://a-data.example.com' },
+    mod_b: { url: 'https://b-data.example.com' },
+    mod_c: { url: 'http://svc.internal:8080/api/a', proxy: 'https://gw.corp.com/api/xxxx/a' },
   },
 } as unknown as Environment;
-
-/** `a_data` 是项目的 ★。 */
-const PROJECT = {
-  baseUrlDefinitions: DEFINITIONS,
-  defaultBaseUrlDefinitionId: 'a_data',
-} as unknown as Project;
 
 function endpoint(over: Partial<EndpointDetail> = {}): EndpointDetail {
   return {
     environmentId: ENV.name,
-    baseUrlDefinitionId: null,
     baseUrlOverride: null,
     ...over,
   } as unknown as EndpointDetail;
 }
 
 describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not truthiness', () => {
-  it('follows the project default when the override is null', () => {
-    const r = resolveEndpointBaseUrl(endpoint(), ENV, PROJECT, 'mod_a');
+  it('reads the module’s own cell when the override is null', () => {
+    const r = resolveEndpointBaseUrl(endpoint(), ENV, 'mod_a');
     assert.equal(r.baseUrl, 'https://a-data.example.com');
-    assert.equal(r.source, 'default');
-    assert.equal(r.definitionId, 'a_data');
-  });
-
-  it('resolves an explicitly chosen definition over the project default', () => {
-    const r = resolveEndpointBaseUrl(
-      endpoint({ baseUrlDefinitionId: 'a_auth' }),
-      ENV,
-      PROJECT,
-      'mod_a',
-    );
-    assert.equal(r.baseUrl, 'https://a-auth.example.com');
-    assert.equal(r.source, 'definition');
+    assert.equal(r.source, 'module');
+    assert.equal(r.proxy, null);
   });
 
   it('treats an empty override as 自定义 with no prefix', () => {
-    const r = resolveEndpointBaseUrl(endpoint({ baseUrlOverride: '' }), ENV, PROJECT, 'mod_a');
+    const r = resolveEndpointBaseUrl(endpoint({ baseUrlOverride: '' }), ENV, 'mod_a');
     assert.equal(r.source, 'override');
-    // 要点就在这里：`resolveEndpointBaseUrl` 不得回落到环境 base URL。
+    // 要点就在这里：`resolveEndpointBaseUrl` 不得回落到模块那一格。
     assert.equal(r.baseUrl, '');
+    assert.equal(r.proxy, null);
   });
 
   it('keeps a legacy host override working as a prefix', () => {
     const r = resolveEndpointBaseUrl(
       endpoint({ baseUrlOverride: 'https://custom.example.com' }),
       ENV,
-      PROJECT,
       'mod_a',
     );
     assert.equal(r.source, 'override');
     assert.equal(r.baseUrl, 'https://custom.example.com');
   });
 
-  it('prefers the override even when a definition is also stored', () => {
+  it('drops the proxy when the endpoint carries its own address', () => {
+    // 端点自带地址时模块那一格与它的代理都不参与。
     const r = resolveEndpointBaseUrl(
-      endpoint({ baseUrlDefinitionId: 'a_auth', baseUrlOverride: '' }),
+      endpoint({ baseUrlOverride: 'https://custom.example.com' }),
       ENV,
-      PROJECT,
-      'mod_a',
+      'mod_c',
     );
     assert.equal(r.source, 'override');
-    assert.equal(r.baseUrl, '');
+    assert.equal(r.proxy, null);
   });
 
   it('resolves to nothing when no env is selected', () => {
-    const r = resolveEndpointBaseUrl(endpoint(), undefined, PROJECT, 'mod_a');
+    const r = resolveEndpointBaseUrl(endpoint(), undefined, 'mod_a');
     assert.equal(r.baseUrl, '');
     assert.equal(r.source, 'none');
   });
 });
 
-// ---- 值层：(环境 × 模块 × 服务) -----------------------------------------
+// ---- 值层：(环境 × 模块) --------------------------------------------------
 //
-// 每个格子里的值对其他所有格子都是错的，所以项目级值与其它模块的值都不会在这里被当成
-// 该格子的地址。
+// 每个格子里的值对其他所有格子都是错的，所以别的模块的值不会在这里被当成该格子的地址。
 
-describe('resolveEndpointBaseUrl — one independent cell per (module, service)', () => {
+describe('resolveEndpointBaseUrl — one independent cell per (module, env)', () => {
   it('reads the module’s own cell, not another module’s', () => {
-    // `a_data` 是两个模块共同的 ★；每个 endpoint 必须落在自己模块的地址上，绝不是
-    // 另一个的
     assert.equal(
-      resolveEndpointBaseUrl(endpoint(), ENV, PROJECT, 'mod_a').baseUrl,
+      resolveEndpointBaseUrl(endpoint(), ENV, 'mod_a').baseUrl,
       'https://a-data.example.com',
     );
     assert.equal(
-      resolveEndpointBaseUrl(endpoint(), ENV, PROJECT, 'mod_b').baseUrl,
+      resolveEndpointBaseUrl(endpoint(), ENV, 'mod_b').baseUrl,
       'https://b-data.example.com',
     );
   });
 
-  it('lets an explicitly named service resolve in a module the ★ never reached', () => {
-    // `b_base` 只在 mod_b 下有值。mod_a 必须什么都拿不到，而不是拿到 mod_b 的地址。
-    const inOwnModule = resolveEndpointBaseUrl(
-      endpoint({ baseUrlDefinitionId: 'b_base' }),
-      ENV,
-      PROJECT,
-      'mod_b',
-    );
-    assert.equal(inOwnModule.baseUrl, 'https://b-base.example.com');
-    assert.equal(inOwnModule.source, 'definition');
-
-    const elsewhere = resolveEndpointBaseUrl(
-      endpoint({ baseUrlDefinitionId: 'b_base' }),
-      ENV,
-      PROJECT,
-      'mod_a',
-    );
-    assert.equal(elsewhere.baseUrl, '');
-    assert.equal(elsewhere.source, 'none');
-  });
-
-  it('gives a project with no ★ nothing, with no fallback', () => {
-    const noStar = {
-      baseUrlDefinitions: [{ id: 'x1', name: '服务' }],
-      defaultBaseUrlDefinitionId: null,
-    } as unknown as Project;
-    const envWithValue = {
-      moduleBaseUrls: { x1: { mod_c: 'https://c.example.com' } },
-    } as unknown as Environment;
-
-    // URL 在那个 id 下确实存在，但没有任何东西选中它。
-    assert.equal(resolveEndpointBaseUrl(endpoint(), envWithValue, noStar, 'mod_c').baseUrl, '');
-    assert.equal(resolveEndpointBaseUrl(endpoint(), envWithValue, noStar, 'mod_c').source, 'none');
+  it('gives the cell’s proxy along with its address', () => {
+    const r = resolveEndpointBaseUrl(endpoint(), ENV, 'mod_c');
+    assert.equal(r.baseUrl, 'http://svc.internal:8080/api/a');
+    assert.equal(r.proxy, 'https://gw.corp.com/api/xxxx/a');
+    assert.equal(r.source, 'module');
   });
 
   it('resolves nothing for an endpoint that is under no module', () => {
     // `null` 模块没有格子，所以只有「自定义」才可能给出答案。
-    const r = resolveEndpointBaseUrl(endpoint(), ENV, PROJECT, null);
+    const r = resolveEndpointBaseUrl(endpoint(), ENV, null);
     assert.equal(r.baseUrl, '');
     assert.equal(r.source, 'none');
   });
 
-  it('reports "none" when the chosen service has no URL in this env', () => {
+  it('reports "none" when the module has no cell in this env', () => {
     const empty = { moduleBaseUrls: {} } as unknown as Environment;
-    const r = resolveEndpointBaseUrl(
-      endpoint({ baseUrlDefinitionId: 'a_auth' }),
-      empty,
-      PROJECT,
-      'mod_a',
-    );
+    const r = resolveEndpointBaseUrl(endpoint(), empty, 'mod_a');
     assert.equal(r.baseUrl, '');
     assert.equal(r.source, 'none');
   });
 
-  it('never reads the deprecated flat layer', () => {
-    // `baseUrls[defId]` 是看不见模块的形状。若被读到，endpoint 会解析到一个不属于
-    // 任何具体模块的主机——正是两层 map 消除的那种泄漏
-    const legacy = {
-      baseUrls: { b_base: 'https://legacy.example.com' },
-      moduleBaseUrls: {},
+  it('reports "none" when the cell’s address is empty', () => {
+    const blank = {
+      moduleBaseUrls: { mod_a: { url: '' } },
     } as unknown as Environment;
-
-    const r = resolveEndpointBaseUrl(
-      endpoint({ baseUrlDefinitionId: 'b_base' }),
-      legacy,
-      PROJECT,
-      'mod_b',
-    );
+    const r = resolveEndpointBaseUrl(endpoint(), blank, 'mod_a');
     assert.equal(r.baseUrl, '');
     assert.equal(r.source, 'none');
-  });
-
-  it('refuses an id that names no service of this project', () => {
-    const r = resolveEndpointBaseUrl(
-      endpoint({ baseUrlDefinitionId: 'not_here' }),
-      ENV,
-      PROJECT,
-      'mod_a',
-    );
-    assert.equal(r.baseUrl, '');
-    assert.equal(r.source, 'none');
-    assert.equal(r.definitionId, null);
   });
 });
+
+/**
+ * 代理前缀替换：请求地址开头那段模块地址被换成代理地址，其余部分原样保留。
+ *
+ * 路径边界这一条是必需的：没有它，`http://h/api` 会命中 `http://h/apixyz`。
+ */
+describe('applyProxy — replaces the module address prefix', () => {
+  it('replaces the prefix and keeps the rest', () => {
+    assert.equal(
+      applyProxy(
+        'http://svc.internal:8080/api/a',
+        'https://gw.corp.com/api/xxxx/a',
+        'http://svc.internal:8080/api/a/orders/list',
+      ),
+      'https://gw.corp.com/api/xxxx/a/orders/list',
+    );
+  });
+
+  it('leaves the URL alone when there is no proxy', () => {
+    assert.equal(
+      applyProxy('http://svc.internal:8080/api/a', null, 'http://svc.internal:8080/api/a/orders'),
+      'http://svc.internal:8080/api/a/orders',
+    );
+  });
+
+  it('leaves the URL alone when the proxy is blank', () => {
+    assert.equal(
+      applyProxy('http://svc.internal:8080/api/a', '   ', 'http://svc.internal:8080/api/a/orders'),
+      'http://svc.internal:8080/api/a/orders',
+    );
+  });
+
+  it('does not match a prefix that ends in the middle of a path segment', () => {
+    assert.equal(
+      applyProxy(
+        'http://svc.internal:8080/api',
+        'https://gw.corp.com',
+        'http://svc.internal:8080/apixyz/orders',
+      ),
+      'http://svc.internal:8080/apixyz/orders',
+    );
+  });
+
+  it('ignores the trailing slashes of the module address', () => {
+    assert.equal(
+      applyProxy(
+        'http://svc.internal:8080/api/',
+        'https://gw.corp.com',
+        'http://svc.internal:8080/api/orders',
+      ),
+      'https://gw.corp.com/orders',
+    );
+  });
+});
+
 describe('joinBaseUrl — a 自定义 URL field is never prefixed', () => {
   it('leaves a full URL alone in custom mode (no base to join)', () => {
     assert.equal(joinBaseUrl('', 'https://api.other.com/users/1'), 'https://api.other.com/users/1');
@@ -351,12 +322,12 @@ describe('resolveVars — 自定义 does not disable environment variables', () 
 });
 
 describe('resolveVars — 停用的变量不参与替换', () => {
-  // `baseUrls` 在这里是必需的：它把 `Environment` 与裸的 `Record<string,string>` 区分开，
-  // 而只有前者才带「哪些变量被停用」这层信息。
+  // `moduleBaseUrls` 在这里是必需的：它把 `Environment` 与裸的 `Record<string,string>`
+  // 区分开，而只有前者才带「哪些变量被停用」这层信息。
   const env = {
     variables: { token: 'abc123', name: 'ada' },
     disabledVariables: ['token'],
-    baseUrls: {},
+    moduleBaseUrls: {},
   } as unknown as Environment;
 
   it('leaves a disabled variable intact and reports it as missing', () => {
@@ -399,7 +370,7 @@ describe('resolveVarsWithMissing — reports what it could not resolve', () => {
   });
 
   it('accepts both an Environment and a raw record', () => {
-    const env = { variables: { a: '1' }, baseUrls: {} } as unknown as Environment;
+    const env = { variables: { a: '1' }, moduleBaseUrls: {} } as unknown as Environment;
     assert.deepEqual(resolveVarsWithMissing('{{a}}{{gone}}', env).missing, ['gone']);
     assert.deepEqual(resolveVarsWithMissing('{{a}}{{gone}}', { a: '1' }).missing, ['gone']);
   });

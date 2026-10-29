@@ -239,7 +239,6 @@ function draftDetail(d: DraftEndpoint): EndpointDetail {
     method: d.method,
     url: d.url,
     environmentId: d.environmentId,
-    baseUrlDefinitionId: d.baseUrlDefinitionId,
     baseUrlOverride: d.baseUrlOverride,
     params: [],
     pathParams: [],

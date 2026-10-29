@@ -1,23 +1,23 @@
 /**
  * CRUD 子工厂 —— 环境。
  *
- * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
+ * `createCrudSlice` 组合的四个子工厂之一（切片级的契约——乐观 `set()` →
  * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
  *
- * 变量和 baseUrl 槽位上都用 `null` 作删除哨兵，而空串是真实取值——这个区别由
+ * 变量上用 `null` 作删除哨兵，而空串是真实取值——这个区别由
  * `../../__tests__/crud-slice.test.ts` 钉住，所以下面那些 `value === null` 判断必须
  * 写对，不能当作风格偏好。
  *
- * `moduleBaseUrls[defId][moduleId]` 是服务 URL 唯一存放的地方：每个
- * (module × 服务) 一个独立单元格，没有继承也没有回退。
- * `resolveEndpointBaseUrl` 只读其中恰好一个。那张扁平的 `baseUrls` 映射不再写入。
+ * `moduleBaseUrls[moduleId]` 是地址唯一存放的地方：每个 (环境 × 模块) 一个独立
+ * 单元格，没有继承也没有回退。格子里有两个字段：`url` 是后端 api 地址，`proxy` 是
+ * 实际访问地址。`resolveEndpointBaseUrl` 只读其中恰好一个。
  *
  * `deleteEnvironment` 与 `setEnvironmentActive` 会在与自身键同一次原子 `set()`
  * 里写别的切片拥有的键（`activeEnvironmentId`、`endpointDetails`）；拆成多次调用
  * 会改变 IPC 失败时回滚的内容。
  */
 import type { StateCreator } from 'zustand';
-import type { Environment, EndpointDetail, EnvWrite } from '@/types/domain';
+import type { Environment, EndpointDetail, EnvWrite, ModuleBaseUrl } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import { invokeWithRollback } from './crud-helpers';
@@ -33,14 +33,18 @@ export interface EnvironmentCrudActions {
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   updateEnvironment: (envId: string, patch: Partial<Pick<Environment, 'name'>>) => Promise<void>;
   /**
-   * 设定（或用 `null` 清空）一个单元格：本环境下服务 `defId` 对 module `moduleId`
-   * 的 URL。每个单元格都是独立取值——清一个不能碰到它的邻居。
+   * 写一个 (环境 × 模块) 格子里的两个字段。
+   *
+   * `url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自独立：
+   * `null` = 该字段保持原值，`''` = 清空该字段。两个字段都清空时这一格整个消失。
+   *
+   * 每个格子都是独立取值——清一个不能碰到它的邻居。
    */
   setEnvironmentModuleBaseUrl: (
     envId: string,
-    defId: string,
     moduleId: string,
     url: string | null,
+    proxy: string | null,
   ) => Promise<void>;
   deleteEnvironment: (envId: string) => Promise<void>;
   setEnvironmentActive: (envId: string) => Promise<void>;
@@ -167,18 +171,24 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
         })),
     );
   },
-  setEnvironmentModuleBaseUrl: async (envId, defId, moduleId, url) => {
+  setEnvironmentModuleBaseUrl: async (envId, moduleId, url, proxy) => {
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return;
-    // 两层都要拷贝：内层映射与其他所有 module 的行共享，原地改它会把这一格
-    // 写进调用方根本没提过的 module。
-    const nextByModule = { ...(prev.moduleBaseUrls[defId] ?? {}) };
-    if (url === null) delete nextByModule[moduleId];
-    else nextByModule[moduleId] = url;
-    const nextModuleBaseUrls = { ...prev.moduleBaseUrls, [defId]: nextByModule };
-    // 最后一个格子没了就把整个服务行删掉，免得已清空的环境还留着一个空的
-    // `defId → {}` 外壳，在任何按键比对环境对象的 UI 里都读作"这里配了服务"。
-    if (Object.keys(nextByModule).length === 0) delete nextModuleBaseUrls[defId];
+    // 格子里两个字段各自独立：`null` 保持原值，`''` 清空。空串的 proxy 落成
+    // `null`（没有代理），与后端 `db::environments::set_module_base_url` 同一套。
+    const cell = prev.moduleBaseUrls[moduleId];
+    const nextCell: ModuleBaseUrl = {
+      url: url === null ? (cell?.url ?? '') : url,
+      proxy: proxy === null ? (cell?.proxy ?? null) : proxy === '' ? null : proxy,
+    };
+    const nextModuleBaseUrls = { ...prev.moduleBaseUrls };
+    // 两个字段都空了就把这一格删掉，免得已清空的环境还留着一个空的
+    // `moduleId → {}` 外壳，在任何按键比对环境对象的 UI 里都读作"这里配了地址"。
+    if (nextCell.url === '' && nextCell.proxy === null) {
+      delete nextModuleBaseUrls[moduleId];
+    } else {
+      nextModuleBaseUrls[moduleId] = nextCell;
+    }
     const optimistic: Environment = { ...prev, moduleBaseUrls: nextModuleBaseUrls };
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
@@ -188,9 +198,9 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
       () =>
         invokeCmd<Environment>(COMMANDS.environmentsSetModuleBaseurl, {
           envId,
-          defId,
           moduleId,
           url,
+          proxy,
         }),
       () =>
         set((s) => ({

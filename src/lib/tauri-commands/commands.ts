@@ -52,13 +52,6 @@ export const COMMANDS = {
   environmentsSetModuleBaseurl: 'environments_set_module_baseurl',
   environmentsSetActive: 'environments_set_active',
 
-  // ----- baseUrl definitions -----
-  baseUrlDefsList: 'base_url_defs_list',
-  baseUrlDefsCreate: 'base_url_defs_create',
-  baseUrlDefsUpdate: 'base_url_defs_update',
-  baseUrlDefsDelete: 'base_url_defs_delete',
-  baseUrlDefsSetDefault: 'base_url_defs_set_default',
-
   // ----- interchange (import / export) -----
   // 两条边各两步：**先预览后落定**。预览只读，它回答「这份文件里有哪些条目、有哪些
   // 已经在项目里了、有哪些构造会丢」；用户勾完才提交。导出侧对称：先看候选清单，
@@ -70,7 +63,7 @@ export const COMMANDS = {
   interchangeExportDocument: 'interchange_export_document',
 
   // ----- interface specs -----
-  // 一份接口规格：模块、集合路径上的每一级、环境、服务与端点，一次调用落完。
+  // 一份接口规格：模块、集合路径上的每一级、环境、模块地址与端点，一次调用落完。
   // 每一部分按名字找、找不到就建，故反复应用同一份规格不改变任何东西。
   //
   // 参数是**一份规格**（`spec`），不是一堆零散字段——那是这条命令存在的理由。
