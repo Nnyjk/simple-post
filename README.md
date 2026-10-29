@@ -8,7 +8,7 @@
 
 Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这里的接口定义，读到的就是用户正在维护的那份数据。
 
-[![版本](https://img.shields.io/badge/version-v0.1.22-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
+[![版本](https://img.shields.io/badge/version-v0.1.23-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
 [![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
 [![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
 [![MCP 工具](https://img.shields.io/badge/MCP-52%20tools-8A2BE2?style=flat-square)](#mcp-server)
