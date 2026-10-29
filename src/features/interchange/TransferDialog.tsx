@@ -226,7 +226,7 @@ function PreviewStep({
           <Switch
             checked={applyService}
             onCheckedChange={setApplyService}
-            aria-label="把文档里的地址落成服务"
+            aria-label="把文档里的地址保存为服务"
           />
           <span className="truncate text-[11px] text-foreground">{proposedService.service}</span>
           <span className="truncate font-mono text-[10px] text-faint">{proposedService.url}</span>
