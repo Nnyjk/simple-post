@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   Hourglass,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import {
+  parseHistoryKeepDraft,
   REQUEST_SETTINGS_DEFAULTS,
   RESPONSE_HISTORY_KEEP_DEFAULT,
   RESPONSE_HISTORY_KEEP_MAX,
@@ -92,6 +93,26 @@ export function RequestSection() {
   const isDirty = useMemo(() => isRequestSettingsDirty(settings), [settings]);
 
   const resetToDefaults = () => updateRequestSettings({ ...REQUEST_DEFAULTS });
+
+  // 保留条数先落在草稿里，失焦或回车才写回。
+  //
+  // 每次按键就写回是不行的：写回会立刻按新条数裁库，而裁掉的行不会回来。用户把 100
+  // 改成 50 时第一键送出的 5 已经把库裁到 5 条，第二键送出的 50 只是让剩下的更少。
+  const [keepDraft, setKeepDraft] = useState(String(historyKeep));
+
+  // 别人改了保留条数时草稿跟着回到当前值，否则输入框里留着旧数字。
+  useEffect(() => {
+    setKeepDraft(String(historyKeep));
+  }, [historyKeep]);
+
+  const commitKeepDraft = useCallback(() => {
+    const n = parseHistoryKeepDraft(keepDraft);
+    if (n === null) {
+      setKeepDraft(String(historyKeep));
+      return;
+    }
+    updateResponseHistoryKeep(n);
+  }, [historyKeep, keepDraft, updateResponseHistoryKeep]);
 
   return (
     <>
@@ -259,11 +280,13 @@ export function RequestSection() {
               min={1}
               max={RESPONSE_HISTORY_KEEP_MAX}
               step={1}
-              value={historyKeep}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                if (Number.isFinite(n) && n >= 1) {
-                  updateResponseHistoryKeep(n);
+              value={keepDraft}
+              onChange={(e) => setKeepDraft(e.target.value)}
+              onBlur={commitKeepDraft}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitKeepDraft();
                 }
               }}
               className="h-8 w-32 font-mono text-xs"

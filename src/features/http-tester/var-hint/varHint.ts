@@ -1,8 +1,9 @@
 /**
- * `{{变量}}` 提示的纯文本规则。
+ * `{{变量}}` 提示的纯规则。
  *
- * 这个模块只处理字符串：找出用户正在输入的半个变量名、判断候选浮层该不该出现、把半个
- * 名字换成完整的 `{{key}}`。浮层的位置在 `VarHintPicker`，写回与键盘导航在 `useVarHint`。
+ * 这个模块只做判定，不碰界面：找出用户正在输入的半个变量名、判断候选浮层该不该出现、
+ * 把半个名字换成完整的 `{{key}}`、判断一次按键该做什么。浮层的位置在 `VarHintPicker`，
+ * 写回在 `useVarHint` 与编辑器那一侧。
  */
 
 /**
@@ -64,4 +65,45 @@ export function filterVarEntries(entries: VarEntry[], partial: string): VarEntry
   const q = partial.toLowerCase();
   if (!q) return entries;
   return entries.filter((e) => e.key.toLowerCase().includes(q));
+}
+
+/** 一次按键该做什么。`none` 是「不归提示管」，按键按它本来的意思走。 */
+export type VarHintKeyAction = 'none' | 'next' | 'prev' | 'insert' | 'close';
+
+/** 判定按键要用到的那几项。两条路径的事件类型不同，故只取共同的几个。 */
+export interface VarHintKeyEvent {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  /** 输入法正在组合。组合期间的 Enter 与方向键属于输入法候选，不是选变量。 */
+  isComposing: boolean;
+  /** 老浏览器上 `isComposing` 取不到时的兜底：229 是 IME 专用的 keyCode。 */
+  keyCode: number;
+}
+
+/**
+ * 这次按键该做什么。
+ *
+ * 两条路径（普通输入框与 CodeMirror 编辑器）吃的是不同类型的事件，规则却只有一份 ——
+ * 判定拆成这个纯函数，两边各调它，故两边不会各自长出不同的行为。
+ *
+ * 三条不拦按键的情况：
+ * - 浮层没开：这一栏根本没有候选可管。
+ * - 输入法正在组合：组合期间的 Enter 与方向键属于输入法候选，拦下来会吞掉用户的中文。
+ * - 没有候选可选：Enter 与 Tab 无从插起，拦下来键盘用户就出不去了。
+ */
+export function varHintKeyAction(
+  event: VarHintKeyEvent,
+  state: { open: boolean; hasEntry: boolean },
+): VarHintKeyAction {
+  if (!state.open) return 'none';
+  if (event.isComposing || event.keyCode === 229) return 'none';
+  // 放过带修饰键的组合，全局快捷键（Ctrl+Enter、Ctrl+S）才仍能触发。
+  if (event.ctrlKey || event.metaKey || event.altKey) return 'none';
+  if (event.key === 'ArrowDown') return 'next';
+  if (event.key === 'ArrowUp') return 'prev';
+  if (event.key === 'Enter' || event.key === 'Tab') return state.hasEntry ? 'insert' : 'none';
+  if (event.key === 'Escape') return 'close';
+  return 'none';
 }

@@ -158,14 +158,11 @@ fn trim_to_cap(conn: &mut Connection, endpoint_id: &str, keep: i64) -> Result<()
     Ok(())
 }
 
-/// 按新的保留条数裁一遍**所有** endpoint 的未收藏历史。
+/// 按新的保留条数裁所有 endpoint 的未收藏行，收藏的行不动。
 ///
-/// 用户改了全局条数后调用：条数变小就得立刻生效，否则用户要等到下一次发送才看到历史
-/// 变短，而那条历史的长度正是用户自己刚改的设置。收藏的行一律不动。
+/// 改全局条数后调用：条数变小时历史要立刻变短，不能等下一次发送。
 ///
-/// 逐个 endpoint 裁，而不是一条跨全部行的 DELETE：跨行的裁剪要在一条语句里按
-/// endpoint 分组取前 N 行，那条 SQL 难读也难验；这里的循环每个 endpoint 一条语句，
-/// 命中同一个索引。
+/// 逐个 endpoint 执行一条 DELETE：跨 endpoint 分组取前 N 行的单条 SQL 难以验证。
 pub fn trim_all(conn: &mut Connection, keep: i64) -> Result<(), AppError> {
     let endpoint_ids = {
         let mut stmt = conn

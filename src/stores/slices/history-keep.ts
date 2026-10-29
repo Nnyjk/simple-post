@@ -30,6 +30,19 @@ export function clampHistoryKeep(keep: number): number {
 }
 
 /**
+ * 把输入框里的草稿解析成一个可用的保留条数。
+ *
+ * 解析不出来（空串、非数字、小于 1）时给 `null`：调用方据此把草稿退回当前值，
+ * 而不是拿一个坏数字去裁库 —— 裁掉的历史不会回来。
+ */
+export function parseHistoryKeepDraft(draft: string): number | null {
+  if (draft.trim() === '') return null;
+  const n = Number(draft);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return n;
+}
+
+/**
  * 丢掉超出条数的**未收藏**行，最旧的先丢。收藏的行一律不动。
  *
  * 输入是「最新在末尾」的次序，输出保持同一次序，故被丢掉的总是最旧的那几行。

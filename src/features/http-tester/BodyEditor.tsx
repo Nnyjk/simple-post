@@ -13,7 +13,15 @@ import { lightCodeTheme } from '@/lib/codemirror-themes';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { parseSchemaView } from '@/lib/schema-view';
 import { SchemaTable } from './SchemaTable';
-import { rectAnchor, useVarHint, VarHintPicker, type VarEntry, type VarHint } from './var-hint';
+import { changedRange } from './model/changedRange';
+import {
+  rectAnchor,
+  useVarHint,
+  VarHintPicker,
+  varHintKeyAction,
+  type VarEntry,
+  type VarHint,
+} from './var-hint';
 
 interface Props {
   value: RequestBody;
@@ -232,7 +240,9 @@ function BodyContent({
   const applyText = useCallback((next: string) => {
     const view = viewRef.current;
     if (view) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
+      // 只替换真正变了的那一段。整篇替换会让编辑器重建语法树，折叠状态与选区一并丢掉。
+      const range = changedRange(view.state.doc.toString(), next);
+      view.dispatch({ changes: { from: range.from, to: range.to, insert: range.insert } });
     }
     setDoc(next);
     latest.current.onChange({ ...latest.current.value, content: next });
@@ -283,28 +293,36 @@ function BodyContent({
    */
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     const h = latest.current.hint;
-    if (!h || !h.open) return false;
-    // 放过带修饰键的组合，全局快捷键（Ctrl+Enter、Ctrl+S）才仍能触发。
-    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (!h) return false;
     const entries = h.entries;
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
+    const entry = entries[h.selected] ?? entries[0];
+    // 规则只有一份：普通输入框与编辑器吃的是不同类型的事件，判定交给同一个纯函数。
+    const action = varHintKeyAction(
+      {
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        isComposing: event.isComposing,
+        keyCode: event.keyCode,
+      },
+      { open: h.open, hasEntry: entry !== undefined },
+    );
+    if (action === 'none') return false;
+    event.preventDefault();
+    if (action === 'next') {
       if (entries.length > 0) h.setSelected((h.selected + 1) % entries.length);
       return true;
     }
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
+    if (action === 'prev') {
       if (entries.length > 0) h.setSelected((h.selected - 1 + entries.length) % entries.length);
       return true;
     }
-    if (event.key === 'Enter' || event.key === 'Tab') {
-      event.preventDefault();
-      const entry = entries[h.selected] ?? entries[0];
+    if (action === 'insert') {
       if (entry) h.insert(entry.key);
       return true;
     }
-    if (event.key === 'Escape') {
-      event.preventDefault();
+    if (action === 'close') {
       h.close();
       return true;
     }
@@ -422,8 +440,7 @@ function initialSchemaView(text: string): SchemaViewMode {
  * ----------------------
  * 两者回答的是不同的问题：左栏那个编辑器是**这一次发什么**，本编辑器是**这个接口接受
  * 什么**。合成一个编辑器时，两种内容只能挤在同一段 JSON 里，于是「写接口定义」与
- * 「调试一次请求」在同一个输入框里互相覆盖 —— AI 定义接口时把 Schema 写进了载荷，
- * 调试时又把取值写成了定义。分开之后，两个字段各有一个编辑器、两句说明。
+ * 「调试一次请求」在同一个输入框里互相覆盖。两个字段各有一个编辑器、两句说明。
  *
  * Schema 不参与发包（导出 OpenAPI 时才读它），故它写坏了不阻止发送与保存：导出那侧
  * 遇到不可解析的 schema 会自己报一条诊断，导出不会因此失败。

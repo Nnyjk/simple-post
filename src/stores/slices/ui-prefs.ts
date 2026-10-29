@@ -7,6 +7,7 @@ import { clampHistoryKeep, RESPONSE_HISTORY_KEEP_DEFAULT } from './history-keep'
 
 export {
   clampHistoryKeep,
+  parseHistoryKeepDraft,
   RESPONSE_HISTORY_KEEP_DEFAULT,
   RESPONSE_HISTORY_KEEP_MAX,
 } from './history-keep';

@@ -10,6 +10,7 @@ import {
   filterVarEntries,
   isInsideVarBlock,
   replacePartialVar,
+  varHintKeyAction,
   type VarEntry,
 } from './varHint';
 
@@ -129,21 +130,27 @@ export function useVarHint({
 
   const keyDown = useCallback(
     (e: ReactKeyboardEvent) => {
-      if (!open) return;
-      // 放过带修饰键的组合，全局快捷键（Ctrl+Enter、Ctrl+S）才仍能触发。
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
+      const entry = filtered[selected] ?? filtered[0];
+      const action = varHintKeyAction(
+        {
+          key: e.key,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+          isComposing: e.nativeEvent.isComposing,
+          keyCode: e.keyCode,
+        },
+        { open, hasEntry: entry !== undefined },
+      );
+      if (action === 'none') return;
+      e.preventDefault();
+      if (action === 'next') {
         if (filtered.length > 0) setSelected((s) => (s + 1) % filtered.length);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
+      } else if (action === 'prev') {
         if (filtered.length > 0) setSelected((s) => (s - 1 + filtered.length) % filtered.length);
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        const entry = filtered[selected] ?? filtered[0];
+      } else if (action === 'insert') {
         if (entry) insert(entry.key);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
+      } else if (action === 'close') {
         setOpen(false);
       }
     },
