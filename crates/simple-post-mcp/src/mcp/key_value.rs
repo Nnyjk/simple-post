@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 ///
 /// 逐个属性的说明一律省掉，只留名字、类型与取值范围：这一行的形状是协议定的，说明
 /// 文字对 agent 没有帮助，而 `tools/list` 的每一个字节都要乘以会话数。对象级的说明
-/// 保留了两条承重的事实（`id` 可选、`enabled` 缺省为 `true`）。
+/// 保留了两条必须说清的事实（`id` 可选、`enabled` 缺省为 `true`）。
 pub(crate) fn key_value_schema() -> Value {
     json!({
         "type": "object",

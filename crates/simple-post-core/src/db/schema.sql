@@ -333,7 +333,7 @@ CREATE TABLE IF NOT EXISTS dynamic_variables (
   value_mode         TEXT NOT NULL DEFAULT 'auto',
   -- 缓存有效期（秒）。
   ttl_seconds        INTEGER NOT NULL DEFAULT 60,
-  -- 取数失败时是否允许用已过期的缓存值兜底。默认不用。
+  -- 取数失败时是否允许用已过期的缓存值。默认不用。
   stale_fallback     INTEGER NOT NULL DEFAULT 0,
   enabled            INTEGER NOT NULL DEFAULT 1,
   sort_order         INTEGER NOT NULL DEFAULT 0,
@@ -442,7 +442,7 @@ END;
 -- 版本历史：
 --   0  版本号之前（原 modules/collections/endpoints 三表布局）。任何标记为 0 的文件
 --      当前构建读不了，会被从零重建。
---   2  `nodes` / `endpoint_details` 以增量方式落地，故更旧的 v2 文件在下次
+--   2  `nodes` / `endpoint_details` 以增量方式加入，故更旧的 v2 文件在下次
 --      `CREATE TABLE IF NOT EXISTS` 时白得它们，不需要自己的版本。
 --   3  当前。没有任何一列改动——改动的是 `endpoint_details.auth_json` **装的东西**。它存
 --      序列化的 `domain::AuthConfig`，而撤掉 `type` → `kind` 的 serde rename（以及
@@ -456,7 +456,7 @@ END;
 -- 重建 = bump 版本 = `ensure_current_schema` 删掉每个用户的库。由两种前任布局之一写下的
 -- 行由 `db::mod` 里的 `migrate_base_urls_into_value_layer` 修复。
 --
--- `response_history` 落地后**仍是**版本 3：新表是最纯粹的增量改动——上面每个 `CREATE`
+-- `response_history` 加入后**仍是**版本 3：新表是最纯粹的增量改动——上面每个 `CREATE`
 -- 都是 `IF NOT EXISTS`，故既有库在下次 `db::migrate` 白得它，既不需要 `ADDED_COLUMNS`
 -- 条目（那份列表是给「给已存在的表加列」用的）也不需要 bump 版本。
 --
@@ -465,7 +465,7 @@ END;
 -- `environments.disabled_variables_json` 同理：新列，经 `db::ADDED_COLUMNS` 到达，
 -- 旧行读回来是空集合（= 全部启用），故仍是版本 3。
 --
--- 请求脚本落地后**仍是**版本 3：`endpoint_details` 的两列是可空新列（经
+-- 请求脚本加入后**仍是**版本 3：`endpoint_details` 的两列是可空新列（经
 -- `db::ADDED_COLUMNS` 到达），`node_scripts` 是新表（`IF NOT EXISTS` 已覆盖）。
 -- bump 版本 = `ensure_current_schema` 删掉每个用户的库，而脚本功能不值得这个代价。
 --

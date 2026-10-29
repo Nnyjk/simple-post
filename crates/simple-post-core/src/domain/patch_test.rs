@@ -52,7 +52,7 @@ fn node_patch_distinguishes_absent_from_null() {
     assert_eq!(p.name.as_deref(), Some("renamed"));
     assert!(p.parent_id.is_none());
 
-    // `parentId: null` → 提升到项目顶层。那只对模块合法，但领域层承载的是意图，
+    // `parentId: null` → 提升到项目顶层。那只对模块合法，但领域层接受的是意图，
     // 执行类型矩阵是 DB 层的事。
     let p: ResourceNodePatch = serde_json::from_value(json!({ "parentId": null })).unwrap();
     assert_eq!(p.parent_id, Some(None));
@@ -68,10 +68,10 @@ fn a_default_patch_is_empty() {
 
 #[test]
 fn every_patch_field_alone_makes_the_patch_non_empty() {
-    // 这里守住的是：`is_empty` 曾是手写字段列表这个坑。加了字段却忘了扩列表，会让 MCP 的
+    // 这里守住的是：`is_empty` 从序列化推导，故新增字段不会与手写字段表失配。若改成手写
+    // 字段列表，加了字段却忘了扩列表，会让 MCP 的
     // `endpoint_update` 工具静默忽略该字段，而 Tauri 与 REST 路径——它们压根不调
     // `is_empty`——却会应用它。同一个 bug，随传输层不同给出两种相反的行为。
-    // `is_empty` 现从序列化推导，故不会失配。
     // 本测试是第二道防线，而它真正的职责不同：加字段会逼编译器在这里补一行，把一次静默
     // 跳过变成一处忘不掉的编辑。刻意用结构体更新语法——它让字段名与断言同一行，好让评审
     // 一眼对照两边。

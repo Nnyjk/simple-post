@@ -55,7 +55,7 @@ fn detail_payload_on_a_non_endpoint_is_rejected() {
     assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
 }
 
-// 父子矩阵。这些过去全靠外键保证。
+// 父子矩阵。这份矩阵由 `may_under` 与数据库触发器两处保证。
 
 #[test]
 fn a_module_may_not_have_a_node_parent() {
@@ -71,8 +71,8 @@ fn a_module_may_not_have_a_node_parent() {
 
 #[test]
 fn an_endpoint_may_hang_off_a_module_directly() {
-    // 单个 endpoint 的情形。要求一个 collection 曾让这种最简情况先得为此建一个用完即弃的
-    // 文件夹，故矩阵给 endpoint 命名两种父类型、只给 collection 一种。
+    // 单个 endpoint 的情形：它可以挂在 module 下，故矩阵给 endpoint 命名两种父类型、
+    // 只给 collection 一种。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     let (e, d) = endpoint("p1", "e1", "m1", 0);
@@ -82,7 +82,7 @@ fn an_endpoint_may_hang_off_a_module_directly() {
     assert_eq!(got.kind, ResourceNodeType::Endpoint);
     assert_eq!(got.parent_id.as_deref(), Some("m1"));
     assert_eq!(got.root_id, "p1");
-    // detail 行必须与节点一起落地，否则树上会有一行测试者打不开的东西。
+    // detail 行必须与节点一起写入，否则树上会有一行测试者打不开的东西。
     assert_eq!(
         db::with_conn(&pool, |c| db::endpoint_details::get(c, "e1"))
             .unwrap()

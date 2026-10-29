@@ -27,7 +27,7 @@ pub enum BaseUrlSource {
 ///
 /// 优先级（从高到低）：
 ///   1. `endpoint.base_url_override` —— 每端点的自定义模式。`None` 落到服务链；
-///      `Some(host)` 钉死该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义
+///      `Some(host)` 固定该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义
 ///      模式，URL 字段里已经是完整地址。
 ///   2. `detail.base_url_definition_id`，再退到项目 ★
 ///      （`project.default_base_url_definition_id`）。

@@ -60,7 +60,7 @@ fn init_rebuilds_a_legacy_store() {
     assert_eq!(projects, 0, "legacy rows must not survive a rebuild");
 
     // 旧的 `legacy_marker` 表彻底消失。这就是「文件被替换」的检查：就地清空旧文件会把它留下，
-    // 而一个本构建已不再理解的 schema，是它必须永远继续理解下去的东西。
+    // 而本构建必须永远继续理解自己写出的 schema。
     let still_there: i64 = with_conn(&pool, |c| {
         Ok(c.query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='legacy_marker'",

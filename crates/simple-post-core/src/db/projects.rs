@@ -17,7 +17,7 @@ use crate::error::AppError;
 /// 全部项目，并填好各自的 `base_url_definitions`。两条查询——一条取项目行，一条按
 /// project_id 分组取全部定义——故代价不随每个项目有几个定义而变。
 pub fn list(conn: &mut Connection) -> Result<Vec<Project>, AppError> {
-    // 先收集项目，好让 `stmt` 对 `conn` 的借用在为定义 join 打开第二条语句之前就结束。
+    // list 先收集项目，好让 `stmt` 对 `conn` 的借用在为定义 join 打开第二条语句之前就结束。
     let mut projects = Vec::new();
     {
         let mut stmt = conn.prepare(
@@ -118,7 +118,7 @@ pub fn update(conn: &mut Connection, id: &str, patch: ProjectPatch) -> Result<Pr
         sets.push(format!("color = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(c.clone()));
     }
-    // 总是推进 updated_at。
+    // update 总是推进 updated_at，即便 patch 只带了别的字段。
     sets.push(format!("updated_at = ?{}", binds.len() + 1));
     binds.push(rusqlite::types::Value::Integer(crate::domain::now_ms()));
 
@@ -177,7 +177,7 @@ pub const DEFAULT_MODULE_NAME: &str = "默认模块";
 ///   笛卡尔网格里填它，那里他正在填的那一行是看得见的。
 ///
 /// 返回的 `Project` 是写入后的读结果，调用方可直接回传给渲染层而无需重新拉取。
-/// 调用方必须已持有事务（`db::with_tx`）：项目、它的环境与它的模块必须一起落地，否则都不该落。
+/// 调用方必须已持有事务（`db::with_tx`）：项目、它的环境与它的模块必须一起写入，否则一个都不该写。
 pub fn create_with_defaults(conn: &mut Connection, project: &Project) -> Result<Project, AppError> {
     let mut project = project.clone();
     // 调用方的结构体可能带着为表单准备的乐观状态（对重新提交的表单，还有一个乐观的 ★）。
@@ -226,9 +226,9 @@ fn row_to_project(row: &Row<'_>) -> Result<Project, rusqlite::Error> {
         id: row.get(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
-        // 不落库；仅遗留迁移使用
+        // base_url 不落库；仅遗留迁移使用
         base_url: None,
-        // 由 populate_defs 填充
+        // base_url_definitions 由 populate_defs 填充
         base_url_definitions: Vec::new(),
         default_base_url_definition_id: row.get(3)?,
         color: row.get(4)?,
@@ -249,7 +249,7 @@ fn populate_defs(conn: &mut Connection, projects: &mut [Project]) -> Result<(), 
          WHERE project_id IN (SELECT id FROM projects) \
          ORDER BY project_id ASC, sort_order ASC, id ASC",
     )?;
-    // 按 project_id 分桶。数据集很小（总共几十条定义），HashMap 有点大材小用，但代码路径更直白。
+    // populate_defs 按 project_id 分桶。数据集很小（总共几十条定义），HashMap 有点大材小用，但代码路径更直白。
     let mut by_project: std::collections::HashMap<String, Vec<crate::domain::BaseUrlDefinition>> =
         std::collections::HashMap::new();
     let rows = stmt.query_map([], |row| {

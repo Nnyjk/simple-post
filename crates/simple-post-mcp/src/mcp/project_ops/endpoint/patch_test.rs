@@ -356,8 +356,8 @@ async fn endpoint_update_leaves_the_path_parameters_alone_when_the_field_is_abse
     );
 }
 
-/// An empty patch used to be a silent success that wrote nothing and
-/// returned the unchanged endpoint, which reads as "it worked".
+/// An empty patch must not be a silent success that writes nothing and
+/// returns the unchanged endpoint, which reads as "it worked".
 #[tokio::test]
 async fn endpoint_update_rejects_an_empty_patch() {
     let (st, id) = fixture();

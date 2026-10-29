@@ -1,6 +1,6 @@
 //! 动态变量 MCP 工具的测试。
 //!
-//! 定义是**全局**的，故这批测试不再按项目分桶：创建与列出都不带项目参数，权限门落在
+//! 定义是**全局**的，故这批测试不按项目分桶：创建与列出都不带项目参数，权限门落在
 //! 「数据源接口所属的项目」上。
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -135,7 +135,7 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 disabled_variables: vec![],
             },
         )?;
-        // p2 的树：一个模块下一个接口。改指数据源到 p2 的接口时，落点就是它。
+        // p2 的树：一个模块下一个接口。改指数据源到 p2 的接口时，写入目标就是它。
         db::nodes::create(
             c,
             &ResourceNode {

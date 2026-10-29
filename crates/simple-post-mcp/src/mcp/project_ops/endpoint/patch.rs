@@ -1,7 +1,7 @@
 //! 严格的 patch 字段读取器。
 //!
 //! `endpoint_update` 的每个字段都经这里读，契约是四档：键缺失 → 不动、JSON `null` →
-//! 清空、有值 → 写入、格式错 → `Validation`。第四档承重。
+//! 清空、有值 → 写入、格式错 → `Validation`。第四档不能省。
 
 use serde_json::Value;
 

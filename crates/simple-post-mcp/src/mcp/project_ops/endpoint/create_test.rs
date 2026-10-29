@@ -386,9 +386,9 @@ async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
     );
 }
 
-/// A typo'd `auth_config` used to be swallowed into an all-default
-/// `AuthConfig` via `unwrap_or_default()`, so the create succeeded and
-/// described an endpoint whose bearer token did not exist.
+/// A typo'd `auth_config` must not be swallowed into an all-default
+/// `AuthConfig` via `unwrap_or_default()`, or the create succeeds and
+/// describes an endpoint whose bearer token does not exist.
 #[tokio::test]
 async fn endpoint_create_rejects_a_malformed_auth_config() {
     let st = state();

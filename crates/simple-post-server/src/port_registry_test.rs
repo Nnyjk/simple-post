@@ -4,7 +4,7 @@
 //! `SIMPLE_POST_DATA_DIR` 指向的系统临时目录，永不触碰开发者真实的 `mcp.port`。
 
 use super::*;
-// 这两个随职责拆进了子模块；断言与拆分前逐字相同，只是改从那里取。
+// 这两个住在子模块里，本文件从那里取。
 use super::paths::DATA_DIR_ENV;
 use super::record::now_secs;
 use std::path::PathBuf;
@@ -134,7 +134,7 @@ fn write_replaces_stale_record_after_dead_pid() {
 #[test]
 fn release_is_idempotent_when_missing() {
     let _env = ScopedEnv::new();
-    // 此前没有写入。
+    // 这个目录里还没有写入过任何记录。
     release().expect("release on empty dir");
     release().expect("release again");
 }

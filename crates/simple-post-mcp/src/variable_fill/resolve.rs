@@ -1,7 +1,7 @@
 //! `resolve_endpoint` —— 主 API，把端点 + 环境 + 项目 + 覆盖值合成线上形状。
 //!
 //! 对应渲染进程的 `buildFetchInit`；顺序（先拼 baseUrl 再替换变量、最后收斜杠）
-//! 是承重的，改动顺序会改出别的 URL。
+//! 不能改，改动顺序会改出别的 URL。
 
 use std::collections::HashMap;
 

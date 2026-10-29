@@ -134,7 +134,7 @@ fn capability_policy_round_trip() {
 
 #[test]
 fn capability_policy_satisfies_matrix() {
-    // ReadOnly
+    // ReadOnly — covers Read only.
     assert!(CapabilityPolicy::ReadOnly.satisfies(Capability::Read));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Create));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Update));

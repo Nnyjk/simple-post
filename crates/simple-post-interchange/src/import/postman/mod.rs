@@ -153,7 +153,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
 
     let environments = parse_variables(root, &project_name);
 
-    // 整份集合根上的 `event[]`（整个集合的前置 / 测试脚本）**没有落点**。
+    // 整份集合根上的 `event[]`（整个集合的前置 / 测试脚本）**无处可写**。
     //
     // 本仓库的脚本住在端点与集合上，而「整份集合」不是一个节点：顶层条目各自成一个
     // 模块，挂进已有模块时那些模块降级成集合。故根上的脚本挂不到任何一个上——

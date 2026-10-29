@@ -111,7 +111,7 @@ async fn tool_api_resolve_template(
     };
     crate::mcp::check_permission(&state.pool, &gate_project, "api_resolve_template").await?;
 
-    // 取指定环境的变量，取不到就用空表。
+    // 这一段取指定环境的变量，取不到就用空表。
     let vars = if let Some(env_id) = a.env_id.as_deref() {
         simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::environments::get(c, env_id)

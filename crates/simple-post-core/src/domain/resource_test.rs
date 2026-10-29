@@ -79,9 +79,9 @@ fn permission_round_trip() {
 
 #[test]
 fn permission_serde_wire_matches_as_str() {
-    // 这里守住的是：`rename_all = "lowercase"` 曾把 ReadCall 拼成 `"readcall"`，一种既不匹配
-    // `as_str()`、也不匹配 `agent_permissions` CHECK 约束、更不匹配 TS 联合类型的第三种
-    // 拼法。往返测试抓不到它——serde 读得回自己编出来的东西——所以靠的是这条断言。
+    // 这里守住的是：线格式必须与 `as_str()` 一致，且同时匹配 `agent_permissions` 的 CHECK
+    // 约束与 TS 联合类型。三者只要有一处不一致，权限值就有第三种拼法。
+    // 往返测试抓不到它——serde 读得回自己编出来的东西——所以靠的是这条断言。
     for p in [Permission::Read, Permission::ReadCall, Permission::Full] {
         let wire = serde_json::to_string(&p).unwrap();
         assert_eq!(
@@ -161,8 +161,8 @@ fn may_under_is_the_whole_parent_child_matrix() {
     assert!(Collection.may_under(Collection));
     assert!(!Collection.may_under(Endpoint));
 
-    // endpoint 是唯一命名*两种*父的行。强制一个 collection 曾让「单个 endpoint、无文件夹」
-    // 这种最简情况先得建一个用完即弃的 collection。
+    // endpoint 是唯一命名*两种*父的行：它可以挂在 module 下，也可以挂在 collection 下，
+    // 故「单个 endpoint、无文件夹」的最简情况不必先建一个用完即弃的 collection。
     assert!(Endpoint.may_under(Module));
     assert!(Endpoint.may_under(Collection));
     assert!(!Endpoint.may_under(Endpoint));

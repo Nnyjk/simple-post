@@ -5,7 +5,7 @@
 //!
 //! ## 合并丢了什么，由什么接管
 //!
-//! 三表布局靠外键（如 `endpoints.collection_id REFERENCES collections(id)`）免费得到
+//! 三表布局靠外键（如 `endpoints.collection_id REFERENCES collections(id)`）直接实现
 //! 「父永远接受它的列能指名的那些类型」。单一多态 `parent_id` 做不到：SQLite 的 CHECK
 //! 约束读不到别的行。
 //!

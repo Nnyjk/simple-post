@@ -64,7 +64,7 @@ pub const RESPONSE_HISTORY_MAX_BODY_BYTES: usize = 256 * 1024;
 ///
 /// 刻意不是 [`ApiResponse`]：那个类型把 headers 建模为有序对，只为不丢重复的 `Set-Cookie`
 /// 而熬过一次 IPC。响应入库时早已越过那道边界、并被 `tuplesToRecord` 折成普通对象——重复头的
-/// 丢失已经发生，不是本类型的问题。此处存对子等于存渲染层已不再拥有的信息，而渲染层自己的
+/// 丢失在入库前就发生了，不是本类型的问题。此处存对子等于存渲染层已经拿不到的信息，而渲染层自己的
 /// `ApiResponse` 就得多长一种形状。
 /// 本类型是 `src/types/domain.ts` 里 `ApiResponse` 的 Rust 镜像，那同样是适配**之后**的类型，
 /// 而非上面 [`ApiResponse`] 的镜像。
@@ -119,7 +119,7 @@ pub struct StoredRequestSnapshot {
 /// `response_history` 的一行。
 ///
 /// 外面包一层而不是给已存响应加宽 `id` / `createdAt`，是因为两者生命周期不同：响应是载荷，
-/// 这三个是行的身份。它也让 `bodyTruncated` 紧挨它所描述的 body——把这个标志抹到
+/// 这三个是行的身份。它也让 `bodyTruncated` 紧挨它所描述的 body——把这个标志写进
 /// `StoredResponse` 上，就得在那里把它设为可选、在这里设为必填，只为一比特的信息。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

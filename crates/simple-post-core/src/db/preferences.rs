@@ -135,7 +135,7 @@ pub mod keys {
     pub const RESPONSE_HISTORY_KEEP: &str = "response_history.keep";
 }
 
-/// 每个 endpoint 最多保留多少条未收藏历史的天花板。
+/// 每个 endpoint 最多保留多少条未收藏历史的上限。
 ///
 /// 用户在设置里能改这个数，但再大的值也没有意义：历史条带一次也显示不完那么多行，
 /// 而每一行都在用户的 `store.db` 里占着地方。
