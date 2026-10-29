@@ -1,10 +1,10 @@
-//! 一条 request 落成一个 endpoint：URL 拆成 path / params / 一台 server，其余字段各归各处。
+//! 一条 request 落成一个 endpoint：URL 拆成 path / params / 这条自己的地址，其余字段各归各处。
 
 use serde_json::{Map, Value};
 use simple_post_core::domain::{parse_http_method, KeyValue};
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{IrEndpoint, IrScripts, IrServer};
+use crate::ir::{IrEndpoint, IrScripts};
 
 use super::auth::parse_auth;
 use super::body::parse_body;
@@ -16,7 +16,6 @@ pub(super) fn build_endpoint(
     name: String,
     ptr: &str,
     scripts: IrScripts,
-    servers: &mut Vec<IrServer>,
     ctx: &mut Ctx,
 ) -> Option<IrEndpoint> {
     let Some(url_value) = req.get("url") else {
@@ -43,12 +42,6 @@ pub(super) fn build_endpoint(
     };
 
     let url = UrlParts::new(url_value, &format!("{ptr}/request/url"), ctx);
-    if let Some(server) = &url.server {
-        // 同一 host 在这个模块里出现多次只算一个服务。
-        if !servers.iter().any(|s| s.url == server.url) {
-            servers.push(server.clone());
-        }
-    }
 
     let endpoint = IrEndpoint {
         key: format!("{ptr}/request"),
@@ -56,6 +49,9 @@ pub(super) fn build_endpoint(
         description: description_text(req.get("description")),
         method,
         path: url.path,
+        // 拆出来的 host 是这一条自己的地址。模块那一格放得下一个地址，故模块里的
+        // 第一个地址交给模块，其余的留给各自的端点。
+        base_url_override: url.host,
         params: url.params,
         headers: kv_list(req.get("header"), &format!("{ptr}/request/header"), ctx),
         body: parse_body(req, &format!("{ptr}/request/body"), ctx),
@@ -69,14 +65,15 @@ pub(super) fn build_endpoint(
 }
 
 // -------------------------------------------------------------------------
-// URL —— 拆成 path + params + 一台 server
+// URL —— 拆成 path + params + 这条自己的地址
 // -------------------------------------------------------------------------
 
-/// URL 的三段落法：path-only 的路径、query 参数、以及一台服务。
+/// URL 的三段落法：path-only 的路径、query 参数、以及这台机器的地址。
 struct UrlParts {
     path: String,
     params: Vec<KeyValue>,
-    server: Option<IrServer>,
+    /// 拆出来的 host 前缀（带 scheme）。`None` = 这条 URL 里没有 host。
+    host: Option<String>,
 }
 
 impl UrlParts {
@@ -95,7 +92,7 @@ impl UrlParts {
             return Self {
                 path: String::new(),
                 params: Vec::new(),
-                server: None,
+                host: None,
             };
         };
 
@@ -112,44 +109,41 @@ impl UrlParts {
             .unwrap_or_else(|| parse_query_string(query));
 
         match authority {
-            // 整体占位（`{{baseUrl}}/users`）拆不出稳定的服务名，整串留在 path 里。
+            // 整体占位（`{{baseUrl}}/users`）拆不出稳定的地址，整串留在 path 里。
             Some(host) if host.contains("{{") => {
                 ctx.diagnostics.push(
                     Diagnostic::warn(
                         ptr,
-                        "host 是一个整体变量，拆不出稳定的服务名；整串 URL 保留在 path 里",
+                        "host 是一个整体变量，拆不出稳定的地址；整串 URL 保留在 path 里",
                     )
                     .dropping(raw.clone()),
                 );
                 Self {
                     path: raw,
                     params,
-                    server: None,
+                    host: None,
                 }
             }
             Some(host) if !host.is_empty() => Self {
                 path: path_part.to_string(),
                 params,
-                server: Some(IrServer {
-                    service: super::service_name(host),
-                    url: match protocol.filter(|p| !p.is_empty()) {
-                        Some(p) => format!("{p}://{host}"),
-                        None => format!("//{host}"),
-                    },
+                host: Some(match protocol.filter(|p| !p.is_empty()) {
+                    Some(p) => format!("{p}://{host}"),
+                    None => format!("//{host}"),
                 }),
             },
             _ => {
                 ctx.diagnostics.push(
                     Diagnostic::warn(
                         ptr,
-                        "URL 里没有 host（相对地址或整体变量），无法生成服务；整串保留在 path 里",
+                        "URL 里没有 host（相对地址或整体变量），无法生成地址；整串保留在 path 里",
                     )
                     .dropping(raw.clone()),
                 );
                 Self {
                     path: path_part.to_string(),
                     params,
-                    server: None,
+                    host: None,
                 }
             }
         }

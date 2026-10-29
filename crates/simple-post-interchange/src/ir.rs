@@ -8,15 +8,14 @@
 //!    [`simple_post_core::domain::EndpointDetail::node_id`] 此刻根本不存在。
 //! 2. **诊断无处安放。** `domain` 每个字段都是标称值，没有位置能说「这里原本是个
 //!    multipart file 字段，被丢掉了」。
-//! 3. **导出要跨四张表。** host 不在 endpoint 上，URL 按 (环境 × 模块 × 服务) 二级索引，
+//! 3. **导出要跨四张表。** host 不在 endpoint 上，URL 按 (环境 × 模块) 一级索引，
 //!    故投影必须先自己选定环境（见 [`Exchange::environment_id`]）。
 //!
 //! ## `IrEndpoint::path` 是 path-only
 //!
-//! 刻意**不**复用 `EndpointDetail`：那个结构体带 `node_id`、`environment_id` 与
-//! `base_url_definition_id` 三个此刻要么不存在、要么属于标准格式而非外来格式的身份字段。
-//! 外来格式给的是整条 URL，host 的部分要么成为服务、要么成为诊断，两件事都在
-//! `format → ir` 这一侧发生，所以 `ir` 存路径。
+//! 刻意**不**复用 `EndpointDetail`：那个结构体带 `node_id` 与 `environment_id` 两个此刻
+//! 不存在的身份字段。外来格式给的是整条 URL，host 的部分要么成为模块那一格、要么成为端点
+//! 自己的 `base_url_override`，两件事都在 `format → ir` 这一侧发生，所以 `ir` 存路径。
 //!
 //! ## `key` 是「IR 还没成为节点」的那一半身份
 //!
@@ -57,13 +56,12 @@ pub struct IrModule {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// 本模块在**选定环境**下为各服务配置的 URL。IR 不带 id，故这里按服务**名**索引：
-    /// `base_url_definitions` 是项目级的表，同一项目里两个服务不可能同名。
+    /// 本模块在**选定环境**下那一格的地址：一个模块一格，没有第二层。
     ///
-    /// 该模块没配就是没有 URL——**没有回退层**，不借用别的模块的值，也不落回项目 ★。
+    /// 该模块没配就是没有地址——**没有回退层**，不借用别的模块的值。
     /// 故缺席是一个真实答案，不是「待补」。
-    #[serde(default)]
-    pub servers: Vec<IrServer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<IrBaseUrl>,
     /// 直接挂在模块下的 endpoint。`ResourceNodeType::may_under` 允许这一层，
     /// 好让「一个 endpoint」这种最简形状不必先建一个用完即弃的 collection。
     #[serde(default)]
@@ -79,14 +77,15 @@ pub struct IrModule {
     pub scripts: IrScripts,
 }
 
-/// 一个 (模块 × 环境) 单元格的实际取值。键是服务名而不是 id：IR 是无 id 的中间态，
-/// 而服务表由项目拥有，同项目内名字已无歧义。
+/// 一个（环境 × 模块）格子里的地址。
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IrServer {
-    /// `base_url_definitions.name`。项目内唯一。
-    pub service: String,
+pub struct IrBaseUrl {
+    /// 后端 api 地址。
     pub url: String,
+    /// 实际访问地址。`None` = 没有代理，请求直接打 `url`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
 }
 
 /// 分组。递归嵌套，深度无上限——`may_under` 允许 collection 挂 collection，
@@ -147,9 +146,15 @@ pub struct IrEndpoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub method: HttpMethod,
-    /// **只有路径。** host 来自服务或环境，不在这里——这正是 `ir` 不能是 `domain` 别名的
-    /// 第三个理由（见模块文档）。
+    /// **只有路径。** host 归模块那一格或本端点自己的 `base_url_override`，不在这里——这正是
+    /// `ir` 不能是 `domain` 别名的第三个理由（见模块文档）。
     pub path: String,
+    /// 端点自己的地址前缀。`Some` 时这个端点不套用模块那一格。
+    ///
+    /// 外来文档的 host 是**逐条**给的，而一格里只放得下一个地址，故一个模块里出现第二个
+    /// host 时，那几条端点各自带着自己的地址，模块那一格留给第一个 host。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url_override: Option<String>,
     #[serde(default)]
     pub params: Vec<KeyValue>,
     /// URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
@@ -236,7 +241,7 @@ pub fn subtree_keys(module: &IrModule) -> BTreeSet<String> {
 }
 
 /// 一组「本层端点 + 下层分组」里的全部端点 key。模块与集合形状相同，只是模块多一个
-/// `servers` 字段，故共这一个走查器。
+/// `base_url` 字段，故共这一个走查器。
 ///
 /// **显式工作栈而非递归**：IR 的 collection 嵌套深度无上限，递归会让一棵畸形外来
 /// 文件靠栈深度把预览或写路径带走。
@@ -253,6 +258,19 @@ pub(crate) fn endpoint_keys_of(
         for ep in &c.endpoints {
             out.insert(ep.key.clone());
         }
+        stack.extend(c.collections.iter().rev());
+    }
+    out
+}
+
+/// 这个模块子树里的全部端点，按文档顺序。
+///
+/// **显式工作栈而非递归**：理由同 [`endpoint_keys_of`]。
+pub(crate) fn endpoints_of(module: &IrModule) -> Vec<&IrEndpoint> {
+    let mut out: Vec<&IrEndpoint> = module.endpoints.iter().collect();
+    let mut stack: Vec<&IrCollection> = module.collections.iter().rev().collect();
+    while let Some(c) = stack.pop() {
+        out.extend(c.endpoints.iter());
         stack.extend(c.collections.iter().rev());
     }
     out

@@ -9,7 +9,7 @@ use simple_post_core::error::AppError;
 use super::support::{doc_of, ep, one_module};
 use super::{to_document, DocFormat};
 use crate::diagnostics::Severity;
-use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
+use crate::ir::{Exchange, IrBaseUrl, IrCollection, IrEndpoint, IrModule, IrScripts};
 
 /// 这个 operation 的 `requestBody` 引用的 component 名字。
 ///
@@ -187,10 +187,10 @@ fn servers_are_taken_per_module_and_never_borrowed() {
         modules: vec![
             IrModule {
                 name: "with".into(),
-                servers: vec![IrServer {
-                    service: "api".into(),
+                base_url: Some(IrBaseUrl {
                     url: "https://api.example.com".into(),
-                }],
+                    proxy: None,
+                }),
                 endpoints: vec![ep("a", HttpMethod::Get, "/a")],
                 ..Default::default()
             },

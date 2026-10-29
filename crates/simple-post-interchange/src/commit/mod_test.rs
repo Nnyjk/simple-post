@@ -92,8 +92,8 @@ fn endpoint_details_land_with_their_nodes() {
     assert_eq!(detail.headers.len(), 1);
     assert_eq!(detail.body.mode, BodyMode::Json);
     assert_eq!(detail.auth.kind, simple_post_core::domain::AuthType::Bearer);
-    // 外来格式给不出服务与环境，写 None 是真实答案（「用项目的 ★」）。
-    assert_eq!(detail.base_url_definition_id, None);
+    // 端点没有自己的地址：它跟随模块那一格。
+    assert_eq!(detail.base_url_override, None);
 }
 
 #[test]

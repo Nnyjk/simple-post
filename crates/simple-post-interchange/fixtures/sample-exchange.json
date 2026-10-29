@@ -5,11 +5,11 @@
     {
       "key": "m0",
       "name": "用户",
-      "description": "配了服务 URL 的模块",
-      "servers": [
-        { "service": "网关", "url": "https://api.acme.test/v1" },
-        { "service": "上传", "url": "https://upload.acme.test" }
-      ],
+      "description": "配了地址的模块",
+      "baseUrl": {
+        "url": "https://api.acme.test/v1",
+        "proxy": "https://gw.acme.test/v1"
+      },
       "endpoints": [
         {
           "key": "m0e0",
@@ -234,8 +234,8 @@
     },
     {
       "key": "m1",
-      "name": "无服务模块",
-      "description": "这个模块在选定环境里没有配任何 URL，导出时不得借到 m0 的地址",
+      "name": "无地址模块",
+      "description": "这个模块在选定环境里没有配地址，导出时不得借到 m0 的地址",
       "endpoints": [
         {
           "key": "m1e0",

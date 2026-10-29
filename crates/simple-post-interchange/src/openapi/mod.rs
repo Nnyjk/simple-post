@@ -9,8 +9,7 @@
 //! - **`responses` 合成默认，不猜。** `StoredResponse` 存的是实际响应，里面没有响应
 //!   schema；请求体那份定义（`RequestBody.schema`）说的是**请求**，不能拿来当响应形状。
 //!   故每个 operation 输出一个 `200: OK`。
-//! - **`servers` 逐模块取，不回退。** 该模块没配就是没有 URL：不借用别的模块的，
-//!   也不落回项目 ★。
+//! - **`servers` 逐模块取，不回退。** 该模块没配就是没有 URL：不借用别的模块的。
 //! - **`tags` 就是集合名。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这层就在产物里
 //!   消失，重新导入时全部塌成一个分组。tag 是扁平字符串，故只落**最外层**集合——
 //!   见 [`document_tags`]。
@@ -381,7 +380,7 @@ pub fn to_document(ex: &Exchange, format: DocFormat) -> Result<Document, AppErro
     let mut stack: Vec<Pending> = ex.modules.iter().rev().map(Pending::module).collect();
     while let Some(p) = stack.pop() {
         for ep in p.endpoints {
-            b.operation(ep, p.servers, p.group);
+            b.operation(ep, p.base_url, p.group);
         }
         // 集合与模块上的脚本同样表达不了。集合没有文档位置（它落成 tag），故指针
         // 指回它在树里的身份——导出侧的 `key` 就是 `nodes.id`。
@@ -392,7 +391,7 @@ pub fn to_document(ex: &Exchange, format: DocFormat) -> Result<Document, AppErro
             p.collections
                 .iter()
                 .rev()
-                .map(|c| Pending::collection(c, p.servers, p.group)),
+                .map(|c| Pending::collection(c, p.base_url, p.group)),
         );
     }
     for m in &ex.modules {

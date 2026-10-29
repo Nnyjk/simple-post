@@ -67,10 +67,10 @@ fn a_real_collection_lands_as_modules_collections_and_endpoints() {
     assert_eq!(root_module.endpoints[0].key, "/item/1/request");
     assert_eq!(root_module.endpoints[0].path, "/healthz");
 
-    // 同一 host 在模块内只算一台服务。
-    assert_eq!(m.servers.len(), 1);
-    assert_eq!(m.servers[0].service, "api.example.com");
-    assert_eq!(m.servers[0].url, "https://api.example.com");
+    // 一个模块一格：格子里的地址是这个模块里第一个端点的地址。
+    let cell = m.base_url.as_ref().expect("模块那一格");
+    assert_eq!(cell.url, "https://api.example.com");
+    assert_eq!(cell.proxy, None);
     assert_eq!(ex.endpoint_count(), 3);
 }
 

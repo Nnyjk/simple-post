@@ -6,7 +6,8 @@
 //!
 //! - **表达不了的构造必须出声。** 每一处降级映射都写一条 [`Diagnostic`]：静默丢一个
 //!   字段与没写这个字段的解析器，对用户是同一件事。
-//! - **路径是 path-only。** host 归 [`IrModule::servers`]，query 归
+//! - **路径是 path-only。** host 归 [`IrModule::base_url`] 与
+//!   [`crate::ir::IrEndpoint::base_url_override`]，query 归
 //!   [`crate::ir::IrEndpoint::params`]；拆不出 host 时整串留在 path 里——留一个错的路径，
 //!   好过静默丢掉整条 URL。
 //! - **嵌套深度无上限。** folder 树用显式工作栈遍历，故一棵畸形外来文件只会拿到一堆
@@ -26,14 +27,12 @@ use simple_post_core::domain::{uid, Environment, KeyValue};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{Exchange, IrModule, IrScripts, IrServer};
+use crate::ir::{Exchange, IrBaseUrl, IrModule, IrScripts};
 
-// `request.rs` 里的 `super::service_name` 要落到这条绑定上，故它得挂在 `postman` 而非
-// `request` 自己的 `use` 里。
 use self::request::{build_endpoint, rebuild_raw};
 use self::script::{parse_scripts, Place};
 use self::tree::{classify, walk_children, Class};
-use super::{service_name, ParsedExchange};
+use super::ParsedExchange;
 
 /// 解析期的累积状态。
 #[derive(Default)]
@@ -88,15 +87,12 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                 continue;
             };
 
-            let mut servers: Vec<IrServer> = Vec::new();
             match classify(obj, &ptr, &mut ctx) {
                 Class::Request(req) => {
                     let mut endpoints = Vec::new();
                     // 脚本挂在**条目**上，不在 `request` 里。
                     let scripts = parse_scripts(obj, &ptr, Place::Node, &mut ctx);
-                    if let Some(ep) =
-                        build_endpoint(req, item_name(obj), &ptr, scripts, &mut servers, &mut ctx)
-                    {
+                    if let Some(ep) = build_endpoint(req, item_name(obj), &ptr, scripts, &mut ctx) {
                         endpoints.push(ep);
                     }
                     if endpoints.is_empty() {
@@ -109,7 +105,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                                 key: LOOSE_KEY.to_string(),
                                 name: project_name.clone(),
                                 description: None,
-                                servers: Vec::new(),
+                                base_url: None,
                                 endpoints: Vec::new(),
                                 collections: Vec::new(),
                                 scripts: IrScripts::default(),
@@ -119,18 +115,12 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                     };
                     loose_at = Some(at);
                     modules[at].endpoints.extend(endpoints);
-                    // 散落请求可能各带各的 host；按服务名去重后并进去。
-                    for s in servers {
-                        if !modules[at].servers.iter().any(|e| e.service == s.service) {
-                            modules[at].servers.push(s);
-                        }
-                    }
                 }
                 Class::Folder(items) => {
                     // 顶层 folder 会落成**模块**（挂进已有模块时降级成集合）。模块不能存
                     // 脚本，故脚本先读出来带着，落库侧再按落点决定写不写。
                     let scripts = parse_scripts(obj, &ptr, Place::Node, &mut ctx);
-                    let c = walk_children(items, &ptr, &mut servers, &mut ctx);
+                    let c = walk_children(items, &ptr, &mut ctx);
                     // 空容器不进树：预览里挂一个什么都没有的模块，只会让人以为少导了东西
                     // （落库侧同样跳过空容器，见 `ir::subtree_keys`）。
                     if c.endpoints.is_empty() && c.collections.is_empty() {
@@ -140,7 +130,7 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                         key: ptr,
                         name: item_name(obj),
                         description: description_text(obj.get("description")),
-                        servers,
+                        base_url: None,
                         endpoints: c.endpoints,
                         collections: c.collections,
                         scripts,
@@ -150,6 +140,10 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
             }
         }
     }
+
+    // 一个模块一格：格子里的地址取这个模块子树里第一个端点的地址。模块里的第二个
+    // 地址没有地方放，那些端点各自带着自己的地址（`IrEndpoint::base_url_override`）。
+    assign_module_base_urls(&mut modules);
 
     let environments = parse_variables(root, &project_name);
 
@@ -176,9 +170,27 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
 // environment / 小工具
 // -------------------------------------------------------------------------
 
+/// 给每个模块定下它那一格。
+///
+/// 一个模块一格，故格子里的地址取这个模块子树里第一个端点的地址。模块里的第二个
+/// 地址没有地方放：那些端点各自带着自己的地址（`IrEndpoint::base_url_override`），
+/// 不套用模块这一格。Postman 的 `host` 逐条给，故这里从端点那里回收。
+fn assign_module_base_urls(modules: &mut [IrModule]) {
+    for m in modules.iter_mut() {
+        let first = {
+            let endpoints = crate::ir::endpoints_of(m);
+            endpoints
+                .iter()
+                .find_map(|e| e.base_url_override.clone())
+                .filter(|url| !url.is_empty())
+        };
+        m.base_url = first.map(|url| IrBaseUrl { url, proxy: None });
+    }
+}
+
 /// 文档自带的 `variable[]` → 一个环境。
 ///
-/// 它是**收集变量**，不是服务：导成 `base_url_definitions` 会凭空造出一台不存在的服务。
+/// 它是**收集变量**，不是地址：导成模块那一格会凭空造出一台不存在的机器。
 /// `is_active` 恒为 false：导入不抢激活位。
 fn parse_variables(root: &Map<String, Value>, name: &str) -> Vec<Environment> {
     let Some(arr) = root.get("variable").and_then(Value::as_array) else {
@@ -206,7 +218,6 @@ fn parse_variables(root: &Map<String, Value>, name: &str) -> Vec<Environment> {
         id: uid(),
         project_id: String::new(),
         name: name.to_string(),
-        base_urls: HashMap::new(),
         module_base_urls: HashMap::new(),
         variables,
         disabled_variables,

@@ -31,8 +31,7 @@ fn collection_variables_become_an_environment_not_a_service() {
         env.variables.get("base").map(String::as_str),
         Some("https://api.example.com")
     );
-    // 变量不是服务：导成服务会凭空造出一台不存在的机器。
-    assert!(env.base_urls.is_empty());
+    // 变量不是地址：导成模块那一格会凭空造出一台不存在的机器。
     assert!(env.module_base_urls.is_empty());
     assert!(!env.is_active, "导入不抢激活位");
 
