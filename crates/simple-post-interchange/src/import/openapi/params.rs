@@ -196,7 +196,7 @@ pub(super) fn request_body(
     let media = normalize_media(&picked);
     let mode = mode_of(&media);
     if mode == BodyMode::Multipart {
-        return multipart_body(ctx, picked_media, &at_ptr);
+        return multipart_body(ctx, view, picked_media, &at_ptr);
     }
     let sample = picked_media
         .get("example")
@@ -204,8 +204,31 @@ pub(super) fn request_body(
     RequestBody {
         mode,
         content: sample.map(scalar_text).unwrap_or_default(),
-        schema: None,
+        schema: import_schema(ctx, view, picked_media, &at_ptr),
     }
+}
+
+/// `content[media].schema` → `body.schema`（一份 JSON Schema 文本）。
+///
+/// **本地 `$ref` 展开成内联内容。** `body.schema` 存的是一段**自足**的文本：导出器
+/// 把它写进 `components.schemas` 并让 `requestBody` 指过去，而那份 components 是导出
+/// 时自己生成的——存一段带 `$ref` 的文本进去，导出时那份引用指不到任何东西。
+///
+/// 只收**对象**：布尔 schema（`true` / `false`）不是导出器认的那种（它要写成
+/// `components.schemas` 里的一个对象），收进来只会在导出时变成一条「不是合法的
+/// JSON Schema 对象」的诊断。故这里就不收，也说一句。
+fn import_schema(ctx: &mut Ctx, view: &DocView, media: &Value, at_ptr: &str) -> Option<String> {
+    let raw = media.get("schema")?;
+    // deref 遇到成环或指不到东西时返回 None，并且已经为它出过诊断。
+    let expanded = deref(ctx, view.root, raw, at_ptr)?;
+    if !expanded.is_object() {
+        ctx.diagnostics.push(Diagnostic::info(
+            at_ptr,
+            "请求体上的 schema 不是一个 JSON Schema 对象，这份定义没有导入",
+        ));
+        return None;
+    }
+    Some(expanded.to_string())
 }
 
 /// multipart 请求体 → 分片数组。
@@ -222,11 +245,14 @@ pub(super) fn request_body(
 ///
 /// 两处都取不到分片时降级成 `BodyMode::Raw` 并出诊断：保守，但**不静默**——
 /// 声称自己能发 multipart 却发不出分片，就是「存得对、发得错」。
-fn multipart_body(ctx: &mut Ctx, media: &Value, at_ptr: &str) -> RequestBody {
+fn multipart_body(ctx: &mut Ctx, view: &DocView, media: &Value, at_ptr: &str) -> RequestBody {
     let mut parts = parts_from_example(media);
     if parts.is_empty() {
         parts = parts_from_properties(media);
     }
+    // multipart 的 schema 也是一份正经的请求体定义（它说的是有哪些表单字段），
+    // 故照样导入——不导入的话，「导出再导入」会把这份定义丢掉。
+    let schema = import_schema(ctx, view, media, at_ptr);
     if parts.is_empty() {
         ctx.diagnostics.push(
             Diagnostic::warn(
@@ -242,13 +268,13 @@ fn multipart_body(ctx: &mut Ctx, media: &Value, at_ptr: &str) -> RequestBody {
                 .or_else(|| media.get("default"))
                 .map(scalar_text)
                 .unwrap_or_default(),
-            schema: None,
+            schema,
         };
     }
     RequestBody {
         mode: BodyMode::Multipart,
         content: serde_json::to_string(&parts).unwrap_or_default(),
-        schema: None,
+        schema,
     }
 }
 

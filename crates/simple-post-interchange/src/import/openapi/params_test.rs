@@ -210,3 +210,102 @@ fn a_multipart_body_with_nothing_to_synthesise_is_downgraded_with_a_diagnostic()
         ex.diagnostics
     );
 }
+
+/// 请求体上的 schema 要导入成 `body.schema`。
+///
+/// 这条是往返保真的前提：导出器把 `body.schema` 写进 `components.schemas` 并让
+/// `requestBody` 指过去，导入器若不把它读回来，「导出再导入」就把这份定义丢了。
+#[test]
+fn a_request_body_schema_is_imported() {
+    let ex = ir_of(
+        r#"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "paths": {
+            "/users": {
+              "post": {
+                "requestBody": {
+                  "content": {
+                    "application/json": {
+                      "schema": { "type": "object", "title": "UserProfile", "properties": { "id": { "type": "string" } } }
+                    }
+                  }
+                },
+                "responses": { "200": {} }
+              }
+            }
+          }
+        }"#,
+    );
+    let body = &first_endpoint(&ex).body;
+    let schema = body.schema.as_deref().expect("请求体上的 schema 要导入");
+    let parsed: serde_json::Value = serde_json::from_str(schema).expect("导入的 schema 是 JSON");
+    assert_eq!(parsed["title"], "UserProfile");
+    assert_eq!(parsed["properties"]["id"]["type"], "string");
+}
+
+/// 请求体上的 schema 里带**本地 `$ref`** 时，要展开成内联内容。
+///
+/// `body.schema` 存的是一段自足的文本：导出器把它写进 `components.schemas` 并让
+/// `requestBody` 指过去，而那份 components 是导出时自己生成的——存一段带 `$ref`
+/// 的文本进去，导出时那份引用指不到任何东西。
+#[test]
+fn a_local_ref_inside_the_request_body_schema_is_expanded() {
+    let ex = ir_of(
+        r##"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "components": {
+            "schemas": {
+              "Id": { "type": "string" },
+              "User": { "type": "object", "properties": { "id": { "$ref": "#/components/schemas/Id" } } }
+            }
+          },
+          "paths": {
+            "/users": {
+              "post": {
+                "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
+                "responses": { "200": {} }
+              }
+            }
+          }
+        }"##,
+    );
+    let body = &first_endpoint(&ex).body;
+    let schema = body.schema.as_deref().expect("请求体上的 schema 要导入");
+    assert!(
+        !schema.contains("$ref"),
+        "导进来的 schema 必须自足，不能还指着文档里的 components：{schema}"
+    );
+    let parsed: serde_json::Value = serde_json::from_str(schema).expect("导入的 schema 是 JSON");
+    assert_eq!(parsed["properties"]["id"]["type"], "string");
+}
+
+/// 不是对象的 schema（布尔型）不导入，但要**说出来**。
+///
+/// 布尔 schema 不是导出器认的那种（它要写成 `components.schemas` 里的一个对象），
+/// 收进来只会在导出时变成一条「不是合法的 JSON Schema 对象」的诊断。
+#[test]
+fn a_non_object_request_body_schema_is_not_imported_but_is_reported() {
+    let ex = ir_of(
+        r#"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "paths": {
+            "/users": {
+              "post": {
+                "requestBody": { "content": { "application/json": { "schema": true } } },
+                "responses": { "200": {} }
+              }
+            }
+          }
+        }"#,
+    );
+    let body = &first_endpoint(&ex).body;
+    assert!(body.schema.is_none(), "布尔 schema 不该被导入");
+    assert!(
+        ex.diagnostics.iter().any(|d| d.message.contains("schema")),
+        "没导入要说一声：{:?}",
+        ex.diagnostics
+    );
+}
