@@ -26,6 +26,9 @@ pub enum BodyMode {
     None,
     Json,
     /// `application/x-www-form-urlencoded`。不是 multipart。
+    ///
+    /// 内容是**结构化的**：[`RequestBody::content`] 装的是一行一行的键值对（JSON 数组
+    /// 文本），不是一个拼好的 urlencoded 串。行里带着说明，界面上的表格才有地方放。
     Form,
     /// `multipart/form-data`。线上是 `multipart`。
     ///
@@ -34,7 +37,16 @@ pub enum BodyMode {
     /// 在 [`RequestBody::content`] 里，是一个 JSON 数组；装配在
     /// `src/lib/multipart.ts` 与 `mcp/http_ops/multipart.rs`。
     Multipart,
+    /// `application/xml`。内容是 XML 原文。
+    Xml,
+    /// `text/plain`。内容是纯文本原文。
     Raw,
+    /// `application/octet-stream`。整个请求体是一个文件。
+    ///
+    /// 内容是 [`RequestBody::content`] 里那份文件描述（JSON 对象文本），描述里带着文件名、
+    /// 字节数与 base64 的字节。文件本身不在库里存路径——路径由**运行请求的那台机器**
+    /// 解析，桌面端与服务端容器不是一个文件系统。
+    Binary,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -44,6 +56,85 @@ pub struct RequestBody {
     pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
+}
+
+/// `form` 模式里的一行。
+///
+/// 键、值、是否参与发送、说明。`enabled` 缺省为真：一份没写 `enabled` 的行就是一行要
+/// 发的表单字段。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FormField {
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// 缺省为真的布尔值。
+///
+/// serde 的 `default` 要一个函数，故单独给它一个名字：`FormField::enabled` 的缺省值是
+/// 「参与发送」，不是「不参与」。
+fn enabled_by_default() -> bool {
+    true
+}
+
+/// `multipart` 模式里的一个分片。
+///
+/// 与 [`crate::domain::RequestBody::content`] 里那份 JSON 数组一一对应。文件分片的内容
+/// 放在 [`MultipartPart::base64`] 里：文件是字节，而分片数组存在 JSON 文本里，故字节
+/// 只能以 base64 的形态进去。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MultipartPart {
+    /// 分片名（`Content-Disposition` 里的 `name`）。
+    #[serde(default)]
+    pub name: String,
+    /// 文本分片的内容。
+    #[serde(default)]
+    pub value: String,
+    /// 这一分片是否参与发送。缺省为真。
+    ///
+    /// 与 `FormField::enabled` 同一条规则：停用的分片不进 body，但还留在表格里，
+    /// 用户改主意时勾回来即可，不必重新选文件。
+    #[serde(default = "enabled_by_default")]
+    pub enabled: bool,
+    /// 文件分片的文件名。有它即文件分片。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    /// 分片自己的 Content-Type。文件分片缺省为 `application/octet-stream`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    /// 文件分片的字节（base64）。有它时 [`MultipartPart::value`] 不参与发包。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base64: Option<String>,
+    /// 说明。界面上那一列写着什么，不上线。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// `binary` 模式选中的那个文件。
+///
+/// 存在 [`RequestBody::content`] 里，是一个 JSON 对象文本。`base64` 是文件的字节。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BodyFile {
+    /// 文件名。界面上显示它；它不上线（请求体只有字节与 Content-Type）。
+    #[serde(default)]
+    pub name: String,
+    /// 文件有多少字节。
+    #[serde(default)]
+    pub size: u64,
+    /// 文件自己的 MIME 类型。缺省 `application/octet-stream`。
+    #[serde(default)]
+    pub content_type: String,
+    /// 文件的字节（base64）。
+    #[serde(default)]
+    pub base64: String,
 }
 
 impl RequestBody {

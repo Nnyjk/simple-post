@@ -27,6 +27,11 @@ pub struct ApiResponse {
     pub size_bytes: u64,
     pub headers: Vec<[String; 2]>,
     pub body: String,
+    /// 响应体的**二进制形态**：原始字节的 base64。
+    ///
+    /// 响应字节不是合法 UTF-8 时才有它（图片、压缩包、PDF…），此时 `body` 是空串。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_json: Option<serde_json::Value>,
     pub content_type: String,
@@ -80,6 +85,13 @@ pub struct StoredResponse {
     pub headers: BTreeMap<String, String>,
     /// 已被写入路径裁剪到 [`RESPONSE_HISTORY_MAX_BODY_BYTES`]。
     pub body: String,
+    /// 响应体的**二进制形态**：原始字节的 base64。
+    ///
+    /// 响应字节不是合法 UTF-8 时才有它（图片、压缩包、PDF…），此时 `body` 是空串。
+    /// 落库时它与 `body` 分列两栏：宽松解码过的文本对二进制没有价值，存下来只是浪费
+    /// 空间（每个非法字节会展开成三个字节的 U+FFFD）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_json: Option<serde_json::Value>,
     pub content_type: String,
@@ -114,6 +126,12 @@ pub struct StoredRequestSnapshot {
     pub headers: Vec<(String, String)>,
     /// body 内容。没有 body 时为 `None`。
     pub body: Option<String>,
+    /// body 的字节（base64）。与 `body` 互斥：二进制请求体（`binary` 模式，或带文件
+    /// 分片的 multipart）走这里。
+    ///
+    /// 写这一列之前存的行没有它，故为 `Option`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
 }
 
 /// `response_history` 的一行。

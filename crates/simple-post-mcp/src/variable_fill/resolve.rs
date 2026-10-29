@@ -187,25 +187,33 @@ pub fn resolve_endpoint_with(
     let final_url = append_apikey_query(url_with_params, &resolved_auth);
 
     // ---- body 是否带上 + 替换 --------------------------------
-    let body = match &eff_body.mode {
-        simple_post_core::domain::BodyMode::None => None,
-        _ if eff_body.content.is_empty() => None,
-        _ => {
-            let b = resolve_template(&eff_body.content, &vars);
-            for m in b.missing {
-                record_missing(&mut missing, &mut seen, m);
-            }
-            Some(b.resolved)
-        }
-    };
+    // 按模式各走各的规则：`json` / `xml` / `raw` 整段替换，`form` 与 `multipart` 逐个
+    // 字段替换（整段替换会把替换出来的引号塞进那段 JSON 文本里，于是整份内容解析不
+    // 出来），`binary` 不替换（文件字节不是模板）。规则住在
+    // `simple_post_core::body`，与渲染进程侧同一套。
+    let resolved_body = simple_post_core::body::resolve_body(&eff_body, &vars);
+    for m in resolved_body.missing {
+        record_missing(&mut missing, &mut seen, m);
+    }
+    let body = resolved_body.text;
+    let body_base64 = resolved_body.base64;
 
     // ---- 请求头排序 ---------------------------------------------
+    // `binary` 模式的 Content-Type 取文件自己的类型，故要先从 body 内容里读出来。
+    // 其余模式不需要它（`None`）。
+    let binary_content_type = match eff_body.mode {
+        simple_post_core::domain::BodyMode::Binary => Some(
+            simple_post_core::body::binary_content_type(&eff_body.content),
+        ),
+        _ => None,
+    };
     let headers = build_headers(
         &eff_headers,
         &eff_body.mode,
         &resolved_auth,
         &vars,
         &mut missing,
+        binary_content_type.as_deref(),
     );
 
     Ok(ResolvedEndpoint {
@@ -214,6 +222,7 @@ pub fn resolve_endpoint_with(
         headers,
         params: params_subst,
         body,
+        body_base64,
         body_mode: eff_body.mode,
         auth: resolved_auth,
         missing_vars: missing,

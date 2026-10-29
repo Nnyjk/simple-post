@@ -88,7 +88,9 @@ fn media_type_of(mode: &BodyMode) -> Option<&'static str> {
         BodyMode::Json => Some("application/json"),
         BodyMode::Form => Some("application/x-www-form-urlencoded"),
         BodyMode::Multipart => Some("multipart/form-data"),
+        BodyMode::Xml => Some("application/xml"),
         BodyMode::Raw => Some("application/octet-stream"),
+        BodyMode::Binary => Some("application/octet-stream"),
     }
 }
 

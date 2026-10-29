@@ -114,7 +114,7 @@ fn capture(parts_json: &str) -> Captured {
     // 与 `mcp::http_ops` 装请求的顺序一致：先让 `apply` 改写 headers 并给出 body，
     // 再把两者一起交给 `http_executor`。
     let mut headers: Vec<(String, String)> = vec![("Accept".into(), "application/json".into())];
-    let body = apply(&mut headers, parts_json);
+    let assembled = apply(&mut headers, parts_json);
     assert!(
         headers
             .iter()
@@ -126,7 +126,10 @@ fn capture(parts_json: &str) -> Captured {
         method: "POST".into(),
         url: format!("http://{addr}/upload"),
         headers,
-        body: Some(body),
+        // 文本形态与二进制形态互斥：把 `AssembledBody` 的两个字段原样交给传输层，
+        // 这里不做任何判断——判断在装配那一步已经做完了。
+        body: assembled.text,
+        body_base64: assembled.base64,
         timeout_ms: 10_000,
         follow_redirects: false,
         max_response_size_kb: 1024,
@@ -283,7 +286,7 @@ fn a_multipart_request_that_reaches_a_socket_is_parsable() {
 fn a_user_set_content_type_is_replaced_but_keeps_its_name() {
     // 这条不走 socket：`apply` 的覆盖规则与传输无关，断言它的输入输出更直接。
     let mut headers = vec![("content-type".to_string(), "application/json".to_string())];
-    let body = apply(&mut headers, r#"[{"name":"a","value":"1"}]"#);
+    let assembled = apply(&mut headers, r#"[{"name":"a","value":"1"}]"#);
 
     let ct_headers: Vec<&(String, String)> = headers
         .iter()
@@ -302,6 +305,9 @@ fn a_user_set_content_type_is_replaced_but_keeps_its_name() {
         .1
         .strip_prefix("multipart/form-data; boundary=")
         .expect("the value must be replaced by the multipart one");
+    let body = assembled
+        .text
+        .expect("a text-only multipart body is valid UTF-8");
     assert!(
         body.contains(&format!("--{boundary}\r\n")),
         "the replacement boundary must be the one in the body"

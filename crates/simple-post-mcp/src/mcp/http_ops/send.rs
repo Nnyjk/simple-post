@@ -36,6 +36,7 @@ pub(super) async fn send_resolved(
         url,
         headers,
         body,
+        body_base64,
         body_mode,
         auth,
         missing_vars,
@@ -83,10 +84,13 @@ pub(super) async fn send_resolved(
     // 存 json / 覆盖 multipart 时整条请求没有 Content-Type 且分片原样发出；存 multipart /
     // 覆盖 json 时 body 被换成只有收尾分隔符的壳，调用方传的内容静默消失。
     let mut body = body;
+    let mut body_base64 = body_base64;
     if body_mode == simple_post_core::domain::BodyMode::Multipart {
-        body = body
-            .take()
-            .map(|content| multipart::apply(&mut headers, &content));
+        if let Some(content) = body.take() {
+            let assembled = multipart::apply(&mut headers, &content);
+            body = assembled.text;
+            body_base64 = assembled.base64;
+        }
     }
 
     // `send_with_scripts` 把脚本链跑在同一条序列里：前置脚本改写请求 → 发出 → 测试
@@ -100,6 +104,7 @@ pub(super) async fn send_resolved(
                 url: url.clone(),
                 headers: headers.clone(),
                 body,
+                body_base64,
             },
             env: env_snapshot(env),
             settings,

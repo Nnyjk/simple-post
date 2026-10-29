@@ -103,6 +103,7 @@ fn resp(status: u16, body: &str) -> StoredResponse {
         size_bytes: body.len() as u64,
         headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
         body: body.into(),
+        body_base64: None,
         body_json: Some(serde_json::json!({ "echo": body })),
         content_type: "application/json".into(),
         error: None,
@@ -118,6 +119,7 @@ fn request(url: &str) -> StoredRequestSnapshot {
         url: url.into(),
         headers: vec![("content-type".into(), "application/json".into())],
         body: Some("{\"a\":1}".into()),
+        body_base64: None,
     }
 }
 

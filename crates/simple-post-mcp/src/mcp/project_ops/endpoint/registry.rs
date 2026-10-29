@@ -130,15 +130,19 @@ placeholder name in `url`; a placeholder without an entry keeps its literal brac
                     "type": "string",
                     "enum": json!(BODY_MODE_VALUES),
                     "description": "How to interpret body_content when sending. \"none\" sends no \
-body; \"raw\" sends the text verbatim; \"json\" sends a JSON instance; \"form\" sends urlencoded \
-text; \"multipart\" sends a JSON array of parts, each {\"name\": string, \"value\": string, \
-\"filename\"?: string, \"contentType\"?: string}, and it also replaces a Content-Type header you set."
+body; \"raw\" sends the text verbatim; \"json\" sends a JSON instance; \"xml\" sends XML text; \
+\"form\" sends x-www-form-urlencoded text; \"multipart\" sends a JSON array of parts, each \
+{\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string, \"base64\"?: \
+string}, and it also replaces a Content-Type header you set; \"binary\" sends a JSON object \
+{\"name\": string, \"size\": number, \"contentType\"?: string, \"base64\": string} as raw bytes."
                 },
                 "body_content": {
                     "type": "string",
                     "description": "The request payload actually sent on the wire, interpreted according to \
 body_mode. This is the field for \"what to send when testing\"; the documented parameter definition \
-goes in body_schema."
+goes in body_schema. For \"form\" it is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \
+\"description\"?}]; for \"multipart\" it is a JSON array of parts; for \"binary\" it is a JSON \
+object describing one file."
                 },
                 "body_schema": {
                     "type": "string",
@@ -237,7 +241,7 @@ segments in `url`. They are substituted into the path itself, not appended to th
                                 "mode": { "type": "string", "enum": json!(BODY_MODE_VALUES) },
                                 "content": {
                                     "type": "string",
-                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values, not a JSON Schema — the definition goes in `schema`."
+                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values, not a JSON Schema — the definition goes in `schema`. For mode \"form\" it is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \"description\"?}]; for mode \"multipart\" it is a JSON array of parts; for mode \"binary\" it is a JSON object describing one file."
                                 },
                                 "schema": {
                                     "type": ["string", "null"],

@@ -16,7 +16,8 @@ use crate::error::AppError;
 
 /// 线上接受的 `body_mode` 取值，与 [`BodyMode`] 的变体一一对应；JSON Schema 与解析器
 /// 共用这一份，改一处即可。
-pub const BODY_MODE_VALUES: &[&str] = &["none", "json", "form", "multipart", "raw"];
+pub const BODY_MODE_VALUES: &[&str] =
+    &["none", "json", "form", "multipart", "xml", "raw", "binary"];
 
 /// 线上接受的 `auth_type` 取值，对应 [`AuthType`] 的小写变体名。
 pub const AUTH_TYPE_VALUES: &[&str] = &["none", "bearer", "basic", "apikey", "oauth2"];
@@ -28,7 +29,9 @@ pub fn parse_body_mode(s: &str) -> Result<BodyMode, AppError> {
         "json" => BodyMode::Json,
         "form" => BodyMode::Form,
         "multipart" => BodyMode::Multipart,
+        "xml" => BodyMode::Xml,
         "raw" => BodyMode::Raw,
+        "binary" => BodyMode::Binary,
         other => {
             return Err(AppError::Validation(format!(
                 "unknown body_mode {other:?}; expected one of: {}",

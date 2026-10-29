@@ -120,7 +120,8 @@ Tauri command 与 REST route 都退化成薄壳。
 
 解析器遇到本仓库表达不了的构造时，一律出诊断 + 丢弃，**不静默降级**：
 
-- Postman `formdata` 里 `type: file` 的分片 —— multipart 分片结构存不下文件内容。
+- Postman `formdata` 里 `type: file` 的分片 —— Postman 导出的文件字段只有**路径**，
+  没有文件本身的内容，故那份字节拿不到（分片结构能存字节，装的是别处读来的字节）。
 - Postman 的 `auth` 方案里 oauth2 / digest —— 导入器只映射 noauth / basic / bearer /
   apikey 四种，其余方案出诊断并按无 auth 处理（`import/postman/auth.rs`）。
 - OpenAPI 的 `apiKey` `in: cookie` —— `ApiKeyLocation` 只有 `Header | Query`。
@@ -185,16 +186,23 @@ Postman 的每个 environment 落成一个新 `Environment`，变量进 `variabl
 
 `BodyMode` 已加宽（决策：加宽而非冻结）。**加宽是存储决策，代价是发送链路必须跟上。**
 
-新增的 multipart 变体若只有存储、没有发送实现，会出现最坏的一种失败：
+新增的 body 变体若只有存储、没有发送实现，会出现最坏的一种失败：
 导入进来的 endpoint **存得对、发得错**。用户看不出任何异常，只会觉得「这个接口导入
-之后行为不一样了」。所以下面三处是**前置**，不是后续：
+之后行为不一样了」。所以下面几处是**前置**，不是后续：
 
+- `src/lib/body/` —— 七种 body 形态的内容形状与装配规则（与 Rust 侧 `core::body`
+  是同一套规则的两份实现，由 `fixtures/body-parity.json` 钉住）
 - `src/lib/multipart.ts` —— 真正拼出 multipart body（与 Rust 侧
   `mcp/http_ops/multipart.rs` 是同一套规则的两份实现）
 - 请求体编辑器 —— 能渲染并编辑新模式
 - `variable_fill` —— `ResolvedEndpoint.body_mode`（`variable_fill/types.rs`）带着套用过
   `overrides` 之后的 mode，`auto_content_type`（`variable_fill/request.rs`）对 `Multipart`
   返回 `None`，boundary 由发送方在 execute 之前补上
+
+`form` 模式的内容形状也一并改了：它从「一个拼好的 urlencoded 串」变成「行数组的
+JSON 文本」。导入器因此写出**行数组**（`import/postman/body.rs`），界面上的表格才有
+地方放，而被 Postman 禁用的字段也留得下来（标成不参与发送）。旧内容仍能读——
+读不出行数组时按旧格式读。
 
 `BodyMode` 加变体对已存的 `body_json` 是向后兼容的（旧值继续反序列化成功），
 **不要**为此 bump `SCHEMA_VERSION` —— 那会让 `ensure_current_schema` 删掉用户的库。

@@ -23,12 +23,17 @@ use super::template::resolve_template;
 ///
 /// `apikey.inLocation == Query` 在这里**不**生成请求头 —— 由调用方经
 /// `append_apikey_query` 追加到 URL。
+///
+/// `binary_content_type` 是 `binary` 模式下文件自己的 MIME 类型：整个请求体是一个
+/// 文件时，用文件那个类型才描述得了它（一张 PNG 不该顶着 `application/octet-stream`
+/// 发出去）。它只在 `body_mode` 是 `Binary` 时被读，其余模式传 `None`。
 pub(super) fn build_headers(
     endpoint_headers: &[simple_post_core::domain::KeyValue],
     body_mode: &simple_post_core::domain::BodyMode,
     auth: &AuthConfig,
     vars: &HashMap<String, String>,
     missing: &mut Vec<String>,
+    binary_content_type: Option<&str>,
 ) -> Vec<(String, String)> {
     let mut seen: HashMap<String, ()> = HashMap::new();
     let mut out: Vec<(String, String)> = Vec::new();
@@ -50,7 +55,7 @@ pub(super) fn build_headers(
         out.push((h.key.clone(), r.resolved));
     }
 
-    if let Some(ct) = auto_content_type(body_mode) {
+    if let Some(ct) = auto_content_type(body_mode, binary_content_type) {
         if !out
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
@@ -97,12 +102,19 @@ pub(super) fn build_headers(
     out
 }
 
-fn auto_content_type(mode: &simple_post_core::domain::BodyMode) -> Option<&'static str> {
+fn auto_content_type<'a>(
+    mode: &simple_post_core::domain::BodyMode,
+    binary_content_type: Option<&'a str>,
+) -> Option<&'a str> {
     use simple_post_core::domain::BodyMode;
     match mode {
         BodyMode::Json => Some("application/json"),
         BodyMode::Form => Some("application/x-www-form-urlencoded"),
+        BodyMode::Xml => Some("application/xml"),
         BodyMode::Raw => Some("text/plain"),
+        // `binary` 模式整个请求体就是一个文件，故 Content-Type 取那个文件的类型；
+        // 读不出文件类型时用二进制流类型——任何服务端都能收下它。
+        BodyMode::Binary => Some(binary_content_type.unwrap_or("application/octet-stream")),
         BodyMode::None => None,
         // multipart 的 Content-Type 必须带 boundary，而 boundary 每次请求现生成，
         // 纯函数给不出来。返回不带 boundary 的值等于发出一个服务端解析不了的请求，

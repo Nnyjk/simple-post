@@ -21,6 +21,9 @@ pub struct HttpSendBody {
     #[serde(default)]
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// 请求体的二进制形态（base64）。有它时 `body` 缺席，线上发出去的是解码后的字节。
+    #[serde(default)]
+    pub body_base64: Option<String>,
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,

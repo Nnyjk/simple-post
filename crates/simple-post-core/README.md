@@ -9,10 +9,12 @@ crates/simple-post-core/
 ├── Cargo.toml
 ├── README.md
 └── src/
-    ├── lib.rs                 # re-exports db / domain / dynamic / error /
-    │                          # http_executor / mcp_metrics / oauth2 /
+    ├── lib.rs                 # re-exports body / db / domain / dynamic /
+    │                          # error / http_executor / mcp_metrics / oauth2 /
     │                          # path_params / permissions / script / spec /
     │                          # template / tls / url
+    ├── body.rs                # the request-body rules — how each body mode's
+    │                          # content is parsed, templated and assembled
     ├── db/                    # SQLite + CRUD modules
     │   ├── mod.rs             # the module map + init / ping / with_conn /
     │   │                      # with_tx / DbPool / migrate

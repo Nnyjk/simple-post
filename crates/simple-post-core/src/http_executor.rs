@@ -10,6 +10,7 @@
 
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use serde::Serialize;
 
 use crate::domain::TlsSettings;
@@ -39,6 +40,16 @@ pub struct HttpResponse {
     /// 名字一律小写，与线路上的写法一致。
     pub request_headers: Vec<[String; 2]>,
     pub body: String,
+    /// 响应体的**二进制形态**：原始字节的 base64。
+    ///
+    /// 响应字节不是合法 UTF-8 时才有它（图片、压缩包、PDF…），此时 `body` 是宽松解码
+    /// 后的结果——非法字节已被替换成 U+FFFD，原始字节不可恢复。要预览图片、要下载文件，
+    /// 都得走这条通道。
+    ///
+    /// 字节是合法 UTF-8 时**不给**这条通道：文本响应不需要它，给了只是让每个响应多带
+    /// 一份同内容的拷贝。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
     pub content_type: String,
     pub method: String,
     pub url: String,
@@ -98,7 +109,16 @@ pub struct HttpRequestInput {
     pub method: String,
     pub url: String,
     pub headers: Vec<(String, String)>,
+    /// 请求体的**文本形态**。
     pub body: Option<String>,
+    /// 请求体的**二进制形态**：原始字节的 base64。
+    ///
+    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。multipart 带文件分片时整个
+    /// 请求体是字节，故走这条通道；纯文本的请求体仍走 `body`。
+    ///
+    /// 两者都有时以本字段为准：调用方交下来的 body 形态与字节形态不一致时，发出去的是
+    /// 字节那份——它才是能被还原成文件的那份。
+    pub body_base64: Option<String>,
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
@@ -152,6 +172,115 @@ pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
     (out, true)
 }
 
+/// 把字节裁到至多 `max_bytes` 字节。
+///
+/// 与 [`truncate_body`] 的差别有两条，都是二进制形态逼出来的：
+///
+/// * 切点落在**字节**上，不落字符边界——原始字节里没有字符边界这回事。
+/// * 不追加截断标记——标记是文本，插进字节流里会污染它。是否被裁过由
+///   [`ResponsePayload::truncated`] 单独报出。
+fn truncate_bytes(bytes: &[u8], max_bytes: u64) -> (Vec<u8>, bool) {
+    if max_bytes == 0 || bytes.len() as u64 <= max_bytes {
+        return (bytes.to_vec(), false);
+    }
+    (bytes[..max_bytes as usize].to_vec(), true)
+}
+
+/// 响应体的两种形态。
+///
+/// 文本形态是宽松解码后的字符串；二进制形态是原始字节的 base64。**判据只有一条：字节
+/// 是不是合法 UTF-8**——是则只有文本形态，否则两种形态都给（文本那份已被破坏过）。
+pub(crate) struct ResponsePayload {
+    /// 文本形态。
+    pub text: String,
+    /// 二进制形态。字节是合法 UTF-8 时为 `None`。
+    pub base64: Option<String>,
+    /// 响应体有多少字节。
+    pub bytes: u64,
+    /// 响应体被裁过。
+    pub truncated: bool,
+}
+
+/// 把读回来的原始字节分成文本与二进制两种形态。
+///
+/// 文本形态走的是 [`truncate_body`]：宽松解码后再按字符边界裁，与对照读法
+/// （`Response::text()` 之后交给同一个函数）逐字节一致。**先裁字节再解码会给出另一个
+/// 答案**——落在裁点上的半个多字节字符在两种顺序下解出不同的东西。
+///
+/// 二进制形态按字节裁：它给的是原始字节，字符边界对它没有意义。
+///
+/// **形态的判据是「内容是不是文本」，不是「读到的这段字节是不是合法 UTF-8」**：读到的
+/// 字节是按上限裁过的，裁点落在某个多字节字符中间时，一个纯文本响应读回来也是非法
+/// UTF-8。故先问 Content-Type，再问字节。
+pub(crate) fn split_response_payload(
+    raw: Vec<u8>,
+    max_bytes: u64,
+    content_type: &str,
+) -> ResponsePayload {
+    let is_text = is_textual_content_type(content_type) || std::str::from_utf8(&raw).is_ok();
+    let (text, text_truncated) =
+        truncate_body(String::from_utf8_lossy(&raw).into_owned(), max_bytes);
+
+    if is_text {
+        return ResponsePayload {
+            bytes: text.len() as u64,
+            text,
+            base64: None,
+            truncated: text_truncated,
+        };
+    }
+
+    let (bytes, bytes_truncated) = truncate_bytes(&raw, max_bytes);
+    ResponsePayload {
+        bytes: bytes.len() as u64,
+        text: String::new(),
+        base64: Some(base64::engine::general_purpose::STANDARD.encode(&bytes)),
+        truncated: bytes_truncated,
+    }
+}
+
+/// 这个 Content-Type 说它的内容是文本吗？
+///
+/// 主类型是 `text`，或子类型以 `json` / `xml` 结尾，或子类型是那几个明确的文本类型
+/// （`javascript`、`x-www-form-urlencoded`、`graphql`）。
+///
+/// `application/octet-stream`、`image/*`、`application/pdf`、`application/zip` 都不算：
+/// 它们的内容是字节，宽松解码会把它们弄坏。
+fn is_textual_content_type(content_type: &str) -> bool {
+    let main = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if main.starts_with("text/") {
+        return true;
+    }
+    let Some(subtype) = main.split_once('/').map(|(_, s)| s) else {
+        return false;
+    };
+    subtype.ends_with("json")
+        || subtype.ends_with("xml")
+        || matches!(
+            subtype,
+            "javascript" | "x-www-form-urlencoded" | "graphql" | "yaml" | "x-yaml"
+        )
+}
+
+/// 请求体的字节。
+///
+/// `body_base64` 优先于 `body`：两者都有时以字节那份为准——它才是能被还原成文件的那份。
+/// base64 解不开时返回一条说明问题的消息，而不是把空 body 发出去。
+pub(crate) fn request_body_bytes(input: &HttpRequestInput) -> Result<Option<Vec<u8>>, String> {
+    if let Some(b64) = &input.body_base64 {
+        return base64::engine::general_purpose::STANDARD
+            .decode(b64.as_bytes())
+            .map(Some)
+            .map_err(|e| format!("the request body is not valid base64: {e}"));
+    }
+    Ok(input.body.as_ref().map(|s| s.as_bytes().to_vec()))
+}
+
 /// 上限之上多读 4 字节：保证起始于上限之前的 rune 完整，[`truncate_body`] 的字符边界
 /// 回退才与整读落在同一个偏移上。
 const BOUNDARY_LOOKAHEAD_BYTES: u64 = 4;
@@ -162,14 +291,12 @@ const BOUNDARY_LOOKAHEAD_BYTES: u64 = 4;
 ///
 /// `max_bytes == 0` 表示不设上限，整个 body 都要读进来。
 ///
-/// 解码须与未开 `charset` 的 `Response::text()` 一致（UTF-8 宽松解码）。
-///
-/// 不用 `Content-Length` 判截断：它描述的是编码后的长度，与 [`truncate_body`] 的判据
-/// 分叉，同一个响应会在两种形态下给出不同的 `truncated`。
+/// 读的是**原始字节**，不解码：响应可能是二进制（图片、压缩包），解码会破坏它。
+/// 解码与「文本还是二进制」的判定由 [`split_response_payload`] 做。
 async fn read_body_capped(
     mut res: reqwest::Response,
     max_bytes: u64,
-) -> Result<String, reqwest::Error> {
+) -> Result<Vec<u8>, reqwest::Error> {
     let cap = if max_bytes == 0 {
         u64::MAX
     } else {
@@ -188,11 +315,7 @@ async fn read_body_capped(
         }
     }
 
-    // 合法 UTF-8 时 `String::from_utf8` 原地校验、不复制（`from_utf8_lossy` 要复制一份）。
-    match String::from_utf8(buf) {
-        Ok(text) => Ok(text),
-        Err(e) => Ok(String::from_utf8_lossy(e.as_bytes()).into_owned()),
-    }
+    Ok(buf)
 }
 
 // 线上那一份请求头。
@@ -216,7 +339,13 @@ const TRANSPORT_ACCEPT_ENCODING: &str = "gzip,deflate,br";
 ///
 /// 调用方交下来的那些按原样保留（名字转小写，与线路上的写法一致），传输层补的几条
 /// 追加在后面。调用方自己写过的同名头不补第二条：线路上发出去的是调用方那一份。
-pub(crate) fn effective_request_headers(input: &HttpRequestInput) -> Vec<[String; 2]> {
+///
+/// `body_len` 是**请求体的字节数**。它不能从 `input.body` 的字符串长度取：请求体也可能是
+/// base64 形态的二进制，那时字符串长度是字节数的四分之三，而线路上写的是字节数。
+pub(crate) fn effective_request_headers(
+    input: &HttpRequestInput,
+    body_len: Option<usize>,
+) -> Vec<[String; 2]> {
     let mut out: Vec<[String; 2]> = input
         .headers
         .iter()
@@ -252,9 +381,9 @@ pub(crate) fn effective_request_headers(input: &HttpRequestInput) -> Vec<[String
         }
     }
 
-    if let Some(ref body) = input.body {
+    if let Some(len) = body_len {
         if !has("content-length") {
-            out.push(["content-length".to_string(), body.len().to_string()]);
+            out.push(["content-length".to_string(), len.to_string()]);
         }
     }
 
@@ -456,8 +585,17 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
             req = req.header(k, v);
         }
     }
-    if let Some(ref b) = input.body {
-        req = req.body(b.clone());
+
+    // 请求体的字节在**建客户端之前**解出来：`content-length` 要的是字节数，而 base64
+    // 形态的字符串长度不是字节数。解不开时报错而不是发一个空 body——那会让服务端收到
+    // 一个内容被静默丢掉的请求。
+    let body_bytes = match request_body_bytes(input) {
+        Ok(b) => b,
+        Err(msg) => return HttpResult::err("network", msg),
+    };
+
+    if let Some(ref bytes) = body_bytes {
+        req = req.body(bytes.clone());
     }
 
     let res = match req.send().await {
@@ -487,7 +625,7 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     let max_bytes = input.max_response_size_kb.saturating_mul(1024);
 
     // 读取时的上限：缓冲区上限与响应大小无关，超出的部分直接丢弃。
-    let body_text = match read_body_capped(res, max_bytes).await {
+    let raw_body = match read_body_capped(res, max_bytes).await {
         Ok(t) => t,
         Err(e) => {
             let kind = if e.is_timeout() { "timeout" } else { "network" };
@@ -496,20 +634,21 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     };
 
     let elapsed = start.elapsed().as_millis();
-    let (final_body, truncated) = truncate_body(body_text, max_bytes);
+    let payload = split_response_payload(raw_body, max_bytes, &content_type);
 
     HttpResult::ok(HttpResponse {
         status: status.as_u16(),
         status_text,
         duration_ms: elapsed,
-        size_bytes: final_body.len() as u64,
+        size_bytes: payload.bytes,
         headers: header_pairs,
-        request_headers: effective_request_headers(input),
-        body: final_body,
+        request_headers: effective_request_headers(input, body_bytes.as_ref().map(|b| b.len())),
+        body: payload.text,
+        body_base64: payload.base64,
         content_type,
         method: input.method.clone(),
         url: input.url.clone(),
-        truncated,
+        truncated: payload.truncated,
     })
 }
 

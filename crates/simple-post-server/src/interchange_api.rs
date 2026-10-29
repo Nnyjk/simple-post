@@ -277,6 +277,7 @@ async fn resolve_content(
             url: url.to_string(),
             headers: Vec::new(),
             body: None,
+            body_base64: None,
             timeout_ms: 30_000,
             follow_redirects: true,
             max_response_size_kb: FETCH_MAX_KB,
