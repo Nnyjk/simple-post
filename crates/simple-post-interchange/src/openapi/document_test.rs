@@ -11,6 +11,22 @@ use super::{to_document, DocFormat};
 use crate::diagnostics::Severity;
 use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
 
+/// 这个 operation 的 `requestBody` 引用的 component 名字。
+///
+/// 名字是**内容派生**的（见 `Builder::claim_schema_name`），故测试不去硬编码它，
+/// 而是顺着 `$ref` 找——这样测试盯的是「引用指得到」，而不是「哈希算法没变」。
+fn referenced_schema_name(doc: &Value, path: &str, verb: &str) -> String {
+    let reference = doc["paths"][path][verb]["requestBody"]["content"]["application/json"]
+        ["schema"]["$ref"]
+        .as_str()
+        .expect("requestBody 必须是一个 $ref");
+    reference
+        .rsplit('/')
+        .next()
+        .expect("$ref 的末段是 component 名字")
+        .to_string()
+}
+
 #[test]
 fn every_operation_gets_exactly_one_synthetic_200() {
     let ex = one_module(
@@ -299,9 +315,11 @@ fn body_mode_picks_the_matching_media_type() {
     );
     let doc = doc_of(&ex);
 
+    // 带 schema 的那条写 $ref，且那个名字在 components 里真的有一份定义。
+    let name = referenced_schema_name(&doc, "/a", "post");
     assert_eq!(
         doc["paths"]["/a"]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"],
-        "#/components/schemas/Schema1"
+        format!("#/components/schemas/{name}")
     );
     assert!(doc["paths"]["/a"]["post"]["requestBody"]["content"]
         .get("multipart/form-data")
@@ -318,14 +336,14 @@ fn body_mode_picks_the_matching_media_type() {
     assert!(doc["paths"]["/c"]["get"].get("requestBody").is_none());
 
     // 手写且合法的 schema 原样透传
-    assert_eq!(doc["components"]["schemas"]["Schema1"]["type"], "object");
+    assert_eq!(doc["components"]["schemas"][&name]["type"], "object");
 }
 
 /// 端点带了 `body.schema` 时，`requestBody` 必须**引用**它，而不是另写一个。
 ///
 /// `collect_schema` 把 schema 收进 `components.schemas`，故 `requestBody` 必须生成
 /// 对应的 `$ref`。若 `requestBody` 恒写死 `{"type": "object"}`，产物里会躺着一堆没人
-/// 引用的 `Schema1`…，而每个 requestBody 都在宣称一个错的请求体形状。
+/// 引用的定义，而每个 requestBody 都在宣称一个错的请求体形状。
 #[test]
 fn a_body_schema_is_referenced_from_the_request_body() {
     let ex = one_module(
@@ -358,6 +376,219 @@ fn a_body_schema_is_referenced_from_the_request_body() {
             .get("type")
             .is_none(),
         "引用之后不再内联一个形状"
+    );
+}
+
+/// 写了 `title` 的 schema 按 title 命名。
+///
+/// `title` 是 JSON Schema 自己的字段：用户在界面的 Schema 编辑区里写它，就是在给
+/// 这份定义起名。读文档的人看到 `UserProfile` 立刻知道它是什么，而 `Schema1` 这种
+/// 按位置编出来的名字什么也不说。
+#[test]
+fn a_schema_with_a_title_is_named_after_that_title() {
+    let ex = one_module(
+        "m",
+        vec![IrEndpoint {
+            body: RequestBody {
+                mode: BodyMode::Json,
+                content: "{}".into(),
+                schema: Some(
+                    r#"{"type":"object","title":"UserProfile","properties":{"id":{"type":"string"}}}"#
+                        .into(),
+                ),
+            },
+            ..ep("a", HttpMethod::Post, "/a")
+        }],
+    );
+    let doc = doc_of(&ex);
+
+    assert_eq!(referenced_schema_name(&doc, "/a", "post"), "UserProfile");
+    assert_eq!(
+        doc["components"]["schemas"]["UserProfile"]["title"],
+        "UserProfile"
+    );
+}
+
+/// 名字由**内容**决定，不按出现顺序编号。
+///
+/// 位置编号有两个毛病：文档里出现 `Schema1`、`Schema2`… 这种读不出任何信息的名字；
+/// 而删掉一个接口之后，后面每一个的名字都往前挪，同一份文档在两次导出之间对不上号。
+///
+/// 这条用两份产物对比：同一份定义在其中的位置不同，名字必须一样。
+#[test]
+fn a_schema_name_does_not_depend_on_its_position() {
+    let schema = r#"{"type":"object","properties":{"id":{"type":"string"}}}"#;
+    let with_schema = || IrEndpoint {
+        body: RequestBody {
+            mode: BodyMode::Json,
+            content: "{}".into(),
+            schema: Some(schema.into()),
+        },
+        ..ep("a", HttpMethod::Post, "/a")
+    };
+
+    let alone = doc_of(&one_module("m", vec![with_schema()]));
+    let after_another = doc_of(&one_module(
+        "m",
+        vec![
+            IrEndpoint {
+                body: RequestBody {
+                    mode: BodyMode::Json,
+                    content: "{}".into(),
+                    schema: Some(r#"{"type":"object","title":"Other"}"#.into()),
+                },
+                ..ep("x", HttpMethod::Post, "/x")
+            },
+            with_schema(),
+        ],
+    ));
+
+    assert_eq!(
+        referenced_schema_name(&alone, "/a", "post"),
+        referenced_schema_name(&after_another, "/a", "post"),
+        "名字不能随位置变"
+    );
+}
+
+/// 同一份定义出现在两个接口上时只写一份，两个 operation 都 `$ref` 它。
+#[test]
+fn the_same_schema_on_two_endpoints_is_written_once() {
+    let schema = r#"{"type":"object","title":"UserProfile","properties":{"id":{"type":"string"}}}"#;
+    let endpoint = |name: &str, path: &str| IrEndpoint {
+        body: RequestBody {
+            mode: BodyMode::Json,
+            content: "{}".into(),
+            schema: Some(schema.into()),
+        },
+        ..ep(name, HttpMethod::Post, path)
+    };
+    let ex = one_module("m", vec![endpoint("a", "/a"), endpoint("b", "/b")]);
+    let doc = doc_of(&ex);
+
+    let name_a = referenced_schema_name(&doc, "/a", "post");
+    let name_b = referenced_schema_name(&doc, "/b", "post");
+    assert_eq!(
+        name_a, name_b,
+        "同一份定义只写一份，两个 operation 指同一个名字"
+    );
+    assert_eq!(
+        doc["components"]["schemas"]
+            .as_object()
+            .expect("对象")
+            .len(),
+        1,
+        "components.schemas 里只有一份"
+    );
+}
+
+/// 键序不同的两份内容是**同一份**定义：去重按规范文本（键序无关）比对。
+#[test]
+fn the_same_schema_written_in_a_different_key_order_is_still_one_component() {
+    let endpoint = |path: &str, schema: &str| IrEndpoint {
+        body: RequestBody {
+            mode: BodyMode::Json,
+            content: "{}".into(),
+            schema: Some(schema.into()),
+        },
+        ..ep("e", HttpMethod::Post, path)
+    };
+    let ex = one_module(
+        "m",
+        vec![
+            endpoint(
+                "/a",
+                r#"{"type":"object","title":"User","properties":{"id":{"type":"string"}}}"#,
+            ),
+            endpoint(
+                "/b",
+                r#"{"properties":{"id":{"type":"string"}},"title":"User","type":"object"}"#,
+            ),
+        ],
+    );
+    let doc = doc_of(&ex);
+
+    assert_eq!(
+        referenced_schema_name(&doc, "/a", "post"),
+        referenced_schema_name(&doc, "/b", "post"),
+        "键序不同不该产生两份定义"
+    );
+    assert_eq!(
+        doc["components"]["schemas"]
+            .as_object()
+            .expect("对象")
+            .len(),
+        1,
+        "components.schemas 里只有一份"
+    );
+}
+
+/// 两份**内容不同**的定义即使同名（同一个 `title`）也不能共用一个名字。
+///
+/// 共用名字的后果是后写的那份覆盖前一份：产物里只剩一份定义，而两个 operation
+/// 都指着它——读到的是错的形状，比没有更糟。
+#[test]
+fn two_different_schemas_with_the_same_title_do_not_share_a_name() {
+    let endpoint = |path: &str, schema: &str| IrEndpoint {
+        body: RequestBody {
+            mode: BodyMode::Json,
+            content: "{}".into(),
+            schema: Some(schema.into()),
+        },
+        ..ep("e", HttpMethod::Post, path)
+    };
+    let ex = one_module(
+        "m",
+        vec![
+            endpoint(
+                "/a",
+                r#"{"type":"object","title":"User","properties":{"a":{"type":"string"}}}"#,
+            ),
+            endpoint(
+                "/b",
+                r#"{"type":"object","title":"User","properties":{"b":{"type":"string"}}}"#,
+            ),
+        ],
+    );
+    let doc = doc_of(&ex);
+
+    let name_a = referenced_schema_name(&doc, "/a", "post");
+    let name_b = referenced_schema_name(&doc, "/b", "post");
+    assert_ne!(name_a, name_b, "两份内容不同的定义不能共用一个名字");
+    assert_eq!(
+        doc["components"]["schemas"][&name_a]["properties"]["a"]["type"], "string",
+        "第一份没被覆盖"
+    );
+    assert_eq!(
+        doc["components"]["schemas"][&name_b]["properties"]["b"]["type"], "string",
+        "第二份没被覆盖"
+    );
+}
+
+/// `title` 里的非法字符要换成合法的 component 键字符。
+///
+/// component 键只允许 `[A-Za-z0-9._-]`，一个带空格的标题直接写进去就是一份不合规的
+/// 文档，而 Redocly 与多数代码生成器都会因此报错。
+#[test]
+fn a_title_with_illegal_characters_becomes_a_legal_component_key() {
+    let ex = one_module(
+        "m",
+        vec![IrEndpoint {
+            body: RequestBody {
+                mode: BodyMode::Json,
+                content: "{}".into(),
+                schema: Some(r#"{"type":"object","title":"Create User"}"#.into()),
+            },
+            ..ep("a", HttpMethod::Post, "/a")
+        }],
+    );
+    let doc = doc_of(&ex);
+
+    let name = referenced_schema_name(&doc, "/a", "post");
+    assert_eq!(name, "Create_User");
+    assert!(
+        name.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')),
+        "component 键只允许 [A-Za-z0-9._-]，got: {name}"
     );
 }
 
@@ -453,7 +684,8 @@ fn a_json_object_shaped_schema_hint_is_passed_through_as_is() {
     );
     let out = to_document(&ex, DocFormat::Json).expect("导出应成功");
     let doc: Value = serde_json::from_str(&out.content).expect("合法 JSON");
-    assert_eq!(doc["components"]["schemas"]["Schema1"]["limit"], "number");
+    let name = referenced_schema_name(&doc, "/a", "post");
+    assert_eq!(doc["components"]["schemas"][&name]["limit"], "number");
     assert!(
         out.diagnostics.is_empty(),
         "没有要报的东西：{:?}",

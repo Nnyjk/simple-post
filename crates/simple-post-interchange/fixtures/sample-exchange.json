@@ -109,6 +109,45 @@
           "method": "GET",
           "path": "/api/user/info",
           "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e11",
+          "name": "新建用户资料",
+          "description": "带 body.schema 的接口：导出时 requestBody 写 $ref 指到 components.schemas",
+          "method": "POST",
+          "path": "/users/profile",
+          "body": {
+            "mode": "json",
+            "content": "{\"name\":\"{{name}}\"}",
+            "schema": "{\"type\":\"object\",\"title\":\"UserProfile\",\"properties\":{\"name\":{\"type\":\"string\"},\"age\":{\"type\":\"integer\"}},\"required\":[\"name\"]}"
+          },
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e12",
+          "name": "替换用户资料",
+          "description": "与上一条用同一份定义：只写一份，两个 operation 都 $ref 它",
+          "method": "PUT",
+          "path": "/users/profile",
+          "body": {
+            "mode": "json",
+            "content": "{\"name\":\"{{name}}\"}",
+            "schema": "{\"type\":\"object\",\"title\":\"UserProfile\",\"properties\":{\"name\":{\"type\":\"string\"},\"age\":{\"type\":\"integer\"}},\"required\":[\"name\"]}"
+          },
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e13",
+          "name": "用户偏好",
+          "description": "schema 没有 title：名字由内容派生，不按出现顺序编号",
+          "method": "POST",
+          "path": "/users/preferences",
+          "body": {
+            "mode": "json",
+            "content": "{}",
+            "schema": "{\"type\":\"object\",\"properties\":{\"theme\":{\"type\":\"string\"}}}"
+          },
+          "auth": { "kind": "bearer", "bearer": "{{token}}" }
         }
       ],
       "collections": [

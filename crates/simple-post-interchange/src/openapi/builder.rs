@@ -10,8 +10,8 @@ use crate::ir::{IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
 use crate::spec::{escape_pointer_token, PATH_METHODS};
 
 use super::{
-    component_key, document_tags, media_type_of, normalize_path_template, operation_id, parameters,
-    path_key_is_expressible,
+    canonical_json, component_key, content_hash, document_tags, media_type_of,
+    normalize_path_template, operation_id, parameters, path_key_is_expressible,
 };
 
 /// 一层待写的内容。`servers` 随栈一起下潜：URL 是 per 模块的，分组里的 endpoint
@@ -63,7 +63,7 @@ pub(super) struct Builder {
     /// 已用过的 `operationId`。规范要求它在整份文档里唯一，而「动词 + 路径」的映射
     /// 不是单射，故撞上时给后来的那个编号。
     used_operation_ids: HashSet<String>,
-    /// 手写 schema 的去重账本（按原文），同名 schema 只写一份。
+    /// 手写 schema 的去重账本：规范文本 → 它在 components 里的名字。同一份内容只写一份。
     schema_seen: HashMap<String, String>,
     pub(super) tags: BTreeSet<String>,
     pub(super) diagnostics: Vec<Diagnostic>,
@@ -151,7 +151,7 @@ impl Builder {
         //
         // 收集与引用必须**同进同出**：`mode = none` 的端点没有 requestBody，收集了
         // 却没人引用，`components.schemas` 里就留下一堆没人引用的定义（读文档的人
-        // 看到 `Schema1`… 会以为它们有意义）。故收集放在 media type 判定的里面 ——
+        // 看到它们会以为它们有意义）。故收集放在 media type 判定的里面 ——
         // 没有 requestBody 就没有 schema 可引。
         if let Some(media) = media_type_of(&ep.body.mode) {
             // `collect_schema` 必须**先**跑：它决定这份 schema 在 components 里叫什么，
@@ -263,29 +263,34 @@ impl Builder {
 
     /// 手写的 `body.schema` 透传到 `components.schemas`，返回它在 components 里的名字。
     ///
-    /// 它是一个 `Option<String>`（JSON 文本）且没有名字，故按出现顺序编号。解析不成
-    /// 合法 JSON Schema 就忽略 + `Info`，**不报错**：界面的 schema 编辑区手写的那份
-    /// 可能正写到一半，一份畸形 schema 不该让整次导出失败。
+    /// **名字由内容派生，不按出现顺序编号。** 位置编号有两个毛病：它与内容无关，于是
+    /// 文档里出现 `Schema1`、`Schema2`… 这种读不出任何信息的名字；而删掉一个接口之后，
+    /// 后面每一个的名字都往前挪，同一份文档在两次导出之间对不上号。
+    ///
+    /// 派生规则（见 [`Builder::claim_schema_name`]）：
+    ///
+    /// 1. schema 里有非空 `title` → 用它（经 [`component_key`] 规范化成合法的
+    ///    component 键）。`title` 是 JSON Schema 自己的字段，用户在界面的 Schema 编辑区
+    ///    里写它，就是在给这份定义起名。
+    /// 2. 没有 `title` → 名字是 `Schema_` + 该内容规范文本的短哈希。**一律带哈希**：
+    ///    给它一个裸的 `Schema`，「哪个拿到 `Schema`」就取决于它在文档里的先后——那还是
+    ///    按位置命名。
+    /// 3. 上面那个名字已被**另一份内容**占用 → 追加 `_` + 内容短哈希。
+    ///
+    /// **同一份内容恒定同一个名字**：去重按**规范文本**（键序无关）比对，故同一份
+    /// 定义出现在两个接口上时只写一份，两个 operation 都 `$ref` 它。
+    ///
+    /// 解析不成合法 JSON Schema 就忽略 + `Info`，**不报错**：界面的 schema 编辑区
+    /// 手写的那份可能正写到一半，一份畸形 schema 不该让整次导出失败。
     ///
     /// **返回名字而不只是收集**：调用方拿它写 `requestBody` 里的 `$ref`。收集了却
     /// 不被引用是三种选择里最差的一种——`components.schemas` 里躺着一堆没人引用的
-    /// 定义（读文档的人看到 `Schema1`…`Schema9` 会以为它们有意义），而每个
-    /// requestBody 都在宣称一个错的请求体形状。故调用方只在真的要写 `requestBody`
-    /// 时才收集（见上）。
+    /// 定义（读文档的人看到它们会以为它们有意义），而每个 requestBody 都在宣称一个
+    /// 错的请求体形状。故调用方只在真的要写 `requestBody` 时才收集（见上）。
     pub(super) fn collect_schema(&mut self, ep: &IrEndpoint, pointer: &str) -> Option<String> {
         let raw = ep.body.schema.as_ref().filter(|s| !s.trim().is_empty())?;
-        match serde_json::from_str::<Value>(raw) {
-            Ok(v) if v.is_object() => {
-                let text = v.to_string();
-                if let Some(name) = self.schema_seen.get(&text) {
-                    // 同一份 schema 只写一份，两个端点引同一个名字。
-                    return Some(name.clone());
-                }
-                let name = format!("Schema{}", self.schemas.len() + 1);
-                self.schemas.insert(name.clone(), v);
-                self.schema_seen.insert(text, name.clone());
-                Some(name)
-            }
+        let parsed: Value = match serde_json::from_str::<Value>(raw) {
+            Ok(v) if v.is_object() => v,
             _ => {
                 self.diagnostics.push(
                     Diagnostic::info(
@@ -294,8 +299,59 @@ impl Builder {
                     )
                     .dropping(raw.clone()),
                 );
-                None
+                return None;
             }
+        };
+        // 规范文本：键序不同的两份内容算同一份，故去重与命名都按它算。
+        let canonical = canonical_json(&parsed);
+        if let Some(name) = self.schema_seen.get(&canonical) {
+            // 同一份 schema 只写一份，两个端点引同一个名字。
+            return Some(name.clone());
+        }
+        let name = self.claim_schema_name(&parsed, &canonical);
+        self.schema_seen.insert(canonical, name.clone());
+        self.schemas.insert(name.clone(), parsed);
+        Some(name)
+    }
+
+    /// 给一份 schema 找一个没被占用的 component 名字。
+    ///
+    /// 名字与内容**必须**分开看：两个不同的定义共用一个名字时，后写的那份会覆盖前一份，
+    /// 产物里只剩一份定义，而两个 operation 都指着它——那是**错的**，比没有更糟。故基名
+    /// 被别人占着时绝不覆盖，改为追加内容哈希。
+    ///
+    /// **没有 `title` 的那份一律带哈希**：若给它一个裸的 `Schema`，那么「哪个拿到
+    /// `Schema`」就取决于它在文档里的先后——那还是按位置命名，与本规则相抵触。
+    fn claim_schema_name(&mut self, value: &Value, canonical: &str) -> String {
+        let hash = content_hash(canonical);
+        let titled = value
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(component_key)
+            // 全是非 ASCII 的标题（如中文）规范化之后只剩下划线，读不出任何信息，
+            // 那就当这份没有 title，交给内容哈希命名。
+            .filter(|k| k.chars().any(|c| c.is_ascii_alphanumeric()));
+        let base = titled.clone().unwrap_or_else(|| "Schema".to_string());
+        // 有 title 的那份可以用这个可读的名字；没有 title 的必须带哈希。
+        if titled.is_some() && !self.schemas.contains_key(&base) {
+            return base;
+        }
+        // 基名被另一份内容占着（或压根没有 title）→ 追加内容哈希。
+        // 两份内容不同的 schema 绝不共用一个名字。
+        let hashed = format!("{base}_{hash}");
+        if !self.schemas.contains_key(&hashed) {
+            return hashed;
+        }
+        // 哈希也撞上（两份内容的哈希相同）：再追加序号，保证不覆盖任何人。
+        let mut n = 2;
+        loop {
+            let candidate = format!("{hashed}_{n}");
+            if !self.schemas.contains_key(&candidate) {
+                return candidate;
+            }
+            n += 1;
         }
     }
 

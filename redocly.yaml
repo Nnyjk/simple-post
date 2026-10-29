@@ -17,9 +17,9 @@ rules:
   no-empty-servers: off
 
   # `responses` 每个 operation 恒为 `200: {description: "OK"}`。本仓库没有响应
-  # schema 的可信数据源（`StoredResponse` 只存实际响应，`body.schema` UI 从不写），
-  # 编一个 `4XX` 出来看起来更完整，但它是**假的**：声称的响应范围没有依据。
-  # 见 issue #5 的「`responses` 合成默认，不猜」。
+  # schema 的可信数据源（`StoredResponse` 只存实际响应，而 `body.schema` 说的是
+  # **请求**接受什么参数、不是响应长什么样），编一个 `4XX` 出来看起来更完整，
+  # 但它是**假的**：声称的响应范围没有依据。见 issue #5 的「`responses` 合成默认，不猜」。
   operation-4xx-response: off
 
   # 我们不知道用户项目的许可证。`info.license` 只能由用户自己声明，导出器替他们
@@ -38,3 +38,8 @@ rules:
   #   operation-operationId   —— 曾报 17 处：operation 完全没有 operationId。
   #   security-defined        —— 曾报 2 处：无凭据的接口没有显式声明 `security: []`。
   #   no-server-example.com   —— 会把 `example.com` 这类占位域名指出来。
+
+  # `components.schemas` 里躺着一份没人引用的定义时，读文档的人会以为它有意义，而
+  # 每个 requestBody 都在宣称一个错的请求体形状。`recommended` 不含这条，故显式打开：
+  # 导出器只在真要写 requestBody 时才收集 schema，产物里不该有孤儿定义。
+  no-unused-components: error
