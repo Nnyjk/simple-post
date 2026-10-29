@@ -76,9 +76,6 @@ fn seed_project(dir: &std::path::Path) {
                 id: "p1".to_string(),
                 name: "规格项目".to_string(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3B82F6".to_string(),
                 created_at: 1,
                 updated_at: 1,
@@ -101,7 +98,6 @@ fn camel_case_spec() -> serde_json::Value {
             "baseUrl": "https://api.example.test",
             "activate": true
         },
-        "service": { "name": "网关", "default": true },
         "endpoint": {
             "name": "查订单",
             "method": "GET",
@@ -126,7 +122,7 @@ async fn one_call_lands_the_whole_spec() {
     );
     let body: serde_json::Value = response.json().await.expect("json body");
 
-    // 落了什么：模块、集合路径上的两级、环境、服务、端点。
+    // 落了什么：模块、集合路径上的两级、环境、端点。
     assert_eq!(body["module"]["name"], "交易", "模块按名字建出来");
     assert_eq!(body["module"]["created"], true, "第一次应用是新建");
     let collections = body["collections"].as_array().expect("集合数组");
@@ -135,8 +131,6 @@ async fn one_call_lands_the_whole_spec() {
     assert_eq!(collections[1]["name"], "明细");
     assert_eq!(body["environment"]["name"], "dev");
     assert_eq!(body["environment"]["activated"], true);
-    assert_eq!(body["service"]["name"], "网关");
-    assert_eq!(body["service"]["isDefault"], true);
     assert_eq!(body["endpoint"]["name"], "查订单");
     assert!(
         body["endpoint"]["id"].as_str().is_some(),

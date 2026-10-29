@@ -144,22 +144,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/environments/{envId}/module-baseurls",
             post(environments_set_module_baseurl),
         )
-        // ---- baseUrlDefs ----
-        // 服务属于项目，故三个 project 级动词挂在 `/api/projects/{projectId}/baseurls`。
-        // `/baseurls/default` 与 `/api/baseurl-defs/{defId}` 前缀不同，不存在 radix
-        // tree 优先级问题；`base_url_defs_test` 盯住每一条都仍可达。
-        .route(
-            "/api/projects/{projectId}/baseurls",
-            get(base_url_defs_list).post(base_url_defs_create),
-        )
-        .route(
-            "/api/projects/{projectId}/baseurls/default",
-            post(base_url_defs_set_default),
-        )
-        .route(
-            "/api/baseurl-defs/{defId}",
-            patch(base_url_defs_update).delete(base_url_defs_delete),
-        )
         // ---- request settings (singleton) ----
         .route(
             "/api/request-settings",

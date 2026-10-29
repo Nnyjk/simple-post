@@ -35,7 +35,6 @@ pub fn environments_create(
         id: uid(),
         project_id,
         name,
-        base_urls: opts.base_urls.unwrap_or_default(),
         module_base_urls: HashMap::new(),
         variables: opts.variables.unwrap_or_default(),
         disabled_variables: Vec::new(),
@@ -107,27 +106,26 @@ pub fn environments_rename_var(
     })
 }
 
-/// 写唯一一层 URL 的一格：`env.moduleBaseUrls[defId][moduleId]`。
+/// 写（环境 × 模块）那一格：`env.moduleBaseUrls[moduleId]`。
 ///
-/// `defId` 是项目的一个服务，`moduleId` 是正在给它配地址的模块——同一服务可在两个
-/// 模块指向两个主机。这一层之上没有第二层可写、也没有可回落的东西，所以在此清空一格
-/// 就意味着请求不带 base URL 发出。`url = None` 才是清空；传空串会存下一格「看着是空」
-/// 的值，与清空无法区分。
+/// 格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自
+/// 独立：`url = None` = 地址保持原值，`url = Some("")` = 清空地址；`proxy` 同理。
+/// 格子上没有别的层，也不向别的模块的值回落，故两个字段都清空时这一格就整个消失。
 #[tauri::command]
 pub fn environments_set_module_baseurl(
     state: State<DbPool>,
     env_id: String,
-    def_id: String,
     module_id: String,
     url: Option<String>,
+    proxy: Option<String>,
 ) -> Result<Environment, AppError> {
     crate::db::with_tx(&state, |c| {
         crate::db::environments::set_module_base_url(
             c,
             &env_id,
-            &def_id,
             &module_id,
             url.as_deref(),
+            proxy.as_deref(),
         )
     })
 }

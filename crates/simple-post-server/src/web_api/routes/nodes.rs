@@ -28,8 +28,8 @@ use crate::dto::SendOutcomeDto;
 /// `POST /api/http/send` —— 裸 URL 逃生口。
 ///
 /// **这是本 crate 唯一对外发请求的路由**：URL 完全由 body 决定，绕过端点配置的
-/// base URL 解析，出站策略只在 `http_executor` 执行层把关。节点级的 `/send` 没有这条路由，
-/// 否则就是第二条不受管辖的出站通道——`base_url_defs_test` 盯住它不可路由。
+/// base URL 解析，出站策略只在 `http_executor` 执行层把关。节点级的 `/send` 不注册，
+/// 否则就是第二条不受管辖的出站通道。
 ///
 /// body 里带 `endpointId` 时，请求会按脚本链走一遍：前置脚本在发出之前改写它，
 /// 测试脚本在响应回来之后断言并写回环境变量。整条序列由

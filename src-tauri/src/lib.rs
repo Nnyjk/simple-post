@@ -187,11 +187,6 @@ pub fn run() {
             crate::commands::environments_rename_var,
             crate::commands::environments_set_module_baseurl,
             crate::commands::environments_set_active,
-            crate::commands::base_url_defs_list,
-            crate::commands::base_url_defs_create,
-            crate::commands::base_url_defs_update,
-            crate::commands::base_url_defs_delete,
-            crate::commands::base_url_defs_set_default,
             // 动态变量：定义 CRUD、解析、写覆盖值、强制重取。逻辑在 `crate::dynamic_api`，
             // REST 路由调的是同一批函数。
             crate::commands::dynamic_variables_list,

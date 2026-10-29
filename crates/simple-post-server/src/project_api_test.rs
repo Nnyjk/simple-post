@@ -1,6 +1,6 @@
-//! 项目、服务与资源树节点的创建编排 —— 两侧 transport 共用的那一份行为。
+//! 项目与资源树节点的创建编排 —— 两侧 transport 共用的那一份行为。
 //!
-//! 这里断言的是**规则**（id 归谁铸、★ 与服务的关系、父子关系的推导、两半一起落），
+//! 这里断言的是**规则**（id 归谁铸、父子关系的推导、两半一起落），
 //! 不是某一条线的形状 —— Tauri 命令与 REST 路由的线上形状各自不同，它们只是把各自的
 //! 形状翻译成本模块的入参。
 
@@ -12,10 +12,7 @@ use simple_post_core::domain::{ResourceNode, ResourceNodeType};
 
 use crate::dto::{CreateEndpointDetailOpts, CreateProjectOpts};
 
-use super::{
-    create_base_url_def, create_node, create_project, resolve_root_id, set_default_base_url_def,
-    NodeCreateInput,
-};
+use super::{create_node, create_project, resolve_root_id, NodeCreateInput};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -130,9 +127,7 @@ fn a_project_keeps_a_blank_id_the_caller_gave() {
     )
     .expect("建项目");
 
-    // 项目 id 是调用方给的标识，它给什么就是什么。服务 id 那套「空白按缺失」的规矩
-    // （`adopt_or_mint_id`）不套在项目上——两套策略唯一的差别就是纯空白算不算缺失，
-    // 断言「纯空白照用」才把这条差别钉住。
+    // 项目 id 是调用方给的标识，它给什么就是什么。纯空白也算「给了」，故照用。
     assert_eq!(project.id, "   ", "纯空白也是调用方给的 id，要照用");
 }
 
@@ -151,116 +146,6 @@ fn a_new_project_gets_a_default_environment_and_a_default_module() {
     })
     .expect("读模块");
     assert_eq!(modules.len(), 1, "项目一存在就有一个模块可归属");
-}
-
-#[test]
-fn a_new_project_has_no_default_service() {
-    let pool = temp_pool("no-star");
-    let project_id = seed_project(&pool, "p_no_star");
-
-    let project = db::with_conn(&pool, |c| db::projects::get(c, &project_id)).expect("读项目");
-
-    assert_eq!(
-        project.default_base_url_definition_id, None,
-        "建项目不等于选一个默认服务"
-    );
-    assert!(
-        project.base_url_definitions.is_empty(),
-        "建项目不种服务：服务名还得用户自己起"
-    );
-}
-
-// ----- 服务 ---------------------------------------------------------------
-
-#[test]
-fn a_service_keeps_the_id_the_caller_gave() {
-    let pool = temp_pool("def-adopt");
-    let project_id = seed_project(&pool, "p_def_adopt");
-
-    let def = create_base_url_def(
-        &pool,
-        &project_id,
-        Some("d_given".to_string()),
-        "api".to_string(),
-        None,
-    )
-    .expect("建服务");
-
-    assert_eq!(def.id, "d_given");
-    assert_eq!(def.name, "api");
-}
-
-#[test]
-fn a_service_without_an_id_gets_one() {
-    let pool = temp_pool("def-mint");
-    let project_id = seed_project(&pool, "p_def_mint");
-
-    let def =
-        create_base_url_def(&pool, &project_id, None, "api".to_string(), None).expect("建服务");
-
-    assert!(!def.id.is_empty(), "没有 id 就该铸一个");
-}
-
-#[test]
-fn a_service_with_a_blank_id_gets_a_fresh_one() {
-    let pool = temp_pool("def-blank");
-    let project_id = seed_project(&pool, "p_def_blank");
-
-    let def = create_base_url_def(
-        &pool,
-        &project_id,
-        Some("   ".to_string()),
-        "api".to_string(),
-        None,
-    )
-    .expect("建服务");
-
-    assert!(!def.id.trim().is_empty(), "纯空白不是可用的 id，该铸一个");
-}
-
-#[test]
-fn a_service_does_not_become_the_default_one() {
-    let pool = temp_pool("def-no-star");
-    let project_id = seed_project(&pool, "p_def_no_star");
-
-    create_base_url_def(&pool, &project_id, None, "api".to_string(), None).expect("建服务");
-
-    let project = db::with_conn(&pool, |c| db::projects::get(c, &project_id)).expect("读项目");
-    assert_eq!(
-        project.default_base_url_definition_id, None,
-        "建服务不等于选一个默认服务"
-    );
-}
-
-#[test]
-fn setting_the_default_service_points_the_project_star_at_it() {
-    let pool = temp_pool("star");
-    let project_id = seed_project(&pool, "p_star");
-    let def =
-        create_base_url_def(&pool, &project_id, None, "api".to_string(), None).expect("建服务");
-
-    let project = set_default_base_url_def(&pool, &project_id, Some(&def.id)).expect("选默认服务");
-
-    assert_eq!(
-        project.default_base_url_definition_id.as_deref(),
-        Some(def.id.as_str())
-    );
-}
-
-#[test]
-fn clearing_the_default_service_takes_the_star_back() {
-    let pool = temp_pool("star-clear");
-    let project_id = seed_project(&pool, "p_star_clear");
-    let def =
-        create_base_url_def(&pool, &project_id, None, "api".to_string(), None).expect("建服务");
-    set_default_base_url_def(&pool, &project_id, Some(&def.id)).expect("选默认服务");
-
-    let project = set_default_base_url_def(&pool, &project_id, None).expect("收回默认服务");
-
-    assert_eq!(
-        project.default_base_url_definition_id, None,
-        "收回后项目回到没有默认服务的状态"
-    );
 }
 
 // ----- 节点 ---------------------------------------------------------------

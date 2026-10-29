@@ -57,7 +57,7 @@ pub fn interchange_import_commit(
     module_id: String,
     content: String,
     selected: Option<Vec<String>>,
-    apply_service: Option<bool>,
+    apply_base_url: Option<bool>,
 ) -> Result<ImportCommitDto, AppError> {
     crate::interchange_api::import_commit(
         &state,
@@ -66,14 +66,14 @@ pub fn interchange_import_commit(
             module_id,
             content,
             selected: selected.unwrap_or_default(),
-            apply_service,
+            apply_base_url,
         },
     )
 }
 
 /// 导出候选清单。**不写库。**
 ///
-/// `environment_id` 缺席或空串 = 按激活环境解析 `servers`（与今天一致）；给了 id
+/// `environment_id` 缺席或空串 = 按激活环境解析那一格的地址（与今天一致）；给了 id
 /// 就按那个环境解析——渲染层换了环境会重取一趟。Tauri 2 把 payload 里的 camelCase
 /// 键映到本形参，故渲染层送的是 `environmentId`。
 #[tauri::command]
