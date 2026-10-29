@@ -82,7 +82,9 @@ pub(crate) fn missing_pieces(
     };
     let names = simple_post_core::dynamic::list_names(&parts);
     if !names.is_empty() {
-        let dynamic_names = enabled_dynamic_names(pool);
+        // 动态变量挂在项目里，故只有**本项目**的同名定义才算可用：别的项目里的那条
+        // 在这个端点上不会被替换。
+        let dynamic_names = enabled_dynamic_names(pool, &project.id);
         for name in names {
             if variable_available(env.as_ref(), &dynamic_names, &name) {
                 continue;
@@ -136,7 +138,7 @@ fn base_url_gap(
 
 /// 这个名字能不能被替换掉。
 ///
-/// 环境变量被停用时不参与替换，故它不算可用；动态变量的定义是全局的，被停用的
+/// 环境变量被停用时不参与替换，故它不算可用；动态变量的定义挂在项目里，被停用的
 /// 定义同样不参与替换。
 fn variable_available(env: Option<&Environment>, dynamic_names: &[String], name: &str) -> bool {
     if dynamic_names.iter().any(|d| d == name) {
@@ -150,14 +152,16 @@ fn variable_available(env: Option<&Environment>, dynamic_names: &[String], name:
     }
 }
 
-/// 全部**启用中**的动态变量名。停用的定义不参与替换，故不算可用。
-fn enabled_dynamic_names(pool: &DbPool) -> Vec<String> {
+/// 某个项目里全部**启用中**的动态变量名。停用的定义不参与替换，故不算可用。
+fn enabled_dynamic_names(pool: &DbPool, project_id: &str) -> Vec<String> {
     simple_post_core::db::with_conn(pool, |c| {
-        Ok(simple_post_core::db::dynamic_variables::list(c)?
-            .into_iter()
-            .filter(|d| d.enabled)
-            .map(|d| d.name)
-            .collect())
+        Ok(
+            simple_post_core::db::dynamic_variables::list_by_project(c, project_id)?
+                .into_iter()
+                .filter(|d| d.enabled)
+                .map(|d| d.name)
+                .collect(),
+        )
     })
     .unwrap_or_default()
 }

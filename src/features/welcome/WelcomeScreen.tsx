@@ -50,7 +50,6 @@ export function WelcomeScreen() {
   const theme = useAppStore((s) => s.theme);
   const openProject = useAppStore((s) => s.openProject);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
-  const openDynamicVariablesTab = useAppStore((s) => s.openDynamicVariablesTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -203,19 +202,12 @@ export function WelcomeScreen() {
               <SettingsIcon className="h-3.5 w-3.5" />
               打开设置
             </button>
-            {/* 动态变量是全局的：一条定义不属于任何项目，故没有打开项目时也要能
-                触达它 —— 这正是「先把基础数据源定义好，再在各项目里引用」的入口。 */}
-            <button
-              type="button"
-              onClick={() => openDynamicVariablesTab()}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground',
-                focusRing,
-              )}
-            >
+            {/* 动态变量挂在项目里（变量名项目内唯一），故没有项目时它开不了 ——
+                这里只说明它在哪，不给一个点了没反应的按钮。 */}
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card/20 px-3 py-1.5 text-xs text-muted-foreground/70">
               <Braces className="h-3.5 w-3.5" />
-              动态变量
-            </button>
+              动态变量在项目内维护，打开项目后从顶栏进入
+            </span>
             <button
               type="button"
               onClick={handleDocs}

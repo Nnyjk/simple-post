@@ -193,7 +193,7 @@ fn guide() -> Value {
             "body_mode says how body_content is framed: \"none\" sends no body, \"raw\" sends the text verbatim, \"json\" sends a JSON instance, \"form\" sends urlencoded text, and \"multipart\" sends a JSON array of parts — each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string}, where contentType defaults to application/octet-stream for a part that has a filename.",
             "A {{var}} in the url, params, headers, body or auth is replaced from the environment's variables. A name that is not there is listed in missing.",
             "Path parameters are separate from query parameters: `params` goes into the query string, `path_params` fills the `{placeholder}` segments in the path itself, and the key of each path parameter must match a placeholder name.",
-            "Dynamic variables are global and their values are resolved before substitution, so a name that is a dynamic variable is not reported in missing.",
+            "Dynamic variables belong to a project and their values are resolved before substitution, so a name that is one of the project's dynamic variables is not reported in missing. A request resolves only against its own project's definitions; dynamic_var_resolve is the tool that crosses projects.",
             "An endpoint without a collection is fine: give module_id only and it sits directly under the module.",
             "endpoint_update changes only the fields its patch names. Use it to change an existing endpoint; endpoint_create with if_exists=reuse never writes anything.",
             "spec_upsert merges the variables it names into the environment and leaves the other variables alone. It never creates a project and never changes a project's permission tier.",

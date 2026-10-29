@@ -49,6 +49,9 @@ export function HttpTester() {
   const draftSaveError = useAppStore((s) => s.draftSaveError);
   const requestPending = useAppStore((s) => s.requestPending);
   const requestSettings = useAppStore((s) => s.requestSettings);
+  // 动态变量挂在项目里，故这一页只认**消费方项目**（当前项目）里的定义：
+  // 请求侧不回退到别的项目，同名变量在不同项目里是不同的东西。
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
   const dynamicVariables = useAppStore((s) => s.dynamicVariables);
   const dynamicValues = useAppStore((s) => s.dynamicValues);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
@@ -174,10 +177,22 @@ export function HttpTester() {
     [allEndpointDetails],
   );
 
+  // 变量选择器的条目：环境变量与动态变量并进同一份候选（不新开页签）。
+  //
+  // 只取当前项目里的定义与它们当前项目的取值桶：别的项目的同名变量不参与这次替换。
+  const projectDynamicVariables = useMemo(
+    () => dynamicVariables.filter((v) => v.projectId === activeProjectId),
+    [dynamicVariables, activeProjectId],
+  );
+  const projectDynamicValues = useMemo(
+    () => dynamicValues[activeProjectId] ?? {},
+    [dynamicValues, activeProjectId],
+  );
+
   // 变量候选：环境变量与动态变量并进同一份候选（不新开页签）。
   const dynamicEntries = useMemo<VarEntry[]>(
-    () => buildDynamicEntries(dynamicVariables, dynamicValues),
-    [dynamicVariables, dynamicValues],
+    () => buildDynamicEntries(projectDynamicVariables, projectDynamicValues),
+    [projectDynamicVariables, projectDynamicValues],
   );
 
   // 全部候选（环境 + 动态）。URL 栏与各输入框共用同一份，故候选只在这里算一次。
@@ -251,14 +266,14 @@ export function HttpTester() {
     setValidationError(result.ok ? null : result.error);
   };
 
-  // 全部动态变量定义。定义是全局的，故这里没有项目维度；这里只要当前值，故不算引用关系。
+  // 当前项目里的全部动态变量定义。这里只要当前值。
   useEffect(() => {
-    void loadDynamicVariables({ includeReferences: false });
-  }, [loadDynamicVariables]);
+    void loadDynamicVariables(activeProjectId);
+  }, [loadDynamicVariables, activeProjectId]);
 
   const enabledDynamicNames = useMemo(
-    () => enabledDynamicNameSet(dynamicVariables),
-    [dynamicVariables],
+    () => enabledDynamicNameSet(projectDynamicVariables),
+    [projectDynamicVariables],
   );
 
   const dynamicNames = useMemo(() => {
@@ -271,14 +286,14 @@ export function HttpTester() {
   useEffect(() => {
     if (dynamicNames.length === 0) return;
     const timer = window.setTimeout(() => {
-      void resolveDynamicVariables(dynamicNames);
+      void resolveDynamicVariables(dynamicNames, activeProjectId);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [dynamicNames, resolveDynamicVariables]);
+  }, [dynamicNames, activeProjectId, resolveDynamicVariables]);
 
   const dynamicVars = useMemo(
-    () => buildDynamicVars(dynamicValues, enabledDynamicNames),
-    [dynamicValues, enabledDynamicNames],
+    () => buildDynamicVars(projectDynamicValues, enabledDynamicNames),
+    [projectDynamicValues, enabledDynamicNames],
   );
 
   // 组装请求的唯一入口。发送前若解析出了新的值，用新值再组装一次。

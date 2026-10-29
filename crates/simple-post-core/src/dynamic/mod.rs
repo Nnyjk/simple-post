@@ -11,8 +11,8 @@
 //!
 //! ## 取数上下文由定义自己决定
 //!
-//! 定义是全局的，故同一个 `{{name}}` 在任何项目里都指向同一条定义。取数要用的项目、
-//! 环境、服务与模块因此全部由那条定义推导（见 [`source_context`]），而不是由「谁在
+//! 定义挂在项目里，故同一个 `{{name}}` 只在消费方那个项目里指向一条定义。取数要用的
+//! 项目、环境、服务与模块仍然全部由那条定义推导（见 [`source_context`]），而不是由「谁在
 //! 消费这个变量」决定：数据源端点落在哪个项目就用哪个项目的服务与模块，定义点名的
 //! 环境就是那个环境，没点名就用该项目的第一个可用环境。
 //!
@@ -40,6 +40,7 @@
 //! - `fetcher.rs`：取数器抽象与一次解析的上下文
 //! - `flight.rs`：single-flight 注册表
 //! - `resolve.rs`：编排——取数、抽取、落缓存
+//! - `transform.rs`：抽取之后跑处理脚本，用它的返回值替换抽取结果
 
 mod cache;
 mod extract;
@@ -50,6 +51,7 @@ mod names;
 mod resolve;
 mod serialize;
 mod source;
+mod transform;
 
 // 公开接口：定义在按职责分开的子模块里，这里重新导出，故 `dynamic::merge_pool` 等旧路径不变。
 pub use cache::{decide, Decision};
@@ -57,9 +59,10 @@ pub use extract::extract_value;
 pub use fetcher::{RawSource, ResolveContext, SourceFetcher};
 pub use merge::merge_pool;
 pub use names::{list_names, TemplateParts};
-pub use resolve::{resolve_names, MAX_VALUE_BYTES};
+pub use resolve::{resolve_definition, resolve_names, MAX_VALUE_BYTES};
 pub use serialize::{parse_raw, serialize_value};
 pub use source::{source_context, SourceContext};
+pub use transform::apply as apply_transform;
 
 // `SourceFetcher` 的签名里出现 `DynamicError`，测试模块靠 `use super::*` 拿到这个类型。
 // 只在测试构建里重导出，生产构建的公开接口与拆分前一致。

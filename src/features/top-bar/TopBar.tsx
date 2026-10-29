@@ -279,7 +279,7 @@ export function TopBar() {
         </div>
       )}
 
-      {/* 动态变量入口。定义是全局的，故这个入口一直都在——没有打开项目时也能用。 */}
+      {/* 动态变量入口。定义挂在项目里，故它开的是**当前项目**的那一页。 */}
       <Tooltip content="动态变量" side="bottom">
         <Button
           {...NO_DRAG}

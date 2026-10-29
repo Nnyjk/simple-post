@@ -28,7 +28,7 @@ fn limits(timeout_ms: u64) -> ScriptLimits {
 fn sandbox(limits: &ScriptLimits, request: &ScriptRequest) -> Sandbox {
     let sandbox = Sandbox::new(limits).expect("engine should start");
     sandbox
-        .init(request, None, &EnvSnapshot::default(), limits)
+        .init(request, None, &EnvSnapshot::default(), None, limits)
         .expect("init should succeed");
     sandbox
 }
@@ -208,7 +208,9 @@ fn environment_variables_can_be_read_and_written() {
             .into_iter()
             .collect(),
     };
-    sandbox.init(&request, None, &env, &limits).expect("init");
+    sandbox
+        .init(&request, None, &env, None, &limits)
+        .expect("init");
 
     let run = sandbox.run(
         "console.log(String(pm.environment.get('token')));\
@@ -352,7 +354,13 @@ fn the_response_is_visible_to_a_test_script() {
         response_time_ms: 12,
     };
     sandbox
-        .init(&request, Some(&response), &EnvSnapshot::default(), &limits)
+        .init(
+            &request,
+            Some(&response),
+            &EnvSnapshot::default(),
+            None,
+            &limits,
+        )
         .expect("init");
 
     let run = sandbox.run(

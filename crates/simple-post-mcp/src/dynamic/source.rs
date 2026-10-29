@@ -314,6 +314,13 @@ async fn send(
             status: response.status,
             content_type: response.content_type,
             body: response.body,
+            // 响应头与耗时给处理脚本看（`pm.response.headers` / `pm.response.responseTime`）。
+            headers: response
+                .headers
+                .iter()
+                .map(|pair| (pair[0].clone(), pair[1].clone()))
+                .collect(),
+            duration_ms: response.duration_ms as u64,
         }),
         None => {
             let error = outcome.http.error;

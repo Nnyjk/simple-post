@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { WelcomeScreen } from '@/features/welcome/WelcomeScreen';
-import { useAppStore, SETTINGS_TAB_ID, DYNAMIC_TAB_ID } from '@/stores/app-store';
+import { useAppStore, SETTINGS_TAB_ID } from '@/stores/app-store';
 import { BootSplashGate } from '@/features/welcome/BootSplashGate';
 
 // ---------------------------------------------------------------------------
@@ -13,6 +13,9 @@ import { BootSplashGate } from '@/features/welcome/BootSplashGate';
 // 否则欢迎页的「打开设置」会写出一个没人渲染的 tab。此时渲染
 // `SettingsSurface` —— 与 workspace 内同一份 `SettingsPanel`，只是外壳不同。
 // 判断放在本文件而非 `WelcomeScreen` 内，才能保证两个宿主共用一份面板实现。
+//
+// 动态变量**不是**例外：它挂在项目里，故它只是 workspace 里的一个项目内标签页，
+// 没有项目时开不了（欢迎页只提示先打开项目）。
 //
 // 不在共享布局里做条件渲染：欢迎页会被挤进一个窗格，四周是无法在没有项目
 // 时做任何事的 chrome。
@@ -36,14 +39,6 @@ const WorkspaceShell = lazy(() =>
 // 面板体共用，只有外壳不同（见 `features/settings/SettingsSurface.tsx`）。
 const SettingsSurface = lazy(() =>
   import('@/features/settings/SettingsSurface').then((m) => ({ default: m.SettingsSurface })),
-);
-
-// 动态变量同样是全局资产，故同样需要一个无项目宿主。面板体与 workspace 里的是同一份
-// （见 `features/dynamic-variables/DynamicVariablesSurface.tsx`）。
-const DynamicVariablesSurface = lazy(() =>
-  import('@/features/dynamic-variables/DynamicVariablesSurface').then((m) => ({
-    default: m.DynamicVariablesSurface,
-  })),
 );
 
 // 启动失败可能落在任一 surface，故置于两者之上，而非嵌在某个 shell 里。
@@ -137,10 +132,9 @@ function App() {
   }, []);
 
   const onWelcome = activeProjectId === '';
-  // 设置与动态变量都是全局资产，不需要项目也能触达。在此判断（而非放进
-  // `WelcomeScreen`），才能让两个宿主共用一份面板实现。
+  // 设置是无项目也能触达的单例。在此判断（而非放进 `WelcomeScreen`），才能让两个宿主
+  // 共用一份面板实现。
   const onWelcomeSettings = onWelcome && activeTabId === SETTINGS_TAB_ID;
-  const onWelcomeDynamic = onWelcome && activeTabId === DYNAMIC_TAB_ID;
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
@@ -157,10 +151,6 @@ function App() {
       {onWelcomeSettings ? (
         <Suspense fallback={<SurfaceFallback label="加载设置…" />}>
           <SettingsSurface />
-        </Suspense>
-      ) : onWelcomeDynamic ? (
-        <Suspense fallback={<SurfaceFallback label="加载动态变量…" />}>
-          <DynamicVariablesSurface />
         </Suspense>
       ) : onWelcome ? (
         <WelcomeScreen />

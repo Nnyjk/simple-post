@@ -95,6 +95,7 @@ fn detail(node_id: &str, url: &str) -> EndpointDetail {
 fn definition(id: &str, name: &str) -> DynamicVariable {
     DynamicVariable {
         id: id.into(),
+        project_id: Some("p1".into()),
         name: name.into(),
         description: None,
         source_endpoint_id: None,
@@ -103,6 +104,7 @@ fn definition(id: &str, name: &str) -> DynamicVariable {
         source_environment_id: None,
         source_base_url_definition_id: None,
         extract_path: "$".into(),
+        transform_script: None,
         value_mode: ValueMode::Auto,
         ttl_seconds: 60,
         stale_fallback: false,
@@ -264,102 +266,6 @@ fn deleting_a_definition_removes_its_cache_rows() {
     })
     .expect("count");
     assert_eq!(rows, 0);
-}
-
-#[test]
-fn the_endpoints_referencing_a_name_are_listed() {
-    let (pool, _dir) = fresh_pool();
-    // e1 的 body 里写 `{{sns}}`，e2 不写。
-    db::with_tx(&pool, |c| {
-        db::endpoint_details::update(
-            c,
-            "e1",
-            crate::domain::EndpointDetailPatch {
-                body: Some(RequestBody {
-                    mode: crate::domain::BodyMode::Json,
-                    content: "{\"sns\": {{sns}}}".into(),
-                    schema: None,
-                }),
-                ..Default::default()
-            },
-        )
-    })
-    .expect("update detail");
-
-    let map = db::with_conn(&pool, |c| {
-        referencing_endpoints(c, &["sns".to_string(), "other".to_string()])
-    })
-    .expect("scan");
-    let refs = map.get("sns").expect("sns 的引用");
-    let ids: Vec<String> = refs.iter().map(|r| r.endpoint_id.clone()).collect();
-    assert_eq!(ids, vec!["e1".to_string()]);
-    assert_eq!(refs[0].project_id, "p1");
-    assert_eq!(refs[0].project_name, "First");
-
-    assert!(map.get("other").expect("other 的引用").is_empty());
-}
-
-#[test]
-fn one_scan_answers_every_name() {
-    let (pool, _dir) = fresh_pool();
-    // e1 引用 `{{sns}}`，e2 引用 `{{token}}`。
-    db::with_tx(&pool, |c| {
-        db::endpoint_details::update(
-            c,
-            "e1",
-            crate::domain::EndpointDetailPatch {
-                body: Some(RequestBody {
-                    mode: crate::domain::BodyMode::Json,
-                    content: "{\"sns\": {{sns}}}".into(),
-                    schema: None,
-                }),
-                ..Default::default()
-            },
-        )
-    })
-    .expect("update e1");
-    db::with_tx(&pool, |c| {
-        db::endpoint_details::update(
-            c,
-            "e2",
-            crate::domain::EndpointDetailPatch {
-                body: Some(RequestBody {
-                    mode: crate::domain::BodyMode::Json,
-                    content: "{\"token\": {{token}}}".into(),
-                    schema: None,
-                }),
-                ..Default::default()
-            },
-        )
-    })
-    .expect("update e2");
-
-    // 一次遍历同时回答两个名字：端点各自只落到自己引用的那个名字下。
-    let map = db::with_conn(&pool, |c| {
-        referencing_endpoints(c, &["sns".to_string(), "token".to_string()])
-    })
-    .expect("scan");
-    let sns_ids: Vec<String> = map
-        .get("sns")
-        .expect("sns 的引用")
-        .iter()
-        .map(|r| r.endpoint_id.clone())
-        .collect();
-    assert_eq!(sns_ids, vec!["e1".to_string()]);
-    let token_ids: Vec<String> = map
-        .get("token")
-        .expect("token 的引用")
-        .iter()
-        .map(|r| r.endpoint_id.clone())
-        .collect();
-    assert_eq!(token_ids, vec!["e2".to_string()]);
-}
-
-#[test]
-fn an_empty_name_list_scans_nothing() {
-    let (pool, _dir) = fresh_pool();
-    let map = db::with_conn(&pool, |c| referencing_endpoints(c, &[])).expect("scan");
-    assert!(map.is_empty());
 }
 
 #[test]
@@ -578,4 +484,63 @@ fn a_duplicate_id_is_reported_as_an_id_conflict() {
     };
     assert!(message.contains("id"), "实际消息是：{message}");
     assert!(!message.contains("已有一个叫"), "不该报成重名：{message}");
+}
+
+#[test]
+fn moving_a_definition_into_a_project_that_already_has_that_name_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
+    let mut other = definition("d2", "sns");
+    other.project_id = Some("p2".into());
+    db::with_tx(&pool, |c| create(c, &other)).expect("create");
+
+    // 两个项目各有同名定义本来是允许的；但把 p1 的那条挪进 p2 就会与 p2 那条撞上。
+    // 撞上的那一刻必须说清是「重名」，而不是把数据库的唯一索引错误泄给用户。
+    let err = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                project_id: Some("p2".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect_err("挪进一个已经有同名定义的项目应该被拒");
+    let message = match err {
+        crate::error::AppError::Validation(message) => message,
+        other => panic!("期望一条校验错误，实际是 {other:?}"),
+    };
+    assert!(message.contains("已有一个叫"), "实际消息是：{message}");
+
+    // 被拒的定义留在原来的项目里。
+    let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
+    assert_eq!(got.project_id.as_deref(), Some("p1"));
+}
+
+#[test]
+fn moving_a_definition_into_a_project_without_that_name_is_allowed() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
+    let mut other = definition("d2", "points");
+    other.project_id = Some("p2".into());
+    db::with_tx(&pool, |c| create(c, &other)).expect("create");
+
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                project_id: Some("p2".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("目标项目里没有同名定义，挪过去应当被允许");
+
+    let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
+    assert_eq!(got.project_id.as_deref(), Some("p2"));
+    assert_eq!(got.name, "sns");
 }

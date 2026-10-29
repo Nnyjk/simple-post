@@ -6,12 +6,14 @@ use simple_post_core::error::AppError;
 
 /// 解析这个请求引用到的动态变量，返回它们的值（变量名 → 替换用的文本）。
 ///
-/// 只挑「请求里出现过」的名字——未被引用的定义不参与这次发送，也不产生错误。名字是
-/// 全局的，故没有「本项目有定义」这一层过滤：后端按名字找到哪条定义就用哪条。
+/// 只挑「请求里出现过」的名字——未被引用的定义不参与这次发送，也不产生错误。
 ///
-/// **定义是全局的，故发送路径也要过数据源项目的那道门。** 一条定义可能指向别的项目的
-/// 接口，而取数用的是那个项目的 base URL 与鉴权——那个项目的权限决定这次取数能不能做。
-/// 少了这道门，一个只读项目的客户端就能借本项目的接口把别的项目的凭据用出去。
+/// **取值只认消费方所在的项目。** 请求里的 `{{name}}` 在本项目里找不到定义，就是缺失的：
+/// 不退到别的项目去拿同名的那条。故这里按 `project.id` 查定义。
+///
+/// **发送路径也要过数据源项目的那道门。** 一条定义可能指向别的项目的接口，而取数用的是
+/// 那个项目的 base URL 与鉴权——那个项目的权限决定这次取数能不能做。少了这道门，一个
+/// 只读项目的客户端就能借本项目的接口把别的项目的凭据用出去。
 /// 内联数据源没有项目可落（它自带完整地址与凭据），故只由全局能力档位裁决。
 ///
 /// 取数失败**不让整次调用失败**：该变量按缺失处理（`{{name}}` 原样留在请求里），错误
@@ -68,11 +70,11 @@ pub(super) async fn resolve_dynamic_values(
     if names.is_empty() {
         return Ok(empty);
     }
-    // 逐个名字找到它指向的定义，再按那个定义的数据源项目过门：名字是全局的，
-    // 一批名字可能分属不同项目，故这道门要一个个查。
+    // 逐个名字找到它指向的定义，再按那个定义的数据源项目过门：定义挂在消费方项目里，
+    // 但数据源可能指向别的项目，那道门要一个个查。
     for name in &names {
         let definition = simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::dynamic_variables::get_by_name(c, name)
+            simple_post_core::db::dynamic_variables::get_by_name_in_project(c, &project.id, name)
         })?;
         let Some(definition) = definition else {
             continue;
@@ -89,8 +91,13 @@ pub(super) async fn resolve_dynamic_values(
     let ctx = simple_post_core::dynamic::ResolveContext {
         pool: state.pool.clone(),
     };
-    let resolution =
-        simple_post_core::dynamic::resolve_names(&ctx, &names, false, &crate::dynamic::fetcher())
-            .await?;
+    let resolution = simple_post_core::dynamic::resolve_names(
+        &ctx,
+        Some(&project.id),
+        &names,
+        false,
+        &crate::dynamic::fetcher(),
+    )
+    .await?;
     Ok(resolution.values)
 }

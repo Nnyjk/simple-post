@@ -211,6 +211,8 @@ pub struct BaseUrlDefSetDefaultBody {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariableCreateBody {
+    /// 归属项目。定义挂在项目里，故它必填：变量名在项目内唯一。
+    pub project_id: String,
     pub name: String,
     /// 客户端自铸的 id，非空白时照单采纳——与 `BaseUrlDefCreateBody::id` 同一理由：
     /// renderer 在这一行持久化之前就拿这个 id 当键。
@@ -233,6 +235,9 @@ pub struct DynamicVariableCreateBody {
     /// JSONPath 表达式。`$` 表示整段响应。
     #[serde(default)]
     pub extract_path: Option<String>,
+    /// 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工。
+    #[serde(default)]
+    pub transform_script: Option<String>,
     /// 值的序列化形态：`auto` / `json` / `text`。
     #[serde(default)]
     pub value_mode: Option<crate::domain::ValueMode>,
@@ -252,8 +257,12 @@ pub struct DynamicVariableCreateBody {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariableResolveBody {
-    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。名字是全局的。
+    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。
     pub names: Vec<String>,
+    /// 在哪个项目里找这些名字。缺席 = 跨项目找（同名定义出现在多个项目里时按歧义
+    /// 处理，不猜）。
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// 真 = 跳过缓存，强制重新取数。
     #[serde(default)]
     pub force: Option<bool>,

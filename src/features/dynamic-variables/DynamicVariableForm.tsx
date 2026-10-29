@@ -7,6 +7,9 @@
  *
  * 引用接口时，表单还会给出**取数用的环境与服务**：默认取那个接口所属项目的第一个可用
  * 环境与默认服务，用户可以改。两者都跟着数据源走，故选了接口之后它们才有意义。
+ *
+ * 定义挂在**项目**里，故表单要知道它属于哪个项目：新建时是当前项目，编辑时是这条定义
+ * 自己的归属项目。变量名在项目内唯一。
  */
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
@@ -18,6 +21,11 @@ import { EndpointTreePicker } from './EndpointTreePicker';
 export interface DynamicVariableFormProps {
   /** 传了就走编辑模式，不传就是新建。 */
   variable?: DynamicVariableView;
+  /**
+   * 归属项目。新建时表单把它写进 `projectId`；编辑时表单优先用 `variable.projectId`，
+   * 那个值缺失时用这个 prop，两个都缺时用当前项目。
+   */
+  projectId?: string;
   onCancel: () => void;
   onDone: () => void;
   /** 编辑模式下的一键改名（面板的「改名建议」用）。 */
@@ -33,16 +41,21 @@ function cmp(a: string, b: string): number {
 
 export function DynamicVariableForm({
   variable,
+  projectId,
   onCancel,
   onDone,
   onRename,
 }: DynamicVariableFormProps) {
   const projects = useAppStore((s) => s.projects);
   const environments = useAppStore((s) => s.environments);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
   const createDynamicVariable = useAppStore((s) => s.createDynamicVariable);
   const updateDynamicVariable = useAppStore((s) => s.updateDynamicVariable);
   // 保存失败的原因。表单就地显示它，免得用户只看到表单凭空消失。
   const saveError = useAppStore((s) => s.dynamicError);
+
+  // 归属项目。编辑时以定义自己的为准，新建时是当前项目。
+  const ownerProjectId = variable?.projectId ?? projectId ?? activeProjectId;
 
   const [name, setName] = useState(variable?.name ?? '');
   const [description, setDescription] = useState(variable?.description ?? '');
@@ -64,6 +77,7 @@ export function DynamicVariableForm({
   const [environmentId, setEnvironmentId] = useState(variable?.sourceEnvironmentId ?? '');
   const [serviceId, setServiceId] = useState(variable?.sourceBaseUrlDefinitionId ?? '');
   const [extractPath, setExtractPath] = useState(variable?.extractPath ?? '$');
+  const [transformScript, setTransformScript] = useState(variable?.transformScript ?? '');
   const [valueMode, setValueMode] = useState<ValueMode>(variable?.valueMode ?? 'auto');
   const [ttlSeconds, setTtlSeconds] = useState(String(variable?.ttlSeconds ?? 60));
   const [staleFallback, setStaleFallback] = useState(variable?.staleFallback ?? false);
@@ -125,6 +139,7 @@ export function DynamicVariableForm({
           sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
           sourceBaseUrlDefinitionId: usesEndpoint ? serviceId || null : null,
           extractPath,
+          transformScript: transformScript.trim() === '' ? null : transformScript,
           valueMode,
           ttlSeconds: ttlValue,
           staleFallback,
@@ -134,6 +149,7 @@ export function DynamicVariableForm({
         if (!ok) return;
       } else {
         const created = await createDynamicVariable({
+          projectId: ownerProjectId,
           name,
           description: description || undefined,
           sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
@@ -141,6 +157,7 @@ export function DynamicVariableForm({
           sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
           sourceBaseUrlDefinitionId: usesEndpoint ? serviceId || null : null,
           extractPath,
+          transformScript: transformScript.trim() === '' ? null : transformScript,
           valueMode,
           ttlSeconds: ttlValue,
           staleFallback,
@@ -157,6 +174,10 @@ export function DynamicVariableForm({
   return (
     <div className="rounded-md border border-border p-3">
       <h3 className="text-xs font-medium">{variable ? '编辑定义' : '新建定义'}</h3>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        归属项目：{projects.find((p) => p.id === ownerProjectId)?.name ?? '（未知）'}
+        。变量名在这个项目里唯一。
+      </p>
       <div className="mt-2 flex flex-col gap-2">
         <label className="flex items-center gap-2 text-xs">
           <span className="w-20 shrink-0 text-muted-foreground">变量名</span>
@@ -272,6 +293,25 @@ export function DynamicVariableForm({
           <span className="text-[11px] text-muted-foreground">JSONPath；`$` 表示整段响应。</span>
         </label>
 
+        <div className="flex items-start gap-2 text-xs">
+          <span className="w-20 shrink-0 pt-1.5 text-muted-foreground">处理脚本</span>
+          <div className="flex flex-1 flex-col gap-1">
+            <textarea
+              value={transformScript}
+              onChange={(e) => setTransformScript(e.target.value)}
+              spellCheck={false}
+              placeholder={'return pm.data.items.map((x) => x.code).join(",")'}
+              className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
+            />
+            <span className="text-[11px] text-muted-foreground">
+              可选。抽取之后跑，用来做 JSONPath 表达不了的加工。脚本拿得到抽取结果（
+              <code className="font-mono">pm.data</code>）与原始响应（
+              <code className="font-mono">pm.response</code>），用
+              <code className="font-mono">return</code> 给出最终值；不写就沿用抽取结果。
+            </span>
+          </div>
+        </div>
+
         <label className="flex items-center gap-2 text-xs">
           <span className="w-20 shrink-0 text-muted-foreground">值的形态</span>
           <select
@@ -318,7 +358,7 @@ export function DynamicVariableForm({
           <Button
             size="sm"
             onClick={() => void handleSubmit()}
-            disabled={busy || name.trim() === '' || !hasSource}
+            disabled={busy || name.trim() === '' || !hasSource || ownerProjectId === ''}
           >
             保存
           </Button>

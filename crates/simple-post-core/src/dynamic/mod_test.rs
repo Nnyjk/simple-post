@@ -166,6 +166,7 @@ fn a_disabled_parameter_is_not_referenced() {
 fn definition(ttl_seconds: i64, stale_fallback: bool) -> DynamicVariable {
     DynamicVariable {
         id: "d1".into(),
+        project_id: Some("p1".into()),
         name: "sns".into(),
         description: None,
         source_endpoint_id: None,
@@ -174,6 +175,7 @@ fn definition(ttl_seconds: i64, stale_fallback: bool) -> DynamicVariable {
         source_environment_id: None,
         source_base_url_definition_id: None,
         extract_path: "$".into(),
+        transform_script: None,
         value_mode: ValueMode::Auto,
         ttl_seconds,
         stale_fallback,
@@ -410,6 +412,8 @@ impl SourceFetcher for CountingFetcher {
                 status: self.status,
                 content_type: "application/json".into(),
                 body: self.body.clone(),
+                headers: vec![],
+                duration_ms: 0,
             })
         })
     }
@@ -455,7 +459,7 @@ async fn a_resolution_fetches_the_value_and_caches_it() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("[{\"code\":\"A001\"}]");
 
-    let first = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let first = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(
@@ -465,7 +469,7 @@ async fn a_resolution_fetches_the_value_and_caches_it() {
     assert_eq!(fetcher.calls(), 1);
 
     // 第二次命中缓存，不再取数。
-    let second = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let second = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(fetcher.calls(), 1);
@@ -481,10 +485,10 @@ async fn a_force_ignores_the_cache() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("[]");
 
-    resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
-    resolve_names(&ctx, &["sns".to_string()], true, &fetcher)
+    resolve_names(&ctx, Some("p1"), &["sns".to_string()], true, &fetcher)
         .await
         .expect("解析");
     assert_eq!(fetcher.calls(), 2);
@@ -496,7 +500,7 @@ async fn a_failing_fetch_leaves_the_name_missing_and_reports_the_reason() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::failing();
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert!(!out.values.contains_key("sns"));
@@ -511,7 +515,7 @@ async fn a_non_2xx_source_is_reported_as_a_status_error() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("{}").with_status(503);
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors.len(), 1);
@@ -524,7 +528,7 @@ async fn a_source_body_that_is_not_json_is_reported_as_not_json() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("not json");
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::NotJson);
@@ -551,10 +555,115 @@ async fn a_source_whose_path_matches_nothing_is_reported_as_no_match() {
     .expect("patch");
     def.name = "sns".into();
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::NoMatch);
+}
+
+// ---------------------------------------------------------------------------
+// 处理脚本
+// ---------------------------------------------------------------------------
+
+/// 给库里那条定义装上一段处理脚本。
+fn set_transform_script(pool: &db::DbPool, script: &str) {
+    db::with_tx(pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            crate::domain::DynamicVariablePatch {
+                transform_script: Some(Some(script.into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("patch");
+}
+
+#[tokio::test]
+async fn the_transform_script_rewrites_the_extracted_value() {
+    // 取数 → 抽取 → 脚本改写：脚本看到的是**抽取出来的那一份**，不是整段响应。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("[{\"code\":\"A001\"},{\"code\":\"B002\"}]");
+    db::with_tx(&pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            crate::domain::DynamicVariablePatch {
+                extract_path: Some("$[0].code".into()),
+                transform_script: Some(Some("return pm.data + \"-X\";".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("patch");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(
+        out.values.get("sns").map(String::as_str),
+        Some("A001-X"),
+        "脚本 return 的值就是最终值"
+    );
+}
+
+#[tokio::test]
+async fn the_transform_script_can_read_the_raw_response() {
+    // `pm.response` 是**整段**响应：抽取规则之外的字段也能拿到。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("{\"total\":7,\"items\":[1,2]}");
+    db::with_tx(&pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            crate::domain::DynamicVariablePatch {
+                extract_path: Some("$.items".into()),
+                transform_script: Some(Some("return pm.response.json().total;".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("patch");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(out.values.get("sns").map(String::as_str), Some("7"));
+}
+
+#[tokio::test]
+async fn a_transform_script_that_throws_leaves_the_name_missing() {
+    // 脚本失败按「取值失败」处理：名字缺失，原因是脚本错误，不是网络错误。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("{\"a\":1}");
+    set_transform_script(&pool, "throw new Error('炸了');");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert!(!out.values.contains_key("sns"));
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].kind, DynamicErrorKind::ScriptError);
+}
+
+#[tokio::test]
+async fn a_transform_script_that_returns_nothing_leaves_the_name_missing() {
+    // 没有 `return` 就没有值：脚本「跑通了」不等于「给出了结果」。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("{\"a\":1}");
+    set_transform_script(&pool, "const x = pm.data;");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert!(!out.values.contains_key("sns"));
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].kind, DynamicErrorKind::ScriptError);
 }
 
 #[tokio::test]
@@ -564,7 +673,7 @@ async fn a_value_that_is_too_large_is_not_written_to_the_cache() {
     let big = format!("\"{}\"", "x".repeat(MAX_VALUE_BYTES + 10));
     let fetcher = CountingFetcher::new(&big);
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::TooLarge);
@@ -588,9 +697,15 @@ async fn concurrent_resolutions_of_the_same_definition_fetch_only_once() {
         let ctx = Arc::clone(&ctx);
         let fetcher = Arc::clone(&fetcher);
         tasks.push(tokio::spawn(async move {
-            resolve_names(&ctx, &["sns".to_string()], false, fetcher.as_ref())
-                .await
-                .expect("解析")
+            resolve_names(
+                &ctx,
+                Some("p1"),
+                &["sns".to_string()],
+                false,
+                fetcher.as_ref(),
+            )
+            .await
+            .expect("解析")
         }));
     }
     for task in tasks {
@@ -621,7 +736,7 @@ async fn a_disabled_definition_is_not_resolved() {
     })
     .expect("patch");
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert!(out.values.is_empty());
@@ -635,7 +750,7 @@ async fn a_name_without_a_definition_is_skipped() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("[]");
 
-    let out = resolve_names(&ctx, &["token".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["token".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert!(out.values.is_empty());
@@ -649,7 +764,7 @@ async fn a_stale_value_is_used_when_the_fetch_fails_and_the_definition_allows_it
     let ctx = context(&pool);
     // 先取一次，把值写进缓存；随后把 TTL 改成 0（立刻过期）并允许回退。
     let good = CountingFetcher::new("[1]");
-    resolve_names(&ctx, &["sns".to_string()], false, &good)
+    resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &good)
         .await
         .expect("解析");
     db::with_tx(&pool, |c| {
@@ -675,7 +790,7 @@ async fn a_stale_value_is_used_when_the_fetch_fails_and_the_definition_allows_it
     .expect("expire");
 
     let bad = CountingFetcher::failing();
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &bad)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &bad)
         .await
         .expect("解析");
     assert_eq!(out.values.get("sns").map(String::as_str), Some("[1]"));

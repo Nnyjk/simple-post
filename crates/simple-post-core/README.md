@@ -18,11 +18,12 @@ crates/simple-post-core/
     │   ├── base_url_defs.rs   # the project-level service list
     │   ├── base_url_migration.rs
     │   ├── dynamic_variable_cache.rs
-    │   ├── dynamic_variables/ # the global definition table
+    │   ├── dynamic_variables/ # the per-project definition table
     │   │   ├── mod.rs         #   facade
-    │   │   ├── read.rs        #   list / get / get_by_name / source_project_id_of
+    │   │   ├── read.rs        #   list / list_by_project / get
+    │   │   │                  #   / get_by_name_in_project / get_by_name_across
+    │   │   │                  #   / project_id_of / source_project_id_of
     │   │   ├── write.rs       #   create / update / delete
-    │   │   ├── references.rs  #   which endpoints reference a definition
     │   │   ├── validation.rs  #   source bindings, name shape
     │   │   └── mapping.rs     #   row → domain
     │   ├── endpoint_details.rs
@@ -45,7 +46,8 @@ crates/simple-post-core/
     │                          # request-script wire types)
     ├── dynamic/               # the dynamic-variable engine, one file per
     │                          # concern (merge / serialize / names / cache /
-    │                          # extract / source / flight / fetcher / resolve)
+    │                          # extract / source / flight / fetcher / resolve /
+    │                          # transform)
     ├── error.rs               # AppError enum
     ├── http_executor.rs       # reqwest-based HTTP executor (used by
     │                          # `http_request` Tauri command)

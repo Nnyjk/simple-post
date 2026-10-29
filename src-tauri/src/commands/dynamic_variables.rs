@@ -23,14 +23,13 @@ use crate::dynamic_api::DynamicVariableView;
 ///
 /// 只读缓存行，**不取数**。
 ///
-/// `include_references` 缺席时带上「哪些端点引用了它」；传 `false` 则不算——算它要扫
-/// 一遍全部端点，而只要当前值的调用方不需要它。
+/// 不带「哪些端点引用了它」：那条信息只在接口那侧存在，变量这一侧不维护反向索引。
 #[tauri::command]
 pub fn dynamic_variables_list(
     state: State<DbPool>,
-    include_references: Option<bool>,
+    project_id: Option<String>,
 ) -> Result<Vec<DynamicVariableView>, AppError> {
-    crate::dynamic_api::list(&state, include_references.unwrap_or(true))
+    crate::dynamic_api::list(&state, project_id.as_deref())
 }
 
 /// 新建一条动态变量定义。
@@ -42,6 +41,7 @@ pub fn dynamic_variables_list(
 #[tauri::command]
 pub fn dynamic_variables_create(
     state: State<DbPool>,
+    project_id: String,
     name: String,
     id: Option<String>,
     description: Option<String>,
@@ -50,6 +50,7 @@ pub fn dynamic_variables_create(
     source_environment_id: Option<String>,
     source_base_url_definition_id: Option<String>,
     extract_path: Option<String>,
+    transform_script: Option<String>,
     value_mode: Option<ValueMode>,
     ttl_seconds: Option<i64>,
     stale_fallback: Option<bool>,
@@ -58,6 +59,7 @@ pub fn dynamic_variables_create(
 ) -> Result<DynamicVariable, AppError> {
     let opts = crate::dynamic_api::CreateOpts {
         id,
+        project_id: Some(project_id),
         name,
         description,
         source_endpoint_id,
@@ -65,6 +67,7 @@ pub fn dynamic_variables_create(
         source_environment_id,
         source_base_url_definition_id,
         extract_path,
+        transform_script,
         value_mode,
         ttl_seconds,
         stale_fallback,
@@ -91,13 +94,23 @@ pub fn dynamic_variables_delete(state: State<DbPool>, id: String) -> Result<(), 
 }
 
 /// 解析一批动态变量。这一步会真的发出站请求（去数据源取数）。
+///
+/// `project_id` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走
+/// 的就是这条）；不给就是跨项目取值。
 #[tauri::command]
 pub async fn dynamic_variables_resolve(
     state: State<'_, DbPool>,
     names: Vec<String>,
+    project_id: Option<String>,
     force: Option<bool>,
 ) -> Result<DynamicResolution, AppError> {
-    crate::dynamic_api::resolve(&state, &names, force.unwrap_or(false)).await
+    crate::dynamic_api::resolve(
+        &state,
+        project_id.as_deref(),
+        &names,
+        force.unwrap_or(false),
+    )
+    .await
 }
 
 /// 写覆盖值。`value` 缺席 = 清除，有值 = 写入。

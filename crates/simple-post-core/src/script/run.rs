@@ -53,7 +53,7 @@ pub fn run_phase(
             return outcome;
         }
     };
-    if let Err(failure) = sandbox.init(request, response, env, limits) {
+    if let Err(failure) = sandbox.init(request, response, env, None, limits) {
         outcome.errors.push(ScriptError {
             kind: failure.kind,
             message: failure.message,
