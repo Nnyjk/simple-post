@@ -134,8 +134,6 @@ function makeProject(id) {
     id,
     name: 'X',
     description: '',
-    baseUrlDefinitions: [],
-    defaultBaseUrlDefinitionId: null,
     color: '#000000',
     createdAt: 0,
     updatedAt: 0,
