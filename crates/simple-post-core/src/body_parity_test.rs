@@ -20,6 +20,7 @@ struct Fixture {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Case {
     name: String,
     #[serde(default)]
@@ -94,5 +95,24 @@ fn the_fixture_uses_the_real_body_modes() {
     assert!(
         modes.contains(&BodyMode::Multipart),
         "样本里必须有一个 multipart 用例"
+    );
+}
+
+/// 样本里必须至少有一个带 Content-Type 期望的用例。
+///
+/// 那条键名一旦与结构体对不上，serde 会**静默**忽略它，上面的检查就退化成一条什么都不
+/// 检查的空测试。故这里数一遍：数出 0 就是「样本里的键与读取器对不上」，而不是
+/// 「样本没写这一项」。
+#[test]
+fn the_fixture_pins_at_least_one_binary_content_type() {
+    let fixture: Fixture = serde_json::from_str(FIXTURE).expect("body parity fixture");
+    let pinned = fixture
+        .cases
+        .iter()
+        .filter(|c| c.expected_content_type.is_some())
+        .count();
+    assert!(
+        pinned > 0,
+        "样本里必须至少有一个带 expectedContentType 的用例，否则 Content-Type 那条规则没被钉住"
     );
 }
