@@ -22,6 +22,6 @@ export function buildPathParamError(input: {
   );
   const missingInPath = missingPathParams.filter((n) => !missingInBase.includes(n));
   return missingInBase.length > 0
-    ? `前置 URL 里的 ${missingInBase.join('、')} 不是端点自己的路径参数，请把前置 URL 改成 {{变量}} 或直接写死`
+    ? `前置 URL 里的 ${missingInBase.join('、')} 不是端点自己的路径参数，请把前置 URL 改成 {{变量}} 或直接写明地址`
     : `路径参数 ${missingInPath.join('、')} 没有填值，填好才能发送`;
 }

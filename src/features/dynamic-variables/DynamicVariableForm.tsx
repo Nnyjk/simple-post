@@ -346,7 +346,7 @@ export function DynamicVariableForm({
             checked={staleFallback}
             onChange={(e) => setStaleFallback(e.target.checked)}
           />
-          <span>取数失败时允许用过期值兜底</span>
+          <span>取数失败时允许用过期值</span>
         </label>
 
         <label className="flex items-center gap-2 text-xs">
