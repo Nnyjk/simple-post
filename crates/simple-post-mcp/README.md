@@ -70,7 +70,7 @@ crates/simple-post-mcp/
         │   ├── send.rs        #   the send path + the script env snapshot
         │   └── table.rs       #   the dispatch table (the two schemas)
         ├── project_ops/       # project / collection / module / endpoint /
-        │                       # base_url_def CRUD tools
+        │                       # spec tools
         │   ├── endpoint.rs    #   facade over endpoint/
         │   ├── endpoint/      #   the endpoint tools, one file per concern
         │   │   ├── args.rs    #     the argument shapes
@@ -81,7 +81,6 @@ crates/simple-post-mcp/
         │   │   ├── registry.rs #    the JSON Schema
         │   │   ├── resource.rs #    the node + detail composite read
         │   │   └── write.rs   #     the write handlers
-        │   ├── base_url_def.rs
         │   ├── collection.rs
         │   ├── module.rs
         │   ├── project.rs

@@ -44,10 +44,9 @@ OpenAPI 的存在。`simple-post-mcp` **不依赖**本 crate —— scope 内没
 2. **诊断无处安放。** `EndpointDetail` 每个字段都是标称值，没有一个位置能说
    「这里原本是个 multipart file 字段，我丢掉了」。没有诊断通道，「不静默丢弃」
    只能靠 review 保证。
-3. **导出侧读不到自己需要的东西。** `base_url_definition_id` 为空表示「用项目的 ★」，
-   ★ 在 `projects` 表，URL 在 `environments.module_base_urls_json` 里按
-   `service_id → module_id` 二级索引。所以导出必须自己决定**取哪个环境**——
-   这是投影逻辑，不属于任何一行 endpoint。
+3. **导出侧读不到自己需要的东西。** URL 住在 `environments.module_base_urls_json` 里按
+   `module_id` 一级索引，端点自己的地址在 `endpoint_details.base_url_override`。
+   所以导出必须自己决定**取哪个环境**——这是投影逻辑，不属于任何一行 endpoint。
 
 **指纹去重算在 `ir` 上，两种导入器因此互相认得**：同一份接口用 Postman 导一次、
 OpenAPI 导一次，第二次能认出是同一个 endpoint。指纹若按格式各算各的，这个性质
@@ -63,10 +62,10 @@ src/
 ├── ir.rs             # 交换格式：ir::Exchange / IrModule / IrCollection / IrEndpoint
 ├── ir_test.rs
 ├── fingerprint.rs    # 稳定请求指纹
-├── project.rs        # domain → ir 投影（导出侧的四表 join）+ module_to_ir
+├── project.rs        # domain → ir 投影（导出侧的三表 join）+ module_to_ir
 ├── commit/
 │   ├── mod.rs        # ir → db::with_tx：补 id、校验放置；commit_in_tx 在此
-│   ├── service.rs    # plan_service —— 预览与落库共用的那一个服务判定
+│   ├── base_url.rs   # plan_base_url —— 预览与落库共用的那一个地址判定
 │   ├── dedupe.rs     # decide —— 按指纹裁定新增 / 重复 / 被勾选裁掉
 │   └── support.rs    # 测试夹具：commit_all / nested_exchange
 ├── openapi/
@@ -173,14 +172,13 @@ token 与环境变量名，诊断是要显示给人看的。
 `kind` 匹配时才读对应载荷。未选中方案的载荷同样为 `Some`，按载荷存在性分派会把
 用户没选中的凭据注入请求。
 
-## 环境与 baseUrl 的分工
+## 环境与地址的分工
 
 Postman 的每个 environment 落成一个新 `Environment`，变量进 `variables`，
 `is_active` 恒 `false`（导入一个环境不等于切换当前环境）。
 
-**不导成 baseUrl**：服务的*列表*是项目级事实（`base_url_definitions.project_id`），
-而*取值*是 per (环境 × 模块 × 服务)。外来格式给不出「模块 × 服务」这一层，硬塞会
-造出一堆项目里并不存在的服务定义。
+**环境不导成地址**：地址是 per (环境 × 模块) 那一格，而 Postman 的 `variable[]` 给不出
+「模块」这一层，硬塞会造出项目里并不存在的模块地址。
 
 ## 域模型加宽契约
 
@@ -214,9 +212,9 @@ JSON 文本」。导入器因此写出**行数组**（`import/postman/body.rs`�
 （`RequestBody.schema`）说的是**这个接口接受什么**，不能拿来当响应形状。所以没有可信
 数据源，猜出来的 schema 看不出不可靠，比不猜更糟。
 
-**`servers`：逐模块取，不回退。** URL 是 per (环境 × 模块 × 服务) 且**刻意没有任何
-回退层**。导出必须先选定一个环境，然后每个模块各取各的；该模块没配就是没有 URL，
-不写 `servers` 条目，不借用别的模块的，也不落回项目 ★。
+**`servers`：逐模块取，不回退。** 地址是 per (环境 × 模块) 且**刻意没有任何
+回退层**。导出必须先选定一个环境，然后每个模块各取各的；该模块没配就是没有地址，
+不写 `servers` 条目，不借用别的模块的。
 
 因为这条，文档**根上没有 `servers`** —— 提到根就成了全局默认，等于让没配的模块借到
 兄弟模块的地址。`servers` 逐 operation 携带。
@@ -354,7 +352,7 @@ OpenAPI 没有独立的「请求头」段落，头就是参数的一种位置；
 | OpenAPI `jsonSchemaDialect` | 不读，**不诊断** | 声明 schema 方言，本仓库不校验 schema 方言 |
 | OpenAPI `components.pathItems` | 不读，**不诊断** | 3.1 的构造 |
 | OpenAPI `callbacks` | 不读，**不诊断** | 本仓库的请求模型是「一个端点一次请求」，回调没有对应形状 |
-| OpenAPI `servers[1..]` | 不读，**不诊断** | 一个 operation 只带一个 `servers` 数组，取文档根的那一份；多出来的 host 是「同一操作打到多个地址」，本仓库的 URL 是 per (环境 × 模块 × 服务) 的单元格，表达不了 |
+| OpenAPI `servers[1..]` | 不读，**不诊断** | 一个 operation 只带一个 `servers` 数组，取文档根的那一份；多出来的 host 是「同一操作打到多个地址」，本仓库的地址是 per (环境 × 模块) 的单元格，表达不了 |
 | 请求头的**值** | 不写进文档（头名写成 `in: header` 的参数条目） | 值里常有凭据与 `{{变量}}`；本仓库导出凭据时也只写「有这个凭据」不写值 |
 | 端点 / 集合 / 模块上的**脚本** | 出诊断 | OpenAPI 没有脚本的构造 |
 
