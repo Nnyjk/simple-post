@@ -21,7 +21,10 @@ import { EndpointTreePicker } from './EndpointTreePicker';
 export interface DynamicVariableFormProps {
   /** 传了就走编辑模式，不传就是新建。 */
   variable?: DynamicVariableView;
-  /** 归属项目。新建时必填；编辑时用它兜住（定义自己的归属项目为准）。 */
+  /**
+   * 归属项目。新建时表单把它写进 `projectId`；编辑时表单优先用 `variable.projectId`，
+   * 那个值缺失时用这个 prop，两个都缺时用当前项目。
+   */
   projectId?: string;
   onCancel: () => void;
   onDone: () => void;

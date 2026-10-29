@@ -485,3 +485,62 @@ fn a_duplicate_id_is_reported_as_an_id_conflict() {
     assert!(message.contains("id"), "实际消息是：{message}");
     assert!(!message.contains("已有一个叫"), "不该报成重名：{message}");
 }
+
+#[test]
+fn moving_a_definition_into_a_project_that_already_has_that_name_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
+    let mut other = definition("d2", "sns");
+    other.project_id = Some("p2".into());
+    db::with_tx(&pool, |c| create(c, &other)).expect("create");
+
+    // 两个项目各有同名定义本来是允许的；但把 p1 的那条挪进 p2 就会与 p2 那条撞上。
+    // 撞上的那一刻必须说清是「重名」，而不是把数据库的唯一索引错误泄给用户。
+    let err = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                project_id: Some("p2".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect_err("挪进一个已经有同名定义的项目应该被拒");
+    let message = match err {
+        crate::error::AppError::Validation(message) => message,
+        other => panic!("期望一条校验错误，实际是 {other:?}"),
+    };
+    assert!(message.contains("已有一个叫"), "实际消息是：{message}");
+
+    // 被拒的定义留在原来的项目里。
+    let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
+    assert_eq!(got.project_id.as_deref(), Some("p1"));
+}
+
+#[test]
+fn moving_a_definition_into_a_project_without_that_name_is_allowed() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");
+    let mut other = definition("d2", "points");
+    other.project_id = Some("p2".into());
+    db::with_tx(&pool, |c| create(c, &other)).expect("create");
+
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                project_id: Some("p2".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("目标项目里没有同名定义，挪过去应当被允许");
+
+    let got = db::with_conn(&pool, |c| get(c, "d1")).expect("read");
+    assert_eq!(got.project_id.as_deref(), Some("p2"));
+    assert_eq!(got.name, "sns");
+}

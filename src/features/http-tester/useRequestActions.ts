@@ -108,6 +108,7 @@ export function useRequestActions({
   setCurlFlash: (v: boolean) => void;
 }) {
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
 
   const handleSend = useCallback(async () => {
     if (!endpointId) return;
@@ -125,7 +126,10 @@ export function useRequestActions({
       // TTL 内命中缓存时后端不发取数请求，故这一步通常是廉价的一次 IPC。
       let request = prepared;
       if (dynamicNames.length > 0) {
-        const { values } = await resolveDynamicVariables(dynamicNames);
+        // 第二个参数是**消费方项目**：动态变量的定义挂在项目里，故只解析当前项目里的那些。
+        // 少了它，store 会跨项目找同名定义——发出去的值可能与预览里显示的不是同一条，
+        // 两个项目各有一条同名变量时尤其明显。
+        const { values } = await resolveDynamicVariables(dynamicNames, activeProjectId);
         request = prepareWithDynamic(values);
       }
       // 路径参数缺值就不发：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
@@ -196,6 +200,7 @@ export function useRequestActions({
     prepareWithDynamic,
     dynamicNames,
     resolveDynamicVariables,
+    activeProjectId,
     auth,
     env,
     preRequestScript,

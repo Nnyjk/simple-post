@@ -4,7 +4,7 @@
  * 与 `tauri-commands-routes-env.test.ts` 同构，断言 `(method, url, body)`，好让路由的
  * 静默漂移响亮地失败。
  *
- * 定义是全局的，故这组路由都不带项目参数：名字在整个工作区里唯一。
+ * 定义挂在项目里，故这组路由带项目参数：列表与解析都能按项目过滤。
  */
 import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';

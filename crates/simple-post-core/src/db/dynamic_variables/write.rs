@@ -23,7 +23,8 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
             def.name
         )));
     }
-    // 归属项目必须存在：定义挂在项目里，指向一个不存在的项目等于挂在虚空里。
+    // 归属项目必须存在：`project_id` 是指向 `projects.id` 的外键，项目不存在时插入会以
+    // 一个外键错误收场，那个错误读不出是哪个项目 id 写错了。
     if let Some(project_id) = def.project_id.as_deref() {
         check_project_exists(conn, project_id)?;
     }
@@ -136,14 +137,21 @@ pub fn update(
                 "变量名 '{name}' 非法：只能用字母、数字与下划线"
             )));
         }
-        if name != &current.name {
-            if let Some(project_id) = next_project_id.as_deref() {
-                if let Some(existing) = get_by_name_in_project(conn, project_id, name)? {
-                    if existing.id != id {
-                        return Err(AppError::Validation(format!(
-                            "项目里已有一个叫 '{name}' 的动态变量"
-                        )));
-                    }
+    }
+    // 改完之后这条定义叫什么名字、落在哪个项目里。**名字或项目任一变了**，重名就得
+    // 在改完之后所在的项目里查：只改归属项目时，那个项目里可能已经有同名定义了。
+    // 漏掉这一查，`UPDATE` 会撞上 `idx_dynamic_vars_project_name`，把数据库的约束错误
+    // 泄给用户，而不是说清是哪个名字撞了。
+    let next_name = patch.name.as_deref().unwrap_or(&current.name);
+    let name_changed = next_name != current.name;
+    let project_changed = next_project_id != current.project_id;
+    if name_changed || project_changed {
+        if let Some(project_id) = next_project_id.as_deref() {
+            if let Some(existing) = get_by_name_in_project(conn, project_id, next_name)? {
+                if existing.id != id {
+                    return Err(AppError::Validation(format!(
+                        "项目里已有一个叫 '{next_name}' 的动态变量"
+                    )));
                 }
             }
         }
