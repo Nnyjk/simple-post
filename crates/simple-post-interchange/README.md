@@ -134,6 +134,12 @@ Tauri command 与 REST route 都退化成薄壳。
 `components.schemas` 里的一个对象），故不收，并出一条 `Info` 说明。Postman 集合里没有
 请求体 schema 这个构造，那边没有可导入的东西。
 
+**一处例外：multipart 降级成 `Raw` 时，那份定义不跟着走。** multipart 的请求体既没有
+样例、schema 里也没有字段时，导入器降级成 `BodyMode::Raw`（存原始文本）。而 Raw 的
+media type 是 `application/octet-stream`，multipart 的 schema 说的是有哪些表单字段 ——
+把它挂在 octet-stream 上，导出的文档就在宣称一个错的请求格式，而存下来的内容已经是
+原始文本了，这份定义描述的也不是它。故降级时分片与那份定义一起丢，诊断里点名。
+
 **分组只认 `tags[0]`，没打 tag 的整份归到一个以 `info.title` 命名的分组里。**
 落进已有模块时 IR 顶层模块一律降级成集合，故这条同时就是「OpenAPI tag → 目标模块下的
 集合」。曾经按「一个 operation 一个模块」实现，于是**一个 tag 都不打的文档**（Apifox、

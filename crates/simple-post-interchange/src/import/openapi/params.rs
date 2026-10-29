@@ -245,6 +245,10 @@ fn import_schema(ctx: &mut Ctx, view: &DocView, media: &Value, at_ptr: &str) -> 
 ///
 /// 两处都取不到分片时降级成 `BodyMode::Raw` 并出诊断：保守，但**不静默**——
 /// 声称自己能发 multipart 却发不出分片，就是「存得对、发得错」。
+///
+/// **降级时那份 schema 不跟着走**：Raw 的 media type 是 `application/octet-stream`，
+/// 而 multipart 的 schema 说的是有哪些表单字段。把它挂在 octet-stream 上，导出的文档
+/// 就在宣称一个错的请求格式——而存下来的内容已经是原始文本了，这份定义描述的也不是它。
 fn multipart_body(ctx: &mut Ctx, view: &DocView, media: &Value, at_ptr: &str) -> RequestBody {
     let mut parts = parts_from_example(media);
     if parts.is_empty() {
@@ -257,9 +261,9 @@ fn multipart_body(ctx: &mut Ctx, view: &DocView, media: &Value, at_ptr: &str) ->
         ctx.diagnostics.push(
             Diagnostic::warn(
                 at_ptr,
-                "multipart 请求体既没有样例也没有 schema 字段，已按原始文本导入",
+                "multipart 请求体既没有样例、schema 里也没有字段，已按原始文本导入",
             )
-            .dropping("multipart 分片"),
+            .dropping("multipart 分片与请求体定义"),
         );
         return RequestBody {
             mode: BodyMode::Raw,
@@ -268,7 +272,11 @@ fn multipart_body(ctx: &mut Ctx, view: &DocView, media: &Value, at_ptr: &str) ->
                 .or_else(|| media.get("default"))
                 .map(scalar_text)
                 .unwrap_or_default(),
-            schema,
+            // **降级成 Raw 之后，这份定义不能跟着走。** Raw 的 media type 是
+            // `application/octet-stream`，而 multipart 的 schema 说的是有哪些表单
+            // 字段；把它挂在 octet-stream 上，导出的文档就在宣称一个错的请求格式。
+            // 存下来的内容已经是原始文本了，这份定义描述的也不是它。
+            schema: None,
         };
     }
     RequestBody {

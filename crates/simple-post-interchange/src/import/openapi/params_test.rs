@@ -211,6 +211,80 @@ fn a_multipart_body_with_nothing_to_synthesise_is_downgraded_with_a_diagnostic()
     );
 }
 
+/// multipart 降级成 Raw 时，那份 multipart 的定义**不能**跟着走。
+///
+/// Raw 的 media type 是 `application/octet-stream`，而 multipart 的 schema 说的是
+/// 有哪些表单字段。把它挂在 octet-stream 上，导出的文档就在宣称一个错的请求格式。
+#[test]
+fn a_multipart_body_downgraded_to_raw_drops_its_schema() {
+    let ex = ir_of(
+        r#"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "paths": {
+            "/upload": {
+              "post": {
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": { "type": "object", "additionalProperties": { "type": "string" } }
+                    }
+                  }
+                },
+                "responses": { "200": {} }
+              }
+            }
+          }
+        }"#,
+    );
+    let body = &first_endpoint(&ex).body;
+    assert_eq!(body.mode, BodyMode::Raw);
+    assert!(
+        body.schema.is_none(),
+        "降级成 Raw 之后，那份 multipart 的定义不该再挂着：{:?}",
+        body.schema
+    );
+}
+
+/// multipart 的请求体定义要导入（降级成 Raw 的那一条除外）。
+///
+/// multipart 的 schema 说的是有哪些表单字段，是一份正经的请求体定义；不导入的话，
+/// 「导出再导入」会把它丢掉。
+#[test]
+fn a_multipart_body_schema_is_imported() {
+    let ex = ir_of(
+        r#"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "paths": {
+            "/upload": {
+              "post": {
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": {
+                        "type": "object",
+                        "properties": { "file": { "type": "string", "example": "a.txt" } }
+                      }
+                    }
+                  }
+                },
+                "responses": { "200": {} }
+              }
+            }
+          }
+        }"#,
+    );
+    let body = &first_endpoint(&ex).body;
+    assert_eq!(body.mode, BodyMode::Multipart);
+    let schema = body
+        .schema
+        .as_deref()
+        .expect("multipart 的请求体定义要导入");
+    let parsed: serde_json::Value = serde_json::from_str(schema).expect("导入的 schema 是 JSON");
+    assert_eq!(parsed["properties"]["file"]["type"], "string");
+}
+
 /// 请求体上的 schema 要导入成 `body.schema`。
 ///
 /// 这条是往返保真的前提：导出器把 `body.schema` 写进 `components.schemas` 并让
