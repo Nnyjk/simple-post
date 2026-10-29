@@ -1,18 +1,16 @@
 import type { StateCreator } from 'zustand';
-import type { ApiResponse, ResponseHistoryEntry, ScriptOutcome } from '@/types/domain';
+import type {
+  ApiResponse,
+  ResponseHistoryEntry,
+  ScriptOutcome,
+  StoredRequestSnapshot,
+} from '@/types/domain';
 import { uid } from '@/lib/utils';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import type { ApiResponseExample } from '../store-types';
 import { DRAFT_ID_PREFIX } from '../store-types';
-
-/**
- * store 中每个 endpoint 保留的历史条数上限。
- *
- * 与数据库的上限各守一头，不是重复：服务端那个挡住任何写入方（未来的 MCP
- * 工具、脚本），这个挡住读回来的条数超出历史条能显示的量。
- */
-const MAX_HISTORY_PER_ENDPOINT = 10;
+import { capUnfavorited } from './history-keep';
 
 /**
  * ui-response —— 最近一次响应、请求中标记、按 endpoint 的历史与已存示例。
@@ -27,19 +25,18 @@ const MAX_HISTORY_PER_ENDPOINT = 10;
  * 的子工厂而非独立 slice，见 `../ui-slice.ts`。
  */
 
-/** FIFO 追加，受 {@link MAX_HISTORY_PER_ENDPOINT} 截断。 */
+/** FIFO 追加，受保留条数截断。 */
 function appendCapped(
   prev: ResponseHistoryEntry[],
   entry: ResponseHistoryEntry,
+  keep: number,
 ): ResponseHistoryEntry[] {
-  return prev.length >= MAX_HISTORY_PER_ENDPOINT
-    ? [...prev.slice(prev.length - (MAX_HISTORY_PER_ENDPOINT - 1)), entry]
-    : [...prev, entry];
+  return capUnfavorited([...prev, entry], keep);
 }
 
 /**
  * 把服务端读回的行并进历史条：按 id 去重、补上本地已有但回包里没有的行，
- * 再按内存路径同一套 FIFO 截断。
+ * 再按内存路径同一套截断。
  *
  * **顺序。** `list_by_endpoint` 按 `created_at DESC` 回答，那是"最近在前"的
  * *查询*要的顺序；而 store 的约定是最新在**末尾**——`appendCapped` 追加到
@@ -55,6 +52,7 @@ function appendCapped(
 function mergeLoaded(
   rows: ResponseHistoryEntry[],
   local: ResponseHistoryEntry[],
+  keep: number,
 ): ResponseHistoryEntry[] {
   const known = new Set(rows.map((r) => r.id));
   // 先反转再排序，不能只反转：sort 稳定，同一毫秒打戳的两行靠这个次序分
@@ -63,11 +61,23 @@ function mergeLoaded(
   for (const row of local) {
     if (!known.has(row.id)) merged.push(row);
   }
-  return merged.sort((a, b) => a.createdAt - b.createdAt).slice(-MAX_HISTORY_PER_ENDPOINT);
+  return capUnfavorited(
+    merged.sort((a, b) => a.createdAt - b.createdAt),
+    keep,
+  );
 }
 
 export interface UiResponseState {
   lastResponse: ApiResponse | null;
+  /**
+   * 最近一次显示的响应对应的**请求**。
+   *
+   * 与 `lastResponse` 同一刻写入，故两者描述同一次调用。它是解析之后的那一份：
+   * base URL 与路径已拼接、`{{var}}` 已替换、查询串已追加。
+   *
+   * 旧的历史行没有它，故可以是 `null`——界面据此不画请求侧栏。
+   */
+  lastRequest: StoredRequestSnapshot | null;
   /**
    * 最近一次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。
    *
@@ -92,8 +102,14 @@ export interface UiResponseActions {
    *
    * 内存那一半必须**同步**：发送按钮的体验依赖历史行与 `lastResponse` 同一刻
    * 出现，所以先插乐观行，落盘在其后 fire-and-forget。
+   *
+   * `request` 是那次发送出去的请求；它缺席时行里就没有请求侧栏可画。
    */
-  addResponseHistory: (endpointId: string, response: ApiResponse) => void;
+  addResponseHistory: (
+    endpointId: string,
+    response: ApiResponse,
+    request?: StoredRequestSnapshot,
+  ) => void;
   /**
    * 读单个 endpoint 的历史进 map。
    *
@@ -105,11 +121,29 @@ export interface UiResponseActions {
    * 但不得落到 `bootstrapError`——那个 flag 表示启动已死，缺一个历史面板不算。
    */
   loadResponseHistory: (endpointId: string) => Promise<void>;
-  /** 删掉单个 endpoint 的历史，本地与服务端都删。 */
+  /**
+   * 删掉单个 endpoint 的**未收藏**历史，本地与服务端都删。
+   *
+   * 收藏的行留着：用户说它们永久保存，故「清空」这个动作只清自动保留的那部分。
+   */
   clearResponseHistory: (endpointId: string) => Promise<void>;
+  /**
+   * 收藏或取消收藏一条历史行。
+   *
+   * 本地先改（星标立刻变），落盘在其后。落盘失败时本地仍显示收藏状态：用户标出的
+   * 那一行不该因为一次写失败就从界面上消失。
+   */
+  setResponseHistoryFavorite: (id: string, favorite: boolean) => void;
+  /**
+   * 按新的保留条数裁一遍本地的历史列表。
+   *
+   * 服务端改条数时已经裁过库里的行，故本地也要按同一条规则裁，否则界面会多显示
+   * 库里已经没有的行。收藏的行两边都不动。
+   */
+  trimResponseHistory: (keep: number) => void;
   addResponseExample: (endpointId: string, response: ApiResponse) => string;
   deleteResponseExample: (endpointId: string, exampleId: string) => void;
-  setLastResponse: (resp: ApiResponse | null) => void;
+  setLastResponse: (resp: ApiResponse | null, request?: StoredRequestSnapshot | null) => void;
   /** 记下最近一次发送的脚本产出。 */
   setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
   setRequestPending: (pending: boolean) => void;
@@ -119,12 +153,13 @@ export type UiResponse = UiResponseState & UiResponseActions;
 
 export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set) => ({
   lastResponse: null,
+  lastRequest: null,
   lastScriptOutcome: null,
   requestPending: false,
   responseHistory: {},
   responseExamples: {},
 
-  addResponseHistory: (endpointId, response) => {
+  addResponseHistory: (endpointId, response, request) => {
     // 乐观行，先于任何 await 插入。id 由渲染侧生成，明显不是服务端 id，
     // 所以下面的替换不可能与已存行相撞。
     const provisional: ResponseHistoryEntry = {
@@ -133,11 +168,16 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
       response,
       bodyTruncated: false,
       createdAt: Date.now(),
+      isFavorite: false,
+      ...(request ? { request } : {}),
     };
     set((s) => {
       const prev = s.responseHistory[endpointId] ?? [];
       return {
-        responseHistory: { ...s.responseHistory, [endpointId]: appendCapped(prev, provisional) },
+        responseHistory: {
+          ...s.responseHistory,
+          [endpointId]: appendCapped(prev, provisional, s.responseHistoryKeep),
+        },
       };
     });
 
@@ -145,7 +185,11 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
     // 它的历史继续在内存里累积。
     if (endpointId.startsWith(DRAFT_ID_PREFIX)) return;
 
-    void invokeCmd<ResponseHistoryEntry>(COMMANDS.responseHistoryAppend, { endpointId, response })
+    void invokeCmd<ResponseHistoryEntry>(COMMANDS.responseHistoryAppend, {
+      endpointId,
+      response,
+      request: request ?? null,
+    })
       .then((stored) => {
         // 返回的行才是实际落库的内容：body 可能被截到 256 KiB，`bodyJson` 一并
         // 丢弃。留着乐观行会让历史条把半份文档说成整个响应。
@@ -183,7 +227,11 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
       set((s) => ({
         responseHistory: {
           ...s.responseHistory,
-          [endpointId]: mergeLoaded(rows, s.responseHistory[endpointId] ?? []),
+          [endpointId]: mergeLoaded(
+            rows,
+            s.responseHistory[endpointId] ?? [],
+            s.responseHistoryKeep,
+          ),
         },
       }));
     } catch (e) {
@@ -193,9 +241,14 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
 
   clearResponseHistory: async (endpointId) => {
     set((s) => {
-      if (!(endpointId in s.responseHistory)) return {};
+      const prev = s.responseHistory[endpointId];
+      if (!prev) return {};
+      // 收藏的行留着：服务端那条 `clear` 也只删未收藏的那些，两边必须一致。
+      const kept = prev.filter((e) => e.isFavorite);
+      if (kept.length === prev.length) return {};
       const next = { ...s.responseHistory };
-      delete next[endpointId];
+      if (kept.length === 0) delete next[endpointId];
+      else next[endpointId] = kept;
       return { responseHistory: next };
     });
     if (endpointId.startsWith(DRAFT_ID_PREFIX)) return;
@@ -207,6 +260,42 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
       // 因为清空动作丢掉了它依赖的那个 key。
       console.warn('[store] response history clear failed', e);
     }
+  },
+
+  setResponseHistoryFavorite: (id, favorite) => {
+    // 本地先改：星标立刻变，不等一次 IPC。
+    set((s) => {
+      const next = { ...s.responseHistory };
+      let hit = false;
+      for (const [endpointId, entries] of Object.entries(s.responseHistory)) {
+        if (!entries.some((e) => e.id === id)) continue;
+        hit = true;
+        next[endpointId] = entries.map((e) => (e.id === id ? { ...e, isFavorite: favorite } : e));
+      }
+      if (!hit) return {};
+      return { responseHistory: next };
+    });
+    void invokeCmd<boolean>(COMMANDS.responseHistorySetFavorite, { id, favorite }).catch(
+      (e: unknown) => {
+        // 收藏是用户显式标出的意图，一次写失败不该让它从界面上消失；本地仍显示
+        // 收藏状态，库里那一份则等下一次落盘或重启后再说。
+        console.warn('[store] response history favorite failed', e);
+      },
+    );
+  },
+
+  trimResponseHistory: (keep) => {
+    set((s) => {
+      const next: Record<string, ResponseHistoryEntry[]> = {};
+      let changed = false;
+      for (const [endpointId, entries] of Object.entries(s.responseHistory)) {
+        const capped = capUnfavorited(entries, keep);
+        next[endpointId] = capped;
+        if (capped.length !== entries.length) changed = true;
+      }
+      if (!changed) return {};
+      return { responseHistory: next };
+    });
   },
 
   addResponseExample: (endpointId, response) => {
@@ -234,7 +323,8 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
   // 换响应就换掉脚本产出：脚本产出**属于**那一次响应，回看一条历史响应时它并不存在
   // （历史表里不存脚本结果），留着上一次发送的产出只会让人把两件事看成一件。
   // 发送路径因此先 `setLastResponse` 再 `setLastScriptOutcome`。
-  setLastResponse: (resp) => set({ lastResponse: resp, lastScriptOutcome: null }),
+  setLastResponse: (resp, request) =>
+    set({ lastResponse: resp, lastRequest: request ?? null, lastScriptOutcome: null }),
   setLastScriptOutcome: (outcome) => set({ lastScriptOutcome: outcome }),
   setRequestPending: (pending) => set({ requestPending: pending }),
 });

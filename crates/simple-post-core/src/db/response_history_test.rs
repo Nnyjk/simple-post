@@ -3,6 +3,7 @@ use crate::db;
 use crate::db::nodes;
 use crate::domain::{
     AuthConfig, EndpointDetail, HttpMethod, Project, RequestBody, ResourceNode, ResourceNodeType,
+    RESPONSE_HISTORY_KEEP_DEFAULT,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -110,6 +111,16 @@ fn resp(status: u16, body: &str) -> StoredResponse {
     }
 }
 
+/// 那次发送出去的请求。
+fn request(url: &str) -> StoredRequestSnapshot {
+    StoredRequestSnapshot {
+        method: HttpMethod::Post,
+        url: url.into(),
+        headers: vec![("content-type".into(), "application/json".into())],
+        body: Some("{\"a\":1}".into()),
+    }
+}
+
 fn count_for(pool: &db::DbPool, endpoint_id: &str) -> i64 {
     db::with_conn(pool, |c| {
         c.query_row(
@@ -120,6 +131,27 @@ fn count_for(pool: &db::DbPool, endpoint_id: &str) -> i64 {
         .map_err(AppError::Sqlite)
     })
     .unwrap()
+}
+
+fn favorite_count_for(pool: &db::DbPool, endpoint_id: &str) -> i64 {
+    db::with_conn(pool, |c| {
+        c.query_row(
+            "SELECT COUNT(*) FROM response_history WHERE endpoint_id = ?1 AND is_favorite = 1",
+            params![endpoint_id],
+            |r| r.get(0),
+        )
+        .map_err(AppError::Sqlite)
+    })
+    .unwrap()
+}
+
+/// 改全局保留条数。
+fn set_keep(pool: &db::DbPool, keep: i64) {
+    db::with_tx(pool, |c| {
+        db::preferences::set_response_history_keep(c, keep)?;
+        Ok(())
+    })
+    .unwrap();
 }
 
 // 往返
@@ -137,7 +169,7 @@ fn every_field_survives_the_round_trip() {
         body_json: None,
         ..resp(204, "")
     };
-    db::with_tx(&pool, |c| append(c, "e1", &sent)).unwrap();
+    db::with_tx(&pool, |c| append(c, "e1", &sent, None)).unwrap();
 
     let back = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
     assert_eq!(back.len(), 1);
@@ -155,6 +187,32 @@ fn every_field_survives_the_round_trip() {
 }
 
 #[test]
+fn the_request_snapshot_survives_the_round_trip() {
+    let (pool, _dir) = fresh_pool();
+    let sent = request("https://example.test/api/things?page=2");
+    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "ok"), Some(&sent))).unwrap();
+
+    let back = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
+    assert_eq!(
+        back[0].request.as_ref(),
+        Some(&sent),
+        "the request that went out must come back byte for byte"
+    );
+}
+
+#[test]
+fn a_row_without_a_request_reads_back_as_none() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "ok"), None)).unwrap();
+
+    let back = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
+    assert_eq!(
+        back[0].request, None,
+        "a row written before the request column existed has no request"
+    );
+}
+
+#[test]
 fn header_order_is_stable_across_reads() {
     let (pool, _dir) = fresh_pool();
     let mut headers = BTreeMap::new();
@@ -165,7 +223,7 @@ fn header_order_is_stable_across_reads() {
         headers,
         ..resp(200, "ok")
     };
-    db::with_tx(&pool, |c| append(c, "e1", &sent)).unwrap();
+    db::with_tx(&pool, |c| append(c, "e1", &sent, None)).unwrap();
 
     let first = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
     let second = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
@@ -182,39 +240,159 @@ fn header_order_is_stable_across_reads() {
 fn append_keeps_only_the_last_cap_per_endpoint() {
     let (pool, _dir) = fresh_pool();
     // 刻意超额追加：那个会无上限撑大库的循环，正是必须不生效的循环。
-    for i in 0..(RESPONSE_HISTORY_PER_ENDPOINT * 4) {
-        db::with_tx(&pool, |c| append(c, "e1", &resp(200, &format!("body-{i}")))).unwrap();
+    for i in 0..(RESPONSE_HISTORY_KEEP_DEFAULT * 4) {
+        db::with_tx(&pool, |c| {
+            append(c, "e1", &resp(200, &format!("body-{i}")), None)
+        })
+        .unwrap();
     }
-    assert_eq!(count_for(&pool, "e1"), RESPONSE_HISTORY_PER_ENDPOINT);
+    assert_eq!(count_for(&pool, "e1"), RESPONSE_HISTORY_KEEP_DEFAULT);
 
     let rows = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
-    assert_eq!(rows.len(), RESPONSE_HISTORY_PER_ENDPOINT as usize);
+    assert_eq!(rows.len(), RESPONSE_HISTORY_KEEP_DEFAULT as usize);
     // 最新的在前，且存活的是**最后**那几次发送——一个丢掉最新行的封顶看起来是对的，
     // 直到用户去找他刚触发的那个响应。
     assert_eq!(
         rows[0].response.body,
-        format!("body-{}", RESPONSE_HISTORY_PER_ENDPOINT * 4 - 1)
+        format!("body-{}", RESPONSE_HISTORY_KEEP_DEFAULT * 4 - 1)
     );
     assert_eq!(
         rows[rows.len() - 1].response.body,
-        format!("body-{}", RESPONSE_HISTORY_PER_ENDPOINT * 3)
+        format!("body-{}", RESPONSE_HISTORY_KEEP_DEFAULT * 3)
     );
 }
 
 #[test]
 fn the_cap_is_per_endpoint_not_global() {
     let (pool, _dir) = fresh_pool();
-    for i in 0..(RESPONSE_HISTORY_PER_ENDPOINT + 5) {
-        db::with_tx(&pool, |c| append(c, "e1", &resp(200, &format!("a{i}")))).unwrap();
+    for i in 0..(RESPONSE_HISTORY_KEEP_DEFAULT + 5) {
+        db::with_tx(&pool, |c| {
+            append(c, "e1", &resp(200, &format!("a{i}")), None)
+        })
+        .unwrap();
     }
-    db::with_tx(&pool, |c| append(c, "e2", &resp(201, "solo"))).unwrap();
+    db::with_tx(&pool, |c| append(c, "e2", &resp(201, "solo"), None)).unwrap();
 
-    assert_eq!(count_for(&pool, "e1"), RESPONSE_HISTORY_PER_ENDPOINT);
+    assert_eq!(count_for(&pool, "e1"), RESPONSE_HISTORY_KEEP_DEFAULT);
     assert_eq!(
         count_for(&pool, "e2"),
         1,
         "e2 must not inherit e1's trimming"
     );
+}
+
+// 保留条数来自全局设置
+
+#[test]
+fn the_keep_count_comes_from_the_global_preference() {
+    let (pool, _dir) = fresh_pool();
+    set_keep(&pool, 3);
+
+    for i in 0..10 {
+        db::with_tx(&pool, |c| {
+            append(c, "e1", &resp(200, &format!("b{i}")), None)
+        })
+        .unwrap();
+    }
+    assert_eq!(
+        count_for(&pool, "e1"),
+        3,
+        "the setting must reach the code that trims, not just the one that displays it"
+    );
+
+    // 改小之后立刻生效，不必等下一次发送。
+    set_keep(&pool, 2);
+    db::with_tx(&pool, |c| trim_all(c, 2)).unwrap();
+    assert_eq!(count_for(&pool, "e1"), 2);
+}
+
+#[test]
+fn a_keep_count_below_one_is_clamped() {
+    let (pool, _dir) = fresh_pool();
+    set_keep(&pool, 0);
+    assert_eq!(
+        db::with_conn(&pool, db::preferences::response_history_keep).unwrap(),
+        1,
+        "zero would mean 'keep nothing', which is not a state the strip can show"
+    );
+}
+
+// 收藏
+
+#[test]
+fn a_favorite_row_survives_the_trim() {
+    let (pool, _dir) = fresh_pool();
+    set_keep(&pool, 3);
+
+    let first = db::with_tx(&pool, |c| append(c, "e1", &resp(200, "keep-me"), None)).unwrap();
+    assert!(db::with_tx(&pool, |c| set_favorite(c, &first.id, true)).unwrap());
+
+    for i in 0..10 {
+        db::with_tx(&pool, |c| {
+            append(c, "e1", &resp(200, &format!("b{i}")), None)
+        })
+        .unwrap();
+    }
+
+    assert_eq!(
+        count_for(&pool, "e1"),
+        4,
+        "the favorite plus the three newest unfavorited rows"
+    );
+    assert_eq!(favorite_count_for(&pool, "e1"), 1);
+
+    let rows = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
+    assert!(
+        rows.iter().any(|r| r.response.body == "keep-me"),
+        "a favorited row must not be trimmed away"
+    );
+    assert!(
+        rows.iter().any(|r| r.is_favorite),
+        "the favorite flag must come back with the row"
+    );
+}
+
+#[test]
+fn un_favoriting_a_row_puts_it_back_under_the_cap() {
+    let (pool, _dir) = fresh_pool();
+    set_keep(&pool, 2);
+    let first = db::with_tx(&pool, |c| append(c, "e1", &resp(200, "old"), None)).unwrap();
+    db::with_tx(&pool, |c| set_favorite(c, &first.id, true)).unwrap();
+
+    for i in 0..5 {
+        db::with_tx(&pool, |c| {
+            append(c, "e1", &resp(200, &format!("b{i}")), None)
+        })
+        .unwrap();
+    }
+    assert_eq!(count_for(&pool, "e1"), 3);
+
+    db::with_tx(&pool, |c| set_favorite(c, &first.id, false)).unwrap();
+    db::with_tx(&pool, |c| trim_all(c, 2)).unwrap();
+    assert_eq!(
+        count_for(&pool, "e1"),
+        2,
+        "an un-favorited row is an ordinary row again"
+    );
+}
+
+#[test]
+fn favoriting_a_row_that_does_not_exist_reports_it() {
+    let (pool, _dir) = fresh_pool();
+    assert!(!db::with_tx(&pool, |c| set_favorite(c, "nope", true)).unwrap());
+}
+
+#[test]
+fn clear_keeps_the_favorites() {
+    let (pool, _dir) = fresh_pool();
+    let kept = db::with_tx(&pool, |c| append(c, "e1", &resp(200, "kept"), None)).unwrap();
+    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "dropped"), None)).unwrap();
+    db::with_tx(&pool, |c| set_favorite(c, &kept.id, true)).unwrap();
+
+    let n = db::with_tx(&pool, |c| clear(c, "e1")).unwrap();
+    assert_eq!(n, 1, "only the un-favorited row is cleared");
+    assert_eq!(count_for(&pool, "e1"), 1);
+    assert_eq!(favorite_count_for(&pool, "e1"), 1);
 }
 
 // 响应体封顶
@@ -223,7 +401,7 @@ fn the_cap_is_per_endpoint_not_global() {
 fn an_oversized_body_is_clipped_and_says_so() {
     let (pool, _dir) = fresh_pool();
     let huge = "x".repeat(RESPONSE_HISTORY_MAX_BODY_BYTES + 5_000);
-    let entry = db::with_tx(&pool, |c| append(c, "e1", &resp(200, &huge))).unwrap();
+    let entry = db::with_tx(&pool, |c| append(c, "e1", &resp(200, &huge), None)).unwrap();
 
     assert!(entry.body_truncated);
     assert!(entry.response.body.len() <= RESPONSE_HISTORY_MAX_BODY_BYTES);
@@ -242,7 +420,7 @@ fn an_oversized_body_is_clipped_and_says_so() {
 fn a_body_at_the_cap_is_not_truncated() {
     let (pool, _dir) = fresh_pool();
     let exact = "x".repeat(RESPONSE_HISTORY_MAX_BODY_BYTES);
-    let entry = db::with_tx(&pool, |c| append(c, "e1", &resp(200, &exact))).unwrap();
+    let entry = db::with_tx(&pool, |c| append(c, "e1", &resp(200, &exact), None)).unwrap();
     assert!(!entry.body_truncated);
     assert_eq!(entry.response.body.len(), exact.len());
     assert!(entry.response.body_json.is_some());
@@ -271,8 +449,8 @@ fn clipping_lands_on_a_char_boundary() {
 #[test]
 fn deleting_an_endpoint_takes_its_history() {
     let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "a"))).unwrap();
-    db::with_tx(&pool, |c| append(c, "e2", &resp(200, "b"))).unwrap();
+    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "a"), None)).unwrap();
+    db::with_tx(&pool, |c| append(c, "e2", &resp(200, "b"), None)).unwrap();
 
     db::with_tx(&pool, |c| nodes::delete(c, "e1")).unwrap();
 
@@ -288,7 +466,7 @@ fn deleting_an_endpoint_takes_its_history() {
 fn deleting_a_project_takes_the_whole_subtree_s_history() {
     let (pool, _dir) = fresh_pool();
     for id in ["e1", "e2", "e3"] {
-        db::with_tx(&pool, |c| append(c, id, &resp(200, id))).unwrap();
+        db::with_tx(&pool, |c| append(c, id, &resp(200, id), None)).unwrap();
     }
     // 没有显式的历史清理——外键就是全部机制，故这个测试是将来某次重构与「留下一堆没人能
     // 触及或删除的孤儿行」之间唯一的挡板。
@@ -307,7 +485,10 @@ fn deleting_a_project_takes_the_whole_subtree_s_history() {
 fn clear_drops_one_endpoints_rows_and_reports_the_count() {
     let (pool, _dir) = fresh_pool();
     for i in 0..3 {
-        db::with_tx(&pool, |c| append(c, "e1", &resp(200, &format!("{i}")))).unwrap();
+        db::with_tx(&pool, |c| {
+            append(c, "e1", &resp(200, &format!("{i}")), None)
+        })
+        .unwrap();
     }
     let n = db::with_tx(&pool, |c| clear(c, "e1")).unwrap();
     assert_eq!(n, 3);
@@ -325,9 +506,9 @@ fn clear_drops_one_endpoints_rows_and_reports_the_count() {
 fn list_by_endpoint_returns_that_endpoint_and_nothing_else() {
     let (pool, _dir) = fresh_pool();
     for (id, tag) in [("e1", "one"), ("e2", "two"), ("e3", "three")] {
-        db::with_tx(&pool, |c| append(c, id, &resp(200, tag))).unwrap();
+        db::with_tx(&pool, |c| append(c, id, &resp(200, tag), None)).unwrap();
     }
-    db::with_tx(&pool, |c| append(c, "e1", &resp(500, "boom"))).unwrap();
+    db::with_tx(&pool, |c| append(c, "e1", &resp(500, "boom"), None)).unwrap();
 
     let rows = db::with_conn(&pool, |c| list_by_endpoint(c, "e1")).unwrap();
     assert_eq!(rows.len(), 2);
@@ -344,7 +525,7 @@ fn list_by_endpoint_returns_that_endpoint_and_nothing_else() {
 #[test]
 fn an_endpoint_with_no_history_reads_as_empty_not_as_everybody_elses() {
     let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "one"))).unwrap();
+    db::with_tx(&pool, |c| append(c, "e1", &resp(200, "one"), None)).unwrap();
 
     // The read this function replaced was project-scoped and returned
     // every endpoint's rows. Asking an empty endpoint for its history is
@@ -373,7 +554,7 @@ fn an_endpoint_that_is_not_a_row_cannot_be_stored() {
     // side of the rule ("skip persistence for drafts") is a silent
     // branch: if it ever regresses, this is the error the user would
     // otherwise only see as a vanished history row.
-    let err = db::with_tx(&pool, |c| append(c, "draft:abc123", &resp(200, "hi")));
+    let err = db::with_tx(&pool, |c| append(c, "draft:abc123", &resp(200, "hi"), None));
     assert!(
         err.is_err(),
         "FK must reject an endpoint id with no nodes row"

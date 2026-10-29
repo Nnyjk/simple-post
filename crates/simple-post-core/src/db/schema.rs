@@ -161,8 +161,8 @@ fn backfill_dynamic_variable_projects(conn: &mut Connection) -> Result<(), AppEr
 ///
 /// 首项是现役值层。`base_url_definitions` 的那两项是已下线的「服务挂在模块上」模型，
 /// 只因数据迁移必须能**读**那个布局才留着——由 `SCHEMA_SQL` 建出这三列的库与由本列表
-/// 补出的库，对迁移是同一种形状，两者都必须可修复。末两项是动态变量的归属项目与
-/// 处理脚本。
+/// 补出的库，对迁移是同一种形状，两者都必须可修复。末尾四项是动态变量的归属项目与
+/// 处理脚本，以及响应历史的收藏标记与请求快照。
 const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
         "environments",
@@ -222,6 +222,19 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         // 动态变量的处理脚本。纯增量：旧行读回来是 NULL（= 不跑脚本）。
         "dynamic_variables",
         "transform_script",
+        "TEXT",
+    ),
+    (
+        // 用户收藏了这条历史。纯增量：旧行读回来是「未收藏」，语义等价于裁剪规则
+        // 只动未收藏的行。
+        "response_history",
+        "is_favorite",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        // 那次发送出去的请求。纯增量：旧行读回来没有这一份，界面据此不画请求侧栏。
+        "response_history",
+        "request_json",
         "TEXT",
     ),
 ];

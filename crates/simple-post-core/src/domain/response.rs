@@ -40,11 +40,17 @@ pub struct ApiResponse {
 
 // 已持久化的响应历史
 
-/// 单个 endpoint 保留多少条响应。渲染器 `stores/slices/ui-response.ts` 的
-/// `MAX_HISTORY_PER_ENDPOINT` 与之镜像——store 侧封顶使所展示的数组不增长，数据库侧封顶
-/// 使 `store.db` 不增长。两者一致是锦上添花；真正给文件封顶的是数据库侧，故日后漏掉
-/// store 侧的调用方也无法让库无限增长。
-pub const RESPONSE_HISTORY_PER_ENDPOINT: i64 = 10;
+/// 单个 endpoint 保留多少条**未收藏**的响应历史。
+///
+/// 收藏的行不计入这个条数：用户显式标出的那一行不该被自动裁掉。用户可改这个值
+/// （见 [`crate::db::preferences::keys::RESPONSE_HISTORY_KEEP`]），缺省值即此处的
+/// 10 条。
+///
+/// 渲染器 `stores/slices/ui-response.ts` 的 `MAX_HISTORY_PER_ENDPOINT` 与之镜像——
+/// store 侧封顶使所展示的数组不增长，数据库侧封顶使 `store.db` 不增长。两者一致是
+/// 锦上添花；真正给文件封顶的是数据库侧，故日后漏掉 store 侧的调用方也无法让库无限
+/// 增长。
+pub const RESPONSE_HISTORY_KEEP_DEFAULT: i64 = 10;
 
 /// 单条已存响应体的硬上限（字节）。
 ///
@@ -85,6 +91,31 @@ pub struct StoredResponse {
     pub url: Option<String>,
 }
 
+/// 一次发送出去的请求的快照 —— 随响应历史行一起落库。
+///
+/// 响应历史回答的是「那次调用发生了什么」，而一次调用有两面：发出去的请求与收回来的
+/// 响应。只存响应，用户点开一条历史时看到的是一份没有出处的答案，故把请求一起存下。
+///
+/// 存的是**解析之后**的那一份：base URL 与路径已拼接、路径参数已替换、`{{var}}` 已换成
+/// 取到的值、查询串已追加。文档里的那份模板随时可以再打开看，线上真正发出去的那一份
+/// 只有存下来才不会丢。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredRequestSnapshot {
+    pub method: HttpMethod,
+    /// 最终 URL：拼接、替换与追加之后的完整地址。
+    pub url: String,
+    /// 有序 header 元组。HTTP 允许重名 header，故用列表而非 map——map 会把它们合并，
+    /// 而线上形态要能原样还原。
+    ///
+    /// 存的是**线上那一份**：由后端在请求发出后报上来，含传输层补的 `accept` /
+    /// `accept-encoding` / `host` / `content-length`。请求从未抵达时（超时、网络错误）
+    /// 后端报不上来，这一列存的是界面上拼出来的那几条。
+    pub headers: Vec<(String, String)>,
+    /// body 内容。没有 body 时为 `None`。
+    pub body: Option<String>,
+}
+
 /// `response_history` 的一行。
 ///
 /// 外面包一层而不是给已存响应加宽 `id` / `createdAt`，是因为两者生命周期不同：响应是载荷，
@@ -99,4 +130,10 @@ pub struct ResponseHistoryEntry {
     /// `body` 已在 [`RESPONSE_HISTORY_MAX_BODY_BYTES`] 处裁剪。
     pub body_truncated: bool,
     pub created_at: i64,
+    /// 用户收藏了这一行。收藏的行不参与保留条数的裁剪。
+    #[serde(default)]
+    pub is_favorite: bool,
+    /// 那次发送出去的请求。写这一列之前就有的行没有它，故为 `Option`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<StoredRequestSnapshot>,
 }

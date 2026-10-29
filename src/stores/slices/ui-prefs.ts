@@ -3,6 +3,14 @@ import themeBoot from '@/lib/theme-boot';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import type { RequestSettings, Theme } from '../store-types';
+import { clampHistoryKeep, RESPONSE_HISTORY_KEEP_DEFAULT } from './history-keep';
+
+export {
+  clampHistoryKeep,
+  parseHistoryKeepDraft,
+  RESPONSE_HISTORY_KEEP_DEFAULT,
+  RESPONSE_HISTORY_KEEP_MAX,
+} from './history-keep';
 
 /**
  * ui-prefs —— 主题与出站请求旋钮。
@@ -105,11 +113,20 @@ export const REQUEST_SETTINGS_DEFAULTS: RequestSettings = {
 export interface UiPrefsState {
   theme: Theme;
   requestSettings: RequestSettings;
+  /**
+   * 每个接口保留多少条**未收藏**的发送历史。
+   *
+   * 存在后端的 `preferences` 表里（`response_history.keep` 行）：库里裁历史时读的是
+   * 同一份，故界面上改成 50，库里也留 50 条。
+   */
+  responseHistoryKeep: number;
 }
 
 export interface UiPrefsActions {
   setTheme: (t: Theme) => void;
   updateRequestSettings: (patch: Partial<RequestSettings>) => void;
+  /** 改保留条数。服务端会立刻按新条数裁一遍库里的行，本地列表也随之裁。 */
+  updateResponseHistoryKeep: (keep: number) => void;
 }
 
 export type UiPrefs = UiPrefsState & UiPrefsActions;
@@ -156,9 +173,24 @@ export async function loadRequestSettings(): Promise<RequestSettings> {
   };
 }
 
+/**
+ * 读一次「每个接口保留多少条未收藏历史」，行缺失时用缺省值。
+ *
+ * 读不到（后端没有这个设置、库被换掉）时退回缺省值：这个数只是历史条的上限，
+ * 读不出来不该让界面空着。
+ */
+export async function loadResponseHistoryKeep(): Promise<number> {
+  const stored = await invokeCmd<number>(COMMANDS.responseHistoryKeepGet).catch((e: unknown) => {
+    console.warn('[store] response history keep unavailable', e);
+    return RESPONSE_HISTORY_KEEP_DEFAULT;
+  });
+  return clampHistoryKeep(stored);
+}
+
 export const createUiPrefs: StateCreator<AppState, [], [], UiPrefs> = (set, get) => ({
   theme: initialTheme,
   requestSettings: REQUEST_SETTINGS_DEFAULTS,
+  responseHistoryKeep: RESPONSE_HISTORY_KEEP_DEFAULT,
 
   /**
    * 换主题。只写 localStorage —— 主题是渲染层的事，后端读不到也不需要。
@@ -190,5 +222,26 @@ export const createUiPrefs: StateCreator<AppState, [], [], UiPrefs> = (set, get)
     void invokeCmd(COMMANDS.requestSettingsUpdate, { patch: next }).catch((e: unknown) => {
       console.error('[store] request settings update failed', e);
     });
+  },
+
+  /**
+   * 改保留条数。本地副本立刻更新（界面不等 IPC），随后写库。
+   *
+   * 服务端写完会按新条数裁一遍库里的行，故本地那份历史列表也要按同一条规则裁一次——
+   * 否则界面会多显示库里已经没有的行。裁的动作住在 `ui-response` 切片（历史列表是
+   * 它的），这里经 `get()` 调它。
+   */
+  updateResponseHistoryKeep: (keep) => {
+    const next = clampHistoryKeep(keep);
+    set({ responseHistoryKeep: next });
+    void invokeCmd<number>(COMMANDS.responseHistoryKeepSet, { keep: next })
+      .then((applied) => {
+        const effective = clampHistoryKeep(applied);
+        set({ responseHistoryKeep: effective });
+        get().trimResponseHistory(effective);
+      })
+      .catch((e: unknown) => {
+        console.error('[store] response history keep update failed', e);
+      });
   },
 });

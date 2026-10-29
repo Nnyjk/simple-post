@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::{
     http::Method,
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use tower_http::services::ServeDir;
@@ -176,7 +176,18 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // `/api/response-history/{endpointId}` 必须在 axum 的 radix tree 里共存：
         // 抢优先级失败的那条会落到 SPA fallback，回 `200` + HTML，curl 看着就像
         // 一个正常工作的端点。`response_history_test.rs` 用真实 listener 盯这一条。
+        //
+        // `favorite` 与 `keep` 是**字面量**段，故同样注册在参数段之前：它们与
+        // `{endpointId}` 在 radix tree 的同一层，字面量段必须先占住位置。
         .route("/api/response-history", post(response_history_append))
+        .route(
+            "/api/response-history/favorite",
+            put(response_history_set_favorite),
+        )
+        .route(
+            "/api/response-history/keep",
+            get(response_history_keep_get).put(response_history_keep_put),
+        )
         .route(
             "/api/response-history/{endpointId}",
             get(response_history_list).delete(response_history_clear),

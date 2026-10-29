@@ -156,6 +156,10 @@ interface RustHttpOk {
   durationMs: number;
   sizeBytes: number;
   headers: Array<[string, string]>;
+  /**
+   * 线上那一份请求头。由 Rust 的 executor 在请求发出后报上来，故含传输层补的几条。
+   */
+  requestHeaders?: Array<[string, string]>;
   body: string;
   contentType: string;
   method: string;
@@ -220,6 +224,9 @@ function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string)
     durationMs: resp.durationMs,
     sizeBytes: resp.sizeBytes,
     headers: tuplesToRecord(resp.headers),
+    // 线上那一份请求头：含传输层补的 `accept` / `host` / `content-length` 等，
+    // 响应详情页要展示的就是它。旧后端没有这个字段时缺席，界面据此回落到本地那份。
+    ...(resp.requestHeaders ? { requestHeaders: resp.requestHeaders } : {}),
     body: resp.body,
     bodyJson: tryParseJson(resp.body),
     contentType: resp.contentType,
@@ -354,6 +361,18 @@ export interface SendPreparedInput {
 export interface SendPreparedResult {
   response: ApiResponse;
   script: ScriptOutcome | null;
+  /**
+   * 真正发出去的那一份请求。
+   *
+   * 它与 `input.request` 的差别只有 OAuth2 注入的 token：预览刻意不含 token（那会让
+   * cURL 预览把一个活凭据渲染进可复制的命令行），而线上发出去的那一份含它。
+   * 响应区左侧画的是这一份，故它必须是「发出去的那份」而不是「预览的那份」。
+   *
+   * 它的 header 是**界面上拼出来的那几条**；传输层补上的那几条（`accept` /
+   * `accept-encoding` / `host` / `content-length`）在 `response.requestHeaders` 里，
+   * 那边才是线上那一份。
+   */
+  outbound: PreparedRequest;
 }
 
 /**
@@ -409,14 +428,22 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
       const msg = (err as Error)?.message ?? String(err);
       // 中止仍是中止：取 token 这一步被取消不该弹成 OAuth2 错误。
       if (name === 'AbortError' || /abort/i.test(msg)) {
-        return { response: abortedResponse(shape, request.url, 0), script: null };
+        return {
+          response: abortedResponse(shape, request.url, 0),
+          script: null,
+          outbound: request,
+        };
       }
       console.error('[http.ts] oauth2 token fetch failed:', err);
-      return { response: oauth2ErrorResponse(shape, request.url, msg), script: null };
+      return {
+        response: oauth2ErrorResponse(shape, request.url, msg),
+        script: null,
+        outbound: request,
+      };
     }
   }
 
-  return invokeAndMap(
+  const { response, script } = await invokeAndMap(
     {
       method: outbound.method,
       url: outbound.url,
@@ -442,4 +469,5 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
     request.url,
     options,
   );
+  return { response, script, outbound };
 }

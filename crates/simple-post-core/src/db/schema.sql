@@ -233,7 +233,15 @@ CREATE TABLE IF NOT EXISTS response_history (
   method          TEXT,
   url             TEXT,
   body_truncated  INTEGER NOT NULL DEFAULT 0,
-  created_at      INTEGER NOT NULL
+  created_at      INTEGER NOT NULL,
+  -- 用户收藏了这一行。收藏的行不参与保留条数的裁剪（见 `db::response_history` 的
+  -- `trim_to_cap`），故它由用户自己决定留多久。
+  --
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`。
+  is_favorite     INTEGER NOT NULL DEFAULT 0,
+  -- 那次发送出去的请求（URL / header / body），JSON 编码。写这一列之前就有的行没有它，
+  -- 故可以为 NULL。存的是**解析之后**的那一份：线上真正发出去的地址与头。
+  request_json    TEXT
 );
 -- 这张表唯一的读取：历史条带问的是**一个** endpoint 的行，而这也是渲染层唯一发出的查询。
 --

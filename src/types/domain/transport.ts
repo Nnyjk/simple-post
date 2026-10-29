@@ -17,6 +17,34 @@ export interface ApiResponse {
    */
   method?: HttpMethod;
   url?: string;
+  /**
+   * 这一次**真正发出去**的请求头。
+   *
+   * 由后端在请求发出后报上来，故含传输层补的那几条（`accept` / `accept-encoding` /
+   * `host` / `content-length`），不只是界面上写的那几条。
+   *
+   * 失败（超时 / 网络错误 / 中止）时请求从未抵达，故没有这一份。
+   */
+  requestHeaders?: Array<[string, string]>;
+}
+
+/**
+ * 一次发送出去的请求的快照 —— 随响应历史行一起落库。
+ *
+ * Rust 侧 `crates/simple-post-core/src/domain/response.rs::StoredRequestSnapshot` 的镜像。
+ *
+ * 存的是**解析之后**的那一份：base URL 与路径已拼接、路径参数已替换、`{{var}}` 已换成
+ * 取到的值、查询串已追加。文档里那份模板随时可以再打开看，线上真正发出去的那一份只有
+ * 存下来才不会丢。
+ */
+export interface StoredRequestSnapshot {
+  method: HttpMethod;
+  /** 最终 URL：拼接、替换与追加之后的完整地址。 */
+  url: string;
+  /** 有序 header 元组。HTTP 允许重名 header，故用列表而非 map。 */
+  headers: Array<[string, string]>;
+  /** body 内容。没有 body 时为 null。 */
+  body: string | null;
 }
 
 /**
@@ -40,6 +68,16 @@ export interface ResponseHistoryEntry {
   bodyTruncated: boolean;
   /** Unix 毫秒，由数据库打戳而非渲染器。 */
   createdAt: number;
+  /**
+   * 用户收藏了这一行。收藏的行不参与保留条数的裁剪。
+   *
+   * 旧行（写这一列之前就有了的）读回来是 `false`，故它可以是可选的。
+   */
+  isFavorite?: boolean;
+  /**
+   * 那次发送出去的请求。旧行没有它，故它是可选的；缺席时界面不画请求侧栏。
+   */
+  request?: StoredRequestSnapshot;
 }
 
 export interface McpStatus {

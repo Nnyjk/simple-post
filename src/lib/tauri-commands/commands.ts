@@ -103,6 +103,11 @@ export const COMMANDS = {
   responseHistoryAppend: 'response_history_append',
   responseHistoryClear: 'response_history_clear',
   responseHistoryList: 'response_history_list',
+  // 收藏/取消收藏一行。收藏的行不参与保留条数的裁剪。
+  responseHistorySetFavorite: 'response_history_set_favorite',
+  // 保留条数（每个接口保留多少条未收藏历史）。全局设置，不属于任何接口。
+  responseHistoryKeepGet: 'response_history_keep_get',
+  responseHistoryKeepSet: 'response_history_keep_set',
 
   // ----- agent permissions -----
   permissionsGet: 'permissions_get',

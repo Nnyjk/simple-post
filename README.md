@@ -22,7 +22,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 
 <img src="docs/screenshots/workspace-request-response-dark.png" width="960" alt="工作区：左侧接口树，中间请求编辑器，下方响应视图" />
 
-<sub>工作区：左侧是接口树，中间是请求编辑器，下方是响应视图。截图中的接口是 `GET /v1/orders/10086`，响应由本地服务返回。</sub>
+<sub>工作区：左侧是接口树，中间是请求编辑器，下方是响应区。响应区也分两栏：左栏是这一次实际发出去的请求，右栏是收回来的响应。截图中的接口是 `GET /v1/orders/10086`，响应由本地服务返回。</sub>
 
 </div>
 
@@ -36,7 +36,7 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/request-body-json-schema-dark.png" alt="请求体编辑器：载荷与 Schema 分开" /><br /><sub><b>请求体</b>：载荷区与 Schema 区各管一件事，载荷是这一次发出的内容，Schema 是文档里的参数定义。</sub></td>
+<td width="50%"><img src="docs/screenshots/request-body-json-schema-dark.png" alt="请求体编辑器：左边载荷，右边 Schema" /><br /><sub><b>请求体</b>：左右两栏各管一件事。左边是这一次发出的载荷，右边是文档里的参数定义。</sub></td>
 <td width="50%"><img src="docs/screenshots/mcp-connection-settings-dark.png" alt="设置里的连接页：MCP 进程状态与接入配置" /><br /><sub><b>连接</b>：MCP 进程的运行状态、已注册工具数量，以及可直接粘贴给客户端的接入配置。</sub></td>
 </tr>
 <tr>
@@ -45,7 +45,11 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/interchange-import-preview-light.png" alt="导入 OpenAPI 文档的预览对话框" /><br /><sub><b>导入</b>：先预览将要写入的树，再逐项勾选。</sub></td>
-<td width="50%"><img src="docs/screenshots/request-settings-light.png" alt="设置里的请求行为：超时、跟随重定向、最大响应体积、HTTPS 出站" /><br /><sub><b>请求设置</b>：超时、跟随重定向、最大响应体积，以及 HTTPS 出站的全局默认，对桌面端与 MCP 端同时生效。</sub></td>
+<td width="50%"><img src="docs/screenshots/request-settings-light.png" alt="设置里的请求行为：超时、跟随重定向、最大响应体积、HTTPS 出站、历史保留" /><br /><sub><b>请求设置</b>：超时、跟随重定向、最大响应体积，以及 HTTPS 出站的全局默认，对桌面端与 MCP 端同时生效。历史保留条数另开一张卡片，它管的是「发过的记录留多少条」。</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/response-request-details-dark.png" alt="响应区左栏：这一次实际发出去的请求详情" /><br /><sub><b>请求详情</b>：左栏画的是线上真正发出去的那一份 —— 常规、查询字符串参数、请求头、请求体。请求头含传输层补的那几条，不只是界面上写的那几条。</sub></td>
+<td width="50%"><img src="docs/screenshots/workspace-request-response-light.png" alt="工作区：响应区左右两栏，左栏是发出去的请求，右栏是收回来的响应" /><br /><sub><b>响应区</b>：左右两栏回答同一件事的两面 —— 服务端刚才收到什么、回了什么。</sub></td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/tls-endpoint-panel-light.png" alt="端点编辑器的证书页签：继承全局设置与四个证书字段" /><br /><sub><b>证书</b>：端点自己那份 HTTPS 出站设置。一个「继承全局设置」开关加四个字段，给了自己那份就整体顶掉全局默认。</sub></td>

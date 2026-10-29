@@ -15,10 +15,15 @@ import { Select } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { KeyValueEditor } from './KeyValueEditor';
 import { DEFAULT_OAUTH2, fetchOAuth2Token } from '@/lib/oauth2';
+import { VarHintInput, type VarEntry } from './var-hint';
 
 interface Props {
   value: AuthConfig;
   onChange: (auth: AuthConfig) => void;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
+  varEntries: VarEntry[];
+  /** 当前环境名，显示在候选浮层的标题上。 */
+  envName?: string;
 }
 
 const TYPES: { id: AuthType; label: string }[] = [
@@ -36,7 +41,15 @@ const GRANT_OPTIONS: { value: OAuth2GrantType; label: string }[] = [
   { value: 'implicit', label: '隐式（implicit）' },
 ];
 
-export function AuthEditor({ value, onChange }: Props) {
+/**
+ * 鉴权配置表单。
+ *
+ * 只有会上线替换的取值栏接变量候选提示：Bearer 的 token、Basic 的用户名与密码、API Key
+ * 的 value。`lib/http-build/auth.ts::resolveAuth` 只解析这几处，故别处接提示等于许诺
+ * 一个不会替换的变量 —— Key、Add to、OAuth2 的全部字段都不接，OAuth2 那份配置是后端
+ * 换取 token 时用的，不是模板取值处。
+ */
+export function AuthEditor({ value, onChange, varEntries, envName }: Props) {
   return (
     <div className="px-4 py-3 space-y-3">
       <div>
@@ -57,9 +70,11 @@ export function AuthEditor({ value, onChange }: Props) {
       {value.kind === 'bearer' && (
         <div>
           <label className="mb-1.5 block label-caps">Token</label>
-          <Input
+          <VarHintInput
             value={value.bearer ?? ''}
-            onChange={(e) => onChange({ ...value, bearer: e.target.value })}
+            onChange={(next) => onChange({ ...value, bearer: next })}
+            entries={varEntries}
+            envName={envName}
             placeholder="eyJhbGciOi... 支持 {{var}}"
             className="font-mono text-sm"
           />
@@ -73,28 +88,32 @@ export function AuthEditor({ value, onChange }: Props) {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1.5 block label-caps">Username</label>
-            <Input
+            <VarHintInput
               value={value.basic?.username ?? ''}
-              onChange={(e) =>
+              onChange={(next) =>
                 onChange({
                   ...value,
-                  basic: { username: e.target.value, password: value.basic?.password ?? '' },
+                  basic: { username: next, password: value.basic?.password ?? '' },
                 })
               }
+              entries={varEntries}
+              envName={envName}
               className="font-mono text-sm"
             />
           </div>
           <div>
             <label className="mb-1.5 block label-caps">Password</label>
-            <Input
+            <VarHintInput
               type="password"
               value={value.basic?.password ?? ''}
-              onChange={(e) =>
+              onChange={(next) =>
                 onChange({
                   ...value,
-                  basic: { username: value.basic?.username ?? '', password: e.target.value },
+                  basic: { username: value.basic?.username ?? '', password: next },
                 })
               }
+              entries={varEntries}
+              envName={envName}
               className="font-mono text-sm"
             />
           </div>
@@ -145,18 +164,20 @@ export function AuthEditor({ value, onChange }: Props) {
           </div>
           <div>
             <label className="mb-1.5 block label-caps">Value</label>
-            <Input
+            <VarHintInput
               value={value.apikey?.value ?? ''}
-              onChange={(e) =>
+              onChange={(next) =>
                 onChange({
                   ...value,
                   apikey: {
                     key: value.apikey?.key ?? '',
-                    value: e.target.value,
+                    value: next,
                     inLocation: value.apikey?.inLocation ?? 'header',
                   },
                 })
               }
+              entries={varEntries}
+              envName={envName}
               placeholder="支持 {{var}}"
               className="font-mono text-sm"
             />
