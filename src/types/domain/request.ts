@@ -19,7 +19,35 @@ export interface KeyValue {
   description?: string;
 }
 
-export type BodyMode = 'none' | 'json' | 'form' | 'multipart' | 'raw';
+/**
+ * 请求体的七种形态。
+ *
+ * 与 Rust 的 `simple_post_core::domain::BodyMode` 一一对应（serde 用小写变体名）。
+ * 每个变体在 `RequestBody.content` 里装的东西不一样，故换模式就是换内容形状：
+ *
+ * | 模式 | `content` 装的是什么 | 发出去的东西 |
+ * |---|---|---|
+ * | `none` | 空 | 没有 body |
+ * | `json` / `xml` / `raw` | 原文 | 文本 |
+ * | `form` | 行数组的 JSON 文本 | urlencoded 文本 |
+ * | `multipart` | 分片数组的 JSON 文本 | 字节 |
+ * | `binary` | 文件描述的 JSON 文本 | 字节（文件本身） |
+ */
+export type BodyMode = 'none' | 'json' | 'form' | 'multipart' | 'xml' | 'raw' | 'binary';
+
+/**
+ * `form` 模式里的一行。
+ *
+ * 与 Rust 的 `simple_post_core::domain::FormField` 一一对应。`enabled` 缺省为真：
+ * 一份没写 `enabled` 的行就是一行要发的表单字段。
+ */
+export interface FormField {
+  key: string;
+  value: string;
+  enabled: boolean;
+  /** 说明。界面上那一列写着什么，不上线。 */
+  description?: string;
+}
 
 /**
  * `multipart` 模式下的一个分片。分片数组存在 `RequestBody.content` 里
@@ -27,16 +55,48 @@ export type BodyMode = 'none' | 'json' | 'form' | 'multipart' | 'raw';
  */
 export interface MultipartPart {
   name: string;
+  /** 文本分片的内容。 */
   value: string;
+  /** 这一分片是否参与发送。缺省为真。 */
+  enabled: boolean;
   /** 有值即文件分片：`Content-Disposition` 带上 `filename=`，并默认 `application/octet-stream`。 */
   filename?: string;
   /** 分片自己的 Content-Type；文件分片缺省为 `application/octet-stream`。 */
   contentType?: string;
+  /**
+   * 文件分片的字节（base64）。有它时 `value` 不参与发包。
+   *
+   * 分片数组存在 JSON 文本里，而文件是字节，故字节只能以 base64 的形态进去。
+   */
+  base64?: string;
+  /** 说明。界面上那一列写着什么，不上线。 */
+  description?: string;
+}
+
+/**
+ * `binary` 模式选中的那个文件。
+ *
+ * 与 Rust 的 `simple_post_core::domain::BodyFile` 一一对应。文件**不在库里存路径**——
+ * 路径由运行请求的那台机器解析，桌面端与服务端容器不是一个文件系统。
+ */
+export interface BodyFile {
+  /** 文件名。界面上显示它；它不上线（请求体只有字节与 Content-Type）。 */
+  name: string;
+  /** 文件有多少字节。 */
+  size: number;
+  /** 文件自己的 MIME 类型。缺省 `application/octet-stream`。 */
+  contentType: string;
+  /** 文件的字节（base64）。 */
+  base64: string;
 }
 
 export interface RequestBody {
   mode: BodyMode;
-  /** 这一次发出的载荷。json / form / raw 模式是原始文本，multipart 模式是 `MultipartPart[]` 的 JSON 文本。 */
+  /**
+   * 这一次发出的载荷。json / xml / raw 模式是原始文本；form 模式是 `FormField[]` 的
+   * JSON 文本；multipart 模式是 `MultipartPart[]` 的 JSON 文本；binary 模式是
+   * `BodyFile` 的 JSON 文本。
+   */
   content: string;
   /**
    * 文档里那份参数定义（JSON Schema）。只用于文档与 OpenAPI 导出，**从不上线**——

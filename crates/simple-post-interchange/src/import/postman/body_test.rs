@@ -136,7 +136,12 @@ fn other_body_modes_land_where_the_sender_expects_them() {
     let eps = endpoints_in_order(ex);
     assert_eq!(eps.len(), 4, "四条顶层散落的请求都进了同一个模块");
     assert_eq!(eps[0].body.mode, BodyMode::Form);
-    assert_eq!(eps[0].body.content, "a=1&b=2");
+    // `form` 模式的内容是**行数组**，不是拼好的 urlencoded 串：界面上的表格才有
+    // 地方放，而被 Postman 禁用的字段也留得下来（标成不参与发送）。
+    assert_eq!(
+        eps[0].body.content,
+        r#"[{"key":"a","value":"1","enabled":true},{"key":"b","value":"2","enabled":true},{"key":"off","value":"3","enabled":false}]"#
+    );
     assert_eq!(eps[1].body.mode, BodyMode::Raw);
     assert_eq!(eps[1].body.content, "hello");
     assert_eq!(eps[2].body.mode, BodyMode::None);

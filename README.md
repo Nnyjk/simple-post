@@ -40,6 +40,10 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 <td width="50%"><img src="docs/screenshots/mcp-connection-settings-dark.png" alt="设置里的连接页：MCP 进程状态与接入配置" /><br /><sub><b>连接</b>：MCP 进程的运行状态、已注册工具数量，以及可直接粘贴给客户端的接入配置。</sub></td>
 </tr>
 <tr>
+<td width="50%"><img src="docs/screenshots/request-body-form-data-light.png" alt="请求体编辑器：form-data 的分片表，文本分片与文件分片" /><br /><sub><b>请求体形态</b>：无、JSON、x-www-form-urlencoded、form-data、XML、Text、binary 七种形态各有自己的编辑器。form-data 的分片可以在文本与文件之间切换。</sub></td>
+<td width="50%"><img src="docs/screenshots/response-image-light.png" alt="响应区：图片响应给出预览与下载" /><br /><sub><b>响应按类型渲染</b>：JSON 走 Pretty，文本走文本，图片给预览，二进制给下载卡片。下载的是原始字节。</sub></td>
+</tr>
+<tr>
 <td width="50%"><img src="docs/screenshots/dynamic-variables-panel-dark.png" alt="动态变量面板：项目内定义、数据源、取数环境与当前值" /><br /><sub><b>动态变量</b>：定义挂在项目里，变量名项目内唯一。面板显示数据源、取数环境与服务，以及当前值。</sub></td>
 <td width="50%"><img src="docs/screenshots/command-palette-dark.png" alt="命令面板：跨项目搜索接口" /><br /><sub><b>命令面板</b>：<code>Ctrl+K</code> 打开，跨项目、模块、集合、接口搜索。</sub></td>
 </tr>
@@ -71,11 +75,25 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 
 某一格没有填写，表示该模块在此环境下没有这个服务的地址，并且不继承任何值——既不继承项目默认服务，也不继承别的模块。地址存放在 `environments.module_base_urls_json` 里，结构是 `服务 id → 模块 id → URL`。
 
-### 请求体分两栏：载荷与定义
+### 请求体：七种形态，文件与二进制都发得出字节
 
-请求体的 `content` 是这一次发出的载荷，`schema` 是文档里这份接口接受什么参数的定义（JSON Schema，只用于文档与 OpenAPI 导出，从不参与发送）。两者都是 JSON 对象，形状接近，所以界面给它们两个编辑器：`content` 一个，`schema` 一个折叠在下面。
+请求体的形态有七种：无、JSON、`x-www-form-urlencoded`、`form-data`、XML、Text 与 binary。界面按这七种给不同的编辑器。
+
+`x-www-form-urlencoded` 与 `form-data` 用键值表：一行一个字段，带「说明」列与「是否参与发送」这一位。停用的行不参与发送，但仍留在表里。`form-data` 的每个分片可以在文本与文件之间切换，文件分片的字节从本地文件读出来。
+
+文件**存字节不存路径**：桌面端与服务端容器不是一个文件系统，存路径会让「桌面端建好的接口」在 `serve-web` 上发不出去。
+
+JSON、XML 与 Text 三种形态的 `content` 是原文，binary 形态的 `content` 是一份文件描述（文件名、字节数、MIME 类型与 base64 的字节）。
+
+`content` 与 `schema` 的分工不变：`content` 是这一次发出的载荷，`schema` 是文档里这份接口接受什么参数的定义（JSON Schema，只用于文档与 OpenAPI 导出，从不参与发送）。两者都是 JSON 对象，形状接近，所以界面给它们两个编辑器。
 
 MCP 侧的工具描述写明哪个字段放什么，并且设了一道门：载荷看起来是一份 Schema、而 `schema` 还空着时，`endpoint_create` 与 `endpoint_update` 都会拒绝这次提交。
+
+### 响应按内容类型渲染
+
+响应区按收到的内容类型选视图：JSON 走可展开的 Pretty 视图，文本走纯文本视图，图片给预览，其余二进制给下载卡片。图片与二进制响应都能下载，下载的是**原始字节**而不是页面上的那份文本，文件名取自响应头里的 `Content-Disposition`。
+
+判形态的顺序是「先看 Content-Type 是不是文本，再看字节是不是合法的 UTF-8」：响应体可能被体积上限裁过，裁点切开一个多字节字符时，纯文本响应会被读成非法 UTF-8。
 
 ### 请求脚本运行在嵌入式 QuickJS 沙箱里
 
@@ -303,16 +321,16 @@ sp.example.com {
 - 接口的请求配置（method、url、auth、body、headers、params、tags）单独放在 `endpoint_details` 表里，这些字段对模块与集合没有意义（`crates/simple-post-core/src/db/endpoint_details.rs`）
 - 层级合法性由 SQLite 触发器与应用层检查同时强制（`ResourceNodeType::may_under`、`db::nodes::move_many`）
 - 完整增删改查、复制接口、级联清理，以及模块、集合、接口的上下移排序（`crates/simple-post-core/src/db/nodes.rs`）
-- 响应历史持久化在 SQLite 里，每个接口保留多少条**未收藏**的历史由全局偏好 `response_history.keep` 决定（缺省 10 条，可在设置里改）；收藏的行永久保留、不计入这个条数。响应体超过上限时记 `body_truncated`，查看器据此说明，而不是把半个文档当成完整内容显示（`crates/simple-post-core/src/db/response_history.rs`）
+- 响应历史持久化在 SQLite 里，每个接口保留多少条**未收藏**的历史由全局偏好 `response_history.keep` 决定（缺省 10 条，可在设置里改）；收藏的行永久保留、不计入这个条数。响应体超过上限时记 `body_truncated`，查看器据此说明，而不是把半个文档当成完整内容显示；二进制响应按 base64 存，故历史里的图片与文件同样能重新下载（`crates/simple-post-core/src/db/response_history.rs`）
 
 **桌面与界面**
 
 - 项目与环境切换、全局搜索（`Ctrl+K`）、MCP 进程状态指示器、设置入口（`src/features/top-bar/`）
 - 侧边树递归渲染集合层级、method 彩色徽标、双击改名、右键菜单、删除确认（`src/features/project-tree/`）
 - 拖拽支持三种落点：集合正中间是移进该子树，上边缘与下边缘是同级前后插入（`src/lib/tree-index.ts`）
-- 请求测试器提供 Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页，method 与 URL 写在标签页上方的请求头与地址栏里（URL 栏带 `{{var}}` 高亮与变量选择浮层）；CodeMirror 6 的 JSON 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
+- 请求测试器提供 Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页，method 与 URL 写在标签页上方的请求头与地址栏里（URL 栏带 `{{var}}` 高亮与变量选择浮层）；Body 页签按无、JSON、x-www-form-urlencoded、form-data、XML、Text、binary 七种形态给不同的编辑器，CodeMirror 6 的 JSON 与 XML 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
 - 复制为 cURL、保存接口定义（`src/lib/http-build.ts`）
-- 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers、脚本四种视图，支持复制与下载，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
+- 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers、脚本四种视图；Pretty 按内容类型选视图——JSON 走可展开的树，文本走纯文本，图片给预览，二进制给下载卡片；支持复制与下载，下载的是**原始字节**，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
 - 命令面板跨项目、模块、集合、接口模糊搜索，并内置切换环境、切换主题、打开设置、新建项目、新建模块、复制当前接口 URL 等命令
 - 主题支持 dark、light、system 三种，在 `<html>` 上切换 class，刷新后保留且没有白屏闪烁（`src/styles/globals.css`）
 

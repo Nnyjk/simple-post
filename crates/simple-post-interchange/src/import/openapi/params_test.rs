@@ -136,7 +136,7 @@ fn a_multipart_body_becomes_a_parts_array_not_a_sample_text() {
     // 写出 `null` 会被两侧的逐字段校验判成非法输入），键按字典序。
     assert_eq!(
         body.content,
-        r#"[{"name":"file","value":"x"},{"name":"note","value":"hello"}]"#
+        r#"[{"name":"file","value":"x","enabled":true},{"name":"note","value":"hello","enabled":true}]"#
     );
     let parts: Vec<MultipartPart> = serde_json::from_str(&body.content).expect("分片数组");
     assert_eq!(parts.len(), 2);

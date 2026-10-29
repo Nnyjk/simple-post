@@ -24,7 +24,8 @@ mod settings;
 mod util;
 
 pub use auth::{
-    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, KeyValue, RequestBody,
+    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyFile, BodyMode, FormField,
+    KeyValue, MultipartPart, RequestBody,
 };
 pub use dynamic::{
     DynamicCacheEntry, DynamicError, DynamicErrorKind, DynamicResolution, DynamicValueSource,

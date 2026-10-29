@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { buildFetchInit, buildCurlCommand, prepareRequest } from '../http-build';
 import { parseMultipartParts, buildMultipartBody, newMultipartBoundary } from '../multipart';
+import { bytesToUtf8 } from '../base64';
 import { headerMap, input, prep, ENV } from './http-build-fixtures';
 
 const PARTS = JSON.stringify([
@@ -25,6 +26,18 @@ function declaredBoundary(contentType: string): string {
   return m![1]!;
 }
 
+/**
+ * 请求体的文本形态。
+ *
+ * multipart 的产物是**字节**（文件分片的内容就是字节），故这里按需解成文本。
+ */
+function bodyText(init: RequestInit): string {
+  const body = init.body;
+  if (body === undefined || body === null) return '';
+  if (typeof body === 'string') return body;
+  return bytesToUtf8(body as Uint8Array<ArrayBuffer>);
+}
+
 // ============================================================
 // boundary 一致性
 // ============================================================
@@ -32,7 +45,7 @@ function declaredBoundary(contentType: string): string {
 describe('http-build: multipart boundary', () => {
   it('the Content-Type boundary is the one the body is framed with', () => {
     const { init } = buildFetchInit(input({ body: { mode: 'multipart', content: PARTS } }));
-    const body = init.body as string;
+    const body = bodyText(init);
     const b = declaredBoundary((init.headers as Record<string, string>)['Content-Type']!);
 
     assert.ok(body.startsWith(`--${b}\r\n`), 'body must open with the declared boundary');
@@ -89,7 +102,7 @@ describe('http-build: multipart body shape', () => {
     const b = declaredBoundary((init.headers as Record<string, string>)['Content-Type']!);
 
     assert.equal(
-      init.body,
+      bodyText(init),
       `--${b}\r\nContent-Disposition: form-data; name="field"\r\n\r\nv1\r\n` +
         `--${b}\r\nContent-Disposition: form-data; name="file"; filename="a.txt"\r\n` +
         `Content-Type: application/octet-stream\r\n\r\nBINARY\r\n` +
@@ -102,15 +115,15 @@ describe('http-build: multipart body shape', () => {
       { name: 'f', value: 'd', filename: 'a.png', contentType: 'image/png' },
     ]);
     const { init } = buildFetchInit(input({ body: { mode: 'multipart', content } }));
-    assert.match(init.body as string, /Content-Type: image\/png/);
-    assert.ok(!(init.body as string).includes('application/octet-stream'));
+    assert.match(bodyText(init), /Content-Type: image\/png/);
+    assert.ok(!bodyText(init).includes('application/octet-stream'));
   });
 
   it('leaves a plain field without a Content-Type', () => {
     const { init } = buildFetchInit(
       input({ body: { mode: 'multipart', content: JSON.stringify([{ name: 'a', value: '1' }]) } }),
     );
-    assert.ok(!(init.body as string).includes('Content-Type:'));
+    assert.ok(!bodyText(init).includes('Content-Type:'));
   });
 
   it('escapes quotes and strips CRLF out of header params', () => {
@@ -118,7 +131,7 @@ describe('http-build: multipart body shape', () => {
       { name: 'a"b\r\nX-Evil: 1', value: 'v', filename: 'c\\d.txt' },
     ]);
     const { init } = buildFetchInit(input({ body: { mode: 'multipart', content } }));
-    const body = init.body as string;
+    const body = bodyText(init);
 
     assert.ok(body.includes('name="a\\"bX-Evil: 1"'));
     assert.ok(body.includes('filename="c\\\\d.txt"'));
@@ -141,7 +154,7 @@ describe('http-build: malformed multipart content', () => {
     it(`yields zero parts for ${label}, and still sends a legal body`, () => {
       const { init } = buildFetchInit(input({ body: { mode: 'multipart', content } }));
       const b = declaredBoundary((init.headers as Record<string, string>)['Content-Type']!);
-      assert.equal(init.body, `--${b}--\r\n`);
+      assert.equal(bodyText(init), `--${b}--\r\n`);
     });
   }
 
@@ -223,7 +236,7 @@ describe('http-build: multipart does not disturb the other modes', () => {
     assert.equal(cts[0]![0], 'content-type');
     const b = declaredBoundary(cts[0]![1]);
     assert.ok(
-      (init.body as string).startsWith(`--${b}\r\n`),
+      bodyText(init).startsWith(`--${b}\r\n`),
       "the overridden Content-Type must still declare the body's own boundary",
     );
   });
@@ -270,6 +283,6 @@ describe('http-build: multipart does not disturb the other modes', () => {
         `--${B}\r\nContent-Disposition: form-data; name="nullFields"\r\n\r\nv`,
       ].join('\r\n') + `\r\n--${B}--\r\n`;
 
-    assert.equal(buildMultipartBody(parseMultipartParts(content), B), expected);
+    assert.equal(bytesToUtf8(buildMultipartBody(parseMultipartParts(content), B)), expected);
   });
 });

@@ -407,7 +407,12 @@ fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
 
     match endpoint.body.mode {
         BodyMode::None => {}
-        BodyMode::Json | BodyMode::Form | BodyMode::Multipart | BodyMode::Raw => {
+        BodyMode::Json
+        | BodyMode::Form
+        | BodyMode::Multipart
+        | BodyMode::Xml
+        | BodyMode::Raw
+        | BodyMode::Binary => {
             if endpoint.body.content.trim().is_empty() {
                 issues.push(json!({
                     "field": "body.content",

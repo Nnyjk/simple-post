@@ -298,8 +298,11 @@ fn parts_from_example(media: &Value) -> Vec<MultipartPart> {
         .map(|(name, value)| MultipartPart {
             name: name.clone(),
             value: scalar_text(value),
+            enabled: true,
             filename: None,
             content_type: None,
+            base64: None,
+            description: None,
         })
         .collect()
 }
@@ -319,8 +322,11 @@ fn parts_from_properties(media: &Value) -> Vec<MultipartPart> {
                 .or_else(|| prop.get("default"))
                 .map(scalar_text)
                 .unwrap_or_default(),
+            enabled: true,
             filename: None,
             content_type: None,
+            base64: None,
+            description: None,
         })
         .collect()
 }

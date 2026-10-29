@@ -39,6 +39,7 @@ function prepared(c: ParityCase): PreparedRequest {
     url: c.url,
     headers: c.headers.map(([k, v]) => [k, v] as [string, string]),
     body: null,
+    bodyBase64: null,
     missingVars: [],
     missingPathParams: [],
   };

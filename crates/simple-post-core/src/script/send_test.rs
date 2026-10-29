@@ -74,6 +74,7 @@ fn request(url: &str) -> ScriptRequest {
         method: "GET".to_string(),
         url: url.to_string(),
         headers: vec![],
+        body_base64: None,
         body: None,
     }
 }

@@ -154,6 +154,9 @@ fn every_multipart_parity_case_assembles_the_same_way() {
             .clone()
             .unwrap_or_else(|| panic!("{}: body 解析后为空", case.name));
         let body = multipart::apply(&mut headers, &content);
+        let body = body
+            .text
+            .unwrap_or_else(|| panic!("{}: 装配出的 body 不是文本形态", case.name));
 
         let boundary = boundary_of(&headers);
         let got_headers: Vec<(String, String)> = headers

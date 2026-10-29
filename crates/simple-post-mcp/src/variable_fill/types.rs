@@ -87,6 +87,11 @@ pub struct ResolvedEndpoint {
     pub headers: Vec<(String, String)>,
     pub params: Vec<(String, String)>,
     pub body: Option<String>,
+    /// 请求体的**二进制形态**（base64）。
+    ///
+    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。`binary` 模式与带文件分片的
+    /// `multipart` 走这条通道。
+    pub body_base64: Option<String>,
     /// **套用过 `overrides` 之后**的请求体模式，不是端点行里存的那个。
     ///
     /// multipart 的装配要靠它：`auto_content_type` 对 `Multipart` 返回 `None`

@@ -4,6 +4,7 @@
 //! 打破了「若 `simple-post-mcp` 与 `db::` / `domain::` / `error::` 并列住在主 crate 里」
 //! 本会产生的依赖环。
 
+pub mod body;
 pub mod db;
 pub mod domain;
 pub mod dynamic;

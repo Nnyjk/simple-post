@@ -5,36 +5,32 @@
 //! Content-Type、非法输入的处理都逐条对齐），改动两边必须同步。
 //!
 //! 分片结构存在 `RequestBody::content` 里，是一个分片数组的 JSON 文本：复用既有
-//! 的 `content` 字段，`RequestBody` 的形状不变，`{{var}}` 模板化也照旧作用在这个
-//! 字符串上（那一步由 `variable_fill` 完成，本模块拿到的是已模板化的结果）。
+//! 的 `content` 字段，`RequestBody` 的形状不变，`{{var}}` 模板化由 `variable_fill`
+//! 逐个分片地完成（本模块拿到的是已模板化的结果）。
+//!
+//! **产物是字节**：文件分片的内容是文件的字节，文本分片的内容是 UTF-8 字节。字节是
+//! 合法 UTF-8 时走文本形态，否则走 base64 形态。
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use base64::Engine as _;
+use simple_post_core::domain::MultipartPart;
 
 /// 文件分片没写 `contentType` 时的缺省值，与浏览器发 FormData 一致。
 const DEFAULT_FILE_CONTENT_TYPE: &str = "application/octet-stream";
 
-/// 一个分片。字段类型不对就整份反序列化失败 → 零分片，与 TS 侧逐字段校验后
-/// 丢弃整份的行为一致。
+/// 装配好的 multipart 请求体。
 ///
-/// **显式 `null` 是缺省**，与 TS 侧一致：`#[serde(default)]` 只覆盖缺键，JSON `null`
-/// 反序列化成 `None`，分片留着而那个字段没有值。两侧对 `null` 的判断若不同，
-/// 同一个 body 会在 MCP 与 UI 上发成两份。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct MultipartPart {
-    #[serde(default)]
-    pub(crate) name: String,
-    #[serde(default)]
-    pub(crate) value: String,
-    #[serde(default)]
-    pub(crate) filename: Option<String>,
-    #[serde(default)]
-    pub(crate) content_type: Option<String>,
+/// 文本形态与二进制形态**互斥**：字节是合法 UTF-8 时走文本形态，否则走 base64 形态。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AssembledBody {
+    /// 文本形态。
+    pub(crate) text: Option<String>,
+    /// 二进制形态（base64）。
+    pub(crate) base64: Option<String>,
 }
 
 /// 现生成一个 boundary。RFC 2046 限长 70 且不允许出现在分片内容里，所以用
@@ -64,15 +60,6 @@ pub(crate) fn content_type(boundary: &str) -> String {
     format!("multipart/form-data; boundary={boundary}")
 }
 
-/// `RequestBody::content` 的 JSON 文本 → 分片数组。
-///
-/// **非法输入一律返回空数组**，与 TS 侧同形：不报错、不 panic。空分片仍然是一个
-/// 格式合法的 multipart body（只有收尾分隔符），服务端会报「没有分片」——比发一个
-/// 内容被静默改写的 body 更容易发现。
-pub(crate) fn parse_parts(content: &str) -> Vec<MultipartPart> {
-    serde_json::from_str::<Vec<MultipartPart>>(content).unwrap_or_default()
-}
-
 /// 头参数里的引号与反斜杠要转义，而 CR/LF 必须整个去掉——留着就是往响应头里
 /// 注入一个新头，服务端看到的分片名与用户填的不是一回事。
 fn escape_header_param(value: &str) -> String {
@@ -95,37 +82,54 @@ fn part_content_type(part: &MultipartPart) -> Option<&str> {
     None
 }
 
+/// 分片的内容字节。
+///
+/// 文件分片的内容是 `base64` 里的字节；解不开时给空——那份内容不是有效的 base64，
+/// 而发一个内容被改写过的文件比发一个空文件更容易发现。
+fn part_bytes(part: &MultipartPart) -> Vec<u8> {
+    match part.base64.as_deref() {
+        Some(b64) => base64::engine::general_purpose::STANDARD
+            .decode(b64.as_bytes())
+            .unwrap_or_default(),
+        None => part.value.as_bytes().to_vec(),
+    }
+}
+
 /// 分片数组 + boundary → 真正写进 socket 的 body。行尾是 CRLF（RFC 2046）。
 ///
 /// 零个分片得到 `--<boundary>--\r\n`，仍是格式合法的 multipart。
-pub(crate) fn build_body(parts: &[MultipartPart], boundary: &str) -> String {
-    let mut out = String::new();
+pub(crate) fn build_body(parts: &[MultipartPart], boundary: &str) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
     for part in parts {
-        out.push_str("--");
-        out.push_str(boundary);
-        out.push_str("\r\nContent-Disposition: form-data; name=\"");
-        out.push_str(&escape_header_param(&part.name));
-        out.push('"');
-        if let Some(filename) = part.filename.as_deref().filter(|f| !f.is_empty()) {
-            out.push_str("; filename=\"");
-            out.push_str(&escape_header_param(filename));
-            out.push('"');
+        // 停用的分片不进 body：它还留在表格里，用户改主意时勾回来即可。
+        if !part.enabled {
+            continue;
         }
-        out.push_str("\r\n");
+        out.extend_from_slice(b"--");
+        out.extend_from_slice(boundary.as_bytes());
+        out.extend_from_slice(b"\r\nContent-Disposition: form-data; name=\"");
+        out.extend_from_slice(escape_header_param(&part.name).as_bytes());
+        out.push(b'"');
+        if let Some(filename) = part.filename.as_deref().filter(|f| !f.is_empty()) {
+            out.extend_from_slice(b"; filename=\"");
+            out.extend_from_slice(escape_header_param(filename).as_bytes());
+            out.push(b'"');
+        }
+        out.extend_from_slice(b"\r\n");
 
         if let Some(ct) = part_content_type(part) {
-            out.push_str("Content-Type: ");
-            out.push_str(ct);
-            out.push_str("\r\n");
+            out.extend_from_slice(b"Content-Type: ");
+            out.extend_from_slice(ct.as_bytes());
+            out.extend_from_slice(b"\r\n");
         }
 
-        out.push_str("\r\n");
-        out.push_str(&part.value);
-        out.push_str("\r\n");
+        out.extend_from_slice(b"\r\n");
+        out.extend_from_slice(&part_bytes(part));
+        out.extend_from_slice(b"\r\n");
     }
-    out.push_str("--");
-    out.push_str(boundary);
-    out.push_str("--\r\n");
+    out.extend_from_slice(b"--");
+    out.extend_from_slice(boundary.as_bytes());
+    out.extend_from_slice(b"--\r\n");
     out
 }
 
@@ -139,7 +143,7 @@ pub(crate) fn build_body(parts: &[MultipartPart], boundary: &str) -> String {
 ///
 /// 覆盖的是**值**，header 名保留用户的大小写：HTTP header 名不区分大小写，换掉它
 /// 没有收益。
-pub(crate) fn apply(headers: &mut Vec<(String, String)>, content: &str) -> String {
+pub(crate) fn apply(headers: &mut Vec<(String, String)>, content: &str) -> AssembledBody {
     let boundary = new_boundary();
     let ct = content_type(&boundary);
     match headers
@@ -149,7 +153,21 @@ pub(crate) fn apply(headers: &mut Vec<(String, String)>, content: &str) -> Strin
         Some(i) => headers[i].1 = ct,
         None => headers.push(("Content-Type".to_string(), ct)),
     }
-    build_body(&parse_parts(content), &boundary)
+
+    let bytes = build_body(
+        &simple_post_core::body::parse_multipart_parts(content),
+        &boundary,
+    );
+    match String::from_utf8(bytes) {
+        Ok(text) => AssembledBody {
+            text: Some(text),
+            base64: None,
+        },
+        Err(e) => AssembledBody {
+            text: None,
+            base64: Some(base64::engine::general_purpose::STANDARD.encode(e.as_bytes())),
+        },
+    }
 }
 
 #[cfg(test)]

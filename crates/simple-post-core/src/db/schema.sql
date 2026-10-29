@@ -228,6 +228,12 @@ CREATE TABLE IF NOT EXISTS response_history (
   -- 的顺序就能往返的东西。
   headers_json    TEXT NOT NULL DEFAULT '{}',
   body            TEXT NOT NULL DEFAULT '',
+  -- 响应体的二进制形态：原始字节的 base64。响应字节不是合法 UTF-8 时才有它（图片、
+  -- 压缩包、PDF…），此时 `body` 是空串。分列两栏：宽松解码过的文本对二进制没有价值，
+  -- 存下来只是浪费空间（每个非法字节会展开成三个字节的 U+FFFD）。
+  --
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`。
+  body_base64    TEXT,
   body_json       TEXT,
   error           TEXT,
   method          TEXT,

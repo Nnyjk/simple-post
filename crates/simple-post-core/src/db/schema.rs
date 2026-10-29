@@ -237,6 +237,13 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "request_json",
         "TEXT",
     ),
+    (
+        // 响应体的二进制形态（base64）。纯增量：旧行读回来没有这一份，
+        // 语义等价于「那次响应是文本的」。
+        "response_history",
+        "body_base64",
+        "TEXT",
+    ),
 ];
 
 /// 为 [`ADDED_COLUMNS`] 中缺列的表补上该列。

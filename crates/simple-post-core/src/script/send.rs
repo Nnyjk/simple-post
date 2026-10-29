@@ -256,6 +256,7 @@ fn to_http_input(
         url: request.url.clone(),
         headers: request.headers.clone(),
         body: request.body.clone(),
+        body_base64: request.body_base64.clone(),
         timeout_ms: settings.timeout_ms,
         follow_redirects: settings.follow_redirects,
         max_response_size_kb: settings.max_response_size_kb,
@@ -278,6 +279,7 @@ impl ScriptResponse {
                     .map(|[name, value]| (name.clone(), value.clone()))
                     .collect(),
                 body: response.body.clone(),
+                body_base64: response.body_base64.clone(),
                 response_time_ms: response.duration_ms as u64,
             },
             None => Self::default(),

@@ -68,6 +68,8 @@ async fn http_request(
     url: String,
     headers: Vec<(String, String)>,
     body: Option<String>,
+    // 请求体的二进制形态（base64）。有它时 `body` 缺席，线上发出去的是解码后的字节。
+    body_base64: Option<String>,
     timeout_ms: u64,
     follow_redirects: bool,
     max_response_size_kb: u64,
@@ -90,6 +92,7 @@ async fn http_request(
                 url,
                 headers,
                 body,
+                body_base64,
             },
             env: env.unwrap_or_default(),
             settings: crate::domain::RequestSettings {

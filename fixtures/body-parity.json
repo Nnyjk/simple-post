@@ -1,0 +1,161 @@
+{
+  "$comment": "请求体解析与装配规则的一致性样本。Rust 的 `core::body::resolve_body`（MCP 端）与 TS 的 `src/lib/body`（桌面端）读同一份本文件，产出必须逐条相同。样本钉的是**规则**：逐字段还是逐段模板化、空键与停用行算不算、百分号编码用哪套字符集、产物是文本还是字节。",
+  "cases": [
+    {
+      "name": "json：整段模板化",
+      "vars": { "id": "7" },
+      "body": { "mode": "json", "content": "{\"id\":{{id}}}" },
+      "expected": { "text": "{\"id\":7}", "base64": null, "missing": [] }
+    },
+    {
+      "name": "xml：整段模板化",
+      "vars": { "id": "7" },
+      "body": { "mode": "xml", "content": "<r id=\"{{id}}\"/>" },
+      "expected": { "text": "<r id=\"7\"/>", "base64": null, "missing": [] }
+    },
+    {
+      "name": "raw：整段模板化",
+      "vars": { "id": "7" },
+      "body": { "mode": "raw", "content": "id={{id}}" },
+      "expected": { "text": "id=7", "base64": null, "missing": [] }
+    },
+    {
+      "name": "none：没有请求体",
+      "vars": {},
+      "body": { "mode": "none", "content": "" },
+      "expected": { "text": null, "base64": null, "missing": [] }
+    },
+    {
+      "name": "空内容：没有请求体",
+      "vars": {},
+      "body": { "mode": "json", "content": "" },
+      "expected": { "text": null, "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：逐字段模板化，空格编成 %20",
+      "vars": { "token": "abc", "who": "Ada Lovelace" },
+      "body": {
+        "mode": "form",
+        "content": "[{\"key\":\"a\",\"value\":\"{{token}}\",\"enabled\":true},{\"key\":\"who\",\"value\":\"{{who}}\",\"enabled\":true}]"
+      },
+      "expected": { "text": "a=abc&who=Ada%20Lovelace", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：替换出来的值里有引号，整份 JSON 仍然完好",
+      "vars": { "q": "say \"hi\"" },
+      "body": {
+        "mode": "form",
+        "content": "[{\"key\":\"q\",\"value\":\"{{q}}\",\"enabled\":true}]"
+      },
+      "expected": { "text": "q=say%20%22hi%22", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：停用的行不进正文，其中的变量也不报缺失",
+      "vars": {},
+      "body": {
+        "mode": "form",
+        "content": "[{\"key\":\"a\",\"value\":\"1\",\"enabled\":true},{\"key\":\"b\",\"value\":\"{{gone}}\",\"enabled\":false}]"
+      },
+      "expected": { "text": "a=1", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：空键的行不进正文，其中的变量也不报缺失",
+      "vars": {},
+      "body": {
+        "mode": "form",
+        "content": "[{\"key\":\"\",\"value\":\"{{gone}}\",\"enabled\":true}]"
+      },
+      "expected": { "text": "", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：没写 enabled 的行按参与发送处理",
+      "vars": {},
+      "body": { "mode": "form", "content": "[{\"key\":\"a\",\"value\":\"1\"}]" },
+      "expected": { "text": "a=1", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：旧格式的 urlencoded 原文按旧格式读",
+      "vars": {},
+      "body": { "mode": "form", "content": "a=1&b=2" },
+      "expected": { "text": "a=1&b=2", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：旧格式里没有等号的行，值是空串",
+      "vars": {},
+      "body": { "mode": "form", "content": "a&b=2" },
+      "expected": { "text": "a=&b=2", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：行数组里有一行类型不对，整份作废",
+      "vars": {},
+      "body": { "mode": "form", "content": "[{\"key\":\"a\",\"value\":10}]" },
+      "expected": { "text": "", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：解析不到的变量按首次出现排序报出来",
+      "vars": {},
+      "body": {
+        "mode": "form",
+        "content": "[{\"key\":\"a\",\"value\":\"{{gone}}\",\"enabled\":true},{\"key\":\"b\",\"value\":\"{{alsoGone}}\",\"enabled\":true}]"
+      },
+      "expected": {
+        "text": "a=%7B%7Bgone%7D%7D&b=%7B%7BalsoGone%7D%7D",
+        "base64": null,
+        "missing": ["gone", "alsoGone"]
+      }
+    },
+    {
+      "name": "multipart：逐分片模板化，文件分片的字节不模板化",
+      "vars": { "title": "报告" },
+      "body": {
+        "mode": "multipart",
+        "content": "[{\"name\":\"title\",\"value\":\"{{title}}\"},{\"name\":\"f\",\"filename\":\"a.bin\",\"base64\":\"5L2g5aW9\"}]"
+      },
+      "expected": {
+        "text": "[{\"name\":\"title\",\"value\":\"报告\",\"enabled\":true},{\"name\":\"f\",\"value\":\"\",\"enabled\":true,\"filename\":\"a.bin\",\"base64\":\"5L2g5aW9\"}]",
+        "base64": null,
+        "missing": []
+      }
+    },
+    {
+      "name": "multipart：分片名与内容里都能带变量",
+      "vars": { "field": "userId" },
+      "body": {
+        "mode": "multipart",
+        "content": "[{\"name\":\"{{field}}\",\"value\":\"{{field}}\"}]"
+      },
+      "expected": {
+        "text": "[{\"name\":\"userId\",\"value\":\"userId\",\"enabled\":true}]",
+        "base64": null,
+        "missing": []
+      }
+    },
+    {
+      "name": "binary：文件描述里的字节原样带出去",
+      "vars": {},
+      "body": {
+        "mode": "binary",
+        "content": "{\"name\":\"a.bin\",\"size\":3,\"contentType\":\"application/octet-stream\",\"base64\":\"//8=\"}"
+      },
+      "expected": { "text": null, "base64": "//8=", "missing": [] },
+      "expectedContentType": "application/octet-stream"
+    },
+    {
+      "name": "binary：Content-Type 取文件自己的类型",
+      "vars": {},
+      "body": {
+        "mode": "binary",
+        "content": "{\"name\":\"a.png\",\"size\":3,\"contentType\":\"image/png\",\"base64\":\"//8=\"}"
+      },
+      "expected": { "text": null, "base64": "//8=", "missing": [] },
+      "expectedContentType": "image/png"
+    },
+    {
+      "name": "binary：内容读不出文件描述时没有 body",
+      "vars": {},
+      "body": { "mode": "binary", "content": "not json" },
+      "expected": { "text": null, "base64": null, "missing": [] },
+      "expectedContentType": "application/octet-stream"
+    }
+  ]
+}
