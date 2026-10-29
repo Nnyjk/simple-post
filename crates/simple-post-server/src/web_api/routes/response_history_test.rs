@@ -257,7 +257,121 @@ async fn the_per_endpoint_cap_holds_across_transport_appends() {
     let (_, rows) = get_json(addr, "/api/response-history/e1").await;
     assert_eq!(
         rows.as_array().map(Vec::len),
-        Some(crate::domain::RESPONSE_HISTORY_PER_ENDPOINT as usize),
+        Some(crate::domain::RESPONSE_HISTORY_KEEP_DEFAULT as usize),
         "the db write path trims; the transport must not reintroduce rows"
     );
+}
+
+/// `PUT` 一个 JSON body。
+async fn put_json(
+    addr: SocketAddr,
+    path: &str,
+    body: serde_json::Value,
+) -> (reqwest::StatusCode, serde_json::Value) {
+    let res = client()
+        .put(format!("http://{addr}{path}"))
+        .json(&body)
+        .send()
+        .await
+        .expect("request completes");
+    let status = res.status();
+    let body = res.json().await.unwrap_or(serde_json::Value::Null);
+    (status, body)
+}
+
+/// `favorite` 与 `keep` 是**字面量**段，与 `/api/response-history/{endpointId}` 在
+/// axum 的 radix tree 的同一层。抢优先级失败的那条会落到 SPA fallback，回 `200` 加
+/// 一个 HTML body——在 curl 看来与一个正常端点毫无区别。故这里读的是 body。
+#[tokio::test]
+async fn the_literal_routes_win_over_the_parameter_route() {
+    let (addr, dir) = serve_test_router().await;
+    seed_tree(&dir).await;
+
+    let (status, entry) = post_json(addr, "/api/response-history", append_body()).await;
+    assert_eq!(status, 201, "got {entry}");
+    let row_id = entry["id"].as_str().expect("row id").to_string();
+
+    // 收藏：请求体点名历史行的 id，回裸布尔值。
+    let (status, body) = put_json(
+        addr,
+        "/api/response-history/favorite",
+        json!({ "id": row_id, "favorite": true }),
+    )
+    .await;
+    assert_eq!(status, 200, "the favorite route must answer, got {body}");
+    assert_eq!(
+        body,
+        json!(true),
+        "it must answer a boolean, not the SPA shell"
+    );
+
+    // 保留条数：GET 读、PUT 改，回裸数字。
+    let (status, body) = get_json(addr, "/api/response-history/keep").await;
+    assert_eq!(status, 200, "the keep route must answer, got {body}");
+    assert_eq!(body, json!(crate::domain::RESPONSE_HISTORY_KEEP_DEFAULT));
+
+    let (status, body) = put_json(addr, "/api/response-history/keep", json!({ "keep": 3 })).await;
+    assert_eq!(status, 200, "the keep route must answer, got {body}");
+    assert_eq!(body, json!(3));
+
+    let (_, body) = get_json(addr, "/api/response-history/keep").await;
+    assert_eq!(
+        body,
+        json!(3),
+        "the new count must be the one the db trims with"
+    );
+}
+
+/// 收藏的行不参与裁剪：超过条数之后它仍在，且带着收藏标记。
+#[tokio::test]
+async fn a_favorited_row_is_still_there_after_the_trim() {
+    let (addr, dir) = serve_test_router().await;
+    seed_tree(&dir).await;
+
+    put_json(addr, "/api/response-history/keep", json!({ "keep": 2 })).await;
+
+    let (_, first) = post_json(addr, "/api/response-history", append_body()).await;
+    let row_id = first["id"].as_str().expect("row id").to_string();
+    put_json(
+        addr,
+        "/api/response-history/favorite",
+        json!({ "id": row_id, "favorite": true }),
+    )
+    .await;
+
+    for _ in 0..5 {
+        post_json(addr, "/api/response-history", append_body()).await;
+    }
+
+    let (_, rows) = get_json(addr, "/api/response-history/e1").await;
+    let rows = rows.as_array().expect("array");
+    assert_eq!(rows.len(), 3, "the favorite plus the two newest rows");
+    assert!(
+        rows.iter()
+            .any(|r| r["id"] == row_id && r["isFavorite"] == true),
+        "the favorited row must survive with its flag: {rows:?}"
+    );
+}
+
+/// 请求快照随响应一起落库：响应区左侧画的就是它。
+#[tokio::test]
+async fn the_request_snapshot_travels_with_the_response() {
+    let (addr, dir) = serve_test_router().await;
+    seed_tree(&dir).await;
+
+    let mut body = append_body();
+    body["request"] = json!({
+        "method": "POST",
+        "url": "http://x/orders?page=2",
+        "headers": [["content-type", "application/json"]],
+        "body": "{\"a\":1}"
+    });
+    let (status, entry) = post_json(addr, "/api/response-history", body).await;
+    assert_eq!(status, 201, "got {entry}");
+    assert_eq!(entry["request"]["url"], "http://x/orders?page=2");
+
+    let (_, rows) = get_json(addr, "/api/response-history/e1").await;
+    let rows = rows.as_array().expect("array");
+    assert_eq!(rows[0]["request"]["method"], "POST");
+    assert_eq!(rows[0]["request"]["body"], "{\"a\":1}");
 }

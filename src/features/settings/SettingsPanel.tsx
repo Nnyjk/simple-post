@@ -71,7 +71,7 @@ const RAIL_ITEMS: {
     id: 'request',
     label: '请求',
     icon: <Send className="h-4 w-4" />,
-    hint: '超时 / 重定向 / 体积上限',
+    hint: '超时 / 重定向 / 历史条数',
     concept: 'request',
   },
 ];
@@ -97,7 +97,7 @@ const SECTION_META: Record<
   },
   request: {
     title: '请求',
-    description: '应用到所有 HTTP 发送（v0.2 由 Rust 端消费）',
+    description: '出站请求的行为，以及发送历史的保留条数',
     icon: <Send className="h-3.5 w-3.5" />,
   },
 };

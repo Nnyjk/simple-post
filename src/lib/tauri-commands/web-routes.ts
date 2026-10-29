@@ -321,13 +321,33 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.responseHistoryAppend]: {
     method: 'POST',
     path: () => '/api/response-history',
-    // 显式投影而非默认的 `body = args`：下面两半就是全部线上契约，调用方多带的
-    // 键不能跟着上车。
-    body: (a) => ({ endpointId: a.endpointId, response: a.response }),
+    // 显式投影而非默认的 `body = args`：下面三半就是全部线上契约，调用方多带的
+    // 键不能跟着上车。`request` 是那次发送出去的请求，缺席时省略。
+    body: (a) => ({
+      endpointId: a.endpointId,
+      response: a.response,
+      ...(a.request ? { request: a.request } : {}),
+    }),
   },
   [COMMANDS.responseHistoryClear]: {
     method: 'DELETE',
     path: (a) => `/api/response-history/${encodeURIComponent(String(a.endpointId))}`,
+  },
+  // 字面量路径：与上面那条 `{endpointId}` 路由在 radix tree 的同一层，故不能带参数段。
+  [COMMANDS.responseHistorySetFavorite]: {
+    method: 'PUT',
+    path: () => '/api/response-history/favorite',
+    body: (a) => ({ id: a.id, favorite: a.favorite }),
+  },
+  // 保留条数是全局设置，不属于任何接口，故路径里没有 id。
+  [COMMANDS.responseHistoryKeepGet]: {
+    method: 'GET',
+    path: () => '/api/response-history/keep',
+  },
+  [COMMANDS.responseHistoryKeepSet]: {
+    method: 'PUT',
+    path: () => '/api/response-history/keep',
+    body: (a) => ({ keep: a.keep }),
   },
 
   // ----- agent permissions -----

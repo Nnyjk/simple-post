@@ -12,7 +12,12 @@ import type { StateCreator } from 'zustand';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from './app-store';
-import { loadRequestSettings, readLastProjectId, saveLastProjectId } from './slices/ui-prefs';
+import {
+  loadRequestSettings,
+  loadResponseHistoryKeep,
+  readLastProjectId,
+  saveLastProjectId,
+} from './slices/ui-prefs';
 
 /** 状态部分。 */
 export interface BootstrapSliceState {
@@ -306,6 +311,9 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         //
         // 顺序而非并发：并发时两条命令的发出次序不确定，测试与日志都难读。
         const requestSettings = await loadRequestSettings();
+        // 历史保留条数同样在后端的 `preferences` 表里，且同样要在第 1 层读：它决定库里
+        // 留几行历史，界面与库必须从一开始就是同一个数。
+        const responseHistoryKeep = await loadResponseHistoryKeep();
 
         // 恢复上次停留的项目：刷新后回到它，而不是回到欢迎页。
         //
@@ -329,6 +337,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         set({
           projects,
           requestSettings,
+          responseHistoryKeep,
           loaded: true,
           bootstrapError: null,
           loading: false,

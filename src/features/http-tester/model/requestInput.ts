@@ -1,5 +1,6 @@
 import { prepareRequest } from '@/lib/http-build';
-import type { Environment, HttpMethod } from '@/types/domain';
+import type { PreparedRequest } from '@/lib/http-build';
+import type { Environment, HttpMethod, StoredRequestSnapshot } from '@/types/domain';
 import type { EffectiveRequest } from './effectiveRequest';
 
 /**
@@ -27,4 +28,27 @@ export function buildRequestInput(
     env,
     dynamicVars,
   });
+}
+
+/**
+ * 把一次发送出去的请求折成可落库的快照。
+ *
+ * 收的是 `sendPreparedRequest` 返回的 `outbound`，不是预览那份：线上真正发出去的
+ * 请求在 OAuth2 那一档多一个注入的 token，存预览那份会让历史行少显示那个凭据。
+ *
+ * `wireHeaders` 是后端报上来的**线上那一份**请求头（含传输层补的 `accept` /
+ * `accept-encoding` / `host` / `content-length`）。缺席时回落到本地拼出来的那几条：
+ * 请求从未抵达时（超时、网络错误）后端报不上来，但界面上拼的那份仍然成立。
+ */
+export function toRequestSnapshot(
+  request: PreparedRequest,
+  wireHeaders?: ReadonlyArray<readonly [string, string]>,
+): StoredRequestSnapshot {
+  const headers = wireHeaders ?? request.headers;
+  return {
+    method: request.method,
+    url: request.url,
+    headers: headers.map(([name, value]) => [name, value] as [string, string]),
+    body: request.body,
+  };
 }

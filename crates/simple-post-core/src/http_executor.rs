@@ -32,6 +32,12 @@ pub struct HttpResponse {
     pub size_bytes: u64,
     /// 扁平化为 `[name, value]` 对的响应头（匹配 JS 侧的 `headersToObject` 形状）。
     pub headers: Vec<[String; 2]>,
+    /// 这一次**真正发出去**的请求头。
+    ///
+    /// 不只是调用方交下来的那些：传输层还会补上 `host`、`content-length` 与
+    /// `accept-encoding`，而响应详情页要展示的是线上那一份，故这里给的是补齐后的集合。
+    /// 名字一律小写，与线路上的写法一致。
+    pub request_headers: Vec<[String; 2]>,
     pub body: String,
     pub content_type: String,
     pub method: String,
@@ -187,6 +193,72 @@ async fn read_body_capped(
         Ok(text) => Ok(text),
         Err(e) => Ok(String::from_utf8_lossy(e.as_bytes()).into_owned()),
     }
+}
+
+// 线上那一份请求头。
+
+/// 传输层在调用方的请求头之外补上的那几条。
+///
+/// 它们由 HTTP/1.1 与传输实现决定，不是调用方能关掉的，故线上一定有：
+///   - `accept`：传输库的默认头，值是 `*/*`。调用方自己写过 `accept` 时不补。
+///   - `host`：目标主机名。端口是该 scheme 的默认端口时不写，默认端口之外的才带上。
+///   - `content-length`：请求体的字节数。没有请求体时没有这一条。
+///   - `accept-encoding`：传输层支持的压缩算法。
+///
+/// 值是**线路上的原样**（`accept-encoding` 的逗号后没有空格），不是人读的写法：
+/// 这一份要拿去与原始字节逐条比对。
+/// `http_executor_test.rs` 里的 `the_reported_request_headers_are_the_ones_on_the_wire`
+/// 把它们与线路上的字节逐条比对，故这里写错一个值时那条测试会红。
+const TRANSPORT_ACCEPT: &str = "*/*";
+const TRANSPORT_ACCEPT_ENCODING: &str = "gzip,deflate,br";
+
+/// 这一次真正发出去的请求头。
+///
+/// 调用方交下来的那些按原样保留（名字转小写，与线路上的写法一致），传输层补的几条
+/// 追加在后面。调用方自己写过的同名头不再补：线路上发出去的是调用方那一份。
+pub(crate) fn effective_request_headers(input: &HttpRequestInput) -> Vec<[String; 2]> {
+    let mut out: Vec<[String; 2]> = input
+        .headers
+        .iter()
+        .filter(|(k, _)| !k.is_empty())
+        .map(|(k, v)| [k.to_ascii_lowercase(), v.clone()])
+        .collect();
+
+    // 先把已有的名字收成一份，后面要往 `out` 里 push，故判定不能借用 `out` 本身。
+    let present: Vec<String> = out.iter().map(|e| e[0].clone()).collect();
+    let has = |name: &str| present.iter().any(|k| k == name);
+
+    if !has("accept") {
+        out.push(["accept".to_string(), TRANSPORT_ACCEPT.to_string()]);
+    }
+
+    if !has("accept-encoding") {
+        out.push([
+            "accept-encoding".to_string(),
+            TRANSPORT_ACCEPT_ENCODING.to_string(),
+        ]);
+    }
+
+    if let Ok(url) = reqwest::Url::parse(&input.url) {
+        if !has("host") {
+            let host = url.host_str().unwrap_or_default().to_string();
+            // `Url::port()` 在端口是该 scheme 的默认端口时给 `None`，正好对应
+            // 「默认端口不写」这条规则。
+            let host_header = match url.port() {
+                Some(p) => format!("{host}:{p}"),
+                None => host,
+            };
+            out.push(["host".to_string(), host_header]);
+        }
+    }
+
+    if let Some(ref body) = input.body {
+        if !has("content-length") {
+            out.push(["content-length".to_string(), body.len().to_string()]);
+        }
+    }
+
+    out
 }
 
 // 出站 URL 策略。
@@ -432,6 +504,7 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         duration_ms: elapsed,
         size_bytes: final_body.len() as u64,
         headers: header_pairs,
+        request_headers: effective_request_headers(input),
         body: final_body,
         content_type,
         method: input.method.clone(),

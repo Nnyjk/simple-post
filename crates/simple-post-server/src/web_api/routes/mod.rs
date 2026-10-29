@@ -55,6 +55,7 @@ pub(crate) use projects::{
 };
 pub(crate) use request_settings::{request_settings_get, request_settings_put};
 pub(crate) use response_history::{
-    response_history_append, response_history_clear, response_history_list,
+    response_history_append, response_history_clear, response_history_keep_get,
+    response_history_keep_put, response_history_list, response_history_set_favorite,
 };
 pub(crate) use spec::spec_upsert;

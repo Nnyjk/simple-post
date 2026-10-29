@@ -8,6 +8,7 @@ import { TlsPanel } from './TlsPanel';
 import type { EndpointDraft } from '@/stores/store-types';
 import type { FormatResult } from '@/lib/utils';
 import type { AuthConfig, KeyValue, RequestBody, TlsSettings } from '@/types/domain';
+import type { VarEntry } from './var-hint';
 
 /** 请求配置编辑器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段）。 */
 export type TesterTabId =
@@ -35,6 +36,8 @@ export function RequestTabPanels({
   headerSuggestions,
   validationError,
   pathParamError,
+  varEntries,
+  envName,
   patchDraft,
   onFormatResult,
 }: {
@@ -59,6 +62,10 @@ export function RequestTabPanels({
   validationError: string | null;
   /** 路径参数缺值时拦下发送的原因。 */
   pathParamError: string | null;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
+  varEntries: VarEntry[];
+  /** 当前环境名，显示在候选浮层的标题上。 */
+  envName: string | undefined;
   patchDraft: (patch: Partial<EndpointDraft>) => void;
   onFormatResult: (result: FormatResult) => void;
 }) {
@@ -70,6 +77,8 @@ export function RequestTabPanels({
           onChange={(items) => patchDraft({ params: items })}
           keyPlaceholder="query 参数名"
           valuePlaceholder="值（支持 {{var}}）"
+          varEntries={varEntries}
+          envName={envName}
         />
       )}
       {tab === 'path' && (
@@ -89,6 +98,8 @@ export function RequestTabPanels({
           // 最近使用（项目范围收拢）与内置列表合并 —— 见
           // common-headers.ts::buildHeaderSuggestions。
           keySuggestions={headerSuggestions}
+          varEntries={varEntries}
+          envName={envName}
         />
       )}
       {tab === 'body' && (
@@ -101,9 +112,18 @@ export function RequestTabPanels({
           // 格式化 已经解析过内容，其结果直接定徽标。此处再跑 `runValidation` 检查的
           // 是格式化前的草稿（本次渲染的闭包），即用户刚解析失败的那份内容。
           onFormatResult={onFormatResult}
+          varEntries={varEntries}
+          envName={envName}
         />
       )}
-      {tab === 'auth' && <AuthEditor value={auth} onChange={(auth) => patchDraft({ auth })} />}
+      {tab === 'auth' && (
+        <AuthEditor
+          value={auth}
+          onChange={(auth) => patchDraft({ auth })}
+          varEntries={varEntries}
+          envName={envName}
+        />
+      )}
       {tab === 'docs' && <DocsEditor value={docs} onChange={(docs) => patchDraft({ docs })} />}
       {tab === 'script' && (
         <ScriptPanel

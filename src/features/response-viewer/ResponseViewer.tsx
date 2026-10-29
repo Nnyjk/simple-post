@@ -21,9 +21,22 @@ import { PrettyView } from './PrettyView';
 import { HeadersView } from './HeadersView';
 import { ScriptView } from './ScriptView';
 import { PendingState } from './PendingState';
+import { RequestSummary } from './RequestSummary';
 
+/**
+ * 响应区 —— 左右两栏。
+ *
+ * 左栏是**这一次发出去的请求**（`RequestSummary`），右栏是**收回来的响应**。两栏回答
+ * 的是同一件事的两面：服务端刚才收到什么、回了什么。
+ *
+ * 请求快照与响应同一刻写进 store，故两栏永远描述同一次调用；点开一条历史时也是
+ * 一次写两栏，于是「回看那次调用」看到的是它当时的请求与响应，而不是把今天的
+ * 请求配上一个旧的响应。
+ */
 export function ResponseViewer() {
   const response = useAppStore((s) => s.lastResponse);
+  // 那次请求的快照。与 `lastResponse` 同一刻写入，故两者描述同一次调用。
+  const request = useAppStore((s) => s.lastRequest);
   const pending = useAppStore((s) => s.requestPending);
   // 最近一次发送的脚本产出。脚本的成败不改写请求本身的成败，故失败信息与断言在这里单独呈现。
   const scriptOutcome = useAppStore((s) => s.lastScriptOutcome);
@@ -136,7 +149,14 @@ export function ResponseViewer() {
     // 的 section 会吃光整个盒子，随后的历史条落到屏幕外（DOM 里查得到，只是看不见）。
     return (
       <section className="flex h-full min-h-0 flex-col">
-        <EmptyState />
+        <div className="flex min-h-0 flex-1 border-t border-border bg-card/30">
+          <aside className="w-[38%] min-w-0 shrink-0 overflow-y-auto border-r border-border">
+            <RequestSummary request={request} response={response} />
+          </aside>
+          <div className="flex min-w-0 flex-1 items-center justify-center">
+            <EmptyState />
+          </div>
+        </div>
         <ResponseHistory />
       </section>
     );
@@ -229,71 +249,80 @@ export function ResponseViewer() {
         </div>
       )}
 
-      {/* 页签条 */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
-        <Tabs
-          variant="segmented"
-          items={[
-            { id: 'pretty', label: 'Pretty' },
-            { id: 'raw', label: 'Raw' },
-            {
-              id: 'headers',
-              label: 'Headers',
-              // 填充徽标在这里行不通：它所在的分段要么是 `--muted` 的槽，要么是 `--chip`
-              // 的滑块，没有一种填充能同时与两者拉开对比。计数本就是「有但不需操作」的
-              // 信息，故用第三级文字、放弃 chip。
-              badge: (
-                <span className="text-faint tabular-nums">
-                  {Object.keys(response.headers).length}
-                </span>
-              ),
-            },
-            {
-              id: 'script',
-              label: '脚本',
-              // 徽标只报**失败的**断言数：全过的时候脚本没有问题可报，一个「0」反而像
-              // 在提示什么。没有脚本时整段缺席。
-              badge:
-                scriptOutcome && scriptOutcome.assertions.some((a) => !a.passed) ? (
-                  <span className="text-destructive tabular-nums">
-                    {scriptOutcome.assertions.filter((a) => !a.passed).length}
-                  </span>
-                ) : null,
-            },
-          ]}
-          value={view}
-          onChange={(id) => setView(id as typeof view)}
-        />
-        <div className="ml-auto" />
-        {view === 'pretty' && (
-          <Tooltip content={canFormat ? undefined : '响应不是合法 JSON'} side="bottom">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7"
-              onClick={() => setFormatted((v) => !v)}
-              disabled={!canFormat}
-              data-testid="format-response-btn"
-            >
-              <Wand2 className="h-3.5 w-3.5" />
-              {formatted ? '原文' : '格式化'}
-            </Button>
-          </Tooltip>
-        )}
-      </div>
+      {/* 左栏：这次发出去的请求；右栏：收回来的响应。 */}
+      <div className="flex min-h-0 flex-1">
+        <aside className="w-[38%] min-w-0 shrink-0 overflow-y-auto border-r border-border">
+          <RequestSummary request={request} response={response} />
+        </aside>
 
-      {/* 响应体 */}
-      <div className="min-h-0 flex-1 overflow-auto">
-        {view === 'pretty' && (
-          <PrettyView body={response.body} formatted={formatted} formatResult={formatResult} />
-        )}
-        {view === 'raw' && (
-          <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
-            {response.body}
-          </pre>
-        )}
-        {view === 'headers' && <HeadersView headers={response.headers} />}
-        {view === 'script' && <ScriptView outcome={scriptOutcome} />}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* 页签条 */}
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-1.5">
+            <Tabs
+              variant="segmented"
+              items={[
+                { id: 'pretty', label: 'Pretty' },
+                { id: 'raw', label: 'Raw' },
+                {
+                  id: 'headers',
+                  label: 'Headers',
+                  // 填充徽标在这里行不通：它所在的分段要么是 `--muted` 的槽，要么是 `--chip`
+                  // 的滑块，没有一种填充能同时与两者拉开对比。计数本就是「有但不需操作」的
+                  // 信息，故用第三级文字、放弃 chip。
+                  badge: (
+                    <span className="text-faint tabular-nums">
+                      {Object.keys(response.headers).length}
+                    </span>
+                  ),
+                },
+                {
+                  id: 'script',
+                  label: '脚本',
+                  // 徽标只报**失败的**断言数：全过的时候脚本没有问题可报，一个「0」反而像
+                  // 在提示什么。没有脚本时整段缺席。
+                  badge:
+                    scriptOutcome && scriptOutcome.assertions.some((a) => !a.passed) ? (
+                      <span className="text-destructive tabular-nums">
+                        {scriptOutcome.assertions.filter((a) => !a.passed).length}
+                      </span>
+                    ) : null,
+                },
+              ]}
+              value={view}
+              onChange={(id) => setView(id as typeof view)}
+            />
+            <div className="ml-auto" />
+            {view === 'pretty' && (
+              <Tooltip content={canFormat ? undefined : '响应不是合法 JSON'} side="bottom">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={() => setFormatted((v) => !v)}
+                  disabled={!canFormat}
+                  data-testid="format-response-btn"
+                >
+                  <Wand2 className="h-3.5 w-3.5" />
+                  {formatted ? '原文' : '格式化'}
+                </Button>
+              </Tooltip>
+            )}
+          </div>
+
+          {/* 响应体 */}
+          <div className="min-h-0 flex-1 overflow-auto">
+            {view === 'pretty' && (
+              <PrettyView body={response.body} formatted={formatted} formatResult={formatResult} />
+            )}
+            {view === 'raw' && (
+              <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
+                {response.body}
+              </pre>
+            )}
+            {view === 'headers' && <HeadersView headers={response.headers} />}
+            {view === 'script' && <ScriptView outcome={scriptOutcome} />}
+          </div>
+        </div>
       </div>
 
       {/* 历史条（可折叠） */}

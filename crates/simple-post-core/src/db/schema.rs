@@ -130,6 +130,19 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "tls_json",
         "TEXT",
     ),
+    (
+        // 用户收藏了这条历史。纯增量：旧行读回来是「未收藏」，语义等价于裁剪规则
+        // 只动未收藏的行。
+        "response_history",
+        "is_favorite",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        // 那次发送出去的请求。纯增量：旧行读回来没有这一份，界面据此不画请求侧栏。
+        "response_history",
+        "request_json",
+        "TEXT",
+    ),
 ];
 
 /// 为 [`ADDED_COLUMNS`] 中缺列的表补上该列。
