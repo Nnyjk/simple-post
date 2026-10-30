@@ -20,7 +20,7 @@ export const ENV: Environment = {
     site: 'cn',
   },
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
 };
 
 export function kv(key: string, value: string, enabled = true): KeyValue {

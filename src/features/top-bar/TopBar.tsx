@@ -32,7 +32,7 @@ export function TopBar() {
   const activeEnv = useActiveEnvironment();
   const openProject = useAppStore((s) => s.openProject);
   const loaded = useAppStore((s) => s.loaded);
-  const setEnvironmentActive = useAppStore((s) => s.setEnvironmentActive);
+  const setCurrentEnvironment = useAppStore((s) => s.setCurrentEnvironment);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openDynamicVariablesTab = useAppStore((s) => s.openDynamicVariablesTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
@@ -233,10 +233,10 @@ export function TopBar() {
                       type="button"
                       key={env.id}
                       onClick={() => {
-                        // 写库，不只是改本地状态：「当前环境」是整个工作区共享的一个事实，
-                        // 而 MCP 侧读的是库里那行 `environments.is_active`。只改本地的话，
-                        // 界面按 dev 发请求而 AI 客户端按 prod 发 —— 同一份数据两个答案。
-                        void setEnvironmentActive(env.id);
+                        // 只改本客户端的状态，不写库：「当前环境」是每个客户端自己的实时
+                        // 状态，桌面窗口与网页标签各一份，各切各的。落库会让 web 端
+                        // 多个人互相踩——一个人切了环境，另一个人发请求就换了地址与端口。
+                        setCurrentEnvironment(env.id);
                         setEnvOpen(false);
                       }}
                       className={cn(

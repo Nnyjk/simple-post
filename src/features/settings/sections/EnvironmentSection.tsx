@@ -6,6 +6,7 @@ import { useEnvDialogs } from './hooks/useEnvDialogs';
 import { EnvBody } from './rows/EnvBody';
 import { EnvSwitcher } from './rows/EnvSwitcher';
 import type { Environment, ResourceNode } from '@/types/domain';
+import { pickDefaultEnvironment } from '@/lib/env-default';
 
 export interface EnvironmentSectionProps {
   // ---- scope ----
@@ -115,18 +116,17 @@ export function EnvironmentSection({
     deleteEnvironment,
   });
 
-  // Default to the project-active env whenever the list shape changes,
-  // unless the user has explicitly picked one. Otherwise stay on the
-  // last selection so a re-render doesn't yank the active tab.
+  // 列表形状一变就回到这个项目的默认环境（最早创建的那个），除非用户已明确选过。
+  // 否则停在用户上次选的那一行，免得一次重渲染把正在看的那行拽走。
   useEffect(() => {
     if (environments.length === 0) {
       setActiveId(null);
       return;
     }
     if (activeId && environments.some((e) => e.id === activeId)) return;
-    const active = environments.find((e) => e.isActive);
-    setActiveId(active?.id ?? environments[0]!.id);
-  }, [environments, activeId]);
+    const fallback = pickDefaultEnvironment(environments, projectId);
+    setActiveId(fallback?.id ?? environments[0]!.id);
+  }, [environments, projectId, activeId]);
 
   const activeEnv = useMemo(
     () => environments.find((e) => e.id === activeId) ?? null,

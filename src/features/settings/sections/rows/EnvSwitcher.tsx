@@ -64,13 +64,13 @@ export function EnvSwitcher({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {environments.map((env) => {
-        const isActive = env.id === activeId;
-        const isRenaming = isActive && renameable;
+        const isSelected = env.id === activeId;
+        const isRenaming = isSelected && renameable;
         return (
           <div
             key={env.id}
             role="tab"
-            aria-selected={isActive}
+            aria-selected={isSelected}
             tabIndex={0}
             // 单元格打开期间 chip 不再是切换器：落在名字上（或 chip 内任何位置）的点击
             // 不该把用户正在命名的环境切走。
@@ -90,7 +90,7 @@ export function EnvSwitcher({
               'group relative flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
               // chip 的着色对应项目的档位语言（天蓝 = 基础 / 数据，琥珀 = 配置 / 构建，
               // 紫 = 类生产）。`envIcon` 按环境名自动挑，用户不必逐个打标。
-              isActive
+              isSelected
                 ? 'border-primary/40 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.25)]'
                 : 'border-border bg-card/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground',
             )}
@@ -100,7 +100,7 @@ export function EnvSwitcher({
               neutralBorder
               icon={envIcon(env.name)}
               className={
-                isActive
+                isSelected
                   ? 'border-primary/40 bg-primary/15 text-primary'
                   : 'border-border bg-muted/60 text-muted-foreground'
               }
@@ -130,7 +130,7 @@ export function EnvSwitcher({
                   className={cn(
                     'ml-0.5 inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded text-muted-foreground/60 opacity-0 hover:bg-destructive/20 hover:text-destructive',
                     'group-hover:opacity-100',
-                    isActive && 'opacity-100',
+                    isSelected && 'opacity-100',
                   )}
                 >
                   <Trash2 className="h-3 w-3" />

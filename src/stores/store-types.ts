@@ -131,7 +131,6 @@ export interface DraftEndpoint {
   /** 不含任何 baseUrl 的 URL 路径，含义同 `EndpointDetail.url`。 */
   url: string;
   auth: AuthConfig;
-  environmentId: string | null;
   baseUrlOverride: string | null;
   tags: string[];
   docs: string;

@@ -145,8 +145,8 @@ export function useRequestActions({
       // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
       // 这正是未保存的草稿也能发送的原因：没有 `endpointId` 要查，也没有东西要先持久化。
       //
-      // ENV 药丸只存在于 Zustand，数据库的 `is_active` 不跟随它，故解析必须基于界面上的
-      // `endpointEnv` —— `prepareRequest` 已经折进去了。
+      // 「当前环境」只存在于 Zustand——它不落库，故解析必须基于界面上的 `endpointEnv`
+      // （工作区当前环境），`prepareRequest` 已经折进去了。
       const {
         response: resp,
         script,

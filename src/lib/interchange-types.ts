@@ -69,7 +69,7 @@ export interface ImportedEnvironment {
 export interface ProposedBaseUrl {
   /** 文档给出的那个地址。落库时它会被写进目标模块在这个环境下的那一格。 */
   url: string;
-  /** 地址会写进哪个环境。缺席 = 项目没有激活环境，地址没有落进任何一格。 */
+  /** 地址会写进哪个环境。缺席 = 项目没有默认环境，地址没有落进任何一格。 */
   environmentName?: string;
 }
 
@@ -81,7 +81,7 @@ export interface AppliedBaseUrl {
   proxy?: string;
   /** 写进了哪个模块的格子。 */
   moduleId: string;
-  /** 写进了哪个环境。缺席 = 项目没有激活环境。 */
+  /** 写进了哪个环境。缺席 = 项目没有默认环境。 */
   environmentName?: string;
 }
 

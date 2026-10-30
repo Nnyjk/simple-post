@@ -193,12 +193,6 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     // 独立：`null` = 该字段保持原值，`''` = 清空该字段。
     body: (a) => ({ moduleId: a.moduleId, url: a.url, proxy: a.proxy }),
   },
-  [COMMANDS.environmentsSetActive]: {
-    method: 'POST',
-    // 使用字面量 active 路径，避免与参数路由发生匹配歧义。
-    path: () => '/api/environments/active',
-    body: (a) => ({ envId: a.envId }),
-  },
 
   // ----- dynamic variables -----
   // 定义挂在项目里，故这组路由带一个可选的项目参数：不带就是跨项目那一路。

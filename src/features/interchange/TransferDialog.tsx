@@ -236,7 +236,7 @@ function PreviewStep({
           {proposedBaseUrls.every((b) => b.environmentName) ? (
             <Badge variant="outline">将写入模块格子</Badge>
           ) : (
-            <Badge variant="warning">没有激活环境，地址无处可写</Badge>
+            <Badge variant="warning">没有默认环境，地址无处可写</Badge>
           )}
         </div>
       )}
@@ -322,7 +322,7 @@ function DoneStep({ result }: { result: NonNullable<TransferController['result']
           已写入
           {result.baseUrls.every((b) => b.environmentName)
             ? '模块格子，接口按它解析。'
-            : '时没有激活环境，地址没有落进任何一格。'}
+            : '时没有默认环境，地址没有落进任何一格。'}
         </p>
       )}
       {result.diagnostics.filter((d) => d.severity !== 'info').length > 0 && (

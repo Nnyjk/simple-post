@@ -63,14 +63,6 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     });
   });
 
-  it('environmentsSetActive → POST /api/environments/active (literal route)', async () => {
-    await invokeCmd(COMMANDS.environmentsSetActive, { envId: 'env-1' });
-    const c = last();
-    assert.equal(c.method, 'POST');
-    assert.equal(c.url, '/api/environments/active');
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), { envId: 'env-1' });
-  });
-
   it('environmentsUpdate → PATCH /api/environments/{id} with body = patch only', async () => {
     await invokeCmd(COMMANDS.environmentsUpdate, {
       id: 'env-1',

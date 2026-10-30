@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { clearIpcMock, installBrowserShim, installIpcMock } from './_browser-shim';
 import { createBootstrapSlice, type BootstrapSlice } from '../bootstrap-slice';
+import { saveLastProjectId, saveRememberedEnvironmentId } from '../slices/ui-prefs';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 
 type CapturedCall = { cmd: string; args: Record<string, unknown> };
@@ -99,7 +100,17 @@ const environment: Environment = {
   moduleBaseUrls: {},
   variables: {},
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
+};
+/** 比 `environment` 晚创建的环境 —— 故它不是这个项目的默认环境。 */
+const laterEnvironment: Environment = {
+  id: 'env2',
+  projectId: 'p1',
+  name: '预发',
+  moduleBaseUrls: {},
+  variables: {},
+  disabledVariables: [],
+  createdAt: 2,
 };
 const endpointDetail: EndpointDetail = {
   nodeId: 'e1',
@@ -642,5 +653,26 @@ describe('bootstrap-slice 聚合加载契约', () => {
     await bag.loadWorkspace();
 
     assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the active env');
+  });
+
+  it('第二层补齐时用记住过的那个环境，而不是默认环境', async () => {
+    const bag = makeBootstrapHarness();
+    // 本客户端上次在这个项目里用的是 env2（比默认的 env1 晚创建）。
+    saveLastProjectId('p1');
+    saveRememberedEnvironmentId('p1', 'env2');
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      if (cmd === 'environments_list') return [environment, laterEnvironment];
+      return [];
+    });
+
+    await bag.bootstrap();
+    await bag.loadWorkspace();
+
+    assert.equal(
+      bag.activeEnvironmentId,
+      'env2',
+      '记住过的那个环境优先于默认环境——刷新后该停在同一个环境',
+    );
   });
 });

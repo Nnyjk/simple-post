@@ -24,7 +24,7 @@ import { EnvBody } from '../rows/EnvBody';
 import { EnvSwitcher } from '../rows/EnvSwitcher';
 import type { Environment } from '@/types/domain';
 
-/** 最小环境 —— 该分区只读 id / name / isActive 以及那几个 map。 */
+/** 最小环境 —— 该分区只读 id / name / createdAt 以及那几个 map。 */
 function makeEnv(overrides: Partial<Environment> = {}): Environment {
   return {
     id: 'env-1',
@@ -33,7 +33,7 @@ function makeEnv(overrides: Partial<Environment> = {}): Environment {
     moduleBaseUrls: {},
     variables: {},
     disabledVariables: [],
-    isActive: true,
+    createdAt: 1,
     ...overrides,
   };
 }
@@ -100,7 +100,7 @@ describe('EnvironmentSection cold start (zero environments)', () => {
 describe('EnvironmentSection with a single environment', () => {
   // 容易回归的情形：新项目的第一个环境，故环境条必须能承受离开那个条件渲染。
   //
-  // 注意这里断言不了什么：环境*正文*。该分区在一个 `useEffect` 里解析激活环境，而静态
+  // 注意这里断言不了什么：环境*正文*。该分区在一个 `useEffect` 里解析默认环境，而静态
   // 标记不跑 effect，故此刻 `activeId` 仍是 `null`。这正是重命名入口改在下面经
   // `EnvSwitcher` 检查的原因。
   const html = render(makeProps({ environments: [makeEnv()] }));
@@ -174,7 +174,7 @@ describe('EnvBody — no name row of its own', () => {
   );
 
   it('never spells the env name, which the switcher directly above already says', () => {
-    // 正文曾以自己的一行图标 + 名字开头，于是激活环境在几厘米内被叫了两次；而模块层
+    // 正文曾以自己的一行图标 + 名字开头，于是默认环境在几厘米内被叫了两次；而模块层
     // 从来没有那一行，反倒只有它是唯一读起来像一回事的视图。
     assert.doesNotMatch(html, />dev</);
   });
@@ -195,8 +195,8 @@ describe('EnvironmentSection with several environments', () => {
     makeProps({
       environments: [
         makeEnv(),
-        makeEnv({ id: 'env-2', name: 'prod', isActive: false }),
-        makeEnv({ id: 'env-3', name: 'staging', isActive: false }),
+        makeEnv({ id: 'env-2', name: 'prod', createdAt: 2 }),
+        makeEnv({ id: 'env-3', name: 'staging', createdAt: 3 }),
       ],
     }),
   );

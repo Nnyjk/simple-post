@@ -38,7 +38,7 @@ export function makeEnvironment(overrides: Partial<Environment> = {}): Environme
     moduleBaseUrls: {},
     variables: {},
     disabledVariables: [],
-    isActive: true,
+    createdAt: 1,
     ...overrides,
   };
 }
@@ -68,6 +68,14 @@ type CrudHarnessState = {
   openTabs: never[];
   activeTabId: null;
   activeEndpointId: null;
+  /**
+   * 当前项目与当前环境。
+   *
+   * 「当前环境」是本客户端的实时状态（不落库），删掉当前环境时要回落到这个项目的
+   * 默认环境——回落的目标由 `activeProjectId` 决定，故两个都得在夹具里。
+   */
+  activeProjectId: string;
+  activeEnvironmentId: string;
 };
 
 export function makeCrudHarness(
@@ -75,6 +83,7 @@ export function makeCrudHarness(
   initialEnvironments: Environment[] = [],
   initialNodes: ResourceNode[] = [],
   initialProjects: Project[] = [],
+  initialActiveEnvironmentId = '',
 ) {
   const bag: CrudHarnessState = {
     nodes: initialNodes,
@@ -84,6 +93,8 @@ export function makeCrudHarness(
     openTabs: [],
     activeTabId: null,
     activeEndpointId: null,
+    activeProjectId: 'project-1',
+    activeEnvironmentId: initialActiveEnvironmentId,
   };
   const set = (partial: unknown) => {
     const updater =

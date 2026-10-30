@@ -26,6 +26,7 @@ import { EmptyHint } from '@/components/ui/empty-hint';
 import { EnvSwitcher } from './rows/EnvSwitcher';
 import { GroupHeader } from './rows/GroupHeader';
 import { ModuleBaseUrlTable } from './rows/ModuleBaseUrlTable';
+import { pickDefaultEnvironment } from '@/lib/env-default';
 
 export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
   const mod = useAppStore((s) => s.nodes.find((n) => n.id === moduleId));
@@ -40,17 +41,17 @@ export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
     [environments, mod],
   );
 
-  // 列表形状一变就回到项目当前激活的环境，除非用户已明确选过。规则同
-  // `EnvironmentSection`，两条环境条行为一致。
+  // 列表形状一变就回到这个项目的默认环境（最早创建的那个），除非用户已明确选过。
+  // 规则同 `EnvironmentSection`，两条环境条行为一致。
   useEffect(() => {
     if (projectEnvs.length === 0) {
       setActiveId(null);
       return;
     }
     if (activeId && projectEnvs.some((e) => e.id === activeId)) return;
-    const active = projectEnvs.find((e) => e.isActive);
-    setActiveId(active?.id ?? projectEnvs[0]!.id);
-  }, [projectEnvs, activeId]);
+    const fallback = pickDefaultEnvironment(projectEnvs, mod?.rootId ?? '');
+    setActiveId(fallback?.id ?? projectEnvs[0]!.id);
+  }, [projectEnvs, mod, activeId]);
 
   const activeEnv = useMemo(
     () => projectEnvs.find((e) => e.id === activeId) ?? null,

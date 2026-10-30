@@ -34,7 +34,7 @@ const ENV: Environment = {
   moduleBaseUrls: {},
   variables: { token: 'abc' },
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
 };
 
 let shim: ReturnType<typeof installBrowserShim>;

@@ -55,11 +55,6 @@ export interface EndpointDetail {
    */
   url: string;
   /**
-   * 继承 baseUrl 与自由变量 `variables` 的环境。`null`（或缺省）表示
-   * 未选环境——此时变量池为空，也解析不出 baseUrl。
-   */
-  environmentId?: string | null;
-  /**
    * 本 endpoint 的 baseUrl 覆盖，优先于模块那一格；用于不挂在任何环境里的一次性
    * 主机。三态：`null` = 不在自定义模式，`''` = 自定义模式但不加前缀。
    *
