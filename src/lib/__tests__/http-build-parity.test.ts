@@ -55,8 +55,14 @@ function envOf(variables: Record<string, string>): Environment {
 }
 
 describe('prepareRequest 与 Rust 的 resolve_endpoint 产出一致', () => {
-  it('样本里至少有一个 case', () => {
-    assert.ok(FIXTURE.cases.length > 0, '样本里必须有 case，否则这条测试是空的');
+  it('样本里恰好有 15 条用例', () => {
+    // 条数写死：样本的键名漂了或样本被改小时，这条断言必须变红。写成「大于 0」
+    // 的话，下面那几行断言一条都走不到，测试还是绿的。
+    assert.equal(
+      FIXTURE.cases.length,
+      15,
+      '用例的条数变了：键名漂了或样本被改小时，这条断言必须变红',
+    );
   });
 
   for (const testCase of FIXTURE.cases) {

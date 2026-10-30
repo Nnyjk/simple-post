@@ -1,5 +1,5 @@
 {
-  "$comment": "两侧请求准备规则的一致性样本。Rust 的 `resolve_endpoint`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。`expected.missingVars` 与 `expected.missingPathParams` 比的是**集合**而非顺序：两侧收集未解析项的次序各自是本地的（渲染层按它渲染告警胶囊，MCP 侧按它报 `_missing_vars`），契约只承诺「哪些变量没解析出来」「哪个路径占位符没取到值」。multipart 另有一份样本（`multipart-parity.json`），因为它的 boundary 每次现生成、值无法写死。",
+  "$comment": "两侧请求准备规则的一致性样本。Rust 的 `resolve_endpoint`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。`expected.missingVars` 与 `expected.missingPathParams` 比的是**集合**而非顺序：两侧收集未解析项的次序各自是本地的（渲染层按它渲染告警胶囊，MCP 侧按它报 `_missing_vars`），契约只承诺「哪些变量没解析出来」「哪个路径占位符没取到值」。multipart 另有一份样本（`multipart-parity.json`），因为它的 boundary 每次现生成、值无法写死。`input.proxy` 在场时 base URL 与代理一起住在环境里（环境 × 模块）那一格：渲染进程那一侧直接拿两个值，MCP 那一侧的 `resolve_endpoint` 只从格子里读代理，故这类用例在两侧走的是不同的取数路径。`input.proxy` 缺席时 base URL 走端点自己的 override，不套代理。",
   "cases": [
     {
       "name": "变量替换 + query + bearer 鉴权 + json body",
@@ -316,6 +316,30 @@
       },
       "expected": {
         "url": "https://h.test/users/42?id=7",
+        "headers": [["Accept", "application/json"]],
+        "body": null,
+        "missingVars": [],
+        "missingPathParams": []
+      }
+    },
+    {
+      "name": "模块格带代理时，模块地址与代理地址各自先解析变量，再做代理前缀替换",
+      "env": {
+        "host": "svc.internal:8080",
+        "tenant": "acme"
+      },
+      "input": {
+        "method": "GET",
+        "urlPath": "/orders/list",
+        "baseUrl": "http://{{host}}/api/a",
+        "proxy": "https://gw.corp.com/{{tenant}}/api/a",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": {
+        "url": "https://gw.corp.com/acme/api/a/orders/list",
         "headers": [["Accept", "application/json"]],
         "body": null,
         "missingVars": [],

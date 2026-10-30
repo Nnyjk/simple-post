@@ -1,5 +1,5 @@
 {
-  "$comment": "base URL 的解析与代理前缀替换。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url_with` 与 `apply_proxy`、渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 与 `applyProxy` 读同一份文件。两份实现各写一遍规则，只有共享样本能钉住它们没分叉。`cases` 覆盖解析：端点自己的 `baseUrlOverride` 优先，否则读环境里「模块 × 环境」那一格，没有回退层。`proxyCases` 覆盖代理前缀替换：请求地址里那个作为前缀的模块地址被换成实际访问地址，其余部分原样保留。两侧的读取器都必须用 `deny_unknown_fields` 并数一遍条目数，免得键名漂了导致整条测试空转。",
+  "$comment": "base URL 的解析与代理前缀替换。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url` 与 `apply_proxy`、渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 与 `applyProxy` 读同一份文件。两份实现各写一遍规则，只有共享样本能让两份实现保持一致。`cases` 覆盖解析：端点自己的 `baseUrlOverride` 优先，否则读环境里「环境 × 模块」那一格，没有回退层。`proxyCases` 覆盖代理前缀替换：请求地址里那个作为前缀的模块地址被换成实际访问地址，其余部分原样保留。两侧的读取器都必须用 `deny_unknown_fields` 并断言条目数（`cases` 11 条、`proxyCases` 9 条），免得键名漂了导致整条测试空转。",
   "cases": [
     {
       "name": "端点带自定义主机时用自己的地址",

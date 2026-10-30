@@ -1,5 +1,5 @@
 {
-  "$comment": "动态变量规则的跨语言样本。Rust 的 `core::dynamic`（合并、序列化、名字扫描）与 TS 的 `src/lib/dynamic-vars.ts`（同一组规则的镜像）读同一份本文件，产出必须逐条相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。样本只覆盖「值拿到之后怎么进池、怎么变成字符串、哪些名字算被引用」，不覆盖取数本身——取数是网络行为，不是纯函数。数值只用整数：Rust 的 `serde_json::Number` 保留 `1.0` 的浮点写法，JavaScript 的 `JSON.parse` 把它归一成 `1`，两者在小数上本就不同，而生产路径上序列化只发生在 Rust 侧。",
+  "$comment": "动态变量规则的跨语言样本。Rust 的 `core::dynamic`（合并、序列化、名字扫描）与 TS 的 `src/lib/dynamic-vars.ts`（同一组规则的镜像）读同一份本文件，产出必须逐条相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。样本只覆盖「值拿到之后怎么进池、怎么变成字符串、哪些名字算被引用」，不覆盖取数本身——取数是网络行为，不是纯函数。`scanCases` 的 `parts.proxy` 是那一格的实际访问地址：它会被 `{{var}}` 替换，故它里面的标记同样算被引用；缺席 = 样本没给代理地址。数值只用整数：Rust 的 `serde_json::Number` 保留 `1.0` 的浮点写法，JavaScript 的 `JSON.parse` 把它归一成 `1`，两者在小数上本就不同，而生产路径上序列化只发生在 Rust 侧。",
   "mergeCases": [
     {
       "name": "动态变量的值覆盖同名环境变量",
@@ -240,6 +240,32 @@
         "auth": { "kind": "none" }
       },
       "expected": []
+    },
+    {
+      "name": "代理地址里的标记也算被引用",
+      "parts": {
+        "baseUrl": "",
+        "url": "/x",
+        "proxy": "https://gw.corp.com/{{proxyVar}}",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": ["proxyVar"]
+    },
+    {
+      "name": "代理地址与模块地址里的同名标记只出现一次",
+      "parts": {
+        "baseUrl": "https://{{host}}/v1",
+        "url": "/x",
+        "proxy": "https://gw.corp.com/{{host}}",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" }
+      },
+      "expected": ["host"]
     }
   ]
 }
