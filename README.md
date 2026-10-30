@@ -255,7 +255,7 @@ curl http://localhost:4173/api/healthz
 
 MCP 客户端连接 `http://host:4173/mcp`，并带上 `Authorization: Bearer <口令>`。
 
-同一套 REST 接口也开放给脚本与自动化工具，其中 `POST /api/spec/upsert` 一次调用落一份完整的接口规格（模块、集合路径、环境、服务与端点），与 MCP 工具 `spec_upsert` 落的是同一份东西。
+同一套 REST 接口也开放给脚本与自动化工具，其中 `POST /api/spec/upsert` 一次调用落一份完整的接口规格（模块、集合路径、环境与端点），与 MCP 工具 `spec_upsert` 落的是同一份东西。
 
 需要给 MCP 分配独立端口时，在设置面板的「连接 → HTTP 服务配置」里把「端口」填成一个具体数字（例如 4174）。服务端会另外开一个只提供 MCP 的监听器，那个端口上只有 `/mcp`、`/mcp/healthz` 与 `/mcp/tools`，没有 REST 接口与单页应用。端口填 0 时不单独开端口，MCP 只走主端口。改动需要重启服务才生效。
 
