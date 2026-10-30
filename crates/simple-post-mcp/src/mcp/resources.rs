@@ -5,7 +5,7 @@
 //! 一次说清。
 //!
 //! 为什么放在 resource 而不是工具描述里：这段内容对每个工具都只说得上一点点，
-//! 塞进 47 条工具描述里就是 47 份重复，而 tools/list 的体积是要为每一次会话付钱的。
+//! 塞进 46 条工具描述里就是 46 份重复，而 tools/list 的体积是要为每一次会话付钱的。
 //! resource 是**按需读**的 —— 客户端在动手之前拉一次，agent 就拿到了完整的上下文。
 
 use serde_json::{json, Value};
@@ -178,7 +178,7 @@ fn guide() -> Value {
 
         "rules": [
             "A base URL lives in the (environment x module) cell. That cell never inherits from the project or from a sibling module.",
-            "An endpoint does not bind an environment. api_call_endpoint and api_run_request take an optional environment_id: name one to use it, omit it to use the project's default environment (the earliest one created). Nothing about that choice is stored, so two callers in one workspace can use two different environments at the same time.",
+            "An endpoint does not bind an environment. Name the environment per call, and note that the two tools spell that argument differently: api_call_endpoint takes `environment_id`, api_run_request takes `env_id`. Name one to use it; omit it to use the project's default environment (the earliest one created). Nothing about that choice is stored, so two callers in one workspace can use two different environments at the same time. A name that no longer exists does not fall back to the default environment — that request resolves without an environment at all, so it has no base URL and no substituted variables.",
             "body_content is the payload that goes on the wire; body_schema is the documented parameter definition. They are different things — a JSON Schema written into body_content is rejected, and the error names body_schema.",
             "body_mode says how body_content is framed: \"none\" sends no body, \"raw\" sends the text verbatim, \"json\" sends a JSON instance, \"xml\" sends XML text, \"form\" sends x-www-form-urlencoded text, \"multipart\" sends a JSON array of parts — each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string, \"base64\"?: string}, where contentType defaults to application/octet-stream for a part that has a filename — and \"binary\" sends a JSON object {\"name\": string, \"size\": number, \"contentType\"?: string, \"base64\": string} as raw bytes. For \"form\", body_content is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \"description\"?}].",
             "A {{var}} in the url, params, headers, body or auth is replaced from the environment's variables. A name that is not there is listed in missing.",

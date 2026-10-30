@@ -146,7 +146,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_delete",
-            description: "Delete an environment by id. Endpoints do not bind an environment, so nothing else changes; a request that named this environment now falls back to the project's default environment.",
+            description: "Delete an environment by id. Endpoints do not bind an environment, so nothing else changes; a request that still names this environment resolves without an environment at all — no base URL, no substituted variables — so name another one or omit the name to get the project's default environment.",
             schema: json!({
                 "type": "object",
                 "properties": { "env_id": { "type": "string" } },

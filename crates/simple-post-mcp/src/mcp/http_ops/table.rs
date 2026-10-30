@@ -116,6 +116,13 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "endpoint_id": { "type": "string" },
+                    // 环境名要写进 schema：调用方只能从 schema 里知道这个入参的名字。
+                    //
+                    // 端点行不再绑定环境，故这一次调用可以自己点名一个环境；不点名就用
+                    // 该项目的默认环境（最早创建的那个）。schema 不写它，工具就在骗人：
+                    // `api_resolve_endpoint` 与 `api_validate_endpoint` 都带着这个参数，
+                    // 唯独发送那两个工具不写，读起来就像发送不支持选环境。
+                    "environment_id": { "type": "string" },
                     // 覆盖值要写进 schema：路径参数缺值时发送那侧会拦下请求并说
                     // 「or pass overrides.pathParams when calling」，而调用方只能从
                     // schema 里知道这个入参的名字。schema 不写它，工具就在骗人。

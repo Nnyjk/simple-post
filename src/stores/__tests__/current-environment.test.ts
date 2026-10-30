@@ -49,6 +49,8 @@ const P2 = project('p2', '项目二');
 const E1_DEV = env('e1', 'p1', 'dev', 100);
 const E1_STAGING = env('e2', 'p1', 'staging', 200);
 const E2_DEV = env('e3', 'p2', 'dev', 100);
+/** p2 的第二个环境：dev 先创建（故是 p2 的默认环境），staging 后创建。 */
+const E2_STAGING = env('e4', 'p2', 'staging', 200);
 
 let origError: typeof console.error;
 /** 本次测试里发出去过的 IPC 命令名。 */
@@ -66,7 +68,7 @@ beforeEach(() => {
     projects: [P1, P2],
     nodes: [],
     endpointDetails: {},
-    environments: [E1_DEV, E1_STAGING, E2_DEV],
+    environments: [E1_DEV, E1_STAGING, E2_DEV, E2_STAGING],
     nodesLoaded: true,
     activeProjectId: '',
     activeEnvironmentId: '',
@@ -204,6 +206,42 @@ describe('当前环境：记住的那条与 activeEnvironmentId 始终一致', (
       useAppStore.getState().activeEnvironmentId,
       'e1',
       '别的项目的环境会让接口读到不属于本项目模块的格子',
+    );
+  });
+
+  it('删掉当前项目时，当前环境跟着换到幸存项目上', async () => {
+    installIpcMock(async () => null);
+    // 先在 p2 里用 staging 记住它。
+    useAppStore.getState().setActiveProject('p2');
+    useAppStore.getState().setCurrentEnvironment('e4');
+
+    // 切到 p1（它在前面的项目里），再把它删掉：用户被送到幸存的 p2。
+    useAppStore.getState().setActiveProject('p1');
+    assert.equal(useAppStore.getState().activeEnvironmentId, 'e1');
+
+    await useAppStore.getState().deleteProject('p1');
+
+    assert.equal(useAppStore.getState().activeProjectId, 'p2');
+    assert.equal(
+      useAppStore.getState().activeEnvironmentId,
+      'e4',
+      '当前环境原先指着已删项目的环境；不换的话幸存的 p2 没有环境可读',
+    );
+  });
+
+  it('删掉当前项目时，幸存项目记住的环境不被顶掉', async () => {
+    installIpcMock(async () => null);
+    useAppStore.getState().setActiveProject('p2');
+    useAppStore.getState().setCurrentEnvironment('e4');
+    assert.equal(readRememberedEnvironmentId('p2'), 'e4');
+
+    useAppStore.getState().setActiveProject('p1');
+    await useAppStore.getState().deleteProject('p1');
+
+    assert.equal(
+      readRememberedEnvironmentId('p2'),
+      'e4',
+      'p2 自己记住的环境不能被已删项目的环境 id 顶掉',
     );
   });
 });

@@ -13,8 +13,10 @@
 import type { StateCreator } from 'zustand';
 import type { Project, Environment, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { pickCurrentEnvironment } from '@/lib/env-default';
 import type { AppState } from '../app-store';
 import { filterTabsAfterRemoval, invokeWithRollback, tabKeysForSubtree } from './crud-helpers';
+import { readRememberedEnvironmentId } from './ui-prefs';
 
 /** CRUD 切片拥有的 project 动作。 */
 export interface ProjectCrudActions {
@@ -98,6 +100,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       openTabs: get().openTabs,
       activeTabId: get().activeTabId,
       activeProjectId: get().activeProjectId,
+      activeEnvironmentId: get().activeEnvironmentId,
       activeEndpointId: get().activeEndpointId,
     };
     set((s) => {
@@ -115,6 +118,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       }
       const nextDetails = { ...s.endpointDetails };
       for (const eid of droppedEndpointIds) delete nextDetails[eid];
+      const nextEnvs = s.environments.filter((env) => env.projectId !== id);
       const tabs = filterTabsAfterRemoval(
         s.openTabs,
         s.activeTabId,
@@ -122,24 +126,43 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       );
       const nextActiveEndpointId =
         s.activeEndpointId && removed.has(s.activeEndpointId) ? null : s.activeEndpointId;
+      // 删掉在前面的项目时，把用户送到幸存的那个；它是最后一个时回欢迎页。
+      //
+      // 空串是切表面的开关（`App.tsx` 在 `activeProjectId === ''` 时渲染欢迎
+      // 选择器，而欢迎页的"新建项目"卡片提供空状态下的入口）。把 `activeProjectId`
+      // 留在刚删掉的 id 上会让 `App.tsx` 待在工作区分支里对着一个不存在的
+      // 项目：树显示"尚未选择项目"，右侧显示"该项目已不存在"，整个画面没有一处
+      // 说明该怎么办。
+      const nextActiveProjectId =
+        s.activeProjectId === id
+          ? (s.projects.find((p) => p.id !== id)?.id ?? '')
+          : s.activeProjectId;
+      // 当前环境要跟着换项目一起换：它原先指着刚删掉的项目里的某个环境，那个环境
+      // 随项目一起没了。
+      //
+      // 不换的后果有两处，都很实在：`useActiveEnvironment()` 按 id 找环境，找不到就
+      // 返回 undefined，于是顶栏显示「—」、接口解析读不到任何一格地址；而记住当前
+      // 环境的那条订阅（见 `app-store.ts`）会因为 `activeProjectId` 变了而触发，把
+      // 这个悬空 id 写进**幸存项目**的记忆里，把幸存项目自己记住的环境顶掉。
+      //
+      // 取值顺序与别处一致：幸存项目里本客户端记住的那个 → 它的默认环境。
+      const nextActiveEnvironmentId =
+        s.activeProjectId === id
+          ? (pickCurrentEnvironment(
+              nextEnvs,
+              nextActiveProjectId,
+              nextActiveProjectId ? readRememberedEnvironmentId(nextActiveProjectId) : '',
+            )?.id ?? '')
+          : s.activeEnvironmentId;
       return {
         projects: s.projects.filter((p) => p.id !== id),
         nodes: s.nodes.filter((n) => !removed.has(n.id)),
         endpointDetails: nextDetails,
-        environments: s.environments.filter((env) => env.projectId !== id),
+        environments: nextEnvs,
         responseHistory: nextHistory,
         responseExamples: nextExamples,
-        // 删掉在前面的项目时，把用户送到幸存的那个；它是最后一个时回欢迎页。
-        //
-        // 空串是切表面的开关（`App.tsx` 在 `activeProjectId === ''` 时渲染欢迎
-        // 选择器，而欢迎页的"新建项目"卡片提供空状态下的入口）。把 `activeProjectId`
-        // 留在刚删掉的 id 上会让 `App.tsx` 待在工作区分支里对着一个不存在的
-        // 项目：树显示"尚未选择项目"，右侧显示"该项目已不存在"，整个画面没有一处
-        // 说明该怎么办。
-        activeProjectId:
-          s.activeProjectId === id
-            ? (s.projects.find((p) => p.id !== id)?.id ?? '')
-            : s.activeProjectId,
+        activeProjectId: nextActiveProjectId,
+        activeEnvironmentId: nextActiveEnvironmentId,
         activeEndpointId: nextActiveEndpointId,
         openTabs: tabs.tabs,
         activeTabId: tabs.activeId,
