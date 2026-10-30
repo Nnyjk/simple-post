@@ -111,7 +111,6 @@ fn seed(dir: &std::path::Path, api_url: &str) {
         node_id: "ep_a".into(),
         method: HttpMethod::Get,
         url: format!("{api_url}/me"),
-        environment_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],

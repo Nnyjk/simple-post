@@ -95,8 +95,7 @@ fn camel_case_spec() -> serde_json::Value {
         "environment": {
             "name": "dev",
             "variables": { "token": "abc" },
-            "baseUrl": "https://api.example.test",
-            "activate": true
+            "baseUrl": "https://api.example.test"
         },
         "endpoint": {
             "name": "查订单",
@@ -130,7 +129,6 @@ async fn one_call_lands_the_whole_spec() {
     assert_eq!(collections[0]["name"], "订单");
     assert_eq!(collections[1]["name"], "明细");
     assert_eq!(body["environment"]["name"], "dev");
-    assert_eq!(body["environment"]["activated"], true);
     assert_eq!(body["endpoint"]["name"], "查订单");
     assert!(
         body["endpoint"]["id"].as_str().is_some(),

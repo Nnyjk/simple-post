@@ -186,7 +186,6 @@ pub fn run() {
             crate::commands::environments_set_var_disabled,
             crate::commands::environments_rename_var,
             crate::commands::environments_set_module_baseurl,
-            crate::commands::environments_set_active,
             // 动态变量：定义 CRUD、解析、写覆盖值、强制重取。逻辑在 `crate::dynamic_api`，
             // REST 路由调的是同一批函数。
             crate::commands::dynamic_variables_list,

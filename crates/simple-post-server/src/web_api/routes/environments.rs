@@ -15,7 +15,6 @@ use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState}
 
 use super::super::dto::{
     EnvRenameVarBody, EnvSetModuleBaseUrlBody, EnvSetVarBody, EnvSetVarDisabledBody,
-    SetActiveEnvBody,
 };
 
 // ----- environments -------------------------------------------------------
@@ -43,10 +42,13 @@ pub(crate) async fn environments_create(
     ensure_server_id(&mut body);
     let env: crate::domain::Environment = serde_json::from_value(body)
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
-    db::with_tx(&s.pool, |c| db::environments::create(c, &env)).map_err(map_app_error)?;
+    // 回传**落库之后**的那一行：创建时刻是它在库里认「默认环境」用的字段，回传 0
+    // 的话界面手里的创建时刻与库里对不上，两侧会算出两个不同的默认环境。
+    let created =
+        db::with_tx(&s.pool, |c| db::environments::create(c, &env)).map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
-        Json(serde_json::to_value(&env).unwrap_or(Value::Null)),
+        Json(serde_json::to_value(&created).unwrap_or(Value::Null)),
     ))
 }
 
@@ -126,15 +128,6 @@ pub(crate) async fn environments_set_module_baseurl(
         )
     })
     .map_err(map_app_error)?;
-    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
-}
-
-pub(crate) async fn environments_set_active(
-    State(s): State<Arc<WebState>>,
-    Json(body): Json<SetActiveEnvBody>,
-) -> Result<Json<Value>, HttpErrorResponse> {
-    let row = db::with_tx(&s.pool, |c| db::environments::set_active(c, &body.env_id))
-        .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 

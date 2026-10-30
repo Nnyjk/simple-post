@@ -38,12 +38,10 @@ pub fn environments_create(
         module_base_urls: HashMap::new(),
         variables: opts.variables.unwrap_or_default(),
         disabled_variables: Vec::new(),
-        is_active: opts.make_active.unwrap_or(false),
+        // 创建时刻：`db::environments::create` 用它认定「默认环境」（最早创建的那个）。
+        created_at: now_ms(),
     };
-    crate::db::with_tx(&state, |c| {
-        crate::db::environments::create(c, &env)?;
-        Ok(env.clone())
-    })
+    crate::db::with_tx(&state, |c| crate::db::environments::create(c, &env))
 }
 
 #[tauri::command]
@@ -128,12 +126,4 @@ pub fn environments_set_module_baseurl(
             proxy.as_deref(),
         )
     })
-}
-
-#[tauri::command]
-pub fn environments_set_active(
-    state: State<DbPool>,
-    env_id: String,
-) -> Result<Environment, AppError> {
-    crate::db::with_tx(&state, |c| crate::db::environments::set_active(c, &env_id))
 }

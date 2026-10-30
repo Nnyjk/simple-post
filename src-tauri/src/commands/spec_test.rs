@@ -94,7 +94,6 @@ fn the_wire_keys_land_on_the_same_fields() {
             "name": "查订单",
             "method": "GET",
             "url": "/api/orders/{id}",
-            "environmentId": "env_1",
             "preRequestScript": "pm.environment.set('a', 'b');"
         }
     }))
@@ -111,7 +110,6 @@ fn the_wire_keys_land_on_the_same_fields() {
         Some("https://gw.example.test")
     );
     let endpoint = &camel.endpoint;
-    assert_eq!(endpoint.environment_id.as_deref(), Some("env_1"));
     assert_eq!(
         endpoint.pre_request_script.as_deref(),
         Some("pm.environment.set('a', 'b');")

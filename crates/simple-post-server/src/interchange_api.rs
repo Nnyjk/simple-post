@@ -155,11 +155,12 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
             // id 与 project 由落库方铸。解析器只负责「这个环境叫什么、有哪些变量」，
             // 身份是本仓库的事——所以在这里 clone 一份改，而不是就地改 borrowed 值。
             //
-            // `is_active` 恒 false：导入一个环境不等于切换当前环境，那是一次显式决定。
+            // 当前环境不是落库的状态，故导入的环境没有「激活」这一说；它建好之后，
+            // 谁发请求时点名它，它就是那一次的地址来源。
             let mut owned = env.clone();
             owned.id = uid();
             owned.project_id = opts.project_id.clone();
-            owned.is_active = false;
+            owned.created_at = 0;
             db::environments::create(conn, &owned)?;
             environments_created.push(owned.name.clone());
         }
@@ -187,14 +188,14 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
 
 /// 导出候选预览。
 ///
-/// `opts.environment_id` 指名按**哪个环境**解析那一格的地址：缺席或空串取激活环境，
-/// 给了 id 就按那个环境解析——渲染层在下拉里换了环境就会重取一趟，否则那份清单
-/// 仍是旧环境下的事实，界面上的提示会按旧环境点名。
+/// `opts.environment_id` 指名按**哪个环境**解析那一格的地址：缺席或空串取默认环境
+/// （最早创建的那个），给了 id 就按那个环境解析——渲染层在下拉里换了环境就会重取一趟，
+/// 否则那份清单仍是旧环境下的事实，界面上的提示会按旧环境点名。
 pub fn export_preview(
     pool: &DbPool,
     opts: &ExportPreviewOpts,
 ) -> Result<ExportPreviewDto, AppError> {
-    // 空串 = 渲染层「不选环境」那一项，与「没传」等价：都退回激活环境。
+    // 空串 = 渲染层「不选环境」那一项，与「没传」等价：都退回默认环境。
     let env = opts
         .environment_id
         .as_deref()

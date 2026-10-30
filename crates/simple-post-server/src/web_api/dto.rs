@@ -171,14 +171,6 @@ pub struct EnvSetModuleBaseUrlBody {
     pub proxy: Option<String>,
 }
 
-/// `POST /api/environments/active` 的 body。`envId` 放在 body 而非 URL 里，好让字面量
-/// 路由 `/active` 能充当「设置当前环境」的动词而不与 `/api/environments/:envId` 冲突。
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetActiveEnvBody {
-    pub env_id: String,
-}
-
 /// `PUT /api/permissions/:projectId` 的 body。`permission` 字符串经
 /// [`domain::Permission::parse`] 解析——调用点拼错会以 `AppError::Validation` 失败，
 /// 而不是写进一行垃圾数据。

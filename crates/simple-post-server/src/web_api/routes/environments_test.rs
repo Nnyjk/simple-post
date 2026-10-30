@@ -76,7 +76,7 @@ fn seed_project_with_env(dir: &std::path::Path) {
         )?;
         c.execute_batch(
             "INSERT INTO environments \
-             (id, project_id, name, is_active, variables_json) \
+             (id, project_id, name, created_at, variables_json) \
              VALUES ('env_1', 'p1', 'dev', 1, '{\"token\":\"abc\"}')",
         )?;
         Ok(())
@@ -158,4 +158,49 @@ async fn disabling_a_variable_that_does_not_exist_is_rejected() {
     );
     let body: serde_json::Value = response.json().await.expect("json body");
     assert_eq!(body["code"], "validation");
+}
+
+/// 新建环境回传**落库之后**的那一行：创建时刻是它在库里认「默认环境」用的字段。
+///
+/// 回传 0 的话，界面手里的创建时刻与库里那一行对不上：界面按 0 排「最早创建的那个」，
+/// 后端按真实时刻排，两侧于是给出两个不同的默认环境——接口预览的请求与真正发出去的
+/// 请求不是同一个。
+#[tokio::test]
+async fn creating_an_env_returns_the_stored_creation_time() {
+    let (addr, dir) = serve_test_router().await;
+    seed_project_with_env(&dir);
+
+    let response = post_json(
+        addr,
+        "/api/environments",
+        serde_json::json!({ "projectId": "p1", "name": "staging" }),
+    )
+    .await;
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("json body");
+    let created_at = body["createdAt"].as_i64().expect("createdAt is a number");
+    assert!(
+        created_at > 0,
+        "创建时刻不能是 0：库里补的是当前时刻，回传 0 会让界面与库算出两个默认环境"
+    );
+
+    // 库里那一行与回传的那一份必须是同一个数。
+    let pool = crate::db::init(&dir).expect("db init");
+    let stored = crate::db::with_conn(&pool, |c| {
+        crate::db::environments::get(c, body["id"].as_str().unwrap())
+    })
+    .expect("env row");
+    assert_eq!(
+        stored.created_at, created_at,
+        "回传的那一份与库里那一行必须是同一个创建时刻"
+    );
+
+    // 默认环境 = 最早创建的那个。`env_1` 的创建时刻是 1，比新建的早，故它仍是默认环境。
+    let default = crate::db::with_conn(&pool, |c| crate::db::environments::get_default(c, "p1"))
+        .expect("default env")
+        .expect("the project has a default env");
+    assert_eq!(
+        default.id, "env_1",
+        "最早创建的那个才是默认环境——新环境排在它后面"
+    );
 }
