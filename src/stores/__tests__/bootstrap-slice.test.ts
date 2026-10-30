@@ -652,7 +652,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     await booting;
     await bag.loadWorkspace();
 
-    assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the active env');
+    assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the current env');
   });
 
   it('第二层补齐时用记住过的那个环境，而不是默认环境', async () => {

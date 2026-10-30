@@ -36,7 +36,8 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             method: "POST",
             path: "/api/interchange/export/preview",
             summary: "List a module's subtree as export candidates, with the \
-                      per-module service URLs resolved under the active environment",
+                      per-module service URLs resolved under the named environment, \
+                      or under the project's default environment when none is named",
             stability: "public",
             request: Some("ExportPreviewOpts"),
             response: Some("ExportPreviewDto"),

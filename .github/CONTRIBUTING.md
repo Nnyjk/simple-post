@@ -34,7 +34,7 @@ npm run check
 
 反过来，**表达不成「加一个带默认值的可空列」的改动就是一次 bump**，而 bump 会删掉用户的项目、环境与资源树。删列等于重建表，等于 bump；删一张没人读的表不用 bump——那种表在打开时丢掉即可。
 
-出处：`AGENTS.md` → *`SCHEMA_VERSION` is 4 and a version bump replaces the store*。
+出处：`AGENTS.md` → *A `SCHEMA_VERSION` bump replaces the store*。
 
 ### 2. MCP 双闸 fail-closed
 
