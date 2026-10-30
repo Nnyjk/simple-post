@@ -618,7 +618,7 @@ fn the_export_preview_resolves_base_urls_by_the_named_environment() {
     let (project_id, module_id) = seed_two_environments(&pool);
 
     // 默认环境是「无 URL」那个：不给 environmentId 时按它算。
-    let by_active = export_preview(
+    let by_default = export_preview(
         &pool,
         &ExportPreviewOpts {
             project_id: project_id.clone(),
@@ -627,11 +627,11 @@ fn the_export_preview_resolves_base_urls_by_the_named_environment() {
         },
     )
     .expect("预览");
-    assert_eq!(by_active.environment_id.as_deref(), Some("env-a"));
+    assert_eq!(by_default.environment_id.as_deref(), Some("env-a"));
     assert!(
-        by_active.base_urls[0].base_url.is_none(),
+        by_default.base_urls[0].base_url.is_none(),
         "默认环境里没配地址，就该是缺席的：{:?}",
-        by_active.base_urls
+        by_default.base_urls
     );
 
     // 指名「有地址」那个环境：同一批模块，这一次有地址了。

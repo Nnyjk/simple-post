@@ -16,7 +16,7 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
     TABLE.get_or_init(|| {
         let mut v = Vec::with_capacity(64);
 
-        // env_ops：8 个
+        // env_ops：7 个
         v.extend(env_ops::table());
 
         // project_ops：project + module + collection + endpoint + spec

@@ -157,6 +157,10 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
             //
             // 当前环境不是落库的状态，故导入的环境没有「激活」这一说；它建好之后，
             // 谁发请求时点名它，它就是那一次的地址来源。
+            //
+            // 创建时刻留 0：`db::environments::create` 见到 0 就填当前时刻。导入的
+            // 环境是**此刻**建的，故它不是这个项目最早创建的那个环境，也就是不是
+            // 默认环境——项目原本那个默认环境仍然是默认环境。
             let mut owned = env.clone();
             owned.id = uid();
             owned.project_id = opts.project_id.clone();
