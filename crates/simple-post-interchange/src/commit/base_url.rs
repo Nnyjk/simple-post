@@ -28,8 +28,8 @@ pub struct BaseUrlPlan {
 impl BaseUrlPlan {
     /// 多于一个地址时的那条说明。
     ///
-    /// 一个模块一格，故多个地址不冲突：它们分别落在各自的模块格子里，端点自己带着
-    /// 与模块格子不同的那个。这条说明只是告诉用户「有几台机器」，不是「有件事没做成」。
+    /// 一个模块一格，故多个地址不冲突：模块的地址分别落在各自的模块格子里，端点自己
+    /// 带着的那个留在端点上。这条说明只是告诉用户「有几台机器」，不是「有件事没做成」。
     pub fn multiple_diagnostic(&self) -> Option<Diagnostic> {
         if self.candidates.len() < 2 {
             return None;
@@ -38,7 +38,7 @@ impl BaseUrlPlan {
             Diagnostic::info(
                 DOC_ROOT,
                 format!(
-                    "这份文档有 {} 个地址，分别写进各自的模块格子",
+                    "这份文档有 {} 个地址，分别写进各自的模块格子与端点",
                     self.candidates.len()
                 ),
             )
@@ -83,8 +83,11 @@ fn push_candidate(candidates: &mut Vec<String>, url: &str) {
 
 /// 把一个模块的地址写进它那一格，并回报。
 ///
-/// 写进去的是**后端 api 地址**与**实际访问地址**这一对：格子有两个字段，地址与代理。
-/// 外来文档给得出地址，给不出代理，故代理一律留空。
+/// 导入只写规格里给出的那一段：规格给了地址就写地址，规格没提代理时那一格原有的代理保留，
+/// 用户配的网关不被一次导入抹掉。
+///
+/// 报告里写回那一格**实际**的代理值：规格给了代理就是规格那个，规格没给就是那一格原来的
+/// 那个（可能没有代理）。
 ///
 /// 没有激活环境就没有格子可填，于是地址无处可去——报告里 `environment_name` 为 `None`，
 /// 用户能看见「地址没有落进任何一格」，而不是以为它已经生效了。
@@ -96,12 +99,21 @@ pub(super) fn wire_base_url(
     environment: Option<&Environment>,
     report: &mut CommitReport,
 ) -> Result<(), AppError> {
+    let mut applied_proxy = None;
     if let Some(env) = environment {
-        db::environments::set_module_base_url(conn, &env.id, module_id, Some(url), proxy)?;
+        // `proxy` 传 `None` = 那一格的代理不动，故规格没提代理时该格原有的代理保留。
+        let updated =
+            db::environments::set_module_base_url(conn, &env.id, module_id, Some(url), proxy)?;
+        // 读回那一格实际的代理，而不是把规格里那份原样抄进报告：规格没给代理时那一格
+        // 可能本来就配着网关。
+        applied_proxy = updated
+            .module_base_urls
+            .get(module_id)
+            .and_then(|cell| cell.proxy.clone());
     }
     report.base_urls.push(super::AppliedBaseUrl {
         url: url.to_string(),
-        proxy: proxy.map(|p| p.to_string()),
+        proxy: applied_proxy,
         module_id: module_id.to_string(),
         environment_name: environment.map(|e| e.name.clone()),
     });

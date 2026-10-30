@@ -1,7 +1,7 @@
 //! 地址：外来文档的 host → 环境的 (环境 × 模块) 那一格。
 
 use simple_post_core::db::{self, DbPool};
-use simple_post_core::domain::{uid, HttpMethod};
+use simple_post_core::domain::HttpMethod;
 use simple_post_core::error::AppError;
 
 use super::support::{fresh_project, seeded_module};
@@ -17,6 +17,30 @@ fn module_with_cell(key: &str, name: &str, url: &str, endpoint_key: &str, path: 
         base_url: Some(IrBaseUrl {
             url: url.into(),
             proxy: None,
+        }),
+        endpoints: vec![IrEndpoint {
+            key: endpoint_key.into(),
+            ..IrEndpoint::new("接口", HttpMethod::Get, path)
+        }],
+        ..Default::default()
+    }
+}
+
+/// 一个带地址与代理的模块，底下挂一个端点。
+fn module_with_cell_and_proxy(
+    key: &str,
+    name: &str,
+    url: &str,
+    proxy: Option<&str>,
+    endpoint_key: &str,
+    path: &str,
+) -> IrModule {
+    IrModule {
+        key: key.into(),
+        name: name.into(),
+        base_url: Some(IrBaseUrl {
+            url: url.into(),
+            proxy: proxy.map(|p| p.to_string()),
         }),
         endpoints: vec![IrEndpoint {
             key: endpoint_key.into(),
@@ -108,6 +132,26 @@ fn cell_of(pool: &DbPool, env_id: &str, module_id: &str) -> Option<String> {
         .module_base_urls
         .get(module_id)
         .map(|c| c.url.clone())
+}
+
+/// 某模块在给定环境里那一格的代理地址。
+fn cell_proxy_of(pool: &DbPool, env_id: &str, module_id: &str) -> Option<String> {
+    db::with_conn(pool, |c| db::environments::get(c, env_id))
+        .expect("env")
+        .module_base_urls
+        .get(module_id)
+        .and_then(|c| c.proxy.clone())
+}
+
+/// 给某模块在给定环境里的那一格写上地址与代理。
+///
+/// `proxy` 传 `None` = 那一格的代理不动。
+fn seed_cell(pool: &DbPool, env_id: &str, module_id: &str, url: &str, proxy: Option<&str>) {
+    db::with_tx(pool, |c| {
+        db::environments::set_module_base_url(c, env_id, module_id, Some(url), proxy)?;
+        Ok::<(), AppError>(())
+    })
+    .expect("写格子");
 }
 
 /// 项目里全部模块节点的 id。
@@ -228,9 +272,144 @@ fn importing_into_an_existing_module_gives_that_module_the_first_address() {
     assert_eq!(report.base_urls[0].module_id, module_id);
 
     let env_id = active_env_id(&pool, &project_id);
+    // 地址住在 (环境 × 模块) 那一格：这里是锚点模块在激活环境里的那一格。
     assert_eq!(
         cell_of(&pool, &env_id, &module_id).as_deref(),
         Some("https://api.example.com")
+    );
+    // 端点跟着锚点那一格走，故不带自己的地址。
+    assert_eq!(override_of(&pool, &report.created_endpoint_ids[0]), None);
+    // 顶层模块降级成集合：集合没有格子，地址只落在锚点模块那一格。
+    assert_eq!(report.created_collection_ids.len(), 1);
+    assert_eq!(report.created_endpoint_ids.len(), 1);
+}
+
+/// 规格没提代理时，那一格原有的代理保留：用户配的网关不被一次导入抹掉。
+#[test]
+fn the_cell_keeps_its_own_proxy_when_the_spec_only_gives_an_address() {
+    let (pool, project_id) = fresh_project();
+    let module_id = seeded_module(&pool, &project_id);
+    let env_id = active_env_id(&pool, &project_id);
+    // 用户给锚点模块那一格配了网关。
+    seed_cell(
+        &pool,
+        &env_id,
+        &module_id,
+        "https://old.example.com",
+        Some("https://gw.example.com"),
+    );
+
+    let ex = exchange(vec![module_with_cell(
+        "/item/0",
+        "订单",
+        "https://api.example.com",
+        "/item/0/request/0",
+        "/orders",
+    )]);
+    let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
+
+    assert_eq!(
+        cell_proxy_of(&pool, &env_id, &module_id).as_deref(),
+        Some("https://gw.example.com"),
+        "规格没提代理时那一格原有的代理保留"
+    );
+    assert_eq!(
+        report.base_urls[0].proxy.as_deref(),
+        Some("https://gw.example.com"),
+        "报告里写回那一格实际的代理"
+    );
+}
+
+/// 规格给了代理时，那一格的代理被改成规格给的值，报告里写的就是那个新值。
+#[test]
+fn a_proxy_in_the_spec_replaces_the_proxy_of_the_cell() {
+    let (pool, project_id) = fresh_project();
+    let module_id = seeded_module(&pool, &project_id);
+    let env_id = active_env_id(&pool, &project_id);
+    seed_cell(
+        &pool,
+        &env_id,
+        &module_id,
+        "https://old.example.com",
+        Some("https://gw.example.com"),
+    );
+
+    let ex = exchange(vec![module_with_cell_and_proxy(
+        "/item/0",
+        "订单",
+        "https://api.example.com",
+        Some("https://gw2.example.com"),
+        "/item/0/request/0",
+        "/orders",
+    )]);
+    let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
+
+    assert_eq!(
+        cell_proxy_of(&pool, &env_id, &module_id).as_deref(),
+        Some("https://gw2.example.com"),
+        "规格给了代理就写规格那个"
+    );
+    assert_eq!(
+        report.base_urls[0].proxy.as_deref(),
+        Some("https://gw2.example.com"),
+        "报告里写的是那一格实际的代理"
+    );
+}
+
+/// 那一格没有代理时，报告里写「没有代理」。
+#[test]
+fn a_cell_without_a_proxy_reports_no_proxy() {
+    let (pool, project_id) = fresh_project();
+    let module_id = seeded_module(&pool, &project_id);
+    let env_id = active_env_id(&pool, &project_id);
+
+    let ex = exchange(vec![module_with_cell(
+        "/item/0",
+        "订单",
+        "https://api.example.com",
+        "/item/0/request/0",
+        "/orders",
+    )]);
+    let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
+
+    assert_eq!(
+        cell_proxy_of(&pool, &env_id, &module_id),
+        None,
+        "那一格没有代理"
+    );
+    assert_eq!(report.base_urls[0].proxy, None, "报告里写没有代理");
+}
+
+/// 本次导入一个接口都没写进去时，锚点那一格保持原样。
+///
+/// 本次没写任何东西，却把用户配好的地址改掉，是本次导入之外的事。
+#[test]
+fn an_import_that_writes_no_endpoint_leaves_the_anchor_cell_alone() {
+    let (pool, project_id) = fresh_project();
+    let module_id = seeded_module(&pool, &project_id);
+    let env_id = active_env_id(&pool, &project_id);
+    let ex = exchange(vec![module_with_cell(
+        "/item/0",
+        "订单",
+        "https://api.example.com",
+        "/item/0/request/0",
+        "/orders",
+    )]);
+
+    // 第一次导入：接口写进去了，锚点那一格也写了。
+    commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("第一次导入");
+    // 用户随后把那一格改成别的地址。
+    seed_cell(&pool, &env_id, &module_id, "https://kept.example.com", None);
+
+    // 第二次导入：接口全被指纹认出来，一个都没写。
+    let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("第二次导入");
+
+    assert_eq!(report.created_endpoint_ids.len(), 0, "接口全被指纹跳过");
+    assert!(report.base_urls.is_empty(), "没写接口就不写锚点那一格");
+    assert_eq!(
+        cell_of(&pool, &env_id, &module_id).as_deref(),
+        Some("https://kept.example.com"),
+        "本次没写任何东西，锚点那一格保持原样"
     );
 }
 
@@ -350,6 +529,12 @@ fn the_project_created_here_keeps_the_default_environment() {
     // 建项目的动作会种下一个激活环境——地址才有地方落。
     let (pool, project_id) = fresh_project();
     let env_id = active_env_id(&pool, &project_id);
-    assert!(!env_id.is_empty());
-    assert_ne!(env_id, uid());
+    assert!(!env_id.is_empty(), "建项目会种下一个激活环境");
+    let env = db::with_conn(&pool, |c| db::environments::get(c, &env_id)).expect("环境行");
+    assert_eq!(env.project_id, project_id, "激活环境属于这个项目");
+    assert!(env.is_active, "这一行就是激活的那一个");
+    assert!(
+        env.module_base_urls.is_empty(),
+        "新项目不预置地址：每一格都要用户自己填"
+    );
 }

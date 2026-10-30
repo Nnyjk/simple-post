@@ -138,12 +138,8 @@ impl Builder {
         if let Some(d) = &ep.description {
             op.insert("description".into(), json!(d));
         }
-        // 逐模块取，不回退：该模块没配就没有这一项。
-        if let Some(cell) = base_url {
-            op.insert(
-                "servers".into(),
-                Value::Array(vec![json!({ "url": cell.url })]),
-            );
+        if let Some(servers) = servers_of(ep, base_url) {
+            op.insert("servers".into(), servers);
         }
 
         let params = parameters(ep, &path, &pointer, &mut self.diagnostics);
@@ -388,4 +384,36 @@ impl Builder {
         self.used_operation_ids.insert(candidate.clone());
         candidate
     }
+}
+
+/// 这个 operation 的 `servers`。
+///
+/// **端点自己的地址优先于模块那一格。** 端点配了 `base_url_override` 时，端点打的就是那个
+/// 地址，模块那一格与端点无关；产物写模块那一格的地址，描述的就不是端点实际会打的
+/// 那个地址。
+///
+/// 三种情形：
+///
+/// - `base_url_override` 是非空串 → 写那个串。
+/// - `base_url_override` 是空串 → **不写** `servers`：端点自带完整地址，没有服务器
+///   前缀可写。
+/// - `base_url_override` 是 `None` → 取模块那一格的地址；模块那一格没有地址、或者它
+///   的地址是空串时都不写 `servers`（逐模块取，不回退到别的模块）。
+///
+/// **写的是那一格的后端 api 地址，不是它的实际访问地址。** 导入侧只读文档级的
+/// `servers`，那个地址落进格子的 `url` 那一半。导出若写代理地址，导出再导入这一圈
+/// 下来，代理地址就变成了 `url`，那一格的两个字段换了位置。
+fn servers_of(ep: &IrEndpoint, cell: Option<&IrBaseUrl>) -> Option<Value> {
+    let url = match ep.base_url_override.as_deref() {
+        Some(own) if !own.is_empty() => own,
+        Some(_) => return None,
+        None => {
+            let url = cell.map(|c| c.url.as_str())?;
+            if url.is_empty() {
+                return None;
+            }
+            url
+        }
+    };
+    Some(Value::Array(vec![json!({ "url": url })]))
 }

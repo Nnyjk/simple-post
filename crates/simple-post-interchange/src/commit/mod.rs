@@ -56,7 +56,8 @@ pub struct CommitReport {
 pub struct AppliedBaseUrl {
     /// 写进那一格的后端 api 地址。
     pub url: String,
-    /// 写进那一格的实际访问地址。外来文档给不出代理，故导入时恒为 `None`。
+    /// 写进那一格的实际访问地址。规格没给代理时那一格可能本来就配着网关，故它可能非
+    /// `None`：报告里写的是那一格**实际**的代理值。
     pub proxy: Option<String>,
     /// 写进了哪个模块的格子。
     pub module_id: String,
@@ -209,21 +210,6 @@ pub fn commit_in_tx(
     // 模块走，不必让用户逐个去填。
     let anchor_cell: Option<IrBaseUrl> = ex.modules.iter().find_map(|m| m.base_url.clone());
 
-    // 挂进已有模块时，顶层模块一律降级成集合，而集合没有格子：那一格归锚点模块，
-    // 吃下整份文档的第一个地址。文档里其余的地址由各端点自己带着。
-    if let (Some(module_id), Some(cell)) = (&anchor_id, &anchor_cell) {
-        if apply_base_url {
-            wire_base_url(
-                conn,
-                module_id,
-                &cell.url,
-                cell.proxy.as_deref(),
-                environment,
-                &mut report,
-            )?;
-        }
-    }
-
     // 去重账本先灌入**已落库**的 endpoint，故「同一份 IR 落两次」第二次只跳过不新增。
     let existing = db::endpoint_details::list_by_root(conn, project_id)?;
     let mut fingerprints = FingerprintSet::new();
@@ -245,6 +231,21 @@ pub fn commit_in_tx(
     // 跳过 0」而不知道东西去哪了。
     let fate = decide(&ex.modules, &mut fingerprints.clone(), selected);
     let writable = &fate.writable;
+
+    // 锚点那一格（挂进已有模块时那一格归锚点模块吃下）等到 `writable` 算完才写：
+    // 本次导入一个接口都没写进去时，它没有动过树，也不该动用户配好的地址。
+    if let (Some(module_id), Some(cell)) = (&anchor_id, &anchor_cell) {
+        if apply_base_url && !writable.is_empty() {
+            wire_base_url(
+                conn,
+                module_id,
+                &cell.url,
+                cell.proxy.as_deref(),
+                environment,
+                &mut report,
+            )?;
+        }
+    }
 
     for dup in &fate.duplicates {
         report.skipped_duplicates.push(dup.name.clone());
@@ -312,7 +313,8 @@ pub fn commit_in_tx(
                 } else if apply_base_url {
                     if let Some(cell) = &ir.base_url {
                         // 落到项目顶层时这一格归新建的模块自己。写的是后端 api 地址与
-                        // 实际访问地址这一对；外来文档给得出地址，给不出代理。
+                        // 实际访问地址这一对；规格没提代理时这一格保持没有代理（新建的
+                        // 模块本来就没有代理）。
                         wire_base_url(
                             conn,
                             &group_id,
