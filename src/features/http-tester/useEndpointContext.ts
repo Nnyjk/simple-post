@@ -32,6 +32,7 @@ export function useEndpointContext(
   ancestors: Ancestor[];
   endpointEnv: Environment | undefined;
   moduleId: ReturnType<typeof moduleIdOfEndpoint>;
+  moduleBaseUrl: string | null;
   resolved: ReturnType<typeof resolveEndpointBaseUrl>;
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
@@ -75,7 +76,7 @@ export function useEndpointContext(
 
   // 该接口的有效 baseUrl —— 同时驱动选择器标签与发送时的拼接。
   //
-  // 地址住在环境里「模块 × 环境」那一格，故 `moduleId` 必需：它挑出本接口读的那一格。
+  // 地址住在环境里「环境 × 模块」那一格，故 `moduleId` 必需：它挑出本接口读的那一格。
   //
   // `endpoint` 作为向上遍历的起始行传入而非按 id 查：草稿接口没有 `nodes` 行，只按
   // id 查会得到「无模块」而永远读不到该格（见 `moduleIdOfEndpoint` 的 `self`）。
@@ -83,6 +84,15 @@ export function useEndpointContext(
     () => moduleIdOfEndpoint(allNodes, endpoint?.id, endpoint),
     [allNodes, endpoint],
   );
+  // 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。
+  //
+  // 它与 `resolved.baseUrl` 分开：端点处在「自定义」档时 `resolved.baseUrl` 是端点
+  // 自己的地址，而「跟随模块」那一行要显示的是这一格——用户据此判断「切回跟随模块
+  // 会用哪个地址」。
+  const moduleBaseUrl = useMemo(() => {
+    if (!moduleId) return null;
+    return endpointEnv?.moduleBaseUrls?.[moduleId]?.url ?? null;
+  }, [endpointEnv, moduleId]);
   const resolved = useMemo(
     () => resolveEndpointBaseUrl(detail ?? { baseUrlOverride: null }, endpointEnv, moduleId),
     [detail, endpointEnv, moduleId],
@@ -107,5 +117,14 @@ export function useEndpointContext(
   // 带 host 的历史 override 不掩盖这个意图。
   const isCustomUrl = selection.kind === 'override';
 
-  return { project, ancestors, endpointEnv, moduleId, resolved, selection, isCustomUrl };
+  return {
+    project,
+    ancestors,
+    endpointEnv,
+    moduleId,
+    moduleBaseUrl,
+    resolved,
+    selection,
+    isCustomUrl,
+  };
 }

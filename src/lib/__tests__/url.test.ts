@@ -1,7 +1,7 @@
 /**
  * URL 解析测试 —— `src/lib/url.ts`。
  *
- * 被测行为是地址解析的两档：端点自己的 `baseUrlOverride`，与环境里「模块 × 环境」那一格。
+ * 被测行为是地址解析的两档：端点自己的 `baseUrlOverride`，与环境里「环境 × 模块」那一格。
  * `baseUrlOverride` 是三态，只有该键*存在*才选中自定义这一档：
  *
  *   null / undefined → 读模块那一格

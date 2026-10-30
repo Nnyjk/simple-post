@@ -25,7 +25,10 @@ export interface TransferEndpoint {
   name: string;
   /** 大写动词。`TRACE` 之类不是 `HTTP_METHODS` 里的那七个。 */
   method: string;
-  /** 只有路径。host 不在这里，它挂在分组那一层的 `servers` 上。 */
+  /**
+   * 只有路径。host 不在这里，它住在环境里「环境 × 模块」那一格；端点自己的
+   * `baseUrlOverride` 优先于那一格。
+   */
   path: string;
   bodyMode: BodyMode;
   auth: AuthType;

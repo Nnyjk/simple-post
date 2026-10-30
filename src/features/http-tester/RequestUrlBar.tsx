@@ -20,6 +20,7 @@ import type { HttpMethod } from '@/types/domain';
 export function RequestUrlBar({
   method,
   resolvedBaseUrl,
+  moduleBaseUrl,
   selection,
   isCustomUrl,
   liveUrl,
@@ -42,6 +43,8 @@ export function RequestUrlBar({
 }: {
   method: HttpMethod;
   resolvedBaseUrl: string;
+  /** 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。 */
+  moduleBaseUrl: string | null;
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
   liveUrl: string;
@@ -69,6 +72,7 @@ export function RequestUrlBar({
       <MethodPicker value={method} onChange={onMethodChange} className="border-0" />
       <BaseUrlPicker
         resolvedBaseUrl={resolvedBaseUrl}
+        moduleBaseUrl={moduleBaseUrl}
         selection={selection}
         onSelectionChange={onSelectionChange}
       />

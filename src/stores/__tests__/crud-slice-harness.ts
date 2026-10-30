@@ -43,7 +43,7 @@ export function makeEnvironment(overrides: Partial<Environment> = {}): Environme
   };
 }
 
-/** 一个项目。地址住在环境里的「模块 × 环境」那一格，故项目行上没有地址。 */
+/** 一个项目。地址住在环境里的「环境 × 模块」那一格，故项目行上没有地址。 */
 export function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: 'project-1',

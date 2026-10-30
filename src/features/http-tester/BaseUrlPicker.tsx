@@ -1,7 +1,7 @@
 /**
  * BaseUrlPicker —— HttpTester 里位于方法选择器与 URL 输入框之间的下拉。
  *
- * 它只有两档：**跟随模块** 与 **自定义**。地址住在环境里的「模块 × 环境」那一格，
+ * 它只有两档：**跟随模块** 与 **自定义**。地址住在环境里的「环境 × 模块」那一格，
  * 故切环境即换地址，而接口本身的设置不动。
  *
  * 组件完全受控，由父级持有：
@@ -10,6 +10,10 @@
  * 「自定义」刻意**没有自己的输入框**：选中它就把完整地址交给 URL 栏，在这里再加
  * 一个 host 框会为同一个请求制造第二个真相来源。带 host 的自定义仍按该 host 前缀
  * 解析 —— 此时 `resolvedBaseUrl` 非空 —— 并显示在触发器的副标签上。
+ *
+ * 「跟随模块」那一行显示的是 `moduleBaseUrl`（环境里那一格的地址），不是
+ * `resolvedBaseUrl`：端点处在「自定义」档时 `resolvedBaseUrl` 是端点自己的地址，
+ * 拿它填那一行会把「切回跟随模块会用哪个地址」显示错。
  *
  * 父级同时传入已解析的地址供触发器标签使用；此处不算，以保持选择器无知。
  *
@@ -35,13 +39,32 @@ export type BaseUrlSelection = { kind: 'module' } | { kind: 'override' };
 
 export interface BaseUrlPickerProps {
   /**
-   * 当前已解析的模块地址。只用于触发器的副标签（如「· api.demo.dev」），让用户一眼
-   * 确认实际 host。
+   * 当前生效的地址：端点处在「自定义」档时是端点自己的 `baseUrlOverride`，处在
+   * 「跟随模块」档时是环境里那一格的地址。只用于触发器的副标签（如「· api.demo.dev」），
+   * 让用户一眼确认实际 host。
    */
   resolvedBaseUrl: string;
+  /**
+   * 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。
+   *
+   * 「跟随模块」那一行显示的是它。端点处在「自定义」档时这一行仍要显示这一格的
+   * 地址——用户要看得见「切回跟随模块会用哪个地址」。
+   */
+  moduleBaseUrl: string | null;
   selection: BaseUrlSelection;
   onSelectionChange: (next: BaseUrlSelection) => void;
   className?: string;
+}
+
+/**
+ * 「跟随模块」那一行的副标题。
+ *
+ * 它显示环境里「环境 × 模块」那一格的地址（`moduleBaseUrl`），不是端点自己的
+ * `baseUrlOverride`。那一格没有地址时给一句提示，而不是显示端点自己的地址——
+ * 端点自己的地址属于「自定义」那一行。
+ */
+export function moduleRowSecondary(moduleBaseUrl: string | null): string {
+  return moduleBaseUrl ? moduleBaseUrl : '环境里本模块没有配地址';
 }
 
 const TRIGGER_WIDTH = 'w-52';
@@ -49,6 +72,7 @@ const POPOVER_WIDTH = 'w-80';
 
 export function BaseUrlPicker({
   resolvedBaseUrl,
+  moduleBaseUrl,
   selection,
   onSelectionChange,
   className,
@@ -142,35 +166,63 @@ export function BaseUrlPicker({
             POPOVER_WIDTH,
           )}
         >
-          <ul className="max-h-80 overflow-auto p-1">
-            <Row
-              selected={selection.kind === 'module'}
-              onSelect={() => {
-                onSelectionChange({ kind: 'module' });
-                setOpen(false);
-              }}
-              concept="baseurl"
-              icon={<Globe className="h-3.5 w-3.5" />}
-              primary="跟随模块"
-              secondary={resolvedBaseUrl ? resolvedBaseUrl : '环境里本模块没有配地址'}
-            />
-            <Row
-              selected={selection.kind === 'override'}
-              onSelect={() => {
-                onSelectionChange({ kind: 'override' });
-                // 关掉：这一行的全部职责就是把 URL 栏交给用户，而用户马上就要往里打字 ——
-                // 把 popover 留在 URL 栏上方只会让整个动作显得没反应。
-                setOpen(false);
-              }}
-              concept="variable"
-              icon={<Pencil className="h-3.5 w-3.5" />}
-              primary="自定义"
-              secondary="URL 栏直接填完整地址，不拼接模块地址"
-            />
-          </ul>
+          <BaseUrlPickerRows
+            selection={selection}
+            moduleBaseUrl={moduleBaseUrl}
+            onPickModule={() => {
+              onSelectionChange({ kind: 'module' });
+              setOpen(false);
+            }}
+            onPickOverride={() => {
+              onSelectionChange({ kind: 'override' });
+              // 关掉：这一行的全部职责就是把 URL 栏交给用户，而用户马上就要往里打字 ——
+              // 把 popover 留在 URL 栏上方只会让整个动作显得没反应。
+              setOpen(false);
+            }}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 下拉里的两行。
+ *
+ * 单独成一个组件，是为了让它能在没有浏览器的情况下被渲染出来核对：「跟随模块」那一行
+ * 显示的是环境里那一格的地址，不是端点自己的地址。
+ */
+export function BaseUrlPickerRows({
+  selection,
+  moduleBaseUrl,
+  onPickModule,
+  onPickOverride,
+}: {
+  selection: BaseUrlSelection;
+  /** 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。 */
+  moduleBaseUrl: string | null;
+  onPickModule: () => void;
+  onPickOverride: () => void;
+}) {
+  return (
+    <ul className="max-h-80 overflow-auto p-1">
+      <Row
+        selected={selection.kind === 'module'}
+        onSelect={onPickModule}
+        concept="baseurl"
+        icon={<Globe className="h-3.5 w-3.5" />}
+        primary="跟随模块"
+        secondary={moduleRowSecondary(moduleBaseUrl)}
+      />
+      <Row
+        selected={selection.kind === 'override'}
+        onSelect={onPickOverride}
+        concept="variable"
+        icon={<Pencil className="h-3.5 w-3.5" />}
+        primary="自定义"
+        secondary="URL 栏直接填完整地址，不拼接模块地址"
+      />
+    </ul>
   );
 }
 

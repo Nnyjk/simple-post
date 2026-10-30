@@ -117,7 +117,7 @@ function ProjectWorkspace({ projectId }: { projectId: string }) {
   return (
     <div className="h-full min-h-0 overflow-y-auto pb-6">
       <ProjectInfo projectId={projectId} />
-      <EntitySection title="环境" hint="这个项目的环境变量与前置 URL · 与设置里的环境分区是同一份">
+      <EntitySection title="环境" hint="这个项目的环境变量与模块地址 · 与设置里的环境分区是同一份">
         <Suspense fallback={<BlockFallback />}>
           <ProjectEnvSection />
         </Suspense>

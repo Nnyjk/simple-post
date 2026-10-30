@@ -71,10 +71,8 @@ export function HttpTester() {
   // 实时的 URL —— 输入框此刻的内容：通常是 path，自定义模式下是完整地址。
   const liveUrl = draft?.url ?? detail?.url ?? '';
 
-  const { project, ancestors, endpointEnv, resolved, selection, isCustomUrl } = useEndpointContext(
-    endpoint,
-    detail,
-  );
+  const { project, ancestors, endpointEnv, moduleBaseUrl, resolved, selection, isCustomUrl } =
+    useEndpointContext(endpoint, detail);
 
   // 脚本看得到的环境与解析用的是**同一份变量池**（停用的变量不参与）。
   const scriptEnv = useMemo<EnvSnapshot | undefined>(() => {
@@ -267,9 +265,9 @@ export function HttpTester() {
 
   const dynamicNames = useMemo(() => {
     if (enabledDynamicNames.size === 0) return [];
-    const names = buildDynamicNames(resolved.baseUrl, liveUrl, effective);
+    const names = buildDynamicNames(resolved.baseUrl, liveUrl, effective, resolved.proxy);
     return names.filter((name) => enabledDynamicNames.has(name));
-  }, [enabledDynamicNames, resolved.baseUrl, liveUrl, effective]);
+  }, [enabledDynamicNames, resolved.baseUrl, resolved.proxy, liveUrl, effective]);
 
   // 模板变化时重新解析（防抖 300 ms）。TTL 内命中缓存时后端不发取数请求。
   useEffect(() => {
@@ -409,6 +407,7 @@ export function HttpTester() {
         globalTls: requestSettings.tls,
         method,
         resolvedBaseUrl: resolved.baseUrl,
+        moduleBaseUrl,
       }}
       {...{ selection, isCustomUrl, liveUrl, urlInputRef }}
       {...{ sendBtnRef, playIconRef, copyCurlBtnRef, requestPending, curlFlash }}

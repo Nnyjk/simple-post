@@ -62,7 +62,8 @@ export function indexByParent(
  * 查不到，遍历便返回 `null`——下游读起来就是「这个 endpoint 没有模块」，
  * 也就是根本没有 baseUrl 格子。它的各级父节点都是真实行，缺的只是起点：
  * 把草稿自身的节点作为 `self` 传进来。
- */ export function moduleIdOfEndpoint(
+ */
+export function moduleIdOfEndpoint(
   nodes: readonly ResourceNode[],
   endpointId: string | null | undefined,
   /**

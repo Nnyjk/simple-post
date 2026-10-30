@@ -32,6 +32,11 @@ interface ScanCase {
   name: string;
   parts: {
     baseUrl: string;
+    /**
+     * 那一格的实际访问地址。它会被 `{{var}}` 替换，故它里面的标记同样算被引用。
+     * 缺席 = 样本没给代理地址。
+     */
+    proxy?: string;
     url: string;
     params: KeyValue[];
     pathParams?: KeyValue[];

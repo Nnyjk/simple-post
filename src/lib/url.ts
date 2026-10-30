@@ -7,7 +7,7 @@ import type { EndpointDetail, Environment } from '@/types/domain';
 /**
  * 生效的 baseUrl 来自哪一层；选择器用它标注当前选择（「跟随模块」/「自定义」）。
  *
- * `override` 是端点自己的 `baseUrlOverride`，`module` 是环境里「模块 × 环境」那一格，
+ * `override` 是端点自己的 `baseUrlOverride`，`module` 是环境里「环境 × 模块」那一格，
  * `none` 是谁都没匹配上。
  */
 export type BaseUrlSource = 'override' | 'module' | 'none';

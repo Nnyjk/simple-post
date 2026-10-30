@@ -6,8 +6,9 @@
  * 两份实现各写一遍规则，只有共享样本能钉住它们没分叉：手写的镜像测试各有两份，改了
  * 一边就没人提醒另一边。
  *
- * 读取器**拒绝不认识的键**，并且**数一遍读到的条目数**：样本的键名漂了（`cases` 改名
- * 之类）时，读到的条目数就是 0，那条测试必须因此变红，而不是静默地一条用例都不跑。
+ * 读取器**拒绝不认识的键**、**要求必填的键齐全**，并且**数一遍读到的条目数**：样本的
+ * 键名漂了（`cases` 改名之类）或样本被改小时，读到的条目数就不是写死的那个数，那条
+ * 测试必须因此变红，而不是静默地一条用例都不跑。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -55,6 +56,16 @@ const EXPECTED_KEYS = ['baseUrl', 'proxy', 'source'];
 const PROXY_CASE_KEYS = ['name', 'baseUrl', 'proxy', 'url', 'expected'];
 
 /**
+ * 样本里 `cases` 的确切条数。
+ *
+ * 断言「大于 0」钉不住任何东西：键名漂了或样本被改小，那条断言照样绿。条数写死
+ * 之后，改动样本的人必须同时改这个数字，改动就会落到评审眼前。
+ */
+const EXPECTED_CASE_COUNT = 11;
+/** 样本里 `proxyCases` 的确切条数。 */
+const EXPECTED_PROXY_CASE_COUNT = 9;
+
+/**
  * 断言一个对象只带列出的那些键。少一个键不算错（可选键可以缺席），多一个键算错 ——
  * 键名漂了正是这条规则要抓的事。
  */
@@ -69,6 +80,21 @@ function assertOnlyKeys(value: unknown, allowed: readonly string[], where: strin
   }
 }
 
+/**
+ * 断言一个对象带齐了要求的那些键。多一个键由 `assertOnlyKeys` 抓，少一个必填键由
+ * 本函数抓——必填键缺席说明样本的形状变了，读到的就不是同一件事了。
+ */
+function assertHasKeys(value: unknown, required: readonly string[], where: string): void {
+  assert.equal(typeof value, 'object', `${where} 必须是对象`);
+  assert.ok(value !== null && !Array.isArray(value), `${where} 必须是对象`);
+  for (const key of required) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(value, key),
+      `${where} 少了必填的键「${key}」。样本的形状变了，两侧就会读到不同的东西。`,
+    );
+  }
+}
+
 function readFixture(): Fixture {
   const raw: unknown = JSON.parse(
     readFileSync(new URL('../../../fixtures/base-url-parity.json', import.meta.url), 'utf8'),
@@ -76,15 +102,18 @@ function readFixture(): Fixture {
   assertOnlyKeys(raw, TOP_KEYS, '样本顶层');
 
   const top = raw as Record<string, unknown>;
+  assertHasKeys(top, ['cases', 'proxyCases'], '样本顶层');
   assert.ok(Array.isArray(top.cases), '样本里必须有 cases 数组');
   assert.ok(Array.isArray(top.proxyCases), '样本里必须有 proxyCases 数组');
 
   const cases: ParityCase[] = (top.cases as unknown[]).map((rawCase, i) => {
     const where = `cases[${i}]`;
     assertOnlyKeys(rawCase, CASE_KEYS, where);
+    assertHasKeys(rawCase, CASE_KEYS, where);
     const c = rawCase as Record<string, unknown>;
     assert.equal(typeof c.name, 'string', `${where}.name 必须是字符串`);
     assertOnlyKeys(c.endpoint, ENDPOINT_KEYS, `${where}.endpoint`);
+    assertHasKeys(c.endpoint, ENDPOINT_KEYS, `${where}.endpoint`);
     const endpoint = c.endpoint as Record<string, unknown>;
     assert.ok(
       endpoint.baseUrlOverride === null || typeof endpoint.baseUrlOverride === 'string',
@@ -92,6 +121,7 @@ function readFixture(): Fixture {
     );
     if (c.env !== null) {
       assertOnlyKeys(c.env, ENV_KEYS, `${where}.env`);
+      assertHasKeys(c.env, ENV_KEYS, `${where}.env`);
       const moduleBaseUrls = (c.env as Record<string, unknown>).moduleBaseUrls as Record<
         string,
         unknown
@@ -99,6 +129,7 @@ function readFixture(): Fixture {
       assert.equal(typeof moduleBaseUrls, 'object', `${where}.env.moduleBaseUrls 必须是对象`);
       for (const [moduleId, cell] of Object.entries(moduleBaseUrls)) {
         assertOnlyKeys(cell, CELL_KEYS, `${where}.env.moduleBaseUrls.${moduleId}`);
+        assertHasKeys(cell, ['url'], `${where}.env.moduleBaseUrls.${moduleId}`);
         assert.equal(
           typeof (cell as Record<string, unknown>).url,
           'string',
@@ -108,12 +139,14 @@ function readFixture(): Fixture {
     }
     assert.ok(c.moduleId === null || typeof c.moduleId === 'string', `${where}.moduleId`);
     assertOnlyKeys(c.expected, EXPECTED_KEYS, `${where}.expected`);
+    assertHasKeys(c.expected, EXPECTED_KEYS, `${where}.expected`);
     return c as unknown as ParityCase;
   });
 
   const proxyCases: ProxyCase[] = (top.proxyCases as unknown[]).map((rawCase, i) => {
     const where = `proxyCases[${i}]`;
     assertOnlyKeys(rawCase, PROXY_CASE_KEYS, where);
+    assertHasKeys(rawCase, PROXY_CASE_KEYS, where);
     const c = rawCase as Record<string, unknown>;
     assert.equal(typeof c.name, 'string', `${where}.name 必须是字符串`);
     assert.equal(typeof c.baseUrl, 'string', `${where}.baseUrl 必须是字符串`);
@@ -128,8 +161,12 @@ function readFixture(): Fixture {
 const FIXTURE = readFixture();
 
 describe('base URL 的解析与 Rust 侧一致', () => {
-  it('样本里至少有一个 case', () => {
-    assert.ok(FIXTURE.cases.length > 0, '样本里必须有 case，否则这条测试是空的');
+  it('样本里恰好有 11 条解析用例', () => {
+    assert.equal(
+      FIXTURE.cases.length,
+      EXPECTED_CASE_COUNT,
+      '解析用例的条数变了：键名漂了或样本被改小，这条断言必须变红',
+    );
   });
 
   for (const c of FIXTURE.cases) {
@@ -150,8 +187,12 @@ describe('base URL 的解析与 Rust 侧一致', () => {
 });
 
 describe('代理前缀替换与 Rust 侧一致', () => {
-  it('样本里至少有一个 proxyCase', () => {
-    assert.ok(FIXTURE.proxyCases.length > 0, '样本里必须有 proxyCase，否则这条测试是空的');
+  it('样本里恰好有 9 条代理替换用例', () => {
+    assert.equal(
+      FIXTURE.proxyCases.length,
+      EXPECTED_PROXY_CASE_COUNT,
+      '代理替换用例的条数变了：键名漂了或样本被改小，这条断言必须变红',
+    );
   });
 
   for (const c of FIXTURE.proxyCases) {
