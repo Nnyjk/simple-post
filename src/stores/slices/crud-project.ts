@@ -16,7 +16,7 @@ import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { pickCurrentEnvironment } from '@/lib/env-default';
 import type { AppState } from '../app-store';
 import { filterTabsAfterRemoval, invokeWithRollback, tabKeysForSubtree } from './crud-helpers';
-import { readRememberedEnvironmentId } from './ui-prefs';
+import { readRememberedEnvironmentId, saveRememberedEnvironmentId } from './ui-prefs';
 
 /** CRUD 切片拥有的 project 动作。 */
 export interface ProjectCrudActions {
@@ -168,10 +168,15 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         activeTabId: tabs.activeId,
       };
     });
-    await invokeWithRollback(
+    const deleted = await invokeWithRollback(
       'projects_delete',
       () => invokeCmd<void>(COMMANDS.projectsDelete, { id }),
       () => set(snapshot),
     );
+    // 项目真的没了，它记住的那个环境也该被忘掉 —— 否则 `currentEnvByProject` 里
+    // 一直留着一条指向已删项目的记录。
+    //
+    // 只在删除成功时清：失败时项目还在，那条记忆还得有用（回滚后要停在原处）。
+    if (deleted) saveRememberedEnvironmentId(id, '');
   },
 });

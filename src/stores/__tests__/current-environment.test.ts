@@ -244,4 +244,35 @@ describe('当前环境：记住的那条与 activeEnvironmentId 始终一致', (
       'p2 自己记住的环境不能被已删项目的环境 id 顶掉',
     );
   });
+
+  it('项目删掉了，它记住的那条也从本机的记忆里清掉', async () => {
+    installIpcMock(async () => null);
+    useAppStore.getState().setActiveProject('p1');
+    useAppStore.getState().setCurrentEnvironment('e2');
+    assert.equal(readRememberedEnvironmentId('p1'), 'e2');
+
+    await useAppStore.getState().deleteProject('p1');
+
+    assert.equal(
+      readRememberedEnvironmentId('p1'),
+      '',
+      '项目没了，那条记忆也该被清掉，不能一直留在本机',
+    );
+  });
+
+  it('删除失败回滚时，那条记忆留着——项目还在，记忆还得有用', async () => {
+    installIpcMock(async () => {
+      throw new Error('删除失败');
+    });
+    useAppStore.getState().setActiveProject('p1');
+    useAppStore.getState().setCurrentEnvironment('e2');
+
+    await useAppStore.getState().deleteProject('p1');
+
+    assert.equal(
+      readRememberedEnvironmentId('p1'),
+      'e2',
+      '删除失败时项目还在，回滚后要停在原来那个环境上',
+    );
+  });
 });

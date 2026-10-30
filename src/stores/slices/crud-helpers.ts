@@ -24,17 +24,23 @@ import type { OpenTab, EndpointDraft } from '../store-types';
  *
  * 注意它刻意**不**把错误吞成返回值——需要在失败时拿到值的调用方（各 create
  * 动作）保留自己的 try/catch 并返回 `null`。
+ *
+ * 返回值是「这次调用成功了吗」：成功 `true`，失败（已回滚）`false`。有些收尾动作
+ * 只在真的删掉之后才该做——例如删掉一个项目后把它记住的环境从 localStorage 里清掉；
+ * 删除失败时那条记录还得留着（项目还在，记忆还得有用）。
  */
 export async function invokeWithRollback(
   label: string,
   invoke: () => Promise<unknown>,
   rollback: () => void,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await invoke();
+    return true;
   } catch (e) {
     console.error(`[store] ${label} failed`, e);
     rollback();
+    return false;
   }
 }
 
