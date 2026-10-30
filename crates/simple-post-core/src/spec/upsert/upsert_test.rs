@@ -7,7 +7,7 @@
 use crate::db::test_helpers::fresh_pool;
 use crate::db::{self, DbPool};
 use crate::domain::{AuthType, BodyMode, ResourceNodeType};
-use crate::spec::upsert::{upsert_endpoint_spec, EndpointSpec};
+use crate::spec::upsert::{upsert_endpoint_spec, EndpointSpec, EnvironmentSpec};
 use serde_json::json;
 
 /// 一份最小可用的规格：只指名项目、模块与端点。
@@ -825,6 +825,43 @@ fn the_camel_case_spelling_of_multi_word_fields_is_accepted() {
         first.endpoint.resource.node.id, second.endpoint.resource.node.id,
         "ifExists=duplicate 每次都另建一个端点"
     );
+}
+
+/// 环境那一段的两个地址字段两种拼写都收。
+///
+/// `base_url` 与 `base_url_proxy` 各带一个 camelCase 别名（`baseUrl` 与 `baseUrlProxy`），
+/// 四种拼写落在同一个类型上，故 REST 那条线与 MCP 那条线交上来的形状是同一份。
+#[test]
+fn the_environment_address_fields_accept_both_spellings() {
+    let snake: EnvironmentSpec =
+        serde_json::from_value(json!({ "base_url": "https://a" })).expect("这份规格应当能反序列化");
+    assert_eq!(snake.base_url.as_deref(), Some("https://a"));
+    assert_eq!(snake.base_url_proxy, None);
+
+    let camel: EnvironmentSpec =
+        serde_json::from_value(json!({ "baseUrl": "https://a" })).expect("这份规格应当能反序列化");
+    assert_eq!(camel.base_url.as_deref(), Some("https://a"));
+    assert_eq!(camel.base_url_proxy, None);
+
+    let snake_proxy: EnvironmentSpec =
+        serde_json::from_value(json!({ "base_url_proxy": "https://p" }))
+            .expect("这份规格应当能反序列化");
+    assert_eq!(snake_proxy.base_url_proxy.as_deref(), Some("https://p"));
+    assert_eq!(snake_proxy.base_url, None);
+
+    let camel_proxy: EnvironmentSpec =
+        serde_json::from_value(json!({ "baseUrlProxy": "https://p" }))
+            .expect("这份规格应当能反序列化");
+    assert_eq!(camel_proxy.base_url_proxy.as_deref(), Some("https://p"));
+    assert_eq!(camel_proxy.base_url, None);
+
+    let both: EnvironmentSpec = serde_json::from_value(json!({
+        "base_url": "https://a",
+        "baseUrlProxy": "https://p",
+    }))
+    .expect("这份规格应当能反序列化");
+    assert_eq!(both.base_url.as_deref(), Some("https://a"));
+    assert_eq!(both.base_url_proxy.as_deref(), Some("https://p"));
 }
 
 // =========================================================================

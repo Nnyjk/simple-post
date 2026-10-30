@@ -53,6 +53,9 @@ struct ScanCase {
 struct ScanParts {
     #[serde(default)]
     base_url: String,
+    /// 那一格的实际访问地址。**缺席 = 样本没给代理地址**，此时那一段不参与扫描。
+    #[serde(default)]
+    proxy: Option<String>,
     #[serde(default)]
     url: String,
     #[serde(default)]
@@ -132,6 +135,7 @@ fn every_scan_case_finds_the_same_names() {
     for case in &fixture.scan_cases {
         let parts = TemplateParts {
             base_url: &case.parts.base_url,
+            proxy: case.parts.proxy.as_deref(),
             url: &case.parts.url,
             params: &case.parts.params,
             path_params: &case.parts.path_params,

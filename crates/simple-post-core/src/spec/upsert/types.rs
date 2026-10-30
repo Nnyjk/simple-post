@@ -84,7 +84,7 @@ pub struct EndpointDefinition {
     pub name: String,
     /// HTTP 动词。
     pub method: String,
-    /// 只有路径。host 在发送时从环境的服务 URL 解析。
+    /// 只有路径。host 在发送时从环境里 (环境 × 模块) 那一格的地址解析。
     pub url: String,
     #[serde(default)]
     pub description: Option<String>,

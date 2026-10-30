@@ -232,6 +232,27 @@ fn clearing_the_last_cell_drops_the_module_entirely() {
 }
 
 #[test]
+fn writing_neither_field_leaves_the_cell_untouched() {
+    let pool = fresh_pool();
+    // 两个字段都传 None = 这一次不写任何字段：那一格原样保留，不清空也不删掉。
+    let env = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_pay", None, None)
+    })
+    .unwrap();
+    let pay = env.module_base_urls.get("m_pay").unwrap();
+    assert_eq!(pay.url, "http://localhost:4000/demo/pay");
+    assert_eq!(
+        pay.proxy.as_deref(),
+        Some("https://gw.example.com/demo/pay"),
+        "两个字段都传 None 时，这一格原样保留"
+    );
+    assert!(
+        env.module_base_urls.contains_key("m_auth"),
+        "别的模块那一格也不该被删掉"
+    );
+}
+
+#[test]
 fn set_module_base_url_can_add_a_module_the_environment_never_had() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {

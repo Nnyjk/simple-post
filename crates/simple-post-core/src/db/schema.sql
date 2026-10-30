@@ -430,9 +430,10 @@ END;
 --
 -- `dynamic_variables` 与 `dynamic_variable_cache` 同理：两张都是新表，故仍是版本 3。
 --
--- 动态变量改为全局作用域后，这两张表的形状变了（去掉 `project_id`，加上环境与服务两列）。
--- 版本仍是 3：`db::schema` 在 `migrate` 里认出旧形状并把两张表丢掉重建，故旧的定义不会
--- 残留，而用户的项目、接口与环境不受影响。
+-- 动态变量的作用域是项目：`dynamic_variables` 带 `project_id` 一列，取数用的环境由
+-- `source_environment_id` 一列点名。数据源端点的地址不住在这两张表里——它住在
+-- `environments.module_base_urls_json` 的 (环境 × 模块) 那一格里，那一格有两个字段：
+-- 后端 api 地址与实际访问地址。
 --
 -- 残留的 `request_settings` **表**被清掉后**仍是**版本 3。那张表（单例行，`CHECK id=1`，
 -- 三列即超时 / 跟随重定向 / 响应体积上限）从建立起就没有任何读者：设置旋钮的现役容器是

@@ -119,8 +119,8 @@ fn module_id_of_is_none_for_a_module_or_an_unknown_node() {
 
 #[test]
 fn module_id_of_follows_an_endpoint_that_was_dragged_to_another_module() {
-    // 服务现在是项目级的，故跨模块拖拽无需改指 endpoint 的服务——但它解析所经过的**单元格**
-    // 跟着它走，而这次查找就是在测那个。
+    // 地址住在 (环境 × 模块) 那一格里，故端点被拖到别的模块下时，它解析的那一格跟着
+    // 端点走，而这次查找就是在测那个。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &module("p1", "m2", 1), None);

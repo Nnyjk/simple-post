@@ -153,9 +153,23 @@ fn backfill_dynamic_variable_projects(conn: &mut Connection) -> Result<(), AppEr
 /// 不匹配会**删库**——一个只是拓宽表的补丁版本会清空所有用户的项目、环境与资源树。
 /// 「纯增量改动不 bump」的承诺，全靠 `schema.sql` 的 `IF NOT EXISTS` 加上这一遍。
 ///
-/// 末尾四项是动态变量的归属项目与处理脚本，以及响应历史的收藏标记与请求快照。
+/// 这份列表共 11 列，逐列是：
+///
+/// - `environments.module_base_urls_json`：环境 × 模块 那一格的地址与代理。
+/// - `environments.disabled_variables_json`：这个环境停用了哪些变量名。
+/// - `endpoint_details.pre_request_script`：端点的前置脚本。
+/// - `endpoint_details.test_script`：端点的测试脚本。
+/// - `endpoint_details.path_params_json`：URL 路径里的占位符与它们各自的值。
+/// - `endpoint_details.tls_json`：端点自己的 HTTPS 出站设置。
+/// - `dynamic_variables.project_id`：动态变量的归属项目。
+/// - `dynamic_variables.transform_script`：动态变量的处理脚本。
+/// - `response_history.is_favorite`：用户收藏了这条历史。
+/// - `response_history.request_json`：那次发送出去的请求。
+/// - `response_history.body_base64`：响应体的二进制形态（base64）。
 const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
+        // 环境 × 模块 那一格的地址与代理。纯增量：旧行读回来是空 map，语义等价于
+        // 「这个环境一个模块的地址都没有」。
         "environments",
         "module_base_urls_json",
         "TEXT NOT NULL DEFAULT '{}'",
