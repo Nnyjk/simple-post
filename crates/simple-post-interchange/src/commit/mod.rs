@@ -61,7 +61,7 @@ pub struct AppliedBaseUrl {
     pub proxy: Option<String>,
     /// 写进了哪个模块的格子。
     pub module_id: String,
-    /// 写进了哪个环境。项目没有激活环境时为 `None`——地址没有落进任何一格。
+    /// 写进了哪个环境。项目没有默认环境时为 `None`——地址没有落进任何一格。
     pub environment_name: Option<String>,
 }
 
@@ -189,9 +189,9 @@ pub fn commit_in_tx(
         }
     };
 
-    // 地址住进 (环境 × 模块) 那一格。环境的答案是唯一的：项目当前激活的那一个。
-    // 没有激活环境就没有格子可填，地址便无处可去——报告里说得清楚，用户能看见
-    // 「地址没有落进任何一格」。
+    // 地址住进 (环境 × 模块) 那一格。环境的答案是唯一的：项目的默认环境，即那个
+    // 项目里最早创建的环境。没有默认环境就没有格子可填，地址便无处可去——报告里
+    // 说得清楚，用户能看见「地址没有落进任何一格」。
     let plan = if apply_base_url {
         let plan = plan_base_url(conn, project_id, ex)?;
         if let Some(d) = plan.multiple_diagnostic() {
@@ -443,9 +443,9 @@ pub fn commit_in_tx(
                     method: ir.method.clone(),
                     // `ir` 存的是 path-only，`domain` 这一列同样是 path，故这是一次改名。
                     url: ir.path.clone(),
-                    // 环境取自上面那一次 `plan_base_url`：地址住进 (环境 × 模块) 那一格，
-                    // 而格子只在某一个环境里。端点带上那个环境，解析时才找得到那一格。
-                    environment_id: environment.map(|e| e.id.clone()),
+                    // 端点不绑定环境：地址住进 (环境 × 模块) 那一格，而用哪个环境是
+                    // 发请求那一刻的事——界面按它自己的「当前环境」，MCP 按每次调用点名的
+                    // 那个。故这里不写环境。
                     // 端点自己的地址。与继承来的那一格相同时不写——那表示「跟随模块」，
                     // 用户改了模块的地址时这个端点也跟着走。地址不同时才写自己的。
                     base_url_override: if apply_base_url {

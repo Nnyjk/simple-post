@@ -7,8 +7,8 @@
 //! 三张表才是完整的请求；任何一行都不足以回答「这个接口该打到哪里去」。
 //!
 //! **先选定环境，再逐模块取，不回退。** 该模块没配就是没有地址——不借用别的模块的。
-//! 故两个入口都要求调用方指名 `environment_id`（`None` 表示取激活环境）：
-//! 让「用哪个环境」成为一次显式的决定，而不是本模块替用户挑一个。
+//! 故两个入口都要求调用方指名 `environment_id`（`None` 表示取默认环境，即最早创建的
+//! 那个）：让「用哪个环境」成为一次显式的决定，而不是本模块替用户挑一个。
 
 use std::collections::HashMap;
 
@@ -57,9 +57,10 @@ fn load_projection(
     let project = db::projects::get(conn, project_id)?;
 
     // 指名的环境可能不属于该项目：那会让 URL 跨项目串过来，故只接受本项目的环境。
+    // 没指名就用项目的默认环境（最早创建的那个）。
     let env = match environment_id {
         Some(id) => Some(db::environments::get(conn, id)?),
-        None => db::environments::get_active(conn, project_id)?,
+        None => db::environments::get_default(conn, project_id)?,
     };
     let env = env.filter(|e| e.project_id == project_id);
 
@@ -103,8 +104,8 @@ fn load_projection(
 
 /// 把项目 `project_id` 在环境 `environment_id` 下的样子投影成一份 [`Exchange`]。
 ///
-/// `environment_id` 为 `None` 时取该项目的激活环境；连激活环境都没有（用户把唯一的环境
-/// 停用了）时**不猜**，产出的 IR 里每个模块的 `servers` 都是空的——那正是
+/// `environment_id` 为 `None` 时取该项目的默认环境（最早创建的那个）；连默认环境都没有
+/// （这个项目一个环境都没有）时**不猜**，产出的 IR 里每个模块的 `servers` 都是空的——那正是
 /// 「这些模块没有 URL」的忠实答案。
 pub fn project_to_ir(
     pool: &DbPool,

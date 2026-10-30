@@ -33,7 +33,6 @@ fn collection_variables_become_an_environment_not_a_service() {
     );
     // 变量不是地址：导成模块那一格会凭空造出一台不存在的机器。
     assert!(env.module_base_urls.is_empty());
-    assert!(!env.is_active, "导入不抢激活位");
 
     // 没有 variable[] 就一个环境都不产出。
     let bare = parse_ok(&json!({ "info": { "name": "n" }, "item": [] }));

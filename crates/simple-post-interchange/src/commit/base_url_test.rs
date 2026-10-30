@@ -117,11 +117,11 @@ fn commit_into_module(
     )
 }
 
-/// 项目当前激活环境的 id。
-fn active_env_id(pool: &DbPool, project_id: &str) -> String {
-    db::with_conn(pool, |c| db::environments::get_active(c, project_id))
-        .expect("active env")
-        .expect("项目有激活环境")
+/// 项目默认环境的 id（最早创建的那个）。
+fn default_env_id(pool: &DbPool, project_id: &str) -> String {
+    db::with_conn(pool, |c| db::environments::get_default(c, project_id))
+        .expect("default env")
+        .expect("项目有默认环境")
         .id
 }
 
@@ -189,7 +189,7 @@ fn one_address_lands_in_the_module_cell_and_the_endpoint_follows_it() {
     assert_eq!(report.base_urls[0].url, "https://api.example.com");
     assert!(report.base_urls[0].environment_name.is_some());
 
-    let env_id = active_env_id(&pool, &project_id);
+    let env_id = default_env_id(&pool, &project_id);
     let written_module = report.base_urls[0].module_id.clone();
     assert!(
         module_ids(&pool, &project_id).contains(&written_module),
@@ -226,7 +226,7 @@ fn each_module_keeps_its_own_address() {
     let report = commit_to_root(&pool, &project_id, &ex, true).expect("commit");
     assert_eq!(report.base_urls.len(), 2, "两个模块各写一格");
 
-    let env_id = active_env_id(&pool, &project_id);
+    let env_id = default_env_id(&pool, &project_id);
     let mut urls: Vec<String> = report
         .base_urls
         .iter()
@@ -271,8 +271,8 @@ fn importing_into_an_existing_module_gives_that_module_the_first_address() {
     assert_eq!(report.base_urls.len(), 1);
     assert_eq!(report.base_urls[0].module_id, module_id);
 
-    let env_id = active_env_id(&pool, &project_id);
-    // 地址住在 (环境 × 模块) 那一格：这里是锚点模块在激活环境里的那一格。
+    let env_id = default_env_id(&pool, &project_id);
+    // 地址住在 (环境 × 模块) 那一格：这里是锚点模块在默认环境里的那一格。
     assert_eq!(
         cell_of(&pool, &env_id, &module_id).as_deref(),
         Some("https://api.example.com")
@@ -289,7 +289,7 @@ fn importing_into_an_existing_module_gives_that_module_the_first_address() {
 fn the_cell_keeps_its_own_proxy_when_the_spec_only_gives_an_address() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
-    let env_id = active_env_id(&pool, &project_id);
+    let env_id = default_env_id(&pool, &project_id);
     // 用户给锚点模块那一格配了网关。
     seed_cell(
         &pool,
@@ -325,7 +325,7 @@ fn the_cell_keeps_its_own_proxy_when_the_spec_only_gives_an_address() {
 fn a_proxy_in_the_spec_replaces_the_proxy_of_the_cell() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
-    let env_id = active_env_id(&pool, &project_id);
+    let env_id = default_env_id(&pool, &project_id);
     seed_cell(
         &pool,
         &env_id,
@@ -361,7 +361,7 @@ fn a_proxy_in_the_spec_replaces_the_proxy_of_the_cell() {
 fn a_cell_without_a_proxy_reports_no_proxy() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
-    let env_id = active_env_id(&pool, &project_id);
+    let env_id = default_env_id(&pool, &project_id);
 
     let ex = exchange(vec![module_with_cell(
         "/item/0",
@@ -387,7 +387,7 @@ fn a_cell_without_a_proxy_reports_no_proxy() {
 fn an_import_that_writes_no_endpoint_leaves_the_anchor_cell_alone() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
-    let env_id = active_env_id(&pool, &project_id);
+    let env_id = default_env_id(&pool, &project_id);
     let ex = exchange(vec![module_with_cell(
         "/item/0",
         "订单",
@@ -432,25 +432,18 @@ fn turning_the_address_off_leaves_the_cell_and_the_endpoint_alone() {
         "关掉时端点也不带地址"
     );
 
-    let env_id = active_env_id(&pool, &project_id);
+    let env_id = default_env_id(&pool, &project_id);
     for m in module_ids(&pool, &project_id) {
         assert_eq!(cell_of(&pool, &env_id, &m), None);
     }
 }
 
 #[test]
-fn without_an_active_environment_the_address_has_nowhere_to_go() {
+fn without_a_default_environment_the_address_has_nowhere_to_go() {
     let (pool, project_id) = fresh_project();
-    // 把项目的激活环境撤掉。
-    let env_id = active_env_id(&pool, &project_id);
-    db::with_tx(&pool, |c| {
-        c.execute(
-            "UPDATE environments SET is_active = 0 WHERE id = ?1",
-            [&env_id],
-        )?;
-        Ok::<(), AppError>(())
-    })
-    .expect("clear active");
+    // 把项目的默认环境删掉。
+    let env_id = default_env_id(&pool, &project_id);
+    db::with_tx(&pool, |c| db::environments::delete(c, &env_id)).expect("delete the env");
 
     let ex = exchange(vec![module_with_cell(
         "/item/0",
@@ -464,14 +457,15 @@ fn without_an_active_environment_the_address_has_nowhere_to_go() {
     assert_eq!(report.base_urls.len(), 1);
     assert!(
         report.base_urls[0].environment_name.is_none(),
-        "没有激活环境时地址没落进任何一格"
+        "没有默认环境时地址没落进任何一格"
     );
     assert_eq!(report.base_urls[0].url, "https://api.example.com");
 
-    let env = db::with_conn(&pool, |c| db::environments::get(c, &env_id)).expect("env");
+    let envs = db::with_conn(&pool, |c| db::environments::list_by_project(c, &project_id))
+        .expect("读环境");
     assert!(
-        env.module_base_urls.is_empty(),
-        "那一格仍然是空的：没有环境就没有地方放"
+        envs.is_empty(),
+        "那个环境已经被删了，故没有地方放地址：{envs:?}"
     );
 }
 
@@ -526,13 +520,16 @@ fn a_module_without_an_address_writes_no_cell() {
 
 #[test]
 fn the_project_created_here_keeps_the_default_environment() {
-    // 建项目的动作会种下一个激活环境——地址才有地方落。
+    // 建项目的动作会种下一个环境——地址才有地方落，且那个环境就是默认环境。
     let (pool, project_id) = fresh_project();
-    let env_id = active_env_id(&pool, &project_id);
-    assert!(!env_id.is_empty(), "建项目会种下一个激活环境");
+    let env_id = default_env_id(&pool, &project_id);
+    assert!(!env_id.is_empty(), "建项目会种下一个环境");
     let env = db::with_conn(&pool, |c| db::environments::get(c, &env_id)).expect("环境行");
-    assert_eq!(env.project_id, project_id, "激活环境属于这个项目");
-    assert!(env.is_active, "这一行就是激活的那一个");
+    assert_eq!(env.project_id, project_id, "默认环境属于这个项目");
+    assert!(
+        env.created_at > 0,
+        "这一行带着创建时刻——默认环境就是最早创建的那个"
+    );
     assert!(
         env.module_base_urls.is_empty(),
         "新项目不预置地址：每一格都要用户自己填"

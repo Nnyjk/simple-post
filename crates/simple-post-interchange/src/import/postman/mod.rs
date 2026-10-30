@@ -191,7 +191,7 @@ fn assign_module_base_urls(modules: &mut [IrModule]) {
 /// 文档自带的 `variable[]` → 一个环境。
 ///
 /// 它是**收集变量**，不是地址：导成模块那一格会凭空造出一台不存在的机器。
-/// `is_active` 恒为 false：导入不抢激活位。
+/// 当前环境不是落库的状态，故导入的环境不抢任何位置。
 fn parse_variables(root: &Map<String, Value>, name: &str) -> Vec<Environment> {
     let Some(arr) = root.get("variable").and_then(Value::as_array) else {
         return Vec::new();
@@ -221,7 +221,7 @@ fn parse_variables(root: &Map<String, Value>, name: &str) -> Vec<Environment> {
         module_base_urls: HashMap::new(),
         variables,
         disabled_variables,
-        is_active: false,
+        created_at: 0,
     }]
 }
 
