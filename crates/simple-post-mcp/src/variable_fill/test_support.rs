@@ -21,7 +21,7 @@ pub(super) fn empty_env() -> Environment {
         module_base_urls: HashMap::new(),
         variables: HashMap::new(),
         disabled_variables: Vec::new(),
-        is_active: true,
+        created_at: 0,
     }
 }
 
@@ -60,7 +60,6 @@ pub(super) fn minimal_endpoint() -> EndpointDetail {
         node_id: "ep1".into(),
         method: HttpMethod::Get,
         url: "/users/{{id}}".into(),
-        environment_id: Some("e1".into()),
         base_url_override: None,
         params: Vec::new(),
         path_params: Vec::new(),

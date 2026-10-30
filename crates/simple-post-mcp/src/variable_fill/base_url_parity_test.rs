@@ -97,7 +97,6 @@ fn detail(case: &EndpointCase) -> EndpointDetail {
         node_id: "ep1".into(),
         method: HttpMethod::Get,
         url: "/users".into(),
-        environment_id: None,
         base_url_override: case.base_url_override.clone(),
         params: Vec::new(),
         path_params: Vec::new(),
@@ -133,7 +132,7 @@ fn env(case: Option<&EnvCase>) -> Option<Environment> {
             .collect(),
         variables: HashMap::new(),
         disabled_variables: Vec::new(),
-        is_active: true,
+        created_at: 0,
     })
 }
 

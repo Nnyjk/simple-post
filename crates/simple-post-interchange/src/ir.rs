@@ -13,8 +13,8 @@
 //!
 //! ## `IrEndpoint::path` 是 path-only
 //!
-//! 刻意**不**复用 `EndpointDetail`：那个结构体带 `node_id` 与 `environment_id` 两个此刻
-//! 不存在的身份字段。外来格式给的是整条 URL，host 的部分要么成为模块那一格、要么成为端点
+//! 刻意**不**复用 `EndpointDetail`：那个结构体带 `node_id` 这个此刻不存在的身份字段。
+//! 外来格式给的是整条 URL，host 的部分要么成为模块那一格、要么成为端点
 //! 自己的 `base_url_override`，两件事都在 `format → ir` 这一侧发生，所以 `ir` 存路径。
 //!
 //! ## `key` 是「IR 还没成为节点」的那一半身份

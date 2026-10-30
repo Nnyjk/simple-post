@@ -172,7 +172,7 @@ const ENV: Environment = {
     token: 'eyJ.e2e',
   },
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
 };
 
 function kv(key: string, value: string, enabled = true): KeyValue {

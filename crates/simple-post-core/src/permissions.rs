@@ -117,7 +117,7 @@ pub fn required_permission(tool_name: &str) -> Permission {
     match tool_name {
         // Read——纯检查，无网络。
         "env_list"
-        | "env_get_active"
+        | "env_get_default"
         | "project_list"
         | "project_get"
         | "module_list"

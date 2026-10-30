@@ -139,7 +139,10 @@ fn a_new_project_gets_a_default_environment_and_a_default_module() {
     let envs = db::with_conn(&pool, |c| db::environments::list_by_project(c, &project_id))
         .expect("读环境");
     assert_eq!(envs.len(), 1, "项目一存在就有一个环境可解析 base URL");
-    assert!(envs[0].is_active, "默认环境是激活态");
+    assert!(
+        envs[0].created_at > 0,
+        "默认环境带着创建时刻——最早创建的那个就是它"
+    );
 
     let modules = db::with_conn(&pool, |c| {
         db::nodes::list_by_root_and_type(c, &project_id, ResourceNodeType::Module)

@@ -256,7 +256,7 @@ async fn the_response_names_the_variable_the_environment_is_missing() {
                 module_base_urls: Default::default(),
                 variables: Default::default(),
                 disabled_variables: Vec::new(),
-                is_active: true,
+                created_at: 0,
             },
         )?;
         Ok(())
@@ -304,7 +304,7 @@ async fn a_variable_the_environment_has_is_not_reported_as_missing() {
                     .into_iter()
                     .collect(),
                 disabled_variables: Vec::new(),
-                is_active: true,
+                created_at: 0,
             },
         )?;
         Ok(())

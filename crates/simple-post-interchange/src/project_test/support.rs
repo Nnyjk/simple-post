@@ -11,7 +11,7 @@ use simple_post_core::error::AppError;
 
 pub(super) static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// 一个项目：自带一个默认模块、一个激活环境。
+/// 一个项目：自带一个默认模块、一个默认环境。
 pub(super) struct Seeded {
     pub(super) project_id: String,
     pub(super) module_id: String,
@@ -60,7 +60,6 @@ fn rich_detail(node_id: String) -> EndpointDetail {
         node_id,
         method: HttpMethod::Post,
         url: "/users/{{id}}".into(),
-        environment_id: Some("e".into()),
         base_url_override: None,
         path_params: vec![],
         params: vec![KeyValue {

@@ -610,15 +610,15 @@ async fn the_declared_server_is_never_the_one_dialled() {
 /// 导出预览的地址必须按**指名的那个环境**解析。
 ///
 /// 渲染层在下拉里换了环境就会重取一趟预览，那一趟带着 `environmentId`。若服务端
-/// 仍按激活环境解析，界面上的「该环境下没有配置地址」就会按**旧环境**点名：
+/// 仍按默认环境解析，界面上的「该环境下没有配置地址」就会按**旧环境**点名：
 /// 在新环境里其实配好 URL 的模块被要求去配置，真正缺 URL 的模块反而不被提示。
 #[test]
 fn the_export_preview_resolves_base_urls_by_the_named_environment() {
     let pool = temp_pool("export-env");
     let (project_id, module_id) = seed_two_environments(&pool);
 
-    // 激活环境是「无 URL」那个：不给 environmentId 时按它算。
-    let by_active = export_preview(
+    // 默认环境是「无 URL」那个：不给 environmentId 时按它算。
+    let by_default = export_preview(
         &pool,
         &ExportPreviewOpts {
             project_id: project_id.clone(),
@@ -627,11 +627,11 @@ fn the_export_preview_resolves_base_urls_by_the_named_environment() {
         },
     )
     .expect("预览");
-    assert_eq!(by_active.environment_id.as_deref(), Some("env-a"));
+    assert_eq!(by_default.environment_id.as_deref(), Some("env-a"));
     assert!(
-        by_active.base_urls[0].base_url.is_none(),
-        "激活环境里没配地址，就该是缺席的：{:?}",
-        by_active.base_urls
+        by_default.base_urls[0].base_url.is_none(),
+        "默认环境里没配地址，就该是缺席的：{:?}",
+        by_default.base_urls
     );
 
     // 指名「有地址」那个环境：同一批模块，这一次有地址了。
@@ -655,7 +655,7 @@ fn the_export_preview_resolves_base_urls_by_the_named_environment() {
         by_named.base_urls
     );
 
-    // 空串 ≡ 没传：都退回激活环境。渲染层「不选环境」那一项送来的就是空串。
+    // 空串 ≡ 没传：都退回默认环境。渲染层「不选环境」那一项送来的就是空串。
     let by_empty = export_preview(
         &pool,
         &ExportPreviewOpts {
@@ -718,8 +718,8 @@ fn temp_pool(tag: &str) -> DbPool {
 
 /// 一个项目 + 一个模块 + 两个环境。
 ///
-/// `env-a` 是激活环境，且**没有**给这个模块配地址；`env-b` 配了。两个环境在
-/// 「这个模块有没有地址」这件事上答案相反，故指错环境就会看得见。
+/// `env-a` 是默认环境（建得最早的那个），且**没有**给这个模块配地址；`env-b` 建得晚，
+/// 配了。两个环境在「这个模块有没有地址」这件事上答案相反，故指错环境就会看得见。
 fn seed_two_environments(pool: &DbPool) -> (String, String) {
     db::with_tx(pool, |conn| {
         let project = db::projects::create_with_defaults(
@@ -748,7 +748,15 @@ fn seed_two_environments(pool: &DbPool) -> (String, String) {
             },
             None,
         )?;
-        for (id, name, active) in [("env-a", "甲", true), ("env-b", "乙", false)] {
+        // 项目自带一个环境；把它删掉，好让「默认环境 = 最早创建的那个」有确定的答案。
+        for env in db::environments::list_by_project(conn, &project.id)? {
+            db::environments::delete(conn, &env.id)?;
+        }
+        // 甲建得早，故它是默认环境；乙建得晚。
+        for (id, name, created_at) in [
+            ("env-a", "甲", 1_700_000_000_000i64),
+            ("env-b", "乙", 1_700_000_100_000i64),
+        ] {
             db::environments::create(
                 conn,
                 &Environment {
@@ -758,7 +766,7 @@ fn seed_two_environments(pool: &DbPool) -> (String, String) {
                     module_base_urls: Default::default(),
                     variables: Default::default(),
                     disabled_variables: Default::default(),
-                    is_active: active,
+                    created_at,
                 },
             )?;
         }
@@ -770,9 +778,6 @@ fn seed_two_environments(pool: &DbPool) -> (String, String) {
             Some("https://b.example.com"),
             None,
         )?;
-        // 项目自带的那个默认环境也是激活的，故显式指明「甲」是激活的那个——
-        // 否则「不给 environmentId 时按谁算」这件事就没有确定的答案。
-        db::environments::set_active(conn, "env-a")?;
         Ok((project.id, "m1".to_string()))
     })
     .expect("seed")
@@ -783,7 +788,6 @@ fn endpoint_detail(node_id: &str, method: HttpMethod, url: &str) -> EndpointDeta
         node_id: node_id.into(),
         method,
         url: url.into(),
-        environment_id: None,
         base_url_override: None,
         params: Vec::new(),
         path_params: Vec::new(),

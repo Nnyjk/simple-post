@@ -162,8 +162,8 @@ pub fn resolve_project(
 /// 在项目下按名找或建一个环境。
 ///
 /// 环境的**列表**是项目级事实，名字在同一项目里也不唯一（界面允许两个同名环境），
-/// 所以「按名找」是「找出第一个同名的」。新环境一律 `is_active = false` —— 导入
-/// 一个环境不等于切换当前环境，那是一次显式决定。
+/// 所以「按名找」是「找出第一个同名的」。当前环境不是落库的状态，故这里不碰它——
+/// 新建一个环境不等于任何客户端切换了它。
 pub fn resolve_environment(
     conn: &mut Connection,
     project_id: &str,
@@ -197,7 +197,9 @@ pub fn resolve_environment(
         module_base_urls: std::collections::HashMap::new(),
         variables: std::collections::HashMap::new(),
         disabled_variables: Vec::new(),
-        is_active: false,
+        // 创建时刻：`db::environments::create` 用它认定「默认环境」（最早创建的那个）。
+        // 项目里第一个环境写当前时间，后建的自然排在它后面。
+        created_at: crate::domain::now_ms(),
     };
     db::environments::create(conn, &env)?;
     Ok(Resolved::created(env.id))

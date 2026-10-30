@@ -55,7 +55,6 @@ impl From<simple_post_core::script::ScriptedSendOutcome> for SendOutcomeDto {
 pub struct CreateEndpointDetailOpts {
     pub method: Option<HttpMethod>,
     pub url: Option<String>,
-    pub environment_id: Option<String>,
     pub body: Option<RequestBody>,
     pub auth: Option<AuthConfig>,
     pub tags: Option<Vec<String>>,
@@ -87,7 +86,6 @@ impl CreateEndpointDetailOpts {
             node_id: node_id.to_string(),
             method: self.method.unwrap_or_default(),
             url: self.url.unwrap_or_default(),
-            environment_id: self.environment_id,
             base_url_override: None,
             params: self.params.unwrap_or_default(),
             path_params: self.path_params.unwrap_or_default(),
@@ -108,7 +106,6 @@ impl CreateEndpointDetailOpts {
 #[serde(rename_all = "camelCase")]
 pub struct CreateEnvironmentOpts {
     pub variables: Option<std::collections::HashMap<String, String>>,
-    pub make_active: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -282,7 +279,7 @@ pub struct ImportedEnvironmentDto {
 pub struct ProposedBaseUrlDto {
     /// 文档给出的那个地址。落库时它会被写进目标模块在这个环境下的那一格。
     pub url: String,
-    /// 地址会写进哪个环境。项目没有激活环境时为 `None`——地址没有落进任何一格。
+    /// 地址会写进哪个环境。项目没有默认环境时为 `None`——地址没有落进任何一格。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment_name: Option<String>,
 }
@@ -299,7 +296,7 @@ pub struct AppliedBaseUrlDto {
     pub proxy: Option<String>,
     /// 写进了哪个模块的格子。
     pub module_id: String,
-    /// 写进了哪个环境。项目没有激活环境时为 `None`。
+    /// 写进了哪个环境。项目没有默认环境时为 `None`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment_name: Option<String>,
 }
@@ -359,7 +356,7 @@ pub struct ModuleBaseUrlDto {
 pub struct ExportPreviewDto {
     pub groups: Vec<TransferNode>,
     pub counts: TransferCounts,
-    /// 实际用到的环境 id。为 `None` 表示没选出环境（或该项目没有激活环境），
+    /// 实际用到的环境 id。为 `None` 表示没选出环境（或该项目没有默认环境），
     /// 那时每个模块的 `base_url` 都是缺席的——这是忠实答案，不是「待补」。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment_id: Option<String>,
@@ -415,7 +412,7 @@ pub struct ImportCommitOpts {
 pub struct ExportPreviewOpts {
     pub project_id: String,
     pub module_id: String,
-    /// 按哪个环境解析那一格的地址。**缺席或空串 = 取激活环境**（与今天一致）。
+    /// 按哪个环境解析那一格的地址。**缺席或空串 = 取默认环境**（最早创建的那个）。
     ///
     /// 空串必须与「没传」等价：渲染层「不选环境」那一项送来的就是空串，而空串
     /// 不是一个环境 id——按 id 去查会得到「环境不存在」。

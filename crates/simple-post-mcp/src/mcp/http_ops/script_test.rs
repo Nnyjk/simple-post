@@ -111,7 +111,6 @@ fn script_endpoint(
         node_id: "e_script".into(),
         method: HttpMethod::Get,
         url: format!("{api_url}/me"),
-        environment_id: Some("env_script".into()),
         base_url_override: None,
         params: vec![],
         path_params: vec![],
@@ -134,7 +133,7 @@ fn script_endpoint(
             .into_iter()
             .collect(),
         disabled_variables: vec![],
-        is_active: true,
+        created_at: 0,
     };
     simple_post_core::db::with_tx(&st.pool, |c| {
         projects::create(c, &project)?;

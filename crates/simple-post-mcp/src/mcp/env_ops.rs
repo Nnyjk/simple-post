@@ -1,9 +1,13 @@
-//! 环境域 MCP 工具 —— 共 8 个。
+//! 环境域 MCP 工具 —— 共 7 个。
 //!
 //! 每个工具都是同一套四步：解析 `arguments`（小型 serde 类型）→ 过
 //! `simple_post_core::permissions::require` → 委托
 //! `simple_post_core::db::environments::*` → 用 `CallToolResult::json` 包成单个
 //! text content 块回给 LLM。
+//!
+//! 这里**没有**「切换当前环境」的工具：当前环境是每个客户端自己的实时状态，落库会让
+//! web 端多个人互相踩。MCP 侧改为**逐次点名**——`api_call_endpoint` 与
+//! `api_run_request` 都收一个可选的环境 id，没点名就用项目的默认环境。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -63,7 +67,7 @@ struct SetBaseUrlArgs {
 // 公共：dispatch 表片段
 // =========================================================================
 
-/// 被 `mcp::mod::tool_table` 调一次的 8 行 env_* 记录。
+/// 被 `mcp::mod::tool_table` 调一次的 7 行 env_* 记录。
 pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
@@ -78,15 +82,15 @@ pub(crate) fn table() -> Vec<ToolEntry> {
             func: tool_fn!(tool_env_list),
         },
         ToolEntry {
-            name: "env_get_active",
-            description: "Return the project's currently-active environment, if any.",
+            name: "env_get_default",
+            description: "Return the project's default environment — the earliest one created — if any. A request that names no environment is resolved against it.",
             schema: json!({
                 "type": "object",
                 "properties": { "project_id": { "type": "string" } },
                 "required": ["project_id"],
                 "additionalProperties": false,
             }),
-            func: tool_fn!(tool_env_get_active),
+            func: tool_fn!(tool_env_get_default),
         },
         ToolEntry {
             name: "env_create",
@@ -142,7 +146,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_delete",
-            description: "Delete an environment by id.",
+            description: "Delete an environment by id. Endpoints do not bind an environment, so nothing else changes; a request that still names this environment resolves without an environment at all — no base URL, no substituted variables — so name another one or omit the name to get the project's default environment.",
             schema: json!({
                 "type": "object",
                 "properties": { "env_id": { "type": "string" } },
@@ -185,17 +189,6 @@ pub(crate) fn table() -> Vec<ToolEntry> {
             }),
             func: tool_fn!(tool_env_set_baseurl),
         },
-        ToolEntry {
-            name: "env_set_active",
-            description: "Mark an environment as the active one for its project.",
-            schema: json!({
-                "type": "object",
-                "properties": { "env_id": { "type": "string" } },
-                "required": ["env_id"],
-                "additionalProperties": false,
-            }),
-            func: tool_fn!(tool_env_set_active),
-        },
     ]
 }
 
@@ -213,12 +206,12 @@ async fn tool_env_list(state: &AppState, args: Value) -> Result<CallToolResult, 
     Ok(CallToolResult::json(envs))
 }
 
-async fn tool_env_get_active(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
+async fn tool_env_get_default(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: ProjectIdArgs = serde_json::from_value(args)
-        .map_err(|e| AppError::Validation(format!("env_get_active args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, &a.project_id, "env_get_active").await?;
+        .map_err(|e| AppError::Validation(format!("env_get_default args: {e}")))?;
+    crate::mcp::check_permission(&state.pool, &a.project_id, "env_get_default").await?;
     let env = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::environments::get_active(c, &a.project_id)
+        simple_post_core::db::environments::get_default(c, &a.project_id)
     })?;
     Ok(CallToolResult::json(env))
 }
@@ -279,11 +272,6 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .as_ref()
             .and_then(|p| p.get("disabledVariables"))
             .and_then(|v| serde_json::from_value(v.clone()).ok()),
-        is_active: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("is_active"))
-            .and_then(Value::as_bool),
     };
 
     let env = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -359,18 +347,5 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
         )
     })?;
 
-    Ok(CallToolResult::json(env))
-}
-
-async fn tool_env_set_active(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
-    let env_id = arg_str(&args, "env_id")?.to_string();
-    // 过门前先查所属项目，门才对得上键。
-    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::environments::lookup_project_id(c, &env_id)
-    })?;
-    crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
-    let env = simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::environments::set_active(c, &env_id)
-    })?;
     Ok(CallToolResult::json(env))
 }

@@ -2,7 +2,7 @@
  * 导出预览：换环境之后，提示按**所选**环境算，且不重置已勾选的条目。
  *
  * 缺陷本身：预览的 `baseUrls` 是按环境解析的，而提示（「该环境下没有配置地址」）
- * 一直沿用打开弹窗时那一趟——那时用的是激活环境。用户在下拉里换了环境，提示却还
+ * 一直沿用打开弹窗时那一趟——那时用的是默认环境。用户在下拉里换了环境，提示却还
  * 按旧环境算：已经配好地址的模块被点名要求配置，真正缺地址的模块反而不被提示。
  * 说的与做的不一致，且方向是反的。
  *
@@ -30,7 +30,7 @@ const ENVIRONMENTS: Environment[] = [
     moduleBaseUrls: {},
     variables: {},
     disabledVariables: [],
-    isActive: true,
+    createdAt: 1,
   },
   {
     id: 'envB',
@@ -39,7 +39,7 @@ const ENVIRONMENTS: Environment[] = [
     moduleBaseUrls: {},
     variables: {},
     disabledVariables: [],
-    isActive: false,
+    createdAt: 2,
   },
 ];
 
@@ -131,7 +131,7 @@ describe('导出预览：环境与提示', () => {
   });
 
   it('切到有地址的环境后，提示不再要求配置该模块', async () => {
-    // 打开弹窗那一趟：按激活环境（环境 A）解析，模块 m 缺地址，提示出现。
+    // 打开弹窗那一趟：按默认环境（环境 A）解析，模块 m 缺地址，提示出现。
     const opened = await fetchExportPreview({
       projectId: 'p1',
       moduleId: 'm1',

@@ -125,8 +125,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/environments",
             get(environments_list).post(environments_create),
         )
-        // 同样的 radix tree 优先级：`/active`（字面量）注册在 `/{envId}`（参数）之前。
-        .route("/api/environments/active", post(environments_set_active))
         .route(
             "/api/environments/{envId}",
             patch(environments_update).delete(environments_delete),

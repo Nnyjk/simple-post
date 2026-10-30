@@ -82,7 +82,7 @@ export function missingEnvironmentName(
  * 取一趟导出预览。
  *
  * `environmentId` 决定 `baseUrls` 按哪个环境解析：空串与「没传」等价，服务端那侧
- * 都退回激活环境——「不选环境」那一项送来的就是空串。
+ * 都退回默认环境（最早创建的那个）——「不选环境」那一项送来的就是空串。
  */
 export async function fetchExportPreview(args: {
   projectId: string;
@@ -157,7 +157,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
       reset();
       setPhase('working');
       try {
-        // 此刻**还没选环境**，故这次请求不送 `environmentId`：服务端按激活环境解析，返回值
+        // 此刻**还没选环境**，故这次请求不送 `environmentId`：服务端按默认环境解析，返回值
         // 里的 `environmentId` 正是下拉里该显示的那一个。
         const p = await invokeCmd<ExportPreview>(COMMANDS.interchangeExportPreview, {
           projectId: s.projectId,
@@ -184,7 +184,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
    * 换导出环境。
    *
    * 环境一变，「哪些模块没有地址」就是**那个环境**下的事实，故要重取一趟预览：
-   * 沿用打开弹窗时那一趟（按激活环境算的）会把已经配好地址的模块点成缺地址，
+   * 沿用打开弹窗时那一趟（按默认环境算的）会把已经配好地址的模块点成缺地址，
    * 真正缺地址的模块反而不被点名。
    *
    * 勾选**不重置**：勾选集的成员是节点 id，换环境不产生新节点，用户勾过的东西

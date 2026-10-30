@@ -10,7 +10,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { installIpcMock } from './_browser-shim';
-import { makeCrudHarness, makeEnvironment, type CapturedInvoke } from './crud-slice-harness';
+import {
+  makeCrudHarness,
+  makeDetail,
+  makeEnvironment,
+  type CapturedInvoke,
+} from './crud-slice-harness';
 describe('crud-slice: 环境值的 null 删除契约', () => {
   it('变量删除立即移除本地键，发送 null，并在成功路径保留空字符串值', async () => {
     const original = makeEnvironment({
@@ -272,5 +277,87 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
 
     assert.deepEqual(harness.bag.environments[0].disabledVariables, ['token']);
     assert.strictEqual(harness.bag.environments[0], original);
+  });
+});
+
+describe('crud-slice: 删除环境时当前环境怎么落', () => {
+  /** 两个环境：dev 先创建（故是默认环境），staging 后创建。 */
+  function twoEnvs() {
+    return [
+      makeEnvironment({ id: 'env-1', name: 'dev', createdAt: 1 }),
+      makeEnvironment({ id: 'env-2', name: 'staging', createdAt: 2 }),
+    ];
+  }
+
+  it('删掉当前环境时回落到这个项目的默认环境（最早创建的那个）', async () => {
+    const harness = makeCrudHarness({}, twoEnvs(), [], [], 'env-2');
+    installIpcMock(async () => null);
+
+    await harness.slice.deleteEnvironment('env-2');
+
+    assert.equal(
+      harness.bag.activeEnvironmentId,
+      'env-1',
+      '当前环境被删掉后要落到默认环境，而不是留一个不存在的 id',
+    );
+    assert.deepEqual(
+      harness.bag.environments.map((e) => e.id),
+      ['env-1'],
+      '环境列表里那个被删的确实没了',
+    );
+  });
+
+  it('删掉的不是当前环境时，当前环境不动', async () => {
+    const harness = makeCrudHarness({}, twoEnvs(), [], [], 'env-2');
+    installIpcMock(async () => null);
+
+    await harness.slice.deleteEnvironment('env-1');
+
+    assert.equal(harness.bag.activeEnvironmentId, 'env-2', '当前环境不该被这次删除带走');
+  });
+
+  it('删掉当前环境且项目里再无环境时，当前环境置空', async () => {
+    const harness = makeCrudHarness(
+      {},
+      [makeEnvironment({ id: 'env-1', createdAt: 1 })],
+      [],
+      [],
+      'env-1',
+    );
+    installIpcMock(async () => null);
+
+    await harness.slice.deleteEnvironment('env-1');
+
+    assert.equal(harness.bag.activeEnvironmentId, '', '一个环境都不剩时当前环境置空');
+  });
+
+  it('端点行不再有环境绑定：删环境不动任何接口配置', async () => {
+    const details = { 'ep-a': makeDetail({ nodeId: 'ep-a', url: '/a' }) };
+    const harness = makeCrudHarness(details, twoEnvs(), [], [], 'env-1');
+    installIpcMock(async () => null);
+
+    await harness.slice.deleteEnvironment('env-1');
+
+    assert.strictEqual(
+      harness.bag.endpointDetails['ep-a'],
+      details['ep-a'],
+      '接口配置里没有环境这一项，删环境不该碰它',
+    );
+  });
+
+  it('删除失败时环境列表与当前环境一起回滚', async () => {
+    const harness = makeCrudHarness({}, twoEnvs(), [], [], 'env-2');
+    installIpcMock(async () => {
+      throw new Error('delete failed');
+    });
+
+    await harness.slice.deleteEnvironment('env-2');
+
+    assert.deepEqual(
+      harness.bag.environments.map((e) => e.id),
+      ['env-1', 'env-2'],
+      '删除失败时环境列表回到原值',
+    );
+    assert.equal(harness.bag.activeEnvironmentId, 'env-2', '当前环境也回到原值');
   });
 });

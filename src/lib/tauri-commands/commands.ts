@@ -50,7 +50,6 @@ export const COMMANDS = {
   environmentsSetVarDisabled: 'environments_set_var_disabled',
   environmentsRenameVar: 'environments_rename_var',
   environmentsSetModuleBaseurl: 'environments_set_module_baseurl',
-  environmentsSetActive: 'environments_set_active',
 
   // ----- interchange (import / export) -----
   // 两条边各两步：**先预览后落定**。预览只读，它回答「这份文件里有哪些条目、有哪些

@@ -16,7 +16,7 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
     TABLE.get_or_init(|| {
         let mut v = Vec::with_capacity(64);
 
-        // env_ops：8 个
+        // env_ops：7 个
         v.extend(env_ops::table());
 
         // project_ops：project + module + collection + endpoint + spec
@@ -60,13 +60,12 @@ pub fn registered_tool_names() -> Vec<String> {
 pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     // env
     ("env_list", Capability::Read),
-    ("env_get_active", Capability::Read),
+    ("env_get_default", Capability::Read),
     ("env_create", Capability::Create),
     ("env_update", Capability::Update),
     ("env_delete", Capability::Delete),
     ("env_set_var", Capability::Update),
     ("env_set_baseurl", Capability::Update),
-    ("env_set_active", Capability::Update),
     // project
     ("project_list", Capability::Read),
     ("project_get", Capability::Read),

@@ -85,17 +85,17 @@ fn every_registered_tool_has_a_capability() {
 
 /// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` 与 `README.md` 都写着「47 tools」。上面的双射测试在「工具连同它的
+/// `AGENTS.md` 与 `README.md` 都写着「46 tools」。上面的双射测试在「工具连同它的
 /// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
 /// 里要改这个常量，同一个 commit 也应更新那两份文档。
-const EXPECTED_TOOL_COUNT: usize = 47;
+const EXPECTED_TOOL_COUNT: usize = 46;
 
 #[test]
 fn registered_tool_count_matches_the_documented_figure() {
     assert_eq!(
         tool_table().len(),
         EXPECTED_TOOL_COUNT,
-        "tool count changed; update EXPECTED_TOOL_COUNT and the '47 tools' \
+        "tool count changed; update EXPECTED_TOOL_COUNT and the '46 tools' \
              claims in AGENTS.md and README.md"
     );
 }
@@ -117,23 +117,23 @@ fn every_capability_row_names_a_registered_tool() {
 
 /// `tools/list` 的体积有一个上限，理由是**它每一次会话都要付钱**。
 ///
-/// 客户端在动手之前要先把整份清单读进上下文，于是 47 条描述符的每一个字节都乘以
+/// 客户端在动手之前要先把整份清单读进上下文，于是 46 条描述符的每一个字节都乘以
 /// 「会话数」。详细的解释属于 `simple-post://spec-authoring` 那份按需读取的指南，
 /// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
 ///
 /// **上限怎么算出来的。** 紧凑 JSON 约 **4.71 字节 / token**（`cl100k_base` 实测；
-/// 「字符数 ÷ 3」高估六成），41 392 字节 ≈ **8 788 tokens**，故上限取 42 000 字节。
+/// 「字符数 ÷ 3」高估六成），41 521 字节 ≈ **8 815 tokens**，故上限取 42 000 字节。
 /// 超限时把长说明移到 `simple-post://spec-authoring`，不要扩大工具描述。
 ///
 /// **上限量的是字节**：载荷里含中文描述，`String::len()` 按 UTF-8 字节算，
-/// 故同一份载荷是 41 340 字符、41 392 字节。
+/// 故同一份载荷是 41 461 字符、41 521 字节。
 ///
 /// **42 000 这个上限对应哪几段契约。** 清单里有三段说明是代理地址带来的：
 /// `env_set_baseurl` 的 `proxy` 参数、`spec_upsert` 的 environment 段、
-/// `api_call_endpoint` 的 `settings_override`。加上这三段之后载荷是 41 392 字节，
-/// 上限取 42 000，给它们留 608 字节的余量。
+/// `api_call_endpoint` 的 `settings_override`。加上这三段之后载荷是 41 521 字节，
+/// 上限取 42 000，给它们留 479 字节的余量。
 ///
-/// **这份清单现在装了什么。** 47 条描述符里没有一条携带「服务 id」字段：地址住在
+/// **这份清单现在装了什么。** 46 条描述符里没有一条携带「服务 id」字段：地址住在
 /// （环境 × 模块）一格里，`env_set_baseurl` 按 `env_id` + `module_id` 写那一格。
 ///
 /// **上限要动时怎么写。** 契约长大先把新加的那几段说明压到一行，压到一行还嫌长

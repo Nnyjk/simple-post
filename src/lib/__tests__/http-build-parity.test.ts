@@ -50,7 +50,7 @@ function envOf(variables: Record<string, string>): Environment {
     moduleBaseUrls: {},
     variables,
     disabledVariables: [],
-    isActive: true,
+    createdAt: 1,
   };
 }
 

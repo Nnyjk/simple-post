@@ -1,7 +1,6 @@
 //! `domain → ir → domain` 往返、投影的幂等与「不回退」的服务取值。
 
 use simple_post_core::db;
-use simple_post_core::error::AppError;
 
 use super::project_to_ir;
 use super::support::{
@@ -124,20 +123,13 @@ fn an_environment_from_another_project_is_not_used() {
 }
 
 #[test]
-fn a_project_with_no_active_environment_projects_no_address() {
+fn a_project_with_no_default_environment_projects_no_address() {
     let pool = temp_pool("noenv");
     let s = seed_project(&pool);
     add_endpoint(&pool, &s, &s.module_id);
 
-    // 停用唯一的环境，再不指名任何环境：投影不猜，地址为空。
-    db::with_tx(&pool, |conn| {
-        conn.execute(
-            "UPDATE environments SET is_active = 0 WHERE id = ?1",
-            [&s.env_id],
-        )?;
-        Ok::<(), AppError>(())
-    })
-    .expect("deactivate");
+    // 删掉唯一的环境，再不指名任何环境：投影不猜，地址为空。
+    db::with_tx(&pool, |conn| db::environments::delete(conn, &s.env_id)).expect("delete");
 
     let ex = project_to_ir(&pool, &s.project_id, None).expect("project");
     assert_eq!(ex.environment_id, None);

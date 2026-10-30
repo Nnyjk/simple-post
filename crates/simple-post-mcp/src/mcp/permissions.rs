@@ -19,11 +19,11 @@ pub async fn check_permission(
 
 /// 这次发送用哪个环境。
 ///
-/// 端点自己绑定的环境优先；没绑定就取项目当前激活的那个 —— 与界面那侧一致：界面用的
-/// 是工作区当前环境，而顶栏的环境切换会写 `environments.is_active`，故两处读到的是
-/// 同一个环境。
+/// **逐次点名优先，没点名就用项目的默认环境**（一个项目里最早创建的那个环境，
+/// `db::environments::get_default`）。当前环境不是落库的状态，故这里没有「项目当前
+/// 激活的环境」可读——MCP 每次调用自己选：点名就用点名的那个，不点名就用默认的。
 ///
-/// 端点绑定的环境必须属于端点所在的项目：环境里的变量属于那个项目，拿别的项目的
+/// 点名的环境必须属于这次请求所在的项目：环境里的变量属于那个项目，拿别的项目的
 /// 环境来替换，等于把那个项目的值读进这个项目的请求。
 ///
 /// 两者都取不到时没有环境：变量不替换，base URL 的格子也无从读。
@@ -53,7 +53,7 @@ pub(crate) fn resolve_env(
         return Ok(None);
     }
     Ok(simple_post_core::db::with_conn(pool, |c| {
-        simple_post_core::db::environments::get_active(c, project_id)
+        simple_post_core::db::environments::get_default(c, project_id)
     })
     .unwrap_or(None))
 }

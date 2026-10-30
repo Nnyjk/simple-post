@@ -102,8 +102,7 @@ fn a_full_spec_lands_the_module_the_collections_the_environment_and_the_endpoint
                 "name": "gray",
                 "variables": { "token": "gray-token", "region": "cn-east", "legacy": "old" },
                 "disabled_variables": ["legacy"],
-                "base_url": "https://gray.example.com",
-                "activate": true
+                "base_url": "https://gray.example.com"
             },
             "endpoint": {
                 "name": "查询活动",
@@ -128,10 +127,9 @@ fn a_full_spec_lands_the_module_the_collections_the_environment_and_the_endpoint
     assert_eq!(outcome.collections[0].name, "活动");
     assert_eq!(outcome.collections[1].name, "详情");
 
-    // 环境：新建并激活。
+    // 环境：新建。当前环境不是落库的状态，故这里没有「激活」这一说。
     let env = outcome.environment.expect("规格里有环境");
     assert!(env.created);
-    assert!(env.activated);
 
     // 端点：新建。
     assert!(outcome.endpoint.created);
@@ -161,8 +159,6 @@ fn a_full_spec_lands_the_module_the_collections_the_environment_and_the_endpoint
             Some("pm.environment.set('a', 'b');")
         );
         assert!(detail.test_script.is_some());
-        // 端点绑定到规格里的环境。
-        assert_eq!(detail.environment_id.as_deref(), Some(env.id.as_str()));
 
         // 那一格地址落在 (环境 × 模块) 上。
         let stored_env = db::environments::get(c, &env.id)?;
@@ -727,7 +723,7 @@ fn an_environment_that_belongs_to_another_project_is_refused() {
             module_base_urls: Default::default(),
             variables: Default::default(),
             disabled_variables: Vec::new(),
-            is_active: false,
+            created_at: 0,
         };
         db::environments::create(c, &env)?;
         Ok(env.id)
@@ -889,11 +885,11 @@ fn a_collection_under_another_module_is_refused() {
     assert!(e.to_string().contains("m_order"), "{e}");
 }
 
-/// 端点自绑的环境必须属于规格指名的项目。
+/// 规格里点名的环境必须属于规格指名的项目。
 ///
-/// 环境里的变量属于那个项目，绑一个别的项目的环境等于让这个项目去读那个项目的值。
+/// 环境里的变量属于那个项目，指向别的项目的环境等于让这个项目去读那个项目的值。
 #[test]
-fn an_endpoint_bound_to_another_projects_environment_is_refused() {
+fn an_environment_from_another_project_is_refused() {
     let (pool, _dir) = fresh_pool();
     // fixture 里的环境都属于 p_demo，所以先在另一个项目里造一个。
     let foreign_env_id = db::with_conn(&pool, |c| {
@@ -904,7 +900,7 @@ fn an_endpoint_bound_to_another_projects_environment_is_refused() {
             module_base_urls: Default::default(),
             variables: Default::default(),
             disabled_variables: Vec::new(),
-            is_active: false,
+            created_at: 0,
         };
         db::environments::create(c, &env)?;
         Ok(env.id)
@@ -916,11 +912,11 @@ fn an_endpoint_bound_to_another_projects_environment_is_refused() {
         json!({
             "project_id": "p_demo",
             "module": "营销",
+            "environment": { "id": foreign_env_id },
             "endpoint": {
                 "name": "查询活动",
                 "method": "GET",
-                "url": "/api/campaigns",
-                "environment_id": foreign_env_id
+                "url": "/api/campaigns"
             }
         }),
     );

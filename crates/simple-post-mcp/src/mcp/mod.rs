@@ -9,7 +9,7 @@
 //!     dispatch.rs       ← tools/call 的分派
 //!     args.rs           ← 参数辅助函数
 //!     permissions.rs    ← 按项目的权限门与环境解析
-//!     env_ops.rs        ← 8 个 env_* 工具
+//!     env_ops.rs        ← 7 个 env_* 工具
 //!     key_value.rs      ← 共享的键值对 JSON Schema
 //!     project_ops/      ← project / module / collection / endpoint / spec
 //!     http_ops/         ← api_run_request, api_call_endpoint
@@ -103,6 +103,10 @@ mod tests;
 #[cfg(test)]
 #[path = "env_resolve_test.rs"]
 mod env_resolve_tests;
+
+#[cfg(test)]
+#[path = "env_switch_test.rs"]
+mod env_switch_tests;
 
 #[cfg(test)]
 #[path = "resources_test.rs"]

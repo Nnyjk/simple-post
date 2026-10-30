@@ -103,7 +103,7 @@ pub(super) fn resolve_parent_of(
     }
 }
 
-/// 环境：找或建它、合并变量、写那一格 URL、按规格决定是否激活。
+/// 环境：找或建它、合并变量、写那一格 URL。
 pub(super) fn resolve_environment_of(
     conn: &mut Connection,
     project_id: &str,
@@ -190,16 +190,12 @@ pub(super) fn resolve_environment_of(
         )?;
     }
 
-    // 激活：只在规格明说时改。
-    let activate = env_spec.activate.unwrap_or(false);
-    if activate {
-        db::environments::set_active(conn, &resolved.id)?;
-    }
+    // 当前环境不是落库的状态，故规格里没有「把它设为当前环境」这一项——那是每个客户端
+    // 自己的实时选择，规格落库管不着。
 
     Ok(Some(EnvironmentOutcome {
         id: resolved.id,
         name: env.name,
         created: resolved.created,
-        activated: activate,
     }))
 }

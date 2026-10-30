@@ -26,10 +26,12 @@
  * 独立切片。多个动作刻意在同一次 `set()` 里写别人拥有的键——`deleteProject` 写
  * `openTabs` / `activeTabId` / `activeProjectId` / `activeEndpointId`，
  * `deleteNode` 写 `openTabs` / `activeTabId` / `activeEndpointId`，
- * `setEnvironmentActive` 写 `activeEnvironmentId`，`deleteEnvironment` 写
- * `activeEnvironmentId` + `endpointDetails`；拆成多次 `get().closeTab()`
+ * `deleteEnvironment` 写 `activeEnvironmentId`；拆成多次 `get().closeTab()`
  * 式的调用会把一次 `set()` 变成多次，也改变 IPC 失败时 `set(snapshot)` 能
  * 回滚的范围。
+ *
+ * 「当前环境」不在本切片里：它是客户端的实时状态，不落库，故由 bootstrap 切片的
+ * `setCurrentEnvironment` 管（见 `bootstrap-slice.ts`）。
  *
  * 拓扑是星形：子工厂可 import `./crud-helpers`，彼此之间以及与本文件之间都不
  * 互相 import。各取标准 `(set, get)` 二元组，只返回自己的动作对象。

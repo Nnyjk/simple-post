@@ -5,7 +5,7 @@
 //! 一次说清。
 //!
 //! 为什么放在 resource 而不是工具描述里：这段内容对每个工具都只说得上一点点，
-//! 塞进 47 条工具描述里就是 47 份重复，而 tools/list 的体积是要为每一次会话付钱的。
+//! 塞进 46 条工具描述里就是 46 份重复，而 tools/list 的体积是要为每一次会话付钱的。
 //! resource 是**按需读**的 —— 客户端在动手之前拉一次，agent 就拿到了完整的上下文。
 
 use serde_json::{json, Value};
@@ -66,8 +66,7 @@ fn guide() -> Value {
                     "name": "<环境名，不存在就建；用 id 指认已有环境>",
                     "variables": { "<变量名>": "<值>" },
                     "baseUrl": "<这个环境 × 模块 那一格的后端 api 地址>",
-                    "baseUrlProxy": "<这一格的实际访问地址；接口经代理网关转代时才写>",
-                    "activate": true
+                    "baseUrlProxy": "<这一格的实际访问地址；接口经代理网关转代时才写>"
                 },
                 "endpoint": {
                     "name": "<接口名>",
@@ -114,7 +113,7 @@ fn guide() -> Value {
                 "step": 3,
                 "tool": "env_create",
                 "arguments": { "project_id": "<项目 id>", "name": "<环境名>", "if_exists": "reuse" },
-                "note": "A new environment is never the active one. Call env_set_active when it should be."
+                "note": "A new environment is not the project's default one — the default is the earliest created. Name the environment on each call instead."
             },
             {
                 "step": 4,
@@ -157,7 +156,6 @@ fn guide() -> Value {
             "body_schema": "<这个接口接受哪些参数的文档定义（JSON Schema）；永远不上线>",
             "auth_type": "none | bearer | basic | apikey | oauth2",
             "auth_config": { "bearer": "<token>" },
-            "environment_id": "<环境 id>",
             "base_url_override": "<端点自己的 base URL；它胜过环境里那个模块的格子>",
             "tags": ["<标签>"],
             "pre_request_script": "<发请求之前跑的 JavaScript>",
@@ -180,6 +178,7 @@ fn guide() -> Value {
 
         "rules": [
             "A base URL lives in the (environment x module) cell. That cell never inherits from the project or from a sibling module.",
+            "An endpoint does not bind an environment. Name the environment per call, and note that the two tools spell that argument differently and do not treat it the same. api_call_endpoint takes `environment_id`: name one to use it, omit it and the endpoint's own project falls back to that project's default environment (the earliest one created). api_run_request takes `env_id`, and there is no fallback: a temporary request has no endpoint row to read the project from, so without env_id it has no environment, no base URL and no substituted variables. Nothing about that choice is stored, so two callers in one workspace can use two different environments at the same time. A name that no longer exists does not fall back to the default environment either — that request resolves without an environment at all.",
             "body_content is the payload that goes on the wire; body_schema is the documented parameter definition. They are different things — a JSON Schema written into body_content is rejected, and the error names body_schema.",
             "body_mode says how body_content is framed: \"none\" sends no body, \"raw\" sends the text verbatim, \"json\" sends a JSON instance, \"xml\" sends XML text, \"form\" sends x-www-form-urlencoded text, \"multipart\" sends a JSON array of parts — each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string, \"base64\"?: string}, where contentType defaults to application/octet-stream for a part that has a filename — and \"binary\" sends a JSON object {\"name\": string, \"size\": number, \"contentType\"?: string, \"base64\": string} as raw bytes. For \"form\", body_content is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \"description\"?}].",
             "A {{var}} in the url, params, headers, body or auth is replaced from the environment's variables. A name that is not there is listed in missing.",

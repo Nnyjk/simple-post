@@ -6,6 +6,7 @@ import { useEnvDialogs } from './hooks/useEnvDialogs';
 import { EnvBody } from './rows/EnvBody';
 import { EnvSwitcher } from './rows/EnvSwitcher';
 import type { Environment, ResourceNode } from '@/types/domain';
+import { pickDefaultEnvironment } from '@/lib/env-default';
 
 export interface EnvironmentSectionProps {
   // ---- scope ----
@@ -38,6 +39,16 @@ export interface EnvironmentSectionProps {
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   deleteEnvironment: (envId: string) => void;
   updateEnvironment: (envId: string, patch: Partial<Environment>) => void;
+  /**
+   * 本客户端当前用的那个环境（`activeEnvironmentId`）。
+   *
+   * 面板打开时选中它 —— **前提是它属于本项目**。理由：这一栏改的就是「这个环境在各
+   * 模块下的地址与变量」，而请求发出去时用的也是当前环境；两者停在不同的环境上，
+   * 用户改的是一处、跑的是另一处。
+   *
+   * 它不属于本项目时（例如在别的项目的模块标签里看这一栏）就退回默认环境。
+   */
+  currentEnvironmentId?: string;
 }
 
 /**
@@ -104,6 +115,7 @@ export function EnvironmentSection({
   addEnvironment,
   deleteEnvironment,
   updateEnvironment,
+  currentEnvironmentId,
 }: EnvironmentSectionProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   // 创建进行中，以及（若有）落库后应打开重命名的那个环境 id。
@@ -115,18 +127,22 @@ export function EnvironmentSection({
     deleteEnvironment,
   });
 
-  // Default to the project-active env whenever the list shape changes,
-  // unless the user has explicitly picked one. Otherwise stay on the
-  // last selection so a re-render doesn't yank the active tab.
+  // 列表形状一变就回到「本客户端当前用的那个环境」，除非用户已明确选过。否则停在
+  // 用户上次选的那一行，免得一次重渲染把正在看的那行拽走。
+  //
+  // 落点是当前环境而不是默认环境：这一栏改的是「这个环境在各模块下的地址与变量」，
+  // 而请求发出去时用的也是当前环境。两者停在不同的环境上，用户改的是一处、跑的
+  // 是另一处。当前环境不属于本项目时（看的是别的项目的模块）才退回默认环境。
   useEffect(() => {
     if (environments.length === 0) {
       setActiveId(null);
       return;
     }
     if (activeId && environments.some((e) => e.id === activeId)) return;
-    const active = environments.find((e) => e.isActive);
-    setActiveId(active?.id ?? environments[0]!.id);
-  }, [environments, activeId]);
+    const current = environments.find((e) => e.id === currentEnvironmentId);
+    const fallback = current ?? pickDefaultEnvironment(environments, projectId);
+    setActiveId(fallback?.id ?? environments[0]!.id);
+  }, [environments, projectId, currentEnvironmentId, activeId]);
 
   const activeEnv = useMemo(
     () => environments.find((e) => e.id === activeId) ?? null,

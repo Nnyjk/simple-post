@@ -31,7 +31,7 @@ fn environment_module_base_urls_round_trip() {
             .into_iter()
             .collect(),
         disabled_variables: Vec::new(),
-        is_active: true,
+        created_at: 1_700_000_000_000,
     };
     let s = serde_json::to_string(&env).unwrap();
     assert!(s.contains("\"moduleBaseUrls\""), "{s}");
@@ -54,13 +54,17 @@ fn environment_module_base_urls_round_trip() {
         Some("https://gw/order")
     );
     assert_eq!(back.variables.get("token").unwrap(), "abc");
-    assert!(back.is_active);
+    assert_eq!(back.created_at, 1_700_000_000_000);
 }
 
 #[test]
 fn environment_deserialises_without_module_base_urls() {
     // 值层出现之前写下的载荷必须仍能加载：该字段带 `#[serde(default)]` 正是为了让它到达时
     // 为空，而不是让整次读失败。
+    //
+    // 载荷里的 `isActive` 是「当前环境」那一列的旧键名，它连同那一列一起被删了。
+    // 留着它是因为 `Environment` 不带 `deny_unknown_fields`：旧形状的载荷（外部客户端
+    // 手里可能还存着）必须仍能读，故这里顺带钉住「多出来的键被忽略」这条。
     let back: Environment = serde_json::from_value(json!({
         "id": "e1",
         "projectId": "p1",

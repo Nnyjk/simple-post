@@ -12,13 +12,16 @@
  * 单元格，没有继承也没有回退。格子里有两个字段：`url` 是后端 api 地址，`proxy` 是
  * 实际访问地址。`resolveEndpointBaseUrl` 只读其中恰好一个。
  *
- * `deleteEnvironment` 与 `setEnvironmentActive` 会在与自身键同一次原子 `set()`
- * 里写别的切片拥有的键（`activeEnvironmentId`、`endpointDetails`）；拆成多次调用
- * 会改变 IPC 失败时回滚的内容。
+ * **本切片只写库里的东西。** 「当前环境」是客户端的实时状态，不落库，它由
+ * `bootstrap-slice` 的 `setCurrentEnvironment` 管（详见那里的说明）。
+ *
+ * `deleteEnvironment` 会与自身键同一次原子 `set()` 里写别人拥有的键
+ * （`activeEnvironmentId`）；拆成多次调用会改变 IPC 失败时回滚的内容。
  */
 import type { StateCreator } from 'zustand';
-import type { Environment, EndpointDetail, EnvWrite, ModuleBaseUrl } from '@/types/domain';
+import type { Environment, EnvWrite, ModuleBaseUrl } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { pickDefaultEnvironment } from '@/lib/env-default';
 import type { AppState } from '../app-store';
 import { invokeWithRollback } from './crud-helpers';
 
@@ -47,7 +50,6 @@ export interface EnvironmentCrudActions {
     proxy: string | null,
   ) => Promise<void>;
   deleteEnvironment: (envId: string) => Promise<void>;
-  setEnvironmentActive: (envId: string) => Promise<void>;
   /**
    * 把脚本写下的变量并进**本地副本**。
    *
@@ -211,47 +213,25 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
   deleteEnvironment: async (envId) => {
     const snapshot = {
       environments: get().environments,
-      endpointDetails: get().endpointDetails,
       activeEnvironmentId: get().activeEnvironmentId,
     };
     set((s) => {
-      // 把指向被删环境的 endpoint 的 `environmentId` 清空，让它不再对它解析。
-      // 没有会在飞行动态重算 baseUrl 的选择器，所以这个显式置空是让 URL 栏
-      // 保持诚实的关键。
-      const nextDetails: Record<string, EndpointDetail> = {};
-      for (const [id, d] of Object.entries(s.endpointDetails)) {
-        nextDetails[id] = d.environmentId === envId ? { ...d, environmentId: null } : d;
-      }
-      return {
-        environments: s.environments.filter((env) => env.id !== envId),
-        endpointDetails: nextDetails,
-        // 活动环境正好就是刚删掉的那个时，置空（无活动环境）。
-        activeEnvironmentId: s.activeEnvironmentId === envId ? '' : s.activeEnvironmentId,
-      };
+      const nextEnvs = s.environments.filter((env) => env.id !== envId);
+      // 当前环境正好是刚删掉的那个时，回落到这个项目的默认环境（最早创建的那个）。
+      // 项目里一个环境都不剩时置空（"未选"哨兵），顶栏触发器回落到 '—'。
+      //
+      // 端点不再绑定环境，故这里不必动 `endpointDetails`——删掉一个环境不改变任何
+      // 接口的配置，接口读的是客户端当前的「当前环境」。
+      const activeEnvironmentId =
+        s.activeEnvironmentId === envId
+          ? (pickDefaultEnvironment(nextEnvs, s.activeProjectId)?.id ?? '')
+          : s.activeEnvironmentId;
+      return { environments: nextEnvs, activeEnvironmentId };
     });
     await invokeWithRollback(
       'environments_delete',
       () => invokeCmd<void>(COMMANDS.environmentsDelete, { id: envId }),
       () => set(snapshot),
-    );
-  },
-  setEnvironmentActive: async (envId) => {
-    const prev = get().environments;
-    set((s) => {
-      const target = s.environments.find((env) => env.id === envId);
-      if (!target) return {};
-      return {
-        activeEnvironmentId: envId,
-        environments: s.environments.map((env) => {
-          if (env.projectId !== target.projectId) return env;
-          return { ...env, isActive: env.id === envId };
-        }),
-      };
-    });
-    await invokeWithRollback(
-      'environments_set_active',
-      () => invokeCmd<Environment>(COMMANDS.environmentsSetActive, { envId }),
-      () => set({ environments: prev }),
     );
   },
   applyEnvWrites: (envId, writes) => {

@@ -115,7 +115,7 @@ async fn serve_test_router() -> (SocketAddr, PathBuf) {
 /// 落点要真实存在：导入挂在 `mod_a` 下，导出也从 `mod_a` 读。种一个项目 + 一个模块就够，
 /// endpoint 由上面的 commit 现场造出来。
 ///
-/// 另有一个激活环境：地址住在（环境 × 模块）那一格，没有激活环境就没有格子可填。
+/// 另有一个默认环境：地址住在（环境 × 模块）那一格，没有默认环境就没有格子可填。
 fn seed_tree(dir: &Path) {
     let pool = crate::db::init(dir).expect("db init");
     crate::db::with_tx(&pool, |c| {
@@ -136,7 +136,7 @@ fn seed_tree(dir: &Path) {
                 module_base_urls: Default::default(),
                 variables: Default::default(),
                 disabled_variables: Vec::new(),
-                is_active: true,
+                created_at: 0,
             },
         )?;
         Ok(())

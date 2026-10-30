@@ -122,7 +122,6 @@ fn oauth2_endpoint(
         node_id: "e_oauth".into(),
         method: HttpMethod::Get,
         url: format!("{api_url}/me"),
-        environment_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],

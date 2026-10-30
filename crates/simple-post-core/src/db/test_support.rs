@@ -109,8 +109,6 @@ struct FixtureEndpoint {
     method: String,
     url: String,
     #[serde(default)]
-    environment_id: Option<String>,
-    #[serde(default)]
     base_url_override: Option<String>,
     #[serde(default)]
     params: Vec<serde_json::Value>,
@@ -141,7 +139,9 @@ struct FixtureEnvironment {
     module_base_urls: serde_json::Value,
     #[serde(default)]
     variables: serde_json::Value,
-    is_active: bool,
+    /// 创建时刻。「默认环境」按它认定：一个项目里最早创建的那个环境是它的默认环境。
+    #[serde(default)]
+    created_at: i64,
 }
 
 /// 插入资源树的一行。fixture 的三个树段落都落到这一种形状，变的只有 `kind` 与
@@ -270,15 +270,14 @@ fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
         // 节点与配置一起落：没有 detail 行的 endpoint 打不开。
         tx.execute(
             "INSERT INTO endpoint_details \
-         (node_id, method, url, environment_id, \
+         (node_id, method, url, \
           base_url_override, params_json, headers_json, body_json, \
           auth_json, docs, notes, tags_json) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 e.id,
                 e.method,
                 e.url,
-                e.environment_id,
                 e.base_url_override,
                 serde_json::to_string(&e.params)?,
                 serde_json::to_string(&e.headers)?,
@@ -296,13 +295,13 @@ fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
         let variables_json = serde_json::to_string(&env.variables)?;
         tx.execute(
             "INSERT INTO environments \
-         (id, project_id, name, is_active, module_base_urls_json, variables_json) \
+         (id, project_id, name, created_at, module_base_urls_json, variables_json) \
          VALUES (?,?,?,?,?,?)",
             params![
                 env.id,
                 env.project_id,
                 env.name,
-                env.is_active as i64,
+                env.created_at,
                 module_base_urls_json,
                 variables_json,
             ],

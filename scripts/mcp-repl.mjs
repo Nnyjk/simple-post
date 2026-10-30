@@ -3,7 +3,7 @@
 //
 // Reads JSON-RPC frames (one per line) from stdin and forwards them to the
 // running daemon at http://127.0.0.1:<port>/mcp, printing each response on
-// stdout. Lets you poke at the 47 tools interactively:
+// stdout. Lets you poke at the 46 tools interactively:
 //
 //   npm run mcp:repl                   # uses port_registry to discover
 //   npm run mcp:repl -- --port=41923   # explicit port (debug)

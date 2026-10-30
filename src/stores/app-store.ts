@@ -45,7 +45,7 @@ import { createUiSlice } from './ui-slice';
 import { createMcpSlice } from './mcp-slice';
 import type { DraftEndpoint } from './store-types';
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
-import { saveLastProjectId } from './slices/ui-prefs';
+import { saveLastProjectId, saveRememberedEnvironmentId } from './slices/ui-prefs';
 
 // 由各切片的交集组合出 AppState。各切片工厂同时导出自己的 `*Slice` 类型与
 // `create*` 函数；这里用 `*Slice` 类型（而非 `ReturnType<typeof create*>`）
@@ -95,6 +95,34 @@ useAppStore.subscribe((state, prev) => {
   if (state.activeProjectId !== prev.activeProjectId) {
     saveLastProjectId(state.activeProjectId);
   }
+});
+
+/**
+ * 「在这个项目里用哪个环境」是渲染层的会话事实：刷新后据此停在同一个环境。
+ *
+ * **订阅而不是在各个动作里写。** `activeEnvironmentId` 有好几条改法：切换项目
+ * （`setActiveProject`）、切换环境（`setCurrentEnvironment`）、删除当前环境
+ * （`deleteEnvironment` 回落到默认环境）、重新加载工作区（`reloadWorkspace` 补齐那个
+ * 窗口）。漏掉任何一条，记住的环境就会与实际所在的环境脱节——用户切到 staging 之后
+ * 刷新，却回到 dev。
+ *
+ * **当前环境为空时不写。** 启动那一个窗口里环境列表还没读到，`setActiveProject`
+ * 只能把当前环境清成空串（`''` 是「还没定」哨兵）。那一下若也写进去，记住的那个环境
+ * 就被抹掉了——于是刷新后回到默认环境，而不是上次用的那个。
+ *
+ * 不在项目里时也不写：`activeProjectId` 为空串说明「不在任何项目里」，而记住的那个
+ * 环境是「在这个项目里用哪个」，退出项目不该把它抹掉，下次点回来仍停在同一个环境。
+ */
+useAppStore.subscribe((state, prev) => {
+  if (
+    state.activeProjectId === prev.activeProjectId &&
+    state.activeEnvironmentId === prev.activeEnvironmentId
+  ) {
+    return;
+  }
+  if (state.activeProjectId === '') return;
+  if (state.activeEnvironmentId === '') return;
+  saveRememberedEnvironmentId(state.activeProjectId, state.activeEnvironmentId);
 });
 
 // ---------- 选择器 ----------
@@ -238,7 +266,6 @@ function draftDetail(d: DraftEndpoint): EndpointDetail {
     nodeId: d.id,
     method: d.method,
     url: d.url,
-    environmentId: d.environmentId,
     baseUrlOverride: d.baseUrlOverride,
     params: [],
     pathParams: [],

@@ -91,7 +91,6 @@ fn seed_with_url(st: &AppState, base_url: &str, url: &str) -> String {
         node_id: "e_ovr".into(),
         method: HttpMethod::Get,
         url: url.into(),
-        environment_id: None,
         // 每端点自定义的 base URL 优先级最高，故直接钉住 stub 的地址：不必再为它
         // 建环境格子。
         base_url_override: Some(base_url.to_string()),

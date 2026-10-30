@@ -11,7 +11,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 [![版本](https://img.shields.io/badge/version-v0.1.23-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
 [![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
 [![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
-[![MCP 工具](https://img.shields.io/badge/MCP-52%20tools-8A2BE2?style=flat-square)](#mcp-server)
+[![MCP 工具](https://img.shields.io/badge/MCP-46%20tools-8A2BE2?style=flat-square)](#mcp-server)
 [![许可](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 </div>
@@ -30,7 +30,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 
 Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、请求构造、响应查看都在同一个应用里完成，业务数据保存在本机的 SQLite 文件中，不依赖任何 SaaS 后端。
 
-与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 47 个 MCP 工具读取和修改接口定义、环境变量与模块地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
+与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 46 个 MCP 工具读取和修改接口定义、环境变量与模块地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
 
 ## 界面
 
@@ -68,6 +68,18 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 资源的层级是 Project → Module → Collection → Endpoint。集合下面还能建集合，嵌套深度不设上限，界面的面包屑按真实深度逐级显示。
 
 模块、集合、接口存在同一张 `nodes` 表里，用 `type` 区分，父子关系由 `parent_id` 表达。层级规则是强制执行的契约：模块只能放在顶层，接口可以挂在集合下、也可以直接挂在模块下（单个接口不需要先建一个一次性集合），集合可以挂在模块或另一个集合下。SQLite 触发器与应用层检查同时校验，拖拽落点遵守同一张矩阵。
+
+### 「当前环境」是每个客户端自己的实时状态，接口不绑环境
+
+接口不再记着「我从哪个环境取地址与变量」。库里没有「当前环境」这一列：当前环境是**每个客户端自己的**实时状态——桌面窗口一份、网页标签一份，各切各的。落库会让 web 端多个人互相踩：一个人切了环境，另一个人发请求就换了地址与端口。
+
+于是顶栏的 ENV 药丸、命令面板的「切换环境」、设置面板里的环境切换都只改本客户端的状态，不写库。切一次，全部接口一起换地址与端口——这正是「新建环境并切换后端口不跟着换」那个问题的正解。
+
+「当前环境」按项目记在本机（浏览器 localStorage）：刷新页面回到这个项目时，停在这个项目里上次用的那个环境；没用过或那个环境已被删掉，就用这个项目的**默认环境**。
+
+**默认环境**是项目的属性：一个项目里**最早创建**的那个环境（可改名，靠创建顺序认定）。谁发请求时没点名环境，就用它。库里没有「当前」这一列，只有 `environments.created_at` 用来认「最早」。
+
+接口行不再有环境绑定（`endpoint_details` 没有 `environment_id` 列）。MCP 侧逐次自由选择：`api_call_endpoint` 接受可选的 `environment_id`，点名了就按那个环境解析，不点名就回落到项目的默认环境。
 
 ### 模块地址按「环境 × 模块」逐格隔离，每格带一个代理
 
@@ -141,7 +153,7 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 
 ### MCP Server
 
-47 个 MCP 工具，覆盖项目、模块、集合、接口、模块地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
+46 个 MCP 工具，覆盖项目、模块、集合、接口、模块地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
 
 工具是按「一次调用建好一个接口」设计的，而不只是 CRUD：
 
@@ -310,7 +322,7 @@ sp.example.com {
 | Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
 | 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、MCP 指标、错误类型，以及动态变量、OAuth2、路径参数、请求脚本、接口规格、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
-| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（47 个工具）、axum HTTP daemon、标准输入输出桥接。 |
+| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（46 个工具）、axum HTTP daemon、标准输入输出桥接。 |
 | 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
 | 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
 

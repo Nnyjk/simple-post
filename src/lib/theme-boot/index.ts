@@ -31,6 +31,15 @@ export interface PersistedPrefs {
   lastProjectId?: string;
   /** 只为一次性迁移保留：请求旋钮现在存在 `preferences` 表里，迁移成功后这个字段从 localStorage 删除。 */
   requestSettings?: unknown;
+  /**
+   * 每个项目「本客户端上次用的环境」：`projectId → environmentId`。
+   *
+   * 「当前环境」是每个客户端自己的实时状态（桌面窗口、网页标签各一份），它落在这里
+   * 而不是库里 —— web 端多个人各切各的，不互相踩。
+   *
+   * [`parsePrefs`] 保证它是「字符串到字符串」的映射；不是的话整个字段被丢掉。
+   */
+  currentEnvByProject?: Record<string, string>;
 }
 
 /** 偏好所在的 localStorage 键。整个仓库只有这一处写这个字符串。 */
@@ -46,6 +55,10 @@ const PREFS_KEY = 'simple-post:prefs';
  * `as` 只是类型断言，运行时给不出任何保证——不检查的话，读它的调用方拿到的就是一个
  * 类型上是 `string`、运行时是数字的值。`theme` 不在这里丢：它存的是原始取值，合不合法
  * 由 [`resolveTheme`] 判定。
+ *
+ * `currentEnvByProject` 也要检查：它的值会被当作环境 id 拿去比对，非字符串的值直接丢掉；
+ * 它本身不是「字符串到字符串」的映射时，整个字段丢掉——半张表比没有表更坏，前者会让
+ * 某些项目记住一个环境、另一些项目读到 `undefined` 而看不出哪里不对。
  */
 function parsePrefs(raw: string | null): PersistedPrefs {
   if (typeof raw !== 'string' || raw === '') return {};
@@ -58,7 +71,21 @@ function parsePrefs(raw: string | null): PersistedPrefs {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
   const prefs = parsed as PersistedPrefs;
   if (typeof prefs.lastProjectId !== 'string') delete prefs.lastProjectId;
+  if (!isStringMap(prefs.currentEnvByProject)) delete prefs.currentEnvByProject;
   return prefs;
+}
+
+/**
+ * 判定一个值是不是「字符串到字符串」的映射。
+ *
+ * 空对象算合法——那就是一个都没记住，与「没有这个字段」等价。
+ */
+function isStringMap(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  for (const entry of Object.values(value)) {
+    if (typeof entry !== 'string') return false;
+  }
+  return true;
 }
 
 /**

@@ -831,7 +831,7 @@ fn pool_with_a_module() -> (db::DbPool, std::path::PathBuf) {
                     module_base_urls: Default::default(),
                     variables: Default::default(),
                     disabled_variables: Vec::new(),
-                    is_active: false,
+                    created_at: 0,
                 },
             )?;
         }
@@ -867,7 +867,6 @@ fn pool_with_a_module() -> (db::DbPool, std::path::PathBuf) {
                 node_id: "e1".into(),
                 method: HttpMethod::Get,
                 url: "/points".into(),
-                environment_id: None,
                 base_url_override: None,
                 params: vec![],
                 path_params: vec![],

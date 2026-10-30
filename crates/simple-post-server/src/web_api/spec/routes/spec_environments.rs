@@ -38,14 +38,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
-            path: "/api/environments/active",
-            summary: "Set the active environment for a project",
-            stability: "public",
-            request: Some("SetActiveEnv"),
-            response: Some("Environment"),
-        },
-        RouteSpec {
-            method: "POST",
             path: "/api/environments/{envId}/vars",
             summary: "Set one environment variable (null deletes it)",
             stability: "public",

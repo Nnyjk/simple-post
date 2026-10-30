@@ -132,8 +132,8 @@ pub const DEFAULT_MODULE_NAME: &str = "默认模块";
 /// 拿到的正是那个状态。
 ///
 /// 种了什么，以及同样重要的、没种什么：
-/// - 总是种 [`DEFAULT_ENVIRONMENT_NAME`]，且为激活态，故项目一存在，`{{var}}` 与每个
-///   base URL 就有地方解析。
+/// - 总是种 [`DEFAULT_ENVIRONMENT_NAME`]，且它是这个项目的默认环境（最早创建的那个），
+///   故项目一存在，`{{var}}` 与每个 base URL 就有地方解析。
 /// - 总是种 [`DEFAULT_MODULE_NAME`]，故树、base URL 表格与模块工作区都有行可指。
 /// - **不种 URL。** URL 住在 (环境 × 模块) 那一格，需要一个用户还没填的地址。种一个
 ///   占位地址等于凭空造一个他随后还得去改的值；而在创建表单里问 URL，是问一个无处安放
@@ -153,7 +153,9 @@ pub fn create_with_defaults(conn: &mut Connection, project: &Project) -> Result<
         module_base_urls: Default::default(),
         variables: Default::default(),
         disabled_variables: Default::default(),
-        is_active: true,
+        // 这是项目里第一个环境，故它也是该项目的默认环境（最早创建的那个）。创建时刻
+        // 写当前时间：默认环境按 `created_at` 认定，而这一行必然排在最前面。
+        created_at: crate::domain::now_ms(),
     };
     super::environments::create(conn, &env)?;
 

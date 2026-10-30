@@ -10,13 +10,12 @@ import { groupTools, OTHER_GROUP_KEY } from '@/lib/mcp-tool-groups';
 const REGISTERED_TOOLS = [
   'spec_upsert',
   'env_list',
-  'env_get_active',
+  'env_get_default',
   'env_create',
   'env_update',
   'env_delete',
   'env_set_var',
   'env_set_baseurl',
-  'env_set_active',
   'project_list',
   'project_get',
   'project_create',
@@ -85,7 +84,7 @@ test('groupTools: per-family counts match the registry', () => {
   );
   assert.deepEqual(byKey, {
     spec: 1,
-    env: 8,
+    env: 7,
     project: 5,
     module: 5,
     collection: 5,
@@ -93,7 +92,7 @@ test('groupTools: per-family counts match the registry', () => {
     dynamic: 7,
     api: 8,
   });
-  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 47);
+  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 46);
 });
 
 test('groupTools: no tool is dropped or duplicated', () => {

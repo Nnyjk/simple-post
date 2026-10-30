@@ -11,11 +11,13 @@
 import type { StateCreator } from 'zustand';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { pickCurrentEnvironment } from '@/lib/env-default';
 import type { AppState } from './app-store';
 import {
   loadRequestSettings,
   loadResponseHistoryKeep,
   readLastProjectId,
+  readRememberedEnvironmentId,
   saveLastProjectId,
 } from './slices/ui-prefs';
 
@@ -58,6 +60,16 @@ export interface BootstrapSliceState {
    * 顶栏环境列表、新建模块/集合/接口的目标位置全以它为准。
    */
   activeProjectId: string;
+  /**
+   * 当前环境 —— **本客户端的实时状态**，不落库。
+   *
+   * 桌面窗口与网页标签各有一份，各切各的：web 端多个人各切各的，不互相踩。库里没有
+   * 对应的列，故它随会话存在 store 里，刷新后按项目从 localStorage 恢复（见
+   * `setCurrentEnvironment` 与 `readRememberedEnvironmentId`）。
+   *
+   * 库里与「选哪个环境」有关的只有**默认环境**：一个项目里最早创建的那个环境
+   * （见 `lib/env-default.ts`）。谁发请求时没点名环境，就用它。
+   */
   activeEnvironmentId: string;
   activeEndpointId: string | null;
   /** bootstrap 请求进行中。 */
@@ -106,11 +118,26 @@ export interface BootstrapSliceActions {
    * 时 `nodesLoaded` 会短路重载。只重置选择 —— `activeEnvironmentId` 一并清空，
    * 因为无项目时环境无意义。
    *
-   * 记住的项目 id 由 store 的订阅清掉（`activeProjectId` 变成空串）。
+   * 记住的项目 id 由 store 的订阅清掉（`activeProjectId` 变成空串）。记住的**环境**
+   * 不清：它是「在这个项目里用哪个环境」，与「现在在不在这个项目里」无关，下次点回来
+   * 仍停在同一个环境。
    */
   leaveProject: () => void;
-  setActiveEnvironment: (id: string) => void;
   setActiveEndpoint: (id: string | null) => void;
+  /**
+   * 切换**当前环境** —— 纯客户端状态，不发 IPC、不写库。
+   *
+   * 「当前环境」是每个客户端自己的实时状态：桌面窗口与网页标签各有一份，各切各的。
+   * 落库会让 web 端多个人互相踩——一个人切了环境，另一个人发请求就换了地址与端口。
+   *
+   * 记住它（按项目存进 localStorage）由 store 的订阅负责（见 `app-store.ts`）：
+   * `activeEnvironmentId` 有好几条改法（切换项目、删除环境、重新加载工作区），在各个
+   * 动作里分别写必然漏掉一条，漏掉的后果是记住的环境与实际所在的环境脱节。
+   *
+   * 未知的环境 id 一律忽略：接口解析地址时按环境里的「环境 × 模块」那一格取值，
+   * 切到别的项目的环境会让它读到不属于本项目模块的格子。
+   */
+  setCurrentEnvironment: (envId: string) => void;
   /** 展开 / 折叠一个节点。三种类型共用一个动作：展开位在节点上，只有树知道哪些类型渲染成可展开。 */
   toggleNodeExpanded: (id: string) => void;
 
@@ -235,12 +262,12 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     // ---------- selection / expansion ----------
 
     setActiveProject: (id) => {
-      // `setActiveProject` 只有在项目 id 真的变了才重解激活环境；重新选中当前项目
+      // `setActiveProject` 只有在项目 id 真的变了才重解当前环境；重新选中当前项目
       // 不算变化。
       set((s) => {
-        const env =
-          s.environments.find((e) => e.projectId === id && e.isActive) ??
-          s.environments.find((e) => e.projectId === id);
+        // 换项目后当前环境重解：先用本客户端在这个项目里记住的那个（还有效就用它），
+        // 没用过或已被删掉就用这个项目的默认环境（最早创建的那个）。
+        const env = pickCurrentEnvironment(s.environments, id, readRememberedEnvironmentId(id));
         // 新项目没有环境时这里把它清成 `''`（"未选"哨兵），`useActiveEnvironment()` 返回
         // undefined，顶栏触发器回落到 '—'。
         return {
@@ -251,7 +278,6 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // 刻意不在此加载响应历史：它按 endpoint 而非按项目作用域，由 `setActiveTab`
       // —— 所有进入某接口的路径共享的事件 —— 触发。
     },
-    setActiveEnvironment: (id) => set({ activeEnvironmentId: id }),
     openProject: (id) => {
       // 树是用户马上要看的东西，不等后台那一趟：在这里触发，让渲染落在
       // `nodesLoaded === false` 上（树显示加载态而非错误的"没有模块"空态）。
@@ -287,6 +313,18 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         get().openTab('endpoint', id);
       }
       get().setLastResponse(null);
+    },
+    setCurrentEnvironment: (envId) => {
+      const state = get();
+      if (envId === state.activeEnvironmentId) return;
+      // 只接受当前项目里的环境：接口解析地址时读的是这个环境的「环境 × 模块」格子，
+      // 切到别的项目的环境会让它读到不属于本项目模块的格子。
+      const belongs = state.environments.some(
+        (env) => env.id === envId && env.projectId === state.activeProjectId,
+      );
+      if (!belongs) return;
+      // 不写库：「当前环境」是本客户端的实时状态。记住它由 store 的订阅负责。
+      set({ activeEnvironmentId: envId });
     },
     toggleNodeExpanded: (id) =>
       set((s) => ({
@@ -385,7 +423,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
             invokeCmd<Environment[]>(COMMANDS.environmentsList),
           ]);
 
-          // 提交时重解激活环境。用户在本趟仍在途时点项目卡，`setActiveProject` 会
+          // 提交时重解当前环境。用户在本趟仍在途时点项目卡，`setActiveProject` 会
           // 对着空列表解析并落到 `''`，顶栏就显示 "—"。这里再挑一次环境来补上这个
           // 窗口；id 已正确时是空操作。
           set((s) => {
@@ -395,8 +433,11 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
             );
             const env = stillValid
               ? undefined
-              : (environments.find((e) => e.projectId === s.activeProjectId && e.isActive) ??
-                environments.find((e) => e.projectId === s.activeProjectId));
+              : pickCurrentEnvironment(
+                  environments,
+                  s.activeProjectId,
+                  readRememberedEnvironmentId(s.activeProjectId),
+                );
             return {
               // 展开状态不在服务端，整份替换 `nodes` 会抹掉它。
               nodes: mergeExpanded(s.nodes, nodes),

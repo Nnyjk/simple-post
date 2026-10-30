@@ -71,9 +71,6 @@ pub struct EnvironmentSpec {
     /// 那一格的实际访问地址——接口经代理网关转代后真正要打的那个地址。缺省 = 没有代理。
     #[serde(default, alias = "baseUrlProxy")]
     pub base_url_proxy: Option<String>,
-    /// 落库后把这个环境设为项目的激活环境。
-    #[serde(default)]
-    pub activate: Option<bool>,
 }
 
 /// 规格里的端点那一段。
@@ -110,9 +107,6 @@ pub struct EndpointDefinition {
     /// 认证方案与凭据。`kind` 是方案，缺省 `none`。
     #[serde(default)]
     pub auth: Option<AuthConfig>,
-    /// 端点绑定哪个环境。规格里给了 `environment` 段而这里没给时，绑定那个环境。
-    #[serde(default, alias = "environmentId")]
-    pub environment_id: Option<String>,
     /// 这个端点自己的 base URL，胜过环境里那一格。
     #[serde(default, alias = "baseUrlOverride")]
     pub base_url_override: Option<String>,
@@ -210,8 +204,6 @@ pub struct EnvironmentOutcome {
     pub id: String,
     pub name: String,
     pub created: bool,
-    /// 这次把它设成了项目的激活环境。
-    pub activated: bool,
 }
 
 /// 端点的结果。

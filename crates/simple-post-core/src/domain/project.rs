@@ -81,8 +81,13 @@ pub struct Environment {
     /// 旧行读回来是空集合，语义等价于「全部启用」。
     #[serde(default)]
     pub disabled_variables: Vec<String>,
+    /// 创建时刻（unix 毫秒）。
+    ///
+    /// 「默认环境」按它认定：**一个项目里最早创建的那个环境**是它的默认环境。默认环境
+    /// 是项目的属性（谁发请求时没点名环境就用它），而「当前环境」是每个客户端自己的
+    /// 实时状态——后者不落库，故库里没有「当前」这一列。
     #[serde(default)]
-    pub is_active: bool,
+    pub created_at: i64,
 }
 
 /// 一个（环境 × 模块）格子里的地址配置。
@@ -125,8 +130,6 @@ pub struct EnvironmentPatch {
     /// 的一次原子写，而整份替换会让「启用了谁」这件事看不见中间态。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled_variables: Option<Vec<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub is_active: Option<bool>,
 }
 
 impl EnvironmentPatch {

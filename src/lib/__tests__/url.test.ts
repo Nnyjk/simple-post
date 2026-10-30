@@ -44,7 +44,6 @@ const ENV = {
 
 function endpoint(over: Partial<EndpointDetail> = {}): EndpointDetail {
   return {
-    environmentId: ENV.name,
     baseUrlOverride: null,
     ...over,
   } as unknown as EndpointDetail;

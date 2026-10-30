@@ -41,9 +41,8 @@ export function useEndpointContext(
   // 逐个 `useAppStore` 取用，保持 Zustand v5「selector 不新建对象」规则。
   const allNodes = useAppStore((s) => s.nodes);
   const allProjects = useAppStore((s) => s.projects);
-  const allEnvironments = useAppStore((s) => s.environments);
-  // 工作区当前环境（顶栏的 ENV dev 药丸）。接口未自选环境时用它，让新建接口的
-  // baseUrl + 变量解析直接可用，不必先走一遍选择器。
+  // 工作区当前环境（顶栏的 ENV dev 药丸）。它是本客户端的实时状态，切一次全部接口
+  // 一起换地址与端口。
   const workspaceEnv = useActiveEnvironment();
 
   // 接口所属项目，直接取反规范化的 `rootId`：单棵树上每行都带着这个答案。
@@ -65,14 +64,12 @@ export function useEndpointContext(
     }
     return chain;
   }, [endpoint, allNodes]);
-  // 该接口 baseUrl 所属的环境：优先 detail 的 `environmentId`，否则回落到工作区当前
-  // 环境（顶栏 ENV dev 药丸），免得新建接口因为还没指定环境就没有 baseUrl。
-  const endpointEnv = useMemo(() => {
-    if (detail?.environmentId) {
-      return allEnvironments.find((e) => e.id === detail.environmentId);
-    }
-    return workspaceEnv;
-  }, [detail, allEnvironments, workspaceEnv]);
+  // 该接口 baseUrl 所属的环境 = 工作区**当前环境**（顶栏的 ENV 药丸）。
+  //
+  // 接口不再绑定环境：库里没有 `endpoint_details.environment_id` 那一列，界面上也没有
+  // 「这个接口自己选了哪个环境」这回事。当前环境是每个客户端自己的实时状态，切一次全
+  // 部接口一起换地址 —— 这正是「新建环境并切换后端口不跟着换」那个问题的正解。
+  const endpointEnv = workspaceEnv;
 
   // 该接口的有效 baseUrl —— 同时驱动选择器标签与发送时的拼接。
   //

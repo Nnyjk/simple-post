@@ -25,7 +25,13 @@ CREATE TABLE IF NOT EXISTS environments (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  is_active INTEGER NOT NULL DEFAULT 0,
+  -- 创建时刻（unix 毫秒）。「默认环境」按它认定：一个项目里最早创建的那个环境是它的
+  -- 默认环境，谁发请求时没点名环境就用它。
+  --
+  -- 这里曾有 `is_active` 一列，意思是「这个项目当前激活的环境」。它已被清除：当前环境
+  -- 是每个客户端自己的实时状态（桌面窗口、网页标签各一份），落库会让 web 端多个人互相
+  -- 踩——一个人切了环境，另一个人发请求就换了地址。
+  created_at INTEGER NOT NULL DEFAULT 0,
   -- module_id -> { "url": "...", "proxy": "..." }。**base URL 唯一所在的一层。**
   --
   -- `url` 是后端 api 地址；`proxy` 是实际访问地址——接口经代理网关转代后真正要打的地址。
@@ -107,7 +113,6 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   method                 TEXT NOT NULL,
   -- 只有路径。host 在发送时取自环境的 moduleBaseUrls，故一个 endpoint 可改指向而无需重写。
   url                    TEXT NOT NULL,
-  environment_id         TEXT,
   base_url_override      TEXT,
   params_json            TEXT NOT NULL DEFAULT '[]',
   -- URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。与 `params_json` 分开：
@@ -445,5 +450,11 @@ END;
 -- 后端 api 地址与实际访问地址。`environments.module_base_urls_json` 的形状是
 -- `模块 id → { url, proxy }`。
 --
+-- 版本 5：「当前环境」不再是落库的状态。`environments.is_active` 与
+-- `endpoint_details.environment_id` 两列被清除——当前环境是每个客户端自己的实时状态
+-- （桌面窗口、网页标签各一份），落库会让 web 端多个人互相踩。取而代之的是
+-- `environments.created_at`：一个项目里**最早创建**的那个环境是它的默认环境，谁发请求
+-- 时没点名环境就用它。
+--
 -- 既有库由 `ensure_current_schema` 换新（版本号对不上就删库重建），故没有迁移路径。
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;

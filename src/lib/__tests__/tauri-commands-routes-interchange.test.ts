@@ -100,7 +100,7 @@ describe('invokeCmd (web shape) — interchange', () => {
 
   it('导出预览带上所选环境：environmentId 原样送出', async () => {
     // 换环境后重取的那一趟必须带上环境 id：服务端按它解析各模块在那个环境里的地址，
-    // 送不到就仍按激活环境算，提示于是按旧环境点名。
+    // 送不到就仍按默认环境算，提示于是按旧环境点名。
     await invokeCmd(COMMANDS.interchangeExportPreview, {
       projectId: 'p-1',
       moduleId: 'm-1',

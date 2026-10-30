@@ -87,8 +87,7 @@ async fn one_call_lands_the_module_the_collections_the_environment_and_the_endpo
             "environment": {
                 "name": "dev",
                 "variables": { "token": "t-1" },
-                "base_url": "https://dev.example.com",
-                "activate": true
+                "base_url": "https://dev.example.com"
             },
             "endpoint": {
                 "name": "查询订单",
@@ -121,7 +120,6 @@ async fn one_call_lands_the_module_the_collections_the_environment_and_the_endpo
 
     // 环境。
     assert_eq!(out["environment"]["name"], "dev");
-    assert_eq!(out["environment"]["activated"], true);
 
     // 端点：本体与创建标志都在。
     assert_eq!(out["endpoint"]["created"], true);

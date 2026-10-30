@@ -128,8 +128,6 @@ pub struct EndpointDetail {
     /// dev / staging / prod 之间改指向而无需重写。
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_override: Option<String>,
     #[serde(default)]
     pub params: Vec<KeyValue>,
@@ -176,9 +174,6 @@ pub struct EndpointDetailPatch {
     pub method: Option<HttpMethod>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-    #[serde(default, deserialize_with = "super::double_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url_override: Option<Option<String>>,

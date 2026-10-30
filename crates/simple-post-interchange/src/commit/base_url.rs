@@ -20,8 +20,8 @@ pub struct BaseUrlPlan {
     ///
     /// 同一个地址在多个模块里各写一遍只算一个候选——那是同一台机器，不是多台。
     pub candidates: Vec<String>,
-    /// 项目的**激活**环境。地址只能住进一个环境里，而「哪个环境」只有一个可答的
-    /// 来源：用户当前正在用的那个。为 `None` 时地址无处可放。
+    /// 项目的**默认**环境（最早创建的那个）。地址只能住进一个环境里，而「哪个环境」
+    /// 只有一个可答的来源：项目自带的那一个。为 `None` 时地址无处可放。
     pub environment: Option<Environment>,
 }
 
@@ -64,7 +64,7 @@ pub fn plan_base_url(
             }
         }
     }
-    let environment = db::environments::get_active(conn, project_id)?;
+    let environment = db::environments::get_default(conn, project_id)?;
     Ok(BaseUrlPlan {
         candidates,
         environment,
@@ -89,7 +89,7 @@ fn push_candidate(candidates: &mut Vec<String>, url: &str) {
 /// 报告里写回那一格**实际**的代理值：规格给了代理就是规格那个，规格没给就是那一格原来的
 /// 那个（可能没有代理）。
 ///
-/// 没有激活环境就没有格子可填，于是地址无处可去——报告里 `environment_name` 为 `None`，
+/// 没有默认环境就没有格子可填，于是地址无处可去——报告里 `environment_name` 为 `None`，
 /// 用户能看见「地址没有落进任何一格」，而不是以为它已经生效了。
 pub(super) fn wire_base_url(
     conn: &mut Connection,

@@ -265,7 +265,7 @@ export const ENV: Environment = {
   moduleBaseUrls: {},
   variables: { token: 'eyJ.tok', userId: 'u_demo', apiKey: 'k_123' },
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
 };
 
 export function settings(overrides: Partial<RequestSettings> = {}): RequestSettings {

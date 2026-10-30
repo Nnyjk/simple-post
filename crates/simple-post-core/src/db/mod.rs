@@ -61,7 +61,7 @@ pub(crate) mod test_support;
 /// 改名后旧行反序列化不出来，文件即不可读。
 ///
 /// 版本号历史写在 `schema.sql` 末尾，改动请同步。
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 // CRUD 模块共用的辅助类型与函数。
 
