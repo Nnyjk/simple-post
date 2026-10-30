@@ -31,7 +31,7 @@ fn environment_module_base_urls_round_trip() {
             .into_iter()
             .collect(),
         disabled_variables: Vec::new(),
-        is_active: true,
+        created_at: 1_700_000_000_000,
     };
     let s = serde_json::to_string(&env).unwrap();
     assert!(s.contains("\"moduleBaseUrls\""), "{s}");
@@ -54,7 +54,7 @@ fn environment_module_base_urls_round_trip() {
         Some("https://gw/order")
     );
     assert_eq!(back.variables.get("token").unwrap(), "abc");
-    assert!(back.is_active);
+    assert_eq!(back.created_at, 1_700_000_000_000);
 }
 
 #[test]

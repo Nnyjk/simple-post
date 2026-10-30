@@ -87,7 +87,6 @@ pub(crate) fn detail(node_id: &str) -> EndpointDetail {
         node_id: node_id.into(),
         method: crate::domain::HttpMethod::Get,
         url: format!("/{node_id}"),
-        environment_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],

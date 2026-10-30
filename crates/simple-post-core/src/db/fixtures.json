@@ -132,7 +132,6 @@
       "description": "通过短信验证码登录",
       "method": "POST",
       "url": "/auth/login/sms",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [
@@ -157,7 +156,6 @@
       "description": null,
       "method": "POST",
       "url": "/auth/login",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -180,7 +178,6 @@
       "description": null,
       "method": "GET",
       "url": "/users/{{userId}}",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [
         {
@@ -208,7 +205,6 @@
       "description": null,
       "method": "PATCH",
       "url": "/users/{{userId}}",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -228,7 +224,6 @@
       "description": null,
       "method": "GET",
       "url": "/orders",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [
         { "id": "p1", "key": "page", "value": "1", "enabled": true },
@@ -258,7 +253,6 @@
       "description": null,
       "method": "POST",
       "url": "/orders",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -281,7 +275,6 @@
       "description": null,
       "method": "DELETE",
       "url": "/orders/{{orderId}}",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -301,7 +294,6 @@
       "description": null,
       "method": "POST",
       "url": "/orders/{{orderId}}/refunds",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -324,7 +316,6 @@
       "description": null,
       "method": "POST",
       "url": "/cashier",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -347,7 +338,6 @@
       "description": null,
       "method": "GET",
       "url": "/invoice/titles",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -367,7 +357,6 @@
       "description": null,
       "method": "POST",
       "url": "/invoice/issue",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -390,7 +379,6 @@
       "description": null,
       "method": "GET",
       "url": "/shadow/{{deviceId}}",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -413,7 +401,6 @@
       "description": null,
       "method": "PUT",
       "url": "/shadow/{{deviceId}}/desired",
-      "environmentId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -444,7 +431,7 @@
         }
       },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.dev", "env": "dev" },
-      "isActive": true
+      "createdAt": 1787031874000
     },
     {
       "id": "env_staging",
@@ -456,7 +443,7 @@
         "m_pay": { "url": "http://localhost:4000/demo/pay" }
       },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.staging", "env": "staging" },
-      "isActive": false
+      "createdAt": 1787118274000
     },
     {
       "id": "env_prod",
@@ -468,7 +455,7 @@
         "m_pay": { "url": "http://localhost:4000/demo/pay" }
       },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.prod", "env": "prod" },
-      "isActive": false
+      "createdAt": 1787204674000
     }
   ]
 }

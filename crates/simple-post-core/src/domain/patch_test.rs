@@ -12,21 +12,21 @@ fn endpoint_patch_distinguishes_absent_from_null() {
     }))
     .unwrap();
     assert_eq!(p.url.as_deref(), Some("/renamed"));
-    assert!(p.environment_id.is_none());
+    assert!(p.base_url_override.is_none());
 
-    // `environmentId: null` → Some(None)（清空该列）
+    // `baseUrlOverride: null` → Some(None)（清空该列）
     let p: EndpointDetailPatch = serde_json::from_value(json!({
-        "environmentId": null
+        "baseUrlOverride": null
     }))
     .unwrap();
-    assert_eq!(p.environment_id, Some(None));
+    assert_eq!(p.base_url_override, Some(None));
 
-    // `environmentId: "e1"` → Some(Some("e1"))
+    // `baseUrlOverride: "https://e1"` → Some(Some("https://e1"))
     let p: EndpointDetailPatch = serde_json::from_value(json!({
-        "environmentId": "e1"
+        "baseUrlOverride": "https://e1"
     }))
     .unwrap();
-    assert_eq!(p.environment_id, Some(Some("e1".into())));
+    assert_eq!(p.base_url_override, Some(Some("https://e1".into())));
 }
 
 #[test]
@@ -107,11 +107,6 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
         ..Default::default()
     };
     assert!(!d.is_empty(), "EndpointDetailPatch::url");
-    let d = EndpointDetailPatch {
-        environment_id: Some(Some("e1".into())),
-        ..Default::default()
-    };
-    assert!(!d.is_empty(), "EndpointDetailPatch::environment_id");
     let d = EndpointDetailPatch {
         base_url_override: Some(Some("https://x".into())),
         ..Default::default()
@@ -195,10 +190,10 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
     };
     assert!(!e.is_empty(), "EnvironmentPatch::disabled_variables");
     let e = EnvironmentPatch {
-        is_active: Some(false),
+        name: Some("staging".into()),
         ..Default::default()
     };
-    assert!(!e.is_empty(), "EnvironmentPatch::is_active");
+    assert!(!e.is_empty(), "EnvironmentPatch::name");
 }
 
 #[test]
@@ -216,12 +211,12 @@ fn clearing_a_nullable_column_is_not_an_empty_patch() {
     assert_eq!(v["description"], serde_json::Value::Null);
 
     let d = EndpointDetailPatch {
-        environment_id: Some(None),
+        base_url_override: Some(None),
         ..Default::default()
     };
-    assert!(!d.is_empty(), "clearing environmentId is a real write");
+    assert!(!d.is_empty(), "clearing baseUrlOverride is a real write");
     assert_eq!(
-        serde_json::to_value(&d).unwrap()["environmentId"],
+        serde_json::to_value(&d).unwrap()["baseUrlOverride"],
         serde_json::Value::Null
     );
 }

@@ -208,8 +208,8 @@ fn create_with_defaults_seeds_a_project_and_one_environment() {
     assert_eq!(envs.len(), 1, "exactly the default environment");
     assert_eq!(envs[0].name, DEFAULT_ENVIRONMENT_NAME);
     assert!(
-        envs[0].is_active,
-        "it has to be the active one to be useful"
+        envs[0].created_at > 0,
+        "it has to carry a creation time — the default environment is the earliest one"
     );
     assert!(
         envs[0].module_base_urls.is_empty(),

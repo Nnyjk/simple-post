@@ -66,7 +66,6 @@ fn detail(node_id: &str) -> EndpointDetail {
         node_id: node_id.into(),
         method: HttpMethod::Get,
         url: format!("/{node_id}"),
-        environment_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],
@@ -94,7 +93,6 @@ fn json_columns_round_trip() {
     let patch = r##"{
         "method": "POST",
         "url": "/orders",
-        "environmentId": "env1",
         "baseUrlOverride": "https://mirror.example",
         "params": [{"id":"k1","key":"page","value":"1","enabled":true,"description":"分页"}],
         "pathParams": [{"id":"k3","key":"id","value":"42","enabled":true}],
@@ -113,7 +111,6 @@ fn json_columns_round_trip() {
     let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
     assert_eq!(got.method, HttpMethod::Post);
     assert_eq!(got.url, "/orders");
-    assert_eq!(got.environment_id.as_deref(), Some("env1"));
     assert_eq!(
         got.base_url_override.as_deref(),
         Some("https://mirror.example")

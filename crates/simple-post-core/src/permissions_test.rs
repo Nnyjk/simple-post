@@ -27,7 +27,7 @@ fn at_least_lower_does_not_cover_higher() {
 #[test]
 fn required_permission_read_class() {
     assert_eq!(required_permission("env_list"), Permission::Read);
-    assert_eq!(required_permission("env_get_active"), Permission::Read);
+    assert_eq!(required_permission("env_get_default"), Permission::Read);
     assert_eq!(required_permission("project_list"), Permission::Read);
     assert_eq!(required_permission("project_get"), Permission::Read);
     assert_eq!(required_permission("module_list"), Permission::Read);

@@ -19,7 +19,7 @@ fn sample_env(id: &str, project_id: &str, name: &str) -> Environment {
         module_base_urls: HashMap::new(),
         variables: HashMap::new(),
         disabled_variables: Vec::new(),
-        is_active: false,
+        created_at: 0,
     }
 }
 
@@ -40,36 +40,61 @@ fn list_by_project_returns_seeded_envs() {
 }
 
 #[test]
-fn get_active_returns_dev_from_seeds() {
+fn get_default_returns_the_earliest_env() {
     let pool = fresh_pool();
-    let active = db::with_conn(&pool, |c| get_active(c, "p_demo")).unwrap();
-    let env = active.expect("fixtures seed env_dev with is_active=true");
-    assert_eq!(env.id, "env_dev");
+    // fixtures 给 p_demo 播种三个环境，创建时刻依次是 dev → staging → prod。
+    let default = db::with_conn(&pool, |c| get_default(c, "p_demo")).unwrap();
+    let env = default.expect("p_demo 有三个环境");
+    assert_eq!(env.id, "env_dev", "默认环境是最早创建的那个");
 }
 
 #[test]
-fn set_active_demotes_others_atomically() {
+fn get_default_on_a_project_without_envs_is_none() {
     let pool = fresh_pool();
-    // Initially env_dev is active. Promote env_staging.
-    db::with_tx(&pool, |c| set_active(c, "env_staging")).unwrap();
-    let active = db::with_conn(&pool, |c| get_active(c, "p_demo")).unwrap();
-    assert_eq!(active.unwrap().id, "env_staging");
-
-    // env_dev must be inactive now
-    let envs = db::with_conn(&pool, |c| list_by_project(c, "p_demo")).unwrap();
-    let dev = envs.iter().find(|e| e.id == "env_dev").unwrap();
-    let staging = envs.iter().find(|e| e.id == "env_staging").unwrap();
-    let prod = envs.iter().find(|e| e.id == "env_prod").unwrap();
-    assert!(!dev.is_active);
-    assert!(staging.is_active);
-    assert!(!prod.is_active);
+    let default = db::with_conn(&pool, |c| get_default(c, "p_iot")).unwrap();
+    assert!(default.is_none());
 }
 
 #[test]
-fn set_active_missing_returns_not_found() {
+fn the_default_env_follows_the_creation_order_not_the_name() {
+    // 先建的那个就是默认环境，与它叫什么无关。
     let pool = fresh_pool();
-    let err = db::with_tx(&pool, |c| set_active(c, "env_ghost")).unwrap_err();
-    assert_eq!(err.code(), "not_found");
+    db::with_tx(&pool, |c| {
+        let mut early = sample_env("env_early", "p_iot", "zzz");
+        early.created_at = 1_700_000_000_000;
+        create(c, &early)?;
+        let mut late = sample_env("env_late", "p_iot", "aaa");
+        late.created_at = 1_700_000_100_000;
+        create(c, &late)?;
+        Ok(())
+    })
+    .unwrap();
+    let default = db::with_conn(&pool, |c| get_default(c, "p_iot")).unwrap();
+    assert_eq!(default.unwrap().id, "env_early");
+}
+
+/// 新建环境回传**落库之后**的那一行：创建时刻是它在库里认「默认环境」用的字段。
+///
+/// 调用方通常不给创建时刻（结构体的默认值是 0），故这里补上当前时刻。回传的那一份
+/// 必须带着补过的值：回传 0 的话，界面手里的创建时刻与库里那一行对不上，界面与后端
+/// 于是算出两个不同的默认环境。
+#[test]
+fn creating_an_env_returns_the_effective_creation_time() {
+    let pool = fresh_pool();
+    let mut env = sample_env("env_new", "p_iot", "dev");
+    env.created_at = 0;
+
+    let created = db::with_tx(&pool, |c| create(c, &env)).unwrap();
+
+    assert!(
+        created.created_at > 0,
+        "创建时刻不能是 0：库里补的是当前时刻，回传 0 会让界面与库算出两个默认环境"
+    );
+    let stored = db::with_conn(&pool, |c| get(c, "env_new")).unwrap();
+    assert_eq!(
+        created.created_at, stored.created_at,
+        "回传的那一份与库里那一行必须是同一个创建时刻"
+    );
 }
 
 #[test]
@@ -79,7 +104,6 @@ fn round_trip_preserves_hashmap() {
     env.module_base_urls
         .insert("m_auth".into(), cell("http://qa"));
     env.variables.insert("token".into(), "abc".into());
-    env.is_active = false;
     db::with_tx(&pool, |c| create(c, &env)).unwrap();
     let got = db::with_conn(&pool, |c| get(c, "env1")).unwrap();
     assert_eq!(got.module_base_urls.get("m_auth").unwrap().url, "http://qa");
@@ -497,4 +521,37 @@ fn a_patch_without_the_field_leaves_the_disabled_set_alone() {
         vec!["token".to_string()],
         "改名字不该动停用集合"
     );
+}
+
+/// 端点行不再有环境绑定：删掉一个环境不必改任何端点行，端点照样按客户端选的
+/// 环境（或项目默认环境）解析地址与变量。
+#[test]
+fn deleting_an_env_leaves_the_endpoint_rows_untouched() {
+    let pool = fresh_pool();
+    let before = db::with_conn(&pool, |c| {
+        crate::db::endpoint_details::get(c, "e_login_sms")
+    })
+    .unwrap();
+
+    db::with_tx(&pool, |c| delete(c, "env_dev")).unwrap();
+
+    let after = db::with_conn(&pool, |c| {
+        crate::db::endpoint_details::get(c, "e_login_sms")
+    })
+    .unwrap();
+    assert_eq!(after.method, before.method);
+    assert_eq!(after.url, before.url);
+    assert!(
+        db::with_conn(&pool, |c| get(c, "env_dev")).is_err(),
+        "环境本身确实被删掉了"
+    );
+}
+
+#[test]
+fn deleting_the_default_env_promotes_the_next_earliest_one() {
+    // 默认环境是「最早创建的那个」，故删掉它之后，下一个最早的就是默认环境。
+    let pool = fresh_pool();
+    db::with_tx(&pool, |c| delete(c, "env_dev")).unwrap();
+    let default = db::with_conn(&pool, |c| get_default(c, "p_demo")).unwrap();
+    assert_eq!(default.unwrap().id, "env_staging");
 }
