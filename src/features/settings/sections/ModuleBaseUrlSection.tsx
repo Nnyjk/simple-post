@@ -31,6 +31,7 @@ import { pickDefaultEnvironment } from '@/lib/env-default';
 export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
   const mod = useAppStore((s) => s.nodes.find((n) => n.id === moduleId));
   const environments = useAppStore((s) => s.environments);
+  const currentEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   const setEnvironmentModuleBaseUrl = useAppStore((s) => s.setEnvironmentModuleBaseUrl);
   const openTab = useAppStore((s) => s.openTab);
 
@@ -41,17 +42,20 @@ export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
     [environments, mod],
   );
 
-  // 列表形状一变就回到这个项目的默认环境（最早创建的那个），除非用户已明确选过。
-  // 规则同 `EnvironmentSection`，两条环境条行为一致。
+  // 列表形状一变就回到「本客户端当前用的那个环境」，除非用户已明确选过。规则同
+  // `EnvironmentSection`，两条环境条行为一致。
+  //
+  // 当前环境不属于这个模块所属的项目时（看的是别的项目的模块）才退回默认环境。
   useEffect(() => {
     if (projectEnvs.length === 0) {
       setActiveId(null);
       return;
     }
     if (activeId && projectEnvs.some((e) => e.id === activeId)) return;
-    const fallback = pickDefaultEnvironment(projectEnvs, mod?.rootId ?? '');
+    const current = projectEnvs.find((e) => e.id === currentEnvironmentId);
+    const fallback = current ?? pickDefaultEnvironment(projectEnvs, mod?.rootId ?? '');
     setActiveId(fallback?.id ?? projectEnvs[0]!.id);
-  }, [projectEnvs, mod, activeId]);
+  }, [projectEnvs, mod, currentEnvironmentId, activeId]);
 
   const activeEnv = useMemo(
     () => projectEnvs.find((e) => e.id === activeId) ?? null,

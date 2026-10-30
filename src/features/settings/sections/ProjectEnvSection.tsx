@@ -27,6 +27,7 @@ import { EnvironmentSection } from './EnvironmentSection';
 export function ProjectEnvSection() {
   const allEnvironments = useAppStore((s) => s.environments);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
+  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   const nodes = useAppStore((s) => s.nodes);
 
   const setEnvironmentVar = useAppStore((s) => s.setEnvironmentVar);
@@ -74,6 +75,7 @@ export function ProjectEnvSection() {
       deleteEnvironment={deleteEnvironment}
       updateEnvironment={updateEnvironment}
       addEnvironment={addEnvironment}
+      currentEnvironmentId={activeEnvironmentId}
     />
   );
 }
