@@ -68,7 +68,6 @@ fn seed(st: &AppState, endpoint_tls: Option<TlsSettings>) -> String {
         node_id: "e_tls".into(),
         method: HttpMethod::Get,
         url: "/x".into(),
-        environment_id: None,
         base_url_override: Some("http://127.0.0.1:1".into()),
         params: vec![],
         path_params: vec![],

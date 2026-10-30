@@ -259,7 +259,7 @@ fn a_module_url_lives_in_the_env_cell() {
         module_base_urls,
         variables: HashMap::new(),
         disabled_variables: Vec::new(),
-        is_active: true,
+        created_at: 0,
     };
     let cell = env.module_base_urls.get("mod_a");
     assert_eq!(

@@ -46,7 +46,6 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
                     "bearer": "tok-123"
                 },
                 "tags": ["smoke", "user"],
-                "environment_id": "env_dev",
                 "base_url_override": "https://staging.example.com",
                 "docs": "Creates a user.",
                 "notes": "checked by hand",
@@ -100,8 +99,7 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
 
     assert_eq!(d.tags, vec!["smoke".to_string(), "user".to_string()]);
 
-    // Environment binding + the endpoint's own base URL.
-    assert_eq!(d.environment_id.as_deref(), Some("env_dev"));
+    // The endpoint's own base URL.
     assert_eq!(
         d.base_url_override.as_deref(),
         Some("https://staging.example.com")
@@ -118,7 +116,7 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
 
 /// `Some(None)` must keep meaning "clear" for the `double_option`
 /// fields. A patch that could only ever *set* would make
-/// `environment_id` / `base_url_override` / `notes` one-way.
+/// `base_url_override` / `notes` one-way.
 #[tokio::test]
 async fn an_explicit_null_clears_a_nullable_patch_field() {
     let (st, id) = fixture();
@@ -126,28 +124,31 @@ async fn an_explicit_null_clears_a_nullable_patch_field() {
         &st,
         serde_json::json!({
             "endpoint_id": id,
-            "patch": { "environment_id": "env_dev", "notes": "first" }
+            "patch": { "base_url_override": "https://one.example", "notes": "first" }
         }),
     )
     .await
     .expect("setting the fields");
     assert_eq!(
-        detail_of(&st, &id).environment_id.as_deref(),
-        Some("env_dev")
+        detail_of(&st, &id).base_url_override.as_deref(),
+        Some("https://one.example")
     );
 
     tool_endpoint_update(
         &st,
         serde_json::json!({
             "endpoint_id": id,
-            "patch": { "environment_id": null, "notes": null }
+            "patch": { "base_url_override": null, "notes": null }
         }),
     )
     .await
     .expect("clearing the fields must be a supported write, not an error");
 
     let d = detail_of(&st, &id);
-    assert_eq!(d.environment_id, None, "null must clear, not be rejected");
+    assert_eq!(
+        d.base_url_override, None,
+        "null must clear, not be rejected"
+    );
     assert_eq!(d.notes, None);
 }
 
@@ -314,10 +315,10 @@ async fn endpoint_update_can_patch_a_body_into_multipart() {
     assert_eq!(detail_of(&st, &id).body.mode, BodyMode::Multipart);
 }
 
-/// `endpoint_create` previously hardcoded `environment_id`,
-/// `base_url_override`, `body_schema`, `docs`,
-/// `notes` and `description` to their defaults, so building a fully
-/// configured endpoint took a mandatory second `endpoint_update` call.
+/// `endpoint_create` previously hardcoded `base_url_override`,
+/// `body_schema`, `docs`, `notes` and `description` to their defaults,
+/// so building a fully configured endpoint took a mandatory second
+/// `endpoint_update` call.
 #[tokio::test]
 async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
     let st = state();
@@ -345,7 +346,6 @@ async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
             "auth_type": "bearer",
             "auth_config": { "bearer": "tok" },
             "tags": ["orders"],
-            "environment_id": "env_dev",
             "base_url_override": "https://api.example.com",
             "docs": "Lists orders.",
             "notes": "n"
@@ -367,7 +367,6 @@ async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
     assert_eq!(d.body.schema.as_deref(), Some("{\"limit\":\"number\"}"));
     assert_eq!(d.auth.kind, simple_post_core::domain::AuthType::Bearer);
     assert_eq!(d.auth.bearer.as_deref(), Some("tok"));
-    assert_eq!(d.environment_id.as_deref(), Some("env_dev"));
     assert_eq!(
         d.base_url_override.as_deref(),
         Some("https://api.example.com")

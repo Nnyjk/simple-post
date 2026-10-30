@@ -69,7 +69,6 @@ pub(super) fn bare_detail(node_id: &str) -> EndpointDetail {
         node_id: node_id.into(),
         method: HttpMethod::Get,
         url: "/x".into(),
-        environment_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],

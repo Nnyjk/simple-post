@@ -82,7 +82,6 @@ fn detail(input: &Input) -> EndpointDetail {
         method: simple_post_core::domain::parse_http_method(&input.method)
             .expect("样本里的 method 必须是合法的 HTTP 动词"),
         url: input.url_path.clone(),
-        environment_id: None,
         // 带代理的用例里 base URL 住在格子上，端点自己的 override 必须让开：override
         // 在场时代理不参与（那一格属于模块，不属于端点）。
         base_url_override: if input.proxy.is_some() {
@@ -125,7 +124,7 @@ fn env(variables: &std::collections::BTreeMap<String, String>, input: &Input) ->
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
         disabled_variables: vec![],
-        is_active: true,
+        created_at: 0,
     }
 }
 

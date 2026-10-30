@@ -33,9 +33,9 @@ pub(crate) fn missing_pieces(
 ) -> Vec<String> {
     let mut out = Vec::new();
 
-    // 环境：端点自己绑定的优先，没有就用项目激活的那个 —— 与发送链路同一套判据。
-    let env = crate::mcp::resolve_env(pool, detail.environment_id.as_deref(), &project.id)
-        .unwrap_or(None);
+    // 环境：端点行不再绑定环境，故这里按项目的默认环境（最早创建的那个）算缺口
+    // —— 与发送链路同一套判据。
+    let env = crate::mcp::resolve_env(pool, None, &project.id).unwrap_or(None);
 
     // 模块：base URL 住在 (环境 × 模块) 的单元格里，所以要说清是哪个模块。
     let module_id = simple_post_core::db::with_conn(pool, |c| {
@@ -145,7 +145,7 @@ fn enabled_dynamic_names(pool: &DbPool, project_id: &str) -> Vec<String> {
     .unwrap_or_default()
 }
 
-/// 这个 `missing_pieces` 需要 `Project`，才能知道端点没绑环境时该用哪个激活环境。
+/// 这个 `missing_pieces` 需要 `Project`，才能知道端点没点名环境时该用哪个默认环境。
 pub(crate) fn project_of(pool: &DbPool, project_id: &str) -> Result<Project, AppError> {
     simple_post_core::db::with_conn(pool, |c| simple_post_core::db::projects::get(c, project_id))
 }

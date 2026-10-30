@@ -1,7 +1,8 @@
 //! 「这次发送按哪个环境解析」的归属判据。
 //!
-//! 环境里的变量属于它自己那个项目，故端点绑定的环境必须属于端点所在的项目 ——
+//! 环境里的变量属于它自己那个项目，故本次调用点名的环境必须属于端点所在的项目 ——
 //! 拿别的项目的环境来替换，等于把那个项目的值读进这个项目的请求。
+//! 端点行本身不记环境：用哪个环境是每次调用自己决定的。
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -26,7 +27,7 @@ fn state() -> std::sync::Arc<crate::mcp::AppState> {
     })
 }
 
-/// 端点绑定的环境必须属于端点所在的项目。
+/// 本次调用点名的环境必须属于端点所在的项目。
 #[test]
 fn an_environment_from_another_project_is_not_resolved() {
     let st = state();
@@ -55,7 +56,7 @@ fn an_environment_from_another_project_is_not_resolved() {
                 .into_iter()
                 .collect(),
             disabled_variables: Vec::new(),
-            is_active: false,
+            created_at: 0,
         };
         simple_post_core::db::environments::create(c, &env)?;
         Ok(())

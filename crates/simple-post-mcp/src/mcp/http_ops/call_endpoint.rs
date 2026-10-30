@@ -32,10 +32,9 @@ pub(super) async fn tool_api_call_endpoint(
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint").await?;
 
-    // 环境：端点自己绑定的优先；没绑定就取项目当前激活的那个 —— 与界面那侧一致
-    // （界面用的是工作区当前环境，而工作区的切换会写 `environments.is_active`）。
-    let env =
-        crate::mcp::resolve_env(&state.pool, endpoint.environment_id.as_deref(), &project_id)?;
+    // 环境：这次调用点名的那个优先；没点名就取项目的默认环境（最早创建的那个）。
+    // 端点行不再绑定环境，故每一次调用都可以自己选一个。
+    let env = crate::mcp::resolve_env(&state.pool, a.environment_id.as_deref(), &project_id)?;
 
     let project = if !project_id.is_empty() {
         simple_post_core::db::with_conn(&state.pool, |c| {

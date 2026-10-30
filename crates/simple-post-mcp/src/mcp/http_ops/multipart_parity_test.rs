@@ -63,7 +63,6 @@ fn detail(input: &Input) -> EndpointDetail {
         method: simple_post_core::domain::parse_http_method(&input.method)
             .expect("样本里的 method 必须是合法的 HTTP 动词"),
         url: input.url_path.clone(),
-        environment_id: None,
         base_url_override: Some(input.base_url.clone()),
         params: input.params.clone(),
         path_params: input.path_params.clone(),
@@ -90,7 +89,7 @@ fn env(variables: &std::collections::BTreeMap<String, String>) -> Environment {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
         disabled_variables: vec![],
-        is_active: true,
+        created_at: 0,
     }
 }
 

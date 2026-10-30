@@ -105,5 +105,9 @@ mod tests;
 mod env_resolve_tests;
 
 #[cfg(test)]
+#[path = "env_switch_test.rs"]
+mod env_switch_tests;
+
+#[cfg(test)]
 #[path = "resources_test.rs"]
 mod resources_tests;

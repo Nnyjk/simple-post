@@ -52,6 +52,12 @@ pub(super) struct RunRequestArgs {
 #[derive(Debug, Deserialize)]
 pub(super) struct CallEndpointArgs {
     pub(super) endpoint_id: String,
+    /// 这次调用按哪个环境解析。缺席 = 用该项目的默认环境（最早创建的那个）。
+    ///
+    /// 端点行不再绑定环境，故这里是**逐次**的选择：同一个端点可以在这一轮走预发、
+    /// 下一轮走生产，两次各发各的。
+    #[serde(default)]
+    pub(super) environment_id: Option<String>,
     #[serde(default)]
     pub(super) overrides: Option<Value>,
     #[serde(default)]

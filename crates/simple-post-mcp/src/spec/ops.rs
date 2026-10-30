@@ -50,7 +50,7 @@ pub fn upsert(pool: &DbPool, spec: &EndpointSpec) -> Result<SpecUpsertResult, Ap
 fn missing_pieces(pool: &DbPool, outcome: &SpecOutcome) -> Vec<String> {
     let endpoint_id = &outcome.endpoint.resource.node.id;
     // 取项目的那一步与写工具共用同一个判据（`project_ops::endpoint::project_of`），
-    // 故「激活环境」在两条路上是同一个答案。
+    // 故「默认环境」在两条路上是同一个答案。
     let project = match crate::mcp::project_ops::endpoint::project_of(pool, &outcome.project_id) {
         Ok(project) => project,
         // 查库失败就把失败写进列表：空列表表示「它能发出去了」。

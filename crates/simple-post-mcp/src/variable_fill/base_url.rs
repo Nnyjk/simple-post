@@ -42,8 +42,9 @@ pub struct ResolvedBaseUrl {
 /// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子。格子缺失是
 /// 一个真实答案，不是一个洞。
 ///
-/// `env.module_base_urls` 按 `module_id` 建键。环境取自 `detail.environment_id`；
-/// 未选环境（`None`）时直接短路成空。
+/// `env.module_base_urls` 按 `module_id` 建键。环境由调用方给出：端点行不再绑定环境，
+/// 故它要么是这次调用点名的那一个，要么是项目的默认环境；两者都没有时（`None`）
+/// 直接短路成空。
 pub fn resolve_base_url(
     detail: &EndpointDetail,
     env: Option<&Environment>,

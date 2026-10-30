@@ -143,7 +143,6 @@ async fn module_move_preserves_collections_and_endpoints() {
                 node_id: "e_move".into(),
                 method: simple_post_core::domain::HttpMethod::Get,
                 url: "/x".into(),
-                environment_id: None,
                 base_url_override: None,
                 params: vec![],
                 path_params: vec![],

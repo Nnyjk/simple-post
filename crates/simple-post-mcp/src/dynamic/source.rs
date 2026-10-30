@@ -181,7 +181,6 @@ async fn fetch_from_inline(
         node_id: String::new(),
         method,
         url: spec.url,
-        environment_id: None,
         // 空串 = 自定义模式但不加前缀：URL 字段本身就是完整地址。
         base_url_override: Some(String::new()),
         params: spec.params,

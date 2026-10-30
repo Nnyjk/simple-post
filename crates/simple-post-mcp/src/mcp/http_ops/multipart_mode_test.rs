@@ -118,7 +118,6 @@ fn seed(st: &AppState, api_url: &str, stored: RequestBody) -> String {
         node_id: "e_mp".into(),
         method: HttpMethod::Post,
         url: format!("{api_url}/upload"),
-        environment_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],

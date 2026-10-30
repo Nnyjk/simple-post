@@ -105,8 +105,7 @@ fn environment_schema() -> Value {
             "baseUrlProxy": {
                 "type": "string",
                 "description": "The address the request actually goes to when it is reached through a proxy gateway. Omit it for no proxy."
-            },
-            "activate": { "type": "boolean", "description": "Make this the project's active environment." }
+            }
         },
         "additionalProperties": false
     })
@@ -148,10 +147,6 @@ fn endpoint_schema() -> Value {
             },
             "body": body_schema(),
             "auth": auth_schema(),
-            "environment_id": {
-                "type": "string",
-                "description": "Environment to bind. Defaults to the environment named in this spec."
-            },
             "base_url_override": {
                 "type": "string",
                 "description": "Literal base URL for this endpoint, overriding the environment's cell for this endpoint's module."

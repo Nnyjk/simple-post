@@ -126,7 +126,6 @@ fn endpoint_update_schema_documents_every_patchable_field() {
             "body",
             "description",
             "docs",
-            "environment_id",
             "headers",
             "method",
             "name",
@@ -189,7 +188,6 @@ fn endpoint_update_schema_documents_every_patchable_field() {
     assert_eq!(oauth2["additionalProperties"], false);
     // 可空字段必须写明 `null` 表示清空 ——
     // three-state meaning is invisible on the wire otherwise.
-    assert_eq!(patch_props["environment_id"]["type"][1], "null");
     assert_eq!(patch_props["base_url_override"]["type"][1], "null");
     // `tls` 是端点自己的 HTTPS 出站设置：它有三档（缺席 = 不动、`null` = 清除、
     // 设值 = 写入），故 `null` 必须登记进 schema。

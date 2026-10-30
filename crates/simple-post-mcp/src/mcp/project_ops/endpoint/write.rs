@@ -210,7 +210,6 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         node_id: id,
         method,
         url: a.url,
-        environment_id: a.environment_id,
         base_url_override: a.base_url_override,
         params: coerce_key_values(a.params.unwrap_or_default()),
         path_params: coerce_key_values(a.path_params.unwrap_or_default()),
@@ -306,7 +305,6 @@ pub(super) async fn tool_endpoint_update(
     let detail_patch = EndpointDetailPatch {
         method: patch_value_field::<simple_post_core::domain::HttpMethod>(&patch_obj, "method")?,
         url: patch_value_field::<String>(&patch_obj, "url")?,
-        environment_id: patch_field::<String>(&patch_obj, "environment_id")?,
         base_url_override: patch_field::<String>(&patch_obj, "base_url_override")?,
         params: patch_value_field::<Vec<KeyValueInput>>(&patch_obj, "params")?
             .map(coerce_key_values),
@@ -345,7 +343,7 @@ pub(super) async fn tool_endpoint_update(
             "endpoint_update was given an empty patch: name at least one \
              field to change, e.g. {\"patch\":{\"url\":\"/v2/users\"}}. \
              Accepted fields: method, url, params, headers, body, auth, \
-             tags, environment_id, base_url_override, docs, notes, \
+             tags, base_url_override, docs, notes, \
              pre_request_script, test_script, tls, name, description, sort_order"
                 .into(),
         ));

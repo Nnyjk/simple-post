@@ -163,10 +163,6 @@ to send when testing goes in body_content, never here."
 {\"oauth2\":{...}} (see auth.oauth2 in endpoint_update)."
                 },
                 "tags": { "type": "array", "items": { "type": "string" } },
-                "environment_id": {
-                    "type": "string",
-                    "description": "Environment to bind. Omit for none."
-                },
                 "base_url_override": {
                     "type": "string",
                     "description": "Literal base URL for this endpoint, overriding the environment's cell for the module this endpoint sits in."
@@ -204,7 +200,7 @@ to send when testing goes in body_content, never here."
                 "endpoint_id": { "type": "string" },
                 "patch": {
                     "type": "object",
-                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `environment_id`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script` and `tls` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
+                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script` and `tls` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
                     "properties": {
                         "name": { "type": "string" },
                         "description": { "type": ["string", "null"] },
@@ -276,7 +272,6 @@ segments in `url`. They are substituted into the path itself, not appended to th
                             "additionalProperties": false
                         },
                         "tags": { "type": "array", "items": { "type": "string" } },
-                        "environment_id": { "type": ["string", "null"] },
                         "base_url_override": { "type": ["string", "null"] },
                         "docs": { "type": ["string", "null"] },
                         "notes": { "type": ["string", "null"] },

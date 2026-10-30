@@ -100,7 +100,7 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
             .into_iter()
             .collect(),
         disabled_variables: vec![],
-        is_active: true,
+        created_at: 0,
     };
     simple_post_core::db::with_tx(&st.pool, |c| {
         projects::create(c, &project)?;

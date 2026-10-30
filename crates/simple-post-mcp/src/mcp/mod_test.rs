@@ -85,17 +85,17 @@ fn every_registered_tool_has_a_capability() {
 
 /// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` 与 `README.md` 都写着「47 tools」。上面的双射测试在「工具连同它的
+/// `AGENTS.md` 与 `README.md` 都写着「46 tools」。上面的双射测试在「工具连同它的
 /// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
 /// 里要改这个常量，同一个 commit 也应更新那两份文档。
-const EXPECTED_TOOL_COUNT: usize = 47;
+const EXPECTED_TOOL_COUNT: usize = 46;
 
 #[test]
 fn registered_tool_count_matches_the_documented_figure() {
     assert_eq!(
         tool_table().len(),
         EXPECTED_TOOL_COUNT,
-        "tool count changed; update EXPECTED_TOOL_COUNT and the '47 tools' \
+        "tool count changed; update EXPECTED_TOOL_COUNT and the '46 tools' \
              claims in AGENTS.md and README.md"
     );
 }
