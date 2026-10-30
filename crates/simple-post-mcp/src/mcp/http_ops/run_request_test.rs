@@ -177,6 +177,43 @@ async fn a_stale_environment_id_degrades_instead_of_failing_the_call() {
     assert!(outcome.is_ok(), "环境已被删不该让整次调用失败：{outcome:?}");
 }
 
+/// 临时请求不点名环境，就**没有环境**——没有默认环境可回落。
+///
+/// 与 `api_call_endpoint` 的差别就在这里：后者的项目归属来自端点所属的项目，
+/// 故省略 `environment_id` 时还能回落到那个项目的默认环境；临时请求没有端点行
+/// 可读，项目归属只能由环境 id 反查，故省略 `env_id` 时连项目都没有 —— 既没有
+/// base URL 那一格可读，变量也不替换。
+#[tokio::test]
+async fn a_run_request_without_an_environment_has_no_variables_substituted() {
+    let (api, seen) = stub().await;
+    let st = mcp_state("no-env");
+    let (_, _env_id, module_id) = seed(&st, &api);
+
+    tool_api_run_request(
+        &st,
+        json!({
+            "method": "GET",
+            // 带上完整地址：不点名环境就没有 base URL 可前置，故这里自带地址。
+            "url": format!("{api}/users/{{{{token}}}}"),
+            "module_id": module_id,
+        }),
+    )
+    .await
+    .expect("call");
+
+    let wire = seen.lock().unwrap()[0].clone();
+    // 变量没有被替换：`token` 的值是 `abc`，URL 里不该出现它。
+    assert!(
+        !wire.contains("/users/abc"),
+        "没有环境就没有变量可替换，URL 里不该出现变量的值：{wire}"
+    );
+    // 花括号按 URL 的规矩被编码成 `%7B` / `%7D`，但它仍是那个没被替换的标记。
+    assert!(
+        wire.contains("GET /users/%7B%7Btoken%7D%7D HTTP/1.1"),
+        "没有环境就没有变量可替换，`{{{{token}}}}` 必须原样发出去：{wire}"
+    );
+}
+
 /// 解析不到的变量要报进结果，调用方才知道 URL 里留着 `{{...}}`。
 #[tokio::test]
 async fn a_run_request_reports_the_variables_it_could_not_resolve() {

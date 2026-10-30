@@ -93,7 +93,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                         },
                         "required": ["kind"]
                     },
-                    "env_id": { "type": "string" },
+                    "env_id": { "type": "string", "description": "The environment this request resolves against, and the project it belongs to. Name it: a temporary request has no endpoint row to read the project from, so without this there is no environment, no base URL and no substituted variables." },
                     "module_id": { "type": "string" },
                     "settings_override": {
                         "type": "object",
