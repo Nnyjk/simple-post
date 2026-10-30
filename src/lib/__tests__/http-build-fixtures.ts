@@ -10,8 +10,7 @@ export const ENV: Environment = {
   id: 'env_test',
   projectId: 'p_test',
   name: 'test',
-  baseUrls: {},
-  // (模块 × 服务) 的 URL 层——`prepareRequest` 并不认这个概念（它收到的是已解析好的
+  // (环境 × 模块) 的地址层——`prepareRequest` 并不认这个概念（它收到的是已解析好的
   // `baseUrl`），但该字段没有默认值，所以夹具必须点名它
   moduleBaseUrls: {},
   variables: {

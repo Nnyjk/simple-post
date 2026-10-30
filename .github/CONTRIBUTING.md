@@ -28,13 +28,13 @@ npm run check
 
 这些不是风格偏好，改错了会静默损坏数据或让工具永久失效。**动到相关文件前先读 `AGENTS.md` 对应段落。**
 
-### 1. 不要 bump `SCHEMA_VERSION`
+### 1. 改 schema 前先想清楚要不要 bump `SCHEMA_VERSION`
 
-`ensure_current_schema` 在版本号变化时会**删掉每个用户的整个 store.db**。新增字段一律走 `db::schema::ADDED_COLUMNS`（加法式），并由 `db::migrate` 修复两种旧布局写入的行。`PRAGMA user_version` 至今仍是 `3`，正是这个原因。
+`ensure_current_schema` 在版本号变化时会**删掉每个用户的整个 store.db**。新增字段一律走 `db::schema::ADDED_COLUMNS`（加法式），`db::migrate` 负责把新列补进既有文件——**纯增量改动不 bump 版本号**，正是这个原因。
 
-顺带：有三列是**故意留着的死列**（`environments.base_urls_json`、`base_url_definitions.module_id`、`base_url_definitions.is_default`），它们被新方案取代且不再读写。删列等于重建表，等于 bump 版本号，等于删用户数据。看到「未使用的列」不要顺手清理。
+反过来，**表达不成「加一个带默认值的可空列」的改动就是一次 bump**，而 bump 会删掉用户的项目、环境与资源树。删列等于重建表，等于 bump；删一张没人读的表不用 bump——那种表在打开时丢掉即可。
 
-出处：`AGENTS.md` → *A dead table is dropped on open; a dead column has to stay*。
+出处：`AGENTS.md` → *`SCHEMA_VERSION` is 4 and a version bump replaces the store*。
 
 ### 2. MCP 双闸 fail-closed
 
@@ -42,7 +42,7 @@ npm run check
 
 - **新增工具要改两处注册表**：`tool_table()` 和 `REQUIRED_CAPABILITY`。只改前者，工具会绕过能力闸——要么被当成未分类而彻底不可用，要么（改动未生效时）绕过用户的 `read_only` 选择。`every_registered_tool_has_a_capability` 与它的反向测试会拦住你。
 - **`check_permission(..).await.ok()` 会把拒绝吞掉。** 它编译通过、扫一眼也过得去，然后 `PermissionDenied` 就没了，闸门等于不存在。永远用 `?` 传播。
-- **别写死项目 id。** 处理器必须解析真实归属项目再传进去（`db::nodes::root_id_of` / `db::base_url_defs::project_id_of` / `db::environments::lookup_project_id`）。传字面量 `"global"` 会查不到行、回落到默认的 `ReadCall`，于是所有需要 `Full` 的写工具被永久拒绝——**而工具看起来仍然注册正常**。
+- **别写死项目 id。** 处理器必须解析真实归属项目再传进去（`db::nodes::root_id_of` / `db::environments::lookup_project_id`）。传字面量 `"global"` 会查不到行、回落到默认的 `ReadCall`，于是所有需要 `Full` 的写工具被永久拒绝——**而工具看起来仍然注册正常**。
 - `Send`（出站 HTTP）只有 `full_access` 覆盖。「允许写」不等于「允许随便发请求」。
 
 出处：`AGENTS.md` → *MCP permissions — two gates*、*Adding an MCP tool requires TWO registry edits*。

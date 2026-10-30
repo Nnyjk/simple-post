@@ -57,7 +57,7 @@ pub(super) async fn tool_api_call_endpoint(
 
     // `overrides.module_id` 缺省时要查 `nodes` 补齐：端点属于哪个模块只在树里，
     // detail 行上没有。调用方自己指定了就不覆盖 —— `resolve_endpoint` 是纯函数，
-    // 别让它被一次查库改写。不补的结果是服务列表收窄到空，请求裸奔没有 base URL。
+    // 别让它被一次查库改写。不补的结果是模块格子读不到，请求裸奔没有 base URL。
     let mut overrides = overrides;
     if overrides.module_id.is_none() {
         overrides.module_id = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -74,7 +74,6 @@ pub(super) async fn tool_api_call_endpoint(
     let resolved = crate::variable_fill::resolve_endpoint_with(
         &endpoint,
         env.as_ref(),
-        project_ref,
         Some(&overrides),
         &dynamic,
     )?;

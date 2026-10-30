@@ -19,7 +19,7 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
         // env_ops：8 个
         v.extend(env_ops::table());
 
-        // project_ops：project + module + collection + endpoint + baseUrl
+        // project_ops：project + module + collection + endpoint + spec
         v.extend(project_ops::table());
 
         // http_ops：2 个
@@ -94,12 +94,6 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("endpoint_delete", Capability::Delete),
     ("endpoint_duplicate", Capability::Create),
     ("endpoint_move", Capability::Update),
-    // baseUrl definitions
-    ("base_url_def_list", Capability::Read),
-    ("base_url_def_create", Capability::Create),
-    ("base_url_def_update", Capability::Update),
-    ("base_url_def_delete", Capability::Delete),
-    ("base_url_def_set_default", Capability::Update),
     // 整份接口规格。取 `Update` 而不是 `Create`：它不但建节点，还会改环境变量、
     // 改 base URL 那一格，`if_exists=update` 时还会覆盖已有端点的字段。
     ("spec_upsert", Capability::Update),

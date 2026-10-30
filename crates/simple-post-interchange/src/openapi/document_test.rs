@@ -9,7 +9,7 @@ use simple_post_core::error::AppError;
 use super::support::{doc_of, ep, one_module};
 use super::{to_document, DocFormat};
 use crate::diagnostics::Severity;
-use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
+use crate::ir::{Exchange, IrBaseUrl, IrCollection, IrEndpoint, IrModule, IrScripts};
 
 /// 这个 operation 的 `requestBody` 引用的 component 名字。
 ///
@@ -187,10 +187,10 @@ fn servers_are_taken_per_module_and_never_borrowed() {
         modules: vec![
             IrModule {
                 name: "with".into(),
-                servers: vec![IrServer {
-                    service: "api".into(),
+                base_url: Some(IrBaseUrl {
                     url: "https://api.example.com".into(),
-                }],
+                    proxy: None,
+                }),
                 endpoints: vec![ep("a", HttpMethod::Get, "/a")],
                 ..Default::default()
             },
@@ -211,6 +211,98 @@ fn servers_are_taken_per_module_and_never_borrowed() {
     assert!(
         doc["paths"]["/b"]["get"].get("servers").is_none(),
         "没有配 URL 的模块不得借用别的模块的"
+    );
+}
+
+/// 一个带地址的模块，底下挂着一个端点。
+fn module_with_cell(cell_url: &str, endpoint: IrEndpoint) -> Exchange {
+    Exchange {
+        project_name: "demo".into(),
+        modules: vec![IrModule {
+            name: "m".into(),
+            base_url: Some(IrBaseUrl {
+                url: cell_url.into(),
+                proxy: None,
+            }),
+            endpoints: vec![endpoint],
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+/// 端点自己配了地址时，产物写那个地址。
+///
+/// 端点带自己的地址时不套用模块那一格，故产物必须写端点自己的那个：写模块那一格的
+/// 地址，描述的就不是这个端点实际会打的地址。
+#[test]
+fn an_endpoint_with_its_own_address_writes_that_address_into_servers() {
+    let ex = module_with_cell(
+        "https://api.example.com",
+        IrEndpoint {
+            base_url_override: Some("https://own.example.com".into()),
+            ..ep("a", HttpMethod::Get, "/a")
+        },
+    );
+    let doc = doc_of(&ex);
+
+    assert_eq!(
+        doc["paths"]["/a"]["get"]["servers"],
+        json!([{ "url": "https://own.example.com" }]),
+        "端点自己的地址优先于模块那一格：{:?}",
+        doc["paths"]["/a"]["get"]
+    );
+}
+
+/// 端点自带完整地址（`base_url_override` 是空串）时没有服务器前缀可写。
+///
+/// 这一格地址是端点自己带的，模块那一格与它无关，故产物不写 `servers`：写了模块那一格
+/// 的地址，描述的就不是这个端点实际会打的地址。
+#[test]
+fn an_endpoint_that_carries_its_whole_address_writes_no_servers() {
+    let ex = module_with_cell(
+        "https://api.example.com",
+        IrEndpoint {
+            base_url_override: Some(String::new()),
+            ..ep("a", HttpMethod::Get, "/a")
+        },
+    );
+    let doc = doc_of(&ex);
+
+    assert!(
+        doc["paths"]["/a"]["get"].get("servers").is_none(),
+        "端点自带完整地址时不该写 servers：{:?}",
+        doc["paths"]["/a"]["get"]
+    );
+}
+
+/// 端点没有自己的地址时取模块那一格。
+#[test]
+fn an_endpoint_without_its_own_address_writes_the_module_cell_address() {
+    let ex = module_with_cell("https://api.example.com", ep("a", HttpMethod::Get, "/a"));
+    let doc = doc_of(&ex);
+
+    assert_eq!(
+        doc["paths"]["/a"]["get"]["servers"],
+        json!([{ "url": "https://api.example.com" }]),
+        "端点没有自己的地址时取模块那一格：{:?}",
+        doc["paths"]["/a"]["get"]
+    );
+}
+
+/// 模块那一格没有地址时，产物不写 `servers`。
+///
+/// 格子缺失与格子里的地址是空串都是「没有地址」这两种情形。写一个空的 `servers` 会让
+/// 读产物的人以为这个接口挂在空地址上。
+#[test]
+fn a_module_cell_without_an_address_writes_no_servers() {
+    let ex = module_with_cell("", ep("a", HttpMethod::Get, "/a"));
+    let doc = doc_of(&ex);
+
+    assert!(
+        doc["paths"]["/a"]["get"].get("servers").is_none(),
+        "模块那一格没有地址时不该写 servers：{:?}",
+        doc["paths"]["/a"]["get"]
     );
 }
 

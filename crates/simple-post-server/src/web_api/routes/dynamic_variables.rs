@@ -51,7 +51,6 @@ pub(crate) async fn dynamic_variables_create(
         source_endpoint_id: body.source_endpoint_id,
         source_inline_json: body.source_inline_json,
         source_environment_id: body.source_environment_id,
-        source_base_url_definition_id: body.source_base_url_definition_id,
         extract_path: body.extract_path,
         transform_script: body.transform_script,
         value_mode: body.value_mode,

@@ -33,10 +33,10 @@ pub use dynamic::{
 };
 pub use http::{parse_http_method, HttpMethod};
 pub use oauth2::{OAuth2Auth, OAuth2ClientAuth, OAuth2GrantType, OAuth2TokenLocation};
-pub use project::{Environment, EnvironmentPatch, Project, ProjectPatch};
+pub use project::{Environment, EnvironmentPatch, ModuleBaseUrl, Project, ProjectPatch};
 pub use resource::{
-    BaseUrlDefinition, EndpointDetail, EndpointDetailPatch, EndpointResource, ResourceNode,
-    ResourceNodePatch, ResourceNodeType,
+    EndpointDetail, EndpointDetailPatch, EndpointResource, ResourceNode, ResourceNodePatch,
+    ResourceNodeType,
 };
 pub use response::{
     ApiResponse, ResponseHistoryEntry, StoredRequestSnapshot, StoredResponse,

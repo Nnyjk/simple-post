@@ -1,5 +1,5 @@
 /**
- * CRUD 切片 —— 所有经 Tauri 改动项目、资源树、环境与 baseUrl 定义的写操作。
+ * CRUD 切片 —— 所有经 Tauri 改动项目、资源树与环境的写操作。
  *
  * 树就是一个 `nodes` 数组加一张 `endpointDetails` 映射，所以旧三表布局需要的
  * 三族动作塌缩成三个动作：
@@ -22,13 +22,12 @@
  * import（唯一的耦合点是 `AppState` 类型）。
  *
  * 实现按关注点拆到 `./slices/`（crud-helpers / crud-project / crud-tree /
- * crud-move / crud-environment / crud-baseurl），在这里组合而不是在
- * `app-store.ts` 里注册为独立切片。多个动作刻意在同一次 `set()` 里写别人
- * 拥有的键——`deleteProject` 写 `openTabs` / `activeTabId` / `activeProjectId` /
- * `activeEndpointId`，`deleteNode` 写 `openTabs` / `activeTabId` /
- * `activeEndpointId`，`setEnvironmentActive` 写 `activeEnvironmentId`，
- * `deleteEnvironment` 写 `activeEnvironmentId` + `endpointDetails`，
- * `deleteBaseUrlDefinition` 写 `endpointDetails`；拆成多次 `get().closeTab()`
+ * crud-move / crud-environment），在这里组合而不是在 `app-store.ts` 里注册为
+ * 独立切片。多个动作刻意在同一次 `set()` 里写别人拥有的键——`deleteProject` 写
+ * `openTabs` / `activeTabId` / `activeProjectId` / `activeEndpointId`，
+ * `deleteNode` 写 `openTabs` / `activeTabId` / `activeEndpointId`，
+ * `setEnvironmentActive` 写 `activeEnvironmentId`，`deleteEnvironment` 写
+ * `activeEnvironmentId` + `endpointDetails`；拆成多次 `get().closeTab()`
  * 式的调用会把一次 `set()` 变成多次，也改变 IPC 失败时 `set(snapshot)` 能
  * 回滚的范围。
  *
@@ -37,8 +36,6 @@
  */
 import type { StateCreator } from 'zustand';
 import type { AppState } from './app-store';
-import { createBaseUrlCrud } from './slices/crud-baseurl';
-import type { BaseUrlCrudActions } from './slices/crud-baseurl';
 import { createEnvironmentCrud } from './slices/crud-environment';
 import type { EnvironmentCrudActions } from './slices/crud-environment';
 import { createMoveCrud } from './slices/crud-move';
@@ -57,12 +54,7 @@ export interface CrudSliceState {
 
 /** CRUD 切片拥有的动作 —— 各子工厂动作接口的并集。 */
 export interface CrudSliceActions
-  extends
-    ProjectCrudActions,
-    TreeCrudActions,
-    MoveCrudActions,
-    EnvironmentCrudActions,
-    BaseUrlCrudActions {}
+  extends ProjectCrudActions, TreeCrudActions, MoveCrudActions, EnvironmentCrudActions {}
 
 export type CrudSlice = CrudSliceState & CrudSliceActions;
 
@@ -74,5 +66,4 @@ export const createCrudSlice: StateCreator<AppState, [], [], CrudSlice> = (set, 
   ...createTreeCrud(set, get, store),
   ...createMoveCrud(set, get, store),
   ...createEnvironmentCrud(set, get, store),
-  ...createBaseUrlCrud(set, get, store),
 });

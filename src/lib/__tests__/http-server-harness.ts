@@ -262,7 +262,6 @@ export const ENV: Environment = {
   id: 'env_test',
   projectId: 'p_test',
   name: 'test',
-  baseUrls: {},
   moduleBaseUrls: {},
   variables: { token: 'eyJ.tok', userId: 'u_demo', apiKey: 'k_123' },
   disabledVariables: [],

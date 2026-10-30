@@ -48,11 +48,15 @@ struct SetVarArgs {
 #[derive(Debug, Deserialize)]
 struct SetBaseUrlArgs {
     env_id: String,
-    definition_id: String,
-    /// 要写入的模块。URL 住在 (环境 × 服务 × 模块) 这一格 —— 同一个服务可以在两个
-    /// 模块指向两个不同 host。
+    /// 要写入的模块。地址住在 (环境 × 模块) 这一格 —— 两个模块可以指向两个不同 host。
     module_id: String,
+    /// 后端 api 地址。不能为空串。
     url: String,
+    /// 实际访问地址（接口经代理网关转代后真正要打的那个地址）。
+    ///
+    /// 缺席 = 这一格的代理保持不变；空串 = 清空代理。
+    #[serde(default)]
+    proxy: Option<String>,
 }
 
 // =========================================================================
@@ -116,7 +120,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "name": { "type": "string" },
                             "moduleBaseUrls": {
                                 "type": "object",
-                                "description": "Replaces the whole map, keyed by service id then module id. Each leaf is that (environment x service x module) cell's URL; an absent cell means no base URL, because that cell never inherits."
+                                "description": "Replaces the whole map, keyed by module id. Each leaf is that (environment x module) cell: {\"url\": \"<backend api address>\", \"proxy\": \"<address the request actually goes to>\"}. A cell that is absent here means no base URL for that module, because that cell never inherits."
                             },
                             "variables": {
                                 "type": "object",
@@ -164,16 +168,19 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_set_baseurl",
-            description: "Set the URL one service has for one module in one environment — the (environment x service x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty.",
+            description: "Set the URL one module has in one environment — the (environment x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty. proxy is the address the request actually goes to when the endpoint is reached through a proxy gateway: omit it to leave the cell's proxy as it is, or pass an empty string to clear the proxy.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "env_id": { "type": "string" },
-                    "definition_id": { "type": "string" },
                     "module_id": { "type": "string" },
-                    "url": { "type": "string" }
+                    "url": { "type": "string" },
+                    "proxy": {
+                        "type": "string",
+                        "description": "The address the request actually goes to when it is reached through a proxy gateway. Omit it to keep the cell's proxy unchanged; pass an empty string to clear it."
+                    }
                 },
-                "required": ["env_id", "definition_id", "module_id", "url"],
+                "required": ["env_id", "module_id", "url"],
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_env_set_baseurl),
@@ -256,10 +263,7 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .and_then(|p| p.get("name"))
             .and_then(Value::as_str)
             .map(String::from),
-        // `base_urls` 固定留 None：该列已死 —— `db::migrate` 把值全搬进了
-        // `moduleBaseUrls`，`db::environments::update` 也不读它，转发只会回报一次
-        // 「写成功」而实际什么都没改。客户端照本工具描述走 `moduleBaseUrls`。
-        base_urls: None,
+        // `moduleBaseUrls` 整张 map 替换：缺席 = 该列不动，给了 = 整张替换。
         module_base_urls: a
             .patch
             .as_ref()
@@ -342,17 +346,16 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // 与 `env_set_var` 同为「读—合并—写」：整张 map 是一个 JSON 列，一次原子
-    // UPDATE 才不会让读者看到半张 map。走 `set_module_base_url` 而不是手搓
-    // patch，因为只有它知道嵌套形状；在这里 patch `baseUrls` 只会写进那列死列，
-    // 真正生效的一层纹丝不动。
+    // 那一格（环境 × 模块）由 `set_module_base_url` 写：整张 map 是一个 JSON 列，
+    // 一次原子 UPDATE 才不会让读者看到半张 map。`proxy` 缺席 = 那一格的代理不动，
+    // `proxy` 给空串 = 清空代理。
     let env = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::environments::set_module_base_url(
             c,
             &a.env_id,
-            &a.definition_id,
             &a.module_id,
             Some(&a.url),
+            a.proxy.as_deref(),
         )
     })?;
 

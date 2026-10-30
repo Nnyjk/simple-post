@@ -2,7 +2,7 @@
 //!
 //! 这一组守三件事：
 //!
-//! 1. **一次调用真的落全了** —— 模块、集合、环境、服务、端点一个都不少。
+//! 1. **一次调用真的落全了** —— 模块、集合、环境、端点一个都不少。
 //! 2. **过门在写之前发生** —— 项目的权限不够时，库里一个字节都不动。
 //! 3. **响应带着「还缺什么」** —— agent 不必先发一次请求才知道少了 base URL。
 
@@ -45,9 +45,6 @@ fn project_with_full_permission(pool: &db::DbPool, project_id: &str, name: &str)
                 id: project_id.to_string(),
                 name: name.to_string(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3B82F6".to_string(),
                 created_at: 0,
                 updated_at: 0,
@@ -77,7 +74,7 @@ async fn call(
 // =========================================================================
 
 #[tokio::test]
-async fn one_call_lands_the_module_the_collections_the_environment_the_service_and_the_endpoint() {
+async fn one_call_lands_the_module_the_collections_the_environment_and_the_endpoint() {
     let st = state();
     project_with_full_permission(&st.pool, "p_spec", "规格项目");
 
@@ -93,7 +90,6 @@ async fn one_call_lands_the_module_the_collections_the_environment_the_service_a
                 "base_url": "https://dev.example.com",
                 "activate": true
             },
-            "service": { "name": "交易服务", "default": true },
             "endpoint": {
                 "name": "查询订单",
                 "method": "POST",
@@ -123,11 +119,9 @@ async fn one_call_lands_the_module_the_collections_the_environment_the_service_a
     assert_eq!(out["collections"].as_array().map(Vec::len), Some(2));
     assert_eq!(out["collections"][1]["name"], "明细");
 
-    // 环境与服务。
+    // 环境。
     assert_eq!(out["environment"]["name"], "dev");
     assert_eq!(out["environment"]["activated"], true);
-    assert_eq!(out["service"]["name"], "交易服务");
-    assert_eq!(out["service"]["isDefault"], true);
 
     // 端点：本体与创建标志都在。
     assert_eq!(out["endpoint"]["created"], true);
@@ -156,7 +150,7 @@ async fn the_response_says_what_is_still_missing() {
     let st = state();
     project_with_full_permission(&st.pool, "p_spec", "规格项目");
 
-    // 这一份规格没有服务，也没有 base URL：端点发出去时没有 host。
+    // 这一份规格没有 base URL：端点发出去时没有 host。
     let res = call(
         &st,
         json!({
@@ -172,17 +166,14 @@ async fn the_response_says_what_is_still_missing() {
     let missing = out["missing"].as_array().expect("missing 是一个数组");
     assert!(
         !missing.is_empty(),
-        "没有服务也没有 base URL 时，响应里要点名缺什么：{out}"
+        "没有 base URL 时，响应里要点名缺什么：{out}"
     );
     let text = missing
         .iter()
         .map(|m| m.as_str().unwrap_or_default().to_string())
         .collect::<Vec<_>>()
         .join(" | ");
-    assert!(
-        text.contains("base URL") || text.contains("service"),
-        "{text}"
-    );
+    assert!(text.contains("base URL"), "{text}");
 }
 
 #[tokio::test]
@@ -222,9 +213,6 @@ async fn the_permission_gate_refuses_a_project_that_is_not_writable() {
                 id: "p_ro".to_string(),
                 name: "只读项目".to_string(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3B82F6".to_string(),
                 created_at: 0,
                 updated_at: 0,
@@ -268,9 +256,6 @@ async fn a_project_without_a_permission_row_is_refused() {
                 id: "p_default".to_string(),
                 name: "默认权限项目".to_string(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3B82F6".to_string(),
                 created_at: 0,
                 updated_at: 0,

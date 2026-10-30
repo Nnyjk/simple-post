@@ -163,8 +163,8 @@ export interface BootstrapSliceActions {
   /**
    * 重新取一次项目清单，整份替换 `projects`。
    *
-   * 服务定义住在项目行上，而项目行只在 bootstrap 第一层加载过一次——导入在服务端
-   * 建服务后不刷新它，界面上就看不见那个服务。
+   * 项目行只在 bootstrap 第一层加载过一次——导入在服务端建了项目之后不刷新它，
+   * 界面上就看不见那个新项目。
    */
   refreshProjects: () => Promise<void>;
 }
@@ -437,11 +437,11 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     refreshProjects: async () => {
       try {
         const projects = await invokeCmd<Project[]>(COMMANDS.projectsList);
-        // 整份替换 `projects`：服务清单、★、项目名都在项目行上。
+        // 整份替换 `projects`：项目名与颜色都在项目行上。
         set({ projects });
       } catch (e) {
         // `refreshProjects` 不抛出：调用方是「导入已经落库」之后才来刷新的，一次刷新失败
-        // 不该把导入报成失败。界面上顶多仍旧看不见新服务，刷新一次就好。
+        // 不该把导入报成失败。界面上顶多仍旧看不见新项目，刷新一次就好。
         console.error('[store] projects refresh failed', e);
       }
     },

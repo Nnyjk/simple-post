@@ -20,7 +20,7 @@ use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::uid;
 use simple_post_core::error::AppError;
 use simple_post_core::http_executor::{self, HttpRequestInput, OutboundPolicy};
-use simple_post_interchange::commit::{commit_in_tx, plan_service, CommitTarget};
+use simple_post_interchange::commit::{commit_in_tx, plan_base_url, CommitTarget};
 use simple_post_interchange::fingerprint::{FingerprintSet, RequestIdentity};
 use simple_post_interchange::import;
 use simple_post_interchange::ir::{Exchange, IrCollection, IrEndpoint, IrModule};
@@ -28,9 +28,9 @@ use simple_post_interchange::openapi::DocFormat;
 use simple_post_interchange::project::module_to_ir;
 
 use crate::dto::{
-    AppliedServiceDto, ExportDocumentDto, ExportDocumentOpts, ExportPreviewDto, ExportPreviewOpts,
+    AppliedBaseUrlDto, ExportDocumentDto, ExportDocumentOpts, ExportPreviewDto, ExportPreviewOpts,
     ImportCommitDto, ImportCommitOpts, ImportPreviewDto, ImportPreviewOpts, ImportedEnvironmentDto,
-    ModuleServersDto, ProposedServiceDto, TransferCounts, TransferEndpoint, TransferNode,
+    ModuleBaseUrlDto, ProposedBaseUrlDto, TransferCounts, TransferEndpoint, TransferNode,
 };
 
 /// 拉 OpenAPI / Postman 文档时的大小上限。
@@ -77,7 +77,10 @@ pub async fn import_preview(
         let mut set = FingerprintSet::new();
         set.absorb_details(existing.iter());
         let dup = mark_duplicates(&parsed.exchange, &set);
-        Ok((dup, plan_service(conn, &opts.project_id, &parsed.exchange)?))
+        Ok((
+            dup,
+            plan_base_url(conn, &opts.project_id, &parsed.exchange)?,
+        ))
     })?;
 
     let groups = project_modules(&parsed.exchange.modules, &duplicates, &parsed.exchange);
@@ -87,9 +90,11 @@ pub async fn import_preview(
         duplicates: duplicates.len(),
     };
 
-    // 多 host 的理由在预览里就得说，否则用户勾完才发现服务没建。
+    // 多个地址的理由在预览里就得说，否则用户勾完才发现地址没落进任何一格。
     let mut diagnostics = parsed.exchange.diagnostics.clone();
-    diagnostics.extend(plan.ambiguous_diagnostic());
+    if let Some(d) = plan.multiple_diagnostic() {
+        diagnostics.push(d);
+    }
 
     Ok(ImportPreviewDto {
         format: format.as_str().to_string(),
@@ -100,12 +105,14 @@ pub async fn import_preview(
         groups,
         counts,
         diagnostics,
-        service: plan.server.as_ref().map(|s| ProposedServiceDto {
-            service: s.service.clone(),
-            url: s.url.clone(),
-            existing: plan.existing_id.is_some(),
-            environment_name: plan.environment.as_ref().map(|e| e.name.clone()),
-        }),
+        base_urls: plan
+            .candidates
+            .iter()
+            .map(|url| ProposedBaseUrlDto {
+                url: url.clone(),
+                environment_name: plan.environment.as_ref().map(|e| e.name.clone()),
+            })
+            .collect(),
         environments: parsed
             .environments
             .iter()
@@ -137,8 +144,8 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
             },
             &parsed.exchange,
             &selected,
-            // 缺席为真：文档带了 host 就该有服务，用户在预览里可以逐次取消。
-            opts.apply_service.unwrap_or(true),
+            // 缺席为真：文档带了 host 就该有地址，用户在预览里可以逐次取消。
+            opts.apply_base_url.unwrap_or(true),
         )?;
 
         // 环境与树同事务：一次导入要么全进去，要么一行不进。半棵树加半份环境比
@@ -163,13 +170,16 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
             created_collection_ids: report.created_collection_ids,
             created_endpoint_ids: report.created_endpoint_ids,
             environments_created,
-            service: report.service.map(|s| AppliedServiceDto {
-                name: s.name,
-                url: s.url,
-                created: s.created,
-                assigned: s.assigned,
-                environment_name: s.environment_name,
-            }),
+            base_urls: report
+                .base_urls
+                .into_iter()
+                .map(|b| AppliedBaseUrlDto {
+                    url: b.url,
+                    proxy: b.proxy,
+                    module_id: b.module_id,
+                    environment_name: b.environment_name,
+                })
+                .collect(),
             diagnostics: report.diagnostics,
         })
     })
@@ -177,7 +187,7 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
 
 /// 导出候选预览。
 ///
-/// `opts.environment_id` 指名按**哪个环境**解析 `servers`：缺席或空串取激活环境，
+/// `opts.environment_id` 指名按**哪个环境**解析那一格的地址：缺席或空串取激活环境，
 /// 给了 id 就按那个环境解析——渲染层在下拉里换了环境就会重取一趟，否则那份清单
 /// 仍是旧环境下的事实，界面上的提示会按旧环境点名。
 pub fn export_preview(
@@ -201,13 +211,13 @@ pub fn export_preview(
             duplicates: 0,
         },
         environment_id: ex.environment_id.clone(),
-        servers: ex
+        base_urls: ex
             .modules
             .iter()
-            .map(|m| ModuleServersDto {
+            .map(|m| ModuleBaseUrlDto {
                 module_key: m.key.clone(),
                 module_name: m.name.clone(),
-                servers: m.servers.clone(),
+                base_url: m.base_url.clone(),
             })
             .collect(),
         groups,

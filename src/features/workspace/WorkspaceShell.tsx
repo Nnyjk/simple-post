@@ -112,7 +112,7 @@ export function WorkspaceShell() {
   // `renderActiveContent` 按当前标签类型决定右栏渲染什么。
   //   endpoint → 请求 / 响应上下分栏
   //   project / module / collection → EntitySettings：该实体自己的单列面板（基础信息，
-  //     再是该类型所属的配置 —— 项目的环境、模块按环境的 baseUrls）。面板不点名实体，
+  //     再是该类型所属的配置 —— 项目的环境、模块在各环境下的地址）。面板不点名实体，
   //     上方的标签才点。
   //   settings → 设置面板（本身就是一个标签，不是抽屉）
   //

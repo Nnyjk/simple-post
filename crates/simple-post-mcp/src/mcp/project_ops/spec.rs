@@ -3,8 +3,8 @@
 //! ## 为什么要有这个工具
 //!
 //! 用 CRUD 粒度的工具建一份接口规范，agent 要自己编排七八次调用：建模块、建集合、
-//! 建环境、写环境变量、建服务、写 base URL 那一格、建端点。而每一步的输出是下一步
-//! 的输入，所以它们只能串行；每一步的参数拼错一个字母，得到的错误信息又不指向
+//! 建环境、写环境变量、写 base URL 那一格、建端点。而每一步的输出是下一步的输入，
+//! 所以它们只能串行；每一步的参数拼错一个字母，得到的错误信息又不指向
 //! 「你少写了环境」这件事。
 //!
 //! 这个工具把那份编排收在一处：调用方给一份声明式的规格，服务端在一个事务里把它
@@ -74,6 +74,13 @@ fn auth_schema() -> Value {
 }
 
 /// 环境那一段的 JSON Schema。
+///
+/// 多词字段一律用 camelCase，与同一份 schema 里的 `endpoint` 段一致
+/// （`pathParams` / `baseUrlOverride` / `preRequestScript`）。
+///
+/// `simple_post_core::spec::upsert::EnvironmentSpec` 同样收 snake_case 的别名，故服务端比
+/// 这份 schema 宽：调用方写 `base_url` 一样收得到。那是宽容，不是两套契约 —— 规范拼写
+/// 只有 camelCase 这一套，schema 写的与 core 的别名都收的正是它。
 fn environment_schema() -> Value {
     json!({
         "type": "object",
@@ -86,31 +93,20 @@ fn environment_schema() -> Value {
                 "description": "Variables to write. They are merged into the environment's variables; the ones the spec does not mention are kept.",
                 "additionalProperties": { "type": "string" }
             },
-            "disabled_variables": {
+            "disabledVariables": {
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Variable names to disable. A disabled variable is stored and shown but takes no part in substitution."
             },
-            "base_url": {
+            "baseUrl": {
                 "type": "string",
-                "description": "The URL of the (environment x service x module) cell. Needs a service: that cell has no other dimension to fall back on."
+                "description": "The backend api address of the (environment x module) cell. That cell has no other dimension to fall back on."
+            },
+            "baseUrlProxy": {
+                "type": "string",
+                "description": "The address the request actually goes to when it is reached through a proxy gateway. Omit it for no proxy."
             },
             "activate": { "type": "boolean", "description": "Make this the project's active environment." }
-        },
-        "additionalProperties": false
-    })
-}
-
-/// 服务那一段的 JSON Schema。
-fn service_schema() -> Value {
-    json!({
-        "type": "object",
-        "description": "The service this endpoint resolves against.",
-        "properties": {
-            "name": { "type": "string", "description": "Service name. Created when missing." },
-            "id": { "type": "string", "description": "An existing service id. Mutually exclusive with `name`." },
-            "description": { "type": "string" },
-            "default": { "type": "boolean", "description": "Make this the project's default service (★)." }
         },
         "additionalProperties": false
     })
@@ -129,7 +125,7 @@ fn endpoint_schema() -> Value {
             },
             "url": {
                 "type": "string",
-                "description": "Path only, e.g. \"/api/users/{id}\". The host comes from the environment's service URL at send time."
+                "description": "Path only, e.g. \"/api/users/{id}\". The host comes from the environment's cell for this endpoint's module at send time."
             },
             "description": { "type": "string" },
             "docs": { "type": "string", "description": "Free-form documentation." },
@@ -156,13 +152,9 @@ fn endpoint_schema() -> Value {
                 "type": "string",
                 "description": "Environment to bind. Defaults to the environment named in this spec."
             },
-            "base_url_definition_id": {
-                "type": "string",
-                "description": "Service to resolve against. Defaults to the service named in this spec."
-            },
             "base_url_override": {
                 "type": "string",
-                "description": "Literal base URL for this endpoint, overriding the environment's value for the chosen service."
+                "description": "Literal base URL for this endpoint, overriding the environment's cell for this endpoint's module."
             },
             "pre_request_script": {
                 "type": "string",
@@ -214,12 +206,11 @@ fn spec_schema() -> Value {
                 "description": "An existing collection id."
             },
             "environment": environment_schema(),
-            "service": service_schema(),
             "endpoint": endpoint_schema(),
             "if_exists": {
                 "type": "string",
                 "enum": ["reuse", "error", "duplicate", "update"],
-                "description": "What to do when an endpoint with the same name, method and url already exists under that parent. \"reuse\" (default) returns it unchanged and writes nothing; \"error\" refuses; \"duplicate\" creates a second one; \"update\" overwrites the fields this spec names. It governs the endpoint only — the environment and the service are always applied."            }        },
+                "description": "What to do when an endpoint with the same name, method and url already exists under that parent. \"reuse\" (default) returns it unchanged and writes nothing; \"error\" refuses; \"duplicate\" creates a second one; \"update\" overwrites the fields this spec names. It governs the endpoint only — the environment is always applied."            }        },
         "$defs": {
             "keyValue": crate::mcp::key_value::key_value_schema()
         },
@@ -233,8 +224,8 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
     v.push(crate::mcp::ToolEntry {
         name: "spec_upsert",
         description: "Apply one interface spec in a single call: the module, the \
-                       collections on its path, the environment, the service and the \
-                       endpoint. Each part is found by name and created when missing, so \
+                       collections on its path, the environment and the endpoint. \
+                       Each part is found by name and created when missing, so \
                        a second call reuses them all; only if_exists=duplicate adds a \
                        second endpoint. Use it instead of \
                        chaining the project/module/collection/env/baseUrl/endpoint tools, \

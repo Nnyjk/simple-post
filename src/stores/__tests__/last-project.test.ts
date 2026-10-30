@@ -22,8 +22,6 @@ function project(id: string, name: string): Project {
   return {
     id,
     name,
-    baseUrlDefinitions: [],
-    defaultBaseUrlDefinitionId: null,
     color: '#000000',
     createdAt: 0,
     updatedAt: 0,

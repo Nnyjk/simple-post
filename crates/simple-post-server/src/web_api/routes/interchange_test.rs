@@ -37,8 +37,8 @@ const POSTMAN: &str = r#"{
   ]
 }"#;
 
-/// 同一份集合，但 host 写成了字面量。`{{baseUrl}}` 那种变量 host 拆不出服务，
-/// 所以这份才带得出 `service`。
+/// 同一份集合，但 host 写成了字面量。`{{baseUrl}}` 那种变量 host 拆不出地址，
+/// 所以这份才带得出地址。
 const POSTMAN_WITH_HOST: &str = r#"{
   "info": { "name": "demo", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
   "item": [
@@ -114,6 +114,8 @@ async fn serve_test_router() -> (SocketAddr, PathBuf) {
 
 /// 落点要真实存在：导入挂在 `mod_a` 下，导出也从 `mod_a` 读。种一个项目 + 一个模块就够，
 /// endpoint 由上面的 commit 现场造出来。
+///
+/// 另有一个激活环境：地址住在（环境 × 模块）那一格，没有激活环境就没有格子可填。
 fn seed_tree(dir: &Path) {
     let pool = crate::db::init(dir).expect("db init");
     crate::db::with_tx(&pool, |c| {
@@ -124,6 +126,18 @@ fn seed_tree(dir: &Path) {
         c.execute_batch(
             "INSERT INTO nodes (id, root_id, type, name, sort_order, created_at, updated_at) \
              VALUES ('mod_a', 'p1', 'module', 'A', 0, 1, 1)",
+        )?;
+        crate::db::environments::create(
+            c,
+            &crate::domain::Environment {
+                id: "env_a".to_string(),
+                project_id: "p1".to_string(),
+                name: "开发".to_string(),
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                disabled_variables: Vec::new(),
+                is_active: true,
+            },
         )?;
         Ok(())
     })
@@ -331,9 +345,9 @@ async fn a_compressed_collection_is_accepted() {
 }
 
 #[tokio::test]
-async fn a_literal_host_becomes_a_service_row_and_apply_service_defaults_to_true() {
-    // 这条盯的是**线上的默认值**：`applyService` 缺席必须等于真。缺席若等于假，
-    // 用户在预览里看到的「将新建服务」到落库时就消失了，而两边都是 200。
+async fn a_literal_host_becomes_a_base_url_and_apply_base_url_defaults_to_true() {
+    // 这条盯的是**线上的默认值**：`applyBaseUrl` 缺席必须等于真。缺席若等于假，
+    // 用户在预览里看到的「将写入地址」到落库时就消失了，而两边都是 200。
     let (addr, dir) = serve_test_router().await;
     let (status, preview) = post_json(
         addr,
@@ -342,14 +356,8 @@ async fn a_literal_host_becomes_a_service_row_and_apply_service_defaults_to_true
     )
     .await;
     assert_eq!(status, 200, "{preview}");
-    assert_eq!(preview["service"]["service"], "api.example.com");
-    assert_eq!(preview["service"]["url"], "https://api.example.com");
-    assert_eq!(preview["service"]["existing"], false, "种子项目没有服务");
-    // 种子项目 p1 是裸插的，没有激活环境。
-    assert!(
-        preview["service"].get("environmentName").is_none(),
-        "没有激活环境就不该报出一个环境: {preview}"
-    );
+    assert_eq!(preview["baseUrls"][0]["url"], "https://api.example.com");
+    assert_eq!(preview["baseUrls"][0]["environmentName"], "开发");
 
     let mut keys = Vec::new();
     for group in preview["groups"].as_array().into_iter().flatten() {
@@ -367,28 +375,23 @@ async fn a_literal_host_becomes_a_service_row_and_apply_service_defaults_to_true
     )
     .await;
     assert_eq!(status, 200, "{committed}");
-    assert_eq!(committed["service"]["name"], "api.example.com");
-    assert_eq!(committed["service"]["created"], true);
-    assert_eq!(
-        committed["service"]["assigned"], false,
-        "没有激活环境就没有格子，URL 与端点都无处可落: {committed}"
-    );
+    assert_eq!(committed["baseUrls"][0]["url"], "https://api.example.com");
+    assert_eq!(committed["baseUrls"][0]["moduleId"], "mod_a");
+    assert_eq!(committed["baseUrls"][0]["environmentName"], "开发");
 
-    // 光看报告不够——服务得真的在表里。
-    let (status, defs) = get_json(addr, "/api/projects/p1/baseurls").await;
-    assert_eq!(status, 200, "{defs}");
+    // 光看报告不够——地址得真的落进那一格。
+    let (status, envs) = get_json(addr, "/api/environments?projectId=p1").await;
+    assert_eq!(status, 200, "{envs}");
     assert_eq!(
-        defs.as_array().map(Vec::len),
-        Some(1),
-        "导入应当建出且只建出一台服务: {defs}"
+        envs[0]["moduleBaseUrls"]["mod_a"]["url"], "https://api.example.com",
+        "地址得写进 (环境 × 模块) 那一格: {envs}"
     );
-    assert_eq!(defs[0]["name"], "api.example.com");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
-async fn apply_service_false_leaves_the_service_table_alone() {
+async fn apply_base_url_false_leaves_the_cell_alone() {
     let (addr, dir) = serve_test_router().await;
     let (status, preview) = post_json(
         addr,
@@ -410,20 +413,22 @@ async fn apply_service_false_leaves_the_service_table_alone() {
             "moduleId": "mod_a",
             "content": POSTMAN_WITH_HOST,
             "selected": keys,
-            "applyService": false,
+            "applyBaseUrl": false,
         }),
     )
     .await;
     assert_eq!(status, 200, "{committed}");
     assert!(
-        committed.get("service").is_none(),
-        "关掉之后报告里不该有服务: {committed}"
+        committed.get("baseUrls").is_none(),
+        "关掉之后报告里不该有地址: {committed}"
     );
-    let (status, defs) = get_json(addr, "/api/projects/p1/baseurls").await;
-    assert_eq!(status, 200, "{defs}");
+    let (status, envs) = get_json(addr, "/api/environments?projectId=p1").await;
+    assert_eq!(status, 200, "{envs}");
     assert!(
-        defs.as_array().is_some_and(|d| d.is_empty()),
-        "关掉之后服务表必须一行未动: {defs}"
+        envs[0]["moduleBaseUrls"]
+            .as_object()
+            .is_some_and(|m| m.is_empty()),
+        "关掉之后那一格必须没被写过: {envs}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

@@ -52,18 +52,17 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
             }
         }
     }
-    let (environment_id, base_url_definition_id) = check_source_bindings(
+    let environment_id = check_source_bindings(
         conn,
         def.source_endpoint_id.as_deref(),
         def.source_environment_id.as_deref(),
-        def.source_base_url_definition_id.as_deref(),
     )?;
     let result = conn.execute(
         "INSERT INTO dynamic_variables \
            (id, project_id, name, description, source_endpoint_id, source_inline_json, \
-            source_environment_id, source_base_url_definition_id, extract_path, transform_script, \
+            source_environment_id, extract_path, transform_script, \
             value_mode, ttl_seconds, stale_fallback, enabled, sort_order, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             def.id,
             def.project_id,
@@ -72,7 +71,6 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
             def.source_endpoint_id,
             def.source_inline_json,
             environment_id,
-            base_url_definition_id,
             def.extract_path,
             def.transform_script,
             def.value_mode.as_str(),
@@ -181,15 +179,10 @@ pub fn update(
         None => current.source_environment_id.clone(),
         Some(value) => value.clone(),
     };
-    let next_base_url_definition_id = match &patch.source_base_url_definition_id {
-        None => current.source_base_url_definition_id.clone(),
-        Some(value) => value.clone(),
-    };
-    let (environment_id, base_url_definition_id) = check_source_bindings(
+    let environment_id = check_source_bindings(
         conn,
         next_endpoint_id.as_deref(),
         next_environment_id.as_deref(),
-        next_base_url_definition_id.as_deref(),
     )?;
 
     let mut sets: Vec<String> = Vec::new();
@@ -242,22 +235,13 @@ pub fn update(
             },
         );
     }
-    // 环境与服务跟着数据源走：数据源换成内联请求时它们一并清空——内联请求自带完整
-    // 地址，不需要 base URL。
+    // 环境跟着数据源走：数据源换成内联请求时它一并清空——内联请求自带完整地址，
+    // 不需要 base URL。
     push(
         &mut sets,
         &mut binds,
         "source_environment_id",
         match environment_id {
-            Some(v) => v.into(),
-            None => rusqlite::types::Value::Null,
-        },
-    );
-    push(
-        &mut sets,
-        &mut binds,
-        "source_base_url_definition_id",
-        match base_url_definition_id {
             Some(v) => v.into(),
             None => rusqlite::types::Value::Null,
         },

@@ -1,213 +1,214 @@
 {
-  "$comment": "base URL 的服务链解析：override → 点名服务 → 项目 ★ → (环境 × 服务 × 模块) 那一格。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url_with` 与渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 读同一份文件。两份实现各写一遍规则，只有共享样本能钉住它们没分叉。`endpoint` 只带解析真正读的那两个字段（`baseUrlDefinitionId` 与 `baseUrlOverride`）——环境由调用方给出，不从端点上取。`expected` 比三样：`baseUrl`、`source`（哪一行选中了服务）与 `definitionId`（服务 id）。",
+  "$comment": "base URL 的解析与代理前缀替换。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url` 与 `apply_proxy`、渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 与 `applyProxy` 读同一份文件。两份实现各写一遍规则，只有共享样本能让两份实现保持一致。`cases` 覆盖解析：端点自己的 `baseUrlOverride` 优先，否则读环境里「环境 × 模块」那一格，没有回退层。`proxyCases` 覆盖代理前缀替换：请求地址里那个作为前缀的模块地址被换成实际访问地址，其余部分原样保留。两侧的读取器都必须用 `deny_unknown_fields` 并断言条目数（`cases` 11 条、`proxyCases` 9 条），免得键名漂了导致整条测试空转。",
   "cases": [
     {
       "name": "端点带自定义主机时用自己的地址",
-      "endpoint": {
-        "baseUrlDefinitionId": "data",
-        "baseUrlOverride": "https://custom.example.com"
-      },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
+      "endpoint": { "baseUrlOverride": "https://custom.example.com" },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_a": { "url": "https://mod-a.example.com" }
+        }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "https://custom.example.com",
-        "source": "override",
-        "definitionId": null
+        "proxy": null,
+        "source": "override"
       }
     },
     {
       "name": "端点的 override 是空串时表示自定义但不加前缀",
-      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": "" },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
+      "endpoint": { "baseUrlOverride": "" },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_a": { "url": "https://mod-a.example.com" }
+        }
       },
       "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "override", "definitionId": null }
+      "expected": { "baseUrl": "", "proxy": null, "source": "override" }
     },
     {
-      "name": "端点没给 override 时走服务链",
-      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
+      "name": "端点带自定义主机时不套用那一格的代理",
+      "endpoint": { "baseUrlOverride": "https://custom.example.com" },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_a": {
+            "url": "http://svc.internal:8080/api/a",
+            "proxy": "https://gw.corp.com/api/xxxx/a"
+          }
+        }
+      },
+      "moduleId": "mod_a",
+      "expected": {
+        "baseUrl": "https://custom.example.com",
+        "proxy": null,
+        "source": "override"
+      }
+    },
+    {
+      "name": "端点没给 override 时读模块在环境里的那一格",
+      "endpoint": { "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_a": { "url": "https://mod-a.example.com" }
+        }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "https://mod-a.example.com",
-        "source": "definition",
-        "definitionId": "data"
+        "proxy": null,
+        "source": "module"
       }
     },
     {
-      "name": "端点点名的服务项目里没有时不回退到项目星标",
-      "endpoint": { "baseUrlDefinitionId": "ghost", "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
-      },
-      "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
-    },
-    {
-      "name": "端点点名的服务项目里没有时即使环境里有那一格也不解析",
-      "endpoint": { "baseUrlDefinitionId": "ghost", "baseUrlOverride": null },
+      "name": "那一格带代理时地址与代理一起给出",
+      "endpoint": { "baseUrlOverride": null },
       "env": {
         "moduleBaseUrls": {
-          "data": { "mod_a": "https://mod-a.example.com" },
-          "ghost": { "mod_a": "https://ghost.example.com" }
+          "mod_a": {
+            "url": "http://svc.internal:8080/api/a",
+            "proxy": "https://gw.corp.com/api/xxxx/a"
+          }
         }
-      },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
-      },
-      "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
-    },
-    {
-      "name": "端点没点名服务时用项目星标",
-      "endpoint": { "baseUrlDefinitionId": null, "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
       },
       "moduleId": "mod_a",
       "expected": {
-        "baseUrl": "https://mod-a.example.com",
-        "source": "default",
-        "definitionId": "data"
+        "baseUrl": "http://svc.internal:8080/api/a",
+        "proxy": "https://gw.corp.com/api/xxxx/a",
+        "source": "module"
       }
     },
     {
-      "name": "项目星标指向的服务项目里没有时解析不出东西",
-      "endpoint": { "baseUrlDefinitionId": null, "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "ghost"
-      },
-      "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
-    },
-    {
-      "name": "项目没有星标且端点没点名服务时解析不出东西",
-      "endpoint": { "baseUrlDefinitionId": null, "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": null
-      },
-      "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
-    },
-    {
-      "name": "那一格是空串时解析不出东西",
-      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
-      },
-      "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
-    },
-    {
-      "name": "服务存在但环境里没有那一格时解析不出东西",
-      "endpoint": { "baseUrlDefinitionId": "auth", "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [
-          { "id": "auth", "name": "auth" },
-          { "id": "data", "name": "data" }
-        ],
-        "defaultBaseUrlDefinitionId": "data"
-      },
-      "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
-    },
-    {
-      "name": "端点自己点名的服务胜过项目星标",
-      "endpoint": { "baseUrlDefinitionId": "auth", "baseUrlOverride": null },
+      "name": "两个模块的地址互不相干",
+      "endpoint": { "baseUrlOverride": null },
       "env": {
         "moduleBaseUrls": {
-          "data": { "mod_a": "https://mod-a.example.com" },
-          "auth": { "mod_a": "https://auth.example.com" }
+          "mod_a": { "url": "https://mod-a.example.com" },
+          "mod_b": { "url": "https://mod-b.example.com" }
         }
-      },
-      "project": {
-        "baseUrlDefinitions": [
-          { "id": "auth", "name": "auth" },
-          { "id": "data", "name": "data" }
-        ],
-        "defaultBaseUrlDefinitionId": "data"
-      },
-      "moduleId": "mod_a",
-      "expected": {
-        "baseUrl": "https://auth.example.com",
-        "source": "definition",
-        "definitionId": "auth"
-      }
-    },
-    {
-      "name": "同一个服务在两个模块指向两个主机",
-      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
-      "env": {
-        "moduleBaseUrls": {
-          "data": { "mod_a": "https://mod-a.example.com", "mod_b": "https://mod-b.example.com" }
-        }
-      },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
       },
       "moduleId": "mod_b",
       "expected": {
         "baseUrl": "https://mod-b.example.com",
-        "source": "definition",
-        "definitionId": "data"
+        "proxy": null,
+        "source": "module"
       }
     },
     {
+      "name": "模块没有那一格时解析不出东西",
+      "endpoint": { "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_b": { "url": "https://mod-b.example.com" }
+        }
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "proxy": null, "source": "none" }
+    },
+    {
+      "name": "那一格是空串时解析不出东西",
+      "endpoint": { "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_a": { "url": "" }
+        }
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "proxy": null, "source": "none" }
+    },
+    {
+      "name": "那一格只有代理没有地址时解析不出东西",
+      "endpoint": { "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_a": { "url": "", "proxy": "https://gw.corp.com/api/xxxx/a" }
+        }
+      },
+      "moduleId": "mod_a",
+      "expected": { "baseUrl": "", "proxy": null, "source": "none" }
+    },
+    {
       "name": "模块未知时没有格子可读",
-      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
+      "endpoint": { "baseUrlOverride": null },
+      "env": {
+        "moduleBaseUrls": {
+          "mod_a": { "url": "https://mod-a.example.com" }
+        }
       },
       "moduleId": null,
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+      "expected": { "baseUrl": "", "proxy": null, "source": "none" }
     },
     {
       "name": "环境缺席时解析不出东西",
-      "endpoint": { "baseUrlDefinitionId": "data", "baseUrlOverride": null },
+      "endpoint": { "baseUrlOverride": null },
       "env": null,
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
-      },
       "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+      "expected": { "baseUrl": "", "proxy": null, "source": "none" }
+    }
+  ],
+  "proxyCases": [
+    {
+      "name": "代理地址整体替换模块地址的前缀",
+      "baseUrl": "http://svc.internal:8080/api/a",
+      "proxy": "https://gw.corp.com/api/xxxx/a",
+      "url": "http://svc.internal:8080/api/a/orders/list",
+      "expected": "https://gw.corp.com/api/xxxx/a/orders/list"
     },
     {
-      "name": "端点点名的服务是空串时解析不出东西",
-      "endpoint": { "baseUrlDefinitionId": "", "baseUrlOverride": null },
-      "env": { "moduleBaseUrls": { "data": { "mod_a": "https://mod-a.example.com" } } },
-      "project": {
-        "baseUrlDefinitions": [{ "id": "data", "name": "data" }],
-        "defaultBaseUrlDefinitionId": "data"
-      },
-      "moduleId": "mod_a",
-      "expected": { "baseUrl": "", "source": "none", "definitionId": null }
+      "name": "没有代理时地址原样保留",
+      "baseUrl": "http://svc.internal:8080/api/a",
+      "proxy": null,
+      "url": "http://svc.internal:8080/api/a/orders/list",
+      "expected": "http://svc.internal:8080/api/a/orders/list"
+    },
+    {
+      "name": "代理是空串时地址原样保留",
+      "baseUrl": "http://svc.internal:8080/api/a",
+      "proxy": "",
+      "url": "http://svc.internal:8080/api/a/orders/list",
+      "expected": "http://svc.internal:8080/api/a/orders/list"
+    },
+    {
+      "name": "地址与前缀完全相同时不改动其余部分",
+      "baseUrl": "https://api.example.com",
+      "proxy": "https://gw.corp.com",
+      "url": "https://api.example.com",
+      "expected": "https://gw.corp.com"
+    },
+    {
+      "name": "前缀只在路径边界上命中",
+      "baseUrl": "http://svc.internal:8080/api",
+      "proxy": "https://gw.corp.com",
+      "url": "http://svc.internal:8080/apixyz/orders",
+      "expected": "http://svc.internal:8080/apixyz/orders"
+    },
+    {
+      "name": "模块地址带尾部斜杠时按去掉斜杠后的前缀命中",
+      "baseUrl": "http://svc.internal:8080/api/",
+      "proxy": "https://gw.corp.com",
+      "url": "http://svc.internal:8080/api/orders",
+      "expected": "https://gw.corp.com/orders"
+    },
+    {
+      "name": "查询串紧跟前缀时也算命中",
+      "baseUrl": "http://svc.internal:8080/api",
+      "proxy": "https://gw.corp.com",
+      "url": "http://svc.internal:8080/api?x=1",
+      "expected": "https://gw.corp.com?x=1"
+    },
+    {
+      "name": "地址为空时不做替换",
+      "baseUrl": "",
+      "proxy": "https://gw.corp.com",
+      "url": "/orders",
+      "expected": "/orders"
+    },
+    {
+      "name": "请求打的是另一个主机时不做替换",
+      "baseUrl": "http://svc.internal:8080/api/a",
+      "proxy": "https://gw.corp.com/api/xxxx/a",
+      "url": "https://other.example.com/orders",
+      "expected": "https://other.example.com/orders"
     }
   ]
 }

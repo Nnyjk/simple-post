@@ -7,9 +7,6 @@
       "id": "p_demo",
       "name": "Demo API",
       "description": "示例项目 — 用户与订单",
-      "baseUrlDefinitions": [{ "id": "def_default", "name": "默认" }],
-      "defaultBaseUrlDefinitionId": "def_default",
-      "baseUrl": "http://localhost:4000/demo",
       "color": "#60a5fa",
       "createdAt": 1787031874000,
       "updatedAt": 1789537474000
@@ -18,9 +15,6 @@
       "id": "p_invoice",
       "name": "发票服务",
       "description": "开票、抬头、PDF 生成",
-      "baseUrlDefinitions": [{ "id": "def_invoice_default", "name": "默认" }],
-      "defaultBaseUrlDefinitionId": "def_invoice_default",
-      "baseUrl": "http://localhost:4000/invoice",
       "color": "#a855f7",
       "createdAt": 1788414274000,
       "updatedAt": 1789451074000
@@ -29,9 +23,6 @@
       "id": "p_iot",
       "name": "IoT 设备",
       "description": "设备影子 / 指令下发",
-      "baseUrlDefinitions": [{ "id": "def_iot_default", "name": "默认" }],
-      "defaultBaseUrlDefinitionId": "def_iot_default",
-      "baseUrl": "http://localhost:4000/iot",
       "color": "#f97316",
       "createdAt": 1789019074000,
       "updatedAt": 1789537474000
@@ -142,7 +133,6 @@
       "method": "POST",
       "url": "/auth/login/sms",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [
@@ -168,7 +158,6 @@
       "method": "POST",
       "url": "/auth/login",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -192,7 +181,6 @@
       "method": "GET",
       "url": "/users/{{userId}}",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [
         {
@@ -221,7 +209,6 @@
       "method": "PATCH",
       "url": "/users/{{userId}}",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -242,7 +229,6 @@
       "method": "GET",
       "url": "/orders",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [
         { "id": "p1", "key": "page", "value": "1", "enabled": true },
@@ -273,7 +259,6 @@
       "method": "POST",
       "url": "/orders",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -297,7 +282,6 @@
       "method": "DELETE",
       "url": "/orders/{{orderId}}",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -318,7 +302,6 @@
       "method": "POST",
       "url": "/orders/{{orderId}}/refunds",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -342,7 +325,6 @@
       "method": "POST",
       "url": "/cashier",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -366,7 +348,6 @@
       "method": "GET",
       "url": "/invoice/titles",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -387,7 +368,6 @@
       "method": "POST",
       "url": "/invoice/issue",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -411,7 +391,6 @@
       "method": "GET",
       "url": "/shadow/{{deviceId}}",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -435,7 +414,6 @@
       "method": "PUT",
       "url": "/shadow/{{deviceId}}/desired",
       "environmentId": null,
-      "baseUrlDefinitionId": null,
       "baseUrlOverride": null,
       "params": [],
       "headers": [],
@@ -458,10 +436,11 @@
       "projectId": "p_demo",
       "name": "dev",
       "moduleBaseUrls": {
-        "def_default": {
-          "m_auth": "http://localhost:4000/demo/auth",
-          "m_order": "http://localhost:4000/demo/order",
-          "m_pay": "http://localhost:4000/demo/pay"
+        "m_auth": { "url": "http://localhost:4000/demo/auth" },
+        "m_order": { "url": "http://localhost:4000/demo/order" },
+        "m_pay": {
+          "url": "http://localhost:4000/demo/pay",
+          "proxy": "https://gw.example.com/demo/pay"
         }
       },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.dev", "env": "dev" },
@@ -472,11 +451,9 @@
       "projectId": "p_demo",
       "name": "staging",
       "moduleBaseUrls": {
-        "def_default": {
-          "m_auth": "http://localhost:4000/demo/auth",
-          "m_order": "http://localhost:4000/demo/order",
-          "m_pay": "http://localhost:4000/demo/pay"
-        }
+        "m_auth": { "url": "http://localhost:4000/demo/auth" },
+        "m_order": { "url": "http://localhost:4000/demo/order" },
+        "m_pay": { "url": "http://localhost:4000/demo/pay" }
       },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.staging", "env": "staging" },
       "isActive": false
@@ -486,11 +463,9 @@
       "projectId": "p_demo",
       "name": "prod",
       "moduleBaseUrls": {
-        "def_default": {
-          "m_auth": "http://localhost:4000/demo/auth",
-          "m_order": "http://localhost:4000/demo/order",
-          "m_pay": "http://localhost:4000/demo/pay"
-        }
+        "m_auth": { "url": "http://localhost:4000/demo/auth" },
+        "m_order": { "url": "http://localhost:4000/demo/order" },
+        "m_pay": { "url": "http://localhost:4000/demo/pay" }
       },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.prod", "env": "prod" },
       "isActive": false

@@ -2,58 +2,52 @@
  * URL 辅助 —— 纯函数、无框架依赖。HttpTester、BaseUrlPicker 与 cURL 导出共用
  * 同一套 join / 解析逻辑；要改解析规则就只在这里改一次。
  */
-import type { BaseUrlDefinition, EndpointDetail, Environment, Project } from '@/types/domain';
+import type { EndpointDetail, Environment } from '@/types/domain';
 
-/** 生效的 baseUrl 来自哪一行；选择器用它标注当前选择（"项目默认服务" /
- *  "鉴权服务" / "自定义"）。`default` 是项目 ★，即
- *  `Project.defaultBaseUrlDefinitionId`，因 endpoint 自身没指定服务而命中。 */
-export type BaseUrlSource = 'override' | 'definition' | 'default' | 'none';
+/**
+ * 生效的 baseUrl 来自哪一层；选择器用它标注当前选择（「跟随模块」/「自定义」）。
+ *
+ * `override` 是端点自己的 `baseUrlOverride`，`module` 是环境里「环境 × 模块」那一格，
+ * `none` 是谁都没匹配上。
+ */
+export type BaseUrlSource = 'override' | 'module' | 'none';
 
 export interface ResolvedBaseUrl {
+  /** 后端 api 地址。 */
   baseUrl: string;
+  /** 实际访问地址。`null` = 没有代理，请求直接打 `baseUrl`。 */
+  proxy: string | null;
   source: BaseUrlSource;
-  /** 贡献该值的 baseUrl definition 的 id，无则 `null`。 */
-  definitionId: string | null;
-  /** 贡献该值的 definition 名。 */
-  definitionName: string | null;
 }
 
 /**
  * 解析 endpoint 生效的 baseUrl。解析顺序（优先级由高到低）：
  *   1. `endpoint.baseUrlOverride`      —— 每 endpoint 的「自定义」模式
- *   2. `endpoint.baseUrlDefinitionId`  —— endpoint 命名的服务，未指定则
- *      取 `Project.defaultBaseUrlDefinitionId`
- *   3. `env.moduleBaseUrls[defId][moduleId]` —— 唯一的值层
- *   4. `''`                             —— 什么都没有
+ *   2. `env.moduleBaseUrls[moduleId]`  —— 环境 × 模块那一格
+ *   3. `''`                             —— 什么都没有
  *
  * override 是三态，「有值但为空」是有意义的：
- *   `null` / `undefined` —— 不在自定义模式，继续走服务链
+ *   `null` / `undefined` —— 不在自定义模式，继续读模块那一格
  *   `''`                 —— 自定义但不加前缀：URL 字段本身就是完整地址
  *   `'https://x'`        —— 自定义且带显式主机前缀
  *
  * 这正是 `double_option` patch 约定在干活：调用方写 `baseUrlOverride: ''`
- * 是**记录这个选择**而不是清空，只有 `null` 才清空。把 `''` 并回服务链，
+ * 是**记录这个选择**而不是清空，只有 `null` 才清空。把 `''` 并回模块那一格，
  * 选择器里的「自定义」行看起来就像什么都没做。
  *
- * 服务是项目级的，值是 (环境 × 模块 × 服务) 的：`project.baseUrlDefinitions`
- * 是项目全量列表，所有模块都看得见，指名服务永远不是跨模块错误；模块相关的是
- * 取值的那个格子，所以 `moduleId` 是必填参数——同一服务在两个模块指向两个
- * 主机，正是这个模型要表达的。
+ * 值住在 (环境 × 模块) 这一格，每格独立，**没有回退层**：没有项目默认，没有借用
+ * 别的模块的格子。挂在无模块下的 endpoint（节点已删，或测试器的空状态）
+ * `moduleId` 为 `null`，这种模块没有格子，只有第 1 步能出值。
  *
- * **没有回退层。** `baseUrls` 从不读取；空格子给出 `''` / `'none'`，
- * 绝不借用别的模块或别的服务的 URL。挂在无模块下的 endpoint（节点已删，或
- * 测试器的空状态）`moduleId` 为 `null`，这种模块没有格子，只有第 1 步能出值。
+ * `source` 报的是**哪一层选中了地址**：端点自己的 override 是 `'override'`，模块
+ * 那一格是 `'module'`，没解析出是 `'none'`。
  *
- * `source` 报的是**哪一行选中了服务**，不是哪个格子提供了 URL：endpoint 命名
- * 的服务是 `'definition'`，靠省略命中的项目 ★ 是 `'default'`，没解析出是 `'none'`。
- *
- * 对应 `crates/simple-post-mcp/src/variable_fill.rs` 的 `resolve_base_url_with`，
+ * 对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url`，
  * 两者必须一致。
  */
 export function resolveEndpointBaseUrl(
-  endpoint: Pick<EndpointDetail, 'environmentId' | 'baseUrlDefinitionId' | 'baseUrlOverride'>,
+  endpoint: Pick<EndpointDetail, 'baseUrlOverride'>,
   env: Pick<Environment, 'moduleBaseUrls'> | undefined,
-  project: Pick<Project, 'baseUrlDefinitions' | 'defaultBaseUrlDefinitionId'> | undefined,
   /**
    * endpoint 所处的模块，由调用方用 `moduleIdOfEndpoint` 解析——这是树的问题，
    * 本模块刻意不懂树。
@@ -63,24 +57,55 @@ export function resolveEndpointBaseUrl(
   if (endpoint.baseUrlOverride !== null && endpoint.baseUrlOverride !== undefined) {
     return {
       baseUrl: endpoint.baseUrlOverride,
+      proxy: null,
       source: 'override',
-      definitionId: null,
-      definitionName: null,
     };
   }
-  // `null`（未选择）落到项目 ★。全应用只有 `resolveEndpointBaseUrl` 这一处读项目
-  // 默认服务，且只读一次。
-  const defId = endpoint.baseUrlDefinitionId ?? project?.defaultBaseUrlDefinitionId ?? null;
-  const def = defId ? project?.baseUrlDefinitions.find((d) => d.id === defId) : undefined;
-  if (!def) return { baseUrl: '', source: 'none', definitionId: null, definitionName: null };
-  const url = moduleId ? (env?.moduleBaseUrls?.[def.id]?.[moduleId] ?? '') : '';
-  if (!url) return { baseUrl: '', source: 'none', definitionId: null, definitionName: null };
+  if (!moduleId) return { baseUrl: '', proxy: null, source: 'none' };
+  const cell = env?.moduleBaseUrls?.[moduleId];
+  if (!cell || !cell.url) return { baseUrl: '', proxy: null, source: 'none' };
   return {
-    baseUrl: url,
-    source: endpoint.baseUrlDefinitionId ? 'definition' : 'default',
-    definitionId: def.id,
-    definitionName: def.name,
+    baseUrl: cell.url,
+    proxy: cell.proxy ?? null,
+    source: 'module',
   };
+}
+
+/**
+ * 用代理地址替换请求地址里的模块地址前缀。
+ *
+ * 接口经代理网关转代时，后端 api 地址与实际访问地址不一致：模块那一格写的是
+ * `http://svc.internal:8080/api/a`（后端 api 地址），而真正要打的是
+ * `https://gw.corp.com/api/xxxx/a`（实际访问地址）。本函数把请求地址开头的那段
+ * 模块地址换成代理地址，其余部分原样保留：
+ *
+ *   applyProxy('http://svc.internal:8080/api/a', 'https://gw.corp.com/api/xxxx/a',
+ *              'http://svc.internal:8080/api/a/orders/list')
+ *     → 'https://gw.corp.com/api/xxxx/a/orders/list'
+ *
+ * 规则：
+ *   - `proxy` 缺席或只有空白 → 原样返回。
+ *   - 前缀是 `baseUrl` 去掉尾部所有 `/`；前缀为空 → 原样返回。
+ *   - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求
+ *     地址恰好等于该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会
+ *     命中 `http://h/apixyz`。
+ *   - 其余情况原样返回：请求打的是另一个主机，或那一格压根没有地址。
+ *
+ * 对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `apply_proxy`；
+ * 两者必须一致，否则预览与真正发出的请求描述的是两个 URL。
+ */
+export function applyProxy(baseUrl: string, proxy: string | null | undefined, url: string): string {
+  if (proxy === null || proxy === undefined) return url;
+  const trimmedProxy = proxy.trim();
+  if (trimmedProxy === '') return url;
+  const prefix = baseUrl.replace(/\/+$/, '');
+  if (prefix === '') return url;
+  if (!url.startsWith(prefix)) return url;
+  const rest = url.slice(prefix.length);
+  if (rest !== '' && !rest.startsWith('/') && !rest.startsWith('?') && !rest.startsWith('#')) {
+    return url;
+  }
+  return trimmedProxy + rest;
 }
 
 /**
@@ -181,8 +206,8 @@ export function resolveVarsWithMissing(
 ): ResolvedVars {
   if (!input) return { value: '', missing: [] };
   // `Environment` 的变量在 `.variables` 下，裸 record 本身就是映射；`isEnvironment`
-  // 用 `Environment.baseUrls`（嵌套对象）区分两者——裸 `Record<string,string>` 在那里
-  // 会得到 `string`
+  // 用 `Environment.moduleBaseUrls`（对象）区分两者——裸 `Record<string,string>` 在那里
+  // 会得到 `undefined`
   const map: Record<string, string> | undefined = isEnvironment(vars) ? enabledVars(vars) : vars;
   const missing: string[] = [];
   const seen = new Set<string>();
@@ -254,8 +279,8 @@ function isEnvironment(v: Environment | Record<string, string> | undefined): v i
   return (
     !!v &&
     typeof v === 'object' &&
-    typeof (v as Environment).baseUrls === 'object' &&
-    !Array.isArray((v as Environment).baseUrls)
+    typeof (v as Environment).moduleBaseUrls === 'object' &&
+    !Array.isArray((v as Environment).moduleBaseUrls)
   );
 }
 
@@ -277,6 +302,3 @@ export function enabledVars(env: Environment): Record<string, string> {
   }
   return out;
 }
-
-// 重导出面向选择器的类型，调用方就不必再引第二条路径
-export type { BaseUrlDefinition };

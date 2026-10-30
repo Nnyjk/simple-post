@@ -186,55 +186,18 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.environmentsSetModuleBaseurl]: {
     method: 'POST',
-    // 取值层是 (环境 × 模块 × 服务)，故单元格的两半都走请求体。路径段用
-    // `module-baseurls` 而不是 `baseurls`：裸 `defId` 只能写扁平的、不分模块的取值层。
+    // 取值层是 (环境 × 模块)，故单元格的两半都走请求体。路径段用
+    // `module-baseurls` 而不是 `baseurls`：裸 id 只能写扁平的、不分模块的取值层。
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/module-baseurls`,
-    body: (a) => ({ defId: a.defId, moduleId: a.moduleId, url: a.url }),
+    // 格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自
+    // 独立：`null` = 该字段保持原值，`''` = 清空该字段。
+    body: (a) => ({ moduleId: a.moduleId, url: a.url, proxy: a.proxy }),
   },
   [COMMANDS.environmentsSetActive]: {
     method: 'POST',
     // 使用字面量 active 路径，避免与参数路由发生匹配歧义。
     path: () => '/api/environments/active',
     body: (a) => ({ envId: a.envId }),
-  },
-
-  // ----- baseUrl definitions -----
-  [COMMANDS.baseUrlDefsList]: {
-    method: 'GET',
-    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
-  },
-  [COMMANDS.baseUrlDefsCreate]: {
-    method: 'POST',
-    // 服务挂在**项目**上，所以作用域是项目且住在路径里；`/api/baseurl-defs` 是下面
-    // PATCH/DELETE 以裸 id 寻址的集合。
-    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
-    // 显式投影：`name` 就是全部契约，默认的 `args` 回退会把 `projectId` 以及调用方
-    // 持有的 `opts` 一起泄进请求体。`opts.id` 要转发，因为渲染层自己铸 id
-    // （它在行落库前就用它索引 ★ 与环境单元格）；留空则由服务端铸。
-    body: (a) => {
-      const opts = a.opts as { description?: unknown; id?: unknown } | undefined;
-      const id = typeof opts?.id === 'string' ? opts.id : '';
-      return {
-        name: a.name,
-        ...(opts ? { description: opts.description } : {}),
-        ...(id ? { id } : {}),
-      };
-    },
-  },
-  [COMMANDS.baseUrlDefsUpdate]: {
-    method: 'PATCH',
-    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.id))}`,
-    body: (a) => a.patch,
-  },
-  [COMMANDS.baseUrlDefsDelete]: {
-    method: 'DELETE',
-    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.id))}`,
-  },
-  [COMMANDS.baseUrlDefsSetDefault]: {
-    method: 'POST',
-    // ★ 是项目的属性，所以作用域是项目而非模块。
-    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls/default`,
-    body: (a) => ({ defId: a.defId }),
   },
 
   // ----- dynamic variables -----
@@ -256,7 +219,6 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
       sourceEndpointId: a.sourceEndpointId ?? null,
       sourceInlineJson: a.sourceInlineJson ?? null,
       sourceEnvironmentId: a.sourceEnvironmentId ?? null,
-      sourceBaseUrlDefinitionId: a.sourceBaseUrlDefinitionId ?? null,
       extractPath: a.extractPath ?? null,
       transformScript: a.transformScript ?? null,
       valueMode: a.valueMode ?? null,

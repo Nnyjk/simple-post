@@ -9,12 +9,10 @@ use crate::error::AppError;
 use crate::spec::find_endpoint_by_identity;
 use crate::spec::input::{check_auth_payload, coerce_key_values, reject_schema_shaped_payload};
 
-use super::resolve::{
-    resolve_environment_of, resolve_module_of, resolve_parent_of, resolve_service_of,
-};
+use super::resolve::{resolve_environment_of, resolve_module_of, resolve_parent_of};
 use super::types::{
     EndpointDefinition, EndpointIfExists, EndpointOutcome, EndpointSpec, EnvironmentOutcome,
-    NamedResolved, ServiceOutcome, SpecOutcome,
+    NamedResolved, SpecOutcome,
 };
 
 /// 把一份规格落进库里。
@@ -36,15 +34,10 @@ pub fn upsert_endpoint_spec(
     // 不该由一份接口规格顺带做掉。
     let project = db::projects::get(conn, project_id)?;
 
-    // 端点自绑的环境与服务必须属于规格指名的项目：环境变量与 (环境 × 服务 × 模块)
-    // 那一格 URL 都属于那个项目，绑别的项目的等于让本项目读别的项目的值。
+    // 端点自绑的环境必须属于规格指名的项目：环境变量与 (环境 × 模块) 那一格地址都属于
+    // 那个项目，绑别的项目的等于让本项目读别的项目的值。
     // 校验放在最前面，不通过就整份规格不落库。
-    check_endpoint_bindings(
-        conn,
-        &project.id,
-        spec.endpoint.environment_id.as_deref(),
-        spec.endpoint.base_url_definition_id.as_deref(),
-    )?;
+    check_endpoint_bindings(conn, &project.id, spec.endpoint.environment_id.as_deref())?;
 
     let if_exists = EndpointIfExists::parse(spec.if_exists.as_deref().unwrap_or(""))?;
 
@@ -54,22 +47,12 @@ pub fn upsert_endpoint_spec(
     // ---- 集合与父 ----
     let (parent_id, collections) = resolve_parent_of(conn, &project.id, &module.id, spec)?;
 
-    // ---- 服务 ----
-    let service = resolve_service_of(conn, &project.id, spec)?;
-
     // ---- 环境 ----
-    let environment = resolve_environment_of(conn, &project.id, &module.id, &service, spec)?;
+    let environment = resolve_environment_of(conn, &project.id, &module.id, spec)?;
 
     // ---- 端点 ----
-    let endpoint = upsert_endpoint_of(
-        conn,
-        &project.id,
-        &parent_id,
-        &environment,
-        &service,
-        spec,
-        if_exists,
-    )?;
+    let endpoint =
+        upsert_endpoint_of(conn, &project.id, &parent_id, &environment, spec, if_exists)?;
 
     Ok(SpecOutcome {
         project_id: project.id,
@@ -81,34 +64,24 @@ pub fn upsert_endpoint_spec(
         parent_id,
         collections,
         environment,
-        service,
         endpoint,
     })
 }
 
-/// 端点自绑的环境与服务必须属于这份规格指名的项目。
+/// 端点自绑的环境必须属于这份规格指名的项目。
 ///
-/// 环境里的变量与 (环境 × 服务 × 模块) 那一格 URL 都属于那个项目，所以绑一个别的
-/// 项目的环境或服务，等于让这个项目读另一个项目的值。
+/// 环境里的变量与 (环境 × 模块) 那一格地址都属于那个项目，所以绑一个别的项目的环境，
+/// 等于让这个项目读另一个项目的值。
 fn check_endpoint_bindings(
     conn: &mut Connection,
     project_id: &str,
     environment_id: Option<&str>,
-    base_url_definition_id: Option<&str>,
 ) -> Result<(), AppError> {
     if let Some(env_id) = environment_id {
         let owner = db::environments::get(conn, env_id)?.project_id;
         if owner != project_id {
             return Err(AppError::Validation(format!(
                 "环境 '{env_id}' 属于项目 '{owner}'，不属于这份规格指名的项目 '{project_id}'"
-            )));
-        }
-    }
-    if let Some(def_id) = base_url_definition_id {
-        let owner = db::base_url_defs::project_id_of(conn, def_id)?;
-        if owner != project_id {
-            return Err(AppError::Validation(format!(
-                "服务 '{def_id}' 属于项目 '{owner}'，不属于这份规格指名的项目 '{project_id}'"
             )));
         }
     }
@@ -122,7 +95,6 @@ fn upsert_endpoint_of(
     project_id: &str,
     parent_id: &str,
     environment: &Option<EnvironmentOutcome>,
-    service: &Option<ServiceOutcome>,
     spec: &EndpointSpec,
     if_exists: EndpointIfExists,
 ) -> Result<EndpointOutcome, AppError> {
@@ -154,15 +126,11 @@ fn upsert_endpoint_of(
         None => AuthConfig::default(),
     };
 
-    // 端点绑定的环境与服务：规格里点名了就用它，规格里有对应的那一段就用那一段。
+    // 端点绑定的环境：规格里点名了就用它，规格里有对应的那一段就用那一段。
     let environment_id = def
         .environment_id
         .clone()
         .or_else(|| environment.as_ref().map(|e| e.id.clone()));
-    let base_url_definition_id = def
-        .base_url_definition_id
-        .clone()
-        .or_else(|| service.as_ref().map(|s| s.id.clone()));
 
     let existing =
         find_endpoint_by_identity(conn, parent_id, &def.name, method.as_str(), &def.url)?;
@@ -189,15 +157,7 @@ fn upsert_endpoint_of(
             }
             EndpointIfExists::Duplicate => {}
             EndpointIfExists::Update => {
-                apply_endpoint_patch(
-                    conn,
-                    existing_id,
-                    def,
-                    &body,
-                    &auth,
-                    environment_id,
-                    base_url_definition_id,
-                )?;
+                apply_endpoint_patch(conn, existing_id, def, &body, &auth, environment_id)?;
                 return Ok(EndpointOutcome {
                     created: false,
                     updated: true,
@@ -225,7 +185,6 @@ fn upsert_endpoint_of(
         method,
         url: def.url.clone(),
         environment_id,
-        base_url_definition_id,
         base_url_override: def.base_url_override.clone(),
         params: coerce_key_values(def.params.clone().unwrap_or_default()),
         path_params: coerce_key_values(def.path_params.clone().unwrap_or_default()),
@@ -270,7 +229,6 @@ fn apply_endpoint_patch(
     body: &RequestBody,
     auth: &AuthConfig,
     environment_id: Option<String>,
-    base_url_definition_id: Option<String>,
 ) -> Result<(), AppError> {
     let node_patch = ResourceNodePatch {
         parent_id: None,
@@ -282,7 +240,6 @@ fn apply_endpoint_patch(
         method: None,
         url: None,
         environment_id: environment_id.clone().map(Some),
-        base_url_definition_id: base_url_definition_id.clone().map(Some),
         base_url_override: def.base_url_override.clone().map(Some),
         params: def.params.clone().map(coerce_key_values),
         // 路径参数走 `double_option`：缺席 = 不动，`null` = 清空，设值 = 写入。

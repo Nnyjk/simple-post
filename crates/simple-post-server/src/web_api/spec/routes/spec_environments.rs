@@ -72,8 +72,9 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/environments/{envId}/module-baseurls",
-            summary: "Set one service's URL for one module in this environment \
-                      (the only layer; null clears that one cell)",
+            summary: "Set one module's address and proxy in this environment \
+                      (body: moduleId, url, proxy; null keeps that field unchanged, \
+                      an empty string clears it)",
             stability: "public",
             request: Some("EnvSetModuleBaseUrl"),
             response: Some("Environment"),

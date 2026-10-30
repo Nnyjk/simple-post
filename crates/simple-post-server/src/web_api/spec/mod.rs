@@ -55,4 +55,5 @@ pub struct RouteSpec {
 //   GET  /api/preferences            - raw preferences dump (UI)
 //   PUT  /api/preferences            - raw preferences patch
 // `/api/permissions*` 与 `/api/request_settings*` 同样刻意不在公共契约内。
-// baseUrl-def 一族已登记在 `spec_baseurls` 组。
+// 地址那一族只有一个动词：`POST /api/environments/{envId}/module-baseurls`，登记在
+// `spec_environments` 组。

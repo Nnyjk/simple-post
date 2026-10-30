@@ -7,7 +7,7 @@
 use crate::db::test_helpers::fresh_pool;
 use crate::db::{self, DbPool};
 use crate::domain::{AuthType, BodyMode, ResourceNodeType};
-use crate::spec::upsert::{upsert_endpoint_spec, EndpointSpec};
+use crate::spec::upsert::{upsert_endpoint_spec, EndpointSpec, EnvironmentSpec};
 use serde_json::json;
 
 /// 一份最小可用的规格：只指名项目、模块与端点。
@@ -90,7 +90,7 @@ fn path_parameters_land_in_their_own_list() {
 // =========================================================================
 
 #[test]
-fn a_full_spec_lands_the_module_the_collections_the_environment_the_service_and_the_endpoint() {
+fn a_full_spec_lands_the_module_the_collections_the_environment_and_the_endpoint() {
     let (pool, _dir) = fresh_pool();
     let outcome = apply_ok(
         &pool,
@@ -105,7 +105,6 @@ fn a_full_spec_lands_the_module_the_collections_the_environment_the_service_and_
                 "base_url": "https://gray.example.com",
                 "activate": true
             },
-            "service": { "name": "营销服务", "default": true },
             "endpoint": {
                 "name": "查询活动",
                 "method": "GET",
@@ -133,11 +132,6 @@ fn a_full_spec_lands_the_module_the_collections_the_environment_the_service_and_
     let env = outcome.environment.expect("规格里有环境");
     assert!(env.created);
     assert!(env.activated);
-
-    // 服务：新建并设为 ★。
-    let service = outcome.service.expect("规格里有服务");
-    assert!(service.created);
-    assert!(service.is_default);
 
     // 端点：新建。
     assert!(outcome.endpoint.created);
@@ -167,21 +161,16 @@ fn a_full_spec_lands_the_module_the_collections_the_environment_the_service_and_
             Some("pm.environment.set('a', 'b');")
         );
         assert!(detail.test_script.is_some());
-        // 端点绑定到规格里的环境与服务。
+        // 端点绑定到规格里的环境。
         assert_eq!(detail.environment_id.as_deref(), Some(env.id.as_str()));
-        assert_eq!(
-            detail.base_url_definition_id.as_deref(),
-            Some(service.id.as_str())
-        );
 
-        // 那一格 URL 落在 (环境 × 服务 × 模块) 上。
+        // 那一格地址落在 (环境 × 模块) 上。
         let stored_env = db::environments::get(c, &env.id)?;
-        let cell = stored_env
-            .module_base_urls
-            .get(&service.id)
-            .and_then(|per_module| per_module.get(&outcome.module.id))
-            .map(String::as_str);
-        assert_eq!(cell, Some("https://gray.example.com"));
+        let cell = stored_env.module_base_urls.get(&outcome.module.id);
+        assert_eq!(
+            cell.map(|c| c.url.as_str()),
+            Some("https://gray.example.com")
+        );
 
         // 环境里的变量。
         assert_eq!(
@@ -192,13 +181,67 @@ fn a_full_spec_lands_the_module_the_collections_the_environment_the_service_and_
             stored_env.variables.get("region").map(String::as_str),
             Some("cn-east")
         );
+        Ok(())
+    })
+    .unwrap();
+}
 
-        // 项目 ★ 指向那个服务。
+#[test]
+fn the_environment_base_url_lands_in_the_cell_of_the_specified_module() {
+    // 地址按模块分格，故规格指名哪个模块，地址就写进哪一格。
+    let (pool, _dir) = fresh_pool();
+    let outcome = apply_ok(
+        &pool,
+        json!({
+            "project_id": "p_demo",
+            "module": "营销",
+            "environment": { "name": "gray", "base_url": "https://gray.example.com" },
+            "endpoint": { "name": "查询活动", "method": "GET", "url": "/api/campaigns" }
+        }),
+    );
+
+    let env_id = outcome.environment.expect("规格里有环境").id;
+    db::with_conn(&pool, |c| {
+        let stored_env = db::environments::get(c, &env_id)?;
+        assert_eq!(stored_env.module_base_urls.len(), 1, "只有指名的那一格");
+        let cell = stored_env.module_base_urls.get(&outcome.module.id);
         assert_eq!(
-            db::projects::get(c, "p_demo")?
-                .default_base_url_definition_id
-                .as_deref(),
-            Some(service.id.as_str())
+            cell.map(|c| c.url.as_str()),
+            Some("https://gray.example.com")
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn the_environment_base_url_proxy_lands_in_the_same_cell() {
+    let (pool, _dir) = fresh_pool();
+    let outcome = apply_ok(
+        &pool,
+        json!({
+            "project_id": "p_demo",
+            "module": "营销",
+            "environment": {
+                "name": "gray",
+                "base_url": "https://gray.example.com",
+                "base_url_proxy": "https://gw.example.com/gray"
+            },
+            "endpoint": { "name": "查询活动", "method": "GET", "url": "/api/campaigns" }
+        }),
+    );
+
+    let env_id = outcome.environment.expect("规格里有环境").id;
+    db::with_conn(&pool, |c| {
+        let stored_env = db::environments::get(c, &env_id)?;
+        let cell = stored_env.module_base_urls.get(&outcome.module.id);
+        assert_eq!(
+            cell.map(|c| c.url.as_str()),
+            Some("https://gray.example.com")
+        );
+        assert_eq!(
+            cell.and_then(|c| c.proxy.as_deref()),
+            Some("https://gw.example.com/gray")
         );
         Ok(())
     })
@@ -225,7 +268,6 @@ fn applying_the_same_spec_twice_creates_nothing_the_second_time() {
         "module": "营销",
         "collection_path": "活动",
         "environment": { "name": "gray", "variables": { "token": "t" } },
-        "service": { "name": "营销服务" },
         "endpoint": { "name": "查询活动", "method": "GET", "url": "/api/campaigns" }
     });
 
@@ -682,7 +724,6 @@ fn an_environment_that_belongs_to_another_project_is_refused() {
             id: "env_invoice".to_string(),
             project_id: "p_invoice".to_string(),
             name: "dev".to_string(),
-            base_urls: Default::default(),
             module_base_urls: Default::default(),
             variables: Default::default(),
             disabled_variables: Vec::new(),
@@ -704,21 +745,6 @@ fn an_environment_that_belongs_to_another_project_is_refused() {
     );
     assert!(e.to_string().contains("env_invoice"), "{e}");
     assert!(e.to_string().contains("p_invoice"), "{e}");
-}
-
-#[test]
-fn a_base_url_without_a_service_is_refused() {
-    let (pool, _dir) = fresh_pool();
-    let e = apply(
-        &pool,
-        json!({
-            "project_id": "p_demo",
-            "module": "营销",
-            "environment": { "name": "gray", "base_url": "https://gray.example.com" },
-            "endpoint": { "name": "查询活动", "method": "GET", "url": "/api/campaigns" }
-        }),
-    );
-    assert!(e.to_string().contains("服务"), "{e}");
 }
 
 #[test]
@@ -801,14 +827,51 @@ fn the_camel_case_spelling_of_multi_word_fields_is_accepted() {
     );
 }
 
+/// 环境那一段的两个地址字段两种拼写都收。
+///
+/// `base_url` 与 `base_url_proxy` 各带一个 camelCase 别名（`baseUrl` 与 `baseUrlProxy`），
+/// 四种拼写落在同一个类型上，故 REST 那条线与 MCP 那条线交上来的形状是同一份。
+#[test]
+fn the_environment_address_fields_accept_both_spellings() {
+    let snake: EnvironmentSpec =
+        serde_json::from_value(json!({ "base_url": "https://a" })).expect("这份规格应当能反序列化");
+    assert_eq!(snake.base_url.as_deref(), Some("https://a"));
+    assert_eq!(snake.base_url_proxy, None);
+
+    let camel: EnvironmentSpec =
+        serde_json::from_value(json!({ "baseUrl": "https://a" })).expect("这份规格应当能反序列化");
+    assert_eq!(camel.base_url.as_deref(), Some("https://a"));
+    assert_eq!(camel.base_url_proxy, None);
+
+    let snake_proxy: EnvironmentSpec =
+        serde_json::from_value(json!({ "base_url_proxy": "https://p" }))
+            .expect("这份规格应当能反序列化");
+    assert_eq!(snake_proxy.base_url_proxy.as_deref(), Some("https://p"));
+    assert_eq!(snake_proxy.base_url, None);
+
+    let camel_proxy: EnvironmentSpec =
+        serde_json::from_value(json!({ "baseUrlProxy": "https://p" }))
+            .expect("这份规格应当能反序列化");
+    assert_eq!(camel_proxy.base_url_proxy.as_deref(), Some("https://p"));
+    assert_eq!(camel_proxy.base_url, None);
+
+    let both: EnvironmentSpec = serde_json::from_value(json!({
+        "base_url": "https://a",
+        "baseUrlProxy": "https://p",
+    }))
+    .expect("这份规格应当能反序列化");
+    assert_eq!(both.base_url.as_deref(), Some("https://a"));
+    assert_eq!(both.base_url_proxy.as_deref(), Some("https://p"));
+}
+
 // =========================================================================
 // 跨模块与跨项目
 // =========================================================================
 
 /// 集合必须挂在规格指名的那个模块下。
 ///
-/// base URL 住在 (环境 × 服务 × 模块) 那一格：集合在别的模块下时，规格把那一格写进
-/// 一个模块，端点却挂在另一个模块下，发送时读的是另一个格子。
+/// base URL 住在 (环境 × 模块) 那一格：集合在别的模块下时，规格把那一格写进一个模块，
+/// 端点却挂在另一个模块下，发送时读的是另一个格子。
 #[test]
 fn a_collection_under_another_module_is_refused() {
     let (pool, _dir) = fresh_pool();
@@ -838,7 +901,6 @@ fn an_endpoint_bound_to_another_projects_environment_is_refused() {
             id: "env_invoice".to_string(),
             project_id: "p_invoice".to_string(),
             name: "dev".to_string(),
-            base_urls: Default::default(),
             module_base_urls: Default::default(),
             variables: Default::default(),
             disabled_variables: Vec::new(),
@@ -863,28 +925,6 @@ fn an_endpoint_bound_to_another_projects_environment_is_refused() {
         }),
     );
     assert!(e.to_string().contains("env_invoice"), "{e}");
-    assert!(e.to_string().contains("p_invoice"), "{e}");
-}
-
-/// 端点自绑的服务必须属于规格指名的项目。
-#[test]
-fn an_endpoint_bound_to_another_projects_service_is_refused() {
-    let (pool, _dir) = fresh_pool();
-    // fixture 里 `def_invoice_default` 属于 `p_invoice`。
-    let e = apply(
-        &pool,
-        json!({
-            "project_id": "p_demo",
-            "module": "营销",
-            "endpoint": {
-                "name": "查询活动",
-                "method": "GET",
-                "url": "/api/campaigns",
-                "base_url_definition_id": "def_invoice_default"
-            }
-        }),
-    );
-    assert!(e.to_string().contains("def_invoice_default"), "{e}");
     assert!(e.to_string().contains("p_invoice"), "{e}");
 }
 

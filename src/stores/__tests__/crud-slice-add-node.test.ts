@@ -2,8 +2,7 @@
  * `crud-slice` 的 `addNode` id 归属：新建节点的 id 以**服务端返回值**为准。
  *
  * 本地乐观铸出的 id 只是占位——后端可以另起一个，而 detail 行必须挂在它返回的那一个
- * 上，否则接口配置会挂到一条谁都不拥有的行。baseUrl 服务的 id 契约见
- * `crud-slice-baseurl.test.ts`。
+ * 上，否则接口配置会挂到一条谁都不拥有的行。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

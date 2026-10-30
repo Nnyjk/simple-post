@@ -5,16 +5,15 @@ import { SettingsCategory } from '../SettingsCategory';
 import { useEnvDialogs } from './hooks/useEnvDialogs';
 import { EnvBody } from './rows/EnvBody';
 import { EnvSwitcher } from './rows/EnvSwitcher';
-import type { BaseUrlDefinition, Environment, ResourceNode } from '@/types/domain';
+import type { Environment, ResourceNode } from '@/types/domain';
 
 export interface EnvironmentSectionProps {
   // ---- scope ----
   environments: Environment[];
   projectId: string;
   /**
-   * 本项目的模块，已由宿主过滤并按 `sortOrder` 排序。它们是 前置 URL 表的行轴：行集是
-   * （每个模块 × 每个项目服务），故没有模块的项目无从配置，表格会说明这一点而不是渲染
-   * 一张空网格。
+   * 本项目的模块，已由宿主过滤并按 `sortOrder` 排序。它们是模块地址表的行轴，故
+   * 没有模块的项目无从配置，表格会说明这一点而不是渲染一张空网格。
    */
   modules: readonly ResourceNode[];
 
@@ -26,41 +25,26 @@ export interface EnvironmentSectionProps {
   setEnvironmentVarDisabled: (envId: string, key: string, disabled: boolean) => void;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
   /**
-   * 设定（或用 `null` 清除）值层的一个单元格：在此环境中，模块 `moduleId` 上服务
-   * `defId` 指向的地址。
+   * 写一个 (环境 × 模块) 格子里的两个字段：`url` 是模块地址，`proxy` 是代理地址。
+   * `null` = 该字段保持原值，`''` = 清空该字段。
    */
   setEnvironmentModuleBaseUrl: (
     envId: string,
-    defId: string,
     moduleId: string,
     url: string | null,
+    proxy: string | null,
   ) => void;
   /** 解析出新环境的 id；创建失败时为 `null`。 */
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   deleteEnvironment: (envId: string) => void;
   updateEnvironment: (envId: string, patch: Partial<Environment>) => void;
-
-  // ---- project-scoped service definitions ----
-  baseUrlDefinitions: readonly BaseUrlDefinition[];
-  /** 项目 ★。项目级 —— 没有按模块的默认。 */
-  defaultBaseUrlDefinitionId: string | null;
-  addBaseUrlDefinition: (projectId: string, name: string) => string;
-  updateBaseUrlDefinition: (
-    projectId: string,
-    defId: string,
-    patch: Partial<Pick<BaseUrlDefinition, 'name' | 'description'>>,
-  ) => void;
-  deleteBaseUrlDefinition: (projectId: string, defId: string) => void;
-  /** 把某个服务加星为项目默认；传 `null` 取消加星。 */
-  setDefaultBaseUrlDefinition: (projectId: string, defId: string | null) => void;
 }
 
 /**
  * 新建环境的默认名称。
  *
- * 从项目已有的名字推导，保证生成的名字唯一，且与本面板的中文口吻一致（baseUrl 定义
- * 默认叫 `新服务` 是同一套理由）—— 在一个靠名字指认环境的分区里，两个同名标签无法
- * 区分。
+ * 从项目已有的名字推导，保证生成的名字唯一，且与本面板的中文口吻一致——在一个靠名字
+ * 指认环境的分区里，两个同名标签无法区分。
  */
 export function nextEnvironmentName(existingNames: readonly string[]): string {
   const taken = new Set(existingNames.map((n) => n.trim()));
@@ -82,12 +66,10 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  *   ┌── env switcher (also the rename surface) ──────────────┐
  *   │  ☁  dev  ⚡ staging  🚀 prod            + 新建环境       │
  *   ├────────────────────────────────────────────────────────┤
- *   ├──────────── 前置 URL ───────────────────────────────────┤
- *   │  模块         服务          前置 URL                     │
- *   │  🗂 默认模块   ★ 默认服务   http://localhost:4000/demo  │
- *   │               数据服务     http://127.0.0.1:9100/api   │
- *   │               + 添加服务                                 │
- *   │  🗂 南通6.0    ★ 默认服务     http://192.168.11.101:27000 │
+ *   ├──────────── 模块地址 ───────────────────────────────────┤
+ *   │  模块         模块地址              代理地址            │
+ *   │  🗂 默认模块   http://localhost:4000   （留空即无代理）  │
+ *   │  🗂 南通6.0    http://192.168.11.101                       │
  *   ├──────────── 环境变量 ───────────────────────────────────┤
  *   │  { } token  eyJhbGciOi...                       [×]    │
  *   │  { } env    dev                                 [×]    │
@@ -102,14 +84,9 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
  * controls, hover-revealed delete buttons — but adds an env switcher
  * strip across the top because each env holds its own value overrides.
  *
- * The 前置 URL table is grouped by module because the **address** is
- * per module: every module group lists the project's whole service list and
- * fills in its own cells. The ★ is per project, not per module.
- *
  * 切换器条持有 `新建环境` 控件，故即使一个环境都没有也要渲染 —— 空态是条下方的一句
  * 提示，绝不替代这条。**模块** 标签为更窄的用途展示同一份环境列表（见
- * `ModuleServiceSection`），故本组件不是该列表的唯一宿主，而是它上面项目级写入的唯一
- * 宿主。
+ * `ModuleBaseUrlSection`），故本组件不是该列表的唯一宿主。
  *
  * This file is the shell only: it owns the active-env selection, the
  * delete-confirmation state, and the layout. Every presentational part
@@ -127,12 +104,6 @@ export function EnvironmentSection({
   addEnvironment,
   deleteEnvironment,
   updateEnvironment,
-  baseUrlDefinitions,
-  defaultBaseUrlDefinitionId,
-  addBaseUrlDefinition,
-  updateBaseUrlDefinition,
-  deleteBaseUrlDefinition,
-  setDefaultBaseUrlDefinition,
 }: EnvironmentSectionProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   // 创建进行中，以及（若有）落库后应打开重命名的那个环境 id。
@@ -140,16 +111,9 @@ export function EnvironmentSection({
   const [pendingRenameEnvId, setPendingRenameEnvId] = useState<string | null>(null);
 
   // ---- modal state ----
-  const {
-    deletingBaseUrl,
-    deletingEnv,
-    requestBaseUrlDelete,
-    requestEnvDelete,
-    clearBaseUrlDelete,
-    clearEnvDelete,
-    confirmDeleteBaseUrl,
-    confirmDeleteEnv,
-  } = useEnvDialogs({ projectId, deleteBaseUrlDefinition, deleteEnvironment });
+  const { deletingEnv, requestEnvDelete, clearEnvDelete, confirmDeleteEnv } = useEnvDialogs({
+    deleteEnvironment,
+  });
 
   // Default to the project-active env whenever the list shape changes,
   // unless the user has explicitly picked one. Otherwise stay on the
@@ -239,7 +203,7 @@ export function EnvironmentSection({
 
         {environments.length === 0 ? (
           <EmptyHint className="rounded-lg border-border bg-card/30 px-3 py-8 text-xs">
-            该项目还没有环境 · 点「新建环境」创建第一个，用来切换前置 URL 与环境变量
+            该项目还没有环境 · 点「新建环境」创建第一个，用来切换模块地址与环境变量
           </EmptyHint>
         ) : (
           activeEnv && (
@@ -249,19 +213,12 @@ export function EnvironmentSection({
               <EnvBody
                 key={activeEnv.id}
                 env={activeEnv}
-                projectId={projectId}
                 modules={modules}
                 setEnvironmentVar={setEnvironmentVar}
                 setEnvironmentVarDisabled={setEnvironmentVarDisabled}
                 renameEnvironmentVar={renameEnvironmentVar}
                 setEnvironmentModuleBaseUrl={setEnvironmentModuleBaseUrl}
                 onAddVar={handleAddVar}
-                baseUrlDefinitions={baseUrlDefinitions}
-                defaultBaseUrlDefinitionId={defaultBaseUrlDefinitionId}
-                addBaseUrlDefinition={addBaseUrlDefinition}
-                updateBaseUrlDefinition={updateBaseUrlDefinition}
-                setDefaultBaseUrlDefinition={setDefaultBaseUrlDefinition}
-                onDeleteBaseUrl={requestBaseUrlDelete}
               />
             </div>
           )
@@ -271,20 +228,10 @@ export function EnvironmentSection({
       {/* ---------- Dialogs ---------- */}
 
       <ConfirmDialog
-        open={!!deletingBaseUrl}
-        onOpenChange={(o) => !o && clearBaseUrlDelete()}
-        title={`删除「${deletingBaseUrl?.name ?? ''}」?`}
-        description="该服务会从项目服务清单中移除，所有模块里为它填写的地址也会一并失效；引用它的接口会回落到项目默认服务。"
-        confirmText="删除"
-        destructive
-        onConfirm={confirmDeleteBaseUrl}
-      />
-
-      <ConfirmDialog
         open={!!deletingEnv}
         onOpenChange={(o) => !o && clearEnvDelete()}
         title={`删除环境「${deletingEnv?.name ?? ''}」?`}
-        description="依赖它的接口会停止使用这个环境的前置 URL。"
+        description="依赖它的接口会停止使用这个环境的模块地址。"
         confirmText="删除"
         destructive
         onConfirm={confirmDeleteEnv}

@@ -58,9 +58,7 @@ pub(super) struct EndpointCreateArgs {
     /// 要绑定的环境。建时就收下，新建的端点直接指向正确的环境，省掉第二次调用。
     #[serde(default)]
     pub environment_id: Option<String>,
-    /// 该端点据以解析的服务（`base_url_definitions` 的一行）。`None` = 沿用项目 ★。
-    #[serde(default)]
-    pub base_url_definition_id: Option<String>,
+    /// 该端点自己的 base URL。`None` = 读环境里那个模块的格子。
     #[serde(default)]
     pub base_url_override: Option<String>,
     #[serde(default)]

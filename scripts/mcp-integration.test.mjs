@@ -107,7 +107,6 @@ try {
     'endpoint_list',
     'endpoint_get',
     'endpoint_search',
-    'base_url_def_list',
     'api_resolve_template',
     'api_resolve_endpoint',
     'api_validate_endpoint',

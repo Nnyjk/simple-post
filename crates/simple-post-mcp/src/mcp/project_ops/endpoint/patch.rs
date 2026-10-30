@@ -54,12 +54,9 @@ fn patch_shape_hint(field: &str) -> String {
             AUTH_TYPE_VALUES.join("|")
         ),
         "tags" => "an array of strings, e.g. [\"smoke\",\"user\"]".to_string(),
-        "environment_id"
-        | "base_url_definition_id"
-        | "base_url_override"
-        | "description"
-        | "docs"
-        | "notes" => "a string, or null to clear the field".to_string(),
+        "environment_id" | "base_url_override" | "description" | "docs" | "notes" => {
+            "a string, or null to clear the field".to_string()
+        }
         "name" => "a non-empty string".to_string(),
         "sort_order" => "an integer".to_string(),
         "tls" => "an object shaped {\"skipVerify\":<bool>,\

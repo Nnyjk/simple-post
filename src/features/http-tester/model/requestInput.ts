@@ -7,11 +7,14 @@ import type { EffectiveRequest } from './effectiveRequest';
  * 组装这一次要发出的请求。
  *
  * 发送前若动态变量解析出了新的值，调用方用新值再组装一次。
+ *
+ * `proxy` 是环境里本模块那一格的实际访问地址；它替换请求地址开头那段模块地址。
  */
 export function buildRequestInput(
   method: HttpMethod,
   urlPath: string,
   baseUrl: string,
+  proxy: string | null,
   effective: EffectiveRequest,
   env: Environment | undefined,
   dynamicVars: Record<string, string>,
@@ -20,6 +23,7 @@ export function buildRequestInput(
     method,
     urlPath,
     baseUrl,
+    proxy,
     params: effective.params,
     pathParams: effective.pathParams,
     headers: effective.headers,

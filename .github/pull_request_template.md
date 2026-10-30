@@ -16,8 +16,7 @@ Closes #
 
 <!-- 涉及下面任何一条，先读 .github/CONTRIBUTING.md 对应段落再勾。 -->
 
-- [ ] 没有 bump `SCHEMA_VERSION`（bump 会删掉每个用户的 store.db；新字段走 `db::ADDED_COLUMNS`）
-- [ ] 没有删改那三列「故意留着的死列」（`environments.base_urls_json`、`base_url_definitions.module_id`、`base_url_definitions.is_default`）
+- [ ] schema 改动要么走 `db::ADDED_COLUMNS`（纯增量，不 bump `SCHEMA_VERSION`），要么是一次明确的 bump（bump 会删掉每个用户的 store.db）
 - [ ] 新增 MCP 工具的话，`tool_table()` 与 `REQUIRED_CAPABILITY` **两处**都改了，且 Capability 正确（`Send` 只有 `full_access` 覆盖）
 - [ ] 没有引入 `check_permission(..).await.ok()`（会把 `PermissionDenied` 吞掉，闸门形同不存在）
 - [ ] 需要写项目 id 的处理器解析了真实归属项目，没有传字面量 `"global"`

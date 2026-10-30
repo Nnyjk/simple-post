@@ -107,7 +107,7 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
                 },
                 "url": {
                     "type": "string",
-                    "description": "Path only, e.g. \"/api/users/{id}\". The host comes from the environment's service URL at send time."
+                    "description": "Path only, e.g. \"/api/users/{id}\". The host comes from the environment's cell for this endpoint's module at send time."
                 },
                 "headers": {
                     "type": "array",
@@ -167,13 +167,9 @@ to send when testing goes in body_content, never here."
                     "type": "string",
                     "description": "Environment to bind. Omit for none."
                 },
-                "base_url_definition_id": {
-                    "type": "string",
-                    "description": "Service this endpoint resolves against (a base_url_definitions id). Omit to inherit the project's default service."
-                },
                 "base_url_override": {
                     "type": "string",
-                    "description": "Literal base URL for this endpoint, overriding the environment's value for the chosen service."
+                    "description": "Literal base URL for this endpoint, overriding the environment's cell for the module this endpoint sits in."
                 },
                 "description": { "type": "string" },
                 "docs": { "type": "string", "description": "Free-form documentation." },
@@ -208,7 +204,7 @@ to send when testing goes in body_content, never here."
                 "endpoint_id": { "type": "string" },
                 "patch": {
                     "type": "object",
-                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `environment_id`, `base_url_definition_id`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script` and `tls` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
+                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `environment_id`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script` and `tls` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
                     "properties": {
                         "name": { "type": "string" },
                         "description": { "type": ["string", "null"] },
@@ -281,7 +277,6 @@ segments in `url`. They are substituted into the path itself, not appended to th
                         },
                         "tags": { "type": "array", "items": { "type": "string" } },
                         "environment_id": { "type": ["string", "null"] },
-                        "base_url_definition_id": { "type": ["string", "null"] },
                         "base_url_override": { "type": ["string", "null"] },
                         "docs": { "type": ["string", "null"] },
                         "notes": { "type": ["string", "null"] },

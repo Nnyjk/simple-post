@@ -142,8 +142,8 @@ fn path_templates_use_braces_not_axum_colons() {
 #[test]
 fn servers_land_on_the_operations_of_the_module_that_has_one() {
     // `servers` 写在 **Operation 层**而非文档根：OpenAPI 3.0 允许 operation 覆盖顶层
-    // servers，而这里必须逐 operation 带——URL 是 per (环境 × 模块 × 服务) 的，
-    // 提到根就等于让没有配 URL 的模块借到兄弟模块的地址。
+    // servers，而这里必须逐 operation 带——地址是 per (环境 × 模块) 的，
+    // 提到根就等于让没有配地址的模块借到兄弟模块的地址。
     //
     // 顺带这条断言：**根级 `api.servers` 恒为空是正确的**，不是漏写。
     let ex = sample();
@@ -152,7 +152,7 @@ fn servers_land_on_the_operations_of_the_module_that_has_one() {
 
     assert!(
         api.servers.is_empty(),
-        "文档根不该有 servers：URL 是逐模块的，提到根就变成全局默认"
+        "文档根不该有 servers：地址是逐模块的，提到根就变成全局默认"
     );
 
     let (with, without): (Vec<_>, Vec<_>) = api
@@ -162,7 +162,7 @@ fn servers_land_on_the_operations_of_the_module_that_has_one() {
     assert_eq!(
         without.len(),
         1,
-        "只有「无服务模块」的 /health 不该有 servers，got: {:?}",
+        "只有「无地址模块」的 /health 不该有 servers，got: {:?}",
         without.iter().map(|(p, _, _)| *p).collect::<Vec<_>>()
     );
     assert_eq!(without[0].0, "/health");
@@ -171,11 +171,8 @@ fn servers_land_on_the_operations_of_the_module_that_has_one() {
         let urls: Vec<String> = op.servers.iter().map(|s| s.url.clone()).collect();
         assert_eq!(
             urls,
-            vec![
-                "https://api.acme.test/v1".to_string(),
-                "https://upload.acme.test".to_string(),
-            ],
-            "{method} {path} 的 server 只能是自己模块那两条"
+            vec!["https://api.acme.test/v1".to_string()],
+            "{method} {path} 的 server 只能是自己模块那一格"
         );
     }
 }

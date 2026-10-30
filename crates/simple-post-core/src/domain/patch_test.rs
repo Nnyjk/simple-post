@@ -113,11 +113,6 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
     };
     assert!(!d.is_empty(), "EndpointDetailPatch::environment_id");
     let d = EndpointDetailPatch {
-        base_url_definition_id: Some(Some("def1".into())),
-        ..Default::default()
-    };
-    assert!(!d.is_empty(), "EndpointDetailPatch::base_url_definition_id");
-    let d = EndpointDetailPatch {
         base_url_override: Some(Some("https://x".into())),
         ..Default::default()
     };
@@ -174,24 +169,6 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
     };
     assert!(!p.is_empty(), "ProjectPatch::description");
     let p = ProjectPatch {
-        base_url: Some(Some("u".into())),
-        ..Default::default()
-    };
-    assert!(!p.is_empty(), "ProjectPatch::base_url");
-    let p = ProjectPatch {
-        base_url_definitions: Some(vec![]),
-        ..Default::default()
-    };
-    assert!(!p.is_empty(), "ProjectPatch::base_url_definitions");
-    let p = ProjectPatch {
-        default_base_url_definition_id: Some(Some("def1".into())),
-        ..Default::default()
-    };
-    assert!(
-        !p.is_empty(),
-        "ProjectPatch::default_base_url_definition_id"
-    );
-    let p = ProjectPatch {
         color: Some("#fff".into()),
         ..Default::default()
     };
@@ -203,10 +180,10 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
     };
     assert!(!e.is_empty(), "EnvironmentPatch::name");
     let e = EnvironmentPatch {
-        base_urls: Some(HashMap::new()),
+        module_base_urls: Some(HashMap::new()),
         ..Default::default()
     };
-    assert!(!e.is_empty(), "EnvironmentPatch::base_urls");
+    assert!(!e.is_empty(), "EnvironmentPatch::module_base_urls");
     let e = EnvironmentPatch {
         variables: Some(HashMap::new()),
         ..Default::default()

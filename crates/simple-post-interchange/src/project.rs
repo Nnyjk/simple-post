@@ -1,28 +1,25 @@
 //! `domain → ir` 投影：把资源树读成 IR，供导出。
 //!
-//! ## 为什么这里要跨四张表
+//! ## 为什么这里要跨三张表
 //!
-//! host 不在 endpoint 上。URL 住在 `environments.module_base_urls_json`，按
-//! `service_id → module_id` 二级索引；「这个 endpoint 指哪个服务」在
-//! `endpoint_details.base_url_definition_id`，「项目的 ★」在
-//! `projects.default_base_url_definition_id`。加上 `nodes` 的树，四张表才是完整的请求；
-//! 任何一行都不足以回答「这个接口该打到哪里去」。
+//! host 不在 endpoint 上。地址住在 `environments.module_base_urls_json`，按 `module_id`
+//! 一级索引；端点自己的地址在 `endpoint_details.base_url_override`。加上 `nodes` 的树，
+//! 三张表才是完整的请求；任何一行都不足以回答「这个接口该打到哪里去」。
 //!
-//! **先选定环境，再逐模块取，不回退。** 该模块没配就是没有 URL——不借用别的模块的，
-//! 也不落回项目 ★。故两个入口都要求调用方指名 `environment_id`（`None` 表示取激活环境）：
+//! **先选定环境，再逐模块取，不回退。** 该模块没配就是没有地址——不借用别的模块的。
+//! 故两个入口都要求调用方指名 `environment_id`（`None` 表示取激活环境）：
 //! 让「用哪个环境」成为一次显式的决定，而不是本模块替用户挑一个。
 
 use std::collections::HashMap;
 
 use simple_post_core::db::{self, Connection, DbPool};
 use simple_post_core::domain::{
-    BaseUrlDefinition, EndpointDetail, Environment, NodeScripts, Project, ResourceNode,
-    ResourceNodeType,
+    EndpointDetail, Environment, NodeScripts, Project, ResourceNode, ResourceNodeType,
 };
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
+use crate::ir::{Exchange, IrBaseUrl, IrCollection, IrEndpoint, IrModule, IrScripts};
 
 /// 一次投影读回来的全部上下文。两个导出入口的差别只在「取哪些根节点」，
 /// 故四张表的读与「不回落」的服务解析都共用这一份。
@@ -38,8 +35,8 @@ struct Projection {
 
 impl Projection {
     /// 组装最终那份 [`Exchange`]。`environment_id` 是**实际用到的**那个环境的 id：
-    /// 指名的环境不属于该项目时 `env` 为 `None`，这份 IR 里每个模块的 `servers` 都是空的
-    /// ——那正是「这些模块没有 URL」的忠实答案，而不是「环境没选」。
+    /// 指名的环境不属于该项目时 `env` 为 `None`，这份 IR 里每个模块的 `base_url` 都是空的
+    /// ——那正是「这些模块没有地址」的忠实答案，而不是「环境没选」。
     fn into_exchange(self, modules: Vec<IrModule>, diagnostics: Vec<Diagnostic>) -> Exchange {
         Exchange {
             project_name: self.project.name,
@@ -51,7 +48,7 @@ impl Projection {
     }
 }
 
-/// 四张表读成一份投影。
+/// 三张表读成一份投影。
 fn load_projection(
     conn: &mut Connection,
     project_id: &str,
@@ -124,7 +121,6 @@ pub fn project_to_ir(
             .map(|m| {
                 project_module(
                     m,
-                    &p.project,
                     p.env.as_ref(),
                     &p.details,
                     &p.scripts,
@@ -166,7 +162,6 @@ pub fn module_to_ir(
         let mut diagnostics: Vec<Diagnostic> = Vec::new();
         let modules = vec![project_module(
             &node,
-            &p.project,
             p.env.as_ref(),
             &p.details,
             &p.scripts,
@@ -181,7 +176,6 @@ pub fn module_to_ir(
 #[allow(clippy::too_many_arguments)]
 fn project_module(
     node: &ResourceNode,
-    project: &Project,
     env: Option<&Environment>,
     details: &HashMap<String, EndpointDetail>,
     scripts: &HashMap<String, NodeScripts>,
@@ -193,7 +187,7 @@ fn project_module(
         key: node.id.clone(),
         name: node.name.clone(),
         description: node.description.clone(),
-        servers: module_servers(&project.base_url_definitions, env, node, diagnostics),
+        base_url: module_base_url(env, node),
         endpoints: project_endpoints(node.id.as_str(), details, children_of, diagnostics),
         collections: project_collections(
             node.id.as_str(),
@@ -291,6 +285,8 @@ fn project_endpoint(
         description: node.description.clone(),
         method: d.method.clone(),
         path: d.url.clone(),
+        // 端点自己的地址。`None` = 跟随模块那一格。
+        base_url_override: d.base_url_override.clone(),
         params: d.params.clone(),
         path_params: d.path_params.clone(),
         headers: d.headers.clone(),
@@ -307,37 +303,15 @@ fn project_endpoint(
     })
 }
 
-/// 模块在该环境下、逐服务取的 URL。**不回退**：单元格缺项即「该模块对此服务无地址」。
+/// 这个模块在选定环境下的那一格。**不回退**：格子缺项即「该模块没有地址」。
 ///
-/// 服务表是项目级的，故按项目已有的定义顺序输出，导出的 `servers` 顺序因而稳定。
-fn module_servers(
-    defs: &[BaseUrlDefinition],
-    env: Option<&Environment>,
-    module: &ResourceNode,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Vec<IrServer> {
-    let Some(env) = env else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for def in defs {
-        let Some(per_module) = env.module_base_urls.get(&def.id) else {
-            continue;
-        };
-        match per_module.get(&module.id) {
-            Some(url) => out.push(IrServer {
-                service: def.name.clone(),
-                url: url.clone(),
-            }),
-            // 没有回退层，所以这不是「借用项目 ★」的位置；只在 ★ 恰好指着这个服务
-            // 且本模块配了值时才有意义，否则不产出条目。
-            None => diagnostics.push(Diagnostic::info(
-                format!("/environments/{}/moduleBaseUrls/{}", env.id, module.id),
-                format!("模块「{}」未配置服务「{}」的 URL", module.name, def.name),
-            )),
-        }
-    }
-    out
+/// 一个模块一格，故这里没有第二个键。
+fn module_base_url(env: Option<&Environment>, module: &ResourceNode) -> Option<IrBaseUrl> {
+    let cell = env?.module_base_urls.get(&module.id)?;
+    Some(IrBaseUrl {
+        url: cell.url.clone(),
+        proxy: cell.proxy.clone(),
+    })
 }
 
 // 测试——投影的跨表取值与「不回退」。

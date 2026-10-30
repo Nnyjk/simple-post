@@ -15,7 +15,7 @@ interface SettingsCategoryProps {
    */
   icon?: ReactNode;
   /**
-   * 标题末尾的元素，通常是「恢复默认」「添加服务」这类主动作。渲染为标题块右侧的 flex
+   * 标题末尾的元素，通常是「恢复默认」「添加变量」这类主动作。渲染为标题块右侧的 flex
    *   子项；预留出按钮所需的纵向空间而不撑高整行。
    */
   actions?: ReactNode;

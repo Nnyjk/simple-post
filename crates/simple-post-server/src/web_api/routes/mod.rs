@@ -1,7 +1,6 @@
 //! 每类 REST 资源一个 handler 模块。每个文件拥有自己那族 handler；路由注册本身留在
 //! `web_api/router.rs::build_router`，好让整张路由表在一处读完。
 
-pub(crate) mod base_url_defs;
 pub(crate) mod dynamic_variables;
 pub(crate) mod environments;
 pub(crate) mod interchange;
@@ -16,10 +15,6 @@ pub(crate) mod request_settings;
 pub(crate) mod response_history;
 pub(crate) mod spec;
 
-pub(crate) use base_url_defs::{
-    base_url_defs_create, base_url_defs_delete, base_url_defs_list, base_url_defs_set_default,
-    base_url_defs_update,
-};
 pub(crate) use dynamic_variables::{
     dynamic_variables_create, dynamic_variables_delete, dynamic_variables_list,
     dynamic_variables_refresh, dynamic_variables_resolve, dynamic_variables_set_override,

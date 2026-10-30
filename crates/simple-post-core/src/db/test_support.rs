@@ -61,24 +61,9 @@ struct FixtureProject {
     name: String,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default)]
-    base_url_definitions: Vec<FixtureBaseUrlDef>,
-    #[serde(default)]
-    default_base_url_definition_id: Option<String>,
-    #[serde(default)]
-    base_url: Option<String>,
     color: String,
     created_at: i64,
     updated_at: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FixtureBaseUrlDef {
-    id: String,
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,8 +111,6 @@ struct FixtureEndpoint {
     #[serde(default)]
     environment_id: Option<String>,
     #[serde(default)]
-    base_url_definition_id: Option<String>,
-    #[serde(default)]
     base_url_override: Option<String>,
     #[serde(default)]
     params: Vec<serde_json::Value>,
@@ -152,8 +135,8 @@ struct FixtureEnvironment {
     id: String,
     project_id: String,
     name: String,
-    /// `def_id -> module_id -> url`，现役值层。下线的 `base_urls_json` 完全不播种：
-    /// fixture 库是现役模型的库，留下有值的旧列会让每个播种测试启动都跑一遍数据迁移。
+    /// `module_id -> { url, proxy }`，现役值层。缺项表示「此模块在此环境没有地址」，
+    /// 解析到此为止，不会回落到别的模块的值。
     #[serde(default)]
     module_base_urls: serde_json::Value,
     #[serde(default)]
@@ -184,37 +167,25 @@ fn insert_node(tx: &rusqlite::Transaction<'_>, n: &ResourceNode) -> Result<(), A
     Ok(())
 }
 
-/// 按依赖拓扑顺序插入 fixture 全部行：projects → base_url_defs + modules + envs →
-/// collections → endpoints。外键自然满足，无需 `PRAGMA defer_foreign_keys`。
+/// 按依赖拓扑顺序插入 fixture 全部行：projects → modules + envs → collections →
+/// endpoints。外键自然满足，无需 `PRAGMA defer_foreign_keys`。
 fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
     let tx = conn.transaction()?;
 
     for p in &fx.projects {
         tx.execute(
             "INSERT INTO projects \
-         (id, name, description, default_base_url_definition_id, color, created_at, updated_at) \
-         VALUES (?,?,?,?,?,?,?)",
+         (id, name, description, color, created_at, updated_at) \
+         VALUES (?,?,?,?,?,?)",
             params![
                 p.id,
                 p.name,
                 p.description,
-                p.default_base_url_definition_id,
                 p.color,
                 p.created_at,
                 p.updated_at,
             ],
         )?;
-        // 每个 def 单独入表，endpoint 的外键链才成立。
-        for (i, d) in p.base_url_definitions.iter().enumerate() {
-            tx.execute(
-                "INSERT INTO base_url_definitions \
-             (id, project_id, name, description, sort_order) \
-             VALUES (?,?,?,?,?)",
-                params![d.id, p.id, d.name, d.description, i as i64],
-            )?;
-        }
-        // `baseUrl` 是 Project 上的遗留字段，schema 无对应列，不落库。
-        let _ = p.base_url.as_ref();
     }
 
     // fixture 保持三段式（modules / collections / endpoints），便于人读样例树；
@@ -299,16 +270,15 @@ fn seed_fixtures(conn: &mut Connection, fx: &Fixtures) -> Result<(), AppError> {
         // 节点与配置一起落：没有 detail 行的 endpoint 打不开。
         tx.execute(
             "INSERT INTO endpoint_details \
-         (node_id, method, url, environment_id, base_url_definition_id, \
+         (node_id, method, url, environment_id, \
           base_url_override, params_json, headers_json, body_json, \
           auth_json, docs, notes, tags_json) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 e.id,
                 e.method,
                 e.url,
                 e.environment_id,
-                e.base_url_definition_id,
                 e.base_url_override,
                 serde_json::to_string(&e.params)?,
                 serde_json::to_string(&e.headers)?,

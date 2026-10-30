@@ -6,7 +6,7 @@ use serde_json::{json, Map, Value};
 use simple_post_core::domain::{ApiKeyLocation, AuthConfig, AuthType};
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{IrCollection, IrEndpoint, IrModule, IrScripts, IrServer};
+use crate::ir::{IrBaseUrl, IrCollection, IrEndpoint, IrModule, IrScripts};
 use crate::spec::{escape_pointer_token, PATH_METHODS};
 
 use super::{
@@ -14,10 +14,10 @@ use super::{
     normalize_path_template, operation_id, parameters, path_key_is_expressible,
 };
 
-/// 一层待写的内容。`servers` 随栈一起下潜：URL 是 per 模块的，分组里的 endpoint
+/// 一层待写的内容。地址随栈一起下潜：地址是 per 模块的，分组里的 endpoint
 /// 不能借用兄弟模块的那一份。
 pub(super) struct Pending<'a> {
-    pub(super) servers: &'a [IrServer],
+    pub(super) base_url: Option<&'a IrBaseUrl>,
     pub(super) endpoints: &'a [IrEndpoint],
     pub(super) collections: &'a [IrCollection],
     /// 本层 endpoint 最外层集合的名字，即导出时当 tag 用的那个。模块直接挂着的
@@ -28,7 +28,7 @@ pub(super) struct Pending<'a> {
 impl<'a> Pending<'a> {
     pub(super) fn module(m: &'a IrModule) -> Self {
         Self {
-            servers: &m.servers,
+            base_url: m.base_url.as_ref(),
             endpoints: &m.endpoints,
             collections: &m.collections,
             group: None,
@@ -39,12 +39,12 @@ impl<'a> Pending<'a> {
     /// 继续沿用它，不被更内层的名字覆盖。
     pub(super) fn collection(
         c: &'a IrCollection,
-        servers: &'a [IrServer],
+        base_url: Option<&'a IrBaseUrl>,
         group: Option<&'a str>,
     ) -> Self {
         let group = group.or(Some(c.name.as_str()));
         Self {
-            servers,
+            base_url,
             endpoints: &c.endpoints,
             collections: &c.collections,
             group,
@@ -70,7 +70,12 @@ pub(super) struct Builder {
 }
 
 impl Builder {
-    pub(super) fn operation(&mut self, ep: &IrEndpoint, servers: &[IrServer], group: Option<&str>) {
+    pub(super) fn operation(
+        &mut self,
+        ep: &IrEndpoint,
+        base_url: Option<&IrBaseUrl>,
+        group: Option<&str>,
+    ) {
         let verb = ep.method.as_str().to_ascii_lowercase();
         let pointer = format!("/paths/{}/{}", escape_pointer_token(&ep.path), verb);
         if !PATH_METHODS.contains(&verb.as_str()) {
@@ -133,12 +138,8 @@ impl Builder {
         if let Some(d) = &ep.description {
             op.insert("description".into(), json!(d));
         }
-        // 逐模块取，不回退：该模块没配就没有这一项。
-        if !servers.is_empty() {
-            op.insert(
-                "servers".into(),
-                Value::Array(servers.iter().map(|s| json!({ "url": s.url })).collect()),
-            );
+        if let Some(servers) = servers_of(ep, base_url) {
+            op.insert("servers".into(), servers);
         }
 
         let params = parameters(ep, &path, &pointer, &mut self.diagnostics);
@@ -383,4 +384,36 @@ impl Builder {
         self.used_operation_ids.insert(candidate.clone());
         candidate
     }
+}
+
+/// 这个 operation 的 `servers`。
+///
+/// **端点自己的地址优先于模块那一格。** 端点配了 `base_url_override` 时，端点打的就是那个
+/// 地址，模块那一格与端点无关；产物写模块那一格的地址，描述的就不是端点实际会打的
+/// 那个地址。
+///
+/// 三种情形：
+///
+/// - `base_url_override` 是非空串 → 写那个串。
+/// - `base_url_override` 是空串 → **不写** `servers`：端点自带完整地址，没有服务器
+///   前缀可写。
+/// - `base_url_override` 是 `None` → 取模块那一格的地址；模块那一格没有地址、或者它
+///   的地址是空串时都不写 `servers`（逐模块取，不回退到别的模块）。
+///
+/// **写的是那一格的后端 api 地址，不是它的实际访问地址。** 导入侧只读文档级的
+/// `servers`，那个地址落进格子的 `url` 那一半。导出若写代理地址，导出再导入这一圈
+/// 下来，代理地址就变成了 `url`，那一格的两个字段换了位置。
+fn servers_of(ep: &IrEndpoint, cell: Option<&IrBaseUrl>) -> Option<Value> {
+    let url = match ep.base_url_override.as_deref() {
+        Some(own) if !own.is_empty() => own,
+        Some(_) => return None,
+        None => {
+            let url = cell.map(|c| c.url.as_str())?;
+            if url.is_empty() {
+                return None;
+            }
+            url
+        }
+    };
+    Some(Value::Array(vec![json!({ "url": url })]))
 }

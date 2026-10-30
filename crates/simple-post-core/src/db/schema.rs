@@ -6,7 +6,6 @@ use rusqlite::{params, Connection, OpenFlags};
 
 use crate::error::AppError;
 
-use super::base_url_migration::migrate_base_urls_into_value_layer;
 use super::SCHEMA_VERSION;
 
 /// 执行内嵌 `schema.sql`，把既有库补到当前列集，再修复旧布局写的行。幂等，每次启动可调。
@@ -29,12 +28,7 @@ pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
     // 必须在补列之后：那条索引按新列建，且要丢掉旧形状的「名字全局唯一」那条。
     drop_obsolete_dynamic_variable_name_index(conn)?;
     // 必须在索引换过之后：归位时新索引已经在管着「项目内不重名」这条规矩。
-    backfill_dynamic_variable_projects(conn)?;
-    // 必须在数据迁移之前：那个 pass 要读写的
-    // `module_base_urls_json` / `module_id` / `is_default` 在够旧的库里根本不存在，
-    // 而 `SCHEMA_SQL` 的 `CREATE TABLE IF NOT EXISTS` 对这些库正是空操作——
-    // 所以列只能在这里补。
-    migrate_base_urls_into_value_layer(conn)
+    backfill_dynamic_variable_projects(conn)
 }
 
 /// 丢掉那张建了却没人用过的 `request_settings` 表。
@@ -159,12 +153,23 @@ fn backfill_dynamic_variable_projects(conn: &mut Connection) -> Result<(), AppEr
 /// 不匹配会**删库**——一个只是拓宽表的补丁版本会清空所有用户的项目、环境与资源树。
 /// 「纯增量改动不 bump」的承诺，全靠 `schema.sql` 的 `IF NOT EXISTS` 加上这一遍。
 ///
-/// 首项是现役值层。`base_url_definitions` 的那两项是已下线的「服务挂在模块上」模型，
-/// 只因数据迁移必须能**读**那个布局才留着——由 `SCHEMA_SQL` 建出这三列的库与由本列表
-/// 补出的库，对迁移是同一种形状，两者都必须可修复。末尾四项是动态变量的归属项目与
-/// 处理脚本，以及响应历史的收藏标记与请求快照。
+/// 这份列表共 11 列，逐列是：
+///
+/// - `environments.module_base_urls_json`：环境 × 模块 那一格的地址与代理。
+/// - `environments.disabled_variables_json`：这个环境停用了哪些变量名。
+/// - `endpoint_details.pre_request_script`：端点的前置脚本。
+/// - `endpoint_details.test_script`：端点的测试脚本。
+/// - `endpoint_details.path_params_json`：URL 路径里的占位符与它们各自的值。
+/// - `endpoint_details.tls_json`：端点自己的 HTTPS 出站设置。
+/// - `dynamic_variables.project_id`：动态变量的归属项目。
+/// - `dynamic_variables.transform_script`：动态变量的处理脚本。
+/// - `response_history.is_favorite`：用户收藏了这条历史。
+/// - `response_history.request_json`：那次发送出去的请求。
+/// - `response_history.body_base64`：响应体的二进制形态（base64）。
 const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
+        // 环境 × 模块 那一格的地址与代理。纯增量：旧行读回来是空 map，语义等价于
+        // 「这个环境一个模块的地址都没有」。
         "environments",
         "module_base_urls_json",
         "TEXT NOT NULL DEFAULT '{}'",
@@ -174,18 +179,6 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "environments",
         "disabled_variables_json",
         "TEXT NOT NULL DEFAULT '[]'",
-    ),
-    (
-        "base_url_definitions",
-        "module_id",
-        // 可空：`ALTER TABLE ... ADD COLUMN` 只能追加带默认值的列，而外键需要默认值；
-        // 该形状下每行的这一列本来就是 NULL。
-        "TEXT REFERENCES nodes(id) ON DELETE CASCADE",
-    ),
-    (
-        "base_url_definitions",
-        "is_default",
-        "INTEGER NOT NULL DEFAULT 0",
     ),
     (
         // 端点的两段请求脚本。纯增量：旧行读回来是 NULL（= 没有脚本）。

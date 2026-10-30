@@ -4,20 +4,19 @@ use rusqlite::Connection;
 
 use crate::error::AppError;
 
-/// 校验取数用的环境与服务，并给出真正落库的两个 id。
+/// 校验取数用的环境，并给出真正落库的那个 id。
 ///
-/// 两者都必须属于数据源端点所属的项目：环境的格子按 (环境 × 服务 × 模块) 寻址，服务
-/// 住在项目里，故拿别的项目的环境或服务去取数会取到别处的内容。
+/// 环境必须属于数据源端点所属的项目：环境的格子按 (环境 × 模块) 寻址，拿别的项目的
+/// 环境去取数会取到别处的内容。
 ///
-/// 数据源是内联请求时两者都清空——内联请求自带完整地址，没有 base URL 可谈。
+/// 数据源是内联请求时它清空——内联请求自带完整地址，没有 base URL 可谈。
 pub(super) fn check_source_bindings(
     conn: &mut Connection,
     endpoint_id: Option<&str>,
     environment_id: Option<&str>,
-    base_url_definition_id: Option<&str>,
-) -> Result<(Option<String>, Option<String>), AppError> {
+) -> Result<Option<String>, AppError> {
     let Some(endpoint_id) = endpoint_id else {
-        return Ok((None, None));
+        return Ok(None);
     };
     let project_id = crate::db::nodes::root_id_of(conn, endpoint_id)
         .map_err(|_| AppError::Validation(format!("数据源接口 {endpoint_id} 不存在")))?;
@@ -30,19 +29,7 @@ pub(super) fn check_source_bindings(
             )));
         }
     }
-    if let Some(def_id) = base_url_definition_id {
-        let owner = crate::db::base_url_defs::project_id_of(conn, def_id)
-            .map_err(|_| AppError::Validation(format!("服务 {def_id} 不存在")))?;
-        if owner != project_id {
-            return Err(AppError::Validation(format!(
-                "服务 {def_id} 不在数据源接口所属的项目里"
-            )));
-        }
-    }
-    Ok((
-        environment_id.map(str::to_string),
-        base_url_definition_id.map(str::to_string),
-    ))
+    Ok(environment_id.map(str::to_string))
 }
 
 /// 变量名是否合法：只允许字母、数字与下划线，且非空。

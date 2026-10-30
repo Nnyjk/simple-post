@@ -5,7 +5,7 @@
 //! 一次说清。
 //!
 //! 为什么放在 resource 而不是工具描述里：这段内容对每个工具都只说得上一点点，
-//! 塞进 52 条工具描述里就是 52 份重复，而 tools/list 的体积是要为每一次会话付钱的。
+//! 塞进 47 条工具描述里就是 47 份重复，而 tools/list 的体积是要为每一次会话付钱的。
 //! resource 是**按需读**的 —— 客户端在动手之前拉一次，agent 就拿到了完整的上下文。
 
 use serde_json::{json, Value};
@@ -57,7 +57,7 @@ fn guide() -> Value {
 
         "fastPath": {
             "tool": "spec_upsert",
-            "note": "One call lands the whole spec: the module, the collections on the path, the environment, the service and the endpoint, in one transaction. Each part is found by name and created when missing, so a second call reuses them all; only if_exists=duplicate adds a second endpoint.",
+            "note": "One call lands the whole spec: the module, the collections on the path, the environment and the endpoint, in one transaction. Each part is found by name and created when missing, so a second call reuses them all; only if_exists=duplicate adds a second endpoint.",
             "arguments": {
                 "project_id": "<项目 id；必须已经存在>",
                 "module": "<模块名，不存在就建；用 module_id 指认已有模块>",
@@ -65,17 +65,14 @@ fn guide() -> Value {
                 "environment": {
                     "name": "<环境名，不存在就建；用 id 指认已有环境>",
                     "variables": { "<变量名>": "<值>" },
-                    "base_url": "<这个环境 × 服务 × 模块 那一格的 URL>",
+                    "baseUrl": "<这个环境 × 模块 那一格的后端 api 地址>",
+                    "baseUrlProxy": "<这一格的实际访问地址；接口经代理网关转代时才写>",
                     "activate": true
-                },
-                "service": {
-                    "name": "<服务名，不存在就建；用 id 指认已有服务>",
-                    "default": true
                 },
                 "endpoint": {
                     "name": "<接口名>",
                     "method": "GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS",
-                    "url": "<路径，如 /api/orders；host 在发送时由环境的服务 URL 决定>",
+                    "url": "<路径，如 /api/orders；host 在发送时由环境里那个模块的格子决定>",
                     "params": [{ "key": "<参数名>", "value": "<值>", "enabled": true }],
                     "path_params": [{ "key": "<路径占位符名，如 id>", "value": "<值>", "enabled": true }],
                     "headers": [{ "key": "<头名>", "value": "<值>", "enabled": true }],
@@ -96,7 +93,7 @@ fn guide() -> Value {
                 "error": "Refuses when such an endpoint already exists.",
                 "duplicate": "Builds a second endpoint with the same identity.",
                 "update": "Overwrites the fields this spec names and leaves the others alone. The name, the verb and the path are the endpoint's identity, so they never change here.",
-                "scope": "if_exists governs the endpoint only. The environment and the service sections are always applied."
+                "scope": "if_exists governs the endpoint only. The environment section is always applied."
             }
         },
 
@@ -115,30 +112,24 @@ fn guide() -> Value {
             },
             {
                 "step": 3,
-                "tool": "base_url_def_create",
-                "arguments": { "project_id": "<项目 id>", "name": "<服务名>", "if_exists": "reuse" },
-                "note": "A service belongs to the project, not to a module. if_exists=reuse returns the existing service with that name instead of creating a second one. If the project has no default service (★), call base_url_def_set_default once."
-            },
-            {
-                "step": 4,
                 "tool": "env_create",
                 "arguments": { "project_id": "<项目 id>", "name": "<环境名>", "if_exists": "reuse" },
                 "note": "A new environment is never the active one. Call env_set_active when it should be."
             },
             {
-                "step": 5,
+                "step": 4,
                 "tool": "env_update",
                 "arguments": { "env_id": "<环境 id>", "patch": { "variables": { "<变量名>": "<值>" } } },
                 "note": "patch.variables replaces the whole variable map — send every variable the environment should end up with, in one call. env_set_var changes a single one."
             },
             {
-                "step": 6,
+                "step": 5,
                 "tool": "env_set_baseurl",
-                "arguments": { "env_id": "<环境 id>", "definition_id": "<服务 id>", "module_id": "<模块 id>", "url": "<base url>" },
-                "note": "The URL lives in the (environment x service x module) cell. That cell never inherits, so a cell that is not written means the request goes out without a base URL."
+                "arguments": { "env_id": "<环境 id>", "module_id": "<模块 id>", "url": "<base url>" },
+                "note": "The URL lives in the (environment x module) cell. That cell never inherits, so a cell that is not written means the request goes out without a base URL. Pass proxy only when the module is reached through a proxy gateway: omitting it leaves the cell's proxy as it is, an empty string clears it."
             },
             {
-                "step": 7,
+                "step": 6,
                 "tool": "endpoint_create",
                 "arguments": {
                     "module_id": "<模块 id>",
@@ -158,7 +149,7 @@ fn guide() -> Value {
             "collection_path": "<集合路径，如 订单/明细；段之间一个斜杠>",
             "name": "<接口名>",
             "method": "GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS",
-            "url": "<路径，如 /api/orders；host 在发送时由环境的服务 URL 决定>",
+            "url": "<路径，如 /api/orders；host 在发送时由环境里那个模块的格子决定>",
             "params": [{ "key": "<参数名>", "value": "<值>", "enabled": true }],
             "headers": [{ "key": "<头名>", "value": "<值>", "enabled": true }],
             "body_mode": "none | json | form | multipart | raw",
@@ -167,7 +158,7 @@ fn guide() -> Value {
             "auth_type": "none | bearer | basic | apikey | oauth2",
             "auth_config": { "bearer": "<token>" },
             "environment_id": "<环境 id>",
-            "base_url_definition_id": "<服务 id>",
+            "base_url_override": "<端点自己的 base URL；它胜过环境里那个模块的格子>",
             "tags": ["<标签>"],
             "pre_request_script": "<发请求之前跑的 JavaScript>",
             "test_script": "<响应到达之后跑的 JavaScript>",
@@ -184,11 +175,11 @@ fn guide() -> Value {
             "created": "true = this call created the endpoint; false = an endpoint with the same name, method and url already existed and was returned unchanged.",
             "created_collections": "One entry per level of collection_path, each with its own id and a created flag. A level that already existed has created=false.",
             "missing": "What is still missing before the request can go out: a base URL cell that has no value, or a {{variable}} the environment does not define. An empty list means the endpoint is ready to send.",
-            "spec_upsert": "spec_upsert answers with the same three ideas: `module` and `collections` carry a `created` flag each, `environment` and `service` carry their ids, and `endpoint` carries the endpoint itself plus its `created` and `updated` flags and a `missing` list."
+            "spec_upsert": "spec_upsert answers with the same three ideas: `module` and `collections` carry a `created` flag each, `environment` carries its id, and `endpoint` carries the endpoint itself plus its `created` and `updated` flags and a `missing` list."
         },
 
         "rules": [
-            "A base URL lives in the (environment x service x module) cell. That cell never inherits from the project or from a sibling module.",
+            "A base URL lives in the (environment x module) cell. That cell never inherits from the project or from a sibling module.",
             "body_content is the payload that goes on the wire; body_schema is the documented parameter definition. They are different things — a JSON Schema written into body_content is rejected, and the error names body_schema.",
             "body_mode says how body_content is framed: \"none\" sends no body, \"raw\" sends the text verbatim, \"json\" sends a JSON instance, \"xml\" sends XML text, \"form\" sends x-www-form-urlencoded text, \"multipart\" sends a JSON array of parts — each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string, \"base64\"?: string}, where contentType defaults to application/octet-stream for a part that has a filename — and \"binary\" sends a JSON object {\"name\": string, \"size\": number, \"contentType\"?: string, \"base64\": string} as raw bytes. For \"form\", body_content is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \"description\"?}].",
             "A {{var}} in the url, params, headers, body or auth is replaced from the environment's variables. A name that is not there is listed in missing.",

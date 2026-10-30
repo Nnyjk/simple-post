@@ -50,14 +50,16 @@ function errorText(e: unknown): string {
 }
 
 /**
- * 导出预览里「这个环境下没有配服务 URL」的模块名。
+ * 导出预览里「这个环境下没有配地址」的模块名。
  *
- * 空数组是真实答案：那个环境里每个模块都配了 URL。模块名取自**这一趟预览**，
+ * 空数组是真实答案：那个环境里每个模块都配了地址。模块名取自**这一趟预览**，
  * 故换过环境之后它讲的是新环境下的事实。
  */
-export function missingServerModules(preview: ImportPreview | ExportPreview | null): string[] {
-  if (!preview || !('servers' in preview)) return [];
-  return preview.servers.filter((m) => m.servers.length === 0).map((m) => m.moduleName);
+export function missingBaseUrlModules(preview: ImportPreview | ExportPreview | null): string[] {
+  // `format` 只在导入预览里有，故它是两者的判别键；导出预览的 `baseUrls` 缺席那一项
+  // 才是「这个模块在此环境下没有地址」。
+  if (!preview || 'format' in preview) return [];
+  return preview.baseUrls.filter((m) => !m.baseUrl).map((m) => m.moduleName);
 }
 
 /**
@@ -68,7 +70,7 @@ export function missingServerModules(preview: ImportPreview | ExportPreview | nu
  *
  * `selectedId` 为空（「不选环境」那一项）时没有环境可点，故不给名字。
  */
-export function missingServerEnvironmentName(
+export function missingEnvironmentName(
   environments: Environment[],
   selectedId: string,
 ): string | null {
@@ -79,7 +81,7 @@ export function missingServerEnvironmentName(
 /**
  * 取一趟导出预览。
  *
- * `environmentId` 决定 `servers` 按哪个环境解析：空串与「没传」等价，服务端那侧
+ * `environmentId` 决定 `baseUrls` 按哪个环境解析：空串与「没传」等价，服务端那侧
  * 都退回激活环境——「不选环境」那一项送来的就是空串。
  */
 export async function fetchExportPreview(args: {
@@ -108,9 +110,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
   const [result, setResult] = useState<ImportCommitResult | null>(null);
   const [environmentId, setEnvironmentId] = useState('');
   const [format, setFormat] = useState<DocFormat>('json');
-  // 默认开着：文档带了 host 却不创建成服务，用户打开模块看到的是一排没有地址的路径。
+  // 默认开着：文档带了 host 却不落成地址，用户打开模块看到的是一排没有地址的路径。
   // 取消它是一次明确取舍，不是默认值 —— 故这是预览里的一个勾，不是隐藏的默认。
-  const [applyService, setApplyService] = useState(true);
+  const [applyBaseUrl, setApplyBaseUrl] = useState(true);
   // 换环境的请求号。每次换环境领一个，回来时号对不上就丢弃。
   const [envRequest] = useState(createLatestRequest);
 
@@ -126,8 +128,8 @@ export function useTransfer(options: UseTransferOptions = {}) {
     [preview],
   );
 
-  /** 导出预览里缺服务 URL 的模块。导入模式恒为空。 */
-  const missingServers: string[] = useMemo(() => missingServerModules(preview), [preview]);
+  /** 导出预览里缺地址的模块。导入模式恒为空。 */
+  const missingBaseUrls: string[] = useMemo(() => missingBaseUrlModules(preview), [preview]);
 
   const reset = useCallback(() => {
     setPhase('source');
@@ -136,7 +138,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
     setSelected(new Set());
     setSourceText('');
     setResult(null);
-    setApplyService(true);
+    setApplyBaseUrl(true);
     // `reset` 作废在途的换环境请求：弹窗关掉后它回来，不该再往这个会话里写预览。
     envRequest.invalidate();
   }, [envRequest]);
@@ -181,9 +183,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
   /**
    * 换导出环境。
    *
-   * 环境一变，「哪些模块没有服务 URL」就是**那个环境**下的事实，故要重取一趟预览：
-   * 沿用打开弹窗时那一趟（按激活环境算的）会把已经配好 URL 的模块点成缺 URL，
-   * 真正缺 URL 的模块反而不被点名。
+   * 环境一变，「哪些模块没有地址」就是**那个环境**下的事实，故要重取一趟预览：
+   * 沿用打开弹窗时那一趟（按激活环境算的）会把已经配好地址的模块点成缺地址，
+   * 真正缺地址的模块反而不被点名。
    *
    * 勾选**不重置**：勾选集的成员是节点 id，换环境不产生新节点，用户勾过的东西
    * 不该因为换了个环境就消失。
@@ -193,7 +195,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
       setEnvironmentId(id);
       if (!session || session.mode !== 'export') return;
       // `changeEnvironment` 每次换环境领一个号，回来时号对不上就是过期的那一趟，丢弃。
-      // 连着换两个环境时，先发的那一趟可能后到——它写进去的 servers 属于旧环境。
+      // 连着换两个环境时，先发的那一趟可能后到——它写进去的地址属于旧环境。
       const ticket = envRequest.next();
       setError(null);
       try {
@@ -255,18 +257,18 @@ export function useTransfer(options: UseTransferOptions = {}) {
         moduleId: session.moduleId,
         content: sourceText,
         selected: [...selected],
-        applyService,
+        applyBaseUrl,
       });
       setResult(r);
       setPhase('done');
-      // 导入在服务端建服务，而项目行只在 bootstrap 第一层加载过一次——不刷新就看不见它。
+      // 导入在服务端落地址，而项目行只在 bootstrap 第一层加载过一次——不刷新就看不见它。
       await useAppStore.getState().refreshProjects();
       await options.onImported?.(session.moduleId, r.createdCollectionIds);
     } catch (e) {
       setError(errorText(e));
       setPhase('preview');
     }
-  }, [session, sourceText, selected, applyService, options]);
+  }, [session, sourceText, selected, applyBaseUrl, options]);
 
   /** 产出文档并交给用户。`copy` 为真时只复制，不弹保存对话框。 */
   const save = useCallback(
@@ -315,9 +317,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
     result,
     environmentId,
     format,
-    applyService,
-    /** 导出预览里缺服务 URL 的模块名。导入模式恒为空数组。 */
-    missingServers,
+    applyBaseUrl,
+    /** 导出预览里缺地址的模块名。导入模式恒为空数组。 */
+    missingBaseUrls,
 
     openImport,
     openExport,
@@ -329,7 +331,7 @@ export function useTransfer(options: UseTransferOptions = {}) {
 
     changeEnvironment,
     setFormat,
-    setApplyService,
+    setApplyBaseUrl,
     selectAll: useCallback(() => setSelected((s) => selectAll(s, groups)), [groups]),
     selectNone: useCallback(() => setSelected((s) => selectNone(s, groups)), [groups]),
     invert: useCallback(() => setSelected((s) => invert(s, groups)), [groups]),

@@ -99,9 +99,9 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
   it('every invoke call sets content-type: application/json', async () => {
     await invokeCmd(COMMANDS.environmentsSetModuleBaseurl, {
       envId: 'env1',
-      defId: 'def1',
       moduleId: 'mod1',
       url: 'https://api.example.com',
+      proxy: null,
     });
     const c = last();
     assert.equal(c.contentType, 'application/json');

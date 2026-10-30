@@ -35,7 +35,6 @@ export function makeEnvironment(overrides: Partial<Environment> = {}): Environme
     id: 'env-1',
     projectId: 'project-1',
     name: 'dev',
-    baseUrls: {},
     moduleBaseUrls: {},
     variables: {},
     disabledVariables: [],
@@ -44,21 +43,11 @@ export function makeEnvironment(overrides: Partial<Environment> = {}): Environme
   };
 }
 
-/**
- * 一个拥有三个服务的项目。不再有任何按 module 划分的范围——每个 module 都看到
- * 全部三个——所以下面的测试断言的是那个星形结构是一个项目级 id，而不是每个 module
- * 一个标志位。
- */
+/** 一个项目。地址住在环境里的「环境 × 模块」那一格，故项目行上没有地址。 */
 export function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: 'project-1',
     name: '项目',
-    baseUrlDefinitions: [
-      { id: 'd-1', name: '默认服务' },
-      { id: 'd-2', name: '数据服务' },
-      { id: 'd-3', name: '基础服务' },
-    ],
-    defaultBaseUrlDefinitionId: 'd-1',
     color: '#000000',
     createdAt: 1,
     updatedAt: 1,
@@ -68,7 +57,7 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
 
 /**
  * 构造 CRUD slice 所需的最小 store；环境 action 读取 environments，
- * endpoint action 读取 endpointDetails，baseUrl action 读取 projects，
+ * endpoint action 读取 endpointDetails，project action 读取 projects，
  * 二者共用 Zustand 风格的 setter。
  */
 type CrudHarnessState = {

@@ -12,7 +12,7 @@
  * **草稿的两半。** 字段住在两个地方，这个划分不是巧合：
  *
  *   draftEndpoints[id]   整份文档字段——name / method / url / auth /
- *                        environmentId / baseUrl* / tags / docs。按文档读是因为
+ *                        environmentId / baseUrlOverride / tags / docs。按文档读是因为
  *                        草稿没有已存储的行可供补丁，否则"未设置"与"默认为空"
  *                        就无从分辨。
  *   endpointDrafts[id]   params / headers / body——请求配置编辑器写在这里，且是
@@ -106,7 +106,6 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
       url: '',
       auth: { kind: 'none' },
       environmentId: null,
-      baseUrlDefinitionId: null,
       baseUrlOverride: null,
       tags: [],
       docs: '',
@@ -167,7 +166,6 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
       url: draft.url,
       auth: draft.auth,
       environmentId: draft.environmentId,
-      baseUrlDefinitionId: draft.baseUrlDefinitionId,
       baseUrlOverride: draft.baseUrlOverride,
       tags: draft.tags,
       docs: draft.docs,

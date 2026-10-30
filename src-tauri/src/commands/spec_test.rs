@@ -85,30 +85,33 @@ fn the_wire_keys_land_on_the_same_fields() {
         "projectId": "p1",
         "module": "交易",
         "collectionPath": "订单/明细",
-        "environment": { "name": "dev", "baseUrl": "https://api.example.test" },
-        "service": { "name": "网关" },
+        "environment": {
+            "name": "dev",
+            "baseUrl": "https://api.example.test",
+            "baseUrlProxy": "https://gw.example.test"
+        },
         "endpoint": {
             "name": "查订单",
             "method": "GET",
             "url": "/api/orders/{id}",
             "environmentId": "env_1",
-            "baseUrlDefinitionId": "def_1",
             "preRequestScript": "pm.environment.set('a', 'b');"
         }
     }))
     .expect("a camelCase body deserializes");
     assert_eq!(camel.project_id, "p1");
     assert_eq!(camel.collection_path.as_deref(), Some("订单/明细"));
+    let environment = camel.environment.as_ref().expect("环境那一段");
     assert_eq!(
-        camel
-            .environment
-            .as_ref()
-            .and_then(|e| e.base_url.as_deref()),
+        environment.base_url.as_deref(),
         Some("https://api.example.test")
+    );
+    assert_eq!(
+        environment.base_url_proxy.as_deref(),
+        Some("https://gw.example.test")
     );
     let endpoint = &camel.endpoint;
     assert_eq!(endpoint.environment_id.as_deref(), Some("env_1"));
-    assert_eq!(endpoint.base_url_definition_id.as_deref(), Some("def_1"));
     assert_eq!(
         endpoint.pre_request_script.as_deref(),
         Some("pm.environment.set('a', 'b');")

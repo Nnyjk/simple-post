@@ -8,8 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::{
-    BaseUrlDefinition, EndpointDetail, Environment, HttpMethod, Project, ResourceNode,
-    ResourceNodeType,
+    EndpointDetail, Environment, HttpMethod, Project, ResourceNode, ResourceNodeType,
 };
 use simple_post_core::error::AppError;
 use simple_post_interchange::fingerprint::FingerprintSet;
@@ -526,7 +525,7 @@ async fn the_commit_never_refetches_what_the_preview_already_read() {
             module_id,
             content,
             selected,
-            apply_service: None,
+            apply_base_url: None,
         },
     )
     .expect("commit");
@@ -575,7 +574,7 @@ async fn a_refused_url_is_reported_without_ever_dialling() {
 async fn the_declared_server_is_never_the_one_dialled() {
     // `servers[0]` 是文档**声明**的服务器，`url` 才是抓取目标。这两者混起来就会把
     // 「文档里写了个私网地址」误当成一次 SSRF 尝试——它不是，那只是一个要被记录成
-    // 服务的字符串。默认策略下这一条真的能访问成功，正说明声明的地址从未被访问。
+    // 地址的字符串。默认策略下这一条真的能访问成功，正说明声明的地址从未被访问。
     let _policy = ScopedPolicy::with(false);
     let doc = "{\n\"openapi\":\"3.0.3\",\n\"info\":{\"title\":\"云元数据\",\"version\":\"1\"},\n\
                \"servers\":[{\"url\":\"http://169.254.169.254/latest\"}],\n\
@@ -598,19 +597,23 @@ async fn the_declared_server_is_never_the_one_dialled() {
     .expect("声明了一个私网 server 的文档照样应当拉得下来");
 
     assert_eq!(server.hits(), 1, "抓取目标只有那台 loopback");
-    let svc = preview.service.expect("声明的 server 应当落成一个服务预告");
-    assert_eq!(svc.service, "169.254.169.254");
+    let url = preview
+        .base_urls
+        .first()
+        .expect("声明的 server 应当落成一个地址预告");
+    // 预告里记的是那一格的**基地址**：`/latest` 是路径，住在端点上，不在基地址里。
+    assert_eq!(url.url, "http://169.254.169.254");
 }
 
-// --- 导出预览按「所选环境」解析服务 URL ----------------------------------
+// --- 导出预览按「所选环境」解析那一格的地址 --------------------------------
 
-/// 导出预览的 `servers` 必须按**指名的那个环境**解析。
+/// 导出预览的地址必须按**指名的那个环境**解析。
 ///
 /// 渲染层在下拉里换了环境就会重取一趟预览，那一趟带着 `environmentId`。若服务端
-/// 仍按激活环境解析，界面上的「该环境下没有配置服务 URL」就会按**旧环境**点名：
+/// 仍按激活环境解析，界面上的「该环境下没有配置地址」就会按**旧环境**点名：
 /// 在新环境里其实配好 URL 的模块被要求去配置，真正缺 URL 的模块反而不被提示。
 #[test]
-fn the_export_preview_resolves_servers_by_the_named_environment() {
+fn the_export_preview_resolves_base_urls_by_the_named_environment() {
     let pool = temp_pool("export-env");
     let (project_id, module_id) = seed_two_environments(&pool);
 
@@ -626,12 +629,12 @@ fn the_export_preview_resolves_servers_by_the_named_environment() {
     .expect("预览");
     assert_eq!(by_active.environment_id.as_deref(), Some("env-a"));
     assert!(
-        by_active.servers[0].servers.is_empty(),
-        "激活环境里没配 URL，就该是空的：{:?}",
-        by_active.servers
+        by_active.base_urls[0].base_url.is_none(),
+        "激活环境里没配地址，就该是缺席的：{:?}",
+        by_active.base_urls
     );
 
-    // 指名「有 URL」那个环境：同一批模块，这一次有地址了。
+    // 指名「有地址」那个环境：同一批模块，这一次有地址了。
     let by_named = export_preview(
         &pool,
         &ExportPreviewOpts {
@@ -643,14 +646,13 @@ fn the_export_preview_resolves_servers_by_the_named_environment() {
     .expect("预览");
     assert_eq!(by_named.environment_id.as_deref(), Some("env-b"));
     assert_eq!(
-        by_named.servers[0]
-            .servers
-            .iter()
-            .map(|s| s.url.as_str())
-            .collect::<Vec<_>>(),
-        vec!["https://b.example.com"],
-        "指名的环境里配了 URL，就该读得到：{:?}",
-        by_named.servers
+        by_named.base_urls[0]
+            .base_url
+            .as_ref()
+            .map(|c| c.url.as_str()),
+        Some("https://b.example.com"),
+        "指名的环境里配了地址，就该读得到：{:?}",
+        by_named.base_urls
     );
 
     // 空串 ≡ 没传：都退回激活环境。渲染层「不选环境」那一项送来的就是空串。
@@ -664,7 +666,7 @@ fn the_export_preview_resolves_servers_by_the_named_environment() {
     )
     .expect("预览");
     assert_eq!(by_empty.environment_id.as_deref(), Some("env-a"));
-    assert!(by_empty.servers[0].servers.is_empty());
+    assert!(by_empty.base_urls[0].base_url.is_none());
 }
 
 // --- 测试脚手架 ---------------------------------------------------------
@@ -679,9 +681,6 @@ fn seed_project_with_module(pool: &DbPool) -> (String, String) {
                 id: "p1".into(),
                 name: "示例".into(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3b82f6".into(),
                 created_at: 0,
                 updated_at: 0,
@@ -717,9 +716,9 @@ fn temp_pool(tag: &str) -> DbPool {
     db::init(Path::new(&dir)).expect("init")
 }
 
-/// 一个项目 + 一个模块 + 一个服务定义 + 两个环境。
+/// 一个项目 + 一个模块 + 两个环境。
 ///
-/// `env-a` 是激活环境，且**没有**给这个模块配 URL；`env-b` 配了。两个环境在
+/// `env-a` 是激活环境，且**没有**给这个模块配地址；`env-b` 配了。两个环境在
 /// 「这个模块有没有地址」这件事上答案相反，故指错环境就会看得见。
 fn seed_two_environments(pool: &DbPool) -> (String, String) {
     db::with_tx(pool, |conn| {
@@ -729,9 +728,6 @@ fn seed_two_environments(pool: &DbPool) -> (String, String) {
                 id: "p1".into(),
                 name: "示例".into(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3b82f6".into(),
                 created_at: 0,
                 updated_at: 0,
@@ -752,15 +748,6 @@ fn seed_two_environments(pool: &DbPool) -> (String, String) {
             },
             None,
         )?;
-        db::base_url_defs::create(
-            conn,
-            &BaseUrlDefinition {
-                id: "d1".into(),
-                name: "网关".into(),
-                description: None,
-            },
-            &project.id,
-        )?;
         for (id, name, active) in [("env-a", "甲", true), ("env-b", "乙", false)] {
             db::environments::create(
                 conn,
@@ -768,7 +755,6 @@ fn seed_two_environments(pool: &DbPool) -> (String, String) {
                     id: id.into(),
                     project_id: project.id.clone(),
                     name: name.into(),
-                    base_urls: Default::default(),
                     module_base_urls: Default::default(),
                     variables: Default::default(),
                     disabled_variables: Default::default(),
@@ -780,9 +766,9 @@ fn seed_two_environments(pool: &DbPool) -> (String, String) {
         db::environments::set_module_base_url(
             conn,
             "env-b",
-            "d1",
             "m1",
             Some("https://b.example.com"),
+            None,
         )?;
         // 项目自带的那个默认环境也是激活的，故显式指明「甲」是激活的那个——
         // 否则「不给 environmentId 时按谁算」这件事就没有确定的答案。
@@ -798,7 +784,6 @@ fn endpoint_detail(node_id: &str, method: HttpMethod, url: &str) -> EndpointDeta
         method,
         url: url.into(),
         environment_id: None,
-        base_url_definition_id: None,
         base_url_override: None,
         params: Vec::new(),
         path_params: Vec::new(),
@@ -823,9 +808,6 @@ fn seed_one_endpoint(pool: &DbPool) -> String {
                 id: "p1".into(),
                 name: "示例".into(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3b82f6".into(),
                 created_at: 0,
                 updated_at: 0,

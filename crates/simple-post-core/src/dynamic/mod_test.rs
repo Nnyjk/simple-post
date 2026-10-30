@@ -13,9 +13,9 @@ use super::*;
 const INLINE_SOURCE: &str = r#"{"method":"GET","url":"http://127.0.0.1:9/points"}"#;
 use crate::db;
 use crate::domain::{
-    AuthConfig, AuthType, BaseUrlDefinition, DynamicCacheEntry, DynamicErrorKind,
-    DynamicValueSource, DynamicVariable, EndpointDetail, HttpMethod, KeyValue, Project,
-    RequestBody, ResourceNode, ResourceNodeType, ValueMode,
+    AuthConfig, AuthType, DynamicCacheEntry, DynamicErrorKind, DynamicValueSource, DynamicVariable,
+    EndpointDetail, HttpMethod, KeyValue, Project, RequestBody, ResourceNode, ResourceNodeType,
+    ValueMode,
 };
 
 // -------------------------------------------------------------------------
@@ -117,6 +117,7 @@ fn the_scan_covers_the_fields_that_actually_get_substituted() {
     };
     let parts = TemplateParts {
         base_url: "https://{{host}}",
+        proxy: None,
         url: "/{{pathVar}}",
         params: &params,
         path_params: &[],
@@ -149,6 +150,7 @@ fn a_disabled_parameter_is_not_referenced() {
     }];
     let parts = TemplateParts {
         base_url: "",
+        proxy: None,
         url: "/x",
         params: &params,
         path_params: &[],
@@ -173,7 +175,6 @@ fn definition(ttl_seconds: i64, stale_fallback: bool) -> DynamicVariable {
         source_endpoint_name: None,
         source_inline_json: Some(INLINE_SOURCE.to_string()),
         source_environment_id: None,
-        source_base_url_definition_id: None,
         extract_path: "$".into(),
         transform_script: None,
         value_mode: ValueMode::Auto,
@@ -434,9 +435,6 @@ fn seeded_pool() -> (db::DbPool, std::path::PathBuf) {
                 id: "p1".into(),
                 name: "First".into(),
                 description: None,
-                default_base_url_definition_id: None,
-                base_url_definitions: vec![],
-                base_url: None,
                 color: "#000000".into(),
                 created_at: 1,
                 updated_at: 1,
@@ -802,8 +800,8 @@ async fn a_stale_value_is_used_when_the_fetch_fails_and_the_definition_allows_it
 // 取数上下文
 // -------------------------------------------------------------------------
 
-/// 一个项目，两个服务（★ 与另一个），一个绑了「另一个」服务的接口。
-fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
+/// 一个项目，一个模块，其下一个接口，以及两个环境。
+fn pool_with_a_module() -> (db::DbPool, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-dynamic-ctx-test-{}-{}",
         std::process::id(),
@@ -818,26 +816,25 @@ fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
                 id: "p1".into(),
                 name: "First".into(),
                 description: None,
-                default_base_url_definition_id: None,
-                base_url_definitions: vec![],
-                base_url: None,
                 color: "#000000".into(),
                 created_at: 1,
                 updated_at: 1,
             },
         )?;
-        for (id, name) in [("star", "主服务"), ("own", "接口自绑的服务")] {
-            db::base_url_defs::create(
+        for (id, name) in [("env_a", "alpha"), ("env_b", "beta")] {
+            db::environments::create(
                 c,
-                &BaseUrlDefinition {
+                &crate::domain::Environment {
                     id: id.into(),
+                    project_id: "p1".into(),
                     name: name.into(),
-                    description: None,
+                    module_base_urls: Default::default(),
+                    variables: Default::default(),
+                    disabled_variables: Vec::new(),
+                    is_active: false,
                 },
-                "p1",
             )?;
         }
-        db::base_url_defs::set_default(c, "p1", Some("star"))?;
         db::nodes::create(
             c,
             &ResourceNode {
@@ -871,7 +868,6 @@ fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
                 method: HttpMethod::Get,
                 url: "/points".into(),
                 environment_id: None,
-                base_url_definition_id: Some("own".into()),
                 base_url_override: None,
                 params: vec![],
                 path_params: vec![],
@@ -893,25 +889,49 @@ fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
 }
 
 #[test]
-fn a_definition_that_names_no_service_fetches_through_the_project_star() {
-    // 数据源接口自己绑的服务不在回退链上：定义没点名服务时一律走项目的 ★。
-    let (pool, _dir) = pool_with_a_bound_service();
+fn the_source_context_names_the_module_the_endpoint_sits_in() {
+    // base URL 住在 (环境 × 模块) 那一格，故取数端点所在的模块决定取哪一格。
+    let (pool, _dir) = pool_with_a_module();
     let mut def = definition(60, false);
     def.source_endpoint_id = Some("e1".into());
     def.source_inline_json = None;
 
     let ctx = source_context(&pool, &def).expect("取数上下文");
-    assert_eq!(ctx.base_url_definition_id.as_deref(), Some("star"));
+    assert_eq!(ctx.module_id.as_deref(), Some("m1"));
+    assert_eq!(ctx.project_id.as_deref(), Some("p1"));
 }
 
 #[test]
-fn a_definition_that_names_a_service_uses_it() {
-    let (pool, _dir) = pool_with_a_bound_service();
+fn the_source_context_takes_the_environment_the_definition_names() {
+    let (pool, _dir) = pool_with_a_module();
     let mut def = definition(60, false);
     def.source_endpoint_id = Some("e1".into());
     def.source_inline_json = None;
-    def.source_base_url_definition_id = Some("own".into());
+    def.source_environment_id = Some("env_b".into());
 
     let ctx = source_context(&pool, &def).expect("取数上下文");
-    assert_eq!(ctx.base_url_definition_id.as_deref(), Some("own"));
+    assert_eq!(ctx.environment_id.as_deref(), Some("env_b"));
+}
+
+#[test]
+fn the_source_context_falls_back_to_the_first_environment_of_the_project() {
+    let (pool, _dir) = pool_with_a_module();
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+
+    // 环境按名字排序，故第一个是 `alpha`。
+    let ctx = source_context(&pool, &def).expect("取数上下文");
+    assert_eq!(ctx.environment_id.as_deref(), Some("env_a"));
+}
+
+#[test]
+fn an_inline_source_has_no_project_no_environment_and_no_module() {
+    let (pool, _dir) = pool_with_a_module();
+    let def = definition(60, false);
+
+    let ctx = source_context(&pool, &def).expect("取数上下文");
+    assert!(ctx.project_id.is_none());
+    assert!(ctx.environment_id.is_none());
+    assert!(ctx.module_id.is_none());
 }

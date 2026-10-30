@@ -47,7 +47,6 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
                 },
                 "tags": ["smoke", "user"],
                 "environment_id": "env_dev",
-                "base_url_definition_id": "svc_api",
                 "base_url_override": "https://staging.example.com",
                 "docs": "Creates a user.",
                 "notes": "checked by hand",
@@ -101,9 +100,8 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
 
     assert_eq!(d.tags, vec!["smoke".to_string(), "user".to_string()]);
 
-    // Environment binding + base-url definition binding.
+    // Environment binding + the endpoint's own base URL.
     assert_eq!(d.environment_id.as_deref(), Some("env_dev"));
-    assert_eq!(d.base_url_definition_id.as_deref(), Some("svc_api"));
     assert_eq!(
         d.base_url_override.as_deref(),
         Some("https://staging.example.com")
@@ -317,7 +315,7 @@ async fn endpoint_update_can_patch_a_body_into_multipart() {
 }
 
 /// `endpoint_create` previously hardcoded `environment_id`,
-/// `base_url_definition_id`, `base_url_override`, `body_schema`, `docs`,
+/// `base_url_override`, `body_schema`, `docs`,
 /// `notes` and `description` to their defaults, so building a fully
 /// configured endpoint took a mandatory second `endpoint_update` call.
 #[tokio::test]
@@ -348,7 +346,6 @@ async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
             "auth_config": { "bearer": "tok" },
             "tags": ["orders"],
             "environment_id": "env_dev",
-            "base_url_definition_id": "svc_api",
             "base_url_override": "https://api.example.com",
             "docs": "Lists orders.",
             "notes": "n"
@@ -371,7 +368,6 @@ async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
     assert_eq!(d.auth.kind, simple_post_core::domain::AuthType::Bearer);
     assert_eq!(d.auth.bearer.as_deref(), Some("tok"));
     assert_eq!(d.environment_id.as_deref(), Some("env_dev"));
-    assert_eq!(d.base_url_definition_id.as_deref(), Some("svc_api"));
     assert_eq!(
         d.base_url_override.as_deref(),
         Some("https://api.example.com")

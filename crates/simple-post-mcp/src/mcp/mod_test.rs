@@ -46,7 +46,6 @@ fn tools_list_returns_all_registered_tools() {
     assert!(has("module_"), "missing module_* tools");
     assert!(has("collection_"), "missing collection_* tools");
     assert!(has("endpoint_"), "missing endpoint_* tools");
-    assert!(has("base_url_def_"), "missing base_url_def_* tools");
     assert!(has("api_run_request"), "missing api_run_request");
     assert!(has("api_call_endpoint"), "missing api_call_endpoint");
     assert!(has("api_resolve_"), "missing api_resolve_* tools");
@@ -86,17 +85,17 @@ fn every_registered_tool_has_a_capability() {
 
 /// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` 与 `README.md` 都写着「52 tools」。上面的双射测试在「工具连同它的
+/// `AGENTS.md` 与 `README.md` 都写着「47 tools」。上面的双射测试在「工具连同它的
 /// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
 /// 里要改这个常量，同一个 commit 也应更新那两份文档。
-const EXPECTED_TOOL_COUNT: usize = 52;
+const EXPECTED_TOOL_COUNT: usize = 47;
 
 #[test]
 fn registered_tool_count_matches_the_documented_figure() {
     assert_eq!(
         tool_table().len(),
         EXPECTED_TOOL_COUNT,
-        "tool count changed; update EXPECTED_TOOL_COUNT and the '52 tools' \
+        "tool count changed; update EXPECTED_TOOL_COUNT and the '47 tools' \
              claims in AGENTS.md and README.md"
     );
 }
@@ -118,35 +117,29 @@ fn every_capability_row_names_a_registered_tool() {
 
 /// `tools/list` 的体积有一个上限，理由是**它每一次会话都要付钱**。
 ///
-/// 客户端在动手之前要先把整份清单读进上下文，于是 52 条描述符的每一个字节都乘以
+/// 客户端在动手之前要先把整份清单读进上下文，于是 47 条描述符的每一个字节都乘以
 /// 「会话数」。详细的解释属于 `simple-post://spec-authoring` 那份按需读取的指南，
 /// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
 ///
 /// **上限怎么算出来的。** 紧凑 JSON 约 **4.71 字节 / token**（`cl100k_base` 实测；
-/// 「字符数 ÷ 3」高估六成），42 735 字节 ≈ **9 079 tokens**，故上限取 43 400 字节。
+/// 「字符数 ÷ 3」高估六成），41 392 字节 ≈ **8 788 tokens**，故上限取 42 000 字节。
 /// 超限时把长说明移到 `simple-post://spec-authoring`，不要扩大工具描述。
 ///
-/// **上限从 41 400 提到 43 400 的原因**：HTTPS 出站设置（`tls`）进了
-/// `endpoint_create` / `endpoint_update` 两个写工具的 schema，也进了
-/// `api_run_request` / `api_call_endpoint` 两个发送工具的 `settings_override`
-/// 说明。这几段说明都已压到一行，且每一段都带着一条调用方必须知道的规则
-/// （端点给了这份设置就**整体**取代全局默认；证书只存文件路径，路径由运行请求的
-/// 那台机器解析），再删就变成「工具描述在骗人」。测量值从 40 718 涨到 42 735，
-/// 故上限同步提高，余量（665 字节）仍与原来的（682 字节）同一量级。
-///
-/// **上限从 43 400 提到 44 100 的原因**：动态变量挂到项目上，外加处理脚本。
-/// 契约长大的是 `dynamic_var_*` 这七条工具的 schema：`dynamic_var_list` 与
-/// `dynamic_var_resolve` 各多一个 `project_id`，`dynamic_var_create` 多一个
-/// 必填的 `project_id` 与一个 `transform_script`，`dynamic_var_update` 的 patch
-/// 多 `projectId` 与 `transformScript`。契约里长的字段删不掉，于是上限同步提高：
-/// 测量值从 42 735 涨到 43 401，余量（699 字节）与原来的（665 字节）同一量级。
-/// 新增的三段说明都已压到一行：「定义挂在项目里、名字项目内唯一」「抽取之后跑脚本、
-/// 用 `return` 给出最终值」「同名定义出现在多个项目里按歧义处理」——每一条都是调用方
-/// 不知道就会调错的那一条。
-///
 /// **上限量的是字节**：载荷里含中文描述，`String::len()` 按 UTF-8 字节算，
-/// 故同一份载荷是 42 673 字符、42 735 字节。
-const TOOLS_LIST_BUDGET_BYTES: usize = 44_100;
+/// 故同一份载荷是 41 340 字符、41 392 字节。
+///
+/// **42 000 这个上限对应哪几段契约。** 清单里有三段说明是代理地址带来的：
+/// `env_set_baseurl` 的 `proxy` 参数、`spec_upsert` 的 environment 段、
+/// `api_call_endpoint` 的 `settings_override`。加上这三段之后载荷是 41 392 字节，
+/// 上限取 42 000，给它们留 608 字节的余量。
+///
+/// **这份清单现在装了什么。** 47 条描述符里没有一条携带「服务 id」字段：地址住在
+/// （环境 × 模块）一格里，`env_set_baseurl` 按 `env_id` + `module_id` 写那一格。
+///
+/// **上限要动时怎么写。** 契约长大先把新加的那几段说明压到一行，压到一行还嫌长
+/// 再动上限；上限一动，就在同一次提交里写清是哪一段契约把载荷顶大了、新的测量值
+/// 是多少，否则下一个接手的人只看到一个数字，会以为这个上限是随手拍的。
+const TOOLS_LIST_BUDGET_BYTES: usize = 42_000;
 
 #[test]
 fn the_tools_list_payload_stays_under_its_budget() {
@@ -166,7 +159,7 @@ fn the_tools_list_payload_stays_under_its_budget() {
         "tools/list 是 {} 字节（约 {} tokens），超过上限 {} 字节。\
          详细的规则与例子放 `simple-post://spec-authoring` 那份指南，别往工具描述里塞。",
         payload.len(),
-        payload.len() * 100 / 473,
+        payload.len() * 100 / 471,
         TOOLS_LIST_BUDGET_BYTES
     );
 }

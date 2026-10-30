@@ -113,8 +113,8 @@ pub fn root_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
 
 /// 某节点挂在哪个模块下，不在模块下则为 `None`。
 /// 除模块本身外每个节点上方恰有一个模块，而 endpoint 配置的 base URL 正以该模块为键：
-/// 现役值层是 `moduleBaseUrls[service][module]`，故解析一个 endpoint 的 URL 是两次查找
-/// ——哪个服务、哪个模块——此函数是第二次。这是树上的问题而非该行自身的属性，故不像
+/// 现役值层是 `moduleBaseUrls[module]`，故解析一个 endpoint 的 URL 要先问这个节点属于哪个
+/// 模块，再去那一格里取值。此函数是第一步。这是树上的问题而非该行自身的属性，故不像
 /// `root_id` 那样反范式化。
 /// `None` 是真实答案而非失败：该节点自身可能就是模块，或者根本不存在。需要区分二者的调用方
 /// 先问 [`type_of`]，或干脆把「没有模块」当作「没有 base URL」，解析器正是这么做的。

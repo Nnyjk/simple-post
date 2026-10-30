@@ -1,26 +1,30 @@
-import type { BaseUrlDefinition } from './tree';
-
 export interface Project {
   id: string;
   name: string;
-  description?: string;
-  /** @deprecated 改用 `baseUrlDefinitions` + `Environment.moduleBaseUrls`；仅为兼容保留，新代码不要引用。 */
-  baseUrl?: string;
-  /**
-   * 本项目对外暴露的具名 baseUrl 槽位。**一份列表，全模块共享**——
-   * 设置页表格是这些服务与本项目模块的笛卡尔积，HttpTester 选择器也列出全部。
-   * 新建项目此处为空。
-   */
-  baseUrlDefinitions: BaseUrlDefinition[];
-  /**
-   * 项目级默认服务（★）——endpoint 未指定服务时按它解析，即
-   * `baseUrlDefinitionId === null`。`null` 是有意状态：有服务但用户没打星，
-   * 未指定服务的 endpoint 就没有 baseUrl。打星是**项目级**的，没有模块级默认。
-   */
-  defaultBaseUrlDefinitionId: string | null;
+  description?: string | null;
   color: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/**
+ * 一个（环境 × 模块）格子里的地址配置。
+ *
+ * 两个字段回答两个问题：
+ *
+ *   - `url` 是**后端 api 地址** —— 文档里写的、模块对外声明的那个地址。
+ *   - `proxy` 是**实际访问地址** —— 接口经代理网关转代后真正要打的那个地址。
+ *
+ * 两者不一致时，请求发出前用 `proxy` 替换 `url` 这个前缀，其余部分原样保留。故
+ * `url = "http://svc.internal:8080/api/a"`、`proxy = "https://gw.corp.com/api/xxxx/a"`
+ * 与端点路径 `/orders/list` 合成的实际请求是
+ * `https://gw.corp.com/api/xxxx/a/orders/list`。
+ *
+ * `proxy` 缺席 = 没有代理，请求直接打 `url`。
+ */
+export interface ModuleBaseUrl {
+  url: string;
+  proxy?: string | null;
 }
 
 export interface Environment {
@@ -28,22 +32,12 @@ export interface Environment {
   projectId: string;
   name: string;
   /**
-   * @deprecated 扁平值层，不再读写。唯一值层是 `Environment.moduleBaseUrls`。
+   * 唯一的 URL 层：`moduleId → ModuleBaseUrl`。
    *
-   * 键只有 `defId`，看不见模块，表达不了「同一服务在两个模块指向不同主机」。
-   * 字段仍留在 schema 与线格式里：删列要重建表 = bump `SCHEMA_VERSION`
-   * = `ensure_current_schema` 直接删库。迁移把历史值搬进 `moduleBaseUrls`，
-   * 留在 `baseUrls` 的那份是死数据。
+   * 每个格子都是独立值，彼此**不继承也不回退** —— 缺项或地址为空即「该组合没有值」，
+   * 不会借用别的模块的格子。`resolveEndpointBaseUrl` 读 `moduleBaseUrls[moduleId]`。
    */
-  baseUrls: Record<string, string>;
-  /**
-   * 唯一的 URL 层：`serviceId → moduleId → URL`。
-   *
-   * 每个格子都是独立值，彼此**不继承也不回退**——缺省或空即"该组合没有值"，
-   * 不会借用项目默认服务或别的模块的格子；两个模块能对同一服务名配不同主机
-   * 就靠这一点。`resolveEndpointBaseUrl` 读 `moduleBaseUrls[def.id][moduleId]`。
-   */
-  moduleBaseUrls: Record<string, Record<string, string>>;
+  moduleBaseUrls: Record<string, ModuleBaseUrl>;
   /** 自由模板变量（如 `token`、`apiKey`）。baseUrl 值在 `moduleBaseUrls`，不在这里。 */
   variables: Record<string, string>;
   /**

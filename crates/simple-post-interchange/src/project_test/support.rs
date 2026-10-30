@@ -1,22 +1,21 @@
-//! `domain → ir → domain` 往返与「不回退」的服务取值。
+//! `domain → ir → domain` 往返与「不回退」的地址取值。
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::{
-    uid, AuthConfig, AuthType, BaseUrlDefinition, BodyMode, EndpointDetail, HttpMethod, KeyValue,
-    Project, RequestBody, ResourceNode, ResourceNodeType,
+    uid, AuthConfig, AuthType, BodyMode, EndpointDetail, HttpMethod, KeyValue, Project,
+    RequestBody, ResourceNode, ResourceNodeType,
 };
 use simple_post_core::error::AppError;
 
 pub(super) static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// 一个项目：自带一个默认模块、一个激活环境，外加一条服务定义（名「网关」）。
+/// 一个项目：自带一个默认模块、一个激活环境。
 pub(super) struct Seeded {
     pub(super) project_id: String,
     pub(super) module_id: String,
     pub(super) env_id: String,
-    pub(super) def_id: String,
 }
 
 pub(super) fn temp_pool(tag: &str) -> DbPool {
@@ -39,25 +38,10 @@ pub(super) fn seed_project(pool: &DbPool) -> Seeded {
                 id: uid(),
                 name: "导出项目".into(),
                 description: None,
-                base_url: None,
-                base_url_definitions: Vec::new(),
-                default_base_url_definition_id: None,
                 color: "#3b82f6".into(),
                 created_at: 0,
                 updated_at: 0,
             },
-        )?;
-        // 服务表是项目级的，故这里显式建一行。id 每个项目各不相同：
-        // `base_url_definitions.id` 是主键，同一个库里放两次同一个 id 会被拒。
-        let def_id = format!("def_{}", p.id);
-        db::base_url_defs::create(
-            conn,
-            &BaseUrlDefinition {
-                id: def_id.clone(),
-                name: "网关".into(),
-                description: None,
-            },
-            &p.id,
         )?;
         let modules = db::nodes::list_by_root_and_type(conn, &p.id, ResourceNodeType::Module)?;
         let envs = db::environments::list_by_project(conn, &p.id)?;
@@ -65,20 +49,18 @@ pub(super) fn seed_project(pool: &DbPool) -> Seeded {
             project_id: p.id,
             module_id: modules[0].id.clone(),
             env_id: envs[0].id.clone(),
-            def_id,
         })
     })
     .expect("seed")
 }
 
 /// 一个请求配置齐备的 endpoint：往返要保住的就是这些字段。
-fn rich_detail(node_id: String, def_id: &str) -> EndpointDetail {
+fn rich_detail(node_id: String) -> EndpointDetail {
     EndpointDetail {
         node_id,
         method: HttpMethod::Post,
         url: "/users/{{id}}".into(),
         environment_id: Some("e".into()),
-        base_url_definition_id: Some(def_id.into()),
         base_url_override: None,
         path_params: vec![],
         params: vec![KeyValue {
@@ -128,7 +110,7 @@ pub(super) fn add_endpoint(pool: &DbPool, s: &Seeded, parent: &str) -> String {
             updated_at: 0,
         };
         let id = node.id.clone();
-        let detail = rich_detail(id.clone(), &s.def_id);
+        let detail = rich_detail(id.clone());
         db::nodes::create(conn, &node, Some(&detail))?;
         Ok::<String, AppError>(id)
     })

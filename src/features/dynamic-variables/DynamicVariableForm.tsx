@@ -5,8 +5,9 @@
  * 鉴权与前置脚本都会生效），或一份内联请求（method / url / headers / body / auth 的
  * JSON 文本，URL 必须写完整）。
  *
- * 引用接口时，表单还会给出**取数用的环境与服务**：默认取那个接口所属项目的第一个可用
- * 环境与默认服务，用户可以改。两者都跟着数据源走，故选了接口之后它们才有意义。
+ * 引用接口时，表单还会给出**取数用的环境**：默认取那个接口所属项目的第一个可用
+ * 环境，用户可以改。它跟着数据源走，故选了接口之后它才有意义。取数用的地址由那个
+ * 接口所属模块在所选环境里的那一格决定，故表单不必再问一次。
  *
  * 定义挂在**项目**里，故表单要知道它属于哪个项目：新建时是当前项目，编辑时是这条定义
  * 自己的归属项目。变量名在项目内唯一。
@@ -73,9 +74,8 @@ export function DynamicVariableForm({
   // 数据源接口的名字。树上点一下就有，不必再查一次树。
   const [sourceEndpointName, setSourceEndpointName] = useState(variable?.sourceEndpointName ?? '');
   const [sourceInlineJson, setSourceInlineJson] = useState(variable?.sourceInlineJson ?? '');
-  // 取数用的环境与服务。空串 = 跟随默认（数据源接口所属项目的首个可用环境 / 默认服务）。
+  // 取数用的环境。空串 = 跟随默认（数据源接口所属项目的首个可用环境）。
   const [environmentId, setEnvironmentId] = useState(variable?.sourceEnvironmentId ?? '');
-  const [serviceId, setServiceId] = useState(variable?.sourceBaseUrlDefinitionId ?? '');
   const [extractPath, setExtractPath] = useState(variable?.extractPath ?? '$');
   const [transformScript, setTransformScript] = useState(variable?.transformScript ?? '');
   const [valueMode, setValueMode] = useState<ValueMode>(variable?.valueMode ?? 'auto');
@@ -86,11 +86,6 @@ export function DynamicVariableForm({
 
   const usesEndpoint = sourceKind === 'endpoint';
 
-  // 数据源接口所属的项目。它决定有哪些环境可用、有哪些服务可选。
-  const sourceProject = useMemo(
-    () => projects.find((p) => p.id === sourceProjectId),
-    [projects, sourceProjectId],
-  );
   // 项目里的环境，按名字排序 —— 「第一个可用环境」就是列表里的头一个。
   //
   // 后端 `core::dynamic::source_context` 选默认环境时用的是 `list_by_project` 的
@@ -104,11 +99,6 @@ export function DynamicVariableForm({
     [environments, sourceProjectId],
   );
   const firstEnvironment = projectEnvironments[0];
-  // 服务的默认值：数据源接口所属项目的默认服务（★）。数据源接口自己绑的服务不在
-  // 这条链上——定义没点名服务时一律走项目的 ★。
-  const defaultServiceId = sourceProject?.defaultBaseUrlDefinitionId ?? null;
-  const defaultServiceName =
-    sourceProject?.baseUrlDefinitions.find((d) => d.id === defaultServiceId)?.name ?? null;
 
   const handleSelectEndpoint = (endpointId: string, projectId: string, endpointName: string) => {
     setSourceKind('endpoint');
@@ -116,7 +106,6 @@ export function DynamicVariableForm({
     setSourceProjectId(projectId);
     setSourceEndpointName(endpointName);
     setEnvironmentId('');
-    setServiceId('');
   };
 
   // 没有数据源的定义永远解析不出值，故界面不让人存：引用形态要选了接口，内联形态
@@ -137,7 +126,6 @@ export function DynamicVariableForm({
           sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
           sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
           sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
-          sourceBaseUrlDefinitionId: usesEndpoint ? serviceId || null : null,
           extractPath,
           transformScript: transformScript.trim() === '' ? null : transformScript,
           valueMode,
@@ -155,7 +143,6 @@ export function DynamicVariableForm({
           sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
           sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
           sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
-          sourceBaseUrlDefinitionId: usesEndpoint ? serviceId || null : null,
           extractPath,
           transformScript: transformScript.trim() === '' ? null : transformScript,
           valueMode,
@@ -256,27 +243,7 @@ export function DynamicVariableForm({
                 ))}
               </select>
               <span className="text-[11px] text-muted-foreground">
-                决定取数时用哪个环境的 base URL 与变量。
-              </span>
-            </label>
-
-            <label className="flex items-center gap-2 text-xs">
-              <span className="w-20 shrink-0 text-muted-foreground">取数服务</span>
-              <select
-                value={serviceId}
-                onChange={(e) => setServiceId(e.target.value)}
-                className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">默认（{defaultServiceName ?? '该项目没有默认服务'}）</option>
-                {(sourceProject?.baseUrlDefinitions ?? []).map((def) => (
-                  <option key={def.id} value={def.id}>
-                    {def.name}
-                    {def.id === sourceProject?.defaultBaseUrlDefinitionId ? '（★）' : ''}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[11px] text-muted-foreground">
-                决定取数时用哪个服务。默认取数据源接口所属项目的默认服务。
+                决定取数时用哪个环境的模块地址与变量。
               </span>
             </label>
           </>

@@ -11,7 +11,7 @@ use serde_json::json;
 
 use super::tool_api_run_request;
 use crate::mcp::AppState;
-use simple_post_core::domain::{BaseUrlDefinition, Environment, Project, ResourceNodeType};
+use simple_post_core::domain::{Environment, ModuleBaseUrl, Project, ResourceNodeType};
 
 /// 回固定 200，把收到的原始请求记下来。
 async fn stub() -> (String, Arc<Mutex<Vec<String>>>) {
@@ -57,8 +57,8 @@ fn mcp_state(tag: &str) -> Arc<AppState> {
     })
 }
 
-/// 种一个项目（含一个服务）、一个模块与一个环境，环境的 (服务 × 模块) 格子填了
-/// `base_url`（测试里是本地 stub 的地址，故请求不会跑到外网去）。
+/// 种一个项目、一个模块与一个环境，环境的 (环境 × 模块) 格子填了 `base_url`
+/// （测试里是本地 stub 的地址，故请求不会跑到外网去）。
 /// 返回 (project_id, env_id, module_id)。
 fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
     use simple_post_core::db::{environments, nodes, projects};
@@ -68,13 +68,6 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
         id: "p_run".into(),
         name: "P".into(),
         description: None,
-        base_url: None,
-        base_url_definitions: vec![BaseUrlDefinition {
-            id: "svc".into(),
-            name: "api".into(),
-            description: None,
-        }],
-        default_base_url_definition_id: Some("svc".into()),
         color: String::new(),
         created_at: 0,
         updated_at: 0,
@@ -94,12 +87,12 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
         id: "env_run".into(),
         project_id: "p_run".into(),
         name: "dev".into(),
-        base_urls: Default::default(),
         module_base_urls: [(
-            "svc".to_string(),
-            [("m_run".to_string(), base_url.to_string())]
-                .into_iter()
-                .collect(),
+            "m_run".to_string(),
+            ModuleBaseUrl {
+                url: base_url.to_string(),
+                proxy: None,
+            },
         )]
         .into_iter()
         .collect(),
@@ -111,8 +104,6 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
     };
     simple_post_core::db::with_tx(&st.pool, |c| {
         projects::create(c, &project)?;
-        // 服务定义住在自己的表里，不随项目行一起写。
-        simple_post_core::db::base_url_defs::create(c, &project.base_url_definitions[0], "p_run")?;
         nodes::create(c, &module, None)?;
         environments::create(c, &env)?;
         Ok(())
@@ -134,7 +125,6 @@ async fn a_run_request_gets_the_same_treatment_as_a_stored_endpoint() {
             "method": "GET",
             "url": "/users/{{token}}",
             "env_id": env_id,
-            "base_url_definition_id": "svc",
             "module_id": module_id,
             "params": [{ "key": "page", "value": "1" }],
             "headers": [{ "key": "X-Trace", "value": "t1" }],
@@ -200,7 +190,6 @@ async fn a_run_request_reports_the_variables_it_could_not_resolve() {
             "method": "GET",
             "url": "/x",
             "env_id": env_id,
-            "base_url_definition_id": "svc",
             "module_id": module_id,
             "params": [{ "key": "q", "value": "{{nothing}}" }],
         }),

@@ -39,7 +39,7 @@ pub mod http_config;
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod interchange_api;
 pub mod port_registry;
-/// 项目、服务与资源树节点的创建编排。Tauri 命令与 REST 路由都只调它，故两条 transport
+/// 项目与资源树节点的创建编排。Tauri 命令与 REST 路由都只调它，故两条 transport
 /// 不必各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod project_api;
 /// 一份接口规格的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必

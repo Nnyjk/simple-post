@@ -91,25 +91,20 @@ async fn fetch_from_endpoint(
         message: format!("数据源端点 {endpoint_id} 已被删除"),
     })?;
 
-    // 模块与服务来自取数上下文：模块决定读哪一格 base URL，服务决定读哪个服务。
-    // 两者都由定义自己推导，与谁消费这个变量无关。
+    // 模块来自取数上下文：模块决定读哪一格 base URL。它由定义自己推导，与谁消费
+    // 这个变量无关。
     let overrides = EndpointOverrides {
         module_id: source.module_id.clone(),
-        base_url_definition_id: source.base_url_definition_id.clone(),
         ..Default::default()
     };
 
-    let resolved = crate::variable_fill::resolve_endpoint(
-        &detail,
-        source.env.as_ref(),
-        &source.project,
-        Some(&overrides),
-    )
-    .map_err(|e| DynamicError {
-        name: def.name.clone(),
-        kind: DynamicErrorKind::SourceError,
-        message: format!("解析数据源端点失败：{e}"),
-    })?;
+    let resolved =
+        crate::variable_fill::resolve_endpoint(&detail, source.env.as_ref(), Some(&overrides))
+            .map_err(|e| DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::SourceError,
+                message: format!("解析数据源端点失败：{e}"),
+            })?;
 
     let mut headers = resolved.headers;
     let mut url = resolved.url;
@@ -187,7 +182,6 @@ async fn fetch_from_inline(
         method,
         url: spec.url,
         environment_id: None,
-        base_url_definition_id: None,
         // 空串 = 自定义模式但不加前缀：URL 字段本身就是完整地址。
         base_url_override: Some(String::new()),
         params: spec.params,
@@ -204,17 +198,13 @@ async fn fetch_from_inline(
     };
 
     let overrides = EndpointOverrides::default();
-    let resolved = crate::variable_fill::resolve_endpoint(
-        &detail,
-        source.env.as_ref(),
-        &source.project,
-        Some(&overrides),
-    )
-    .map_err(|e| DynamicError {
-        name: def.name.clone(),
-        kind: DynamicErrorKind::SourceError,
-        message: format!("解析内联请求失败：{e}"),
-    })?;
+    let resolved =
+        crate::variable_fill::resolve_endpoint(&detail, source.env.as_ref(), Some(&overrides))
+            .map_err(|e| DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::SourceError,
+                message: format!("解析内联请求失败：{e}"),
+            })?;
 
     let mut headers = resolved.headers;
     let url = resolved.url;

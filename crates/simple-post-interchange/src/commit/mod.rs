@@ -10,8 +10,8 @@
 //! 落库的每一行走 [`db::nodes::create`]，故父子矩阵由 `validate_placement` 强制，
 //! 本模块不自己再判一遍：那道检查已经在那里，再写一份只会与它不一致。
 
+mod base_url;
 mod dedupe;
-mod service;
 
 use std::collections::BTreeSet;
 
@@ -23,13 +23,13 @@ use simple_post_core::error::AppError;
 
 use crate::diagnostics::{Diagnostic, Severity};
 use crate::fingerprint::FingerprintSet;
-use crate::ir::{Exchange, IrCollection, IrEndpoint, IrModule, IrScripts};
+use crate::ir::{Exchange, IrBaseUrl, IrCollection, IrEndpoint, IrModule, IrScripts};
 
+use self::base_url::wire_base_url;
 use self::dedupe::{decide, has_any, has_any_collection};
-use self::service::wire_service;
-// 预览经 `simple_post_interchange::commit::plan_service` 取这份计划，故 `service` 是私有
-// 模块，而 `plan_service` / `ServicePlan` 要在这里转出去。
-pub use self::service::{plan_service, ServicePlan};
+// 预览经 `simple_post_interchange::commit::plan_base_url` 取这份计划，故 `base_url` 是私有
+// 模块，而 `plan_base_url` / `BaseUrlPlan` 要在这里转出去。
+pub use self::base_url::{plan_base_url, BaseUrlPlan};
 
 /// 一次落库的结果。调用方据此回报「新增几个、跳过几个、丢了什么」。
 #[derive(Debug, Clone, Default)]
@@ -45,24 +45,23 @@ pub struct CommitReport {
     /// IR 自带的诊断加上本次落库新增的诊断，一并带回。预览与落库是两次调用，
     /// 各自持有自己的那份，外不该假设它们是同一个对象。
     pub diagnostics: Vec<Diagnostic>,
-    /// 顺带落下的服务。为 `None` 表示这一次没有服务可落：文档没给 host、给了多个 host，
+    /// 顺带落下的地址，按写入顺序。为空表示这一次没有地址可落：文档没给 host，
     /// 或调用方关掉了它。
-    pub service: Option<AppliedService>,
+    pub base_urls: Vec<AppliedBaseUrl>,
 }
 
-/// 一次导入落下的那个服务。用户要知道「建了什么、URL 去了哪」——否则他打开
-/// 目标模块看到一排 `{{baseUrl}}` 形式的路径，却没有任何地方写着 baseUrl 是多少。
+/// 一次导入落下的一格地址。用户要知道「地址去了哪」——否则他打开目标模块看到的是
+/// 一排 `{{baseUrl}}` 形式的路径，却没有任何地方写着 baseUrl 是多少。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AppliedService {
-    /// `base_url_definitions.name`。项目内唯一。
-    pub name: String,
-    /// 写进 URL 单元格的那个值。
+pub struct AppliedBaseUrl {
+    /// 写进那一格的后端 api 地址。
     pub url: String,
-    /// 服务定义是新建的（`false` = 复用了项目里已有的同名服务）。
-    pub created: bool,
-    /// 端点是否被指向了它。为 `false` 的情形只有一种：没有激活环境，URL 无处可放。
-    pub assigned: bool,
-    /// URL 写进了哪个环境。项目没有激活环境时为 `None`。
+    /// 写进那一格的实际访问地址。规格没给代理时那一格可能本来就配着网关，故它可能非
+    /// `None`：报告里写的是那一格**实际**的代理值。
+    pub proxy: Option<String>,
+    /// 写进了哪个模块的格子。
+    pub module_id: String,
+    /// 写进了哪个环境。项目没有激活环境时为 `None`——地址没有落进任何一格。
     pub environment_name: Option<String>,
 }
 
@@ -97,6 +96,9 @@ enum Pending<'a> {
         ir: &'a IrModule,
         sort: i64,
         anchor: Option<String>,
+        /// 这棵子树里的端点继承哪一格。落到项目顶层时是本模块自己那一格；挂进已有
+        /// 模块时是锚点模块那一格——顶层模块降级成了集合，而集合没有格子。
+        inherited_cell_url: Option<String>,
         /// 这棵子树里还有没有**会被写入**的端点。没有就不写——空的分组在树里
         /// 只会让人以为导入了什么。注意判据是 `writable` 而不是 `selected`：
         /// 全勾上却全被指纹去重，同样等于什么都没写。
@@ -106,6 +108,8 @@ enum Pending<'a> {
         ir: &'a IrCollection,
         parent_id: String,
         sort: i64,
+        /// 同 [`Pending::Group::inherited_cell_url`]：集合自己没有格子，继承上方那一格。
+        inherited_cell_url: Option<String>,
         /// 同 [`Pending::Group::keep`]。
         keep: bool,
     },
@@ -113,6 +117,8 @@ enum Pending<'a> {
         ir: &'a IrEndpoint,
         parent_id: String,
         sort: i64,
+        /// 同 [`Pending::Group::inherited_cell_url`]。
+        inherited_cell_url: Option<String>,
     },
 }
 
@@ -127,18 +133,18 @@ enum Pending<'a> {
 ///
 /// 全程一个 `BEGIN IMMEDIATE` 事务；中途任何一条被拒，整棵都不落。
 ///
-/// `apply_service` 为假时完全不碰服务表：文档里的 host 就当没看见，与本次导入之前
-/// 的行为逐字节相同。
+/// `apply_base_url` 为假时完全不碰地址：文档里的 host 就当没看见，端点也不带自己的
+/// 地址，与本次导入之前的行为逐字节相同。
 pub fn commit(
     pool: &DbPool,
     project_id: &str,
     target: CommitTarget<'_>,
     ex: &Exchange,
     selected: &BTreeSet<String>,
-    apply_service: bool,
+    apply_base_url: bool,
 ) -> Result<CommitReport, AppError> {
     db::with_tx(pool, |conn| {
-        commit_in_tx(conn, project_id, target, ex, selected, apply_service)
+        commit_in_tx(conn, project_id, target, ex, selected, apply_base_url)
     })
 }
 
@@ -153,7 +159,7 @@ pub fn commit_in_tx(
     target: CommitTarget<'_>,
     ex: &Exchange,
     selected: &BTreeSet<String>,
-    apply_service: bool,
+    apply_base_url: bool,
 ) -> Result<CommitReport, AppError> {
     let mut report = CommitReport {
         diagnostics: ex.diagnostics.clone(),
@@ -183,20 +189,26 @@ pub fn commit_in_tx(
         }
     };
 
-    // 服务与它的 URL 单元格。**只在挂进已有模块时做**：URL 的唯一住址是
-    // `env.module_base_urls[def_id][module_id]`，那个 `module_id` 必须是一个已经在树里的
-    // 模块。落项目顶层时每个模块都是下面这几行刚建的，「新建的模块要不要顺手配 URL」
-    // 是另一个决定，不在这里替用户做。
-    let wiring = match (apply_service, anchor_id.as_deref()) {
-        (true, Some(module_id)) => {
-            let plan = plan_service(conn, project_id, ex)?;
-            if let Some(d) = plan.ambiguous_diagnostic() {
-                report.diagnostics.push(d);
-            }
-            wire_service(conn, project_id, module_id, &plan, &mut report)?
+    // 地址住进 (环境 × 模块) 那一格。环境的答案是唯一的：项目当前激活的那一个。
+    // 没有激活环境就没有格子可填，地址便无处可去——报告里说得清楚，用户能看见
+    // 「地址没有落进任何一格」。
+    let plan = if apply_base_url {
+        let plan = plan_base_url(conn, project_id, ex)?;
+        if let Some(d) = plan.multiple_diagnostic() {
+            report.diagnostics.push(d);
         }
-        _ => None,
+        Some(plan)
+    } else {
+        None
     };
+    let environment = plan.as_ref().and_then(|p| p.environment.as_ref());
+
+    // 挂进已有模块时，那一格归锚点模块吃下：整份文档的第一个地址。文档里其余的地址
+    // 由各端点自己带着——端点带自己的地址时就不套用这一格。
+    //
+    // 落到项目顶层时每个模块吃下自己那一格：模块就是下面几行刚建的那些，格子跟着
+    // 模块走，不必让用户逐个去填。
+    let anchor_cell: Option<IrBaseUrl> = ex.modules.iter().find_map(|m| m.base_url.clone());
 
     // 去重账本先灌入**已落库**的 endpoint，故「同一份 IR 落两次」第二次只跳过不新增。
     let existing = db::endpoint_details::list_by_root(conn, project_id)?;
@@ -220,6 +232,21 @@ pub fn commit_in_tx(
     let fate = decide(&ex.modules, &mut fingerprints.clone(), selected);
     let writable = &fate.writable;
 
+    // 锚点那一格（挂进已有模块时那一格归锚点模块吃下）等到 `writable` 算完才写：
+    // 本次导入一个接口都没写进去时，它没有动过树，也不该动用户配好的地址。
+    if let (Some(module_id), Some(cell)) = (&anchor_id, &anchor_cell) {
+        if apply_base_url && !writable.is_empty() {
+            wire_base_url(
+                conn,
+                module_id,
+                &cell.url,
+                cell.proxy.as_deref(),
+                environment,
+                &mut report,
+            )?;
+        }
+    }
+
     for dup in &fate.duplicates {
         report.skipped_duplicates.push(dup.name.clone());
         report.diagnostics.push(
@@ -236,10 +263,16 @@ pub fn commit_in_tx(
     let mut stack: Vec<Pending<'_>> = Vec::new();
     // 逆序入栈 → 出栈顺序与 IR 声明顺序一致，行号（sort_order）因此可预期。
     for (i, m) in ex.modules.iter().enumerate().rev() {
+        // 落到项目顶层时这一格是本模块自己的；挂进已有模块时是锚点模块那一格。
+        let inherited_cell_url = match &anchor_id {
+            Some(_) => anchor_cell.as_ref().map(|c| c.url.clone()),
+            None => m.base_url.as_ref().map(|c| c.url.clone()),
+        };
         stack.push(Pending::Group {
             ir: m,
             sort: i as i64,
             anchor: anchor_id.clone(),
+            inherited_cell_url,
             keep: has_any(m, writable),
         });
     }
@@ -250,6 +283,7 @@ pub fn commit_in_tx(
                 ir,
                 sort,
                 anchor,
+                inherited_cell_url,
                 keep,
             } => {
                 if !keep {
@@ -276,6 +310,20 @@ pub fn commit_in_tx(
                 let group_id = db::nodes::create(conn, &node, None)?.id;
                 if !as_module {
                     report.created_collection_ids.push(group_id.clone());
+                } else if apply_base_url {
+                    if let Some(cell) = &ir.base_url {
+                        // 落到项目顶层时这一格归新建的模块自己。写的是后端 api 地址与
+                        // 实际访问地址这一对；规格没提代理时这一格保持没有代理（新建的
+                        // 模块本来就没有代理）。
+                        wire_base_url(
+                            conn,
+                            &group_id,
+                            &cell.url,
+                            cell.proxy.as_deref(),
+                            environment,
+                            &mut report,
+                        )?;
+                    }
                 }
                 // 模块**不能**存脚本（`node_scripts` 只认 collection）。落进已有模块时
                 // 这一层降级成了集合，脚本就有归宿了；落到项目顶层时它只能是模块，
@@ -297,6 +345,7 @@ pub fn commit_in_tx(
                         ir: c,
                         parent_id: group_id.clone(),
                         sort: i as i64,
+                        inherited_cell_url: inherited_cell_url.clone(),
                         keep: has_any_collection(c, writable),
                     });
                 }
@@ -305,6 +354,7 @@ pub fn commit_in_tx(
                         ir: ep,
                         parent_id: group_id.clone(),
                         sort: i as i64,
+                        inherited_cell_url: inherited_cell_url.clone(),
                     });
                 }
             }
@@ -312,6 +362,7 @@ pub fn commit_in_tx(
                 ir,
                 parent_id,
                 sort,
+                inherited_cell_url,
                 keep,
             } => {
                 if !keep {
@@ -345,6 +396,7 @@ pub fn commit_in_tx(
                         ir: c,
                         parent_id: collection_id.clone(),
                         sort: i as i64,
+                        inherited_cell_url: inherited_cell_url.clone(),
                         keep: has_any_collection(c, writable),
                     });
                 }
@@ -353,6 +405,7 @@ pub fn commit_in_tx(
                         ir: ep,
                         parent_id: collection_id.clone(),
                         sort: i as i64,
+                        inherited_cell_url: inherited_cell_url.clone(),
                     });
                 }
             }
@@ -360,6 +413,7 @@ pub fn commit_in_tx(
                 ir,
                 parent_id,
                 sort,
+                inherited_cell_url,
             } => {
                 // 没被判定为「会写」的（没勾选、或已被指纹认出）整条不写。
                 // 两者的区别只体现在第一遍报出的跳过记录上，不落到树里。
@@ -389,13 +443,16 @@ pub fn commit_in_tx(
                     method: ir.method.clone(),
                     // `ir` 存的是 path-only，`domain` 这一列同样是 path，故这是一次改名。
                     url: ir.path.clone(),
-                    // 服务与环境都取自上面那一次 `wire_service`。两者缺席不是「还没定」：
-                    // 没有服务时写 `None` 的含义是「用项目的 ★」，而 URL 解析链把它当成
-                    // 一个**真实答案**——故那次判定要么给出这两个 id，要么明确告诉我们它
-                    // 什么都没做。
-                    environment_id: wiring.as_ref().map(|w| w.environment_id.clone()),
-                    base_url_definition_id: wiring.as_ref().map(|w| w.definition_id.clone()),
-                    base_url_override: None,
+                    // 环境取自上面那一次 `plan_base_url`：地址住进 (环境 × 模块) 那一格，
+                    // 而格子只在某一个环境里。端点带上那个环境，解析时才找得到那一格。
+                    environment_id: environment.map(|e| e.id.clone()),
+                    // 端点自己的地址。与继承来的那一格相同时不写——那表示「跟随模块」，
+                    // 用户改了模块的地址时这个端点也跟着走。地址不同时才写自己的。
+                    base_url_override: if apply_base_url {
+                        endpoint_override(ir, inherited_cell_url.as_deref())
+                    } else {
+                        None
+                    },
                     params: ir.params.clone(),
                     path_params: ir.path_params.clone(),
                     headers: ir.headers.clone(),
@@ -419,6 +476,18 @@ pub fn commit_in_tx(
     }
 
     Ok(report)
+}
+
+/// 端点自己的地址。
+///
+/// 与继承来的那一格相同 → 不写，那表示「跟随模块」，用户改了模块的地址时这个端点也跟着
+/// 走；不同 → 写自己的那一份。端点本来就没有自己的地址 → 不写，它继承模块那一格。
+fn endpoint_override(ep: &IrEndpoint, inherited_cell_url: Option<&str>) -> Option<String> {
+    let own = ep.base_url_override.clone()?;
+    match inherited_cell_url {
+        Some(cell) if cell == own => None,
+        _ => Some(own),
+    }
 }
 
 /// 把一个节点上的两段脚本写进 `node_scripts`。
@@ -461,7 +530,7 @@ fn write_scripts(
 /// 各处，指任何一个都是撒谎，故指根。
 const DOC_ROOT: &str = "/";
 
-// 测试——结构与事务边界、去重、选择集、服务。
+// 测试——结构与事务边界、去重、选择集、地址。
 
 #[cfg(test)]
 mod support;
@@ -479,8 +548,8 @@ mod dedupe_tests;
 mod selection_tests;
 
 #[cfg(test)]
-#[path = "service_test.rs"]
-mod service_tests;
+#[path = "base_url_test.rs"]
+mod base_url_tests;
 
 #[cfg(test)]
 #[path = "script_test.rs"]

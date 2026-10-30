@@ -40,9 +40,6 @@ fn an_environment_from_another_project_is_not_resolved() {
                     id: id.to_string(),
                     name: name.to_string(),
                     description: None,
-                    base_url: None,
-                    base_url_definitions: Vec::new(),
-                    default_base_url_definition_id: None,
                     color: String::new(),
                     created_at: 0,
                     updated_at: 0,
@@ -53,7 +50,6 @@ fn an_environment_from_another_project_is_not_resolved() {
             id: "env_foreign".to_string(),
             project_id: "p_other".to_string(),
             name: "dev".to_string(),
-            base_urls: Default::default(),
             module_base_urls: Default::default(),
             variables: [("token".to_string(), "secret".to_string())]
                 .into_iter()

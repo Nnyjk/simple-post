@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { TransferTree } from './TransferTree';
-import { missingServerEnvironmentName } from './useTransfer';
+import { missingEnvironmentName } from './useTransfer';
 import type { TransferController } from './useTransfer';
 
 interface TransferDialogProps {
@@ -151,23 +151,23 @@ function PreviewStep({
     selected,
     environmentId,
     format,
-    applyService,
-    missingServers,
+    applyBaseUrl,
+    missingBaseUrls,
     changeEnvironment,
     setFormat,
-    setApplyService,
+    setApplyBaseUrl,
   } = controller;
   const counts = preview?.counts;
   const warned = diagnostics.filter((d) => d.severity !== 'info');
   const [showInfo, setShowInfo] = useState(false);
   const info = diagnostics.filter((d) => d.severity === 'info');
 
-  // 缺席是真实答案：没有 host、或多于一个 host（后者另有诊断说明），都不建服务。
-  const proposedService = isImport ? (preview as ImportPreview | null)?.service : undefined;
+  // 缺席是真实答案：文档没给 host 就不落地址。
+  const proposedBaseUrls = isImport ? ((preview as ImportPreview | null)?.baseUrls ?? []) : [];
 
-  // 提示按**所选**环境点名：预览已按那个环境重取过，模块缺不缺 URL 是那个环境
-  // 下的事实。「不选环境」时没有环境可点，只说「没有配置服务 URL」。
-  const missingEnvName = missingServerEnvironmentName(environments, environmentId);
+  // 提示按**所选**环境点名：预览已按那个环境重取过，模块缺不缺地址是那个环境
+  // 下的事实。「不选环境」时没有环境可点，只说「没有配置地址」。
+  const missingEnvName = missingEnvironmentName(environments, environmentId);
 
   return (
     <div className="space-y-3">
@@ -200,7 +200,7 @@ function PreviewStep({
             value={environmentId}
             onChange={(e) => void changeEnvironment(e.target.value)}
             options={[
-              { value: '', label: '不选环境（不输出 servers）' },
+              { value: '', label: '不选环境（不输出地址）' },
               ...environments.map((e) => ({ value: e.id, label: e.name })),
             ]}
             className="h-7 text-[11px]"
@@ -210,34 +210,31 @@ function PreviewStep({
         </div>
       )}
 
-      {!isImport && missingServers.length > 0 && (
+      {!isImport && missingBaseUrls.length > 0 && (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           <span className="text-warning-foreground">
-            {missingEnvName ? `环境「${missingEnvName}」下没有配置服务 URL` : '没有配置服务 URL'}
+            {missingEnvName ? `环境「${missingEnvName}」下没有配置地址` : '没有配置地址'}
           </span>
-          ：{missingServers.join('、')}。这些模块不会输出 <code className="font-mono">servers</code>
-          ，也不会借用别的模块的地址或项目的 ★。
+          ：{missingBaseUrls.join('、')}。这些模块不会输出地址，也不借用别的模块的地址。
         </p>
       )}
 
-      {proposedService && (
+      {proposedBaseUrls.length > 0 && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground">服务</span>
+          <span className="text-[11px] text-muted-foreground">地址</span>
           <Switch
-            checked={applyService}
-            onCheckedChange={setApplyService}
-            aria-label="把文档里的地址保存为服务"
+            checked={applyBaseUrl}
+            onCheckedChange={setApplyBaseUrl}
+            aria-label="把文档里的地址写进模块格子"
           />
-          <span className="truncate text-[11px] text-foreground">{proposedService.service}</span>
-          <span className="truncate font-mono text-[10px] text-faint">{proposedService.url}</span>
+          {proposedBaseUrls.map((b) => (
+            <span key={b.url} className="truncate font-mono text-[10px] text-faint">
+              {b.url}
+            </span>
+          ))}
           <div className="flex-1" />
-          {proposedService.existing ? (
-            <Badge variant="muted">复用已有服务</Badge>
-          ) : (
-            <Badge variant="outline">将新建服务</Badge>
-          )}
-          {proposedService.environmentName ? (
-            <Badge variant="muted">写入环境「{proposedService.environmentName}」</Badge>
+          {proposedBaseUrls.every((b) => b.environmentName) ? (
+            <Badge variant="outline">将写入模块格子</Badge>
           ) : (
             <Badge variant="warning">没有激活环境，地址无处可写</Badge>
           )}
@@ -314,23 +311,18 @@ function DoneStep({ result }: { result: NonNullable<TransferController['result']
           新建环境：{result.environmentsCreated.join('、')}
         </p>
       )}
-      {result.service && (
+      {result.baseUrls && result.baseUrls.length > 0 && (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          {result.service.created ? '新建' : '复用'}服务{' '}
-          <span className="font-mono text-foreground">{result.service.name}</span>
-          {result.service.environmentName ? (
-            <>
-              ，地址 <span className="font-mono text-foreground">{result.service.url}</span>{' '}
-              已写入环境「
-              {result.service.environmentName}」，接口按它解析。
-            </>
-          ) : (
-            <>
-              。项目没有激活环境，地址{' '}
-              <span className="font-mono text-foreground">{result.service.url}</span>{' '}
-              没有落进任何一格，接口仍按项目的 ★ 解析。
-            </>
-          )}
+          地址{' '}
+          {result.baseUrls.map((b) => (
+            <span key={`${b.moduleId}:${b.url}`} className="font-mono text-foreground">
+              {b.url}{' '}
+            </span>
+          ))}
+          已写入
+          {result.baseUrls.every((b) => b.environmentName)
+            ? '模块格子，接口按它解析。'
+            : '时没有激活环境，地址没有落进任何一格。'}
         </p>
       )}
       {result.diagnostics.filter((d) => d.severity !== 'info').length > 0 && (

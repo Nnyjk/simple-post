@@ -29,12 +29,12 @@ function render(props: { url: string; items: KeyValue[]; error?: string | null }
 
 describe('路径参数编辑器', () => {
   it('空状态也显示发送被拦下的原因', () => {
-    // 占位符只存在于前置 URL 时，端点自己的 URL 里没有占位符，编辑器走进空状态；
+    // 占位符只存在于模块地址时，端点自己的 URL 里没有占位符，编辑器走进空状态；
     // 那条分支曾把 `error` 整段漏掉 —— 用户被切到这一页，却看不到该去哪里改。
     const html = render({
       url: '/users',
       items: [],
-      error: '路径参数 id 在前置 URL 里没有填值，填好才能发送',
+      error: '路径参数 id 在模块地址里没有填值，填好才能发送',
     });
     assert.match(html, /没有填值/);
   });

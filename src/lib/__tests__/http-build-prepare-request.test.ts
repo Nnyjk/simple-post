@@ -54,12 +54,65 @@ describe('prepareRequest: base URL join', () => {
     // 会让 `https://{{host}}/v1` 留在半替换状态
     const env = {
       variables: { host: 'api.example.com', site: 'cn' },
-      baseUrls: {},
+      moduleBaseUrls: {},
     } as unknown as Environment;
     const r = prepareRequest(
       prep({ baseUrl: 'https://{{host}}', urlPath: '/{{site}}/users', env }),
     );
     assert.equal(r.url, 'https://api.example.com/cn/users');
+  });
+});
+
+/**
+ * 代理前缀替换。顺序是硬的：`{{var}}` 替换 → 代理前缀替换 → 折叠斜杠。
+ *
+ * 代理替换排在模板替换之后，因为要换掉的正是**解析出来的**那个前缀；代理地址自己
+ * 也走一趟 `{{var}}`，故它里面写的变量同样会被解析，缺哪个变量都进缺值报告。
+ */
+describe('prepareRequest: proxy prefix replacement', () => {
+  it('replaces the module address prefix with the proxy address', () => {
+    const r = prepareRequest(
+      prep({
+        baseUrl: 'http://svc.internal:8080/api/a',
+        urlPath: '/orders/list',
+        proxy: 'https://gw.corp.com/api/xxxx/a',
+      }),
+    );
+    assert.equal(r.url, 'https://gw.corp.com/api/xxxx/a/orders/list');
+  });
+
+  it('leaves the URL alone when there is no proxy', () => {
+    const r = prepareRequest(
+      prep({ baseUrl: 'http://svc.internal:8080/api/a', urlPath: '/orders/list' }),
+    );
+    assert.equal(r.url, 'http://svc.internal:8080/api/a/orders/list');
+  });
+
+  it('resolves {{var}} inside the proxy address', () => {
+    const env = {
+      variables: { gw: 'gw.corp.com' },
+      moduleBaseUrls: {},
+    } as unknown as Environment;
+    const r = prepareRequest(
+      prep({
+        baseUrl: 'http://svc.internal:8080/api/a',
+        urlPath: '/orders',
+        proxy: 'https://{{gw}}/api/a',
+        env,
+      }),
+    );
+    assert.equal(r.url, 'https://gw.corp.com/api/a/orders');
+  });
+
+  it('reports a variable the proxy address cannot resolve', () => {
+    const r = prepareRequest(
+      prep({
+        baseUrl: 'http://svc.internal:8080/api/a',
+        urlPath: '/orders',
+        proxy: 'https://{{gone}}/api/a',
+      }),
+    );
+    assert.deepEqual(r.missingVars, ['gone']);
   });
 });
 
@@ -347,7 +400,7 @@ describe('prepareRequest: missingVars', () => {
     const r = prepareRequest(
       prep({
         urlPath: '/{{a}}',
-        env: { variables: { a: '{{b}}' }, baseUrls: {} } as unknown as Environment,
+        env: { variables: { a: '{{b}}' }, moduleBaseUrls: {} } as unknown as Environment,
       }),
     );
     assert.equal(r.url, '/{{b}}');

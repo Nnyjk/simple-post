@@ -25,8 +25,8 @@ fn state() -> std::sync::Arc<AppState> {
 }
 
 #[test]
-fn table_count_is_29() {
-    assert_eq!(table().len(), 29);
+fn table_count_is_24() {
+    assert_eq!(table().len(), 24);
 }
 
 #[tokio::test]
@@ -56,9 +56,6 @@ async fn module_move_preserves_collections_and_endpoints() {
             id: String::new(),
             name: String::new(),
             description: None,
-            base_url: None,
-            base_url_definitions: vec![],
-            default_base_url_definition_id: None,
             color: String::new(),
             created_at: 0,
             updated_at: 0,
@@ -147,7 +144,6 @@ async fn module_move_preserves_collections_and_endpoints() {
                 method: simple_post_core::domain::HttpMethod::Get,
                 url: "/x".into(),
                 environment_id: None,
-                base_url_definition_id: None,
                 base_url_override: None,
                 params: vec![],
                 path_params: vec![],
@@ -259,9 +255,6 @@ async fn endpoint_create_accepts_a_module_parent() {
             id: String::new(),
             name: String::new(),
             description: None,
-            base_url: None,
-            base_url_definitions: vec![],
-            default_base_url_definition_id: None,
             color: String::new(),
             created_at: 0,
             updated_at: 0,

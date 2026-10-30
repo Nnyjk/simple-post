@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::*;
 use crate::permissions::CapabilityPolicy;
-use simple_post_interchange::ir::IrServer;
+use simple_post_interchange::ir::IrBaseUrl;
 use simple_post_interchange::Diagnostic;
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -15,8 +15,8 @@ use simple_post_interchange::Diagnostic;
 pub struct CreateProjectOpts {
     pub description: Option<String>,
     pub color: Option<String>,
-    // 没有 `baseUrl`。base URL 属于（环境 × 模块 × 服务）三者的交叉格，而新建
-    // 项目时用户还没起服务名；那一格矩阵由用户在设置里填。
+    // 没有 `baseUrl`。base URL 住在（环境 × 模块）那一格，而新建项目时用户还没
+    // 起模块；那一格矩阵由用户在设置里填。
 }
 
 /// Tauri 与 Web 共用的能力策略返回形状。
@@ -56,7 +56,6 @@ pub struct CreateEndpointDetailOpts {
     pub method: Option<HttpMethod>,
     pub url: Option<String>,
     pub environment_id: Option<String>,
-    pub base_url_definition_id: Option<String>,
     pub body: Option<RequestBody>,
     pub auth: Option<AuthConfig>,
     pub tags: Option<Vec<String>>,
@@ -89,7 +88,6 @@ impl CreateEndpointDetailOpts {
             method: self.method.unwrap_or_default(),
             url: self.url.unwrap_or_default(),
             environment_id: self.environment_id,
-            base_url_definition_id: self.base_url_definition_id,
             base_url_override: None,
             params: self.params.unwrap_or_default(),
             path_params: self.path_params.unwrap_or_default(),
@@ -109,40 +107,8 @@ impl CreateEndpointDetailOpts {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateEnvironmentOpts {
-    pub base_urls: Option<std::collections::HashMap<String, String>>,
     pub variables: Option<std::collections::HashMap<String, String>>,
     pub make_active: Option<bool>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BaseUrlDefPatch {
-    pub name: Option<String>,
-    pub description: Option<Option<String>>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreateBaseUrlDefOpts {
-    pub description: Option<String>,
-    /// 客户端自铸的 id，非空白时照单采纳。
-    ///
-    /// renderer 在这一行存在之前就已经在两个地方持有这个 id——项目的 ★，以及它顺带
-    /// 种下的每个（环境 × 模块）URL 单元格——故服务端铸出的 id 会让两者都指向孤儿。
-    /// 见 [`adopt_or_mint_id`]，两条 transport 都调它。
-    pub id: Option<String>,
-}
-
-/// 采纳调用方给的 id，没有则铸一个。
-///
-/// 两条 transport（Tauri 命令的 `opts.id` 与 REST body 的 `id`）共用这一条规则，
-/// 「服务 id 归谁铸」就不会在两边漂移：由 renderer 铸，是因为它在行存在之前就需要这个
-/// id。空白按缺失处理，免得 `""`（或纯空白）造出空 id 的行。
-pub fn adopt_or_mint_id(requested: Option<String>) -> String {
-    match requested {
-        Some(id) if !id.trim().is_empty() => id,
-        _ => crate::domain::uid(),
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -275,7 +241,7 @@ pub struct TransferEndpoint {
     pub name: String,
     /// 大写动词。`TRACE` 之类是 `HttpMethod::Custom`，`as_str()` 原样返回。
     pub method: String,
-    /// 只有路径。host 不在这里——它住在分组那一层的 `servers` 上。
+    /// 只有路径。host 不在这里——它住在模块那一格的地址上。
     pub path: String,
     pub body_mode: BodyMode,
     pub auth: AuthType,
@@ -307,36 +273,33 @@ pub struct ImportedEnvironmentDto {
     pub disabled_variable_count: usize,
 }
 
-/// 预览里「这份文档会落成一个服务」的预告。
+/// 预览里「这份文档会落成哪些地址」的预告。
 ///
-/// **缺席是一个真实答案**，不是「待定」：文档没给 host、或给了多于一个 host 时就是
-/// 缺席（后者附一条 `Warn` 诊断说明为什么）。
+/// **缺席是一个真实答案**，不是「待定」：文档没给 host 时就是缺席（附一条 `Warn`
+/// 诊断说明为什么）。一份文档可以给出多个地址——它们分别落进各自的模块格子。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProposedServiceDto {
-    /// 服务名，即 host。项目内唯一。
-    pub service: String,
-    /// 文档给出的那个 URL。落库时它会被写进目标模块在这个环境下的那一格。
+pub struct ProposedBaseUrlDto {
+    /// 文档给出的那个地址。落库时它会被写进目标模块在这个环境下的那一格。
     pub url: String,
-    /// 项目里已有同名服务，落库时复用而不是新建。URL 不在服务行上，复用不会改动
-    /// 别的模块的地址。
-    pub existing: bool,
-    /// URL 会写进哪个环境。项目没有激活环境时为 `None`——服务仍然建，只是格子无处可填。
+    /// 地址会写进哪个环境。项目没有激活环境时为 `None`——地址没有落进任何一格。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment_name: Option<String>,
 }
 
-/// 落库报告里已经落下的服务。
+/// 落库报告里已经落下的地址。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AppliedServiceDto {
-    pub name: String,
+pub struct AppliedBaseUrlDto {
+    /// 写进那一格的后端 api 地址。
     pub url: String,
-    /// 服务定义是新建的（`false` = 复用了项目里已有的同名服务）。
-    pub created: bool,
-    /// 端点有没有被指向它。为 `false` 只有一种情形：项目没有激活环境。
-    pub assigned: bool,
-    /// URL 写进了哪个环境。为 `None` 表示没写进去。
+    /// 那一格里实际生效的实际访问地址。外来文档给不出代理，故导入只写地址那一半，
+    /// 那一格原有的代理保留；这一项写的是该格**实际**的代理值，没有代理时为 `None`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
+    /// 写进了哪个模块的格子。
+    pub module_id: String,
+    /// 写进了哪个环境。项目没有激活环境时为 `None`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment_name: Option<String>,
 }
@@ -356,9 +319,9 @@ pub struct ImportPreviewDto {
     pub counts: TransferCounts,
     pub diagnostics: Vec<Diagnostic>,
     pub environments: Vec<ImportedEnvironmentDto>,
-    /// 文档恰好给出一个 host 时有值：会新建（或复用）这个服务并把 URL 填进目标模块。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub service: Option<ProposedServiceDto>,
+    /// 文档给出的地址。空集表示这份文档没有地址可落。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub base_urls: Vec<ProposedBaseUrlDto>,
     /// **仅 URL 模式**回传：拉到的原文。前端原样送回 commit，故一次导入只拉一次
     /// 文档，且 commit 的行为不取决于那之后源站有没有变。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -374,20 +337,21 @@ pub struct ImportCommitDto {
     pub created_endpoint_ids: Vec<String>,
     pub environments_created: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
-    /// 实际落下的服务。为 `None` 表示这一次没碰服务表。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub service: Option<AppliedServiceDto>,
+    /// 实际落下的地址。空集表示这一次没有地址落进任何一格。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub base_urls: Vec<AppliedBaseUrlDto>,
 }
 
-/// 一个模块在所选环境下的服务 URL。
+/// 一个模块在所选环境下的那一格地址。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModuleServersDto {
+pub struct ModuleBaseUrlDto {
     pub module_key: String,
     pub module_name: String,
-    /// **空数组是真实答案**：该模块在此环境下没有配 URL，导出时就不写 `servers`，
-    /// 不借用别的模块的，也不落回项目 ★。
-    pub servers: Vec<IrServer>,
+    /// **缺席是一个真实答案**：该模块在此环境下没有配地址，导出时就不写 `servers`，
+    /// 不借用别的模块的。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<IrBaseUrl>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -396,10 +360,10 @@ pub struct ExportPreviewDto {
     pub groups: Vec<TransferNode>,
     pub counts: TransferCounts,
     /// 实际用到的环境 id。为 `None` 表示没选出环境（或该项目没有激活环境），
-    /// 那时每个模块的 `servers` 都是空的——这是忠实答案，不是「待补」。
+    /// 那时每个模块的 `base_url` 都是缺席的——这是忠实答案，不是「待补」。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment_id: Option<String>,
-    pub servers: Vec<ModuleServersDto>,
+    pub base_urls: Vec<ModuleBaseUrlDto>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -440,10 +404,10 @@ pub struct ImportCommitOpts {
     /// 勾中的端点 key。空集表示「一个都不导」——那是用户的选择，不是失败。
     #[serde(default)]
     pub selected: Vec<String>,
-    /// 是否把文档里的 host 落成服务。**缺席为真**：文档带了 host 就该有服务，
+    /// 是否把文档里的 host 落成地址。**缺席为真**：文档带了 host 就该有地址，
     /// 用户要的是「地址别丢」；关掉它是一种明确的取舍，不是默认值。
     #[serde(default)]
-    pub apply_service: Option<bool>,
+    pub apply_base_url: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -451,7 +415,7 @@ pub struct ImportCommitOpts {
 pub struct ExportPreviewOpts {
     pub project_id: String,
     pub module_id: String,
-    /// 按哪个环境解析 `servers`。**缺席或空串 = 取激活环境**（与今天一致）。
+    /// 按哪个环境解析那一格的地址。**缺席或空串 = 取激活环境**（与今天一致）。
     ///
     /// 空串必须与「没传」等价：渲染层「不选环境」那一项送来的就是空串，而空串
     /// 不是一个环境 id——按 id 去查会得到「环境不存在」。
@@ -464,7 +428,7 @@ pub struct ExportPreviewOpts {
 pub struct ExportDocumentOpts {
     pub project_id: String,
     pub module_id: String,
-    /// 空串 = 不选环境。此时 `servers` 恒为空，导出的文档不带 `servers`。
+    /// 空串 = 不选环境。此时每个模块的地址都是缺席的，导出的文档不带 `servers`。
     #[serde(default)]
     pub environment_id: String,
     #[serde(default)]
