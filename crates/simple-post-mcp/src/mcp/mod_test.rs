@@ -122,11 +122,16 @@ fn every_capability_row_names_a_registered_tool() {
 /// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
 ///
 /// **上限怎么算出来的。** 紧凑 JSON 约 **4.71 字节 / token**（`cl100k_base` 实测；
-/// 「字符数 ÷ 3」高估六成），40 752 字节 ≈ **8 653 tokens**，故上限取 41 400 字节。
+/// 「字符数 ÷ 3」高估六成），41 392 字节 ≈ **8 788 tokens**，故上限取 42 000 字节。
 /// 超限时把长说明移到 `simple-post://spec-authoring`，不要扩大工具描述。
 ///
 /// **上限量的是字节**：载荷里含中文描述，`String::len()` 按 UTF-8 字节算，
-/// 故同一份载荷是 40 700 字符、40 752 字节。
+/// 故同一份载荷是 41 340 字符、41 392 字节。
+///
+/// **42 000 这个上限对应哪几段契约。** 清单里有三段说明是代理地址带来的：
+/// `env_set_baseurl` 的 `proxy` 参数、`spec_upsert` 的 environment 段、
+/// `api_call_endpoint` 的 `settings_override`。加上这三段之后载荷是 41 392 字节，
+/// 上限取 42 000，给它们留 608 字节的余量。
 ///
 /// **这份清单现在装了什么。** 47 条描述符里没有一条携带「服务 id」字段：地址住在
 /// （环境 × 模块）一格里，`env_set_baseurl` 按 `env_id` + `module_id` 写那一格。
@@ -134,7 +139,7 @@ fn every_capability_row_names_a_registered_tool() {
 /// **上限要动时怎么写。** 契约长大先把新加的那几段说明压到一行，压到一行还嫌长
 /// 再动上限；上限一动，就在同一次提交里写清是哪一段契约把载荷顶大了、新的测量值
 /// 是多少，否则下一个接手的人只看到一个数字，会以为这个上限是随手拍的。
-const TOOLS_LIST_BUDGET_BYTES: usize = 41_400;
+const TOOLS_LIST_BUDGET_BYTES: usize = 42_000;
 
 #[test]
 fn the_tools_list_payload_stays_under_its_budget() {
@@ -154,7 +159,7 @@ fn the_tools_list_payload_stays_under_its_budget() {
         "tools/list 是 {} 字节（约 {} tokens），超过上限 {} 字节。\
          详细的规则与例子放 `simple-post://spec-authoring` 那份指南，别往工具描述里塞。",
         payload.len(),
-        payload.len() * 100 / 473,
+        payload.len() * 100 / 471,
         TOOLS_LIST_BUDGET_BYTES
     );
 }

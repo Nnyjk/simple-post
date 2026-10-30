@@ -47,20 +47,23 @@ pub(crate) fn missing_pieces(
     //
     // 端点自己钉了 host（`base_url_override` 是 `Some`）时不需要格子。`Some("")` 是
     // 「明确不要前缀」，也是一个有意选定的答案，故同样不报。
-    let base_url = if detail.base_url_override.is_some() {
-        String::new()
+    let (base_url, proxy) = if detail.base_url_override.is_some() {
+        (String::new(), None)
     } else {
         let resolved =
             crate::variable_fill::resolve_base_url(detail, env.as_ref(), module_id.as_deref());
         if resolved.source == crate::variable_fill::BaseUrlSource::None {
             out.push(base_url_gap(pool, env.as_ref(), module_id.as_deref()));
         }
-        resolved.base_url
+        (resolved.base_url, resolved.proxy)
     };
 
     // ---- 变量 ----
     let parts = simple_post_core::dynamic::TemplateParts {
         base_url: &base_url,
+        // 代理地址会被 `{{var}}` 替换，故它里面的标记同样参与扫描：只出现在代理地址里
+        // 的动态变量缺了，这个端点同样发不出去。
+        proxy: proxy.as_deref(),
         url: &detail.url,
         params: &detail.params,
         // 路径参数值里的 `{{var}}` 照样会被替换，故它们同样参与扫描。

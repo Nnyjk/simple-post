@@ -65,7 +65,7 @@ fn guide() -> Value {
                 "environment": {
                     "name": "<环境名，不存在就建；用 id 指认已有环境>",
                     "variables": { "<变量名>": "<值>" },
-                    "base_url": "<这个环境 × 模块 那一格的后端 api 地址>",
+                    "baseUrl": "<这个环境 × 模块 那一格的后端 api 地址>",
                     "baseUrlProxy": "<这一格的实际访问地址；接口经代理网关转代时才写>",
                     "activate": true
                 },

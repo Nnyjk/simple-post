@@ -140,9 +140,12 @@ fn env(case: Option<&EnvCase>) -> Option<Environment> {
 #[test]
 fn every_case_matches_the_shared_sample() {
     let fixture = fixture();
-    assert!(
-        !fixture.cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    // 条数写死：样本的键名漂了或样本被改小，这条断言也得红。写成「非空」的话，
+    // 上面那几行 `if` 一条都走不到，测试还是绿的。
+    assert_eq!(
+        fixture.cases.len(),
+        11,
+        "样本里的 case 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 
     // 先把全部不符收集起来再一次性断言：`assert_eq!` 失败就 panic，后面的 case 就不再
@@ -183,9 +186,10 @@ fn every_case_matches_the_shared_sample() {
 #[test]
 fn every_proxy_case_matches_the_shared_sample() {
     let fixture = fixture();
-    assert!(
-        !fixture.proxy_cases.is_empty(),
-        "样本里必须有 proxyCase，否则这条测试是空的"
+    assert_eq!(
+        fixture.proxy_cases.len(),
+        9,
+        "样本里的 proxyCase 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 
     let mut mismatches: Vec<String> = Vec::new();

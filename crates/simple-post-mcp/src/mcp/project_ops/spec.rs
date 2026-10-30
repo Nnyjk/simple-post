@@ -74,6 +74,13 @@ fn auth_schema() -> Value {
 }
 
 /// 环境那一段的 JSON Schema。
+///
+/// 多词字段一律用 camelCase，与同一份 schema 里的 `endpoint` 段一致
+/// （`pathParams` / `baseUrlOverride` / `preRequestScript`）。
+///
+/// `simple_post_core::spec::upsert::EnvironmentSpec` 同样收 snake_case 的别名，故服务端比
+/// 这份 schema 宽：调用方写 `base_url` 一样收得到。那是宽容，不是两套契约 —— 规范拼写
+/// 只有 camelCase 这一套，schema 写的与 core 的别名都收的正是它。
 fn environment_schema() -> Value {
     json!({
         "type": "object",
@@ -86,12 +93,12 @@ fn environment_schema() -> Value {
                 "description": "Variables to write. They are merged into the environment's variables; the ones the spec does not mention are kept.",
                 "additionalProperties": { "type": "string" }
             },
-            "disabled_variables": {
+            "disabledVariables": {
                 "type": "array",
                 "items": { "type": "string" },
                 "description": "Variable names to disable. A disabled variable is stored and shown but takes no part in substitution."
             },
-            "base_url": {
+            "baseUrl": {
                 "type": "string",
                 "description": "The backend api address of the (environment x module) cell. That cell has no other dimension to fall back on."
             },

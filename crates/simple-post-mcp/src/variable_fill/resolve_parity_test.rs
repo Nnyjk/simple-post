@@ -10,11 +10,14 @@ use serde_json::Value;
 use super::resolve_endpoint;
 use super::types::EndpointOverrides;
 use simple_post_core::domain::{
-    AuthConfig, BodyMode, EndpointDetail, Environment, KeyValue, RequestBody,
+    AuthConfig, BodyMode, EndpointDetail, Environment, KeyValue, ModuleBaseUrl, RequestBody,
 };
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
 const FIXTURE: &str = include_str!("../../../../fixtures/resolve-parity.json");
+
+/// 带代理的用例把 base URL 与代理放进环境里（环境 × 模块）那一格，模块 id 用这一个。
+const CELL_MODULE_ID: &str = "mod_a";
 
 #[derive(Debug, Deserialize)]
 struct Fixture {
@@ -35,6 +38,13 @@ struct Input {
     method: String,
     url_path: String,
     base_url: String,
+    /// 那一格的实际访问地址。
+    ///
+    /// **在场时** base URL 与代理一起住在环境里（环境 × 模块）那一格：渲染进程那一侧
+    /// 直接拿这两个值，MCP 那一侧的 `resolve_endpoint` 只从格子里读代理，故这类用例在
+    /// 两侧走的是不同的取数路径。**缺席时** base URL 走端点自己的 override，不套代理。
+    #[serde(default)]
+    proxy: Option<String>,
     #[serde(default)]
     params: Vec<KeyValue>,
     #[serde(default)]
@@ -73,7 +83,13 @@ fn detail(input: &Input) -> EndpointDetail {
             .expect("样本里的 method 必须是合法的 HTTP 动词"),
         url: input.url_path.clone(),
         environment_id: None,
-        base_url_override: Some(input.base_url.clone()),
+        // 带代理的用例里 base URL 住在格子上，端点自己的 override 必须让开：override
+        // 在场时代理不参与（那一格属于模块，不属于端点）。
+        base_url_override: if input.proxy.is_some() {
+            None
+        } else {
+            Some(input.base_url.clone())
+        },
         params: input.params.clone(),
         path_params: input.path_params.clone(),
         headers: input.headers.clone(),
@@ -88,12 +104,22 @@ fn detail(input: &Input) -> EndpointDetail {
     }
 }
 
-fn env(variables: &std::collections::BTreeMap<String, String>) -> Environment {
+fn env(variables: &std::collections::BTreeMap<String, String>, input: &Input) -> Environment {
+    let mut module_base_urls = std::collections::HashMap::new();
+    if let Some(proxy) = &input.proxy {
+        module_base_urls.insert(
+            CELL_MODULE_ID.to_string(),
+            ModuleBaseUrl {
+                url: input.base_url.clone(),
+                proxy: Some(proxy.clone()),
+            },
+        );
+    }
     Environment {
         id: "env1".into(),
         project_id: "p1".into(),
         name: "dev".into(),
-        module_base_urls: Default::default(),
+        module_base_urls,
         variables: variables
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -106,16 +132,28 @@ fn env(variables: &std::collections::BTreeMap<String, String>) -> Environment {
 #[test]
 fn every_parity_case_resolves_the_same_way() {
     let fixture = fixture();
-    assert!(
-        !fixture.cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    // 条数写死：样本的键名漂了或样本被改小，这条断言也得红。写成「非空」的话，
+    // 下面那几行 `assert_eq!` 一条都走不到，测试还是绿的。
+    assert_eq!(
+        fixture.cases.len(),
+        15,
+        "样本里的 case 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 
     for case in &fixture.cases {
         let detail = detail(&case.input);
-        let env = env(&case.env);
+        let env = env(&case.env, &case.input);
+        // 带代理的用例要指到模块，否则 `resolve_base_url` 读不到那一格，代理无从参与。
+        let overrides = EndpointOverrides {
+            module_id: case
+                .input
+                .proxy
+                .as_ref()
+                .map(|_| CELL_MODULE_ID.to_string()),
+            ..Default::default()
+        };
         // 样本的 base URL 走端点自己的 override，故环境里没有格子也不影响。
-        let resolved = resolve_endpoint(&detail, Some(&env), Some(&EndpointOverrides::default()))
+        let resolved = resolve_endpoint(&detail, Some(&env), Some(&overrides))
             .unwrap_or_else(|e| panic!("{}: 解析失败: {e}", case.name));
 
         assert_eq!(resolved.url, case.expected.url, "{}: URL", case.name);

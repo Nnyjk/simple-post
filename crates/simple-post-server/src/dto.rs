@@ -293,7 +293,8 @@ pub struct ProposedBaseUrlDto {
 pub struct AppliedBaseUrlDto {
     /// 写进那一格的后端 api 地址。
     pub url: String,
-    /// 写进那一格的实际访问地址。外来文档给不出代理，故导入时恒为 `None`。
+    /// 那一格里实际生效的实际访问地址。外来文档给不出代理，故导入只写地址那一半，
+    /// 那一格原有的代理保留；这一项写的是该格**实际**的代理值，没有代理时为 `None`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub proxy: Option<String>,
     /// 写进了哪个模块的格子。

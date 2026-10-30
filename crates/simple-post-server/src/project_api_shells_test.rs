@@ -60,3 +60,44 @@ fn both_transports_call_the_shared_layer() {
         }
     }
 }
+
+/// 写（环境 × 模块）那一格的两个薄壳：源码路径、源码本身、它必须调的片段、它不得自己写的那几行。
+///
+/// 这一格的写入语义在 `core::db::environments::set_module_base_url` 里：`None` = 不动、
+/// `Some("")` = 清空该字段、两个字段皆空 → 删掉整格。两个薄壳都把参数原样递进去，
+/// 于是这两个字段的语义只有一个出处。
+///
+/// 「不得自己写的那几行」是直接改那张 map：薄壳一旦自己动 `module_base_urls`，那它就在
+/// 自己实现「清空」与「删格」，而那条规则只有一处是对的。
+const CELL_SHELLS: &[(&str, &str, &[&str], &[&str])] = &[
+    (
+        "src-tauri/src/commands/environments.rs",
+        include_str!("../../../src-tauri/src/commands/environments.rs"),
+        &["set_module_base_url("],
+        &["module_base_urls.insert(", "module_base_urls.remove("],
+    ),
+    (
+        "web_api/routes/environments.rs",
+        include_str!("web_api/routes/environments.rs"),
+        &["set_module_base_url("],
+        &["module_base_urls.insert(", "module_base_urls.remove("],
+    ),
+];
+
+#[test]
+fn both_transports_write_the_module_cell_through_the_shared_function() {
+    for (path, text, required, forbidden) in CELL_SHELLS {
+        for snippet in *required {
+            assert!(
+                text.contains(snippet),
+                "{path} 这个薄壳没有调 `{snippet}`，那一格的写入语义就没有唯一的出处"
+            );
+        }
+        for snippet in *forbidden {
+            assert!(
+                !text.contains(snippet),
+                "{path} 自己动了 `{snippet}`，清空与删格的规则只有 `set_module_base_url` 那一处是对的"
+            );
+        }
+    }
+}

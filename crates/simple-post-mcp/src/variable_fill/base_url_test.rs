@@ -170,8 +170,50 @@ fn resolve_endpoint_leaves_the_url_alone_when_the_proxy_does_not_match() {
     assert_eq!(r.url, "https://other.example.com/orders");
 }
 
-// ---- apply_proxy ------------------------------------------------------
+#[test]
+fn the_proxy_address_gets_its_own_variable_replacement() {
+    // 代理地址可能自身是模板，故它单独再替换一次；前缀匹配用的是替换后的值。
+    let mut env = empty_env();
+    env.variables
+        .insert("gw_host".into(), "https://gw.corp.com".into());
+    set_cell_with_proxy(
+        &mut env,
+        MOD_A,
+        "http://svc.internal:8080/api/a",
+        "{{gw_host}}/api/xxxx/a",
+    );
+    let mut ep = minimal_endpoint();
+    ep.url = "/orders/list".into();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
+    assert_eq!(r.url, "https://gw.corp.com/api/xxxx/a/orders/list");
+    assert!(
+        r.missing_vars.is_empty(),
+        "代理地址里的变量解析出来了，不该报缺值：{:?}",
+        r.missing_vars
+    );
+}
 
+#[test]
+fn an_unresolved_variable_in_the_proxy_lands_in_the_missing_report() {
+    // 代理地址里的 `{{var}}` 解析不出来时，缺值报告里得有它，用户才看得见缺哪个变量。
+    let mut env = empty_env();
+    set_cell_with_proxy(
+        &mut env,
+        MOD_A,
+        "http://svc.internal:8080/api/a",
+        "https://gw.corp.com/{{tenant}}/api/xxxx/a",
+    );
+    let mut ep = minimal_endpoint();
+    ep.url = "/orders/list".into();
+    let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
+    assert!(
+        r.missing_vars.contains(&"tenant".to_string()),
+        "代理地址里缺的那个变量没进缺值报告：{:?}",
+        r.missing_vars
+    );
+}
+
+// ---- apply_proxy ------------------------------------------------------
 #[test]
 fn apply_proxy_replaces_the_prefix() {
     assert_eq!(

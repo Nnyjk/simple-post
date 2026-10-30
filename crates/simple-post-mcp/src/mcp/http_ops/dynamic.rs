@@ -28,10 +28,11 @@ pub(super) async fn resolve_dynamic_values(
 ) -> Result<std::collections::HashMap<String, String>, AppError> {
     let empty = std::collections::HashMap::new();
     // `resolve_base_url` 给出的是**未替换**的模板：base URL 也扫（它可能自身
-    // 带变量）。
+    // 带变量），代理地址同样要扫（发送路径对代理地址单独做一次模板替换）。
     let resolved =
         crate::variable_fill::resolve_base_url(detail, env, overrides.module_id.as_deref());
     let base_url = resolved.base_url;
+    let proxy = resolved.proxy;
     // 扫描用的是**生效后**的模板：调用方的覆盖值会替换端点里的那一份，而替换发生在
     // 变量池合并之后，故扫描必须看生效的那一份——否则覆盖值里写的 `{{name}}` 不会
     // 触发取数，原样发出去。
@@ -55,6 +56,7 @@ pub(super) async fn resolve_dynamic_values(
         .unwrap_or_else(|| detail.body.clone());
     let parts = simple_post_core::dynamic::TemplateParts {
         base_url: &base_url,
+        proxy: proxy.as_deref(),
         url: &eff_url,
         params: &eff_params,
         path_params: &eff_path_params,
