@@ -99,7 +99,7 @@ try {
   const names = new Set((list?.result?.tools ?? []).map((tool) => tool.name));
   const readonlyTools = [
     'env_list',
-    'env_get_active',
+    'env_get_default',
     'project_list',
     'project_get',
     'module_list',
