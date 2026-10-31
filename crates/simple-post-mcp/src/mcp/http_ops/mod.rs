@@ -1,19 +1,21 @@
-//! HTTP 执行类 MCP 工具 —— 共 2 个：`api_run_request`（临时请求，不挂端点）与
-//! `api_call_endpoint`（按 id 解析并发出端点）。
+//! HTTP 执行类 MCP 工具 —— 共 3 个：`api_run_request`（临时请求，不挂端点）、
+//! `api_call_endpoint`（按 id 解析并发出端点）与 `api_run_collection`（把一个容器下面的
+//! 接口逐个发出去，给一份报告）。
 //!
-//! 两者汇到同一条执行与结果封装路径，所以不论来源，输出形状一致。**两者也走同一个
+//! 前两个汇到同一条执行与结果封装路径，所以不论来源，输出形状一致。**三者也走同一个
 //! 解析器**：`variable_fill::resolve_endpoint`。临时请求先被拼成一份内存里的
 //! `EndpointDetail`，再交给它解析，故「变量替换 / base URL 拼接 / 鉴权派生 /
 //! header 排序 / body 判空」这些规则只有一份实现 —— 不会因为「发临时请求」而另有一套
-//! 拼接规则。
+//! 拼接规则。批量运行同样走它，只是把每一条的结论收进一份报告。
 //!
 //! ```text
 //!   http_ops/
 //!     mod.rs           ← 当前文件（模块地图 + 重导出）
-//!     args.rs          ← 两个工具的入参形状
-//!     table.rs         ← dispatch 表（两条 schema）
+//!     args.rs          ← 三个工具的入参形状
+//!     table.rs         ← dispatch 表（三条 schema）
 //!     run_request.rs   ← api_run_request
 //!     call_endpoint.rs ← api_call_endpoint
+//!     batch.rs         ← api_run_collection
 //!     dynamic.rs       ← 动态变量取值
 //!     send.rs          ← 发送路径、脚本环境快照、出站旋钮
 //!     project.rs       ← 临时请求的项目行
@@ -21,8 +23,14 @@
 //!     envelope.rs      ← 结果信封
 //!     multipart.rs     ← multipart 装配
 //! ```
+//!
+//! 测试文件：`http_ops_test.rs` / `dynamic_test.rs` / `oauth2_test.rs` /
+//! `multipart_mode_test.rs` / `multipart_parity_test.rs` / `multipart_wire_test.rs` /
+//! `run_request_test.rs` / `overrides_test.rs` / `env_fallback_test.rs` /
+//! `script_test.rs` / `tls_test.rs` / `batch_test.rs`。
 
 mod args;
+mod batch;
 mod call_endpoint;
 mod dynamic;
 mod envelope;
@@ -106,3 +114,7 @@ mod script_tests;
 #[cfg(test)]
 #[path = "tls_test.rs"]
 mod tls_tests;
+
+#[cfg(test)]
+#[path = "batch_test.rs"]
+mod batch_tests;

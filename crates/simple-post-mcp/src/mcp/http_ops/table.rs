@@ -8,10 +8,11 @@ use serde_json::json;
 use crate::mcp::ToolEntry;
 use crate::tool_fn;
 
+use super::batch::tool_api_run_collection;
 use super::call_endpoint::tool_api_call_endpoint;
 use super::run_request::tool_api_run_request;
 
-/// 两个工具的登记项。顺序即 `tools/list` 里的顺序。
+/// 三个工具的登记项。顺序即 `tools/list` 里的顺序。
 pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
@@ -167,6 +168,34 @@ placeholder name; a placeholder without an entry keeps its literal braces and bl
                 "additionalProperties": true,
             }),
             func: tool_fn!(tool_api_call_endpoint),
+        },
+        ToolEntry {
+            name: "api_run_collection",
+            description:
+                "Run every endpoint under a collection or a module, in tree order, and return a report: totals, per-status counts, and one entry per endpoint. A failing endpoint does not stop the rest. Nested collections are included. Requires full_access.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "collection_id": {
+                        "type": "string",
+                        "description": "The collection to run, with its nested collections. Mutually exclusive with module_id."
+                    },
+                    "module_id": {
+                        "type": "string",
+                        "description": "The module to run, with everything under it. Mutually exclusive with collection_id."
+                    },
+                    "environment_id": {
+                        "type": "string",
+                        "description": "The environment the whole batch resolves against. Omit it to use the project's default environment (the earliest one created)."
+                    },
+                    "settings_override": {
+                        "type": "object",
+                        "description": "Outbound knobs for every request in the batch, same shape as api_run_request's `settings_override`. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path — one group, replacing each endpoint's own HTTPS settings as a whole."
+                    }
+                },
+                "additionalProperties": true,
+            }),
+            func: tool_fn!(tool_api_run_collection),
         },
     ]
 }

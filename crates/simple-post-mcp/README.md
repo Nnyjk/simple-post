@@ -59,7 +59,8 @@ crates/simple-post-mcp/
         ├── state.rs           #   AppState + serve_http
         ├── http_ops/          # HTTP send + variable resolution tools
         │   ├── mod.rs         #   the module map
-        │   ├── args.rs        #   the two tools' argument shapes
+        │   ├── args.rs        #   the three tools' argument shapes
+        │   ├── batch.rs       #   api_run_collection
         │   ├── call_endpoint.rs # api_call_endpoint
         │   ├── run_request.rs #   api_run_request
         │   ├── dynamic.rs     #   the dynamic-variable lookup
@@ -68,7 +69,7 @@ crates/simple-post-mcp/
         │   ├── multipart.rs   #   the multipart assembly
         │   ├── project.rs     #   the project row of an ad-hoc request
         │   ├── send.rs        #   the send path + the script env snapshot
-        │   └── table.rs       #   the dispatch table (the two schemas)
+        │   └── table.rs       #   the dispatch table (the three schemas)
         ├── project_ops/       # project / collection / module / endpoint /
         │                       # spec tools
         │   ├── endpoint.rs    #   facade over endpoint/

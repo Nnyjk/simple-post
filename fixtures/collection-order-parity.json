@@ -1,0 +1,365 @@
+{
+  "$comment": "集合子树的端点清单与顺序。两侧各写一遍遍历，故只有一份共享样本才能钉住它们没分叉：Rust 的 `db::nodes::ordered_subtree_endpoints`（MCP 端）与 TS 的 `collect`（应用内批量运行）读同一份本文件，对同一棵树给出**同一个次序**的端点 id 列表。次序规则与界面渲染的那一套一致——一个容器**直接持有**的接口先出，然后才是它的子集合（子集合自己的接口先于它的子集合）。注意它不是纯粹的深度优先前序。`nodes` 里的每一行是一次 `db::nodes::create` 写入的节点，`parentId` 为 null 表示它是模块。",
+  "cases": [
+    {
+      "name": "集合自己的接口先出，再递归子集合",
+      "root": "c1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "订单",
+          "sortOrder": 0
+        },
+        {
+          "id": "e1",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "列表",
+          "sortOrder": 0
+        },
+        {
+          "id": "e2",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "详情",
+          "sortOrder": 1
+        },
+        {
+          "id": "c2",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "collection",
+          "name": "退款",
+          "sortOrder": 0
+        },
+        {
+          "id": "e3",
+          "rootId": "p1",
+          "parentId": "c2",
+          "kind": "endpoint",
+          "name": "发起",
+          "sortOrder": 0
+        },
+        {
+          "id": "e4",
+          "rootId": "p1",
+          "parentId": "c2",
+          "kind": "endpoint",
+          "name": "查询",
+          "sortOrder": 1
+        }
+      ],
+      "expected": ["e1", "e2", "e3", "e4"]
+    },
+    {
+      "name": "两个子集合按 sortOrder 依次展开",
+      "root": "c1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "订单",
+          "sortOrder": 0
+        },
+        {
+          "id": "c2",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "collection",
+          "name": "退款",
+          "sortOrder": 0
+        },
+        {
+          "id": "c3",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "collection",
+          "name": "对账",
+          "sortOrder": 1
+        },
+        {
+          "id": "e1",
+          "rootId": "p1",
+          "parentId": "c2",
+          "kind": "endpoint",
+          "name": "发起退款",
+          "sortOrder": 0
+        },
+        {
+          "id": "e2",
+          "rootId": "p1",
+          "parentId": "c3",
+          "kind": "endpoint",
+          "name": "对账单",
+          "sortOrder": 0
+        }
+      ],
+      "expected": ["e1", "e2"]
+    },
+    {
+      "name": "模块直接持有的接口排在它的集合之前",
+      "root": "m1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "e1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "endpoint",
+          "name": "健康检查",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "订单",
+          "sortOrder": 0
+        },
+        {
+          "id": "e2",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "列表",
+          "sortOrder": 0
+        }
+      ],
+      "expected": ["e1", "e2"]
+    },
+    {
+      "name": "同一个 sortOrder 按 id 排",
+      "root": "c1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "订单",
+          "sortOrder": 0
+        },
+        {
+          "id": "e_b",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "乙",
+          "sortOrder": 5
+        },
+        {
+          "id": "e_a",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "甲",
+          "sortOrder": 5
+        }
+      ],
+      "expected": ["e_a", "e_b"]
+    },
+    {
+      "name": "三层嵌套：越浅的接口越先出",
+      "root": "c1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "一级",
+          "sortOrder": 0
+        },
+        {
+          "id": "c2",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "collection",
+          "name": "二级",
+          "sortOrder": 0
+        },
+        {
+          "id": "c3",
+          "rootId": "p1",
+          "parentId": "c2",
+          "kind": "collection",
+          "name": "三级",
+          "sortOrder": 0
+        },
+        {
+          "id": "e1",
+          "rootId": "p1",
+          "parentId": "c3",
+          "kind": "endpoint",
+          "name": "最深",
+          "sortOrder": 0
+        },
+        {
+          "id": "e2",
+          "rootId": "p1",
+          "parentId": "c2",
+          "kind": "endpoint",
+          "name": "中层",
+          "sortOrder": 0
+        },
+        {
+          "id": "e3",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "浅层",
+          "sortOrder": 0
+        }
+      ],
+      "expected": ["e3", "e2", "e1"]
+    },
+    {
+      "name": "集合下面没有接口",
+      "root": "c1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "空的",
+          "sortOrder": 0
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "根自己就是接口",
+      "root": "e1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "订单",
+          "sortOrder": 0
+        },
+        {
+          "id": "e1",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "列表",
+          "sortOrder": 0
+        }
+      ],
+      "expected": ["e1"]
+    },
+    {
+      "name": "别的项目里的节点不算数",
+      "root": "c1",
+      "nodes": [
+        {
+          "id": "m1",
+          "rootId": "p1",
+          "parentId": null,
+          "kind": "module",
+          "name": "核心",
+          "sortOrder": 0
+        },
+        {
+          "id": "c1",
+          "rootId": "p1",
+          "parentId": "m1",
+          "kind": "collection",
+          "name": "订单",
+          "sortOrder": 0
+        },
+        {
+          "id": "e1",
+          "rootId": "p1",
+          "parentId": "c1",
+          "kind": "endpoint",
+          "name": "列表",
+          "sortOrder": 0
+        },
+        {
+          "id": "m2",
+          "rootId": "p2",
+          "parentId": null,
+          "kind": "module",
+          "name": "另一个项目",
+          "sortOrder": 0
+        },
+        {
+          "id": "e2",
+          "rootId": "p2",
+          "parentId": "m2",
+          "kind": "endpoint",
+          "name": "别的接口",
+          "sortOrder": 0
+        }
+      ],
+      "expected": ["e1"]
+    }
+  ]
+}
