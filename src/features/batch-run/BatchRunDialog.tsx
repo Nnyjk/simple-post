@@ -42,7 +42,6 @@ export function BatchRunDialog({
   const nodes = useAppStore((s) => s.nodes);
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   const environments = useAppStore((s) => s.environments);
-  const projects = useAppStore((s) => s.projects);
   const requestSettings = useAppStore((s) => s.requestSettings);
   const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
@@ -96,7 +95,6 @@ export function BatchRunDialog({
       nodes,
       endpointDetails,
       environments: freezeEnvironments(environments),
-      projects,
       activeEnvironmentId,
       activeProjectId,
       settings: requestSettings,
@@ -137,7 +135,6 @@ export function BatchRunDialog({
     nodes,
     endpointDetails,
     environments,
-    projects,
     activeEnvironmentId,
     activeProjectId,
     requestSettings,

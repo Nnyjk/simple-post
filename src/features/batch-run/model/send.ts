@@ -21,7 +21,6 @@ import type {
   ApiResponse,
   EndpointDetail,
   Environment,
-  Project,
   ResourceNode,
   StoredRequestSnapshot,
 } from '@/types/domain';
@@ -35,9 +34,7 @@ export interface BatchSendContext {
   endpointDetails: Record<string, EndpointDetail>;
   /** 全部环境。**必须是批次开始时的快照**，见 {@link freezeEnvironments}。 */
   environments: readonly Environment[];
-  /** 全部项目。 */
-  projects: readonly Project[];
-  /** 工作区当前激活的环境 id。端点没自绑环境时用它。 */
+  /** 工作区当前激活的环境 id。端点不再自绑环境，故整批读这一个环境。 */
   activeEnvironmentId: string;
   /** 工作区当前项目 id。动态变量按项目解析，故要它。 */
   activeProjectId: string;
@@ -73,7 +70,7 @@ export function freezeEnvironments(envs: readonly Environment[]): Environment[] 
     variables: { ...env.variables },
     disabledVariables: [...(env.disabledVariables ?? [])],
     moduleBaseUrls: Object.fromEntries(
-      Object.entries(env.moduleBaseUrls ?? {}).map(([defId, cells]) => [defId, { ...cells }]),
+      Object.entries(env.moduleBaseUrls ?? {}).map(([moduleId, cell]) => [moduleId, { ...cell }]),
     ),
   }));
 }
@@ -93,13 +90,13 @@ export async function sendBatchItem(
     return failed(item, 'blocked', '这条接口没有请求配置');
   }
 
-  // 环境：端点自绑的优先，否则工作区当前环境。与单次发送同一套回退。
-  const env = detail.environmentId
-    ? ctx.environments.find((e) => e.id === detail.environmentId)
-    : ctx.environments.find((e) => e.id === ctx.activeEnvironmentId);
+  // 环境：工作区**当前环境**。端点不再自绑环境，故这一批与单次发送读的是同一个环境
+  // —— `useEndpointContext` 读的是 `useActiveEnvironment()`，那是同一个 store 状态。
+  // 当前环境为空（还没有环境）时就没有环境：没有 base URL、变量也不替换，与单次发送
+  // 在同一种情况下给出的请求一致。
+  const env = ctx.environments.find((e) => e.id === ctx.activeEnvironmentId);
 
   const node = ctx.nodes.find((n) => n.id === item.endpointId);
-  const project = node ? ctx.projects.find((p) => p.id === node.rootId) : undefined;
   const moduleId = moduleIdOfEndpoint(ctx.nodes, item.endpointId, node);
 
   const parts = buildEndpointRequestParts({
@@ -108,7 +105,6 @@ export async function sendBatchItem(
     // 不是一个集合的成员。
     draft: undefined,
     endpointEnv: env,
-    project,
     moduleId,
     enabledDynamicNames: ctx.enabledDynamicNames,
   });

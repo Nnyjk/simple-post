@@ -42,6 +42,51 @@ struct ItemOutcome {
     missing_path_params: Vec<String>,
 }
 
+/// 一批结论的分类计数。
+///
+/// **三类互斥且穷尽**：每条结论恰好落进「压根没发出去」「发了但没拿到响应」「拿到了
+/// 响应」三类之一，故三类之和恒等于结论条数。报告的恒等式
+/// `总数 = 状态码分布之和 + 没拿到状态码 + 压根没发出去 + 未执行` 就是这条。
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct Counts {
+    pub(super) success: usize,
+    pub(super) failed: usize,
+    /// 压根没发出去（缺路径参数这一类）。
+    pub(super) blocked: usize,
+    /// 发出去了但没拿到响应。
+    pub(super) no_response: usize,
+    /// 拿到了响应，按状态码计。
+    pub(super) status_counts: BTreeMap<u16, usize>,
+}
+
+impl Counts {
+    /// 把一条结论归进三类之一。
+    ///
+    /// 成功与否另计：它决定的是「成功 / 失败」那一对，而不是这三类。
+    pub(super) fn add(&mut self, success: bool, status: u16, failure: Option<&str>) {
+        if success {
+            self.success += 1;
+        } else {
+            self.failed += 1;
+        }
+        // 「压根没发出去」先判：它没有状态码，若按「状态码为 0」判就会落进「没拿到
+        // 响应」—— 两者对调用方是不同信息：前者是这条没准备好，后者是发出去了但
+        // 对方没应答。
+        match failure {
+            Some("blocked") => self.blocked += 1,
+            _ if status == 0 => self.no_response += 1,
+            _ => {
+                *self.status_counts.entry(status).or_insert(0) += 1;
+            }
+        }
+    }
+
+    /// 三类之和：拿到状态码的那些 + 没拿到状态码的那些 + 压根没发出去的那些。
+    pub(super) fn classified(&self) -> usize {
+        self.status_counts.values().sum::<usize>() + self.no_response + self.blocked
+    }
+}
+
 pub(super) async fn tool_api_run_collection(
     state: &AppState,
     args: Value,
@@ -92,6 +137,11 @@ pub(super) async fn tool_api_run_collection(
     .map(freeze_environment)
     .collect();
 
+    // 这次调用按哪个环境解析：点名的那个，没点名就用项目的默认环境（最早创建的那个）。
+    // 整批用**同一个**环境——逐条解析只会得到同一份答案，白白多查一次库。
+    let selected = crate::mcp::resolve_env(&state.pool, a.environment_id.as_deref(), &project_id)?;
+    let env = selected.and_then(|e| envs.iter().find(|f| f.id == e.id));
+
     let settings = resolve_settings(
         &state.pool,
         extract_endpoint_settings(&a.settings_override),
@@ -99,20 +149,15 @@ pub(super) async fn tool_api_run_collection(
     );
 
     let mut items: Vec<Value> = Vec::with_capacity(endpoints.len());
-    let mut success = 0usize;
-    let mut failed = 0usize;
-    let mut blocked = 0usize;
-    let mut no_response = 0usize;
+    let mut counts = Counts::default();
     let mut total_duration_ms = 0u64;
-    let mut status_counts: BTreeMap<u16, usize> = BTreeMap::new();
 
     for node in &endpoints {
         // 单条失败**不中断**整批：这一条记成失败，下一条照发。
         let outcome = match run_one(
             state,
             node,
-            &envs,
-            &project_id,
+            env,
             project_ref,
             &settings,
             a.settings_override.as_ref(),
@@ -133,20 +178,7 @@ pub(super) async fn tool_api_run_collection(
         };
 
         total_duration_ms += outcome.duration_ms;
-        if outcome.success {
-            success += 1;
-        } else {
-            failed += 1;
-        }
-        // 四类互斥且穷尽，故总数不会算错：压根没发出去 / 发了但没拿到响应 / 拿到了
-        // 响应（按状态码进分布）。
-        match outcome.failure {
-            Some("blocked") => blocked += 1,
-            _ if outcome.status == 0 => no_response += 1,
-            _ => {
-                *status_counts.entry(outcome.status).or_insert(0) += 1;
-            }
-        }
+        counts.add(outcome.success, outcome.status, outcome.failure);
 
         items.push(json!({
             "endpoint_id": node.id,
@@ -162,20 +194,30 @@ pub(super) async fn tool_api_run_collection(
         }));
     }
 
-    let status_counts: Vec<Value> = status_counts
-        .into_iter()
+    // 四类互斥且穷尽，故三类之和恒等于结论条数。这条恒等式在开发构建里当场验：
+    // 分类逻辑改动时若漏掉一类或两类重复归类，这里立刻炸，而不是让报告里的总数对不上。
+    debug_assert_eq!(
+        counts.classified(),
+        items.len(),
+        "三类结论互斥且穷尽，三类之和应当等于结论条数"
+    );
+
+    let status_counts: Vec<Value> = counts
+        .status_counts
+        .iter()
         .map(|(status, count)| json!({ "status": status, "count": count }))
         .collect();
 
     Ok(CallToolResult::json(json!({
         "ok": true,
         "total": endpoints.len(),
-        "success": success,
-        "failed": failed,
+        "success": counts.success,
+        "failed": counts.failed,
+        // MCP 的调用是同步的，没有中止协议，故每一条都轮到过，`not_run` 恒为 0。
         "not_run": 0,
         "status_counts": status_counts,
-        "no_response": no_response,
-        "blocked": blocked,
+        "no_response": counts.no_response,
+        "blocked": counts.blocked,
         "total_duration_ms": total_duration_ms,
         "items": items,
     })))
@@ -188,8 +230,7 @@ pub(super) async fn tool_api_run_collection(
 async fn run_one(
     state: &AppState,
     node: &ResourceNode,
-    envs: &[Environment],
-    project_id: &str,
+    env: Option<&Environment>,
     project: &Project,
     settings: &RequestSettings,
     settings_override: Option<&Value>,
@@ -198,14 +239,8 @@ async fn run_one(
         simple_post_core::db::endpoint_details::get(c, &node.id)
     })?;
 
-    // 环境：端点自绑的优先，否则项目当前激活的那个 —— 选择规则由 `resolve_env` 那一处
-    // 决定；这里换成快照里的那一份，脚本写回的变量才不会渗进后面那几条。
-    let selected =
-        crate::mcp::resolve_env(&state.pool, detail.environment_id.as_deref(), project_id)?;
-    let env = selected.and_then(|e| envs.iter().find(|f| f.id == e.id));
-
-    // 端点属于哪个模块只在树里，detail 行上没有，故要查一次：不补的结果是服务列表
-    // 收窄到空，请求裸奔没有 base URL。数据库出错则这一条失败，不静默当成「没有模块」。
+    // 端点属于哪个模块只在树里，detail 行上没有，故要查一次：不补的结果是 base URL
+    // 那一格无从读，请求裸奔没有地址。数据库出错则这一条失败，不静默当成「没有模块」。
     let module_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::module_id_of(c, &node.id)
     })?;
@@ -217,13 +252,8 @@ async fn run_one(
 
     // 动态变量的值必须在**替换之前**取到：取到的值并进变量池，同名时压过环境变量。
     let dynamic = resolve_dynamic_values(state, env, project, &detail, &overrides).await?;
-    let resolved = crate::variable_fill::resolve_endpoint_with(
-        &detail,
-        env,
-        project,
-        Some(&overrides),
-        &dynamic,
-    )?;
+    let resolved =
+        crate::variable_fill::resolve_endpoint_with(&detail, env, Some(&overrides), &dynamic)?;
 
     let tls_override = resolve_tls_override(settings_override, detail.tls.clone())?;
 
@@ -305,11 +335,7 @@ fn freeze_environment(env: &Environment) -> Environment {
     Environment {
         variables: env.variables.clone(),
         disabled_variables: env.disabled_variables.clone(),
-        module_base_urls: env
-            .module_base_urls
-            .iter()
-            .map(|(def_id, cells)| (def_id.clone(), cells.clone()))
-            .collect(),
+        module_base_urls: env.module_base_urls.clone(),
         ..env.clone()
     }
 }

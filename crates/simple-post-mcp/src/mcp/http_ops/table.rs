@@ -184,6 +184,10 @@ placeholder name; a placeholder without an entry keeps its literal braces and bl
                         "type": "string",
                         "description": "The module to run, with everything under it. Mutually exclusive with collection_id."
                     },
+                    "environment_id": {
+                        "type": "string",
+                        "description": "The environment the whole batch resolves against. Omit it to use the project's default environment (the earliest one created)."
+                    },
                     "settings_override": {
                         "type": "object",
                         "description": "Outbound knobs for every request in the batch, same shape as api_run_request's `settings_override`. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path — one group, replacing each endpoint's own HTTPS settings as a whole."
