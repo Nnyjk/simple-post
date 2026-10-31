@@ -107,4 +107,13 @@ describe('buildReport', () => {
     assert.equal(report.totalDurationMs, 100);
     assert.equal(report.elapsedMs, 250);
   });
+
+  it('结论条数超过总数时当场报错，不把差值压成 0 藏起来', () => {
+    // 结论条数比总数多，说明调用方把两个批次的结果混在了一起。那种情况下报出来的
+    // 总数必然对不上恒等式，故宁可报错，也不让它悄悄过去。
+    assert.throws(
+      () => buildReport(1, [outcome({ endpointId: 'a' }), outcome({ endpointId: 'b' })], 0),
+      /超过了这一批的总数/,
+    );
+  });
 });

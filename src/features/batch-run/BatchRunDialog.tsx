@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Square } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -147,6 +147,16 @@ export function BatchRunDialog({
   const abort = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  // 组件卸载时中止在途批次。对话框被关掉时（右上角 X / Esc / 点背景）ProjectTree 把
+  // batchTarget 置空，本组件随之卸载；而 run() 的 Promise 链会继续把剩下的接口逐个
+  // 发出去 —— 用户已经看不到进度了，请求却还在跑。卸载即中止。
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+    },
+    [],
+  );
 
   const kindLabel = rootKind === 'collection' ? '集合' : '模块';
   const scopeText =

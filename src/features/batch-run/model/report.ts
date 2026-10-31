@@ -11,12 +11,20 @@ import type { BatchOutcome, BatchReport } from './types';
  *
  * `total` 是这一批**共有**多少条（不是跑完了多少条）：中止之后没轮到的那几条也在这
  * 个数里，它们由 `notRun` 单独报出。
+ *
+ * `outcomes` 的条数**不得超过** `total`：每条结论对应这一批里的一条接口，多出来的
+ * 结论说明调用方把两个批次的结果混在了一起，那种情况下报出来的总数对不上。宁可当场
+ * 报错，也不要用 `Math.max(0, …)` 把它压成 0 藏起来 —— 恒等式「总数 = 状态码分布之和
+ * + 没拿到状态码 + 压根没发出去 + 未执行」正是靠这个数守住的。
  */
 export function buildReport(
   total: number,
   outcomes: readonly BatchOutcome[],
   elapsedMs: number,
 ): BatchReport {
+  if (outcomes.length > total) {
+    throw new Error(`批量报告的结论条数（${outcomes.length}）超过了这一批的总数（${total}）`);
+  }
   let success = 0;
   let failed = 0;
   let blocked = 0;
@@ -52,7 +60,7 @@ export function buildReport(
     total,
     success,
     failed,
-    notRun: Math.max(0, total - outcomes.length),
+    notRun: total - outcomes.length,
     statusCounts,
     noResponse,
     blocked,
