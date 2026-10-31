@@ -135,7 +135,10 @@ pub fn required_permission(tool_name: &str) -> Permission {
         | "dynamic_var_get" => Permission::Read,
 
         // ReadCall——Read 加上真的去调一个外部服务。
-        "api_run_request" | "api_call_endpoint" | "dynamic_var_resolve" => Permission::ReadCall,
+        // `api_run_collection` 在这一档：它逐个调用端点，每个端点都是一次出站请求。
+        "api_run_request" | "api_call_endpoint" | "api_run_collection" | "dynamic_var_resolve" => {
+            Permission::ReadCall
+        }
 
         // Full——任何写入/改动操作的默认值。新的写入工具**不要**加到上面的匹配里，
         // 让它们落到这里。

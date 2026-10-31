@@ -19,11 +19,36 @@ use super::multipart;
 /// `endpoint_id` 决定脚本链能不能装配（有它才有 collection 那几段）；临时请求没有
 /// 端点，故传 `None` —— 它的请求里没有脚本可跑。
 ///
+/// 解析之后、结果封装之前的一次执行。
+///
+/// 「解析之后发生什么」只有一份实现：OAuth2 的 token 注入、multipart 的装配、脚本链、
+/// 发送。单条发送与批量运行都走它，故两者不会长出两套 —— 两者只是**结果封装**不同：
+/// 单条把结果封成一次调用的信封，批量把每一条的结论收进一份报告。
+pub(super) struct ExecutedRequest {
+    /// 真正发出去的那份 URL。OAuth2 注入 token 之后是那一份。
+    pub url: String,
+    /// 传输层的信封。没拿到响应时 `response` 是 `None`，原因在 `error` 里。
+    pub http: simple_post_core::http_executor::HttpResult,
+    /// 脚本的产出。链上没有任何脚本时是 `None`。
+    pub script: Option<simple_post_core::domain::ScriptOutcome>,
+    /// 没解析出来的变量名。
+    pub missing_vars: Vec<String>,
+    /// 没取到值的路径占位符名。
+    pub missing_path_params: Vec<String>,
+    /// 压根没发出去（路径参数缺值）。为 true 时没有响应。
+    pub blocked: bool,
+}
+
+/// 解析好的请求 → 发出 → 执行结果。
+///
+/// `endpoint_id` 决定脚本链能不能装配（有它才有 collection 那几段）；临时请求没有
+/// 端点，故传 `None` —— 它的请求里没有脚本可跑。
+///
 /// `tls_override` 是这次请求生效的 HTTPS 设置里**端点以上的那一份**：全局默认由
 /// `settings.tls` 带来，端点自带的那份与本次调用的临时覆盖已在调用方合成好。
 /// `None` = 继承全局默认。合成由 core 的 `send_with_scripts` 完成（它在
 /// `crate::tls::resolve` 里把两档合起来），故 MCP 侧只交出该交的那一份。
-pub(super) async fn send_resolved(
+pub(super) async fn execute_resolved(
     state: &AppState,
     method: &str,
     resolved: ResolvedEndpoint,
@@ -31,7 +56,7 @@ pub(super) async fn send_resolved(
     endpoint_id: Option<String>,
     settings: RequestSettings,
     tls_override: Option<TlsSettings>,
-) -> Result<CallToolResult, AppError> {
+) -> Result<ExecutedRequest, AppError> {
     let ResolvedEndpoint {
         url,
         headers,
@@ -44,21 +69,30 @@ pub(super) async fn send_resolved(
         ..
     } = resolved;
 
-    // `send_resolved` 在路径参数缺值时就不发：它按 OpenAPI 惯例是必填的，带着
-    // `{id}` 发出去只会换一个含义不明的 404，而用户看不出是自己漏填了一个值。
+    // 路径参数缺值时就不发：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
+    // 含义不明的 404，而用户看不出是自己漏填了一个值。
+    //
+    // 这里**不**取 OAuth2 的 token：那条请求压根不会发出去，取 token 是一次没有意义
+    // 的出网请求。
     if !missing_path_params.is_empty() {
-        return Err(AppError::Validation(format!(
-            "path parameter(s) have no value: {}. Set them on the endpoint's path \
-             parameters, or pass overrides.pathParams when calling.",
-            missing_path_params.join(", ")
-        )));
+        return Ok(ExecutedRequest {
+            url,
+            http: simple_post_core::http_executor::HttpResult {
+                ok: false,
+                response: None,
+                error: None,
+            },
+            script: None,
+            missing_vars,
+            missing_path_params,
+            blocked: true,
+        });
     }
     let mut url = url;
     let mut headers = headers;
 
-    // `send_resolved` 在发请求之前才取 oauth2 的 token：`resolve_endpoint`（纯函数）
-    // 拿不到它，故注入放在这里而不是那里——`build_headers` 对 bearer/basic/apikey 的
-    // 处理不受影响。
+    // token 在发请求之前才取：`resolve_endpoint`（纯函数）拿不到它，故注入放在这里
+    // 而不是那里——`build_headers` 对 bearer/basic/apikey 的处理不受影响。
     //
     // **必须同时匹配 `kind`**：`resolve_auth` 对未选中的方案原样保留载荷，所以一个从
     // oauth2 切到 bearer 的端点仍带着 `oauth2: Some(..)`。只匹配载荷时 header 档碰巧
@@ -74,9 +108,8 @@ pub(super) async fn send_resolved(
         simple_post_core::oauth2::inject(cfg, &token, &mut headers, &mut url);
     }
 
-    // `send_resolved` 在这里才把 multipart 装配成形：boundary 必须现生成，Content-Type
-    // 与 body 用同一个值。`resolve_endpoint` 只做变量替换，故它给不出带 boundary 的
-    // Content-Type。
+    // multipart 在这里才装配成形：boundary 必须现生成，Content-Type 与 body 用同一个
+    // 值。`resolve_endpoint` 只做变量替换，故它给不出带 boundary 的 Content-Type。
     //
     // 判据读 `resolved.body_mode`（**套过 overrides 的那个 mode**），不读端点行里存的那个：
     // 调用方给 `overrides.body` 就能换掉 mode，而 Content-Type 那边读的是
@@ -118,13 +151,54 @@ pub(super) async fn send_resolved(
     .await?;
 
     state.metrics.inc();
+    Ok(ExecutedRequest {
+        url: outcome.request.url,
+        http: outcome.http,
+        script: outcome.script,
+        missing_vars,
+        missing_path_params,
+        blocked: false,
+    })
+}
+
+/// 解析好的请求 → 发出 → 一次调用的结果信封。
+///
+/// 与 [`execute_resolved`] 的差别只在最后一步：那条把结果封成一次调用的信封，这一条
+/// 在路径参数缺值时报错（单条调用没有「整批」的上下文，一个失败就该让调用方看见）。
+pub(super) async fn send_resolved(
+    state: &AppState,
+    method: &str,
+    resolved: ResolvedEndpoint,
+    env: Option<&Environment>,
+    endpoint_id: Option<String>,
+    settings: RequestSettings,
+    tls_override: Option<TlsSettings>,
+) -> Result<CallToolResult, AppError> {
+    let missing_path_params = resolved.missing_path_params.clone();
+    let executed = execute_resolved(
+        state,
+        method,
+        resolved,
+        env,
+        endpoint_id,
+        settings,
+        tls_override,
+    )
+    .await?;
+    if executed.blocked {
+        return Err(AppError::Validation(format!(
+            "path parameter(s) have no value: {}. Set them on the endpoint's path \
+             parameters, or pass overrides.pathParams when calling.",
+            missing_path_params.join(", ")
+        )));
+    }
     Ok(build_result_envelope(
         method,
-        &outcome.request.url,
-        &outcome.http,
+        &executed.url,
+        &executed.http,
         None,
-        Some(missing_vars),
-        outcome.script,
+        Some(executed.missing_vars),
+        executed.script,
     ))
 }
 

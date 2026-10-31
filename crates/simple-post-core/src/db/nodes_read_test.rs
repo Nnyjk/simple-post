@@ -362,7 +362,7 @@ fn seed_collection_order_case(pool: &db::DbPool, case: &CollectionOrderCase) {
             let ready = node
                 .parent_id
                 .as_deref()
-                .map_or(true, |parent| inserted.contains(parent));
+                .is_none_or(|parent| inserted.contains(parent));
             if !ready {
                 rest.push(node);
                 continue;

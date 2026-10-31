@@ -11,8 +11,8 @@ use super::envelope::header_pairs_to_tuples;
 use super::input::{extract_settings, flatten_key_values, parse_auth, parse_body_mode};
 use super::{flatten_string_map, table, RunRequestArgs};
 #[test]
-fn table_has_two_rows() {
-    assert_eq!(table().len(), 2);
+fn table_has_three_rows() {
+    assert_eq!(table().len(), 3);
 }
 
 #[test]

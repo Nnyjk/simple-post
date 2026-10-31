@@ -12,6 +12,13 @@ fn read_only_hides_writes_and_sends() {
         "api_call_endpoint",
         CapabilityOverride::ReadOnly
     ));
+    // `api_run_collection` 逐个调用端点，每个端点都是一次出站请求，故与
+    // `api_call_endpoint` 同等对待。它不以破坏性后缀结尾，名字里也不含
+    // `api_call_endpoint`，故这条断言钉的是那一处显式排除。
+    assert!(!filter_tools(
+        "api_run_collection",
+        CapabilityOverride::ReadOnly
+    ));
 }
 
 #[test]

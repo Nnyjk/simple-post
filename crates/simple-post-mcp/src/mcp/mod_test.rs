@@ -85,17 +85,17 @@ fn every_registered_tool_has_a_capability() {
 
 /// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` 与 `README.md` 都写着「46 tools」。上面的双射测试在「工具连同它的
+/// `AGENTS.md` 与 `README.md` 都写着「47 tools」。上面的双射测试在「工具连同它的
 /// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
 /// 里要改这个常量，同一个 commit 也应更新那两份文档。
-const EXPECTED_TOOL_COUNT: usize = 46;
+const EXPECTED_TOOL_COUNT: usize = 47;
 
 #[test]
 fn registered_tool_count_matches_the_documented_figure() {
     assert_eq!(
         tool_table().len(),
         EXPECTED_TOOL_COUNT,
-        "tool count changed; update EXPECTED_TOOL_COUNT and the '46 tools' \
+        "tool count changed; update EXPECTED_TOOL_COUNT and the '47 tools' \
              claims in AGENTS.md and README.md"
     );
 }
@@ -133,7 +133,7 @@ fn every_capability_row_names_a_registered_tool() {
 /// `api_call_endpoint` 的 `settings_override`。加上这三段之后载荷是 41 521 字节，
 /// 上限取 42 000，给它们留 479 字节的余量。
 ///
-/// **这份清单现在装了什么。** 46 条描述符里没有一条携带「服务 id」字段：地址住在
+/// **这份清单现在装了什么。** 47 条描述符里没有一条携带「服务 id」字段：地址住在
 /// （环境 × 模块）一格里，`env_set_baseurl` 按 `env_id` + `module_id` 写那一格。
 ///
 /// **上限要动时怎么写。** 契约长大先把新加的那几段说明压到一行，压到一行还嫌长

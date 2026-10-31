@@ -68,3 +68,16 @@ pub(super) struct CallEndpointArgs {
     #[serde(default)]
     pub(super) settings_override: Option<Value>,
 }
+
+/// `api_run_collection` 的入参。
+#[derive(Debug, Deserialize)]
+pub(super) struct RunCollectionArgs {
+    /// 要跑的集合 id。与 `module_id` 二选一。
+    #[serde(default)]
+    pub(super) collection_id: Option<String>,
+    /// 要跑的模块 id（它下面的全部接口）。与 `collection_id` 二选一。
+    #[serde(default)]
+    pub(super) module_id: Option<String>,
+    #[serde(default)]
+    pub(super) settings_override: Option<Value>,
+}
