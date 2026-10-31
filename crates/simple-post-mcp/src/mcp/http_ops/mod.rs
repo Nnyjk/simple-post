@@ -23,6 +23,11 @@
 //!     envelope.rs      ← 结果信封
 //!     multipart.rs     ← multipart 装配
 //! ```
+//!
+//! 测试文件：`http_ops_test.rs` / `dynamic_test.rs` / `oauth2_test.rs` /
+//! `multipart_mode_test.rs` / `multipart_parity_test.rs` / `multipart_wire_test.rs` /
+//! `run_request_test.rs` / `overrides_test.rs` / `env_fallback_test.rs` /
+//! `script_test.rs` / `tls_test.rs` / `batch_test.rs`。
 
 mod args;
 mod batch;
@@ -109,3 +114,7 @@ mod script_tests;
 #[cfg(test)]
 #[path = "tls_test.rs"]
 mod tls_tests;
+
+#[cfg(test)]
+#[path = "batch_test.rs"]
+mod batch_tests;
