@@ -21,6 +21,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { X, ScrollText } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { TabJoinCorners } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -53,6 +54,9 @@ export function WorkspaceTabs() {
   // 右键菜单，锚在被点的那个标签上；在点击位置渲染一个浮动菜单，
   // 关闭由外部点击 / Esc 处理。
   const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
+
+  // 「关闭已保存」一个都没关掉时的提示。
+  const [noSavedTabsNotice, setNoSavedTabsNotice] = useState(false);
 
   // 额外的一轮清理，覆盖所有绕过 delete* 动作的变更路径。代价可接受：数据量以
   // 工作区规模为界。
@@ -422,13 +426,26 @@ export function WorkspaceTabs() {
           }}
           onCloseSaved={() => {
             const n = closeSavedTabs();
-            if (n === 0) {
-              window.alert('没有可关闭的已保存标签（其余都有未保存的修改）。');
-            }
+            if (n === 0) setNoSavedTabsNotice(true);
             setMenu(null);
           }}
         />
       )}
+
+      {/* 没有可关闭的已保存标签 —— 一条只讲事实的提示。
+          用对话框而不是 `window.alert`：原生弹窗的样式不受控，在 Tauri 的 webview 里
+          还会盖住整个应用窗口。 */}
+      <Dialog
+        open={noSavedTabsNotice}
+        onOpenChange={setNoSavedTabsNotice}
+        title="没有可关闭的已保存标签"
+        description="其余标签都有未保存的修改，关掉它们需要先确认。"
+        footer={
+          <Button variant="ghost" onClick={() => setNoSavedTabsNotice(false)}>
+            知道了
+          </Button>
+        }
+      />
     </div>
   );
 }

@@ -17,9 +17,10 @@ interface ConfirmDialogProps {
 }
 
 /**
- * 浏览器 `window.confirm` 的样式化替代。动机与 PromptDialog 相同——fixed 定位、
- * 自定义标题（浏览器会把确认框标成「localhost:5173 显示」）、以及一个样式化的
- * 破坏性变体。
+ * 确认框 —— `Dialog` 之上的薄封装，用于删除与其他不可逆动作。
+ *
+ * 初始焦点落在「取消」上，不是确认键。确认键多数是破坏性的，回车即删不是想要的默认；
+ * 想让用户直接确认的场景不适用这个组件。
  */
 export function ConfirmDialog({
   open,
@@ -39,7 +40,7 @@ export function ConfirmDialog({
       description={description}
       footer={
         <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" autoFocus onClick={() => onOpenChange(false)}>
             {cancelText}
           </Button>
           <Button
