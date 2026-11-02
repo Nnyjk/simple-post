@@ -8,7 +8,7 @@
  * `contenteditable`（也就决定了编辑器能不能拿到焦点），`EditorState.readOnly` 才拦编辑。
  * `editable={false}` 让编辑器永远不可聚焦，而 CodeMirror 自绘的光标（`.cm-cursor`）只在
  * 聚焦时出现，原生光标又被它的 `caret-color: transparent` 关掉 ⇒ 响应体里一个光标都没有。
- * 这两处配置一旦回退，运行期不会有任何失败来提醒。
+ * 这几处配置一旦回退，运行期不会有任何失败来提醒。
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,14 @@ describe('响应体的只读视图要可聚焦，否则没有光标', () => {
     assert.ok(
       /(^|\s)readOnly(\s|$)/.test(codeMirrorProps()),
       'the response body editor must be read-only through the readOnly prop',
+    );
+  });
+
+  it('关掉 history：value 同步的整篇替换会进撤销栈，Ctrl+U 能把响应体退回上一份', () => {
+    assert.ok(
+      /history:\s*false/.test(codeMirrorProps()),
+      'the response body editor must not keep a history stack: the wrapper replaces the ' +
+        'whole document when the value changes, and readOnly does not block undoSelection',
     );
   });
 });
