@@ -3,15 +3,18 @@
  *
  * - 命令来自 `command-registry.buildCommands()`，模糊过滤在本组件内做：
  *   放进 Zustand selector 会在其中新建数组，触发无限重渲染。
- * - 点遮罩或按 Esc 关闭。判定「点在面板外」靠 backdrop 上的 `mousedown`
- *   加 `closest('[role="dialog"]')`，故面板内选中一项不会误关。
+ * - 面板的模态语义（portal、Esc、点遮罩、滚动锁、焦点陷阱、背景 inert、入场动画）
+ *   全部来自 `ModalSurface`。本组件只写面板的内容：搜索行、结果列表、快捷键提示条。
+ *
+ * 面板顶部对齐而不是居中：命令面板是「从上方落下的检索框」，居中会让人以为它是个
+ * 需要读完的表单。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CornerDownLeft, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { buildCommands, type Command } from './command-registry';
 import { cn } from '@/lib/utils';
-import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
+import { ModalSurface } from '@/components/ui/modal-surface';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -29,7 +32,7 @@ function scoreCommand(cmd: Command, q: string): number {
   const hay = `${title} ${hint} ${kw}`;
   const idx = hay.indexOf(q);
   if (idx < 0) return -1;
-  // 命中位置越靠前越好，命中 `title` 内的额外加分。
+  // 命中位置越靠前越好；命中 `title` 内的额外加分。
   let bonus = 0;
   if (title.startsWith(q)) bonus += 50;
   else if (title.includes(q)) bonus += 20;
@@ -62,7 +65,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     if (open) {
       setQuery('');
       setSelected(0);
-      // 延后一拍，好让模态先进 DOM。
+      // 延后一拍，好让面板先进 DOM。
       const t = window.setTimeout(() => inputRef.current?.focus(), 0);
       return () => window.clearTimeout(t);
     }
@@ -82,45 +85,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     if (el) el.scrollIntoView({ block: 'nearest' });
   }, [selected]);
 
-  const backdropRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // 入场动画，每次挂载（`open` 翻 true）都跑一遍；无退场动画 —— `open=false`
-  // 直接卸载整棵树。reduced motion 下退化为直接出现，自动聚焦与键盘行为不变。
-  useGSAP(
-    () => {
-      return motionSafe(() => {
-        if (backdropRef.current) {
-          gsap.fromTo(
-            backdropRef.current,
-            { opacity: 0 },
-            { opacity: 1, duration: 0.18, ease: 'none' },
-          );
-        }
-        if (panelRef.current) {
-          gsap.fromTo(
-            panelRef.current,
-            { opacity: 0, scale: 0.98, y: -8 },
-            { opacity: 1, scale: 1, y: 0, duration: 0.22, ease: 'power3.out' },
-          );
-        }
-      });
-    },
-    { scope: panelRef, dependencies: [open] },
-  );
-
-  if (!open) return null;
-
   const run = (cmd: Command) => {
     cmd.run();
     onClose();
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-    } else if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
       if (results.length > 0) setSelected((s) => (s + 1) % results.length);
     } else if (e.key === 'ArrowUp') {
@@ -145,25 +116,17 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   });
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-start justify-center px-4 pt-[12vh]"
-      onMouseDown={(e) => {
-        // 点面板外关闭。不能用 `e.target === e.currentTarget`：外层还有一层
-        // backdrop 会吃掉 mousedown。改用 `closest('[role="dialog"]')`，
-        // 日后 DOM 再嵌一层也仍能判对。
-        const dialog = (e.currentTarget as HTMLElement).querySelector('[role="dialog"]');
-        if (dialog && !dialog.contains(e.target as Node)) onClose();
+    <ModalSurface
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) onClose();
       }}
+      label={{ ariaLabel: '命令面板' }}
+      align="top"
+      size="lg"
+      className="overflow-hidden rounded-xl bg-popover text-popover-foreground"
     >
-      <div ref={backdropRef} className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="命令面板"
-        className="relative w-full max-w-xl overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
-        onKeyDown={onKeyDown}
-      >
+      <div onKeyDown={onKeyDown}>
         {/* 搜索行 */}
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -244,6 +207,6 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           </span>
         </div>
       </div>
-    </div>
+    </ModalSurface>
   );
 }
