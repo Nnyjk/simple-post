@@ -163,8 +163,9 @@ pub(super) async fn execute_resolved(
 
 /// 解析好的请求 → 发出 → 一次调用的结果信封。
 ///
-/// 与 [`execute_resolved`] 的差别只在最后一步：那条把结果封成一次调用的信封，这一条
-/// 在路径参数缺值时报错（单条调用没有「整批」的上下文，一个失败就该让调用方看见）。
+/// 与 [`execute_resolved`] 的差别只在最后一步：`execute_resolved` 返回 `ExecutedRequest`，
+/// 本函数把它封成调用信封，并在 `blocked` 时返回 `AppError::Validation`（单条调用没有
+/// 「整批」的上下文，一个失败就该让调用方看见）。
 pub(super) async fn send_resolved(
     state: &AppState,
     method: &str,
