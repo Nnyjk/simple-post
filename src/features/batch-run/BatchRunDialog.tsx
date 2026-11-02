@@ -3,6 +3,7 @@ import { Play, Square } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/stores/app-store';
+import { formatDuration } from '@/lib/utils';
 import { enabledDynamicNameSet } from '@/features/http-tester/model/dynamicVars';
 import { collectSubtreeEndpoints, countSubtree } from './model/collect';
 import { freezeEnvironments, sendBatchItem, type BatchSendContext } from './model/send';
@@ -310,10 +311,4 @@ function Stat({
       <span className={`font-medium ${toneClass}`}>{value}</span>
     </span>
   );
-}
-
-/** 毫秒数写成人类读得懂的时长。 */
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
 }
