@@ -38,6 +38,16 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
   // 是合法 JSON 时就会传一个空值。仍然渲染气泡只会在屏幕上多一枚空药丸。
   const hasContent = content !== undefined && content !== null && content !== '';
 
+  /**
+   * 模态面板里的提示气泡要用更高的层。
+   *
+   * 气泡 portal 到 `document.body`，而模态遮罩也铺满视口 —— 气泡若停在模态之下，
+   * 就会被遮罩盖住。模态之外的气泡仍用低的那层：模态打开时背景被置为 `inert`，
+   * 背景的气泡根本不会触发。
+   */
+  const inModal =
+    typeof document !== 'undefined' && anchorRef.current?.closest('[data-modal-surface]') != null;
+
   const cancelPending = useCallback(() => {
     if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
     timeoutRef.current = null;
@@ -112,7 +122,7 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
             }}
             className={cn(
               'pointer-events-none fixed max-w-[min(24rem,calc(100vw-1rem))] whitespace-pre-wrap rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md animate-fade-in',
-              LAYER.tooltip,
+              inModal ? LAYER.tooltipInModal : LAYER.tooltip,
               className,
             )}
           >
