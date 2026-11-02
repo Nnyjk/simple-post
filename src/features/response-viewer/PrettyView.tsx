@@ -53,8 +53,15 @@ export function PrettyView({
           value={displayed}
           extensions={[json()]}
           theme={isDark ? oneDark : lightCodeTheme}
-          editable={false}
+          // 用 `readOnly` 而不是 `editable={false}`：后者去掉 content DOM 的 contenteditable，
+          // 编辑器不再可聚焦 —— CodeMirror 自绘的光标只在聚焦时出现，原生光标又被它的
+          // `caret-color: transparent` 关掉。`readOnly` 拦编辑：输入、粘贴、拖放、剪切全被拒。
+          readOnly
           basicSetup={{
+            // `history` 关掉：`@uiw/react-codemirror` 同步 `value` 时整篇替换，那笔改动会进
+            // 撤销栈；而 `readOnly` 只拦 `undo`、不拦 `undoSelection`，Ctrl+U 会把响应体
+            // 退回上一份，与 store 里那一份对不上。
+            history: false,
             lineNumbers: true,
             foldGutter: true,
             highlightActiveLine: false,
