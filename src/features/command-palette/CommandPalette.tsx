@@ -125,8 +125,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       align="top"
       size="lg"
       className="overflow-hidden rounded-xl bg-popover text-popover-foreground"
+      onKeyDown={onKeyDown}
     >
-      <div onKeyDown={onKeyDown}>
+      <div>
         {/* 搜索行 */}
         <div className="flex items-center gap-2 border-b border-border px-3">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
