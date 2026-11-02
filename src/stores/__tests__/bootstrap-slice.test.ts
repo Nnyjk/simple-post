@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { clearIpcMock, installBrowserShim, installIpcMock } from './_browser-shim';
 import { createBootstrapSlice, type BootstrapSlice } from '../bootstrap-slice';
+import { saveLastProjectId, saveRememberedEnvironmentId } from '../slices/ui-prefs';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 
 type CapturedCall = { cmd: string; args: Record<string, unknown> };
@@ -58,8 +59,6 @@ function makeBootstrapHarness() {
 const project: Project = {
   id: 'p1',
   name: '项目',
-  baseUrlDefinitions: [],
-  defaultBaseUrlDefinitionId: null,
   color: '#000000',
   createdAt: 1,
   updatedAt: 1,
@@ -98,11 +97,20 @@ const environment: Environment = {
   id: 'env1',
   projectId: 'p1',
   name: '开发',
-  baseUrls: {},
   moduleBaseUrls: {},
   variables: {},
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
+};
+/** 比 `environment` 晚创建的环境 —— 故它不是这个项目的默认环境。 */
+const laterEnvironment: Environment = {
+  id: 'env2',
+  projectId: 'p1',
+  name: '预发',
+  moduleBaseUrls: {},
+  variables: {},
+  disabledVariables: [],
+  createdAt: 2,
 };
 const endpointDetail: EndpointDetail = {
   nodeId: 'e1',
@@ -391,19 +399,20 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(nodes[1].expanded, undefined, '新出现的节点保持收起');
   });
 
-  it('refreshProjects 整份替换项目清单：导入建的服务要立刻看得见', async () => {
-    // 服务定义住在项目行上，而项目行是 bootstrap 第一层加载后就没有人再更新的
-    // 那份副本。导入在服务端建服务后不刷新它，新服务在界面上就是不存在。
+  it('refreshProjects 整份替换项目清单：导入后新建的项目要立刻看得见', async () => {
+    // 项目行是 bootstrap 第一层加载后就没有人再更新的那份副本。导入在服务端建项目后
+    // 不刷新它，新项目在界面上就是不存在。
     const bag = makeBootstrapHarness();
-    const withService: Project = {
+    const imported: Project = {
       ...project,
-      baseUrlDefinitions: [{ id: 'd1', name: '127.0.0.1' }],
+      id: 'p2',
+      name: '导入的项目',
     };
-    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [withService] : []));
+    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [imported] : []));
 
     await bag.refreshProjects();
 
-    assert.deepEqual(bag.projects, [withService]);
+    assert.deepEqual(bag.projects, [imported]);
   });
 
   it('refreshProjects 失败不 reject：导入已经落库，不能因为一次刷新失败被报成失败', async () => {
@@ -643,6 +652,27 @@ describe('bootstrap-slice 聚合加载契约', () => {
     await booting;
     await bag.loadWorkspace();
 
-    assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the active env');
+    assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the current env');
+  });
+
+  it('第二层补齐时用记住过的那个环境，而不是默认环境', async () => {
+    const bag = makeBootstrapHarness();
+    // 本客户端上次在这个项目里用的是 env2（比默认的 env1 晚创建）。
+    saveLastProjectId('p1');
+    saveRememberedEnvironmentId('p1', 'env2');
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      if (cmd === 'environments_list') return [environment, laterEnvironment];
+      return [];
+    });
+
+    await bag.bootstrap();
+    await bag.loadWorkspace();
+
+    assert.equal(
+      bag.activeEnvironmentId,
+      'env2',
+      '记住过的那个环境优先于默认环境——刷新后该停在同一个环境',
+    );
   });
 });

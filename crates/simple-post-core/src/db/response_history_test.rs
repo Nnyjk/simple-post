@@ -29,9 +29,6 @@ fn project(id: &str) -> Project {
         id: id.into(),
         name: id.into(),
         description: None,
-        default_base_url_definition_id: None,
-        base_url_definitions: vec![],
-        base_url: None,
         color: "#000000".into(),
         created_at: 1,
         updated_at: 1,
@@ -45,8 +42,6 @@ fn detail(node_id: &str) -> EndpointDetail {
         node_id: node_id.into(),
         method: HttpMethod::Get,
         url: "/api/things".into(),
-        environment_id: None,
-        base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],
@@ -103,6 +98,7 @@ fn resp(status: u16, body: &str) -> StoredResponse {
         size_bytes: body.len() as u64,
         headers: BTreeMap::from([("content-type".to_string(), "application/json".to_string())]),
         body: body.into(),
+        body_base64: None,
         body_json: Some(serde_json::json!({ "echo": body })),
         content_type: "application/json".into(),
         error: None,
@@ -118,6 +114,7 @@ fn request(url: &str) -> StoredRequestSnapshot {
         url: url.into(),
         headers: vec![("content-type".into(), "application/json".into())],
         body: Some("{\"a\":1}".into()),
+        body_base64: None,
     }
 }
 

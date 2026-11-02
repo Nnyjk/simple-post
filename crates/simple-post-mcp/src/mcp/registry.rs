@@ -16,10 +16,10 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
     TABLE.get_or_init(|| {
         let mut v = Vec::with_capacity(64);
 
-        // env_ops：8 个
+        // env_ops：7 个
         v.extend(env_ops::table());
 
-        // project_ops：project + module + collection + endpoint + baseUrl
+        // project_ops：project + module + collection + endpoint + spec
         v.extend(project_ops::table());
 
         // http_ops：2 个
@@ -60,13 +60,12 @@ pub fn registered_tool_names() -> Vec<String> {
 pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     // env
     ("env_list", Capability::Read),
-    ("env_get_active", Capability::Read),
+    ("env_get_default", Capability::Read),
     ("env_create", Capability::Create),
     ("env_update", Capability::Update),
     ("env_delete", Capability::Delete),
     ("env_set_var", Capability::Update),
     ("env_set_baseurl", Capability::Update),
-    ("env_set_active", Capability::Update),
     // project
     ("project_list", Capability::Read),
     ("project_get", Capability::Read),
@@ -94,18 +93,13 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("endpoint_delete", Capability::Delete),
     ("endpoint_duplicate", Capability::Create),
     ("endpoint_move", Capability::Update),
-    // baseUrl definitions
-    ("base_url_def_list", Capability::Read),
-    ("base_url_def_create", Capability::Create),
-    ("base_url_def_update", Capability::Update),
-    ("base_url_def_delete", Capability::Delete),
-    ("base_url_def_set_default", Capability::Update),
     // 整份接口规格。取 `Update` 而不是 `Create`：它不但建节点，还会改环境变量、
     // 改 base URL 那一格，`if_exists=update` 时还会覆盖已有端点的字段。
     ("spec_upsert", Capability::Update),
-    // HTTP 执行 —— 唯二会发外网请求的工具，信任级别最高。
+    // HTTP 执行 —— 唯三会发外网请求的工具，信任级别最高。
     ("api_run_request", Capability::Send),
     ("api_call_endpoint", Capability::Send),
+    ("api_run_collection", Capability::Send),
     // 读侧的变量 / 端点辅助
     ("api_resolve_template", Capability::Read),
     ("api_resolve_endpoint", Capability::Read),

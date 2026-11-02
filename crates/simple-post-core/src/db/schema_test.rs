@@ -217,7 +217,6 @@ fn plant_shipped_dynamic_variables(pool: &DbPool) {
                  source_endpoint_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
                  source_inline_json TEXT,
                  source_environment_id TEXT REFERENCES environments(id) ON DELETE SET NULL,
-                 source_base_url_definition_id TEXT REFERENCES base_url_definitions(id) ON DELETE SET NULL,
                  extract_path       TEXT NOT NULL DEFAULT '$',
                  value_mode         TEXT NOT NULL DEFAULT 'auto',
                  ttl_seconds        INTEGER NOT NULL DEFAULT 60,

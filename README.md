@@ -11,7 +11,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 [![版本](https://img.shields.io/badge/version-v0.1.23-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
 [![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
 [![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
-[![MCP 工具](https://img.shields.io/badge/MCP-52%20tools-8A2BE2?style=flat-square)](#mcp-server)
+[![MCP 工具](https://img.shields.io/badge/MCP-47%20tools-8A2BE2?style=flat-square)](#mcp-server)
 [![许可](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 </div>
@@ -30,7 +30,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 
 Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、请求构造、响应查看都在同一个应用里完成，业务数据保存在本机的 SQLite 文件中，不依赖任何 SaaS 后端。
 
-与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 52 个 MCP 工具读取和修改接口定义、环境变量与服务地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
+与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 47 个 MCP 工具读取和修改接口定义、环境变量与模块地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
 
 ## 界面
 
@@ -40,7 +40,11 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 <td width="50%"><img src="docs/screenshots/mcp-connection-settings-dark.png" alt="设置里的连接页：MCP 进程状态与接入配置" /><br /><sub><b>连接</b>：MCP 进程的运行状态、已注册工具数量，以及可直接粘贴给客户端的接入配置。</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/screenshots/dynamic-variables-panel-dark.png" alt="动态变量面板：项目内定义、数据源、取数环境与当前值" /><br /><sub><b>动态变量</b>：定义挂在项目里，变量名项目内唯一。面板显示数据源、取数环境与服务，以及当前值。</sub></td>
+<td width="50%"><img src="docs/screenshots/request-body-form-data-light.png" alt="请求体编辑器：form-data 的分片表，文本分片与文件分片" /><br /><sub><b>请求体形态</b>：无、JSON、x-www-form-urlencoded、form-data、XML、Text、binary 七种形态各有自己的编辑器。form-data 的分片可以在文本与文件之间切换。</sub></td>
+<td width="50%"><img src="docs/screenshots/response-image-light.png" alt="响应区：图片响应给出预览与下载" /><br /><sub><b>响应按类型渲染</b>：JSON 走 Pretty，文本走文本，图片给预览，二进制给下载卡片。下载的是原始字节。</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/dynamic-variables-panel-dark.png" alt="动态变量面板：项目内定义、数据源、取数环境与当前值" /><br /><sub><b>动态变量</b>：定义挂在项目里，变量名项目内唯一。面板显示数据源、取数环境与模块，以及当前值。</sub></td>
 <td width="50%"><img src="docs/screenshots/command-palette-dark.png" alt="命令面板：跨项目搜索接口" /><br /><sub><b>命令面板</b>：<code>Ctrl+K</code> 打开，跨项目、模块、集合、接口搜索。</sub></td>
 </tr>
 <tr>
@@ -65,17 +69,47 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 
 模块、集合、接口存在同一张 `nodes` 表里，用 `type` 区分，父子关系由 `parent_id` 表达。层级规则是强制执行的契约：模块只能放在顶层，接口可以挂在集合下、也可以直接挂在模块下（单个接口不需要先建一个一次性集合），集合可以挂在模块或另一个集合下。SQLite 触发器与应用层检查同时校验，拖拽落点遵守同一张矩阵。
 
-### 服务地址按「环境 × 模块 × 服务」逐格隔离
+### 「当前环境」是每个客户端自己的实时状态，接口不绑环境
 
-服务清单是项目级的：整个项目只有一份清单，每个模块都能看到清单里的全部服务，也不会出现两个同名服务。每个服务的地址是一个独立的问题：`环境 × 模块 × 服务` 三个维度各自一格。
+接口不再记着「我从哪个环境取地址与变量」。库里没有「当前环境」这一列：当前环境是**每个客户端自己的**实时状态——桌面窗口一份、网页标签一份，各切各的。落库会让 web 端多个人互相踩：一个人切了环境，另一个人发请求就换了地址与端口。
 
-某一格没有填写，表示该模块在此环境下没有这个服务的地址，并且不继承任何值——既不继承项目默认服务，也不继承别的模块。地址存放在 `environments.module_base_urls_json` 里，结构是 `服务 id → 模块 id → URL`。
+于是顶栏的 ENV 药丸、命令面板的「切换环境」、设置面板里的环境切换都只改本客户端的状态，不写库。切一次，全部接口一起换地址与端口——这正是「新建环境并切换后端口不跟着换」那个问题的正解。
 
-### 请求体分两栏：载荷与定义
+「当前环境」按项目记在本机（浏览器 localStorage）：刷新页面回到这个项目时，停在这个项目里上次用的那个环境；没用过或那个环境已被删掉，就用这个项目的**默认环境**。
 
-请求体的 `content` 是这一次发出的载荷，`schema` 是文档里这份接口接受什么参数的定义（JSON Schema，只用于文档与 OpenAPI 导出，从不参与发送）。两者都是 JSON 对象，形状接近，所以界面给它们两个编辑器：`content` 一个，`schema` 一个折叠在下面。
+**默认环境**是项目的属性：一个项目里**最早创建**的那个环境（可改名，靠创建顺序认定）。谁发请求时没点名环境，就用它。库里没有「当前」这一列，只有 `environments.created_at` 用来认「最早」。
+
+接口行不再有环境绑定（`endpoint_details` 没有 `environment_id` 列）。MCP 侧逐次自由选择：`api_call_endpoint` 接受可选的 `environment_id`，点名了就按那个环境解析，不点名就回落到项目的默认环境。
+
+### 模块地址按「环境 × 模块」逐格隔离，每格带一个代理
+
+地址只住在一个地方：`(环境 × 模块)` 这一格。模块没有全局清单，两个模块之间也不共享任何地址。
+
+每一格有两个字段：**后端 api 地址**（模块真正的接口地址）与**代理地址**（实际访问地址）。没有代理时请求直接打后端 api 地址；填了代理时，请求地址里作为前缀的那段后端 api 地址会被换成代理地址，其余部分原样保留。代理地址与后端 api 地址都支持 `{{var}}` 替换。
+
+这一格空着表示该模块在此环境下没有地址，并且不继承任何值——不借用别的模块的。地址存放在 `environments.module_base_urls_json` 里，结构是 `模块 id → { url, proxy }`。
+
+接口自己也可以带一个地址（`baseUrlOverride`）。带了就完全自己算：不套用模块那一格，也不套用代理。
+
+### 请求体：七种形态，文件与二进制都发得出字节
+
+请求体的形态有七种：无、JSON、`x-www-form-urlencoded`、`form-data`、XML、Text 与 binary。界面按这七种给不同的编辑器。
+
+`x-www-form-urlencoded` 与 `form-data` 用键值表：一行一个字段，带「说明」列与「是否参与发送」这一位。停用的行不参与发送，但仍留在表里。`form-data` 的每个分片可以在文本与文件之间切换，文件分片的字节从本地文件读出来。
+
+文件**存字节不存路径**：桌面端与服务端容器不是一个文件系统，存路径会让「桌面端建好的接口」在 `serve-web` 上发不出去。
+
+JSON、XML 与 Text 三种形态的 `content` 是原文，binary 形态的 `content` 是一份文件描述（文件名、字节数、MIME 类型与 base64 的字节）。
+
+`content` 与 `schema` 的分工不变：`content` 是这一次发出的载荷，`schema` 是文档里这份接口接受什么参数的定义（JSON Schema，只用于文档与 OpenAPI 导出，从不参与发送）。两者都是 JSON 对象，形状接近，所以界面给它们两个编辑器。
 
 MCP 侧的工具描述写明哪个字段放什么，并且设了一道门：载荷看起来是一份 Schema、而 `schema` 还空着时，`endpoint_create` 与 `endpoint_update` 都会拒绝这次提交。
+
+### 响应按内容类型渲染
+
+响应区按收到的内容类型选视图：JSON 走可展开的 Pretty 视图，文本走纯文本视图，图片给预览，其余二进制给下载卡片。图片与二进制响应都能下载，下载的是**原始字节**而不是页面上的那份文本，文件名取自响应头里的 `Content-Disposition`。
+
+判形态的顺序是「先看 Content-Type 是不是文本，再看字节是不是合法的 UTF-8」：响应体可能被体积上限裁过，裁点切开一个多字节字符时，纯文本响应会被读成非法 UTF-8。
 
 ### 请求脚本运行在嵌入式 QuickJS 沙箱里
 
@@ -99,7 +133,7 @@ MCP 侧的工具描述写明哪个字段放什么，并且设了一道门：载�
 
 定义挂在**项目**里，变量名在**项目内**唯一：基线平台与各个客户分发项目各自取自己的那份数据，名字可以一样而互不覆盖。请求里的 `{{name}}` 只在**当前项目**里找定义，找不到就是缺失，不会退到别的项目去拿同名的那一条——跨项目取值是调用接口（MCP 的 `dynamic_var_resolve`）的事：它可以点名项目，也可以跨项目找，同一个名字出现在多个项目里时它报一条「歧义」错误而不是猜。
 
-取数用哪个环境与服务由定义自己决定——环境点名了就用它，没点名就用数据源接口所属项目的第一个可用环境；服务点名了就用它，没点名就用那个项目的默认服务（★）。
+取数用哪个环境由定义自己决定——环境点名了就用它，没点名就用数据源接口所属项目的第一个可用环境。取数的地址跟着数据源接口所属的模块走，读那个模块在该环境下的那一格。
 
 数据源有两种形态：引用接口树里的一个接口（复用它的基础地址、鉴权与前置脚本），或者一份内联请求。数据源可以跨项目：定义在项目 A，取数用项目 B 的接口，那这次取数就花 B 的凭据，故 B 的权限也要够。
 
@@ -119,11 +153,11 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 
 ### MCP Server
 
-52 个 MCP 工具，覆盖项目、模块、集合、接口、服务地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
+47 个 MCP 工具，覆盖项目、模块、集合、接口、模块地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
 
 工具是按「一次调用建好一个接口」设计的，而不只是 CRUD：
 
-- **一份规格一次落库。** `spec_upsert` 收一份声明式规格：模块、集合路径、环境、服务与端点。它在一个事务里把这一整份写进库里——缺的模块与集合逐级建出来，缺的环境与服务按名字建出来，URL 写进（环境 × 服务 × 模块）那一格。建一份接口规范不必再按「先查一遍、再建一下」串七八次调用。
+- **一份规格一次落库。** `spec_upsert` 收一份声明式规格：模块、集合路径、环境与端点。它在一个事务里把这一整份写进库里——缺的模块与集合逐级建出来，缺的环境按名字建出来，URL 写进（环境 × 模块）那一格，代理地址写进同一格的另一个字段。建一份接口规范不必再按「先查一遍、再建一下」串七八次调用。
 - **同一份规格有三个入口。** MCP 工具 `spec_upsert`、REST 路由 `POST /api/spec/upsert` 与桌面端命令 `spec_upsert` 落的是同一份规格，落库逻辑只有一份实现。REST 请求体就是那份规格本身，不带外层包装；字段名的两种拼写（`project_id` 与 `projectId`）都收，因此同一份规格可以在 AI 客户端与 HTTP 调用方之间原样搬运。
 - **按路径寻址。** `collection_create` 与 `endpoint_create` 接受 `collection_path`（如 `订单/明细`），路径上缺的集合会被逐级建出来，已有的同名集合直接复用。建一个接口不必先查一遍树。
 - **创建是幂等的。** 所有 `*_create` 工具接受 `if_exists`（`reuse` / `error` / `duplicate`，默认 `reuse`）。重复调用同一个接口定义不会造出第二份。`spec_upsert` 另有一档 `update`：它覆盖规格里点名的字段，没点名的字段保持原样。
@@ -233,7 +267,7 @@ curl http://localhost:4173/api/healthz
 
 MCP 客户端连接 `http://host:4173/mcp`，并带上 `Authorization: Bearer <口令>`。
 
-同一套 REST 接口也开放给脚本与自动化工具，其中 `POST /api/spec/upsert` 一次调用落一份完整的接口规格（模块、集合路径、环境、服务与端点），与 MCP 工具 `spec_upsert` 落的是同一份东西。
+同一套 REST 接口也开放给脚本与自动化工具，其中 `POST /api/spec/upsert` 一次调用落一份完整的接口规格（模块、集合路径、环境与端点），与 MCP 工具 `spec_upsert` 落的是同一份东西。
 
 需要给 MCP 分配独立端口时，在设置面板的「连接 → HTTP 服务配置」里把「端口」填成一个具体数字（例如 4174）。服务端会另外开一个只提供 MCP 的监听器，那个端口上只有 `/mcp`、`/mcp/healthz` 与 `/mcp/tools`，没有 REST 接口与单页应用。端口填 0 时不单独开端口，MCP 只走主端口。改动需要重启服务才生效。
 
@@ -288,7 +322,7 @@ sp.example.com {
 | Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
 | 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、MCP 指标、错误类型，以及动态变量、OAuth2、路径参数、请求脚本、接口规格、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
-| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（52 个工具）、axum HTTP daemon、标准输入输出桥接。 |
+| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（47 个工具）、axum HTTP daemon、标准输入输出桥接。 |
 | 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
 | 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
 
@@ -303,22 +337,22 @@ sp.example.com {
 - 接口的请求配置（method、url、auth、body、headers、params、tags）单独放在 `endpoint_details` 表里，这些字段对模块与集合没有意义（`crates/simple-post-core/src/db/endpoint_details.rs`）
 - 层级合法性由 SQLite 触发器与应用层检查同时强制（`ResourceNodeType::may_under`、`db::nodes::move_many`）
 - 完整增删改查、复制接口、级联清理，以及模块、集合、接口的上下移排序（`crates/simple-post-core/src/db/nodes.rs`）
-- 响应历史持久化在 SQLite 里，每个接口保留多少条**未收藏**的历史由全局偏好 `response_history.keep` 决定（缺省 10 条，可在设置里改）；收藏的行永久保留、不计入这个条数。响应体超过上限时记 `body_truncated`，查看器据此说明，而不是把半个文档当成完整内容显示（`crates/simple-post-core/src/db/response_history.rs`）
+- 响应历史持久化在 SQLite 里，每个接口保留多少条**未收藏**的历史由全局偏好 `response_history.keep` 决定（缺省 10 条，可在设置里改）；收藏的行永久保留、不计入这个条数。响应体超过上限时记 `body_truncated`，查看器据此说明，而不是把半个文档当成完整内容显示；二进制响应按 base64 存，故历史里的图片与文件同样能重新下载（`crates/simple-post-core/src/db/response_history.rs`）
 
 **桌面与界面**
 
 - 项目与环境切换、全局搜索（`Ctrl+K`）、MCP 进程状态指示器、设置入口（`src/features/top-bar/`）
 - 侧边树递归渲染集合层级、method 彩色徽标、双击改名、右键菜单、删除确认（`src/features/project-tree/`）
 - 拖拽支持三种落点：集合正中间是移进该子树，上边缘与下边缘是同级前后插入（`src/lib/tree-index.ts`）
-- 请求测试器提供 Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页，method 与 URL 写在标签页上方的请求头与地址栏里（URL 栏带 `{{var}}` 高亮与变量选择浮层）；CodeMirror 6 的 JSON 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
+- 请求测试器提供 Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页，method 与 URL 写在标签页上方的请求头与地址栏里（URL 栏带 `{{var}}` 高亮与变量选择浮层）；Body 页签按无、JSON、x-www-form-urlencoded、form-data、XML、Text、binary 七种形态给不同的编辑器，CodeMirror 6 的 JSON 与 XML 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
 - 复制为 cURL、保存接口定义（`src/lib/http-build.ts`）
-- 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers、脚本四种视图，支持复制与下载，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
+- 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers、脚本四种视图；Pretty 按内容类型选视图——JSON 走可展开的树，文本走纯文本，图片给预览，二进制给下载卡片；支持复制与下载，下载的是**原始字节**，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
 - 命令面板跨项目、模块、集合、接口模糊搜索，并内置切换环境、切换主题、打开设置、新建项目、新建模块、复制当前接口 URL 等命令
 - 主题支持 dark、light、system 三种，在 `<html>` 上切换 class，刷新后保留且没有白屏闪烁（`src/styles/globals.css`）
 
 **设置**
 
-- 服务（baseUrl）：项目级共享清单，每个模块在每个环境各填各的地址，表头按「模块 × 服务」逐格展开，空格即无地址、不继承
+- 模块地址：每个模块在每个环境各填各的地址，表头按「模块 × 环境」逐格展开，每格填后端 api 地址与代理地址；空格即无地址、不继承
 - 环境变量 `{{var}}` 实时编辑，随项目创建，可以重命名与删除
 - MCP 进程状态：运行指示、daemon 上报的已注册工具列表、daemon 日志尾部（最近 500 行，可折叠）
 - 主题、请求设置（超时、跟随重定向、最大响应体积、HTTPS 出站）、快捷键速查（`src/features/settings/`）
@@ -348,12 +382,11 @@ v0.1.x 已交付：Tauri 桌面应用、`serve-web` 无头 Web 与独立 MCP 二
 
 ### v0.3
 
-- [ ] AI 文档生成（接口转 Markdown）（#9）
-- [ ] AI 测试用例生成（schema 转测试）（#10）
 - [x] 请求脚本（pre-request 与 test 脚本，沙箱隔离）（#7）
 - [x] 动态变量（声明一次 → 取数 → 缓存 → 手动编辑）（#109）
-- [ ] 集合批量运行与简易报告（#8）
-- [ ] 团队协作（Git 同步 JSON 工作区，可选）（#11）
+- [x] 集合批量运行与简易报告（#8）
+
+AI 文档生成、AI 测试用例生成与 Git 工作区协作三项不在应用内实现：外部 AI 客户端通过 MCP 读取接口定义，自行生成文档与测试用例，并用 Git 管理工作区；应用侧因此不新增 AI provider 集成，也不新增 API key 的配置与存储面（#9 #10 #11 已关闭）。
 
 ### v1.0
 

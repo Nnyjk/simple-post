@@ -94,7 +94,9 @@ export function buildCommands(): Command[] {
       hint: 'Environment',
       section: '命令',
       keywords: ['env', 'environment', '环境', env.name],
-      run: () => useAppStore.getState().setActiveEnvironment(env.id),
+      // 切「当前环境」：纯客户端状态，不写库。它是每个客户端自己的实时状态，
+      // 桌面窗口与网页标签各一份，各切各的。
+      run: () => useAppStore.getState().setCurrentEnvironment(env.id),
     });
   }
 

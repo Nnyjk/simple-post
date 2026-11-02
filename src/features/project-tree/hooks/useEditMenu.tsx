@@ -12,6 +12,7 @@ import {
   Pencil,
   Terminal,
   Trash2,
+  Zap,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import type { NewDraftKind } from '@/stores/store-types';
@@ -33,6 +34,11 @@ export interface EditMenuBindings {
   /** 在 `parentId` 下创建接口并就地重命名。 */
   createEndpointAt: (parentId: string) => Promise<void>;
   openEndpointTab: (id: string) => void;
+  /**
+   * 打开批量运行对话框。目标是一个容器（集合或模块），批量运行跑的是它下面的
+   * **全部**接口，含嵌套子集合里的。
+   */
+  openBatchRun: (target: { id: string; name: string; kind: 'collection' | 'module' }) => void;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;
 }
 
@@ -46,6 +52,7 @@ export function useEditMenu({
   openNewItemWithIntent,
   createEndpointAt,
   openEndpointTab,
+  openBatchRun,
   setMenu,
 }: EditMenuBindings) {
   // ---------- store actions ----------
@@ -152,6 +159,13 @@ export function useEditMenu({
             void createEndpointAt(id);
           },
         },
+        {
+          kind: 'item',
+          label: '批量运行',
+          icon: <Zap className="h-3.5 w-3.5" />,
+          // 整个模块下的接口，含嵌套子集合里的。
+          onClick: () => openBatchRun({ id, name: getName('module', id), kind: 'module' }),
+        },
         { kind: 'divider' },
         {
           kind: 'item',
@@ -206,6 +220,13 @@ export function useEditMenu({
           onClick: () => {
             void createEndpointAt(id);
           },
+        },
+        {
+          kind: 'item',
+          label: '批量运行',
+          icon: <Zap className="h-3.5 w-3.5" />,
+          // 这个集合下面的全部接口，**含嵌套子集合里的**。
+          onClick: () => openBatchRun({ id, name: col.name, kind: 'collection' }),
         },
         { kind: 'divider' },
         {

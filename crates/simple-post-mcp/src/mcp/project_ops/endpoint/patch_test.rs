@@ -83,6 +83,10 @@ async fn endpoint_update_rejects_a_non_verb_method() {
 
 /// An unknown `body.mode` and an unknown `auth.kind` must both be
 /// errors. These go through serde, which reports the variant list.
+///
+/// The payload is a name that never existed rather than `xml`: that one
+/// is a supported mode since the body-mode work, so reusing it here
+/// would leave the assertion testing nothing.
 #[tokio::test]
 async fn endpoint_update_rejects_an_unknown_body_mode() {
     let (st, id) = fixture();
@@ -90,7 +94,7 @@ async fn endpoint_update_rejects_an_unknown_body_mode() {
         &st,
         serde_json::json!({
             "endpoint_id": id,
-            "patch": { "body": { "mode": "xml", "content": "<a/>" } }
+            "patch": { "body": { "mode": "yaml", "content": "a: 1" } }
         }),
     )
     .await;

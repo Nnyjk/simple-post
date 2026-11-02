@@ -3,7 +3,7 @@
 use serde_json::{Map, Value};
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{IrCollection, IrEndpoint, IrScripts, IrServer};
+use crate::ir::{IrCollection, IrEndpoint, IrScripts};
 
 use super::request::build_endpoint;
 use super::script::{parse_scripts, Place};
@@ -46,12 +46,7 @@ struct Frame<'a> {
 }
 
 /// 遍历一层容器的全部子项，返回这一层的 endpoints 与 collections。
-pub(super) fn walk_children<'a>(
-    items: &'a [Value],
-    ptr: &str,
-    servers: &mut Vec<IrServer>,
-    ctx: &mut Ctx,
-) -> Container {
+pub(super) fn walk_children<'a>(items: &'a [Value], ptr: &str, ctx: &mut Ctx) -> Container {
     let mut stack: Vec<Frame<'a>> = vec![Frame {
         key: ptr.to_string(),
         name: String::new(),
@@ -111,7 +106,7 @@ pub(super) fn walk_children<'a>(
                 let name = item_name(obj);
                 // 脚本挂在**条目**上，不在 `request` 里。
                 let scripts = parse_scripts(obj, &item_ptr, Place::Node, ctx);
-                if let Some(ep) = build_endpoint(req, name, &item_ptr, scripts, servers, ctx) {
+                if let Some(ep) = build_endpoint(req, name, &item_ptr, scripts, ctx) {
                     stack[owner].endpoints.push(ep);
                 }
             }

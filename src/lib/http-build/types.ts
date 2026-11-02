@@ -32,6 +32,11 @@ export interface BuiltFetch {
   init: RequestInit;
   /** body 的字符串回显（form 模式已 URL/form 安全）。`sendRequest` 目前不用它。 */
   bodyForLog: string;
+  /**
+   * 请求体的**字节**（base64）。与 `init.body` 是同一份东西的两种形态：
+   * 后端收的是 JSON，故字节走 base64 这个字段。
+   */
+  bodyBase64: string | null;
 }
 
 /**
@@ -43,11 +48,17 @@ export interface PrepareRequestInput {
   /**
    * URL 的 path 部分，不含任何 base URL，可带 `{{var}}`。自带 scheme
    * （`https://…`）的 path 优先于 `baseUrl`——endpoint 的「自定义」模式
-   * 靠这点成立：用户手输整个地址，选择器里仍有服务被选中。
+   * 靠这点成立：用户手输整个地址，选择器里仍是自定义那一档。
    */
   urlPath: string;
   /** 已解析的 base URL；空串表示没有 base URL。 */
   baseUrl: string;
+  /**
+   * 实际访问地址（代理）。请求地址以 `baseUrl` 开头时，这个前缀被换成它。
+   *
+   * 缺席或空串 = 没有代理，请求直接打 `baseUrl`。
+   */
+  proxy?: string | null;
   params: KeyValue[];
   headers: KeyValue[];
   body: RequestBody;
@@ -75,10 +86,11 @@ export interface PreparedRequest {
   method: HttpMethod;
   /**
    * 完整 URL：`join(baseUrl, urlPath)` → 替换路径里的 `{占位符}` → 解析 `{{var}}` →
-   * 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的 apikey，顺序如列。
-   * 先 join 再解析，环境自身的 base URL 里的变量才解析得到；折叠放在解析之后，
-   * 因为把变量替换成以 `/` 开头的值才会把 join 的分隔符变成 `//`；参数放最后，
-   * 因为它们的值在进来时已解析（见 `appendQueryString`）。
+   * 代理前缀替换 → 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的 apikey，
+   * 顺序如列。
+   * 先 join 再解析，模块地址里的变量才解析得到；代理替换放在解析之后，因为要换掉
+   * 的正是解析出来的那个前缀；折叠放在代理替换之后，因为代理地址也可能带来重复
+   * 斜杠；参数放最后，因为它们的值在进来时已解析（见 `appendQueryString`）。
    */
   url: string;
   /**
@@ -97,6 +109,17 @@ export interface PreparedRequest {
    * boundary 的 multipart 文本），与 `headers` 里那条 Content-Type 同源。
    */
   body: string | null;
+  /**
+   * 请求体的**字节**（base64）。
+   *
+   * 与 `body` 互斥：字节是合法 UTF-8 时走 `body`，否则走这里。`binary` 模式一律走
+   * 这里——用户选的是文件，发的是它的字节。multipart 里带了文件分片时也是这里。
+   *
+   * 两个字段而不是一个「文本或字节」的联合类型：传输层收的是 JSON，两种形态各有
+   * 自己的字段名才不会互相覆盖；Rust 侧的 `HttpRequestInput` 与 `ScriptRequest`
+   * 用的是同一对字段名。
+   */
+  bodyBase64: string | null;
   /**
    * URL / 参数值 / header / body / auth 里全部未解析的 `{{name}}`，去重且按
    * 首次出现排序。集合与 Rust `resolve_endpoint` 的 `missing_vars` 对齐；

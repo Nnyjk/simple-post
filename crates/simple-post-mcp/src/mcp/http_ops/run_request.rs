@@ -37,25 +37,22 @@ pub(super) async fn tool_api_run_request(
     let content = a.body.clone().unwrap_or_default();
     let body_mode = parse_body_mode(a.body_mode.as_deref(), !content.is_empty())?;
 
-    // `project_id` 的来源：base URL 的取值住在 (环境 × 服务 × 模块) 交叉的格子里，
-    // 而服务属于项目，故要知道项目才能读那张表。给了服务 id 就按它找，只给了环境
-    // 就按环境找。
-    let project_id: Option<String> = match a.base_url_definition_id.as_deref() {
-        Some(def_id) => Some(simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::base_url_defs::project_id_of(c, def_id)
-        })?),
-        None => match a.env_id.as_deref() {
-            Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
-                simple_post_core::db::environments::lookup_project_id(c, env_id)
-            })
-            .ok(),
-            None => None,
-        },
+    // `project_id` 的来源：环境属于项目，故给了环境 id 就知道项目。没给环境就没有
+    // 项目归属，base URL 那一格也无从读。
+    let project_id: Option<String> = match a.env_id.as_deref() {
+        Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
+            simple_post_core::db::environments::lookup_project_id(c, env_id)
+        })
+        .ok(),
+        None => None,
     };
 
-    // 环境：给了 id 就用它；没给就取项目当前激活的那个 —— 与 `api_call_endpoint`
-    // 同一套规则（`mcp::resolve_env`）。取不到（环境已被删）时当作这次请求不做
-    // 变量替换，不让整次调用失败。
+    // 环境：给了 id 就用它。**没给就没有环境**，与 `api_call_endpoint` 不同 ——
+    // 后者的项目归属来自端点所属的项目，故省略环境名时还能回落到那个项目的默认
+    // 环境；这里的项目归属只能由环境 id 反查（见上面那段），没有环境 id 就连
+    // 项目都没有，于是没有默认环境可回落。那次请求没有 base URL、变量也不替换。
+    //
+    // 点名的环境已被删掉时同样当作没有环境，不让整次调用失败。
     let env = crate::mcp::resolve_env(
         &state.pool,
         a.env_id.as_deref(),
@@ -69,8 +66,6 @@ pub(super) async fn tool_api_run_request(
         node_id: String::new(),
         method: method.clone(),
         url: a.url.clone(),
-        environment_id: a.env_id.clone(),
-        base_url_definition_id: a.base_url_definition_id.clone(),
         base_url_override: None,
         params,
         path_params,
@@ -100,7 +95,6 @@ pub(super) async fn tool_api_run_request(
     let resolved = crate::variable_fill::resolve_endpoint_with(
         &detail,
         env.as_ref(),
-        &project,
         Some(&overrides),
         &dynamic,
     )?;

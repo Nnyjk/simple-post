@@ -1,6 +1,6 @@
 //! 响应历史路由的路由与线格式。
 //!
-//! 驱动真实 listener，理由同 `base_url_defs_test.rs`：`/api/response-history` 与
+//! 驱动真实 listener：`/api/response-history` 与
 //! `/api/response-history/:endpointId` 能否在 axum 的 radix tree 里共存，是 router 的
 //! 性质，不是注册代码读一读就能断言的。失败形态之所以难缠，是因为它是静默的——抢
 //! 优先级失败的路由会落到 SPA fallback，回 `200` 加一个 HTML body，在 curl 看来与一个
@@ -19,8 +19,8 @@ use crate::web_api::{build_router, WebState};
 /// 建一个 `WebState`：一次性的 SQLite 文件 + 空 SPA 目录，router 绑在 loopback 上一个
 /// 临时端口。
 ///
-/// 从 `base_url_defs_test.rs` 复制而来而非共用：计数器是每模块各自的，而跨两个
-/// `#[path]` 测试模块共享一套夹具需要一个谁都不拥有的 `pub(crate)` 落点。
+/// 计数器是每模块各自的：跨两个 `#[path]` 测试模块共享一套夹具需要一个谁都不拥有的
+/// `pub(crate)` 落点，故这里各写一份。
 async fn serve_test_router() -> (SocketAddr, PathBuf) {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);

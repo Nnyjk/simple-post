@@ -7,11 +7,14 @@ import type { EffectiveRequest } from './effectiveRequest';
  * 组装这一次要发出的请求。
  *
  * 发送前若动态变量解析出了新的值，调用方用新值再组装一次。
+ *
+ * `proxy` 是环境里本模块那一格的实际访问地址；它替换请求地址开头那段模块地址。
  */
 export function buildRequestInput(
   method: HttpMethod,
   urlPath: string,
   baseUrl: string,
+  proxy: string | null,
   effective: EffectiveRequest,
   env: Environment | undefined,
   dynamicVars: Record<string, string>,
@@ -20,6 +23,7 @@ export function buildRequestInput(
     method,
     urlPath,
     baseUrl,
+    proxy,
     params: effective.params,
     pathParams: effective.pathParams,
     headers: effective.headers,
@@ -50,5 +54,8 @@ export function toRequestSnapshot(
     url: request.url,
     headers: headers.map(([name, value]) => [name, value] as [string, string]),
     body: request.body,
+    // 二进制请求体的字节（`binary` 模式，或带文件分片的 multipart）走这一条通道：
+    // 没有它，历史行里的请求侧栏会显示成一个没有 body 的请求，而那次调用明明带着文件。
+    bodyBase64: request.bodyBase64,
   };
 }

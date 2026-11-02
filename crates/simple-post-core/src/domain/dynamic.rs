@@ -81,9 +81,6 @@ pub struct DynamicVariable {
     /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_environment_id: Option<String>,
-    /// 取数用的服务（`base_url_definitions.id`）。`None` = 数据源接口所属项目的默认服务。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
     pub extract_path: String,
     /// 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工。
@@ -122,9 +119,6 @@ pub struct DynamicVariablePatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_environment_id: Option<Option<String>>,
-    #[serde(default, deserialize_with = "super::double_option")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_base_url_definition_id: Option<Option<String>>,
     pub extract_path: Option<String>,
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]

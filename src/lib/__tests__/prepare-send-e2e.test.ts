@@ -164,7 +164,6 @@ const ENV: Environment = {
   id: 'env_e2e',
   projectId: 'p_e2e',
   name: 'e2e',
-  baseUrls: {},
   moduleBaseUrls: {},
   variables: {
     site: 'cn',
@@ -173,7 +172,7 @@ const ENV: Environment = {
     token: 'eyJ.e2e',
   },
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
 };
 
 function kv(key: string, value: string, enabled = true): KeyValue {

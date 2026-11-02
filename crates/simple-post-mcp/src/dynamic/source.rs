@@ -91,29 +91,25 @@ async fn fetch_from_endpoint(
         message: format!("数据源端点 {endpoint_id} 已被删除"),
     })?;
 
-    // 模块与服务来自取数上下文：模块决定读哪一格 base URL，服务决定读哪个服务。
-    // 两者都由定义自己推导，与谁消费这个变量无关。
+    // 模块来自取数上下文：模块决定读哪一格 base URL。它由定义自己推导，与谁消费
+    // 这个变量无关。
     let overrides = EndpointOverrides {
         module_id: source.module_id.clone(),
-        base_url_definition_id: source.base_url_definition_id.clone(),
         ..Default::default()
     };
 
-    let resolved = crate::variable_fill::resolve_endpoint(
-        &detail,
-        source.env.as_ref(),
-        &source.project,
-        Some(&overrides),
-    )
-    .map_err(|e| DynamicError {
-        name: def.name.clone(),
-        kind: DynamicErrorKind::SourceError,
-        message: format!("解析数据源端点失败：{e}"),
-    })?;
+    let resolved =
+        crate::variable_fill::resolve_endpoint(&detail, source.env.as_ref(), Some(&overrides))
+            .map_err(|e| DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::SourceError,
+                message: format!("解析数据源端点失败：{e}"),
+            })?;
 
     let mut headers = resolved.headers;
     let mut url = resolved.url;
     let mut body = resolved.body;
+    let mut body_base64 = resolved.body_base64;
 
     // OAuth2 的 token 是发请求之前才取得到的，故注入放在这里而不是解析器里。
     if let simple_post_core::domain::AuthConfig {
@@ -134,9 +130,11 @@ async fn fetch_from_endpoint(
 
     // multipart 的 body 在这里才成形：boundary 必须现生成。
     if resolved.body_mode == BodyMode::Multipart {
-        body = body
-            .take()
-            .map(|content| crate::mcp::http_ops::multipart::apply(&mut headers, &content));
+        if let Some(content) = body.take() {
+            let assembled = crate::mcp::http_ops::multipart::apply(&mut headers, &content);
+            body = assembled.text;
+            body_base64 = assembled.base64;
+        }
     }
 
     send(
@@ -149,6 +147,7 @@ async fn fetch_from_endpoint(
             url,
             headers,
             body,
+            body_base64,
             // 数据源端点自带的 HTTPS 出站设置：整体取代全局默认那份，与「按这个端点
             // 发请求」是同一套规则。
             tls: detail.tls.clone(),
@@ -182,8 +181,6 @@ async fn fetch_from_inline(
         node_id: String::new(),
         method,
         url: spec.url,
-        environment_id: None,
-        base_url_definition_id: None,
         // 空串 = 自定义模式但不加前缀：URL 字段本身就是完整地址。
         base_url_override: Some(String::new()),
         params: spec.params,
@@ -200,26 +197,25 @@ async fn fetch_from_inline(
     };
 
     let overrides = EndpointOverrides::default();
-    let resolved = crate::variable_fill::resolve_endpoint(
-        &detail,
-        source.env.as_ref(),
-        &source.project,
-        Some(&overrides),
-    )
-    .map_err(|e| DynamicError {
-        name: def.name.clone(),
-        kind: DynamicErrorKind::SourceError,
-        message: format!("解析内联请求失败：{e}"),
-    })?;
+    let resolved =
+        crate::variable_fill::resolve_endpoint(&detail, source.env.as_ref(), Some(&overrides))
+            .map_err(|e| DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::SourceError,
+                message: format!("解析内联请求失败：{e}"),
+            })?;
 
     let mut headers = resolved.headers;
     let url = resolved.url;
     let mut body = resolved.body;
+    let mut body_base64 = resolved.body_base64;
 
     if resolved.body_mode == BodyMode::Multipart {
-        body = body
-            .take()
-            .map(|content| crate::mcp::http_ops::multipart::apply(&mut headers, &content));
+        if let Some(content) = body.take() {
+            let assembled = crate::mcp::http_ops::multipart::apply(&mut headers, &content);
+            body = assembled.text;
+            body_base64 = assembled.base64;
+        }
     }
 
     send(
@@ -232,6 +228,7 @@ async fn fetch_from_inline(
             url,
             headers,
             body,
+            body_base64,
             // 内联请求没有端点行可继承，故用全局默认那份。
             tls: None,
         },
@@ -250,6 +247,8 @@ struct Outgoing {
     url: String,
     headers: Vec<(String, String)>,
     body: Option<String>,
+    /// 请求体的二进制形态（base64）。有它时 `body` 缺席。
+    body_base64: Option<String>,
     /// 数据源端点自带的 HTTPS 出站设置。`None` = 用全局默认那份。
     ///
     /// 它是**端点自带的那份**，故整体取代全局默认 —— 与「按这个端点发请求」是同一套
@@ -273,6 +272,7 @@ async fn send(
         url,
         headers,
         body,
+        body_base64,
         tls,
     } = outgoing;
     let settings = crate::mcp::http_ops::resolve_settings(&ctx.pool, (None, None, None), None);
@@ -293,6 +293,7 @@ async fn send(
                 url,
                 headers,
                 body,
+                body_base64,
             },
             env,
             settings,

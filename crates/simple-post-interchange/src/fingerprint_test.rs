@@ -279,8 +279,6 @@ fn the_set_recognises_an_already_stored_endpoint() {
             schema: None,
         },
         auth: AuthConfig::default(),
-        environment_id: None,
-        base_url_definition_id: None,
         base_url_override: None,
         docs: None,
         notes: None,

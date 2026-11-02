@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { type BaseUrlSelection } from '@/features/http-tester/BaseUrlPicker';
-import { type EnvSnapshot, type HttpMethod } from '@/types/domain';
+import { type HttpMethod } from '@/types/domain';
 import { type FormatResult } from '@/lib/utils';
 import { validateRequest } from '@/lib/request-validation';
-import { enabledVars } from '@/lib/url';
 import { UNTITLED_ENDPOINT_NAME, type EndpointDraft } from '@/stores/store-types';
 import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { useHttpTesterMotion } from './useHttpTesterMotion';
@@ -12,15 +11,9 @@ import { useRequestActions } from './useRequestActions';
 import { useEndpointContext } from './useEndpointContext';
 import { useVarHint, type VarEntry } from './var-hint';
 import { pathPlaceholders } from '@/lib/path-params';
-import { buildEffectiveRequest } from './model/effectiveRequest';
-import { buildRequestInput } from './model/requestInput';
+import { buildEndpointRequestParts, prepareEndpointRequest } from './model/endpointParts';
 import { buildVarEntries } from './model/varEntries';
-import {
-  buildDynamicEntries,
-  buildDynamicNames,
-  buildDynamicVars,
-  enabledDynamicNameSet,
-} from './model/dynamicVars';
+import { buildDynamicEntries, buildDynamicVars, enabledDynamicNameSet } from './model/dynamicVars';
 import { buildTabItems, type TesterTabId } from './tabs/tabItems';
 import { buildPathParamError } from './tabs/pathParamError';
 import { TesterShell } from './tabs/TesterShell';
@@ -68,22 +61,49 @@ export function HttpTester() {
 
   const urlInputRef = useRef<HTMLInputElement>(null);
 
-  // 实时的 URL —— 输入框此刻的内容：通常是 path，自定义模式下是完整地址。
-  const liveUrl = draft?.url ?? detail?.url ?? '';
-
-  const { project, ancestors, endpointEnv, resolved, selection, isCustomUrl } = useEndpointContext(
+  const { project, ancestors, endpointEnv, moduleId, selection, isCustomUrl } = useEndpointContext(
     endpoint,
     detail,
   );
 
-  // 脚本看得到的环境与解析用的是**同一份变量池**（停用的变量不参与）。
-  const scriptEnv = useMemo<EnvSnapshot | undefined>(() => {
-    if (!endpointEnv) return undefined;
-    return { id: endpointEnv.id, variables: enabledVars(endpointEnv) };
-  }, [endpointEnv]);
+  // 变量候选只算当前项目里的定义：别的项目的同名变量不参与这次替换。
+  const projectDynamicVariables = useMemo(
+    () => dynamicVariables.filter((v) => v.projectId === activeProjectId),
+    [dynamicVariables, activeProjectId],
+  );
+  // 已启用且仍存在的动态变量名。停用或删除之后，那个名字既不算被引用，它的旧值也不
+  // 进变量池。
+  const enabledDynamicNames = useMemo(
+    () => enabledDynamicNameSet(projectDynamicVariables),
+    [projectDynamicVariables],
+  );
 
+  /**
+   * 「这一次要发什么」的推导 —— 与批量运行共用同一份（`model/endpointParts.ts`）。
+   * 改那条推导的规则时，两处同时生效。
+   */
+  const parts = useMemo(
+    () =>
+      buildEndpointRequestParts({
+        detail,
+        draft,
+        endpointEnv,
+        moduleId,
+        enabledDynamicNames,
+      }),
+    [detail, draft, endpointEnv, moduleId, enabledDynamicNames],
+  );
+
+  // 实时的 URL —— 输入框此刻的内容：通常是 path，自定义模式下是完整地址。
+  const liveUrl = parts.urlPath;
   // 有效请求：已存的 detail 叠上草稿（草稿优先），是唯一决定「用户所见即为何」的地方。
-  const effective = useMemo(() => buildEffectiveRequest(draft, detail), [draft, detail]);
+  const effective = parts.effective;
+  // 脚本看得到的环境与解析用的是**同一份变量池**（停用的变量不参与）。
+  const scriptEnv = parts.scriptEnv;
+  // 该接口生效的 baseUrl —— 同时驱动选择器标签与发送时的拼接。
+  const resolved = parts.resolved;
+  // 「跟随模块」那一行要显示的地址：环境里「环境 × 模块」那一格。
+  const moduleBaseUrl = parts.moduleBaseUrl;
 
   /** 把某个编辑器的产出写进草稿（从而置脏）。 */
   const patchDraft = useCallback(
@@ -118,12 +138,12 @@ export function HttpTester() {
   );
 
   /**
-   * 把一次 baseUrl 选择提交到这个接口存放它的位置。`baseUrlDefinitionId` /
-   * `baseUrlOverride` 是草稿的**文档**字段，未保存的接口须用 `updateDraftEndpoint` 写：
-   * 改用 `updateEndpointDetail` 对草稿是静默空操作，选择器会弹回项目默认、URL 保持无前缀。
+   * 把一次 baseUrl 选择提交到这个接口存放它的位置。`baseUrlOverride` 是草稿的
+   * **文档**字段，未保存的接口须用 `updateDraftEndpoint` 写：改用
+   * `updateEndpointDetail` 对草稿是静默空操作，选择器会弹回 跟随模块、URL 保持无前缀。
    */
   const commitBaseUrl = useCallback(
-    (patch: { baseUrlDefinitionId: string | null; baseUrlOverride: string | null }) => {
+    (patch: { baseUrlOverride: string | null }) => {
       if (!endpoint) return;
       if (isDraft) updateDraftEndpoint(endpoint.id, patch);
       else updateEndpointDetail(endpoint.id, patch);
@@ -179,11 +199,7 @@ export function HttpTester() {
 
   // 变量选择器的条目：环境变量与动态变量并进同一份候选（不新开页签）。
   //
-  // 只取当前项目里的定义与它们当前项目的取值桶：别的项目的同名变量不参与这次替换。
-  const projectDynamicVariables = useMemo(
-    () => dynamicVariables.filter((v) => v.projectId === activeProjectId),
-    [dynamicVariables, activeProjectId],
-  );
+  // 取当前项目里的定义与它们当前项目的取值桶：别的项目的同名变量不参与这次替换。
   const projectDynamicValues = useMemo(
     () => dynamicValues[activeProjectId] ?? {},
     [dynamicValues, activeProjectId],
@@ -231,30 +247,19 @@ export function HttpTester() {
   /** baseUrl 选择器的变更 —— 写到哪里由 `commitBaseUrl` 决定（草稿写文档，已存写行）。 */
   const handleBaseUrlSelectionChange = (next: BaseUrlSelection) => {
     if (!endpoint) return;
-    if (next.kind === 'default') {
-      // 两者都清 —— baseUrlDefinitionId 为 null 会让 resolveEndpointBaseUrl 回落到项目 ★。
-      commitBaseUrl({
-        baseUrlDefinitionId: null,
-        baseUrlOverride: null,
-      });
-    } else if (next.kind === 'definition') {
-      commitBaseUrl({
-        baseUrlDefinitionId: next.definitionId,
-        baseUrlOverride: null,
-      });
+    if (next.kind === 'module') {
+      // 跟随模块 —— 清掉 override，接口改回读环境里本模块那一格。
+      commitBaseUrl({ baseUrlOverride: null });
     } else {
       // 自定义 —— `''` 是模式标记而非「清空后的值」：正是它阻止 resolveEndpointBaseUrl
-      // 回落到环境 base URL、给用户即将输入的地址加前缀。既存的行可能已带 host。
+      // 读模块那一格、给用户即将输入的地址加前缀。既存的行可能已带 host。
       const alreadyCustom = selection.kind === 'override';
-      commitBaseUrl({
-        baseUrlOverride: detail?.baseUrlOverride ?? '',
-        baseUrlDefinitionId: null,
-      });
+      commitBaseUrl({ baseUrlOverride: detail?.baseUrlOverride ?? '' });
       if (!alreadyCustom) focusUrlForFullAddress();
     }
   };
 
-  const method = draft?.method ?? detail?.method ?? 'GET';
+  const method = parts.method;
 
   /** 改请求方法 —— 与其它编辑器一样写进草稿。 */
   const handleMethodChange = (m: HttpMethod) => {
@@ -271,16 +276,8 @@ export function HttpTester() {
     void loadDynamicVariables(activeProjectId);
   }, [loadDynamicVariables, activeProjectId]);
 
-  const enabledDynamicNames = useMemo(
-    () => enabledDynamicNameSet(projectDynamicVariables),
-    [projectDynamicVariables],
-  );
-
-  const dynamicNames = useMemo(() => {
-    if (enabledDynamicNames.size === 0) return [];
-    const names = buildDynamicNames(resolved.baseUrl, liveUrl, effective);
-    return names.filter((name) => enabledDynamicNames.has(name));
-  }, [enabledDynamicNames, resolved.baseUrl, liveUrl, effective]);
+  // 本次请求引用到的动态变量名。由共享推导给出，与批量运行取的是同一份名单。
+  const dynamicNames = parts.dynamicNames;
 
   // 模板变化时重新解析（防抖 300 ms）。TTL 内命中缓存时后端不发取数请求。
   useEffect(() => {
@@ -298,9 +295,8 @@ export function HttpTester() {
 
   // 组装请求的唯一入口。发送前若解析出了新的值，用新值再组装一次。
   const prepare = useCallback(
-    (dynamic: Record<string, string>) =>
-      buildRequestInput(method, liveUrl, resolved.baseUrl, effective, endpointEnv, dynamic),
-    [method, liveUrl, resolved.baseUrl, effective, endpointEnv],
+    (dynamic: Record<string, string>) => prepareEndpointRequest(parts, dynamic),
+    [parts],
   );
 
   // 请求的最终线上形态，只组装**一次**：发送与 cURL 预览读同一个对象。
@@ -412,6 +408,7 @@ export function HttpTester() {
         globalTls: requestSettings.tls,
         method,
         resolvedBaseUrl: resolved.baseUrl,
+        moduleBaseUrl,
       }}
       {...{ selection, isCustomUrl, liveUrl, urlInputRef }}
       {...{ sendBtnRef, playIconRef, copyCurlBtnRef, requestPending, curlFlash }}

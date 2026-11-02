@@ -253,11 +253,10 @@ async fn the_response_names_the_variable_the_environment_is_missing() {
                 id: "env_gap".into(),
                 project_id: "p_ep_fix".into(),
                 name: "dev".into(),
-                base_urls: Default::default(),
                 module_base_urls: Default::default(),
                 variables: Default::default(),
                 disabled_variables: Vec::new(),
-                is_active: true,
+                created_at: 0,
             },
         )?;
         Ok(())
@@ -300,13 +299,12 @@ async fn a_variable_the_environment_has_is_not_reported_as_missing() {
                 id: "env_ok".into(),
                 project_id: "p_ep_fix".into(),
                 name: "dev".into(),
-                base_urls: Default::default(),
                 module_base_urls: Default::default(),
                 variables: [("token".to_string(), "t-1".to_string())]
                     .into_iter()
                     .collect(),
                 disabled_variables: Vec::new(),
-                is_active: true,
+                created_at: 0,
             },
         )?;
         Ok(())

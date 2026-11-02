@@ -10,7 +10,7 @@
 //                 里的 `_delete` / `_create` / `_update` / `_set_` /
 //                 `_move` / `_duplicate` 反推。
 //   safe_write  → read-only 之外放行安全改写（env_set_var、env_set_baseurl、
-//                 env_set_active、base_url_def_set_default、request_settings_update）。
+//                 request_settings_update）。
 //   full_access → 不过滤，仍以后端策略为准。
 //
 // 这层只收窄、不放宽：真正的裁决权在后端，本地开关是给「服务端已放开但仍不想让
@@ -71,6 +71,11 @@ pub fn filter_tools(name: &str, cap: CapabilityOverride) -> bool {
             !is_destructive(name)
                 && !name.contains("api_run_request")
                 && !name.contains("api_call_endpoint")
+                // `api_run_collection` 逐个调用端点，每个端点都是一次出站请求，故与
+                // `api_call_endpoint` 同等对待。它不以破坏性后缀结尾，也**不含**
+                // `api_call_endpoint` 字样，故必须显式排除——漏了它，read_only 档位下
+                // 这个会发外网的工具就会出现在清单里。
+                && !name.contains("api_run_collection")
                 && !name.contains("api_resolve_endpoint")
                 && !name.contains("api_validate_endpoint")
                 // `dynamic_var_resolve` 会真的发出站请求（去数据源取数），故与

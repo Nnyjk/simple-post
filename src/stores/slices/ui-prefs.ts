@@ -38,6 +38,8 @@ interface StorePrefs {
   theme?: string;
   lastProjectId?: string;
   requestSettings?: Partial<RequestSettings>;
+  /** 每个项目「本客户端上次用的环境」：`projectId → environmentId`。 */
+  currentEnvByProject?: Record<string, string>;
 }
 
 function loadPrefs(): StorePrefs {
@@ -90,6 +92,38 @@ export function saveLastProjectId(id: string): void {
   } else {
     delete prefs.lastProjectId;
   }
+  savePrefs(prefs);
+}
+
+/**
+ * 读出本客户端在某个项目里上次用的环境 id。
+ *
+ * 空串表示「没记住过」——调用方据此改用那个项目的默认环境（最早创建的那个）。
+ *
+ * 「当前环境」是客户端的实时状态，不是库里的数据：web 端多个人各切各的，谁切了都不
+ * 影响别人。它之所以还要记住，是为了让**同一个**客户端刷新页面后停在原处。
+ */
+export function readRememberedEnvironmentId(projectId: string): string {
+  if (!projectId) return '';
+  return loadPrefs().currentEnvByProject?.[projectId] ?? '';
+}
+
+/**
+ * 记住本客户端在某个项目里当前用的环境。
+ *
+ * 空串表示「这个项目没有当前环境」，故它删掉这一条而不是存一个空值——空值与「没记过」
+ * 在读回来时无法区分。
+ */
+export function saveRememberedEnvironmentId(projectId: string, envId: string): void {
+  if (!projectId) return;
+  const prefs = loadPrefs();
+  const map = { ...(prefs.currentEnvByProject ?? {}) };
+  if (envId) {
+    map[projectId] = envId;
+  } else {
+    delete map[projectId];
+  }
+  prefs.currentEnvByProject = map;
   savePrefs(prefs);
 }
 

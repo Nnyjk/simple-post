@@ -14,6 +14,11 @@ function shellQuote(s: string): string {
  *
  * 这里读到的一切都已是终态：`url` 已 join 且已解析 `{{var}}`，`headers` 是含 auth
  * 派生 `Authorization` 的有序线上列表，`body` 是真正会写进 socket 的那个字符串。
+ *
+ * **二进制 body 走 `--data-binary`**：命令行里塞的是 base64 的文本，而 cURL 会把
+ * `--data-raw` 的内容原样发出去（那就把 base64 文本发出去了）。`@<(…)` 是 bash 的
+ * 进程替换：管道先把 base64 解成字节，再交给 cURL 发出去，故这条命令复现的就是线上
+ * 那一份字节。
  */
 export function preparedToCurl(prepared: PreparedRequest): string {
   const lines: string[] = [`curl -X ${prepared.method.toUpperCase()} ${shellQuote(prepared.url)}`];
@@ -22,7 +27,9 @@ export function preparedToCurl(prepared: PreparedRequest): string {
   for (const [k, v] of prepared.headers) {
     lines.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
   }
-  if (prepared.body !== null) {
+  if (prepared.bodyBase64 !== null) {
+    lines.push(`  --data-binary @<(printf '%s' ${shellQuote(prepared.bodyBase64)} | base64 -d)`);
+  } else if (prepared.body !== null) {
     lines.push(`  --data-raw ${shellQuote(prepared.body)}`);
   }
   return lines.join(' \\\n');

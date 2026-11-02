@@ -35,6 +35,7 @@ export function TesterShell({
   globalTls,
   method,
   resolvedBaseUrl,
+  moduleBaseUrl,
   selection,
   isCustomUrl,
   liveUrl,
@@ -80,6 +81,8 @@ export function TesterShell({
   globalTls: TlsSettings;
   method: HttpMethod;
   resolvedBaseUrl: string;
+  /** 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。 */
+  moduleBaseUrl: string | null;
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
   liveUrl: string;
@@ -134,12 +137,11 @@ export function TesterShell({
         patchDraft={patchDraft}
       />
 
-      {/* URL 栏：方法、baseUrl 选择器、地址输入框与发送 / 保存 / 复制 cURL。 */}
+      {/* URL 栏：方法、地址来源选择器、地址输入框与发送 / 保存 / 复制 cURL。 */}
       <RequestUrlBar
         method={method}
-        definitions={project?.baseUrlDefinitions ?? []}
-        defaultDefinitionId={project?.defaultBaseUrlDefinitionId ?? null}
         resolvedBaseUrl={resolvedBaseUrl}
+        moduleBaseUrl={moduleBaseUrl}
         selection={selection}
         isCustomUrl={isCustomUrl}
         liveUrl={liveUrl}

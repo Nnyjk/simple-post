@@ -5,11 +5,11 @@
 
 use std::collections::HashMap;
 
-use simple_post_core::domain::{EndpointDetail, Environment, Project};
+use simple_post_core::domain::{EndpointDetail, Environment};
 use simple_post_core::error::AppError;
 
 use super::auth::resolve_auth;
-use super::base_url::{collapse_url_slashes, join_base_url, resolve_base_url_with};
+use super::base_url::{apply_proxy, collapse_url_slashes, join_base_url, resolve_base_url};
 use super::request::{append_apikey_query, append_query_string, build_headers};
 use super::template::resolve_template;
 use super::types::{EndpointOverrides, ResolvedEndpoint};
@@ -17,13 +17,14 @@ use super::types::{EndpointOverrides, ResolvedEndpoint};
 // resolve_endpoint —— 主 API
 // -------------------------------------------------------------------------
 
-/// 把端点 + 环境 + 项目 + 覆盖值合成为完全解析好的线上形状。
+/// 把端点 + 环境 + 覆盖值合成为完全解析好的线上形状。
 ///
 /// 解析顺序（对应 `buildFetchInit`）：
 ///   1. 套用覆盖值（url / method / headers / params / body）
-///   2. 经 [`resolve_base_url_with`] 解析 baseUrl
+///   2. 解析 baseUrl 与代理地址（见 [`resolve_base_url`]）
 ///   3. 到处替换 `{{var}}`（URL 路径、headers、params、body 内容、鉴权字段），然后
-///      收掉路径里的重复斜杠（见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的
+///      用代理地址替换请求地址里的 baseUrl 前缀（见 [`apply_proxy`]），最后收掉路径里的
+///      重复斜杠（见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的
 ///      分隔符变成 `//`）
 ///   4. 追加启用的 query 参数（编码后）
 ///   5. 追加 apikey query（`auth.kind == Apikey && inLocation == Query` 时）
@@ -33,19 +34,18 @@ use super::types::{EndpointOverrides, ResolvedEndpoint};
 ///
 /// `missing_vars` 汇总所有没解析出来的 `{{x}}`，失败还是告警由调用方决定。
 ///
-/// 模块走 `overrides.module_id` 而不是单独一个参数：它属于调用方上下文，与调用方自己
-/// 选的 base URL 同类；放在覆盖值里，传入 `None` 的现有调用方都不用改，解析结果是
-/// 「没有模块，也就没有格子可读」—— 这正是一个没有树上下文的端点该得的答案。
+/// 模块走 `overrides.module_id` 而不是单独一个参数：它属于调用方上下文；放在覆盖值里，
+/// 传入 `None` 的现有调用方都不用改，解析结果是「没有模块，也就没有格子可读」——
+/// 这正是一个没有树上下文的端点该得的答案。
 ///
 /// `AppError::Validation` 只用于明显畸形的输入。当前发送路径没有别的校验规则，真正
 /// 用不了的时候由 HTTP 发送器自己报错。
 pub fn resolve_endpoint(
     detail: &EndpointDetail,
     env: Option<&Environment>,
-    project: &Project,
     overrides: Option<&EndpointOverrides>,
 ) -> Result<ResolvedEndpoint, AppError> {
-    resolve_endpoint_with(detail, env, project, overrides, &HashMap::new())
+    resolve_endpoint_with(detail, env, overrides, &HashMap::new())
 }
 
 /// [`resolve_endpoint`] 加上动态变量的值。
@@ -58,7 +58,6 @@ pub fn resolve_endpoint(
 pub fn resolve_endpoint_with(
     detail: &EndpointDetail,
     env: Option<&Environment>,
-    project: &Project,
     overrides: Option<&EndpointOverrides>,
     dynamic: &HashMap<String, String>,
 ) -> Result<ResolvedEndpoint, AppError> {
@@ -79,8 +78,6 @@ pub fn resolve_endpoint_with(
     let mut eff_path_params = detail.path_params.clone();
     let mut eff_body = detail.body.clone();
     let eff_auth = detail.auth.clone();
-    // 调用方的选择压过端点自带的定义 —— 渲染进程未保存的 base URL 选择正是靠这条生效。
-    let eff_def_id = overrides.and_then(|o| o.base_url_definition_id.clone());
     if let Some(o) = overrides {
         if let Some(u) = o.url.clone() {
             eff_url = u;
@@ -128,13 +125,9 @@ pub fn resolve_endpoint_with(
     }
 
     // ---- baseUrl 解析 + URL 替换 ------------------------
-    let (base_url, _src, _def_id) = resolve_base_url_with(
-        detail,
-        env,
-        project,
-        eff_def_id.as_deref(),
-        overrides.and_then(|o| o.module_id.as_deref()),
-    );
+    let resolved = resolve_base_url(detail, env, overrides.and_then(|o| o.module_id.as_deref()));
+    let base_url = resolved.base_url;
+    let proxy = resolved.proxy;
     let joined = join_base_url(&base_url, &eff_url);
 
     // ---- 路径参数：把 URL 路径里的 {占位符} 换成端点自己的值 ---------
@@ -169,10 +162,31 @@ pub fn resolve_endpoint_with(
     for m in url_r.missing {
         record_missing(&mut missing, &mut seen, m);
     }
+
+    // 代理前缀替换：请求地址里的模块地址换成实际访问地址。
+    //
+    // baseUrl 与 proxy 各自再替换一次变量：它们可能是模板，而前缀匹配必须用替换后的
+    // 值。它们里没解析出来的 `{{var}}` 同样进缺值报告——用户看得见缺的是哪个变量。
+    let base_sub = resolve_template(&base_url, &vars);
+    for m in base_sub.missing {
+        record_missing(&mut missing, &mut seen, m);
+    }
+    let proxy_sub = match proxy.as_deref() {
+        Some(p) => {
+            let r = resolve_template(p, &vars);
+            for m in r.missing {
+                record_missing(&mut missing, &mut seen, m);
+            }
+            Some(r.resolved)
+        }
+        None => None,
+    };
+    let url_proxied = apply_proxy(&base_sub.resolved, proxy_sub.as_deref(), &url_r.resolved);
+
     // 替换之后、绝不之前：`{{var}}` → `/api` 才会把 `join_base_url` 插的分隔符变成
     // `//`，到这里真实路径才第一次已知。`collapse_url_slashes` 不碰 query/fragment
     // 数据，所以 params 仍能在它之后再追加。
-    let url_norm = collapse_url_slashes(&url_r.resolved);
+    let url_norm = collapse_url_slashes(&url_proxied);
 
     // ---- 追加 query string（用已替换的 params）-------
     let url_with_params = append_query_string(url_norm, &params_subst);
@@ -187,25 +201,33 @@ pub fn resolve_endpoint_with(
     let final_url = append_apikey_query(url_with_params, &resolved_auth);
 
     // ---- body 是否带上 + 替换 --------------------------------
-    let body = match &eff_body.mode {
-        simple_post_core::domain::BodyMode::None => None,
-        _ if eff_body.content.is_empty() => None,
-        _ => {
-            let b = resolve_template(&eff_body.content, &vars);
-            for m in b.missing {
-                record_missing(&mut missing, &mut seen, m);
-            }
-            Some(b.resolved)
-        }
-    };
+    // 按模式各走各的规则：`json` / `xml` / `raw` 整段替换，`form` 与 `multipart` 逐个
+    // 字段替换（整段替换会把替换出来的引号塞进那段 JSON 文本里，于是整份内容解析不
+    // 出来），`binary` 不替换（文件字节不是模板）。规则住在
+    // `simple_post_core::body`，与渲染进程侧同一套。
+    let resolved_body = simple_post_core::body::resolve_body(&eff_body, &vars);
+    for m in resolved_body.missing {
+        record_missing(&mut missing, &mut seen, m);
+    }
+    let body = resolved_body.text;
+    let body_base64 = resolved_body.base64;
 
     // ---- 请求头排序 ---------------------------------------------
+    // `binary` 模式的 Content-Type 取文件自己的类型，故要先从 body 内容里读出来。
+    // 其余模式不需要它（`None`）。
+    let binary_content_type = match eff_body.mode {
+        simple_post_core::domain::BodyMode::Binary => Some(
+            simple_post_core::body::binary_content_type(&eff_body.content),
+        ),
+        _ => None,
+    };
     let headers = build_headers(
         &eff_headers,
         &eff_body.mode,
         &resolved_auth,
         &vars,
         &mut missing,
+        binary_content_type.as_deref(),
     );
 
     Ok(ResolvedEndpoint {
@@ -214,6 +236,7 @@ pub fn resolve_endpoint_with(
         headers,
         params: params_subst,
         body,
+        body_base64,
         body_mode: eff_body.mode,
         auth: resolved_auth,
         missing_vars: missing,

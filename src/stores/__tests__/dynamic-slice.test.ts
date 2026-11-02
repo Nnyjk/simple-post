@@ -63,7 +63,6 @@ function definition(name: string, id = `d-${name}`, projectId = 'p1'): DynamicVa
     sourceEndpointName: null,
     sourceInlineJson: '{"method":"GET","url":"http://127.0.0.1:9/points"}',
     sourceEnvironmentId: null,
-    sourceBaseUrlDefinitionId: null,
     extractPath: '$',
     transformScript: null,
     valueMode: 'auto',

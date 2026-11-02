@@ -272,16 +272,16 @@ fn the_wire_keys_are_the_camel_case_field_names() {
         "moduleId": "m1",
         "content": "{}",
         "selected": ["a", "b"],
-        "applyService": false,
+        "applyBaseUrl": false,
     }))
     .expect("commit body deserializes");
     assert_eq!(commit.project_id, "p1");
     assert_eq!(commit.selected, vec!["a".to_string(), "b".to_string()]);
     assert_eq!(
-        commit.apply_service,
+        commit.apply_base_url,
         Some(false),
         "`false` must reach the field; a body that drops it would silently read as \
-         the default, and the desktop path would build a service the browser path does not"
+         the default, and the desktop path would write an address the browser path does not"
     );
 
     let export_preview: ExportPreviewOpts =

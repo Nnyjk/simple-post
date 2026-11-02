@@ -55,9 +55,6 @@ struct CreateArgs {
     /// 取数用的环境。缺席 = 数据源端点所属项目的第一个可用环境。
     #[serde(default)]
     source_environment_id: Option<String>,
-    /// 取数用的服务（`base_url_definitions.id`）。缺席 = 数据源接口所属项目的默认服务。
-    #[serde(default)]
-    source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
     #[serde(default)]
     extract_path: Option<String>,
@@ -151,7 +148,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_create",
-            description: "Create a dynamic variable in a project: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule, a transform script and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique within the project. Omit the environment and the service to use the source endpoint's first environment and its project's default service.",
+            description: "Create a dynamic variable in a project: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule, a transform script and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique within the project. Omit the environment to use the source endpoint's first environment.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -161,7 +158,6 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "source_endpoint_id": { "type": "string" },
                     "source_inline_json": { "type": "string" },
                     "source_environment_id": { "type": "string" },
-                    "source_base_url_definition_id": { "type": "string" },
                     "extract_path": { "type": "string" },
                     "transform_script": { "type": "string" },
                     "value_mode": { "type": "string", "enum": ["auto", "json", "text"] },
@@ -191,7 +187,6 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "sourceEndpointId": { "type": ["string", "null"] },
                             "sourceInlineJson": { "type": ["string", "null"] },
                             "sourceEnvironmentId": { "type": ["string", "null"] },
-                            "sourceBaseUrlDefinitionId": { "type": ["string", "null"] },
                             "extractPath": { "type": "string" },
                             "transformScript": { "type": ["string", "null"] },
                             "valueMode": { "type": "string", "enum": ["auto", "json", "text"] },
@@ -344,7 +339,6 @@ async fn tool_dynamic_var_create(
         source_endpoint_id: a.source_endpoint_id,
         source_inline_json: a.source_inline_json,
         source_environment_id: a.source_environment_id,
-        source_base_url_definition_id: a.source_base_url_definition_id,
         extract_path: a.extract_path,
         transform_script: a.transform_script,
         value_mode: a.value_mode,

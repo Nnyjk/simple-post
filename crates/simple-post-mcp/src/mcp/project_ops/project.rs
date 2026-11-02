@@ -184,9 +184,6 @@ pub(super) async fn tool_project_update(
             .as_ref()
             .and_then(|p| p.get("description"))
             .map(|v| v.as_str().map(String::from)),
-        base_url: None,
-        base_url_definitions: None,
-        default_base_url_definition_id: None,
         color: a
             .patch
             .as_ref()

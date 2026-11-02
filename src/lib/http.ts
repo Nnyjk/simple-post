@@ -161,6 +161,10 @@ interface RustHttpOk {
    */
   requestHeaders?: Array<[string, string]>;
   body: string;
+  /**
+   * 响应体的**字节**（base64）。响应不是文本时才有它，文本响应走 `body`。
+   */
+  bodyBase64?: string;
   contentType: string;
   method: string;
   url: string;
@@ -228,6 +232,9 @@ function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string)
     // 响应详情页要展示的就是它。旧后端没有这个字段时缺席，界面据此回落到本地那份。
     ...(resp.requestHeaders ? { requestHeaders: resp.requestHeaders } : {}),
     body: resp.body,
+    // 二进制响应（图片、压缩包、PDF…）的字节走这一条通道：`body` 里那份是宽松解码后的
+    // 结果，非法字节已被替换成 U+FFFD，原始字节不可恢复。
+    ...(resp.bodyBase64 ? { bodyBase64: resp.bodyBase64 } : {}),
     bodyJson: tryParseJson(resp.body),
     contentType: resp.contentType,
     method: input.method,
@@ -285,6 +292,8 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
   // | `Record`。统一归一成元组列表——Rust 反序列化 `Vec<(String, String)>`，
   // web 桥对元组列表原样 JSON 编码，这是两侧唯一都能用的形状
   const headers = initHeadersToTuples(built.init.headers ?? {});
+  // body 有两种形态：文本直接给字符串；二进制给 base64。后端的 `HttpRequestInput`
+  // 两个字段都收，`body_base64` 优先——它才是能被还原成文件的那份。
   const body =
     typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
@@ -295,6 +304,7 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
       url: built.url,
       headers,
       body,
+      bodyBase64: built.bodyBase64,
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
@@ -450,6 +460,8 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
       // `outbound.headers` 已是 `[name, value][]`，原样传
       headers: outbound.headers,
       body: outbound.body,
+      // 二进制请求体（`binary` 模式，或带文件分片的 multipart）走这一条通道。
+      bodyBase64: outbound.bodyBase64,
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,

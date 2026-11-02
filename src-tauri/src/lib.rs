@@ -68,6 +68,8 @@ async fn http_request(
     url: String,
     headers: Vec<(String, String)>,
     body: Option<String>,
+    // 请求体的二进制形态（base64）。有它时 `body` 缺席，线上发出去的是解码后的字节。
+    body_base64: Option<String>,
     timeout_ms: u64,
     follow_redirects: bool,
     max_response_size_kb: u64,
@@ -90,6 +92,7 @@ async fn http_request(
                 url,
                 headers,
                 body,
+                body_base64,
             },
             env: env.unwrap_or_default(),
             settings: crate::domain::RequestSettings {
@@ -183,12 +186,6 @@ pub fn run() {
             crate::commands::environments_set_var_disabled,
             crate::commands::environments_rename_var,
             crate::commands::environments_set_module_baseurl,
-            crate::commands::environments_set_active,
-            crate::commands::base_url_defs_list,
-            crate::commands::base_url_defs_create,
-            crate::commands::base_url_defs_update,
-            crate::commands::base_url_defs_delete,
-            crate::commands::base_url_defs_set_default,
             // 动态变量：定义 CRUD、解析、写覆盖值、强制重取。逻辑在 `crate::dynamic_api`，
             // REST 路由调的是同一批函数。
             crate::commands::dynamic_variables_list,

@@ -46,6 +46,11 @@ const CollectionScriptDialog = lazy(() =>
   })),
 );
 
+// 批量运行的对话框：同样只在打开时挂载，不进常驻 chunk。
+const BatchRunDialog = lazy(() =>
+  import('@/features/batch-run/BatchRunDialog').then((m) => ({ default: m.BatchRunDialog })),
+);
+
 const kindLabel: Record<TargetKind, string> = {
   project: '项目',
   module: '模块',
@@ -89,6 +94,12 @@ export function ProjectTree() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  // 批量运行的目标：一个集合或模块。`null` = 对话框没开。
+  const [batchTarget, setBatchTarget] = useState<{
+    id: string;
+    name: string;
+    kind: 'collection' | 'module';
+  } | null>(null);
 
   // ---------- derived ----------
   // 下面每个过滤都是对原始 store 引用做的 `useMemo`，而不是 selector：返回新数组的
@@ -178,6 +189,7 @@ export function ProjectTree() {
     openNewItemWithIntent,
     createEndpointAt: createEndpoint,
     openEndpointTab,
+    openBatchRun: setBatchTarget,
     setMenu,
   });
 
@@ -462,6 +474,18 @@ export function ProjectTree() {
             onOpenChange={(o) => !o && closeCollectionScripts()}
             nodeId={scriptCollection.id}
             nodeName={scriptCollection.name}
+          />
+        </Suspense>
+      )}
+      {/* 批量运行 —— 同样只在打开时挂载。 */}
+      {batchTarget && (
+        <Suspense fallback={null}>
+          <BatchRunDialog
+            open
+            onOpenChange={(o) => !o && setBatchTarget(null)}
+            rootId={batchTarget.id}
+            rootName={batchTarget.name}
+            rootKind={batchTarget.kind}
           />
         </Suspense>
       )}

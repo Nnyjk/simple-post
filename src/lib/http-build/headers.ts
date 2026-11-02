@@ -9,15 +9,23 @@ import type { MissingTracker } from './pool';
  *
  * multipart 的 Content-Type 含 boundary，而 boundary 在 `prepareRequest` 里现生成，
  * 故它由那条路径单独处理（见 `buildOrderedHeaders`）。
+ *
+ * `binaryContentType` 是 `binary` 模式下文件自己的 MIME 类型：整个请求体就是一个
+ * 文件时，用文件那个类型才描述得了它（一张 PNG 不该顶着 `application/octet-stream`
+ * 发出去）。它只在 `bodyMode === 'binary'` 时被读，其余模式传 `null`。
  */
-export function autoContentType(mode: BodyMode): string | null {
+export function autoContentType(mode: BodyMode, binaryContentType?: string | null): string | null {
   switch (mode) {
     case 'json':
       return 'application/json';
     case 'form':
       return 'application/x-www-form-urlencoded';
+    case 'xml':
+      return 'application/xml';
     case 'raw':
       return 'text/plain';
+    case 'binary':
+      return binaryContentType || 'application/octet-stream';
     default:
       return null;
   }
@@ -45,6 +53,7 @@ export function buildOrderedHeaders(
   pool: Record<string, string>,
   missing: MissingTracker,
   boundary: string | null,
+  binaryContentType?: string | null,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const h of headers) {
@@ -69,7 +78,7 @@ export function buildOrderedHeaders(
   } else {
     // `buildOrderedHeaders` 按 body.mode 补 Content-Type：用户已设过（不分大小写）就不加；
     // mode 蕴含 body 时它照补，内容空不空由 `init.body` 那一步单独管。
-    const ct = autoContentType(bodyMode);
+    const ct = autoContentType(bodyMode, binaryContentType);
     if (ct && existingCt === -1) {
       out.push(['Content-Type', ct]);
     }

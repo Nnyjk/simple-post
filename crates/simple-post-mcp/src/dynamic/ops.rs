@@ -5,8 +5,8 @@
 //! 它的一层薄壳。
 //!
 //! 定义挂在**项目**里：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。取数用的
-//! 环境与服务由定义自己决定（点名的那个，或数据源端点所属项目的首个环境与默认服务），
-//! 故同一个 `{{name}}` 在不同项目里取到的值可以不同——那正是分项目的意义。
+//! 环境由定义自己决定（点名的那个，或数据源端点所属项目的首个环境），故同一个
+//! `{{name}}` 在不同项目里取到的值可以不同——那正是分项目的意义。
 
 use serde::Serialize;
 
@@ -31,8 +31,6 @@ pub struct CreateOpts {
     pub source_inline_json: Option<String>,
     /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
     pub source_environment_id: Option<String>,
-    /// 取数用的服务。`None` = 数据源接口所属项目的默认服务。
-    pub source_base_url_definition_id: Option<String>,
     pub extract_path: Option<String>,
     /// 处理脚本。抽取之后跑。
     pub transform_script: Option<String>,
@@ -74,11 +72,6 @@ pub struct DynamicVariableView {
     pub effective_environment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_environment_name: Option<String>,
-    /// 实际取数用的服务：定义点名的那个，或数据源项目的默认服务。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effective_base_url_definition_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effective_base_url_definition_name: Option<String>,
 }
 
 /// 列出定义，带当前值与缓存状态。
@@ -134,7 +127,6 @@ pub fn create(pool: &DbPool, opts: CreateOpts) -> Result<DynamicVariable, AppErr
         source_endpoint_name: None,
         source_inline_json: opts.source_inline_json,
         source_environment_id: opts.source_environment_id,
-        source_base_url_definition_id: opts.source_base_url_definition_id,
         extract_path: opts.extract_path.unwrap_or_else(|| "$".to_string()),
         transform_script: opts.transform_script,
         value_mode: opts.value_mode.unwrap_or_default(),
@@ -301,14 +293,6 @@ fn view_of(
         }
     };
     let environment: Option<&Environment> = source.env.as_ref();
-    let service_name = source.base_url_definition_id.as_ref().and_then(|id| {
-        source
-            .project
-            .base_url_definitions
-            .iter()
-            .find(|d| &d.id == id)
-            .map(|d| d.name.clone())
-    });
     DynamicVariableView {
         definition,
         value,
@@ -325,7 +309,5 @@ fn view_of(
         },
         effective_environment_id: source.environment_id.clone(),
         effective_environment_name: environment.map(|e| e.name.clone()),
-        effective_base_url_definition_id: source.base_url_definition_id.clone(),
-        effective_base_url_definition_name: service_name,
     }
 }

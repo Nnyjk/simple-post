@@ -9,10 +9,12 @@ crates/simple-post-core/
 ├── Cargo.toml
 ├── README.md
 └── src/
-    ├── lib.rs                 # re-exports db / domain / dynamic / error /
-    │                          # http_executor / mcp_metrics / oauth2 /
+    ├── lib.rs                 # re-exports body / db / domain / dynamic /
+    │                          # error / http_executor / mcp_metrics / oauth2 /
     │                          # path_params / permissions / script / spec /
     │                          # template / tls / url
+    ├── body.rs                # the request-body rules — how each body mode's
+    │                          # content is parsed, templated and assembled
     ├── db/                    # SQLite + CRUD modules
     │   ├── mod.rs             # the module map + init / ping / with_conn /
     │   │                      # with_tx / DbPool / migrate
@@ -20,12 +22,8 @@ crates/simple-post-core/
     │   ├── schema.rs          # migrate — the column backfill + obsolete drops
     │   ├── schema.sql         # CREATE TABLE statements (no rows)
     │   ├── fixtures.json      # test-only fixture data (#[cfg(test)])
-    │   ├── migration_fixtures.rs  # test-only: the two retired service-table
-    │   │                      #   shapes, rebuilt as rows
     │   ├── test_helpers.rs    # test-only: the shared pool + temp-dir builder
     │   ├── test_support.rs    # test-only: the only reader of fixtures.json
-    │   ├── base_url_defs.rs   # the project-level service list
-    │   ├── base_url_migration.rs
     │   ├── dynamic_variable_cache.rs
     │   ├── dynamic_variables/ # the per-project definition table
     │   │   ├── mod.rs         #   facade
@@ -104,7 +102,7 @@ crates/simple-post-core/
     │   └── upsert/            # the transactional write
     │       ├── mod.rs         #   facade
     │       ├── types.rs       #   the wire shapes
-    │       ├── resolve.rs     #   module / collection / service / environment
+    │       ├── resolve.rs     #   module / collection / environment
     │       └── write.rs       #   the endpoint write + the whole transaction
     ├── template.rs            # the `{{name}}` substitution primitives
     ├── tls.rs                 # the HTTPS outbound settings

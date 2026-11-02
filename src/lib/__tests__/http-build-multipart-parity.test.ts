@@ -51,11 +51,10 @@ function envOf(variables: Record<string, string>): Environment {
     id: 'env1',
     projectId: 'p1',
     name: 'dev',
-    baseUrls: {},
     moduleBaseUrls: {},
     variables,
     disabledVariables: [],
-    isActive: true,
+    createdAt: 1,
   };
 }
 

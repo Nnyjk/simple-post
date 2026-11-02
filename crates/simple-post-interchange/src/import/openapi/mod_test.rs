@@ -120,7 +120,10 @@ fn a_document_without_any_tag_yields_a_single_group() {
     assert_eq!(ex.endpoint_count(), 87);
     // 分组键指「整份 paths」这一个位置，不是某个 operation。
     assert_eq!(ex.modules[0].key, "/paths");
-    assert_eq!(ex.modules[0].servers[0].url, "http://192.168.11.101:27000");
+    assert_eq!(
+        ex.modules[0].base_url.as_ref().expect("模块那一格").url,
+        "http://192.168.11.101:27000"
+    );
     assert!(
         ex.modules[0].collections.is_empty(),
         "没有第二层：文档没有给任何可嵌套的分组"
@@ -172,6 +175,6 @@ paths:
     assert_eq!(from_json.endpoint_count(), 2);
     assert_eq!(from_yaml.endpoint_count(), from_json.endpoint_count());
     assert_eq!(from_yaml.endpoint_keys(), from_json.endpoint_keys());
-    assert_eq!(from_yaml.modules[0].servers, from_json.modules[0].servers);
+    assert_eq!(from_yaml.modules[0].base_url, from_json.modules[0].base_url);
     assert_eq!(from_yaml.project_name, from_json.project_name);
 }

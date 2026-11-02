@@ -31,11 +31,10 @@ const ENV: Environment = {
   id: 'env-1',
   projectId: 'p-1',
   name: 'dev',
-  baseUrls: {},
   moduleBaseUrls: {},
   variables: { token: 'abc' },
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
 };
 
 let shim: ReturnType<typeof installBrowserShim>;

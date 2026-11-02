@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror, { EditorView, Prec, type ViewUpdate } from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
+import { xml } from '@codemirror/lang-xml';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { BodyMode, RequestBody } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
@@ -14,6 +15,7 @@ import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { parseSchemaView } from '@/lib/schema-view';
 import { SchemaTable } from './SchemaTable';
 import { changedRange } from './model/changedRange';
+import { BinaryBodyEditor, FormFieldsEditor, MultipartPartsEditor } from './BodyTables';
 import {
   rectAnchor,
   useVarHint,
@@ -51,12 +53,23 @@ interface Props {
   envName?: string;
 }
 
+/**
+ * 请求体的模式页签。
+ *
+ * 七种形态与 `BodyMode` 一一对应：`none` / `json` / `form`（x-www-form-urlencoded）/
+ * `multipart`（form-data）/ `xml` / `raw`（Text）/ `binary`。
+ *
+ * 标签用**协议里的名字**而不是内部代号：`form` 这个名字在界面上看不出它发出去的是
+ * `x-www-form-urlencoded`，而 `multipart` 看不出它是 `form-data`。
+ */
 const BODY_TABS: { id: BodyMode; label: string }[] = [
-  { id: 'none', label: 'none' },
-  { id: 'json', label: 'json' },
-  { id: 'form', label: 'form' },
-  { id: 'multipart', label: 'multipart' },
-  { id: 'raw', label: 'raw' },
+  { id: 'none', label: '无' },
+  { id: 'json', label: 'JSON' },
+  { id: 'form', label: 'x-www-form-urlencoded' },
+  { id: 'multipart', label: 'form-data' },
+  { id: 'xml', label: 'XML' },
+  { id: 'raw', label: 'Text' },
+  { id: 'binary', label: 'binary' },
 ];
 
 /**
@@ -119,6 +132,25 @@ export function BodyEditor({
         <p className="text-[10px] text-muted-foreground">{contentTypeText(value.mode)}</p>
         {value.mode === 'none' ? (
           <NoBodyHint />
+        ) : value.mode === 'form' ? (
+          <FormFieldsEditor
+            content={value.content}
+            onChange={(content) => onChange({ ...value, content })}
+            varEntries={varEntries}
+            envName={envName}
+          />
+        ) : value.mode === 'multipart' ? (
+          <MultipartPartsEditor
+            content={value.content}
+            onChange={(content) => onChange({ ...value, content })}
+            varEntries={varEntries}
+            envName={envName}
+          />
+        ) : value.mode === 'binary' ? (
+          <BinaryBodyEditor
+            content={value.content}
+            onChange={(content) => onChange({ ...value, content })}
+          />
         ) : (
           <BodyContent
             value={value}
@@ -147,9 +179,11 @@ function contentTypeText(mode: BodyMode): string {
   if (mode === 'form') return 'Content-Type: application/x-www-form-urlencoded';
   // boundary 每次发送现生成，故这里不能写死整条 Content-Type
   if (mode === 'multipart') {
-    return 'Content-Type: multipart/form-data（boundary 发送时生成）· 分片填 JSON 数组';
+    return 'Content-Type: multipart/form-data（boundary 发送时生成）· 分片填表格';
   }
+  if (mode === 'xml') return 'Content-Type: application/xml';
   if (mode === 'raw') return 'Content-Type: text/plain';
+  if (mode === 'binary') return 'Content-Type: 取所选文件的类型，缺省 application/octet-stream';
   return '此请求没有请求体';
 }
 
@@ -338,8 +372,9 @@ function BodyContent({
 
   const extensions = useMemo(
     () => [
-      // multipart 的 `content` 也是一个 JSON 文本（分片数组），同样要 json 高亮
-      ...(value.mode === 'json' || value.mode === 'multipart' ? [json()] : []),
+      // json 与 xml 是两种语言，各自带高亮；其余模式是纯文本。
+      ...(value.mode === 'json' ? [json()] : []),
+      ...(value.mode === 'xml' ? [xml()] : []),
       hintKeys,
     ],
     [value.mode, hintKeys],

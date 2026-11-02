@@ -31,6 +31,12 @@ struct ResolveTemplateArgs {
 #[derive(Debug, Deserialize)]
 struct ResolveEndpointArgs {
     endpoint_id: String,
+    /// 按哪个环境解析。缺席 = 该项目的默认环境（最早创建的那个）。
+    ///
+    /// 与 `api_call_endpoint` 的同名参数是同一件事：预览与真正发送必须落在同一个
+    /// 环境上，否则预览出来的 URL 与发出去的 URL 不是一回事。
+    #[serde(default)]
+    environment_id: Option<String>,
     #[serde(default)]
     overrides: Option<Value>,
 }
@@ -65,6 +71,10 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "endpoint_id": { "type": "string" },
+                    "environment_id": {
+                        "type": "string",
+                        "description": "Environment to resolve against. Omit it to use the project's default environment (the earliest one created)."
+                    },
                     "overrides": { "type": "object" }
                 },
                 "required": ["endpoint_id"],
@@ -78,7 +88,13 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "Static check that an endpoint is ready to use: the URL is non-empty, the auth fields are filled, the body is present when the mode needs one, and the payload is not a JSON Schema written into the payload slot. Returns `{ok, issues}` — an issue means \"fix this\".",
             schema: json!({
                 "type": "object",
-                "properties": { "endpoint_id": { "type": "string" } },
+                "properties": {
+                    "endpoint_id": { "type": "string" },
+                    "environment_id": {
+                        "type": "string",
+                        "description": "Environment to resolve against. Omit it to use the project's default environment (the earliest one created)."
+                    }
+                },
                 "required": ["endpoint_id"],
                 "additionalProperties": false,
             }),
@@ -145,17 +161,8 @@ async fn tool_api_resolve_endpoint(
     let project_id = endpoint_project_id(&state.pool, &endpoint.node_id);
     crate::mcp::check_permission(&state.pool, &project_id, "api_resolve_endpoint").await?;
 
-    let env =
-        crate::mcp::resolve_env(&state.pool, endpoint.environment_id.as_deref(), &project_id)?;
-    let project = if !project_id.is_empty() {
-        simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::projects::get(c, &project_id)
-        })
-        .ok()
-    } else {
-        None
-    };
-    let project_ref = project.as_ref().unwrap_or(&EMPTY_PROJECT);
+    // 环境：这次点名的那一个优先，没点名就用项目默认环境（最早创建的那个）。
+    let env = crate::mcp::resolve_env(&state.pool, a.environment_id.as_deref(), &project_id)?;
 
     // 覆盖值反序列化失败是**错误**，不是「当作没传」。`.ok()` 会把一整份覆盖值悄悄
     // 换成空值，于是调用方看到的是「按端点自己那份解析出来的请求」，而不是
@@ -177,12 +184,8 @@ async fn tool_api_resolve_endpoint(
         .flatten();
     }
 
-    let resolved = crate::variable_fill::resolve_endpoint(
-        &endpoint,
-        env.as_ref(),
-        project_ref,
-        Some(&overrides),
-    )?;
+    let resolved =
+        crate::variable_fill::resolve_endpoint(&endpoint, env.as_ref(), Some(&overrides))?;
 
     Ok(CallToolResult::json(json!({
         "method": resolved.method,
@@ -203,6 +206,10 @@ async fn tool_api_validate_endpoint(
     args: Value,
 ) -> Result<CallToolResult, AppError> {
     let endpoint_id = arg_str(&args, "endpoint_id")?.to_string();
+    let environment_id = args
+        .get("environment_id")
+        .and_then(Value::as_str)
+        .map(String::from);
     let endpoint: EndpointDetail = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoint_details::get(c, &endpoint_id)
     })?;
@@ -212,17 +219,7 @@ async fn tool_api_validate_endpoint(
     // 静态检查要按**拼接后**的 URL 找路径占位符：base URL 里也可能有 `{version}` 这样的
     // 占位符，而发送那侧是在拼接后的 URL 上做替换。只看端点自己的 URL，会让静态检查说
     // 「没问题」、真发出去却被拦下 —— 工具就在骗调用方。
-    let env =
-        crate::mcp::resolve_env(&state.pool, endpoint.environment_id.as_deref(), &project_id)?;
-    let project = if !project_id.is_empty() {
-        simple_post_core::db::with_conn(&state.pool, |c| {
-            simple_post_core::db::projects::get(c, &project_id)
-        })
-        .ok()
-    } else {
-        None
-    };
-    let project_ref = project.as_ref().unwrap_or(&EMPTY_PROJECT);
+    let env = crate::mcp::resolve_env(&state.pool, environment_id.as_deref(), &project_id)?;
     // 与发送那侧同一套按模块查找：预览、检查与真正发送必须对「这个端点解析到哪个
     // host」达成一致。
     let module_id = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -230,14 +227,9 @@ async fn tool_api_validate_endpoint(
     })
     .ok()
     .flatten();
-    let (base_url, _src, _def_id) = crate::variable_fill::resolve_base_url_with(
-        &endpoint,
-        env.as_ref(),
-        project_ref,
-        None,
-        module_id.as_deref(),
-    );
-    let joined = crate::variable_fill::join_base_url(&base_url, &endpoint.url);
+    let resolved =
+        crate::variable_fill::resolve_base_url(&endpoint, env.as_ref(), module_id.as_deref());
+    let joined = crate::variable_fill::join_base_url(&resolved.base_url, &endpoint.url);
 
     let issues = validate(&endpoint, &joined);
     let ok = issues.is_empty();
@@ -407,7 +399,12 @@ fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
 
     match endpoint.body.mode {
         BodyMode::None => {}
-        BodyMode::Json | BodyMode::Form | BodyMode::Multipart | BodyMode::Raw => {
+        BodyMode::Json
+        | BodyMode::Form
+        | BodyMode::Multipart
+        | BodyMode::Xml
+        | BodyMode::Raw
+        | BodyMode::Binary => {
             if endpoint.body.content.trim().is_empty() {
                 issues.push(json!({
                     "field": "body.content",
@@ -431,21 +428,6 @@ fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
 
     issues
 }
-
-// 项目已被删除时的空壳，让调用方不必处理悬垂引用。
-// 必须是 `static` 而非 `const`：`&EMPTY_PROJECT` 要拿到的是 `&'static Project`，
-// 引用 `const` 会产生语句结束即释放的临时值，存活的 `&Project` 会触发 E0716。
-static EMPTY_PROJECT: simple_post_core::domain::Project = simple_post_core::domain::Project {
-    id: String::new(),
-    name: String::new(),
-    description: None,
-    base_url: None,
-    base_url_definitions: Vec::new(),
-    default_base_url_definition_id: None,
-    color: String::new(),
-    created_at: 0,
-    updated_at: 0,
-};
 
 // =========================================================================
 // 测试

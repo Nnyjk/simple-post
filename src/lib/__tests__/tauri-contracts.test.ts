@@ -24,22 +24,25 @@ describe('Tauri IPC 入参契约', () => {
     clearIpcMock();
   });
 
-  it('以表驱动方式发送环境与 BaseUrl 的扁平字段', async () => {
+  it('以表驱动方式发送环境与模块地址的扁平字段', async () => {
     const cases: Array<[TauriCommand, Record<string, unknown>]> = [
       [COMMANDS.environmentsSetVar, { envId: 'env-1', key: 'token', value: 'abc' }],
       [COMMANDS.environmentsSetVar, { envId: 'env-1', key: 'token', value: null }],
       [
         COMMANDS.environmentsSetModuleBaseurl,
-        { envId: 'env-1', defId: 'def-1', moduleId: 'mod-1', url: 'https://example.test' },
+        {
+          envId: 'env-1',
+          moduleId: 'mod-1',
+          url: 'https://example.test',
+          proxy: 'https://gw.example.test',
+        },
       ],
       [
         COMMANDS.environmentsSetModuleBaseurl,
-        { envId: 'env-1', defId: 'def-1', moduleId: 'mod-1', url: null },
+        { envId: 'env-1', moduleId: 'mod-1', url: null, proxy: null },
       ],
       [COMMANDS.environmentsUpdate, { id: 'env-1', patch: { name: 'dev' } }],
       [COMMANDS.environmentsDelete, { id: 'env-1' }],
-      [COMMANDS.baseUrlDefsUpdate, { id: 'def-1', patch: { name: 'api' } }],
-      [COMMANDS.baseUrlDefsDelete, { id: 'def-1' }],
       // 树只有一种节点类型，所以移动就是父 id 加下标——没有 `parentKind`，
       // 目的端只有 `nodes` 一张表
       [COMMANDS.nodesMove, { nodeIds: ['c1'], parentId: 'm1', index: 0 }],

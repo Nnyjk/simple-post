@@ -8,16 +8,17 @@ use serde_json::json;
 use crate::mcp::ToolEntry;
 use crate::tool_fn;
 
+use super::batch::tool_api_run_collection;
 use super::call_endpoint::tool_api_call_endpoint;
 use super::run_request::tool_api_run_request;
 
-/// 两个工具的登记项。顺序即 `tools/list` 里的顺序。
+/// 三个工具的登记项。顺序即 `tools/list` 里的顺序。
 pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "api_run_request",
             description:
-                "Run an ad-hoc HTTP request, assembled by the same resolver the stored endpoints use: env variables, baseUrl, auth, params and body all follow the endpoint rules. A base URL is read from moduleBaseUrls[base_url_definition_id][module_id], so both ids are needed.",
+                "Run an ad-hoc HTTP request, assembled by the same resolver the stored endpoints use: env variables, baseUrl, auth, params and body all follow the endpoint rules. A base URL is read from the (environment x module) cell, so env_id and module_id are needed.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -93,8 +94,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                         },
                         "required": ["kind"]
                     },
-                    "env_id": { "type": "string" },
-                    "base_url_definition_id": { "type": "string" },
+                    "env_id": { "type": "string", "description": "The environment this request resolves against, and the project it belongs to. Name it: a temporary request has no endpoint row to read the project from, so without this there is no environment, no base URL and no substituted variables." },
                     "module_id": { "type": "string" },
                     "settings_override": {
                         "type": "object",
@@ -117,6 +117,13 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "endpoint_id": { "type": "string" },
+                    // 环境名要写进 schema：调用方只能从 schema 里知道这个入参的名字。
+                    //
+                    // 端点行不再绑定环境，故这一次调用可以自己点名一个环境；不点名就用
+                    // 该项目的默认环境（最早创建的那个）。schema 不写它，工具就在骗人：
+                    // `api_resolve_endpoint` 与 `api_validate_endpoint` 都带着这个参数，
+                    // 唯独发送那两个工具不写，读起来就像发送不支持选环境。
+                    "environment_id": { "type": "string" },
                     // 覆盖值要写进 schema：路径参数缺值时发送那侧会拦下请求并说
                     // 「or pass overrides.pathParams when calling」，而调用方只能从
                     // schema 里知道这个入参的名字。schema 不写它，工具就在骗人。
@@ -140,7 +147,6 @@ substituted into the path itself, not appended to the query string. The key of e
 placeholder name; a placeholder without an entry keeps its literal braces and blocks the send.",
                                 "items": { "$ref": "#/$defs/keyValue" }
                             },
-                            "baseUrlDefinitionId": { "type": "string" },
                             "moduleId": { "type": "string" }
                         },
                         "additionalProperties": true
@@ -162,6 +168,34 @@ placeholder name; a placeholder without an entry keeps its literal braces and bl
                 "additionalProperties": true,
             }),
             func: tool_fn!(tool_api_call_endpoint),
+        },
+        ToolEntry {
+            name: "api_run_collection",
+            description:
+                "Run every endpoint under a collection or a module, in tree order, and return a report: totals, per-status counts, and one entry per endpoint. A failing endpoint does not stop the rest. Nested collections are included. Requires full_access.",
+            schema: json!({
+                "type": "object",
+                "properties": {
+                    "collection_id": {
+                        "type": "string",
+                        "description": "The collection to run, with its nested collections. Mutually exclusive with module_id."
+                    },
+                    "module_id": {
+                        "type": "string",
+                        "description": "The module to run, with everything under it. Mutually exclusive with collection_id."
+                    },
+                    "environment_id": {
+                        "type": "string",
+                        "description": "The environment the whole batch resolves against. Omit it to use the project's default environment (the earliest one created)."
+                    },
+                    "settings_override": {
+                        "type": "object",
+                        "description": "Outbound knobs for every request in the batch, same shape as api_run_request's `settings_override`. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path — one group, replacing each endpoint's own HTTPS settings as a whole."
+                    }
+                },
+                "additionalProperties": true,
+            }),
+            func: tool_fn!(tool_api_run_collection),
         },
     ]
 }

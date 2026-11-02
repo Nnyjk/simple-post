@@ -5,7 +5,6 @@
 //! 必须一致，且不能与 `web_api/` 下的别的文件重名——`routes/` 下那批 handler 就叫
 //! `projects.rs`、`nodes.rs`、`mcp.rs`，故这一层统一带 `spec_` 前缀。
 
-pub(super) mod spec_baseurls;
 pub(super) mod spec_dynamic_variables;
 pub(super) mod spec_endpoint_details;
 pub(super) mod spec_environments;

@@ -15,7 +15,6 @@ use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState}
 
 use super::super::dto::{
     EnvRenameVarBody, EnvSetModuleBaseUrlBody, EnvSetVarBody, EnvSetVarDisabledBody,
-    SetActiveEnvBody,
 };
 
 // ----- environments -------------------------------------------------------
@@ -43,10 +42,13 @@ pub(crate) async fn environments_create(
     ensure_server_id(&mut body);
     let env: crate::domain::Environment = serde_json::from_value(body)
         .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
-    db::with_tx(&s.pool, |c| db::environments::create(c, &env)).map_err(map_app_error)?;
+    // 回传**落库之后**的那一行：创建时刻是它在库里认「默认环境」用的字段，回传 0
+    // 的话界面手里的创建时刻与库里对不上，两侧会算出两个不同的默认环境。
+    let created =
+        db::with_tx(&s.pool, |c| db::environments::create(c, &env)).map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
-        Json(serde_json::to_value(&env).unwrap_or(Value::Null)),
+        Json(serde_json::to_value(&created).unwrap_or(Value::Null)),
     ))
 }
 
@@ -106,12 +108,11 @@ pub(crate) async fn environments_rename_var(
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 
-/// 写入 URL 唯一所在的那一层的一个格子：
-/// `env.moduleBaseUrls[defId][moduleId]`。
+/// 写（环境 × 模块）那一格：`env.moduleBaseUrls[moduleId]`。
 ///
-/// 同一个服务可以对两个模块指向两个不同主机，故 `moduleId` 是地址的一部分而非过滤
-/// 条件。这一格之上没有任何东西，也不向它回落，故 `url: null` 意味着请求不带
-/// base URL 地发出去。
+/// 格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自
+/// 独立：`url = null` = 地址保持原值，`url = ""` = 清空地址；`proxy` 同理。格子上
+/// 没有别的层，也不向别的模块的值回落，故两个字段都清空时这一格就整个消失。
 pub(crate) async fn environments_set_module_baseurl(
     State(s): State<Arc<WebState>>,
     Path(env_id): Path<String>,
@@ -121,21 +122,12 @@ pub(crate) async fn environments_set_module_baseurl(
         db::environments::set_module_base_url(
             c,
             &env_id,
-            &body.def_id,
             &body.module_id,
             body.url.as_deref(),
+            body.proxy.as_deref(),
         )
     })
     .map_err(map_app_error)?;
-    Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
-}
-
-pub(crate) async fn environments_set_active(
-    State(s): State<Arc<WebState>>,
-    Json(body): Json<SetActiveEnvBody>,
-) -> Result<Json<Value>, HttpErrorResponse> {
-    let row = db::with_tx(&s.pool, |c| db::environments::set_active(c, &body.env_id))
-        .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 

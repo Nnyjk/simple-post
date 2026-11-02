@@ -7,6 +7,15 @@ export interface ApiResponse {
   sizeBytes: number;
   headers: Record<string, string>;
   body: string;
+  /**
+   * 响应体的**字节**（base64）。
+   *
+   * 与 `body` 互斥：响应是二进制（图片、PDF、zip…）时走这里，文本响应走 `body`。
+   * 判据由后端给出——先看 Content-Type 是不是文本，再看字节是不是合法 UTF-8。
+   *
+   * 界面按它渲染图片预览与文件下载：没有这一份，一张 PNG 就只能显示成一串乱码。
+   */
+  bodyBase64?: string;
   /** JSON 响应解析结果，供美化视图用。 */
   bodyJson?: unknown;
   contentType: string;
@@ -45,6 +54,12 @@ export interface StoredRequestSnapshot {
   headers: Array<[string, string]>;
   /** body 内容。没有 body 时为 null。 */
   body: string | null;
+  /**
+   * body 的字节（base64）。与 `body` 互斥：二进制请求体走这里。
+   *
+   * 写这一列之前存的行没有它，故它是可选的。
+   */
+  bodyBase64?: string | null;
 }
 
 /**

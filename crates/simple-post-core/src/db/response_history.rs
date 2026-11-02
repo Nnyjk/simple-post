@@ -19,6 +19,7 @@
 //! 每个函数都取 `&mut Connection`，由调用方决定这次调用是否在事务内。[`append`] 需要事务，
 //! 好让插入与裁剪是原子的。
 
+use base64::Engine as _;
 use rusqlite::{params, Connection, Row};
 
 use crate::domain::{
@@ -30,7 +31,8 @@ use crate::error::AppError;
 use super::json_col_err;
 
 const COLUMNS: &str = "rh.id, rh.endpoint_id, rh.status, rh.status_text, rh.duration_ms, \
-                       rh.size_bytes, rh.content_type, rh.headers_json, rh.body, rh.body_json, \
+                       rh.size_bytes, rh.content_type, rh.headers_json, rh.body, \
+                       rh.body_base64, rh.body_json, \
                        rh.error, rh.method, rh.url, rh.body_truncated, rh.created_at, \
                        rh.is_favorite, rh.request_json";
 
@@ -88,6 +90,10 @@ pub fn append(
     } else {
         response.body_json.clone()
     };
+    // 二进制形态按**字节**裁：上限说的是响应体有多少字节，而 base64 串的长度是字节数的
+    // 四分之三。解不开的 base64 当作没有这一份——那一行仍然带着它的文本形态。
+    let (body_base64, base64_truncated) = clip_body_base64(response.body_base64.as_deref());
+    let truncated = truncated || base64_truncated;
 
     let id = uid();
     let created_at = now_ms();
@@ -100,9 +106,9 @@ pub fn append(
     conn.execute(
         "INSERT INTO response_history \
          (id, endpoint_id, status, status_text, duration_ms, size_bytes, content_type, \
-          headers_json, body, body_json, error, method, url, body_truncated, created_at, \
-          is_favorite, request_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, ?16)",
+          headers_json, body, body_base64, body_json, error, method, url, body_truncated, \
+          created_at, is_favorite, request_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 0, ?17)",
         params![
             id,
             endpoint_id,
@@ -113,6 +119,7 @@ pub fn append(
             response.content_type,
             headers_json,
             body,
+            body_base64,
             body_json.as_ref().map(|v| v.to_string()),
             response.error,
             response.method.as_ref().map(|m| m.as_str()),
@@ -131,6 +138,7 @@ pub fn append(
         endpoint_id: endpoint_id.to_string(),
         response: StoredResponse {
             body,
+            body_base64,
             body_json,
             ..response.clone()
         },
@@ -231,13 +239,35 @@ fn clip_body(body: &str) -> (String, bool) {
     (body[..end].to_string(), true)
 }
 
+/// 把 base64 的响应体裁到封顶。
+///
+/// 上限说的是**字节**，故这里先解回字节、裁一刀、再编回去。解不开的 base64 当作没有
+/// 这一份：那一行仍然带着它的文本形态，界面不会因此少显示什么。
+fn clip_body_base64(body_base64: Option<&str>) -> (Option<String>, bool) {
+    let Some(raw) = body_base64 else {
+        return (None, false);
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(raw.as_bytes()) else {
+        return (None, false);
+    };
+    if bytes.len() <= RESPONSE_HISTORY_MAX_BODY_BYTES {
+        return (Some(raw.to_string()), false);
+    }
+    let clipped = &bytes[..RESPONSE_HISTORY_MAX_BODY_BYTES];
+    (
+        Some(base64::engine::general_purpose::STANDARD.encode(clipped)),
+        true,
+    )
+}
+
 fn row_to_entry(row: &Row<'_>) -> Result<ResponseHistoryEntry, rusqlite::Error> {
     let headers_json: String = row.get(7)?;
-    let body_json: Option<String> = row.get(9)?;
-    let method_str: Option<String> = row.get(11)?;
-    let body_truncated: i64 = row.get(13)?;
-    let is_favorite: i64 = row.get(15)?;
-    let request_json: Option<String> = row.get(16)?;
+    let body_base64: Option<String> = row.get(9)?;
+    let body_json: Option<String> = row.get(10)?;
+    let method_str: Option<String> = row.get(12)?;
+    let body_truncated: i64 = row.get(14)?;
+    let is_favorite: i64 = row.get(16)?;
+    let request_json: Option<String> = row.get(17)?;
 
     // 与 `endpoint_details::row_to_detail` 同样的重新包装：一个存下来的动词若被解析器拒绝，那是
     // `domain` 的失败而非行映射的失败，故转成这个映射器欠调用方的 `rusqlite::Error`——并带上
@@ -245,7 +275,7 @@ fn row_to_entry(row: &Row<'_>) -> Result<ResponseHistoryEntry, rusqlite::Error> 
     let method = match method_str {
         Some(m) => Some(parse_http_method(&m).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(
-                11,
+                12,
                 rusqlite::types::Type::Text,
                 Box::new(super::JsonColError(format!("method: {e}"))),
             )
@@ -270,15 +300,16 @@ fn row_to_entry(row: &Row<'_>) -> Result<ResponseHistoryEntry, rusqlite::Error> 
             headers: serde_json::from_str(&headers_json)
                 .map_err(|e| json_col_err("headers_json", e))?,
             body: row.get(8)?,
+            body_base64,
             body_json: body_json
                 .map(|raw| serde_json::from_str(&raw).map_err(|e| json_col_err("body_json", e)))
                 .transpose()?,
-            error: row.get(10)?,
+            error: row.get(11)?,
             method,
-            url: row.get(12)?,
+            url: row.get(13)?,
         },
         body_truncated: body_truncated != 0,
-        created_at: row.get(14)?,
+        created_at: row.get(15)?,
         is_favorite: is_favorite != 0,
         request,
     })

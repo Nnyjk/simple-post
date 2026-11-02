@@ -12,8 +12,8 @@
 //! ## 取数上下文由定义自己决定
 //!
 //! 定义挂在项目里，故同一个 `{{name}}` 只在消费方那个项目里指向一条定义。取数要用的
-//! 项目、环境、服务与模块仍然全部由那条定义推导（见 [`source_context`]），而不是由「谁在
-//! 消费这个变量」决定：数据源端点落在哪个项目就用哪个项目的服务与模块，定义点名的
+//! 项目、环境与模块仍然全部由那条定义推导（见 [`source_context`]），而不是由「谁在
+//! 消费这个变量」决定：数据源端点落在哪个项目就用哪个项目的模块，定义点名的
 //! 环境就是那个环境，没点名就用该项目的第一个可用环境。
 //!
 //! ## 分层
@@ -36,7 +36,7 @@
 //! - `names.rs`：请求引用了哪些 `{{name}}`
 //! - `cache.rs`：缓存决定
 //! - `extract.rs`：按 JSONPath 抽值
-//! - `source.rs`：定义取数用的环境 / 服务 / 模块
+//! - `source.rs`：定义取数用的环境 / 模块
 //! - `fetcher.rs`：取数器抽象与一次解析的上下文
 //! - `flight.rs`：single-flight 注册表
 //! - `resolve.rs`：编排——取数、抽取、落缓存
@@ -74,6 +74,10 @@ pub use crate::domain::DynamicError;
 #[cfg(test)]
 #[path = "mod_test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "names_test.rs"]
+mod names_tests;
 
 #[cfg(test)]
 #[path = "resolve_parity_test.rs"]

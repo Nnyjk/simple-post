@@ -1,26 +1,35 @@
 //! `environments` 表的 CRUD。
 //!
-//! 每个环境持有一张按 (服务 × 模块) 的 URL map（`moduleBaseUrls`）和一个自由变量池。那张
-//! map 是**唯一**的 URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的
-//! 值，也不会回落到已下线的环境级 map。`base_urls_json` 列仍在表里——删列 = 重建表 =
-//! bump `SCHEMA_VERSION` = `ensure_current_schema` 删掉用户的库——但此处不读不写；唯一的
-//! 读者是 `db::migrate` 里的那个迁移。
+//! 每个环境持有一张按模块的地址 map（`moduleBaseUrls`）和一个自由变量池。那张 map 是
+//! **唯一**的 URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的值。
 //!
-//! `set_active` 是事务性的「降级其他、升级这个」——事务必须把写锁跨在两步上，否则两次并发
-//! 的 set_active 会留下两个激活环境。这里不取锁，调用方须把 `set_active` 包进 `db::with_tx`。
+//! 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问
+//! 地址——接口经代理网关转代后真正要打的那个地址。两者不一致时，请求发出前用 `proxy`
+//! 替换 `url` 这个前缀。
+//!
+//! 这里**没有**「当前环境」这一列。当前环境是每个客户端自己的实时状态——桌面窗口、
+//! 网页标签各一份，各切各的。落库会让 web 端多个人互相踩：一个人切了环境，另一个人
+//! 发请求就换了地址与端口。
+//!
+//! 库里只有一个与「选哪个环境」有关的概念：**默认环境**。它是项目的属性，即一个项目里
+//! **最早创建**的那个环境（按 `created_at` 认定，见 [`get_default`]）。谁发请求时没点名
+//! 环境，就用它。
+//!
+//! 端点行也不再绑定环境（`endpoint_details` 没有 `environment_id` 列）：界面上「当前环境」
+//! 说了算，MCP 侧则由每次调用自己点名，两条路都落到同一批数据上。
 
 use std::collections::HashMap;
 
 use rusqlite::{params, Connection, Row};
 
-use crate::domain::{Environment, EnvironmentPatch};
+use crate::domain::{Environment, EnvironmentPatch, ModuleBaseUrl};
 use crate::error::AppError;
 
 /// 这里每次读共用的列清单，顺序同 [`row_to_env`]。
 ///
-/// 用一个字符串而非四份拷贝：两个 URL 列彼此相邻，只点名其中一个的读会静默产出一个所有模块
+/// 用一个字符串而非几份拷贝：URL 列与变量列相邻，只点名其中一个的读会静默产出一个所有模块
 /// 都解析成 `''` 的环境。
-const COLUMNS: &str = "id, project_id, name, is_active, base_urls_json, module_base_urls_json, variables_json, disabled_variables_json";
+const COLUMNS: &str = "id, project_id, name, created_at, module_base_urls_json, variables_json, disabled_variables_json";
 
 // 读。
 
@@ -48,7 +57,7 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
         "SELECT {COLUMNS} FROM environments \
          ORDER BY project_id ASC, name ASC, id ASC"
     ))?;
-    let rows = stmt.query_map(params![], row_to_env)?;
+    let rows = stmt.query_map([], row_to_env)?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r.map_err(AppError::Sqlite)?);
@@ -56,15 +65,21 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
     Ok(out)
 }
 
-/// 某项目唯一激活的环境，没有则 `None`。schema 不强制「只有一行激活」的不变式（那是 UI
-/// 的职责），故这里返回 `is_active = 1` 的那一行；[`set_active`] 负责维持该不变式。
-pub fn get_active(
+/// 某项目的**默认环境**：一个项目里最早创建的那个环境。没有则 `None`。
+///
+/// 「最早创建」按 `created_at` 认定；同一毫秒里创建的两个环境按 id 决胜，故这个查询
+/// 的结果唯一，与库里有多少个环境无关。
+///
+/// 这里曾经是 `get_active`（读 `is_active` 列）。那一列已随「当前环境」一起被清除：
+/// 当前环境是客户端的实时状态，而默认环境是项目的属性，两者不是一回事。
+pub fn get_default(
     conn: &mut Connection,
     project_id: &str,
 ) -> Result<Option<Environment>, AppError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM environments \
-         WHERE project_id = ?1 AND is_active = 1 \
+         WHERE project_id = ?1 \
+         ORDER BY created_at ASC, id ASC \
          LIMIT 1"
     ))?;
     let mut rows = stmt.query(params![project_id])?;
@@ -86,10 +101,6 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
 /// 查 `env_id` 所属的 `project_id`。env id 未知时返回 `NotFound`——调用方（会改动的 MCP
 /// 工具）需要这个解析结果来施加逐项目权限检查；把未知 id 当作静默的「global」就是一个
 /// 权限绕过。
-///
-/// 这正是补上那一环的工具：
-///   tool_env_update(env_id="e_unknown") ⇒ lookup_project_id 失败
-///   ⇒ NotFound ⇒ handler 在动任何东西之前就返回 NotFound。
 pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, AppError> {
     let pid: Option<String> = conn
         .query_row(
@@ -103,28 +114,41 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
 
 // 写。
 
-pub fn create(conn: &mut Connection, e: &Environment) -> Result<(), AppError> {
+/// 新建一个环境。返回**落库之后**的那一行。
+///
+/// 返回值带着**生效的** `created_at`：调用方通常不给它（结构体的默认值是 0），故
+/// 这里补上当前时刻——存 0 的话这个环境会永远排在最前面，于是后来建的每一个环境
+/// 都成不了默认环境。调用方必须回传这一份：把 0 回传出去，界面手里的创建时刻就与
+/// 库里那一行对不上，于是「默认环境」在两侧算出两个答案。
+pub fn create(conn: &mut Connection, e: &Environment) -> Result<Environment, AppError> {
     let module_base_urls_json = serde_json::to_string(&e.module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
     let disabled_variables_json = serde_json::to_string(&e.disabled_variables)?;
-    // `base_urls_json` 刻意不在这个列表里。点名它会继续写一个无人读的列，而把调用方的遗留
-    // `baseUrls` 带进去会留下一个在下一个读者眼里像是活的 blob。不写它就让 schema 默认值
-    // 生效，那正是本构建写的每一行上 `base_urls_json` 取到的默认值。
+    // `created_at` 认定「默认环境」：一个项目里最早创建的那个。调用方通常不给它
+    // （结构体的默认值是 0），故这里补上当前时刻——存 0 的话这个环境会永远排在最前面，
+    // 于是后来建的每一个环境都成不了默认环境。
+    let created_at = if e.created_at == 0 {
+        crate::domain::now_ms()
+    } else {
+        e.created_at
+    };
     conn.execute(
         "INSERT INTO environments \
-         (id, project_id, name, is_active, module_base_urls_json, variables_json, disabled_variables_json) \
+         (id, project_id, name, created_at, module_base_urls_json, variables_json, disabled_variables_json) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             e.id,
             e.project_id,
             e.name,
-            e.is_active as i64,
+            created_at,
             module_base_urls_json,
             variables_json,
             disabled_variables_json,
         ],
     )?;
-    Ok(())
+    // 读回这一行而不是就地拼：读回来的那份与 `GET /api/environments` 给的完全一致，
+    // 调用方把它放进界面后不必再刷新一次。
+    get(conn, &e.id)
 }
 
 pub fn update(
@@ -132,9 +156,6 @@ pub fn update(
     id: &str,
     patch: EnvironmentPatch,
 ) -> Result<Environment, AppError> {
-    // 注意：`is_active` 在这里**也会**被 patch。`set_active` 才是负责维持「恰好一个激活」
-    // 的那一处，但它清零其余行而这里不——两者都写 `is_active` 时，「恰好一个」就不再成立。
-    // 这处分工尚未对齐，不要把本函数当作翻转激活状态的正规入口。
     let mut sets: Vec<String> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
 
@@ -146,9 +167,6 @@ pub fn update(
         sets.push(format!("module_base_urls_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(m)?));
     }
-    // `patch.base_urls` 收下但**忽略**——它背后的列已死（见模块文档）。写它会让一个已下线的
-    // 层在下一个读者眼里像是现役的；而把该字段从 patch 类型里删掉，则会让旧客户端的载荷
-    // 直接失败。故静默跳过是取舍。
     if let Some(v) = &patch.variables {
         sets.push(format!("variables_json = ?{}", binds.len() + 1));
         binds.push(rusqlite::types::Value::Text(serde_json::to_string(v)?));
@@ -163,11 +181,6 @@ pub fn update(
             &sorted,
         )?));
     }
-    if let Some(a) = patch.is_active {
-        sets.push(format!("is_active = ?{}", binds.len() + 1));
-        binds.push(rusqlite::types::Value::Integer(a as i64));
-    }
-
     if sets.is_empty() {
         return get(conn, id);
     }
@@ -184,34 +197,12 @@ pub fn update(
     get(conn, id)
 }
 
-/// 把 `id` 升级为激活，并把同项目其余环境降级。**必须在 `db::with_tx` 内调用**——两条
-/// `UPDATE` 必须一起拿到写锁，否则并发的 `set_active` 会留下两个激活环境。
-/// 返回更新后的环境，好让调用方直接回显给渲染层。
-pub fn set_active(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
-    // set_active 先查项目，好给降级划定范围。必须在两条 UPDATE 之前，以便 id 不存在时直接短路。
-    let project_id: Option<String> = conn
-        .query_row(
-            "SELECT project_id FROM environments WHERE id = ?1",
-            params![id],
-            |r| r.get(0),
-        )
-        .ok();
-    let project_id = match project_id {
-        Some(p) => p,
-        None => return Err(AppError::NotFound(format!("environment {id}"))),
-    };
-    conn.execute(
-        "UPDATE environments SET is_active = 0 \
-         WHERE project_id = ?1 AND id != ?2",
-        params![project_id, id],
-    )?;
-    conn.execute(
-        "UPDATE environments SET is_active = 1 WHERE id = ?1",
-        params![id],
-    )?;
-    get(conn, id)
-}
-
+/// 删掉一个环境。
+///
+/// **必须在 `db::with_tx` 内调用**：删环境要与其他写一起提交。
+///
+/// 端点行不再绑定环境，故这里不需要解绑：删掉一个环境只是少了一个可选的环境，界面与
+/// MCP 侧各自按「当前环境 / 点名的环境」回落，落到项目默认环境。
 pub fn delete(conn: &mut Connection, id: &str) -> Result<(), AppError> {
     let rows = conn.execute("DELETE FROM environments WHERE id = ?1", params![id])?;
     if rows == 0 {
@@ -311,11 +302,14 @@ pub fn rename_var(
         )));
     }
     let mut env = get(conn, env_id)?;
-    let value = env.variables.remove(from_key).ok_or_else(|| {
-        AppError::Validation(format!(
-            "rename_var: environment {env_id} has no variable {from_key:?}"
-        ))
-    })?;
+    let value = match env.variables.remove(from_key) {
+        Some(v) => v,
+        None => {
+            return Err(AppError::Validation(format!(
+                "rename_var: environment {env_id} has no variable {from_key:?}"
+            )))
+        }
+    };
     if env.variables.contains_key(to_key) {
         // 恢复刚移除的键，好让这次中止把 map 留在未改动状态。
         env.variables.insert(from_key.to_string(), value);
@@ -346,41 +340,45 @@ pub fn rename_var(
     Ok(env)
 }
 
-/// 设置或清除一个 `moduleBaseUrls[def_id][module_id]` 单元格。
+/// 写一个（环境 × 模块）格子的两个字段。
 ///
-/// `url = None` 移除该单元格，而这是真实答案而非一个洞：(服务 × 模块) 是唯一的一层，
-/// 故被清空的单元格意味着此模块对此服务无地址，解析到此为止。它不会回落到别的模块的值，
-/// 也不会回落到已下线的环境级 map——两个模块把同一个服务指向不同 host 是常态，不是该被统一处理的
-/// 错误。
-/// 此处不核对 endpoint 的模块是否属于该环境的项目：这一对只有在 endpoint 真的去解析它时才
-/// 成为 URL，而拦住跨项目服务被指名的是 `base_url_definitions.project_id_of`。
+/// 两个参数各自「写什么就是什么」：
+///
+/// - `url` 传 `Some(u)` 写入后端 api 地址，传 `None` 则**这一格不动**；传空串表示清空它。
+/// - `proxy` 传 `Some(p)` 写入实际访问地址，传 `None` 则**这一格不动**；传空串表示清空它。
+///
+/// 两个字段都空时整格删掉：一个既没有地址也没有代理的格子解析不出任何东西，留着只会
+/// 让按键遍历的读法误判为「此处已配置」。
+///
+/// 此处不核对模块是否属于该环境的项目：那一对只有在 endpoint 真的去解析它时才成为 URL，
+/// 而端点解析走的是端点所属项目的树。
 /// **必须在 `db::with_tx` 内调用。** 返回更新后的 [`Environment`] 供渲染层回显。
 pub fn set_module_base_url(
     conn: &mut Connection,
     env_id: &str,
-    def_id: &str,
     module_id: &str,
     url: Option<&str>,
+    proxy: Option<&str>,
 ) -> Result<Environment, AppError> {
     // 与 `set_var` 同样的「载入 → 改 → 写」形状，同一个理由：对 JSON 列的一次原子 UPDATE 使
-    // 读者看不到写了一半的 map。嵌套 map 只在确实要设值时才创建，故清掉某服务最后一个单元格
-    // 不会在它后面留下一个空 `{}`。
+    // 读者看不到写了一半的 map。
     let mut env = get(conn, env_id)?;
-    match url {
-        Some(u) => {
-            env.module_base_urls
-                .entry(def_id.to_string())
-                .or_default()
-                .insert(module_id.to_string(), u.to_string());
-        }
-        None => {
-            if let Some(per_module) = env.module_base_urls.get_mut(def_id) {
-                per_module.remove(module_id);
-                if per_module.is_empty() {
-                    env.module_base_urls.remove(def_id);
-                }
-            }
-        }
+    let cell = env.module_base_urls.get(module_id);
+    let mut next = cell.cloned().unwrap_or_default();
+    if let Some(u) = url {
+        next.url = u.to_string();
+    }
+    if let Some(p) = proxy {
+        next.proxy = if p.is_empty() {
+            None
+        } else {
+            Some(p.to_string())
+        };
+    }
+    if next.url.is_empty() && next.proxy.is_none() {
+        env.module_base_urls.remove(module_id);
+    } else {
+        env.module_base_urls.insert(module_id.to_string(), next);
     }
     let module_base_urls_json = serde_json::to_string(&env.module_base_urls)?;
     let rows = conn.execute(
@@ -396,10 +394,9 @@ pub fn set_module_base_url(
 // 行映射器。
 
 fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
-    let base_urls_json: String = row.get(4)?;
-    let module_base_urls_json: String = row.get(5)?;
-    let variables_json: String = row.get(6)?;
-    let disabled_variables_json: String = row.get(7)?;
+    let module_base_urls_json: String = row.get(4)?;
+    let variables_json: String = row.get(5)?;
+    let disabled_variables_json: String = row.get(6)?;
     let parse_err = |e: serde_json::Error, col: &str| {
         rusqlite::Error::FromSqlConversionFailure(
             0,
@@ -407,11 +404,7 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
             Box::new(JsonColError(format!("{col}: {e}"))),
         )
     };
-    // `base_urls` 解析了但从不使用：该列只为存活而留，解析它是为了让仍会发来该字段的客户端在
-    // 线格式上仍然诚实。故一个畸形的 blob 仍会让这次读失败，而不是被静默报成空 map。
-    let base_urls: HashMap<String, String> =
-        serde_json::from_str(&base_urls_json).map_err(|e| parse_err(e, "base_urls_json"))?;
-    let module_base_urls: HashMap<String, HashMap<String, String>> =
+    let module_base_urls: HashMap<String, ModuleBaseUrl> =
         serde_json::from_str(&module_base_urls_json)
             .map_err(|e| parse_err(e, "module_base_urls_json"))?;
     let variables: HashMap<String, String> =
@@ -422,8 +415,7 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
         id: row.get(0)?,
         project_id: row.get(1)?,
         name: row.get(2)?,
-        is_active: row.get::<_, i64>(3)? != 0,
-        base_urls,
+        created_at: row.get(3)?,
         module_base_urls,
         variables,
         disabled_variables,

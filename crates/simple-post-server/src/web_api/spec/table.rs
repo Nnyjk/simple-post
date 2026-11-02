@@ -13,13 +13,12 @@ use super::RouteSpec;
 /// （懒加载层级树的两节，供动态变量的数据源选择器跨项目挑接口）。它们的形状跟着那个
 /// 界面的需求走，还不承诺 v1 稳定。
 pub fn public_route_specs() -> Vec<RouteSpec> {
-    let mut specs = Vec::with_capacity(51);
+    let mut specs = Vec::with_capacity(46);
     specs.extend(routes::spec_health::routes());
     specs.extend(routes::spec_projects::routes());
     specs.extend(routes::spec_nodes::routes());
     specs.extend(routes::spec_endpoint_details::routes());
     specs.extend(routes::spec_dynamic_variables::routes());
-    specs.extend(routes::spec_baseurls::routes());
     specs.extend(routes::spec_environments::routes());
     specs.extend(routes::spec_response_history::routes());
     specs.extend(routes::spec_interchange::routes());

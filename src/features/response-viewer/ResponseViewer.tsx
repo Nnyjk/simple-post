@@ -22,6 +22,8 @@ import { HeadersView } from './HeadersView';
 import { ScriptView } from './ScriptView';
 import { PendingState } from './PendingState';
 import { RequestSummary } from './RequestSummary';
+import { BinaryView } from './BinaryView';
+import { classifyResponse, downloadResponse } from './responseKind';
 
 /**
  * 响应区 —— 左右两栏。
@@ -57,6 +59,10 @@ export function ResponseViewer() {
 
   const formatResult = useMemo(() => tryFormatJson(response?.body ?? ''), [response?.body]);
   const canFormat = formatResult.ok;
+
+  // 响应该怎么渲染：JSON / 文本 / 图片 / 二进制。后端已经把「文本还是二进制」判完了
+  // （按 Content-Type 先判，再看字节是不是合法 UTF-8），界面只按结果选视图。
+  const kind = response ? classifyResponse(response) : 'text';
 
   // 状态药丸的脉冲 + 数字滚动。`statusPillRef` 指向「图标 + 状态码 + statusText」整行，
   // 使整个药丸作为一个整体形变。两个可变计数对象放在 ref 里，gsap 才能逐帧改 `.val`
@@ -206,11 +212,15 @@ export function ResponseViewer() {
               )}
             </Button>
           </Tooltip>
-          <Tooltip content="复制响应体" side="bottom">
+          <Tooltip
+            content={kind === 'binary' ? '二进制响应没有可复制的文本' : '复制响应体'}
+            side="bottom"
+          >
             <Button
               variant="ghost"
               size="icon"
               className="h-7 w-7"
+              disabled={kind === 'binary'}
               onClick={() => navigator.clipboard?.writeText(response.body)}
             >
               <Copy className="h-3.5 w-3.5" />
@@ -221,15 +231,7 @@ export function ResponseViewer() {
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              onClick={() => {
-                const blob = new Blob([response.body], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'response.txt';
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
+              onClick={() => downloadResponse(response)}
             >
               <Download className="h-3.5 w-3.5" />
             </Button>
@@ -292,7 +294,7 @@ export function ResponseViewer() {
               onChange={(id) => setView(id as typeof view)}
             />
             <div className="ml-auto" />
-            {view === 'pretty' && (
+            {view === 'pretty' && kind === 'json' && (
               <Tooltip content={canFormat ? undefined : '响应不是合法 JSON'} side="bottom">
                 <Button
                   variant="outline"
@@ -311,14 +313,28 @@ export function ResponseViewer() {
 
           {/* 响应体 */}
           <div className="min-h-0 flex-1 overflow-auto">
-            {view === 'pretty' && (
-              <PrettyView body={response.body} formatted={formatted} formatResult={formatResult} />
-            )}
-            {view === 'raw' && (
-              <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
-                {response.body}
-              </pre>
-            )}
+            {view === 'pretty' &&
+              (kind === 'json' ? (
+                <PrettyView
+                  body={response.body}
+                  formatted={formatted}
+                  formatResult={formatResult}
+                />
+              ) : kind === 'text' ? (
+                <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
+                  {response.body}
+                </pre>
+              ) : (
+                <BinaryView response={response} />
+              ))}
+            {view === 'raw' &&
+              (kind === 'json' || kind === 'text' ? (
+                <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
+                  {response.body}
+                </pre>
+              ) : (
+                <BinaryView response={response} />
+              ))}
             {view === 'headers' && <HeadersView headers={response.headers} />}
             {view === 'script' && <ScriptView outcome={scriptOutcome} />}
           </div>

@@ -16,7 +16,6 @@
 //! `uid` 与项目默认色定义在 `crate::domain`，`db` crate 也复用，单一定义以免 REST、
 //! Tauri 命令与 SQLite 测试路径三方漂移。
 
-mod base_url_defs;
 // `pub(crate)`：REST 路由反序列化的是 Tauri 命令同一个 `CreateProjectOpts`，两个传输
 // 必须对「创建带什么」达成一致，各存一份 DTO 正是本文件开头警告的漂移。
 pub(crate) mod dto;
@@ -44,7 +43,6 @@ mod spec;
 // `#[macro_export]` 宏（`__cmd__<name>`、`__tauri_command_name_<name>`），
 // 而 `generate_handler!` 把 `crate::commands::<name>` 改写成对 `crate::commands::__cmd__<name>`
 // 的调用，是经该路径所在模块解析宏，而非经 crate 根的别名。列条目会把宏留在子模块，E0433 随后而来。
-pub use base_url_defs::*;
 pub use dto::*;
 pub use dynamic_variables::*;
 pub use environments::*;

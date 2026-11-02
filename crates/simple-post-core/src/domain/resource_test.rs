@@ -4,64 +4,76 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn environment_base_urls_round_trip() {
+fn environment_module_base_urls_round_trip() {
     let env = Environment {
         id: "e1".into(),
         project_id: "p1".into(),
         name: "dev".into(),
-        base_urls: [("def_default".to_string(), "http://x".to_string())]
-            .into_iter()
-            .collect(),
-        module_base_urls: [(
-            "def_default".to_string(),
-            [
-                ("m_auth".to_string(), "http://auth".to_string()),
-                ("m_order".to_string(), "http://order".to_string()),
-            ]
-            .into_iter()
-            .collect(),
-        )]
+        module_base_urls: [
+            (
+                "m_auth".to_string(),
+                ModuleBaseUrl {
+                    url: "http://auth".into(),
+                    proxy: None,
+                },
+            ),
+            (
+                "m_order".to_string(),
+                ModuleBaseUrl {
+                    url: "http://order".into(),
+                    proxy: Some("https://gw/order".into()),
+                },
+            ),
+        ]
         .into_iter()
         .collect(),
         variables: [("token".to_string(), "abc".to_string())]
             .into_iter()
             .collect(),
         disabled_variables: Vec::new(),
-        is_active: true,
+        created_at: 1_700_000_000_000,
     };
     let s = serde_json::to_string(&env).unwrap();
-    // 线格式同时给出两张 URL map，而已下线的那张保留它历史上的 `baseUrls` 拼法，好让旧客户端
-    // 仍能解析。
     assert!(s.contains("\"moduleBaseUrls\""), "{s}");
     let back: Environment = serde_json::from_str(&s).unwrap();
-    assert_eq!(back.base_urls.get("def_default").unwrap(), "http://x");
     assert_eq!(
-        back.module_base_urls
-            .get("def_default")
-            .unwrap()
-            .get("m_auth")
-            .unwrap(),
+        back.module_base_urls.get("m_auth").unwrap().url,
         "http://auth"
     );
+    assert!(back.module_base_urls.get("m_auth").unwrap().proxy.is_none());
+    assert_eq!(
+        back.module_base_urls.get("m_order").unwrap().url,
+        "http://order"
+    );
+    assert_eq!(
+        back.module_base_urls
+            .get("m_order")
+            .unwrap()
+            .proxy
+            .as_deref(),
+        Some("https://gw/order")
+    );
     assert_eq!(back.variables.get("token").unwrap(), "abc");
-    assert!(back.is_active);
+    assert_eq!(back.created_at, 1_700_000_000_000);
 }
 
 #[test]
 fn environment_deserialises_without_module_base_urls() {
-    // 值层迁移之前写下的载荷必须仍能加载：该字段带 `#[serde(default)]` 正是为了让它到达时
+    // 值层出现之前写下的载荷必须仍能加载：该字段带 `#[serde(default)]` 正是为了让它到达时
     // 为空，而不是让整次读失败。
+    //
+    // 载荷里的 `isActive` 是「当前环境」那一列的旧键名，它连同那一列一起被删了。
+    // 留着它是因为 `Environment` 不带 `deny_unknown_fields`：旧形状的载荷（外部客户端
+    // 手里可能还存着）必须仍能读，故这里顺带钉住「多出来的键被忽略」这条。
     let back: Environment = serde_json::from_value(json!({
         "id": "e1",
         "projectId": "p1",
         "name": "dev",
-        "baseUrls": { "def_default": "http://x" },
         "variables": {},
         "isActive": false,
     }))
     .unwrap();
     assert!(back.module_base_urls.is_empty());
-    assert_eq!(back.base_urls.get("def_default").unwrap(), "http://x");
 }
 
 #[test]
@@ -92,35 +104,6 @@ fn permission_serde_wire_matches_as_str() {
         let back: Permission = serde_json::from_str(&wire).unwrap();
         assert_eq!(p, back);
     }
-}
-
-#[test]
-fn project_always_emits_default_base_url_definition_id() {
-    // TS 镜像把它声明为必填但可空，故「无默认」必须以显式 null 到达，而不是一个缺席的键。
-    let p = Project {
-        id: "p".into(),
-        name: "n".into(),
-        description: None,
-        base_url: None,
-        base_url_definitions: vec![],
-        default_base_url_definition_id: None,
-        color: "#3b82f6".into(),
-        created_at: 0,
-        updated_at: 0,
-    };
-    let v = serde_json::to_value(&p).unwrap();
-    assert!(
-        v.get("defaultBaseUrlDefinitionId").is_some(),
-        "key must be present, got {v}"
-    );
-    assert_eq!(v["defaultBaseUrlDefinitionId"], serde_json::Value::Null);
-    // ……而设了值仍能往返。
-    let p = Project {
-        default_base_url_definition_id: Some("def1".into()),
-        ..p
-    };
-    let back: Project = serde_json::from_value(serde_json::to_value(&p).unwrap()).unwrap();
-    assert_eq!(back.default_base_url_definition_id.as_deref(), Some("def1"));
 }
 
 #[test]

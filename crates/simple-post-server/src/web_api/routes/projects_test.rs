@@ -16,8 +16,8 @@ use crate::web_api::{build_router, WebState};
 
 /// 起一个真实的 router：一次性的 SQLite 文件 + 空 SPA 目录，绑在 loopback 的临时端口上。
 ///
-/// 从 `base_url_defs_test.rs` 复制而来而非共用：计数器是每模块各自的，而跨两个
-/// `#[path]` 测试模块共享一套夹具需要一个谁都不拥有的 `pub(crate)` 落点。
+/// 计数器是每模块各自的：跨两个 `#[path]` 测试模块共享一套夹具需要一个谁都不拥有的
+/// `pub(crate)` 落点，故这里各写一份。
 async fn serve_test_router() -> (SocketAddr, PathBuf) {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);

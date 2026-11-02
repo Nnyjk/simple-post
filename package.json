@@ -41,6 +41,7 @@
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/lang-xml": "^6.1.0",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@gsap/react": "^2.1.2",
     "@lezer/highlight": "^1.2.5",

@@ -144,6 +144,8 @@ fn body_mode_tag(mode: &BodyMode) -> &'static str {
         BodyMode::Form => "form",
         BodyMode::Raw => "raw",
         BodyMode::Multipart => "multipart",
+        BodyMode::Xml => "xml",
+        BodyMode::Binary => "binary",
     }
 }
 

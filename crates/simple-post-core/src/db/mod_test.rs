@@ -24,13 +24,7 @@ fn init_creates_dir_and_db_file() {
 fn init_leaves_a_fresh_database_empty() {
     // Simple Post 不带任何种子数据：`db::init` 建完表即止。行只来自用户或 MCP 客户端。
     let (pool, _dir) = fresh_empty_pool();
-    for table in [
-        "projects",
-        "nodes",
-        "endpoint_details",
-        "environments",
-        "base_url_definitions",
-    ] {
+    for table in ["projects", "nodes", "endpoint_details", "environments"] {
         let count: i64 = with_conn(&pool, |c| {
             Ok(c.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?)
         })
