@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ui/layers';
 import type { VarHintAnchor } from './VarHintAnchor';
 import type { VarEntry } from './varHint';
 
@@ -85,7 +86,10 @@ export function VarHintPicker({
       role="listbox"
       aria-label="变量"
       data-testid="var-hint-picker"
-      className="fixed z-50 max-h-64 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg animate-fade-in"
+      className={cn(
+        'fixed max-h-64 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg animate-fade-in',
+        LAYER.popover,
+      )}
       onMouseDown={(e) => e.preventDefault() /* 保持输入框聚焦 */}
     >
       <div className="flex items-center gap-1.5 border-b border-border px-2 py-1 label-caps">

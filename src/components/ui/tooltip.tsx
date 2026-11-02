@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import { LAYER } from './layers';
 
 interface TooltipProps {
   content: ReactNode;
@@ -110,7 +111,8 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
               visibility: pos ? 'visible' : 'hidden',
             }}
             className={cn(
-              'pointer-events-none fixed z-[150] max-w-[min(24rem,calc(100vw-1rem))] whitespace-pre-wrap rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md animate-fade-in',
+              'pointer-events-none fixed max-w-[min(24rem,calc(100vw-1rem))] whitespace-pre-wrap rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md animate-fade-in',
+              LAYER.tooltip,
               className,
             )}
           >

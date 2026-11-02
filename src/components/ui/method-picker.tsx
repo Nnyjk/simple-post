@@ -21,6 +21,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
+import { LAYER } from './layers';
 import { HTTP_METHODS, type HttpMethod } from '@/types/domain';
 import { MethodPill } from './method-pill';
 
@@ -138,7 +139,10 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
         <ul
           role="listbox"
           aria-label="HTTP method"
-          className="absolute top-full left-0 z-50 mt-1 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg"
+          className={cn(
+            'absolute top-full left-0 mt-1 overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg',
+            LAYER.popover,
+          )}
         >
           {HTTP_METHODS.map((m, idx) => {
             const isSelected = m === value;

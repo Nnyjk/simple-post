@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ui/layers';
 
 export type ContextMenuItem =
   | {
@@ -75,7 +76,10 @@ export function TreeContextMenu({ open, x, y, items, onClose }: TreeContextMenuP
       ref={ref}
       role="menu"
       style={{ left: pos.left, top: pos.top, position: 'fixed' }}
-      className="z-[100] min-w-[180px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg animate-fade-in"
+      className={cn(
+        'min-w-[180px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg animate-fade-in',
+        LAYER.contextMenu,
+      )}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((it, idx) =>

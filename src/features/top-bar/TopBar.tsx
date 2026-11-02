@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette-lazy';
 import { cn, focusRing } from '@/lib/utils';
+import { LAYER } from '@/components/ui/layers';
 import { WindowControls } from '@/components/ui/window-controls';
 
 /**
@@ -137,7 +138,12 @@ export function TopBar() {
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </Button>
         {projOpen && loaded && projects.length > 0 && (
-          <div className="absolute left-0 top-full z-50 mt-1 w-64 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
+          <div
+            className={cn(
+              'absolute left-0 top-full mt-1 w-64 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg',
+              LAYER.popover,
+            )}
+          >
             <div className="px-2 py-1 label-caps">项目</div>
             {projects.map((p) => (
               <button
@@ -203,7 +209,12 @@ export function TopBar() {
             <ChevronDown className="h-3.5 w-3.5 opacity-60" />
           </Button>
           {envOpen && (
-            <div className="absolute left-0 top-full z-50 mt-1 w-56 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg">
+            <div
+              className={cn(
+                'absolute left-0 top-full mt-1 w-56 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg',
+                LAYER.popover,
+              )}
+            >
               <div className="px-2 py-1 label-caps">环境</div>
               {envs.length === 0 ? (
                 <>

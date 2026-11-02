@@ -28,6 +28,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Globe, Pencil } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
+import { LAYER } from '@/components/ui/layers';
 import { IconTile } from '@/components/ui/icon-tile';
 import type { HueConcept } from '@/lib/hue';
 
@@ -162,7 +163,8 @@ export function BaseUrlPicker({
           role="listbox"
           aria-label="选择地址来源"
           className={cn(
-            'absolute top-full left-0 z-50 mt-1 overflow-hidden rounded-lg border border-border bg-popover shadow-lg',
+            'absolute top-full left-0 mt-1 overflow-hidden rounded-lg border border-border bg-popover shadow-lg',
+            LAYER.popover,
             POPOVER_WIDTH,
           )}
         >
