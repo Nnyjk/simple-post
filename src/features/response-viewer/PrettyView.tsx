@@ -53,7 +53,10 @@ export function PrettyView({
           value={displayed}
           extensions={[json()]}
           theme={isDark ? oneDark : lightCodeTheme}
-          editable={false}
+          // 用 `readOnly` 而不是 `editable={false}`：后者去掉 content DOM 的 contenteditable，
+          // 编辑器不再可聚焦 —— CodeMirror 自绘的光标只在聚焦时出现，原生光标又被它的
+          // `caret-color: transparent` 关掉。`readOnly` 拦编辑：输入、粘贴、拖放、剪切全被拒。
+          readOnly
           basicSetup={{
             lineNumbers: true,
             foldGutter: true,
