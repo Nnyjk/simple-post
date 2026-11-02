@@ -1,8 +1,10 @@
-//! 端点没绑环境时的回落：MCP 侧按项目当前激活的环境解析。
+//! 端点没点名环境时的回落：MCP 侧按项目的默认环境解析。
 //!
-//! 界面那侧用的是工作区当前环境（顶栏的环境切换会写 `environments.is_active`），
-//! 而端点行上的 `environment_id` 通常是空的 —— 界面自己建的接口从不写它。故 MCP 侧
-//! 必须回落，否则同一个端点在界面发有 host、变量已替换，在 MCP 侧发却裸奔。
+//! 端点行不再绑定环境，故 MCP 侧每次调用要么自己点名一个环境，要么不点名。不点名时
+//! 回落的是**项目的默认环境**（一个项目里最早创建的那个）—— 与界面那侧一致：界面用
+//! 的是它自己记住的「当前环境」，而那个环境在库里是同一个项目的某个环境。
+//!
+//! 回落必须有，否则同一个端点在界面发有 host、变量已替换，在 MCP 侧发却裸奔。
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -12,7 +14,7 @@ use serde_json::json;
 use super::tool_api_call_endpoint;
 use crate::mcp::AppState;
 use simple_post_core::domain::{
-    AuthConfig, BaseUrlDefinition, EndpointDetail, Environment, HttpMethod, Project, RequestBody,
+    AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, Project, RequestBody,
     ResourceNodeType,
 };
 
@@ -60,10 +62,9 @@ fn mcp_state(tag: &str) -> Arc<AppState> {
     })
 }
 
-/// 种一个项目、模块、端点与一个**激活**的环境。端点的 `environment_id` 是空的
-/// ——界面自己建的接口就是这样。
+/// 种一个项目、模块、端点与一个环境。那个环境是这个项目里最早创建的，故它是默认环境。
 fn seed(st: &AppState, base_url: &str) -> String {
-    use simple_post_core::db::{base_url_defs, environments, nodes, permissions, projects};
+    use simple_post_core::db::{environments, nodes, permissions, projects};
     use simple_post_core::domain::ResourceNode;
     use simple_post_core::permissions::Permission;
 
@@ -71,13 +72,6 @@ fn seed(st: &AppState, base_url: &str) -> String {
         id: "p_env".into(),
         name: "P".into(),
         description: None,
-        base_url: None,
-        base_url_definitions: vec![BaseUrlDefinition {
-            id: "svc".into(),
-            name: "api".into(),
-            description: None,
-        }],
-        default_base_url_definition_id: Some("svc".into()),
         color: String::new(),
         created_at: 0,
         updated_at: 0,
@@ -97,9 +91,6 @@ fn seed(st: &AppState, base_url: &str) -> String {
         node_id: "e_env".into(),
         method: HttpMethod::Get,
         url: "/users/{{userId}}".into(),
-        // 端点没绑环境 —— 界面那侧会回落到工作区当前环境。
-        environment_id: None,
-        base_url_definition_id: None,
         base_url_override: None,
         params: vec![],
         path_params: vec![],
@@ -121,12 +112,12 @@ fn seed(st: &AppState, base_url: &str) -> String {
         id: "env_env".into(),
         project_id: "p_env".into(),
         name: "dev".into(),
-        base_urls: Default::default(),
         module_base_urls: [(
-            "svc".to_string(),
-            [("m_env".to_string(), base_url.to_string())]
-                .into_iter()
-                .collect(),
+            "m_env".to_string(),
+            ModuleBaseUrl {
+                url: base_url.to_string(),
+                proxy: None,
+            },
         )]
         .into_iter()
         .collect(),
@@ -134,12 +125,11 @@ fn seed(st: &AppState, base_url: &str) -> String {
             .into_iter()
             .collect(),
         disabled_variables: vec![],
-        // 激活的环境 —— 顶栏的环境切换写的就是这一列。
-        is_active: true,
+        // 这个项目里最早创建的环境 —— 故它是默认环境。
+        created_at: 0,
     };
     simple_post_core::db::with_tx(&st.pool, |c| {
         projects::create(c, &project)?;
-        base_url_defs::create(c, &project.base_url_definitions[0], "p_env")?;
         nodes::create(c, &module, None)?;
         nodes::create(
             c,
@@ -164,9 +154,9 @@ fn seed(st: &AppState, base_url: &str) -> String {
     "e_env".to_string()
 }
 
-/// 端点没绑环境时，MCP 侧要按项目激活的环境解析，与界面那侧一致。
+/// 端点没点名环境时，MCP 侧要按项目的默认环境解析，与界面那侧一致。
 #[tokio::test]
-async fn an_endpoint_without_its_own_environment_falls_back_to_the_active_one() {
+async fn an_endpoint_without_a_named_environment_falls_back_to_the_default_one() {
     let (api, seen) = stub().await;
     let st = mcp_state("fallback");
     let id = seed(&st, &api);
@@ -176,9 +166,9 @@ async fn an_endpoint_without_its_own_environment_falls_back_to_the_active_one() 
         .expect("call");
 
     let wire = seen.lock().unwrap()[0].clone();
-    // base URL 来自 (环境 × 服务 × 模块) 的格子，变量也由那个环境替换。
+    // base URL 来自 (环境 × 模块) 的格子，变量也由那个环境替换。
     assert!(
         wire.contains("GET /users/42 HTTP/1.1"),
-        "端点没绑环境时必须按项目激活的环境解析：{wire}"
+        "端点没点名环境时必须按项目默认的环境解析：{wire}"
     );
 }

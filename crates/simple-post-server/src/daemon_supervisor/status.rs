@@ -87,7 +87,7 @@ impl McpDaemonHandle {
             uptime_ms: snap.uptime_ms,
             requests_handled: snap.requests_handled,
             // `current_connections` 是为将来某条 stderr 指标行预留的；daemon 尚未发出
-            // 这样的行，故硬编码 `0`。先把这个计数器放上线格式里是为了向前兼容——
+            // 这样的行，故这里写死 `0`。先把这个计数器放上线格式里是为了向前兼容——
             // daemon 真的开始发它时，UI 不必改 schema。
             current_connections: 0,
             registered_tools: crate::mcp::registered_tool_names(),

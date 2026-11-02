@@ -167,7 +167,7 @@ fn normalise_pem_boundaries(pem: &[u8]) -> Vec<u8> {
         // END 标记的收尾是 5 个连字符：标签之后的第一处「-----」。
         let after = &rest[pos + END_MARKER.len()..];
         let Some(dashes) = find_bytes(after, b"-----") else {
-            // 不是一条完整的 END 标记，原样留着。
+            // 不是一条完整的 END 标记，就原样留着。
             out.extend_from_slice(&rest[pos..]);
             break;
         };

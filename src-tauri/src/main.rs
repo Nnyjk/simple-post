@@ -103,9 +103,9 @@ enum Cmd {
         #[arg(long)]
         spa_dir: Option<String>,
 
-        /// Data directory. Defaults to the OS-conventional
-        /// `dirs::data_dir()/simple-post` so the GUI and the server
-        /// share the same SQLite file.
+        /// Data directory. Defaults to `dirs::data_dir()` (or
+        /// `SIMPLE_POST_DATA_DIR` when that is set) so the GUI and the
+        /// server share the same SQLite file.
         #[arg(long)]
         data_dir: Option<String>,
 

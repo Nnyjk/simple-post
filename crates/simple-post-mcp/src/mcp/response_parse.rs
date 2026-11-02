@@ -163,6 +163,7 @@ async fn tool_api_parse_response(
             .map(|(k, v)| [k.clone(), v.clone()])
             .collect(),
         body: a.body,
+        body_base64: None,
         body_json: parsed.body_json,
         content_type: a.content_type,
         error: None,
@@ -281,6 +282,7 @@ fn build_api(input: &ResponseInput) -> Result<ApiResponse, AppError> {
             .map(|(k, v)| [k.clone(), v.clone()])
             .collect(),
         body: input.body.clone(),
+        body_base64: None,
         body_json,
         content_type: input.content_type.clone(),
         error: None,

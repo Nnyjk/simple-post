@@ -97,14 +97,25 @@ fn delete_removes_only_the_named_key() {
 }
 
 /// 既有用户的库里**没有**这张表——`schema.sql` 里是 `CREATE TABLE IF NOT EXISTS`，
-/// 所以它由启动时的 `db::migrate` 白得。这条测试替身验证的是「全新文件上表存在」。
+/// 所以它由启动时的 `db::migrate` 白得。故重开一个已经有这张表的库不该清掉它：
+/// 为这张表 bump 版本号会让 `ensure_current_schema` 删库。
 #[test]
 fn the_table_is_reachable_without_bumping_the_schema_version() {
-    let pool = fresh_pool();
-    db::with_conn(&pool, |c| upsert(c, "k1", &token("at-1"))).unwrap();
+    let dir: PathBuf = std::env::temp_dir().join(format!(
+        "simple-post-oauth2-tokens-reopen-{}-{}",
+        std::process::id(),
+        crate::db::test_counter::next()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let pool = db::init(&dir).expect("init");
+    db::with_tx(&pool, |c| upsert(c, "k1", &token("at-1"))).unwrap();
+    drop(pool);
+
+    let pool = db::init(&dir).expect("re-init");
+    let got = db::with_conn(&pool, |c| get(c, "k1")).unwrap();
     assert_eq!(
-        db::SCHEMA_VERSION,
-        3,
-        "oauth2_tokens 是纯增量新表，版本号不得动——bump 会让 ensure_current_schema 删库"
+        got,
+        Some(token("at-1")),
+        "重开一个已经有这张表的库不该清掉它"
     );
 }

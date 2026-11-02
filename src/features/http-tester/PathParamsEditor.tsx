@@ -65,7 +65,7 @@ export function PathParamsEditor({
     onChange(items.filter((it) => it.id !== id));
   };
 
-  // 发送被拦下的原因。空状态里也要出现：占位符可能只存在于前置 URL 里，这时
+  // 发送被拦下的原因。空状态里也要出现：占位符可能只存在于模块地址里，这时
   // 本页一行都没有，不显示这句话，用户就不知道该去哪里改。
   const errorBanner = error ? (
     <div

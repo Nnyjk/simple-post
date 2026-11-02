@@ -186,79 +186,35 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
   [COMMANDS.environmentsSetModuleBaseurl]: {
     method: 'POST',
-    // 取值层是 (环境 × 模块 × 服务)，故单元格的两半都走请求体。字面量路径段让它
-    // 与已下线的 `/baseurls` 路由区分开 —— 那条路由没了，因为裸 `defId` 只能写
-    // 扁平的、不分模块的取值层。
+    // 取值层是 (环境 × 模块)，故单元格的两半都走请求体。路径段用
+    // `module-baseurls` 而不是 `baseurls`：裸 id 只能写扁平的、不分模块的取值层。
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/module-baseurls`,
-    body: (a) => ({ defId: a.defId, moduleId: a.moduleId, url: a.url }),
-  },
-  [COMMANDS.environmentsSetActive]: {
-    method: 'POST',
-    // 使用字面量 active 路径，避免与参数路由发生匹配歧义。
-    path: () => '/api/environments/active',
-    body: (a) => ({ envId: a.envId }),
-  },
-
-  // ----- baseUrl definitions -----
-  [COMMANDS.baseUrlDefsList]: {
-    method: 'GET',
-    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
-  },
-  [COMMANDS.baseUrlDefsCreate]: {
-    method: 'POST',
-    // 服务挂在**项目**上，所以作用域是项目且住在路径里；`/api/baseurl-defs` 是下面
-    // PATCH/DELETE 以裸 id 寻址的集合。
-    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls`,
-    // 显式投影：`name` 就是全部契约，默认的 `args` 回退会把 `projectId` 以及调用方
-    // 持有的 `opts` 一起泄进请求体。`opts.id` 要转发，因为渲染层自己铸 id
-    // （它在行落库前就用它索引 ★ 与环境单元格）；留空则由服务端铸。
-    body: (a) => {
-      const opts = a.opts as { description?: unknown; id?: unknown } | undefined;
-      const id = typeof opts?.id === 'string' ? opts.id : '';
-      return {
-        name: a.name,
-        ...(opts ? { description: opts.description } : {}),
-        ...(id ? { id } : {}),
-      };
-    },
-  },
-  [COMMANDS.baseUrlDefsUpdate]: {
-    method: 'PATCH',
-    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.id))}`,
-    body: (a) => a.patch,
-  },
-  [COMMANDS.baseUrlDefsDelete]: {
-    method: 'DELETE',
-    path: (a) => `/api/baseurl-defs/${encodeURIComponent(String(a.id))}`,
-  },
-  [COMMANDS.baseUrlDefsSetDefault]: {
-    method: 'POST',
-    // ★ 是项目的属性，所以作用域是项目而非模块。
-    path: (a) => `/api/projects/${encodeURIComponent(String(a.projectId))}/baseurls/default`,
-    body: (a) => ({ defId: a.defId }),
+    // 格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自
+    // 独立：`null` = 该字段保持原值，`''` = 清空该字段。
+    body: (a) => ({ moduleId: a.moduleId, url: a.url, proxy: a.proxy }),
   },
 
   // ----- dynamic variables -----
-  // 定义是全局的，故这组路由都不带项目参数：名字在整个工作区里唯一。
+  // 定义挂在项目里，故这组路由带一个可选的项目参数：不带就是跨项目那一路。
   // 列表只读缓存行，不取数；`/resolve` 才会真的发出站请求。
   [COMMANDS.dynamicVariablesList]: {
     method: 'GET',
-    // `includeReferences=false` 时后端不算引用关系（那要扫一遍全部端点）。
-    path: (a) => `/api/dynamic-variables${buildQuery({ includeReferences: a.includeReferences })}`,
+    path: (a) => `/api/dynamic-variables${buildQuery({ projectId: a.projectId })}`,
   },
   [COMMANDS.dynamicVariablesCreate]: {
     method: 'POST',
     path: () => '/api/dynamic-variables',
     // 显式投影：下面这些键就是全部线上契约，调用方多带的键不能跟着上车。
     body: (a) => ({
+      projectId: a.projectId ?? null,
       name: a.name,
       id: a.id ?? null,
       description: a.description ?? null,
       sourceEndpointId: a.sourceEndpointId ?? null,
       sourceInlineJson: a.sourceInlineJson ?? null,
       sourceEnvironmentId: a.sourceEnvironmentId ?? null,
-      sourceBaseUrlDefinitionId: a.sourceBaseUrlDefinitionId ?? null,
       extractPath: a.extractPath ?? null,
+      transformScript: a.transformScript ?? null,
       valueMode: a.valueMode ?? null,
       ttlSeconds: a.ttlSeconds ?? null,
       staleFallback: a.staleFallback ?? null,
@@ -280,6 +236,8 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: () => '/api/dynamic-variables/resolve',
     body: (a) => ({
       names: a.names,
+      // `projectId` 不传就是跨项目取值。
+      projectId: a.projectId || null,
       force: a.force ?? false,
     }),
   },
@@ -321,13 +279,33 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.responseHistoryAppend]: {
     method: 'POST',
     path: () => '/api/response-history',
-    // 显式投影而非默认的 `body = args`：下面两半就是全部线上契约，调用方多带的
-    // 键不能跟着上车。
-    body: (a) => ({ endpointId: a.endpointId, response: a.response }),
+    // 显式投影而非默认的 `body = args`：下面三半就是全部线上契约，调用方多带的
+    // 键不能跟着上车。`request` 是那次发送出去的请求，缺席时省略。
+    body: (a) => ({
+      endpointId: a.endpointId,
+      response: a.response,
+      ...(a.request ? { request: a.request } : {}),
+    }),
   },
   [COMMANDS.responseHistoryClear]: {
     method: 'DELETE',
     path: (a) => `/api/response-history/${encodeURIComponent(String(a.endpointId))}`,
+  },
+  // 字面量路径：与上面那条 `{endpointId}` 路由在 radix tree 的同一层，故不能带参数段。
+  [COMMANDS.responseHistorySetFavorite]: {
+    method: 'PUT',
+    path: () => '/api/response-history/favorite',
+    body: (a) => ({ id: a.id, favorite: a.favorite }),
+  },
+  // 保留条数是全局设置，不属于任何接口，故路径里没有 id。
+  [COMMANDS.responseHistoryKeepGet]: {
+    method: 'GET',
+    path: () => '/api/response-history/keep',
+  },
+  [COMMANDS.responseHistoryKeepSet]: {
+    method: 'PUT',
+    path: () => '/api/response-history/keep',
+    body: (a) => ({ keep: a.keep }),
   },
 
   // ----- agent permissions -----

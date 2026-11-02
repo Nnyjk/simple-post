@@ -28,7 +28,7 @@ pub(super) use simple_post_core::spec::input::{AUTH_TYPE_VALUES, BODY_MODE_VALUE
 /// OAuth2 载荷的 JSON Schema。两处用它（`endpoint_update` 的 `auth.oauth2` 与
 /// `spec_upsert` 的 `endpoint.auth.oauth2`），故 AI 客户端在两条路上看到同一份形状。
 ///
-/// `additionalProperties: false` 是承重的：`endpoint_update` 的 `auth` 上有它，
+/// `additionalProperties: false` 不能去掉：`endpoint_update` 的 `auth` 上有它，
 /// 而 agent 是这里最主要的外部写路径。漏登记一个字段不是「宽松一点」，而是那个字段
 /// **根本传不进来**——一个仍然看着正确注册的工具却永远收不到配置。
 ///

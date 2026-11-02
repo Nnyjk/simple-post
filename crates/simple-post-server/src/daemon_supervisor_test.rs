@@ -11,7 +11,7 @@
 //! 需要真实进程的（spawn 路径、有界 teardown 等待）按设计不在此列，宁可不测也不伪造。
 
 use super::*;
-// 这三个纯函数随职责拆进了子模块；测试的断言与拆分前逐字相同，只是改从那里取。
+// 这三个纯函数住在子模块里，本文件从那里取。
 use super::probe::start_is_noop;
 use super::reap::teardown_targets;
 use super::watcher::watcher_owns_state;
@@ -180,7 +180,7 @@ fn the_shared_spawn_path_stays_free_of_tauri() {
         .expect("ensure_started_with must exist in daemon_supervisor.rs");
 
     // 按名字找 `AppHandle`，再加上会把窗口运行时一并拖进来的那些 Tauri trait / 路径。
-    // 类型别名或完全限定的 `tauri::AppHandle` 由第二项检查兜住。
+    // 类型别名或完全限定的 `tauri::AppHandle` 由第二项检查（`tauri::`）覆盖。
     for forbidden in ["AppHandle", "tauri::", "Emitter", "EmitterExt"] {
         assert!(
             !body.contains(forbidden),

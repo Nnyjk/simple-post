@@ -1,24 +1,26 @@
 import { Play, Save, Copy, Check } from 'lucide-react';
-import type { KeyboardEvent, RefObject } from 'react';
+import type { RefObject } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { MethodPicker } from '@/components/ui/method-picker';
 import { Tooltip } from '@/components/ui/tooltip';
 import { BaseUrlPicker, type BaseUrlSelection } from './BaseUrlPicker';
+import { VarHintInput, type VarEntry } from './var-hint';
 import { cn, methodColorVar } from '@/lib/utils';
-import type { BaseUrlDefinition, HttpMethod } from '@/types/domain';
+import type { HttpMethod } from '@/types/domain';
 
 /**
- * 请求栏：方法、baseUrl 选择器、URL 输入框，以及发送 / 复制 cURL / 保存三个动作。
+ * 请求栏：方法、地址来源选择器、URL 输入框，以及发送 / 复制 cURL / 保存三个动作。
  *
  * 它渲染**当前有效**的请求（草稿叠已存的 detail）；编辑经回调回写草稿。请求本身的
  * 组装不在这里——它要与发送和 cURL 预览共用同一个对象，故留在 `HttpTester`。
+ *
+ * URL 输入框带变量候选提示：用户敲 `{{` 时浮出环境变量与动态变量，选中即插入
+ * `{{key}}`（见 `var-hint`）。
  */
 export function RequestUrlBar({
   method,
-  definitions,
-  defaultDefinitionId,
   resolvedBaseUrl,
+  moduleBaseUrl,
   selection,
   isCustomUrl,
   liveUrl,
@@ -30,18 +32,19 @@ export function RequestUrlBar({
   curlFlash,
   dirty,
   isDraft,
+  varEntries,
+  envName,
   onMethodChange,
   onSelectionChange,
   onUrlChange,
-  onUrlKeyDown,
   onSend,
   onSave,
   onCopyCurl,
 }: {
   method: HttpMethod;
-  definitions: BaseUrlDefinition[];
-  defaultDefinitionId: string | null;
   resolvedBaseUrl: string;
+  /** 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。 */
+  moduleBaseUrl: string | null;
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
   liveUrl: string;
@@ -53,10 +56,13 @@ export function RequestUrlBar({
   curlFlash: boolean;
   dirty: boolean;
   isDraft: boolean;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
+  varEntries: VarEntry[];
+  /** 当前环境名，显示在候选浮层的标题上。 */
+  envName?: string;
   onMethodChange: (m: HttpMethod) => void;
   onSelectionChange: (next: BaseUrlSelection) => void;
   onUrlChange: (next: string) => void;
-  onUrlKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
   onSend: () => void;
   onSave: () => void;
   onCopyCurl: () => void;
@@ -65,20 +71,18 @@ export function RequestUrlBar({
     <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 py-2.5">
       <MethodPicker value={method} onChange={onMethodChange} className="border-0" />
       <BaseUrlPicker
-        // 项目的完整服务列表 —— 服务属于项目级，故每一个都是这里真实可选项。按服务不同的
-        // 是读 URL 的**单元格**，不是可选性。
-        definitions={definitions}
-        defaultDefinitionId={defaultDefinitionId}
         resolvedBaseUrl={resolvedBaseUrl}
+        moduleBaseUrl={moduleBaseUrl}
         selection={selection}
         onSelectionChange={onSelectionChange}
       />
       <div className="relative flex min-w-0 flex-1 items-center">
-        <Input
-          ref={urlInputRef}
+        <VarHintInput
+          inputRef={urlInputRef}
           value={liveUrl}
-          onChange={(e) => onUrlChange(e.target.value)}
-          onKeyDown={onUrlKeyDown}
+          onChange={onUrlChange}
+          entries={varEntries}
+          envName={envName}
           // 自定义 让本框承载完整地址，故须明示：placeholder 换成完整 URL、ring 标出
           // 模式 —— 选择器位于用户实际聚焦的框左侧，光靠它的标签不够。
           className={cn(
@@ -88,7 +92,7 @@ export function RequestUrlBar({
           placeholder={isCustomUrl || !resolvedBaseUrl ? 'https://api.example.com/path' : '/path'}
           title={
             isCustomUrl
-              ? '自定义：直接使用这里填写的完整地址，不再拼接 baseUrl 前缀'
+              ? '自定义：直接使用这里填写的完整地址，不再拼接模块地址'
               : resolvedBaseUrl || undefined
           }
           data-testid="url-input"

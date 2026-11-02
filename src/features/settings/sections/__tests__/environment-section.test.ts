@@ -24,17 +24,16 @@ import { EnvBody } from '../rows/EnvBody';
 import { EnvSwitcher } from '../rows/EnvSwitcher';
 import type { Environment } from '@/types/domain';
 
-/** 最小环境 —— 该分区只读 id / name / isActive 以及那几个 map。 */
+/** 最小环境 —— 该分区只读 id / name / createdAt 以及那几个 map。 */
 function makeEnv(overrides: Partial<Environment> = {}): Environment {
   return {
     id: 'env-1',
     projectId: 'proj-1',
     name: 'dev',
-    baseUrls: {},
     moduleBaseUrls: {},
     variables: {},
     disabledVariables: [],
-    isActive: true,
+    createdAt: 1,
     ...overrides,
   };
 }
@@ -51,12 +50,6 @@ function makeProps(overrides: Partial<EnvironmentSectionProps> = {}): Environmen
     addEnvironment: async () => 'env-new',
     deleteEnvironment: () => {},
     updateEnvironment: () => {},
-    baseUrlDefinitions: [],
-    defaultBaseUrlDefinitionId: null,
-    addBaseUrlDefinition: () => 'def-1',
-    updateBaseUrlDefinition: () => {},
-    deleteBaseUrlDefinition: () => {},
-    setDefaultBaseUrlDefinition: () => {},
     ...overrides,
   };
 }
@@ -107,7 +100,7 @@ describe('EnvironmentSection cold start (zero environments)', () => {
 describe('EnvironmentSection with a single environment', () => {
   // 容易回归的情形：新项目的第一个环境，故环境条必须能承受离开那个条件渲染。
   //
-  // 注意这里断言不了什么：环境*正文*。该分区在一个 `useEffect` 里解析激活环境，而静态
+  // 注意这里断言不了什么：环境*正文*。该分区在一个 `useEffect` 里解析默认环境，而静态
   // 标记不跑 effect，故此刻 `activeId` 仍是 `null`。这正是重命名入口改在下面经
   // `EnvSwitcher` 检查的原因。
   const html = render(makeProps({ environments: [makeEnv()] }));
@@ -151,7 +144,8 @@ describe('EnvSwitcher — the env name lives here, and so does its rename', () =
   });
 
   it('keeps the chip a tab for assistive tech after the swap away from <button>', () => {
-    // 名称单元格本身是个按钮，故 chip 不能再是按钮。这几条正是原先那个元素免费提供的语义。
+    // 名称单元格本身是个按钮，故 chip 不能再是按钮。这三条断言的是 chip 替 `<button>`
+    // 补齐的语义：角色、可选中状态与可聚焦。
     assert.match(renameable, /role="tab"/);
     assert.match(renameable, /aria-selected="true"/);
     assert.match(renameable, /tabindex="0"/);
@@ -170,31 +164,29 @@ describe('EnvBody — no name row of its own', () => {
   const html = renderToStaticMarkup(
     createElement(EnvBody, {
       env: makeEnv(),
-      projectId: p.projectId,
       modules: p.modules,
       setEnvironmentVar: p.setEnvironmentVar,
       setEnvironmentVarDisabled: p.setEnvironmentVarDisabled,
       renameEnvironmentVar: p.renameEnvironmentVar,
       setEnvironmentModuleBaseUrl: p.setEnvironmentModuleBaseUrl,
       onAddVar: () => {},
-      baseUrlDefinitions: p.baseUrlDefinitions,
-      defaultBaseUrlDefinitionId: p.defaultBaseUrlDefinitionId,
-      addBaseUrlDefinition: p.addBaseUrlDefinition,
-      updateBaseUrlDefinition: p.updateBaseUrlDefinition,
-      setDefaultBaseUrlDefinition: p.setDefaultBaseUrlDefinition,
-      onDeleteBaseUrl: () => {},
     }),
   );
 
   it('never spells the env name, which the switcher directly above already says', () => {
-    // 正文曾以自己的一行图标 + 名字开头，于是激活环境在几厘米内被叫了两次；而模块层
+    // 正文曾以自己的一行图标 + 名字开头，于是默认环境在几厘米内被叫了两次；而模块层
     // 从来没有那一行，反倒只有它是唯一读起来像一回事的视图。
     assert.doesNotMatch(html, />dev</);
   });
 
   it('still renders the groups that belong to the env', () => {
-    assert.match(html, /前置 URL/);
+    assert.match(html, /模块地址/);
     assert.match(html, /环境变量/);
+  });
+
+  it('never spells the word 服务 in this area', () => {
+    // 「服务」这一层已经不存在：地址住在 (环境 × 模块) 那一格。
+    assert.doesNotMatch(html, /服务/);
   });
 });
 
@@ -203,8 +195,8 @@ describe('EnvironmentSection with several environments', () => {
     makeProps({
       environments: [
         makeEnv(),
-        makeEnv({ id: 'env-2', name: 'prod', isActive: false }),
-        makeEnv({ id: 'env-3', name: 'staging', isActive: false }),
+        makeEnv({ id: 'env-2', name: 'prod', createdAt: 2 }),
+        makeEnv({ id: 'env-3', name: 'staging', createdAt: 3 }),
       ],
     }),
   );

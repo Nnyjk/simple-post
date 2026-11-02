@@ -65,7 +65,7 @@ impl LogBuffer {
         inner.capturing = true;
     }
 
-    /// 本监管者不再持有这个 daemon 的 stderr 管道（复用一个外部启动的 daemon）。
+    /// 本监管者不持有这个 daemon 的 stderr 管道（复用一个外部启动的 daemon）。
     ///
     /// 那种情况下缓冲永远是空的，用户看到的应该是「无日志捕获」而不是「没有日志」。
     pub(super) fn stop_capture(&self) {

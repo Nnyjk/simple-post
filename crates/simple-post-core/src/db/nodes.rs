@@ -5,7 +5,7 @@
 //!
 //! ## 合并丢了什么，由什么接管
 //!
-//! 三表布局靠外键（如 `endpoints.collection_id REFERENCES collections(id)`）免费得到
+//! 三表布局靠外键（如 `endpoints.collection_id REFERENCES collections(id)`）直接实现
 //! 「父永远接受它的列能指名的那些类型」。单一多态 `parent_id` 做不到：SQLite 的 CHECK
 //! 约束读不到别的行。
 //!
@@ -27,8 +27,8 @@ mod write;
 
 // 公开接口：定义在按职责分开的子模块里，这里重新导出，故 `nodes::create` 等旧路径不变。
 pub use read::{
-    get, list_all, list_by_root, list_by_root_and_type, list_children, module_id_of, root_id_of,
-    search, search_paths, subtree_ids, type_of, SearchHit,
+    get, list_all, list_by_root, list_by_root_and_type, list_children, module_id_of,
+    ordered_subtree_endpoints, root_id_of, search, search_paths, subtree_ids, type_of, SearchHit,
 };
 pub use tree::{move_many, move_to_root};
 pub use write::{create, delete, duplicate, reparent, update};

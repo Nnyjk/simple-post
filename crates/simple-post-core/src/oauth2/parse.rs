@@ -28,7 +28,7 @@ pub(super) fn error_response(status: u16, body: &str, content_type: &str) -> App
 /// IdP 会从「能取到 token」变成一句解析错误：
 ///
 /// - `token_type` 在 crate 里是**必填**，但 §5.1 之外仍有 IdP 不回；缺时补
-///   `Bearer`（与本项目原先的默认一致）。
+///   `Bearer`（与本项目默认的 `token_type` 一致）。
 /// - `expires_in` 在 crate 里是 `Option<u64>`，即必须是 JSON **数字**；而
 ///   form-urlencoded 的应答给不了类型，统一转成字符串后得再按数字转回来。
 ///

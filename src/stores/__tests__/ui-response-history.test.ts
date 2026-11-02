@@ -125,6 +125,9 @@ describe('addResponseHistory 的落盘与乐观行', () => {
     assert.deepEqual(calls[0].args, {
       endpointId: REAL_ID,
       response: makeResponse(),
+      // 没有请求快照时显式传 null：两侧的 `Option<StoredRequestSnapshot>` 都把
+      // 「键缺席」与「键为 null」读成同一件事，字段摆在那里比缺席更好核对。
+      request: null,
     });
     // 两者仍在本地累积——那是历史条渲染的东西。
     assert.equal(useAppStore.getState().responseHistory[REAL_ID]?.length, 1);
@@ -258,7 +261,7 @@ describe('loadResponseHistory 按接口加载', () => {
     assert.equal(rows.at(-1)?.response.status, 201, '新发的那一条在最后');
   });
 
-  it('首次打开：读取晚于发送落地时，乐观行不能被吃掉', async () => {
+  it('首次打开：读取晚于发送完成时，乐观行不能被吃掉', async () => {
     let releaseList: () => void = () => undefined;
     let releaseAppend: () => void = () => undefined;
     const listGateP = new Promise<void>((resolve) => {

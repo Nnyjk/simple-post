@@ -68,18 +68,35 @@ export type TabKind =
 
 /**
  * 只存在于内存的东西所用的 id 前缀。真实节点 id 是裸 `uid()`，所以 `draft:`
- * 不可能与它相撞——草稿标签、草稿 endpoint 与真实 endpoint 因此能共用同一个
+ * 不可能与它重名——草稿标签、草稿 endpoint 与真实 endpoint 因此能共用同一个
  * `openTabs` 数组，而不必靠「猜」来判断持有的是哪一种。
  */
 export const DRAFT_ID_PREFIX = 'draft:';
 
 /**
- * 动态变量标签的 id。
+ * 动态变量标签的 id 前缀。
  *
- * 动态变量是**全局**的：一条定义不属于任何项目，任何项目的端点都能引用它。故这个
- * 页面是单例，像设置那样属于用户而不属于项目——标签 id 用固定值。
+ * 动态变量挂在**项目**里，故这个标签是**项目内**的标签页：每个项目有自己的一条，
+ * 切项目时它跟着那条项目的标签条一起暂存与取回。标签 id 里带上项目 id，
+ * 于是「这条标签属于哪个项目」不用另找一张表去问。
  */
-export const DYNAMIC_TAB_ID = '__dynamic_variables__';
+export const DYNAMIC_TAB_ID_PREFIX = '__dynamic_variables__:';
+
+/**
+ * 某个项目的动态变量标签 id。
+ *
+ * 前缀保证它与真实节点 id（裸 `uid()`）不会重名——标签 id 直接当 `openTabs` 的键用。
+ */
+export function dynamicTabId(projectId: string): string {
+  return `${DYNAMIC_TAB_ID_PREFIX}${projectId}`;
+}
+
+/**
+ * 从动态变量标签 id 里取回项目 id。id 不是这个形状时返回空串。
+ */
+export function dynamicTabProjectId(tabId: string): string {
+  return tabId.startsWith(DYNAMIC_TAB_ID_PREFIX) ? tabId.slice(DYNAMIC_TAB_ID_PREFIX.length) : '';
+}
 
 /**
  * 只存在于渲染侧的 endpoint。
@@ -114,8 +131,6 @@ export interface DraftEndpoint {
   /** 不含任何 baseUrl 的 URL 路径，含义同 `EndpointDetail.url`。 */
   url: string;
   auth: AuthConfig;
-  environmentId: string | null;
-  baseUrlDefinitionId: string | null;
   baseUrlOverride: string | null;
   tags: string[];
   docs: string;
@@ -179,8 +194,8 @@ export interface ProjectTabSet {
  * 所以整个标签遵循同一条规则：**编辑存在草稿里，Save 才落盘，在此之前标签一直是
  * 脏的。**
  *
- * 刻意**不**包含 `baseUrlDefinitionId` / `baseUrlOverride`：它们是连接配置，点中
- * 选择器那一行的瞬间就提交了——始终是那种「没有 Save 按钮」的行为。
+ * 刻意**不**包含 `baseUrlOverride`：它是连接配置，点中选择器那一行的瞬间就提交
+ * 了——始终是那种「没有 Save 按钮」的行为。
  */
 export interface EndpointDraft {
   url?: string;

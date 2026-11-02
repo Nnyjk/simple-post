@@ -156,7 +156,15 @@ interface RustHttpOk {
   durationMs: number;
   sizeBytes: number;
   headers: Array<[string, string]>;
+  /**
+   * 线上那一份请求头。由 Rust 的 executor 在请求发出后报上来，故含传输层补的几条。
+   */
+  requestHeaders?: Array<[string, string]>;
   body: string;
+  /**
+   * 响应体的**字节**（base64）。响应不是文本时才有它，文本响应走 `body`。
+   */
+  bodyBase64?: string;
   contentType: string;
   method: string;
   url: string;
@@ -220,7 +228,13 @@ function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string)
     durationMs: resp.durationMs,
     sizeBytes: resp.sizeBytes,
     headers: tuplesToRecord(resp.headers),
+    // 线上那一份请求头：含传输层补的 `accept` / `host` / `content-length` 等，
+    // 响应详情页要展示的就是它。旧后端没有这个字段时缺席，界面据此回落到本地那份。
+    ...(resp.requestHeaders ? { requestHeaders: resp.requestHeaders } : {}),
     body: resp.body,
+    // 二进制响应（图片、压缩包、PDF…）的字节走这一条通道：`body` 里那份是宽松解码后的
+    // 结果，非法字节已被替换成 U+FFFD，原始字节不可恢复。
+    ...(resp.bodyBase64 ? { bodyBase64: resp.bodyBase64 } : {}),
     bodyJson: tryParseJson(resp.body),
     contentType: resp.contentType,
     method: input.method,
@@ -278,6 +292,8 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
   // | `Record`。统一归一成元组列表——Rust 反序列化 `Vec<(String, String)>`，
   // web 桥对元组列表原样 JSON 编码，这是两侧唯一都能用的形状
   const headers = initHeadersToTuples(built.init.headers ?? {});
+  // body 有两种形态：文本直接给字符串；二进制给 base64。后端的 `HttpRequestInput`
+  // 两个字段都收，`body_base64` 优先——它才是能被还原成文件的那份。
   const body =
     typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
@@ -288,6 +304,7 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
       url: built.url,
       headers,
       body,
+      bodyBase64: built.bodyBase64,
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
@@ -354,6 +371,18 @@ export interface SendPreparedInput {
 export interface SendPreparedResult {
   response: ApiResponse;
   script: ScriptOutcome | null;
+  /**
+   * 真正发出去的那一份请求。
+   *
+   * 它与 `input.request` 的差别只有 OAuth2 注入的 token：预览刻意不含 token（那会让
+   * cURL 预览把一个活凭据渲染进可复制的命令行），而线上发出去的那一份含它。
+   * 响应区左侧画的是这一份，故它必须是「发出去的那份」而不是「预览的那份」。
+   *
+   * 它的 header 是**界面上拼出来的那几条**；传输层补上的那几条（`accept` /
+   * `accept-encoding` / `host` / `content-length`）在 `response.requestHeaders` 里，
+   * 那边才是线上那一份。
+   */
+  outbound: PreparedRequest;
 }
 
 /**
@@ -396,7 +425,7 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
 
   // 真正发出去的那一份：`request` 是 cURL 预览共享的 `useMemo` 产物，注入只改副本。
   //
-  // 不传 `force`：发请求走后端按需刷新（命中缓存就复用，过期才换），只有 UI 的
+  // 这里不传 `force`：发请求走后端按需刷新（命中缓存就复用，过期才换），只有 UI 的
   // 「获取 Token」按钮才强制重取。
   let outbound = request;
   const auth = input.auth;
@@ -409,20 +438,30 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
       const msg = (err as Error)?.message ?? String(err);
       // 中止仍是中止：取 token 这一步被取消不该弹成 OAuth2 错误。
       if (name === 'AbortError' || /abort/i.test(msg)) {
-        return { response: abortedResponse(shape, request.url, 0), script: null };
+        return {
+          response: abortedResponse(shape, request.url, 0),
+          script: null,
+          outbound: request,
+        };
       }
       console.error('[http.ts] oauth2 token fetch failed:', err);
-      return { response: oauth2ErrorResponse(shape, request.url, msg), script: null };
+      return {
+        response: oauth2ErrorResponse(shape, request.url, msg),
+        script: null,
+        outbound: request,
+      };
     }
   }
 
-  return invokeAndMap(
+  const { response, script } = await invokeAndMap(
     {
       method: outbound.method,
       url: outbound.url,
       // `outbound.headers` 已是 `[name, value][]`，原样传
       headers: outbound.headers,
       body: outbound.body,
+      // 二进制请求体（`binary` 模式，或带文件分片的 multipart）走这一条通道。
+      bodyBase64: outbound.bodyBase64,
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
@@ -442,4 +481,5 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
     request.url,
     options,
   );
+  return { response, script, outbound };
 }

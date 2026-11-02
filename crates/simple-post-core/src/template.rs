@@ -61,7 +61,7 @@ fn template_replace<F: FnMut(&str) -> String>(template: &str, mut repl: F) -> St
     let mut i = 0;
     while i < bytes.len() {
         if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
-            // 找配对的 `}}`。
+            // find_close 找配对的 `}}`。
             if let Some(end_rel) = find_close(template, i + 2) {
                 let inner = &template[i + 2..i + 2 + end_rel];
                 // 标记内容必须是裸标识符（`\w+`），与渲染进程的正则一致。其它形状
@@ -75,7 +75,7 @@ fn template_replace<F: FnMut(&str) -> String>(template: &str, mut repl: F) -> St
                 continue;
             }
         }
-        // 按 UTF-8 字符（不是字节）推进，避免切在 rune 中间。
+        // next_char_boundary 按 UTF-8 字符（不是字节）推进，避免切在 rune 中间。
         let ch_end = next_char_boundary(template, i);
         out.push_str(&template[i..ch_end]);
         i = ch_end;
@@ -84,7 +84,7 @@ fn template_replace<F: FnMut(&str) -> String>(template: &str, mut repl: F) -> St
 }
 
 fn find_close(s: &str, from: usize) -> Option<usize> {
-    // 从 `from` 开始在字符边界上找 `}}`。
+    // find_close 从 `from` 开始在字符边界上找 `}}`。
     let mut i = from;
     while i + 1 < s.len() {
         if s.as_bytes()[i] == b'}' && s.as_bytes()[i + 1] == b'}' {

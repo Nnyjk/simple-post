@@ -12,14 +12,14 @@ export function useTreeSelection() {
   const toggleNodeExpanded = useAppStore((s) => s.toggleNodeExpanded);
 
   // ---------- click handlers (open tab + activate) ----------
-  // 这里没有 `openProjectTab`：项目不是这棵树里的一行，故树内没有任何可点击进入项目的
-  // 元素。进入项目是 store 里的 `openProject`，由欢迎页选择器、顶栏选择器、命令面板与
-  // 面包屑调用。
+  // `useTreeSelection` 里没有 `openProjectTab`：项目不是这棵树里的一行，故树内没有任何
+  // 可点击进入项目的元素。进入项目是 store 里的 `openProject`，由欢迎页选择器、顶栏选择器、
+  // 命令面板与面包屑调用。
   const openModuleTab = (id: string) => {
     openTab('module', id);
-    // 每次点击都切换该行的展开状态。只做展开（已展开时跳过）时，点一个已展开的模块会同时
-    // 在树上把它折叠掉，而用户无从判断为什么「收缩」从行点击上不起作用。无条件切换让这一
-    // 行的行为与其他树控件一致。
+    // `openModuleTab` 每次点击都切换该行的展开状态。只做展开（已展开时跳过）时，点一个已
+    // 展开的模块会同时在树上把它折叠掉，而用户无从判断为什么「收缩」从行点击上不起作用。
+    // 无条件切换让这一行的行为与其他树控件一致。
     toggleNodeExpanded(id);
   };
   const openCollectionTab = (id: string) => {

@@ -1,8 +1,8 @@
 //! `api_run_request` 的端到端断言：临时请求也走端点那套解析规则。
 //!
-//! 这条工具此前既没有测试，也没有实现 `params` / `auth` —— 工具描述承诺了它们，
-//! 实现却只读了 `headers` 与 `body`。本文件用真实 socket 钉住它现在发出去的
-//! 是什么：变量替换、base URL 前置、查询参数与鉴权头。
+//! 这条工具要实现工具描述承诺的 `params` / `auth`，而不是只读 `headers` 与 `body`。
+//! 本文件用真实 socket 钉住它现在发出去的是什么：变量替换、base URL 前置、
+//! 查询参数与鉴权头。
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -11,7 +11,7 @@ use serde_json::json;
 
 use super::tool_api_run_request;
 use crate::mcp::AppState;
-use simple_post_core::domain::{BaseUrlDefinition, Environment, Project, ResourceNodeType};
+use simple_post_core::domain::{Environment, ModuleBaseUrl, Project, ResourceNodeType};
 
 /// 回固定 200，把收到的原始请求记下来。
 async fn stub() -> (String, Arc<Mutex<Vec<String>>>) {
@@ -57,8 +57,8 @@ fn mcp_state(tag: &str) -> Arc<AppState> {
     })
 }
 
-/// 种一个项目（含一个服务）、一个模块与一个环境，环境的 (服务 × 模块) 格子填了
-/// `base_url`（测试里是本地 stub 的地址，故请求不会跑到外网去）。
+/// 种一个项目、一个模块与一个环境，环境的 (环境 × 模块) 格子填了 `base_url`
+/// （测试里是本地 stub 的地址，故请求不会跑到外网去）。
 /// 返回 (project_id, env_id, module_id)。
 fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
     use simple_post_core::db::{environments, nodes, projects};
@@ -68,13 +68,6 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
         id: "p_run".into(),
         name: "P".into(),
         description: None,
-        base_url: None,
-        base_url_definitions: vec![BaseUrlDefinition {
-            id: "svc".into(),
-            name: "api".into(),
-            description: None,
-        }],
-        default_base_url_definition_id: Some("svc".into()),
         color: String::new(),
         created_at: 0,
         updated_at: 0,
@@ -94,12 +87,12 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
         id: "env_run".into(),
         project_id: "p_run".into(),
         name: "dev".into(),
-        base_urls: Default::default(),
         module_base_urls: [(
-            "svc".to_string(),
-            [("m_run".to_string(), base_url.to_string())]
-                .into_iter()
-                .collect(),
+            "m_run".to_string(),
+            ModuleBaseUrl {
+                url: base_url.to_string(),
+                proxy: None,
+            },
         )]
         .into_iter()
         .collect(),
@@ -107,12 +100,10 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
             .into_iter()
             .collect(),
         disabled_variables: vec![],
-        is_active: true,
+        created_at: 0,
     };
     simple_post_core::db::with_tx(&st.pool, |c| {
         projects::create(c, &project)?;
-        // 服务定义住在自己的表里，不随项目行一起写。
-        simple_post_core::db::base_url_defs::create(c, &project.base_url_definitions[0], "p_run")?;
         nodes::create(c, &module, None)?;
         environments::create(c, &env)?;
         Ok(())
@@ -134,7 +125,6 @@ async fn a_run_request_gets_the_same_treatment_as_a_stored_endpoint() {
             "method": "GET",
             "url": "/users/{{token}}",
             "env_id": env_id,
-            "base_url_definition_id": "svc",
             "module_id": module_id,
             "params": [{ "key": "page", "value": "1" }],
             "headers": [{ "key": "X-Trace", "value": "t1" }],
@@ -187,6 +177,43 @@ async fn a_stale_environment_id_degrades_instead_of_failing_the_call() {
     assert!(outcome.is_ok(), "环境已被删不该让整次调用失败：{outcome:?}");
 }
 
+/// 临时请求不点名环境，就**没有环境**——没有默认环境可回落。
+///
+/// 与 `api_call_endpoint` 的差别就在这里：后者的项目归属来自端点所属的项目，
+/// 故省略 `environment_id` 时还能回落到那个项目的默认环境；临时请求没有端点行
+/// 可读，项目归属只能由环境 id 反查，故省略 `env_id` 时连项目都没有 —— 既没有
+/// base URL 那一格可读，变量也不替换。
+#[tokio::test]
+async fn a_run_request_without_an_environment_has_no_variables_substituted() {
+    let (api, seen) = stub().await;
+    let st = mcp_state("no-env");
+    let (_, _env_id, module_id) = seed(&st, &api);
+
+    tool_api_run_request(
+        &st,
+        json!({
+            "method": "GET",
+            // 带上完整地址：不点名环境就没有 base URL 可前置，故这里自带地址。
+            "url": format!("{api}/users/{{{{token}}}}"),
+            "module_id": module_id,
+        }),
+    )
+    .await
+    .expect("call");
+
+    let wire = seen.lock().unwrap()[0].clone();
+    // 变量没有被替换：`token` 的值是 `abc`，URL 里不该出现它。
+    assert!(
+        !wire.contains("/users/abc"),
+        "没有环境就没有变量可替换，URL 里不该出现变量的值：{wire}"
+    );
+    // 花括号按 URL 的规矩被编码成 `%7B` / `%7D`，但它仍是那个没被替换的标记。
+    assert!(
+        wire.contains("GET /users/%7B%7Btoken%7D%7D HTTP/1.1"),
+        "没有环境就没有变量可替换，`{{{{token}}}}` 必须原样发出去：{wire}"
+    );
+}
+
 /// 解析不到的变量要报进结果，调用方才知道 URL 里留着 `{{...}}`。
 #[tokio::test]
 async fn a_run_request_reports_the_variables_it_could_not_resolve() {
@@ -200,7 +227,6 @@ async fn a_run_request_reports_the_variables_it_could_not_resolve() {
             "method": "GET",
             "url": "/x",
             "env_id": env_id,
-            "base_url_definition_id": "svc",
             "module_id": module_id,
             "params": [{ "key": "q", "value": "{{nothing}}" }],
         }),

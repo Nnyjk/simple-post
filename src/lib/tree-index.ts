@@ -48,10 +48,9 @@ export function indexByParent(
  * 项目不变），此处代价也低：遍历长度受集合嵌套深度约束，而 `nodes` 已在内存。
  *
  * 之所以需要它：baseUrl 的**值**是按模块的——endpoint 通过
- * `env.moduleBaseUrls[defId][moduleId]` 解析自己的服务（见 `lib/url.ts` 的
+ * `env.moduleBaseUrls[moduleId]` 解析自己的地址（见 `lib/url.ts` 的
  * `resolveEndpointBaseUrl`），解析层得先知道它属于哪个模块才能读那个格子。
- * 服务**列表**是项目级的，无需收窄——正是这个不对称让本函数在服务不再属于模块
- * 之后仍然存在。
+ * 那个格子是 (环境 × 模块) 独有的，故没有模块就没有格子可读。
  *
  * 收全量节点列表并自己做索引，调用方可以直接传 `store.nodes`；它**没有**做
  * memo：请放进 `useMemo`，不要当 Zustand selector 用（返回的字符串在
@@ -80,7 +79,7 @@ export function moduleIdOfEndpoint(
   for (const n of nodes) byId.set(n.id, n);
 
   // `kind` 是节点自身的类型；endpoint 可以直接挂在 module 下（无集合），
-  // 所以两种形态都在这里终止
+  // 所以这两种形态都由这个循环终止
   let cur = byId.get(endpointId) ?? (self?.id === endpointId ? self : undefined);
   let guard = 0;
   while (cur && guard++ < 64) {
@@ -88,7 +87,7 @@ export function moduleIdOfEndpoint(
     if (!cur.parentId) return null;
     cur = byId.get(cur.parentId);
   }
-  // 成环不可能——schema 的父子矩阵与移动守卫都禁止它——但一次有界遍历静默
+  // 成环不可能——schema 的父子矩阵与移动守卫都禁止它——但这个有界遍历静默
   // 返回 `null`，好过一次无界遍历把发送路径挂死
   return null;
 }

@@ -17,8 +17,8 @@ use super::router::{build_mcp_only_router, build_router, WebState};
 /// 绑定 TCP listener 并服务到 SIGINT/SIGTERM。
 ///
 /// `data_dir` 供 daemon supervisor 定位 SQLite 文件，必须与桌面端
-/// `dirs::data_dir().join("com.simple-post")` 的约定一致，两种形态才共用同一
-/// 数据库。
+/// `port_registry::data_dir()` 的解析结果一致（`SIMPLE_POST_DATA_DIR`，未设时是
+/// `dirs::data_dir()`），两种形态才共用同一数据库。
 ///
 /// `auto_start_daemon` 为 `Some(bool)` 时 CLI 已给定答案，`None` 时由持久化的
 /// `mcp.auto_start` 行决定。在这里解析而非在 `main.rs`：那边会另开一个

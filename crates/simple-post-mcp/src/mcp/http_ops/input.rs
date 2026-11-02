@@ -175,8 +175,10 @@ pub(super) fn parse_body_mode(v: Option<&str>, has_body: bool) -> Result<BodyMod
         "form" => Ok(BodyMode::Form),
         "raw" | "text" => Ok(BodyMode::Raw),
         "multipart" => Ok(BodyMode::Multipart),
+        "xml" => Ok(BodyMode::Xml),
+        "binary" => Ok(BodyMode::Binary),
         other => Err(AppError::Validation(format!(
-            "body_mode: unknown mode {other:?} (expected none|json|form|raw|multipart)"
+            "body_mode: unknown mode {other:?} (expected none|json|form|multipart|xml|raw|binary)"
         ))),
     }
 }

@@ -18,7 +18,7 @@ serde = { workspace = true }
 # 故 YAML 与 JSON 在解析器眼里是同一种东西，`$ref` 也因此只是 JSON Pointer 走查。
 serde_json = { workspace = true }
 # 维护中的 `serde_yaml` fork。上游 serde_yaml 0.9 已弃用，而依赖一个弃用 crate
-# 需要解释为什么还留着它——那个理由不成立。MSRV 1.71.1 ≤ workspace 的 1.77.2。
+# 需要解释为什么还留着它——那个理由不成立。MSRV 1.71.1 ≤ workspace 的 1.87。
 serde_norway = "0.9"
 
 [dev-dependencies]

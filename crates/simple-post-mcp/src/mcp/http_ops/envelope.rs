@@ -100,6 +100,7 @@ pub(super) fn http_response_to_api(resp: &HttpResponse, method: &str, url: &str)
         size_bytes: resp.size_bytes,
         headers: resp.headers.clone(),
         body: resp.body.clone(),
+        body_base64: resp.body_base64.clone(),
         body_json: None,
         content_type: resp.content_type.clone(),
         error: None,

@@ -18,7 +18,8 @@ pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
 
 /// 打开（或创建）`<data_dir>/store.db`，升到 [`SCHEMA_VERSION`]，返回连接池。
 ///
-/// `data_dir` 通常是 `dirs::data_dir().unwrap().join("com.simple-post")`，缺失即创建。
+/// `data_dir` 通常是 `dirs::data_dir()`（Windows 上即 `%APPDATA%`），设了
+/// `SIMPLE_POST_DATA_DIR` 时是那个目录，缺失即创建。
 ///
 /// 旧布局的文件是**替换而非升级**（见 [`ensure_current_schema`]）：本应用没有迁移路径，
 /// 故只记日志，不在每次启动时打扰用户。

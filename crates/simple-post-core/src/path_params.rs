@@ -189,7 +189,7 @@ pub fn substitute(url: &str, values: &[(String, String)]) -> (String, Vec<String
                 if seen.insert(name.clone(), ()).is_none() {
                     missing.push(name.clone());
                 }
-                // 取不到值就把占位符原样放回去，用户在 URL 预览里看得见缺哪个。
+                // 替换函数取不到值就把占位符原样放回去，用户在 URL 预览里看得见缺哪个。
                 out.push_str(&scope[*from..*to]);
             }
         }

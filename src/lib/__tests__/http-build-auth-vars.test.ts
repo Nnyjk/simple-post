@@ -84,8 +84,8 @@ describe('http-build: auth (Basic)', () => {
         } as AuthConfig,
       }),
     );
-    // 这里要验的是不抛异常，且解 btoa(...) 得到原始 UTF-8 字节——所以验往返而不钉死
-    // 某个 base64 字符串（它取决于编码器细节）。
+    // 这里要验的是不抛异常，且解 btoa(...) 得到原始 UTF-8 字节——所以验往返，不断言某个
+    // 具体的 base64 字符串（它取决于编码器细节）。
     const hdr = (init.headers as Record<string, string>)['Authorization'];
     assert.ok(hdr.startsWith('Basic '));
     const decoded = Buffer.from(hdr.slice('Basic '.length), 'base64').toString('utf-8');

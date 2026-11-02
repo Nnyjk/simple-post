@@ -67,6 +67,7 @@ async fn exchange(request: HttpRequest, tls: TlsSettings) -> Result<HttpResponse
             })
             .collect(),
         body: Some(body),
+        body_base64: None,
         timeout_ms: TOKEN_TIMEOUT_MS,
         // 这次请求带着 `client_secret` / 用户密码 / 授权码，跟随重定向等于把它们再寄给
         // 一个未校验的目标——`OutboundPolicy` 只挡私有网段，挡不住 302 到另一个公网主机。

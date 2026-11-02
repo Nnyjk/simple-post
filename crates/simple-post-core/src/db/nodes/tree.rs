@@ -140,7 +140,7 @@ pub fn move_many(
 /// 单独成函数而不是给 `move_many` 加参数，因为两者差别不止一个参数值：跨边界还要重编
 /// **旧**项目的顶层兄弟，否则那个项目的 `sort_order` 会留下空档。
 /// `target_index` 为 `None` 表示追加。**必须在 `db::with_tx` 内调用**——两个项目的排序必须
-/// 一起落地。
+/// 一起写入。
 pub fn move_to_root(
     conn: &mut Connection,
     id: &str,

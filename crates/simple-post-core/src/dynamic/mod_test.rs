@@ -13,9 +13,9 @@ use super::*;
 const INLINE_SOURCE: &str = r#"{"method":"GET","url":"http://127.0.0.1:9/points"}"#;
 use crate::db;
 use crate::domain::{
-    AuthConfig, AuthType, BaseUrlDefinition, DynamicCacheEntry, DynamicErrorKind,
-    DynamicValueSource, DynamicVariable, EndpointDetail, HttpMethod, KeyValue, Project,
-    RequestBody, ResourceNode, ResourceNodeType, ValueMode,
+    AuthConfig, AuthType, DynamicCacheEntry, DynamicErrorKind, DynamicValueSource, DynamicVariable,
+    EndpointDetail, HttpMethod, KeyValue, Project, RequestBody, ResourceNode, ResourceNodeType,
+    ValueMode,
 };
 
 // -------------------------------------------------------------------------
@@ -117,6 +117,7 @@ fn the_scan_covers_the_fields_that_actually_get_substituted() {
     };
     let parts = TemplateParts {
         base_url: "https://{{host}}",
+        proxy: None,
         url: "/{{pathVar}}",
         params: &params,
         path_params: &[],
@@ -149,6 +150,7 @@ fn a_disabled_parameter_is_not_referenced() {
     }];
     let parts = TemplateParts {
         base_url: "",
+        proxy: None,
         url: "/x",
         params: &params,
         path_params: &[],
@@ -166,14 +168,15 @@ fn a_disabled_parameter_is_not_referenced() {
 fn definition(ttl_seconds: i64, stale_fallback: bool) -> DynamicVariable {
     DynamicVariable {
         id: "d1".into(),
+        project_id: Some("p1".into()),
         name: "sns".into(),
         description: None,
         source_endpoint_id: None,
         source_endpoint_name: None,
         source_inline_json: Some(INLINE_SOURCE.to_string()),
         source_environment_id: None,
-        source_base_url_definition_id: None,
         extract_path: "$".into(),
+        transform_script: None,
         value_mode: ValueMode::Auto,
         ttl_seconds,
         stale_fallback,
@@ -410,6 +413,8 @@ impl SourceFetcher for CountingFetcher {
                 status: self.status,
                 content_type: "application/json".into(),
                 body: self.body.clone(),
+                headers: vec![],
+                duration_ms: 0,
             })
         })
     }
@@ -430,9 +435,6 @@ fn seeded_pool() -> (db::DbPool, std::path::PathBuf) {
                 id: "p1".into(),
                 name: "First".into(),
                 description: None,
-                default_base_url_definition_id: None,
-                base_url_definitions: vec![],
-                base_url: None,
                 color: "#000000".into(),
                 created_at: 1,
                 updated_at: 1,
@@ -455,7 +457,7 @@ async fn a_resolution_fetches_the_value_and_caches_it() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("[{\"code\":\"A001\"}]");
 
-    let first = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let first = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(
@@ -465,7 +467,7 @@ async fn a_resolution_fetches_the_value_and_caches_it() {
     assert_eq!(fetcher.calls(), 1);
 
     // 第二次命中缓存，不再取数。
-    let second = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let second = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(fetcher.calls(), 1);
@@ -481,10 +483,10 @@ async fn a_force_ignores_the_cache() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("[]");
 
-    resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
-    resolve_names(&ctx, &["sns".to_string()], true, &fetcher)
+    resolve_names(&ctx, Some("p1"), &["sns".to_string()], true, &fetcher)
         .await
         .expect("解析");
     assert_eq!(fetcher.calls(), 2);
@@ -496,7 +498,7 @@ async fn a_failing_fetch_leaves_the_name_missing_and_reports_the_reason() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::failing();
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert!(!out.values.contains_key("sns"));
@@ -511,7 +513,7 @@ async fn a_non_2xx_source_is_reported_as_a_status_error() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("{}").with_status(503);
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors.len(), 1);
@@ -524,7 +526,7 @@ async fn a_source_body_that_is_not_json_is_reported_as_not_json() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("not json");
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::NotJson);
@@ -551,10 +553,115 @@ async fn a_source_whose_path_matches_nothing_is_reported_as_no_match() {
     .expect("patch");
     def.name = "sns".into();
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::NoMatch);
+}
+
+// ---------------------------------------------------------------------------
+// 处理脚本
+// ---------------------------------------------------------------------------
+
+/// 给库里那条定义装上一段处理脚本。
+fn set_transform_script(pool: &db::DbPool, script: &str) {
+    db::with_tx(pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            crate::domain::DynamicVariablePatch {
+                transform_script: Some(Some(script.into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("patch");
+}
+
+#[tokio::test]
+async fn the_transform_script_rewrites_the_extracted_value() {
+    // 取数 → 抽取 → 脚本改写：脚本看到的是**抽取出来的那一份**，不是整段响应。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("[{\"code\":\"A001\"},{\"code\":\"B002\"}]");
+    db::with_tx(&pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            crate::domain::DynamicVariablePatch {
+                extract_path: Some("$[0].code".into()),
+                transform_script: Some(Some("return pm.data + \"-X\";".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("patch");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(
+        out.values.get("sns").map(String::as_str),
+        Some("A001-X"),
+        "脚本 return 的值就是最终值"
+    );
+}
+
+#[tokio::test]
+async fn the_transform_script_can_read_the_raw_response() {
+    // `pm.response` 是**整段**响应：抽取规则之外的字段也能拿到。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("{\"total\":7,\"items\":[1,2]}");
+    db::with_tx(&pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            crate::domain::DynamicVariablePatch {
+                extract_path: Some("$.items".into()),
+                transform_script: Some(Some("return pm.response.json().total;".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("patch");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(out.values.get("sns").map(String::as_str), Some("7"));
+}
+
+#[tokio::test]
+async fn a_transform_script_that_throws_leaves_the_name_missing() {
+    // 脚本失败按「取值失败」处理：名字缺失，原因是脚本错误，不是网络错误。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("{\"a\":1}");
+    set_transform_script(&pool, "throw new Error('炸了');");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert!(!out.values.contains_key("sns"));
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].kind, DynamicErrorKind::ScriptError);
+}
+
+#[tokio::test]
+async fn a_transform_script_that_returns_nothing_leaves_the_name_missing() {
+    // 没有 `return` 就没有值：脚本「跑通了」不等于「给出了结果」。
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("{\"a\":1}");
+    set_transform_script(&pool, "const x = pm.data;");
+
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert!(!out.values.contains_key("sns"));
+    assert_eq!(out.errors.len(), 1);
+    assert_eq!(out.errors[0].kind, DynamicErrorKind::ScriptError);
 }
 
 #[tokio::test]
@@ -564,7 +671,7 @@ async fn a_value_that_is_too_large_is_not_written_to_the_cache() {
     let big = format!("\"{}\"", "x".repeat(MAX_VALUE_BYTES + 10));
     let fetcher = CountingFetcher::new(&big);
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::TooLarge);
@@ -588,9 +695,15 @@ async fn concurrent_resolutions_of_the_same_definition_fetch_only_once() {
         let ctx = Arc::clone(&ctx);
         let fetcher = Arc::clone(&fetcher);
         tasks.push(tokio::spawn(async move {
-            resolve_names(&ctx, &["sns".to_string()], false, fetcher.as_ref())
-                .await
-                .expect("解析")
+            resolve_names(
+                &ctx,
+                Some("p1"),
+                &["sns".to_string()],
+                false,
+                fetcher.as_ref(),
+            )
+            .await
+            .expect("解析")
         }));
     }
     for task in tasks {
@@ -621,7 +734,7 @@ async fn a_disabled_definition_is_not_resolved() {
     })
     .expect("patch");
 
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert!(out.values.is_empty());
@@ -635,7 +748,7 @@ async fn a_name_without_a_definition_is_skipped() {
     let ctx = context(&pool);
     let fetcher = CountingFetcher::new("[]");
 
-    let out = resolve_names(&ctx, &["token".to_string()], false, &fetcher)
+    let out = resolve_names(&ctx, Some("p1"), &["token".to_string()], false, &fetcher)
         .await
         .expect("解析");
     assert!(out.values.is_empty());
@@ -649,7 +762,7 @@ async fn a_stale_value_is_used_when_the_fetch_fails_and_the_definition_allows_it
     let ctx = context(&pool);
     // 先取一次，把值写进缓存；随后把 TTL 改成 0（立刻过期）并允许回退。
     let good = CountingFetcher::new("[1]");
-    resolve_names(&ctx, &["sns".to_string()], false, &good)
+    resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &good)
         .await
         .expect("解析");
     db::with_tx(&pool, |c| {
@@ -675,7 +788,7 @@ async fn a_stale_value_is_used_when_the_fetch_fails_and_the_definition_allows_it
     .expect("expire");
 
     let bad = CountingFetcher::failing();
-    let out = resolve_names(&ctx, &["sns".to_string()], false, &bad)
+    let out = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &bad)
         .await
         .expect("解析");
     assert_eq!(out.values.get("sns").map(String::as_str), Some("[1]"));
@@ -687,8 +800,8 @@ async fn a_stale_value_is_used_when_the_fetch_fails_and_the_definition_allows_it
 // 取数上下文
 // -------------------------------------------------------------------------
 
-/// 一个项目，两个服务（★ 与另一个），一个绑了「另一个」服务的接口。
-fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
+/// 一个项目，一个模块，其下一个接口，以及两个环境。
+fn pool_with_a_module() -> (db::DbPool, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-dynamic-ctx-test-{}-{}",
         std::process::id(),
@@ -703,26 +816,25 @@ fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
                 id: "p1".into(),
                 name: "First".into(),
                 description: None,
-                default_base_url_definition_id: None,
-                base_url_definitions: vec![],
-                base_url: None,
                 color: "#000000".into(),
                 created_at: 1,
                 updated_at: 1,
             },
         )?;
-        for (id, name) in [("star", "主服务"), ("own", "接口自绑的服务")] {
-            db::base_url_defs::create(
+        for (id, name) in [("env_a", "alpha"), ("env_b", "beta")] {
+            db::environments::create(
                 c,
-                &BaseUrlDefinition {
+                &crate::domain::Environment {
                     id: id.into(),
+                    project_id: "p1".into(),
                     name: name.into(),
-                    description: None,
+                    module_base_urls: Default::default(),
+                    variables: Default::default(),
+                    disabled_variables: Vec::new(),
+                    created_at: 0,
                 },
-                "p1",
             )?;
         }
-        db::base_url_defs::set_default(c, "p1", Some("star"))?;
         db::nodes::create(
             c,
             &ResourceNode {
@@ -755,8 +867,6 @@ fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
                 node_id: "e1".into(),
                 method: HttpMethod::Get,
                 url: "/points".into(),
-                environment_id: None,
-                base_url_definition_id: Some("own".into()),
                 base_url_override: None,
                 params: vec![],
                 path_params: vec![],
@@ -778,25 +888,49 @@ fn pool_with_a_bound_service() -> (db::DbPool, std::path::PathBuf) {
 }
 
 #[test]
-fn a_definition_that_names_no_service_fetches_through_the_project_star() {
-    // 数据源接口自己绑的服务不在回退链上：定义没点名服务时一律走项目的 ★。
-    let (pool, _dir) = pool_with_a_bound_service();
+fn the_source_context_names_the_module_the_endpoint_sits_in() {
+    // base URL 住在 (环境 × 模块) 那一格，故取数端点所在的模块决定取哪一格。
+    let (pool, _dir) = pool_with_a_module();
     let mut def = definition(60, false);
     def.source_endpoint_id = Some("e1".into());
     def.source_inline_json = None;
 
     let ctx = source_context(&pool, &def).expect("取数上下文");
-    assert_eq!(ctx.base_url_definition_id.as_deref(), Some("star"));
+    assert_eq!(ctx.module_id.as_deref(), Some("m1"));
+    assert_eq!(ctx.project_id.as_deref(), Some("p1"));
 }
 
 #[test]
-fn a_definition_that_names_a_service_uses_it() {
-    let (pool, _dir) = pool_with_a_bound_service();
+fn the_source_context_takes_the_environment_the_definition_names() {
+    let (pool, _dir) = pool_with_a_module();
     let mut def = definition(60, false);
     def.source_endpoint_id = Some("e1".into());
     def.source_inline_json = None;
-    def.source_base_url_definition_id = Some("own".into());
+    def.source_environment_id = Some("env_b".into());
 
     let ctx = source_context(&pool, &def).expect("取数上下文");
-    assert_eq!(ctx.base_url_definition_id.as_deref(), Some("own"));
+    assert_eq!(ctx.environment_id.as_deref(), Some("env_b"));
+}
+
+#[test]
+fn the_source_context_falls_back_to_the_first_environment_of_the_project() {
+    let (pool, _dir) = pool_with_a_module();
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+
+    // 环境按名字排序，故第一个是 `alpha`。
+    let ctx = source_context(&pool, &def).expect("取数上下文");
+    assert_eq!(ctx.environment_id.as_deref(), Some("env_a"));
+}
+
+#[test]
+fn an_inline_source_has_no_project_no_environment_and_no_module() {
+    let (pool, _dir) = pool_with_a_module();
+    let def = definition(60, false);
+
+    let ctx = source_context(&pool, &def).expect("取数上下文");
+    assert!(ctx.project_id.is_none());
+    assert!(ctx.environment_id.is_none());
+    assert!(ctx.module_id.is_none());
 }

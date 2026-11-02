@@ -4,7 +4,7 @@
 //!
 //! ## 工具级错误为什么走 `result.isError` 而不是 JSON-RPC 的 `error`
 //!
-//! JSON-RPC 的 `error` 字段只承载**信封级**失败（parse error -32700、
+//! JSON-RPC 的 `error` 字段只用于**信封级**失败（parse error -32700、
 //! invalid request -32600、method not found -32601、invalid params -32602、
 //! internal error -32603），它与 `result` 在一个响应里互斥。MCP 则规定
 //! `tools/call` 的失败用 `result.isError: true`：工具**跑了**，只是它报告的工作

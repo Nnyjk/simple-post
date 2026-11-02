@@ -104,7 +104,7 @@ export interface FetchTokenOptions extends CallApiOptions {
 
 /**
  * 向后端要一份可注入的 token。失败时 reject（`invokeCmd` 的既有约定），调用方自行
- * 兜住——UI 显示错误横幅，`http.ts` 把它折成一个 `status: 0` 的响应。
+ * 处理——UI 显示错误横幅，`http.ts` 把它折成一个 `status: 0` 的响应。
  */
 export async function fetchOAuth2Token(
   auth: AuthConfig,

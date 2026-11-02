@@ -23,6 +23,11 @@ export type ValueMode = 'auto' | 'json' | 'text';
 export interface DynamicTemplateParts {
   /** base URL。它可能自身带变量，故与 path 一起扫。 */
   baseUrl: string;
+  /**
+   * 那一格的实际访问地址。它会被 `{{var}}` 替换，故它里面的标记同样算被引用 ——
+   * 不扫的话，只在代理地址里出现的动态变量永远不会被取数，替换后仍是字面量 `{{name}}`。
+   */
+  proxy?: string;
   /** 端点的 path。 */
   url: string;
   params: KeyValue[];
@@ -67,9 +72,9 @@ export function mergePool(
  * 模板里出现的全部 `{{name}}` 名字，按首次出现排序。
  *
  * 只扫**会被替换**的字段：启用的且 key 非空的参数值、启用的且 key 非空的路径参数值、
- * 启用的且 key 非空的 header 值、body 内容、以及鉴权里那三种方案（bearer / basic /
- * apikey）。OAuth2 的配置字段不被变量替换，故不在扫描范围内——扫了会让一条根本没被
- * 用到的定义去取数。
+ * 启用的且 key 非空的 header 值、body 内容、那一格的实际访问地址（代理地址），以及
+ * 鉴权里那三种方案（bearer / basic / apikey）。OAuth2 的配置字段不被变量替换，故不在
+ * 扫描范围内——扫了会让一条根本没被用到的定义去取数。
  */
 export function listDynamicNames(parts: DynamicTemplateParts): string[] {
   const out: string[] = [];
@@ -83,6 +88,8 @@ export function listDynamicNames(parts: DynamicTemplateParts): string[] {
   };
 
   add(parts.baseUrl);
+  // 代理地址（那一格的实际访问地址）会被单独替换一遍，故它里面的标记同样算被引用。
+  if (parts.proxy) add(parts.proxy);
   add(parts.url);
   for (const param of parts.params) {
     if (!param.enabled || !param.key) continue;

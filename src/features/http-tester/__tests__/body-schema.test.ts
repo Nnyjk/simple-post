@@ -86,9 +86,25 @@ describe('请求体：界面上的定义编辑器', () => {
   it('模式切成 none 之后残留的定义仍然看得见、删得掉', () => {
     // 模式切换保留整个 body（含 schema），而 `none` 的端点在导出时没有 requestBody
     // 可引用它 —— 定义区若跟着模式一起藏起来，用户就再也删不掉那份残留。
+    //
+    // 断言的是「定义区在右栏常驻，不在左栏的模式分支里」：左栏按模式换载荷区，
+    // 右栏始终渲染定义区。写死一个字符距离是不稳的——左栏多几个分支就会红，而那
+    // 与「定义区会不会被藏起来」毫无关系。
+    const leftAt = source.indexOf('{/* 左栏');
+    const rightAt = source.indexOf('{/* 右栏');
+    assert.ok(leftAt !== -1 && rightAt !== -1, 'BodyEditor 必须分左右两栏');
+    assert.ok(leftAt < rightAt, '左栏在右栏之前');
+
+    const leftColumn = source.slice(leftAt, rightAt);
+    const rightColumn = source.slice(rightAt);
+
     assert.ok(
-      /value\.mode === 'none'[\s\S]{0,600}SchemaSection/.test(source),
-      'none 模式下残留的 schema 要仍然给出那块编辑区',
+      rightColumn.includes('<SchemaSection'),
+      '右栏必须渲染定义区，否则它只是存着，用户看不见也改不了',
+    );
+    assert.ok(
+      !leftColumn.includes('SchemaSection'),
+      '定义区不能落在左栏的模式分支里：切到 none 时那块编辑区就得跟着没了',
     );
   });
 });

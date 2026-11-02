@@ -39,7 +39,7 @@ pub mod http_config;
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod interchange_api;
 pub mod port_registry;
-/// 项目、服务与资源树节点的创建编排。Tauri 命令与 REST 路由都只调它，故两条 transport
+/// 项目与资源树节点的创建编排。Tauri 命令与 REST 路由都只调它，故两条 transport
 /// 不必各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod project_api;
 /// 一份接口规格的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必
@@ -68,7 +68,7 @@ pub use simple_post_mcp::{daemon_http, mcp};
 /// CLI 子命令 `mcp` 的入口。负责数据目录解析、DB 初始化、axum serve、端口记录写入，
 /// 以及 SIGINT/SIGTERM 关闭。
 ///
-/// `http_config` 承载 router 需要的、超出 `bind` / `port` 之外的监听设置：挂载路径
+/// `http_config` 存放 router 需要的、超出 `bind` / `port` 之外的监听设置：挂载路径
 /// 与 Host/Origin 白名单。supervisor 从 `mcp.http_config` 偏好填它（见
 /// `daemon_cli_args`）；手工跑的 `simple-post mcp` 拿的是 clap 默认值，也就是出厂的
 /// 仅 loopback 配置。

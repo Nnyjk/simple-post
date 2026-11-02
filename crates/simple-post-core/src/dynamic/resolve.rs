@@ -22,48 +22,116 @@ pub const MAX_VALUE_BYTES: usize = 256 * 1024;
 
 /// 解析一批名字，返回它们的值、状态与错误。
 ///
-/// 名字里没有对应定义的（那是环境变量，或者是拼错的名字）直接跳过——它们由变量替换那一步
-/// 按缺失处理。停用的定义也跳过：`{{name}}` 原样留着并进未解析变量列表。
+/// `project_id` 决定这些名字在哪个范围里找：
 ///
-/// 定义是全局的，故同一个名字在任何项目里都指向同一条定义；取数上下文由那条定义自己
-/// 决定，与调用方是哪个项目无关。
+/// - `Some(项目)` = **项目内取值**：只认那个项目里的定义。找不到就是缺失，`{{name}}`
+///   原样留在请求里。请求发送走的就是这条——消费方项目里没有这个名字，它不会去别的
+///   项目拿同名的那条。
+/// - `None` = **跨项目取值**（调用接口那条路）：同一个名字在多个项目里都有定义时，
+///   不知道该用哪一条，故记一条「歧义」错误并按缺失处理，不猜。
+///
+/// 名字里没有对应定义的（那是环境变量，或者是拼错的名字）直接跳过——它们由变量替换
+/// 那一步按缺失处理。停用的定义也跳过：`{{name}}` 原样留着并进未解析变量列表。
 pub async fn resolve_names(
     ctx: &ResolveContext,
+    project_id: Option<&str>,
     names: &[String],
     force: bool,
     fetcher: &dyn SourceFetcher,
 ) -> Result<DynamicResolution, AppError> {
-    let now = crate::domain::now_ms();
     let mut resolution = DynamicResolution::default();
 
     for name in names {
-        let Some(def) = db::with_conn(&ctx.pool, |c| db::dynamic_variables::get_by_name(c, name))?
-        else {
+        let (def, lookup_error) = lookup(ctx, project_id, name)?;
+        if let Some(error) = lookup_error {
+            resolution.errors.push(error);
+        }
+        let Some(def) = def else {
             continue;
         };
         if !def.enabled {
             continue;
         }
-        let source = source_context(&ctx.pool, &def)?;
-        let outcome = resolve_one(ctx, &def, &source, now, force, fetcher).await?;
-        if let Some(value) = &outcome.value {
+        let status = resolve_definition(ctx, &def, force, fetcher).await?;
+        if let Some(value) = &status.value {
             resolution.values.insert(name.clone(), value.clone());
         }
-        if let Some(error) = &outcome.error {
+        if let Some(error) = &status.error {
             resolution.errors.push(error.clone());
         }
-        resolution.statuses.push(DynamicValueStatus {
-            name: name.clone(),
-            value: outcome.value,
-            source: outcome.source,
-            fetched_at: outcome.fetched_at,
-            expires_at: outcome.expires_at,
-            is_override: outcome.is_override,
-            error: outcome.error,
-        });
+        resolution.statuses.push(status);
     }
 
     Ok(resolution)
+}
+
+/// 解析一条**已知**的定义，返回它的状态。
+///
+/// 强制重取走的是这条：它手里已经有那条定义了，不必再按名字找一遍——按名字找会撞上
+/// 同名定义在别的项目里的那种歧义。
+pub async fn resolve_definition(
+    ctx: &ResolveContext,
+    def: &DynamicVariable,
+    force: bool,
+    fetcher: &dyn SourceFetcher,
+) -> Result<DynamicValueStatus, AppError> {
+    let now = crate::domain::now_ms();
+    let source = source_context(&ctx.pool, def)?;
+    let outcome = resolve_one(ctx, def, &source, now, force, fetcher).await?;
+    Ok(DynamicValueStatus {
+        name: def.name.clone(),
+        value: outcome.value,
+        source: outcome.source,
+        fetched_at: outcome.fetched_at,
+        expires_at: outcome.expires_at,
+        is_override: outcome.is_override,
+        error: outcome.error,
+    })
+}
+
+/// 找到一个名字对应的定义。
+///
+/// 项目内取值：只查那个项目。跨项目取值：查全部项目，同名多条即歧义——记一条错误
+/// 并按缺失处理。
+fn lookup(
+    ctx: &ResolveContext,
+    project_id: Option<&str>,
+    name: &str,
+) -> Result<(Option<DynamicVariable>, Option<DynamicError>), AppError> {
+    match project_id {
+        Some(project_id) => {
+            let found = db::with_conn(&ctx.pool, |c| {
+                db::dynamic_variables::get_by_name_in_project(c, project_id, name)
+            })?;
+            Ok((found, None))
+        }
+        None => {
+            let candidates = db::with_conn(&ctx.pool, |c| {
+                db::dynamic_variables::get_by_name_across(c, name)
+            })?;
+            match candidates.len() {
+                0 => Ok((None, None)),
+                1 => Ok((candidates.into_iter().next(), None)),
+                _ => {
+                    // 歧义：跨项目取值时同一个名字有多条定义，不猜。
+                    let projects: Vec<String> = candidates
+                        .iter()
+                        .map(|d| d.project_id.clone().unwrap_or_else(|| "未归属".to_string()))
+                        .collect();
+                    let error = DynamicError {
+                        name: name.to_string(),
+                        kind: DynamicErrorKind::Ambiguous,
+                        message: format!(
+                            "变量 '{}' 在多个项目里都有定义（{}），跨项目取值时不知道该用哪一条",
+                            name,
+                            projects.join("、")
+                        ),
+                    };
+                    Ok((None, Some(error)))
+                }
+            }
+        }
+    }
 }
 
 /// 一条定义的解析结果。
@@ -217,6 +285,12 @@ async fn fetch_one(
             };
             return Ok(fallback_or_missing(def, stale_fallback, error));
         }
+    };
+
+    // 处理脚本：抽取之后跑。JSONPath 负责「取哪一段」，脚本负责「这一段怎么变成值」。
+    let extracted = match super::transform::apply(def, extracted, &raw, source).await {
+        Ok(value) => value,
+        Err(error) => return Ok(fallback_or_missing(def, stale_fallback, error)),
     };
 
     let raw_json = serde_json::to_string(&extracted).unwrap_or_default();

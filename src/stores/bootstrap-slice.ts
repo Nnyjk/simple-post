@@ -11,8 +11,15 @@
 import type { StateCreator } from 'zustand';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { pickCurrentEnvironment } from '@/lib/env-default';
 import type { AppState } from './app-store';
-import { loadRequestSettings, readLastProjectId, saveLastProjectId } from './slices/ui-prefs';
+import {
+  loadRequestSettings,
+  loadResponseHistoryKeep,
+  readLastProjectId,
+  readRememberedEnvironmentId,
+  saveLastProjectId,
+} from './slices/ui-prefs';
 
 /** 状态部分。 */
 export interface BootstrapSliceState {
@@ -34,7 +41,7 @@ export interface BootstrapSliceState {
   /**
    * 第二层（树 + 接口配置 + 环境）是否已就绪。
    *
-   * 与 `loaded` 刻意分开：欢迎页只需 `projects`，故 `loaded` 一落地就拆掉启动
+   * 与 `loaded` 刻意分开：欢迎页只需 `projects`，故 `loaded` 一为 true 就拆掉启动
    * 画面，不必等三个可能很大的列表。
    *
    * 消费方必须区分二者：`nodesLoaded === false` 窗口里的 `nodes: []` 是歧义的，
@@ -50,9 +57,19 @@ export interface BootstrapSliceState {
   // 当前选择与 bootstrap 数据紧密耦合，保留在此切片内。
   /**
    * 当前项目 id。`''` = 尚未选择项目（刚启动，或已退出到欢迎页）。树的渲染范围、
-   * 顶栏环境列表、新建模块/集合/接口的落点全以它为准。
+   * 顶栏环境列表、新建模块/集合/接口的目标位置全以它为准。
    */
   activeProjectId: string;
+  /**
+   * 当前环境 —— **本客户端的实时状态**，不落库。
+   *
+   * 桌面窗口与网页标签各有一份，各切各的：web 端多个人各切各的，不互相踩。库里没有
+   * 对应的列，故它随会话存在 store 里，刷新后按项目从 localStorage 恢复（见
+   * `setCurrentEnvironment` 与 `readRememberedEnvironmentId`）。
+   *
+   * 库里与「选哪个环境」有关的只有**默认环境**：一个项目里最早创建的那个环境
+   * （见 `lib/env-default.ts`）。谁发请求时没点名环境，就用它。
+   */
   activeEnvironmentId: string;
   activeEndpointId: string | null;
   /** bootstrap 请求进行中。 */
@@ -101,11 +118,26 @@ export interface BootstrapSliceActions {
    * 时 `nodesLoaded` 会短路重载。只重置选择 —— `activeEnvironmentId` 一并清空，
    * 因为无项目时环境无意义。
    *
-   * 记住的项目 id 由 store 的订阅清掉（`activeProjectId` 变成空串）。
+   * 记住的项目 id 由 store 的订阅清掉（`activeProjectId` 变成空串）。记住的**环境**
+   * 不清：它是「在这个项目里用哪个环境」，与「现在在不在这个项目里」无关，下次点回来
+   * 仍停在同一个环境。
    */
   leaveProject: () => void;
-  setActiveEnvironment: (id: string) => void;
   setActiveEndpoint: (id: string | null) => void;
+  /**
+   * 切换**当前环境** —— 纯客户端状态，不发 IPC、不写库。
+   *
+   * 「当前环境」是每个客户端自己的实时状态：桌面窗口与网页标签各有一份，各切各的。
+   * 落库会让 web 端多个人互相踩——一个人切了环境，另一个人发请求就换了地址与端口。
+   *
+   * 记住它（按项目存进 localStorage）由 store 的订阅负责（见 `app-store.ts`）：
+   * `activeEnvironmentId` 有好几条改法（切换项目、删除环境、重新加载工作区），在各个
+   * 动作里分别写必然漏掉一条，漏掉的后果是记住的环境与实际所在的环境脱节。
+   *
+   * 未知的环境 id 一律忽略：接口解析地址时按环境里的「环境 × 模块」那一格取值，
+   * 切到别的项目的环境会让它读到不属于本项目模块的格子。
+   */
+  setCurrentEnvironment: (envId: string) => void;
   /** 展开 / 折叠一个节点。三种类型共用一个动作：展开位在节点上，只有树知道哪些类型渲染成可展开。 */
   toggleNodeExpanded: (id: string) => void;
 
@@ -121,9 +153,9 @@ export interface BootstrapSliceActions {
    *      **不** await，大树不会拖慢首屏。
    *
    * 第 2 步立即开始，只是不在关键路径上。`openProject` 也会触发它，故在后台
-   * 那一趟落地前就点开项目卡的用户仍能拿到完整的树。
+   * 那一趟完成前就点开项目卡的用户仍能拿到完整的树。
    *
-   * 第 1 层落地后若 localStorage 里记着上次停留的项目，本函数进入那个项目 ——
+   * 第 1 层完成后若 localStorage 里记着上次停留的项目，本函数进入那个项目 ——
    * 刷新后回到原处，而不是回到欢迎页。项目已不存在时清掉那条记录并留在欢迎页。
    */
   bootstrap: () => Promise<void>;
@@ -158,8 +190,8 @@ export interface BootstrapSliceActions {
   /**
    * 重新取一次项目清单，整份替换 `projects`。
    *
-   * 服务定义住在项目行上，而项目行只在 bootstrap 第一层加载过一次——导入在服务端
-   * 建服务后不刷新它，界面上就看不见那个服务。
+   * 项目行只在 bootstrap 第一层加载过一次——导入在服务端建了项目之后不刷新它，
+   * 界面上就看不见那个新项目。
    */
   refreshProjects: () => Promise<void>;
 }
@@ -230,12 +262,13 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     // ---------- selection / expansion ----------
 
     setActiveProject: (id) => {
-      // 只有真正的变化才重解激活环境；重新选中当前项目不是一个事件。
+      // `setActiveProject` 只有在项目 id 真的变了才重解当前环境；重新选中当前项目
+      // 不算变化。
       set((s) => {
-        const env =
-          s.environments.find((e) => e.projectId === id && e.isActive) ??
-          s.environments.find((e) => e.projectId === id);
-        // 新项目没有环境时清成 `''`（"未选"哨兵），`useActiveEnvironment()` 返回
+        // 换项目后当前环境重解：先用本客户端在这个项目里记住的那个（还有效就用它），
+        // 没用过或已被删掉就用这个项目的默认环境（最早创建的那个）。
+        const env = pickCurrentEnvironment(s.environments, id, readRememberedEnvironmentId(id));
+        // 新项目没有环境时这里把它清成 `''`（"未选"哨兵），`useActiveEnvironment()` 返回
         // undefined，顶栏触发器回落到 '—'。
         return {
           activeProjectId: id,
@@ -245,7 +278,6 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // 刻意不在此加载响应历史：它按 endpoint 而非按项目作用域，由 `setActiveTab`
       // —— 所有进入某接口的路径共享的事件 —— 触发。
     },
-    setActiveEnvironment: (id) => set({ activeEnvironmentId: id }),
     openProject: (id) => {
       // 树是用户马上要看的东西，不等后台那一趟：在这里触发，让渲染落在
       // `nodesLoaded === false` 上（树显示加载态而非错误的"没有模块"空态）。
@@ -264,10 +296,10 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       get().setLastResponse(null);
     },
     leaveProject: () => {
-      // 已经不在项目里就空操作，欢迎页上误点标题不会扰动状态。
+      // `leaveProject` 在已经不在项目里时空操作，欢迎页上误点标题不会扰动状态。
       if (get().activeProjectId === '') return;
-      // 与 `openProject` 同样的换条、同样的顺序理由：在项目仍是"在前的那个"时
-      // 搁置，否则每个打开的标签都无人归属，标签条会丢。
+      // 与 `openProject` 同样的换条、同样的顺序理由：`switchProjectTabs('')` 在项目
+      // 仍是"在前的那个"时搁置标签，否则每个打开的标签都无人归属，标签条会丢。
       get().switchProjectTabs('');
       // 清掉记住的项目 id 由 store 的订阅负责（`activeProjectId` 变成空串）。
       set({ activeProjectId: '', activeEnvironmentId: '', activeEndpointId: null });
@@ -282,6 +314,18 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       }
       get().setLastResponse(null);
     },
+    setCurrentEnvironment: (envId) => {
+      const state = get();
+      if (envId === state.activeEnvironmentId) return;
+      // 只接受当前项目里的环境：接口解析地址时读的是这个环境的「环境 × 模块」格子，
+      // 切到别的项目的环境会让它读到不属于本项目模块的格子。
+      const belongs = state.environments.some(
+        (env) => env.id === envId && env.projectId === state.activeProjectId,
+      );
+      if (!belongs) return;
+      // 不写库：「当前环境」是本客户端的实时状态。记住它由 store 的订阅负责。
+      set({ activeEnvironmentId: envId });
+    },
     toggleNodeExpanded: (id) =>
       set((s) => ({
         nodes: s.nodes.map((n) => (n.id === id ? { ...n, expanded: !n.expanded } : n)),
@@ -294,7 +338,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       set({ loading: true, bootstrapError: null });
 
       try {
-        // 第 1 层 —— 欢迎页唯一需要的查询：一次带索引的少量行读取，一落地启动
+        // 第 1 层 —— 欢迎页唯一需要的查询：一次带索引的少量行读取，这一层一返回启动
         // 闪屏即拆下，用户看到项目选择器。
         //
         // 列表命令在没有过滤条件时返回全量数据，避免把 project_id 误传为空。
@@ -302,10 +346,13 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
 
         // 请求旋钮也在第 1 层读：它存在后端的 `preferences` 表里，而设置面板在欢迎页
         // 上就能打开 —— 旋钮必须在那之前就位，否则面板先显示的是默认值，而用户在
-        // 面板上改的值也会被随后落地的第二层覆盖掉。
+        // 面板上改的值也会被随后返回的第二层覆盖掉。
         //
         // 顺序而非并发：并发时两条命令的发出次序不确定，测试与日志都难读。
         const requestSettings = await loadRequestSettings();
+        // 历史保留条数同样在后端的 `preferences` 表里，且同样要在第 1 层读：它决定库里
+        // 留几行历史，界面与库必须从一开始就是同一个数。
+        const responseHistoryKeep = await loadResponseHistoryKeep();
 
         // 恢复上次停留的项目：刷新后回到它，而不是回到欢迎页。
         //
@@ -329,6 +376,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         set({
           projects,
           requestSettings,
+          responseHistoryKeep,
           loaded: true,
           bootstrapError: null,
           loading: false,
@@ -349,7 +397,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       // 两个 flag 都做幂等：三个调用方（`bootstrap`、`openProject`、重试）
       // 互不协调。
       //
-      // 在途分支返回*未决*的 promise 而不是立即 resolve：这个区别是承重的 ——
+      // 在途分支返回*未决*的 promise 而不是立即 resolve：这个区别必须成立 ——
       // 否则 await 此处、以便在树就绪后接续工作的调用方会立刻继续，看到加载前状态。
       if (get().nodesLoaded) return;
       if (inFlight) return inFlight;
@@ -375,9 +423,9 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
             invokeCmd<Environment[]>(COMMANDS.environmentsList),
           ]);
 
-          // 提交时重解激活环境。用户在本趟仍在途时点项目卡，`setActiveProject` 会
-          // 对着空列表解析并落到 `''`，顶栏就显示 "—"。这里再挑一次补上这个窗口；
-          // id 已正确时是空操作。
+          // 提交时重解当前环境。用户在本趟仍在途时点项目卡，`setActiveProject` 会
+          // 对着空列表解析并落到 `''`，顶栏就显示 "—"。这里再挑一次环境来补上这个
+          // 窗口；id 已正确时是空操作。
           set((s) => {
             const current = s.activeEnvironmentId;
             const stillValid = environments.some(
@@ -385,15 +433,18 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
             );
             const env = stillValid
               ? undefined
-              : (environments.find((e) => e.projectId === s.activeProjectId && e.isActive) ??
-                environments.find((e) => e.projectId === s.activeProjectId));
+              : pickCurrentEnvironment(
+                  environments,
+                  s.activeProjectId,
+                  readRememberedEnvironmentId(s.activeProjectId),
+                );
             return {
-              // 展开状态不在服务端，整份替换会抹掉它。
+              // 展开状态不在服务端，整份替换 `nodes` 会抹掉它。
               nodes: mergeExpanded(s.nodes, nodes),
               endpointDetails,
               environments,
               nodesLoaded: true,
-              // 树已经读回来了，先前那一趟的失败说明已经过期。
+              // 树已经读回来了，先前那一趟的失败消息已经过期，故清掉 `nodesError`。
               nodesError: null,
               ...(env ? { activeEnvironmentId: env.id } : {}),
             };
@@ -411,8 +462,8 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
           // 那一趟说成已经结束。
           if (inFlight === local) {
             set({ nodesLoading: false });
-            // 最后清：每个 awaiter 都已拿到这个 promise，且从 `nodesError` 横幅发起的
-            // 重试必须能开新一趟，而不是并入已结算的那趟。
+            // `inFlight` 最后清：每个 awaiter 都已拿到这个 promise，且从 `nodesError`
+            // 横幅发起的重试必须能开新一趟，而不是并入已结算的那趟。
             inFlight = null;
           }
         }
@@ -427,11 +478,11 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     refreshProjects: async () => {
       try {
         const projects = await invokeCmd<Project[]>(COMMANDS.projectsList);
-        // 整份替换：服务清单、★、项目名都在项目行上。
+        // 整份替换 `projects`：项目名与颜色都在项目行上。
         set({ projects });
       } catch (e) {
-        // 不抛出：调用方是「导入已经落库」之后才来刷新的，一次刷新失败不该把导入
-        // 报成失败。界面上顶多仍旧看不见新服务，刷新一次就好。
+        // `refreshProjects` 不抛出：调用方是「导入已经落库」之后才来刷新的，一次刷新失败
+        // 不该把导入报成失败。界面上顶多仍旧看不见新项目，刷新一次就好。
         console.error('[store] projects refresh failed', e);
       }
     },

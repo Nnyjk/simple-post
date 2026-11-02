@@ -1,4 +1,4 @@
-import type { KeyboardEvent, RefObject } from 'react';
+import type { RefObject } from 'react';
 import { Tabs, type TabItem } from '@/components/ui/tabs';
 import type { HttpMethod, Project, ResourceNode, TlsSettings } from '@/types/domain';
 import type { EndpointDraft } from '@/stores/store-types';
@@ -7,7 +7,7 @@ import { EndpointBreadcrumb } from '../EndpointBreadcrumb';
 import { EndpointHeader } from '../EndpointHeader';
 import { RequestUrlBar } from '../RequestUrlBar';
 import { RequestTabPanels } from '../RequestTabPanels';
-import { EnvVarPicker, type VarEntry } from '../EnvVarPicker';
+import { type VarEntry } from '../var-hint';
 import type { BaseUrlSelection } from '../BaseUrlPicker';
 import type { KeySuggestion } from '../KeyValueEditor';
 import type { Ancestor } from '../useEndpointContext';
@@ -35,6 +35,7 @@ export function TesterShell({
   globalTls,
   method,
   resolvedBaseUrl,
+  moduleBaseUrl,
   selection,
   isCustomUrl,
   liveUrl,
@@ -48,7 +49,6 @@ export function TesterShell({
   onMethodChange,
   onSelectionChange,
   onUrlChange,
-  onUrlKeyDown,
   onSend,
   onSave,
   onCopyCurl,
@@ -61,12 +61,7 @@ export function TesterShell({
   validationError,
   pathParamError,
   onFormatResult,
-  varPickerOpen,
-  onCloseVarPicker,
   varEntries,
-  varSelected,
-  onVarSelectedChange,
-  onInsertVar,
   envName,
 }: {
   project: Project | undefined;
@@ -86,6 +81,8 @@ export function TesterShell({
   globalTls: TlsSettings;
   method: HttpMethod;
   resolvedBaseUrl: string;
+  /** 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。 */
+  moduleBaseUrl: string | null;
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
   liveUrl: string;
@@ -99,7 +96,6 @@ export function TesterShell({
   onMethodChange: (m: HttpMethod) => void;
   onSelectionChange: (next: BaseUrlSelection) => void;
   onUrlChange: (next: string) => void;
-  onUrlKeyDown: (e: KeyboardEvent<HTMLInputElement>) => void;
   onSend: () => void;
   onSave: () => void;
   onCopyCurl: () => void;
@@ -116,12 +112,9 @@ export function TesterShell({
   /** 路径参数缺值时拦下发送的原因。 */
   pathParamError: string | null;
   onFormatResult: (result: FormatResult) => void;
-  varPickerOpen: boolean;
-  onCloseVarPicker: () => void;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
   varEntries: VarEntry[];
-  varSelected: number;
-  onVarSelectedChange: (next: number) => void;
-  onInsertVar: (key: string) => void;
+  /** 当前环境名，显示在候选浮层的标题上。 */
   envName: string | undefined;
 }) {
   return (
@@ -144,12 +137,11 @@ export function TesterShell({
         patchDraft={patchDraft}
       />
 
-      {/* URL 栏：方法、baseUrl 选择器、地址输入框与发送 / 保存 / 复制 cURL。 */}
+      {/* URL 栏：方法、地址来源选择器、地址输入框与发送 / 保存 / 复制 cURL。 */}
       <RequestUrlBar
         method={method}
-        definitions={project?.baseUrlDefinitions ?? []}
-        defaultDefinitionId={project?.defaultBaseUrlDefinitionId ?? null}
         resolvedBaseUrl={resolvedBaseUrl}
+        moduleBaseUrl={moduleBaseUrl}
         selection={selection}
         isCustomUrl={isCustomUrl}
         liveUrl={liveUrl}
@@ -161,10 +153,11 @@ export function TesterShell({
         curlFlash={curlFlash}
         dirty={dirty}
         isDraft={isDraft}
+        varEntries={varEntries}
+        envName={envName}
         onMethodChange={onMethodChange}
         onSelectionChange={onSelectionChange}
         onUrlChange={onUrlChange}
-        onUrlKeyDown={onUrlKeyDown}
         onSend={onSend}
         onSave={onSave}
         onCopyCurl={onCopyCurl}
@@ -237,23 +230,12 @@ export function TesterShell({
           headerSuggestions={headerSuggestions}
           validationError={validationError}
           pathParamError={pathParamError}
+          varEntries={varEntries}
+          envName={envName}
           patchDraft={patchDraft}
           onFormatResult={onFormatResult}
         />
       </div>
-
-      {/* Env 变量选择器 —— 锚在 URL 输入框上，在选择器内部用 getBoundingClientRect
-          定位，故滚动 / resize 时跟随输入框。 */}
-      <EnvVarPicker
-        open={varPickerOpen}
-        onClose={onCloseVarPicker}
-        entries={varEntries}
-        selected={varSelected}
-        onSelectedChange={onVarSelectedChange}
-        onSelect={onInsertVar}
-        anchorRef={urlInputRef}
-        envName={envName}
-      />
     </section>
   );
 }

@@ -126,14 +126,14 @@ export interface McpSliceActions {
   /**
    * 把守护进程最近报告的错误记到 `mcpStatus.lastError`。McpStatusPanel 里的
    * `daemon://crashed` 事件监听器用它立刻显示守护进程给的错误串，而不用等下
-   * 一次 3s 轮询落地。传 `null` 清空该字段（例如成功重启之后）。尚无
+   * 一次 3s 轮询返回。传 `null` 清空该字段（例如成功重启之后）。尚无
    * `mcpStatus` 快照时是空操作——面板能容忍这段加载空档。把它收在这里，是为了让
    * 渲染层不必直接对 `mcpStatus` 调 `setState`，那会绕过本切片文档承诺的每一条
    * 不变量。
    */
   recordLastError: (lastError: string | null) => void;
   /**
-   * 读已落盘的 `mcp.auto_start` 偏好。首次读取落地前为 `null`；面板在这段窗口
+   * 读已落盘的 `mcp.auto_start` 偏好。首次读取返回前为 `null`；面板在这段窗口
    * 里渲染禁用的开关，用户因此不会看到还没读到的值被显示成"关"。
    */
   mcpAutoStart: boolean | null;
@@ -175,7 +175,7 @@ type SetState = (partial: Partial<AppState>) => void;
 
 /**
  * 把 `mcpStatus.status` 强设为 `status`，其余字段保留上一次已知快照。首次轮询
- * 落地前退回到 `EMPTY_MCP_STATE`，好让徽标绝不会从残缺对象渲染。
+ * 返回前退回到 `EMPTY_MCP_STATE`，好让徽标绝不会从残缺对象渲染。
  */
 function withStatus(get: () => AppState, status: McpRuntimeStatus): McpUiState {
   const cur = get().mcpStatus;
@@ -303,7 +303,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
       const result: RestartResult = await invokeCmd<RestartResult>(COMMANDS.mcpDaemonRestart);
       if (!result.ok) {
         // Rust 吞掉了底层 `AppError` 并返回 `{ ok: false, pid: null, port: null }`。
-        // 摆出与异常路径相同的 `crashed` 徽标好让对话框接得住；Rust 没给错误串，
+        // 这里摆出与异常路径相同的 `crashed` 徽标，好让对话框接得住；Rust 没给错误串，
         // 所以 `lastError` 留空，交给下一次轮询去显示守护进程自己报告的东西。
         console.warn('[store] mcp_daemon_restart returned ok=false');
         const cur = get().mcpStatus;
@@ -317,7 +317,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
       await get().refreshMcpStatus();
     } catch (e) {
       console.error('[store] mcp_daemon_restart failed', e);
-      // 把失败摆到徽标上——对话框会读 lastError。
+      // 这里把失败摆到徽标上——对话框会读 lastError。
       const cur = get().mcpStatus;
       const lastError = e instanceof Error ? e.message : String(e);
       set({
@@ -404,12 +404,12 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
     }
   },
   setMcpAutoStart: async (value) => {
-    // 乐观翻转——面板在往返期间禁用开关，我们希望它立刻反映用户意图。
+    // 乐观翻转——面板在往返期间禁用开关，开关要立刻反映用户意图。
     // setter 失败时抛错，好让面板把开关滚回去并显示错误。
     set({ mcpAutoStart: value });
     try {
       await invokeCmd<boolean>(COMMANDS.mcpAutoStartSet, { value });
-      // 刚打开自动启动的话守护进程可能已经起来了——刷新快照，
+      // 刚打开自动启动的话守护进程可能已经起来了——这里刷新快照，
       // 不必等下一个 3s tick 徽标才更新。
       if (value) {
         await get().refreshMcpStatus();

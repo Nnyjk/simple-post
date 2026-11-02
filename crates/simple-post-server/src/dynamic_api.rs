@@ -7,8 +7,7 @@
 //! 为何不把逻辑直接写在 Tauri 命令里：那样 web 形态就没有对应的那一半——这正是
 //! AGENTS.md 的 dual-transport invariant 要消灭的事。
 //!
-//! 定义是**全局**的，故这些操作都不按项目作用域：名字在整个工作区里唯一，任何项目的
-//! 端点都能引用同一条定义。
+//! 定义挂在**项目**里：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。
 
 use simple_post_core::db::DbPool;
 use simple_post_core::domain::{
@@ -18,13 +17,13 @@ use simple_post_core::error::AppError;
 
 pub use simple_post_mcp::dynamic::ops::{CreateOpts, DynamicVariableView};
 
-/// 列出全部定义，带当前值与缓存状态。
+/// 列出定义，带当前值与缓存状态。
 ///
-/// `include_references` 决定要不要带上「哪些端点引用了它」。桌面端与 REST 那条路是
-/// 用户自己的工作区，带上它；MCP 那条路不带（那边的 `dynamic_var_list` 没有按项目的门，
-/// 带走它等于开了一条枚举别项目接口名的旁路）。
-pub fn list(pool: &DbPool, include_references: bool) -> Result<Vec<DynamicVariableView>, AppError> {
-    simple_post_mcp::dynamic::ops::list(pool, include_references)
+/// `project_id` 决定列哪个范围：给了就只列那个项目里的，不给就列全部项目。
+///
+/// 不带「哪些端点引用了它」：那条信息只在接口那侧存在，变量这一侧不维护反向索引。
+pub fn list(pool: &DbPool, project_id: Option<&str>) -> Result<Vec<DynamicVariableView>, AppError> {
+    simple_post_mcp::dynamic::ops::list(pool, project_id)
 }
 
 /// 读一条定义，带当前值与缓存状态。
@@ -52,12 +51,16 @@ pub fn delete(pool: &DbPool, definition_id: &str) -> Result<(), AppError> {
 }
 
 /// 解析一批名字。
+///
+/// `project_id` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走
+/// 的就是这条）；不给就是跨项目取值。
 pub async fn resolve(
     pool: &DbPool,
+    project_id: Option<&str>,
     names: &[String],
     force: bool,
 ) -> Result<DynamicResolution, AppError> {
-    simple_post_mcp::dynamic::ops::resolve(pool, names, force).await
+    simple_post_mcp::dynamic::ops::resolve(pool, project_id, names, force).await
 }
 
 /// 强制重新取一条定义。

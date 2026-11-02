@@ -17,8 +17,10 @@ import type {
   EnvSnapshot,
   EnvWrite,
   ScriptOutcome,
+  StoredRequestSnapshot,
   TlsSettings,
 } from '@/types/domain';
+import { toRequestSnapshot } from './model/requestInput';
 
 /** 与 store 里 `setLastResponse` / `addResponseHistory` 相同的形状。 */
 
@@ -88,12 +90,16 @@ export function useRequestActions({
    */
   onPathParamGate: (missing: string[]) => void;
   setRequestPending: (v: boolean) => void;
-  setLastResponse: (resp: ApiResponse | null) => void;
+  setLastResponse: (resp: ApiResponse | null, request?: StoredRequestSnapshot | null) => void;
   /** 记下这次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。 */
   setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
   /** 把脚本写回的环境变量并进本地副本（落库由后端做）。 */
   applyEnvWrites: (envId: string, writes: EnvWrite[]) => void;
-  addResponseHistory: (endpointId: string, response: ApiResponse) => void;
+  addResponseHistory: (
+    endpointId: string,
+    response: ApiResponse,
+    request?: StoredRequestSnapshot,
+  ) => void;
   saveDraftEndpoint: (id: string) => Promise<string | null>;
   updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
   clearEndpointDraft: (id: string) => void;
@@ -102,13 +108,14 @@ export function useRequestActions({
   setCurlFlash: (v: boolean) => void;
 }) {
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
+  const activeProjectId = useAppStore((s) => s.activeProjectId);
 
   const handleSend = useCallback(async () => {
     if (!endpointId) return;
     // 校验是请求的前置门。解析不了的 json body 不该让服务端去猜；照发只会让用户对着
     // 服务端解析错误，而这个错误本可以指出他敲错的那个字符。
     if (!runValidation()) return;
-    // 先取消任何在途请求。
+    // `handleSend` 先取消任何在途请求。
     inFlightRef.current?.abort();
     const ctrl = new AbortController();
     inFlightRef.current = ctrl;
@@ -119,10 +126,13 @@ export function useRequestActions({
       // TTL 内命中缓存时后端不发取数请求，故这一步通常是廉价的一次 IPC。
       let request = prepared;
       if (dynamicNames.length > 0) {
-        const { values } = await resolveDynamicVariables(dynamicNames);
+        // 第二个参数是**消费方项目**：动态变量的定义挂在项目里，故只解析当前项目里的那些。
+        // 少了它，store 会跨项目找同名定义——发出去的值可能与预览里显示的不是同一条，
+        // 两个项目各有一条同名变量时尤其明显。
+        const { values } = await resolveDynamicVariables(dynamicNames, activeProjectId);
         request = prepareWithDynamic(values);
       }
-      // 路径参数缺值就不发：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
+      // 路径参数缺值时这里不发出去：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
       // 含义不明的 404，而用户看不出是自己漏填了一个值。
       //
       // 这一步在动态变量解析**之后**：路径参数的值可能就是一个动态变量，它取不到值时
@@ -135,9 +145,13 @@ export function useRequestActions({
       // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
       // 这正是未保存的草稿也能发送的原因：没有 `endpointId` 要查，也没有东西要先持久化。
       //
-      // ENV 药丸只存在于 Zustand，数据库的 `is_active` 不跟随它，故解析必须基于界面上的
-      // `endpointEnv` —— `prepareRequest` 已经折进去了。
-      const { response: resp, script } = await sendPreparedRequest({
+      // 「当前环境」只存在于 Zustand——它不落库，故解析必须基于界面上的 `endpointEnv`
+      // （工作区当前环境），`prepareRequest` 已经折进去了。
+      const {
+        response: resp,
+        script,
+        outbound,
+      } = await sendPreparedRequest({
         request,
         // 与 `prepared` 用的是同一份 auth：OAuth2 要靠它取 token，`prepared` 本身
         // 不含（token 只有发出去的那一刻才拿得到）。
@@ -156,20 +170,23 @@ export function useRequestActions({
         // 端点自己的 HTTPS 出站设置：`null` = 继承全局默认那份。
         tlsOverride,
       });
-      setLastResponse(resp);
+      // 这里存的是 `outbound`（发出去的那一份），不是 `prepared`（预览那份）：OAuth2 的
+      // token 只在 `outbound` 里，历史行要显示的就是它。请求头取后端报上来的线上那
+      // 一份（含传输层补的 `host` / `content-length` 等），它缺席时才回落到本地拼的。
+      const snapshot = toRequestSnapshot(outbound, resp.requestHeaders);
+      setLastResponse(resp, snapshot);
       setLastScriptOutcome(script);
-      addResponseHistory(endpointId, resp);
+      addResponseHistory(endpointId, resp, snapshot);
       // 脚本写回的环境变量：**后端已落库**（那是唯一那条持久化路径），这里只把
       // 本地副本同步过来，于是下一个请求立刻能解析到新变量。
       if (script && script.envWrites.length > 0 && env?.id) {
         applyEnvWrites(env.id, script.envWrites);
       }
     } catch (e) {
-      // sendRequest 有文档保证不抛 —— 这个 catch 是防御网，兜住 buildFetchInit 之类
-      // 的意外。
+      // sendRequest 有文档保证不抛 —— 这个 catch 接住 `buildFetchInit` 之类的意外。
       console.error('[HttpTester] sendRequest threw:', e);
     } finally {
-      // 只有仍是当前 controller 才清空（途中可能被更新的发送顶替）。
+      // `inFlightRef` 只有在仍是当前 controller 时才清空（途中可能被更新的发送顶替）。
       if (inFlightRef.current === ctrl) inFlightRef.current = null;
       setRequestPending(false);
     }
@@ -182,6 +199,7 @@ export function useRequestActions({
     prepareWithDynamic,
     dynamicNames,
     resolveDynamicVariables,
+    activeProjectId,
     auth,
     env,
     preRequestScript,

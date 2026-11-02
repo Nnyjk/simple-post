@@ -151,9 +151,6 @@ pub fn resolve_project(
         id: mint_id("proj"),
         name: name.to_string(),
         description: description.map(|d| d.to_string()),
-        base_url: None,
-        base_url_definitions: Vec::new(),
-        default_base_url_definition_id: None,
         color: color.unwrap_or("#3B82F6").to_string(),
         created_at: now,
         updated_at: now,
@@ -162,52 +159,11 @@ pub fn resolve_project(
     Ok(Resolved::created(project.id))
 }
 
-/// 在项目下按名找或建一个服务（`base_url_definitions`）。
-///
-/// 服务名在项目内**本该唯一**，但表上没有唯一约束 —— 于是「建两次」不会报错，
-/// 而是留下两个同名服务，后面挑哪个当默认值就成了一份运气。故这里按名找或建，
-/// 让重复调用不再造出第二份。
-pub fn resolve_base_url_def(
-    conn: &mut Connection,
-    project_id: &str,
-    name: &str,
-    description: Option<&str>,
-    if_exists: IfExists,
-) -> Result<Resolved, AppError> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(AppError::Validation("服务名不能为空".into()));
-    }
-
-    let defs = db::base_url_defs::list_by_project(conn, project_id)?;
-    let found = defs.iter().find(|d| d.name.trim() == name);
-
-    if let Some(d) = found {
-        match if_exists {
-            IfExists::Reuse => return Ok(Resolved::reused(d.id.clone())),
-            IfExists::Error => {
-                return Err(AppError::Validation(format!(
-                    "这个项目里已经有一个叫「{name}」的服务了；换一个名字，或改用 if_exists=duplicate 另建一个"
-                )))
-            }
-            IfExists::Duplicate => {}
-        }
-    }
-
-    let def = crate::domain::BaseUrlDefinition {
-        id: mint_id("svc"),
-        name: name.to_string(),
-        description: description.map(|d| d.to_string()),
-    };
-    db::base_url_defs::create(conn, &def, project_id)?;
-    Ok(Resolved::created(def.id))
-}
-
 /// 在项目下按名找或建一个环境。
 ///
 /// 环境的**列表**是项目级事实，名字在同一项目里也不唯一（界面允许两个同名环境），
-/// 所以「按名找」是「找出第一个同名的」。新环境一律 `is_active = false` —— 导入
-/// 一个环境不等于切换当前环境，那是一次显式决定。
+/// 所以「按名找」是「找出第一个同名的」。当前环境不是落库的状态，故这里不碰它——
+/// 新建一个环境不等于任何客户端切换了它。
 pub fn resolve_environment(
     conn: &mut Connection,
     project_id: &str,
@@ -238,11 +194,12 @@ pub fn resolve_environment(
         id: mint_id("env"),
         project_id: project_id.to_string(),
         name: name.to_string(),
-        base_urls: std::collections::HashMap::new(),
         module_base_urls: std::collections::HashMap::new(),
         variables: std::collections::HashMap::new(),
         disabled_variables: Vec::new(),
-        is_active: false,
+        // 创建时刻：`db::environments::create` 用它认定「默认环境」（最早创建的那个）。
+        // 项目里第一个环境写当前时间，后建的自然排在它后面。
+        created_at: crate::domain::now_ms(),
     };
     db::environments::create(conn, &env)?;
     Ok(Resolved::created(env.id))

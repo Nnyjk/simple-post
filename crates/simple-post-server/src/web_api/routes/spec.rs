@@ -28,8 +28,8 @@ use super::super::{map_app_error, HttpErrorResponse, WebState};
 
 /// `POST /api/spec/upsert` —— 一次调用落一份完整的接口规格。
 ///
-/// 回的是「落了什么」与「端点还缺什么」两半：模块、集合路径上的每一级、环境、服务
-/// 与端点各自的 id，以及这个端点还缺哪几样才能发出去。
+/// 回的是「落了什么」与「端点还缺什么」两半：模块、集合路径上的每一级、环境与端点
+/// 各自的 id，以及这个端点还缺哪几样才能发出去。
 pub(crate) async fn spec_upsert(
     State(s): State<Arc<WebState>>,
     Json(body): Json<Value>,

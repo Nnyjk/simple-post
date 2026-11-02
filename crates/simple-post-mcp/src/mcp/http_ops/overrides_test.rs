@@ -72,9 +72,6 @@ fn seed_with_url(st: &AppState, base_url: &str, url: &str) -> String {
         id: "p_ovr".into(),
         name: "P".into(),
         description: None,
-        base_url: None,
-        base_url_definitions: vec![],
-        default_base_url_definition_id: None,
         color: String::new(),
         created_at: 0,
         updated_at: 0,
@@ -94,10 +91,8 @@ fn seed_with_url(st: &AppState, base_url: &str, url: &str) -> String {
         node_id: "e_ovr".into(),
         method: HttpMethod::Get,
         url: url.into(),
-        environment_id: None,
-        base_url_definition_id: None,
         // 每端点自定义的 base URL 优先级最高，故直接钉住 stub 的地址：不必再为它
-        // 建服务定义与环境格子。
+        // 建环境格子。
         base_url_override: Some(base_url.to_string()),
         params: vec![],
         path_params: vec![],
@@ -138,7 +133,7 @@ fn seed_with_url(st: &AppState, base_url: &str, url: &str) -> String {
 
 /// 形状不对的覆盖值要报错，不能被静默换成空值。
 ///
-/// 那一层曾经用 `.ok()` 把整份覆盖值换成空值：调用方看到的是「按端点自己那份发出去
+/// 那一层若把整份覆盖值换成空值，调用方看到的是「按端点自己那份发出去
 /// 的请求」，而不是「你传的 overrides 格式不对」—— 于是覆盖值整个消失，而界面与
 /// 日志里看不出任何异常。
 ///

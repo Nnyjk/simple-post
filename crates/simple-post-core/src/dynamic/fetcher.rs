@@ -18,6 +18,10 @@ pub struct RawSource {
     pub status: u16,
     pub content_type: String,
     pub body: String,
+    /// 响应头。处理脚本看得到它们（`pm.response.headers`）。
+    pub headers: Vec<(String, String)>,
+    /// 往返耗时（毫秒）。
+    pub duration_ms: u64,
 }
 
 /// 取数器：把一条定义的数据源变成一次真实的 HTTP 响应。

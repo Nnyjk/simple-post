@@ -46,6 +46,11 @@ const CollectionScriptDialog = lazy(() =>
   })),
 );
 
+// 批量运行的对话框：同样只在打开时挂载，不进常驻 chunk。
+const BatchRunDialog = lazy(() =>
+  import('@/features/batch-run/BatchRunDialog').then((m) => ({ default: m.BatchRunDialog })),
+);
+
 const kindLabel: Record<TargetKind, string> = {
   project: '项目',
   module: '模块',
@@ -89,6 +94,12 @@ export function ProjectTree() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState<EditTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  // 批量运行的目标：一个集合或模块。`null` = 对话框没开。
+  const [batchTarget, setBatchTarget] = useState<{
+    id: string;
+    name: string;
+    kind: 'collection' | 'module';
+  } | null>(null);
 
   // ---------- derived ----------
   // 下面每个过滤都是对原始 store 引用做的 `useMemo`，而不是 selector：返回新数组的
@@ -102,7 +113,7 @@ export function ProjectTree() {
     [tree, query, endpointDetails],
   );
   // `rootId` 反规范化地存在于每个节点上，故「属于当前打开的项目」只是一次过滤 ——
-  // 不必向上走到模块再去找项目 id。
+  // `projectNodes` 不必向上走到模块再去找项目 id。
   const projectNodes = useMemo(
     () => nodes.filter((n) => n.rootId === activeProjectId),
     [nodes, activeProjectId],
@@ -130,7 +141,7 @@ export function ProjectTree() {
   const transfer = useTransfer({
     onImported: async (moduleId) => {
       await useAppStore.getState().reloadWorkspace();
-      // 展开落点模块：新集合挂在它下面，父级折叠着的话用户看不到自己刚导入了什么。
+      // 展开目标模块：新集合挂在它下面，父级折叠着的话用户看不到自己刚导入了什么。
       // 新建的集合本身保持折叠 —— 一次导入几十个分组，全展开等于把树推到看不见底。
       useAppStore.setState((s) => ({
         nodes: s.nodes.map((n) => (n.id === moduleId ? { ...n, expanded: true } : n)),
@@ -178,6 +189,7 @@ export function ProjectTree() {
     openNewItemWithIntent,
     createEndpointAt: createEndpoint,
     openEndpointTab,
+    openBatchRun: setBatchTarget,
     setMenu,
   });
 
@@ -462,6 +474,18 @@ export function ProjectTree() {
             onOpenChange={(o) => !o && closeCollectionScripts()}
             nodeId={scriptCollection.id}
             nodeName={scriptCollection.name}
+          />
+        </Suspense>
+      )}
+      {/* 批量运行 —— 同样只在打开时挂载。 */}
+      {batchTarget && (
+        <Suspense fallback={null}>
+          <BatchRunDialog
+            open
+            onOpenChange={(o) => !o && setBatchTarget(null)}
+            rootId={batchTarget.id}
+            rootName={batchTarget.name}
+            rootKind={batchTarget.kind}
           />
         </Suspense>
       )}

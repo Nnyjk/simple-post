@@ -42,9 +42,9 @@ export function InlineNameCell({
   const inputRef = useRef<HTMLInputElement>(null);
   // `autoEdit` 是标志而非事件：它可以跨多次重渲染一直为 `true`，单元格之后也可能重新
   // 挂载（例如切环境会给正文换 key）。用 ref 上闩把它变成 false → true 的边沿，
-  // 于是每次拉高只开一次，而不会在每次击键引起的重渲染上都开。
+  // 于是这个闩每次拉高只开一次，而不会在每次击键引起的重渲染上都开。
   const autoOpened = useRef(false);
-  // 只有自动打开才预选文本。点击编辑既有行仍保持原先「光标在末尾」的行为，
+  // 只有自动打开才预选文本。点击编辑既有行时光标仍落在末尾，
   // 免得改个服务名悄悄变成全选覆盖。
   const preselectOnOpen = useRef(false);
 
@@ -62,7 +62,7 @@ export function InlineNameCell({
     onAutoEditEnd?.();
   }, [autoEdit, value, onAutoEditEnd]);
 
-  // 在 `editing` 翻过去之后的那一次渲染才跑，那才是输入框真正存在的第一刻 ——
+  // 这个 effect 在 `editing` 翻过去之后的那一次渲染才跑，那才是输入框真正存在的第一刻 ——
   // 上面的 effect 够不到这个 ref。
   useEffect(() => {
     if (!editing || !preselectOnOpen.current) return;

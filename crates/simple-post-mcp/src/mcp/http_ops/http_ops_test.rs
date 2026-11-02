@@ -5,14 +5,14 @@ use std::collections::HashMap;
 use serde_json::json;
 
 use crate::mcp::{arg_bool_opt, arg_str, arg_str_opt, arg_u64_opt};
-use simple_post_core::domain::{BodyMode, Environment, HttpMethod};
+use simple_post_core::domain::{BodyMode, Environment, HttpMethod, ModuleBaseUrl};
 
 use super::envelope::header_pairs_to_tuples;
 use super::input::{extract_settings, flatten_key_values, parse_auth, parse_body_mode};
 use super::{flatten_string_map, table, RunRequestArgs};
 #[test]
-fn table_has_two_rows() {
-    assert_eq!(table().len(), 2);
+fn table_has_three_rows() {
+    assert_eq!(table().len(), 3);
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn the_call_endpoint_schema_defines_the_key_value_it_refers_to() {
 ///
 /// 工具描述与 JSON Schema 文档化的就是这种形状，而域类型 `KeyValue` 要求 `id` 与
 /// `enabled` 都在。按域类型直接反序列化，`{"key":"id","value":"42"}` 会因缺字段而
-/// 失败 —— 而那一层曾经用 `.ok()` 把整份覆盖值换成空值，调用方看不出出了什么事。
+/// 失败 —— 那一层若把整份覆盖值换成空值，调用方看不出出了什么事。
 #[test]
 fn overrides_accept_a_key_value_only_row() {
     let o: crate::variable_fill::EndpointOverrides = serde_json::from_value(json!({
@@ -196,7 +196,6 @@ fn settings_override_extracts_values() {
         body_mode: None,
         auth: None,
         env_id: None,
-        base_url_definition_id: None,
         module_id: None,
         settings_override: Some(so),
         timeout_ms: None,
@@ -242,28 +241,29 @@ fn header_pairs_round_trip() {
     assert_eq!(tuples, vec![("a".into(), "b".into())]);
 }
 
-/// 环境行里那个 (服务 × 模块) 的格子：base URL 唯一的住址。
-/// base URL 唯一的住址：(环境 × 服务 × 模块) 的那个格子。
+/// 环境行里那个 (环境 × 模块) 的格子：base URL 唯一的住址。
 #[test]
-fn a_service_url_lives_in_the_env_cell() {
+fn a_module_url_lives_in_the_env_cell() {
     let mut module_base_urls = HashMap::new();
     module_base_urls.insert(
-        "auth".into(),
-        HashMap::from([("mod_a".into(), "https://auth.example.com".into())]),
+        "mod_a".into(),
+        ModuleBaseUrl {
+            url: "https://auth.example.com".into(),
+            proxy: None,
+        },
     );
     let env = Environment {
         id: "e1".into(),
         project_id: "p1".into(),
         name: "dev".into(),
-        base_urls: HashMap::new(),
         module_base_urls,
         variables: HashMap::new(),
         disabled_variables: Vec::new(),
-        is_active: true,
+        created_at: 0,
     };
-    let cell = env
-        .module_base_urls
-        .get("auth")
-        .and_then(|m| m.get("mod_a"));
-    assert_eq!(cell.map(String::as_str), Some("https://auth.example.com"));
+    let cell = env.module_base_urls.get("mod_a");
+    assert_eq!(
+        cell.map(|c| c.url.as_str()),
+        Some("https://auth.example.com")
+    );
 }

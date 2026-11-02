@@ -86,9 +86,8 @@ describe('http-build: cURL parity with fetch', () => {
 
   it('emits the caller-joined URL when the input is a path', () => {
     // 回归网。`buildCurlCommand` 只对它拿到的 url 跑模板替换——它**不**join base URL。
-    // 本文件其余测试都传完整 URL，所以渲染器真正产出的「只有 path」那种形状从
-    // 来没被覆盖过，于是「复制为 cURL」发出的是 `curl -X POST '/cashier'`，根本跑
-    // 不了。契约钉在这里：传进来什么 URL，就发出什么 URL。
+    // 契约钉在这里：传进来什么 URL，就发出什么 URL；渲染器产出的「只有 path」那种形状
+    // 也必须原样发出，否则「复制为 cURL」给出的是 `curl -X POST '/cashier'`，根本跑不了。
     const i = input({ method: 'POST', url: 'https://api.example.com/cashier' });
     const curl = buildCurlCommand(i);
     assert.ok(

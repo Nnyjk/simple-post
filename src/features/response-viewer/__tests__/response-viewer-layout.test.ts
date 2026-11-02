@@ -4,7 +4,7 @@
  * 为什么只能读源码：本 runner（`tsx --test` + `node:assert`）没有 DOM、没有 jsdom，
  * 也没有 React 渲染器，测不了 `ResponseViewer` 的任何实际尺寸。
  *
- * 它钉住的是当初真正坏掉的那件事：包住历史条的那个元素的形状。`<WorkspaceShell>` 把
+ * 它钉住的是包住历史条的那个元素的形状。`<WorkspaceShell>` 把
  * 查看器渲染在 `min-h-0 flex-1` 里，而那不是 flex 容器，故 `ResponseViewer` 的每个分支
  * 都必须自带一个 flex 列 —— 否则带 `h-full` 的兄弟会吃光整个盒子，其后按块流排布的
  * 内容就落到屏幕外。

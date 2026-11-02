@@ -32,15 +32,13 @@ use simple_post_core::domain::{parse_http_method, HttpMethod};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
-use crate::ir::{Exchange, IrEndpoint, IrModule, IrScripts, IrServer};
+use crate::ir::{Exchange, IrBaseUrl, IrEndpoint, IrModule, IrScripts};
 use crate::spec::{escape_pointer_token, PATH_METHODS};
 
 use self::auth::auth_of;
 use self::params::{parameters, request_body};
 use self::servers::doc_servers;
-// `servers.rs` 里的 `super::service_name` 要落到这条绑定上，故它得挂在 `openapi` 而非
-// `servers` 自己的 `use` 里。
-use super::{service_name, ParsedExchange};
+use super::ParsedExchange;
 
 /// `requestBody.content` 的偏好序：先到先得。`RequestBody` 只有一个 `content`，
 /// 装不下第二个。
@@ -79,8 +77,8 @@ pub(super) struct DocView<'a> {
 
 /// `servers[0].url` 拆完之后的样子。
 pub(super) struct DocServers {
-    /// 文档级只有一个 host。URL 是 per (环境 × 模块 × 服务)，本仓库装不下多服务器。
-    pub(super) hosts: Vec<IrServer>,
+    /// 文档级的地址。一个模块一格，故这份文档只给得出一个地址。
+    pub(super) host: Option<String>,
     /// 留在 path 上的前缀。
     pub(super) base_path: String,
 }
@@ -213,7 +211,11 @@ fn group_of(
         key: key.clone(),
         name,
         description: None,
-        servers: view.servers.hosts.clone(),
+        base_url: view
+            .servers
+            .host
+            .clone()
+            .map(|url| IrBaseUrl { url, proxy: None }),
         endpoints: Vec::new(),
         collections: Vec::new(),
         scripts: IrScripts::default(),
@@ -251,6 +253,8 @@ fn endpoint_of(
         description: text(operation, "description"),
         method,
         path,
+        // 文档级的地址归模块那一格，故端点不带自己的地址。
+        base_url_override: None,
         params,
         path_params,
         headers,

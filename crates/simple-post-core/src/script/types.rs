@@ -19,6 +19,14 @@ pub struct ScriptRequest {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// 请求体的**二进制形态**（base64）。
+    ///
+    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。multipart 带文件分片时整个请求体
+    /// 是字节，故走这条通道。
+    ///
+    /// 脚本改不动它：脚本改的是 `body`（文本形态），改写二进制请求体不是脚本该做的事。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
 }
 
 /// 一份已收到的响应。test 脚本看它。
@@ -29,6 +37,12 @@ pub struct ScriptResponse {
     pub status: String,
     pub headers: Vec<(String, String)>,
     pub body: String,
+    /// 响应体的**二进制形态**（base64）。
+    ///
+    /// 响应字节不是合法 UTF-8 时才有它，此时 `body` 是空串。断言要读图片或压缩包的内容
+    /// 时走这条通道。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
     /// 往返耗时（毫秒）。
     pub response_time_ms: u64,
 }

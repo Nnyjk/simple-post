@@ -62,7 +62,7 @@ pub(super) fn deref(ctx: &mut Ctx, root: &Value, input: &Value, pointer: &str) -
                 };
                 // 本帧压进去的 ref 指针：非空对象/数组由下面的 Merge 帧弹回，标量就地弹回。
                 // 两侧必须对称——少弹一次会提前清掉祖先帧的「正在展开」，那棵子树里
-                // 真的成环时就认不出来了，只能靠深度上限兜，报错会指向错误的方向。
+                // 真的成环时就认不出来了，只能靠深度上限拦住，报错会指向错误的方向。
                 ctx.active.extend(opened.iter().cloned());
                 match node {
                     Value::Object(map) if !map.is_empty() => {

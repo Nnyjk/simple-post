@@ -22,6 +22,8 @@ pub const PRELUDE: &str = r##"
   var varState = { values: {} };
   var reqState = { method: '', url: '', headers: {}, body: null };
   var respState = null;
+  // 处理脚本拿到的数据：动态变量抽取出来的那个值。
+  var dataState = null;
 
   function show(v) {
     if (typeof v === 'string') return v;
@@ -291,6 +293,12 @@ pub const PRELUDE: &str = r##"
       }
     }
   };
+  // `pm.data` 是**值本身**（不是包装）：抽取出来的那个 JSON，脚本直接
+  // `pm.data.items[0].id` 这样取。用取值器而不是普通属性，故它在注入之后才拿到真值。
+  Object.defineProperty(pm, 'data', {
+    get: function () { return dataState; },
+    configurable: true
+  });
   globalThis.pm = pm;
 
   // ---- console --------------------------------------------------------
@@ -341,6 +349,7 @@ pub const PRELUDE: &str = r##"
     reqState.body = (input.request && input.request.body !== null && input.request.body !== undefined)
       ? String(input.request.body) : null;
     respState = input.response ? input.response : null;
+    dataState = (input.data !== undefined && input.data !== null) ? input.data : null;
   };
 
   // 失败的脚本要回滚：宿主把它改过的请求换回来。

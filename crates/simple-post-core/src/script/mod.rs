@@ -24,6 +24,7 @@ mod limits;
 mod prelude;
 mod run;
 mod send;
+mod transform;
 mod types;
 
 // 线上类型住在 `domain`（要与渲染层的 TS 镜像放在一起），这里转出一次，
@@ -33,10 +34,11 @@ pub use crate::domain::{
     ScriptPhase,
 };
 pub use chain::{collect_chain, merge_env};
-pub use engine::{Sandbox, ScriptEffects, ScriptFailure, ScriptRun};
+pub use engine::{Sandbox, ScriptEffects, ScriptFailure, ScriptRun, TransformRun};
 pub use limits::{ScriptLimits, DEFAULT_SCRIPT_LIMITS};
 pub use run::run_phase;
 pub use send::{send_with_scripts, ScriptOverride, ScriptedSendInput, ScriptedSendOutcome};
+pub use transform::{run_transform, TransformOutcome};
 pub use types::{ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit};
 
 // 测试。兄弟 `#[path]` 模块，遵循本 crate 的惯例：Rust 按模块路径找文件，测试专用

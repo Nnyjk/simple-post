@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use axum::{
     http::Method,
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
     Json, Router,
 };
 use tower_http::services::ServeDir;
@@ -125,8 +125,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/environments",
             get(environments_list).post(environments_create),
         )
-        // 同样的 radix tree 优先级：`/active`（字面量）注册在 `/{envId}`（参数）之前。
-        .route("/api/environments/active", post(environments_set_active))
         .route(
             "/api/environments/{envId}",
             patch(environments_update).delete(environments_delete),
@@ -144,22 +142,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/environments/{envId}/module-baseurls",
             post(environments_set_module_baseurl),
         )
-        // ---- baseUrlDefs ----
-        // 服务属于项目，故三个 project 级动词挂在 `/api/projects/{projectId}/baseurls`。
-        // `/baseurls/default` 与 `/api/baseurl-defs/{defId}` 前缀不同，不存在 radix
-        // tree 优先级问题；`base_url_defs_test` 盯住每一条都仍可达。
-        .route(
-            "/api/projects/{projectId}/baseurls",
-            get(base_url_defs_list).post(base_url_defs_create),
-        )
-        .route(
-            "/api/projects/{projectId}/baseurls/default",
-            post(base_url_defs_set_default),
-        )
-        .route(
-            "/api/baseurl-defs/{defId}",
-            patch(base_url_defs_update).delete(base_url_defs_delete),
-        )
         // ---- request settings (singleton) ----
         .route(
             "/api/request-settings",
@@ -176,7 +158,18 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // `/api/response-history/{endpointId}` 必须在 axum 的 radix tree 里共存：
         // 抢优先级失败的那条会落到 SPA fallback，回 `200` + HTML，curl 看着就像
         // 一个正常工作的端点。`response_history_test.rs` 用真实 listener 盯这一条。
+        //
+        // `favorite` 与 `keep` 是**字面量**段，故同样注册在参数段之前：它们与
+        // `{endpointId}` 在 radix tree 的同一层，字面量段必须先占住位置。
         .route("/api/response-history", post(response_history_append))
+        .route(
+            "/api/response-history/favorite",
+            put(response_history_set_favorite),
+        )
+        .route(
+            "/api/response-history/keep",
+            get(response_history_keep_get).put(response_history_keep_put),
+        )
         .route(
             "/api/response-history/{endpointId}",
             get(response_history_list).delete(response_history_clear),

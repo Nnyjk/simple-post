@@ -1,5 +1,5 @@
-//! project / module / collection / endpoint / baseUrlDef / spec MCP 工具，共
-//! 5 + 5 + 5 + 8 + 5 + 1 = **29 个**。
+//! project / module / collection / endpoint / spec MCP 工具，共
+//! 5 + 5 + 5 + 8 + 1 = **24 个**。
 //!
 //! ## 命名
 //!
@@ -21,10 +21,9 @@ use serde::Deserialize;
 
 use crate::mcp::ToolEntry;
 
-pub(super) mod base_url_def;
 pub(super) mod collection;
 // `pub(crate)`：`crate::spec::ops` 要用 `endpoint::missing_pieces` —— 那条判据要调
-// `variable_fill::resolve_base_url_with`，而它在 mcp crate 里，故这条判据不能住在 core。
+// `variable_fill::resolve_base_url`，而它在 mcp crate 里，故这条判据不能住在 core。
 pub(crate) mod endpoint;
 pub(super) mod module;
 pub(super) mod project;
@@ -34,8 +33,8 @@ pub(super) mod spec;
 // 跨子模块共用的 Args 形状
 // =========================================================================
 //
-// `ProjectIdArgs` 被 `project_get` / `module_list` / `base_url_def_list` 共用，
-// `ModuleIdArgs` 被 `collection_list` 共用。集中放在这里，各实体子模块就能
+// `ProjectIdArgs` 被 `project_get` / `module_list` 共用，`ModuleIdArgs` 被
+// `collection_list` 共用。集中放在这里，各实体子模块就能
 // `use super::*`，专心写自己的 Args。
 
 #[derive(Debug, Deserialize)]
@@ -53,8 +52,8 @@ pub(super) struct ModuleIdArgs {
 // =========================================================================
 
 /// 拼好的 dispatch 表，顺序固定：projects (5) → modules (5) → collections (5)
-/// → endpoints (8) → base_url_defs (5) → spec (1)。各子模块的 `register()` 只推自己那一段，
-/// 这里拼起来，调用方拿到含全部 29 条的单个 `table()`。
+/// → endpoints (8) → spec (1)。各子模块的 `register()` 只推自己那一段，
+/// 这里拼起来，调用方拿到含全部 24 条的单个 `table()`。
 pub(crate) fn table() -> Vec<ToolEntry> {
     let mut v = Vec::with_capacity(32);
 
@@ -69,9 +68,6 @@ pub(crate) fn table() -> Vec<ToolEntry> {
 
     // ---- endpoints (8) ----
     endpoint::register(&mut v);
-
-    // ---- base_url_defs (5) ----
-    base_url_def::register(&mut v);
 
     // ---- spec (1) ----
     spec::register(&mut v);

@@ -71,7 +71,7 @@ const RAIL_ITEMS: {
     id: 'request',
     label: '请求',
     icon: <Send className="h-4 w-4" />,
-    hint: '超时 / 重定向 / 体积上限',
+    hint: '超时 / 重定向 / 历史条数',
     concept: 'request',
   },
 ];
@@ -97,19 +97,19 @@ const SECTION_META: Record<
   },
   request: {
     title: '请求',
-    description: '应用到所有 HTTP 发送（v0.2 由 Rust 端消费）',
+    description: '出站请求的行为，以及发送历史的保留条数',
     icon: <Send className="h-3.5 w-3.5" />,
   },
 };
 
 export function SettingsPanel() {
   // 当前分区住在 store，这样顶栏环境切换器的深链（它调 `openSettingsTab('env')`）
-  // 在标签首次打开时就落到正确的分区上。
+  // 在标签首次打开时就能切到正确的分区。
   const activeSection = useAppStore((s) => s.activeSettingsSection);
   const setActiveSection = useAppStore((s) => s.setActiveSettingsSection);
 
-  // 这里不再读别的。环境分区的 store 接线 —— 哪些环境属于当前项目、哪些模块是前置 URL
-  // 表的行轴，以及七个环境 / 四个服务动作 —— 住在 `ProjectEnvSection`，因为项目标签挂载的
+  // `SettingsPanel` 不再读别的。环境分区的 store 接线 —— 哪些环境属于当前项目、哪些模块是
+  // 模块地址表的行轴，以及那几组环境动作 —— 住在 `ProjectEnvSection`，因为项目标签挂载的
   // 正是同一份分区。改在这里拼这些 props，就等于让那些规则有第二份副本。
   const mainRef = useRef<HTMLElement>(null);
 

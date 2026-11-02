@@ -12,6 +12,7 @@
 import { Suspense, lazy } from 'react';
 import type { RequestBody } from '@/types/domain';
 import type { FormatResult } from '@/lib/utils';
+import type { VarEntry } from './var-hint';
 
 const BodyEditorImpl = lazy(() => import('./BodyEditor').then((m) => ({ default: m.BodyEditor })));
 
@@ -20,12 +21,18 @@ export function BodyEditor({
   onChange,
   validationError,
   onFormatResult,
+  varEntries,
+  envName,
 }: {
   value: RequestBody;
   onChange: (body: RequestBody) => void;
   /** 钉住的格式错误，归 HttpTester 所有，见 BodyEditor 的 props。 */
   validationError?: string | null;
   onFormatResult?: (result: FormatResult) => void;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
+  varEntries: VarEntry[];
+  /** 当前环境名，显示在候选浮层的标题上。 */
+  envName?: string;
 }) {
   return (
     <Suspense fallback={<EditorSkeleton />}>
@@ -34,6 +41,8 @@ export function BodyEditor({
         onChange={onChange}
         validationError={validationError}
         onFormatResult={onFormatResult}
+        varEntries={varEntries}
+        envName={envName}
       />
     </Suspense>
   );

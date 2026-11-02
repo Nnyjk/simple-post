@@ -21,7 +21,9 @@ fn http_response_serialises_camel_case() {
         duration_ms: 42,
         size_bytes: 7,
         headers: vec![],
+        request_headers: vec![],
         body: "{}".into(),
+        body_base64: None,
         content_type: "application/json".into(),
         method: "GET".into(),
         url: "http://x/y".into(),
@@ -178,6 +180,7 @@ async fn execute_refuses_before_dialing() {
         url: "file:///C:/Windows/win.ini".into(),
         headers: vec![],
         body: None,
+        body_base64: None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -191,7 +194,7 @@ async fn execute_refuses_before_dialing() {
 }
 
 /// 策略必须挺过一次重定向。
-/// 逐跳重检 `check_url` 是承重的：只查初始 URL 时，一个回答 `302` 指向被禁地址的 URL
+/// 逐跳重检 `check_url` 不能省：只查初始 URL 时，一个回答 `302` 指向被禁地址的 URL
 /// 照样能抵达它——正是这条策略存在的意义所要阻止的威胁。这里起一个真实的 loopback
 /// 服务器朝元数据地址回 `302`，并断言那一跳被拒绝。
 #[tokio::test]
@@ -223,6 +226,7 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
         url: format!("http://localhost:{port}/bounce"),
         headers: vec![],
         body: None,
+        body_base64: None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -244,6 +248,202 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
         err.message.contains("error following redirect"),
         "expected the redirect to be refused rather than followed, got: {}",
         err.message
+    );
+}
+
+// 线上那一份请求头
+//
+// 下面这一组把「上报的请求头」与「线路上的原始字节」逐条比对。响应详情页要展示的是
+// 线上那一份，故这两者必须一致：传输层补的 `host` / `content-length` /
+// `accept-encoding` 若漏报或写错，界面展示的就是一份假的请求。
+
+/// 起一个服务器，把这次请求的**原始字节**原样交回来。
+///
+/// 用裸 TCP：只有原始字节能回答「线上到底发了哪些头」，任何 HTTP 框架都会把它们
+/// 解析后重新组织，那样就问不到原问题了。
+async fn spawn_raw_request_capture() -> (u16, oneshot::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let Ok((mut sock, _)) = listener.accept().await else {
+            return;
+        };
+        let raw = read_raw_request(&mut sock).await;
+        let _ = sock
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{}",
+            )
+            .await;
+        let _ = tx.send(raw);
+    });
+    (port, rx)
+}
+
+/// 把请求读到完：请求头读到 `\r\n\r\n`，再按 `content-length` 补上请求体。
+///
+/// 请求体必须一并读完：服务端提前回响应而客户端还在写 body 时，那次请求会以
+/// 连接错误收场，测的就不是请求头了。
+async fn read_raw_request(sock: &mut TcpStream) -> String {
+    let mut seen: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut head_end: Option<usize> = None;
+    while head_end.is_none() {
+        let Ok(n) = sock.read(&mut buf).await else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        seen.extend_from_slice(&buf[..n]);
+        head_end = seen
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|p| p + 4);
+    }
+    let Some(head_end) = head_end else {
+        return String::from_utf8_lossy(&seen).to_string();
+    };
+    let head = String::from_utf8_lossy(&seen[..head_end]).to_string();
+    let want = head
+        .lines()
+        .find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            if k.trim().eq_ignore_ascii_case("content-length") {
+                v.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    while seen.len() - head_end < want {
+        let Ok(n) = sock.read(&mut buf).await else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        seen.extend_from_slice(&buf[..n]);
+    }
+    String::from_utf8_lossy(&seen).to_string()
+}
+
+/// 把原始请求头解析成 `(小写名字, 值)` 的列表。
+fn parse_raw_headers(raw: &str) -> Vec<(String, String)> {
+    raw.lines()
+        .skip(1)
+        .take_while(|l| !l.trim().is_empty())
+        .filter_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            Some((k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        })
+        .collect()
+}
+
+/// 上报的请求头必须与线路上的原始字节逐条相同。
+///
+/// 传输层会补 `host`、`content-length` 与 `accept-encoding`，调用方看不见它们；
+/// 响应详情页要展示「实际发出去的请求」，故 executor 必须把它们一并报上来。
+#[tokio::test]
+async fn the_reported_request_headers_are_the_ones_on_the_wire() {
+    let (port, raw_rx) = spawn_raw_request_capture().await;
+    let input = HttpRequestInput {
+        method: "POST".into(),
+        url: format!("http://127.0.0.1:{port}/api/orders?page=1"),
+        headers: vec![
+            ("X-Token".into(), "demo-token-001".into()),
+            ("Content-Type".into(), "application/json".into()),
+        ],
+        body: Some("{\"orderId\":\"42\"}".into()),
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+
+    let out = execute_with_policy(&input, OutboundPolicy::default()).await;
+    let raw = raw_rx.await.expect("the server must capture the request");
+    let wire = parse_raw_headers(&raw);
+    let reported = out
+        .response
+        .expect("a response")
+        .request_headers
+        .iter()
+        .map(|e| (e[0].to_ascii_lowercase(), e[1].clone()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        reported, wire,
+        "the reported request headers must be the ones on the wire.\n\
+         raw request:\n{raw}"
+    );
+}
+
+/// 没有请求体时线上没有 `content-length`，上报的那一份也不该有。
+#[tokio::test]
+async fn a_request_without_a_body_reports_no_content_length() {
+    let (port, raw_rx) = spawn_raw_request_capture().await;
+    let input = HttpRequestInput {
+        method: "GET".into(),
+        url: format!("http://127.0.0.1:{port}/health"),
+        headers: vec![],
+        body: None,
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+
+    let out = execute_with_policy(&input, OutboundPolicy::default()).await;
+    let raw = raw_rx.await.expect("the server must capture the request");
+    let reported = out
+        .response
+        .expect("a response")
+        .request_headers
+        .iter()
+        .map(|e| (e[0].to_ascii_lowercase(), e[1].clone()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(reported, parse_raw_headers(&raw), "raw request:\n{raw}");
+    assert!(
+        !reported.iter().any(|(k, _)| k == "content-length"),
+        "there is no body, so there is no content-length on the wire"
+    );
+}
+
+/// 调用方自己写过的头不补第二条：线路上发出去的是调用方那一份。
+#[tokio::test]
+async fn a_caller_supplied_host_header_is_not_duplicated() {
+    let (port, raw_rx) = spawn_raw_request_capture().await;
+    let input = HttpRequestInput {
+        method: "GET".into(),
+        url: format!("http://127.0.0.1:{port}/health"),
+        headers: vec![("Host".into(), "example.test".into())],
+        body: None,
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+
+    let out = execute_with_policy(&input, OutboundPolicy::default()).await;
+    let raw = raw_rx.await.expect("the server must capture the request");
+    let reported = out
+        .response
+        .expect("a response")
+        .request_headers
+        .iter()
+        .map(|e| (e[0].to_ascii_lowercase(), e[1].clone()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(reported, parse_raw_headers(&raw), "raw request:\n{raw}");
+    assert_eq!(
+        reported.iter().filter(|(k, _)| k == "host").count(),
+        1,
+        "the caller's host header is the only one on the wire"
     );
 }
 
@@ -327,6 +527,106 @@ fn truncate_body_exact_cap_is_not_truncated() {
     assert!(!truncated);
 }
 
+// 响应的形态判据
+
+/// `text/plain` 的响应即便字节非法 UTF-8，也仍是**文本形态**。
+///
+/// 读回来的字节是按体积上限裁过的，裁点落在某个多字节字符中间时，一个纯文本响应读回来
+/// 也是非法 UTF-8。只看字节会把这样的文本误判成二进制，于是界面给一段正文弹出「下载
+/// 文件」的卡片。故判据先问 Content-Type：它说这是文本，那就是文本。
+#[test]
+fn a_text_content_type_stays_text_even_when_the_bytes_are_not_utf8() {
+    // 「你」的前两个字节：单独放在一起不是合法 UTF-8。
+    let raw = vec![0xE4, 0xBD];
+    let payload = split_response_payload(raw, 1024, "text/plain; charset=utf-8");
+    assert!(
+        payload.base64.is_none(),
+        "Content-Type 说它是文本，就该给文本形态"
+    );
+}
+
+/// `application/octet-stream` 的响应字节非法 UTF-8 时是**二进制形态**。
+///
+/// 这是上条的反面：Content-Type 没说它是文本，字节也不是合法 UTF-8，两个判据都说不，
+/// 于是给 base64 那一份。
+#[test]
+fn a_binary_content_type_with_invalid_utf8_bytes_is_binary() {
+    let raw = vec![0x00, 0xFF, 0xFE];
+    let payload = split_response_payload(raw, 1024, "application/octet-stream");
+    let base64 = payload.base64.expect("非法 UTF-8 的字节该走 base64 形态");
+    assert_eq!(base64, "AP/+");
+    assert!(payload.text.is_empty());
+    assert_eq!(payload.bytes, 3);
+}
+
+/// `application/octet-stream` 的字节**恰好**是合法 UTF-8 时，给文本形态。
+///
+/// 判据的顺序是「先问 Content-Type，再问字节」：Content-Type 没说它是文本，才轮到字节
+/// 说话。字节说得清，那就是文本。
+#[test]
+fn a_binary_content_type_with_valid_utf8_bytes_is_text() {
+    let raw = b"plain ascii".to_vec();
+    let payload = split_response_payload(raw, 1024, "application/octet-stream");
+    assert!(payload.base64.is_none());
+    assert_eq!(payload.text, "plain ascii");
+}
+
+/// 哪些 Content-Type 算文本。
+///
+/// `application/octet-stream`、`image/*`、`application/pdf`、`application/zip` 都不算：它们的
+/// 内容是字节，宽松解码会把它们弄坏。
+///
+/// `image/svg+xml` **算**文本：它就是 XML，而 XML 是文本。后端因此把 SVG 放进文本形态，
+/// 界面仍按 Content-Type 把它当图片渲染——那两件事互不矛盾。
+#[test]
+fn textual_content_types_are_the_ones_that_carry_text() {
+    for ct in [
+        "text/plain",
+        "text/html; charset=utf-8",
+        "application/json",
+        "application/problem+json",
+        "application/xml",
+        "image/svg+xml",
+        "application/javascript",
+        "application/x-www-form-urlencoded",
+    ] {
+        assert!(is_textual_content_type(ct), "{ct} 该算文本");
+    }
+
+    for ct in [
+        "application/octet-stream",
+        "image/png",
+        "image/jpeg",
+        "application/pdf",
+        "application/zip",
+        "",
+    ] {
+        assert!(!is_textual_content_type(ct), "{ct} 不该算文本");
+    }
+}
+
+/// 二进制形态按**字节**裁，文本形态按**字符边界**裁。
+///
+/// 二进制给的是原始字节，字符边界对它没有意义；文本那份已经被宽松解码过，按字节裁会切出
+/// 半个字符。
+///
+/// 二进制形态的样本必须是非法 UTF-8：字节合法时后端给的是文本形态（见上一条规则），
+/// 裁法也就跟着变成按字符裁了。
+#[test]
+fn the_binary_form_is_truncated_by_bytes_and_the_text_form_by_characters() {
+    let binary_raw = vec![0xE4, 0xBD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+    let binary = split_response_payload(binary_raw, 5, "application/octet-stream");
+    assert!(binary.truncated);
+    assert_eq!(binary.bytes, 5, "二进制形态按字节裁，正好 5 字节");
+
+    let text_raw = "你好你好".as_bytes().to_vec(); // 12 字节
+    let text = split_response_payload(text_raw, 5, "text/plain");
+    assert!(text.truncated);
+    // 3 字节一个「你」：5 字节里放得下一个完整的字，按字节裁会切出半个字。
+    assert!(text.text.starts_with('你'), "got: {}", text.text);
+    assert!(text.text.contains("[truncated"));
+}
+
 // HttpResult 辅助函数
 
 #[test]
@@ -337,7 +637,9 @@ fn http_result_ok_carries_response_only() {
         duration_ms: 12,
         size_bytes: 3,
         headers: vec![["content-type".into(), "text/plain".into()]],
+        request_headers: vec![],
         body: "hi!".into(),
+        body_base64: None,
         content_type: "text/plain".into(),
         method: "GET".into(),
         url: "http://x".into(),
@@ -358,7 +660,7 @@ fn http_result_err_carries_error_only() {
     assert_eq!(err.message, "dns blew up");
 }
 
-// 响应体读取——「读取时护栏」
+// 响应体读取——「读取时上限」
 //
 // 下面这几条分别钉住：裁剪结果与整读逐字节一致、上限处的 UTF-8 字符边界回退、
 // 带 Content-Length 与 chunked 两条路都在上限处收手。
@@ -637,6 +939,7 @@ async fn streamed_body_matches_legacy_truncation_byte_for_byte() {
             url: url.clone(),
             headers: vec![],
             body: None,
+            body_base64: None,
             timeout_ms: 10_000,
             follow_redirects: true,
             max_response_size_kb: 1,
@@ -680,6 +983,7 @@ async fn cut_at_the_limit_backs_off_to_the_rune_boundary() {
         url: format!("http://127.0.0.1:{port}/rune"),
         headers: vec![],
         body: None,
+        body_base64: None,
         timeout_ms: 10_000,
         follow_redirects: true,
         max_response_size_kb: 1,
@@ -722,6 +1026,7 @@ async fn body_exactly_at_the_limit_is_not_truncated() {
         url: format!("http://127.0.0.1:{port}/exact"),
         headers: vec![],
         body: None,
+        body_base64: None,
         timeout_ms: 10_000,
         follow_redirects: true,
         max_response_size_kb: 1,
@@ -754,6 +1059,7 @@ async fn oversized_content_length_response_stops_reading_at_the_limit() {
         url: format!("http://127.0.0.1:{port}/big"),
         headers: vec![],
         body: None,
+        body_base64: None,
         timeout_ms: 3_000,
         follow_redirects: true,
         max_response_size_kb: 1,
@@ -798,6 +1104,7 @@ async fn oversized_chunked_response_stops_reading_at_the_limit() {
         url: format!("http://127.0.0.1:{port}/chunked"),
         headers: vec![],
         body: None,
+        body_base64: None,
         timeout_ms: 3_000,
         follow_redirects: true,
         max_response_size_kb: 1,

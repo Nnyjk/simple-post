@@ -1,9 +1,13 @@
-//! 环境域 MCP 工具 —— 共 8 个。
+//! 环境域 MCP 工具 —— 共 7 个。
 //!
 //! 每个工具都是同一套四步：解析 `arguments`（小型 serde 类型）→ 过
 //! `simple_post_core::permissions::require` → 委托
 //! `simple_post_core::db::environments::*` → 用 `CallToolResult::json` 包成单个
 //! text content 块回给 LLM。
+//!
+//! 这里**没有**「切换当前环境」的工具：当前环境是每个客户端自己的实时状态，落库会让
+//! web 端多个人互相踩。MCP 侧改为**逐次点名**——`api_call_endpoint` 与
+//! `api_run_request` 都收一个可选的环境 id，没点名就用项目的默认环境。
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -48,18 +52,22 @@ struct SetVarArgs {
 #[derive(Debug, Deserialize)]
 struct SetBaseUrlArgs {
     env_id: String,
-    definition_id: String,
-    /// 要写入的模块。URL 住在 (环境 × 服务 × 模块) 这一格 —— 同一个服务可以在两个
-    /// 模块指向两个不同 host。
+    /// 要写入的模块。地址住在 (环境 × 模块) 这一格 —— 两个模块可以指向两个不同 host。
     module_id: String,
+    /// 后端 api 地址。不能为空串。
     url: String,
+    /// 实际访问地址（接口经代理网关转代后真正要打的那个地址）。
+    ///
+    /// 缺席 = 这一格的代理保持不变；空串 = 清空代理。
+    #[serde(default)]
+    proxy: Option<String>,
 }
 
 // =========================================================================
 // 公共：dispatch 表片段
 // =========================================================================
 
-/// 被 `mcp::mod::tool_table` 调一次的 8 行 env_* 记录。
+/// 被 `mcp::mod::tool_table` 调一次的 7 行 env_* 记录。
 pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
@@ -74,15 +82,15 @@ pub(crate) fn table() -> Vec<ToolEntry> {
             func: tool_fn!(tool_env_list),
         },
         ToolEntry {
-            name: "env_get_active",
-            description: "Return the project's currently-active environment, if any.",
+            name: "env_get_default",
+            description: "Return the project's default environment — the earliest one created — if any. A request that names no environment is resolved against it.",
             schema: json!({
                 "type": "object",
                 "properties": { "project_id": { "type": "string" } },
                 "required": ["project_id"],
                 "additionalProperties": false,
             }),
-            func: tool_fn!(tool_env_get_active),
+            func: tool_fn!(tool_env_get_default),
         },
         ToolEntry {
             name: "env_create",
@@ -116,7 +124,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "name": { "type": "string" },
                             "moduleBaseUrls": {
                                 "type": "object",
-                                "description": "Replaces the whole map, keyed by service id then module id. Each leaf is that (environment x service x module) cell's URL; an absent cell means no base URL, because that cell never inherits."
+                                "description": "Replaces the whole map, keyed by module id. Each leaf is that (environment x module) cell: {\"url\": \"<backend api address>\", \"proxy\": \"<address the request actually goes to>\"}. A cell that is absent here means no base URL for that module, because that cell never inherits."
                             },
                             "variables": {
                                 "type": "object",
@@ -138,7 +146,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_delete",
-            description: "Delete an environment by id.",
+            description: "Delete an environment by id. Endpoints do not bind an environment, so nothing else changes; a request that still names this environment resolves without an environment at all — no base URL, no substituted variables — so name another one or omit the name to get the project's default environment.",
             schema: json!({
                 "type": "object",
                 "properties": { "env_id": { "type": "string" } },
@@ -164,30 +172,22 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_set_baseurl",
-            description: "Set the URL one service has for one module in one environment — the (environment x service x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty.",
+            description: "Set the URL one module has in one environment — the (environment x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty. proxy is the address the request actually goes to when the endpoint is reached through a proxy gateway: omit it to leave the cell's proxy as it is, or pass an empty string to clear the proxy.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "env_id": { "type": "string" },
-                    "definition_id": { "type": "string" },
                     "module_id": { "type": "string" },
-                    "url": { "type": "string" }
+                    "url": { "type": "string" },
+                    "proxy": {
+                        "type": "string",
+                        "description": "The address the request actually goes to when it is reached through a proxy gateway. Omit it to keep the cell's proxy unchanged; pass an empty string to clear it."
+                    }
                 },
-                "required": ["env_id", "definition_id", "module_id", "url"],
+                "required": ["env_id", "module_id", "url"],
                 "additionalProperties": false,
             }),
             func: tool_fn!(tool_env_set_baseurl),
-        },
-        ToolEntry {
-            name: "env_set_active",
-            description: "Mark an environment as the active one for its project.",
-            schema: json!({
-                "type": "object",
-                "properties": { "env_id": { "type": "string" } },
-                "required": ["env_id"],
-                "additionalProperties": false,
-            }),
-            func: tool_fn!(tool_env_set_active),
         },
     ]
 }
@@ -206,12 +206,12 @@ async fn tool_env_list(state: &AppState, args: Value) -> Result<CallToolResult, 
     Ok(CallToolResult::json(envs))
 }
 
-async fn tool_env_get_active(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
+async fn tool_env_get_default(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: ProjectIdArgs = serde_json::from_value(args)
-        .map_err(|e| AppError::Validation(format!("env_get_active args: {e}")))?;
-    crate::mcp::check_permission(&state.pool, &a.project_id, "env_get_active").await?;
+        .map_err(|e| AppError::Validation(format!("env_get_default args: {e}")))?;
+    crate::mcp::check_permission(&state.pool, &a.project_id, "env_get_default").await?;
     let env = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::environments::get_active(c, &a.project_id)
+        simple_post_core::db::environments::get_default(c, &a.project_id)
     })?;
     Ok(CallToolResult::json(env))
 }
@@ -248,7 +248,7 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // 逐个把可选字段从 patch 里取出来。
+    // patch 里没点名的字段一律留 None，故 update 只写被点名的那些列。
     let patch = EnvironmentPatch {
         name: a
             .patch
@@ -256,10 +256,7 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .and_then(|p| p.get("name"))
             .and_then(Value::as_str)
             .map(String::from),
-        // `base_urls` 固定留 None：该列已死 —— `db::migrate` 把值全搬进了
-        // `moduleBaseUrls`，`db::environments::update` 也不读它，转发只会回报一次
-        // 「写成功」而实际什么都没改。客户端照本工具描述走 `moduleBaseUrls`。
-        base_urls: None,
+        // `moduleBaseUrls` 整张 map 替换：缺席 = 该列不动，给了 = 整张替换。
         module_base_urls: a
             .patch
             .as_ref()
@@ -275,11 +272,6 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
             .as_ref()
             .and_then(|p| p.get("disabledVariables"))
             .and_then(|v| serde_json::from_value(v.clone()).ok()),
-        is_active: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("is_active"))
-            .and_then(Value::as_bool),
     };
 
     let env = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -342,32 +334,18 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // 与 `env_set_var` 同为「读—合并—写」：整张 map 是一个 JSON 列，一次原子
-    // UPDATE 才不会让读者看到半张 map。走 `set_module_base_url` 而不是手搓
-    // patch，因为只有它知道嵌套形状；在这里 patch `baseUrls` 只会写进那列死列，
-    // 真正生效的一层纹丝不动。
+    // 那一格（环境 × 模块）由 `set_module_base_url` 写：整张 map 是一个 JSON 列，
+    // 一次原子 UPDATE 才不会让读者看到半张 map。`proxy` 缺席 = 那一格的代理不动，
+    // `proxy` 给空串 = 清空代理。
     let env = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::environments::set_module_base_url(
             c,
             &a.env_id,
-            &a.definition_id,
             &a.module_id,
             Some(&a.url),
+            a.proxy.as_deref(),
         )
     })?;
 
-    Ok(CallToolResult::json(env))
-}
-
-async fn tool_env_set_active(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
-    let env_id = arg_str(&args, "env_id")?.to_string();
-    // 过门前先查所属项目，门才对得上键。
-    let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
-        simple_post_core::db::environments::lookup_project_id(c, &env_id)
-    })?;
-    crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
-    let env = simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::environments::set_active(c, &env_id)
-    })?;
     Ok(CallToolResult::json(env))
 }

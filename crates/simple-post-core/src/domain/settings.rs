@@ -208,7 +208,7 @@ pub const DEFAULT_MCP_PATH: &str = "/mcp";
 
 impl McpHttpConfig {
     /// axum 路由器想要的挂载路径形态：恒有前导 `/`，恒无尾随 `/`。`"/"`、`""` 与缺斜杠一律
-    /// 收敛到 [`DEFAULT_MCP_PATH`]，而不是产出一个把设置面板里看得见的东西全都 404 的路由器。
+    /// 统一成 [`DEFAULT_MCP_PATH`]，而不是产出一个把设置面板里看得见的东西全都 404 的路由器。
     pub fn normalized_path(&self) -> String {
         let raw = self.path.trim();
         let trimmed = raw.trim_end_matches('/');
@@ -231,7 +231,7 @@ impl McpHttpConfig {
         if self.host.trim().is_empty() {
             return Err(AppError::Validation("host must not be empty".into()));
         }
-        // 先归一化再检查，好让 `/mcp/` 与 `/mcp` 不会双双通过验证、随后在路由器上打架。
+        // normalized_path 先归一化再检查，好让 `/mcp/` 与 `/mcp` 不会双双通过验证、随后在路由器上打架。
         if self.path.trim().is_empty() {
             return Err(AppError::Validation(format!(
                 "path must not be empty (expected something like {DEFAULT_MCP_PATH:?})"

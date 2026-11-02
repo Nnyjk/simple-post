@@ -1,7 +1,7 @@
 //! `body.mode` 的降级映射：表达不了的形态出诊断，能表达的落到 `RequestBody`。
 
 use serde_json::{Map, Value};
-use simple_post_core::domain::{BodyMode, RequestBody};
+use simple_post_core::domain::{BodyMode, FormField, RequestBody};
 
 use crate::diagnostics::Diagnostic;
 use crate::spec::MultipartPart;
@@ -44,16 +44,23 @@ pub(super) fn parse_body(req: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> 
             // 用户看到的 `/item/0/request/body/2` 在源文件里指向一个**数组**，而那一项
             // 其实住在 `body/urlencoded/2` —— 对不上就是定位不到。
             let parts = kv_list(b.get("urlencoded"), &format!("{ptr}/urlencoded"), ctx);
-            // 不做百分号编码：值里常有 `{{var}}`，编码后模板化就匹配不到了。
-            let content = parts
+            // 写成**行数组**而不是拼好的 urlencoded 串：`form` 模式的内容是结构化的
+            // 行，界面上的表格才有地方放，而被 Postman 禁用的字段也留得下来（标成
+            // 不参与发送），用户改主意时勾回来即可。
+            //
+            // 这里不做百分号编码：值里常有 `{{var}}`，编码后模板化就匹配不到了。
+            let fields: Vec<FormField> = parts
                 .iter()
-                .filter(|p| p.enabled)
-                .map(|p| format!("{}={}", p.key, p.value))
-                .collect::<Vec<_>>()
-                .join("&");
+                .map(|p| FormField {
+                    key: p.key.clone(),
+                    value: p.value.clone(),
+                    enabled: p.enabled,
+                    description: None,
+                })
+                .collect();
             RequestBody {
                 mode: BodyMode::Form,
-                content,
+                content: simple_post_core::body::serialize_form_fields(&fields),
                 schema: None,
             }
         }
@@ -79,12 +86,15 @@ pub(super) fn parse_body(req: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> 
                         );
                         continue;
                     }
-                    // 分片结构没有 enabled 位，故被 Postman 禁用的文本字段照样落下。
+                    // 分片结构有 enabled 位，故被 Postman 禁用的文本字段不落下。
                     parts.push(MultipartPart {
                         name,
                         value: field_text(e, "value").unwrap_or_default(),
+                        enabled: true,
                         filename: None,
                         content_type: None,
+                        base64: None,
+                        description: None,
                     });
                 }
             }

@@ -12,7 +12,7 @@
  * **草稿的两半。** 字段住在两个地方，这个划分不是巧合：
  *
  *   draftEndpoints[id]   整份文档字段——name / method / url / auth /
- *                        environmentId / baseUrl* / tags / docs。按文档读是因为
+ *                        baseUrlOverride / tags / docs。按文档读是因为
  *                        草稿没有已存储的行可供补丁，否则"未设置"与"默认为空"
  *                        就无从分辨。
  *   endpointDrafts[id]   params / headers / body——请求配置编辑器写在这里，且是
@@ -105,8 +105,6 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
       method: 'GET',
       url: '',
       auth: { kind: 'none' },
-      environmentId: null,
-      baseUrlDefinitionId: null,
       baseUrlOverride: null,
       tags: [],
       docs: '',
@@ -127,8 +125,8 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
   updateDraftEndpoint: (draftId, patch) =>
     set((s) => {
       const current = s.draftEndpoints[draftId];
-      // 未知 id：静默空操作。编辑器可能在标签关闭之后才发出补丁（debounce、blur、
-      // 某个异步保存落地），在这里抛错会把它本该更新的那个标签弄崩。
+      // 未知 id：`updateDraftEndpoint` 静默空操作。编辑器可能在标签关闭之后才发出补丁
+      // （debounce、blur、某个异步保存完成），在这里抛错会把它本该更新的那个标签弄崩。
       if (!current) return {};
       return { draftEndpoints: { ...s.draftEndpoints, [draftId]: { ...current, ...patch } } };
     }),
@@ -166,8 +164,6 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
       method: draft.method,
       url: draft.url,
       auth: draft.auth,
-      environmentId: draft.environmentId,
-      baseUrlDefinitionId: draft.baseUrlDefinitionId,
       baseUrlOverride: draft.baseUrlOverride,
       tags: draft.tags,
       docs: draft.docs,
@@ -200,7 +196,7 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     // `activeTabId` 的邻居回退会立刻被覆盖。
     //
     // `pending` 刻意**不**带过去。它上面已经合并进 `detail`，那就是这次写入的
-    // 全部内容，所以在新 id 下重新种一遍恰恰会重建 Save 本该终结的那个状态：
+    // 全部内容，所以在新 id 下重新种一遍恰恰会重建一个本该已经结束的状态：
     // 标签上挂一个 `•`、"关闭已保存"不肯关它、第二次 Save 又写不出新东西。
     // 已保存 endpoint 的标签是干净的——见 `HttpTester` 自己的 `handleSave`，
     // 出于同样的理由它调了 `clearEndpointDraft`。

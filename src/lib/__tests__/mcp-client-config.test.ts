@@ -142,7 +142,7 @@ describe('unavailableReason', () => {
   });
 
   it('never blames the bridge binary — that path is gone', () => {
-    // stdio 桥接不再是生成的形状，所以指向它的提示只会把用户引去找一个并不需要的安装。
+    // stdio 桥接不在生成的配置形状里，所以指向它的提示只会把用户引去找一个并不需要的安装。
     assert.doesNotMatch(unavailableReason(onlyPreset(), { port: null }), /桥接/);
   });
 });

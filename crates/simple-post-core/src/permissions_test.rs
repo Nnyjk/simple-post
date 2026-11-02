@@ -27,7 +27,7 @@ fn at_least_lower_does_not_cover_higher() {
 #[test]
 fn required_permission_read_class() {
     assert_eq!(required_permission("env_list"), Permission::Read);
-    assert_eq!(required_permission("env_get_active"), Permission::Read);
+    assert_eq!(required_permission("env_get_default"), Permission::Read);
     assert_eq!(required_permission("project_list"), Permission::Read);
     assert_eq!(required_permission("project_get"), Permission::Read);
     assert_eq!(required_permission("module_list"), Permission::Read);
@@ -35,7 +35,6 @@ fn required_permission_read_class() {
     assert_eq!(required_permission("endpoint_list"), Permission::Read);
     assert_eq!(required_permission("endpoint_get"), Permission::Read);
     assert_eq!(required_permission("endpoint_search"), Permission::Read);
-    assert_eq!(required_permission("base_url_def_list"), Permission::Read);
     assert_eq!(
         required_permission("api_resolve_template"),
         Permission::Read
@@ -134,7 +133,7 @@ fn capability_policy_round_trip() {
 
 #[test]
 fn capability_policy_satisfies_matrix() {
-    // ReadOnly
+    // ReadOnly — covers Read only.
     assert!(CapabilityPolicy::ReadOnly.satisfies(Capability::Read));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Create));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Update));
@@ -237,9 +236,6 @@ async fn resolve_capability_takes_stricter_side_when_project_permits_more() {
                 id: "p_full".to_string(),
                 name: "p_full".to_string(),
                 description: None,
-                base_url: None,
-                base_url_definitions: vec![],
-                default_base_url_definition_id: None,
                 color: crate::domain::default_project_color(),
                 created_at: now,
                 updated_at: now,
@@ -277,9 +273,6 @@ async fn resolve_capability_takes_stricter_side_when_global_permits_more() {
                 id: "p_readcall".to_string(),
                 name: "p_readcall".to_string(),
                 description: None,
-                base_url: None,
-                base_url_definitions: vec![],
-                default_base_url_definition_id: None,
                 color: crate::domain::default_project_color(),
                 created_at: now,
                 updated_at: now,
@@ -316,9 +309,6 @@ async fn resolve_capability_agree() {
                 id: "p_match".to_string(),
                 name: "p_match".to_string(),
                 description: None,
-                base_url: None,
-                base_url_definitions: vec![],
-                default_base_url_definition_id: None,
                 color: crate::domain::default_project_color(),
                 created_at: now,
                 updated_at: now,

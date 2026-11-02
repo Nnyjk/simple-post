@@ -2,7 +2,7 @@
  * Bootstrap 契约测试：锁定**两层**加载的时序，以及失败时的错误状态。
  *
  * 分层是这一版的核心，所以测试盯的不是"发了哪几个命令"，而是"欢迎页
- * 在哪一刻可以画"：`loaded` 必须在只有 `projects_list` 落地时就为 true，
+ * 在哪一刻可以画"：`loaded` 必须在只有 `projects_list` 返回时就为 true，
  * 而 `nodesLoaded` 要等到树那一组读完。后者若和前者一起翻 true，启动画面
  * 就又回到了"等最慢的那个查询"。
  */
@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 
 import { clearIpcMock, installBrowserShim, installIpcMock } from './_browser-shim';
 import { createBootstrapSlice, type BootstrapSlice } from '../bootstrap-slice';
+import { saveLastProjectId, saveRememberedEnvironmentId } from '../slices/ui-prefs';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 
 type CapturedCall = { cmd: string; args: Record<string, unknown> };
@@ -58,8 +59,6 @@ function makeBootstrapHarness() {
 const project: Project = {
   id: 'p1',
   name: '项目',
-  baseUrlDefinitions: [],
-  defaultBaseUrlDefinitionId: null,
   color: '#000000',
   createdAt: 1,
   updatedAt: 1,
@@ -98,11 +97,20 @@ const environment: Environment = {
   id: 'env1',
   projectId: 'p1',
   name: '开发',
-  baseUrls: {},
   moduleBaseUrls: {},
   variables: {},
   disabledVariables: [],
-  isActive: true,
+  createdAt: 1,
+};
+/** 比 `environment` 晚创建的环境 —— 故它不是这个项目的默认环境。 */
+const laterEnvironment: Environment = {
+  id: 'env2',
+  projectId: 'p1',
+  name: '预发',
+  moduleBaseUrls: {},
+  variables: {},
+  disabledVariables: [],
+  createdAt: 2,
 };
 const endpointDetail: EndpointDetail = {
   nodeId: 'e1',
@@ -132,24 +140,26 @@ describe('bootstrap-slice 聚合加载契约', () => {
     clearIpcMock();
   });
 
-  it('第一层只读 projects 与请求旋钮：欢迎页不必等树那一组', async () => {
+  it('第一层只读 projects 与两条全局偏好：欢迎页不必等树那一组', async () => {
     const bag = makeBootstrapHarness();
     const calls: CapturedCall[] = [];
     const responses: Record<string, unknown> = {
       projects_list: [project],
-      // 一棵扁平的树取代了原来的 module / collection / endpoint 三件套。
+      request_settings_get: { timeoutMs: 30_000, followRedirects: true, maxResponseSizeKb: 5_120 },
+      response_history_keep_get: 10,
+      // 树是一张扁平的表：module / collection / endpoint 三种行都由 `nodes_list` 一次返回。
       nodes_list: [moduleNode, collectionNode, endpointNode],
       endpoint_details_list: [endpointDetail],
       environments_list: [environment],
     };
-    // 给树那一层设闸，好让我们能在 bootstrap 中途观察 store。这正是这次拆分的
-    // 重点：这些还在 pending 时 `loaded` 就必须已经是 true。
+    // 给树那一层设闸，好让我们能在 bootstrap 中途观察 store。树那三条还在 pending 时
+    // `loaded` 就必须已经是 true。
     let releaseTree: () => void = () => undefined;
     const treeGate = new Promise<void>((resolve) => {
       releaseTree = resolve;
     });
-    // 只有树那一组等闸。第 1 层读的那两条（项目清单与请求旋钮）必须立刻落地，
-    // 否则欢迎页会跟着树一起等 —— 那正是这次拆分要消除的事。
+    // 只有树那一组等闸。第 1 层读的那三条（项目清单与两条全局偏好）必须立刻返回，
+    // 否则欢迎页会跟着树一起等。
     const TREE_COMMANDS = new Set(['nodes_list', 'endpoint_details_list', 'environments_list']);
     installIpcMock(async (cmd, args) => {
       calls.push({ cmd, args });
@@ -159,7 +169,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     const booting = bag.bootstrap();
     // 不释放树闸就等第一层落定。一个宏任务 tick 会排空所有 pending 微任务，
-    // 而那正好是第一层 `set()` 落地的边界——数 `Promise.resolve()` 只会是对
+    // 而那正好是第一层 `set()` 执行的边界——数 `Promise.resolve()` 只会是对
     // `invokeCmd` 恰好含有几个 await 的猜测。
     await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -174,6 +184,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
       [
         'projects_list',
         'request_settings_get',
+        'response_history_keep_get',
         'nodes_list',
         'endpoint_details_list',
         'environments_list',
@@ -183,7 +194,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
 
     releaseTree();
     await booting;
-    // `bootstrap()` 第一层一落地就返回——这正是这次拆分的全部意义。去 await
+    // `bootstrap()` 第一层一完成就返回——这正是这次拆分的全部意义。去 await
     // `loadWorkspace()` 反而会把这一趟并进 bootstrap 已经启动的那一趟，
     // 而后者之所以做得到，只是在于在途的加载交回它的 pending promise 而不是
     // 立即 resolve。
@@ -193,7 +204,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(bag.nodesLoading, false);
     assert.equal(bag.bootstrapError, null);
     assert.equal(bag.nodesError, null);
-    assert.deepEqual(calls.slice(2), [
+    assert.deepEqual(calls.slice(3), [
       { cmd: 'nodes_list', args: {} },
       { cmd: 'endpoint_details_list', args: {} },
       { cmd: 'environments_list', args: {} },
@@ -388,19 +399,20 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(nodes[1].expanded, undefined, '新出现的节点保持收起');
   });
 
-  it('refreshProjects 整份替换项目清单：导入建的服务要立刻看得见', async () => {
-    // 服务定义住在项目行上，而项目行是 bootstrap 第一层加载后就没有人再更新的
-    // 那份副本。导入在服务端建服务后不刷新它，新服务在界面上就是不存在。
+  it('refreshProjects 整份替换项目清单：导入后新建的项目要立刻看得见', async () => {
+    // 项目行是 bootstrap 第一层加载后就没有人再更新的那份副本。导入在服务端建项目后
+    // 不刷新它，新项目在界面上就是不存在。
     const bag = makeBootstrapHarness();
-    const withService: Project = {
+    const imported: Project = {
       ...project,
-      baseUrlDefinitions: [{ id: 'd1', name: '127.0.0.1' }],
+      id: 'p2',
+      name: '导入的项目',
     };
-    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [withService] : []));
+    installIpcMock(async (cmd) => (cmd === 'projects_list' ? [imported] : []));
 
     await bag.refreshProjects();
 
-    assert.deepEqual(bag.projects, [withService]);
+    assert.deepEqual(bag.projects, [imported]);
   });
 
   it('refreshProjects 失败不 reject：导入已经落库，不能因为一次刷新失败被报成失败', async () => {
@@ -491,7 +503,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     bag.openTab = (kind: string, id: string) => opened.push({ kind, id });
     bag.switchProjectTabs = (id: string) => switched.push(id);
     bag.setActiveProject = (id: string) => selected.push(id);
-    // 用户在后台那一趟落地之前就点了项目卡片，也必须仍能拿到树，
+    // 用户在后台那一趟完成之前就点了项目卡片，也必须仍能拿到树，
     // 所以进入项目会重新请求。
     bag.loadWorkspace = async () => {
       workspaceLoads += 1;
@@ -612,7 +624,7 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.deepEqual(bag.environments, []);
   });
 
-  it('第二层在项目已进入后才落地时，补选该项目的 active 环境', async () => {
+  it('第二层在项目已进入后才返回时，补选该项目的 active 环境', async () => {
     const bag = makeBootstrapHarness();
     let releaseTree: () => void = () => undefined;
     const treeGate = new Promise<void>((resolve) => {
@@ -640,6 +652,27 @@ describe('bootstrap-slice 聚合加载契约', () => {
     await booting;
     await bag.loadWorkspace();
 
-    assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the active env');
+    assert.equal(bag.activeEnvironmentId, 'env1', 'the tree layer back-fills the current env');
+  });
+
+  it('第二层补齐时用记住过的那个环境，而不是默认环境', async () => {
+    const bag = makeBootstrapHarness();
+    // 本客户端上次在这个项目里用的是 env2（比默认的 env1 晚创建）。
+    saveLastProjectId('p1');
+    saveRememberedEnvironmentId('p1', 'env2');
+    installIpcMock(async (cmd) => {
+      if (cmd === 'projects_list') return [project];
+      if (cmd === 'environments_list') return [environment, laterEnvironment];
+      return [];
+    });
+
+    await bag.bootstrap();
+    await bag.loadWorkspace();
+
+    assert.equal(
+      bag.activeEnvironmentId,
+      'env2',
+      '记住过的那个环境优先于默认环境——刷新后该停在同一个环境',
+    );
   });
 });

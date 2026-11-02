@@ -1,7 +1,7 @@
 //! 严格的 patch 字段读取器。
 //!
 //! `endpoint_update` 的每个字段都经这里读，契约是四档：键缺失 → 不动、JSON `null` →
-//! 清空、有值 → 写入、格式错 → `Validation`。第四档承重。
+//! 清空、有值 → 写入、格式错 → `Validation`。第四档不能省。
 
 use serde_json::Value;
 
@@ -54,12 +54,9 @@ fn patch_shape_hint(field: &str) -> String {
             AUTH_TYPE_VALUES.join("|")
         ),
         "tags" => "an array of strings, e.g. [\"smoke\",\"user\"]".to_string(),
-        "environment_id"
-        | "base_url_definition_id"
-        | "base_url_override"
-        | "description"
-        | "docs"
-        | "notes" => "a string, or null to clear the field".to_string(),
+        "base_url_override" | "description" | "docs" | "notes" => {
+            "a string, or null to clear the field".to_string()
+        }
         "name" => "a non-empty string".to_string(),
         "sort_order" => "an integer".to_string(),
         "tls" => "an object shaped {\"skipVerify\":<bool>,\

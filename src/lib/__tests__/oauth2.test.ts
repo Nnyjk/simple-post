@@ -2,12 +2,12 @@
  * `oauth2.ts`（token 注入 + 取 token 的唯一入口）的纯单测。通过 `npm test` 运行
  * （它调用 `tsx --test`）。
  *
- * 只覆盖纯函数：注入规则（query / header、编码、参数名兜底、查重）与「不改传入的
- * `request`」这条接缝。真正的取 token 往返在 Rust 侧（`oauth2_test.rs`），本文件
+ * 只覆盖纯函数：注入规则（query / header、编码、参数名为空时的回退、查重）与「不改传入的
+ * `request`」这条契约。真正的取 token 往返在 Rust 侧（`oauth2_test.rs`），本文件
  * 不打网络。
  *
  * 覆盖矩阵：
- *   A. query 位置 —— `?` / `&`、参数名兜底、键值编码
+ *   A. query 位置 —— `?` / `&`、参数名为空时的回退、键值编码
  *   B. header 位置 —— `<tokenType> <token>`、空类型只给裸 token、已有 Authorization 不重复追加
  *   C. 纯度 —— `applyOAuth2Token` 不改传入对象
  *   D. 非 oauth2 的 auth 原样返回

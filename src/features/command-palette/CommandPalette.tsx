@@ -74,7 +74,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     if (selected >= results.length) setSelected(Math.max(0, results.length - 1));
   }, [results.length, selected]);
 
-  // 把选中行滚进视野。
+  // 这个 effect 把选中行滚进视野。
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -133,7 +133,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }
   };
 
-  // 按 section 把相邻命令并成组，好渲染分组标题。
+  // `grouped` 按 section 把相邻命令并成组，好渲染分组标题。
   const grouped: { section: string; items: { cmd: Command; idx: number }[] }[] = [];
   results.forEach((cmd, idx) => {
     const last = grouped[grouped.length - 1];

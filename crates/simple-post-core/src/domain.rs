@@ -24,7 +24,8 @@ mod settings;
 mod util;
 
 pub use auth::{
-    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, KeyValue, RequestBody,
+    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyFile, BodyMode, FormField,
+    KeyValue, MultipartPart, RequestBody,
 };
 pub use dynamic::{
     DynamicCacheEntry, DynamicError, DynamicErrorKind, DynamicResolution, DynamicValueSource,
@@ -32,14 +33,14 @@ pub use dynamic::{
 };
 pub use http::{parse_http_method, HttpMethod};
 pub use oauth2::{OAuth2Auth, OAuth2ClientAuth, OAuth2GrantType, OAuth2TokenLocation};
-pub use project::{Environment, EnvironmentPatch, Project, ProjectPatch};
+pub use project::{Environment, EnvironmentPatch, ModuleBaseUrl, Project, ProjectPatch};
 pub use resource::{
-    BaseUrlDefinition, EndpointDetail, EndpointDetailPatch, EndpointResource, ResourceNode,
-    ResourceNodePatch, ResourceNodeType,
+    EndpointDetail, EndpointDetailPatch, EndpointResource, ResourceNode, ResourceNodePatch,
+    ResourceNodeType,
 };
 pub use response::{
-    ApiResponse, ResponseHistoryEntry, StoredResponse, RESPONSE_HISTORY_MAX_BODY_BYTES,
-    RESPONSE_HISTORY_PER_ENDPOINT,
+    ApiResponse, ResponseHistoryEntry, StoredRequestSnapshot, StoredResponse,
+    RESPONSE_HISTORY_KEEP_DEFAULT, RESPONSE_HISTORY_MAX_BODY_BYTES,
 };
 pub use script::{
     AssertionResult, EnvSnapshot, EnvWrite, NodeScripts, NodeScriptsPatch, ScriptError,

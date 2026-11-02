@@ -4,13 +4,14 @@ import { IconTile } from '@/components/ui/icon-tile';
 import type { HueConcept } from '@/lib/hue';
 import { cn } from '@/lib/utils';
 /**
- * KeyValueTable —— 环境面板两张行表（前置 URL 定义、环境变量）共用的外壳。
+ * KeyValueTable —— 键值行表格的外壳：每一行的描边色块、行内边距与末尾的「添加」按钮。
  *
- * 两者只有这些不同：图标、强调色、标签、变量键的校验规则，以及前置 URL 额外的
- * 「设为默认」开关。这份公共外壳住在这里，各表自己的单元格由 `renderRow` 提供。
+ * `KeyValueTable` 只画外壳，行内的单元格由调用方的 `renderRow` 提供。环境面板的
+ * 「环境变量」表（`VariableTable`）用它；模块地址表（`ModuleBaseUrlTable`）自己画
+ * 网格，不用它。
  *
- * 新增控件是两种状态共用的同一个元素。空状态只保留提示文案，渲染的正是同一个页脚按钮，
- * 故两个状态之间不会漂移出两样东西。
+ * 「添加」按钮在两种状态下是同一个元素：有内容的行列表与空状态渲染的是同一个按钮，
+ * 故两种状态之间不会漂移出两样东西。
  */
 
 export interface KeyValueTableProps<T> {
@@ -22,7 +23,7 @@ export interface KeyValueTableProps<T> {
   /** 空状态按钮与页脚按钮共用的标签。 */
   addText: string;
   onAdd: () => void;
-  /** 行内边距。前置 URL 的行比变量行略高。 */
+  /** 行内边距。调用方用它微调每一行的高度。 */
   rowClassName?: string;
   /**
    * 行的单元格内容，不含行外壳。收到 `flush` 参数，行据此在自己是第一行时抑制上边框。
@@ -39,8 +40,8 @@ export function KeyValueTable<T>({
   rowClassName,
   renderRow,
 }: KeyValueTableProps<T>) {
-  // 一个控件，两种状态。把它提到分支之外正是要点：每个分支各写一份，空状态才会
-  // 长得和有内容的状态不一样。
+  // 「添加」按钮在两种状态下是同一个元素。把它提到分支之外：两个分支各写一份，
+  // 空状态才会长得和有内容的状态不一样。
   const addControl = (
     <button
       type="button"
@@ -83,7 +84,7 @@ export function KeyValueTable<T>({
   );
 }
 
-/** 两张表都放在每行开头的那块 36px 描边色块。两表的 `py-*` 微调不同，故留作参数。 */
+/** 每行开头的那块 36px 描边色块。`RowTile` 渲染它，各表自己决定图标与语义色相。 */
 export function RowTile({ concept, icon }: { concept: HueConcept; icon: ReactNode }) {
   return <IconTile size="lg" bordered concept={concept} icon={icon} />;
 }

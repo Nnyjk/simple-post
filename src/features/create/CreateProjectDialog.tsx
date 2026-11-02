@@ -17,11 +17,11 @@ import { CreateDialog, ColorPicker, DescriptionField, Field, NameField } from '.
  * `DEFAULT_ENVIRONMENT_NAME` 与 `DEFAULT_MODULE_NAME`。
  *
  * 刻意复制而非拉取，理由同 `lib/palette.ts` 镜像 `domain::default_project_color()`：
- * 后端是唯一真相源，这份只喂字段下方的提示；`projects_create` 的响应带着真值，故这里漂移
+ * 后端是唯一真相源，这份只用于字段下方的提示；`projects_create` 的响应带着真值，故这里漂移
  * 最多表现为提示写错，不会波及数据 —— 两边一起改。
  *
- * 刻意**不**给 baseUrl 提示：新项目不播种任何服务，`defaultBaseUrlDefinitionId` 回来是
- * `null`，服务由用户自己添加、打星号、再在设置里逐模块填地址。
+ * 刻意**不**给地址提示：新项目不播种任何模块地址，地址由用户自己在「设置 · 环境变量」
+ * 里逐模块填写。
  */
 const DEFAULT_ENVIRONMENT_NAME = '默认环境';
 const DEFAULT_MODULE_NAME = '默认模块';
@@ -37,7 +37,7 @@ export function CreateProjectDialog() {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const open = draft.open && draft.type === 'project';
 
-  // 这里允许留空，另两个对话框不允许：`submitNewItem` 会回落到「新项目」，首次使用的
+  // 这个对话框允许留空，另两个对话框不允许：`submitNewItem` 会回落到「新项目」，首次使用的
   // 用户只想先有个项目，不该非得先起名才看得见它。
   const submit = () => {
     void submitNewItem();
@@ -67,7 +67,7 @@ export function CreateProjectDialog() {
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         新项目会带一个环境「{DEFAULT_ENVIRONMENT_NAME}
         」和一个模块「{DEFAULT_MODULE_NAME}
-        」，都可以就地改名。服务清单与各模块的前置 URL 在「设置 · 环境变量」里配置。
+        」，都可以就地改名。各模块的地址与代理地址在「设置 · 环境变量」里配置。
       </p>
     </CreateDialog>
   );

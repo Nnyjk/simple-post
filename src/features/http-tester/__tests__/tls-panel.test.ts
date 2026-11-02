@@ -69,7 +69,7 @@ function inputTag(html: string, ariaLabel: string): string {
  * 标签里有没有 `disabled` **属性**。
  *
  * 不能用 `includes('disabled')` 判定：`Switch` 与 `Input` 的 class 名里都写着
- * `disabled:cursor-not-allowed`，那个字符串会撞上，让「没禁用」也被判成「禁用了」。
+ * `disabled:cursor-not-allowed`，那个字符串包含 `disabled`，让「没禁用」也被判成「禁用了」。
  * React 把布尔属性渲染成 `disabled=""`，故按这个形状判定。
  */
 function isDisabled(tag: string): boolean {

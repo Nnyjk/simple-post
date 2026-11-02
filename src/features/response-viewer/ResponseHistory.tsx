@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { History, ChevronDown } from 'lucide-react';
+import { History, ChevronDown, Star } from 'lucide-react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { DRAFT_ID_PREFIX } from '@/stores/store-types';
 import type { ResponseHistoryEntry } from '@/types/domain';
@@ -12,6 +12,10 @@ import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils'
  * 各行来自 store 的 `responseHistory`，由 `response_history` 表支撑、按接口加载 —— 故能
  * 跨重启保留，且每行都带服务端盖的 `id` 与 `createdAt`（见 `ResponseHistoryEntry`）。
  *
+ * 每行前面有一个星标：点了收藏这一条，收藏的行不参与保留条数的裁剪，故它永久保存。
+ * 点一行则把那次调用的请求与响应一起放回响应区 —— 只放响应的话，用户看到的是一份
+ * 没有出处的答案。
+ *
  * selector 说明：用稳定的 selector 读原始 `responseHistory` 对象（单个状态字段，而非派生
  * 的 `.find()` / `.filter()` 结果），按接口的数组在组件内解析；最新在前的切片用 `useMemo`
  * 构建，以免每次渲染都新建数组。
@@ -23,6 +27,7 @@ export function ResponseHistory() {
   // 原始引用 —— 只在这份字典本身被替换时重渲染。
   const history = useAppStore((s) => s.responseHistory);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
+  const setResponseHistoryFavorite = useAppStore((s) => s.setResponseHistoryFavorite);
   const loadResponseHistory = useAppStore((s) => s.loadResponseHistory);
   const clearResponseHistory = useAppStore((s) => s.clearResponseHistory);
   const [open, setOpen] = useState(false);
@@ -65,7 +70,13 @@ export function ResponseHistory() {
   const onPick = (entry: ResponseHistoryEntry) => {
     // 解包：查看器展示的是响应，不是存储行。被截断的行带 `bodyTruncated`，但它交出的 body
     // 已是服务端存下的那个截断版本 —— 这里无需再裁。
-    setLastResponse(entry.response);
+    //
+    // 请求快照一起放回去：响应区左侧画的就是它，故这一次写的是「那次调用的两面」。
+    setLastResponse(entry.response, entry.request ?? null);
+  };
+
+  const onToggleFavorite = (entry: ResponseHistoryEntry) => {
+    setResponseHistoryFavorite(entry.id, !entry.isFavorite);
   };
 
   const onClear = () => {
@@ -101,9 +112,10 @@ export function ResponseHistory() {
             size="xs"
             onClick={onClear}
             className="mr-2 shrink-0 text-muted-foreground"
+            title="清掉自动保留的那些行；收藏的行永久保存，不受这个动作影响"
             data-testid="response-history-clear"
           >
-            清空
+            清空未收藏
           </Button>
         )}
       </div>
@@ -117,7 +129,13 @@ export function ResponseHistory() {
           ) : (
             <ul className="divide-y divide-border/40">
               {ordered.map((entry) => (
-                <HistoryRow key={entry.id} entry={entry} now={now} onPick={onPick} />
+                <HistoryRow
+                  key={entry.id}
+                  entry={entry}
+                  now={now}
+                  onPick={onPick}
+                  onToggleFavorite={onToggleFavorite}
+                />
               ))}
             </ul>
           )}
@@ -149,9 +167,10 @@ interface HistoryRowProps {
   /** 列表中每一行共用的一次时钟读数。 */
   now: number;
   onPick: (entry: ResponseHistoryEntry) => void;
+  onToggleFavorite: (entry: ResponseHistoryEntry) => void;
 }
 
-function HistoryRow({ entry, now, onPick }: HistoryRowProps) {
+function HistoryRow({ entry, now, onPick, onToggleFavorite }: HistoryRowProps) {
   // method / url 不属于最初的 ApiResponse 契约，而是发送方填的可选字段。后端若忘了填，
   // 回落到占位值。
   const method = (entry.response.method ?? 'GET') as string;
@@ -160,13 +179,32 @@ function HistoryRow({ entry, now, onPick }: HistoryRowProps) {
   const truncated = url.length > 60 ? `${url.slice(0, 57)}…` : url;
 
   return (
-    <li>
+    <li className="flex items-center">
+      {/* 星标是这一行的兄弟而非子元素：嵌进那个按钮既是无效 HTML，也会让点星标变成
+          「打开这条历史」。 */}
+      <button
+        type="button"
+        onClick={() => onToggleFavorite(entry)}
+        title={
+          entry.isFavorite ? '取消收藏（这一条会重新受保留条数约束）' : '收藏这一条（永久保存）'
+        }
+        aria-pressed={!!entry.isFavorite}
+        aria-label={entry.isFavorite ? '取消收藏' : '收藏'}
+        className={cn(
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors',
+          'hover:bg-accent/40',
+          entry.isFavorite ? 'text-warning-foreground' : 'text-muted-foreground/40',
+        )}
+        data-testid="response-history-favorite"
+      >
+        <Star className={cn('h-3.5 w-3.5', entry.isFavorite && 'fill-current')} />
+      </button>
       <Button
         variant="ghost"
         size="sm"
         onClick={() => onPick(entry)}
         className={cn(
-          'h-auto w-full justify-start gap-2 rounded-none px-4 py-1.5 text-xs font-normal',
+          'h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-2 py-1.5 text-xs font-normal',
           'hover:bg-accent/40',
         )}
         data-testid="response-history-item"

@@ -21,6 +21,9 @@ pub struct HttpSendBody {
     #[serde(default)]
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
+    /// 请求体的二进制形态（base64）。有它时 `body` 缺席，线上发出去的是解码后的字节。
+    #[serde(default)]
+    pub body_base64: Option<String>,
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
@@ -150,25 +153,22 @@ pub struct EnvSetVarDisabledBody {
     pub disabled: bool,
 }
 
-/// `POST /api/environments/:envId/module-baseurls` 的 body。`url = null` 清空这一格。
-/// 这是 URL 唯一所在的一层——上面没有别的层，也不向别的模块的值回落。
+/// `POST /api/environments/:envId/module-baseurls` 的 body。
+///
+/// 一个格子是（环境 × 模块）。格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际
+/// 访问地址。两个字段各自独立：`null` = 该字段保持原值，`""` = 清空该字段；两个字段
+/// 都清空时整格删掉。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvSetModuleBaseUrlBody {
-    pub def_id: String,
-    /// 正在写入该服务地址的模块。同一个服务可以对两个模块指向两个不同主机，故
-    /// `moduleId` 是地址的一部分而非过滤条件。
+    /// 正在配地址的模块。
     pub module_id: String,
+    /// 后端 api 地址。`null` = 保持原值，`""` = 清空。
     #[serde(default)]
     pub url: Option<String>,
-}
-
-/// `POST /api/environments/active` 的 body。`envId` 放在 body 而非 URL 里，好让字面量
-/// 路由 `/active` 能充当「设置当前环境」的动词而不与 `/api/environments/:envId` 冲突。
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetActiveEnvBody {
-    pub env_id: String,
+    /// 实际访问地址。`null` = 保持原值，`""` = 清空。
+    #[serde(default)]
+    pub proxy: Option<String>,
 }
 
 /// `PUT /api/permissions/:projectId` 的 body。`permission` 字符串经
@@ -180,40 +180,17 @@ pub struct PermissionPutBody {
     pub permission: String,
 }
 
-/// `POST /api/projects/:projectId/baseurls` 的 body。项目放在路径里，因为服务列表属于
-/// 项目；body 里只承载单个服务的属性。
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BaseUrlDefCreateBody {
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    /// 客户端自铸的 id，非空白时照单采纳——REST 侧的
-    /// `commands::dto::CreateBaseUrlDefOpts::id`。两条 transport 出于同一理由收它：
-    /// renderer 在这一行持久化之前就拿这个 id 当项目 ★ 与每格（环境 × 模块）URL
-    /// 单元格的键，服务端铸的 id 会让所有引用变成孤儿。
-    #[serde(default)]
-    pub id: Option<String>,
-}
-
-/// `POST /api/projects/:projectId/baseurls/default` 的 body。`defId = null` 表示把项目
-/// 的 ★ 完全撤掉——新建项目正处于这个状态。
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BaseUrlDefSetDefaultBody {
-    #[serde(default)]
-    pub def_id: Option<String>,
-}
-
 // ----- 动态变量 -----------------------------------------------------------
 
 /// `POST /api/dynamic-variables` 的 body。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariableCreateBody {
+    /// 归属项目。定义挂在项目里，故它必填：变量名在项目内唯一。
+    pub project_id: String,
     pub name: String,
-    /// 客户端自铸的 id，非空白时照单采纳——与 `BaseUrlDefCreateBody::id` 同一理由：
-    /// renderer 在这一行持久化之前就拿这个 id 当键。
+    /// 客户端自铸的 id，非空白时照单采纳——渲染进程在这一行持久化之前就拿这个 id 当键，
+    /// 服务端铸的 id 会让那一处引用变成孤儿。
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -227,12 +204,12 @@ pub struct DynamicVariableCreateBody {
     /// 取数用的环境。缺席 = 数据源端点所属项目的第一个可用环境。
     #[serde(default)]
     pub source_environment_id: Option<String>,
-    /// 取数用的服务（`base_url_definitions.id`）。缺席 = 数据源接口所属项目的默认服务。
-    #[serde(default)]
-    pub source_base_url_definition_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
     #[serde(default)]
     pub extract_path: Option<String>,
+    /// 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工。
+    #[serde(default)]
+    pub transform_script: Option<String>,
     /// 值的序列化形态：`auto` / `json` / `text`。
     #[serde(default)]
     pub value_mode: Option<crate::domain::ValueMode>,
@@ -252,8 +229,12 @@ pub struct DynamicVariableCreateBody {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicVariableResolveBody {
-    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。名字是全局的。
+    /// 要解析的变量名。请求体里写 `{{name}}` 用的那个。
     pub names: Vec<String>,
+    /// 在哪个项目里找这些名字。缺席 = 跨项目找（同名定义出现在多个项目里时按歧义
+    /// 处理，不猜）。
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// 真 = 跳过缓存，强制重新取数。
     #[serde(default)]
     pub force: Option<bool>,

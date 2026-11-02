@@ -50,14 +50,6 @@ export const COMMANDS = {
   environmentsSetVarDisabled: 'environments_set_var_disabled',
   environmentsRenameVar: 'environments_rename_var',
   environmentsSetModuleBaseurl: 'environments_set_module_baseurl',
-  environmentsSetActive: 'environments_set_active',
-
-  // ----- baseUrl definitions -----
-  baseUrlDefsList: 'base_url_defs_list',
-  baseUrlDefsCreate: 'base_url_defs_create',
-  baseUrlDefsUpdate: 'base_url_defs_update',
-  baseUrlDefsDelete: 'base_url_defs_delete',
-  baseUrlDefsSetDefault: 'base_url_defs_set_default',
 
   // ----- interchange (import / export) -----
   // 两条边各两步：**先预览后落定**。预览只读，它回答「这份文件里有哪些条目、有哪些
@@ -70,7 +62,7 @@ export const COMMANDS = {
   interchangeExportDocument: 'interchange_export_document',
 
   // ----- interface specs -----
-  // 一份接口规格：模块、集合路径上的每一级、环境、服务与端点，一次调用落完。
+  // 一份接口规格：模块、集合路径上的每一级、环境、模块地址与端点，一次调用落完。
   // 每一部分按名字找、找不到就建，故反复应用同一份规格不改变任何东西。
   //
   // 参数是**一份规格**（`spec`），不是一堆零散字段——那是这条命令存在的理由。
@@ -103,6 +95,11 @@ export const COMMANDS = {
   responseHistoryAppend: 'response_history_append',
   responseHistoryClear: 'response_history_clear',
   responseHistoryList: 'response_history_list',
+  // 收藏/取消收藏一行。收藏的行不参与保留条数的裁剪。
+  responseHistorySetFavorite: 'response_history_set_favorite',
+  // 保留条数（每个接口保留多少条未收藏历史）。全局设置，不属于任何接口。
+  responseHistoryKeepGet: 'response_history_keep_get',
+  responseHistoryKeepSet: 'response_history_keep_set',
 
   // ----- agent permissions -----
   permissionsGet: 'permissions_get',

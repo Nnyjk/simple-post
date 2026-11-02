@@ -25,7 +25,7 @@ export interface EndpointTreePickerProps {
    * 选中一个接口。取消选择时后两个参数为空串。
    *
    * 带上接口名与所属项目：表单要把「已选接口」显示成名字，也靠项目 id 去列那个项目的
-   * 环境与服务——只有 id 的话界面得自己再查一次树。
+   * 环境——只有 id 的话界面得自己再查一次树。
    */
   onSelect: (endpointId: string, projectId: string, endpointName: string) => void;
 }

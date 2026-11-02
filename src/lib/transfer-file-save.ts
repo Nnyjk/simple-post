@@ -6,7 +6,7 @@
  *   走这条是因为 WebView 里的 blob 下载不跨形态一致，而「另存为」是用户预期的形态。
  * - **Web / Docker**：同一个 DOM 上的 blob + `<a download>`，浏览器原生行为。
  *
- * 两个插件都是**动态 import**，不是洁癖：它们在浏览器形态里没有实现，静态引入会让
+ * 两个插件都是**动态 import**，不是因为风格偏好：它们在浏览器形态里没有实现，静态引入会让
  * `serve-web` 的 bundle 白背一份 Tauri 代码，并在运行时炸掉。`IS_TAURI_SHELL` 已在
  * `tauri-commands.ts` 导出。
  */
@@ -15,7 +15,7 @@ import type { ExportDocument } from './interchange-types';
 
 export type SaveOutcome = 'saved' | 'cancelled';
 
-/** 保存对话框的过滤器。`mediaType` 决定扩展名，`fileName` 兜住用户改名的情形。 */
+/** 保存对话框的过滤器。扩展名由 `doc.mediaType` 决定；用户在对话框里改文件名不受这个过滤器限制。 */
 function filtersFor(doc: ExportDocument) {
   const ext = doc.mediaType === 'application/yaml' ? 'yaml' : 'json';
   return [{ name: ext.toUpperCase(), extensions: [ext] }];
