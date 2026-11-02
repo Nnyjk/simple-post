@@ -260,3 +260,136 @@ fn duplicate_adopts_the_id_the_caller_chose() {
         "picked-here"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 共享样本：集合子树的端点清单与顺序
+// ---------------------------------------------------------------------------
+//
+// 顺序规则由一份 JSON 钉住，TS 侧（应用内批量运行的 `collect`）读同一份文件。
+// 两侧各写一遍遍历，故只有一份共享样本才能钉住它们没分叉。
+
+/// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
+const COLLECTION_ORDER_FIXTURE: &str =
+    include_str!("../../../../fixtures/collection-order-parity.json");
+
+/// `deny_unknown_fields` 与 `rename_all` 一起上：前者把「键名对不上」从静默忽略变成
+/// 响亮失败——serde 默认会忽略结构体里没有的键，于是样本里改了字段名而读取器没跟上时，
+/// 那条断言会一条都没跑到却一直是绿的。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CollectionOrderFixture {
+    #[serde(rename = "$comment")]
+    _comment: Option<String>,
+    cases: Vec<CollectionOrderCase>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CollectionOrderCase {
+    name: String,
+    root: String,
+    nodes: Vec<CollectionOrderNode>,
+    expected: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CollectionOrderNode {
+    id: String,
+    root_id: String,
+    parent_id: Option<String>,
+    kind: String,
+    name: String,
+    sort_order: i64,
+}
+
+#[test]
+fn ordered_subtree_endpoints_matches_the_shared_sample() {
+    let fixture: CollectionOrderFixture = serde_json::from_str(COLLECTION_ORDER_FIXTURE)
+        .expect("fixtures/collection-order-parity.json must parse");
+    assert!(
+        !fixture.cases.is_empty(),
+        "the shared sample must not be empty — an empty one pins nothing"
+    );
+    for case in &fixture.cases {
+        let (pool, _dir) = fresh_pool();
+        seed_collection_order_case(&pool, case);
+        let got = db::with_conn(&pool, |c| ordered_subtree_endpoints(c, &case.root))
+            .unwrap_or_else(|e| panic!("case {:?}: {e}", case.name));
+        let ids: Vec<&str> = got.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, case.expected, "case: {}", case.name);
+    }
+}
+
+/// 把样本里的一棵树写进一个临时库。
+///
+/// 节点按「父先于子」插入：`nodes.parent_id` 是自引用外键，父不存在时插入会被拒。
+fn seed_collection_order_case(pool: &db::DbPool, case: &CollectionOrderCase) {
+    // 样本里用到的每个项目都要有一行，否则外键拒绝。
+    let mut roots: Vec<&str> = case.nodes.iter().map(|n| n.root_id.as_str()).collect();
+    roots.sort_unstable();
+    roots.dedup();
+    for root in roots {
+        let exists = db::with_conn(pool, |c| Ok(db::projects::get(c, root).is_ok())).unwrap();
+        if exists {
+            continue;
+        }
+        db::with_tx(pool, |c| {
+            db::projects::create(
+                c,
+                &crate::domain::Project {
+                    id: root.into(),
+                    name: root.into(),
+                    description: None,
+                    color: "#000000".into(),
+                    created_at: 1,
+                    updated_at: 1,
+                },
+            )
+        })
+        .unwrap();
+    }
+
+    let mut pending: Vec<&CollectionOrderNode> = case.nodes.iter().collect();
+    let mut inserted: std::collections::HashSet<String> = std::collections::HashSet::new();
+    while !pending.is_empty() {
+        let mut rest: Vec<&CollectionOrderNode> = Vec::new();
+        let mut progressed = false;
+        for node in pending {
+            let ready = node
+                .parent_id
+                .as_deref()
+                .is_none_or(|parent| inserted.contains(parent));
+            if !ready {
+                rest.push(node);
+                continue;
+            }
+            let kind = ResourceNodeType::parse(&node.kind)
+                .unwrap_or_else(|| panic!("unknown node kind {:?}", node.kind));
+            let resource = crate::domain::ResourceNode {
+                id: node.id.clone(),
+                root_id: node.root_id.clone(),
+                parent_id: node.parent_id.clone(),
+                kind,
+                name: node.name.clone(),
+                description: None,
+                sort_order: node.sort_order,
+                created_at: 1,
+                updated_at: 1,
+            };
+            let detail_row = match kind {
+                ResourceNodeType::Endpoint => Some(detail(&node.id)),
+                _ => None,
+            };
+            put(pool, &resource, detail_row.as_ref());
+            inserted.insert(node.id.clone());
+            progressed = true;
+        }
+        assert!(
+            progressed,
+            "case {:?} has a node whose parent is not in the sample",
+            case.name
+        );
+        pending = rest;
+    }
+}

@@ -3,10 +3,13 @@
  *
  * 从原始 store 数组派生，**不新建 store 侧的引用** —— 逐个 `useAppStore` 取用，保持
  * Zustand v5「selector 不新建对象」规则，派生列表一律在本地 `useMemo` 里算。
+ *
+ * **base URL 的解析不在这里**：它在 `model/endpointParts.ts` 的
+ * `buildEndpointRequestParts` 里，与单次发送共用同一份推导。这里的 `moduleId` 与
+ * `endpointEnv` 是那份推导的输入。
  */
 import { useMemo } from 'react';
 import { useAppStore, useActiveEnvironment } from '@/stores/app-store';
-import { resolveEndpointBaseUrl } from '@/lib/url';
 import { moduleIdOfEndpoint } from '@/lib/tree-index';
 import type { BaseUrlSelection } from './BaseUrlPicker';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
@@ -19,7 +22,7 @@ export interface Ancestor {
 }
 
 /**
- * 解析接口的项目 / 祖先链 / 环境 / 模块 / 有效 baseUrl / 选择器状态。
+ * 解析接口的项目 / 祖先链 / 环境 / 模块 / baseUrl 选择器状态。
  *
  * 这些值只依赖 store 里的数据，故合成一个 hook；`HttpTester` 读它们渲染面包屑、
  * 选择器与 URL 栏，并把 `commitBaseUrl` 之外的写操作留在自己那里。
@@ -32,8 +35,6 @@ export function useEndpointContext(
   ancestors: Ancestor[];
   endpointEnv: Environment | undefined;
   moduleId: ReturnType<typeof moduleIdOfEndpoint>;
-  moduleBaseUrl: string | null;
-  resolved: ReturnType<typeof resolveEndpointBaseUrl>;
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
 } {
@@ -71,28 +72,13 @@ export function useEndpointContext(
   // 部接口一起换地址 —— 这正是「新建环境并切换后端口不跟着换」那个问题的正解。
   const endpointEnv = workspaceEnv;
 
-  // 该接口的有效 baseUrl —— 同时驱动选择器标签与发送时的拼接。
-  //
-  // 地址住在环境里「环境 × 模块」那一格，故 `moduleId` 必需：它挑出本接口读的那一格。
+  // 该接口所处模块。base URL 的**值**按模块区分，故读取那一格时需要它。
   //
   // `endpoint` 作为向上遍历的起始行传入而非按 id 查：草稿接口没有 `nodes` 行，只按
   // id 查会得到「无模块」而永远读不到该格（见 `moduleIdOfEndpoint` 的 `self`）。
   const moduleId = useMemo(
     () => moduleIdOfEndpoint(allNodes, endpoint?.id, endpoint),
     [allNodes, endpoint],
-  );
-  // 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。
-  //
-  // 它与 `resolved.baseUrl` 分开：端点处在「自定义」档时 `resolved.baseUrl` 是端点
-  // 自己的地址，而「跟随模块」那一行要显示的是这一格——用户据此判断「切回跟随模块
-  // 会用哪个地址」。
-  const moduleBaseUrl = useMemo(() => {
-    if (!moduleId) return null;
-    return endpointEnv?.moduleBaseUrls?.[moduleId]?.url ?? null;
-  }, [endpointEnv, moduleId]);
-  const resolved = useMemo(
-    () => resolveEndpointBaseUrl(detail ?? { baseUrlOverride: null }, endpointEnv, moduleId),
-    [detail, endpointEnv, moduleId],
   );
 
   // 驱动选择器：反映接口上现存的选择。用户改选时 `commitBaseUrl` 写到这个接口存放
@@ -114,14 +100,5 @@ export function useEndpointContext(
   // 带 host 的历史 override 不掩盖这个意图。
   const isCustomUrl = selection.kind === 'override';
 
-  return {
-    project,
-    ancestors,
-    endpointEnv,
-    moduleId,
-    moduleBaseUrl,
-    resolved,
-    selection,
-    isCustomUrl,
-  };
+  return { project, ancestors, endpointEnv, moduleId, selection, isCustomUrl };
 }

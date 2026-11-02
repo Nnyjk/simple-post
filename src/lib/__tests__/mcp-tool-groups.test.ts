@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { groupTools, OTHER_GROUP_KEY } from '@/lib/mcp-tool-groups';
 
 /**
- * daemon 今天实际注册的工具。逐字照抄（而非推导）是有意的：给 Rust 注册表加了
+ * daemon 今天实际注册的 47 个工具。逐字照抄（而非推导）是有意的：给 Rust 注册表加了
  * 工具却没教 `groupTools` 它的前缀时，它会变成一条失败的「其他」断言，而不是表格里
  * 悄悄少一行。
  */
@@ -41,6 +41,7 @@ const REGISTERED_TOOLS = [
   'endpoint_move',
   'api_run_request',
   'api_call_endpoint',
+  'api_run_collection',
   'api_resolve_template',
   'api_resolve_endpoint',
   'api_validate_endpoint',
@@ -90,9 +91,9 @@ test('groupTools: per-family counts match the registry', () => {
     collection: 5,
     endpoint: 8,
     dynamic: 7,
-    api: 8,
+    api: 9,
   });
-  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 46);
+  assert.equal(groupTools(REGISTERED_TOOLS).flatMap((g) => g.items).length, 47);
 });
 
 test('groupTools: no tool is dropped or duplicated', () => {
