@@ -24,8 +24,40 @@ use simple_post_core::error::AppError;
 
 use super::args::RunCollectionArgs;
 use super::dynamic::resolve_dynamic_values;
-use super::input::{extract_endpoint_settings, format_method, resolve_tls_override};
+use super::input::{
+    extract_endpoint_settings, format_method, parse_tls_settings, resolve_tls_override,
+};
 use super::send::{execute_resolved, resolve_settings};
+
+/// 一条端点的失败分两个域，报告里的分类也按这两个域分。
+///
+/// - `Prepare`：**压根没发出去**。缺请求配置、端点所属模块查不到、动态变量取不到值、
+///   请求解析不出来——都发生在请求交给传输层之前。报告记 `blocked`。
+/// - `Send`：请求已经交出去了但没拿到响应。报告记 `transport`。
+///
+/// 两者对调用方是两种不同的信息：前者是这条没准备好，后者是发出去了但对方没应答。
+/// 故错误要带着域的标记传回调用方，由调用方归类。
+enum RunError {
+    Prepare(AppError),
+    Send(AppError),
+}
+
+impl RunError {
+    /// 这个错误对应的报告分类。
+    fn failure(&self) -> &'static str {
+        match self {
+            RunError::Prepare(_) => "blocked",
+            RunError::Send(_) => "transport",
+        }
+    }
+
+    /// 错误信息。写进报告的 `error` 字段。
+    fn message(&self) -> String {
+        match self {
+            RunError::Prepare(e) | RunError::Send(e) => e.to_string(),
+        }
+    }
+}
 
 /// 一条端点跑完之后的结论。
 struct ItemOutcome {
@@ -111,7 +143,7 @@ pub(super) async fn tool_api_run_collection(
     };
 
     // 真实归属项目。按项目的权限门要的就是它：`agent_permissions.project_id` 是指向
-    // `projects(id)` 的外键，编出来的 id 永远没有对应的行，于是这道门形同虚设。
+    // `projects(id)` 的外键，编出来的 id 永远没有对应的行，于是这道门不起作用。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::root_id_of(c, &root_id)
     })?;
@@ -148,6 +180,10 @@ pub(super) async fn tool_api_run_collection(
         a.settings_override.as_ref(),
     );
 
+    // 本次调用的 HTTPS 覆盖先解析一次：它对整批生效，形状不对时整批拒绝，而不是给每个
+    // 端点各记一条「压根没发出去」。
+    parse_tls_settings(a.settings_override.as_ref().and_then(|v| v.get("tls")))?;
+
     let mut items: Vec<Value> = Vec::with_capacity(endpoints.len());
     let mut counts = Counts::default();
     let mut total_duration_ms = 0u64;
@@ -170,8 +206,8 @@ pub(super) async fn tool_api_run_collection(
                 status: 0,
                 status_text: String::new(),
                 duration_ms: 0,
-                failure: Some("transport"),
-                error: Some(err.to_string()),
+                failure: Some(err.failure()),
+                error: Some(err.message()),
                 missing_vars: Vec::new(),
                 missing_path_params: Vec::new(),
             },
@@ -194,8 +230,9 @@ pub(super) async fn tool_api_run_collection(
         }));
     }
 
-    // 四类互斥且穷尽，故三类之和恒等于结论条数。这条恒等式在开发构建里当场验：
-    // 分类逻辑改动时若漏掉一类或两类重复归类，这里立刻炸，而不是让报告里的总数对不上。
+    // 三类互斥且穷尽，故三类之和恒等于结论条数。这条恒等式在开发构建里当场验：
+    // 分类逻辑改动时若漏掉一类或两类重复归类，这里立刻 panic，而不是让报告里的总数
+    // 对不上。
     debug_assert_eq!(
         counts.classified(),
         items.len(),
@@ -225,8 +262,10 @@ pub(super) async fn tool_api_run_collection(
 
 /// 跑一条端点，给出它的结论。
 ///
-/// `Err` 只在「这一步压根没法开始」时返回（端点没有请求配置这类数据问题）；传输失败
-/// 与状态码不对都算「跑完了，结论是失败」，由 `ItemOutcome` 表达。
+/// `Err` 只在「这一步没法跑完」时返回，且带域的标记：准备阶段的失败是
+/// [`RunError::Prepare`]（压根没发出去），发送阶段的失败是 [`RunError::Send`]（发出去了
+/// 但没拿到响应）。传输失败与状态码不对都算「跑完了，结论是失败」，由 `ItemOutcome`
+/// 表达。
 async fn run_one(
     state: &AppState,
     node: &ResourceNode,
@@ -234,16 +273,18 @@ async fn run_one(
     project: &Project,
     settings: &RequestSettings,
     settings_override: Option<&Value>,
-) -> Result<ItemOutcome, AppError> {
+) -> Result<ItemOutcome, RunError> {
     let detail: EndpointDetail = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoint_details::get(c, &node.id)
-    })?;
+    })
+    .map_err(RunError::Prepare)?;
 
-    // 端点属于哪个模块只在树里，detail 行上没有，故要查一次：不补的结果是 base URL
-    // 那一格无从读，请求裸奔没有地址。数据库出错则这一条失败，不静默当成「没有模块」。
+    // 端点属于哪个模块只在树里，detail 行上没有，故要查一次：不查就读不到「环境 × 模块」
+    // 那一格地址，请求没有地址。数据库出错则这一条失败，不静默当成「没有模块」。
     let module_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::module_id_of(c, &node.id)
-    })?;
+    })
+    .map_err(RunError::Prepare)?;
 
     let overrides = crate::variable_fill::EndpointOverrides {
         module_id: module_id.clone(),
@@ -251,11 +292,15 @@ async fn run_one(
     };
 
     // 动态变量的值必须在**替换之前**取到：取到的值并进变量池，同名时压过环境变量。
-    let dynamic = resolve_dynamic_values(state, env, project, &detail, &overrides).await?;
+    let dynamic = resolve_dynamic_values(state, env, project, &detail, &overrides)
+        .await
+        .map_err(RunError::Prepare)?;
     let resolved =
-        crate::variable_fill::resolve_endpoint_with(&detail, env, Some(&overrides), &dynamic)?;
+        crate::variable_fill::resolve_endpoint_with(&detail, env, Some(&overrides), &dynamic)
+            .map_err(RunError::Prepare)?;
 
-    let tls_override = resolve_tls_override(settings_override, detail.tls.clone())?;
+    let tls_override =
+        resolve_tls_override(settings_override, detail.tls.clone()).map_err(RunError::Prepare)?;
 
     let executed = execute_resolved(
         state,
@@ -267,7 +312,8 @@ async fn run_one(
         settings.clone(),
         tls_override,
     )
-    .await?;
+    .await
+    .map_err(RunError::Send)?;
 
     // 路径参数缺值时压根没发出去 —— 它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会
     // 换一个含义不明的 404。
