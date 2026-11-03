@@ -64,8 +64,8 @@ pub fn write(rec: &PortRecord) -> Result<(), AppError> {
 
 /// 申领 `rec` 的注册文件，并把 `config_fingerprint` 一起写进去。
 ///
-/// 指纹是同一个 JSON 对象里的另一个顶层键（见 [`serialize_entry`]），故没有指纹
-/// 时文件与从前逐字节一样。
+/// 指纹是同一个 JSON 对象里的另一个顶层键（见 [`serialize_entry`]），故没有指纹时文件与只有
+/// 端口与 PID 的那份逐字节一样。
 ///
 /// daemon 侧（`lib.rs`）用的是 [`write`]：它拿不到「这份 daemon 服务的配置」的
 /// 指纹，故写出的记录里没有那一项——读它的人据此判断「判断不了」。

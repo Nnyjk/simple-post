@@ -31,12 +31,10 @@ pub(crate) async fn mcp_log_tail(
 //   GET /api/mcp/http-config —— 读绑定 host / port / path 与白名单
 //   PUT /api/mcp/http-config —— 校验、持久化、报告是否需要重启
 //
-// 两者都委派给 `commands::mcp_http_config` 的普通函数，故 REST 路由与 Tauri 命令在
-// 校验与「是否需要重启」上不会各说各话。
-//
-// 注意这里配置的是**daemon 子进程**，不是本服务器：`web_api::build_router` 挂载的
-// `/mcp` 路由留在规范路径上，而文档推荐的 stdio-bridge → `serve-web` 客户端配置正是
-// 依赖这一点。
+// 两者都委派给 `http_config` 的普通函数，故 REST 路由与 Tauri 命令在校验与「是否需要重启」
+// 上不会各说各话。
+// 这里配置的是**daemon 子进程**，不是本服务器：`web_api::build_router` 挂载的 `/mcp` 路由留在
+// 规范路径上，文档推荐的 stdio-bridge → `serve-web` 客户端配置正是依赖这一点。
 
 /// `GET /api/mcp/http-config` —— daemon 的监听配置。`preferences` 行缺失时返回出厂的
 /// 仅 loopback 默认值而非 404，好让全新安装渲染出一个表单而不是一个错误。
@@ -48,17 +46,14 @@ pub(crate) async fn mcp_http_config_get(
         .map_err(map_app_error)
 }
 
-/// `PUT` 的 body，接受这条路由合理会收到的两种形状之一。
-///
-/// * **wrapped** —— `{ "config": { … } }`。这是双 transport 的 `invokeCmd` 发的：
-///   它的 `WEB_ROUTES` 条目复刻了 Tauri 命令的参数列表，因为同一个调用点必须对两种
-///   transport 都能用。
+/// `PUT` 的 body，接受这条路由合理会收到的两种形状之一：
+/// * **wrapped** —— `{ "config": { … } }`。这是双 transport 的 `invokeCmd` 发的：它的
+///   `WEB_ROUTES` 条目复刻了 Tauri 命令的参数列表，同一个调用点必须对两种 transport 都能用。
 /// * **bare** —— `{ "host": …, "path": … }`，即文档化的 REST 形状。
 ///
-/// 必须**先试** wrapped：两条变体之所以能共存，靠的就是这个顺序。`McpHttpConfig` 带
-/// `#[serde(default)]` 且不拒绝未知字段，所以它会把 `{ "config": { … } }` 当成一个
-/// 每个字段都*缺失*的对象愉快接受——于是一次看似成功的保存，实则把用户的 LAN 配置
-/// 悄悄覆盖成仅 loopback 默认值。
+/// 必须**先试** wrapped：`McpHttpConfig` 带 `#[serde(default)]` 且不拒绝未知字段，故它会把
+/// `{ "config": { … } }` 当成每个字段都*缺失*的对象接受——一次看似成功的保存，实则把用户的
+/// LAN 配置悄悄覆盖成仅 loopback 默认值。
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum McpHttpConfigBody {
@@ -166,45 +161,31 @@ pub(crate) async fn mcp_capability_list_tools(
 /// `POST /api/mcp/stop` —— 手动 OFF 开关。
 ///
 /// 响应信封与 `/api/mcp/start`、`/api/mcp/restart` 同为 `RestartResult` 形状：
-/// `{ ok, pid, port }`。停止成功回 `{ ok: true, pid: null, port: null }`——之后没有
-/// 任何东西在服务，故 `null` 就是答案，不是缺字段。停一个已经停了的 daemon 回
-/// `{ ok: true }`，不是错误。
-///
+/// `{ ok, pid, port }`。停止成功回 `{ ok: true, pid: null, port: null }`——之后没有任何东西在
+/// 服务，故 `null` 就是答案，不是缺字段。停一个已经停了的 daemon 回 `{ ok: true }`，不是错误。
 /// 终止本进程 spawn 的 daemon，以及仅从端口记录收养来的那个（见
 /// `daemon_supervisor::teardown`），然后释放 `mcp.port`。
 pub(crate) async fn mcp_stop(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<crate::dto::RestartResult>, HttpErrorResponse> {
     match s.daemon.stop().await {
-        Ok(snapshot) => Ok(Json(crate::dto::RestartResult {
-            ok: true,
-            pid: snapshot.pid,
-            port: snapshot.port,
-        })),
+        Ok(snapshot) => Ok(Json(crate::dto::RestartResult::from_status(&snapshot))),
         Err(e) => {
             eprintln!("[mcp_stop] failed: {e:?}");
-            Ok(Json(crate::dto::RestartResult {
-                ok: false,
-                pid: None,
-                port: None,
-            }))
+            Ok(Json(crate::dto::RestartResult::failed()))
         }
     }
 }
 
 /// `POST /api/mcp/start` —— 手动 ON 开关。
 ///
-/// 幂等，而幂等正是重点：对一个健康的 daemon 点「启动」不能杀掉重拉——那会丢
-/// 掉进行中的 MCP 会话并无谓折腾端口。故它走 supervisor 的幂等 `start`，原样返回既有
-/// daemon 的身份，只在什么都没被跟踪时才 spawn。
-///
-/// 一条例外：端口记录里的配置指纹与当前这份配置不一致时，那个 daemon 服务的不是要
-/// 的这份配置，故它被替换掉（判据见 `daemon_supervisor::reuse_decision`）。指纹一致
-/// 时绝不杀。
-///
+/// 幂等，而幂等正是重点：对一个健康的 daemon 点「启动」不能杀掉重拉——那会丢掉进行中的 MCP
+/// 会话并无谓折腾端口。故它走 supervisor 的幂等 `start`，原样返回既有 daemon 的身份，只在
+/// 什么都没被跟踪时才 spawn。
+/// 一条例外：端口记录里的配置指纹与当前这份配置不一致时，那个 daemon 服务的不是要的这份配置，
+/// 故它被替换掉（判据见 `daemon_supervisor::reuse_decision`）。指纹一致时绝不杀。
 /// 响应信封与 `/api/mcp/stop`、`/api/mcp/restart` 同为 `RestartResult` 形状：
-/// `{ ok, pid, port }`，其中 `pid` / `port` 标识当前在服务的 daemon。底层失败
-/// （spawn 错误、healthz 超时）按 restart 的做法折叠成
+/// `{ ok, pid, port }`。底层失败（spawn 错误、healthz 超时）按 restart 的做法折叠成
 /// `{ ok: false, pid: null, port: null }`。
 pub(crate) async fn mcp_start(
     State(s): State<Arc<WebState>>,
@@ -212,18 +193,10 @@ pub(crate) async fn mcp_start(
     // Tauri 之外没有 `AppHandle`，故这是 supervisor 共享路径的 `serve-web` 绑定：
     // 不从 Tauri 派生任何东西，并取服务器启动时用的数据目录。
     match s.daemon.start_without_app_handle(&s.data_dir).await {
-        Ok(snapshot) => Ok(Json(crate::dto::RestartResult {
-            ok: true,
-            pid: snapshot.pid,
-            port: snapshot.port,
-        })),
+        Ok(snapshot) => Ok(Json(crate::dto::RestartResult::from_status(&snapshot))),
         Err(e) => {
             eprintln!("[mcp_start] failed: {e:?}");
-            Ok(Json(crate::dto::RestartResult {
-                ok: false,
-                pid: None,
-                port: None,
-            }))
+            Ok(Json(crate::dto::RestartResult::failed()))
         }
     }
 }
@@ -233,9 +206,9 @@ pub(crate) async fn mcp_start(
 /// `POST /api/mcp/restart` —— 杀掉当前 daemon（无论 spawn 还是收养而来）再拉起一个
 /// 新的。
 ///
-/// 响应信封 `RestartResult` —— `{ ok, pid, port }` —— 与 `/api/mcp/start` 和
-/// `/api/mcp/stop` 逐字节相同。错误被吞成 `{ ok: false, pid: null, port: null }` 而非
-/// 5xx，好让三个生命周期动词对 UI 维持统一的 `{ ok: bool }` 契约。
+/// 响应信封 `RestartResult` —— `{ ok, pid, port }` —— 与 `/api/mcp/start` 和 `/api/mcp/stop`
+/// 逐字节相同。错误被吞成 `{ ok: false, pid: null, port: null }` 而非 5xx，好让三个生命周期动词
+/// 对 UI 维持统一的 `{ ok: bool }` 契约。
 pub(crate) async fn mcp_restart(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<crate::dto::RestartResult>, HttpErrorResponse> {
@@ -243,37 +216,14 @@ pub(crate) async fn mcp_restart(
     // `{ ok: false, pid: null, port: null }` 出现而非 5xx，故 web UI 的重启动作保留
     // 统一的 `{ ok: bool }` 契约。
     let result = match s.daemon.restart_without_app_handle(&s.data_dir).await {
-        Ok(snapshot) => crate::dto::RestartResult {
-            ok: true,
-            pid: snapshot.pid,
-            port: snapshot.port,
-        },
-        Err(_) => crate::dto::RestartResult {
-            ok: false,
-            pid: None,
-            port: None,
-        },
+        Ok(snapshot) => crate::dto::RestartResult::from_status(&snapshot),
+        Err(_) => crate::dto::RestartResult::failed(),
     };
     Ok(Json(result))
 }
 
 pub(crate) async fn mcp_proxy_path() -> String {
-    // 内联 `commands::mcp_daemon_proxy_path` 的同一套逻辑，避免依赖 `#[tauri::command]`
-    // 宏胶水（那会逼出一个 `tauri::AppHandle` 参数）。
-    fn build(_exe_name: &str, proxy_name: &str) -> Option<std::path::PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        let parent = exe.parent()?;
-        Some(parent.join(proxy_name))
-    }
-
-    let path = if cfg!(windows) {
-        build("simple-post.exe", "simple-post-mcp.exe")
-    } else {
-        build("simple-post", "simple-post-mcp")
-    };
-
-    path.map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unresolved current_exe>".to_string())
+    crate::http_config::mcp_proxy_path()
 }
 
 /// 把一个 JSON-RPC 请求派发给 MCP dispatcher。包装

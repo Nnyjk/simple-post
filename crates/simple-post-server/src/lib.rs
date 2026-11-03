@@ -2,8 +2,7 @@
 //!
 //! 本 crate 是桌面 shell 与容器镜像共享的一切，减去 GUI。它拥有：
 //!
-//!   * `web_api` —— `serve-web` 背后的 axum router：REST 面、`/mcp` JSON-RPC 端点、
-//!     静态 SPA host。
+//!   * `web_api` —— `serve-web` 背后的 axum router：REST 面、`/mcp` JSON-RPC 端点、静态 SPA host。
 //!   * `daemon_supervisor` —— 与 host 无关的 MCP daemon spawn / teardown 逻辑。
 //!   * `auth` —— bearer 中间件及其公开路径名单。
 //!   * `port_registry` —— stdio bridge 用来发现端口的 `mcp.port` 文件。
@@ -11,11 +10,9 @@
 //!
 //! ## 为何要单独一个 crate
 //!
-//! `src-tauri` 无条件链接 `tauri`，而 Tauri 在 Linux 上会拖来整个 GTK/WebKit 栈。
-//! 这让「只跑服务端」无法容器化：镜像为一个永远显示不出来的 GUI 背上 X11 库，
-//! `--lib` 测试二进制还通过 `AppHandle` 把 Windows GUI runtime 拖了进来（见
-//! `daemon_supervisor` 上的长注记）。把服务端拆出来，镜像就是 `debian-slim` 加一个
-//! 二进制，测试二进制也不会链接它不该链接的东西。
+//! `src-tauri` 无条件链接 `tauri`，而 Tauri 在 Linux 上会拖来整个 GTK/WebKit 栈，故「只跑
+//! 服务端」无法容器化。拆出来后镜像就是 `debian-slim` 加一个二进制，测试二进制也不会链接它
+//! 不该链接的东西。
 //!
 //! 依赖方向是单向的：
 //!
@@ -25,10 +22,12 @@
 //!                                     +-------------->  simple-post-mcp
 //! ```
 //!
-//! `src-tauri` 再导出下列模块，故 Tauri 命令里既有的
-//! `crate::daemon_supervisor::…` / `crate::web_api::…` 路径仍能解析。
+//! `src-tauri` 再导出下列模块，故 Tauri 命令里既有的 `crate::daemon_supervisor::…` /
+//! `crate::web_api::…` 路径仍能解析。
 
 pub mod auth;
+/// 两个二进制共用的 CLI 片段（`serve-web` / `mcp` 的解析与启动）。
+pub mod cli;
 pub mod daemon_supervisor;
 pub mod dto;
 /// 动态变量的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必各写一遍
@@ -53,6 +52,10 @@ pub mod web_api;
 // `spec` 也在其中：一份接口规格的线格式与落库编排在 core，三个宿主都认它。
 pub use simple_post_core::{db, domain, error, http_executor, oauth2, permissions, script, spec};
 
+// `mcp-proxy` 的入口住在 `cli` 模块里（与另两个子命令同处），再导出一次保持
+// `simple_post_server::run_mcp_proxy` 这个调用点不变。
+pub use cli::run_mcp_proxy;
+
 // 转换层本身也再导出一次：旧的调用点写 `crate::interchange::…` 时仍能解析到
 // `simple_post_interchange`。本仓库内的调用点目前都写 `simple_post_interchange::…`。
 pub use simple_post_interchange as interchange;
@@ -65,10 +68,9 @@ pub use simple_post_mcp::{daemon_http, mcp};
 /// CLI 子命令 `mcp` 的入口。负责数据目录解析、DB 初始化、axum serve、端口记录写入，
 /// 以及 SIGINT/SIGTERM 关闭。
 ///
-/// `http_config` 存放 router 需要的、超出 `bind` / `port` 之外的监听设置：挂载路径
-/// 与 Host/Origin 白名单。supervisor 从 `mcp.http_config` 偏好填它（见
-/// `daemon_cli_args`）；手工跑的 `simple-post mcp` 拿的是 clap 默认值，也就是出厂的
-/// 仅 loopback 配置。
+/// `http_config` 存放 router 需要的、超出 `bind` / `port` 之外的监听设置：挂载路径与
+/// Host/Origin 白名单。supervisor 从 `mcp.http_config` 偏好填它（见 `daemon_cli_args`）；
+/// 手工跑的 `simple-post mcp` 拿的是 clap 默认值，也就是出厂的仅 loopback 配置。
 pub fn run_mcp(
     transport: String,
     port: u16,
@@ -117,9 +119,8 @@ pub fn run_mcp(
         };
 
         // 同时支持 `--transport=stdio` 与默认的 `--transport=http`，但一律走同一个 axum
-        // router，这样只维护一套 handler。（推荐的 stdio 路径是 proxy 二进制；这个
-        // 回落分支主要是为了让该 CLI 参数存在——若将来 AI 客户端支持直连 HTTP MCP
-        // 就能启用。）
+        // router，这样只维护一套 handler。（推荐的 stdio 路径是 proxy 二进制；这个回落分支
+        // 主要是为了让该 CLI 参数存在。）
         let _ = transport; // 为向前兼容而接受，目前尚未分支处理。
 
         // 这里直接 bind + spawn 而不走 `mcp::serve_http`：后者的签名早于监听配置，
@@ -206,27 +207,15 @@ pub fn run_mcp(
     });
 }
 
-/// CLI 子命令 `mcp-proxy` 的入口。proxy 是独立二进制
-/// （`simple-post-mcp[.exe]`）；用主二进制跑它几乎肯定是用户搞错了（PATH 不对、
-/// 快捷方式指错），故指路到正确的二进制并以非零退出，好让 CI 脚本能抓到。
-pub fn run_mcp_proxy() {
-    eprintln!(
-        "mcp-proxy is a separate binary — please run `simple-post-mcp` instead \
-         (or connect the client to the daemon over HTTP)."
-    );
-    std::process::exit(2);
-}
-
 /// CLI 子命令 `serve-web` 的入口。拉起一个 axum HTTP 服务器，它：
 ///
 ///   * 从 `<project>/dist/` 提供打包好的 SPA；
 ///   * 暴露 `/api/*` REST 路由供浏览器 CRUD + HTTP 发送 + prefs；
-///   * 让既有的 `/mcp` JSON-RPC router 原封不动，使 MCP 客户端
-///     （Claude Desktop、Cursor 等）照常工作。
+///   * 让既有的 `/mcp` JSON-RPC router 原封不动，使 MCP 客户端（Claude Desktop、Cursor 等）
+///     照常工作。
 ///
-/// 浏览器从不 spawn daemon——它直连 `127.0.0.1:<port>`。daemon 子进程（若
-/// `mcp.auto_start == true`）跑在本机 `simple-post` 进程树下，只能经 REST 桥接触达；
-/// AI 客户端要么连自己机器上的 `simple-post-mcp` 二进制，要么直连本机的 HTTP 端点。
+/// 浏览器从不 spawn daemon——它直连 `127.0.0.1:<port>`。daemon 子进程（若 `mcp.auto_start ==
+/// true`）跑在本机 `simple-post` 进程树下，只能经 REST 桥接触达。
 ///
 pub async fn run_serve_web(
     bind_addr: std::net::SocketAddr,
@@ -255,8 +244,8 @@ pub async fn run_serve_web(
 /// 初始化全局 `tracing` subscriber，好让全 crate 的 `tracing::info!` /
 /// `tracing::warn!` / `tracing::error!` 宏真正输出。
 ///
-/// 认 `RUST_LOG`（经 `EnvFilter`），未设置时默认 `info`。用 `try_init`，重复初始化
-/// （测试 + GUI + CLI）会静默 no-op 而不是 panic。
+/// 认 `RUST_LOG`（经 `EnvFilter`），未设置时默认 `info`。用 `try_init`，重复初始化（测试 +
+/// GUI + CLI）会静默 no-op 而不是 panic。
 pub fn init_tracing() {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));

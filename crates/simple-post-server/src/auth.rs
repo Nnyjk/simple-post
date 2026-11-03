@@ -1,15 +1,12 @@
 //! `serve-web` 的 bearer 鉴权中间件。
 //!
-//! 默认 no-op：只有进程带非空 `SIMPLE_POST_WEB_PASSWORD`（或 CLI
-//! `--password=<token>`）时才拒绝请求。绑 `0.0.0.0` 的部署必须设，
-//! 否则 `/api/*` 与 `/mcp` 全网可达。
+//! 默认 no-op：只有进程带非空 `SIMPLE_POST_WEB_PASSWORD`（或 CLI `--password=<token>`）时才拒绝
+//! 请求。绑 `0.0.0.0` 的部署必须设，否则 `/api/*` 与 `/mcp` 全网可达。
 //!
-//! 免鉴权：`/api/healthz`、`/mcp/healthz`、`/healthz`，以及 SPA
-//! shell（`GET /`）——浏览器从 `localStorage` 取 token，在自己的 REST
-//! 请求上带上，`<script type="module">` 带不上。
-//!
-//! token 存 `localStorage` 而非 HttpOnly cookie：这里的鉴权按进程而非
-//! 按用户，SSR 之前也没有别的地方能放。
+//! 免鉴权：`/api/healthz`、`/mcp/healthz`、`/healthz`，以及 SPA shell（`GET /`）——浏览器从
+//! `localStorage` 取 token，在自己的 REST 请求上带上，`<script type="module">` 带不上。
+//! token 存 `localStorage` 而非 HttpOnly cookie：这里的鉴权按进程而非按用户，SSR 之前也没有别的
+//! 地方能放。
 
 use std::sync::Arc;
 
@@ -34,13 +31,11 @@ impl AuthState {
     }
 }
 
-/// bearer 中间件。`state.password` 为 `None` 时完全放行；为 `Some` 时，
-/// 除 [`is_public_path`] 名单外的 `/api/*`、`/mcp`、`/mcp/tools` 缺少
-/// 匹配的 `Authorization: Bearer <token>` 一律 401。
-///
-/// **名单成员 ≠ 路由已注册**：改名单不会注册路由，改路由也不会更新名单，
-/// 两处必须一起看。`/assets/*` 挂在鉴权层之外——浏览器无法给
-/// `<script type="module">` 附 `Authorization`，挂进去则每个 JS/CSS 都 401。
+/// bearer 中间件。`state.password` 为 `None` 时完全放行；为 `Some` 时，除 [`is_public_path`]
+/// 名单外的 `/api/*`、`/mcp`、`/mcp/tools` 缺少匹配的 `Authorization: Bearer <token>` 一律 401。
+/// **名单成员 ≠ 路由已注册**：改名单不会注册路由，改路由也不会更新名单，两处必须一起看。
+/// `/assets/*` 挂在鉴权层之外——浏览器无法给 `<script type="module">` 附 `Authorization`，挂进去
+/// 则每个 JS/CSS 都 401。
 pub async fn auth_middleware(
     State(state): State<AuthState>,
     request: Request,

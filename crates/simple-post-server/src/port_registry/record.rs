@@ -26,9 +26,8 @@ pub struct PortRecord {
 /// 端口文件里那条记录的旁边那一项：daemon 服务的 HTTP 配置的指纹所放的键名。
 ///
 /// 指纹是同一个 JSON 对象里的另一个顶层键，**不在** [`PortRecord`] 结构里。
-/// [`PortRecord`] 在 `lib.rs`（daemon 侧）被逐字段构造，给它加字段就得改那个
-/// 文件，而那个文件不在本次改动的范围内。顶层键的形状不动，故读这个文件的第三方
-/// （proxy 二进制、`scripts/mcp-repl.mjs`）照旧解析得了。
+/// [`PortRecord`] 在 `lib.rs`（daemon 侧）被逐字段构造，给它加字段就得改那个文件。顶层键的
+/// 形状不动，故读这个文件的第三方（proxy 二进制、`scripts/mcp-repl.mjs`）解析得了。
 pub const CONFIG_FINGERPRINT_KEY: &str = "config_fingerprint";
 
 /// 端口文件里的一条完整内容：那条记录 + 它服务的 HTTP 配置的指纹。
@@ -79,7 +78,7 @@ pub fn serialize_entry(
 /// 解析端口文件的内容。
 ///
 /// 记录本身解析不出来就返回 `Err`：那说明文件坏了，与「文件不存在」是两件事。
-/// 旧记录里没有配置指纹那一项，故那一项是 `None`——「判断不了」。
+/// 没有配置指纹的记录里那一项是 `None`——「判断不了」。
 pub fn parse_entry(bytes: &[u8]) -> Result<PortEntry, serde_json::Error> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let config_fingerprint = value

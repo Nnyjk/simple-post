@@ -31,7 +31,7 @@ pub use simple_post_mcp::{daemon_http, mcp};
 // 好让 Tauri 命令与 REST 路由调同一个函数。`spec_api` 同理 —— 一份接口规格的落库编排。
 // `project_api` 也是 —— 项目、服务与资源树节点的创建编排。
 pub use simple_post_server::{
-    auth, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry,
+    auth, cli, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry,
     project_api, spec_api, web_api,
 };
 

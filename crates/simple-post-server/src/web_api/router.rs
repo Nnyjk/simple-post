@@ -57,9 +57,9 @@ fn body_limit() -> axum::extract::DefaultBodyLimit {
 
 /// 组装 axum router。`spa_dir` 是 `dist/` 的**绝对**路径，由调用方解析一次传入。
 ///
-/// `state.password` 为 `Some` 时给除 `auth::is_public_path` 公开名单外的
-/// 全部路由装上 bearer 中间件。`state.base_path` 为 `Some` 时把整棵 router
-/// `nest` 到该前缀下，供反代把 SPA 挂在 `https://host/sp/`。两者默认 `None`。
+/// `state.password` 为 `Some` 时给除 `auth::is_public_path` 公开名单外的全部路由装上 bearer
+/// 中间件。`state.base_path` 为 `Some` 时把整棵 router `nest` 到该前缀下，供反代把 SPA 挂在
+/// `https://host/sp/`。两者默认 `None`。
 pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // `build_router` 在 `Arc::new(state)` 之前复制 `password` 与 `base_path`：
     // `state` 随即被移走，之后只能读这两个副本。
@@ -343,8 +343,8 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
 
 /// 组装 MCP 那三条路由：`/mcp` JSON-RPC、`/mcp/healthz`、`/mcp/tools`。
 ///
-/// 主 router 与专用 MCP 监听器共用这一份路由，所以「同一套 dispatch、同一份库、
-/// 同一道权限闸」在两个端口上是同一段代码，而不是两份长得像的实现。
+/// 主 router 与专用 MCP 监听器共用这一份路由，所以「同一套 dispatch、同一份库、同一道权限闸」
+/// 在两个端口上是同一段代码，而不是两份长得像的实现。
 fn build_mcp_routes(mcp_state: Arc<McpAppState>) -> Router {
     let json_rpc_state = mcp_state.clone();
     let healthz_state = mcp_state.clone();
@@ -361,12 +361,11 @@ fn build_mcp_routes(mcp_state: Arc<McpAppState>) -> Router {
 /// 组装只服务 MCP 的 router：挂载路径与 Host/Origin 白名单都取自用户的
 /// `mcp.http_config`。
 ///
-/// 复用 [`daemon_http::build_router_with_config`]，而不是自己再拼一套路由：那份
-/// router 带着 MCP 的挂载路径（配置里的路径 + `/mcp` 别名）与 Host/Origin 守卫，
-/// 于是这个专用端口上的 MCP 端点与 daemon 端点行为一致——同一套 dispatch、
-/// 同一份库、同一道白名单。外面再叠主端口那一道 bearer 鉴权，于是两个端口
-/// 对客户端是同一回事：设置面板「连接 → HTTP 服务配置」里写的地址、端口、
-/// 路径、白名单，对这两个端口同时生效。
+/// 复用 [`daemon_http::build_router_with_config`]，而不是自己再拼一套路由：那份 router 带着 MCP
+/// 的挂载路径（配置里的路径 + `/mcp` 别名）与 Host/Origin 守卫，于是这个专用端口上的 MCP 端点
+/// 与 daemon 端点行为一致——同一套 dispatch、同一份库、同一道白名单。
+/// 外面再叠主端口那一道 bearer 鉴权，于是两个端口对客户端是同一回事：设置面板「连接 → HTTP
+/// 服务配置」里写的地址、端口、路径、白名单，对这两个端口同时生效。
 pub fn build_mcp_only_router(state: WebState, config: &crate::domain::McpHttpConfig) -> Router {
     let password = state.password.clone();
     let router = crate::daemon_http::build_router_with_config(state.mcp_state.clone(), config);
