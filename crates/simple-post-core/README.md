@@ -25,8 +25,8 @@ crates/simple-post-core/
     │   ├── test_helpers.rs    # test-only: the shared pool + temp-dir builder
     │   ├── test_support.rs    # test-only: the only reader of fixtures.json
     │   ├── dynamic_variable_cache.rs
+    │   ├── dynamic_variables.rs # facade over dynamic_variables/
     │   ├── dynamic_variables/ # the per-project definition table
-    │   │   ├── mod.rs         #   facade
     │   │   ├── read.rs        #   list / list_by_project / get
     │   │   │                  #   / get_by_name_in_project / get_by_name_across
     │   │   │                  #   / project_id_of / source_project_id_of
@@ -116,11 +116,12 @@ crates/simple-post-core/
 ## Why this crate exists
 
 The modules above live here rather than inside `src-tauri`. The MCP
-module (`src-tauri::mcp`) consumed them via `use crate::db::*` /
-`use crate::domain::*` / `use crate::error::*` / etc. Pulling the MCP
-module into its own `simple-post-mcp` crate would have created a
-cycle (mcp needs core types, main crate also needs both mcp and core
-types). Hosting the shared modules in a third crate breaks the cycle.
+module used to live in the main crate (`src-tauri::mcp`) and consumed them
+via `use crate::db::*` / `use crate::domain::*` / `use crate::error::*` /
+etc. Pulling the MCP module into its own `simple-post-mcp` crate would
+have created a cycle (mcp needs core types, main crate also needs both
+mcp and core types). Hosting the shared modules in a third crate breaks
+the cycle.
 
 ## Consumers
 

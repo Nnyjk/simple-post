@@ -184,7 +184,7 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 
 `simple-post-server` 是另一条**不链接 Tauri** 的构建路径，产出物具备 `serve-web` 与 `mcp` 两个子命令，但不携带 GUI 运行时。容器镜像构建的就是它，因此镜像里没有 GTK、WebKit 与 X11。
 
-MCP 桥接二进制只以编译产物的形式发布（release 产物或 `cargo install simple-post-mcp`），没有 npm 包。`simple-post mcp-proxy` 这个子命令会提示改用独立二进制并以退出码 2 结束。
+MCP 桥接二进制只以编译产物的形式发布：GitHub Release 上只有桌面安装包，crates.io 上也没有 `simple-post-mcp` 这个 crate，所以这个二进制要从源码编译——在仓库根目录执行 `cargo install --path crates/simple-post-mcp`。没有 npm 包。`simple-post mcp-proxy` 这个子命令会提示改用独立二进制并以退出码 2 结束。
 
 ## 快速开始
 
@@ -309,9 +309,7 @@ sp.example.com {
 
 - **`SIMPLE_POST_WEB_PASSWORD` 必须设置。** 口令为空时鉴权中间件不生效，`/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。容器监听 `0.0.0.0`，因此这个口令是唯一的访问控制。
 - 健康检查 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证，方便探针使用；`/assets/*` 与单页应用外壳同样免认证——浏览器无法给 `<script type="module">` 附加 `Authorization` 头，对它们鉴权会让带口令的部署无法打开页面。
-- **两条出站通道的权限不同**：
-  - `POST /api/nodes/:id/send`（界面的 Send 按钮走这条）只接受接口 id 与相对路径，基础地址、路径、`{{var}}` 替换与鉴权全部由服务端按数据库里的配置组装。浏览器无法指定目标地址，传入绝对 URL 会被 400 拒绝，因此这条通道没有 SSRF 面。
-  - `POST /api/http/send` 是原始 URL 通道，调用方可以指定任意地址（仅允许 `http` 与 `https`）。默认不拦截私网地址——桌面端用户经常要访问 `localhost:3000`，默认拦截会破坏主要用途。公网或共享部署请设置 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段。
+- **只有一条出站通道**：`POST /api/http/send`（界面的 Send 按钮走这条）。界面在渲染进程里组装整个请求，后端只负责发，所以请求体里的 URL 完全由调用方给出，服务端就是这条通道的代理。出站策略由 `core::http_executor::OutboundPolicy` 把关，它只放行 `http` 与 `https` 两种 scheme。默认不拦截私网地址——桌面端用户经常要访问 `localhost:3000`，默认拦截会破坏主要用途。公网或共享部署请设置 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段（`100.64.0.0/10`）。服务端**不注册**节点级的 `POST /api/nodes/{id}/send`：注册了它就多出一条不受管辖的出站通道。
 
 ## 技术结构
 

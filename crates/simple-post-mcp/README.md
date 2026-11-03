@@ -2,12 +2,16 @@
 
 MCP server module + standalone CLI binary for Simple Post.
 
-Extracted from `src-tauri/src/mcp/` and `src-tauri/src/bin/mcp_proxy.rs`
-during the workspace refactor. The standalone binary's CLI surface is
-`--url` / `--password` / `--transport=stdio|http` / `--capability` /
-`--log-level`.
+The module was extracted from `src-tauri/src/mcp/` during the workspace
+refactor, and the stdio bridge was extracted from
+`src-tauri/src/bin/mcp_proxy.rs` — both of those paths are gone; the
+standalone binary is this crate's own `[[bin]]`. The standalone binary's
+CLI surface is `--url` / `--password` / `--transport=stdio|http` /
+`--capability` / `--log-level`.
 
-The binary is the only distribution form — there is no npm wrapper. An AI
+The binary is the only distribution form — there is no npm wrapper, and
+the crate is not on crates.io either, so build it from source: run
+`cargo install --path crates/simple-post-mcp` in the repository root. An AI
 client that cannot run a Rust binary should connect to the daemon's HTTP
 endpoint instead (start `simple-post serve-web`, point the client at
 `http://<host>:<port>/mcp`), which needs nothing installed client-side.
@@ -110,6 +114,16 @@ Three of the six flags also accept an env-var override: `--url` reads
 `SIMPLE_POST_WEB_URL`, `--password` reads `SIMPLE_POST_WEB_PASSWORD`, and
 `--capability` reads `SIMPLE_POST_MCP_CAPABILITY`. The flag wins when both
 are set. `--transport`, `--port` and `--log-level` have no env-var override.
+
+## Tools and capability tiers
+
+`tool_table()` registers 47 MCP tools, and `REQUIRED_CAPABILITY` gives
+every one of them a row. The global capability gate treats a missing row
+as unclassified and denies the tool. The three capability tiers are
+`read_only` / `safe_write` / `full_access`. The backend applies the tier
+the user picked in Settings (persisted as the `mcp.policy` preference);
+the `--capability` flag of this binary narrows the local view further, so
+it can only narrow what the backend already allows.
 
 ## Clients with no native binary
 
