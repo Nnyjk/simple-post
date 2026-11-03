@@ -11,7 +11,7 @@
  * `src/lib/__tests__/dynamic-parity.test.ts` 读同一份文件，产出必须逐条相同。
  *
  * 值的序列化在后端发生（前端拿到的已经是替换用的文本），这里的 [`serializeValue`] 是
- * 同一套规则的镜像，供面板显示「保存后长什么样」与样本对照使用。
+ * 同一套规则的镜像，只有共享样本的读取器读它（见 `__tests__/dynamic-parity.test.ts`）。
  */
 import type { AuthConfig, KeyValue, RequestBody } from '@/types/domain';
 import { listVars } from './url';
@@ -134,17 +134,4 @@ export function serializeValue(value: unknown, mode: ValueMode): string {
   if (typeof value === 'boolean') return String(value);
   if (value === null || value === undefined) return 'null';
   return JSON.stringify(value) ?? '';
-}
-
-/**
- * 覆盖值是用户手打的文本：能解析成 JSON 就用它，解析不了就当成一个字符串。
- *
- * 与 Rust 的 `core::dynamic::parse_raw` 同一套规则。
- */
-export function parseRaw(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
 }

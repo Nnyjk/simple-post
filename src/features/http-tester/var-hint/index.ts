@@ -18,7 +18,7 @@ export {
   type VarHintKeyAction,
   type VarHintKeyEvent,
 } from './varHint';
-export { elementAnchor, rectAnchor, refAnchor, type VarHintAnchor } from './VarHintAnchor';
-export { useVarHint, type UseVarHintOptions, type VarHint } from './useVarHint';
-export { VarHintPicker, type VarHintPickerProps } from './VarHintPicker';
+export { elementAnchor, rectAnchor, refAnchor } from './VarHintAnchor';
+export { useVarHint, type VarHint } from './useVarHint';
+export { VarHintPicker } from './VarHintPicker';
 export { VarHintInput, type VarHintInputProps } from './VarHintInput';

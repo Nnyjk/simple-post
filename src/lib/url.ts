@@ -265,8 +265,10 @@ export function listVars(input: string): string[] {
 const WORD = /^[A-Za-z0-9_]+$/;
 
 /**
- * `resolveVarsWithMissing`，丢弃 missing 列表。保留这个名字是因为既有调用方都
- * import 它——两者同一实现，`{{x}}` 不可能在这里存活却被那里报出来。
+ * `resolveVarsWithMissing`，丢弃 missing 列表。
+ *
+ * 两者是同一段代码：`{{x}}` 不可能在这一处存活却在那一处被报出来。共享样本的读取器
+ * import 两者并比对结果（见 `__tests__/url.test.ts`）。
  */
 export function resolveVars(
   input: string,
