@@ -54,7 +54,10 @@ export function ModuleRow({
       >
         <button
           type="button"
-          draggable
+          // 正在改名的那一行不参与拖拽。理由见 `EndpointRow.tsx` 的同一处：重命名输入框就在
+          // 这个 button 里面，而 `draggable` 的祖先会把「在输入框里框选文字」的手势读成
+          // 「拖这一行」。
+          draggable={!isEditing}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragOver={onDragOver}
