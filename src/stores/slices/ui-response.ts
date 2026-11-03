@@ -198,6 +198,14 @@ export interface UiResponseActions {
   setLastScriptOutcome: (tabId: string, outcome: ScriptOutcome | null) => void;
   /** 标记某个标签上有没有在途请求。 */
   setRequestPending: (tabId: string, pending: boolean) => void;
+  /**
+   * 把某个标签的那份响应**搬**到另一个标签下。
+   *
+   * 草稿接口保存后会换成新 id 的标签：`saveDraftEndpoint` 先关掉草稿标签，再按新
+   * id 开一个接口标签，而标签 id 就是响应的键。故保存时要把那份响应搬过去，否则
+   * 用户刚发出来的那次响应在保存之后就没了。
+   */
+  moveResponse: (fromTabId: string, toTabId: string) => void;
 }
 
 export type UiResponse = UiResponseState & UiResponseActions;
@@ -417,4 +425,13 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
         pending,
       })),
     })),
+  moveResponse: (fromTabId, toTabId) =>
+    set((s) => {
+      const moved = s.lastResponses[fromTabId];
+      if (!moved) return {};
+      const next = { ...s.lastResponses };
+      delete next[fromTabId];
+      next[toTabId] = moved;
+      return { lastResponses: next };
+    }),
 });
