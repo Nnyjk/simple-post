@@ -56,8 +56,8 @@ pub use simple_post_core::{
     db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script, spec,
 };
 
-// 转换层本身也再导出一次，好让调用点写 `crate::interchange::…` 而不是
-// `simple_post_interchange::…`——与上面那两行的理由相同。
+// 转换层本身也再导出一次：旧的调用点写 `crate::interchange::…` 时仍能解析到
+// `simple_post_interchange`。本仓库内的调用点目前都写 `simple_post_interchange::…`。
 pub use simple_post_interchange as interchange;
 
 // 再导出独立 `simple-post-mcp` crate 的 MCP 模块。之所以也再导出 `daemon_http`，

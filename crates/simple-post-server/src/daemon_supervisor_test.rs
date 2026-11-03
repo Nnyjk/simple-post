@@ -172,10 +172,10 @@ fn fn_body<'a>(src: &'a str, signature: &str) -> Option<&'a str> {
 #[test]
 fn the_shared_spawn_path_stays_free_of_tauri() {
     let src = include_str!("daemon_supervisor.rs");
-    // 注意结尾那个 `(`。`ensure_started_with` 是 `ensure_started_without_app_handle`
-    // 的子串——"with" + "out" 拼出 "without"——所以不带括号去搜会悄悄匹配到**错误**的
-    // 函数，于是无论注入什么这个测试都通过。同样的陷阱适用于 `ensure_started` 与
-    // `ensure_started_…`。
+    // 注意结尾那个 `(`。`ensure_started_with` 是 `ensure_started_…` 那一族里
+    // 更长名字的子串——"with" + "out" 拼出 "without"——所以不带括号去搜会悄悄匹配到
+    // **错误**的函数，于是无论注入什么这个测试都通过。同样的陷阱适用于
+    // `ensure_started` 与 `ensure_started_…`。
     let body = fn_body(src, "async fn ensure_started_with(")
         .expect("ensure_started_with must exist in daemon_supervisor.rs");
 

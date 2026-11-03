@@ -210,17 +210,6 @@ impl McpDaemonHandle {
             .tauri_finish(app_handle))
     }
 
-    /// `serve-web` 形态的 [`Self::ensure_started`]：无 `AppHandle`，自带数据目录。
-    pub async fn ensure_started_without_app_handle(
-        &self,
-        data_dir: &Path,
-    ) -> Result<u16, crate::error::AppError> {
-        Ok(self
-            .ensure_started_with(&data_dir.display().to_string())
-            .await?
-            .poll_only_finish())
-    }
-
     /// 所有 host 形态共用的唯一 spawn 路径。
     ///
     /// 刻意不含 `AppHandle`（及任何其他 Tauri 东西），好让 `--lib` 测试二进制

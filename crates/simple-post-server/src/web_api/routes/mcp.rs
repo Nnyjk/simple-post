@@ -8,11 +8,10 @@ use crate::mcp::AppState as McpAppState;
 use crate::permissions::CapabilityPolicy;
 use simple_post_mcp::daemon_http;
 
-use super::super::dto::McpStatusDto;
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
-pub(crate) async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<McpStatusDto> {
-    Json(s.daemon.snapshot().into())
+pub(crate) async fn mcp_status(State(s): State<Arc<WebState>>) -> Json<crate::dto::McpStatusDto> {
+    Json(s.daemon.snapshot())
 }
 
 /// `GET /api/mcp/logs` —— daemon 最近若干行日志。

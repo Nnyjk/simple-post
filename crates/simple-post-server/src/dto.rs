@@ -178,24 +178,6 @@ pub struct McpLogTailDto {
     pub capturing: bool,
 }
 
-impl McpStatusDto {
-    /// 安全的「未运行」快照。`registered_tools` 为空是因为没有 daemon 就没有工具可
-    /// 暴露——调用方会在 daemon 回来后的下一次轮询拿到工具列表。
-    pub fn stopped() -> Self {
-        Self {
-            status: "stopped".to_string(),
-            running: false,
-            pid: None,
-            port: None,
-            uptime_ms: 0,
-            requests_handled: 0,
-            current_connections: 0,
-            registered_tools: Vec::new(),
-            last_error: None,
-        }
-    }
-}
-
 /// `mcp_daemon_restart` Tauri 命令的返回值。与 `McpStatusDto` 分开，是因为重启路径
 /// 是唯一一处刻意吞掉底层 `AppError` 的地方——好让 UI 渲染统一的
 /// `{ ok: false, ... }` 信封，而不必在每个调用点再挂一层 `.catch`。

@@ -66,11 +66,11 @@ pub fn create_project(
 /// 建节点。endpoint 一次调用带上两半（结构节点 + 请求配置），两者写在同一个事务里，
 /// 而任何一半可能缺失的树是打不开的树。
 ///
-/// `root_id` 留空时按 `parent_id` 推导：子节点的归属由父节点蕴含，调用方只需点名父
-/// 节点，两者不可能打架。
+/// `root_id` 留空时按 `parent_id` 推导：子节点的归属由父节点蕴含，调用方点名父
+/// 节点即可。调用方点名了 `root_id` 时沿用它——那已经是它给出的答案。
 pub fn create_node(pool: &DbPool, input: NodeCreateInput) -> Result<ResourceNode, AppError> {
     let NodeCreateInput { mut node, detail } = input;
-    // MUTATION-2：一律从父节点推导，忽略调用方给的 root_id
+    // `root_id` 为空时才按父节点推导：调用方点名了归属就沿用它，父节点不覆盖它。
     if node.root_id.is_empty() {
         node.root_id = resolve_root_id(pool, None, node.parent_id.as_deref())?;
     }

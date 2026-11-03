@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    http::Method,
     routing::{get, patch, post, put},
     Json, Router,
 };
@@ -377,8 +376,3 @@ pub fn build_mcp_only_router(state: WebState, config: &crate::domain::McpHttpCon
         crate::auth::auth_middleware,
     ))
 }
-
-// `Method` 不参与按方法分发的路由表；这个常量只为让 `axum::http::Method` 的导入
-// 不被判为未使用。
-#[allow(dead_code)]
-const _UNUSED_METHOD: Method = Method::GET;
