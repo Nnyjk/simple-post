@@ -66,14 +66,18 @@ impl McpDaemonHandle {
                     pid: None,
                     port: None,
                     uptime_ms: 0,
-                    requests_handled: 0,
-                    current_connections: 0,
                     registered_tools: Vec::new(),
                     last_error: Some("supervisor busy".into()),
                 };
             }
         };
-        let snap = state.metrics.snapshot();
+        // uptime 从监管者记录的 daemon 启动时刻算起。原来的指标模块把这个数字算成
+        // 「监管者自己被创建到现在」，两者不是同一件事——界面上的「已运行」说的是
+        // daemon，不是监管者。
+        let uptime_ms = state
+            .started_at
+            .map(|t| t.elapsed().as_millis() as u64)
+            .unwrap_or(0);
         let status_str = state.status.as_str().to_string();
         // `running` 是 `status` 的派生视图，为仍读这个 bool 的调用方保留。仅严格
         // 的 `"running"` 计入——`starting` / `restarting` 是瞬态，renderer 对这两者
@@ -84,12 +88,7 @@ impl McpDaemonHandle {
             running,
             pid: state.pid,
             port: state.port,
-            uptime_ms: snap.uptime_ms,
-            requests_handled: snap.requests_handled,
-            // `current_connections` 是为将来某条 stderr 指标行预留的；daemon 尚未发出
-            // 这样的行，故这里写死 `0`。先把这个计数器放上线格式里是为了向前兼容——
-            // daemon 真的开始发它时，UI 不必改 schema。
-            current_connections: 0,
+            uptime_ms,
             registered_tools: crate::mcp::registered_tool_names(),
             last_error: state.last_error.clone(),
         }

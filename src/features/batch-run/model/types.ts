@@ -1,19 +1,11 @@
 /**
- * 集合子树的端点清单与顺序 —— 状态机、逐条结果与汇总报告。
+ * 集合子树的端点清单与顺序 —— 逐条结果与汇总报告。
  *
  * 逐条结果（[`BatchOutcome`]）与汇总报告（[`BatchReport`]）是**两份**东西：前者回答
  * 「这一条怎么样了」，后者回答「这一批怎么样」。报告的每一项都能由逐条结果算出来，
  * 故报告不是另一份记录，而是同一批事实的另一种读法。
  */
 import type { EnvWrite } from '@/types/domain';
-
-/**
- * 一个端点在批量运行中的状态。
- *
- * `pending` → `running` → `success` | `failed`。运行结束时仍是 `pending` 的那些是
- * **未执行**——中止之后没轮到它们。
- */
-export type BatchItemState = 'pending' | 'running' | 'success' | 'failed';
 
 /**
  * 一条失败的分类。

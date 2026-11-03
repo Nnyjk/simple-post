@@ -23,7 +23,6 @@ fn state() -> std::sync::Arc<crate::mcp::AppState> {
     std::sync::Arc::new(crate::mcp::AppState {
         pool: simple_post_core::db::init(&dir).unwrap(),
         started_at: std::time::Instant::now(),
-        metrics: std::sync::Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 

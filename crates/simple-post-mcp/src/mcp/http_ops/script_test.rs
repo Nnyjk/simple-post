@@ -70,7 +70,6 @@ fn mcp_state(tag: &str) -> std::sync::Arc<AppState> {
     std::sync::Arc::new(AppState {
         pool: simple_post_core::db::init(&dir).unwrap(),
         started_at: std::time::Instant::now(),
-        metrics: std::sync::Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 

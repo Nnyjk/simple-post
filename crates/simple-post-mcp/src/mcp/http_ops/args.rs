@@ -1,5 +1,5 @@
-//! 两个工具的入参形状 —— `api_run_request` 收一整份临时请求，`api_call_endpoint`
-//! 收一个端点 id 加一份覆盖值。
+//! 三个工具的入参形状 —— `api_run_request` 收一整份临时请求，`api_call_endpoint`
+//! 收一个端点 id 加一份覆盖值，`api_run_collection` 收一个容器 id 加一份覆盖值。
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -23,7 +23,7 @@ pub(super) struct RunRequestArgs {
     pub(super) path_params: Option<Value>,
     #[serde(default)]
     pub(super) body: Option<String>,
-    /// body 的模式（`none` / `json` / `form` / `raw` / `multipart`）。
+    /// body 的模式（`none` / `json` / `form` / `multipart` / `xml` / `raw` / `binary`）。
     /// 给了 body 而没给模式时算 `raw`。
     #[serde(default)]
     pub(super) body_mode: Option<String>,
@@ -34,9 +34,9 @@ pub(super) struct RunRequestArgs {
     pub(super) auth: Option<Value>,
     /// 这次请求用哪个环境，以及**它属于哪个项目**。
     ///
-    /// 这一项不是可选的：临时请求没有端点行可读，项目归属只能由环境 id 反查，
-    /// 故不点名就没有项目 —— 既没有默认环境可回落，也没有（环境 × 模块）那一格
-    /// 地址可读。那次请求照发，但不带 base URL、`{{var}}` 也不替换。
+    /// 临时请求没有端点行可读，项目归属只能由环境 id 反查，故不点名就没有项目：
+    /// 既没有默认环境可回落，也没有（环境 × 模块）那一格地址可读。那次请求照发，
+    /// 但不带 base URL、`{{var}}` 也不替换。
     #[serde(default)]
     pub(super) env_id: Option<String>,
     /// 取值时读的是哪个模块的格子。地址住在 (环境 × 模块)，不给就没有格子、没有

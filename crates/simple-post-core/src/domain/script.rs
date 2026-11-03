@@ -149,11 +149,6 @@ impl ScriptOutcome {
         Self::default()
     }
 
-    /// 断言有失败的吗？失败**不**改变请求的成败，只在这里呈现。
-    pub fn has_failed_assertions(&self) -> bool {
-        self.assertions.iter().any(|a| !a.passed)
-    }
-
     /// 把另一个阶段的产出并进来。一次发送跑两个阶段（前置与测试），结果合成一份。
     pub fn merge(&mut self, other: ScriptOutcome) {
         self.logs.extend(other.logs);

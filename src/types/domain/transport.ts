@@ -99,7 +99,6 @@ export interface McpStatus {
   running: boolean;
   pid?: number;
   uptime?: number;
-  requestsHandled: number;
   lastError?: string;
 }
 

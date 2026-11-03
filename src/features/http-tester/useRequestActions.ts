@@ -22,8 +22,6 @@ import type {
 } from '@/types/domain';
 import { toRequestSnapshot } from './model/requestInput';
 
-/** 与 store 里 `setLastResponse` / `addResponseHistory` 相同的形状。 */
-
 /**
  * 返回发送 / 保存 / 复制三个处理器。必须无条件调用——它是 hook。
  */

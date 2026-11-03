@@ -239,6 +239,8 @@ pub fn resolve_endpoint_with(
         body_base64,
         body_mode: eff_body.mode,
         auth: resolved_auth,
+        // 变量池随结果一起走：取 OAuth2 的 token 时要用的正是这一份。
+        vars,
         missing_vars: missing,
         missing_path_params,
     })

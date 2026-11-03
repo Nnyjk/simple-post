@@ -78,18 +78,9 @@ pub(super) fn build_result_envelope(
                     message: "no response and no error".into(),
                 },
             );
-            state_metrics_err();
             CallToolResult::err(format!("{}: {}", err.kind, err.message))
         }
     }
-}
-
-/// 传输失败时的错误计数。单独抽出来是为了让 `Option` 分支不必把整个 state
-/// 带进闭包。
-fn state_metrics_err() {
-    // 这里拿不到 state：`http_executor` 自己用 `tracing` 记指标，daemon 的
-    // `mcp_metrics.errors` 由 daemon_http.rs 的处理器自增。本函数刻意为空，只为让
-    // 成功/失败两侧的调用点对称。
 }
 
 pub(super) fn http_response_to_api(resp: &HttpResponse, method: &str, url: &str) -> ApiResponse {

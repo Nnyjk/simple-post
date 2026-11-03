@@ -18,7 +18,6 @@ use std::pin::Pin;
 
 use serde::Deserialize;
 
-use simple_post_core::db::DbPool;
 use simple_post_core::domain::{
     parse_http_method, AuthConfig, BodyMode, DynamicError, DynamicErrorKind, DynamicVariable,
     EndpointDetail, KeyValue, RequestBody,
@@ -118,7 +117,9 @@ async fn fetch_from_endpoint(
         ..
     } = &resolved.auth
     {
-        let token = simple_post_core::oauth2::ensure_token(&ctx.pool, cfg)
+        // 变量池交给 core：OAuth2 配置里那四个字段的 `{{var}}` 由 core 在取 token
+        // 之前替换（规则见 `simple_post_core::oauth2`）。MCP 侧不自己替换。
+        let token = simple_post_core::oauth2::ensure_token(&ctx.pool, cfg, &resolved.vars)
             .await
             .map_err(|e| DynamicError {
                 name: def.name.clone(),
@@ -339,6 +340,3 @@ async fn send(
         }
     }
 }
-
-/// 取数器需要的连接池类型别名，便于调用方少写一层路径。
-pub type Pool = DbPool;

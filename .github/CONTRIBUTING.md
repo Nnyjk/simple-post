@@ -71,7 +71,7 @@ npm run check
 
 ### 5. MCP 的 stdout 只有 JSON-RPC
 
-`simple-post-mcp` 里 stdout 只承载 JSON-RPC 帧。日志、panic、`__mcp_metrics__{…}` 遥测一律走 stderr。stdout 上出现非 JSON 会直接让 AI 客户端崩掉。
+`simple-post-mcp` 里 stdout 只承载 JSON-RPC 帧。日志与 panic 一律走 stderr。stdout 上出现非 JSON 会直接让 AI 客户端崩掉。
 
 出处：`AGENTS.md` → *MCP stdout discipline*。
 
@@ -102,7 +102,7 @@ npm run check
 
 ## Issue
 
-用模板。仓库的高风险点都做成了模板字段：两个模板都列出「数据结构 / schema」与「MCP 工具注册或权限」两项，`feature_request.yml` 另外列出「前后端命令」（描述里点名五处协同）、「反向代理 / base path」、「回归网测试」与「CI / 门禁」，`bug_report.yml` 另外列出「容器 / 部署」。
+用模板。仓库的高风险点都做成了模板字段：两个模板都列出「数据结构 / schema」、「MCP 工具注册或权限」、「前后端命令」与「反向代理 / base path」四项；`feature_request.yml` 的「前后端命令」描述里点名五处协同，它另外列出「回归网测试」（描述里点名三处读源码文本的回归网）、「CI / 门禁」与「纯文档」；`bug_report.yml` 另外列出「容器 / 部署」。
 
 ## 发版
 
@@ -125,7 +125,7 @@ npm run check
    ```
    看到 `"status":"ok"` 即可——注意断言的是**响应体**，状态码单独看会骗人（未注册路径会落到 SPA fallback 返回 `200 text/html`）。
 5. **手动发布** draft release，并写上 release notes。
-6. 打 `v*` 前确认 `main` 上的 CI 是绿的，且版本号已在 `package.json` 与根 `Cargo.toml` 同步更新（两者共用一个 workspace version）。
+6. 打 `v*` 前确认 `main` 上的 CI 是绿的，且四处版本号已同步更新：`package.json` 的 `version`、根 `Cargo.toml` 的 `[workspace.package]` 块、`src-tauri/tauri.conf.json` 的 `version`、README 顶部的版本徽章。根 `Cargo.toml` 里那一份由各个 crate 的 `version.workspace = true` 继承，改一处即可带起全部 crate；`package.json` 与 `tauri.conf.json` 各有自己的一份。
 
 ## 许可
 

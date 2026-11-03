@@ -1,8 +1,13 @@
 //! OAuth2：按需取 token、必要时刷新，然后把 token 交给调用方注入请求。
 //!
-//! 这一层**只管 token 的生命周期**，不碰 URL、header 排序或 `{{var}}` 替换——那些是
-//! `variable_fill` 与 `src/lib/http-build.ts` 的活。两边各自调 [`ensure_token`] 拿到
-//! [`OAuth2Token`]，再用 [`auth_header_value`] / 各自的 query 追加把 token 挂到请求上。
+//! 这一层管 token 的生命周期，**并且**管 OAuth2 配置自己那几个字段的 `{{var}}` 替换
+//! （见 [`config`]）。替换住在这里，是因为取 token 之前必须有一份替换好的配置，而两边
+//! （渲染进程与 MCP）都不再自己做这一步。
+//!
+//! URL、header 排序与请求体那些 `{{var}}` 替换仍然是 `variable_fill` 与
+//! `src/lib/http-build.ts` 的活 —— 本模块只碰 OAuth2 配置本身。两边各自调
+//! [`ensure_token`] 拿到 [`OAuth2Token`]，再用 [`auth_header_value`] / 各自的 query
+//! 追加把 token 挂到请求上。
 //!
 //! 三条不变量：
 //!
@@ -16,6 +21,7 @@
 //!   `endpoint_details.auth_json` 里，故没有两处漂移的可能。
 
 mod api;
+mod config;
 mod form;
 mod http_client;
 mod inject;
@@ -29,6 +35,7 @@ pub use api::{
     ensure_token, fetch_and_store, resolve, save_manual, OAuth2ManualToken, OAuth2TokenDto,
     OAuth2TokenRequest,
 };
+pub use config::{substitute_config, SubstitutedConfig, KEPT_FIELDS, SUBSTITUTED_FIELDS};
 pub use inject::{auth_header_value, auth_query_value, goes_in_query, inject};
 pub use store::auth_key;
 pub use validate::validate;
@@ -64,6 +71,10 @@ mod unit_tests;
 #[cfg(test)]
 #[path = "oauth2/inject_parity_test.rs"]
 mod inject_parity_tests;
+
+#[cfg(test)]
+#[path = "oauth2/config_parity_test.rs"]
+mod config_parity_tests;
 
 #[cfg(test)]
 #[path = "oauth2/live_test.rs"]

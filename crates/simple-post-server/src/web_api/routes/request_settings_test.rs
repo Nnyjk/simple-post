@@ -39,7 +39,6 @@ async fn serve_test_router() -> (SocketAddr, PathBuf) {
         mcp_state: Arc::new(crate::mcp::AppState {
             pool,
             started_at: std::time::Instant::now(),
-            metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
         }),
         password: None,
         base_path: None,

@@ -134,7 +134,6 @@ fn test_state_with(base_url: &str, url: &str, body_content: &str) -> Arc<AppStat
     Arc::new(AppState {
         pool,
         started_at: Instant::now(),
-        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 
@@ -275,7 +274,6 @@ fn two_project_state() -> Arc<AppState> {
     Arc::new(AppState {
         pool,
         started_at: Instant::now(),
-        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 

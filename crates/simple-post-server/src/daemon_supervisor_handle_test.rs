@@ -77,11 +77,9 @@ fn new_handle_snapshot_is_stopped() {
     assert!(!s.running, "new handle should be stopped");
     assert_eq!(s.pid, None);
     assert_eq!(s.port, None);
-    assert_eq!(s.requests_handled, 0);
-    // 不能写 `assert_eq!(.., 0)`：`McpMetrics::new()` 打上
-    // `started_at_ms = now_ms()`，`snapshot()` 返回的是时间差，跨过一条语句的
-    // 毫秒边界就会读到 1。那是两条相邻语句之间的墙钟差，不是状态变化——精确
-    // 断言 0 会在机器忙到被抢占时随机把 CI 弄红。
+    // 不能写 `assert_eq!(.., 0)`：uptime 是从监管者记录的启动时刻算起的时间差，
+    // 跨过一条语句的毫秒边界就会读到 1。那是两条相邻语句之间的墙钟差，不是状态
+    // 变化——精确断言 0 会在机器忙到被抢占时随机把 CI 弄红。
     assert!(
         s.uptime_ms <= 1,
         "uptime of a handle that was never started should be ~0, got {}",

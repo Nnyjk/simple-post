@@ -10,7 +10,6 @@ pub mod domain;
 pub mod dynamic;
 pub mod error;
 pub mod http_executor;
-pub mod mcp_metrics;
 pub mod oauth2;
 pub mod path_params;
 pub mod permissions;

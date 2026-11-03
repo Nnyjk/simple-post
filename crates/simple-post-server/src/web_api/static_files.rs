@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use axum::{
     body::Body,
-    extract::Path,
     http::{header, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -18,18 +17,6 @@ use axum::{
 /// 到这里而不是交给打包器，见 [`shell_with_base`]。
 pub(crate) async fn spa_index(spa_dir: PathBuf, base: Option<String>) -> Response {
     serve_file_or_index(spa_dir, "index.html", base).await
-}
-
-#[allow(dead_code)] // reserved for future asset-serve route; not yet wired in build_router
-async fn spa_assets(
-    axum::extract::State(spa_dir): axum::extract::State<PathBuf>,
-    Path(rel): Path<String>,
-) -> Response {
-    // 拒绝任何 `..`，使这一层即使绑在 `0.0.0.0` 也只是只读静态面。
-    if rel.split('/').any(|seg| seg == "..") {
-        return (StatusCode::BAD_REQUEST, "bad path").into_response();
-    }
-    serve_file_or_index(spa_dir, &rel, None).await
 }
 
 /// 从 `spa_dir` 读一个文件；未命中则回 SPA shell。

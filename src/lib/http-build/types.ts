@@ -127,6 +127,17 @@ export interface PreparedRequest {
    */
   missingVars: string[];
   /**
+   * 这次组装用的变量池（环境变量 + 动态变量的值）。
+   *
+   * 它随请求一起走，因为 OAuth2 取 token 时要用**同一份**池：token 端点里的
+   * `{{var}}` 由后端（Rust 侧的 `simple_post_core::oauth2`）在取 token 之前替换，
+   * 渲染进程不自己替换。池另算一份的话，同一个 `{{var}}` 在 URL 里能解析、在
+   * `tokenUrl` 里却不能解析。
+   *
+   * 它不进 cURL 预览，也不进落库的请求快照。
+   */
+  vars: Record<string, string>;
+  /**
    * URL 路径里没取到值的占位符名（`/users/{id}` 的 `id`）。
    *
    * 与 `missingVars` 是两回事：那边是「变量池里没有这个变量」，这边是「端点自己的

@@ -24,8 +24,6 @@ struct ResolveTemplateArgs {
     template: String,
     #[serde(default)]
     env_id: Option<String>,
-    #[serde(default)]
-    scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,8 +53,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "template": { "type": "string" },
-                    "env_id": { "type": "string" },
-                    "scope": { "type": "string", "enum": ["request", "headers", "params", "body", "auth"] }
+                    "env_id": { "type": "string" }
                 },
                 "required": ["template"],
                 "additionalProperties": false,
@@ -138,7 +135,6 @@ async fn tool_api_resolve_template(
         Default::default()
     };
 
-    let _ = a.scope; // 留给将来的分域替换（headers/body 等）
     let resolved = crate::variable_fill::resolve_template(&a.template, &vars);
 
     Ok(CallToolResult::json(json!({

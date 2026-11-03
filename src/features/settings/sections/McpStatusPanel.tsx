@@ -213,17 +213,7 @@ export function StateSummary({ state }: { state: McpUiState | null }) {
   return (
     <span className="inline-flex items-center gap-2">
       <StatusBadge status={state.status} />
-      {state.pid !== null && (
-        <>
-          <span className="font-mono text-foreground/80">PID {state.pid}</span>
-          <span className="text-muted-foreground/60">·</span>
-        </>
-      )}
-      <span className="text-muted-foreground">
-        已处理{' '}
-        <span className="font-mono text-foreground">{state.requestsHandled.toLocaleString()}</span>{' '}
-        次请求
-      </span>
+      {state.pid !== null && <span className="font-mono text-foreground/80">PID {state.pid}</span>}
     </span>
   );
 }

@@ -17,7 +17,7 @@ mod serve;
 mod spec;
 mod static_files;
 
-pub use dto::{ensure_server_id, HealthDto, McpStatusDto};
+pub use dto::{ensure_server_id, HealthDto};
 pub use error::{map_app_error, HttpErrorResponse};
 pub use router::{build_mcp_only_router, build_router, WebState};
 pub use serve::{default_data_dir, default_spa_dir, serve};

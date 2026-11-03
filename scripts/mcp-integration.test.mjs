@@ -167,8 +167,8 @@ try {
 
   const after = await (await fetch(`http://127.0.0.1:${port}/mcp/healthz`)).json();
   assert(
-    after.requests_handled >= 4,
-    `healthz reports handled requests (got ${after.requests_handled})`,
+    Array.isArray(after.registered_tools) && after.registered_tools.length > 0,
+    `healthz lists the registered tools (got ${after.registered_tools?.length})`,
   );
   assert(after.status === 'ok', 'healthz remains ok after calls');
 

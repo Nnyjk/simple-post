@@ -29,7 +29,6 @@ pub(super) fn state() -> std::sync::Arc<AppState> {
     std::sync::Arc::new(crate::mcp::AppState {
         pool: simple_post_core::db::init(&dir).unwrap(),
         started_at: Instant::now(),
-        metrics: std::sync::Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 

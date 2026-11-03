@@ -5,6 +5,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+# 只在本仓库内用路径依赖，不发布到 crates.io（误 publish 会抢注这个名字）。
+publish = false
 
 [lib]
 name = "simple_post_interchange"

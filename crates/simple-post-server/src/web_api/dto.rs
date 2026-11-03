@@ -57,40 +57,6 @@ pub struct HttpSendBody {
     pub test_script: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpStatusDto {
-    pub status: String,
-    pub running: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pid: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub port: Option<u16>,
-    pub uptime_ms: u64,
-    pub requests_handled: u64,
-    pub current_connections: u64,
-    pub registered_tools: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_error: Option<String>,
-}
-
-impl From<crate::dto::McpStatusDto> for McpStatusDto {
-    fn from(s: crate::dto::McpStatusDto) -> Self {
-        // Tauri 命令 DTO 形状已经对了——逐字段拷贝，任一侧改名都不会静默失同步。
-        Self {
-            status: s.status,
-            running: s.running,
-            pid: s.pid,
-            port: s.port,
-            uptime_ms: s.uptime_ms,
-            requests_handled: s.requests_handled,
-            current_connections: s.current_connections,
-            registered_tools: s.registered_tools,
-            last_error: s.last_error,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, Default)]
 pub struct PreferencesPutBody {
     /// 要设置的单键。直接对应 `preferences` 表的一行。

@@ -10,9 +10,9 @@ crates/simple-post-core/
 ├── README.md
 └── src/
     ├── lib.rs                 # re-exports body / db / domain / dynamic /
-    │                          # error / http_executor / mcp_metrics / oauth2 /
-    │                          # path_params / permissions / script / spec /
-    │                          # template / tls / url
+    │                          # error / http_executor / oauth2 / path_params /
+    │                          # permissions / script / spec / template / tls /
+    │                          # url
     ├── body.rs                # the request-body rules — how each body mode's
     │                          # content is parsed, templated and assembled
     ├── db/                    # SQLite + CRUD modules
@@ -25,8 +25,8 @@ crates/simple-post-core/
     │   ├── test_helpers.rs    # test-only: the shared pool + temp-dir builder
     │   ├── test_support.rs    # test-only: the only reader of fixtures.json
     │   ├── dynamic_variable_cache.rs
+    │   ├── dynamic_variables.rs # facade over dynamic_variables/
     │   ├── dynamic_variables/ # the per-project definition table
-    │   │   ├── mod.rs         #   facade
     │   │   ├── read.rs        #   list / list_by_project / get
     │   │   │                  #   / get_by_name_in_project / get_by_name_across
     │   │   │                  #   / project_id_of / source_project_id_of
@@ -71,10 +71,10 @@ crates/simple-post-core/
     ├── error.rs               # AppError enum
     ├── http_executor.rs       # reqwest-based HTTP executor (used by
     │                          # `http_request` Tauri command)
-    ├── mcp_metrics.rs         # in-memory MCP daemon metrics
     ├── oauth2.rs              # facade over oauth2/
     ├── oauth2/                # the OAuth2 token flow
     │   ├── api.rs             #   the entry both transports share
+    │   ├── config.rs          #   the {{var}} substitution in the OAuth2 config
     │   ├── form.rs            #   the x-www-form-urlencoded decoding
     │   ├── http_client.rs     #   the `oauth2` crate's outbound adapter
     │   ├── inject.rs          #   putting the token into the request
@@ -116,16 +116,17 @@ crates/simple-post-core/
 ## Why this crate exists
 
 The modules above live here rather than inside `src-tauri`. The MCP
-module (`src-tauri::mcp`) consumed them via `use crate::db::*` /
-`use crate::domain::*` / `use crate::error::*` / etc. Pulling the MCP
-module into its own `simple-post-mcp` crate would have created a
-cycle (mcp needs core types, main crate also needs both mcp and core
-types). Hosting the shared modules in a third crate breaks the cycle.
+module used to live in the main crate (`src-tauri::mcp`) and consumed them
+via `use crate::db::*` / `use crate::domain::*` / `use crate::error::*` /
+etc. Pulling the MCP module into its own `simple-post-mcp` crate would
+have created a cycle (mcp needs core types, main crate also needs both
+mcp and core types). Hosting the shared modules in a third crate breaks
+the cycle.
 
 ## Consumers
 
 - `crates/simple-post-server` (the headless host): `pub use simple_post_core::{db,
-  domain, error, http_executor, mcp_metrics, oauth2, permissions, script, spec}`
+  domain, error, http_executor, oauth2, permissions, script, spec}`
   re-exports the modules under the historical `crate::db::*` / `crate::domain::*`
   paths so call sites don't need to be rewritten.
 - `src-tauri` (the Tauri shell + `serve-web`): `pub use simple_post_core::{…}`

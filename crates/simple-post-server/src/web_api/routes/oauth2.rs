@@ -6,6 +6,12 @@
 //!
 //! **受 bearer 鉴权层保护**：它会向一个由 `auth.tokenUrl` 指定的地址发请求，而 URL 由
 //! 请求体决定。把它放进 `auth::is_public_path` 等于给未鉴权的调用方开一条出站通道。
+//!
+//! **body 里的 `vars` 是变量池**：渲染进程组装请求时算出的那一份（`buildPool(env,
+//! dynamicVars)`）。OAuth2 配置里那四个字段的 `{{var}}` 由 core 在取 token 之前替换
+//! （规则见 `simple_post_core::oauth2`），故渲染进程不自己替换，但必须把池送过来 ——
+//! 送的是**同一份**池，否则同一个 `{{var}}` 在 URL 里能解析、在 `tokenUrl` 里不能解析。
+//! 缺席 `vars` 时配置里的 `{{var}}` 原样留着，取 token 会报出缺哪个变量。
 
 use std::sync::Arc;
 

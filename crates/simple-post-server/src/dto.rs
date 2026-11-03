@@ -149,10 +149,6 @@ pub struct McpStatusDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     pub uptime_ms: u64,
-    pub requests_handled: u64,
-    /// 当前活跃的 MCP 客户端连接数。metrics 模块尚未暴露对应计数器，故 supervisor
-    /// 在 daemon 通过 stderr 上报之前一律写 `0`；UI 把它显示成一行「0 connections」。
-    pub current_connections: u64,
     pub registered_tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
@@ -176,24 +172,6 @@ pub struct McpLogTailDto {
     /// 复用一个**外部启动**的 daemon 时没有管道，那种情况下缓冲永远是空的。
     /// 用户看到的应该是「无日志捕获」而不是「没有日志」。
     pub capturing: bool,
-}
-
-impl McpStatusDto {
-    /// 安全的「未运行」快照。`registered_tools` 为空是因为没有 daemon 就没有工具可
-    /// 暴露——调用方会在 daemon 回来后的下一次轮询拿到工具列表。
-    pub fn stopped() -> Self {
-        Self {
-            status: "stopped".to_string(),
-            running: false,
-            pid: None,
-            port: None,
-            uptime_ms: 0,
-            requests_handled: 0,
-            current_connections: 0,
-            registered_tools: Vec::new(),
-            last_error: None,
-        }
-    }
 }
 
 /// `mcp_daemon_restart` Tauri 命令的返回值。与 `McpStatusDto` 分开，是因为重启路径

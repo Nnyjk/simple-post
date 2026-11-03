@@ -136,13 +136,6 @@ useAppStore.subscribe((state, prev) => {
 export const useActiveProject = () =>
   useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
 
-/**
- * 当前活动的工作区标签（原始引用），没有标签打开时为 `null`。返回 `OpenTab`
- * 对象本身，好让消费方按 `kind` 选渲染器。
- */
-export const useActiveTab = () =>
-  useAppStore((s) => s.openTabs.find((t) => t.id === s.activeTabId) ?? null);
-
 export const useActiveEnvironment = () =>
   useAppStore((s) => s.environments.find((e) => e.id === s.activeEnvironmentId));
 
@@ -168,14 +161,6 @@ export const useActiveEndpoint = () =>
     if (!id) return null;
     const node = s.nodes.find((n) => n.id === id);
     return node && node.kind === 'endpoint' ? node : null;
-  });
-
-/** 活动 endpoint 的请求配置，或 `undefined`。 */
-export const useActiveEndpointDetail = () =>
-  useAppStore((s) => {
-    const activeTab = s.openTabs.find((t) => t.id === s.activeTabId);
-    const id = activeTab?.kind === 'endpoint' ? activeTab.id : s.activeEndpointId;
-    return id ? s.endpointDetails[id] : undefined;
   });
 
 // ---------------------------------------------------------------------------

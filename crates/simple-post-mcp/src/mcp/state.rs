@@ -10,8 +10,6 @@ pub struct AppState {
     pub pool: simple_post_core::db::DbPool,
     /// uptime 报告的墙钟起点。
     pub started_at: Instant,
-    /// 实时计数器，每处理一个请求就自增，供 `/mcp/healthz` 与 `mcp_status` 展示。
-    pub metrics: Arc<simple_post_core::mcp_metrics::McpMetrics>,
 }
 
 /// 在 `bind:port` 上起 MCP HTTP daemon，返回**实际**端口。
@@ -33,7 +31,6 @@ pub async fn serve_http(
     let state = Arc::new(AppState {
         pool,
         started_at: Instant::now(),
-        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     });
 
     tokio::spawn(async move {

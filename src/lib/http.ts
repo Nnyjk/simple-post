@@ -431,7 +431,9 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
   const auth = input.auth;
   if (auth?.kind === 'oauth2' && auth.oauth2) {
     try {
-      const token = await fetchOAuth2Token(auth, { signal: input.signal });
+      // `request.vars` 是组装这份请求时用的那一份变量池：OAuth2 配置里的
+      // `{{var}}` 由后端在取 token 之前替换，送同一份池过去，两边看到的是同一批变量。
+      const token = await fetchOAuth2Token(auth, { signal: input.signal, vars: request.vars });
       outbound = applyOAuth2Token(request, auth, token);
     } catch (err) {
       const name = (err as { name?: string })?.name;

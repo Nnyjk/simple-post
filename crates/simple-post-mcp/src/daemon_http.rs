@@ -15,9 +15,9 @@
 //!   * 信封级失败（JSON 解析不过、`jsonrpc != "2.0"`、method 未知、缺 `params.name`）
 //!     → `error`，因为此时还没有工具正文可读
 //!
-//! 代价：调用方在 JSON-RPC 边界上分不出传输级与工具级失败。真正需要这个区分的地方在
-//! 下一层 —— `GET /mcp/healthz` 的 `requests_handled` 与服务端信封失败计数；
-//! 不要在响应体里把它重新引回来。
+//! 代价：调用方在 JSON-RPC 边界上分不出传输级与工具级失败。`GET /mcp/healthz`
+//! 只报告存活、运行时长与工具清单，不再给请求计数；两类失败的区别要由调用方
+//! 自己从工具正文里读。
 
 use std::sync::Arc;
 
@@ -260,11 +260,6 @@ async fn handle_healthz(State(state): State<Arc<AppState>>) -> Json<HealthzRespo
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
         uptime_ms,
-        requests_handled: state
-            .metrics
-            .requests_handled
-            .load(std::sync::atomic::Ordering::Relaxed),
-        current_connections: 0, // axum 0.7 没有便宜的取法
         registered_tools: mcp::registered_tool_names(),
     })
 }
@@ -274,8 +269,6 @@ pub struct HealthzResponse {
     pub status: &'static str,
     pub version: &'static str,
     pub uptime_ms: u64,
-    pub requests_handled: u64,
-    pub current_connections: u64,
     pub registered_tools: Vec<String>,
 }
 
@@ -305,11 +298,6 @@ async fn handle_mcp_post(State(state): State<Arc<AppState>>, body: String) -> Re
 /// `handle_mcp_post` 的本体。对外暴露，好让 `serve-web` 形状在同一个 `/mcp` 路由
 /// 上复用完全相同的分发，而不必再挂一遍 daemon router（那会把 `/mcp` 前缀叠两次）。
 pub async fn dispatch_mcp_request(state: Arc<AppState>, body: String) -> Response {
-    state
-        .metrics
-        .requests_handled
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
     let request: JsonRpcRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(e) => {

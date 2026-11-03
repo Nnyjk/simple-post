@@ -7,7 +7,8 @@
 //!
 //! 稳定性分级：
 //!   * `public`   —— 端点形状、鉴权、响应码稳定。破坏性变更需走 `/api/v2/*` 迁移。
-//!   * `internal` —— 无版本承诺，只供 UI / supervisor 使用。
+//!   * `internal` —— 无版本承诺，只供 UI / supervisor 使用。internal 端点不进本表，
+//!     故 `RouteSpec::stability` 目前只取 `"public"`。
 //!
 //! 本表为手工维护，**故意**不枚举每一条 axum 路由绑定（如 `/mcp/*` 属于另一套
 //! JSON-RPC MCP 契约，另行记录）。
@@ -31,7 +32,8 @@ pub struct RouteSpec {
     pub path: &'static str,
     /// OpenAPI 文档里的简短说明。
     pub summary: &'static str,
-    /// `'public'` 属 v1 稳定契约，`'internal'` 不是。
+    /// 稳定性标记。表里的每一行都是 `"public"`；标为 internal 的端点不进本表，
+    /// 所以这个字段目前只有一个取值。OpenAPI dumper 把它写成 `x-stability`。
     pub stability: &'static str,
     /// 可选的请求体形状名（由 OpenAPI dumper 查表）。`None` 表示无请求体，
     /// 或该形状尚未记录。
@@ -41,19 +43,34 @@ pub struct RouteSpec {
 }
 
 // ---- internal (not in OpenAPI v1) -------------------------------
-// 以下端点刻意不登记：它们是 supervisor / UI 的投影，无版本承诺。它们
-// 在 `WEB_ROUTES` 里可供运行时访问，但 OpenAPI v1 文档省略。
-//   GET  /api/mcp/status             - daemon status (UI)
-//   GET  /api/mcp/logs               - daemon log tail (UI)
-//   POST /api/mcp/restart            - daemon restart
-//   GET  /api/mcp/proxy-path         - mcp_proxy binary path
-//   GET  /api/mcp/capability         - capability policy
-//   PUT  /api/mcp/capability         - capability policy
-//   GET  /api/mcp/capability/tools   - visible tools under current policy
-//   GET  /api/mcp/http-config        - daemon bind host/port/path + allowlists
-//   PUT  /api/mcp/http-config        - daemon listener configuration
-//   GET  /api/preferences            - raw preferences dump (UI)
-//   PUT  /api/preferences            - raw preferences patch
-// `/api/permissions*` 与 `/api/request_settings*` 同样刻意不在公共契约内。
+// 以下端点在 `build_router` 里注册了，但刻意不登记：它们是设置面板与 supervisor
+// 的投影，无版本承诺。它们在 `WEB_ROUTES` 里可供运行时访问，但 OpenAPI v1 文档
+// 省略它们。
+//   GET  /api/nodes/children           - 懒加载层级树：取一个节点的直接孩子
+//   GET  /api/nodes/search             - 跨全部项目搜接口并带回它所在的路径
+//   GET  /api/request-settings         - 出站请求旋钮的单例行
+//   PUT  /api/request-settings
+//   GET  /api/permissions/{projectId}   - 每个项目的权限档位
+//   PUT  /api/permissions/{projectId}
+//   PUT  /api/response-history/favorite - 标记或取消标记一条历史
+//   GET  /api/response-history/keep     - 读全局保留条数
+//   PUT  /api/response-history/keep
+//   GET  /api/mcp/status               - daemon 生命周期快照
+//   GET  /api/mcp/logs                 - daemon 日志 tail
+//   POST /api/mcp/restart              - 重启 daemon
+//   GET  /api/mcp/proxy-path           - `simple-post-mcp` 二进制的路径
+//   GET  /api/mcp/capability           - 能力策略
+//   PUT  /api/mcp/capability
+//   GET  /api/mcp/capability/tools     - 当前策略下可见的工具名
+//   GET  /api/mcp/http-config          - daemon 的绑定地址、挂载路径与白名单
+//   PUT  /api/mcp/http-config
+//   GET  /api/preferences              - 偏好表的原始读写
+//   PUT  /api/preferences
+//   GET  /healthz                      - 无前缀的健康探针别名（与 `/api/healthz` 共用同一个处理函数）
+//   GET  /mcp/healthz                  - MCP 监听器的健康探针
+//   GET  /mcp/tools                    - MCP 监听器暴露的工具名清单
+//
+// `/mcp` 本身是 JSON-RPC 端点，属另一套契约，不在本表范围内。
+//
 // 地址那一族只有一个动词：`POST /api/environments/{envId}/module-baseurls`，登记在
 // `spec_environments` 组。

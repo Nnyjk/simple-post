@@ -24,7 +24,8 @@ pub fn mcp_auto_start_get(state: State<'_, DbPool>) -> Result<bool, AppError> {
 /// `POST /api/mcp/stop`）。手动启动的 daemon 本次会话继续跑到用户关开关或退出应用。
 ///
 /// `mcp_daemon_start` 走的是同一条幂等 supervisor 路径，因此在已健康的 daemon 上打开
-/// 开关，报的是那个 daemon 的身份，不会把端口翻来覆去地换。
+/// 开关，报的是那个 daemon 的身份，不会把端口翻来覆去地换。它有一处例外：端口文件里
+/// 那个 daemon 服务的配置与现在要用的这份不一致时，它被换掉。
 #[tauri::command]
 pub async fn mcp_auto_start_set(
     state: State<'_, DbPool>,

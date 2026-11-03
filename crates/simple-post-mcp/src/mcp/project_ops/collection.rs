@@ -52,7 +52,6 @@ pub(super) struct CollectionMoveArgs {
     #[serde(default)]
     pub new_parent_collection_id: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)] // 留给将来的排序接口
     pub new_sort_order: Option<i64>,
 }
 

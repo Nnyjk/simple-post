@@ -363,7 +363,6 @@ function McpStatusPill() {
   const status = mcp?.status ?? 'stopped';
   const pid = mcp?.pid ?? null;
   const port = mcp?.port ?? null;
-  const requestsHandled = mcp?.requestsHandled ?? 0;
 
   const running = status === 'running';
   const unhealthy = status === 'crashed' || status === 'unhealthy';
@@ -393,7 +392,6 @@ function McpStatusPill() {
             Streamable HTTP
             {port !== null ? ` · :${port}` : ''}
             {pid !== null ? ` · PID ${pid}` : ''}
-            {requestsHandled > 0 ? ` · ${requestsHandled} reqs` : ''}
           </div>
           <div className="text-[10px] text-muted-foreground/70">点击打开「设置 · 连接」</div>
         </div>

@@ -3,6 +3,8 @@
 //! `EndpointOverrides` 的字段全是 `Option<T>`，于是「没覆盖」与「覆盖成 None / 空」
 //! 是两回事。
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 
 use crate::mcp::key_value::{coerce_key_values, KeyValueInput};
@@ -88,6 +90,12 @@ pub struct ResolvedEndpoint {
     /// Content-Type 依据的 mode 与装配依据的 mode 就可能不是同一个。
     pub body_mode: BodyMode,
     pub auth: AuthConfig,
+    /// 这次解析用的变量池（环境变量 + 动态变量的值）。
+    ///
+    /// 取 OAuth2 的 token 时要用**同一份**池：token 端点里的 `{{var}}` 由 core 在取
+    /// token 之前替换（规则见 `simple_post_core::oauth2`），手边没有池就替换不了。
+    /// 请求的其余部分在这之前已经替换完了，故这份池只服务于取 token 这一步。
+    pub vars: HashMap<String, String>,
     pub missing_vars: Vec<String>,
     /// URL 路径里没取到值的占位符名（`/users/{id}` 的 `id`）。
     ///

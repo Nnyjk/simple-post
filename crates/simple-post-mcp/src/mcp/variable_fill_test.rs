@@ -24,7 +24,6 @@ fn state() -> Arc<AppState> {
     Arc::new(crate::mcp::AppState {
         pool: simple_post_core::db::init(&dir).unwrap(),
         started_at: Instant::now(),
-        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 

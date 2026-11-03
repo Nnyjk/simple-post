@@ -9,9 +9,7 @@ use super::RouteSpec;
 /// 公共 HTTP API 的唯一事实来源。**手工维护**——任何应进入 v1 稳定契约的新
 /// 端点都必须在此登记。缺席者按 `internal` 处理，不进 OpenAPI。
 ///
-/// 已知按 `internal` 处理的：`GET /api/nodes/children` 与 `GET /api/nodes/search`
-/// （懒加载层级树的两节，供动态变量的数据源选择器跨项目挑接口）。它们的形状跟着那个
-/// 界面的需求走，还不承诺 v1 稳定。
+/// 当前缺席的端点逐条列在 `spec/mod.rs` 的「internal (not in OpenAPI v1)」一节里。
 pub fn public_route_specs() -> Vec<RouteSpec> {
     let mut specs = Vec::with_capacity(46);
     specs.extend(routes::spec_health::routes());

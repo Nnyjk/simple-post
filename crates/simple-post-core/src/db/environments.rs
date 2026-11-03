@@ -25,6 +25,8 @@ use rusqlite::{params, Connection, Row};
 use crate::domain::{Environment, EnvironmentPatch, ModuleBaseUrl};
 use crate::error::AppError;
 
+use super::json_col_err;
+
 /// 这里每次读共用的列清单，顺序同 [`row_to_env`]。
 ///
 /// 用一个字符串而非几份拷贝：URL 列与变量列相邻，只点名其中一个的读会静默产出一个所有模块
@@ -397,20 +399,13 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
     let module_base_urls_json: String = row.get(4)?;
     let variables_json: String = row.get(5)?;
     let disabled_variables_json: String = row.get(6)?;
-    let parse_err = |e: serde_json::Error, col: &str| {
-        rusqlite::Error::FromSqlConversionFailure(
-            0,
-            rusqlite::types::Type::Text,
-            Box::new(JsonColError(format!("{col}: {e}"))),
-        )
-    };
     let module_base_urls: HashMap<String, ModuleBaseUrl> =
         serde_json::from_str(&module_base_urls_json)
-            .map_err(|e| parse_err(e, "module_base_urls_json"))?;
+            .map_err(|e| json_col_err("module_base_urls_json", e))?;
     let variables: HashMap<String, String> =
-        serde_json::from_str(&variables_json).map_err(|e| parse_err(e, "variables_json"))?;
+        serde_json::from_str(&variables_json).map_err(|e| json_col_err("variables_json", e))?;
     let disabled_variables: Vec<String> = serde_json::from_str(&disabled_variables_json)
-        .map_err(|e| parse_err(e, "disabled_variables_json"))?;
+        .map_err(|e| json_col_err("disabled_variables_json", e))?;
     Ok(Environment {
         id: row.get(0)?,
         project_id: row.get(1)?,
@@ -421,19 +416,6 @@ fn row_to_env(row: &Row<'_>) -> Result<Environment, rusqlite::Error> {
         disabled_variables,
     })
 }
-
-/// 包住字符串的小 `StdError`。需要它是因为 rusqlite 的 `FromSqlConversionFailure` 载荷要求
-/// `Box<dyn StdError + Send + Sync + 'static>`。
-#[derive(Debug)]
-struct JsonColError(String);
-
-impl std::fmt::Display for JsonColError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for JsonColError {}
 
 // 测试。
 

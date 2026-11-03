@@ -22,7 +22,7 @@
 //! 本文件是门面，只保留「读/删文件」这两个入口，其余按职责落在同名子目录下：
 //!
 //!   * `paths` —— 平台目录解析与 `mcp.port` 路径拼装。
-//!   * `record` —— 文件里那条记录的形状与它自己的时间戳。
+//!   * `record` —— 文件里那条记录的形状、它服务的配置的指纹，以及两者的序列化。
 //!   * `claim` —— 多实例申领：`create_new` 与它的回落/报错，整块不可再拆。
 //!   * `proc` —— 进程表探测与按 PID 强杀。
 //!   * `health` —— `/mcp/healthz` 存活探测。
@@ -35,19 +35,19 @@ mod record;
 
 // 门面即对外接口：子模块的私有性不该改变调用方的路径写法，`port_registry::write` /
 // `port_registry::read` / … 在 `src-tauri` 与 daemon CLI 里都按原样解析。
-pub use claim::write;
+pub use claim::{write, write_with_fingerprint};
 pub use health::healthz;
 pub use paths::{data_dir, port_file_path, FILE_NAME};
 pub use proc::{is_pid_alive, terminate_pid};
-pub use record::PortRecord;
+pub use record::{PortEntry, PortRecord, CONFIG_FINGERPRINT_KEY};
 
-/// 读当前记录。文件不存在、读不了或反序列化失败（损坏 / 写了一半——按「没有 daemon」
-/// 处理，比 panic 安全）时返回 `None`。
-pub fn read() -> Option<PortRecord> {
+/// 读当前记录与它服务的配置的指纹。文件不存在、读不了或反序列化失败（损坏 / 写
+/// 了一半——按「没有 daemon」处理，比 panic 安全）时返回 `None`。
+pub fn read_entry() -> Option<PortEntry> {
     let path = port_file_path().ok()?;
     let bytes = std::fs::read(&path).ok()?;
-    match serde_json::from_slice::<PortRecord>(&bytes) {
-        Ok(rec) => Some(rec),
+    match record::parse_entry(&bytes) {
+        Ok(entry) => Some(entry),
         Err(e) => {
             tracing::debug!(
                 target: "port_registry",
@@ -56,6 +56,12 @@ pub fn read() -> Option<PortRecord> {
             None
         }
     }
+}
+
+/// 读当前记录。文件不存在、读不了或反序列化失败（损坏 / 写了一半——按「没有 daemon」
+/// 处理，比 panic 安全）时返回 `None`。
+pub fn read() -> Option<PortRecord> {
+    read_entry().map(|entry| entry.record)
 }
 
 /// 删掉端口文件（GUI 退出时调用）。幂等——`NotFound` 视作成功，故 renderer 可以
@@ -76,3 +82,7 @@ pub fn release() -> Result<(), crate::error::AppError> {
 #[cfg(test)]
 #[path = "port_registry_test.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "port_registry_fingerprint_test.rs"]
+mod fingerprint_tests;

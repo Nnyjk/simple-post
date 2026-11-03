@@ -1,5 +1,7 @@
 // 线格式 / 入参：两条传输层共同入口 `resolve`、重定向与单飞闸。
 
+use std::collections::HashMap;
+
 use super::store::unix_secs;
 use super::test_fixtures::{client_credentials, fresh_pool, FakeIdp};
 use super::*;
@@ -20,6 +22,7 @@ async fn resolve_reports_a_half_configured_oauth2_instead_of_guessing() {
             },
             manual: None,
             force: false,
+            vars: HashMap::new(),
         },
     )
     .await
@@ -41,6 +44,7 @@ async fn resolve_reports_a_non_oauth2_kind() {
             },
             manual: None,
             force: false,
+            vars: HashMap::new(),
         },
     )
     .await
@@ -65,6 +69,7 @@ async fn resolve_does_not_claim_a_cache_hit_was_a_fresh_fetch() {
         &OAuth2ManualToken {
             pasted: "AT-1".into(),
         },
+        &HashMap::new(),
     )
     .unwrap();
 
@@ -78,6 +83,7 @@ async fn resolve_does_not_claim_a_cache_hit_was_a_fresh_fetch() {
             },
             manual: None,
             force: false,
+            vars: HashMap::new(),
         },
     )
     .await
@@ -96,7 +102,10 @@ async fn a_token_endpoint_redirect_does_not_get_the_credentials_resent() {
     let mut cfg = client_credentials();
     cfg.token_url = idp;
 
-    let err = fetch_and_store(&pool, &cfg).await.unwrap_err().to_string();
+    let err = fetch_and_store(&pool, &cfg, &HashMap::new())
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(
         err.contains("302"),
         "3xx 必须当错误报出来而不是跟过去，got: {err}"
@@ -198,7 +207,11 @@ async fn concurrent_callers_refresh_the_expired_token_only_once() {
     })
     .unwrap();
 
-    let (a, b) = tokio::join!(ensure_token(&pool, &cfg), ensure_token(&pool, &cfg));
+    let no_vars = HashMap::new();
+    let (a, b) = tokio::join!(
+        ensure_token(&pool, &cfg, &no_vars),
+        ensure_token(&pool, &cfg, &no_vars)
+    );
     assert_eq!(a.expect("first").access_token, "AT-ONCE");
     assert_eq!(b.expect("second").access_token, "AT-ONCE");
     assert_eq!(
@@ -224,4 +237,53 @@ async fn the_wire_dto_never_carries_a_refresh_token() {
     };
     let json = serde_json::to_string(&dto).unwrap();
     assert!(!json.contains("refreshToken"), "got: {json}");
+}
+
+/// OAuth2 配置里的 `{{var}}` 在取 token 之前替换：token 请求发到替换后的地址。
+///
+/// 替换规则住在 core（`super::config`），渲染进程侧与 MCP 侧都不再自己做这一步，故两边
+/// 送过来的变量池就能得到同一份 token 端点。
+#[tokio::test]
+async fn the_token_request_goes_to_the_substituted_token_url() {
+    let idp = FakeIdp::start(
+        "200 OK",
+        "application/json",
+        r#"{"access_token":"AT-VAR","token_type":"Bearer","expires_in":600}"#,
+    )
+    .await;
+    let pool = fresh_pool();
+
+    let mut cfg = client_credentials();
+    // 假 IdP 的地址是 `http://127.0.0.1:<port>/oauth/token`，故把主机部分放进变量里。
+    let host = idp.url.trim_end_matches("/oauth/token").to_string();
+    cfg.token_url = "{{idp_host}}/oauth/token".into();
+
+    let mut vars = HashMap::new();
+    vars.insert("idp_host".to_string(), host);
+
+    let token = fetch_and_store(&pool, &cfg, &vars).await.expect("取 token");
+    assert_eq!(token.access_token, "AT-VAR");
+    let request = idp.received().await;
+    assert!(
+        request.starts_with("POST /oauth/token HTTP/1.1"),
+        "请求必须打到替换后的地址，got: {request}"
+    );
+}
+
+/// OAuth2 配置里的变量没解析出来时，错误信息要点名是哪个变量。
+///
+/// 少了这一句，用户看到的是一句「token 获取失败」，而真实原因是配置里的 `{{var}}`
+/// 没展开。
+#[tokio::test]
+async fn a_missing_variable_in_the_oauth2_config_is_named_in_the_error() {
+    let pool = fresh_pool();
+    let mut cfg = client_credentials();
+    cfg.token_url = "{{idp_host}}/oauth/token".into();
+
+    let err = ensure_token(&pool, &cfg, &HashMap::new())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("tokenUrl"), "要点名是哪个字段，got: {err}");
+    assert!(err.contains("idp_host"), "要点名是哪个变量，got: {err}");
 }

@@ -1,6 +1,8 @@
 use base64::Engine as _;
 // 真的发一次 HTTP：form 体、`Authorization: Basic`、刷新与错误应答在真实 socket 上成立。
 
+use std::collections::HashMap;
+
 use super::store::unix_secs;
 use super::test_fixtures::{client_credentials, fresh_pool, kv, FakeIdp};
 use super::*;
@@ -24,7 +26,9 @@ async fn a_client_credentials_grant_reaches_the_token_endpoint_over_http() {
     cfg.client_secret = "open sesame".into();
     cfg.extra_params = vec![kv("audience", "https://api.example.com")];
 
-    let token = fetch_and_store(&pool, &cfg).await.expect("取 token");
+    let token = fetch_and_store(&pool, &cfg, &HashMap::new())
+        .await
+        .expect("取 token");
     assert_eq!(token.access_token, "AT-LIVE");
 
     let request = idp.received().await;
@@ -58,7 +62,9 @@ async fn a_client_credentials_grant_reaches_the_token_endpoint_over_http() {
     );
 
     // 取到的 token 必须落进缓存，使第二次发请求不再碰 IdP。
-    let cached = ensure_token(&pool, &cfg).await.expect("命中缓存");
+    let cached = ensure_token(&pool, &cfg, &HashMap::new())
+        .await
+        .expect("命中缓存");
     assert_eq!(cached.access_token, "AT-LIVE");
 }
 
@@ -93,7 +99,9 @@ async fn an_expired_token_is_refreshed_with_the_refresh_grant() {
     })
     .unwrap();
 
-    let token = ensure_token(&pool, &cfg).await.expect("走刷新");
+    let token = ensure_token(&pool, &cfg, &HashMap::new())
+        .await
+        .expect("走刷新");
     assert_eq!(token.access_token, "AT-REFRESHED");
     assert_eq!(
         token.refresh_token.as_deref(),
@@ -138,7 +146,9 @@ async fn an_expired_token_without_a_refresh_token_is_refetched() {
     })
     .unwrap();
 
-    let token = ensure_token(&pool, &cfg).await.expect("整取");
+    let token = ensure_token(&pool, &cfg, &HashMap::new())
+        .await
+        .expect("整取");
     assert_eq!(token.access_token, "AT-NEW");
     assert_eq!(token.refresh_token.as_deref(), Some("RT-NEW"));
     let request = idp.received().await;
@@ -160,7 +170,10 @@ async fn a_token_endpoint_error_is_reported_with_its_own_words() {
     let mut cfg = client_credentials();
     cfg.token_url = idp.url.clone();
 
-    let err = fetch_and_store(&pool, &cfg).await.unwrap_err().to_string();
+    let err = fetch_and_store(&pool, &cfg, &HashMap::new())
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("invalid_client"), "got: {err}");
     assert!(err.contains("bad secret"), "got: {err}");
     assert!(
@@ -179,7 +192,7 @@ fn manual_tokens_are_only_accepted_for_implicit() {
     let manual = OAuth2ManualToken {
         pasted: "AT-1".into(),
     };
-    let err = save_manual(&pool, &client_credentials(), &manual)
+    let err = save_manual(&pool, &client_credentials(), &manual, &HashMap::new())
         .unwrap_err()
         .to_string();
     assert!(err.contains("implicit"), "got: {err}");
@@ -199,13 +212,16 @@ async fn a_saved_implicit_token_is_reused_instead_of_refetched() {
         &OAuth2ManualToken {
             pasted: "http://app/cb#access_token=AT-IMPLICIT&expires_in=3600".into(),
         },
+        &HashMap::new(),
     )
     .unwrap();
     assert_eq!(token.access_token, "AT-IMPLICIT");
     assert_eq!(token.token_type, "Bearer");
 
     // 隐式流没有 token 端点，故「按需刷新」只能是命中缓存。
-    let again = ensure_token(&pool, &cfg).await.expect("命中缓存");
+    let again = ensure_token(&pool, &cfg, &HashMap::new())
+        .await
+        .expect("命中缓存");
     assert_eq!(again.access_token, "AT-IMPLICIT");
 }
 
@@ -217,6 +233,9 @@ async fn implicit_without_a_saved_token_says_what_to_do_instead_of_hanging() {
         authorization_url: "https://idp.example.com/authorize".into(),
         ..OAuth2Auth::default()
     };
-    let err = ensure_token(&pool, &cfg).await.unwrap_err().to_string();
+    let err = ensure_token(&pool, &cfg, &HashMap::new())
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("回调 URL"), "got: {err}");
 }

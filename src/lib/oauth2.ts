@@ -100,6 +100,15 @@ export interface FetchTokenOptions extends CallApiOptions {
   force?: boolean;
   /** 用户粘贴的原文，只用于 `implicit`（那里没有 token 端点可调）。 */
   manual?: string;
+  /**
+   * 变量池：后端用它替换 OAuth2 配置里那四个字段的 `{{var}}`。
+   *
+   * 替换规则住在后端（Rust 侧的 `simple_post_core::oauth2`），渲染进程不自己替换，故
+   * 必须把池送过去。发请求的路径送的是**组装请求时用的那一份**
+   * （`PreparedRequest.vars`），否则同一个 `{{var}}` 在 URL 里能解析、在 `tokenUrl`
+   * 里却不能解析。
+   */
+  vars?: Record<string, string>;
 }
 
 /**
@@ -113,5 +122,7 @@ export async function fetchOAuth2Token(
   const args: Record<string, unknown> = { auth };
   if (options.manual !== undefined) args.manual = { pasted: options.manual };
   if (options.force) args.force = true;
+  // 变量池送过去，后端才有池可替换 OAuth2 配置里的 `{{var}}`。
+  if (options.vars !== undefined) args.vars = options.vars;
   return invokeCmd<OAuth2TokenResult>(COMMANDS.oauth2Token, args, { signal: options.signal });
 }

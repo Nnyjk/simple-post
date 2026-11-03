@@ -111,7 +111,6 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
    * 的 `index` 指的是目标已排序子列表内的位置。
    */
   const computeTargetIndex = (
-    drag: DragPayload,
     target: { kind: TargetKind; id: string },
     zone: DropZone,
   ): number | null => {
@@ -186,7 +185,7 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
     // 模块是项目顶层，没有节点父级，故只能在兄弟之间重排。
     if (drag.kind === 'module') {
       if (target.kind !== 'module') return;
-      const idx = computeTargetIndex(drag, target, computeZoneFromEvent(e, drag, target));
+      const idx = computeTargetIndex(target, computeZoneFromEvent(e, drag, target));
       if (idx === null) return;
       moveNodes(drag.ids, null, idx);
       return;
@@ -197,8 +196,7 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
       // 模块）服务端的类型矩阵会拒绝，故在这里先拒，免得乐观状态显示一个必然 400 的移动。
       if (drag.kind !== 'collection' && drag.kind !== 'endpoint') return;
       const zone = computeZoneFromEvent(e, drag, target);
-      const idx =
-        zone === 'into' ? siblingsOf(target.id).length : computeTargetIndex(drag, target, zone);
+      const idx = zone === 'into' ? siblingsOf(target.id).length : computeTargetIndex(target, zone);
       if (idx === null) return;
       moveNodes(drag.ids, target.id, idx);
       return;
@@ -219,7 +217,7 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
       const targetNode = nodes.find((n) => n.id === target.id);
       if (!targetNode || !targetNode.parentId) return;
       if (drag.kind === 'collection' && wouldCycleInto(drag.ids, target.id)) return;
-      const idx = computeTargetIndex(drag, target, zone);
+      const idx = computeTargetIndex(target, zone);
       if (idx === null) return;
       moveNodes(drag.ids, targetNode.parentId, idx);
       return;
@@ -231,7 +229,7 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
     if (drag.kind !== 'endpoint') return;
     const targetNode = nodes.find((n) => n.id === target.id);
     if (!targetNode || !targetNode.parentId) return;
-    const idx = computeTargetIndex(drag, target, computeZoneFromEvent(e, drag, target));
+    const idx = computeTargetIndex(target, computeZoneFromEvent(e, drag, target));
     if (idx === null) return;
     moveNodes(drag.ids, targetNode.parentId, idx);
   };

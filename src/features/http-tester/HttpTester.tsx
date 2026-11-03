@@ -422,7 +422,7 @@ export function HttpTester() {
         pathParamError,
         onFormatResult: handleFormatResult,
       }}
-      {...{ varEntries, envName: endpointEnv?.name }}
+      {...{ varEntries, envName: endpointEnv?.name, vars: prepared.vars }}
     />
   );
 }

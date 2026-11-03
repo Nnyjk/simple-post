@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    http::Method,
     routing::{get, patch, post, put},
     Json, Router,
 };
@@ -28,9 +27,9 @@ pub struct WebState {
     pub pool: DbPool,
     pub daemon: McpDaemonHandle,
     pub data_dir: PathBuf,
-    /// `/mcp` JSON-RPC 用的 MCP 状态：与 daemon 子进程共用同一 pool 与
-    /// metrics，所以指向 `http://server:4173/mcp` 的 AI 客户端与浏览器 SPA
-    /// 落在同一份数据上。
+    /// `/mcp` JSON-RPC 用的 MCP 状态：与 daemon 子进程共用同一 pool，
+    /// 所以指向 `http://server:4173/mcp` 的 AI 客户端与浏览器 SPA 落在同一份
+    /// 数据上。
     pub mcp_state: Arc<crate::mcp::AppState>,
     /// 可选 bearer 口令。`None` 保持整棵路由树不鉴权；`Some(_)` 则对每个
     /// `/api/*` 与 `/mcp` 请求强制 `auth_middleware`。前端把 bearer 存在
@@ -271,7 +270,7 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
     // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools`。不复用
     // `daemon_http::build_router`：它的内层路由自带 `/mcp` 前缀，再挂一次就成了
     // `/mcp/mcp`。这里直接对共享的 `mcp_state` 注册——与 daemon 子进程同一
-    // pool + metrics。
+    // pool。
     let mcp_routes = build_mcp_routes(state_arc.mcp_state.clone());
 
     // 静态 SPA。`ServeDir` 给 `/assets/*` 正确的 Range / ETag / Last-Modified，
@@ -377,8 +376,3 @@ pub fn build_mcp_only_router(state: WebState, config: &crate::domain::McpHttpCon
         crate::auth::auth_middleware,
     ))
 }
-
-// `Method` 不参与按方法分发的路由表；这个常量只为让 `axum::http::Method` 的导入
-// 不被判为未使用。
-#[allow(dead_code)]
-const _UNUSED_METHOD: Method = Method::GET;

@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use super::paths::port_file_path;
 use super::proc::is_pid_alive;
 use super::read;
+use super::record::serialize_entry;
 use crate::error::AppError;
 use crate::port_registry::PortRecord;
 
@@ -42,7 +43,7 @@ fn try_create_new(path: &Path, json: &[u8]) -> Result<bool, AppError> {
     }
 }
 
-/// 申领 `rec` 的注册文件。
+/// 申领 `rec` 的注册文件，不带配置指纹。
 ///
 /// 行为：
 ///   1. 先试 `create_new(true)`（Unix 上的原子 O_EXCL，Windows 上等价）。成功则写入并
@@ -58,7 +59,21 @@ fn try_create_new(path: &Path, json: &[u8]) -> Result<bool, AppError> {
 /// 的 `block_on` 再拖进一层。共享锁是 `tokio::sync::Mutex`，因为不引第二个 crate 就
 /// 只有它可用；此处从不从异步上下文 await 它。
 pub fn write(rec: &PortRecord) -> Result<(), AppError> {
-    let json = serde_json::to_vec(rec)?;
+    write_with_fingerprint(rec, None)
+}
+
+/// 申领 `rec` 的注册文件，并把 `config_fingerprint` 一起写进去。
+///
+/// 指纹是同一个 JSON 对象里的另一个顶层键（见 [`serialize_entry`]），故没有指纹
+/// 时文件与从前逐字节一样。
+///
+/// daemon 侧（`lib.rs`）用的是 [`write`]：它拿不到「这份 daemon 服务的配置」的
+/// 指纹，故写出的记录里没有那一项——读它的人据此判断「判断不了」。
+pub fn write_with_fingerprint(
+    rec: &PortRecord,
+    config_fingerprint: Option<&str>,
+) -> Result<(), AppError> {
+    let json = serialize_entry(rec, config_fingerprint)?;
 
     let lock = write_lock();
     let guard = match tokio::runtime::Handle::try_current() {
