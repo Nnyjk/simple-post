@@ -1,4 +1,4 @@
-﻿import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
 import { MethodPill } from '@/components/ui/method-pill';
@@ -68,7 +68,11 @@ export function EndpointRow({
       >
         <button
           type="button"
-          draggable
+          // 正在改名的那一行不参与拖拽。这一行的重命名输入框就渲染在这个 button 里面，
+          // 而 `draggable` 的祖先会抢走鼠标手势：在输入框里按住左键拖动，浏览器把它当成
+          // 「拖这一行」而不是框选文字 —— 用户想改个名字，却把整行拖去了别处。
+          // 改名与拖动本来就是互斥的两件事，故编辑期间干脆不提供拖拽。
+          draggable={!isEditing}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragOver={onDragOver}
