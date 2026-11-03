@@ -85,6 +85,17 @@ describe('重命名一行时：那一行不参与拖拽', () => {
       );
     }
   });
+
+  it('三种树行都把「正在改名」这个状态交给共享行外壳', () => {
+    for (const row of ROWS) {
+      const src = code(readSource(`../rows/${row}`));
+      assert.match(
+        src,
+        /isEditing=\{isEditing\}/,
+        `${row}：没有把 isEditing 交给共享行外壳 —— 那一行在重命名期间仍然参与拖拽，输入框里的框选手势又被拖拽抢走`,
+      );
+    }
+  });
 });
 
 describe('不在重命名时：拖拽照旧', () => {
