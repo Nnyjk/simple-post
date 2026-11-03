@@ -1,11 +1,9 @@
-﻿import { ChevronRight, Plus } from 'lucide-react';
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react';
+﻿import type { MouseEvent as ReactMouseEvent } from 'react';
+import { ChevronRight } from 'lucide-react';
 import type { ResourceNode } from '@/types/domain';
 import { cn } from '@/lib/utils';
-import { Tooltip } from '@/components/ui/tooltip';
-import { InlineEdit } from '@/components/ui/InlineEdit';
-import type { DropZone } from '../tree-types';
-import { DropHintOverlay } from './DropHintOverlay';
+import type { DragContextValue } from '../tree-types';
+import { TreeRow } from './TreeRow';
 
 export interface CollectionRowProps {
   collection: ResourceNode;
@@ -16,14 +14,13 @@ export interface CollectionRowProps {
   onCancelEdit: () => void;
   onContextMenu: (e: ReactMouseEvent) => void;
   onPlusClick: (e: ReactMouseEvent) => void;
-  onDragStart: (e: ReactDragEvent) => void;
-  onDragEnd: (e: ReactDragEvent) => void;
-  onDragOver: (e: ReactDragEvent) => void;
-  onDragLeave: (e: ReactDragEvent) => void;
-  onDrop: (e: ReactDragEvent) => void;
-  dropHint: DropZone | null;
+  dragContext: DragContextValue;
 }
 
+/**
+ * 集合行。行容器、按钮、拖放回调与行内改名都在 `TreeRow` 里；这一层只留下集合特有的
+ * 那几样东西：展开箭头，以及行尾的「新建」按钮。
+ */
 export function CollectionRow({
   collection,
   isEditing,
@@ -33,82 +30,30 @@ export function CollectionRow({
   onCancelEdit,
   onContextMenu,
   onPlusClick,
-  onDragStart,
-  onDragEnd,
-  onDragOver,
-  onDragLeave,
-  onDrop,
-  dropHint,
+  dragContext,
 }: CollectionRowProps) {
   return (
-    <div onContextMenu={onContextMenu} className="group mb-0.5 rounded-md">
-      <div
-        className={cn(
-          'relative flex items-center gap-0.5 rounded-sm transition-colors',
-          dropHint === 'into' && 'bg-primary/15 ring-1 ring-primary/40',
-        )}
-      >
-        <button
-          type="button"
-          // 正在改名的那一行不参与拖拽。理由见 `EndpointRow.tsx` 的同一处：重命名输入框就在
-          // 这个 button 里面，而 `draggable` 的祖先会把「在输入框里框选文字」的手势读成
-          // 「拖这一行」。
-          draggable={!isEditing}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          onDrop={onDrop}
-          onClick={onSelect}
-          onDoubleClick={(e) => {
-            if (!isEditing) {
-              e.preventDefault();
-              e.stopPropagation();
-              onStartEdit();
-            }
-          }}
+    <TreeRow
+      kind="collection"
+      id={collection.id}
+      name={collection.name}
+      isEditing={isEditing}
+      leading={
+        <ChevronRight
           className={cn(
-            // 名字用 `--foreground` —— 见 `ModuleRow.tsx` 的说明。
-            'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-foreground transition-colors',
-            'hover:bg-overlay-hover',
+            'h-3 w-3 shrink-0 text-faint transition-transform',
+            collection.expanded && 'rotate-90 text-muted-foreground',
           )}
-        >
-          <ChevronRight
-            className={cn(
-              'h-3 w-3 shrink-0 text-faint transition-transform',
-              collection.expanded && 'rotate-90 text-muted-foreground',
-            )}
-          />
-          {/* 没有类型图标、也没有数量徽标 —— 见 `ModuleRow.tsx` 的说明。展开状态由那个
-              箭头承担。 */}
-          <InlineEdit
-            value={collection.name}
-            onSave={onSaveEdit}
-            // 由树的 `editing` 目标受控，好让从对话框创建的集合直接进入重命名。见
-            // `EndpointRow.tsx` 处的同一条说明。
-            editing={isEditing}
-            onEditingChange={(open) => {
-              if (!open) onCancelEdit();
-            }}
-            className="flex-1"
-            display={() => <span className="flex-1 truncate">{collection.name}</span>}
-          />
-        </button>
-        <div className="invisible flex shrink-0 items-center pr-1 group-hover:visible">
-          <Tooltip content="新建" side="top">
-            <button
-              type="button"
-              onClick={onPlusClick}
-              onDoubleClick={(e) => e.stopPropagation()}
-              aria-label="新建"
-              className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </Tooltip>
-        </div>
-        <DropHintOverlay zone={dropHint} />
-      </div>
-    </div>
+        />
+      }
+      onPlusClick={onPlusClick}
+      onSelect={onSelect}
+      onStartEdit={onStartEdit}
+      onSaveEdit={onSaveEdit}
+      onCancelEdit={onCancelEdit}
+      onContextMenu={onContextMenu}
+      dragContext={dragContext}
+      buttonClassName="hover:bg-overlay-hover"
+    />
   );
 }
