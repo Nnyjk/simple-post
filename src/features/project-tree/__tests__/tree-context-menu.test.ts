@@ -6,13 +6,8 @@
  * 「功能测试看不见的那类缺陷」的既定取舍，见
  * `src/features/response-viewer/__tests__/response-viewer-layout.test.ts`，理由相同。
  *
- * **它钉住的是什么。** 树里**左键**点接口 = 「我要在它上面干活」，故它要开标签并跳转；
- * 树里**右键**点接口 = 「看一眼菜单」，故它只该弹菜单。两条路径曾经共用同一个
- * `setActiveEndpoint`，于是右键也会把那个接口的标签打开并跳过去 —— 用户正看着的另一个
- * 接口就这么被换掉了。
- *
- * 行为层面靠真机验证；这里守的是**接线**：那两处右键入口一旦又接回激活动作，右键就会
- * 重新抢走活动标签。
+ * 守接线：树里右键接口只弹菜单，不调用 `setActiveEndpoint`、`openEndpointTab` 或 `openTab`。
+ * 左键仍调用 `setActiveEndpoint(id)`；行为层面靠真机验证。
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -26,8 +21,8 @@ function readSource(relative: string): string {
 /**
  * 剥掉注释，只留代码。
  *
- * 必须剥：注释里会提到「早先这里会先 `setActiveEndpoint`」这样的**反例**，不剥的话
- * 源码级断言会被自己的说明文字满足 —— 一条不可能失败的回归测试比没有更糟。
+ * 必须剥：注释里会提到 `setActiveEndpoint` 这样的**反例**，不剥的话源码级断言会被
+ * 自己的说明文字满足 —— 一条不可能失败的回归测试比没有更糟。
  */
 function code(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -44,6 +39,27 @@ function openEndpointMenuBody(): string {
   return m[0];
 }
 
+/** 共用的右键菜单处理器的函数体。 */
+function openMenuBody(): string {
+  const m = EDIT_MENU.match(/const openMenu = [\s\S]*?\n {2}\};/);
+  assert.ok(m, 'useEditMenu 里没有 openMenu');
+  return m[0];
+}
+
+/** 左键点击处理器的函数体。 */
+function handleEndpointClickBody(): string {
+  const m = TREE_SELECTION.match(/const handleEndpointClick = [\s\S]*?\n {2}\};/);
+  assert.ok(m, 'useTreeSelection 里没有 handleEndpointClick');
+  return m[0];
+}
+
+/** 左键开接口标签的处理器的函数体。 */
+function openEndpointTabBody(): string {
+  const m = TREE_SELECTION.match(/const openEndpointTab = [\s\S]*?\n {2}\};/);
+  assert.ok(m, 'useTreeSelection 里没有 openEndpointTab');
+  return m[0];
+}
+
 describe('右键一个接口：只弹菜单，不激活它', () => {
   it('右键处理器里没有激活接口的动作', () => {
     const body = openEndpointMenuBody();
@@ -51,6 +67,11 @@ describe('右键一个接口：只弹菜单，不激活它', () => {
       /\bsetActiveEndpoint\s*\(/.test(body),
       false,
       '右键又去激活接口了：右键只是要看一眼菜单，不该把那个接口的标签打开并跳过去',
+    );
+    assert.equal(
+      /\bsetActiveEndpoint\s*\(/.test(openMenuBody()),
+      false,
+      '右键共用的 openMenu 又去激活接口了：它也服务模块与集合，接口右键不该抢活动标签',
     );
     assert.equal(
       /\bopenEndpointTab\s*\(/.test(body),
@@ -61,6 +82,14 @@ describe('右键一个接口：只弹菜单，不激活它', () => {
       /\bopenTab\s*\(/.test(body),
       false,
       '右键又去开标签了：标签只该由「我要在它上面干活」的那些动作开',
+    );
+  });
+
+  it('右键处理器会真正弹出菜单', () => {
+    assert.match(
+      openEndpointMenuBody(),
+      /\bopenMenu\s*\(\s*e\s*,\s*'endpoint'\s*,\s*id\s*\)/,
+      '右键处理器没有调用 openMenu：右键不再弹出菜单',
     );
   });
 
@@ -86,9 +115,14 @@ describe('右键一个接口：只弹菜单，不激活它', () => {
 describe('左键一个接口：仍然要激活它', () => {
   it('左键路径仍然会激活接口', () => {
     assert.match(
-      TREE_SELECTION,
+      handleEndpointClickBody(),
+      /\bopenEndpointTab\s*\(\s*id\s*\)/,
+      '左键点接口不再开标签了：单击一行本该打开它的标签并跳过去',
+    );
+    assert.match(
+      openEndpointTabBody(),
       /\bsetActiveEndpoint\s*\(\s*id\s*\)/,
-      '左键点接口不再激活接口了：那会让树点不动 —— 单击一行本该打开它的标签并跳过去',
+      '开接口标签不再激活接口了：标签打开后树不会跳到该接口',
     );
   });
 });
