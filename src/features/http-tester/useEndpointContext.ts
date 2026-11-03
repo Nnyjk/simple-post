@@ -1,12 +1,9 @@
 /**
- * 「这个接口在树上处于什么位置」的解析结果。
+ * 「这个接口在树上处于什么位置」的解析结果。从原始 store 数组派生，**不新建 store 侧的引用**
+ * —— 逐个 `useAppStore` 取用，保持 Zustand v5「selector 不新建对象」规则。
  *
- * 从原始 store 数组派生，**不新建 store 侧的引用** —— 逐个 `useAppStore` 取用，保持
- * Zustand v5「selector 不新建对象」规则，派生列表一律在本地 `useMemo` 里算。
- *
- * **base URL 的解析不在这里**：它在 `model/endpointParts.ts` 的
- * `buildEndpointRequestParts` 里，与单次发送共用同一份推导。这里的 `moduleId` 与
- * `endpointEnv` 是那份推导的输入。
+ * **base URL 的解析不在这里**：它在 `model/endpointParts.ts` 的 `buildEndpointRequestParts`
+ * 里，与单次发送共用同一份推导。
  */
 import { useMemo } from 'react';
 import { useAppStore, useActiveEnvironment } from '@/stores/app-store';
@@ -22,10 +19,8 @@ export interface Ancestor {
 }
 
 /**
- * 解析接口的项目 / 祖先链 / 环境 / 模块 / baseUrl 选择器状态。
- *
- * 这些值只依赖 store 里的数据，故合成一个 hook；`HttpTester` 读它们渲染面包屑、
- * 选择器与 URL 栏，并把 `commitBaseUrl` 之外的写操作留在自己那里。
+ * 解析接口的项目 / 祖先链 / 环境 / 模块 / baseUrl 选择器状态。这些值只依赖 store 里的数据，
+ * 故合成一个 hook；`HttpTester` 读它们渲染面包屑、选择器与 URL 栏。
  */
 export function useEndpointContext(
   endpoint: ResourceNode | null,

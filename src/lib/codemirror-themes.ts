@@ -5,12 +5,11 @@ import { tags as t } from '@lezer/highlight';
 /**
  * CodeMirror 亮色主题 + 偏 JSON 的高亮样式。
  *
- * 镜像 `src/styles/globals.css` 里的 HSL 调色板，好让编辑器跟上 Tailwind 的 `light`
- * 调色板，又不依赖 `@uiw/codemirror-theme-*`。
- *
- * JSON token（propertyName / string / number / bool / null / punctuation / bracket）
- * 逐个指定颜色，这样亮色模式下的 `json()` 语言扩展仍有语法高亮——CodeMirror 自带的
- * `'light'` 主题不给这些 token 上色。
+ * - 镜像 `src/styles/globals.css` 里的 HSL 调色板，好让编辑器跟上 Tailwind 的 `light`
+ *   调色板，又不依赖 `@uiw/codemirror-theme-*`。
+ * - JSON token（propertyName / string / number / bool / null / punctuation / bracket）逐个
+ *   指定颜色，这样亮色模式下的 `json()` 语言扩展仍有语法高亮——CodeMirror 自带的
+ *   `'light'` 主题不给这些 token 上色。
  */
 const lightEditorTheme = EditorView.theme(
   {

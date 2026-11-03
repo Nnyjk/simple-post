@@ -1,24 +1,16 @@
 /**
  * WorkspaceShell —— 项目激活时的应用框架。
  *
- * 为什么单列一个模块
- * -----------------------------
  * `App.tsx` 按 `activeProjectId === ''` 在两个界面间切换：独立的欢迎页，与本组件。把工作区
  * 放在自己的模块里，才让 `App.tsx` 能 `lazy()` 它 —— 于是打开应用只取 store 与项目选择器。
- * 树、顶栏、HTTP tester、设置面板与 CodeMirror 编辑器，都要等用户真的进入项目才取。
+ * 树、顶栏、HTTP tester、设置面板与 CodeMirror 编辑器，都要等用户真的进入项目才取。这与
+ * `bootstrap-slice.ts` 里的两层 `bootstrap()` 配套。
  *
- * 这与 `bootstrap-slice.ts` 里的两层 `bootstrap()` 配套：第一层（`projects`）放行启动闪屏，
- * 第二层（树 / 详情 / 环境）在其后就位。
+ * 这里刻意不挂载 `ProjectTree`：它只在项目激活时渲染，而没有项目时它只有「尚未选择项目」
+ * 一列占位 —— 一条死掉的 256px 面板，外加一个搜索框、一个必然失败的「新建」按钮。
  *
- * 这里刻意不挂载什么
- * --------------------------------------
- * `ProjectTree` 只在项目激活时渲染。没有项目时它只有「尚未选择项目」一列占位 —— 一条死
- * 掉的 256px 面板，外加一个搜索框、一个没有父级项目就必然失败的「新建」按钮，以及一个
- * 恒为零的页脚计数。
- *
- * 没有项目时也要能到设置面板这件事由 `App.tsx` 负责（
- * `features/settings/SettingsSurface.tsx`），本外壳因此不必在没有树的情况下渲染设置。两个
- * 宿主挂载的是同一个 `SettingsPanel`，只有外围 chrome 不同。
+ * 没有项目时也要能到设置面板这件事由 `App.tsx` 负责（`features/settings/SettingsSurface.tsx`），
+ * 本外壳因此不必在没有树的情况下渲染设置。两个宿主挂载的是同一个 `SettingsPanel`。
  */
 
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
@@ -30,10 +22,8 @@ import { Splitter } from '@/components/ui/splitter';
 import { useAppStore } from '@/stores/app-store';
 
 // ---------------------------------------------------------------------------
-// 代码分割 —— 每个 lazy 边界的原因见其上方的说明。
-//
-// 这些都是只存在于*本外壳之内*的面板，故把它们异步化在首屏毫无代价（本外壳本身就已是
-// 异步 chunk），还让它们互不落进对方的 chunk。
+// 代码分割 —— 每个 lazy 边界的原因见其上方的说明。这些都是只存在于*本外壳之内*的面板，
+// 故把它们异步化在首屏毫无代价（本外壳本身就已是异步 chunk）。
 // ---------------------------------------------------------------------------
 
 // CodeMirror（未压缩 425 kB / gzip 139 kB）。只有接口标签需要它。
@@ -65,10 +55,8 @@ const DirtyCloseDialog = lazy(() =>
 );
 
 /**
- * 尚未到达的 chunk 的占位。
- *
- * 尺寸填满自己的槽位而非一个居中的 spinner：先塌成 spinner 再猛地撑满高度的 lazy 面板
- * 就是一次布局跳动 —— 而这正是整套拆分要消除的卡顿。
+ * 尚未到达的 chunk 的占位。尺寸填满自己的槽位而非一个居中的 spinner：先塌成 spinner 再猛地
+ * 撑满高度的 lazy 面板就是一次布局跳动。
  */
 function PanelFallback({ label }: { label?: string }) {
   return (
@@ -91,14 +79,10 @@ export function WorkspaceShell() {
   const containerRef = useRef<HTMLDivElement>(null);
   const resetBasis = () => setBasis('50%');
 
-  // 这个 effect 在 bootstrap 窗口内预热编辑器 chunk。
-  //
-  // 本外壳本身是 lazy，所以它挂载时模块图已在解析中；发起与 lazy 组件相同的动态 import
-  // 会填好注册表，等 store 有接口标签要渲染时，CodeMirror chunk 已解码完毕，`lazy()`
-  // 边界同步解析。同一 specifier → 同一 chunk，故这只是把迟早会发生的这一次取件提前、
-  // 并挪出关键路径。
-  //
-  // 以「当前标签是接口」为门。无条件预热会把约 450 kB 编辑器拉进一个只显示项目卡片的工作区。
+  // 这个 effect 在 bootstrap 窗口内预热编辑器 chunk。本外壳本身是 lazy，所以它挂载时模块图已在
+  // 解析中；发起与 lazy 组件相同的动态 import 会填好注册表（同一 specifier → 同一 chunk），
+  // 等 store 有接口标签要渲染时，CodeMirror chunk 已解码完毕。以「当前标签是接口」为门：
+  // 无条件预热会把约 450 kB 编辑器拉进一个只显示项目卡片的工作区。
   useEffect(() => {
     if (activeTab?.kind !== 'endpoint') return;
     const t = setTimeout(() => {
@@ -109,16 +93,15 @@ export function WorkspaceShell() {
     return () => clearTimeout(t);
   }, [activeTab?.kind]);
 
-  // `renderActiveContent` 按当前标签类型决定右栏渲染什么。
+  // `renderActiveContent` 按当前标签类型决定右栏渲染什么：
   //   endpoint → 请求 / 响应上下分栏
-  //   project / module / collection → EntitySettings：该实体自己的单列面板（基础信息，
-  //     再是该类型所属的配置 —— 项目的环境、模块在各环境下的地址）。面板不点名实体，
-  //     上方的标签才点。
+  //   project / module / collection → EntitySettings：该实体自己的单列面板（基础信息，再是
+  //     该类型所属的配置 —— 项目的环境、模块在各环境下的地址）。面板不点名实体，上方的
+  //     标签才点。
   //   settings → 设置面板（本身就是一个标签，不是抽屉）
   //
   // 「有项目但没有激活标签」正是关掉最后一个标签后的状态：项目本身就适合作为这块内容，
-  // 项目重命名 / 删除也住在那里，因为项目不是树中的一行。「无项目且无标签」则没东西可显示
-  // —— 但那种状态由 `App.tsx` 渲染欢迎页，故永远不会走到这里。
+  // 项目重命名 / 删除也住在那里，因为项目不是树中的一行。
   const renderActiveContent = () => {
     if (!activeTab) {
       return (

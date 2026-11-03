@@ -1,22 +1,11 @@
 /**
- * 模态层原语 —— 承载「挡住背景、只与最上层对话」的那一层。
+ * 模态层原语 —— 仓库里所有全屏模态（`Dialog`、`CommandPalette`）都走它，且每件事只有
+ * 一处实现：portal 到 `document.body`；Esc 关闭（点遮罩关闭可由 `disableBackdropClose`
+ * 关掉）；焦点陷阱（Tab 在面板里循环，关闭后焦点回到打开它的那个元素）；背景置为
+ * `inert` 且对读屏隐藏；统一的入场动画与统一的层级。面板长什么样由调用方决定。
  *
- * 仓库里所有全屏模态都走它：`Dialog`（对话框）与 `CommandPalette`（命令面板）。
- * 它负责的事只有这些，且每一件都只有一处实现：
- *
- * - portal 到 `document.body`，好逃出树里任何 `overflow` 父级。
- * - Esc 关闭；点遮罩关闭（`disableBackdropClose` 可关掉后者）。
- * - 焦点陷阱：Tab 在面板里循环，关闭后焦点回到打开它的那个元素。
- * - 背景置为 `inert` 且对读屏隐藏：背景既点不到、Tab 不进去、也不被读出来。
- * - 统一的入场动画与统一的层级。
- *
- * 面板长什么样由调用方决定：`Dialog` 给它加了标题栏与页脚，命令面板给了它搜索行与
- * 快捷键提示条。刻意不在这里规定形状 —— 两者的差别是形状的差别，不是模态语义的差别，
- * 把形状也塞进来只会让原语长出一排互相牵制的开关。
- *
- * **能同时开着多层。** 命令面板可以开在一个对话框之上，所以三件事按「栈」处理：
- * Esc 只由最上面那层处理（一次 Esc 只关一层），Tab 的焦点循环也只由最上面那层管，
- * 背景的 `inert` 用计数（最后一层关上才还原）。
+ * **能同时开着多层。** 命令面板可以开在一个对话框之上，故 Esc 与 Tab 只交给栈顶那层
+ * （一次 Esc 只关一层），背景的 `inert` 用计数（最后一层关上才还原）。
  */
 
 import {
@@ -33,7 +22,7 @@ import { LAYER } from './layers';
 
 /**
  * 面板的可访问名。二选一：字符串直接当 `aria-label`，元素 id 走 `aria-labelledby`。
- * 写成联合类型是为了逼调用方明确选一种 —— 两者都不给的面板，读屏软件报不出它是什么。
+ * 写成联合类型是为了逼调用方明确选一种，两者都不给的面板读屏软件报不出它是什么。
  */
 export type ModalLabel =
   { ariaLabel: string; ariaLabelledBy?: never } | { ariaLabel?: never; ariaLabelledBy: string };
@@ -82,10 +71,8 @@ function focusableIn(root: HTMLElement): HTMLElement[] {
 }
 
 /**
- * 已打开的模态层，从下到上。
- *
- * Esc 与 Tab 只交给栈顶那层：两层都开着时，一次 Esc 只该关最上面那层。少了这个栈，
- * 两层的监听器都会响应同一次 Esc —— 底层那个对话框会连带把「未保存的草稿」一起丢掉。
+ * 已打开的模态层，从下到上。Esc 与 Tab 只交给栈顶那层：两层都开着时，一次 Esc 只该关
+ * 最上面那层，少了这个栈，底层那个对话框会连带把「未保存的草稿」一起丢掉。
  */
 const openSurfaces: object[] = [];
 
@@ -100,10 +87,9 @@ function markBackgroundInert(): () => void {
   const marked: { el: HTMLElement; inert: boolean; ariaHidden: string | null }[] = [];
   for (const child of Array.from(document.body.children)) {
     if (!(child instanceof HTMLElement)) continue;
-    // 别的模态层不标记：它们同样是可交互的界面。
-    //
-    // **要用 `hasAttribute`**，不能只靠 `querySelector`：每个遮罩层都是
-    // `document.body` 的直接子节点（portal 渲染到 body），兄弟层不在彼此的后代里。
+    // 别的模态层不标记：它们同样是可交互的界面。要用 `hasAttribute`，不能只靠
+    // `querySelector` —— 每个遮罩层都是 `document.body` 的直接子节点，兄弟层不在彼此的
+    // 后代里。
     if (child.hasAttribute('data-modal-surface')) continue;
     if (child.querySelector('[data-modal-surface]')) continue;
     marked.push({
@@ -143,11 +129,9 @@ export function ModalSurface({
   const selfRef = useRef<object>({});
 
   /**
-   * 打开之前聚焦的是哪个元素。
-   *
-   * **在 render 期间记下**，不能等到副作用里再读：那时 DOM 已经改过、`autoFocus` 也
-   * 已经把焦点挪到面板里的按钮上了，读到的会是面板内部的元素 —— 关闭时它已经被卸载，
-   * `document.contains` 为假，焦点就再也还不回去了。
+   * 打开之前聚焦的是哪个元素。**在 render 期间记下**，不能等到副作用里再读：那时 DOM
+   * 已经改过、`autoFocus` 也已经把焦点挪到面板里的按钮上，读到的是面板内部的元素，
+   * 关闭时它已被卸载，焦点就再也还不回去。
    */
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
@@ -157,7 +141,7 @@ export function ModalSurface({
   }
   wasOpenRef.current = open;
 
-  // 进栈。**这个副作用必须排在键盘监听之前**，否则新一层开起来时，栈顶还是旧的那层，
+  // 进栈。这个副作用必须排在键盘监听之前，否则新一层开起来时栈顶还是旧的那层，
   // 第一次 Esc 会被旧层抢走。
   useEffect(() => {
     if (!open) return;
@@ -169,11 +153,9 @@ export function ModalSurface({
     };
   }, [open]);
 
-  // Esc 关闭与 Tab 循环，共用一个捕获阶段的监听器。
-  //
-  // 捕获阶段是必须的：React 的事件系统挂在 root 容器上，冒泡阶段才轮到它。
-  // Esc 在这里 `stopPropagation()` 之后，React 的 `onKeyDown` 就再也收不到它 ——
-  // 于是「按 Esc 关掉」这件事全仓库只有这一处实现，不会出现两个处理器各关一次。
+  // Esc 关闭与 Tab 循环，共用一个捕获阶段的监听器。捕获阶段是必须的：React 的事件系统
+  // 挂在 root 容器上，冒泡阶段才轮到它。Esc 在这里 `stopPropagation()` 之后，React 的
+  // `onKeyDown` 就再也收不到它 —— 「按 Esc 关掉」全仓库只有这一处实现。
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -213,9 +195,8 @@ export function ModalSurface({
     return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [open, onOpenChange]);
 
-  // 背景置为 inert，关闭时归还焦点。
-  //
-  // 归还在解除 inert 之后做：inert 里的元素不接受焦点，先 `focus()` 会被浏览器丢掉。
+  // 背景置为 inert，关闭时归还焦点。归还在解除 inert 之后做：inert 里的元素不接受
+  // 焦点，先 `focus()` 会被浏览器丢掉。
   useEffect(() => {
     if (!open) return;
     if (backgroundUsers === 0) backgroundRestore = markBackgroundInert();
@@ -233,10 +214,8 @@ export function ModalSurface({
     };
   }, [open]);
 
-  // 打开时把焦点移进面板。
-  //
-  // 面板里若有 `autoFocus` 的元素，浏览器在挂载那一刻已经聚焦了它，此时不再抢。
-  // 延后一拍是必要的：挂载之前输入框还不存在。
+  // 打开时把焦点移进面板。面板里若有 `autoFocus` 的元素，浏览器在挂载那一刻已经聚焦了
+  // 它，此时不再抢。延后一拍是必要的：挂载之前输入框还不存在。
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => {
@@ -249,11 +228,8 @@ export function ModalSurface({
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  // 入场动画 —— 每次面板挂载（open 翻成 true）都跑。没有出场动画：open=false 会整体
-  // 卸载 portal，这样就够。
-  //
-  // 减弱动效下面板直接出现。它照样挂载、照样困住焦点、照样有背景，所以它的行为没有
-  // 任何一点依赖这段过渡跑起来。
+  // 入场动画 —— 每次面板挂载（open 翻成 true）都跑。没有出场动画：open=false 会整体卸载
+  // portal。减弱动效下面板直接出现，它照样挂载、照样困住焦点、照样有背景。
   useGSAP(
     () => {
       return motionSafe(() => {

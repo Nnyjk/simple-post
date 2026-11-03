@@ -1,12 +1,11 @@
 /**
- * 渲染层调用的每个 Tauri 命令名的唯一来源。`src/` 里每个 `invoke(...)` 都必须
- * 走 `COMMANDS` 表，绝不用裸字符串 —— 这样两侧（Rust 侧
- * `src-tauri/src/lib.rs` 的 `invoke_handler!` 注册，或渲染层）改名会被编译器
- * 或一次全局替换抓到，而不是运行时静默失效。
+ * 渲染层调用的每个 Tauri 命令名的唯一来源。`src/` 里每个 `invoke(...)` 都必须走
+ * `COMMANDS` 表，绝不用裸字符串：这样两侧（Rust 侧 `src-tauri/src/lib.rs` 的
+ * `invoke_handler!` 注册，或渲染层）改名会被编译器或一次全局替换抓到，而不是运行时静默失效。
  *
  * 命名约定：
- *   - 字符串值必须等于 `src-tauri/src/commands/` 里的函数名（`http_request`
- *     例外，它是 `src-tauri/src/lib.rs` 里的 `#[tauri::command]`）。
+ *   - 字符串值必须等于 `src-tauri/src/commands/` 里的函数名（`http_request` 例外，
+ *     它是 `src-tauri/src/lib.rs` 里的 `#[tauri::command]`）。
  *   - 对象上的键为 camelCase 以便 TS 侧使用：`mcp_status` ⇒ `mcpStatus`。
  *   - 每个分区内按字母序排列，扫一眼表就能发现缺失的命令。
  */
@@ -119,7 +118,7 @@ export const COMMANDS = {
   /**
    * restart 必须终止端口记录指向的那个 daemon，而不只是 supervisor 恰好持有的
    * `Child` 句柄：supervisor 接管一个已在运行的 daemon 时没有句柄，只按句柄杀
-   * 会悄悄留下旧进程，"重启"又收养了同一个进程。
+   * 会留下旧进程，"重启"又收养了同一个进程。
    */
   mcpDaemonRestart: 'mcp_daemon_restart',
   /**

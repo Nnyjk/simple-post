@@ -18,13 +18,12 @@ import {
 } from './mcp-http-config-form';
 
 /**
- * Streamable-HTTP 监听配置。
+ * Streamable-HTTP 监听配置。这张卡片**只管配置**，从不启停 daemon。运行期控制只归「MCP
+ * 进程」那一张卡片，本卡片负责持久化 `mcp_http_config_get` / `mcp_http_config_set` 读写的
+ * 配置。
  *
- * 这张卡片**只管配置**，从不启停 daemon。运行期控制只归「MCP 进程」那一张卡片，
- * 本卡片负责持久化 `mcp_http_config_get` / `mcp_http_config_set` 读写的配置。
- *
- * 监听无法就地改绑，故保存只落配置，由后端回 `requiresRestart`；页脚照此说明并指向
- * 拥有重启的那张卡片，不会暗示运行中的服务已经换地址。
+ * 监听无法就地改绑，故保存只落配置，由后端回 `requiresRestart`；页脚照此说明并指向拥有
+ * 重启的那张卡片。
  */
 export function McpHttpConfigSection() {
   const [saved, setSaved] = useState<McpHttpConfig | null>(null);
@@ -70,12 +69,11 @@ export function McpHttpConfigSection() {
   /**
    * 保存后要重启什么，两种形态不一样。
    *
-   * 守护进程（桌面端）的监听地址、路径与白名单是**spawn 时**从这一行读的，所以
-   * 改完要重启守护进程才生效。专用 MCP 端口则是 **Web 进程启动时**开的监听器，
-   * 重启守护进程对它没有影响——Web 形态下（容器）那部分要重启 Web 服务本身。
+   * 守护进程（桌面端）的监听地址、路径与白名单是**spawn 时**从这一行读的，改完要重启守护
+   * 进程才生效。专用 MCP 端口则是 **Web 进程启动时**开的监听器，重启守护进程对它没有影响
+   * —— Web 形态下（容器）那部分要重启 Web 服务本身。
    *
-   * 指错重启动作比不说更糟：用户在「进程」卡片里重启了守护进程，端口还是没变，
-   * 于是以为配置没保存成功。
+   * 指错重启动作比不说更糟：用户在「进程」卡片里重启了守护进程，端口还是没变。
    */
   const restartHint = IS_TAURI_SHELL
     ? '配置已保存，需要在「MCP 进程」卡片里重启守护进程后生效。'
@@ -265,11 +263,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /**
- * 一个白名单文本域。
- *
- * `components/ui/` 里没有共享的 `Textarea` 原语，而为唯一调用方加一个只是死重量
- * （不算 `dead-components` 那条哨兵，它的 API 面比这个特性需要还宽），故这里内联镜像
- * `Input` 的类名约定。
+ * 一个白名单文本域。`components/ui/` 里没有共享的 `Textarea` 原语，而为唯一调用方加一个
+ * 只是死重量，故这里内联镜像 `Input` 的类名约定。
  */
 function ListTextarea({
   value,

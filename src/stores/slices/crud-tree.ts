@@ -1,18 +1,17 @@
 /**
  * CRUD 子工厂 —— 资源树。
  *
- * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
- * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
+ * `createCrudSlice` 组合的四个子工厂之一（切片级的契约——乐观 `set()` → `invokeCmd` →
+ * 快照回滚——见 `../crud-slice.ts`）。
  *
- * 树就是一个 `nodes` 数组加一张 `endpointDetails` 映射，所以旧三表布局需要的
- * 三族动作塌缩成三个动作：
+ * 树就是一个 `nodes` 数组加一张 `endpointDetails` 映射，故资源树的动作只有两族：
  *
  *   addNode / updateNode / deleteNode  （一次级联删除，不是三次）
  *   updateEndpointDetail               （配置，保持独立）
  *
- * 删除不再需要知道自己删的是什么：`nodes.parent_id` 在数据库里级联，本地写入
- * 也用同样方式移除子树。移动（见 `./crud-move.ts`）不再需要 `parentKind`，
- * 因为父节点自己的 `type` 就决定了节点能落到哪里。
+ * 删除不需要知道自己删的是什么：`nodes.parent_id` 在数据库里级联，本地写入也用同样方式
+ * 移除子树。移动（见 `./crud-move.ts`）不需要 `parentKind`，因为父节点自己的 `type` 就决定
+ * 了节点能落到哪里。
  */
 import type { StateCreator } from 'zustand';
 import type { ResourceNode, ResourceNodeType, EndpointDetail } from '@/types/domain';
@@ -78,8 +77,8 @@ export interface TreeCrudActions {
 
 export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (set, get) => ({
   addNode: async (input) => {
-    // 提供给后端，好让 REST 路径据此确定 endpoint 的 `detail.nodeId`——但**不**
-    // 当作权威，见下面的 `createdId`。
+    // 提供给后端，好让 REST 路径据此确定 endpoint 的 `detail.nodeId`——但**不**当作权威，
+    // 见下面的 `createdId`。
     const id = uid();
     try {
       const node = await invokeCmd<ResourceNode>(COMMANDS.nodesCreate, {
@@ -92,18 +91,16 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         sortOrder: 0,
         ...(input.detail ? { detail: input.detail } : {}),
       });
-      // 下游一切都按**服务端**返回的 id 作键，而不是我们提供的那个。REST 路径会
-      // 采纳我们提供的（`ensure_server_id` 只在缺失时才填），但 Tauri 命令自己
-      // 铸一个 `uid()` 并忽略该参数，所以同样一次调用在两种传输下返回不同的
-      // id。用本地 `id` 给 detail 映射作键，就会把它写在一个没有任何行持有的键
-      // 下：`EndpointList` 因找不到 detail 而跳过该 endpoint，标签解析成"已删除"
-      // 描述符，而 module 的计数（数的是节点而非 detail）仍显示着它。信任
-      // `node.id` 让两种传输一致，不必让 store 知道自己在跟谁说话。
+      // 下游一切都按**服务端**返回的 id 作键，而不是我们提供的那个。REST 路径会采纳我们提供的
+      // （`ensure_server_id` 只在缺失时才填），但 Tauri 命令自己铸一个 `uid()` 并忽略该参数，
+      // 故同样一次调用在两种传输下返回不同的 id。用本地 `id` 给 detail 映射作键，就会把它写在
+      // 一个没有任何行持有的键下：`EndpointList` 因找不到 detail 而跳过该 endpoint，标签解析成
+      // 「已删除」描述符，而 module 的计数（数的是节点而非 detail）仍显示着它。信任 `node.id`
+      // 让两种传输一致。
       const createdId = node.id;
       set((s) => ({
         nodes: [...s.nodes, node],
-        // 只有 endpoint 有 detail 行；给 module 写一个空的会让
-        // `Object.keys(endpointDetails)` 说谎。
+        // 只有 endpoint 有 detail 行；给 module 写一个空的会让 `Object.keys(endpointDetails)` 说谎。
         ...(input.kind === 'endpoint'
           ? {
               endpointDetails: {
@@ -133,8 +130,8 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
   },
 
   deleteNode: async (id) => {
-    // 三种类型共用一次删除。`nodes.parent_id` 在数据库里级联；本地写入丢掉
-    // 同一棵子树，好让树不会在下一次重载之前闪回已删节点的子节点。
+    // 三种类型共用一次删除。`nodes.parent_id` 在数据库里级联；本地写入丢掉同一棵子树，
+    // 故树不会在下一次重载之前闪回已删节点的子节点。
     const snapshot = {
       nodes: get().nodes,
       endpointDetails: get().endpointDetails,
@@ -163,10 +160,9 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         s.activeTabId,
         tabKeysForSubtree(s.nodes, removed, 'node', id),
       );
-      // 接口没了，它那个标签（连带挂在那儿的响应）也就没了。这条路径不走
-      // `closeTab`，故响应得在这里单独带走——留着就成了没人引用的悬空数据，
-      // 而它的键（接口 id）会被下次打开同一个接口时复用，于是新开的标签会看到
-      // 一条上一条命途的响应。
+      // 接口没了，它那个标签（连带挂在那儿的响应）也就没了。这条路径不走 `closeTab`，故响应得
+      // 在这里单独带走——留着就成了没人引用的悬空数据，而它的键（接口 id）会被下次打开同一个
+      // 接口时复用，于是新开的标签会看到一条上一条命途的响应。
       const nextResponses = { ...s.lastResponses };
       for (const eid of droppedEndpointIds) delete nextResponses[eid];
       return {
@@ -201,14 +197,13 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
   },
 
   /**
-   * 乐观复制 + 后台 invoke。同步返回 id，好让调用方（ProjectTree）能立刻
-   * 激活新标签并马上开始重命名。
+   * 乐观复制 + 后台 invoke。同步返回 id，好让调用方（ProjectTree）能立刻激活新标签并马上
+   * 开始重命名。
    *
-   * id 在这里铸造并作为 `newId` 发出，后端采纳它（`db::nodes::duplicate`
-   * 不再自己铸）。这就是全部契约：一旦服务端回答了不同的 id，标签条、
-   * `activeEndpointId` 和进行中的重命名会全都指着那个谁都不拥有的乐观 id，
-   * 标签渲染成"接口已删除"。`addNode` 靠信任返回的 id 解决同一个问题，但复制
-   * 做不到：它的调用方在本次调用返回之前就已经对那个 id 采取行动了。
+   * id 在这里铸造并作为 `newId` 发出，后端采纳它（`db::nodes::duplicate` 不再自己铸）。这就是
+   * 全部契约：一旦服务端回答了不同的 id，标签条、`activeEndpointId` 和进行中的重命名会全都
+   * 指着那个谁都不拥有的乐观 id。`addNode` 靠信任返回的 id 解决同一个问题，但复制做不到：
+   * 它的调用方在本次调用返回之前就已经对那个 id 采取行动了。
    */
   duplicateEndpoint: (id) => {
     const state = get();
@@ -218,8 +213,8 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
     const newId = uid();
     const now = Date.now();
     set((s) => {
-      // 放在原节点旁边，而不是集合末尾：用户看不见的副本挨着它复制的东西很容易
-      // 被漏掉。这与服务端 `db::nodes::duplicate` 的做法一致。
+      // 放在原节点旁边，而不是集合末尾：用户看不见的副本挨着它复制的东西很容易被漏掉。这与
+      // 服务端 `db::nodes::duplicate` 的做法一致。
       const siblings = s.nodes
         .filter((n) => n.parentId === original.parentId)
         .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -247,9 +242,9 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         },
       };
     });
-    // `newId` 不是提示——它就是那一行的 id，服务端会采纳它。所以这里 resolve 之后
-    // 没有东西需要对齐：那份乐观行**就是**被写下去的那一行。只有失败才有活要干
-    // ——删掉那个在别处已不存在的副本。
+    // `newId` 不是提示——它就是那一行的 id，服务端会采纳它。故这里 resolve 之后没有东西需要
+    // 对齐：那份乐观行**就是**被写下去的那一行。只有失败才有活要干——删掉那个在别处已不存在的
+    // 副本。
     invokeCmd<ResourceNode>(COMMANDS.nodesDuplicate, { id, newId }).catch((e) => {
       console.error('[store] nodes_duplicate failed', e);
       set((s) => {

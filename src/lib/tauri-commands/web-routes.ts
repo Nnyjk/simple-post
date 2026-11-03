@@ -1,10 +1,10 @@
 /**
  * web 形态的 REST 路由表。
  *
- * 路由表对应 `crates/simple-post-server/src/web_api/` 里的 axum 路由树
- * （`.route()` 注册在 `mod.rs::build_router`）。两侧不共享源码 —— 靠
- * `scripts/mcp-integration.test.mjs` 的集成测试与 PR 时的手工复核保持一致。
- * 新增 invoke 命令必须在**两处**都补上对应的 REST 条目。
+ * - 路由表对应 `crates/simple-post-server/src/web_api/` 里的 axum 路由树
+ *   （`.route()` 注册在 `mod.rs::build_router`）。两侧不共享源码，靠
+ *   `scripts/mcp-integration.test.mjs` 的集成测试与 PR 时的手工复核保持一致。
+ * - 新增 invoke 命令必须在**两处**都补上对应的 REST 条目。
  */
 import { COMMANDS, type TauriCommand } from './commands';
 export interface RouteSpec {
@@ -90,12 +90,12 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     method: 'POST',
     path: () => '/api/nodes',
     // `NodeCreateBody` 把节点字段直接放在最外层，所以请求体就是节点自身字段 —— 不是
-    // `{ node: {…} }` 的包装。Tauri 命令同样吃扁平 args，故这里只需补上服务端
-    // 自己盖章的部分：id 与 detail 行的键。`sortOrder` 在线上必填且无默认，
-    // 缺省必须变成 0 而不是 `undefined`。
+    // `{ node: {…} }` 的包装。Tauri 命令同样吃扁平 args，故这里只需补上服务端自己盖章的
+    // 部分：id 与 detail 行的键。`sortOrder` 在线上必填且无默认，缺省必须变成 0 而不是
+    // `undefined`。
     //
-    // 用 `kind` 而非 `type`，因为那是两侧的领域字段名；它还必须与 Tauri 命令的
-    // `kind` 参数一致，否则桌面模式会要一个 handler 从不读取的键。
+    // 用 `kind` 而非 `type`，因为那是两侧的领域字段名；它还必须与 Tauri 命令的 `kind`
+    // 参数一致，否则桌面模式会要一个 handler 从不读取的键。
     body: (a) => ({
       id: a.id,
       rootId: a.rootId,

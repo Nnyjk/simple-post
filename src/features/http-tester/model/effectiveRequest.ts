@@ -15,11 +15,9 @@ export const EMPTY_BODY: RequestBody = { mode: 'none', content: '' };
 export const EMPTY_AUTH: AuthConfig = { kind: 'none' };
 
 /**
- * 当前生效的请求配置：已存的 detail 叠上草稿。
- *
- * 所有请求配置编辑器都写草稿而非该行，故这里是唯一决定「用户所见即为何」的地方 ——
- * 发送、保存、cURL 预览与校验都读它。URL / method 不放进本对象：URL 栏还要原始值做
- * 自己的选择器与光标逻辑。
+ * 当前生效的请求配置：已存的 detail 叠上草稿。所有请求配置编辑器都写草稿而非该行，故这里是
+ * 唯一决定「用户所见即为何」的地方 —— 发送、保存、cURL 预览与校验都读它。URL / method 不放进
+ * 本对象：URL 栏还要原始值做自己的选择器与光标逻辑。
  */
 export interface EffectiveRequest {
   params: KeyValue[];
@@ -32,10 +30,8 @@ export interface EffectiveRequest {
   preRequestScript: string;
   testScript: string;
   /**
-   * 该端点自己的 HTTPS 出站设置。`null` = 继承全局默认（`RequestSettings.tls`）。
-   *
-   * 与其它字段不同，它有第三态：草稿里显式写过 `null` 表示「回到继承全局」，那必须
-   * 压过已存的那份，故这里不能用 `??` 回落。
+   * 该端点自己的 HTTPS 出站设置。`null` = 继承全局默认（`RequestSettings.tls`）。它有第三
+   * 态：草稿里显式写过 `null` 表示「回到继承全局」，那必须压过已存的那份，故不能用 `??` 回落。
    */
   tls: TlsSettings | null;
 }

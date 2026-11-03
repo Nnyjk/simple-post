@@ -2,18 +2,14 @@ import type { ApiResponse } from '@/types/domain';
 import { base64ToBytes, bytesToBase64, utf8Bytes } from '@/lib/base64';
 
 /**
- * 响应内容的四种形态 —— 界面按它决定怎么渲染。
- *
- * - `json`：Content-Type 说它是 JSON，按 JSON 渲染（可格式化）。
- * - `text`：其它文本，原样渲染。
- * - `image`：图片，给出预览。
- * - `binary`：二进制文件，给出下载。
+ * 响应内容的四种形态 —— 界面按它决定怎么渲染：`json`（按 JSON 渲染，可格式化）、
+ * `text`（其它文本，原样渲染）、`image`（图片，给出预览）、`binary`（二进制文件，给出
+ * 下载）。
  *
  * **判据先看 Content-Type，再看字节。** 后端把响应读回来时会按体积上限裁过，裁点落在
  * 多字节字符中间时，一个纯文本响应读回来也是非法 UTF-8；只看字节会把文本误判成二进制。
- * 故后端先按 Content-Type 判「这是不是文本」，再按字节判「文本能不能原样解码」。
  */
-export type ResponseKind = 'json' | 'text' | 'image' | 'binary';
+type ResponseKind = 'json' | 'text' | 'image' | 'binary';
 
 /** 这个 Content-Type 说内容是 JSON 吗？ */
 function isJsonContentType(contentType: string): boolean {
@@ -31,10 +27,8 @@ function isImageContentType(contentType: string): boolean {
 }
 
 /**
- * 这个响应该怎么渲染。
- *
- * 图片先按 Content-Type 判：SVG 是文本（合法 UTF-8），后端会把它放进文本形态，而它
- * 仍然是一张图——只按字节判的话 SVG 会被当成一段普通文本。
+ * 这个响应该怎么渲染。图片先按 Content-Type 判：SVG 是文本（合法 UTF-8），后端会把它放进
+ * 文本形态，而它仍然是一张图 —— 只按字节判的话 SVG 会被当成一段普通文本。
  */
 export function classifyResponse(response: ApiResponse): ResponseKind {
   const contentType = response.contentType ?? '';
@@ -46,11 +40,9 @@ export function classifyResponse(response: ApiResponse): ResponseKind {
 }
 
 /**
- * 响应体的原始字节。
- *
- * 后端给的是「文本形态」或「base64 形态」二者之一：二进制走 base64，文本走字符串。
- * 文本那份是宽松解码的结果，非法字节已被替换成 U+FFFD——故只有文本形态时才能说它
- * 就是原文（那时它本来就是合法 UTF-8）。
+ * 响应体的原始字节。后端给的是「文本形态」或「base64 形态」二者之一：二进制走 base64，
+ * 文本走字符串。文本那份是宽松解码的结果，非法字节已被替换成 U+FFFD —— 故只有文本形态
+ * 时才能说它就是原文。
  */
 export function responseBytes(response: ApiResponse): Uint8Array<ArrayBuffer> {
   if (response.bodyBase64) return base64ToBytes(response.bodyBase64);
@@ -79,10 +71,8 @@ const EXTENSION_BY_CONTENT_TYPE: Record<string, string> = {
 };
 
 /**
- * 下载用的文件名。
- *
- * 先按 `Content-Disposition` 里服务端给的名字（那是服务端最清楚的文件名），取不到
- * 再按 Content-Type 猜扩展名。
+ * 下载用的文件名。先按 `Content-Disposition` 里服务端给的名字，取不到再按 Content-Type
+ * 猜扩展名。
  */
 export function responseFileName(response: ApiResponse): string {
   const fromHeader = fileNameFromContentDisposition(response.headers['content-disposition']);
@@ -94,10 +84,8 @@ export function responseFileName(response: ApiResponse): string {
 }
 
 /**
- * 从 `Content-Disposition` 里取文件名。
- *
- * RFC 5987 的 `filename*=UTF-8''…` 优先：它能带非 ASCII 名字，而 `filename="…"` 那份
- * 按规范只能是 ASCII。
+ * 从 `Content-Disposition` 里取文件名。RFC 5987 的 `filename*=UTF-8''…` 优先：它能带
+ * 非 ASCII 名字，而 `filename="…"` 那份按规范只能是 ASCII。
  */
 function fileNameFromContentDisposition(header: string | undefined): string | null {
   if (!header) return null;
@@ -121,10 +109,8 @@ function fileNameFromContentDisposition(header: string | undefined): string | nu
 }
 
 /**
- * 把响应存成文件。
- *
- * 存的是**原始字节**：文本形态存 UTF-8 编码，二进制形态存 base64 解出来的字节。
- * 用 `text/plain` 存二进制会把字节改写成乱码。
+ * 把响应存成文件。存的是**原始字节**：文本形态存 UTF-8 编码，二进制形态存 base64 解出来的
+ * 字节。用 `text/plain` 存二进制会把字节改写成乱码。
  */
 export function downloadResponse(response: ApiResponse): void {
   const bytes = responseBytes(response);
@@ -138,10 +124,8 @@ export function downloadResponse(response: ApiResponse): void {
 }
 
 /**
- * 图片预览用的 data URL。
- *
- * 文本形态的响应（SVG 这类）按 UTF-8 重新编码成 base64——那份文本本来就是合法 UTF-8，
- * 重新编码得到的字节与原始字节一致。
+ * 图片预览用的 data URL。文本形态的响应（SVG 这类）按 UTF-8 重新编码成 base64 —— 那份文本
+ * 本来就是合法 UTF-8，重新编码得到的字节与原始字节一致。
  */
 export function responseDataUrl(response: ApiResponse): string | null {
   if (!isImageContentType(response.contentType ?? '')) return null;

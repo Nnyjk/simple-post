@@ -1,20 +1,16 @@
 /**
  * 常用 HTTP 请求头，供 Headers 页 KeyValueEditor 的 datalist 自动补全使用。
  *
- * 这份列表刻意短，并按*意图*而非 spec 字母序分组——用户敲 `a` 时要看到
- * `Authorization`，而不是被 `Accept-CH` 埋在后面。数组内的顺序就是 datalist 的
- * 显示顺序（Chrome/Firefox 遵守，Safari 按字母排——接受之）。
- *
- * 条目字段：
- *   - `name`：字面 header 名，会填进 key 字段。
- *   - `description`：单行 tooltip / 下拉副标题。编辑器渲染更丰富的 datalist 时
- *     展示；基础 `<datalist>` 只显示 `name`。
- *   - `placeholderValue?`：可选的「值该长什么样」提示，显示在 description 里
- *     （如 Authorization 的 `Bearer xxx`）。不自动填——那太魔法——但提示把用户
- *     往正确格式上引。
- *   - `source?`：内置列表是 `builtin`，从用户自己 endpoint 里收来的名字是
- *     `recent`。暴露出来，好让编辑器在渲染比裸 `<datalist>` 更丰富的 UI 时标注
- *     「最近用过」。
+ * - 这份列表刻意短，并按*意图*而非 spec 字母序分组——用户敲 `a` 时要看到
+ *   `Authorization`，而不是被 `Accept-CH` 埋在后面。数组内的顺序就是 datalist 的显示顺序
+ *   （Chrome/Firefox 遵守，Safari 按字母排——接受之）。
+ * - `name`：字面 header 名，会填进 key 字段。
+ * - `description`：单行 tooltip / 下拉副标题；编辑器渲染更丰富的 datalist 时展示，
+ *   基础 `<datalist>` 只显示 `name`。
+ * - `placeholderValue?`：可选的「值该长什么样」提示，显示在 description 里
+ *   （如 Authorization 的 `Bearer xxx`）；不自动填，但提示把用户往正确格式上引。
+ * - `source?`：内置列表是 `builtin`，从用户自己 endpoint 里收来的名字是 `recent`；
+ *   暴露出来，好让编辑器在渲染比裸 `<datalist>` 更丰富的 UI 时标注「最近用过」。
  */
 export interface CommonHeader {
   name: string;

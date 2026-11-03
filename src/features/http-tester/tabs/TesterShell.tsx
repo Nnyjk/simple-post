@@ -15,10 +15,8 @@ import type { EffectiveRequest } from '../model/effectiveRequest';
 import type { TesterTabId } from './tabItems';
 
 /**
- * 请求测试器的外壳 —— 面包屑、接口头、URL 栏、页签条、页签内容区与变量选择器。
- *
- * 纯展示：所有 state、handler 与 hook 留在 `HttpTester`，这里只按显式 props 把它们
- * 摆到界面上。
+ * 请求测试器的外壳 —— 面包屑、接口头、URL 栏、页签条与页签内容区。纯展示：所有 state、
+ * handler 与 hook 留在 `HttpTester`，这里只按显式 props 把它们摆到界面上。
  */
 export function TesterShell({
   project,
@@ -168,7 +166,7 @@ export function TesterShell({
 
       {/* 草稿保存失败会保留草稿与标签，重试就是再按一次保存 —— 但用户必须知道刚才那下
           什么都没做，否则点击看起来是坏的。`addNode` 把真实错误吞成 `null` 只记日志，
-          故这是 UI 能给的唯一信号，重试入口就是这个按钮。 */}
+          故这是 UI 能给的唯一信号。 */}
       {draftSaveError && (
         <div
           role="alert"
@@ -199,8 +197,8 @@ export function TesterShell({
       )}
 
       {/* 页签条 —— 与下方面板相连：本行独占那条分隔线（条内不再有），激活标签以面板底色
-          填充自己，盖住分隔线并与之圆角相接。`bg-card/30` 与上方 URL 栏一致，也是
-          激活标签得以凸显的背景。`pt-1.5` 不配 `pb`，使条的下沿与分隔线齐平。 */}
+          填充自己，盖住分隔线并与之圆角相接。`bg-card/30` 与上方 URL 栏一致，
+          `pt-1.5` 不配 `pb`，使条的下沿与分隔线齐平。 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 pt-1.5">
         <Tabs
           variant="connected"

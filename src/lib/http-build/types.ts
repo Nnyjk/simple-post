@@ -1,12 +1,11 @@
 import type { AuthConfig, Environment, HttpMethod, KeyValue, RequestBody } from '@/types/domain';
 
 /**
- * 影响请求**线上形态**的入参。超时 / 重定向 / 体积上限与调用方的 `AbortSignal`
- * 只在执行期起作用，不在这里。
+ * 影响请求**线上形态**的入参。超时 / 重定向 / 体积上限与调用方的 `AbortSignal` 只在执行期
+ * 起作用，不在这里。
  *
- * `url` 是**完整** URL：这里没有 baseUrl 槽位，调用方必须先拼好。手上正好是
- * baseUrl 与 path 时用 `prepareRequest`；此形状留给 fetch 与 cURL 两个适配器，
- * 它们视其为 `baseUrl: ''`。
+ * `url` 是**完整** URL：这里没有 baseUrl 槽位，调用方必须先拼好。手上正好是 baseUrl 与 path
+ * 时用 `prepareRequest`；此形状留给 fetch 与 cURL 两个适配器，它们视其为 `baseUrl: ''`。
  */
 export interface BuildInput {
   method: HttpMethod;
@@ -28,14 +27,16 @@ export interface BuiltFetch {
    * 最终 URL：query 参数与 query 位置的 apikey 已追加。
    */
   url: string;
-  /** 可直接交给 `fetch` 的 `RequestInit`；`signal` 与 `redirect` 不在其中，由调用方叠加。 */
-  init: RequestInit;
+  /**
+   * 可直接交给 `fetch` 的 `RequestInit`；`signal` 与 `redirect` 不在其中，由调用方叠加。
+   *
+   * `headers` 收窄成 `Record`：`buildFetchInit` 造出的 header 恒是这个形状，`RequestInit` 的
+   * `HeadersInit` 联合类型会让调用点以为还可能是 `Headers` 或元组数组。
+   */
+  init: Omit<RequestInit, 'headers'> & { headers: Record<string, string> };
   /** body 的字符串回显（form 模式已 URL/form 安全）。`sendRequest` 目前不用它。 */
   bodyForLog: string;
-  /**
-   * 请求体的**字节**（base64）。与 `init.body` 是同一份东西的两种形态：
-   * 后端收的是 JSON，故字节走 base64 这个字段。
-   */
+  /** 请求体的**字节**（base64）。与 `init.body` 是同一份东西的两种形态：后端收的是 JSON，故字节走 base64 这个字段。 */
   bodyBase64: string | null;
 }
 
@@ -46,17 +47,15 @@ export interface BuiltFetch {
 export interface PrepareRequestInput {
   method: HttpMethod;
   /**
-   * URL 的 path 部分，不含任何 base URL，可带 `{{var}}`。自带 scheme
-   * （`https://…`）的 path 优先于 `baseUrl`——endpoint 的「自定义」模式
-   * 靠这点成立：用户手输整个地址，选择器里仍是自定义那一档。
+   * URL 的 path 部分，不含任何 base URL，可带 `{{var}}`。自带 scheme（`https://…`）的 path 优先于
+   * `baseUrl`——endpoint 的「自定义」模式靠这点成立：用户手输整个地址，选择器里仍是自定义那一档。
    */
   urlPath: string;
   /** 已解析的 base URL；空串表示没有 base URL。 */
   baseUrl: string;
   /**
-   * 实际访问地址（代理）。请求地址以 `baseUrl` 开头时，这个前缀被换成它。
-   *
-   * 缺席或空串 = 没有代理，请求直接打 `baseUrl`。
+   * 实际访问地址（代理）。请求地址以 `baseUrl` 开头时，这个前缀被换成它。缺席或空串 = 没有代理，
+   * 请求直接打 `baseUrl`。
    */
   proxy?: string | null;
   params: KeyValue[];
@@ -64,19 +63,14 @@ export interface PrepareRequestInput {
   body: RequestBody;
   auth: AuthConfig;
   env?: Environment;
-  /**
-   * URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
-   *
-   * 它们替换进路径本身，不像 `params` 那样进查询串。
-   */
+  /** URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。它们替换进路径本身，不像 `params` 那样进查询串。 */
   pathParams?: KeyValue[];
   /**
    * 动态变量的当前值：变量名 → 替换用的文本。
    *
-   * 它们在变量池的**最后一步**并入，故同名时压过环境变量；被停用的环境变量也不影响
-   * 它们（停用过滤只作用于环境变量）。合并规则见 `src/lib/dynamic-vars.ts` 的
-   * `mergePool`，与 Rust 的 `core::dynamic::merge_pool` 同一套，由
-   * `fixtures/dynamic-parity.json` 钉住。
+   * 它们在变量池的**最后一步**并入，故同名时压过环境变量；被停用的环境变量也不影响它们。
+   * 合并规则见 `src/lib/dynamic-vars.ts` 的 `mergePool`，与 Rust 的 `core::dynamic::merge_pool`
+   * 同一套，由 `fixtures/dynamic-parity.json` 钉住。
    */
   dynamicVars?: Record<string, string>;
 }
@@ -85,12 +79,12 @@ export interface PrepareRequestInput {
 export interface PreparedRequest {
   method: HttpMethod;
   /**
-   * 完整 URL：`join(baseUrl, urlPath)` → 替换路径里的 `{占位符}` → 解析 `{{var}}` →
-   * 代理前缀替换 → 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的 apikey，
-   * 顺序如列。
-   * 先 join 再解析，模块地址里的变量才解析得到；代理替换放在解析之后，因为要换掉
-   * 的正是解析出来的那个前缀；折叠放在代理替换之后，因为代理地址也可能带来重复
-   * 斜杠；参数放最后，因为它们的值在进来时已解析（见 `appendQueryString`）。
+   * 完整 URL：`join(baseUrl, urlPath)` → 替换路径里的 `{占位符}` → 解析 `{{var}}` → 代理前缀替换
+   * → 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的 apikey，顺序如列。
+   *
+   * 先 join 再解析，模块地址里的变量才解析得到；代理替换放在解析之后，因为要换掉的正是解析
+   * 出来的那个前缀；折叠放在代理替换之后，因为代理地址也可能带来重复斜杠；参数放最后，
+   * 因为它们的值在进来时已解析（见 `appendQueryString`）。
    */
   url: string;
   /**
@@ -99,40 +93,37 @@ export interface PreparedRequest {
    */
   headers: Array<[string, string]>;
   /**
-   * body 内容；`mode === 'none'` 或用户填的内容为空时为 `null`。
-   * 与其他字段一样模板化：`{{var}}` 对当前环境解析。
+   * body 内容；`mode === 'none'` 或用户填的内容为空时为 `null`。与其他字段一样模板化：
+   * `{{var}}` 对当前环境解析。
    *
-   * 判空跑在**用户写的原文**上、模板化之前，与 Rust 的 `resolve_endpoint` 同序；
-   * 所以内容只有一个变量且解析为 `""` 的 body 照样发空串而不被丢掉。
+   * 判空跑在**用户写的原文**上、模板化之前，与 Rust 的 `resolve_endpoint` 同序；故内容只有
+   * 一个变量且解析为 `""` 的 body 照样发空串而不被丢掉。
    *
-   * `multipart` 下这里已是**装配好的** body（`content` 里的分片数组变成了带
-   * boundary 的 multipart 文本），与 `headers` 里那条 Content-Type 同源。
+   * `multipart` 下这里已是**装配好的** body（`content` 里的分片数组变成了带 boundary 的
+   * multipart 文本），与 `headers` 里那条 Content-Type 同源。
    */
   body: string | null;
   /**
-   * 请求体的**字节**（base64）。
+   * 请求体的**字节**（base64）。与 `body` 互斥：字节是合法 UTF-8 时走 `body`，否则走这里。
+   * `binary` 模式一律走这里——用户选的是文件，发的是它的字节。multipart 里带了文件分片时也是
+   * 这里。
    *
-   * 与 `body` 互斥：字节是合法 UTF-8 时走 `body`，否则走这里。`binary` 模式一律走
-   * 这里——用户选的是文件，发的是它的字节。multipart 里带了文件分片时也是这里。
-   *
-   * 两个字段而不是一个「文本或字节」的联合类型：传输层收的是 JSON，两种形态各有
-   * 自己的字段名才不会互相覆盖；Rust 侧的 `HttpRequestInput` 与 `ScriptRequest`
-   * 用的是同一对字段名。
+   * 两个字段而不是一个「文本或字节」的联合类型：传输层收的是 JSON，两种形态各有自己的字段名
+   * 才不会互相覆盖；Rust 侧的 `HttpRequestInput` 与 `ScriptRequest` 用的是同一对字段名。
    */
   bodyBase64: string | null;
   /**
-   * URL / 参数值 / header / body / auth 里全部未解析的 `{{name}}`，去重且按
-   * 首次出现排序。集合与 Rust `resolve_endpoint` 的 `missing_vars` 对齐；
-   * *顺序*是渲染器本地的，只有本应用的告警提示消费它。
+   * URL / 参数值 / header / body / auth 里全部未解析的 `{{name}}`，去重且按首次出现排序。
+   * 集合与 Rust `resolve_endpoint` 的 `missing_vars` 对齐；*顺序*是渲染器本地的，只有本应用的
+   * 告警提示消费它。
    */
   missingVars: string[];
   /**
    * 这次组装用的变量池（环境变量 + 动态变量的值）。
    *
-   * 它随请求一起走，因为 OAuth2 取 token 时要用**同一份**池：token 端点里的
-   * `{{var}}` 由后端（Rust 侧的 `simple_post_core::oauth2`）在取 token 之前替换，
-   * 渲染进程不自己替换。池另算一份的话，同一个 `{{var}}` 在 URL 里能解析、在
-   * `tokenUrl` 里却不能解析。
+   * 它随请求一起走，因为 OAuth2 取 token 时要用**同一份**池：token 端点里的 `{{var}}` 由后端
+   * （Rust 侧的 `simple_post_core::oauth2`）在取 token 之前替换，渲染进程不自己替换。池另算一份
+   * 的话，同一个 `{{var}}` 在 URL 里能解析、在 `tokenUrl` 里却不能解析。
    *
    * 它不进 cURL 预览，也不进落库的请求快照。
    */
@@ -140,9 +131,9 @@ export interface PreparedRequest {
   /**
    * URL 路径里没取到值的占位符名（`/users/{id}` 的 `id`）。
    *
-   * 与 `missingVars` 是两回事：那边是「变量池里没有这个变量」，这边是「端点自己的
-   * 路径参数没有填值」。发送那侧按这份清单拦下请求——路径参数按 OpenAPI 惯例是必填的，
-   * 缺值发出去只会换一个含义不明的 404。
+   * 与 `missingVars` 是两回事：那边是「变量池里没有这个变量」，这边是「端点自己的路径参数没有
+   * 填值」。发送那侧按这份清单拦下请求——路径参数按 OpenAPI 惯例是必填的，缺值发出去只会换一个
+   * 含义不明的 404。
    */
   missingPathParams: string[];
 }

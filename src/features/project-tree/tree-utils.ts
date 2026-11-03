@@ -31,12 +31,10 @@ export function decodeDrag(raw: string): DragPayload | null {
 }
 
 /**
- * 把打平的节点列表变成行渲染所用的嵌套形状，一趟建完。
+ * 把打平的节点列表变成行渲染所用的嵌套形状，一趟建完。每个节点都指明自己的父节点，整棵树
+ * 就是单个 `parentId → children` 索引。
  *
- * 每个节点都指明自己的父节点，整棵树就是单个 `parentId → children` 索引。
- *
- * `projectId` 收窄到一个项目的树；其他项目的节点直接丢弃，而不是渲染到不属于自己的
- * 模块底下。
+ * `projectId` 收窄到一个项目的树；其他项目的节点直接丢弃，而不是渲染到不属于自己的模块底下。
  */
 export function buildTree(
   nodes: readonly ResourceNode[],
@@ -94,10 +92,8 @@ export function buildTree(
 }
 
 /**
- * 该接口是否命中搜索：名称、url 或任一 tag。url 与 tag 都在 detail 行里，
- * 只在节点上匹配名称会让「按路径找接口」悄悄失效。
- *
- * 模块级与集合级过滤共用它，两个层级不会漂移成匹配不同的东西。
+ * 该接口是否命中搜索：名称、url 或任一 tag。url 与 tag 都在 detail 行里，只在节点上匹配名称
+ * 会让「按路径找接口」悄悄失效。模块级与集合级过滤共用它。
  */
 function endpointMatches(
   e: ResourceNode,

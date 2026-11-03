@@ -10,9 +10,9 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { groupState, isIndeterminate } from './selection';
 
 /**
- * 导入侧会带来 `HttpMethod::Custom` 的冷门动词（`TRACE` 落库后就是这个形状），
- * 而 TS 侧的 `HttpMethod` 是封闭联合。这里不做校验，只把字符串交给展示层——
- * 校验动词合法性的地方在解析器与导出器，不在渲染这 80 行里。
+ * 导入侧会带来 `HttpMethod::Custom` 的冷门动词（`TRACE` 落库后就是这个形状），而 TS 侧的
+ * `HttpMethod` 是封闭联合。这里不做校验，只把字符串交给展示层 —— 校验动词合法性的地方在
+ * 解析器与导出器。
  */
 const asMethod = (raw: string): HttpMethod => raw as HttpMethod;
 
@@ -25,8 +25,8 @@ interface CheckBoxProps {
 }
 
 /**
- * 勾选框。三态里的「半选」没有对应的 `checked` 值，只能设 DOM 属性——
- * 故这里用 `useEffect` 同步，而不是在 JSX 上写一个不存在的属性。
+ * 勾选框。三态里的「半选」没有对应的 `checked` 值，只能设 DOM 属性 —— 故这里用
+ * `useEffect` 同步，而不是在 JSX 上写一个不存在的属性。
  */
 function CheckBox({ checked, indeterminate, disabled, label, onChange }: CheckBoxProps) {
   const ref = useRef<HTMLInputElement>(null);
@@ -187,10 +187,9 @@ interface TransferTreeProps extends RowProps {
 }
 
 /**
- * 勾选树。**导入与导出共用这一个组件**：两边的线类型是同一个 `TransferNode`，
- * 差别（重复标记、环境提示）在各自的行上显示，不在这里分叉。
- *
- * 分组之间靠**分隔线**而不是套一层边框——外层已经是弹窗面板，再加边框会读成卡片套卡片。
+ * 勾选树。**导入与导出共用这一个组件**：两边的线类型是同一个 `TransferNode`，差别（重复
+ * 标记、环境提示）在各自的行上显示，不在这里分叉。分组之间靠**分隔线**而不是套一层边框 ——
+ * 外层已经是弹窗面板，再加边框会读成卡片套卡片。
  */
 export function TransferTree({
   groups,

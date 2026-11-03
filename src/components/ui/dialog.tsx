@@ -19,13 +19,11 @@ interface DialogProps {
 }
 
 /**
- * 模态对话框 —— 标题、说明、正文、页脚四段。
+ * 模态对话框 —— 标题、说明、正文、页脚四段。模态语义（portal、Esc、点遮罩、滚动锁、焦点
+ * 陷阱、背景 inert、入场动画）都在 `ModalSurface` 里，本组件只负责面板长什么样。
  *
- * 模态语义（portal、Esc、点遮罩、滚动锁、焦点陷阱、背景 inert、入场动画）都在
- * `ModalSurface` 里，本组件只负责面板长什么样。
- *
- * 面板的可访问名走标题元素的 id（`aria-labelledby`），不靠 `aria-label` 抄一份
- * 标题文字：抄的那份与看到的标题会各自漂移，标题改成非字符串时更是直接消失。
+ * 面板的可访问名走标题元素的 id（`aria-labelledby`），不靠 `aria-label` 抄一份标题文字：
+ * 抄的那份与看到的标题会各自漂移。
  */
 export function Dialog({
   open,

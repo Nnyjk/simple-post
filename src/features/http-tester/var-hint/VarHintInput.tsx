@@ -22,10 +22,9 @@ export type VarHintInputProps = Omit<
 };
 
 /**
- * 带变量候选提示的输入框。
- *
- * 用户敲下 `{{` 时浮出候选，选中一项即把 `{{key}}` 写进字段并把光标放到 token 末尾。
- * 浮层的位置由 `refAnchor` 读取输入框的屏幕坐标，故输入框在页面里挪动时浮层跟着走。
+ * 带变量候选提示的输入框。用户敲下 `{{` 时浮出候选，选中一项即把 `{{key}}` 写进字段并把
+ * 光标放到 token 末尾。浮层的位置由 `refAnchor` 读取输入框的屏幕坐标，故输入框在页面里挪动
+ * 时浮层跟着走。
  */
 export function VarHintInput({
   value,

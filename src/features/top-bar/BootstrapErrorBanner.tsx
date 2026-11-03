@@ -1,16 +1,10 @@
 /**
- * 启动加载失败横幅。
+ * 启动加载失败横幅。`bootstrap()` 在一个 `Promise.all` 里 hydrate 项目 / 模块 / 集合 / 接口 /
+ * 环境。五个命令中任一失败时，slice 保留最后已知的数据，并把消息记进 `bootstrapError` ——
+ * 它刻意**不**用空数组顶替，故后端故障不会被渲染成「你没有项目」。
  *
- * `bootstrap()` 在一个 `Promise.all` 里 hydrate 项目 / 模块 / 集合 / 接口 / 环境。五个命令
- * 中任一失败时，slice 保留最后已知的数据，并把消息记进 `bootstrapError` —— 它刻意**不**用
- * 空数组顶替，故后端故障不会被渲染成「你没有项目」。
- *
- * 这个区分只有在有人读这个标志时才有意义。本组件读它。
- *
- * 两个出口，都是刻意的：
- *   - 重试 重跑 `bootstrap()`。它只在 `loaded` 为真或已有加载在进行时提前返回，故失败的
- *     一次是可重试的。
- *   - 忽略 不重试、直接清掉消息，供用户已理解失败原因、只想让空界面让开的情形。
+ * 两个出口，都是刻意的：重试 重跑 `bootstrap()`（它只在 `loaded` 为真或已有加载在进行时提前
+ * 返回，故失败的一次是可重试的）；忽略 不重试、直接清掉消息。
  */
 import { AlertTriangle, Loader2, RotateCw, X } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';

@@ -20,36 +20,27 @@ const THEME_ICON: Record<Theme, string> = {
 
 /**
  * 「查看文档」的占位提示走懒加载边界：对话框会拉进 GSAP，欢迎页在 entry chunk 里，
- * 不该替它付这份冷启动成本。详见 `WelcomeNoticeDialog.tsx` 的说明。
+ * 不该替它付这份冷启动成本。
  */
 const WelcomeNoticeDialog = lazy(() =>
   import('./WelcomeNoticeDialog').then((m) => ({ default: m.WelcomeNoticeDialog })),
 );
 
 /**
- * Welcome —— 独立的起始界面。
- *
- * `activeProjectId === ''` 时显示，也就是应用的启动态：`bootstrap()` 只加载项目列表、
- * 刻意不选中任何项目（见 `stores/bootstrap-slice.ts`），故两种传输下打开应用都落在这里，
+ * Welcome —— 独立的起始界面。`activeProjectId === ''` 时显示，也就是应用的启动态：
+ * `bootstrap()` 只加载项目列表、刻意不选中任何项目，故两种传输下打开应用都落在这里，
  * 而不是落进恰好排在最前的那个项目。
  *
- * 全窗口界面，不是面板
- * ---------------------------------
- * `App.tsx` 是用它*替代*工作区框架渲染的，故它在位时周围的 chrome 根本不存在：没有项目时
- * 树里只有「尚未选择项目」占位、环境切换器没有可归属的项目、标签条是空的。另一半见
- * `features/workspace/WorkspaceShell.tsx`。
+ * 全窗口界面，不是面板：`App.tsx` 是用它*替代*工作区框架渲染的，故它在位时周围的 chrome
+ * 根本不存在。另一半见 `features/workspace/WorkspaceShell.tsx`。由此带来的状态结论：
+ * `openProject()` 翻 `activeProjectId`，切换是瞬时的，没有可跨越的过渡。
  *
- * 由此带来的状态结论值得说一句：`openProject()` 翻 `activeProjectId`，切换是瞬时的。
- * 没有可跨越的过渡，因为没有共享布局可供过渡。
+ * 它不显示各项目的节点数：那意味着要读 `s.nodes` 并在一块唯一职责是「让用户挑项目」的
+ * 屏幕上对整棵树跑 `useMemo` —— 而树是 bootstrap 的第二层，此屏绘制时通常还没到，计数会读成
+ * 一个笃定的零。
  *
- * 它不显示什么
- * ---------------------
- * 各项目的节点数。那意味着要读 `s.nodes` 并在一块唯一职责是「让用户挑项目」的屏幕上对
- * 整棵树跑 `useMemo` —— 而树是 bootstrap 的第二层，此屏绘制时通常还没到，计数会读成一个
- * 笃定的零。卡片显示名称与描述，那才是用户真正在比较的东西。
- *
- * 本组件「自我管理可见性」：项目激活时返回 `null`，故在 App.tsx 里可直接渲染而无需在
- * 调用处再写条件（纵深防御 —— App.tsx 也会短路渲染，但这道守卫把契约写明了）。
+ * 本组件「自我管理可见性」：项目激活时返回 `null`，故在 App.tsx 里可直接渲染而无需在调用
+ * 处再写条件。
  */
 export function WelcomeScreen() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);

@@ -1,27 +1,17 @@
 /**
  * SettingsSurface —— 设置面板的**无项目**宿主。
  *
- * 为什么需要第二个宿主
- * -----------------
  * 设置是全局的：四个分区中的三个（连接 / 外观与体验 / 请求）不按项目划分，第四个（环境）
  * 则是应用唯一能诚实说「先选一个项目」的地方。若只能作为*标签*触达，欢迎页就够不到它 ——
  * 那里的按钮调用 `openSettingsTab()`，store 老老实实加了个标签，而 `App.tsx` 因为界面切换
  * 以 `activeProjectId` 为准，仍在渲染 `WelcomeScreen`，点击完全没反应。
  *
- * 修法不是第二份实现，而是第二个*挂载点*：
- *
- *   WelcomeScreen  ─┐
- *                   ├─→ SettingsPanel（一个文件、一份实现）
- *   WorkspaceShell ─┘        ↑
- *                             └ SettingsSurface（本文件）补上一个独立界面所需的 chrome
+ * 修法不是第二份实现，而是第二个*挂载点*：`WelcomeScreen` 与 `WorkspaceShell` 都挂
+ * `SettingsPanel`（一个文件、一份实现），`SettingsSurface` 只补上一个独立界面所需的 chrome。
  *
  * `App.tsx` 既按 `activeProjectId === ''` 也按设置标签是否为当前标签来挑选界面，故两个宿主
- * 渲染的是同一份面板状态（`activeSettingsSection` 住在 store 里）。在项目内，工作区仍以标签
- * 的形式持有它 —— 那种位置自带标签条的关闭便利性；项目外没有标签条，故由这个表头提供返回
- * 的路。
- *
- * 为何不在这里复制一份面板：每个分区都从 store 而非 props 读数据，侧栏选中项也是 store 状态，
- * 故把它挂到两处不可能让同一个分区出现两种视图。唯一不同的是它周围的 chrome。
+ * 渲染的是同一份面板状态（`activeSettingsSection` 住在 store 里）。为何不在这里复制一份面板：
+ * 每个分区都从 store 而非 props 读数据，故把它挂到两处不可能让同一个分区出现两种视图。
  */
 
 import { ArrowLeft, Settings2 } from 'lucide-react';

@@ -7,12 +7,11 @@ import type { MissingTracker } from './pool';
 /**
  * 按 body mode 自动补 Content-Type（`none` 与 `multipart` 返回 `null`）。
  *
- * multipart 的 Content-Type 含 boundary，而 boundary 在 `prepareRequest` 里现生成，
- * 故它由那条路径单独处理（见 `buildOrderedHeaders`）。
+ * multipart 的 Content-Type 含 boundary，而 boundary 在 `prepareRequest` 里现生成，故它由那条路径
+ * 单独处理（见 `buildOrderedHeaders`）。
  *
- * `binaryContentType` 是 `binary` 模式下文件自己的 MIME 类型：整个请求体就是一个
- * 文件时，用文件那个类型才描述得了它（一张 PNG 不该顶着 `application/octet-stream`
- * 发出去）。它只在 `bodyMode === 'binary'` 时被读，其余模式传 `null`。
+ * `binaryContentType` 是 `binary` 模式下文件自己的 MIME 类型：整个请求体就是一个文件时，用文件
+ * 那个类型才描述得了它。它只在 `bodyMode === 'binary'` 时被读，其余模式传 `null`。
  */
 export function autoContentType(mode: BodyMode, binaryContentType?: string | null): string | null {
   switch (mode) {
@@ -32,19 +31,16 @@ export function autoContentType(mode: BodyMode, binaryContentType?: string | nul
 }
 
 /**
- * 有序 header 列表：先是用户 header，再是自动 Content-Type（缺失才补，multipart
- * 例外）与 Accept，最后是 auth 派生的 header（`Authorization` 或 header 位置的
- * apikey）。查重大小写不敏感——HTTP header 名本就大小写不敏感。
+ * 有序 header 列表：先是用户 header，再是自动 Content-Type（缺失才补，multipart 例外）与
+ * Accept，最后是 auth 派生的 header（`Authorization` 或 header 位置的 apikey）。查重大小写不敏感
+ * ——HTTP header 名本就大小写不敏感。`apikey.inLocation === 'query'` 不出 header，调用方通过
+ * `appendApikeyToQuery` 拼到 URL 上。
  *
- * `apikey.inLocation === 'query'` 不出 header，调用方通过 `appendApikeyToQuery`
- * 拼到 URL 上。
- *
- * **multipart 的 Content-Type 位置与其它模式不同。** 它的值含 boundary，而 boundary
- * 每次请求现生成，故它不能与别的自动 Content-Type 那样在 header 阶段决定位置。
- * Rust 侧（`variable_fill::build_headers` + `mcp::http_ops::multipart::apply`）的做法是：
- * multipart 模式在 header 阶段**不**补 Content-Type；装配 body 的那一步若发现用户
- * 写过 Content-Type 就地替换它的值，没写过就追加到列表**末尾**。本函数照同一规则做，
- * 故两侧的头部顺序逐条相同。
+ * **multipart 的 Content-Type 位置与其它模式不同。** 它的值含 boundary，而 boundary 每次请求
+ * 现生成，故它不能与别的自动 Content-Type 那样在 header 阶段决定位置。Rust 侧
+ * （`variable_fill::build_headers` + `mcp::http_ops::multipart::apply`）的做法是：multipart 模式在
+ * header 阶段**不**补 Content-Type；装配 body 的那一步若发现用户写过 Content-Type 就地替换它的值，
+ * 没写过就追加到列表**末尾**。本函数照同一规则做，故两侧的头部顺序逐条相同。
  */
 export function buildOrderedHeaders(
   headers: readonly KeyValue[],
@@ -68,16 +64,15 @@ export function buildOrderedHeaders(
   const existingCt = out.findIndex(([k]) => k.toLowerCase() === 'content-type');
 
   if (multipartCt !== null) {
-    // `buildOrderedHeaders` 就地替换用户自己写过的那条 Content-Type 的**值**，header 名
-    // 保留用户的大小写。其余模式的 body 是用户手写的，用户那条 Content-Type 有机会描述它；
-    // multipart 的 body 由 boundary 框出来，用户那条值在结构上描述不了它 —— 留着就是
+    // `buildOrderedHeaders` 就地替换用户自己写过的那条 Content-Type 的**值**，header 名保留用户的
+    // 大小写。multipart 的 body 由 boundary 框出来，用户那条值在结构上描述不了它——留着就是
     // 「发得错」：请求发得出去、服务端解析不出分片，而用户看不出异常。
     if (existingCt !== -1) {
       out[existingCt] = [out[existingCt]![0], multipartCt];
     }
   } else {
-    // `buildOrderedHeaders` 按 body.mode 补 Content-Type：用户已设过（不分大小写）就不加；
-    // mode 蕴含 body 时它照补，内容空不空由 `init.body` 那一步单独管。
+    // `buildOrderedHeaders` 按 body.mode 补 Content-Type：用户已设过（不分大小写）就不加；mode
+    // 蕴含 body 时它照补，内容空不空由 `init.body` 那一步单独管。
     const ct = autoContentType(bodyMode, binaryContentType);
     if (ct && existingCt === -1) {
       out.push(['Content-Type', ct]);
@@ -89,9 +84,8 @@ export function buildOrderedHeaders(
     out.push(['Accept', 'application/json']);
   }
 
-  // `buildOrderedHeaders` 补 auth 派生的 header：用户已有同名（不分大小写）时跳过——
-  // fetch 用 Record 只会留最后一个值，而 cURL 里两条 `-H 'Authorization: …'` 服务端
-  // 看到的是 header 列表而非覆盖。
+  // `buildOrderedHeaders` 补 auth 派生的 header：用户已有同名（不分大小写）时跳过——fetch 用
+  // Record 只会留最后一个值，而 cURL 里两条 `-H 'Authorization: …'` 服务端看到的是 header 列表。
   if (auth.kind === 'bearer' && auth.bearer) {
     if (!out.some(([k]) => k.toLowerCase() === 'authorization')) {
       out.push(['Authorization', `Bearer ${auth.bearer}`]);
@@ -107,8 +101,7 @@ export function buildOrderedHeaders(
     }
   }
 
-  // multipart 且用户没写过 Content-Type 时，`buildOrderedHeaders` 把 Content-Type 追加到
-  // 列表**末尾**，与 Rust 侧 `multipart::apply` 的追加位置一致。
+  // multipart 且用户没写过 Content-Type 时，`buildOrderedHeaders` 把 Content-Type 追加到列表**末尾**，与 Rust 侧 `multipart::apply` 的追加位置一致。
   if (multipartCt !== null && existingCt === -1) {
     out.push(['Content-Type', multipartCt]);
   }

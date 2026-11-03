@@ -36,18 +36,13 @@ import {
   tlsPathValue,
 } from '@/lib/tls';
 
-// 「恢复默认恢复到哪里」的唯一真相。做成常量，好让「恢复默认」处理器与禁用态判定对
-// 「什么算被改动过」保持一致。
-//
-// 取自 store 切片里的那一份：后端 `RequestSettings::default()` 与它是同一个数，
-// 界面与 MCP 侧的缺省值因此一致。
+// 「恢复默认恢复到哪里」的唯一真相。做成常量，好让「恢复默认」处理器与禁用态判定对「什么
+// 算被改动过」保持一致。取自 store 切片里的那一份，故界面与 MCP 侧的缺省值一致。
 const REQUEST_DEFAULTS = REQUEST_SETTINGS_DEFAULTS;
 
 /**
- * 小节里的设置项数：三项出站旋钮 + HTTPS 出站的四项。
- *
- * 不从 `REQUEST_DEFAULTS` 的键数算——`tls` 是四个字段的一组，算成一项会让页面上
- * 少报三项。
+ * 小节里的设置项数：三项出站旋钮 + HTTPS 出站的四项。不从 `REQUEST_DEFAULTS` 的键数算
+ * —— `tls` 是四个字段的一组，算成一项会让页面上少报三项。
  */
 const SETTING_COUNT = 7;
 
@@ -59,10 +54,8 @@ const PATH_ICONS = {
 } as const;
 
 /**
- * 这一小节是否已偏离缺省值。
- *
- * 提成纯函数是为了能单独测它：「恢复默认」按钮的可用状态就是它的取反，而「什么算被改动过」
- * 这段判断必须逐项覆盖，改漏了哪一项只能靠人肉读组件才发现。
+ * 这一小节是否已偏离缺省值。提成纯函数是为了能单独测它：「恢复默认」按钮的可用状态就是它的
+ * 取反，而「什么算被改动过」这段判断必须逐项覆盖。
  */
 export function isRequestSettingsDirty(settings: RequestSettings): boolean {
   return (
@@ -74,12 +67,9 @@ export function isRequestSettingsDirty(settings: RequestSettings): boolean {
 }
 
 /**
- * 请求行为 —— 作用于每一次外发 HTTP 调用。
- *
- * 七行，各带标签、一句说明默认值*为何*重要的描述，以及右侧的控件。前三行是出站
- * 旋钮，后四行是 HTTPS 出站设置（一个开关 + 三个证书路径）。「恢复默认」按钮放在
- * 小节表头，且只有当至少一行已偏离 `REQUEST_DEFAULTS` 时才可用，免得这个便利性一直引诱
- * 用户去「重置」本来就已是默认值的东西。
+ * 请求行为 —— 作用于每一次外发 HTTP 调用。七行，各带标签、一句说明默认值*为何*重要的描述，
+ * 以及右侧的控件。前三行是出站旋钮，后四行是 HTTPS 出站设置（一个开关 + 三个证书路径）。
+ * 「恢复默认」按钮放在小节表头，且只有当至少一行已偏离 `REQUEST_DEFAULTS` 时才可用。
  *
  * 本组件还渲染第二张卡片「历史保留」：发送历史的保留条数也是全局的，但它不是出站请求的
  * 旋钮（改它不影响任何一次发送的形态），故不与上面那几行混在一张卡里。
@@ -94,10 +84,8 @@ export function RequestSection() {
 
   const resetToDefaults = () => updateRequestSettings({ ...REQUEST_DEFAULTS });
 
-  // `keepDraft` 先接住保留条数，失焦或回车才写回。
-  //
-  // 每次按键就写回是不行的：写回会立刻按新条数裁库，而裁掉的行不会回来。用户把 100
-  // 改成 50 时第一键送出的 5 已经把库裁到 5 条，第二键送出的 50 只是让剩下的更少。
+  // `keepDraft` 先接住保留条数，失焦或回车才写回。每次按键就写回是不行的：写回会立刻按新
+  // 条数裁库，而裁掉的行不会回来。用户把 100 改成 50 时第一键送出的 5 已经把库裁到 5 条。
   const [keepDraft, setKeepDraft] = useState(String(historyKeep));
 
   // `historyKeep` 变化时 `keepDraft` 跟着回到当前值，否则输入框里留着旧数字。

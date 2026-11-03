@@ -1,21 +1,14 @@
 /**
  * MethodPicker —— 选 HTTP 方法的自绘 listbox。
  *
- * 替掉原生 `<select>`：原生控件无法把 `<option>` 子项与触发器分开上色，于是选中
- * 某个带色的方法（如 POST → 蓝）会把颜色渗到每个其他选项上。本组件把每个选项渲染
- * 成真正的 `<button>`，各自按 `methodColorVar` 上色。
+ * 替掉原生 `<select>`：原生控件无法把 `<option>` 子项与触发器分开上色，于是选中某个带色的
+ * 方法（如 POST → 蓝）会把颜色渗到每个其他选项上。本组件把每个选项渲染成真正的
+ * `<button>`，各自按 `methodColorVar` 上色。
  *
- * 触发器显示 **solid** 口味的 **MethodPill**，好让选中的动词读作控件而不是一段
- * 彩色文字；下拉行用同一枚药丸的 **tinted** 口味，免得比行内容更抢眼。
+ * 触发器显示 **solid** 口味的 **MethodPill**，下拉行用同一枚药丸的 **tinted** 口味。
  *
- * 交互：
- *  - 点触发器 → 开 / 关
- *  - 点外部（mousedown）→ 关
- *  - Esc → 关
- *  - ↑ / ↓ → 移动 active 下标（不提交）
- *  - Enter → 提交 active 选项并关闭
- *  - Tab → 关（默认 tab 导航保留）
- *  - 点某个选项 → 提交并关闭
+ * 交互：点触发器开 / 关；点外部（mousedown）关；Esc 关；↑ / ↓ 移动 active 下标（不提交）；
+ * Enter 提交 active 选项并关闭；Tab 关（默认 tab 导航保留）；点某个选项提交并关闭。
  */
 
 import { useEffect, useRef, useState } from 'react';

@@ -1,13 +1,9 @@
 /**
- * 「这个端点这一次要发什么」的推导 —— 应用内**唯一**的一份。
+ * 「这个端点这一次要发什么」的推导 —— 应用内**唯一**的一份。单次发送（`HttpTester`）与批量运行
+ * （`src/features/batch-run/`）都从这里取要素，故「批量运行的变量替换语义与单次发送完全一致」
+ * 这条要求由结构保证，而不是靠两边各自小心。改动任何一条规则只改这一个文件，两侧同时生效。
  *
- * 单次发送（`HttpTester`）与批量运行（`src/features/batch-run/`）都从这里取要素，故
- * 「批量运行的变量替换语义与单次发送完全一致」这条要求由结构保证，而不是靠两边
- * 各自小心。改动任何一条规则（例如 base URL 的解析次序、动态变量的压过规则）只改
- * 这一个文件，两侧同时生效。
- *
- * 推导出的要素与「组装请求」分成两段，原因是动态变量的值要在**替换之前**才拿到：
- * 拿到新值之后要重新组装一次，而重新组装需要的正是这里推导出的那几项。
+ * 推导出的要素与「组装请求」分成两段，原因是动态变量的值要在**替换之前**才拿到。
  */
 import { enabledVars, resolveEndpointBaseUrl, type ResolvedBaseUrl } from '@/lib/url';
 import type { PreparedRequest } from '@/lib/http-build';
@@ -18,12 +14,9 @@ import { buildEffectiveRequest, type EffectiveRequest } from './effectiveRequest
 import { buildRequestInput } from './requestInput';
 
 /**
- * 一个端点一次发送的全部要素。
- *
- * `env` 是**解析用的**环境（`prepareRequest` 从它取变量池），`scriptEnv` 是**脚本
- * 看得见**的环境快照。两者看的是同一份变量池，但形态不同：前者是环境对象本身
- * （`buildPool` 从它的 `variables` 与 `disabledVariables` 合成），后者是已经滤掉
- * 停用变量的扁平字典。
+ * 一个端点一次发送的全部要素。`env` 是**解析用的**环境（`prepareRequest` 从它取变量池），
+ * `scriptEnv` 是**脚本看得见**的环境快照。两者看的是同一份变量池，但形态不同：前者是环境
+ * 对象本身，后者是已经滤掉停用变量的扁平字典。
  */
 export interface EndpointRequestParts {
   /** 请求方法。草稿优先于已存的那份。 */
@@ -35,11 +28,9 @@ export interface EndpointRequestParts {
   /** 生效的 base URL 全貌：后端 api 地址、实际访问地址与来源。 */
   resolved: ResolvedBaseUrl;
   /**
-   * 环境里「环境 × 模块」那一格的地址；没有那一格时是 `null`。
-   *
-   * 它与 `resolved.baseUrl` 分开：端点处在「自定义」档时 `resolved.baseUrl` 是端点
-   * 自己的地址，而「跟随模块」那一行要显示的是这一格——用户据此判断「切回跟随模块
-   * 会用哪个地址」。
+   * 环境里「环境 × 模块」那一格的地址；没有那一格时是 `null`。它与 `resolved.baseUrl`
+   * 分开：端点处在「自定义」档时 `resolved.baseUrl` 是端点自己的地址，而「跟随模块」那一行
+   * 要显示的是这一格。
    */
   moduleBaseUrl: string | null;
   /** 有效请求：已存的 detail 叠上草稿。 */
@@ -67,10 +58,8 @@ export interface EndpointRequestPartsInput {
 }
 
 /**
- * 推导一个端点一次发送的全部要素。
- *
- * 这一步是纯函数：同样的输入给出同样的输出，故界面预览、cURL 预览与真实发送读到
- * 的必然是同一个请求。
+ * 推导一个端点一次发送的全部要素。这一步是纯函数：同样的输入给出同样的输出，故界面预览、
+ * cURL 预览与真实发送读到的必然是同一个请求。
  */
 export function buildEndpointRequestParts(input: EndpointRequestPartsInput): EndpointRequestParts {
   const method = input.draft?.method ?? input.detail?.method ?? 'GET';
@@ -108,10 +97,8 @@ export function buildEndpointRequestParts(input: EndpointRequestPartsInput): End
 }
 
 /**
- * 用给定的动态变量值组装请求。
- *
- * `dynamicVars` 是**这一批**动态变量的当前值。传空对象即用不带动态变量的那份组装，
- * 与单次发送在「没有动态变量」时的结果一致。
+ * 用给定的动态变量值组装请求。`dynamicVars` 是**这一批**动态变量的当前值。传空对象即用不带
+ * 动态变量的那份组装，与单次发送在「没有动态变量」时的结果一致。
  */
 export function prepareEndpointRequest(
   parts: EndpointRequestParts,

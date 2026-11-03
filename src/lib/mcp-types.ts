@@ -1,10 +1,8 @@
 /**
- * 面向渲染器的 MCP daemon 状态类型。放在 `src/lib/`（纯 `.ts`），让 store、
- * 面板组件与 `useMcpStatus` hook 都能 import 同一个规范类型，而不必把 `.tsx`
- * 拖进 `stores/` 或经面板产生循环依赖。
- *
- * 形状镜像 Rust 的 `McpStatusDto`（见 `src-tauri/src/commands/`）。渲染器一侧
- * 容忍不匹配：未知的生命周期字符串在徽标里收敛为 `'stopped'`，绝不抛。
+ * 面向渲染器的 MCP daemon 状态类型。放在 `src/lib/`（纯 `.ts`），让 store、面板组件与
+ * `useMcpStatus` hook 都能 import 同一个规范类型，而不必把 `.tsx` 拖进 `stores/` 或经
+ * 面板产生循环依赖。形状镜像 Rust 的 `McpStatusDto`（见 `src-tauri/src/commands/`）；
+ * 渲染器一侧容忍不匹配：未知的生命周期字符串在徽标里收敛为 `'stopped'`，绝不抛。
  */
 
 /**
@@ -54,8 +52,8 @@ export interface RestartResult {
 }
 
 /**
- * 同一个信封，换个在 start/stop 调用点读起来更顺的名字。保留为别名而非第二个
- * 接口，两个方向的结构类型完全相同。
+ * 同一个信封，换个在 start/stop 调用点读起来更顺的名字。保留为别名而非第二个接口，
+ * 两个方向的结构类型完全相同。
  */
 export type DaemonControlResult = RestartResult;
 

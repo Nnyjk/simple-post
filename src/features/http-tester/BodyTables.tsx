@@ -16,15 +16,15 @@ import { fileContentType, readFileAsBase64 } from './model/fileBytes';
 /**
  * 请求体的三个结构化编辑器：`x-www-form-urlencoded`、`form-data` 与 `binary`。
  *
- * **三者都是结构化的**：`content` 里存的不是拼好的正文，而是一份描述结构的 JSON
- * 文本。结构化换来两样东西——表格里的「说明」列有地方放，文件分片有地方放字节。
+ * **三者都是结构化的**：`content` 里存的不是拼好的正文，而是一份描述结构的 JSON 文本。
+ * 结构化换来两样东西——表格里的「说明」列有地方放，文件分片有地方放字节。
  *
- * 装配在发送那一步做（`src/lib/body` 与 Rust 的 `core::body` 各一份），故本组件只
- * 负责把用户的输入写成那份 JSON 文本。
+ * 装配在发送那一步做（`src/lib/body` 与 Rust 的 `core::body` 各一份），故本组件只负责把用户
+ * 的输入写成那份 JSON 文本。
  *
- * **行没有稳定 id，用下标当 React key。** 行只能追加与删除，不会重排，故下标在
- * 两次编辑之间是稳定的。给行加 id 意味着它要进 `content` 那份 JSON，而那份 JSON
- * 同时被后端与 MCP 侧解析——多一个纯界面字段会让两侧的形状对不上。
+ * **行没有稳定 id，用下标当 React key。** 行只能追加与删除，不会重排，故下标在两次编辑之间
+ * 是稳定的。给行加 id 意味着它要进 `content` 那份 JSON，而那份 JSON 同时被后端与 MCP 侧
+ * 解析——多一个纯界面字段会让两侧的形状对不上。
  */
 
 // ============================================================
@@ -32,10 +32,8 @@ import { fileContentType, readFileAsBase64 } from './model/fileBytes';
 // ============================================================
 
 /**
- * 表单字段表：一行一个字段。
- *
- * 写回 `content` 的是 `FormField[]` 的 JSON 文本。后端与 MCP 侧读它时逐字段模板化，
- * 再拼成 urlencoded 正文。
+ * 表单字段表：一行一个字段。写回 `content` 的是 `FormField[]` 的 JSON 文本，后端与 MCP 侧读它
+ * 时逐字段模板化，再拼成 urlencoded 正文。
  */
 export function FormFieldsEditor({
   content,
@@ -137,10 +135,8 @@ export function FormFieldsEditor({
 // ============================================================
 
 /**
- * form-data 的分片表。
- *
- * 每个分片是「文本」或「文件」：文件分片的内容是字节，存在 `base64` 里，而分片
- * 数组存在 JSON 文本里——故字节只能以 base64 的形态进去。
+ * form-data 的分片表。每个分片是「文本」或「文件」：文件分片的内容是字节，存在 `base64`
+ * 里，而分片数组存在 JSON 文本里 —— 故字节只能以 base64 的形态进去。
  */
 export function MultipartPartsEditor({
   content,
@@ -199,9 +195,7 @@ export function MultipartPartsEditor({
 }
 
 /**
- * form-data 的一行。
- *
- * 文件那一格是独立的组件：选文件是**异步**的（要读完字节），状态放在组件里，
+ * form-data 的一行。文件那一格是独立的组件：选文件是**异步**的（要读完字节），状态放在组件里，
  * 不能塞进整表的受控数据里。
  */
 function MultipartRow({
@@ -385,10 +379,8 @@ function FileCell({
 // ============================================================
 
 /**
- * binary 模式：整个请求体就是一个文件。
- *
- * `content` 里存的是文件描述（文件名、体积、MIME 类型与字节的 base64）。字节随请求
- * 走，故它也会进历史记录与请求详情。
+ * binary 模式：整个请求体就是一个文件。`content` 里存的是文件描述（文件名、体积、MIME 类型
+ * 与字节的 base64）。字节随请求走，故它也会进历史记录与请求详情。
  */
 export function BinaryBodyEditor({
   content,

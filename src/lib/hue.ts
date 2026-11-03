@@ -1,33 +1,21 @@
 /**
  * 语义色相强调 —— 概念→颜色的唯一映射。
  *
- * 为什么要有这个文件：「模块是什么颜色」曾因查看位置不同而有多个答案，其中还
- * 混着内联 hex 这类不跟随主题的值（内联 hex 在暗色下不会跟着树那行一起偏移）。
- * 现在所有这类判断都走 `HUE`，而具体色值由 `globals.css` 以 CSS 变量持有，
- * 随 `.dark` 类自动切换明暗。
+ * 所有「模块是什么颜色」的判断都走 `HUE`；具体色值由 `globals.css` 以 CSS 变量持有，
+ * 随 `.dark` 类切换明暗。
  *
- * 两档
- * ---
- * A 档 —— project / module / collection / endpoint。彩度更高。这是树的结构词汇；
- *   图标形状本身已不同（package / folder / open-folder / code），颜色只是加强而
- *   不是承载含义。
- *
- * B 档 —— baseurl / variable / connection / request。刻意更安静，好让设置与配置
- *   区永远不与树抢注意力。低彩度也让 `connection` 的玫红不会被误认成同面板里紧挨着
- *   的饱和 `--destructive` 红。
- *
- * 另外两个概念刻意不取色相：
- *   - environment  → `--primary`（它是应用的主要上下文，复用 primary 在语义上诚实，
- *     不会与其它概念用同一个颜色）
- *   - appearance   → `--muted-foreground`（纯外观偏好面板，给它色相只会无信息收益地
- *     喊叫）
- *
- * 色相角度是要命的
- * ---------------
- * 这些强调色以 12-14px 渲染在 15% alpha 的底色上，此时明度差几乎看不见，色相距离
- * 是观者唯一还能分辨的线索。下面的角度因此按「任何两个*同时出现*的概念不相隔
- * 30° 以内」排布——见 HUE_ANGLES 与 `src/lib/__tests__/hue.test.ts` 里的间隔断言。
- * 调饱和度或明度是安全的；旋转某个色相不是，那会让两个概念的色相距离重新小于 30°。
+ * - **A 档** —— project / module / collection / endpoint。彩度更高：这是树的结构词汇，
+ *   图标形状本身已不同（package / folder / open-folder / code），颜色只加强而不再承载含义。
+ * - **B 档** —— baseurl / variable / connection / request。刻意更安静，好让设置与配置区
+ *   永远不与树抢注意力；低彩度也让 `connection` 的玫红不会被误认成同面板里紧挨着的
+ *   饱和 `--destructive` 红。
+ * - 另外两个概念刻意不取色相：environment → `--primary`（应用的主要上下文，复用 primary
+ *   在语义上诚实，也不会与其它概念用同一个颜色）；appearance → `--muted-foreground`
+ *   （纯外观偏好面板，给它色相只会无信息收益地喊叫）。
+ * - **色相角度的约束**：这些强调色以 12-14px 渲染在 15% alpha 的底色上，明度差几乎看不见，
+ *   色相距离是观者唯一还能分辨的线索；下面的角度因此按「任何两个*同时出现*的概念不相隔
+ *   30° 以内」排布——见 HUE_ANGLES 与 `src/lib/__tests__/hue.test.ts` 里的间隔断言。
+ *   调饱和度或明度是安全的；旋转某个色相不是，那会让两个概念的色相距离重新小于 30°。
  */
 
 export type HueConcept =
@@ -72,7 +60,7 @@ export const HUE_SEPARATION_PAIRS: readonly (readonly [HueConcept, HueConcept])[
 /** 两个同时出现的概念必须保持的最小色相角度（度）。 */
 export const HUE_MIN_SEPARATION = 30;
 
-export interface HueClasses {
+interface HueClasses {
   /** 15% alpha 的底色，作 tile 背景。 */
   bg: string;
   /** 满彩度前景 —— 图标字形与文字。 */
@@ -82,8 +70,8 @@ export interface HueClasses {
 }
 
 /**
- * 概念 → 工具类。每个概念的三个条目刻意相邻：只改其中一个正是本文件要防的漂移，
- * 且有测试断言它们始终指向同一个 `--hue-*` 变量。
+ * 概念 → 工具类。每个概念的三个条目刻意相邻：只改其中一个会让三个条目指向不同的
+ * `--hue-*` 变量，测试断言它们始终指向同一个。
  */
 export const HUE: Record<HueConcept, HueClasses> = {
   project: {

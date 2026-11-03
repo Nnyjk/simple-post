@@ -1,14 +1,14 @@
 import type { AuthConfig, OAuth2Auth } from '@/types/domain';
+import { bytesToBase64 } from '@/lib/base64';
 import { listVars, resolveVarsWithMissing } from '../url';
 import type { MissingTracker } from './pool';
 
 /**
- * OAuth2 配置里会被 `{{var}}` 替换的字段。
+ * OAuth2 配置里会被 `{{var}}` 替换的字段。替换本身发生在后端（Rust 侧的
+ * `simple_post_core::oauth2`），渲染进程不替换：取 token 时后端才有变量池。
  *
- * 替换本身发生在后端（Rust 侧的 `simple_post_core::oauth2`），渲染进程不替换：取 token
- * 时后端才有变量池。这份清单是渲染进程唯一需要知道的 OAuth2 侧规则 —— 它决定哪些字段
- * 的变量进缺值报告。与 Rust 侧那份同一份清单，由 `fixtures/oauth2-config-parity.json`
- * 钉住。
+ * 这份清单是渲染进程唯一需要知道的 OAuth2 侧规则——它决定哪些字段的变量进缺值报告。与
+ * Rust 侧那份同一份清单，由 `fixtures/oauth2-config-parity.json` 钉住。
  */
 export const OAUTH2_SUBSTITUTED_FIELDS = [
   'tokenUrl',
@@ -18,13 +18,10 @@ export const OAUTH2_SUBSTITUTED_FIELDS = [
 ] as const;
 
 /**
- * OAuth2 配置里没解析出来的变量名。
+ * OAuth2 配置里没解析出来的变量名。只看**会被替换**的那四个字段：密钥与一次性输入
+ * （`clientSecret` / `password` / `authCode`）不参与替换，故它们里面的 `{{var}}` 不是缺变量。
  *
- * 只看**会被替换**的那四个字段：密钥与一次性输入（`clientSecret` / `password` /
- * `authCode`）不参与替换，故它们里面的 `{{var}}` 不是缺变量。
- *
- * 判据与 Rust 侧那份同一套：变量名是裸标识符，且变量池里没有它。池里有但取值是空串
- * 算已解析。
+ * 判据与 Rust 侧那份同一套：变量名是裸标识符，且变量池里没有它。池里有但取值是空串算已解析。
  */
 export function oauth2MissingVars(cfg: OAuth2Auth, pool: Record<string, string>): string[] {
   const out: string[] = [];
@@ -42,15 +39,15 @@ export function oauth2MissingVars(cfg: OAuth2Auth, pool: Record<string, string>)
 }
 
 /**
- * 解析 auth config 里的 `{{var}}` 并记录未解析项。返回新对象、不改传入值——
- * auth config 存在 Zustand store 里，发送不能写它。
+ * 解析 auth config 里的 `{{var}}` 并记录未解析项。返回新对象、不改传入值——auth config 存在
+ * Zustand store 里，发送不能写它。
  *
- * 只扫选中的 `kind` 且只扫会上线的字段：Basic config 上残留的 `bearer` 串不属于
- * 这次请求，报它的变量纯属噪声。
+ * 只扫选中的 `kind` 且只扫会上线的字段：Basic config 上残留的 `bearer` 串不属于这次请求，
+ * 报它的变量纯属噪声。
  *
- * **OAuth2 的配置不替换**，只把没解析出来的变量报出来：替换由后端在取 token 之前做
- * （规则见 `OAUTH2_SUBSTITUTED_FIELDS` 的说明）。渲染进程报一次，用户在发请求之前就
- * 看得见「缺哪个变量」，而不是等后端回一句「token 获取失败」。
+ * **OAuth2 的配置不替换**，只把没解析出来的变量报出来：替换由后端在取 token 之前做（规则见
+ * `OAUTH2_SUBSTITUTED_FIELDS` 的说明）。渲染进程报一次，用户在发请求之前就看得见「缺哪个
+ * 变量」。
  */
 export function resolveAuth(
   auth: AuthConfig,
@@ -89,18 +86,13 @@ export function resolveAuth(
 }
 
 /**
- * 为 HTTP Basic 认证把 `user:pass` 做 base64。走 `TextEncoder` 是为了先把含非 ASCII
- * 的凭据（中文用户名、emoji 密码）按 UTF-8 编码成字节再 base64——浏览器的事实惯例，
- * Express 等多数服务端按裸字节解码这个 header。
- *
- * `btoa` 由 DOM lib 提供，已在项目 tsconfig 的 `"lib": ["ES2022", "DOM", "DOM.Iterable"]` 里。
+ * 为 HTTP Basic 认证把 `user:pass` 做 base64。走 `TextEncoder` 是为了先把含非 ASCII 的凭据
+ * （中文用户名、emoji 密码）按 UTF-8 编码成字节再 base64——浏览器的事实惯例，Express 等多数
+ * 服务端按裸字节解码这个 header。
  */
 export function b64Basic(user: string, pass: string): string {
   const raw = `${user}:${pass}`;
-  const bytes = new TextEncoder().encode(raw);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-  return btoa(bin);
+  return bytesToBase64(new TextEncoder().encode(raw));
 }
 
 /** 把 `inLocation` 为 `'query'` 的 `apikey` 追加到 URL。 */
