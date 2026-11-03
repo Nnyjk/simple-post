@@ -17,6 +17,8 @@ export type DropRejection =
   | 'type'
   /** 落点会把节点嵌进自己的后代。 */
   | 'cycle'
+  /** 载荷声明的类型与节点自己的类型对不上。 */
+  | 'kind-mismatch'
   /** 目标行已经不在树里。 */
   | 'unknown-target';
 
@@ -25,7 +27,8 @@ export type DropRejection =
  * 而项目顶层只放得下模块。
  */
 export type DropDecision =
-  { ok: true; parentId: string | null; index: number } | { ok: false; reason: DropRejection };
+  | { ok: true; parentId: string | null; index: number; zone: DropZone }
+  | { ok: false; reason: DropRejection };
 
 /**
  * 目标行对当前这次拖拽开放的放置区。
@@ -120,7 +123,12 @@ export function bandsFor(
 }
 
 /**
- * 目标行在这次拖拽下的放置区。目标行不在树里时返回 `null`。
+ * 目标行在这次拖拽下的放置区。被拒时返回 `null` —— 调用方据此不画落点提示，并把光标
+ * 显示成「不可放」。
+ *
+ * 这个函数不另算一套规则：它直接问 `resolveDrop` 同一个问题。两处各算一套的话，
+ * 悬停时会画出「能放」的提示，松手时却被拒 —— 提示与结果对不上，而那正是最难自查的
+ * 一类缺陷（悬停时一切正常，松开时什么也没发生）。
  */
 export function zoneFor(
   drag: DragPayload,
@@ -128,11 +136,10 @@ export function zoneFor(
   nodes: ResourceNode[],
   rect: { top: number; height: number } | null,
   clientY: number,
+  activeProjectId: string | null,
 ): DropZone | null {
-  const targetNode = nodes.find((n) => n.id === target.id);
-  if (!targetNode) return null;
-  const bands = bandsFor(drag.kind, target, targetNode, nodes);
-  return zoneFromRowPosition(rect, clientY, bands);
+  const decision = resolveDrop({ drag, target, rect, clientY, nodes, activeProjectId });
+  return decision.ok ? decision.zone : null;
 }
 
 /**
@@ -176,12 +183,18 @@ export function resolveDrop(input: DropInput): DropDecision {
   const targetNode = nodes.find((n) => n.id === target.id);
   if (!targetNode) return { ok: false, reason: 'unknown-target' };
 
-  // 跨项目：被拖的每一个节点都要与目标同属一个项目。
+  // 逐个核对被拖的节点：它要在树里、它要与目标同属一个项目、它的类型要与载荷声明的
+  // 类型一致。
+  //
+  // 最后一条挡住伪造的载荷：`text/plain` 里塞一段 JSON 就能声明自己是「接口拖拽」，
+  // 而它列出来的其实是一个集合。按声明的类型选放置区时，那个集合就借着接口的身份绕过
+  // 「接口行只接受接口」那条限制。
   for (const id of drag.ids) {
     const node = nodes.find((n) => n.id === id);
     if (!node || node.rootId !== targetNode.rootId) {
       return { ok: false, reason: 'cross-project' };
     }
+    if (node.kind !== drag.kind) return { ok: false, reason: 'kind-mismatch' };
   }
 
   const bands = bandsFor(drag.kind, target, targetNode, nodes);
@@ -192,7 +205,7 @@ export function resolveDrop(input: DropInput): DropDecision {
     if (!bands.into) return { ok: false, reason: 'type' };
     if (wouldCycleInto(drag.ids, target.id, nodes)) return { ok: false, reason: 'cycle' };
     const children = siblingsOf(target.id, nodes).filter((n) => !drag.ids.includes(n.id));
-    return { ok: true, parentId: target.id, index: children.length };
+    return { ok: true, parentId: target.id, index: children.length, zone };
   }
 
   if (!bands.beside) return { ok: false, reason: 'type' };
@@ -205,7 +218,7 @@ export function resolveDrop(input: DropInput): DropDecision {
   );
   const idx = siblings.findIndex((n) => n.id === target.id);
   if (idx < 0) return { ok: false, reason: 'unknown-target' };
-  return { ok: true, parentId, index: zone === 'above' ? idx : idx + 1 };
+  return { ok: true, parentId, index: zone === 'above' ? idx : idx + 1, zone };
 }
 
 /**

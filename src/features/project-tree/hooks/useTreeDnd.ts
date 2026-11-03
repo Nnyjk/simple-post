@@ -97,7 +97,14 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
       const drag = decodeDrag(raw) ?? lastDragPayload;
       const key = `${target.kind}:${target.id}`;
       const zone = drag
-        ? zoneFor(drag, target, nodes, e.currentTarget.getBoundingClientRect(), e.clientY)
+        ? zoneFor(
+            drag,
+            target,
+            nodes,
+            e.currentTarget.getBoundingClientRect(),
+            e.clientY,
+            activeProjectId,
+          )
         : null;
       if (!zone) {
         // 这一行不接受这次拖拽 —— 光标显示「不可放」，也不画落点提示。

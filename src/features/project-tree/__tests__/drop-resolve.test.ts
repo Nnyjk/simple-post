@@ -182,19 +182,19 @@ describe('解析一次放置', () => {
     // m1 落到 m2 之下：项目顶层的同级序列去掉 m1 之后是 [m2]，m2 在那一份里的下标是 0，
     // 「在它下面」就是下标 1。
     const r = drop('module', ['m1'], 'm2', 0.8);
-    assert.deepEqual(r, { ok: true, parentId: null, index: 1 });
+    assert.deepEqual(r, { ok: true, parentId: null, index: 1, zone: 'below' });
   });
 
   it('集合拖到模块行上嵌进去，落在该模块的子列表末尾', () => {
     // m1 的子节点是 c1、e0、c3 三个，故新槽位是 3。
     const r = drop('collection', ['c2'], 'm1', 0.5);
-    assert.deepEqual(r, { ok: true, parentId: 'm1', index: 3 });
+    assert.deepEqual(r, { ok: true, parentId: 'm1', index: 3, zone: 'into' });
   });
 
   it('接口拖到集合行上嵌进去', () => {
     // c1 的子节点是 c2、e1、e2、e3 四个，故新槽位是 4。
     const r = drop('endpoint', ['e0'], 'c1', 0.5);
-    assert.deepEqual(r, { ok: true, parentId: 'c1', index: 4 });
+    assert.deepEqual(r, { ok: true, parentId: 'c1', index: 4, zone: 'into' });
   });
 
   it('模块拖到集合或接口行上被拒 —— 模块没有节点父级', () => {
@@ -209,19 +209,19 @@ describe('解析一次放置', () => {
   it('接口拖到接口行上成为它的兄弟，落在同一父级里', () => {
     // f1 落到 f2 之下：c3 的子节点去掉 f1 之后是 [f2, f3]，f2 的下标是 0。
     const r = drop('endpoint', ['f1'], 'f2', 0.8);
-    assert.deepEqual(r, { ok: true, parentId: 'c3', index: 1 });
+    assert.deepEqual(r, { ok: true, parentId: 'c3', index: 1, zone: 'below' });
   });
 
   it('往下拖时落在目标后面一格，而不是再往后一格', () => {
     // 槽位按「去掉被移动者之后」的同级序列算，故 f2 在那一份序列里的下标是 0，
     // 「在它下面」就是 1。若拿含被移动者的序列算下标，这里会答 2，落到 f3 后面去。
     const r = drop('endpoint', ['f1'], 'f2', 0.8);
-    assert.deepEqual(r, { ok: true, parentId: 'c3', index: 1 });
+    assert.deepEqual(r, { ok: true, parentId: 'c3', index: 1, zone: 'below' });
   });
 
   it('往上拖时落在目标前面一格', () => {
     const r = drop('endpoint', ['f3'], 'f1', 0.2);
-    assert.deepEqual(r, { ok: true, parentId: 'c3', index: 0 });
+    assert.deepEqual(r, { ok: true, parentId: 'c3', index: 0, zone: 'above' });
   });
 
   it('落回自己被拒', () => {
@@ -244,6 +244,20 @@ describe('解析一次放置', () => {
       activeProjectId: 'p1',
     });
     assert.deepEqual(r, { ok: false, reason: 'cross-project' });
+  });
+
+  it('载荷声明的类型与节点自己的类型对不上时被拒', () => {
+    // c3 是集合，而载荷声明自己是接口拖拽。按声明的类型算，这个集合会借着接口的身份
+    // 绕过「接口行只接受接口」那条限制，被挪到 e1 旁边。
+    const r = resolveDrop({
+      drag: { kind: 'endpoint', ids: ['c3'] },
+      target: { kind: 'endpoint', id: 'e1' },
+      rect: ROW,
+      clientY: yAt(0.5),
+      nodes: NODES,
+      activeProjectId: 'p1',
+    });
+    assert.deepEqual(r, { ok: false, reason: 'kind-mismatch' });
   });
 
   it('目标行不在树里时报「目标不存在」', () => {
@@ -279,7 +293,7 @@ describe('悬停提示与落点用的是同一套判定', () => {
   it('模块行上悬停集合时整行都是「嵌进去」', () => {
     for (const ratio of [0.05, 0.5, 0.95]) {
       assert.equal(
-        zoneFor({ kind: 'collection', ids: ['c2'] }, target('m1'), NODES, ROW, yAt(ratio)),
+        zoneFor({ kind: 'collection', ids: ['c2'] }, target('m1'), NODES, ROW, yAt(ratio), 'p1'),
         'into',
       );
     }
@@ -287,15 +301,63 @@ describe('悬停提示与落点用的是同一套判定', () => {
 
   it('集合行上悬停模块时没有可放的地方 —— 提示不画', () => {
     assert.equal(
-      zoneFor({ kind: 'module', ids: ['m1'] }, target('c1'), NODES, ROW, yAt(0.5)),
+      zoneFor({ kind: 'module', ids: ['m1'] }, target('c1'), NODES, ROW, yAt(0.5), 'p1'),
       null,
     );
   });
 
   it('接口行上悬停集合时没有可放的地方', () => {
     assert.equal(
-      zoneFor({ kind: 'collection', ids: ['c1'] }, target('e1'), NODES, ROW, yAt(0.5)),
+      zoneFor({ kind: 'collection', ids: ['c1'] }, target('e1'), NODES, ROW, yAt(0.5), 'p1'),
       null,
     );
+  });
+
+  it('悬停自己那一行时不画提示 —— 落回自己会被拒', () => {
+    assert.equal(
+      zoneFor({ kind: 'endpoint', ids: ['e1'] }, target('e1'), NODES, ROW, yAt(0.5), 'p1'),
+      null,
+    );
+  });
+
+  it('悬停自己的后代时不画提示 —— 落进后代会绕成环', () => {
+    // c1 之下有 c2。把 c1 拖到 c2 上就是把自己嵌进自己的后代。
+    assert.equal(
+      zoneFor({ kind: 'collection', ids: ['c1'] }, target('c2'), NODES, ROW, yAt(0.5), 'p1'),
+      null,
+    );
+  });
+
+  it('悬停提示与最终落点必须是同一个结论', () => {
+    // 提示画出来了却放不下，是最难自查的一类缺陷：悬停时一切正常，松手时什么也没发生，
+    // 用户只会觉得「这个软件偶尔抽风」。故这里把每一组（拖拽类型、目标行、光标位置）
+    // 都跑一遍，要求两个函数给出同一个答案。
+    const drags: { kind: ResourceNodeType; ids: string[] }[] = [
+      { kind: 'module', ids: ['m1'] },
+      { kind: 'collection', ids: ['c2'] },
+      { kind: 'collection', ids: ['c1'] },
+      { kind: 'endpoint', ids: ['e0'] },
+      { kind: 'endpoint', ids: ['e1'] },
+    ];
+    for (const drag of drags) {
+      for (const id of ['m1', 'm2', 'c1', 'c2', 'c3', 'e0', 'e1', 'f1']) {
+        for (const ratio of [0.05, 0.5, 0.95]) {
+          const decision = resolveDrop({
+            drag,
+            target: target(id),
+            rect: ROW,
+            clientY: yAt(ratio),
+            nodes: NODES,
+            activeProjectId: 'p1',
+          });
+          const zone = zoneFor(drag, target(id), NODES, ROW, yAt(ratio), 'p1');
+          assert.equal(
+            zone,
+            decision.ok ? decision.zone : null,
+            `把 ${drag.kind} ${drag.ids.join(',')} 拖到 ${id} 的 ${ratio} 处：提示与落点给了两个答案`,
+          );
+        }
+      }
+    }
   });
 });
