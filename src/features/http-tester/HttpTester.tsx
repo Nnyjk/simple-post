@@ -312,10 +312,8 @@ export function HttpTester() {
   // 组件卸载时中止在途请求。`handleSend` 复用同一个标签的那一条，故 pending 期间
   // 再次点击 = 取消上一次重来。
   //
-  // **按标签分开**：在途标记也是挂在标签上的（在途标记改成挂在标签上之后，A 上
-  // 在途时 B 的 Send 按钮不再被锁住），若这里还共用一条 controller，B 的发送就会
-  // 把 A 的在途请求一起 abort 掉 —— 用户在 A 上发请求、切到 B、随手发一个，
-  // A 的那次就无声无息地死了。
+  // **按标签分开**：在途标记也按标签取（见 `stores/slices/ui-response.ts`），若这里
+  // 还共用一条 controller，B 的发送就会把 A 的在途请求一起 abort 掉。
   const inFlightRef = useRef<Map<string, AbortController>>(new Map());
   useEffect(() => {
     const controllers = inFlightRef.current;

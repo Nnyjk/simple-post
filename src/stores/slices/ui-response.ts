@@ -13,28 +13,21 @@ import { DRAFT_ID_PREFIX } from '../store-types';
 import { capUnfavorited } from './history-keep';
 
 /**
- * ui-response —— **挂在标签上**的当前响应与请求中标记，加上按接口的历史与已存示例。
+ * ui-response —— **按标签存放**的当前响应与在途标记，加上按接口的历史与已存示例。
  *
- * 合成一个子工厂：一次发送依次写 `requestPending` → `lastResponse` →
- * `responseHistory`，拆开就把一个用户动作的三步散进三个文件。
+ * 合成一个子工厂：一次发送依次写 `lastResponses[tabId].pending` →
+ * `lastResponses[tabId].response` → `responseHistory`，拆开就把一个用户动作的三步
+ * 散进三个文件。
  *
- * **为什么响应挂在标签上。** 响应区渲染在**当前标签**里 —— 它是那个标签的工作区的
- * 一部分。故响应也归那个标签所有：键是标签 id，界面按 `activeTabId` 取，标签关掉
- * 时一并回收。
+ * **响应为什么挂在标签上。** 响应区渲染在**当前标签**里 —— 它是那个标签的工作区的
+ * 一部分。故响应归那个标签所有：键是标签 id，界面按 `activeTabId` 取那一份。
  *
- * 早先它是全局单槽（`lastResponse` 一个字段）。于是「切接口」不得不显式清空它，
- * 而那一刀总会有一边漏：树里点接口会清（**重复点同一个接口也照清**），标签条切
- * 接口不会清 → 后者把上一个接口的响应串到了当前标签上。同一份状态、两种切法，
- * 一个丢数据一个串数据。
+ * 在途标记与响应是同一份状态，故它也按标签取：接口 A 上在途的请求不锁 B 的
+ * Send 按钮。
  *
- * 挂在标签上之后，「切接口」不需要任何清空动作：切过去读到的就是那个标签自己的
- * 那份。顺带地，接口 A 上的在途请求也不再影响 B 的 Send 按钮 —— 在途标记与响应
- * 是同一份状态。
- *
- * **标签关了，响应也就没了。** 这是「挂在工作区上」的直接推论，也正是它与
- * `responseHistory` 的分工：后者是**落库**的历史条，跨重启留存；前者是**这一次
- * 会话**的现场。关掉标签再从树打开接口，那个接口不在标签栏内，响应区就是空的 ——
- * 不需要（也不能）从别处「加载」一份回来。
+ * **标签关掉，那份响应就没了。** 这是响应挂在工作区上的直接后果，也正是它与
+ * `responseHistory` 的分工：后者是**落库**的历史条，跨重启留存；前者只是这一次
+ * 运行里的状态，关掉标签再从树打开接口，响应区就是空的。
  *
  * `responseHistory` 落盘（见 `addResponseHistory` / `loadResponseHistory`），
  * 这是本子工厂唯一接触 IPC 的理由；`responseExamples` 仍只在内存里。
@@ -89,8 +82,7 @@ function mergeLoaded(
  * 一个标签（接口工作区）当前的那份响应 —— 四样东西合在一处。
  *
  * 它们**描述同一次调用**，故必须一起换：换响应就要换掉请求快照与脚本产出，
- * 反之亦然。分成四个全局字段时，「切换接口」不得不显式清空它们，而清空的那
- * 一刀总有一边会漏。
+ * 反之亦然 —— 只换一半，响应区左右两栏就配错了同一次调用。
  */
 export interface EndpointResponseState {
   /** 最近一次显示的响应。 */
@@ -123,9 +115,10 @@ export interface UiResponseState {
    * 也不带脚本产出）。
    *
    * 份数不需要额外的闸：响应随标签走，标签关掉时那份一并回收（见
-   * `slices/ui-tabs.ts` 的 `closeTab` 等动作），故这里的份数至多是「用户同时
-   * 打开着的标签数」。每份都带着一份响应体（上限是「响应体积上限」那个设置），
-   * 故开着的标签多时内存也随之涨——这是明摆着的取舍，不是漏掉的闸。
+   * `slices/ui-tabs.ts` 的 `closeTab` 等动作），故这里的份数至多是「用户打开过、
+   * 还没被关掉的标签数」——换项目时暂存在 `projectTabs` 里的那批标签也各留一份。
+   * 每份都带着一份响应体（上限是「响应体积上限」那个设置），故开着的标签多时
+   * 内存也随之涨——这是明摆着的取舍，不是漏掉的闸。
    */
   lastResponses: Record<string, EndpointResponseState>;
   /**
@@ -389,11 +382,11 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
     set((s) => {
       const prev = s.responseExamples[endpointId];
       if (!prev) return {};
-      const next = { ...s.responseExamples };
-      const filtered = prev.filter((ex) => ex.id !== exampleId);
-      if (filtered.length === prev.length) return {};
-      next[endpointId] = filtered;
-      return { responseExamples: next };
+      const next = prev.filter((ex) => ex.id !== exampleId);
+      if (next.length === prev.length) return {};
+      return {
+        responseExamples: { ...s.responseExamples, [endpointId]: next },
+      };
     }),
 
   // 换响应就换掉脚本产出：脚本产出**属于**那一次响应，回看一条历史响应时它并不存在

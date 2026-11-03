@@ -313,13 +313,9 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       if (id !== null) {
         get().openTab('endpoint', id);
       }
-      // **不清响应**。响应是挂在标签上的（见 `slices/ui-response.ts`），界面按当前
-      // 标签 id 取，故：
-      //   · 重复点同一个接口（甚至只是右键看个菜单）不会把它刚发出来的那次响应弄丢；
-      //   · 从 A 切到 B 时，B 显示的是 **B 自己**的响应，不是 A 的。
-      // 早先这里是 `setLastResponse(null)`（响应是一个全局单槽，只能靠清空来避免
-      // 串台），于是「树里点接口」清空、「标签条切接口」不清 —— 同一份状态两种
-      // 切法，一个丢数据一个串数据。
+      // **不清响应**：响应是挂在标签上的（见 `slices/ui-response.ts`），界面按当前
+      // 标签 id 取，故重复点同一个接口不会把它刚发出来的那次响应弄丢，从 A 切到 B
+      // 时 B 显示的也是 B 自己那一份。
     },
     setCurrentEnvironment: (envId) => {
       const state = get();
