@@ -15,8 +15,6 @@
 //! 每表 CRUD 在同目录 `db/*.rs`，全部接收 `&mut rusqlite::Connection`，
 //! 由调用方决定是否在事务内。
 
-use std::sync::Arc;
-
 // 子模块：对外公开，让编排层 / Tauri commands 可直接调用单个 CRUD 函数。
 pub mod dynamic_variable_cache;
 pub mod dynamic_variables;
@@ -64,12 +62,6 @@ pub(crate) mod test_support;
 pub const SCHEMA_VERSION: i64 = 5;
 
 // CRUD 模块共用的辅助类型与函数。
-
-/// `Arc<str>` 的重导出，供需要廉价克隆 id 句柄的调用方使用。
-#[allow(dead_code)]
-pub(crate) fn arc_str(s: impl Into<String>) -> Arc<str> {
-    Arc::from(s.into())
-}
 
 /// JSON-in-TEXT 列解码失败时的错误类型。rusqlite 的 `FromSqlConversionFailure`
 /// 要 `Box<dyn StdError + Send + Sync + 'static>`，故用这个字符串类型把消息装下。

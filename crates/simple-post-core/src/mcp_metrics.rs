@@ -1,7 +1,9 @@
 //! MCP 守护进程的轻量指标计数器。
 //!
-//! HTTP 守护进程在每个请求处理完后向 stderr 发一行 `__mcp_metrics__{...}` JSON。GUI（与
-//! proxy）跟踪 stderr、解析该行，并把活计数器反映到 `McpStatusDto` 供渲染层使用。
+//! GUI（与 proxy）跟踪 daemon 的 stderr，用 `parse_metric_line` 解析指标行，并把活
+//! 计数器反映到 `McpStatusDto` 供渲染层使用。指标行的形状由 `emit_metric_line` 定义。
+//! daemon 进程目前不写指标行（`emit_metric_line` 没有生产调用点），故 GUI 这一侧解析
+//! 到的行永远不是指标行，活计数器的数字全部来自 daemon 进程内自己的递增。
 //!
 //! 为何是 stderr 而非 stdout：proxy 原样转发 stdout 作为 JSON-RPC。我们往 stdout 写的任何
 //! 东西都会污染那条 JSON 流。stderr 是「与结构化指标混在一起的诊断杂音」的惯用通道。
@@ -16,13 +18,23 @@ use serde::{Deserialize, Serialize};
 
 /// 活计数器。字段全是原子的，故渲染层快照路径的读与守护进程 stderr 转发侧的写
 /// 不需要互斥量。
-/// `started_at_ms` 在构造时设置一次；其余由守护进程（经 `inc` / `inc_err`）递增，
-/// 也由 GUI 在解析 stderr 快照时递增（当它自己的计数器落后于守护进程时）。
+/// `started_at_ms` 在 `new()` 里设置一次，之后不再变。
+///
+/// `requests_handled` 有两个递增来源：MCP 守护进程在 JSON-RPC 入口直接写这个原子字段
+/// （`simple-post-mcp` 的 `daemon_http::dispatch_mcp_request`），以及 MCP 发出一条
+/// HTTP 请求后调用 `inc()`（`simple-post-mcp` 的 `http_ops::send`）。两者数的不是同一
+/// 件事——一个是进来的 JSON-RPC 请求，一个是出去的 HTTP 请求——这个计数把它们加在
+/// 了一起。
+///
+/// `errors` 恒为 0：`inc_err()` 唯一的调用点是本 crate 的单测，守护进程与 GUI 都没有
+/// 调用它。GUI 侧合并 stderr 快照的 `merge_from_stderr` 需要 daemon 发来带错误数的
+/// 指标行，而 daemon 不写指标行，故它也拿不到数据。
 #[derive(Debug, Default)]
 pub struct McpMetrics {
     /// 守护进程自启动以来处理过的请求总数。
     pub requests_handled: AtomicU64,
-    /// `requests_handled` 中出错的子集（HTTP 5xx 或工具错误）。独立计数以便算成功率。
+    /// 错误计数。设计意图是「`requests_handled` 中出错的子集」（HTTP 5xx 或工具错误），
+    /// 但生产代码里没有人调用 `inc_err()`，故它恒为 0。
     pub errors: AtomicU64,
     /// 守护进程启动时的 unix epoch 毫秒。构造时设置；`snapshot()` 读它来算 `uptime_ms`。
     pub started_at_ms: AtomicU64,
@@ -36,12 +48,12 @@ impl McpMetrics {
         s
     }
 
-    /// 递增成功计数。
+    /// 递增成功计数。生产代码里的调用点只有一处：MCP 发出一条 HTTP 请求之后。
     pub fn inc(&self) {
         self.requests_handled.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// 递增错误计数（与成功分开记）。
+    /// 递增错误计数（与成功分开记）。生产代码里没有调用点——只有本 crate 的单测调它。
     pub fn inc_err(&self) {
         self.errors.fetch_add(1, Ordering::Relaxed);
     }
@@ -82,14 +94,14 @@ pub struct MetricsSnapshot {
     pub uptime_ms: u64,
 }
 
-/// 守护进程加在每行指标前的线前缀。GUI 的解析器（`parse_metric_line`）精确比对它——不以它
+/// 指标行的线前缀。`emit_metric_line` 写它，`parse_metric_line` 精确比对它——不以它
 /// 开头的行原样留给 `tracing` / 控制台输出。
 pub const METRIC_PREFIX: &str = "__mcp_metrics__";
 
-/// 守护进程侧辅助函数：构造要写到 stderr 的那一行。
+/// 构造指标行：那一行若写进 stderr，GUI 侧就能用 `parse_metric_line` 解析它。
 /// 格式：`__mcp_metrics__{"requests_handled":N,"errors":N,"uptime_ms":N}\n`
-/// 返回 `String` 而非直接写，好让守护进程可以走 `eprintln!`（在 TTY 上逐行 flush），
-/// 或走它自选的带缓冲的 sink。
+/// 返回 `String` 而非直接写，好让调用方可以走 `eprintln!`（在 TTY 上逐行 flush），
+/// 或走它自选的带缓冲的 sink。当前 daemon 侧没有调用它。
 pub fn emit_metric_line(snap: &MetricsSnapshot) -> String {
     format!(
         "{}{}\n",
