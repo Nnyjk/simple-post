@@ -86,7 +86,7 @@ beforeEach(() => {
     draftEndpoints: {},
     draftSaveError: null,
     lastCreatedId: null,
-    lastResponse: null,
+    lastResponses: {},
   });
 });
 

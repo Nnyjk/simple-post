@@ -87,10 +87,27 @@ export function useRequestActions({
    * 界面据此显示提示并切到路径参数那一页。
    */
   onPathParamGate: (missing: string[]) => void;
-  setRequestPending: (v: boolean) => void;
-  setLastResponse: (resp: ApiResponse | null, request?: StoredRequestSnapshot | null) => void;
-  /** 记下这次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。 */
-  setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
+  /**
+   * 标记某个标签上有没有在途请求。
+   *
+   * 传标签 id 而不传接口 id：在途标记与响应是同一份状态（挂在标签上），调用方
+   * 手上有哪个键，就用哪个键 —— 两处混用会让「发出去的那次」与「标记在途的那次」
+   * 不是同一个标签。
+   */
+  setRequestPending: (tabId: string, v: boolean) => void;
+  /**
+   * 记下某个标签最近一次的响应与那次请求的快照。
+   *
+   * 传标签 id 的理由同上：响应是挂在标签上的，写到别的标签上等于把这次调用
+   * 挂到了另一个接口的工作区上。
+   */
+  setLastResponse: (
+    tabId: string,
+    resp: ApiResponse | null,
+    request?: StoredRequestSnapshot | null,
+  ) => void;
+  /** 记下某个标签最近一次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。 */
+  setLastScriptOutcome: (tabId: string, outcome: ScriptOutcome | null) => void;
   /** 把脚本写回的环境变量并进本地副本（落库由后端做）。 */
   applyEnvWrites: (envId: string, writes: EnvWrite[]) => void;
   addResponseHistory: (
@@ -101,8 +118,13 @@ export function useRequestActions({
   saveDraftEndpoint: (id: string) => Promise<string | null>;
   updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
   clearEndpointDraft: (id: string) => void;
-  /** 在途请求的 ref：pending 期间再次点击发送 = 取消上一次重来。 */
-  inFlightRef: RefObject<AbortController | null>;
+  /**
+   * 在途请求的 controller，**按标签 id 分开**。
+   *
+   * 同一个标签 pending 期间再次点击发送 = 取消上一次重来；换成**别的**标签则各发
+   * 各的，B 的发送不会把 A 的在途请求一起 abort 掉。
+   */
+  inFlightRef: RefObject<Map<string, AbortController>>;
   setCurlFlash: (v: boolean) => void;
 }) {
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
@@ -113,11 +135,12 @@ export function useRequestActions({
     // 校验是请求的前置门。解析不了的 json body 不该让服务端去猜；照发只会让用户对着
     // 服务端解析错误，而这个错误本可以指出他敲错的那个字符。
     if (!runValidation()) return;
-    // `handleSend` 先取消任何在途请求。
-    inFlightRef.current?.abort();
+    // `handleSend` 先取消**这个标签上**任何在途请求。别的标签各有各的，换一个
+    // 接口发送不该把这边那次一起 abort 掉。
+    inFlightRef.current.get(endpointId)?.abort();
     const ctrl = new AbortController();
-    inFlightRef.current = ctrl;
-    setRequestPending(true);
+    inFlightRef.current.set(endpointId, ctrl);
+    setRequestPending(endpointId, true);
     try {
       // 动态变量的值必须在**替换之前**到手：替换一旦发生，变量池里就没有同名变量的
       // 概念了，而「动态变量压过同名环境变量」这条规则正是在替换之前生效的。
@@ -172,8 +195,12 @@ export function useRequestActions({
       // token 只在 `outbound` 里，历史行要显示的就是它。请求头取后端报上来的线上那
       // 一份（含传输层补的 `host` / `content-length` 等），它缺席时才回落到本地拼的。
       const snapshot = toRequestSnapshot(outbound, resp.requestHeaders);
-      setLastResponse(resp, snapshot);
-      setLastScriptOutcome(script);
+      // 写的是**这个标签**的那一份：响应是挂在标签上的（见 `slices/ui-response.ts`），
+      // 故在 A 上发的不会跑到 B 的标签上。用 `endpointId`（它就是这个标签的 id）
+      // 而不是当下的活动标签——发送期间用户可能已经切走了，那次响应属于**发起它**
+      // 的那个标签。
+      setLastResponse(endpointId, resp, snapshot);
+      setLastScriptOutcome(endpointId, script);
       addResponseHistory(endpointId, resp, snapshot);
       // 脚本写回的环境变量：**后端已落库**（那是唯一那条持久化路径），这里只把
       // 本地副本同步过来，于是下一个请求立刻能解析到新变量。
@@ -185,8 +212,8 @@ export function useRequestActions({
       console.error('[HttpTester] sendRequest threw:', e);
     } finally {
       // `inFlightRef` 只有在仍是当前 controller 时才清空（途中可能被更新的发送顶替）。
-      if (inFlightRef.current === ctrl) inFlightRef.current = null;
-      setRequestPending(false);
+      if (inFlightRef.current.get(endpointId) === ctrl) inFlightRef.current.delete(endpointId);
+      setRequestPending(endpointId, false);
     }
   }, [
     endpointId,

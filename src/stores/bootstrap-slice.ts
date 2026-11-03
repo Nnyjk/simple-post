@@ -290,10 +290,12 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       get().setActiveProject(id);
       // 记住这个项目由 store 的订阅负责（见 `app-store.ts`）：`activeProjectId` 还有
       // 命令面板与删项目两条改法，在这里单独写会漏掉它们。
-      // tester 正显示的接口属于被离开的项目；留着会让 `useActiveEndpoint` 和最后
-      // 一条响应都指向新树里不存在的接口。
+      // tester 正显示的接口属于被离开的项目；留着会让 `useActiveEndpoint` 指向
+      // 新树里不存在的接口。
       set({ activeEndpointId: null });
-      get().setLastResponse(null);
+      // **不清响应**：响应是挂在标签上的（见 `slices/ui-response.ts`），换项目时那些
+      // 标签连同各自的响应被搁置在 `projectTabs` 旁边；回到这个项目时，那个接口的
+      // 响应还在——换项目不该顺手把它扔掉。
     },
     leaveProject: () => {
       // `leaveProject` 在已经不在项目里时空操作，欢迎页上误点标题不会扰动状态。
@@ -306,13 +308,18 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     },
     setActiveEndpoint: (id) => {
       // `activeEndpointId` 归本切片；标签侧的副作用（openTabs / activeTabId）归
-      // ui-slice —— 走规范动作而不是跨切片写。`lastResponse: null` 同理归 ui-slice
-      // （它是最近一次 HTTP 响应，不是选择缓存），故走 `setLastResponse`。
+      // ui-slice —— 走规范动作而不是跨切片写。
       set({ activeEndpointId: id });
       if (id !== null) {
         get().openTab('endpoint', id);
       }
-      get().setLastResponse(null);
+      // **不清响应**。响应是挂在标签上的（见 `slices/ui-response.ts`），界面按当前
+      // 标签 id 取，故：
+      //   · 重复点同一个接口（甚至只是右键看个菜单）不会把它刚发出来的那次响应弄丢；
+      //   · 从 A 切到 B 时，B 显示的是 **B 自己**的响应，不是 A 的。
+      // 早先这里是 `setLastResponse(null)`（响应是一个全局单槽，只能靠清空来避免
+      // 串台），于是「树里点接口」清空、「标签条切接口」不清 —— 同一份状态两种
+      // 切法，一个丢数据一个串数据。
     },
     setCurrentEnvironment: (envId) => {
       const state = get();

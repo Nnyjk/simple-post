@@ -9,6 +9,7 @@ import type {
   SettingsCategoryId,
   TabKind,
 } from '../store-types';
+import type { EndpointResponseState } from './ui-response';
 
 /**
  * ui-tabs —— 工作区标签条与每个 endpoint 的编辑草稿。
@@ -190,6 +191,8 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         endpointDrafts,
         dirtyTabIds,
         draftEndpoints,
+        // 响应是挂在标签上的，故关标签要把它带走——同一套规矩的第四样东西。
+        lastResponses: withoutResponses(s.lastResponses, [tabId]),
       };
     }),
   setActiveTab: (tabId) =>
@@ -299,10 +302,16 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         activeTabId: nextActive,
         dirtyTabIds: nextDirty,
         endpointDrafts: nextDrafts,
+        // 被清扫掉的标签（底层实体已经没了）带走的那份响应。留下的标签继续用自己
+        // 那份，故这里只删被移除的那些。
+        lastResponses: withoutResponses(
+          s.lastResponses,
+          s.openTabs.filter((t) => !valid.some((v) => v.id === t.id)).map((t) => t.id),
+        ),
       };
     }),
   closeAllTabs: () =>
-    set({
+    set((s) => ({
       openTabs: [],
       activeTabId: null,
       dirtyTabIds: new Set(),
@@ -310,7 +319,9 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       // 与上面同一条理由、上一级：关掉的 draft 标签就是一份再也存不下去的草稿，
       // 所以"全关"必须把文档一起带走。
       draftEndpoints: {},
-    }),
+      // 全关 ⇒ 所有标签都没了 ⇒ 所有响应一起走。
+      lastResponses: withoutResponses(s.lastResponses, Object.keys(s.lastResponses)),
+    })),
   closeSavedTabs: () => {
     const state = get();
     const toClose = state.openTabs.filter((t) => !state.dirtyTabIds.has(t.id));
@@ -342,6 +353,11 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         activeTabId: nextActive,
         endpointDrafts: nextDrafts,
         draftEndpoints: nextDraftEndpoints,
+        // 被关掉的标签带走它的响应——与草稿、文档同一条理由。
+        lastResponses: withoutResponses(
+          s.lastResponses,
+          toClose.map((t) => t.id),
+        ),
       };
     });
     return toClose.length;
@@ -434,6 +450,35 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
  */
 function carriesEndpointDraft(kind: TabKind): boolean {
   return kind === 'endpoint' || kind === 'endpoint-draft';
+}
+
+/**
+ * 丢掉这些标签带走的**响应状态**。
+ *
+ * 响应是挂在标签上的（见 `slices/ui-response.ts`），故标签没了，那份响应也就没了：
+ * 它描述的是那个标签里刚发生的那次调用，标签不在了，没人引用它。
+ *
+ * 这与草稿、脏标记是同一套「标签没了就带走」的规矩，只是多一样东西。三处清扫
+ * （关标签、清扫失效标签、全关）若各漏一处，那份响应就会留在一张没人引用的表里，
+ * 而它的键是标签 id —— 标签 id 会被复用（同一个接口重新打开就是同一个 id），
+ * 于是新开的标签会看到上一条命途的响应。
+ *
+ * 没有要清的键时返回**原引用**：这样这次 `set()` 不会因为一张没变过的表而多出新
+ * 对象，订阅它的组件也就不会白白重渲染。
+ */
+function withoutResponses(
+  responses: Record<string, EndpointResponseState>,
+  removedTabIds: Iterable<string>,
+): Record<string, EndpointResponseState> {
+  const next = { ...responses };
+  let changed = false;
+  for (const id of removedTabIds) {
+    if (id in next) {
+      delete next[id];
+      changed = true;
+    }
+  }
+  return changed ? next : responses;
 }
 
 /**

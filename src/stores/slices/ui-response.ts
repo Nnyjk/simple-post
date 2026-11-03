@@ -13,10 +13,28 @@ import { DRAFT_ID_PREFIX } from '../store-types';
 import { capUnfavorited } from './history-keep';
 
 /**
- * ui-response —— 最近一次响应、请求中标记、按 endpoint 的历史与已存示例。
+ * ui-response —— **挂在标签上**的当前响应与请求中标记，加上按接口的历史与已存示例。
  *
  * 合成一个子工厂：一次发送依次写 `requestPending` → `lastResponse` →
  * `responseHistory`，拆开就把一个用户动作的三步散进三个文件。
+ *
+ * **为什么响应挂在标签上。** 响应区渲染在**当前标签**里 —— 它是那个标签的工作区的
+ * 一部分。故响应也归那个标签所有：键是标签 id，界面按 `activeTabId` 取，标签关掉
+ * 时一并回收。
+ *
+ * 早先它是全局单槽（`lastResponse` 一个字段）。于是「切接口」不得不显式清空它，
+ * 而那一刀总会有一边漏：树里点接口会清（**重复点同一个接口也照清**），标签条切
+ * 接口不会清 → 后者把上一个接口的响应串到了当前标签上。同一份状态、两种切法，
+ * 一个丢数据一个串数据。
+ *
+ * 挂在标签上之后，「切接口」不需要任何清空动作：切过去读到的就是那个标签自己的
+ * 那份。顺带地，接口 A 上的在途请求也不再影响 B 的 Send 按钮 —— 在途标记与响应
+ * 是同一份状态。
+ *
+ * **标签关了，响应也就没了。** 这是「挂在工作区上」的直接推论，也正是它与
+ * `responseHistory` 的分工：后者是**落库**的历史条，跨重启留存；前者是**这一次
+ * 会话**的现场。关掉标签再从树打开接口，那个接口不在标签栏内，响应区就是空的 ——
+ * 不需要（也不能）从别处「加载」一份回来。
  *
  * `responseHistory` 落盘（见 `addResponseHistory` / `loadResponseHistory`），
  * 这是本子工厂唯一接触 IPC 的理由；`responseExamples` 仍只在内存里。
@@ -67,24 +85,49 @@ function mergeLoaded(
   );
 }
 
-export interface UiResponseState {
-  lastResponse: ApiResponse | null;
+/**
+ * 一个标签（接口工作区）当前的那份响应 —— 四样东西合在一处。
+ *
+ * 它们**描述同一次调用**，故必须一起换：换响应就要换掉请求快照与脚本产出，
+ * 反之亦然。分成四个全局字段时，「切换接口」不得不显式清空它们，而清空的那
+ * 一刀总有一边会漏。
+ */
+export interface EndpointResponseState {
+  /** 最近一次显示的响应。 */
+  response: ApiResponse | null;
   /**
-   * 最近一次显示的响应对应的**请求**。
+   * 那次响应对应的**请求**。
    *
-   * 与 `lastResponse` 同一刻写入，故两者描述同一次调用。它是解析之后的那一份：
+   * 与 `response` 同一刻写入，故两者描述同一次调用。它是解析之后的那一份：
    * base URL 与路径已拼接、`{{var}}` 已替换、查询串已追加。
    *
    * 旧的历史行没有它，故可以是 `null`——界面据此不画请求侧栏。
    */
-  lastRequest: StoredRequestSnapshot | null;
+  request: StoredRequestSnapshot | null;
   /**
    * 最近一次发送的脚本产出（断言 / 日志 / 错误 / 写回的环境变量）。
    *
-   * 与 `lastResponse` 同一刻写入，故两者永远描述同一次发送。没有脚本时为 null。
+   * 与 `response` 同一刻写入，故两者永远描述同一次发送。没有脚本时为 null。
    */
-  lastScriptOutcome: ScriptOutcome | null;
-  requestPending: boolean;
+  scriptOutcome: ScriptOutcome | null;
+  /** 这个标签上有没有在途请求。 */
+  pending: boolean;
+}
+
+export interface UiResponseState {
+  /**
+   * 每个标签当前的那份响应，键是标签 id。
+   *
+   * 只在内存里：它是**这一次运行**的界面状态，不是落库的东西（落库的是
+   * `responseHistory` 那张表，且那是另一套形状——存下来的行会被裁到 256 KiB，
+   * 也不带脚本产出）。
+   *
+   * 份数不需要额外的闸：响应随标签走，标签关掉时那份一并回收（见
+   * `slices/ui-tabs.ts` 的 `closeTab` 等动作），故这里的份数至多是「用户同时
+   * 打开着的标签数」。每份都带着一份响应体（上限是「响应体积上限」那个设置），
+   * 故开着的标签多时内存也随之涨——这是明摆着的取舍，不是漏掉的闸。
+   */
+  lastResponses: Record<string, EndpointResponseState>;
   /**
    * 每个 endpoint 的发送历史，**最新在末尾**——`appendCapped` 写这个次序，
    * {@link mergeLoaded} 把服务端读回的行归一到它。只在渲染时反转，别处不许反。
@@ -100,8 +143,8 @@ export interface UiResponseActions {
   /**
    * 记一次发送到历史条并落盘。
    *
-   * 内存那一半必须**同步**：发送按钮的体验依赖历史行与 `lastResponse` 同一刻
-   * 出现，所以先插乐观行，落盘在其后 fire-and-forget。
+   * 内存那一半必须**同步**：发送按钮的体验依赖历史行与响应同一刻出现，所以先插
+   * 乐观行，落盘在其后 fire-and-forget。
    *
    * `request` 是那次发送出去的请求；它缺席时行里就没有请求侧栏可画。
    */
@@ -143,19 +186,52 @@ export interface UiResponseActions {
   trimResponseHistory: (keep: number) => void;
   addResponseExample: (endpointId: string, response: ApiResponse) => string;
   deleteResponseExample: (endpointId: string, exampleId: string) => void;
-  setLastResponse: (resp: ApiResponse | null, request?: StoredRequestSnapshot | null) => void;
-  /** 记下最近一次发送的脚本产出。 */
-  setLastScriptOutcome: (outcome: ScriptOutcome | null) => void;
-  setRequestPending: (pending: boolean) => void;
+  /**
+   * 记下**某个标签**最近一次的响应与那次请求的快照。
+   *
+   * 两个参数必须成对写：界面上的响应区左右两栏描述同一次调用，缺一半就成了
+   * 「今天的请求配上一份旧的响应」。
+   *
+   * 换响应就换掉脚本产出：脚本产出**属于**那一次响应，回看一条历史响应时它并不存在
+   * （历史表里不存脚本结果），留着上一次发送的产出只会让人把两件事看成一件。
+   * 发送路径因此先 `setLastResponse` 再 `setLastScriptOutcome`。
+   */
+  setLastResponse: (
+    tabId: string,
+    resp: ApiResponse | null,
+    request?: StoredRequestSnapshot | null,
+  ) => void;
+  /** 记下某个标签最近一次发送的脚本产出。 */
+  setLastScriptOutcome: (tabId: string, outcome: ScriptOutcome | null) => void;
+  /** 标记某个标签上有没有在途请求。 */
+  setRequestPending: (tabId: string, pending: boolean) => void;
 }
 
 export type UiResponse = UiResponseState & UiResponseActions;
 
+/**
+ * 写某个标签的那一份。
+ *
+ * **新键补一份空的**：标签刚打开、还没发过请求时它没有条目，于是四个字段都得从
+ * 空值起步——否则界面上读 `response` 会拿到 `undefined` 而不是 `null`。
+ */
+function writeTabResponse(
+  map: Record<string, EndpointResponseState>,
+  tabId: string,
+  patch: (prev: EndpointResponseState) => EndpointResponseState,
+): Record<string, EndpointResponseState> {
+  const prev = map[tabId] ?? {
+    response: null,
+    request: null,
+    scriptOutcome: null,
+    pending: false,
+  };
+  return { ...map, [tabId]: patch(prev) };
+}
+
 export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set) => ({
-  lastResponse: null,
-  lastRequest: null,
-  lastScriptOutcome: null,
-  requestPending: false,
+  // 空表：还没有任何标签发过请求。
+  lastResponses: {},
   responseHistory: {},
   responseExamples: {},
 
@@ -313,18 +389,39 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
     set((s) => {
       const prev = s.responseExamples[endpointId];
       if (!prev) return {};
-      const next = prev.filter((ex) => ex.id !== exampleId);
-      if (next.length === prev.length) return {};
-      return {
-        responseExamples: { ...s.responseExamples, [endpointId]: next },
-      };
+      const next = { ...s.responseExamples };
+      const filtered = prev.filter((ex) => ex.id !== exampleId);
+      if (filtered.length === prev.length) return {};
+      next[endpointId] = filtered;
+      return { responseExamples: next };
     }),
 
   // 换响应就换掉脚本产出：脚本产出**属于**那一次响应，回看一条历史响应时它并不存在
   // （历史表里不存脚本结果），留着上一次发送的产出只会让人把两件事看成一件。
   // 发送路径因此先 `setLastResponse` 再 `setLastScriptOutcome`。
-  setLastResponse: (resp, request) =>
-    set({ lastResponse: resp, lastRequest: request ?? null, lastScriptOutcome: null }),
-  setLastScriptOutcome: (outcome) => set({ lastScriptOutcome: outcome }),
-  setRequestPending: (pending) => set({ requestPending: pending }),
+  setLastResponse: (tabId, resp, request) =>
+    set((s) => ({
+      lastResponses: writeTabResponse(s.lastResponses, tabId, (prev) => ({
+        response: resp,
+        request: request ?? null,
+        scriptOutcome: null,
+        // 在途标记**不**跟着换：响应到达时 `handleSend` 的 finally 还没跑，
+        // 清掉它会让 PendingState 先消失、然后才轮到响应出现。
+        pending: prev.pending,
+      })),
+    })),
+  setLastScriptOutcome: (tabId, outcome) =>
+    set((s) => ({
+      lastResponses: writeTabResponse(s.lastResponses, tabId, (prev) => ({
+        ...prev,
+        scriptOutcome: outcome,
+      })),
+    })),
+  setRequestPending: (tabId, pending) =>
+    set((s) => ({
+      lastResponses: writeTabResponse(s.lastResponses, tabId, (prev) => ({
+        ...prev,
+        pending,
+      })),
+    })),
 });

@@ -36,12 +36,21 @@ import { classifyResponse, downloadResponse } from './responseKind';
  * 请求配上一个旧的响应。
  */
 export function ResponseViewer() {
-  const response = useAppStore((s) => s.lastResponse);
-  // 那次请求的快照。与 `lastResponse` 同一刻写入，故两者描述同一次调用。
-  const request = useAppStore((s) => s.lastRequest);
-  const pending = useAppStore((s) => s.requestPending);
+  // 响应是**挂在标签上**的：这一份属于当前标签那个接口工作区。取的是活动标签的
+  // id（endpoint 标签的 id 就是接口 id），故树里点接口、标签条切标签、命令面板
+  // 跳转读到的都是同一份东西——界面上永远显示「这个接口自己那一次发送」的结果，
+  // 不会串到别的接口上。
+  //
+  // 用 `activeTabId` 这把现成的键（`useActiveEndpoint` 与 `useActiveEndpointResource`
+  // 都用它回答「当前是哪个接口」），不必为此另造一个选择器。
+  const tabId = useAppStore((s) => s.activeTabId);
+  const tabState = useAppStore((s) => (tabId ? s.lastResponses[tabId] : undefined));
+  const response = tabState?.response ?? null;
+  // 那次请求的快照。与 `response` 同一刻写入，故两者描述同一次调用。
+  const request = tabState?.request ?? null;
+  const pending = tabState?.pending ?? false;
   // 最近一次发送的脚本产出。脚本的成败不改写请求本身的成败，故失败信息与断言在这里单独呈现。
-  const scriptOutcome = useAppStore((s) => s.lastScriptOutcome);
+  const scriptOutcome = tabState?.scriptOutcome ?? null;
   // 取资源形式而非行形式：响应可能属于从未保存过的接口，而「保存为示例」以此 id 为键，
   // 对 `draft:` 前缀的 id 同样成立。
   const endpoint = useActiveEndpointResource()?.node ?? null;
