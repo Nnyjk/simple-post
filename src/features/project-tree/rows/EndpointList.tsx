@@ -58,22 +58,12 @@ export function EndpointList({
             onSaveEdit={(name) => onEndpointSaveEdit(ep.id, name)}
             onCancelEdit={onCancelEdit}
             onContextMenu={(e) => onEndpointContextMenu(e, ep.id)}
-            onDragStart={(e) => {
-              // 拖拽一个属于多选集合的接口时，拖的是整个选区；否则只拖这一行。
-              const ids =
-                selectedEndpointIds.has(ep.id) && selectedEndpointIds.size > 1
-                  ? Array.from(selectedEndpointIds)
-                  : [ep.id];
-              dragContext.setDataTransfer(e, { kind: 'endpoint', ids });
-            }}
-            onDragEnd={dragContext.handleDragEnd}
-            onDragOver={dragContext.makeDragOverHandler({ kind: 'endpoint', id: ep.id })}
-            onDragLeave={dragContext.makeDragLeaveHandler({ kind: 'endpoint', id: ep.id })}
-            onDrop={dragContext.makeDropHandler({ kind: 'endpoint', id: ep.id })}
-            dropHint={
-              dragContext.dropHint && dragContext.dropHint.key === `endpoint:${ep.id}`
-                ? dragContext.dropHint.zone
-                : null
+            dragContext={dragContext}
+            // 拖拽一个属于多选集合的接口时，拖的是整个选区；否则只拖这一行。
+            dragIds={
+              selectedEndpointIds.has(ep.id) && selectedEndpointIds.size > 1
+                ? Array.from(selectedEndpointIds)
+                : [ep.id]
             }
           />
         );

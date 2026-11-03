@@ -49,7 +49,7 @@ pub fn move_many(
     let new_root_id = match new_parent_id {
         None => {
             for m in &movers {
-                if m.kind != ResourceNodeType::Module {
+                if !m.kind.may_sit_at_project_top() {
                     return Err(AppError::Validation(format!(
                         "only a module can sit at the top of a project; \
                          node {} is a {}",

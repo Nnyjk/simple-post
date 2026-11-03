@@ -3,6 +3,11 @@ import type { EndpointDetail, ResourceNode } from '@/types/domain';
 
 export type TargetKind = 'project' | 'module' | 'collection' | 'endpoint';
 
+/**
+ * 树里的三种节点。`project` 不是节点 —— 它是模块的父级作用域，故不在其中。
+ */
+export type TreeNodeKind = Exclude<TargetKind, 'project'>;
+
 export interface DeleteTarget {
   kind: TargetKind;
   id: string;
@@ -15,7 +20,7 @@ export interface DeleteTarget {
 export type EditTarget = { kind: TargetKind; id: string };
 
 export interface DragPayload {
-  kind: TargetKind;
+  kind: TreeNodeKind;
   /** 被拖的全部 id（单选就是一个元素的数组）。 */
   ids: string[];
 }
@@ -66,9 +71,9 @@ export interface DragContextValue {
    */
   moveNodes: (nodeIds: string[], parentId: string | null, index: number) => void;
   setDataTransfer: (e: ReactDragEvent, payload: DragPayload) => void;
-  makeDragOverHandler: (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => void;
-  makeDragLeaveHandler: (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => void;
-  makeDropHandler: (target: { kind: TargetKind; id: string }) => (e: ReactDragEvent) => void;
+  makeDragOverHandler: (target: { kind: TreeNodeKind; id: string }) => (e: ReactDragEvent) => void;
+  makeDragLeaveHandler: (target: { kind: TreeNodeKind; id: string }) => (e: ReactDragEvent) => void;
+  makeDropHandler: (target: { kind: TreeNodeKind; id: string }) => (e: ReactDragEvent) => void;
   handleDragEnd: (e: ReactDragEvent) => void;
   dropHint: { key: string; zone: DropZone } | null;
 }

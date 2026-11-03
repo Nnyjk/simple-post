@@ -1,0 +1,14 @@
+{
+  "matrix": [
+    { "child": "module", "parent": "module", "allowed": false },
+    { "child": "module", "parent": "collection", "allowed": false },
+    { "child": "module", "parent": "endpoint", "allowed": false },
+    { "child": "collection", "parent": "module", "allowed": true },
+    { "child": "collection", "parent": "collection", "allowed": true },
+    { "child": "collection", "parent": "endpoint", "allowed": false },
+    { "child": "endpoint", "parent": "module", "allowed": true },
+    { "child": "endpoint", "parent": "collection", "allowed": true },
+    { "child": "endpoint", "parent": "endpoint", "allowed": false }
+  ],
+  "projectTopLevel": ["module"]
+}

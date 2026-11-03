@@ -69,3 +69,8 @@ mod patch_tests;
 #[cfg(test)]
 #[path = "domain/body_test.rs"]
 mod body_tests;
+
+/// 跨语言样本——与渲染进程侧 `src/lib/__tests__/placement-parity.test.ts` 读同一份文件。
+#[cfg(test)]
+#[path = "domain/placement_parity_test.rs"]
+mod placement_parity_tests;

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, focusRing } from '@/lib/utils';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
-import type { EditTarget, TargetKind } from './tree-types';
+import type { DragContextValue, EditTarget, TargetKind } from './tree-types';
 import { buildTree, filterTree } from './tree-utils';
 import { useTreeDnd } from './hooks/useTreeDnd';
 import { useEditMenu } from './hooks/useEditMenu';
@@ -207,6 +207,18 @@ export function ProjectTree() {
     moveNodes,
   });
 
+  // 拖放接线打包成一份，供树里的行统一接上。行的拖放行为全部由这一份决定 ——
+  // 三种行各写一遍接线时，改一处要改三处，漏掉一处不会报错。
+  const dragContext: DragContextValue = {
+    moveNodes,
+    setDataTransfer,
+    makeDragOverHandler,
+    makeDragLeaveHandler,
+    makeDropHandler,
+    handleDragEnd,
+    dropHint,
+  };
+
   // ---------- render ----------
   return (
     <aside
@@ -353,21 +365,7 @@ export function ProjectTree() {
                   onCancelEdit={cancelEdit}
                   onContextMenu={(e) => openMenu(e, 'module', modBranch.module.id)}
                   onPlusClick={openModulePlusMenu(modBranch.module.id)}
-                  onDragStart={(e) => {
-                    setDataTransfer(e, { kind: 'module', ids: [modBranch.module.id] });
-                  }}
-                  onDragEnd={handleDragEnd}
-                  onDragOver={makeDragOverHandler({
-                    kind: 'module',
-                    id: modBranch.module.id,
-                  })}
-                  onDragLeave={makeDragLeaveHandler({ kind: 'module', id: modBranch.module.id })}
-                  onDrop={makeDropHandler({ kind: 'module', id: modBranch.module.id })}
-                  dropHint={
-                    dropHint && dropHint.key === `module:${modBranch.module.id}`
-                      ? dropHint.zone
-                      : null
-                  }
+                  dragContext={dragContext}
                 />
                 <TreeChildren expanded={!!modBranch.module.expanded}>
                   {/* 直接挂在模块上的接口，排在其集合之上 —— 模块同时接受两种子节点。 */}
@@ -389,15 +387,7 @@ export function ProjectTree() {
                       }}
                       onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
                       onCancelEdit={cancelEdit}
-                      dragContext={{
-                        moveNodes,
-                        setDataTransfer,
-                        makeDragOverHandler,
-                        makeDragLeaveHandler,
-                        makeDropHandler,
-                        handleDragEnd,
-                        dropHint,
-                      }}
+                      dragContext={dragContext}
                     />
                   )}
                   <CollectionBranch
@@ -422,15 +412,7 @@ export function ProjectTree() {
                       openMenu(e, 'endpoint', id);
                     }}
                     onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
-                    dragContext={{
-                      moveNodes,
-                      setDataTransfer,
-                      makeDragOverHandler,
-                      makeDragLeaveHandler,
-                      makeDropHandler,
-                      handleDragEnd,
-                      dropHint,
-                    }}
+                    dragContext={dragContext}
                   />
                 </TreeChildren>
               </div>

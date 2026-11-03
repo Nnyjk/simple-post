@@ -6,14 +6,16 @@
  *
  * 移动是一个动作而不是三个，而且无法表达成一次普通的字段写入：本地 `set()`
  * 会重算目标同级节点的 `sortOrder`，并把被移动子树里每个后代的 `rootId`
- * 一起带走。`ResourceNodeType::may_under` 这条契约——module 只能顶层、endpoint
+ * 一起带走。父子类型矩阵（`@/lib/node-placement.ts`）——模块只能顶层、endpoint
  * 只能挂在 collection 或 module 下、collection 只能挂在 module 或 collection
- * 下——由 Rust 里的触发器强制；下面的守卫是它的乐观镜像，所以被拒的拖放
+ * 下——由 Rust 里的触发器强制；下面的守卫是它的镜像，所以被拒的拖放
  * 绝不会渲染出后端本来就不会接受的状态。
  */
 import type { StateCreator } from 'zustand';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { indexByParent } from '@/lib/tree-index';
+import { mayUnder } from '@/lib/node-placement';
+import type { ResourceNode } from '@/types/domain';
 import type { AppState } from '../app-store';
 import { collectSubtree, renumber } from './crud-helpers';
 
@@ -22,88 +24,109 @@ export interface MoveCrudActions {
   /**
    * 把一个或多个节点移到 `parentId` 下的同级槽位 `index`。
    *
-   * `parentId: null` 表示"项目顶层"，且只对 module 合法。`nodeIds` 按节点应当
+   * `parentId: null` 表示「项目顶层」，且只对 module 合法。`nodeIds` 按节点应当
    * 写入的先后排列，所以多选拖放会保持用户挑选的顺序。
    */
   moveNodes: (nodeIds: string[], parentId: string | null, index: number) => Promise<void>;
 }
 
+/**
+ * 算出一次移动之后的整份节点表。
+ *
+ * 返回 `null` 表示这次移动不合法 —— 守卫不通过时整次移动都不该发生，连请求也不该发。
+ * 守卫与后端的 `db::nodes::move_many` 一一对应：类型矩阵、项目边界与成环检查。
+ */
+function computeMove(
+  nodes: ResourceNode[],
+  nodeIds: string[],
+  parentId: string | null,
+  index: number,
+): ResourceNode[] | null {
+  if (nodeIds.length === 0) return null;
+  const idSet = new Set(nodeIds);
+  const childrenIndex = indexByParent(nodes);
+  const sources = nodes.filter((n) => idSet.has(n.id));
+  // 请求的 id 必须全都在树里。有一部分找不到时，只把匹配到的那几个乐观移动出去，却把
+  // 整份 `nodeIds` 发给后端 —— 后端因不认识的 id 拒绝这次移动，再把本地状态回滚回去，
+  // 用户看到的是「拖了一下又弹回去」。守卫在这里把整次移动拦下：不改状态，也不发请求。
+  if (sources.length !== idSet.size) return null;
+
+  // 目标父节点，以及这些节点将落入的项目。`rootId` 就在每个节点身上，
+  // 所以项目边界检查是一次字符串比较。
+  let targetRootId: string;
+  if (parentId === null) {
+    // 「项目顶层」——那里只放得下模块。
+    if (sources.some((n) => !mayUnder(n.kind, 'project'))) return null;
+    targetRootId = sources[0].rootId;
+  } else {
+    const targetParent = nodes.find((n) => n.id === parentId);
+    if (!targetParent) return null;
+    // 类型矩阵：这个子类型能不能坐在那个父类型下。缺这一步时，一次不合法的移动会先把
+    // 乐观状态画出来，再等后端 400 才回滚。
+    if (sources.some((n) => !mayUnder(n.kind, targetParent.kind))) return null;
+    targetRootId = targetParent.rootId;
+  }
+
+  // 防环：节点不能被移到它自己或它的任何后代之下。UI 会禁用这类目标位置，
+  // 但陈旧的拖放载荷仍可能报出这样一个 id。
+  const movedSubtrees = new Set<string>();
+  for (const src of sources) {
+    for (const nid of collectSubtree(src.id, childrenIndex)) movedSubtrees.add(nid);
+  }
+  if (parentId !== null && movedSubtrees.has(parentId)) return null;
+
+  // 每个源节点必须已经属于目标所在的项目。服务端否则会拒绝这次移动；
+  // 本地检查在这里就拒绝，免得乐观状态显示出将会 400 的东西。
+  for (const src of sources) {
+    if (src.rootId !== targetRootId) return null;
+  }
+
+  // `siblings` 剔掉被移动者的目标同级节点——它们会在下方重新插到 `index` 处。
+  //
+  // 目标是顶层时，同级就是目标项目的 module，也就是那些没有父节点的节点；
+  // 只按 `parentId === null` 界定会把所有项目的顶层一次性扫进来。
+  const siblings =
+    parentId === null
+      ? nodes
+          .filter((n) => n.parentId === null && n.rootId === targetRootId && !idSet.has(n.id))
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+      : (childrenIndex.get(parentId) ?? []).filter((n) => !idSet.has(n.id));
+
+  // 被移动的行保持调用方给的顺序，所以多选拖放会按用户挑选的次序依次插入。
+  const movedRows = sources
+    .slice()
+    .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id))
+    .map((n) => ({ ...n, parentId, rootId: targetRootId }));
+
+  const clampedIndex = Math.max(0, Math.min(index, siblings.length));
+  const renumbered = renumber([
+    ...siblings.slice(0, clampedIndex),
+    ...movedRows,
+    ...siblings.slice(clampedIndex),
+  ]);
+  const renumberedById = new Map(renumbered.map((n) => [n.id, n] as const));
+
+  // 每个节点要么保住原槽位（在目标之外），要么是被重新编号的行，
+  // 要么是某个被移动行的后代——后者的 `rootId` 必须跟着走。只重排目标
+  // 那一层会漏掉最后这一类，导致跨项目移动子树的乐观状态与数据库不一致。
+  return nodes.map((n) => {
+    const renamed = renumberedById.get(n.id);
+    if (renamed) return renamed;
+    if (movedSubtrees.has(n.id) && n.rootId !== targetRootId) {
+      return { ...n, rootId: targetRootId };
+    }
+    return n;
+  });
+}
+
 export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (set, get) => ({
   moveNodes: async (nodeIds, parentId, index) => {
     const prevNodes = get().nodes;
-    set((s) => {
-      if (nodeIds.length === 0) return {};
-      const idSet = new Set(nodeIds);
-      const childrenIndex = indexByParent(s.nodes);
-      const sources = s.nodes.filter((n) => idSet.has(n.id));
-      if (sources.length === 0) return {};
-
-      // 目标父节点，以及这些节点将落入的项目。`rootId` 就在每个节点身上，
-      // 所以项目边界检查是一次字符串比较。
-      let targetRootId: string;
-      if (parentId === null) {
-        // "项目顶层"——只对 module 合法。
-        if (sources.some((n) => n.kind !== 'module')) return {};
-        targetRootId = sources[0].rootId;
-      } else {
-        const targetParent = s.nodes.find((n) => n.id === parentId);
-        if (!targetParent) return {};
-        targetRootId = targetParent.rootId;
-      }
-
-      // 防环：节点不能被移到它自己或它的任何后代之下。UI 会禁用这类目标位置，
-      // 但陈旧的拖放载荷仍可能报出这样一个 id。
-      const movedSubtrees = new Set<string>();
-      for (const src of sources) {
-        for (const nid of collectSubtree(src.id, childrenIndex)) movedSubtrees.add(nid);
-      }
-      if (parentId !== null && movedSubtrees.has(parentId)) return {};
-
-      // 每个源节点必须已经属于目标所在的项目。服务端否则会拒绝这次移动；
-      // 本地检查在这里就拒绝，免得乐观状态显示出将会 400 的东西。
-      for (const src of sources) {
-        if (src.rootId !== targetRootId) return {};
-      }
-
-      // `siblings` 剔掉被移动者的目标同级节点——它们会在下方重新插到 `index` 处。
-      //
-      // 目标是顶层时，同级就是目标项目的 module，也就是那些没有父节点的节点；
-      // 只按 `parentId === null` 界定会把所有项目的顶层一次性扫进来。
-      const siblings =
-        parentId === null
-          ? s.nodes
-              .filter((n) => n.parentId === null && n.rootId === targetRootId && !idSet.has(n.id))
-              .sort((a, b) => a.sortOrder - b.sortOrder)
-          : (childrenIndex.get(parentId) ?? []).filter((n) => !idSet.has(n.id));
-
-      // 被移动的行保持调用方给的顺序，所以多选拖放会按用户挑选的次序依次插入。
-      const movedRows = sources
-        .slice()
-        .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id))
-        .map((n) => ({ ...n, parentId, rootId: targetRootId }));
-
-      const clampedIndex = Math.max(0, Math.min(index, siblings.length));
-      const renumbered = renumber([
-        ...siblings.slice(0, clampedIndex),
-        ...movedRows,
-        ...siblings.slice(clampedIndex),
-      ]);
-      const renumberedById = new Map(renumbered.map((n) => [n.id, n] as const));
-
-      // 每个节点要么保住原槽位（在目标之外），要么是被重新编号的行，
-      // 要么是某个被移动行的后代——后者的 `rootId` 必须跟着走。只重排目标
-      // 那一层会漏掉最后这一类，导致跨项目移动子树的乐观状态与数据库不一致。
-      const next = s.nodes.map((n) => {
-        const renamed = renumberedById.get(n.id);
-        if (renamed) return renamed;
-        if (movedSubtrees.has(n.id) && n.rootId !== targetRootId) {
-          return { ...n, rootId: targetRootId };
-        }
-        return n;
-      });
-
-      return { nodes: next };
-    });
+    const next = computeMove(prevNodes, nodeIds, parentId, index);
+    // 守卫不通过 —— 这次移动不发生，也不发请求。发过去只会被后端按同一套规则拒绝，
+    // 而乐观状态已经先画上去了，那会与后端落库的结果对不上。
+    if (!next) return;
+    set({ nodes: next });
     try {
       await invokeCmd<void>(COMMANDS.nodesMove, { nodeIds, parentId, index });
     } catch (e) {

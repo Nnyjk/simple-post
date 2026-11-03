@@ -61,6 +61,15 @@ impl ResourceNodeType {
             ),
         }
     }
+
+    /// 本类型的节点能否落在项目顶层（`parent_id = NULL`）。
+    ///
+    /// 模块的父级是项目而不是节点，故这是「没有节点父」的唯一合法情形；集合与接口的
+    /// 父级永远是节点。前端 `src/lib/node-placement.ts` 读的是同一张矩阵的镜像，两侧由
+    /// `fixtures/placement-parity.json` 钉住。
+    pub fn may_sit_at_project_top(self) -> bool {
+        matches!(self, ResourceNodeType::Module)
+    }
 }
 
 /// 资源树的一行：只有结构与身份。

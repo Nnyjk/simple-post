@@ -67,24 +67,7 @@ export function CollectionBranch(props: CollectionBranchProps) {
               onCancelEdit={onCancelEdit}
               onContextMenu={(e) => onContextMenu(e, 'collection', collection.id)}
               onPlusClick={onPlusClick(collection.id)}
-              onDragStart={(e) =>
-                dragContext.setDataTransfer(e, { kind: 'collection', ids: [collection.id] })
-              }
-              onDragEnd={dragContext.handleDragEnd}
-              onDragOver={dragContext.makeDragOverHandler({
-                kind: 'collection',
-                id: collection.id,
-              })}
-              onDragLeave={dragContext.makeDragLeaveHandler({
-                kind: 'collection',
-                id: collection.id,
-              })}
-              onDrop={dragContext.makeDropHandler({ kind: 'collection', id: collection.id })}
-              dropHint={
-                dragContext.dropHint && dragContext.dropHint.key === `collection:${collection.id}`
-                  ? dragContext.dropHint.zone
-                  : null
-              }
+              dragContext={dragContext}
             />
             {(colEndpoints.length > 0 || subCols.length > 0) && (
               <TreeChildren expanded={!!collection.expanded}>
