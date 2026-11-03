@@ -24,8 +24,6 @@ struct ResolveTemplateArgs {
     template: String,
     #[serde(default)]
     env_id: Option<String>,
-    #[serde(default)]
-    scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,8 +53,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                 "type": "object",
                 "properties": {
                     "template": { "type": "string" },
-                    "env_id": { "type": "string" },
-                    "scope": { "type": "string", "enum": ["request", "headers", "params", "body", "auth"], "description": "Accepted but not applied: every placeholder in the template is resolved, whatever part of a request it came from." }
+                    "env_id": { "type": "string" }
                 },
                 "required": ["template"],
                 "additionalProperties": false,
@@ -138,9 +135,6 @@ async fn tool_api_resolve_template(
         Default::default()
     };
 
-    // `scope` 不参与替换：模板里的占位符无论出现在哪一段都一起替换，故写上它与
-    // 省略它得到同一个结果。
-    let _ = a.scope;
     let resolved = crate::variable_fill::resolve_template(&a.template, &vars);
 
     Ok(CallToolResult::json(json!({
