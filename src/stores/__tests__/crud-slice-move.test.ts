@@ -135,6 +135,27 @@ describe('crud-slice: moveNodes 的守卫', () => {
     assert.equal(byId(harness, 'c1').parentId, 'm1', 'c1 不能被拖进自己的后代');
     assert.equal(calls.length, 0, '被守卫拦下的移动不该发请求');
   });
+
+  it('请求的 id 有一部分不在树里时整次移动都不发生', async () => {
+    const harness = makeCrudHarness({}, [], makeNodes());
+    const calls = recordMoves();
+
+    // ghost 不在树里。匹配到的那一个（e1）类型上是合法的（接口挂模块下允许），
+    // 故只有「请求的 id 必须全都在树里」这条守卫拦得住它。
+    await harness.slice.moveNodes(['e1', 'ghost'], 'm1', 0);
+
+    assert.equal(byId(harness, 'e1').parentId, 'c1', 'e1 不该被移动 —— 请求里有不认识的 id');
+    assert.equal(calls.length, 0, '被守卫拦下的移动不该发请求');
+  });
+
+  it('请求的 id 全都不在树里时这次移动不发生', async () => {
+    const harness = makeCrudHarness({}, [], makeNodes());
+    const calls = recordMoves();
+
+    await harness.slice.moveNodes(['ghost'], 'm1', 0);
+
+    assert.equal(calls.length, 0, '被守卫拦下的移动不该发请求');
+  });
 });
 
 describe('crud-slice: moveNodes 的槽位', () => {

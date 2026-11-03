@@ -46,7 +46,10 @@ function computeMove(
   const idSet = new Set(nodeIds);
   const childrenIndex = indexByParent(nodes);
   const sources = nodes.filter((n) => idSet.has(n.id));
-  if (sources.length === 0) return null;
+  // 请求的 id 必须全都在树里。有一部分找不到时，只把匹配到的那几个乐观移动出去，却把
+  // 整份 `nodeIds` 发给后端 —— 后端因不认识的 id 拒绝这次移动，再把本地状态回滚回去，
+  // 用户看到的是「拖了一下又弹回去」。守卫在这里把整次移动拦下：不改状态，也不发请求。
+  if (sources.length !== idSet.size) return null;
 
   // 目标父节点，以及这些节点将落入的项目。`rootId` 就在每个节点身上，
   // 所以项目边界检查是一次字符串比较。
