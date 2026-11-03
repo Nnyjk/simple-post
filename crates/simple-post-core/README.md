@@ -10,9 +10,9 @@ crates/simple-post-core/
 ├── README.md
 └── src/
     ├── lib.rs                 # re-exports body / db / domain / dynamic /
-    │                          # error / http_executor / mcp_metrics / oauth2 /
-    │                          # path_params / permissions / script / spec /
-    │                          # template / tls / url
+    │                          # error / http_executor / oauth2 / path_params /
+    │                          # permissions / script / spec / template / tls /
+    │                          # url
     ├── body.rs                # the request-body rules — how each body mode's
     │                          # content is parsed, templated and assembled
     ├── db/                    # SQLite + CRUD modules
@@ -71,10 +71,10 @@ crates/simple-post-core/
     ├── error.rs               # AppError enum
     ├── http_executor.rs       # reqwest-based HTTP executor (used by
     │                          # `http_request` Tauri command)
-    ├── mcp_metrics.rs         # in-memory MCP daemon metrics
     ├── oauth2.rs              # facade over oauth2/
     ├── oauth2/                # the OAuth2 token flow
     │   ├── api.rs             #   the entry both transports share
+    │   ├── config.rs          #   the {{var}} substitution in the OAuth2 config
     │   ├── form.rs            #   the x-www-form-urlencoded decoding
     │   ├── http_client.rs     #   the `oauth2` crate's outbound adapter
     │   ├── inject.rs          #   putting the token into the request
@@ -126,7 +126,7 @@ the cycle.
 ## Consumers
 
 - `crates/simple-post-server` (the headless host): `pub use simple_post_core::{db,
-  domain, error, http_executor, mcp_metrics, oauth2, permissions, script, spec}`
+  domain, error, http_executor, oauth2, permissions, script, spec}`
   re-exports the modules under the historical `crate::db::*` / `crate::domain::*`
   paths so call sites don't need to be rewritten.
 - `src-tauri` (the Tauri shell + `serve-web`): `pub use simple_post_core::{…}`

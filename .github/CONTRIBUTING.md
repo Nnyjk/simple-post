@@ -71,7 +71,7 @@ npm run check
 
 ### 5. MCP 的 stdout 只有 JSON-RPC
 
-`simple-post-mcp` 里 stdout 只承载 JSON-RPC 帧。日志、panic、`__mcp_metrics__{…}` 遥测一律走 stderr。stdout 上出现非 JSON 会直接让 AI 客户端崩掉。
+`simple-post-mcp` 里 stdout 只承载 JSON-RPC 帧。日志与 panic 一律走 stderr。stdout 上出现非 JSON 会直接让 AI 客户端崩掉。
 
 出处：`AGENTS.md` → *MCP stdout discipline*。
 

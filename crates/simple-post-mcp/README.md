@@ -17,8 +17,8 @@ endpoint instead (start `simple-post serve-web`, point the client at
 `http://<host>:<port>/mcp`), which needs nothing installed client-side.
 
 The shared low-level layer (`db`, `domain`, `dynamic`, `error`,
-`http_executor`, `mcp_metrics`, `oauth2`, `path_params`, `permissions`,
-`script`, `spec`, `template`, `tls`, `url`) lives in the sibling
+`http_executor`, `oauth2`, `path_params`, `permissions`, `script`, `spec`,
+`template`, `tls`, `url`) lives in the sibling
 `simple-post-core` crate so both this crate and the main Tauri crate can
 consume them without creating a cycle.
 
@@ -45,7 +45,8 @@ crates/simple-post-mcp/
     │   └── ops.rs
     ├── variable_fill.rs       # facade over variable_fill/ (the interpolation rules)
     ├── variable_fill/         # the interpolation rules, one file per concern
-    │   ├── auth.rs            #   the bearer / basic / apikey / oauth2 fields
+    │   ├── auth.rs            #   the bearer / basic / apikey fields
+    │   │                      #   the oauth2 fields are substituted by core
     │   ├── base_url.rs        #   the base URL resolution + joining
     │   ├── request.rs         #   the header order + the query append
     │   ├── resolve.rs         #   resolve_endpoint (the main API)
