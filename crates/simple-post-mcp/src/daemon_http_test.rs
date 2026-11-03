@@ -381,6 +381,5 @@ fn test_state() -> AppState {
             .build(r2d2_sqlite::SqliteConnectionManager::memory())
             .expect("in-memory pool"),
         started_at: std::time::Instant::now(),
-        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     }
 }

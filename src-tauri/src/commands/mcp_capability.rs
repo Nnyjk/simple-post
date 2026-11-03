@@ -41,12 +41,10 @@ pub async fn mcp_capability_set(
 pub async fn mcp_capability_list_tools(
     pool: tauri::State<'_, DbPool>,
 ) -> Result<Vec<String>, AppError> {
-    use std::sync::Arc;
     use std::time::Instant;
     let state = crate::mcp::AppState {
         pool: pool.inner().clone(),
         started_at: Instant::now(),
-        metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
     };
     Ok(crate::mcp::tool_descriptors(&state)
         .await

@@ -49,12 +49,9 @@ pub mod web_api;
 
 // 再导出共享的底层，好让调用点在 workspace 抽取与本次 crate 拆分之后继续使用
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /
-// `crate::permissions::*` / `crate::http_executor::*` /
-// `crate::mcp_metrics::*` / `crate::mcp::*`。
+// `crate::permissions::*` / `crate::http_executor::*` / `crate::mcp::*`。
 // `spec` 也在其中：一份接口规格的线格式与落库编排在 core，三个宿主都认它。
-pub use simple_post_core::{
-    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script, spec,
-};
+pub use simple_post_core::{db, domain, error, http_executor, oauth2, permissions, script, spec};
 
 // 转换层本身也再导出一次：旧的调用点写 `crate::interchange::…` 时仍能解析到
 // `simple_post_interchange`。本仓库内的调用点目前都写 `simple_post_interchange::…`。
@@ -146,7 +143,6 @@ pub fn run_mcp(
         let state = std::sync::Arc::new(crate::mcp::AppState {
             pool,
             started_at: std::time::Instant::now(),
-            metrics: std::sync::Arc::new(crate::mcp_metrics::McpMetrics::new()),
         });
         tokio::spawn(async move {
             if let Err(e) =

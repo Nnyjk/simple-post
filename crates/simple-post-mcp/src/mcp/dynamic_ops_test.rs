@@ -182,7 +182,6 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
     Arc::new(AppState {
         pool,
         started_at: Instant::now(),
-        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 

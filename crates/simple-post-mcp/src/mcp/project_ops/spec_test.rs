@@ -32,7 +32,6 @@ fn state() -> Arc<AppState> {
     Arc::new(AppState {
         pool: db::init(&dir).unwrap(),
         started_at: Instant::now(),
-        metrics: Arc::new(simple_post_core::mcp_metrics::McpMetrics::new()),
     })
 }
 

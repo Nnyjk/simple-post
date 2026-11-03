@@ -59,6 +59,7 @@ pub(super) async fn execute_resolved(
         body_base64,
         body_mode,
         auth,
+        vars,
         missing_vars,
         missing_path_params,
         ..
@@ -99,7 +100,9 @@ pub(super) async fn execute_resolved(
         ..
     } = &auth
     {
-        let token = simple_post_core::oauth2::ensure_token(&state.pool, cfg).await?;
+        // 变量池交给 core：OAuth2 配置里那四个字段的 `{{var}}` 由 core 在取 token
+        // 之前替换（规则见 `simple_post_core::oauth2`）。MCP 侧不自己替换。
+        let token = simple_post_core::oauth2::ensure_token(&state.pool, cfg, &vars).await?;
         simple_post_core::oauth2::inject(cfg, &token, &mut headers, &mut url);
     }
 
@@ -145,7 +148,6 @@ pub(super) async fn execute_resolved(
     )
     .await?;
 
-    state.metrics.inc();
     Ok(ExecutedRequest {
         url: outcome.request.url,
         http: outcome.http,

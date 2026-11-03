@@ -23,9 +23,7 @@ pub mod commands;
 #[path = "http_request_test.rs"]
 mod http_request_tests;
 
-pub use simple_post_core::{
-    db, domain, error, http_executor, mcp_metrics, oauth2, permissions, script, spec,
-};
+pub use simple_post_core::{db, domain, error, http_executor, oauth2, permissions, script, spec};
 pub use simple_post_mcp::{daemon_http, mcp};
 
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。

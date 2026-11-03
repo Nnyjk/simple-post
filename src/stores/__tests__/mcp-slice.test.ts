@@ -63,8 +63,6 @@ const BASE_RUNNING: McpUiState = {
   pid: 1234,
   port: 4567,
   uptimeMs: 5_000,
-  requestsHandled: 0,
-  currentConnections: 0,
   registeredTools: [],
 };
 
@@ -136,7 +134,7 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
     // ---- 成功路径 ----
     installIpcMock(async (cmd) => {
       if (cmd === 'mcp_status') {
-        return { ...BASE_RUNNING, pid: 9999, requestsHandled: 42 };
+        return { ...BASE_RUNNING, pid: 9999 };
       }
       throw new Error('unexpected cmd: ' + cmd);
     });
@@ -145,7 +143,6 @@ describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
     assert.ok(mcp.mcpStatus, 'mcpStatus populated on success');
     assert.equal(mcp.mcpStatus.status, 'running');
     assert.equal(mcp.mcpStatus.pid, 9999, 'success payload merged');
-    assert.equal(mcp.mcpStatus.requestsHandled, 42);
 
     const previousPid = mcp.mcpStatus.pid;
     const previousUptime = mcp.mcpStatus.uptimeMs;

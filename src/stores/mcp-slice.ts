@@ -52,8 +52,6 @@ const EMPTY_MCP_STATE: McpUiState = {
   pid: null,
   port: null,
   uptimeMs: 0,
-  requestsHandled: 0,
-  currentConnections: 0,
   registeredTools: [],
 };
 
@@ -276,8 +274,8 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
   refreshMcpStatus: async () => {
     try {
       // Rust 的 `McpStatusDto` 带 `#[serde(rename_all =
-      // "camelCase")]` 以及新增的 `status` 与 `current_connections` 字段，
-      // 所以线路形状现在与 `McpUiState` 一一对应。这一个强制转换是唯一的
+      // "camelCase")]` 以及 `status` 字段，所以线路形状现在与 `McpUiState`
+      // 一一对应。这一个强制转换是唯一的
       // 逃生口——渲染层信任守护进程给的生命周期字符串，而徽标对任何未知值都
       // 退回 `'stopped'`，所以运行时不匹配不可能以 TS 错误的形式暴露出来。
       const dto = (await invokeCmd<unknown>(COMMANDS.mcpStatus)) as McpUiState;

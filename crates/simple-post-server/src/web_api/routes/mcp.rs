@@ -153,7 +153,6 @@ pub(crate) async fn mcp_capability_list_tools(
     let state = crate::mcp::AppState {
         pool,
         started_at: std::time::Instant::now(),
-        metrics: std::sync::Arc::new(crate::mcp_metrics::McpMetrics::new()),
     };
     Ok(Json(
         crate::mcp::tool_descriptors(&state)
@@ -195,9 +194,13 @@ pub(crate) async fn mcp_stop(
 
 /// `POST /api/mcp/start` —— 手动 ON 开关。
 ///
-/// 幂等，而幂等正是重点：对一个健康的 daemon 点「启动」绝不能杀掉重拉——那会丢
+/// 幂等，而幂等正是重点：对一个健康的 daemon 点「启动」不能杀掉重拉——那会丢
 /// 掉进行中的 MCP 会话并无谓折腾端口。故它走 supervisor 的幂等 `start`，原样返回既有
 /// daemon 的身份，只在什么都没被跟踪时才 spawn。
+///
+/// 一条例外：端口记录里的配置指纹与当前这份配置不一致时，那个 daemon 服务的不是要
+/// 的这份配置，故它被替换掉（判据见 `daemon_supervisor::reuse_decision`）。指纹一致
+/// 时绝不杀。
 ///
 /// 响应信封与 `/api/mcp/stop`、`/api/mcp/restart` 同为 `RestartResult` 形状：
 /// `{ ok, pid, port }`，其中 `pid` / `port` 标识当前在服务的 daemon。底层失败
@@ -286,17 +289,11 @@ pub(crate) async fn mcp_json_rpc_post(
 pub(crate) async fn mcp_healthz(state: Arc<McpAppState>) -> axum::Json<serde_json::Value> {
     use daemon_http::HealthzResponse;
     let uptime_ms = state.started_at.elapsed().as_millis() as u64;
-    let requests_handled = state
-        .metrics
-        .requests_handled
-        .load(std::sync::atomic::Ordering::Relaxed);
     let registered_tools = crate::mcp::registered_tool_names();
     axum::Json(serde_json::json!(HealthzResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
         uptime_ms,
-        requests_handled,
-        current_connections: 0,
         registered_tools,
     }))
 }

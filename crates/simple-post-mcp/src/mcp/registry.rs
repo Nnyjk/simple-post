@@ -41,8 +41,7 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
 /// 全部工具名的快照（给 `/mcp/healthz` 与自检）。
 ///
 /// **注意**这是未过滤的全量注册表，不是用户在当前策略下看得见的那份；要
-/// 「按策略之后」的那份请用 [`tool_descriptors`]。healthz 与 metrics 都
-/// 不需要用户的视角。
+/// 「按策略之后」的那份请用 [`tool_descriptors`]。healthz 不需要用户的视角。
 pub fn registered_tool_names() -> Vec<String> {
     tool_table().iter().map(|e| e.name.to_string()).collect()
 }

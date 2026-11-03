@@ -149,10 +149,6 @@ pub struct McpStatusDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
     pub uptime_ms: u64,
-    pub requests_handled: u64,
-    /// 当前活跃的 MCP 客户端连接数。metrics 模块尚未暴露对应计数器，故 supervisor
-    /// 在 daemon 通过 stderr 上报之前一律写 `0`；UI 把它显示成一行「0 connections」。
-    pub current_connections: u64,
     pub registered_tools: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
