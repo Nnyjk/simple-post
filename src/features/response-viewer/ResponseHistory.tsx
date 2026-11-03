@@ -68,11 +68,15 @@ export function ResponseHistory() {
   const now = Date.now();
 
   const onPick = (entry: ResponseHistoryEntry) => {
+    if (!endpointId) return;
     // 解包：查看器展示的是响应，不是存储行。被截断的行带 `bodyTruncated`，但它交出的 body
     // 已是服务端存下的那个截断版本 —— 这里无需再裁。
     //
     // 请求快照一起放回去：响应区左侧画的就是它，故这一次写的是「那次调用的两面」。
-    setLastResponse(entry.response, entry.request ?? null);
+    //
+    // 写的是**这个标签**的那一份：响应是挂在标签上的（见 `slices/ui-response.ts`），
+    // 回看历史是当前接口自己的动作，不该动别人的。
+    setLastResponse(endpointId, entry.response, entry.request ?? null);
   };
 
   const onToggleFavorite = (entry: ResponseHistoryEntry) => {

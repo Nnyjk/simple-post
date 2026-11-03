@@ -43,6 +43,19 @@ let failCreate = false;
 /** 守护进程回什么——刻意**不是**我们提供给它的那个 id。 */
 const SERVER_ID = 'ep-server-1';
 
+/** 一份最小的响应。 */
+const RESPONSE = {
+  status: 200,
+  statusText: 'OK',
+  durationMs: 1,
+  sizeBytes: 0,
+  headers: {},
+  body: '{"ok":true}',
+  contentType: 'application/json',
+  method: 'GET',
+  url: 'http://x.test/y',
+} as never;
+
 let origError: typeof console.error;
 
 beforeEach(() => {
@@ -86,7 +99,7 @@ beforeEach(() => {
     draftEndpoints: {},
     draftSaveError: null,
     lastCreatedId: null,
-    lastResponse: null,
+    lastResponses: {},
   });
 });
 
@@ -227,6 +240,22 @@ describe('draft endpoints: Save is the only thing that writes', () => {
     assert.equal(tabFor(draftId), undefined, 'the draft tab is closed');
     assert.equal(tabFor(SERVER_ID)?.kind, 'endpoint');
     assert.equal(state.activeTabId, SERVER_ID);
+  });
+
+  it("carries the draft's response over to the saved endpoint", async () => {
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+    const store = useAppStore.getState();
+    store.setLastResponse(draftId, RESPONSE);
+
+    await store.saveDraftEndpoint(draftId);
+
+    const responses = useAppStore.getState().lastResponses;
+    assert.equal(responses[draftId], undefined, 'the draft tab takes its response with it');
+    assert.equal(
+      responses[SERVER_ID]?.response,
+      RESPONSE,
+      'the saved endpoint keeps showing the response the draft got',
+    );
   });
 
   it('lands the pending edits in the row rather than re-seeding a draft', async () => {

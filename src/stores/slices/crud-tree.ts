@@ -140,6 +140,7 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
       endpointDetails: get().endpointDetails,
       responseHistory: get().responseHistory,
       responseExamples: get().responseExamples,
+      lastResponses: get().lastResponses,
       openTabs: get().openTabs,
       activeTabId: get().activeTabId,
       activeEndpointId: get().activeEndpointId,
@@ -162,11 +163,18 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
         s.activeTabId,
         tabKeysForSubtree(s.nodes, removed, 'node', id),
       );
+      // 接口没了，它那个标签（连带挂在那儿的响应）也就没了。这条路径不走
+      // `closeTab`，故响应得在这里单独带走——留着就成了没人引用的悬空数据，
+      // 而它的键（接口 id）会被下次打开同一个接口时复用，于是新开的标签会看到
+      // 一条上一条命途的响应。
+      const nextResponses = { ...s.lastResponses };
+      for (const eid of droppedEndpointIds) delete nextResponses[eid];
       return {
         nodes: s.nodes.filter((n) => !removed.has(n.id)),
         endpointDetails: nextDetails,
         responseHistory: nextHistory,
         responseExamples: nextExamples,
+        lastResponses: nextResponses,
         activeEndpointId:
           s.activeEndpointId && removed.has(s.activeEndpointId) ? null : s.activeEndpointId,
         openTabs: tabs.tabs,

@@ -97,6 +97,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       environments: get().environments,
       responseHistory: get().responseHistory,
       responseExamples: get().responseExamples,
+      lastResponses: get().lastResponses,
       openTabs: get().openTabs,
       activeTabId: get().activeTabId,
       activeProjectId: get().activeProjectId,
@@ -118,6 +119,10 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       }
       const nextDetails = { ...s.endpointDetails };
       for (const eid of droppedEndpointIds) delete nextDetails[eid];
+      // 项目没了，它下面那些接口的标签（连同挂在标签上的响应）也就没了。这条路径
+      // 不走 `closeTab`，故响应在这里单独带走——理由同 `crud-tree.ts`。
+      const nextResponses = { ...s.lastResponses };
+      for (const eid of droppedEndpointIds) delete nextResponses[eid];
       const nextEnvs = s.environments.filter((env) => env.projectId !== id);
       const tabs = filterTabsAfterRemoval(
         s.openTabs,
@@ -161,6 +166,7 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         environments: nextEnvs,
         responseHistory: nextHistory,
         responseExamples: nextExamples,
+        lastResponses: nextResponses,
         activeProjectId: nextActiveProjectId,
         activeEnvironmentId: nextActiveEnvironmentId,
         activeEndpointId: nextActiveEndpointId,

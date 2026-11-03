@@ -200,6 +200,9 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     // 标签上挂一个 `•`、"关闭已保存"不肯关它、第二次 Save 又写不出新东西。
     // 已保存 endpoint 的标签是干净的——见 `HttpTester` 自己的 `handleSave`，
     // 出于同样的理由它调了 `clearEndpointDraft`。
+    // 那次发送的响应挂在草稿标签下，而保存后标签换成新 id 的接口标签：把它搬过去，
+    // 否则用户刚发出来的那次响应在保存之后就没了。
+    get().moveResponse(draftId, endpointId);
     get().discardDraftEndpoint(draftId);
     get().closeTab(draftId);
     get().openTab('endpoint', endpointId);

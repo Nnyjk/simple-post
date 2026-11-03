@@ -40,7 +40,11 @@ export function HttpTester() {
   const saveDraftEndpoint = useAppStore((s) => s.saveDraftEndpoint);
   const updateDraftEndpoint = useAppStore((s) => s.updateDraftEndpoint);
   const draftSaveError = useAppStore((s) => s.draftSaveError);
-  const requestPending = useAppStore((s) => s.requestPending);
+  // 在途标记与响应是同一份状态（挂在标签上），故它也按标签取：接口 A 上在途的
+  // 请求，不该让 B 的标签也显示「请求中…」，也不该把 B 的 Send 按钮一起锁上。
+  const requestPending = useAppStore((s) =>
+    s.activeTabId ? (s.lastResponses[s.activeTabId]?.pending ?? false) : false,
+  );
   const requestSettings = useAppStore((s) => s.requestSettings);
   // 动态变量挂在项目里，故这一页只认**消费方项目**（当前项目）里的定义：
   // 请求侧不回退到别的项目，同名变量在不同项目里是不同的东西。
@@ -305,13 +309,17 @@ export function HttpTester() {
   // 必须无条件运行的 hook：切走接口会让本组件以更少的 hook 重渲染、React 抛
   // "Rendered fewer hooks than expected"（违反 rules-of-hooks）。所有 hook 都要放在提前返回之上。
 
-  // 组件卸载时中止在途请求。`handleSend` 复用同一个 ref，故 pending 期间再次点击 =
-  // 取消上一次重来。
-  const inFlightRef = useRef<AbortController | null>(null);
+  // 组件卸载时中止在途请求。`handleSend` 复用同一个标签的那一条，故 pending 期间
+  // 再次点击 = 取消上一次重来。
+  //
+  // **按标签分开**：在途标记也按标签取（见 `stores/slices/ui-response.ts`），若这里
+  // 还共用一条 controller，B 的发送就会把 A 的在途请求一起 abort 掉。
+  const inFlightRef = useRef<Map<string, AbortController>>(new Map());
   useEffect(() => {
+    const controllers = inFlightRef.current;
     return () => {
-      inFlightRef.current?.abort();
-      inFlightRef.current = null;
+      for (const ctrl of controllers.values()) ctrl.abort();
+      controllers.clear();
     };
   }, []);
 

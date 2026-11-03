@@ -84,8 +84,7 @@ beforeEach(() => {
 
   useAppStore.setState({
     responseHistory: {},
-    lastResponse: null,
-    lastRequest: null,
+    lastResponses: {},
     responseHistoryKeep: 10,
   });
 });
@@ -247,15 +246,16 @@ describe('clearResponseHistory 只清未收藏的行', () => {
 describe('请求快照与响应同一刻写入', () => {
   it('setLastResponse 同时写响应与请求', () => {
     const resp = makeResponse();
-    useAppStore.getState().setLastResponse(resp, SNAPSHOT);
+    useAppStore.getState().setLastResponse(ENDPOINT_ID, resp, SNAPSHOT);
 
-    assert.equal(useAppStore.getState().lastResponse, resp);
-    assert.deepEqual(useAppStore.getState().lastRequest, SNAPSHOT);
+    const tabState = useAppStore.getState().lastResponses[ENDPOINT_ID];
+    assert.equal(tabState?.response, resp);
+    assert.deepEqual(tabState?.request, SNAPSHOT);
   });
 
-  it('不带快照时 lastRequest 为 null，界面据此不画请求侧栏', () => {
-    useAppStore.getState().setLastResponse(makeResponse());
-    assert.equal(useAppStore.getState().lastRequest, null);
+  it('不带快照时请求为 null，界面据此不画请求侧栏', () => {
+    useAppStore.getState().setLastResponse(ENDPOINT_ID, makeResponse());
+    assert.equal(useAppStore.getState().lastResponses[ENDPOINT_ID]?.request, null);
   });
 
   it('写历史时把快照一并交给服务端', async () => {
