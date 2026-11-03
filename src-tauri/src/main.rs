@@ -182,7 +182,10 @@ fn main() {
         Some(Cmd::McpProxy) => {
             eprintln!(
                 "mcp-proxy is a separate binary:\n  \
-                 - cargo-installed: cargo install simple-post-mcp\n  \
+                 - build it from source: cargo install --path crates/simple-post-mcp\n  \
+                   (run that in the repository root; it installs the `simple-post-mcp` binary)\n  \
+                 - the published release assets are desktop installers only, so that\n  \
+                   binary is not among them\n  \
                  - or connect the client to the daemon over HTTP instead"
             );
             std::process::exit(2);
