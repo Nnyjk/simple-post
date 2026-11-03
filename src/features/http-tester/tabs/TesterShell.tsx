@@ -63,6 +63,7 @@ export function TesterShell({
   onFormatResult,
   varEntries,
   envName,
+  vars,
 }: {
   project: Project | undefined;
   ancestors: Ancestor[];
@@ -116,6 +117,8 @@ export function TesterShell({
   varEntries: VarEntry[];
   /** 当前环境名，显示在候选浮层的标题上。 */
   envName: string | undefined;
+  /** 变量池：取 OAuth2 token 时送给后端，让它替换配置里那四个字段的 `{{var}}`。 */
+  vars: Record<string, string>;
 }) {
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
@@ -232,6 +235,7 @@ export function TesterShell({
           pathParamError={pathParamError}
           varEntries={varEntries}
           envName={envName}
+          vars={vars}
           patchDraft={patchDraft}
           onFormatResult={onFormatResult}
         />

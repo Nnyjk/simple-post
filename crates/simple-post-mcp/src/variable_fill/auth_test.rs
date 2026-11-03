@@ -159,13 +159,19 @@ fn resolve_endpoint_user_authorization_wins_over_auth_config() {
 
 // ---- oauth2 ------------------------------------------------------
 
-/// OAuth2 配置里 `{{var}}` 的替换是**有选择的**：地址与标识替换，密钥不替换。
+/// OAuth2 的配置**不在解析阶段替换**：那条规则（哪些字段被替换、哪些密钥不替换）住在
+/// core 的 `simple_post_core::oauth2`（`substitute_config`），由 core 在取 token 之前
+/// 替换。MCP 侧把变量池交给 `ensure_token` 即可。
 ///
-/// 密钥那半边不是省事。`resolve_auth` 的返回值进 `ResolvedEndpoint.auth`，而
-/// `api_resolve_endpoint` 会把整个 auth 回显给 agent —— 一旦 `clientSecret` 也被解出来，
-/// 环境变量表里那份 secret 就会被复制进一次工具响应。
+/// 密钥那半边不是省事。替换发生在 core 内部，故 `clientSecret` / `password` /
+/// `authCode` 里的 `{{var}}` 不会被解出来，而解出来的那份配置也不会进任何被回显的
+/// 结构体 —— `api_resolve_endpoint` 回显的 `auth` 就是这份未替换的载荷。
+///
+/// 样本 `fixtures/oauth2-config-parity.json` 钉住「哪些字段被替换」这条规则，两侧读取器
+/// 是 `crates/simple-post-core/src/oauth2/config_parity_test.rs` 与
+/// `src/lib/__tests__/oauth2-config-parity.test.ts`。
 #[test]
-fn oauth2_substitutes_addresses_and_identifiers_but_not_secrets() {
+fn the_oauth2_payload_is_left_alone_by_the_resolver() {
     let mut env = empty_env();
     env.variables.insert("idp".into(), "idp.example.com".into());
     env.variables.insert("cid".into(), "my-client".into());
@@ -190,20 +196,30 @@ fn oauth2_substitutes_addresses_and_identifiers_but_not_secrets() {
 
     let r = resolve_endpoint(&ep, Some(&env), None).unwrap();
     let o = r.auth.oauth2.expect("oauth2 载荷要被透传");
-    assert_eq!(o.token_url, "https://idp.example.com/oauth/token");
-    assert_eq!(o.client_id, "my-client");
-    assert_eq!(o.scope, "idp.example.com.read");
-    assert_eq!(o.client_secret, "{{secret}}", "密钥不参与替换");
-    assert_eq!(o.password, "{{pw}}", "密码不参与替换");
+    // 解析阶段一个字段都不替换：替换发生在取 token 之前，由 core 做。
+    assert_eq!(o.token_url, "https://{{idp}}/oauth/token");
+    assert_eq!(o.client_id, "{{cid}}");
+    assert_eq!(o.scope, "{{idp}}.read");
+    assert_eq!(o.client_secret, "{{secret}}");
+    assert_eq!(o.password, "{{pw}}");
+    // 变量池随结果一起走：取 token 时要用的正是这一份。
+    assert_eq!(
+        r.vars.get("idp").map(String::as_str),
+        Some("idp.example.com")
+    );
+    assert_eq!(
+        r.vars.get("secret").map(String::as_str),
+        Some("SUPER-SECRET")
+    );
     assert!(
-        !r.missing_vars.contains(&"secret".to_string()),
-        "没被解析的字段不该报缺变量（它压根没参与解析），got: {:?}",
+        !r.missing_vars.contains(&"idp".to_string()),
+        "没参与替换的字段不该报缺变量（它压根没参与解析），got: {:?}",
         r.missing_vars
     );
 }
 
-/// `kind` 不是 oauth2 时，那份 oauth2 载荷原样留着不动（不解析、不报错），与
-/// bearer/basic 的处理一致：只处理选中的那一种。
+/// `kind` 不是 oauth2 时，那份 oauth2 载荷同样原样留着不动（不解析、不报错）：解析器
+/// 压根不碰 oauth2 的载荷，替换由 core 在取 token 之前做。
 #[test]
 fn an_unselected_oauth2_payload_is_left_alone() {
     let mut env = empty_env();

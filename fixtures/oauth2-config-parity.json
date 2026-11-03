@@ -1,0 +1,106 @@
+{
+  "substitutedFields": ["tokenUrl", "authorizationUrl", "clientId", "scope"],
+  "keptFields": ["clientSecret", "password", "authCode"],
+  "cases": [
+    {
+      "name": "地址与标识被替换，密钥与一次性输入不替换",
+      "vars": {
+        "idp": "idp.example.com",
+        "cid": "my-client",
+        "sc": "read write",
+        "secret": "SUPER-SECRET",
+        "pw": "hunter2",
+        "code": "AUTH-CODE",
+        "user": "alice",
+        "redirect": "https://app.example.com/cb",
+        "verifier": "PKCE-VERIFIER"
+      },
+      "config": {
+        "tokenUrl": "https://{{idp}}/oauth/token",
+        "authorizationUrl": "https://{{idp}}/oauth/authorize",
+        "clientId": "{{cid}}",
+        "clientSecret": "{{secret}}",
+        "scope": "{{sc}}",
+        "authCode": "{{code}}",
+        "password": "{{pw}}",
+        "username": "{{user}}",
+        "redirectUri": "{{redirect}}",
+        "codeVerifier": "{{verifier}}"
+      },
+      "expected": {
+        "tokenUrl": "https://idp.example.com/oauth/token",
+        "authorizationUrl": "https://idp.example.com/oauth/authorize",
+        "clientId": "my-client",
+        "clientSecret": "{{secret}}",
+        "scope": "read write",
+        "authCode": "{{code}}",
+        "password": "{{pw}}",
+        "username": "{{user}}",
+        "redirectUri": "{{redirect}}",
+        "codeVerifier": "{{verifier}}"
+      },
+      "missing": []
+    },
+    {
+      "name": "变量池里没有的变量原样留着，并报成缺变量",
+      "vars": { "cid": "my-client" },
+      "config": {
+        "tokenUrl": "https://{{idp}}/oauth/token",
+        "clientId": "{{cid}}",
+        "scope": "{{sc}}"
+      },
+      "expected": {
+        "tokenUrl": "https://{{idp}}/oauth/token",
+        "clientId": "my-client",
+        "scope": "{{sc}}"
+      },
+      "missing": ["idp", "sc"]
+    },
+    {
+      "name": "密钥与一次性输入里的变量不替换，也不报缺变量",
+      "vars": {},
+      "config": {
+        "clientSecret": "{{secret}}",
+        "password": "{{pw}}",
+        "authCode": "{{code}}"
+      },
+      "expected": {
+        "clientSecret": "{{secret}}",
+        "password": "{{pw}}",
+        "authCode": "{{code}}"
+      },
+      "missing": []
+    },
+    {
+      "name": "标记名不是裸标识符时原样留着",
+      "vars": { "idp": "idp.example.com" },
+      "config": { "tokenUrl": "https://{{ idp }}/oauth/token" },
+      "expected": { "tokenUrl": "https://{{ idp }}/oauth/token" },
+      "missing": []
+    },
+    {
+      "name": "变量池为空时四个被替换的字段都原样留着",
+      "vars": {},
+      "config": {
+        "tokenUrl": "https://{{idp}}/oauth/token",
+        "authorizationUrl": "https://{{idp}}/oauth/authorize",
+        "clientId": "{{cid}}",
+        "scope": "{{sc}}"
+      },
+      "expected": {
+        "tokenUrl": "https://{{idp}}/oauth/token",
+        "authorizationUrl": "https://{{idp}}/oauth/authorize",
+        "clientId": "{{cid}}",
+        "scope": "{{sc}}"
+      },
+      "missing": ["idp", "cid", "sc"]
+    },
+    {
+      "name": "变量池里的取值为空串时算已解析",
+      "vars": { "idp": "" },
+      "config": { "tokenUrl": "https://{{idp}}/oauth/token" },
+      "expected": { "tokenUrl": "https:///oauth/token" },
+      "missing": []
+    }
+  ]
+}

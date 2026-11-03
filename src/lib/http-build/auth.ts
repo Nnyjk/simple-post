@@ -1,6 +1,45 @@
-import type { AuthConfig } from '@/types/domain';
-import { resolveVarsWithMissing } from '../url';
+import type { AuthConfig, OAuth2Auth } from '@/types/domain';
+import { listVars, resolveVarsWithMissing } from '../url';
 import type { MissingTracker } from './pool';
+
+/**
+ * OAuth2 配置里会被 `{{var}}` 替换的字段。
+ *
+ * 替换本身发生在后端（Rust 侧的 `simple_post_core::oauth2`），渲染进程不替换：取 token
+ * 时后端才有变量池。这份清单是渲染进程唯一需要知道的 OAuth2 侧规则 —— 它决定哪些字段
+ * 的变量进缺值报告。与 Rust 侧那份同一份清单，由 `fixtures/oauth2-config-parity.json`
+ * 钉住。
+ */
+export const OAUTH2_SUBSTITUTED_FIELDS = [
+  'tokenUrl',
+  'authorizationUrl',
+  'clientId',
+  'scope',
+] as const;
+
+/**
+ * OAuth2 配置里没解析出来的变量名。
+ *
+ * 只看**会被替换**的那四个字段：密钥与一次性输入（`clientSecret` / `password` /
+ * `authCode`）不参与替换，故它们里面的 `{{var}}` 不是缺变量。
+ *
+ * 判据与 Rust 侧那份同一套：变量名是裸标识符，且变量池里没有它。池里有但取值是空串
+ * 算已解析。
+ */
+export function oauth2MissingVars(cfg: OAuth2Auth, pool: Record<string, string>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const field of OAUTH2_SUBSTITUTED_FIELDS) {
+    for (const name of listVars(cfg[field])) {
+      if (seen.has(name)) continue;
+      // 用 `hasOwnProperty` 而不是 `in`：`in` 会撞上 `Object.prototype` 上的名字。
+      if (Object.prototype.hasOwnProperty.call(pool, name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+  }
+  return out;
+}
 
 /**
  * 解析 auth config 里的 `{{var}}` 并记录未解析项。返回新对象、不改传入值——
@@ -8,6 +47,10 @@ import type { MissingTracker } from './pool';
  *
  * 只扫选中的 `kind` 且只扫会上线的字段：Basic config 上残留的 `bearer` 串不属于
  * 这次请求，报它的变量纯属噪声。
+ *
+ * **OAuth2 的配置不替换**，只把没解析出来的变量报出来：替换由后端在取 token 之前做
+ * （规则见 `OAUTH2_SUBSTITUTED_FIELDS` 的说明）。渲染进程报一次，用户在发请求之前就
+ * 看得见「缺哪个变量」，而不是等后端回一句「token 获取失败」。
  */
 export function resolveAuth(
   auth: AuthConfig,
@@ -38,6 +81,9 @@ export function resolveAuth(
       ...auth,
       apikey: { ...auth.apikey, key: k.value, value: v.value },
     };
+  }
+  if (auth.kind === 'oauth2' && auth.oauth2) {
+    missing.add(oauth2MissingVars(auth.oauth2, pool));
   }
   return auth;
 }

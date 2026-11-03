@@ -147,6 +147,8 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
     bodyBase64,
     missingVars: missing.list(),
     missingPathParams: substituted.missing,
+    // 变量池随结果一起走：OAuth2 取 token 时要用的正是这一份（见 `PreparedRequest.vars`）。
+    vars: pool,
   };
 }
 

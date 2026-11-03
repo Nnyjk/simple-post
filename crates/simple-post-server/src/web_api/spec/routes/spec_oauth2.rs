@@ -12,7 +12,10 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         path: "/api/oauth2/token",
         summary: "Resolve an OAuth2 access token for one auth config \
                       (cached, refreshed on expiry, or fetched); the caller \
-                      injects it into the request it is about to send",
+                      injects it into the request it is about to send. The \
+                      optional vars pool is substituted into the config's \
+                      token URL, authorization URL, client ID and scope \
+                      before the token is fetched",
         stability: "public",
         request: Some("OAuth2TokenRequest"),
         response: Some("OAuth2TokenDto"),

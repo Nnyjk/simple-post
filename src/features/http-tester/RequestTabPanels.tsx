@@ -38,6 +38,7 @@ export function RequestTabPanels({
   pathParamError,
   varEntries,
   envName,
+  vars,
   patchDraft,
   onFormatResult,
 }: {
@@ -66,6 +67,8 @@ export function RequestTabPanels({
   varEntries: VarEntry[];
   /** 当前环境名，显示在候选浮层的标题上。 */
   envName: string | undefined;
+  /** 变量池：取 OAuth2 token 时送给后端，让它替换配置里那四个字段的 `{{var}}`。 */
+  vars: Record<string, string>;
   patchDraft: (patch: Partial<EndpointDraft>) => void;
   onFormatResult: (result: FormatResult) => void;
 }) {
@@ -122,6 +125,7 @@ export function RequestTabPanels({
           onChange={(auth) => patchDraft({ auth })}
           varEntries={varEntries}
           envName={envName}
+          vars={vars}
         />
       )}
       {tab === 'docs' && <DocsEditor value={docs} onChange={(docs) => patchDraft({ docs })} />}

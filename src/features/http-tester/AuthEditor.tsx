@@ -24,6 +24,14 @@ interface Props {
   varEntries: VarEntry[];
   /** 当前环境名，显示在候选浮层的标题上。 */
   envName?: string;
+  /**
+   * 变量池（环境变量 + 动态变量的值）。取 token 时送给后端，后端用它替换 OAuth2
+   * 配置里那四个字段的 `{{var}}`。
+   *
+   * 它与发送请求用的是**同一份**（`PreparedRequest.vars`），故同一个 `{{var}}` 在
+   * URL 里能解析、在 `tokenUrl` 里也能解析。
+   */
+  vars: Record<string, string>;
 }
 
 const TYPES: { id: AuthType; label: string }[] = [
@@ -45,11 +53,13 @@ const GRANT_OPTIONS: { value: OAuth2GrantType; label: string }[] = [
  * 鉴权配置表单。
  *
  * 只有会上线替换的取值栏接变量候选提示：Bearer 的 token、Basic 的用户名与密码、API Key
- * 的 value。`lib/http-build/auth.ts::resolveAuth` 只解析这几处，故别处接提示等于许诺
- * 一个不会替换的变量 —— Key、Add to、OAuth2 的全部字段都不接，OAuth2 那份配置是后端
- * 换取 token 时用的，不是模板取值处。
+ * 的 value，以及 OAuth2 的 token 端点、授权端点、client id 与 scope —— 那四个字段由
+ * 后端在取 token 之前替换，字段清单见
+ * `lib/http-build/auth.ts::OAUTH2_SUBSTITUTED_FIELDS`。故别处接提示等于许诺一个不会
+ * 替换的变量：API Key 的 Key、Add to、OAuth2 的 clientSecret / password / authCode
+ * 都不接。
  */
-export function AuthEditor({ value, onChange, varEntries, envName }: Props) {
+export function AuthEditor({ value, onChange, varEntries, envName, vars }: Props) {
   return (
     <div className="px-4 py-3 space-y-3">
       <div>
@@ -186,7 +196,14 @@ export function AuthEditor({ value, onChange, varEntries, envName }: Props) {
       )}
 
       {value.kind === 'oauth2' && (
-        <OAuth2Fields value={value} cfg={value.oauth2 ?? DEFAULT_OAUTH2} onChange={onChange} />
+        <OAuth2Fields
+          value={value}
+          cfg={value.oauth2 ?? DEFAULT_OAUTH2}
+          onChange={onChange}
+          varEntries={varEntries}
+          envName={envName}
+          vars={vars}
+        />
       )}
     </div>
   );
@@ -203,10 +220,19 @@ function OAuth2Fields({
   value,
   cfg,
   onChange,
+  varEntries,
+  envName,
+  vars,
 }: {
   value: AuthConfig;
   cfg: OAuth2Auth;
   onChange: (auth: AuthConfig) => void;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
+  varEntries: VarEntry[];
+  /** 当前环境名，显示在候选浮层的标题上。 */
+  envName?: string;
+  /** 变量池：取 token 时送给后端，让它替换配置里那四个字段的 `{{var}}`。 */
+  vars: Record<string, string>;
 }) {
   const [pending, setPending] = useState(false);
   const [token, setToken] = useState<OAuth2TokenResult | null>(null);
@@ -246,9 +272,13 @@ function OAuth2Fields({
       const auth: AuthConfig = { kind: 'oauth2', oauth2: cfg };
       // 隐式流程没有 token 端点可调，token 由用户从浏览器粘回来；其余流程走
       // `force` 让后端忽略缓存重取一次。
+      //
+      // 变量池一起送过去：配置里的 `{{var}}` 由后端在取 token 之前替换（规则住在
+      // Rust 侧的 `simple_post_core::oauth2`），渲染进程不自己替换。不送池时，配置里
+      // 写着 `{{var}}` 的 token 端点会被原样发出去。
       const t = await fetchOAuth2Token(
         auth,
-        isImplicit ? { manual: cfg.authCode } : { force: true },
+        isImplicit ? { manual: cfg.authCode, vars } : { force: true, vars },
       );
       if (seq === reqSeq.current) setToken(t);
     } catch (err) {
@@ -287,9 +317,11 @@ function OAuth2Fields({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="mb-1.5 block label-caps">Client ID</label>
-          <Input
+          <VarHintInput
             value={cfg.clientId}
-            onChange={(e) => patch({ clientId: e.target.value })}
+            onChange={(next) => patch({ clientId: next })}
+            entries={varEntries}
+            envName={envName}
             className="font-mono text-sm"
           />
         </div>
@@ -306,9 +338,11 @@ function OAuth2Fields({
 
       <div>
         <label className="mb-1.5 block label-caps">Scope</label>
-        <Input
+        <VarHintInput
           value={cfg.scope}
-          onChange={(e) => patch({ scope: e.target.value })}
+          onChange={(next) => patch({ scope: next })}
+          entries={varEntries}
+          envName={envName}
           placeholder="空格分隔，留空用服务端默认值"
           className="font-mono text-sm"
         />
@@ -317,9 +351,11 @@ function OAuth2Fields({
       {!isImplicit && (
         <div>
           <label className="mb-1.5 block label-caps">Token URL</label>
-          <Input
+          <VarHintInput
             value={cfg.tokenUrl}
-            onChange={(e) => patch({ tokenUrl: e.target.value })}
+            onChange={(next) => patch({ tokenUrl: next })}
+            entries={varEntries}
+            envName={envName}
             placeholder="https://idp.example.com/oauth2/token"
             className="font-mono text-sm"
           />
@@ -329,9 +365,11 @@ function OAuth2Fields({
       {needsAuthorizationUrl && (
         <div>
           <label className="mb-1.5 block label-caps">Authorization URL</label>
-          <Input
+          <VarHintInput
             value={cfg.authorizationUrl}
-            onChange={(e) => patch({ authorizationUrl: e.target.value })}
+            onChange={(next) => patch({ authorizationUrl: next })}
+            entries={varEntries}
+            envName={envName}
             placeholder="https://idp.example.com/oauth2/authorize"
             className="font-mono text-sm"
           />

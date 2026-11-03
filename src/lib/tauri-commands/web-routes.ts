@@ -352,8 +352,9 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   },
 
   // ----- OAuth 2.0 -----
-  // 与 Tauri 命令同一个 `OAuth2TokenRequest`（`{ auth, manual?, force? }`），
-  // 故请求体就是 args 本身，两种形态无需翻译。
+  // 与 Tauri 命令同一个 `OAuth2TokenRequest`（`{ auth, manual?, force?, vars? }`），
+  // 故请求体就是 args 本身，两种形态无需翻译。`vars` 是变量池，后端用它替换 OAuth2
+  // 配置里的 `{{var}}`（规则在 core 的 `simple_post_core::oauth2`）。
   [COMMANDS.oauth2Token]: { method: 'POST', path: () => '/api/oauth2/token' },
 
   // ----- low-level HTTP executor -----
