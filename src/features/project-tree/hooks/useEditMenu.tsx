@@ -117,6 +117,20 @@ export function useEditMenu({
     setMenu({ x: e.clientX, y: e.clientY, items: buildMenuItems(kind, id) });
   };
 
+  /**
+   * 右键一个接口只弹菜单：不激活它，也不挪树里的活动行。
+   *
+   * 活动行的含义是「标签条里打开着的那个请求」（见 `EndpointRow` 的 `active`），
+   * 它须与标签条一致 —— 挪了它，界面会说被右键的那一行是当前接口，而标签条与右侧
+   * 仍停在原来那个接口上。
+   *
+   * 菜单项各自带着被右键那一行的 id（重命名、复制、删除各自作用于那一行），
+   * 故弹菜单不需要先把那一行变成活动行。
+   */
+  const openEndpointMenu = (e: ReactMouseEvent, id: string) => {
+    openMenu(e, 'endpoint', id);
+  };
+
   const getName = (kind: TargetKind, id: string): string => {
     if (kind === 'project') return projects.find((p) => p.id === id)?.name ?? '';
     return nodes.find((n) => n.id === id)?.name ?? '';
@@ -338,6 +352,7 @@ export function useEditMenu({
     cancelEdit,
     saveEdit,
     openMenu,
+    openEndpointMenu,
     handleDeleteConfirm,
     scriptCollection,
     closeCollectionScripts: () => setScriptCollection(null),
