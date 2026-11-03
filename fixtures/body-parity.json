@@ -50,6 +50,15 @@
       "expected": { "text": "q=say%20%22hi%22", "base64": null, "missing": [] }
     },
     {
+      "name": "form：值里的 & 与 + 走 encodeURIComponent 的字符集",
+      "vars": { "q": "a&b+c=d" },
+      "body": {
+        "mode": "form",
+        "content": "[{\"key\":\"q\",\"value\":\"{{q}}\",\"enabled\":true}]"
+      },
+      "expected": { "text": "q=a%26b%2Bc%3Dd", "base64": null, "missing": [] }
+    },
+    {
       "name": "form：停用的行不进正文，其中的变量也不报缺失",
       "vars": {},
       "body": {
