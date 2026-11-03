@@ -1,7 +1,7 @@
 //! 发送路径 —— 一份已解析好的请求 → 发出 → 结果信封。
 //!
-//! 两个发送工具共用它，故「解析之后发生什么」只有一份实现：oauth2 的 token 注入、
-//! multipart 的装配、脚本链、发送、结果封装。
+//! 三个发送工具共用 `execute_resolved`，故「解析之后发生什么」只有一份实现：oauth2 的
+//! token 注入、multipart 的装配、脚本链、发送、结果封装。
 
 use serde_json::Value;
 
@@ -14,11 +14,6 @@ use simple_post_core::error::AppError;
 use super::envelope::build_result_envelope;
 use super::multipart;
 
-/// 一份已解析好的请求 → 发出 → 结果信封。
-///
-/// `endpoint_id` 决定脚本链能不能装配（有它才有 collection 那几段）；临时请求没有
-/// 端点，故传 `None` —— 它的请求里没有脚本可跑。
-///
 /// 解析之后、结果封装之前的一次执行。
 ///
 /// 「解析之后发生什么」只有一份实现：OAuth2 的 token 注入、multipart 的装配、脚本链、

@@ -22,7 +22,7 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
         // project_ops：project + module + collection + endpoint + spec
         v.extend(project_ops::table());
 
-        // http_ops：2 个
+        // http_ops：3 个
         v.extend(http_ops::table());
 
         // variable_fill（MCP 适配层）：3 个
@@ -96,7 +96,8 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     // 整份接口规格。取 `Update` 而不是 `Create`：它不但建节点，还会改环境变量、
     // 改 base URL 那一格，`if_exists=update` 时还会覆盖已有端点的字段。
     ("spec_upsert", Capability::Update),
-    // HTTP 执行 —— 唯三会发外网请求的工具，信任级别最高。
+    // HTTP 执行 —— 三个发送类工具，信任级别最高。另有 `dynamic_var_resolve` 也会
+    // 发出站请求，它在下面动态变量那一组里。
     ("api_run_request", Capability::Send),
     ("api_call_endpoint", Capability::Send),
     ("api_run_collection", Capability::Send),

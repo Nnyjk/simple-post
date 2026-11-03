@@ -9,8 +9,7 @@
 //   read_only   → 只留 `Capability::Read`。响应体里没有该元数据，只能按名字
 //                 里的 `_delete` / `_create` / `_update` / `_set_` /
 //                 `_move` / `_duplicate` 反推。
-//   safe_write  → read-only 之外放行安全改写（env_set_var、env_set_baseurl、
-//                 request_settings_update）。
+//   safe_write  → read-only 之外放行安全改写（env_set_var、env_set_baseurl）。
 //   full_access → 不过滤，仍以后端策略为准。
 //
 // 这层只收窄、不放宽：真正的裁决权在后端，本地开关是给「服务端已放开但仍不想让

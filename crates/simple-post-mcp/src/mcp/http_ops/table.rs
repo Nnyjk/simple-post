@@ -1,4 +1,4 @@
-//! dispatch 表 —— 两个工具的登记项与 JSON Schema。
+//! dispatch 表 —— 三个工具的登记项与 JSON Schema。
 //!
 //! 描述与 schema 是 `tools/list` 的全部内容，故两者都逐字写死在这里：
 //! 描述只说「这个参数是什么」，规则与例子放 `simple-post://spec-authoring` 指南。
@@ -67,8 +67,8 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     },
                     "body_mode": {
                         "type": "string",
-                        "enum": ["none", "json", "form", "raw", "multipart"],
-                        "description": "How to frame the body. Defaults to raw when a body is given, none otherwise."
+                        "enum": ["none", "json", "form", "multipart", "xml", "raw", "binary"],
+                        "description": "How to frame the body. Defaults to raw when a body is given, none otherwise. `binary` takes the same file-descriptor JSON as a stored endpoint."
                     },
                     "auth": {
                         "type": "object",
@@ -98,7 +98,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "module_id": { "type": "string" },
                     "settings_override": {
                         "type": "object",
-                        "description": "Outbound knobs for this call. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path. Those four keys are one group: giving `tls` replaces the endpoint's own HTTPS settings as a whole, not field by field, so resend every key you want to keep."
+                        "description": "Outbound knobs for this call. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path. Those four keys are one group: an ad-hoc request has no endpoint of its own, so giving `tls` replaces the global default HTTPS settings as a whole, not field by field, so resend every key you want to keep."
                     },
                     "timeout_ms": { "type": "integer" },
                     "follow_redirects": { "type": "boolean" },
@@ -122,7 +122,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     // 端点行不再绑定环境，故这一次调用可以自己点名一个环境；不点名就用
                     // 该项目的默认环境（最早创建的那个）。schema 不写它，工具就在骗人：
                     // `api_resolve_endpoint` 与 `api_validate_endpoint` 都带着这个参数，
-                    // 唯独发送那两个工具不写，读起来就像发送不支持选环境。
+                    // 两个发送工具起初不写这个参数，读起来就像发送不支持选环境。
                     "environment_id": { "type": "string" },
                     // 覆盖值要写进 schema：路径参数缺值时发送那侧会拦下请求并说
                     // 「or pass overrides.pathParams when calling」，而调用方只能从
@@ -153,7 +153,7 @@ placeholder name; a placeholder without an entry keeps its literal braces and bl
                     },
                     "settings_override": {
                         "type": "object",
-                        "description": "Outbound knobs for this call. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path. Those four keys are one group: giving `tls` replaces the global default HTTPS settings as a whole, not field by field, so resend every key you want to keep."
+                        "description": "Outbound knobs for this call. `tls` takes snake_case keys: skip_verify, ca_certificate_path, client_certificate_path, client_key_path. Those four keys are one group: giving `tls` replaces the endpoint's own HTTPS settings as a whole, not field by field, so resend every key you want to keep. The global default applies only when the endpoint has no HTTPS settings of its own."
                     }
                 },
                 "$defs": {

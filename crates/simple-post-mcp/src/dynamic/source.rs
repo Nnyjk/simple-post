@@ -18,7 +18,6 @@ use std::pin::Pin;
 
 use serde::Deserialize;
 
-use simple_post_core::db::DbPool;
 use simple_post_core::domain::{
     parse_http_method, AuthConfig, BodyMode, DynamicError, DynamicErrorKind, DynamicVariable,
     EndpointDetail, KeyValue, RequestBody,
@@ -339,6 +338,3 @@ async fn send(
         }
     }
 }
-
-/// 取数器需要的连接池类型别名，便于调用方少写一层路径。
-pub type Pool = DbPool;
