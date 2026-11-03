@@ -86,6 +86,10 @@ pub async fn mcp_daemon_restart(
 /// 幂等：已跟踪到健康 daemon 时原样返回其 `pid` / `port`，不杀不重启；只有真的
 /// 停止 / 崩溃 / 不健康才走拉起路径并报新的 daemon 身份。
 ///
+/// 一处例外：端口文件里那个 daemon 服务的配置与现在要用的这份不一致时，它被换掉
+/// ——那个 daemon 服务的不是这份配置。判据是端口记录里的配置指纹，见
+/// `daemon_supervisor::reuse_decision`。
+///
 /// 返回 [`RestartResult`] `{ ok, pid, port }`，与 restart / stop 同形，渲染侧不必
 /// 按动词分支。底层 `AppError`（拉起失败、healthz 超时）同样吞成
 /// `{ ok: false, pid: null, port: null }`。

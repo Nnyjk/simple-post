@@ -51,11 +51,10 @@ pub async fn serve(
     };
 
     // `/mcp` JSON-RPC 与本进程共用 `mcp_state`：pool 与 GUI 的 `simple-post.db`
-    // 同源，metrics 按进程新建故每次重启归零。
+    // 同源。
     let mcp_state = Arc::new(McpAppState {
         pool: pool.clone(),
         started_at: std::time::Instant::now(),
-        metrics: Arc::new(crate::mcp_metrics::McpMetrics::new()),
     });
 
     // MCP 专用监听器的配置：与设置面板那张「HTTP 服务配置」卡片读的是同一行。
@@ -80,10 +79,10 @@ pub async fn serve(
     eprintln!("[serve-web] listening on http://{bind_addr}");
     eprintln!("[serve-web] data dir: {}", data_dir.display());
 
-    // 必须先 bind 再预热 MCP daemon。`restart_without_app_handle` 是固定 200ms
-    // sleep + Windows 上两次 `tasklist` + 拉起本可执行文件的 `mcp` 模式子进程 +
-    // 一次 healthz；排在 bind 之前，浏览器全程对着 connection refused，表现为
-    // 白屏。
+    // 必须先 bind 再预热 MCP daemon。预热要么收养端口文件里那个已经在服务的
+    // daemon（一次 healthz 探测），要么拉起本可执行文件的 `mcp` 模式子进程（固定
+    // 200ms sleep + Windows 上两次 `tasklist` + 一次 healthz）；排在 bind 之前，
+    // 浏览器全程对着 connection refused，表现为白屏。
     //
     // 先 bind 则它变成真正的后台任务：daemon 与页面并行起来，
     // `/api/mcp/status` 在就绪前报 `Starting`——GUI 已在暴露这个瞬态。
@@ -127,7 +126,10 @@ pub async fn serve(
     if want_daemon {
         let dir = data_dir.clone();
         tokio::spawn(async move {
-            if let Err(e) = daemon.restart_without_app_handle(&dir).await {
+            // 复用优先：端口文件里那个 daemon 服务的配置与本进程要用的这份一致时，
+            // 收养它，不打断进行中的 MCP 会话（桌面应用起的 daemon 也会被收养）。
+            // 配置不一致（或旧记录里没有指纹，判断不了）时才重启它。
+            if let Err(e) = daemon.start_without_app_handle(&dir).await {
                 eprintln!("[serve-web] ensure_started failed: {e:?}");
             }
         });
@@ -170,3 +172,11 @@ pub fn default_spa_dir() -> PathBuf {
 pub fn default_data_dir() -> Result<PathBuf, AppError> {
     port_registry::data_dir()
 }
+
+// -------------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------------
+
+#[cfg(test)]
+#[path = "serve_test.rs"]
+mod tests;

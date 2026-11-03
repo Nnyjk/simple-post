@@ -5,9 +5,10 @@
 //!
 //! 生命周期：
 //!   * `ensure_started` 由 GUI 的 `.setup()` 调用。若端口文件指向一个活着的 PID，
-//!     直接复用（重启笔记本后的廉价路径），否则在 OS 分配的端口上拉起子进程。
-//!   * `forward_stderr_and_parse_metrics` 逐行读子进程 stderr，把指标行喂进内存里的
-//!     `McpMetrics`，`mcp_status` 由此反映实时数字。
+//!     且它服务的配置与现在要用的这份一致，直接收养它（重启笔记本后的廉价路径），
+//!     否则在 OS 分配的端口上拉起子进程。
+//!   * `forward_stderr` 逐行读子进程 stderr，把每一行写进日志环形缓冲并转投
+//!     tracing 通道。
 //!   * `watch_exit` 等待子进程，非零退出时向 Tauri app handle 发
 //!     `daemon://crashed`；renderer 弹 toast 并让用户重试。
 //!   * `stop` 是手动 OFF 开关（Tauri `mcp_daemon_stop` / `POST /api/mcp/stop`），
@@ -31,7 +32,7 @@
 //!   * `reap` —— 终止侧：杀哪些 PID、走哪条回收通道、有界等待，以及 `stop` /
 //!     `shutdown` / `restart_without_app_handle`。
 //!   * `watcher` —— 退出监视器（两个变体只差一个崩溃事件）。
-//!   * `stderr` —— daemon stderr 的指标/日志转发。
+//!   * `stderr` —— daemon stderr 的日志转发。
 //!
 //! `ensure_started` 与 `ensure_started_with` 必须留在本文件：源码级回归测试按文本
 //! 扫描它们，见 `daemon_supervisor_test.rs`。
@@ -62,7 +63,7 @@ mod watcher;
 use listen_config::daemon_cli_args;
 use log_buffer::LogBuffer;
 use state::DaemonState;
-use stderr::forward_stderr_and_parse_metrics;
+use stderr::forward_stderr;
 use watcher::watch_exit_no_app;
 // 线格式类型是本模块的公开接口；其余子模块的东西一律只经 `pub(super)` 可见。
 pub use status::{DaemonCrashedPayload, DaemonStatus};
@@ -215,55 +216,63 @@ impl McpDaemonHandle {
     /// 刻意不含 `AppHandle`（及任何其他 Tauri 东西），好让 `--lib` 测试二进制
     /// 不链入 GUI runtime——改签名前先读 [`Started`] 上的长注记。
     ///
-    ///   1. `port_registry::read()` 返回的记录若 PID 仍活着**且** `/mcp/healthz`
-    ///      有响应 → 复用（重启后 daemon 没清理端口文件的场景）。被复用的 daemon 是
-    ///      *被收养*的：记 `state.pid` 但 `state.child` 保持 `None`，因为我们从未
-    ///      spawn 它、没有 reap 句柄——这对 stop/restart 意味着什么见
-    ///      `reap::teardown_targets`。也不返回监视器：没有子进程句柄可供观察。
-    ///   2. 否则释放陈旧文件、申领新端口、spawn 进程、以新 PID 写端口记录，并等
-    ///      最多 5s 直到 `/mcp/healthz` 转绿。
+    ///   1. `port_registry::read_entry()` 返回的记录若 PID 仍活着**且**
+    ///      `/mcp/healthz` 有响应 → 看配置指纹：指纹一致就**收养**那个 daemon
+    ///      （重启后 daemon 没清理端口文件的场景），指纹不一致或读不出指纹就重启它。
+    ///      被收养的 daemon 是*被收养*的：记 `state.pid` 但 `state.child` 保持
+    ///      `None`，因为我们从未 spawn 它、没有 reap 句柄——这对 stop/restart 意味着
+    ///      什么见 `reap::teardown_targets`。也不返回监视器：没有子进程句柄可供观察。
+    ///   2. 否则释放陈旧文件、申领新端口、spawn 进程、以新 PID 写端口记录（连同这份
+    ///      daemon 实际在服务的配置的指纹），并等最多 5s 直到 `/mcp/healthz` 转绿。
     ///   3. 在此启动 stderr 转发器，并返回 `(state, pid)`，由*调用方*据此建自己的
     ///      退出监视器。该任务活得比本函数久，直到子进程死亡为止更新状态。
     async fn ensure_started_with(&self, data_dir: &str) -> Result<Started, crate::error::AppError> {
+        // 一次解析、提前取好：它同时喂给子进程命令行、端口记录里的配置指纹与
+        // 「能不能收养」的判断，三者必须是同一份配置——记录若声称 `127.0.0.1` 而
+        // daemon 实际绑在 `0.0.0.0`，`requires_restart` 会在每次保存时都回答
+        // 「需要重启」。
+        let http_config = self.http_config();
+        let wanted_fingerprint = crate::http_config::config_fingerprint(&http_config);
+
         // ----- 复用路径 ------------------------------------------------
-        if let Some(rec) = port_registry::read() {
-            if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
-                let mut g = self.inner.lock().await;
-                g.pid = Some(rec.pid);
-                g.port = Some(rec.port);
-                g.port_record = Some(rec.clone());
-                g.status = DaemonStatus::Running;
-                g.started_at = Some(Instant::now());
-                // 被复用的 daemon 是外部启动的：我们没有它的 stderr 管道，故没有日志可捕获。
-                self.logs.stop_capture();
-                return Ok(Started {
-                    port: rec.port,
-                    watch: None,
-                });
+        if let Some(entry) = port_registry::read_entry() {
+            if port_registry::is_pid_alive(entry.record.pid)
+                && port_registry::healthz(entry.record.port).await
+            {
+                match reuse_decision(entry.config_fingerprint.as_deref(), &wanted_fingerprint) {
+                    ReuseDecision::Adopt => return Ok(self.adopt(entry.record).await),
+                    ReuseDecision::Restart => {
+                        // 那个 daemon 服务的不是我要的这份配置（或旧记录里没有指纹，
+                        // 判断不了）：杀掉它，让下面的 spawn 路径拉一个新的。
+                        self.teardown(DaemonStatus::Restarting).await?;
+                    }
+                }
             }
         }
 
         // ----- 全新 spawn 路径 ------------------------------------------
-        // 一次解析、提前取好：它同时喂给子进程命令行和端口记录，两者必须一致——
-        // 记录若声称 `127.0.0.1` 而 daemon 实际绑在 `0.0.0.0`，`requires_restart`
-        // 会在每次保存时都回答「需要重启」。
-        let http_config = self.http_config();
         let mut g = self.inner.lock().await;
         // 持锁复查：等锁期间别的任务可能刚 spawn 过。
-        if let Some(rec) = port_registry::read() {
-            if port_registry::is_pid_alive(rec.pid) && port_registry::healthz(rec.port).await {
-                g.pid = Some(rec.pid);
-                g.port = Some(rec.port);
-                g.port_record = Some(rec.clone());
-                g.status = DaemonStatus::Running;
-                g.started_at = Some(Instant::now());
-                // 同上：被复用的 daemon 没有 stderr 管道。
-                self.logs.stop_capture();
-                return Ok(Started {
-                    port: rec.port,
-                    watch: None,
-                });
+        let mut restart_first = false;
+        if let Some(entry) = port_registry::read_entry() {
+            if port_registry::is_pid_alive(entry.record.pid)
+                && port_registry::healthz(entry.record.port).await
+            {
+                match reuse_decision(entry.config_fingerprint.as_deref(), &wanted_fingerprint) {
+                    ReuseDecision::Adopt => {
+                        // 收养要拿同一把锁：先放锁。
+                        drop(g);
+                        return Ok(self.adopt(entry.record).await);
+                    }
+                    ReuseDecision::Restart => restart_first = true,
+                }
             }
+        }
+        if restart_first {
+            // 重启要杀掉那个 daemon，而 teardown 也要拿这把锁：先放锁。
+            drop(g);
+            self.teardown(DaemonStatus::Restarting).await?;
+            g = self.inner.lock().await;
         }
         // 状态置 Starting。下面任何一步失败都会把它翻成 Crashed / Unhealthy 供 UI 呈现。
         g.status = DaemonStatus::Starting;
@@ -308,7 +317,9 @@ impl McpDaemonHandle {
         let stderr = child.stderr.take();
 
         let rec = PortRecord::new(pid, port, &http_config.host, data_dir.to_string());
-        if let Err(e) = port_registry::write(&rec) {
+        // 端口记录里带上这份 daemon 实际在服务的配置的指纹：下一个监管者（桌面端或
+        // serve-web）读到它就能判断「这个 daemon 服务的是不是我要的那份配置」。
+        if let Err(e) = port_registry::write_with_fingerprint(&rec, Some(&wanted_fingerprint)) {
             // 端口文件写失败——子进程归我们，返回前先 reap，别留下一个没有端口文件的
             // daemon。
             let _ = child.kill().await;
@@ -326,8 +337,6 @@ impl McpDaemonHandle {
             g.port_record = Some(rec);
             g.status = DaemonStatus::Starting;
             g.started_at = Some(Instant::now());
-            // 注意：保留此前的 `g.metrics`——它可能已被更早的一轮更新过，长驻运行中复用
-            // 本 handle 重启时还要继续用。
         }
         // 每次 spawn 换一份日志：重启后的日志不该与上一轮混在一起。
         self.logs.start_capture();
@@ -361,16 +370,8 @@ impl McpDaemonHandle {
         }
 
         // ----- 交给后台任务 -------------------------------------------
-        let metrics = {
-            let g = self.inner.lock().await;
-            Arc::clone(&g.metrics)
-        };
         if let Some(stderr) = stderr {
-            tokio::spawn(forward_stderr_and_parse_metrics(
-                stderr,
-                metrics,
-                Arc::clone(&self.logs),
-            ));
+            tokio::spawn(forward_stderr(stderr, Arc::clone(&self.logs)));
         }
         {
             let mut g = self.inner.lock().await;
@@ -388,9 +389,32 @@ impl McpDaemonHandle {
         })
     }
 
+    /// 收养一个已经在服务的 daemon：记下它的身份，把状态置为运行中。
+    ///
+    /// 被收养的 daemon 是外部启动的：我们从未 spawn 它，故没有它的 stderr 管道，
+    /// 没有日志可捕获——界面上的 MCP 日志面板在这种情形下是空的。
+    async fn adopt(&self, rec: PortRecord) -> Started {
+        let port = rec.port;
+        {
+            let mut g = self.inner.lock().await;
+            g.pid = Some(rec.pid);
+            g.port = Some(rec.port);
+            g.port_record = Some(rec);
+            g.status = DaemonStatus::Running;
+            g.started_at = Some(Instant::now());
+        }
+        // 被收养的 daemon 是外部启动的：我们没有它的 stderr 管道，故没有日志可捕获。
+        self.logs.stop_capture();
+        Started { port, watch: None }
+    }
+
     /// 手动 ON 开关（Tauri 形态）。天生幂等：健康且被跟踪的 daemon 原样返回——不
     /// kill、不重拉、不折腾端口；只有确实停止 / 崩溃 / 不健康的 daemon 才走 spawn
     /// 路径。
+    ///
+    /// 一处例外：端口文件里那个 daemon 服务的配置与现在要用的这份不一致时，它被换掉
+    /// （判据见 `reuse_decision`）。本监管者已经在跟踪一个健康的 daemon 时不走那条
+    /// 路——那一份就是它自己起的。
     #[cfg(feature = "gui")]
     pub async fn start(
         &self,
@@ -434,6 +458,31 @@ impl McpDaemonHandle {
     }
 }
 
+/// 端口文件里那个 daemon 与「我现在要的那份配置」的关系。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReuseDecision {
+    /// 指纹一致：那个 daemon 正在服务这份配置。收养它——不 kill、不重拉，进行中的
+    /// MCP 会话不断。
+    Adopt,
+    /// 指纹不一致，或旧记录里没有指纹（判断不了）：那个 daemon 服务的不是这份配置
+    /// （或无从判断），重启。
+    Restart,
+}
+
+/// 端口文件里那个 daemon 能不能被收养？
+///
+/// 指纹一致 → [`ReuseDecision::Adopt`]；指纹不一致或读不出指纹 →
+/// [`ReuseDecision::Restart`]。
+///
+/// 读不出指纹就是「判断不了」，而判断不了的方向是重启——与
+/// `http_config::requires_restart` 对同一情形给的回答一致。
+pub(crate) fn reuse_decision(recorded: Option<&str>, wanted: &str) -> ReuseDecision {
+    match recorded {
+        Some(recorded) if recorded == wanted => ReuseDecision::Adopt,
+        _ => ReuseDecision::Restart,
+    }
+}
+
 // -------------------------------------------------------------------------
 // 测试
 // -------------------------------------------------------------------------
@@ -447,3 +496,7 @@ mod lifecycle_tests;
 #[cfg(test)]
 #[path = "daemon_supervisor_handle_test.rs"]
 mod handle_tests;
+
+#[cfg(test)]
+#[path = "daemon_supervisor_reuse_test.rs"]
+mod reuse_tests;

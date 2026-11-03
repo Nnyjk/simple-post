@@ -1,10 +1,8 @@
 //! 监管者的内部记账，与 [`super::status`] 的线格式类型分开。
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use super::status::DaemonStatus;
-use crate::mcp_metrics::McpMetrics;
 use crate::port_registry::PortRecord;
 
 /// 内部：每次 spawn 的记账。放在 tokio mutex 后，公开方法才能是 `&self`
@@ -17,7 +15,6 @@ pub(super) struct DaemonState {
     /// 子进程已被别处 reap 后再 `wait()` 会报错，所以 `child` 一直留到
     /// `shutdown`，reap 归我们。
     pub(super) child: Option<tokio::process::Child>,
-    pub(super) metrics: Arc<McpMetrics>,
     pub(super) status: DaemonStatus,
     pub(super) started_at: Option<Instant>,
     pub(super) last_error: Option<String>,
@@ -30,7 +27,6 @@ impl DaemonState {
             port: None,
             port_record: None,
             child: None,
-            metrics: Arc::new(McpMetrics::new()),
             status: DaemonStatus::Stopped,
             started_at: None,
             last_error: None,
