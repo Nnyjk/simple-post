@@ -85,7 +85,7 @@ export function ResponseViewer() {
 
   useGSAP(() => {
     // PendingState 会隐藏药丸，故等完整响应 UI 挂载后再动。`pending` 进依赖数组是为了
-    // pending 翻回 false 时重跑：handleSend 先写 lastResponse 再清 pending，第二次跃迁
+    // pending 翻回 false 时重跑：handleSend 先写这个标签的响应再清 pending，第二次跃迁
     // 才是动画浮现的那一次。
     if (pending || !response || !statusPillRef.current) return;
 
