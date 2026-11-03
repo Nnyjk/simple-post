@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
   FilePlus,
   Settings as SettingsIcon,
@@ -17,6 +17,14 @@ const THEME_ICON: Record<Theme, string> = {
   light: '☀️',
   system: '🖥️',
 };
+
+/**
+ * 「查看文档」的占位提示走懒加载边界：对话框会拉进 GSAP，欢迎页在 entry chunk 里，
+ * 不该替它付这份冷启动成本。详见 `WelcomeNoticeDialog.tsx` 的说明。
+ */
+const WelcomeNoticeDialog = lazy(() =>
+  import('./WelcomeNoticeDialog').then((m) => ({ default: m.WelcomeNoticeDialog })),
+);
 
 /**
  * Welcome —— 独立的起始界面。
@@ -53,6 +61,7 @@ export function WelcomeScreen() {
   const openNewItem = useAppStore((s) => s.openNewItem);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const [docsNoticeOpen, setDocsNoticeOpen] = useState(false);
 
   // 主视觉的错峰入场 —— 走 CSS，不用 GSAP。
   //
@@ -73,7 +82,7 @@ export function WelcomeScreen() {
 
   const handleDocs = () => {
     // 占位 —— 完整文档计划在 v0.2 推出
-    window.alert('文档中心：敬请期待\n\nv0.2 上线后将提供完整使用指南与快捷键手册。');
+    setDocsNoticeOpen(true);
   };
 
   const hasProjects = loaded && projects.length > 0;
@@ -238,6 +247,13 @@ export function WelcomeScreen() {
           </div>
         </div>
       </main>
+
+      {/* 「查看文档」的占位提示。仅在真的打开时才挂载，懒加载的 chunk 也才在那时取。 */}
+      {docsNoticeOpen && (
+        <Suspense fallback={null}>
+          <WelcomeNoticeDialog open onClose={() => setDocsNoticeOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

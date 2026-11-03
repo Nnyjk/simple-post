@@ -3,9 +3,9 @@ import { Plus, RefreshCw, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, focusRing } from '@/lib/utils';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
-import { ConfirmDialog } from './ConfirmDialog';
 import type { EditTarget, TargetKind } from './tree-types';
 import { buildTree, filterTree } from './tree-utils';
 import { useTreeDnd } from './hooks/useTreeDnd';
@@ -454,7 +454,7 @@ export function ProjectTree() {
           open
           onOpenChange={(o) => !o && cancelDelete()}
           title={`删除${kindLabel[toDelete.kind]}「${toDelete.name}」？`}
-          message={
+          description={
             toDelete.cascade ? (
               <span>此操作不可撤销，{toDelete.cascade}。</span>
             ) : (
@@ -462,7 +462,7 @@ export function ProjectTree() {
             )
           }
           destructive
-          confirmLabel="删除"
+          confirmText="删除"
           onConfirm={handleDeleteConfirm}
         />
       )}

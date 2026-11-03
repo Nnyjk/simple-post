@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { X, CheckCircle2, XSquare } from 'lucide-react';
 import type { OpenTab } from '@/stores/app-store';
 import { cn } from '@/lib/utils';
+import { LAYER } from '@/components/ui/layers';
 export interface TabContextMenuProps {
   anchor: { x: number; y: number };
   tabId: string;
@@ -69,7 +70,10 @@ export function TabContextMenu({
       ref={menuRef}
       role="menu"
       style={style}
-      className="z-[200] min-w-[200px] overflow-hidden rounded-md border border-border bg-popover py-1 text-xs shadow-lg"
+      className={cn(
+        'min-w-[200px] overflow-hidden rounded-md border border-border bg-popover py-1 text-xs shadow-lg',
+        LAYER.contextMenu,
+      )}
     >
       <MenuItem
         icon={<X className="h-3.5 w-3.5" />}
