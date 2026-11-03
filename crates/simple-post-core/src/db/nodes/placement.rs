@@ -14,9 +14,8 @@ use super::read::get;
 /// * 顶层节点没有指名项目，或指名的项目不存在
 ///
 /// 最后一条尤其要紧：两条传输层都把缺席的 `rootId` 默认成空串，而顶层节点没有 `parentId`
-/// 可供推导，空串于是直达 `INSERT`，SQLite 报 `FOREIGN KEY constraint failed`——那会以
-/// 500 加 `code: "sqlite"` 出现，把一个调用方的错误说成传输故障，而错误封装无法让客户端
-/// 把它与真正的服务端故障区分开。
+/// 可供推导，空串于是直达 `INSERT`，SQLite 报 `FOREIGN KEY constraint failed`——那会把一个
+/// 调用方的错误说成传输故障。
 pub(super) fn validate_placement(
     conn: &mut Connection,
     kind: ResourceNodeType,

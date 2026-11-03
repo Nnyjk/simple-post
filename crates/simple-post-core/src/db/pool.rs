@@ -19,10 +19,8 @@ pub type DbPool = r2d2::Pool<SqliteConnectionManager>;
 /// 打开（或创建）`<data_dir>/store.db`，升到 [`SCHEMA_VERSION`]，返回连接池。
 ///
 /// `data_dir` 通常是 `dirs::data_dir()`（Windows 上即 `%APPDATA%`），设了
-/// `SIMPLE_POST_DATA_DIR` 时是那个目录，缺失即创建。
-///
-/// 旧布局的文件是**替换而非升级**（见 [`ensure_current_schema`]）：本应用没有迁移路径，
-/// 故只记日志，不在每次启动时打扰用户。
+/// `SIMPLE_POST_DATA_DIR` 时是那个目录，缺失即创建。旧布局的文件是**替换而非升级**
+/// （见 [`ensure_current_schema`]），故只记日志，不在每次启动时打扰用户。
 pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     std::fs::create_dir_all(data_dir)?;
     let db_path = data_dir.join("store.db");
@@ -68,10 +66,8 @@ pub fn init(data_dir: &Path) -> Result<DbPool, AppError> {
     Ok(pool)
 }
 
-/// 在池中取一条连接执行闭包。只读用它；写优先用 `with_tx`。
-///
-/// PRAGMA（foreign_keys、journal_mode 等）由池的 `with_init` 钩子逐连接应用，
-/// 故每次 checkout 拿到的都是配置好的句柄。
+/// 在池中取一条连接执行闭包。只读用它；写优先用 `with_tx`。PRAGMA（foreign_keys、
+/// journal_mode 等）由池的 `with_init` 钩子逐连接应用。
 pub fn with_conn<F, R>(pool: &DbPool, f: F) -> Result<R, AppError>
 where
     F: FnOnce(&mut Connection) -> Result<R, AppError>,
@@ -80,11 +76,9 @@ where
     f(&mut conn)
 }
 
-/// 在写事务内执行闭包，`SQLITE_BUSY` 重试 3 次、间隔 50 ms：够等其他写者提交，
-/// 又不至于卡顿；3 次仍失败则作为 `AppError::Db` 上抛。
-///
-/// 不用 rusqlite 的 `transaction()`：它是 `BEGIN DEFERRED`，`SQLITE_BUSY` 会拖到
-/// **首次写入**才暴露。要的是一进事务就取锁，即 `BEGIN IMMEDIATE`。
+/// 在写事务内执行闭包，`SQLITE_BUSY` 重试 3 次、间隔 50 ms：够等其他写者提交，又不至于
+/// 卡顿；3 次仍失败则作为 `AppError::Db` 上抛。不用 rusqlite 的 `transaction()`：它是
+/// `BEGIN DEFERRED`，`SQLITE_BUSY` 会拖到**首次写入**才暴露；要的是 `BEGIN IMMEDIATE`。
 pub fn with_tx<F, R>(pool: &DbPool, f: F) -> Result<R, AppError>
 where
     F: Fn(&mut Connection) -> Result<R, AppError>,

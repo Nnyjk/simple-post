@@ -1,14 +1,14 @@
 //! 沙箱引擎：建立 QuickJS 运行时、装上资源上限、跑脚本、把改动读回来。
 //!
-//! **这里不得 panic。** release profile 是 `panic = "abort"`，脚本路径上任何 panic 都会
-//! 直接终止进程——而宿主（MCP 守护进程）正替别人握着连接。所有 rquickjs 的 `Result`
-//! 都必须显式处理，错误一律变成 [`ScriptFailure`]。
+//! - **这里不得 panic。** release profile 是 `panic = "abort"`，脚本路径上任何 panic 都会直接
+//!   终止进程，而宿主（MCP 守护进程）正替别人握着连接。rquickjs 的 `Result` 必须显式处理，
+//!   错误一律变成 [`ScriptFailure`]。
 //!
-//! **这里不得写 stdout。** `simple-post-mcp` 的 stdout 只允许 JSON-RPC 帧，而本模块
-//! 被它链接。`console.log` 走内存里的日志数组，不碰任何进程输出。
+//! - **这里不得写 stdout。** `simple-post-mcp` 的 stdout 只允许 JSON-RPC 帧，而本模块被它链接。
+//!   `console.log` 走内存里的日志数组，不碰任何进程输出。
 //!
-//! 引擎实例**不跨线程**（`Runtime` / `Context` 非 `Send`），故整条脚本链在一个
-//! `spawn_blocking` 闭包里跑完，见 [`super::run`]。
+//! - 引擎实例**不跨线程**（`Runtime` / `Context` 非 `Send`），故整条脚本链在一个
+//!   `spawn_blocking` 闭包里跑完，见 [`super::run`]。
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -73,9 +73,7 @@ pub struct Sandbox {
 }
 
 impl Sandbox {
-    /// 建一个带上限的沙箱。
-    ///
-    /// 截止时刻在**这里**定下：整个阶段（整条脚本链）共享一份预算。
+    /// 建一个带上限的沙箱。截止时刻在**这里**定下：整个阶段（整条脚本链）共享一份预算。
     pub fn new(limits: &ScriptLimits) -> Result<Self, ScriptFailure> {
         let runtime = Runtime::new().map_err(|e| ScriptFailure {
             kind: ScriptErrorKind::Runtime,
@@ -121,9 +119,8 @@ impl Sandbox {
         Ok(sandbox)
     }
 
-    /// 把输入注入沙箱：请求、响应、环境、限额。
-    ///
-    /// `data` 是**处理脚本**看到的那份数据（`pm.data`）。请求脚本不用它，传 `None`。
+    /// 把输入注入沙箱：请求、响应、环境、限额。`data` 是**处理脚本**看到的那份数据
+    /// （`pm.data`）；请求脚本不用它，传 `None`。
     pub fn init(
         &self,
         request: &ScriptRequest,
@@ -162,10 +159,8 @@ impl Sandbox {
         })
     }
 
-    /// 跑一段脚本。
-    ///
-    /// `request_before` 是脚本执行前的请求：**失败时用它回滚**，故部分生效的请求
-    /// 不会出现——那比完全没生效更难排查。
+    /// 跑一段脚本。`request_before` 是脚本执行前的请求：**失败时用它回滚**，故部分生效的请求
+    /// 不会出现。
     pub fn run(&self, script: &str, request_before: &ScriptRequest) -> ScriptRun {
         // 先拍下环境与请求作用域变量：失败时要连同请求一起换回去。
         let _ = self.snapshot_state();
@@ -201,12 +196,8 @@ impl Sandbox {
 
     /// 跑一段处理脚本，取回它 `return` 的值。
     ///
-    /// 脚本包在一个函数体里跑，故 `return` 是合法的——用户写
-    /// `return pm.data.items[0].id;` 就能给出最终值。脚本看到的是 `pm.data`
-    /// （抽取结果）与 `pm.response`（原始响应）。
-    ///
-    /// 没有返回值（`undefined`）算失败：处理脚本的唯一产出就是那个值，没给值等于
-    /// 脚本什么也没做，而用户以为它做了。
+    /// 脚本包在一个函数体里跑，故 `return` 是合法的。脚本看到的是 `pm.data`（抽取结果）与
+    /// `pm.response`（原始响应）。没有返回值（`undefined`）算失败：处理脚本的唯一产出就是那个值。
     pub fn run_transform(&self, script: &str) -> TransformRun {
         let outcome = self.eval_transform(script);
         let drained = self.drain();
@@ -453,14 +444,14 @@ fn headers_to_list(
             continue;
         }
         if let Some(v) = headers.get(k) {
-            out.push((k.clone(), json_to_string(v)));
+            out.push((k.clone(), crate::domain::json_scalar_to_text(v)));
         }
     }
     for (k, v) in headers {
         if seen.contains(k) {
             continue;
         }
-        out.push((k.clone(), json_to_string(v)));
+        out.push((k.clone(), crate::domain::json_scalar_to_text(v)));
     }
     out
 }
@@ -468,18 +459,7 @@ fn headers_to_list(
 /// header 的值转成文本。
 ///
 /// 脚本可以直接往 `pm.request.headers` 上塞非字符串（`pm.request.headers['X-Count'] = 5`），
-/// 那条路绕过 `normalizeHeaders`，故这里要自己转——JS 的 `String(5)` 是 `"5"`，
-/// 直接当成空串会让这个 header 静默变成空的。
-fn json_to_string(value: &Json) -> String {
-    match value {
-        Json::String(s) => s.clone(),
-        Json::Null => String::new(),
-        Json::Bool(b) => b.to_string(),
-        Json::Number(n) => n.to_string(),
-        other => other.to_string(),
-    }
-}
-
+/// 那条路绕过 `normalizeHeaders`，故这里要自己转——直接当成空串会让这个 header 静默变成空的。
 /// 把 JS 值转成可读文本。用 `Coerced` 走 JS 的 `ToString` 语义——`Error` 对象的
 /// `message` 不在可枚举属性里，JSON 序列化拿不到它。
 fn value_text(value: &Value) -> String {

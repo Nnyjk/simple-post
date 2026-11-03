@@ -6,10 +6,8 @@ use crate::error::AppError;
 
 /// 校验取数用的环境，并给出真正落库的那个 id。
 ///
-/// 环境必须属于数据源端点所属的项目：环境的格子按 (环境 × 模块) 寻址，拿别的项目的
-/// 环境去取数会取到别处的内容。
-///
-/// 数据源是内联请求时它清空——内联请求自带完整地址，没有 base URL 可谈。
+/// 环境必须属于数据源端点所属的项目：环境的格子按 (环境 × 模块) 寻址，拿别的项目的环境去
+/// 取数会取到别处的内容。数据源是内联请求时它清空——内联请求自带完整地址。
 pub(super) fn check_source_bindings(
     conn: &mut Connection,
     endpoint_id: Option<&str>,
@@ -32,10 +30,8 @@ pub(super) fn check_source_bindings(
     Ok(environment_id.map(str::to_string))
 }
 
-/// 变量名是否合法：只允许字母、数字与下划线，且非空。
-///
-/// 与 `crate::template::is_word` 同一套判据——`{{my-var}}` 这样的名字替换原语认不出来，
-/// 存进去就等于存了一条永远不生效的定义。
+/// 变量名是否合法：只允许字母、数字与下划线，且非空。与 `crate::template::is_word` 同一套
+/// 判据——`{{my-var}}` 这样的名字替换原语认不出来。
 pub fn is_valid_name(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

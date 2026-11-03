@@ -1,22 +1,16 @@
 //! `environments` 表的 CRUD。
 //!
-//! 每个环境持有一张按模块的地址 map（`moduleBaseUrls`）和一个自由变量池。那张 map 是
-//! **唯一**的 URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的值。
-//!
-//! 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问
-//! 地址——接口经代理网关转代后真正要打的那个地址。两者不一致时，请求发出前用 `proxy`
-//! 替换 `url` 这个前缀。
-//!
-//! 这里**没有**「当前环境」这一列。当前环境是每个客户端自己的实时状态——桌面窗口、
-//! 网页标签各一份，各切各的。落库会让 web 端多个人互相踩：一个人切了环境，另一个人
-//! 发请求就换了地址与端口。
-//!
-//! 库里只有一个与「选哪个环境」有关的概念：**默认环境**。它是项目的属性，即一个项目里
-//! **最早创建**的那个环境（按 `created_at` 认定，见 [`get_default`]）。谁发请求时没点名
-//! 环境，就用它。
-//!
-//! 端点行也不再绑定环境（`endpoint_details` 没有 `environment_id` 列）：界面上「当前环境」
-//! 说了算，MCP 侧则由每次调用自己点名，两条路都落到同一批数据上。
+//! - 每个环境持有一张按模块的地址 map（`moduleBaseUrls`）和一个自由变量池。那张 map 是**唯一**的
+//!   URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的值。
+//! - 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址
+//!   ——接口经代理网关转代后真正要打的那个地址。两者不一致时，请求发出前用 `proxy` 替换
+//!   `url` 这个前缀。
+//! - 这里**没有**「当前环境」这一列。当前环境是每个客户端自己的实时状态——桌面窗口、网页标签各
+//!   一份，各切各的；落库会让 web 端多个人互相踩。
+//! - 库里只有一个与「选哪个环境」有关的概念：**默认环境**，即一个项目里**最早创建**的那个环境
+//!   （按 `created_at` 认定，见 [`get_default`]）。谁发请求时没点名环境，就用它。
+//! - 端点行不绑定环境（`endpoint_details` 没有 `environment_id` 列）：界面上「当前环境」说了算，
+//!   MCP 侧由每次调用自己点名，两条路都落到同一批数据上。
 
 use std::collections::HashMap;
 
@@ -69,11 +63,8 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<Environment>, AppError> {
 
 /// 某项目的**默认环境**：一个项目里最早创建的那个环境。没有则 `None`。
 ///
-/// 「最早创建」按 `created_at` 认定；同一毫秒里创建的两个环境按 id 决胜，故这个查询
-/// 的结果唯一，与库里有多少个环境无关。
-///
-/// 这里曾经是 `get_active`（读 `is_active` 列）。那一列已随「当前环境」一起被清除：
-/// 当前环境是客户端的实时状态，而默认环境是项目的属性，两者不是一回事。
+/// 「最早创建」按 `created_at` 认定；同一毫秒里创建的两个环境按 id 决胜，故这个查询的结果唯一，
+/// 与库里有多少个环境无关。
 pub fn get_default(
     conn: &mut Connection,
     project_id: &str,
@@ -100,9 +91,8 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
     }
 }
 
-/// 查 `env_id` 所属的 `project_id`。env id 未知时返回 `NotFound`——调用方（会改动的 MCP
-/// 工具）需要这个解析结果来施加逐项目权限检查；把未知 id 当作静默的「global」就是一个
-/// 权限绕过。
+/// 查 `env_id` 所属的 `project_id`。env id 未知时返回 `NotFound`——调用方（会改动的 MCP 工具）
+/// 需要这个解析结果来施加逐项目权限检查，把未知 id 当作静默的「global」就是一个权限绕过。
 pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, AppError> {
     let pid: Option<String> = conn
         .query_row(
@@ -118,10 +108,8 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
 
 /// 新建一个环境。返回**落库之后**的那一行。
 ///
-/// 返回值带着**生效的** `created_at`：调用方通常不给它（结构体的默认值是 0），故
-/// 这里补上当前时刻——存 0 的话这个环境会永远排在最前面，于是后来建的每一个环境
-/// 都成不了默认环境。调用方必须回传这一份：把 0 回传出去，界面手里的创建时刻就与
-/// 库里那一行对不上，于是「默认环境」在两侧算出两个答案。
+/// 调用方必须回传这一份：把 0 回传出去，界面手里的创建时刻就与库里那一行对不上，于是「默认环境」
+/// 在两侧算出两个答案。
 pub fn create(conn: &mut Connection, e: &Environment) -> Result<Environment, AppError> {
     let module_base_urls_json = serde_json::to_string(&e.module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
@@ -167,11 +155,11 @@ pub fn update(
     }
     if let Some(m) = &patch.module_base_urls {
         sets.push(format!("module_base_urls_json = ?{}", binds.len() + 1));
-        binds.push(rusqlite::types::Value::Text(serde_json::to_string(m)?));
+        binds.push(super::json_col(m)?);
     }
     if let Some(v) = &patch.variables {
         sets.push(format!("variables_json = ?{}", binds.len() + 1));
-        binds.push(rusqlite::types::Value::Text(serde_json::to_string(v)?));
+        binds.push(super::json_col(v)?);
     }
     if let Some(d) = &patch.disabled_variables {
         // 存成排序后的形状：集合的两种写法（逐个 toggle 与整份替换）落到同一份规范形状，
@@ -179,9 +167,7 @@ pub fn update(
         let mut sorted = d.clone();
         sorted.sort();
         sets.push(format!("disabled_variables_json = ?{}", binds.len() + 1));
-        binds.push(rusqlite::types::Value::Text(serde_json::to_string(
-            &sorted,
-        )?));
+        binds.push(super::json_col(&sorted)?);
     }
     if sets.is_empty() {
         return get(conn, id);
@@ -250,11 +236,11 @@ pub fn set_var(
 
 /// 停用或启用一个环境变量。**必须在 `db::with_tx` 内调用。**
 ///
-/// 停用的变量**照样存、照样显示，但不参与替换**——`{{x}}` 留在原样并进
-/// `missing_vars`，用户看得见「这个变量没被替换」，而不是静默被替掉。
+/// 停用的变量**照样存、照样显示，但不参与替换**——`{{x}}` 留在原样并进 `missing_vars`，
+/// 用户看得见「这个变量没被替换」，而不是静默被替掉。
 ///
-/// 键不存在时返回 [`AppError::Validation`]：停用一个不存在的变量没有意义，而静默成功会让
-/// 调用方以为它生效了。
+/// 键不存在时返回 [`AppError::Validation`]：停用一个不存在的变量没有意义，静默成功会让调用方
+/// 以为它生效了。
 pub fn set_var_disabled(
     conn: &mut Connection,
     env_id: &str,
@@ -344,17 +330,12 @@ pub fn rename_var(
 
 /// 写一个（环境 × 模块）格子的两个字段。
 ///
-/// 两个参数各自「写什么就是什么」：
-///
 /// - `url` 传 `Some(u)` 写入后端 api 地址，传 `None` 则**这一格不动**；传空串表示清空它。
 /// - `proxy` 传 `Some(p)` 写入实际访问地址，传 `None` 则**这一格不动**；传空串表示清空它。
-///
-/// 两个字段都空时整格删掉：一个既没有地址也没有代理的格子解析不出任何东西，留着只会
-/// 让按键遍历的读法误判为「此处已配置」。
+/// - 两个字段都空时整格删掉：一个既没有地址也没有代理的格子解析不出任何东西。
 ///
 /// 此处不核对模块是否属于该环境的项目：那一对只有在 endpoint 真的去解析它时才成为 URL，
-/// 而端点解析走的是端点所属项目的树。
-/// **必须在 `db::with_tx` 内调用。** 返回更新后的 [`Environment`] 供渲染层回显。
+/// 而端点解析走的是端点所属项目的树。**必须在 `db::with_tx` 内调用。**
 pub fn set_module_base_url(
     conn: &mut Connection,
     env_id: &str,

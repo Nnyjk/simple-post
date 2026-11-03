@@ -20,10 +20,8 @@ pub fn default_project_color() -> String {
 
 /// 新主键：`sp_` + 墙钟十六进制 + 每进程计数器，拼接而成。
 ///
-/// 它**不是**不透明、也不可猜测——它编码了生成时刻，这对单用户桌面应用可以接受（其数据库
-/// 本就被该用户可读），此处点明以免有人把它用在需要更多保证的场景。计数器才是唯一性所在：
-/// 否则同一纳秒内生成的两个键会相撞，而在一个时钟节拍内重启的进程会重复前缀。随机后缀可
-/// 去掉这两条隐患，但库仍是本地的，不值得多一个依赖。
+/// 它编码了生成时刻，对单用户桌面应用可以接受（其数据库本就被该用户可读），此处点明以免
+/// 有人把它用在需要更多保证的场景。计数器才是唯一性所在：否则同一纳秒内生成的两个键会相撞。
 pub fn uid() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -41,8 +39,8 @@ pub fn uid() -> String {
 ///   - `null`   → `Some(None)`       → 向该列写 NULL
 ///   - `"foo"`  → `Some(Some("foo"))` → 写 "foo"
 ///
-/// serde 内建的 `Option<T>` 把缺席与 `null` 折叠成一回事，这会毁掉 patch 结构体里
-/// 「清空该列」与「保持不动」的区分。本包装器把它还原。
+/// serde 内建的 `Option<T>` 把缺席与 `null` 折叠成一回事，这会毁掉 patch 结构体里「清空该列」
+/// 与「保持不动」的区分。本包装器把它还原。
 pub fn double_option<'de, T, D>(de: D) -> Result<Option<Option<T>>, D::Error>
 where
     T: Deserialize<'de>,
@@ -51,15 +49,24 @@ where
     Deserialize::deserialize(de).map(Some)
 }
 
+/// JSON 标量 → 文本。`String` 取其内容，`null` 取空串，其余按 JSON 的写法。
+///
+/// 对象与数组也照 JSON 写出（`{"a":1}`）——调用点只把标量交给它。
+pub fn json_scalar_to_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
 /// `value` 是否不含任何会上线的字段。
 ///
-/// 「有没有东西要写」由「能否序列化成空对象」回答，而不是自己再列一遍字段：每个 patch 字段
-/// 都带 `skip_serializing_if = "Option::is_none"`，故该属性**就是**「缺席即不碰此列」的编码，
-/// 判定从它推导出来就只有一处真相，新增字段不会与手写字段表失配。三态情形随之自动成立：
-/// `Some(None)`（清空该列）序列化为显式 `null`，键存在，patch 正确地*不*算空。
+/// 「有没有东西要写」由「能否序列化成空对象」回答，而不是自己再列一遍字段：每个 patch 字段都带
+/// `skip_serializing_if = "Option::is_none"`，故该属性**就是**「缺席即不碰此列」的编码。三态情形随之
+/// 自动成立：`Some(None)`（清空该列）序列化为显式 `null`，键存在，patch 正确地*不*算空。
 ///
-/// 这些类型不会序列化失败（字段只有标量、`Option`、`Vec`，或本身 `Serialize` 的嵌套结构），
-/// 但序列化失败时返回 `false` 而非 `true` 是刻意的：偏向「非空」意味着意外失败会让写入照常发生、
+/// 序列化失败时返回 `false` 而非 `true` 是刻意的：偏向「非空」意味着意外失败会让写入照常发生、
 /// 真实错误在 DB 层暴露，而不是被吞成一次静默的空操作。
 pub(crate) fn serialises_to_empty_object<T: Serialize>(value: &T) -> bool {
     serde_json::to_value(value)

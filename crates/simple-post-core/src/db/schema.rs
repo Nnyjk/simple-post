@@ -12,7 +12,7 @@ use super::SCHEMA_VERSION;
 ///
 /// 所有 `CREATE` 都是 `IF NOT EXISTS`，对已迁移的库是空操作。父子矩阵触发器是唯一例外：
 /// 先 DROP 再建——触发器体**就是**契约，`IF NOT EXISTS` 会让老库继续执行应用层已放弃的矩阵。
-/// **不插入任何行**：全新安装是空库，由用户或 MCP 客户端填充；测试种子在 `test_support`。
+/// **不插入任何行**：全新安装是空库，由用户或 MCP 客户端填充。
 pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
     // 必须在 `SCHEMA_SQL` 之前：旧预览形状的动态变量表带着 `project_id` 列，且缺列，
     // `CREATE TABLE IF NOT EXISTS` 对它是空操作，旧行会留在一张形状已经不同的表里。
@@ -33,15 +33,13 @@ pub fn migrate(conn: &mut Connection) -> Result<(), AppError> {
 
 /// 丢掉那张建了却没人用过的 `request_settings` 表。
 ///
-/// 它是单例行（`CHECK id=1`），三列是超时 / 跟随重定向 / 响应体积上限，但从建立起就没有
-/// 任何一行被写进去、也没有任何读者。请求旋钮的现役容器是 `preferences` 表里的
-/// `request_settings` **行**（[`crate::db::preferences::keys::REQUEST_SETTINGS`]）。
-///
-/// **刻意不 bump `SCHEMA_VERSION`**：删掉一张没人读的表不改变任何一行的可读性，而 bump
-/// 版本会让 [`ensure_current_schema`] 删掉每个用户的库——为清一张空表赔上全部项目、
-/// 环境与资源树。做法与 [`drop_obsolete_dynamic_variable_tables`] 同源：打开时丢掉。
-///
-/// **只丢这一张表**：`preferences` 表本身不能碰，请求旋钮就住在它里面。
+/// - 它是单例行（`CHECK id=1`），三列是超时 / 跟随重定向 / 响应体积上限，但从建立起就没有任何
+///   一行被写进去、也没有任何读者。请求旋钮的现役容器是 `preferences` 表里的
+///   `request_settings` **行**（[`crate::db::preferences::keys::REQUEST_SETTINGS`]）。
+/// - **刻意不 bump `SCHEMA_VERSION`**：删一张没人读的表不改变任何一行的可读性，而 bump 版本会让
+///   [`ensure_current_schema`] 删掉每个用户的库。做法与 [`drop_obsolete_dynamic_variable_tables`]
+///   同源：打开时丢掉。
+/// - **只丢这一张表**：`preferences` 表本身不能碰，请求旋钮就住在它里面。
 fn drop_obsolete_request_settings_table(conn: &mut Connection) -> Result<(), AppError> {
     // 一条语句，不先查再删：GUI、守护进程与 `serve-web` 各自打开同一个 `store.db`，两个
     // 进程同时走到这里时，先查后删的写法会让其中一个撞上「no such table」——那会让
@@ -54,13 +52,9 @@ fn drop_obsolete_request_settings_table(conn: &mut Connection) -> Result<(), App
 
 /// 旧预览形状的动态变量表直接丢掉。
 ///
-/// 旧预览形状是「定义属于项目」：表里有 `project_id` 列，且**没有**
-/// `source_environment_id`（取数环境是后来才加的）。当前形状同样带 `project_id`，
-/// 故不能只看那一列——得看它有没有后加的那几列。
-///
-/// 丢掉两张表即可，下一次 `SCHEMA_SQL` 会把它们按当前形状建回来。
-///
-/// 只丢这两张表：项目、接口、环境等其余数据不动。
+/// 旧预览形状是「定义属于项目」：表里有 `project_id` 列，且**没有** `source_environment_id`。
+/// 当前形状同样带 `project_id`，故不能只看那一列，要看它有没有后加的那几列。
+/// 丢掉两张表即可，下一次 `SCHEMA_SQL` 会按当前形状建回来；项目、接口、环境等其余数据不动。
 fn drop_obsolete_dynamic_variable_tables(conn: &mut Connection) -> Result<(), AppError> {
     if !table_has_column(conn, "dynamic_variables", "project_id")? {
         return Ok(());
@@ -80,10 +74,8 @@ fn drop_obsolete_dynamic_variable_tables(conn: &mut Connection) -> Result<(), Ap
 
 /// 丢掉旧形状的「变量名全局唯一」那条索引。
 ///
-/// 旧形状的名字在整个工作区里唯一，新形状是**项目内**唯一：不同项目可以有同名变量。
-/// 留着旧索引，新项目里的同名变量根本存不进去——那正是这次要改掉的行为。
-///
-/// 新形状的两条索引由 `SCHEMA_SQL` 建（它们按 `project_id` 建，故要求那一列先补上）。
+/// 旧形状的名字在整个工作区里唯一，新形状是**项目内**唯一：留着旧索引，新项目里的同名变量根本
+/// 存不进去。新形状的两条索引由 `SCHEMA_SQL` 建（按 `project_id` 建，故要求那一列先补上）。
 fn drop_obsolete_dynamic_variable_name_index(conn: &mut Connection) -> Result<(), AppError> {
     conn.execute_batch("DROP INDEX IF EXISTS idx_dynamic_vars_name;")?;
     Ok(())
@@ -97,8 +89,6 @@ fn drop_obsolete_dynamic_variable_name_index(conn: &mut Connection) -> Result<()
 /// - 数据源端点还在 → 端点所属的项目（那正是这条定义取数时用的项目）；
 /// - 数据源是内联请求 → 工作区里的第一个项目（按创建时间，再按 id）；
 /// - 工作区里一个项目都没有 → 留空（未归属），等用户认领。
-///
-/// 旧形状里名字全局唯一，故归位之后同一项目里也不会撞名。
 fn backfill_dynamic_variable_projects(conn: &mut Connection) -> Result<(), AppError> {
     let rows: Vec<(String, Option<String>)> = {
         let mut stmt = conn.prepare(
@@ -145,27 +135,13 @@ fn backfill_dynamic_variable_projects(conn: &mut Connection) -> Result<(), AppEr
 
 /// 本项目某个构建写过、但并非每个构建都有的列。
 ///
-/// `CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，后加的列因此永远到不了已有文件；
-/// 在此补列是那些文件唯一的补救途径。幂等性靠问 SQLite 而非记账：已存在的列被跳过，
-/// 故每次启动都跑、第二次无事发生。
+/// `CREATE TABLE IF NOT EXISTS` 对已存在的表是空操作，后加的列因此永远到不了已有文件；在此补列
+/// 是那些文件唯一的补救途径。幂等性靠问 SQLite 而非记账：已存在的列被跳过。
 ///
-/// **刻意不 bump `SCHEMA_VERSION`**：它不是迁移计数器，[`ensure_current_schema`] 遇到
-/// 不匹配会**删库**——一个只是拓宽表的补丁版本会清空所有用户的项目、环境与资源树。
-/// 「纯增量改动不 bump」的承诺，全靠 `schema.sql` 的 `IF NOT EXISTS` 加上这一遍。
+/// **刻意不 bump `SCHEMA_VERSION`**：它不是迁移计数器，[`ensure_current_schema`] 遇到不匹配会
+/// **删库**——一个只是拓宽表的补丁版本会清空所有用户的项目、环境与资源树。
 ///
-/// 这份列表共 11 列，逐列是：
-///
-/// - `environments.module_base_urls_json`：环境 × 模块 那一格的地址与代理。
-/// - `environments.disabled_variables_json`：这个环境停用了哪些变量名。
-/// - `endpoint_details.pre_request_script`：端点的前置脚本。
-/// - `endpoint_details.test_script`：端点的测试脚本。
-/// - `endpoint_details.path_params_json`：URL 路径里的占位符与它们各自的值。
-/// - `endpoint_details.tls_json`：端点自己的 HTTPS 出站设置。
-/// - `dynamic_variables.project_id`：动态变量的归属项目。
-/// - `dynamic_variables.transform_script`：动态变量的处理脚本。
-/// - `response_history.is_favorite`：用户收藏了这条历史。
-/// - `response_history.request_json`：那次发送出去的请求。
-/// - `response_history.body_base64`：响应体的二进制形态（base64）。
+/// 每一项后面都写了旧行读回来的等价语义。
 const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
         // 环境 × 模块 那一格的地址与代理。纯增量：旧行读回来是空 map，语义等价于
@@ -286,12 +262,11 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
     Ok(false)
 }
 
-/// 把磁盘上的库升到 [`SCHEMA_VERSION`]，版本不符则替换。
-/// 返回 `true` 表示文件已被删除、将重建，由调用方告知数据丢失。
+/// 把磁盘上的库升到 [`SCHEMA_VERSION`]，版本不符则替换。返回 `true` 表示文件已被删除、
+/// 将重建，由调用方告知数据丢失。
 ///
-/// **没有迁移路径。** 本项目还没有发布给真实用户，数据迁移框架是守护一个人群的投机重量；
-/// 版本号之前的三表布局（`modules` / `collections` / `endpoints`）文件直接替换而非升级。
-/// 这个判断一旦改变，只有本函数需要动。
+/// **没有迁移路径。** 本项目还没有发布给真实用户，为真实用户写数据迁移框架不划算；版本号之前的
+/// 三表布局（`modules` / `collections` / `endpoints`）文件直接替换而非升级。
 pub(super) fn ensure_current_schema(db_path: &Path) -> Result<bool, AppError> {
     if !db_path.exists() {
         // 全新安装——`migrate` 会创建文件并写入版本号。

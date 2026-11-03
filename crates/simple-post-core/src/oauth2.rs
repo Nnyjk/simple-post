@@ -44,10 +44,8 @@ pub use crate::db::oauth2_tokens::OAuth2Token;
 
 use crate::oauth2::parse::parse_pasted;
 
-/// 提前多久把 token 当成已过期。
-///
-/// 宁可早刷新也不晚：晚意味着拿一个刚失效的 token 发出请求，服务端回 401，用户看到
-/// 一次莫名失败。60 秒够盖住「取回来 → 组装 → 发出」这段，也够盖住双方时钟的一点偏差。
+/// 提前多久把 token 当成已过期。宁可早刷新也不晚：晚意味着拿一个刚失效的 token 发出请求，
+/// 服务端回 401。60 秒够盖住「取回来 → 组装 → 发出」这段，也够盖住双方时钟的一点偏差。
 const EXPIRY_SKEW_SECS: i64 = 60;
 
 /// token 端点的超时。它不是用户的业务请求，不该继承 `settings.timeoutMs`。

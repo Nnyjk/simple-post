@@ -3,23 +3,19 @@
 //! ## 为什么要有这一层
 //!
 //! MCP 工具是 CRUD 粒度的：建模块、建集合、建端点各是一个工具，而且都只收 id。
-//! 于是「创建一个接口规范」这种跨多类实体、有先后依赖的复合任务，被拆成
-//! 「先查一遍、再建一下」的十几步；每一步查出来的 id 是下一步的输入，所以它们
-//! 天然串行。同一件事在 REST 路由与桌面 command 侧还要再写一遍。
+//! 于是「创建一个接口规格」这种跨多类实体、有先后依赖的复合任务，被拆成「先查一遍、再建一下」的
+//! 十几步；每一步查出来的 id 是下一步的输入，所以它们天然串行。同一件事在 REST 路由与桌面
+//! command 侧还要再写一遍。
 //!
 //! 本模块把「找到就复用、找不到就建」这一步收在一处，并让三个宿主
-//! （`simple-post-server` 的 REST 路由、`simple-post-mcp` 的工具、Tauri command）
-//! 拿到同一套语义。**它只做寻址**：拼请求、发请求、解析响应都不在这里。
+//! （`simple-post-server` 的 REST 路由、`simple-post-mcp` 的工具、Tauri command）拿到同一套语义。
+//! **它只做寻址**：拼请求、发请求、解析响应都不在这里。
 //!
 //! ## 幂等靠什么判定
 //!
-//! 按**名字**，不按指纹。指纹（method + path + body 摘要）是 interchange 那边的
-//! 概念，core 不依赖 interchange，故 core 侧不另造一套；名字是调用方看得见、
-//! 说得清的东西，「这个模块叫 trade」是一个可以复述的判据。
-//!
-//! 端点的例外：端点的名字不唯一（两个集合下各有一个叫「查询」的接口是常事），
-//! 所以端点按**同一个父下 method + url 完全相同**来判定。这是调用方能自己
-//! 复述出来的判据，不是一串指纹。
+//! 按**名字**，不按指纹。指纹（method + path + body 摘要）是 interchange 那边的概念，core
+//! 不依赖 interchange，故 core 侧不另造一套。端点的例外：端点的名字不唯一（两个集合下各有一个
+//! 叫「查询」的接口是常事），所以端点按**同一个父下 method + url 完全相同**来判定。
 //!
 //! ## 本模块的三部分
 //!
@@ -27,8 +23,7 @@
 //! * [`input`]：agent 的输入 → 域类型的强制转换。
 //! * [`upsert`]：一份接口规格的线格式与整份落库的编排。
 //!
-//! 三部分都在 core，因为它们要在 REST 路由、桌面 command 与 MCP 工具三处保持
-//! 同一套语义；写在某一侧，另一侧就会静默少一半。
+//! 三部分都在 core，因为它们要在 REST 路由、桌面 command 与 MCP 工具三处保持同一套语义。
 
 pub mod input;
 pub mod upsert;
@@ -44,9 +39,7 @@ use crate::error::AppError;
 /// 找到同名项时怎么办。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IfExists {
-    /// 复用已有的那一个。这是默认值。
-    ///
-    /// 默认取这一档的理由：重复调用同一个「建」工具几乎总是意图相同的一件事，
+    /// 复用已有的那一个。这是默认值：重复调用同一个「建」工具几乎总是意图相同的一件事，
     /// 而「建出两个同名模块」是一个没人会主动要求的结果。
     Reuse,
     /// 报冲突，不新建。调用方明确说「我要一个新的」时用这一档。
@@ -113,12 +106,8 @@ impl Resolved {
 
 /// 按名找或建一个项目。
 ///
-/// 项目的名字**不唯一**（两个同名项目是合法的），所以「按名找」在这里是「找出第一个
-/// 同名的」而不是「唯一的那个」。这仍是有用的：agent 反复应用同一份规格时，靠它
-/// 认出「我刚才建的那个项目」。
-///
-/// `description` 与 `color` 只在**新建**时写进去。复用已有项目时它们一个都不动 ——
-/// 「复用」的意思就是「不写任何字段」，改了它就不再是复用了。
+/// 项目的名字**不唯一**（两个同名项目是合法的），所以「按名找」在这里是「找出第一个同名的」。
+/// `description` 与 `color` 只在**新建**时写进去：复用已有项目时它们一个都不动。
 pub fn resolve_project(
     conn: &mut Connection,
     name: &str,
@@ -161,9 +150,8 @@ pub fn resolve_project(
 
 /// 在项目下按名找或建一个环境。
 ///
-/// 环境的**列表**是项目级事实，名字在同一项目里也不唯一（界面允许两个同名环境），
-/// 所以「按名找」是「找出第一个同名的」。当前环境不是落库的状态，故这里不碰它——
-/// 新建一个环境不等于任何客户端切换了它。
+/// 名字在同一项目里不唯一（界面允许两个同名环境），
+/// 所以「按名找」是「找出第一个同名的」。当前环境不是落库的状态，故这里不碰它。
 pub fn resolve_environment(
     conn: &mut Connection,
     project_id: &str,
@@ -207,8 +195,7 @@ pub fn resolve_environment(
 
 /// 在项目下按名找或建一个模块。
 ///
-/// 模块只能待在项目顶层（`ResourceNodeType::may_under` 强制），故查找范围就是
-/// 「该项目下的模块」——不需要额外限定层级。
+/// 模块只能待在项目顶层（`ResourceNodeType::may_under` 强制），故查找范围就是「该项目下的模块」。
 pub fn resolve_module(
     conn: &mut Connection,
     project_id: &str,
@@ -255,9 +242,8 @@ pub fn resolve_module(
 
 /// 在某个父下按名找或建一个集合。
 ///
-/// `parent_collection_id` 给出时，集合挂在那个集合下（嵌套）；不给时挂在
-/// `module_id` 下（顶层集合）。两种父都被 `may_under` 允许，校验由
-/// [`db::nodes::create`] 执行 —— 本模块不自己判一遍，那道检查会与它漂移。
+/// `parent_collection_id` 给出时，集合挂在那个集合下（嵌套）；不给时挂在 `module_id` 下
+/// （顶层集合）。两种父都被 `may_under` 允许，校验由 [`db::nodes::create`] 执行。
 pub fn resolve_collection(
     conn: &mut Connection,
     module_id: &str,
@@ -307,9 +293,8 @@ pub fn resolve_collection(
 
 /// 按路径逐级找或建集合。路径相对模块，第一段是模块下的顶层集合。
 ///
-/// 返回每一级的结果，顺序与路径一致，调用方据此知道哪几级是这次新建的。
-/// 路径为空串或含空段时报错 —— 「订单//明细」这种写法是调用方的笔误，
-/// 悄悄当成「订单/明细」会让它建到别的地方去。
+/// 返回每一级的结果，顺序与路径一致。路径为空串或含空段时报错：「订单//明细」这种写法是
+/// 调用方的笔误，悄悄当成「订单/明细」会让它建到别的地方去。
 pub fn resolve_collection_path(
     conn: &mut Connection,
     module_id: &str,
@@ -349,17 +334,11 @@ pub fn split_path(path: &str) -> Result<Vec<String>, AppError> {
 
 /// 在同一个父下按「名字 + method + url」找端点。找到返回它，找不到返回 `None`。
 ///
-/// 父可以是集合，也可以是模块（端点允许直接挂在模块下）。
+/// 父可以是集合，也可以是模块（端点允许直接挂在模块下）。**名字参与判据**：同一个集合下两个
+/// 都叫「查询」的接口靠 method 与 url 区分，只按 method + url 判会让第二个「查询」永远建不出来。
 ///
-/// **名字参与判据**，这不是多余的严格：同一个集合下两个都叫「查询」的接口是常事，
-/// 它们靠 method 与 url 区分；而两个同名同 method 同 url 的端点才是同一个接口被
-/// 建了两遍。只按 method + url 判会把前者也认成同一个，于是第二个「查询」永远建不出来。
-///
-/// url 里的占位符不参与比较，故 `/users/{id}` 与 `/users/1` 是两个不同的端点，
-/// 而 `/users/{id}` 与 `/users/{name}` 也是 —— 它们发出去的请求形状确实不同。
-///
-/// method 走 [`crate::domain::parse_http_method`] 归一，所以 `"post"` 与 `"POST"`
-/// 比的是同一个动词 —— 判据里不留大小写这条岔路。
+/// url 里的占位符不参与比较，故 `/users/{id}` 与 `/users/{name}` 是两个不同的端点。method 走
+/// [`crate::domain::parse_http_method`] 归一，`"post"` 与 `"POST"` 比的是同一个动词。
 pub fn find_endpoint_by_identity(
     conn: &mut Connection,
     parent_id: &str,
@@ -388,11 +367,9 @@ pub fn find_endpoint_by_identity(
 
 /// 铸一个带前缀的 id。
 ///
-/// **绝不能用「前缀 + 毫秒时钟」**：那是毫秒时钟，同一毫秒内两次创建会得到
-/// 同一个主键，第二次直接撞 `nodes.id` 约束。AI 客户端成批循环创建时必然踩到。
-/// [`crate::domain::uid`] 是本仓库的 id 唯一来源：纳秒 + 进程内计数器，进程内不撞、
-/// 重启也不重复前缀。
-fn mint_id(prefix: &str) -> String {
+/// **绝不能用「前缀 + 毫秒时钟」**：同一毫秒内两次创建会得到同一个主键，第二次直接撞
+/// `nodes.id` 约束。[`crate::domain::uid`] 是本仓库的 id 唯一来源：纳秒 + 进程内计数器。
+pub fn mint_id(prefix: &str) -> String {
     uid().replacen("sp_", &format!("{prefix}_"), 1)
 }
 

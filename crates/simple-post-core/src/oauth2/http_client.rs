@@ -28,10 +28,8 @@ use crate::http_executor::{self, HttpRequestInput};
 use super::parse::{error_response, normalize_success_body};
 use super::{TOKEN_MAX_RESPONSE_KB, TOKEN_TIMEOUT_MS};
 
-/// 无状态客户端。每次换 token 现建一个。
-///
-/// 带一份 HTTPS 出站设置：token 端点也是一次出站，故它与普通请求走同一道 TLS 规则——
-/// 用户给内部 IdP 配的 CA 证书与客户端证书，对 token 端点同样有效。
+/// 无状态客户端。每次换 token 现建一个。带一份 HTTPS 出站设置：token 端点也是一次出站，故它
+/// 与普通请求走同一道 TLS 规则。
 pub(super) struct ExecutorClient {
     /// 这次出站生效的 HTTPS 设置。由调用方合成好传进来，本模块不读库。
     pub(super) tls: TlsSettings,
@@ -95,10 +93,8 @@ async fn exchange(request: HttpRequest, tls: TlsSettings) -> Result<HttpResponse
 
 /// 2xx 应答的 body → crate 看得懂的那份响应。
 ///
-/// 状态码一律报 **200**：crate 的 `check_response_status` 只认 200，而本项目一直
-/// 接受整个 2xx（201 / 202 也放过）。把原样状态码转交，crate 会对 201 报一句
-/// `token 请求失败` —— 那是从宽变严的回归，而 RFC 6749 §5.1 本来就规定 token
-/// 端点回 200，放宽只是本项目一贯的容忍。
+/// 状态码一律报 **200**：crate 的 `check_response_status` 只认 200，而本项目接受整个 2xx
+/// （201 / 202 也放过）。把原样状态码转交，crate 会对 201 报一句 `token 请求失败`。
 ///
 /// 调用方必须先确认状态码落在 2xx，否则这里会替非 2xx 撒谎。
 fn ok_response(body: &str, content_type: &str) -> Result<HttpResponse, AppError> {

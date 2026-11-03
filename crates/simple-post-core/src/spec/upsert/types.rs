@@ -10,16 +10,10 @@ use crate::spec::input::KeyValueInput;
 
 /// 一份接口规格。
 ///
-/// 字段一律用 `Option` 表达「这份规格没有提到它」，因为「没提到」与「提到但为空」
-/// 在落库时的处置不同：前者不动已有的东西，后者要覆盖。
-///
-/// ## 两种拼写都收
-///
-/// 字段名是 snake_case（MCP 那条线的惯例），但**camelCase 的别名同样收**：
-/// REST 路由与桌面 command 所在的这条线通篇用 camelCase，让调用方为了一份规格
-/// 改掉自己的书写习惯没有必要。两种拼写落在**同一个**类型上，故三端不会各收各的形状。
-///
-/// 别名只挂在多词的字段上；单词字段两种拼写本就相同。
+/// - 字段一律用 `Option` 表达「没提到」：「没提到」与「提到但为空」在落库时处置不同，前者不动
+///   已有的东西，后者要覆盖。
+/// - 字段名是 snake_case（MCP 那条线的惯例），**camelCase 的别名同样收**，两者落在同一个类型上，
+///   故三端不会各收各的形状。别名只挂在多词的字段上。
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EndpointSpec {
@@ -163,14 +157,11 @@ impl EndpointIfExists {
 // =========================================================================
 // 结果
 // =========================================================================
-//
-// 结果类型本身带 `Serialize` 且字段名是线上形状，故 REST 路由、桌面 command 与
-// MCP 工具回的是同一份 JSON，而不必各写一遍拼装 —— 那三份拼装迟早会各写错一遍。
 
 /// 一次落库的结果。
 ///
-/// 三个宿主（REST 路由、桌面 command、MCP 工具）回的是同一份形状：结果类型本身
-/// 可序列化，故不必各写一遍 JSON 拼装，也就不会各写错一遍。
+/// 三个宿主（REST 路由、桌面 command、MCP 工具）回的是同一份形状：结果类型本身可序列化，
+/// 故不必各写一遍 JSON 拼装。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpecOutcome {
@@ -208,9 +199,8 @@ pub struct EnvironmentOutcome {
 
 /// 端点的结果。
 ///
-/// 端点的节点结构与请求配置直接写在这一层：`resource` 带 `#[serde(flatten)]`，
-/// 序列化时并进 `endpoint`，故 `endpoint.id` 就是端点的 id，`endpoint.detail` 是它的
-/// 请求配置。若把它们收在 `endpoint.resource` 下，调用方就要多挖两级，而那两级里没有信息。
+/// `resource` 带 `#[serde(flatten)]`，序列化时并进 `endpoint`，故 `endpoint.id` 是端点的 id，
+/// `endpoint.detail` 是它的请求配置。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndpointOutcome {

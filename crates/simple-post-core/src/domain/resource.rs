@@ -39,11 +39,10 @@ impl ResourceNodeType {
 
     /// 本类型的节点能否直接挂在 `parent` 类型的节点下。
     ///
-    /// SQLite 无法在单一多态 `parent_id` 上表达它——CHECK 约束读不到别的行——故矩阵写在
-    /// 这里，并由 `db::nodes` 在每次写入时执行，`schema.sql` 另有配套触发器。
-    ///
-    /// endpoint 的父刻意是两个类型：模块直接收 endpoint，免得「一个 endpoint」这种最简场景
-    /// 先得为此建一个用完即弃的 collection；collection 同样收 endpoint，也继续收子 collection。
+    /// SQLite 的 CHECK 约束读不到别的行，无法在多态 `parent_id` 上表达这个矩阵，故矩阵写在这里，
+    /// 由 `db::nodes` 每次写入时执行，`schema.sql` 另有配套触发器。
+    /// endpoint 的父是 module 或 collection：模块直接收 endpoint，免得「一个 endpoint」这种最简场景
+    /// 先得为此建一个用完即弃的 collection。
     pub fn may_under(self, parent: ResourceNodeType) -> bool {
         match self {
             // 模块的父是项目，不是节点。调用方以 `parent_id = NULL` 表达，故「无父」是唯一合法情形。
@@ -54,7 +53,7 @@ impl ResourceNodeType {
                 parent,
                 ResourceNodeType::Module | ResourceNodeType::Collection
             ),
-            // collection 用来把 endpoint 与同级分组；模块则直接收下不需要独立文件夹的那个。
+            // collection 用来把 endpoint 与同级分组；模块直接收下不需要独立文件夹的那个。
             ResourceNodeType::Endpoint => matches!(
                 parent,
                 ResourceNodeType::Module | ResourceNodeType::Collection
@@ -62,26 +61,23 @@ impl ResourceNodeType {
         }
     }
 
-    /// 本类型的节点能否落在项目顶层（`parent_id = NULL`）。
+    /// 本类型的节点能否落在项目顶层（`parent_id = NULL`）。只有 module 可以。
     ///
-    /// 模块的父级是项目而不是节点，故这是「没有节点父」的唯一合法情形；集合与接口的
-    /// 父级永远是节点。前端 `src/lib/node-placement.ts` 读的是同一张矩阵的镜像，两侧由
+    /// 前端 `src/lib/node-placement.ts` 读的是同一张矩阵的镜像，两侧由
     /// `fixtures/placement-parity.json` 钉住。
     pub fn may_sit_at_project_top(self) -> bool {
         matches!(self, ResourceNodeType::Module)
     }
 }
 
-/// 资源树的一行：只有结构与身份。
+/// 资源树的一行：只有结构与身份。endpoint 的请求配置在 [`EndpointDetail`] 里，按 `node_id` 关联。
 ///
-/// endpoint 的请求配置在 [`EndpointDetail`] 里，按 `node_id` 关联。拆开不是为了整洁：
-/// `method` / `url` / `tags` 对模块毫无意义，折叠进来会让每个模块和 collection 行永远
-/// 带着空列。
+/// `method` / `url` / `tags` 对模块毫无意义，折叠进来会让每个模块和 collection 行永远带着空列。
 ///
-/// `src/types/domain.ts` 侧的镜像多一个字段：渲染器的折叠/展开态 `expanded?: boolean`。
-/// 此处刻意不要——它既不落库也不属于节点身份。缺它也安全：本结构体忽略未知键，渲染层
-/// 带 `expanded` 回传会被直接丢弃。用 `#[serde(deny_unknown_fields)]` 堵这个口是错的：
-/// 它会连该字段一并拒绝，也会破坏 [`EndpointResource`] 的 `#[serde(flatten)]`。
+/// `src/types/domain.ts` 侧的镜像多一个字段：渲染器的折叠/展开态 `expanded?: boolean`。此处刻意不要
+/// ——它既不落库也不属于节点身份。本结构体忽略未知键，渲染层带 `expanded` 回传会被直接丢弃；用
+/// `#[serde(deny_unknown_fields)]` 堵这个口是错的，它会连该字段一并拒绝，也会破坏 [`EndpointResource`]
+/// 的 `#[serde(flatten)]`。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceNode {
@@ -126,7 +122,7 @@ impl ResourceNodePatch {
     }
 }
 
-/// endpoint 的请求配置。按 `node_id` 与 [`ResourceNode`] 关联；树的列刻意不出现在这里，
+/// endpoint 的请求配置。按 `node_id` 与 [`ResourceNode`] 关联；树的列不出现在这里，
 /// 好让它们各自只有一个归属。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,9 +138,8 @@ pub struct EndpointDetail {
     pub params: Vec<KeyValue>,
     /// URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
     ///
-    /// 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，
-    /// 路径参数要被替换进路径本身。混在一份列表里，「这个参数进哪儿」就取决于
-    /// URL 文本，改一个占位符的名字会静默改变一个参数的归属。
+    /// 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，路径参数要被替换进
+    /// 路径本身。混在一份列表里，改一个占位符的名字会静默改变一个参数的归属。
     #[serde(default)]
     pub path_params: Vec<KeyValue>,
     #[serde(default)]
@@ -231,7 +226,7 @@ impl EndpointDetailPatch {
 
 /// 树与编辑器共同看到的 endpoint：节点结构 + 请求配置。
 /// 与 [`ResourceNode`] 分开，好让树的读取可以完全跳过 `endpoint_details`——树只渲染
-/// name / type / sort_order，为此对每个节点都 join 详情表，等于读一组多数行根本没有的列。
+/// name / type / sort_order。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndpointResource {

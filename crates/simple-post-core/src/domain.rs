@@ -50,7 +50,7 @@ pub use settings::{
     is_loopback_host, McpHttpConfig, Permission, RequestSettings, TlsSettings, DEFAULT_MCP_HOST,
     DEFAULT_MCP_PATH,
 };
-pub use util::{default_project_color, double_option, now_ms, uid};
+pub use util::{default_project_color, double_option, json_scalar_to_text, now_ms, uid};
 
 // 测试——跨 IPC 形状的往返序列化。
 

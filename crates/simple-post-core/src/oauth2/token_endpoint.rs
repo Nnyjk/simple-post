@@ -36,7 +36,7 @@ type ErrorResp = StandardErrorResponse<BasicErrorResponseType>;
 ///
 /// 第 10 位是 token 端点的状态：`set_token_uri` 之后就是 [`EndpointSet`]，故四个
 /// `exchange_*` 是不带 `Result` 的那组。中间四位是 auth / device / introspection /
-/// revocation 四个端点的状态，本项目一个都不用，全留 [`EndpointNotSet`]。
+/// revocation 四个端点的状态，本项目一个都不用。
 type Oauth2Client = Client<
     ErrorResp,
     BasicTokenResponse,
@@ -52,10 +52,10 @@ type Oauth2Client = Client<
 
 /// 组一个已配好 token 端点与 client 凭据的 client。
 ///
-/// `AuthType` 直接对应配置里的 `client_auth`：RFC 6749 §2.3.1 允许凭据放 Basic 头
-/// 或请求体，crate 按 `AuthType` 决定放哪儿。Basic 分支**先对 id 与 secret 各做
-/// 一次 form 编码再 base64**（§2.3.1 的原文要求，不是 RFC 7617 Basic 的通常做法），
-/// 所以含 `:` / `+` / 空格的 secret 也不会被服务端解出另一组凭据。
+/// `AuthType` 直接对应配置里的 `client_auth`：RFC 6749 §2.3.1 允许凭据放 Basic 头或请求体，
+/// crate 按 `AuthType` 决定放哪儿。Basic 分支**先对 id 与 secret 各做一次 form 编码再
+/// base64**（§2.3.1 的原文要求），所以含 `:` / `+` / 空格的 secret 也不会被服务端解出
+/// 另一组凭据。
 pub(super) fn client_for(cfg: &OAuth2Auth) -> Result<Oauth2Client, AppError> {
     let mut client = Client::new(ClientId::new(cfg.client_id.trim().to_string()))
         .set_token_uri(TokenUrl::new(cfg.token_url.trim().to_string()).map_err(config_error)?)
@@ -96,12 +96,10 @@ pub(crate) fn scopes_of(cfg: &OAuth2Auth) -> Vec<Scope> {
 /// 给请求挂 scope 与 `extra_params`。
 ///
 /// 四个 crate 请求类型没有共同 trait，而这些方法四边同名，故宏写一次。
-/// `scope` 分支走 `add_scope`（crate 原生字段）；`no_scope` 用于
-/// `CodeTokenRequest`——它没有 `add_scope`，scope 按普通表单字段挂（RFC 6749
-/// §4.1.3 允许 token 请求带 scope）。
+/// `no_scope` 用于 `CodeTokenRequest`——它没有 `add_scope`，scope 按普通表单字段挂
+/// （RFC 6749 §4.1.3 允许 token 请求带 scope）。
 ///
-/// 路径一律写全 `$crate::`：宏在调用处展开，裸名字会按**调用方**的作用域解析，
-/// 而调用方（本文件的单测）没有 `use` 过这两个函数。
+/// 路径一律写全 `$crate::`：宏在调用处展开，裸名字会按**调用方**的作用域解析。
 macro_rules! decorate {
     ($r:ident, $cfg:expr, scope) => {{
         for s in $crate::oauth2::token_endpoint::scopes_of($cfg) {
@@ -195,9 +193,8 @@ pub(super) async fn refresh_via_http(
 
 /// crate 的英文错误 → 本项目的中文错误。
 ///
-/// 传输级失败与**非 2xx** 已在 [`http_client`] 里就地变成 `AppError`，crate 根本没
-/// 见到非 2xx 应答，所以走不到 `ServerResponse`。剩下的 `Parse` 就是「2xx 但
-/// body 里没有可用的 access_token」。
+/// 传输级失败与**非 2xx** 已在 [`http_client`] 里就地变成 `AppError`，所以走不到
+/// `ServerResponse`。剩下的 `Parse` 就是「2xx 但 body 里没有可用的 access_token」。
 fn map_request_error(e: RequestTokenError<AppError, ErrorResp>) -> AppError {
     match e {
         RequestTokenError::Request(inner) => inner,

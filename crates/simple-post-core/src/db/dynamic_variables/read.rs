@@ -9,11 +9,8 @@ use super::mapping::{row_to_var, COLUMNS};
 
 /// 列出全部定义，按 `sort_order` 排序。
 ///
-/// 跨全部项目：这条读路径服务的是「列出工作区里所有动态变量」这种调用（跨项目调用
-/// 接口要靠它），项目内的那一份走 [`list_by_project`]。
-///
-/// `source_endpoint_name` 由一次 LEFT JOIN 顺带取回：界面要显示「数据源：站点清单」，
-/// 让调用方自己再查一次树是多余的往返。
+/// 跨全部项目：这条读路径服务的是「列出工作区里所有动态变量」这种调用，项目内的那一份走
+/// [`list_by_project`]。`source_endpoint_name` 由一次 LEFT JOIN 顺带取回。
 pub fn list(conn: &mut Connection) -> Result<Vec<DynamicVariable>, AppError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {} FROM dynamic_variables v \
@@ -69,8 +66,7 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<DynamicVariable, AppError>
 
 /// 按名字读某个项目里的一条定义。解析阶段用它把 `{{sns}}` 里的名字对上定义。
 ///
-/// **只认这个项目**：同名变量在别的项目里另有一条定义，与这条无关。取值不回退——
-/// 消费方项目里没有这个名字，它就是缺失的。
+/// **只认这个项目**：同名变量在别的项目里另有一条定义，取值不回退。
 pub fn get_by_name_in_project(
     conn: &mut Connection,
     project_id: &str,
@@ -89,10 +85,8 @@ pub fn get_by_name_in_project(
     }
 }
 
-/// 按名字读**跨全部项目**的同名定义。
-///
-/// 跨项目调用接口用它：同一个名字在多个项目里都有定义时，调用方要自己决定用哪一条，
-/// 故这里把全部候选都返回，由上层判歧义。
+/// 按名字读**跨全部项目**的同名定义。跨项目调用接口用它：同一个名字在多个项目里都有定义时，
+/// 调用方要自己决定用哪一条，故这里把全部候选都返回，由上层判歧义。
 pub fn get_by_name_across(
     conn: &mut Connection,
     name: &str,
@@ -129,9 +123,8 @@ pub fn project_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, 
 
 /// 一条定义的数据源端点所属的项目。数据源是内联请求时没有项目。
 ///
-/// MCP 工具用它决定「这次取数算在哪个项目的权限下」——取数会真的用到那个项目的
-/// base URL 与鉴权。归属项目是另一回事（见 [`project_id_of`]）：那条决定「谁拥有这条
-/// 定义」，这条决定「这次取数花谁的钱」。
+/// MCP 工具用它决定「这次取数算在哪个项目的权限下」——取数会真的用到那个项目的 base URL 与
+/// 鉴权。归属项目是另一回事（见 [`project_id_of`]）：那条决定「谁拥有这条定义」。
 pub fn source_project_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, AppError> {
     let endpoint_id: Option<Option<String>> = conn
         .query_row(

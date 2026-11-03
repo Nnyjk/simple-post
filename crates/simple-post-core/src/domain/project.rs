@@ -67,8 +67,8 @@ pub struct Environment {
     pub name: String,
     /// `module_id -> ModuleBaseUrl`。**URL 只存在于这一层。**
     ///
-    /// 每个格子独立：缺项表示「此模块在此环境没有地址」，解析到此为止，不会回落到别的
-    /// 模块的值。格子里的 `proxy` 是实际访问地址，请求发出前用它替换 `url` 这个前缀。
+    /// 每个格子独立：缺项表示「此模块在此环境没有地址」，解析到此为止。格子里的 `proxy` 是
+    /// 实际访问地址，请求发出前用它替换 `url` 这个前缀。
     #[serde(default)]
     pub module_base_urls: HashMap<String, ModuleBaseUrl>,
     #[serde(default)]
@@ -76,33 +76,23 @@ pub struct Environment {
     /// 被停用的变量名。**照样存、照样显示，但不参与替换。**
     ///
     /// 与 `variables` 平行，而不是把值改成 `{value, enabled}`：后者会改掉
-    /// `environments.variables_json` 列的既有格式，读路径
-    /// `serde_json::from_str::<HashMap<String,String>>` 就会在旧行上失败。平行集合是纯增量：
-    /// 旧行读回来是空集合，语义等价于「全部启用」。
+    /// `environments.variables_json` 列的既有格式，读路径就会在旧行上失败。平行集合是纯增量。
     #[serde(default)]
     pub disabled_variables: Vec<String>,
     /// 创建时刻（unix 毫秒）。
     ///
-    /// 「默认环境」按它认定：**一个项目里最早创建的那个环境**是它的默认环境。默认环境
-    /// 是项目的属性（谁发请求时没点名环境就用它），而「当前环境」是每个客户端自己的
-    /// 实时状态——后者不落库，故库里没有「当前」这一列。
+    /// 「默认环境」按它认定：**一个项目里最早创建的那个环境**是它的默认环境。默认环境是项目的
+    /// 属性，而「当前环境」是每个客户端自己的实时状态——后者不落库，故库里没有「当前」这一列。
     #[serde(default)]
     pub created_at: i64,
 }
 
 /// 一个（环境 × 模块）格子里的地址配置。
 ///
-/// 两个字段回答两个问题：
-///
 /// - `url` 是**后端 api 地址**——文档里写的、模块对外声明的那个地址。
 /// - `proxy` 是**实际访问地址**——接口经代理网关转代后真正要打的那个地址。
 ///
-/// 两者不一致时，请求发出前用 `proxy` 替换 `url` 这个前缀，其余部分原样保留。故
-/// `url = "http://svc.internal:8080/api/a"`、`proxy = "https://gw.corp.com/api/xxxx/a"`
-/// 与端点路径 `/orders/list` 合成的实际请求是
-/// `https://gw.corp.com/api/xxxx/a/orders/list`。
-///
-/// `proxy` 为 `None` = 没有代理，请求直接打 `url`。
+/// 两者不一致时，请求发出前用 `proxy` 替换 `url` 这个前缀，其余部分原样保留。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleBaseUrl {
@@ -124,10 +114,8 @@ pub struct EnvironmentPatch {
     pub module_base_urls: Option<HashMap<String, ModuleBaseUrl>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variables: Option<HashMap<String, String>>,
-    /// 整份停用集合替换。缺席 = 不碰，值 = 替换成那份集合。
-    ///
-    /// 逐个变量的停用 / 启用走 `db::environments::set_var_disabled`：那是**一个**变量
-    /// 的一次原子写，而整份替换会让「启用了谁」这件事看不见中间态。
+    /// 整份停用集合替换。缺席 = 不碰，值 = 替换成那份集合。逐个变量的停用 / 启用走
+    /// `db::environments::set_var_disabled`：那是**一个**变量的一次原子写。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled_variables: Option<Vec<String>>,
 }
