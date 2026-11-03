@@ -7,8 +7,8 @@
 //! 三张表才是完整的请求；任何一行都不足以回答「这个接口该打到哪里去」。
 //!
 //! **先选定环境，再逐模块取，不回退。** 该模块没配就是没有地址——不借用别的模块的。
-//! 故两个入口都要求调用方指名 `environment_id`（`None` 表示取默认环境，即最早创建的
-//! 那个）：让「用哪个环境」成为一次显式的决定，而不是本模块替用户挑一个。
+//! 两个入口都收 `environment_id`：`None` 取该项目的默认环境（最早创建的那个）；
+//! 给了 id 就按那个环境解析，那个环境不属于本项目时产出的 IR 里每个模块都没有地址。
 
 use std::collections::HashMap;
 
@@ -57,6 +57,8 @@ fn load_projection(
     let project = db::projects::get(conn, project_id)?;
 
     // 指名的环境可能不属于该项目：那会让 URL 跨项目串过来，故只接受本项目的环境。
+    // 指名的环境不存在时 `db::environments::get` 报错，调用方拿到的就是那个错误，
+    // 而不是一份静默退回默认环境的 IR。
     // 没指名就用项目的默认环境（最早创建的那个）。
     let env = match environment_id {
         Some(id) => Some(db::environments::get(conn, id)?),
