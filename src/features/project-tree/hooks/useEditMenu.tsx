@@ -117,6 +117,25 @@ export function useEditMenu({
     setMenu({ x: e.clientX, y: e.clientY, items: buildMenuItems(kind, id) });
   };
 
+  /**
+   * 右键一个接口：只弹菜单，**不激活它**。
+   *
+   * 右键是「看一眼菜单」，不是「我要在它上面干活」。早先调用点会先
+   * `setActiveEndpoint(id)`，于是右键把那个接口的标签打开**并跳过去** —— 用户正看着的
+   * 另一个接口就这么被换掉了；那一次 `setActiveEndpoint` 还会顺手清掉响应，于是右键看个
+   * 菜单的功夫，刚发出来的那次响应也没了。
+   *
+   * **连树里的活动行也不挪。** 那一行的含义是「标签条里打开着的那个请求」（见
+   * `EndpointRow` 的 `active`），它必须与标签条一致：挪了它，界面会说 B 是当前接口，
+   * 而标签条与右侧仍停在 A。
+   *
+   * 菜单里的每一项都自带那个 id —— 重命名、复制、删除各自作用于被右键的那一行 ——
+   * 故这里不需要先把那一行变成活动行。
+   */
+  const openEndpointMenu = (e: ReactMouseEvent, id: string) => {
+    openMenu(e, 'endpoint', id);
+  };
+
   const getName = (kind: TargetKind, id: string): string => {
     if (kind === 'project') return projects.find((p) => p.id === id)?.name ?? '';
     return nodes.find((n) => n.id === id)?.name ?? '';
@@ -338,6 +357,7 @@ export function useEditMenu({
     cancelEdit,
     saveEdit,
     openMenu,
+    openEndpointMenu,
     handleDeleteConfirm,
     scriptCollection,
     closeCollectionScripts: () => setScriptCollection(null),

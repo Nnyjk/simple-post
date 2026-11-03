@@ -181,6 +181,7 @@ export function ProjectTree() {
     cancelEdit,
     saveEdit,
     openMenu,
+    openEndpointMenu,
     handleDeleteConfirm,
     scriptCollection,
     closeCollectionScripts,
@@ -383,10 +384,7 @@ export function ProjectTree() {
                         setActiveEndpoint(id);
                         startEdit('endpoint', id);
                       }}
-                      onEndpointContextMenu={(e, id) => {
-                        setActiveEndpoint(id);
-                        openMenu(e, 'endpoint', id);
-                      }}
+                      onEndpointContextMenu={openEndpointMenu}
                       onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
                       onCancelEdit={cancelEdit}
                       dragContext={{
@@ -417,10 +415,7 @@ export function ProjectTree() {
                       setActiveEndpoint(id);
                       startEdit('endpoint', id);
                     }}
-                    onEndpointContextMenu={(e, id) => {
-                      setActiveEndpoint(id);
-                      openMenu(e, 'endpoint', id);
-                    }}
+                    onEndpointContextMenu={openEndpointMenu}
                     onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
                     dragContext={{
                       moveNodes,
