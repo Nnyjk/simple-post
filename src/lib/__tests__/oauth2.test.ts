@@ -2,13 +2,12 @@
  * `oauth2.ts`（token 注入 + 取 token 的唯一入口）的纯单测。通过 `npm test` 运行
  * （它调用 `tsx --test`）。
  *
- * 只覆盖纯函数：注入规则（query / header、编码、参数名为空时的回退、查重）与「不改传入的
- * `request`」这条契约。真正的取 token 往返在 Rust 侧（`oauth2_test.rs`），本文件
- * 不打网络。
+ * 注入规则本身（query / header 两种位置、编码、参数名为空时的回退、查重）由共享样本
+ * `fixtures/oauth2-parity.json` 钉住，Rust 那一侧读同一份文件（读取器在
+ * `oauth2-parity.test.ts`）。本文件只覆盖样本没覆盖的那部分，以及两个纯函数：
  *
- * 覆盖矩阵：
- *   A. query 位置 —— `?` / `&`、参数名为空时的回退、键值编码
- *   B. header 位置 —— `<tokenType> <token>`、空类型只给裸 token、已有 Authorization 不重复追加
+ *   A. query 档不动 header
+ *   B. header 档不动 URL
  *   C. 纯度 —— `applyOAuth2Token` 不改传入对象
  *   D. 非 oauth2 的 auth 原样返回
  */
@@ -91,51 +90,6 @@ function headerMap(tuples: ReadonlyArray<readonly [string, string]>): Record<str
 // ============================================================
 
 describe('oauth2: query 位置的 token', () => {
-  it('URL 原本没有 ? 时用 ? 追加', () => {
-    const req = prepared();
-    const out = applyOAuth2Token(req, oauth2({ tokenLocation: 'query' }), token());
-    assert.equal(out.url, 'https://api.example.com/x?access_token=eyJ.tok');
-  });
-
-  it('URL 已有 ? 时用 & 追加', () => {
-    const req = prepared({ urlPath: 'x?foo=bar' });
-    const out = applyOAuth2Token(req, oauth2({ tokenLocation: 'query' }), token());
-    assert.equal(out.url, 'https://api.example.com/x?foo=bar&access_token=eyJ.tok');
-  });
-
-  it('参数名为空白时回落 access_token', () => {
-    const req = prepared();
-    for (const blank of ['', '   ', '\t']) {
-      const out = applyOAuth2Token(
-        req,
-        oauth2({ tokenLocation: 'query', tokenParam: blank }),
-        token(),
-      );
-      assert.equal(out.url, 'https://api.example.com/x?access_token=eyJ.tok');
-    }
-  });
-
-  it('参数名非空白时按用户填的来', () => {
-    const req = prepared();
-    const out = applyOAuth2Token(
-      req,
-      oauth2({ tokenLocation: 'query', tokenParam: 'api_key' }),
-      token(),
-    );
-    assert.equal(out.url, 'https://api.example.com/x?api_key=eyJ.tok');
-  });
-
-  it('键与值都 URL 编码——未编码的 & / + 会把 token 截成半截', () => {
-    const req = prepared();
-    const out = applyOAuth2Token(
-      req,
-      oauth2({ tokenLocation: 'query', tokenParam: 'a key' }),
-      token({ accessToken: 'a+b/c=d' }),
-    );
-    // ' ' -> %20, '+' -> %2B, '/' -> %2F, '=' -> %3D
-    assert.equal(out.url, 'https://api.example.com/x?a%20key=a%2Bb%2Fc%3Dd');
-  });
-
   it('query 档不动 header', () => {
     const req = prepared({ headers: [kv('X-Trace', 'abc')] });
     const out = applyOAuth2Token(req, oauth2({ tokenLocation: 'query' }), token());
@@ -161,41 +115,6 @@ describe('oauth2: buildTokenQuery', () => {
 // ============================================================
 
 describe('oauth2: header 位置的 token', () => {
-  it('追加 Authorization: Bearer <token>', () => {
-    const req = prepared();
-    const out = applyOAuth2Token(req, oauth2(), token());
-    assert.equal(headerMap(out.headers)['Authorization'], 'Bearer eyJ.tok');
-  });
-
-  it('tokenType 为 MAC 时原样透传，不改成 Bearer', () => {
-    const req = prepared();
-    const out = applyOAuth2Token(req, oauth2(), token({ tokenType: 'MAC' }));
-    assert.equal(headerMap(out.headers)['Authorization'], 'MAC eyJ.tok');
-  });
-
-  it('tokenType 为空时只给裸 token（与 Rust 的 auth_header_value 同规则）', () => {
-    const req = prepared();
-    const out = applyOAuth2Token(req, oauth2(), token({ tokenType: '  ' }));
-    assert.equal(headerMap(out.headers)['Authorization'], 'eyJ.tok');
-  });
-
-  it('用户已手写 Authorization 时不重复追加', () => {
-    const req = prepared({ headers: [kv('Authorization', 'Bearer mine')] });
-    const out = applyOAuth2Token(req, oauth2(), token());
-    const h = headerMap(out.headers);
-    assert.equal(h['Authorization'], 'Bearer mine');
-    // 只有一条 Authorization，且没有小写重复项
-    assert.equal(h['authorization'], undefined);
-    assert.equal(out.headers.filter(([k]) => k.toLowerCase() === 'authorization').length, 1);
-  });
-
-  it('用户写的小写 authorization 同样算数（header 名大小写不敏感）', () => {
-    const req = prepared({ headers: [kv('authorization', 'Bearer mine')] });
-    const out = applyOAuth2Token(req, oauth2(), token());
-    assert.deepEqual(headerMap(out.headers)['authorization'], 'Bearer mine');
-    assert.equal(out.headers.filter(([k]) => k.toLowerCase() === 'authorization').length, 1);
-  });
-
   it('header 档不动 URL', () => {
     const req = prepared({ urlPath: 'x?a=1' });
     const out = applyOAuth2Token(req, oauth2(), token());

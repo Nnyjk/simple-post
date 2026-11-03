@@ -1,9 +1,13 @@
 /**
  * `http-build.ts` 的认证与 `{{var}}` 模板解析单测。
  *
- * 覆盖：Bearer / Basic / API Key（header 与 query 两种位置）各自派生的线上形态，
- * 以及 URL / header / body 里的 `{{var}}` 替换，含 join 与替换的先后（`//` 那条
- * 回归）。查询串、body 包含、cURL 一致性在同目录的其它分片里。
+ * 覆盖：Bearer / Basic / API Key 各自的**模板替换**（凭据里的 `{{var}}`、缺失变量的
+ * 原样保留、query 档的 apikey），以及 URL / header / body 里的 `{{var}}` 替换，含
+ * join 与替换的先后（`//` 那条回归）。
+ *
+ * 认证派生的**线上形态**（Basic 的 base64、apikey 的 header、用户自己写的同名 header
+ * 胜出）由 `http-build-prepare-request.test.ts` 钉住 —— `buildFetchInit` 只是
+ * `prepareRequest` 的薄适配器，两处各写一遍是重复覆盖。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,19 +43,6 @@ describe('http-build: auth (Bearer)', () => {
     );
     assert.equal((init.headers as Record<string, string>)['Authorization'], 'Bearer {{missing}}');
   });
-
-  it('user Authorization header wins; auth is not appended twice', () => {
-    const { init } = buildFetchInit(
-      input({
-        headers: [kv('Authorization', 'Bearer user-override')],
-        auth: { kind: 'bearer', bearer: 'eyJ.tok' } as AuthConfig,
-      }),
-    );
-    const h = init.headers as Record<string, string>;
-    assert.equal(h['Authorization'], 'Bearer user-override');
-    // 任何大小写下都不该出现重复的 "authorization" 键。
-    assert.equal(h['authorization'], undefined);
-  });
 });
 
 // ============================================================
@@ -59,22 +50,6 @@ describe('http-build: auth (Bearer)', () => {
 // ============================================================
 
 describe('http-build: auth (Basic)', () => {
-  it('base64-encodes user:pass in Authorization header', () => {
-    const { init } = buildFetchInit(
-      input({
-        auth: {
-          kind: 'basic',
-          basic: { username: 'alice', password: 'secret' },
-        } as AuthConfig,
-      }),
-    );
-    // btoa('alice:secret') = 'YWxpY2U6c2VjcmV0'
-    assert.equal(
-      (init.headers as Record<string, string>)['Authorization'],
-      'Basic YWxpY2U6c2VjcmV0',
-    );
-  });
-
   it('UTF-8 encodes non-ASCII credentials before base64', () => {
     const { init } = buildFetchInit(
       input({
@@ -107,19 +82,6 @@ describe('http-build: auth (Basic)', () => {
     const decoded = Buffer.from(hdr.slice('Basic '.length), 'base64').toString('utf-8');
     assert.equal(decoded, 'u_demo:eyJ.tok');
   });
-
-  it('user Authorization header wins', () => {
-    const { init } = buildFetchInit(
-      input({
-        headers: [kv('Authorization', 'Bearer override')],
-        auth: {
-          kind: 'basic',
-          basic: { username: 'a', password: 'b' },
-        } as AuthConfig,
-      }),
-    );
-    assert.equal((init.headers as Record<string, string>)['Authorization'], 'Bearer override');
-  });
 });
 
 // ============================================================
@@ -127,18 +89,6 @@ describe('http-build: auth (Basic)', () => {
 // ============================================================
 
 describe('http-build: auth (API Key)', () => {
-  it('in header mode: emits <key>: <value>', () => {
-    const { init } = buildFetchInit(
-      input({
-        auth: {
-          kind: 'apikey',
-          apikey: { key: 'X-API-Key', value: 'k_123', inLocation: 'header' },
-        } as AuthConfig,
-      }),
-    );
-    assert.equal((init.headers as Record<string, string>)['X-API-Key'], 'k_123');
-  });
-
   it('in header mode: resolves {{apiKey}} from env', () => {
     const { init } = buildFetchInit(
       input({
@@ -150,21 +100,6 @@ describe('http-build: auth (API Key)', () => {
       }),
     );
     assert.equal((init.headers as Record<string, string>)['X-API-Key'], 'k_123');
-  });
-
-  it('user has same header key → user wins, no duplicate', () => {
-    const { init } = buildFetchInit(
-      input({
-        headers: [kv('X-API-Key', 'override')],
-        auth: {
-          kind: 'apikey',
-          apikey: { key: 'X-API-Key', value: 'k_123', inLocation: 'header' },
-        } as AuthConfig,
-      }),
-    );
-    const h = init.headers as Record<string, string>;
-    assert.equal(h['X-API-Key'], 'override');
-    assert.equal(h['x-api-key'], undefined);
   });
 
   it('in query mode: appended to URL', () => {
@@ -261,7 +196,7 @@ describe('http-build: {{var}} template resolution', () => {
  *
  * 这些用例走真正的 `prepareRequest` 而非只用 `joinBaseUrl`，因为这个顺序只存在于
  * 组装后的流水线里。Rust 侧对应的用例在
- * `crates/simple-post-mcp/src/variable_fill_test.rs`；两者必须一致，否则预览描述的
+ * `crates/simple-post-mcp/src/mcp/variable_fill_test.rs`；两者必须一致，否则预览描述的
  * URL 没人会发。
  */
 describe('http-build: baseUrl join + {{var}} expansion never yields //', () => {

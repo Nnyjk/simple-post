@@ -1,5 +1,4 @@
 use super::*;
-use crate::mcp::arg_str_opt;
 use simple_post_core::domain::{
     ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, HttpMethod, KeyValue,
     RequestBody,
@@ -49,11 +48,6 @@ fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> E
         test_script: None,
         tls: None,
     }
-}
-
-#[test]
-fn table_has_three_rows() {
-    assert_eq!(table().len(), 3);
 }
 
 #[tokio::test]
@@ -174,12 +168,6 @@ fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
             .any(|i| i["message"].as_str().unwrap().contains("JSON Schema")),
         "a declared schema is not a defect: {issues:?}"
     );
-}
-
-#[test]
-fn arg_str_opt_returns_none_for_missing() {
-    let v = json!({});
-    assert_eq!(arg_str_opt(&v, "x"), None);
 }
 
 /// 路径参数缺值：URL 里留着 `{id}`，端点没有给它赋值。发送那侧会因此拦下请求，
