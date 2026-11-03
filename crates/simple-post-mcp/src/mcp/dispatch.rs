@@ -11,9 +11,9 @@ use super::tool_table;
 /// 按名字 dispatch 一次 `tools/call`。未知名字 → `AppError::NotFound`
 /// （JSON-RPC 层折成 `is_error: true`，LLM 能看到缺的是哪个工具）。
 ///
-/// 进 handler 前再过一次全局能力门（`tools/list` 那道在 `tool_descriptors`）。
-/// 策略为 `ReadOnly` 时直接 `tools/call` 一个写工具，拿到的是
-/// `AppError::PermissionDenied`，handler 根本不会执行。
+/// 进 handler 前再过一次全局能力门（`tools/list` 那道在 `tool_descriptors`）。策略为
+/// `ReadOnly` 时直接 `tools/call` 一个写工具，拿到的是 `AppError::PermissionDenied`，
+/// handler 根本不会执行。
 pub async fn dispatch(
     state: &AppState,
     name: &str,

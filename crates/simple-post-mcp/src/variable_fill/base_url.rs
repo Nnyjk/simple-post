@@ -33,18 +33,16 @@ pub struct ResolvedBaseUrl {
 ///
 /// 优先级（从高到低）：
 ///   1. `endpoint.base_url_override` —— 每端点的自定义模式。`None` 落到模块那一格；
-///      `Some(host)` 固定该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义
-///      模式，URL 字段里已经是完整地址。
-///   2. `env.module_base_urls[module_id]` —— 环境 × 模块那一格。它的 `url` 是后端
-///      api 地址，`proxy` 是实际访问地址。
+///      `Some(host)` 固定该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义模式，
+///      URL 字段里已经是完整地址。
+///   2. `env.module_base_urls[module_id]` —— 环境 × 模块那一格。它的 `url` 是后端 api 地址，
+///      `proxy` 是实际访问地址。
 ///   3. `""` —— 什么都没有。
 ///
-/// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子。格子缺失是
-/// 一个真实答案，不是一个洞。
-///
-/// `env.module_base_urls` 按 `module_id` 建键。环境由调用方给出：端点行不再绑定环境，
-/// 故它要么是这次调用点名的那一个，要么是项目的默认环境；两者都没有时（`None`）
-/// 直接短路成空。
+/// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子。格子缺失是一个真实答案，
+/// 不是一个洞。
+/// `env.module_base_urls` 按 `module_id` 建键。环境由调用方给出：端点行不再绑定环境，故它要么
+/// 是这次调用点名的那一个，要么是项目的默认环境；两者都没有时（`None`）直接短路成空。
 pub fn resolve_base_url(
     detail: &EndpointDetail,
     env: Option<&Environment>,
@@ -92,8 +90,8 @@ pub fn resolve_base_url(
 ///
 /// 接口经代理网关转代时，后端 api 地址与实际访问地址不一致：模块那一格写的是
 /// `http://svc.internal:8080/api/a`（后端 api 地址），而真正要打的是
-/// `https://gw.corp.com/api/xxxx/a`（实际访问地址）。本函数把请求地址开头的那段
-/// 模块地址换成代理地址，其余部分原样保留：
+/// `https://gw.corp.com/api/xxxx/a`（实际访问地址）。本函数把请求地址开头的那段模块地址换成
+/// 代理地址，其余部分原样保留：
 ///
 ///   apply_proxy("http://svc.internal:8080/api/a", Some("https://gw.corp.com/api/xxxx/a"),
 ///               "http://svc.internal:8080/api/a/orders/list")
@@ -103,13 +101,12 @@ pub fn resolve_base_url(
 ///
 /// - `proxy` 为空或只有空白 → 原样返回。
 /// - 前缀是 `base_url` 去掉尾部所有 `/`；前缀为空 → 原样返回。
-/// - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求地址
-///   恰好等于该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会命中
-///   `http://h/apixyz`。
+/// - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求地址恰好
+///   等于该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会命中 `http://h/apixyz`。
 /// - 其余情况原样返回：请求打的是另一个主机，或那一格压根没有地址。
 ///
-/// 与 `src/lib/url.ts` 的 `applyProxy` 对应；两边必须一致，否则预览与真正发出的请求
-/// 描述的是两个 URL。
+/// 与 `src/lib/url.ts` 的 `applyProxy` 对应；两边必须一致，否则预览与真正发出的请求描述的是
+/// 两个 URL。
 pub fn apply_proxy(base_url: &str, proxy: Option<&str>, url: &str) -> String {
     let Some(proxy) = proxy else {
         return url.to_string();
@@ -166,9 +163,9 @@ fn has_scheme(s: &str) -> bool {
     scheme_prefix_len(s).is_some()
 }
 
-/// 前导 `scheme://` 的字节长度，没有则 `None`。[`has_scheme`] 与
-/// [`collapse_url_slashes`] 共用它，两者才不会对「scheme 到哪结束」产生分歧 ——
-/// 这条边界正是决定哪些斜杠属于协议、哪些是笔误的依据。
+/// 前导 `scheme://` 的字节长度，没有则 `None`。[`has_scheme`] 与 [`collapse_url_slashes`] 共用它，
+/// 两者才不会对「scheme 到哪结束」产生分歧——这条边界正是决定哪些斜杠属于协议、哪些是笔误的
+/// 依据。
 fn scheme_prefix_len(s: &str) -> Option<usize> {
     // RFC 3986 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )，对应 TS 正则
     // `/^[a-z][a-z0-9+.-]*:\/\//i`。
@@ -193,23 +190,22 @@ fn scheme_prefix_len(s: &str) -> Option<usize> {
     }
 }
 
-/// 收掉 URL **路径**里连续的 `/`，其余字节一概不动。输入必须是已经拼接**并且**已经
-/// 完成 `{{var}}` 替换的 URL。
+/// 收掉 URL **路径**里连续的 `/`，其余字节一概不动。输入必须是已经拼接**并且**已经完成
+/// `{{var}}` 替换的 URL。
 ///
-/// 拼接必然发生在替换之前（环境自己的 base URL 里也可能有模板），所以
-/// [`join_base_url`] 无从知道 `{{var}}` 会展开成什么。它插入一个分隔符，随后替换把
-/// `http://host:9200/{{var}}` 变成 `http://host:9200//api`，对多数服务端那是另一条
-/// 路由。只有替换之后真相才成立。
+/// 拼接必然发生在替换之前（环境自己的 base URL 里也可能有模板），所以 [`join_base_url`]
+/// 无从知道 `{{var}}` 会展开成什么。它插入一个分隔符，随后替换把 `http://host:9200/{{var}}`
+/// 变成 `http://host:9200//api`，对多数服务端那是另一条路由。只有替换之后真相才成立。
 ///
 /// 作用范围刻意很窄 —— 无脑收连斜杠会毁掉真实 URL：
 ///   - `scheme://` 不是路径，`https://` 必须原样存活
 ///   - 无 scheme 的前导 `//` 是协议相对引用（`//cdn.example.com/x`），斜杠有意义
-///   - `?query` / `#fragment` 是数据不是路径：参数里嵌套的 URL
-///     （`?redirect=https://x//y`）必须原样穿过
+///   - `?query` / `#fragment` 是数据不是路径：参数里嵌套的 URL（`?redirect=https://x//y`）
+///     必须原样穿过
 ///   - 未解析的 `{{var}}` 是文本不是分隔符，它该进 `missing_vars` 而不是被当作多余字符删掉
 ///
-/// 与 `src/lib/url.ts` 的 `collapseUrlSlashes` 对应；两边必须一致，否则预览与真正发
-/// 出的请求描述的是两个 URL。
+/// 与 `src/lib/url.ts` 的 `collapseUrlSlashes` 对应；两边必须一致，否则预览与真正发出的请求
+/// 描述的是两个 URL。
 pub fn collapse_url_slashes(url: &str) -> String {
     if url.is_empty() {
         return String::new();

@@ -18,10 +18,10 @@
 //!     dynamic_ops.rs    ← 动态变量 7 个
 //! ```
 //!
-//! 本模块只做胶水，不定义任何域概念：域类型、DB、HTTP 执行、变量解析、响应解析、
-//! 权限全在 `simple_post_core::domain` / `::db` / `::http_executor` / `::permissions`
-//! 与 `crate::variable_fill` / `crate::response_parse` 里，这里只有 dispatch 接线
-//! 和 JSON-RPC 信封类型。
+//! 本模块只做胶水，不定义任何域概念：域类型、DB、HTTP 执行、变量解析、响应解析、权限全在
+//! `simple_post_core::domain` / `::db` / `::http_executor` / `::permissions` 与
+//! `crate::variable_fill` / `crate::response_parse` 里，这里只有 dispatch 接线和 JSON-RPC
+//! 信封类型。
 
 pub mod dynamic_ops;
 pub mod env_ops;
@@ -59,16 +59,16 @@ pub(crate) use registry::tool_table;
 // 工具函数装箱宏
 // =========================================================================
 
-/// 把 `async fn tool_xxx(&AppState, Value) -> Result<...>` 包成 dispatch 表
-/// 里存的 boxed-future `ToolFn`。每个 `func:` 槽位都用它：
+/// 把 `async fn tool_xxx(&AppState, Value) -> Result<...>` 包成 dispatch 表里存的 boxed-future
+/// `ToolFn`。每个 `func:` 槽位都用它：
 ///
 /// ```ignore
 /// ToolEntry { name: ..., func: tool_fn!(tool_xxx), ... }
 /// ```
 ///
-/// `#[macro_export]` 把它放在 crate 根，调用处只写 `crate::tool_fn!(...)`。
-/// 宏体里的路径除 `serde_json::Value` 外都带 `$crate::` 前缀，调用方无需任何
-/// `use`；`serde_json::Value` 不带前缀是因为每个子模块都已经 import 了它。
+/// `#[macro_export]` 把它放在 crate 根，调用处只写 `crate::tool_fn!(...)`。宏体里的路径除
+/// `serde_json::Value` 外都带 `$crate::` 前缀，调用方无需任何 `use`；`serde_json::Value`
+/// 不带前缀是因为每个子模块都已经 import 了它。
 #[macro_export]
 macro_rules! tool_fn {
     ($f:path) => {{

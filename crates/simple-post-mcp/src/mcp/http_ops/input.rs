@@ -28,12 +28,10 @@ pub(crate) fn flatten_string_map(
     let mut out = Vec::new();
     if let Value::Object(map) = v {
         for (k, val) in map {
+            // 值为 null 的键不进正文，其余的值都走标量转换。
             let s = match val {
-                Value::String(s) => s.clone(),
-                Value::Number(n) => n.to_string(),
-                Value::Bool(b) => b.to_string(),
                 Value::Null => continue,
-                other => other.to_string(),
+                other => scalar_to_string(other),
             };
             out.push((k.clone(), s));
         }
@@ -91,12 +89,10 @@ pub(crate) fn flatten_key_values(
     match v {
         Value::Object(map) => {
             for (k, val) in map {
+                // 值为 null 的键不进正文，其余的值都走标量转换。
                 let s = match val {
-                    Value::String(s) => s.clone(),
-                    Value::Number(n) => n.to_string(),
-                    Value::Bool(b) => b.to_string(),
                     Value::Null => continue,
-                    other => other.to_string(),
+                    other => scalar_to_string(other),
                 };
                 push(k.clone(), s, None);
             }

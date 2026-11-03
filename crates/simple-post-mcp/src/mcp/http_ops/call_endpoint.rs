@@ -33,7 +33,7 @@ pub(super) async fn tool_api_call_endpoint(
     crate::mcp::check_permission(&state.pool, &project_id, "api_call_endpoint").await?;
 
     // 环境：这次调用点名的那个优先；没点名就取项目的默认环境（最早创建的那个）。
-    // 端点行不再绑定环境，故每一次调用都可以自己选一个。
+    // 端点行不绑定环境，故每一次调用都可以自己选一个。
     let env = crate::mcp::resolve_env(&state.pool, a.environment_id.as_deref(), &project_id)?;
 
     let project = if !project_id.is_empty() {
