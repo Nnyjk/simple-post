@@ -10,7 +10,7 @@ use super::EndpointOverrides;
 // ---- resolve_endpoint join/substitute ordering ---------------------
 //
 // Same boundaries as the TS `prepareRequest` suite in
-// `src/lib/__tests__/http-build.test.ts`.
+// `src/lib/__tests__/http-build-auth-vars.test.ts`.
 
 #[test]
 fn resolve_endpoint_leading_slash_var_does_not_double_the_separator() {

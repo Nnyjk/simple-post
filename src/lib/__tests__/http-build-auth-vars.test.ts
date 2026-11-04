@@ -196,7 +196,7 @@ describe('http-build: {{var}} template resolution', () => {
  *
  * 这些用例走真正的 `prepareRequest` 而非只用 `joinBaseUrl`，因为这个顺序只存在于
  * 组装后的流水线里。Rust 侧对应的用例在
- * `crates/simple-post-mcp/src/mcp/variable_fill_test.rs`；两者必须一致，否则预览描述的
+ * `crates/simple-post-mcp/src/variable_fill/resolve_test.rs`；两者必须一致，否则预览描述的
  * URL 没人会发。
  */
 describe('http-build: baseUrl join + {{var}} expansion never yields //', () => {
