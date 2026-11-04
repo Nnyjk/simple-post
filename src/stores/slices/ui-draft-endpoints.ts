@@ -188,7 +188,7 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     get().moveResponse(draftId, endpointId);
     get().discardDraftEndpoint(draftId);
     get().closeTab(draftId);
-    // 用规范动作收尾：它把「当前接口」指向新行，并打开、激活它的标签。分开写这两处必然漏掉
+    // 用 setActiveEndpoint 收尾：它把「当前接口」指向新行，并打开、激活它的标签。分开写这两处必然漏掉
     // 其中一处，而漏掉的那一处正是树——树的高亮读的是 `activeEndpointId`，标签条读的是
     // `activeTabId`，两处不同步时树与标签条会指向两个不同的接口。
     get().setActiveEndpoint(endpointId);

@@ -498,3 +498,76 @@ describe('draft endpoints: the tab survives the sweeps that prune dead tabs', ()
     assert.equal(draftId in state.endpointDrafts, false);
   });
 });
+
+// ============================================================
+// 标签条与资源树指向同一个接口
+// ============================================================
+
+describe('the tab bar and the resource tree point at the same endpoint', () => {
+  /** 两个已打开的接口标签，树里也有对应的两行。 */
+  function twoEndpointTabs() {
+    useAppStore.setState({
+      nodes: [
+        ...useAppStore.getState().nodes,
+        { ...MODULE, id: 'ep-a', kind: 'endpoint' },
+        { ...MODULE, id: 'ep-b', kind: 'endpoint' },
+      ],
+      openTabs: [
+        { id: 'ep-a', kind: 'endpoint' },
+        { id: 'ep-b', kind: 'endpoint' },
+      ],
+      activeTabId: 'ep-a',
+      activeEndpointId: 'ep-a',
+    });
+  }
+
+  it('follows the tab bar when the user activates another endpoint tab', () => {
+    // 树里的高亮读 `activeEndpointId`，标签条的激活读 `activeTabId`。用户点标签条切到
+    // 另一个接口时只改后者，树里的高亮就还停在原来那一行——两边说的不是同一个接口。
+    twoEndpointTabs();
+
+    useAppStore.getState().setActiveTab('ep-b');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-b');
+    assert.equal(state.activeEndpointId, 'ep-b', '树里的高亮必须跟着标签条走');
+  });
+
+  it('follows the fallback when the active endpoint tab is closed', () => {
+    // 关掉活动标签后标签条回退到前一个标签，树里的高亮也要回退到同一个接口。
+    twoEndpointTabs();
+
+    useAppStore.getState().closeTab('ep-a');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-b');
+    assert.equal(state.activeEndpointId, 'ep-b', '回退后的高亮落在同一个接口上');
+  });
+
+  it('leaves the tree alone when a tab that is not the active one is closed', () => {
+    twoEndpointTabs();
+    useAppStore.setState({ activeTabId: 'ep-b', activeEndpointId: 'ep-b' });
+
+    useAppStore.getState().closeTab('ep-a');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-b');
+    assert.equal(state.activeEndpointId, 'ep-b', '关掉别的标签不动高亮');
+  });
+
+  it('clears the highlight when the tab bar lands on a draft', () => {
+    // 草稿在树里没有行，故树里没有可高亮的行；让高亮停在另一个接口上，用户看到的就是
+    // 两个地方各说各话。
+    twoEndpointTabs();
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+    // 建草稿那一步本身已经把高亮清空了，故这里再把它指回一个已存的接口——
+    // 断言要测的是「切到草稿标签」这一步，不是建草稿那一步。
+    useAppStore.setState({ activeEndpointId: 'ep-a' });
+
+    useAppStore.getState().setActiveTab(draftId);
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, draftId);
+    assert.equal(state.activeEndpointId, null, '草稿没有树行，高亮就没有落点');
+  });
+});
