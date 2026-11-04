@@ -1,13 +1,12 @@
 //! 写侧 handler：`endpoint_create` / `_update` / `_delete` / `_duplicate` / `_move`。
 //!
-//! 过门一律由父节点或端点自身经 `nodes::root_id_of` 解析归属项目，不接受调用方
-//! 自称的项目 id。
+//! 过门一律由父节点或端点自身经 `nodes::root_id_of` 解析归属项目，不接受调用方自称的项目 id。
 
 use serde_json::{json, Value};
 
 use super::args::{
-    mint_endpoint_id, EndpointCreateArgs, EndpointDeleteArgs, EndpointDuplicateArgs,
-    EndpointMoveArgs, TlsSettingsInput,
+    EndpointCreateArgs, EndpointDeleteArgs, EndpointDuplicateArgs, EndpointMoveArgs,
+    TlsSettingsInput,
 };
 use super::input::{build_auth, parse_body_mode, reject_schema_shaped_payload};
 use super::missing::{missing_pieces, project_of};
@@ -29,8 +28,8 @@ use simple_post_core::spec::{self, IfExists};
 /// - `collection_path` + `module_id`：路径相对模块，中途缺的集合会被逐级建出来。
 /// - `module_id`：直接建在模块下（端点允许不占一个集合）。
 ///
-/// 这一步**不建任何东西**：建出来之前要先过权限门，顺序反了就是权限门形同虚设 ——
-/// 没权限的调用方照样能在别人的项目里建出集合。
+/// 这一步**不建任何东西**：建出来之前要先过权限门，顺序反了就是权限门形同虚设——没权限的调用方
+/// 照样能在别人的项目里建出集合。
 fn anchor_of(a: &EndpointCreateArgs) -> Result<String, AppError> {
     // `collection_id` 与 `collection_path` 都在说「挂在哪」，两个一起给就是两种说法
     // 打架。悄悄挑一个会让调用方以为建在它说的那个父下 —— 所以直接拒。
@@ -80,8 +79,8 @@ fn anchor_of(a: &EndpointCreateArgs) -> Result<String, AppError> {
 
 /// 把路径上的集合逐级建出来，返回末级那个集合的 id。
 ///
-/// 路径上的每一级都**复用**已有的同名集合 —— 路径是「去哪儿」的定位，不是「建什么」
-/// 的声明，所以中途遇到已存在的层级是常态而不是冲突。
+/// 路径上的每一级都**复用**已有的同名集合 —— 路径是「去哪儿」的定位，不是「建什么」的声明，所以
+/// 中途遇到已存在的层级是常态而不是冲突。
 fn materialize_parent(
     state: &AppState,
     a: &EndpointCreateArgs,
@@ -194,7 +193,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
     let auth = build_auth(a.auth_type.as_deref(), a.auth_config.clone())?;
 
     let now = simple_post_core::domain::now_ms();
-    let id = mint_endpoint_id();
+    let id = simple_post_core::spec::mint_id("ep");
     let node = ResourceNode {
         id: id.clone(),
         root_id: project_id.clone(),
@@ -241,8 +240,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
 
 /// 组装写工具的响应：端点本体 + 「这次新建了哪些集合」 + 「它还缺什么」。
 ///
-/// 三个字段都是**加**上去的，端点本体的形状不变，所以已经在读这个响应的客户端
-/// 不受影响。
+/// 三个字段都是**加**上去的，端点本体的形状不变，所以已经在读这个响应的客户端不受影响。
 fn endpoint_response(
     state: &AppState,
     endpoint_id: &str,

@@ -34,9 +34,8 @@ pub(super) struct RunRequestArgs {
     pub(super) auth: Option<Value>,
     /// 这次请求用哪个环境，以及**它属于哪个项目**。
     ///
-    /// 临时请求没有端点行可读，项目归属只能由环境 id 反查，故不点名就没有项目：
-    /// 既没有默认环境可回落，也没有（环境 × 模块）那一格地址可读。那次请求照发，
-    /// 但不带 base URL、`{{var}}` 也不替换。
+    /// 临时请求没有端点行可读，项目归属只能由环境 id 反查，故不点名就没有项目：既没有默认环境
+    /// 可回落，也没有（环境 × 模块）那一格地址可读。那次请求照发，但不带 base URL、`{{var}}` 也不替换。
     #[serde(default)]
     pub(super) env_id: Option<String>,
     /// 取值时读的是哪个模块的格子。地址住在 (环境 × 模块)，不给就没有格子、没有
@@ -59,8 +58,8 @@ pub(super) struct CallEndpointArgs {
     pub(super) endpoint_id: String,
     /// 这次调用按哪个环境解析。缺席 = 用该项目的默认环境（最早创建的那个）。
     ///
-    /// 端点行不再绑定环境，故这里是**逐次**的选择：同一个端点可以在这一轮走预发、
-    /// 下一轮走生产，两次各发各的。
+    /// 端点行不绑定环境，故这里是**逐次**的选择：同一个端点可以在这一轮走预发、下一轮走生产，
+    /// 两次各发各的。
     #[serde(default)]
     pub(super) environment_id: Option<String>,
     #[serde(default)]
@@ -80,8 +79,8 @@ pub(super) struct RunCollectionArgs {
     pub(super) module_id: Option<String>,
     /// 整批按哪个环境解析。缺席 = 用该项目的默认环境（最早创建的那个）。
     ///
-    /// 端点行不再绑定环境，故这里是**逐次**的选择：同一个集合可以在这一轮走预发、
-    /// 下一轮走生产，两次各跑各的。整批用同一个环境。
+    /// 端点行不绑定环境，故这里是**逐次**的选择：同一个集合可以在这一轮走预发、下一轮走生产，
+    /// 两次各跑各的。整批用同一个环境。
     #[serde(default)]
     pub(super) environment_id: Option<String>,
     #[serde(default)]

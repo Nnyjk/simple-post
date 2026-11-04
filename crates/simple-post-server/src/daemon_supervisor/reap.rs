@@ -21,8 +21,8 @@ pub(super) const TEARDOWN_POLL: Duration = Duration::from_millis(50);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TeardownTarget {
     pub pid: u32,
-    /// `true` 表示监管者对该 PID 持有 `Child` 句柄——是我们 spawn 的，reap
-    /// 归我们，可用 `try_wait()`。
+    /// `true` 表示监管者对该 PID 持有 `Child` 句柄——是我们 spawn 的，reap 归我们，可用
+    /// `try_wait()`。
     /// `false` 表示只有端口记录点名的*被收养* daemon：没有句柄，只能经
     /// [`port_registry::terminate_pid`] 带外杀掉。
     pub via_handle: bool,
@@ -32,14 +32,12 @@ pub(crate) struct TeardownTarget {
 ///
 /// 两个来源，各一个 PID：
 ///   * `owned_pid`——我们 spawn 且仍持有句柄的子进程。
-///   * `adopted_pid`——端口记录点名、自己从未 spawn 的活 daemon。复用路径会填
-///     `state.pid` 却不填 `state.child`，只查句柄的 teardown 会扑空，于是 `restart`
-///     立刻重新收养了它本该替换掉的同一个进程，同时报告成功。
+///   * `adopted_pid`——端口记录点名、自己从未 spawn 的活 daemon。复用路径会填 `state.pid` 却不填
+///     `state.child`，只查句柄的 teardown 会扑空，于是 `restart` 立刻重新收养了它本该替换掉的
+///     同一个进程，同时报告成功。
 ///
-/// 同一 PID 至多出现一次（既 spawn 又收养的 daemon 是同一个进程，而句柄是更
-/// 廉价的回收方式）。`0` 在这里滤掉而不是在每个调用点：spawn 后
-/// `child.id()` 合法地返回 `None`，漏网的 `0` 会一路走到
-/// `taskkill /F /PID 0`。
+/// 同一 PID 至多出现一次。`0` 在这里滤掉而不是在每个调用点：spawn 后 `child.id()` 合法地返回
+/// `None`，漏网的 `0` 会一路走到 `taskkill /F /PID 0`。
 pub(super) fn teardown_targets(
     owned_pid: Option<u32>,
     adopted_pid: Option<u32>,

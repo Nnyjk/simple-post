@@ -4,7 +4,7 @@ import { IconTile } from '@/components/ui/icon-tile';
 
 interface SettingsCategoryProps {
   /**
-   * @deprecated 锚点 id 不再渲染（抽屉改用标签页）。保留仅为兼容既有调用点。
+   * @deprecated 这个 id 不再渲染（设置区改用标签页）。保留只是为了让既有调用点不用改。
    */
   id?: string;
   title?: string;
@@ -38,13 +38,11 @@ interface SettingsCategoryProps {
 }
 
 /**
- * 设置标签详情页中的一个条目。
+ * 设置标签详情页中的一个条目。结构：表头（图标 + 小标题 + 可选弱化描述）后接内容井。负的
+ * 横向 margin 把外层分隔线（若有）拉到主面板两缘，内层 `px-12` 则让正文保持舒适的内缩。
  *
- * 结构：表头（图标 + 小标题 + 可选弱化描述）后接内容井。负的横向 margin 把外层分隔线
- * （若有）拉到主面板两缘，内层 `px-12` 则让正文保持舒适的内缩。
- *
- * 内容默认是柔和卡片（`variant="card"`），使每个设置分组读起来是一个完整表面；子元素
- * 已经是自足的卡片或行、只差一个表头时，传 `variant="stacked"`。
+ * 内容默认是柔和卡片（`variant="card"`）；子元素已经是自足的卡片或行、只差一个表头时，传
+ * `variant="stacked"`。
  */
 export function SettingsCategory({
   title,

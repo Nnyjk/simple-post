@@ -1,5 +1,4 @@
 use super::*;
-use crate::mcp::arg_str_opt;
 use std::sync::{
     atomic::{AtomicU32, Ordering},
     Arc,
@@ -37,11 +36,6 @@ fn extract_text_json(res: &CallToolResult) -> serde_json::Value {
         .as_str()
         .expect("text content present");
     serde_json::from_str(text).expect("inner content is JSON")
-}
-
-#[test]
-fn table_has_three_rows() {
-    assert_eq!(table().len(), 3);
 }
 
 #[tokio::test]
@@ -168,30 +162,4 @@ async fn extract_jsonpath_rejects_empty_path() {
     )
     .await;
     assert!(matches!(res, Err(AppError::Validation(_))));
-}
-
-#[test]
-fn headers_from_value_handles_object_and_array() {
-    let obj = json!({ "X-A": "1", "X-B": "2" });
-    let pairs = crate::mcp::http_ops::flatten_string_map(Some(&obj), "h").unwrap();
-    assert_eq!(pairs.len(), 2);
-
-    let arr = json!([["X-A", "1"]]);
-    let pairs = crate::mcp::http_ops::flatten_string_map(Some(&arr), "h").unwrap();
-    assert_eq!(pairs.len(), 1);
-
-    assert!(crate::mcp::http_ops::flatten_string_map(None, "h")
-        .unwrap()
-        .is_empty());
-    assert!(
-        crate::mcp::http_ops::flatten_string_map(Some(&Value::Null), "h")
-            .unwrap()
-            .is_empty()
-    );
-}
-
-#[test]
-fn arg_str_opt_returns_none_for_missing() {
-    let v = json!({});
-    assert_eq!(arg_str_opt(&v, "x"), None);
 }

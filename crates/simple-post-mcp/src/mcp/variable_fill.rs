@@ -241,9 +241,8 @@ async fn tool_api_validate_endpoint(
 
 /// 端点 node → project id，供按项目的那扇门使用。
 ///
-/// 查不到时退化成空串 —— 那等于「没有这一行」，取默认 `ReadCall`。本文件三个工具
-/// 都是 `Read` 档，所以这层退化不会误放行写操作；将来若挂上更高档位的工具，空串
-/// 就会把调用永久拒掉。
+/// 查不到时退化成空串 —— 那等于「没有这一行」，取默认 `ReadCall`。本文件三个工具都是
+/// `Read` 档，所以这层退化不会误放行写操作。
 /// `root_id` 已反规范化在每一行上，一次索引读即可，不必回溯父链。
 fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> String {
     simple_post_core::db::with_conn(pool, |c| {
@@ -253,7 +252,6 @@ fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> St
 }
 
 /// 静态检查：端点看起来跑不跑得起来。返回 `{field, message}` 形式的 issues 列表。
-/// 静态检查这个端点。
 ///
 /// `url` 是**拼接后**的 URL（base URL + 端点自己的路径），路径占位符从它里面取：
 /// base URL 里也可能有 `{version}` 这样的占位符，而发送那侧是在拼接后的 URL 上做

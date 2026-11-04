@@ -1,9 +1,10 @@
 /**
  * `http-build.ts` 的查询串与 header 组装单测（`buildFetchInit` 适配器形状）。
  *
- * 覆盖：查询串的 `?`/`&` 选择与编码、用户 header 的顺序、自动补的
- * Content-Type / Accept，以及与用户 header 的去重。认证、模板、body 与 cURL
- * 一致性在同目录的其它分片里。
+ * 覆盖：查询串的 `?`/`&` 选择与编码、用户 header 的顺序与去重，以及用户自己写的
+ * Content-Type / Accept 优先于自动补的那条。自动补 Content-Type / Accept 这几条规则
+ * 由 `http-request-shape.test.ts` 在真实服务上验过一遍（看的是服务端收到的请求头），
+ * 本文件不再重述。认证、模板、body 与 cURL 一致性在同目录的其它分片里。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,13 +24,6 @@ describe('http-build: query string', () => {
   it('appends a single param with ?', () => {
     const { url } = buildFetchInit(input({ params: [kv('page', '1')] }));
     assert.equal(url, 'http://api.example.com/x?page=1');
-  });
-
-  it('joins multiple params with &', () => {
-    const { url } = buildFetchInit(
-      input({ params: [kv('page', '1'), kv('size', '20'), kv('sort', 'desc')] }),
-    );
-    assert.equal(url, 'http://api.example.com/x?page=1&size=20&sort=desc');
   });
 
   it('uses & when URL already has ?', () => {
@@ -112,37 +106,9 @@ describe('http-build: headers', () => {
     assert.equal((init.headers as Record<string, string>)['Content-Type'], undefined);
   });
 
-  it('auto-adds Content-Type for json mode when user has none', () => {
-    const { init } = buildFetchInit(input({ body: { mode: 'json', content: '{}' } }));
-    assert.equal((init.headers as Record<string, string>)['Content-Type'], 'application/json');
-  });
-
-  it('auto-adds Content-Type for form mode', () => {
-    const { init } = buildFetchInit(input({ body: { mode: 'form', content: 'a=1' } }));
-    assert.equal(
-      (init.headers as Record<string, string>)['Content-Type'],
-      'application/x-www-form-urlencoded',
-    );
-  });
-
-  it('auto-adds Content-Type for raw mode', () => {
-    const { init } = buildFetchInit(input({ body: { mode: 'raw', content: 'hello' } }));
-    assert.equal((init.headers as Record<string, string>)['Content-Type'], 'text/plain');
-  });
-
-  it('does NOT auto-add Content-Type when body.mode is none', () => {
-    const { init } = buildFetchInit(input({ body: { mode: 'none', content: '' } }));
-    assert.equal((init.headers as Record<string, string>)['Content-Type'], undefined);
-  });
-
   it('auto-adds Content-Type even when json content is empty (mode implies a body shape)', () => {
     const { init } = buildFetchInit(input({ body: { mode: 'json', content: '' } }));
     assert.equal((init.headers as Record<string, string>)['Content-Type'], 'application/json');
-  });
-
-  it('auto-adds Accept: application/json when user has none', () => {
-    const { init } = buildFetchInit(input());
-    assert.equal((init.headers as Record<string, string>)['Accept'], 'application/json');
   });
 
   it('respects user-set Accept (case-insensitive)', () => {

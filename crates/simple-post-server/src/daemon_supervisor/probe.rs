@@ -10,10 +10,9 @@ use super::McpDaemonHandle;
 
 /// 纯函数：一次「启动」请求是否已被满足。
 ///
-/// 手动 ON 开关的幂等规则：若监管者跟踪的 daemon 仍能答 healthz，就返回该
-/// daemon 的身份而不 kill 重拉。`tracked_port.is_some()` 必须与状态同时成立——
-/// `Running` 但无跟踪端口是「已收养、随后丢了端口记录」的状态，此处无法确认存活，
-/// 而重新 spawn 才是唯一诚实的答案。
+/// 手动 ON 开关的幂等规则：若监管者跟踪的 daemon 仍能答 healthz，就返回该 daemon 的身份而不
+/// kill 重拉。`tracked_port.is_some()` 必须与状态同时成立——`Running` 但无跟踪端口是「已收养、
+/// 随后丢了端口记录」的状态，此处无法确认存活，而重新 spawn 才是唯一诚实的答案。
 // 纯决策函数且不含 Tauri，故始终参与编译——`daemon_supervisor_test.rs` 直接测它。
 // 它唯一的生产调用方（`is_serving`）受 GUI feature 门控，故在无 GUI 的 feature 上
 // 挂 `allow(dead_code)`。

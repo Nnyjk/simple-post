@@ -1,7 +1,7 @@
 //! dispatch 表 —— 三个工具的登记项与 JSON Schema。
 //!
-//! 描述与 schema 是 `tools/list` 的全部内容，故两者都逐字写死在这里：
-//! 描述只说「这个参数是什么」，规则与例子放 `simple-post://spec-authoring` 指南。
+//! 描述与 schema 是 `tools/list` 的全部内容，故两者都逐字写死在这里：描述只说「这个参数是什么」，
+//! 规则与例子放 `simple-post://spec-authoring` 指南。
 
 use serde_json::json;
 
@@ -119,7 +119,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     "endpoint_id": { "type": "string" },
                     // 环境名要写进 schema：调用方只能从 schema 里知道这个入参的名字。
                     //
-                    // 端点行不再绑定环境，故这一次调用可以自己点名一个环境；不点名就用
+                    // 端点行不绑定环境，故这一次调用可以自己点名一个环境；不点名就用
                     // 该项目的默认环境（最早创建的那个）。schema 不写它，工具就在骗人：
                     // `api_resolve_endpoint` 与 `api_validate_endpoint` 都带着这个参数，
                     // 两个发送工具起初不写这个参数，读起来就像发送不支持选环境。

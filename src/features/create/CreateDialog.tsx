@@ -1,7 +1,6 @@
 /**
- * 三个新建对话框共用的外壳 —— `Dialog` 框、提交守卫，以及各类型都有的两个字段。
- *
- * 各类型是独立组件、住在自己的入口旁（`CreateProjectDialog` / `CreateModuleDialog` /
+ * 三个新建对话框共用的外壳 —— `Dialog` 框、提交守卫，以及各类型都有的两个字段。各类型是
+ * 独立组件、住在自己的入口旁（`CreateProjectDialog` / `CreateModuleDialog` /
  * `CreateCollectionDialog`），本文件只留它们的公共部分。接口没有对话框：
  * `createEndpointAt` 直接写那一行。
  */

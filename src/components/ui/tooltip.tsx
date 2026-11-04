@@ -18,14 +18,13 @@ const EDGE = 8;
 /**
  * 悬浮提示，portal 到 `document.body` 并用 `fixed` 定位。
  *
- * portal 是要点。气泡若作为触发器的绝对定位子元素，就会被布局进触发器所在的容器
- * 并被它裁掉：节点树里那个容器是 `overflow-y-auto`，于是靠近顶部的行提示会被滚动
- * 框切掉，靠近底部的行则被面板边缘吃掉。`z-index` 修不了裁剪——无论层叠顺序如何，
- * 祖先的 `overflow` 都赢。逃逸到 `document.body` 并量触发器的 rect 才是真正让提示
- * 可读的办法，这也正是 `TreeContextMenu` 与 `Dialog` 已有的形状。
+ * portal 是要点。气泡若作为触发器的绝对定位子元素，就会被布局进触发器所在的容器并被它
+ * 裁掉：节点树里那个容器是 `overflow-y-auto`，于是靠近顶部的行提示会被滚动框切掉。
+ * `z-index` 修不了裁剪——无论层叠顺序如何，祖先的 `overflow` 都赢。逃逸到
+ * `document.body` 并量触发器的 rect 才是真正让提示可读的办法。
  *
- * 气泡在挂载后测量，并在滚动与 resize 时重新测量，好让它在树于静止指针下方滚动时
- * 始终贴着触发器。
+ * 气泡在挂载后测量，并在滚动与 resize 时重新测量，好让它在树于静止指针下方滚动时始终贴着
+ * 触发器。
  */
 export function Tooltip({ content, children, side = 'top', className }: TooltipProps) {
   const [visible, setVisible] = useState(false);
@@ -39,11 +38,8 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
   const hasContent = content !== undefined && content !== null && content !== '';
 
   /**
-   * 模态面板里的提示气泡要用更高的层。
-   *
-   * 气泡 portal 到 `document.body`，而模态遮罩也铺满视口 —— 气泡若停在模态之下，
-   * 就会被遮罩盖住。模态之外的气泡仍用低的那层：模态打开时背景被置为 `inert`，
-   * 背景的气泡根本不会触发。
+   * 模态面板里的提示气泡要用更高的层。气泡 portal 到 `document.body`，而模态遮罩也铺满
+   * 视口 —— 气泡若停在模态之下就会被遮罩盖住。模态之外的气泡仍用低的那层。
    */
   const inModal =
     typeof document !== 'undefined' && anchorRef.current?.closest('[data-modal-surface]') != null;

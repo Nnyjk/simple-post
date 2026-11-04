@@ -6,12 +6,9 @@ import type { VarHintAnchor } from './VarHintAnchor';
 import type { VarEntry } from './varHint';
 
 /**
- * 候选浮层 —— 列出环境变量与动态变量，供插入 `{{key}}`。
- *
- * 纯展示的受控组件，父组件掌管：
- *  - 要显示的 `entries`（通常已按用户输入的半个变量名过滤）
- *  - 选中行下标及其变更方式（`onSelectedChange`）
- *  - 打开 / 关闭状态
+ * 候选浮层 —— 列出环境变量与动态变量，供插入 `{{key}}`。纯展示的受控组件，父组件掌管：
+ * 要显示的 `entries`（通常已按用户输入的半个变量名过滤）、选中行下标及其变更方式
+ * （`onSelectedChange`）、打开 / 关闭状态。
  *
  * 位置锚在 `anchor`：落在 `top: 锚点底 + 4px`、`left: 锚点左`，宽度 >= 240px。
  */

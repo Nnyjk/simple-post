@@ -1,19 +1,18 @@
 /**
  * CRUD 子工厂 —— 环境。
  *
- * `createCrudSlice` 组合的四个子工厂之一（切片级的契约——乐观 `set()` →
- * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
+ * `createCrudSlice` 组合的四个子工厂之一（切片级的契约——乐观 `set()` → `invokeCmd` →
+ * 快照回滚——见 `../crud-slice.ts`）。
  *
  * 变量上用 `null` 作删除哨兵，而空串是真实取值——这个区别由
- * `../../__tests__/crud-slice.test.ts` 钉住，所以下面那些 `value === null` 判断必须
- * 写对，不能当作风格偏好。
+ * `../../__tests__/crud-slice.test.ts` 钉住，故那些 `value === null` 判断必须写对。
  *
- * `moduleBaseUrls[moduleId]` 是地址唯一存放的地方：每个 (环境 × 模块) 一个独立
- * 单元格，没有继承也没有回退。格子里有两个字段：`url` 是后端 api 地址，`proxy` 是
- * 实际访问地址。`resolveEndpointBaseUrl` 只读其中恰好一个。
+ * `moduleBaseUrls[moduleId]` 是地址唯一存放的地方：每个 (环境 × 模块) 一个独立单元格，
+ * 没有继承也没有回退。格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。
+ * `resolveEndpointBaseUrl` 只读其中恰好一个。
  *
- * **本切片只写库里的东西。** 「当前环境」是客户端的实时状态，不落库，它由
- * `bootstrap-slice` 的 `setCurrentEnvironment` 管（详见那里的说明）。
+ * **本切片只写库里的东西。** 「当前环境」是客户端的实时状态，不落库，它由 `bootstrap-slice`
+ * 的 `setCurrentEnvironment` 管。
  *
  * `deleteEnvironment` 会与自身键同一次原子 `set()` 里写别人拥有的键
  * （`activeEnvironmentId`）；拆成多次调用会改变 IPC 失败时回滚的内容。
@@ -114,8 +113,8 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     if (!prev) return;
     if (fromKey === toKey) return;
 
-    // 乐观的单步交换：旧键消失与新键出现发生在同一次 state 写入里，
-    // 所以任何中间渲染都不会显示"变量不见了"。值跟着键走。
+    // 乐观的单步交换：旧键消失与新键出现发生在同一次 state 写入里，故任何中间渲染都不会
+    // 显示「变量不见了」。值跟着键走。
     const { [fromKey]: value, ...rest } = prev.variables;
     if (value === undefined) return;
     const optimistic: Environment = {
@@ -127,16 +126,14 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     }));
 
     try {
-      // 一条命令、一个事务。拆成两次 `environments_set_var` 会在两次调用之间
-      // 让变量处于已删除状态，而第二次调用失败时下面的回滚只还原了 UI，
-      // 后端却已经把删除提交了。
+      // 一条命令、一个事务。拆成两次 `environments_set_var` 会在两次调用之间让变量处于已删除
+      // 状态，而第二次调用失败时下面的回滚只还原了 UI，后端却已经把删除提交了。
       const updated = await invokeCmd<Environment>(COMMANDS.environmentsRenameVar, {
         envId,
         fromKey,
         toKey,
       });
-      // 后端回显的是改名后权威的环境，所以另一个窗口的并发编辑不会被这份
-      // 乐观猜测覆盖。
+      // 后端回显的是改名后权威的环境，故另一个窗口的并发编辑不会被这份乐观猜测覆盖。
       set((s) => ({
         environments: s.environments.map((env) => (env.id === envId ? updated : env)),
       }));
@@ -176,16 +173,16 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
   setEnvironmentModuleBaseUrl: async (envId, moduleId, url, proxy) => {
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return;
-    // 格子里两个字段各自独立：`null` 保持原值，`''` 清空。空串的 proxy 落成
-    // `null`（没有代理），与后端 `db::environments::set_module_base_url` 同一套。
+    // 格子里两个字段各自独立：`null` 保持原值，`''` 清空。空串的 proxy 落成 `null`（没有代理），
+    // 与后端 `db::environments::set_module_base_url` 同一套。
     const cell = prev.moduleBaseUrls[moduleId];
     const nextCell: ModuleBaseUrl = {
       url: url === null ? (cell?.url ?? '') : url,
       proxy: proxy === null ? (cell?.proxy ?? null) : proxy === '' ? null : proxy,
     };
     const nextModuleBaseUrls = { ...prev.moduleBaseUrls };
-    // 两个字段都空了就把这一格删掉，免得已清空的环境还留着一个空的
-    // `moduleId → {}` 外壳，在任何按键比对环境对象的 UI 里都读作"这里配了地址"。
+    // 两个字段都空了就把这一格删掉，免得已清空的环境还留着一个空的 `moduleId → {}` 外壳，
+    // 在任何按键比对环境对象的 UI 里都读作「这里配了地址」。
     if (nextCell.url === '' && nextCell.proxy === null) {
       delete nextModuleBaseUrls[moduleId];
     } else {
@@ -217,11 +214,11 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     };
     set((s) => {
       const nextEnvs = s.environments.filter((env) => env.id !== envId);
-      // 当前环境正好是刚删掉的那个时，回落到这个项目的默认环境（最早创建的那个）。
-      // 项目里一个环境都不剩时置空（"未选"哨兵），顶栏触发器回落到 '—'。
+      // 当前环境正好是刚删掉的那个时，回落到这个项目的默认环境（最早创建的那个）。项目里一个
+      // 环境都不剩时置空（「未选」哨兵），顶栏触发器回落到 '—'。
       //
-      // 端点不再绑定环境，故这里不必动 `endpointDetails`——删掉一个环境不改变任何
-      // 接口的配置，接口读的是客户端当前的「当前环境」。
+      // 端点不再绑定环境，故这里不必动 `endpointDetails`——删掉一个环境不改变任何接口的配置，
+      // 接口读的是客户端当前的「当前环境」。
       const activeEnvironmentId =
         s.activeEnvironmentId === envId
           ? (pickDefaultEnvironment(nextEnvs, s.activeProjectId)?.id ?? '')

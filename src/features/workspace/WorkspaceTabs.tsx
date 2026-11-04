@@ -1,20 +1,18 @@
 /**
- * WorkspaceTabs —— 右栏上方的横向标签条。每个标签对应一个已打开的实体
- * （项目 / 模块 / 集合 / 接口），点击激活，「×」关闭，中键关闭同浏览器。
+ * WorkspaceTabs —— 右栏上方的横向标签条。每个标签对应一个已打开的实体（项目 / 模块 /
+ * 集合 / 接口），点击激活，「×」关闭，中键关闭同浏览器。
  *
- * - 底层实体（或其父级）被删的标签会在每次状态变化时自动剪除；同一清理也
- *   以 `pruneStaleTabs` 暴露给绕过 delete* 动作的变更路径。
- * - 标签放不下时进入 **compact 模式**，不出横向滚动条（会破坏周边 chrome）。
- *   两种模式都是**固定宽度**（normal=160px、compact=92px），条内每个标签
- *   等宽，读起来是一张干净的网格；标题在 normal 下截到 ≈ 5–6 个汉字、compact
- *   下 ≈ 2 个，hint 只在 normal 下显示并受 `max-w` 限制。宽度过渡走 CSS，
- *   位置滑动走 GSAP Flip；标签集、激活标签或窗口尺寸变化时重新测量。
- * - 激活标签与下方面板融合（浏览器惯例，见 `TabJoinCorners`），且条上只有它
- *   的标签用加粗字重 —— 字重步进取自 WinShun 的 `PageTabs.qml`，这里不需要
- *   它的宽度预留 trick，因为标签宽度固定、标题截断而非回流。
- * - 标签位置在增删/重排时滑动而非瞬移（GSAP Flip，见下方 useGSAP）。
- * - 激活标签下方的 0.5px 主色条是挂在条级的单一常驻元素，几何逐帧从激活标签
- *   的实时 rect **推导**，而不是量一次再补间 —— 见下方「Active-tab indicator」。
+ * - 底层实体（或其父级）被删的标签会在每次状态变化时自动剪除；同一清理也以
+ *   `pruneStaleTabs` 暴露给绕过 delete* 动作的变更路径。
+ * - 标签放不下时进入 **compact 模式**，不出横向滚动条。两种模式都是**固定宽度**
+ *   （normal=160px、compact=92px），条内每个标签等宽；标题在 normal 下截到 ≈ 5–6 个
+ *   汉字、compact 下 ≈ 2 个，hint 只在 normal 下显示。宽度过渡走 CSS，位置滑动走
+ *   GSAP Flip。
+ * - 激活标签与下方面板融合（浏览器惯例，见 `TabJoinCorners`），且条上只有它的标签用
+ *   加粗字重。
+ * - 标签位置在增删 / 重排时滑动而非瞬移（GSAP Flip，见下方 useGSAP）。
+ * - 激活标签下方的 0.5px 主色条是挂在条级的单一常驻元素，几何逐帧从激活标签的实时
+ *   rect **推导**，见下方「Active-tab indicator」。
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -32,11 +30,11 @@ import { TabContextMenu } from './TabContextMenu';
 /**
  * 激活标签条的调参，理由见组件内「Active-tab indicator」。
  *
- * `BAR_APPROACH` 是每帧弥合剩余距离的比例：60fps 下 0.24 在 17 帧后只剩约 1%，
- * 即约 0.28s 落定 —— 正好与 Flip 时长一致，两者才像同一段动作。
+ * `BAR_APPROACH` 是每帧弥合剩余距离的比例：60fps 下 0.24 在 17 帧后只剩约 1%，即约
+ * 0.28s 落定 —— 正好与 Flip 时长一致。
  *
- * `BAR_SETTLE_MS` 是变化之后继续读实时 rect 的时长，必须长过任何能移动标签的
- * 动画：280ms Flip + 200ms CSS 宽度过渡，并留出 resize 连续触发两者的余量。
+ * `BAR_SETTLE_MS` 是变化之后继续读实时 rect 的时长，必须长过任何能移动标签的动画：
+ * 280ms Flip + 200ms CSS 宽度过渡。
  */
 const BAR_APPROACH = 0.24;
 const BAR_SETTLE_MS = 480;
@@ -51,19 +49,17 @@ export function WorkspaceTabs() {
   const closeSavedTabs = useAppStore((s) => s.closeSavedTabs);
   const pruneStaleTabs = useAppStore((s) => s.pruneStaleTabs);
 
-  // 右键菜单，锚在被点的那个标签上；在点击位置渲染一个浮动菜单，
-  // 关闭由外部点击 / Esc 处理。
+  // 右键菜单，锚在被点的那个标签上；在点击位置渲染一个浮动菜单，关闭由外部点击 / Esc
+  // 处理。
   const [menu, setMenu] = useState<{ tabId: string; x: number; y: number } | null>(null);
 
   // 「关闭已保存」一个都没关掉时的提示。
   const [noSavedTabsNotice, setNoSavedTabsNotice] = useState(false);
 
-  // 额外的一轮清理，覆盖所有绕过 delete* 动作的变更路径。代价可接受：数据量以
-  // 工作区规模为界。
-  //
-  // `nodesLoaded` 是依赖而非顺带捕获：`pruneStaleTabs` 在树加载完之前空操作
-  // （空 `nodes` 与"全部被删"无法区分），不在这个翻转上重跑，刚进入的项目的
-  // 标签就永远不会被剪掉。
+  // 额外的一轮清理，覆盖所有绕过 delete* 动作的变更路径。代价可接受：数据量以工作区规模
+  // 为界。`nodesLoaded` 是依赖而非顺带捕获：`pruneStaleTabs` 在树加载完之前空操作
+  // （空 `nodes` 与「全部被删」无法区分），不在这个翻转上重跑，刚进入的项目的标签就永远
+  // 不会被剪掉。
   const nodesLoaded = useAppStore((s) => s.nodesLoaded);
   useEffect(() => {
     pruneStaleTabs();
@@ -75,15 +71,14 @@ export function WorkspaceTabs() {
   // 标签加得多时把激活标签保持在可见区。
   const stripRef = useRef<HTMLDivElement>(null);
 
-  // compact 模式的判定：条里放不下全宽标签时，让每个标签缩到更小的下限
-  // （图标 + 4-5 字 + 关闭），而不是出横向滚动条 —— 后者会与周边 chrome 打架。
-  // 标题靠 `max-w` 截断，绝不退化成纯图标（眼睛在标签里总该看到点文字）。
+  // compact 模式的判定：条里放不下全宽标签时，让每个标签缩到更小的下限（图标 + 4-5 字 +
+  // 关闭），而不是出横向滚动条。标题靠 `max-w` 截断，绝不退化成纯图标。
   //
-  // 两种模式都是固定宽度（normal=160px、compact=92px），条内看起来一致。
-  // 阈值按"能放下多少个 *normal* 标签"计算，放不下就整体降到 compact 宽度。
+  // 两种模式都是固定宽度（normal=160px、compact=92px）。阈值按「能放下多少个 *normal*
+  // 标签」计算，放不下就整体降到 compact 宽度。
   //
   // 标签集变化、激活标签切换、窗口 resize 时重新测量；用 resize 监听而非
-  // ResizeObserver，因为只需要条自己的 clientWidth，且 resize 每帧至多一次。
+  // ResizeObserver，因为只需要条自己的 clientWidth。
   const [isCompact, setIsCompact] = useState(false);
   const measureCompact = useCallback(() => {
     const el = stripRef.current;
@@ -105,15 +100,11 @@ export function WorkspaceTabs() {
   // ------------------------------------------------------------------
   //  Tab position animation (GSAP Flip, FLIP pattern)
   // ------------------------------------------------------------------
-  // useGSAP's `dependencies` + `revertOnUpdate: true` runs each callback
-  // *after* React commits, then registers a cleanup that's invoked the
-  // next time deps change. We capture tab positions in the callback and
-  // play them back in the cleanup — that order is what gives us FLIP:
-  // the new DOM has already been committed by the time the cleanup runs,
-  // so `Flip.from(state)` can tween from the previously-captured positions
-  // to the just-committed positions. `absolute: true` lets Flip take the
-  // tabs out of flow during the tween so neighbours don't reflow as each
-  // tab slides.
+  // `useGSAP` 的 `dependencies` + `revertOnUpdate: true` 在 React 提交**之后**跑回调，
+  // 再注册一个清理函数，下次依赖变化时执行。回调里记下标签位置、在清理函数里播放，
+  // 顺序正是 FLIP 成立的原因：清理时新 DOM 已经提交，`Flip.from(state)` 才能从上一次
+  // 记下的位置补间到刚提交的位置。`absolute: true` 让 Flip 在补间期间把标签移出文档流，
+  // 相邻标签就不会跟着回流。
   useGSAP(
     () => {
       if (!stripRef.current) return;
@@ -136,36 +127,31 @@ export function WorkspaceTabs() {
   // ------------------------------------------------------------------
   // 逐帧推导，绝不量一次。
   //
-  // 有三件互不相干的事会移动这些标签，且"量一次激活标签再补间过去"的读数
-  // 时刻，三者都可能仍在飞行中：
+  // 有三件互不相干的事会移动这些标签，且「量一次激活标签再补间过去」的读数时刻，三者都可能
+  // 仍在飞行中：
   //
-  //   1. 上面的 Flip。`absolute: true` 会把每个被补间的标签以 `position: absolute`
-  //      放到它**提交前**的位置，所以补间期间读到的 `offsetLeft` 是动画位置而非
-  //      最终位置 —— 照它补间，条会指向标签刚才所在的地方。
-  //   2. 标签的 CSS 宽度过渡（`transition-[width,…]`，200ms），条在 normal 与
-  //      compact 之间翻转时触发。整个过渡期间它既改每个标签的宽度，也改每个邻居
-  //      的 offset。
+  //   1. 上面的 Flip。`absolute: true` 会把被补间的标签放到它**提交前**的位置，故补间期间
+  //      读到的 `offsetLeft` 是动画位置而非最终位置。
+  //   2. 标签的 CSS 宽度过渡（`transition-[width,…]`，200ms），条在 normal 与 compact
+  //      之间翻转时触发。
   //   3. 条自己的 `scrollLeft`（滚轮处理与 `scrollIntoView` 都会动它）。
   //
-  // 所以只要这三者之一可能在跑，条的目标就每帧从实时 rect 重读。当前位置再以
-  // 固定比例向该目标缓动，于是条既能滑向相邻标签，也能跟住动画中的标签，
-  // 且不会停在一个已经过期的数值上。
+  // 所以只要这三者之一可能在跑，条的目标就每帧从实时 rect 重读。当前位置再以固定比例向该
+  // 目标缓动，于是条既能滑向相邻标签，也能跟住动画中的标签。
   //
-  // 循环不是常驻的：任何能移动标签的东西变化时（激活标签、标签集、compact
-  // 模式）重跑一个有时限的窗口，窗口结束即停。窗口长到覆盖 280ms Flip 与
-  // 200ms 宽度过渡再加其上的 resize 连发，短到空闲的条不做逐帧工作。
+  // 循环不是常驻的：任何能移动标签的东西变化时（激活标签、标签集、compact 模式）重跑一个
+  // 有时限的窗口，窗口结束即停。窗口长到覆盖 280ms Flip 与 200ms 宽度过渡。
   const barRef = useRef<HTMLSpanElement>(null);
-  // `started` 区分"放置"与"移动"：某次激活的首帧是直接就位（没有值得动画的
-  // 上一位置 —— 全新挂载，或条从无标签状态回来），之后每帧才缓动。
+  // `started` 区分「放置」与「移动」：某次激活的首帧是直接就位（没有值得动画的上一位置 ——
+  // 全新挂载，或条从无标签状态回来），之后每帧才缓动。
   const barState = useRef({ x: 0, width: 0, started: false });
 
   const placeBar = useCallback(() => {
     const strip = stripRef.current;
     const bar = barRef.current;
     if (!strip || !bar) {
-      // 标签在最后一个关闭时整条卸载（上面的 `descriptors.length === 0` 返回 null）。
-      // 此处忘掉上一位置，下一条出现的条就会直接就位到自己的标签上，而不是从
-      // 一个过期坐标滑进来。
+      // 标签在最后一个关闭时整条卸载（上面的 `descriptors.length === 0` 返回 null）。此处
+      // 忘掉上一位置，下一条出现的条就会直接就位到自己的标签上，而不是从过期坐标滑进来。
       barState.current.started = false;
       return;
     }
@@ -180,8 +166,8 @@ export function WorkspaceTabs() {
     }
     const stripRect = strip.getBoundingClientRect();
     const tabRect = activeEl.getBoundingClientRect();
-    // 条是绝对定位在滚动容器**内部**的，故它的 x 是内容坐标系 —— 必须把滚动
-    // 偏移加回来，否则条正好偏移一个已滚动的量。
+    // 条是绝对定位在滚动容器**内部**的，故它的 x 是内容坐标系 —— 必须把滚动偏移加回来，
+    // 否则条正好偏移一个已滚动的量。
     const targetX = tabRect.left - stripRect.left + strip.scrollLeft;
     const targetW = tabRect.width;
     const cur = barState.current;
@@ -208,8 +194,8 @@ export function WorkspaceTabs() {
       placeBar();
       if (now - startedAt < BAR_SETTLE_MS) raf = requestAnimationFrame(tick);
     };
-    // 首帧排到下一个动画帧而非同步执行：那是 Flip 真正开始的第一个时刻，
-    // 条读到的才是真实位置，而不是一个即将被动画带走的已提交位置。
+    // 首帧排到下一个动画帧而非同步执行：那是 Flip 真正开始的第一个时刻，条读到的才是真实
+    // 位置，而不是一个即将被动画带走的已提交位置。
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // 依赖里列 `openTabs`（不只是它的 length）与 `isCompact`：关掉一个**非**激活
@@ -245,13 +231,10 @@ export function WorkspaceTabs() {
       role="tablist"
       aria-label="工作区标签"
       className={cn(
-        // 这条标签条不用 `border-b`：分隔线是子元素（`below`）而不是边框，因为本条是
-        // `overflow-hidden`，它按 *padding* box 裁剪 —— 自带边框会落在裁剪之外，
-        // 任何子元素都盖不到，激活标签就无法与下方面板融合。1px 子元素线在裁剪
-        // 之内，标签的填充能把它擦掉。
+        // 这条标签条不用 `border-b`：分隔线是子元素（`below`）而不是边框。本条按
+        // padding box 裁剪，自带边框会落在裁剪之外，激活标签就无法与下方面板融合。
         'relative flex h-9 shrink-0 items-stretch gap-0.5 overflow-hidden bg-card/40 pl-0 pr-1.5',
-        // 双保险：标准与 webkit 滚动条都藏。条本身是 `overflow-hidden`，滚动条
-        // 其实不会出现在这里 —— 规则留着以防将来有人改回 `overflow-x-auto`。
+        // 条是 `overflow-hidden`，滚动条不会出现在这里。
         'scrollbar-none',
       )}
     >
@@ -270,7 +253,7 @@ export function WorkspaceTabs() {
             role="tab"
             aria-selected={active}
             onMouseDown={(e) => {
-              // Middle-click closes the tab (browser convention).
+              // 中键关闭标签（浏览器惯例）。
               if (e.button === 1) {
                 e.preventDefault();
                 requestCloseTab(d.tab.id);
@@ -287,24 +270,20 @@ export function WorkspaceTabs() {
               setMenu({ tabId: d.tab.id, x: e.clientX, y: e.clientY });
             }}
             className={cn(
-              // 宽度策略（整条内统一）：
-              //  - normal：每个标签恰好 `w-[160px]`，条读起来是等宽单元格网格；
-              //    标题约容 5–6 个汉字后截断，过长的 hint 在标签内截成 `...`，
-              //    而不是把标签撑宽。
-              //  - compact（160px 放不下时触发）：每个标签恰好 `w-[92px]`，标题
-              //    截到 ≈ 2 个汉字，激活项一眼可辨。hint 隐藏 —— 它的 `shrink-0`
-              //    会在视觉上破坏固定的 92px。
+              // 宽度策略（整条内统一）：normal 每个标签恰好 `w-[160px]`，条读起来是等宽
+              // 单元格网格，标题约容 5–6 个汉字后截断，过长的 hint 在标签内截成 `...`；
+              // compact 每个标签恰好 `w-[92px]`，标题截到 ≈ 2 个汉字，hint 隐藏 ——
+              // 它的 `shrink-0` 会在视觉上破坏固定的 92px。
               'group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs transition-[width,gap,padding] duration-200 ease-out',
               isCompact ? 'w-[92px]' : 'w-[160px]',
               active
                 ? 'border-border bg-background text-foreground'
-                : // 用 `bg-overlay-hover` 而非手写 `bg-accent/40`：新暗色阶梯上
-                  // `--accent`（17.6%）与条自身的底色几乎相同，实心 accent 的
-                  // hover 只差约一个亮度级，读起来等于没变。overlay token 是
-                  // 一个真实台阶。
+                : // 用 `bg-overlay-hover` 而非手写 `bg-accent/40`：新暗色阶梯上 `--accent`
+                  // （17.6%）与条自身的底色几乎相同，实心 accent 的 hover 只差约一个亮度级，
+                  // 读起来等于没变。overlay token 是一个真实台阶。
                   'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
-              // `z-10` 是激活标签与面板融合的关键：它必须盖过条的分隔线，否则
-              // `z-0` 的发丝线子元素会横穿它的底边。
+              // `z-10` 是激活标签与面板融合的关键：它必须盖过条的分隔线，否则 `z-0` 的
+              // 发丝线子元素会横穿它的底边。
               active && 'z-10',
             )}
             onClick={() => setActiveTab(d.tab.id)}
@@ -314,13 +293,11 @@ export function WorkspaceTabs() {
             {active && <TabJoinCorners stripClass="bg-card/40" />}
             <span className={cn('shrink-0', active && d.iconColor)}>{d.icon}</span>
             <span
-              // 标题是唯一会伸展的元素，始终截断 —— 但能给它的空间随模式变化：
-              //  - normal：~84px（≈ 5 个汉字），hint（如"订单生命周期"）在其右侧。
-              //  - compact：~36px（≈ 2 个汉字），hint 隐藏。
+              // 标题是唯一会伸展的元素，始终截断 —— 但能给它的空间随模式变化：normal 约
+              // 84px（≈ 5 个汉字），hint 在其右侧；compact 约 36px（≈ 2 个汉字），hint 隐藏。
               // 完整标题通过 `title` 属性在 hover 时可得。
               //
-              // 字重步进挂在标签文字上而不是整个标签：它是唯一字形变化的元素，
-              // method pill 与旁边的图标不该跟着加粗。
+              // 字重步进挂在标签文字上而不是整个标签：method pill 与旁边的图标不该跟着加粗。
               className={cn(
                 'min-w-0 truncate',
                 isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
@@ -333,11 +310,10 @@ export function WorkspaceTabs() {
             {/*
              * 尾部控件作为一个 flex item 整体出行，才能用 `ml-auto` 推到标签右缘。
              *
-             * 标题带 `flex-1` 但又被 `max-w-[88px]` 封顶，这正是 hint 的空间来源。
-             * 该上限也意味着短标题会留下 flexbox 无处安放的空隙 —— 它会落在行的
-             * *末端*、关闭按钮之后，于是 `ttt ×` 被挤在 160px 标签的左三分之一、
-             * × 后面留一块死白。`ml-auto` 把这段空隙移到这一组控件之前，也就是
-             * 浏览器标签放它的位置：标题靠左、× 钉在右。
+             * 标题带 `flex-1` 但又被 `max-w-[88px]` 封顶，这正是 hint 的空间来源。该上限也
+             * 意味着短标题会留下 flexbox 无处安放的空隙，它会落在行的*末端*、关闭按钮之后。
+             * `ml-auto` 把这段空隙移到这一组控件之前，也就是浏览器标签放它的位置：
+             * 标题靠左、× 钉在右。
              *
              * 用一个包裹元素而不是直接给关闭按钮加 `ml-auto`：`Tooltip` 会把子元素
              * 包在 `relative inline-flex` 的 span 里，那个 span 才是 flex item。
@@ -381,9 +357,9 @@ export function WorkspaceTabs() {
         );
       })}
 
-      {/* 常驻的激活标签指示条。挂在条级以跨标签集变化作为单一元素存活，几何在布局
-          运动期间逐帧写入 —— 见上方「Active-tab indicator」。class 里刻意不含
-          `w-0`：宽度完全由驱动逐帧写，class 级宽度只会变成与它打架的行内覆盖。 */}
+      {/* 常驻的激活标签指示条。挂在条级以跨标签集变化作为单一元素存活，几何在布局运动
+          期间逐帧写入 —— 见上方「Active-tab indicator」。class 里刻意不含 `w-0`：宽度完全
+          由驱动逐帧写，class 级宽度只会变成与它打架的行内覆盖。 */}
       <span
         ref={barRef}
         aria-hidden

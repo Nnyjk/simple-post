@@ -48,8 +48,8 @@ pub fn get(conn: &mut Connection, auth_key: &str) -> Result<Option<OAuth2Token>,
 /// 写入（或覆盖）某份配置的 token。
 ///
 /// 刷新响应按 RFC 6749 §6 **可能不带** `refresh_token`，此时必须沿用旧值而不是写成
-/// NULL——丢掉它等于让这份配置下次的刷新机会永久消失。`refresh_token` 为 `None`
-/// 才表示「确实没有 / 该流程不签发」，此时清空旧值是对的。
+/// NULL——丢掉它等于让这份配置下次的刷新机会永久消失。沿用旧值由调用方
+/// （`oauth2::store`）负责：它把旧值填进 `token` 再调本函数，本函数原样写入。
 pub fn upsert(conn: &mut Connection, auth_key: &str, token: &OAuth2Token) -> Result<(), AppError> {
     conn.execute(
         "INSERT INTO oauth2_tokens \

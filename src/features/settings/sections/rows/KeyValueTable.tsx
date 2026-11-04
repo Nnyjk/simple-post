@@ -5,13 +5,10 @@ import type { HueConcept } from '@/lib/hue';
 import { cn } from '@/lib/utils';
 /**
  * KeyValueTable —— 键值行表格的外壳：每一行的描边色块、行内边距与末尾的「添加」按钮。
+ * `KeyValueTable` 只画外壳，行内的单元格由调用方的 `renderRow` 提供。
  *
- * `KeyValueTable` 只画外壳，行内的单元格由调用方的 `renderRow` 提供。环境面板的
- * 「环境变量」表（`VariableTable`）用它；模块地址表（`ModuleBaseUrlTable`）自己画
- * 网格，不用它。
- *
- * 「添加」按钮在两种状态下是同一个元素：有内容的行列表与空状态渲染的是同一个按钮，
- * 故两种状态之间不会漂移出两样东西。
+ * 「添加」按钮在两种状态下是同一个元素：有内容的行列表与空状态渲染的是同一个按钮，故两种
+ * 状态之间不会漂移出两样东西。
  */
 
 export interface KeyValueTableProps<T> {

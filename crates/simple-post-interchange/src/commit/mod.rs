@@ -1,8 +1,7 @@
 //! `ir → db`：补 id、校验放置、按选择集裁剪、指纹去重，全程一个事务。
 //!
-//! 住在本 crate 而不是 Tauri command 里，是刻意的：AGENTS.md 的 dual-transport invariant
-//! 说的就是逻辑泄漏到传输层的代价。落库逻辑只有一份，Tauri command 与 REST route
-//! 都退化成薄壳。
+//! 住在本 crate 而不是 Tauri command 里，是刻意的：dual-transport invariant 说的就是逻辑泄漏到
+//! 传输层的代价。落库逻辑只有一份，Tauri command 与 REST route 都退化成薄壳。
 //!
 //! **整个过程在一个 `db::with_tx` 里**：一棵含多层嵌套的 IR 要么整棵进去，要么一行不进。
 //! 半棵树比没有树更难读——用户看到的是一棵能展开、点开却报「接口已删除」的树。
@@ -124,17 +123,12 @@ enum Pending<'a> {
 
 /// 把一份 IR 落进 `project_id` 指名的项目。
 ///
-/// `project_id` 是调用方选定的落点——IR 自身没有项目 id，因为项目不是节点，
-/// 它是由 `root_id` 指名的隐式根。
-///
-/// `selected` 是端点 [`IrEndpoint::key`] 的选择集。**未勾选的端点整条不写，且不发诊断**：
-/// 用户主动取消勾选不是问题，报一条「跳过」只会把真正该看的诊断淹没。传
-/// [`Exchange::endpoint_keys`] 即全选。
-///
-/// 全程一个 `BEGIN IMMEDIATE` 事务；中途任何一条被拒，整棵都不落。
-///
-/// `apply_base_url` 为假时完全不碰地址：文档里的 host 就当没看见，端点也不带自己的
-/// 地址，与本次导入之前的行为逐字节相同。
+/// `project_id` 是调用方选定的落点——IR 自身没有项目 id，因为项目不是节点，它是由 `root_id`
+/// 指名的隐式根。
+/// `selected` 是端点 [`IrEndpoint::key`] 的选择集。**未勾选的端点整条不写，且不发诊断**：用户
+/// 主动取消勾选不是问题，报一条「跳过」只会把真正该看的诊断淹没。传 [`Exchange::endpoint_keys`]
+/// 即全选。全程一个 `BEGIN IMMEDIATE` 事务；中途任何一条被拒，整棵都不落。
+/// `apply_base_url` 为假时完全不碰地址：文档里的 host 就当没看见，端点也不带自己的地址。
 pub fn commit(
     pool: &DbPool,
     project_id: &str,
@@ -150,9 +144,9 @@ pub fn commit(
 
 /// [`commit`] 的事务内版本。调用方**自己**开事务。
 ///
-/// 存在的理由：一次导入要写的不止树——Postman 的环境是项目级的另一张表，它必须与树
-/// 同生共死。而 [`db::with_tx`] 的闭包拿不到另一个连接（`BEGIN IMMEDIATE` 会与外层
-/// 那个自己死锁），所以编排层拿到的是这一个「已持有连接」的版本。
+/// 存在的理由：一次导入要写的不止树——Postman 的环境是项目级的另一张表，它必须与树同生共死。
+/// 而 [`db::with_tx`] 的闭包拿不到另一个连接（`BEGIN IMMEDIATE` 会与外层那个自己死锁），所以
+/// 编排层拿到的是这一个「已持有连接」的版本。
 pub fn commit_in_tx(
     conn: &mut Connection,
     project_id: &str,
@@ -480,8 +474,8 @@ pub fn commit_in_tx(
 
 /// 端点自己的地址。
 ///
-/// 与继承来的那一格相同 → 不写，那表示「跟随模块」，用户改了模块的地址时这个端点也跟着
-/// 走；不同 → 写自己的那一份。端点本来就没有自己的地址 → 不写，它继承模块那一格。
+/// 与继承来的那一格相同 → 不写，那表示「跟随模块」，用户改了模块的地址时这个端点也跟着走；
+/// 不同 → 写自己的那一份。端点本来就没有自己的地址 → 不写，它继承模块那一格。
 fn endpoint_override(ep: &IrEndpoint, inherited_cell_url: Option<&str>) -> Option<String> {
     let own = ep.base_url_override.clone()?;
     match inherited_cell_url {
@@ -492,9 +486,8 @@ fn endpoint_override(ep: &IrEndpoint, inherited_cell_url: Option<&str>) -> Optio
 
 /// 把一个节点上的两段脚本写进 `node_scripts`。
 ///
-/// `as_module` 为真表示这个节点落成了**模块**——而模块不能存脚本（`node_scripts`
-/// 只认 collection，应用层与 SQLite 触发器各查一次）。那种情况下脚本无处可去，
-/// 出诊断说明，不静默丢。
+/// `as_module` 为真表示这个节点落成了**模块**——而模块不能存脚本（`node_scripts` 只认
+/// collection，应用层与 SQLite 触发器各查一次）。那种情况下脚本无处可去，出诊断说明，不静默丢。
 fn write_scripts(
     conn: &mut Connection,
     node_id: &str,

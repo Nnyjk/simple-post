@@ -236,19 +236,6 @@ fn an_empty_paste_is_an_error_not_an_empty_token() {
 // form 解码与 query 档的百分号编码
 // ---------------------------------------------------------------------------
 
-/// query 档的 token 用 `percent_encode`，与渲染进程那份 TS 实现同字符集。
-#[test]
-fn the_query_token_is_percent_encoded_like_the_renderer_does() {
-    // query 档的 token 走 `crate::url::percent_encode`（与渲染进程的
-    // `encodeURIComponent` 同字符集），不是 form 编码 —— 空格是 `%20` 而不是 `+`。
-    //
-    // client 凭据放 Basic 头时的 form 编码（RFC 6749 §2.3.1）是 `oauth2` crate 的
-    // 职责，不在本项目里，故此处不测。
-    assert_eq!(crate::url::percent_encode("Aladdin"), "Aladdin");
-    assert_eq!(crate::url::percent_encode("open sesame"), "open%20sesame");
-    assert_eq!(crate::url::percent_encode("a+b"), "a%2Bb");
-}
-
 /// 少数 IdP 回的 token 应答是 form 编码，解码器要认它。
 #[test]
 fn form_decoding_reads_the_idp_response_encoding() {

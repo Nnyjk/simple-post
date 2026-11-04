@@ -1,11 +1,9 @@
 // =========================================================================
 // MCP HTTP 监听配置
 // =========================================================================
-// 两个 Tauri 命令。校验、持久化与「是否需要重启」的判定都在
-// `simple_post_server::http_config`（与 REST 共用），桌面与 web 两种形状不会漂移——
-// 为什么是这对辅助函数而不是直接写 preferences，见那个文件。
-//
-// 这里只剩 `#[tauri::command]` 的胶水：取出受管 pool，交过去。
+// 两个 Tauri 命令。校验、持久化与「是否需要重启」的判定都在 `simple_post_server::http_config`
+// （与 REST 共用），桌面与 web 两种形状不会漂移——为什么是这对辅助函数而不是直接写
+// preferences，见那个文件。这里只剩 `#[tauri::command]` 的胶水：取出受管 pool，交过去。
 
 use crate::db::DbPool;
 use crate::domain::McpHttpConfig;

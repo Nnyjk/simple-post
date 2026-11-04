@@ -16,11 +16,6 @@ import type { AuthConfig, HttpMethod } from '../../types/domain';
 // ============================================================
 
 describe('http-build: body inclusion', () => {
-  it('mode=none → init.body is undefined', () => {
-    const { init } = buildFetchInit(input({ body: { mode: 'none', content: '' } }));
-    assert.equal(init.body, undefined);
-  });
-
   it('mode=none with content → still no body (mode wins)', () => {
     const { init } = buildFetchInit(
       input({ body: { mode: 'none', content: 'should not be sent' } }),

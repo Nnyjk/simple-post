@@ -88,9 +88,8 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
 
 /// 建一行端点的配置。
 ///
-/// 写之前校验 TLS 那三个路径字段：它们必须真的是路径 —— 用户把证书正文粘进输入框，
-/// 那段文本会原样落进 `tls_json` 列，而这一列会被 `GET /api/nodes/:id/endpoint-detail`
-/// 原样返回。「证书只存路径，不存内容」要在写入口守住。
+/// 写之前校验 TLS 那三个路径字段：用户把证书正文粘进输入框，那段文本会原样落进 `tls_json`
+/// 列，而这一列会被 `GET /api/nodes/:id/endpoint-detail` 原样返回。
 pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError> {
     if let Some(tls) = &d.tls {
         tls.validate()?;
@@ -130,9 +129,8 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
 
 /// 改一行端点的配置。
 ///
-/// 写之前校验 TLS 那三个路径字段：它们必须真的是路径 —— 用户把证书正文粘进输入框，
-/// 那段文本会原样落进 `tls_json` 列，而这一列会被 `GET /api/nodes/:id/endpoint-detail`
-/// 原样返回。「证书只存路径，不存内容」要在写入口守住。
+/// 写之前校验 TLS 那三个路径字段：用户把证书正文粘进输入框，那段文本会原样落进 `tls_json`
+/// 列，而这一列会被 `GET /api/nodes/:id/endpoint-detail` 原样返回。
 pub fn update(
     conn: &mut Connection,
     node_id: &str,
@@ -162,31 +160,31 @@ pub fn update(
     );
     if let Some(p) = &patch.params {
         sets.push(format!("params_json = ?{}", binds.len() + 1));
-        binds.push(json(&p)?);
+        binds.push(super::json_col(&p)?);
     }
     if let Some(p) = &patch.path_params {
         sets.push(format!("path_params_json = ?{}", binds.len() + 1));
         // `Some(None)` 是「清空」。这一列非空（`NOT NULL DEFAULT '[]'`），故清空写成
         // 空列表，而不是 NULL。
-        binds.push(json(&p.as_deref().unwrap_or(&[]))?);
+        binds.push(super::json_col(&p.as_deref().unwrap_or(&[]))?);
     }
     if let Some(h) = &patch.headers {
         sets.push(format!("headers_json = ?{}", binds.len() + 1));
-        binds.push(json(&h)?);
+        binds.push(super::json_col(&h)?);
     }
     if let Some(b) = &patch.body {
         sets.push(format!("body_json = ?{}", binds.len() + 1));
-        binds.push(json(&b)?);
+        binds.push(super::json_col(&b)?);
     }
     if let Some(a) = &patch.auth {
         sets.push(format!("auth_json = ?{}", binds.len() + 1));
-        binds.push(json(&a)?);
+        binds.push(super::json_col(&a)?);
     }
     push_optional(&mut sets, &mut binds, "docs", &patch.docs);
     push_optional(&mut sets, &mut binds, "notes", &patch.notes);
     if let Some(t) = &patch.tags {
         sets.push(format!("tags_json = ?{}", binds.len() + 1));
-        binds.push(json(&t)?);
+        binds.push(super::json_col(&t)?);
     }
     if let Some(s) = &patch.pre_request_script {
         sets.push(format!("pre_request_script = ?{}", binds.len() + 1));
@@ -200,7 +198,7 @@ pub fn update(
         sets.push(format!("tls_json = ?{}", binds.len() + 1));
         // `Some(None)` = 清除端点自己的设置（回到继承全局），故写 NULL。
         binds.push(match t {
-            Some(v) => json(v)?,
+            Some(v) => super::json_col(v)?,
             None => rusqlite::types::Value::Null,
         });
     }
@@ -224,10 +222,6 @@ pub fn update(
 }
 
 // 内部实现。
-
-fn json<T: serde::Serialize>(v: &T) -> Result<rusqlite::types::Value, AppError> {
-    Ok(rusqlite::types::Value::Text(serde_json::to_string(v)?))
-}
 
 /// 为一个 `Option<Option<T>>` 字段追加 `col = ?n` 子句。
 /// 双层 Option 是全领域统一的约定：缺席则该列不动，显式 null 则清空。

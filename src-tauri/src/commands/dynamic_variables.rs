@@ -1,11 +1,10 @@
 //! 动态变量的 Tauri 命令 —— REST 路由的同一套实现的薄壳。
 //!
-//! 两个薄壳都只调 `crate::dynamic_api`，故桌面端与 web 形态不可能对同一件事各说各话
-//! （AGENTS.md 的 dual-transport invariant）。
+//! 两个薄壳都只调 `crate::dynamic_api`，故桌面端与 web 形态不可能对同一件事各说各话。
 //!
-//! **命令参数是扁平的**，不是一个 `opts: …` 包装：`#[tauri::command]` 按参数名去 payload
-//! 里取值，而 REST 侧 `Json<…>` 直接吃整个 body；渲染层两边发的是同一个扁平对象，于是
-//! 参数名必须就是那些 camelCase 字段名本身。
+//! **命令参数是扁平的**，不是一个 `opts: …` 包装：`#[tauri::command]` 按参数名去 payload 里取值，
+//! 而 REST 侧 `Json<…>` 直接吃整个 body；渲染层两边发的是同一个扁平对象，于是参数名必须就是
+//! 那些 camelCase 字段名本身。
 //!
 //! 定义是**全局**的，故这些命令都不带项目参数。
 
@@ -21,9 +20,8 @@ use crate::dynamic_api::DynamicVariableView;
 
 /// 列出全部动态变量，带当前值与缓存状态。
 ///
-/// 只读缓存行，**不取数**。
-///
-/// 不带「哪些端点引用了它」：那条信息只在接口那侧存在，变量这一侧不维护反向索引。
+/// 只读缓存行，**不取数**。不带「哪些端点引用了它」：那条信息只在接口那侧存在，变量这一侧不维护
+/// 反向索引。
 #[tauri::command]
 pub fn dynamic_variables_list(
     state: State<DbPool>,
@@ -34,9 +32,9 @@ pub fn dynamic_variables_list(
 
 /// 新建一条动态变量定义。
 ///
-/// **参数多**：它们必须逐字段对应 REST body 的字段名（dual-transport invariant），
-/// 故不能塞进一个 opts 结构体——那会让桌面侧的 payload 变成 `{ opts: {...} }`，
-/// 与浏览器侧发出去的扁平对象对不上，只坏一端。
+/// **参数多**：它们必须逐字段对应 REST body 的字段名（dual-transport invariant），故不能塞进一个
+/// opts 结构体——那会让桌面侧的 payload 变成 `{ opts: {...} }`，与浏览器侧发出去的扁平对象对不上，
+/// 只坏一端。
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn dynamic_variables_create(
@@ -93,8 +91,8 @@ pub fn dynamic_variables_delete(state: State<DbPool>, id: String) -> Result<(), 
 
 /// 解析一批动态变量。这一步会真的发出站请求（去数据源取数）。
 ///
-/// `project_id` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走
-/// 的就是这条）；不给就是跨项目取值。
+/// `project_id` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走的就是
+/// 这条）；不给就是跨项目取值。
 #[tauri::command]
 pub async fn dynamic_variables_resolve(
     state: State<'_, DbPool>,
@@ -113,8 +111,8 @@ pub async fn dynamic_variables_resolve(
 
 /// 写覆盖值。`value` 缺席 = 清除，有值 = 写入。
 ///
-/// 过期时间有三种可能，故多带一个 `forever` 开关：`forever = true` → 一直有效；
-/// `expires_at = Some(ms)` → 到期时间就是它；两者都没有 → 沿用定义的 TTL。
+/// 过期时间有三种可能，故多带一个 `forever` 开关：`forever = true` → 一直有效；`expires_at =
+/// Some(ms)` → 到期时间就是它；两者都没有 → 沿用定义的 TTL。
 #[tauri::command]
 pub fn dynamic_variables_set_override(
     state: State<DbPool>,

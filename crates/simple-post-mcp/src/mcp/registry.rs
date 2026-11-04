@@ -38,24 +38,21 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
     })
 }
 
-/// 全部工具名的快照（给 `/mcp/healthz` 与自检）。
-///
-/// **注意**这是未过滤的全量注册表，不是用户在当前策略下看得见的那份；要
-/// 「按策略之后」的那份请用 [`tool_descriptors`]。healthz 不需要用户的视角。
+/// 全部工具名的快照（给 `/mcp/healthz` 与自检）。**注意**这是未过滤的全量注册表，不是用户在
+/// 当前策略下看得见的那份；要「按策略之后」的那份请用 [`tool_descriptors`]。healthz 不需要用户的
+/// 视角。
 pub fn registered_tool_names() -> Vec<String> {
     tool_table().iter().map(|e| e.name.to_string()).collect()
 }
 
 /// 工具名 → 它需要的全局 [`Capability`]。
 ///
-/// **穷尽**：`tool_table()` 里每一条都必须在此有行。两道能力门在缺行时都
-/// *fail closed*，所以少一行的工具是被拒绝，而不是被默认放行；
-/// `every_registered_tool_has_a_capability` 是让两张表同步的回归网。
-///
-/// 用户全局 `read_only` / `safe_write` / `full_access` 的执行点在这里，
-/// 因此本表不能有默认值。按项目的
-/// [`simple_post_core::permissions::required_permission`] 是另一道更粗的门
-/// （未知工具默认 `Permission::Full`），两者不要互相顶替。
+/// **穷尽**：`tool_table()` 里每一条都必须在此有行。两道能力门在缺行时都 *fail closed*，所以
+/// 少一行的工具是被拒绝，而不是被默认放行；`every_registered_tool_has_a_capability` 是让两张表
+/// 同步的回归网。
+/// 用户全局 `read_only` / `safe_write` / `full_access` 的执行点在这里，因此本表不能有默认值。
+/// 按项目的 [`simple_post_core::permissions::required_permission`] 是另一道更粗的门（未知工具
+/// 默认 `Permission::Full`），两者不要互相顶替。
 pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     // env
     ("env_list", Capability::Read),
@@ -126,12 +123,10 @@ pub fn required_capability(name: &str) -> Option<Capability> {
         .map(|(_, c)| *c)
 }
 
-/// 全部工具描述符的快照（给 `tools/list` 与 `/mcp/tools`）。按当前
-/// [`CapabilityPolicy`] 滤掉策略不覆盖的工具 —— 这是 LLM 可见清单的唯一真相，
-/// 配错的策略绝不能把写工具泄给 AI。
-///
-/// 未设置策略时取 [`CapabilityPolicy::ReadOnly`]（safe-by-default）：没进过
-/// 设置面板的用户只看到只读清单。
+/// 全部工具描述符的快照（给 `tools/list` 与 `/mcp/tools`）。按当前 [`CapabilityPolicy`] 滤掉
+/// 策略不覆盖的工具——这是 LLM 可见清单的唯一真相，配错的策略绝不能把写工具泄给 AI。
+/// 未设置策略时取 [`CapabilityPolicy::ReadOnly`]（safe-by-default）：没进过设置面板的用户只看到
+/// 只读清单。
 pub async fn tool_descriptors(state: &AppState) -> Vec<ToolDescriptor> {
     let policy = resolve_capability(&state.pool, None)
         .await

@@ -20,11 +20,8 @@ use crate::script::{self, EnvSnapshot, ScriptResponse, DEFAULT_SCRIPT_LIMITS};
 use super::fetcher::RawSource;
 use super::source::SourceContext;
 
-/// 跑一段处理脚本。
-///
-/// 没有脚本（空串或空白）→ 原样返回抽取结果。
-///
-/// 脚本失败 → 返回一条错误：调用方按「取值失败」处理（缺失，或退回过期缓存值）。
+/// 跑一段处理脚本。没有脚本（空串或空白）→ 原样返回抽取结果。脚本失败 → 返回一条错误：
+/// 调用方按「取值失败」处理（缺失，或退回过期缓存值）。
 pub async fn apply(
     def: &DynamicVariable,
     extracted: Value,

@@ -3,10 +3,8 @@ import vm from 'node:vm';
 import { transformWithOxc, type Plugin } from 'vite';
 
 /**
- * `index.html` 里放这段脚本的位置标记。
- *
- * 插件把标记替换成编译好的内联脚本。标记不在 HTML 里就是构建配置与源码脱节了，
- * 插件会在构建期报错，而不是让页面悄悄用回默认主题。
+ * `index.html` 里放这段脚本的位置标记。插件把标记替换成编译好的内联脚本。
+ * 标记不在 HTML 里时，插件在构建期报错，而不是让页面用回默认主题。
  */
 export const THEME_BOOT_MARKER = '<!--theme-boot-->';
 
@@ -26,20 +24,17 @@ const DYNAMIC_IMPORT = /\bimport\s*\(/;
  * 独占一行的块注释。
  *
  * 注释是给人看的，注入进 `index.html` 的那段脚本是给浏览器看的——首屏预算里它每一个字节
- * 都要算。故把块注释剥掉，只留代码。
+ * 都要算，故把块注释剥掉，只留代码。
  *
  * 单行与多行分开剥：多行那条要求注释从行首开始、到行首的结束标记为止，单行那条自己就能
- * 收尾。分开剥才不会出现「单行注释的结束标记不在行首，于是匹配跨到下一个注释，把中间的
- * 代码一起吞掉」这种事。
+ * 收尾；分开剥才不会把下一个注释连同中间的代码一起吞掉。
  */
 const SINGLE_LINE_BLOCK_COMMENT = /^[ \t]*\/\*\*[^\n]*\*\/[ \t]*\n?/gm;
 const MULTI_LINE_BLOCK_COMMENT = /^[ \t]*\/\*\*[\s\S]*?^[ \t]*\*\/\n?/gm;
 
 /**
- * 代码里声明了哪些名字（函数与常量）。
- *
- * 剥注释前后的两份代码必须声明同样的名字：剥注释一旦吞掉了代码，名字就少了，而那份代码
- * 往往仍是合法 JavaScript，光看语法发现不了。
+ * 代码里声明了哪些名字（函数与常量）。剥注释前后的两份代码必须声明同样的名字：剥注释一旦
+ * 吞掉了代码，名字就少了，而那份代码往往仍是合法 JavaScript，光看语法发现不了。
  */
 function declarationNames(code: string): string {
   const names: string[] = [];
@@ -49,10 +44,8 @@ function declarationNames(code: string): string {
 }
 
 /**
- * 剥掉块注释。
- *
- * 剥完的代码若与原来声明的名字对不上，或不再是合法 JavaScript，就原样返回带注释的版本——
- * 省下几个字节不值得换一个坏掉的首帧。
+ * 剥掉块注释。剥完的代码若与原来声明的名字对不上，或不再是合法 JavaScript，就原样返回
+ * 带注释的版本——省下几个字节不值得换一个坏掉的首帧。
  */
 function stripBlockComments(code: string): string {
   const stripped = code
@@ -70,8 +63,6 @@ function stripBlockComments(code: string): string {
 
 /**
  * 把共享模块的源码编译成一段可注入 `index.html` 的内联脚本。
- *
- * 做法是三步：
  *
  * 1. `transformWithOxc` 把 TypeScript 转成 JavaScript（类型消失，语法保留）。
  * 2. 把唯一那条默认导出改写成给全局对象赋值 —— 内联脚本是 classic script，拿不到模块系统
@@ -115,10 +106,8 @@ export async function buildThemeBootScript(source: string): Promise<string> {
 }
 
 /**
- * 把编译好的内联脚本注入 `index.html`。
- *
- * 插件自己不读文件、不碰路径：`vite.config.ts` 把源文件内容读出来传进来，于是本模块既能在
- * 构建期用，也能在测试里直接 import 断言它的行为。
+ * 把编译好的内联脚本注入 `index.html`。插件自己不读文件、不碰路径：`vite.config.ts`
+ * 把源文件内容读出来传进来，于是本模块既能在构建期用，也能在测试里直接 import 断言它的行为。
  */
 export function themeBootPlugin(source: string): Plugin {
   return {

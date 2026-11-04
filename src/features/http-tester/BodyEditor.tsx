@@ -29,22 +29,13 @@ interface Props {
   value: RequestBody;
   onChange: (body: RequestBody) => void;
   /**
-   * 父组件钉住的格式错误，或 `null`。
-   *
-   * 归父组件所有，因为校验是**动作**而非派生值：它在 发送 / 保存 / 格式化 时跑，结论一直
-   * 保留到下一次触发（见 `lib/request-validation`）。本组件因此不能自己消徽标，
-   * 打完字把 JSON 改对并不等于它能解析。
-   *
-   * 不放进 `BodyContent` 自己的 state，是为了让错误活过切到别的 HTTP 标签再切回来：
-   * 它属于请求，不属于本组件挂了多久。
+   * 父组件钉住的格式错误，或 `null`。校验是动作而非派生值，结论保留到下一次触发
+   * （见 `lib/request-validation`），所以徽标由父组件消，本组件只显示。
    */
   validationError?: string | null;
   /**
-   * 格式化之后带着解析结果回调。
-   *
-   * 回传结果而非一个 `ok` 布尔：父组件据此清除本次校验报出的错误，而不是重跑一遍校验。
-   * 回调触发时格式化后的内容已进入草稿但父组件还没重渲染，在那里重查等于去校验用户
-   * 刚刚格式化失败的那份内容，再把已经清除的错误重新显示出来。
+   * 格式化之后带着解析结果回调。父组件据此清除本次校验报出的错误，而不是重跑校验：
+   * 回调触发时格式化后的内容已进入草稿但父组件还没重渲染，重查会重新报错。
    */
   onFormatResult?: (result: FormatResult) => void;
   /** 变量候选：环境变量与动态变量并进同一份列表。 */
@@ -54,13 +45,8 @@ interface Props {
 }
 
 /**
- * 请求体的模式页签。
- *
- * 七种形态与 `BodyMode` 一一对应：`none` / `json` / `form`（x-www-form-urlencoded）/
- * `multipart`（form-data）/ `xml` / `raw`（Text）/ `binary`。
- *
- * 标签用**协议里的名字**而不是内部代号：`form` 这个名字在界面上看不出它发出去的是
- * `x-www-form-urlencoded`，而 `multipart` 看不出它是 `form-data`。
+ * 请求体的七种形态，与 `BodyMode` 一一对应。标签用协议里的名字：`form` 发出的是
+ * `x-www-form-urlencoded`，`multipart` 发出的是 `form-data`。
  */
 const BODY_TABS: { id: BodyMode; label: string }[] = [
   { id: 'none', label: '无' },
@@ -73,13 +59,9 @@ const BODY_TABS: { id: BodyMode; label: string }[] = [
 ];
 
 /**
- * 请求体编辑区 —— 左右两栏。
- *
- * 左栏是**这一次发什么**：模式页签、Content-Type 说明、格式化按钮与载荷编辑器。
- * 右栏是**这个接口接受什么**：文档里那份参数定义（JSON Schema）。
- *
- * 两栏回答不同的问题，故它们各有一个编辑器、各自一份说明；合成一个编辑器时两种内容
- * 只能挤在同一段 JSON 里，于是「写接口定义」与「调试一次请求」互相覆盖。
+ * 请求体编辑区 —— 左右两栏。左栏是**这一次发什么**（模式页签、Content-Type 说明、
+ * 载荷编辑器），右栏是**这个接口接受什么**（JSON Schema）。两者回答不同的问题，
+ * 故各有一个编辑器；合成一个编辑器时两种内容会挤在同一段 JSON 里互相覆盖。
  */
 export function BodyEditor({
   value,
@@ -90,9 +72,8 @@ export function BodyEditor({
   envName,
 }: Props) {
   const handleFormat = () => {
-    // 带占位符的模板**不能**格式化：格式化会把文本改写成解析出来的值，而占位符在
-    // 模板阶段根本不是 JSON。故这里直接说清楚，而不是拿 JSON 解析器的原话去说一件
-    // 不是 JSON 的事。
+    // 带占位符的模板不能格式化：格式化会把文本改写成解析出来的值，而占位符在模板阶段
+    // 根本不是 JSON。
     if (listVars(value.content).length > 0) {
       onFormatResult?.({ ok: false, error: '带 {{变量}} 的模板不能格式化' });
       return;
@@ -197,11 +178,8 @@ function NoBodyHint() {
 }
 
 /**
- * 载荷编辑器 —— 左栏那个 CodeMirror。
- *
- * 变量候选提示接在编辑器里：敲 `{{` 时浮出环境变量与动态变量，选中即把 `{{key}}` 写进
- * 文档。编辑器不是普通输入框，故 `var-hint` 的那条规则照用，写回与键盘导航在这里自己
- * 实现。
+ * 载荷编辑器 —— 左栏那个 CodeMirror。变量候选提示接在编辑器里：敲 `{{` 时浮出候选，
+ * 选中即把 `{{key}}` 写进文档。编辑器不是普通输入框，故写回与键盘导航在这里自己实现。
  */
 function BodyContent({
   value,
@@ -234,8 +212,8 @@ function BodyContent({
     hint: VarHint | null;
   }>({ value, onChange, hint: null });
 
-  // 用户已经看不到 body 时还钉着错误，徽标就成了另一个国家的提示。凡是离开 json 编辑器
-  // 就作废它，下次 发送 / 保存 会重新检查此刻的内容。
+  // 用户已经看不到 body 时还钉着错误，徽标就指错了位置。凡是离开 json 编辑器就作废它，
+  // 下次 发送 / 保存 会重新检查此刻的内容。
   const shownError = value.mode === 'json' ? (validationError ?? null) : null;
 
   // 显隐也交给 GSAP，与过渡同属一处：报错期间元素不条件卸载，同一个结论重跑一次也不会
@@ -380,7 +358,7 @@ function BodyContent({
     [value.mode, hintKeys],
   );
 
-  // 浮层锚在光标处：编辑器里没有「光标所在的那个输入框」，故按光标位置算出矩形。
+  // 浮层按光标位置定位：编辑器里没有「光标所在的那个输入框」，故按光标位置算出矩形。
   const anchor = useMemo(
     () =>
       rectAnchor(() => {
@@ -415,9 +393,8 @@ function BodyContent({
       </div>
 
       {/*
-        浮在编辑器顶部而非堆在下方：280 px 的 CodeMirror 挡在用户和徽标之间，错误就没人看见。
-        常驻不自动消失也不手动关，只在校验通过后离场。`pointer-events-auto` 换来悬停时
-        完整未截断的文案，代价只是编辑器右上角一小块死区。
+        徽标浮在编辑器顶部：280 px 的 CodeMirror 会挡住用户和徽标，错误就没人看见。
+        徽标常驻不自动消失也不手动关，只在校验通过后离场。
       */}
       {hintText && (
         <div
@@ -427,9 +404,8 @@ function BodyContent({
           className={cn(
             'absolute right-2 top-2 z-10 flex max-w-[min(420px,60%)] items-center gap-1.5',
             'rounded-full border px-2.5 py-1 text-[11px] shadow-md',
-            // 实心 destructive，不用浅色底。`--destructive-foreground` 两个主题都是近白，
-            // 它是「压在饱和填充上」的文字色；配 `bg-background/85` 那种浅底就是白字白底。
-            // 这对 token 两个主题解算一致，因为没有任何一侧覆写它们。
+            // 实心 destructive，不用浅色底：`--destructive-foreground` 两个主题都是近白，
+            // 配 `bg-background/85` 那种浅底就是白字白底。
             'border-destructive bg-destructive text-destructive-foreground',
           )}
           title={hintText}
@@ -458,10 +434,8 @@ function BodyContent({
 type SchemaViewMode = 'structure' | 'json';
 
 /**
- * Schema 编辑区初次打开时显示哪个视图。
- *
- * 文本能解析成结构、且不是空的，就落在「结构」视图 —— 读定义靠的是那张表，
- * 不是一坨 JSON。解析不出来或还没写，就落在「JSON」视图，因为那里才写得下去。
+ * Schema 编辑区初次打开时显示哪个视图。文本能解析成结构且非空就落在「结构」视图，
+ * 解析不出来或还没写就落在「JSON」视图。
  */
 function initialSchemaView(text: string): SchemaViewMode {
   const parsed = parseSchemaView(text);
@@ -471,30 +445,17 @@ function initialSchemaView(text: string): SchemaViewMode {
 /**
  * 请求体的 Schema 编辑区 —— 文档里那份「参数长什么样」的定义。
  *
- * 为什么与载荷编辑器分开
- * ----------------------
- * 两者回答的是不同的问题：左栏那个编辑器是**这一次发什么**，本编辑器是**这个接口接受
- * 什么**。合成一个编辑器时，两种内容只能挤在同一段 JSON 里，于是「写接口定义」与
- * 「调试一次请求」在同一个输入框里互相覆盖。两个字段各有一个编辑器、两句说明。
- *
- * Schema 不参与发包（导出 OpenAPI 时才读它），故它写坏了不阻止发送与保存：导出那侧
- * 遇到不可解析的 schema 会自己报一条诊断，导出不会因此失败。
- *
- * 常驻不折叠：模式切成 none 之后 body 里的 schema 仍在（模式切换保留整个 body），
- * 藏起来用户就再也删不掉那份残留。
- *
- * 为什么有两个视图
- * --------------
- * 「结构」视图把定义画成一张属性表，读参数时不必逐字读 JSON；「JSON」视图保留编辑器，
- * 供用户继续改这段文本。两个视图读写的是同一份文本（`value.schema`），故它们不可能
- * 各说各话：用户在 JSON 视图改完，结构视图随即按新文本重画。
+ * - 与载荷编辑器分开：左栏是这一次发什么，本区是这个接口接受什么。
+ * - 不参与发包（导出 OpenAPI 时才读它），写坏了不阻止发送与保存。
+ * - 常驻不折叠：模式切成 none 之后 body 里的 schema 仍在，藏起来用户就删不掉它。
+ * - 「结构」与「JSON」两个视图读写同一份文本（`value.schema`），故它们不会各说各话。
  */
 function SchemaSection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const isDark = useIsDark();
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<SchemaViewMode>(() => initialSchemaView(value));
-  // 用户是否自己选过视图。用户选过之后，视图就不再由文本的解析状态决定 —— 否则用户
-  // 正在 JSON 视图里改字，文本一改合法就被拽去结构视图，编辑器会从眼皮底下消失。
+  // 用户是否自己选过视图。用户选过之后，视图不再由文本的解析状态决定，否则用户正在
+  // JSON 视图里改字，文本一改合法就被拽去结构视图，编辑器会从眼皮底下消失。
   const userPickedView = useRef(false);
 
   const parsed = useMemo(() => parseSchemaView(value), [value]);
@@ -561,15 +522,13 @@ function SchemaSection({ value, onChange }: { value: string; onChange: (v: strin
               value={value}
               onChange={(v) => {
                 onChange(v);
-                // 用户在这个视图里改字，视图就以这里为准：文本一改合法，结构视图
-                // 也不该把编辑器从眼皮底下拽走。
+                // 用户在这个视图里改字，视图就以这里为准。
                 userPickedView.current = true;
                 // 改对了就消掉上一轮的结论；还没改对时保留它，直到下一次离开编辑器。
                 const next = parseError(v);
                 if (!next) setError(null);
               }}
-              // 离开编辑器时判一次合法性。逐键判会让编辑到一半的 JSON 一直亮着错误，
-              // 那正是载荷编辑器不采用实时校验的原因。
+              // 离开编辑器时判一次合法性。逐键判会让编辑到一半的 JSON 一直亮着错误。
               onBlur={() => setError(parseError(value))}
               extensions={[json()]}
               theme={isDark ? oneDark : lightCodeTheme}

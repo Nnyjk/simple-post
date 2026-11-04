@@ -1,11 +1,7 @@
 /**
- * 请求体的解析与装配 —— 渲染进程与 MCP 端共用的那套规则。
- *
- * 与 `crates/simple-post-core/src/body.rs` 是同一套规则的两份实现，逐条对齐：
- * 模板化按字段做还是按整段做、空键与禁用行算不算、百分号编码用哪套字符集、产物
- * 是文本还是二进制。改动两边必须同步。
- *
- * ## 一个请求体有七种形态
+ * 请求体的解析与装配 —— 渲染进程与 MCP 端共用的那套规则。与
+ * `crates/simple-post-core/src/body.rs` 是同一套规则的两份实现，逐条对齐：模板化按字段做
+ * 还是按整段做、空键与禁用行算不算、百分号编码用哪套字符集、产物是文本还是二进制。
  *
  * `BodyMode` 的每个变体在 `RequestBody.content` 里装的东西都不一样：
  *
@@ -17,20 +13,16 @@
  * | `multipart` | 分片数组的 JSON 文本 | 字节 |
  * | `binary` | 文件描述的 JSON 文本 | 字节（文件本身） |
  *
- * `form` 与 `multipart` 是**结构化**的：它们的 `content` 是一段 JSON 文本，描述的是
- * 一行一行 / 一个一个分片，而不是拼好的正文。结构化带来两样东西：界面上的表格有地方
- * 放说明，文件分片有地方放字节。
+ * `form` 与 `multipart` 是**结构化**的：它们的 `content` 是一段 JSON 文本，描述的是一行一行
+ * / 一个一个分片，而不是拼好的正文。结构化带来两样东西：界面上的表格有地方放说明，文件分片
+ * 有地方放字节。
  *
- * ## 模板化按字段做，不按整段做
+ * **模板化按字段做，不按整段做。** `json` / `xml` / `raw` 整段替换；`form` 与 `multipart`
+ * **逐个字段**替换。整段替换在结构化形态上是错的：替换出来的值里带一个引号就会把那段 JSON
+ * 文本弄坏，于是整份内容解析不出来，请求发出去的是一个空 body。
  *
- * `json` / `xml` / `raw` 整段替换；`form` 与 `multipart` **逐个字段**替换。整段替换在
- * 结构化形态上是错的：替换出来的值里带一个引号就会把那段 JSON 文本弄坏，于是整份内容
- * 解析不出来，请求发出去的是一个空 body。
- *
- * ## 产物的两种形态
- *
- * 产物是**文本**还是**二进制**，由字节决定：字节是合法 UTF-8 就走文本形态，否则走
- * base64 形态。`binary` 模式一律走二进制形态——用户选的是文件，发的是它的字节。
+ * **产物的两种形态。** 产物是**文本**还是**二进制**，由字节决定：字节是合法 UTF-8 就走文本
+ * 形态，否则走 base64 形态。`binary` 模式一律走二进制形态——用户选的是文件，发的是它的字节。
  */
 import type { BodyFile, FormField, MultipartPart, RequestBody } from '@/types/domain';
 import { resolveVarsWithMissing } from '../url';
@@ -55,10 +47,8 @@ function emptyBody(): ResolvedBody {
 // -------------------------------------------------------------------------
 
 /**
- * 按 `RequestBody.mode` 解析请求体。
- *
- * `vars` 是这一次的变量池。`json` / `xml` / `raw` 整段替换，`form` 与 `multipart`
- * 逐个字段替换，`binary` 不替换（文件字节不是模板）。
+ * 按 `RequestBody.mode` 解析请求体。`vars` 是这一次的变量池：`json` / `xml` / `raw` 整段替换，
+ * `form` 与 `multipart` 逐个字段替换，`binary` 不替换（文件字节不是模板）。
  */
 export function resolveBody(body: RequestBody, vars: Record<string, string>): ResolvedBody {
   if (body.mode === 'none' || body.content.length === 0) {
@@ -82,10 +72,8 @@ export function resolveBody(body: RequestBody, vars: Record<string, string>): Re
 }
 
 /**
- * `form` 模式：逐行模板化，然后拼成 urlencoded 正文。
- *
- * **空键的行不进正文**，其中的变量也不报缺失——与查询参数同一条规则：没有名字的字段
- * 没有地方可去。
+ * `form` 模式：逐行模板化，然后拼成 urlencoded 正文。**空键的行不进正文**，其中的变量也不报
+ * 缺失——与查询参数同一条规则：没有名字的字段没有地方可去。
  */
 function resolveFormBody(content: string, vars: Record<string, string>): ResolvedBody {
   const fields = parseFormFields(content);
@@ -99,25 +87,23 @@ function resolveFormBody(content: string, vars: Record<string, string>): Resolve
     const key = resolveVarsWithMissing(field.key, vars);
     const value = resolveVarsWithMissing(field.value, vars);
     missing.push(...key.missing, ...value.missing);
-    pairs.push(`${percentEncode(key.value)}=${percentEncode(value.value)}`);
+    pairs.push(`${encodeURIComponent(key.value)}=${encodeURIComponent(value.value)}`);
   }
 
   return { text: pairs.join('&'), base64: null, missing: dedup(missing) };
 }
 
 /**
- * `multipart` 模式：逐个分片模板化，然后重新序列化成分片数组。
- *
- * 装配（boundary、分片头、字节）在发送侧做：boundary 每次现生成，装配与 Content-Type
- * 必须用同一个值。
+ * `multipart` 模式：逐个分片模板化，然后重新序列化成分片数组。装配（boundary、分片头、字节）
+ * 在发送侧做：boundary 每次现生成，装配与 Content-Type 必须用同一个值。
  */
 function resolveMultipartBody(content: string, vars: Record<string, string>): ResolvedBody {
   const parts = parseMultipartParts(content);
   const missing: string[] = [];
 
   const resolved = parts.map((part) => {
-    // 文件分片的字节不模板化：base64 里没有 `{{`，模板化它只会平白多扫一遍。
-    // 分片名也不模板化——它与文件名一起描述「哪个文件」，不是用户填的值。
+    // 文件分片的字节不模板化：base64 里没有 `{{`，模板化它只会平白多扫一遍。分片名也不模板化
+    // ——它与文件名一起描述「哪个文件」，不是用户填的值。
     if (part.base64 !== undefined) return part;
     const name = resolveVarsWithMissing(part.name, vars);
     const value = resolveVarsWithMissing(part.value, vars);
@@ -129,10 +115,8 @@ function resolveMultipartBody(content: string, vars: Record<string, string>): Re
 }
 
 /**
- * `binary` 模式：文件描述里的字节原样带出去。
- *
- * 文件描述读不出来（内容不是那份 JSON）时没有 body：发一个空 body 好过发一段被改写
- * 过的文本。
+ * `binary` 模式：文件描述里的字节原样带出去。文件描述读不出来（内容不是那份 JSON）时没有
+ * body：发一个空 body 好过发一段被改写过的文本。
  */
 function resolveBinaryBody(content: string): ResolvedBody {
   const file = parseBodyFile(content);
@@ -145,17 +129,14 @@ function resolveBinaryBody(content: string): ResolvedBody {
 // -------------------------------------------------------------------------
 
 /**
- * `form` 模式的内容 → 行。
+ * `form` 模式的内容 → 行。内容是行数组的 JSON 文本。**解析不出来时给空数组**，不报错：这是
+ * 一个纯函数，两条发送路径在这一点上必须同形。
  *
- * 内容是行数组的 JSON 文本。**解析不出来时给空数组**，不报错：这是一个纯函数，两条发送
- * 路径在这一点上必须同形。
+ * 任一行的字段类型不对就整份作废，与 multipart 分片的规则一致：逐行各自取值会让同一个畸形
+ * 输入在两侧得到不同的正文。
  *
- * 任一行的字段类型不对就整份作废，与 multipart 分片的规则一致：逐行各自取值会让同一个
- * 畸形输入在两侧得到不同的正文。
- *
- * **不是行数组时按旧格式读**：早期版本的 `form` 模式存的是一个拼好的 urlencoded 串
- * （Postman 导入器至今还那么写）。那份内容不该被当成空表单——那等于把用户已经写好的
- * 字段悄悄丢掉。
+ * **内容不是行数组时按 urlencoded 串读取**（Postman 导入器写的就是这个形状）。那份内容不能
+ * 当成空表单——那等于把用户已经写好的字段丢掉。
  */
 export function parseFormFields(content: string): FormField[] {
   let parsed: unknown;
@@ -195,10 +176,10 @@ export function parseFormFields(content: string): FormField[] {
 }
 
 /**
- * 旧格式的 `form` 内容（urlencoded 串）→ 行。
+ * urlencoded 串形态的 `form` 内容 → 行（Postman 导入器写的就是这个形状）。
  *
- * 按 `&` 分行，每行按**第一个** `=` 分成键与值。值不做百分号解码：那份内容里存的是
- * 用户写下的原文，解码会把值里的 `%` 变成别的字符。
+ * 按 `&` 分行，每行按**第一个** `=` 分成键与值。值不做百分号解码：那份内容里存的是用户写下的
+ * 原文，解码会把值里的 `%` 变成别的字符。
  */
 export function parseLegacyFormFields(content: string): FormField[] {
   if (!content) return [];
@@ -222,10 +203,8 @@ export function serializeFormFields(fields: FormField[]): string {
 // -------------------------------------------------------------------------
 
 /**
- * `multipart` 模式的内容 → 分片。
- *
- * **解析不出来时给空数组**，不报错——与 Rust 侧 `core::body::parse_multipart_parts`
- * 同一条规则。
+ * `multipart` 模式的内容 → 分片。**解析不出来时给空数组**，不报错——与 Rust 侧
+ * `core::body::parse_multipart_parts` 同一条规则。
  *
  * 任一分片的字段类型不对就整份作废，与 serde 反序列化失败后丢弃整份一致。
  */
@@ -273,11 +252,7 @@ export function parseMultipartParts(content: string): MultipartPart[] {
 // 解析：binary 的文件
 // -------------------------------------------------------------------------
 
-/**
- * `binary` 模式的内容 → 文件描述。
- *
- * 读不出来时给 `null`：那个内容不是文件描述，就没有文件。
- */
+/** `binary` 模式的内容 → 文件描述。读不出来时给 `null`：那个内容不是文件描述，就没有文件。 */
 export function parseBodyFile(content: string): BodyFile | null {
   let parsed: unknown;
   try {
@@ -302,11 +277,9 @@ export function parseBodyFile(content: string): BodyFile | null {
 }
 
 /**
- * `binary` 模式请求体的 Content-Type：文件自己的 MIME 类型，缺省
- * `application/octet-stream`。
- *
- * 读不出文件描述时给缺省值：没有文件也就没有类型，而 `application/octet-stream`
- * 是任何服务端都能收下的形态。
+ * `binary` 模式请求体的 Content-Type：文件自己的 MIME 类型，缺省 `application/octet-stream`。
+ * 读不出文件描述时给缺省值：没有文件也就没有类型，而 `application/octet-stream` 是任何服务端
+ * 都能收下的形态。
  */
 export function binaryContentType(content: string): string {
   const file = parseBodyFile(content);
@@ -317,42 +290,6 @@ export function binaryContentType(content: string): string {
 // -------------------------------------------------------------------------
 // 内部
 // -------------------------------------------------------------------------
-
-/**
- * 百分号编码。保留 `A-Z a-z 0-9 - _ . ! ~ * ' ( )`，其余字节一律 `%XX`（大写十六进制）。
- *
- * 字符集取 JS 的 `encodeURIComponent` 而不是 RFC 3986 的 unreserved 集：多出来的
- * `! * ' ( )` 在查询串里是合法的子分隔符，而渲染进程发出去的请求用的就是这套编码。
- * 空格是 `%20`（不是 form 编码的 `+`）：`+` 在严格按 RFC 3986 解析查询串的服务端
- * 会被读成加号而非空格。
- *
- * 这里按 UTF-8 **字节**编码，与 Rust 的 `core::url::percent_encode` 逐字节一致。
- */
-export function percentEncode(s: string): string {
-  const bytes = new TextEncoder().encode(s);
-  let out = '';
-  for (const b of bytes) {
-    if (
-      (b >= 0x41 && b <= 0x5a) ||
-      (b >= 0x61 && b <= 0x7a) ||
-      (b >= 0x30 && b <= 0x39) ||
-      b === 0x2d ||
-      b === 0x5f ||
-      b === 0x2e ||
-      b === 0x21 ||
-      b === 0x7e ||
-      b === 0x2a ||
-      b === 0x27 ||
-      b === 0x28 ||
-      b === 0x29
-    ) {
-      out += String.fromCharCode(b);
-    } else {
-      out += '%' + b.toString(16).padStart(2, '0').toUpperCase();
-    }
-  }
-  return out;
-}
 
 /** 去重并保持首次出现的次序。 */
 function dedup(names: string[]): string[] {
@@ -380,10 +317,7 @@ function uint(v: unknown): number | null {
   return v;
 }
 
-/**
- * 可选字符串字段：缺省与 `null` 都给 `undefined`，类型不对给 `null`（调用方据此
- * 整份作废）。
- */
+/** 可选字符串字段：缺省与 `null` 都给 `undefined`，类型不对给 `null`（调用方据此整份作废）。 */
 function optStr(v: unknown): string | undefined | null {
   if (v === undefined || v === null) return undefined;
   return typeof v === 'string' ? v : null;

@@ -10,13 +10,11 @@ import { KeyValueTable, RowTile } from './KeyValueTable';
 const VAR_KEY_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * VariableTable —— 该环境的 `{{key}} → value` 覆盖值。
+ * VariableTable —— 该环境的 `{{key}} → value` 覆盖值。列表外壳（行表格、每行开头的图标
+ * 色块、末尾的「添加变量」按钮）由 `KeyValueTable` 提供；每一行里的单元格由
+ * `VariableTable` 自己渲染。
  *
- * 列表外壳（行表格、每行开头的图标色块、末尾的「添加变量」按钮）由 `KeyValueTable`
- * 提供；每一行里的单元格由 `VariableTable` 自己渲染。
- *
- * **停用的变量照样列出来，但不参与替换**：`{{x}}` 留在原样并进缺失变量报告，
- * 用户看得见「这个变量没被替换」，而不是静默被替掉。
+ * **停用的变量照样列出来，但不参与替换**：`{{x}}` 留在原样并进缺失变量报告。
  */
 interface VariableTableProps {
   env: Environment;

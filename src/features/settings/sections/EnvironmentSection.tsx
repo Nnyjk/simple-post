@@ -40,11 +40,9 @@ export interface EnvironmentSectionProps {
   deleteEnvironment: (envId: string) => void;
   updateEnvironment: (envId: string, patch: Partial<Environment>) => void;
   /**
-   * 本客户端当前用的那个环境（`activeEnvironmentId`）。
-   *
-   * 面板打开时选中它 —— **前提是它属于本项目**。理由：这一栏改的就是「这个环境在各
-   * 模块下的地址与变量」，而请求发出去时用的也是当前环境；两者停在不同的环境上，
-   * 用户改的是一处、跑的是另一处。
+   * 本客户端当前用的那个环境（`activeEnvironmentId`）。面板打开时选中它 —— **前提是它
+   * 属于本项目**：这一栏改的就是「这个环境在各模块下的地址与变量」，而请求发出去时用的
+   * 也是当前环境；两者停在不同的环境上，用户改的是一处、跑的是另一处。
    *
    * 它不属于本项目时（例如在别的项目的模块标签里看这一栏）就退回默认环境。
    */
@@ -52,10 +50,8 @@ export interface EnvironmentSectionProps {
 }
 
 /**
- * 新建环境的默认名称。
- *
- * 从项目已有的名字推导，保证生成的名字唯一，且与本面板的中文口吻一致——在一个靠名字
- * 指认环境的分区里，两个同名标签无法区分。
+ * 新建环境的默认名称。从项目已有的名字推导，保证生成的名字唯一，且与本面板的中文口吻
+ * 一致 —— 在一个靠名字指认环境的分区里，两个同名标签无法区分。
  */
 export function nextEnvironmentName(existingNames: readonly string[]): string {
   const taken = new Set(existingNames.map((n) => n.trim()));
@@ -70,39 +66,14 @@ export function nextEnvironmentName(existingNames: readonly string[]): string {
 }
 
 /**
- * Per-environment configuration.
+ * 每个环境一份配置。上方是环境切换条（兼重命名入口），下方是模块地址表与环境变量表。
+ * 没有按环境的表头行：切换器已经点名了当前环境。
  *
- * Layout:
+ * 切换器条持有 `新建环境` 控件，故即使一个环境都没有也要渲染 —— 空态是条下方的一句提示，
+ * 不替代这条。**模块** 标签为更窄的用途展示同一份环境列表（见 `ModuleBaseUrlSection`）。
  *
- *   ┌── env switcher (also the rename surface) ──────────────┐
- *   │  ☁  dev  ⚡ staging  🚀 prod            + 新建环境       │
- *   ├────────────────────────────────────────────────────────┤
- *   ├──────────── 模块地址 ───────────────────────────────────┤
- *   │  模块         模块地址              代理地址            │
- *   │  🗂 默认模块   http://localhost:4000   （留空即无代理）  │
- *   │  🗂 南通6.0    http://192.168.11.101                       │
- *   ├──────────── 环境变量 ───────────────────────────────────┤
- *   │  { } token  eyJhbGciOi...                       [×]    │
- *   │  { } env    dev                                 [×]    │
- *   │                  + 添加变量                            │
- *   └────────────────────────────────────────────────────────┘
- *
- * 没有按环境的表头行：上方的切换器已经点名了每个环境，几像素之下再把当前环境
- * 重复一遍纯属冗余。重命名随之搬进切换器 —— 见 `EnvSwitcher`。
- *
- * Visually it inherits the new SettingsCategory aesthetic — coloured
- * icon containers, SettingRow-style padded rows, badge trailing
- * controls, hover-revealed delete buttons — but adds an env switcher
- * strip across the top because each env holds its own value overrides.
- *
- * 切换器条持有 `新建环境` 控件，故即使一个环境都没有也要渲染 —— 空态是条下方的一句
- * 提示，绝不替代这条。**模块** 标签为更窄的用途展示同一份环境列表（见
- * `ModuleBaseUrlSection`），故本组件不是该列表的唯一宿主。
- *
- * This file is the shell only: it owns the active-env selection, the
- * delete-confirmation state, and the layout. Every presentational part
- * lives under `rows/` (props only, no store access) and the dialog
- * state lives in `hooks/useEnvDialogs`.
+ * 本组件只管外壳：当前环境的选择、删除确认状态与布局。展示部分在 `rows/`（只收 props，
+ * 不读 store），对话框状态在 `hooks/useEnvDialogs`。
  */
 export function EnvironmentSection({
   environments,
@@ -127,12 +98,9 @@ export function EnvironmentSection({
     deleteEnvironment,
   });
 
-  // 列表形状一变就回到「本客户端当前用的那个环境」，除非用户已明确选过。否则停在
-  // 用户上次选的那一行，免得一次重渲染把正在看的那行拽走。
-  //
-  // 落点是当前环境而不是默认环境：这一栏改的是「这个环境在各模块下的地址与变量」，
-  // 而请求发出去时用的也是当前环境。两者停在不同的环境上，用户改的是一处、跑的
-  // 是另一处。当前环境不属于本项目时（看的是别的项目的模块）才退回默认环境。
+  // 列表形状一变就回到「本客户端当前用的那个环境」，除非用户已明确选过，否则一次重渲染会
+  // 把正在看的那行拽走。落点是当前环境而不是默认环境：这一栏改的是「这个环境在各模块下的
+  // 地址与变量」，而请求发出去时用的也是当前环境。当前环境不属于本项目时才退回默认环境。
   useEffect(() => {
     if (environments.length === 0) {
       setActiveId(null);

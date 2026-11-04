@@ -1,7 +1,7 @@
 //! 发送路径 —— 一份已解析好的请求 → 发出 → 结果信封。
 //!
-//! 三个发送工具共用 `execute_resolved`，故「解析之后发生什么」只有一份实现：oauth2 的
-//! token 注入、multipart 的装配、脚本链、发送、结果封装。
+//! 三个发送工具共用 `execute_resolved`，故「解析之后发生什么」只有一份实现：oauth2 的 token 注入、
+//! multipart 的装配、脚本链、发送、结果封装。
 
 use serde_json::Value;
 
@@ -16,9 +16,9 @@ use super::multipart;
 
 /// 解析之后、结果封装之前的一次执行。
 ///
-/// 「解析之后发生什么」只有一份实现：OAuth2 的 token 注入、multipart 的装配、脚本链、
-/// 发送。单条发送与批量运行都走它，故两者不会长出两套 —— 两者只是**结果封装**不同：
-/// 单条把结果封成一次调用的信封，批量把每一条的结论收进一份报告。
+/// 「解析之后发生什么」只有一份实现：OAuth2 的 token 注入、multipart 的装配、脚本链、发送。
+/// 单条发送与批量运行都走它，故两者不会长出两套 —— 两者只是**结果封装**不同：单条把结果封成
+/// 一次调用的信封，批量把每一条的结论收进一份报告。
 pub(super) struct ExecutedRequest {
     /// 真正发出去的那份 URL。OAuth2 注入 token 之后是那一份。
     pub url: String,
@@ -36,13 +36,11 @@ pub(super) struct ExecutedRequest {
 
 /// 解析好的请求 → 发出 → 执行结果。
 ///
-/// `endpoint_id` 决定脚本链能不能装配（有它才有 collection 那几段）；临时请求没有
-/// 端点，故传 `None` —— 它的请求里没有脚本可跑。
-///
-/// `tls_override` 是这次请求生效的 HTTPS 设置里**端点以上的那一份**：全局默认由
-/// `settings.tls` 带来，端点自带的那份与本次调用的临时覆盖已在调用方合成好。
-/// `None` = 继承全局默认。合成由 core 的 `send_with_scripts` 完成（它在
-/// `crate::tls::resolve` 里把两档合起来），故 MCP 侧只交出该交的那一份。
+/// `endpoint_id` 决定脚本链能不能装配（有它才有 collection 那几段）；临时请求没有端点，故传
+/// `None` —— 它的请求里没有脚本可跑。
+/// `tls_override` 是这次请求生效的 HTTPS 设置里**端点以上的那一份**：全局默认由 `settings.tls`
+/// 带来，端点自带的那份与本次调用的临时覆盖已在调用方合成好。合成由 core 的 `send_with_scripts`
+/// 完成（它在 `crate::tls::resolve` 里把两档合起来），故 MCP 侧只交出该交的那一份。
 pub(super) async fn execute_resolved(
     state: &AppState,
     method: &str,
@@ -160,9 +158,9 @@ pub(super) async fn execute_resolved(
 
 /// 解析好的请求 → 发出 → 一次调用的结果信封。
 ///
-/// 与 [`execute_resolved`] 的差别只在最后一步：`execute_resolved` 返回 `ExecutedRequest`，
-/// 本函数把它封成调用信封，并在 `blocked` 时返回 `AppError::Validation`（单条调用没有
-/// 「整批」的上下文，一个失败就该让调用方看见）。
+/// 与 [`execute_resolved`] 的差别只在最后一步：`execute_resolved` 返回 `ExecutedRequest`，本
+/// 函数把它封成调用信封，并在 `blocked` 时返回 `AppError::Validation`（单条调用没有「整批」的
+/// 上下文，一个失败就该让调用方看见）。
 pub(super) async fn send_resolved(
     state: &AppState,
     method: &str,
@@ -220,14 +218,12 @@ pub(crate) fn env_snapshot(env: Option<&Environment>) -> simple_post_core::scrip
 
 /// 本次发送用的出站旋钮（超时 / 跟随重定向 / 最大响应体积）。
 ///
-/// 起点是**用户配置的那一份**（`preferences` 的 `request_settings` 行，桌面端在设置
-/// 面板里改的就是它），调用方的覆盖值再盖上去。故界面上把超时调成 5 秒，MCP 侧也是
-/// 5 秒；行缺失时用 `RequestSettings::default()`。
-///
-/// **`settings.tls` 不在这里被覆盖**：它是 HTTPS 出站的**全局默认**，而本次调用的
-/// 临时覆盖要压过端点自带的那一份，故它走 `send_resolved` 的 `tls_override` 参数，
-/// 由 core 的 `send_with_scripts` 与全局默认合成。写进 `settings.tls` 的话，端点
-/// 自带的那份就被顶掉了。
+/// 起点是**用户配置的那一份**（`preferences` 的 `request_settings` 行，桌面端在设置面板里改的
+/// 就是它），调用方的覆盖值再盖上去。故界面上把超时调成 5 秒，MCP 侧也是 5 秒；行缺失时用
+/// `RequestSettings::default()`。
+/// **`settings.tls` 不在这里被覆盖**：它是 HTTPS 出站的**全局默认**，而本次调用的临时覆盖要压过
+/// 端点自带的那一份，故它走 `send_resolved` 的 `tls_override` 参数，由 core 的
+/// `send_with_scripts` 与全局默认合成。写进 `settings.tls` 的话，端点自带的那份就被顶掉了。
 pub(crate) fn resolve_settings(
     pool: &DbPool,
     flat: (Option<u64>, Option<bool>, Option<u64>),

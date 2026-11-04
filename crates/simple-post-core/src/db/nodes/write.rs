@@ -12,10 +12,9 @@ use super::placement::{check_detail_agreement, validate_placement};
 use super::read::get;
 use super::tree::move_many;
 
-/// 插入一个节点；类型需要时连同它的 `endpoint_details` 行。
-/// 两半一起落：缺 detail 行的节点、或缺节点的 detail 行，都是没有读者走得动的树。调用方为
-/// endpoint 提供 `detail`，其余必须传 `None`——[`check_detail_agreement`] 在插入前强制，
-/// 故此错误以校验错误报出，而不是日后表现为一个半填充的 endpoint。
+/// 插入一个节点；类型需要时连同它的 `endpoint_details` 行。两半一起落：缺 detail 行的节点、
+/// 或缺节点的 detail 行，都是没有读者走得动的树。调用方为 endpoint 提供 `detail`，其余必须
+/// 传 `None`——[`check_detail_agreement`] 在插入前强制。
 pub fn create(
     conn: &mut Connection,
     node: &ResourceNode,
@@ -46,15 +45,12 @@ pub fn create(
     Ok(node.clone())
 }
 
-/// 在同一父下复制一个 endpoint 及其配置。
-/// 只限 endpoint：模块或 collection 的「副本」是个空壳，UI 也没有表达它的方式。
-/// 复制子树是另一个功能，不是 duplicate。
+/// 在同一父下复制一个 endpoint 及其配置。只限 endpoint：模块或 collection 的「副本」是个空壳。
 /// **必须在 `db::with_tx` 内调用**——节点与它的 detail 行必须一起写入，否则副本打不开。
-/// `new_id` 让调用方命名副本；`None` 在此生成一个，那正无状态调用方（MCP 工具）要的。
-/// 桌面 UI 传自己的 id，因为它做的是**乐观**复制：在本调用返回之前就把行写进 store、激活
-/// 标签页并把用户直接送进重命名。此处生成的 id 会来得太晚——标签页、选中项与进行中的
-/// 重命名都会指向一行不存在的记录，工作区把标签页渲染成「接口已删除」。与 `nodes_create`
-/// 同一契约：接受 SPA 给的 id。
+///
+/// `new_id` 让调用方命名副本；`None` 在此生成一个，那正无状态调用方（MCP 工具）要的。桌面 UI
+/// 传自己的 id，因为它做的是**乐观**复制：在本调用返回之前就把行写进 store、激活标签页并把
+/// 用户直接送进重命名——此处生成的 id 会来得太晚，标签页会指向一行不存在的记录。
 pub fn duplicate(
     conn: &mut Connection,
     id: &str,

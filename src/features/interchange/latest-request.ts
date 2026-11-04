@@ -5,7 +5,7 @@
  * 连着换两个环境时先发的那一趟可能后到，它带回来的地址属于旧环境——
  * 写进去的话，提示又会按旧环境点名。
  */
-export interface LatestRequest {
+interface LatestRequest {
   /** 领一个号。 */
   next(): number;
   /** 这个号还是最新的吗。 */

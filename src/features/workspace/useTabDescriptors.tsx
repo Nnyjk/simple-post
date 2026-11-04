@@ -19,12 +19,10 @@ export interface TabDescriptor {
   hint?: string;
   icon: React.ReactNode;
   /**
-   * 类型名（作为一个词），只给 hover 标题用 —— 绝不上条：160px 放不下第二个
-   * 词，图标已经能区分类型。
+   * 类型名（作为一个词），只给 hover 标题用 —— 绝不上条：160px 放不下第二个词，图标已经能
+   * 区分类型。
    *
-   * 只给三种节点类型设。接口标签带 method pill，比"接口"二字信息更多；`settings`
-   * 不需要（标题本身就是标签）。节点类型正是那些标题被去掉后右栏不再重复身份的
-   * 类型 —— `EntitySettings` 现在没有自己的类型标签，这个词就住在这里。
+   * 只给三种节点类型设。接口标签带 method pill，比「接口」二字信息更多。
    */
   kindLabel?: string;
   /**

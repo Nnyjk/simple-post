@@ -8,20 +8,20 @@
 //!    [`simple_post_core::domain::EndpointDetail::node_id`] 此刻根本不存在。
 //! 2. **诊断无处安放。** `domain` 每个字段都是标称值，没有位置能说「这里原本是个
 //!    multipart file 字段，被丢掉了」。
-//! 3. **导出要跨四张表。** host 不在 endpoint 上，URL 按 (环境 × 模块) 一级索引，
-//!    故投影必须先自己选定环境（见 [`Exchange::environment_id`]）。
+//! 3. **导出要跨四张表。** host 不在 endpoint 上，URL 按 (环境 × 模块) 一级索引，故投影
+//!    必须先自己选定环境（见 [`Exchange::environment_id`]）。
 //!
 //! ## `IrEndpoint::path` 是 path-only
 //!
 //! 刻意**不**复用 `EndpointDetail`：那个结构体带 `node_id` 这个此刻不存在的身份字段。
-//! 外来格式给的是整条 URL，host 的部分要么成为模块那一格、要么成为端点
-//! 自己的 `base_url_override`，两件事都在 `format → ir` 这一侧发生，所以 `ir` 存路径。
+//! 外来格式给的是整条 URL，host 的部分要么成为模块那一格、要么成为端点自己的
+//! `base_url_override`，两件事都在 `format → ir` 这一侧发生，所以 `ir` 存路径。
 //!
 //! ## `key` 是「IR 还没成为节点」的那一半身份
 //!
-//! 勾选是前端行为，而前端要能把「第几行」换回「第几个 IR 节点」。落库前没有
-//! `nodes.id`，故每个 IR 节点带一个 [`IrEndpoint::key`]：导入时是外来格式里的位置指针
-//! （与 [`Diagnostic::pointer`] 同一套寻址纪律），导出时是 `nodes.id`。
+//! 勾选是前端行为，而前端要能把「第几行」换回「第几个 IR 节点」。落库前没有 `nodes.id`，
+//! 故每个 IR 节点带一个 [`IrEndpoint::key`]：导入时是外来格式里的位置指针（与
+//! [`Diagnostic::pointer`] 同一套寻址纪律），导出时是 `nodes.id`。
 
 use std::collections::BTreeSet;
 
@@ -56,10 +56,8 @@ pub struct IrModule {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// 本模块在**选定环境**下那一格的地址：一个模块一格，没有第二层。
-    ///
-    /// 该模块没配就是没有地址——**没有回退层**，不借用别的模块的值。
-    /// 故缺席是一个真实答案，不是「待补」。
+    /// 本模块在**选定环境**下那一格的地址：一个模块一格，没有第二层。该模块没配就是没有
+    /// 地址——**没有回退层**，不借用别的模块的值。故缺席是一个真实答案，不是「待补」。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<IrBaseUrl>,
     /// 直接挂在模块下的 endpoint。`ResourceNodeType::may_under` 允许这一层，
@@ -68,11 +66,9 @@ pub struct IrModule {
     pub endpoints: Vec<IrEndpoint>,
     #[serde(default)]
     pub collections: Vec<IrCollection>,
-    /// 这个模块上的两段脚本。
-    ///
-    /// **模块本身不能存脚本**（`node_scripts` 只认 collection），故这一段只在
-    /// 「落进已有模块」时用得上：那时 IR 顶层的模块会降级成集合。落到项目顶层时
-    /// 它无处可去，落库侧会出一条诊断说明。
+    /// 这个模块上的两段脚本。**模块本身不能存脚本**（`node_scripts` 只认 collection），故这一段
+    /// 只在「落进已有模块」时用得上：那时 IR 顶层的模块会降级成集合。落到项目顶层时它无处可去，
+    /// 落库侧会出一条诊断说明。
     #[serde(default)]
     pub scripts: IrScripts,
 }
@@ -108,12 +104,8 @@ pub struct IrCollection {
     pub scripts: IrScripts,
 }
 
-/// 一个节点上的两段脚本。
-///
-/// 与 `domain::NodeScripts` 同形，但**没有 `node_id`**：IR 里的节点还没有 id。
-/// 端点的脚本落进 `endpoint_details`（与 body / headers 同级），集合的脚本落进
-/// `node_scripts` 表。
-///
+/// 一个节点上的两段脚本。与 `domain::NodeScripts` 同形，但**没有 `node_id`**：IR 里的节点还没有
+/// id。端点的脚本落进 `endpoint_details`（与 body / headers 同级），集合的脚本落进 `node_scripts` 表。
 /// `None` = 没有脚本。两个字段都是**源码**，不是路径：外来格式给的就是内联的文本。
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -150,9 +142,8 @@ pub struct IrEndpoint {
     /// `ir` 不能是 `domain` 别名的第三个理由（见模块文档）。
     pub path: String,
     /// 端点自己的地址前缀。`Some` 时这个端点不套用模块那一格。
-    ///
-    /// 外来文档的 host 是**逐条**给的，而一格里只放得下一个地址，故一个模块里出现第二个
-    /// host 时，那几条端点各自带着自己的地址，模块那一格留给第一个 host。
+    /// 外来文档的 host 是**逐条**给的，而一格里只放得下一个地址，故一个模块里出现第二个 host
+    /// 时，那几条端点各自带着自己的地址，模块那一格留给第一个 host。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url_override: Option<String>,
     #[serde(default)]
@@ -192,12 +183,10 @@ impl IrEndpoint {
     }
 }
 
-/// `child` 能否挂在 `parent` 类型的节点下。落库前的预检，与
-/// [`ResourceNodeType::may_under`] 同一个矩阵，故只有一处真相。
-///
-/// 错误消息同时点名父子两种类型：IR 的类型系统已经让「module 下挂 module」写不出来，
-/// 但落库前仍要报得出**是哪一对**冲突——真正走到这一步的是外来格式把一棵畸形树
-/// 翻译过来的情形。
+/// `child` 能否挂在 `parent` 类型的节点下。落库前的预检，与 [`ResourceNodeType::may_under`]
+/// 同一个矩阵，故只有一处真相。
+/// 错误消息同时点名父子两种类型：落库前仍要报得出**是哪一对**冲突——真正走到这一步的是外来
+/// 格式把一棵畸形树翻译过来的情形。
 pub fn may_contain(parent: ResourceNodeType, child: ResourceNodeType) -> Result<(), String> {
     if child.may_under(parent) {
         Ok(())
@@ -242,9 +231,8 @@ pub fn subtree_keys(module: &IrModule) -> BTreeSet<String> {
 
 /// 一组「本层端点 + 下层分组」里的全部端点 key。模块与集合形状相同，只是模块多一个
 /// `base_url` 字段，故共这一个走查器。
-///
-/// **显式工作栈而非递归**：IR 的 collection 嵌套深度无上限，递归会让一棵畸形外来
-/// 文件靠栈深度把预览或写路径带走。
+/// **显式工作栈而非递归**：IR 的 collection 嵌套深度无上限，递归会让一棵畸形外来文件靠栈深度
+/// 把预览或写路径带走。
 pub(crate) fn endpoint_keys_of(
     endpoints: &[IrEndpoint],
     collections: &[IrCollection],
@@ -304,13 +292,10 @@ impl Exchange {
     }
 
     /// 只留下 `selected` 里的端点，**以及通往它们的全部祖先**。
-    ///
-    /// 导出侧用：那里没有指纹可去重，勾选就是唯一的过滤。取消勾选的分组连同整棵
-    /// 子树一起消失，产物里不会留下一个空分组。
-    ///
-    /// 与 [`crate::commit`] 的裁剪**刻意**是两份：落库那份还要问指纹、并把「为什么
-    /// 少写了几个」记成诊断，这里只需要纯粹的形状裁剪。共用一份就得让不落库的路径
-    /// 也背上一个它用不到的账本。
+    /// 导出侧用：那里没有指纹可去重，勾选就是唯一的过滤。取消勾选的分组连同整棵子树一起消失，
+    /// 产物里不会留下一个空分组。
+    /// 与 [`crate::commit`] 的裁剪**刻意**是两份：落库那份还要问指纹、并把「为什么少写了几个」
+    /// 记成诊断，这里只需要纯粹的形状裁剪。共用一份就得让不落库的路径也背上一个它用不到的账本。
     pub fn retain_selected(&self, selected: &BTreeSet<String>) -> Exchange {
         let mut out = self.clone();
         out.modules.retain_mut(|m| retain_module(m, selected));

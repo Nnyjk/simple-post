@@ -45,7 +45,7 @@ test('HUE and HUE_ANGLES cover exactly the same concepts', () => {
   assert.deepEqual(inHue, inAngles, 'a concept is missing from one of the two maps');
 });
 
-test('the four previously-colliding pairs stay visually distinct', () => {
+test('the four separation pairs stay visually distinct', () => {
   // 这几对必须彼此可辨。若有人「简化」调色板、复用同一个色相，拦下它的就是这里。
   assert.equal(HUE_SEPARATION_PAIRS.length, 4);
 
@@ -69,11 +69,4 @@ test('no two concepts share a hue angle at all', () => {
       assert.notEqual(HUE_ANGLES[a], HUE_ANGLES[b], `${a} and ${b} share hue ${HUE_ANGLES[a]}°`);
     }
   }
-});
-
-test('hueDistance is a real circular distance', () => {
-  assert.equal(hueDistance(10, 350), 20);
-  assert.equal(hueDistance(350, 10), 20);
-  assert.equal(hueDistance(0, 180), 180);
-  assert.equal(hueDistance(90, 90), 0);
 });

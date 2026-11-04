@@ -20,9 +20,8 @@ import { EndpointList } from './rows/EndpointList';
 import { CollectionBranch } from './rows/CollectionBranch';
 
 // 项目内两类实体的创建对话框。两者既 `lazy()` **又**挂在 store 的 open 标志上：
-// `lazy()` 组件一被渲染就触发 import，无条件挂载会在打开项目时就把对话框基础组件
-// （以及经集合对话框的 select 牵进来的 GSAP）拉进 workspace chunk，而不是等到需要它的
-// 那次点击。接口没有对话框 —— 见 `useNewItemFlow::createEndpoint`。
+// `lazy()` 组件一被渲染就触发 import，无条件挂载会在打开项目时就把对话框基础组件拉进
+// workspace chunk。接口没有对话框 —— 见 `useNewItemFlow::createEndpoint`。
 const CreateModuleDialog = lazy(() =>
   import('@/features/create/CreateModuleDialog').then((m) => ({ default: m.CreateModuleDialog })),
 );
@@ -66,7 +65,6 @@ export function ProjectTree() {
   const activeEndpointId = useAppStore((s) => s.activeEndpointId);
   // bootstrap 的第二层。`nodes: []` 是歧义的 —— 既可能是「该项目没有模块」，也可能是
   // 「树还没到」，读成前者会让加载途中进入项目的人看到一个笃定但错误的空态。
-  // 见 `stores/bootstrap-slice.ts`。
   const nodesLoaded = useAppStore((s) => s.nodesLoaded);
   const nodesError = useAppStore((s) => s.nodesError);
   // 手动刷新树的进行中标志。`reloadWorkspace` 自己也会置它，但这里要用它转圈。
@@ -82,8 +80,8 @@ export function ProjectTree() {
   const reloadWorkspace = useAppStore((s) => s.reloadWorkspace);
   /**
    * 项目标签是否在前台？刻意写成把整个答案折叠成 **boolean** 的 selector：返回
-   * `s.openTabs.find(...)` 的 selector 每次调用都会交出新的引用，导致每次 store 写入都
-   * 重渲染整棵树。
+   * `s.openTabs.find(...)` 的 selector 每次调用都交出新引用，导致每次 store 写入都重渲染
+   * 整棵树。
    */
   const projectTabActive = useAppStore((s) => {
     if (s.activeTabId !== s.activeProjectId) return false;
@@ -208,8 +206,8 @@ export function ProjectTree() {
     moveNodes,
   });
 
-  // 拖放接线打包成一份，供树里的行统一接上。行的拖放行为全部由这一份决定 ——
-  // 三种行各写一遍接线时，改一处要改三处，漏掉一处不会报错。
+  // 拖放接线打包成一份，供树里的行统一接上。行的拖放行为全部由这一份决定 —— 三种行各写
+  // 一遍接线时，改一处要改三处，漏掉一处不会报错。
   const dragContext: DragContextValue = {
     moveNodes,
     setDataTransfer,
@@ -224,27 +222,22 @@ export function ProjectTree() {
   return (
     <aside
       // 用实色 `--card` 而非 `bg-card/30`：半透明叠加正是表面色阶要替掉的手搓透明；
-      // `--card` 现在是区别于 `--background` 的一级，面板读起来是一层而非一层薄雾，
-      // 其内部状态交给 `--overlay-hover` / `--surface-select`。
+      // `--card` 现在是区别于 `--background` 的一级，其内部状态交给 `--overlay-hover` /
+      // `--surface-select`。
       className="relative flex h-full w-64 shrink-0 flex-col border-r border-border bg-card"
       onDragEnd={handleDragEnd}
     >
-      {/* 表头 —— 项目在这里被点名，而不是渲染成一行。项目**不是**本树中的节点（它从
-          欢迎页选择器或顶栏选择器进入），故面板仍需说明自己列的是哪个项目的模块。
+      {/* 表头 —— 项目在这里被点名，而不是渲染成一行。项目**不是**本树中的节点（它从欢迎页
+          选择器或顶栏选择器进入），故面板仍需说明自己列的是哪个项目的模块。
 
-          名字是**按钮**：它打开（或重新激活）项目标签，标题因此成为进入项目自身工作区
-          的入口而非一个标签。项目不在树里，没有别的行能表示「给我看这个项目」，故关掉
-          它的标签后面板就没有回到项目卡片的路径。
+          名字是**按钮**：它打开（或重新激活）项目标签，标题因此成为进入项目自身工作区的
+          入口 —— 项目不在树里，没有别的行能表示「给我看这个项目」。
 
-          此处刻意没有「+」。项目内部唯一能创建的是模块 —— 集合和接口都需要父级，而项目
-          不归这棵树管。下面列表已独占那一个动作（「新建模块」），表头按钮既是通往单个选项
-          的第二条路径，又顺带提供三个在这里根本用不了的选项。项目在欢迎页的「新建项目」
-          卡片或顶栏选择器里创建。 */}
+          此处刻意没有「+」：项目内部唯一能创建的是模块，集合和接口都需要父级。列表已独占
+          「新建模块」那个入口，项目在欢迎页的「新建项目」卡片或顶栏选择器里创建。 */}
       <div className="flex h-9 shrink-0 items-center border-b border-border bg-card/40 px-3">
         {activeProject ? (
-          // 标题就是项目标签自己的入口。项目不是这棵树里的一行，回项目卡片的路只有标签条
-          // —— 关掉那个标签（或标签条已满）的用户就点不到任何东西。
-          //
+          // 标题就是项目标签自己的入口。项目不是这棵树里的一行，回项目卡片的路只有标签条。
           // `openTab` 是激活已有标签而非复制一个，故项目标签已开着时再点也安全；
           // `projectTabActive` 只驱动「你在这里」的填充。
           <button
@@ -272,9 +265,8 @@ export function ProjectTree() {
         ) : (
           <span className="label-caps">工作区</span>
         )}
-        {/* 刷新按钮 —— 重取一趟树、接口配置与环境。
-            用 `reloadWorkspace` 而不是 `loadWorkspace`：后者在 `nodesLoaded` 上早退，
-            树已经加载过时按它等于什么都不做。 */}
+        {/* 刷新按钮 —— 重取一趟树、接口配置与环境。用 `reloadWorkspace` 而不是
+            `loadWorkspace`：后者在 `nodesLoaded` 上早退，树已经加载过时按它等于什么都不做。 */}
         <button
           type="button"
           onClick={() => void reloadWorkspace()}
@@ -292,7 +284,6 @@ export function ProjectTree() {
         </button>
       </div>
 
-      {/* 搜索 */}
       <div className="px-2 pt-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />

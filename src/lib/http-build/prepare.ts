@@ -19,32 +19,23 @@ import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
  *
  * 操作顺序（每一步的顺序都有讲究）：
  *
- *   1. join `baseUrl` + `urlPath`——自带 scheme 的 path 优先，「自定义」的完整 URL
- *      因此不会被前缀；
- *   2. 把路径里的 `{占位符}` 换成端点自己的路径参数——它们的值先解析 `{{var}}`，
- *      再按路径段编码；
+ *   1. join `baseUrl` + `urlPath`——自带 scheme 的 path 优先，「自定义」的完整 URL 因此不会被前缀；
+ *   2. 把路径里的 `{占位符}` 换成端点自己的路径参数——它们的值先解析 `{{var}}`，再按路径段编码；
  *   3. 在 join 后的 URL 上解析 `{{var}}`，模块地址里的变量才解析得到；
  *   4. 模块地址与代理地址各再解析一趟 `{{var}}`——前缀匹配要拿解析后的文本；
  *   5. 用代理地址替换请求地址开头那段模块地址——替换的是解析之后的前缀；
  *   6. 折叠 URL path 里的重复斜杠；
- *   7. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL
- *      选 `?` 还是 `&`）；
+ *   7. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL 选 `?` 还是 `&`）；
  *   8. 追加 query 位置的 apikey；
  *   9. 构造有序 header 列表；
  *  10. 决定 body 是否包含（`mode !== 'none'` **且**原文非空），再按模式解析 body。
  *
- * multipart 的 boundary 在建 header 与 body 之前生成：Content-Type 与 body 用同一个值，
- * 两者不在同一步生成就会对不上。
+ * multipart 的 boundary 在建 header 与 body 之前生成：Content-Type 与 body 用同一个值，两者
+ * 不在同一步生成就会对不上。每个上线的字段都被模板化，body 也不例外；每个写下的 `{{var}}`
+ * 解析不到就记录。
  *
- * 每个上线的字段都被模板化，body 也不例外；每个写下的 `{{var}}` 解析不到就记录。
- *
- * body 的规则住在 `src/lib/body`：它与 Rust 的 `simple_post_core::body` 是同一套规则的
- * 两份实现（模板化按字段做还是按整段做、空键算不算、产物是文本还是字节），改动两边
- * 必须同步。
- *
- * 模块地址与代理地址各多走一趟 `{{var}}` 替换：代理地址不在 URL 里，模块地址的变量
- * 则已经由 URL 那趟解析过，但两者的**前缀匹配**都要拿解析后的文本，故各自解析一次，
- * 缺哪个变量都进同一份缺值报告。
+ * body 的规则住在 `src/lib/body`：它与 Rust 的 `simple_post_core::body` 是同一套规则的两份实现
+ * （模板化按字段做还是按整段做、空键算不算、产物是文本还是字节），改动两边必须同步。
  */
 export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const missing = createMissingTracker();
@@ -56,11 +47,11 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
 
   const joined = joinBaseUrl(input.baseUrl, input.urlPath);
 
-  // 路径参数的值在下面那趟 `{{var}}` 替换**之前**解析：路径参数的值要先编码，
-  // 编码过的 `{{var}}` 就再也认不出来了，故值里的变量在这一步就地解析。
+  // 路径参数的值在下面那趟 `{{var}}` 替换**之前**解析：路径参数的值要先编码，编码过的
+  // `{{var}}` 就再也认不出来了，故值里的变量在这一步就地解析。
   //
-  // 值里仍有没解析出来的 `{{var}}` 时，这个路径参数按「还没准备好」处理（不替换、
-  // 计入缺值）：把 `%7B%7Btoken%7D%7D` 塞进路径，用户看不出缺的是哪个变量。
+  // 值里仍有没解析出来的 `{{var}}` 时，这个路径参数按「还没准备好」处理（不替换、计入缺值）：
+  // 把 `%7B%7Btoken%7D%7D` 塞进路径，用户看不出缺的是哪个变量。
   const pathValues: Array<readonly [string, string]> = [];
   for (const name of pathPlaceholders(joined)) {
     const p = (input.pathParams ?? []).find((it) => it.enabled && it.key === name);
@@ -76,9 +67,8 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   const url = resolveVarsWithMissing(substituted.url, pool);
   missing.add(url.missing);
 
-  // 模块地址与代理地址各自再解析一趟 `{{var}}`：代理地址不在 URL 里，模块地址的
-  // 变量则已经由上面那趟解析掉了，但两者的**前缀匹配**都要拿解析后的文本，故这里
-  // 各算一次。缺掉的变量同样进缺值报告。
+  // 模块地址与代理地址各自再解析一趟 `{{var}}`：代理地址不在 URL 里，模块地址的变量则已经由
+  // 上面那趟解析掉了，但两者的**前缀匹配**都要拿解析后的文本，故这里各算一次。
   const resolvedBase = resolveVarsWithMissing(input.baseUrl, pool);
   missing.add(resolvedBase.missing);
   const resolvedProxy = resolveVarsWithMissing(input.proxy ?? '', pool);
@@ -87,9 +77,9 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
   // 代理替换放在模板替换之后：要换掉的正是解析出来的那个前缀。
   const proxied = applyProxy(resolvedBase.value, resolvedProxy.value, url.value);
 
-  // `collapseUrlSlashes` 放在替换之后、绝不之前：`{{var}}` → `/api` 才会把 `joinBaseUrl`
-  // 插入的分隔符变成 `//`，到这里真实 path 才确定。`collapseUrlSlashes` 不碰
-  // query/fragment，所以参数还能在它之后追加
+  // `collapseUrlSlashes` 放在替换之后、绝不之前：`{{var}}` → `/api` 才会把 `joinBaseUrl` 插入的
+  // 分隔符变成 `//`，到这里真实 path 才确定。`collapseUrlSlashes` 不碰 query/fragment，
+  // 所以参数还能在它之后追加
   const normalized = collapseUrlSlashes(proxied);
 
   const withParams = appendQueryString(normalized, input.params, pool, missing);
@@ -112,20 +102,20 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
     binaryCt,
   );
 
-  // `resolveBody` 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。
-  // 先模板化再判断会静默丢掉 body 只是一个解析为空串的变量的请求。
+  // `resolveBody` 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。先模板化
+  // 再判断会静默丢掉 body 只是一个解析为空串的变量的请求。
   //
-  // `form` 与 `multipart` 逐个字段模板化，`json` / `xml` / `raw` 整段模板化，
-  // `binary` 不模板化（文件字节不是模板）。
+  // `form` 与 `multipart` 逐个字段模板化，`json` / `xml` / `raw` 整段模板化，`binary` 不模板化
+  // （文件字节不是模板）。
   const resolved = resolveBody(input.body, pool);
   missing.add(resolved.missing);
 
-  // multipart 在模板化之后才装配：`content` 存的就是分片数组的 JSON 文本，
-  // 故它与其它 mode 共用同一条模板化路径
+  // multipart 在模板化之后才装配：`content` 存的就是分片数组的 JSON 文本，故它与其它 mode
+  // 共用同一条模板化路径。
   //
-  // 内容为空时**不装配**：那样会得到一个只有收尾分隔符的 body，而 Rust 侧在
-  // `resolve_body` 给出空 body 时根本不会走到装配那一步。两侧不一致时，
-  // 「空 body」在一边发出去是一条空 multipart、在另一边发出去是完全没有 body。
+  // 内容为空时**不装配**：那样会得到一个只有收尾分隔符的 body，而 Rust 侧在 `resolve_body`
+  // 给出空 body 时根本不会走到装配那一步。两侧不一致时，「空 body」在一边发出去是一条空
+  // multipart、在另一边发出去是完全没有 body。
   let body: string | null = null;
   let bodyBase64: string | null = null;
   if (resolved.text !== null || resolved.base64 !== null) {
@@ -153,11 +143,9 @@ export function prepareRequest(input: PrepareRequestInput): PreparedRequest {
 }
 
 /**
- * `BuildInput` → `PrepareRequestInput`，base URL 为空串。
- *
- * `BuildInput.url` 一向是完整 URL，所以这里的兼容适配器把它当作无 base 可 join 的
- * path；`joinBaseUrl` 在该输入上是恒等的（空 base 返回 path，自带 scheme 的 path
- * 原样返回）。
+ * `BuildInput` → `PrepareRequestInput`，base URL 为空串。`BuildInput.url` 一向是完整 URL，
+ * 故这里的兼容适配器把它当作无 base 可 join 的 path；`joinBaseUrl` 在该输入上是恒等的
+ * （空 base 返回 path，自带 scheme 的 path 原样返回）。
  */
 export function fromBuildInput(input: BuildInput): PrepareRequestInput {
   return {

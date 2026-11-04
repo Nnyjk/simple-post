@@ -9,7 +9,7 @@ use serde::{Serialize, Serializer};
 /// 所有能跨 Rust ↔ JS 边界的错误。
 ///
 /// 每个变体在线上都有一个稳定的 `code` 字符串（即 snake_case 的变体名）加一条给人看的
-/// `message`。新变体应保持 `code` 小写且跨版本稳定——前端要按它分派。
+/// `message`。新变体的 `code` 要小写且跨版本稳定——前端要按它分派。
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     /// 资源查找没有结果（如对不存在的 id 调 `db::projects::get`）。渲染层映射为 404 提示。

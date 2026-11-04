@@ -6,9 +6,8 @@ use super::auth::KeyValue;
 
 /// OAuth2 授权流程（grant type）。四种的取 token 方式不同，其余字段共用。
 ///
-/// 线上是 snake_case（`authorization_code` / `client_credentials` /
-/// `password` / `implicit`）—— 与 RFC 6749 的 `grant_type` 取值同名，AI 客户端
-/// 与用户都不必再做一次心算映射。
+/// 线上是 snake_case（`authorization_code` / `client_credentials` / `password` /
+/// `implicit`）——与 RFC 6749 的 `grant_type` 取值同名。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OAuth2GrantType {
@@ -50,10 +49,8 @@ pub enum OAuth2TokenLocation {
 ///
 /// **每个字段都 `#[serde(default)]`，且刻意不做必填校验的反序列化期拒绝。**
 /// 这一行住在 `endpoint_details.auth_json` 里，库里现存的 `'{}'` 默认行与
-/// `{kind: bearer, bearer: "…"}` 都必须继续读得出来——把新变体的字段设成必填，
-/// 就是 AGENTS.md 记的「`type` → `kind` 改名后旧行读不出来」的同一类事故，
-/// 而那次是靠 bump 版本删库才摆脱的。缺字段推迟到真正发请求时按
-/// [`crate::oauth2::validate`] 报错，那时报错信息比 serde 的字段列表有用。
+/// `{kind: bearer, bearer: "…"}` 都必须继续读得出来——把新变体的字段设成必填，旧行就再也
+/// 反序列化不出来。缺字段推迟到真正发请求时按 [`crate::oauth2::validate`] 报错。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuth2Auth {

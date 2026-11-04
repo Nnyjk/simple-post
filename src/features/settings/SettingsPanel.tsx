@@ -1,23 +1,13 @@
 /**
- * SettingsPanel —— （单例）设置标签的内容。
+ * SettingsPanel —— （单例）设置标签的内容。布局：左侧一条窄栏放四个分类按钮，右侧是可滚动
+ * 的主区显示当前分区。标签本身住在工作区标签条里（kind: 'settings'，id: '__settings__'），
+ * 故本组件只是正文 —— 没有抽屉外框、没有页眉、没有关闭 X（用标签自己的 X）。
  *
- * 布局：左侧一条窄栏放四个分类按钮，右侧是可滚动的主区显示当前分区。标签本身住在
- * 工作区标签条里（kind: 'settings'，id: '__settings__'），故本组件只是正文 ——
- * 没有抽屉外框、没有页眉、没有关闭 X（用标签自己的 X）。
+ * 挂载两处，一份实现：工作区把它渲染进标签条，无项目的 `SettingsSurface` 则把同一个组件铺满
+ * 整窗供欢迎页用。这是安全的，因为下面的一切都从 store 读而非吃 props。
  *
- * 挂载两处，一份实现
- * ------------------
- * 工作区把它渲染进标签条，无项目的 `SettingsSurface` 则把同一个组件铺满整窗供欢迎页用。
- * 这是安全的，因为下面的一切都从 store 读而非吃 props：选中的分区、各分区数据，甚至
- * 哪些项目的环境在范围内。两个宿主只在这具正文外面的外框上有差别。见 `SettingsSurface.tsx`。
- *
- * 环境分区在这条链上还要再往下一层：本面板只决定显示哪个分区，该分区自己的 store 接线
- * 住在 `ProjectEnvSection`，因为*项目标签*也把它当作自己的一层挂载。两个宿主、一份分区，
- * 没有第二份「哪些环境和模块在范围内」。
- *
- * 右栏开头是一段细窄的面包屑 + 分区标题，让用户始终有「我在哪」的提示，而不必在同一屏
- * 上把栏上的标签重复两遍。每个子分区经 `SettingsCategory` 渲染自己的头，`SettingsCategory`
- * 又把行包进一层柔和的卡片外壳。
+ * 环境分区在这条链上还要再往下一层：本面板只决定显示哪个分区，该分区自己的 store 接线住在
+ * `ProjectEnvSection`，因为*项目标签*也把它当作自己的一层挂载。
  */
 
 import { useRef } from 'react';
@@ -41,10 +31,8 @@ const RAIL_ITEMS: {
   icon: React.ReactNode;
   hint: string;
   /**
-   * 栏上药丸的语义色相，使激活行的图标色调与分区头用的是同一个概念。
-   *
-   * `env` 与 `appearance` 不取色相：环境是应用的主要语境（`--primary`），外观是纯装饰，
-   * 两者都保持中性，而不是凭空发明一个没有信息收益的颜色。见 `src/lib/hue.ts`。
+   * 栏上药丸的语义色相，使激活行的图标色调与分区头用的是同一个概念。`env` 与
+   * `appearance` 不取色相：环境是应用的主要语境（`--primary`），外观是纯装饰。
    */
   concept?: HueConcept;
 }[] = [
@@ -113,12 +101,9 @@ export function SettingsPanel() {
   // 正是同一份分区。改在这里拼这些 props，就等于让那些规则有第二份副本。
   const mainRef = useRef<HTMLElement>(null);
 
-  // `activeSection` 变化时给当前分区做交叉淡入。外层包装带 `key={activeSection}`，
-  // React 因此每次切换都重挂分区，我们再把刚挂上的根节点从「淡出 + 略微下移」补间回
-  // 它的自然位置。
-  //
-  // 纯装饰：分区无论如何都会重挂，故 reduced motion 下它只是直接出现。不需要结束回调
-  // —— 补间背后没有状态，不像树的展开高度或响应面板的数字滚动。
+  // `activeSection` 变化时给当前分区做交叉淡入。外层包装带 `key={activeSection}`，React
+  // 因此每次切换都重挂分区，我们再把刚挂上的根节点从「淡出 + 略微下移」补间回它的自然位置。
+  // 纯装饰：分区无论如何都会重挂，故 reduced motion 下它只是直接出现。
   useGSAP(
     () => {
       const root = mainRef.current?.querySelector<HTMLElement>('[data-settings-section]');

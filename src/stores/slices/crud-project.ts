@@ -1,14 +1,13 @@
 /**
  * CRUD 子工厂 —— 项目。
  *
- * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
- * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
+ * `createCrudSlice` 组合的四个子工厂之一（切片级的契约——乐观 `set()` → `invokeCmd` →
+ * 快照回滚——见 `../crud-slice.ts`）。
  *
- * `deleteProject` 是本切片里跨度最大的跨切片写入：它在一次原子的 `set()` 里
- * 移除该项目的整棵子树、它的环境、按被丢弃 endpoint 作键的响应历史 / 已存示例，
- * 以及对应的工作区标签。保持单次写入是刻意的：改写成多次
- * `get().closeTab()` 式的调用会把它拆成好几次渲染，也让 IPC 失败时的
- * `set(snapshot)` 回滚到一个用户已经走过的状态。
+ * `deleteProject` 是本切片里跨度最大的跨切片写入：它在一次原子的 `set()` 里移除该项目的整棵
+ * 子树、它的环境、按被丢弃 endpoint 作键的响应历史 / 已存示例，以及对应的工作区标签。保持
+ * 单次写入是刻意的：改写成多次 `get().closeTab()` 式的调用会把它拆成好几次渲染，也让 IPC
+ * 失败时的 `set(snapshot)` 回滚到一个用户已经走过的状态。
  */
 import type { StateCreator } from 'zustand';
 import type { Project, Environment, ResourceNode } from '@/types/domain';
@@ -39,15 +38,13 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         opts: opts ?? null,
       });
       set((s) => ({ projects: [...s.projects, project] }));
-      // 新项目会带一个默认环境**和**一个默认 module（见
-      // `db::projects::create_with_defaults`）。两者都要在这里补拉一次：bootstrap 期间
-      // 第二层已经跑过，`openProject` 的 `loadWorkspace` 会提前返回，所以不补这两步的话，
-      // 环境切换器会显示"—"而 `{{var}}` 无从解析，树会对一个明明有
-      // module 的项目显示「该项目还没有模块」——而且一直持续到应用重启。
+      // 新项目会带一个默认环境**和**一个默认 module（见 `db::projects::create_with_defaults`）。
+      // 两者都要在这里补拉一次：bootstrap 期间第二层已经跑过，`openProject` 的
+      // `loadWorkspace` 会提前返回，故不补这两步的话，环境切换器会显示「—」而 `{{var}}` 无从
+      // 解析，树会对一个明明有 module 的项目显示「该项目还没有模块」。
       //
-      // 两者都是不带过滤的整表读取（所有项目的环境、所有项目的节点），也正是
-      // store 已经持有的内容——所以是替换而不是合并。module 没有
-      // `endpoint_details` 行，这里 detail 映射无需处理。
+      // 两者都是不带过滤的整表读取（所有项目的环境、所有项目的节点），也正是 store 已经持有的
+      // 内容——故是替换而不是合并。module 没有 `endpoint_details` 行，这里 detail 映射无需处理。
       try {
         const environments = await invokeCmd<Environment[]>(COMMANDS.environmentsList);
         set({ environments });
@@ -105,8 +102,8 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       activeEndpointId: get().activeEndpointId,
     };
     set((s) => {
-      // `rootId` 被反规范化到每个节点身上，正是为了让"什么属于这个项目"变成一次
-      // 过滤，而不必沿 module → collection → endpoint 一路向下走。
+      // `rootId` 被反规范化到每个节点身上，正是为了让「什么属于这个项目」变成一次过滤，而
+      // 不必沿 module → collection → endpoint 一路向下走。
       const removed = new Set(s.nodes.filter((n) => n.rootId === id).map((n) => n.id));
       const droppedEndpointIds = s.nodes
         .filter((n) => n.kind === 'endpoint' && removed.has(n.id))
@@ -119,8 +116,8 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       }
       const nextDetails = { ...s.endpointDetails };
       for (const eid of droppedEndpointIds) delete nextDetails[eid];
-      // 项目没了，它下面那些接口的标签（连同挂在标签上的响应）也就没了。这条路径
-      // 不走 `closeTab`，故响应在这里单独带走——理由同 `crud-tree.ts`。
+      // 项目没了，它下面那些接口的标签（连同挂在标签上的响应）也就没了。这条路径不走
+      // `closeTab`，故响应在这里单独带走——理由同 `crud-tree.ts`。
       const nextResponses = { ...s.lastResponses };
       for (const eid of droppedEndpointIds) delete nextResponses[eid];
       const nextEnvs = s.environments.filter((env) => env.projectId !== id);
@@ -133,22 +130,20 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
         s.activeEndpointId && removed.has(s.activeEndpointId) ? null : s.activeEndpointId;
       // 删掉在前面的项目时，把用户送到幸存的那个；它是最后一个时回欢迎页。
       //
-      // 空串是切表面的开关（`App.tsx` 在 `activeProjectId === ''` 时渲染欢迎
-      // 选择器，而欢迎页的"新建项目"卡片提供空状态下的入口）。把 `activeProjectId`
-      // 留在刚删掉的 id 上会让 `App.tsx` 待在工作区分支里对着一个不存在的
-      // 项目：树显示"尚未选择项目"，右侧显示"该项目已不存在"，整个画面没有一处
-      // 说明该怎么办。
+      // 空串是切表面的开关（`App.tsx` 在 `activeProjectId === ''` 时渲染欢迎选择器，而欢迎页的
+      // 「新建项目」卡片提供空状态下的入口）。把 `activeProjectId` 留在刚删掉的 id 上会让
+      // `App.tsx` 待在工作区分支里对着一个不存在的项目：树显示「尚未选择项目」，右侧显示
+      // 「该项目已不存在」，整个画面没有一处说明该怎么办。
       const nextActiveProjectId =
         s.activeProjectId === id
           ? (s.projects.find((p) => p.id !== id)?.id ?? '')
           : s.activeProjectId;
-      // 当前环境要跟着换项目一起换：它原先指着刚删掉的项目里的某个环境，那个环境
-      // 随项目一起没了。
+      // 当前环境要跟着换项目一起换：它原先指着刚删掉的项目里的某个环境，那个环境随项目一起没了。
       //
-      // 不换的后果有两处，都很实在：`useActiveEnvironment()` 按 id 找环境，找不到就
-      // 返回 undefined，于是顶栏显示「—」、接口解析读不到任何一格地址；而记住当前
-      // 环境的那条订阅（见 `app-store.ts`）会因为 `activeProjectId` 变了而触发，把
-      // 这个悬空 id 写进**幸存项目**的记忆里，把幸存项目自己记住的环境顶掉。
+      // 不换的后果有两处，都很实在：`useActiveEnvironment()` 按 id 找环境，找不到就返回 undefined，
+      // 于是顶栏显示「—」、接口解析读不到任何一格地址；而记住当前环境的那条订阅（见
+      // `app-store.ts`）会因为 `activeProjectId` 变了而触发，把这个悬空 id 写进**幸存项目**的
+      // 记忆里，把幸存项目自己记住的环境顶掉。
       //
       // 取值顺序与别处一致：幸存项目里本客户端记住的那个 → 它的默认环境。
       const nextActiveEnvironmentId =
@@ -179,8 +174,8 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
       () => invokeCmd<void>(COMMANDS.projectsDelete, { id }),
       () => set(snapshot),
     );
-    // 项目真的没了，它记住的那个环境也该被忘掉 —— 否则 `currentEnvByProject` 里
-    // 一直留着一条指向已删项目的记录。
+    // 项目真的没了，它记住的那个环境也该被忘掉——否则 `currentEnvByProject` 里一直留着一条指向
+    // 已删项目的记录。
     //
     // 只在删除成功时清：失败时项目还在，那条记忆还得有用（回滚后要停在原处）。
     if (deleted) saveRememberedEnvironmentId(id, '');

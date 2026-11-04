@@ -7,10 +7,9 @@ use serde::{Deserialize, Serialize};
 /// 逐项目的 MCP 权限。`Read < ReadCall < Full`；序关系本身在
 /// [`crate::permissions::permission_at_least`]。
 ///
-/// 用 `snake_case` 而非 `lowercase`：后者把 `ReadCall` 映射成 `"readcall"`，一个既不匹配
-/// [`Self::as_str`]（`db::permissions` 写的、`parse` 读的），也不匹配 `agent_permissions`
-/// 的 CHECK 约束、更不匹配 TypeScript 侧 `AgentPermission` 联合类型的第三种拼法。
-/// `snake_case` 让四处一致，且与其兄弟 [`crate::permissions::CapabilityPolicy`] 相同。
+/// 用 `snake_case` 而非 `lowercase`：后者把 `ReadCall` 映射成 `"readcall"`，既不匹配
+/// [`Self::as_str`]（`db::permissions` 写的、`parse` 读的），也不匹配 `agent_permissions` 的
+/// CHECK 约束与 TypeScript 侧 `AgentPermission` 联合类型。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
@@ -43,30 +42,26 @@ impl Permission {
 
 /// HTTPS 出站的一组开关与证书位置。
 ///
-/// **证书只存文件路径，不存内容。** 私钥一旦进库，`GET /api/preferences` 会把整行原样
-/// 返回（Web 形态下那是给任何持有 bearer 口令的客户端看的），而 SQLite 文件本身也是一份
-/// 用户没预期的备份。路径则随时可以被删掉或换掉，这是可接受的。
+/// **证书只存文件路径，不存内容。** 私钥一旦进库，`GET /api/preferences` 会把整行原样返回
+/// （Web 形态下那是给任何持有 bearer 口令的客户端看的）。
 ///
-/// 路径由**运行请求的那台机器**解析：桌面端是本机路径，serve-web / Docker 端是服务端容器
-/// 里的路径，故 Web 形态下运维需要把证书挂进容器才能用。
+/// 路径由**运行请求的那台机器**解析：桌面端是本机路径，serve-web / Docker 端是服务端容器里的
+/// 路径，故 Web 形态下运维需要把证书挂进容器才能用。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TlsSettings {
     /// 跳过服务端证书校验，主机名一并跳过。
     ///
-    /// 关闭时服务端证书的过期、自签名、签发者一律不查，故这条请求会被任何一个中间人
-    /// 截获与改写。默认值是 `false`——**只有用户明确打开才生效**。
+    /// 关闭时服务端证书的过期、自签名、签发者一律不查，这条请求会被任何一个中间人截获与改写。
+    /// 默认值是 `false`——**只有用户明确打开才生效**。
     pub skip_verify: bool,
-    /// 自定义 CA 证书的 PEM 文件路径。空 = 用 `reqwest` 内置的公共根证书集。
-    ///
-    /// 一个 PEM 文件里可以含多张证书（bundle），`reqwest` 会把它们逐张加进信任链。
+    /// 自定义 CA 证书的 PEM 文件路径。空 = 用 `reqwest` 内置的公共根证书集。一个 PEM 文件里
+    /// 可以含多张证书（bundle），`reqwest` 会把它们逐张加进信任链。
     pub ca_certificate_path: Option<String>,
     /// 客户端证书的 PEM 文件路径（mTLS）。空 = 不挂客户端证书。
     pub client_certificate_path: Option<String>,
     /// 客户端私钥的 PEM 文件路径。空 = 从 `client_certificate_path` 指向的文件里一起读。
-    ///
-    /// 单独给私钥路径而无证书路径是非法组合：客户端证书要连着私钥一起出示，只有私钥
-    /// 发不出去。
+    /// 单独给私钥路径而无证书路径是非法组合：客户端证书要连着私钥一起出示。
     pub client_key_path: Option<String>,
 }
 
@@ -89,13 +84,11 @@ impl TlsSettings {
 
     /// 校验这三个路径字段：它们必须真的是路径，不能是粘进来的证书正文。
     ///
-    /// 类型层面已经挡住了应用自己写证书内容（这三个字段只有路径），但挡不住**用户**把
-    /// 私钥正文粘进「客户端私钥」那个输入框 —— 那段文本会原样落进
-    /// `preferences` 的 `request_settings` 行或 `endpoint_details.tls_json`，而
-    /// `GET /api/preferences` 把整行原样返回。这正是「证书只存路径，不存内容」要防的
-    /// 暴露面，故在这里把那条口子堵上。
+    /// 类型层面挡住了应用自己写证书内容（这三个字段只有路径），但挡不住**用户**把私钥正文粘进
+    /// 「客户端私钥」那个输入框——那段文本会原样落进 `preferences` 的 `request_settings` 行或
+    /// `endpoint_details.tls_json`，而 `GET /api/preferences` 把整行原样返回。
     ///
-    /// 判据：值里出现 PEM 的区块标记，或出现换行 —— 路径两者都不会有。
+    /// 判据：值里出现 PEM 的区块标记，或出现换行——路径两者都不会有。
     pub fn validate(&self) -> Result<(), crate::error::AppError> {
         for (label, value) in [
             ("自定义 CA 证书", &self.ca_certificate_path),
@@ -127,11 +120,9 @@ impl TlsSettings {
 
 /// 出站请求旋钮。单例，作为 JSON blob 存在 `preferences` KV 表里，而非自成一表。
 ///
-/// 容器级 `#[serde(default)]` 的分量在**读**侧而非写侧：存下的 blob 是某个更早构建写的，
-/// 故此日新增第四个字段时，每个既有安装的行都能缺它反序列化——否则
-/// `request_settings_get` 会让它们全部失败。代价落在写侧：`PUT /api/request_settings`
-/// 是整体替换，缺字段的请求体会把该字段重置为默认值而不是被拒。对一个默认值写在
-/// [`Default`] 上的设置单例，这更有用；该路由自己的注释也这么写。
+/// 容器级 `#[serde(default)]` 的分量在**读**侧而非写侧：存下的 blob 可能缺后来新增的字段，
+/// 故每个既有安装的行都能缺它反序列化——否则 `request_settings_get` 会让它们全部失败。
+/// 代价落在写侧：`PUT /api/request_settings` 是整体替换，缺字段的请求体会把该字段重置为默认值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RequestSettings {
@@ -158,17 +149,13 @@ impl Default for RequestSettings {
 /// MCP HTTP 守护进程监听在哪、应答谁。
 ///
 /// 设置单例，作为 JSON blob 存在 `preferences` 的
-/// [`crate::db::preferences::keys::MCP_HTTP_CONFIG`] 之下——与所有其他结构化设置同属
-/// 「preferences 袋子装 JSON 值」这条规则。
-///
-/// 容器级 `#[serde(default)]` 的分量在**读**侧，理由同 [`RequestSettings`]：存下的 blob 是
-/// 更早构建写的，后来新增的字段不能让每个既有安装的行解析失败。代价落在写侧——缺字段会
-/// 把该字段重置为默认值而不是被拒——对设置单例而言这更有用。
+/// [`crate::db::preferences::keys::MCP_HTTP_CONFIG`] 之下。容器级 `#[serde(default)]` 的分量在
+/// **读**侧，理由同 [`RequestSettings`]。
 ///
 /// 与安全相关的是 `allow_remote` 加那两张允许表，且它们**结构上 fail-closed**：默认值
 /// （`allow_remote: false`，两表皆空）只接受 loopback `Host`，且完全不接受任何 `Origin`。
-/// `validate` 拒绝唯一那个自相矛盾的组合——非 loopback 绑定却不开远程访问，那会监听在
-/// 局域网上而守卫挡掉所有真正从那里到达的请求。
+/// `validate` 拒绝唯一那个自相矛盾的组合——非 loopback 绑定却不开远程访问，那会监听在局域网上
+/// 而守卫挡掉所有真正从那里到达的请求。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct McpHttpConfig {

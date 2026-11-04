@@ -120,8 +120,7 @@ pub struct EnvWrite {
 
 /// 脚本执行时看到的环境快照。
 ///
-/// `id` 决定 `pm.environment.set` 往哪写；`None` 表示没有环境，那种写入会被丢弃
-/// 并记一条警告——无处可写时静默丢弃比报错更让人困惑。
+/// `id` 决定 `pm.environment.set` 往哪写；`None` 表示没有环境，那种写入被丢弃并记一条警告。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvSnapshot {

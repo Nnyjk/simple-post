@@ -54,11 +54,9 @@ pub struct JsonRpcError {
 /// `tools/call` 放在 `result` 里的形状，对应 MCP 的 `CallToolResult`
 /// （子集：目前只发 text content）。
 ///
-/// `rename_all = "camelCase"` 是硬约束，不是风格：spec 里失败标志叫 `isError`，
-/// 原样序列化 Rust 字段名会被合规客户端整个忽略，于是 LLM 把失败的调用读成成功。
-/// 本结构是 `tools/call` result 的唯一塑形来源，所以属性就是全部修复手段。
-/// 下面 `CallToolContent` 的 `rename_all = "snake_case"` 与此无关 —— 它管的是
-/// `type` **标签**，而该标签只有 `text` 一个变体。
+/// `rename_all = "camelCase"` 是硬约束，不是风格：spec 里失败标志叫 `isError`，原样序列化
+/// Rust 字段名会被合规客户端整个忽略，于是 LLM 把失败的调用读成成功。本结构是 `tools/call`
+/// result 的唯一塑形来源，所以属性就是全部修复手段。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
@@ -109,9 +107,8 @@ impl CallToolResult {
 /// 已注册工具的静态描述 —— 名称、说明、`arguments` 的 JSON Schema，`tools/list` 返回。
 ///
 /// `rename_all = "camelCase"` 是硬约束：spec 把这个字段写作 `inputSchema`，发出
-/// `input_schema` 会让每个合规客户端都认定该工具没有参数，模型只能从描述文字里
-/// 猜参数列表。本 crate 从不回读 descriptor（`Deserialize` 未使用），所以只有
-/// 断言序列化结果才拦得住 —— 见 `mod_test.rs`。
+/// `input_schema` 会让每个合规客户端都认定该工具没有参数，模型只能从描述文字里猜参数列表。
+/// 本 crate 从不回读 descriptor（`Deserialize` 未使用），所以只有断言序列化结果才拦得住。
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDescriptor {
@@ -124,8 +121,8 @@ pub struct ToolDescriptor {
 /// `Value::Null`），缺失/类型不对的字段由 handler 自己归一成
 /// `AppError::Validation`。
 ///
-/// `'a` 这个 HRTB 把返回 future 的生命周期绑到 `&AppState` 的借用上；去掉它，
-/// boxed `dyn Future` 会退回 `'static`，`&AppState` 借用就过不了编译。
+/// `'a` 这个 HRTB 把返回 future 的生命周期绑到 `&AppState` 的借用上；去掉它，boxed `dyn
+/// Future` 会退回 `'static`，`&AppState` 借用就过不了编译。
 pub type ToolFn = for<'a> fn(
     state: &'a AppState,
     args: Value,

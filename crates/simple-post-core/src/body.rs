@@ -12,20 +12,19 @@
 //! | `multipart` | 分片数组的 JSON 文本 | 字节 |
 //! | `binary` | 文件描述的 JSON 文本 | 字节（文件本身） |
 //!
-//! `form` 与 `multipart` 是**结构化**的：它们的 `content` 是一段 JSON 文本，描述的是
-//! 一行一行 / 一个一个分片，而不是拼好的正文。结构化带来两样东西：界面上的表格有地方
-//! 放说明，文件分片有地方放字节。
+//! `form` 与 `multipart` 是**结构化**的：它们的 `content` 是一段 JSON 文本，描述的是一行一行 /
+//! 一个一个分片，而不是拼好的正文。故界面上的表格有地方放说明，文件分片有地方放字节。
 //!
 //! ## 模板化按字段做，不按整段做
 //!
-//! `json` / `xml` / `raw` 整段替换；`form` 与 `multipart` **逐个字段**替换。整段替换在
-//! 结构化形态上是错的：替换出来的值里带一个引号就会把那段 JSON 文本弄坏，于是整份内容
-//! 解析不出来，请求发出去的是一个空 body。
+//! `json` / `xml` / `raw` 整段替换；`form` 与 `multipart` **逐个字段**替换。整段替换在结构化
+//! 形态上是错的：替换出来的值里带一个引号就会把那段 JSON 文本弄坏，于是整份内容解析不出来，
+//! 请求发出去的是一个空 body。
 //!
 //! ## 产物的两种形态
 //!
-//! 产物是**文本**还是**二进制**，由字节决定：字节是合法 UTF-8 就走文本形态，否则走
-//! base64 形态。`binary` 模式一律走二进制形态——用户选的是文件，发的是它的字节。
+//! 产物是**文本**还是**二进制**，由字节决定：字节是合法 UTF-8 就走文本形态，否则走 base64 形态。
+//! `binary` 模式一律走二进制形态——用户选的是文件，发的是它的字节。
 //!
 //! 渲染进程侧有同一套规则（`src/lib/body/`），两边由 `fixtures/body-parity.json` 钉住。
 
@@ -170,18 +169,12 @@ fn resolve_binary_body(content: &str) -> ResolvedBody {
 
 /// `form` 模式的内容 → 行。
 ///
-/// 内容是行数组的 JSON 文本。**解析不出来时给空数组**，不报错：这是一个纯函数，两条发送
-/// 路径在这一点上必须同形。
-///
-/// 任一行的字段类型不对就整份作废，与 multipart 分片的规则一致：逐行各自取值会让同一个
-/// 畸形输入在两侧得到不同的正文。
-///
-/// **不是行数组时按旧格式读**：早期版本的 `form` 模式存的是一个拼好的 urlencoded 串
-/// （Postman 导入器至今还那么写）。那份内容不该被当成空表单——那等于把用户已经写好的
-/// 字段悄悄丢掉。
-///
-/// 「是数组但有一行不对」与「不是数组」是两种不同的情况，故分成两步判：前者整份作废，
-/// 后者按旧格式读。
+/// - 内容是行数组的 JSON 文本；**解析不出来时给空数组**，不报错——这是一个纯函数，两条发送
+///   路径在这一点上必须同形。
+/// - 任一行的字段类型不对就整份作废，与 multipart 分片的规则一致：逐行各自取值会让同一个畸形
+///   输入在两侧得到不同的正文。
+/// - **不是行数组时按旧格式读**（见 [`parse_legacy_form_fields`]）：拼好的 urlencoded 串不是空
+///   表单，按空表单读会把用户已经写好的字段悄悄丢掉。
 pub fn parse_form_fields(content: &str) -> Vec<FormField> {
     match serde_json::from_str::<serde_json::Value>(content) {
         Ok(serde_json::Value::Array(_)) => {
@@ -231,9 +224,7 @@ pub fn serialize_form_fields(fields: &[FormField]) -> String {
 /// `multipart` 模式的内容 → 分片。
 ///
 /// **解析不出来时给空数组**，不报错——与渲染进程侧 `src/lib/multipart.ts` 的
-/// `parseMultipartParts` 同一条规则。
-///
-/// 任一分片的字段类型不对就整份作废，与 serde 反序列化失败后丢弃整份一致。
+/// `parseMultipartParts` 同一条规则。任一分片的字段类型不对就整份作废。
 pub fn parse_multipart_parts(content: &str) -> Vec<MultipartPart> {
     serde_json::from_str::<Vec<MultipartPart>>(content).unwrap_or_default()
 }

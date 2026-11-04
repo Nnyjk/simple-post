@@ -4,9 +4,7 @@ import type { Environment, HttpMethod, StoredRequestSnapshot } from '@/types/dom
 import type { EffectiveRequest } from './effectiveRequest';
 
 /**
- * 组装这一次要发出的请求。
- *
- * 发送前若动态变量解析出了新的值，调用方用新值再组装一次。
+ * 组装这一次要发出的请求。发送前若动态变量解析出了新的值，调用方用新值再组装一次。
  *
  * `proxy` 是环境里本模块那一格的实际访问地址；它替换请求地址开头那段模块地址。
  */
@@ -35,14 +33,11 @@ export function buildRequestInput(
 }
 
 /**
- * 把一次发送出去的请求折成可落库的快照。
+ * 把一次发送出去的请求折成可落库的快照。收的是 `sendPreparedRequest` 返回的 `outbound`，
+ * 不是预览那份：线上真正发出去的请求在 OAuth2 那一档多一个注入的 token。
  *
- * 收的是 `sendPreparedRequest` 返回的 `outbound`，不是预览那份：线上真正发出去的
- * 请求在 OAuth2 那一档多一个注入的 token，存预览那份会让历史行少显示那个凭据。
- *
- * `wireHeaders` 是后端报上来的**线上那一份**请求头（含传输层补的 `accept` /
- * `accept-encoding` / `host` / `content-length`）。缺席时回落到本地拼出来的那几条：
- * 请求从未抵达时（超时、网络错误）后端报不上来，但界面上拼的那份仍然成立。
+ * `wireHeaders` 是后端报上来的**线上那一份**请求头（含传输层补的 `accept` / `host` /
+ * `content-length`）。缺席时回落到本地拼出来的那几条：请求从未抵达时后端报不上来。
  */
 export function toRequestSnapshot(
   request: PreparedRequest,

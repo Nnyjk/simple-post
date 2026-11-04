@@ -28,10 +28,8 @@ pub struct TransformOutcome {
     pub failure: Option<ScriptFailure>,
 }
 
-/// 跑一段处理脚本，取回它 `return` 的值。
-///
-/// **放到阻塞线程上**：引擎是同步且 CPU 密集的，在异步 worker 上跑会卡住整个运行时
-/// （与 `send_with_scripts` 里的脚本链同一条纪律）。
+/// 跑一段处理脚本，取回它 `return` 的值。**放到阻塞线程上**：引擎是同步且 CPU 密集的，在异步
+/// worker 上跑会卡住整个运行时。
 pub async fn run_transform(
     script: &str,
     data: Json,

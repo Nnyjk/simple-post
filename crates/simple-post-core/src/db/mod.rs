@@ -35,10 +35,8 @@ mod schema;
 pub use pool::{init, ping, with_conn, with_tx, DbPool};
 pub use schema::migrate;
 
-/// CRUD 函数收的连接类型。**再导出而非让调用方各自依赖 `rusqlite`**：编排层
-/// （`simple-post-server`、`simple-post-interchange`）要写一个自己的私有取数函数时，
-/// 它需要能写出 `&mut Connection` 的签名，又不该为此在 Cargo.toml 里加一条 rusqlite——
-/// 那会让「转换层依赖了持久化实现」这件事在依赖图上变成真的。
+/// CRUD 函数收的连接类型。**再导出而非让调用方各自依赖 `rusqlite`**：编排层要写出
+/// `&mut Connection` 的签名，又不该为此在 Cargo.toml 里加一条 rusqlite。
 pub use rusqlite::Connection;
 
 // 仅测试。整个模块是 `#[cfg(test)]`，只编进 `cargo test`，别处不存在。
@@ -51,12 +49,10 @@ pub(crate) mod test_support;
 
 /// 本构建读写的布局，由 `schema.sql` 末尾写入 `PRAGMA user_version`。
 ///
-/// **仅当旧版本文件无法满足新形状时才可 bump**（删列/改名、一表拆多表）。纯增量的
-/// 改动（新表、可空新列）不需要：`CREATE TABLE IF NOT EXISTS` 已覆盖，缺列靠
-/// `db::schema` 的 `ADDED_COLUMNS` 补。
-///
-/// 改 `domain.rs` 里 auth 的字段名同样要 bump：`auth_json` 存的是 serde 原样输出，
-/// 改名后旧行反序列化不出来，文件即不可读。
+/// **仅当旧版本文件无法满足新形状时才可 bump**（删列/改名、一表拆多表）。纯增量的改动
+/// （新表、可空新列）不需要：`CREATE TABLE IF NOT EXISTS` 已覆盖，缺列靠 `db::schema` 的
+/// `ADDED_COLUMNS` 补。改 `domain.rs` 里 auth 的字段名同样要 bump：`auth_json` 存的是
+/// serde 原样输出，改名后旧行反序列化不出来。
 ///
 /// 版本号历史写在 `schema.sql` 末尾，改动请同步。
 pub const SCHEMA_VERSION: i64 = 5;
@@ -75,6 +71,13 @@ impl std::fmt::Display for JsonColError {
 }
 
 impl std::error::Error for JsonColError {}
+
+/// 把一个可序列化值装成 JSON-in-TEXT 列的值。所有把结构化数据放 TEXT 列的模块共用。
+pub(crate) fn json_col<T: serde::Serialize>(
+    value: &T,
+) -> Result<rusqlite::types::Value, crate::error::AppError> {
+    Ok(rusqlite::types::Value::Text(serde_json::to_string(value)?))
+}
 
 /// 把 JSON 列的 serde 失败映射成 rusqlite 转换错误并带上列名——调用方能看出是哪一列坏了，
 /// 而不是面对一个不透明的解码失败。所有把结构化数据放 TEXT 列的模块共用。

@@ -1,8 +1,7 @@
 /**
  * 导入 / 导出的线类型。与 `crates/simple-post-server/src/dto.rs` 里那几个结构体一一对应。
  *
- * **导入与导出共用同一棵 `TransferNode` 树**：勾选弹窗只有一个组件，一份类型才叫共用；
- * 两套形状在组件里各写一半再凑合渲染，那种「共用」只是文件名上的共用。
+ * **导入与导出共用同一棵 `TransferNode` 树**：勾选弹窗只有一个组件，一份类型才叫共用。
  */
 import type { AuthType, BodyMode } from '@/types/domain';
 

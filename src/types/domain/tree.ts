@@ -18,14 +18,11 @@ export type ResourceNodeType = 'module' | 'collection' | 'endpoint';
 export interface ResourceNode {
   id: string;
   /**
-   * 归属项目，冗余写在每个节点上：一次索引读即可回答"属于哪个项目"，
-   * 既是 store 的项目过滤条件，也是后端按项目鉴权的 key。
+   * 归属项目，冗余写在每个节点上：一次索引读即可回答「属于哪个项目」，既是 store 的项目过滤
+   * 条件，也是后端按项目鉴权的 key。
    */
   rootId: string;
-  /**
-   * 直接父节点；module 的父级是项目，故为 `null`。其他组合
-   * `db::nodes::move_many` 会拒绝。
-   */
+  /** 直接父节点；module 的父级是项目，故为 `null`。其他组合 `db::nodes::move_many` 会拒绝。 */
   parentId: string | null;
   /** 命名 `kind` 因为 `type` 是 Rust 关键字；不用 serde `rename` 绕，理由同 `AuthConfig.kind`。 */
   kind: ResourceNodeType;
@@ -42,8 +39,8 @@ export interface ResourceNode {
 /**
  * endpoint 的请求配置，按 node id 单独一行。
  *
- * 从 `ResourceNode` 拆出：method / url / tags 对 module 无意义。树只渲染
- * name / kind / sortOrder，读树不碰这张表。
+ * 从 `ResourceNode` 拆出：method / url / tags 对 module 无意义。树只渲染 name / kind /
+ * sortOrder，读树不碰这张表。
  */
 export interface EndpointDetail {
   nodeId: string;
@@ -55,8 +52,8 @@ export interface EndpointDetail {
    */
   url: string;
   /**
-   * 本 endpoint 的 baseUrl 覆盖，优先于模块那一格；用于不挂在任何环境里的一次性
-   * 主机。三态：`null` = 不在自定义模式，`''` = 自定义模式但不加前缀。
+   * 本 endpoint 的 baseUrl 覆盖，优先于模块那一格；用于不挂在任何环境里的一次性主机。三态：
+   * `null` = 不在自定义模式，`''` = 自定义模式但不加前缀。
    *
    * 覆盖生效时模块地址与代理都不参与，故这一项是这一整套地址解析的唯一出口。
    */
@@ -65,9 +62,8 @@ export interface EndpointDetail {
   /**
    * URL 路径里的占位符（`/users/{id}` 的 `id`）与它们各自的值。
    *
-   * 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，
-   * 路径参数要被替换进路径本身。混在一份列表里，改一个占位符的名字会静默
-   * 改变一个参数的归属。
+   * 与 `params` 分开存，因为两者进的地方不同：`params` 一律进查询串，路径参数要被替换进
+   * 路径本身。混在一份列表里，改一个占位符的名字会静默改变一个参数的归属。
    */
   pathParams?: KeyValue[];
   headers: KeyValue[];
@@ -80,18 +76,17 @@ export interface EndpointDetail {
   /**
    * 请求发出之前跑的那段脚本。`null`（或缺省）= 没有脚本。
    *
-   * 与 body / headers 同级：它们都是这个端点自己的请求配置。collection 的脚本在
-   * `NodeScripts` 里。
+   * 与 body / headers 同级：它们都是这个端点自己的请求配置。collection 的脚本在 `NodeScripts`
+   * 里。
    */
   preRequestScript?: string | null;
   /** 响应回来之后跑的那段脚本。`null`（或缺省）= 没有脚本。 */
   testScript?: string | null;
   /**
-   * 该端点自己的 HTTPS 出站设置。`null`（或缺省）= 继承全局默认
-   * （`RequestSettings.tls`）。
+   * 该端点自己的 HTTPS 出站设置。`null`（或缺省）= 继承全局默认（`RequestSettings.tls`）。
    *
-   * 端点给了设置就**整体**取代全局那份，不是逐字段合并，故这一个字段足以表达
-   * 「这个接口用另一套证书」。
+   * 端点给了设置就**整体**取代全局那份，不是逐字段合并，故这一个字段足以表达「这个接口用
+   * 另一套证书」。
    */
   tls?: TlsSettings | null;
 }

@@ -13,9 +13,8 @@ use crate::error::AppError;
 
 /// 读一个节点的脚本。
 ///
-/// **没有行不是错误**：没配过脚本是正常状态，于是返回一份全空的 `NodeScripts`。
-/// 这一点与 `endpoint_details` 相反——那里「节点存在却没有 detail 行」意味着两张表
-/// 不一致，值得暴露出来。
+/// **没有行不是错误**：没配过脚本是正常状态，于是返回一份全空的 `NodeScripts`。这一点与
+/// `endpoint_details` 相反——那里「节点存在却没有 detail 行」意味着两张表不一致。
 pub fn get(conn: &mut Connection, node_id: &str) -> Result<NodeScripts, AppError> {
     let sql =
         "SELECT node_id, pre_request_script, test_script FROM node_scripts WHERE node_id = ?1";
@@ -96,10 +95,8 @@ fn empty(node_id: &str) -> NodeScripts {
 
 /// 一个项目里所有集合的脚本。
 ///
-/// **一次读回整棵树的脚本**，与 [`super::endpoint_details::list_by_root`] 同一条纪律：
-/// 导出是一次投影，逐节点发查询会让一棵大树变成 N 次往返。
-///
-/// 只有**有脚本**的节点在结果里——没配过脚本是正常状态，不该占一行。
+/// **一次读回整棵树的脚本**，与 [`super::endpoint_details::list_by_root`] 同一条纪律：逐节点
+/// 发查询会让一棵大树变成 N 次往返。只有**有脚本**的节点在结果里。
 pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<NodeScripts>, AppError> {
     let sql = "SELECT s.node_id, s.pre_request_script, s.test_script \
                FROM node_scripts s \

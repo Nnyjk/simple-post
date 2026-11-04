@@ -1,8 +1,7 @@
 //! 导入 / 导出的编排层：**两条 transport 共用的那一份**。
 //!
-//! 住在本 crate 而不是 Tauri command 里，是 AGENTS.md 的 dual-transport invariant 的
-//! 直接后果：逻辑写在某一侧，另一侧就会静默地少一半。Tauri command 与 REST handler
-//! 都只调这里。
+//! 住在本 crate 而不是 Tauri command 里，是 dual-transport invariant 的直接后果：逻辑写在
+//! 某一侧，另一侧就会静默地少一半。Tauri command 与 REST handler 都只调这里。
 //!
 //! 四件事，每件都只做一次：
 //!
@@ -33,23 +32,18 @@ use crate::dto::{
     ModuleBaseUrlDto, ProposedBaseUrlDto, TransferCounts, TransferEndpoint, TransferNode,
 };
 
-/// 拉 OpenAPI / Postman 文档时的大小上限。
-///
-/// **必须显式给。** [`HttpRequestInput::max_response_size_kb`] 由调用方给，
-/// 不给就是 0——而 [`http_executor`] 会把超限的响应**截断**后照样返回一个 200。
-/// 一份 3 MB 的 OpenAPI yaml 于是变成一个尾部带着截断标记、解析必然失败的文档，
-/// 而错误信息只会说「JSON 解析失败」，看不出真正的原因是「被我们自己砍了」。
+/// 拉 OpenAPI / Postman 文档时的大小上限。**必须显式给**：[`HttpRequestInput::max_response_size_kb`]
+/// 由调用方给，不给就是 0——而 [`http_executor`] 会把超限的响应**截断**后照样返回一个 200，
+/// 于是错误信息只说「JSON 解析失败」，看不出真正的原因是「被我们自己砍了」。
 const FETCH_MAX_KB: u64 = 8 * 1024;
 
 /// 这四个端点的 HTTP 请求体上限，与 [`FETCH_MAX_KB`] 挨着放，因为两者讲的是同一件事。
 ///
-/// **不给就是 axum 的 2 MB 默认值**，而导入导出恰恰是唯一一类「请求体装着整份文档」的动词。
+/// **不给就是 axum 的 2 MB 默认值**，而导入导出恰恰是唯一一类「请求体装着整份文档」的动词：
 /// 那时超限回的是 `413 Failed to buffer the request body`，用户看到的是传输层错误而不是
-/// 「文档太大」，且桌面形态（Tauri IPC 无此限制）同一份文件能正常导入——两侧行为分叉，
-/// 没有任何一层会报错。
-///
-/// 取两倍余量：URL 模式下原文要在 preview 与 commit 之间来回传两次，而 JSON 字符串的
-/// 转义会让同样的字节数再涨一截。两倍仍是**有界**缓冲，不是无上限。
+/// 「文档太大」，且桌面形态（Tauri IPC 无此限制）同一份文件能正常导入——两侧行为分叉。
+/// 取两倍余量：URL 模式下原文要在 preview 与 commit 之间来回传两次，而 JSON 字符串的转义会让
+/// 同样的字节数再涨一截。两倍仍是**有界**缓冲，不是无上限。
 pub(crate) const TRANSFER_BODY_LIMIT_BYTES: usize = (FETCH_MAX_KB * 1024 * 2) as usize;
 
 /// 内容来源。`from_url` 为真时，预览要把原文回传给前端，让提交那一步不必再拉一次。
@@ -67,10 +61,8 @@ pub async fn import_preview(
     let source = resolve_content(pool, opts.content.as_deref(), opts.url.as_deref()).await?;
     let (format, parsed) = import::sniff_and_parse(&source.text)?;
 
-    // 去重账本只灌**已落库**的行：预览要回答的是「这些条目项目里已经有了吗」，
-    // 而这个答案必须与真正落库时用的是同一本账。用 `contains`（不记账），
-    // 否则这份预览会替落库先把账记上一遍。
-    //
+    // 去重账本只灌**已落库**的行：预览要回答的是「这些条目项目里已经有了吗」，而这个答案必须与
+    // 真正落库时用的是同一本账。用 `contains`（不记账），否则这份预览会替落库先把账记上一遍。
     // 「这个项目能不能接住这份文档」是同一批只读，搭同一次连接走完。
     let (duplicates, plan) = db::with_conn(pool, |conn| {
         let existing = db::endpoint_details::list_by_root(conn, &opts.project_id)?;
@@ -126,11 +118,10 @@ pub async fn import_preview(
     })
 }
 
-/// 把勾中的条目落进目标模块。
-///
-/// **重新解析同一份 `content`，不重跑 URL 拉取** —— 预览已经把 URL 模式的原文回传，
-/// 前端原样送到这里。缓存解析结果意味着要加临时表 + TTL + 清理路径，而解析是纯函数：
-/// 重跑一次的成本远低于那套复杂度，换来的是「预览里看到的和落下去的一定是同一棵树」。
+/// 把勾中的条目落进目标模块。**重新解析同一份 `content`，不重跑 URL 拉取**：预览已经把 URL
+/// 模式的原文回传，前端原样送到这里。
+/// 缓存解析结果意味着要加临时表 + TTL + 清理路径，而解析是纯函数：重跑一次的成本远低于那套
+/// 复杂度，换来的是「预览里看到的和落下去的一定是同一棵树」。
 pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCommitDto, AppError> {
     let (_format, parsed) = import::sniff_and_parse(&opts.content)?;
     let selected: BTreeSet<String> = opts.selected.iter().cloned().collect();
@@ -152,15 +143,12 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
         // 什么都没有更难收拾。
         let mut environments_created = Vec::new();
         for env in &parsed.environments {
-            // id 与 project 由落库方铸。解析器只负责「这个环境叫什么、有哪些变量」，
-            // 身份是本仓库的事——所以在这里 clone 一份改，而不是就地改 borrowed 值。
-            //
-            // 当前环境不是落库的状态，故导入的环境没有「激活」这一说；它建好之后，
-            // 谁发请求时点名它，它就是那一次的地址来源。
-            //
-            // 创建时刻留 0：`db::environments::create` 见到 0 就填当前时刻。导入的
-            // 环境是**此刻**建的，故它不是这个项目最早创建的那个环境，也就是不是
-            // 默认环境——项目原本那个默认环境仍然是默认环境。
+            // id 与 project 由落库方铸。解析器只负责「这个环境叫什么、有哪些变量」，身份是本
+            // 仓库的事——所以在这里 clone 一份改，而不是就地改 borrowed 值。
+            // 当前环境不是落库的状态，故导入的环境没有「激活」这一说；它建好之后，谁发请求时
+            // 点名它，它就是那一次的地址来源。
+            // 创建时刻留 0：`db::environments::create` 见到 0 就填当前时刻。导入的环境是**此刻**
+            // 建的，故它不是这个项目最早创建的那个环境，也就是不是默认环境。
             let mut owned = env.clone();
             owned.id = uid();
             owned.project_id = opts.project_id.clone();
@@ -192,9 +180,9 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
 
 /// 导出候选预览。
 ///
-/// `opts.environment_id` 指名按**哪个环境**解析那一格的地址：缺席或空串取默认环境
-/// （最早创建的那个），给了 id 就按那个环境解析——渲染层在下拉里换了环境就会重取一趟，
-/// 否则那份清单仍是旧环境下的事实，界面上的提示会按旧环境点名。
+/// `opts.environment_id` 指名按**哪个环境**解析那一格的地址：缺席或空串取默认环境（最早创建
+/// 的那个），给了 id 就按那个环境解析——渲染层在下拉里换了环境就会重取一趟，否则那份清单仍是
+/// 旧环境下的事实。
 pub fn export_preview(
     pool: &DbPool,
     opts: &ExportPreviewOpts,
@@ -263,11 +251,10 @@ pub fn export_document(
 // 内容来源
 // -------------------------------------------------------------------------
 
-/// 文件内容与 URL 二选一。URL 分支的出站请求**必须**经 `execute_with_policy`：
-/// 那里的 `check_url` 是本仓库唯一的 SSRF 防护，绕开它等于把服务端变成开放代理。
-///
-/// 这次出站用**全局默认**的 HTTPS 设置：拉文档这件事不属于某个端点，端点级的覆盖对它
-/// 没有意义；而用户给内部文档系统配的 CA 证书与跳过校验，对这一步同样有效。
+/// 文件内容与 URL 二选一。URL 分支的出站请求**必须**经 `execute_with_policy`：那里的
+/// `check_url` 是本仓库唯一的 SSRF 防护，绕开它等于把服务端变成开放代理。
+/// 这次出站用**全局默认**的 HTTPS 设置：拉文档不属于某个端点，端点级的覆盖对它没有意义；
+/// 用户给内部文档系统配的 CA 证书与跳过校验，对这一步同样有效。
 async fn resolve_content(
     pool: &DbPool,
     content: Option<&str>,
@@ -424,10 +411,8 @@ fn project_endpoint(
     }
 }
 
-/// 落在某个端点上的诊断下标。
-///
-/// 按 pointer 的前缀归属：一个 `Warning` 的 pointer 是 `/item/2/request/url`，
-/// 它属于 key 为 `/item/2/request` 的那一行。前缀比对补一个 `/` 才比，
+/// 落在某个端点上的诊断下标。按 pointer 的前缀归属：一个 `Warning` 的 pointer 是
+/// `/item/2/request/url`，它属于 key 为 `/item/2/request` 的那一行。前缀比对补一个 `/` 才比，
 /// 否则 `/item/2` 会认领掉 `/item/21/...` 的诊断。
 fn diagnostics_of(ex: &Exchange, key: &str) -> Vec<usize> {
     let prefix = format!("{key}/");
@@ -454,7 +439,7 @@ fn non_empty(s: String) -> Option<String> {
     }
 }
 
-/// 文件名。`safe` 是路径分隔符与控制字符都拿掉了的项目名——它来自用户，
+/// 文件名。`project_name` 是路径分隔符与控制字符都拿掉了的项目名——它来自用户，
 /// 而它会拼进一个下载路径。
 fn file_name(project_name: &str, format: DocFormat) -> String {
     let stem: String = project_name

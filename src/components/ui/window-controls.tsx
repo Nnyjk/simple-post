@@ -1,16 +1,14 @@
 /**
- * 自绘窗口控件——只在 Tauri shell（decorations: false）里有效。纯 Vite / 浏览器
- * dev 模式下照样渲染但不起作用，点它们是空操作（`safeCall` 里的 catch 接住异常）。
+ * 自绘窗口控件——只在 Tauri shell（decorations: false）里有效。纯 Vite / 浏览器 dev 模式下
+ * 照样渲染但不起作用，点它们是空操作（`safeCall` 里的 catch 接住异常）。
  *
- * Win11 式的一组：最小化、最大化/还原、关闭。只有关闭用强调色（与资源管理器、
- * VS Code 以及用户已经信任的每个 Win11 应用一致）。
+ * Win11 式的一组：最小化、最大化 / 还原、关闭。只有关闭用强调色。
  *
- * 住在 `components/ui` 而非 `features/top-bar`，因为两个宿主都要它：工作区顶栏，
- * 以及独立欢迎屏——后者是整窗 surface、没有自己的顶栏，否则就既不能最小化也不能
- * 最大化，在 Windows 上还关不掉。
+ * 住在 `components/ui` 而非 `features/top-bar`，因为两个宿主都要它：工作区顶栏，以及独立
+ * 欢迎屏——后者是整窗 surface、没有自己的顶栏，否则就既不能最小化也不能最大化。
  *
- * Tauri 2 拖拽区注意事项：`data-tauri-drag-region` 那一行里的每个可交互控件都
- * 必须用 `data-tauri-drag-region="false"` 退出，否则 webview 的拖拽手势会吞掉点击。
+ * Tauri 2 拖拽区注意事项：`data-tauri-drag-region` 那一行里的每个可交互控件都必须用
+ * `data-tauri-drag-region="false"` 退出，否则 webview 的拖拽手势会吞掉点击。
  */
 import { useEffect, useState } from 'react';
 import { Minus, Square, Copy, X } from 'lucide-react';

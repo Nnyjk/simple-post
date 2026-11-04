@@ -31,16 +31,12 @@ pub struct ScriptedSendInput {
     pub settings: RequestSettings,
     /// 该端点自己的 HTTPS 出站设置。`None` = 继承全局默认。
     ///
-    /// 全局默认与端点的覆盖在 [`crate::tls::resolve`] 里合成，故调用方只管
-    /// 交出端点这一份，不必自己读库、也不必自己合成——桌面端、`serve-web` 端与 MCP 端
-    /// 于是不会对「这次请求用哪份证书」各说各话。
+    /// 全局默认与端点的覆盖在 [`crate::tls::resolve`] 里合成，故调用方只管交出端点这一份。
     pub tls_override: Option<TlsSettings>,
     /// 端点自己那两段脚本的覆盖。
     ///
-    /// `None` = 用存的那份；`Some` = 用这份（空串 = 没有脚本）。
-    ///
-    /// 渲染层送的是**界面上此刻生效的那份**（草稿优先，回落到已存的那份），
-    /// 否则「所见」与「所发」会分叉：用户改完脚本还没保存就发送，跑的却是旧脚本。
+    /// `None` = 用存的那份；`Some` = 用这份（空串 = 没有脚本）。渲染层送的是**界面上此刻生效的
+    /// 那份**（草稿优先，回落到已存的那份），否则「所见」与「所发」会分叉。
     pub script_override: Option<ScriptOverride>,
 }
 

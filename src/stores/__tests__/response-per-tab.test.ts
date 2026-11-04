@@ -5,8 +5,7 @@
  * **为什么用真实组合 store。** 被测行为跨切片：响应状态住在 `ui-response`，而
  * 「标签没了就把它带走」这件事住在 `ui-tabs`（关标签、清扫失效标签、全关）与
  * `crud-tree` / `crud-project`（删接口、删项目）。stub 掉任何一侧，测的就不是
- * 同一件事了——那正是这个 bug 当初漏掉一半的原因（切接口的两条路径，一半清空、
- * 一半不清）。
+ * 同一件事了。
  *
  * 运行：npx tsx --test src/stores/__tests__/response-per-tab.test.ts
  */

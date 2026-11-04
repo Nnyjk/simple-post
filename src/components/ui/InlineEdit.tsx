@@ -32,37 +32,30 @@ export interface InlineEditProps {
   ariaLabel?: string;
   testId?: string;
   /**
-   * 受控的编辑状态。不传时编辑器自持状态——除树行外的所有调用方都是如此。
-   *
-   * 树需要另一种模式：它把「正在重命名的行」存为树状态，这样*新建*的行可以直接
-   * 进入重命名而无需合成一次双击。与 onEditingChange 配对，由它告知用户已结束。
+   * 受控的编辑状态。不传时编辑器自持状态——除树行外的所有调用方都是如此。树需要另一种
+   * 模式：它把「正在重命名的行」存为树状态，这样*新建*的行可以直接进入重命名而无需合成
+   * 一次双击。与 onEditingChange 配对，由它告知用户已结束。
    */
   editing?: boolean;
   /**
-   * 编辑器进入或离开编辑模式时通知——包括由用户触发的改变（双击 / Enter / Esc /
-   * 失焦），这使它成为受控 `editing` 的闭合通道。对用它在编辑期间门控其他交互的
-   * 父组件也有用（例如把页签标为有未保存改动）。
+   * 编辑器进入或离开编辑模式时通知——包括由用户触发的改变（双击 / Enter / Esc / 失焦），
+   * 这使它成为受控 `editing` 的闭合通道。
    */
   onEditingChange?: (editing: boolean) => void;
   /**
-   * 为 `true` 时，空草稿会作为 `onSave('')` 提交，而不是当作取消。默认
-   * `false`（留空 = 取消）以对齐树行重命名的交互。确实允许清空的字段
-   * （如可选描述）设为 `true`。
+   * 为 `true` 时，空草稿会作为 `onSave('')` 提交，而不是当作取消。默认 `false`
+   * （留空 = 取消）。确实允许清空的字段（如可选描述）设为 `true`。
    */
   commitEmpty?: boolean;
 }
 
 /**
- * 通用行内编辑器。默认渲染 display 节点；双击（或经 display 的 open() 回调）
- * 换成自动聚焦并全选原文的单行 <input>。键盘：
- *   - Enter  → 提交（非空且有变化则保存，否则取消——除非 commitEmpty，
- *              此时空草稿会作为 `onSave('')` 提交）
- *   - Esc    → 取消（草稿回退到 `value`）
- *   - Blur   → 提交
+ * 通用行内编辑器。默认渲染 display 节点；双击（或经 display 的 open() 回调）换成自动聚焦并
+ * 全选原文的单行 <input>。键盘：Enter 提交（非空且有变化则保存，否则取消——除非 commitEmpty，
+ * 此时空草稿会作为 `onSave('')` 提交）；Esc 取消（草稿回退到 `value`）；Blur 提交。
  *
- * 编辑模式下 <input> 上的 click 与 Enter 事件不冒泡。这对一个通常嵌在可点
- * 行里（编辑时那行不该折叠）、旁边还有绑 Enter 的兄弟组件（如 TagInput）的行内编辑器
- * 来说是正确默认。确实需要冒泡的调用方可以自己再包一层点击目标。
+ * 编辑模式下 <input> 上的 click 与 Enter 事件不冒泡：这对通常嵌在可点行里（编辑时那行不该
+ * 折叠）、旁边还有绑 Enter 的兄弟组件（如 TagInput）的行内编辑器来说是正确默认。
  */
 export function InlineEdit({
   value,

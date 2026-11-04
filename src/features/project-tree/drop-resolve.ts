@@ -3,8 +3,8 @@ import { mayUnder, type PlacementScope } from '@/lib/node-placement';
 import type { DragPayload, DropZone, TreeNodeKind } from './tree-types';
 
 /**
- * 一次放置被拒绝的理由。每条理由都对应一个具体的问题，故都单独命名 —— 测试能逐条断言
- * 「哪一种组合被哪一条规则挡住」，而不只是断言「什么都没发生」。
+ * 一次放置被拒绝的理由。每条理由对应一个具体问题，故都单独命名 —— 测试能逐条断言
+ * 「哪一种组合被哪一条规则挡住」。
  */
 export type DropRejection =
   /** 没有可用的拖拽载荷。 */
@@ -31,10 +31,8 @@ export type DropDecision =
   | { ok: false; reason: DropRejection };
 
 /**
- * 目标行对当前这次拖拽开放的放置区。
- *
- * 两个区各自独立：某一行可能只开放其中一个。模块行对集合与接口的拖拽就只开放
- * `into` —— 它的兄弟作用域是项目顶层，那里只放得下模块。
+ * 目标行对当前这次拖拽开放的放置区。两个区各自独立：某一行可能只开放其中一个。模块行
+ * 对集合与接口的拖拽就只开放 `into` —— 它的兄弟作用域是项目顶层，那里只放得下模块。
  */
 export interface DropBands {
   /** 能否嵌进这一行，即成为它的子节点。 */
@@ -52,18 +50,14 @@ export interface DropTarget {
 /**
  * 算出光标落在目标行的哪一块。
  *
- * 三种分档：
+ * - 两个区都开放（容器行对容器或接口的拖拽）：25/50/25 —— 上四分位是「放在它上面」，
+ *   下四分位是「放在它下面」，中间一半是「嵌进去」。
+ * - 只开放 `into`（模块行对集合或接口的拖拽）：整行都是「嵌进去」。
+ * - 只开放 `beside`（模块行对模块的拖拽、接口行对接口的拖拽）：朴素 50/50。
  *
- *   - 两个区都开放（容器行对容器或接口的拖拽）：25/50/25 —— 上四分位是「放在它上面」，
- *     下四分位是「放在它下面」，中间一半是「嵌进去」。
- *   - 只开放 `into`（模块行对集合或接口的拖拽）：整行都是「嵌进去」。
- *   - 只开放 `beside`（模块行对模块的拖拽、接口行对接口的拖拽）：朴素 50/50。
- *
- * 矩形缺失或高度为 0 时谈比例没有意义，故解析成一个确定的方向：只开放 `into` 时
- * 回落到 `into`，其余回落到 `above`。
- *
- * 返回 `null` 表示这一行不接受这次拖拽 —— 调用方据此不画落点提示，并把光标显示成
- * 「不可放」。
+ * 矩形缺失或高度为 0 时解析成一个确定的方向：只开放 `into` 时回落到 `into`，其余回落到
+ * `above`。返回 `null` 表示这一行不接受这次拖拽 —— 调用方据此不画落点提示，并把光标
+ * 显示成「不可放」。
  */
 export function zoneFromRowPosition(
   rect: { top: number; height: number } | null | undefined,
@@ -83,10 +77,9 @@ export function zoneFromRowPosition(
 }
 
 /**
- * 目标行的父级作用域 —— 「落进目标自己的父级里」这件事，父级是谁。
- *
- * 模块的父级是项目（`parent_id = NULL`），故它的作用域是 `'project'`；集合与接口的
- * 父级是节点，作用域就是那个父节点的类型。
+ * 目标行的父级作用域 —— 「落进目标自己的父级里」这件事，父级是谁。模块的父级是项目
+ * （`parent_id = NULL`），作用域是 `'project'`；集合与接口的父级是节点，作用域就是那个
+ * 父节点的类型。
  */
 function scopeOf(
   target: DropTarget,
@@ -100,14 +93,12 @@ function scopeOf(
 }
 
 /**
- * 目标行对一次拖拽开放的放置区。两条规则都来自父子类型矩阵。
- *
- *   - `into`：被拖的类型能不能坐在目标类型之下。
- *   - `beside`：被拖的类型能不能坐在目标自己父级的作用域里。
+ * 目标行对一次拖拽开放的放置区，两条规则都来自父子类型矩阵：`into` 看被拖的类型能不能
+ * 坐在目标类型之下，`beside` 看它能不能坐在目标自己父级的作用域里。
  *
  * 一处刻意收窄：**接口行只接受接口的拖拽**。那一行的手势是「在容器内重排接口」，
- * 而树把接口与集合分开渲染（集合永远排在接口之后），故把集合拖到接口旁边虽然符合
- * 类型矩阵，落点却不是用户看到的位置。想把集合挪到模块里的接口旁边，拖到模块行上。
+ * 而树把接口与集合分开渲染（集合永远排在接口之后），故把集合拖到接口旁边虽然符合类型
+ * 矩阵，落点却不是用户看到的位置。想把集合挪到模块里的接口旁边，拖到模块行上。
  */
 export function bandsFor(
   dragKind: TreeNodeKind,
@@ -126,9 +117,8 @@ export function bandsFor(
  * 目标行在这次拖拽下的放置区。被拒时返回 `null` —— 调用方据此不画落点提示，并把光标
  * 显示成「不可放」。
  *
- * 这个函数不另算一套规则：它直接问 `resolveDrop` 同一个问题。两处各算一套的话，
- * 悬停时会画出「能放」的提示，松手时却被拒 —— 提示与结果对不上，而那正是最难自查的
- * 一类缺陷（悬停时一切正常，松开时什么也没发生）。
+ * 这个函数不另算一套规则，它直接问 `resolveDrop` 同一个问题：两处各算一套的话，悬停时
+ * 会画出「能放」的提示，松手时却被拒。
  */
 export function zoneFor(
   drag: DragPayload,
@@ -164,14 +154,11 @@ export interface DropInput {
 /**
  * 解析一次放置：给出新父级与新槽位，或者给出被拒绝的理由。
  *
- * 两种落点：
- *
- *   - **`into`** —— 成为目标行的子节点，落在它的子列表末尾。
- *   - **`above` / `below`** —— 成为目标行的兄弟，即落进目标自己的父级里、排它前后。
+ * - **`into`** —— 成为目标行的子节点，落在它的子列表末尾。
+ * - **`above` / `below`** —— 成为目标行的兄弟，即落进目标自己的父级里、排它前后。
  *
  * 槽位按「目标自己的父级里、去掉被移动者之后」的同级序列算 —— 插入动作也发生在那一份
- * 序列上（被移动者要先从原位摘掉）。拿含被移动者的序列算槽位会差一位：在同一个父级里
- * 往下拖时，会落到目标后面再一格。
+ * 序列上（被移动者要先从原位摘掉）。拿含被移动者的序列算槽位会差一位。
  */
 export function resolveDrop(input: DropInput): DropDecision {
   const { drag, target, rect, clientY, nodes, activeProjectId } = input;
@@ -184,11 +171,8 @@ export function resolveDrop(input: DropInput): DropDecision {
   if (!targetNode) return { ok: false, reason: 'unknown-target' };
 
   // 逐个核对被拖的节点：它要在树里、它要与目标同属一个项目、它的类型要与载荷声明的
-  // 类型一致。
-  //
-  // 最后一条挡住伪造的载荷：`text/plain` 里塞一段 JSON 就能声明自己是「接口拖拽」，
-  // 而它列出来的其实是一个集合。按声明的类型选放置区时，那个集合就借着接口的身份绕过
-  // 「接口行只接受接口」那条限制。
+  // 类型一致。最后一条挡住伪造的载荷：`text/plain` 里塞一段 JSON 就能声明自己是「接口
+  // 拖拽」，而它列出来的其实是一个集合。
   for (const id of drag.ids) {
     const node = nodes.find((n) => n.id === id);
     if (!node || node.rootId !== targetNode.rootId) {
@@ -222,10 +206,8 @@ export function resolveDrop(input: DropInput): DropDecision {
 }
 
 /**
- * 某个父级下的同级节点，按显示顺序。
- *
- * `parentId: null` 是项目顶层 —— 即模块。须同时按 `rootId` 收窄，因为 `null` 是所有
- * 项目共用的顶层。
+ * 某个父级下的同级节点，按显示顺序。`parentId: null` 是项目顶层（即模块），须同时按
+ * `rootId` 收窄，因为 `null` 是所有项目共用的顶层。
  */
 function siblingsOf(
   parentId: string | null,
@@ -238,10 +220,8 @@ function siblingsOf(
 }
 
 /**
- * 成环守卫：目标不能是源本身或源的任何后代，否则会把节点嵌进自己。
- *
- * 沿 `parentId` 遍历而不特判集合：模块被拖到其内部的集合上，与集合被拖到自己的子节点
- * 上是同一种环。
+ * 成环守卫：目标不能是源本身或源的任何后代，否则会把节点嵌进自己。沿 `parentId` 遍历
+ * 而不特判集合：模块被拖到其内部的集合上，与集合被拖到自己的子节点上是同一种环。
  */
 function wouldCycleInto(movingIds: string[], parentId: string, nodes: ResourceNode[]): boolean {
   if (movingIds.includes(parentId)) return true;

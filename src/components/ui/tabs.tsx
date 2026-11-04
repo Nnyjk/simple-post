@@ -21,26 +21,22 @@ export type TabsProps =
   | (TabsBaseProps & {
       variant: 'connected';
       /**
-       * strip 自身的底色——与包住本 `Tabs` 的那个元素、以及它背后面板用的类相同。
-       *
-       * 必填而非可选，因为圆角缺口就是用它画的：填错会让 tab 两侧肩部露出一个
-       * 与周围都不匹配的颜色。它只需要与 strip 一致，且只需要与 strip 一致。
+       * strip 自身的底色——与包住本 `Tabs` 的那个元素、以及它背后面板用的类相同。必填而非
+       * 可选，因为圆角缺口就是用它画的：填错会让 tab 两侧肩部露出一个与周围都不匹配的颜色。
        */
       joinStripClass: string;
     })
   | (TabsBaseProps & { variant: 'segmented'; joinStripClass?: never });
 
 /**
- * 下划线式页签栏——与应用顶部工作区页签条同一视觉语汇，但去掉了 FLIP 动画与关闭
- * 按钮。选中项用 `border-b-2` 下划线而非背景药丸，读起来是导航面（而非分段控件），
- * 也与页签条其余 chrome 对齐。
+ * 下划线式页签栏——与应用顶部工作区页签条同一视觉语汇，但去掉了 FLIP 动画与关闭按钮。
+ * 选中项用 `border-b-2` 下划线而非背景药丸，读起来是导航面（而非分段控件）。
  *
- * `variant="connected"` 换成浏览器页签语汇：选中项填上面板自身的底色并*压在*分隔线
- * 之上，于是读起来属于下面的面板，而不是浮在上面的控件。肩部见 `TabJoinCorners`。
+ * `variant="connected"` 换成浏览器页签语汇：选中项填上面板自身的底色并*压在*分隔线之上，
+ * 于是读起来属于下面的面板。肩部见 `TabJoinCorners`。
  *
- * `variant="segmented"` 又是另一层意思：它是*模式切换器*（Pretty / Raw / Headers）而
- * 不是导航。被选的一小组同类项该待在带凸起滑块的实心槽里，而不是文档位置。取自
- * WinShun 的 `ScopeTabs.qml`；几何细节见下方容器处的说明。
+ * `variant="segmented"` 是*模式切换器*（Pretty / Raw / Headers）而不是导航，故被选的一
+ * 小组同类项该待在带凸起滑块的实心槽里。取自 WinShun 的 `ScopeTabs.qml`。
  */
 export function Tabs({ items, value, onChange, className, size = 'sm', ...rest }: TabsProps) {
   const connected = rest.variant === 'connected';
@@ -52,16 +48,12 @@ export function Tabs({ items, value, onChange, className, size = 'sm', ...rest }
       role="tablist"
       className={cn(
         // strip 自身在底部带一条发丝分隔线，好让选中项的下划线*压在其上*（tab 上用
-        // -mb-px），读起来像从面上长出来——VS Code、浏览器、GitHub 文件页签都是
-        // 这个模式。
+        // -mb-px），读起来像从面上长出来——VS Code、浏览器、GitHub 文件页签都是这个模式。
         //
-        // `connected` 自己没有这条线：包住 strip 的元素持有整宽分隔线（strip 通常
-        // 只和它的标签一样宽，线短一截会读成失误），由选中项盖住。而这种遮盖只在
-        // 包裹层*不裁剪*时成立——`overflow-hidden` 裁到 padding box，那在包裹层
-        // 边框之上。
+        // `connected` 自己没有这条线：包住 strip 的元素持有整宽分隔线，由选中项盖住。
+        // 而这种遮盖只在包裹层*不裁剪*时成立——`overflow-hidden` 裁到 padding box。
         //
-        // `segmented` 则是一个自足的槽：它有自己的填充，与下方任何分隔线无关，所以
-        // 不能继承另两者需要的 `-mb-px`。
+        // `segmented` 则是一个自足的槽：它有自己的填充，与下方任何分隔线无关。
         segmented
           ? 'flex items-center gap-0.5 rounded-lg bg-muted p-[3px]'
           : connected
@@ -132,17 +124,14 @@ const JOIN_DISC = 'absolute h-5 w-5 rounded-full';
 /**
  * 让选中项读起来与下方面板*融为一体的*两处圆角缺口。
  *
- * 分隔线若只是停在 tab 两侧，tab 就读成一张摆在页面上的卡片。浏览器是把 tab 的
- * 肩部圆化进那条线，于是轮廓在交界处不断开——这个圆化就是「一整块」的全部效果。
- * 它必须画成*strip 的*颜色而不是交给填充，因为亮色主题下 strip 往往与面板同色，
- * 只有轮廓能把两者分开。
+ * 分隔线若只是停在 tab 两侧，tab 就读成一张摆在页面上的卡片。浏览器是把 tab 的肩部圆化进
+ * 那条线，于是轮廓在交界处不断开。它必须画成*strip 的*颜色而不是交给填充，因为亮色主题
+ * 下 strip 往往与面板同色，只有轮廓能把两者分开。
  *
- * 每侧是 tab 底角上一个零溢出的 `JOIN_R` 窗口，里面放一个以该角点为圆心的
- * `JOIN_DISC` 圆：圆落在窗口内的四分之一被涂成 strip 色，于是抹掉 tab 的填充
- * *与*侧边框的一枚四分圆盘——一个凹缺口，边框因此收在曲线上而非直角上。
- *
- * 圆必须被裁进窗口（而不是直接停在角点上），否则它外侧的四分之三会溢出到 tab
- * 之外，在下面的面板上画出可见的半圆盘。
+ * 每侧是 tab 底角上一个零溢出的 `JOIN_R` 窗口，里面放一个以该角点为圆心的 `JOIN_DISC`
+ * 圆：圆落在窗口内的四分之一被涂成 strip 色，于是抹掉 tab 的填充*与*侧边框的一枚四分圆盘
+ * ——一个凹缺口，边框因此收在曲线上而非直角上。圆必须被裁进窗口，否则它外侧的四分之三
+ * 会溢出到 tab 之外，在下面的面板上画出可见的半圆盘。
  */
 export function TabJoinCorners({ stripClass }: { stripClass: string }) {
   return (

@@ -7,13 +7,11 @@ import { ScriptPanel } from '@/features/http-tester/ScriptPanel';
 import { buildScriptsPatch } from './scripts-patch';
 
 /**
- * collection 上的两段脚本。
+ * collection 上的两段脚本。与端点的脚本共用一个编辑面板（同一个 `ScriptPanel`）：形状相同、
+ * 跑的沙箱相同，只是存的地方不同 —— 端点的在 `endpoint_details` 行里，collection 的在自己的
+ * 表里。
  *
- * 与端点的脚本共用一个编辑面板（同一个 `ScriptPanel`）：形状相同、跑的沙箱相同，
- * 只是存的地方不同——端点的在 `endpoint_details` 行里，collection 的在自己的表里。
- *
- * **没有草稿态**：这个对话框是「打开—改—保存」的一步式，不进 store。collection 的
- * 脚本不参与端点编辑器的脏标记体系，给它另开一套只会多出一条要同步的路径。
+ * **没有草稿态**：这个对话框是「打开—改—保存」的一步式，不进 store。
  */
 export function CollectionScriptDialog({
   open,

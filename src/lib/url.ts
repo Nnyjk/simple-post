@@ -5,10 +5,8 @@
 import type { EndpointDetail, Environment } from '@/types/domain';
 
 /**
- * 生效的 baseUrl 来自哪一层；选择器用它标注当前选择（「跟随模块」/「自定义」）。
- *
- * `override` 是端点自己的 `baseUrlOverride`，`module` 是环境里「环境 × 模块」那一格，
- * `none` 是谁都没匹配上。
+ * 生效的 baseUrl 来自哪一层；选择器用它标注当前选择（「跟随模块」/「自定义」）。`override` 是端点
+ * 自己的 `baseUrlOverride`，`module` 是环境里「环境 × 模块」那一格，`none` 是谁都没匹配上。
  */
 export type BaseUrlSource = 'override' | 'module' | 'none';
 
@@ -21,29 +19,18 @@ export interface ResolvedBaseUrl {
 }
 
 /**
- * 解析 endpoint 生效的 baseUrl。解析顺序（优先级由高到低）：
- *   1. `endpoint.baseUrlOverride`      —— 每 endpoint 的「自定义」模式
- *   2. `env.moduleBaseUrls[moduleId]`  —— 环境 × 模块那一格
- *   3. `''`                             —— 什么都没有
+ * 解析 endpoint 生效的 baseUrl。解析顺序（优先级由高到低）：`endpoint.baseUrlOverride`（每 endpoint
+ * 的「自定义」模式）→ `env.moduleBaseUrls[moduleId]`（环境 × 模块那一格）→ `''`（什么都没有）。
  *
- * override 是三态，「有值但为空」是有意义的：
- *   `null` / `undefined` —— 不在自定义模式，继续读模块那一格
- *   `''`                 —— 自定义但不加前缀：URL 字段本身就是完整地址
- *   `'https://x'`        —— 自定义且带显式主机前缀
+ * override 是三态：`null` / `undefined` = 不在自定义模式，继续读模块那一格；`''` = 自定义但不加前缀
+ * （URL 字段本身就是完整地址）；`'https://x'` = 自定义且带显式主机前缀。这正是 `double_option` patch
+ * 约定在干活：调用方写 `baseUrlOverride: ''` 是**记录这个选择**而不是清空，只有 `null` 才清空。
  *
- * 这正是 `double_option` patch 约定在干活：调用方写 `baseUrlOverride: ''`
- * 是**记录这个选择**而不是清空，只有 `null` 才清空。把 `''` 并回模块那一格，
- * 选择器里的「自定义」行看起来就像什么都没做。
+ * 值住在（环境 × 模块）这一格，每格独立，**没有回退层**：没有项目默认，不借用别的模块的格子。
+ * 挂在无模块下的 endpoint `moduleId` 为 `null`，这种模块没有格子，只有第 1 步能出值。
  *
- * 值住在 (环境 × 模块) 这一格，每格独立，**没有回退层**：没有项目默认，没有借用
- * 别的模块的格子。挂在无模块下的 endpoint（节点已删，或测试器的空状态）
- * `moduleId` 为 `null`，这种模块没有格子，只有第 1 步能出值。
- *
- * `source` 报的是**哪一层选中了地址**：端点自己的 override 是 `'override'`，模块
- * 那一格是 `'module'`，没解析出是 `'none'`。
- *
- * 对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url`，
- * 两者必须一致。
+ * `source` 报的是**哪一层选中了地址**。对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs`
+ * 的 `resolve_base_url`，两者必须一致。
  */
 export function resolveEndpointBaseUrl(
   endpoint: Pick<EndpointDetail, 'baseUrlOverride'>,
@@ -72,27 +59,18 @@ export function resolveEndpointBaseUrl(
 }
 
 /**
- * 用代理地址替换请求地址里的模块地址前缀。
+ * 用代理地址替换请求地址里的模块地址前缀。接口经代理网关转代时，后端 api 地址与实际访问地址
+ * 不一致：模块那一格写的是后端 api 地址，而真正要打的是代理地址，故本函数把请求地址开头的那段
+ * 模块地址换成代理地址，其余部分原样保留。
  *
- * 接口经代理网关转代时，后端 api 地址与实际访问地址不一致：模块那一格写的是
- * `http://svc.internal:8080/api/a`（后端 api 地址），而真正要打的是
- * `https://gw.corp.com/api/xxxx/a`（实际访问地址）。本函数把请求地址开头的那段
- * 模块地址换成代理地址，其余部分原样保留：
+ * - `proxy` 缺席或只有空白 → 原样返回。
+ * - 前缀是 `baseUrl` 去掉尾部所有 `/`；前缀为空 → 原样返回。
+ * - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求地址恰好等于
+ *   该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会命中 `http://h/apixyz`。
+ * - 其余情况原样返回：请求打的是另一个主机，或那一格压根没有地址。
  *
- *   applyProxy('http://svc.internal:8080/api/a', 'https://gw.corp.com/api/xxxx/a',
- *              'http://svc.internal:8080/api/a/orders/list')
- *     → 'https://gw.corp.com/api/xxxx/a/orders/list'
- *
- * 规则：
- *   - `proxy` 缺席或只有空白 → 原样返回。
- *   - 前缀是 `baseUrl` 去掉尾部所有 `/`；前缀为空 → 原样返回。
- *   - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求
- *     地址恰好等于该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会
- *     命中 `http://h/apixyz`。
- *   - 其余情况原样返回：请求打的是另一个主机，或那一格压根没有地址。
- *
- * 对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `apply_proxy`；
- * 两者必须一致，否则预览与真正发出的请求描述的是两个 URL。
+ * 对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `apply_proxy`；两者必须一致，
+ * 否则预览与真正发出的请求描述的是两个 URL。
  */
 export function applyProxy(baseUrl: string, proxy: string | null | undefined, url: string): string {
   if (proxy === null || proxy === undefined) return url;
@@ -109,17 +87,12 @@ export function applyProxy(baseUrl: string, proxy: string | null | undefined, ur
 }
 
 /**
- * 安全地拼接 baseUrl 与请求 path。path 自带 scheme 时视作绝对地址，并折叠
- * join 边界上的重复斜杠。
+ * 安全地拼接 baseUrl 与请求 path。path 自带 scheme 时视作绝对地址，并折叠 join 边界上的重复斜杠。
  *
- *   joinBaseUrl('https://api.example.com', '/users/1')
- *     → 'https://api.example.com/users/1'
- *   joinBaseUrl('https://api.example.com/', 'users/1')
- *     → 'https://api.example.com/users/1'
- *   joinBaseUrl('', '/users/1')
- *     → '/users/1'
- *   joinBaseUrl('https://api.example.com', 'https://other/')
- *     → 'https://other/'  （path 优先——它自带 scheme）
+ *   joinBaseUrl('https://api.example.com', '/users/1')     → 'https://api.example.com/users/1'
+ *   joinBaseUrl('https://api.example.com/', 'users/1')      → 'https://api.example.com/users/1'
+ *   joinBaseUrl('', '/users/1')                            → '/users/1'
+ *   joinBaseUrl('https://api.example.com', 'https://other/') → 'https://other/'（path 优先）
  */
 export function joinBaseUrl(baseUrl: string, path: string): string {
   const trimmedPath = path ?? '';
@@ -132,25 +105,21 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
 }
 
 /**
- * 折叠 URL **path** 里连续的 `/`，输入必须已 join 且已解析 `{{var}}`，
- * 其余字节一概不动。
+ * 折叠 URL **path** 里连续的 `/`，输入必须已 join 且已解析 `{{var}}`，其余字节一概不动。
  *
- * join 必然发生在替换之前（环境自身的 base URL 可能是模板），所以
- * `joinBaseUrl` 无从知道 `{{var}}` 会展开成以 `/` 开头的值。它照样插入分隔符，
- * 替换随后把 `http://host:9200/{{var}}` 变成 `http://host:9200//api`，对多数
- * 服务端那是另一条路由（往往是重定向或 404）。只有替换之后真相才知道，
- * 所以这是独立一遍，而不是让 `joinBaseUrl` 去猜。
+ * join 必然发生在替换之前（环境自身的 base URL 可能是模板），故 `joinBaseUrl` 无从知道
+ * `{{var}}` 会展开成以 `/` 开头的值；只有替换之后真相才知道，所以这是独立一遍，而不是让
+ * `joinBaseUrl` 去猜。
  *
  * 范围刻意收窄——无脑 `replace(/\/{2,}/g, '/')` 会破坏真实 URL：
- *   - `scheme://` 不是 path，`https://` 必须原样保留；
- *   - 无 scheme 的前导 `//` 是 protocol-relative 引用（`//cdn.example.com/x`），
- *     它的斜杠有意义；
- *   - `?query` / `#fragment` 是数据不是 path：携带嵌套 URL 的参数
- *     （`?redirect=https://x//y`）必须原样穿过；
- *   - 未解析的 `{{var}}` 标记是文本不是分隔符，由 `missingVars` 报告，不在这里压平。
  *
- * 对应 `crates/simple-post-mcp/src/variable_fill.rs` 的 `collapse_url_slashes`；
- * 两者不一致，预览与真正发出的请求就会描述不同的 URL。
+ * - `scheme://` 不是 path，`https://` 必须原样保留。
+ * - 无 scheme 的前导 `//` 是 protocol-relative 引用，它的斜杠有意义。
+ * - `?query` / `#fragment` 是数据不是 path：携带嵌套 URL 的参数必须原样穿过。
+ * - 未解析的 `{{var}}` 标记是文本不是分隔符，由 `missingVars` 报告，不在这里压平。
+ *
+ * 对应 `crates/simple-post-mcp/src/variable_fill.rs` 的 `collapse_url_slashes`；两者不一致，
+ * 预览与真正发出的请求就会描述不同的 URL。
  */
 export function collapseUrlSlashes(url: string): string {
   if (!url) return url ?? '';
@@ -175,12 +144,9 @@ export function collapseUrlSlashes(url: string): string {
 export interface ResolvedVars {
   value: string;
   /**
-   * 未解析的 `{{name}}`，按首次出现去重，顺序在多次渲染间稳定（每次敲键都
-   * 重排的告警胶囊比没有更糟）。
-   *
-   * 它是 `crates/simple-post-mcp/src/variable_fill.rs` 里
-   * `ResolvedTemplate.missing` 的渲染器孪生；两者不一致，同一 endpoint 在前端
-   * 的「未解析变量」提示与 MCP 的 `missing_vars` 报告就不是一回事。
+   * 未解析的 `{{name}}`，按首次出现去重，顺序在多次渲染间稳定（每次敲键都重排的告警胶囊比没有更糟）。
+   * 它是 `crates/simple-post-mcp/src/variable_fill.rs` 里 `ResolvedTemplate.missing` 的渲染器孪生，
+   * 两者不一致时前端提示与 MCP 的 `missing_vars` 报告就不是一回事。
    */
   missing: string[];
 }
@@ -189,32 +155,25 @@ export interface ResolvedVars {
  * 把 `{{varName}}` 形式的字符串对着变量池解析，并报告解析不到的标记。变量池可以是
  * `Environment`（用 `env.variables`），也可以是裸的 `Record<string,string>`。
  *
- * 未知变量原样保留（如 `{{missing}}` 仍是 `{{missing}}`），让用户在请求预览里
- * 看得见缺什么，而不是静默变成 `undefined`。
- *
- * **停用的变量不参与替换**：它们照样存、照样显示，但 `{{x}}` 留在原样并进
- * `missing` 报告——用户看得见「这个变量没被替换」，而不是静默被替掉。
- *
- * 变量名只接受 `\w+`（`[A-Za-z0-9_]+`）；`{{ my-var }}`、`{{ a.b }}` 原样穿过。
- * 替换是**单趟、非递归**的——`{{{{a}}}}` 变成 `{{a}}`，不会再展开一次。这与
- * Rust 解析器的 `template_replace` / `is_word` 一致，也是变量值里恰好含 `{{`
- * 时不会被二次展开（或死循环）的原因。
+ * - 未知变量原样保留（如 `{{missing}}` 仍是 `{{missing}}`），让用户在请求预览里看得见缺什么。
+ * - **停用的变量不参与替换**：它们照样存、照样显示，但 `{{x}}` 留在原样并进 `missing` 报告。
+ * - 变量名只接受 `\w+`（`[A-Za-z0-9_]+`）；`{{ my-var }}`、`{{ a.b }}` 原样穿过。
+ * - 替换是**单趟、非递归**的——`{{{{a}}}}` 变成 `{{a}}`，不会再展开一次。这与 Rust 解析器的
+ *   `template_replace` / `is_word` 一致，也是变量值里恰好含 `{{` 时不会二次展开的原因。
  */
 export function resolveVarsWithMissing(
   input: string,
   vars: Environment | Record<string, string> | undefined,
 ): ResolvedVars {
   if (!input) return { value: '', missing: [] };
-  // `Environment` 的变量在 `.variables` 下，裸 record 本身就是映射；`isEnvironment`
-  // 用 `Environment.moduleBaseUrls`（对象）区分两者——裸 `Record<string,string>` 在那里
-  // 会得到 `undefined`
+  // `Environment` 的变量在 `.variables` 下，裸 record 本身就是映射；`isEnvironment` 用
+  // `Environment.moduleBaseUrls`（对象）区分两者——裸 `Record<string,string>` 在那里会得到 `undefined`
   const map: Record<string, string> | undefined = isEnvironment(vars) ? enabledVars(vars) : vars;
   const missing: string[] = [];
   const seen = new Set<string>();
   const value = input.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     const v = map?.[key];
-    // 判空用 nullish 而非真值：显式定义为空串的变量解析为 '' 且**不算**缺失，
-    // 只有键不存在时替换回调才把标记原样留在原处
+    // 判空用 nullish 而非真值：显式定义为空串的变量解析为 '' 且**不算**缺失，只有键不存在时替换回调才把标记原样留在原处
     if (v !== undefined && v !== null) return v;
     if (!seen.has(key)) {
       seen.add(key);
@@ -228,14 +187,13 @@ export function resolveVarsWithMissing(
 /**
  * 列出字符串里出现的**全部** `{{name}}` 标记名，按首次出现去重。
  *
- * 与 [`resolveVarsWithMissing`] 的区别是：那个只报告**没解析出来**的名字，这个报告
- * **出现过**的名字。动态变量要知道自己有没有被请求引用，就得问这个——一个同名的环境变量
- * 会让 `{{name}}` 解析成功，于是「没解析出来」那个清单里根本没有它。
+ * 与 [`resolveVarsWithMissing`] 的区别是：那个只报告**没解析出来**的名字，这个报告**出现过**的名字。
+ * 动态变量要知道自己有没有被请求引用，就得问这个——一个同名的环境变量会让 `{{name}}` 解析成功，
+ * 于是「没解析出来」那个清单里根本没有它。
  *
- * 判据与 Rust 的 `core::template::list_missing_vars` 同一套：找**配对**的 `}}`，中间的内容
- * 必须是裸标识符（`[A-Za-z0-9_]+`）。故叠写的形状（`{{{{a}}}}`）不算标记——它先遇到的
- * 那对 `}}` 截出的是 `{{a`，不是标识符。两侧必须逐条相同，故这份判据由
- * `fixtures/dynamic-parity.json` 的 `scanCases` 钉住。
+ * 判据与 Rust 的 `core::template::list_missing_vars` 同一套：找**配对**的 `}}`，中间的内容必须是裸
+ * 标识符（`[A-Za-z0-9_]+`）。故叠写的形状（`{{{{a}}}}`）不算标记——它先遇到的那对 `}}` 截出的是
+ * `{{a`，不是标识符。两侧必须逐条相同，故这份判据由 `fixtures/dynamic-parity.json` 的 `scanCases` 钉住。
  */
 export function listVars(input: string): string[] {
   if (!input) return [];
@@ -265,10 +223,8 @@ export function listVars(input: string): string[] {
 const WORD = /^[A-Za-z0-9_]+$/;
 
 /**
- * `resolveVarsWithMissing`，丢弃 missing 列表。
- *
- * 两者是同一段代码：`{{x}}` 不可能在这一处存活却在那一处被报出来。共享样本的读取器
- * import 两者并比对结果（见 `__tests__/url.test.ts`）。
+ * `resolveVarsWithMissing`，丢弃 missing 列表。两者是同一段代码：`{{x}}` 不可能在这一处存活
+ * 却在那一处被报出来。共享样本的读取器 import 两者并比对结果（见 `__tests__/url.test.ts`）。
  */
 export function resolveVars(
   input: string,
@@ -287,13 +243,11 @@ function isEnvironment(v: Environment | Record<string, string> | undefined): v i
 }
 
 /**
- * 参与替换的变量：环境里**没有**被停用的那些。
+ * 参与替换的变量：环境里**没有**被停用的那些。停用的变量照样存、照样显示，但不参与替换——
+ * `{{x}}` 留在原样并进 `missing` 报告，用户看得见「这个变量没被替换」。
  *
- * 停用的变量照样存、照样显示，但不参与替换——`{{x}}` 留在原样并进 `missing` 报告，
- * 用户看得见「这个变量没被替换」，而不是静默被替掉。
- *
- * 导出是因为脚本看到的变量池必须是**同一份**：`pm.environment.get('token')` 读到的
- * 必须是这次请求替换进去的那个值。
+ * 导出是因为脚本看到的变量池必须是**同一份**：`pm.environment.get('token')` 读到的必须是这次
+ * 请求替换进去的那个值。
  */
 export function enabledVars(env: Environment): Record<string, string> {
   const disabled = env.disabledVariables ?? [];

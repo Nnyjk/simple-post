@@ -17,15 +17,12 @@ use super::types::{EndpointOverrides, ResolvedEndpoint};
 // resolve_endpoint —— 主 API
 // -------------------------------------------------------------------------
 
-/// 把端点 + 环境 + 覆盖值合成为完全解析好的线上形状。
-///
-/// 解析顺序（对应 `buildFetchInit`）：
+/// 把端点 + 环境 + 覆盖值合成为完全解析好的线上形状。解析顺序（对应 `buildFetchInit`）：
 ///   1. 套用覆盖值（url / method / headers / params / body）
 ///   2. 解析 baseUrl 与代理地址（见 [`resolve_base_url`]）
-///   3. 到处替换 `{{var}}`（URL 路径、headers、params、body 内容、鉴权字段），然后
-///      用代理地址替换请求地址里的 baseUrl 前缀（见 [`apply_proxy`]），最后收掉路径里的
-///      重复斜杠（见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的
-///      分隔符变成 `//`）
+///   3. 到处替换 `{{var}}`（URL 路径、headers、params、body 内容、鉴权字段），然后用代理地址
+///      替换请求地址里的 baseUrl 前缀（见 [`apply_proxy`]），最后收掉路径里的重复斜杠
+///      （见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的分隔符变成 `//`）
 ///   4. 追加启用的 query 参数（编码后）
 ///   5. 追加 apikey query（`auth.kind == Apikey && inLocation == Query` 时）
 ///   6. 构建有序请求头列表（用户头 + 自动 Content-Type + 自动 Accept + 鉴权推出的
@@ -33,13 +30,9 @@ use super::types::{EndpointOverrides, ResolvedEndpoint};
 ///   7. 决定是否带上 body（仅当 `body.mode != None && content` 非空）
 ///
 /// `missing_vars` 汇总所有没解析出来的 `{{x}}`，失败还是告警由调用方决定。
-///
-/// 模块走 `overrides.module_id` 而不是单独一个参数：它属于调用方上下文；放在覆盖值里，
-/// 传入 `None` 的现有调用方都不用改，解析结果是「没有模块，也就没有格子可读」——
-/// 这正是一个没有树上下文的端点该得的答案。
-///
-/// `AppError::Validation` 只用于明显畸形的输入。当前发送路径没有别的校验规则，真正
-/// 用不了的时候由 HTTP 发送器自己报错。
+/// 模块走 `overrides.module_id` 而不是单独一个参数：它属于调用方上下文；放在覆盖值里，传入
+/// `None` 的现有调用方都不用改，解析结果是「没有模块，也就没有格子可读」。
+/// `AppError::Validation` 只用于明显畸形的输入；真正用不了的时候由 HTTP 发送器自己报错。
 pub fn resolve_endpoint(
     detail: &EndpointDetail,
     env: Option<&Environment>,
@@ -50,9 +43,8 @@ pub fn resolve_endpoint(
 
 /// [`resolve_endpoint`] 加上动态变量的值。
 ///
-/// 动态变量的值必须**在替换之前**并进变量池：合并规则是「动态变量的值优先于同名环境
-/// 变量；被停用的环境变量不影响动态变量」，替换一旦发生，池里就没有同名变量的概念了。
-///
+/// 动态变量的值必须**在替换之前**并进变量池：合并规则是「动态变量的值优先于同名环境变量；
+/// 被停用的环境变量不影响动态变量」，替换一旦发生，池里就没有同名变量的概念了。
 /// 合并规则本身住在 `simple_post_core::dynamic::merge_pool`，与渲染进程的
 /// `src/lib/dynamic-vars.ts` 的 `mergePool` 同一套，由 `fixtures/dynamic-parity.json` 钉住。
 pub fn resolve_endpoint_with(
@@ -201,10 +193,9 @@ pub fn resolve_endpoint_with(
     let final_url = append_apikey_query(url_with_params, &resolved_auth);
 
     // ---- body 是否带上 + 替换 --------------------------------
-    // 按模式各走各的规则：`json` / `xml` / `raw` 整段替换，`form` 与 `multipart` 逐个
-    // 字段替换（整段替换会把替换出来的引号塞进那段 JSON 文本里，于是整份内容解析不
-    // 出来），`binary` 不替换（文件字节不是模板）。规则住在
-    // `simple_post_core::body`，与渲染进程侧同一套。
+    // 按模式各走各的规则：`json` / `xml` / `raw` 整段替换，`form` 与 `multipart` 逐个字段
+    // 替换（整段替换会把替换出来的引号塞进那段 JSON 文本里，于是整份内容解析不出来），
+    // `binary` 不替换（文件字节不是模板）。规则住在 `simple_post_core::body`，与渲染进程侧同一套。
     let resolved_body = simple_post_core::body::resolve_body(&eff_body, &vars);
     for m in resolved_body.missing {
         record_missing(&mut missing, &mut seen, m);

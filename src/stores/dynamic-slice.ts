@@ -1,22 +1,22 @@
 /**
- * 动态变量切片 —— 项目内的「变量名 → 数据源 → 抽取规则 → 缓存时长」声明，以及它们
- * 当前的取值。
+ * 动态变量切片 —— 项目内的「变量名 → 数据源 → 抽取规则 → 缓存时长」声明，以及它们当前的
+ * 取值。
  *
- * 定义**挂在项目里**：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。故这个
- * 切片处处带项目维度——取值桶就是按项目分的（`dynamicValues[projectId][name]`），
- * 否则切项目时上一个项目的同名值会被下一个项目读到，那正是这次要改掉的行为。
+ * 定义**挂在项目里**：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。故这个切片
+ * 处处带项目维度——取值桶就是按项目分的（`dynamicValues[projectId][name]`），否则切项目时
+ * 上一个项目的同名值会被下一个项目读到。
  *
  * 状态分两半：
  *
  *   - `dynamicVariables`：已加载的定义列表。每条定义自带它的归属项目，读者按项目过滤。
  *     列表命令一次带回定义 + 当前值 + 缓存状态，面板直接渲染它，不必再拼。
- *   - `dynamicValues`：**项目 id → 变量名 → 当前值**。取数用的环境由定义自己决定
- *     （点名的那个，或数据源接口所属项目的第一个可用环境），故同一个名字在一个项目里
- *     只有一个当前值——不按环境分桶，但要按项目分桶。
+ *   - `dynamicValues`：**项目 id → 变量名 → 当前值**。取数用的环境由定义自己决定（点名的那个，
+ *     或数据源接口所属项目的第一个可用环境），故同一个名字在一个项目里只有一个当前值——
+ *     不按环境分桶，但要按项目分桶。
  *
- * 取数在**渲染进程**发起（`resolveDynamicVariables`），因为变量的值必须在
- * `prepareRequest` 替换 `{{var}}` 之前就到手——替换一旦发生，变量池里就没有同名变量
- * 的概念了。合并规则见 `src/lib/dynamic-vars.ts` 的 `mergePool`。
+ * 取数在**渲染进程**发起（`resolveDynamicVariables`），因为变量的值必须在 `prepareRequest`
+ * 替换 `{{var}}` 之前就到手——替换一旦发生，变量池里就没有同名变量的概念了。合并规则见
+ * `src/lib/dynamic-vars.ts` 的 `mergePool`。
  */
 import type { StateCreator } from 'zustand';
 import type {
@@ -83,11 +83,11 @@ export interface DynamicSliceActions {
   /**
    * 解析一批名字，返回它们的值与错误。
    *
-   * `projectId` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走
-   * 的就是这条），不给就是跨项目取值（同名定义出现在多个项目里时按歧义处理，不猜）。
+   * `projectId` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走的就是
+   * 这条），不给就是跨项目取值（同名定义出现在多个项目里时按歧义处理，不猜）。
    *
-   * 值同时写进 store，故请求编辑器下一次 `prepareRequest` 会用上它们。TTL 内命中缓存
-   * 时后端不发取数请求，故这一步通常是廉价的。
+   * 值同时写进 store，故请求编辑器下一次 `prepareRequest` 会用上它们。TTL 内命中缓存时后端
+   * 不发取数请求，故这一步通常是廉价的。
    */
   resolveDynamicVariables: (
     names: string[],
@@ -102,11 +102,7 @@ export interface DynamicSliceActions {
   ) => Promise<void>;
   /** 强制重新取一次数。 */
   refreshDynamicVariable: (id: string) => Promise<void>;
-  /**
-   * 把一个变量名从取值桶里剔除。
-   *
-   * 停用或删除之后调用它：留着旧值就等于停用之后仍然在替换。
-   */
+  /** 把一个变量名从取值桶里剔除。停用或删除之后调用它：留着旧值就等于停用之后仍然在替换。 */
   dropDynamicValue: (projectId: string, name: string) => void;
 }
 
@@ -121,10 +117,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
   dynamicError: null,
 
   /**
-   * 把一个变量名从取值桶里剔除。
-   *
-   * 停用或删除之后，它残留的旧值不该留着：请求编辑器把桶里的值并进变量池，
-   * 留着就等于停用之后仍然在替换。
+   * 把一个变量名从取值桶里剔除。停用或删除之后，它残留的旧值不该留着：请求编辑器把桶里的值
+   * 并进变量池，留着就等于停用之后仍然在替换。
    *
    * 桶按项目分，故要连项目一起给：同名变量在别的项目里还活着，那一份不能被一起删掉。
    */
@@ -231,8 +225,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       });
       // 值写进 store：请求编辑器下一次 `prepareRequest` 会用上它们。
       //
-      // 桶按项目分：跨项目取值（不点名项目）时那些值没有项目可落，故归到空串那一格——
-      // 那一格不参与任何项目的请求替换。
+      // 桶按项目分：跨项目取值（不点名项目）时那些值没有项目可落，故归到空串那一格——那一格不
+      // 参与任何项目的请求替换。
       const scope = projectId ?? '';
       set((s) => {
         const bucket = { ...(s.dynamicValues[scope] ?? {}) };
@@ -321,8 +315,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 /**
  * 一条定义属于哪个项目 —— 也就是「重载列表时该列哪个项目」。
  *
- * 优先用定义自己的归属项目；定义不在已加载的列表里（于是无从查它的归属）时退回
- * 当前活动项目 —— 那是用户正在看的那个，也是面板与请求页要显示的那一个。
+ * 优先用定义自己的归属项目；定义不在已加载的列表里（于是无从查它的归属）时退回当前活动项目
+ * ——那是用户正在看的那个，也是面板与请求页要显示的那一个。
  */
 function scopeOf(state: AppState, id: string): string | undefined {
   const definition = state.dynamicVariables.find((v) => v.id === id);

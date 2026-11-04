@@ -1,28 +1,17 @@
 /**
- * BaseUrlPicker —— HttpTester 里位于方法选择器与 URL 输入框之间的下拉。
+ * BaseUrlPicker —— HttpTester 里位于方法选择器与 URL 输入框之间的下拉。它只有两档：
+ * **跟随模块** 与 **自定义**。地址住在环境里的「环境 × 模块」那一格，故切环境即换地址，
+ * 而接口本身的设置不动。
  *
- * 它只有两档：**跟随模块** 与 **自定义**。地址住在环境里的「环境 × 模块」那一格，
- * 故切环境即换地址，而接口本身的设置不动。
- *
- * 组件完全受控，由父级持有：
- *   - `selection` —— 当前是哪一档
- *
- * 「自定义」刻意**没有自己的输入框**：选中它就把完整地址交给 URL 栏，在这里再加
- * 一个 host 框会为同一个请求制造第二个真相来源。带 host 的自定义仍按该 host 前缀
- * 解析 —— 此时 `resolvedBaseUrl` 非空 —— 并显示在触发器的副标签上。
+ * 「自定义」刻意**没有自己的输入框**：选中它就把完整地址交给 URL 栏，在这里再加一个 host
+ * 框会为同一个请求制造第二个真相来源。带 host 的自定义仍按该 host 前缀解析，并显示在触发器
+ * 的副标签上。
  *
  * 「跟随模块」那一行显示的是 `moduleBaseUrl`（环境里那一格的地址），不是
- * `resolvedBaseUrl`：端点处在「自定义」档时 `resolvedBaseUrl` 是端点自己的地址，
- * 拿它填那一行会把「切回跟随模块会用哪个地址」显示错。
+ * `resolvedBaseUrl`：端点处在「自定义」档时 `resolvedBaseUrl` 是端点自己的地址。
  *
- * 父级同时传入已解析的地址供触发器标签使用；此处不算，以保持选择器无知。
- *
- * 视觉风格：卡片式触发器（rounded-lg + 强调色图标容器），下移行采用 SettingRow 风格
- * （图标容器 + 主标签 + 副标签 + 末尾徽标），与新的设置分类观感一致。
- *
- * 位置：本组件住在 `features/http-tester/` 而非 `components/ui/`，因为它不是基础件 ——
- * 它写死了「跟随模块 / 自定义」的语义，且只有一个消费方（HttpTester）。它组合的那几个
- * 基础件才是 `components/ui/` 里货真价实的 primitive。
+ * 位置：本组件住在 `features/http-tester/` 而非 `components/ui/`，因为它写死了「跟随模块 /
+ * 自定义」的语义，且只有一个消费方（HttpTester）。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -40,16 +29,13 @@ export type BaseUrlSelection = { kind: 'module' } | { kind: 'override' };
 
 export interface BaseUrlPickerProps {
   /**
-   * 当前生效的地址：端点处在「自定义」档时是端点自己的 `baseUrlOverride`，处在
-   * 「跟随模块」档时是环境里那一格的地址。只用于触发器的副标签（如「· api.demo.dev」），
-   * 让用户一眼确认实际 host。
+   * 当前生效的地址：端点处在「自定义」档时是端点自己的 `baseUrlOverride`，处在「跟随模块」
+   * 档时是环境里那一格的地址。只用于触发器的副标签，让用户一眼确认实际 host。
    */
   resolvedBaseUrl: string;
   /**
-   * 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。
-   *
-   * 「跟随模块」那一行显示的是它。端点处在「自定义」档时这一行仍要显示这一格的
-   * 地址——用户要看得见「切回跟随模块会用哪个地址」。
+   * 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。「跟随模块」那一行显示的是它：
+   * 端点处在「自定义」档时这一行仍要显示这一格的地址。
    */
   moduleBaseUrl: string | null;
   selection: BaseUrlSelection;
@@ -58,11 +44,8 @@ export interface BaseUrlPickerProps {
 }
 
 /**
- * 「跟随模块」那一行的副标题。
- *
- * 它显示环境里「环境 × 模块」那一格的地址（`moduleBaseUrl`），不是端点自己的
- * `baseUrlOverride`。那一格没有地址时给一句提示，而不是显示端点自己的地址——
- * 端点自己的地址属于「自定义」那一行。
+ * 「跟随模块」那一行的副标题。它显示环境里「环境 × 模块」那一格的地址（`moduleBaseUrl`），
+ * 不是端点自己的 `baseUrlOverride`。那一格没有地址时给一句提示。
  */
 export function moduleRowSecondary(moduleBaseUrl: string | null): string {
   return moduleBaseUrl ? moduleBaseUrl : '环境里本模块没有配地址';
@@ -189,10 +172,8 @@ export function BaseUrlPicker({
 }
 
 /**
- * 下拉里的两行。
- *
- * 单独成一个组件，是为了让它能在没有浏览器的情况下被渲染出来核对：「跟随模块」那一行
- * 显示的是环境里那一格的地址，不是端点自己的地址。
+ * 下拉里的两行。单独成一个组件，是为了让它能在没有浏览器的情况下被渲染出来核对：「跟随模块」
+ * 那一行显示的是环境里那一格的地址，不是端点自己的地址。
  */
 export function BaseUrlPickerRows({
   selection,

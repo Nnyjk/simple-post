@@ -1,8 +1,8 @@
 //! HTTP 执行层。
 //!
-//! 纯 I/O——不含业务逻辑。调用方（Tauri command、MCP 守护进程或将来的 cron worker）构造
-//! [`HttpRequestInput`]、交给 [`execute`]、拿回一个 [`HttpResult`]，其形状与 React 渲染层
-//! 已经理解的线契约一致（见 `src/lib/http.ts::ApiResponse`）。
+//! 纯 I/O——不含业务逻辑。调用方（Tauri command、MCP 守护进程）构造 [`HttpRequestInput`]、
+//! 交给 [`execute`]、拿回一个 [`HttpResult`]，其形状与 React 渲染层已经理解的线契约一致
+//! （见 `src/lib/http.ts::ApiResponse`）。
 //!
 //! 本模块是后端里唯一与 `reqwest` 说话的地方。把线类型与真正的网络调用从 `lib.rs` 里拆出来，
 //! 使这一层能被 MCP 守护进程复用，而不必拖进 Tauri 的 `#[command]` 宏管线（以及随之而来的
@@ -17,12 +17,11 @@ use crate::domain::TlsSettings;
 
 // 线类型——镜像 TS 侧的 `ApiResponse` / `HttpError`。
 
-/// 成功的 HTTP 响应。字段名与 `ApiResponse` 一致，故 React 侧可以复用它现有的响应视图代码
-/// 而无需翻译层。
-/// `rename_all = "camelCase"` 是必需的属性，不是装饰：没有它 serde 会发出 `status_text` /
+/// 成功的 HTTP 响应。字段名与 `ApiResponse` 一致，故 React 侧可以复用它现有的响应视图代码。
+///
+/// `rename_all = "camelCase"` 是必需的属性：没有它 serde 会发出 `status_text` /
 /// `duration_ms` / `size_bytes` / `content_type`，而 `src/lib/http.ts` 读的是
-/// `statusText` / `durationMs` / `sizeBytes` / `contentType`——每一个都读回 `undefined`，
-/// 于是响应栏对每个请求都渲染成 `NaN s` 与 `0 B`，content type 也永远到不了阅读器。
+/// `statusText` / `durationMs` / `sizeBytes` / `contentType`——每一个都读回 `undefined`。
 /// `HttpResult` 与 `HttpError` 都带同一个属性，故两个类型的线格式一致。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,17 +36,12 @@ pub struct HttpResponse {
     ///
     /// 不只是调用方交下来的那些：传输层还会补上 `host`、`content-length` 与
     /// `accept-encoding`，而响应详情页要展示的是线上那一份，故这里给的是补齐后的集合。
-    /// 名字一律小写，与线路上的写法一致。
     pub request_headers: Vec<[String; 2]>,
     pub body: String,
     /// 响应体的**二进制形态**：原始字节的 base64。
     ///
-    /// 响应字节不是合法 UTF-8 时才有它（图片、压缩包、PDF…），此时 `body` 是宽松解码
-    /// 后的结果——非法字节已被替换成 U+FFFD，原始字节不可恢复。要预览图片、要下载文件，
-    /// 都得走这条通道。
-    ///
-    /// 字节是合法 UTF-8 时**不给**这条通道：文本响应不需要它，给了只是让每个响应多带
-    /// 一份同内容的拷贝。
+    /// 响应字节不是合法 UTF-8 时才有它（图片、压缩包、PDF…），此时 `body` 是宽松解码后的结果
+    /// ——非法字节已被替换成 U+FFFD，原始字节不可恢复。字节是合法 UTF-8 时不给这条通道。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body_base64: Option<String>,
     pub content_type: String,
@@ -59,8 +53,7 @@ pub struct HttpResponse {
 
 /// 传输层失败。与 `HttpResponse.status == 0` 不同——后者是前端用来表示 HTTP 层的非 2xx。
 /// 本类型表示「请求从未抵达应用层」——DNS、连接、TLS、重置、中止、超时。
-/// `rename_all` 当前是空操作（两个字段都是单词），但它必须与 [`HttpResponse`] 用同一个
-/// 属性，否则两个类型的线格式会不一致。
+/// `rename_all` 当前是空操作（两个字段都是单词），但它必须与 [`HttpResponse`] 用同一个属性。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpError {
@@ -113,11 +106,10 @@ pub struct HttpRequestInput {
     pub body: Option<String>,
     /// 请求体的**二进制形态**：原始字节的 base64。
     ///
-    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。multipart 带文件分片时整个
-    /// 请求体是字节，故走这条通道；纯文本的请求体仍走 `body`。
+    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。multipart 带文件分片时整个请求体是字节，
+    /// 故走这条通道；纯文本的请求体仍走 `body`。
     ///
-    /// 两者都有时以本字段为准：调用方交下来的 body 形态与字节形态不一致时，发出去的是
-    /// 字节那份——它才是能被还原成文件的那份。
+    /// 两者都有时以本字段为准——字节那份才是能被还原成文件的那份。
     pub body_base64: Option<String>,
     pub timeout_ms: u64,
     pub follow_redirects: bool,
@@ -128,28 +120,23 @@ pub struct HttpRequestInput {
 }
 
 // 内部实现——小到把它们内联为 `pub(crate)` 能保持公开接口干净。lib.rs 里的 Tauri command 与
-// 将来的 MCP 守护进程都调 `execute`；别的都不需要碰这些。
+// MCP 守护进程都调 `execute`；别的都不需要碰这些。
 
 /// 把文本形式的 HTTP 方法解析成 `reqwest::Method`，未知动词回退 GET（前端已经在已知列表上
 /// 把过一道）。
 pub(crate) fn parse_method(method: &str) -> reqwest::Method {
-    match method.to_ascii_uppercase().as_str() {
-        "GET" => reqwest::Method::GET,
-        "POST" => reqwest::Method::POST,
-        "PUT" => reqwest::Method::PUT,
-        "DELETE" => reqwest::Method::DELETE,
-        "PATCH" => reqwest::Method::PATCH,
-        "HEAD" => reqwest::Method::HEAD,
-        "OPTIONS" => reqwest::Method::OPTIONS,
-        other => reqwest::Method::from_bytes(other.as_bytes()).unwrap_or(reqwest::Method::GET),
-    }
+    // 动词表只有一份：`domain::parse_http_method` 是 MCP 工具与 `HttpMethod` 反序列化
+    // 共用的那个解析器。
+    crate::domain::parse_http_method(method)
+        .ok()
+        .and_then(|m| reqwest::Method::from_bytes(m.as_str().as_bytes()).ok())
+        .unwrap_or(reqwest::Method::GET)
 }
 
-/// 把 body 字符串裁到至多 `max_bytes` 字节（落在 UTF-8 安全的字符边界上）。被裁时加上一个
-/// 标记。与原 fetch 路径的截断契约一致。
+/// 把 body 字符串裁到至多 `max_bytes` 字节（落在 UTF-8 安全的字符边界上）。被裁时加上一个标记。
 ///
-/// 这条契约同时是**流式读取路径**的裁剪判据：流式路径把「读到的原始字节」解码成字符串后
-/// 交给本函数，故裁剪点与标记文案只有这一个产生点，不会出现两条路径各裁各的。
+/// 这条契约同时是**流式读取路径**的裁剪判据：流式路径把「读到的原始字节」解码成字符串后交给
+/// 本函数，故裁剪点与标记文案只有这一个产生点。
 pub(crate) fn truncate_body(body: String, max_bytes: u64) -> (String, bool) {
     if max_bytes == 0 {
         return (body, false);
@@ -189,8 +176,8 @@ fn truncate_bytes(bytes: &[u8], max_bytes: u64) -> (Vec<u8>, bool) {
 /// 响应体的两种形态。
 ///
 /// 文本形态是宽松解码后的字符串；二进制形态是原始字节的 base64。**判据先问 Content-Type，
-/// 再问字节**：Content-Type 说它是文本就是文本（哪怕读到的字节非法 UTF-8——那是裁点切开
-/// 多字节字符造成的）；Content-Type 没说它是文本，才轮到字节说话。
+/// 再问字节**：Content-Type 说它是文本就是文本（哪怕读到的字节非法 UTF-8）；没说它是文本，
+/// 才轮到字节说话。
 pub(crate) struct ResponsePayload {
     /// 文本形态。
     pub text: String,
@@ -204,15 +191,11 @@ pub(crate) struct ResponsePayload {
 
 /// 把读回来的原始字节分成文本与二进制两种形态。
 ///
-/// 文本形态走的是 [`truncate_body`]：宽松解码后再按字符边界裁，与对照读法
-/// （`Response::text()` 之后交给同一个函数）逐字节一致。**先裁字节再解码会给出另一个
-/// 答案**——落在裁点上的半个多字节字符在两种顺序下解出不同的东西。
+/// 文本形态走 [`truncate_body`]：宽松解码后再按字符边界裁。**先裁字节再解码会给出另一个答案**
+/// ——落在裁点上的半个多字节字符在两种顺序下解出不同的东西。二进制形态按字节裁。
 ///
-/// 二进制形态按字节裁：它给的是原始字节，字符边界对它没有意义。
-///
-/// **形态的判据是「内容是不是文本」，不是「读到的这段字节是不是合法 UTF-8」**：读到的
-/// 字节是按上限裁过的，裁点落在某个多字节字符中间时，一个纯文本响应读回来也是非法
-/// UTF-8。故先问 Content-Type，再问字节。
+/// **形态的判据是「内容是不是文本」，不是「读到的这段字节是不是合法 UTF-8」**：读到的字节是按
+/// 上限裁过的，裁点落在某个多字节字符中间时，一个纯文本响应读回来也是非法 UTF-8。
 pub(crate) fn split_response_payload(
     raw: Vec<u8>,
     max_bytes: u64,
@@ -243,10 +226,8 @@ pub(crate) fn split_response_payload(
 /// 这个 Content-Type 说它的内容是文本吗？
 ///
 /// 主类型是 `text`，或子类型以 `json` / `xml` 结尾，或子类型是那几个明确的文本类型
-/// （`javascript`、`x-www-form-urlencoded`、`graphql`）。
-///
-/// `application/octet-stream`、`image/*`、`application/pdf`、`application/zip` 都不算：
-/// 它们的内容是字节，宽松解码会把它们弄坏。
+/// （`javascript`、`x-www-form-urlencoded`、`graphql`）。`application/octet-stream`、
+/// `image/*`、`application/pdf`、`application/zip` 都不算：宽松解码会把它们弄坏。
 fn is_textual_content_type(content_type: &str) -> bool {
     let main = content_type
         .split(';')
@@ -286,14 +267,11 @@ pub(crate) fn request_body_bytes(input: &HttpRequestInput) -> Result<Option<Vec<
 /// 回退才与整读落在同一个偏移上。
 const BOUNDARY_LOOKAHEAD_BYTES: u64 = 4;
 
-/// 流式读取响应体：边读边计数，累计到上限就停，剩下的字节直接丢弃。
+/// 流式读取响应体：边读边计数，累计到上限就停，剩下的字节直接丢弃。缓冲区的大小只与上限有关，
+/// 与响应大小无关。`max_bytes == 0` 表示不设上限，整个 body 都要读进来。
 ///
-/// 缓冲区的大小只与上限有关，与响应大小无关。
-///
-/// `max_bytes == 0` 表示不设上限，整个 body 都要读进来。
-///
-/// 读的是**原始字节**，不解码：响应可能是二进制（图片、压缩包），解码会破坏它。
-/// 解码与「文本还是二进制」的判定由 [`split_response_payload`] 做。
+/// 读的是**原始字节**，不解码：响应可能是二进制（图片、压缩包），解码会破坏它。解码与
+/// 「文本还是二进制」的判定由 [`split_response_payload`] 做。
 async fn read_body_capped(
     mut res: reqwest::Response,
     max_bytes: u64,
@@ -338,8 +316,8 @@ const TRANSPORT_ACCEPT_ENCODING: &str = "gzip,deflate,br";
 
 /// 这一次真正发出去的请求头。
 ///
-/// 调用方交下来的那些按原样保留（名字转小写，与线路上的写法一致），传输层补的几条
-/// 追加在后面。调用方自己写过的同名头不补第二条：线路上发出去的是调用方那一份。
+/// 调用方交下来的那些按原样保留（名字转小写），传输层补的几条追加在后面。调用方自己写过的同名头
+/// 不补第二条：线路上发出去的是调用方那一份。
 ///
 /// `body_len` 是**请求体的字节数**。它不能从 `input.body` 的字符串长度取：请求体也可能是
 /// base64 形态的二进制，那时字符串长度是字节数的四分之三，而线路上写的是字节数。
@@ -442,10 +420,9 @@ pub enum UrlVerdict {
     Refused(String),
 }
 
-/// 判定为绝不该通过服务端代理抵达的 IP：loopback、RFC1918、link-local（含
-/// 169.254.169.254 处的云元数据）、运营商级 NAT、以及 IPv6 unique-local。
-/// 此处**不**解析主机名：解析会在检查与拨号之间开出一个 DNS rebinding 窗口；需要基于名字的
-/// 策略时，调用方应当显式地接受那个取舍，而不是被悄悄上一个半吊子的措施。
+/// 判定为绝不该通过服务端代理抵达的 IP：loopback、RFC1918、link-local（含 169.254.169.254 处的
+/// 云元数据）、运营商级 NAT、以及 IPv6 unique-local。
+/// 此处**不**解析主机名：解析会在检查与拨号之间开出一个 DNS rebinding 窗口。
 fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
@@ -520,8 +497,7 @@ pub fn check_url(url: &str, policy: OutboundPolicy) -> UrlVerdict {
 
 /// 经 `reqwest` 发出真实 HTTP 请求，绕开浏览器 CORS。纯异步 I/O；无共享状态。
 /// 前端调 `lib.rs` 里的 `http_request` Tauri command，由它转发到这里。MCP 守护进程
-/// （`crate::mcp`）今天经它自己的 `execute_http` 转发层路由请求，待该兼容层退役后会
-/// 直接调这里。
+/// （`crate::mcp`）经它自己的 `execute_http` 转发层路由请求。
 pub async fn execute(input: &HttpRequestInput) -> HttpResult {
     execute_with_policy(input, OutboundPolicy::from_env()).await
 }
@@ -535,8 +511,7 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         return HttpResult::err("network", reason);
     }
 
-    // 每次调用一个 Client，好让 API 保持请求作用域；将来若想要跨调用的连接池，
-    // 可以把它提到 `tauri::State`。
+    // 每次调用一个 Client，好让 API 保持请求作用域。
     //
     // 重定向策略在**每一跳**上都重跑 `check_url`。只查初始 URL 会让整道守卫变成摆设：
     // 开着 `follow_redirects`（默认）时，一个回答 `302 Location: http://169.254.169.254/…`

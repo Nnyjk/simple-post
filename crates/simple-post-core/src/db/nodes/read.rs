@@ -113,14 +113,12 @@ pub fn root_id_of(conn: &mut Connection, id: &str) -> Result<String, AppError> {
     })
 }
 
-/// 某节点挂在哪个模块下，不在模块下则为 `None`。
-/// 除模块本身外每个节点上方恰有一个模块，而 endpoint 配置的 base URL 正以该模块为键：
-/// 现役值层是 `moduleBaseUrls[module]`，故解析一个 endpoint 的 URL 要先问这个节点属于哪个
-/// 模块，再去那一格里取值。此函数是第一步。这是树上的问题而非该行自身的属性，故不像
-/// `root_id` 那样反范式化。
-/// `None` 是真实答案而非失败：该节点自身可能就是模块，或者根本不存在。需要区分二者的调用方
-/// 先问 [`type_of`]，或干脆把「没有模块」当作「没有 base URL」，解析器正是这么做的。
-/// 向上遍历跳过节点自身，故模块不会被当成自己的答案。
+/// 某节点挂在哪个模块下，不在模块下则为 `None`。除模块本身外每个节点上方恰有一个模块，
+/// 而 endpoint 配置的 base URL 正以该模块为键，故解析一个 endpoint 的 URL 要先问这个节点属于
+/// 哪个模块。这是树上的问题而非该行自身的属性，故不像 `root_id` 那样反范式化。
+///
+/// `None` 是真实答案而非失败：该节点自身可能就是模块，或者根本不存在。向上遍历跳过节点自身，
+/// 故模块不会被当成自己的答案。
 pub fn module_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, AppError> {
     let found: Option<String> = conn
         .query_row(
@@ -180,20 +178,15 @@ pub fn subtree_ids(conn: &mut Connection, roots: &[String]) -> Result<Vec<String
     Ok(ids)
 }
 
-/// 某个容器节点子树下的全部端点，按**树的显示顺序**排。
-///
-/// 顺序与界面渲染的那一套一致（渲染侧见 `src/features/project-tree/tree-utils.ts` 的
-/// `buildTree`，它把一个容器自己的接口画在它的子集合**之上**）：
+/// 某个容器节点子树下的全部端点，按**树的显示顺序**排。顺序与界面渲染的那一套一致
+/// （渲染侧见 `src/features/project-tree/tree-utils.ts` 的 `buildTree`）：
 ///
 ///   1. 容器**直接持有**的接口，按 `(sort_order, id)`；
-///   2. 然后容器**直接持有**的子集合，按 `(sort_order, id)`，逐个递归——子集合自己的
-///      接口先出，然后才是它的子集合。
+///   2. 然后容器**直接持有**的子集合，按 `(sort_order, id)`，逐个递归——子集合自己的接口先出，
+///      然后才是它的子集合。
 ///
 /// 故这不是纯粹的深度优先前序：一个集合的接口全部出完，才轮到它的第一个子集合。
-/// 批量运行按这个次序发请求，与用户在树上看到的行序一致。
-///
-/// `root_id` 指向的节点不存在时返回空列表（不是错误）——调用方通常已经查过那棵树，
-/// 这里只回答「它下面有哪些端点」。
+/// `root_id` 指向的节点不存在时返回空列表（不是错误）。
 pub fn ordered_subtree_endpoints(
     conn: &mut Connection,
     root_id: &str,
@@ -293,10 +286,8 @@ fn push_containers(
     stack.extend(containers);
 }
 
-/// 一个节点的直接子节点，按显示序排列。
-/// `kind` 可收窄到单一类型。在合并后的树上，这是「列出这个 collection 里的 endpoint」唯一
-/// 需要的查询。
-/// 非递归：要整棵子树，用 [`subtree_ids`] 配 [`list_by_root_and_type`]，或从根沿父回溯。
+/// 一个节点的直接子节点，按显示序排列。`kind` 可收窄到单一类型。非递归：要整棵子树，用
+/// [`subtree_ids`] 配 [`list_by_root_and_type`]，或从根沿父回溯。
 pub fn list_children(
     conn: &mut Connection,
     parent_id: &str,
@@ -357,10 +348,8 @@ pub fn search_paths(
     Ok(out)
 }
 
-/// 一个节点的祖先名字，自上而下：先是项目名，再是模块与集合的名字。
-///
-/// 上溯有深度上限：数据里的环会让无上限的循环永远转下去，而一次失败的查找不该拖垮
-/// 整个界面。
+/// 一个节点的祖先名字，自上而下：先是项目名，再是模块与集合的名字。上溯有深度上限：数据里
+/// 的环会让无上限的循环永远转下去。
 fn ancestors(conn: &mut Connection, node: &ResourceNode) -> Result<Vec<String>, AppError> {
     const MAX_DEPTH: usize = 64;
 

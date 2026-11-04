@@ -34,20 +34,14 @@ pub(crate) async fn projects_get(
 /// 创建项目，并种下它的默认环境。
 ///
 /// 有两种 body 形状，都仍在使用：
-///
 /// - `{ "name": …, "opts": { description, color } }` —— `invokeCmd(COMMANDS.projectsCreate, …)`
-///   发的就是这个，因为 `WEB_ROUTES.projectsCreate` 没有 `body:` mapper，参数对象*就是*
-///   payload。这是 SPA 自己的契约。
+///   发的就是这个，因为 `WEB_ROUTES.projectsCreate` 没有 `body:` mapper，参数对象*就是* payload。
 /// - 打平的 `Project` —— 文档化的公共 v1 形状，外部 REST 客户端使用。
 ///
-/// 两者都解析：`Project` 没有 `opts` 字段，而 serde 会静默丢弃未知键，于是按 `Project`
-/// 解析会让 create 表单的 description 与 colour 全被丢掉，只剩 name 返回。
-///
-/// `opts` 在场时优先，否则从打平的字段里读。base URL 不在其中：它不是项目属性，
-/// `Project.base_url` 是遗留字段且从不持久化。
-///
-/// 这一侧只负责线格式：两种 body 形状的挑选、`name` 缺席时的报错，以及
-/// `ensure_server_id` 补 id。
+/// 两者都解析：`Project` 没有 `opts` 字段，而 serde 会静默丢弃未知键，于是按 `Project` 解析会让
+/// create 表单的 description 与 colour 全被丢掉，只剩 name 返回。`opts` 在场时优先，否则从打平
+/// 的字段里读。base URL 不在其中：它不是项目属性，`Project.base_url` 是遗留字段且从不持久化。
+/// 这一侧只负责线格式：两种 body 形状的挑选、`name` 缺席时的报错，以及 `ensure_server_id` 补 id。
 pub(crate) async fn projects_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,

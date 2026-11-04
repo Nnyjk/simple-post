@@ -15,9 +15,8 @@ import {
 } from './varHint';
 
 /**
- * 变量提示的状态与处理器。
- *
- * 字段的当前文本由调用方给，写回也由调用方做——本 hook 不碰 store，也不持有字段本身。
+ * 变量提示的状态与处理器。字段的当前文本由调用方给，写回也由调用方做 —— 本 hook 不碰
+ * store，也不持有字段本身。
  */
 export interface VarHint {
   /** 浮层是否该出现。 */
@@ -32,10 +31,8 @@ export interface VarHint {
   /** 字段文本变了：写回并更新浮层开关。 */
   change: (next: string) => void;
   /**
-   * 文本被别处改成了这样：只更新浮层开关，不写回。
-   *
-   * CodeMirror 的文档是编辑器自己改的，文本先到组件、再由组件写回 store，故那条路径
-   * 不能用 `change`（它会写回一次刚被编辑器写过的文本）。
+   * 文本被别处改成了这样：只更新浮层开关，不写回。CodeMirror 的文档是编辑器自己改的，
+   * 文本先到组件、再由组件写回 store，故那条路径不能用 `change`。
    */
   sync: (next: string) => void;
   /** 键盘导航与确认。 */
@@ -50,27 +47,22 @@ export interface UseVarHintOptions {
   /** 写回字段文本。 */
   onChange: (next: string) => void;
   /**
-   * 插入完成后把光标放到变量 token 的末尾。
-   *
-   * 调用方负责移动光标：普通输入框用 `setSelectionRange`，CodeMirror 用一次选区变更。
+   * 插入完成后把光标放到变量 token 的末尾。调用方负责移动光标：普通输入框用
+   * `setSelectionRange`，CodeMirror 用一次选区变更。
    */
   onCaret?: (caret: number) => void;
   /** 候选条目：环境变量与动态变量并进同一份列表。 */
   entries: VarEntry[];
   /**
-   * 光标在 `value` 里的下标。
-   *
-   * 缺省是文本末尾，故普通输入框不必给；CodeMirror 给出真实光标位置，于是「半个变量名」
-   * 取的是光标之前的那一段，而不是整篇文档的末尾。
+   * 光标在 `value` 里的下标。缺省是文本末尾，故普通输入框不必给；CodeMirror 给出真实
+   * 光标位置，于是「半个变量名」取的是光标之前的那一段，而不是整篇文档的末尾。
    */
   caret?: number;
 }
 
 /**
- * 变量注入提示的状态机。
- *
- * 浮层的开关跟着文本走：文本里没有未闭合的 `{{` 时它就该消失，用户把 `{{` 敲完整了它也
- * 该消失（那已经是写好的变量，不再需要候选）。
+ * 变量注入提示的状态机。浮层的开关跟着文本走：文本里没有未闭合的 `{{` 时它就该消失，
+ * 用户把 `{{` 敲完整了它也该消失（那已经是写好的变量，不再需要候选）。
  */
 export function useVarHint({
   value,

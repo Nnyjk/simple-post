@@ -1,21 +1,14 @@
 /**
  * ModuleBaseUrlSection —— **模块** 标签下的地址层。
  *
- * 它回答什么，以及为何不是 `EnvironmentSection`
- * ------------------------------------------------
- * 项目的「环境」分区回答的是「本项目有哪些环境，每个模块在各环境里的地址是什么」——
- * 一个以模块为行轴的表。在某个模块自己的标签里，这个问题已经被面板标题回答过了，
- * 留着模块这一列只会在那一行上重复打印同一个名字。
+ * 项目的「环境」分区回答的是「本项目有哪些环境，每个模块在各环境里的地址是什么」，一个以
+ * 模块为行轴的表。在某个模块自己的标签里，这个问题已经被面板标题回答过了。
  *
- * 所以这就是同一张表，只是把模块这一维塌成一项：列出每个环境，以及本模块在各环境下
- * 的地址与代理地址。它仍是 `ModuleBaseUrlTable` 的 `module` 模式 —— 单元格语义
- * （一个值只属于唯一的「环境 × 模块」格子，且无可继承）正是该组件存在的全部理由，
- * 再来一张表就等于让这条规则有第二个住处。
+ * 所以这就是同一张表，只是把模块这一维塌成一项：列出每个环境，以及本模块在各环境下的
+ * 地址与代理地址。它仍是 `ModuleBaseUrlTable` 的 `module` 模式 —— 单元格语义（一个值只属于
+ * 唯一的「环境 × 模块」格子，且无可继承）正是该组件存在的全部理由。
  *
- * 它刻意不提供什么
- * ----------------
- * 环境的新建 / 删除排除在外：环境条仍是 `EnvSwitcher`，故列表读起来完全一样，
- * 只是少了那两个项目级按钮。
+ * 它刻意不提供环境的新建 / 删除：环境条仍是 `EnvSwitcher`，故列表读起来完全一样。
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -43,9 +36,7 @@ export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
   );
 
   // 列表形状一变就回到「本客户端当前用的那个环境」，除非用户已明确选过。规则同
-  // `EnvironmentSection`，两条环境条行为一致。
-  //
-  // 当前环境不属于这个模块所属的项目时（看的是别的项目的模块）才退回默认环境。
+  // `EnvironmentSection`。当前环境不属于这个模块所属的项目时才退回默认环境。
   useEffect(() => {
     if (projectEnvs.length === 0) {
       setActiveId(null);
@@ -75,8 +66,7 @@ export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
         environments={projectEnvs}
         activeId={activeId}
         onPick={setActiveId}
-        // 空操作：这条环境条上两个控件都隐藏了，但 props 仍是必填，日后有人在这里翻
-        // `showDelete` 也不会调到 undefined 回调。
+        // 空操作：这条环境条上两个控件都隐藏了，但 props 仍是必填，故这两个回调不会被调用。
         onRequestDelete={() => undefined}
         onAdd={() => undefined}
         showAdd={false}

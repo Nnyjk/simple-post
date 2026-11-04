@@ -2,19 +2,17 @@
 //!
 //! 此处并存两层：
 //!
-//! 1. **逐项目 [`Permission`]**（Read / ReadCall / Full）——历史那一道门，存在
-//!    `agent_permissions` 表里。MCP 工具 handler 的 [`require`] 包装器在跑一个会改动的工具
-//!    前查这张表。新的代码应优先用全局 [`CapabilityPolicy`] 回答「这个工具该不该被 agent
-//!    看到/调用」，再落到逐项目 [`Permission`] 回答「这个具体项目可不可写」。
-//! 2. **全局 [`CapabilityPolicy`]**（ReadOnly / SafeWrite / FullAccess）——用户在设置面板里
-//!    配的更高阶一道门，存在 `preferences.mcp.policy`。它同时驱动 `tools/list` 的可见性与
-//!    每次 `tools/call` 上的第二道预检。逐项目是 "Read" 而全局是 "SafeWrite" 无关紧要，反之
-//!    亦然——我们取保守的较大者（更严的一侧胜出）。
+//! 1. **全局 [`CapabilityPolicy`]**（ReadOnly / SafeWrite / FullAccess）——用户在设置面板里配的
+//!    高阶一道门，存在 `preferences.mcp.policy`。它同时驱动 `tools/list` 的可见性与每次
+//!    `tools/call` 上的第二道预检。
+//! 2. **逐项目 [`Permission`]**（Read / ReadCall / Full）——存在 `agent_permissions` 表里。
+//!    MCP 工具 handler 的 [`require`] 包装器在跑一个会改动的工具前查这张表。
 //!
-//! [`Permission`] 枚举住在 `crate::domain`（镜像 `src/types/domain.ts`），本模块重导出它，
-//! 好让调用方写 `use crate::permissions::Permission` 而不必直接依赖 `domain`。
-//! [`CapabilityPolicy`] / [`Capability`] 住在这里，因为它们是 MCP 专属的（`permissions` 表与
-//! 渲染层的逐项目权限表单共享，而能力层不共享）。
+//! 新的代码应优先用全局 [`CapabilityPolicy`] 回答「这个工具该不该被 agent 看到/调用」，再落到
+//! 逐项目 [`Permission`] 回答「这个具体项目可不可写」。两侧都问时取更严的那一个。
+//!
+//! [`Permission`] 枚举住在 `crate::domain`（镜像 `src/types/domain.ts`），本模块重导出它。
+//! [`CapabilityPolicy`] / [`Capability`] 住在这里，因为它们是 MCP 专属的。
 
 use serde::{Deserialize, Serialize};
 
@@ -64,9 +62,7 @@ impl CapabilityPolicy {
     }
 
     /// 本档位是否覆盖某个 [`Capability`] 类。全序 Read < Create < Update < Delete < Send
-    /// （Delete 与 Send 同级——两者都是破坏性/外发的）。
-    /// 注意 Send 在最顶，因为 `api_run_request` / `api_call_endpoint` 真的会发出站 HTTP
-    /// 请求——「让 AI 发网络请求」是我们授予的最高信任级别。
+    /// （Delete 与 Send 同级）。Send 要求最高档位，因为它真的会发出站 HTTP 请求。
     pub fn satisfies(&self, required: Capability) -> bool {
         let rank_required = capability_rank(required);
         let rank_self = match self {
@@ -85,7 +81,9 @@ impl CapabilityPolicy {
 
 /// 单个工具所需的 capability 类。供全局能力门使用（逐项目的 `permissions` 表用的是另一个
 /// [`Permission`] 枚举）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+// 不派生 `PartialOrd`/`Ord`：那会把 `Send` 排在 `Delete` 之上，而实际用的
+// `capability_rank` 让两者同级。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
     /// 纯观察——无网络，无状态变化。
     Read,
@@ -110,9 +108,8 @@ fn capability_rank(c: Capability) -> u8 {
     }
 }
 
-/// 把工具名映射到它所需的最低权限。
-/// **未列出**的一切都默认为 [`Permission::Full`]。这是安全的方向——一个没有在此登记就
-/// 加进来的新写入工具会要求 Full，绝不会是 Read。
+/// 把工具名映射到它所需的最低权限。**未列出**的一切都默认为 [`Permission::Full`]：一个没有
+/// 在此登记就加进来的新写入工具会要求 Full，绝不会是 Read。
 pub fn required_permission(tool_name: &str) -> Permission {
     match tool_name {
         // Read——纯检查，无网络。
@@ -182,18 +179,14 @@ fn rank(p: Permission) -> u8 {
 
 // resolve_capability——把全局策略与逐项目权限合并
 
-/// 解析应当给下一次 MCP 工具调用把关的**有效**能力策略。两个输入：
-/// 1. 全局的 `mcp.policy` 偏好（三档开关）。
-/// 2. 逐项目的 `permissions` 行（自 v0.1 起就在 schema 里的向后兼容层）。
+/// 解析应当给下一次 MCP 工具调用把关的**有效**能力策略。两个输入：全局的 `mcp.policy`
+/// 偏好（三档开关）与逐项目的 `permissions` 行。
 ///
-/// `project_id == None` ⇒ 只有全局偏好要紧（例如 `tools/list` 在不碰任何项目的前提下
-/// 构建用户可见的工具清单）。
-/// `project_id == Some(_)` ⇒ 两侧都问，取二者中**更严**的。理由：全局档位是 "ReadOnly"
-/// 而项目授予 `Full` 时，项目那份授予不能推翻用户「把 AI 写操作全局关掉」的选择；反过来，
-/// 全局是 "FullAccess" 而项目只有 `ReadCall` 时，项目那份限制性授予胜出。保守的方向是唯一
-/// 安全的方向。
-/// 存储失败（preferences 或 permissions 查询）时返回 `AppError::Db`。只读操作用它；
-/// 调用方应把该错误当作拒绝（不要静默退回一个从宽的默认值）。
+/// `project_id == None` ⇒ 只有全局偏好要紧（例如 `tools/list` 在不碰任何项目的前提下构建
+/// 用户可见的工具清单）。`project_id == Some(_)` ⇒ 两侧都问，取二者中**更严**的：全局档位是
+/// "ReadOnly" 而项目授予 `Full` 时，项目那份授予不能推翻用户「把 AI 写操作全局关掉」的选择。
+///
+/// 存储失败（preferences 或 permissions 查询）时返回 `AppError::Db`。调用方应把该错误当作拒绝。
 pub async fn resolve_capability(
     pool: &crate::db::DbPool,
     project_id: Option<&str>,

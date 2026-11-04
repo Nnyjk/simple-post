@@ -1,17 +1,16 @@
 /**
- * ui-slice 的公开接口。实现按关注点拆到 `./slices/`，在这里组合，
- * 不在 `app-store.ts` 里注册为独立 slice。
+ * ui-slice 的公开接口。实现按关注点拆到 `./slices/`，在这里组合，不在 `app-store.ts` 里
+ * 注册为独立 slice。
  *
- * 多个 action 刻意在同一次 `set()` 里写别的 slice 的键——`submitNewItem` 写
- * `lastCreatedId` 并调 `addProject` / `addNode` / `setActiveEndpoint`；`deleteNode`
- * 一起剪掉 `responseHistory` / `responseExamples` / `openTabs` / `endpointDrafts`；
- * `saveDraftEndpoint` 按顺序改 draft map、endpoint-draft map 和两份标签列表。
- * 拆成多次 `get().closeTab()` 式的调用会把一次 `set()` 变成多次，
- * IPC 失败时能回滚的状态也就不一样了。
+ * 多个 action 刻意在同一次 `set()` 里写别的 slice 的键——`submitNewItem` 写 `lastCreatedId`
+ * 并调 `addProject` / `addNode` / `setActiveEndpoint`；`deleteNode` 一起剪掉 `responseHistory` /
+ * `responseExamples` / `openTabs` / `endpointDrafts`；`saveDraftEndpoint` 按顺序改 draft map、
+ * endpoint-draft map 和两份标签列表。拆成多次 `get().closeTab()` 式的调用会把一次 `set()`
+ * 变成多次，IPC 失败时能回滚的状态也就不一样了。
  *
- * 拓扑是星形：子工厂可 import `../store-types` 与共享的 `AppState` 类型，
- * 彼此之间、以及与本文件之间都不互相 import。各取标准
- * `(set, get, store)` 三元组，只返回自己的 state + action 对象。
+ * 拓扑是星形：子工厂可 import `../store-types` 与共享的 `AppState` 类型，彼此之间、以及与
+ * 本文件之间都不互相 import。各取标准 `(set, get, store)` 三元组，只返回自己的 state + action
+ * 对象。
  */
 import type { StateCreator } from 'zustand';
 import type { AppState } from './app-store';

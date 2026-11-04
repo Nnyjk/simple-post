@@ -33,10 +33,8 @@ export interface TransferSession {
 }
 
 /**
- * 一条边上的五个阶段。
- *
- * `source`（选文件 / 填链接）与 `preview`（勾选）是**分开**的两屏：选来源时没什么
- * 可看的，而预览可能有几百行，两者塞进一屏会让来源那三个控件被挤到看不见。
+ * 一条边上的五个阶段。`source`（选文件 / 填链接）与 `preview`（勾选）是**分开**的两屏：
+ * 选来源时没什么可看的，而预览可能有几百行。
  */
 export type TransferPhase = 'source' | 'working' | 'preview' | 'done';
 
@@ -50,10 +48,8 @@ function errorText(e: unknown): string {
 }
 
 /**
- * 导出预览里「这个环境下没有配地址」的模块名。
- *
- * 空数组是真实答案：那个环境里每个模块都配了地址。模块名取自**这一趟预览**，
- * 故换过环境之后它讲的是新环境下的事实。
+ * 导出预览里「这个环境下没有配地址」的模块名。空数组是真实答案：那个环境里每个模块都配了
+ * 地址。模块名取自**这一趟预览**，故换过环境之后它讲的是新环境下的事实。
  */
 export function missingBaseUrlModules(preview: ImportPreview | ExportPreview | null): string[] {
   // `format` 只在导入预览里有，故它是两者的判别键；导出预览的 `baseUrls` 缺席那一项
@@ -63,10 +59,8 @@ export function missingBaseUrlModules(preview: ImportPreview | ExportPreview | n
 }
 
 /**
- * 提示里点名的环境。
- *
- * 按**所选**环境取名字：下拉里选的是哪个环境，提示就该说哪个环境——写死的
- * 「该环境」在换过环境之后指的是旧环境，说的与做的不一致。
+ * 提示里点名的环境。按**所选**环境取名字：下拉里选的是哪个环境，提示就该说哪个环境 ——
+ * 写死的「该环境」在换过环境之后指的是旧环境，说的与做的不一致。
  *
  * `selectedId` 为空（「不选环境」那一项）时没有环境可点，故不给名字。
  */
@@ -79,10 +73,8 @@ export function missingEnvironmentName(
 }
 
 /**
- * 取一趟导出预览。
- *
- * `environmentId` 决定 `baseUrls` 按哪个环境解析：空串与「没传」等价，服务端那侧
- * 都退回默认环境（最早创建的那个）——「不选环境」那一项送来的就是空串。
+ * 取一趟导出预览。`environmentId` 决定 `baseUrls` 按哪个环境解析：空串与「没传」等价，
+ * 服务端那侧都退回默认环境（最早创建的那个）。
  */
 export async function fetchExportPreview(args: {
   projectId: string;
@@ -183,12 +175,10 @@ export function useTransfer(options: UseTransferOptions = {}) {
   /**
    * 换导出环境。
    *
-   * 环境一变，「哪些模块没有地址」就是**那个环境**下的事实，故要重取一趟预览：
-   * 沿用打开弹窗时那一趟（按默认环境算的）会把已经配好地址的模块点成缺地址，
-   * 真正缺地址的模块反而不被点名。
+   * 环境一变，「哪些模块没有地址」就是**那个环境**下的事实，故要重取一趟预览：沿用打开
+   * 弹窗时那一趟（按默认环境算的）会把已经配好地址的模块点成缺地址。
    *
-   * 勾选**不重置**：勾选集的成员是节点 id，换环境不产生新节点，用户勾过的东西
-   * 不该因为换了个环境就消失。
+   * 勾选**不重置**：勾选集的成员是节点 id，换环境不产生新节点。
    */
   const changeEnvironment = useCallback(
     async (id: string) => {
