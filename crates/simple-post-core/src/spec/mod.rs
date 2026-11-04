@@ -368,7 +368,8 @@ pub fn find_endpoint_by_identity(
 /// 铸一个带前缀的 id。
 ///
 /// **绝不能用「前缀 + 毫秒时钟」**：同一毫秒内两次创建会得到同一个主键，第二次直接撞
-/// `nodes.id` 约束。[`crate::domain::uid`] 是本仓库的 id 唯一来源：纳秒 + 进程内计数器。
+/// `nodes.id` 约束。[`crate::domain::uid`] 是本仓库的 id 唯一来源：纳秒 + 进程内计数器
+/// （计数器的重启 caveat 见 `uid` 的文档）。
 pub fn mint_id(prefix: &str) -> String {
     uid().replacen("sp_", &format!("{prefix}_"), 1)
 }

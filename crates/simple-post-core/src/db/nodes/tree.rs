@@ -133,11 +133,14 @@ pub fn move_many(
     Ok(())
 }
 
-/// 把一个模块转到另一个项目，并落到指定的顶层槽位。[`move_many`] 表达不了的那一种移动：
-/// 它没有父行可读 root，于是保留模块当前的 `root_id`。
+/// 把一个模块转到另一个项目，并落到指定的顶层槽位。[`move_many`] 表达不了的那一种移动。
 ///
 /// 单独成函数而不是给 `move_many` 加参数，因为两者差别不止一个参数值：跨边界还要重编
 /// **旧**项目的顶层兄弟，否则那个项目的 `sort_order` 会留下空档。
+///
+/// `move_many` 的 `new_parent_id` 为 `None` 时没有父行可读 `root_id`，它保留模块当前的
+/// `root_id`——同项目内重排正确，跨项目移动错误。MCP 的 `module_move` 工具走的是后者，
+/// 所以它调本函数而不是 `move_many`。
 /// `target_index` 为 `None` 表示追加。**必须在 `db::with_tx` 内调用**。
 pub fn move_to_root(
     conn: &mut Connection,

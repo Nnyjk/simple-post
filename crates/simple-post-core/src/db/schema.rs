@@ -141,7 +141,7 @@ fn backfill_dynamic_variable_projects(conn: &mut Connection) -> Result<(), AppEr
 /// **刻意不 bump `SCHEMA_VERSION`**：它不是迁移计数器，[`ensure_current_schema`] 遇到不匹配会
 /// **删库**——一个只是拓宽表的补丁版本会清空所有用户的项目、环境与资源树。
 ///
-/// 每一项后面都写了旧行读回来的等价语义。
+/// 每一项后面都写了旧行读回来的等价语义（`test_script` 与相邻的 `pre_request_script` 共用一条）。
 const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
         // 环境 × 模块 那一格的地址与代理。纯增量：旧行读回来是空 map，语义等价于

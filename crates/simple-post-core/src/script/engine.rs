@@ -433,6 +433,10 @@ fn merge_request(before: &ScriptRequest, after: Option<Json>) -> ScriptRequest {
 }
 
 /// 沙箱的 header 对象 → 有序对列表。原顺序优先，新名字追加。
+///
+/// 脚本可以直接往 `pm.request.headers` 上塞非字符串（`pm.request.headers['X-Count'] = 5`），
+/// 那条路绕过 `normalizeHeaders`，故 `json_scalar_to_text` 在这里替 header 值转文本——
+/// 直接当成空串会让这个 header 静默变成空的。
 fn headers_to_list(
     headers: &Map<String, Json>,
     original: &[(String, String)],
@@ -456,10 +460,6 @@ fn headers_to_list(
     out
 }
 
-/// header 的值转成文本。
-///
-/// 脚本可以直接往 `pm.request.headers` 上塞非字符串（`pm.request.headers['X-Count'] = 5`），
-/// 那条路绕过 `normalizeHeaders`，故这里要自己转——直接当成空串会让这个 header 静默变成空的。
 /// 把 JS 值转成可读文本。用 `Coerced` 走 JS 的 `ToString` 语义——`Error` 对象的
 /// `message` 不在可枚举属性里，JSON 序列化拿不到它。
 fn value_text(value: &Value) -> String {
