@@ -404,27 +404,27 @@ Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
 带 `file:line` 的都是实测，不是推测。
 
 - **`body_schema` 不是一列。** `crates/simple-post-core/src/db/schema.sql:123` 只有 `body_json`，整个 `RequestBody`
-  （含 `schema`）塞在里面。全仓库三个写入点：`domain/auth.rs:54`（定义）、
-  `src/types/domain/request.ts:93`（TS 镜像）、MCP 的 `body_schema` 入参
-  （`project_ops/endpoint/args.rs:51` → `write.rs:189`）。**界面的请求体编辑器也写它**
+  （含 `schema`）塞在里面。全仓库三个写入点：`domain/auth.rs:53`（定义）、
+  `src/types/domain/request.ts:99`（TS 镜像）、MCP 的 `body_schema` 入参
+  （`project_ops/endpoint/args.rs:49` → `write.rs:188`）。**界面的请求体编辑器也写它**
   （右栏那块 Schema 区，见 `src/features/http-tester/BodyEditor.tsx`）—— 按列名去找会找不到。
-- **模板语法两边同形。** `crates/simple-post-core/src/template.rs:102` 的 `is_word` 只认
+- **模板语法两边同形。** `crates/simple-post-core/src/template.rs:96` 的 `is_word` 只认
   `[A-Za-z0-9_]`，Postman 的 `{{var}}` 同形，所以转换基本白送。但 Postman 实际会写
   `{{my-var}}`（连字符）与 `{{$timestamp}}`（动态变量）——两者都会被现有解析器**原样
   放过**，故导入器对它们出诊断，否则这份定义就是静默失效。
   这条判据住在 core（`crates/simple-post-core/src/template.rs::is_word`），导入器
   `crates/simple-post-interchange/src/import/postman/template.rs` 调它，故诊断说的话与
   发送时的实际行为不会分家。
-- **`ApiKeyLocation` 只有 `Header | Query`**（`domain/auth.rs:208`），OpenAPI 的
+- **`ApiKeyLocation` 只有 `Header | Query`**（`domain/auth.rs:197`），OpenAPI 的
   apiKey 还允许 `cookie`。导入遇到 `in: cookie` 出诊断。
 - **`HttpMethod::Custom` 导不出 OpenAPI。** `domain/http.rs:22-27` 能装 `PROPFIND`，
   但 OpenAPI 3.0 的 `paths` 是固定键集（get/put/post/delete/options/head/patch/trace）。
   导出遇到集合外的动词出诊断。反向没问题：OpenAPI 的 `trace` 落成
   `HttpMethod::Custom("TRACE")`。
 - **URL 拉取文档要显式抬高体积上限。** `http_executor::HttpRequestInput`
-  的 `max_response_size_kb`（`http_executor.rs:124`）由调用方给，一份 3 MB 的
+  的 `max_response_size_kb`（`http_executor.rs:116`）由调用方给，一份 3 MB 的
   OpenAPI yaml 会撞上 UI 的默认值。走 `execute_with_policy` 以保留 SSRF 防护
-  （`check_url`，`http_executor.rs:479`）——不要另开一条裸 `reqwest` 通道。
+  （`check_url`，`http_executor.rs:456`）——不要另开一条裸 `reqwest` 通道。
 
 ## YAML 依赖（已核实，勿重新推导）
 
