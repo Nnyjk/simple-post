@@ -161,6 +161,20 @@ describe('draft endpoints: creating one touches neither the database nor the tre
     assert.equal(state.activeEndpointId, null);
   });
 
+  it('clears the current endpoint, so the tree stops pointing at another one', () => {
+    // 之前打开着另一个接口。草稿没有树行，故树里没有可高亮的行；把「当前接口」留成那个
+    // 旧接口，树的高亮与标签条的激活就会各说各话——用户看到的是「新建完却停在已有的
+    // 那个接口」。
+    useAppStore.setState({
+      nodes: [...useAppStore.getState().nodes, { ...MODULE, id: 'ep-old', kind: 'endpoint' }],
+      activeEndpointId: 'ep-old',
+    });
+
+    useAppStore.getState().createEndpointDraft('m1');
+
+    assert.equal(useAppStore.getState().activeEndpointId, null);
+  });
+
   it('still refuses a parent that cannot hold an endpoint', async () => {
     assert.equal(await useAppStore.getState().createEndpointAt('nope'), null);
     assert.equal(await useAppStore.getState().createEndpointAt(''), null);
@@ -240,6 +254,22 @@ describe('draft endpoints: Save is the only thing that writes', () => {
     assert.equal(tabFor(draftId), undefined, 'the draft tab is closed');
     assert.equal(tabFor(SERVER_ID)?.kind, 'endpoint');
     assert.equal(state.activeTabId, SERVER_ID);
+  });
+
+  it('points the current endpoint at the saved row, so the tree and the tab bar agree', async () => {
+    // 树的高亮读 `activeEndpointId`，标签条的激活读 `activeTabId`。两处不同步时，保存一个新
+    // 接口之后，树里高亮的仍是保存前那个接口——重名时用户根本分不出那是哪一个。
+    useAppStore.setState({
+      nodes: [...useAppStore.getState().nodes, { ...MODULE, id: 'ep-old', kind: 'endpoint' }],
+      activeEndpointId: 'ep-old',
+    });
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+
+    await useAppStore.getState().saveDraftEndpoint(draftId);
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeEndpointId, SERVER_ID, '树的高亮必须落在刚保存的那一行');
+    assert.equal(state.activeTabId, SERVER_ID, '标签条的激活必须落在同一个接口上');
   });
 
   it("carries the draft's response over to the saved endpoint", async () => {
