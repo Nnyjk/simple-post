@@ -56,6 +56,22 @@ function handleEndpointClickBody(): string {
   return m[0];
 }
 
+/**
+ * 左键点击处理器里，修饰键分支结束之后的那一段代码。
+ *
+ * 只取 `return;` 之后的部分：`handleEndpointClick` 在 Ctrl/Meta 分支里提前返回，
+ * 那一段里的调用不属于普通左键路径。把 `openEndpointTab(id)` 挪进那个分支，
+ * 普通单击就不会再打开标签 —— 所以断言必须落在修饰键分支之后。
+ */
+function handleEndpointClickOrdinaryPath(): string {
+  const body = handleEndpointClickBody();
+  const branch = body.indexOf('e.ctrlKey || e.metaKey');
+  assert.ok(branch >= 0, 'useTreeSelection 的 handleEndpointClick 里没有修饰键分支');
+  const branchEnd = body.indexOf('return;', branch);
+  assert.ok(branchEnd >= 0, 'handleEndpointClick 的修饰键分支没有提前返回');
+  return body.slice(branchEnd);
+}
+
 /** 左键开接口标签的处理器的函数体。 */
 function openEndpointTabBody(): string {
   const m = TREE_SELECTION.match(/const openEndpointTab = [\s\S]*?\n {2}\};/);
@@ -80,6 +96,11 @@ describe('右键一个接口：只弹菜单，不激活它', () => {
       /\bopenEndpointTab\s*\(/.test(body),
       false,
       '右键又去开标签了：标签只该由「我要在它上面干活」的那些动作开',
+    );
+    assert.equal(
+      /\bopenEndpointTab\s*\(/.test(openMenuBody()),
+      false,
+      '右键共用的 openMenu 又去开标签了：它也服务模块与集合，接口右键不该抢活动标签',
     );
     assert.equal(
       /\bopenTab\s*\(/.test(body),
@@ -118,7 +139,7 @@ describe('右键一个接口：只弹菜单，不激活它', () => {
 describe('左键一个接口：仍然要激活它', () => {
   it('左键路径仍然会激活接口', () => {
     assert.match(
-      handleEndpointClickBody(),
+      handleEndpointClickOrdinaryPath(),
       /\bopenEndpointTab\s*\(\s*id\s*\)/,
       '左键点接口不再开标签了：单击一行本该打开它的标签并跳过去',
     );
