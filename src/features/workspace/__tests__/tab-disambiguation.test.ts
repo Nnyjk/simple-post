@@ -7,7 +7,7 @@
  *   1. 只有**同名**的接口标签才需要可见的提示段落。没有冲突时标签与原来一模一样——
  *      那一段要占掉标题右侧约 40px，平时留着就是白花掉标题的空间。
  *   2. 提示按级别往外退：先试直接父容器的名字，不足以区分这一组就退到模块名，再不够退到
- *      完整路径。三个级别都区分不了时不写提示。
+ *      最短的可区分前缀。三个级别都区分不了时不写提示。
  *   3. 分组按**视觉上**的标题走：连续的空白压成一个空格、首尾空白去掉，故「用户列表」与
  *      「用户列表 」算同名。
  *   4. 找不到容器时路径是空的，标签维持原样——不写「（无）」这类占位文字。
@@ -104,9 +104,9 @@ describe('tab-disambiguation: same-named endpoints tell each other apart by path
     assert.equal(paths.get('draft')?.path, '账户 › 订单');
   });
 
-  it('falls back to the whole path when neither the container nor the module tells them apart', () => {
+  it('falls back to the shortest prefix that tells them apart', () => {
     // 三个同名接口：父容器同名，模块也有一对同名。父容器名与模块名都区分不了这一组，
-    // 只有完整路径能——它在这一组里互不相同。
+    // 于是取最短的可区分前缀——两段就够，不必把整条路径写进去。
     const sources: EndpointTabSource[] = [
       { id: 'e1', title: '用户列表', parentId: 'c4' },
       { id: 'e2', title: '用户列表', parentId: 'c5' },
@@ -115,9 +115,11 @@ describe('tab-disambiguation: same-named endpoints tell each other apart by path
 
     const paths = endpointTabPaths(sources, DEEP_TREE);
 
-    assert.equal(paths.get('e1')?.hint, '支付 › 订单 › 明细');
-    assert.equal(paths.get('e2')?.hint, '支付 › 售后 › 明细');
-    assert.equal(paths.get('e3')?.hint, '账户 › 订单 › 明细');
+    assert.equal(paths.get('e1')?.hint, '支付 › 订单');
+    assert.equal(paths.get('e2')?.hint, '支付 › 售后');
+    assert.equal(paths.get('e3')?.hint, '账户 › 订单');
+    // 完整路径照旧给全——悬停提示靠它区分。
+    assert.equal(paths.get('e1')?.path, '支付 › 订单 › 明细');
   });
 
   it('treats an unsaved draft as one of the same-named endpoints', () => {

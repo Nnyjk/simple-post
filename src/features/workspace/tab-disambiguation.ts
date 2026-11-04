@@ -10,9 +10,10 @@
  * 一模一样。
  *
  * **提示按三个级别往外退。** 直接父容器的名字最短也最贴近用户；它不足以区分这一组同名
- * 标签时（例如两个模块下各有一个叫「订单」的集合），退到模块名；再不够就退到完整路径。
- * 三个级别都不足以区分时（同名模块下的同名集合里各有一个同名接口）就不写提示——写一段
- * 看起来有区别的文字，比不写更让人误解。
+ * 标签时（例如两个模块下各有一个叫「订单」的集合），退到模块名；再不够就退到**最短的可区
+ * 别前缀**——一段一段往下加，加到这一组各条互不相同为止。三个级别都不足以区分时（同名模块
+ * 下的同名集合里各有一个同名接口）就不写提示——写一段看起来有区别的文字，比不写更让人误
+ * 解。
  */
 import type { ResourceNode } from '@/types/domain';
 import { containerPathOf } from '@/lib/tree-index';
@@ -36,11 +37,16 @@ export interface TabPathInfo {
 /**
  * 可见提示的三个级别，从最贴近接口的一层往外退。
  *
- * `last` 是直接父容器的名字，`module` 是路径最外层（模块）的名字，`full` 是整条路径。
+ * `last` 是直接父容器的名字，`module` 是路径最外层（模块）的名字，`prefix` 是能让这一组
+ * 互相区分开的最短前缀。
  */
-type HintLevel = 'last' | 'module' | 'full';
+type HintLevel = 'last' | 'module' | 'prefix';
 
-const HINT_LEVELS: readonly HintLevel[] = ['last', 'module', 'full'];
+/** 提示怎么取的一组规则。`prefixLen` 只在 `prefix` 级别下有意义。 */
+interface HintRule {
+  level: HintLevel;
+  prefixLen: number;
+}
 
 /**
  * 分组用的标题键：连续的空白压成一个空格，首尾空白去掉。
@@ -88,12 +94,12 @@ export function endpointTabPaths(
       segments: containerPathOf(nodes, source.parentId),
     }));
     // 提示的级别整组共用：同一个级别下各条的取值互不相同，用户才分得清谁是谁。
-    const level = collides ? pickHintLevel(entries) : null;
+    const rule = collides ? pickHintRule(entries) : null;
 
     for (const { source, segments } of entries) {
       out.set(source.id, {
         path: segments.join(' › '),
-        hint: level === null ? '' : hintAt(segments, level),
+        hint: rule === null ? '' : hintBy(rule, segments),
       });
     }
   }
@@ -101,29 +107,50 @@ export function endpointTabPaths(
 }
 
 /**
- * 选出整组共用的提示级别。
+ * 选出整组共用的提示规则。
  *
- * 一个级别可用，当且仅当组内每一条都能给出该级别的取值，且这些取值互不相同。组内有一条
- * 拿不出取值（接口还没有容器）时，这个级别不可用——它没有可写的提示，整组也就不写。
+ * 一个级别可用，当且仅当组内各条的取值互不相同。组内有一条拿不出取值（接口还没有容器）
+ * 时，整组都不写——它没有可写的提示。
+ *
+ * 两个单段级别都不够时，取**最短的可区分前缀**：短的那些段先试，不够再往下加一段。前缀
+ * 比整条路径短，而标签上能显示的字数有限，短一点就多一分显示得下的机会。
  */
-function pickHintLevel(entries: { segments: string[] }[]): HintLevel | null {
-  for (const level of HINT_LEVELS) {
-    const values = entries.map((e) => hintAt(e.segments, level));
-    if (values.some((v) => v === '')) continue;
-    if (new Set(values).size === values.length) return level;
+function pickHintRule(entries: { segments: string[] }[]): HintRule | null {
+  // 有一条拿不出路径（接口还没有容器）时，整组都不写提示。
+  if (entries.some((e) => e.segments.length === 0)) return null;
+
+  for (const level of ['last', 'module'] as const) {
+    const values = entries.map((e) => hintBy({ level, prefixLen: 0 }, e.segments));
+    if (new Set(values).size === values.length) return { level, prefixLen: 0 };
+  }
+
+  const prefixLen = shortestDistinguishingPrefix(entries.map((e) => e.segments));
+  if (prefixLen === null) return null;
+  return { level: 'prefix', prefixLen };
+}
+
+/**
+ * 让组内各条互不相同的最短前缀有几段。各条路径完全相同时没有这样的长度——那种情况
+ * 任何提示都区分不了它们。
+ */
+function shortestDistinguishingPrefix(all: string[][]): number | null {
+  const maxLen = Math.max(0, ...all.map((s) => s.length));
+  for (let k = 1; k <= maxLen; k++) {
+    const keys = all.map((s) => s.slice(0, k).join(' › '));
+    if (new Set(keys).size === keys.length) return k;
   }
   return null;
 }
 
 /**
- * 某个级别下的提示文字。
+ * 按规则取出提示文字。
  *
- * `last` 取最靠近接口的那一段容器名，`module` 取最外层（模块）的名字，`full` 是整条路径。
- * 接口还没有容器时没有哪一段可取，一律返回空串。
+ * `last` 取最靠近接口的那一段容器名，`module` 取最外层（模块）的名字，`prefix` 取路径最
+ * 前面的若干段。接口还没有容器时没有哪一段可取，一律返回空串。
  */
-function hintAt(segments: string[], level: HintLevel): string {
+function hintBy(rule: HintRule, segments: string[]): string {
   if (segments.length === 0) return '';
-  if (level === 'last') return segments[segments.length - 1];
-  if (level === 'module') return segments[0];
-  return segments.join(' › ');
+  if (rule.level === 'last') return segments[segments.length - 1];
+  if (rule.level === 'module') return segments[0];
+  return segments.slice(0, rule.prefixLen).join(' › ');
 }
