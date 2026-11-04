@@ -39,6 +39,9 @@ services:
       # (the default), there is no such listener and the mapping would point
       # at nothing.
       #
+      # That listener is opened when the server starts, so changing the port
+      # in the app needs a container restart before the new port answers.
+      #
       # - target: 4174
       #   published: 4174
       #   protocol: tcp

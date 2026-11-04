@@ -71,6 +71,9 @@ services:
       # a port of its own inside the container. Publishing `4174:4173` instead
       # would leave 4174 unbound and the service would look half-deployed.
       #
+      # That listener is opened when the server starts, so changing the port
+      # in the app needs a service update before the new port answers.
+      #
       # `mode: host` also changes how the update has to be ordered: the
       # published port belongs to the task, so with `start-first` below the
       # old task still owns the host port while the new one starts, and the
