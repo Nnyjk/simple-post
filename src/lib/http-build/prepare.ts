@@ -39,11 +39,10 @@ import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
  * （模板化按字段做还是按整段做、空键算不算、产物是文本还是字节），改动两边必须同步。
  */
 export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
-  // 用户写下的字符串先归一成良构字符串：落单的代理项在 UTF-8 里没有对应字节，平台的
-  // `encodeURIComponent` 遇到它直接抛 `URIError`，而请求是在渲染期组装的，异常一路到 React
-  // 根节点，整棵工作区树被卸载。归一之后，请求里的每个字符串都能原样进到后端
-  // （后端的 serde_json 拒绝落单代理项）。
-  const input = wellFormedDeep(rawInput);
+  // prepareRequest 先把用户写下的字符串归一成良构字符串：落单的代理项在 UTF-8 里没有对应
+  // 字节，`encodeURIComponent` 遇到它直接抛 `URIError`，而请求是在渲染期组装的，异常一路
+  // 到 React 根节点，整棵工作区树被卸载。
+  const input = normalizeInput(rawInput);
 
   const missing = createMissingTracker();
 
@@ -147,6 +146,18 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
     // 变量池随结果一起走：OAuth2 取 token 时要用的正是这一份（见 `PreparedRequest.vars`）。
     vars: pool,
   };
+}
+
+/**
+ * 组装前的归一。二进制模式的 `content` 是一份文件描述，其中 base64 是文件本身的字节
+ * （按构造只有 ASCII 字符），而那份字符串可能很大 —— 故这个模式的 `content` 不进归一，
+ * 描述里会发出去的字段由 `parseBodyFile` 归一。
+ */
+function normalizeInput(input: PrepareRequestInput): PrepareRequestInput {
+  if (input.body.mode !== 'binary') return wellFormedDeep(input);
+  const { body } = input;
+  const normalized = wellFormedDeep({ ...input, body: { ...body, content: '' } });
+  return { ...normalized, body };
 }
 
 /**

@@ -11,17 +11,19 @@
  *   C. 纯度 —— `applyOAuth2Token` 不改传入对象
  *   D. 非 oauth2 的 auth 原样返回
  */
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   applyOAuth2Token,
   buildAuthHeaderValue,
   buildTokenQuery,
+  fetchOAuth2Token,
   hasAuthorizationHeader,
 } from '../oauth2';
 import { prepareRequest, type PrepareRequestInput, type PreparedRequest } from '../http-build';
 import type { AuthConfig, KeyValue, OAuth2Auth, OAuth2TokenResult } from '../../types/domain';
+import { calls, installFetchMock, restoreFetchMock } from './tauri-commands-fetch-mock';
 
 /** `prepareRequest` 的 header 入参是 `KeyValue[]`（不是元组列表——元组是它的**产出**）。 */
 function kv(key: string, value: string, enabled = true): KeyValue {
@@ -180,5 +182,23 @@ describe('oauth2: 非 oauth2 的 auth 原样返回', () => {
   it('kind 是 oauth2 但载荷缺省时按「没配 oauth2」处理', () => {
     const req = prepared();
     assert.equal(applyOAuth2Token(req, { kind: 'oauth2' }, token()), req);
+  });
+});
+
+// ============================================================
+// E. 取 token 时发给后端的入参
+// ============================================================
+
+describe('fetchOAuth2Token: 发给后端的入参已归一', () => {
+  before(() => installFetchMock({ json: { accessToken: 'tok', tokenType: 'Bearer' } }));
+  after(() => restoreFetchMock());
+
+  it('用户粘贴的值里的落单代理项被换成 U+FFFD', async () => {
+    // serde_json 拒绝 JSON 里的落单代理项转义，不归一的话这一次取 token 会直接失败
+    await fetchOAuth2Token(oauth2(), { manual: '\uD800' });
+    const body = calls[0]?.body;
+    assert.ok(body, '取 token 的请求没有发出');
+    const sent = JSON.parse(body) as { manual: { pasted: string } };
+    assert.equal(sent.manual.pasted, '\uFFFD');
   });
 });

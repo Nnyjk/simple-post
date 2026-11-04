@@ -11,7 +11,7 @@ import type { AuthConfig, OAuth2Auth, OAuth2TokenResult } from '@/types/domain';
 import type { PreparedRequest } from './http-build';
 import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
 import { percentEncode } from './percent-encode';
-import { wellFormedDeep } from './well-formed';
+import { wellFormed, wellFormedDeep } from './well-formed';
 
 /**
  * `AuthConfig.oauth2` 缺省时的渲染形状。库里存着 `'{}'` 这样的默认行，MCP 也可能只写
@@ -116,11 +116,10 @@ export async function fetchOAuth2Token(
   auth: AuthConfig,
   options: FetchTokenOptions = {},
 ): Promise<OAuth2TokenResult> {
-  // 鉴权配置原样发给后端（后端在取 token 之前替换那四个字段里的 `{{var}}`）。发过去之前先
-  // 归一落单的代理项：serde_json 拒绝 JSON 里的落单代理项转义，不归一的话这一次取 token 会
-  // 直接失败。
+  // fetchOAuth2Token 发给后端的鉴权配置与用户粘贴的值都先归一：serde_json 拒绝 JSON 里的
+  // 落单代理项转义，不归一的话这一次取 token 会直接失败。
   const args: Record<string, unknown> = { auth: wellFormedDeep(auth) };
-  if (options.manual !== undefined) args.manual = { pasted: options.manual };
+  if (options.manual !== undefined) args.manual = { pasted: wellFormed(options.manual) };
   if (options.force) args.force = true;
   // 变量池送过去，后端才有池可替换 OAuth2 配置里的 `{{var}}`。
   if (options.vars !== undefined) args.vars = options.vars;

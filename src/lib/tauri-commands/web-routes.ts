@@ -21,8 +21,8 @@ export interface RouteSpec {
 
 /**
  * 由 record 生成稳定、确定的 `?key=value&…` 查询串。丢弃 `undefined` / `null` /
- * 空字符串的值，键排序，两半都过 `percentEncode`。搜索框里的字也在里面，故这一步不能抛
- * 异常（落单的代理项按 U+FFFD 编码，见 `src/lib/well-formed.ts`）。
+ * 空字符串的值，键排序，两半都过 `percentEncode`（落单的代理项按 U+FFFD 编码，见
+ * `src/lib/well-formed.ts`）。
  */
 export function buildQuery(params: Record<string, unknown>): string {
   const parts: string[] = [];
