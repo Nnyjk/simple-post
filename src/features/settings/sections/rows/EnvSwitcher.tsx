@@ -11,20 +11,14 @@ import { InlineNameCell } from './InlineNameCell';
 /**
  * EnvSwitcher —— 分区顶部的环境选择条。
  *
- * 环境名只在这里出现一次
- * ----------------------
- * 这条选择条已经叫出了每一个环境的名字，故**激活**的那枚 chip 自带 `InlineNameCell`，
- * 读起来就是名字加一个悬停才出现的铅笔。未激活的 chip 只是普通 span —— 去改一个还看不见
- * 的环境不是谁需要的动作。
+ * 环境名只在这里出现一次：这条选择条已经叫出了每一个环境的名字，故**激活**的那枚 chip 自带
+ * `InlineNameCell`，未激活的 chip 只是普通 span —— 去改一个还看不见的环境不是谁需要的动作。
  *
- * 由此 chip 内部出现了按钮，故它改成带 `role="tab"`、`tabIndex` 与手写 Enter / Space
- * 的 `div`：`<button>` 自带的按钮语义由 `role="tab"`、`tabIndex` 与这段按键处理补齐。
- * `role` 与 `aria-selected` 未变，辅助技术看到的仍是同一条标签条。
+ * 由此 chip 内部出现了按钮，故它改成带 `role="tab"`、`tabIndex` 与手写 Enter / Space 的
+ * `div`：`<button>` 自带的按钮语义由 `role="tab"`、`tabIndex` 与这段按键处理补齐。
  *
- * `showAdd` / `showDelete` 是为**模块**层准备的：它展示同一批环境，但不能提供那两个
- * 项目级写入 —— 新建环境和删除环境都作用在项目上，而在模块标签里删掉一个环境会连带
- * 抹掉每个模块在它下面的值。那一层改为指向项目自己的环境分区。默认 `true`，
- * 设置分区的行为不变。
+ * `showAdd` / `showDelete` 是为**模块**层准备的：它展示同一批环境，但不能提供那两个项目级
+ * 写入 —— 在模块标签里删掉一个环境会连带抹掉每个模块在它下面的值。默认 `true`。
  */
 export function EnvSwitcher({
   environments,
@@ -51,8 +45,7 @@ export function EnvSwitcher({
   /** 显示每个环境的删除入口。 */
   showDelete?: boolean;
   /**
-   * 为某个环境提交新名字。模块层不传：它不该重命名项目级的环境，也因此那里的激活 chip
-   * 名字单元格退回普通 span。
+   * 为某个环境提交新名字。模块层不传：它不该重命名项目级的环境。
    */
   onRename?: (envId: string, name: string) => void;
   /** 直接以聚焦状态打开该环境的名称单元格 —— 用于刚建出来的那个。 */

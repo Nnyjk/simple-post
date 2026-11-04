@@ -21,10 +21,8 @@ pub struct ScriptLimits {
     pub max_assertions: usize,
 }
 
-/// 默认限额。
-///
-/// 1000 ms 对「读一个变量、塞一个 token」这类脚本绰绰有余，而死循环脚本不会把宿主
-/// 拖住一秒以上。内存 32 MB 足以跑常规脚本，又不至于让一个失控脚本吃掉整台机器。
+/// 默认限额。1000 ms 对「读一个变量、塞一个 token」这类脚本绰绰有余，而死循环脚本不会把宿主
+/// 拖住一秒以上。内存 32 MB 足以跑常规脚本。
 pub const DEFAULT_SCRIPT_LIMITS: ScriptLimits = ScriptLimits {
     timeout_ms: 1_000,
     memory_bytes: 32 * 1024 * 1024,

@@ -28,14 +28,11 @@ pub struct HttpSendBody {
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
     /// HTTPS 出站的**全局默认**（设置面板里改的那份）。
-    ///
-    /// `Option` 而非直接一个 `TlsSettings`：桌面端那个命令收的是 `Option<TlsSettings>`，
-    /// 故 `"tls": null` 在桌面端被收下、在 REST 端被拒 —— 同一份 JSON 两条 transport
-    /// 判定不同。取 `Option` 后两侧的判定一致（`null` 与缺席都得到缺省值）。
+    /// 取 `Option<TlsSettings>` 后两条 transport 对 `"tls": null` 的判定一致：
+    /// `null` 与缺席都得到缺省值。
     #[serde(default)]
     pub tls: Option<simple_post_core::domain::TlsSettings>,
     /// 该端点自己的 HTTPS 出站设置。`null` = 继承全局默认。
-    ///
     /// 端点给了设置就**整体**取代全局那份，故它不是逐字段的覆盖。
     #[serde(default)]
     pub tls_override: Option<simple_post_core::domain::TlsSettings>,
@@ -66,14 +63,11 @@ pub struct PreferencesPutBody {
 }
 
 // -------------------------------------------------------------------------
-// 线格式辅助函数——本身很小，但服务端注入的字段都从这里走，好让 SPA 与 REST 的
-// 契约与 Tauri 命令路径保持 1:1。
+// 线格式辅助函数：服务端注入的字段都从这里走，与 Tauri 命令路径保持同一份契约。
 // -------------------------------------------------------------------------
 
-/// 调用方（SPA）没给 `id` 时补一个服务端生成的。镜像每个 `commands::*_create` 的
-/// 做法：取用户可见字段，再盖上 `id = uid()`。不补的话每次 REST create 都会以
-/// `[validation] missing field 'id'` 失败——domain 结构体全都要求 `id`，而 SPA 只发
-/// name / description / color 等。
+/// SPA 没给 `id` 时补一个服务端生成的，与 `commands::*_create` 同样在用户可见字段上盖 `id = uid()`。
+/// domain 结构体全都要求 `id`，而 SPA 只发 name / description / color 等。
 pub fn ensure_server_id(body: &mut Value) {
     let needs_fill = match body.get("id") {
         None | Some(Value::Null) => true,
@@ -86,8 +80,7 @@ pub fn ensure_server_id(body: &mut Value) {
 }
 
 // -------------------------------------------------------------------------
-// 资源 CRUD 面的线格式 DTO。这一块保持精简——已在 `domain::*` 里的形状直接复用，
-// 使线格式契约与 TS 侧保持 1:1。
+// 资源 CRUD 面的线格式 DTO：形状直接复用 `domain::*`，与 TS 侧保持 1:1。
 // -------------------------------------------------------------------------
 
 /// `POST /api/environments/:envId/vars` 的 body。`value = null` 表示删除该变量
@@ -119,11 +112,9 @@ pub struct EnvSetVarDisabledBody {
     pub disabled: bool,
 }
 
-/// `POST /api/environments/:envId/module-baseurls` 的 body。
-///
-/// 一个格子是（环境 × 模块）。格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际
-/// 访问地址。两个字段各自独立：`null` = 该字段保持原值，`""` = 清空该字段；两个字段
-/// 都清空时整格删掉。
+/// `POST /api/environments/:envId/module-baseurls` 的 body。一个格子是（环境 × 模块），
+/// 格子里 `url` 是后端 api 地址、`proxy` 是实际访问地址。两个字段各自独立：
+/// `null` = 保持原值，`""` = 清空；都清空时整格删掉。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvSetModuleBaseUrlBody {
@@ -231,29 +222,17 @@ pub struct DynamicVariableOverrideBody {
 pub struct NodeCreateBody {
     #[serde(flatten)]
     pub node: NodeCreateNodeBody,
-    /// endpoint 才有，其余节点不带。任一侧不匹配都被 `db::nodes` 拒绝（不在这里），
-    /// 故这条规则只有一处。
-    ///
-    /// 用 `CreateEndpointDetailOpts` 而非 `EndpointDetail`：后者每个字段都必填，而从
-    /// 树的「新建请求」建出的 endpoint 只带用户目前敲下的内容——Tauri 命令一直接受
-    /// 这种形状（见该类型自己的文档注释）。在这里直接反序列化成 `EndpointDetail` 会让
-    /// `method`——它没有默认值——只在 REST 这一条 transport 上变成必填，于是同一次点击
-    /// 在桌面端建出 endpoint、在 `serve-web` 下回 400。复用命令的类型正是为了防止两条
-    /// transport 再次漂移。
+    /// endpoint 才有，其余节点不带；任一侧不匹配都由 `db::nodes` 拒绝。
+    /// 用 `CreateEndpointDetailOpts` 而非 `EndpointDetail`：后者每字段必填，会让没有默认值的
+    /// `method` 只在 REST 这一条 transport 上必填，于是同一次点击在 `serve-web` 下回 400。
     #[serde(default)]
     pub detail: Option<crate::dto::CreateEndpointDetailOpts>,
 }
 
-/// `POST /api/nodes` body 中结构性的那一半。
-///
-/// 不是 `ResourceNode`。后者是*存储*行，`rootId` 恒在（数据库保证）；但 create 调用在
-/// 指定父节点时没有理由知道所属项目，而 renderer 会发 `rootId: null` 来表达这层意思。
-/// 按存储形状反序列化会让「让服务端自己推」成为这条 transport 上客户端唯一无法表达
-/// 的诉求（`400 invalid type: null, expected a string`）；这里的 `root_id:
-/// Option<String>` 与 Tauri 命令同名参数是同一份契约。
-///
-/// `id` 必填，因为解析本类型之前 `ensure_server_id` 已补上它；时间戳缺席，因为由
-/// 服务端盖。
+/// `POST /api/nodes` body 中结构性的那一半。`root_id` 取 `Option<String>`，与 Tauri 命令同名参数
+/// 同一份契约：renderer 发 `rootId: null` 表示「由服务端推」，按存储形状反序列化会报
+/// `400 invalid type: null, expected a string`。
+/// `id` 必填，因为解析本类型之前 `ensure_server_id` 已补上它；时间戳缺席，由服务端盖。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeCreateNodeBody {
@@ -291,13 +270,9 @@ impl NodeCreateNodeBody {
     }
 }
 
-/// `POST /api/nodes/move` 的 body。
-///
-/// `nodeIds` 就是节点在目标位置应出现的顺序，故多选拖拽能保持用户的选择次序。
-///
-/// `parentId` 取代了旧的 `parentKind` + `parentId` 组合：目的地位于哪张表，如今是父
-/// 节点 `type` 的问题，由 `db::nodes::move_many` 回答。`null` 表示项目顶层，且仅对模块
-/// 合法。
+/// `POST /api/nodes/move` 的 body。`nodeIds` 就是节点在目标位置应出现的顺序，故多选拖拽能保持选择次序。
+/// `parentId` 决定落点：目的地位于哪张表由父节点 `type` 回答（`db::nodes::move_many`）；`null` 表示
+/// 项目顶层，且仅对模块合法。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeMoveBody {

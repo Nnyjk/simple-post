@@ -6,8 +6,8 @@ use crate::domain::{
     ResourceNodePatch, ResourceNodeType,
 };
 use crate::error::AppError;
-use crate::spec::find_endpoint_by_identity;
 use crate::spec::input::{check_auth_payload, coerce_key_values, reject_schema_shaped_payload};
+use crate::spec::{find_endpoint_by_identity, mint_id};
 
 use super::resolve::{resolve_environment_of, resolve_module_of, resolve_parent_of};
 use super::types::{
@@ -16,11 +16,10 @@ use super::types::{
 
 /// 把一份规格落进库里。
 ///
-/// **整个过程在一个事务里**：规格写到一半失败时，库里不留半截状态 ——
-/// 一个建好模块却没有端点的规格，比一次彻底失败更难收拾。
+/// **整个过程在一个事务里**：规格写到一半失败时，库里不留半截状态。
 ///
-/// 调用方**必须先过权限门**再调本函数：规格指名了 `project_id`，而本函数会往
-/// 那个项目里写东西。门在本函数之外，是因为读权限档位与写库不该在同一把锁里。
+/// 调用方**必须先过权限门**再调本函数：规格指名了 `project_id`，而本函数会往那个项目里
+/// 写东西。门在本函数之外，是因为读权限档位与写库不该在同一把锁里。
 pub fn upsert_endpoint_spec(
     conn: &mut Connection,
     spec: &EndpointSpec,
@@ -137,7 +136,7 @@ fn upsert_endpoint_of(
     }
 
     let now = crate::domain::now_ms();
-    let id = mint_endpoint_id();
+    let id = mint_id("ep");
     let node = ResourceNode {
         id: id.clone(),
         root_id: project_id.to_string(),
@@ -188,8 +187,7 @@ fn load_endpoint_resource(
 
 /// 把规格里点名的字段覆盖到一个已有端点上。规格没点名的字段保持原样。
 ///
-/// 名字、动词与路径**不在**这份 patch 里：它们是端点的身份，而能被这一档找到的
-/// 那个端点，名字、动词与路径本来就与规格相同。
+/// 名字、动词与路径**不在**这份 patch 里：它们是端点的身份。
 fn apply_endpoint_patch(
     conn: &mut Connection,
     endpoint_id: &str,
@@ -237,12 +235,4 @@ fn apply_endpoint_patch(
 /// 读出模块的名字，供结果回显。
 fn module_name_of(conn: &mut Connection, module_id: &str) -> Result<String, AppError> {
     Ok(db::nodes::get(conn, module_id)?.name)
-}
-
-/// 铸一个端点 id。
-///
-/// id 不能用「前缀 + 毫秒时钟」：同一毫秒内两次创建会撞 `nodes.id` 约束，
-/// AI 客户端成批循环创建时必然踩到。[`crate::domain::uid`] 是本仓库的 id 唯一来源。
-fn mint_endpoint_id() -> String {
-    crate::domain::uid().replacen("sp_", "ep_", 1)
 }

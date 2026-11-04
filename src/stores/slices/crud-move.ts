@@ -1,15 +1,14 @@
 /**
  * CRUD 子工厂 —— 拖放移动。
  *
- * `createCrudSlice` 组合的五个子工厂之一（切片级的契约——乐观 `set()` →
- * `invokeCmd` → 快照回滚——见 `../crud-slice.ts`）。
+ * `createCrudSlice` 组合的四个子工厂之一（切片级的契约——乐观 `set()` → `invokeCmd` →
+ * 快照回滚——见 `../crud-slice.ts`）。
  *
- * 移动是一个动作而不是三个，而且无法表达成一次普通的字段写入：本地 `set()`
- * 会重算目标同级节点的 `sortOrder`，并把被移动子树里每个后代的 `rootId`
- * 一起带走。父子类型矩阵（`@/lib/node-placement.ts`）——模块只能顶层、endpoint
- * 只能挂在 collection 或 module 下、collection 只能挂在 module 或 collection
- * 下——由 Rust 里的触发器强制；下面的守卫是它的镜像，所以被拒的拖放
- * 绝不会渲染出后端本来就不会接受的状态。
+ * 移动是一个动作而不是三个，而且无法表达成一次普通的字段写入：本地 `set()` 会重算目标同级
+ * 节点的 `sortOrder`，并把被移动子树里每个后代的 `rootId` 一起带走。父子类型矩阵
+ * （`@/lib/node-placement.ts`）——模块只能顶层、endpoint 只能挂在 collection 或 module 下、
+ * collection 只能挂在 module 或 collection 下——由 Rust 里的触发器强制；下面的守卫是它的镜像，
+ * 故被拒的拖放绝不会渲染出后端本来就不会接受的状态。
  */
 import type { StateCreator } from 'zustand';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
@@ -46,13 +45,13 @@ function computeMove(
   const idSet = new Set(nodeIds);
   const childrenIndex = indexByParent(nodes);
   const sources = nodes.filter((n) => idSet.has(n.id));
-  // 请求的 id 必须全都在树里。有一部分找不到时，只把匹配到的那几个乐观移动出去，却把
-  // 整份 `nodeIds` 发给后端 —— 后端因不认识的 id 拒绝这次移动，再把本地状态回滚回去，
-  // 用户看到的是「拖了一下又弹回去」。守卫在这里把整次移动拦下：不改状态，也不发请求。
+  // 请求的 id 必须全都在树里。有一部分找不到时，只把匹配到的那几个乐观移动出去，却把整份
+  // `nodeIds` 发给后端——后端因不认识的 id 拒绝这次移动，再把本地状态回滚回去，用户看到的是
+  // 「拖了一下又弹回去」。守卫在这里把整次移动拦下：不改状态，也不发请求。
   if (sources.length !== idSet.size) return null;
 
-  // 目标父节点，以及这些节点将落入的项目。`rootId` 就在每个节点身上，
-  // 所以项目边界检查是一次字符串比较。
+  // 目标父节点，以及这些节点将落入的项目。`rootId` 就在每个节点身上，故项目边界检查是一次
+  // 字符串比较。
   let targetRootId: string;
   if (parentId === null) {
     // 「项目顶层」——那里只放得下模块。
@@ -61,30 +60,30 @@ function computeMove(
   } else {
     const targetParent = nodes.find((n) => n.id === parentId);
     if (!targetParent) return null;
-    // 类型矩阵：这个子类型能不能坐在那个父类型下。缺这一步时，一次不合法的移动会先把
-    // 乐观状态画出来，再等后端 400 才回滚。
+    // 类型矩阵：这个子类型能不能坐在那个父类型下。缺这一步时，一次不合法的移动会先把乐观状态
+    // 画出来，再等后端 400 才回滚。
     if (sources.some((n) => !mayUnder(n.kind, targetParent.kind))) return null;
     targetRootId = targetParent.rootId;
   }
 
-  // 防环：节点不能被移到它自己或它的任何后代之下。UI 会禁用这类目标位置，
-  // 但陈旧的拖放载荷仍可能报出这样一个 id。
+  // 防环：节点不能被移到它自己或它的任何后代之下。UI 会禁用这类目标位置，但陈旧的拖放载荷仍
+  // 可能报出这样一个 id。
   const movedSubtrees = new Set<string>();
   for (const src of sources) {
     for (const nid of collectSubtree(src.id, childrenIndex)) movedSubtrees.add(nid);
   }
   if (parentId !== null && movedSubtrees.has(parentId)) return null;
 
-  // 每个源节点必须已经属于目标所在的项目。服务端否则会拒绝这次移动；
-  // 本地检查在这里就拒绝，免得乐观状态显示出将会 400 的东西。
+  // 每个源节点必须已经属于目标所在的项目。服务端否则会拒绝这次移动；本地检查在这里就拒绝，
+  // 免得乐观状态显示出将会 400 的东西。
   for (const src of sources) {
     if (src.rootId !== targetRootId) return null;
   }
 
   // `siblings` 剔掉被移动者的目标同级节点——它们会在下方重新插到 `index` 处。
   //
-  // 目标是顶层时，同级就是目标项目的 module，也就是那些没有父节点的节点；
-  // 只按 `parentId === null` 界定会把所有项目的顶层一次性扫进来。
+  // 目标是顶层时，同级就是目标项目的 module，也就是那些没有父节点的节点；只按
+  // `parentId === null` 界定会把所有项目的顶层一次性扫进来。
   const siblings =
     parentId === null
       ? nodes
@@ -106,9 +105,9 @@ function computeMove(
   ]);
   const renumberedById = new Map(renumbered.map((n) => [n.id, n] as const));
 
-  // 每个节点要么保住原槽位（在目标之外），要么是被重新编号的行，
-  // 要么是某个被移动行的后代——后者的 `rootId` 必须跟着走。只重排目标
-  // 那一层会漏掉最后这一类，导致跨项目移动子树的乐观状态与数据库不一致。
+  // 每个节点要么保住原槽位（在目标之外），要么是被重新编号的行，要么是某个被移动行的后代
+  // ——后者的 `rootId` 必须跟着走。只重排目标那一层会漏掉最后这一类，导致跨项目移动子树的
+  // 乐观状态与数据库不一致。
   return nodes.map((n) => {
     const renamed = renumberedById.get(n.id);
     if (renamed) return renamed;
@@ -123,8 +122,8 @@ export const createMoveCrud: StateCreator<AppState, [], [], MoveCrudActions> = (
   moveNodes: async (nodeIds, parentId, index) => {
     const prevNodes = get().nodes;
     const next = computeMove(prevNodes, nodeIds, parentId, index);
-    // 守卫不通过 —— 这次移动不发生，也不发请求。发过去只会被后端按同一套规则拒绝，
-    // 而乐观状态已经先画上去了，那会与后端落库的结果对不上。
+    // 守卫不通过——这次移动不发生，也不发请求。发过去只会被后端按同一套规则拒绝，而乐观状态
+    // 已经先画上去了，那会与后端落库的结果对不上。
     if (!next) return;
     set({ nodes: next });
     try {

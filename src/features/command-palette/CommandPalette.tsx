@@ -1,13 +1,13 @@
 /**
  * 命令面板 —— Ctrl/Cmd + K 打开的全屏模态。
  *
- * - 命令来自 `command-registry.buildCommands()`，模糊过滤在本组件内做：
- *   放进 Zustand selector 会在其中新建数组，触发无限重渲染。
- * - 面板的模态语义（portal、Esc、点遮罩、滚动锁、焦点陷阱、背景 inert、入场动画）
- *   全部来自 `ModalSurface`。本组件只写面板的内容：搜索行、结果列表、快捷键提示条。
+ * - 命令来自 `command-registry.buildCommands()`，模糊过滤在本组件内做：放进 Zustand selector
+ *   会在其中新建数组，触发无限重渲染。
+ * - 面板的模态语义（portal、Esc、点遮罩、滚动锁、焦点陷阱、背景 inert、入场动画）全部来自
+ *   `ModalSurface`。本组件只写面板的内容：搜索行、结果列表、快捷键提示条。
  *
- * 面板顶部对齐而不是居中：命令面板是「从上方落下的检索框」，居中会让人以为它是个
- * 需要读完的表单。
+ * 面板顶部对齐而不是居中：命令面板是「从上方落下的检索框」，居中会让人以为它是个需要读完的
+ * 表单。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';

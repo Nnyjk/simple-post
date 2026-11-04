@@ -7,10 +7,8 @@ use crate::domain::ValueMode;
 /// 把抽到的值变成替换用的文本。
 ///
 /// - `json`：始终是 JSON 序列化，故标量带引号（`"A001"`）。
-/// - `auto` 与 `text`：对象与数组给裸 JSON 片段，标量给纯文本。两者输出**完全一致**——
-///   `text` 是用户的声明（值会被放进请求体的字符串位置，转义由用户承担），不是另一种形态。
-///
-/// 替换环节不做任何转义。
+/// - `auto` 与 `text`：对象与数组给裸 JSON 片段，标量给纯文本。两者输出**完全一致**
+///   ——`text` 是用户的声明，不是另一种形态。替换环节不做任何转义。
 pub fn serialize_value(value: &Value, mode: ValueMode) -> String {
     match mode {
         ValueMode::Json => serde_json::to_string(value).unwrap_or_default(),

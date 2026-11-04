@@ -30,12 +30,9 @@ pub struct OAuth2TokenRequest {
     pub force: bool,
     /// 变量池：渲染进程侧算好的那一份（`buildPool(env, dynamicVars)`）。
     ///
-    /// OAuth2 配置里的 `{{var}}` 由 core 在取 token 之前替换，替换规则住在
-    /// [`super::config`]。渲染进程侧不自己替换，故它必须把变量池送过来 ——
-    /// 送的是**同一份**池（组装请求时用的那份），否则同一个 `{{var}}` 在 URL 里能
-    /// 解析、在 `tokenUrl` 里不能解析。
-    ///
-    /// 缺席 = 没有变量可替换，配置里的 `{{var}}` 原样留着。
+    /// OAuth2 配置里的 `{{var}}` 由 core 在取 token 之前替换，替换规则住在 [`super::config`]。
+    /// 渲染进程侧必须送**同一份**池（组装请求时用的那份），否则同一个 `{{var}}` 在 URL 里能解析、
+    /// 在 `tokenUrl` 里不能解析。缺席 = 没有变量可替换，配置里的 `{{var}}` 原样留着。
     #[serde(default)]
     pub vars: HashMap<String, String>,
 }
@@ -51,9 +48,8 @@ pub struct OAuth2ManualToken {
 
 /// 回给渲染层的形状。
 ///
-/// **刻意不含 `refresh_token`**：它在 `oauth2_tokens` 表里续期，web 形态下没必要、
-/// 也不应该让浏览器持有。`accessToken` 必须给——前端要自己把它拼进 `Authorization`，
-/// 与它拿到别的请求头没有区别。
+/// **刻意不含 `refresh_token`**：它在 `oauth2_tokens` 表里续期，不应该让浏览器持有。
+/// `accessToken` 必须给——前端要自己把它拼进 `Authorization`。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuth2TokenDto {
@@ -109,22 +105,19 @@ pub async fn resolve(pool: &DbPool, req: &OAuth2TokenRequest) -> Result<OAuth2To
 
 /// 取 token 的单飞闸。
 ///
-/// 全局一把锁而不是按 `auth_key` 分桶：取 token 是秒级低频操作，串行化不产生可感知的
-/// 竞争，而分桶要维护一张只增不减的表。
+/// 全局一把锁而不是按 `auth_key` 分桶：取 token 是秒级低频操作，串行化不产生可感知的竞争，
+/// 而分桶要维护一张只增不减的表。
 ///
-/// 它挡的是一个具体的失败，而不是泛泛的「线程安全」：同一份配置的两次并发发送都发现
-/// 缓存过期，于是都拿同一个**一次性** `refresh_token` 去换。轮换 refresh token 的
-/// IdP 会让第二次失败，而我们「刷新失败就整取」的回退路径会拿**已消费**的授权码再换一次，
-/// 于是用户看到一句完全无从排查的失败。闸内重读缓存让第二次直接复用第一次的结果。
+/// 它挡的是一个具体的失败：同一份配置的两次并发发送都发现缓存过期，于是都拿同一个**一次性**
+/// `refresh_token` 去换。轮换 refresh token 的 IdP 会让第二次失败，而我们「刷新失败就整取」的
+/// 回退路径会拿**已消费**的授权码再换一次。闸内重读缓存让第二次直接复用第一次的结果。
 static REFRESH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// 缓存里有一份且还没过期就直接用；过期则先试刷新，刷新不成再整取。发送路径的唯一入口。
 ///
-/// 整段「查缓存 → 刷新 → 落库」在 [`REFRESH_GATE`] 里，并在拿到闸之后**重读**缓存：
-/// 并发调用者在这里看到的是前一个刚写下的 token，而不是又去刷新一遍。
-///
-/// UI 的 `force` 路径（[`fetch_and_store`]）不经过这把闸——它要的就是忽略缓存重取，
-/// 与并发重复发请求是两种不同的意图，串行化它只会让「重新获取」按下去没反应。
+/// 整段「查缓存 → 刷新 → 落库」在 [`REFRESH_GATE`] 里，并在拿到闸之后**重读**缓存：并发调用者
+/// 在这里看到的是前一个刚写下的 token。UI 的 `force` 路径（[`fetch_and_store`]）不经过这把闸
+/// ——它要的就是忽略缓存重取。
 pub async fn ensure_token(
     pool: &DbPool,
     cfg: &OAuth2Auth,
@@ -199,11 +192,9 @@ async fn fetch_and_store_resolved(
 
 /// 报出这条流程用到的字段里没解析出来的变量。
 ///
-/// 只报**这条流程真的会发出去**的字段：`tokenUrl` / `clientId` / `scope` 进了 token
-/// 请求，字段里留着 `{{name}}` 就等于把字面量发给 IdP，而用户看到的只是一句
-/// 「token 获取失败」。`authorizationUrl` 不进 token 请求（它只是给用户点开的登录地址，
-/// 而本应用不开浏览器），`implicit` 流程压根没有 token 端点（token 由用户粘贴），
-/// 故两者都不报。
+/// 只报**这条流程真的会发出去**的字段：`tokenUrl` / `clientId` / `scope` 进了 token 请求，
+/// 字段里留着 `{{name}}` 就等于把字面量发给 IdP，而用户看到的只是一句「token 获取失败」。
+/// `authorizationUrl` 不进 token 请求，`implicit` 流程没有 token 端点，故两者都不报。
 fn report_unresolved(sub: &SubstitutedConfig) -> Result<(), AppError> {
     if sub.config.grant_type == OAuth2GrantType::Implicit {
         return Ok(());
@@ -227,8 +218,7 @@ fn report_unresolved(sub: &SubstitutedConfig) -> Result<(), AppError> {
 
 /// 收下用户粘贴的 `implicit` token 并写进缓存。
 ///
-/// 只对 `implicit` 开放：别的流程都能自己换到手，为它们开这个口子只会让「为什么这次
-/// 没过 IdP」变得难查。
+/// 只对 `implicit` 开放：别的流程都能自己换到手。
 pub fn save_manual(
     pool: &DbPool,
     cfg: &OAuth2Auth,

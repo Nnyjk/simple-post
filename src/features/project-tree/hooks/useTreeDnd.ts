@@ -34,9 +34,8 @@ export interface TreeDndBindings {
 /**
  * 树的全部拖放管线：载荷编码、落点判定、放置提示。
  *
- * 落点规则本身不在这一层 —— 它住在 `../drop-resolve.ts`，是一组纯函数，规则全部来自
- * 父子类型矩阵（`@/lib/node-placement.ts`）。这一层只负责把浏览器事件翻译成那些函数
- * 的入参，以及把「这一行接受哪些放置区」的结论画成提示。
+ * 落点规则本身不在这一层 —— 它住在 `../drop-resolve.ts`，是一组纯函数，规则全部来自父子类型
+ * 矩阵（`@/lib/node-placement.ts`）。这一层只负责把浏览器事件翻译成那些函数的入参。
  *
  * 状态与 store 值由 `ProjectTree` 传入 —— 本 hook 不持有任何 store selector。
  */
@@ -51,10 +50,8 @@ export function useTreeDnd({ nodes, activeProjectId, moveNodes }: TreeDndBinding
   } | null>(null);
 
   /**
-   * drop 处理器工厂。按行绑定，好让每一行自己决定是否接受放置（以及插到哪个索引）。
-   *
-   * 落点由 `resolveDrop` 算出：它给出新父级与新槽位，或者给出被拒绝的理由。被拒时
-   * 什么也不做 —— 界面在 `dragover` 阶段就没有画提示，光标也已经是「不可放」。
+   * drop 处理器工厂。按行绑定，好让每一行自己决定是否接受放置（以及插到哪个索引）。落点由
+   * `resolveDrop` 算出：它给出新父级与新槽位，或者给出被拒绝的理由。被拒时什么也不做。
    */
   const makeDropHandler = (target: { kind: TreeNodeKind; id: string }) => (e: ReactDragEvent) => {
     e.preventDefault();

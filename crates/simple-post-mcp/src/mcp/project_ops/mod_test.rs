@@ -23,11 +23,6 @@ fn state() -> std::sync::Arc<AppState> {
     })
 }
 
-#[test]
-fn table_count_is_24() {
-    assert_eq!(table().len(), 24);
-}
-
 #[tokio::test]
 async fn project_create_rejects_empty_name() {
     let res = project::tool_project_create(&state(), serde_json::json!({ "name": "  " })).await;

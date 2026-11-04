@@ -26,9 +26,8 @@ pub struct McpCapabilityDto {
 }
 
 /// 一次发送的结果：传输层的信封 + 脚本的产出。
-///
-/// **脚本结果可选**：链上没有脚本时它缺席，旧的调用方只读 `http` 那一半即可。
-/// 脚本失败**不改变** `http` 里的成败——失败信息在 `script` 里单独呈现。
+/// 脚本结果可选：链上没有脚本时它缺席。脚本失败**不改变** `http` 里的成败，
+/// 失败信息在 `script` 里单独呈现。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendOutcomeDto {
@@ -47,9 +46,7 @@ impl From<simple_post_core::script::ScriptedSendOutcome> for SendOutcomeDto {
 }
 
 /// `nodes_create` 随结构节点一并携带的 endpoint 请求配置。
-///
-/// 整块可选、字段全可选：从树上的「新建请求」建出来的 endpoint 起始为空、事后
-/// 再填，每一列在这种情形下都有合理默认值。
+/// 整块可选、字段全可选：从树上的「新建请求」建出来的 endpoint 起始为空、事后再填。
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateEndpointDetailOpts {
@@ -69,18 +66,14 @@ pub struct CreateEndpointDetailOpts {
     /// 响应回来之后跑的那段脚本。缺席 = 没有脚本。
     pub test_script: Option<String>,
     /// 该端点自己的 HTTPS 出站设置。缺席 = 继承全局默认。
-    ///
     /// 端点给了这份设置就**整体**取代全局那份，故它不是逐字段的覆盖。
     pub tls: Option<TlsSettings>,
 }
 
 impl CreateEndpointDetailOpts {
-    /// 展开成 `db::nodes::create` 要写的那一行。`node_id` 由这里传入而非留给调用方，
-    /// 免得 detail 指向一个从未插入的节点。
-    ///
-    /// 之所以是 `pub` 而非 `pub(crate)`：`POST /api/nodes`（本 crate）与
-    /// `nodes_create` Tauri 命令（`src-tauri`）接受同一个 opts 类型并都经这里展开，
-    /// 两条 transport 才能对半填的 endpoint 采用同样的默认值。
+    /// 展开成 `db::nodes::create` 要写的那一行。`node_id` 由这里传入而非留给调用方，免得 detail
+    /// 指向一个从未插入的节点。是 `pub` 而非 `pub(crate)`：`POST /api/nodes`（本 crate）与
+    /// `nodes_create` Tauri 命令（`src-tauri`）接受同一个 opts 类型并都经这里展开。
     pub fn into_detail(self, node_id: &str) -> EndpointDetail {
         EndpointDetail {
             node_id: node_id.to_string(),
@@ -119,21 +112,15 @@ pub struct RequestSettingsPatch {
 }
 
 // ---------------------------------------------------------------------------
-// MCP daemon DTO —— daemon 线格式的唯一事实来源。
-// `crate::daemon_supervisor::McpDaemonHandle::snapshot()` 返回它，
+// MCP daemon DTO：daemon 线格式的唯一事实来源。`McpDaemonHandle::snapshot()` 返回它，
 // `mcp_status` Tauri 命令原样转发。
 // ---------------------------------------------------------------------------
 
-/// 内嵌 MCP daemon 的快照。由 `mcp_status` 返回，UI 周期性轮询以展示「AI 桥接是否
-/// 在跑」。
-///
-/// 线格式与 `src/lib/mcp-types.ts::McpUiState` 完全一致。`status` 是生命周期真值
-/// （经 `as_str()` 镜像内部的 `DaemonStatus` 枚举）；`running` 保留为派生布尔量，
-/// 让仍消费旧形状的调用方无需强制迁移。
-///
-/// 这些类型都不含 Tauri 专有内容——只是 `Serialize` / `Deserialize` 的袋子——故放在
-/// 两个 host 之下；`src-tauri/src/commands/dto.rs` 再导出本模块，旧的
-/// `crate::commands::Foo` 路径仍解析到同一批类型。
+/// 内嵌 MCP daemon 的快照，由 `mcp_status` 返回供 UI 轮询。线格式与 `src/lib/mcp-types.ts::McpUiState`
+/// 一致。
+/// `status` 是生命周期真值（`as_str()` 镜像 `DaemonStatus` 枚举），`running` 是派生布尔量，
+/// 供只读它的调用方继续用。
+/// 这些类型不含 Tauri 专有内容，故放在两个 host 之下；`src-tauri/src/commands/dto.rs` 再导出本模块。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpStatusDto {
@@ -141,8 +128,7 @@ pub struct McpStatusDto {
     /// "restarting" | "crashed" | "unhealthy"`。只读 `running` 的消费者不受影响，
     /// 因为我们置 `running = (status == "running")`。
     pub status: String,
-    /// 向后兼容布尔量，当且仅当 `status == "running"` 为真。旧调用方可继续读它而不必
-    /// 认识生命周期枚举；徽标 / UI 逻辑已改用 `status`。
+    /// 派生布尔量，当且仅当 `status == "running"` 为真，供只读它的调用方继续用。
     pub running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
@@ -167,20 +153,14 @@ pub struct McpLogTailDto {
     pub started_at_ms: Option<u64>,
     /// 缓冲是否因超出容量而丢过行。用户据此知道「上面还有更早的日志，但已经没了」。
     pub truncated: bool,
-    /// 本监管者是否持有这个 daemon 的 stderr 管道。
-    ///
-    /// 复用一个**外部启动**的 daemon 时没有管道，那种情况下缓冲永远是空的。
-    /// 用户看到的应该是「无日志捕获」而不是「没有日志」。
+    /// 本监管者是否持有这个 daemon 的 stderr 管道。复用一个**外部启动**的 daemon 时没有管道，
+    /// 缓冲恒为空，用户看到的应是「无日志捕获」而不是「没有日志」。
     pub capturing: bool,
 }
 
-/// `mcp_daemon_restart` Tauri 命令的返回值。与 `McpStatusDto` 分开，是因为重启路径
-/// 是唯一一处刻意吞掉底层 `AppError` 的地方——好让 UI 渲染统一的
-/// `{ ok: false, ... }` 信封，而不必在每个调用点再挂一层 `.catch`。
-///
-/// 失败路径上 `pid` / `port` 刻意序列化成 JSON `null`（而非跳过），使响应形状稳定：
-/// `{ ok, pid, port }` 恒在。这与 renderer 的 `RestartResult` 类型（见
-/// `src/lib/mcp-types.ts`）对齐。
+/// `mcp_daemon_restart` Tauri 命令的返回值。与 `McpStatusDto` 分开，因为重启路径是唯一一处
+/// 吞掉底层 `AppError` 的地方，好让 UI 渲染统一的 `{ ok: false, ... }` 信封。
+/// 失败路径上 `pid` / `port` 序列化成 JSON `null`（而非跳过），使 `{ ok, pid, port }` 形状稳定。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RestartResult {
@@ -189,14 +169,32 @@ pub struct RestartResult {
     pub port: Option<u16>,
 }
 
+impl RestartResult {
+    /// 成功时的信封：daemon 的 pid 与端口。
+    pub fn from_status(status: &McpStatusDto) -> Self {
+        Self {
+            ok: true,
+            pid: status.pid,
+            port: status.port,
+        }
+    }
+
+    /// 失败时的信封。`pid` / `port` 为 `null`，使 `{ ok, pid, port }` 形状稳定。
+    pub fn failed() -> Self {
+        Self {
+            ok: false,
+            pid: None,
+            port: None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // interchange —— 导入 / 导出共用的线形状
 // ---------------------------------------------------------------------------
 
 /// 勾选树上的一个分组（导入时是「将要落成集合的那一层」，导出时是集合）。
-///
-/// **导入与导出共用同一个节点类型**是刻意的：一个组件一份类型，才能真正做到
-/// 「共用一个弹窗」，而不是两套形状在组件里各写一半再凑合渲染。
+/// 导入与导出共用这一个节点类型，组件才能真正共用一个弹窗，而不是两套形状各写一半。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferNode {
@@ -249,9 +247,8 @@ pub struct ImportedEnvironmentDto {
 }
 
 /// 预览里「这份文档会落成哪些地址」的预告。
-///
-/// **缺席是一个真实答案**，不是「待定」：文档没给 host 时就是缺席（附一条 `Warn`
-/// 诊断说明为什么）。一份文档可以给出多个地址——它们分别落进各自的模块格子。
+/// **缺席是一个真实答案**，不是「待定」：文档没给 host 时就是缺席（附一条 `Warn` 诊断说明为什么）。
+/// 一份文档可以给出多个地址，它们分别落进各自的模块格子。
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProposedBaseUrlDto {
@@ -391,9 +388,8 @@ pub struct ExportPreviewOpts {
     pub project_id: String,
     pub module_id: String,
     /// 按哪个环境解析那一格的地址。**缺席或空串 = 取默认环境**（最早创建的那个）。
-    ///
-    /// 空串必须与「没传」等价：渲染层「不选环境」那一项送来的就是空串，而空串
-    /// 不是一个环境 id——按 id 去查会得到「环境不存在」。
+    /// 空串必须与「没传」等价：渲染层「不选环境」送来的就是空串，而空串不是环境 id，
+    /// 按 id 去查会得到「环境不存在」。
     #[serde(default)]
     pub environment_id: Option<String>,
 }

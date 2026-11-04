@@ -1,21 +1,16 @@
 /**
- * 集合子树的端点清单 —— 按**树的显示顺序**。
+ * 集合子树的端点清单 —— 按**树的显示顺序**。次序规则与界面渲染的那一套一致：容器**直接
+ * 持有**的接口先出，然后才是它的子集合，逐个递归展开。它不是纯粹的深度优先前序 —— 界面把
+ * 一个容器自己的接口画在它的子集合**之上**，故批量执行的次序与用户在树上看到的行序相同。
  *
- * 次序规则与界面渲染的那一套一致：容器**直接持有**的接口先出，然后才是它的子集合，
- * 逐个递归展开。它不是纯粹的深度优先前序——界面把一个容器自己的接口画在它的子集合
- * **之上**，故批量执行的次序与用户在树上看到的行序相同。
- *
- * Rust 侧的 `db::nodes::ordered_subtree_endpoints` 是同一套规则的另一半实现。两侧各
- * 写一遍遍历，故顺序规则由 `fixtures/collection-order-parity.json` 钉住，测试读同一
- * 份文件。
+ * Rust 侧的 `db::nodes::ordered_subtree_endpoints` 是同一套规则的另一半实现，两侧各写一遍
+ * 遍历，故顺序规则由 `fixtures/collection-order-parity.json` 钉住。
  */
 import type { ResourceNode } from '@/types/domain';
 
 /**
- * 取某个容器子树下的全部端点。
- *
- * `nodes` 是工作区的全部节点（打平的数组），`rootId` 指向一个模块或集合。根自己就是
- * 端点时，返回它自己。根不存在时返回空列表。
+ * 取某个容器子树下的全部端点。`nodes` 是工作区的全部节点（打平的数组），`rootId` 指向一个
+ * 模块或集合。根自己就是端点时返回它自己，根不存在时返回空列表。
  */
 export function collectSubtreeEndpoints(
   nodes: readonly ResourceNode[],
@@ -59,10 +54,8 @@ export function collectSubtreeEndpoints(
 }
 
 /**
- * 某个容器子树下的接口数量与子集合数量，报告标题要用。
- *
- * 子集合数只数**直接**的子集合：标题说的是「这个集合下面有几个子集合」，而递归总数
- * 会随嵌套深度变化，读起来反而不准。
+ * 某个容器子树下的接口数量与子集合数量，报告标题要用。子集合数只数**直接**的子集合：标题
+ * 说的是「这个集合下面有几个子集合」，而递归总数会随嵌套深度变化，读起来反而不准。
  */
 export function countSubtree(
   nodes: readonly ResourceNode[],

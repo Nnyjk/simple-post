@@ -1,33 +1,27 @@
 /**
  * 本目录下 CRUD 各子工厂共用的纯助手。
  *
- * 它们刻意放在 store 侧而不是 `@/lib/tree-index`：每一个都只有一两个调用方，
- * 且全在 CRUD 切片内部，把只用一次的助手提升成共享模块只会给其他所有导入方
- * 扩大那个模块的表面积。`indexByParent` 相反——它确实共用，所以子工厂仍从
- * `@/lib/tree-index` 导入它。
+ * 它们刻意放在 store 侧而不是 `@/lib/tree-index`：每一个都只有一两个调用方，且全在 CRUD
+ * 切片内部，把只用一次的助手提升成共享模块只会给其他所有导入方扩大那个模块的表面积。
+ * `indexByParent` 相反——它确实共用，故子工厂仍从 `@/lib/tree-index` 导入它。
  *
- * 除了 `invokeWithRollback` 之外，下面所有东西都是不碰 store 的纯计算，
- * 这正是它们能在 `set()` 回调里安全调用的原因。
+ * 除了 `invokeWithRollback` 之外，下面所有东西都是不碰 store 的纯计算，故它们能在
+ * `set()` 回调里安全调用。
  */
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import type { OpenTab, EndpointDraft } from '../store-types';
 
 /**
- * 每次乐观写入的尾巴：调守护进程，失败时记日志并把本地 state 回滚。
+ * 每次乐观写入的尾巴：调守护进程，失败时记日志并把本地 state 回滚。日志前缀与「你记得回滚
+ * 了吗？」这个问题由这里统一回答，调用方只提供这一次写入的「回滚」具体是什么。
  *
- * 日志前缀和"你记得回滚了吗？"这个问题由这里统一回答，调用方只提供这一次
- * 写入的"回滚"具体是什么。
+ * `rollback` 是回调而不是值，因为回滚形状确实不同：有些是必须跑在**当前** state 上的 updater
+ * （`set((s) => …)`），有些是乐观写入之前捕获的快照对象。
  *
- * `rollback` 是回调而不是值，因为回滚形状确实不同：有些是必须跑在**当前**
- * state 上的 updater（`set((s) => …)`），有些是乐观写入之前捕获的快照对象。
- * 只接受单一形式的助手会迫使另一类改写。
- *
- * 注意它刻意**不**把错误吞成返回值——需要在失败时拿到值的调用方（各 create
- * 动作）保留自己的 try/catch 并返回 `null`。
- *
- * 返回值是「这次调用成功了吗」：成功 `true`，失败（已回滚）`false`。有些收尾动作
- * 只在真的删掉之后才该做——例如删掉一个项目后把它记住的环境从 localStorage 里清掉；
- * 删除失败时那条记录还得留着（项目还在，记忆还得有用）。
+ * 它刻意**不**把错误吞成返回值——需要在失败时拿到值的调用方（各 create 动作）保留自己的
+ * try/catch 并返回 `null`。返回值是「这次调用成功了吗」：成功 `true`，失败（已回滚）`false`。
+ * 有些收尾动作只在真的删掉之后才该做——例如删掉一个项目后把它记住的环境从 localStorage 里
+ * 清掉；删除失败时那条记录还得留着（项目还在，记忆还得有用）。
  */
 export async function invokeWithRollback(
   label: string,
@@ -50,11 +44,8 @@ export function renumber<T extends { sortOrder: number }>(items: readonly T[]): 
 }
 
 /**
- * 一个节点及其下方所有后代。
- *
- * 沿 `parentId` 做 BFS，带一个已访问集合。这个集合不是防御性冗余：数据里出现
- * 环会让这里永远转下去，而 UI 是 store 与手工编辑过的 `store.db` 之间唯一的
- * 屏障。
+ * 一个节点及其下方所有后代。沿 `parentId` 做 BFS，带一个已访问集合。这个集合不是防御性冗余：
+ * 数据里出现环会让这里永远转下去，而 UI 是 store 与手工编辑过的 `store.db` 之间唯一的屏障。
  */
 export function collectSubtree(
   rootId: string,
@@ -72,8 +63,8 @@ export function collectSubtree(
 }
 
 /**
- * 丢掉底层实体已被移除的标签。返回新的标签表、新的活动标签 id（活动标签被移除
- * 时取前一个邻居），以及一个"是否有变化"的标记。
+ * 丢掉底层实体已被移除的标签。返回新的标签表、新的活动标签 id（活动标签被移除时取前一个
+ * 邻居），以及一个「是否有变化」的标记。
  */
 export function filterTabsAfterRemoval(
   tabs: readonly OpenTab[],
@@ -100,11 +91,9 @@ export function filterTabsAfterRemoval(
 }
 
 /**
- * 删除一棵子树时该关掉的标签键。
- *
- * 标签按它所显示的东西的 id 作键，而 `module` / `collection` / `endpoint`
- * 标签的 id 就是它的节点 id——所以扫一遍被移除的 id 就同时回答了三者。project
- * 是另一回事：它们不是节点，由 project 动作负责关。
+ * 删除一棵子树时该关掉的标签键。标签按它所显示的东西的 id 作键，而 `module` / `collection` /
+ * `endpoint` 标签的 id 就是它的节点 id——故扫一遍被移除的 id 就同时回答了三者。project 是另一
+ * 回事：它们不是节点，由 project 动作负责关。
  */
 export function tabKeysForSubtree(
   nodes: readonly ResourceNode[],
@@ -123,12 +112,12 @@ export function tabKeysForSubtree(
 /**
  * 把 endpoint 草稿转成落盘它的 `updateEndpointDetail` 补丁。
  *
- * 两条保存路径共用——HttpTester 的 Save 按钮与脏关闭对话框的"保存"——所以
- * 它们不会分叉：给 `EndpointDraft` 新增的字段两边都自动带上，因为这个映射由
- * 草稿自身的键驱动，而不是手写的字段表。
+ * 两条保存路径共用——HttpTester 的 Save 按钮与脏关闭对话框的「保存」——故它们不会分叉：给
+ * `EndpointDraft` 新增的字段两边都自动带上，因为这个映射由草稿自身的键驱动，而不是手写的
+ * 字段表。
  *
- * 每个草稿字段在 `EndpointDetail` 里都有同名对应，正是这个 1:1 让强制转换成立。
- * 若某字段需要在进来的路上做转换，这个前提就不成立，那时该字段应在这里显式列出。
+ * 每个草稿字段在 `EndpointDetail` 里都有同名对应，正是这个 1:1 让强制转换成立。若某字段需要
+ * 在进来的路上做转换，那时该字段应在这里显式列出。
  */
 export function draftToPatch(draft: EndpointDraft): Partial<EndpointDetail> {
   const patch: Record<string, unknown> = {};

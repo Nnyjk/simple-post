@@ -16,18 +16,16 @@ export type { McpRuntimeStatus, McpUiState };
 const RESTART_GRACE_MS = 2000;
 
 /**
- * MCP daemon 的重启控件。
+ * MCP daemon 的重启控件。真相各归其位：
  *
- * 真相各归其位：
- *   - 3 秒轮询循环在 Zustand store 里（`useAppStore.startMcpPolling` / `refreshMcpStatus`）。
- *     任何挂载 `useMcpStatus` 的组件都参与同一个单例循环，本面板不再另起 `setInterval`。
- *   - 本面板只留一份 daemon 局部逻辑：`daemon://crashed` 事件监听。Rust 发出该事件时
- *     立即调 `refreshMcpStatus`，徽标当场翻成 `crashed`，不等下一个 3 秒 tick。
- *   - 按钮本身调 `useAppStore.getState().restartMcp()` —— 乐观的「重启中」翻转放在 store，
- *     这样对话框按钮发起的并发重启会呈现同一个可见状态。
+ * - 3 秒轮询循环在 Zustand store 里（`useAppStore.startMcpPolling` / `refreshMcpStatus`），
+ *   任何挂载 `useMcpStatus` 的组件都参与同一个单例循环，本面板不再另起 `setInterval`。
+ * - 本面板只留一份 daemon 局部逻辑：`daemon://crashed` 事件监听，Rust 发出该事件时立即调
+ *   `refreshMcpStatus`，徽标当场翻成 `crashed`。
+ * - 按钮本身调 `useAppStore.getState().restartMcp()`，乐观的「重启中」翻转放在 store。
  *
- * 本地的 `restarting` 只是观感状态（invoke 在途及宽限期内禁用按钮），**不**遮蔽
- * 徽标所渲染的 daemon 侧 `mcpStatus.status === 'restarting'`。
+ * 本地的 `restarting` 只是观感状态（invoke 在途及宽限期内禁用按钮），**不**遮蔽徽标所渲染的
+ * daemon 侧 `mcpStatus.status === 'restarting'`。
  */
 export function McpStatusPanel() {
   const mcpStatus = useMcpStatus();

@@ -2,17 +2,16 @@
 //!
 //! 端点建好了不等于能发出去。两种最常见的缺口：
 //!
-//! 1. **base URL 那一格没填。** URL 住在 (环境 × 模块) 的单元格里，那个格子
-//!    **没有任何上层可借** —— 没填就是发出去一条裸路径。
+//! 1. **base URL 那一格没填。** URL 住在 (环境 × 模块) 的单元格里，那个格子**没有任何上层可借**
+//!    —— 没填就是发出去一条裸路径。
 //! 2. **环境里没有它引用的变量。** `{{token}}` 原样发出去，服务端收到的是字面量。
 //!
-//! 两种都不会让建端点失败，所以只能靠提示告诉 agent。提示随写工具的响应回去，
-//! agent 一次就知道要补什么，而不用先发一次请求、看报错、再回头补一轮。
+//! 两种都不会让建端点失败，所以只能靠提示告诉 agent。提示随写工具的响应回去，agent 一次就知道
+//! 要补什么，而不用先发一次请求、看报错、再回头补一轮。
 //!
 //! 判据一律取自现成的实现，不另写一套：base URL 用
 //! [`crate::variable_fill::resolve_base_url`]，变量扫描用
-//! [`simple_post_core::dynamic::list_names`] —— 后者是发送链路用的同一份「哪些字段
-//! 会被替换」的判据。
+//! [`simple_post_core::dynamic::list_names`]——后者是发送链路用的同一份「哪些字段会被替换」的判据。
 
 use simple_post_core::db::DbPool;
 use simple_post_core::domain::{EndpointDetail, Environment, Project};
@@ -20,8 +19,8 @@ use simple_post_core::error::AppError;
 
 /// 查出一个端点当前还缺的东西。空列表表示它能发出去了。
 ///
-/// 查不出来的东西一律不报：读库失败时返回一个空列表，而不是把「查不到」说成
-/// 「不缺」—— 前者让 agent 多问一句，后者让 agent 以为一切正常。
+/// 查不出来的东西一律不报：读库失败时返回一个空列表，而不是把「查不到」说成「不缺」——前者让
+/// agent 多问一句，后者让 agent 以为一切正常。
 ///
 /// `pub(crate)`：MCP 工具、`crate::spec::ops`（REST 路由与桌面 command 那一侧）
 /// 都用它，故它得走出 `project_ops`。
@@ -33,7 +32,7 @@ pub(crate) fn missing_pieces(
 ) -> Vec<String> {
     let mut out = Vec::new();
 
-    // 环境：端点行不再绑定环境，故这里按项目的默认环境（最早创建的那个）算缺口
+    // 环境：端点行不绑定环境，故这里按项目的默认环境（最早创建的那个）算缺口
     // —— 与发送链路同一套判据。
     let env = crate::mcp::resolve_env(pool, None, &project.id).unwrap_or(None);
 

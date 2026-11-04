@@ -44,6 +44,7 @@ crates/simple-post-server/
 └── src/
     ├── lib.rs                # the public surface + the shared re-exports
     ├── main.rs               # the headless binary: the `serve-web` command
+    ├── cli.rs                # the CLI fragments both binaries share (serve-web / mcp)
     ├── auth.rs               # the bearer middleware + the public-path list
     ├── dto.rs                # the wire shapes both transports share
     ├── http_config.rs        # the MCP listener config + its fingerprint

@@ -7,9 +7,8 @@
 /// 百分号编码。保留 `A-Z a-z 0-9 - _ . ! ~ * ' ( )`，其余字节一律 `%XX`（大写十六进制）。
 ///
 /// 字符集取 JS 的 `encodeURIComponent` 而不是 RFC 3986 的 unreserved 集：多出来的
-/// `! * ' ( )` 在查询串里是合法的子分隔符，而渲染进程发出去的请求用的就是这套编码。
-/// 空格是 `%20`（不是 form 编码的 `+`）：`+` 在严格按 RFC 3986 解析查询串的服务端
-/// 会被读成加号而非空格。
+/// `! * ' ( )` 在查询串里是合法的子分隔符。空格是 `%20`（不是 form 编码的 `+`）：`+` 在
+/// 严格按 RFC 3986 解析查询串的服务端会被读成加号而非空格。
 pub fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {

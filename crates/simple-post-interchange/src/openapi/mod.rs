@@ -11,9 +11,8 @@
 //!   故每个 operation 输出一个 `200: OK`。
 //! - **`servers` 先看端点自己的地址，再逐模块取，不回退。** 端点配了自己的地址就写那个
 //!   地址；端点没有自己的地址时取模块那一格，该模块没配就是没有 URL：不借用别的模块的。
-//! - **`tags` 就是集合名。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这层就在产物里
-//!   消失，重新导入时全部塌成一个分组。tag 是扁平字符串，故只落**最外层**集合——
-//!   见 [`document_tags`]。
+//! - **`tags` 就是集合名。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这层就在产物里消失，
+//!   重新导入时全部塌成一个分组。tag 是扁平字符串，故只落**最外层**集合——见 [`document_tags`]。
 
 mod builder;
 
@@ -96,15 +95,13 @@ fn media_type_of(mode: &BodyMode) -> Option<&'static str> {
 
 /// `动词 + 路径` → 一个合法的 `operationId`。
 ///
-/// 路径分隔符换成**双**下划线，其余非法字符换成单下划线：`operationId` 在多数代码
-/// 生成器里会被直接变成方法名，而 `/` 与 `{}` 都不是标识符字符。不做大小写变换——
-/// 那会抹掉用户路径里的区分信息。
-///
-/// 分隔符要与其余字符区分开，否则 `/api/user-info` 与 `/api/user/info` 撞名
-/// （现在分别是 `get___api__user_info` 与 `get___api__user__info`）。
-///
-/// 映射仍不是**单射**（`/a-b` 与 `/a_b` 撞名），故另有一道编号回退（见
-/// [`Builder::claim_operation_id`]）：规范要的是「文档内唯一」，不是「映射可逆」。
+/// 路径分隔符换成**双**下划线，其余非法字符换成单下划线：`operationId` 在多数代码生成器里会被
+/// 直接变成方法名，而 `/` 与 `{}` 都不是标识符字符。不做大小写变换——那会抹掉用户路径里的区分
+/// 信息。
+/// 分隔符要与其余字符区分开，否则 `/api/user-info` 与 `/api/user/info` 撞名（现在分别是
+/// `get___api__user_info` 与 `get___api__user__info`）。映射仍不是**单射**（`/a-b` 与 `/a_b`
+/// 撞名），故另有一道编号回退（见 [`Builder::claim_operation_id`]）：规范要的是「文档内唯一」，
+/// 不是「映射可逆」。
 fn operation_id(verb: &str, path: &str) -> String {
     let mut out = String::with_capacity(verb.len() + path.len() + 1);
     out.push_str(verb);

@@ -2,11 +2,10 @@
 //! `api_call_endpoint`（按 id 解析并发出端点）与 `api_run_collection`（把一个容器下面的
 //! 接口逐个发出去，给一份报告）。
 //!
-//! 三个都走 `send.rs` 的同一条执行路径，故「解析之后发生什么」只有一份实现。**三者
-//! 也走同一个解析器**：`variable_fill::resolve_endpoint_with`。临时请求先被拼成一份内存里的
-//! `EndpointDetail`，再交给它解析，故「变量替换 / base URL 拼接 / 鉴权派生 /
-//! header 排序 / body 判空」这些规则只有一份实现 —— 不会因为「发临时请求」而另有一套
-//! 拼接规则。批量运行同样走它，只是把每一条的结论收进一份报告。
+//! 三个都走 `send.rs` 的同一条执行路径，故「解析之后发生什么」只有一份实现。**三者也走同一个
+//! 解析器**：`variable_fill::resolve_endpoint_with`。临时请求先被拼成一份内存里的
+//! `EndpointDetail`，再交给它解析，故「变量替换 / base URL 拼接 / 鉴权派生 / header 排序 /
+//! body 判空」这些规则只有一份实现。批量运行同样走它，只是把每一条的结论收进一份报告。
 //!
 //! ```text
 //!   http_ops/

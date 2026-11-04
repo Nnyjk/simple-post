@@ -2,15 +2,13 @@
  * `multipart/form-data` 的分片装配 —— Content-Type 的 boundary 与 body 里的
  * boundary **必须是同一个字符串**，否则服务端解析失败而请求看起来成功。
  *
- * 分片结构存在 `RequestBody.content` 里，是一个 `MultipartPart[]` 的 JSON 文本。
- * 复用既有的 `content` 字段（而不是给 `RequestBody` 加 `parts`）是有意的：
- * `RequestBody` 原样进 `body_json`，`{{var}}` 模板化也照旧作用在这个字符串上。
- *
- * **产物是字节**：文件分片的内容是文件的字节，文本分片的内容是 UTF-8 字节。字节是
- * 合法 UTF-8 时走文本形态，否则走 base64 形态。
- *
- * 与 `mcp/http_ops/multipart.rs` 是同一套规则的两份实现（边界字符集、转义、
- * 缺省 Content-Type、非法输入的处理都逐条对齐），改动两边必须同步。
+ * - 分片结构存在 `RequestBody.content` 里，是一个 `MultipartPart[]` 的 JSON 文本。复用
+ *   既有的 `content` 字段（而不是给 `RequestBody` 加 `parts`）是有意的：`RequestBody`
+ *   原样进 `body_json`，`{{var}}` 模板化也照旧作用在这个字符串上。
+ * - **产物是字节**：文件分片的内容是文件的字节，文本分片的内容是 UTF-8 字节；字节是合法
+ *   UTF-8 时走文本形态，否则走 base64 形态。
+ * - 与 `mcp/http_ops/multipart.rs` 是同一套规则的两份实现（边界字符集、转义、缺省
+ *   Content-Type、非法输入的处理都逐条对齐），改动两边必须同步。
  */
 import type { MultipartPart } from '@/types/domain';
 import { base64ToBytes, bytesToBase64, bytesToUtf8, isValidUtf8, utf8Bytes } from './base64';

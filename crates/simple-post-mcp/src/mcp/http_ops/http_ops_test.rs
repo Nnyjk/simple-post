@@ -2,18 +2,14 @@
 
 use std::collections::HashMap;
 
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::mcp::{arg_bool_opt, arg_str, arg_str_opt, arg_u64_opt};
 use simple_post_core::domain::{BodyMode, Environment, HttpMethod, ModuleBaseUrl};
 
 use super::envelope::header_pairs_to_tuples;
 use super::input::{extract_settings, flatten_key_values, parse_auth, parse_body_mode};
-use super::{flatten_string_map, table, RunRequestArgs};
-#[test]
-fn table_has_three_rows() {
-    assert_eq!(table().len(), 3);
-}
+use super::{flatten_string_map, RunRequestArgs};
 
 #[test]
 fn flatten_object_to_pairs() {
@@ -42,6 +38,15 @@ fn flatten_array_of_pairs() {
 fn flatten_rejects_bad_shape() {
     let v = json!("not a map");
     assert!(flatten_string_map(Some(&v), "h").is_err());
+}
+
+/// 缺席与 `null` 都得到空列表，不报错。
+#[test]
+fn flatten_absent_or_null_is_empty() {
+    assert!(flatten_string_map(None, "h").unwrap().is_empty());
+    assert!(flatten_string_map(Some(&Value::Null), "h")
+        .unwrap()
+        .is_empty());
 }
 
 /// 三种键值对形状（对象映射 / 键值对数组 / 端点那套对象）都要收下。

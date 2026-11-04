@@ -1,12 +1,11 @@
 /**
  * base64 与字节之间的转换 —— 传输层的二进制通道用它。
  *
- * 浏览器只有 `btoa` / `atob`，而它们吃的是「每个字符一个字节」的字符串。故字节与
- * 字符串之间要过一次 latin1 转换：直接 `btoa(String.fromCharCode(...bytes))` 在大文件
- * 上会炸调用栈，故分块处理。
- *
- * 字母表是标准的那个（`+` / `/`，带 `=` 补位），与 Rust 的
- * `base64::engine::general_purpose::STANDARD` 一致——两侧拼出来的字符串要能互换。
+ * - 浏览器只有 `btoa` / `atob`，而它们吃的是「每个字符一个字节」的字符串，故字节与
+ *   字符串之间要过一次 latin1 转换；直接 `btoa(String.fromCharCode(...bytes))` 在大文件上
+ *   会炸调用栈，故分块处理。
+ * - 字母表是标准的那个（`+` / `/`，带 `=` 补位），与 Rust 的
+ *   `base64::engine::general_purpose::STANDARD` 一致——两侧拼出来的字符串要能互换。
  */
 
 /** 一次转换的块大小。太大会在 `String.fromCharCode` 上炸掉调用栈。 */
@@ -48,7 +47,7 @@ export function utf8Bytes(text: string): Uint8Array<ArrayBuffer> {
  * 这串字节是合法 UTF-8 吗？
  *
  * 判据是「能不能用严格模式解成字符串」：严格模式遇到非法序列会抛，而宽松模式会把
- * 坏字节换成 U+FFFD——那等于把一份二进制悄悄改写成文本。
+ * 坏字节换成 U+FFFD——那等于把一份二进制改写成文本。
  *
  * `TextDecoder` 的 `fatal: true` 就是严格模式。
  */

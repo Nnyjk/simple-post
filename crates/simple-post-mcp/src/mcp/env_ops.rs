@@ -1,9 +1,8 @@
 //! 环境域 MCP 工具 —— 共 7 个。
 //!
 //! 每个工具都是同一套四步：解析 `arguments`（小型 serde 类型）→ 过
-//! `simple_post_core::permissions::require` → 委托
-//! `simple_post_core::db::environments::*` → 用 `CallToolResult::json` 包成单个
-//! text content 块回给 LLM。
+//! `simple_post_core::permissions::require` → 委托 `simple_post_core::db::environments::*` → 用
+//! `CallToolResult::json` 包成单个 text content 块回给 LLM。
 //!
 //! 这里**没有**「切换当前环境」的工具：当前环境是每个客户端自己的实时状态，落库会让
 //! web 端多个人互相踩。MCP 侧改为**逐次点名**——`api_call_endpoint` 与

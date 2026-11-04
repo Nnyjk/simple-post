@@ -7,12 +7,10 @@ import { cn } from '@/lib/utils';
  * 紧凑的「点击即编辑」文本单元格。点值换成输入框；失焦或回车提交，Esc 还原。可选的
  * `validate` 会拦下提交并就地显示错误。
  *
- * 刻意留在环境分区本地（而非复用 `@/components/ui/InlineEdit`）：它单击即开 ——
- * 这里行距很密的表格布局容不下双击的手势提示；且它支持 `validate` 与就地报错，
- * `InlineEdit` 没有对应能力。
+ * 刻意留在环境分区本地（而非复用 `@/components/ui/InlineEdit`）：它单击即开 —— 这里行距很密的
+ * 表格布局容不下双击的手势提示；且它支持 `validate` 与就地报错。
  *
- * `autoEdit` 让输入框不经点击直接打开。环境面板用它把刚建好的环境直接落到命名上，
- * 用户不必去找重命名入口；其余调用点（服务名、变量键）仍由点击驱动打开。
+ * `autoEdit` 让输入框不经点击直接打开：环境面板用它把刚建好的环境直接落到命名上。
  */
 export function InlineNameCell({
   value,

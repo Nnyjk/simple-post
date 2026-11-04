@@ -10,12 +10,9 @@ use super::validation::{
     check_source_bindings, is_unique_violation, is_valid_name, unique_violation_columns,
 };
 
-/// 新建一条定义。
-///
-/// 变量名非法、与同项目里的另一条定义重名、或归属项目不存在时返回 `Validation`。
-///
-/// 重名会撞上 `idx_dynamic_vars_project_name` 那条唯一索引，与其把数据库的约束错误泄给
-/// 用户，不如在这里说清是哪个名字撞了。
+/// 新建一条定义。变量名非法、与同项目里的另一条定义重名、或归属项目不存在时返回
+/// `Validation`。重名会撞上 `idx_dynamic_vars_project_name` 那条唯一索引，与其把数据库的
+/// 约束错误泄给用户，不如在这里说清是哪个名字撞了。
 pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppError> {
     if !is_valid_name(&def.name) {
         return Err(AppError::Validation(format!(
@@ -111,10 +108,8 @@ pub fn create(conn: &mut Connection, def: &DynamicVariable) -> Result<(), AppErr
     Ok(())
 }
 
-/// 改一条定义。
-///
-/// 改 `name` 时同样要过合法性检查与重名检查；改归属项目时，新项目里也不能有同名
-/// 的定义。
+/// 改一条定义。改 `name` 时同样要过合法性检查与重名检查；改归属项目时，新项目里也不能有
+/// 同名的定义。
 pub fn update(
     conn: &mut Connection,
     id: &str,

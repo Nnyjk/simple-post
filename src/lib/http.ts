@@ -1,24 +1,21 @@
 /**
  * 真实 HTTP 发送 —— 一条传输路径、两种分发形态：
  *
- *   1. Tauri shell  → `invokeCmd(COMMANDS.httpRequest, …)` 命中 Rust 的
- *                     `http_request` 命令，它委派给 `http_executor::execute`
- *                     （reqwest）。完全绕开 webview 的 CORS。
+ *   1. Tauri shell  → `invokeCmd(COMMANDS.httpRequest, …)` 命中 Rust 的 `http_request`
+ *                     命令，它委派给 `http_executor::execute`（reqwest），绕开 webview 的 CORS。
  *   2. Web / Dev    → `invokeCmd` 落到 `webInvokeCmd` → axum `serve-web` 上的
  *                     `POST /api/http/send`，调用同一个 `http_executor::execute`。
- *                     同一条 Rust 路径，同一种响应形状。
  *
- * 两种形态都返回同一个 `RustHttpResult` 信封；应用其余部分（HttpTester、
- * ResponseViewer、cURL 导出）不关心跑的是哪条。
+ * 两种形态都返回同一个 `RustHttpResult` 信封；应用其余部分（HttpTester、ResponseViewer、
+ * cURL 导出）不关心跑的是哪条。
  *
  * 契约：
- *   - URL + init 由 `buildFetchInit` 构造（与 cURL 导出共享的唯一真相）。
- *     只发送 URL、header（元组数组）与 body **字符串**，其余是 JSON 友好的载荷。
- *   - 由调用方的 `signal` 组合出每次调用的 AbortController，并按
- *     `settings.timeoutMs` 定时。signal 会传给 `invokeCmd`，web 形态下它交给
- *     原生 `fetch`；Tauri 形态只 reject JS promise，Rust 里的 `reqwest` 仍跑到底。
- *   - 返回 `ApiResponse`。网络失败、超时与中止都以 `status: 0` 加可区分的
- *     `statusText` 上报，UI 据此渲染对应横幅。
+ *   - URL + init 由 `buildFetchInit` 构造（与 cURL 导出共享的唯一真相）。只发送 URL、header
+ *     （元组数组）与 body **字符串**，其余是 JSON 友好的载荷。
+ *   - 由调用方的 `signal` 组合出每次调用的 AbortController，并按 `settings.timeoutMs` 定时。
+ *     signal 会传给 `invokeCmd`，web 形态下它交给原生 `fetch`；Tauri 形态只 reject JS promise，
+ *     Rust 里的 `reqwest` 仍跑到底。
+ *   - 返回 `ApiResponse`。网络失败、超时与中止都以 `status: 0` 加可区分的 `statusText` 上报。
  *   - 绝不抛异常——`HttpTester` 只把返回的 `ApiResponse` 塞进 store。
  */
 import type {
@@ -156,14 +153,10 @@ interface RustHttpOk {
   durationMs: number;
   sizeBytes: number;
   headers: Array<[string, string]>;
-  /**
-   * 线上那一份请求头。由 Rust 的 executor 在请求发出后报上来，故含传输层补的几条。
-   */
+  /** 线上那一份请求头。由 Rust 的 executor 在请求发出后报上来，故含传输层补的几条。 */
   requestHeaders?: Array<[string, string]>;
   body: string;
-  /**
-   * 响应体的**字节**（base64）。响应不是文本时才有它，文本响应走 `body`。
-   */
+  /** 响应体的**字节**（base64）。响应不是文本时才有它，文本响应走 `body`。 */
   bodyBase64?: string;
   contentType: string;
   method: string;
@@ -181,25 +174,17 @@ interface RustHttpResult {
 }
 
 /**
- * 后端一次发送的返回：传输层的信封 + 脚本的产出。
- *
- * `script` 缺席 = 链上没有任何脚本。脚本失败**不**改写 `http` 里的成败。
+ * 后端一次发送的返回：传输层的信封 + 脚本的产出。`script` 缺席 = 链上没有任何脚本。
+ * 脚本失败**不**改写 `http` 里的成败。
  */
 interface RustSendOutcome {
   http: RustHttpResult;
   script?: ScriptOutcome | null;
 }
 
-/** 把任意 `HeadersInit` 形状转成 `[name, value]` 元组列表。 */
-function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
-  if (Array.isArray(h)) return h as Array<[string, string]>;
-  if (typeof Headers !== 'undefined' && h instanceof Headers) {
-    const out: Array<[string, string]> = [];
-    h.forEach((v, k) => out.push([k, v]));
-    return out;
-  }
-  if (h && typeof h === 'object') return Object.entries(h as Record<string, string>);
-  return [];
+/** 把请求头记录转成 `[name, value]` 元组列表。 */
+function initHeadersToTuples(h: Record<string, string>): Array<[string, string]> {
+  return Object.entries(h);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,8 +192,8 @@ function initHeadersToTuples(h: HeadersInit): Array<[string, string]> {
 // ---------------------------------------------------------------------------
 
 /**
- * 把后端 `HttpResult` 信封转成渲染器的 `ApiResponse`。裸 URL 路径与 endpoint
- * 路径共用，好让两个界面产出逐字节相同的 UI 状态。
+ * 把后端 `HttpResult` 信封转成渲染器的 `ApiResponse`。裸 URL 路径与 endpoint 路径共用，
+ * 故两个界面产出逐字节相同的 UI 状态。
  */
 function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string): ApiResponse {
   if (!r.ok || !r.response) {
@@ -258,7 +243,7 @@ async function invokeAndMap(
     //   - serve-web HTTP 非 2xx / 网络不可达
     //   - WEB_ROUTES 缺该命令（只有加了 COMMANDS 却没配对应路由才会发生）
     //   - 调用方的 AbortSignal 中止（Tauri 形态 reject，web 形态抛 DOMException）
-    // 中止单独识别，其余都落到通用 Network Error 横幅，UI 至少还有信息量
+    // 中止单独识别，其余都落到通用 Network Error 横幅。
     const name = (err as { name?: string })?.name;
     const msg = (err as Error)?.message ?? String(err);
     if (name === 'AbortError' || /abort/i.test(msg)) {
@@ -272,28 +257,21 @@ async function invokeAndMap(
 /**
  * 经后端传输（`invokeCmd(COMMANDS.httpRequest, …)`）发送 `input` 描述的请求。
  *
- * 传输在模块加载时选定一次：
- *   - Tauri shell → `invoke()` IPC → Rust `http_executor::execute`
- *   - serve-web   → `POST /api/http/send` → 同一个 Rust executor
- *
- * 两种形态都打到同一个基于 `reqwest` 的 executor，所以超时、重定向、最大体积、
- * body 截断都在服务端发生，结果以 JSON 信封跨过边界。
+ * 传输在模块加载时选定一次：Tauri shell → `invoke()` IPC → Rust `http_executor::execute`；
+ * serve-web → `POST /api/http/send` → 同一个 Rust executor。两种形态都打到同一个基于
+ * `reqwest` 的 executor，故超时、重定向、最大体积、body 截断都在服务端发生。
  *
  * ⚠️ 这条路径允许调用方指定任意 URL，服务端因此成了代理。裸 URL 场景与
- * [`sendPreparedRequest`] 都一样——两者都收一个已完成的 URL，因为「前端组装
- * 整个请求、后端负责发」就意味着 URL 归前端所有。限制它的是 `OutboundPolicy`。
+ * [`sendPreparedRequest`] 都一样——两者都收一个已完成的 URL，因为「前端组装整个请求、
+ * 后端负责发」就意味着 URL 归前端所有。限制它的是 `OutboundPolicy`。
  *
- * 没有「裸浏览器 fetch」回退：所有受支持的发行形态前面都有真实后端，直连浏览器的
- * fetch 只在不带服务器的 Vite-only 模式下才有意义，而那种模式不发布。
+ * 没有「裸浏览器 fetch」回退：所有受支持的发行形态前面都有真实后端。
  */
 export async function sendRequest(input: SendInput): Promise<ApiResponse> {
   const built = buildFetchInit(input);
-  // `buildFetchInit` 返回的 `RequestInit.headers` 可能是 `Headers | [][]`
-  // | `Record`。统一归一成元组列表——Rust 反序列化 `Vec<(String, String)>`，
-  // web 桥对元组列表原样 JSON 编码，这是两侧唯一都能用的形状
-  const headers = initHeadersToTuples(built.init.headers ?? {});
-  // body 有两种形态：文本直接给字符串；二进制给 base64。后端的 `HttpRequestInput`
-  // 两个字段都收，`body_base64` 优先——它才是能被还原成文件的那份。
+  // 请求头转成元组列表——Rust 反序列化 `Vec<(String, String)>`，web 桥对元组列表原样 JSON 编码，这是两侧唯一都能用的形状
+  const headers = initHeadersToTuples(built.init.headers);
+  // body 有两种形态：文本直接给字符串；二进制给 base64。后端的 `HttpRequestInput` 两个字段都收，`body_base64` 优先——它才是能被还原成文件的那份。
   const body =
     typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
@@ -308,8 +286,7 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
-      // HTTPS 出站的全局默认（设置面板里改的那份）。裸 URL 请求没有端点，
-      // 故它没有自己那份，端点级覆盖一律缺席。
+      // HTTPS 出站的全局默认（设置面板里改的那份）。裸 URL 请求没有端点，故端点级覆盖一律缺席。
       tls: input.settings.tls,
       tlsOverride: null,
     },
@@ -324,63 +301,52 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
 // Prepared-request 发送 —— 构造与执行终于是同一条路径
 // ---------------------------------------------------------------------------
 
-export interface SendPreparedInput {
+interface SendPreparedInput {
   /**
-   * `prepareRequest` 产出的已完成请求。构造归调用方（base URL join、
-   * `{{var}}` 解析、header 排序、auth 归约），本函数只负责执行。
+   * `prepareRequest` 产出的已完成请求。构造归调用方（base URL join、`{{var}}` 解析、header
+   * 排序、auth 归约），本函数只负责执行。
    */
   request: PreparedRequest;
   /**
-   * `prepareRequest` 用的那份 auth。只为 OAuth2 而读：token 要发网络请求才拿得到，
-   * 没法在那个纯函数里取，故注入发生在发送这一刻（见本函数的实现）。
+   * `prepareRequest` 用的那份 auth。只为 OAuth2 而读：token 要发网络请求才拿得到，没法在那个
+   * 纯函数里取，故注入发生在发送这一刻。
    */
   auth?: AuthConfig;
   settings: RequestSettings;
   signal?: AbortSignal;
   /**
-   * 端点 id。有它才装配得到脚本链（collection 的两段 + 端点自己的两段）；
-   * 缺席 = 临时请求，没有脚本。
+   * 端点 id。有它才装配得到脚本链（collection 的两段 + 端点自己的两段）；缺席 = 临时请求。
    */
   endpointId?: string;
   /**
-   * 脚本看得到的环境。
-   *
-   * **与解析用的是同一份变量池**——脚本看到的必须是这次请求看到的那份，否则
-   * `pm.environment.get('token')` 读到的与请求里替换进去的会不是同一个值。
+   * 脚本看得到的环境。**与解析用的是同一份变量池**——脚本看到的必须是这次请求看到的那份，
+   * 否则 `pm.environment.get('token')` 读到的与请求里替换进去的会不是同一个值。
    */
   env?: EnvSnapshot;
   /**
-   * 端点自己的前置脚本，**覆盖**存的那份。空串 = 没有脚本。
-   *
-   * 送的是界面上此刻生效的那份（草稿优先）：否则用户改完脚本还没保存就发送，跑的
-   * 却是旧脚本，「所见」与「所发」就分叉了。
+   * 端点自己的前置脚本，**覆盖**存的那份。空串 = 没有脚本。送的是界面上此刻生效的那份
+   * （草稿优先）：否则用户改完脚本还没保存就发送，跑的却是旧脚本，「所见」与「所发」就分叉了。
    */
   preRequestScript?: string;
   /** 端点自己的测试脚本，覆盖规则同上。 */
   testScript?: string;
   /**
-   * 该端点自己的 HTTPS 出站设置。`null` 或缺席 = 继承全局默认
-   * （`settings.tls`）。
-   *
-   * 端点给了设置就**整体**取代全局那份，故后端收到的不是逐字段的补丁。
+   * 该端点自己的 HTTPS 出站设置。`null` 或缺席 = 继承全局默认（`settings.tls`）。端点给了
+   * 设置就**整体**取代全局那份，故后端收到的不是逐字段的补丁。
    */
   tlsOverride?: TlsSettings | null;
 }
 
 /** 一次发送的结果：响应 + 脚本的产出（没有脚本时 `script` 为 null）。 */
-export interface SendPreparedResult {
+interface SendPreparedResult {
   response: ApiResponse;
   script: ScriptOutcome | null;
   /**
-   * 真正发出去的那一份请求。
+   * 真正发出去的那一份请求。它与 `input.request` 的差别只有 OAuth2 注入的 token：预览刻意不含
+   * token（那会让 cURL 预览把一个活凭据渲染进可复制的命令行），而线上发出去的那一份含它。
    *
-   * 它与 `input.request` 的差别只有 OAuth2 注入的 token：预览刻意不含 token（那会让
-   * cURL 预览把一个活凭据渲染进可复制的命令行），而线上发出去的那一份含它。
-   * 响应区左侧画的是这一份，故它必须是「发出去的那份」而不是「预览的那份」。
-   *
-   * 它的 header 是**界面上拼出来的那几条**；传输层补上的那几条（`accept` /
-   * `accept-encoding` / `host` / `content-length`）在 `response.requestHeaders` 里，
-   * 那边才是线上那一份。
+   * 它的 header 是**界面上拼出来的那几条**；传输层补上的那几条（`accept` / `accept-encoding` /
+   * `host` / `content-length`）在 `response.requestHeaders` 里，那边才是线上那一份。
    */
   outbound: PreparedRequest;
 }
@@ -388,30 +354,25 @@ export interface SendPreparedResult {
 /**
  * 发送一个已 prepare 的请求。
  *
- * 这个入口的意义在于：发出去的就是预览渲染的那个对象。组装归前端规则时，
- * cURL 预览与真实发送就成了两套靠手工对齐的实现，对不齐时用户看到的是
- * 「复制为 cURL」给出另一个请求；调一次 `prepareRequest` 再发其结果，
- * 这种分歧无从表达。
+ * 这个入口的意义在于：发出去的就是预览渲染的那个对象。组装归前端规则时，cURL 预览与真实
+ * 发送就成了两套靠手工对齐的实现；调一次 `prepareRequest` 再发其结果，这种分歧无从表达。
  *
- * header 走元组列表而非 `Record`：Rust 反序列化 `Vec<(String, String)>`，
- * web 桥（`POST /api/http/send`）对元组列表原样 JSON 编码，这是两侧唯一都能用
- * 的形状；`Record` 还会丢掉重名 header。
+ * header 走元组列表而非 `Record`：Rust 反序列化 `Vec<(String, String)>`，web 桥
+ * （`POST /api/http/send`）对元组列表原样 JSON 编码，故 `Record` 还会丢掉重名 header。
  *
- * OAuth2 是这里唯一在发送前还要做事的一档：token 那时才取得到，而把它写进
- * `prepared` 会让 `preparedToCurl` 把一个活凭据渲染进可复制的命令行、随剪贴板
- * 和工单流出去。故预览**刻意**不含 token —— 两者只差这一项，URL / header / body
- * 仍同源。
+ * OAuth2 是这里唯一在发送前还要做事的一档：token 那时才取得到，而把它写进 `prepared` 会让
+ * `preparedToCurl` 把一个活凭据渲染进可复制的命令行。故预览**刻意**不含 token——两者只差
+ * 这一项，URL / header / body 仍同源。
  *
- * ⚠️ 与 [`sendRequest`] 同一条注意事项：URL 由调用方提供，服务端因此成了它的
- * 代理，`OutboundPolicy` 依然生效。
+ * ⚠️ 与 [`sendRequest`] 同一条注意事项：URL 由调用方提供，服务端因此成了它的代理，
+ * `OutboundPolicy` 依然生效。
  *
- * 绝不抛异常——失败以 `status: 0` 加可区分的 `statusText` 返回，与 `sendRequest`
- * 完全一致。
+ * 绝不抛异常——失败以 `status: 0` 加可区分的 `statusText` 返回，与 `sendRequest` 完全一致。
  */
 export async function sendPreparedRequest(input: SendPreparedInput): Promise<SendPreparedResult> {
   const { request } = input;
-  // 信封映射器与错误构造器只从这个形状读 `method` 与 `settings.timeoutMs`；
-  // params/headers/body/auth 都已并入 `request`，所以下面的占位值永不被查
+  // 信封映射器与错误构造器只从这个形状读 `method` 与 `settings.timeoutMs`；params/headers/
+  // body/auth 都已并入 `request`，故下面的占位值永不被查
   const shape: SendInput = {
     method: request.method,
     url: request.url,
@@ -431,8 +392,7 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
   const auth = input.auth;
   if (auth?.kind === 'oauth2' && auth.oauth2) {
     try {
-      // `request.vars` 是组装这份请求时用的那一份变量池：OAuth2 配置里的
-      // `{{var}}` 由后端在取 token 之前替换，送同一份池过去，两边看到的是同一批变量。
+      // `request.vars` 是组装这份请求时用的那一份变量池：OAuth2 配置里的 `{{var}}` 由后端在取 token 之前替换，送同一份池过去，两边看到的是同一批变量。
       const token = await fetchOAuth2Token(auth, { signal: input.signal, vars: request.vars });
       outbound = applyOAuth2Token(request, auth, token);
     } catch (err) {
@@ -478,8 +438,7 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
       tlsOverride: input.tlsOverride ?? null,
     },
     shape,
-    // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的
-    // token 就写在这个 URL 里。
+    // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的 token 就写在这个 URL 里。
     request.url,
     options,
   );

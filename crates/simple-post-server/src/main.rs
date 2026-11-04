@@ -139,7 +139,7 @@ fn main() {
             mcp_auto_start,
             web_password,
             public_base_path,
-        } => serve_web(ServeWebOptions {
+        } => simple_post_server::cli::serve_web(simple_post_server::cli::ServeWebOptions {
             bind,
             port,
             spa_dir,
@@ -157,122 +157,23 @@ fn main() {
             allow_remote,
             allowed_hosts,
             allowed_origins,
-        } => {
-            let http_config = simple_post_server::domain::McpHttpConfig {
-                host: bind.clone(),
-                port,
-                path,
-                allow_remote,
-                allowed_hosts: split_allow_list(allowed_hosts),
-                allowed_origins: split_allow_list(allowed_origins),
-            };
-            simple_post_server::run_mcp(transport, port, bind, http_config);
-        }
+        } => simple_post_server::cli::run_mcp(simple_post_server::cli::McpOptions {
+            transport,
+            port,
+            bind,
+            path,
+            allow_remote,
+            allowed_hosts,
+            allowed_origins,
+        }),
     }
-}
-
-/// 把 `--allowed-*` 的 CLI 列表规范成真正的 `Vec<String>`。
-///
-/// `None`（flag 缺席）与 `Some("")`（supervisor 对空列表发的 `--allowed-hosts=`）
-/// 都必须落到空列表，绝不能是单元素 `[""]`。空 host 白名单意味着 daemon *拒绝*所有
-/// 非 loopback 的 `Host`，故一个多余的空项既会漏进持久化配置，又会变成永不匹配的
-/// 规则。
-fn split_allow_list(raw: Option<String>) -> Vec<String> {
-    raw.unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// `serve-web` 的全部开关。
-///
-/// 打包成一个结构体再往下传：位置参数排到八个之后，调用点只能靠顺序认哪一个
-/// 是端口、哪一个是口令，而 `Option<bool>` 这种「`None` 走持久化值、`Some`
-/// 走本次覆盖」的开关混在中间尤其容易接错位。
-struct ServeWebOptions {
-    bind: String,
-    port: u16,
-    spa_dir: Option<String>,
-    data_dir: Option<String>,
-    mcp_auto_start: Option<bool>,
-    web_password: Option<String>,
-    public_base_path: Option<String>,
-}
-
-/// 把 `serve-web` 的 flag 解析成具体路径并跑起服务器。
-fn serve_web(opts: ServeWebOptions) {
-    let ServeWebOptions {
-        bind,
-        port,
-        spa_dir,
-        data_dir,
-        mcp_auto_start,
-        web_password,
-        public_base_path,
-    } = opts;
-    let bind_addr: std::net::SocketAddr = match format!("{bind}:{port}").parse() {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("[serve-web] invalid --bind/--port: {e}");
-            std::process::exit(2);
-        }
-    };
-    let spa_path = match spa_dir {
-        Some(p) => std::path::PathBuf::from(p),
-        None => simple_post_server::web_api::default_spa_dir(),
-    };
-    let data_path = match data_dir {
-        Some(p) => std::path::PathBuf::from(p),
-        None => match simple_post_server::web_api::default_data_dir() {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("[serve-web] cannot resolve data dir: {e:?}");
-                std::process::exit(2);
-            }
-        },
-    };
-
-    // CLI flag 存在时覆盖持久化的那一行。
-    //
-    // `None` 原样向上传而不在此解析：`web_api::serve` 会用它自己已经打开的连接池读
-    // 持久化值，在这里另开一个只为读一个 preference，等于对同一个文件付第二次 schema
-    // 检查与第二个连接池。
-    //
-    // 但显式 flag 仍经这里把覆盖值写回，使强制值照旧被持久化。
-    let auto_start = match mcp_auto_start {
-        Some(v) => {
-            if let Ok(pool) = simple_post_server::db::init(&data_path) {
-                let _ = simple_post_server::db::with_tx(&pool, |c| {
-                    simple_post_server::db::preferences::set(
-                        c,
-                        simple_post_server::db::preferences::keys::MCP_AUTO_START,
-                        &v,
-                    )
-                });
-            }
-            Some(v)
-        }
-        None => None,
-    };
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("[serve-web] failed to build tokio runtime");
-    runtime.block_on(simple_post_server::run_serve_web(
-        bind_addr,
-        spa_path,
-        data_path,
-        auto_start,
-        web_password,
-        public_base_path,
-    ));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // 测试直接断言白名单的规范化结果。
+    use simple_post_server::cli::split_allow_list;
 
     fn parse(argv: &[&str]) -> Cli {
         Cli::try_parse_from(argv).expect("must parse")

@@ -22,8 +22,7 @@ use crate::error::AppError;
 /// 没有配置脚本的节点不进链。
 ///
 /// `endpoint_override` 覆盖**端点自己**那两段脚本：`None` = 用存的那份；`Some` = 用这份
-/// （空串 = 没有脚本）。渲染层送的是界面上此刻生效的那份，故未保存的编辑也会跑到；
-/// 祖先 collection 的脚本仍从库里读——它们不在端点编辑器里改。
+/// （空串 = 没有脚本）。渲染层送的是界面上此刻生效的那份，故未保存的编辑也会跑到。
 pub fn collect_chain(
     conn: &mut rusqlite::Connection,
     endpoint_node_id: &str,

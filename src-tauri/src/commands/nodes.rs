@@ -2,10 +2,8 @@
 // region: nodes
 // ===========================================================================
 //
-// Tauri 半边；REST 半边在 `web_api/routes/nodes.rs`，两者都过 `crate::db::nodes`，
-// 两种传输不可能分叉。
-//
-// 非结构的两类命令另有归属：`nodes_duplicate` 与 endpoint-detail 一对。
+// Tauri 半边；REST 半边在 `web_api/routes/nodes.rs`，两者都过 `crate::db::nodes`，两种传输
+// 不可能分叉。非结构的两类命令另有归属：`nodes_duplicate` 与 endpoint-detail 一对。
 
 use tauri::State;
 
@@ -88,11 +86,9 @@ pub fn nodes_search_paths(
     })
 }
 
-/// 建节点。endpoint 一次调用带上两半（结构节点 + 请求配置）：两者写在同一个事务里，
-/// 而任何一半可能缺失的树是打不开的树。
-///
+/// 建节点。endpoint 一次调用带上两半（结构节点 + 请求配置）：两者写在同一个事务里，而任何
+/// 一半可能缺失的树是打不开的树。
 /// 只有 module 需要 `root_id`；collection / endpoint 从父节点推出，两者不可能打架。
-///
 /// 命令这一侧只负责线格式：`kind` 是字符串，在这里解析成枚举。
 #[tauri::command]
 pub fn nodes_create(
@@ -140,9 +136,8 @@ pub fn nodes_delete(state: State<DbPool>, id: String) -> Result<(), AppError> {
 
 /// 移动节点到新父节点下的新同级位置。
 ///
-/// `parent_id` 为 `None` 是「项目顶层」，只对 module 合法——目标父节点自身的类型
-/// 已经回答了「放哪」，无需另带 `parentKind`。`node_ids` 即落地顺序，多选拖拽得以
-/// 保持用户的选择次序。
+/// `parent_id` 为 `None` 是「项目顶层」，只对 module 合法——目标父节点自身的类型已经回答了
+/// 「放哪」。`node_ids` 即落地顺序，多选拖拽得以保持用户的选择次序。
 #[tauri::command]
 pub fn nodes_move(
     state: State<DbPool>,
@@ -158,9 +153,8 @@ pub fn nodes_move(
 /// 在同父下、紧跟其后复制一个 endpoint。
 ///
 /// 只限 endpoint：module / collection 的「副本」是空壳，复制子树是另一个功能而非复制。
-///
-/// `new_id` 由调用方给就照用，让乐观复制能立刻给标签栏一行它渲染时确实存在的记录；
-/// 不给则服务端生成，没有本地副本要对齐的一方（MCP 工具）要的就是后者。
+/// `new_id` 由调用方给就照用，让乐观复制能立刻给标签栏一行它渲染时确实存在的记录；不给则
+/// 服务端生成，没有本地副本要对齐的一方（MCP 工具）要的就是后者。
 #[tauri::command]
 pub fn nodes_duplicate(
     state: State<DbPool>,
@@ -183,25 +177,12 @@ pub fn endpoint_detail_get(
 
 /// 全部 endpoint 的请求配置，扁平列表，渲染侧按 `nodeId` 建索引。
 ///
-/// 与 [`nodes_list`] 分开：树不渲染 method / url，只需要名称 / 类型 / 顺序。启动时为
-/// 每个节点读一次 detail 表，会拉来多数行根本没有的列集，而折进树读取就是每次启动
-/// 一次 join，换来用户可能一辈子不打开的数据。
+/// 与 [`nodes_list`] 分开：树不渲染 method / url，只需要名称 / 类型 / 顺序。启动时为每个节点读
+/// 一次 detail 表，会拉来多数行根本没有的列集，而折进树读取就是每次启动一次 join，换来用户
+/// 可能一辈子不打开的数据。
 #[tauri::command]
 pub fn endpoint_details_list(state: State<DbPool>) -> Result<Vec<EndpointDetail>, AppError> {
-    // 每个项目一次查询而非 join：`endpoint_details` 以节点 id 为键，要触达某项目的
-    // endpoint 只能经 `nodes.root_id`；`list_by_root` 已含这个 join，项目数受用户
-    // 实际打开的范围约束。
-    let roots = crate::db::with_conn(&state, crate::db::projects::list)?
-        .into_iter()
-        .map(|p| p.id)
-        .collect::<Vec<String>>();
-    let mut out = Vec::new();
-    for root in roots {
-        out.extend(crate::db::with_conn(&state, |c| {
-            crate::db::endpoint_details::list_by_root(c, &root)
-        })?);
-    }
-    Ok(out)
+    crate::project_api::list_endpoint_details(&state)
 }
 
 /// 改 endpoint 的请求配置。与 [`nodes_update`] 分开，免得改个名字就重写没变的 JSON 列。

@@ -1,12 +1,9 @@
 /**
- * Simple Post 标记 —— 任意尺寸的标题栏 tile。
+ * Simple Post 标记 —— 任意尺寸的标题栏 tile。几何与 `src-tauri/app-icon.svg` **完全相同**，
+ * 后者是各平台图标（`npm run icons`）的生成源。两个文件互为交叉引用：改一个就得改另一个。
  *
- * 几何与 `src-tauri/app-icon.svg` **完全相同**，后者是各平台图标
- * （`npm run icons`）的生成源。两个文件互为交叉引用：改一个就得改另一个。
- *
- * 内联渲染而非 `<img>`，好让它继承主题的 `--primary` / `--hue-project` token，
- * 随其余 chrome 一起切换明暗。生成的 PNG 做不到——它们在生成时刻就烤定了，因此
- * 用的是亮色主题的值。
+ * 内联渲染而非 `<img>`，好让它继承主题的 `--primary` / `--hue-project` token，随其余
+ * chrome 一起切换明暗。生成的 PNG 做不到 —— 它们在生成时刻就烤定了亮色主题的值。
  */
 import { cn } from '@/lib/utils';
 

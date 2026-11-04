@@ -25,11 +25,8 @@ interface Props {
   /** 当前环境名，显示在候选浮层的标题上。 */
   envName?: string;
   /**
-   * 变量池（环境变量 + 动态变量的值）。取 token 时送给后端，后端用它替换 OAuth2
-   * 配置里那四个字段的 `{{var}}`。
-   *
-   * 它与发送请求用的是**同一份**（`PreparedRequest.vars`），故同一个 `{{var}}` 在
-   * URL 里能解析、在 `tokenUrl` 里也能解析。
+   * 变量池（环境变量 + 动态变量的值）。取 token 时送给后端，后端用它替换 OAuth2 配置里
+   * 那四个字段的 `{{var}}`。它与发送请求用的是同一份（`PreparedRequest.vars`）。
    */
   vars: Record<string, string>;
 }
@@ -50,14 +47,13 @@ const GRANT_OPTIONS: { value: OAuth2GrantType; label: string }[] = [
 ];
 
 /**
- * 鉴权配置表单。
+ * 鉴权配置表单。接变量候选提示的取值栏：
  *
- * 只有会上线替换的取值栏接变量候选提示：Bearer 的 token、Basic 的用户名与密码、API Key
- * 的 value，以及 OAuth2 的 token 端点、授权端点、client id 与 scope —— 那四个字段由
- * 后端在取 token 之前替换，字段清单见
- * `lib/http-build/auth.ts::OAUTH2_SUBSTITUTED_FIELDS`。故别处接提示等于许诺一个不会
- * 替换的变量：API Key 的 Key、Add to、OAuth2 的 clientSecret / password / authCode
- * 都不接。
+ * - Bearer 的 token、Basic 的用户名与密码、API Key 的 value。
+ * - OAuth2 的 token 端点、授权端点、client id 与 scope（清单见
+ *   `lib/http-build/auth.ts::OAUTH2_SUBSTITUTED_FIELDS`）。
+ * - 不接提示：API Key 的 Key 与 Add to、OAuth2 的 clientSecret / password / authCode，
+ *   它们不参与替换。
  */
 export function AuthEditor({ value, onChange, varEntries, envName, vars }: Props) {
   return (
@@ -210,11 +206,8 @@ export function AuthEditor({ value, onChange, varEntries, envName, vars }: Props
 }
 
 /**
- * OAuth 2.0 表单。
- *
- * `cfg` 恒为一份完整配置：`AuthConfig.oauth2` 可以缺省（老数据、MCP 只写了
- * `kind`），此时渲染回落到 `DEFAULT_OAUTH2` 而**不**往 store 补写——那会把用户
- * 没配过的字段记成配过的。
+ * OAuth 2.0 表单。`cfg` 恒为一份完整配置：`AuthConfig.oauth2` 缺省时渲染回落到
+ * `DEFAULT_OAUTH2`，而不往 store 补写 —— 那会把用户没配过的字段记成配过的。
  */
 function OAuth2Fields({
   value,
@@ -239,12 +232,8 @@ function OAuth2Fields({
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * 在途取 token 的序号。改配置与发起取 token 都让它自增，结果回来时只有序号仍是
-   * 当前值才写 state。
-   *
-   * 少了它就会出现这一串：点「获取 Token」→ 在返回前改掉 `tokenUrl` → 晚到的响应
-   * 按旧配置 setToken → 界面对**新**配置显示「刚获取」。`pending` 挡不住这个，它只
-   * 管按钮点两下。
+   * 在途取 token 的序号。改配置与发起取 token 都让它自增，结果回来时只有序号仍是当前
+   * 值才写 state，否则晚到的响应会按旧配置 setToken，界面对**新**配置显示「刚获取」。
    */
   const reqSeq = useRef(0);
 
@@ -270,12 +259,11 @@ function OAuth2Fields({
       // 传 `cfg` 而不是 `value.oauth2`：载荷缺省时后者是 `undefined`，后端会按
       // 「缺少 oauth2 载荷」拒绝，而这个表单明明渲染得出完整配置。
       const auth: AuthConfig = { kind: 'oauth2', oauth2: cfg };
-      // 隐式流程没有 token 端点可调，token 由用户从浏览器粘回来；其余流程走
-      // `force` 让后端忽略缓存重取一次。
+      // 隐式流程没有 token 端点可调，token 由用户从浏览器粘回来；其余流程走 `force`
+      // 让后端忽略缓存重取一次。
       //
-      // 变量池一起送过去：配置里的 `{{var}}` 由后端在取 token 之前替换（规则住在
-      // Rust 侧的 `simple_post_core::oauth2`），渲染进程不自己替换。不送池时，配置里
-      // 写着 `{{var}}` 的 token 端点会被原样发出去。
+      // 变量池一起送过去：配置里的 `{{var}}` 由后端在取 token 之前替换（规则住在 Rust
+      // 侧的 `simple_post_core::oauth2`），渲染进程不自己替换。
       const t = await fetchOAuth2Token(
         auth,
         isImplicit ? { manual: cfg.authCode, vars } : { force: true, vars },

@@ -6,8 +6,11 @@
  * 「功能测试看不见的那类缺陷」的既定取舍，见
  * `src/features/response-viewer/__tests__/response-viewer-layout.test.ts`，理由相同。
  *
- * 守接线：树里右键接口只弹菜单，不调用 `setActiveEndpoint`、`openEndpointTab` 或 `openTab`。
- * 左键仍调用 `setActiveEndpoint(id)`；行为层面靠真机验证。
+ * **它钉住的是什么。** 树里**左键**点接口 = 「我要在它上面干活」，故它要开标签并跳转；
+ * 树里**右键**点接口 = 「看一眼菜单」，故它只弹菜单，不调用 `setActiveEndpoint`。
+ *
+ * 行为层面靠真机验证；这里守的是**接线**：那两处右键入口一旦又接回激活动作，右键就会
+ * 重新抢走活动标签。
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

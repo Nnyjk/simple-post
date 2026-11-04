@@ -139,19 +139,6 @@ enum Cmd {
     },
 }
 
-/// 把 `--allowed-*` 的命令行列表归一成真正的 `Vec<String>`。
-///
-/// `None`（flag 未给）与 `Some("")`（supervisor 对空列表发的 `--allowed-hosts=`）都必须
-/// 落到空列表，绝不能落成单元素 `[""]`。空 host allowlist 等于 daemon 拒绝一切非
-/// loopback `Host`，多出的那个空项既会漏进持久化配置，又是一条永远匹配不上的规则。
-fn split_allow_list(raw: Option<String>) -> Vec<String> {
-    raw.unwrap_or_default()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
 fn main() {
     simple_post_lib::init_tracing();
 
@@ -165,31 +152,18 @@ fn main() {
             allow_remote,
             allowed_hosts,
             allowed_origins,
-        }) => {
-            // 转发给 lib 入口，二进制与 lib 共用同一份 daemon 实现。
-            let http_config = simple_post_lib::domain::McpHttpConfig {
-                host: bind.clone(),
-                port,
-                path,
-                allow_remote,
-                allowed_hosts: split_allow_list(allowed_hosts),
-                allowed_origins: split_allow_list(allowed_origins),
-            };
-            simple_post_lib::run_mcp(transport, port, bind, http_config);
-        }
+        }) => simple_post_lib::cli::run_mcp(simple_post_lib::cli::McpOptions {
+            transport,
+            port,
+            bind,
+            path,
+            allow_remote,
+            allowed_hosts,
+            allowed_origins,
+        }),
 
         // mcp-proxy 是独立二进制，此处拒绝启动。
-        Some(Cmd::McpProxy) => {
-            eprintln!(
-                "mcp-proxy is a separate binary:\n  \
-                 - build it from source: cargo install --path crates/simple-post-mcp\n  \
-                   (run that in the repository root; it installs the `simple-post-mcp` binary)\n  \
-                 - the published release assets are desktop installers only, so that\n  \
-                   binary is not among them\n  \
-                 - or connect the client to the daemon over HTTP instead"
-            );
-            std::process::exit(2);
-        }
+        Some(Cmd::McpProxy) => simple_post_lib::run_mcp_proxy(),
 
         // 面向浏览器的 web 宿主：起一个小 tokio runtime、解析 bind 地址，转发给 lib 入口。
         Some(Cmd::ServeWeb {
@@ -200,66 +174,15 @@ fn main() {
             mcp_auto_start,
             web_password,
             public_base_path,
-        }) => {
-            let bind_addr: std::net::SocketAddr = match format!("{bind}:{port}").parse() {
-                Ok(a) => a,
-                Err(e) => {
-                    eprintln!("[serve-web] invalid --bind/--port: {e}");
-                    std::process::exit(2);
-                }
-            };
-            let spa_path = match spa_dir {
-                Some(p) => std::path::PathBuf::from(p),
-                None => simple_post_lib::web_api::default_spa_dir(),
-            };
-            let data_path = match data_dir {
-                Some(p) => std::path::PathBuf::from(p),
-                None => match simple_post_lib::web_api::default_data_dir() {
-                    Ok(d) => d,
-                    Err(e) => {
-                        eprintln!("[serve-web] cannot resolve data dir: {e:?}");
-                        std::process::exit(2);
-                    }
-                },
-            };
-
-            // 命令行给了就覆盖持久化的那一行。
-            //
-            // `None` 原样转发，不在此解析：为此单独开一个 `db::init()` 池只为读一个
-            // preference（一次 schema 检查、整份 `schema.sql`、4 连接池），而几行之后
-            // `web_api::serve` 会为同一个文件再开一个；`serve()` 用它已有的池解析该值。
-            //
-            // 显式给值时仍在此落库，强制值因此被持久化。
-            let auto_start = match mcp_auto_start {
-                Some(v) => {
-                    // 落库覆盖值，后续启动才一致。
-                    if let Ok(pool) = simple_post_lib::db::init(&data_path) {
-                        let _ = simple_post_lib::db::with_tx(&pool, |c| {
-                            simple_post_lib::db::preferences::set(
-                                c,
-                                simple_post_lib::db::preferences::keys::MCP_AUTO_START,
-                                &v,
-                            )
-                        });
-                    }
-                    Some(v)
-                }
-                None => None,
-            };
-
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("[serve-web] failed to build tokio runtime");
-            runtime.block_on(simple_post_lib::run_serve_web(
-                bind_addr,
-                spa_path,
-                data_path,
-                auto_start,
-                web_password,
-                public_base_path,
-            ));
-        }
+        }) => simple_post_lib::cli::serve_web(simple_post_lib::cli::ServeWebOptions {
+            bind,
+            port,
+            spa_dir,
+            data_dir,
+            mcp_auto_start,
+            web_password,
+            public_base_path,
+        }),
 
         None => simple_post_lib::run(),
     }
@@ -272,6 +195,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use simple_post_lib::cli::split_allow_list;
 
     /// supervisor 在空 allowlist 下构造的 argv。clap 一旦拒绝这个空值，这里就解析失败，
     /// daemon 子进程永远起不来。

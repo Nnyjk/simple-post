@@ -3,47 +3,29 @@
 //! Tauri GUI 把同一个二进制以 `mcp` 子命令模式拉成子进程，通过 [`McpDaemonHandle`]
 //! 暴露其生命周期，并在子进程意外退出时向 renderer 发 `daemon://crashed` 事件。
 //!
-//! 生命周期：
-//!   * `ensure_started` 由 GUI 的 `.setup()` 调用。若端口文件指向一个活着的 PID，
-//!     且它服务的配置与现在要用的这份一致，直接收养它（重启笔记本后的廉价路径），
-//!     否则在 OS 分配的端口上拉起子进程。
-//!   * `forward_stderr` 逐行读子进程 stderr，把每一行写进日志环形缓冲并转投
-//!     tracing 通道。
-//!   * `watch_exit` 等待子进程，非零退出时向 Tauri app handle 发
-//!     `daemon://crashed`；renderer 弹 toast 并让用户重试。
-//!   * `stop` 是手动 OFF 开关（Tauri `mcp_daemon_stop` / `POST /api/mcp/stop`），
-//!     `shutdown` 是退出钩子。两者走同一条 `teardown`，它也会终止本监管者只是
-//!     *收养* 的 daemon，见 `reap::teardown_targets`。
-//!   * `start` 是手动 ON 开关且幂等：健康且被跟踪的 daemon 原样返回，不重新拉起。
+//! 生命周期：`ensure_started` 收养端口文件指向的活 daemon（配置指纹一致时），否则拉起新
+//! 子进程；`forward_stderr` 逐行转发子进程 stderr；`watch_exit` 在非零退出时发
+//! `daemon://crashed`；`stop`（手动 OFF）与 `shutdown`（退出钩子）走同一条 `teardown`，
+//! 它也终止本监管者只是*收养* 的 daemon（见 `reap::teardown_targets`）；`start` 是手动 ON
+//! 开关且幂等，健康且被跟踪的 daemon 原样返回。
 //!
-//! `auto_start`（持久化偏好）与 `start` / `stop`（运行时动词）是叠加而非重叠的
-//! 关系：偏好决定 daemon 启动时是否自动起来，开关决定它*现在*是否在跑。
-//! 关掉 `auto_start` 不会杀掉已在运行的 daemon。
+//! `auto_start`（持久化偏好）决定 daemon 启动时是否自动起来，`start` / `stop`（运行时动词）
+//! 决定它*现在*是否在跑；关掉 `auto_start` 不会杀掉已在运行的 daemon。
 //!
-//! ## 文件分工
+//! 文件分工（本文件是门面，只持有 spawn 侧与三个 Tauri 绑定）：`status` 生命周期状态与快照
+//! 投影、`state` 每次 spawn 的内部记账、`listen_config` 监听配置行 → 子进程 argv、
+//! `probe` healthz 探测、`reap` 终止侧、`watcher` 退出监视器、`stderr` 日志转发。
 //!
-//! 本文件是门面，持有 spawn 侧（唯一的主机无关路径）与三个 Tauri 绑定；其余按职责
-//! 落在同名子目录下：
-//!
-//!   * `status` —— 生命周期状态与快照投影（`DaemonStatus` / `McpStatusDto`）。
-//!   * `state` —— 每次 spawn 的内部记账（mutex 后的 `DaemonState`）。
-//!   * `listen_config` —— 持久化的监听配置行 → 子进程 argv。
-//!   * `probe` —— healthz 探测与它喂给「启动是否已成 no-op」的判定。
-//!   * `reap` —— 终止侧：杀哪些 PID、走哪条回收通道、有界等待，以及 `stop` /
-//!     `shutdown` / `restart_without_app_handle`。
-//!   * `watcher` —— 退出监视器（两个变体只差一个崩溃事件）。
-//!   * `stderr` —— daemon stderr 的日志转发。
-//!
-//! `ensure_started` 与 `ensure_started_with` 必须留在本文件：源码级回归测试按文本
-//! 扫描它们，见 `daemon_supervisor_test.rs`。
+//! `ensure_started` 与 `ensure_started_with` 必须留在本文件：源码级回归测试按文本扫描它们，
+//! 见 `daemon_supervisor_test.rs`。
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-// 只有 GUI host 会发 `daemon://crashed`。此 feature 之下本 crate 完全不依赖
-// Tauri——这正是容器镜像免掉 GTK/WebKit、`--lib` 测试二进制免掉 Windows GUI
-// runtime 的原因。发事件的那一侧在 `watcher`，本文件只接收句柄。
+// 只有 GUI host 会发 `daemon://crashed`。此 feature 之下本 crate 完全不依赖 Tauri，故容器镜像
+// 免掉 GTK/WebKit、`--lib` 测试二进制免掉 Windows GUI runtime。发事件的一侧在 `watcher`，
+// 本文件只接收句柄。
 #[cfg(feature = "gui")]
 use tauri::AppHandle;
 use tokio::sync::Mutex;
@@ -67,8 +49,8 @@ use stderr::forward_stderr;
 use watcher::watch_exit_no_app;
 // 线格式类型是本模块的公开接口；其余子模块的东西一律只经 `pub(super)` 可见。
 pub use status::{DaemonCrashedPayload, DaemonStatus};
-// 保持 `crate::daemon_supervisor::TeardownTarget` 这条 crate 内路径不变。生产的 lib
-// 构建里没有别的引用方，故显式压掉未用告警——它是被测试用的导出面。
+// 保持 `crate::daemon_supervisor::TeardownTarget` 这条 crate 内路径不变。生产的 lib 构建里没有别的
+// 引用方，故显式压掉未用告警——它是被测试用的导出面。
 #[allow(unused_imports)]
 pub(crate) use reap::TeardownTarget;
 #[cfg(feature = "gui")]
@@ -91,21 +73,13 @@ struct PendingWatch {
 
 /// [`McpDaemonHandle::ensure_started_with`] 的返回值——唯一的主机无关 spawn 路径。
 ///
-/// # 为何 Tauri 绑定是*本类型上的方法*而非 spawn 路径的参数
-///
-/// spawn 路径必须 100% 不含 Tauri，`AppHandle` 只能出现在下面这层薄薄的
-/// `finish` 对里，且只从三个 Tauri 绑定（`ensure_started`、`start`、`restart`）
-/// 可达。**不要把 `AppHandle` 移回 `ensure_started_with` 能看见的任何类型或
-/// 参数。** 一个被 `tokio::spawn` 的共享代码持有的 `AppHandle` 会把整个 Tauri
-/// Windows runtime 留在这个模块的可达图里：`--lib` 测试二进制会因此链上
-/// `tao` / `muda` 的五个 DLL 与 +2.4 MB GUI/COM/shell 代码，并在**加载**时死于
-/// `0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND`（未解析的入口点是
-/// `comctl32.dll!TaskDialogIndirect`，它只存在于 comctl32 **v6**——经 activation
-/// context 解析的 side-by-side 程序集，而非 `System32` 里的 v5 副本），一个测试都
-/// 跑不了。
-///
-/// `daemon_supervisor_test.rs::the_shared_spawn_path_stays_free_of_tauri` 是这
-/// 条不变量的回归网。
+/// spawn 路径必须 100% 不含 Tauri，`AppHandle` 只能出现在这层薄薄的 `finish` 对里，且只从三个
+/// Tauri 绑定（`ensure_started`、`start`、`restart`）可达。**不要把 `AppHandle` 移回
+/// `ensure_started_with` 能看见的任何类型或参数。** 共享代码持有 `AppHandle` 会把 Tauri Windows
+/// runtime 留在本模块的可达图里，`--lib` 测试二进制会在**加载**时死于
+/// `0xc0000139 STATUS_ENTRYPOINT_NOT_FOUND`（未解析的入口点是 `comctl32.dll!TaskDialogIndirect`，
+/// 它只存在于 comctl32 **v6**），一个测试都跑不了。
+/// 回归网：`daemon_supervisor_test.rs::the_shared_spawn_path_stays_free_of_tauri`。
 struct Started {
     port: u16,
     /// 仅在刚拉起新子进程、仍需退出监视器时为 `Some`；复用路径为 `None`
@@ -144,20 +118,13 @@ impl Started {
 #[derive(Clone)]
 pub struct McpDaemonHandle {
     inner: Arc<Mutex<DaemonState>>,
-    /// spawn 时读 `mcp.http_config` 用的连接池，好让子进程 CLI 与设置面板一致。
-    ///
-    /// 测试用的裸 `new()` 为 `None`，此时回退到
-    /// [`crate::domain::McpHttpConfig::default`]。两种
-    /// 真实 host 形态（`lib.rs::run` 与 `web_api::serve`）都走
-    /// [`Self::with_pool`] 构造——在 *spawn* 时读该行而非构造时，正是为了用户改完
-    /// 设置再点重启就能生效，不必重建受管 state。
-    ///
-    /// `r2d2::Pool` 底层是 `Arc`，故此克隆廉价。
+    /// spawn 时读 `mcp.http_config` 用的连接池，好让子进程 CLI 与设置面板一致。裸 `new()` 为
+    /// `None`，此时回退到 [`crate::domain::McpHttpConfig::default`]。
+    /// 两种真实 host 形态都走 [`Self::with_pool`]：在 *spawn* 时读该行而非构造时，用户改完设置
+    /// 再点重启就能生效，不必重建受管 state。
     pool: Option<crate::db::DbPool>,
-    /// daemon 的日志环形缓冲。
-    ///
-    /// **刻意放在状态锁之外**：读日志不必抢那把锁，故它永远不会被「监管者正忙」挡住。
-    /// 缓冲自己的互斥量只护住那几百行字符串，临界区是微秒级。
+    /// daemon 的日志环形缓冲。**刻意放在状态锁之外**：读日志不必抢那把锁，不会被「监管者正忙」
+    /// 挡住；缓冲自己的互斥量只护住那几百行字符串，临界区是微秒级。
     logs: Arc<LogBuffer>,
 }
 
@@ -218,10 +185,10 @@ impl McpDaemonHandle {
     ///
     ///   1. `port_registry::read_entry()` 返回的记录若 PID 仍活着**且**
     ///      `/mcp/healthz` 有响应 → 看配置指纹：指纹一致就**收养**那个 daemon
-    ///      （重启后 daemon 没清理端口文件的场景），指纹不一致或读不出指纹就重启它。
-    ///      被收养的 daemon 是*被收养*的：记 `state.pid` 但 `state.child` 保持
-    ///      `None`，因为我们从未 spawn 它、没有 reap 句柄——这对 stop/restart 意味着
-    ///      什么见 `reap::teardown_targets`。也不返回监视器：没有子进程句柄可供观察。
+    ///      （daemon 没清理端口文件的场景），指纹不一致或读不出指纹就重启它。
+    ///      被收养的 daemon 记 `state.pid` 但 `state.child` 保持 `None`，因为我们从未
+    ///      spawn 它、没有 reap 句柄——这对 stop/restart 意味着什么见
+    ///      `reap::teardown_targets`。也不返回监视器：没有子进程句柄可供观察。
     ///   2. 否则释放陈旧文件、申领新端口、spawn 进程、以新 PID 写端口记录（连同这份
     ///      daemon 实际在服务的配置的指纹），并等最多 5s 直到 `/mcp/healthz` 转绿。
     ///   3. 在此启动 stderr 转发器，并返回 `(state, pid)`，由*调用方*据此建自己的
@@ -356,10 +323,9 @@ impl McpDaemonHandle {
             sleep(Duration::from_millis(100)).await;
         }
         if !healthy {
-            // 把子进程留在 `state` 里而不是交给监视器：spawn 路径不知道 host 就装不了监视器
-            // （这正是 [`Started`] 的全部要点），而监视器若*拿走*句柄就会剥掉
-            // `state.child`，让 `stop` / `restart` 无法 reap 这个进程。留在这里，
-            // 不健康启动时 `teardown_targets` 的 `owned_pid` 通道依然有效。
+            // 把子进程留在 `state` 里而不是交给监视器：监视器若*拿走*句柄就会剥掉 `state.child`，
+            // 让 `stop` / `restart` 无法 reap 这个进程。留在这里，不健康启动时
+            // `teardown_targets` 的 `owned_pid` 通道依然有效。
             let mut g = self.inner.lock().await;
             g.status = DaemonStatus::Unhealthy;
             g.last_error = Some("healthz never came up within 5s".into());
@@ -390,9 +356,8 @@ impl McpDaemonHandle {
     }
 
     /// 收养一个已经在服务的 daemon：记下它的身份，把状态置为运行中。
-    ///
-    /// 被收养的 daemon 是外部启动的：我们从未 spawn 它，故没有它的 stderr 管道，
-    /// 没有日志可捕获——界面上的 MCP 日志面板在这种情形下是空的。
+    /// 被收养的 daemon 是外部启动的：我们从未 spawn 它，故没有 stderr 管道，界面上的 MCP
+    /// 日志面板在这种情形下是空的。
     async fn adopt(&self, rec: PortRecord) -> Started {
         let port = rec.port;
         {
@@ -403,18 +368,14 @@ impl McpDaemonHandle {
             g.status = DaemonStatus::Running;
             g.started_at = Some(Instant::now());
         }
-        // 被收养的 daemon 是外部启动的：我们没有它的 stderr 管道，故没有日志可捕获。
         self.logs.stop_capture();
         Started { port, watch: None }
     }
 
-    /// 手动 ON 开关（Tauri 形态）。天生幂等：健康且被跟踪的 daemon 原样返回——不
-    /// kill、不重拉、不折腾端口；只有确实停止 / 崩溃 / 不健康的 daemon 才走 spawn
-    /// 路径。
-    ///
-    /// 一处例外：端口文件里那个 daemon 服务的配置与现在要用的这份不一致时，它被换掉
-    /// （判据见 `reuse_decision`）。本监管者已经在跟踪一个健康的 daemon 时不走那条
-    /// 路——那一份就是它自己起的。
+    /// 手动 ON 开关（Tauri 形态）。天生幂等：健康且被跟踪的 daemon 原样返回——不 kill、不重拉、
+    /// 不折腾端口；只有确实停止 / 崩溃 / 不健康的 daemon 才走 spawn 路径。
+    /// 一处例外：端口文件里那个 daemon 服务的配置与现在要用的这份不一致时它被换掉（判据见
+    /// `reuse_decision`）；本监管者已经在跟踪一个健康的 daemon 时不走那条路。
     #[cfg(feature = "gui")]
     pub async fn start(
         &self,
@@ -469,13 +430,10 @@ pub(crate) enum ReuseDecision {
     Restart,
 }
 
-/// 端口文件里那个 daemon 能不能被收养？
-///
-/// 指纹一致 → [`ReuseDecision::Adopt`]；指纹不一致或读不出指纹 →
-/// [`ReuseDecision::Restart`]。
-///
-/// 读不出指纹就是「判断不了」，而判断不了的方向是重启——与
-/// `http_config::requires_restart` 对同一情形给的回答一致。
+/// 端口文件里那个 daemon 能不能被收养？指纹一致 → [`ReuseDecision::Adopt`]；指纹不一致或读不出
+/// 指纹 → [`ReuseDecision::Restart`]。
+/// 读不出指纹就是「判断不了」，判断不了的方向是重启——与 `http_config::requires_restart` 对同一
+/// 情形给的回答一致。
 pub(crate) fn reuse_decision(recorded: Option<&str>, wanted: &str) -> ReuseDecision {
     match recorded {
         Some(recorded) if recorded == wanted => ReuseDecision::Adopt,

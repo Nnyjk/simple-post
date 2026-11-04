@@ -10,18 +10,17 @@ export function cn(...inputs: ClassValue[]) {
 /**
  * 应用里交互元素唯一的焦点环写法，当 `cn()` 的一个参数用：`cn('…基础样式', focusRing)`。
  *
- * 只留一份意味着日后改环的宽度或偏移时处处同时生效——手抄的字面量正是那种会
- * 悄悄漂移、一半控件 1px 一半 2px 的东西。
+ * 焦点环的宽度与偏移只在这里定义，各控件从 `focusRing` 取。
  */
 export const focusRing =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ' +
   'focus-visible:ring-offset-1 focus-visible:ring-offset-background';
 
 /**
- * 同样的环，但无偏移。给贴着窗口边缘的自定义标题栏控件（`WindowControls`）与
- * 权限单选（`AgentPermissionsTable`）用——那里 1px 偏移会被裁掉。单独成一个常量
- * 而不是就地内联，是为了让「贴边」与「内嵌」的差异保持有意且可 grep：某个控件若哪天
- * 从贴边改成内嵌，换的是一个 token。
+ * 同样的环，但无偏移。给贴着窗口边缘的自定义标题栏控件（`WindowControls`）与权限单选
+ * （`AgentPermissionsTable`）用——那里 1px 偏移会被裁掉。单独成一个常量而不是就地内联，
+ * 是为了让「贴边」与「内嵌」的差异保持有意且可 grep：某个控件若哪天从贴边改成内嵌，
+ * 换的是一个 token。
  */
 export const focusRingBare =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -76,12 +75,10 @@ export function uid(): string {
 }
 
 // ---------------------------------------------------------------------------
-// JSON 美化 —— 响应查看器与 body 编辑器的「格式化」按钮共用。返回带标签的结果，
-// 调用方无需 try/catch 就能区分成功与解析错误。
-//
-// 放在 `utils.ts` 是因为 `tryFormatJson` 纯且无依赖（`useIsDark` 会 import
-// `useAppStore`，因此住在 `theme.ts`，以免形成 `crud-slice → utils → app-store`
-// 的环）。
+// JSON 美化 —— 响应查看器与 body 编辑器的「格式化」按钮共用。返回带标签的结果，调用方
+// 无需 try/catch 就能区分成功与解析错误。放在 `utils.ts` 是因为 `tryFormatJson` 纯且无依赖
+// （`useIsDark` 会 import `useAppStore`，因此住在 `theme.ts`，以免形成
+// `crud-slice → utils → app-store` 的环）。
 // ---------------------------------------------------------------------------
 
 export type FormatResult = { ok: true; formatted: string } | { ok: false; error: string };

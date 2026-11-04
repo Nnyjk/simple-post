@@ -3,11 +3,10 @@
 use serde::Serialize;
 
 /// TS 侧 `HttpMethod` 的镜像。序列化为渲染层已在用的大写动词（`"GET"`、`"POST"`…）；
-/// 未知动词落到 `Custom(String)`，使 UI 的前向兼容写入不会在 Rust 侧炸掉。
+/// 未知动词落到 `Custom(String)`。
 ///
 /// `Deserialize` 手写，好让本类型只有**一个**解析器：派生实现会把 `"get"` 收成
 /// `Custom("get")` 并原样存库，于是 IPC 写入与 MCP 调用同一个动词会存出两种表示。
-/// 一切都走 [`parse_http_method`]。
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
@@ -74,10 +73,9 @@ fn is_method_token(s: &str) -> bool {
         })
 }
 
-/// 每个 MCP 工具、请求执行路径**以及** `HttpMethod` 的 `Deserialize` 共用的解析器。
-/// 已知动词大小写不敏感地映射；其余 RFC 9110 token（如 `PROPFIND`、`LOCK`）原样流成
-/// `HttpMethod::Custom`，使将来/冷门的 HTTP 动词不丢数据。空串、含空白、非 token 的输入
-/// 以 `AppError::Validation` 拒绝，好让调用方（通常是 LLM）拿到一条说明问题的消息。
+/// 每个 MCP 工具、请求执行路径**以及** `HttpMethod` 的 `Deserialize` 共用的解析器。已知动词
+/// 大小写不敏感地映射；其余 RFC 9110 token（如 `PROPFIND`、`LOCK`）原样流成
+/// `HttpMethod::Custom`。空串、含空白、非 token 的输入以 `AppError::Validation` 拒绝。
 pub fn parse_http_method(m: &str) -> Result<HttpMethod, crate::error::AppError> {
     use crate::error::AppError;
     let trimmed = m.trim();

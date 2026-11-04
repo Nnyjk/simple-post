@@ -11,14 +11,12 @@ import { LAYER } from '@/components/ui/layers';
 import { WindowControls } from '@/components/ui/window-controls';
 
 /**
- * Tauri 2 的坑：容器上带 `data-tauri-drag-region="true"` 时，内部**任何** mousedown
- * 都会启动窗口拖拽；交互子元素（按钮 / 输入）必须显式用
- * `data-tauri-drag-region="false"` 退出，否则会静默丢失点击处理。
+ * Tauri 2 的坑：容器上带 `data-tauri-drag-region="true"` 时，内部**任何** mousedown 都会
+ * 启动窗口拖拽；交互子元素（按钮 / 输入）必须显式用 `data-tauri-drag-region="false"`
+ * 退出，否则会静默丢失点击处理。
  *
- * 此处的做法：
- *   - `<header>` 整行开启拖拽。
- *   - 其中每个 `<button>` 都关闭拖拽（经 Button 组件透传，它把 ...props 展开到原生
- *     `<button>`）。
+ * 此处的做法：`<header>` 整行开启拖拽，其中每个 `<button>` 都关闭拖拽（经 Button 组件
+ * 透传，它把 ...props 展开到原生 `<button>`）。
  *
  * 权限在 `src-tauri/capabilities/default.json` —— 必须列出
  * `core:window:allow-start-dragging`，否则即使有该属性拖拽也不会触发。
@@ -349,12 +347,11 @@ export function TopBar() {
 }
 
 /**
- * 右上角 MCP 状态药丸。读共享的守护进程快照（见 `useMcpStatus`）—— 轮询循环在 store
- * 里，故本组件是纯渲染：无 `setInterval`、无 `invoke`、无监听。
+ * 右上角 MCP 状态药丸。读共享的守护进程快照（见 `useMcpStatus`）—— 轮询循环在 store 里，
+ * 故本组件是纯渲染：无 `setInterval`、无 `invoke`、无监听。
  *
- * 它也是连接设置的入口：连接页提供的每个控件都在「设置 · 连接」下，故一个告诉你
- * daemon 挂了的圆点，应当能把你带到能启动它的地方。它必须是真正可点的 `<button>` ——
- * 无 `onClick` 的按钮比 `<span>` 更糟：它向键盘与读屏用户宣告可激活，却什么都不做。
+ * 它也是连接设置的入口，故必须是真正可点的 `<button>` —— 无 `onClick` 的按钮比 `<span>`
+ * 更糟：它向键盘与读屏用户宣告可激活，却什么都不做。
  */
 function McpStatusPill() {
   const mcp = useMcpStatus();

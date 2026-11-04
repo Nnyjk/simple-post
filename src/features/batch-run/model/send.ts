@@ -1,12 +1,10 @@
 /**
- * 批量运行里「发一条」的那一半 —— 取要素、组装、发送、记历史。
+ * 批量运行里「发一条」的那一半 —— 取要素、组装、发送、记历史。要素的推导与组装都走
+ * `src/features/http-tester/model/endpointParts.ts`，那一份与单次发送共用，故「批量运行的
+ * 变量替换语义与单次发送完全一致」是结构保证。
  *
- * 要素的推导与组装都走 `src/features/http-tester/model/endpointParts.ts`，那一份与
- * 单次发送共用，故「批量运行的变量替换语义与单次发送完全一致」是结构保证：两边跑
- * 的是同一个 `prepareRequest`，不是两套碰巧对上的实现。
- *
- * 脚本链由后端装配：发出去时带上端点 id，后端就会把祖先集合与端点自己的那两段脚本
- * 串起来（见 `core::script::chain`）。前端读不到集合脚本，也不需要读。
+ * 脚本链由后端装配：发出去时带上端点 id，后端就会把祖先集合与端点自己的那两段脚本串起来
+ * （见 `core::script::chain`）。前端读不到集合脚本，也不需要读。
  */
 import { sendPreparedRequest } from '@/lib/http';
 import { validateRequest } from '@/lib/request-validation';
@@ -57,12 +55,10 @@ export interface BatchSendContext {
 }
 
 /**
- * 拍一份环境的快照。
- *
- * 脚本可以把变量写回环境。若批量运行读的是 store 里的环境对象，那么第 1 条写回的
- * 变量会出现在第 2 条的替换里，「这一批看到的是同一份变量」就不成立了。故批次开始
- * 时把环境复制一份，整批都用这份副本：写回仍然落库（后端做），但**不影响**这一批
- * 后面那几条看到的值。
+ * 拍一份环境的快照。脚本可以把变量写回环境，若批量运行读的是 store 里的环境对象，那么第 1
+ * 条写回的变量会出现在第 2 条的替换里，「这一批看到的是同一份变量」就不成立了。故批次
+ * 开始时把环境复制一份，整批都用这份副本：写回仍然落库（后端做），但**不影响**这一批后面
+ * 那几条看到的值。
  */
 export function freezeEnvironments(envs: readonly Environment[]): Environment[] {
   return envs.map((env) => ({
@@ -76,9 +72,7 @@ export function freezeEnvironments(envs: readonly Environment[]): Environment[] 
 }
 
 /**
- * 发一条端点，返回它的结论。
- *
- * 绝不抛：一条失败只是这一条的结论，整批照跑。
+ * 发一条端点，返回它的结论。绝不抛：一条失败只是这一条的结论，整批照跑。
  */
 export async function sendBatchItem(
   item: BatchItem,

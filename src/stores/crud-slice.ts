@@ -1,40 +1,36 @@
 /**
  * CRUD 切片 —— 所有经 Tauri 改动项目、资源树与环境的写操作。
  *
- * 树就是一个 `nodes` 数组加一张 `endpointDetails` 映射，所以旧三表布局需要的
- * 三族动作塌缩成三个动作：
+ * 树就是一个 `nodes` 数组加一张 `endpointDetails` 映射，故动作只有三族：
  *
  *   addNode / updateNode / deleteNode  （一次级联删除，不是三次）
  *   moveNodes                          （一次移动，不是三次）
  *   updateEndpointDetail               （配置，保持独立）
  *
- * 删除不再需要知道自己删的是什么：`nodes.parent_id` 在数据库里级联，本地写入
- * 也用同样方式移除子树。移动不再需要 `parentKind`，因为父节点自己的 `type`
- * 就决定了节点能落到哪里。
+ * 删除不需要知道自己删的是什么：`nodes.parent_id` 在数据库里级联，本地写入也用同样方式
+ * 移除子树。移动不需要 `parentKind`，因为父节点自己的 `type` 就决定了节点能落到哪里。
  *
  * 所有写动作都是同一种形状：
  *   1. 用 `set()` 乐观地改本地 state，让 UI 立刻更新。
  *   2. fire-and-forget（或 await）`invokeCmd<...>(COMMANDS.*)`。
  *   3. 失败时快照并回滚本地 state，然后记日志。
  *
- * 本切片通过 `get()` 读 store 其余部分（`loaded`、`setActive*` 等）——没问题，
- * 因为所有切片共用同一个 Zustand 底层 store。任何其他切片模块都不会被直接
- * import（唯一的耦合点是 `AppState` 类型）。
+ * 本切片通过 `get()` 读 store 其余部分（`loaded`、`setActive*` 等）：所有切片共用同一个
+ * Zustand 底层 store，任何其他切片模块都不会被直接 import（唯一的耦合点是 `AppState` 类型）。
  *
- * 实现按关注点拆到 `./slices/`（crud-helpers / crud-project / crud-tree /
- * crud-move / crud-environment），在这里组合而不是在 `app-store.ts` 里注册为
- * 独立切片。多个动作刻意在同一次 `set()` 里写别人拥有的键——`deleteProject` 写
- * `openTabs` / `activeTabId` / `activeProjectId` / `activeEndpointId`，
- * `deleteNode` 写 `openTabs` / `activeTabId` / `activeEndpointId`，
- * `deleteEnvironment` 写 `activeEnvironmentId`；拆成多次 `get().closeTab()`
- * 式的调用会把一次 `set()` 变成多次，也改变 IPC 失败时 `set(snapshot)` 能
- * 回滚的范围。
+ * 实现按关注点拆到 `./slices/`（crud-helpers / crud-project / crud-tree / crud-move /
+ * crud-environment），在这里组合而不是在 `app-store.ts` 里注册为独立切片。多个动作刻意在
+ * 同一次 `set()` 里写别人拥有的键——`deleteProject` 写 `openTabs` / `activeTabId` /
+ * `activeProjectId` / `activeEndpointId`，`deleteNode` 写 `openTabs` / `activeTabId` /
+ * `activeEndpointId`，`deleteEnvironment` 写 `activeEnvironmentId`；拆成多次
+ * `get().closeTab()` 式的调用会把一次 `set()` 变成多次，也改变 IPC 失败时 `set(snapshot)`
+ * 能回滚的范围。
  *
  * 「当前环境」不在本切片里：它是客户端的实时状态，不落库，故由 bootstrap 切片的
  * `setCurrentEnvironment` 管（见 `bootstrap-slice.ts`）。
  *
- * 拓扑是星形：子工厂可 import `./crud-helpers`，彼此之间以及与本文件之间都不
- * 互相 import。各取标准 `(set, get)` 二元组，只返回自己的动作对象。
+ * 拓扑是星形：子工厂可 import `./crud-helpers`，彼此之间以及与本文件之间都不互相 import。
+ * 各取标准 `(set, get)` 二元组，只返回自己的动作对象。
  */
 import type { StateCreator } from 'zustand';
 import type { AppState } from './app-store';

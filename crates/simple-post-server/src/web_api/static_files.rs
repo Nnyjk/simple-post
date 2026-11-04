@@ -13,8 +13,8 @@ use axum::{
 /// 提供 `npm run build` 产出的 `dist/`。根路径返回 `index.html`；`/assets/`
 /// 下的内容由 `tower-http::services::ServeDir` 从磁盘提供。
 ///
-/// `base` 是反代前缀（`Some("/sp")`）或 `None`（按根部署）。为何必须一路传
-/// 到这里而不是交给打包器，见 [`shell_with_base`]。
+/// `base` 是反代前缀（`Some("/sp")`）或 `None`（按根部署）。为何必须一路传到这里而不是交给
+/// 打包器，见 [`shell_with_base`]。
 pub(crate) async fn spa_index(spa_dir: PathBuf, base: Option<String>) -> Response {
     serve_file_or_index(spa_dir, "index.html", base).await
 }
@@ -84,20 +84,17 @@ pub(crate) const BASE_GLOBAL: &str = "__SIMPLE_POST_BASE__";
 /// # 为何必须有这一步
 ///
 /// `vite.config.ts` 不设 `base`，故 `vite build` 产出**根绝对**的资源引用
-/// （`<script src="/assets/index-<hash>.js">`），renderer 的 `webFetch` 也调
-/// `fetch('/api/…')` 不带前缀。两者在根路径都对，一旦 router nest 到前缀下就
-/// 全错：浏览器请求 `/assets/…` 与 `/api/…`，而挂在 `/sp` 的 router 看不到。
-///
-/// 前缀也无法在构建期定死：容器里它由运行时的
-/// `SIMPLE_POST_PUBLIC_BASE_PATH` 决定，同一个镜像要同时服务两种形态。故在此
-/// 按响应改写，取值来自 router 构造时的同一个 `WebState.base_path`。
+/// （`<script src="/assets/index-<hash>.js">`），renderer 的 `webFetch` 也调 `fetch('/api/…')`
+/// 不带前缀。两者在根路径都对，一旦 router nest 到前缀下就全错：浏览器请求 `/assets/…` 与
+/// `/api/…`，而挂在 `/sp` 的 router 看不到。前缀也无法在构建期定死：容器里它由运行时的
+/// `SIMPLE_POST_PUBLIC_BASE_PATH` 决定，同一个镜像要同时服务两种形态。故在此按响应改写，取值
+/// 来自 router 构造时的同一个 `WebState.base_path`。
 ///
 /// # 改写什么
 ///
-/// shell 中根绝对的 `src="…"` / `href="…"` 值。本应用的 `index.html` 里就是
-/// `/favicon.svg` 与 `/assets/*`。协议相对（`//cdn…`）不动。仅形似属性的内联
-/// JSON 是理论上的误判源，本 shell 没有，为一个人工维护的文件做完整 HTML 解析
-/// 不划算。
+/// shell 中根绝对的 `src="…"` / `href="…"` 值。本应用的 `index.html` 里就是 `/favicon.svg`
+/// 与 `/assets/*`。协议相对（`//cdn…`）不动。仅形似属性的内联 JSON 是理论上的误判源，本 shell
+/// 没有，为一个人工维护的文件做完整 HTML 解析不划算。
 pub(crate) fn shell_with_base(html: &[u8], base: Option<&str>) -> Vec<u8> {
     let base = base.map(str::trim).filter(|b| !b.is_empty());
     let Some(base) = base else {

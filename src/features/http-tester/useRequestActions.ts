@@ -1,9 +1,6 @@
 /**
- * 请求栏的三个动作：发送、保存、复制 cURL。
- *
- * 三者共用同一个 `prepared`（请求的最终线上形态），故「用户复制到的就是服务端
- * 收到的」这条不变式在这里成立。本模块只编排顺序——校验门、在途请求的取消与清空、
- * 复制 cURL 的反馈；状态与 store 写入全部由调用点持有。
+ * 请求栏的三个动作：发送、保存、复制 cURL。三者共用同一个 `prepared`，故「用户复制到的
+ * 就是服务端收到的」这条不变式成立。本模块只编排顺序，状态与 store 写入由调用点持有。
  */
 import { useCallback, type RefObject } from 'react';
 import { sendPreparedRequest } from '@/lib/http';
@@ -56,10 +53,8 @@ export function useRequestActions({
   draft: EndpointDraft | undefined;
   prepared: PreparedRequest;
   /**
-   * 用给定的动态变量值重新组装请求。
-   *
-   * 发送前若解析出了新的动态变量值，就要用它们重新组装一次——预览用的是 store 里
-   * 上一批值，而发出去的那份必须是刚解析出来的那一份。
+   * 用给定的动态变量值重新组装请求。发送前若解析出了新的动态变量值，就要用它们重新
+   * 组装一次 —— 预览用的是 store 里上一批值，而发出去的那份必须是刚解析出来的那一份。
    */
   prepareWithDynamic: (dynamicVars: Record<string, string>) => PreparedRequest;
   /** 本次请求引用到的动态变量名。 */
@@ -73,33 +68,26 @@ export function useRequestActions({
   testScript: string;
   settings: RequestSettings;
   /**
-   * 端点自己的 HTTPS 出站设置。`null` = 继承全局默认（`settings.tls`）。
-   *
-   * 送的是界面上此刻生效的那份（草稿优先），故未保存的证书设置也会跑到。
+   * 端点自己的 HTTPS 出站设置。`null` = 继承全局默认（`settings.tls`）。送的是界面上
+   * 此刻生效的那份（草稿优先），故未保存的证书设置也会跑到。
    */
   tlsOverride: TlsSettings | null;
   /** 跑校验并回报是否通过；失败时它已把界面切到出问题的页签。 */
   runValidation: () => boolean;
   /**
-   * 路径参数的闸门开了还是关了。
-   *
-   * 收到非空名单 = 闸门关了（缺那几个值，发送已经停下）；收到空名单 = 闸门开了。
-   * 界面据此显示提示并切到路径参数那一页。
+   * 路径参数的闸门开了还是关了。收到非空名单 = 闸门关了（缺那几个值，发送已经停下）；
+   * 收到空名单 = 闸门开了。界面据此显示提示并切到路径参数那一页。
    */
   onPathParamGate: (missing: string[]) => void;
   /**
-   * 标记某个标签上有没有在途请求。
-   *
-   * 传标签 id 而不传接口 id：在途标记与响应是同一份状态（挂在标签上），调用方
-   * 手上有哪个键，就用哪个键 —— 两处混用会让「发出去的那次」与「标记在途的那次」
-   * 不是同一个标签。
+   * 标记某个标签上有没有在途请求。传标签 id 而不传接口 id：在途标记与响应是同一份
+   * 状态（挂在标签上），两处混用会让「发出去的那次」与「标记在途的那次」不是同一个
+   * 标签。
    */
   setRequestPending: (tabId: string, v: boolean) => void;
   /**
-   * 记下某个标签最近一次的响应与那次请求的快照。
-   *
-   * 传标签 id 的理由同上：响应是挂在标签上的，写到别的标签上等于把这次调用
-   * 挂到了另一个接口的工作区上。
+   * 记下某个标签最近一次的响应与那次请求的快照。响应是挂在标签上的，写到别的标签上
+   * 等于把这次调用挂到了另一个接口的工作区上。
    */
   setLastResponse: (
     tabId: string,
@@ -119,10 +107,8 @@ export function useRequestActions({
   updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
   clearEndpointDraft: (id: string) => void;
   /**
-   * 在途请求的 controller，**按标签 id 分开**。
-   *
-   * 同一个标签 pending 期间再次点击发送 = 取消上一次重来；换成**别的**标签则各发
-   * 各的，B 的发送不会把 A 的在途请求一起 abort 掉。
+   * 在途请求的 controller，**按标签 id 分开**。同一个标签 pending 期间再次点击发送 =
+   * 取消上一次重来；换成**别的**标签则各发各的，B 的发送不会把 A 的在途请求一起 abort。
    */
   inFlightRef: RefObject<Map<string, AbortController>>;
   setCurlFlash: (v: boolean) => void;
@@ -132,7 +118,7 @@ export function useRequestActions({
 
   const handleSend = useCallback(async () => {
     if (!endpointId) return;
-    // 校验是请求的前置门。解析不了的 json body 不该让服务端去猜；照发只会让用户对着
+    // 校验是请求的前置门：解析不了的 json body 不该让服务端去猜，照发只会让用户对着
     // 服务端解析错误，而这个错误本可以指出他敲错的那个字符。
     if (!runValidation()) return;
     // `handleSend` 先取消**这个标签上**任何在途请求。别的标签各有各的，换一个
@@ -144,30 +130,24 @@ export function useRequestActions({
     try {
       // 动态变量的值必须在**替换之前**到手：替换一旦发生，变量池里就没有同名变量的
       // 概念了，而「动态变量压过同名环境变量」这条规则正是在替换之前生效的。
-      // TTL 内命中缓存时后端不发取数请求，故这一步通常是廉价的一次 IPC。
       let request = prepared;
       if (dynamicNames.length > 0) {
         // 第二个参数是**消费方项目**：动态变量的定义挂在项目里，故只解析当前项目里的那些。
-        // 少了它，store 会跨项目找同名定义——发出去的值可能与预览里显示的不是同一条，
-        // 两个项目各有一条同名变量时尤其明显。
+        // 少了它，store 会跨项目找同名定义，发出去的值可能与预览里显示的不是同一条。
         const { values } = await resolveDynamicVariables(dynamicNames, activeProjectId);
         request = prepareWithDynamic(values);
       }
       // 路径参数缺值时这里不发出去：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
-      // 含义不明的 404，而用户看不出是自己漏填了一个值。
-      //
-      // 这一步在动态变量解析**之后**：路径参数的值可能就是一个动态变量，它取不到值时
-      // 这个路径参数同样算「还没准备好」。
+      // 含义不明的 404。这一步在动态变量解析**之后**：路径参数的值可能就是一个动态变量，
+      // 它取不到值时这个路径参数同样算「还没准备好」。
       const missingPathParams = request.missingPathParams;
       onPathParamGate(missingPathParams);
       if (missingPathParams.length > 0) {
         return;
       }
-      // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口。
-      // 这正是未保存的草稿也能发送的原因：没有 `endpointId` 要查，也没有东西要先持久化。
-      //
-      // 「当前环境」只存在于 Zustand——它不落库，故解析必须基于界面上的 `endpointEnv`
-      // （工作区当前环境），`prepareRequest` 已经折进去了。
+      // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口，这正是
+      // 未保存的草稿也能发送的原因。「当前环境」只存在于 Zustand（不落库），故解析基于
+      // 工作区当前环境，`prepareRequest` 已经折进去了。
       const {
         response: resp,
         script,
@@ -196,9 +176,8 @@ export function useRequestActions({
       // 一份（含传输层补的 `host` / `content-length` 等），它缺席时才回落到本地拼的。
       const snapshot = toRequestSnapshot(outbound, resp.requestHeaders);
       // 写的是**这个标签**的那一份：响应是挂在标签上的（见 `slices/ui-response.ts`），
-      // 故在 A 上发的不会跑到 B 的标签上。用 `endpointId`（它就是这个标签的 id）
-      // 而不是当下的活动标签——发送期间用户可能已经切走了，那次响应属于**发起它**
-      // 的那个标签。
+      // 故在 A 上发的不会跑到 B 的标签上。用 `endpointId`（它就是这个标签的 id）而不是
+      // 当下的活动标签 —— 那次响应属于**发起它**的那个标签。
       setLastResponse(endpointId, resp, snapshot);
       setLastScriptOutcome(endpointId, script);
       addResponseHistory(endpointId, resp, snapshot);

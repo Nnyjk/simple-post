@@ -2,10 +2,9 @@
  * CreateProjectDialog —— 唯一一个不隶属于项目的创建对话框。
  *
  * 项目是唯一没有上级项目的类型，可从三处创建：欢迎页卡片、顶栏项目下拉、命令面板
- * （Ctrl+K）。其中两处在 *workspace* 面、一处在 *welcome* 面，挂在任一屏都会让另两个
- * 入口写出一个没人渲染的草稿。故这个 portal 挂在 `App.tsx` —— 门面切换由它掌管，只有它
- * 能让 portal 活过切换。模块与集合对话框不需要：它们只在项目内可达，那正是 `ProjectTree`
- * 挂载它们的地方。
+ * （Ctrl+K）。其中两处在 *workspace* 面、一处在 *welcome* 面，挂在任一屏都会让另两个入口写出
+ * 一个没人渲染的草稿。故这个 portal 挂在 `App.tsx` —— 门面切换由它掌管，只有它能让 portal 活过
+ * 切换。模块与集合对话框不需要：它们只在项目内可达，那正是 `ProjectTree` 挂载它们的地方。
  */
 
 import { useRef } from 'react';
@@ -16,12 +15,8 @@ import { CreateDialog, ColorPicker, DescriptionField, Field, NameField } from '.
  * `projects_create` 播种的行。对应 `crates/simple-post-core/src/db/projects.rs` 里的
  * `DEFAULT_ENVIRONMENT_NAME` 与 `DEFAULT_MODULE_NAME`。
  *
- * 刻意复制而非拉取，理由同 `lib/palette.ts` 镜像 `domain::default_project_color()`：
- * 后端是唯一真相源，这份只用于字段下方的提示；`projects_create` 的响应带着真值，故这里漂移
- * 最多表现为提示写错，不会波及数据 —— 两边一起改。
- *
- * 刻意**不**给地址提示：新项目不播种任何模块地址，地址由用户自己在「设置 · 环境变量」
- * 里逐模块填写。
+ * 刻意复制而非拉取，理由同 `lib/palette.ts` 镜像 `domain::default_project_color()`：后端是
+ * 唯一真相源，这份只用于字段下方的提示。刻意**不**给地址提示：新项目不播种任何模块地址。
  */
 const DEFAULT_ENVIRONMENT_NAME = '默认环境';
 const DEFAULT_MODULE_NAME = '默认模块';

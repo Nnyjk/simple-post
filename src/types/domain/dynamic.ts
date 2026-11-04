@@ -11,10 +11,9 @@ export type ValueMode = 'auto' | 'json' | 'text';
 /**
  * 一条动态变量的定义：变量名 → 数据源 → 抽取规则 → 缓存时长。
  *
- * 作用域是**项目**：一条定义挂在一个项目里，变量名在项目内唯一。不同项目可以有同名变量
- * 而互不覆盖——基线项目与各个客户分发项目各自取自己的那份数据，正因为它们的名字一样、
- * 取值不同。数据源二选一：`sourceEndpointId` 引用树里的一个端点，
- * `sourceInlineJson` 是一份内联请求。
+ * 作用域是**项目**：一条定义挂在一个项目里，变量名在项目内唯一。不同项目可以有同名变量而互不
+ * 覆盖——基线项目与各个客户分发项目各自取自己的那份数据，正因为它们的名字一样、取值不同。
+ * 数据源二选一：`sourceEndpointId` 引用树里的一个端点，`sourceInlineJson` 是一份内联请求。
  */
 export interface DynamicVariable {
   id: string;
@@ -35,8 +34,8 @@ export interface DynamicVariable {
   /**
    * 处理脚本。抽取之后跑，用来做 JSONPath 表达不了的加工（取值、拼接、算账）。
    *
-   * 脚本拿得到抽取结果（`pm.data`）与原始响应（`pm.response`），用 `return` 给出最终值。
-   * 空 = 不跑脚本，抽取结果就是最终值。
+   * 脚本拿得到抽取结果（`pm.data`）与原始响应（`pm.response`），用 `return` 给出最终值。空 =
+   * 不跑脚本，抽取结果就是最终值。
    */
   transformScript?: string | null;
   valueMode: ValueMode;

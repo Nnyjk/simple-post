@@ -23,9 +23,9 @@ interface TransferDialogProps {
 }
 
 /**
- * 导入与导出**共用**这一个弹窗。两个模式只差三处：来源选择、导出那两项设置
- * （环境 / 格式）、以及结尾的落定动作。中间那屏——计数、勾选树、诊断——完全相同，
- * 故它不是「两套界面长得像」，而是同一段代码跑在两种数据上。
+ * 导入与导出**共用**这一个弹窗。两个模式只差三处：来源选择、导出那两项设置（环境 /
+ * 格式）、以及结尾的落定动作。中间那屏——计数、勾选树、诊断——完全相同，故它不是
+ * 「两套界面长得像」，而是同一段代码跑在两种数据上。
  */
 export function TransferDialog({ controller, environments, onClose }: TransferDialogProps) {
   const { session, phase, error, preview, result } = controller;

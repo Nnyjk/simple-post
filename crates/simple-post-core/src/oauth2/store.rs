@@ -11,11 +11,9 @@ use super::EXPIRY_SKEW_SECS;
 
 /// 这份配置对应的缓存键：除 `auth_code` 外全部字段的 sha256 十六进制。
 ///
-/// 排除 `auth_code` 是必须的：它是**一次性**输入，用户贴一次新码就换一个值，若进了
-/// 哈希，缓存行会在每次换码后立刻变成孤儿——而配置语义上根本没变。
-///
-/// 哈希而不是原始 JSON：主键里带着 `clientSecret` 的明文会把一份凭据复制到第二张表，
-/// 与本模块「凭据只存一份」的承诺冲突。
+/// 排除 `auth_code` 是必须的：它是**一次性**输入，用户贴一次新码就换一个值，若进了哈希，
+/// 缓存行会在每次换码后立刻变成孤儿。哈希而不是原始 JSON：主键里带着 `clientSecret` 的明文
+/// 会把一份凭据复制到第二张表。
 pub fn auth_key(cfg: &OAuth2Auth) -> String {
     let mut canonical = cfg.clone();
     canonical.auth_code = String::new();

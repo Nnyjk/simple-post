@@ -40,9 +40,8 @@ const COLUMNS: &str = "rh.id, rh.endpoint_id, rh.status, rh.status_text, rh.dura
 
 /// 一个 endpoint 的历史，最新的在前。
 ///
-/// 返回的是「全部收藏行 + 最新的 N 条未收藏行」，N 由 [`keep_count`] 读出。受 [`append`]
-/// 维持的裁剪约束，故未收藏的部分不可能返回无界的列表——但收藏的行可以无限多，因为用户
-/// 说它们永久保存。
+/// 返回的是「全部收藏行 + 最新的 N 条未收藏行」，N 由 [`keep_count`] 读出。未收藏的部分不可能
+/// 返回无界的列表——但收藏的行可以无限多。
 pub fn list_by_endpoint(
     conn: &mut Connection,
     endpoint_id: &str,
@@ -70,12 +69,12 @@ pub fn list_by_endpoint(
 
 // 写。
 
-/// 存下一条响应，并把该 endpoint 的未收藏历史裁回上限。
-/// 返回落库后的行（含响应体裁剪），关心的调用方无需再读一次即可展示。
-/// 裁剪是 `DELETE … WHERE rowid NOT IN (SELECT rowid … LIMIT cap)` 而非「先计数、再删最旧的 N」：
-/// 那是一条语句，它不会在「到底有几行」这件事上出错，也没有计数与删除之间的窗口留给并发
-/// append 钻进来。SQLite 串行化写入，且整件事跑在调用方的 `BEGIN IMMEDIATE` 之内。
-/// `created_at` 在此取一次、由插入共用，故存下的时间戳与调用方本会算出的值相同。
+/// 存下一条响应，并把该 endpoint 的未收藏历史裁回上限。返回落库后的行（含响应体裁剪），
+/// 关心的调用方无需再读一次即可展示。
+///
+/// 裁剪是 `DELETE … WHERE rowid NOT IN (SELECT rowid … LIMIT cap)` 而非「先计数、再删最旧的
+/// N」：那是一条语句，它不会在「到底有几行」这件事上出错，也没有计数与删除之间的窗口留给并发
+/// append 钻进来。
 pub fn append(
     conn: &mut Connection,
     endpoint_id: &str,
@@ -166,11 +165,9 @@ fn trim_to_cap(conn: &mut Connection, endpoint_id: &str, keep: i64) -> Result<()
     Ok(())
 }
 
-/// 按新的保留条数裁所有 endpoint 的未收藏行，收藏的行不动。
-///
-/// 改全局条数后调用：条数变小时历史要立刻变短，不能等下一次发送。
-///
-/// 逐个 endpoint 执行一条 DELETE：跨 endpoint 分组取前 N 行的单条 SQL 难以验证。
+/// 按新的保留条数裁所有 endpoint 的未收藏行，收藏的行不动。改全局条数后调用：条数变小时历史
+/// 要立刻变短，不能等下一次发送。逐个 endpoint 执行一条 DELETE：跨 endpoint 分组取前 N 行的
+/// 单条 SQL 难以验证。
 pub fn trim_all(conn: &mut Connection, keep: i64) -> Result<(), AppError> {
     let endpoint_ids = {
         let mut stmt = conn
@@ -201,9 +198,8 @@ pub fn set_favorite(conn: &mut Connection, id: &str, favorite: bool) -> Result<b
 
 /// 丢掉一个 endpoint 的**未收藏**历史，返回删掉的行数。
 ///
-/// 收藏的行留着：用户说它们永久保存，故「清空」这个动作只清自动保留的那部分。
-/// 删除路径没有任何东西调用它——外键已经覆盖了——故它唯一的职责是显式的「清掉这个
-/// endpoint 的历史」这个入口：此时 endpoint 还活着，只是它的行不再被需要。
+/// 收藏的行留着：用户说它们永久保存，故「清空」这个动作只清自动保留的那部分。删除路径没有
+/// 任何东西调用它——外键已经覆盖了——故它唯一的职责是显式的「清掉这个 endpoint 的历史」。
 pub fn clear(conn: &mut Connection, endpoint_id: &str) -> Result<usize, AppError> {
     Ok(conn.execute(
         "DELETE FROM response_history WHERE endpoint_id = ?1 AND is_favorite = 0",
@@ -215,17 +211,14 @@ pub fn clear(conn: &mut Connection, endpoint_id: &str) -> Result<usize, AppError
 
 /// 这个 endpoint 该保留多少条未收藏历史。
 ///
-/// 条数住在 `preferences` 的 `response_history.keep` 行里，是全局设置。裁剪与读取都按它
-/// 来，而不是各自带一个缺省常量——那会让「设置里改成 50」与「库里仍按 10 裁」长期各说
-/// 各话。
+/// 条数住在 `preferences` 的 `response_history.keep` 行里，是全局设置。裁剪与读取都按它来，
+/// 而不是各自带一个缺省常量。
 fn keep_count(conn: &mut Connection) -> Result<i64, AppError> {
     super::preferences::response_history_keep(conn)
 }
 
-/// 把 `body` 裁到封顶，落在 UTF-8 字符边界上。
-/// 取字符边界而非字节边界，是因为被裁掉的那一半是要在响应阅读器里显示的：一个停在半个
-/// 码位上的 `String` 序列化不会报错，到达时却渲染成 U+FFFD，把一个刻意的截断标记变成乱码。
-/// `char_indices` 是单趟扫描，而截剪是罕见路径，故只在 body 真的超限时才付这次扫描的代价。
+/// 把 `body` 裁到封顶，落在 UTF-8 字符边界上。取字符边界而非字节边界，是因为被裁掉的那一半
+/// 是要在响应阅读器里显示的：一个停在半个码位上的 `String` 到达时却渲染成 U+FFFD。
 fn clip_body(body: &str) -> (String, bool) {
     if body.len() <= RESPONSE_HISTORY_MAX_BODY_BYTES {
         return (body.to_string(), false);
@@ -239,10 +232,8 @@ fn clip_body(body: &str) -> (String, bool) {
     (body[..end].to_string(), true)
 }
 
-/// 把 base64 的响应体裁到封顶。
-///
-/// 上限说的是**字节**，故这里先解回字节、裁一刀、再编回去。解不开的 base64 当作没有
-/// 这一份：那一行仍然带着它的文本形态，界面不会因此少显示什么。
+/// 把 base64 的响应体裁到封顶。上限说的是**字节**，故这里先解回字节、裁一刀、再编回去。
+/// 解不开的 base64 当作没有这一份：那一行仍然带着它的文本形态。
 fn clip_body_base64(body_base64: Option<&str>) -> (Option<String>, bool) {
     let Some(raw) = body_base64 else {
         return (None, false);

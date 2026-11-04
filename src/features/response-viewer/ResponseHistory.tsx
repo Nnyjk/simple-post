@@ -7,18 +7,15 @@ import { Button } from '@/components/ui/button';
 import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils';
 
 /**
- * 响应查看器底部的可折叠「历史（n）」条。
+ * 响应查看器底部的可折叠「历史（n）」条。各行来自 store 的 `responseHistory`，由
+ * `response_history` 表支撑、按接口加载 —— 故能跨重启保留，且每行都带服务端盖的 `id` 与
+ * `createdAt`。
  *
- * 各行来自 store 的 `responseHistory`，由 `response_history` 表支撑、按接口加载 —— 故能
- * 跨重启保留，且每行都带服务端盖的 `id` 与 `createdAt`（见 `ResponseHistoryEntry`）。
+ * 每行前面有一个星标：点了收藏这一条，收藏的行不参与保留条数的裁剪，故它永久保存。点一行
+ * 则把那次调用的请求与响应一起放回响应区。
  *
- * 每行前面有一个星标：点了收藏这一条，收藏的行不参与保留条数的裁剪，故它永久保存。
- * 点一行则把那次调用的请求与响应一起放回响应区 —— 只放响应的话，用户看到的是一份
- * 没有出处的答案。
- *
- * selector 说明：用稳定的 selector 读原始 `responseHistory` 对象（单个状态字段，而非派生
- * 的 `.find()` / `.filter()` 结果），按接口的数组在组件内解析；最新在前的切片用 `useMemo`
- * 构建，以免每次渲染都新建数组。
+ * selector 说明：用稳定的 selector 读原始 `responseHistory` 对象（单个状态字段，而非派生的
+ * `.find()` / `.filter()` 结果），按接口的数组在组件内解析。
  */
 export function ResponseHistory() {
   // 历史按接口 id 作键，草稿接口用它的 `draft:` id —— 故未保存的接口同样会累积自己的发送
@@ -150,10 +147,8 @@ export function ResponseHistory() {
 }
 
 /**
- * 「刚刚 / 12 秒前 / 3 分钟前」，「x 分钟前」不再携带信息后退回具体时刻。
- *
- * 留在本文件而非 `src/lib/utils.ts`：本组件是它唯一的调用方，而 `utils.ts` 其余都是载荷
- * 的格式化器（字节、毫秒、状态色相），没有「现在」的概念。等第二个调用方出现时再提升。
+ * 「刚刚 / 12 秒前 / 3 分钟前」，「x 分钟前」不再携带信息后退回具体时刻。留在本文件而非
+ * `src/lib/utils.ts`：本组件是它唯一的调用方，等第二个调用方出现时再提升。
  */
 function formatRelativeTime(createdAt: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - createdAt) / 1000));

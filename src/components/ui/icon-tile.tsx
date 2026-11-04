@@ -3,14 +3,9 @@ import { cn } from '@/lib/utils';
 import { HUE, type HueConcept } from '@/lib/hue';
 
 /**
- * IconTile —— 图标所坐的那块着色方块。
- *
- * 尺寸档（调用方按最近的档选）：
- *   xs  设置侧栏、环境切换器 24px
- *   sm  资源树行、GroupHeader 20px
- *   md  设置行 / 分类头 28px
- *   lg  表单行（baseUrl / 变量）36px
- *   xl  ConnectionSection 的 hero 卡片 40px
+ * IconTile —— 图标所坐的那块着色方块。尺寸档（调用方按最近的档选）：xs 24px（设置侧栏、
+ * 环境切换器）、sm 20px（资源树行、GroupHeader）、md 28px（设置行 / 分类头）、lg 36px
+ * （表单行）、xl 40px（ConnectionSection 的 hero 卡片）。
  *
  * 概念色相（`concept`）表达身份，`tone` 表达状态或应用的主要上下文（environment），
  * 两者不是一回事，也不要混用。
@@ -27,22 +22,14 @@ const SIZE_CLASS: Record<IconTileSize, string> = {
 };
 
 /**
- * tone → 上色。
+ * tone → 上色。`default` 是唯一能被 `concept` 覆盖的条目；其余四种是 tile 在*报告的状态*，
+ * 不是它代表的身份，所以谁也不许改画它们。
  *
- * `default` 是唯一能被 `concept` 覆盖的条目；其余四种是 tile 在*报告的状态*，不是
- * 它代表的身份，所以谁也不许改画它们。
+ * `success` / `warning` 取 `-foreground` 那个 token 而非基础 token：15% alpha 的淡色底上，
+ * 基础值作为描边可读，作为浅色主题铺在其上的近白底色里的字形就太淡了。
  *
- * `success` / `warning` 取 `-foreground` 那个 token 而非基础 token：15% alpha 的淡色
- * 底上，基础值（`--success` 142 71% 45%、`--warning` 38 92% 45%）只是各自色阶的
- * *边框*档，作为描边可读，作为浅色主题铺在其上的近白底色里的字形就太淡了。
- * `--success-foreground` / `--warning-foreground` 才是文字档（亮色 30%、暗色 75%），
- * 也正是 `Badge` 的 success / warning 变体在同一淡色底上用的。见 AGENTS.md 的语义
- * token 配对说明。
- *
- * `danger` 刻意不守这条规则：`--destructive-foreground` 是**实心**填色上的文字档，
- * 亮色纯白 `0 0% 100%` / 暗色近黑 `0 0% 10%`；配淡色底在亮色模式下就是白底白字。
- * 而 `--destructive`（亮色 5 59% 44% / 暗色 354 100% 80%）是该作用域里唯一被提亮的
- * token，在该淡色底上两种主题都过 ~5:1。
+ * `danger` 刻意不守这条规则：`--destructive-foreground` 是**实心**填色上的文字档，配淡色底
+ * 在亮色模式下就是白底白字。
  */
 const TONE: Record<NonNullable<IconTileProps['tone']>, { bg: string; text: string }> = {
   default: { bg: 'bg-muted/60', text: 'text-muted-foreground' },
@@ -71,10 +58,8 @@ export interface IconTileProps {
    * `primary` 供那两个代表 *environment* 的 tile 用——environment 刻意不占色相
    * （见 `src/lib/hue.ts`），它保留 `--primary` 是因为那是应用的主要上下文。
    *
-   * `success` / `warning` / `danger` 给报告某个运行中事物*状态*的 tile。固定概念
-   * 色相做不了这活：`concept="connection"` 在任何生命周期下都是玫红
-   * （`--hue-connection` 355°），daemon 的 hero tile 会在服务期间一直红着——
-   * 那是在声明，不是在挑颜色。见 `src/lib/mcp-status-tone.ts`。
+   * `success` / `warning` / `danger` 给报告某个运行中事物*状态*的 tile。见
+   * `src/lib/mcp-status-tone.ts`。
    */
   tone?: 'default' | 'danger' | 'primary' | 'success' | 'warning';
   /** 设置侧栏上的中性 tile 也带一条发丝边。 */

@@ -1,14 +1,12 @@
 /**
  * 把导出的文档交给用户。
  *
- * 两种形态、两条路径：
  * - **桌面（Tauri）**：`dialog` 插件弹原生「另存为」，`fs` 插件按用户选定的路径写盘。
  *   走这条是因为 WebView 里的 blob 下载不跨形态一致，而「另存为」是用户预期的形态。
  * - **Web / Docker**：同一个 DOM 上的 blob + `<a download>`，浏览器原生行为。
- *
- * 两个插件都是**动态 import**，不是因为风格偏好：它们在浏览器形态里没有实现，静态引入会让
- * `serve-web` 的 bundle 白背一份 Tauri 代码，并在运行时炸掉。`IS_TAURI_SHELL` 已在
- * `tauri-commands.ts` 导出。
+ * - 两个插件都是**动态 import**，不是因为风格偏好：它们在浏览器形态里没有实现，静态引入会让
+ *   `serve-web` 的 bundle 白背一份 Tauri 代码，并在运行时炸掉。`IS_TAURI_SHELL` 已在
+ *   `tauri-commands.ts` 导出。
  */
 import { IS_TAURI_SHELL } from './tauri-commands';
 import type { ExportDocument } from './interchange-types';

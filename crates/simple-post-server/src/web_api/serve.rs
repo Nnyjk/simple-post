@@ -1,7 +1,6 @@
 //! `serve-web` 的启动入口。
 //!
-//! `serve` 绑定监听器、决定是否预热 MCP daemon，并把主端口与 MCP 专用端口两个
-//! 监听器交给 axum。
+//! `serve` 绑定监听器、决定是否预热 MCP daemon，并把主端口与 MCP 专用端口两个监听器交给 axum。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,21 +15,15 @@ use super::router::{build_mcp_only_router, build_router, WebState};
 
 /// 绑定 TCP listener 并服务到 SIGINT/SIGTERM。
 ///
-/// `data_dir` 供 daemon supervisor 定位 SQLite 文件，必须与桌面端
-/// `port_registry::data_dir()` 的解析结果一致（`SIMPLE_POST_DATA_DIR`，未设时是
-/// `dirs::data_dir()`），两种形态才共用同一数据库。
-///
-/// `auto_start_daemon` 为 `Some(bool)` 时 CLI 已给定答案，`None` 时由持久化的
-/// `mcp.auto_start` 行决定。在这里解析而非在 `main.rs`：那边会另开一个
-/// `db::init()` 池只为读一个 preference，冷启动就付两次 schema 检查与两个连接池。
-///
-/// **MCP 专用端口由持久化的 `mcp.http_config` 决定**：`port` 非 0 时额外开一个
-/// 只服务 MCP 的监听器（见 [`build_mcp_only_router`]），那个端口上没有 REST、
-/// 没有 SPA，只有 MCP 自己的那组路由；`port` 为 0 时不开，主端口上的 `/mcp`
-/// 照旧可用。
-///
-/// 端口取设置里的那一个，而不是另设一个环境变量：设置面板「连接 → HTTP 服务
-/// 配置」里写的端口，就是对外暴露的那个端口。两处各写一个数字，迟早会对不上。
+/// `data_dir` 供 daemon supervisor 定位 SQLite 文件，必须与桌面端 `port_registry::data_dir()` 的
+/// 解析结果一致（`SIMPLE_POST_DATA_DIR`，未设时是 `dirs::data_dir()`），两种形态才共用同一数据库。
+/// `auto_start_daemon` 为 `Some(bool)` 时 CLI 已给定答案，`None` 时由持久化的 `mcp.auto_start`
+/// 行决定。在这里解析而非在 `main.rs`：那边会另开一个 `db::init()` 池只为读一个 preference。
+/// **MCP 专用端口由持久化的 `mcp.http_config` 决定**：`port` 非 0 时额外开一个只服务 MCP 的
+/// 监听器（见 [`build_mcp_only_router`]），那个端口上没有 REST、没有 SPA，只有 MCP 自己的那组
+/// 路由；`port` 为 0 时不开，主端口上的 `/mcp` 照旧可用。
+/// 端口取设置里的那一个，而不是另设一个环境变量：设置面板「连接 → HTTP 服务配置」里写的端口，
+/// 就是对外暴露的那个端口。两处各写一个数字，迟早会对不上。
 pub async fn serve(
     bind_addr: std::net::SocketAddr,
     data_dir: PathBuf,

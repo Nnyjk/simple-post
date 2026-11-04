@@ -3,12 +3,11 @@ import type { ResourceNodeType } from '@/types/domain';
 /**
  * 资源树的父子类型矩阵 —— 全应用只在这里声明一次。
  *
- * 这张表是 `simple_post_core::domain::ResourceNodeType::may_under` 的镜像。后端在每一次
- * 写入时执行它（`db::nodes` 的应用层检查，加 `schema.sql` 里的两个触发器），前端在
- * 拖放判定与乐观更新时读它。两侧由 `fixtures/placement-parity.json` 钉住：改了一边而
- * 没改另一边，那条样本会红。
- *
- * `project` 是「项目顶层」这个作用域 —— 模块的父级是项目而不是节点，故它也要占一行。
+ * - 这张表是 `simple_post_core::domain::ResourceNodeType::may_under` 的镜像。后端在每一次
+ *   写入时执行它（`db::nodes` 的应用层检查，加 `schema.sql` 里的两个触发器），前端在
+ *   拖放判定与乐观更新时读它。两侧由 `fixtures/placement-parity.json` 钉住：改了一边而
+ *   没改另一边，那条样本会红。
+ * - `project` 是「项目顶层」这个作用域 —— 模块的父级是项目而不是节点，故它也要占一行。
  */
 export type PlacementScope = ResourceNodeType | 'project';
 
