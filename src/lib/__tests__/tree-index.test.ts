@@ -353,4 +353,22 @@ describe('tree-index: containerPathOf', () => {
     ];
     assert.equal(containerPathOf(cyclic, 'x').length, 2, '环上的容器只被记一次');
   });
+
+  it('walks through a nesting deeper than any fixed depth cap', () => {
+    // 集合可以嵌套任意深（schema 不限层数）。遍历靠 `seen` 停下——每个节点 id 最多被
+    // 访问一次——故不必再设层数上限；设了会在很深的嵌套下把最外层的模块名丢掉，
+    // 而那正是区分同名接口最有用的一段。
+    const deep: ResourceNode[] = [makeNode('mod', null, 0, { kind: 'module', name: '模块' })];
+    let parent = 'mod';
+    for (let i = 0; i < 70; i++) {
+      const id = `col-${i}`;
+      deep.push(makeNode(id, parent, 0, { kind: 'collection', name: `第${i}层` }));
+      parent = id;
+    }
+
+    const path = containerPathOf(deep, parent);
+
+    assert.equal(path.length, 71, '模块加上七十层集合都要在路径里');
+    assert.equal(path[0], '模块', '最外层的那一段不能被截掉');
+  });
 });

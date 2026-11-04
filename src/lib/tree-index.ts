@@ -64,9 +64,10 @@ export function containerPathOf(
   const path: string[] = [];
   const seen = new Set<string>();
   let cur = byId.get(parentId);
-  let guard = 0;
-  // `seen` 让环上的容器只被记一次：schema 禁止成环，但一次有界的遍历比一次无界的遍历安全。
-  while (cur && !seen.has(cur.id) && guard++ < 64) {
+  // `seen` 让遍历在成环处停下：每个节点 id 最多被访问一次，而节点总数有限，故遍历必然终止。
+  // 集合可以嵌套任意深（schema 不限嵌套层数），故这里不另设层数上限——设了会在很深的
+  // 嵌套下把最外层的模块名丢掉，而那正是区分同名接口最有用的一段。
+  while (cur && !seen.has(cur.id)) {
     seen.add(cur.id);
     if (cur.kind === 'collection' || cur.kind === 'module') path.unshift(cur.name);
     // 模块是路径的顶端：它上面只有项目，而项目不是容器。
