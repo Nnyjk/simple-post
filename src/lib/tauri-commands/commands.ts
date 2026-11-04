@@ -140,8 +140,9 @@ export const COMMANDS = {
 
   // ----- Streamable HTTP listener config -----
   // MCP 端点的 host / port / path，加上远程访问开关与 Host/Origin 白名单。读返回
-  // 已持久化的配置；写返回 `{ config, requiresRestart }` —— 监听器无法就地重绑，
-  // 所以由调用方给出重启提示，而不是假装改动已生效。
+  // 已持久化的配置；写返回 `{ config, requiresRestart, requiresListenerRestart }` ——
+  // 监听器无法就地重绑，所以由调用方给出重启提示，而不是假装改动已生效。两条判断分属
+  // 两个对象：守护进程与 MCP 专用监听器。
   mcpHttpConfigGet: 'mcp_http_config_get',
   mcpHttpConfigSet: 'mcp_http_config_set',
 

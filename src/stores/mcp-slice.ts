@@ -24,9 +24,23 @@ import type {
   RestartResult,
 } from '@/lib/mcp-types';
 import type { AppState } from './app-store';
+import type { McpHttpConfig } from '@/types/domain';
 
 /** 共享 MCP 守护进程快照的轮询周期。唯一来源。 */
 const MCP_REFRESH_INTERVAL_MS = 3000;
+
+/**
+ * 保存 MCP 监听配置后服务端回传的信封。两条重启判断分属两个对象：守护进程（绑定地址、
+ * 路径、远程开关、白名单）与 MCP 专用监听器（端口、路径、远程开关、白名单）。
+ */
+export interface McpHttpConfigSaveResult {
+  /** 服务端回显的规范化配置（trim 过、路径已归一）。 */
+  config: McpHttpConfig;
+  /** 守护进程必须重启才生效。 */
+  requiresRestart: boolean;
+  /** MCP 专用监听器必须由 Web 服务重新开一次才生效。 */
+  requiresListenerRestart: boolean;
+}
 
 // 仅浏览器——持有绑定的 `visibilitychange` handler，好让 store 在
 // `stopMcpPolling` 时摘掉它。store 动作是唯一消费者，所以模块级变量
@@ -153,6 +167,24 @@ export interface McpSliceActions {
    * （该行不存在时默认 `false`）。
    */
   refreshMcpAutoStart: () => Promise<void>;
+  /**
+   * 已落盘的 `mcp.http_config`（MCP 监听配置）。首次读取前为 `null`。
+   *
+   * 它住在 store 里而不是组件的本地 state 里，因为**两处**要读同一份：设置面板「HTTP 服务
+   * 配置」卡片用它渲染表单，「接入配置」卡片用它算客户端要连的地址。各读各的会漂——卡片保存
+   * 之后，那张地址卡片还停在旧端口上，用户照着复制出去的地址连不到。
+   */
+  mcpHttpConfig: McpHttpConfig | null;
+  /**
+   * 从后端重读 MCP 监听配置。成功返回 `true`；失败时保留上一次的好内容并返回 `false`，
+   * 好让表单能说明「读不到」而不是渲染一张空白卡。
+   */
+  refreshMcpHttpConfig: () => Promise<boolean>;
+  /**
+   * 保存 MCP 监听配置。成功时把服务端回显的规范化配置写进 store，并回传两条重启判断
+   * （守护进程那条、专用监听器那条）；失败时返回 `null`，调用方据此显示错误。
+   */
+  saveMcpHttpConfig: (config: McpHttpConfig) => Promise<McpHttpConfigSaveResult | null>;
 }
 
 export type McpSlice = McpSliceState & McpSliceActions;
@@ -198,6 +230,10 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
    * daemon 日志。首次 `refreshDaemonLogs` 之前为 null。
    */
   daemonLogs: null,
+  /**
+   * 已落盘的 MCP 监听配置。首次 `refreshMcpHttpConfig` 之前为 null。
+   */
+  mcpHttpConfig: null,
   refreshDaemonLogs: async () => {
     try {
       const dto = await invokeCmd<McpLogTail>(COMMANDS.mcpDaemonLogTail);
@@ -387,6 +423,30 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
       set({ mcpAutoStart: v });
     } catch (e) {
       console.warn('[store] mcp_auto_start_get failed', e);
+    }
+  },
+  refreshMcpHttpConfig: async () => {
+    try {
+      const config = await invokeCmd<McpHttpConfig>(COMMANDS.mcpHttpConfigGet);
+      set({ mcpHttpConfig: config });
+      return true;
+    } catch (e) {
+      console.warn('[store] mcp_http_config_get failed', e);
+      return false;
+    }
+  },
+  saveMcpHttpConfig: async (config) => {
+    try {
+      const result = await invokeCmd<McpHttpConfigSaveResult>(COMMANDS.mcpHttpConfigSet, {
+        config,
+      });
+      // 采信服务端的回显：它做过规范化（trim / 默认路径）。写进 store 的是这一份，
+      // 故「接入配置」那张地址卡片与这张表单读到的永远是同一份配置。
+      set({ mcpHttpConfig: result.config ?? config });
+      return { ...result, config: result.config ?? config };
+    } catch (e) {
+      console.warn('[store] mcp_http_config_set failed', e);
+      return null;
     }
   },
   setMcpAutoStart: async (value) => {

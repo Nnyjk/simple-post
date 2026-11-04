@@ -10,13 +10,24 @@ import {
   unavailableReason,
   wrapForClient,
   type McpClientPreset,
+  type McpEndpointFacts,
 } from '../mcp-client-config';
 
 // 这些测试存在是因为失败模式是**静默**的：客户端拿到错的根键或错的 `type` 值
 // 不会报错——服务端只是永远不出现在它的工具列表里。所以一个会发出错误形状的复制按钮
 // 比没有复制按钮更糟，而 CI 里没有任何东西会发现。
 
-const RUNNING = { port: 51234 };
+/** 桌面端：守护进程跑在本机，端口由操作系统分配。 */
+const RUNNING: McpEndpointFacts = { shape: 'desktop', daemonPort: 51234 };
+
+/** Web 端：服务端进程暴露 MCP，专用端口由配置决定。 */
+const WEB: McpEndpointFacts = {
+  shape: 'web',
+  origin: 'http://192.168.12.81:54173',
+  basePath: '',
+  mcpPort: 54174,
+  mcpPath: '/mcp',
+};
 
 function onlyPreset(): McpClientPreset {
   const [first, ...rest] = MCP_CLIENT_PRESETS;
@@ -128,21 +139,60 @@ describe('buildClientConfig', () => {
   it('returns null when the daemon is down so the UI can explain why', () => {
     // 没有端口就没有 URL。发出一个里面带着字面量 `null` 的片段会「能复制但坏掉」，
     // 那比一句解释更糟。
-    assert.equal(buildClientConfig(onlyPreset(), { port: null }), null);
+    assert.equal(buildClientConfig(onlyPreset(), { shape: 'desktop', daemonPort: null }), null);
   });
 
   it('returns null for a non-positive port rather than guessing', () => {
-    assert.equal(buildClientConfig(onlyPreset(), { port: 0 }), null);
+    assert.equal(buildClientConfig(onlyPreset(), { shape: 'desktop', daemonPort: 0 }), null);
   });
 });
 
 describe('unavailableReason', () => {
   it('blames the daemon when no port is known', () => {
-    assert.match(unavailableReason(onlyPreset(), { port: null }), /MCP 未运行/);
+    assert.match(
+      unavailableReason(onlyPreset(), { shape: 'desktop', daemonPort: null }),
+      /MCP 未运行/,
+    );
   });
 
   it('never blames the bridge binary — that path is gone', () => {
     // stdio 桥接不在生成的配置形状里，所以指向它的提示只会把用户引去找一个并不需要的安装。
-    assert.doesNotMatch(unavailableReason(onlyPreset(), { port: null }), /桥接/);
+    assert.doesNotMatch(
+      unavailableReason(onlyPreset(), { shape: 'desktop', daemonPort: null }),
+      /桥接/,
+    );
+  });
+});
+
+describe('the web form', () => {
+  it('points at the dedicated MCP port, not at the daemon port', () => {
+    // 守护进程跑在服务端进程内部，它的端口既不在客户端机器上、也没有发布出去。
+    // 拿它拼出来的地址，客户端连过去只会连接被拒。
+    const entry = buildServerEntry(onlyPreset(), WEB);
+    assert.ok(entry);
+    assert.equal(entry.url, 'http://192.168.12.81:54174/mcp');
+  });
+
+  it('falls back to the main port when no dedicated port is configured', () => {
+    const entry = buildServerEntry(onlyPreset(), { ...WEB, mcpPort: 0 });
+    assert.ok(entry);
+    assert.equal(entry.url, 'http://192.168.12.81:54173/mcp');
+  });
+
+  it('keeps the reverse-proxy prefix on the main port', () => {
+    const entry = buildServerEntry(onlyPreset(), { ...WEB, mcpPort: 0, basePath: '/sp' });
+    assert.ok(entry);
+    assert.equal(entry.url, 'http://192.168.12.81:54173/sp/mcp');
+  });
+
+  it('uses the configured mount path on the dedicated port', () => {
+    const entry = buildServerEntry(onlyPreset(), { ...WEB, mcpPath: '/ai/mcp' });
+    assert.ok(entry);
+    assert.equal(entry.url, 'http://192.168.12.81:54174/ai/mcp');
+  });
+
+  it('does not blame the daemon when the web endpoint is known', () => {
+    // Web 形态下 MCP 由服务端进程应答，守护进程停着也照样有端点。
+    assert.doesNotMatch(unavailableReason(onlyPreset(), WEB), /MCP 未运行/);
   });
 });
