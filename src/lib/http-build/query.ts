@@ -1,5 +1,6 @@
 import type { KeyValue } from '@/types/domain';
 import { resolveVarsWithMissing } from '../url';
+import { percentEncode } from '../percent-encode';
 import type { MissingTracker } from './pool';
 
 /**
@@ -28,7 +29,7 @@ export function appendQueryString(
     // 空值判断跑在*解析后*的值上：解析为 "" 的变量与手输的空值同样丢掉该参数
     if (value.value === '') continue; // spec: skip empty keys/values
     // 空格编码成 `%20`（与 JS 的 `encodeURIComponent` 同字符集，不是 form 编码的 `+`）
-    parts.push(`${encodeURIComponent(p.key)}=${encodeURIComponent(value.value)}`);
+    parts.push(`${percentEncode(p.key)}=${percentEncode(value.value)}`);
   }
   if (parts.length === 0) return url;
   return `${url}${url.includes('?') ? '&' : '?'}${parts.join('&')}`;

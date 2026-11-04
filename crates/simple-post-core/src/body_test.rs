@@ -266,3 +266,28 @@ fn an_empty_content_has_no_body() {
     let out = resolve_body(&body(BodyMode::Json, ""), &vars(&[]));
     assert!(out.text.is_none());
 }
+// -------------------------------------------------------------------------
+// 落单代理项
+// -------------------------------------------------------------------------
+
+/// JSON 里的落单代理项转义被 serde_json 拒绝，故 Rust 侧收不到这种值。
+///
+/// 渲染进程侧的 JS 字符串按 UTF-16 存，能装下落单的代理项，故那边在百分号编码前把它换成
+/// U+FFFD（`src/lib/well-formed.ts`）。Rust 的 `String` 恒为合法 UTF-8，serde_json 遇到
+/// `\uD800` 这类落单代理项转义直接报错，故 `core::body` 这一侧不需要同样的归一。
+#[test]
+fn serde_json_rejects_a_lone_surrogate_escape() {
+    let lone =
+        serde_json::from_str::<Vec<FormField>>(r#"[{"key":"q","value":"\ud800","enabled":true}]"#);
+    assert!(
+        lone.is_err(),
+        "落单代理项的转义应当被 serde_json 拒绝：{:?}",
+        lone
+    );
+
+    // 成对的代理项是一个增补平面字符，它解析得出来——故被拒绝的只是落单的那一个
+    let paired = serde_json::from_str::<Vec<FormField>>(
+        r#"[{"key":"q","value":"\ud83d\ude00","enabled":true}]"#,
+    );
+    assert!(paired.is_ok(), "成对代理项应当解析得出来：{:?}", paired);
+}

@@ -206,4 +206,24 @@ describe('prepareEndpointRequest', () => {
     const request = prepareEndpointRequest(parts, {});
     assert.equal(request.url, 'https://gw.test/api/orders/list');
   });
+
+  it('请求体里带落单代理项时不抛异常', () => {
+    // 渲染期这条路径（`HttpTester` 的 `useMemo`）一旦抛异常，仓库里没有 React 错误边界，
+    // 整棵工作区树会被卸载
+    const parts = buildEndpointRequestParts({
+      detail: detail(),
+      draft: {
+        body: {
+          mode: 'form',
+          content: JSON.stringify([
+            { key: 'q', value: String.fromCharCode(0xd800), enabled: true },
+          ]),
+        },
+      },
+      endpointEnv: env(),
+      moduleId: 'm1',
+      enabledDynamicNames: NO_DYNAMIC,
+    });
+    assert.doesNotThrow(() => prepareEndpointRequest(parts, {}));
+  });
 });

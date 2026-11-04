@@ -1,6 +1,7 @@
 import type { AuthConfig, OAuth2Auth } from '@/types/domain';
 import { bytesToBase64 } from '@/lib/base64';
 import { listVars, resolveVarsWithMissing } from '../url';
+import { percentEncode } from '../percent-encode';
 import type { MissingTracker } from './pool';
 
 /**
@@ -102,5 +103,5 @@ export function appendApikeyToQuery(url: string, auth: AuthConfig): string {
   }
   const { key, value } = auth.apikey;
   if (!key) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+  return `${url}${url.includes('?') ? '&' : '?'}${percentEncode(key)}=${percentEncode(value)}`;
 }
