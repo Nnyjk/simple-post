@@ -521,6 +521,16 @@ describe('the tab bar and the resource tree point at the same endpoint', () => {
     });
   }
 
+  /** 只开着一个接口标签 —— 关掉草稿后回退的目标因此是确定的。 */
+  function oneEndpointTab() {
+    useAppStore.setState({
+      nodes: [...useAppStore.getState().nodes, { ...MODULE, id: 'ep-a', kind: 'endpoint' }],
+      openTabs: [{ id: 'ep-a', kind: 'endpoint' }],
+      activeTabId: 'ep-a',
+      activeEndpointId: 'ep-a',
+    });
+  }
+
   it('follows the tab bar when the user activates another endpoint tab', () => {
     // 树里的高亮读 `activeEndpointId`，标签条的激活读 `activeTabId`。用户点标签条切到
     // 另一个接口时只改后者，树里的高亮就还停在原来那一行——两边说的不是同一个接口。
@@ -569,5 +579,34 @@ describe('the tab bar and the resource tree point at the same endpoint', () => {
     const state = useAppStore.getState();
     assert.equal(state.activeTabId, draftId);
     assert.equal(state.activeEndpointId, null, '草稿没有树行，高亮就没有落点');
+  });
+
+  it('brings the highlight back when the user returns from the draft to the endpoint', () => {
+    // 建草稿时高亮被清空（草稿没有树行），切回接口标签时高亮要回到那一行——
+    // 否则用户从草稿回到接口，树里仍没有可高亮的行。
+    oneEndpointTab();
+    useAppStore.getState().createEndpointDraft('m1');
+
+    assert.equal(useAppStore.getState().activeEndpointId, null, '草稿阶段没有可高亮的行');
+
+    useAppStore.getState().setActiveTab('ep-a');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-a');
+    assert.equal(state.activeEndpointId, 'ep-a', '切回接口标签时高亮回到那一行');
+  });
+
+  it('brings the highlight back when closing the draft falls back to the endpoint', () => {
+    // 关掉活动的草稿标签后标签条回退到前一个接口，树里的高亮也要回到同一个接口。
+    oneEndpointTab();
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+
+    assert.equal(useAppStore.getState().activeEndpointId, null, '草稿阶段没有可高亮的行');
+
+    useAppStore.getState().closeTab(draftId);
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-a', '标签条回退到那个接口');
+    assert.equal(state.activeEndpointId, 'ep-a', '树里的高亮也回到那个接口');
   });
 });
