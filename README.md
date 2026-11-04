@@ -8,7 +8,7 @@
 
 Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这里的接口定义，读到的就是用户正在维护的那份数据。
 
-[![版本](https://img.shields.io/badge/version-v0.1.23-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
+[![版本](https://img.shields.io/badge/version-v0.1.30-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
 [![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
 [![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
 [![MCP 工具](https://img.shields.io/badge/MCP-47%20tools-8A2BE2?style=flat-square)](#mcp-server)
@@ -154,6 +154,8 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 ### MCP Server
 
 47 个 MCP 工具，覆盖项目、模块、集合、接口、模块地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
+
+**这一版的工具清单从 52 条变成 47 条。** 地址从「服务」改成「（环境 × 模块）」那一格之后，原来的五个 `base_url_def_*` 工具不再存在，写地址改用 `env_set_baseurl`（收 `env_id`、`module_id`、`url` 与可选的 `proxy`）。「当前环境」不再落库，`env_get_active` 改名为 `env_get_default`，`env_set_active` 随旧的环境切换一起移除；发请求要指定环境时，由 `api_call_endpoint` 的可选参数 `environment_id` 点名，不点名就用项目里最早创建的那个环境。新增的工具是 `api_run_collection`，用于批量运行一个集合。
 
 工具是按「一次调用建好一个接口」设计的，而不只是 CRUD：
 
@@ -319,7 +321,7 @@ sp.example.com {
 | --- | --- | --- |
 | Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
-| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、MCP 指标、错误类型，以及动态变量、OAuth2、路径参数、请求脚本、接口规格、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
+| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、错误类型，以及请求体、动态变量、OAuth2、路径参数、请求脚本、接口规格、模板、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
 | MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（47 个工具）、axum HTTP daemon、标准输入输出桥接。 |
 | 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
 | 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
@@ -341,7 +343,8 @@ sp.example.com {
 
 - 项目与环境切换、全局搜索（`Ctrl+K`）、MCP 进程状态指示器、设置入口（`src/features/top-bar/`）
 - 侧边树递归渲染集合层级、method 彩色徽标、双击改名、右键菜单、删除确认（`src/features/project-tree/`）
-- 拖拽支持三种落点：集合正中间是移进该子树，上边缘与下边缘是同级前后插入（`src/lib/tree-index.ts`）
+- 拖拽的落点判定遵守与数据库触发器同一套父子类型矩阵（`src/lib/node-placement.ts`）；容器行的上四分位是「放在它上面」、下四分位是「放在它下面」、中间一半是「嵌进去」，模块行只接受「嵌进去」（`src/features/project-tree/drop-resolve.ts`）
+- 在资源树里右键一个集合或一个模块可以「批量运行」：程序按树上的次序把这个容器下面的接口逐个发出去，跑完给出逐条结果与汇总报告（`src/features/batch-run/`）
 - 请求测试器提供 Params、路径参数、Headers、Body、Auth、Docs、脚本、证书八个标签页，method 与 URL 写在标签页上方的请求头与地址栏里（URL 栏带 `{{var}}` 高亮与变量选择浮层）；Body 页签按无、JSON、x-www-form-urlencoded、form-data、XML、Text、binary 七种形态给不同的编辑器，CodeMirror 6 的 JSON 与 XML 编辑器带实时校验，Markdown 分屏预览，鉴权支持 None、Bearer、Basic、API Key 与 OAuth 2.0（`src/features/http-tester/`）
 - 复制为 cURL、保存接口定义（`src/lib/http-build.ts`）
 - 响应区显示状态码、耗时与大小，提供 Pretty、Raw、Headers、脚本四种视图；Pretty 按内容类型选视图——JSON 走可展开的树，文本走纯文本，图片给预览，二进制给下载卡片；支持复制与下载，下载的是**原始字节**，历史折叠条里的记录可以点击重放（`src/features/response-viewer/`）
@@ -379,6 +382,8 @@ v0.1.x 已交付：Tauri 桌面应用、`serve-web` 无头 Web 与独立 MCP 二
 - [x] 仓库治理：说明内容、CI 提速与镜像发布、协作规范、注释中文化（#23 #24 #25 #26）
 
 ### v0.3
+
+这一版随 v0.1.30 发布。
 
 - [x] 请求脚本（pre-request 与 test 脚本，沙箱隔离）（#7）
 - [x] 动态变量（声明一次 → 取数 → 缓存 → 手动编辑）（#109）
