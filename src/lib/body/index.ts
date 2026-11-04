@@ -23,9 +23,15 @@
  *
  * **产物的两种形态。** 产物是**文本**还是**二进制**，由字节决定：字节是合法 UTF-8 就走文本
  * 形态，否则走 base64 形态。`binary` 模式一律走二进制形态——用户选的是文件，发的是它的字节。
+ *
+ * **百分号编码前先归一。** 渲染进程把落单的代理项换成 U+FFFD 再编码
+ * （`src/lib/well-formed.ts`），故编码这一步不抛异常；Rust 侧收不到这种值——serde_json
+ * 拒绝 JSON 里的落单代理项转义。
  */
 import type { BodyFile, FormField, MultipartPart, RequestBody } from '@/types/domain';
 import { resolveVarsWithMissing } from '../url';
+import { percentEncode } from '../percent-encode';
+import { wellFormed } from '../well-formed';
 
 /** 解析后的请求体。 */
 export interface ResolvedBody {
@@ -87,7 +93,7 @@ function resolveFormBody(content: string, vars: Record<string, string>): Resolve
     const key = resolveVarsWithMissing(field.key, vars);
     const value = resolveVarsWithMissing(field.value, vars);
     missing.push(...key.missing, ...value.missing);
-    pairs.push(`${encodeURIComponent(key.value)}=${encodeURIComponent(value.value)}`);
+    pairs.push(`${percentEncode(key.value)}=${percentEncode(value.value)}`);
   }
 
   return { text: pairs.join('&'), base64: null, missing: dedup(missing) };
@@ -252,7 +258,12 @@ export function parseMultipartParts(content: string): MultipartPart[] {
 // 解析：binary 的文件
 // -------------------------------------------------------------------------
 
-/** `binary` 模式的内容 → 文件描述。读不出来时给 `null`：那个内容不是文件描述，就没有文件。 */
+/**
+ * `binary` 模式的内容 → 文件描述。读不出来时给 `null`：那个内容不是文件描述，就没有文件。
+ *
+ * 名字与 Content-Type 归一成良构字符串（它们会作为请求头发出去）；base64 是文件字节，
+ * 按构造只有 ASCII 字符，不归一。
+ */
 export function parseBodyFile(content: string): BodyFile | null {
   let parsed: unknown;
   try {
@@ -273,7 +284,7 @@ export function parseBodyFile(content: string): BodyFile | null {
   const size = r.size === undefined ? 0 : uint(r.size);
   if (size === null) return null;
 
-  return { name, size, contentType, base64 };
+  return { name: wellFormed(name), size, contentType: wellFormed(contentType), base64 };
 }
 
 /**

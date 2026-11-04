@@ -10,6 +10,8 @@
 import type { AuthConfig, OAuth2Auth, OAuth2TokenResult } from '@/types/domain';
 import type { PreparedRequest } from './http-build';
 import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
+import { percentEncode } from './percent-encode';
+import { wellFormed, wellFormedDeep } from './well-formed';
 
 /**
  * `AuthConfig.oauth2` 缺省时的渲染形状。库里存着 `'{}'` 这样的默认行，MCP 也可能只写
@@ -43,12 +45,12 @@ export function hasAuthorizationHeader(headers: ReadonlyArray<readonly [string, 
 }
 
 /**
- * 拼 query 位置的 token。键值都过 `encodeURIComponent`：access token 常见 base64url 以外的形态
+ * 拼 query 位置的 token。键值都过 `percentEncode`：access token 常见 base64url 以外的形态
  * （带 `+` / `=` / `.`），不编码会被 `&` 或 `+` 截断成一个残缺的值。
  */
 export function buildTokenQuery(url: string, param: string, token: OAuth2TokenResult): string {
   const key = param.trim() === '' ? DEFAULT_TOKEN_PARAM : param;
-  return `${url}${url.includes('?') ? '&' : '?'}${encodeURIComponent(key)}=${encodeURIComponent(token.accessToken)}`;
+  return `${url}${url.includes('?') ? '&' : '?'}${percentEncode(key)}=${percentEncode(token.accessToken)}`;
 }
 
 /**
@@ -114,8 +116,10 @@ export async function fetchOAuth2Token(
   auth: AuthConfig,
   options: FetchTokenOptions = {},
 ): Promise<OAuth2TokenResult> {
-  const args: Record<string, unknown> = { auth };
-  if (options.manual !== undefined) args.manual = { pasted: options.manual };
+  // fetchOAuth2Token 发给后端的鉴权配置与用户粘贴的值都先归一：serde_json 拒绝 JSON 里的
+  // 落单代理项转义，不归一的话这一次取 token 会直接失败。
+  const args: Record<string, unknown> = { auth: wellFormedDeep(auth) };
+  if (options.manual !== undefined) args.manual = { pasted: wellFormed(options.manual) };
   if (options.force) args.force = true;
   // 变量池送过去，后端才有池可替换 OAuth2 配置里的 `{{var}}`。
   if (options.vars !== undefined) args.vars = options.vars;

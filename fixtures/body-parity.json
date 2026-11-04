@@ -1,5 +1,5 @@
 {
-  "$comment": "请求体解析与装配规则的一致性样本。Rust 的 `core::body::resolve_body`（MCP 端）与 TS 的 `src/lib/body`（桌面端）读同一份本文件，产出必须逐条相同。样本钉的是**规则**：逐字段还是逐段模板化、空键与停用行算不算、百分号编码用哪套字符集、产物是文本还是字节。",
+  "$comment": "请求体解析与装配规则的一致性样本。Rust 的 `core::body::resolve_body`（MCP 端）与 TS 的 `src/lib/body`（桌面端）读同一份本文件，产出必须逐条相同。样本钉的是**规则**：逐字段还是逐段模板化、空键与停用行算不算、百分号编码用哪套字符集、产物是文本还是字节。**落单代理项那条规则不在本样本里**：JSON 里的 \\uD800 转义 serde_json 直接拒绝，两侧的读取器读不了整份样本；那条规则由 `src/lib/__tests__/lone-surrogate-encoding.test.ts` 与 `crates/simple-post-core/src/body_test.rs` 里那条用例分别钉住。",
   "cases": [
     {
       "name": "json：整段模板化",
@@ -57,6 +57,15 @@
         "content": "[{\"key\":\"q\",\"value\":\"{{q}}\",\"enabled\":true}]"
       },
       "expected": { "text": "q=a%26b%2Bc%3Dd", "base64": null, "missing": [] }
+    },
+    {
+      "name": "form：值里的替换字符按 U+FFFD 的字节编码",
+      "vars": { "q": "\ufffd" },
+      "body": {
+        "mode": "form",
+        "content": "[{\"key\":\"q\",\"value\":\"{{q}}\",\"enabled\":true}]"
+      },
+      "expected": { "text": "q=%EF%BF%BD", "base64": null, "missing": [] }
     },
     {
       "name": "form：停用的行不进正文，其中的变量也不报缺失",

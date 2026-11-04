@@ -15,6 +15,7 @@
 
 import type { KeyValue } from '@/types/domain';
 import { uid } from '@/lib/utils';
+import { percentEncode } from './percent-encode';
 
 /** 一个占位符：名字，以及它在路径段里的起止下标（含两头大括号）。 */
 interface Found {
@@ -174,7 +175,8 @@ export function applyPathParamValue(
  * 把 URL 路径段里的占位符替换成给定的值。
  *
  * `values` 是「占位符名 → 取到的值」，值是**未经编码**的原文：编码由本函数统一做，字符集取
- * `encodeURIComponent`，与 Rust 侧 `simple_post_core::url::percent_encode` 同一套，故路径参数
+ * `percentEncode`（见 `src/lib/percent-encode.ts`），与 Rust 侧
+ * `simple_post_core::url::percent_encode` 同一套，故路径参数
  * 的值与查询参数的值遵守同一条编码纪律。
  *
  * 取不到值的占位符**原样留在 URL 里**，并出现在返回的 `missing` 里。值是空串或只有空白时同样
@@ -201,7 +203,7 @@ export function substitutePathParams(
     out += scope.slice(cursor, f.from);
     const hit = values.find(([k]) => k === f.name);
     if (hit && hit[1].trim() !== '') {
-      out += encodeURIComponent(hit[1]);
+      out += percentEncode(hit[1]);
     } else {
       if (!seen.has(f.name)) {
         seen.add(f.name);
