@@ -145,10 +145,14 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (idx < 0) return {};
       const nextTabs = s.openTabs.filter((t) => t.id !== tabId);
       let nextActive = s.activeTabId;
+      // 标签条换了活动标签，树里的高亮也要跟着换。回退到的标签是接口时，高亮落在它那一行；
+      // 回退到别的种类时，高亮保持原样。
+      let selection: Selection = {};
       if (s.activeTabId === tabId) {
         // `nextActive` 先取前一个，再取后一个，最后 null。多数 IDE 标签条（Chrome、VS Code）都是这个次序。
         const fallback = s.openTabs[idx - 1] ?? s.openTabs[idx + 1] ?? null;
         nextActive = fallback ? fallback.id : null;
+        selection = fallback ? selectionFor(fallback) : {};
       }
       // `closeTab` 关掉 endpoint 标签时一并丢掉它的草稿与脏标记，否则草稿永远留着。draft
       // endpoint 标签同样适用：它的 id 不在 `nodes` 里，这里是唯一能回收该 `endpointDrafts`
@@ -178,6 +182,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       return {
         openTabs: nextTabs,
         activeTabId: nextActive,
+        ...selection,
         endpointDrafts,
         dirtyTabIds,
         draftEndpoints,
@@ -191,8 +196,12 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         return { activeTabId: null };
       }
       // `setActiveTab` 拒绝未知 id——不能让 UI 停在悬空标签上。
-      if (!s.openTabs.some((t) => t.id === tabId)) return {};
-      return { activeTabId: tabId };
+      const target = s.openTabs.find((t) => t.id === tabId);
+      if (!target) return {};
+      // 标签条与资源树要指向同一个接口：标签条读 `activeTabId`，树里的高亮读
+      // `activeEndpointId`。只写前者时，用户点标签条切到另一个接口，树里的高亮仍停在原来
+      // 那一行——两边说的不是同一个接口。
+      return { activeTabId: tabId, ...selectionFor(target) };
     }),
   markTabDirty: (tabId, dirty) =>
     set((s) => {
@@ -422,6 +431,11 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
 });
 
 /**
+ * 资源树高亮要跟着标签条走时写进 state 的那一个字段。空对象表示「不动高亮」。
+ */
+type Selection = { activeEndpointId?: string | null };
+
+/**
  * 该种类的标签是否拥有 `endpointDrafts` 里的一条目。`endpoint` 与 `endpoint-draft` 都为真：
  * draft endpoint 走的是与已存 endpoint **同一套**请求配置编辑器，`endpointDrafts` 两种情况都
  * 按标签 id 作键，区别只在 `nodes` 里有没有行。
@@ -431,6 +445,19 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
  */
 function carriesEndpointDraft(kind: TabKind): boolean {
   return kind === 'endpoint' || kind === 'endpoint-draft';
+}
+
+/**
+ * 某个标签成为活动标签时，资源树里的高亮该落在哪一行。
+ *
+ * 接口标签落在它自己那一行；草稿标签在树里没有行，故把高亮清空——树里没有可高亮的行时，
+ * 让高亮停在另一个接口上，用户看到的就是两个地方各说各话。模块、集合、项目与设置那几类
+ * 标签不是接口，故不动高亮。
+ */
+function selectionFor(tab: OpenTab): Selection {
+  if (tab.kind === 'endpoint') return { activeEndpointId: tab.id };
+  if (tab.kind === 'endpoint-draft') return { activeEndpointId: null };
+  return {};
 }
 
 /**

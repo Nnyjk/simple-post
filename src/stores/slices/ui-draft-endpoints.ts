@@ -105,6 +105,9 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
       dirtyTabIds: new Set(s.dirtyTabIds).add(id),
     }));
     state.openTab('endpoint-draft', id);
+    // 草稿没有树行，故树里没有可高亮的行。把「当前接口」清空，别让它停在**另一个**接口上：
+    // 树的高亮与标签条的激活各说各话时，用户看到的是「新建完却停在已有的那个同名接口」。
+    get().setActiveEndpoint(null);
     return id;
   },
 
@@ -185,8 +188,10 @@ export const createUiDraftEndpoints: StateCreator<AppState, [], [], UiDraftEndpo
     get().moveResponse(draftId, endpointId);
     get().discardDraftEndpoint(draftId);
     get().closeTab(draftId);
-    get().openTab('endpoint', endpointId);
-    get().setActiveTab(endpointId);
+    // 用 setActiveEndpoint 收尾：它把「当前接口」指向新行，并打开、激活它的标签。分开写这两处必然漏掉
+    // 其中一处，而漏掉的那一处正是树——树的高亮读的是 `activeEndpointId`，标签条读的是
+    // `activeTabId`，两处不同步时树与标签条会指向两个不同的接口。
+    get().setActiveEndpoint(endpointId);
     return endpointId;
   },
 });

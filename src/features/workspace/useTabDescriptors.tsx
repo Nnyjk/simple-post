@@ -2,6 +2,7 @@ import { Package, FolderOpen, FolderClosed, Hash, Settings2, Braces } from 'luci
 import { useAppStore, type OpenTab, type TabKind } from '@/stores/app-store';
 import { MethodPill } from '@/components/ui/method-pill';
 import { HUE } from '@/lib/hue';
+import { endpointTabPaths, type EndpointTabSource } from './tab-disambiguation';
 export const KIND_LABEL: Record<TabKind, string> = {
   project: '项目',
   module: '模块',
@@ -17,6 +18,11 @@ export interface TabDescriptor {
   tab: OpenTab;
   title: string;
   hint?: string;
+  /**
+   * 接口所在容器的完整路径，从模块往下。它只写进悬停提示，不占标签的宽度，故与 `hint`
+   * 分开：`hint` 是标题右侧那一小段可见文字，`path` 是它的完整版。
+   */
+  path?: string;
   icon: React.ReactNode;
   /**
    * 类型名（作为一个词），只给 hover 标题用 —— 绝不上条：160px 放不下第二个词，图标已经能
@@ -46,6 +52,20 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
   // 未保存接口只住在这里，永远不进 `nodes`。没有它，条会把它们渲染成"已删除"
   // 的样子 —— 而那恰恰是草稿确定不是的东西。
   const draftEndpoints = useAppStore((s) => s.draftEndpoints);
+
+  // 接口标签要不要显示路径提示，取决于**这批标签里**有没有同名接口，故先扫一遍接口类标签
+  // （已存接口与未保存的草稿），算出它们的标题与所在容器。
+  const endpointSources: EndpointTabSource[] = [];
+  for (const t of tabs) {
+    if (t.kind === 'endpoint') {
+      const e = nodes.find((x) => x.id === t.id);
+      if (e) endpointSources.push({ id: t.id, title: e.name, parentId: e.parentId });
+    } else if (t.kind === 'endpoint-draft') {
+      const d = draftEndpoints[t.id];
+      if (d) endpointSources.push({ id: t.id, title: d.name, parentId: d.parentId });
+    }
+  }
+  const endpointPaths = endpointTabPaths(endpointSources, nodes);
 
   // 手写循环而非 .map().filter()，实体缺失时形状保持稳定（回落到"已删除"
   // 标签而不是什么都不渲染 —— `pruneStaleTabs` 下一拍会清掉它）。
@@ -137,9 +157,12 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
         out.push(missingDescriptor(t));
         continue;
       }
+      const info = endpointPaths.get(t.id);
       out.push({
         tab: t,
         title: d.name,
+        hint: info?.hint || undefined,
+        path: info?.path || undefined,
         icon: (
           <MethodPill
             method={d.method}
@@ -161,9 +184,12 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
       out.push(missingDescriptor(t));
       continue;
     }
+    const info = endpointPaths.get(t.id);
     out.push({
       tab: t,
       title: e.name,
+      hint: info?.hint || undefined,
+      path: info?.path || undefined,
       icon: (
         <MethodPill
           method={eDetail.method}

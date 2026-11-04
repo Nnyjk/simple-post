@@ -39,6 +39,45 @@ export function indexByParent(
 }
 
 /**
+ * endpoint 所在路径上的容器名 —— 从模块往下逐层列出，最外层在前。
+ *
+ * 标签条用它给同名接口做区分：两个接口重名时，光看名字分不出谁是谁，路径能。
+ *
+ * 只列**容器**（模块与集合），不含接口自己：调用方已经知道接口名，它要回答的是
+ * 「这个接口在树的哪里」。直接挂在模块下的接口得到一段路径（模块名），挂在集合下的得到
+ * 两段（模块名、集合名），集合可以嵌套任意层，故路径长度不固定。
+ *
+ * 收全量节点列表并自己做索引，调用方可以直接传 `store.nodes`；它**没有**做 memo：
+ * 返回值是新数组，请放进 `useMemo`，不要当 Zustand selector 用。
+ *
+ * 找不到祖先时返回空数组：接口还没有容器（草稿的父节点还没建出来）或树还没加载完时，
+ * 那是「路径暂缺」而不是「路径为空」，调用方据此不写提示。
+ */
+export function containerPathOf(
+  nodes: readonly ResourceNode[],
+  parentId: string | null | undefined,
+): string[] {
+  if (!parentId) return [];
+  const byId = new Map<string, ResourceNode>();
+  for (const n of nodes) byId.set(n.id, n);
+
+  const path: string[] = [];
+  const seen = new Set<string>();
+  let cur = byId.get(parentId);
+  // `seen` 让遍历在成环处停下：每个节点 id 最多被访问一次，而节点总数有限，故遍历必然终止。
+  // 集合可以嵌套任意深（schema 不限嵌套层数），故这里不另设层数上限——设了会在很深的
+  // 嵌套下把最外层的模块名丢掉，而那正是区分同名接口最有用的一段。
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    if (cur.kind === 'collection' || cur.kind === 'module') path.unshift(cur.name);
+    // 模块是路径的顶端：它上面只有项目，而项目不是容器。
+    if (cur.kind === 'module') break;
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return path;
+}
+
+/**
  * endpoint 最终所处模块的 id，不在任何模块下则为 `null`。
  *
  * 项目 id 以 `rootId` 冗余写在每个节点上，「属于哪个项目」一次查得到；但模块没有对应列，

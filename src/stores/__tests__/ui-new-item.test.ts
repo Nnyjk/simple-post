@@ -222,7 +222,9 @@ describe('ui-new-item: createEndpointAt takes the parent from its argument', () 
     // `setActiveEndpoint` 会为一个 `nodes` 里谁也不认识的 id 打开 `endpoint` 标签，
     // 所以草稿改为打开自己那种。
     assert.deepEqual(h.calls.openTab, [{ kind: 'endpoint-draft', refId: draftId }]);
-    assert.deepEqual(h.calls.activeEndpoint, []);
+    // 草稿期间要把「当前接口」清空：setActiveEndpoint(null) 不开任何标签（上面的 openTab 断言钉住这一点），
+    // 只是别让树里高亮的仍是之前打开的那个接口。
+    assert.deepEqual(h.calls.activeEndpoint, [null]);
     assert.equal(h.bag.activeTabId, draftId);
   });
 

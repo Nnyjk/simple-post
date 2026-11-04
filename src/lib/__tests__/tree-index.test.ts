@@ -21,7 +21,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { indexByParent, moduleIdOfEndpoint } from '../tree-index';
+import { indexByParent, moduleIdOfEndpoint, containerPathOf } from '../tree-index';
 import type { ResourceNode, ResourceNodeType } from '@/types/domain';
 
 // ---------- 夹具 ----------
@@ -310,5 +310,65 @@ describe('tree-index: moduleIdOfEndpoint', () => {
     const draft = makeNode('draft_1', 'col_a', 0);
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'ep_b', draft), 'mod_b');
     assert.equal(moduleIdOfEndpoint(NESTED_TREE, 'draft_1', makeNode('other', 'mod_b', 0)), null);
+  });
+});
+
+// ============================================================
+// containerPathOf
+// ============================================================
+
+describe('tree-index: containerPathOf', () => {
+  const tree: ResourceNode[] = [
+    makeNode('mod_a', null, 0, { kind: 'module', name: '支付' }),
+    makeNode('col_a', 'mod_a', 0, { kind: 'collection', name: '订单' }),
+    makeNode('sub_a', 'col_a', 0, { kind: 'collection', name: '退款' }),
+    makeNode('mod_b', null, 1, { kind: 'module', name: '账户' }),
+  ];
+
+  it('lists the containers from the outermost to the innermost', () => {
+    assert.deepEqual(containerPathOf(tree, 'sub_a'), ['支付', '订单', '退款']);
+  });
+
+  it('gives one segment for an endpoint sitting directly on a module', () => {
+    assert.deepEqual(containerPathOf(tree, 'mod_a'), ['支付']);
+  });
+
+  it('stops at the module and does not walk into the project', () => {
+    // 模块上面只有项目，而项目不是容器，故路径到模块为止。
+    assert.deepEqual(containerPathOf(tree, 'mod_b'), ['账户']);
+  });
+
+  it('returns an empty path when the parent is missing', () => {
+    // 草稿的父节点还没建出来、或树还没加载完时，路径是「暂缺」而不是「空」——
+    // 调用方据此不写提示，而不是写一段「（无）」。
+    assert.deepEqual(containerPathOf(tree, 'nope'), []);
+    assert.deepEqual(containerPathOf(tree, null), []);
+    assert.deepEqual(containerPathOf(tree, undefined), []);
+  });
+
+  it('terminates on a cyclic parent chain instead of hanging', () => {
+    const cyclic = [
+      makeNode('x', 'y', 0, { kind: 'collection', name: 'X' }),
+      makeNode('y', 'x', 0, { kind: 'collection', name: 'Y' }),
+    ];
+    assert.equal(containerPathOf(cyclic, 'x').length, 2, '环上的容器只被记一次');
+  });
+
+  it('walks through a nesting deeper than any fixed depth cap', () => {
+    // 集合可以嵌套任意深（schema 不限层数）。遍历靠 `seen` 停下——每个节点 id 最多被
+    // 访问一次——故不必再设层数上限；设了会在很深的嵌套下把最外层的模块名丢掉，
+    // 而那正是区分同名接口最有用的一段。
+    const deep: ResourceNode[] = [makeNode('mod', null, 0, { kind: 'module', name: '模块' })];
+    let parent = 'mod';
+    for (let i = 0; i < 70; i++) {
+      const id = `col-${i}`;
+      deep.push(makeNode(id, parent, 0, { kind: 'collection', name: `第${i}层` }));
+      parent = id;
+    }
+
+    const path = containerPathOf(deep, parent);
+
+    assert.equal(path.length, 71, '模块加上七十层集合都要在路径里');
+    assert.equal(path[0], '模块', '最外层的那一段不能被截掉');
   });
 });

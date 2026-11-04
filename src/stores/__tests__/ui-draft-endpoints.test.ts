@@ -161,6 +161,20 @@ describe('draft endpoints: creating one touches neither the database nor the tre
     assert.equal(state.activeEndpointId, null);
   });
 
+  it('clears the current endpoint, so the tree stops pointing at another one', () => {
+    // 之前打开着另一个接口。草稿没有树行，故树里没有可高亮的行；把「当前接口」留成那个
+    // 旧接口，树的高亮与标签条的激活就会各说各话——用户看到的是「新建完却停在已有的
+    // 那个接口」。
+    useAppStore.setState({
+      nodes: [...useAppStore.getState().nodes, { ...MODULE, id: 'ep-old', kind: 'endpoint' }],
+      activeEndpointId: 'ep-old',
+    });
+
+    useAppStore.getState().createEndpointDraft('m1');
+
+    assert.equal(useAppStore.getState().activeEndpointId, null);
+  });
+
   it('still refuses a parent that cannot hold an endpoint', async () => {
     assert.equal(await useAppStore.getState().createEndpointAt('nope'), null);
     assert.equal(await useAppStore.getState().createEndpointAt(''), null);
@@ -240,6 +254,22 @@ describe('draft endpoints: Save is the only thing that writes', () => {
     assert.equal(tabFor(draftId), undefined, 'the draft tab is closed');
     assert.equal(tabFor(SERVER_ID)?.kind, 'endpoint');
     assert.equal(state.activeTabId, SERVER_ID);
+  });
+
+  it('points the current endpoint at the saved row, so the tree and the tab bar agree', async () => {
+    // 树的高亮读 `activeEndpointId`，标签条的激活读 `activeTabId`。两处不同步时，保存一个新
+    // 接口之后，树里高亮的仍是保存前那个接口——重名时用户根本分不出那是哪一个。
+    useAppStore.setState({
+      nodes: [...useAppStore.getState().nodes, { ...MODULE, id: 'ep-old', kind: 'endpoint' }],
+      activeEndpointId: 'ep-old',
+    });
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+
+    await useAppStore.getState().saveDraftEndpoint(draftId);
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeEndpointId, SERVER_ID, '树的高亮必须落在刚保存的那一行');
+    assert.equal(state.activeTabId, SERVER_ID, '标签条的激活必须落在同一个接口上');
   });
 
   it("carries the draft's response over to the saved endpoint", async () => {
@@ -466,5 +496,117 @@ describe('draft endpoints: the tab survives the sweeps that prune dead tabs', ()
     const state = useAppStore.getState();
     assert.equal(draftId in state.draftEndpoints, false);
     assert.equal(draftId in state.endpointDrafts, false);
+  });
+});
+
+// ============================================================
+// 标签条与资源树指向同一个接口
+// ============================================================
+
+describe('the tab bar and the resource tree point at the same endpoint', () => {
+  /** 两个已打开的接口标签，树里也有对应的两行。 */
+  function twoEndpointTabs() {
+    useAppStore.setState({
+      nodes: [
+        ...useAppStore.getState().nodes,
+        { ...MODULE, id: 'ep-a', kind: 'endpoint' },
+        { ...MODULE, id: 'ep-b', kind: 'endpoint' },
+      ],
+      openTabs: [
+        { id: 'ep-a', kind: 'endpoint' },
+        { id: 'ep-b', kind: 'endpoint' },
+      ],
+      activeTabId: 'ep-a',
+      activeEndpointId: 'ep-a',
+    });
+  }
+
+  /** 只开着一个接口标签 —— 关掉草稿后回退的目标因此是确定的。 */
+  function oneEndpointTab() {
+    useAppStore.setState({
+      nodes: [...useAppStore.getState().nodes, { ...MODULE, id: 'ep-a', kind: 'endpoint' }],
+      openTabs: [{ id: 'ep-a', kind: 'endpoint' }],
+      activeTabId: 'ep-a',
+      activeEndpointId: 'ep-a',
+    });
+  }
+
+  it('follows the tab bar when the user activates another endpoint tab', () => {
+    // 树里的高亮读 `activeEndpointId`，标签条的激活读 `activeTabId`。用户点标签条切到
+    // 另一个接口时只改后者，树里的高亮就还停在原来那一行——两边说的不是同一个接口。
+    twoEndpointTabs();
+
+    useAppStore.getState().setActiveTab('ep-b');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-b');
+    assert.equal(state.activeEndpointId, 'ep-b', '树里的高亮必须跟着标签条走');
+  });
+
+  it('follows the fallback when the active endpoint tab is closed', () => {
+    // 关掉活动标签后标签条回退到前一个标签，树里的高亮也要回退到同一个接口。
+    twoEndpointTabs();
+
+    useAppStore.getState().closeTab('ep-a');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-b');
+    assert.equal(state.activeEndpointId, 'ep-b', '回退后的高亮落在同一个接口上');
+  });
+
+  it('leaves the tree alone when a tab that is not the active one is closed', () => {
+    twoEndpointTabs();
+    useAppStore.setState({ activeTabId: 'ep-b', activeEndpointId: 'ep-b' });
+
+    useAppStore.getState().closeTab('ep-a');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-b');
+    assert.equal(state.activeEndpointId, 'ep-b', '关掉别的标签不动高亮');
+  });
+
+  it('clears the highlight when the tab bar lands on a draft', () => {
+    // 草稿在树里没有行，故树里没有可高亮的行；让高亮停在另一个接口上，用户看到的就是
+    // 两个地方各说各话。
+    twoEndpointTabs();
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+    // 建草稿那一步本身已经把高亮清空了，故这里再把它指回一个已存的接口——
+    // 断言要测的是「切到草稿标签」这一步，不是建草稿那一步。
+    useAppStore.setState({ activeEndpointId: 'ep-a' });
+
+    useAppStore.getState().setActiveTab(draftId);
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, draftId);
+    assert.equal(state.activeEndpointId, null, '草稿没有树行，高亮就没有落点');
+  });
+
+  it('brings the highlight back when the user returns from the draft to the endpoint', () => {
+    // 建草稿时高亮被清空（草稿没有树行），切回接口标签时高亮要回到那一行——
+    // 否则用户从草稿回到接口，树里仍没有可高亮的行。
+    oneEndpointTab();
+    useAppStore.getState().createEndpointDraft('m1');
+
+    assert.equal(useAppStore.getState().activeEndpointId, null, '草稿阶段没有可高亮的行');
+
+    useAppStore.getState().setActiveTab('ep-a');
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-a');
+    assert.equal(state.activeEndpointId, 'ep-a', '切回接口标签时高亮回到那一行');
+  });
+
+  it('brings the highlight back when closing the draft falls back to the endpoint', () => {
+    // 关掉活动的草稿标签后标签条回退到前一个接口，树里的高亮也要回到同一个接口。
+    oneEndpointTab();
+    const draftId = useAppStore.getState().createEndpointDraft('m1');
+
+    assert.equal(useAppStore.getState().activeEndpointId, null, '草稿阶段没有可高亮的行');
+
+    useAppStore.getState().closeTab(draftId);
+
+    const state = useAppStore.getState();
+    assert.equal(state.activeTabId, 'ep-a', '标签条回退到那个接口');
+    assert.equal(state.activeEndpointId, 'ep-a', '树里的高亮也回到那个接口');
   });
 });

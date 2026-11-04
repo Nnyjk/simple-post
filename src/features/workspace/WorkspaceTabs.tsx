@@ -246,6 +246,13 @@ export function WorkspaceTabs() {
       {descriptors.map((d) => {
         const active = d.tab.id === activeTabId;
         const dirty = dirtyTabIds.has(d.tab.id);
+        // 悬停时给出的完整说明。接口标签额外带上它所在容器的路径——重名的接口靠这条路径
+        // 分辨，标签条本身只放得下其中一段。
+        const titleText = d.path
+          ? `${d.title} · ${d.path}`
+          : d.kindLabel
+            ? `${d.kindLabel} · ${d.title}`
+            : d.title;
         return (
           <div
             key={`${d.tab.kind}:${d.tab.id}`}
@@ -303,7 +310,7 @@ export function WorkspaceTabs() {
                 isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
                 active && 'font-semibold',
               )}
-              title={d.kindLabel ? `${d.kindLabel} · ${d.title}` : d.title}
+              title={titleText}
             >
               {d.title}
             </span>
@@ -328,7 +335,7 @@ export function WorkspaceTabs() {
                 </Tooltip>
               )}
               {d.hint && !isCompact && (
-                <Tooltip content={d.hint} side="bottom">
+                <Tooltip content={d.path || d.hint} side="bottom">
                   <span className="max-w-[40px] truncate text-[10px] text-faint">{d.hint}</span>
                 </Tooltip>
               )}
