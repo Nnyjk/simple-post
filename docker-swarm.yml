@@ -45,7 +45,7 @@ services:
       SIMPLE_POST_DATA_DIR: /data
 
       # See docker-compose.yml for the full warning: an empty password leaves
-      # `/api/*` and `/mcp` unauthenticated on a `0.0.0.0` listener.
+      # `/api/*` and the MCP endpoint unauthenticated on a `0.0.0.0` listener.
       SIMPLE_POST_WEB_PASSWORD: ${SP_WEB_PASSWORD:-}
       RUST_LOG: ${SP_RUST_LOG:-info}
 
@@ -56,20 +56,30 @@ services:
       # Published on every node in the cluster, not just the one running the
       # task. `- ${SP_WEB_BIND:-4173}:4173`
       #
-      # The MCP endpoint lives on this same port by default (path /mcp).
+      # The MCP endpoint lives on its own port — the MCP daemon's listener.
+      # The main port serves the REST API and the SPA only.
       - '${SP_WEB_BIND:-4173}:4173'
 
-      # OPTIONAL: a dedicated port for MCP only. The container-side port must
-      # equal the port configured in the app (Settings → 连接 → HTTP 服务配置
-      # → 端口) — that field is the single source of truth for it. A non-zero
-      # value there makes the server open a second listener that serves
-      # nothing but MCP (no REST, no SPA).
+      # OPTIONAL: publish the MCP endpoint's port too. The container-side
+      # port must equal the port configured in the app (Settings → 连接 →
+      # HTTP 服务配置 → 端口) — the daemon binds exactly that port inside the
+      # container, and that field is the single source of truth for it.
+      #
+      # The app's 监听地址 must be 0.0.0.0 for the published port to be
+      # reachable: the daemon binds that address inside the container, so a
+      # loopback address would leave it unreachable from outside. With the
+      # app left at 0 (the default) the daemon's port is assigned by the
+      # operating system and there is nothing to publish.
       #
       # The two published ports must map to **different** container ports on
       # purpose: one container port carries at most one published port (the
-      # engine drops the second mapping silently), so the MCP listener needs
+      # engine drops the second mapping silently), so the MCP daemon needs
       # a port of its own inside the container. Publishing `4174:4173` instead
       # would leave 4174 unbound and the service would look half-deployed.
+      #
+      # Changing the port in the app needs the daemon to be restarted
+      # (Settings → MCP 进程 → 重启 MCP); the task itself does not have to
+      # be replaced.
       #
       # `mode: host` also changes how the update has to be ordered: the
       # published port belongs to the task, so with `start-first` below the
