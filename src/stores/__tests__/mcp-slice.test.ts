@@ -29,6 +29,7 @@ import {
 
 import { createMcpSlice, type McpSlice } from '../mcp-slice';
 import type { McpUiState, RestartResult } from '@/lib/mcp-types';
+import type { McpHttpConfig } from '@/types/domain';
 
 // ---------- harness ----------
 
@@ -84,6 +85,79 @@ afterEach(() => {
 // ============================================================
 // T-1 —— 轮询生命周期
 // ============================================================
+
+// ============================================================
+// MCP 监听配置 —— 两处消费方读到同一份
+// ============================================================
+
+const BASE_CONFIG: McpHttpConfig = {
+  host: '127.0.0.1',
+  port: 54174,
+  path: '/mcp',
+  allowRemote: false,
+  allowedHosts: [],
+  allowedOrigins: [],
+};
+
+describe('mcp-slice: MCP 监听配置', () => {
+  it('refreshMcpHttpConfig 把读到的配置放进 store', async () => {
+    installIpcMock(async (cmd) => {
+      if (cmd === 'mcp_http_config_get') return BASE_CONFIG;
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+    const mcp = makeMcpHarness();
+    // 断言走局部变量：直接断言 mcp.mcpHttpConfig 会把它收窄成 null，
+    // 后面再读它的字段就成了在 never 上取属性。
+    const before = mcp.mcpHttpConfig;
+    assert.ok(before === null, '读之前没有值');
+    const ok = await mcp.refreshMcpHttpConfig();
+    assert.equal(ok, true);
+    assert.equal(mcp.mcpHttpConfig?.port, 54174);
+  });
+
+  it('refreshMcpHttpConfig 失败时保留上一次的好内容', async () => {
+    installIpcMock(async (cmd) => {
+      if (cmd === 'mcp_http_config_get') return BASE_CONFIG;
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+    const mcp = makeMcpHarness();
+    await mcp.refreshMcpHttpConfig();
+    installIpcMock(async () => {
+      throw new Error('boom');
+    });
+    const ok = await mcp.refreshMcpHttpConfig();
+    assert.equal(ok, false, '失败要说出来');
+    assert.equal(mcp.mcpHttpConfig?.port, 54174, '上一次的好内容留着');
+  });
+
+  it('saveMcpHttpConfig 把服务端回显的配置写进 store，并回传那条重启判断', async () => {
+    installIpcMock(async (cmd) => {
+      if (cmd === 'mcp_http_config_set') {
+        return {
+          config: { ...BASE_CONFIG, port: 54175 },
+          requiresRestart: true,
+        };
+      }
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+    const mcp = makeMcpHarness();
+    const result = await mcp.saveMcpHttpConfig(BASE_CONFIG);
+    assert.ok(result);
+    // MCP 的监听器就是守护进程，故只有一条重启判断：端口改了同样要重启它。
+    assert.equal(result.requiresRestart, true, '端口的改动要重启守护进程');
+    assert.equal(mcp.mcpHttpConfig?.port, 54175, 'store 里是服务端回显的那份');
+  });
+
+  it('saveMcpHttpConfig 失败时返回 null，且不动 store 里的值', async () => {
+    installIpcMock(async () => {
+      throw new Error('boom');
+    });
+    const mcp = makeMcpHarness();
+    const result = await mcp.saveMcpHttpConfig(BASE_CONFIG);
+    assert.equal(result, null);
+    assert.equal(mcp.mcpHttpConfig, null);
+  });
+});
 
 describe('mcp-slice: startMcpPolling — T-1 idempotency + visibility', () => {
   it('is idempotent — repeated calls yield exactly one setInterval', () => {

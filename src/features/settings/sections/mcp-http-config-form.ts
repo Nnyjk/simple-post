@@ -1,5 +1,9 @@
 import type { McpHttpConfig } from '@/types/domain';
 
+// 回环地址的判断住在 `src/lib/loopback-host.ts`：设置面板与 MCP 端点地址计算都要判它，
+// 三处各写一遍时其中一处改了另外两处不会跟着改。
+export { isLoopbackHost } from '@/lib/loopback-host';
+
 /**
  * Streamable-HTTP 监听表单的纯表单逻辑。
  *
@@ -133,12 +137,6 @@ export function isDraftDirty(draft: McpHttpConfigDraft, saved: McpHttpConfig): b
   const next = configFromDraft(draft);
   if (next === null) return true;
   return !configEquals(next, saved);
-}
-
-/** `localhost` / `127.0.0.1` / `::1` —— 不需要白名单的地址。 */
-export function isLoopbackHost(host: string): boolean {
-  const value = host.trim().toLowerCase();
-  return value === '127.0.0.1' || value === '::1' || value === 'localhost';
 }
 
 /** 该 Origin 条目是否带协议？`https://…` 带，`example.com` 不带。 */
