@@ -10,8 +10,8 @@
 //!   * `internal` —— 无版本承诺，只供 UI / supervisor 使用。internal 端点不进本表，
 //!     故 `RouteSpec::stability` 目前只取 `"public"`。
 //!
-//! 本表为手工维护，**故意**不枚举每一条 axum 路由绑定（如 `/mcp/*` 属于另一套
-//! JSON-RPC MCP 契约，另行记录）。
+//! 本表为手工维护，**故意**不枚举每一条 axum 路由绑定。MCP 的 JSON-RPC 端点不在
+//! 主端口上，它由守护进程自己那个监听端口提供，属另一套契约。
 //!
 //! 布局：`RouteSpec` 结构体在这里，`public_route_specs()` 在 `table.rs`，
 //! 每个资源分组一个文件放在 `routes/` 下。
@@ -67,10 +67,9 @@ pub struct RouteSpec {
 //   GET  /api/preferences              - 偏好表的原始读写
 //   PUT  /api/preferences
 //   GET  /healthz                      - 无前缀的健康探针别名（与 `/api/healthz` 共用同一个处理函数）
-//   GET  /mcp/healthz                  - MCP 监听器的健康探针
-//   GET  /mcp/tools                    - MCP 监听器暴露的工具名清单
 //
-// `/mcp` 本身是 JSON-RPC 端点，属另一套契约，不在本表范围内。
+// MCP 的 JSON-RPC 端点、它的健康探针与工具清单都在**守护进程自己的监听端口**上，
+// 不在主端口上，故不在本表范围内。
 //
 // 地址那一族只有一个动词：`POST /api/environments/{envId}/module-baseurls`，登记在
 // `spec_environments` 组。

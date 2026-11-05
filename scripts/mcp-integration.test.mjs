@@ -147,7 +147,8 @@ try {
     name: 'env_list',
     arguments: { project_id: 'p_demo' },
   });
-  assert(envList?.result?.is_error !== true, 'env_list succeeds against an empty database');
+  // 工具级失败用 `result.isError`（MCP 规范的拼写），不是 `is_error`。
+  assert(envList?.result?.isError !== true, 'env_list succeeds against an empty database');
   const envText = envList?.result?.content?.[0]?.text ?? '';
   const envs = JSON.parse(envText);
   assert(
@@ -159,7 +160,7 @@ try {
     name: 'env_create',
     arguments: { project_id: 'p_demo', name: 'should-fail' },
   });
-  assert(create?.result?.is_error === true, 'read_only policy rejects env_create');
+  assert(create?.result?.isError === true, 'read_only policy rejects env_create');
   assert(
     /permission denied/i.test(create?.result?.content?.[0]?.text ?? ''),
     'env_create rejection explains permission denial',

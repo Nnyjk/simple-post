@@ -21,9 +21,12 @@ function portFilePath() {
   const base =
     process.env.SIMPLE_POST_DATA_DIR ||
     (process.platform === 'win32'
-      ? join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'simple-post')
-      : join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'simple-post'));
-  return join(base, 'mcp.port');
+      ? (process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'))
+      : (process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share')));
+  // `simple-post` 这一段两种基准目录都要拼：Rust 侧的
+  // `simple_post_core::port_file` 是在基准目录**下面**再建一层 `simple-post`，
+  // 设了 SIMPLE_POST_DATA_DIR 时也不例外。少拼这一段就找不到端口文件。
+  return join(base, 'simple-post', 'mcp.port');
 }
 
 let port = null;

@@ -1,44 +1,50 @@
-//! 专用 MCP 监听器的路由集合。
+//! 主端口的路由集合：**不包含 MCP**。
 //!
-//! 这个 router 只服务 MCP：管理平台的 REST 与 SPA 都不在里面。断言分两半写——
-//! 「哪些路径可达」与「哪些路径 404」。只断言 `/mcp` 通是证明不了这件事的，
-//! 因为一个把整棵主 router 挂上去的监听器也会让 `/mcp` 通。
+//! MCP 的端点是守护进程自己的监听端口（见 `mcp_router` 与 `daemon_supervisor`），主端口只
+//! 提供 REST 与静态文件。这个文件是那条分界的回归网：
 //!
-//! 它复用 daemon 那份 router（挂载路径 + Host/Origin 守卫），所以这里还要
-//! 断言白名单确实生效：设置面板里那两张白名单表，对这个端口与对 daemon 是
-//! 同一套规矩。
+//!   * 主端口上的 `/mcp`、`/mcp/healthz`、`/mcp/tools` 都**不是** MCP 端点；
+//!   * 主端口上的 `/api/mcp/*`（状态、日志、生命周期动词）**仍然**可达——那是管理 MCP 的
+//!     REST 面，与 MCP 协议本身不是一回事。
+//!
+//! 断言不能只看状态码：主 router 挂着 SPA fallback，未知路径回的是 `200 text/html` 的壳，
+//! 而真的挂上 MCP 路由时回的是 `200 application/json`（`/mcp` 那条只接受 POST，故 GET 回
+//! `405`）。状态码分不出「没有这个路由」与「回落的壳」，故这里断言 content-type 与响应体。
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use crate::domain::McpHttpConfig;
-use crate::web_api::{build_mcp_only_router, WebState};
+use crate::web_api::{build_router, WebState};
 
-/// 起一个只服务 MCP 的 router，绑在 loopback 的临时端口上。
+/// SPA 壳里的标记。断言「回的是壳」时用它，而不是断言某个状态码。
+const SHELL_MARKER: &str = "<!-- simple-post-spa-shell -->";
+
+/// 起主 router，绑在 loopback 的临时端口上。
 ///
 /// 每个测试的隔离靠原子计数器加 pid，因为 cargo 并行跑测试，好几个会共用同一条临时路径。
-async fn serve_mcp_only_router(config: McpHttpConfig) -> (SocketAddr, PathBuf) {
+async fn serve_main_router() -> (SocketAddr, PathBuf) {
     use std::sync::atomic::{AtomicU32, Ordering};
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let id = COUNTER.fetch_add(1, Ordering::Relaxed);
 
-    let dir = std::env::temp_dir().join(format!(
-        "simple-post-web-mcp-only-{}-{id}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("simple-post-web-main-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp dir");
 
+    let spa_dir = dir.join("spa");
+    std::fs::create_dir_all(&spa_dir).expect("spa dir");
+    std::fs::write(
+        spa_dir.join("index.html"),
+        format!("<!doctype html><html><head>{SHELL_MARKER}</head><body></body></html>"),
+    )
+    .expect("write shell");
+
     let pool = crate::db::init(&dir).expect("db init");
     let state = WebState {
-        pool: pool.clone(),
+        pool,
         daemon: crate::daemon_supervisor::McpDaemonHandle::new(),
         data_dir: dir.clone(),
-        mcp_state: Arc::new(crate::mcp::AppState {
-            pool,
-            started_at: std::time::Instant::now(),
-        }),
         password: None,
         base_path: None,
     };
@@ -47,36 +53,61 @@ async fn serve_mcp_only_router(config: McpHttpConfig) -> (SocketAddr, PathBuf) {
         .await
         .expect("bind loopback");
     let addr = listener.local_addr().expect("local addr");
-    let router = build_mcp_only_router(state, &config);
+    let router = build_router(state, spa_dir);
     tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
     });
     (addr, dir)
 }
 
-/// 默认配置（回环、关闭远程访问）供大部分用例使用。
-fn loopback_config() -> McpHttpConfig {
-    McpHttpConfig::default()
-}
-
-/// MCP 那三条路由在这个端口上照常工作：两个探针 GET，`/mcp` 走 JSON-RPC。
+/// 主端口上的那三条 MCP 路径都不是 MCP 端点。
 #[tokio::test]
-async fn the_mcp_routes_answer() {
-    let (addr, dir) = serve_mcp_only_router(loopback_config()).await;
+async fn the_main_port_does_not_answer_mcp() {
+    let (addr, dir) = serve_main_router().await;
     let client = reqwest::Client::new();
 
-    for path in ["/mcp/healthz", "/mcp/tools"] {
+    for path in ["/mcp", "/mcp/healthz", "/mcp/tools"] {
         let response = client
             .get(format!("http://{addr}{path}"))
             .send()
             .await
             .expect("request completes");
-        assert_eq!(
-            response.status(),
-            reqwest::StatusCode::OK,
-            "{path} should answer on the MCP-only listener"
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let body = response.text().await.expect("text body");
+
+        assert_ne!(
+            status,
+            reqwest::StatusCode::METHOD_NOT_ALLOWED,
+            "{path} 上存在一条只接受 POST 的路由 —— 主端口不该有 MCP 端点"
+        );
+        assert!(
+            !content_type.contains("application/json"),
+            "{path} 不该回 JSON：{body}"
+        );
+        assert!(
+            !body.contains("registered_tools"),
+            "{path} 不该是 MCP 健康探针：{body}"
+        );
+        assert!(
+            !body.contains("serverInfo"),
+            "{path} 不该是 MCP JSON-RPC 端点：{body}"
         );
     }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `POST /mcp` 在主端口上不受理 JSON-RPC。
+#[tokio::test]
+async fn the_main_port_does_not_speak_json_rpc() {
+    let (addr, dir) = serve_main_router().await;
+    let client = reqwest::Client::new();
 
     let response = client
         .post(format!("http://{addr}/mcp"))
@@ -87,104 +118,33 @@ async fn the_mcp_routes_answer() {
         .send()
         .await
         .expect("request completes");
+    let body = response.text().await.expect("text body");
     assert!(
-        response.status().is_success(),
-        "initialize should be answered on the MCP-only listener"
+        !body.contains("serverInfo"),
+        "主端口上的 /mcp 不该应答 JSON-RPC：{body}"
     );
-    let body: serde_json::Value = response.json().await.expect("json body");
-    assert_eq!(body["result"]["serverInfo"]["name"], "simple-post-mcp");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// 管理平台在这个端口上不存在：SPA 壳、健康探针、REST 全部 404。
+/// 管理 MCP 的那组 REST 动词仍然在主端口上可达。
 ///
-/// 这是「MCP 端口与管理平台端口不是同一个」的机器可查的证据——把 MCP 端口
-/// 放给 AI 客户端，不会顺带把 `/api/*` 也放出去。
+/// 「主端口不提供 MCP」说的是 MCP 协议本身，不是「管理 MCP 的接口也没了」。
 #[tokio::test]
-async fn the_admin_surface_is_absent() {
-    let (addr, dir) = serve_mcp_only_router(loopback_config()).await;
-    let client = reqwest::Client::new();
-
-    for path in ["/", "/healthz", "/api/healthz", "/api/projects"] {
-        let response = client
-            .get(format!("http://{addr}{path}"))
-            .send()
-            .await
-            .expect("request completes");
-        assert_eq!(
-            response.status(),
-            reqwest::StatusCode::NOT_FOUND,
-            "{path} must not exist on the MCP-only listener"
-        );
-    }
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// 设置里写的挂载路径在这个端口上生效，`/mcp` 仍作为别名可用。
-///
-/// 别名不是装饰：AI 客户端按 `/mcp` 写死了地址，改名而不留别名就会把它们
-/// 全部指空。
-#[tokio::test]
-async fn the_configured_mount_path_answers_and_mcp_stays_an_alias() {
-    let mut config = loopback_config();
-    config.path = "/mcp-endpoint".to_string();
-    let (addr, dir) = serve_mcp_only_router(config).await;
+async fn the_admin_surface_for_mcp_still_answers() {
+    let (addr, dir) = serve_main_router().await;
     let client = reqwest::Client::new();
 
     let response = client
-        .get(format!("http://{addr}/mcp-endpoint/healthz"))
+        .get(format!("http://{addr}/api/mcp/status"))
         .send()
         .await
         .expect("request completes");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
-
-    let response = client
-        .get(format!("http://{addr}/mcp/healthz"))
-        .send()
-        .await
-        .expect("request completes");
-    assert_eq!(
-        response.status(),
-        reqwest::StatusCode::OK,
-        "/mcp 应当作为别名继续可用"
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Host 白名单在这个端口上生效：不在名单里的 Host 被拒。
-///
-/// 这条断言钉的是「设置面板里那两张白名单表对这个端口同样有约束力」——
-/// 专用端口不是绕过白名单的后门。
-#[tokio::test]
-async fn the_host_allowlist_applies_to_the_dedicated_port() {
-    let mut config = loopback_config();
-    config.allow_remote = true;
-    config.allowed_hosts = vec!["studio.local".to_string()];
-    config.allowed_origins = vec!["*".to_string()];
-    let (addr, dir) = serve_mcp_only_router(config).await;
-    let client = reqwest::Client::new();
-
-    let allowed = client
-        .get(format!("http://{addr}/mcp/healthz"))
-        .header("Host", "studio.local")
-        .send()
-        .await
-        .expect("request completes");
-    assert_eq!(allowed.status(), reqwest::StatusCode::OK);
-
-    let denied = client
-        .get(format!("http://{addr}/mcp/healthz"))
-        .header("Host", "somewhere.else")
-        .send()
-        .await
-        .expect("request completes");
-    assert_eq!(
-        denied.status(),
-        reqwest::StatusCode::FORBIDDEN,
-        "不在白名单里的 Host 应当被拒"
+    let body: serde_json::Value = response.json().await.expect("json body");
+    assert!(
+        body.get("status").and_then(|v| v.as_str()).is_some(),
+        "状态快照要有 status 字段：{body}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

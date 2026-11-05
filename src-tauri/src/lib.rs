@@ -143,7 +143,7 @@ pub fn run() {
         }
     };
 
-    let daemon_handle = McpDaemonHandle::with_pool(pool.clone());
+    let daemon_handle = McpDaemonHandle::with_pool(pool.clone(), None);
 
     tauri::Builder::default()
         // 导出的「另存为」。`serve-web` 形态没有 Tauri，前端在浏览器里退回 Blob 下载，

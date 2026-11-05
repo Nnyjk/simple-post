@@ -8,10 +8,10 @@ use std::sync::OnceLock;
 
 use tokio::sync::Mutex;
 
-use super::paths::port_file_path;
+use super::port_file_path;
 use super::proc::is_pid_alive;
 use super::read;
-use super::record::serialize_entry;
+use super::serialize_entry;
 use crate::error::AppError;
 use crate::port_registry::PortRecord;
 

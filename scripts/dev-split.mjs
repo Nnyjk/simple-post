@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 // scripts/dev-split.mjs — run Vite dev server + Rust serve-web together so
 // an AI agent (or a browser pointed at http://localhost:5173) gets HMR
-// from Vite while /api and /mcp requests are proxied (see `proxy` in
+// from Vite while /api requests are proxied (see `proxy` in
 // vite.config.ts) to the Rust axum server on http://127.0.0.1:4173.
 //
 //   npm run dev:split
 //
 // Layout:
 //   [vite]      → stdout/stderr from `npm run dev`           (port 5173)
-//   [serve-web] → stdout/stderr from `cargo run … serve-web` (port 4173 — REST + MCP + SPA shell)
+//   [serve-web] → stdout/stderr from `cargo run … serve-web` (port 4173 — REST + SPA shell)
 //
 // Notes:
 //   - First run of serve-web will compile the Rust binary (cargo build
 //     step). That can take 10–60s on a cold cache. Subsequent runs are
 //     incremental and quick.
-//   - vite.config.ts proxies /api and /mcp → http://127.0.0.1:4173.
+//   - vite.config.ts proxies /api → http://127.0.0.1:4173.
 //     If serve-web isn't up yet, those requests 502 — that's expected.
 //   - On Ctrl-C we SIGTERM both children, wait 3s, then SIGKILL any
 //     survivors. On Windows we use `taskkill /T /F` because plain

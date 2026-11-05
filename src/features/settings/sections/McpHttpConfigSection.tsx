@@ -4,9 +4,10 @@ import { SettingsCategory } from '../SettingsCategory';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { COMMANDS, invokeCmd, IS_TAURI_SHELL } from '@/lib/tauri-commands';
+import { IS_TAURI_SHELL } from '@/lib/tauri-commands';
+import { mcpEndpointUrl, unavailableReason, type McpEndpointFacts } from '@/lib/mcp-client-config';
+import { useAppStore } from '@/stores/app-store';
 import { focusRing, cn } from '@/lib/utils';
-import type { McpHttpConfig } from '@/types/domain';
 import {
   DEFAULT_MCP_HTTP_CONFIG,
   configFromDraft,
@@ -22,43 +23,44 @@ import {
  * 进程」那一张卡片，本卡片负责持久化 `mcp_http_config_get` / `mcp_http_config_set` 读写的
  * 配置。
  *
- * 监听无法就地改绑，故保存只落配置，由后端回 `requiresRestart`；页脚照此说明并指向拥有
- * 重启的那张卡片。
+ * 监听无法就地改绑，故保存只落配置，由后端回一条重启判断（守护进程那条）；页脚照此说明
+ * 并指向拥有重启的那个对象。
+ *
+ * 已落盘的那份配置住在 store 里，故「接入配置」那张地址卡片读到的是同一份：卡片保存之后
+ * 地址卡片立刻跟着变，不会停在旧端口上。
  */
 export function McpHttpConfigSection() {
-  const [saved, setSaved] = useState<McpHttpConfig | null>(null);
+  const saved = useAppStore((s) => s.mcpHttpConfig);
+  const refreshMcpHttpConfig = useAppStore((s) => s.refreshMcpHttpConfig);
+  const saveMcpHttpConfig = useAppStore((s) => s.saveMcpHttpConfig);
   const [draft, setDraft] = useState<McpHttpConfigDraft>(() =>
     draftFromConfig(DEFAULT_MCP_HTTP_CONFIG),
   );
-  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** 守护进程要不要重启才吃到新配置（绑定地址、端口、路径、远程开关、白名单）。 */
   const [restartPending, setRestartPending] = useState(false);
 
-  const hydrate = useCallback(() => {
-    setLoading(true);
+  const hydrate = useCallback(async () => {
     setLoadError(null);
-    invokeCmd<McpHttpConfig>(COMMANDS.mcpHttpConfigGet)
-      .then((config) => {
-        setSaved(config);
-        setDraft(draftFromConfig(config));
-      })
-      .catch((e: unknown) => {
-        // 命令在更旧的后端上可能不存在。让表单留在默认值上并说明，而不是渲染一张空白卡。
-        console.error('[mcp http config] hydrate failed', e);
-        setLoadError('读取 HTTP 服务配置失败');
-        setSaved(DEFAULT_MCP_HTTP_CONFIG);
-        setDraft(draftFromConfig(DEFAULT_MCP_HTTP_CONFIG));
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, []);
+    const ok = await refreshMcpHttpConfig();
+    if (!ok) {
+      setLoadError('读取 HTTP 服务配置失败');
+    }
+  }, [refreshMcpHttpConfig]);
 
   useEffect(() => {
-    hydrate();
+    void hydrate();
   }, [hydrate]);
+
+  // 表单草稿跟着 store 里那份已落盘配置走：读回来时播种一次，保存后服务端回显的规范化
+  // 配置也会重新播种一次（那正是「已修改」标志要清掉的时候）。
+  useEffect(() => {
+    if (saved) setDraft(draftFromConfig(saved));
+  }, [saved]);
+
+  const loading = saved === null;
 
   // 派生而非存储：对本地表单状态做一个不碰 selector 的 `useMemo`，故这里不存在
   // 「Zustand selector 里新建数组」那个坑。
@@ -67,17 +69,43 @@ export function McpHttpConfigSection() {
   const remoteRedundant = !draft.allowRemote && isLoopbackHost(draft.host);
 
   /**
-   * 保存后要重启什么，两种形态不一样。
+   * 保存后要重启什么。
    *
-   * 守护进程（桌面端）的监听地址、路径与白名单是**spawn 时**从这一行读的，改完要重启守护
-   * 进程才生效。专用 MCP 端口则是 **Web 进程启动时**开的监听器，重启守护进程对它没有影响
-   * —— Web 形态下（容器）那部分要重启 Web 服务本身。
+   * 只有一件：MCP 的监听器**就是**守护进程，绑定地址、监听端口、挂载路径、远程开关与
+   * 两张白名单全都在它启动时读进命令行，改任何一项都要重启它。
    *
    * 指错重启动作比不说更糟：用户在「进程」卡片里重启了守护进程，端口还是没变。
    */
-  const restartHint = IS_TAURI_SHELL
-    ? '配置已保存，需要在「MCP 进程」卡片里重启守护进程后生效。'
-    : '配置已保存：监听地址、路径与白名单要重启「MCP 进程」卡片里的守护进程才生效；端口的改动要重启 Web 服务本身（MCP 专用端口是 Web 进程启动时开的）。';
+  const restartNotes: string[] = [];
+  if (restartPending) {
+    restartNotes.push(
+      '监听地址、端口、路径与白名单的改动需要重启「MCP 进程」卡片里的守护进程后生效。',
+    );
+  }
+
+  /**
+   * 对外暴露的 MCP 端点。取的是**已保存**的配置，故它报的是当前生效的那个端点，
+   * 而不是草稿里还没保存的那个。
+   *
+   * MCP 的端点只有一处：守护进程自己的监听端口。桌面端连本机的那个端口，Web 端连页面
+   * 这台机器上的那个端口。
+   */
+  const mcpStatus = useAppStore((s) => s.mcpStatus);
+  const endpointFacts: McpEndpointFacts = IS_TAURI_SHELL
+    ? {
+        shape: 'desktop',
+        configPort: saved?.port ?? 0,
+        daemonPort: mcpStatus?.port ?? null,
+        path: saved?.path ?? '/mcp',
+      }
+    : {
+        shape: 'web',
+        origin: typeof window === 'undefined' ? '' : window.location.origin,
+        configPort: saved?.port ?? 0,
+        host: saved?.host ?? '127.0.0.1',
+        path: saved?.path ?? '/mcp',
+      };
+  const exposedEndpoint = mcpEndpointUrl(endpointFacts);
 
   const patch = (next: Partial<McpHttpConfigDraft>) =>
     setDraft((prev) => {
@@ -92,19 +120,12 @@ export function McpHttpConfigSection() {
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await invokeCmd<{ config: McpHttpConfig; requiresRestart: boolean }>(
-        COMMANDS.mcpHttpConfigSet,
-        { config },
-      );
-      // 采信后端的回显 —— 它做过规范化（trim / 默认路径），据它重新播种才能让「已修改」
-      // 标志保持诚实。
-      const next = result.config ?? config;
-      setSaved(next);
-      setDraft(draftFromConfig(next));
+      const result = await saveMcpHttpConfig(config);
+      if (!result) {
+        setSaveError('保存失败，请重试');
+        return;
+      }
       setRestartPending(result.requiresRestart === true);
-    } catch (e) {
-      console.error('[mcp http config] save failed', e);
-      setSaveError('保存失败，请重试');
     } finally {
       setSaving(false);
     }
@@ -144,7 +165,7 @@ export function McpHttpConfigSection() {
               disabled={loading}
             />
           </Field>
-          <Field label="端口" hint="0 = 不单独开 MCP 端口">
+          <Field label="端口" hint="0 = 由系统分配">
             <Input
               type="number"
               min={0}
@@ -168,11 +189,29 @@ export function McpHttpConfigSection() {
           </Field>
         </div>
         <p className="text-[11px] text-muted-foreground/80">
-          端口写 0 时，MCP 只走主端口上的 /mcp；写一个具体端口时，服务端会另开一个 只服务 MCP
-          的监听器（那个端口上没有管理平台，也没有 REST 接口），这个端口 就是对外暴露 MCP
-          的端口——主端口上的 /mcp 照旧可用。桌面形态下 MCP 由后台守护 进程应答，它的端口
-          始终由系统分配，这一栏只对 Web 与容器形态有意义。
+          MCP 的端点只有一处：后台守护进程自己的监听端口，主端口不再提供 MCP。端口写 0 时由
+          系统分配，客户端配置里的地址会随重启变化；写一个具体端口时，守护进程就监听那个
+          端口，地址固定不变。监听地址写 127.0.0.1 时只有本机能连；写 0.0.0.0 时局域网里的
+          其他机器也能连，那种情况要开「允许远程访问」并把 Host 与 Origin 白名单填上。
         </p>
+        <div className="rounded-md border border-border/60 bg-muted/30 px-2.5 py-2">
+          <div className="text-[11px] font-medium text-foreground">对外暴露的 MCP 端点</div>
+          {exposedEndpoint ? (
+            <div className="mt-0.5 font-mono text-[11px] text-foreground/90 break-all">
+              {exposedEndpoint}
+            </div>
+          ) : (
+            <div className="mt-0.5 text-[11px] text-muted-foreground">
+              {unavailableReason(endpointFacts)}
+            </div>
+          )}
+          <div className="mt-1 text-[10px] text-muted-foreground/80">
+            {saved && saved.port > 0
+              ? `配置里写的端口是 ${saved.port}；守护进程重启之后才真的监听它。` +
+                (IS_TAURI_SHELL ? '' : '部署侧还要把这个端口发布出来，外部客户端才连得上。')
+              : '端口写 0 时由系统分配，客户端配置里的地址会随重启变化。'}
+          </div>
+        </div>
       </div>
 
       {/* ----- 远程访问 --------------------------------------- */}
@@ -231,8 +270,8 @@ export function McpHttpConfigSection() {
             <span className="text-destructive">{error}</span>
           ) : dirty ? (
             <span>有未保存的修改。保存只写入配置，运行中的服务不会立即改变。</span>
-          ) : restartPending ? (
-            <span>{restartHint}</span>
+          ) : restartNotes.length > 0 ? (
+            <span>{restartNotes.join(' ')}</span>
           ) : (
             <span>与已保存的配置一致。</span>
           )}

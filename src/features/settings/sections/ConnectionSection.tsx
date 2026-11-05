@@ -11,9 +11,14 @@ import { CopyConfigTile } from './CopyConfigTile';
 import { AgentPermissionsTable } from './AgentPermissionsTable';
 import { DaemonRestartDialog } from './DaemonRestartDialog';
 import { McpHttpConfigSection } from './McpHttpConfigSection';
-import { COMMANDS } from '@/lib/tauri-commands';
+import { COMMANDS, IS_TAURI_SHELL } from '@/lib/tauri-commands';
 import { invokeCmd } from '@/lib/tauri-commands';
-import { MCP_CLIENT_PRESETS, buildClientConfig, unavailableReason } from '@/lib/mcp-client-config';
+import {
+  MCP_CLIENT_PRESETS,
+  buildClientConfig,
+  unavailableReason,
+  type McpEndpointFacts,
+} from '@/lib/mcp-client-config';
 import { daemonTone } from '@/lib/mcp-status-tone';
 import { groupTools } from '@/lib/mcp-tool-groups';
 import { cn, focusRing } from '@/lib/utils';
@@ -105,9 +110,29 @@ export function ConnectionSection() {
     }
   }, [mcpStatus?.status, restartDialogSeen]);
 
+  // ----- MCP 监听配置 -----
+  // 客户端片段里的地址由它决定：Web 形态下专用端口与挂载路径都出自这一行。
+  // 它住在 store 里，「HTTP 服务配置」卡片保存后这里立刻跟着变。
+  const mcpHttpConfig = useAppStore((s) => s.mcpHttpConfig);
+
   // ----- Generated client configs -----
-  // 由 daemon **实时**事实驱动而非手写常量，故片段里的端口永远是 daemon 实际所在端口。
-  const facts = { port: mcpStatus?.port ?? null };
+  //
+  // MCP 的端点只有一处：守护进程自己的监听端口。两种部署形态的差别在「客户端从哪台机器
+  // 连过去」——桌面端连本机，Web 端连页面这台机器上的那个端口。
+  const facts: McpEndpointFacts = IS_TAURI_SHELL
+    ? {
+        shape: 'desktop',
+        configPort: mcpHttpConfig?.port ?? 0,
+        daemonPort: mcpStatus?.port ?? null,
+        path: mcpHttpConfig?.path ?? '/mcp',
+      }
+    : {
+        shape: 'web',
+        origin: typeof window === 'undefined' ? '' : window.location.origin,
+        configPort: mcpHttpConfig?.port ?? 0,
+        host: mcpHttpConfig?.host ?? '127.0.0.1',
+        path: mcpHttpConfig?.path ?? '/mcp',
+      };
 
   const tools = mcpStatus?.registeredTools ?? [];
   // 工具表的分类。每次渲染重算而不 memo：输入是 44 元素数组、`groupTools` 单趟完成，
@@ -210,7 +235,7 @@ export function ConnectionSection() {
       <McpHttpConfigSection />
 
       {/* ----- 客户端配置 ---------------------------------- */}
-      {/* 一格一种格式：由 daemon **实时**端口生成的 Claude Code HTTP 配置。没有传输方式
+      {/* 一格一种格式：按部署形态生成的 Claude Code HTTP 配置。没有传输方式
           分页，也没有客户端选择器 —— HTTP 不需要在客户端机器上装任何东西，且是 daemon
           换了端口后仍然有效的形态。见 `src/lib/mcp-client-config.ts`。 */}
       <SettingsCategory
@@ -221,7 +246,7 @@ export function ConnectionSection() {
         <div className="space-y-3 p-3">
           {MCP_CLIENT_PRESETS.map((p) => {
             const configJson = buildClientConfig(p, facts);
-            const reason = unavailableReason(p, facts);
+            const reason = unavailableReason(facts);
             return (
               <CopyConfigTile
                 key={p.id}

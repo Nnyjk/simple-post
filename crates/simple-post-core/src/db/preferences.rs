@@ -132,11 +132,14 @@ pub mod keys {
 /// 而每一行都在用户的 `store.db` 里占着地方。
 pub const RESPONSE_HISTORY_KEEP_MAX: i64 = 500;
 
-/// 读 `mcp.auto_start` 偏好，取文档化的默认值（`false`）。桌面 `.setup()` 与 Web 服务端的
+/// 读 `mcp.auto_start` 偏好，取文档化的默认值（`true`）。桌面 `.setup()` 与 Web 服务端的
 /// 启动路径都用它，故两种形态对同一行达成一致。
+///
+/// 默认**开**：MCP 进程是 MCP 唯一的对外端点（主端口不再挂 `/mcp`），关掉它就没有任何
+/// MCP 端点可连。容器重启后 MCP 静默消失的坑正是这样来的——偏好行缺失时读出 `false`。
 pub fn mcp_auto_start(conn: &mut Connection) -> Result<bool, AppError> {
     let raw: Option<bool> = get(conn, keys::MCP_AUTO_START)?;
-    Ok(raw.unwrap_or(false))
+    Ok(raw.unwrap_or(true))
 }
 
 /// 把 `mcp.policy` 偏好读成 [`CapabilityPolicy`]。行缺失、或带着无法识别的字符串时退回

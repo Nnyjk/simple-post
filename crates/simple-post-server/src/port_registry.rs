@@ -1,7 +1,7 @@
 //! MCP HTTP daemon 的端口注册表。
 //!
 //! daemon 启动时把一条小 JSON 记录（`mcp.port`）写到平台数据目录。GUI 启动时读它
-//! 以发现 daemon 端点；独立的 `simple-post-mcp-proxy` 二进制读同一个文件，得知把
+//! 以发现 daemon 端点；独立的 `simple-post-mcp` 桥接二进制读同一个文件，得知把
 //! JSON-RPC 流量转到哪里。
 //!
 //! 并发：两个 GUI 实例同时启动都会抢这个文件。写路径用进程级
@@ -9,57 +9,42 @@
 //! 自己拒掉第二个写入者。输家重读、发现是个活 PID，于是报 `Validation` 错误，而不是
 //! 悄悄覆盖赢家的记录。
 //!
-//! 文件路径：
-//!   * Windows: `%APPDATA%\simple-post\mcp.port`
-//!   * macOS:   `~/Library/Application Support/simple-post/mcp.port`
-//!   * Linux:   `$XDG_DATA_HOME/simple-post/mcp.port`（或
-//!     `~/.local/share/simple-post/mcp.port`）
+//! **文件路径与记录形状住在 `simple_post_core::port_file`**：读这个文件的一方不止
+//! 一个——`simple-post-server` 写它，`simple-post-mcp` 读它，而后者不能依赖前者
+//! （依赖方向是单向的：`server → core`、`mcp → core`）。规则若各写一遍，两处就会漂。
 //!
-//! 测试下用 `SIMPLE_POST_DATA_DIR` 覆盖基准目录，免得单测踩掉真实用户的端口文件。
+//! 本文件是门面，只保留「申领 / 删除」这两个入口，其余按职责落在同名子目录下：
 //!
-//! ## 文件分工
-//!
-//! 本文件是门面，只保留「读/删文件」这两个入口，其余按职责落在同名子目录下：
-//!
-//!   * `paths` —— 平台目录解析与 `mcp.port` 路径拼装。
-//!   * `record` —— 文件里那条记录的形状、它服务的配置的指纹，以及两者的序列化。
 //!   * `claim` —— 多实例申领：`create_new` 与它的回落/报错，整块不可再拆。
 //!   * `proc` —— 进程表探测与按 PID 强杀。
 //!   * `health` —— `/mcp/healthz` 存活探测。
+//!
+//! 路径解析与记录形状由 core 提供，见 [`simple_post_core::port_file`]。
 
 mod claim;
 mod health;
-mod paths;
 mod proc;
-mod record;
 
 // 门面即对外接口：子模块的私有性不该改变调用方的路径写法，`port_registry::write` /
 // `port_registry::read` / … 在 `src-tauri` 与 daemon CLI 里都按原样解析。
 pub use claim::{write, write_with_fingerprint};
 pub use health::healthz;
-pub use paths::{data_dir, port_file_path, FILE_NAME};
 pub use proc::{is_pid_alive, terminate_pid};
-pub use record::{PortEntry, PortRecord, CONFIG_FINGERPRINT_KEY};
+
+// 路径与记录形状来自 core（原因见文件头的说明）。这里再导出一次，
+// `crate::port_registry::PortRecord` 这条路径在两个 crate 里都解析得到。
+pub use simple_post_core::port_file::{
+    data_dir, now_secs, parse_entry, port_file_path, serialize_entry, PortEntry, PortRecord,
+    CONFIG_FINGERPRINT_KEY, DATA_DIR_ENV, FILE_NAME,
+};
 
 /// 读当前记录与它服务的配置的指纹。文件不存在、读不了或反序列化失败（损坏 / 写
 /// 了一半——按「没有 daemon」处理，比 panic 安全）时返回 `None`。
 pub fn read_entry() -> Option<PortEntry> {
-    let path = port_file_path().ok()?;
-    let bytes = std::fs::read(&path).ok()?;
-    match record::parse_entry(&bytes) {
-        Ok(entry) => Some(entry),
-        Err(e) => {
-            tracing::debug!(
-                target: "port_registry",
-                "mcp.port present but unparseable, treating as missing: {e}"
-            );
-            None
-        }
-    }
+    simple_post_core::port_file::read_entry()
 }
 
-/// 读当前记录。文件不存在、读不了或反序列化失败（损坏 / 写了一半——按「没有 daemon」
-/// 处理，比 panic 安全）时返回 `None`。
+/// 读当前记录。文件不存在、读不了或反序列化失败时返回 `None`。
 pub fn read() -> Option<PortRecord> {
     read_entry().map(|entry| entry.record)
 }

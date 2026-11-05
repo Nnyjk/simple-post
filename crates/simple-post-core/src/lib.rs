@@ -13,6 +13,9 @@ pub mod http_executor;
 pub mod oauth2;
 pub mod path_params;
 pub mod permissions;
+/// `mcp.port` 端口文件：路径解析与记录形状。写它的一方与读它的一方分属两个 crate，
+/// 故它住在两者共用的这一层。
+pub mod port_file;
 pub mod script;
 pub mod spec;
 pub mod template;

@@ -7,6 +7,10 @@
 // `daemon_supervisor::daemon_cli_args` 在下次 spawn 时放进命令行的东西，故保存不会重配
 // 正在运行的 daemon，响应里因此带 `requires_restart`，让 UI 能把这件事说出来。
 //
+// MCP 的监听器**就是**守护进程：这一行的绑定地址、监听端口、挂载路径、远程开关与两张
+// 白名单，全都在 daemon 启动时读进命令行（见 `daemon_supervisor::daemon_cli_args`），
+// 故保存不会重配正在运行的 daemon，响应里因此带 `requires_restart`，让 UI 把这件事说出来。
+//
 // 两条 transport 都走下面这两个普通函数（`src-tauri/src/commands/mcp_http_config.rs` 的
 // Tauri 命令与 `web_api/routes/mcp.rs` 的 REST 路由都是薄包装），故桌面端与 web 端在
 // 校验上、在「是否需要重启」这个判断上都不会漂移。
@@ -38,12 +42,15 @@ pub fn mcp_proxy_path() -> String {
         .unwrap_or_else(|| "<unresolved current_exe>".to_string())
 }
 
-/// 一次写入的响应信封：存下的配置，加上「正在运行的 daemon 是否已经在服务别的东西」。
+/// 一次写入的响应信封：存下的配置，加上「守护进程要不要重启才生效」。
+///
+/// 只有一条判断，因为 MCP 的监听器**就是**守护进程：绑定地址、监听端口、挂载路径、远程
+/// 开关与两张白名单全都在它启动时读进命令行，改任何一项都要重启它。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpHttpConfigDto {
     pub config: McpHttpConfig,
-    /// 新配置与正在运行的 daemon 实际在服务的东西不同，须重启才生效。
+    /// 守护进程必须重启才生效。
     pub requires_restart: bool,
 }
 
@@ -72,16 +79,21 @@ pub fn write_http_config(
 
 /// 新配置与 daemon 现在服务的东西是否不同？
 ///
-/// 真值来源有三个：
+/// 这个判断的**对象是守护进程**：MCP 的监听器就是它，故绑定地址、监听端口、挂载路径、
+/// 远程开关与两张白名单改了都要重启它。
+///
+/// 真值来源有四个：
 ///
 ///   * **记录里的配置指纹** —— 运行中的 daemon 实际在服务的那份配置的指纹，故它说的就是
-///     「这个 daemon 现在服务什么」；指纹与新配置的指纹不同就是有差异。
-///   * **host / port** —— 运行中 daemon 自己的 `--bind` 与它实际绑定的端口发布在
-///     `mcp.port` 记录里。配置里的 `port: 0` 表示「由 OS 分配」，运行中的 daemon 早已解析
-///     完毕，故永远不构成差异。
+///     「这个 daemon 现在服务什么」；指纹与新配置的指纹不同就是有差异。端口参与指纹，
+///     故改端口会被判成「要重启」而不是「收养旧的那个」。
+///   * **host** —— 运行中 daemon 自己的 `--bind` 发布在 `mcp.port` 记录里。
 ///   * **path / allow_remote / 白名单** —— 旧记录里既没有这些也没有指纹，故只能拿*先前持久化的*
 ///     那一行当参照。对本应用 spawn 出来的每个 daemon 这都是准确的；对手工拉起的 daemon 会
 ///     偏向「要重启」，而对一个用户无从自行核验的 flag 来说这正是安全的方向。
+///   * **port** —— 配置里写死了端口时，那个端口必须是 daemon 实际在听的那个：写死的端口就是
+///     对外暴露的地址，端口对不上就是「它服务的东西变了」。端口写 `0` 时由操作系统分配，
+///     与记录里的那个数无关，故不比。
 ///
 /// `record: None` 是「判断不了」的情形，回答 `true`。记录的 PID 已消失则回答 `false`：没有东西
 /// 在服务，下一次 start 自然会取到新行，中间不需要重启步骤。旧记录读不出指纹也是「判断不了」，
@@ -102,17 +114,22 @@ fn requires_restart(
         return config_fingerprint(new) != recorded;
     }
     new.host != record.record.bind
-        || (new.port != 0 && new.port != record.record.port)
         || new.path != previous.path
         || new.allow_remote != previous.allow_remote
-        || new.allowed_hosts != previous.allowed_hosts
-        || new.allowed_origins != previous.allowed_origins
+        // 两张名单是成员判定，顺序不改变行为，故比较前先排序。
+        || sorted_copy(&new.allowed_hosts) != sorted_copy(&previous.allowed_hosts)
+        || sorted_copy(&new.allowed_origins) != sorted_copy(&previous.allowed_origins)
+        // 配置里写死了端口时，那个端口必须就是 daemon 实际在听的那个。
+        || (new.port > 0 && new.port != record.record.port)
 }
 
 /// 一份 MCP HTTP 监听配置的指纹：两份配置服务的内容完全相同时，指纹相同。
-/// 参与计算的有五项：绑定地址、挂载路径、远程开关、允许的 `Host` 名单、允许的 `Origin`
-/// 名单。监听端口不参与——daemon 实际在听的端口由 OS 分配并记在端口文件里，而配置里的
-/// `port` 描述的是 `serve-web` 那个「只服务 MCP」的监听器，与 daemon 子进程无关。
+/// 参与计算的有六项：绑定地址、监听端口、挂载路径、远程开关、允许的 `Host` 名单、允许的
+/// `Origin` 名单。
+///
+/// **端口参与计算**：daemon 监听的就是配置里写的那个端口，故端口变了就是「它现在服务的东西
+/// 变了」，监管者必须换掉它而不是收养它。端口为 `0` 时由操作系统分配，那种情况下两次读取
+/// 之间端口多半不同，指纹也跟着不同——但那时本来也没有稳定端口可言。
 /// 两张名单先排序再拼，故「同一组名单、顺序不同」得到同一个指纹：那两张名单是成员判定，
 /// 顺序不改变行为。
 /// 指纹是规范化后的 JSON 文本，不是摘要：这个 crate 里没有可用的哈希依赖，而这个形态写在
@@ -121,6 +138,7 @@ pub fn config_fingerprint(config: &McpHttpConfig) -> String {
     let canonical = serde_json::json!({
         "v": 1,
         "host": config.host.trim(),
+        "port": config.port,
         "path": config.normalized_path(),
         "allow_remote": config.allow_remote,
         "allowed_hosts": sorted_copy(&config.allowed_hosts),

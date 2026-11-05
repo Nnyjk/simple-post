@@ -182,7 +182,7 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 | --- | --- | --- |
 | 桌面应用 | `simple-post` | Tauri 图形界面，`tauri build` 产出 NSIS / dmg / deb 安装包。 |
 | 无头 Web | `simple-post serve-web` | REST 接口 + 单页应用，默认 4173 端口，可挂反向代理，可放进容器。 |
-| MCP 桥接 | `simple-post-mcp` | 独立二进制，把标准输入输出上的 JSON-RPC 转发给运行中的 `serve-web`，供 AI 客户端以 stdio 方式挂载。 |
+| MCP 桥接 | `simple-post-mcp` | 独立二进制，把标准输入输出上的 JSON-RPC 转发给运行中的 MCP 守护进程，供 AI 客户端以 stdio 方式挂载。不给 `--url` 时它从 `mcp.port` 文件里发现守护进程的端口。 |
 
 `simple-post-server` 是另一条**不链接 Tauri** 的构建路径，产出物具备 `serve-web` 与 `mcp` 两个子命令，但不携带 GUI 运行时。容器镜像构建的就是它，因此镜像里没有 GTK、WebKit 与 X11。
 
@@ -223,7 +223,7 @@ docker compose up -d          # → http://localhost:4173
 
 | compose 里的名字 | 程序读的名字 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `SP_WEB_PASSWORD` | `SIMPLE_POST_WEB_PASSWORD` | 空 | `/api/*` 与 `/mcp` 的 Bearer 口令。留空即完全不鉴权。 |
+| `SP_WEB_PASSWORD` | `SIMPLE_POST_WEB_PASSWORD` | 空 | `/api/*` 与 MCP 守护进程那个端口的 Bearer 口令。留空即完全不鉴权。 |
 | `SP_WEB_BIND` | 无 | `4173` | 宿主机映射的端口，容器内固定为 4173。 |
 | `SP_RUST_LOG` | `RUST_LOG` | `info` | tracing 的日志过滤级别。 |
 | `SP_PUBLIC_BASE_PATH` | `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反向代理前缀，必须以 `/` 开头。 |
@@ -240,6 +240,8 @@ Swarm 部署时有两个不要改动的约束：
 
 ### 让 AI 客户端连上
 
+MCP 的端点只有一个：后台守护进程（MCP daemon）自己的监听端口。主端口不提供 MCP。
+
 设置面板的「连接 → 接入配置」会生成一份可以直接粘贴的片段，形如：
 
 ```json
@@ -247,15 +249,17 @@ Swarm 部署时有两个不要改动的约束：
   "mcpServers": {
     "simple-post": {
       "type": "http",
-      "url": "http://127.0.0.1:<daemon 端口>/mcp"
+      "url": "http://127.0.0.1:4174/mcp"
     }
   }
 }
 ```
 
-客户端不安装任何东西。客户端所在机器不能运行 `simple-post-mcp` 时，也可以直接指向 `simple-post serve-web` 暴露的 `POST /mcp`，传输的是同一套 JSON-RPC。
+客户端不安装任何东西。客户端所在机器不能运行 `simple-post-mcp` 时，直接指向那个端口上的 `POST /mcp`，传输的是同一套 JSON-RPC。
 
-不要把 daemon 端口写死在客户端配置里。`simple-post mcp` 默认使用 `--port=0`，端口由操作系统分配，每次重启都会变化，写死的地址会在下次重启时失效。
+要让地址固定下来，就在「连接 → HTTP 服务配置」里把「端口」填成一个具体数字（例如 4174），保存后重启「MCP 进程」卡片里的守护进程：守护进程会监听那个端口，客户端配置里的地址此后不随重启变化。端口留 0 时由操作系统分配，地址每次重启都会变。
+
+Web 与容器形态下这段片段指向的是**服务端那台机器上的 MCP 端口**，而不是主端口：守护进程跑在服务端进程内部，它的端口要由部署侧发布出来，外部客户端才连得上。
 
 ## 部署到服务器
 
@@ -267,13 +271,15 @@ curl http://localhost:4173/api/healthz
 # {"status":"ok","version":"…","shape":"server"}
 ```
 
-MCP 客户端连接 `http://host:4173/mcp`，并带上 `Authorization: Bearer <口令>`。
+MCP 客户端连接 `http://host:<MCP 端口>/mcp`，并带上 `Authorization: Bearer <口令>`。那个端口由设置面板「连接 → HTTP 服务配置」里的「端口」决定，与主端口（4173）是两个端口。
 
 同一套 REST 接口也开放给脚本与自动化工具，其中 `POST /api/spec/upsert` 一次调用落一份完整的接口规格（模块、集合路径、环境与端点），与 MCP 工具 `spec_upsert` 落的是同一份东西。
 
-需要给 MCP 分配独立端口时，在设置面板的「连接 → HTTP 服务配置」里把「端口」填成一个具体数字（例如 4174）。服务端会另外开一个只提供 MCP 的监听器，那个端口上只有 `/mcp`、`/mcp/healthz` 与 `/mcp/tools`，没有 REST 接口与单页应用。端口填 0 时不单独开端口，MCP 只走主端口。改动需要重启服务才生效。
+MCP 的端口在设置面板的「连接 → HTTP 服务配置」里配置：把「端口」填成一个具体数字（例如 4174），把「监听地址」填成 `0.0.0.0`（这样局域网里的其他机器才连得上），保存后重启「MCP 进程」卡片里的守护进程。守护进程会监听那个端口，那个端口上只有 `/mcp`、`/mcp/healthz` 与 `/mcp/tools`，没有 REST 接口与单页应用。主端口上不提供 MCP。
 
-独立端口是新增的一条入口，主端口上的 `/mcp` 照旧可用。两者的差别在于：独立端口按 MCP 自己的 Host 与 Origin 白名单校验，主端口上的 `/mcp` 不做 Host 校验，只受 Bearer 口令约束。
+监听地址写 `127.0.0.1` 时那个端口只在本机可达，容器部署时外部客户端连不上。开放到局域网要开「允许远程访问」，并把 Host 与 Origin 白名单填上——空名单意味着拒绝一切非回环的 Host。
+
+端口那一栏的改动要**重启守护进程**才生效：监听地址、端口、挂载路径与两张白名单全都在守护进程启动时读进命令行。
 
 这个端口是唯一对外暴露 MCP 的位置，部署侧发布它时，发布的目标端口必须与设置里填写的数字一致。
 

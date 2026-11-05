@@ -4,9 +4,6 @@
 //! `SIMPLE_POST_DATA_DIR` 指向的系统临时目录，永不触碰开发者真实的 `mcp.port`。
 
 use super::*;
-// 这两个住在子模块里，本文件从那里取。
-use super::paths::DATA_DIR_ENV;
-use super::record::now_secs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -166,6 +163,23 @@ fn record_carries_version_and_epoch() {
     assert_eq!(rec.version, env!("CARGO_PKG_VERSION"));
     assert!(rec.started_at >= before && rec.started_at <= after);
     assert_eq!(rec.bind, "127.0.0.1");
+}
+
+/// 桥接二进制（`simple-post-mcp`）读同一个文件来发现守护进程的端口。
+///
+/// 写它的一方与读它的一方分属两个 crate，路径规则若各写一遍就会漂——漂了之后
+/// 桥接会连不上一个正在服务的 daemon，而症状离原因很远。
+#[test]
+fn the_bridge_can_discover_the_port_the_registry_wrote() {
+    let _env = ScopedEnv::new();
+    let rec = sample(41241, 0);
+    write(&rec).expect("write");
+    assert_eq!(
+        simple_post_core::port_file::read_port(),
+        Some(41241),
+        "桥接二进制读出来的端口必须与写进去的一致"
+    );
+    release().unwrap();
 }
 
 #[test]
