@@ -676,11 +676,9 @@ async fn a_value_that_is_too_large_is_not_written_to_the_cache() {
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::TooLarge);
 
-    // 内联数据源没有环境，缓存键的环境段就是空串。
-    let cached = db::with_conn(&pool, |c| {
-        db::dynamic_variable_cache::get(c, "d1", crate::db::dynamic_variable_cache::NO_ENVIRONMENT)
-    })
-    .expect("read");
+    // 内联数据源没有环境，缓存键的环境段就是空串（空串表示没有环境）。
+    let cached =
+        db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", "")).expect("read");
     assert!(cached.is_none());
 }
 

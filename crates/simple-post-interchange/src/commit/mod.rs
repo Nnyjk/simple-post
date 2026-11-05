@@ -20,7 +20,7 @@ use simple_post_core::domain::{
 };
 use simple_post_core::error::AppError;
 
-use crate::diagnostics::{Diagnostic, Severity};
+use crate::diagnostics::Diagnostic;
 use crate::fingerprint::FingerprintSet;
 use crate::ir::{Exchange, IrBaseUrl, IrCollection, IrEndpoint, IrModule, IrScripts};
 
@@ -39,7 +39,7 @@ pub struct CommitReport {
     /// 不落库，故前端拿不到「哪些组是刚建的」就只能全不展开。
     pub created_collection_ids: Vec<String>,
     /// 被指纹认出来而跳过的条目。跳过不是丢弃：它们仍在 IR 里，且带了一条
-    /// [`Severity::Info`] 诊断说明为什么没写。
+    /// [`crate::Severity::Info`] 诊断说明为什么没写。
     pub skipped_duplicates: Vec<String>,
     /// IR 自带的诊断加上本次落库新增的诊断，一并带回。预览与落库是两次调用，
     /// 各自持有自己的那份，外不该假设它们是同一个对象。
@@ -62,16 +62,6 @@ pub struct AppliedBaseUrl {
     pub module_id: String,
     /// 写进了哪个环境。项目没有默认环境时为 `None`——地址没有落进任何一格。
     pub environment_name: Option<String>,
-}
-
-impl CommitReport {
-    /// 值得让用户看的那几条——[`Severity::Info`] 是「按设计跳过」，不是问题。
-    pub fn notable_diagnostics(&self) -> Vec<&Diagnostic> {
-        self.diagnostics
-            .iter()
-            .filter(|d| d.severity != Severity::Info)
-            .collect()
-    }
 }
 
 /// IR 顶层那些「模块」往哪儿落。

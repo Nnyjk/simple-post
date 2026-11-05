@@ -169,17 +169,20 @@ fn an_illegal_placement_is_rejected_and_names_the_conflict() {
 }
 
 #[test]
-fn the_ir_placement_matrix_matches_the_domain_one() {
-    // commit 不自己判放置，走的是 `db::nodes::create` 的校验。故断言 IR 侧的
-    // `may_contain` 与 domain 的 `may_under` 是同一个矩阵，而不是第二份真相。
+fn the_placement_matrix_comes_from_the_domain_one() {
+    // commit 不自己判放置，走的是 `db::nodes::create` 的校验。父子矩阵的唯一实现是
+    // domain 里的 `may_under`，这里断言的正是那一份。
     use simple_post_core::domain::ResourceNodeType as T;
     for parent in [T::Module, T::Collection, T::Endpoint] {
         for child in [T::Module, T::Collection, T::Endpoint] {
-            assert_eq!(
-                crate::ir::may_contain(parent, child).is_ok(),
-                child.may_under(parent),
-                "{parent:?} → {child:?}"
+            let allowed = matches!(
+                (parent, child),
+                (T::Module, T::Collection)
+                    | (T::Module, T::Endpoint)
+                    | (T::Collection, T::Collection)
+                    | (T::Collection, T::Endpoint)
             );
+            assert_eq!(child.may_under(parent), allowed, "{parent:?} → {child:?}");
         }
     }
 }

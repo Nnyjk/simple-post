@@ -66,22 +66,6 @@ pub struct TlsSettings {
 }
 
 impl TlsSettings {
-    /// 这组设置是否会让某次请求挂上客户端证书。
-    pub fn has_client_certificate(&self) -> bool {
-        self.client_certificate_path
-            .as_ref()
-            .map(|p| !p.trim().is_empty())
-            .unwrap_or(false)
-    }
-
-    /// 这组设置是否会让某次请求带上自定义 CA 证书。
-    pub fn has_ca_certificate(&self) -> bool {
-        self.ca_certificate_path
-            .as_ref()
-            .map(|p| !p.trim().is_empty())
-            .unwrap_or(false)
-    }
-
     /// 校验这三个路径字段：它们必须真的是路径，不能是粘进来的证书正文。
     ///
     /// 类型层面挡住了应用自己写证书内容（这三个字段只有路径），但挡不住**用户**把私钥正文粘进

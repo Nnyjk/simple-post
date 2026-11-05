@@ -15,9 +15,6 @@ use rusqlite::{params, Connection, Row};
 use crate::domain::DynamicCacheEntry;
 use crate::error::AppError;
 
-/// 没有环境时用的占位。
-pub const NO_ENVIRONMENT: &str = "";
-
 /// 读一个（定义 × 环境）的缓存行。没有行不是错误——还没取过数是正常状态。
 pub fn get(
     conn: &mut Connection,
@@ -71,24 +68,6 @@ pub fn delete(
         params![definition_id, environment_id],
     )?;
     Ok(())
-}
-
-/// 某个定义在全部环境下的缓存行。面板要按环境切换显示，故读一次全部。
-pub fn list_by_definition(
-    conn: &mut Connection,
-    definition_id: &str,
-) -> Result<Vec<DynamicCacheEntry>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT definition_id, environment_id, value_json, fetched_at, expires_at, \
-                is_override, override_expires_at \
-         FROM dynamic_variable_cache WHERE definition_id = ?1",
-    )?;
-    let rows = stmt.query_map(params![definition_id], row_to_entry)?;
-    let mut out = Vec::new();
-    for r in rows {
-        out.push(r.map_err(AppError::Sqlite)?);
-    }
-    Ok(out)
 }
 
 /// 行映射器。
