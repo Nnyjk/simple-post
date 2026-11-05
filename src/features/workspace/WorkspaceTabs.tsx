@@ -6,11 +6,11 @@
  *   `pruneStaleTabs` 暴露给绕过 delete* 动作的变更路径。
  * - 标签放不下时进入 **compact 模式**，不出横向滚动条。两种模式都是**固定宽度**
  *   （normal=160px、compact=92px），条内每个标签等宽；标题在 normal 下截到 ≈ 5–6 个
- *   汉字、compact 下 ≈ 2 个，hint 只在 normal 下显示。宽度过渡走 CSS，位置滑动走
- *   GSAP Flip。
+ *   汉字、compact 下 ≈ 2 个，hint 只在 normal 下显示。宽度与位置都由 GSAP Flip
+ *   一起补间，横向滚动也由 GSAP 补间 —— 这三件事各走各的，就会互相打架。
  * - 激活标签与下方面板融合（浏览器惯例，见 `TabJoinCorners`），且条上只有它的标签用
  *   加粗字重。
- * - 标签位置在增删 / 重排时滑动而非瞬移（GSAP Flip，见下方 useGSAP）。
+ * - 标签位置在增删 / 重排时滑动而非瞬移（GSAP Flip，见下方 useLayoutEffect）。
  * - 激活标签下方的 0.5px 主色条是挂在条级的单一常驻元素，几何逐帧从激活标签的实时
  *   rect **推导**，见下方「Active-tab indicator」。
  */
@@ -23,8 +23,9 @@ import { Dialog } from '@/components/ui/dialog';
 import { TabJoinCorners } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { Flip, gsap, useGSAP } from '@/lib/gsap';
+import { Flip, gsap } from '@/lib/gsap';
 import { useTabDescriptors } from './useTabDescriptors';
+import { scrollTargetForActiveTab } from './tab-scroll';
 import { TabContextMenu } from './TabContextMenu';
 
 /**
@@ -34,7 +35,7 @@ import { TabContextMenu } from './TabContextMenu';
  * 0.28s 落定 —— 正好与 Flip 时长一致。
  *
  * `BAR_SETTLE_MS` 是变化之后继续读实时 rect 的时长，必须长过任何能移动标签的动画：
- * 280ms Flip + 200ms CSS 宽度过渡。
+ * 280ms Flip + 200ms 标题截断上限过渡。
  */
 const BAR_APPROACH = 0.24;
 const BAR_SETTLE_MS = 480;
@@ -71,6 +72,13 @@ export function WorkspaceTabs() {
   // 标签加得多时把激活标签保持在可见区。
   const stripRef = useRef<HTMLDivElement>(null);
 
+  // 上一次记录的标签布局 —— Flip 补间的起点。
+  const flipStateRef = useRef<ReturnType<typeof Flip.getState> | null>(null);
+
+  // 「把激活标签滚进视野」的最新实现。用 ref 存，是因为 Flip 补间的 `onComplete`
+  // 回调不该闭包住过期的激活标签 id。
+  const scrollActiveIntoViewRef = useRef<() => void>(() => {});
+
   // compact 模式的判定：条里放不下全宽标签时，让每个标签缩到更小的下限（图标 + 4-5 字 +
   // 关闭），而不是出横向滚动条。标题靠 `max-w` 截断，绝不退化成纯图标。
   //
@@ -100,27 +108,41 @@ export function WorkspaceTabs() {
   // ------------------------------------------------------------------
   //  Tab position animation (GSAP Flip, FLIP pattern)
   // ------------------------------------------------------------------
-  // `useGSAP` 的 `dependencies` + `revertOnUpdate: true` 在 React 提交**之后**跑回调，
-  // 再注册一个清理函数，下次依赖变化时执行。回调里记下标签位置、在清理函数里播放，
-  // 顺序正是 FLIP 成立的原因：清理时新 DOM 已经提交，`Flip.from(state)` 才能从上一次
-  // 记下的位置补间到刚提交的位置。`absolute: true` 让 Flip 在补间期间把标签移出文档流，
-  // 相邻标签就不会跟着回流。
-  useGSAP(
-    () => {
-      if (!stripRef.current) return;
-      const targets = stripRef.current.querySelectorAll<HTMLElement>('[data-tab-id]');
-      if (targets.length === 0) return;
-      const state = Flip.getState(targets);
-      return () => {
-        Flip.from(state, {
-          duration: 0.28,
-          ease: 'power2.out',
-          absolute: true,
-        });
-      };
-    },
-    { dependencies: [openTabs], scope: stripRef, revertOnUpdate: true },
-  );
+  // 顺序是「提交前记下旧位置 → 提交 → 从旧位置补间到新位置」。React 的渲染阶段拿不
+  // 到旧位置（那时新 DOM 还没提交），故旧位置由上一次记录的 `flipStateRef` 提供：
+  // `Flip.getState` 取到的是本次提交后的最终布局，它与上一次记录的那份一比，就是
+  // 补间的两端。
+  //
+  // 依赖里必须带 `isCompact`：标签宽度在 normal（160px）与 compact（92px）之间变，
+  // 而宽度也是 Flip 补间的一部分。少了它，上一次记下的是 160px 宽的那一套位置，
+  // 下一次增删标签时标签会凭空涨回 160px —— 条的内容宽度随之暴涨，标签条里的内容
+  // 全部重排一遍。
+  //
+  // 清理函数让上一次补间立刻落定：Flip 的补间期间把标签移出文档流
+  //（`absolute: true`），不落定的话下一轮 `getState` 量到的是动画中途的位置。
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const targets = strip.querySelectorAll<HTMLElement>('[data-tab-id]');
+    if (targets.length === 0) {
+      flipStateRef.current = null;
+      return;
+    }
+    const current = Flip.getState(targets);
+    const previous = flipStateRef.current;
+    flipStateRef.current = current;
+    if (!previous) return;
+    const tween = Flip.from(previous, {
+      duration: 0.28,
+      ease: 'power2.out',
+      absolute: true,
+      // 补间结束后标签才回到文档流，那一刻才算得出它们最终在哪，故滚动放在这里。
+      onComplete: () => scrollActiveIntoViewRef.current(),
+    });
+    return () => {
+      tween.progress(1);
+    };
+  }, [openTabs, isCompact]);
 
   // ------------------------------------------------------------------
   //  Active-tab indicator
@@ -132,15 +154,15 @@ export function WorkspaceTabs() {
   //
   //   1. 上面的 Flip。`absolute: true` 会把被补间的标签放到它**提交前**的位置，故补间期间
   //      读到的 `offsetLeft` 是动画位置而非最终位置。
-  //   2. 标签的 CSS 宽度过渡（`transition-[width,…]`，200ms），条在 normal 与 compact
-  //      之间翻转时触发。
-  //   3. 条自己的 `scrollLeft`（滚轮处理与 `scrollIntoView` 都会动它）。
+  //   2. 标签宽度的补间。宽度由 Flip 逐帧写下（见上方 useLayoutEffect），条在 normal
+  //      与 compact 之间翻转时，整条标签的位置随宽度一起变。
+  //   3. 条自己的 `scrollLeft`（滚轮处理与补间滚动都会动它）。
   //
   // 所以只要这三者之一可能在跑，条的目标就每帧从实时 rect 重读。当前位置再以固定比例向该
   // 目标缓动，于是条既能滑向相邻标签，也能跟住动画中的标签。
   //
   // 循环不是常驻的：任何能移动标签的东西变化时（激活标签、标签集、compact 模式）重跑一个
-  // 有时限的窗口，窗口结束即停。窗口长到覆盖 280ms Flip 与 200ms 宽度过渡。
+  // 有时限的窗口，窗口结束即停。窗口长到覆盖 280ms Flip 与 200ms 标题截断上限过渡。
   const barRef = useRef<HTMLSpanElement>(null);
   // `started` 区分「放置」与「移动」：某次激活的首帧是直接就位（没有值得动画的上一位置 ——
   // 全新挂载，或条从无标签状态回来），之后每帧才缓动。
@@ -203,11 +225,41 @@ export function WorkspaceTabs() {
     // 一次性重排全部。
   }, [placeBar, openTabs, isCompact]);
 
+  // ------------------------------------------------------------------
+  //  Keeping the active tab visible
+  // ------------------------------------------------------------------
+  // 原生 `scrollIntoView` 会**瞬间**改掉 `scrollLeft`：所有标签的视口位置在同一帧
+  // 里挪一截，那一下不参与任何动画，读起来就是「标签条猛地跳一下」。故滚动由 GSAP
+  // 补间完成，该滚到哪儿由 `tab-scroll.ts` 算出。
+  const scrollActiveIntoView = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip || !activeTabId) return;
+    const el = strip.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`);
+    if (!el) return;
+    const target = scrollTargetForActiveTab(strip, el.getBoundingClientRect());
+    if (target === null) return;
+    gsap.to(strip, {
+      scrollLeft: target,
+      duration: 0.28,
+      ease: 'power2.out',
+      overwrite: true,
+    });
+  }, [activeTabId]);
+
   useEffect(() => {
-    if (!activeTabId) return;
-    const el = stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`);
-    if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [activeTabId, openTabs.length]);
+    scrollActiveIntoViewRef.current = scrollActiveIntoView;
+  }, [scrollActiveIntoView]);
+
+  // 什么时候滚：标签集变了（增删、换项目）→ 由 Flip 补间落定后的 `onComplete` 滚，
+  // 那时标签已回到文档流，位置才是最终位置；只是切换激活标签 → 没有 Flip 参与，
+  // 这里立即滚。
+  const prevOpenTabsRef = useRef(openTabs);
+  useEffect(() => {
+    const tabsChanged = prevOpenTabsRef.current !== openTabs;
+    prevOpenTabsRef.current = openTabs;
+    if (tabsChanged) return;
+    scrollActiveIntoView();
+  }, [activeTabId, openTabs, scrollActiveIntoView]);
 
   // 垂直滚轮转横向滚动，与各浏览器标签栏一致。
   useEffect(() => {
@@ -281,7 +333,11 @@ export function WorkspaceTabs() {
               // 单元格网格，标题约容 5–6 个汉字后截断，过长的 hint 在标签内截成 `...`；
               // compact 每个标签恰好 `w-[92px]`，标题截到 ≈ 2 个汉字，hint 隐藏 ——
               // 它的 `shrink-0` 会在视觉上破坏固定的 92px。
-              'group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs transition-[width,gap,padding] duration-200 ease-out',
+              //
+              // 这里**没有**宽度的 CSS 过渡：宽度与位置都由上方的 Flip 一起补间。
+              // 两者各管一半时，CSS 过渡会把 Flip 逐帧写下的 inline width 再过渡一次，
+              // 标签在动画结束后还要慢慢收回去 —— 与位置补间对不上账。
+              'group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs',
               isCompact ? 'w-[92px]' : 'w-[160px]',
               active
                 ? 'border-border bg-background text-foreground'
@@ -306,7 +362,9 @@ export function WorkspaceTabs() {
               //
               // 字重步进挂在标签文字上而不是整个标签：method pill 与旁边的图标不该跟着加粗。
               className={cn(
-                'min-w-0 truncate',
+                // 截断上限跟着模式变（88px → 36px），故它自己有过渡：否则容器收窄的
+                // 同一瞬间标题会突然少几个字，与容器宽度的变化对不上。
+                'min-w-0 truncate transition-[max-width] duration-200 ease-out',
                 isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
                 active && 'font-semibold',
               )}
