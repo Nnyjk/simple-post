@@ -124,8 +124,16 @@ try {
   const bareHealth = await fetch(`${BASE}/healthz`);
   assert(bareHealth.status === 404, `bare /healthz returns 404 (got ${bareHealth.status})`);
 
+  // MCP 的端点不在主端口上：它是守护进程自己的监听端口。前缀下的 /mcp/healthz
+  // 落到 SPA fallback，回的是壳而不是 MCP 探针的 JSON——所以断言响应体，不看状态码。
   const mcpHealth = await fetch(`${BASE}${PREFIX}/mcp/healthz`);
-  assert(mcpHealth.status === 200, `${PREFIX}/mcp/healthz returns 200 (got ${mcpHealth.status})`);
+  const mcpHealthBody = await mcpHealth.text();
+  assert(
+    !mcpHealthBody.includes('registered_tools'),
+    `${PREFIX}/mcp/healthz does not answer with the MCP probe (got ${JSON.stringify(
+      mcpHealthBody.slice(0, 60),
+    )})`,
+  );
 
   const spa = await fetch(`${BASE}${PREFIX}/`);
   assert(spa.status === 200, `${PREFIX}/ returns 200 (got ${spa.status})`);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Web 鉴权集成测试：验证开放模式、密码模式、健康检查和 MCP 探针。
+// Web 鉴权集成测试：验证开放模式、密码模式、健康检查，以及主端口不提供 MCP。
 // 子进程输出由统一生命周期工具消费，退出与临时目录清理均有时间上限。
 
 import { mkdtempSync } from 'node:fs';
@@ -216,8 +216,14 @@ await runPhase('phase 2', scratch2, proc2, async () => {
     `phase 2: GET / returns text/html (got ${JSON.stringify(contentType)})`,
   );
 
+  // MCP 的端点不在主端口上：它是守护进程自己的监听端口。主端口上的 /mcp/healthz
+  // 落到 SPA fallback，回的是壳而不是 MCP 探针的 JSON——所以断言响应体，不看状态码。
   const mcpHealth = await fetch(`${BASE}/mcp/healthz`);
-  assert(mcpHealth.status === 200, `phase 2: /mcp/healthz stays 200 (got ${mcpHealth.status})`);
+  const mcpHealthBody = await mcpHealth.text();
+  assert(
+    !mcpHealthBody.includes('registered_tools'),
+    `phase 2: the main port does not serve MCP (got ${JSON.stringify(mcpHealthBody.slice(0, 60))})`,
+  );
 });
 
 if (failures > 0) {
