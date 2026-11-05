@@ -160,7 +160,7 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 工具是按「一次调用建好一个接口」设计的，而不只是 CRUD：
 
 - **一份规格一次落库。** `spec_upsert` 收一份声明式规格：模块、集合路径、环境与端点。它在一个事务里把这一整份写进库里——缺的模块与集合逐级建出来，缺的环境按名字建出来，URL 写进（环境 × 模块）那一格，代理地址写进同一格的另一个字段。建一份接口规范不必再按「先查一遍、再建一下」串七八次调用。
-- **同一份规格有三个入口。** MCP 工具 `spec_upsert`、REST 路由 `POST /api/spec/upsert` 与桌面端命令 `spec_upsert` 落的是同一份规格，落库逻辑只有一份实现。REST 请求体就是那份规格本身，不带外层包装；字段名的两种拼写（`project_id` 与 `projectId`）都收，因此同一份规格可以在 AI 客户端与 HTTP 调用方之间原样搬运。
+- **同一份规格有两个入口。** MCP 工具 `spec_upsert` 与 REST 路由 `POST /api/spec/upsert` 落的是同一份规格，落库逻辑只有一份实现。REST 请求体就是那份规格本身，不带外层包装；字段名的两种拼写（`project_id` 与 `projectId`）都收，因此同一份规格可以在 AI 客户端与 HTTP 调用方之间原样搬运。
 - **按路径寻址。** `collection_create` 与 `endpoint_create` 接受 `collection_path`（如 `订单/明细`），路径上缺的集合会被逐级建出来，已有的同名集合直接复用。建一个接口不必先查一遍树。
 - **创建是幂等的。** 所有 `*_create` 工具接受 `if_exists`（`reuse` / `error` / `duplicate`，默认 `reuse`）。重复调用同一个接口定义不会造出第二份。`spec_upsert` 另有一档 `update`：它覆盖规格里点名的字段，没点名的字段保持原样。
 - **一次调用写全。** `endpoint_create` 一次收下 method、url、参数、请求头、请求体的载荷与定义、鉴权、前置脚本与测试脚本，不需要再补一次 `endpoint_update`。
