@@ -8,7 +8,6 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::web_api::{build_router, WebState};
 
@@ -33,13 +32,9 @@ async fn serve_test_router() -> (SocketAddr, PathBuf) {
 
     let pool = crate::db::init(&dir).expect("db init");
     let state = WebState {
-        pool: pool.clone(),
+        pool,
         daemon: crate::daemon_supervisor::McpDaemonHandle::new(),
         data_dir: dir.clone(),
-        mcp_state: Arc::new(crate::mcp::AppState {
-            pool,
-            started_at: std::time::Instant::now(),
-        }),
         password: None,
         base_path: None,
     };

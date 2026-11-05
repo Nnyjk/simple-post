@@ -30,12 +30,21 @@ impl McpDaemonHandle {
     /// 当前跟踪的 daemon 是否仍在服务？探测在锁外跑（它是一次 HTTP 往返），判断本身
     /// 是纯函数 [`start_is_noop`]。
     pub(super) async fn is_serving(&self) -> bool {
-        let (status, port) = {
+        let (status, port, bind) = {
             let g = self.inner.lock().await;
-            (g.status, g.port)
+            (
+                g.status,
+                g.port,
+                g.port_record.as_ref().map(|r| r.bind.clone()),
+            )
         };
+        // 探测要按 daemon 实际绑定的那个地址来：绑具体网卡地址（如 192.168.12.81）
+        // 时回环不通，只探 127.0.0.1 会把活着的 daemon 误判成起不来。
         let healthy = match port {
-            Some(p) => port_registry::healthz(p).await,
+            Some(p) => {
+                let host = bind.as_deref().unwrap_or("127.0.0.1");
+                port_registry::healthz(p, host).await
+            }
             None => false,
         };
         start_is_noop(status, port, healthy)

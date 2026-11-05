@@ -123,6 +123,10 @@ pub struct McpDaemonHandle {
     /// 两种真实 host 形态都走 [`Self::with_pool`]：在 *spawn* 时读该行而非构造时，用户改完设置
     /// 再点重启就能生效，不必重建受管 state。
     pool: Option<crate::db::DbPool>,
+    /// Web 形态的口令。守护进程是 MCP 唯一的对外端点，故它必须和主服务器用同一道 bearer
+    /// 闸：口令经**环境变量**传给子进程，不进命令行——命令行在 Linux 上对所有用户可读。
+    /// 桌面形态没有口令（`None`），守护进程只靠回环绑定与 Host/Origin 守卫。
+    password: Option<String>,
     /// daemon 的日志环形缓冲。**刻意放在状态锁之外**：读日志不必抢那把锁，不会被「监管者正忙」
     /// 挡住；缓冲自己的互斥量只护住那几百行字符串，临界区是微秒级。
     logs: Arc<LogBuffer>,
@@ -141,15 +145,17 @@ impl McpDaemonHandle {
         Self {
             inner: Arc::new(Mutex::new(DaemonState::empty())),
             pool: None,
+            password: None,
             logs: Arc::new(LogBuffer::new()),
         }
     }
 
-    /// 两种真实 host 形态共用的构造器。
-    pub fn with_pool(pool: crate::db::DbPool) -> Self {
+    /// 两种真实 host 形态共用的构造器。`password` 是 Web 形态的口令，桌面形态传 `None`。
+    pub fn with_pool(pool: crate::db::DbPool, password: Option<String>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(DaemonState::empty())),
             pool: Some(pool),
+            password,
             logs: Arc::new(LogBuffer::new()),
         }
     }
@@ -204,7 +210,7 @@ impl McpDaemonHandle {
         // ----- 复用路径 ------------------------------------------------
         if let Some(entry) = port_registry::read_entry() {
             if port_registry::is_pid_alive(entry.record.pid)
-                && port_registry::healthz(entry.record.port).await
+                && port_registry::healthz(entry.record.port, &entry.record.bind).await
             {
                 match reuse_decision(entry.config_fingerprint.as_deref(), &wanted_fingerprint) {
                     ReuseDecision::Adopt => return Ok(self.adopt(entry.record).await),
@@ -223,7 +229,7 @@ impl McpDaemonHandle {
         let mut restart_first = false;
         if let Some(entry) = port_registry::read_entry() {
             if port_registry::is_pid_alive(entry.record.pid)
-                && port_registry::healthz(entry.record.port).await
+                && port_registry::healthz(entry.record.port, &entry.record.bind).await
             {
                 match reuse_decision(entry.config_fingerprint.as_deref(), &wanted_fingerprint) {
                     ReuseDecision::Adopt => {
@@ -249,18 +255,25 @@ impl McpDaemonHandle {
         // 先清陈旧文件再挑新端口，免得 port_registry::write() 里的读路径撞上它。
         let _ = port_registry::release();
 
-        // ----- 分配端口 -------------------------------------------
-        // 绑 0 → 由 OS 选。真实端口从 local_addr() 出来，随即 drop 掉 listener
-        // 让 daemon 去抢（Linux 上无竞态，因为我们持锁且只有一个 GUI 会申领；
-        // 真 TOCTOU 需要两个 GUI 恰好同时启动）。
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(crate::error::AppError::Io)?;
-        let port = listener
-            .local_addr()
-            .map(|a| a.port())
-            .map_err(crate::error::AppError::Io)?;
-        drop(listener);
+        // ----- 端口 -----------------------------------------------
+        // 配置里写了具体端口就用那个：MCP 的端点地址因此是稳定的，AI 客户端的
+        // 配置文件里不必跟着重启换地址。写 0 时才由操作系统分配——绑 0 → 由 OS 选，
+        // 真实端口从 local_addr() 出来，随即 drop 掉 listener 让 daemon 去抢
+        //（Linux 上无竞态，因为我们持锁且只有一个 GUI 会申领；真 TOCTOU 需要两个
+        // GUI 恰好同时启动）。
+        let port = if http_config.port > 0 {
+            http_config.port
+        } else {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .map_err(crate::error::AppError::Io)?;
+            let assigned = listener
+                .local_addr()
+                .map(|a| a.port())
+                .map_err(crate::error::AppError::Io)?;
+            drop(listener);
+            assigned
+        };
 
         // ----- spawn 子进程 -------------------------------------------
         let exe = std::env::current_exe().map_err(crate::error::AppError::Io)?;
@@ -270,6 +283,22 @@ impl McpDaemonHandle {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true); // GUI 被 drop ⇒ 子进程收到 SIGKILL
+
+        // Web 形态的口令随子进程走。守护进程是 MCP 唯一的对外端点，故它必须和主服务器
+        // 用同一道 bearer 闸；口令经**环境变量**传下去，不进命令行——命令行在 Linux 上
+        // 对所有用户可读。
+        //
+        // 无口令时显式清掉继承值：本进程的环境里可能残留着别人的
+        // SIMPLE_POST_WEB_PASSWORD（例如宿主用同一个环境变量启过 serve-web），而桌面
+        // 形态的守护进程只靠回环绑定与 Host/Origin 守卫，不该被一道看不见的闸拦住。
+        match self.password.as_deref() {
+            Some(p) => {
+                cmd.env("SIMPLE_POST_WEB_PASSWORD", p);
+            }
+            None => {
+                cmd.env_remove("SIMPLE_POST_WEB_PASSWORD");
+            }
+        }
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -312,7 +341,7 @@ impl McpDaemonHandle {
         let mut healthy = false;
         for _ in 0..50 {
             // 50 × 100ms = 5s
-            if port_registry::healthz(port).await {
+            if port_registry::healthz(port, &http_config.host).await {
                 healthy = true;
                 break;
             }

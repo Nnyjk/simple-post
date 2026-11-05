@@ -162,6 +162,9 @@ pub struct McpHttpConfig {
     /// 绑定地址。`127.0.0.1` 即守护进程仅本机可达。
     pub host: String,
     /// 监听端口。`0` 表示「由 OS 分配」——守护进程自己选定的端口随后经 `mcp.port` 记录公布。
+    ///
+    /// 非 0 时**就是这个端口**：MCP 进程按它监听，故 AI 客户端的配置文件里可以写死一个
+    /// 不随重启变化的地址。
     pub port: u16,
     /// JSON-RPC 端点的挂载路径。必须以 `/` 开头。
     pub path: String,

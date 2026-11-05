@@ -2,6 +2,9 @@
 //!
 //! `build_router` 在这里注册整棵 `/api/*` 路由，是全仓库路由表的唯一事实来源。
 //! handler 按资源拆到 `routes/`，本文件只负责把 handler 挂到路径上。
+//!
+//! **这里没有 MCP 路由**：MCP 的端点是守护进程自己的监听端口（见
+//! `daemon_supervisor`），主端口不提供 JSON-RPC。
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,7 +17,6 @@ use tower_http::services::ServeDir;
 
 use crate::daemon_supervisor::McpDaemonHandle;
 use crate::db::DbPool;
-use crate::mcp::AppState as McpAppState;
 
 use super::dto::HealthDto;
 use super::routes::*;
@@ -27,16 +29,16 @@ pub struct WebState {
     pub pool: DbPool,
     pub daemon: McpDaemonHandle,
     pub data_dir: PathBuf,
-    /// `/mcp` JSON-RPC 用的 MCP 状态：与 daemon 子进程共用同一 pool，
-    /// 所以指向 `http://server:4173/mcp` 的 AI 客户端与浏览器 SPA 落在同一份
-    /// 数据上。
-    pub mcp_state: Arc<crate::mcp::AppState>,
     /// 可选 bearer 口令。`None` 保持整棵路由树不鉴权；`Some(_)` 则对每个
-    /// `/api/*` 与 `/mcp` 请求强制 `auth_middleware`。前端把 bearer 存在
+    /// `/api/*` 请求强制 `auth_middleware`。前端把 bearer 存在
     /// `localStorage`，由 `webFetch()` 带上。
+    ///
+    /// MCP 的端点不在这一棵路由树上：它是守护进程自己的监听端口，口令经
+    /// 环境变量 `SIMPLE_POST_WEB_PASSWORD` 传给那个子进程，由它自己的 bearer
+    /// 层校验。
     pub password: Option<String>,
-    /// 可选反代 base path（如 `"/sp"`）。设置后整棵 router（含 `/mcp` 与
-    /// 三个健康探针）都 `nest` 到该前缀下：`curl /api/projects` 404，
+    /// 可选反代 base path（如 `"/sp"`）。设置后整棵 router（含两个健康探针）
+    /// 都 `nest` 到该前缀下：`curl /api/projects` 404，
     /// `curl /sp/api/projects` 200。
     pub base_path: Option<String>,
 }
@@ -267,12 +269,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         )
         .with_state(state_arc.clone());
 
-    // `/mcp` JSON-RPC + `/mcp/healthz` + `/mcp/tools`。不复用
-    // `daemon_http::build_router`：它的内层路由自带 `/mcp` 前缀，再挂一次就成了
-    // `/mcp/mcp`。这里直接对共享的 `mcp_state` 注册——与 daemon 子进程同一
-    // pool。
-    let mcp_routes = build_mcp_routes(state_arc.mcp_state.clone());
-
     // 静态 SPA。`ServeDir` 给 `/assets/*` 正确的 Range / ETag / Last-Modified，
     // fallback 交给 `index.html` 以支持前端路由。
     //
@@ -303,7 +299,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         let base_root = base_path.clone();
         Router::new()
             .merge(api)
-            .merge(mcp_routes)
             .route(
                 "/",
                 get(move || spa_index(spa_root.clone(), base_root.clone())),
@@ -339,39 +334,4 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         }
         _ => inner,
     }
-}
-
-/// 组装 MCP 那三条路由：`/mcp` JSON-RPC、`/mcp/healthz`、`/mcp/tools`。
-///
-/// 主 router 与专用 MCP 监听器共用这一份路由，所以「同一套 dispatch、同一份库、同一道权限闸」
-/// 在两个端口上是同一段代码，而不是两份长得像的实现。
-fn build_mcp_routes(mcp_state: Arc<McpAppState>) -> Router {
-    let json_rpc_state = mcp_state.clone();
-    let healthz_state = mcp_state.clone();
-    let tools_state = mcp_state;
-    Router::new()
-        .route(
-            "/mcp",
-            post(move |body: String| mcp_json_rpc_post(json_rpc_state, body)),
-        )
-        .route("/mcp/healthz", get(move || mcp_healthz(healthz_state)))
-        .route("/mcp/tools", get(move || mcp_tools(tools_state)))
-}
-
-/// 组装只服务 MCP 的 router：挂载路径与 Host/Origin 白名单都取自用户的
-/// `mcp.http_config`。
-///
-/// 复用 [`daemon_http::build_router_with_config`]，而不是自己再拼一套路由：那份 router 带着 MCP
-/// 的挂载路径（配置里的路径 + `/mcp` 别名）与 Host/Origin 守卫，于是这个专用端口上的 MCP 端点
-/// 与 daemon 端点行为一致——同一套 dispatch、同一份库、同一道白名单。
-/// 外面再叠主端口那一道 bearer 鉴权，于是两个端口对客户端是同一回事：设置面板「连接 → HTTP
-/// 服务配置」里写的地址、端口、路径、白名单，对这两个端口同时生效。
-pub fn build_mcp_only_router(state: WebState, config: &crate::domain::McpHttpConfig) -> Router {
-    let password = state.password.clone();
-    let router = crate::daemon_http::build_router_with_config(state.mcp_state.clone(), config);
-    let auth_state = crate::auth::AuthState::new(password.as_deref());
-    router.layer(axum::middleware::from_fn_with_state(
-        auth_state,
-        crate::auth::auth_middleware,
-    ))
 }

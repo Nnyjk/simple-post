@@ -1,17 +1,15 @@
 //! `serve-web` 的启动入口。
 //!
-//! `serve` 绑定监听器、决定是否预热 MCP daemon，并把主端口与 MCP 专用端口两个监听器交给 axum。
+//! `serve` 绑定监听器、决定是否预热 MCP daemon，并把主端口的监听器交给 axum。
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::daemon_supervisor::McpDaemonHandle;
 use crate::db;
 use crate::error::AppError;
-use crate::mcp::AppState as McpAppState;
 use crate::port_registry;
 
-use super::router::{build_mcp_only_router, build_router, WebState};
+use super::router::{build_router, WebState};
 
 /// 绑定 TCP listener 并服务到 SIGINT/SIGTERM。
 ///
@@ -19,11 +17,13 @@ use super::router::{build_mcp_only_router, build_router, WebState};
 /// 解析结果一致（`SIMPLE_POST_DATA_DIR`，未设时是 `dirs::data_dir()`），两种形态才共用同一数据库。
 /// `auto_start_daemon` 为 `Some(bool)` 时 CLI 已给定答案，`None` 时由持久化的 `mcp.auto_start`
 /// 行决定。在这里解析而非在 `main.rs`：那边会另开一个 `db::init()` 池只为读一个 preference。
-/// **MCP 专用端口由持久化的 `mcp.http_config` 决定**：`port` 非 0 时额外开一个只服务 MCP 的
-/// 监听器（见 [`build_mcp_only_router`]），那个端口上没有 REST、没有 SPA，只有 MCP 自己的那组
-/// 路由；`port` 为 0 时不开，主端口上的 `/mcp` 照旧可用。
-/// 端口取设置里的那一个，而不是另设一个环境变量：设置面板「连接 → HTTP 服务配置」里写的端口，
-/// 就是对外暴露的那个端口。两处各写一个数字，迟早会对不上。
+/// **MCP 的端点是守护进程自己的监听端口**，由持久化的 `mcp.http_config` 决定：守护进程启动时
+/// 把那一行的绑定地址、端口、挂载路径与两张白名单读进命令行（见
+/// `daemon_supervisor::daemon_cli_args`）。
+///
+/// 主端口**不**提供 MCP，故本进程不再另开一个「只服务 MCP」的监听器：那个监听器会抢走
+/// 配置里写的端口（守护进程绑不上那个端口），而且它绑的是 Web 主机的地址，与配置里的
+/// 绑定地址不是同一件事——两处口径不一致，端口与地址迟早对不上。
 pub async fn serve(
     bind_addr: std::net::SocketAddr,
     data_dir: PathBuf,
@@ -34,39 +34,25 @@ pub async fn serve(
 ) -> Result<(), AppError> {
     let pool = db::init(&data_dir)?;
     // 守护进程在 spawn 时从这个池读 `mcp.http_config`，使子进程命令行与设置面板一致。
-    let daemon = McpDaemonHandle::with_pool(pool.clone());
+    // 口令一并交给它：守护进程是 MCP 唯一的对外端点，必须和主服务器用同一道 bearer 闸。
+    let daemon = McpDaemonHandle::with_pool(pool.clone(), password.clone());
 
     // 在两个值被移进 `WebState` 之前定好守护进程决策：省掉第二次 `db::init()`，
     // 且后台任务预热的 handle 就是 `/api/mcp/*` 读写的那一个。
     let want_daemon = match auto_start_daemon {
         Some(v) => v,
-        None => db::with_conn(&pool, db::preferences::mcp_auto_start).unwrap_or(false),
+        // 读不出偏好行时按「要起」处理：MCP 的端点只有守护进程一个，主端口不再提供 MCP，
+        // 所以守护进程不起来就等于 MCP 消失。
+        None => db::with_conn(&pool, db::preferences::mcp_auto_start).unwrap_or(true),
     };
-
-    // `/mcp` JSON-RPC 与本进程共用 `mcp_state`：pool 与 GUI 的 `simple-post.db`
-    // 同源。
-    let mcp_state = Arc::new(McpAppState {
-        pool: pool.clone(),
-        started_at: std::time::Instant::now(),
-    });
-
-    // MCP 专用监听器的配置：与设置面板那张「HTTP 服务配置」卡片读的是同一行。
-    //
-    // `db::with_conn` 读不出这一行时按未配置处理（端口 0 → 不开）：这一行坏了
-    // 不该让整个 Web 主机起不来，主端口上的 `/mcp` 仍然照常工作。
-    let mcp_config = db::with_conn(&pool, db::preferences::mcp_http_config).unwrap_or_default();
 
     let state = WebState {
         pool,
         daemon: daemon.clone(),
         data_dir: data_dir.clone(),
-        mcp_state,
         password,
         base_path,
     };
-    // 专用 MCP 监听器的 router 必须在 `state` 被 `build_router` 移走之前做好。
-    let mcp_only_router =
-        (mcp_config.port > 0).then(|| build_mcp_only_router(state.clone(), &mcp_config));
     let router = build_router(state, spa_dir);
 
     eprintln!("[serve-web] listening on http://{bind_addr}");
@@ -83,39 +69,8 @@ pub async fn serve(
         .await
         .map_err(|e| AppError::Validation(format!("bind {bind_addr}: {e}")))?;
 
-    // 第二个监听器：只服务 MCP。两个监听器都在 daemon 预热之前 bind 好，
-    // 所以「端口起不来」是一次启动期的硬错误，而不是运行期某个请求才发现的意外。
-    //
-    // 绑定失败即整体失败：设置里明确写了这个端口，起不来就该在启动时喊出来，
-    // 而不是让容器以「起来了但少了那个端口」的样子被健康检查判为正常。
-    //
-    // 绑定地址取主监听器的地址，不取设置里的 `host`：设置里的那个地址是
-    // **MCP daemon** 的绑定地址，而 daemon 在容器里拿不到宿主网卡的地址
-    // （填宿主 IP 会 bind 失败）。专用端口与 Web 主机绑在同一个地址上，
-    // 谁该访问它由 Host/Origin 守卫决定——那才是访问控制该待的地方。
-    let mcp_listener = match mcp_only_router {
-        Some(mcp_router) => {
-            let mcp_addr = std::net::SocketAddr::new(bind_addr.ip(), mcp_config.port);
-            let listener = tokio::net::TcpListener::bind(mcp_addr)
-                .await
-                .map_err(|e| AppError::Validation(format!("bind MCP listener {mcp_addr}: {e}")))?;
-            eprintln!(
-                "[serve-web] MCP-only listener on http://{mcp_addr}{} (from mcp.http_config)",
-                mcp_config.normalized_path()
-            );
-            Some((listener, mcp_router))
-        }
-        None => None,
-    };
-
-    if let Some((listener, mcp_router)) = mcp_listener {
-        tokio::spawn(async move {
-            if let Err(e) = axum::serve(listener, mcp_router).await {
-                eprintln!("[serve-web] MCP-only listener exited with error: {e}");
-            }
-        });
-    }
-
+    // MCP 的端点是守护进程自己的监听端口，不是这个监听器：守护进程作为后台任务被拉起，
+    // 绑的是 `mcp.http_config` 里写的地址与端口。
     if want_daemon {
         let dir = data_dir.clone();
         tokio::spawn(async move {

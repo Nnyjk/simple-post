@@ -1,10 +1,15 @@
 //! `serve-web` 的 bearer 鉴权中间件。
 //!
 //! 默认 no-op：只有进程带非空 `SIMPLE_POST_WEB_PASSWORD`（或 CLI `--password=<token>`）时才拒绝
-//! 请求。绑 `0.0.0.0` 的部署必须设，否则 `/api/*` 与 `/mcp` 全网可达。
+//! 请求。绑 `0.0.0.0` 的部署必须设，否则 `/api/*` 全网可达。
+//!
+//! 这一层同时用在两处：主服务器的 REST 路由树，以及 MCP 守护进程自己的 router
+//! （口令经环境变量 `SIMPLE_POST_WEB_PASSWORD` 传给那个子进程）。
 //!
 //! 免鉴权：`/api/healthz`、`/mcp/healthz`、`/healthz`，以及 SPA shell（`GET /`）——浏览器从
 //! `localStorage` 取 token，在自己的 REST 请求上带上，`<script type="module">` 带不上。
+//! 守护进程另有自己的一份公开路径：配置里的挂载路径对应的 `<mount>/healthz`（见
+//! [`AuthState::with_public_paths`])。
 //! token 存 `localStorage` 而非 HttpOnly cookie：这里的鉴权按进程而非按用户，SSR 之前也没有别的
 //! 地方能放。
 
@@ -21,12 +26,25 @@ use axum::{
 #[derive(Clone, Default)]
 pub struct AuthState {
     pub password: Option<Arc<String>>,
+    /// 除 [`is_public_path`] 那份固定名单之外，这个进程额外放行的路径。
+    ///
+    /// 守护进程按配置里的挂载路径提供 `<mount>/healthz`，而固定名单里只有 `/mcp/healthz`
+    /// 那一个别名。守护进程把配置里的那几个路径也放进这份名单，用户配了 `/ai` 时
+    /// `GET /ai/healthz` 才不会被口令拦住。
+    pub extra_public_paths: Arc<Vec<String>>,
 }
 
 impl AuthState {
     pub fn new(password: Option<&str>) -> Self {
+        Self::with_public_paths(password, Vec::new())
+    }
+
+    /// 带一份额外的公开路径。`extra` 里的每一条按**完整路径**匹配，与
+    /// [`is_public_path`] 那份固定名单同样严格（不是前缀匹配）。
+    pub fn with_public_paths(password: Option<&str>, extra: Vec<String>) -> Self {
         Self {
             password: password.map(|s| Arc::new(s.to_string())),
+            extra_public_paths: Arc::new(extra),
         }
     }
 }
@@ -48,7 +66,7 @@ pub async fn auth_middleware(
 
     // 精确匹配，避免 `/api/healthz-other` 之类被顺带放行。
     let path = request.uri().path();
-    if is_public_path(path) {
+    if is_public_path(path) || state.extra_public_paths.iter().any(|p| p == path) {
         return next.run(request).await;
     }
 

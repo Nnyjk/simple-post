@@ -4,9 +4,7 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::mcp::AppState as McpAppState;
 use crate::permissions::CapabilityPolicy;
-use simple_post_mcp::daemon_http;
 
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
@@ -33,8 +31,8 @@ pub(crate) async fn mcp_log_tail(
 //
 // 两者都委派给 `http_config` 的普通函数，故 REST 路由与 Tauri 命令在校验与「是否需要重启」
 // 上不会各说各话。
-// 这里配置的是**daemon 子进程**，不是本服务器：`web_api::build_router` 挂载的 `/mcp` 路由留在
-// 规范路径上，文档推荐的 stdio-bridge → `serve-web` 客户端配置正是依赖这一点。
+// 这里配置的是**daemon 子进程**，不是本服务器：MCP 的端点就是守护进程自己的监听端口，
+// 主端口不提供 JSON-RPC。
 
 /// `GET /api/mcp/http-config` —— daemon 的监听配置。`preferences` 行缺失时返回出厂的
 /// 仅 loopback 默认值而非 404，好让全新安装渲染出一个表单而不是一个错误。
@@ -224,33 +222,6 @@ pub(crate) async fn mcp_restart(
 
 pub(crate) async fn mcp_proxy_path() -> String {
     crate::http_config::mcp_proxy_path()
-}
-
-/// 把一个 JSON-RPC 请求派发给 MCP dispatcher。包装
-/// `daemon_http::dispatch_mcp_request`（daemon 的 `/mcp` handler 核心），使
-/// `serve-web` 形态无需 spawn daemon 子进程即可在同一个端口上服务 AI 客户端。
-pub(crate) async fn mcp_json_rpc_post(
-    state: Arc<McpAppState>,
-    body: String,
-) -> axum::response::Response {
-    daemon_http::dispatch_mcp_request(state, body).await
-}
-
-pub(crate) async fn mcp_healthz(state: Arc<McpAppState>) -> axum::Json<serde_json::Value> {
-    use daemon_http::HealthzResponse;
-    let uptime_ms = state.started_at.elapsed().as_millis() as u64;
-    let registered_tools = crate::mcp::registered_tool_names();
-    axum::Json(serde_json::json!(HealthzResponse {
-        status: "ok",
-        version: env!("CARGO_PKG_VERSION"),
-        uptime_ms,
-        registered_tools,
-    }))
-}
-
-pub(crate) async fn mcp_tools(state: Arc<McpAppState>) -> axum::Json<serde_json::Value> {
-    let _ = state;
-    axum::Json(serde_json::json!({ "tools": crate::mcp::registered_tool_names() }))
 }
 
 #[cfg(test)]

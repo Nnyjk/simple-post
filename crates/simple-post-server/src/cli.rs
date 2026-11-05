@@ -32,6 +32,11 @@ pub struct McpOptions {
 }
 
 /// 起 MCP daemon。监听配置由本函数按 CLI 开关拼出。
+///
+/// bearer 口令从环境变量 `SIMPLE_POST_WEB_PASSWORD` 读，不从命令行读：命令行在 Linux 上
+/// 对所有用户可读，而守护进程是 MCP 唯一的对外端点，那道闸不能靠一个公开的口令。
+/// 监管者 spawn 这个子进程时把口令放进它的环境（见 `daemon_supervisor`），没有口令时
+/// 显式清掉继承来的那个值。
 pub fn run_mcp(opts: McpOptions) {
     let http_config = McpHttpConfig {
         host: opts.bind.clone(),
@@ -41,7 +46,10 @@ pub fn run_mcp(opts: McpOptions) {
         allowed_hosts: split_allow_list(opts.allowed_hosts),
         allowed_origins: split_allow_list(opts.allowed_origins),
     };
-    crate::run_mcp(opts.transport, opts.port, opts.bind, http_config);
+    let password = std::env::var("SIMPLE_POST_WEB_PASSWORD")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+    crate::run_mcp(opts.transport, opts.port, opts.bind, http_config, password);
 }
 
 /// `serve-web` 的全部开关。

@@ -109,11 +109,16 @@ fn get_with_wrong_type_errors() {
     assert!(err.is_err());
 }
 
+/// 缺省是**要起**：MCP 的端点只有守护进程一个，主端口不再提供 MCP，故守护进程不
+/// 起来就等于 MCP 静默消失。
 #[test]
-fn mcp_auto_start_defaults_to_false_when_missing() {
+fn mcp_auto_start_defaults_to_true_when_missing() {
     let pool = fresh_pool();
     let v = db::with_conn(&pool, mcp_auto_start).unwrap();
-    assert!(!v, "default must be false — the daemon must not auto-start");
+    assert!(
+        v,
+        "default must be true — the MCP endpoint is the daemon alone"
+    );
 }
 
 #[test]

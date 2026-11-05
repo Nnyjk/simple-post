@@ -2,7 +2,8 @@
 //!
 //! 本 crate 是桌面 shell 与容器镜像共享的一切，减去 GUI。它拥有：
 //!
-//!   * `web_api` —— `serve-web` 背后的 axum router：REST 面、`/mcp` JSON-RPC 端点、静态 SPA host。
+//!   * `web_api` —— `serve-web` 背后的 axum router：REST 面与静态 SPA host（不含 MCP：
+//!     MCP 的端点是守护进程自己的监听端口）。
 //!   * `daemon_supervisor` —— 与 host 无关的 MCP daemon spawn / teardown 逻辑。
 //!   * `auth` —— bearer 中间件及其公开路径名单。
 //!   * `port_registry` —— stdio bridge 用来发现端口的 `mcp.port` 文件。
@@ -37,6 +38,8 @@ pub mod http_config;
 /// 导入 / 导出的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod interchange_api;
+/// MCP 守护进程自己那个端口上的 router（挂载路径 + Host/Origin 守卫 + bearer 闸）。
+pub mod mcp_router;
 pub mod port_registry;
 /// 项目与资源树节点的创建编排。Tauri 命令与 REST 路由都只调它，故两条 transport
 /// 不必各写一遍——见 AGENTS.md 的 dual-transport invariant。
@@ -61,7 +64,7 @@ pub use cli::run_mcp_proxy;
 pub use simple_post_interchange as interchange;
 
 // 再导出独立 `simple-post-mcp` crate 的 MCP 模块。之所以也再导出 `daemon_http`，
-// 是因为 `run_mcp` 需要 `serve_with_config` 把监听配置（挂载路径 + Host/Origin
+// 是因为 `mcp_router::build_mcp_router` 需要它把监听配置（挂载路径 + Host/Origin
 // 白名单）交给 router，而 `mcp::serve_http` 没有这些参数。
 pub use simple_post_mcp::{daemon_http, mcp};
 
@@ -71,11 +74,16 @@ pub use simple_post_mcp::{daemon_http, mcp};
 /// `http_config` 存放 router 需要的、超出 `bind` / `port` 之外的监听设置：挂载路径与
 /// Host/Origin 白名单。supervisor 从 `mcp.http_config` 偏好填它（见 `daemon_cli_args`）；
 /// 手工跑的 `simple-post mcp` 拿的是 clap 默认值，也就是出厂的仅 loopback 配置。
+///
+/// `password` 是可选的 bearer 口令。守护进程是 MCP 唯一的对外端点，故它必须和主服务器
+/// 用同一道 bearer 闸；口令经环境变量 `SIMPLE_POST_WEB_PASSWORD` 传给它（见 `cli::run_mcp`），
+/// 不进命令行——命令行在 Linux 上对所有用户可读。
 pub fn run_mcp(
     transport: String,
     port: u16,
     bind: String,
     http_config: crate::domain::McpHttpConfig,
+    password: Option<String>,
 ) {
     init_tracing();
 
@@ -145,10 +153,13 @@ pub fn run_mcp(
             pool,
             started_at: std::time::Instant::now(),
         });
+
+        // MCP 的 router 由本 crate 组装（`mcp_router::build_mcp_router`）：挂载路径与
+        // Host/Origin 守卫来自 `daemon_http`，bearer 闸住在本 crate —— `simple-post-mcp`
+        // 不能依赖 server crate，依赖方向是单向的。
+        let router = crate::mcp_router::build_mcp_router(state, &http_config, password.as_deref());
         tokio::spawn(async move {
-            if let Err(e) =
-                crate::daemon_http::serve_with_config(listener, state, http_config).await
-            {
+            if let Err(e) = axum::serve(listener, router).await {
                 tracing::error!(error = %e, "MCP daemon exited with error");
             }
         });
@@ -210,12 +221,11 @@ pub fn run_mcp(
 /// CLI 子命令 `serve-web` 的入口。拉起一个 axum HTTP 服务器，它：
 ///
 ///   * 从 `<project>/dist/` 提供打包好的 SPA；
-///   * 暴露 `/api/*` REST 路由供浏览器 CRUD + HTTP 发送 + prefs；
-///   * 让既有的 `/mcp` JSON-RPC router 原封不动，使 MCP 客户端（Claude Desktop、Cursor 等）
-///     照常工作。
+///   * 暴露 `/api/*` REST 路由供浏览器 CRUD + HTTP 发送 + prefs。
 ///
-/// 浏览器从不 spawn daemon——它直连 `127.0.0.1:<port>`。daemon 子进程（若 `mcp.auto_start ==
-/// true`）跑在本机 `simple-post` 进程树下，只能经 REST 桥接触达。
+/// MCP 的端点不在这一层：它是守护进程自己的监听端口（`mcp.http_config` 里写的地址与
+/// 端口）。浏览器从不 spawn daemon——它直连 `127.0.0.1:<port>`。daemon 子进程（若
+/// `mcp.auto_start == true`）跑在本机 `simple-post` 进程树下，只能经 REST 桥接触达。
 ///
 pub async fn run_serve_web(
     bind_addr: std::net::SocketAddr,

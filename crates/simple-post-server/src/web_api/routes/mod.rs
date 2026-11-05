@@ -30,9 +30,9 @@ pub(crate) use interchange::{
     interchange_import_preview,
 };
 pub(crate) use mcp::{
-    mcp_capability_get, mcp_capability_list_tools, mcp_capability_put, mcp_healthz,
-    mcp_http_config_get, mcp_http_config_put, mcp_json_rpc_post, mcp_log_tail, mcp_proxy_path,
-    mcp_restart, mcp_start, mcp_status, mcp_stop, mcp_tools,
+    mcp_capability_get, mcp_capability_list_tools, mcp_capability_put, mcp_http_config_get,
+    mcp_http_config_put, mcp_log_tail, mcp_proxy_path, mcp_restart, mcp_start, mcp_status,
+    mcp_stop,
 };
 pub(crate) use node_scripts::{node_scripts_get, node_scripts_patch};
 // `http_send` 从这里而非某个独立的 `endpoints` 模块再导出：它现在挂在节点之下，
