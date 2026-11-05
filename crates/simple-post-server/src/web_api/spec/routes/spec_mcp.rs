@@ -14,7 +14,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             path: "/api/mcp/start",
             summary: "Start the embedded MCP daemon (idempotent: a healthy \
                       running daemon is left untouched and echoed back)",
-            stability: "public",
             request: None,
             response: Some("RestartResult"),
         },
@@ -24,7 +23,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             summary: "Stop the embedded MCP daemon and release its port file \
                       (idempotent; always `{ ok: true, pid: null, port: null }` \
                       on success)",
-            stability: "public",
             request: None,
             response: Some("RestartResult"),
         },

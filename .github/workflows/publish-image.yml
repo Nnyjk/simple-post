@@ -5,20 +5,17 @@ name: Publish Container Image
 # `docker build` + `docker push` against a registry they had to provision.
 # This closes that: one `v*` tag produces both the desktop installers and a
 # multi-arch image.
+#
+# 镜像标签由 git tag 决定，本工作流不提供手动输入的标签参数。
 
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to publish (leave empty to use ref name)'
-        required: false
-        default: ''
 
 concurrency:
-  group: publish-image-${{ inputs.tag || github.ref_name }}
+  group: publish-image-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:

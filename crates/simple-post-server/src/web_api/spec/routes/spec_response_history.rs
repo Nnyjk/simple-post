@@ -15,7 +15,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             path: "/api/response-history/{endpointId}",
             summary: "Stored responses for one endpoint; newest first, at most the endpoint's \
                       10 kept rows. An endpoint with nothing stored answers []",
-            stability: "public",
             request: None,
             response: Some("ResponseHistoryEntry[]"),
         },
@@ -23,7 +22,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             method: "POST",
             path: "/api/response-history",
             summary: "Store one response; the server clips the body at 256 KiB and trims the endpoint back to its 10 newest rows",
-            stability: "public",
             request: Some("ResponseHistoryAppend"),
             response: Some("ResponseHistoryEntry"),
         },
@@ -31,7 +29,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             method: "DELETE",
             path: "/api/response-history/{endpointId}",
             summary: "Clear one endpoint's stored responses; answers how many rows were removed",
-            stability: "public",
             request: None,
             response: Some("DeleteCount"),
         },

@@ -16,7 +16,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
                       optional vars pool is substituted into the config's \
                       token URL, authorization URL, client ID and scope \
                       before the token is fetched",
-        stability: "public",
         request: Some("OAuth2TokenRequest"),
         response: Some("OAuth2TokenDto"),
     }]

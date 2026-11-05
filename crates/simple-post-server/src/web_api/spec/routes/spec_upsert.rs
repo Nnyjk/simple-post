@@ -18,7 +18,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
                       endpoint. Each part is found by name and created when missing, \
                       so a second call reuses them all; only if_exists=duplicate adds \
                       a second endpoint",
-        stability: "public",
         request: Some("EndpointSpec"),
         response: Some("SpecUpsertResult"),
     }]

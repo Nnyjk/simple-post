@@ -120,7 +120,7 @@ describe('invokeCmd (web shape) under a reverse-proxy base path', () => {
   });
 
   it('prefixes path params too', async () => {
-    await invokeCmd(COMMANDS.projectsGet, { id: 'proj_1' });
+    await invokeCmd(COMMANDS.projectsUpdate, { id: 'proj_1', patch: { name: 'x' } });
     assert.equal(calls[0].url, '/sp/api/projects/proj_1');
   });
 

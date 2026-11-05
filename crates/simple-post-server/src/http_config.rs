@@ -22,26 +22,6 @@ use crate::domain::McpHttpConfig;
 use crate::error::AppError;
 use crate::port_registry::{self, PortEntry};
 
-/// AI 客户端在 `mcpServers` 里启动的 `simple-post-mcp` 的绝对路径，取 `current_exe()` 的所在目录：
-/// 两个二进制经 `cargo build --workspace` 落在同一 `target/<profile>/`，没有 npm 包装路径可指。
-/// 查找失败时返回 `"<unresolved current_exe>"`，渲染侧按不可操作的占位串处理。
-pub fn mcp_proxy_path() -> String {
-    fn build(proxy_name: &str) -> Option<std::path::PathBuf> {
-        let exe = std::env::current_exe().ok()?;
-        let parent = exe.parent()?;
-        Some(parent.join(proxy_name))
-    }
-
-    let path = if cfg!(windows) {
-        build("simple-post-mcp.exe")
-    } else {
-        build("simple-post-mcp")
-    };
-
-    path.map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unresolved current_exe>".to_string())
-}
-
 /// 一次写入的响应信封：存下的配置，加上「守护进程要不要重启才生效」。
 ///
 /// 只有一条判断，因为 MCP 的监听器**就是**守护进程：绑定地址、监听端口、挂载路径、远程

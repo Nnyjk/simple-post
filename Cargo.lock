@@ -3750,17 +3750,8 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 name = "simple-post"
 version = "0.1.30"
 dependencies = [
- "axum",
  "clap",
- "dirs",
- "mime_guess",
- "r2d2",
- "r2d2_sqlite",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
  "serde_json",
- "serde_json_path",
  "simple-post-core",
  "simple-post-mcp",
  "simple-post-server",
@@ -3768,11 +3759,6 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
- "thiserror 2.0.21",
- "tokio",
- "tower-http 0.7.1",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3814,18 +3800,15 @@ dependencies = [
  "axum",
  "base64 0.23.1",
  "clap",
- "dirs",
  "r2d2",
  "r2d2_sqlite",
  "reqwest 0.12.28",
- "rusqlite",
  "serde",
  "serde_json",
  "serde_json_path",
  "simple-post-core",
  "thiserror 2.0.21",
  "tokio",
- "tower-http 0.7.1",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3841,7 +3824,6 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "serde_json_path",
  "simple-post-core",
  "simple-post-interchange",
  "simple-post-mcp",
