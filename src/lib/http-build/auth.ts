@@ -1,5 +1,5 @@
 import type { AuthConfig, OAuth2Auth } from '@/types/domain';
-import { bytesToBase64 } from '@/lib/base64';
+import { bytesToBase64, utf8Bytes } from '@/lib/base64';
 import { listVars, resolveVarsWithMissing } from '../url';
 import { percentEncode } from '../percent-encode';
 import type { MissingTracker } from './pool';
@@ -24,7 +24,7 @@ export const OAUTH2_SUBSTITUTED_FIELDS = [
  *
  * 判据与 Rust 侧那份同一套：变量名是裸标识符，且变量池里没有它。池里有但取值是空串算已解析。
  */
-export function oauth2MissingVars(cfg: OAuth2Auth, pool: Record<string, string>): string[] {
+function oauth2MissingVars(cfg: OAuth2Auth, pool: Record<string, string>): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const field of OAUTH2_SUBSTITUTED_FIELDS) {
@@ -93,7 +93,7 @@ export function resolveAuth(
  */
 export function b64Basic(user: string, pass: string): string {
   const raw = `${user}:${pass}`;
-  return bytesToBase64(new TextEncoder().encode(raw));
+  return bytesToBase64(utf8Bytes(raw));
 }
 
 /** 把 `inLocation` 为 `'query'` 的 `apikey` 追加到 URL。 */

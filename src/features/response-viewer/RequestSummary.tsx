@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Globe } from 'lucide-react';
 import type { ApiResponse, StoredRequestSnapshot } from '@/types/domain';
 import { cn, formatBytes, formatDuration, methodColorVar, tryFormatJson } from '@/lib/utils';
-import { base64ToBytes } from '@/lib/base64';
+import { base64ToBytes, utf8Bytes } from '@/lib/base64';
 
 /**
  * 请求详情 —— 响应区左栏那份「这一次实际发出去的请求」。
@@ -76,7 +76,7 @@ function GeneralSection({
 }) {
   const bodyBytes = useMemo(() => {
     if (request.bodyBase64) return base64ToBytes(request.bodyBase64).length;
-    return request.body ? new TextEncoder().encode(request.body).length : 0;
+    return request.body ? utf8Bytes(request.body).length : 0;
   }, [request.body, request.bodyBase64]);
   return (
     <Section title="常规">

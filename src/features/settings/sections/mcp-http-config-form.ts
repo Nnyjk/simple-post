@@ -22,7 +22,7 @@ export const DEFAULT_MCP_HTTP_CONFIG: McpHttpConfig = {
   allowedOrigins: [],
 };
 
-export const MAX_PORT = 65535;
+const MAX_PORT = 65535;
 
 /**
  * 表单的工作态。有两个字段刻意不同于 `McpHttpConfig`：
@@ -59,7 +59,7 @@ export function parseList(text: string): string[] {
 }
 
 /** 把白名单数组渲染回一行一条的文本域形态。 */
-export function formatList(list: readonly string[]): string {
+function formatList(list: readonly string[]): string {
   return list.join('\n');
 }
 

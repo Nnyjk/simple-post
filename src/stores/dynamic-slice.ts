@@ -27,6 +27,7 @@ import type {
   ValueMode,
 } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { errorText } from '@/lib/error-text';
 import type { AppState } from './app-store';
 
 /** 新建一条定义时要填的字段。 */
@@ -152,7 +153,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       set({ dynamicVariables: views, dynamicError: null });
     } catch (e) {
       console.error('[store] dynamic_variables_list failed', e);
-      set({ dynamicError: messageOf(e) });
+      set({ dynamicError: errorText(e) });
     }
   },
 
@@ -177,7 +178,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       return created.id;
     } catch (e) {
       console.error('[store] dynamic_variables_create failed', e);
-      set({ dynamicError: messageOf(e) });
+      set({ dynamicError: errorText(e) });
       return null;
     }
   },
@@ -192,7 +193,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       return true;
     } catch (e) {
       console.error('[store] dynamic_variables_update failed', e);
-      set({ dynamicError: messageOf(e) });
+      set({ dynamicError: errorText(e) });
       return false;
     }
   },
@@ -205,7 +206,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       await get().loadDynamicVariables(scopeOf(get(), id));
     } catch (e) {
       console.error('[store] dynamic_variables_delete failed', e);
-      set({ dynamicError: messageOf(e) });
+      set({ dynamicError: errorText(e) });
     }
   },
 
@@ -249,7 +250,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       return { values: resolution.values, errors: resolution.errors };
     } catch (e) {
       console.error('[store] dynamic_variables_resolve failed', e);
-      set({ dynamicError: messageOf(e) });
+      set({ dynamicError: errorText(e) });
       return { values: {}, errors: [] };
     } finally {
       set({ dynamicResolving: false });
@@ -278,7 +279,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       await get().loadDynamicVariables(scopeOf(get(), id));
     } catch (e) {
       console.error('[store] dynamic_variables_set_override failed', e);
-      set({ dynamicError: messageOf(e) });
+      set({ dynamicError: errorText(e) });
     }
   },
 
@@ -305,7 +306,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       await get().loadDynamicVariables(scopeOf(get(), id));
     } catch (e) {
       console.error('[store] dynamic_variables_refresh failed', e);
-      set({ dynamicError: messageOf(e) });
+      set({ dynamicError: errorText(e) });
     } finally {
       set({ dynamicResolving: false });
     }
@@ -321,9 +322,4 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 function scopeOf(state: AppState, id: string): string | undefined {
   const definition = state.dynamicVariables.find((v) => v.id === id);
   return definition?.projectId ?? (state.activeProjectId || undefined);
-}
-
-/** 错误消息。`invokeCmd` 抛的是 Error，但外部来源的载荷未必是。 */
-function messageOf(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }

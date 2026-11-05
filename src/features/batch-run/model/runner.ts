@@ -5,6 +5,7 @@
  * 执行器不认识 HTTP：它只按顺序调用调用方给的 `send`，并把每一条的结论收齐，故它可以在
  * 没有后端的情况下测。
  */
+import { errorText } from '@/lib/error-text';
 import { buildReport } from './report';
 import type { BatchItem, BatchOutcome, BatchReport } from './types';
 
@@ -63,7 +64,7 @@ export async function runBatch(
         statusText: 'Error',
         durationMs: 0,
         failure: 'transport',
-        error: err instanceof Error ? err.message : String(err),
+        error: errorText(err),
       };
     }
     outcomes.push(outcome);

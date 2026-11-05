@@ -11,8 +11,8 @@ import type { EndpointDraft } from '@/stores/store-types';
  * 缺失 `endpoint_details` 行时的占位，让 effective 请求有类型可读。
  * 按引用共享：所有编辑器都是先展开再写，不会就地修改。
  */
-export const EMPTY_BODY: RequestBody = { mode: 'none', content: '' };
-export const EMPTY_AUTH: AuthConfig = { kind: 'none' };
+const EMPTY_BODY: RequestBody = { mode: 'none', content: '' };
+const EMPTY_AUTH: AuthConfig = { kind: 'none' };
 
 /**
  * 当前生效的请求配置：已存的 detail 叠上草稿。所有请求配置编辑器都写草稿而非该行，故这里是

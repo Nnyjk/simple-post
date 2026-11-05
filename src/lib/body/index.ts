@@ -187,7 +187,7 @@ export function parseFormFields(content: string): FormField[] {
  * 按 `&` 分行，每行按**第一个** `=` 分成键与值。值不做百分号解码：那份内容里存的是用户写下的
  * 原文，解码会把值里的 `%` 变成别的字符。
  */
-export function parseLegacyFormFields(content: string): FormField[] {
+function parseLegacyFormFields(content: string): FormField[] {
   if (!content) return [];
   return content
     .split('&')
