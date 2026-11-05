@@ -65,6 +65,16 @@ pub fn duplicate(
     }
     let detail = super::super::endpoint_details::get(conn, id)?;
     let now = crate::domain::now_ms();
+    // 副本紧跟原件，故排在原件之后的兄弟整体后移一位，给副本腾出位置。
+    // 不移位的话副本与那个兄弟共用同一个 `sort_order`，读侧按 `(sort_order, id)` 排序，
+    // 兄弟排在副本前面，副本就落到了它后面。
+    if let Some(parent_id) = node.parent_id.as_deref() {
+        conn.execute(
+            "UPDATE nodes SET sort_order = sort_order + 1 \
+             WHERE parent_id = ?1 AND sort_order > ?2",
+            params![parent_id, node.sort_order],
+        )?;
+    }
     let copy = ResourceNode {
         id: new_id
             .map(str::to_string)

@@ -101,7 +101,7 @@ pub struct ResourceNode {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResourceNodePatch {
     /// 改父。`None` 保持原父不动；显式 `Some(None)` 把节点提到项目顶层，这只对模块合法。
     #[serde(default, deserialize_with = "super::double_option")]
@@ -172,7 +172,7 @@ pub struct EndpointDetail {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EndpointDetailPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<HttpMethod>,

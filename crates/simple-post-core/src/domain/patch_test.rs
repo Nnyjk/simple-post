@@ -59,6 +59,19 @@ fn node_patch_distinguishes_absent_from_null() {
 }
 
 #[test]
+fn a_patch_with_an_unknown_field_is_rejected() {
+    // 字段名写错必须报错：serde 静默丢弃未知键的话，调用方以为改成功了，
+    // 而库里的行一字未动。
+    let err = serde_json::from_value::<ResourceNodePatch>(json!({ "sort_order": 5 })).unwrap_err();
+    assert!(err.to_string().contains("sort_order"), "got {err}");
+
+    let err =
+        serde_json::from_value::<EndpointDetailPatch>(json!({ "baseUrlOveride": "https://e1" }))
+            .unwrap_err();
+    assert!(err.to_string().contains("baseUrlOveride"), "got {err}");
+}
+
+#[test]
 fn a_default_patch_is_empty() {
     assert!(ResourceNodePatch::default().is_empty());
     assert!(EndpointDetailPatch::default().is_empty());

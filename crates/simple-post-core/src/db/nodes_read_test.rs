@@ -190,6 +190,42 @@ fn search_does_not_match_a_null_url_on_a_non_endpoint() {
 }
 
 #[test]
+fn search_treats_like_wildcards_as_literal_text() {
+    // 搜索词里的 `%` 与 `_` 按字面量匹配：当通配符用时，搜 `50%` 会命中整个库，
+    // 搜 `a_c` 会命中 `abc`。
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+
+    let got = db::with_conn(&pool, |c| search(c, "%")).unwrap();
+    assert!(got.is_empty(), "% must not match every node: {got:?}");
+
+    let got = db::with_conn(&pool, |c| search(c, "e_")).unwrap();
+    assert!(got.is_empty(), "_ must not match one character: {got:?}");
+
+    let got = db::with_conn(&pool, |c| search(c, "e1")).unwrap();
+    assert_eq!(got.len(), 1, "a plain term still matches: {got:?}");
+}
+
+#[test]
+fn search_paths_treats_like_wildcards_as_literal_text() {
+    // 动态变量的数据源选择器走的是这条搜索路径，故它也得按字面量匹配。
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+
+    let got = db::with_conn(&pool, |c| search_paths(c, "%", 10)).unwrap();
+    assert!(got.is_empty(), "% must not match every endpoint: {got:?}");
+
+    let got = db::with_conn(&pool, |c| search_paths(c, "e1", 10)).unwrap();
+    assert_eq!(got.len(), 1, "a plain term still matches: {got:?}");
+}
+
+#[test]
 fn duplicate_copies_the_endpoint_and_its_configuration() {
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
@@ -259,6 +295,35 @@ fn duplicate_adopts_the_id_the_caller_chose() {
         db::with_conn(&pool, |c| get(c, "picked-here")).unwrap().id,
         "picked-here"
     );
+}
+
+#[test]
+fn a_duplicate_lands_right_after_the_original() {
+    // 副本紧跟原件：排在原件之后的兄弟整体后移一位，副本才有自己的位置。
+    // 不移位的话副本与那个兄弟共用同一个 `sort_order`，读侧按 `(sort_order, id)`
+    // 排序，兄弟排在副本前面，副本就落到了它后面。
+    //
+    // 兄弟的 id 刻意比副本的 id 小（`e2` 对 `e9-copy`）：排序的第二关键字是 id，
+    // 故两个节点重号时谁在前由 id 决定。用例要能抓住「副本被挤到兄弟后面」，
+    // 就得让兄弟的 id 排在副本前面。
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e9", "c1", 0);
+    put(&pool, &e, Some(&d));
+    let (e2, d2) = endpoint("p1", "e2", "c1", 1);
+    put(&pool, &e2, Some(&d2));
+
+    db::with_tx(&pool, |c| duplicate(c, "e9", Some("e9-copy"))).unwrap();
+
+    let ids: Vec<String> = db::with_conn(&pool, |c| {
+        list_by_root_and_type(c, "p1", ResourceNodeType::Endpoint)
+    })
+    .unwrap()
+    .iter()
+    .map(|n| n.id.clone())
+    .collect();
+    assert_eq!(ids, vec!["e9", "e9-copy", "e2"]);
 }
 
 // ---------------------------------------------------------------------------
