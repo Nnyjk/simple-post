@@ -1,16 +1,18 @@
 // crates/simple-post-mcp/src/main.rs
 //
-// 独立 MCP 入口。以 stdin/stdout 上的 JSON-RPC 对接运行中的
-// `simple-post serve-web`。
+// 独立 MCP 入口。以 stdin/stdout 上的 JSON-RPC 对接运行中的 MCP 守护进程。
 //
 // 用法：
-//   simple-post-mcp                                       # stdio to localhost:4173
-//   simple-post-mcp --url=http://B:4173 --password=<tok>  # cross-machine
+//   simple-post-mcp                                       # stdio to the running daemon
+//   simple-post-mcp --url=http://B:4174 --password=<tok>  # cross-machine
 //   simple-post-mcp --transport=http --port=4333         # expose /mcp over HTTP
 //   simple-post-mcp --capability=read_only               # belt-and-suspenders filter
 //
 // 每个 flag 都能用环境变量代替（SIMPLE_POST_WEB_URL /
 // SIMPLE_POST_WEB_PASSWORD / SIMPLE_POST_MCP_CAPABILITY），两者同时给时 flag 优先。
+//
+// 不给 --url 时从 `mcp.port` 文件里发现运行中的守护进程端口。MCP 的端点不在主
+// 端口上，故这里不能拿主端口的地址当默认值——那样连过去只会拿到 SPA 壳。
 
 use std::io::IsTerminal;
 use std::process::ExitCode;
@@ -28,14 +30,13 @@ use simple_post_mcp::http_client::WebClient;
     about = "Standalone MCP bridge for Simple Post (stdio/HTTP client → simple-post-mcp daemon)"
 )]
 struct Cli {
-    /// URL of the running `simple-post serve-web` instance.
+    /// Base URL of the running MCP daemon.
     /// Env override: `SIMPLE_POST_WEB_URL`.
-    #[arg(
-        long,
-        env = "SIMPLE_POST_WEB_URL",
-        default_value = "http://localhost:4173"
-    )]
-    url: String,
+    ///
+    /// 省略时从 `mcp.port` 文件里发现运行中的守护进程端口。MCP 的端点是那个
+    /// 守护进程自己的监听端口，主端口不提供 MCP。
+    #[arg(long, env = "SIMPLE_POST_WEB_URL")]
+    url: Option<String>,
 
     /// Optional bearer password for password-protected web backends.
     /// Env override: `SIMPLE_POST_WEB_PASSWORD`.
@@ -84,7 +85,25 @@ async fn main() -> ExitCode {
         },
     };
 
-    let client = WebClient::new(cli.url.clone(), cli.password.clone());
+    // 没给地址就从 `mcp.port` 文件里发现运行中的守护进程端口。MCP 的端点是那个
+    // 守护进程自己的监听端口，主端口不提供 MCP——拿主端口的地址当默认值只会连到
+    // 一个 SPA 壳上。
+    let base_url = match cli.url.clone() {
+        Some(u) => u,
+        None => match simple_post_core::port_file::read_port() {
+            Some(port) => format!("http://127.0.0.1:{port}"),
+            None => {
+                eprintln!(
+                    "[simple-post-mcp] 找不到运行中的 MCP 守护进程：没有可读的 {}",
+                    simple_post_core::port_file::FILE_NAME
+                );
+                eprintln!("[simple-post-mcp] 先启动 Simple Post（桌面端或 serve-web），或用 --url 指定地址。");
+                return ExitCode::from(2);
+            }
+        },
+    };
+
+    let client = WebClient::new(base_url, cli.password.clone());
     if std::env::var_os("SIMPLE_POST_MCP_DEBUG_HANDSHAKE").is_some() {
         match client.healthz().await {
             Ok(v) => eprintln!("[simple-post-mcp] handshake ok: {v}"),

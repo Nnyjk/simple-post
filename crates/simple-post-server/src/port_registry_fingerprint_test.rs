@@ -4,8 +4,7 @@
 //! 全部是对纯函数的断言：不设环境变量、不写文件，故不会与别的测试抢
 //! `SIMPLE_POST_DATA_DIR`。
 
-use super::record::{parse_entry, serialize_entry, CONFIG_FINGERPRINT_KEY};
-use super::PortRecord;
+use super::{parse_entry, serialize_entry, PortRecord, CONFIG_FINGERPRINT_KEY};
 
 fn sample() -> PortRecord {
     PortRecord::new(0, 41234, "127.0.0.1", "C:\\scratch")
