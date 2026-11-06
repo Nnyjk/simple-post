@@ -64,10 +64,51 @@ describe('标签条动画的结构约定', () => {
     assert.match(code, /scrollTargetForActiveTab\(/);
     assert.match(code, /gsap\.to\(strip/);
     assert.match(code, /scrollLeft:\s*target/);
+    // 直接赋值 scrollLeft 就是瞬间挪一截，不参与任何动画。滚轮那条是另一回事：
+    // 它改的是 `el.scrollLeft`（滚轮自己的增量），不在这一行的禁止范围内。
+    assert.doesNotMatch(code, /\bstrip\.scrollLeft\s*=[^=]/);
   });
 
-  it('上一次补间在下一轮开始前落定', () => {
-    assert.match(code, /tween\.progress\(1\)/);
+  it('上一次补间在下一轮开始前落定，且落定时要还原标签样式', () => {
+    // 落定必须在清理函数里：写在效果体里，落定的就是**这一轮**的补间，而不是上一轮。
+    assert.match(code, /return \(\) => \{[^}]*tween\.progress\(1\)/);
+    // suppressEvents 会把 GSAP 还原标签样式的回调一起抑制掉，标签就此停在绝对定位上，
+    // 条的内容宽度从此算不对。
+    assert.doesNotMatch(code, /progress\(1\s*,\s*true\)/);
+  });
+
+  it('新出现的标签被并进 Flip 的那份记录', () => {
+    // 不并进去的话，Flip 会把它当成进入元素：它留在文档流里，其余标签被 Flip 移出
+    // 文档流之后，它会退回条的最左边，与第一个标签重叠。
+    assert.match(code, /previous\.add\(\s*Flip\.getState\(\s*entering\s*\)\s*\)/);
+  });
+
+  it('滚动结束后重新记录布局', () => {
+    // Flip 记的是视口坐标：条滚动过之后那份记录就过期了，下一次增删标签会先横跳一截。
+    assert.match(code, /onComplete:\s*\(\)\s*=>\s*captureFlipState\(\)/);
+  });
+
+  it('滚轮滚动之后重新记录布局', () => {
+    assert.match(code, /scheduleFlipStateRefresh\(\)/);
+  });
+
+  it('目标已在可视范围时停掉上一次滚动', () => {
+    // 不停掉的话，上一次滚动会继续往旧标签那边滑，把刚点开的标签带出视野。
+    assert.match(code, /if \(target === null\) \{[^}]*gsap\.killTweensOf\(strip\)/);
+  });
+
+  it('滚轮滚动之前停掉程序滚动', () => {
+    // 程序滚动那个补间每帧都在写 scrollLeft，会把滚轮的结果抹掉。
+    assert.match(code, /onWheel[\s\S]{0,600}?gsap\.killTweensOf\(el\)/);
+  });
+
+  it('Flip 补间还在跑时不立刻滚动', () => {
+    // 此刻标签的位置是动画中途的位置，算出来的滚动目标是错的。
+    // 这道守卫在「立刻滚动」那个效果里，不是文件里任意一处。
+    assert.match(
+      code,
+      /if \(tabsChanged\) return;[\s\S]{0,300}?if \(flipRunningRef\.current\) return;/,
+    );
   });
 
   it('位置补间不再走 useGSAP 的清理函数', () => {

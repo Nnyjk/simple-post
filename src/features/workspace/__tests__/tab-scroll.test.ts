@@ -69,4 +69,10 @@ describe('scrollTargetForActiveTab', () => {
     // 目标的左缘已经贴着条的左缘（256），算出来的目标位置与当前滚动位置相同 → 不滚。
     assert.equal(scrollTargetForActiveTab(host, { left: 256, right: 300 }), null);
   });
+
+  it('差不足半个像素时也不滚', () => {
+    const host = makeHost({ scrollLeft: 200, scrollWidth: 2000, clientWidth: 1000 });
+    // 目标左缘 255.75，条的左缘 256 → 只差 0.25px，不滚。
+    assert.equal(scrollTargetForActiveTab(host, { left: 255.75, right: 300 }), null);
+  });
 });
