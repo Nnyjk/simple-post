@@ -5,20 +5,17 @@ name: Publish Container Image
 # `docker build` + `docker push` against a registry they had to provision.
 # This closes that: one `v*` tag produces both the desktop installers and a
 # multi-arch image.
+#
+# 镜像标签由 git tag 决定，本工作流不提供手动输入的标签参数。
 
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to publish (leave empty to use ref name)'
-        required: false
-        default: ''
 
 concurrency:
-  group: publish-image-${{ inputs.tag || github.ref_name }}
+  group: publish-image-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -28,6 +25,9 @@ permissions:
 jobs:
   publish:
     name: Build and push linux/amd64 + linux/arm64
+    # 只有 `v*` tag 触发发布。手动 dispatch 选了分支时 `github.ref_name` 是分支名，
+    # 那次构建是还没发布的代码，故它不许占用 `latest`。
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -58,7 +58,8 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+            # 预发布版（`v0.2.0-rc1`）不许占用 `latest`：它不是给普通用户装的那一份。
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
             # `{{version}}` 把 git tag 的 `v` 去掉（`v0.1.2` → `0.1.2`），而
             # release.yml 的说明里写的是 `:${{ github.ref_name }}`，那带 `v`。
             # 两种拼法都推一份，说明里的命令才是真的能拉下来的那一条。

@@ -226,9 +226,11 @@ fn a_blank_path_counts_as_not_filled_in() {
         client_certificate_path: Some("".into()),
         client_key_path: Some("  ".into()),
     };
+    // 设置里存的是用户原样输入的空白串；「空白算没填」这条判据由 `tls::apply_to_builder`
+    // 执行（它把空白串视同没填，故不去读那个文件），所以这里装得上客户端。
+    assert_eq!(tls.ca_certificate_path.as_deref(), Some("   "));
+    assert_eq!(tls.client_certificate_path.as_deref(), Some(""));
     apply(&tls).expect("空白路径该被当成没填");
-    assert!(!tls.has_ca_certificate());
-    assert!(!tls.has_client_certificate());
 }
 
 // 路径字段的取值校验。

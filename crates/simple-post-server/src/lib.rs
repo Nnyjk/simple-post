@@ -44,7 +44,7 @@ pub mod port_registry;
 /// 项目与资源树节点的创建编排。Tauri 命令与 REST 路由都只调它，故两条 transport
 /// 不必各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod project_api;
-/// 一份接口规格的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必
+/// 一份接口规格的编排层。REST 路由与 MCP 工具都只调它，故两个宿主不必
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod spec_api;
 pub mod web_api;
@@ -52,7 +52,7 @@ pub mod web_api;
 // 再导出共享的底层，好让调用点在 workspace 抽取与本次 crate 拆分之后继续使用
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /
 // `crate::permissions::*` / `crate::http_executor::*` / `crate::mcp::*`。
-// `spec` 也在其中：一份接口规格的线格式与落库编排在 core，三个宿主都认它。
+// `spec` 也在其中：一份接口规格的线格式与落库编排在 core，两个宿主都认它。
 pub use simple_post_core::{db, domain, error, http_executor, oauth2, permissions, script, spec};
 
 // `mcp-proxy` 的入口住在 `cli` 模块里（与另两个子命令同处），再导出一次保持

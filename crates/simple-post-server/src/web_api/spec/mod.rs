@@ -8,7 +8,7 @@
 //! 稳定性分级：
 //!   * `public`   —— 端点形状、鉴权、响应码稳定。破坏性变更需走 `/api/v2/*` 迁移。
 //!   * `internal` —— 无版本承诺，只供 UI / supervisor 使用。internal 端点不进本表，
-//!     故 `RouteSpec::stability` 目前只取 `"public"`。
+//!     故本表里的每一行都是 `public`。
 //!
 //! 本表为手工维护，**故意**不枚举每一条 axum 路由绑定。MCP 的 JSON-RPC 端点不在
 //! 主端口上，它由守护进程自己那个监听端口提供，属另一套契约。
@@ -32,9 +32,6 @@ pub struct RouteSpec {
     pub path: &'static str,
     /// OpenAPI 文档里的简短说明。
     pub summary: &'static str,
-    /// 稳定性标记。表里的每一行都是 `"public"`；标为 internal 的端点不进本表，
-    /// 所以这个字段目前只有一个取值。OpenAPI dumper 把它写成 `x-stability`。
-    pub stability: &'static str,
     /// 可选的请求体形状名（由 OpenAPI dumper 查表）。`None` 表示无请求体，
     /// 或该形状尚未记录。
     pub request: Option<&'static str>,
@@ -58,7 +55,6 @@ pub struct RouteSpec {
 //   GET  /api/mcp/status               - daemon 生命周期快照
 //   GET  /api/mcp/logs                 - daemon 日志 tail
 //   POST /api/mcp/restart              - 重启 daemon
-//   GET  /api/mcp/proxy-path           - `simple-post-mcp` 二进制的路径
 //   GET  /api/mcp/capability           - 能力策略
 //   PUT  /api/mcp/capability
 //   GET  /api/mcp/capability/tools     - 当前策略下可见的工具名

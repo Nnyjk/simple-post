@@ -101,7 +101,7 @@ pub struct ResourceNode {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResourceNodePatch {
     /// 改父。`None` 保持原父不动；显式 `Some(None)` 把节点提到项目顶层，这只对模块合法。
     #[serde(default, deserialize_with = "super::double_option")]
@@ -114,6 +114,25 @@ pub struct ResourceNodePatch {
     pub description: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort_order: Option<i64>,
+    /// 资源自己的身份字段：`id` / `rootId` / `kind` / `createdAt` / `updatedAt`。
+    ///
+    /// 「取回再改再写回」是公开契约：客户端 GET 一个节点，改一处，再把整个 body PATCH
+    /// 回去。补丁类型带 `deny_unknown_fields`，故它必须认得资源自己的每一个字段名，
+    /// 否则这条往返从一个 400 开始。
+    ///
+    /// 这几个字段只被**接受**，不被写入：节点的身份由路径里的 id 决定，而创建与更新时间
+    /// 由写路径自己盖。它们用 `skip_serializing` 而不是 `skip_serializing_if`：它们不
+    /// 指向任何可写列，故不该让 `is_empty` 读起来像「有东西要写」。
+    #[serde(default, skip_serializing)]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub root_id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub kind: Option<ResourceNodeType>,
+    #[serde(default, skip_serializing)]
+    pub created_at: Option<i64>,
+    #[serde(default, skip_serializing)]
+    pub updated_at: Option<i64>,
 }
 
 impl ResourceNodePatch {
@@ -172,7 +191,7 @@ pub struct EndpointDetail {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EndpointDetailPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<HttpMethod>,
@@ -216,6 +235,10 @@ pub struct EndpointDetailPatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls: Option<Option<TlsSettings>>,
+    /// 这份配置属于哪个节点。客户端 GET 一份配置再 PATCH 回去时会把它一起带回来，故
+    /// 补丁类型认得它——但它只被**接受**，不被写入：节点的 id 由路径决定。
+    #[serde(default, skip_serializing)]
+    pub node_id: Option<String>,
 }
 
 impl EndpointDetailPatch {

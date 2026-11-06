@@ -25,7 +25,7 @@
 
 use std::collections::BTreeSet;
 
-use simple_post_core::domain::{AuthConfig, HttpMethod, KeyValue, RequestBody, ResourceNodeType};
+use simple_post_core::domain::{AuthConfig, HttpMethod, KeyValue, RequestBody};
 
 use crate::diagnostics::Diagnostic;
 
@@ -183,22 +183,6 @@ impl IrEndpoint {
     }
 }
 
-/// `child` 能否挂在 `parent` 类型的节点下。落库前的预检，与 [`ResourceNodeType::may_under`]
-/// 同一个矩阵，故只有一处真相。
-/// 错误消息同时点名父子两种类型：落库前仍要报得出**是哪一对**冲突——真正走到这一步的是外来
-/// 格式把一棵畸形树翻译过来的情形。
-pub fn may_contain(parent: ResourceNodeType, child: ResourceNodeType) -> Result<(), String> {
-    if child.may_under(parent) {
-        Ok(())
-    } else {
-        Err(format!(
-            "a {} cannot sit under a {}",
-            child.as_str(),
-            parent.as_str()
-        ))
-    }
-}
-
 impl IrCollection {
     /// 这棵子树里的 endpoint 数量，含所有层级。落库方用它报告「将新增几个接口」，
     /// 故必须与实际写进去的行数一致——递归是唯一算得准的地方。
@@ -311,7 +295,7 @@ impl Exchange {
     }
 }
 
-// 测试——IR 的树形与前置检查。
+// 测试——IR 的树形计数与父子矩阵。
 
 #[cfg(test)]
 #[path = "ir_test.rs"]

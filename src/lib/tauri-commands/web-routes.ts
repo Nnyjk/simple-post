@@ -51,10 +51,6 @@ export function buildQuery(params: Record<string, unknown>): string {
 export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // ----- projects -----
   [COMMANDS.projectsList]: { method: 'GET', path: () => '/api/projects' },
-  [COMMANDS.projectsGet]: {
-    method: 'GET',
-    path: (a) => `/api/projects/${encodeURIComponent(String(a.id))}`,
-  },
   [COMMANDS.projectsCreate]: { method: 'POST', path: () => '/api/projects' },
   [COMMANDS.projectsUpdate]: {
     method: 'PATCH',
@@ -72,10 +68,6 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.nodesList]: {
     method: 'GET',
     path: (a) => `/api/nodes${buildQuery({ rootId: a.rootId, type: a.type, q: a.query })}`,
-  },
-  [COMMANDS.nodesGet]: {
-    method: 'GET',
-    path: (a) => `/api/nodes/${encodeURIComponent(String(a.id))}`,
   },
   // 懒加载层级树：展开一个节点只取它的直接孩子；给项目 id 则取那个项目的模块。
   [COMMANDS.nodesChildren]: {
@@ -134,10 +126,6 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     body: (a) => ({ newId: a.newId ?? null }),
   },
   [COMMANDS.endpointDetailsList]: { method: 'GET', path: () => '/api/endpoint-details' },
-  [COMMANDS.endpointDetailGet]: {
-    method: 'GET',
-    path: (a) => `/api/nodes/${encodeURIComponent(String(a.nodeId))}/endpoint-detail`,
-  },
   [COMMANDS.endpointDetailUpdate]: {
     method: 'PATCH',
     path: (a) => `/api/nodes/${encodeURIComponent(String(a.nodeId))}/endpoint-detail`,
@@ -342,17 +330,6 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: () => '/api/interchange/export/document',
   },
 
-  // ----- interface specs -----
-  // 请求体就是那份规格本身，不带外层包装：它与 MCP 工具 `spec_upsert` 的参数
-  // 逐字段相同，故一份规格可以从 MCP 客户端原样搬到 HTTP 调用方。
-  //
-  // 字段名两种拼写都收（`project_id` 与 `projectId`）：服务端落在同一个类型上。
-  [COMMANDS.specUpsert]: {
-    method: 'POST',
-    path: () => '/api/spec/upsert',
-    body: (a) => a.spec,
-  },
-
   // ----- OAuth 2.0 -----
   // 与 Tauri 命令同一个 `OAuth2TokenRequest`（`{ auth, manual?, force?, vars? }`），
   // 故请求体就是 args 本身，两种形态无需翻译。`vars` 是变量池，后端用它替换 OAuth2
@@ -380,10 +357,6 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.mcpDaemonRestart]: {
     method: 'POST',
     path: () => '/api/mcp/restart',
-  },
-  [COMMANDS.mcpDaemonProxyPath]: {
-    method: 'GET',
-    path: () => '/api/mcp/proxy-path',
   },
   // 同上面 `request_settings_*`：走 preferences。
   [COMMANDS.mcpAutoStartGet]: {

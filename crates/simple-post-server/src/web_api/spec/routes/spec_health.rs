@@ -7,7 +7,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         method: "GET",
         path: "/api/healthz",
         summary: "Liveness probe (no auth)",
-        stability: "public",
         request: None,
         response: Some("HealthzResponse"),
     }]

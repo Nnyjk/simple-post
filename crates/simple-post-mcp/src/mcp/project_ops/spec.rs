@@ -13,7 +13,7 @@
 //! ## 编排住在 core，不在这里
 //!
 //! 落库的编排在 [`simple_post_core::spec::upsert`]，因为同一份规格的语义要在 REST
-//! 路由、桌面 command 与这个工具三处一致。写在某一侧，另一侧就会静默少一半。
+//! 路由与这个工具两处一致。写在某一侧，另一侧就会静默少一半。
 //! 本文件只做三件事：反序列化规格、过权限门、把结果与「还缺什么」组装成响应。
 
 use serde_json::{json, Value};
@@ -242,8 +242,9 @@ pub(in crate::mcp::project_ops) async fn tool_spec_upsert(
     // 门没过就返回拒绝，库里一个字节都不动。
     crate::mcp::check_permission(&state.pool, spec.project_id.trim(), "spec_upsert").await?;
 
-    // 落库与「还缺什么」由 `crate::spec::ops` 一处实现：REST 路由与桌面 command
-    // 走的是同一段，故三个宿主回的是同一份形状，agent 与脚本不必各自再挖两级。
+    // 落库与「还缺什么」由 `crate::spec::ops` 一处实现：REST 路由经
+    // `simple_post_server::spec_api::upsert` 转发到同一个函数，故两个宿主回的是
+    // 同一份形状，agent 与脚本不必各自再挖两级。
     let result = crate::spec::ops::upsert(&state.pool, &spec)?;
 
     Ok(CallToolResult::json(

@@ -250,7 +250,6 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         .route("/api/mcp/start", post(mcp_start))
         .route("/api/mcp/stop", post(mcp_stop))
         .route("/api/mcp/restart", post(mcp_restart))
-        .route("/api/mcp/proxy-path", get(mcp_proxy_path))
         // ---- mcp capability policy ----
         .route(
             "/api/mcp/capability",

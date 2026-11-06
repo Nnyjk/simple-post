@@ -11,6 +11,7 @@ import type { StateCreator } from 'zustand';
 import type { EndpointDetail, Environment, Project, ResourceNode } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { pickCurrentEnvironment } from '@/lib/env-default';
+import { errorText } from '@/lib/error-text';
 import type { AppState } from './app-store';
 import {
   loadRequestSettings,
@@ -332,7 +333,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
           loading: false,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = errorText(error);
         console.error('[store] bootstrap failed', error);
         // 保留已有数据并暴露错误状态，不把任何列表失败伪装成空数组。
         set({ loading: false, bootstrapError: message });
@@ -397,7 +398,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
             };
           });
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = errorText(error);
           console.error('[store] workspace load failed', error);
           // 只有当前那一趟才报它的失败：被后一趟取代的失败是过期消息，写上去会让「树已读回来」与「读取失败」同时挂在屏幕上。
           if (inFlight === local) {

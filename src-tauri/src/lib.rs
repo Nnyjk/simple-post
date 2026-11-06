@@ -28,11 +28,11 @@ pub use simple_post_mcp::{daemon_http, mcp};
 
 // 无头宿主整体转发：用 `pub use` 而非逐个包装函数，`commands/` 才不必因拆 crate 而改。
 // `interchange_api` 与 `dynamic_api` 在其中：导入 / 导出与动态变量的逻辑住在 server crate，
-// 好让 Tauri 命令与 REST 路由调同一个函数。`spec_api` 同理 —— 一份接口规格的落库编排。
+// 好让 Tauri 命令与 REST 路由调同一个函数。
 // `project_api` 也是 —— 项目、服务与资源树节点的创建编排。
 pub use simple_post_server::{
     auth, cli, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry,
-    project_api, spec_api, web_api,
+    project_api, web_api,
 };
 
 // CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
@@ -158,12 +158,10 @@ pub fn run() {
             http_request,
             // 刻意没有「按 endpoint 发送」的命令：前端组装完整请求后交给 `http_request`。
             crate::commands::projects_list,
-            crate::commands::projects_get,
             crate::commands::projects_create,
             crate::commands::projects_update,
             crate::commands::projects_delete,
             crate::commands::nodes_list,
-            crate::commands::nodes_get,
             crate::commands::nodes_children,
             crate::commands::nodes_search_paths,
             crate::commands::nodes_create,
@@ -171,7 +169,6 @@ pub fn run() {
             crate::commands::nodes_delete,
             crate::commands::nodes_move,
             crate::commands::nodes_duplicate,
-            crate::commands::endpoint_detail_get,
             crate::commands::endpoint_details_list,
             crate::commands::endpoint_detail_update,
             crate::commands::node_scripts_get,
@@ -212,7 +209,6 @@ pub fn run() {
             crate::commands::mcp_daemon_start,
             crate::commands::mcp_daemon_stop,
             crate::commands::mcp_daemon_restart,
-            crate::commands::mcp_daemon_proxy_path,
             crate::commands::mcp_auto_start_get,
             crate::commands::mcp_auto_start_set,
             crate::commands::mcp_capability_get,
@@ -226,9 +222,6 @@ pub fn run() {
             crate::commands::interchange_import_commit,
             crate::commands::interchange_export_preview,
             crate::commands::interchange_export_document,
-            // 一份接口规格：一次调用落一整份（模块 / 集合路径 / 环境 / 服务 / 端点）。
-            // 逻辑在 `crate::spec_api`，REST 侧同名路由调的是同一批函数。
-            crate::commands::spec_upsert,
         ])
         .setup(|app| {
             // 先读持久化的 mcp.auto_start（默认 false，需用户在设置里开启）再拉 supervisor。

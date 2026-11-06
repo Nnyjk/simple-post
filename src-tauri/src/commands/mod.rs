@@ -57,4 +57,3 @@ pub use permissions::*;
 pub use projects::*;
 pub use request_settings::*;
 pub use response_history::*;
-pub use spec::*;

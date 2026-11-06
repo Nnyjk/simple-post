@@ -220,10 +220,6 @@ pub(crate) async fn mcp_restart(
     Ok(Json(result))
 }
 
-pub(crate) async fn mcp_proxy_path() -> String {
-    crate::http_config::mcp_proxy_path()
-}
-
 #[cfg(test)]
 #[path = "mcp_test.rs"]
 mod tests;

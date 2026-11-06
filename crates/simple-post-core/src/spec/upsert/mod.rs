@@ -11,8 +11,8 @@
 //!
 //! ## 为什么编排住在 core
 //!
-//! 因为同一份规格的语义要在三个宿主里一致：`simple-post-server` 的 REST 路由、
-//! `simple-post-mcp` 的工具、Tauri command。编排写在某一侧，另一侧就会静默少一半
+//! 因为同一份规格的语义要在两个宿主里一致：`simple-post-server` 的 REST 路由与
+//! `simple-post-mcp` 的工具。编排写在某一侧，另一侧就会静默少一半
 //! —— 这正是本仓库反复强调的 dual-transport invariant。本模块只做落库，
 //! 不发请求、不拼 HTTP 请求，故它不依赖 axum，也不依赖 Tauri。
 //!

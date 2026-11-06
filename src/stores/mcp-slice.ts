@@ -16,6 +16,7 @@
  */
 import type { StateCreator } from 'zustand';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { errorText } from '@/lib/error-text';
 import type {
   DaemonControlResult,
   McpLogTail,
@@ -342,7 +343,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
       console.error('[store] mcp_daemon_restart failed', e);
       // 这里把失败摆到徽标上——对话框会读 lastError。
       const cur = get().mcpStatus;
-      const lastError = e instanceof Error ? e.message : String(e);
+      const lastError = errorText(e);
       set({
         mcpStatus: cur
           ? { ...cur, status: 'crashed', lastError }
@@ -372,7 +373,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
     } catch (e) {
       console.error('[store] mcp_daemon_start failed', e);
       const cur = get().mcpStatus;
-      const lastError = e instanceof Error ? e.message : String(e);
+      const lastError = errorText(e);
       set({
         mcpStatus: cur
           ? { ...cur, status: 'crashed', lastError }

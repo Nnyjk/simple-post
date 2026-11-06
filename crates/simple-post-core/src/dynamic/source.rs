@@ -39,19 +39,21 @@ pub fn source_context(pool: &db::DbPool, def: &DynamicVariable) -> Result<Source
     };
 
     let project_id = db::with_conn(pool, |c| db::nodes::root_id_of(c, endpoint_id))?;
-    let module_id = db::with_conn(pool, |c| db::nodes::module_id_of(c, endpoint_id))
-        .ok()
-        .flatten();
-    let project = db::with_conn(pool, |c| db::projects::get(c, &project_id))
-        .unwrap_or_else(|_| Project::empty());
+    let module_id = db::with_conn(pool, |c| db::nodes::module_id_of(c, endpoint_id))?;
+    let project = db::with_conn(pool, |c| db::projects::get(c, &project_id))?;
 
     // 环境：点名的那个优先。没点名就用项目里的第一个——环境按名字排序，故「第一个」
     // 与用户在选择器里看到的头一个一致。
     let env = match def.source_environment_id.as_deref() {
-        Some(env_id) => db::with_conn(pool, |c| db::environments::get(c, env_id)).ok(),
-        None => db::with_conn(pool, |c| db::environments::list_by_project(c, &project_id))
-            .ok()
-            .and_then(|list| list.into_iter().next()),
+        Some(env_id) => match db::with_conn(pool, |c| db::environments::get(c, env_id)) {
+            Ok(env) => Some(env),
+            // 环境行已被删掉：外键把它置空，故这一格本就没有环境。
+            Err(AppError::NotFound(_)) => None,
+            Err(e) => return Err(e),
+        },
+        None => db::with_conn(pool, |c| db::environments::list_by_project(c, &project_id))?
+            .into_iter()
+            .next(),
     };
 
     Ok(SourceContext {

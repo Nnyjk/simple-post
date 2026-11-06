@@ -1,8 +1,8 @@
-//! IR 的树形计数与父子矩阵预检。
+//! IR 的树形计数与父子矩阵。
 
 use simple_post_core::domain::{HttpMethod, ResourceNodeType};
 
-use super::{may_contain, IrCollection, IrEndpoint, IrModule};
+use super::{IrCollection, IrEndpoint, IrModule};
 use crate::diagnostics::{Diagnostic, Severity};
 
 fn ep(name: &str) -> IrEndpoint {
@@ -54,16 +54,16 @@ fn placement_allows_the_documented_pairs() {
         (Collection, Collection),
         (Collection, Endpoint),
     ] {
-        assert_eq!(may_contain(parent, child), Ok(()), "{parent:?} → {child:?}");
+        assert!(child.may_under(parent), "{parent:?} → {child:?}");
     }
 }
 
 #[test]
 fn placement_rejects_a_module_under_a_module() {
     use ResourceNodeType::*;
-    let err = may_contain(Module, Module).unwrap_err();
-    // 错误必须同时点名父子，否则用户看不出该改哪一处。
-    assert_eq!(err, "a module cannot sit under a module");
+    // 父子矩阵的唯一实现是 domain 里的 `may_under`，IR 侧不再留第二份副本；
+    // 冲突的消息由落库那层（`db::nodes::create`）去报。
+    assert!(!Module.may_under(Module));
 }
 
 #[test]

@@ -18,7 +18,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
                       selectable intermediate form; writes nothing. Either `content` \
                       or `url`; URL mode echoes the fetched text back as \
                       `resolvedContent` so the commit does not fetch twice",
-            stability: "public",
             request: Some("ImportPreviewOpts"),
             response: Some("ImportPreviewDto"),
         },
@@ -28,7 +27,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             summary: "Re-parse the same content and land the endpoints whose keys \
                       are in `selected` under the given module, together with the \
                       source environments, in one transaction",
-            stability: "public",
             request: Some("ImportCommitOpts"),
             response: Some("ImportCommitDto"),
         },
@@ -38,7 +36,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             summary: "List a module's subtree as export candidates, with the \
                       per-module service URLs resolved under the named environment, \
                       or under the project's default environment when none is named",
-            stability: "public",
             request: Some("ExportPreviewOpts"),
             response: Some("ExportPreviewDto"),
         },
@@ -47,7 +44,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
             path: "/api/interchange/export/document",
             summary: "Render the selected endpoints as an OpenAPI 3.0 document in \
                       the requested format; reads only, returns the document text",
-            stability: "public",
             request: Some("ExportDocumentOpts"),
             response: Some("ExportDocumentDto"),
         },

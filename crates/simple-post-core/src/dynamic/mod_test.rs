@@ -477,6 +477,28 @@ async fn a_resolution_fetches_the_value_and_caches_it() {
     );
 }
 
+/// 取数上下文造不出来时，这一次解析按缺失处理并记一条错误，而不是让整次发送中止。
+#[tokio::test]
+async fn a_source_context_that_cannot_be_built_leaves_the_variable_missing() {
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("[]");
+    let mut def = definition(60, false);
+    // 数据源端点已经被删掉。外键会把它置空，但定义对象可能是删除之前读出来的那一份，
+    // 故这条路径真的会走到「端点不在了」。
+    def.source_endpoint_id = Some("已经删掉的端点".into());
+
+    let status = resolve_definition(&ctx, &def, false, &fetcher)
+        .await
+        .expect("按缺失处理，不该中止整次发送");
+    assert!(status.value.is_none());
+    assert_eq!(status.source, DynamicValueSource::Missing);
+    let error = status.error.expect("记一条错误");
+    assert_eq!(error.kind, DynamicErrorKind::SourceMissing);
+    assert_eq!(error.name, "sns");
+    assert_eq!(fetcher.calls(), 0, "取数不该被发起");
+}
+
 #[tokio::test]
 async fn a_force_ignores_the_cache() {
     let (pool, _dir) = seeded_pool();
@@ -676,11 +698,9 @@ async fn a_value_that_is_too_large_is_not_written_to_the_cache() {
         .expect("解析");
     assert_eq!(out.errors[0].kind, DynamicErrorKind::TooLarge);
 
-    // 内联数据源没有环境，缓存键的环境段就是空串。
-    let cached = db::with_conn(&pool, |c| {
-        db::dynamic_variable_cache::get(c, "d1", crate::db::dynamic_variable_cache::NO_ENVIRONMENT)
-    })
-    .expect("read");
+    // 内联数据源没有环境，缓存键的环境段就是空串（空串表示没有环境）。
+    let cached =
+        db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", "")).expect("read");
     assert!(cached.is_none());
 }
 

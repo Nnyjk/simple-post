@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::{ResourceNode, ResourceNodeType};
 use crate::error::AppError;
@@ -66,18 +66,33 @@ pub fn list_all(conn: &mut Connection) -> Result<Vec<ResourceNode>, AppError> {
     Ok(out)
 }
 
+/// 把搜索词转成 LIKE 的模式串：用户输入里的 `%` 与 `_` 按字面量匹配，不当通配符。
+/// 转义字符取 `!` 而不是反斜杠，故 SQL 与 Rust 字面量都不必处理反斜杠转义。
+fn like_pattern(q: &str) -> String {
+    let mut out = String::with_capacity(q.len() + 2);
+    out.push('%');
+    for ch in q.chars() {
+        if ch == '!' || ch == '%' || ch == '_' {
+            out.push('!');
+        }
+        out.push(ch);
+    }
+    out.push('%');
+    out
+}
+
 /// 对树做子串搜索。
 /// endpoint 的 `url` 在 `endpoint_details`，故此处得 join 才能触及——配置被拆出去的同一个
 /// 理由。模块与 collection 没有 url，`n.type = 'endpoint'` 这道守卫免得匹配上 null 列。
 /// 只想只读的话 `with_conn` 足够；调用方若还要读命中 endpoint 的详情，则必须在
 /// `db::with_tx` 内调用——join 本身是只读的。
 pub fn search(conn: &mut Connection, q: &str) -> Result<Vec<ResourceNode>, AppError> {
-    let pattern = format!("%{q}%");
+    let pattern = like_pattern(q);
     let sql = format!(
         "SELECT {COLUMNS_N} FROM nodes n \
          LEFT JOIN endpoint_details e ON e.node_id = n.id \
-         WHERE n.name LIKE ?1 OR n.description LIKE ?1 \
-            OR (n.type = 'endpoint' AND e.url LIKE ?1) \
+         WHERE n.name LIKE ?1 ESCAPE '!' OR n.description LIKE ?1 ESCAPE '!' \
+            OR (n.type = 'endpoint' AND e.url LIKE ?1 ESCAPE '!') \
          ORDER BY n.root_id ASC, n.sort_order ASC, n.id ASC"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -132,7 +147,7 @@ pub fn module_id_of(conn: &mut Connection, id: &str) -> Result<Option<String>, A
             params![id],
             |r| r.get(0),
         )
-        .ok();
+        .optional()?;
     Ok(found)
 }
 
@@ -325,12 +340,12 @@ pub fn search_paths(
     q: &str,
     limit: usize,
 ) -> Result<Vec<SearchHit>, AppError> {
-    let pattern = format!("%{q}%");
+    let pattern = like_pattern(q);
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLUMNS_N} FROM nodes n \
          LEFT JOIN endpoint_details e ON e.node_id = n.id \
          WHERE n.type = 'endpoint' \
-           AND (n.name LIKE ?1 OR n.description LIKE ?1 OR e.url LIKE ?1) \
+           AND (n.name LIKE ?1 ESCAPE '!' OR n.description LIKE ?1 ESCAPE '!' OR e.url LIKE ?1 ESCAPE '!') \
          ORDER BY n.root_id ASC, n.sort_order ASC, n.id ASC \
          LIMIT {}",
         limit.clamp(1, 200)

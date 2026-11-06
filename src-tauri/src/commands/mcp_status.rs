@@ -27,15 +27,6 @@ pub fn mcp_daemon_log_tail(
     Ok(state.log_tail())
 }
 
-/// AI 客户端在 `mcpServers` 里启动的 `simple-post-mcp` 绝对路径，供连接面板的「复制代理路径」
-/// 直接粘贴。取 `current_exe()` 的所在目录：两个二进制经 `cargo build --workspace` 落在同一
-/// `target/<profile>/`，没有 npm 包装路径可指。
-/// 查找失败时返回 `"<unresolved current_exe>"`，渲染侧按不可操作的占位串处理。
-#[tauri::command]
-pub fn mcp_daemon_proxy_path() -> String {
-    crate::http_config::mcp_proxy_path()
-}
-
 /// 重启内嵌 MCP daemon。用户层面幂等：面板在重启进行中禁用按钮，连点两次只重启一次。
 ///
 /// `AppError` 被吞成 `{ ok: false, pid: null, port: null }` 而不外抛：渲染侧的 restart 动作自带

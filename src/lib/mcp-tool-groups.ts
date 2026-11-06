@@ -30,7 +30,7 @@ const CATEGORIES: ReadonlyArray<{ key: string; label: string; prefix: string }> 
 ];
 
 export const OTHER_GROUP_KEY = 'other';
-export const OTHER_GROUP_LABEL = '其他';
+const OTHER_GROUP_LABEL = '其他';
 
 /**
  * 把 `names` 拆进上面的分类，保持 CATEGORIES 的顺序，有未匹配项时把「其他」追加

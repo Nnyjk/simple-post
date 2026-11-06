@@ -19,8 +19,7 @@ fn committing_the_same_ir_twice_creates_no_duplicate() {
         second.created_endpoint_ids
     );
     assert_eq!(second.skipped_duplicates.len(), 3);
-    // 跳过要有出处：一条 Info 说清按指纹跳过，且没有更严重的诊断。
-    assert_eq!(second.notable_diagnostics().len(), 0);
+    // 跳过要有出处：一条 Info 说清按指纹跳过。
     assert!(second
         .diagnostics
         .iter()

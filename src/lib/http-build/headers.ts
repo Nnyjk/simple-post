@@ -13,7 +13,7 @@ import type { MissingTracker } from './pool';
  * `binaryContentType` 是 `binary` 模式下文件自己的 MIME 类型：整个请求体就是一个文件时，用文件
  * 那个类型才描述得了它。它只在 `bodyMode === 'binary'` 时被读，其余模式传 `null`。
  */
-export function autoContentType(mode: BodyMode, binaryContentType?: string | null): string | null {
+function autoContentType(mode: BodyMode, binaryContentType?: string | null): string | null {
   switch (mode) {
     case 'json':
       return 'application/json';

@@ -791,7 +791,7 @@ fn an_unknown_verb_is_refused() {
 
 /// 多词字段两种拼写都收：`ifExists` 与 `pathParams` 与 snake_case 落在同一个类型上。
 ///
-/// REST 路由与桌面 command 那条线通篇用 camelCase，MCP 那条线用 snake_case，而
+/// REST 路由那条线通篇用 camelCase，MCP 那条线用 snake_case，而
 /// `deny_unknown_fields` 会把少一个别名变成整份规格被拒。
 #[test]
 fn the_camel_case_spelling_of_multi_word_fields_is_accepted() {

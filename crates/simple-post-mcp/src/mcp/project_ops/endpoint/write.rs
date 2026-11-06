@@ -299,6 +299,7 @@ pub(super) async fn tool_endpoint_update(
         name: patch_value_field::<String>(&patch_obj, "name")?,
         description: patch_field::<String>(&patch_obj, "description")?,
         sort_order: patch_value_field::<i64>(&patch_obj, "sort_order")?,
+        ..Default::default()
     };
     let detail_patch = EndpointDetailPatch {
         method: patch_value_field::<simple_post_core::domain::HttpMethod>(&patch_obj, "method")?,
@@ -330,6 +331,7 @@ pub(super) async fn tool_endpoint_update(
         // 线格式用 `TlsSettingsInput` 而不是域类型：拼错的键名要报错，不能静默丢掉
         // 一个键后写进一份「看起来设好了、其实没有」的设置。
         tls: patch_field::<TlsSettingsInput>(&patch_obj, "tls")?.map(|inner| inner.map(Into::into)),
+        ..Default::default()
     };
     // 载荷与定义写反了就地拒绝 —— 与 `endpoint_create` 同一道门。只查这次 patch
     // 点名的 body：没点名 body 的 patch 不该因为端点早就存着的那份载荷被拒。

@@ -5,6 +5,7 @@
  * 本包装保持调用点的 props 与组件名不变，只把成本挪到 chunk 之后。
  */
 import { Suspense, lazy } from 'react';
+import { EditorSkeleton } from './EditorSkeleton';
 
 const ScriptEditorImpl = lazy(() =>
   import('./ScriptEditor').then((m) => ({ default: m.ScriptEditor })),
@@ -25,9 +26,4 @@ export function ScriptEditor({
       <ScriptEditorImpl value={value} onChange={onChange} placeholder={placeholder} />
     </Suspense>
   );
-}
-
-/** chunk 流入期间占住编辑器的完整高度。居中 spinner 会让面板塌下去再弹回，读起来像布局抖动。 */
-function EditorSkeleton() {
-  return <div className="h-full w-full animate-pulse bg-muted/30" aria-busy="true" />;
 }

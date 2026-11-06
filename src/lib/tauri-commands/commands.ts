@@ -13,7 +13,6 @@
 export const COMMANDS = {
   // ----- projects -----
   projectsList: 'projects_list',
-  projectsGet: 'projects_get',
   projectsCreate: 'projects_create',
   projectsUpdate: 'projects_update',
   projectsDelete: 'projects_delete',
@@ -22,7 +21,6 @@ export const COMMANDS = {
   // 节点是三种类型之一，由 `type` 区分；树形靠 `parentId`，归属靠 `rootId`。
   // 接口的请求配置另有一对命令：`method` / `url` 对模块无意义。
   nodesList: 'nodes_list',
-  nodesGet: 'nodes_get',
   /** 一个节点的直接子节点。懒加载层级树的一节：展开时才取。 */
   nodesChildren: 'nodes_children',
   /** 跨全部项目搜接口，带它所在的路径（项目 / 模块 / 集合…）。 */
@@ -33,7 +31,6 @@ export const COMMANDS = {
   nodesMove: 'nodes_move',
   nodesDuplicate: 'nodes_duplicate',
   endpointDetailsList: 'endpoint_details_list',
-  endpointDetailGet: 'endpoint_detail_get',
   endpointDetailUpdate: 'endpoint_detail_update',
   // collection 上的两段脚本。端点的脚本随 `endpointDetailUpdate` 一起改（它们住在
   // 同一行配置里），这一对只管 collection。
@@ -59,13 +56,6 @@ export const COMMANDS = {
   interchangeImportCommit: 'interchange_import_commit',
   interchangeExportPreview: 'interchange_export_preview',
   interchangeExportDocument: 'interchange_export_document',
-
-  // ----- interface specs -----
-  // 一份接口规格：模块、集合路径上的每一级、环境、模块地址与端点，一次调用落完。
-  // 每一部分按名字找、找不到就建，故反复应用同一份规格不改变任何东西。
-  //
-  // 参数是**一份规格**（`spec`），不是一堆零散字段——那是这条命令存在的理由。
-  specUpsert: 'spec_upsert',
 
   // ----- dynamic variables -----
   // 一条声明：变量名 → 数据源 → 抽取规则 → 缓存时长。消费端点的请求体里写 `{{sns}}`，
@@ -121,12 +111,6 @@ export const COMMANDS = {
    * 会留下旧进程，"重启"又收养了同一个进程。
    */
   mcpDaemonRestart: 'mcp_daemon_restart',
-  /**
-   * 解析 stdio bridge 二进制（`simple-post-mcp.exe` / `simple-post-mcp`）的
-   * 磁盘绝对路径。ConnectionSection 用它把"代理二进制路径"占位符填成真值
-   * 而不是字面提示。
-   */
-  mcpDaemonProxyPath: 'mcp_daemon_proxy_path',
   /** 持久化的 `mcp.auto_start` 偏好。默认 `false`；Tauri 与 `serve-web` 两种形态都认这一行。 */
   mcpAutoStartGet: 'mcp_auto_start_get',
   mcpAutoStartSet: 'mcp_auto_start_set',

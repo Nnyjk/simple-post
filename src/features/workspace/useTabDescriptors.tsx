@@ -3,7 +3,7 @@ import { useAppStore, type OpenTab, type TabKind } from '@/stores/app-store';
 import { MethodPill } from '@/components/ui/method-pill';
 import { HUE } from '@/lib/hue';
 import { endpointTabPaths, type EndpointTabSource } from './tab-disambiguation';
-export const KIND_LABEL: Record<TabKind, string> = {
+const KIND_LABEL: Record<TabKind, string> = {
   project: '项目',
   module: '模块',
   collection: '集合',

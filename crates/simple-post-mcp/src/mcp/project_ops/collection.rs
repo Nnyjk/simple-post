@@ -296,6 +296,7 @@ pub(super) async fn tool_collection_update(
             .and_then(|p| p.get("description"))
             .map(|v| v.as_str().map(String::from)),
         sort_order: None,
+        ..Default::default()
     };
     let c = simple_post_core::db::with_tx(&state.pool, |c2| {
         simple_post_core::db::nodes::update(c2, &a.collection_id, patch.clone())

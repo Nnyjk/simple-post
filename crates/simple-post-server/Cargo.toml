@@ -31,7 +31,6 @@ simple-post-interchange = { path = "../simple-post-interchange" }
 # Shared workspace deps (resolved to the versions pinned at the root)
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_json_path = { workspace = true }
 tokio = { workspace = true }
 # Used by `port_registry`'s liveness probe and by the route tests.
 reqwest = { workspace = true }

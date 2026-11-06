@@ -36,14 +36,6 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.equal(c.body, undefined);
   });
 
-  it('projectsGet → GET /api/projects/{id} with url-encoded id', async () => {
-    await invokeCmd(COMMANDS.projectsGet, { id: 'a/b c' });
-    const c = last();
-    assert.equal(c.method, 'GET');
-    // '/' 与 ' ' 必须百分号编码；不该有任何裸字符漏出去。
-    assert.equal(c.url, '/api/projects/a%2Fb%20c');
-  });
-
   it('projectsUpdate → PATCH /api/projects/{id} with body = patch only', async () => {
     await invokeCmd(COMMANDS.projectsUpdate, {
       id: 'p1',
@@ -93,14 +85,6 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     await invokeCmd(COMMANDS.nodesList, { rootId: 'pX', type: 'endpoint', query: 'a b&c' });
     const c = last();
     assert.equal(c.url, '/api/nodes?q=a%20b%26c&rootId=pX&type=endpoint');
-  });
-
-  it('nodesGet → GET /api/nodes/{id} with the id percent-encoded', async () => {
-    await invokeCmd(COMMANDS.nodesGet, { id: 'a/b' });
-    const c = last();
-    assert.equal(c.method, 'GET');
-    assert.equal(c.url, '/api/nodes/a%2Fb');
-    assert.equal(c.body, undefined);
   });
 
   it('nodesCreate → POST /api/nodes with a FLAT body (NodeCreateBody flattens the node)', async () => {
@@ -216,14 +200,6 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.equal(c.body, undefined);
   });
 
-  it('endpointDetailGet → GET /api/nodes/{nodeId}/endpoint-detail', async () => {
-    await invokeCmd(COMMANDS.endpointDetailGet, { nodeId: 'n1' });
-    const c = last();
-    assert.equal(c.method, 'GET');
-    assert.equal(c.url, '/api/nodes/n1/endpoint-detail');
-    assert.equal(c.body, undefined);
-  });
-
   it('endpointDetailUpdate → PATCH /api/nodes/{nodeId}/endpoint-detail with body = patch only', async () => {
     await invokeCmd(COMMANDS.endpointDetailUpdate, {
       nodeId: 'n1',
@@ -232,7 +208,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     const c = last();
     assert.equal(c.method, 'PATCH');
     assert.equal(c.url, '/api/nodes/n1/endpoint-detail');
-    // 节点 id 走 path；在 body 里重复它会被 `EndpointDetailPatch` 静默丢弃。
+    // 节点 id 走 path；body 里再带一份 `nodeId`，`EndpointDetailPatch` 收下但不用它
+    // （它不指向任何可写列）。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { method: 'POST' });
   });
 });

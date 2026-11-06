@@ -104,38 +104,6 @@ fn load_projection(
     })
 }
 
-/// 把项目 `project_id` 在环境 `environment_id` 下的样子投影成一份 [`Exchange`]。
-///
-/// `environment_id` 为 `None` 时取该项目的默认环境（最早创建的那个）；连默认环境都没有
-/// （这个项目一个环境都没有）时**不猜**，产出的 IR 里每个模块的 `servers` 都是空的——那正是
-/// 「这些模块没有 URL」的忠实答案。
-pub fn project_to_ir(
-    pool: &DbPool,
-    project_id: &str,
-    environment_id: Option<&str>,
-) -> Result<Exchange, AppError> {
-    db::with_conn(pool, |conn| {
-        let p = load_projection(conn, project_id, environment_id)?;
-        let roots = p.children_of.get(&None).cloned().unwrap_or_default();
-        let mut diagnostics: Vec<Diagnostic> = Vec::new();
-        let modules = roots
-            .iter()
-            .filter(|n| n.kind == ResourceNodeType::Module)
-            .map(|m| {
-                project_module(
-                    m,
-                    p.env.as_ref(),
-                    &p.details,
-                    &p.scripts,
-                    &p.children_of,
-                    &mut diagnostics,
-                )
-            })
-            .collect();
-        Ok(p.into_exchange(modules, diagnostics))
-    })
-}
-
 /// 把**一个模块**的整棵子树投影成一份只含一个模块的 [`Exchange`]。导出入口用这个：
 /// 落点是模块行上的 `+`，范围就是那棵子树。
 ///

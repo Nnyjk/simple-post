@@ -100,7 +100,8 @@ fn the_cache_key_is_the_definition_and_the_environment() {
     assert!(one.is_some());
     assert!(two.is_some());
 
-    let none_env = db::with_conn(&pool, |c| get(c, "d1", NO_ENVIRONMENT)).expect("read");
+    // 空串表示没有环境：那个环境下的缓存行不存在。
+    let none_env = db::with_conn(&pool, |c| get(c, "d1", "")).expect("read");
     assert!(none_env.is_none());
 }
 
@@ -135,15 +136,4 @@ fn deleting_a_row_removes_it() {
     db::with_tx(&pool, |c| delete(c, "d1", "env1")).expect("delete");
     let got = db::with_conn(&pool, |c| get(c, "d1", "env1")).expect("read");
     assert!(got.is_none());
-}
-
-#[test]
-fn the_rows_of_one_definition_are_listed_together() {
-    let (pool, _dir) = fresh_pool();
-    db::with_tx(&pool, |c| upsert(c, &entry("d1", "env1"))).expect("write");
-    db::with_tx(&pool, |c| upsert(c, &entry("d1", "env2"))).expect("write");
-    db::with_tx(&pool, |c| upsert(c, &entry("d2", "env1"))).expect("write");
-
-    let rows = db::with_conn(&pool, |c| list_by_definition(c, "d1")).expect("read");
-    assert_eq!(rows.len(), 2);
 }

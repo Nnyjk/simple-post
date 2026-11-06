@@ -17,7 +17,6 @@
 //      `RouteSpec { ... }` literal rows in it.
 //   2. Groups rows by path (one path may have multiple methods).
 //   3. Emits an OpenAPI 3.1 yaml document with `paths` keyed by path.
-//   4. Tags internal / omitted routes via a top-level note.
 //
 // The table may be one inline `vec![…]` inside `public_route_specs()`, or
 // one `routes()` call per resource group (each group in its own file). The
@@ -219,7 +218,6 @@ for (const block of sourceBlocks) {
       method: get('method'),
       path: get('path'),
       summary: get('summary'),
-      stability: get('stability'),
       request: getOpt('request'),
       response: getOpt('response'),
     });
@@ -303,7 +301,6 @@ for (const [path, methods] of [...byPath.entries()].sort()) {
   for (const r of methods) {
     out.push(`    ${r.method.toLowerCase()}:`);
     out.push(`      summary: ${y(r.summary)}`);
-    out.push(`      x-stability: ${r.stability}`);
     if (r.request) {
       out.push(`      x-request-shape: ${y(r.request)}`);
     }
@@ -317,17 +314,7 @@ for (const [path, methods] of [...byPath.entries()].sort()) {
 }
 out.push('components:');
 out.push('  securitySchemes: {}');
-out.push('x-internal-routes-not-documented:');
-out.push('  - GET    /api/mcp/status');
-out.push('  - POST   /api/mcp/start');
-out.push('  - POST   /api/mcp/stop');
-out.push('  - POST   /api/mcp/restart');
-out.push('  - GET    /api/mcp/proxy-path');
-out.push('  - GET    /api/mcp/capability');
-out.push('  - PUT    /api/mcp/capability');
-out.push('  - GET    /api/mcp/capability/tools');
-out.push('  - GET    /api/preferences');
-out.push('  - PUT    /api/preferences');
+// 内部路由清单由 server 侧维护：`crates/simple-post-server/src/web_api/spec/mod.rs` 的「internal (not in OpenAPI v1)」一节逐条列出那些端点，本脚本不复制它。
 out.push('x-shape-references:');
 out.push('  note: |');
 out.push('    Request / response shapes referenced via `x-request-shape` / `x-response-shape`');

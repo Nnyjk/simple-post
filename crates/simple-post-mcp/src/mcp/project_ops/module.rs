@@ -182,6 +182,7 @@ pub(super) async fn tool_module_update(
         parent_id: None,
         description: None,
         sort_order: None,
+        ..Default::default()
     };
     let m = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::nodes::update(c, &a.module_id, patch.clone())

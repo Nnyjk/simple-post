@@ -75,10 +75,6 @@ struct FixtureModule {
     #[serde(default)]
     description: Option<String>,
     sort_order: i64,
-    /// 仅 UI 的展开状态。带入 fixture 以便渲染测试能读到真实树，永不落库。
-    #[serde(default)]
-    #[allow(dead_code)]
-    expanded: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,10 +88,6 @@ struct FixtureCollection {
     #[serde(default)]
     description: Option<String>,
     sort_order: i64,
-    /// 仅 UI 的展开状态，见 [`FixtureModule::expanded`]。
-    #[serde(default)]
-    #[allow(dead_code)]
-    expanded: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

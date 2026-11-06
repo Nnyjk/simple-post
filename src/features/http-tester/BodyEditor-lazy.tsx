@@ -11,6 +11,7 @@ import { Suspense, lazy } from 'react';
 import type { RequestBody } from '@/types/domain';
 import type { FormatResult } from '@/lib/utils';
 import type { VarEntry } from './var-hint';
+import { EditorSkeleton } from './EditorSkeleton';
 
 const BodyEditorImpl = lazy(() => import('./BodyEditor').then((m) => ({ default: m.BodyEditor })));
 
@@ -44,9 +45,4 @@ export function BodyEditor({
       />
     </Suspense>
   );
-}
-
-/** chunk 流入期间占住编辑器的完整高度。居中 spinner 会让面板塌下去再弹回，读起来像布局抖动。 */
-function EditorSkeleton() {
-  return <div className="h-full w-full animate-pulse bg-muted/30" aria-busy="true" />;
 }

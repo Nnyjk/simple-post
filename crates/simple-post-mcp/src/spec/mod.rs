@@ -4,8 +4,8 @@
 //! `crate::mcp::project_ops::endpoint::missing`，因为它要用
 //! `variable_fill::resolve_base_url` —— 那个函数在 mcp crate 里，core 用不到它。
 //!
-//! 本模块把两者合成**一次调用**，并给出**一份三个宿主共用的响应形状**：MCP 工具、
-//! REST 路由与桌面 command 回的是同一份 JSON，故 agent 与脚本不必各自再挖两级。
+//! 本模块把两者合成**一次调用**，并给出**一份两个宿主共用的响应形状**：MCP 工具与
+//! REST 路由回的是同一份 JSON，故 agent 与脚本不必各自再挖两级。
 //!
 //! 与 [`crate::dynamic`] 同一套分工：引擎在 core，这一侧的操作在 ops 里。
 

@@ -46,25 +46,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 
 # Shared workspace deps (resolved to the versions pinned at the root)
-serde = { workspace = true }
 serde_json = { workspace = true }
-serde_json_path = { workspace = true }
-tokio = { workspace = true }
-reqwest = { workspace = true }
-rusqlite = { workspace = true }
-r2d2 = { workspace = true }
-r2d2_sqlite = { workspace = true }
 clap = { workspace = true }
-dirs = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-thiserror = { workspace = true }
-
-# HTTP server (`serve-web` shape). `ServeDir` serves the SPA while
-# the same axum process fronts `/api/*` and `/mcp`.
-axum = { workspace = true }
-tower-http = { workspace = true }
-mime_guess = { workspace = true }
 
 # NOTE: release profile lives at the workspace root (Cargo.toml) —
 # cargo warns "profiles for the non root package will be ignored"

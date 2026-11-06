@@ -22,7 +22,7 @@ use simple_post_core::error::AppError;
 /// 查不出来的东西一律不报：读库失败时返回一个空列表，而不是把「查不到」说成「不缺」——前者让
 /// agent 多问一句，后者让 agent 以为一切正常。
 ///
-/// `pub(crate)`：MCP 工具、`crate::spec::ops`（REST 路由与桌面 command 那一侧）
+/// `pub(crate)`：MCP 工具与 `crate::spec::ops`（REST 路由那一侧）
 /// 都用它，故它得走出 `project_ops`。
 pub(crate) fn missing_pieces(
     pool: &DbPool,

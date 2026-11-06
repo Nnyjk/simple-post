@@ -9,6 +9,7 @@
  *   `tauri-commands.ts` 导出。
  */
 import { IS_TAURI_SHELL } from './tauri-commands';
+import { errorText } from './error-text';
 import type { ExportDocument } from './interchange-types';
 
 export type SaveOutcome = 'saved' | 'cancelled';
@@ -25,7 +26,7 @@ function filtersFor(doc: ExportDocument) {
  * 故这里换成人话。
  */
 export function humanizeSaveError(err: unknown): Error {
-  const raw = err instanceof Error ? err.message : String(err);
+  const raw = errorText(err);
   if (/not allowed|scope|permission|forbidden/i.test(raw)) {
     return new Error('这个位置不允许写入。请存到「文档」「下载」或桌面目录下。');
   }

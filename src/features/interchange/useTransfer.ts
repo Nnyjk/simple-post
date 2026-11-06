@@ -13,6 +13,7 @@ import type {
   TransferNode,
 } from '@/lib/interchange-types';
 import { copyGeneratedDocument, saveGeneratedDocument } from '@/lib/transfer-file-save';
+import { errorText } from '@/lib/error-text';
 import { createLatestRequest } from './latest-request';
 import {
   allKeys,
@@ -41,10 +42,6 @@ export type TransferPhase = 'source' | 'working' | 'preview' | 'done';
 export interface UseTransferOptions {
   /** 导入落库成功后由调用方刷新树并展开目标模块。 */
   onImported?: (moduleId: string, createdCollectionIds: string[]) => void | Promise<void>;
-}
-
-function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 /**

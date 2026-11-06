@@ -8,7 +8,6 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         path: "/api/http/send",
         summary: "Execute an arbitrary HTTP request (raw-URL escape hatch; \
                       honours the outbound URL policy)",
-        stability: "public",
         request: Some("HttpRequestInput"),
         response: Some("HttpResult"),
     }]

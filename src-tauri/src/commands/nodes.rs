@@ -48,11 +48,6 @@ pub fn nodes_list(
     })
 }
 
-#[tauri::command]
-pub fn nodes_get(state: State<DbPool>, id: String) -> Result<ResourceNode, AppError> {
-    crate::db::with_conn(&state, |c| crate::db::nodes::get(c, &id))
-}
-
 /// 一个节点的直接子节点。懒加载层级树的一节：展开时才取，不预先拉整棵树。
 ///
 /// `parent_id` 给一个节点就取它的孩子；`project_id` 给一个项目就取那个项目的模块
@@ -164,15 +159,6 @@ pub fn nodes_duplicate(
     crate::db::with_tx(&state, |c| {
         crate::db::nodes::duplicate(c, &id, new_id.as_deref())
     })
-}
-
-/// 一个 endpoint 节点的请求配置。
-#[tauri::command]
-pub fn endpoint_detail_get(
-    state: State<DbPool>,
-    node_id: String,
-) -> Result<EndpointDetail, AppError> {
-    crate::db::with_conn(&state, |c| crate::db::endpoint_details::get(c, &node_id))
 }
 
 /// 全部 endpoint 的请求配置，扁平列表，渲染侧按 `nodeId` 建索引。

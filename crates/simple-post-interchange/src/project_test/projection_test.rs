@@ -1,12 +1,24 @@
 //! `domain → ir → domain` 往返、投影的幂等与「不回退」的服务取值。
+//!
+//! 导出入口是 `module_to_ir`（一个模块的整棵子树），故这里的 IR 都从模块这一层取。
 
-use simple_post_core::db;
+use simple_post_core::db::{self, DbPool};
 
-use super::project_to_ir;
+use super::module_to_ir;
 use super::support::{
     add_endpoint, add_endpoint_without_detail, add_module, seed_project, temp_pool,
 };
-use crate::ir::IrEndpoint;
+use crate::ir::{Exchange, IrEndpoint};
+
+/// 取一个模块的 IR。
+fn project(
+    pool: &DbPool,
+    project_id: &str,
+    module_id: &str,
+    environment_id: Option<&str>,
+) -> Exchange {
+    module_to_ir(pool, project_id, module_id, environment_id).expect("project")
+}
 
 #[test]
 fn domain_to_ir_to_domain_keeps_the_request() {
@@ -14,7 +26,7 @@ fn domain_to_ir_to_domain_keeps_the_request() {
     let s = seed_project(&pool);
     let node_id = add_endpoint(&pool, &s, &s.module_id);
 
-    let ex = project_to_ir(&pool, &s.project_id, Some(&s.env_id)).expect("project");
+    let ex = project(&pool, &s.project_id, &s.module_id, Some(&s.env_id));
     assert_eq!(ex.environment_id.as_deref(), Some(s.env_id.as_str()));
 
     let ir_ep: &IrEndpoint = ex.modules[0]
@@ -62,8 +74,8 @@ fn projecting_twice_gives_the_same_answer() {
     let s = seed_project(&pool);
     add_endpoint(&pool, &s, &s.module_id);
 
-    let first = project_to_ir(&pool, &s.project_id, Some(&s.env_id)).expect("first");
-    let second = project_to_ir(&pool, &s.project_id, Some(&s.env_id)).expect("second");
+    let first = project(&pool, &s.project_id, &s.module_id, Some(&s.env_id));
+    let second = project(&pool, &s.project_id, &s.module_id, Some(&s.env_id));
 
     assert_eq!(first.modules.len(), second.modules.len());
     assert_eq!(
@@ -77,7 +89,7 @@ fn projecting_twice_gives_the_same_answer() {
 fn the_address_is_read_per_module_with_no_fallback() {
     let pool = temp_pool("srv");
     let s = seed_project(&pool);
-    add_module(&pool, &s.project_id, "没有地址的模块");
+    let without_address = add_module(&pool, &s.project_id, "没有地址的模块");
 
     db::with_tx(&pool, |conn| {
         db::environments::set_module_base_url(
@@ -90,21 +102,21 @@ fn the_address_is_read_per_module_with_no_fallback() {
     })
     .expect("set url");
 
-    let ex = project_to_ir(&pool, &s.project_id, Some(&s.env_id)).expect("project");
-
-    let cell_of = |name: &str| -> Option<String> {
-        ex.modules
-            .iter()
-            .find(|m| m.name == name)
-            .and_then(|m| m.base_url.as_ref())
-            .map(|c| c.url.clone())
-    };
+    // 配了地址的那个模块读得到自己那一格。
+    let with_address = project(&pool, &s.project_id, &s.module_id, Some(&s.env_id));
     assert_eq!(
-        cell_of("默认模块").as_deref(),
+        with_address.modules[0]
+            .base_url
+            .as_ref()
+            .map(|c| c.url.clone())
+            .as_deref(),
         Some("https://mod-a.example.com")
     );
+
+    // 没配的那个模块没有地址，不借用别的模块的。
+    let no_address = project(&pool, &s.project_id, &without_address, Some(&s.env_id));
     assert!(
-        cell_of("没有地址的模块").is_none(),
+        no_address.modules[0].base_url.is_none(),
         "未配置的模块不得借用别的模块的地址"
     );
 }
@@ -117,7 +129,7 @@ fn an_environment_from_another_project_is_not_used() {
     assert_ne!(a.project_id, b.project_id);
 
     // 指名别的项目的环境：地址会跨项目串过来，故当作「没选环境」。
-    let ex = project_to_ir(&pool, &b.project_id, Some(&a.env_id)).expect("project");
+    let ex = project(&pool, &b.project_id, &b.module_id, Some(&a.env_id));
     assert_eq!(ex.environment_id, None);
     assert!(ex.modules.iter().all(|m| m.base_url.is_none()));
 }
@@ -131,7 +143,7 @@ fn a_project_with_no_default_environment_projects_no_address() {
     // 删掉唯一的环境，再不指名任何环境：投影不猜，地址为空。
     db::with_tx(&pool, |conn| db::environments::delete(conn, &s.env_id)).expect("delete");
 
-    let ex = project_to_ir(&pool, &s.project_id, None).expect("project");
+    let ex = project(&pool, &s.project_id, &s.module_id, None);
     assert_eq!(ex.environment_id, None);
     assert!(ex.modules.iter().all(|m| m.base_url.is_none()));
     // 树本身照常投影出来：没有地址不影响接口清单。
@@ -150,7 +162,7 @@ fn an_endpoint_without_a_detail_row_is_reported_not_dropped_silently() {
     let s = seed_project(&pool);
     let orphan = add_endpoint_without_detail(&pool, &s, &s.module_id);
 
-    let ex = project_to_ir(&pool, &s.project_id, Some(&s.env_id)).expect("project");
+    let ex = project(&pool, &s.project_id, &s.module_id, Some(&s.env_id));
 
     assert!(
         ex.modules

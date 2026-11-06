@@ -146,7 +146,7 @@ export const DOC_FORMATS: { value: DocFormat; label: string; extension: string }
  * 严重度 → 徽标变体。
  *
  * `info` 用 muted 而不是 outline：它是「按设计如此 / 已在别处说明」，不该跟真正的问题
- * 抢注意力——这个区分与 Rust 侧 `CommitReport::notable_diagnostics` 滤掉 Info 是同一件事。
+ * 抢注意力——服务端把整份诊断交出来，界面上由这一处把 `info` 标成 muted。
  */
 export const SEVERITY_VARIANT: Record<Severity, 'muted' | 'warning' | 'destructive'> = {
   info: 'muted',
