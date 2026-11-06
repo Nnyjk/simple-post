@@ -51,6 +51,8 @@ export function scrollTargetForActiveTab(host: ScrollHost, target: HorizontalBox
   }
 
   next = Math.min(Math.max(next, 0), maxScroll);
+  // 差不足半个像素就不滚：浏览器给出的 rect 带小数，差这么点滚过去看不出区别，
+  // 却会让滚动位置变成一个带小数的数。
   if (Math.abs(next - host.scrollLeft) < 0.5) return null;
   return next;
 }

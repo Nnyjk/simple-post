@@ -75,6 +75,14 @@ export function WorkspaceTabs() {
   // 上一次记录的标签布局 —— Flip 补间的起点。
   const flipStateRef = useRef<ReturnType<typeof Flip.getState> | null>(null);
 
+  // Flip 补间是否正在跑。补间进行中量到的是动画中途的位置，此时既不能重新记录布局，
+  // 也不能按当前位置算滚动目标。
+  const flipRunningRef = useRef(false);
+
+  // 上一次补间是不是被打断的（下一轮补间紧接着开始）。被打断时不要在落定时滚动：
+  // 下一轮的补间马上开始，两者会抢同一个 scrollLeft。
+  const interruptedRef = useRef(false);
+
   // 「把激活标签滚进视野」的最新实现。用 ref 存，是因为 Flip 补间的 `onComplete`
   // 回调不该闭包住过期的激活标签 id。
   const scrollActiveIntoViewRef = useRef<() => void>(() => {});
@@ -132,17 +140,85 @@ export function WorkspaceTabs() {
     const previous = flipStateRef.current;
     flipStateRef.current = current;
     if (!previous) return;
+    // 本次新出现的标签没有「上一次的位置」：Flip 会把它当成进入元素，让它留在文档
+    // 流里。其余标签被 Flip 移出文档流之后，它会退回条的最左边，与第一个标签重叠。
+    // 故把它的当前（最终）位置并进那份记录 —— 它就成了「位置没变」的普通元素，
+    // 一样被移出文档流，一样待在最终的位置上。
+    const known = new Set(previous.targets);
+    const entering = Array.from(targets).filter((el) => !known.has(el));
+    if (entering.length > 0) previous.add(Flip.getState(entering));
+    interruptedRef.current = false;
     const tween = Flip.from(previous, {
       duration: 0.28,
       ease: 'power2.out',
       absolute: true,
       // 补间结束后标签才回到文档流，那一刻才算得出它们最终在哪，故滚动放在这里。
-      onComplete: () => scrollActiveIntoViewRef.current(),
+      onComplete: () => {
+        flipRunningRef.current = false;
+        // 被打断的那一次不滚：下一轮补间紧接着开始，滚动会与它抢同一个 scrollLeft。
+        // 下一轮补间结束后由它自己滚。
+        if (interruptedRef.current) {
+          interruptedRef.current = false;
+          return;
+        }
+        scrollActiveIntoViewRef.current();
+      },
     });
+    flipRunningRef.current = true;
     return () => {
+      // 补间被打断：让它立刻落定，标签才回到文档流，下一轮量到的才是最终位置。
+      // 这里不能加 suppressEvents —— 那会把 GSAP 还原标签样式的回调一起抑制掉，
+      // 标签会停在绝对定位上，条的内容宽度从此算不对。
+      interruptedRef.current = true;
       tween.progress(1);
+      flipRunningRef.current = false;
     };
   }, [openTabs, isCompact]);
+
+  // ------------------------------------------------------------------
+  //  Keeping the recorded layout in sync with the scroll
+  // ------------------------------------------------------------------
+  // Flip 记的是**视口坐标**。条一旦滚动（程序滚动、滚轮滚动、浏览器自己纠正滚动
+  // 位置），那份记录就过期了：下一次增删标签时，Flip 会从过期的视口坐标起步，
+  // 整条标签先横向跳一截，再滑回正确位置。
+  //
+  // 故滚动停稳之后重新记一次。重新记录只在条静止时做 —— 补间进行中量到的是动画
+  // 中途的位置，记下来比不记还糟。
+  /**
+   * 重新记录标签布局。
+   *
+   * Flip 记的是视口坐标，条滚动过之后那份记录就过期了 —— 下一次增删标签时，Flip 会
+   * 从过期的视口坐标起步，整条标签先横向跳一截，再滑回正确位置。故滚动停稳之后要
+   * 重新记一次。
+   *
+   * 补间进行中不记：那时量到的是动画中途的位置，记下来比不记更糟。
+   */
+  const captureFlipState = useCallback(() => {
+    if (flipRunningRef.current) return;
+    const strip = stripRef.current;
+    if (!strip) return;
+    const targets = strip.querySelectorAll<HTMLElement>('[data-tab-id]');
+    flipStateRef.current = targets.length > 0 ? Flip.getState(targets) : null;
+  }, []);
+
+  // 滚轮连发时每滚一下都重新记录太贵（每次都要量一遍所有标签），故等滚轮停下来再记。
+  const wheelRefreshTimerRef = useRef(0);
+  /**
+   * 稍后重新记录一次标签布局。
+   *
+   * 滚轮连发时每滚一下都重新记录太贵（每次都要把每个标签量一遍），故等滚轮停下来
+   * 再记。
+   */
+  const scheduleFlipStateRefresh = useCallback(() => {
+    window.clearTimeout(wheelRefreshTimerRef.current);
+    wheelRefreshTimerRef.current = window.setTimeout(() => {
+      captureFlipState();
+    }, 120);
+  }, [captureFlipState]);
+
+  useEffect(() => {
+    return () => window.clearTimeout(wheelRefreshTimerRef.current);
+  }, []);
 
   // ------------------------------------------------------------------
   //  Active-tab indicator
@@ -231,20 +307,35 @@ export function WorkspaceTabs() {
   // 原生 `scrollIntoView` 会**瞬间**改掉 `scrollLeft`：所有标签的视口位置在同一帧
   // 里挪一截，那一下不参与任何动画，读起来就是「标签条猛地跳一下」。故滚动由 GSAP
   // 补间完成，该滚到哪儿由 `tab-scroll.ts` 算出。
+  /**
+   * 把激活标签滚进可视范围。
+   *
+   * 该滚到哪儿由 `scrollTargetForActiveTab` 算出，滚动本身由 GSAP 补间完成 ——
+   * 原生 `scrollIntoView` 会瞬间改掉 `scrollLeft`，所有标签的视口位置在同一帧里
+   * 挪一截，那一下不参与任何动画。
+   */
   const scrollActiveIntoView = useCallback(() => {
     const strip = stripRef.current;
     if (!strip || !activeTabId) return;
     const el = strip.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`);
     if (!el) return;
     const target = scrollTargetForActiveTab(strip, el.getBoundingClientRect());
-    if (target === null) return;
+    if (target === null) {
+      // 激活标签本来就在可视范围里，但上一次滚动可能还在往别处跑：停掉它，否则条会
+      // 继续滑，把刚点开的标签带出视野。
+      gsap.killTweensOf(strip);
+      captureFlipState();
+      return;
+    }
     gsap.to(strip, {
       scrollLeft: target,
       duration: 0.28,
       ease: 'power2.out',
       overwrite: true,
+      // 滚动改动了视口坐标，滚完之后重新记一次布局。
+      onComplete: () => captureFlipState(),
     });
-  }, [activeTabId]);
+  }, [activeTabId, captureFlipState]);
 
   useEffect(() => {
     scrollActiveIntoViewRef.current = scrollActiveIntoView;
@@ -258,6 +349,9 @@ export function WorkspaceTabs() {
     const tabsChanged = prevOpenTabsRef.current !== openTabs;
     prevOpenTabsRef.current = openTabs;
     if (tabsChanged) return;
+    // Flip 补间还在跑时不要立刻滚：此刻标签的位置是动画中途的位置，算出来的滚动
+    // 目标是错的。补间结束后由它自己滚，那时位置才是最终位置。
+    if (flipRunningRef.current) return;
     scrollActiveIntoView();
   }, [activeTabId, openTabs, scrollActiveIntoView]);
 
@@ -269,11 +363,15 @@ export function WorkspaceTabs() {
       if (e.deltaY === 0 || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
       if (el.scrollWidth <= el.clientWidth) return;
       e.preventDefault();
+      // 程序滚动那个补间每帧都在写 scrollLeft，会把滚轮的结果抹掉：先停掉它。
+      gsap.killTweensOf(el);
       el.scrollLeft += e.deltaY;
+      // 滚动改动了视口坐标，重新记一次布局。
+      scheduleFlipStateRefresh();
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [scheduleFlipStateRefresh]);
 
   if (descriptors.length === 0) return null;
 
