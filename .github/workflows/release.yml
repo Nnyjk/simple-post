@@ -97,7 +97,12 @@ jobs:
             on the same tag:
 
             ```
-            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            # GHCR stores the image under the lowercase path, and docker
+            # refuses a reference whose path contains uppercase letters
+            # (`invalid reference format: repository name must be
+            # lowercase`). `github.repository` keeps the owner's original
+            # case, so the pull command spells the published path out.
+            docker pull ghcr.io/nnyjk/simple-post:${{ github.ref_name }}
             ```
 
             The same image is also tagged without the `v` (`__VERSION__`), plus
