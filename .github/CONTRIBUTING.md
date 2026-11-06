@@ -114,8 +114,8 @@ npm run check
    - 桌面应用启动一次，`npm run check` 不需要在安装包里跑，但要确认应用能开、能建项目
 3. **验证镜像**（需要 `docker login ghcr`）：
    ```bash
-   docker pull ghcr.io/Nnyjk/simple-post:<tag>
-   docker buildx imagetools inspect ghcr.io/Nnyjk/simple-post:<tag>
+   docker pull ghcr.io/nnyjk/simple-post:<tag>
+   docker buildx imagetools inspect ghcr.io/nnyjk/simple-post:<tag>
    ```
    确认 `linux/amd64` 与 `linux/arm64` 都在清单里。
 4. **验证 compose 部署**（对着刚拉的镜像，不带 `build:`）：
