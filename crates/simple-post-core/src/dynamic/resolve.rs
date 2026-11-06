@@ -70,7 +70,31 @@ pub async fn resolve_definition(
     fetcher: &dyn SourceFetcher,
 ) -> Result<DynamicValueStatus, AppError> {
     let now = crate::domain::now_ms();
-    let source = source_context(&ctx.pool, def)?;
+    // 取数上下文造不出来（数据源端点已被删掉、那一行读不出来……）时，这一次解析按缺失
+    // 处理并记一条错误，而不是让整次发送在请求发出前中止。`dynamic/mod.rs` 的规范
+    // 如此要求：取数失败不让整次发送失败。
+    let source = match source_context(&ctx.pool, def) {
+        Ok(source) => source,
+        Err(e) => {
+            let error = DynamicError {
+                name: def.name.clone(),
+                kind: match &e {
+                    AppError::NotFound(_) => DynamicErrorKind::SourceMissing,
+                    _ => DynamicErrorKind::SourceError,
+                },
+                message: format!("取数上下文构造失败：{e}"),
+            };
+            return Ok(DynamicValueStatus {
+                name: def.name.clone(),
+                value: None,
+                source: DynamicValueSource::Missing,
+                fetched_at: None,
+                expires_at: None,
+                is_override: false,
+                error: Some(error),
+            });
+        }
+    };
     let outcome = resolve_one(ctx, def, &source, now, force, fetcher).await?;
     Ok(DynamicValueStatus {
         name: def.name.clone(),
