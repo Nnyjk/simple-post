@@ -65,26 +65,45 @@ pub fn duplicate(
     }
     let detail = super::super::endpoint_details::get(conn, id)?;
     let now = crate::domain::now_ms();
-    // 副本紧跟原件，故排在原件之后的兄弟整体后移一位，给副本腾出位置。
-    // 不移位的话副本与那个兄弟共用同一个 `sort_order`，读侧按 `(sort_order, id)` 排序，
-    // 兄弟排在副本前面，副本就落到了它后面。
-    if let Some(parent_id) = node.parent_id.as_deref() {
-        conn.execute(
-            "UPDATE nodes SET sort_order = sort_order + 1 \
-             WHERE parent_id = ?1 AND sort_order > ?2",
-            params![parent_id, node.sort_order],
-        )?;
+    let copy_id = new_id
+        .map(str::to_string)
+        .unwrap_or_else(crate::domain::uid);
+    // 端点必然有父：类型矩阵不允许端点落在项目顶层，`validate_placement` 在写入时强制了
+    // 这一点，故这一行只在库里被改坏时才走不到。
+    if node.parent_id.is_none() {
+        return Err(AppError::Validation(format!(
+            "endpoint {id} has no parent node"
+        )));
     }
+    // 副本紧跟原件，故同父兄弟先按显示序压成 `0..N`，副本再插到原件后面占一个槽位。
+    //
+    // 直接「把排在原件之后的兄弟加一」有两个洞：
+    // 1. 与原件同 `sort_order` 的兄弟不在「之后」里，故不被后移，副本落到它后面；
+    // 2. 兄弟的 `sort_order` 已是 `i64::MAX` 时，加一在 SQLite 里溢出成 REAL，
+    //    而这一列读出来是 `i64`，那一行就读不出来了。
+    // 压平之后槽位是 `0..N`，加一不会溢出，同序的兄弟也一并排好。
+    let mut order = super::tree::sibling_ids(conn, &node)?;
+    let at = order
+        .iter()
+        .position(|x| x == &node.id)
+        .unwrap_or(order.len().saturating_sub(1));
+    order.insert(at + 1, copy_id.clone());
+    // 副本还没有行，故先写已有兄弟的槽位，副本自己的槽位在下面创建时写。
+    let mut update = conn.prepare("UPDATE nodes SET sort_order = ?1 WHERE id = ?2")?;
+    for (i, sid) in order.iter().enumerate() {
+        if sid != &copy_id {
+            update.execute(params![i as i64, sid])?;
+        }
+    }
+    drop(update);
     let copy = ResourceNode {
-        id: new_id
-            .map(str::to_string)
-            .unwrap_or_else(crate::domain::uid),
+        id: copy_id,
         // 用「 (副本)」而非英文标记：这一行的名字是用户在中文界面里读到的东西，而 SPA 乐观
         // 写入时用的是同一个后缀——两者不一致会让副本看起来在创建后一刻自己改了名。
         name: format!("{} (副本)", node.name),
-        // 紧跟原件之后，不是 `MAX + 1`：把副本排到队尾，会让人正看着的 endpoint 复制后
+        // 紧跟原件之后，不是队尾：把副本排到队尾，会让人正看着的 endpoint 复制后
         // 从光标底下跑掉。
-        sort_order: node.sort_order + 1,
+        sort_order: (at + 1) as i64,
         created_at: now,
         updated_at: now,
         ..node

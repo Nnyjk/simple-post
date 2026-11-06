@@ -215,7 +215,7 @@ fn top_level_ids(conn: &mut Connection, root_id: &str) -> Result<Vec<String>, Ap
 }
 
 /// 按给定顺序把 `0..N` 写进 `sort_order`。
-fn write_order(conn: &mut Connection, ids: &[String]) -> Result<(), AppError> {
+pub(super) fn write_order(conn: &mut Connection, ids: &[String]) -> Result<(), AppError> {
     let mut update = conn.prepare("UPDATE nodes SET sort_order = ?1 WHERE id = ?2")?;
     for (i, id) in ids.iter().enumerate() {
         update.execute(params![i as i64, id])?;
@@ -238,12 +238,13 @@ fn renumber_top_level(
     write_order(conn, &ids)
 }
 
-/// `id` 在它当前兄弟中的零基位置。
-pub(super) fn sibling_index(
+/// `node` 的兄弟 id，按显示序（`sort_order` 升序，同序按 `id` 升序）。
+///
+/// 读侧按同一个次序排序，故这份清单就是界面上看到的那个顺序。
+pub(super) fn sibling_ids(
     conn: &mut Connection,
     node: &ResourceNode,
-    id: &str,
-) -> Result<i32, AppError> {
+) -> Result<Vec<String>, AppError> {
     let ids: Vec<String> = match &node.parent_id {
         Some(p) => {
             let mut stmt = conn.prepare(
@@ -265,5 +266,15 @@ pub(super) fn sibling_index(
             ids
         }
     };
+    Ok(ids)
+}
+
+/// `id` 在它当前兄弟中的零基位置。
+pub(super) fn sibling_index(
+    conn: &mut Connection,
+    node: &ResourceNode,
+    id: &str,
+) -> Result<i32, AppError> {
+    let ids = sibling_ids(conn, node)?;
     Ok(ids.iter().position(|x| x == id).unwrap_or(0) as i32)
 }

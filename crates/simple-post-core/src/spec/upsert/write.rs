@@ -200,6 +200,7 @@ fn apply_endpoint_patch(
         name: None,
         description: def.description.clone().map(Some),
         sort_order: None,
+        ..Default::default()
     };
     let detail_patch = EndpointDetailPatch {
         method: None,
@@ -222,6 +223,7 @@ fn apply_endpoint_patch(
         test_script: def.test_script.clone().map(Some),
         // 接口规格里没有 HTTPS 出站设置这一项：证书是本机的东西，不随规格走。
         tls: None,
+        ..Default::default()
     };
     if !node_patch.is_empty() {
         db::nodes::update(conn, endpoint_id, node_patch)?;

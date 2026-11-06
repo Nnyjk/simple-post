@@ -72,6 +72,67 @@ fn a_patch_with_an_unknown_field_is_rejected() {
 }
 
 #[test]
+fn a_resource_read_back_can_be_written_back_as_a_patch() {
+    // 「取回再改再写回」是公开契约：客户端 GET 一个节点或一份端点配置，改一处，再把
+    // 整个 body PATCH 回去。补丁类型带 `deny_unknown_fields`，故它必须认得资源自己的
+    // 每一个字段名，否则这条往返从一个 400 开始。
+    let node = ResourceNode {
+        id: "n1".into(),
+        root_id: "p1".into(),
+        parent_id: Some("c1".into()),
+        kind: ResourceNodeType::Endpoint,
+        name: "查订单".into(),
+        description: Some("说明".into()),
+        sort_order: 3,
+        created_at: 11,
+        updated_at: 22,
+    };
+    let patch: ResourceNodePatch =
+        serde_json::from_value(serde_json::to_value(&node).unwrap()).unwrap();
+    assert_eq!(patch.name.as_deref(), Some("查订单"));
+    assert_eq!(patch.sort_order, Some(3));
+
+    let detail = EndpointDetail {
+        node_id: "n1".into(),
+        method: HttpMethod::Post,
+        url: "/api/orders".into(),
+        base_url_override: None,
+        params: vec![],
+        path_params: vec![],
+        headers: vec![],
+        body: RequestBody::default(),
+        auth: AuthConfig::default(),
+        docs: None,
+        notes: None,
+        tags: vec![],
+        pre_request_script: None,
+        test_script: None,
+        tls: None,
+    };
+    let patch: EndpointDetailPatch =
+        serde_json::from_value(serde_json::to_value(&detail).unwrap()).unwrap();
+    assert_eq!(patch.url.as_deref(), Some("/api/orders"));
+    assert!(!patch.is_empty(), "url 是一个真实的写入目标");
+}
+
+#[test]
+fn a_patch_carrying_only_the_resource_identity_is_still_empty() {
+    // 身份字段不指向任何可写列，故它们不构成一次写入：`is_empty` 仍为真，写路径不会
+    // 因为它们多跑一趟 UPDATE，MCP 侧也不会把这次调用当成「改了东西」。
+    let n: ResourceNodePatch = serde_json::from_value(json!({
+        "id": "n1",
+        "rootId": "p1",
+        "kind": "endpoint",
+        "createdAt": 11,
+        "updatedAt": 22
+    }))
+    .unwrap();
+    assert!(n.is_empty(), "身份字段不构成一次写入");
+    let d: EndpointDetailPatch = serde_json::from_value(json!({ "nodeId": "n1" })).unwrap();
+    assert!(d.is_empty(), "nodeId 不构成一次写入");
+}
+
+#[test]
 fn a_default_patch_is_empty() {
     assert!(ResourceNodePatch::default().is_empty());
     assert!(EndpointDetailPatch::default().is_empty());

@@ -326,6 +326,57 @@ fn a_duplicate_lands_right_after_the_original() {
     assert_eq!(ids, vec!["e9", "e9-copy", "e2"]);
 }
 
+#[test]
+fn a_duplicate_lands_right_after_the_original_even_when_a_sibling_shares_its_sort_order() {
+    // 同 `sort_order` 的兄弟读侧按 id 决胜。副本要落在原件**后面**，故那个同序的兄弟
+    // 也得排在副本后面。旧做法「把排在原件之后的兄弟加一」漏掉了同序的兄弟（它不在
+    // 「之后」里），副本就落到了它后面。
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+    // 同序，且 id 比副本小。
+    let (e2, d2) = endpoint("p1", "e2", "c1", 0);
+    put(&pool, &e2, Some(&d2));
+
+    db::with_tx(&pool, |c| duplicate(c, "e1", Some("e1-copy"))).unwrap();
+
+    let ids: Vec<String> = db::with_conn(&pool, |c| {
+        list_by_root_and_type(c, "p1", ResourceNodeType::Endpoint)
+    })
+    .unwrap()
+    .iter()
+    .map(|n| n.id.clone())
+    .collect();
+    assert_eq!(ids, vec!["e1", "e1-copy", "e2"]);
+}
+
+#[test]
+fn a_duplicate_does_not_overflow_a_sibling_that_sits_at_the_integer_limit() {
+    // 兄弟的 `sort_order` 已经是 `i64::MAX` 时，「加一」在 SQLite 里溢出成 REAL，
+    // 而这一列读出来是 `i64`——那一行就读不出来了。压平重排没有这个问题。
+    let (pool, _dir) = fresh_pool();
+    put(&pool, &module("p1", "m1", 0), None);
+    put(&pool, &collection("p1", "c1", "m1", 0), None);
+    let (e, d) = endpoint("p1", "e1", "c1", 0);
+    put(&pool, &e, Some(&d));
+    let (e2, d2) = endpoint("p1", "e2", "c1", i64::MAX);
+    put(&pool, &e2, Some(&d2));
+
+    db::with_tx(&pool, |c| duplicate(c, "e1", Some("e1-copy"))).unwrap();
+
+    let rows = db::with_conn(&pool, |c| {
+        list_by_root_and_type(c, "p1", ResourceNodeType::Endpoint)
+    })
+    .unwrap();
+    let ids: Vec<&str> = rows.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(ids, vec!["e1", "e1-copy", "e2"]);
+    // 槽位压成连续的 `0..N`，那一行读得出来。
+    let e2 = rows.iter().find(|n| n.id == "e2").expect("e2 还在");
+    assert_eq!(e2.sort_order, 2, "got {}", e2.sort_order);
+}
+
 // ---------------------------------------------------------------------------
 // 共享样本：集合子树的端点清单与顺序
 // ---------------------------------------------------------------------------
