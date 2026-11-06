@@ -1,7 +1,7 @@
 //! 一份接口规格的 REST handler。
 //!
-//! 一条路由：`POST /api/spec/upsert`。逻辑全部在 `crate::spec_api`，故 Tauri 命令与这条路由走
-//! 同一套实现，且与 MCP 工具 `spec_upsert` 落库落的是同一份东西。
+//! 一条路由：`POST /api/spec/upsert`。逻辑全部在 `crate::spec_api`，它与 MCP 工具
+//! `spec_upsert` 落在同一个实现上，故两个宿主落库落的是同一份东西。
 //!
 //! ## 请求体就是那份规格
 //!

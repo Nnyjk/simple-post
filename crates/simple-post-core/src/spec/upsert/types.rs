@@ -160,7 +160,7 @@ impl EndpointIfExists {
 
 /// 一次落库的结果。
 ///
-/// 三个宿主（REST 路由、桌面 command、MCP 工具）回的是同一份形状：结果类型本身可序列化，
+/// 两个宿主（REST 路由与 MCP 工具）回的是同一份形状：结果类型本身可序列化，
 /// 故不必各写一遍 JSON 拼装。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

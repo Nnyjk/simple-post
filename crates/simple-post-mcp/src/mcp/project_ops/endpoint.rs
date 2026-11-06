@@ -28,7 +28,7 @@ pub(super) use write::tool_endpoint_create;
 // 它们本来只服务 `endpoint_*` 那 8 个工具，现在同一个 `project_ops` 下的另一个
 // 工具也要用，故在这里再导出一次。
 //
-// `missing_pieces` 另有一处调用方：`crate::spec::ops` —— REST 路由与桌面 command
+// `missing_pieces` 另有一处调用方：`crate::spec::ops` —— REST 路由
 // 落同一份规格时也要算「还缺什么」，而那条判据住在 mcp crate 里（它要用
 // `variable_fill::resolve_base_url`），故它得能走出 `project_ops`。
 pub(in crate::mcp::project_ops) use input::oauth2_config_schema;

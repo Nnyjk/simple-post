@@ -208,7 +208,8 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     const c = last();
     assert.equal(c.method, 'PATCH');
     assert.equal(c.url, '/api/nodes/n1/endpoint-detail');
-    // 节点 id 走 path；在 body 里重复它会被 `EndpointDetailPatch` 静默丢弃。
+    // 节点 id 走 path；body 里再带一份 `nodeId`，`EndpointDetailPatch` 收下但不用它
+    // （它不指向任何可写列）。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), { method: 'POST' });
   });
 });
