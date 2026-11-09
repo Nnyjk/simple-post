@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use simple_post_core::domain::RewriteRule;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HealthDto {
@@ -113,19 +115,19 @@ pub struct EnvSetVarDisabledBody {
 }
 
 /// `POST /api/environments/:envId/module-baseurls` 的 body。一个格子是（环境 × 模块），
-/// 格子里 `url` 是后端 api 地址、`proxy` 是实际访问地址。两个字段各自独立：
+/// 格子里 `url` 是模块地址、`rewrite` 是路径前缀改写规则。两个字段各自独立：
 /// `null` = 保持原值，`""` = 清空；都清空时整格删掉。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvSetModuleBaseUrlBody {
     /// 正在配地址的模块。
     pub module_id: String,
-    /// 后端 api 地址。`null` = 保持原值，`""` = 清空。
+    /// 模块地址。`null` = 保持原值，`""` = 清空。
     #[serde(default)]
     pub url: Option<String>,
-    /// 实际访问地址。`null` = 保持原值，`""` = 清空。
+    /// 路径前缀改写规则。`null` = 保持原值；起点与目标都空白的规则 = 清空。
     #[serde(default)]
-    pub proxy: Option<String>,
+    pub rewrite: Option<RewriteRule>,
 }
 
 /// `PUT /api/permissions/:projectId` 的 body。`permission` 字符串经

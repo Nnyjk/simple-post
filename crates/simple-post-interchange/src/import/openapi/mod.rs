@@ -215,7 +215,7 @@ fn group_of(
             .servers
             .host
             .clone()
-            .map(|url| IrBaseUrl { url, proxy: None }),
+            .map(|url| IrBaseUrl { url, rewrite: None }),
         endpoints: Vec::new(),
         collections: Vec::new(),
         scripts: IrScripts::default(),

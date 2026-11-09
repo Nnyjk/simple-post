@@ -129,7 +129,7 @@ fn seed(st: &AppState, dev_url: &str, staging_url: &str) {
             "m_switch".to_string(),
             ModuleBaseUrl {
                 url: url.to_string(),
-                proxy: None,
+                rewrite: None,
             },
         )]
         .into_iter()

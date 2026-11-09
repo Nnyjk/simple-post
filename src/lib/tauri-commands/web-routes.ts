@@ -179,9 +179,9 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     // 取值层是 (环境 × 模块)，故单元格的两半都走请求体。路径段用
     // `module-baseurls` 而不是 `baseurls`：裸 id 只能写扁平的、不分模块的取值层。
     path: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/module-baseurls`,
-    // 格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自
-    // 独立：`null` = 该字段保持原值，`''` = 清空该字段。
-    body: (a) => ({ moduleId: a.moduleId, url: a.url, proxy: a.proxy }),
+    // 格子里有两个字段：`url` 是模块地址，`rewrite` 是路径前缀改写规则。两个字段各自
+    // 独立：`null` = 该字段保持原值，起点与目标都空白的规则 = 清空规则。
+    body: (a) => ({ moduleId: a.moduleId, url: a.url, rewrite: a.rewrite }),
   },
 
   // ----- dynamic variables -----

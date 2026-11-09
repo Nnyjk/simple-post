@@ -79,7 +79,7 @@ export function buildEndpointRequestParts(input: EndpointRequestPartsInput): End
     resolved.baseUrl,
     urlPath,
     effective,
-    resolved.proxy,
+    resolved.rewrite,
   ).filter((name) => input.enabledDynamicNames.has(name));
   return {
     method,
@@ -108,7 +108,7 @@ export function prepareEndpointRequest(
     parts.method,
     parts.urlPath,
     parts.baseUrl,
-    parts.resolved.proxy,
+    parts.resolved.rewrite,
     parts.effective,
     parts.env,
     dynamicVars,

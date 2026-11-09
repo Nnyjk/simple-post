@@ -184,7 +184,7 @@ fn assign_module_base_urls(modules: &mut [IrModule]) {
                 .find_map(|e| e.base_url_override.clone())
                 .filter(|url| !url.is_empty())
         };
-        m.base_url = first.map(|url| IrBaseUrl { url, proxy: None });
+        m.base_url = first.map(|url| IrBaseUrl { url, rewrite: None });
     }
 }
 

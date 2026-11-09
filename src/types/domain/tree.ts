@@ -55,7 +55,8 @@ export interface EndpointDetail {
    * 本 endpoint 的 baseUrl 覆盖，优先于模块那一格；用于不挂在任何环境里的一次性主机。三态：
    * `null` = 不在自定义模式，`''` = 自定义模式但不加前缀。
    *
-   * 覆盖生效时模块地址与代理都不参与，故这一项是这一整套地址解析的唯一出口。
+   * 覆盖生效时模块那一格的**地址**不参与；但那一格的路径前缀改写规则照样生效——规则改的是
+   * 端点自己的路径，与主机是谁的无关。
    */
   baseUrlOverride?: string | null;
   params: KeyValue[];

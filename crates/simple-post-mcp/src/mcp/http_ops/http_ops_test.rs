@@ -254,7 +254,7 @@ fn a_module_url_lives_in_the_env_cell() {
         "mod_a".into(),
         ModuleBaseUrl {
             url: "https://auth.example.com".into(),
-            proxy: None,
+            rewrite: None,
         },
     );
     let env = Environment {

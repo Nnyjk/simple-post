@@ -67,8 +67,8 @@ pub struct Environment {
     pub name: String,
     /// `module_id -> ModuleBaseUrl`。**URL 只存在于这一层。**
     ///
-    /// 每个格子独立：缺项表示「此模块在此环境没有地址」，解析到此为止。格子里的 `proxy` 是
-    /// 实际访问地址，请求发出前用它替换 `url` 这个前缀。
+    /// 每个格子独立：缺项表示「此模块在此环境没有地址」，解析到此为止。格子里的 `rewrite`
+    /// 是路径前缀改写规则，请求发出前用它改写端点自己的 URL 路径。
     #[serde(default)]
     pub module_base_urls: HashMap<String, ModuleBaseUrl>,
     #[serde(default)]
@@ -87,20 +87,39 @@ pub struct Environment {
     pub created_at: i64,
 }
 
+/// 路径前缀改写规则：把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
+///
+/// - `from`（起点）是端点自己 URL 的路径前缀，如 `/api/air`。它**按原文匹配**：不做
+///   `{{var}}` 替换；模块地址自带的路径段也不参与匹配（模块地址与端点地址互不干扰）。
+/// - `to`（目标）是替换后的路径前缀，如 `/api/project-a/air`。空串表示把这段前缀整个去掉。
+///
+/// 命中要求落在路径边界上：URL 以 `from` 开头，**且**其后紧跟的那一位是 `/`、`?` 或
+/// `#`（或 URL 恰好等于 `from`）。没有这一条，`/api/air` 会命中 `/api/airplane`。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RewriteRule {
+    /// 被替换的路径前缀，原文照抄。
+    pub from: String,
+    /// 替换后的路径前缀。空串表示去掉这段前缀。
+    pub to: String,
+}
+
 /// 一个（环境 × 模块）格子里的地址配置。
 ///
-/// - `url` 是**后端 api 地址**——文档里写的、模块对外声明的那个地址。
-/// - `proxy` 是**实际访问地址**——接口经代理网关转代后真正要打的那个地址。
+/// - `url` 是**模块地址**——文档里写的、模块对外声明的那个地址。
+/// - `rewrite` 是**路径前缀改写规则**——只改写端点自己的 URL 路径，模块地址里的主机与
+///   路径段一概不动。
 ///
-/// 两者不一致时，请求发出前用 `proxy` 替换 `url` 这个前缀，其余部分原样保留。
+/// 两者回答两个不同的问题：前者决定打哪个主机，后者决定路径怎么改。主机不变、只换路径前缀
+/// 这一类需求由 `rewrite` 表达。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleBaseUrl {
-    /// 后端 api 地址。
+    /// 模块地址。
     pub url: String,
-    /// 实际访问地址。`None` = 直接用 `url`。
+    /// 路径前缀改写规则。`None` = 没有改写。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proxy: Option<String>,
+    pub rewrite: Option<RewriteRule>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -125,7 +125,7 @@ struct FixtureEnvironment {
     id: String,
     project_id: String,
     name: String,
-    /// `module_id -> { url, proxy }`，现役值层。缺项表示「此模块在此环境没有地址」，
+    /// `module_id -> { url, rewrite }`，现役值层。缺项表示「此模块在此环境没有地址」，
     /// 解析到此为止，不会回落到别的模块的值。
     #[serde(default)]
     module_base_urls: serde_json::Value,

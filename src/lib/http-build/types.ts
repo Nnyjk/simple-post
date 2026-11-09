@@ -1,4 +1,11 @@
-import type { AuthConfig, Environment, HttpMethod, KeyValue, RequestBody } from '@/types/domain';
+import type {
+  AuthConfig,
+  Environment,
+  HttpMethod,
+  KeyValue,
+  RequestBody,
+  RewriteRule,
+} from '@/types/domain';
 
 /**
  * 影响请求**线上形态**的入参。超时 / 重定向 / 体积上限与调用方的 `AbortSignal` 只在执行期
@@ -54,10 +61,10 @@ export interface PrepareRequestInput {
   /** 已解析的 base URL；空串表示没有 base URL。 */
   baseUrl: string;
   /**
-   * 实际访问地址（代理）。请求地址以 `baseUrl` 开头时，这个前缀被换成它。缺席或空串 = 没有代理，
-   * 请求直接打 `baseUrl`。
+   * 路径前缀改写规则。它只改写 `urlPath`（端点自己的 URL），模块地址里的主机与路径段一概
+   * 不动。缺席 = 没有改写。
    */
-  proxy?: string | null;
+  rewrite?: RewriteRule | null;
   params: KeyValue[];
   headers: KeyValue[];
   body: RequestBody;
@@ -79,12 +86,13 @@ export interface PrepareRequestInput {
 export interface PreparedRequest {
   method: HttpMethod;
   /**
-   * 完整 URL：`join(baseUrl, urlPath)` → 替换路径里的 `{占位符}` → 解析 `{{var}}` → 代理前缀替换
-   * → 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的 apikey，顺序如列。
+   * 完整 URL：`applyRewrite(urlPath)` → `join(baseUrl, urlPath)` → 替换路径里的
+   * `{占位符}` → 解析 `{{var}}` → 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的
+   * apikey，顺序如列。
    *
-   * 先 join 再解析，模块地址里的变量才解析得到；代理替换放在解析之后，因为要换掉的正是解析
-   * 出来的那个前缀；折叠放在代理替换之后，因为代理地址也可能带来重复斜杠；参数放最后，
-   * 因为它们的值在进来时已解析（见 `appendQueryString`）。
+   * 改写放在最前：它只作用在端点自己的 URL 上，且要在拼接之前——模块地址自带的路径段不参与
+   * 匹配。先 join 再解析，模块地址里的变量才解析得到；折叠放在替换之后，因为替换会把拼接插入
+   * 的分隔符变成 `//`；参数放最后，因为它们的值在进来时已解析（见 `appendQueryString`）。
    */
   url: string;
   /**

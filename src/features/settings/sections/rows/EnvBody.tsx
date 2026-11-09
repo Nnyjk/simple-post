@@ -38,8 +38,8 @@ export function EnvBody({
       <GroupHeader
         icon={<Globe className="h-3.5 w-3.5" />}
         title="模块地址"
-        // 按实际的样子描述这个模型：每个模块在本环境里各有一份地址与代理地址。
-        description="每个模块在本环境里各有一份地址与代理地址"
+        // 按实际的样子描述这个模型：每个模块在本环境里各有一份地址与路径改写规则。
+        description="每个模块在本环境里各有一份地址与路径改写规则"
         meta={modules.length > 0 ? `${modules.length} 个模块` : undefined}
       />
       <ModuleBaseUrlTable

@@ -16,7 +16,7 @@ fn the_server_url_splits_into_a_host_and_a_path_prefix() {
     assert_eq!(ep.path, "/v2/users", "url 字段只存 path，host 不进去");
     let cell = ex.modules[0].base_url.as_ref().expect("模块那一格");
     assert_eq!(cell.url, "https://api.example.com");
-    assert_eq!(cell.proxy, None);
+    assert_eq!(cell.rewrite, None);
 }
 
 #[test]

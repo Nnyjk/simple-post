@@ -70,7 +70,7 @@ fn a_real_collection_lands_as_modules_collections_and_endpoints() {
     // 一个模块一格：格子里的地址是这个模块里第一个端点的地址。
     let cell = m.base_url.as_ref().expect("模块那一格");
     assert_eq!(cell.url, "https://api.example.com");
-    assert_eq!(cell.proxy, None);
+    assert_eq!(cell.rewrite, None);
     assert_eq!(ex.endpoint_count(), 3);
 }
 

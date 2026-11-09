@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { listDynamicNames, mergePool, serializeValue, type ValueMode } from '../dynamic-vars';
-import type { AuthConfig, KeyValue, RequestBody } from '../../types/domain';
+import type { AuthConfig, KeyValue, RequestBody, RewriteRule } from '../../types/domain';
 
 interface MergeCase {
   name: string;
@@ -33,10 +33,10 @@ interface ScanCase {
   parts: {
     baseUrl: string;
     /**
-     * 那一格的实际访问地址。它会被 `{{var}}` 替换，故它里面的标记同样算被引用。
-     * 缺席 = 样本没给代理地址。
+     * 那一格的路径前缀改写规则。它的目标会被 `{{var}}` 替换，故它里面的标记同样算被引用。
+     * 缺席 = 样本没给改写规则。
      */
-    proxy?: string;
+    rewrite?: RewriteRule | null;
     url: string;
     params: KeyValue[];
     pathParams?: KeyValue[];

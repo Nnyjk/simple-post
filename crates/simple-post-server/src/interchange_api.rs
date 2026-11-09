@@ -168,7 +168,7 @@ pub fn import_commit(pool: &DbPool, opts: &ImportCommitOpts) -> Result<ImportCom
                 .into_iter()
                 .map(|b| AppliedBaseUrlDto {
                     url: b.url,
-                    proxy: b.proxy,
+                    rewrite: b.rewrite,
                     module_id: b.module_id,
                     environment_name: b.environment_name,
                 })

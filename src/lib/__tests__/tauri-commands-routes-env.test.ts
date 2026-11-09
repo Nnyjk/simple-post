@@ -50,16 +50,16 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
       envId: 'env1',
       moduleId: 'mod1',
       url: 'https://api.example.com',
-      proxy: 'https://gw.example.com',
+      rewrite: { from: '/api/air', to: '/api/project-a/air' },
     });
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/environments/env1/module-baseurls');
-    // 格子里有两个字段：模块地址与代理地址。它们各自独立，缺席即保持原值。
+    // 格子里有两个字段：模块地址与路径前缀改写规则。它们各自独立，缺席即保持原值。
     assert.deepEqual(JSON.parse(c.body ?? 'null'), {
       moduleId: 'mod1',
       url: 'https://api.example.com',
-      proxy: 'https://gw.example.com',
+      rewrite: { from: '/api/air', to: '/api/project-a/air' },
     });
   });
 

@@ -48,7 +48,10 @@ const ENVIRONMENTS: Environment[] = [
  *
  * `baseUrl` 缺席是一个真实答案：该模块在此环境下没有配地址。
  */
-function preview(environmentId: string, baseUrl?: { url: string; proxy?: string }): ExportPreview {
+function preview(
+  environmentId: string,
+  baseUrl?: { url: string; rewrite?: { from: string; to: string } },
+): ExportPreview {
   return {
     groups: [
       {

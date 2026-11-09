@@ -4,16 +4,19 @@
 
 use std::collections::HashSet;
 
-use crate::domain::{AuthConfig, AuthType, KeyValue, RequestBody};
+use crate::domain::{AuthConfig, AuthType, KeyValue, RequestBody, RewriteRule};
 use crate::template::list_missing_vars;
 
 /// 请求模板的各段。扫描「哪些 `{{name}}` 被引用了」只需要这些。
 pub struct TemplateParts<'a> {
     /// base URL。它可能自身带变量，故与 path 一起扫。
     pub base_url: &'a str,
-    /// 那一格的实际访问地址。它会被 `{{var}}` 替换，故它里面的标记同样算被引用 ——
-    /// 不扫的话，只在代理地址里出现的动态变量永远不会被取数，替换后仍是字面量 `{{name}}`。
-    pub proxy: Option<&'a str>,
+    /// 路径前缀改写规则的**目标**。它会被 `{{var}}` 替换（它进了 URL），故它里面的标记同样
+    /// 算被引用——不扫的话，只在改写目标里出现的动态变量永远不会被取数，替换后仍是字面量
+    /// `{{name}}`。
+    ///
+    /// 规则的**起点**不扫：它按原文匹配，不做变量替换。
+    pub rewrite: Option<&'a RewriteRule>,
     /// 端点的 path。
     pub url: &'a str,
     pub params: &'a [KeyValue],
@@ -29,8 +32,8 @@ pub struct TemplateParts<'a> {
 
 /// 模板里出现的全部 `{{name}}` 名字，按首次出现排序。
 ///
-/// 只扫**会被替换**的字段：base URL、那一格的代理地址、启用的且 key 非空的参数值 / 路径参数值 /
-/// header 值、body 内容、以及鉴权里那三种方案（bearer / basic / apikey）。OAuth2 的配置字段
+/// 只扫**会被替换**的字段：base URL、路径改写规则的目标、启用的且 key 非空的参数值 /
+/// 路径参数值 / header 值、body 内容、以及鉴权里那三种方案（bearer / basic / apikey）。OAuth2 的配置字段
 /// 不被变量替换，扫了会让一条根本没被用到的定义去取数。
 pub fn list_names(parts: &TemplateParts<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -44,10 +47,9 @@ pub fn list_names(parts: &TemplateParts<'_>) -> Vec<String> {
     };
 
     add(parts.base_url);
-    // 代理地址也会被 `{{var}}` 替换，故它里面的标记同样算被引用：没有代理、代理是空串
-    // 时不扫。
-    if let Some(proxy) = parts.proxy.filter(|p| !p.is_empty()) {
-        add(proxy);
+    // 改写目标会被 `{{var}}` 替换，故它里面的标记同样算被引用。
+    if let Some(rewrite) = parts.rewrite {
+        add(&rewrite.to);
     }
     add(parts.url);
     for p in parts.params {

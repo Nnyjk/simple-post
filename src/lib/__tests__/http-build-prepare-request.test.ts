@@ -64,52 +64,63 @@ describe('prepareRequest: base URL join', () => {
 });
 
 /**
- * 代理前缀替换。顺序是硬的：`{{var}}` 替换 → 代理前缀替换 → 折叠斜杠。
+ * 路径前缀改写。顺序是硬的：**改写 → 拼接 → `{{var}}` 替换 → 折叠斜杠**。
  *
- * 代理替换排在模板替换之后，因为要换掉的正是**解析出来的**那个前缀；代理地址自己
- * 也走一趟 `{{var}}`，故它里面写的变量同样会被解析，缺哪个变量都进缺值报告。
+ * 改写排在最前，因为它只作用在端点自己的路径上，且要在拼接之前——模块地址自带的路径段
+ * 不参与匹配。改写的目标进了 URL，故它里面写的变量同样会被解析，缺哪个变量都进缺值报告。
  */
-describe('prepareRequest: proxy prefix replacement', () => {
-  it('replaces the module address prefix with the proxy address', () => {
+describe('prepareRequest: path prefix rewrite', () => {
+  it('replaces the path prefix of the endpoint’s own URL', () => {
     const r = prepareRequest(
       prep({
-        baseUrl: 'http://svc.internal:8080/api/a',
-        urlPath: '/orders/list',
-        proxy: 'https://gw.corp.com/api/xxxx/a',
+        baseUrl: '127.0.0.1:8080',
+        urlPath: '/api/air/xxxxx',
+        rewrite: { from: '/api/air', to: '/api/project-a/air' },
       }),
     );
-    assert.equal(r.url, 'https://gw.corp.com/api/xxxx/a/orders/list');
+    assert.equal(r.url, '127.0.0.1:8080/api/project-a/air/xxxxx');
   });
 
-  it('leaves the URL alone when there is no proxy', () => {
+  it('leaves the URL alone when the start does not match', () => {
+    const r = prepareRequest(
+      prep({
+        baseUrl: '127.0.0.1:8080',
+        urlPath: '/api/water/xxxxx',
+        rewrite: { from: '/api/air', to: '/api/project-a/air' },
+      }),
+    );
+    assert.equal(r.url, '127.0.0.1:8080/api/water/xxxxx');
+  });
+
+  it('leaves the URL alone when there is no rule', () => {
     const r = prepareRequest(
       prep({ baseUrl: 'http://svc.internal:8080/api/a', urlPath: '/orders/list' }),
     );
     assert.equal(r.url, 'http://svc.internal:8080/api/a/orders/list');
   });
 
-  it('resolves {{var}} inside the proxy address', () => {
+  it('resolves {{var}} inside the rewrite target', () => {
     const env = {
-      variables: { gw: 'gw.corp.com' },
+      variables: { tenant: 'project-a' },
       moduleBaseUrls: {},
     } as unknown as Environment;
     const r = prepareRequest(
       prep({
-        baseUrl: 'http://svc.internal:8080/api/a',
-        urlPath: '/orders',
-        proxy: 'https://{{gw}}/api/a',
+        baseUrl: '127.0.0.1:8080',
+        urlPath: '/api/air/xxxxx',
+        rewrite: { from: '/api/air', to: '/api/{{tenant}}/air' },
         env,
       }),
     );
-    assert.equal(r.url, 'https://gw.corp.com/api/a/orders');
+    assert.equal(r.url, '127.0.0.1:8080/api/project-a/air/xxxxx');
   });
 
-  it('reports a variable the proxy address cannot resolve', () => {
+  it('reports a variable the rewrite target cannot resolve', () => {
     const r = prepareRequest(
       prep({
-        baseUrl: 'http://svc.internal:8080/api/a',
-        urlPath: '/orders',
-        proxy: 'https://{{gone}}/api/a',
+        baseUrl: '127.0.0.1:8080',
+        urlPath: '/api/air/xxxxx',
+        rewrite: { from: '/api/air', to: '/api/{{gone}}/air' },
       }),
     );
     assert.deepEqual(r.missingVars, ['gone']);

@@ -211,7 +211,7 @@ fn the_environment_base_url_lands_in_the_cell_of_the_specified_module() {
 }
 
 #[test]
-fn the_environment_base_url_proxy_lands_in_the_same_cell() {
+fn the_environment_base_url_rewrite_lands_in_the_same_cell() {
     let (pool, _dir) = fresh_pool();
     let outcome = apply_ok(
         &pool,
@@ -221,7 +221,7 @@ fn the_environment_base_url_proxy_lands_in_the_same_cell() {
             "environment": {
                 "name": "gray",
                 "base_url": "https://gray.example.com",
-                "base_url_proxy": "https://gw.example.com/gray"
+                "base_url_rewrite": { "from": "/api/air", "to": "/api/gray/air" }
             },
             "endpoint": { "name": "查询活动", "method": "GET", "url": "/api/campaigns" }
         }),
@@ -236,8 +236,8 @@ fn the_environment_base_url_proxy_lands_in_the_same_cell() {
             Some("https://gray.example.com")
         );
         assert_eq!(
-            cell.and_then(|c| c.proxy.as_deref()),
-            Some("https://gw.example.com/gray")
+            cell.and_then(|c| c.rewrite.as_ref()).map(|r| r.to.as_str()),
+            Some("/api/gray/air")
         );
         Ok(())
     })
@@ -825,39 +825,56 @@ fn the_camel_case_spelling_of_multi_word_fields_is_accepted() {
 
 /// 环境那一段的两个地址字段两种拼写都收。
 ///
-/// `base_url` 与 `base_url_proxy` 各带一个 camelCase 别名（`baseUrl` 与 `baseUrlProxy`），
+/// `base_url` 与 `base_url_rewrite` 各带一个 camelCase 别名（`baseUrl` 与 `baseUrlRewrite`），
 /// 四种拼写落在同一个类型上，故 REST 那条线与 MCP 那条线交上来的形状是同一份。
 #[test]
 fn the_environment_address_fields_accept_both_spellings() {
     let snake: EnvironmentSpec =
         serde_json::from_value(json!({ "base_url": "https://a" })).expect("这份规格应当能反序列化");
     assert_eq!(snake.base_url.as_deref(), Some("https://a"));
-    assert_eq!(snake.base_url_proxy, None);
+    assert_eq!(snake.base_url_rewrite, None);
 
     let camel: EnvironmentSpec =
         serde_json::from_value(json!({ "baseUrl": "https://a" })).expect("这份规格应当能反序列化");
     assert_eq!(camel.base_url.as_deref(), Some("https://a"));
-    assert_eq!(camel.base_url_proxy, None);
+    assert_eq!(camel.base_url_rewrite, None);
 
-    let snake_proxy: EnvironmentSpec =
-        serde_json::from_value(json!({ "base_url_proxy": "https://p" }))
-            .expect("这份规格应当能反序列化");
-    assert_eq!(snake_proxy.base_url_proxy.as_deref(), Some("https://p"));
-    assert_eq!(snake_proxy.base_url, None);
+    let snake_rewrite: EnvironmentSpec = serde_json::from_value(json!({
+        "base_url_rewrite": { "from": "/api/air", "to": "/api/a/air" }
+    }))
+    .expect("这份规格应当能反序列化");
+    assert_eq!(
+        snake_rewrite
+            .base_url_rewrite
+            .as_ref()
+            .map(|r| r.from.as_str()),
+        Some("/api/air")
+    );
+    assert_eq!(snake_rewrite.base_url, None);
 
-    let camel_proxy: EnvironmentSpec =
-        serde_json::from_value(json!({ "baseUrlProxy": "https://p" }))
-            .expect("这份规格应当能反序列化");
-    assert_eq!(camel_proxy.base_url_proxy.as_deref(), Some("https://p"));
-    assert_eq!(camel_proxy.base_url, None);
+    let camel_rewrite: EnvironmentSpec = serde_json::from_value(json!({
+        "baseUrlRewrite": { "from": "/api/air", "to": "/api/a/air" }
+    }))
+    .expect("这份规格应当能反序列化");
+    assert_eq!(
+        camel_rewrite
+            .base_url_rewrite
+            .as_ref()
+            .map(|r| r.from.as_str()),
+        Some("/api/air")
+    );
+    assert_eq!(camel_rewrite.base_url, None);
 
     let both: EnvironmentSpec = serde_json::from_value(json!({
         "base_url": "https://a",
-        "baseUrlProxy": "https://p",
+        "baseUrlRewrite": { "from": "/api/air", "to": "/api/a/air" }
     }))
     .expect("这份规格应当能反序列化");
     assert_eq!(both.base_url.as_deref(), Some("https://a"));
-    assert_eq!(both.base_url_proxy.as_deref(), Some("https://p"));
+    assert_eq!(
+        both.base_url_rewrite.as_ref().map(|r| r.to.as_str()),
+        Some("/api/a/air")
+    );
 }
 
 // =========================================================================

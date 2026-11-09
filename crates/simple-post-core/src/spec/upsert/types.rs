@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{AuthConfig, EndpointResource, RequestBody};
+use crate::domain::{AuthConfig, EndpointResource, RequestBody, RewriteRule};
 use crate::error::AppError;
 use crate::spec::input::KeyValueInput;
 
@@ -59,12 +59,13 @@ pub struct EnvironmentSpec {
     /// 要停用的变量名。合并进已有的停用集合。
     #[serde(default, alias = "disabledVariables")]
     pub disabled_variables: Option<Vec<String>>,
-    /// 这个环境 × 模块 那一格的地址（后端 api 地址）。地址住在那一格，故它随模块走。
+    /// 这个环境 × 模块 那一格的地址。地址住在那一格，故它随模块走。
     #[serde(default, alias = "baseUrl")]
     pub base_url: Option<String>,
-    /// 那一格的实际访问地址——接口经代理网关转代后真正要打的那个地址。缺省 = 没有代理。
-    #[serde(default, alias = "baseUrlProxy")]
-    pub base_url_proxy: Option<String>,
+    /// 那一格的路径前缀改写规则：把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
+    /// 缺省 = 没有规则。
+    #[serde(default, alias = "baseUrlRewrite")]
+    pub base_url_rewrite: Option<RewriteRule>,
 }
 
 /// 规格里的端点那一段。

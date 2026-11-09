@@ -25,7 +25,7 @@
 
 use std::collections::BTreeSet;
 
-use simple_post_core::domain::{AuthConfig, HttpMethod, KeyValue, RequestBody};
+use simple_post_core::domain::{AuthConfig, HttpMethod, KeyValue, RequestBody, RewriteRule};
 
 use crate::diagnostics::Diagnostic;
 
@@ -77,11 +77,11 @@ pub struct IrModule {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IrBaseUrl {
-    /// 后端 api 地址。
+    /// 模块地址。
     pub url: String,
-    /// 实际访问地址。`None` = 没有代理，请求直接打 `url`。
+    /// 路径前缀改写规则。`None` = 没有改写。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proxy: Option<String>,
+    pub rewrite: Option<RewriteRule>,
 }
 
 /// 分组。递归嵌套，深度无上限——`may_under` 允许 collection 挂 collection，

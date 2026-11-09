@@ -8,7 +8,7 @@
  * `../../__tests__/crud-slice.test.ts` 钉住，故那些 `value === null` 判断必须写对。
  *
  * `moduleBaseUrls[moduleId]` 是地址唯一存放的地方：每个 (环境 × 模块) 一个独立单元格，
- * 没有继承也没有回退。格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。
+ * 没有继承也没有回退。格子里有两个字段：`url` 是模块地址，`rewrite` 是路径前缀改写规则。
  * `resolveEndpointBaseUrl` 只读其中恰好一个。
  *
  * **本切片只写库里的东西。** 「当前环境」是客户端的实时状态，不落库，它由 `bootstrap-slice`
@@ -18,7 +18,7 @@
  * （`activeEnvironmentId`）；拆成多次调用会改变 IPC 失败时回滚的内容。
  */
 import type { StateCreator } from 'zustand';
-import type { Environment, EnvWrite, ModuleBaseUrl } from '@/types/domain';
+import type { Environment, EnvWrite, ModuleBaseUrl, RewriteRule } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { pickDefaultEnvironment } from '@/lib/env-default';
 import type { AppState } from '../app-store';
@@ -37,8 +37,9 @@ export interface EnvironmentCrudActions {
   /**
    * 写一个 (环境 × 模块) 格子里的两个字段。
    *
-   * `url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自独立：
-   * `null` = 该字段保持原值，`''` = 清空该字段。两个字段都清空时这一格整个消失。
+   * `url` 是模块地址，`rewrite` 是路径前缀改写规则。两个字段各自独立：
+   * `null` = 该字段保持原值；起点与目标都空白的规则 = 清空规则。两个字段都清空时这一格整个
+   * 消失。
    *
    * 每个格子都是独立取值——清一个不能碰到它的邻居。
    */
@@ -46,7 +47,7 @@ export interface EnvironmentCrudActions {
     envId: string,
     moduleId: string,
     url: string | null,
-    proxy: string | null,
+    rewrite: RewriteRule | null,
   ) => Promise<void>;
   deleteEnvironment: (envId: string) => Promise<void>;
   /**
@@ -170,20 +171,25 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
         })),
     );
   },
-  setEnvironmentModuleBaseUrl: async (envId, moduleId, url, proxy) => {
+  setEnvironmentModuleBaseUrl: async (envId, moduleId, url, rewrite) => {
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return;
-    // 格子里两个字段各自独立：`null` 保持原值，`''` 清空。空串的 proxy 落成 `null`（没有代理），
+    // 格子里两个字段各自独立：`null` 保持原值。起点与目标都空白的规则落成 `null`（没有规则），
     // 与后端 `db::environments::set_module_base_url` 同一套。
     const cell = prev.moduleBaseUrls[moduleId];
     const nextCell: ModuleBaseUrl = {
       url: url === null ? (cell?.url ?? '') : url,
-      proxy: proxy === null ? (cell?.proxy ?? null) : proxy === '' ? null : proxy,
+      rewrite:
+        rewrite === null
+          ? (cell?.rewrite ?? null)
+          : rewrite.from.trim() === '' && rewrite.to.trim() === ''
+            ? null
+            : rewrite,
     };
     const nextModuleBaseUrls = { ...prev.moduleBaseUrls };
     // 两个字段都空了就把这一格删掉，免得已清空的环境还留着一个空的 `moduleId → {}` 外壳，
     // 在任何按键比对环境对象的 UI 里都读作「这里配了地址」。
-    if (nextCell.url === '' && nextCell.proxy === null) {
+    if (nextCell.url === '' && nextCell.rewrite === null) {
       delete nextModuleBaseUrls[moduleId];
     } else {
       nextModuleBaseUrls[moduleId] = nextCell;
@@ -199,7 +205,7 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
           envId,
           moduleId,
           url,
-          proxy,
+          rewrite,
         }),
       () =>
         set((s) => ({

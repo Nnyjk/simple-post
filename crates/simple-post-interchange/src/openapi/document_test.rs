@@ -189,7 +189,7 @@ fn servers_are_taken_per_module_and_never_borrowed() {
                 name: "with".into(),
                 base_url: Some(IrBaseUrl {
                     url: "https://api.example.com".into(),
-                    proxy: None,
+                    rewrite: None,
                 }),
                 endpoints: vec![ep("a", HttpMethod::Get, "/a")],
                 ..Default::default()
@@ -222,7 +222,7 @@ fn module_with_cell(cell_url: &str, endpoint: IrEndpoint) -> Exchange {
             name: "m".into(),
             base_url: Some(IrBaseUrl {
                 url: cell_url.into(),
-                proxy: None,
+                rewrite: None,
             }),
             endpoints: vec![endpoint],
             ..Default::default()

@@ -5,7 +5,7 @@ import { SettingsCategory } from '../SettingsCategory';
 import { useEnvDialogs } from './hooks/useEnvDialogs';
 import { EnvBody } from './rows/EnvBody';
 import { EnvSwitcher } from './rows/EnvSwitcher';
-import type { Environment, ResourceNode } from '@/types/domain';
+import type { Environment, ResourceNode, RewriteRule } from '@/types/domain';
 import { pickDefaultEnvironment } from '@/lib/env-default';
 
 export interface EnvironmentSectionProps {
@@ -26,14 +26,14 @@ export interface EnvironmentSectionProps {
   setEnvironmentVarDisabled: (envId: string, key: string, disabled: boolean) => void;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
   /**
-   * 写一个 (环境 × 模块) 格子里的两个字段：`url` 是模块地址，`proxy` 是代理地址。
-   * `null` = 该字段保持原值，`''` = 清空该字段。
+   * 写一个 (环境 × 模块) 格子里的两个字段：`url` 是模块地址，`rewrite` 是路径前缀改写规则。
+   * `null` = 该字段保持原值；起点与目标都空白的规则 = 清空规则。
    */
   setEnvironmentModuleBaseUrl: (
     envId: string,
     moduleId: string,
     url: string | null,
-    proxy: string | null,
+    rewrite: RewriteRule | null,
   ) => void;
   /** 解析出新环境的 id；创建失败时为 `null`。 */
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;

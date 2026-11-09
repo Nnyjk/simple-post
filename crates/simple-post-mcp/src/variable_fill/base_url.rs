@@ -1,8 +1,8 @@
-//! base URL 解析、代理前缀替换、拼接与斜杠收拢 —— 对应 `src/lib/url.ts`。
+//! base URL 解析、路径前缀改写、拼接与斜杠收拢 —— 对应 `src/lib/url.ts`。
 //!
 //! 两边必须一致，否则屏幕上的预览与真正发出去的请求描述的是两个 URL。
 
-use simple_post_core::domain::{EndpointDetail, Environment};
+use simple_post_core::domain::{EndpointDetail, Environment, RewriteRule};
 // -------------------------------------------------------------------------
 // base URL 解析 —— 对应 src/lib/url.ts::resolveEndpointBaseUrl
 // -------------------------------------------------------------------------
@@ -18,26 +18,28 @@ pub enum BaseUrlSource {
     None,
 }
 
-/// 解析出来的一组值：后端 api 地址、实际访问地址与来源。
+/// 解析出来的一组值：模块地址、路径前缀改写规则与来源。
 #[derive(Debug, Clone)]
 pub struct ResolvedBaseUrl {
-    /// 后端 api 地址——模块在环境里那一格的 `url`。
+    /// 模块地址——模块在环境里那一格的 `url`。
     pub base_url: String,
-    /// 实际访问地址——那一格的 `proxy`。`None` = 没有代理，直接用 `base_url`。
-    pub proxy: Option<String>,
+    /// 路径前缀改写规则——那一格的 `rewrite`。`None` = 没有改写。
+    pub rewrite: Option<RewriteRule>,
     /// 这个结果是从哪来的。
     pub source: BaseUrlSource,
 }
 
-/// 算出端点最终生效的 base URL。
+/// 算出端点最终生效的模块地址与路径前缀改写规则。
 ///
-/// 优先级（从高到低）：
+/// 地址的优先级（从高到低）：
 ///   1. `endpoint.base_url_override` —— 每端点的自定义模式。`None` 落到模块那一格；
 ///      `Some(host)` 固定该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义模式，
 ///      URL 字段里已经是完整地址。
-///   2. `env.module_base_urls[module_id]` —— 环境 × 模块那一格。它的 `url` 是后端 api 地址，
-///      `proxy` 是实际访问地址。
+///   2. `env.module_base_urls[module_id]` —— 环境 × 模块那一格。它的 `url` 是模块地址。
 ///   3. `""` —— 什么都没有。
+///
+/// 路径前缀改写规则只作用在**端点自己的 URL** 上，与地址来源无关：端点自带自定义主机时，
+/// 路径照样按那一格的规则改写——主机是端点自己的事，路径前缀是这一格的事。
 ///
 /// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子。格子缺失是一个真实答案，
 /// 不是一个洞。
@@ -48,85 +50,78 @@ pub fn resolve_base_url(
     env: Option<&Environment>,
     module_id: Option<&str>,
 ) -> ResolvedBaseUrl {
+    // 那一格（环境 × 模块）里的配置：模块地址与路径前缀改写规则都在这里。没有模块就没有
+    // 格子，模块的配置不是一个可以被借用的东西。
+    let cell = module_id.and_then(|m| env.and_then(|e| e.module_base_urls.get(m)));
+    let rewrite = cell.and_then(|c| c.rewrite.clone());
+
     // `Some("")` 是明确选择而不是缺省：端点处于自定义模式，URL 字段里就是完整地址，
     // 再前置环境的 base URL 会把它弄坏。与 src/lib/url.ts 的
     // `resolveEndpointBaseUrl` 对应 —— 两边不一致，前端预览与后端请求说的就是两个 URL。
     if let Some(ovr) = detail.base_url_override.as_deref() {
         return ResolvedBaseUrl {
             base_url: ovr.to_string(),
-            proxy: None,
+            rewrite,
             source: BaseUrlSource::Override,
         };
     }
 
-    // 没有模块就没有格子，模块的地址不是一个可以被借用的东西。
-    let Some(module_id) = module_id else {
-        return ResolvedBaseUrl {
-            base_url: String::new(),
-            proxy: None,
-            source: BaseUrlSource::None,
-        };
-    };
-
     // 模块地址只存在 `env.module_base_urls[module_id]` 这一格里。缺失或为空表示这一格
     // （环境 × 模块）没配，与「什么都没点名」是同一个答案：`source: none`。这一格不向
     // 别的模块的格子回落 —— 空的格子是一个真实答案，不是一个洞。
-    let cell = env.and_then(|e| e.module_base_urls.get(module_id));
     match cell {
         Some(cell) if !cell.url.is_empty() => ResolvedBaseUrl {
             base_url: cell.url.clone(),
-            proxy: cell.proxy.clone(),
+            rewrite,
             source: BaseUrlSource::Module,
         },
         _ => ResolvedBaseUrl {
             base_url: String::new(),
-            proxy: None,
+            rewrite,
             source: BaseUrlSource::None,
         },
     }
 }
 
-/// 用代理地址替换请求地址里的模块地址前缀。
+/// 把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
 ///
-/// 接口经代理网关转代时，后端 api 地址与实际访问地址不一致：模块那一格写的是
-/// `http://svc.internal:8080/api/a`（后端 api 地址），而真正要打的是
-/// `https://gw.corp.com/api/xxxx/a`（实际访问地址）。本函数把请求地址开头的那段模块地址换成
-/// 代理地址，其余部分原样保留：
+/// 模块地址自带的路径段不参与匹配：改写只作用在端点自己的 URL 上，故模块地址里的主机与
+/// 路径段一概不动。
 ///
-///   apply_proxy("http://svc.internal:8080/api/a", Some("https://gw.corp.com/api/xxxx/a"),
-///               "http://svc.internal:8080/api/a/orders/list")
-///     → "https://gw.corp.com/api/xxxx/a/orders/list"
+///   apply_rewrite(Some(&RewriteRule { from: "/api/air".into(), to: "/api/project-a/air".into() }),
+///                 "/api/air/xxxxx")
+///     → "/api/project-a/air/xxxxx"
 ///
 /// 规则：
 ///
-/// - `proxy` 为空或只有空白 → 原样返回。
-/// - 前缀是 `base_url` 去掉尾部所有 `/`；前缀为空 → 原样返回。
-/// - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求地址恰好
-///   等于该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会命中 `http://h/apixyz`。
-/// - 其余情况原样返回：请求打的是另一个主机，或那一格压根没有地址。
+/// - 规则缺席，或 `from` 去掉首尾空白与尾部 `/` 之后为空 → 原样返回。
+/// - `from` 去掉尾部所有 `/`（`/` 本身除外）；`to` 去掉首尾空白。
+/// - URL 以 `from` 开头，**且**其后紧跟的那一位是 `/`、`?` 或 `#`（或 URL 恰好等于
+///   `from`）→ 替换成 `to` + 其余部分。边界这一条是必需的：没有它，`/api/air` 会命中
+///   `/api/airplane`。
+/// - 其余情况原样返回。
 ///
-/// 与 `src/lib/url.ts` 的 `applyProxy` 对应；两边必须一致，否则预览与真正发出的请求描述的是
-/// 两个 URL。
-pub fn apply_proxy(base_url: &str, proxy: Option<&str>, url: &str) -> String {
-    let Some(proxy) = proxy else {
+/// `from` 按**原文**匹配：它不做 `{{var}}` 替换，故那里的标记永远不会被展开。
+/// `to` 会被随后的 `{{var}}` 替换扫到（它进了 URL）。
+///
+/// 与 `src/lib/url.ts` 的 `applyRewrite` 对应；两边必须一致，否则预览与真正发出的请求描述的
+/// 是两个 URL。
+pub fn apply_rewrite(url: &str, rule: Option<&RewriteRule>) -> String {
+    let Some(rule) = rule else {
         return url.to_string();
     };
-    let proxy = proxy.trim();
-    if proxy.is_empty() {
+    let from = rule.from.trim().trim_end_matches('/');
+    if from.is_empty() {
         return url.to_string();
     }
-    let prefix = base_url.trim_end_matches('/');
-    if prefix.is_empty() {
-        return url.to_string();
-    }
-    let Some(rest) = url.strip_prefix(prefix) else {
+    let Some(rest) = url.strip_prefix(from) else {
         return url.to_string();
     };
     if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('?') || rest.starts_with('#'))
     {
         return url.to_string();
     }
-    format!("{proxy}{rest}")
+    format!("{}{rest}", rule.to.trim())
 }
 
 /// 安全地拼接 `base_url` 与 `path`。`path` 自带 scheme 时按已是绝对地址处理，拼接处

@@ -1,7 +1,7 @@
 //! 地址：外来文档的 host → 环境的 (环境 × 模块) 那一格。
 
 use simple_post_core::db::{self, DbPool};
-use simple_post_core::domain::HttpMethod;
+use simple_post_core::domain::{HttpMethod, RewriteRule};
 use simple_post_core::error::AppError;
 
 use super::support::{fresh_project, seeded_module};
@@ -16,7 +16,7 @@ fn module_with_cell(key: &str, name: &str, url: &str, endpoint_key: &str, path: 
         name: name.into(),
         base_url: Some(IrBaseUrl {
             url: url.into(),
-            proxy: None,
+            rewrite: None,
         }),
         endpoints: vec![IrEndpoint {
             key: endpoint_key.into(),
@@ -26,12 +26,12 @@ fn module_with_cell(key: &str, name: &str, url: &str, endpoint_key: &str, path: 
     }
 }
 
-/// 一个带地址与代理的模块，底下挂一个端点。
-fn module_with_cell_and_proxy(
+/// 一个带地址与路径前缀改写规则的模块，底下挂一个端点。
+fn module_with_cell_and_rewrite(
     key: &str,
     name: &str,
     url: &str,
-    proxy: Option<&str>,
+    rewrite: Option<&RewriteRule>,
     endpoint_key: &str,
     path: &str,
 ) -> IrModule {
@@ -40,7 +40,7 @@ fn module_with_cell_and_proxy(
         name: name.into(),
         base_url: Some(IrBaseUrl {
             url: url.into(),
-            proxy: proxy.map(|p| p.to_string()),
+            rewrite: rewrite.cloned(),
         }),
         endpoints: vec![IrEndpoint {
             key: endpoint_key.into(),
@@ -63,7 +63,7 @@ fn module_with_endpoint_override(
         name: name.into(),
         base_url: Some(IrBaseUrl {
             url: url.into(),
-            proxy: None,
+            rewrite: None,
         }),
         endpoints: vec![IrEndpoint {
             key: endpoint_key.into(),
@@ -134,21 +134,27 @@ fn cell_of(pool: &DbPool, env_id: &str, module_id: &str) -> Option<String> {
         .map(|c| c.url.clone())
 }
 
-/// 某模块在给定环境里那一格的代理地址。
-fn cell_proxy_of(pool: &DbPool, env_id: &str, module_id: &str) -> Option<String> {
+/// 某模块在给定环境里那一格的路径前缀改写规则。
+fn cell_rewrite_of(pool: &DbPool, env_id: &str, module_id: &str) -> Option<RewriteRule> {
     db::with_conn(pool, |c| db::environments::get(c, env_id))
         .expect("env")
         .module_base_urls
         .get(module_id)
-        .and_then(|c| c.proxy.clone())
+        .and_then(|c| c.rewrite.clone())
 }
 
-/// 给某模块在给定环境里的那一格写上地址与代理。
+/// 给某模块在给定环境里的那一格写上地址与改写规则。
 ///
-/// `proxy` 传 `None` = 那一格的代理不动。
-fn seed_cell(pool: &DbPool, env_id: &str, module_id: &str, url: &str, proxy: Option<&str>) {
+/// `rewrite` 传 `None` = 那一格的规则不动。
+fn seed_cell(
+    pool: &DbPool,
+    env_id: &str,
+    module_id: &str,
+    url: &str,
+    rewrite: Option<&RewriteRule>,
+) {
     db::with_tx(pool, |c| {
-        db::environments::set_module_base_url(c, env_id, module_id, Some(url), proxy)?;
+        db::environments::set_module_base_url(c, env_id, module_id, Some(url), rewrite)?;
         Ok::<(), AppError>(())
     })
     .expect("写格子");
@@ -286,17 +292,20 @@ fn importing_into_an_existing_module_gives_that_module_the_first_address() {
 
 /// 规格没提代理时，那一格原有的代理保留：用户配的网关不被一次导入抹掉。
 #[test]
-fn the_cell_keeps_its_own_proxy_when_the_spec_only_gives_an_address() {
+fn the_cell_keeps_its_own_rewrite_when_the_spec_only_gives_an_address() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
     let env_id = default_env_id(&pool, &project_id);
-    // 用户给锚点模块那一格配了网关。
+    // 用户给锚点模块那一格配了路径改写规则。
     seed_cell(
         &pool,
         &env_id,
         &module_id,
         "https://old.example.com",
-        Some("https://gw.example.com"),
+        Some(&RewriteRule {
+            from: "/api/air".into(),
+            to: "/api/project-a/air".into(),
+        }),
     );
 
     let ex = exchange(vec![module_with_cell(
@@ -309,20 +318,20 @@ fn the_cell_keeps_its_own_proxy_when_the_spec_only_gives_an_address() {
     let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
 
     assert_eq!(
-        cell_proxy_of(&pool, &env_id, &module_id).as_deref(),
-        Some("https://gw.example.com"),
-        "规格没提代理时那一格原有的代理保留"
+        cell_rewrite_of(&pool, &env_id, &module_id).map(|r| r.to),
+        Some("/api/project-a/air".to_string()),
+        "规格没提规则时那一格原有的规则保留"
     );
     assert_eq!(
-        report.base_urls[0].proxy.as_deref(),
-        Some("https://gw.example.com"),
-        "报告里写回那一格实际的代理"
+        report.base_urls[0].rewrite.as_ref().map(|r| r.to.clone()),
+        Some("/api/project-a/air".to_string()),
+        "报告里写回那一格实际的规则"
     );
 }
 
-/// 规格给了代理时，那一格的代理被改成规格给的值，报告里写的就是那个新值。
+/// 规格给了规则时，那一格的规则被改成规格给的值，报告里写的就是那个新值。
 #[test]
-fn a_proxy_in_the_spec_replaces_the_proxy_of_the_cell() {
+fn a_rewrite_in_the_spec_replaces_the_rewrite_of_the_cell() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
     let env_id = default_env_id(&pool, &project_id);
@@ -331,34 +340,40 @@ fn a_proxy_in_the_spec_replaces_the_proxy_of_the_cell() {
         &env_id,
         &module_id,
         "https://old.example.com",
-        Some("https://gw.example.com"),
+        Some(&RewriteRule {
+            from: "/api/air".into(),
+            to: "/api/project-a/air".into(),
+        }),
     );
 
-    let ex = exchange(vec![module_with_cell_and_proxy(
+    let ex = exchange(vec![module_with_cell_and_rewrite(
         "/item/0",
         "订单",
         "https://api.example.com",
-        Some("https://gw2.example.com"),
+        Some(&RewriteRule {
+            from: "/api/air".into(),
+            to: "/api/project-b/air".into(),
+        }),
         "/item/0/request/0",
         "/orders",
     )]);
     let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
 
     assert_eq!(
-        cell_proxy_of(&pool, &env_id, &module_id).as_deref(),
-        Some("https://gw2.example.com"),
-        "规格给了代理就写规格那个"
+        cell_rewrite_of(&pool, &env_id, &module_id).map(|r| r.to),
+        Some("/api/project-b/air".to_string()),
+        "规格给了规则就写规格那个"
     );
     assert_eq!(
-        report.base_urls[0].proxy.as_deref(),
-        Some("https://gw2.example.com"),
-        "报告里写的是那一格实际的代理"
+        report.base_urls[0].rewrite.as_ref().map(|r| r.to.clone()),
+        Some("/api/project-b/air".to_string()),
+        "报告里写的是那一格实际的规则"
     );
 }
 
-/// 那一格没有代理时，报告里写「没有代理」。
+/// 那一格没有规则时，报告里写「没有规则」。
 #[test]
-fn a_cell_without_a_proxy_reports_no_proxy() {
+fn a_cell_without_a_rewrite_reports_no_rewrite() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
     let env_id = default_env_id(&pool, &project_id);
@@ -373,11 +388,11 @@ fn a_cell_without_a_proxy_reports_no_proxy() {
     let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
 
     assert_eq!(
-        cell_proxy_of(&pool, &env_id, &module_id),
+        cell_rewrite_of(&pool, &env_id, &module_id),
         None,
-        "那一格没有代理"
+        "那一格没有规则"
     );
-    assert_eq!(report.base_urls[0].proxy, None, "报告里写没有代理");
+    assert_eq!(report.base_urls[0].rewrite, None, "报告里写没有规则");
 }
 
 /// 本次导入一个接口都没写进去时，锚点那一格保持原样。

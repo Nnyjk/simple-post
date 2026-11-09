@@ -74,10 +74,10 @@ export interface ProposedBaseUrl {
 
 /** 落库报告里已经落下的地址。 */
 export interface AppliedBaseUrl {
-  /** 写进那一格的后端 api 地址。 */
+  /** 写进那一格的模块地址。 */
   url: string;
-  /** 写进那一格的实际访问地址。外来文档给不出代理，故导入时恒为缺席。 */
-  proxy?: string;
+  /** 写进那一格的路径前缀改写规则。外来文档给不出规则，故导入时恒为缺席。 */
+  rewrite?: { from: string; to: string };
   /** 写进了哪个模块的格子。 */
   moduleId: string;
   /** 写进了哪个环境。缺席 = 项目没有默认环境。 */
@@ -117,7 +117,7 @@ export interface ModuleBaseUrlEntry {
   moduleKey: string;
   moduleName: string;
   /** 缺席是一个真实答案：该模块在此环境下没有配地址。 */
-  baseUrl?: { url: string; proxy?: string };
+  baseUrl?: { url: string; rewrite?: { from: string; to: string } };
 }
 
 export interface ExportPreview {

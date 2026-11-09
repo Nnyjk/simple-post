@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::{list_names, merge_pool, serialize_value, TemplateParts};
-use crate::domain::{AuthConfig, KeyValue, RequestBody, ValueMode};
+use crate::domain::{AuthConfig, KeyValue, RequestBody, RewriteRule, ValueMode};
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
 const FIXTURE: &str = include_str!("../../../../fixtures/dynamic-parity.json");
@@ -53,9 +53,9 @@ struct ScanCase {
 struct ScanParts {
     #[serde(default)]
     base_url: String,
-    /// 那一格的实际访问地址。**缺席 = 样本没给代理地址**，此时那一段不参与扫描。
+    /// 那一格的路径前缀改写规则。**缺席 = 样本没给改写规则**，此时那一段不参与扫描。
     #[serde(default)]
-    proxy: Option<String>,
+    rewrite: Option<RewriteRule>,
     #[serde(default)]
     url: String,
     #[serde(default)]
@@ -135,7 +135,7 @@ fn every_scan_case_finds_the_same_names() {
     for case in &fixture.scan_cases {
         let parts = TemplateParts {
             base_url: &case.parts.base_url,
-            proxy: case.parts.proxy.as_deref(),
+            rewrite: case.parts.rewrite.as_ref(),
             url: &case.parts.url,
             params: &case.parts.params,
             path_params: &case.parts.path_params,

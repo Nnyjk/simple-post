@@ -5,14 +5,17 @@ import { cn } from '@/lib/utils';
 import type { EnvironmentSectionProps } from '../EnvironmentSection';
 
 /**
- * 模块地址表 —— 每行一个模块，两列：模块地址与代理地址。一行是一个 (环境 × 模块) 格子，
+ * 模块地址表 —— 每行一个模块，三列：模块、模块地址与路径改写。一行是一个 (环境 × 模块) 格子，
  * 格子里有两个字段：
  *
  * - **模块地址** —— 文档里写的、模块对外声明的那个地址。
- * - **代理地址** —— 接口经代理网关转代后真正要打的那个地址。留空即没有代理。
+ * - **路径改写** —— 一对「起点 → 目标」。它把端点**自己 URL** 的路径前缀从起点换成目标，
+ *   模块地址里的主机与路径段一概不动。故模块地址是 `127.0.0.1:8080`、起点是 `/api/air`、
+ *   目标是 `/api/project-a/air` 时，端点路径 `/api/air/xxxxx` 发出的是
+ *   `127.0.0.1:8080/api/project-a/air/xxxxx`。
  *
- * 两个字段各自独立写入：`null` = 该字段保持原值，`''` = 清空该字段。两个字段都空时这一格
- * 整个消失。每个格子都是独立值，没有任何东西可继承。
+ * 两个字段各自独立写入：`null` = 该字段保持原值；起点与目标都空白的规则 = 清空规则。两个字段
+ * 都空时这一格整个消失。每个格子都是独立值，没有任何东西可继承。
  *
  * 纯展示：一切都由 props 传入，包括模块列表（已按项目过滤并由宿主排序）。
  *
@@ -31,6 +34,8 @@ interface ModuleBaseUrlTableProps {
 const GRID = 'grid grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2';
 /** 同一张表去掉 模块 列 —— `mode="module"`。 */
 const GRID_SINGLE = 'grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2';
+/** 路径改写那一列里的两个输入框并排。 */
+const REWRITE_GRID = 'grid grid-cols-2 items-center gap-1';
 
 export function ModuleBaseUrlTable({
   env,
@@ -56,11 +61,14 @@ export function ModuleBaseUrlTable({
       <div className={cn(grid, 'border-b border-border/60 px-4 py-2')}>
         {!single && <span className="label-caps">模块</span>}
         <span className="label-caps">模块地址</span>
-        <span className="label-caps">代理地址</span>
+        <span className="label-caps" title="把端点自己 URL 的路径前缀从起点换成目标">
+          路径改写
+        </span>
       </div>
 
       {modules.map((module) => {
         const cell = env.moduleBaseUrls[module.id];
+        const rewrite = cell?.rewrite ?? null;
         return (
           <div
             key={module.id}
@@ -74,7 +82,7 @@ export function ModuleBaseUrlTable({
               </div>
             )}
 
-            {/* 模块地址 —— 本模块在此环境下的后端 api 地址。只给通用提示：在此点名另一个
+            {/* 模块地址 —— 本模块在此环境下的地址。只给通用提示：在此点名另一个
                 格子等于承诺一种并不存在的继承。
 
                 输入框送空串即清空该字段；另一个字段送 `null` 表示保持原值。 */}
@@ -91,15 +99,33 @@ export function ModuleBaseUrlTable({
               />
             </div>
 
-            {/* 代理地址 —— 实际访问地址。留空即没有代理，请求直接打模块地址。 */}
-            <div className="min-w-0">
+            {/* 路径改写 —— 一对「起点 → 目标」。起点按原文匹配端点自己 URL 的开头，命中要求落在
+                路径边界上；目标可以留空（把这段前缀整个去掉）。两个输入框各自写入自己那一半，
+                另一半保持原值。 */}
+            <div className={cn(REWRITE_GRID, 'min-w-0')}>
               <Input
-                value={cell?.proxy ?? ''}
+                value={rewrite?.from ?? ''}
                 onChange={(e) =>
-                  setEnvironmentModuleBaseUrl(env.id, module.id, null, e.target.value)
+                  setEnvironmentModuleBaseUrl(env.id, module.id, null, {
+                    from: e.target.value,
+                    to: rewrite?.to ?? '',
+                  })
                 }
-                placeholder="留空即没有代理"
-                aria-label={`${module.name} · 代理地址`}
+                placeholder="起点 /api/air"
+                aria-label={`${module.name} · 路径改写起点`}
+                className="h-8 font-mono text-xs"
+                spellCheck={false}
+              />
+              <Input
+                value={rewrite?.to ?? ''}
+                onChange={(e) =>
+                  setEnvironmentModuleBaseUrl(env.id, module.id, null, {
+                    from: rewrite?.from ?? '',
+                    to: e.target.value,
+                  })
+                }
+                placeholder="目标 /api/project-a/air"
+                aria-label={`${module.name} · 路径改写目标`}
                 className="h-8 font-mono text-xs"
                 spellCheck={false}
               />

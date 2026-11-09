@@ -76,7 +76,7 @@ describe('buildEndpointRequestParts', () => {
     });
     assert.equal(parts.baseUrl, 'https://example.test');
     assert.equal(parts.resolved.source, 'override');
-    assert.equal(parts.resolved.proxy, null);
+    assert.equal(parts.resolved.rewrite, null);
   });
 
   it('跟随模块：读环境里「环境 × 模块」那一格', () => {
@@ -92,20 +92,23 @@ describe('buildEndpointRequestParts', () => {
     assert.equal(parts.moduleBaseUrl, 'https://m1.test');
   });
 
-  it('那一格带代理地址时，baseUrl 是后端地址、proxy 是实际访问地址', () => {
+  it('那一格带改写规则时，baseUrl 是模块地址、rewrite 是路径前缀改写规则', () => {
     const parts = buildEndpointRequestParts({
       detail: detail(),
       draft: undefined,
       endpointEnv: env({
         moduleBaseUrls: {
-          m1: { url: 'http://svc.internal:8080/api', proxy: 'https://gw.test/api' },
+          m1: {
+            url: '127.0.0.1:8080',
+            rewrite: { from: '/api/air', to: '/api/project-a/air' },
+          },
         },
       }),
       moduleId: 'm1',
       enabledDynamicNames: NO_DYNAMIC,
     });
-    assert.equal(parts.baseUrl, 'http://svc.internal:8080/api');
-    assert.equal(parts.resolved.proxy, 'https://gw.test/api');
+    assert.equal(parts.baseUrl, '127.0.0.1:8080');
+    assert.deepEqual(parts.resolved.rewrite, { from: '/api/air', to: '/api/project-a/air' });
   });
 
   it('模块没有那一格时不借用别的模块的格子', () => {
@@ -191,20 +194,23 @@ describe('prepareEndpointRequest', () => {
     assert.equal(request.url, '/users/from-env');
   });
 
-  it('代理地址替换请求地址开头的模块地址', () => {
+  it('路径前缀改写只改端点自己的路径', () => {
     const parts = buildEndpointRequestParts({
-      detail: detail({ url: '/orders/list' }),
+      detail: detail({ url: '/api/air/xxxxx' }),
       draft: undefined,
       endpointEnv: env({
         moduleBaseUrls: {
-          m1: { url: 'http://svc.internal:8080/api', proxy: 'https://gw.test/api' },
+          m1: {
+            url: '127.0.0.1:8080',
+            rewrite: { from: '/api/air', to: '/api/project-a/air' },
+          },
         },
       }),
       moduleId: 'm1',
       enabledDynamicNames: NO_DYNAMIC,
     });
     const request = prepareEndpointRequest(parts, {});
-    assert.equal(request.url, 'https://gw.test/api/orders/list');
+    assert.equal(request.url, '127.0.0.1:8080/api/project-a/air/xxxxx');
   });
 
   it('请求体里带落单代理项时不抛异常', () => {

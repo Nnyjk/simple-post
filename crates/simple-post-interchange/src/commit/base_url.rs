@@ -1,7 +1,7 @@
 //! 地址：外来文档的 host → 环境的 (环境 × 模块) 那一格。
 
 use simple_post_core::db::{self, Connection};
-use simple_post_core::domain::Environment;
+use simple_post_core::domain::{Environment, RewriteRule};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
@@ -86,8 +86,8 @@ fn push_candidate(candidates: &mut Vec<String>, url: &str) {
 /// 导入只写规格里给出的那一段：规格给了地址就写地址，规格没提代理时那一格原有的代理保留，
 /// 用户配的网关不被一次导入抹掉。
 ///
-/// 报告里写回那一格**实际**的代理值：规格给了代理就是规格那个，规格没给就是那一格原来的
-/// 那个（可能没有代理）。
+/// 报告里写回那一格**实际**的改写规则：规格给了规则就是规格那个，规格没给就是那一格原来
+/// 那个（可能没有规则）。
 ///
 /// 没有默认环境就没有格子可填，于是地址无处可去——报告里 `environment_name` 为 `None`，
 /// 用户能看见「地址没有落进任何一格」，而不是以为它已经生效了。
@@ -95,25 +95,25 @@ pub(super) fn wire_base_url(
     conn: &mut Connection,
     module_id: &str,
     url: &str,
-    proxy: Option<&str>,
+    rewrite: Option<&RewriteRule>,
     environment: Option<&Environment>,
     report: &mut CommitReport,
 ) -> Result<(), AppError> {
-    let mut applied_proxy = None;
+    let mut applied_rewrite = None;
     if let Some(env) = environment {
-        // `proxy` 传 `None` = 那一格的代理不动，故规格没提代理时该格原有的代理保留。
+        // `rewrite` 传 `None` = 那一格的规则不动，故规格没提规则时该格原有的规则保留。
         let updated =
-            db::environments::set_module_base_url(conn, &env.id, module_id, Some(url), proxy)?;
-        // 读回那一格实际的代理，而不是把规格里那份原样抄进报告：规格没给代理时那一格
-        // 可能本来就配着网关。
-        applied_proxy = updated
+            db::environments::set_module_base_url(conn, &env.id, module_id, Some(url), rewrite)?;
+        // 读回那一格实际的规则，而不是把规格里那份原样抄进报告：规格没给规则时那一格
+        // 可能本来就配着。
+        applied_rewrite = updated
             .module_base_urls
             .get(module_id)
-            .and_then(|cell| cell.proxy.clone());
+            .and_then(|cell| cell.rewrite.clone());
     }
     report.base_urls.push(super::AppliedBaseUrl {
         url: url.to_string(),
-        proxy: applied_proxy,
+        rewrite: applied_rewrite,
         module_id: module_id.to_string(),
         environment_name: environment.map(|e| e.name.clone()),
     });

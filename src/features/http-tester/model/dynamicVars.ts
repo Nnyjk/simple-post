@@ -1,5 +1,5 @@
 import { listDynamicNames } from '@/lib/dynamic-vars';
-import type { DynamicValueStatus, DynamicVariableView } from '@/types/domain';
+import type { DynamicValueStatus, DynamicVariableView, RewriteRule } from '@/types/domain';
 import type { VarEntry } from '../var-hint';
 import type { EffectiveRequest } from './effectiveRequest';
 
@@ -52,18 +52,18 @@ export function enabledDynamicNameSet(dynamicVariables: DynamicVariableView[]): 
  * 扫的是**未替换**的模板，故同名环境变量也会被扫出来——动态变量在替换时压过环境变量
  * （见 `mergePool`），故名单里只留有定义且已启用的那些。
  *
- * `proxy` 是那一格的实际访问地址。发送路径会对它单独做一遍 `{{var}}` 替换，故它里面
- * 的标记同样要被扫到：扫不到的名字永远不会被取数，替换后仍是字面量 `{{name}}`。
+ * `rewrite` 是那一格的路径前缀改写规则。发送路径会对它的目标单独做一遍 `{{var}}` 替换，
+ * 故它里面的标记同样要被扫到：扫不到的名字永远不会被取数，替换后仍是字面量 `{{name}}`。
  */
 export function buildDynamicNames(
   baseUrl: string,
   url: string,
   effective: EffectiveRequest,
-  proxy: string | null,
+  rewrite: RewriteRule | null,
 ): string[] {
   return listDynamicNames({
     baseUrl,
-    proxy: proxy ?? undefined,
+    rewrite,
     url,
     params: effective.params,
     pathParams: effective.pathParams,

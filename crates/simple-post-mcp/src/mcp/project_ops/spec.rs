@@ -100,11 +100,16 @@ fn environment_schema() -> Value {
             },
             "baseUrl": {
                 "type": "string",
-                "description": "The backend api address of the (environment x module) cell. That cell has no other dimension to fall back on."
+                "description": "The module address of the (environment x module) cell. That cell has no other dimension to fall back on."
             },
-            "baseUrlProxy": {
-                "type": "string",
-                "description": "The address the request actually goes to when it is reached through a proxy gateway. Omit it for no proxy."
+            "baseUrlRewrite": {
+                "type": "object",
+                "description": "Replaces the endpoint's own path prefix \"from\" with \"to\". Omit it for no rewrite.",
+                "properties": {
+                    "from": { "type": "string" },
+                    "to": { "type": "string" }
+                },
+                "additionalProperties": false
             }
         },
         "additionalProperties": false

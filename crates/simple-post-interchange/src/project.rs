@@ -281,7 +281,7 @@ fn module_base_url(env: Option<&Environment>, module: &ResourceNode) -> Option<I
     let cell = env?.module_base_urls.get(&module.id)?;
     Some(IrBaseUrl {
         url: cell.url.clone(),
-        proxy: cell.proxy.clone(),
+        rewrite: cell.rewrite.clone(),
     })
 }
 

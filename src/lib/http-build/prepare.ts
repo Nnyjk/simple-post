@@ -1,5 +1,5 @@
 import {
-  applyProxy,
+  applyRewrite,
   collapseUrlSlashes,
   joinBaseUrl,
   listVars,
@@ -20,11 +20,11 @@ import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
  *
  * 操作顺序（每一步的顺序都有讲究）：
  *
- *   1. join `baseUrl` + `urlPath`——自带 scheme 的 path 优先，「自定义」的完整 URL 因此不会被前缀；
- *   2. 把路径里的 `{占位符}` 换成端点自己的路径参数——它们的值先解析 `{{var}}`，再按路径段编码；
- *   3. 在 join 后的 URL 上解析 `{{var}}`，模块地址里的变量才解析得到；
- *   4. 模块地址与代理地址各再解析一趟 `{{var}}`——前缀匹配要拿解析后的文本；
- *   5. 用代理地址替换请求地址开头那段模块地址——替换的是解析之后的前缀；
+ *   1. 用路径前缀改写规则改写 `urlPath`——只改端点自己的 URL，模块地址自带的路径段不参与匹配；
+ *   2. join `baseUrl` + `urlPath`——自带 scheme 的 path 优先，「自定义」的完整 URL 因此不会被前缀；
+ *   3. 把路径里的 `{占位符}` 换成端点自己的路径参数——它们的值先解析 `{{var}}`，再按路径段编码；
+ *   4. 在 join 后的 URL 上解析 `{{var}}`，模块地址里的变量才解析得到；
+ *   5. 模块地址再解析一趟 `{{var}}`——缺值报告要指出缺的是哪个变量；
  *   6. 折叠 URL path 里的重复斜杠；
  *   7. 逐个解析启用参数的**值**并把存活者拼成查询串（编码，并按当前 URL 选 `?` 还是 `&`）；
  *   8. 追加 query 位置的 apikey；
@@ -51,7 +51,10 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
 
   const auth = resolveAuth(input.auth, pool, missing);
 
-  const joined = joinBaseUrl(input.baseUrl, input.urlPath);
+  // 路径前缀改写作用在**端点自己的 URL** 上，且在拼接之前：模块地址自带的路径段不参与
+  // 匹配，主机也不动。改写后的路径随后与模块地址拼接。
+  const rewritten = applyRewrite(input.urlPath, input.rewrite);
+  const joined = joinBaseUrl(input.baseUrl, rewritten);
 
   // 路径参数的值在下面那趟 `{{var}}` 替换**之前**解析：路径参数的值要先编码，编码过的
   // `{{var}}` 就再也认不出来了，故值里的变量在这一步就地解析。
@@ -73,20 +76,14 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   const url = resolveVarsWithMissing(substituted.url, pool);
   missing.add(url.missing);
 
-  // 模块地址与代理地址各自再解析一趟 `{{var}}`：代理地址不在 URL 里，模块地址的变量则已经由
-  // 上面那趟解析掉了，但两者的**前缀匹配**都要拿解析后的文本，故这里各算一次。
+  // 模块地址自己再解析一趟 `{{var}}`：它可能是模板，缺值报告要指出缺的是哪个变量。
   const resolvedBase = resolveVarsWithMissing(input.baseUrl, pool);
   missing.add(resolvedBase.missing);
-  const resolvedProxy = resolveVarsWithMissing(input.proxy ?? '', pool);
-  missing.add(resolvedProxy.missing);
-
-  // 代理替换放在模板替换之后：要换掉的正是解析出来的那个前缀。
-  const proxied = applyProxy(resolvedBase.value, resolvedProxy.value, url.value);
 
   // `collapseUrlSlashes` 放在替换之后、绝不之前：`{{var}}` → `/api` 才会把 `joinBaseUrl` 插入的
   // 分隔符变成 `//`，到这里真实 path 才确定。`collapseUrlSlashes` 不碰 query/fragment，
   // 所以参数还能在它之后追加
-  const normalized = collapseUrlSlashes(proxied);
+  const normalized = collapseUrlSlashes(url.value);
 
   const withParams = appendQueryString(normalized, input.params, pool, missing);
   const finalUrl = appendApikeyToQuery(withParams, auth);

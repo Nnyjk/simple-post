@@ -1,4 +1,4 @@
-//! base URL 解析与代理前缀替换的共享样本读取器。
+//! base URL 解析与路径前缀改写的共享样本读取器。
 //!
 //! 判据来自共享样本 `fixtures/base-url-parity.json`，渲染进程那一侧
 //! （`src/lib/__tests__/base-url-parity.test.ts`）读同一份文件。两份实现各写一遍规则，
@@ -9,10 +9,10 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use simple_post_core::domain::{
-    AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, RequestBody,
+    AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, RequestBody, RewriteRule,
 };
 
-use super::base_url::{apply_proxy, resolve_base_url, BaseUrlSource};
+use super::base_url::{apply_rewrite, resolve_base_url, BaseUrlSource};
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
 const FIXTURE: &str = include_str!("../../../../fixtures/base-url-parity.json");
@@ -24,7 +24,7 @@ struct Fixture {
     #[serde(rename = "$comment", default)]
     _comment: Option<String>,
     cases: Vec<Case>,
-    proxy_cases: Vec<ProxyCase>,
+    rewrite_cases: Vec<RewriteCase>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,7 +55,7 @@ struct EnvCase {
 struct CellCase {
     url: String,
     #[serde(default)]
-    proxy: Option<String>,
+    rewrite: Option<RewriteRule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,18 +63,16 @@ struct CellCase {
 struct Expected {
     base_url: String,
     #[serde(default)]
-    proxy: Option<String>,
+    rewrite: Option<RewriteRule>,
     source: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ProxyCase {
+struct RewriteCase {
     name: String,
-    base_url: String,
-    #[serde(default)]
-    proxy: Option<String>,
     url: String,
+    rewrite: Option<RewriteRule>,
     expected: String,
 }
 
@@ -125,7 +123,7 @@ fn env(case: Option<&EnvCase>) -> Option<Environment> {
                     k.clone(),
                     ModuleBaseUrl {
                         url: v.url.clone(),
-                        proxy: v.proxy.clone(),
+                        rewrite: v.rewrite.clone(),
                     },
                 )
             })
@@ -158,14 +156,14 @@ fn every_case_matches_the_shared_sample() {
         );
         if got.base_url != case.expected.base_url {
             mismatches.push(format!(
-                "{}: base URL 是 {}，样本要求 {}",
+                "{}: 模块地址是 {}，样本要求 {}",
                 case.name, got.base_url, case.expected.base_url
             ));
         }
-        if got.proxy != case.expected.proxy {
+        if got.rewrite != case.expected.rewrite {
             mismatches.push(format!(
-                "{}: 代理是 {:?}，样本要求 {:?}",
-                case.name, got.proxy, case.expected.proxy
+                "{}: 改写规则是 {:?}，样本要求 {:?}",
+                case.name, got.rewrite, case.expected.rewrite
             ));
         }
         if got.source != source_of(&case.expected.source) {
@@ -183,17 +181,17 @@ fn every_case_matches_the_shared_sample() {
 }
 
 #[test]
-fn every_proxy_case_matches_the_shared_sample() {
+fn every_rewrite_case_matches_the_shared_sample() {
     let fixture = fixture();
     assert_eq!(
-        fixture.proxy_cases.len(),
+        fixture.rewrite_cases.len(),
         9,
-        "样本里的 proxyCase 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
+        "样本里的 rewriteCase 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 
     let mut mismatches: Vec<String> = Vec::new();
-    for case in &fixture.proxy_cases {
-        let got = apply_proxy(&case.base_url, case.proxy.as_deref(), &case.url);
+    for case in &fixture.rewrite_cases {
+        let got = apply_rewrite(&case.url, case.rewrite.as_ref());
         if got != case.expected {
             mismatches.push(format!(
                 "{}: 得到 {got}，样本要求 {}",
@@ -203,7 +201,7 @@ fn every_proxy_case_matches_the_shared_sample() {
     }
     assert!(
         mismatches.is_empty(),
-        "这些 proxyCase 与样本对不上：\n{}",
+        "这些 rewriteCase 与样本对不上：\n{}",
         mismatches.join("\n")
     );
 }
@@ -211,30 +209,30 @@ fn every_proxy_case_matches_the_shared_sample() {
 /// 样本本身得覆盖得住每一条规则。
 ///
 /// 这一条是防「读取器的键名与样本对不上」的那道防线：serde 遇到不认识的键会**静默
-/// 忽略**，于是 `expected.proxy` 永远读到 `None`，上面两条断言一条用例都没走到，却
-/// 一直是绿的。故这里数一遍样本里真正带代理的条目，为 0 就失败。
+/// 忽略**，于是 `expected.rewrite` 永远读到 `None`，上面两条断言一条用例都没走到，却
+/// 一直是绿的。故这里数一遍样本里真正带改写规则的条目，为 0 就失败。
 #[test]
 fn the_sample_covers_the_resolution_rules() {
     let fixture = fixture();
 
-    let with_proxy = fixture
+    let with_rewrite = fixture
         .cases
         .iter()
-        .filter(|c| c.expected.proxy.is_some())
+        .filter(|c| c.expected.rewrite.is_some())
         .count();
     assert!(
-        with_proxy > 0,
-        "样本里没有一条带代理的 case，代理这一条规则就没人钉住"
+        with_rewrite > 0,
+        "样本里没有一条带改写规则的 case，改写规则这一条就没人钉住"
     );
 
-    let proxy_cases_with_proxy = fixture
-        .proxy_cases
+    let rewrite_cases_with_rule = fixture
+        .rewrite_cases
         .iter()
-        .filter(|c| c.proxy.is_some())
+        .filter(|c| c.rewrite.is_some())
         .count();
     assert!(
-        proxy_cases_with_proxy > 0,
-        "样本里没有一条带代理的 proxyCase，前缀替换就没人钉住"
+        rewrite_cases_with_rule > 0,
+        "样本里没有一条带规则的 rewriteCase，改写就没人钉住"
     );
 
     let override_cases = fixture

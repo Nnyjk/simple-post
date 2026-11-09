@@ -10,7 +10,7 @@
  * 值的序列化在后端发生（前端拿到的已经是替换用的文本），这里的 [`serializeValue`] 是同一套
  * 规则的镜像，只有共享样本的读取器读它。
  */
-import type { AuthConfig, KeyValue, RequestBody } from '@/types/domain';
+import type { AuthConfig, KeyValue, RequestBody, RewriteRule } from '@/types/domain';
 import { listVars } from './url';
 
 /** 值的序列化形态。与 Rust 的 `domain::ValueMode` 一一对应。 */
@@ -21,10 +21,12 @@ export interface DynamicTemplateParts {
   /** base URL。它可能自身带变量，故与 path 一起扫。 */
   baseUrl: string;
   /**
-   * 那一格的实际访问地址。它会被 `{{var}}` 替换，故它里面的标记同样算被引用——不扫的话，
-   * 只在代理地址里出现的动态变量永远不会被取数。
+   * 路径前缀改写规则的**目标**。它会被 `{{var}}` 替换（它进了 URL），故它里面的标记同样算
+   * 被引用——不扫的话，只在改写目标里出现的动态变量永远不会被取数。
+   *
+   * 规则的**起点**不扫：它按原文匹配，不做变量替换。
    */
-  proxy?: string;
+  rewrite?: RewriteRule | null;
   /** 端点的 path。 */
   url: string;
   params: KeyValue[];
@@ -67,7 +69,7 @@ export function mergePool(
  * 模板里出现的全部 `{{name}}` 名字，按首次出现排序。
  *
  * 只扫**会被替换**的字段：启用的且 key 非空的参数值、路径参数值、header 值、body 内容、
- * 那一格的实际访问地址（代理地址），以及鉴权里那三种方案（bearer / basic / apikey）。
+ * 路径改写规则的目标，以及鉴权里那三种方案（bearer / basic / apikey）。
  * OAuth2 的配置字段不被变量替换，故不在扫描范围内——扫了会让一条根本没被用到的定义去取数。
  */
 export function listDynamicNames(parts: DynamicTemplateParts): string[] {
@@ -82,8 +84,8 @@ export function listDynamicNames(parts: DynamicTemplateParts): string[] {
   };
 
   add(parts.baseUrl);
-  // 代理地址（那一格的实际访问地址）会被单独替换一遍，故它里面的标记同样算被引用。
-  if (parts.proxy) add(parts.proxy);
+  // 改写目标会被单独替换一遍，故它里面的标记同样算被引用。
+  if (parts.rewrite) add(parts.rewrite.to);
   add(parts.url);
   for (const param of parts.params) {
     if (!param.enabled || !param.key) continue;

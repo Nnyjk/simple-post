@@ -71,10 +71,13 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     assert.strictEqual(harness.bag.environments[0], original);
   });
 
-  it('模块地址的两个字段各自独立：null 保持原值，空串清空该字段', async () => {
+  it('模块地址的两个字段各自独立：null 保持原值，空白规则清空该字段', async () => {
     const original = makeEnvironment({
       moduleBaseUrls: {
-        'mod-1': { url: 'https://api.example.test', proxy: 'https://gw.example.test' },
+        'mod-1': {
+          url: 'https://api.example.test',
+          rewrite: { from: '/api/air', to: '/api/project-a/air' },
+        },
         'mod-2': { url: 'https://api2.example.test' },
       },
     });
@@ -85,7 +88,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
       return null;
     });
 
-    // 只改地址，代理保持原值（proxy 送 null）。
+    // 只改地址，改写规则保持原值（rewrite 送 null）。
     await harness.slice.setEnvironmentModuleBaseUrl(
       'env-1',
       'mod-1',
@@ -94,18 +97,18 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     );
     assert.deepEqual(harness.bag.environments[0].moduleBaseUrls['mod-1'], {
       url: 'https://api3.example.test',
-      proxy: 'https://gw.example.test',
+      rewrite: { from: '/api/air', to: '/api/project-a/air' },
     });
 
-    // 只清代理，地址保持原值（url 送 null）。
-    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, '');
+    // 只清改写规则，地址保持原值（url 送 null）。起点与目标都空白即「没有规则」。
+    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, { from: '', to: '' });
     assert.deepEqual(harness.bag.environments[0].moduleBaseUrls['mod-1'], {
       url: 'https://api3.example.test',
-      proxy: null,
+      rewrite: null,
     });
 
     // 两个字段都空了，这一格整个消失；别的模块的格子原样保留。
-    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', '', '');
+    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', '', { from: '', to: '' });
     assert.equal(
       Object.hasOwn(harness.bag.environments[0].moduleBaseUrls, 'mod-1'),
       false,
@@ -122,16 +125,26 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
           envId: 'env-1',
           moduleId: 'mod-1',
           url: 'https://api3.example.test',
-          proxy: null,
+          rewrite: null,
         },
       },
       {
         cmd: 'environments_set_module_baseurl',
-        args: { envId: 'env-1', moduleId: 'mod-1', url: null, proxy: '' },
+        args: {
+          envId: 'env-1',
+          moduleId: 'mod-1',
+          url: null,
+          rewrite: { from: '', to: '' },
+        },
       },
       {
         cmd: 'environments_set_module_baseurl',
-        args: { envId: 'env-1', moduleId: 'mod-1', url: '', proxy: '' },
+        args: {
+          envId: 'env-1',
+          moduleId: 'mod-1',
+          url: '',
+          rewrite: { from: '', to: '' },
+        },
       },
     ]);
   });
