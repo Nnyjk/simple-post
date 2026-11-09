@@ -60,12 +60,12 @@ pub(crate) fn missing_pieces(
     };
 
     // ---- 变量 ----
+    // 路径前缀改写作用在端点自己的 URL 上，故扫描的是**改写之后**的那一份：改写没
+    // 命中时就是原路径（目标里的标记不会被扫到——那个目标这次不参与请求）。
+    let scanned_url = crate::variable_fill::apply_rewrite(&detail.url, rewrite.as_ref());
     let parts = simple_post_core::dynamic::TemplateParts {
         base_url: &base_url,
-        // 改写目标会被 `{{var}}` 替换，故它里面的标记同样参与扫描：只出现在改写目标里
-        // 的动态变量缺了，这个端点同样发不出去。
-        rewrite: rewrite.as_ref(),
-        url: &detail.url,
+        url: &scanned_url,
         params: &detail.params,
         // 路径参数值里的 `{{var}}` 照样会被替换，故它们同样参与扫描。
         path_params: &detail.path_params,

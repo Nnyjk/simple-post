@@ -117,7 +117,7 @@ fn the_scan_covers_the_fields_that_actually_get_substituted() {
     };
     let parts = TemplateParts {
         base_url: "https://{{host}}",
-        rewrite: None,
+
         url: "/{{pathVar}}",
         params: &params,
         path_params: &[],
@@ -150,7 +150,7 @@ fn a_disabled_parameter_is_not_referenced() {
     }];
     let parts = TemplateParts {
         base_url: "",
-        rewrite: None,
+
         url: "/x",
         params: &params,
         path_params: &[],

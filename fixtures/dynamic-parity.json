@@ -1,53 +1,91 @@
 {
-  "$comment": "动态变量规则的跨语言样本。Rust 的 `core::dynamic`（合并、序列化、名字扫描）与 TS 的 `src/lib/dynamic-vars.ts`（同一组规则的镜像）读同一份本文件，产出必须逐条相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。样本只覆盖「值拿到之后怎么进池、怎么变成字符串、哪些名字算被引用」，不覆盖取数本身——取数是网络行为，不是纯函数。`scanCases` 的 `parts.rewrite` 是那一格的路径前缀改写规则：它的目标会被 `{{var}}` 替换，故它里面的标记同样算被引用；缺席 = 样本没给改写规则。数值只用整数：Rust 的 `serde_json::Number` 保留 `1.0` 的浮点写法，JavaScript 的 `JSON.parse` 把它归一成 `1`，两者在小数上本就不同，而生产路径上序列化只发生在 Rust 侧。",
+  "$comment": "动态变量规则的跨语言样本。Rust 的 `core::dynamic`（合并、序列化、名字扫描）与 TS 的 `src/lib/dynamic-vars.ts`（同一组规则的镜像）读同一份本文件，产出必须逐条相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。样本只覆盖「值拿到之后怎么进池、怎么变成字符串、哪些名字算被引用」，不覆盖取数本身——取数是网络行为，不是纯函数。`scanCases` 的 `parts.url` 是这次请求**真正会发出去**的那一份路径：路径前缀改写已经由调用方算进去了，故改写目标里的标记算被引用，而没被改写掉的那一段里的标记不算。数值只用整数：Rust 的 `serde_json::Number` 保留 `1.0` 的浮点写法，JavaScript 的 `JSON.parse` 把它归一成 `1`，两者在小数上本就不同，而生产路径上序列化只发生在 Rust 侧。",
   "mergeCases": [
     {
       "name": "动态变量的值覆盖同名环境变量",
-      "env": { "sns": "env-value", "token": "t" },
+      "env": {
+        "sns": "env-value",
+        "token": "t"
+      },
       "disabled": [],
-      "dynamic": { "sns": "dynamic-value" },
-      "expected": { "sns": "dynamic-value", "token": "t" }
+      "dynamic": {
+        "sns": "dynamic-value"
+      },
+      "expected": {
+        "sns": "dynamic-value",
+        "token": "t"
+      }
     },
     {
       "name": "被停用的同名环境变量不影响动态变量",
-      "env": { "sns": "env-value" },
+      "env": {
+        "sns": "env-value"
+      },
       "disabled": ["sns"],
-      "dynamic": { "sns": "dynamic-value" },
-      "expected": { "sns": "dynamic-value" }
+      "dynamic": {
+        "sns": "dynamic-value"
+      },
+      "expected": {
+        "sns": "dynamic-value"
+      }
     },
     {
       "name": "被停用的环境变量不参与替换",
-      "env": { "sns": "env-value", "token": "t" },
+      "env": {
+        "sns": "env-value",
+        "token": "t"
+      },
       "disabled": ["token"],
       "dynamic": {},
-      "expected": { "sns": "env-value" }
+      "expected": {
+        "sns": "env-value"
+      }
     },
     {
       "name": "停用名单里的环境变量与动态变量同名时，动态变量照常生效",
-      "env": { "sns": "env-value" },
+      "env": {
+        "sns": "env-value"
+      },
       "disabled": ["sns"],
-      "dynamic": { "sns": "dynamic-value" },
-      "expected": { "sns": "dynamic-value" }
+      "dynamic": {
+        "sns": "dynamic-value"
+      },
+      "expected": {
+        "sns": "dynamic-value"
+      }
     },
     {
       "name": "动态变量的值不进环境变量集合本身",
-      "env": { "token": "t" },
+      "env": {
+        "token": "t"
+      },
       "disabled": [],
-      "dynamic": { "sns": "dynamic-value" },
-      "expected": { "sns": "dynamic-value", "token": "t" }
+      "dynamic": {
+        "sns": "dynamic-value"
+      },
+      "expected": {
+        "sns": "dynamic-value",
+        "token": "t"
+      }
     }
   ],
   "serializeCases": [
     {
       "name": "auto 对数组给裸 JSON 片段",
       "mode": "auto",
-      "value": [{ "code": "A001" }],
+      "value": [
+        {
+          "code": "A001"
+        }
+      ],
       "expected": "[{\"code\":\"A001\"}]"
     },
     {
       "name": "auto 对对象给裸 JSON 片段",
       "mode": "auto",
-      "value": { "code": "A001" },
+      "value": {
+        "code": "A001"
+      },
       "expected": "{\"code\":\"A001\"}"
     },
     {
@@ -77,7 +115,11 @@
     {
       "name": "json 对数组给裸 JSON 片段",
       "mode": "json",
-      "value": [{ "code": "A001" }],
+      "value": [
+        {
+          "code": "A001"
+        }
+      ],
       "expected": "[{\"code\":\"A001\"}]"
     },
     {
@@ -101,13 +143,19 @@
     {
       "name": "text 对数组给裸 JSON 片段（与 auto 相同）",
       "mode": "text",
-      "value": [{ "code": "A001" }],
+      "value": [
+        {
+          "code": "A001"
+        }
+      ],
       "expected": "[{\"code\":\"A001\"}]"
     },
     {
       "name": "text 对对象给裸 JSON 片段（与 auto 相同）",
       "mode": "text",
-      "value": { "code": "A001" },
+      "value": {
+        "code": "A001"
+      },
       "expected": "{\"code\":\"A001\"}"
     },
     {
@@ -135,10 +183,30 @@
       "parts": {
         "baseUrl": "https://{{host}}/v1",
         "url": "/x/{{pathVar}}",
-        "params": [{ "id": "p1", "key": "q", "value": "{{paramVar}}", "enabled": true }],
-        "headers": [{ "id": "h1", "key": "X-Token", "value": "{{headerVar}}", "enabled": true }],
-        "body": { "mode": "json", "content": "{\"bodyVar\": {{bodyVar}}}" },
-        "auth": { "kind": "bearer", "bearer": "{{authVar}}" }
+        "params": [
+          {
+            "id": "p1",
+            "key": "q",
+            "value": "{{paramVar}}",
+            "enabled": true
+          }
+        ],
+        "headers": [
+          {
+            "id": "h1",
+            "key": "X-Token",
+            "value": "{{headerVar}}",
+            "enabled": true
+          }
+        ],
+        "body": {
+          "mode": "json",
+          "content": "{\"bodyVar\": {{bodyVar}}}"
+        },
+        "auth": {
+          "kind": "bearer",
+          "bearer": "{{authVar}}"
+        }
       },
       "expected": ["host", "pathVar", "paramVar", "headerVar", "bodyVar", "authVar"]
     },
@@ -147,10 +215,29 @@
       "parts": {
         "baseUrl": "",
         "url": "/x",
-        "params": [{ "id": "p1", "key": "q", "value": "{{offParam}}", "enabled": false }],
-        "headers": [{ "id": "h1", "key": "X", "value": "{{offHeader}}", "enabled": false }],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "params": [
+          {
+            "id": "p1",
+            "key": "q",
+            "value": "{{offParam}}",
+            "enabled": false
+          }
+        ],
+        "headers": [
+          {
+            "id": "h1",
+            "key": "X",
+            "value": "{{offHeader}}",
+            "enabled": false
+          }
+        ],
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": []
     },
@@ -159,10 +246,29 @@
       "parts": {
         "baseUrl": "",
         "url": "/x",
-        "params": [{ "id": "p1", "key": "", "value": "{{emptyKey}}", "enabled": true }],
-        "headers": [{ "id": "h1", "key": "", "value": "{{emptyKey}}", "enabled": true }],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "params": [
+          {
+            "id": "p1",
+            "key": "",
+            "value": "{{emptyKey}}",
+            "enabled": true
+          }
+        ],
+        "headers": [
+          {
+            "id": "h1",
+            "key": "",
+            "value": "{{emptyKey}}",
+            "enabled": true
+          }
+        ],
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": []
     },
@@ -173,8 +279,17 @@
         "url": "/x",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "basic", "basic": { "username": "{{user}}", "password": "{{pass}}" } }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "basic",
+          "basic": {
+            "username": "{{user}}",
+            "password": "{{pass}}"
+          }
+        }
       },
       "expected": ["user", "pass"]
     },
@@ -183,10 +298,22 @@
       "parts": {
         "baseUrl": "",
         "url": "/{{dup}}",
-        "params": [{ "id": "p1", "key": "q", "value": "{{dup}}", "enabled": true }],
+        "params": [
+          {
+            "id": "p1",
+            "key": "q",
+            "value": "{{dup}}",
+            "enabled": true
+          }
+        ],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": ["dup"]
     },
@@ -197,8 +324,13 @@
         "url": "/{{{{nested}}}}",
         "params": [],
         "headers": [],
-        "body": { "mode": "json", "content": "{\"x\": {{{triple}}}}" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "json",
+          "content": "{\"x\": {{{triple}}}}"
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": []
     },
@@ -208,10 +340,22 @@
         "baseUrl": "",
         "url": "/users/{id}",
         "params": [],
-        "pathParams": [{ "id": "pp1", "key": "id", "value": "{{pathParamVar}}", "enabled": true }],
+        "pathParams": [
+          {
+            "id": "pp1",
+            "key": "id",
+            "value": "{{pathParamVar}}",
+            "enabled": true
+          }
+        ],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": ["pathParamVar"]
     },
@@ -221,10 +365,22 @@
         "baseUrl": "",
         "url": "/users/{id}",
         "params": [],
-        "pathParams": [{ "id": "pp1", "key": "id", "value": "{{offPathParam}}", "enabled": false }],
+        "pathParams": [
+          {
+            "id": "pp1",
+            "key": "id",
+            "value": "{{offPathParam}}",
+            "enabled": false
+          }
+        ],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": []
     },
@@ -234,36 +390,56 @@
         "baseUrl": "",
         "url": "/users/{id}",
         "params": [],
-        "pathParams": [{ "id": "pp1", "key": "", "value": "{{emptyPathKey}}", "enabled": true }],
+        "pathParams": [
+          {
+            "id": "pp1",
+            "key": "",
+            "value": "{{emptyPathKey}}",
+            "enabled": true
+          }
+        ],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": []
     },
     {
-      "name": "路径改写目标里的标记也算被引用",
+      "name": "生效后的路径里的标记也算被引用",
       "parts": {
         "baseUrl": "",
-        "url": "/x",
-        "rewrite": { "from": "/api/air", "to": "/api/{{rewriteVar}}/air" },
+        "url": "/api/{{rewriteVar}}/air",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": ["rewriteVar"]
     },
     {
-      "name": "路径改写目标与模块地址里的同名标记只出现一次",
+      "name": "生效后的路径与模块地址里的同名标记只出现一次",
       "parts": {
         "baseUrl": "https://{{host}}/v1",
-        "url": "/x",
-        "rewrite": { "from": "/api/air", "to": "/api/{{host}}/air" },
+        "url": "/api/{{host}}/air",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": ["host"]
     }
