@@ -24,7 +24,7 @@ export function PathParamsEditor({
   error,
   onChange,
 }: {
-  /** 当前生效的 URL 文本。占位符名单从它派生。 */
+  /** 用来派生占位符名单的那份路径 —— 改写之后的那一份，故改写目标里的占位符也在内。 */
   url: string;
   /** 已存的路径参数（占位符名 → 值）。 */
   items: KeyValue[];

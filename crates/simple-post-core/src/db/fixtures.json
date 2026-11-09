@@ -427,7 +427,7 @@
         "m_order": { "url": "http://localhost:4000/demo/order" },
         "m_pay": {
           "url": "http://localhost:4000/demo/pay",
-          "proxy": "https://gw.example.com/demo/pay"
+          "rewrite": { "from": "/api/pay", "to": "/api/demo/pay" }
         }
       },
       "variables": { "token": "eyJhbGciOiJIUzI1NiJ9.dev", "env": "dev" },

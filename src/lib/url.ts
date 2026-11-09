@@ -2,7 +2,7 @@
  * URL 辅助 —— 纯函数、无框架依赖。HttpTester、BaseUrlPicker 与 cURL 导出共用
  * 同一套 join / 解析逻辑；要改解析规则就只在这里改一次。
  */
-import type { EndpointDetail, Environment } from '@/types/domain';
+import type { EndpointDetail, Environment, RewriteRule } from '@/types/domain';
 
 /**
  * 生效的 baseUrl 来自哪一层；选择器用它标注当前选择（「跟随模块」/「自定义」）。`override` 是端点
@@ -11,10 +11,10 @@ import type { EndpointDetail, Environment } from '@/types/domain';
 export type BaseUrlSource = 'override' | 'module' | 'none';
 
 export interface ResolvedBaseUrl {
-  /** 后端 api 地址。 */
+  /** 模块地址。 */
   baseUrl: string;
-  /** 实际访问地址。`null` = 没有代理，请求直接打 `baseUrl`。 */
-  proxy: string | null;
+  /** 路径前缀改写规则。`null` = 没有改写。 */
+  rewrite: RewriteRule | null;
   source: BaseUrlSource;
 }
 
@@ -41,49 +41,99 @@ export function resolveEndpointBaseUrl(
    */
   moduleId: string | null,
 ): ResolvedBaseUrl {
+  const cell = moduleId ? env?.moduleBaseUrls?.[moduleId] : undefined;
+  // 路径前缀改写规则只作用在端点自己的 URL 上，与地址来源无关：端点自带自定义主机时，
+  // 路径照样按这一格的规则改写——主机是端点自己的事，路径前缀是这一格的事。
+  const rewrite = cell?.rewrite ?? null;
   if (endpoint.baseUrlOverride !== null && endpoint.baseUrlOverride !== undefined) {
     return {
       baseUrl: endpoint.baseUrlOverride,
-      proxy: null,
+      rewrite,
       source: 'override',
     };
   }
-  if (!moduleId) return { baseUrl: '', proxy: null, source: 'none' };
-  const cell = env?.moduleBaseUrls?.[moduleId];
-  if (!cell || !cell.url) return { baseUrl: '', proxy: null, source: 'none' };
+  if (!moduleId) return { baseUrl: '', rewrite: null, source: 'none' };
+  if (!cell || !cell.url) return { baseUrl: '', rewrite, source: 'none' };
   return {
     baseUrl: cell.url,
-    proxy: cell.proxy ?? null,
+    rewrite,
     source: 'module',
   };
 }
 
 /**
- * 用代理地址替换请求地址里的模块地址前缀。接口经代理网关转代时，后端 api 地址与实际访问地址
- * 不一致：模块那一格写的是后端 api 地址，而真正要打的是代理地址，故本函数把请求地址开头的那段
- * 模块地址换成代理地址，其余部分原样保留。
+ * 把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
  *
- * - `proxy` 缺席或只有空白 → 原样返回。
- * - 前缀是 `baseUrl` 去掉尾部所有 `/`；前缀为空 → 原样返回。
- * - 请求地址以该前缀开头，**且**前缀之后紧跟的那一位是 `/`、`?` 或 `#`（或请求地址恰好等于
- *   该前缀）→ 替换。边界这一条是必需的：没有它，`http://h/api` 会命中 `http://h/apixyz`。
- * - 其余情况原样返回：请求打的是另一个主机，或那一格压根没有地址。
+ * 规则只作用在路径上：主机与查询串一概不动。模块地址自带的路径段不参与匹配。
  *
- * 对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `apply_proxy`；两者必须一致，
- * 否则预览与真正发出的请求描述的是两个 URL。
- */
-export function applyProxy(baseUrl: string, proxy: string | null | undefined, url: string): string {
-  if (proxy === null || proxy === undefined) return url;
-  const trimmedProxy = proxy.trim();
-  if (trimmedProxy === '') return url;
-  const prefix = baseUrl.replace(/\/+$/, '');
-  if (prefix === '') return url;
-  if (!url.startsWith(prefix)) return url;
-  const rest = url.slice(prefix.length);
-  if (rest !== '' && !rest.startsWith('/') && !rest.startsWith('?') && !rest.startsWith('#')) {
-    return url;
+ * - 规则缺席，或 `from` 去掉首尾空白之后为空 → 原样返回（没有起点就没有规则）。
+ * - `to` 是绝对地址（带 `scheme://` 或以 `//` 开头）→ 原样返回。改写只准改路径，
+ *   不准把请求挪到另一个主机上去——那会把凭据发到别处。
+ * - `from` 去掉尾部所有 `/`；起点就是 `/` 时它指的是**路径根**，整条路径换到 `to` 底下。
+ * - 路径以 `from` 开头，**且**其后紧跟的那一位是 `/`（或路径恰好等于 `from`）→ 换成
+ *   `to` + 其余部分。边界这一条是必需的：没有它，`/api/air` 会命中 `/api/airplane`。
+ * - 其余情况原样返回。
+ *
+ * `from` 按**原文**匹配：它不做 `{{var}}` 替换，故那里的标记永远不会被展开。`to` 会被随后的
+ * `{{var}}` 替换扫到（它进了 URL）。
+ *
+ * 对应 Rust 侧 `simple_post_core::url::apply_rewrite`（MCP 侧与导入导出侧都转发到它）；
+ * 两者必须一致，否则预览与真正发出去的请求描述的是两个 URL。共享样本是
+ * `fixtures/base-url-parity.json`。
+ */ export function applyRewrite(url: string, rule: RewriteRule | null | undefined): string {
+  if (!rule) return url;
+  const fromRaw = rule.from.trim();
+  if (fromRaw === '') return url;
+  const to = rule.to.trim();
+  // 目标带 scheme 时不改写：改写只准改路径，不准把请求挪到另一个主机上去——
+  // 那会把请求里的凭据发到别处。
+  if (SCHEME_RE.test(to) || to.startsWith('//')) return url;
+
+  const { head, path, tail } = splitUrl(url);
+  const from = fromRaw.replace(/\/+$/, '');
+  if (from === '') {
+    // 起点是路径根：整条路径换到目标底下。两边各自带的那道斜杠都要留着，
+    // 故这里是直接相接（`/gateway` + `/api/air/list`）。
+    return head + to + path + tail;
   }
-  return trimmedProxy + rest;
+  if (!path.startsWith(from)) return url;
+  const rest = path.slice(from.length);
+  if (rest !== '' && !rest.startsWith('/')) return url;
+  return head + to + rest + tail;
+}
+
+/** 前导 `scheme://`。与 Rust 侧 `core::url::scheme_prefix_len` 认同一件事。 */
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * 把 URL 拆成三段：主机部分（含 scheme）、路径、查询串与片段。
+ *
+ * 主机部分含 scheme 与 authority：`https://h`、`//h`、空串（相对地址）都算主机部分。
+ * 路径是从主机部分之后到 `?` 或 `#` 之前的那一段。
+ */
+function splitUrl(url: string): { head: string; path: string; tail: string } {
+  let head = '';
+  let rest = url;
+  const scheme = SCHEME_RE.exec(url);
+  if (scheme) {
+    const after = url.slice(scheme[0].length);
+    const end = after.search(/[/?#]/);
+    const cut = end === -1 ? after.length : end;
+    head = url.slice(0, scheme[0].length + cut);
+    rest = url.slice(head.length);
+  } else if (url.startsWith('//')) {
+    const after = url.slice(2);
+    const end = after.search(/[/?#]/);
+    const cut = end === -1 ? after.length : end;
+    head = url.slice(0, 2 + cut);
+    rest = url.slice(head.length);
+  }
+  const cut = rest.search(/[?#]/);
+  return {
+    head,
+    path: cut === -1 ? rest : rest.slice(0, cut),
+    tail: cut === -1 ? '' : rest.slice(cut),
+  };
 }
 
 /**
@@ -97,7 +147,7 @@ export function applyProxy(baseUrl: string, proxy: string | null | undefined, ur
 export function joinBaseUrl(baseUrl: string, path: string): string {
   const trimmedPath = path ?? '';
   if (!trimmedPath) return baseUrl ?? '';
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmedPath)) return trimmedPath;
+  if (SCHEME_RE.test(trimmedPath)) return trimmedPath;
   const trimmedBase = (baseUrl ?? '').replace(/\/+$/, '');
   if (!trimmedBase) return trimmedPath;
   if (trimmedPath.startsWith('/')) return trimmedBase + trimmedPath;
@@ -124,7 +174,7 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
 export function collapseUrlSlashes(url: string): string {
   if (!url) return url ?? '';
   // `scheme://` 与 protocol-relative 的 `//` 归入 `head`，不是 path。
-  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(url);
+  const scheme = SCHEME_RE.exec(url);
   let head = '';
   let rest = url;
   if (scheme) {

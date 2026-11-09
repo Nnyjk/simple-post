@@ -71,10 +71,13 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     assert.strictEqual(harness.bag.environments[0], original);
   });
 
-  it('模块地址的两个字段各自独立：null 保持原值，空串清空该字段', async () => {
+  it('模块地址的两个字段各自独立：null 保持原值，空白规则清空该字段', async () => {
     const original = makeEnvironment({
       moduleBaseUrls: {
-        'mod-1': { url: 'https://api.example.test', proxy: 'https://gw.example.test' },
+        'mod-1': {
+          url: 'https://api.example.test',
+          rewrite: { from: '/api/air', to: '/api/project-a/air' },
+        },
         'mod-2': { url: 'https://api2.example.test' },
       },
     });
@@ -85,7 +88,7 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
       return null;
     });
 
-    // 只改地址，代理保持原值（proxy 送 null）。
+    // 只改地址，改写规则保持原值（rewrite 送 null）。
     await harness.slice.setEnvironmentModuleBaseUrl(
       'env-1',
       'mod-1',
@@ -94,18 +97,18 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
     );
     assert.deepEqual(harness.bag.environments[0].moduleBaseUrls['mod-1'], {
       url: 'https://api3.example.test',
-      proxy: 'https://gw.example.test',
+      rewrite: { from: '/api/air', to: '/api/project-a/air' },
     });
 
-    // 只清代理，地址保持原值（url 送 null）。
-    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, '');
+    // 只清改写规则，地址保持原值（url 送 null）。起点与目标都空白即「没有规则」。
+    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, { from: '', to: '' });
     assert.deepEqual(harness.bag.environments[0].moduleBaseUrls['mod-1'], {
       url: 'https://api3.example.test',
-      proxy: null,
+      rewrite: null,
     });
 
     // 两个字段都空了，这一格整个消失；别的模块的格子原样保留。
-    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', '', '');
+    await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', '', { from: '', to: '' });
     assert.equal(
       Object.hasOwn(harness.bag.environments[0].moduleBaseUrls, 'mod-1'),
       false,
@@ -122,16 +125,26 @@ describe('crud-slice: 环境值的 null 删除契约', () => {
           envId: 'env-1',
           moduleId: 'mod-1',
           url: 'https://api3.example.test',
-          proxy: null,
+          rewrite: null,
         },
       },
       {
         cmd: 'environments_set_module_baseurl',
-        args: { envId: 'env-1', moduleId: 'mod-1', url: null, proxy: '' },
+        args: {
+          envId: 'env-1',
+          moduleId: 'mod-1',
+          url: null,
+          rewrite: { from: '', to: '' },
+        },
       },
       {
         cmd: 'environments_set_module_baseurl',
-        args: { envId: 'env-1', moduleId: 'mod-1', url: '', proxy: '' },
+        args: {
+          envId: 'env-1',
+          moduleId: 'mod-1',
+          url: '',
+          rewrite: { from: '', to: '' },
+        },
       },
     ]);
   });
@@ -359,5 +372,54 @@ describe('crud-slice: 删除环境时当前环境怎么落', () => {
       '删除失败时环境列表回到原值',
     );
     assert.equal(harness.bag.activeEnvironmentId, 'env-2', '当前环境也回到原值');
+  });
+});
+
+describe('crud-slice: 同一格子的写按提交的先后顺序发出', () => {
+  it('第二次写等第一次回来才发出去，旧规则不会落在后面', async () => {
+    const original = makeEnvironment({
+      moduleBaseUrls: {
+        'mod-1': {
+          url: 'https://api.example.test',
+          rewrite: { from: '/api/air', to: '/api/project-a/air' },
+        },
+      },
+    });
+    const harness = makeCrudHarness({}, [original]);
+    const calls: CapturedInvoke[] = [];
+    let releaseFirst!: () => void;
+    const firstPending = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      if (calls.length === 1) await firstPending;
+      return null;
+    });
+
+    const first = harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, {
+      from: '/api/air',
+      to: '/api/project-b/air',
+    });
+    const second = harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, {
+      from: '/api/air',
+      to: '/api/project-c/air',
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(calls.length, 1, '第二次写必须等第一次回来才发出去');
+
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    assert.equal(calls.length, 2, '两次写都要发出去');
+    const targets = calls.map((c) => (c.args as { rewrite: { to: string } }).rewrite.to);
+    assert.deepEqual(
+      targets,
+      ['/api/project-b/air', '/api/project-c/air'],
+      '两次写按提交的先后顺序发出，后提交的那条不会落在前面',
+    );
   });
 });

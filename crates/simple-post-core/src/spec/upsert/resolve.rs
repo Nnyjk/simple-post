@@ -178,15 +178,15 @@ pub(super) fn resolve_environment_of(
     }
 
     // 那一格地址：它住在 (环境 × 模块) 上，故模块由调用方给出。
-    // `base_url` 是后端 api 地址，`base_url_proxy` 是实际访问地址；两者各自写自己的字段，
+    // `base_url` 是模块地址，`base_url_rewrite` 是路径前缀改写规则；两者各自写自己的字段，
     // 规格没点名的那个不动。
-    if env_spec.base_url.is_some() || env_spec.base_url_proxy.is_some() {
+    if env_spec.base_url.is_some() || env_spec.base_url_rewrite.is_some() {
         db::environments::set_module_base_url(
             conn,
             &resolved.id,
             module_id,
             env_spec.base_url.as_deref(),
-            env_spec.base_url_proxy.as_deref(),
+            env_spec.base_url_rewrite.as_ref(),
         )?;
     }
 

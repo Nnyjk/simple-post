@@ -1,11 +1,13 @@
-//! base URL 的解析、代理前缀替换、拼接与斜杠收拢。
+//! base URL 的解析、路径前缀改写、拼接与斜杠收拢。
+
+use simple_post_core::domain::RewriteRule;
 
 use super::base_url::{
-    apply_proxy, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
+    apply_rewrite, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
 };
 use super::resolve::resolve_endpoint;
 use super::test_support::{
-    empty_env, env_with_two_modules, in_module_a, minimal_endpoint, set_cell_with_proxy, MOD_A,
+    empty_env, env_with_two_modules, in_module_a, minimal_endpoint, set_cell_with_rewrite, MOD_A,
     MOD_B,
 };
 
@@ -16,7 +18,7 @@ fn the_module_cell_resolves_the_endpoints_own_address() {
     let env = env_with_two_modules();
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "https://mod-a.example.com");
-    assert_eq!(got.proxy, None);
+    assert_eq!(got.rewrite, None);
     assert_eq!(got.source, BaseUrlSource::Module);
 }
 
@@ -31,17 +33,24 @@ fn two_modules_resolve_different_hosts() {
 }
 
 #[test]
-fn a_cell_with_a_proxy_reports_both_addresses() {
+fn a_cell_with_a_rewrite_reports_both_the_address_and_the_rule() {
     let mut env = empty_env();
-    set_cell_with_proxy(
+    set_cell_with_rewrite(
         &mut env,
         MOD_A,
-        "http://svc.internal:8080/api/a",
-        "https://gw.corp.com/api/xxxx/a",
+        "127.0.0.1:8080",
+        "/api/air",
+        "/api/project-a/air",
     );
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
-    assert_eq!(got.base_url, "http://svc.internal:8080/api/a");
-    assert_eq!(got.proxy.as_deref(), Some("https://gw.corp.com/api/xxxx/a"));
+    assert_eq!(got.base_url, "127.0.0.1:8080");
+    assert_eq!(
+        got.rewrite,
+        Some(RewriteRule {
+            from: "/api/air".into(),
+            to: "/api/project-a/air".into(),
+        })
+    );
     assert_eq!(got.source, BaseUrlSource::Module);
 }
 
@@ -51,6 +60,7 @@ fn no_module_context_resolves_to_nothing() {
     let env = env_with_two_modules();
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), None);
     assert_eq!(got.base_url, "");
+    assert_eq!(got.rewrite, None);
     assert_eq!(got.source, BaseUrlSource::None);
 }
 
@@ -66,13 +76,19 @@ fn an_empty_cell_does_not_fall_back_to_another_module() {
 }
 
 #[test]
-fn a_cell_with_only_a_proxy_resolves_to_nothing() {
-    // 没有地址就没有可替换的前缀，代理因此也不参与解析。
+fn a_cell_with_only_a_rewrite_resolves_to_no_address() {
+    // 没有地址就没有可拼接的模块地址；但改写规则仍然读得到——它改的是端点自己的路径。
     let mut env = empty_env();
-    set_cell_with_proxy(&mut env, MOD_A, "", "https://gw.corp.com");
+    set_cell_with_rewrite(&mut env, MOD_A, "", "/api/air", "/api/project-a/air");
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "");
-    assert_eq!(got.proxy, None);
+    assert_eq!(
+        got.rewrite,
+        Some(RewriteRule {
+            from: "/api/air".into(),
+            to: "/api/project-a/air".into(),
+        })
+    );
     assert_eq!(got.source, BaseUrlSource::None);
 }
 
@@ -92,25 +108,32 @@ fn a_per_endpoint_override_still_beats_the_module_cell() {
     ep.base_url_override = Some("".to_string());
     let got = resolve_base_url(&ep, Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "");
-    assert_eq!(got.proxy, None);
+    assert_eq!(got.rewrite, None);
     assert_eq!(got.source, BaseUrlSource::Override);
 }
 
 #[test]
-fn a_per_endpoint_override_does_not_pick_up_the_proxy() {
-    // 自定义意味着「地址由我自己填」，代理那一层不参与。
+fn a_per_endpoint_override_still_gets_the_cells_rewrite_rule() {
+    // 改写只作用在端点自己的路径上，与主机是谁的无关：端点钉了自己的主机，路径照样改写。
     let mut env = empty_env();
-    set_cell_with_proxy(
+    set_cell_with_rewrite(
         &mut env,
         MOD_A,
-        "http://svc.internal:8080/api/a",
-        "https://gw.corp.com/api/xxxx/a",
+        "127.0.0.1:8080",
+        "/api/air",
+        "/api/project-a/air",
     );
     let mut ep = minimal_endpoint();
     ep.base_url_override = Some("https://custom.example.com".into());
     let got = resolve_base_url(&ep, Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "https://custom.example.com");
-    assert_eq!(got.proxy, None);
+    assert_eq!(
+        got.rewrite,
+        Some(RewriteRule {
+            from: "/api/air".into(),
+            to: "/api/project-a/air".into(),
+        })
+    );
     assert_eq!(got.source, BaseUrlSource::Override);
 }
 
@@ -139,143 +162,155 @@ fn resolve_endpoint_without_module_context_has_no_base_url() {
 }
 
 #[test]
-fn resolve_endpoint_replaces_the_module_address_with_the_proxy() {
-    // 端到端：模块那一格是后端 api 地址，请求发出去时换成实际访问地址。
+fn resolve_endpoint_rewrites_the_endpoints_own_path() {
+    // 端到端：模块地址是 `127.0.0.1:8080`，端点路径是 `/api/air/xxxxx`，那一格配了
+    // `/api/air` → `/api/project-a/air`，发出去的是 `127.0.0.1:8080/api/project-a/air/xxxxx`。
     let mut env = empty_env();
-    set_cell_with_proxy(
+    set_cell_with_rewrite(
         &mut env,
         MOD_A,
-        "http://svc.internal:8080/api/a",
-        "https://gw.corp.com/api/xxxx/a",
+        "127.0.0.1:8080",
+        "/api/air",
+        "/api/project-a/air",
     );
     let mut ep = minimal_endpoint();
-    ep.url = "/orders/list".into();
+    ep.url = "/api/air/xxxxx".into();
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
-    assert_eq!(r.url, "https://gw.corp.com/api/xxxx/a/orders/list");
+    assert_eq!(r.url, "127.0.0.1:8080/api/project-a/air/xxxxx");
 }
 
 #[test]
-fn resolve_endpoint_leaves_the_url_alone_when_the_proxy_does_not_match() {
-    // 端点写的是另一个主机时，代理那一层不参与：它匹配的是模块地址那个前缀。
+fn resolve_endpoint_leaves_the_url_alone_when_the_rule_does_not_match() {
+    // 端点路径不以起点开头时，改写不参与：它匹配的是端点自己路径的开头。
     let mut env = empty_env();
-    set_cell_with_proxy(
+    set_cell_with_rewrite(
         &mut env,
         MOD_A,
-        "http://svc.internal:8080/api/a",
-        "https://gw.corp.com/api/xxxx/a",
+        "127.0.0.1:8080",
+        "/api/air",
+        "/api/project-a/air",
     );
     let mut ep = minimal_endpoint();
-    ep.url = "https://other.example.com/orders".into();
+    ep.url = "/api/water/xxxxx".into();
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
-    assert_eq!(r.url, "https://other.example.com/orders");
+    assert_eq!(r.url, "127.0.0.1:8080/api/water/xxxxx");
 }
 
 #[test]
-fn the_proxy_address_gets_its_own_variable_replacement() {
-    // 代理地址可能自身是模板，故它单独再替换一次；前缀匹配用的是替换后的值。
+fn the_rewrite_target_gets_its_own_variable_replacement() {
+    // 改写的目标可能自身是模板，故它进 URL 之后照常被替换一遍。
     let mut env = empty_env();
-    env.variables
-        .insert("gw_host".into(), "https://gw.corp.com".into());
-    set_cell_with_proxy(
+    env.variables.insert("tenant".into(), "project-a".into());
+    set_cell_with_rewrite(
         &mut env,
         MOD_A,
-        "http://svc.internal:8080/api/a",
-        "{{gw_host}}/api/xxxx/a",
+        "127.0.0.1:8080",
+        "/api/air",
+        "/api/{{tenant}}/air",
     );
     let mut ep = minimal_endpoint();
-    ep.url = "/orders/list".into();
+    ep.url = "/api/air/xxxxx".into();
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
-    assert_eq!(r.url, "https://gw.corp.com/api/xxxx/a/orders/list");
+    assert_eq!(r.url, "127.0.0.1:8080/api/project-a/air/xxxxx");
     assert!(
         r.missing_vars.is_empty(),
-        "代理地址里的变量解析出来了，不该报缺值：{:?}",
+        "改写目标里的变量解析出来了，不该报缺值：{:?}",
         r.missing_vars
     );
 }
 
 #[test]
-fn an_unresolved_variable_in_the_proxy_lands_in_the_missing_report() {
-    // 代理地址里的 `{{var}}` 解析不出来时，缺值报告里得有它，用户才看得见缺哪个变量。
+fn an_unresolved_variable_in_the_rewrite_target_lands_in_the_missing_report() {
+    // 改写目标里的 `{{var}}` 解析不出来时，缺值报告里得有它，用户才看得见缺哪个变量。
     let mut env = empty_env();
-    set_cell_with_proxy(
+    set_cell_with_rewrite(
         &mut env,
         MOD_A,
-        "http://svc.internal:8080/api/a",
-        "https://gw.corp.com/{{tenant}}/api/xxxx/a",
+        "127.0.0.1:8080",
+        "/api/air",
+        "/api/{{tenant}}/air",
     );
     let mut ep = minimal_endpoint();
-    ep.url = "/orders/list".into();
+    ep.url = "/api/air/xxxxx".into();
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).expect("resolves");
     assert!(
         r.missing_vars.contains(&"tenant".to_string()),
-        "代理地址里缺的那个变量没进缺值报告：{:?}",
+        "改写目标里缺的那个变量没进缺值报告：{:?}",
         r.missing_vars
     );
 }
 
-// ---- apply_proxy ------------------------------------------------------
+// ---- apply_rewrite ----------------------------------------------------
 #[test]
-fn apply_proxy_replaces_the_prefix() {
+fn apply_rewrite_replaces_the_prefix() {
     assert_eq!(
-        apply_proxy(
-            "http://svc.internal:8080/api/a",
-            Some("https://gw.corp.com/api/xxxx/a"),
-            "http://svc.internal:8080/api/a/orders/list",
+        apply_rewrite(
+            "/api/air/xxxxx",
+            Some(&RewriteRule {
+                from: "/api/air".into(),
+                to: "/api/project-a/air".into(),
+            }),
         ),
-        "https://gw.corp.com/api/xxxx/a/orders/list"
+        "/api/project-a/air/xxxxx"
     );
 }
 
 #[test]
-fn apply_proxy_without_a_proxy_changes_nothing() {
+fn apply_rewrite_without_a_rule_changes_nothing() {
+    assert_eq!(apply_rewrite("/api/air/xxxxx", None), "/api/air/xxxxx");
     assert_eq!(
-        apply_proxy(
-            "http://svc.internal:8080/api/a",
-            None,
-            "http://svc.internal:8080/api/a/orders/list",
+        apply_rewrite(
+            "/api/air/xxxxx",
+            Some(&RewriteRule {
+                from: "".into(),
+                to: "/api/project-a/air".into(),
+            }),
         ),
-        "http://svc.internal:8080/api/a/orders/list"
-    );
-    assert_eq!(
-        apply_proxy(
-            "http://svc.internal:8080/api/a",
-            Some("  "),
-            "http://svc.internal:8080/api/a/orders/list",
-        ),
-        "http://svc.internal:8080/api/a/orders/list"
+        "/api/air/xxxxx",
+        "起点为空白的规则匹配不了任何东西"
     );
 }
 
 #[test]
-fn apply_proxy_only_matches_on_a_path_boundary() {
-    // `http://h/api` 不该命中 `http://h/apixyz`。
+fn apply_rewrite_only_matches_on_a_path_boundary() {
+    // `/api/air` 不该命中 `/api/airplane`。
     assert_eq!(
-        apply_proxy(
-            "http://svc.internal:8080/api",
-            Some("https://gw.corp.com"),
-            "http://svc.internal:8080/apixyz/orders",
+        apply_rewrite(
+            "/api/airplane/xxxxx",
+            Some(&RewriteRule {
+                from: "/api/air".into(),
+                to: "/api/project-a/air".into(),
+            }),
         ),
-        "http://svc.internal:8080/apixyz/orders"
+        "/api/airplane/xxxxx"
     );
 }
 
 #[test]
-fn apply_proxy_matches_the_url_exactly() {
+fn apply_rewrite_matches_the_url_exactly() {
     assert_eq!(
-        apply_proxy(
-            "https://api.example.com",
-            Some("https://gw.corp.com"),
-            "https://api.example.com",
+        apply_rewrite(
+            "/api/air",
+            Some(&RewriteRule {
+                from: "/api/air".into(),
+                to: "/api/project-a/air".into(),
+            }),
         ),
-        "https://gw.corp.com"
+        "/api/project-a/air"
     );
 }
 
 #[test]
-fn apply_proxy_needs_a_base_url_to_match_against() {
+fn apply_rewrite_with_an_empty_target_drops_the_prefix() {
     assert_eq!(
-        apply_proxy("", Some("https://gw.corp.com"), "/orders"),
-        "/orders"
+        apply_rewrite(
+            "/api/air/xxxxx",
+            Some(&RewriteRule {
+                from: "/api/air".into(),
+                to: "".into(),
+            }),
+        ),
+        "/xxxxx"
     );
 }
 

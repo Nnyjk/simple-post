@@ -110,9 +110,10 @@ pub(crate) async fn environments_rename_var(
 
 /// 写（环境 × 模块）那一格：`env.moduleBaseUrls[moduleId]`。
 ///
-/// 格子里有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址。两个字段各自
-/// 独立：`url = null` = 地址保持原值，`url = ""` = 清空地址；`proxy` 同理。格子上
-/// 没有别的层，也不向别的模块的值回落，故两个字段都清空时这一格就整个消失。
+/// 格子里有两个字段：`url` 是模块地址，`rewrite` 是路径前缀改写规则。两个字段各自
+/// 独立：`url = null` = 地址保持原值，`url = ""` = 清空地址；`rewrite = null` = 规则保持原值，
+/// 起点与目标都空白的规则 = 清空规则。格子上没有别的层，也不向别的模块的值回落，故两个字段都
+/// 清空时这一格就整个消失。
 pub(crate) async fn environments_set_module_baseurl(
     State(s): State<Arc<WebState>>,
     Path(env_id): Path<String>,
@@ -124,7 +125,7 @@ pub(crate) async fn environments_set_module_baseurl(
             &env_id,
             &body.module_id,
             body.url.as_deref(),
-            body.proxy.as_deref(),
+            body.rewrite.as_ref(),
         )
     })
     .map_err(map_app_error)?;

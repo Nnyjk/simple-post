@@ -8,7 +8,7 @@
       "description": "配了地址的模块",
       "baseUrl": {
         "url": "https://api.acme.test/v1",
-        "proxy": "https://gw.acme.test/v1"
+        "rewrite": { "from": "/api/air", "to": "/api/project-a/air" }
       },
       "endpoints": [
         {

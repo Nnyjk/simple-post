@@ -23,11 +23,11 @@ fn sample_env(id: &str, project_id: &str, name: &str) -> Environment {
     }
 }
 
-/// 一格地址。`proxy` 缺省表示这一格没有代理。
+/// 一格地址。缺省表示这一格没有路径前缀改写规则。
 fn cell(url: &str) -> ModuleBaseUrl {
     ModuleBaseUrl {
         url: url.into(),
-        proxy: None,
+        rewrite: None,
     }
 }
 
@@ -130,19 +130,26 @@ fn seeded_module_base_urls_come_back_per_module() {
 }
 
 #[test]
-fn the_seeded_proxy_comes_back_with_its_cell() {
+fn the_seeded_rewrite_comes_back_with_its_cell() {
     let pool = fresh_pool();
     let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
     let pay = got.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://localhost:4000/demo/pay");
     assert_eq!(
-        pay.proxy.as_deref(),
-        Some("https://gw.example.com/demo/pay"),
-        "格子里的代理地址要跟着格子一起存下来"
+        pay.rewrite,
+        Some(RewriteRule {
+            from: "/api/pay".into(),
+            to: "/api/demo/pay".into(),
+        }),
+        "格子里的路径改写规则要跟着格子一起存下来"
     );
     assert!(
-        got.module_base_urls.get("m_auth").unwrap().proxy.is_none(),
-        "没有代理的格子读回来是 None"
+        got.module_base_urls
+            .get("m_auth")
+            .unwrap()
+            .rewrite
+            .is_none(),
+        "没有规则的格子读回来是 None"
     );
 }
 
@@ -156,9 +163,12 @@ fn set_module_base_url_writes_one_cell_and_leaves_its_siblings() {
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://pay");
     assert_eq!(
-        pay.proxy.as_deref(),
-        Some("https://gw.example.com/demo/pay"),
-        "只写地址时，这一格原有的代理地址必须保持不变"
+        pay.rewrite,
+        Some(RewriteRule {
+            from: "/api/pay".into(),
+            to: "/api/demo/pay".into(),
+        }),
+        "只写地址时，这一格原有的改写规则必须保持不变"
     );
     assert_eq!(
         env.module_base_urls.get("m_auth").unwrap().url,
@@ -186,32 +196,56 @@ fn set_module_base_url_overwrites_rather_than_appending() {
 }
 
 #[test]
-fn writing_only_the_proxy_leaves_the_address_alone() {
+fn writing_only_the_rewrite_leaves_the_address_alone() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_dev", "m_auth", None, Some("https://gw/auth"))
+        set_module_base_url(
+            c,
+            "env_dev",
+            "m_auth",
+            None,
+            Some(&RewriteRule {
+                from: "/api/air".into(),
+                to: "/api/project-a/air".into(),
+            }),
+        )
     })
     .unwrap();
     let auth = env.module_base_urls.get("m_auth").unwrap();
     assert_eq!(
         auth.url, "http://localhost:4000/demo/auth",
-        "只写代理时，这一格原有的地址必须保持不变"
+        "只写改写规则时，这一格原有的地址必须保持不变"
     );
-    assert_eq!(auth.proxy.as_deref(), Some("https://gw/auth"));
+    assert_eq!(
+        auth.rewrite,
+        Some(RewriteRule {
+            from: "/api/air".into(),
+            to: "/api/project-a/air".into(),
+        })
+    );
 }
 
 #[test]
-fn clearing_the_proxy_keeps_the_address() {
+fn clearing_the_rewrite_keeps_the_address() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_dev", "m_pay", None, Some(""))
+        set_module_base_url(
+            c,
+            "env_dev",
+            "m_pay",
+            None,
+            Some(&RewriteRule {
+                from: "".into(),
+                to: "".into(),
+            }),
+        )
     })
     .unwrap();
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://localhost:4000/demo/pay");
     assert!(
-        pay.proxy.is_none(),
-        "空串清掉代理，但这一格还有地址，故这一格留着"
+        pay.rewrite.is_none(),
+        "起点与目标都空白的规则清掉规则，但这一格还有地址，故这一格留着"
     );
 }
 
@@ -225,9 +259,12 @@ fn clearing_a_cell_does_not_borrow_a_sibling_modules_value() {
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "", "地址被清空，这一格没有地址可解析");
     assert_eq!(
-        pay.proxy.as_deref(),
-        Some("https://gw.example.com/demo/pay"),
-        "清地址不动代理"
+        pay.rewrite,
+        Some(RewriteRule {
+            from: "/api/pay".into(),
+            to: "/api/demo/pay".into(),
+        }),
+        "清地址不动改写规则"
     );
     assert_eq!(
         env.module_base_urls.get("m_auth").unwrap().url,
@@ -239,12 +276,16 @@ fn clearing_a_cell_does_not_borrow_a_sibling_modules_value() {
 #[test]
 fn clearing_the_last_cell_drops_the_module_entirely() {
     let pool = fresh_pool();
-    // 一个既没有地址也没有代理的格子解析不出任何东西，留着只会让按键遍历的读法误判成
+    // 一个既没有地址也没有改写规则的格子解析不出任何东西，留着只会让按键遍历的读法误判成
     // 「此处已配置」。
+    let blank = RewriteRule {
+        from: "".into(),
+        to: "".into(),
+    };
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(c, "env_dev", "m_auth", Some(""), Some(""))?;
-        set_module_base_url(c, "env_dev", "m_order", Some(""), Some(""))?;
-        set_module_base_url(c, "env_dev", "m_pay", Some(""), Some(""))
+        set_module_base_url(c, "env_dev", "m_auth", Some(""), Some(&blank))?;
+        set_module_base_url(c, "env_dev", "m_order", Some(""), Some(&blank))?;
+        set_module_base_url(c, "env_dev", "m_pay", Some(""), Some(&blank))
     })
     .unwrap();
     assert!(
@@ -266,8 +307,11 @@ fn writing_neither_field_leaves_the_cell_untouched() {
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://localhost:4000/demo/pay");
     assert_eq!(
-        pay.proxy.as_deref(),
-        Some("https://gw.example.com/demo/pay"),
+        pay.rewrite,
+        Some(RewriteRule {
+            from: "/api/pay".into(),
+            to: "/api/demo/pay".into(),
+        }),
         "两个字段都传 None 时，这一格原样保留"
     );
     assert!(

@@ -2,9 +2,8 @@
 //!
 //! - 每个环境持有一张按模块的地址 map（`moduleBaseUrls`）和一个自由变量池。那张 map 是**唯一**的
 //!   URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的值。
-//! - 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是后端 api 地址，`proxy` 是实际访问地址
-//!   ——接口经代理网关转代后真正要打的那个地址。两者不一致时，请求发出前用 `proxy` 替换
-//!   `url` 这个前缀。
+//! - 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是模块地址，`rewrite` 是路径前缀
+//!   改写规则——只改写端点自己的 URL 路径，模块地址里的主机与路径段一概不动。
 //! - 这里**没有**「当前环境」这一列。当前环境是每个客户端自己的实时状态——桌面窗口、网页标签各
 //!   一份，各切各的；落库会让 web 端多个人互相踩。
 //! - 库里只有一个与「选哪个环境」有关的概念：**默认环境**，即一个项目里**最早创建**的那个环境
@@ -16,7 +15,7 @@ use std::collections::HashMap;
 
 use rusqlite::{params, Connection, Row};
 
-use crate::domain::{Environment, EnvironmentPatch, ModuleBaseUrl};
+use crate::domain::{Environment, EnvironmentPatch, ModuleBaseUrl, RewriteRule};
 use crate::error::AppError;
 
 use super::json_col_err;
@@ -330,9 +329,10 @@ pub fn rename_var(
 
 /// 写一个（环境 × 模块）格子的两个字段。
 ///
-/// - `url` 传 `Some(u)` 写入后端 api 地址，传 `None` 则**这一格不动**；传空串表示清空它。
-/// - `proxy` 传 `Some(p)` 写入实际访问地址，传 `None` 则**这一格不动**；传空串表示清空它。
-/// - 两个字段都空时整格删掉：一个既没有地址也没有代理的格子解析不出任何东西。
+/// - `url` 传 `Some(u)` 写入模块地址，传 `None` 则**这一格不动**；传空串表示清空它。
+/// - `rewrite` 传 `Some(r)` 写入路径前缀改写规则，传 `None` 则**这一格不动**；起点与目标
+///   都空白的规则表示清空它。
+/// - 两个字段都空时整格删掉：一个既没有地址也没有改写规则的格子解析不出任何东西。
 ///
 /// 此处不核对模块是否属于该环境的项目：那一对只有在 endpoint 真的去解析它时才成为 URL，
 /// 而端点解析走的是端点所属项目的树。**必须在 `db::with_tx` 内调用。**
@@ -341,7 +341,7 @@ pub fn set_module_base_url(
     env_id: &str,
     module_id: &str,
     url: Option<&str>,
-    proxy: Option<&str>,
+    rewrite: Option<&RewriteRule>,
 ) -> Result<Environment, AppError> {
     // 与 `set_var` 同样的「载入 → 改 → 写」形状，同一个理由：对 JSON 列的一次原子 UPDATE 使
     // 读者看不到写了一半的 map。
@@ -351,14 +351,16 @@ pub fn set_module_base_url(
     if let Some(u) = url {
         next.url = u.to_string();
     }
-    if let Some(p) = proxy {
-        next.proxy = if p.is_empty() {
+    if let Some(r) = rewrite {
+        // 两个字段都空白的规则等于没有规则：清掉它。起点为空而目标有值的规则照样存下来——
+        // 用户写下的东西不替他丢，而它匹配不了任何东西（起点为空的规则不生效）。
+        next.rewrite = if r.from.trim().is_empty() && r.to.trim().is_empty() {
             None
         } else {
-            Some(p.to_string())
+            Some(r.clone())
         };
     }
-    if next.url.is_empty() && next.proxy.is_none() {
+    if next.url.is_empty() && next.rewrite.is_none() {
         env.module_base_urls.remove(module_id);
     } else {
         env.module_base_urls.insert(module_id.to_string(), next);

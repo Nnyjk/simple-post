@@ -8,19 +8,34 @@ export interface Project {
 }
 
 /**
- * 一个（环境 × 模块）格子里的地址配置。两个字段回答两个问题：`url` 是**后端 api 地址**
- * （文档里写的、模块对外声明的那个地址），`proxy` 是**实际访问地址**（接口经代理网关转代后
- * 真正要打的那个地址）。
+ * 路径前缀改写规则：把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
  *
- * 两者不一致时，请求发出前用 `proxy` 替换 `url` 这个前缀，其余部分原样保留。故
- * `url = "http://svc.internal:8080/api/a"`、`proxy = "https://gw.corp.com/api/xxxx/a"` 与端点路径
- * `/orders/list` 合成的实际请求是 `https://gw.corp.com/api/xxxx/a/orders/list`。
+ * - `from`（起点）是端点自己 URL 的路径前缀，如 `/api/air`。它**按原文匹配**：不做
+ *   `{{var}}` 替换；模块地址自带的路径段也不参与匹配（模块地址与端点地址互不干扰）。
+ * - `to`（目标）是替换后的路径前缀，如 `/api/project-a/air`。空串表示把这段前缀整个去掉。
  *
- * `proxy` 缺席 = 没有代理，请求直接打 `url`。
+ * 命中要求落在路径边界上：URL 以 `from` 开头，且其后紧跟 `/`、`?` 或 `#`（或 URL 恰好
+ * 等于 `from`）。没有这一条，`/api/air` 会命中 `/api/airplane`。
+ */
+export interface RewriteRule {
+  from: string;
+  to: string;
+}
+
+/**
+ * 一个（环境 × 模块）格子里的地址配置。两个字段回答两个问题：`url` 是**模块地址**
+ * （文档里写的、模块对外声明的那个地址），`rewrite` 是**路径前缀改写规则**（只改写端点
+ * 自己的 URL 路径）。
+ *
+ * 两者互不干扰：模块地址里的主机与路径段一概不动。故
+ * `url = "127.0.0.1:8080"`、`rewrite = { from: "/api/air", to: "/api/project-a/air" }` 与端点
+ * 路径 `/api/air/xxxxx` 合成的实际请求是 `127.0.0.1:8080/api/project-a/air/xxxxx`。
+ *
+ * `rewrite` 缺席 = 没有改写，端点自己的 URL 原样使用。
  */
 export interface ModuleBaseUrl {
   url: string;
-  proxy?: string | null;
+  rewrite?: RewriteRule | null;
 }
 
 export interface Environment {

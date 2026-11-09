@@ -28,15 +28,20 @@ pub(super) async fn resolve_dynamic_values(
 ) -> Result<std::collections::HashMap<String, String>, AppError> {
     let empty = std::collections::HashMap::new();
     // `resolve_base_url` 给出的是**未替换**的模板：base URL 也扫（它可能自身
-    // 带变量），代理地址同样要扫（发送路径对代理地址单独做一次模板替换）。
+    // 带变量），路径改写规则的目标同样要扫（发送路径对它单独做一次模板替换）。
     let resolved =
         crate::variable_fill::resolve_base_url(detail, env, overrides.module_id.as_deref());
     let base_url = resolved.base_url;
-    let proxy = resolved.proxy;
+    let rewrite = resolved.rewrite;
     // 扫描用的是**生效后**的模板：调用方的覆盖值会替换端点里的那一份，而替换发生在
     // 变量池合并之后，故扫描必须看生效的那一份——否则覆盖值里写的 `{{name}}` 不会
     // 触发取数，原样发出去。
-    let eff_url = overrides.url.clone().unwrap_or_else(|| detail.url.clone());
+    // 路径前缀改写作用在端点自己的 URL 上，故扫描的是**改写之后**的那一份：改写没
+    // 命中时就是原路径（目标里的标记不会被扫到——那个目标这次不参与请求）。
+    let eff_url = crate::variable_fill::apply_rewrite(
+        &overrides.url.clone().unwrap_or_else(|| detail.url.clone()),
+        rewrite.as_ref(),
+    );
     let eff_params = overrides
         .params
         .clone()
@@ -56,7 +61,7 @@ pub(super) async fn resolve_dynamic_values(
         .unwrap_or_else(|| detail.body.clone());
     let parts = simple_post_core::dynamic::TemplateParts {
         base_url: &base_url,
-        proxy: proxy.as_deref(),
+
         url: &eff_url,
         params: &eff_params,
         path_params: &eff_path_params,

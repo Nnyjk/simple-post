@@ -14,14 +14,17 @@ fn environment_module_base_urls_round_trip() {
                 "m_auth".to_string(),
                 ModuleBaseUrl {
                     url: "http://auth".into(),
-                    proxy: None,
+                    rewrite: None,
                 },
             ),
             (
                 "m_order".to_string(),
                 ModuleBaseUrl {
                     url: "http://order".into(),
-                    proxy: Some("https://gw/order".into()),
+                    rewrite: Some(RewriteRule {
+                        from: "/api/order".into(),
+                        to: "/api/demo/order".into(),
+                    }),
                 },
             ),
         ]
@@ -40,7 +43,12 @@ fn environment_module_base_urls_round_trip() {
         back.module_base_urls.get("m_auth").unwrap().url,
         "http://auth"
     );
-    assert!(back.module_base_urls.get("m_auth").unwrap().proxy.is_none());
+    assert!(back
+        .module_base_urls
+        .get("m_auth")
+        .unwrap()
+        .rewrite
+        .is_none());
     assert_eq!(
         back.module_base_urls.get("m_order").unwrap().url,
         "http://order"
@@ -49,9 +57,10 @@ fn environment_module_base_urls_round_trip() {
         back.module_base_urls
             .get("m_order")
             .unwrap()
-            .proxy
-            .as_deref(),
-        Some("https://gw/order")
+            .rewrite
+            .as_ref()
+            .map(|r| r.to.as_str()),
+        Some("/api/demo/order")
     );
     assert_eq!(back.variables.get("token").unwrap(), "abc");
     assert_eq!(back.created_at, 1_700_000_000_000);

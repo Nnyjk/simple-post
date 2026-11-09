@@ -90,7 +90,7 @@ fn seed(st: &AppState, base_url: &str) -> (String, String, String) {
             "m_run".to_string(),
             ModuleBaseUrl {
                 url: base_url.to_string(),
-                proxy: None,
+                rewrite: None,
             },
         )]
         .into_iter()

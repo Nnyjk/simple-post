@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use simple_post_core::domain::{
-    AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, RequestBody,
+    AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, RequestBody, RewriteRule,
 };
 
 use super::EndpointOverrides;
@@ -31,18 +31,27 @@ pub(super) fn set_cell(env: &mut Environment, module: &str, url: &str) {
         module.to_string(),
         ModuleBaseUrl {
             url: url.to_string(),
-            proxy: None,
+            rewrite: None,
         },
     );
 }
 
-/// 写一个带代理的（环境 × 模块）格子。
-pub(super) fn set_cell_with_proxy(env: &mut Environment, module: &str, url: &str, proxy: &str) {
+/// 写一个带路径前缀改写规则的（环境 × 模块）格子。
+pub(super) fn set_cell_with_rewrite(
+    env: &mut Environment,
+    module: &str,
+    url: &str,
+    from: &str,
+    to: &str,
+) {
     env.module_base_urls.insert(
         module.to_string(),
         ModuleBaseUrl {
             url: url.to_string(),
-            proxy: Some(proxy.to_string()),
+            rewrite: Some(RewriteRule {
+                from: from.to_string(),
+                to: to.to_string(),
+            }),
         },
     );
 }

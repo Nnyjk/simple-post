@@ -212,7 +212,7 @@ function ModuleWorkspace({ moduleId }: { moduleId: string }) {
         </InfoBlock>
       </EntitySection>
 
-      <EntitySection title="模块地址" hint="本模块在各环境下的地址与代理地址 · 各环境分别保存">
+      <EntitySection title="模块地址" hint="本模块在各环境下的地址与路径改写规则 · 各环境分别保存">
         <Suspense fallback={<BlockFallback />}>
           <ModuleBaseUrlSection moduleId={moduleId} />
         </Suspense>

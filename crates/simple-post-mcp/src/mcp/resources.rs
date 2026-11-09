@@ -64,8 +64,8 @@ fn guide() -> Value {
                 "environment": {
                     "name": "<环境名，不存在就建；用 id 指认已有环境>",
                     "variables": { "<变量名>": "<值>" },
-                    "baseUrl": "<这个环境 × 模块 那一格的后端 api 地址>",
-                    "baseUrlProxy": "<这一格的实际访问地址；接口经代理网关转代时才写>"
+                    "baseUrl": "<这个环境 × 模块 那一格的模块地址>",
+                    "baseUrlRewrite": { "from": "<端点自己 URL 的路径前缀>", "to": "<替换后的路径前缀>" }
                 },
                 "endpoint": {
                     "name": "<接口名>",
@@ -124,7 +124,7 @@ fn guide() -> Value {
                 "step": 5,
                 "tool": "env_set_baseurl",
                 "arguments": { "env_id": "<环境 id>", "module_id": "<模块 id>", "url": "<base url>" },
-                "note": "The URL lives in the (environment x module) cell. That cell never inherits, so a cell that is not written means the request goes out without a base URL. Pass proxy only when the module is reached through a proxy gateway: omitting it leaves the cell's proxy as it is, an empty string clears it."
+                "note": "The URL lives in the (environment x module) cell. That cell never inherits, so a cell that is not written means the request goes out without a base URL. Pass rewrite only when the endpoints of that module need their own path prefix replaced: omitting it leaves the cell's rule as it is, {\"from\": \"\", \"to\": \"\"} clears it."
             },
             {
                 "step": 6,

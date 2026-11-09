@@ -53,7 +53,7 @@ fn the_wire_keys_land_on_the_same_fields() {
         "environment": {
             "name": "dev",
             "baseUrl": "https://api.example.test",
-            "baseUrlProxy": "https://gw.example.test"
+            "baseUrlRewrite": { "from": "/api/air", "to": "/api/project-a/air" }
         },
         "endpoint": {
             "name": "查订单",
@@ -71,8 +71,11 @@ fn the_wire_keys_land_on_the_same_fields() {
         Some("https://api.example.test")
     );
     assert_eq!(
-        environment.base_url_proxy.as_deref(),
-        Some("https://gw.example.test")
+        environment
+            .base_url_rewrite
+            .as_ref()
+            .map(|rule| rule.to.as_str()),
+        Some("/api/project-a/air")
     );
     let endpoint = &camel.endpoint;
     assert_eq!(

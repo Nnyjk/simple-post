@@ -5,7 +5,7 @@
  * 模块为行轴的表。在某个模块自己的标签里，这个问题已经被面板标题回答过了。
  *
  * 所以这就是同一张表，只是把模块这一维塌成一项：列出每个环境，以及本模块在各环境下的
- * 地址与代理地址。它仍是 `ModuleBaseUrlTable` 的 `module` 模式 —— 单元格语义（一个值只属于
+ * 地址与路径改写规则。它仍是 `ModuleBaseUrlTable` 的 `module` 模式 —— 单元格语义（一个值只属于
  * 唯一的「环境 × 模块」格子，且无可继承）正是该组件存在的全部理由。
  *
  * 它刻意不提供环境的新建 / 删除：环境条仍是 `EnvSwitcher`，故列表读起来完全一样。
@@ -89,7 +89,7 @@ export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
             <GroupHeader
               icon={<Globe className="h-3.5 w-3.5" />}
               title="模块地址"
-              description="本模块在各个环境下的地址与代理地址"
+              description="本模块在各个环境下的地址与路径改写规则"
             />
             <ModuleBaseUrlTable
               // 以 env id 为 key，切环境即重置这张表自己的临时状态 —— 上一个环境里

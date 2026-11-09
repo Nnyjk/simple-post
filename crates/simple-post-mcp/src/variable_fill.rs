@@ -34,7 +34,7 @@ mod template;
 mod types;
 
 pub use base_url::{
-    apply_proxy, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
+    apply_rewrite, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
     ResolvedBaseUrl,
 };
 pub use resolve::{resolve_endpoint, resolve_endpoint_with};

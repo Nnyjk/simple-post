@@ -11,12 +11,13 @@ use super::resolve_endpoint;
 use super::types::EndpointOverrides;
 use simple_post_core::domain::{
     AuthConfig, BodyMode, EndpointDetail, Environment, KeyValue, ModuleBaseUrl, RequestBody,
+    RewriteRule,
 };
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
 const FIXTURE: &str = include_str!("../../../../fixtures/resolve-parity.json");
 
-/// 带代理的用例把 base URL 与代理放进环境里（环境 × 模块）那一格，模块 id 用这一个。
+/// 带改写规则的用例把 base URL 与改写规则放进环境里（环境 × 模块）那一格，模块 id 用这一个。
 const CELL_MODULE_ID: &str = "mod_a";
 
 #[derive(Debug, Deserialize)]
@@ -38,13 +39,13 @@ struct Input {
     method: String,
     url_path: String,
     base_url: String,
-    /// 那一格的实际访问地址。
+    /// 那一格的路径前缀改写规则。
     ///
-    /// **在场时** base URL 与代理一起住在环境里（环境 × 模块）那一格：渲染进程那一侧
-    /// 直接拿这两个值，MCP 那一侧的 `resolve_endpoint` 只从格子里读代理，故这类用例在
-    /// 两侧走的是不同的取数路径。**缺席时** base URL 走端点自己的 override，不套代理。
+    /// **在场时** base URL 与改写规则一起住在环境里（环境 × 模块）那一格：渲染进程那一侧
+    /// 直接拿这两个值，MCP 那一侧的 `resolve_endpoint` 只从格子里读改写规则，故这类用例在
+    /// 两侧走的是不同的取数路径。**缺席时** base URL 走端点自己的 override。
     #[serde(default)]
-    proxy: Option<String>,
+    rewrite: Option<RewriteRule>,
     #[serde(default)]
     params: Vec<KeyValue>,
     #[serde(default)]
@@ -82,9 +83,9 @@ fn detail(input: &Input) -> EndpointDetail {
         method: simple_post_core::domain::parse_http_method(&input.method)
             .expect("样本里的 method 必须是合法的 HTTP 动词"),
         url: input.url_path.clone(),
-        // 带代理的用例里 base URL 住在格子上，端点自己的 override 必须让开：override
-        // 在场时代理不参与（那一格属于模块，不属于端点）。
-        base_url_override: if input.proxy.is_some() {
+        // 带改写规则的用例里 base URL 住在格子上，端点自己的 override 必须让开：那一格
+        // 属于模块，不属于端点。
+        base_url_override: if input.rewrite.is_some() {
             None
         } else {
             Some(input.base_url.clone())
@@ -105,12 +106,12 @@ fn detail(input: &Input) -> EndpointDetail {
 
 fn env(variables: &std::collections::BTreeMap<String, String>, input: &Input) -> Environment {
     let mut module_base_urls = std::collections::HashMap::new();
-    if let Some(proxy) = &input.proxy {
+    if let Some(rewrite) = &input.rewrite {
         module_base_urls.insert(
             CELL_MODULE_ID.to_string(),
             ModuleBaseUrl {
                 url: input.base_url.clone(),
-                proxy: Some(proxy.clone()),
+                rewrite: Some(rewrite.clone()),
             },
         );
     }
@@ -142,11 +143,11 @@ fn every_parity_case_resolves_the_same_way() {
     for case in &fixture.cases {
         let detail = detail(&case.input);
         let env = env(&case.env, &case.input);
-        // 带代理的用例要指到模块，否则 `resolve_base_url` 读不到那一格，代理无从参与。
+        // 带改写规则的用例要指到模块，否则 `resolve_base_url` 读不到那一格，规则无从参与。
         let overrides = EndpointOverrides {
             module_id: case
                 .input
-                .proxy
+                .rewrite
                 .as_ref()
                 .map(|_| CELL_MODULE_ID.to_string()),
             ..Default::default()

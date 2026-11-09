@@ -9,7 +9,7 @@ use simple_post_core::domain::{EndpointDetail, Environment};
 use simple_post_core::error::AppError;
 
 use super::auth::resolve_auth;
-use super::base_url::{apply_proxy, collapse_url_slashes, join_base_url, resolve_base_url};
+use super::base_url::{apply_rewrite, collapse_url_slashes, join_base_url, resolve_base_url};
 use super::request::{append_apikey_query, append_query_string, build_headers};
 use super::template::resolve_template;
 use super::types::{EndpointOverrides, ResolvedEndpoint};
@@ -19,10 +19,10 @@ use super::types::{EndpointOverrides, ResolvedEndpoint};
 
 /// 把端点 + 环境 + 覆盖值合成为完全解析好的线上形状。解析顺序（对应 `buildFetchInit`）：
 ///   1. 套用覆盖值（url / method / headers / params / body）
-///   2. 解析 baseUrl 与代理地址（见 [`resolve_base_url`]）
-///   3. 到处替换 `{{var}}`（URL 路径、headers、params、body 内容、鉴权字段），然后用代理地址
-///      替换请求地址里的 baseUrl 前缀（见 [`apply_proxy`]），最后收掉路径里的重复斜杠
-///      （见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的分隔符变成 `//`）
+///   2. 解析模块地址与路径前缀改写规则（见 [`resolve_base_url`]），并用改写规则改写端点
+///      自己的 URL（见 [`apply_rewrite`]）
+///   3. 到处替换 `{{var}}`（URL 路径、headers、params、body 内容、鉴权字段），最后收掉路径里的
+///      重复斜杠（见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的分隔符变成 `//`）
 ///   4. 追加启用的 query 参数（编码后）
 ///   5. 追加 apikey query（`auth.kind == Apikey && inLocation == Query` 时）
 ///   6. 构建有序请求头列表（用户头 + 自动 Content-Type + 自动 Accept + 鉴权推出的
@@ -119,8 +119,12 @@ pub fn resolve_endpoint_with(
     // ---- baseUrl 解析 + URL 替换 ------------------------
     let resolved = resolve_base_url(detail, env, overrides.and_then(|o| o.module_id.as_deref()));
     let base_url = resolved.base_url;
-    let proxy = resolved.proxy;
-    let joined = join_base_url(&base_url, &eff_url);
+    let rewrite = resolved.rewrite;
+
+    // 路径前缀改写作用在**端点自己的 URL** 上，且在拼接之前：模块地址自带的路径段不参与
+    // 匹配，主机也不动。改写后的路径随后与模块地址拼接。
+    let rewritten = apply_rewrite(&eff_url, rewrite.as_ref());
+    let joined = join_base_url(&base_url, &rewritten);
 
     // ---- 路径参数：把 URL 路径里的 {占位符} 换成端点自己的值 ---------
     // 替换发生在下面那趟 `{{var}}` 替换**之前**：路径参数的值要先编码，编码过的
@@ -155,30 +159,17 @@ pub fn resolve_endpoint_with(
         record_missing(&mut missing, &mut seen, m);
     }
 
-    // 代理前缀替换：请求地址里的模块地址换成实际访问地址。
-    //
-    // baseUrl 与 proxy 各自再替换一次变量：它们可能是模板，而前缀匹配必须用替换后的
-    // 值。它们里没解析出来的 `{{var}}` 同样进缺值报告——用户看得见缺的是哪个变量。
+    // 模块地址自己再替换一次变量：它可能是模板。它里没解析出来的 `{{var}}` 同样进缺值
+    // 报告——用户看得见缺的是哪个变量。
     let base_sub = resolve_template(&base_url, &vars);
     for m in base_sub.missing {
         record_missing(&mut missing, &mut seen, m);
     }
-    let proxy_sub = match proxy.as_deref() {
-        Some(p) => {
-            let r = resolve_template(p, &vars);
-            for m in r.missing {
-                record_missing(&mut missing, &mut seen, m);
-            }
-            Some(r.resolved)
-        }
-        None => None,
-    };
-    let url_proxied = apply_proxy(&base_sub.resolved, proxy_sub.as_deref(), &url_r.resolved);
 
     // 替换之后、绝不之前：`{{var}}` → `/api` 才会把 `join_base_url` 插的分隔符变成
     // `//`，到这里真实路径才第一次已知。`collapse_url_slashes` 不碰 query/fragment
     // 数据，所以 params 仍能在它之后再追加。
-    let url_norm = collapse_url_slashes(&url_proxied);
+    let url_norm = collapse_url_slashes(&url_r.resolved);
 
     // ---- 追加 query string（用已替换的 params）-------
     let url_with_params = append_query_string(url_norm, &params_subst);

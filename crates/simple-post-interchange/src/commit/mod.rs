@@ -15,6 +15,7 @@ mod dedupe;
 use std::collections::BTreeSet;
 
 use simple_post_core::db::{self, Connection, DbPool};
+use simple_post_core::domain::RewriteRule;
 use simple_post_core::domain::{
     now_ms, uid, EndpointDetail, NodeScriptsPatch, ResourceNode, ResourceNodeType,
 };
@@ -53,11 +54,11 @@ pub struct CommitReport {
 /// 一排 `{{baseUrl}}` 形式的路径，却没有任何地方写着 baseUrl 是多少。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AppliedBaseUrl {
-    /// 写进那一格的后端 api 地址。
+    /// 写进那一格的模块地址。
     pub url: String,
-    /// 写进那一格的实际访问地址。规格没给代理时那一格可能本来就配着网关，故它可能非
-    /// `None`：报告里写的是那一格**实际**的代理值。
-    pub proxy: Option<String>,
+    /// 写进那一格的路径前缀改写规则。规格没给规则时那一格可能本来就配着，故它可能非
+    /// `None`：报告里写的是那一格**实际**的规则。
+    pub rewrite: Option<RewriteRule>,
     /// 写进了哪个模块的格子。
     pub module_id: String,
     /// 写进了哪个环境。项目没有默认环境时为 `None`——地址没有落进任何一格。
@@ -224,7 +225,7 @@ pub fn commit_in_tx(
                 conn,
                 module_id,
                 &cell.url,
-                cell.proxy.as_deref(),
+                cell.rewrite.as_ref(),
                 environment,
                 &mut report,
             )?;
@@ -296,14 +297,14 @@ pub fn commit_in_tx(
                     report.created_collection_ids.push(group_id.clone());
                 } else if apply_base_url {
                     if let Some(cell) = &ir.base_url {
-                        // 落到项目顶层时这一格归新建的模块自己。写的是后端 api 地址与
-                        // 实际访问地址这一对；规格没提代理时这一格保持没有代理（新建的
-                        // 模块本来就没有代理）。
+                        // 落到项目顶层时这一格归新建的模块自己。写的是模块地址与路径
+                        // 前缀改写规则这一对；规格没提规则时这一格保持没有规则（新建的
+                        // 模块本来就没有规则）。
                         wire_base_url(
                             conn,
                             &group_id,
                             &cell.url,
-                            cell.proxy.as_deref(),
+                            cell.rewrite.as_ref(),
                             environment,
                             &mut report,
                         )?;

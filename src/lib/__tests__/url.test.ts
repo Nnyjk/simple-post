@@ -19,7 +19,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  applyProxy,
+  applyRewrite,
   collapseUrlSlashes,
   joinBaseUrl,
   resolveEndpointBaseUrl,
@@ -38,7 +38,10 @@ const ENV = {
   moduleBaseUrls: {
     mod_a: { url: 'https://a-data.example.com' },
     mod_b: { url: 'https://b-data.example.com' },
-    mod_c: { url: 'http://svc.internal:8080/api/a', proxy: 'https://gw.corp.com/api/xxxx/a' },
+    mod_c: {
+      url: 'http://svc.internal:8080/api/a',
+      rewrite: { from: '/api/air', to: '/api/project-a/air' },
+    },
   },
 } as unknown as Environment;
 
@@ -54,7 +57,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
     const r = resolveEndpointBaseUrl(endpoint(), ENV, 'mod_a');
     assert.equal(r.baseUrl, 'https://a-data.example.com');
     assert.equal(r.source, 'module');
-    assert.equal(r.proxy, null);
+    assert.equal(r.rewrite, null);
   });
 
   it('treats an empty override as 自定义 with no prefix', () => {
@@ -62,7 +65,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
     assert.equal(r.source, 'override');
     // 要点就在这里：`resolveEndpointBaseUrl` 不得回落到模块那一格。
     assert.equal(r.baseUrl, '');
-    assert.equal(r.proxy, null);
+    assert.equal(r.rewrite, null);
   });
 
   it('keeps a legacy host override working as a prefix', () => {
@@ -75,15 +78,15 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
     assert.equal(r.baseUrl, 'https://custom.example.com');
   });
 
-  it('drops the proxy when the endpoint carries its own address', () => {
-    // 端点自带地址时模块那一格与它的代理都不参与。
+  it('keeps the cell’s rewrite when the endpoint carries its own address', () => {
+    // 改写只作用在端点自己的路径上，与主机是谁的无关：端点自带地址时路径照样改写。
     const r = resolveEndpointBaseUrl(
       endpoint({ baseUrlOverride: 'https://custom.example.com' }),
       ENV,
       'mod_c',
     );
     assert.equal(r.source, 'override');
-    assert.equal(r.proxy, null);
+    assert.deepEqual(r.rewrite, { from: '/api/air', to: '/api/project-a/air' });
   });
 
   it('resolves to nothing when no env is selected', () => {
@@ -109,10 +112,10 @@ describe('resolveEndpointBaseUrl — one independent cell per (module, env)', ()
     );
   });
 
-  it('gives the cell’s proxy along with its address', () => {
+  it('gives the cell’s rewrite along with its address', () => {
     const r = resolveEndpointBaseUrl(endpoint(), ENV, 'mod_c');
     assert.equal(r.baseUrl, 'http://svc.internal:8080/api/a');
-    assert.equal(r.proxy, 'https://gw.corp.com/api/xxxx/a');
+    assert.deepEqual(r.rewrite, { from: '/api/air', to: '/api/project-a/air' });
     assert.equal(r.source, 'module');
   });
 
@@ -141,56 +144,45 @@ describe('resolveEndpointBaseUrl — one independent cell per (module, env)', ()
 });
 
 /**
- * 代理前缀替换：请求地址开头那段模块地址被换成代理地址，其余部分原样保留。
+ * 路径前缀改写：端点**自己 URL** 的路径前缀从起点换成目标，其余部分原样保留。
  *
- * 路径边界这一条是必需的：没有它，`http://h/api` 会命中 `http://h/apixyz`。
+ * 路径边界这一条是必需的：没有它，`/api/air` 会命中 `/api/airplane`。
  */
-describe('applyProxy — replaces the module address prefix', () => {
+describe('applyRewrite — replaces the endpoint’s own path prefix', () => {
   it('replaces the prefix and keeps the rest', () => {
     assert.equal(
-      applyProxy(
-        'http://svc.internal:8080/api/a',
-        'https://gw.corp.com/api/xxxx/a',
-        'http://svc.internal:8080/api/a/orders/list',
-      ),
-      'https://gw.corp.com/api/xxxx/a/orders/list',
+      applyRewrite('/api/air/xxxxx', { from: '/api/air', to: '/api/project-a/air' }),
+      '/api/project-a/air/xxxxx',
     );
   });
 
-  it('leaves the URL alone when there is no proxy', () => {
-    assert.equal(
-      applyProxy('http://svc.internal:8080/api/a', null, 'http://svc.internal:8080/api/a/orders'),
-      'http://svc.internal:8080/api/a/orders',
-    );
+  it('leaves the URL alone when there is no rule', () => {
+    assert.equal(applyRewrite('/api/air/xxxxx', null), '/api/air/xxxxx');
   });
 
-  it('leaves the URL alone when the proxy is blank', () => {
+  it('leaves the URL alone when the start is blank', () => {
     assert.equal(
-      applyProxy('http://svc.internal:8080/api/a', '   ', 'http://svc.internal:8080/api/a/orders'),
-      'http://svc.internal:8080/api/a/orders',
+      applyRewrite('/api/air/xxxxx', { from: '   ', to: '/api/project-a/air' }),
+      '/api/air/xxxxx',
     );
   });
 
   it('does not match a prefix that ends in the middle of a path segment', () => {
     assert.equal(
-      applyProxy(
-        'http://svc.internal:8080/api',
-        'https://gw.corp.com',
-        'http://svc.internal:8080/apixyz/orders',
-      ),
-      'http://svc.internal:8080/apixyz/orders',
+      applyRewrite('/api/airplane/xxxxx', { from: '/api/air', to: '/api/project-a/air' }),
+      '/api/airplane/xxxxx',
     );
   });
 
-  it('ignores the trailing slashes of the module address', () => {
+  it('ignores the trailing slashes of the start', () => {
     assert.equal(
-      applyProxy(
-        'http://svc.internal:8080/api/',
-        'https://gw.corp.com',
-        'http://svc.internal:8080/api/orders',
-      ),
-      'https://gw.corp.com/orders',
+      applyRewrite('/api/air/xxxxx', { from: '/api/air/', to: '/api/project-a/air' }),
+      '/api/project-a/air/xxxxx',
     );
+  });
+
+  it('drops the prefix when the target is blank', () => {
+    assert.equal(applyRewrite('/api/air/xxxxx', { from: '/api/air', to: '' }), '/xxxxx');
   });
 });
 

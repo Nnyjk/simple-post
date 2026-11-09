@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::{arg_str, AppState, CallToolResult, ToolEntry};
 use crate::tool_fn;
-use simple_post_core::domain::EnvironmentPatch;
+use simple_post_core::domain::{EnvironmentPatch, RewriteRule};
 use simple_post_core::error::AppError;
 
 // =========================================================================
@@ -53,13 +53,13 @@ struct SetBaseUrlArgs {
     env_id: String,
     /// 要写入的模块。地址住在 (环境 × 模块) 这一格 —— 两个模块可以指向两个不同 host。
     module_id: String,
-    /// 后端 api 地址。不能为空串。
+    /// 模块地址。不能为空串。
     url: String,
-    /// 实际访问地址（接口经代理网关转代后真正要打的那个地址）。
+    /// 路径前缀改写规则：把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
     ///
-    /// 缺席 = 这一格的代理保持不变；空串 = 清空代理。
+    /// 缺席 = 这一格的规则保持不变；起点与目标都空白的规则 = 清空规则。
     #[serde(default)]
-    proxy: Option<String>,
+    rewrite: Option<RewriteRule>,
 }
 
 // =========================================================================
@@ -123,7 +123,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "name": { "type": "string" },
                             "moduleBaseUrls": {
                                 "type": "object",
-                                "description": "Replaces the whole map, keyed by module id. Each leaf is that (environment x module) cell: {\"url\": \"<backend api address>\", \"proxy\": \"<address the request actually goes to>\"}. A cell that is absent here means no base URL for that module, because that cell never inherits."
+                                "description": "Replaces the whole map, keyed by module id. Each leaf is that (environment x module) cell: {\"url\": \"<module address>\", \"rewrite\": {\"from\": \"<path prefix to replace>\", \"to\": \"<prefix that replaces it>\"}}. A cell that is absent here means no base URL for that module, because that cell never inherits."
                             },
                             "variables": {
                                 "type": "object",
@@ -171,16 +171,22 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_set_baseurl",
-            description: "Set the URL one module has in one environment — the (environment x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty. proxy is the address the request actually goes to when the endpoint is reached through a proxy gateway: omit it to leave the cell's proxy as it is, or pass an empty string to clear the proxy.",
+            description: "Set the URL one module has in one environment — the (environment x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty. rewrite replaces the path prefix \"from\" of the endpoint's own URL with \"to\": omit it to keep the cell's rule, or pass {\"from\": \"\", \"to\": \"\"} to clear it.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "env_id": { "type": "string" },
                     "module_id": { "type": "string" },
                     "url": { "type": "string" },
-                    "proxy": {
-                        "type": "string",
-                        "description": "The address the request actually goes to when it is reached through a proxy gateway. Omit it to keep the cell's proxy unchanged; pass an empty string to clear it."
+                    "rewrite": {
+                        "type": "object",
+                        "description": "Replaces the endpoint's own path prefix \"from\" with \"to\". Omit it to keep the cell's rule; pass {\"from\": \"\", \"to\": \"\"} to clear it.",
+                        "properties": {
+                            "from": { "type": "string" },
+                            "to": { "type": "string" }
+                        },
+                        "required": ["from", "to"],
+                        "additionalProperties": false
                     }
                 },
                 "required": ["env_id", "module_id", "url"],
@@ -334,15 +340,15 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
     // 那一格（环境 × 模块）由 `set_module_base_url` 写：整张 map 是一个 JSON 列，
-    // 一次原子 UPDATE 才不会让读者看到半张 map。`proxy` 缺席 = 那一格的代理不动，
-    // `proxy` 给空串 = 清空代理。
+    // 一次原子 UPDATE 才不会让读者看到半张 map。`rewrite` 缺席 = 那一格的规则不动，
+    // 起点与目标都空白的规则 = 清空规则。
     let env = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::environments::set_module_base_url(
             c,
             &a.env_id,
             &a.module_id,
             Some(&a.url),
-            a.proxy.as_deref(),
+            a.rewrite.as_ref(),
         )
     })?;
 

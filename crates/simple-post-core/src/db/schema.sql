@@ -32,10 +32,11 @@ CREATE TABLE IF NOT EXISTS environments (
   -- 是每个客户端自己的实时状态（桌面窗口、网页标签各一份），落库会让 web 端多个人互相
   -- 踩——一个人切了环境，另一个人发请求就换了地址。
   created_at INTEGER NOT NULL DEFAULT 0,
-  -- module_id -> { "url": "...", "proxy": "..." }。**base URL 唯一所在的一层。**
+  -- module_id -> { "url": "...", "rewrite": { "from": "...", "to": "..." } }。
+  -- **base URL 唯一所在的一层。**
   --
-  -- `url` 是后端 api 地址；`proxy` 是实际访问地址——接口经代理网关转代后真正要打的地址。
-  -- 两者不一致时，请求发出前用 `proxy` 替换 `url` 这个前缀。`proxy` 缺省 = 没有代理。
+  -- `url` 是模块地址；`rewrite` 是路径前缀改写规则——把端点**自己 URL** 的路径前缀从
+  -- `from` 换成 `to`，主机与查询串一概不动。`rewrite` 缺省 = 没有改写。
   --
   -- 每个格子独立：某模块没有条目即它没有地址，且不会继承别的模块的。
   module_base_urls_json TEXT NOT NULL DEFAULT '{}',
@@ -455,6 +456,10 @@ END;
 -- （桌面窗口、网页标签各一份），落库会让 web 端多个人互相踩。取而代之的是
 -- `environments.created_at`：一个项目里**最早创建**的那个环境是它的默认环境，谁发请求
 -- 时没点名环境就用它。
+--
+-- 格子里的第二个字段从 `proxy` 换成 `rewrite` 是**列内 JSON 的字段名**更换，故版本号不动。
+-- 旧行里的 `proxy` 值读不出来：serde 忽略不认识的键，而 `proxy` 表达的是「整段地址换成
+-- 网关地址」，它无法映射成路径前缀改写，故这一版不再支持代理地址。
 --
 -- 既有库由 `ensure_current_schema` 换新（版本号对不上就删库重建），故没有迁移路径。
 PRAGMA user_version = 5;

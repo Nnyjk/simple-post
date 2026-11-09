@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use simple_post_core::domain::{
     ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BodyMode, HttpMethod, RequestBody,
+    RewriteRule,
 };
 use simple_post_core::error::AppError;
 
@@ -189,7 +190,7 @@ fn servers_are_taken_per_module_and_never_borrowed() {
                 name: "with".into(),
                 base_url: Some(IrBaseUrl {
                     url: "https://api.example.com".into(),
-                    proxy: None,
+                    rewrite: None,
                 }),
                 endpoints: vec![ep("a", HttpMethod::Get, "/a")],
                 ..Default::default()
@@ -222,7 +223,7 @@ fn module_with_cell(cell_url: &str, endpoint: IrEndpoint) -> Exchange {
             name: "m".into(),
             base_url: Some(IrBaseUrl {
                 url: cell_url.into(),
-                proxy: None,
+                rewrite: None,
             }),
             endpoints: vec![endpoint],
             ..Default::default()
@@ -883,4 +884,40 @@ fn doc_format_answers_the_orchestration_questions_and_refuses_to_guess() {
         DocFormat::parse("toml"),
         Err(AppError::Validation(_))
     ));
+}
+
+/// 那一格带路径改写规则时，导出的路径是改写后的。
+///
+/// 导出的 `servers` 写的是那一格的地址，路径若不改写，产物描述的那个请求发不出去——
+/// 地址与路径说的必须是同一个请求。
+#[test]
+fn a_rewrite_in_the_cell_rewrites_the_exported_path() {
+    let ex = Exchange {
+        project_name: "demo".into(),
+        modules: vec![IrModule {
+            name: "m".into(),
+            base_url: Some(IrBaseUrl {
+                url: "https://api.example.com".into(),
+                rewrite: Some(RewriteRule {
+                    from: "/api/air".into(),
+                    to: "/api/project-a/air".into(),
+                }),
+            }),
+            endpoints: vec![ep("a", HttpMethod::Get, "/api/air/list")],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let doc = doc_of(&ex);
+
+    assert!(
+        doc["paths"]["/api/project-a/air/list"]["get"].is_object(),
+        "导出的路径应是改写后的：{:?}",
+        doc["paths"]
+    );
+    assert!(
+        doc["paths"]["/api/air/list"].get("get").is_none(),
+        "原路径不该出现在产物里：{:?}",
+        doc["paths"]
+    );
 }

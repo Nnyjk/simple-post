@@ -1,18 +1,18 @@
 import { prepareRequest } from '@/lib/http-build';
 import type { PreparedRequest } from '@/lib/http-build';
-import type { Environment, HttpMethod, StoredRequestSnapshot } from '@/types/domain';
+import type { Environment, HttpMethod, RewriteRule, StoredRequestSnapshot } from '@/types/domain';
 import type { EffectiveRequest } from './effectiveRequest';
 
 /**
  * 组装这一次要发出的请求。发送前若动态变量解析出了新的值，调用方用新值再组装一次。
  *
- * `proxy` 是环境里本模块那一格的实际访问地址；它替换请求地址开头那段模块地址。
+ * `rewrite` 是环境里本模块那一格的路径前缀改写规则；它只改写端点自己的 URL 路径。
  */
 export function buildRequestInput(
   method: HttpMethod,
   urlPath: string,
   baseUrl: string,
-  proxy: string | null,
+  rewrite: RewriteRule | null,
   effective: EffectiveRequest,
   env: Environment | undefined,
   dynamicVars: Record<string, string>,
@@ -21,7 +21,7 @@ export function buildRequestInput(
     method,
     urlPath,
     baseUrl,
-    proxy,
+    rewrite,
     params: effective.params,
     pathParams: effective.pathParams,
     headers: effective.headers,

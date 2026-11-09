@@ -11,10 +11,9 @@ use crate::template::list_missing_vars;
 pub struct TemplateParts<'a> {
     /// base URL。它可能自身带变量，故与 path 一起扫。
     pub base_url: &'a str,
-    /// 那一格的实际访问地址。它会被 `{{var}}` 替换，故它里面的标记同样算被引用 ——
-    /// 不扫的话，只在代理地址里出现的动态变量永远不会被取数，替换后仍是字面量 `{{name}}`。
-    pub proxy: Option<&'a str>,
-    /// 端点的 path。
+    /// 端点的 path。**必须是改写之后的那一份**：路径前缀改写会换掉其中的一段，
+    /// 改写没命中时就是原路径。扫描的是这次请求真正会发出去的那一份——改写目标里
+    /// 的标记算数，没被改写掉的那段里的标记不算数。
     pub url: &'a str,
     pub params: &'a [KeyValue],
     /// URL 路径里的占位符与它们各自的值。它们替换进路径本身。
@@ -29,9 +28,12 @@ pub struct TemplateParts<'a> {
 
 /// 模板里出现的全部 `{{name}}` 名字，按首次出现排序。
 ///
-/// 只扫**会被替换**的字段：base URL、那一格的代理地址、启用的且 key 非空的参数值 / 路径参数值 /
-/// header 值、body 内容、以及鉴权里那三种方案（bearer / basic / apikey）。OAuth2 的配置字段
-/// 不被变量替换，扫了会让一条根本没被用到的定义去取数。
+/// 只扫**会被替换**的字段：base URL、端点那一份**生效后**的 path、启用的且 key 非空的
+/// 参数值 / 路径参数值 / header 值、body 内容、以及鉴权里那三种方案（bearer / basic /
+/// apikey）。OAuth2 的配置字段不被变量替换，扫了会让一条根本没被用到的定义去取数。
+///
+/// 路径前缀改写已经由调用方算进 `url` 了：命中时扫改写后的路径，没命中时扫原路径。
+/// 扫描器自己不知道改写规则——它只认这次请求真正会发出去的那一份路径。
 pub fn list_names(parts: &TemplateParts<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -44,11 +46,7 @@ pub fn list_names(parts: &TemplateParts<'_>) -> Vec<String> {
     };
 
     add(parts.base_url);
-    // 代理地址也会被 `{{var}}` 替换，故它里面的标记同样算被引用：没有代理、代理是空串
-    // 时不扫。
-    if let Some(proxy) = parts.proxy.filter(|p| !p.is_empty()) {
-        add(proxy);
-    }
+
     add(parts.url);
     for p in parts.params {
         if p.enabled && !p.key.is_empty() {

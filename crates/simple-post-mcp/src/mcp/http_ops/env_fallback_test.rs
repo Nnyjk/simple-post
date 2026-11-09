@@ -115,7 +115,7 @@ fn seed(st: &AppState, base_url: &str) -> String {
             "m_env".to_string(),
             ModuleBaseUrl {
                 url: base_url.to_string(),
-                proxy: None,
+                rewrite: None,
             },
         )]
         .into_iter()

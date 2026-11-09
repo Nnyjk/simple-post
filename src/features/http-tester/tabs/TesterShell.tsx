@@ -37,6 +37,7 @@ export function TesterShell({
   selection,
   isCustomUrl,
   liveUrl,
+  pathParamUrl,
   urlInputRef,
   sendBtnRef,
   playIconRef,
@@ -85,6 +86,8 @@ export function TesterShell({
   selection: BaseUrlSelection;
   isCustomUrl: boolean;
   liveUrl: string;
+  /** 用来派生路径参数名单的那份路径：改写之后的那一份。 */
+  pathParamUrl: string;
   urlInputRef: RefObject<HTMLInputElement | null>;
   sendBtnRef: RefObject<HTMLButtonElement | null>;
   playIconRef: RefObject<HTMLSpanElement | null>;
@@ -218,7 +221,7 @@ export function TesterShell({
           tab={tab}
           params={effective.params}
           pathParams={effective.pathParams}
-          url={liveUrl}
+          url={pathParamUrl}
           headers={effective.headers}
           body={effective.body}
           auth={effective.auth}
