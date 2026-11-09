@@ -104,11 +104,12 @@ fn environment_schema() -> Value {
             },
             "baseUrlRewrite": {
                 "type": "object",
-                "description": "Replaces the endpoint's own path prefix \"from\" with \"to\". Omit it for no rewrite.",
+                "description": "Replaces the endpoint's own path prefix \"from\" with \"to\". Omit it to keep the cell's rule; pass {\"from\": \"\", \"to\": \"\"} to clear it.",
                 "properties": {
                     "from": { "type": "string" },
                     "to": { "type": "string" }
                 },
+                "required": ["from", "to"],
                 "additionalProperties": false
             }
         },

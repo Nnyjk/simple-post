@@ -185,6 +185,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "from": { "type": "string" },
                             "to": { "type": "string" }
                         },
+                        "required": ["from", "to"],
                         "additionalProperties": false
                     }
                 },
