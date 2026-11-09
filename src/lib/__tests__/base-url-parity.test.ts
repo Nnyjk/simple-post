@@ -64,7 +64,7 @@ const REWRITE_KEYS = ['from', 'to'];
  */
 const EXPECTED_CASE_COUNT = 11;
 /** 样本里 `rewriteCases` 的确切条数。 */
-const EXPECTED_REWRITE_CASE_COUNT = 9;
+const EXPECTED_REWRITE_CASE_COUNT = 13;
 
 /**
  * 断言一个对象只带列出的那些键。少一个键不算错（可选键可以缺席），多一个键算错 ——
@@ -202,7 +202,7 @@ describe('base URL 的解析与 Rust 侧一致', () => {
 });
 
 describe('路径前缀改写与 Rust 侧一致', () => {
-  it('样本里恰好有 9 条改写用例', () => {
+  it('样本里恰好有 13 条改写用例', () => {
     assert.equal(
       FIXTURE.rewriteCases.length,
       EXPECTED_REWRITE_CASE_COUNT,

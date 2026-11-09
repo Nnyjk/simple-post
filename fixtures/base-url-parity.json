@@ -1,5 +1,5 @@
 {
-  "$comment": "base URL 的解析与路径前缀改写。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url` 与 `apply_rewrite`、渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 与 `applyRewrite` 读同一份文件。两份实现各写一遍规则，只有共享样本能让两份实现保持一致。`cases` 覆盖解析：端点自己的 `baseUrlOverride` 优先，否则读环境里「环境 × 模块」那一格，没有回退层；路径前缀改写规则与地址来源无关，端点自带主机时路径照样改写。`rewriteCases` 覆盖改写规则：端点自己 URL 的路径前缀从 `from` 换成 `to`，命中要求落在路径边界上（`/`、`?`、`#`），模块地址自带的路径段不参与匹配。两侧的读取器都必须用 `deny_unknown_fields` 并断言条目数（`cases` 11 条、`rewriteCases` 9 条），免得键名漂了导致整条测试空转。",
+  "$comment": "base URL 的解析与路径前缀改写。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url` 与核心库 `crates/simple-post-core/src/url.rs` 的 `apply_rewrite`、渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 与 `applyRewrite` 读同一份文件。两份实现各写一遍规则，只有共享样本能让两份实现保持一致。`cases` 覆盖解析：端点自己的 `baseUrlOverride` 优先，否则读环境里「环境 × 模块」那一格，没有回退层；路径前缀改写规则与地址来源无关，端点自带主机时路径照样改写。`rewriteCases` 覆盖改写规则：端点自己 URL 的路径前缀从 `from` 换成 `to`，命中要求落在路径边界上（`/`），模块地址自带的路径段不参与匹配；目标是绝对地址时拒绝改写；起点是 `/` 时指的是路径根；端点自带完整地址时改写作用在它的路径上。两侧的读取器都必须用 `deny_unknown_fields` 并断言条目数（`cases` 11 条、`rewriteCases` 13 条），免得键名漂了导致整条测试空转。",
   "cases": [
     {
       "name": "端点带自定义主机时用自己的地址",
@@ -307,6 +307,42 @@
         "to": "/api/project-a/other"
       },
       "expected": "/api/air/xxxxx"
+    },
+    {
+      "name": "起点是路径根时整条路径换到目标底下",
+      "url": "/api/air/list",
+      "rewrite": {
+        "from": "/",
+        "to": "/gateway"
+      },
+      "expected": "/gateway/api/air/list"
+    },
+    {
+      "name": "起点是路径根且地址就是根时换到目标底下",
+      "url": "/",
+      "rewrite": {
+        "from": "/",
+        "to": "/gateway"
+      },
+      "expected": "/gateway/"
+    },
+    {
+      "name": "目标带 scheme 时不改写",
+      "url": "/api/air/xxxxx",
+      "rewrite": {
+        "from": "/api/air",
+        "to": "https://other.example/api"
+      },
+      "expected": "/api/air/xxxxx"
+    },
+    {
+      "name": "端点自带完整地址时只改它的路径",
+      "url": "https://h.example/api/air/list?x=1",
+      "rewrite": {
+        "from": "/api/air",
+        "to": "/api/project-a/air"
+      },
+      "expected": "https://h.example/api/project-a/air/list?x=1"
     }
   ]
 }

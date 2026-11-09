@@ -64,32 +64,76 @@ export function resolveEndpointBaseUrl(
 /**
  * 把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
  *
- * 模块地址自带的路径段不参与匹配：改写只作用在端点自己的 URL 上，故模块地址里的主机与路径段
- * 一概不动。
+ * 规则只作用在路径上：主机与查询串一概不动。模块地址自带的路径段不参与匹配。
  *
- * - 规则缺席，或 `from` 去掉首尾空白与尾部 `/` 之后为空 → 原样返回。
- * - `from` 去掉尾部所有 `/`（`/` 本身除外）；`to` 去掉首尾空白。
- * - URL 以 `from` 开头，**且**其后紧跟的那一位是 `/`、`?` 或 `#`（或 URL 恰好等于
- *   `from`）→ 替换成 `to` + 其余部分。边界这一条是必需的：没有它，`/api/air` 会命中
- *   `/api/airplane`。
+ * - 规则缺席，或 `from` 去掉首尾空白之后为空 → 原样返回（没有起点就没有规则）。
+ * - `to` 是绝对地址（带 `scheme://` 或以 `//` 开头）→ 原样返回。改写只准改路径，
+ *   不准把请求挪到另一个主机上去——那会把凭据发到别处。
+ * - `from` 去掉尾部所有 `/`；起点就是 `/` 时它指的是**路径根**，整条路径换到 `to` 底下。
+ * - 路径以 `from` 开头，**且**其后紧跟的那一位是 `/`（或路径恰好等于 `from`）→ 换成
+ *   `to` + 其余部分。边界这一条是必需的：没有它，`/api/air` 会命中 `/api/airplane`。
  * - 其余情况原样返回。
  *
  * `from` 按**原文**匹配：它不做 `{{var}}` 替换，故那里的标记永远不会被展开。`to` 会被随后的
  * `{{var}}` 替换扫到（它进了 URL）。
  *
- * 对应 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `apply_rewrite`；两者必须一致，
- * 否则预览与真正发出的请求描述的是两个 URL。
- */
-export function applyRewrite(url: string, rule: RewriteRule | null | undefined): string {
+ * 对应 Rust 侧 `simple_post_core::url::apply_rewrite`（MCP 侧与导入导出侧都转发到它）；
+ * 两者必须一致，否则预览与真正发出去的请求描述的是两个 URL。共享样本是
+ * `fixtures/base-url-parity.json`。
+ */ export function applyRewrite(url: string, rule: RewriteRule | null | undefined): string {
   if (!rule) return url;
-  const from = rule.from.trim().replace(/\/+$/, '');
-  if (from === '') return url;
-  if (!url.startsWith(from)) return url;
-  const rest = url.slice(from.length);
-  if (rest !== '' && !rest.startsWith('/') && !rest.startsWith('?') && !rest.startsWith('#')) {
-    return url;
+  const fromRaw = rule.from.trim();
+  if (fromRaw === '') return url;
+  const to = rule.to.trim();
+  // 目标带 scheme 时不改写：改写只准改路径，不准把请求挪到另一个主机上去——
+  // 那会把请求里的凭据发到别处。
+  if (SCHEME_RE.test(to) || to.startsWith('//')) return url;
+
+  const { head, path, tail } = splitUrl(url);
+  const from = fromRaw.replace(/\/+$/, '');
+  if (from === '') {
+    // 起点是路径根：整条路径换到目标底下。两边各自带的那道斜杠都要留着，
+    // 故这里是直接相接（`/gateway` + `/api/air/list`）。
+    return head + to + path + tail;
   }
-  return rule.to.trim() + rest;
+  if (!path.startsWith(from)) return url;
+  const rest = path.slice(from.length);
+  if (rest !== '' && !rest.startsWith('/')) return url;
+  return head + to + rest + tail;
+}
+
+/** 前导 `scheme://`。与 Rust 侧 `core::url::scheme_prefix_len` 认同一件事。 */
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * 把 URL 拆成三段：主机部分（含 scheme）、路径、查询串与片段。
+ *
+ * 主机部分含 scheme 与 authority：`https://h`、`//h`、空串（相对地址）都算主机部分。
+ * 路径是从主机部分之后到 `?` 或 `#` 之前的那一段。
+ */
+function splitUrl(url: string): { head: string; path: string; tail: string } {
+  let head = '';
+  let rest = url;
+  const scheme = SCHEME_RE.exec(url);
+  if (scheme) {
+    const after = url.slice(scheme[0].length);
+    const end = after.search(/[/?#]/);
+    const cut = end === -1 ? after.length : end;
+    head = url.slice(0, scheme[0].length + cut);
+    rest = url.slice(head.length);
+  } else if (url.startsWith('//')) {
+    const after = url.slice(2);
+    const end = after.search(/[/?#]/);
+    const cut = end === -1 ? after.length : end;
+    head = url.slice(0, 2 + cut);
+    rest = url.slice(head.length);
+  }
+  const cut = rest.search(/[?#]/);
+  return {
+    head,
+    path: cut === -1 ? rest : rest.slice(0, cut),
+    tail: cut === -1 ? '' : rest.slice(cut),
+  };
 }
 
 /**
@@ -103,7 +147,7 @@ export function applyRewrite(url: string, rule: RewriteRule | null | undefined):
 export function joinBaseUrl(baseUrl: string, path: string): string {
   const trimmedPath = path ?? '';
   if (!trimmedPath) return baseUrl ?? '';
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmedPath)) return trimmedPath;
+  if (SCHEME_RE.test(trimmedPath)) return trimmedPath;
   const trimmedBase = (baseUrl ?? '').replace(/\/+$/, '');
   if (!trimmedBase) return trimmedPath;
   if (trimmedPath.startsWith('/')) return trimmedBase + trimmedPath;
@@ -130,7 +174,7 @@ export function joinBaseUrl(baseUrl: string, path: string): string {
 export function collapseUrlSlashes(url: string): string {
   if (!url) return url ?? '';
   // `scheme://` 与 protocol-relative 的 `//` 归入 `head`，不是 path。
-  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(url);
+  const scheme = SCHEME_RE.exec(url);
   let head = '';
   let rest = url;
   if (scheme) {

@@ -185,7 +185,7 @@ fn every_rewrite_case_matches_the_shared_sample() {
     let fixture = fixture();
     assert_eq!(
         fixture.rewrite_cases.len(),
-        9,
+        13,
         "样本里的 rewriteCase 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 

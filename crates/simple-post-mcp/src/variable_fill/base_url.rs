@@ -85,43 +85,17 @@ pub fn resolve_base_url(
 
 /// 把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
 ///
-/// 模块地址自带的路径段不参与匹配：改写只作用在端点自己的 URL 上，故模块地址里的主机与
-/// 路径段一概不动。
+/// 实现住在 `simple_post_core::url::apply_rewrite`：核心库那一层是中立位置，MCP 侧与导入
+/// 导出侧都要用它，三处各写一份就会分叉。
 ///
-///   apply_rewrite(Some(&RewriteRule { from: "/api/air".into(), to: "/api/project-a/air".into() }),
-///                 "/api/air/xxxxx")
+///   apply_rewrite("/api/air/xxxxx",
+///                 Some(&RewriteRule { from: "/api/air".into(), to: "/api/project-a/air".into() }))
 ///     → "/api/project-a/air/xxxxx"
 ///
-/// 规则：
-///
-/// - 规则缺席，或 `from` 去掉首尾空白与尾部 `/` 之后为空 → 原样返回。
-/// - `from` 去掉尾部所有 `/`（`/` 本身除外）；`to` 去掉首尾空白。
-/// - URL 以 `from` 开头，**且**其后紧跟的那一位是 `/`、`?` 或 `#`（或 URL 恰好等于
-///   `from`）→ 替换成 `to` + 其余部分。边界这一条是必需的：没有它，`/api/air` 会命中
-///   `/api/airplane`。
-/// - 其余情况原样返回。
-///
-/// `from` 按**原文**匹配：它不做 `{{var}}` 替换，故那里的标记永远不会被展开。
-/// `to` 会被随后的 `{{var}}` 替换扫到（它进了 URL）。
-///
 /// 与 `src/lib/url.ts` 的 `applyRewrite` 对应；两边必须一致，否则预览与真正发出的请求描述的
-/// 是两个 URL。
+/// 是两个 URL。共享样本是 `fixtures/base-url-parity.json`。
 pub fn apply_rewrite(url: &str, rule: Option<&RewriteRule>) -> String {
-    let Some(rule) = rule else {
-        return url.to_string();
-    };
-    let from = rule.from.trim().trim_end_matches('/');
-    if from.is_empty() {
-        return url.to_string();
-    }
-    let Some(rest) = url.strip_prefix(from) else {
-        return url.to_string();
-    };
-    if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('?') || rest.starts_with('#'))
-    {
-        return url.to_string();
-    }
-    format!("{}{rest}", rule.to.trim())
+    simple_post_core::url::apply_rewrite(url, rule)
 }
 
 /// 安全地拼接 `base_url` 与 `path`。`path` 自带 scheme 时按已是绝对地址处理，拼接处
@@ -160,29 +134,9 @@ fn has_scheme(s: &str) -> bool {
 
 /// 前导 `scheme://` 的字节长度，没有则 `None`。[`has_scheme`] 与 [`collapse_url_slashes`] 共用它，
 /// 两者才不会对「scheme 到哪结束」产生分歧——这条边界正是决定哪些斜杠属于协议、哪些是笔误的
-/// 依据。
+/// 依据。实现在 `simple_post_core::url::scheme_prefix_len`。
 fn scheme_prefix_len(s: &str) -> Option<usize> {
-    // RFC 3986 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )，对应 TS 正则
-    // `/^[a-z][a-z0-9+.-]*:\/\//i`。
-    let bytes = s.as_bytes();
-    if bytes.is_empty() || !bytes[0].is_ascii_alphabetic() {
-        return None;
-    }
-    let mut i = 1;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_alphanumeric() || c == b'+' || c == b'-' || c == b'.' {
-            i += 1;
-            continue;
-        }
-        break;
-    }
-    // 接下来要求 `:` 后跟 `//`。
-    if i + 2 < bytes.len() && bytes[i] == b':' && bytes[i + 1] == b'/' && bytes[i + 2] == b'/' {
-        Some(i + 3)
-    } else {
-        None
-    }
+    simple_post_core::url::scheme_prefix_len(s)
 }
 
 /// 收掉 URL **路径**里连续的 `/`，其余字节一概不动。输入必须是已经拼接**并且**已经完成
