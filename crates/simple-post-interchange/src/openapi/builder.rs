@@ -89,9 +89,16 @@ impl Builder {
             return;
         }
 
+        // 路径前缀改写：那一格的规则作用在端点自己的路径上。导出的 `servers` 写的是
+        // 那一格的地址，路径若不改写，产物描述的那个请求就发不出去——地址与路径说的
+        // 必须是同一个请求。
+        let rewritten = match base_url.and_then(|c| c.rewrite.as_ref()) {
+            Some(rule) => simple_post_core::url::apply_rewrite(&ep.path, Some(rule)),
+            None => ep.path.clone(),
+        };
         // `{{name}}` → `{name}`：两种方言的路径模板讲的是同一件事，换完才谈得上
         // 「这个键合不合规范」。指针仍指向原 path——那才是用户在预览里看到的那一行。
-        let path = normalize_path_template(&ep.path);
+        let path = normalize_path_template(&rewritten);
         if !path_key_is_expressible(&path) {
             self.diagnostics.push(
                 Diagnostic::warn(
@@ -400,9 +407,9 @@ impl Builder {
 /// - `base_url_override` 是 `None` → 取模块那一格的地址；模块那一格没有地址、或者它
 ///   的地址是空串时都不写 `servers`（逐模块取，不回退到别的模块）。
 ///
-/// **写的是那一格的后端 api 地址，不是它的实际访问地址。** 导入侧只读文档级的
-/// `servers`，那个地址落进格子的 `url` 那一半。导出若写代理地址，导出再导入这一圈
-/// 下来，代理地址就变成了 `url`，那一格的两个字段换了位置。
+/// **写的是那一格的地址。** 导入侧只读文档级的 `servers`，那个地址落进格子的 `url`
+/// 那一半；那一格的路径改写规则不写进文档——它直接体现在每个 operation 的 `paths` 键
+/// 上，故 `servers` 与 `paths` 说的是同一个可用的请求。
 fn servers_of(ep: &IrEndpoint, cell: Option<&IrBaseUrl>) -> Option<Value> {
     let url = match ep.base_url_override.as_deref() {
         Some(own) if !own.is_empty() => own,
