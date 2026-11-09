@@ -11,6 +11,7 @@ import { useRequestActions } from './useRequestActions';
 import { useEndpointContext } from './useEndpointContext';
 import { useVarHint, type VarEntry } from './var-hint';
 import { pathPlaceholders } from '@/lib/path-params';
+import { applyRewrite } from '@/lib/url';
 import { buildEndpointRequestParts, prepareEndpointRequest } from './model/endpointParts';
 import { buildVarEntries } from './model/varEntries';
 import { buildDynamicEntries, buildDynamicVars, enabledDynamicNameSet } from './model/dynamicVars';
@@ -108,6 +109,9 @@ export function HttpTester() {
   const resolved = parts.resolved;
   // 「跟随模块」那一行要显示的地址：环境里「环境 × 模块」那一格。
   const moduleBaseUrl = parts.moduleBaseUrl;
+  // 路径参数那一页的占位符名单来自**改写之后**的那份路径：改写目标里可能带
+  // `{tenant}` 这样的占位符，它会进最终 URL，故它也得有地方填值。
+  const pathParamUrl = applyRewrite(liveUrl, resolved.rewrite);
 
   /** 把某个编辑器的产出写进草稿（从而置脏）。 */
   const patchDraft = useCallback(
@@ -120,7 +124,7 @@ export function HttpTester() {
 
   // URL 路径里有几个占位符 —— 路径参数那一页要列几行。这个 useMemo 必须在提前返回
   // **之上**：条件调用的 hook 会让 React 在切换接口时抛「Rendered fewer hooks than expected」。
-  const pathParamCount = useMemo(() => pathPlaceholders(liveUrl).length, [liveUrl]);
+  const pathParamCount = useMemo(() => pathPlaceholders(pathParamUrl).length, [pathParamUrl]);
 
   // 草稿的文档字段存在 `draftEndpoints`（草稿没有 `nodes` 行），经 `saveDraftEndpoint` 落库。
   const saveEndpointName = useCallback(
@@ -387,7 +391,7 @@ export function HttpTester() {
   const pathParamError = buildPathParamError({
     sendBlocked,
     missingPathParams: prepared.missingPathParams,
-    ownPathParams: pathPlaceholders(liveUrl),
+    ownPathParams: pathPlaceholders(pathParamUrl),
     basePathParams: pathPlaceholders(resolved.baseUrl ?? ''),
   });
 
@@ -418,7 +422,7 @@ export function HttpTester() {
         resolvedBaseUrl: resolved.baseUrl,
         moduleBaseUrl,
       }}
-      {...{ selection, isCustomUrl, liveUrl, urlInputRef }}
+      {...{ selection, isCustomUrl, liveUrl, pathParamUrl, urlInputRef }}
       {...{ sendBtnRef, playIconRef, copyCurlBtnRef, requestPending, curlFlash }}
       {...{ dirty, onMethodChange: handleMethodChange, onUrlChange: urlHint.change }}
       {...{ onSend: handleSend, onSave: handleSave }}

@@ -23,6 +23,16 @@ import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { pickDefaultEnvironment } from '@/lib/env-default';
 import type { AppState } from '../app-store';
 import { invokeWithRollback } from './crud-helpers';
+/**
+ * 同一格子的写请求排队用的队列。键是 `环境 id:模块 id`。
+ *
+ * 见 `setEnvironmentModuleBaseUrl` 里那几行：排队的是**请求**，乐观更新照旧立刻做。
+ */
+const cellWriteQueue = new Map<string, Promise<unknown>>();
+/** 这一格最新的一次写的序号：回滚时只有它才回滚。 */
+const latestCellWrite = new Map<string, number>();
+/** 每一次写取一个号。 */
+let cellWriteSeq = 0;
 
 /** CRUD 切片拥有的 environment 动作。 */
 export interface EnvironmentCrudActions {
@@ -171,9 +181,9 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
         })),
     );
   },
-  setEnvironmentModuleBaseUrl: async (envId, moduleId, url, rewrite) => {
+  setEnvironmentModuleBaseUrl: (envId, moduleId, url, rewrite) => {
     const prev = get().environments.find((e) => e.id === envId);
-    if (!prev) return;
+    if (!prev) return Promise.resolve();
     // 格子里两个字段各自独立：`null` 保持原值。起点与目标都空白的规则落成 `null`（没有规则），
     // 与后端 `db::environments::set_module_base_url` 同一套。
     const cell = prev.moduleBaseUrls[moduleId];
@@ -198,20 +208,37 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
-    await invokeWithRollback(
-      'environments_set_module_baseurl',
-      () =>
-        invokeCmd<Environment>(COMMANDS.environmentsSetModuleBaseurl, {
-          envId,
-          moduleId,
-          url,
-          rewrite,
-        }),
-      () =>
-        set((s) => ({
-          environments: s.environments.map((env) => (env.id === envId ? prev : env)),
-        })),
+    // 同一格子的写请求按提交的先后顺序一个接一个发出去：设置面板的路径改写那一列有两个
+    // 输入框，用户先改起点再改目标就是两次写。并发发出时服务器可能先把后提交的那条处理掉，
+    // SQLite 里就留下旧的那条规则——界面显示的是新规则，请求却按旧规则改写。
+    //
+    // 排队的是**请求**：乐观更新照旧立刻做，输入框才不会卡。
+    const key = `${envId}:${moduleId}`;
+    const seq = ++cellWriteSeq;
+    latestCellWrite.set(key, seq);
+    const previous = cellWriteQueue.get(key) ?? Promise.resolve();
+    const write = previous.then(() =>
+      invokeWithRollback(
+        'environments_set_module_baseurl',
+        () =>
+          invokeCmd<Environment>(COMMANDS.environmentsSetModuleBaseurl, {
+            envId,
+            moduleId,
+            url,
+            rewrite,
+          }),
+        () => {
+          // 只有这一格**最新**的那次写失败时才回滚：更早的那次失败时，后来的写已经把界面
+          // 更新过了，回滚会把用户刚改的内容一起抹掉。
+          if (latestCellWrite.get(key) !== seq) return;
+          set((s) => ({
+            environments: s.environments.map((env) => (env.id === envId ? prev : env)),
+          }));
+        },
+      ),
     );
+    cellWriteQueue.set(key, write);
+    return write.then(() => undefined);
   },
   deleteEnvironment: async (envId) => {
     const snapshot = {

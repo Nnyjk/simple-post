@@ -45,7 +45,7 @@ export function RequestTabPanels({
   tab: TesterTabId;
   params: KeyValue[];
   pathParams: KeyValue[];
-  /** 当前生效的 URL 文本。路径参数的名单从它派生。 */
+  /** 用来派生路径参数名单的那份路径 —— 改写之后的那一份，故改写目标里的占位符也在内。 */
   url: string;
   headers: KeyValue[];
   body: RequestBody;

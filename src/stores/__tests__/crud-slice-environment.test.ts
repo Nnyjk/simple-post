@@ -374,3 +374,52 @@ describe('crud-slice: 删除环境时当前环境怎么落', () => {
     assert.equal(harness.bag.activeEnvironmentId, 'env-2', '当前环境也回到原值');
   });
 });
+
+describe('crud-slice: 同一格子的写按提交的先后顺序发出', () => {
+  it('第二次写等第一次回来才发出去，旧规则不会落在后面', async () => {
+    const original = makeEnvironment({
+      moduleBaseUrls: {
+        'mod-1': {
+          url: 'https://api.example.test',
+          rewrite: { from: '/api/air', to: '/api/project-a/air' },
+        },
+      },
+    });
+    const harness = makeCrudHarness({}, [original]);
+    const calls: CapturedInvoke[] = [];
+    let releaseFirst!: () => void;
+    const firstPending = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    installIpcMock(async (cmd, args) => {
+      calls.push({ cmd, args: args ?? {} });
+      if (calls.length === 1) await firstPending;
+      return null;
+    });
+
+    const first = harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, {
+      from: '/api/air',
+      to: '/api/project-b/air',
+    });
+    const second = harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, {
+      from: '/api/air',
+      to: '/api/project-c/air',
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(calls.length, 1, '第二次写必须等第一次回来才发出去');
+
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    assert.equal(calls.length, 2, '两次写都要发出去');
+    const targets = calls.map((c) => (c.args as { rewrite: { to: string } }).rewrite.to);
+    assert.deepEqual(
+      targets,
+      ['/api/project-b/air', '/api/project-c/air'],
+      '两次写按提交的先后顺序发出，后提交的那条不会落在前面',
+    );
+  });
+});
