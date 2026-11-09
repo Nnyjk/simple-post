@@ -76,7 +76,7 @@ export interface ProposedBaseUrl {
 export interface AppliedBaseUrl {
   /** 写进那一格的模块地址。 */
   url: string;
-  /** 写进那一格的路径前缀改写规则。外来文档给不出规则，故导入时恒为缺席。 */
+  /** 该格实际保存的路径前缀改写规则。外来文档给不出规则，故导入时保留该格原有的规则。 */
   rewrite?: { from: string; to: string };
   /** 写进了哪个模块的格子。 */
   moduleId: string;
