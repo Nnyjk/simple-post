@@ -80,6 +80,7 @@ crates/simple-post-mcp/
         │   ├── endpoint.rs    #   facade over endpoint/
         │   ├── endpoint/      #   the endpoint tools, one file per concern
         │   │   ├── args.rs    #     the argument shapes
+        │   │   ├── history.rs #     endpoint_history — the recorded calls of one endpoint
         │   │   ├── input.rs   #     the input coercion
         │   │   ├── missing.rs #     the "what is still missing" rule
         │   │   ├── patch.rs   #     the patch coercion
@@ -118,7 +119,7 @@ are set. `--transport`, `--port` and `--log-level` have no env-var override.
 
 ## Tools and capability tiers
 
-`tool_table()` registers 47 MCP tools, and `REQUIRED_CAPABILITY` gives
+`tool_table()` registers 48 MCP tools, and `REQUIRED_CAPABILITY` gives
 every one of them a row. The global capability gate treats a missing row
 as unclassified and denies the tool. The three capability tiers are
 `read_only` / `safe_write` / `full_access`. The backend applies the tier

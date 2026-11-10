@@ -1,9 +1,10 @@
 //! `endpoint_*` MCP 工具 —— 端点 CRUD、搜索、复制、移动，共 8 个。
 //!
 //! 本文件只是门面：登记与 JSON Schema（`registry.rs`）、Args（`args.rs`）、输入强制
-//! 转换（`input.rs` / `patch.rs`）、读写 handler（`read.rs` / `write.rs`）与
-//! node+detail 的合成读取（`resource.rs`）各归一个文件，挂在同名子目录 `endpoint/`
-//! 下。`project_ops` 经本文件取 `register()` 与 `tool_endpoint_create`。
+//! 转换（`input.rs` / `patch.rs`）、读写 handler（`read.rs` / `write.rs`）、调用历史的
+//! 读取（`history.rs`）与 node+detail 的合成读取（`resource.rs`）各归一个文件，挂在同名
+//! 子目录 `endpoint/` 下。`project_ops` 经本文件取 `register()` 与
+//! `tool_endpoint_create`。
 
 #[cfg(test)]
 use serde_json::Value;
@@ -12,6 +13,7 @@ use serde_json::Value;
 use simple_post_core::error::AppError;
 
 mod args;
+mod history;
 mod input;
 mod missing;
 mod patch;
@@ -101,3 +103,7 @@ mod gate_tests;
 #[cfg(test)]
 #[path = "endpoint/schema_test.rs"]
 mod schema_tests;
+
+#[cfg(test)]
+#[path = "endpoint/history_test.rs"]
+mod history_tests;

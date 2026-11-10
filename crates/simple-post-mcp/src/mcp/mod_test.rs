@@ -84,17 +84,17 @@ fn every_registered_tool_has_a_capability() {
 
 /// 精确的工具总数，断言在一个文档能指着的地方。
 ///
-/// `AGENTS.md` 与 `README.md` 都写着「47 tools」。上面的双射测试在「工具连同它的
+/// `AGENTS.md` 与 `README.md` 都写着「48 tools」。上面的双射测试在「工具连同它的
 /// capability 行一起增删」时仍然绿，光靠它守不住这两个数字。改注册表的同一个 commit
 /// 里要改这个常量，同一个 commit 也应更新那两份文档。
-const EXPECTED_TOOL_COUNT: usize = 47;
+const EXPECTED_TOOL_COUNT: usize = 48;
 
 #[test]
 fn registered_tool_count_matches_the_documented_figure() {
     assert_eq!(
         tool_table().len(),
         EXPECTED_TOOL_COUNT,
-        "tool count changed; update EXPECTED_TOOL_COUNT and the '47 tools' \
+        "tool count changed; update EXPECTED_TOOL_COUNT and the '48 tools' \
              claims in AGENTS.md and README.md"
     );
 }
@@ -116,33 +116,38 @@ fn every_capability_row_names_a_registered_tool() {
 
 /// `tools/list` 的体积有一个上限，理由是**它每一次会话都要付钱**。
 ///
-/// 客户端在动手之前要先把整份清单读进上下文，于是 47 条描述符的每一个字节都乘以
+/// 客户端在动手之前要先把整份清单读进上下文，于是 48 条描述符的每一个字节都乘以
 /// 「会话数」。详细的解释属于 `simple-post://spec-authoring` 那份按需读取的指南，
 /// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
 ///
 /// **上限量的是字节**：载荷里含中文描述，`String::len()` 按 UTF-8 字节算，故同一份
-/// 载荷是 43 243 字符、43 305 字节。上限 **43 400 字节**（紧凑 JSON 约 4.71 字节 /
-/// token，即约 9 171 tokens；用真实分词器量是约 9 210 tokens，见 `AGENTS.md`；
-/// 「字符数 ÷ 3」高估六成）。超限时把长说明移到
+/// 载荷是 43 880 字符、43 942 字节。上限 **44 050 字节**（用真实分词器量是 9 410
+/// tokens，见 `AGENTS.md`；「字符数 ÷ 3」高估六成）。超限时把长说明移到
 /// `simple-post://spec-authoring`，不要扩大工具描述。
 ///
-/// **上限对应哪几段契约。** 清单里有四段说明是地址配置与批量运行带来的：
+/// **上限对应哪几段契约。** 清单里有五段说明是地址配置、批量运行与调用历史带来的：
 /// `env_set_baseurl` 的 `rewrite` 参数、`spec_upsert` 的 environment 段、
-/// `api_call_endpoint` 的 `settings_override`，以及 `api_run_collection` 的四个参数
-/// （目标集合 / 目标模块 / 这批按哪个环境 / 一批请求共用的出站旋钮）。契约里长的字段
-/// 删不掉，于是上限取 43 400，给当前载荷留 95 字节的余量。新增的四段说明都已压到
-/// 一行：「目标二选一」「嵌套集合里的接口一并跑」「这批按哪个环境解析」「`tls` 四个键
-/// 是一组、整体取代端点自己那份」——每一条都是调用方不知道就会调错的那一条。
+/// `api_call_endpoint` 的 `settings_override`，`api_run_collection` 的四个参数
+/// （目标集合 / 目标模块 / 这批按哪个环境 / 一批请求共用的出站旋钮），以及
+/// `endpoint_history` 的三个参数（读哪个接口 / 读几条 / 每段 body 给多少字符）。
+/// 契约里长的字段删不掉，于是上限取 44 050，给当前载荷留 108 字节的余量。五段说明
+/// 都已压到一行：「目标二选一」「嵌套集合里的接口一并跑」「这批按哪个环境解析」
+/// 「`tls` 四个键是一组、整体取代端点自己那份」「最新的在前，默认 5 条，body 默认
+/// 2000 字」——每一条都是调用方不知道就会调错的那一条。
 ///
-/// **余量**：当前载荷 43 305 字节，距上限 43 400 字节还有 95 字节。
+/// **上限这次为什么动。** 加 `endpoint_history` 时顶大了载荷：新工具的 schema 与描述
+/// 合计 577 字节，故上限从 43 400 提到 44 050，新的测量值是 43 942 字节 / 9 410
+/// tokens。
 ///
-/// **这份清单现在装了什么。** 47 条描述符里没有一条携带「服务 id」字段：地址住在
+/// **余量**：当前载荷 43 942 字节，距上限 44 050 字节还有 108 字节。
+///
+/// **这份清单现在装了什么。** 48 条描述符里没有一条携带「服务 id」字段：地址住在
 /// （环境 × 模块）一格里，`env_set_baseurl` 按 `env_id` + `module_id` 写那一格。
 ///
 /// **上限要动时怎么写。** 契约长大先把新加的那几段说明压到一行，压到一行还嫌长
 /// 再动上限；上限一动，就在同一次提交里写清是哪一段契约把载荷顶大了、新的测量值
 /// 是多少，否则下一个接手的人只看到一个数字，会以为这个上限是随手拍的。
-const TOOLS_LIST_BUDGET_BYTES: usize = 43_400;
+const TOOLS_LIST_BUDGET_BYTES: usize = 44_050;
 
 #[test]
 fn the_tools_list_payload_stays_under_its_budget() {

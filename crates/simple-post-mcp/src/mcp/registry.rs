@@ -84,6 +84,8 @@ pub const REQUIRED_CAPABILITY: &[(&str, Capability)] = &[
     ("endpoint_list", Capability::Read),
     ("endpoint_get", Capability::Read),
     ("endpoint_search", Capability::Read),
+    // 已记录的调用历史：纯读，与接口定义同一档。
+    ("endpoint_history", Capability::Read),
     ("endpoint_create", Capability::Create),
     ("endpoint_update", Capability::Update),
     ("endpoint_delete", Capability::Delete),

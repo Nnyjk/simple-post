@@ -141,6 +141,22 @@ pub(super) struct EndpointGetArgs {
     pub endpoint_id: String,
 }
 
+/// `endpoint_history` 的入参。
+///
+/// `deny_unknown_fields`：字段名拼错时报错，而不是当作「没传这个限制」。
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct EndpointHistoryArgs {
+    /// 要读历史的接口 id。
+    pub endpoint_id: String,
+    /// 最多返回几条，最新的在前。
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// 每段 body 最多给多少字符。0 = 不给 body。
+    #[serde(default)]
+    pub body_chars: Option<u32>,
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct EndpointDeleteArgs {
     pub endpoint_id: String,

@@ -122,6 +122,7 @@ pub fn required_permission(tool_name: &str) -> Permission {
         | "endpoint_list"
         | "endpoint_get"
         | "endpoint_search"
+        | "endpoint_history"
         | "api_resolve_template"
         | "api_resolve_endpoint"
         | "api_validate_endpoint"
