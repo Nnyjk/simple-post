@@ -399,6 +399,33 @@ describe('bootstrap-slice 聚合加载契约', () => {
     assert.equal(nodes[1].expanded, undefined, '新出现的节点保持收起');
   });
 
+  it('setAllNodesExpanded 一次改掉当前项目的模块与集合：接口与别的项目不动', () => {
+    // 展开状态写在节点上，而工作区的节点都在同一张表里。批量动作若不按项目收窄，
+    // 用户会发现自己没碰过的另一个项目的树也被展开了。
+    const bag = makeBootstrapHarness();
+    const otherProjectModule: ResourceNode = { ...moduleNode, id: 'm2', rootId: 'p2' };
+    bag.activeProjectId = 'p1';
+    bag.nodes = [moduleNode, collectionNode, endpointNode, otherProjectModule];
+
+    bag.setAllNodesExpanded(true);
+
+    const byId = new Map((bag.nodes as ResourceNode[]).map((n) => [n.id, n]));
+    assert.equal(byId.get('m1')?.expanded, true, '模块展开');
+    assert.equal(byId.get('c1')?.expanded, true, '集合展开');
+    assert.equal(
+      byId.get('e1')?.expanded,
+      undefined,
+      '接口是叶子，没有子级可展开，不该被写展开状态',
+    );
+    assert.equal(byId.get('m2')?.expanded, undefined, '别的项目的模块不该被顺带展开');
+
+    bag.setAllNodesExpanded(false);
+
+    const collapsed = new Map((bag.nodes as ResourceNode[]).map((n) => [n.id, n]));
+    assert.equal(collapsed.get('m1')?.expanded, false, '模块收起');
+    assert.equal(collapsed.get('c1')?.expanded, false, '集合收起');
+  });
+
   it('refreshProjects 整份替换项目清单：导入后新建的项目要立刻看得见', async () => {
     // 项目行是 bootstrap 第一层加载后就没有人再更新的那份副本。导入在服务端建项目后
     // 不刷新它，新项目在界面上就是不存在。
