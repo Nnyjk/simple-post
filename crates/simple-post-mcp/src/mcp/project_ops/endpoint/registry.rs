@@ -5,6 +5,7 @@
 
 use serde_json::json;
 
+use super::history::tool_endpoint_history;
 use super::input::{
     oauth2_config_schema, tls_settings_patch_schema, tls_settings_schema, AUTH_TYPE_VALUES,
     BODY_MODE_VALUES,
@@ -48,6 +49,23 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
             "additionalProperties": false,
         }),
         func: tool_fn!(tool_endpoint_get),
+    });
+    v.push(crate::mcp::ToolEntry {
+        name: "endpoint_history",
+        description: "Read the recorded calls of one endpoint: the request that was sent \
+                       and the response that came back, newest first. Use it to see the \
+                       real response shape before writing a client.",
+        schema: json!({
+            "type": "object",
+            "properties": {
+                "endpoint_id": { "type": "string", "description": "Endpoint whose recorded calls to read." },
+                "limit": { "type": "integer", "description": "How many rows to return, newest first. Default 5, between 1 and 50." },
+                "body_chars": { "type": "integer", "description": "How many characters of each body to return. Default 2000; 0 returns no body." }
+            },
+            "required": ["endpoint_id"],
+            "additionalProperties": false,
+        }),
+        func: tool_fn!(tool_endpoint_history),
     });
     v.push(crate::mcp::ToolEntry {
         name: "endpoint_search",

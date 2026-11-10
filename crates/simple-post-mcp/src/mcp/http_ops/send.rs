@@ -1,15 +1,21 @@
 //! 发送路径 —— 一份已解析好的请求 → 发出 → 结果信封。
 //!
 //! 三个发送工具共用 `execute_resolved`，故「解析之后发生什么」只有一份实现：oauth2 的 token 注入、
-//! multipart 的装配、脚本链、发送、结果封装。
+//! multipart 的装配、脚本链、发送、结果封装，以及调用历史的写入。
+
+use std::collections::BTreeMap;
 
 use serde_json::Value;
 
 use crate::mcp::{AppState, CallToolResult};
 use crate::variable_fill::ResolvedEndpoint;
 use simple_post_core::db::DbPool;
-use simple_post_core::domain::{Environment, RequestSettings, TlsSettings};
+use simple_post_core::domain::{
+    Environment, RequestSettings, StoredRequestSnapshot, StoredResponse, TlsSettings,
+};
 use simple_post_core::error::AppError;
+use simple_post_core::http_executor::HttpResult;
+use simple_post_core::script::{ScriptRequest, ScriptedSendOutcome};
 
 use super::envelope::build_result_envelope;
 use super::multipart;
@@ -122,6 +128,10 @@ pub(super) async fn execute_resolved(
         }
     }
 
+    // 历史行要记「哪一个接口」，故先留一份副本：下面 `endpoint_id` 要移进
+    // `ScriptedSendInput`。
+    let history_endpoint_id = endpoint_id.clone();
+
     // `send_with_scripts` 把脚本链跑在同一条序列里：前置脚本改写请求 → 发出 → 测试
     // 脚本断言并写回变量。整条序列由 core 一处实现，故桌面端与 MCP 端不会分叉。
     let outcome = simple_post_core::script::send_with_scripts(
@@ -145,6 +155,13 @@ pub(super) async fn execute_resolved(
         },
     )
     .await?;
+
+    // 这一次调用也要进调用历史：MCP 发的请求与界面上发的是同一类请求，历史条只收界面
+    // 那一份的话，agent 读到的历史会漏掉它自己刚发的那次。临时请求没有接口可挂，
+    // 故只记挂了接口的那一次。
+    if let Some(endpoint_id) = history_endpoint_id.as_deref() {
+        record_history(state, endpoint_id, &outcome).await;
+    }
 
     Ok(ExecutedRequest {
         url: outcome.request.url,
@@ -254,4 +271,106 @@ pub(crate) fn resolve_settings(
         }
     }
     settings
+}
+
+// =========================================================================
+// 调用历史
+// =========================================================================
+
+/// 把这一次调用记进 `response_history`。
+///
+/// 写入失败只记日志，不让整次发送失败：请求已经发出去了，响应已经在调用方手上了，
+/// 把一次历史写入失败说成发送失败是对故障的错误描述。
+///
+/// 数据库写入放进 `spawn_blocking`：`db::with_tx` 在库忙时会重试并等待，那段等待不该
+/// 占住一个 Tokio 工作线程（core 的 `permissions::resolve_capability` 也这么写）。
+async fn record_history(state: &AppState, endpoint_id: &str, outcome: &ScriptedSendOutcome) {
+    let stored = stored_response(&outcome.http, &outcome.request);
+    let request = stored_request(&outcome.http, &outcome.request);
+    let endpoint_id = endpoint_id.to_string();
+    let pool = state.pool.clone();
+    let joined = tokio::task::spawn_blocking(move || {
+        simple_post_core::db::with_tx(&pool, |c| {
+            simple_post_core::db::response_history::append(
+                c,
+                &endpoint_id,
+                &stored,
+                request.as_ref(),
+            )
+        })
+    })
+    .await;
+    match joined {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::warn!(error = %e, "写入调用历史失败"),
+        Err(e) => tracing::warn!(error = %e, "写入调用历史的任务没能跑完"),
+    }
+}
+
+/// 这次调用的响应，存进历史行的那一份。
+fn stored_response(http: &HttpResult, request: &ScriptRequest) -> StoredResponse {
+    match &http.response {
+        Some(resp) => StoredResponse {
+            status: resp.status,
+            status_text: resp.status_text.clone(),
+            duration_ms: u64::try_from(resp.duration_ms).unwrap_or(u64::MAX),
+            size_bytes: resp.size_bytes,
+            // 响应头允许重名（多行 `Set-Cookie`），而这里存的是映射，故后者胜出——
+            // 与渲染层 `tuplesToRecord` 的行为一致。
+            headers: resp
+                .headers
+                .iter()
+                .map(|[k, v]| (k.clone(), v.clone()))
+                .collect(),
+            body: resp.body.clone(),
+            body_base64: resp.body_base64.clone(),
+            // 传输层不解析 JSON，故这里没有美化后的那份。
+            body_json: None,
+            content_type: resp.content_type.clone(),
+            error: None,
+            method: simple_post_core::domain::parse_http_method(&resp.method).ok(),
+            url: Some(resp.url.clone()),
+        },
+        None => StoredResponse {
+            // 请求没有抵达：没有状态码，失败原因记在 `error` 里。
+            status: 0,
+            status_text: String::new(),
+            duration_ms: 0,
+            size_bytes: 0,
+            headers: BTreeMap::new(),
+            body: String::new(),
+            body_base64: None,
+            body_json: None,
+            content_type: String::new(),
+            error: http
+                .error
+                .as_ref()
+                .map(|e| format!("{}: {}", e.kind, e.message)),
+            method: simple_post_core::domain::parse_http_method(&request.method).ok(),
+            url: Some(request.url.clone()),
+        },
+    }
+}
+
+/// 那次发出去的请求，存进历史行的那一份。
+///
+/// 请求头取**线上那一份**：传输层补的那几条（`host` / `accept-encoding` 等）也在里面。
+/// 请求没有抵达时没有这一份，退回调用方交下来的那些。
+fn stored_request(http: &HttpResult, request: &ScriptRequest) -> Option<StoredRequestSnapshot> {
+    let method = simple_post_core::domain::parse_http_method(&request.method).ok()?;
+    let headers = match &http.response {
+        Some(resp) => resp
+            .request_headers
+            .iter()
+            .map(|[k, v]| (k.clone(), v.clone()))
+            .collect(),
+        None => request.headers.clone(),
+    };
+    Some(StoredRequestSnapshot {
+        method,
+        url: request.url.clone(),
+        headers,
+        body: request.body.clone(),
+        body_base64: request.body_base64.clone(),
+    })
 }

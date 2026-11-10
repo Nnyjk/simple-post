@@ -30,7 +30,7 @@ Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这�
 
 Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、请求构造、响应查看都在同一个应用里完成，业务数据保存在本机的 SQLite 文件中，不依赖任何 SaaS 后端。
 
-与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 47 个 MCP 工具读取和修改接口定义、环境变量与模块地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
+与其他 API 客户端的主要差别是：Simple Post 内置一个 MCP Server。外部 AI 客户端通过 48 个 MCP 工具读取和修改接口定义、环境变量与模块地址，也可以直接发起请求。AI 读到的是用户正在维护的那份数据，而不是从文档里推测出来的结构。
 
 ## 界面
 
@@ -153,9 +153,9 @@ JSONPath 表达不了的加工交给**处理脚本**：它在抽取之后跑，�
 
 ### MCP Server
 
-47 个 MCP 工具，覆盖项目、模块、集合、接口、模块地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
+48 个 MCP 工具，覆盖项目、模块、集合、接口、模块地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义——不是只读。
 
-**这一版的工具清单从 52 条变成 47 条。** 地址从「服务」改成「（环境 × 模块）」那一格之后，原来的五个 `base_url_def_*` 工具不再存在，写地址改用 `env_set_baseurl`（收 `env_id`、`module_id`、`url` 与可选的 `rewrite`）。「当前环境」不再落库，`env_get_active` 改名为 `env_get_default`，`env_set_active` 随旧的环境切换一起移除；发请求要指定环境时，由 `api_call_endpoint` 的可选参数 `environment_id` 点名，不点名就用项目里最早创建的那个环境。新增的工具是 `api_run_collection`，用于批量运行一个集合。
+**这一版的工具清单从 52 条变成 48 条。** 地址从「服务」改成「（环境 × 模块）」那一格之后，原来的五个 `base_url_def_*` 工具不再存在，写地址改用 `env_set_baseurl`（收 `env_id`、`module_id`、`url` 与可选的 `rewrite`）。「当前环境」不再落库，`env_get_active` 改名为 `env_get_default`，`env_set_active` 随旧的环境切换一起移除；发请求要指定环境时，由 `api_call_endpoint` 的可选参数 `environment_id` 点名，不点名就用项目里最早创建的那个环境。新增的工具是 `api_run_collection`（批量运行一个集合）与 `endpoint_history`（读某个接口已记录的调用历史：发出去的请求与收回来的响应，前端接入时照着真实响应写客户端）。
 
 工具是按「一次调用建好一个接口」设计的，而不只是 CRUD：
 
@@ -328,7 +328,7 @@ sp.example.com {
 | Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
 | 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限、错误类型，以及请求体、动态变量、OAuth2、路径参数、请求脚本、接口规格、模板、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
-| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（47 个工具）、axum HTTP daemon、标准输入输出桥接。 |
+| MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（48 个工具）、axum HTTP daemon、标准输入输出桥接。 |
 | 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
 | 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
 
