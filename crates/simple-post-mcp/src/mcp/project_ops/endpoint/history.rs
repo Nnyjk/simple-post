@@ -42,9 +42,11 @@ pub(super) async fn tool_endpoint_history(
         simple_post_core::db::response_history::list_by_endpoint(c, &a.endpoint_id)
     })?;
 
+    // 下限是 1：`limit: 0` 回一个空数组，而空数组与「这个接口没被调用过」长得
+    // 一样，调用方会据此得出错的结论。
     let limit = a
         .limit
-        .map(|l| (l as usize).min(MAX_LIMIT))
+        .map(|l| (l as usize).clamp(1, MAX_LIMIT))
         .unwrap_or(DEFAULT_LIMIT);
     let body_chars = a
         .body_chars
@@ -88,6 +90,8 @@ struct HistoryEntry {
     body: String,
     /// 响应体是片段：为 true 时 `body` 不是完整的那一份。
     body_truncated: bool,
+    /// 响应体是二进制字节，未在此返回：`body` 是空串，原始字节在库里是 base64。
+    has_binary_body: bool,
     /// 那次发出去的请求。
     request: Option<RequestSnapshot>,
 }
@@ -114,6 +118,7 @@ impl HistoryEntry {
             headers: resp.headers.clone(),
             body,
             body_truncated,
+            has_binary_body: resp.body_base64.is_some(),
             request: row
                 .request
                 .as_ref()
@@ -134,6 +139,8 @@ struct RequestSnapshot {
     body: Option<String>,
     /// 请求体是片段：为 true 时 `body` 不是完整的那一份。
     body_truncated: bool,
+    /// 请求体是二进制字节，未在此返回：`body` 缺席，原始字节在库里是 base64。
+    has_binary_body: bool,
 }
 
 impl RequestSnapshot {
@@ -151,6 +158,7 @@ impl RequestSnapshot {
             headers: r.headers.clone(),
             body,
             body_truncated,
+            has_binary_body: r.body_base64.is_some(),
         }
     }
 }

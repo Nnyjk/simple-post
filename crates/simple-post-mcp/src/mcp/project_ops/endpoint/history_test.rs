@@ -31,6 +31,19 @@ fn stored_response(status: u16, body: &str) -> StoredResponse {
     }
 }
 
+/// 一条二进制调用的历史行：body 是空串，原始字节在 base64 那一列里。
+fn append_binary_row(st: &AppState, endpoint_id: &str) {
+    let mut response = stored_response(200, "");
+    response.body_base64 = Some("AAEC".to_string());
+    let mut request = stored_request();
+    request.body = None;
+    request.body_base64 = Some("AAEC".to_string());
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        response_history::append(c, endpoint_id, &response, Some(&request))
+    })
+    .expect("写入历史行");
+}
+
 /// 那次发出去的请求。
 fn stored_request() -> StoredRequestSnapshot {
     StoredRequestSnapshot {
@@ -110,10 +123,50 @@ async fn endpoint_history_returns_the_recorded_calls_newest_first() {
     assert_eq!(rows[1]["status"], 200);
     assert_eq!(rows[1]["body"], r#"{"page":1}"#);
     assert_eq!(rows[1]["method"], "GET");
+    // 文本响应不是二进制：要显式说清楚，否则调用方分不出「没给」与「是二进制」。
+    assert_eq!(rows[1]["hasBinaryBody"], false);
+    assert_eq!(rows[1]["request"]["hasBinaryBody"], false);
     assert_eq!(rows[1]["url"], "http://127.0.0.1:9/x");
     // 那次发出去的请求也回来了：前端接入要知道请求长什么样。
     assert_eq!(rows[1]["request"]["method"], "GET");
     assert_eq!(rows[1]["request"]["url"], "http://127.0.0.1:9/x");
+}
+
+/// 二进制请求体与响应体都不在此返回，故要说清楚「没给」与「是二进制」的区别。
+#[tokio::test]
+async fn endpoint_history_marks_a_binary_body_instead_of_silently_dropping_it() {
+    let (st, endpoint_id) = fixture();
+    append_binary_row(&st, &endpoint_id);
+
+    let res = tool_endpoint_history(&st, json!({ "endpoint_id": endpoint_id }))
+        .await
+        .expect("读历史");
+    let rows = payload(&res);
+    let rows = rows.as_array().expect("结果是数组");
+    assert_eq!(rows[0]["hasBinaryBody"], true, "响应体是二进制，要说清楚");
+    assert_eq!(rows[0]["body"], "", "二进制响应体的文本形态是空串");
+    assert_eq!(
+        rows[0]["request"]["hasBinaryBody"], true,
+        "请求体是二进制，要说清楚"
+    );
+    assert_eq!(
+        rows[0]["request"]["body"],
+        serde_json::Value::Null,
+        "二进制请求体的文本形态缺席"
+    );
+}
+
+/// `limit: 0` 回一行而不是空数组：空数组与「这个接口没被调用过」长得一样。
+#[tokio::test]
+async fn endpoint_history_clamps_a_zero_limit_to_one_row() {
+    let (st, endpoint_id) = fixture();
+    append_row(&st, &endpoint_id, 200, "a");
+
+    let res = tool_endpoint_history(&st, json!({ "endpoint_id": endpoint_id, "limit": 0 }))
+        .await
+        .expect("读历史");
+    let rows = payload(&res);
+    assert_eq!(rows.as_array().expect("结果是数组").len(), 1);
 }
 
 /// `limit` 真的裁剪返回的行数。

@@ -59,7 +59,7 @@ pub(in crate::mcp::project_ops) fn register(v: &mut Vec<crate::mcp::ToolEntry>) 
             "type": "object",
             "properties": {
                 "endpoint_id": { "type": "string", "description": "Endpoint whose recorded calls to read." },
-                "limit": { "type": "integer", "description": "How many rows to return, newest first. Default 5, max 50." },
+                "limit": { "type": "integer", "description": "How many rows to return, newest first. Default 5, between 1 and 50." },
                 "body_chars": { "type": "integer", "description": "How many characters of each body to return. Default 2000; 0 returns no body." }
             },
             "required": ["endpoint_id"],

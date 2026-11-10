@@ -160,7 +160,7 @@ pub(super) async fn execute_resolved(
     // 那一份的话，agent 读到的历史会漏掉它自己刚发的那次。临时请求没有接口可挂，
     // 故只记挂了接口的那一次。
     if let Some(endpoint_id) = history_endpoint_id.as_deref() {
-        record_history(state, endpoint_id, &outcome);
+        record_history(state, endpoint_id, &outcome).await;
     }
 
     Ok(ExecutedRequest {
@@ -281,14 +281,29 @@ pub(crate) fn resolve_settings(
 ///
 /// 写入失败只记日志，不让整次发送失败：请求已经发出去了，响应已经在调用方手上了，
 /// 把一次历史写入失败说成发送失败是对故障的错误描述。
-fn record_history(state: &AppState, endpoint_id: &str, outcome: &ScriptedSendOutcome) {
+///
+/// 数据库写入放进 `spawn_blocking`：`db::with_tx` 在库忙时会重试并等待，那段等待不该
+/// 占住一个 Tokio 工作线程（core 的 `permissions::resolve_capability` 也这么写）。
+async fn record_history(state: &AppState, endpoint_id: &str, outcome: &ScriptedSendOutcome) {
     let stored = stored_response(&outcome.http, &outcome.request);
     let request = stored_request(&outcome.http, &outcome.request);
-    let result = simple_post_core::db::with_tx(&state.pool, |c| {
-        simple_post_core::db::response_history::append(c, endpoint_id, &stored, request.as_ref())
-    });
-    if let Err(e) = result {
-        tracing::warn!(error = %e, endpoint = endpoint_id, "写入调用历史失败");
+    let endpoint_id = endpoint_id.to_string();
+    let pool = state.pool.clone();
+    let joined = tokio::task::spawn_blocking(move || {
+        simple_post_core::db::with_tx(&pool, |c| {
+            simple_post_core::db::response_history::append(
+                c,
+                &endpoint_id,
+                &stored,
+                request.as_ref(),
+            )
+        })
+    })
+    .await;
+    match joined {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::warn!(error = %e, "写入调用历史失败"),
+        Err(e) => tracing::warn!(error = %e, "写入调用历史的任务没能跑完"),
     }
 }
 
