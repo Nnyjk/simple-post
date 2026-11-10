@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useMemo, useState } from 'react';
-import { Plus, RefreshCw, Search } from 'lucide-react';
+import { ChevronsDown, ChevronsUp, Plus, RefreshCw, Search } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -78,6 +78,7 @@ export function ProjectTree() {
   // 刷新树用 `reloadWorkspace` 而不是 `loadWorkspace`：后者在 `nodesLoaded` 上早退，
   // 树已经加载过时按它等于什么都不做。
   const reloadWorkspace = useAppStore((s) => s.reloadWorkspace);
+  const setAllNodesExpanded = useAppStore((s) => s.setAllNodesExpanded);
   /**
    * 项目标签是否在前台？刻意写成把整个答案折叠成 **boolean** 的 selector：返回
    * `s.openTabs.find(...)` 的 selector 每次调用都交出新引用，导致每次 store 写入都重渲染
@@ -116,6 +117,16 @@ export function ProjectTree() {
     () => nodes.filter((n) => n.rootId === activeProjectId),
     [nodes, activeProjectId],
   );
+  // 两个按钮各自的可执行状态。接口是叶子，没有子级可展开，故不参与这两个判断。
+  const expandableNodes = useMemo(
+    () => projectNodes.filter((n) => n.kind !== 'endpoint'),
+    [projectNodes],
+  );
+  // 全部展开：树里还有收着的分支时才需要它做这件事。
+  const canExpandAll =
+    expandableNodes.length > 0 && !expandableNodes.every((n) => n.expanded === true);
+  // 全部收起：树里已经有展开的分支时才需要它做这件事。
+  const canCollapseAll = expandableNodes.some((n) => n.expanded === true);
 
   // ---------- click / selection handlers ----------
   const {
@@ -265,6 +276,39 @@ export function ProjectTree() {
         ) : (
           <span className="label-caps">工作区</span>
         )}
+        {/* 全部展开 / 全部收起 —— 树深了以后逐层点开很费事，两个按钮各做一件事。
+            每个按钮在无事可做时自己变灰：全部展开在树已经全开着时无事可做，
+            全部收起在没有展开的分支时无事可做。 */}
+        <button
+          type="button"
+          onClick={() => setAllNodesExpanded(true)}
+          disabled={!canExpandAll}
+          title="全部展开"
+          aria-label="全部展开"
+          data-testid="tree-expand-all-btn"
+          className={cn(
+            'shrink-0 rounded p-1 text-muted-foreground transition-colors',
+            'mr-0.5 hover:bg-overlay-hover hover:text-foreground disabled:opacity-50',
+            focusRing,
+          )}
+        >
+          <ChevronsDown className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setAllNodesExpanded(false)}
+          disabled={!canCollapseAll}
+          title="全部收起"
+          aria-label="全部收起"
+          data-testid="tree-collapse-all-btn"
+          className={cn(
+            'shrink-0 rounded p-1 text-muted-foreground transition-colors',
+            'hover:bg-overlay-hover hover:text-foreground disabled:opacity-50',
+            focusRing,
+          )}
+        >
+          <ChevronsUp className="h-3.5 w-3.5" />
+        </button>
         {/* 刷新按钮 —— 重取一趟树、接口配置与环境。用 `reloadWorkspace` 而不是
             `loadWorkspace`：后者在 `nodesLoaded` 上早退，树已经加载过时按它等于什么都不做。 */}
         <button

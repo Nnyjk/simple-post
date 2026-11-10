@@ -123,6 +123,15 @@ export interface BootstrapSliceActions {
   setCurrentEnvironment: (envId: string) => void;
   /** 展开 / 折叠一个节点。三种类型共用一个动作：展开位在节点上，只有树知道哪些类型渲染成可展开。 */
   toggleNodeExpanded: (id: string) => void;
+  /**
+   * 把当前项目里的模块与集合一次性全部展开或全部折叠。
+   *
+   * 只动当前项目的节点：展开状态写在每个节点上，而工作区的节点存在同一张表里，
+   * 连带别的项目会改掉用户没碰过的树。
+   *
+   * 接口是叶子，没有子级可展开，故不改它们。
+   */
+  setAllNodesExpanded: (expanded: boolean) => void;
 
   // actions: bootstrap (one-shot at app start)
   /**
@@ -285,6 +294,13 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
     toggleNodeExpanded: (id) =>
       set((s) => ({
         nodes: s.nodes.map((n) => (n.id === id ? { ...n, expanded: !n.expanded } : n)),
+      })),
+    // `setAllNodesExpanded` 只改当前项目里的模块与集合：别的项目的节点与接口都不动。
+    setAllNodesExpanded: (expanded) =>
+      set((s) => ({
+        nodes: s.nodes.map((n) =>
+          n.rootId === s.activeProjectId && n.kind !== 'endpoint' ? { ...n, expanded } : n,
+        ),
       })),
 
     // ---------- bootstrap (one-shot, called from main.tsx) ----------
