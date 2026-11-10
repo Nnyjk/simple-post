@@ -16,7 +16,7 @@
 //!     call_endpoint.rs ← api_call_endpoint
 //!     batch.rs         ← api_run_collection
 //!     dynamic.rs       ← 动态变量取值
-//!     send.rs          ← 发送路径、脚本环境快照、出站旋钮
+//!     send.rs          ← 发送路径、脚本环境快照、出站旋钮、调用历史写入
 //!     project.rs       ← 临时请求的项目行
 //!     input.rs         ← 入参压平与解析
 //!     envelope.rs      ← 结果信封
@@ -26,7 +26,7 @@
 //! 测试文件：`http_ops_test.rs` / `dynamic_test.rs` / `oauth2_test.rs` /
 //! `multipart_mode_test.rs` / `multipart_parity_test.rs` / `multipart_wire_test.rs` /
 //! `run_request_test.rs` / `overrides_test.rs` / `env_fallback_test.rs` /
-//! `script_test.rs` / `tls_test.rs` / `batch_test.rs`。
+//! `script_test.rs` / `tls_test.rs` / `batch_test.rs` / `history_record_test.rs`。
 
 mod args;
 mod batch;
@@ -117,3 +117,7 @@ mod tls_tests;
 #[cfg(test)]
 #[path = "batch_test.rs"]
 mod batch_tests;
+
+#[cfg(test)]
+#[path = "history_record_test.rs"]
+mod history_record_tests;
