@@ -38,7 +38,10 @@ export function EndpointList({
   dragContext,
 }: EndpointListProps) {
   return (
-    <div className="ml-3 border-l border-border/60 pl-1">
+    // 不再往里缩：接口是叶子，它的名称方块要跟上级的名称方块左边界对齐 ——
+    // 往里缩 17px 的话，接口的名称便落在上级名称的右边。引导线由上级那一层画
+    // （集合分支的容器），那一根线已经把这一组接口圈在里面了。
+    <div>
       {endpoints.map((ep) => {
         // 没有详情行的接口，后端根本不会创建这样的树，故这里缺一行意味着两张表不一致。
         // `EndpointList` 跳过该行，而不是拿 `undefined` 去渲染 method pill。

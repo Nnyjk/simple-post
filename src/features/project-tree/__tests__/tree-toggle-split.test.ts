@@ -143,7 +143,7 @@ describe('展开箭头：它自己是另一个按钮', () => {
   });
 });
 
-describe('箭头不发起拖拽，但仍然是放置目标', () => {
+describe('箭头与名称：两块各自独立的方块', () => {
   it('箭头不发起拖拽', () => {
     const arrow = elementAround(code(readSource(SHELL)), 'data-testid="tree-toggle-btn"');
     assert.doesNotMatch(arrow, /draggable/, '箭头又能拖了 —— 拖箭头会让人以为这一行能被拖走');
@@ -157,6 +157,78 @@ describe('箭头不发起拖拽，但仍然是放置目标', () => {
   it('箭头仍然是这一行的放置目标', () => {
     const arrow = elementAround(code(readSource(SHELL)), 'data-testid="tree-toggle-btn"');
     assert.match(arrow, /onDrop=/, '箭头不接放置了 —— 把节点拖到箭头那一小条上会落空');
+  });
+
+  it('箭头有自己的圆角边框与阴影', () => {
+    const arrow = elementAround(code(readSource(SHELL)), 'data-testid="tree-toggle-btn"');
+    assert.match(arrow, /rounded-/, '箭头没有圆角');
+    assert.match(arrow, /border/, '箭头没有边框');
+    assert.match(arrow, /shadow/, '箭头没有阴影');
+  });
+
+  it('名称那一块也有自己的圆角边框与阴影', () => {
+    const label = elementAround(code(readSource(SHELL)), 'onClick={onSelect}');
+    assert.match(label, /rounded-/, '名称那一块没有圆角');
+    assert.match(label, /border/, '名称那一块没有边框');
+    assert.match(label, /shadow/, '名称那一块没有阴影');
+  });
+
+  it('名称左侧对齐，不居中', () => {
+    const label = elementAround(code(readSource(SHELL)), 'onClick={onSelect}');
+    assert.match(label, /text-left/, '名称那一块不是左对齐');
+  });
+
+  it('名称那一块的边框与阴影从左向右渐变消失', () => {
+    const shell = code(readSource(SHELL));
+    assert.match(shell, /linear-gradient\(to right/, '名称那一块的边框没有从左向右的渐变遮罩');
+    assert.match(shell, /mask(Image|-image)/, '渐变没有落在遮罩上 —— 文字会跟着一起淡掉');
+    const label = elementAround(shell, 'onClick={onSelect}');
+    assert.match(label, /FADE_BORDER_STYLE/, '名称那一块没有用那一份渐变遮罩');
+    assert.match(
+      label,
+      /pointer-events-none/,
+      '渐变那一层没有关掉指针事件 —— 它会挡住这一行的点击',
+    );
+  });
+
+  it('箭头与名称两块之间只隔一点', () => {
+    const shell = code(readSource(SHELL));
+    assert.match(
+      shell,
+      /items-center gap-0\.5/,
+      '行容器不再用 2px 的间隙 —— 箭头与名称两块之间隔得太远',
+    );
+    const label = elementAround(shell, 'onClick={onSelect}');
+    assert.match(
+      label,
+      /\bpx-1\.5\b/,
+      '名称那一块的左右内边距不是 6px —— 名称离自己那一块的边框太远',
+    );
+  });
+
+  it('箭头与名称两块同高', () => {
+    const shell = code(readSource(SHELL));
+    const blockH = shell.match(/const BLOCK_H = '([^']+)'/)?.[1];
+    assert.ok(blockH, '共享行外壳里没有写死块高度的那一个常量');
+    const arrow = elementAround(shell, 'data-testid="tree-toggle-btn"');
+    const label = elementAround(shell, 'onClick={onSelect}');
+    assert.match(arrow, /BLOCK_H/, '箭头方块没有用统一的高度');
+    assert.match(label, /BLOCK_H/, '名称方块没有用统一的高度');
+  });
+
+  it('药丸留在名称方块里面', () => {
+    const label = elementAround(code(readSource(SHELL)), 'onClick={onSelect}');
+    assert.match(label, /\{leading\}/, '药丸被搬出了名称方块 —— 药丸与名称不再是一体的');
+  });
+
+  it('接口行左侧留出一格，名称方块才与上级对齐', () => {
+    const shell = code(readSource(SHELL));
+    assert.match(
+      shell,
+      /!toggle && leading/,
+      '接口行没有为对齐留出左侧那一格 —— 它的名称方块落在上级名称方块的左边',
+    );
+    assert.match(shell, /<span aria-hidden[^>]*SLOT_W/, '那一格不是与箭头同样宽的空格');
   });
 });
 
