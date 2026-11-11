@@ -13,6 +13,8 @@ export interface CollectionBranchProps {
   depth: number;
   editing: { kind: TargetKind; id: string } | null;
   onSelectCollection: (id: string) => void;
+  /** 点展开箭头时调用 —— 只切展开状态，不打开工作区。 */
+  onToggleCollection: (id: string) => void;
   onStartEditCollection: (id: string) => void;
   onSaveEditCollection: (id: string, name: string) => void;
   onCancelEdit: () => void;
@@ -37,6 +39,7 @@ export function CollectionBranch(props: CollectionBranchProps) {
     depth,
     editing,
     onSelectCollection,
+    onToggleCollection,
     onStartEditCollection,
     onSaveEditCollection,
     onCancelEdit,
@@ -62,6 +65,7 @@ export function CollectionBranch(props: CollectionBranchProps) {
               collection={collection}
               isEditing={editing?.kind === 'collection' && editing.id === collection.id}
               onSelect={() => onSelectCollection(collection.id)}
+              onToggle={() => onToggleCollection(collection.id)}
               onStartEdit={() => onStartEditCollection(collection.id)}
               onSaveEdit={(name) => onSaveEditCollection(collection.id, name)}
               onCancelEdit={onCancelEdit}

@@ -132,6 +132,7 @@ export function ProjectTree() {
   const {
     openModuleTab,
     openCollectionTab,
+    toggleExpanded,
     openEndpointTab,
     selectedEndpointIds,
     handleEndpointClick,
@@ -396,6 +397,7 @@ export function ProjectTree() {
                   module={modBranch.module}
                   isEditing={editing?.kind === 'module' && editing.id === modBranch.module.id}
                   onSelect={() => openModuleTab(modBranch.module.id)}
+                  onToggle={() => toggleExpanded(modBranch.module.id)}
                   onStartEdit={() => startEdit('module', modBranch.module.id)}
                   onSaveEdit={(name) => saveEdit('module', modBranch.module.id, name)}
                   onCancelEdit={cancelEdit}
@@ -428,6 +430,7 @@ export function ProjectTree() {
                     depth={1}
                     editing={editing}
                     onSelectCollection={openCollectionTab}
+                    onToggleCollection={toggleExpanded}
                     onStartEditCollection={(id) => startEdit('collection', id)}
                     onSaveEditCollection={(id, name) => saveEdit('collection', id, name)}
                     onCancelEdit={cancelEdit}
