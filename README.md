@@ -8,7 +8,7 @@
 
 Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这里的接口定义，读到的就是用户正在维护的那份数据。
 
-[![版本](https://img.shields.io/badge/version-v0.1.32-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
+[![版本](https://img.shields.io/badge/version-v0.1.33-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
 [![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
 [![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
 [![MCP 工具](https://img.shields.io/badge/MCP-48%20tools-8A2BE2?style=flat-square)](#mcp-server)
@@ -109,11 +109,11 @@ MCP 桥接二进制 `simple-post-mcp` 只以编译产物的形式发布：GitHub
 容器：
 
 ```bash
-docker pull ghcr.io/nnyjk/simple-post:0.1.32
+docker pull ghcr.io/nnyjk/simple-post:0.1.33
 docker run -d --name simple-post -p 4173:4173 \
   -e SIMPLE_POST_WEB_PASSWORD=换成一句长随机口令 \
   -v simple-post-data:/data \
-  ghcr.io/nnyjk/simple-post:0.1.32
+  ghcr.io/nnyjk/simple-post:0.1.33
 ```
 
 浏览器访问 `http://localhost:4173/`；设了口令时第一次用 `http://localhost:4173/?token=<口令>` 打开，页面把口令存进浏览器的 localStorage，之后直接访问根路径即可。
@@ -144,7 +144,7 @@ MCP 的端点是守护进程自己的监听端口，主端口上不提供 MCP。
 
 镜像里只有 `simple-post-server`、单页应用的静态产物与一个数据目录。SQLite 使用 `rusqlite` 的 `bundled` 静态编译，TLS 使用 rustls 内置的根证书集，因此镜像不安装 GTK、WebKit、X11 与 OpenSSL。单页应用在 `/app/spa`，数据在 `/data`。
 
-镜像地址是 `ghcr.io/nnyjk/simple-post`，同时提供 linux/amd64 与 linux/arm64，每个 `v*` 标签发布一次。常用标签：`0.1.32`（具体版本）、`0.1`（次版本）、`latest`（最新正式版）。
+镜像地址是 `ghcr.io/nnyjk/simple-post`，同时提供 linux/amd64 与 linux/arm64，每个 `v*` 标签发布一次。常用标签：`0.1.33`（具体版本）、`0.1`（次版本）、`latest`（最新正式版）。
 
 ### Docker Compose 部署
 
@@ -154,7 +154,7 @@ MCP 的端点是守护进程自己的监听端口，主端口上不提供 MCP。
 cp .env.example .env
 ```
 
-至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.32`；本地构建就执行 `docker build -t simple-post:local .`，`SP_IMAGE` 留空即可。
+至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.33`；本地构建就执行 `docker build -t simple-post:local .`，`SP_IMAGE` 留空即可。
 
 启动与验证：
 
@@ -313,7 +313,7 @@ sp.example.com {
 
 ## 路线图
 
-v0.1.x 已交付：Tauri 桌面应用、`serve-web` 无头 Web 与独立 MCP 二进制，三者共用一套 Rust 核心。v0.2 的鉴权扩展、响应历史持久化、MCP 进程可视化、Postman 与 OpenAPI 导入导出、MCP 写工具与仓库治理全部完成。v0.3 随 v0.1.32 发布，请求脚本、动态变量与集合批量运行全部完成。
+v0.1.x 已交付：Tauri 桌面应用、`serve-web` 无头 Web 与独立 MCP 二进制，三者共用一套 Rust 核心。v0.2 的鉴权扩展、响应历史持久化、MCP 进程可视化、Postman 与 OpenAPI 导入导出、MCP 写工具与仓库治理全部完成。v0.3 随 v0.1.33 发布，请求脚本、动态变量与集合批量运行全部完成。
 
 AI 文档生成、AI 测试用例生成与 Git 工作区协作三项不在应用内实现：外部 AI 客户端通过 MCP 读取接口定义，自行生成文档与测试用例，并用 Git 管理工作区；应用侧因此不新增 AI provider 集成，也不新增 API key 的配置与存储面（#9 #10 #11 已关闭）。
 
