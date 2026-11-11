@@ -156,7 +156,7 @@ describe('展开箭头：它自己是另一个按钮', () => {
   });
 });
 
-describe('箭头与名称：两块各自独立的方块', () => {
+describe('箭头与名称：两个各自独立的按钮', () => {
   it('箭头不发起拖拽', () => {
     const arrow = elementAround(code(readSource(SHELL)), 'data-testid="tree-toggle-btn"');
     assert.doesNotMatch(arrow, /draggable/, '箭头又能拖了 —— 拖箭头会让人以为这一行能被拖走');
@@ -172,36 +172,33 @@ describe('箭头与名称：两块各自独立的方块', () => {
     assert.match(arrow, /onDrop=/, '箭头不接放置了 —— 把节点拖到箭头那一小条上会落空');
   });
 
-  it('箭头有自己的圆角边框与阴影', () => {
+  it('箭头那一块的边框与阴影在悬浮时才显出来', () => {
     const arrow = elementAround(code(readSource(SHELL)), 'data-testid="tree-toggle-btn"');
-    assert.match(arrow, /rounded-/, '箭头没有圆角');
-    assert.match(arrow, /border/, '箭头没有边框');
-    assert.match(arrow, /shadow/, '箭头没有阴影');
+    assert.match(
+      arrow,
+      /absolute inset-0 rounded-md border border-border shadow-sm/,
+      '箭头那一块没有画边框与阴影的覆盖层',
+    );
+    assert.match(arrow, /opacity-0/, '箭头的覆盖层不是默认透明的 —— 边框不该一直显着');
+    assert.match(arrow, /pointer-events-none/, '覆盖层吃了指针事件 —— 点箭头会被它挡掉');
   });
 
-  it('名称那一块也有自己的圆角边框与阴影', () => {
+  it('名称那一块的边框与阴影在悬浮时才显出来', () => {
     const label = elementAround(code(readSource(SHELL)), 'onClick={onSelect}');
-    assert.match(label, /rounded-/, '名称那一块没有圆角');
-    assert.match(label, /border/, '名称那一块没有边框');
-    assert.match(label, /shadow/, '名称那一块没有阴影');
+    assert.match(
+      label,
+      /absolute inset-0 rounded-md border border-border shadow-sm/,
+      '名称那一块没有画边框与阴影的覆盖层',
+    );
+    assert.match(label, /opacity-0/, '名称的覆盖层不是默认透明的 —— 边框不该一直显着');
+    assert.match(label, /pointer-events-none/, '覆盖层吃了指针事件 —— 点行名会被它挡掉');
+    assert.match(label, /style=\{FADE_BORDER_STYLE\}/, '名称那一块的边框没有从左向右渐变消失');
+    assert.match(label, /rounded-/, '名称那一块的 hover 填充没有圆角');
   });
 
   it('名称左侧对齐，不居中', () => {
     const label = elementAround(code(readSource(SHELL)), 'onClick={onSelect}');
     assert.match(label, /text-left/, '名称那一块不是左对齐');
-  });
-
-  it('名称那一块的边框与阴影从左向右渐变消失', () => {
-    const shell = code(readSource(SHELL));
-    assert.match(shell, /linear-gradient\(to right/, '名称那一块的边框没有从左向右的渐变遮罩');
-    assert.match(shell, /mask(Image|-image)/, '渐变没有落在遮罩上 —— 文字会跟着一起淡掉');
-    const label = elementAround(shell, 'onClick={onSelect}');
-    assert.match(label, /FADE_BORDER_STYLE/, '名称那一块没有用那一份渐变遮罩');
-    assert.match(
-      label,
-      /pointer-events-none/,
-      '渐变那一层没有关掉指针事件 —— 它会挡住这一行的点击',
-    );
   });
 
   it('箭头与名称两块之间只隔一点', () => {
@@ -217,6 +214,13 @@ describe('箭头与名称：两块各自独立的方块', () => {
       /\bpx-1\.5\b/,
       '名称那一块的左右内边距不是 6px —— 名称离自己那一块的边框太远',
     );
+  });
+
+  it('箭头贴着名称那一块：前导槽只比图标宽一点', () => {
+    const shell = code(readSource(SHELL));
+    const slotW = shell.match(/const SLOT_W = 'w-\[(\d+)px\]'/)?.[1];
+    assert.ok(slotW, '共享行外壳里没有写死前导槽宽度的那一个常量');
+    assert.ok(Number(slotW) <= 16, `前导槽还有 ${slotW}px 宽 —— 箭头与名称之间隔着一段空白`);
   });
 
   it('箭头与名称两块同高', () => {
@@ -242,6 +246,36 @@ describe('箭头与名称：两块各自独立的方块', () => {
       '接口行没有为对齐留出左侧那一格 —— 它的名称方块落在上级名称方块的左边',
     );
     assert.match(shell, /<span aria-hidden[^>]*SLOT_W/, '那一格不是与箭头同样宽的空格');
+  });
+});
+
+describe('边框的显隐：GSAP 补间', () => {
+  it('鼠标进出每一块时补间 opacity', () => {
+    const shell = code(readSource(SHELL));
+    assert.match(shell, /mouseenter/, '没有监听鼠标进入 —— 边框不会显出来');
+    assert.match(shell, /mouseleave/, '没有监听鼠标离开 —— 边框不会收回去');
+    assert.match(shell, /gsap\.to\(border, \{ opacity/, '边框的显隐没有走 GSAP 补间');
+  });
+
+  it('减弱动效时直接落到终态', () => {
+    const shell = code(readSource(SHELL));
+    assert.match(shell, /motionSafe\(/, '边框的显隐没有走 motionSafe');
+    assert.match(
+      shell,
+      /gsap\.set\(border, \{ opacity \}\)/,
+      '减弱动效时没有直接落到终态 —— 边框会留在屏幕上',
+    );
+  });
+
+  it('motionSafe 的两个分支没有放反', () => {
+    const shell = code(readSource(SHELL));
+    // motionSafe(animate, jumpToEnd)：第一个参数是「播动画」的分支，第二个是
+    // 「落到终态」的分支。顺序反了，默认动效下只剩直落，动画等于没写。
+    const call = shell.indexOf('motionSafe(');
+    const to = shell.indexOf('gsap.to(border', call);
+    const set = shell.indexOf('gsap.set(border', call);
+    assert.ok(call !== -1 && to !== -1 && set !== -1, '源码里找不到 motionSafe 的两个分支');
+    assert.ok(to < set, 'motionSafe 的两个分支放反了 —— 默认动效下走的是直落，边框不会淡入淡出');
   });
 });
 

@@ -17,7 +17,7 @@
 services:
   simple-post:
     # `SP_IMAGE` points the stack at the published image without editing
-    # this file: put SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.33 in .env.
+    # this file: put SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.34 in .env.
     # The default is the local tag that `docker build -t simple-post:local .`
     # produces.
     image: ${SP_IMAGE:-simple-post:local}

@@ -1,22 +1,25 @@
-import type {
-  CSSProperties,
-  DragEvent as ReactDragEvent,
-  MouseEvent as ReactMouseEvent,
-  ReactNode,
+import {
+  useRef,
+  type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  type RefObject,
 } from 'react';
 import { ChevronRight, Plus } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { Tooltip } from '@/components/ui/tooltip';
 import { InlineEdit } from '@/components/ui/InlineEdit';
 import type { DragContextValue, TreeNodeKind } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
 /**
- * 一行里三块东西的高度：箭头方块、名称方块、行尾的「新建」按钮。
+ * 一行里三块东西的高度：箭头、名称方块、行尾的「新建」按钮。
  *
- * 箭头方块与名称方块必须**同高** —— 两个边框框住的两块东西，一高一低看着不像一对。
- * 高度写死在这儿（26px）而不是由字号推出来：名称那一块里装的是一段文字，行高会随
- * 字体设置变，写死的高度不会变。
+ * 箭头与名称方块必须**同高** —— 箭头只有一枚图标，名称那一块里是一段文字，两者同高
+ * 时图标与文字落在同一条水平线上。高度写死在这儿（26px）而不是由字号推出来：名称
+ * 那一块里装的是一段文字，行高会随字体设置变，写死的高度不会变。
  */
 const BLOCK_H = 'h-[26px]';
 
@@ -24,8 +27,7 @@ const BLOCK_H = 'h-[26px]';
  * 名称方块的边框与阴影：从左向右渐变消失。
  *
  * 做法是给一层「只画边框与阴影」的覆盖层加遮罩 —— 遮罩只作用在那一层上，文字不跟着淡。
- * 边框由覆盖层画、按钮自己留一条透明边框：按钮自己的 border 一旦带上遮罩，文字会一起淡掉；
- * 留一条透明边框则让按钮的盒模型与从前一致，文字的位置不挪。
+ * 这一层平时是透明的：鼠标悬在这一块上时，GSAP 把它淡入，边框与阴影才显出来。
  */
 const FADE_BORDER_STYLE: CSSProperties = {
   WebkitMaskImage: 'linear-gradient(to right, black 0%, black 25%, transparent 100%)',
@@ -33,12 +35,69 @@ const FADE_BORDER_STYLE: CSSProperties = {
 };
 
 /**
- * 前导槽的宽度：箭头方块与接口行的 method 药丸都占这一格。
+ * 前导槽的宽度：模块行与集合行的箭头占这一格，接口行没有箭头，留一格同样宽的空位。
  *
- * 两样东西占同一个槽，名称方块的左边界就在同一个位置 —— 于是**接口行的名称方块与
+ * 两行用同一个宽度常数，名称方块的左边界便落在同一个位置 —— 于是**接口行的名称方块与
  * 上级的名称方块左边界对齐**（接口是叶子，没有自己的层级）。
+ *
+ * 这一格只比箭头图标本身宽一点：箭头那一块只是一枚图标，多出来的宽度会变成箭头与
+ * 名称之间的一段空白。
  */
-const SLOT_W = 'w-[26px]';
+const SLOT_W = 'w-[16px]';
+
+/**
+ * 那些块的边框：鼠标悬在哪一块上，哪一块的边框才显出来，离开时收回。
+ *
+ * 边框与阴影画在一层覆盖上（覆盖层平时透明），故动画只动 `opacity` —— 边框的颜色留在
+ * CSS 里，不搬到 JS 里再补间一遍。
+ *
+ * 悬停的判定挂在覆盖层所在的按钮上：覆盖层自己不吃指针事件，鼠标进出按钮才是这一块
+ * 的进出。
+ *
+ * 减弱动效时不播补间，直接落到终态：边框该显出来就显出来。
+ */
+function useHoverBorders(borderRefs: RefObject<HTMLSpanElement | null>[]) {
+  useGSAP(() => {
+    const targets = borderRefs
+      .map((ref) => ref.current)
+      .filter((el): el is HTMLSpanElement => el !== null);
+    if (!targets.length) return;
+
+    // 边框的显隐是状态，不是装饰：监听无条件注册，只决定「怎么改 opacity」。
+    // motionSafe 的第一个参数是「播动画」的分支，第二个是「落到终态」的分支：
+    // 默认动效下走补间，用户要求减弱动效时走直落。两个分支放反了，默认动效下就
+    // 只剩直落，动画等于没写。
+    let fade = (border: HTMLSpanElement, opacity: number) => gsap.set(border, { opacity });
+    const cleanup = motionSafe(
+      () => {
+        fade = (border, opacity) =>
+          gsap.to(border, { opacity, duration: 0.15, ease: 'power2.out', overwrite: 'auto' });
+      },
+      () => {
+        fade = (border, opacity) => gsap.set(border, { opacity });
+      },
+    );
+
+    const offs = targets.map((border) => {
+      // 覆盖层画在按钮里面，它的父元素就是那一块的按钮 —— 鼠标进出按钮即是进出这一块。
+      const host = border.parentElement;
+      const enter = () => fade(border, 1);
+      const leave = () => fade(border, 0);
+      host?.addEventListener('mouseenter', enter);
+      host?.addEventListener('mouseleave', leave);
+      return () => {
+        host?.removeEventListener('mouseenter', enter);
+        host?.removeEventListener('mouseleave', leave);
+        gsap.killTweensOf(border);
+      };
+    });
+
+    return () => {
+      cleanup();
+      offs.forEach((off) => off());
+    };
+  });
+}
 
 export interface TreeRowProps {
   /**
@@ -126,6 +185,11 @@ export function TreeRow({
       ? dragContext.dropHint.zone
       : null;
 
+  /** 两块各有一层默认透明的边框覆盖层：悬浮时由 GSAP 淡入。 */
+  const arrowBorderRef = useRef<HTMLSpanElement>(null);
+  const nameBorderRef = useRef<HTMLSpanElement>(null);
+  useHoverBorders([arrowBorderRef, nameBorderRef]);
+
   /** 行按钮是这一行的拖拽起点 —— 箭头不参与。 */
   const startDrag = (e: ReactDragEvent) => {
     dragContext.setDataTransfer(e, { kind, ids: dragIds ?? [id] });
@@ -158,13 +222,19 @@ export function TreeRow({
             title={toggle.expanded ? '收起' : '展开'}
             data-testid="tree-toggle-btn"
             className={cn(
-              'flex shrink-0 items-center justify-center rounded-md border border-border shadow-sm',
+              'relative flex shrink-0 items-center justify-center rounded-md',
               BLOCK_H,
               SLOT_W,
               'text-faint transition-colors hover:bg-overlay-hover hover:text-foreground',
               focusRing,
             )}
           >
+            {/* 边框与阴影由这一层画，它不吃指针事件；平时透明，悬停时由 GSAP 淡入。 */}
+            <span
+              ref={arrowBorderRef}
+              aria-hidden
+              className="pointer-events-none absolute inset-0 rounded-md border border-border shadow-sm opacity-0"
+            />
             <ChevronRight
               className={cn(
                 'h-3 w-3 transition-transform',
@@ -199,17 +269,18 @@ export function TreeRow({
             }
           }}
           className={cn(
-            'relative flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-transparent px-1.5',
+            'relative flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5',
             'text-left text-xs text-foreground transition-colors',
             BLOCK_H,
             buttonClassName,
           )}
         >
-          {/* 边框与阴影由这一层画，它从左向右渐变消失；它不吃指针事件，点击照旧落在按钮上。 */}
+          {/* 边框与阴影由这一层画，它不吃指针事件；平时透明，悬停时由 GSAP 淡入。 */}
           <span
+            ref={nameBorderRef}
             aria-hidden
-            className="pointer-events-none absolute -inset-px rounded-md border border-border shadow-sm"
             style={FADE_BORDER_STYLE}
+            className="pointer-events-none absolute inset-0 rounded-md border border-border shadow-sm opacity-0"
           />
           {leading}
           <InlineEdit
