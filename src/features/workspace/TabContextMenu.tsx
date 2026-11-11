@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { X, CheckCircle2, XSquare } from 'lucide-react';
+import {
+  X,
+  CheckCircle2,
+  XSquare,
+  LayersMinus,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+} from 'lucide-react';
 import type { OpenTab } from '@/stores/app-store';
 import { cn } from '@/lib/utils';
 import { LAYER } from '@/components/ui/layers';
@@ -10,6 +17,9 @@ export interface TabContextMenuProps {
   dirtyTabIds: Set<string>;
   onClose: () => void;
   onCloseTab: (id: string) => void;
+  onCloseOthers: () => void;
+  onCloseLeft: () => void;
+  onCloseRight: () => void;
   onCloseAll: () => void;
   onCloseSaved: () => void;
 }
@@ -21,6 +31,9 @@ export function TabContextMenu({
   dirtyTabIds,
   onClose,
   onCloseTab,
+  onCloseOthers,
+  onCloseLeft,
+  onCloseRight,
   onCloseAll,
   onCloseSaved,
 }: TabContextMenuProps) {
@@ -65,6 +78,13 @@ export function TabContextMenu({
   const savedCount = openTabs.filter((t) => !dirtyTabIds.has(t.id)).length;
   const targetDirty = dirtyTabIds.has(tabId);
 
+  // 「左侧」与「右侧」以**被右键的那个标签**在标签条上的位置为准：左边是排在它前面的那些，
+  // 右边是排在它后面的那些。
+  const targetIndex = openTabs.findIndex((t) => t.id === tabId);
+  const leftCount = targetIndex > 0 ? targetIndex : 0;
+  const rightCount = targetIndex >= 0 ? openTabs.length - targetIndex - 1 : 0;
+  const othersCount = openTabs.length - 1;
+
   return (
     <div
       ref={menuRef}
@@ -80,6 +100,27 @@ export function TabContextMenu({
         label="关闭"
         shortcut={targetDirty ? '有未保存' : undefined}
         onClick={() => onCloseTab(tabId)}
+      />
+      <MenuItem
+        icon={<LayersMinus className="h-3.5 w-3.5" />}
+        label="关闭其他"
+        shortcut={othersCount === 0 ? '无可关闭' : `${othersCount} 个`}
+        disabled={othersCount === 0}
+        onClick={onCloseOthers}
+      />
+      <MenuItem
+        icon={<ArrowLeftToLine className="h-3.5 w-3.5" />}
+        label="关闭左侧"
+        shortcut={leftCount === 0 ? '无可关闭' : `${leftCount} 个`}
+        disabled={leftCount === 0}
+        onClick={onCloseLeft}
+      />
+      <MenuItem
+        icon={<ArrowRightToLine className="h-3.5 w-3.5" />}
+        label="关闭右侧"
+        shortcut={rightCount === 0 ? '无可关闭' : `${rightCount} 个`}
+        disabled={rightCount === 0}
+        onClick={onCloseRight}
       />
       <MenuItem
         icon={<CheckCircle2 className="h-3.5 w-3.5" />}

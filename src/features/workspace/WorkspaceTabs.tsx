@@ -46,6 +46,8 @@ export function WorkspaceTabs() {
   const setActiveTab = useAppStore((s) => s.setActiveTab);
   const requestCloseTab = useAppStore((s) => s.requestCloseTab);
   const requestCloseOthers = useAppStore((s) => s.requestCloseOthers);
+  const requestCloseLeft = useAppStore((s) => s.requestCloseLeft);
+  const requestCloseRight = useAppStore((s) => s.requestCloseRight);
   const requestCloseAllTabs = useAppStore((s) => s.requestCloseAllTabs);
   const closeSavedTabs = useAppStore((s) => s.closeSavedTabs);
   const pruneStaleTabs = useAppStore((s) => s.pruneStaleTabs);
@@ -555,6 +557,19 @@ export function WorkspaceTabs() {
           onClose={() => setMenu(null)}
           onCloseTab={(id) => {
             requestCloseTab(id);
+            setMenu(null);
+          }}
+          onCloseOthers={() => {
+            // 右键菜单的「关闭其他」以**被右键的那个标签**为基准，不是活动标签。
+            requestCloseOthers(menu.tabId);
+            setMenu(null);
+          }}
+          onCloseLeft={() => {
+            requestCloseLeft(menu.tabId);
+            setMenu(null);
+          }}
+          onCloseRight={() => {
+            requestCloseRight(menu.tabId);
             setMenu(null);
           }}
           onCloseAll={() => {
