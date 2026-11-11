@@ -6,8 +6,7 @@ import { useAppStore } from '@/stores/app-store';
  * 对象的 store selector —— 下面的取值都是原始 store 引用或 `.find()` 的结果（稳定）。
  *
  * 「打开工作区」与「展开 / 收起」是**两件事**，各有一个入口：行按钮调 `openModuleTab` /
- * `openCollectionTab`，展开箭头调 `toggleExpanded`。曾经两者绑在同一个点击上，点箭头
- * 会顺手打开工作区、点名字会顺手收起刚展开的分支。
+ * `openCollectionTab`，展开箭头调 `toggleExpanded`。
  */
 export function useTreeSelection() {
   // ---------- store actions ----------

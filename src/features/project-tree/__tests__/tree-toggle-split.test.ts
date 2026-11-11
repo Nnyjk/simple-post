@@ -6,12 +6,8 @@
  * 「功能测试看不见的那类缺陷」的既定取舍，见 `tree-rename-selection.test.ts` 的开头，
  * 理由相同。
  *
- * **它钉住的是什么。** 树里的「打开工作区」与「展开 / 收起」曾经绑在同一个点击上：
- * 点行名既打开工作区又切换展开状态，点展开箭头也一样。两个后果都与用户当下的意图
- * 相反 —— 用户只想看内容却打开了工作区，用户只想收起分支却打开了工作区。
- *
- * 故两者必须各自独立：行按钮调 `openTab`，展开箭头调 `toggleNodeExpanded`，两个
- * 按钮是两个元素。
+ * **它钉住的是什么。** 「打开工作区」与「展开 / 收起」必须各自独立：行按钮调
+ * `openTab`，展开箭头调 `toggleNodeExpanded`，两个按钮是两个元素。
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +21,7 @@ function readSource(relative: string): string {
 /**
  * 剥掉注释，只留代码。
  *
- * 必须剥：注释里会提到「曾经两者绑在同一个点击上」这样的**反例**，不剥的话源码级断言
+ * 必须剥：注释里会写出与断言相同的字面量（例如提到 `onDrop=`），不剥的话源码级断言
  * 会被自己的说明文字满足 —— 一条不可能失败的回归测试比没有更糟。
  */
 function code(source: string): string {
@@ -118,6 +114,23 @@ describe('展开箭头：它自己是另一个按钮', () => {
     const closes = arrow.match(/<\/button>/g)?.length ?? 0;
     assert.equal(opens, 1, '箭头按钮里还套着别的按钮 —— 浏览器会把两个点击合成一个');
     assert.equal(closes, 1, '箭头按钮的标签没有配平');
+  });
+
+  it('箭头按钮不在行按钮里，也没有被存成变量再插进行按钮', () => {
+    const shell = code(readSource(SHELL));
+    const label = elementAround(shell, 'onClick={onSelect}');
+    assert.doesNotMatch(
+      label,
+      /tree-toggle-btn/,
+      '箭头按钮的标记出现在行按钮里 —— 它被渲染在行按钮内部',
+    );
+    // 箭头按钮若被存成变量再插进行按钮，上面那条断言看不见它 —— 源码级的判据到此为止，
+    // 仓库没有渲染器可用来断言真正的元素嵌套（见本文件开头）。
+    assert.doesNotMatch(
+      shell,
+      /=\s*\(?\s*<button/,
+      '箭头按钮被存成了变量 —— 源码级断言看不见它最终被插在哪个按钮里',
+    );
   });
 
   it('箭头按钮在行按钮外面，不是行按钮的一部分', () => {

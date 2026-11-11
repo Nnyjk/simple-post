@@ -55,9 +55,7 @@ export interface TreeRowProps {
   /**
    * 展开 / 收起的箭头。给了这一项，行左侧就多一个**独立的小按钮**。
    *
-   * 两件事刻意分开：行按钮只打开工作区，箭头只切换展开状态。曾经两者绑在同一个点击上，
-   * 于是点箭头会顺手打开工作区、点名字会顺手把刚展开的分支收起来 —— 两个后果都与用户
-   * 当下的意图相反。
+   * 两件事刻意分开：行按钮只打开工作区，箭头只切换展开状态。
    */
   toggle?: {
     /** 这一行当前是否展开。 */
@@ -148,9 +146,9 @@ export function TreeRow({
         {toggle && (
           <button
             type="button"
-            // 箭头不发起拖拽：它是展开 / 收起的控件，拖它既没有意义，也会让人以为
-            // 这一行能被拖走。放置仍然认它 —— 把别的节点拖到箭头那一小条上，与拖到
-            // 名称上是同一件事，故 drop 那几个回调留在它上面。
+            // 箭头不发起拖拽：它只切换展开状态，拖它没有意义。这个按钮保留
+            // onDragOver 与 onDrop —— 把别的节点拖到箭头那一小条上，与拖到名称上
+            // 是同一件事。
             onDragOver={dragContext.makeDragOverHandler({ kind, id })}
             onDragLeave={dragContext.makeDragLeaveHandler({ kind, id })}
             onDrop={dragContext.makeDropHandler({ kind, id })}
