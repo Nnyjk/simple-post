@@ -118,3 +118,29 @@ describe('批量关闭：关闭其他 / 关闭左侧 / 关闭右侧', () => {
     assert.ok(!tabIds().includes('t2'), '干净的已经关掉了');
   });
 });
+
+describe('关掉提示栏等于取消', () => {
+  it('脏标签既没有被关闭，未保存的修改也还在', () => {
+    openTabs(['t1', 't2'], 't1');
+    useAppStore.getState().setEndpointDraft('t1', { url: '/未保存的路径' });
+
+    useAppStore.getState().requestCloseTab('t1');
+    assert.ok(useAppStore.getState().pendingDirtyClose, '提示栏打开了');
+
+    useAppStore.getState().resolveDirtyClose('cancel');
+
+    const state = useAppStore.getState();
+    assert.equal(state.pendingDirtyClose, null, '批次清掉了');
+    assert.ok(tabIds().includes('t1'), '标签还在');
+    assert.equal(state.endpointDrafts.t1?.url, '/未保存的路径', '未保存的修改原样留着');
+  });
+
+  it('取消之后队列里剩下的标签也不再被关掉', () => {
+    openTabs(['t1', 't2'], 't2');
+
+    useAppStore.getState().requestCloseTab('t2');
+    useAppStore.getState().resolveDirtyClose('cancel');
+
+    assert.ok(tabIds().includes('t2'), '标签还在');
+  });
+});

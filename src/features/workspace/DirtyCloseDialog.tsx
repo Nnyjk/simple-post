@@ -3,13 +3,15 @@
  * 怎么办」。队列（`pendingDirtyClose: { tabIds, index }`）与结算动作（`resolveDirtyClose`）都归
  * store，本组件只是视图：读当前 id、查出标签的显示标题、渲染三个按钮。
  *
- * 三个按钮，按用户提需求的顺序：
+ * 四个按钮，按用户提需求的顺序：
  *
+ * - 取消 —— 一个标签都不关，未保存的修改原样留着。标题行的 × 关闭按钮与 Esc 也走这条路：
+ *   用户既然关掉了这个对话框，就是改了主意，顺手把标签关掉不是他表达的意思。
  * - 直接关闭 —— 丢弃当前标签的修改，并中止队列余下部分。
  * - 保存 —— 应用当前标签的待存修改，队列推进到下一个脏标签。
  * - 全部保存 —— 应用其余每个标签的待存修改，全部关闭，然后关掉对话框。
  *
- * 刻意禁用遮罩关闭。但标题行的 × 关闭按钮行为等同 `直接关闭`，好让用户有一条显式退出路径。
+ * 刻意禁用遮罩关闭 —— 不让一次误点把队列晾在那里。
  */
 
 import { useMemo } from 'react';
@@ -75,10 +77,12 @@ export function DirtyCloseDialog() {
   return (
     <Dialog
       open
-      // × 关闭按钮（以及 Esc）行为等同 `discard`：跳过当前标签的保存并推进。
+      // × 关闭按钮（以及 Esc）等同 `cancel`：**不关闭任何标签**，只是把这一批待关闭的
+      // 标签留在原地。用户既然关掉了这个对话框，就是改了主意 —— 顺手把他的标签关掉、
+      // 把未保存的修改丢掉，不是他表达的意思。
       // 遮罩点击仍禁用 —— 不让一次误点把队列晾在那里。
       onOpenChange={(o) => {
-        if (!o) resolveDirtyClose('discard');
+        if (!o) resolveDirtyClose('cancel');
       }}
       disableBackdropClose
       title={
@@ -96,6 +100,14 @@ export function DirtyCloseDialog() {
             {total > 1 ? `共 ${total} 个未保存标签` : null}
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => resolveDirtyClose('cancel')}
+              data-testid="dirty-cancel"
+            >
+              取消
+            </Button>
             <Button
               variant="outline"
               size="sm"

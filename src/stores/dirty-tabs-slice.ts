@@ -63,8 +63,10 @@ export interface DirtyTabsSliceActions {
    * 把 `pendingDirtyClose.index` 往前推一步，走到末尾则清空批次。
    * DirtyCloseDialog 的"保存" / "直接关闭" / "全部保存"按钮使用。
    *
+   * `cancel` 是第四个动作：**不关闭任何标签**，只把批次清掉。用户关掉提示栏（点标题行的 ×
+   * 或按 Esc）走的就是它 —— 关掉提示栏意味着用户改变了主意，不能顺手把他的未保存修改丢掉。
    */
-  resolveDirtyClose: (action: 'discard' | 'save' | 'saveAll') => void;
+  resolveDirtyClose: (action: 'cancel' | 'discard' | 'save' | 'saveAll') => void;
   /** 把给定的标签 id 过滤成当前标脏的那些。请求关闭路径共用的内部助手。 */
   partitionDirty: (targetIds: string[]) => string[];
 }
@@ -181,6 +183,12 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
     if (!batch) return;
     const currentId = batch.tabIds[batch.index];
     if (!currentId) {
+      set({ pendingDirtyClose: null });
+      return;
+    }
+    if (action === 'cancel') {
+      // 用户关掉了提示栏（点标题行的 × 或按 Esc）—— 他改主意了，这一批标签一个都不该关，
+      // 未保存的修改也要原样留着。故这里只清空批次，不碰任何标签。
       set({ pendingDirtyClose: null });
       return;
     }
