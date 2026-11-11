@@ -16,9 +16,11 @@
 
 services:
   simple-post:
-    # Local tag — there is no registry push in v0.1. Swap in a registry
-    # reference when one exists; nothing else in this file has to change.
-    image: simple-post:local
+    # `SP_IMAGE` points the stack at the published image without editing
+    # this file: put SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.32 in .env.
+    # The default is the local tag that `docker build -t simple-post:local .`
+    # produces.
+    image: ${SP_IMAGE:-simple-post:local}
     container_name: simple-post
     restart: unless-stopped
 
