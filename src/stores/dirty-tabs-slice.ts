@@ -37,12 +37,21 @@ export interface DirtyTabsSliceActions {
    * 带脏守卫的关闭变体。若目标标签是脏的，动作会填充 `pendingDirtyClose`，让用户在真正关闭
    * 发生之前决定（丢弃 / 保存 / 全部保存）；若什么都不脏，立即关闭。
    *
-   * `requestCloseTab` 是单个标签；`requestCloseOthers` 是「关掉除活动标签外的所有标签」；
+   * `requestCloseTab` 是单个标签；`requestCloseOthers` 是「关掉除某个标签外的所有标签」；
    * `requestCloseAllTabs` 是「关掉所有标签」。单个的形式供标签上的 X 按钮和右键「关闭」项使用，
-   * 批量形式供「Close All」/「Close Others」使用。
+   * 批量形式供右键菜单的「关闭其他」/「关闭左侧」/「关闭右侧」/「关闭所有」使用。
    */
   requestCloseTab: (tabId: string) => void;
-  requestCloseOthers: () => void;
+  /**
+   * 关掉除 `exceptTabId` 之外的所有标签。不传 `exceptTabId` 时保留当前活动标签
+   * （标签条末尾那个「关闭其他标签」按钮走的就是这条）；传了则以那个标签为基准
+   * （右键菜单的「关闭其他」以**被右键的那个标签**为基准，而不是活动标签）。
+   */
+  requestCloseOthers: (exceptTabId?: string) => void;
+  /** 关掉 `tabId` 左侧的所有标签（按标签条上的先后）。 */
+  requestCloseLeft: (tabId: string) => void;
+  /** 关掉 `tabId` 右侧的所有标签（按标签条上的先后）。 */
+  requestCloseRight: (tabId: string) => void;
   requestCloseAllTabs: () => void;
   /**
    * 提交给定标签上未保存的编辑而不关闭它。对 endpoint 标签意味着通过 `updateEndpointDetail`
@@ -53,6 +62,7 @@ export interface DirtyTabsSliceActions {
   /**
    * 把 `pendingDirtyClose.index` 往前推一步，走到末尾则清空批次。
    * DirtyCloseDialog 的"保存" / "直接关闭" / "全部保存"按钮使用。
+   *
    */
   resolveDirtyClose: (action: 'discard' | 'save' | 'saveAll') => void;
   /** 把给定的标签 id 过滤成当前标脏的那些。请求关闭路径共用的内部助手。 */
@@ -60,6 +70,26 @@ export interface DirtyTabsSliceActions {
 }
 
 export type DirtyTabsSlice = DirtyTabsSliceState & DirtyTabsSliceActions;
+
+/**
+ * 关掉一批标签 —— 所有批量关闭动作（「关闭其他」/「关闭左侧」/「关闭右侧」/「关闭所有」）
+ * 共用的实现。干净的那些立刻关掉；脏的那些排进队列，交给对话框问用户「这些未保存的修改
+ * 怎么办」。
+ */
+function closeWithDirtyGuard(
+  set: (partial: Partial<AppState>) => void,
+  get: () => AppState,
+  targetIds: string[],
+): void {
+  if (targetIds.length === 0) return;
+  const dirty = get().partitionDirty(targetIds);
+  for (const id of targetIds) {
+    if (!dirty.includes(id)) get().closeTab(id);
+  }
+  if (dirty.length > 0) {
+    set({ pendingDirtyClose: { tabIds: dirty, index: 0 } });
+  }
+}
 
 export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice> = (set, get) => ({
   // 启动时没有待关闭批次。DirtyCloseDialog 只在它变成非 null 时才挂载。
@@ -93,31 +123,37 @@ export const createDirtyTabsSlice: StateCreator<AppState, [], [], DirtyTabsSlice
     get().closeTab(tabId);
   },
 
-  requestCloseOthers: () => {
+  requestCloseOthers: (exceptTabId) => {
     const state = get();
-    const targetIds = state.openTabs.filter((t) => t.id !== state.activeTabId).map((t) => t.id);
-    if (targetIds.length === 0) return;
-    const dirty = get().partitionDirty(targetIds);
-    // 干净的立刻关掉；脏的排进队列交给对话框。
-    for (const id of targetIds) {
-      if (!dirty.includes(id)) get().closeTab(id);
-    }
-    if (dirty.length > 0) {
-      set({ pendingDirtyClose: { tabIds: dirty, index: 0 } });
-    }
+    // 不传 `exceptTabId` 时保留活动标签 —— 标签条末尾那个「关闭其他标签」按钮走的就是
+    // 这条。传了则以那个标签为基准 —— 右键菜单的「关闭其他」以被右键的那个标签为准。
+    const keep = exceptTabId ?? state.activeTabId;
+    const targetIds = state.openTabs.filter((t) => t.id !== keep).map((t) => t.id);
+    closeWithDirtyGuard(set, get, targetIds);
+  },
+
+  requestCloseLeft: (tabId) => {
+    const index = get().openTabs.findIndex((t) => t.id === tabId);
+    if (index < 0) return;
+    // 左侧 = 标签条上排在它前面的那些。
+    const targetIds = get()
+      .openTabs.slice(0, index)
+      .map((t) => t.id);
+    closeWithDirtyGuard(set, get, targetIds);
+  },
+
+  requestCloseRight: (tabId) => {
+    const index = get().openTabs.findIndex((t) => t.id === tabId);
+    if (index < 0) return;
+    const targetIds = get()
+      .openTabs.slice(index + 1)
+      .map((t) => t.id);
+    closeWithDirtyGuard(set, get, targetIds);
   },
 
   requestCloseAllTabs: () => {
-    const state = get();
-    const targetIds = state.openTabs.map((t) => t.id);
-    if (targetIds.length === 0) return;
-    const dirty = get().partitionDirty(targetIds);
-    for (const id of targetIds) {
-      if (!dirty.includes(id)) get().closeTab(id);
-    }
-    if (dirty.length > 0) {
-      set({ pendingDirtyClose: { tabIds: dirty, index: 0 } });
-    }
+    const targetIds = get().openTabs.map((t) => t.id);
+    closeWithDirtyGuard(set, get, targetIds);
   },
 
   saveDirtyTab: (tabId) => {
