@@ -1,0 +1,160 @@
+# =============================================================================
+# simple-post —— Portainer / Docker Swarm 栈定义
+#
+# 用途：在 Portainer 的图形界面里建一个 Swarm 栈（Stacks → Add stack → Web editor），
+#       或者在命令行里执行
+#           docker stack deploy -c docker-portainer.yml simple-post
+#
+# 与仓库里另外两个配置文件的差别，以及每处差别的原因：
+#
+#   1. 写了 `version: "3.8"`：Portainer CE 2.x 的建栈走 compose v1 加载器，
+#      文件里没有 `version:` 键时它按 1.0 处理，直接报
+#      "unsupported Compose file version: 1.0"。命令行里的 `docker stack deploy`
+#      用的是 compose-spec，不需要这个键，故 docker-swarm.yml 故意不写
+#      （见该文件头部说明）。用 Portainer 部署时必须显式写 3.x。
+#
+#   2. `endpoint_mode: dnsrr` 与端口的 `mode: host`：swarm 的 ingress 网络若没有
+#      路由器容器，vip + ingress 发布出来的端口在宿主上没有 DNAT 规则，
+#      症状是「服务 1/1 running、容器里的应用也健康，但宿主直连端口 connection refused」。
+#      dnsrr + host 让任务直接持有宿主端口，不经过路由网格。
+#
+#   3. `update_config.order: stop-first`：host 模式的发布端口由任务持有，
+#      新旧两个任务不能同时占同一个宿主端口。start-first 会让新任务抢不到端口，
+#      结果是容器起来了却少一条端口映射。stop-first 先停旧任务再起新任务，
+#      更新期间服务短暂不可用。
+#
+#   4. 没有 `placement.constraints`：约束要求节点带 `simple_post_data=true` 标签，
+#      单节点集群没有该标签时保留会直接 "no suitable node"。
+#      多节点集群的做法见文件末尾那段注释。
+#
+#   5. `replicas: 1`：数据是一个 WAL 模式的 SQLite 文件，多写进程会互相 SQLITE_BUSY。
+#
+# ---- 两个端口：管理平台与 MCP -------------------------------------------
+#
+#   54173 → 容器 4173：管理平台（单页应用）与 REST API。
+#   54174 → 容器 54174：MCP 专用监听器。那个端口上只有 MCP 自己的那组路由
+#           （`/mcp`、`/mcp/healthz`、`/mcp/tools`），没有 REST、没有单页应用。
+#
+# MCP 专用端口的数字来自应用内的设置：设置面板「连接 → HTTP 服务配置」里的
+# 「端口」写了 54174，服务端就另开一个只服务 MCP 的监听器；写 0 则不开，
+# MCP 只走主端口。**发布出去的容器端口必须与设置里写的数字一致**，
+# 否则发布出来的那个端口上没有任何东西在监听。
+#
+# 为什么容器端口与宿主端口是同一个数字（54174 → 54174）：设置里写的是 MCP 服务
+# 自己监听的端口，发布时原样映射出去，中间不再做一次翻译，于是「设置里的数字」
+# 「容器里监听的端口」「外面能连到的端口」是同一个数。
+#
+# 两个发布端口必须指向**不同的容器端口**：同一个容器端口只能承载一个发布端口，
+# 引擎会静默丢掉第二个映射（容器起来后 `HostConfig.PortBindings` 里只有一条，
+# 宿主上那个端口没有监听），症状是「服务 1/1 running，但那个端口连不上」。
+#
+# ---- 口令 --------------------------------------------------------------
+#
+# 下面**不设** `SIMPLE_POST_WEB_PASSWORD` 时，`/api/*` 与 `/mcp` 不鉴权。
+# 这里不能写成 `SIMPLE_POST_WEB_PASSWORD: ""`：服务端 `auth.rs` 的判据是
+# 「这个变量有没有被设置」，不是「值是不是空」——变量未设置时鉴权中间件直接放行；
+# 写成空串就变成鉴权开启，且要求请求带上一个空的 bearer 口令，
+# 结果是所有 `/api/*` 返回 401。
+#
+# 代价：同网段任何人都能调用 API，其中 `POST /api/http/send` 可以向任意 http(s)
+# 地址发请求。要开启鉴权，把下面那行取消注释并填一句非空口令即可。
+# =============================================================================
+
+version: '3.8'
+
+services:
+  simple-post:
+    # 镜像来自 GitHub Container Registry，由 `v*` 标签的发布流水线构建，
+    # 同时提供 linux/amd64 与 linux/arm64。升级时改这一行的版本号，
+    # 然后在 Portainer 里 Update the stack。
+    image: ghcr.io/nnyjk/simple-post:0.1.32
+
+    environment:
+      # 挂载点与镜像的 ENV、`--data-dir` 一致：SQLite 库、`mcp.port`
+      # 记录与 preferences 行都落在这个卷里。
+      SIMPLE_POST_DATA_DIR: /data
+
+      # 口令：不设这个变量，`/api/*` 与 `/mcp` 不鉴权。理由见文件头。
+      # SIMPLE_POST_WEB_PASSWORD: "换成你的口令"
+
+      RUST_LOG: info
+
+      # ---- 反向代理部署才需要 -------------------------------------------
+      # 挂在 https://host/sp/ 下时设置（必须以 / 开头），服务端会把整个
+      # router 放进前缀下，nginx 侧不要剥前缀。
+      # SIMPLE_POST_PUBLIC_BASE_PATH: /sp
+
+      # ---- 出站加固（按需开启） -----------------------------------------
+      # 置 1 后 `POST /api/http/send` 拒绝回环、私网、链路本地
+      # （含云 metadata 169.254.169.254）与 CGNAT。
+      # 需要访问内网服务时不要开启。
+      # SIMPLE_POST_BLOCK_PRIVATE_NET: 1
+
+    # 长语法：`mode: host` 把发布端口绑在宿主上（绕开没有路由器容器的
+    # ingress 网络），`target` 是容器内端口，两个条目的 target 必须不同。
+    ports:
+      - target: 4173
+        published: 54173
+        protocol: tcp
+        mode: host
+      # MCP 专用端口。target 必须与应用内「连接 → HTTP 服务配置」里的
+      # MCP 端口一致（当前是 54174）。
+      - target: 54174
+        published: 54174
+        protocol: tcp
+        mode: host
+
+    volumes:
+      - simple-post-data:/data
+
+    # 与镜像内置的探针一致，`/healthz` 免认证。
+    healthcheck:
+      test: ['CMD', '/usr/local/bin/simple-post-healthcheck']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    deploy:
+      replicas: 1
+
+      # dnsrr：任务用容器 IP 直接应答 DNS，不经过 vip 虚拟地址。
+      endpoint_mode: dnsrr
+
+      update_config:
+        # stop-first，不是 start-first：宿主模式的发布端口由任务持有，
+        # 新旧任务不能同时占同一个端口。理由见文件头那段。
+        order: stop-first
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+        monitor: 30s
+        max_failure_ratio: 0.3
+      rollback_config:
+        order: stop-first
+        parallelism: 1
+        delay: 5s
+        failure_action: pause
+        monitor: 30s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          memory: 512M
+
+      # ---- 多节点集群才需要这一段 ---------------------------------------
+      # 命名卷是 `local` 驱动，只存在于一个节点。先给持有数据的节点打标签：
+      #     docker node update --label-add simple_post_data=true <node-id>
+      # 再把下面三行取消注释。没有约束时，任务更新后重新调度可能落到别的节点，
+      # Docker 在那里新建一个空卷，服务照常健康起来，数据却没有迁移过去。
+      #
+      # placement:
+      #   constraints:
+      #     - node.labels.simple_post_data == 'true'
+
+volumes:
+  simple-post-data:
+    driver: local
