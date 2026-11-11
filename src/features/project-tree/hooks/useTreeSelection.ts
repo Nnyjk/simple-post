@@ -4,6 +4,10 @@ import { useAppStore } from '@/stores/app-store';
 /**
  * 为树节点打开右栏标签的点击处理器，外加供拖放使用的接口多选。不持有会新建数组 /
  * 对象的 store selector —— 下面的取值都是原始 store 引用或 `.find()` 的结果（稳定）。
+ *
+ * 「打开工作区」与「展开 / 收起」是**两件事**，各有一个入口：行按钮调 `openModuleTab` /
+ * `openCollectionTab`，展开箭头调 `toggleExpanded`。曾经两者绑在同一个点击上，点箭头
+ * 会顺手打开工作区、点名字会顺手收起刚展开的分支。
  */
 export function useTreeSelection() {
   // ---------- store actions ----------
@@ -17,13 +21,14 @@ export function useTreeSelection() {
   // 命令面板与面包屑调用。
   const openModuleTab = (id: string) => {
     openTab('module', id);
-    // `openModuleTab` 每次点击都切换该行的展开状态。只做展开（已展开时跳过）时，点一个已
-    // 展开的模块会同时在树上把它折叠掉，而用户无从判断为什么「收缩」从行点击上不起作用。
-    // 无条件切换让这一行的行为与其他树控件一致。
-    toggleNodeExpanded(id);
   };
   const openCollectionTab = (id: string) => {
     openTab('collection', id);
+  };
+  /**
+   * 展开 / 收起 —— 与「打开工作区」分开的那一半。只有展开箭头调它。
+   */
+  const toggleExpanded = (id: string) => {
     toggleNodeExpanded(id);
   };
   const openEndpointTab = (id: string) => {
@@ -55,6 +60,7 @@ export function useTreeSelection() {
   return {
     openModuleTab,
     openCollectionTab,
+    toggleExpanded,
     openEndpointTab,
     selectedEndpointIds,
     handleEndpointClick,
