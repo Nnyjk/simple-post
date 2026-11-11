@@ -64,15 +64,17 @@ function useHoverBorders(borderRefs: RefObject<HTMLSpanElement | null>[]) {
     if (!targets.length) return;
 
     // 边框的显隐是状态，不是装饰：监听无条件注册，只决定「怎么改 opacity」。
-    // 默认是直落（不做补间）；允许播动画时换成补间版。
+    // motionSafe 的第一个参数是「播动画」的分支，第二个是「落到终态」的分支：
+    // 默认动效下走补间，用户要求减弱动效时走直落。两个分支放反了，默认动效下就
+    // 只剩直落，动画等于没写。
     let fade = (border: HTMLSpanElement, opacity: number) => gsap.set(border, { opacity });
     const cleanup = motionSafe(
       () => {
-        fade = (border, opacity) => gsap.set(border, { opacity });
-      },
-      () => {
         fade = (border, opacity) =>
           gsap.to(border, { opacity, duration: 0.15, ease: 'power2.out', overwrite: 'auto' });
+      },
+      () => {
+        fade = (border, opacity) => gsap.set(border, { opacity });
       },
     );
 

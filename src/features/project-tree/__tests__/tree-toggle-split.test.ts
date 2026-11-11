@@ -266,6 +266,17 @@ describe('边框的显隐：GSAP 补间', () => {
       '减弱动效时没有直接落到终态 —— 边框会留在屏幕上',
     );
   });
+
+  it('motionSafe 的两个分支没有放反', () => {
+    const shell = code(readSource(SHELL));
+    // motionSafe(animate, jumpToEnd)：第一个参数是「播动画」的分支，第二个是
+    // 「落到终态」的分支。顺序反了，默认动效下只剩直落，动画等于没写。
+    const call = shell.indexOf('motionSafe(');
+    const to = shell.indexOf('gsap.to(border', call);
+    const set = shell.indexOf('gsap.set(border', call);
+    assert.ok(call !== -1 && to !== -1 && set !== -1, '源码里找不到 motionSafe 的两个分支');
+    assert.ok(to < set, 'motionSafe 的两个分支放反了 —— 默认动效下走的是直落，边框不会淡入淡出');
+  });
 });
 
 describe('模块行与集合行：都接上了箭头', () => {
