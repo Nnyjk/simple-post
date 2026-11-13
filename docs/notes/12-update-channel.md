@@ -75,7 +75,7 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 | 容器 | `GET /api/update/deployment` 返回 `shape: "docker"`、镜像 `ghcr.io/nnyjk/simple-post:latest`、命令 `docker compose pull simple-post && docker compose up -d simple-post` | 在**宿主**改 `.env` 的 `SP_IMAGE` 并执行 pull / up。`pull` 拉的是 `SP_IMAGE` 指向的名字，默认 `simple-post:local` 是本机构建标签，pull 它什么也拉不到 |
 | 源码 / 二进制 | `shape: "binary"`，`image` 与 `command` 都是 `null` | 拉代码重新 `cargo build --release -p simple-post-server`（或换二进制），重启 `serve-web` 进程 |
 
-`shape` 的判定在 `update_api::is_docker`：存在 `/.dockerenv`，或 `SIMPLE_POST_DEPLOYMENT` 被设成 `docker`（供没有 `/.dockerenv` 的运行时使用）。
+`shape` 的判定在 `crates/simple-post-server/src/update_api.rs` 的 `is_docker`：存在 `/.dockerenv`，或 `SIMPLE_POST_DEPLOYMENT` 被设成 `docker`（供没有 `/.dockerenv` 的运行时使用）。
 
 ## 离线与降级
 
@@ -92,7 +92,7 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 - **缓存是进程级的**：桌面进程与容器进程各一份，互不影响；一个进程里的 6 小时不代表另一个进程也查过。
 - **`update_apply` 的端到端只在「运维声明了命令」的部署里成立。** 把界面上的 `docker compose pull …` 复制到容器里执行不会成功；那一条是给宿主执行的。
 - **不要在桌面壳里补 `update_deployment` / `update_apply`。** 加之前先回答「这台机器怎么更新」是谁的问题：桌面由插件装安装包，这两条在桌面没有语义（见 `AGENTS.md` 的同名不变量）。
-- **发布正文要写在这一版的改动前面。** 对话框显示的就是这段正文，正文只写安装说明时用户看到的是「怎么装」，不是「改了什么」。
+- **发布正文的第一节要写「这一版的改动」。** 对话框显示的就是这段正文；正文只有安装说明时，用户看到的是「怎么装」，不是「改了什么」。
 
 ## 相关笔记
 
