@@ -137,12 +137,14 @@ MCP 的端点是守护进程自己的监听端口，主端口上不提供 MCP。
 
 | 形态 | 适用场景 | 配置文件 | 启动方式 |
 | --- | --- | --- | --- |
-| Docker Compose | 单台机器，最常见的用法 | `docker-compose.yml` | `docker compose up -d` |
-| Swarm 栈（命令行） | 多节点集群 | `docker-swarm.yml` | `docker stack deploy -c docker-swarm.yml simple-post` |
-| Swarm 栈（Portainer） | 用 Portainer 图形界面管理集群 | `docker-portainer.yml` | Portainer → Stacks → Add stack |
+| Docker Compose | 单台机器，最常见的用法 | `docker/docker-compose.yml` | `docker compose --project-directory . -f docker/docker-compose.yml up -d` |
+| Swarm 栈（命令行） | 多节点集群 | `docker/docker-swarm.yml` | `docker stack deploy -c docker/docker-swarm.yml simple-post` |
+| Swarm 栈（Portainer） | 用 Portainer 图形界面管理集群 | `docker/docker-portainer.yml` | Portainer → Stacks → Add stack |
 | 无头 Web（不用容器） | 已有 Rust 环境，直接跑二进制 | 无 | `simple-post-server serve-web --bind 0.0.0.0 --port 4173` |
 
 镜像里只有 `simple-post-server`、单页应用的静态产物与一个数据目录。SQLite 使用 `rusqlite` 的 `bundled` 静态编译，TLS 使用 rustls 内置的根证书集，因此镜像不安装 GTK、WebKit、X11 与 OpenSSL。单页应用在 `/app/spa`，数据在 `/data`。
+
+compose 相关命令都在仓库根执行。`--project-directory .` 不能省：compose 文件在 `docker/` 下，不带它时 Compose 会把 `docker/` 当成项目目录，于是读不到根目录的 `.env`，项目名也从 `simple-post` 变成 `docker`，数据卷跟着改名成 `docker_simple-post-data`（已有的卷就“消失”了）。
 
 镜像地址是 `ghcr.io/nnyjk/simple-post`，只提供 linux/amd64，每个 `v*` 标签发布一次。常用标签：`0.1.34`（具体版本）、`0.1`（次版本）、`latest`（最新正式版）。
 
@@ -154,21 +156,21 @@ MCP 的端点是守护进程自己的监听端口，主端口上不提供 MCP。
 cp .env.example .env
 ```
 
-至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.34`；本地构建就执行 `docker build -t simple-post:local .`，`SP_IMAGE` 留空即可。
+至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.34`；本地构建就执行 `docker build -f docker/Dockerfile -t simple-post:local .`，`SP_IMAGE` 留空即可。
 
 启动与验证：
 
 ```bash
-docker compose up -d
-docker compose ps        # STATUS 应为 running / healthy
-docker compose logs -f simple-post
+docker compose --project-directory . -f docker/docker-compose.yml up -d
+docker compose --project-directory . -f docker/docker-compose.yml ps        # STATUS 应为 running / healthy
+docker compose --project-directory . -f docker/docker-compose.yml logs -f simple-post
 curl http://localhost:4173/api/healthz
 # {"status":"ok","version":"…","shape":"server"}
 ```
 
 打开页面：浏览器访问 `http://<宿主地址>:4173/`。设了口令时第一次用 `http://<宿主地址>:4173/?token=<口令>` 打开，页面把口令写进浏览器的 localStorage 并删掉地址栏里的查询参数，之后直接访问根路径即可。
 
-发布 MCP 端口（三步）：在应用里打开「设置 → 连接 → HTTP 服务配置」，把「端口」填成 4174，把「监听地址」填成 `0.0.0.0`，按需打开「允许远程访问」并把访问用的域名或 IP 填进 Host 白名单，保存后点「MCP 进程 → 重启 MCP」；在 `docker-compose.yml` 里取消注释 MCP 那段端口映射（`target: 4174`）；最后 `docker compose up -d` 重建容器。端口、监听地址与两张白名单都在守护进程启动时读进命令行，不重启不生效。
+发布 MCP 端口（三步）：在应用里打开「设置 → 连接 → HTTP 服务配置」，把「端口」填成 4174，把「监听地址」填成 `0.0.0.0`，按需打开「允许远程访问」并把访问用的域名或 IP 填进 Host 白名单，保存后点「MCP 进程 → 重启 MCP」；在 `docker/docker-compose.yml` 里取消注释 MCP 那段端口映射（`target: 4174`）；最后 `docker compose --project-directory . -f docker/docker-compose.yml up -d` 重建容器。端口、监听地址与两张白名单都在守护进程启动时读进命令行，不重启不生效。
 
 配置项对照：
 
@@ -187,46 +189,46 @@ curl http://localhost:4173/api/healthz
 
 | 动作 | 命令 |
 | --- | --- |
-| 看日志 | `docker compose logs -f simple-post` |
-| 重启服务 | `docker compose restart simple-post` |
-| 停止并保留数据卷 | `docker compose down` |
-| 停止并删除数据卷 | `docker compose down -v`（数据一并删除，不可恢复） |
-| 升级 | 改 `.env` 里的 `SP_IMAGE` 版本号，再执行 `docker compose pull && docker compose up -d`。数据在卷里，升级不影响数据。 |
+| 看日志 | `docker compose --project-directory . -f docker/docker-compose.yml logs -f simple-post` |
+| 重启服务 | `docker compose --project-directory . -f docker/docker-compose.yml restart simple-post` |
+| 停止并保留数据卷 | `docker compose --project-directory . -f docker/docker-compose.yml down` |
+| 停止并删除数据卷 | `docker compose --project-directory . -f docker/docker-compose.yml down -v`（数据一并删除，不可恢复） |
+| 升级 | 改 `.env` 里的 `SP_IMAGE` 版本号，再执行 `docker compose --project-directory . -f docker/docker-compose.yml pull && docker compose --project-directory . -f docker/docker-compose.yml up -d`。数据在卷里，升级不影响数据。 |
 
 备份与恢复：SQLite 库运行在 WAL 模式，运行时直接复制文件可能拿到不完整的事务，所以先停服再打包卷。卷的实际名字是 `<项目名>_simple-post-data`（项目名默认取当前目录名，Swarm 栈则是 `<栈名>_simple-post-data`），先用 `docker volume ls` 确认一次。
 
 ```bash
-docker compose stop
+docker compose --project-directory . -f docker/docker-compose.yml stop
 docker run --rm -v simple-post_simple-post-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/simple-post-data-$(date +%F).tar.gz -C /data .
-docker compose start
+docker compose --project-directory . -f docker/docker-compose.yml start
 ```
 
 压缩包里是数据卷的全部内容：SQLite 库（`store.db` 及其 `-wal`、`-shm` 文件）与端口登记文件 `simple-post/mcp.port`。恢复时先清空卷再解包，并把属主改回应用用的 uid 10001：
 
 ```bash
-docker compose down
+docker compose --project-directory . -f docker/docker-compose.yml down
 docker run --rm -v simple-post_simple-post-data:/data -v "$PWD":/backup alpine \
   sh -c "rm -rf /data/* && tar xzf /backup/simple-post-data-YYYY-MM-DD.tar.gz -C /data && chown -R 10001:10001 /data"
-docker compose up -d
+docker compose --project-directory . -f docker/docker-compose.yml up -d
 ```
 
 ### Portainer / Swarm 栈部署
 
-用 Portainer 的图形界面建栈时用 `docker-portainer.yml`，不要用 `docker-swarm.yml`。两个栈文件针对的是两种不同的加载方式，下面这几处差别都有原因：
+用 Portainer 的图形界面建栈时用 `docker/docker-portainer.yml`，不要用 `docker/docker-swarm.yml`。两个栈文件针对的是两种不同的加载方式，下面这几处差别都有原因：
 
-| 差别 | `docker-swarm.yml`（命令行） | `docker-portainer.yml`（Portainer） |
+| 差别 | `docker/docker-swarm.yml`（命令行） | `docker/docker-portainer.yml`（Portainer） |
 | --- | --- | --- |
 | `version:` 键 | 不写。`docker stack deploy` 用的是 compose-spec，这个键会被拒绝。 | 写 `"3.8"`。Portainer CE 2.x 的建栈走 compose v1 加载器，没有这个键时它按 1.0 处理，直接报 "unsupported Compose file version: 1.0"。 |
 | 端口发布 | `vip` + 默认 `ingress` 网络。 | `dnsrr` + `mode: host`。ingress 网络若没有路由器容器，vip 发布出来的端口在宿主上没有 DNAT 规则，症状是「服务 1/1 running、容器里也健康，但宿主直连端口 connection refused」。 |
 | 更新顺序 | `start-first`。 | `stop-first`。host 模式的发布端口由任务持有，新旧任务不能同时占同一个宿主端口；`start-first` 会让新任务抢不到端口，结果是容器起来了却少一条端口映射。 |
 
-另外，`docker-swarm.yml` 默认带 `placement.constraints`（要求节点带 `simple_post_data=true` 标签），`docker-portainer.yml` 默认不带：单节点集群没有这个标签，保留会直接 "no suitable node"。
+另外，`docker/docker-swarm.yml` 默认带 `placement.constraints`（要求节点带 `simple_post_data=true` 标签），`docker/docker-portainer.yml` 默认不带：单节点集群没有这个标签，保留会直接 "no suitable node"。
 
 建栈步骤：
 
 1. 在 Portainer 的 Swarm 页面选择 local 环境。单机集群直接往下走，多节点集群先给持有数据的节点打标签。
-2. Stacks → Add stack → Web editor，把 `docker-portainer.yml` 的内容整段粘进去 → Deploy the stack。栈里的 `image` 行写的是发布镜像的版本号，升级时改这一行。
+2. Stacks → Add stack → Web editor，把 `docker/docker-portainer.yml` 的内容整段粘进去 → Deploy the stack。栈里的 `image` 行写的是发布镜像的版本号，升级时改这一行。
 3. 等服务起来：Services 那一行显示 1/1，点进去看 Logs。命令行侧可以用 `docker service ls` 看同一份信息。
 4. 验证：`curl http://<宿主地址>:54173/api/healthz`。
 5. 发布 MCP 端口：栈里已经发布了 `54174 → 54174`。只要应用里的 MCP 端口也写成 54174（「连接 → HTTP 服务配置」的「端口」栏填 54174、「监听地址」填 `0.0.0.0`，保存后重启 MCP 进程），那个端口上就有监听。改了应用里的端口，就要同步改栈里的 `target` 并 Update the stack。
