@@ -105,7 +105,7 @@ CI 额外跑三样本地不在 `check` 里的东西：`vite build`、`cargo test
 - `web`（必需检查，名 `Web — format, lint, typecheck, test, build`，ubuntu，Node 22）：`npm ci --include=dev` → `format:check` → `lint` → `typecheck` → `npm test` → 装 Rust 工具链 + `lint:openapi` → `build`。
 - `rust`（必需检查，名 `Rust — fmt, clippy, test`，windows-latest）：`cargo fmt --all --check` → `cargo clippy --workspace --all-targets -- -D warnings` → `cargo test --workspace`。
 - `docker`（必需检查，名 `Docker — image build + container smoke test`，75 分钟）：`needs: changes`，`if: ${{ !cancelled() && needs.changes.outputs.docker != 'false' }}`（fail-closed）。步骤：Buildx → 构建 `linux/amd64` 并 `load` 为 `simple-post:local` → 起容器等 HEALTHCHECK → 断言 `/healthz` 响应体、SPA 外壳与哈希资源、未鉴权 `/api/projects` = 401 → REST 建项目 → `id -u == 10001` 且无 libgtk/libwebkit → 用同一命名卷重建容器 → 项目仍在 → 清理。
-- `docker-arm64`（advisory）：只在 `main` push、定时或手动触发，`continue-on-error: true`，QEMU 构建 `linux/arm64` 输出 OCI tar，不 load。
+- `docker-arm64`（advisory）：只在 `main` push、定时或手动触发，`continue-on-error: true`，在原生 `ubuntu-24.04-arm` runner 上构建 `linux/arm64` 输出 OCI tar，不 load。
 
 三个 display name 就是 `main` 上配置的必需状态检查。**改 job 名 = 改仓库设置**，不是纯 YAML 编辑。
 
