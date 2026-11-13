@@ -124,6 +124,8 @@ CI 额外跑三样本地不在 `check` 里的东西：`vite build`、`cargo test
 
 ### 部署
 
+> 下面按「Docker 文件已经躺在 `docker/` 下」的布局写。这批文件正在从仓库根迁入（`git status` 里是 `RM Dockerfile -> docker/Dockerfile` 一类重命名，`docker/README.md` 尚未跟踪）；在还没带上这次迁移的提交上，把每条命令里的 `docker/` 前缀去掉即可。
+
 - `docker/Dockerfile` 三阶段：`node:22-bookworm-slim` 构建 SPA → `rust:bookworm` 编 `-p simple-post-server` → `debian:bookworm-slim` 运行。运行阶段**不装任何包**，探针用 bash `/dev/tcp` 手写；它以 uid 10001 运行，`SIMPLE_POST_DATA_DIR=/data`，入口 `serve-web --bind 0.0.0.0 --port 4173`。前提是 server crate 不链接 Tauri/GTK/WebKit；CI 会断言镜像里没有 `libgtk*`/`libwebkit*`。
 - `docker/docker-compose.yml`：单机 Compose/`docker stack deploy` 两用；无 `build:`、无顶层 `version:`、无 `container_name` 之外的花活；`SP_IMAGE` 可指向发布镜像。
 - `docker/docker-swarm.yml`：`replicas: 1`、`endpoint_mode: vip`、`update_config.order: start-first`、**开启** `placement.constraints: node.labels.simple_post_data == 'true'`。
