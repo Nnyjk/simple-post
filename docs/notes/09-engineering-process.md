@@ -12,9 +12,9 @@
 3. Rust 测试默认是「兄弟文件 + `#[path]`」，只有五个文件仍是 inline `mod tests`。
 4. 仓库里有十余个**读源码文本**的哨兵测试；改注释、改字符串字面量都可能让它们变红，这通常是契约真的变了的信号，不要先放宽判据。
 5. `scripts/` 下的辅助脚本既不在 `npm test` 的收集范围内，也不进 CI；删除路由/命令/MCP 工具后必须手工清扫。
-6. CI 三道必需闸（web / rust / docker），其中 docker 按变更范围跳过、但跳过被报告为成功；arm64 只是 advisory。
+6. CI 三道必需闸（web / rust / docker），其中 docker 按变更范围跳过、但跳过被报告为成功。
 7. 容器运行阶段**不装任何包**，其前提是 `simple-post-server` 保持 Tauri-free。
-8. 发布是「四份版本号 + annotated tag + draft release 手填 notes + 多架构镜像」；`main` 受保护，版本提交必须走 PR 且用 rebase merge。
+8. 发布是「四份版本号 + annotated tag + draft release 手填 notes + amd64 镜像」；`main` 受保护，版本提交必须走 PR 且用 rebase merge。
 9. 本地最危险的一次误操作是让 server/GUI 用到桌面 app 的 `store.db`；`SCHEMA_VERSION` 不匹配会**删掉**它。
 
 ## 结构
@@ -99,18 +99,17 @@ CI 额外跑三样本地不在 `check` 里的东西：`vite build`、`cargo test
 
 ### CI 三道闸（`.github/workflows/ci.yml`）
 
-触发：push 到 `main`、所有 PR、每周一 04:23 定时、手动。`concurrency: ci-${{ github.ref }}`，`cancel-in-progress: true`。
+触发：push 到 `main`、所有 PR、手动。`concurrency: ci-${{ github.ref }}`，`cancel-in-progress: true`。
 
 - `changes`（`Change scope`）：`dorny/paths-filter` 计算 `docker` 输出，覆盖 `docker/**`、Cargo/package 清单、`crates/**`、`src-tauri/**`、`src/**`、`scripts/**`、构建配置等。
 - `web`（必需检查，名 `Web — format, lint, typecheck, test, build`，ubuntu，Node 22）：`npm ci --include=dev` → `format:check` → `lint` → `typecheck` → `npm test` → 装 Rust 工具链 + `lint:openapi` → `build`。
 - `rust`（必需检查，名 `Rust — fmt, clippy, test`，windows-latest）：`cargo fmt --all --check` → `cargo clippy --workspace --all-targets -- -D warnings` → `cargo test --workspace`。
 - `docker`（必需检查，名 `Docker — image build + container smoke test`，75 分钟）：`needs: changes`，`if: ${{ !cancelled() && needs.changes.outputs.docker != 'false' }}`（fail-closed）。步骤：Buildx → 构建 `linux/amd64` 并 `load` 为 `simple-post:local` → 起容器等 HEALTHCHECK → 断言 `/healthz` 响应体、SPA 外壳与哈希资源、未鉴权 `/api/projects` = 401 → REST 建项目 → `id -u == 10001` 且无 libgtk/libwebkit → 用同一命名卷重建容器 → 项目仍在 → 清理。
-- `docker-arm64`（advisory）：只在 `main` push、定时或手动触发，`continue-on-error: true`，在原生 `ubuntu-24.04-arm` runner 上构建 `linux/arm64` 输出 OCI tar，不 load。
 
 三个 display name 就是 `main` 上配置的必需状态检查。**改 job 名 = 改仓库设置**，不是纯 YAML 编辑。
 
 - `release.yml`：`v*` tag 或手动触发；三平台矩阵（macOS universal dmg/app、Ubuntu deb/appimage、Windows NSIS）；`releaseDraft: true`；`cancel-in-progress: false`。
-- `publish-image.yml`：`v*` tag；`if: startsWith(github.ref, 'refs/tags/v')`；多架构推送；四个标签由 metadata-action 生成（`x.y.z`、`x.y`、`vX.Y.Z`、`latest`，预发布不带 `-` 才给 `latest`）；`provenance: false`；`cancel-in-progress: false`。
+- `publish-image.yml`：`v*` tag；`if: startsWith(github.ref, 'refs/tags/v')`；构建并推送 `linux/amd64`；四个标签由 metadata-action 生成（`x.y.z`、`x.y`、`vX.Y.Z`、`latest`，预发布不带 `-` 才给 `latest`）；`provenance: false`；`cancel-in-progress: false`。
 
 两个发布工作流都用 `cancel-in-progress: false`：取消一次进行到一半的发布会留下半成品，比重复一次更糟；第二次触发排队而不是并行。
 

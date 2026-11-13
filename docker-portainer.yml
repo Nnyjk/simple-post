@@ -65,7 +65,7 @@ version: '3.8'
 services:
   simple-post:
     # 镜像来自 GitHub Container Registry，由 `v*` 标签的发布流水线构建，
-    # 同时提供 linux/amd64 与 linux/arm64。升级时改这一行的版本号，
+    # 本镜像只提供 linux/amd64。升级时改这一行的版本号，
     # 然后在 Portainer 里 Update the stack。
     image: ghcr.io/nnyjk/simple-post:0.1.34
 
