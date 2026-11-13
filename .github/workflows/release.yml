@@ -92,7 +92,7 @@ jobs:
             - **Windows**: run the `Simple_Post_*_x64-setup.exe` NSIS installer
 
             ### Container image
-            A matching multi-arch image (`linux/amd64` + `linux/arm64`) is published
+            A matching `linux/amd64` image is published
             to GitHub Container Registry by `.github/workflows/publish-image.yml`
             on the same tag:
 
