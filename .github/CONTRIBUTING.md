@@ -10,7 +10,7 @@
 npm run check
 ```
 
-它依次执行 `format:check` → `lint` → `typecheck` → `npm test` → `lint:openapi` → `fmt:check` → `clippy`。CI 的 Web 与 Rust 两个 job 跑的检查都在这条命令里，此外 CI 还多跑三样本地不跑的：`vite build` 生产构建、`cargo test --workspace` Rust 测试、容器内的快速验证（`docker build` 与 `docker compose up` 可在本地覆盖后两样的主要部分）。
+它依次执行 `format:check` → `lint` → `typecheck` → `npm test` → `lint:openapi` → `fmt:check` → `clippy`。CI 的 Web 与 Rust 两个 job 跑的检查都在这条命令里，此外 CI 还多跑三样本地不跑的：`vite build` 生产构建、`cargo test --workspace` Rust 测试、容器内的快速验证（`docker build -f docker/Dockerfile .` 与 `docker compose --project-directory . -f docker/docker-compose.yml up` 可在本地覆盖后两样的主要部分）。
 
 需要 Rust 侧完整测试时单独跑 `cargo test --workspace`。
 
@@ -120,7 +120,7 @@ npm run check
    确认清单里只有 `linux/amd64`。
 4. **验证 compose 部署**（对着刚拉的镜像，不带 `build:`）：
    ```bash
-   SP_WEB_PASSWORD=<口令> docker compose up -d
+   SP_WEB_PASSWORD=<口令> docker compose --project-directory . -f docker/docker-compose.yml up -d
    curl -fsS http://localhost:4173/healthz
    ```
    看到 `"status":"ok"` 即可——注意断言的是**响应体**，状态码单独看会骗人（未注册路径会落到 SPA fallback 返回 `200 text/html`）。
