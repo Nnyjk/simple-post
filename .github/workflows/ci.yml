@@ -9,11 +9,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    # Weekly arm64 compile check. It is deliberately not a required
-    # check, so a scheduled run is its one chance to catch a
-    # target-specific break before the next release.
-    - cron: '23 4 * * 1'
   workflow_dispatch:
 
 concurrency:
@@ -44,8 +39,8 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
     steps:
       # On `pull_request` this reads the file list from the API; on
-      # `push`/`schedule` it diffs, which needs more than the shallow
-      # default. Repo is small, so a full fetch costs little.
+      # `push` it diffs, which needs more than the shallow default.
+      # Repo is small, so a full fetch costs little.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -344,40 +339,3 @@ jobs:
         run: |
           docker rm -f sp-smoke >/dev/null 2>&1 || true
           docker volume rm -f sp-smoke-data >/dev/null 2>&1 || true
-
-  docker-arm64:
-    # Compile check: this job builds the image for linux/arm64 on a native
-    # arm64 runner, so `cargo build --release` executes on arm64 hardware
-    # instead of under QEMU emulation.
-    #
-    # Measured on this runner: the job takes 168s end to end and `cargo
-    # build --release` takes 119s. The same build under QEMU emulation
-    # takes 1330s for the job and 1286.8s for cargo, because
-    # `[profile.release]` is `lto = true` with `codegen-units = 1`.
-    #
-    # The check is advisory. Job-level `continue-on-error` makes GitHub
-    # report a failure here without failing the run, so a target-specific
-    # compile break never blocks the amd64 smoke test nor a merge. An
-    # advisory check stays off the per-PR path: it runs on main pushes,
-    # the weekly schedule and manual dispatch.
-    name: Docker — linux/arm64 compile check (advisory)
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-    continue-on-error: true
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: 'Set up Buildx'
-        uses: docker/setup-buildx-action@v4
-
-      - name: 'Build image (linux/arm64 — compile check only)'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/arm64
-          tags: simple-post:arm64-ci
-          # This job asserts nothing against the image, so the export is
-          # written and discarded.
-          outputs: type=oci,dest=/tmp/simple-post-arm64.oci.tar
