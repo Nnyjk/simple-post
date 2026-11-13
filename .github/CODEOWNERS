@@ -9,6 +9,4 @@
 # Areas that carry the highest blast radius, listed explicitly so a future
 # split has them already named. Uncomment and point at real people once there
 # is more than one.
-/Dockerfile              @Nnyjk
-/docker-compose.yml      @Nnyjk
-/docker-swarm.yml        @Nnyjk
+/docker/                 @Nnyjk

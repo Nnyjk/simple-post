@@ -2,12 +2,18 @@
 # simple-post — Docker Compose deployment
 #
 # The same file shape is accepted by `docker stack deploy` (see
-# docker-swarm.yml for the swarm-flavoured copy), which is why there is no
+# docker/docker-swarm.yml for the swarm-flavoured copy), which is why there is no
 # `build:` key here and no top-level `version:` — `docker stack deploy`
 # ignores the first and rejects the second. Build the image first:
 #
-#     docker build -t simple-post:local .
-#     docker compose up -d
+#     docker build -f docker/Dockerfile -t simple-post:local .
+#     docker compose --project-directory . -f docker/docker-compose.yml up -d
+#
+# `--project-directory .` is not decoration: this file lives one level below the
+# repository root, and Compose otherwise takes *this* directory as the project
+# directory. That would load `docker/.env` instead of the repo-root `.env` and
+# name the project `docker`, which renames the data volume to
+# `docker_simple-post-data` and orphans an existing one.
 #
 # Image entrypoint (baked into the image, not repeated here):
 #     simple-post-server serve-web --bind 0.0.0.0 --port 4173 \
@@ -18,8 +24,8 @@ services:
   simple-post:
     # `SP_IMAGE` points the stack at the published image without editing
     # this file: put SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.34 in .env.
-    # The default is the local tag that `docker build -t simple-post:local .`
-    # produces.
+    # The default is the local tag that
+    # `docker build -f docker/Dockerfile -t simple-post:local .` produces.
     image: ${SP_IMAGE:-simple-post:local}
     container_name: simple-post
     restart: unless-stopped

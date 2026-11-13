@@ -21,7 +21,7 @@
 # The health probe therefore cannot use `curl` (installing it would pull
 # libssl3 / libcurl4 in as a *probe* dependency, not an app one), so the
 # runtime writes a ~6 line bash probe over `/dev/tcp` instead. Same probe
-# is referenced by `docker-compose.yml` / `docker-swarm.yml`.
+# is referenced by `docker/docker-compose.yml` / `docker/docker-swarm.yml`.
 # =============================================================================
 
 

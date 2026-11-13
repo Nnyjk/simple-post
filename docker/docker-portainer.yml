@@ -3,14 +3,14 @@
 #
 # 用途：在 Portainer 的图形界面里建一个 Swarm 栈（Stacks → Add stack → Web editor），
 #       或者在命令行里执行
-#           docker stack deploy -c docker-portainer.yml simple-post
+#           docker stack deploy -c docker/docker-portainer.yml simple-post
 #
 # 与仓库里另外两个配置文件的差别，以及每处差别的原因：
 #
 #   1. 写了 `version: "3.8"`：Portainer CE 2.x 的建栈走 compose v1 加载器，
 #      文件里没有 `version:` 键时它按 1.0 处理，直接报
 #      "unsupported Compose file version: 1.0"。命令行里的 `docker stack deploy`
-#      用的是 compose-spec，不需要这个键，故 docker-swarm.yml 故意不写
+#      用的是 compose-spec，不需要这个键，故 docker/docker-swarm.yml 故意不写
 #      （见该文件头部说明）。用 Portainer 部署时必须显式写 3.x。
 #
 #   2. `endpoint_mode: dnsrr` 与端口的 `mode: host`：swarm 的 ingress 网络若没有
