@@ -24,3 +24,10 @@ public
 # Agent worktrees are separate checkouts with their own tsconfig /
 # prettier state. Linting them from here reports their files as ours.
 .worktrees
+
+# `skills/` holds machine-local agent notes (gitignored, never published).
+# They are not part of the repo's format check: skipping the whole tree here
+# keeps local files — including the runnable `pr-flow/scripts/*.mjs` — from
+# turning `npm run check` red. Only the hand-written prose must stay
+# byte-stable, and `*.md` above already covers that.
+skills

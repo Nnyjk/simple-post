@@ -18,6 +18,10 @@ export default [
       // this ignore the flat config cannot resolve a single tsconfigRootDir
       // and every file in the real tree fails to parse.
       '.worktrees/**',
+      // Local agent skills / handoff docs live in a gitignored `skills/`
+      // tree: machine-local notes that are not part of the published
+      // repo, so they must not be linted as if they were repo sources.
+      'skills/**',
       'src-tauri/gen/**',
       'public/**',
     ],
