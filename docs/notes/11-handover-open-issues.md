@@ -47,7 +47,7 @@
 
 2. **parity 那批**：`npm test`（自动收 `src/**/*.test.ts`）。
    期望：全绿，且 `http-build-parity` / `body-parity` / `base-url-parity` 等各跑满样本条数。
-   不期望时：多半是只改了两侧之一。想验证第 15 条的空转风险，可临时把某个 fixture 的键名改错一个字母再跑——绿了就证明该读取器没有兜底，改回后再决定是否补校验。
+   不期望时：多半是只改了两侧之一。想验证第 15 条的空转风险，可临时把某个 fixture 的键名改错一个字母，再跑**读它的那个读取器**——五个里有四个是 Rust 的（`cargo test -p simple-post-core <测试名>` / `-p simple-post-mcp <测试名>`），本步的 `npm test` 只收 `src/**/*.test.ts`，证明不了 Rust 侧；绿了就说明该读取器没有兜底，改回后再决定是否补校验。
 
 3. **两个数字**：工具数 = 48（`mcp/mod_test.rs` 的常量与 `tool_table().len()`），`COMMANDS` 与 `WEB_ROUTES` 各 59 条。
    期望：三处都与实测一致。
@@ -59,7 +59,7 @@
 
 5. **起一次真实服务**：设 `SIMPLE_POST_DATA_DIR` 到临时目录后 `npm run dev:split`，打开 `http://127.0.0.1:5173/`。
    期望：欢迎页正常、能建项目、`/api/projects` 返回 200、设置面板可达。
-   不期望时：先确认 4173 是否真的起来（`/api` 由 Vite 代理过去），再确认数据目录是空的新库而不是用户那份（schema 不符会删库，见 01 的陷阱）。
+   不期望时：先确认 4173 是否真的起来（`/api` 由 Vite 代理过去），再确认数据目录是空的新库而不是用户那份（本构建的 `SCHEMA_VERSION` 更高时会删库重建，见 01 的陷阱）。
 
 6. **Rust 全量**：`cargo test --workspace`。
    期望：通过；尤其 `openapi_model_test`（用 `openapiv3` 反序列化自家产物）不能红。

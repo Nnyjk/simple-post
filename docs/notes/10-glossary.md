@@ -21,7 +21,7 @@
 | `endpoint_details` | 只属于 endpoint 的请求配置行（method/url/auth/body/headers/params/tags/tls），按 node id 一行 | module/collection 上不存在这行；它们也不该有 method/url |
 | `node_scripts` | collection 级的两段脚本；触发器 `trg_node_scripts_collection_only` 保证 endpoint/module 写不进来 | endpoint 自己的脚本住在 `endpoint_details` 里，不在这张表 |
 | `preferences` | 全局 `key → value` 表（`ui.theme`、`mcp.auto_start`、`mcp.policy`、`mcp.http_config`、`request_settings`、`response_history.keep`） | 环境变量（`environments.variables`）；也**不是**每个项目一份 |
-| `SCHEMA_VERSION` | 当前是 **5**（`db/mod.rs:58`）。`ensure_current_schema` 读到不匹配就**删库重建**，没有迁移路径 | `ADDED_COLUMNS`（增量补列，**不** bump 版本，不删数据） |
+| `SCHEMA_VERSION` | 当前是 **5**（`db/mod.rs:58`）。`ensure_current_schema` 只在库的 `user_version` **更低**时**删库重建**（没有迁移路径）；**更高**时返回校验错误、文件原样保留，提示升级构建或换 `SIMPLE_POST_DATA_DIR` | `ADDED_COLUMNS`（增量补列，**不** bump 版本，不删数据） |
 | WAL | SQLite 的 journal 模式，带 `-wal` / `-shm` 两个旁文件；只在单一文件系统上成立，故 swarm 副本数固定 1 | 「备份可以直接拷 `store.db`」——运行中拷会拿到不完整事务 |
 
 ### 请求装配
@@ -80,7 +80,7 @@
 | 5 | 请求规则写两处（TS `prepareRequest` / Rust `resolve_endpoint`），由 `fixtures/` 钉住；改一处必改另一处 | [04](04-request-pipeline.md)、[08](08-interchange-and-parity.md) |
 | 6 | 路径前缀改写只有一个实现：`core::url::apply_rewrite` | [04](04-request-pipeline.md) |
 | 7 | 当前环境不落库；默认环境 = `created_at` 最早的那个 | [03](03-data-model.md)、[05](05-mcp.md) |
-| 8 | `SCHEMA_VERSION` 不匹配 = 删库重建，没有迁移 | [03](03-data-model.md) |
+| 8 | `SCHEMA_VERSION` 只在库里版本更低时删库重建（无迁移）；更高时报错并保留文件 | [03](03-data-model.md) |
 | 9 | 端点自带的 TLS 设置**整体取代**全局那份，不逐字段合并 | [04](04-request-pipeline.md) |
 | 10 | 脚本链顺序 collection → nested collection → endpoint，前置与测试两阶段同序；单个脚本失败则它对请求与变量的改动全部丢弃 | [06](06-dynamic-and-scripts.md) |
 | 11 | MCP 端点是 daemon 自己的端口，主端口不提供 `/mcp` | [05](05-mcp.md) |

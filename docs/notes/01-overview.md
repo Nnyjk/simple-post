@@ -28,7 +28,7 @@ Simple Post 是 **Windows 优先、本地优先的桌面 API 调试工具**（Po
 | 前端 | React 19 + TypeScript 6 + Vite 8（Rolldown）+ Zustand 5 + Tailwind 4 + CodeMirror 6 | 测试用 Node 内置 runner（`tsx --test`），没有 Vitest/Jest/RTL |
 | 桌面壳 | Tauri 2（`tauri` 2.x、CLI 2.12） | CSP 有意为 `null`；插件只用 `dialog` + `fs`，权限按需列举 |
 | 后端 | Rust 1.87（edition 2021）、`axum` 0.8、`reqwest` 0.12（`rustls-tls`） | `reqwest` 刻意钉 0.12：0.13 移除了 webpki-roots，会失去内置 Mozilla 根证书集 |
-| 存储 | SQLite（`rusqlite` bundled）+ `r2d2` 池，WAL + `foreign_keys=ON` | 单文件 `store.db`，数据目录由 `SIMPLE_POST_DATA_DIR` / `%APPDATA%/simple-post` 决定 |
+| 存储 | SQLite（`rusqlite` bundled）+ `r2d2` 池，WAL + `foreign_keys=ON` | 单文件 `store.db`，数据目录由 `SIMPLE_POST_DATA_DIR` 或 `dirs::data_dir()` 决定（Windows 上即 `%APPDATA%`，`store.db` 直接落这一层；`simple-post/` 子目录只放 `mcp.port`） |
 | 脚本沙箱 | `rquickjs`（QuickJS-NG），关闭 `rust-alloc` | 只有它同时给墙钟打断 + 内存上限 + 栈上限 |
 | 打包 | `tauri build` → NSIS；Docker 多阶段 → `debian-slim` + 一个二进制 | 运行阶段不装任何包，前提是 server crate 保持无 Tauri |
 
@@ -90,11 +90,11 @@ npm run dev:split
 - **三种形态共用一份核心**：桌面、`serve-web`、MCP 都经由 `simple-post-core`；任何一侧单独实现的规则，另一侧会静默缺失（详见 02 的双传输不变量）。
 - **MCP 的端点只有一个**：守护进程自己的监听端口。主端口（4173）不挂 `/mcp`、`/mcp/healthz`、`/mcp/tools`，所以给客户端配 `http://host:4173/mcp` 永远连不上。
 - **版本号四处同步**：`package.json`、根 `Cargo.toml` 的 `[workspace.package]`、`src-tauri/tauri.conf.json`、`README.md` 徽章。`Cargo.lock` / `package-lock.json` 跟随。
-- **数据只有一份**：默认数据目录就是用户在用的那份 `store.db`；`SCHEMA_VERSION` 不匹配时它会被**删除重建**（见 03 篇）。
+- **数据只有一份**：默认数据目录就是用户在用的那份 `store.db`；库的 `user_version` **低于**本构建的 `SCHEMA_VERSION` 时它会被**删除重建**（没有迁移路径），**高于**时启动直接报错、文件原样保留（见 03 篇）。
 
 ## 陷阱
 
-- **在 worktree 或旧分支里起服务会删掉用户的库。** `serve-web` 与 GUI 默认都用 `dirs::data_dir()`；`npm run dev:split` **不会**替你设 `SIMPLE_POST_DATA_DIR`。schema 版本不同的那份二进制会把真实 `store.db` 连 `-wal`/`-shm` 一起删掉。
+- **在比用户那份库更新的分支（含 worktree）里起服务会删掉用户的库。** `serve-web` 与 GUI 默认都用 `dirs::data_dir()`；`npm run dev:split` **不会**替你设 `SIMPLE_POST_DATA_DIR`。删库只发生在「新代码 + 旧库」这一侧：`SCHEMA_VERSION` 高于库里 `user_version` 的二进制会把真实 `store.db` 连 `-wal`/`-shm` 一起删掉；反过来旧二进制打开新库只报校验错误、不动文件。
 - **`npm test` 只收 `src/**/*.test.ts`。** `scripts/` 下的集成测试与 `_verify_store.mjs` 不在 CI 里，删命令/改路由时它们不会红，需要手工扫一遍。
 - **`npm run dev` 的 `/api` 代理只指向 4173。** `serve-web` 没起就是 502，不是 Vite 的 bug。
 - **别用 `vite.config.ts` 里没有的 `/mcp` 代理**：MCP 端口在开发态由 OS 分配，代理无从知道。

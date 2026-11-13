@@ -58,7 +58,7 @@ simple-post-server ──▶ simple-post-interchange ──▶ simple-post-core
   → 报告：created / skipped / base_urls / diagnostics
 ```
 
-- URL 分支必须经 `simple_post_core::http_executor::execute_with_policy`（`check_url` 是唯一的 SSRF 防护），且必须显式给 `max_response_size_kb`——不给是 0，超限会被**截断后照样返回 200**，错误信息退化成「JSON 解析失败」。
+- URL 分支必须经 `simple_post_core::http_executor::execute_with_policy`（`check_url` 是唯一的 SSRF 防护），且必须显式给 `max_response_size_kb`（导入器给的是 `FETCH_MAX_KB = 8 * 1024`）。**0 表示不限制**：响应不截断、`truncated = false`；非零上限下超限响应被截断并标 `truncated = true`，导入器见旗标直接拒绝（「文档超过 8 MB 上限，已被截断，无法解析」），不会退化成 YAML/JSON 解析失败。
 - 预览只把**已落库**的行灌进账本，并且用 `contains` 而不是 `seen`：预览不能替落库先记一遍账。
 - `plan_base_url` 是只读的，预览与落库共用同一个函数（落库在事务内重算）。它收集模块格与端点 override 的地址去重成候选，并取项目默认环境（最早创建的那个）。没有默认环境 → 地址无处可落，报告里 `environment_name` 为 `None`，用户能看见而不是以为已生效。
 - 诊断呈现：`Diagnostic` 按端点归属到 `diagnostic_indexes`，否则同一个 `pointer` 在两个分组下各显示一次；`TransferDialog` 把 `info` 与 `warn/error` 分两栏。
@@ -119,7 +119,7 @@ simple-post-server ──▶ simple-post-interchange ──▶ simple-post-core
 - **导入时**＝源格式里的位置指针（`/item/2`、`/paths/~1users/get`），与 `Diagnostic::pointer` 同一套 JSON Pointer 转义纪律（`~` 先于 `/`）。
 - **导出时**＝`nodes.id`。
 - 前端勾选传回的就是这个 key；`commit` 拿它当选择集与去重诊断的指针。三种容器都带它，故 `TransferNode.key` 与它同源。
-- `#[serde(default)]` 不是风格：它让**手写**或**旧**的 IR JSON（缺 `key`）仍能反序列化，代价是缺失时得到空串——空串 key 会让选择集匹配不上，于是「整份文件看起来勾上了却一个都没写」。所以任何构造 IR 的地方都必须显式给 key。
+- `#[serde(default)]` 不是风格：它让**手写**或**旧**的 IR JSON（缺 `key`）仍能反序列化，代价是缺失时得到空串——空串 key 会与选择集里的 `""` 互相匹配，而 `decide` 的 `writable` 是按 key 记账的 `BTreeSet`：多个空 key 端点里**至多写一个**，其余被静默丢掉（也可能一个都不匹配，取决于选择集里有没有 `""`）。所以任何构造 IR 的地方都必须显式给 key。
 
 ### 4. 去重语义
 
