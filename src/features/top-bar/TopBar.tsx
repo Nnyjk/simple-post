@@ -6,6 +6,7 @@ import { AppIcon } from '@/components/ui/app-icon';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette-lazy';
+import { UpdatePill } from '@/features/update/UpdatePill';
 import { cn, focusRing } from '@/lib/utils';
 import { LAYER } from '@/components/ui/layers';
 import { WindowControls } from '@/components/ui/window-controls';
@@ -322,6 +323,7 @@ export function TopBar() {
       </button>
 
       <div className="ml-auto flex items-center gap-2">
+        <UpdatePill />
         <McpStatusPill />
         <Tooltip content="设置" side="bottom">
           <Button

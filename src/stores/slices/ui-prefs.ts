@@ -35,6 +35,10 @@ interface StorePrefs {
   requestSettings?: Partial<RequestSettings>;
   /** 每个项目「本客户端上次用的环境」：`projectId → environmentId`。 */
   currentEnvByProject?: Record<string, string>;
+  /** 上次成功检查更新的时刻（ISO）。自动检查按它做 24 小时节流。 */
+  lastUpdateCheckAt?: string;
+  /** 用户点过「稍后再说」的版本号。同一个版本不再出现在顶栏。 */
+  dismissedUpdateVersion?: string;
 }
 
 function loadPrefs(): StorePrefs {
@@ -108,6 +112,36 @@ export function saveRememberedEnvironmentId(projectId: string, envId: string): v
     delete map[projectId];
   }
   prefs.currentEnvByProject = map;
+  savePrefs(prefs);
+}
+
+/**
+ * 读出更新相关的两条偏好。空串表示「没有记录」，调用方据此判定「该检查了」/「没有忽略任何版本」。
+ *
+ * 这两条与主题、上次项目、当前环境同住一份 `simple-post:prefs`，故写入必须**合并**：
+ * 整份替换会把另外三样一起抹掉。
+ */
+export function readUpdatePrefs(): { lastCheckedAt: string; dismissedVersion: string } {
+  const prefs = loadPrefs();
+  return {
+    lastCheckedAt: prefs.lastUpdateCheckAt ?? '',
+    dismissedVersion: prefs.dismissedUpdateVersion ?? '',
+  };
+}
+
+/** 记下这次成功检查的时刻，供 `dueForCheck` 判定下一次自动检查。 */
+export function saveLastUpdateCheckAt(iso: string): void {
+  savePrefs({ ...loadPrefs(), lastUpdateCheckAt: iso });
+}
+
+/** 记住用户忽略掉的版本。空串是「没有忽略任何版本」，故它删掉这个键。 */
+export function saveDismissedUpdateVersion(version: string): void {
+  const prefs = loadPrefs();
+  if (version) {
+    prefs.dismissedUpdateVersion = version;
+  } else {
+    delete prefs.dismissedUpdateVersion;
+  }
   savePrefs(prefs);
 }
 

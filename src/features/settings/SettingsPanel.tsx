@@ -11,19 +11,26 @@
  */
 
 import { useRef } from 'react';
-import { ChevronRight, Cloud, Cpu, Palette } from 'lucide-react';
+import { ChevronRight, Cloud, Cpu, Info, Palette } from 'lucide-react';
 import { Send } from 'lucide-react';
 import { useAppStore, type SettingsCategoryId } from '@/stores/app-store';
 import { ProjectEnvSection } from './sections/ProjectEnvSection';
 import { ConnectionSection } from './sections/ConnectionSection';
 import { AppearanceSection } from './sections/AppearanceSection';
 import { RequestSection } from './sections/RequestSection';
+import { AboutUpdateCard } from '@/features/update/AboutUpdateCard';
 import { cn } from '@/lib/utils';
 import type { HueConcept } from '@/lib/hue';
 import { IconTile } from '@/components/ui/icon-tile';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
-const CATEGORY_IDS: readonly SettingsCategoryId[] = ['env', 'connection', 'appearance', 'request'];
+const CATEGORY_IDS: readonly SettingsCategoryId[] = [
+  'env',
+  'connection',
+  'appearance',
+  'request',
+  'about',
+];
 
 const RAIL_ITEMS: {
   id: SettingsCategoryId;
@@ -62,6 +69,12 @@ const RAIL_ITEMS: {
     hint: '超时 / 重定向 / 历史条数',
     concept: 'request',
   },
+  {
+    id: 'about',
+    label: '关于与更新',
+    icon: <Info className="h-4 w-4" />,
+    hint: '版本 / 检查更新',
+  },
 ];
 
 const SECTION_META: Record<
@@ -87,6 +100,11 @@ const SECTION_META: Record<
     title: '请求',
     description: '出站请求的行为，以及发送历史的保留条数',
     icon: <Send className="h-3.5 w-3.5" />,
+  },
+  about: {
+    title: '关于与更新',
+    description: '版本号、更新检查与更新方式',
+    icon: <Info className="h-3.5 w-3.5" />,
   },
 };
 
@@ -209,6 +227,13 @@ export function SettingsPanel() {
             return (
               <div key={activeSection} data-settings-section>
                 <AppearanceSection />
+              </div>
+            );
+          }
+          if (id === 'about') {
+            return (
+              <div key={activeSection} data-settings-section>
+                <AboutUpdateCard />
               </div>
             );
           }

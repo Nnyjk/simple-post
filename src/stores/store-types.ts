@@ -114,7 +114,7 @@ export interface DraftEndpoint {
 export { UNTITLED_ENDPOINT_NAME } from './slices/ui-new-item';
 
 /** 设置标签内部的分节。驱动左侧栏。 */
-export type SettingsCategoryId = 'env' | 'connection' | 'appearance' | 'request';
+export type SettingsCategoryId = 'env' | 'connection' | 'appearance' | 'request' | 'about';
 
 /**
  * 设置标签所用的哨兵 id。设置是单例面板，用固定 id 才能让开关与激活逻辑和实体标签完全一致。
