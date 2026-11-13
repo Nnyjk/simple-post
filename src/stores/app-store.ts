@@ -27,6 +27,7 @@ import { createDirtyTabsSlice } from './dirty-tabs-slice';
 import { createDynamicSlice } from './dynamic-slice';
 import { createUiSlice } from './ui-slice';
 import { createMcpSlice } from './mcp-slice';
+import { createUpdateSlice } from './update-slice';
 import type { DraftEndpoint } from './store-types';
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
 import { saveLastProjectId, saveRememberedEnvironmentId } from './slices/ui-prefs';
@@ -39,14 +40,16 @@ import type { DirtyTabsSlice } from './dirty-tabs-slice';
 import type { DynamicSlice } from './dynamic-slice';
 import type { UiSlice } from './ui-slice';
 import type { McpSlice } from './mcp-slice';
+import type { UpdateSlice } from './update-slice';
 
-/** 组合后的 AppState —— 六个切片的交集。 */
+/** 组合后的 AppState —— 七个切片的交集。 */
 export type AppState = BootstrapSlice &
   CrudSlice &
   DirtyTabsSlice &
   DynamicSlice &
   UiSlice &
-  McpSlice;
+  McpSlice &
+  UpdateSlice;
 
 /**
  * 组合后的 Zustand store。各切片工厂拿到同一个 `(set, get, store)` 三元组，读写的都是同一个
@@ -59,7 +62,20 @@ export const useAppStore = create<AppState>()((set, get, store) => ({
   ...createDynamicSlice(set, get, store),
   ...createUiSlice(set, get, store),
   ...createMcpSlice(set, get, store),
+  ...createUpdateSlice(set, get, store),
 }));
+
+/**
+ * 启动后的自动更新检查。`loaded` 翻真意味着第一层 `bootstrap()` 落地，此时再问更新：
+ * 它排在启动画面之后，慢也不会拖住首帧。
+ *
+ * 触发点放在订阅而不是 `bootstrap()` 里：`bootstrap()` 另有重试入口，而 `loaded` 只有一处写，
+ * 订阅因此对两条路径都恰好触发一次。检查本身静默——24 小时节流与「失败不弹窗」都在
+ * `autoCheckUpdate` 里。
+ */
+useAppStore.subscribe((state, prev) => {
+  if (state.loaded && !prev.loaded) void state.autoCheckUpdate();
+});
 
 /**
  * 「我正在哪个项目里干活」是渲染层的会话事实：刷新后据此回到那个项目。
