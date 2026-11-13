@@ -106,7 +106,7 @@ npm run check
 
 ## 发版
 
-`release.yml` 建的是 **draft** release，`publish-image.yml` 在同一 tag 上推多架构镜像。点 publish 之前按这个顺序走：
+`release.yml` 建的是 **draft** release，`publish-image.yml` 在同一 tag 上推 `linux/amd64` 镜像。点 publish 之前按这个顺序走：
 
 1. **确认 tag 已在远端**，且 `release.yml` 与 `publish-image.yml` 两个 workflow 都跑完。
 2. **验证 draft 的产物**：
@@ -117,7 +117,7 @@ npm run check
    docker pull ghcr.io/nnyjk/simple-post:<tag>
    docker buildx imagetools inspect ghcr.io/nnyjk/simple-post:<tag>
    ```
-   确认 `linux/amd64` 与 `linux/arm64` 都在清单里。
+   确认清单里只有 `linux/amd64`。
 4. **验证 compose 部署**（对着刚拉的镜像，不带 `build:`）：
    ```bash
    SP_WEB_PASSWORD=<口令> docker compose up -d

@@ -45,7 +45,7 @@ Simple Post 是 **Windows 优先、本地优先的桌面 API 调试工具**（Po
 | `fixtures/` | 10 份跨语言样本（见 08 篇），每份同时被 Rust 与 TS 的实现读取 |
 | `scripts/` | 开发/测试/构建脚本：`dev-split.mjs`、`run-tests.mjs`、各集成测试、`e2e/preflight.mjs` |
 | `docs/` | 仅 `screenshots/`（产品截图）+ 本目录 `notes/` |
-| `.github/workflows/` | `ci.yml`、`release.yml`（桌面安装包）、`publish-image.yml`（GHCR 多架构） |
+| `.github/workflows/` | `ci.yml`、`release.yml`（桌面安装包）、`publish-image.yml`（GHCR，`linux/amd64`） |
 | `docker/` | 容器部署：`Dockerfile`（三阶段）、`docker-compose.yml`、`docker-swarm.yml`、`docker-portainer.yml`，以及旁置的 `Dockerfile.dockerignore` |
 | `.worktrees/` | agent 运行时创建的**完整第二份 checkout**，gitignored；不要在里面当前仓库扫 |
 | `.thinkrail/` | 本地 agent 工具状态（未进 `.gitignore`，只能靠自觉不扫） |

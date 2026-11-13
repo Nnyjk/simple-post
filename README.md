@@ -144,7 +144,7 @@ MCP 的端点是守护进程自己的监听端口，主端口上不提供 MCP。
 
 镜像里只有 `simple-post-server`、单页应用的静态产物与一个数据目录。SQLite 使用 `rusqlite` 的 `bundled` 静态编译，TLS 使用 rustls 内置的根证书集，因此镜像不安装 GTK、WebKit、X11 与 OpenSSL。单页应用在 `/app/spa`，数据在 `/data`。
 
-镜像地址是 `ghcr.io/nnyjk/simple-post`，同时提供 linux/amd64 与 linux/arm64，每个 `v*` 标签发布一次。常用标签：`0.1.34`（具体版本）、`0.1`（次版本）、`latest`（最新正式版）。
+镜像地址是 `ghcr.io/nnyjk/simple-post`，只提供 linux/amd64，每个 `v*` 标签发布一次。常用标签：`0.1.34`（具体版本）、`0.1`（次版本）、`latest`（最新正式版）。
 
 ### Docker Compose 部署
 
