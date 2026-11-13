@@ -102,15 +102,16 @@ describe('update slice — applyUpdate', () => {
   });
 });
 
-describe('update slice — 桌面分支不碰 web 专用命令', () => {
-  it('桌面形态下 checkForUpdate / loadDeployment 一次也不调用 update_* 命令', async () => {
+describe('update slice — 桌面分支与 web 专用命令的边界', () => {
+  it('桌面形态且插件报无新版时，checkForUpdate / loadDeployment 一次也不调用 update_* 命令', async () => {
     // 本用例的前提：测试环境装了 `__TAURI_INTERNALS__`，故宿主判定为「桌面」。
     assert.equal(isUpdaterAvailable(), true);
 
     const calls: string[] = [];
     installIpcMock((cmd) => {
       calls.push(cmd);
-      // 插件没有可用更新、也读不到版本号 —— 恰好是最容易漏回 web 命令的那条路径。
+      // 插件没有可用更新、也读不到版本号 —— 这是「为了 notes 再打一次网络」最容易被
+      // 顺手写错的一条路径：没有对话框要渲染，那次调用只有配额成本。
       return undefined;
     });
 
@@ -124,6 +125,66 @@ describe('update slice — 桌面分支不碰 web 专用命令', () => {
     );
     assert.equal(slice.updateInfo?.available, false);
     assert.equal(slice.updateDeployment, null);
+  });
+});
+
+describe('update slice — 桌面端用线上发布说明覆盖 latest.json 的装机说明', () => {
+  // 插件报的那份：`tauri-action` 在构建期从 `releaseBody` 模板写进 `latest.json`。
+  const pluginUpdate = {
+    version: '0.1.35',
+    body: '请下载对应平台的安装包并运行',
+    date: '2026-11-13T02:00:00Z',
+    close: async () => undefined,
+  };
+
+  const mockDesktop = (onCheck: () => unknown) =>
+    installIpcMock((cmd) => {
+      if (cmd.includes('updater')) return pluginUpdate;
+      if (cmd.includes('app|version')) return '0.1.34';
+      if (cmd === 'update_check') return onCheck();
+      return undefined;
+    });
+
+  it('update_check 拿到 notes 时，notes 与 url 都来自它', async () => {
+    mockDesktop(() => ({
+      current: '0.1.34',
+      latest: '0.1.35',
+      available: true,
+      checkedAt: '2026-11-13T02:05:00Z',
+      cached: false,
+      notes: '## 这一版\n- 更新对话框认得线上的发布说明',
+      url: 'https://github.com/Nnyjk/simple-post/releases/tag/v0.1.35',
+      error: null,
+    }));
+
+    const slice = makeHarness();
+    await slice.checkForUpdate(false);
+
+    assert.equal(slice.updateInfo?.notes, '## 这一版\n- 更新对话框认得线上的发布说明');
+    assert.equal(
+      slice.updateInfo?.url,
+      'https://github.com/Nnyjk/simple-post/releases/tag/v0.1.35',
+    );
+    // 版本、发布时间仍以插件为准：按钮装的就是插件报的那个版本。
+    assert.equal(slice.updateInfo?.latest, '0.1.35');
+    assert.equal(slice.updateReleaseDate, '2026-11-13T02:00:00Z');
+    assert.equal(slice.updateError, null);
+  });
+
+  it('update_check 抛错时静默回落到插件的 notes，url 为空且不置错误', async () => {
+    mockDesktop(() => {
+      throw new Error('command update_check not found');
+    });
+
+    const slice = makeHarness();
+    await slice.checkForUpdate(false);
+
+    assert.equal(slice.updateInfo?.available, true);
+    assert.equal(slice.updateInfo?.notes, pluginUpdate.body);
+    assert.equal(slice.updateInfo?.url, null);
+    // 补充信息失败不是用户要处理的事：对话框照常打开，不弹错误条。
+    assert.equal(slice.updateError, null);
+    assert.equal(slice.updateBusy, false);
   });
 });
 

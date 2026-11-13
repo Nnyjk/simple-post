@@ -45,10 +45,31 @@ async function desktopVersion(): Promise<string> {
 }
 
 /**
+ * 桌面端补一次「这一版改了什么」。
+ *
+ * `latest.json` 的 `notes` 由发布流水线在构建期写入，内容固定是装机说明；人工补在 release
+ * 上的正文只有 `update_check`（实时读 GitHub）拿得到，故插件报有新版的这一次再问一遍。
+ *
+ * 拉不到就返回 `null`：桌面壳里这条命令可能还没实现，网络也可能断。这里捕获一切异常、
+ * 不重试、不写 `updateError` —— 对话框退回插件那份 notes 就够用，不该因为补充信息失败而报错。
+ */
+async function liveReleaseNotes(): Promise<{ notes: string | null; url: string | null } | null> {
+  try {
+    const info = await invokeCmd<UpdateCheck>(COMMANDS.updateCheck, { force: false });
+    return { notes: info.notes, url: info.url };
+  } catch (e) {
+    console.debug('[store] live release notes unavailable', e);
+    return null;
+  }
+}
+
+/**
  * 桌面端的一次检查。插件回答「有没有可安装的新版」；没有新版时它是 `null`，而界面还要写
  * 「已是最新」并给出当前版本，故版本号单独取一次。
  *
- * `url` 留空：桌面上没有 GitHub 接口给的那份 release 页地址，按 tag 拼出仓库路径就是猜。
+ * 有新版的这一次再取一次线上发布说明：`latest.json` 的 `notes` 是构建期的装机说明，
+ * 用户想看的「这一版改了什么」在 GitHub 的 release 正文里。取不到就用插件那份，
+ * 并且**不在无新版时打这次网络** —— 没有对话框要渲染，只有配额在消耗。
  */
 async function desktopCheck(): Promise<CheckOutcome> {
   const [desktop, current] = await Promise.all([checkDesktopUpdate(), desktopVersion()]);
@@ -68,6 +89,7 @@ async function desktopCheck(): Promise<CheckOutcome> {
       releaseDate: null,
     };
   }
+  const live = await liveReleaseNotes();
   return {
     info: {
       current: desktop.currentVersion || current,
@@ -75,8 +97,8 @@ async function desktopCheck(): Promise<CheckOutcome> {
       available: true,
       checkedAt,
       cached: false,
-      notes: desktop.notes,
-      url: null,
+      notes: live?.notes || desktop.notes,
+      url: live?.url ?? null,
       error: null,
     },
     releaseDate: desktop.date,
