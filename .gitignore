@@ -85,3 +85,9 @@ src-tauri/gen/
 # matching lint-side ignores — without all three, the tooling crawls into
 # the worktree and reports *its* files as if they belonged to this tree.
 /.worktrees/
+
+# 本机 agent 的流程与技能文档（`skills/`）：只服务这台机器上的会话，不随仓库
+# 发布，也不进线上仓库——内容里带本机的推送/评审配方与临时取舍，公开仓库里
+# 既无读者也会过期。整目录忽略，条目按主题分目录；`.prettierignore` 与
+# `eslint.config.js` 里有配套的 lint 侧忽略，三处要一起改。
+/skills/
