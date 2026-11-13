@@ -32,7 +32,7 @@ pub use simple_post_mcp::{daemon_http, mcp};
 // `project_api` 也是 —— 项目、服务与资源树节点的创建编排。
 pub use simple_post_server::{
     auth, cli, daemon_supervisor, dto, dynamic_api, http_config, interchange_api, port_registry,
-    project_api, web_api,
+    project_api, update_api, web_api,
 };
 
 // CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
@@ -226,6 +226,9 @@ pub fn run() {
             crate::commands::interchange_import_commit,
             crate::commands::interchange_export_preview,
             crate::commands::interchange_export_document,
+            // 线上发布说明。桌面壳只有这一条 update 命令：安装由 updater 插件负责，
+            // `update_deployment` / `update_apply` 的语义（运维声明的本机更新命令）桌面没有。
+            crate::commands::update_check,
         ])
         .setup(|app| {
             // 先读持久化的 mcp.auto_start（默认 false，需用户在设置里开启）再拉 supervisor。

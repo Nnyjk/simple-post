@@ -136,9 +136,12 @@ export const COMMANDS = {
   // `force` 供 UI 的「获取 Token」按钮绕过后端缓存；发请求时不传，走按需刷新。
   oauth2Token: 'oauth2_token',
 
-  // ----- updates（只有 web 形态）-----
-  // 这三条**没有** Tauri 命令：桌面端用 tauri updater 插件自己查签名清单、自己装。
-  // 故桌面形态下 `invokeCmd` 会因为没有 handler 报错——界面侧在桌面分支不调它们。
+  // ----- updates -----
+  // `updateCheck` 两条传输都有：桌面的 `update_check` 命令调 server crate 的同一个函数，
+  // 拿到的是线上实时 release body；`serve-web` 走 `/api/update/check`。
+  // `updateDeployment` / `updateApply` **只有** web 形态：它们回答「这台机器怎么更新」，
+  // 桌面由 updater 插件装安装包，故桌面形态下 `invokeCmd` 会因为没 handler 报错——
+  // 界面侧在桌面分支不调这两条。
   updateCheck: 'update_check',
   updateDeployment: 'update_deployment',
   updateApply: 'update_apply',

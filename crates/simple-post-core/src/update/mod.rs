@@ -1,8 +1,9 @@
 //! 更新检查：版本比较、GitHub release 抓取与进程内缓存。
 //!
-//! 桌面端**不走这里**：它用 tauri updater 插件（`src-tauri`）自己查签名清单。本模块
-//! 只服务无头 `serve-web` 的三条 `/api/update/*` 路由，缓存也因而是进程级的——
-//! 一个容器进程一份。
+//! 自动安装**不走这里**：桌面用 tauri updater 插件（`src-tauri`）按签名清单装安装包。
+//! 但「这一版改了什么」只有 [`check`] 拿得到（线上 release body），故桌面壳的
+//! `update_check` 命令也调它；`serve-web` 的三条 `/api/update/*` 路由同样调这里。
+//! 缓存是进程级的——桌面进程与容器进程各一份。
 
 pub mod check;
 pub mod version;
