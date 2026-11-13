@@ -20,4 +20,7 @@ pub mod script;
 pub mod spec;
 pub mod template;
 pub mod tls;
+/// 「有没有新版本」的判定与更新执行。只有无头 `serve-web` 用它——桌面端走
+/// tauri updater 插件。
+pub mod update;
 pub mod url;

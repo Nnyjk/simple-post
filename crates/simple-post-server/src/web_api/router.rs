@@ -266,6 +266,14 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/preferences",
             get(preferences_get).put(preferences_put),
         )
+        // ---- updates（只有无头 serve-web 用；桌面端走 tauri updater 插件）----
+        //
+        // `check` 的失败也是 200：降级信息在响应体的 `error` 字段里，因为渲染层的
+        // `invokeCmd` 把非 2xx 变成异常。`apply` 的 403 / 409 是「没执行」本身。
+        // 三条都不在 `auth::is_public_path` 名单里。
+        .route("/api/update/check", get(update_check))
+        .route("/api/update/deployment", get(update_deployment))
+        .route("/api/update/apply", post(update_apply))
         .with_state(state_arc.clone());
 
     // 静态 SPA。`ServeDir` 给 `/assets/*` 正确的 Range / ETag / Last-Modified，
