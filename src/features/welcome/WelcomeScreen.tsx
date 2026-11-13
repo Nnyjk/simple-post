@@ -11,6 +11,7 @@ import { useAppStore, type Theme } from '@/stores/app-store';
 import { cn, focusRing } from '@/lib/utils';
 import { AppIcon } from '@/components/ui/app-icon';
 import { WindowControls } from '@/components/ui/window-controls';
+import { UpdatePill } from '@/features/update/UpdatePill';
 
 const THEME_ICON: Record<Theme, string> = {
   dark: '🌙',
@@ -99,7 +100,10 @@ export function WelcomeScreen() {
           <AppIcon className="h-6 w-6" />
           <span className="text-sm font-semibold tracking-tight">Simple Post</span>
         </div>
-        <div className="ml-auto flex items-center">
+        <div className="ml-auto flex items-center gap-2">
+          {/* 欢迎页没有工作区的顶栏，更新入口放在窗口操作按钮左侧的同一行：
+              同一枚药丸，同样无更新时返回 `null`，不占位。 */}
+          <UpdatePill />
           <WindowControls />
         </div>
       </header>

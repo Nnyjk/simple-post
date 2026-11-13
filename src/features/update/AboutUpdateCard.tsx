@@ -63,7 +63,14 @@ export function AboutUpdateCard() {
         flush
         label="当前版本"
         description="正在运行的 Simple Post 版本"
-        control={<span className="font-mono text-xs text-foreground">{info?.current || '—'}</span>}
+        control={
+          info?.current ? (
+            <span className="font-mono text-xs text-foreground">{info.current}</span>
+          ) : (
+            // 还没查过、或 web 端这次没拿到 `current`：写清楚下一步做什么，不留空白。
+            <span className="text-[11px] text-muted-foreground">未知，点检查更新</span>
+          )
+        }
       />
       <SettingRow
         label="上次检查"
