@@ -180,6 +180,7 @@ curl http://localhost:4173/api/healthz
 | `SP_WEB_BIND` | 无 | `4173` | 宿主机映射的端口，容器内固定为 4173。 |
 | `SP_IMAGE` | 无 | `simple-post:local` | 镜像名与标签。 |
 | `SP_RUST_LOG` | `RUST_LOG` | `info` | tracing 的日志过滤级别。 |
+| `SP_UPDATE_COMMAND` | `SIMPLE_POST_UPDATE_COMMAND` | 空 | 更新对话框「立即执行更新」执行的那条命令。留空即不可就地更新；要与 `SP_WEB_PASSWORD`（口令模式）同时成立才生效。命令由容器内的 bash 执行，只能用 bash 与 coreutils 的能力。 |
 | `SP_PUBLIC_BASE_PATH` | `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反向代理前缀，必须以 `/` 开头。 |
 | 无 | `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置为 `1` 后，`/api/http/send` 拒绝回环、私网与链路本地地址（含云厂商 metadata）。这一项没有对应的 `SP_*` 变量，要在 compose 的 `environment` 里直接写。 |
 
@@ -297,6 +298,33 @@ sp.example.com {
 - **不要把口令写成空串。** 服务端判断的是这个环境变量有没有被设置，不是值是不是空：未设置时不鉴权，写成 `""` 则变成鉴权开启且要求一个空的口令，结果是所有 `/api/*` 返回 401。
 - 健康检查 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证；`/assets/*` 与单页应用外壳同样免认证——浏览器无法给 `<script type="module">` 附加 `Authorization` 头，对它们鉴权会让带口令的部署无法打开页面。
 - **只有一条出站通道**：`POST /api/http/send`。请求体里的 URL 完全由调用方给出，服务端就是这条通道的代理。出站策略由 `core::http_executor::OutboundPolicy` 把关，它只放行 `http` 与 `https` 两种 scheme。默认不拦截私网地址，桌面端用户经常要访问 `localhost:3000`；公网或共享部署请设置 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段（`100.64.0.0/10`）。服务端不注册节点级的 `POST /api/nodes/{id}/send`，注册了它就多出一条不受管辖的出站通道。
+
+## 版本更新
+
+三种形态都从 GitHub 上那条 release 知道「有没有新版本」：桌面端读 `releases/latest/download/latest.json`，web 端读 `releases/latest`。区别在「谁去装」。
+
+### 桌面端：应用内自动更新
+
+应用启动、首屏数据加载完成后自动查一次（最近 24 小时内查过就跳过），有新版本时顶栏出现一枚 `v<版本>` 入口。点开是更新对话框：当前版本 → 新版本、这一版的发布说明，主按钮「下载并安装」。下载完成后安装程序接管并重启应用——Windows 上是 NSIS 安装包，`installMode: passive` 让安装过程不需要逐页点下一步。
+
+「有没有新版」由 Tauri updater 插件判：它读 `https://github.com/Nnyjk/simple-post/releases/latest/download/latest.json`，比对版本号并校验安装包签名。「这一版改了什么」来自 GitHub 上那条 release 的正文（桌面壳的 `update_check` 命令走 `releases/latest` 现取）；`latest.json` 里那份 `notes` 是发布流水线在构建期写进去的安装说明，只在线上正文取不到时显示。点「稍后再说」会按版本记住，同一个版本不再弹。
+
+### Web 端：提示 + 按部署形态更新
+
+浏览器形态没有 updater 插件，能做的只有提示与给出更新动作：
+
+| 部署形态 | 更新动作 |
+| --- | --- |
+| 容器 | 把 `.env` 里的 `SP_IMAGE` 指向新版本，在**宿主**执行 `docker compose --project-directory . -f docker/docker-compose.yml pull simple-post`，再执行 `… up -d simple-post`。数据在命名卷里，换镜像不动数据。 |
+| 源码 / 二进制 | `git pull` 后重新 `cargo build --release -p simple-post-server`（或换掉二进制），再重启 `serve-web` 进程。 |
+
+更新对话框里那行命令由 `GET /api/update/deployment` 按部署形态给出，是给宿主执行的：镜像的运行阶段只有 `simple-post-server` 与那个用 bash `/dev/tcp` 写的健康探针，没有 docker CLI，容器自己拉不了镜像。要让对话框出现「立即执行更新」，运维必须声明 `SIMPLE_POST_UPDATE_COMMAND` **且** 设置 `SP_WEB_PASSWORD`（口令模式）；缺任何一条，`applyEnabled` 就是 `false`，`POST /api/update/apply` 回 403。命令由容器内的 bash 执行，只能用 bash 与 coreutils 的能力，例如给旁车或宿主的 HTTP 接口发一个最小请求，由那一侧执行 `docker compose pull`。
+
+### 离线与限流
+
+- 抓不到 `releases/latest` 时顶栏不出现更新入口，也不弹对话框；应用照常使用。
+- 设置 →「关于与更新」写明原因：连不上发布服务器、GitHub 接口限流、仓库里还没有发布版本、发布接口返回了读不懂的内容。
+- 服务端把可用结果在进程内缓存 6 小时，失败的响应不缓存；「检查更新」按钮强制刷新，但同一进程 60 秒内最多强制一次。离线部署照旧手工 `docker pull` 加 `up -d`，这条路径不依赖检查。
 
 ## 技术结构
 
