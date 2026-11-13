@@ -124,7 +124,10 @@ npm run check
    curl -fsS http://localhost:4173/healthz
    ```
    看到 `"status":"ok"` 即可——注意断言的是**响应体**，状态码单独看会骗人（未注册路径会落到 SPA fallback 返回 `200 text/html`）。
-5. **手动发布** draft release，并写上 release notes。
+5. **手动发布** draft release。发布前确认三件事：
+   - **签名 secret 已配**：首次发布前在仓库 Secrets 里放 `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（后者填空串）。缺前者时 `release.yml` 把 `bundle.createUpdaterArtifacts` 改成 `false`、删掉 `plugins.updater` 并打一条 warning，本次只产出安装包，应用内自动更新保持不可用——这是刻意降级，不是构建失败。
+   - **正文顺序是对的**：`release.yml` 的 `releaseBody` 只写了「### 这一版的改动」一节占位与安装说明，补正文时**先写这一版的改动，再留安装说明**。应用内「更新」对话框显示的就是这段正文（桌面端经 `update_check` 读线上 release；`latest.json` 的 `notes` 只是回落）。
+   - **发布之后客户端才拿得到清单**：`gh release edit <tag> --notes-file <file> --draft=false` 之后，`https://github.com/Nnyjk/simple-post/releases/latest/download/latest.json` 才会被 updater 插件与 `GET /api/update/check` 读到；draft 阶段客户端读不到，也不会提示新版本。
 6. 打 `v*` 前确认 `main` 上的 CI 是绿的，且四处版本号已同步更新：`package.json` 的 `version`、根 `Cargo.toml` 的 `[workspace.package]` 块、`src-tauri/tauri.conf.json` 的 `version`、README 顶部的版本徽章。根 `Cargo.toml` 里那一份由各个 crate 的 `version.workspace = true` 继承，改一处即可带起全部 crate；`package.json` 与 `tauri.conf.json` 各有自己的一份。
 
 ## 许可

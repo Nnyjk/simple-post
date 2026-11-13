@@ -121,6 +121,8 @@ CI 额外跑三样本地不在 `check` 里的东西：`vite build`、`cargo test
 4. 两个工作流跑完后，draft release 的「这一版改动」是手写的；补完后 `gh release edit <tag> --notes-file <file> --draft=false`。
 5. 镜像路径一律小写（`ghcr.io/nnyjk/simple-post`），发布说明里的 `docker pull` 必须能照抄执行。
 
+版本提示与自动更新的链路（谁读 `latest.json`、谁读 release 正文、「立即执行更新」的两道门）见 [12-update-channel.md](12-update-channel.md)。
+
 ### 部署
 
 - `docker/Dockerfile` 三阶段：`node:22-bookworm-slim` 构建 SPA → `rust:bookworm` 编 `-p simple-post-server` → `debian:bookworm-slim` 运行。运行阶段**不装任何包**，探针用 bash `/dev/tcp` 手写；它以 uid 10001 运行，`SIMPLE_POST_DATA_DIR=/data`，入口 `serve-web --bind 0.0.0.0 --port 4173`。前提是 server crate 不链接 Tauri/GTK/WebKit；CI 会断言镜像里没有 `libgtk*`/`libwebkit*`。

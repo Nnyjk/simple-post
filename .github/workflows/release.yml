@@ -116,6 +116,9 @@ jobs:
           tagName: ${{ inputs.tag || format('refs/tags/{0}', github.ref_name) }}
           releaseName: 'Simple Post v__VERSION__'
           releaseBody: |
+            ### 这一版的改动
+            <!-- 发布前替换本节：应用内「更新」对话框显示的就是这段正文 -->
+
             ## Simple Post v__VERSION__
 
             Desktop API client with built-in MCP for AI collaboration.
