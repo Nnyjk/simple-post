@@ -159,11 +159,12 @@ jobs:
 
   docker:
     # Container image + a smoke test against a *running* container.
-    # Gated on change scope: measured on main at 18m14s, this job was
-    # 98.7% of a full CI run's wall clock, and a README-only PR does not
-    # change a single byte of it. Every assertion below is untouched —
-    # each is the regression net for a defect that shipped (#17 / #19 /
-    # #20), and none of them is traded for speed.
+    # Gated on change scope: a README-only PR does not change a single
+    # byte of this job's work. On a full-scope run this job measures
+    # 185s and `rust` measures 200s; the two run in parallel, so this
+    # job does not set the run's wall clock. Every assertion below is
+    # untouched — each is the regression net for a defect that shipped
+    # (#17 / #19 / #20), and none of them is traded for speed.
     name: Docker — image build + container smoke test
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docker != 'false' }}
@@ -345,38 +346,33 @@ jobs:
           docker volume rm -f sp-smoke-data >/dev/null 2>&1 || true
 
   docker-arm64:
-    # Compile check only, split out of `docker`. It was `continue-on-error`
-    # inside that job already, so it never gated anything — but it consumed
-    # most of the wall clock, because `[profile.release]` is `lto = true`
-    # with `codegen-units = 1`, which is exactly the configuration QEMU
-    # emulation handles worst. A check that does not gate should not run on
-    # every PR; main pushes and the weekly schedule are where it earns its
-    # keep.
+    # Compile check: this job builds the image for linux/arm64 on a native
+    # arm64 runner, so `cargo build --release` executes on arm64 hardware
+    # instead of under QEMU emulation.
     #
-    # `continue-on-error` stays at job level so this stays non-gating even
-    # now that it is a job of its own — a target-specific break must never
-    # block the amd64 smoke test.
+    # The check is advisory. Job-level `continue-on-error` makes GitHub
+    # report a failure here without failing the run, so a target-specific
+    # compile break never blocks the amd64 smoke test nor a merge. An
+    # advisory check stays off the per-PR path: it runs on main pushes,
+    # the weekly schedule and manual dispatch.
     name: Docker — linux/arm64 compile check (advisory)
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     continue-on-error: true
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-
-      - name: 'Set up QEMU (linux/arm64 cross-build)'
-        uses: docker/setup-qemu-action@v4
 
       - name: 'Set up Buildx'
         uses: docker/setup-buildx-action@v4
 
-      - name: 'Build image (linux/arm64 under QEMU — compile check only)'
+      - name: 'Build image (linux/arm64 — compile check only)'
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/arm64
           tags: simple-post:arm64-ci
-          # `load: true` is impossible here (the runner daemon is amd64), so
-          # emit an OCI tarball instead and throw it away.
+          # This job asserts nothing against the image, so the export is
+          # written and discarded.
           outputs: type=oci,dest=/tmp/simple-post-arm64.oci.tar
