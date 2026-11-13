@@ -149,3 +149,47 @@ async fn the_admin_surface_for_mcp_still_answers() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// 三条更新路由挂在主端口的 JSON 面上，而不只是回落到 SPA 壳。
+///
+/// 壳与 `GET /api/update/deployment` 都是 `200`，故断言响应体：
+/// `apply` 在这一份 state（`password: None`）下必须回 403 + `{code}` ——
+/// 未开口令模式的部署不给更新入口。这条同时证明那三条路由真的注册了。
+#[tokio::test]
+async fn the_update_surface_is_registered() {
+    let (addr, dir) = serve_main_router().await;
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get(format!("http://{addr}/api/update/deployment"))
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = response.json().await.expect("json body");
+    assert!(
+        body.get("shape").and_then(|v| v.as_str()).is_some(),
+        "部署形态要有 shape 字段：{body}"
+    );
+    assert!(
+        body.get("applyEnabled").and_then(|v| v.as_bool()).is_some(),
+        "部署形态要有 applyEnabled 字段：{body}"
+    );
+
+    let response = client
+        .post(format!("http://{addr}/api/update/apply"))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+    let body: serde_json::Value = response.json().await.expect("json body");
+    assert_eq!(
+        body.get("code").and_then(|v| v.as_str()),
+        Some("update_disabled"),
+        "未开口令模式的部署必须拒绝执行更新：{body}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

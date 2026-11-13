@@ -62,6 +62,9 @@ pub struct RouteSpec {
 //   PUT  /api/mcp/http-config
 //   GET  /api/preferences              - 偏好表的原始读写
 //   PUT  /api/preferences
+//   GET  /api/update/check             - 查最新 release（无新版本与失败都回 200）
+//   GET  /api/update/deployment        - 部署形态与「能不能执行更新」
+//   POST /api/update/apply             - 执行运维声明的更新命令（口令模式下才开放）
 //   GET  /healthz                      - 无前缀的健康探针别名（与 `/api/healthz` 共用同一个处理函数）
 //
 // MCP 的 JSON-RPC 端点、它的健康探针与工具清单都在**守护进程自己的监听端口**上，
