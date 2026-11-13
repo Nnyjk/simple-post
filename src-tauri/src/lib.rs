@@ -151,6 +151,10 @@ pub fn run() {
         // `src/lib/transfer-file-save.ts`。
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // 自动更新。检查与下载由前端 `src/lib/updater.ts` 动态 import 后调用；
+        // 安装完成后用 `process` 插件重启，故两者一起注册。
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(pool)
         .manage(daemon_handle)
         .invoke_handler(tauri::generate_handler![

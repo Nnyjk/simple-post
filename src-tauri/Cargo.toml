@@ -44,6 +44,10 @@ tauri = { version = "2", features = [] }
 # `fs:default` 会把读写整个用户目录一并打开，本项目只需要写一个文本文件。
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+# 自动更新：检查 `latest.json`、验签、下载安装由前端 `src/lib/updater.ts` 驱动；
+# 安装后重启走 `process` 插件。两者都只在桌面壳注册。
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 # Shared workspace deps (resolved to the versions pinned at the root)
 serde_json = { workspace = true }

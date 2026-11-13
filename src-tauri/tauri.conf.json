@@ -33,6 +33,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -43,5 +44,12 @@
     "category": "DeveloperTool",
     "shortDescription": "Desktop API client with built-in MCP",
     "longDescription": "A modern API debugger for Windows 10/11 with built-in MCP Server for AI collaboration."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVGRkFDOTFGRUJBRjNCMTYKUldRV082L3JIOG42WDlDOUd5N3k4K3U3Q3VXczV0K1RQTk9HUGFlODdOYTlZVkhOekJ5QWdRRGgK",
+      "endpoints": ["https://github.com/Nnyjk/simple-post/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
   }
 }
