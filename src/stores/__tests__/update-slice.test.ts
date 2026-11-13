@@ -16,6 +16,7 @@ import {
   type ShimGlobals,
 } from './_browser-shim';
 import { createUpdateSlice, type UpdateSlice } from '../update-slice';
+import { isUpdaterAvailable } from '@/lib/updater';
 import { readUpdatePrefs, saveLastProjectId, saveLastUpdateCheckAt } from '../slices/ui-prefs';
 import type { UpdateApplyResult } from '@/types/update';
 
@@ -98,6 +99,31 @@ describe('update slice — applyUpdate', () => {
     assert.equal(slice.applyResult, null);
     assert.match(slice.updateError ?? '', /not enabled/);
     assert.equal(slice.updateBusy, false);
+  });
+});
+
+describe('update slice — 桌面分支不碰 web 专用命令', () => {
+  it('桌面形态下 checkForUpdate / loadDeployment 一次也不调用 update_* 命令', async () => {
+    // 本用例的前提：测试环境装了 `__TAURI_INTERNALS__`，故宿主判定为「桌面」。
+    assert.equal(isUpdaterAvailable(), true);
+
+    const calls: string[] = [];
+    installIpcMock((cmd) => {
+      calls.push(cmd);
+      // 插件没有可用更新、也读不到版本号 —— 恰好是最容易漏回 web 命令的那条路径。
+      return undefined;
+    });
+
+    const slice = makeHarness();
+    await slice.checkForUpdate(false);
+    await slice.loadDeployment();
+
+    assert.deepEqual(
+      calls.filter((cmd) => cmd.startsWith('update_')),
+      [],
+    );
+    assert.equal(slice.updateInfo?.available, false);
+    assert.equal(slice.updateDeployment, null);
   });
 });
 
