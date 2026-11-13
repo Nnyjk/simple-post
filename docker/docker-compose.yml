@@ -89,6 +89,24 @@ services:
       # tracing-subscriber filter. Unset means "info and above".
       RUST_LOG: ${SP_RUST_LOG:-info}
 
+      # 「这台机器怎么更新」的那条命令：`POST /api/update/apply` 用 `sh -c` 执行它，
+      # 界面据此决定要不要显示「立即执行更新」。留空 = 未声明。
+      #
+      # 两道门同时成立才可执行：这个变量非空，且部署开了口令模式
+      # （`SIMPLE_POST_WEB_PASSWORD` 已设置）。少一道，`applyEnabled` 就是 false，
+      # `POST /api/update/apply` 回 403。
+      #
+      # 命令由容器内的 bash 执行，而镜像的运行阶段是 `debian:bookworm-slim`，只装了
+      # `simple-post-server` 与那个用 bash `/dev/tcp` 写的健康探针，没有 docker CLI、
+      # curl、wget、nc，故命令只能落在 bash 与 coreutils 之内：例如用
+      # `exec 3<>/dev/tcp/<host>/<port>` 给旁车或宿主机上的一个 HTTP 接口发一个最小
+      # 请求，由那一侧执行 `docker compose pull`。
+      #
+      # 挂载宿主 `/var/run/docker.sock` 不能让 `docker compose pull` 成立：镜像里没有
+      # docker 可执行文件。为它装一个 CLI 会推翻「运行阶段不装任何包」这个前提，
+      # 故这里不给 socket 挂载示例。
+      SIMPLE_POST_UPDATE_COMMAND: ${SP_UPDATE_COMMAND:-}
+
       # ---- reverse-proxy deployments only ------------------------------
       # Mounting at https://host/sp/ ? Uncomment and set SP_PUBLIC_BASE_PATH
       # in .env. build_router nests the *entire* router under the prefix,
