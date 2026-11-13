@@ -26,6 +26,9 @@ tsconfig.tsbuildinfo
 src-tauri/gen/
 
 # ---- VCS / CI / agent state ----
+# The agent entries below (worktrees, scratch, local skills) are machine-local
+# session state, not repo content: they are never a build input, so keeping
+# them out also stops unrelated local edits from busting the layer cache.
 .git/
 .gitattributes
 .gitignore
@@ -35,6 +38,7 @@ src-tauri/gen/
 scripts/.scratch/
 .minimax/
 .playwright-mcp/
+skills/
 coverage/
 
 # ---- Secrets ----

@@ -50,10 +50,7 @@ jobs:
         with:
           filters: |
             docker:
-              - 'Dockerfile'
-              - '.dockerignore'
-              - 'docker-compose.yml'
-              - 'docker-swarm.yml'
+              - 'docker/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'package.json'
@@ -175,7 +172,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./Dockerfile
+          file: ./docker/Dockerfile
           platforms: linux/amd64
           # Same tag the two compose files reference, so this job exercises
           # the exact image name the deployment docs tell users to build.
