@@ -74,10 +74,44 @@ jobs:
             librsvg2-dev \
             patchelf
 
+      # 更新包要签名。缺 `TAURI_SIGNING_PRIVATE_KEY` 时 `createUpdaterArtifacts: true`
+      # 会让 `tauri build` 在打包末尾签名失败，整个发布变红；故缺密钥时把更新产物与
+      # updater 配置一起摘掉，本次只出货安装包。私钥只进探测这一步的环境，不铺到整个 job。
+      - name: Probe updater signing key
+        id: updater-signing
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Disable updater artifacts (no signing key)
+        if: steps.updater-signing.outputs.present == 'false'
+        shell: bash
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const path = "src-tauri/tauri.conf.json";
+          const conf = JSON.parse(fs.readFileSync(path, "utf8"));
+          conf.bundle.createUpdaterArtifacts = false;
+          if (conf.plugins) delete conf.plugins.updater;
+          fs.writeFileSync(path, JSON.stringify(conf, null, 2) + "\n");
+          '
+          echo "::warning::TAURI_SIGNING_PRIVATE_KEY 未配置：本次发布不产出更新包与 latest.json，应用内自动更新保持不可用。"
+
       - name: Build & publish release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 有这两份 secret 时 tauri-action 会签名更新包（`*.sig`）、上传签名，并把
+          # `latest.json` 覆盖写进同一个 release；缺 `*.sig` 时它只打印
+          # "Signature not found for the updater JSON. Skipping upload..." 后继续。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ inputs.tag || format('refs/tags/{0}', github.ref_name) }}
           releaseName: 'Simple Post v__VERSION__'
