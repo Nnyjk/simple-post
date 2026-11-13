@@ -166,15 +166,15 @@ MCP 专用端口必须是**独立的容器端口**（同一容器端口只能承
 
 ## 陷阱
 
-- **数据目录**：`serve-web` 与 GUI 默认都取 `dirs::data_dir()`（Windows 即 `%APPDATA%`），`store.db` 直接落在那层、不带 `simple-post` 后缀；`mcp.port` 则在同层的 `simple-post/` 子目录。三种形态传给 `db::init` 的目录并不相同，`serve-web --data-dir` 也不会传给 daemon 子进程——落点与差异见 `03-data-model.md` 的「数据目录与落点」。`SCHEMA_VERSION` 不匹配时 `ensure_current_schema` 会**删除** `store.db`，不可恢复。跑 worktree 或任何验证前设 `SIMPLE_POST_DATA_DIR=<scratch>`（不要只给 `--data-dir`）。
+- **数据目录**：`serve-web` 与 GUI 默认都取 `dirs::data_dir()`（Windows 即 `%APPDATA%`），`store.db` 直接落在那层、不带 `simple-post` 后缀；`mcp.port` 则在同层的 `simple-post/` 子目录。三种形态传给 `db::init` 的目录并不相同，`serve-web --data-dir` 也不会传给 daemon 子进程——落点与差异见 `03-data-model.md` 的「数据目录与落点」。库的 `user_version` **低于**本构建的 `SCHEMA_VERSION` 时 `ensure_current_schema` 会**删除** `store.db`（连 `-wal`/`-shm`），不可恢复；反过来旧构建打开新库只报校验错误、不动文件。跑 worktree 或任何验证前设 `SIMPLE_POST_DATA_DIR=<scratch>`（不要只给 `--data-dir`）。
 - `npm run dev:split` **不设** `SIMPLE_POST_DATA_DIR`，必须自己先在环境里设好再启动。
 - `.worktrees/<session>/` 是独立 checkout；漏掉任一处 ignore，lint/格式化会爬进去并把它的文件当本树的文件报错。
-- Windows PowerShell 写 UTF-8 必须 `-Encoding utf8NoBOM`；5.1 的默认 ANSI 会破坏 UTF-8。
+- **写 UTF-8 要分 PowerShell 版本**：PowerShell 6+ 用 `-Encoding utf8NoBOM`；Windows PowerShell 5.1 没有这个值（照抄会直接报参数错），用 `[System.IO.File]::WriteAllText($p, $t, (New-Object System.Text.UTF8Encoding($false)))`。5.1 的默认编码也不统一：`>` 重定向是 UTF-16LE，`Set-Content` 默认 ANSI，两者都会写坏 UTF-8。
 - `npm ci` 在 CI 里必须 `--include=dev`：Actions 默认 `NODE_ENV=production`，否则 `tauri`/`eslint`/`tsx` 都不在。
 - 容器里 MCP 端口要同时改三处：应用设置里的端口、compose/swarm 里的 `target`、应用监听地址保持 `0.0.0.0`；改完要重启 daemon。
 - 不设 `SIMPLE_POST_WEB_PASSWORD` 等于把 `/api/*`（含任意 URL 出站）与 `/mcp` 暴露在 `0.0.0.0`。但也不能写成空串——`auth.rs` 判的是「变量是否设置」，空串会变成要求空 bearer。
 - `SIMPLE_POST_PUBLIC_BASE_PATH` 留空串会触发「必须以 `/` 开头」校验失败；不用就整个键注释掉。
-- schema 变更：纯加列走 `ADDED_COLUMNS`、不 bump；任何无法表达为「加一个带默认值的可空列」的改动才 bump，而 bump 会删掉所有用户的 store。
+- schema 变更：判据是**兼容性**，不是可空性。只要是 `ALTER TABLE … ADD COLUMN` 能表达、且旧行读回来语义等价的列，就写进 `ADDED_COLUMNS`、不 bump——`TEXT NOT NULL DEFAULT '{}'`（`schema.rs:151`）就是现成的例子。只有需要改写既有行、或旧二进制读不了新形状的改动才 bump，而 bump 会删掉所有用户的 store。
 - 探针与冒烟测试必须断言响应体：无路由路径会落到 SPA fallback 返回 `200 text/html`，只看状态码会在错误的路由上通过。
 
 ## 相关笔记

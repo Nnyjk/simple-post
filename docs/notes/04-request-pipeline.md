@@ -7,7 +7,7 @@
 
 ## 一句话结论
 
-线上请求只由**一个纯函数**造出来——渲染进程是 `prepareRequest`，MCP/REST 是 `resolve_endpoint_with`——然后两侧都进同一条序列 `core::script::send_with_scripts`（前置脚本 → 发送 → 测试脚本 → 变量回写）。桌面与 MCP 的差别只在「谁组装」和「带不带界面草稿」，**脚本插在哪一步**没有第二份实现。
+线上请求只由**一个纯函数**造出来——渲染进程是 `prepareRequest`（走 REST 的浏览器路径也是它，产物经 `POST /api/http/send` 发出），MCP 侧才是 `resolve_endpoint_with`——然后两侧都进同一条序列 `core::script::send_with_scripts`（前置脚本 → 发送 → 测试脚本 → 变量回写）。桌面与 MCP 的差别只在「谁组装」和「带不带界面草稿」，**脚本插在哪一步**没有第二份实现。
 
 ## 链路
 

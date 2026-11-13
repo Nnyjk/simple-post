@@ -7,7 +7,7 @@
 
 ## 一句话结论
 
-`simple-post-mcp` 是**桥**，不是服务：它把 stdin 上的 JSON-RPC 逐行转发给运行中的 daemon（或在 `--transport=http` 下自己开一个小 axum），真正的裁决在 daemon 的 `mcp::dispatch`。工具总数实测 **48**，注册表 `tool_table()` 与能力表 `REQUIRED_CAPABILITY` 必须**双射**；两道门（全局能力档、逐项目权限）任一漏配都是 fail-closed 的拒绝，不是放行。
+`simple-post-mcp` 是**桥**，不是服务：它把 stdin 上的 JSON-RPC 逐行转发给运行中的 daemon（或在 `--transport=http` 下自己开一个小 axum），真正的裁决在 daemon 的 `mcp::dispatch`。工具总数实测 **48**，注册表 `tool_table()` 与能力表 `REQUIRED_CAPABILITY` 必须**双射**；两道门（全局能力档、逐项目权限）方向不同：Gate A 对没登记进能力表的工具**直接拒绝**（注册表 bug，不隐式放行）；Gate B 在逐项目权限行缺失时退回 `Permission::default() = ReadCall`——读类与 `ReadCall` 类工具照样能过，只有写工具要求的 `Full` 被拒。
 
 ## 结构
 
