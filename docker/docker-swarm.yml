@@ -49,6 +49,14 @@ services:
       SIMPLE_POST_WEB_PASSWORD: ${SP_WEB_PASSWORD:-}
       RUST_LOG: ${SP_RUST_LOG:-info}
 
+      # 「这台机器怎么更新」的那条命令：`POST /api/update/apply` 用 `sh -c` 执行它，
+      # 界面据此决定要不要显示「立即执行更新」。留空 = 未声明。
+      # 声明了还要 `SIMPLE_POST_WEB_PASSWORD` 非空，两条同时成立才可执行。
+      # 镜像里没有 docker CLI（运行阶段不装任何包），命令只能落在 bash 与 coreutils
+      # 之内；`docker compose pull` 由宿主执行。完整说明见
+      # docker/docker-compose.yml 的同一行。
+      SIMPLE_POST_UPDATE_COMMAND: ${SP_UPDATE_COMMAND:-}
+
       # SIMPLE_POST_PUBLIC_BASE_PATH: ${SP_PUBLIC_BASE_PATH}
       # SIMPLE_POST_BLOCK_PRIVATE_NET: 1
 

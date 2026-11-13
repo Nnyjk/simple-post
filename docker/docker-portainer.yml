@@ -79,6 +79,20 @@ services:
 
       RUST_LOG: info
 
+      # 更新命令：`POST /api/update/apply` 用 `sh -c` 执行它，界面据此决定要不要
+      # 显示「立即执行更新」。留空 = 未声明。声明了还要设
+      # `SIMPLE_POST_WEB_PASSWORD`（本文件里那一行默认是注释掉的，故默认不开口令
+      # 模式），两条同时成立才可执行。
+      #
+      # 镜像里没有 docker CLI（运行阶段不装任何包），命令只能落在 bash 与
+      # coreutils 之内，例如调一个旁车或宿主 agent 的 HTTP 接口；
+      # `docker compose pull` 由宿主执行，容器自己跑不了。完整说明见
+      # docker/docker-compose.yml 的同一行。
+      #
+      # Portainer 建栈时也可以不写在文件里，改在 Stacks 的 Environment variables
+      # 里加一条 `SIMPLE_POST_UPDATE_COMMAND`，效果相同。
+      SIMPLE_POST_UPDATE_COMMAND: ${SP_UPDATE_COMMAND:-}
+
       # ---- 反向代理部署才需要 -------------------------------------------
       # 挂在 https://host/sp/ 下时设置（必须以 / 开头），服务端会把整个
       # router 放进前缀下，nginx 侧不要剥前缀。
