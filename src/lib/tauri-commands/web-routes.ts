@@ -342,7 +342,8 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
 
   // ----- updates -----
-  // 只有 `serve-web` 有这三条；桌面端走 tauri updater 插件，不经过 `WEB_ROUTES`。
+  // 三条都有 `serve-web` 路由。桌面壳只实现 `update_check`（走 IPC，不经过 `WEB_ROUTES`）；
+  // `deployment` / `apply` 在桌面没有实现。
   // `check` 的失败也是 200，降级信息在响应体的 `error` 字段里；`force` 走查询串。
   [COMMANDS.updateCheck]: {
     method: 'GET',

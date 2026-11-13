@@ -1,7 +1,8 @@
 //! 更新检查 / 更新执行的编排层。
 //!
 //! 三条 `/api/update/*` 路由的薄壳都在 `web_api/routes/update.rs`；这里放判断与执行本身。
-//! 桌面端不调这些函数：桌面用 tauri updater 插件，更新由安装包负责。
+//! 桌面壳只调 [`check`]（`update_check` 命令）——「这一版改了什么」只有它拿得到；自动
+//! 安装由 tauri updater 插件负责，[`deployment`] 与 [`apply`] 只服务 `serve-web`。
 //!
 //! ## `apply` 的威胁模型
 //!

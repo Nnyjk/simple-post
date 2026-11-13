@@ -37,6 +37,8 @@ mod projects;
 mod request_settings;
 mod response_history;
 mod spec;
+// 桌面壳只实现 `update_check`；`update_deployment` / `update_apply` 只服务 `serve-web`。
+mod update;
 
 // 必须是 glob，不能列条目：`#[tauri::command]` 除函数外还生成两个 `#[macro_export]` 宏
 // （`__cmd__<name>`、`__tauri_command_name_<name>`），而 `generate_handler!` 把
@@ -57,3 +59,4 @@ pub use permissions::*;
 pub use projects::*;
 pub use request_settings::*;
 pub use response_history::*;
+pub use update::*;
