@@ -341,6 +341,24 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // 这里无需翻译。
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
 
+  // ----- updates -----
+  // 只有 `serve-web` 有这三条；桌面端走 tauri updater 插件，不经过 `WEB_ROUTES`。
+  // `check` 的失败也是 200，降级信息在响应体的 `error` 字段里；`force` 走查询串。
+  [COMMANDS.updateCheck]: {
+    method: 'GET',
+    path: (a) => `/api/update/check${buildQuery({ force: a.force ? 1 : undefined })}`,
+  },
+  [COMMANDS.updateDeployment]: {
+    method: 'GET',
+    path: () => '/api/update/deployment',
+  },
+  // 请求体是空对象：命令由运维在环境变量里声明，不接受调用方传入。
+  [COMMANDS.updateApply]: {
+    method: 'POST',
+    path: () => '/api/update/apply',
+    body: () => ({}),
+  },
+
   // ----- MCP daemon -----
   [COMMANDS.mcpStatus]: { method: 'GET', path: () => '/api/mcp/status' },
   [COMMANDS.mcpDaemonLogTail]: { method: 'GET', path: () => '/api/mcp/logs' },

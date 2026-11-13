@@ -47,6 +47,9 @@ pub mod project_api;
 /// 一份接口规格的编排层。REST 路由与 MCP 工具都只调它，故两个宿主不必
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod spec_api;
+/// 更新检查与更新执行的编排层。三条 `/api/update/*` 路由只调它；桌面端不走这条路
+/// （桌面用 tauri updater 插件）。
+pub mod update_api;
 pub mod web_api;
 
 // 再导出共享的底层，好让调用点在 workspace 抽取与本次 crate 拆分之后继续使用

@@ -14,6 +14,7 @@ pub(crate) mod projects;
 pub(crate) mod request_settings;
 pub(crate) mod response_history;
 pub(crate) mod spec;
+pub(crate) mod update;
 
 pub(crate) use dynamic_variables::{
     dynamic_variables_create, dynamic_variables_delete, dynamic_variables_list,
@@ -53,3 +54,4 @@ pub(crate) use response_history::{
     response_history_keep_put, response_history_list, response_history_set_favorite,
 };
 pub(crate) use spec::spec_upsert;
+pub(crate) use update::{update_apply, update_check, update_deployment};
