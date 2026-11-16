@@ -14,6 +14,7 @@ import { useInlineMenus } from './hooks/useInlineMenus';
 import { useNewItemFlow } from './hooks/useNewItemFlow';
 import { useTreeSelection } from './hooks/useTreeSelection';
 import { useTransfer } from '@/features/interchange/useTransfer';
+import { useDocsShare } from '@/features/docs-share/useDocsShare';
 import { ModuleRow } from './rows/ModuleRow';
 import { TreeChildren } from './rows/TreeChildren';
 import { EndpointList } from './rows/EndpointList';
@@ -36,6 +37,12 @@ const TransferDialogLazy = lazy(() =>
   import('@/features/interchange/TransferDialog-lazy').then((m) => ({
     default: m.TransferDialogLazy,
   })),
+);
+
+// 接口文档弹窗：勾选树与上面那份共用，但产物是 HTML 快照，渲染器牵着 `marked`。
+// 它同样只在打开时挂载——`marked` 因此不会出现在打开项目的常驻路径上。
+const DocsShareDialogLazy = lazy(() =>
+  import('@/features/docs-share/DocsShareDialog').then((m) => ({ default: m.DocsShareDialog })),
 );
 
 // 集合的脚本对话框：它牵着 CodeMirror（应用最大的依赖），故同样懒加载。
@@ -161,6 +168,22 @@ export function ProjectTree() {
 
   const { session: transferSession, openImport, openExport } = transfer;
 
+  // ---------- 导出接口文档 ----------
+  // 与导入/导出同住本组件、同一套「状态在 hook 里」的约定：只有模块行的「+」菜单能打开它。
+  const docsShare = useDocsShare();
+  const openDocsShare = docsShare.open;
+
+  const startDocsShare = useCallback(
+    (module: { id: string; name: string }) => {
+      openDocsShare({
+        projectId: activeProjectId,
+        moduleId: module.id,
+        moduleName: module.name,
+      });
+    },
+    [activeProjectId, openDocsShare],
+  );
+
   const startTransfer = useCallback(
     (mode: 'import' | 'export', module: { id: string; name: string }) => {
       const session = {
@@ -180,6 +203,7 @@ export function ProjectTree() {
     openNewItemWithIntent,
     createEndpointAt: createEndpoint,
     startTransfer,
+    startDocsShare,
     setMenu,
   });
 
@@ -523,6 +547,12 @@ export function ProjectTree() {
       {transferSession && (
         <Suspense fallback={null}>
           <TransferDialogLazy controller={transfer} />
+        </Suspense>
+      )}
+      {/* 导出接口文档。同样按「有没有目标」挂载：不打开就不会去取那个 chunk。 */}
+      {docsShare.target && (
+        <Suspense fallback={null}>
+          <DocsShareDialogLazy controller={docsShare} />
         </Suspense>
       )}
     </aside>

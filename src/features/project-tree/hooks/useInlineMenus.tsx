@@ -1,4 +1,11 @@
-import { CornerDownRight, FileInput, FileOutput, FilePlus, FolderPlus } from 'lucide-react';
+import {
+  CornerDownRight,
+  FileInput,
+  FileOutput,
+  FilePlus,
+  FileText,
+  FolderPlus,
+} from 'lucide-react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { ResourceNode } from '@/types/domain';
 import type { ContextMenuItem } from '../TreeContextMenu';
@@ -26,6 +33,8 @@ export interface InlineMenuBindings {
    * 该模块下的集合，目标层级是模块才不用问「往哪一层插」。
    */
   startTransfer: (mode: 'import' | 'export', module: { id: string; name: string }) => void;
+  /** 打开「导出接口文档」弹窗，目标层级同样是 `module`：文档按模块成篇，模块名就是它的标题。 */
+  startDocsShare: (module: { id: string; name: string }) => void;
   setMenu: (m: { x: number; y: number; items: ContextMenuItem[] } | null) => void;
 }
 
@@ -41,6 +50,7 @@ export function useInlineMenus({
   openNewItemWithIntent,
   createEndpointAt,
   startTransfer,
+  startDocsShare,
   setMenu,
 }: InlineMenuBindings) {
   const openModulePlusMenu = (moduleId: string) => (e: ReactMouseEvent) => {
@@ -79,6 +89,15 @@ export function useInlineMenus({
         icon: <FileOutput className="h-3.5 w-3.5" />,
         disabled: !module,
         onClick: () => module && startTransfer('export', { id: module.id, name: module.name }),
+      },
+      {
+        kind: 'item',
+        label: '导出接口文档…',
+        icon: <FileText className="h-3.5 w-3.5" />,
+        // 与导出 OpenAPI 同一层级、同一个模块目标；区别只在产物：那份是给机器读的
+        // OpenAPI，这份是给人读的 HTML 快照。
+        disabled: !module,
+        onClick: () => module && startDocsShare({ id: module.id, name: module.name }),
       },
     ];
     setMenu({ x: e.clientX, y: e.clientY, items });
