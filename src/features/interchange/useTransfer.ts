@@ -276,9 +276,9 @@ export function useTransfer(options: UseTransferOptions = {}) {
           close();
           return;
         }
-        const outcome = await saveGeneratedDocument(doc);
+        const { status } = await saveGeneratedDocument(doc);
         // 用户点了取消不是失败：回到勾选那屏，改个格式再试一次。
-        if (outcome === 'cancelled') {
+        if (status === 'cancelled') {
           setPhase('preview');
           return;
         }

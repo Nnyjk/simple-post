@@ -8,14 +8,18 @@
  * `TransferNode` 形状、以及 `selection.ts` 的纯运算），另起一条 60 行的状态机，不去碰导入/导出
  * 的行为。
  *
- * 所有读取都发生在**动作那一刻**（`useAppStore.getState()`）：弹窗打开期间用户在后台改了接口，
- * 生成时拿到的仍是当时最新的已保存定义。未保存草稿不在 `endpointDetails` 里（它们在 UI 切片的
- * `endpointDrafts`），因此进不了文档——这正是界面上声明的那句话。
+ * 所有读取都发生在**动作那一刻**，而且定义是从持久化结果重新取的（`nodes_list` /
+ * `endpoint_details_list`），不是 store 里那份：`updateEndpointDetail` 先改 store 再等后端，
+ * 失败才回滚，快照若取自 store 就可能冻结一次从未落库的编辑。未保存草稿本来就不在
+ * `endpointDetails` 里（它们在 UI 切片的 `endpointDrafts`），因此进不了文档——这正是界面上
+ * 声明的那句话。
  */
 import { useCallback, useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
+import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { errorText } from '@/lib/error-text';
 import { saveGeneratedDocument } from '@/lib/transfer-file-save';
+import type { EndpointDetail, Environment, ResourceNode } from '@/types/domain';
 import type { TransferNode } from '@/lib/interchange-types';
 import { buildApiDocModel, docGroups } from '@/lib/doc/model';
 import { docFileName } from '@/lib/doc/file-name';
@@ -117,19 +121,29 @@ export function useDocsShare(): DocsShareController {
     try {
       const state = useAppStore.getState();
       const project = state.projects.find((p) => p.id === target.projectId);
+      // 定义从**持久化结果**重新读一遍，而不是用 store 里那份：`updateEndpointDetail` 是乐观
+      // 更新（先改 store 再等后端），保存失败时回滚。快照若取自那份，一次失败的保存也会被冻结进
+      // 发出去的文件，而它从未落库。
+      const [nodes, savedDetails, environments] = await Promise.all([
+        invokeCmd<ResourceNode[]>(COMMANDS.nodesList),
+        invokeCmd<EndpointDetail[]>(COMMANDS.endpointDetailsList),
+        invokeCmd<Environment[]>(COMMANDS.environmentsList),
+      ]);
+      const details: Record<string, EndpointDetail> = {};
+      for (const row of savedDetails) details[row.nodeId] = row;
       // 文档里只列变量名，故环境只影响「列哪些名字」；优先用用户当前选中的那个。
       const environment =
-        state.environments.find(
+        environments.find(
           (e) => e.id === state.activeEnvironmentId && e.projectId === target.projectId,
         ) ??
-        state.environments.find((e) => e.projectId === target.projectId) ??
+        environments.find((e) => e.projectId === target.projectId) ??
         null;
       const generatedAt = new Date();
       const model = buildApiDocModel({
         projectName: project?.name ?? target.moduleName,
         moduleId: target.moduleId,
-        nodes: state.nodes,
-        details: state.endpointDetails,
+        nodes,
+        details,
         selected,
         generatedAt,
         environment,
@@ -137,7 +151,7 @@ export function useDocsShare(): DocsShareController {
       // 弹窗开着的时候用户可能在别处删了接口、或切了项目：那时模型会是空的，
       // 生成一份「0 个接口」的快照只会让人以为工具坏了。
       if (model.endpointCount === 0) {
-        throw new Error('选中的接口已经不在当前项目里了，请重新选择。');
+        throw new Error('选中的接口不在已保存的定义里了（可能刚保存、还没落库），请重新选择。');
       }
       // 渲染器牵着 `marked`，故**在这里**才动态取：文档功能没被点开时，
       // 项目树那条常驻路径上不该出现 Markdown 解析器。
@@ -166,7 +180,7 @@ export function useDocsShare(): DocsShareController {
         content: doc.html,
         diagnostics: [],
       });
-      if (outcome === 'saved') setSavedName(doc.fileName);
+      if (outcome.status === 'saved') setSavedName(outcome.fileName);
     } catch (err) {
       setError(errorText(err));
     } finally {

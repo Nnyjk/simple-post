@@ -14,7 +14,7 @@
  * 其余 token（代码块、表格、列表……）沿用 marked 的默认实现，它们自己会转义文本。
  */
 import { marked, Renderer, type Tokens } from 'marked';
-import { escapeHtml, isSafeHref } from './escape';
+import { escapeHref, escapeHtml, isSafeHref } from './escape';
 
 class SafeRenderer extends Renderer {
   override html({ text }: Tokens.HTML | Tokens.Tag): string {
@@ -24,7 +24,7 @@ class SafeRenderer extends Renderer {
   override link({ href, tokens }: Tokens.Link): string {
     const inner = this.parser.parseInline(tokens);
     if (!isSafeHref(href)) return inner;
-    return `<a href="${escapeHtml(href)}" rel="noreferrer noopener" target="_blank">${inner}</a>`;
+    return `<a href="${escapeHref(href)}" rel="noreferrer noopener" target="_blank">${inner}</a>`;
   }
 
   override image({ text }: Tokens.Image): string {

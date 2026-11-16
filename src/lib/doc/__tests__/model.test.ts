@@ -184,3 +184,15 @@ test('勾选树是同一份 TransferNode 形状：METHOD 与路径取自已保�
     ],
   );
 });
+
+test('勾选树不列没有已保存定义的接口，数量与导出保持一致', () => {
+  const nodes = [
+    MODULE,
+    node({ id: 'ep_saved', kind: 'endpoint', parentId: 'mod_1', name: '有定义', sortOrder: 1 }),
+    node({ id: 'ep_ghost', kind: 'endpoint', parentId: 'mod_1', name: '没定义', sortOrder: 2 }),
+  ];
+  const groups = docGroups(nodes, { ep_saved: detail({ nodeId: 'ep_saved' }) }, 'mod_1');
+  const keys = groups[0].endpoints.map((e) => e.key);
+  assert.deepEqual(keys, ['ep_saved']);
+  assert.equal(groups[0].endpointTotal, 1);
+});

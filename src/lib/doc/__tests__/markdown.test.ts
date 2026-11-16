@@ -67,3 +67,9 @@ test('空说明返回空串，常规 Markdown 仍然可用', () => {
   assert.equal(html.includes('<code>code</code>'), true);
   assert.equal(html.includes('<strong>粗体</strong>'), true);
 });
+
+test('地址里已有的实体只保留一层编码，查询参数不被改坏', () => {
+  const html = renderMarkdownDoc('[x](https://example.com/?a=1&b=2)');
+  assert.equal(html.includes('href="https://example.com/?a=1&amp;b=2"'), true, html);
+  assert.equal(html.includes('&amp;amp;'), false, html);
+});

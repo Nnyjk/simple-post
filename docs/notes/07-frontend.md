@@ -92,7 +92,7 @@
 导出「接口文档」是纯前端产物：桌面与 serve-web 是同一份 SPA，因此一处实现、两形态完全一致，**没有新命令、没有新路由、没有后端改动**。
 
 - **「不可更改」= 快照文件**，理由：接收方要的是「我发出去的那一刻长什么样」。导出把当时的接口定义冻结进一份自包含 HTML，之后工作区里怎么改都不影响已经发出去的那份；文件里没有编辑入口，也没有任何回写通道。这比「分享链接」简单得多，也**刻意不用分享链接**——bearer 保护的部署不该多一个免鉴权出口。若将来真要做链接分享，那是独立的安全决策，不是这里的延伸。
-- **只读已保存的定义**：数据源是 store 的 `nodes` + `endpointDetails`。未保存的草稿在 `ui-slice` 的 `endpointDrafts` 里，所以天然进不了文档；接口节点没有 `endpointDetails`（从未落库）时直接跳过，不渲染空壳。弹窗描述里写明了这一点。
+- **只读已保存的定义**：数据源是持久化结果——`useDocsShare` 在生成那一刻重新取 `nodes_list` / `endpoint_details_list` / `environments_list`，而不是 store 里那份：`updateEndpointDetail` 是乐观更新（先改 store 再等后端，失败才回滚），快照若取自 store，就可能冻结一次从未落库的编辑。未保存的草稿在 `ui-slice` 的 `endpointDrafts` 里，所以天然进不了文档；接口节点没有 `endpointDetails`（从未落库）时连勾选列表都不出现，不渲染空壳。弹窗描述里写明了这一点。
 - **绝不输出值【硬约束】**：请求头 / 查询参数 / 路径参数 / 鉴权 / 环境变量只写**名字、说明、结构与 schema**，`KeyValue.value`、`AuthConfig` 的密钥、环境变量取值一律不进模型。模型的测试用一串 `*_SECRET` 断言序列化产物里不含它们。响应 `example` 是用户专门写作文档的字段，可以输出。硬约束的原因很直接：一份到处转发的 HTML 里带 token 不可接受。
 - 分层：`src/lib/doc/model.ts`（纯模型，`buildApiDocModel`，`generatedAt` 由调用方传入）、`src/lib/doc/render.ts`（纯渲染，同输入同时刻 → 同字节）、`src/lib/doc/escape.ts`（唯一转义出口）、`src/lib/doc/markdown.ts`（`marked` + `SafeRenderer`：原始 HTML 转义、链接协议白名单 `http`/`https`/`mailto`/相对路径/`#`，`javascript:` 与 `data:` 丢弃、图片只留 alt）、`src/lib/doc/file-name.ts`（`<项目名>-接口文档-<YYYYMMDD>.html`，清 Windows 非法字符）。
 - 产物纪律：单文件 HTML，inline `<style>`，**无 `<script>`、无 `<link>`、无 `src=`、无外链与外部字体**，`prefers-color-scheme` 同时给深浅两套变量。`schema`/`example` 在 `<pre>` 里是两空格缩进的规范化 JSON（解析不了就原样输出）。
@@ -110,7 +110,7 @@
 6. 所有模态走 `ModalSurface`，所有层级走 `LAYER`。
 7. 主题解析只在 `theme-boot/index.ts` 一处，且该文件保持「零 import、单默认导出、可编译成 classic script」。
 8. 编辑器/`marked`/GSAP 不进首屏静态图；`manualChunks` 永远保持函数形式。
-9. 导出的接口文档是快照：不含 `<script>`、不含外链、不含任何取值；新字段要么进模型（名字/说明/schema），要么不进文档。
+9. 导出的接口文档是快照：不含 `<script>`、不含外链，不写请求参数 / 鉴权 / 环境变量的取值（响应 `example` 例外，它是用户写给文档的）；新字段要么进模型（名字/说明/schema），要么不进文档。
 
 ## 陷阱
 
