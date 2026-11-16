@@ -121,6 +121,11 @@ async fn docker_shape_is_reported_when_declared() {
 
     let deployment = deployment(true);
     assert_eq!(deployment.shape, "docker");
+    // 版本随响应走：界面把它钉成「当前版本」，不需要再打一次 GitHub。
+    assert_eq!(
+        deployment.version,
+        simple_post_core::update::current_version()
+    );
     assert_eq!(deployment.image, Some(DOCKER_IMAGE));
     assert_eq!(deployment.command, Some(DOCKER_COMMAND));
     // 形态与「能不能执行」是两件事：这条部署没声明命令，故仍不可执行。

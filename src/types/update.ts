@@ -33,6 +33,8 @@ export interface UpdateCheck {
 export type DeploymentShape = 'docker' | 'binary';
 
 export interface UpdateDeployment {
+  /** 正在响应的服务端版本。web 形态的「当前版本」以它为准。 */
+  version: string;
   shape: DeploymentShape;
   /** 镜像引用，`shape === 'docker'` 时给出，否则 `null`。 */
   image: string | null;

@@ -8,6 +8,7 @@ import { useEffect } from 'react';
 import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { useAppStore } from '@/stores/app-store';
 import { isUpdaterAvailable } from '@/lib/updater';
 import { describeCheckOutcome } from '@/lib/update/messages';
@@ -20,16 +21,27 @@ export function AboutUpdateCard() {
   const deployment = useAppStore((s) => s.updateDeployment);
   const busy = useAppStore((s) => s.updateBusy);
   const error = useAppStore((s) => s.updateError);
+  const pinned = useAppStore((s) => s.pinnedVersion);
+  const autoCheck = useAppStore((s) => s.autoCheckUpdates);
   const checkForUpdate = useAppStore((s) => s.checkForUpdate);
   const loadDeployment = useAppStore((s) => s.loadDeployment);
+  const ensurePinnedVersion = useAppStore((s) => s.ensurePinnedVersion);
+  const setAutoCheckUpdates = useAppStore((s) => s.setAutoCheckUpdates);
 
   const desktop = isUpdaterAvailable();
+
+  // 当前版本来自运行中的应用本身，与「有没有新版」查没查成无关。
+  useEffect(() => {
+    void ensurePinnedVersion();
+  }, [ensurePinnedVersion]);
 
   // 通道说明要说对「新版本从哪来」，那就得知道本部署是容器还是源码/二进制。
   useEffect(() => {
     if (desktop || deployment) return;
     void loadDeployment();
   }, [desktop, deployment, loadDeployment]);
+
+  const currentVersion = pinned || info?.current || '';
 
   const lastChecked = info ? relativeTime(info.checkedAt, Date.now()) : null;
   const outcome = error ?? (info ? describeCheckOutcome(info) : '还没有检查过更新');
@@ -64,12 +76,23 @@ export function AboutUpdateCard() {
         label="当前版本"
         description="正在运行的 Simple Post 版本"
         control={
-          info?.current ? (
-            <span className="font-mono text-xs text-foreground">{info.current}</span>
+          currentVersion ? (
+            <span className="font-mono text-xs text-foreground">{currentVersion}</span>
           ) : (
-            // 还没查过、或 web 端这次没拿到 `current`：写清楚下一步做什么，不留空白。
+            // 连应用自己都还没报出结论：写清楚下一步做什么，不留空白。
             <span className="text-[11px] text-muted-foreground">未知，点检查更新</span>
           )
+        }
+      />
+      <SettingRow
+        label="自动检查更新"
+        description="启动后每 24 小时最多查一次；关掉之后仍可点「检查更新」"
+        control={
+          <Switch
+            checked={autoCheck}
+            onCheckedChange={setAutoCheckUpdates}
+            aria-label="自动检查更新"
+          />
         }
       />
       <SettingRow

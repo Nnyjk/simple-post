@@ -39,6 +39,10 @@ interface StorePrefs {
   lastUpdateCheckAt?: string;
   /** 用户点过「稍后再说」的版本号。同一个版本不再出现在顶栏。 */
   dismissedUpdateVersion?: string;
+  /** 运行中应用自报的版本号。设置卡片常显它，且「有没有新版」与它比。 */
+  currentVersion?: string;
+  /** 启动后是否自动检查更新。缺省（键不存在）为 `true`。 */
+  autoCheckUpdates?: boolean;
 }
 
 function loadPrefs(): StorePrefs {
@@ -121,11 +125,19 @@ export function saveRememberedEnvironmentId(projectId: string, envId: string): v
  * 这两条与主题、上次项目、当前环境同住一份 `simple-post:prefs`，故写入必须**合并**：
  * 整份替换会把另外三样一起抹掉。
  */
-export function readUpdatePrefs(): { lastCheckedAt: string; dismissedVersion: string } {
+export function readUpdatePrefs(): {
+  lastCheckedAt: string;
+  dismissedVersion: string;
+  pinnedVersion: string;
+  autoCheckUpdates: boolean;
+} {
   const prefs = loadPrefs();
   return {
     lastCheckedAt: prefs.lastUpdateCheckAt ?? '',
     dismissedVersion: prefs.dismissedUpdateVersion ?? '',
+    pinnedVersion: prefs.currentVersion ?? '',
+    // 键不存在就是「没关过」：默认开着。
+    autoCheckUpdates: prefs.autoCheckUpdates !== false,
   };
 }
 
@@ -141,6 +153,32 @@ export function saveDismissedUpdateVersion(version: string): void {
     prefs.dismissedUpdateVersion = version;
   } else {
     delete prefs.dismissedUpdateVersion;
+  }
+  savePrefs(prefs);
+}
+
+/**
+ * 钉住「当前版本」。空串是「还不知道」，故它删掉这个键而不是存一个空值。
+ *
+ * 这条与「记住的项目」「每个项目上次用的环境」同住一份偏好，故写入必须合并。
+ */
+export function savePinnedVersion(version: string): void {
+  const prefs = loadPrefs();
+  if (version) {
+    prefs.currentVersion = version;
+  } else {
+    delete prefs.currentVersion;
+  }
+  savePrefs(prefs);
+}
+
+/** 记住「启动时自动检查更新」这个开关。开是缺省，故打开时删键而不是存一个 `true`。 */
+export function saveAutoCheckUpdates(enabled: boolean): void {
+  const prefs = loadPrefs();
+  if (enabled) {
+    delete prefs.autoCheckUpdates;
+  } else {
+    prefs.autoCheckUpdates = false;
   }
   savePrefs(prefs);
 }

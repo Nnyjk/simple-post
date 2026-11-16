@@ -49,6 +49,8 @@ pub const OUTPUT_LIMIT_BYTES: usize = 8 * 1024;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDeployment {
+    /// 正在响应的 `serve-web` 版本。界面把它钉成「当前版本」，不依赖 GitHub 可达。
+    pub version: &'static str,
     /// `"docker"` 或 `"binary"`。
     pub shape: &'static str,
     /// `shape == "docker"` 时的镜像引用，否则 `None`。
@@ -129,6 +131,7 @@ fn is_docker() -> bool {
 pub fn deployment(password_mode: bool) -> UpdateDeployment {
     let docker = is_docker();
     UpdateDeployment {
+        version: simple_post_core::update::current_version(),
         shape: if docker { "docker" } else { "binary" },
         image: if docker { Some(DOCKER_IMAGE) } else { None },
         command: if docker { Some(DOCKER_COMMAND) } else { None },
@@ -193,6 +196,8 @@ fn shell_command(command: &str) -> tokio::process::Command {
     {
         let mut cmd = tokio::process::Command::new("cmd");
         cmd.arg("/C").arg(command);
+        // 无头部署里 `cmd` 不会开窗；桌面宿主调到这里时它才会。
+        crate::win_spawn::hide_console_tokio(&mut cmd);
         cmd
     }
     #[cfg(not(windows))]

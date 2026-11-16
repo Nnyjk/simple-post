@@ -6,12 +6,37 @@
  * 类型；没见过的码按「未知原因」呈现并把原码带上，界面不会因为一个新增的码而空着。
  */
 
+import type { UpdateErrorCode } from '@/types/update';
+
 const ERROR_TEXT: Record<string, string> = {
   unreachable: '连不上发布服务器（网络不可达，或被代理拦住了）',
   rate_limited: 'GitHub 接口限流，过几分钟再试',
   no_release: '仓库里还没有发布版本',
   bad_response: '发布接口返回了读不懂的内容',
 };
+
+/**
+ * 桌面壳里插件只抛出一句英文原因，没有服务端的 `error` 字段。这里把它归到界面认识的
+ * 四个码上；认不出的一律按「连不上」，不编造更具体的结论。
+ */
+export function classifyCheckFailure(reason: string): UpdateErrorCode {
+  const text = reason.toLowerCase();
+  if (text.includes('rate limit') || text.includes('403') || text.includes('429')) {
+    return 'rate_limited';
+  }
+  if (text.includes('404') || text.includes('not found') || text.includes('no release')) {
+    return 'no_release';
+  }
+  if (
+    text.includes('signature') ||
+    text.includes('invalid') ||
+    text.includes('parse') ||
+    text.includes('json')
+  ) {
+    return 'bad_response';
+  }
+  return 'unreachable';
+}
 
 /** 失败原因的中文说法；`null` 表示这次没有失败，返回 `null`。 */
 export function describeCheckError(error: string | null | undefined): string | null {

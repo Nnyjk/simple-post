@@ -241,3 +241,105 @@ describe('update slice — 自动检查的节流', () => {
     assert.equal(checked, 1);
   });
 });
+
+describe('update slice — 检查失败只在 updateError 上落字', () => {
+  it('插件报错时只有 updateError 变化，其余状态与自动检查记账都不动', async () => {
+    const calls: string[] = [];
+    installIpcMock((cmd) => {
+      calls.push(cmd);
+      if (cmd.includes('updater')) throw new Error('net::ERR_INTERNET_DISCONNECTED');
+      if (cmd.includes('app|version')) return '0.1.34';
+      return undefined;
+    });
+
+    const slice = makeHarness();
+    await slice.checkForUpdate(false);
+
+    // 失败原因按四类文案翻译；顶栏入口的判据是 `updateInfo.available`，它必须仍是 false。
+    assert.match(slice.updateError ?? '', /连不上发布服务器/);
+    assert.equal(slice.updateInfo?.available, false);
+    assert.equal(slice.updateInfo?.error, 'unreachable');
+    assert.equal(slice.updateBusy, false);
+    assert.equal(slice.applyResult, null);
+    assert.equal(slice.updateDeployment, null);
+    assert.equal(slice.updateReleaseDate, null);
+    // 失败不是「有了结论」：不记账，下次启动还能再查一次。
+    assert.equal(readUpdatePrefs().lastCheckedAt, '');
+    // 失败的一次检查不该再去 GitHub 补发布说明。
+    assert.deepEqual(
+      calls.filter((cmd) => cmd === 'update_check'),
+      [],
+    );
+  });
+});
+
+describe('update slice — 当前版本是「有没有新版」的判据', () => {
+  it('latest 不高于运行中的版本时不算有新版本', async () => {
+    installIpcMock((cmd) => {
+      // 插件读到的 latest.json 比运行中的版本还旧：已经升过级，不该再提示。
+      if (cmd.includes('updater')) {
+        return { version: '0.1.34', body: null, date: null, close: async () => undefined };
+      }
+      if (cmd.includes('app|version')) return '0.1.35';
+      if (cmd === 'update_check') return { notes: null, url: null };
+      return undefined;
+    });
+
+    const slice = makeHarness();
+    await slice.checkForUpdate(true);
+
+    assert.equal(slice.updateInfo?.available, false);
+    assert.equal(slice.updateInfo?.current, '0.1.35');
+    assert.equal(slice.pinnedVersion, '0.1.35');
+    assert.equal(slice.updateError, null);
+  });
+
+  it('把当前版本合并写进偏好，不抹掉记住的项目', async () => {
+    saveLastProjectId('p1');
+    installIpcMock((cmd) => {
+      if (cmd.includes('updater')) return undefined;
+      if (cmd.includes('app|version')) return '0.1.34';
+      return undefined;
+    });
+
+    const slice = makeHarness();
+    await slice.checkForUpdate(false);
+
+    const raw = window.localStorage.getItem('simple-post:prefs') ?? '';
+    assert.match(raw, /"currentVersion":"0.1.34"/);
+    assert.match(raw, /"lastProjectId":"p1"/);
+    assert.equal(readUpdatePrefs().pinnedVersion, '0.1.34');
+  });
+});
+
+describe('update slice — 自动检查开关', () => {
+  it('关掉之后启动不查，手动检查仍然可用，且偏好只改这一个字段', async () => {
+    saveLastProjectId('p2');
+    const slice = makeHarness();
+    const forces: Array<boolean | undefined> = [];
+    slice.checkForUpdate = async (force) => {
+      forces.push(force);
+    };
+
+    slice.setAutoCheckUpdates(false);
+    await slice.autoCheckUpdate();
+    assert.deepEqual(forces, []);
+    assert.equal(readUpdatePrefs().autoCheckUpdates, false);
+    const raw = window.localStorage.getItem('simple-post:prefs') ?? '';
+    assert.match(raw, /"lastProjectId":"p2"/);
+    assert.match(raw, /"autoCheckUpdates":false/);
+
+    await slice.checkForUpdate(true);
+    assert.deepEqual(forces, [true]);
+  });
+
+  it('重新打开开关时从偏好里删掉这个键，回到默认的「自动查」', () => {
+    const slice = makeHarness();
+    slice.setAutoCheckUpdates(false);
+    slice.setAutoCheckUpdates(true);
+
+    const raw = window.localStorage.getItem('simple-post:prefs') ?? '';
+    assert.doesNotMatch(raw, /autoCheckUpdates/);
+    assert.equal(readUpdatePrefs().autoCheckUpdates, true);
+  });
+});

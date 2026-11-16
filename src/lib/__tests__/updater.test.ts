@@ -2,8 +2,8 @@
  * 自动更新模块的两条硬约束。
  *
  * 1. 非 Tauri 壳（`serve-web`、纯 Node、Vite dev）里 `checkDesktopUpdate()` 必须安静地
- *    返回 `null`。它由界面在启动时调用，抛异常会让「检查更新」变成控制台里的一串红字，
- *    而那个形态本来就没有更新可装。
+ *    返回 `{ status: 'none' }`。它由界面在启动时调用，抛异常会让「检查更新」变成控制台里
+ *    的一串红字，而那个形态本来就没有更新可装。
  * 2. `@tauri-apps/plugin-updater` 与 `@tauri-apps/plugin-process` 不得在模块顶部静态
  *    import。这两个包在浏览器形态里没有实现，静态引入会把它们拖进 `serve-web` 的
  *    bundle。第二条只读源码，与 `tab-strip-animation.test.ts` 的哨兵同一写法。
@@ -45,8 +45,8 @@ describe('updater 模块的形态边界', () => {
     assert.equal(isUpdaterAvailable(), false);
   });
 
-  it('非 Tauri 壳里 checkDesktopUpdate 返回 null，不抛', async () => {
-    assert.equal(await checkDesktopUpdate(), null);
+  it('非 Tauri 壳里 checkDesktopUpdate 返回 none，不抛', async () => {
+    assert.deepEqual(await checkDesktopUpdate(), { status: 'none' });
   });
 
   it('非 Tauri 壳里 installDesktopUpdate 抛出 Error，而不是静默成功', async () => {

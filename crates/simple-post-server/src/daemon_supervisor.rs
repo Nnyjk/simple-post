@@ -283,6 +283,8 @@ impl McpDaemonHandle {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true); // GUI 被 drop ⇒ 子进程收到 SIGKILL
+                                 // 桌面壳是 GUI 子系统，不压住这一步 Windows 会给 daemon 开一扇控制台窗口。
+        crate::win_spawn::hide_console_tokio(&mut cmd);
 
         // Web 形态的口令随子进程走。守护进程是 MCP 唯一的对外端点，故它必须和主服务器
         // 用同一道 bearer 闸；口令经**环境变量**传下去，不进命令行——命令行在 Linux 上
