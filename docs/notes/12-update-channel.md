@@ -26,7 +26,7 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 
 - 命令只有一条：`src-tauri/src/commands/update.rs` 的 `update_check(force)`，返回 `UpdateCheck`。抓取失败也返回 `Ok`，原因在 `error` 字段——与 REST 侧同一个约定。
 - 判断「有没有新版」的是插件：`tauri.conf.json` 的 `plugins.updater.endpoints` 指向 `releases/latest/download/latest.json`，`pubkey` 校验签名；`bundle.createUpdaterArtifacts: true` 才会产出更新包与 `.sig`。
-- 安装与重启：`src/lib/updater.ts` 的 `installDesktopUpdate` 走 `downloadAndInstall`，完成后调 `plugin-process` 的 `relaunch()`；能力由 `capabilities/default.json` 的 `updater:default` 与 `process:allow-restart` 授予。Windows 的 `installMode: passive` 让 NSIS 安装过程不需要逐页交互。
+- 安装与重启：`src/lib/updater.ts` 的 `installDesktopUpdate` 走 `downloadAndInstall`，完成后调 `plugin-process` 的 `relaunch()`；能力由 `capabilities/default.json` 的 `updater:default` 与 `process:allow-restart` 授予。Windows 用 `installMode: quiet`（`/S /UPDATE /R`）：安装器不开窗口、不调用旧版卸载器、装完由 NSIS 自己重启（详见下一节）。
 - 启动检查由 `src/lib/update/time.ts` 的 `dueForCheck` 节流：24 小时；记录只在真拿到结论时写（`saveLastUpdateCheckAt`），一次限流不会吃掉接下来一天的自动检查。「稍后再说」把版本号写进 `dismissedVersion`，顶栏入口按版本消失。
 - `isUpdaterAvailable()` = 在 Tauri 壳里且不是 `tauri dev`；开发构建没有签名产物，检查只会失败。
 
@@ -34,17 +34,45 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 
 ```
 浏览器 → GET /api/update/check[?force=1]      → update_api::check → core 缓存 → GitHub
-       → GET /api/update/deployment           → update_api::deployment（形态 + 镜像 + 命令 + applyEnabled）
+       → GET /api/update/deployment           → update_api::deployment（形态 + 镜像 + 命令 + applyEnabled + 服务端版本）
        → POST /api/update/apply               → update_api::apply → sh -c <SIMPLE_POST_UPDATE_COMMAND>
 ```
 
 | 路由 | 鉴权 | 失败形状 |
 |---|---|---|
 | `GET /api/update/check` | 口令模式下要 bearer | 除鉴权外一律 200，`error` 字段是 `unreachable` / `rate_limited` / `no_release` / `bad_response` |
-| `GET /api/update/deployment` | 同上 | 只读环境变量与 `/.dockerenv`，不失败 |
+| `GET /api/update/deployment` | 同上 | 只读环境变量与 `/.dockerenv`，不失败；响应带 `version`（服务端版本），桌面端不调它 |
 | `POST /api/update/apply` | 同上 | 403 `update_disabled`（两道门没都成立）、409 `update_in_progress`（已有一次在跑） |
 
 `check` 的失败也回 200 是约定，不是疏忽：渲染层的 `invokeCmd` 把非 2xx 变成异常，异常里只剩一句 HTTP 状态，读不出「上游限流」与「这台机器断网」的区别。`apply` 的 403 / 409 相反，它们本身就是「没执行」。
+
+## 桌面安装：`installMode` 决定用户看到什么
+
+`plugins.updater.windows.installMode` 只有插件那三种取值，它决定插件给安装器拼的参数：
+
+| `installMode` | NSIS 参数 | 用户看到什么 |
+|---|---|---|
+| `basicUi` | `/UPDATE` | 完整向导（欢迎、目录、开始菜单、完成页） |
+| `passive` | `/P /UPDATE /R` | 无交互的进度窗口，页面自动翻过 |
+| `quiet` | `/S /UPDATE /R` | 什么都不显示 |
+
+本仓库用 `quiet`。核准依据是插件与打包器源码，不是试出来的：
+
+- 插件在 Windows 上不 spawn 进程：`tauri-plugin-updater-2.14.1/src/updater.rs::install_inner` 用 `ShellExecuteW(…, "open", installer, params, …, SW_SHOW)` 启动安装器，随后 `std::process::exit(0)`。窗口形态只能由参数控制，没有 `CREATE_NO_WINDOW` 可加。
+- 参数由 `updater.rs::updater_parameters` 拼：`install_mode.nsis_args()` + `/UPDATE` + `/R`（`restart_after_install` 默认 true）。`src/config.rs` 里 `nsis_args` 是 `passive → /P`、`quiet → /S`、`basicUi → 无`。
+- `tauri-bundler-2.10.4/src/bundle/windows/nsis/installer.nsi`：`/UPDATE` 让 `PageLeaveReinstall` 直接 `Goto reinst_done`，**不调用旧版卸载器**——「卸载 → 安装」两步只在用户手动双击安装包（没有 `/UPDATE`）时出现。页面表里除 `PageReinstall` 外每一项都带 `SkipIfPassive`，而 `/S` 是 NSIS 内建静默，所有页面都不显示；`.onInstSuccess` 在静默下读 `/R`，用 `RunAsUser "$INSTDIR\<main binary>"` 重启。
+- 权限：`bundle.windows.nsis` 没有配置，bundler 默认 `currentUser` → `RequestExecutionLevel user`，静默安装不弹 UAC。
+- 会重新引入页面的配置项：`license`（许可证页）、`installMode: "both"`（安装模式选择页）、`displayLanguageSelector` 且 `languages` 多于一种（启动时的语言对话框）、自定义 `template` / `installerHooks`。四个都不要加。
+- `relaunch()` 在 Windows 上是兜底不到的死代码：安装器一启动，应用进程已经 `exit(0)`；重启由 NSIS 的参数完成。
+
+代价：静默安装失败时没有任何安装器界面可看——表现是「装完没回来」。下载进度仍在应用内（`updateProgress` / `updatePhase`），安装阶段只有一句「正在安装…」。
+
+## 当前版本、比较规则与自动检查
+
+- 「当前版本」钉的是正在运行的进程：桌面读 `@tauri-apps/api/app` 的 `getVersion()`，`serve-web` 读 `update_deployment` 响应里的 `version`。两者都写进 `simple-post:prefs` 的 `currentVersion`（合并写，不抹掉 `lastProjectId` 与 `currentEnvByProject`）。设置卡片 `AboutUpdateCard` 常显它，打开时调一次 `ensurePinnedVersion`；每次检查也会用同一个来源刷新它。
+- 「有没有新版」的判据是 `shouldPromptUpdate(available, latest, current)`（`src/lib/update/version.ts`）：`latest ≤ current` 一律不提示；`latest` 认不出、或当前版本还不知道时，信发布方的结论。比较规则与 Rust 侧 `version::compare` 一致：去前导 `v`、切掉 `-` 后缀、缺段补 0、逐段按数字比。
+- 自动检查开关是 `autoCheckUpdates`（`simple-post:prefs`，键不存在即「开」）：关掉后启动不做自动检查，手动「检查更新」不受影响；24 小时节流仍由 `dueForCheck` 用 `lastUpdateCheckAt` 判断。
+- 检查失败只写 `updateError`：`checkForUpdate` 的失败分支只改 `updateError` 与 `updateBusy`，不写 `bootstrapError`、不弹窗、不阻塞 `bootstrap()`。桌面壳里插件把网络、限流、签名失败都抛成异常，`checkDesktopUpdate` 因此返回 `{ status: 'failed', reason }` 而不是伪装成「没有新版」，`classifyCheckFailure` 再把它归到四个错误码之一。
 
 ## latest.json 与 release 正文的分工
 
@@ -79,7 +107,7 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 
 ## 离线与降级
 
-- 抓不到 release：`error` 非空，`latest` / `notes` / `url` 全为 `null`，`available` 为假。顶栏的 `UpdatePill` 因此返回 `null`（不留空槽），对话框不弹。
+- 抓不到 release：`error` 非空，`latest` / `notes` / `url` 全为 `null`，`available` 为假。顶栏的 `UpdatePill` 因此返回 `null`（不留空槽），对话框不弹。桌面壳里插件把失败抛成异常，由 `checkDesktopUpdate` 的 `failed` 结论转成 `updateError`；只要 `updateError` 非空，`UpdatePill` 也返回 `null`——哪怕上一次结论里还有一个可用新版。
 - 设置 →「关于与更新」（`AboutUpdateCard`）把原因写出来，四类文案在 `src/lib/update/messages.ts`；卡片底部那行「更新方式」按 `desktop / docker / binary` 三种说法之一。
 - 缓存只对**可用**结果生效（`CacheState.fresh`），失败不缓存：断网机器不会连着 6 小时报同一次失败。`force` 被节流时返回上一次的答案并标 `cached: true`。
 - 发布侧缺 `TAURI_SIGNING_PRIVATE_KEY` 时，`release.yml` 把 `createUpdaterArtifacts` 改成 `false`、删掉 `plugins.updater`，本次不产出更新包与 `latest.json`，应用内自动更新保持不可用。这是刻意的降级，避免整次发布因为签名失败而变红。

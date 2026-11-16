@@ -2,7 +2,7 @@
  * 更新对话框 —— 版本对照、发布说明、以及按宿主分流的主操作。
  *
  * 三条通道的差别不在长相，而在「点下去以后谁去搬新版本」：
- * - 桌面壳：updater 插件下载安装包并在完成后重启进程，界面只报进度。
+ * - 桌面壳：updater 插件在后台跑安装包，装完由安装器重启进程，界面只报进度。
  * - 容器（`serve-web` 跑在镜像里）：更新由平台侧下发，这里能给的只有 `docker pull`
  *   那一条命令；服务端允许就地执行时才能点「立即执行更新」。
  * - 源码 / 二进制：没有可代跑的东西，说明文字 + 命令，用户按部署文档来。
@@ -177,14 +177,19 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const primary = (() => {
     if (desktop) {
       return (
-        <Button
-          size="sm"
-          onClick={() => void runDesktopInstall()}
-          disabled={busy}
-          className="gap-1.5"
-        >
-          {installing ? '正在安装…' : '下载并安装'}
-        </Button>
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            size="sm"
+            onClick={() => void runDesktopInstall()}
+            disabled={busy}
+            className="gap-1.5"
+          >
+            {installing ? '正在安装…' : '下载并安装'}
+          </Button>
+          <span className="text-[11px] text-muted-foreground">
+            安装包在后台静默运行，装完自动重启，不需要卸载或再点下一步。
+          </span>
+        </div>
       );
     }
     if (docker) {

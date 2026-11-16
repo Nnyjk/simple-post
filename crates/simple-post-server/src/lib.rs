@@ -51,6 +51,8 @@ pub mod spec_api;
 /// （桌面用 tauri updater 插件）。
 pub mod update_api;
 pub mod web_api;
+/// Windows 上不给控制台子进程（`tasklist` / `taskkill` / `cmd` / daemon）开窗口。
+pub mod win_spawn;
 
 // 再导出共享的底层，好让调用点在 workspace 抽取与本次 crate 拆分之后继续使用
 // `crate::db::*` / `crate::domain::*` / `crate::error::*` /

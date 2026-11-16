@@ -14,13 +14,16 @@ import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { checkDesktopUpdate, installDesktopUpdate, isUpdaterAvailable } from '@/lib/updater';
 import type { UpdateApplyResult, UpdateCheck, UpdateDeployment } from '@/types/update';
 import { errorText } from '@/lib/error-text';
-import { describeCheckError } from '@/lib/update/messages';
+import { classifyCheckFailure, describeCheckError } from '@/lib/update/messages';
 import { dueForCheck } from '@/lib/update/time';
+import { shouldPromptUpdate } from '@/lib/update/version';
 import type { AppState } from './app-store';
 import {
   readUpdatePrefs,
+  saveAutoCheckUpdates,
   saveDismissedUpdateVersion,
   saveLastUpdateCheckAt,
+  savePinnedVersion,
 } from './slices/ui-prefs';
 
 /** 一次检查的结果，外加插件报的发布日期（只有桌面端才有）。 */
@@ -74,7 +77,23 @@ async function liveReleaseNotes(): Promise<{ notes: string | null; url: string |
 async function desktopCheck(): Promise<CheckOutcome> {
   const [desktop, current] = await Promise.all([checkDesktopUpdate(), desktopVersion()]);
   const checkedAt = new Date().toISOString();
-  if (!desktop) {
+  if (desktop.status === 'failed') {
+    // 失败也是一条结论：卡片要说「为什么没查到」，其余状态不动。
+    return {
+      info: {
+        current,
+        latest: null,
+        available: false,
+        checkedAt,
+        cached: false,
+        notes: null,
+        url: null,
+        error: classifyCheckFailure(desktop.reason),
+      },
+      releaseDate: null,
+    };
+  }
+  if (desktop.status === 'none') {
     return {
       info: {
         current,
@@ -92,16 +111,16 @@ async function desktopCheck(): Promise<CheckOutcome> {
   const live = await liveReleaseNotes();
   return {
     info: {
-      current: desktop.currentVersion || current,
-      latest: desktop.version,
+      current: desktop.update.currentVersion || current,
+      latest: desktop.update.version,
       available: true,
       checkedAt,
       cached: false,
-      notes: live?.notes || desktop.notes,
+      notes: live?.notes || desktop.update.notes,
       url: live?.url ?? null,
       error: null,
     },
-    releaseDate: desktop.date,
+    releaseDate: desktop.update.date,
   };
 }
 
@@ -124,6 +143,13 @@ export interface UpdateSliceState {
   updatePhase: 'download' | 'install' | null;
   /** web + docker 的执行结果。`exitCode` 非 0 时界面要显著标红。 */
   applyResult: UpdateApplyResult | null;
+  /**
+   * 运行中应用自报的当前版本。桌面来自 `getVersion()`，web 来自服务端响应；
+   * 持久化后设置卡片常显，「有没有新版」也以它为基准。
+   */
+  pinnedVersion: string;
+  /** 启动后是否自动检查更新。关掉只停自动那一次，手动「检查更新」仍可用。 */
+  autoCheckUpdates: boolean;
 }
 
 export interface UpdateSliceActions {
@@ -139,6 +165,14 @@ export interface UpdateSliceActions {
   autoCheckUpdate: () => Promise<void>;
   /** 桌面端「下载并安装」。成功后由 updater 模块重启进程，界面不再接管。 */
   runDesktopInstall: () => Promise<void>;
+  /**
+   * 把「当前版本」钉成运行中的那一个：桌面问 `getVersion()`，web 读
+   * `update_deployment` 的 `version`。已钉的旧值会被运行中的应用改写（升级后的第一屏），
+   * 但不会被线上 tag 之类的第二手来源改写。
+   */
+  ensurePinnedVersion: () => Promise<void>;
+  /** 改「自动检查更新」开关，并合并写回偏好。 */
+  setAutoCheckUpdates: (enabled: boolean) => void;
 }
 
 export type UpdateSlice = UpdateSliceState & UpdateSliceActions;
@@ -155,6 +189,8 @@ export const createUpdateSlice: StateCreator<AppState, [], [], UpdateSlice> = (s
   updateProgress: null,
   updatePhase: null,
   applyResult: null,
+  pinnedVersion: initialPrefs.pinnedVersion,
+  autoCheckUpdates: initialPrefs.autoCheckUpdates,
 
   checkForUpdate: async (force = false) => {
     // 已经有一次检查在跑就不再叠一次：自动检查与用户点击可能同时发生，两个回答谁先到说不准。
@@ -167,11 +203,22 @@ export const createUpdateSlice: StateCreator<AppState, [], [], UpdateSlice> = (s
             info: await invokeCmd<UpdateCheck>(COMMANDS.updateCheck, { force }),
             releaseDate: null,
           };
+      // 当前版本以运行中应用自报的为准：先钉住，再用它复核「有没有新版」。
+      const current = info.current || get().pinnedVersion;
+      const gated: UpdateCheck = {
+        ...info,
+        current,
+        available: shouldPromptUpdate(info.available, info.latest, current),
+      };
+      if (current && current !== get().pinnedVersion) {
+        set({ pinnedVersion: current });
+        savePinnedVersion(current);
+      }
       set({
-        updateInfo: info,
+        updateInfo: gated,
         updateReleaseDate: releaseDate,
         updateBusy: false,
-        updateError: describeCheckError(info.error),
+        updateError: describeCheckError(gated.error),
       });
       // 只在真拿到结论时记账：一次限流不该把接下来 24 小时的自动检查一起吃掉。
       if (!info.error) saveLastUpdateCheckAt(new Date().toISOString());
@@ -185,7 +232,13 @@ export const createUpdateSlice: StateCreator<AppState, [], [], UpdateSlice> = (s
     // 桌面端没有部署形态这回事，问也只会拿到「command not found」。
     if (isUpdaterAvailable()) return;
     try {
-      set({ updateDeployment: await invokeCmd<UpdateDeployment>(COMMANDS.updateDeployment) });
+      const deployment = await invokeCmd<UpdateDeployment>(COMMANDS.updateDeployment);
+      set({ updateDeployment: deployment });
+      // 这条响应自带服务端版本：settings 卡片不必等一次 GitHub 可达才写得出当前版本。
+      if (deployment.version && deployment.version !== get().pinnedVersion) {
+        set({ pinnedVersion: deployment.version });
+        savePinnedVersion(deployment.version);
+      }
     } catch (e) {
       // 部署形态读不到不是用户要处理的事：对话框退回「按部署文档拉取新版本」的说明。
       console.warn('[store] update deployment unavailable', e);
@@ -211,9 +264,35 @@ export const createUpdateSlice: StateCreator<AppState, [], [], UpdateSlice> = (s
   },
 
   autoCheckUpdate: async () => {
+    // 开关关掉后，启动那一次就什么都不做；手动「检查更新」走 `checkForUpdate`，不受它影响。
+    if (!get().autoCheckUpdates) return;
     // 节流状态在 localStorage 里：同一台机器上重启应用不该每开一次就问一遍 GitHub。
     if (!dueForCheck(readUpdatePrefs().lastCheckedAt, Date.now())) return;
     await get().checkForUpdate(false);
+  },
+
+  ensurePinnedVersion: async () => {
+    if (isUpdaterAvailable()) {
+      // 桌面问运行中的应用本身：升级之后第一次打开设置就该显示新版本，而不是上一版。
+      const version = await desktopVersion();
+      if (version && version !== get().pinnedVersion) {
+        set({ pinnedVersion: version });
+        savePinnedVersion(version);
+      }
+      return;
+    }
+    // web 形态没有 `getVersion()`：`update_deployment` 既给形态，也给服务端版本。
+    if (!get().updateDeployment) await get().loadDeployment();
+    const version = get().updateDeployment?.version ?? '';
+    if (version && version !== get().pinnedVersion) {
+      set({ pinnedVersion: version });
+      savePinnedVersion(version);
+    }
+  },
+
+  setAutoCheckUpdates: (enabled) => {
+    set({ autoCheckUpdates: enabled });
+    saveAutoCheckUpdates(enabled);
   },
 
   runDesktopInstall: async () => {

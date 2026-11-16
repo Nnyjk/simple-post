@@ -28,11 +28,20 @@ export function isUpdaterAvailable(): boolean {
 }
 
 /**
- * 检查更新。非桌面形态、没有新版、网络或签名校验出错，三种情况都返回 `null`：
- * 界面只有「有更新」与「没有更新」两种呈现，错误细节在这里没有出口。
+ * 一次桌面检查的三种结论。`failed` 与 `none` 必须分开：插件把网络、限流、签名失败都抛成
+ * 异常，混进 `none` 会让用户看到「已是最新版本」——那正是要消掉的假结论。
  */
-export async function checkDesktopUpdate(): Promise<DesktopUpdate | null> {
-  if (!isUpdaterAvailable()) return null;
+export type DesktopCheckResult =
+  | { status: 'available'; update: DesktopUpdate }
+  | { status: 'none' }
+  | { status: 'failed'; reason: string };
+
+/**
+ * 检查更新。非桌面形态与「确实没有新版」都返回 `none`；插件出错返回 `failed` 并带上原始
+ * 原因，由设置 →「关于与更新」的卡片翻译成中文，不抛给调用方。
+ */
+export async function checkDesktopUpdate(): Promise<DesktopCheckResult> {
+  if (!isUpdaterAvailable()) return { status: 'none' };
 
   try {
     const [{ check }, { getVersion }] = await Promise.all([
@@ -40,7 +49,7 @@ export async function checkDesktopUpdate(): Promise<DesktopUpdate | null> {
       import('@tauri-apps/api/app'),
     ]);
     const update = await check();
-    if (!update) return null;
+    if (!update) return { status: 'none' };
 
     const result: DesktopUpdate = {
       version: update.version,
@@ -50,9 +59,9 @@ export async function checkDesktopUpdate(): Promise<DesktopUpdate | null> {
     };
     // `Update` 在 Rust 侧持有一个资源；这里只取元数据，不下载，故把它还回去。
     await update.close();
-    return result;
-  } catch {
-    return null;
+    return { status: 'available', update: result };
+  } catch (e) {
+    return { status: 'failed', reason: errorText(e) };
   }
 }
 

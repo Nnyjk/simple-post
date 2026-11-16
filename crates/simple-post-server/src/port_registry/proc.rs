@@ -22,11 +22,13 @@ pub fn is_pid_alive(pid: u32) -> bool {
     #[cfg(target_os = "windows")]
     {
         let needle = format!("\"{pid}\"");
-        let output = std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        let mut cmd = std::process::Command::new("tasklist");
+        cmd.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .output();
+            .stderr(std::process::Stdio::null());
+        // 桌面壳是 GUI 子系统，不加这一步每次探测都会闪一扇终端窗口。
+        crate::win_spawn::hide_console_std(&mut cmd);
+        let output = cmd.output();
         match output {
             Ok(out) => {
                 let s = String::from_utf8_lossy(&out.stdout);
@@ -74,13 +76,13 @@ pub fn terminate_pid(pid: u32) -> bool {
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("taskkill")
-            .args(["/F", "/PID", &pid.to_string()])
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/F", "/PID", &pid.to_string()])
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+            .stderr(std::process::Stdio::null());
+        // 与探测同理：GUI 宿主 spawn 控制台程序，不压住就闪一回。
+        crate::win_spawn::hide_console_std(&mut cmd);
+        cmd.status().map(|s| s.success()).unwrap_or(false)
     }
 
     #[cfg(not(target_os = "windows"))]
