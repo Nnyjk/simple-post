@@ -236,6 +236,7 @@ function draftDetail(d: DraftEndpoint): EndpointDetail {
     auth: d.auth,
     docs: d.docs,
     tags: d.tags,
+    responses: [],
   };
 }
 

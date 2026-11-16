@@ -67,6 +67,7 @@ function detail(nodeId: string): EndpointDetail {
     body: { mode: 'none', content: '' },
     auth: { kind: 'none' },
     tags: [],
+    responses: [],
   };
 }
 

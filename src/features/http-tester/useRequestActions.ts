@@ -11,6 +11,7 @@ import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
 import type {
   ApiResponse,
   AuthConfig,
+  EndpointDetail,
   EnvSnapshot,
   EnvWrite,
   ScriptOutcome,
@@ -18,6 +19,18 @@ import type {
   TlsSettings,
 } from '@/types/domain';
 import { toRequestSnapshot } from './model/requestInput';
+
+/** 一个已存接口的补丁：`nodeId` 由目标行决定，补丁里不带。 */
+type EndpointPatch = Partial<Omit<EndpointDetail, 'nodeId'>>;
+
+/**
+ * 一次保存被后端拒绝。原因挂在产出它的那个接口上：落盘是异步的，期间用户可能已经切到
+ * 别的接口，横幅不该把那句话显示在别人头上。
+ */
+export interface SaveRejection {
+  endpointId: string;
+  message: string;
+}
 
 /**
  * 返回发送 / 保存 / 复制三个处理器。必须无条件调用——它是 hook。
@@ -47,6 +60,7 @@ export function useRequestActions({
   clearEndpointDraft,
   inFlightRef,
   setCurlFlash,
+  setSaveError,
 }: {
   endpointId: string | undefined;
   isDraft: boolean;
@@ -104,8 +118,11 @@ export function useRequestActions({
     request?: StoredRequestSnapshot,
   ) => void;
   saveDraftEndpoint: (id: string) => Promise<string | null>;
-  updateEndpointDetail: (id: string, patch: ReturnType<typeof draftToPatch>) => void;
+  /** 落盘一个已存接口的补丁；resolve 成后端拒绝的原因，`null` = 已接受。 */
+  updateEndpointDetail: (id: string, patch: EndpointPatch) => Promise<string | null>;
   clearEndpointDraft: (id: string) => void;
+  /** 记下保存被后端拒绝的原因（`null` = 清掉）。上方横幅据此显示并给重试。 */
+  setSaveError: (error: SaveRejection | null) => void;
   /**
    * 在途请求的 controller，**按标签 id 分开**。同一个标签 pending 期间再次点击发送 =
    * 取消上一次重来；换成**别的**标签则各发各的，B 的发送不会把 A 的在途请求一起 abort。
@@ -232,8 +249,25 @@ export function useRequestActions({
     }
 
     const patch = draft ? draftToPatch(draft) : {};
-    if (Object.keys(patch).length > 0) updateEndpointDetail(endpointId, patch);
-    clearEndpointDraft(endpointId);
+    if (Object.keys(patch).length === 0) {
+      clearEndpointDraft(endpointId);
+      return;
+    }
+    // 已存接口的补丁由后端落盘，而响应定义的状态码等只在那里判。被拒时草稿必须留着：
+    // 清掉它等于让用户刚填的定义静静消失，界面上看不出刚才那下什么都没写进去。
+    const submitted = draft;
+    void updateEndpointDetail(endpointId, patch).then((rejected) => {
+      if (rejected !== null) {
+        setSaveError({ endpointId, message: `保存被后端拒绝：${rejected}` });
+        return;
+      }
+      setSaveError(null);
+      // 落盘期间用户还能改字段。改过就说明手上这份草稿比刚才提交的新，清掉等于把那次
+      // 编辑一起丢掉，故只在它还是提交时那一份时才清。
+      if (useAppStore.getState().endpointDrafts[endpointId] === submitted) {
+        clearEndpointDraft(endpointId);
+      }
+    });
   }, [
     endpointId,
     runValidation,
@@ -242,6 +276,7 @@ export function useRequestActions({
     saveDraftEndpoint,
     updateEndpointDetail,
     clearEndpointDraft,
+    setSaveError,
   ]);
 
   const handleCopyCurl = useCallback(async () => {

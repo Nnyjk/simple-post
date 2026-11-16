@@ -161,6 +161,7 @@ function detail(id: string): EndpointDetail {
     docs: '',
     notes: '',
     tags: [],
+    responses: [],
     preRequestScript: '',
     testScript: '',
     tls: null,

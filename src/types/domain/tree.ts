@@ -79,10 +79,9 @@ export interface EndpointDetail {
   auth: AuthConfig;
   /**
    * 这个接口会回什么。与 `body.schema` 对称的**响应的固定参考信息**：只是文档，
-   * 不上线，也不从调用历史里反推。缺省与空数组同义（服务端总是给数组，这里放宽是
-   * 为了让既有的 `EndpointDetail` 构造点不必逐个补字段）。
+   * 不上线，也不从调用历史里反推。服务端总是给数组，空数组 = 没有定义。
    */
-  responses?: ResponseDefinition[];
+  responses: ResponseDefinition[];
   docs?: string;
   /** Markdown 笔记。与 `docs` 分开存放：整页文档保持不动，描述就地填写。 */
   notes?: string;

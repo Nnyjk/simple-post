@@ -25,6 +25,7 @@ export function makeDetail(overrides: Partial<EndpointDetail> = {}): EndpointDet
     body: { mode: 'none', content: '' },
     auth: { kind: 'none' },
     tags: [],
+    responses: [],
     ...overrides,
   };
 }

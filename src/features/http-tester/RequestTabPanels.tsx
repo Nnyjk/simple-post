@@ -3,16 +3,26 @@ import { PathParamsEditor } from './PathParamsEditor';
 import { BodyEditor } from './BodyEditor-lazy';
 import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor-lazy';
+import { ResponseEditor } from './ResponseEditor-lazy';
 import { ScriptPanel } from './ScriptPanel';
 import { TlsPanel } from './TlsPanel';
 import type { EndpointDraft } from '@/stores/store-types';
 import type { FormatResult } from '@/lib/utils';
-import type { AuthConfig, KeyValue, RequestBody, TlsSettings } from '@/types/domain';
+import type {
+  AuthConfig,
+  KeyValue,
+  RequestBody,
+  ResponseDefinition,
+  TlsSettings,
+} from '@/types/domain';
 import type { VarEntry } from './var-hint';
 
-/** 请求配置编辑器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段）。 */
+/**
+ * 请求配置编辑器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段），
+ * `response` 是文档用的响应定义，与发送请求无关。
+ */
 export type TesterTabId =
-  'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'script' | 'tls';
+  'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'response' | 'script' | 'tls';
 
 /**
  * 页签内容区 —— 只渲染当前那一页编辑器。
@@ -29,6 +39,7 @@ export function RequestTabPanels({
   body,
   auth,
   docs,
+  responses,
   preRequestScript,
   testScript,
   tls,
@@ -51,6 +62,8 @@ export function RequestTabPanels({
   body: RequestBody;
   auth: AuthConfig;
   docs: string;
+  /** 文档用的响应定义。发送请求不读它。 */
+  responses: ResponseDefinition[];
   /** 前置脚本的当前文本。 */
   preRequestScript: string;
   /** 测试脚本的当前文本。 */
@@ -129,6 +142,9 @@ export function RequestTabPanels({
         />
       )}
       {tab === 'docs' && <DocsEditor value={docs} onChange={(docs) => patchDraft({ docs })} />}
+      {tab === 'response' && (
+        <ResponseEditor value={responses} onChange={(responses) => patchDraft({ responses })} />
+      )}
       {tab === 'script' && (
         <ScriptPanel
           preRequest={preRequestScript}

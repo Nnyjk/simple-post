@@ -1,9 +1,12 @@
 import type { ReactNode } from 'react';
 import type { TabItem } from '@/components/ui/tabs';
 
-/** 请求测试器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段）。 */
+/**
+ * 请求测试器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段），
+ * `response` 是文档用的响应定义，与发送请求无关。
+ */
 export type TesterTabId =
-  'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'script' | 'tls';
+  'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'response' | 'script' | 'tls';
 
 const TABS: { id: TesterTabId; label: string; disabled?: boolean }[] = [
   { id: 'params', label: 'Params' },
@@ -12,6 +15,7 @@ const TABS: { id: TesterTabId; label: string; disabled?: boolean }[] = [
   { id: 'body', label: 'Body' },
   { id: 'auth', label: 'Auth' },
   { id: 'docs', label: 'Docs' },
+  { id: 'response', label: '响应' },
   { id: 'script', label: '脚本' },
   { id: 'tls', label: '证书' },
 ];
@@ -23,6 +27,8 @@ export interface TabBadgeState {
   headers: number;
   body: boolean;
   auth: boolean;
+  /** 响应定义的条数，与 params 一样报「有几条」。 */
+  response: number;
   script: boolean;
   /** 端点是否带着自己那份 HTTPS 出站设置。 */
   tls: boolean;
@@ -48,6 +54,9 @@ export function buildTabItems(state: TabBadgeState): TabItem[] {
       badge = (
         <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>
       );
+    }
+    if (t.id === 'response' && state.response) {
+      badge = <span className="rounded bg-muted px-1 text-[10px]">{state.response}</span>;
     }
     if (t.id === 'script' && state.script) {
       badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;

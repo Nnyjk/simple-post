@@ -3,7 +3,14 @@
  * DirtyTabsSlice 的 `pendingDirtyClose` 同时引用，各声明一份就会漂移，故放在同一个文件里。
  * 切片工厂只 import 本文件，运行时状态留在切片模块自己那里。
  */
-import type { AuthConfig, HttpMethod, KeyValue, RequestBody, TlsSettings } from '@/types/domain';
+import type {
+  AuthConfig,
+  HttpMethod,
+  KeyValue,
+  RequestBody,
+  ResponseDefinition,
+  TlsSettings,
+} from '@/types/domain';
 
 /**
  * 视觉主题预设，驱动 document 根节点上的 CSS 变量。定义在 `src/lib/theme-boot/index.ts`：
@@ -148,7 +155,7 @@ export interface ProjectTabSet {
  * 每个 endpoint 的未保存编辑，存在 `endpointDrafts` 里，切走标签再切回来才留得住输入。
  *
  * - 每个字段各自可选，缺失的字段含义是「与已存的 `EndpointDetail` 相同」。
- * - 所有请求配置编辑器（params / headers / body / auth / docs / tags）都写进这里，
+ * - 所有请求配置编辑器（params / headers / body / auth / responses / docs / tags）都写进这里，
  *   故**编辑存在草稿里，Save 才落盘，在此之前标签一直是脏的**。
  * - 刻意**不**包含 `baseUrlOverride`：它是连接配置，点中选择器那一行的瞬间就提交了。
  */
@@ -161,6 +168,11 @@ export interface EndpointDraft {
   headers?: KeyValue[];
   body?: RequestBody;
   auth?: AuthConfig;
+  /**
+   * 文档用的响应定义：整份替换已存的那份，发送请求时不读它。保存时随 `draftToPatch`
+   * 一起进 patch，故草稿上填的定义不会在保存后消失。
+   */
+  responses?: ResponseDefinition[];
   docs?: string;
   tags?: string[];
   /** 请求发出之前跑的那段脚本。 */

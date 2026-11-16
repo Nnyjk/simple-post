@@ -7,7 +7,7 @@ import { validateRequest } from '@/lib/request-validation';
 import { UNTITLED_ENDPOINT_NAME, type EndpointDraft } from '@/stores/store-types';
 import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { useHttpTesterMotion } from './useHttpTesterMotion';
-import { useRequestActions } from './useRequestActions';
+import { useRequestActions, type SaveRejection } from './useRequestActions';
 import { useEndpointContext } from './useEndpointContext';
 import { useVarHint, type VarEntry } from './var-hint';
 import { pathPlaceholders } from '@/lib/path-params';
@@ -41,6 +41,12 @@ export function HttpTester() {
   const saveDraftEndpoint = useAppStore((s) => s.saveDraftEndpoint);
   const updateDraftEndpoint = useAppStore((s) => s.updateDraftEndpoint);
   const draftSaveError = useAppStore((s) => s.draftSaveError);
+  // 已存接口的补丁被后端拒绝时，store 只回滚不留话；横幅要显示的是后端原话（状态码不合
+  // 法之类），故这份消息由本页持有，与 `draftSaveError` 共用同一条横幅。落盘是异步的，
+  // 期间用户可能已经切走，故这句话记着自己属于哪个接口，只在该接口上显示。
+  const [saveError, setSaveError] = useState<SaveRejection | null>(null);
+  const saveErrorHere =
+    saveError && saveError.endpointId === endpoint?.id ? saveError.message : null;
   // 在途标记与响应是同一份状态（挂在标签上），故它也按标签取：接口 A 上在途的
   // 请求，不该让 B 的标签也显示「请求中…」，也不该把 B 的 Send 按钮一起锁上。
   const requestPending = useAppStore((s) =>
@@ -368,6 +374,7 @@ export function HttpTester() {
     clearEndpointDraft,
     inFlightRef,
     setCurlFlash,
+    setSaveError,
   });
   // 没有 detail 行的节点是数据漏洞而非正常态（每个接口创建时都带一行）。返回同样的空态。
   if (!endpoint || !detail) {
@@ -401,6 +408,7 @@ export function HttpTester() {
     headers: enabledHeaders,
     body: hasBody,
     auth: hasAuth,
+    response: effective.responses.length,
     script: hasScript,
     tls: hasOwnTls,
   });
@@ -427,7 +435,13 @@ export function HttpTester() {
       {...{ dirty, onMethodChange: handleMethodChange, onUrlChange: urlHint.change }}
       {...{ onSend: handleSend, onSave: handleSave }}
       {...{ onCopyCurl: handleCopyCurl, onSelectionChange: handleBaseUrlSelectionChange }}
-      {...{ draftSaveError, dynamicError, tabItems, tab, onTabChange: setTab }}
+      {...{
+        draftSaveError: draftSaveError ?? saveErrorHere,
+        dynamicError,
+        tabItems,
+        tab,
+        onTabChange: setTab,
+      }}
       {...{
         headerSuggestions,
         validationError,

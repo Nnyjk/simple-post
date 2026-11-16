@@ -47,7 +47,11 @@ describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () =>
     assert.equal(harness.bag.endpointDetails['ep-rollback'].method, 'POST');
     assert.equal(harness.bag.endpointDetails['ep-rollback'].url, '/widgets/v2');
 
-    await action;
+    const rejected = await action;
+
+    // 拒绝原因经返回值交给调用方 —— 已存接口的补丁被拒时界面要显示后端原话，
+    // 否则用户刚填的那条编辑会静静消失。
+    assert.match(String(rejected), /sqlite: disk I\/O error/);
 
     const after = harness.bag.endpointDetails['ep-rollback'];
     // 原来的 detail 必须仍原封不动地在 store 里。
@@ -79,6 +83,27 @@ describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () =>
     );
   });
 
+  it('Tauri 形态的拒绝是 `{ code, message }` 对象，也要取到人话', async () => {
+    const original = makeDetail({ nodeId: 'ep-object-reject', url: '/widgets' });
+    const harness = makeCrudHarness({ 'ep-object-reject': original });
+
+    // Tauri 形态的 `invoke` 把 Rust 的 `AppError` 原样序列化后 reject，不是 `Error`。
+    // 若这里退回 `String(e)`，横幅会显示 `[object Object]`。
+    installIpcMock(async (cmd) => {
+      if (cmd === 'endpoint_detail_update') {
+        throw { code: 'VALIDATION', message: 'responses[0].status 不合法' };
+      }
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    const rejected = await harness.slice.updateEndpointDetail('ep-object-reject', {
+      responses: [],
+    });
+
+    assert.equal(rejected, 'responses[0].status 不合法', '取 message 字段而不是对象本身');
+    assert.equal(harness.bag.endpointDetails['ep-object-reject'], original, '被拒后仍回滚到原快照');
+  });
+
   it('未知 nodeId 不发 IPC — 没有 detail 行可乐观写入', async () => {
     const harness = makeCrudHarness({});
     const calls: CapturedInvoke[] = [];
@@ -87,8 +112,9 @@ describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () =>
       return null;
     });
 
-    await harness.slice.updateEndpointDetail('ghost', { url: '/nope' });
+    const rejected = await harness.slice.updateEndpointDetail('ghost', { url: '/nope' });
 
+    assert.equal(rejected, null, '没有 detail 行不算被拒');
     assert.deepEqual(calls, [], '没有 detail 行就不该打扰后端');
   });
 

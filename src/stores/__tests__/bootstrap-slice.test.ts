@@ -121,6 +121,7 @@ const endpointDetail: EndpointDetail = {
   body: { mode: 'none', content: '' },
   auth: { kind: 'none' },
   tags: [],
+  responses: [],
 };
 
 describe('bootstrap-slice 聚合加载契约', () => {

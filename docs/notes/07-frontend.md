@@ -47,7 +47,7 @@
 |---|---|---|
 | `project-tree/` | 左栏资源树：构建/过滤、DnD、行内改名、右键菜单、新建流程 | `ProjectTree.tsx`、`tree-utils.ts`、`rows/TreeRow.tsx`、`hooks/useTreeDnd.ts` |
 | `workspace/` | 工作区外壳、标签条、按标签分发内容、未保存关闭对话框 | `WorkspaceShell.tsx`、`WorkspaceTabs.tsx`、`tab-scroll.ts`、`DirtyCloseDialog.tsx` |
-| `http-tester/` | 请求编辑器：method/URL、params/headers/body/auth/TLS/脚本、变量提示 | `HttpTester.tsx`、`model/endpointParts.ts`、`useRequestActions.ts`、`*-lazy.tsx` |
+| `http-tester/` | 请求编辑器：method/URL、params/headers/body/auth/响应定义/TLS/脚本、变量提示 | `HttpTester.tsx`、`model/endpointParts.ts`、`useRequestActions.ts`、`ResponseEditor-lazy.tsx`、`*-lazy.tsx` |
 | `response-viewer/` | 响应：pretty/headers/binary/script 视图、历史、示例 | `ResponseViewer.tsx`、`responseKind.ts`、`ResponseHistory.tsx` |
 | `interchange/` | 导入/导出预览与提交（先预览后落定） | `TransferDialog.tsx`、`useTransfer.ts`、`selection.ts` |
 | `settings/` | 单例设置面板四分区 + 无项目宿主 | `SettingsPanel.tsx`、`SettingsSurface.tsx`、`sections/*` |

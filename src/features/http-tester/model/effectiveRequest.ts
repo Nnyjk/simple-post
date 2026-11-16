@@ -3,6 +3,7 @@ import type {
   EndpointDetail,
   KeyValue,
   RequestBody,
+  ResponseDefinition,
   TlsSettings,
 } from '@/types/domain';
 import type { EndpointDraft } from '@/stores/store-types';
@@ -26,6 +27,8 @@ export interface EffectiveRequest {
   body: RequestBody;
   auth: AuthConfig;
   docs: string;
+  /** 文档用的响应定义，草稿整份替换已存的那份。发送请求不读它。 */
+  responses: ResponseDefinition[];
   tags: string[];
   preRequestScript: string;
   testScript: string;
@@ -48,6 +51,7 @@ export function buildEffectiveRequest(
     body: draft?.body ?? detail?.body ?? EMPTY_BODY,
     auth: draft?.auth ?? detail?.auth ?? EMPTY_AUTH,
     docs: draft?.docs ?? detail?.docs ?? '',
+    responses: draft?.responses ?? detail?.responses ?? [],
     tags: draft?.tags ?? detail?.tags ?? [],
     preRequestScript: draft?.preRequestScript ?? detail?.preRequestScript ?? '',
     testScript: draft?.testScript ?? detail?.testScript ?? '',

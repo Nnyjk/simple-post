@@ -23,6 +23,7 @@ const effective: EffectiveRequest = {
   body: { mode: 'none', content: '' },
   auth: { kind: 'none' },
   docs: '',
+  responses: [],
   tags: [],
   preRequestScript: '',
   testScript: '',

@@ -101,7 +101,7 @@ export function TesterShell({
   onSend: () => void;
   onSave: () => void;
   onCopyCurl: () => void;
-  /** 草稿保存失败的原因。 */
+  /** 上一次保存没有落盘的原因：草稿写入失败，或已存接口的补丁被后端拒绝。 */
   draftSaveError: string | null;
   /** 动态变量的定义没加载上来 / 取数调用失败时的原因。 */
   dynamicError: string | null;
@@ -167,9 +167,10 @@ export function TesterShell({
         onCopyCurl={onCopyCurl}
       />
 
-      {/* 草稿保存失败会保留草稿与标签，重试就是再按一次保存 —— 但用户必须知道刚才那下
-          什么都没做，否则点击看起来是坏的。`addNode` 把真实错误吞成 `null` 只记日志，
-          故这是 UI 能给的唯一信号。 */}
+      {/* 保存失败会保留草稿与标签，重试就是再按一次保存 —— 但用户必须知道刚才那下
+          什么都没做，否则点击看起来是坏的。草稿写入失败时 `addNode` 把真实错误吞成
+          `null` 只记日志；已存接口被后端拒绝时原因由调用方带上来，故这条横幅是 UI 能
+          给的全部信号。 */}
       {draftSaveError && (
         <div
           role="alert"
@@ -226,6 +227,7 @@ export function TesterShell({
           body={effective.body}
           auth={effective.auth}
           docs={effective.docs}
+          responses={effective.responses}
           preRequestScript={effective.preRequestScript}
           testScript={effective.testScript}
           // 端点自己那份 HTTPS 出站设置（`null` = 继承全局）与全局默认那份。

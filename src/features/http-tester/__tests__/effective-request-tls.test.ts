@@ -33,6 +33,7 @@ function detail(tls?: TlsSettings | null): EndpointDetail {
     body: { mode: 'none', content: '' },
     auth: { kind: 'none' },
     tags: [],
+    responses: [],
     ...(tls !== undefined ? { tls } : {}),
   };
 }
