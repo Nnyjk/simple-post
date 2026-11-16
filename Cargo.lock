@@ -3970,7 +3970,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "simple-post"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "clap",
  "serde_json",
@@ -3987,7 +3987,7 @@ dependencies = [
 
 [[package]]
 name = "simple-post-core"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "base64 0.23.1",
  "dirs",
@@ -4008,7 +4008,7 @@ dependencies = [
 
 [[package]]
 name = "simple-post-interchange"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "openapiv3",
  "serde",
@@ -4019,7 +4019,7 @@ dependencies = [
 
 [[package]]
 name = "simple-post-mcp"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -4039,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "simple-post-server"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "axum",
  "clap",
