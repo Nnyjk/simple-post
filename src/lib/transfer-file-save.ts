@@ -14,9 +14,15 @@ import type { ExportDocument } from './interchange-types';
 
 export type SaveOutcome = 'saved' | 'cancelled';
 
-/** 保存对话框的过滤器。扩展名由 `doc.mediaType` 决定；用户在对话框里改文件名不受这个过滤器限制。 */
+/**
+ * 保存对话框的过滤器。扩展名由 `doc.mediaType` 决定；用户在对话框里改文件名不受这个过滤器限制。
+ *
+ * 三种产物都从这一条路出去：OpenAPI 的 `application/json` / `application/yaml`，以及接口文档
+ * 快照的 `text/html`。媒体类型不认识时退回 `json`——那是绝大多数调用方的形状。
+ */
 function filtersFor(doc: ExportDocument) {
-  const ext = doc.mediaType === 'application/yaml' ? 'yaml' : 'json';
+  const ext =
+    doc.mediaType === 'application/yaml' ? 'yaml' : doc.mediaType === 'text/html' ? 'html' : 'json';
   return [{ name: ext.toUpperCase(), extensions: [ext] }];
 }
 
@@ -61,8 +67,9 @@ export async function copyGeneratedDocument(doc: ExportDocument): Promise<void> 
 }
 
 /**
- * 浏览器形态的下载。`Blob` 的 MIME 用 `application/json` / `application/yaml`，
- * 于是「打开方式」列表里会落到正确的程序上。
+ * 浏览器形态的下载。`Blob` 的 MIME 原样取 `doc.mediaType`（`application/json` /
+ * `application/yaml` / `text/html`），于是「打开方式」列表里会落到正确的程序上——HTML 快照会
+ * 被浏览器自己打开，而不是落到编辑器里。
  */
 function downloadInBrowser(doc: ExportDocument): void {
   const blob = new Blob([doc.content], { type: `${doc.mediaType};charset=utf-8` });
