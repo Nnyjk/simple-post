@@ -15,6 +15,15 @@ import type { ExportDocument } from './interchange-types';
 export type SaveOutcome = 'saved' | 'cancelled';
 
 /**
+ * 保存结果。`fileName` 是**真正**落盘的那一个：桌面「另存为」对话框里用户可以把建议名改掉，
+ * 界面若继续显示建议名，就是在报告一个不存在的文件。
+ */
+export interface SaveResult {
+  status: SaveOutcome;
+  fileName: string | null;
+}
+
+/**
  * 保存对话框的过滤器。扩展名由 `doc.mediaType` 决定；用户在对话框里改文件名不受这个过滤器限制。
  *
  * 三种产物都从这一条路出去：OpenAPI 的 `application/json` / `application/yaml`，以及接口文档
@@ -39,10 +48,10 @@ export function humanizeSaveError(err: unknown): Error {
   return err instanceof Error ? err : new Error(raw);
 }
 
-export async function saveGeneratedDocument(doc: ExportDocument): Promise<SaveOutcome> {
+export async function saveGeneratedDocument(doc: ExportDocument): Promise<SaveResult> {
   if (!IS_TAURI_SHELL) {
     downloadInBrowser(doc);
-    return 'saved';
+    return { status: 'saved', fileName: doc.fileName };
   }
 
   const { save } = await import('@tauri-apps/plugin-dialog');
@@ -50,7 +59,7 @@ export async function saveGeneratedDocument(doc: ExportDocument): Promise<SaveOu
     defaultPath: doc.fileName,
     filters: filtersFor(doc),
   });
-  if (!path) return 'cancelled';
+  if (!path) return { status: 'cancelled', fileName: null };
 
   const { writeTextFile } = await import('@tauri-apps/plugin-fs');
   try {
@@ -58,7 +67,13 @@ export async function saveGeneratedDocument(doc: ExportDocument): Promise<SaveOu
   } catch (err) {
     throw humanizeSaveError(err);
   }
-  return 'saved';
+  return { status: 'saved', fileName: baseName(path) };
+}
+
+/** 桌面返回的是完整路径（Windows 上是 `\` 分隔）。界面只要文件名那一段。 */
+function baseName(path: string): string {
+  const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return cut >= 0 ? path.slice(cut + 1) : path;
 }
 
 /** 复制到剪贴板。次要出口：原生保存对话框被取消时，用户仍然拿得到内容。 */

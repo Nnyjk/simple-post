@@ -48,12 +48,21 @@ export function escapeHtml(value: string): string {
  * 变成字面量，但 Markdown 解析器也可能已经把 `&#58;` 解成 `:`；两种来路都要在判定前归一。
  */
 export function isSafeHref(href: string): boolean {
-  const normalized = stripUrlNoise(decodeNumericEntities(href));
+  const normalized = stripUrlNoise(decodeEntities(href));
   if (normalized === '') return false;
   const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(normalized);
   if (!scheme) return true;
   const name = scheme[1].toLowerCase();
   return name === 'http' || name === 'https' || name === 'mailto';
+}
+
+/**
+ * `href` 属性值的转义。Markdown 解析器交下来的地址**已经做过一次**实体编码
+ * （`?a=1&b=2` 到这里是 `?a=1&amp;b=2`），再套 `escapeHtml` 会变成 `&amp;amp;`，接收方点开
+ * 就是查询参数 `amp;b`。故先还原实体再转一次：输出里只有一层编码，浏览器读到的正是原地址。
+ */
+export function escapeHref(href: string): string {
+  return escapeHtml(decodeEntities(href));
 }
 
 /** 浏览器解析 URL 时忽略 ASCII 控制字符与空格（`java\tscript:` 就是 `javascript:`），故先全部剥掉。 */
@@ -67,8 +76,17 @@ function stripUrlNoise(value: string): string {
   return out;
 }
 
-function decodeNumericEntities(value: string): string {
-  return value.replace(/&#(x[0-9a-fA-F]+|\d+);/g, (_match, body: string) => {
+/**
+ * 还原实体引用。白名单判定必须做这一步：`jav&#97;script:`、`javascript&colon;` 都是浏览器认的
+ * 写法。命名实体只收常见的几个——其余保持字面量时协议判定不成立，链接会退化成一个打不开的相对
+ * 地址，既不是脚本也不是漏网的跳板。
+ */
+function decodeEntities(value: string): string {
+  const named = value.replace(
+    /&(amp|lt|gt|quot|apos|colon|tab|newline|sol|period|nbsp);/gi,
+    (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match,
+  );
+  return named.replace(/&#(x[0-9a-fA-F]+|\d+);/g, (_match, body: string) => {
     const code =
       body.startsWith('x') || body.startsWith('X')
         ? Number.parseInt(body.slice(1), 16)
@@ -76,3 +94,18 @@ function decodeNumericEntities(value: string): string {
     return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
   });
 }
+
+/** 只收会影响协议判定的那几个：冒号、制表/换行、斜杠、点，其余还原出来也没意义。 */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  colon: ':',
+  tab: '\t',
+  newline: '\n',
+  sol: '/',
+  period: '.',
+  nbsp: '\u00a0',
+};

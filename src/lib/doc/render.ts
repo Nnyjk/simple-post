@@ -223,15 +223,66 @@ function renderResponse(response: DocResponse): string {
 /**
  * schema / example 是用户手写的文本：能解析成 JSON 就重排成两空格缩进（同一份定义换个排列法
  * 也让产物保持一致），解析不了就原样输出——文档不该因为一段坏 JSON 而丢掉用户写的东西。
+ *
+ * 重排**只动空白**，不经过 `JSON.parse` 的数值往返：`{"id":9007199254740993}` 这样超出 IEEE-754
+ * 的安全整数会被 `Number` 舍入成 `…992`，那是用户从没写过的值。
  */
 function canonicalJsonText(raw: string): string {
   const text = raw.trim();
   if (text === '') return '';
   try {
-    return JSON.stringify(JSON.parse(text), null, 2) ?? text;
+    JSON.parse(text);
   } catch {
     return text;
   }
+  return prettyJsonWhitespace(text);
+}
+
+function prettyJsonWhitespace(text: string): string {
+  let out = '';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let last = '';
+  // 换行是**推迟**到下一个 token 才落的：`{}`、`{ }` 这类空容器因此不会多出一行只有缩进的空行。
+  let pendingBreak = false;
+  for (const ch of text) {
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') continue;
+    const isClose = ch === '}' || ch === ']';
+    const emptyClose = (ch === '}' && last === '{') || (ch === ']' && last === '[');
+    if ((pendingBreak || isClose) && !emptyClose) {
+      out += `\n${'  '.repeat(Math.max(0, depth - (isClose ? 1 : 0)))}`;
+      pendingBreak = false;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+    } else if (ch === '{' || ch === '[') {
+      depth += 1;
+      out += ch;
+      pendingBreak = true;
+    } else if (ch === '}' || ch === ']') {
+      depth -= 1;
+      out += ch;
+      pendingBreak = true;
+    } else if (ch === ',') {
+      out += ch;
+      pendingBreak = true;
+    } else if (ch === ':') {
+      out += ': ';
+    } else {
+      out += ch;
+    }
+    last = ch;
+  }
+  return out;
 }
 
 function codeBlock(text: string): string {

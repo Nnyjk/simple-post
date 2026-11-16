@@ -155,7 +155,9 @@ function toTransferNode(
 ): TransferNode {
   const kids = children.get(node.id) ?? [];
   const endpoints = kids
-    .filter((n) => n.kind === 'endpoint')
+    // 没有 `detail` 的节点列表里给不出 METHOD 与路径，也进不了文档（`buildGroup` 会跳过）。
+    // 留在这里只会让「已选 n 个」与实际导出的数量对不上。
+    .filter((n) => n.kind === 'endpoint' && details[n.id] !== undefined)
     .sort(bySortOrder)
     .map((n) => {
       const detail = details[n.id];

@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import type { EndpointDetail, ResourceNode } from '@/types/domain';
+import type { EndpointDetail, ResourceNode, ResponseDefinition } from '@/types/domain';
 
 import { buildApiDocModel } from '../model';
 import { renderApiDocHtml } from '../render';
@@ -20,6 +20,7 @@ function modelOf(
     nodes?: ResourceNode[];
     details?: Record<string, EndpointDetail>;
     docs?: string;
+    responses?: ResponseDefinition[];
   } = {},
 ) {
   return buildApiDocModel({
@@ -35,7 +36,7 @@ function modelOf(
         pathParams: [kv('id', '1', '订单 id')],
         params: [kv('page', '2', '页码')],
         headers: [kv('Authorization', 'Bearer token', '访问令牌')],
-        responses: [
+        responses: overrides.responses ?? [
           {
             id: 'r1',
             status: '200',
@@ -153,4 +154,23 @@ test('说明里写明数据来源与快照语义，环境变量只列名字', ()
   assert.equal(html.includes('都不会出现在这份文件里'), true);
   assert.equal(html.includes('region'), true);
   assert.equal(html.includes('cn<'), false);
+});
+
+test('响应示例重排只动空白，超出安全整数的值不被舍入', () => {
+  const html = renderApiDocHtml(
+    modelOf({
+      responses: [
+        {
+          id: 'r_1',
+          status: '200',
+          description: 'OK',
+          contentType: 'application/json',
+          example: '{"id":9007199254740993,"tags":[]}',
+        },
+      ],
+    }),
+  );
+  assert.equal(html.includes('9007199254740993'), true);
+  assert.equal(html.includes('9007199254740992'), false);
+  assert.equal(html.includes('&quot;id&quot;: 9007199254740993'), true);
 });
