@@ -65,13 +65,23 @@ fn checker(fake: &Fake) -> UpdateChecker {
     UpdateChecker::new(Box::new(fake.clone()))
 }
 
+/// 比 `current_version()` 大一个补丁号的版本。夹具里写死版本号的话，每次
+/// 发版都会让「有新版可用」这条断言变红；这里跟着版本源走。
+fn next_version() -> String {
+    let current = current_version();
+    let (head, patch) = current.rsplit_once('.').expect("版本号至少两段");
+    let patch: u64 = patch.parse().expect("补丁号是数字");
+    format!("{head}.{}", patch + 1)
+}
+
 #[tokio::test]
 async fn newer_release_is_available() {
-    let fake = Fake::release("v0.1.35");
+    let next = next_version();
+    let fake = Fake::release(&format!("v{next}"));
     let result = checker(&fake).check(false).await;
 
     assert_eq!(result.current, current_version());
-    assert_eq!(result.latest.as_deref(), Some("0.1.35"));
+    assert_eq!(result.latest.as_deref(), Some(next.as_str()));
     assert!(result.available);
     assert!(!result.cached);
     assert_eq!(result.error, None);
@@ -80,10 +90,11 @@ async fn newer_release_is_available() {
 
 #[tokio::test]
 async fn same_version_is_not_available() {
-    let fake = Fake::release("v0.1.34");
+    let current = current_version();
+    let fake = Fake::release(&format!("v{current}"));
     let result = checker(&fake).check(false).await;
 
-    assert_eq!(result.latest.as_deref(), Some("0.1.34"));
+    assert_eq!(result.latest.as_deref(), Some(current));
     assert!(!result.available);
     assert_eq!(result.error, None);
 }
