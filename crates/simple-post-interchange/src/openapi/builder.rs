@@ -175,11 +175,9 @@ impl Builder {
             );
         }
 
-        // 合成默认：响应历史可能被截断，猜出来的 schema 看不出不可靠，比不猜更糟。
-        op.insert(
-            "responses".into(),
-            json!({ "200": { "description": "OK" } }),
-        );
+        // 端点自己声明的响应。一条都没有时才退回「200: OK」——规范要求 `responses`
+        // 至少有一个成员。
+        op.insert("responses".into(), self.responses_of(ep, &pointer));
 
         match self.register_scheme(&ep.auth, &pointer) {
             Some(name) => {
@@ -215,6 +213,87 @@ impl Builder {
         if let Some(map) = item.as_object_mut() {
             map.insert(verb, Value::Object(op));
         }
+    }
+
+    /// 端点的响应定义 → OpenAPI 的 `responses` 对象。
+    ///
+    /// 一条定义都没给时才退回 `{"200": {"description": "OK"}}`：规范要求 `responses` 至少有一个
+    /// 成员，而「没写定义」与「回 200」在绝大多数接口上是同一件事。
+    ///
+    /// 写不进文档的定义（`status` 不合法、`schema` 不是对象、`contentType` 不是 media type）
+    /// 落一条 `Diagnostic` 并**跳过这一条**：把过不了规范校验的键写进去，整份文档都会被判为
+    /// 非法，那比少一条响应严重得多。`status` 重复时留第一条——同一个键写两遍，后一个会静默
+    /// 覆盖前一个。
+    ///
+    /// `contentType` 为空时只写 `description`：没有 media type 就没有 `content` 块，`schema`
+    /// 与 `example` 也就没有地方挂，此时回一条 `Info` 说明它们被丢下了。
+    fn responses_of(&mut self, ep: &IrEndpoint, pointer: &str) -> Value {
+        let mut out = Map::new();
+        for response in &ep.responses {
+            let slot = format!(
+                "{pointer}/responses/{}",
+                escape_pointer_token(&response.status)
+            );
+            if !simple_post_core::domain::is_response_status(&response.status) {
+                self.diagnostics.push(Diagnostic::warn(
+                    &slot,
+                    "status 不是 `200`、`2XX` 或 `default` 这样的键，OpenAPI 里没有它的位置",
+                ));
+                continue;
+            }
+            if out.contains_key(response.status.as_str()) {
+                self.diagnostics.push(Diagnostic::info(
+                    &slot,
+                    format!(
+                        "同一个 status「{}」上已经有另一条响应定义，后出现的这一条被丢弃",
+                        response.status
+                    ),
+                ));
+                continue;
+            }
+            let schema = match &response.schema {
+                Some(schema) if !schema.is_object() => {
+                    self.diagnostics.push(Diagnostic::warn(
+                        &slot,
+                        "schema 必须是 JSON 对象（一份 JSON Schema），这一条响应被丢弃",
+                    ));
+                    continue;
+                }
+                other => other.clone(),
+            };
+
+            let mut item = Map::new();
+            item.insert("description".into(), json!(response.description));
+            let media = response.content_type.trim();
+            if media.is_empty() {
+                if schema.is_some() || response.example.is_some() {
+                    self.diagnostics.push(Diagnostic::info(
+                        &slot,
+                        "响应没有 contentType，OpenAPI 没有地方安放它的 schema 与 example，只能导出 description",
+                    ));
+                }
+            } else if !simple_post_core::domain::is_media_type(media) {
+                self.diagnostics.push(Diagnostic::warn(
+                    &slot,
+                    format!("contentType「{media}」不是 `type/subtype` 形状，这一条响应被丢弃"),
+                ));
+                continue;
+            } else {
+                let mut body = Map::new();
+                if let Some(schema) = schema {
+                    body.insert("schema".into(), schema);
+                }
+                if let Some(example) = &response.example {
+                    body.insert("example".into(), example_value(example));
+                }
+                item.insert("content".into(), json!({ media: body }));
+            }
+            out.insert(response.status.clone(), Value::Object(item));
+        }
+        if out.is_empty() {
+            return json!({ "200": { "description": "OK" } });
+        }
+        Value::Object(out)
     }
 
     /// 端点 auth → 一条 securityScheme，返回它的名字。同名只写一份。
@@ -391,6 +470,14 @@ impl Builder {
         self.used_operation_ids.insert(candidate.clone());
         candidate
     }
+}
+
+/// 响应示例的原文 → 文档里的 `example` 值。
+///
+/// 示例在库里是原文（用户粘贴的那一段）。能解析成 JSON 就写解析出来的值，故 `{"id": 1}` 在
+/// 文档里是一个对象，而不是一段转义过的文本；解析不了（`<html>…`、纯文本）就原样当字符串写。
+fn example_value(raw: &str) -> Value {
+    serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
 }
 
 /// 这个 operation 的 `servers`。

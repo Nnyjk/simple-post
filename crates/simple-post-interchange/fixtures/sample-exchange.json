@@ -148,6 +148,37 @@
             "schema": "{\"type\":\"object\",\"properties\":{\"theme\":{\"type\":\"string\"}}}"
           },
           "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        },
+        {
+          "key": "m0e14",
+          "name": "用户资料",
+          "description": "响应定义：一条只有 description，一条带 schema 与 example",
+          "method": "GET",
+          "path": "/users/{id}/profile",
+          "pathParams": [
+            { "id": "kv20", "key": "id", "value": "42", "enabled": true }
+          ],
+          "responses": [
+            {
+              "id": "resp_1",
+              "status": "200",
+              "description": "用户资料",
+              "contentType": "application/json",
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "integer" },
+                  "displayName": { "type": "string" }
+                }
+              },
+              "example": "{\"id\":42,\"displayName\":\"Ada\"}"
+            },
+            {
+              "id": "resp_2",
+              "status": "404",
+              "description": "用户不存在"
+            }
+          ]
         }
       ],
       "collections": [

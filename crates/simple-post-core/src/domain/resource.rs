@@ -1,5 +1,7 @@
 //! 资源树：module / collection / endpoint 的节点行，以及 endpoint 的请求配置。
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::auth::{AuthConfig, KeyValue, RequestBody};
@@ -141,7 +143,196 @@ impl ResourceNodePatch {
     }
 }
 
-/// endpoint 的请求配置。按 `node_id` 与 [`ResourceNode`] 关联；树的列不出现在这里，
+/// 一条响应的**文档定义**：这个端点会回什么。与请求侧的 `params` / `body.schema` 对称。
+///
+/// 这只是文档：发送请求时不读它，响应历史也不写回它，故它与实际收到的响应可以不一致。
+/// 它的去处是导出的 OpenAPI 文档与 agent 的入参。
+///
+/// 字段形状由 OpenAPI 的 response 对象决定：`description` 在那份规范里必填，故这里也是必填字段。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponseDefinition {
+    /// 行身份，只给界面列表与 PATCH 定位用。缺省时由调用方铸 id（`spec::input` 的 coercion
+    /// 铸 `resp_` 前缀），与 [`KeyValue`] 的 `id` 同一套做法。
+    #[serde(default)]
+    pub id: String,
+    /// `200` / `2XX` / `default` 三种写法之一，判定见 [`is_response_status`]。
+    #[serde(default)]
+    pub status: String,
+    /// 这个响应是什么。OpenAPI 只要求它存在，空串导出成 `""`。
+    #[serde(default)]
+    pub description: String,
+    /// 例 `application/json`。空串表示导出时不写 `content` 块，只留 `description`。
+    #[serde(default)]
+    pub content_type: String,
+    /// 响应体的 JSON Schema（对象）。`None` = 没有 schema 可写。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<serde_json::Value>,
+    /// 示例正文的原文。导出时能解析成 JSON 就写成 JSON 值，否则按字符串写。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub example: Option<String>,
+}
+
+/// 响应定义里查出的一个字段级问题。`index` 指向它在列表中的位置。
+///
+/// 存储层的写入口（`db::endpoint_details::{create,update}`）与 MCP 的 `api_validate_endpoint`
+/// 都读这个结构：前者把问题折成一条 `Validation` 错误，后者逐条报成 issue。**判据只在这里
+/// 实现一次**，两侧各自只负责措辞：`Validation` 走中文（与 core 其余校验错误一致），MCP 的
+/// issue 走英文（与 `api_validate_endpoint` 其余 issue 一致），故 `kind` 同时带着「哪条规则
+/// 被踩了」，措辞按 `kind` 分派。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponseProblem {
+    pub index: usize,
+    /// 结构体字段名：`status` / `schema` / `contentType`。
+    pub field: &'static str,
+    pub kind: ResponseProblemKind,
+    pub message: String,
+}
+
+/// 响应定义踩的是哪一条规则。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseProblemKind {
+    /// `status` 不是 `200` / `2XX` / `default` 之一。
+    StatusSyntax,
+    /// 同一份定义里 `status` 出现了第二次。
+    StatusDuplicate,
+    /// `schema` 给了，但不是 JSON 对象。
+    SchemaNotObject,
+    /// `contentType` 非空，但不是 `type/subtype` 形状。
+    ContentType,
+}
+
+impl ResponseProblem {
+    /// 线上字段路径：`responses[0].status`。MCP issue 的 `field` 用的就是这个写法。
+    pub fn field_path(&self) -> String {
+        format!("responses[{}].{}", self.index, self.field)
+    }
+}
+
+/// 给缺 id 的响应定义铸一个 `resp_` 前缀的 id，其余原样返回。
+///
+/// 三条写路径都在入口调它：`spec::input` 的 coercion（MCP 入参与 spec upsert）、
+/// `db::endpoint_details` 的写入（REST 直达的那条）、`interchange::commit` 的落库（导入的
+/// `IrEndpoint` 可能不带 id）。界面靠这个 id 定位行，故任何一条路径都不能漏。
+pub fn ensure_response_ids(mut responses: Vec<ResponseDefinition>) -> Vec<ResponseDefinition> {
+    for response in &mut responses {
+        if response.id.trim().is_empty() {
+            response.id = super::util::uid_with_prefix("resp");
+        }
+    }
+    responses
+}
+
+/// 校验一整份响应定义：逐条字段规则，外加「同一份里 `status` 不得重复」。
+///
+/// 规则只在这里实现一次，故 REST 与 MCP 两条写路径无法各说各话。
+pub fn response_problems(responses: &[ResponseDefinition]) -> Vec<ResponseProblem> {
+    let mut problems = Vec::new();
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    for (index, response) in responses.iter().enumerate() {
+        if !is_response_status(&response.status) {
+            problems.push(ResponseProblem {
+                index,
+                field: "status",
+                kind: ResponseProblemKind::StatusSyntax,
+                message: format!(
+                    "status `{}` 不是合法值：只接受 1XX–5XX 的三位数字、同范围的 `NXX`（如 `2XX`）与字面 `default`",
+                    response.status
+                ),
+            });
+        } else if let Some(first) = seen.insert(response.status.as_str(), index) {
+            problems.push(ResponseProblem {
+                index,
+                field: "status",
+                kind: ResponseProblemKind::StatusDuplicate,
+                message: format!("status `{}` 与第 {} 条重复", response.status, first),
+            });
+        }
+        if let Some(schema) = &response.schema {
+            if !schema.is_object() {
+                problems.push(ResponseProblem {
+                    index,
+                    field: "schema",
+                    kind: ResponseProblemKind::SchemaNotObject,
+                    message: "schema 必须是 JSON 对象".to_string(),
+                });
+            }
+        }
+        let content_type = response.content_type.trim();
+        if !content_type.is_empty() && !is_media_type(content_type) {
+            problems.push(ResponseProblem {
+                index,
+                field: "contentType",
+                kind: ResponseProblemKind::ContentType,
+                message: format!(
+                    "contentType `{content_type}` 不是合法的 media type：要写成 `type/subtype`"
+                ),
+            });
+        }
+    }
+    problems
+}
+
+/// `status` 的合法写法，全小写的 `default` 是唯一例外：`200`、`2XX`（大写字母）或 `default`。
+///
+/// 三位数字的首位限定在 1–5，与 OpenAPI 的响应状态码取值范围一致。小写的 `2xx` 不接受：
+/// 同一种写法在文档里只应有一种拼法。
+pub fn is_response_status(status: &str) -> bool {
+    if status == "default" {
+        return true;
+    }
+    match status.as_bytes() {
+        [first, rest, last] => {
+            (b'1'..=b'5').contains(first) && rest.is_ascii_digit() && last.is_ascii_digit()
+        }
+        [first, rest, b'X', b'X'] => (b'1'..=b'5').contains(first) && rest.is_ascii_digit(),
+        _ => false,
+    }
+}
+
+/// `type/subtype` 的够用判定，不引解析库。
+///
+/// 参数（`; charset=utf-8`）按 media type 的规定忽略；两个 token 都必须非空且只由 RFC 7230 的
+/// token 字符组成，中间恰好一个 `/`。通配符 `*` 属于 token 字符，故 `application/*` 也通过——
+/// OpenAPI 的 `content` 键允许 media range。
+///
+/// 公开是因为导出的 OpenAPI 要拿同一个判据决定「这个 `content` 键能不能写」：写进去的键
+/// 过不了规范校验，整份文档都会被判为非法。
+pub fn is_media_type(raw: &str) -> bool {
+    let essence = raw.split(';').next().unwrap_or("").trim();
+    let mut parts = essence.split('/');
+    let (Some(kind), Some(subtype), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    !kind.is_empty()
+        && !subtype.is_empty()
+        && kind.bytes().all(is_token_byte)
+        && subtype.bytes().all(is_token_byte)
+}
+
+/// RFC 7230 的 tchar：字母、数字与 `!#$%&'*+-.^_`|~`。
+fn is_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+/// endpoint 的请求配置与响应定义。按 `node_id` 与 [`ResourceNode`] 关联；树的列不出现在这里，
 /// 好让它们各自只有一个归属。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +358,12 @@ pub struct EndpointDetail {
     pub body: RequestBody,
     #[serde(default)]
     pub auth: AuthConfig,
+    /// 这个端点会回什么。文档定义，不上线：发送请求不读它，响应历史也不写它。
+    ///
+    /// `#[serde(default)]` 与 `responses_json` 列的 `DEFAULT '[]'` 是同一件事的两处表达：
+    /// 老库补列之后，既有端点的这里读出空列表。
+    #[serde(default)]
+    pub responses: Vec<ResponseDefinition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -215,6 +412,13 @@ pub struct EndpointDetailPatch {
     pub body: Option<RequestBody>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthConfig>,
+    /// 缺席 = 不动，`null` = 清空，设值 = 整体替换。
+    ///
+    /// 走 `double_option`，理由同 `pathParams`：`Option<Vec<_>>` 会把「键缺席」与「值是 `null`」
+    /// 折叠成同一件事，`{"responses": null}` 就清不掉任何定义。
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub responses: Option<Option<Vec<ResponseDefinition>>>,
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docs: Option<Option<String>>,

@@ -195,6 +195,7 @@ async fn fetch_from_inline(
         pre_request_script: None,
         test_script: None,
         tls: None,
+        responses: vec![],
     };
 
     let overrides = EndpointOverrides::default();

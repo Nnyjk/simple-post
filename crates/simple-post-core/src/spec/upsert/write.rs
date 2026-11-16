@@ -6,8 +6,10 @@ use crate::domain::{
     ResourceNodePatch, ResourceNodeType,
 };
 use crate::error::AppError;
-use crate::spec::input::{check_auth_payload, coerce_key_values, reject_schema_shaped_payload};
-use crate::spec::{find_endpoint_by_identity, mint_id};
+use crate::spec::find_endpoint_by_identity;
+use crate::spec::input::{
+    check_auth_payload, coerce_key_values, coerce_responses, reject_schema_shaped_payload,
+};
 
 use super::resolve::{resolve_environment_of, resolve_module_of, resolve_parent_of};
 use super::types::{
@@ -136,7 +138,7 @@ fn upsert_endpoint_of(
     }
 
     let now = crate::domain::now_ms();
-    let id = mint_id("ep");
+    let id = crate::domain::uid_with_prefix("ep");
     let node = ResourceNode {
         id: id.clone(),
         root_id: project_id.to_string(),
@@ -158,6 +160,11 @@ fn upsert_endpoint_of(
         headers: coerce_key_values(def.headers.clone().unwrap_or_default()),
         body,
         auth,
+        responses: def
+            .responses
+            .clone()
+            .map(coerce_responses)
+            .unwrap_or_default(),
         docs: def.docs.clone(),
         notes: def.notes.clone(),
         tags: def.tags.clone().unwrap_or_default(),
@@ -216,6 +223,11 @@ fn apply_endpoint_patch(
         headers: def.headers.clone().map(coerce_key_values),
         body: def.body.as_ref().map(|_| body.clone()),
         auth: def.auth.as_ref().map(|_| auth.clone()),
+        // 规格点名了就整体替换这一份定义，没点名就一个字段都不碰。
+        responses: def
+            .responses
+            .clone()
+            .map(|rows| Some(coerce_responses(rows))),
         docs: def.docs.clone().map(Some),
         notes: def.notes.clone().map(Some),
         tags: def.tags.clone(),

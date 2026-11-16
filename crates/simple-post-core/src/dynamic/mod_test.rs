@@ -899,6 +899,7 @@ fn pool_with_a_module() -> (db::DbPool, std::path::PathBuf) {
                 pre_request_script: None,
                 test_script: None,
                 tls: None,
+                responses: vec![],
             }),
         )?;
         Ok(())

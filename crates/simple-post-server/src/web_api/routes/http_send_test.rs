@@ -112,6 +112,7 @@ fn seed(dir: &std::path::Path, api_url: &str) {
         headers: vec![],
         body: RequestBody::default(),
         auth: AuthConfig::default(),
+        responses: vec![],
         docs: None,
         notes: None,
         tags: vec![],

@@ -64,6 +64,12 @@ fn patch_shape_hint(field: &str) -> String {
              \"clientKeyPath\":\"<path>\"}, or null to clear the endpoint's own \
              HTTPS settings"
             .to_string(),
+        "responses" => "an array of objects shaped {\"status\":\"200\",\
+             \"description\":\"OK\",\"contentType\":\"application/json\",\
+             \"schema\":{...},\"example\":\"...\"}, or null to clear the whole \
+             response list; note `contentType` is a media type and `schema` must \
+             be an object when present"
+            .to_string(),
         _ => String::new(),
     }
 }

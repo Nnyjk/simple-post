@@ -25,7 +25,9 @@
 
 use std::collections::BTreeSet;
 
-use simple_post_core::domain::{AuthConfig, HttpMethod, KeyValue, RequestBody, RewriteRule};
+use simple_post_core::domain::{
+    AuthConfig, HttpMethod, KeyValue, RequestBody, ResponseDefinition, RewriteRule,
+};
 
 use crate::diagnostics::Diagnostic;
 
@@ -159,6 +161,12 @@ pub struct IrEndpoint {
     pub body: RequestBody,
     #[serde(default)]
     pub auth: AuthConfig,
+    /// 这个接口会回什么的文档定义。与 `body.schema` 对称，同样只为文档存在。
+    ///
+    /// 导入时一条响应落一条定义；导出时它决定 `responses` 对象的内容，故这一份是
+    /// OpenAPI 与 Postman 两个方向的共同载体。
+    #[serde(default)]
+    pub responses: Vec<ResponseDefinition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

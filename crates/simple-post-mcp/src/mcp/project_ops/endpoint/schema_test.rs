@@ -133,6 +133,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
             "params",
             "path_params",
             "pre_request_script",
+            "responses",
             "sort_order",
             "tags",
             "test_script",
@@ -189,6 +190,9 @@ fn endpoint_update_schema_documents_every_patchable_field() {
     // 可空字段必须写明 `null` 表示清空 ——
     // three-state meaning is invisible on the wire otherwise.
     assert_eq!(patch_props["base_url_override"]["type"][1], "null");
+    // `responses` 同样三档：缺席 = 不动、`null` = 清空整份、数组 = 整体替换。
+    assert_eq!(patch_props["responses"]["type"][0], "array");
+    assert_eq!(patch_props["responses"]["type"][1], "null");
     // `tls` 是端点自己的 HTTPS 出站设置：它有三档（缺席 = 不动、`null` = 清除、
     // 设值 = 写入），故 `null` 必须登记进 schema。
     assert_eq!(patch_props["tls"]["type"][0], "object");
@@ -231,4 +235,35 @@ fn endpoint_create_and_endpoint_update_describe_the_same_tls_shape() {
         "两处 `tls` 的属性表必须一致，否则 agent 会写出两种拼法"
     );
     assert_eq!(create["properties"]["tls"]["type"], "object");
+}
+
+/// `endpoint_create` 的 `responses` 与 `endpoint_update` 的 `patch.responses` 说同一件事，
+/// 故两处的属性表必须一致：agent 在两条路上看到两种形状，就会写出两种拼法。
+#[test]
+fn endpoint_create_and_endpoint_update_describe_the_same_response_shape() {
+    let table = crate::mcp::tool_table();
+    let create = table
+        .iter()
+        .find(|e| e.name == "endpoint_create")
+        .map(|e| e.schema.clone())
+        .expect("endpoint_create must be registered");
+    let update = table
+        .iter()
+        .find(|e| e.name == "endpoint_update")
+        .map(|e| e.schema.clone())
+        .expect("endpoint_update must be registered");
+
+    let create_props = &create["properties"]["responses"]["items"]["properties"];
+    let update_props =
+        &update["properties"]["patch"]["properties"]["responses"]["items"]["properties"];
+    assert_eq!(
+        create_props, update_props,
+        "两处 `responses` 的属性表必须一致，否则 agent 会写出两种拼法"
+    );
+    assert_eq!(create["properties"]["responses"]["items"]["type"], "object");
+    // `status` 唯一必填：一条没有 status 的响应定义不知道说的是哪个状态码。
+    assert_eq!(
+        create["properties"]["responses"]["items"]["required"],
+        serde_json::json!(["status"])
+    );
 }

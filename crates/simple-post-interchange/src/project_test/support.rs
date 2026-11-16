@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::{
     uid, AuthConfig, AuthType, BodyMode, EndpointDetail, HttpMethod, KeyValue, Project,
-    RequestBody, ResourceNode, ResourceNodeType,
+    RequestBody, ResourceNode, ResourceNodeType, ResponseDefinition,
 };
 use simple_post_core::error::AppError;
 
@@ -92,6 +92,24 @@ fn rich_detail(node_id: String) -> EndpointDetail {
         pre_request_script: None,
         test_script: None,
         tls: None,
+        responses: vec![
+            ResponseDefinition {
+                id: "resp_1".into(),
+                status: "200".into(),
+                description: "用户".into(),
+                content_type: "application/json".into(),
+                schema: Some(serde_json::json!({"type": "object"})),
+                example: Some("{\"id\":1}".into()),
+            },
+            ResponseDefinition {
+                id: "resp_2".into(),
+                status: "404".into(),
+                description: "没有这个用户".into(),
+                content_type: String::new(),
+                schema: None,
+                example: None,
+            },
+        ],
     }
 }
 

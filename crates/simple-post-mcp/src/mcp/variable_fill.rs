@@ -257,7 +257,7 @@ fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> St
 /// base URL 里也可能有 `{version}` 这样的占位符，而发送那侧是在拼接后的 URL 上做
 /// 替换，只看端点自己的 URL 会漏掉它。
 fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
-    use simple_post_core::domain::{AuthType, BodyMode};
+    use simple_post_core::domain::{AuthType, BodyMode, ResponseProblemKind};
     let mut issues = Vec::new();
 
     if endpoint.url.trim().is_empty() {
@@ -418,6 +418,30 @@ fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
                         body.content is what is actually sent; the documented parameter \
                         definition belongs in body.schema."
         }));
+    }
+
+    // 响应定义：判据在 `simple_post_core::domain::response_problems`，与
+    // `db::endpoint_details::{create,update}` 是同一份，故这里报出来的问题一定也拦得住
+    // 写入。措辞在本层，因为 issue 面向 agent 读者。
+    for problem in simple_post_core::domain::response_problems(&endpoint.responses) {
+        let response = &endpoint.responses[problem.index];
+        let message = match problem.kind {
+            ResponseProblemKind::StatusSyntax => format!(
+                "`{}` is not a response status: use a 1XX-5XX code, the same range as \
+                 `NXX` (e.g. `2XX`), or `default`",
+                response.status
+            ),
+            ResponseProblemKind::StatusDuplicate => format!(
+                "status `{}` is defined more than once; one definition per status",
+                response.status
+            ),
+            ResponseProblemKind::SchemaNotObject => "schema must be a JSON object".to_string(),
+            ResponseProblemKind::ContentType => format!(
+                "`{}` is not a media type such as application/json",
+                response.content_type.trim()
+            ),
+        };
+        issues.push(json!({ "field": problem.field_path(), "message": message }));
     }
 
     issues

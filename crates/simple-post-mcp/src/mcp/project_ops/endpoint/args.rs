@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::mcp::key_value::KeyValueInput;
 use simple_post_core::domain::TlsSettings;
+use simple_post_core::spec::input::ResponseDefinitionInput;
 
 /// `endpoint_create` 的入参。
 ///
@@ -72,6 +73,10 @@ pub(super) struct EndpointCreateArgs {
     /// 不做逐字段合并。证书只存文件路径，路径由运行请求的那台机器解析。
     #[serde(default)]
     pub tls: Option<TlsSettingsInput>,
+    /// 这个端点会回什么的文档定义。与 `body_schema` 对称，只是说的那一头是响应。
+    /// 它不上线：既不参与发送，也不从调用历史里反推。
+    #[serde(default)]
+    pub responses: Option<Vec<ResponseDefinitionInput>>,
 }
 
 /// `tls` 载荷的线格式。

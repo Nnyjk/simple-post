@@ -178,6 +178,15 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "TEXT",
     ),
     (
+        // 端点的响应定义（文档用，不上线）。纯增量：旧行读回来是空列表，语义等价于
+        // 「这个接口还没有响应定义」，导出 OpenAPI 时才退回一个 `200: OK`。
+        //
+        // 靠 ADD COLUMN 而不是重建表：重建会连带清掉用户的项目与整棵树。
+        "endpoint_details",
+        "responses_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    ),
+    (
         // 动态变量的归属项目。纯增量：旧行读回来是 NULL（= 未归属），
         // `backfill_dynamic_variable_projects` 随后给它们补上。
         //

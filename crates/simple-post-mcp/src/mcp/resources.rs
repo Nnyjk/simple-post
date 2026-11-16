@@ -165,6 +165,15 @@ fn guide() -> Value {
                 "clientCertificatePath": "<客户端证书的 PEM 文件路径>",
                 "clientKeyPath": "<客户端私钥的 PEM 文件路径>"
             },
+            "responses": [
+                {
+                    "status": "200",
+                    "description": "<这个状态码回来的是什么>",
+                    "contentType": "application/json",
+                    "schema": { "type": "object", "properties": {} },
+                    "example": "{\"id\": 1}"
+                }
+            ],
             "if_exists": "reuse"
         },
 
@@ -179,6 +188,7 @@ fn guide() -> Value {
             "A base URL lives in the (environment x module) cell. That cell never inherits from the project or from a sibling module.",
             "An endpoint does not bind an environment. Name the environment per call, and note that the two tools spell that argument differently and do not treat it the same. api_call_endpoint takes `environment_id`: name one to use it, omit it and the endpoint's own project falls back to that project's default environment (the earliest one created). api_run_request takes `env_id`, and there is no fallback: a temporary request has no endpoint row to read the project from, so without env_id it has no environment, no base URL and no substituted variables. Nothing about that choice is stored, so two callers in one workspace can use two different environments at the same time. A name that no longer exists does not fall back to the default environment either — that request resolves without an environment at all.",
             "body_content is the payload that goes on the wire; body_schema is the documented parameter definition. They are different things — a JSON Schema written into body_content is rejected, and the error names body_schema.",
+            "responses documents what the endpoint returns: [{status, description, contentType, schema, example}]. It is documentation only — never sent, and never inferred from call history. status is 200, 2XX or default, and must be unique within the list; schema must be a JSON object; contentType is a media type such as application/json, and an empty one exports the response with only a description. example is the raw body text. An OpenAPI export uses these definitions and only falls back to {\"200\": {\"description\": \"OK\"}} when the endpoint has none.",
             "body_mode says how body_content is framed: \"none\" sends no body, \"raw\" sends the text verbatim, \"json\" sends a JSON instance, \"xml\" sends XML text, \"form\" sends x-www-form-urlencoded text, \"multipart\" sends a JSON array of parts — each {\"name\": string, \"value\": string, \"filename\"?: string, \"contentType\"?: string, \"base64\"?: string}, where contentType defaults to application/octet-stream for a part that has a filename — and \"binary\" sends a JSON object {\"name\": string, \"size\": number, \"contentType\"?: string, \"base64\": string} as raw bytes. For \"form\", body_content is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \"description\"?}].",
             "A {{var}} in the url, params, headers, body or auth is replaced from the environment's variables. A name that is not there is listed in missing.",
             "Path parameters are separate from query parameters: `params` goes into the query string, `path_params` fills the `{placeholder}` segments in the path itself, and the key of each path parameter must match a placeholder name.",

@@ -83,6 +83,7 @@ pub(super) async fn tool_api_run_request(
         test_script: None,
         // 临时请求没有端点，故它没有「端点自带的那份」HTTPS 设置。
         tls: None,
+        responses: vec![],
     };
 
     let overrides = crate::variable_fill::EndpointOverrides {

@@ -149,6 +149,7 @@ async fn module_move_preserves_collections_and_endpoints() {
                 pre_request_script: None,
                 test_script: None,
                 tls: None,
+                responses: vec![],
             }),
         )?;
         // 按项目的那扇门默认 `read_call`，低于移动要求的 `full`。必须在项目行存在

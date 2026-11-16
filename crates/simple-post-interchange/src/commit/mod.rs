@@ -443,6 +443,9 @@ pub fn commit_in_tx(
                     headers: ir.headers.clone(),
                     body: ir.body.clone(),
                     auth: ir.auth.clone(),
+                    // 响应定义只为文档存在。导入的 IR 可能不带 id，落库前统一补上：界面靠它
+                    // 定位行，而这一条路径绕过了 MCP 与 REST 的 coercion。
+                    responses: simple_post_core::domain::ensure_response_ids(ir.responses.clone()),
                     docs: ir.docs.clone(),
                     notes: ir.notes.clone(),
                     tags: ir.tags.clone(),

@@ -794,6 +794,7 @@ fn endpoint_detail(node_id: &str, method: HttpMethod, url: &str) -> EndpointDeta
         headers: Vec::new(),
         body: Default::default(),
         auth: Default::default(),
+        responses: Vec::new(),
         docs: None,
         notes: None,
         tags: Vec::new(),

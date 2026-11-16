@@ -104,6 +104,7 @@ fn seed_with_url(st: &AppState, base_url: &str, url: &str) -> String {
         pre_request_script: None,
         test_script: None,
         tls: None,
+        responses: vec![],
     };
     db::with_tx(&st.pool, |c| {
         db::projects::create(c, &project)?;

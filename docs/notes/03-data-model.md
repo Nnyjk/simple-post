@@ -58,8 +58,9 @@ macOS / Linux 只是把 `%APPDATA%` 换成 `dirs::data_dir()` 的平台值（`~/
 ### endpoint_details
 
 - 分表理由：`method` / `url` / `body` / `auth` / `tags` 对 module 与 collection 毫无意义；折叠进 `nodes` 会让它们带一组永远为空的列，也让搜索里的 `method = ?` 无物可分。`node_id` 既是 PK 也是外键，树列（name / sort_order / 时间戳）只住 `nodes`。
-- `*_json` 清单：`params_json`、`path_params_json`、`headers_json`、`body_json`、`auth_json`、`tags_json`、`tls_json`。`path_params_json` 与 `params_json` 分开：前者替换进路径，后者进查询串。
+- `*_json` 清单：`params_json`、`path_params_json`、`headers_json`、`body_json`、`auth_json`、`tags_json`、`tls_json`、`responses_json`。`path_params_json` 与 `params_json` 分开：前者替换进路径，后者进查询串。
 - `tls_json` 是唯一可空的结构化列：`NULL` = 继承全局（`preferences.request_settings.tls`）；非空即端点自带一整套 HTTPS 设置，整体取代全局。
+- `responses_json` 装这个接口会回什么的定义（`ResponseDefinition` 数组，状态码 / 说明 / media type / JSON Schema / 示例原文），与 `body_json` 里的请求侧 `schema` 对称。**它是文档**：不上线，也不从 `response_history` 反推。列 `NOT NULL DEFAULT '[]'`，空数组 = 没写定义；老库经 `ADDED_COLUMNS` 增量补列，`SCHEMA_VERSION` 不动（重建表会丢掉用户的项目与树）。
 - endpoint 行**不绑定环境**（v5 起没有 `environment_id`）：接口地址由发送时选中的 `(环境 × 模块)` 格子决定。
 
 ### preferences

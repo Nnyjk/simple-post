@@ -68,6 +68,8 @@ pub struct CreateEndpointDetailOpts {
     /// 该端点自己的 HTTPS 出站设置。缺席 = 继承全局默认。
     /// 端点给了这份设置就**整体**取代全局那份，故它不是逐字段的覆盖。
     pub tls: Option<TlsSettings>,
+    /// 这个接口会回什么。缺席 = 没写定义。只是文档，不上线。
+    pub responses: Option<Vec<ResponseDefinition>>,
 }
 
 impl CreateEndpointDetailOpts {
@@ -85,6 +87,11 @@ impl CreateEndpointDetailOpts {
             headers: self.headers.unwrap_or_default(),
             body: self.body.unwrap_or_default(),
             auth: self.auth.unwrap_or_default(),
+            // 缺 `id` 的定义在这里铸：这一条路不经 MCP / spec 的 coercion，而
+            // `db::endpoint_details::create` 只校验、不补身份。
+            responses: simple_post_core::domain::ensure_response_ids(
+                self.responses.unwrap_or_default(),
+            ),
             docs: self.docs,
             notes: self.notes,
             tags: self.tags.unwrap_or_default(),

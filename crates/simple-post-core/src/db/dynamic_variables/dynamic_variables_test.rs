@@ -84,6 +84,7 @@ fn detail(node_id: &str, url: &str) -> EndpointDetail {
         pre_request_script: None,
         test_script: None,
         tls: None,
+        responses: vec![],
     }
 }
 

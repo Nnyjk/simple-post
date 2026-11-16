@@ -115,6 +115,7 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 pre_request_script: None,
                 test_script: None,
                 tls: None,
+                responses: vec![],
             }),
         )?;
         db::environments::create(
@@ -174,6 +175,7 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 pre_request_script: None,
                 test_script: None,
                 tls: None,
+                responses: vec![],
             }),
         )?;
         Ok(())

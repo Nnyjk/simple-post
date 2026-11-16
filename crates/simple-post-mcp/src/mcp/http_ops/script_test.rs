@@ -122,6 +122,7 @@ fn script_endpoint(
         pre_request_script: pre_request.map(String::from),
         test_script: test.map(String::from),
         tls: None,
+        responses: vec![],
     };
     let env = Environment {
         id: "env_script".into(),
