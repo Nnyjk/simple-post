@@ -144,7 +144,7 @@ MCP 的端点是守护进程自己的监听端口，主端口上不提供 MCP。
 
 镜像里只有 `simple-post-server`、单页应用的静态产物与一个数据目录。SQLite 使用 `rusqlite` 的 `bundled` 静态编译，TLS 使用 rustls 内置的根证书集，因此镜像不安装 GTK、WebKit、X11 与 OpenSSL。单页应用在 `/app/spa`，数据在 `/data`。
 
-compose 相关命令都在仓库根执行。`--project-directory .` 不能省：compose 文件在 `docker/` 下，不带它时 Compose 会把 `docker/` 当成项目目录，于是读不到根目录的 `.env`，项目名也从 `simple-post` 变成 `docker`，数据卷跟着改名成 `docker_simple-post-data`（已有的卷就“消失”了）。
+compose 相关命令都在仓库根执行。`--project-directory .` 不能省：compose 文件在 `docker/` 下，不带它时 Compose 会把 `docker/` 当成项目目录，于是读不到根目录的 `.env`，项目名也从 `simple-post` 变成 `docker`，数据卷跟着改名成 `docker_simple-post-data`（已有的卷就“消失”了）。用旧写法（项目名为 `docker`）起的部署，换到带 `--project-directory .` 的命令前先核对项目名，迁移步骤见 `docker/README.md` 的「更新」。
 
 镜像地址是 `ghcr.io/nnyjk/simple-post`，只提供 linux/amd64，每个 `v*` 标签发布一次。常用标签：`0.1.34`（具体版本）、`0.1`（次版本）、`latest`（最新正式版）。
 
