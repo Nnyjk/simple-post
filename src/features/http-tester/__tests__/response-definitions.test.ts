@@ -18,6 +18,7 @@ import {
   appendResponse,
   moveResponse,
   patchResponse,
+  rekeyRows,
   removeResponse,
 } from '../model/responseDefinitions';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
@@ -92,6 +93,30 @@ describe('草稿里的响应定义进保存补丁', () => {
   it('清空成空数组也是一次明确的改动', () => {
     const patch = draftToPatch({ responses: [] });
     assert.deepEqual(patch.responses, []);
+  });
+});
+
+describe('行键', () => {
+  it('新行拿到本地键，上下移动时键跟着行走', () => {
+    const rows = appendResponse(appendResponse([]));
+    assert.deepEqual(
+      rows.map((r) => r.id),
+      ['', ''],
+    );
+
+    const keys = rekeyRows([], rows);
+    assert.equal(new Set(keys).size, 2, '两条新行不能共用一个键');
+
+    // 移动后调用方把键一起换位：每一行仍带着自己那个键，卡片里的本地文本才不串。
+    const moved = moveResponse(rows, 0, 1);
+    const swapped = [keys[1], keys[0]];
+    assert.deepEqual(rekeyRows(swapped, moved), swapped);
+    assert.notDeepEqual(rekeyRows(swapped, moved), keys, '换过位就换了顺序');
+  });
+
+  it('落盘后服务端 id 取代本地键', () => {
+    const keys = rekeyRows(['row-1', 'row-2'], DEFINED);
+    assert.deepEqual(keys, ['resp_a', 'resp_b']);
   });
 });
 
