@@ -143,6 +143,7 @@ export function blankDetail(
     body: { mode: 'none', content: '' },
     auth: { kind: 'none' },
     tags: [],
+    responses: [],
     ...partial,
   };
 }

@@ -47,7 +47,11 @@ describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () =>
     assert.equal(harness.bag.endpointDetails['ep-rollback'].method, 'POST');
     assert.equal(harness.bag.endpointDetails['ep-rollback'].url, '/widgets/v2');
 
-    await action;
+    const rejected = await action;
+
+    // 拒绝原因经返回值交给调用方 —— 已存接口的补丁被拒时界面要显示后端原话，
+    // 否则用户刚填的那条编辑会静静消失。
+    assert.match(String(rejected), /sqlite: disk I\/O error/);
 
     const after = harness.bag.endpointDetails['ep-rollback'];
     // 原来的 detail 必须仍原封不动地在 store 里。
@@ -87,8 +91,9 @@ describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () =>
       return null;
     });
 
-    await harness.slice.updateEndpointDetail('ghost', { url: '/nope' });
+    const rejected = await harness.slice.updateEndpointDetail('ghost', { url: '/nope' });
 
+    assert.equal(rejected, null, '没有 detail 行不算被拒');
     assert.deepEqual(calls, [], '没有 detail 行就不该打扰后端');
   });
 

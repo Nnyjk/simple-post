@@ -41,6 +41,13 @@ export function HttpTester() {
   const saveDraftEndpoint = useAppStore((s) => s.saveDraftEndpoint);
   const updateDraftEndpoint = useAppStore((s) => s.updateDraftEndpoint);
   const draftSaveError = useAppStore((s) => s.draftSaveError);
+  // 已存接口的补丁被后端拒绝时，store 只回滚不留话；横幅要显示的是后端原话（状态码不合
+  // 法之类），故这份消息由本页持有，与 `draftSaveError` 共用同一条横幅。
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // 那句拒绝话说的是上一个接口。留在横幅上会被读成当前接口保存失败。
+  useEffect(() => {
+    setSaveError(null);
+  }, [endpoint?.id]);
   // 在途标记与响应是同一份状态（挂在标签上），故它也按标签取：接口 A 上在途的
   // 请求，不该让 B 的标签也显示「请求中…」，也不该把 B 的 Send 按钮一起锁上。
   const requestPending = useAppStore((s) =>
@@ -368,6 +375,7 @@ export function HttpTester() {
     clearEndpointDraft,
     inFlightRef,
     setCurlFlash,
+    setSaveError,
   });
   // 没有 detail 行的节点是数据漏洞而非正常态（每个接口创建时都带一行）。返回同样的空态。
   if (!endpoint || !detail) {
@@ -401,6 +409,7 @@ export function HttpTester() {
     headers: enabledHeaders,
     body: hasBody,
     auth: hasAuth,
+    response: effective.responses.length,
     script: hasScript,
     tls: hasOwnTls,
   });
@@ -427,7 +436,13 @@ export function HttpTester() {
       {...{ dirty, onMethodChange: handleMethodChange, onUrlChange: urlHint.change }}
       {...{ onSend: handleSend, onSave: handleSave }}
       {...{ onCopyCurl: handleCopyCurl, onSelectionChange: handleBaseUrlSelectionChange }}
-      {...{ draftSaveError, dynamicError, tabItems, tab, onTabChange: setTab }}
+      {...{
+        draftSaveError: draftSaveError ?? saveError,
+        dynamicError,
+        tabItems,
+        tab,
+        onTabChange: setTab,
+      }}
       {...{
         headerSuggestions,
         validationError,

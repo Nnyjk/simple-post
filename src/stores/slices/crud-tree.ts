@@ -61,11 +61,16 @@ export interface TreeCrudActions {
    */
   deleteNode: (id: string) => Promise<void>;
 
-  /** 打补丁：修改一个 endpoint 的请求配置。 */
+  /**
+   * 打补丁：修改一个 endpoint 的请求配置。
+   *
+   * 落盘是唯一的校验点（响应定义的状态码等只在后端判），故这里 resolve 出后端拒绝的原因，
+   * `null` = 已接受。调用方需要这份原话，才能让被拒的编辑不静默消失。
+   */
   updateEndpointDetail: (
     nodeId: string,
     patch: Partial<Omit<EndpointDetail, 'nodeId'>>,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
 
   /**
    * 复制一个 endpoint。**同步**返回新 id，因为调用方（ProjectTree）会立刻激活
@@ -186,14 +191,18 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
 
   updateEndpointDetail: async (nodeId, patch) => {
     const prev = get().endpointDetails[nodeId];
-    if (!prev) return;
+    if (!prev) return null;
     const optimistic: EndpointDetail = { ...prev, ...patch };
     set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: optimistic } }));
-    await invokeWithRollback(
-      'endpoint_detail_update',
-      () => invokeCmd<EndpointDetail>(COMMANDS.endpointDetailUpdate, { nodeId, patch }),
-      () => set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: prev } })),
-    );
+    try {
+      await invokeCmd<EndpointDetail>(COMMANDS.endpointDetailUpdate, { nodeId, patch });
+      return null;
+    } catch (e) {
+      // 不走 `invokeWithRollback`：它把错误吞成 `false`，而调用方要的是后端原话。
+      console.error('[store] endpoint_detail_update failed', e);
+      set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: prev } }));
+      return e instanceof Error ? e.message : String(e);
+    }
   },
 
   /**

@@ -49,6 +49,7 @@ function makeDetail(id: string, url: string, tags: string[] = []): EndpointDetai
     body: { mode: 'none', content: '' },
     auth: { kind: 'none' },
     tags,
+    responses: [],
   };
 }
 

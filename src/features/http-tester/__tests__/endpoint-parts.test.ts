@@ -18,6 +18,7 @@ function detail(over: Partial<EndpointDetail> = {}): EndpointDetail {
     docs: '',
     notes: '',
     tags: [],
+    responses: [],
     preRequestScript: '',
     testScript: '',
     tls: null,
