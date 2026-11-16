@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import { marked } from 'marked';
-import { FileText, Sparkles } from 'lucide-react';
+import { FileText } from 'lucide-react';
 import { Tabs } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -30,12 +29,6 @@ export function DocsEditor({ value, onChange }: Props) {
           value={mode}
           onChange={(id) => setMode(id as typeof mode)}
         />
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground">
-            <Sparkles className="h-3.5 w-3.5" />
-            AI 补全
-          </Button>
-        </div>
       </div>
       <div className={cn('flex min-h-0 flex-1', mode === 'split' && 'divide-x divide-border')}>
         {(mode === 'edit' || mode === 'split') && (
@@ -63,7 +56,7 @@ export function DocsEditor({ value, onChange }: Props) {
               <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                 <FileText className="h-8 w-8 opacity-40" />
                 <p>暂无文档</p>
-                <p className="text-[11px]">在左侧编辑 Markdown，或点击「AI 补全」</p>
+                <p className="text-[11px]">在左侧编辑 Markdown</p>
               </div>
             )}
           </div>
