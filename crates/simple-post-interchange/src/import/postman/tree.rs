@@ -106,7 +106,7 @@ pub(super) fn walk_children<'a>(items: &'a [Value], ptr: &str, ctx: &mut Ctx) ->
                 let name = item_name(obj);
                 // 脚本挂在**条目**上，不在 `request` 里。
                 let scripts = parse_scripts(obj, &item_ptr, Place::Node, ctx);
-                if let Some(ep) = build_endpoint(req, name, &item_ptr, scripts, ctx) {
+                if let Some(ep) = build_endpoint(obj, req, name, &item_ptr, scripts, ctx) {
                     stack[owner].endpoints.push(ep);
                 }
             }

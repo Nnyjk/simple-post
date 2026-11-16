@@ -79,6 +79,7 @@ fn seed(st: &AppState, endpoint_tls: Option<TlsSettings>) -> String {
         pre_request_script: None,
         test_script: None,
         tls: endpoint_tls,
+        responses: vec![],
     };
     db::with_tx(&st.pool, |c| {
         db::projects::create(c, &project)?;

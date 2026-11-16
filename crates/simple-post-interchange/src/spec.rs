@@ -31,6 +31,18 @@ pub(crate) fn escape_pointer_token(token: &str) -> String {
     token.replace('~', "~0").replace('/', "~1")
 }
 
+/// media type 归一：`Application/JSON; charset=utf-8` 与 `application/json` 同一个。
+///
+/// 两个导入器都要从外来文档里认 Content-Type，两侧各写一份就会各认各的——
+/// 同一份文件里的同一个头，一边认得出、另一边认不出，而两侧的测试各自照样是绿的。
+pub(crate) fn normalize_media(raw: &str) -> String {
+    raw.split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+}
+
 #[cfg(test)]
 #[path = "spec_test.rs"]
 mod tests;

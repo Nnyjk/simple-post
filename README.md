@@ -71,6 +71,7 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 - `collection_create` 与 `endpoint_create` 接受 `collection_path`，路径上缺的集合会被逐级建出来，已有的同名集合直接复用。
 - 所有 `*_create` 工具接受 `if_exists`（`reuse` / `error` / `duplicate`，默认 `reuse`），重复调用同一个接口定义不会造出第二份。
 - 写工具的响应里带 `missing`：模块地址那一格没有值，或者环境里没有它引用的变量，都会点名说出来。
+- 接口的**请求与响应各自带一份固定参考信息**：请求侧是 `body.schema`（这份载荷接受什么参数），响应侧是 `responses`（这个接口会回什么——状态码、说明、media type、响应正文的 JSON Schema 与示例）。响应定义只是文档，不参与发送，OpenAPI 导出直接用它，只有一条都没写时才退回 `200: OK`。
 
 写操作的授权要同时通过两道检查，任何一道缺失都是拒绝而不是放行：
 

@@ -126,6 +126,7 @@ fn test_state_with(base_url: &str, url: &str, body_content: &str) -> Arc<AppStat
                 pre_request_script: None,
                 test_script: None,
                 tls: None,
+                responses: vec![],
             },
         )?;
         Ok(())
@@ -246,6 +247,7 @@ fn two_project_state() -> Arc<AppState> {
                 pre_request_script: None,
                 test_script: None,
                 tls: None,
+                responses: vec![],
             },
         )?;
         db::endpoint_details::create(
@@ -266,6 +268,7 @@ fn two_project_state() -> Arc<AppState> {
                 pre_request_script: None,
                 test_script: None,
                 tls: None,
+                responses: vec![],
             },
         )?;
         Ok(())

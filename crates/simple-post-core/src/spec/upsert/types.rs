@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{AuthConfig, EndpointResource, RequestBody, RewriteRule};
 use crate::error::AppError;
-use crate::spec::input::KeyValueInput;
+use crate::spec::input::{KeyValueInput, ResponseDefinitionInput};
 
 /// 一份接口规格。
 ///
@@ -102,6 +102,12 @@ pub struct EndpointDefinition {
     /// 认证方案与凭据。`kind` 是方案，缺省 `none`。
     #[serde(default)]
     pub auth: Option<AuthConfig>,
+    /// 这个端点会回什么的文档定义。
+    ///
+    /// 点名了就整体替换那份定义（`[]` 清空），没点名就一个字段都不碰。它不上线：既不影响
+    /// 发出的请求，也不读响应历史。
+    #[serde(default)]
+    pub responses: Option<Vec<ResponseDefinitionInput>>,
     /// 这个端点自己的 base URL，胜过环境里那一格。
     #[serde(default, alias = "baseUrlOverride")]
     pub base_url_override: Option<String>,

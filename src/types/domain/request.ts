@@ -100,6 +100,34 @@ export interface RequestBody {
 }
 
 /**
+ * 一条响应定义：这个接口会回什么。对应 Rust 的
+ * `simple_post_core::domain::ResponseDefinition`。
+ *
+ * **只是文档**：不上线，也不从调用历史里反推。与 `RequestBody.schema` 对称——那边是
+ * 请求的固定参考信息，这边是响应的。
+ */
+export interface ResponseDefinition {
+  /** 行身份，界面列表按它对齐一行。新建时后端铸造（`resp_` 前缀），调用方不必给。 */
+  id: string;
+  /**
+   * 状态码键：`200` 这样的具体码、`2XX` 这样的整段，或字面 `default`。
+   * 同一份 `responses` 里不得重复。
+   */
+  status: string;
+  /** 人读的说明。OpenAPI 的 `description` 是必填，故这里没有「缺省」这一档。 */
+  description: string;
+  /**
+   * 响应的 media type，例 `application/json`。**空串 = 不写 content 块**，
+   * 此时 `schema` 与 `example` 在 OpenAPI 里没有地方安放，导出时会被落一条诊断。
+   */
+  contentType: string;
+  /** 响应正文的 JSON Schema（一个对象）。`undefined` / 缺省 = 不写。 */
+  schema?: Record<string, unknown>;
+  /** 示例正文原文。导出时能 `serde_json::from_str` 成值就写成 JSON 值，否则写成字符串。 */
+  example?: string | null;
+}
+
+/**
  * HTTPS 出站的一组开关与证书位置，对应 Rust 的 `simple_post_core::domain::TlsSettings`
  * （字段名 camelCase）。**证书只存文件路径，不存内容。** 私钥一旦进库，
  * `GET /api/preferences` 会把整行原样返回，Web 形态下那是给任何持有 bearer 口令的客户端看的。

@@ -11,7 +11,7 @@
 
 use serde_json::Value;
 
-use crate::domain::{AuthConfig, AuthType, BodyMode, KeyValue, RequestBody};
+use crate::domain::{AuthConfig, AuthType, BodyMode, KeyValue, RequestBody, ResponseDefinition};
 use crate::error::AppError;
 
 /// 线上接受的 `body_mode` 取值，与 [`BodyMode`] 的变体一一对应；JSON Schema 与解析器
@@ -163,6 +163,55 @@ pub fn coerce_key_values(rows: Vec<KeyValueInput>) -> Vec<KeyValue> {
     rows.into_iter()
         .map(KeyValueInput::into_key_value)
         .collect()
+}
+
+/// agent 手写的一条响应定义的线上形状。
+///
+/// [`ResponseDefinition`] 的 `id` 是簿记字段（界面拿它做行 key），`description` /
+/// `contentType` 在「只想记一句说明」时没必要出现，故这些都给默认值；`status` 必填——
+/// 它就是这条定义的身份。
+///
+/// `example` 收任意 JSON 值：字符串原样存，其它值按紧凑 JSON 存成文本。这样
+/// 「示例是一段文本」与「示例是一个对象」都不需要 agent 先自己转义。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponseDefinitionInput {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub content_type: String,
+    #[serde(default)]
+    pub schema: Option<Value>,
+    #[serde(default)]
+    pub example: Option<Value>,
+}
+
+impl From<ResponseDefinitionInput> for ResponseDefinition {
+    fn from(input: ResponseDefinitionInput) -> Self {
+        ResponseDefinition {
+            id: input.id.unwrap_or_default(),
+            // 手写 JSON 里前后多一个空格是常事，边界空白在这里抹平；中间的空白仍然是错误，
+            // 由 `response_problems` 报出来。
+            status: input.status.trim().to_string(),
+            description: input.description,
+            content_type: input.content_type.trim().to_string(),
+            schema: input.schema,
+            example: input.example.and_then(|example| match example {
+                Value::Null => None,
+                Value::String(text) => Some(text),
+                other => Some(other.to_string()),
+            }),
+        }
+    }
+}
+
+/// 反序列化 `responses` 数组，并补齐 `ResponseDefinition` 要求、而 agent 没有理由知道的
+/// 簿记字段（`id`，缺省时铸 `resp_` 前缀）。
+pub fn coerce_responses(rows: Vec<ResponseDefinitionInput>) -> Vec<ResponseDefinition> {
+    crate::domain::ensure_response_ids(rows.into_iter().map(ResponseDefinition::from).collect())
 }
 
 /// 载荷与定义写反了就地拒绝。

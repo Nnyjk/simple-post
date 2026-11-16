@@ -139,3 +139,60 @@ pub(in crate::mcp::project_ops) fn tls_settings_patch_schema() -> serde_json::Va
         "additionalProperties": false
     })
 }
+
+// =========================================================================
+// 响应定义的 JSON Schema
+// =========================================================================
+
+/// 一条响应定义的属性表。`endpoint_create` 的 `responses`、`endpoint_update` 的
+/// `patch.responses` 与 `spec_upsert` 的 `endpoint.responses` 描述的是同一份东西，故属性表
+/// 只写一遍，三处引用它。
+///
+/// 键名是 camelCase，与 `simple_post_core::spec::input::ResponseDefinitionInput` 的 serde 键名
+/// 一致——故这几处载荷可以直接反序列化成那个类型。
+/// **说明只留「不写就会错」的那几条**：`status` 的取值形状、`contentType` 决定 `schema` 与
+/// `example` 有没有地方放、`id` 不必给。其余规则（schema 必须是对象、status 不得重复）写在
+/// `simple-post://spec-authoring` 指南里，这里的每个字节都要乘以会话数。
+fn response_definition_properties() -> serde_json::Value {
+    json!({
+        "id": { "type": "string" },
+        "status": { "type": "string", "description": "200, 2XX or default." },
+        "description": { "type": "string" },
+        "contentType": {
+            "type": "string",
+            "description": "Media type; empty exports the response with no content block."
+        },
+        "schema": { "type": "object" },
+        "example": { "type": ["string", "object", "array", "number", "boolean", "null"] }
+    })
+}
+
+fn response_definition_item() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "properties": response_definition_properties(),
+        "required": ["status"],
+        "additionalProperties": false
+    })
+}
+
+/// 一份端点会回什么的定义，`endpoint_create` 与 `spec_upsert` 用它。
+///
+/// 它是**文档**：既不参与发送，也不从调用历史里反推。
+pub(in crate::mcp::project_ops) fn responses_schema() -> serde_json::Value {
+    json!({
+        "type": "array",
+        "description": "What this endpoint returns. Documentation only: never sent.",
+        "items": response_definition_item()
+    })
+}
+
+/// 与 [`responses_schema`] 同一份形状，多一档 `null`：`endpoint_update` 用它，`null` 表示清空
+/// 整份列表。
+pub(in crate::mcp::project_ops) fn responses_patch_schema() -> serde_json::Value {
+    json!({
+        "type": ["array", "null"],
+        "description": "Replaces the whole list. null clears it.",
+        "items": response_definition_item()
+    })
+}

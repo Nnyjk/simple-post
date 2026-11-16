@@ -142,7 +142,15 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   -- 就整体取代全局那份，故这一列非空即端点自带一整套 HTTPS 设置。
   --
   -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`。
-  tls_json               TEXT
+  tls_json               TEXT,
+  -- 端点会回什么：`domain::ResponseDefinition` 的 JSON 数组。这只是文档定义，不上线——
+  -- 发送请求不读这一列，响应历史也不写这一列。
+  --
+  -- 空数组 = 这个接口没有响应定义，导出 OpenAPI 时才退回一个 `200: OK`。
+  --
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`；
+  -- 重建表会连带丢掉用户的项目与整棵树，而这一列有完全等价的默认值。
+  responses_json         TEXT NOT NULL DEFAULT '[]'
 );
 
 -- collection 节点上的两段脚本。

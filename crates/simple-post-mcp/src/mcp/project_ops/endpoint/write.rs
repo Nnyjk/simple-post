@@ -18,6 +18,7 @@ use simple_post_core::domain::{
     EndpointDetail, EndpointDetailPatch, RequestBody, ResourceNode, ResourceNodeType, TlsSettings,
 };
 use simple_post_core::error::AppError;
+use simple_post_core::spec::input::{coerce_responses, ResponseDefinitionInput};
 use simple_post_core::spec::{self, IfExists};
 
 /// 端点的父节点从哪儿来 —— **只读**地看一眼，用来定归属项目。
@@ -193,7 +194,7 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
     let auth = build_auth(a.auth_type.as_deref(), a.auth_config.clone())?;
 
     let now = simple_post_core::domain::now_ms();
-    let id = simple_post_core::spec::mint_id("ep");
+    let id = simple_post_core::domain::uid_with_prefix("ep");
     let node = ResourceNode {
         id: id.clone(),
         root_id: project_id.clone(),
@@ -215,6 +216,9 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         headers: coerce_key_values(a.headers.unwrap_or_default()),
         body,
         auth,
+        // 响应定义是文档，不参与发送。缺 id 的在这里铸，与 params / headers 的
+        // coercion 同一条路；校验在 `db::endpoint_details::create` 里统一做一次。
+        responses: coerce_responses(a.responses.unwrap_or_default()),
         docs: a.docs,
         notes: a.notes,
         tags: a.tags.unwrap_or_default(),
@@ -331,6 +335,10 @@ pub(super) async fn tool_endpoint_update(
         // 线格式用 `TlsSettingsInput` 而不是域类型：拼错的键名要报错，不能静默丢掉
         // 一个键后写进一份「看起来设好了、其实没有」的设置。
         tls: patch_field::<TlsSettingsInput>(&patch_obj, "tls")?.map(|inner| inner.map(Into::into)),
+        // 响应定义整份替换：缺席 = 不动，`null` = 清空，数组 = 用它换掉整份。
+        // 逐条合并没有意义——用户删掉的那一条没法用「改一条」表达。
+        responses: patch_field::<Vec<ResponseDefinitionInput>>(&patch_obj, "responses")?
+            .map(|rows| rows.map(coerce_responses)),
         ..Default::default()
     };
     // 载荷与定义写反了就地拒绝 —— 与 `endpoint_create` 同一道门。只查这次 patch
@@ -344,7 +352,7 @@ pub(super) async fn tool_endpoint_update(
              field to change, e.g. {\"patch\":{\"url\":\"/v2/users\"}}. \
              Accepted fields: method, url, params, headers, body, auth, \
              tags, base_url_override, docs, notes, \
-             pre_request_script, test_script, tls, name, description, sort_order"
+             pre_request_script, test_script, tls, responses, name, description, sort_order"
                 .into(),
         ));
     }

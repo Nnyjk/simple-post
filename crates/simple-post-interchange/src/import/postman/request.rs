@@ -1,10 +1,11 @@
 //! 一条 request 落成一个 endpoint：URL 拆成 path / params / 这条自己的地址，其余字段各归各处。
 
 use serde_json::{Map, Value};
-use simple_post_core::domain::{parse_http_method, KeyValue};
+use simple_post_core::domain::{parse_http_method, KeyValue, ResponseDefinition};
 
 use crate::diagnostics::Diagnostic;
 use crate::ir::{IrEndpoint, IrScripts};
+use crate::spec::normalize_media;
 
 use super::auth::parse_auth;
 use super::body::parse_body;
@@ -12,6 +13,7 @@ use super::template::scan_templates;
 use super::{description_text, field_text, flag, kv_list, Ctx};
 
 pub(super) fn build_endpoint(
+    item: &Map<String, Value>,
     req: &Map<String, Value>,
     name: String,
     ptr: &str,
@@ -56,12 +58,135 @@ pub(super) fn build_endpoint(
         headers: kv_list(req.get("header"), &format!("{ptr}/request/header"), ctx),
         body: parse_body(req, &format!("{ptr}/request/body"), ctx),
         auth: parse_auth(req, &format!("{ptr}/request/auth"), ctx),
+        // 响应示例挂在**条目**上，不在 `request` 里。
+        responses: responses_of(item, ptr, ctx),
         tags: Vec::new(),
         scripts,
         ..Default::default()
     };
     scan_templates(&endpoint, ptr, ctx);
     Some(endpoint)
+}
+
+// -------------------------------------------------------------------------
+// 响应示例 —— `item.response[]` 落成响应定义
+// -------------------------------------------------------------------------
+
+/// Postman 的响应示例 → 响应定义，一条示例一条定义。
+///
+/// 示例里正好有定义需要的那几格：`code` 是状态码、`status` 是那句 `OK`、`header` 里有
+/// Content-Type、`body` 是正文原文。`schema` 永远是空的——Postman 没有响应 schema 这个构造，
+/// 从正文反推一份 schema 就是猜。
+///
+/// 丢掉的逐项点名：`cookie`、`originalRequest`、示例自己的名字，以及 Content-Type 之外的
+/// 响应头，本仓库的响应定义各只有一格。
+fn responses_of(item: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> Vec<ResponseDefinition> {
+    let Some(Value::Array(list)) = item.get("response") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (i, entry) in list.iter().enumerate() {
+        let slot = format!("{ptr}/response/{i}");
+        let Some(response) = entry.as_object() else {
+            ctx.diagnostics
+                .push(Diagnostic::warn(&slot, "响应示例不是对象，已跳过"));
+            continue;
+        };
+
+        let code = response
+            .get("code")
+            .and_then(Value::as_i64)
+            .unwrap_or_default();
+        let status = code.to_string();
+        if !simple_post_core::domain::is_response_status(&status) {
+            ctx.diagnostics.push(
+                Diagnostic::warn(
+                    &slot,
+                    "响应示例没有可用的 code。status 必须是三位状态码形状，这一条已跳过",
+                )
+                .dropping(
+                    response
+                        .get("code")
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "(缺)".to_string()),
+                ),
+            );
+            continue;
+        }
+
+        let mut content_type = String::new();
+        if let Some(Value::Array(headers)) = response.get("header") {
+            for (j, header) in headers.iter().enumerate() {
+                let Some(header) = header.as_object() else {
+                    continue;
+                };
+                let key = header
+                    .get("key")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let value = header
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if key.eq_ignore_ascii_case("content-type") && content_type.is_empty() {
+                    // 参数（`; charset=utf-8`）属于这份报文，不属于「这个响应是什么类型」。
+                    content_type = normalize_media(value);
+                } else {
+                    ctx.diagnostics.push(
+                        Diagnostic::warn(
+                            format!("{slot}/header/{j}"),
+                            "响应头在响应定义里没有对应字段，已丢弃",
+                        )
+                        .dropping(format!("{key}: {value}")),
+                    );
+                }
+            }
+        }
+
+        for key in [
+            "cookie",
+            "originalRequest",
+            "name",
+            "_postman_previewlanguage",
+        ] {
+            if let Some(dropped) = response.get(key).filter(|v| !v.is_null()) {
+                ctx.diagnostics.push(
+                    Diagnostic::warn(
+                        format!("{slot}/{key}"),
+                        "响应示例里的这一项在本仓库的响应定义里没有对应字段，已丢弃",
+                    )
+                    .dropping(truncate(dropped)),
+                );
+            }
+        }
+
+        out.push(ResponseDefinition {
+            // id 由落库那一侧铸：导入只负责内容。
+            id: String::new(),
+            status,
+            description: field_text(response, "status").unwrap_or_default(),
+            content_type,
+            schema: None,
+            example: response
+                .get("body")
+                .and_then(Value::as_str)
+                .filter(|body| !body.is_empty())
+                .map(str::to_string),
+        });
+    }
+    out
+}
+
+/// 诊断里点名丢掉的东西时要有个长度上限：一份响应体可以是几 MB。
+fn truncate(value: &Value) -> String {
+    let text = match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    match text.char_indices().nth(120) {
+        Some((at, _)) => format!("{}…", &text[..at]),
+        None => text,
+    }
 }
 
 // -------------------------------------------------------------------------

@@ -13,7 +13,8 @@
 use rusqlite::{params, Connection, Row};
 
 use crate::domain::{
-    AuthConfig, EndpointDetail, EndpointDetailPatch, KeyValue, RequestBody, TlsSettings,
+    AuthConfig, EndpointDetail, EndpointDetailPatch, KeyValue, RequestBody, ResponseDefinition,
+    TlsSettings,
 };
 use crate::error::AppError;
 
@@ -22,7 +23,7 @@ use super::json_col_err;
 const COLUMNS: &str =
     "node_id, method, url, base_url_override, params_json, path_params_json, headers_json, \
                        body_json, auth_json, docs, notes, tags_json, pre_request_script, \
-                       test_script, tls_json";
+                       test_script, tls_json, responses_json";
 
 // 读。
 
@@ -70,7 +71,7 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
     // 列清单在此写出而非复用 COLUMNS：这些列要用 `e` 别名限定，`nodes` 才能 join 进来。
     let sql = "SELECT e.node_id, e.method, e.url, e.base_url_override, e.params_json, e.path_params_json, e.headers_json, \
                   e.body_json, e.auth_json, e.docs, e.notes, e.tags_json, e.pre_request_script, \
-                  e.test_script, e.tls_json \
+                  e.test_script, e.tls_json, e.responses_json \
          FROM endpoint_details e \
          JOIN nodes n ON n.id = e.node_id \
          WHERE n.root_id = ?1 AND n.type = 'endpoint' \
@@ -90,15 +91,19 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
 ///
 /// 写之前校验 TLS 那三个路径字段：用户把证书正文粘进输入框，那段文本会原样落进 `tls_json`
 /// 列，而这一列会被 `GET /api/nodes/:id/endpoint-detail` 原样返回。
+///
+/// 响应定义也在这里校验：这是 REST 直达的写入口，与 MCP 的写入口共用
+/// [`crate::domain::response_problems`] 这一套规则。
 pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError> {
     if let Some(tls) = &d.tls {
         tls.validate()?;
     }
+    let responses = validated_responses(&d.responses)?;
     conn.execute(
         "INSERT INTO endpoint_details \
          (node_id, method, url, base_url_override, params_json, path_params_json, headers_json, body_json, \
-          auth_json, docs, notes, tags_json, pre_request_script, test_script, tls_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+          auth_json, docs, notes, tags_json, pre_request_script, test_script, tls_json, responses_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             d.node_id,
             d.method.as_str(),
@@ -122,6 +127,7 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
                 Some(t) => Some(serde_json::to_string(t)?),
                 None => None,
             },
+            responses,
         ],
     )?;
     Ok(())
@@ -179,6 +185,15 @@ pub fn update(
     if let Some(a) = &patch.auth {
         sets.push(format!("auth_json = ?{}", binds.len() + 1));
         binds.push(super::json_col(&a)?);
+    }
+    if let Some(rows) = &patch.responses {
+        sets.push(format!("responses_json = ?{}", binds.len() + 1));
+        // `Some(None)` 是「清空」。这一列非空（`NOT NULL DEFAULT '[]'`），故清空写成空列表。
+        let text = match rows {
+            Some(inner) => validated_responses(inner)?,
+            None => "[]".to_string(),
+        };
+        binds.push(rusqlite::types::Value::Text(text));
     }
     push_optional(&mut sets, &mut binds, "docs", &patch.docs);
     push_optional(&mut sets, &mut binds, "notes", &patch.notes);
@@ -240,6 +255,24 @@ fn push_optional(
     }
 }
 
+/// 校验并序列化响应定义。`create` 与 `update` 各调一次。
+///
+/// 缺 id 的条目在这里拿到 `resp_` 前缀：REST 与 MCP 的入参都可能不带 id，而界面靠它定位行，
+/// 故写入口是补 id 的最后一道。
+fn validated_responses(rows: &[ResponseDefinition]) -> Result<String, AppError> {
+    let problems = crate::domain::response_problems(rows);
+    if !problems.is_empty() {
+        let messages: Vec<String> = problems
+            .iter()
+            .map(|problem| format!("{}: {}", problem.field_path(), problem.message))
+            .collect();
+        return Err(AppError::Validation(messages.join("; ")));
+    }
+    Ok(serde_json::to_string(&crate::domain::ensure_response_ids(
+        rows.to_vec(),
+    ))?)
+}
+
 /// 脚本列的值：清空写 NULL，保留写文本。
 fn optional_text(value: &Option<String>) -> rusqlite::types::Value {
     match value {
@@ -256,6 +289,8 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
     let body_json: String = row.get(7)?;
     let auth_json: String = row.get(8)?;
     let tags_json: String = row.get(11)?;
+    // 这一列有 `DEFAULT '[]'`，故老库补列后读出的永远是空列表而不是 NULL。
+    let responses_json: String = row.get(15)?;
     // NULL = 端点没有自己的 HTTPS 设置（继承全局默认）。
     let tls_json: Option<String> = row.get(14)?;
 
@@ -284,6 +319,8 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
             .map_err(|e| json_col_err("body_json", e))?,
         auth: serde_json::from_str::<AuthConfig>(&auth_json)
             .map_err(|e| json_col_err("auth_json", e))?,
+        responses: serde_json::from_str::<Vec<ResponseDefinition>>(&responses_json)
+            .map_err(|e| json_col_err("responses_json", e))?,
         docs: row.get(9)?,
         notes: row.get(10)?,
         tags: serde_json::from_str::<Vec<String>>(&tags_json)

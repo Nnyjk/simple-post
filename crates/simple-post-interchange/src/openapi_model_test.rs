@@ -29,7 +29,7 @@ fn sample() -> Exchange {
 }
 
 /// 夹具里的接口数，以及其中被导出的那部分。少改一处就会在这里红。
-const FIXTURE_ENDPOINTS: usize = 23;
+const FIXTURE_ENDPOINTS: usize = 24;
 /// `PROPFIND` 在固定动词键集之外，被带诊断跳过，故产物里比夹具少一个。
 const SKIPPED_VERBS: usize = 1;
 
@@ -89,12 +89,17 @@ fn the_required_fields_the_model_demands_are_present() {
     }
 }
 
+/// 没有响应定义的 operation 合成一条 `200: OK`；写了定义的那个用它自己的那几条。
+///
+/// 编出来的响应体比没有更糟，故合成的那条只有一个 `description`。
 #[test]
-fn every_operation_has_exactly_the_one_synthetic_200() {
+fn responses_come_from_the_endpoint_and_are_synthesized_only_when_absent() {
     let ex = sample();
-    let doc = to_document(&ex, DocFormat::Json).expect("json");
-    let api = parse_model(&doc.content, DocFormat::Json);
+    let out = to_document(&ex, DocFormat::Json).expect("json");
+    let doc: serde_json::Value = serde_json::from_str(&out.content).expect("合法 JSON");
+    let api = parse_model(&out.content, DocFormat::Json);
 
+    let defined = "/users/{id}/profile";
     for (path, method, op) in api.operations() {
         let codes: Vec<String> = op
             .responses
@@ -102,26 +107,45 @@ fn every_operation_has_exactly_the_one_synthetic_200() {
             .keys()
             .map(|c| c.to_string())
             .collect();
-        assert_eq!(
-            codes,
-            vec!["200".to_string()],
-            "{method} {path} 只应有合成的 200——编出来的响应体比没有更糟"
-        );
-        let response = op
-            .responses
-            .responses
-            .values()
-            .next()
-            .expect("刚断言过非空");
-        assert!(
-            !response
-                .as_item()
-                .expect("合成响应不该是 $ref")
-                .description
-                .is_empty(),
-            "response 必须有 description（OpenAPI 的 REQUIRED）"
-        );
+        if path == defined && method == "get" {
+            assert_eq!(
+                codes,
+                vec!["200".to_string(), "404".to_string()],
+                "夹具里这个接口写了两条响应定义"
+            );
+        } else {
+            assert_eq!(
+                codes,
+                vec!["200".to_string()],
+                "{method} {path} 没有响应定义，只应有合成的 200"
+            );
+        }
+        for response in op.responses.responses.values() {
+            assert!(
+                !response
+                    .as_item()
+                    .expect("响应不该是 $ref")
+                    .description
+                    .is_empty(),
+                "response 必须有 description（OpenAPI 的 REQUIRED）：{method} {path}"
+            );
+        }
     }
+
+    // 定义里那条 `schema` + `example` 原样落到 content 块里；`example` 能解析成
+    // JSON 就写成 JSON 值，不是一段字符串。
+    let responses = &doc["paths"][defined]["get"]["responses"];
+    assert_eq!(
+        responses["200"]["content"]["application/json"]["schema"]["type"],
+        "object"
+    );
+    assert_eq!(
+        responses["200"]["content"]["application/json"]["example"],
+        serde_json::json!({ "id": 42, "displayName": "Ada" })
+    );
+    // 只有 description 的那条：没有 content 块。
+    assert!(responses["404"].get("content").is_none());
+    assert_eq!(responses["404"]["description"], "用户不存在");
 }
 
 #[test]

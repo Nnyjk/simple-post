@@ -16,10 +16,10 @@ rules:
   # 文档根没有 `servers`。这条规则要求的正是我们不要的那个形状。
   no-empty-servers: off
 
-  # `responses` 每个 operation 恒为 `200: {description: "OK"}`。本仓库没有响应
-  # schema 的可信数据源（`StoredResponse` 只存实际响应，而 `body.schema` 说的是
-  # **请求**接受什么参数、不是响应长什么样），编一个 `4XX` 出来看起来更完整，
-  # 但它是**假的**：声称的响应范围没有依据。见 issue #5 的「`responses` 合成默认，不猜」。
+  # 响应来自端点自己的定义（`EndpointDetail.responses`）；定义里没有 4XX 时导出也不会
+  # 编一条出来——编出来的「错误响应」声称的响应范围没有依据。一条定义都没有的 operation
+  # 才退回 `200: {description: "OK"}`，因为规范要求 `responses` 至少有一个成员。
+  # 见 issue #5 的「`responses` 只用端点自己的定义」。
   operation-4xx-response: off
 
   # 我们不知道用户项目的许可证。`info.license` 只能由用户自己声明，导出器替他们

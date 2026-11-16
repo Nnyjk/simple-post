@@ -263,6 +263,7 @@ fn project_endpoint(
         headers: d.headers.clone(),
         body: d.body.clone(),
         auth: d.auth.clone(),
+        responses: d.responses.clone(),
         docs: d.docs.clone(),
         notes: d.notes.clone(),
         tags: d.tags.clone(),

@@ -112,8 +112,9 @@ simple-post-server ──▶ simple-post-interchange ──▶ simple-post-core
 2. **诊断无处安放**：`domain` 每个字段都是标称值，没有位置能说「这里原本是个 multipart file 字段，被丢掉了」；把「不静默丢弃」变成类型要求，只能靠独立通道。
 3. **导出要跨四张表**：host 在环境格子里、端点自己的地址在 `base_url_override`，故投影必须先选定环境——这是投影逻辑，不属于任何一行 endpoint。同理 `IrEndpoint.path` 是 path-only，host 在 `format → ir` 那一侧就被分派到模块格或端点 override。
 
-### 3. `IrNode.key` 的双重身份
+还有一条边值得单说：**响应定义跟着端点走**。`IrEndpoint.responses` 装 `ResponseDefinition` 数组，三条边的行为与其它字段一致——`format → ir` 这一侧是**有损**的（OpenAPI 的 `headers` / `links` 与多个 `examples` 表达不了，Postman 的 cookie 与 `originalRequest` 也表达不了，各落一条 `Diagnostic` 并点名丢的是哪一段）；`ir → domain` 仍是**无损全函数**（缺 `id` 的在这里铸成 `resp_` 前缀，与导入时那个 JSON Pointer 身份无关）；`domain → ir` 原样投影。导出那一侧不合成：端点写了定义就用它的，一条都没有才退回 `200: OK`。
 
+### 3. `IrNode.key` 的双重身份
 `IrModule::key` / `IrCollection::key` / `IrEndpoint::key` 都是 `#[serde(default)] pub key: String`：
 
 - **导入时**＝源格式里的位置指针（`/item/2`、`/paths/~1users/get`），与 `Diagnostic::pointer` 同一套 JSON Pointer 转义纪律（`~` 先于 `/`）。

@@ -29,7 +29,9 @@ pub mod input;
 pub mod upsert;
 
 use crate::db::{self, Connection};
-use crate::domain::{now_ms, uid, Environment, Project, ResourceNode, ResourceNodeType};
+use crate::domain::{
+    now_ms, uid_with_prefix, Environment, Project, ResourceNode, ResourceNodeType,
+};
 use crate::error::AppError;
 
 // =========================================================================
@@ -137,7 +139,7 @@ pub fn resolve_project(
 
     let now = now_ms();
     let project = Project {
-        id: mint_id("proj"),
+        id: uid_with_prefix("proj"),
         name: name.to_string(),
         description: description.map(|d| d.to_string()),
         color: color.unwrap_or("#3B82F6").to_string(),
@@ -179,7 +181,7 @@ pub fn resolve_environment(
     }
 
     let env = Environment {
-        id: mint_id("env"),
+        id: uid_with_prefix("env"),
         project_id: project_id.to_string(),
         name: name.to_string(),
         module_base_urls: std::collections::HashMap::new(),
@@ -225,7 +227,7 @@ pub fn resolve_module(
 
     let now = now_ms();
     let node = ResourceNode {
-        id: mint_id("mod"),
+        id: uid_with_prefix("mod"),
         root_id: project_id.to_string(),
         // 模块的父级是项目本身，不是另一个节点。
         parent_id: None,
@@ -277,7 +279,7 @@ pub fn resolve_collection(
 
     let now = now_ms();
     let node = ResourceNode {
-        id: mint_id("col"),
+        id: uid_with_prefix("col"),
         root_id,
         parent_id: Some(parent_id.to_string()),
         kind: ResourceNodeType::Collection,
@@ -363,15 +365,6 @@ pub fn find_endpoint_by_identity(
         }
     }
     Ok(None)
-}
-
-/// 铸一个带前缀的 id。
-///
-/// **绝不能用「前缀 + 毫秒时钟」**：同一毫秒内两次创建会得到同一个主键，第二次直接撞
-/// `nodes.id` 约束。[`crate::domain::uid`] 是本仓库的 id 唯一来源：纳秒 + 进程内计数器
-/// （计数器的重启 caveat 见 `uid` 的文档）。
-pub fn mint_id(prefix: &str) -> String {
-    uid().replacen("sp_", &format!("{prefix}_"), 1)
 }
 
 // =========================================================================

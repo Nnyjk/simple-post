@@ -7,8 +7,8 @@ use serde_json::json;
 
 use super::history::tool_endpoint_history;
 use super::input::{
-    oauth2_config_schema, tls_settings_patch_schema, tls_settings_schema, AUTH_TYPE_VALUES,
-    BODY_MODE_VALUES,
+    oauth2_config_schema, responses_patch_schema, responses_schema, tls_settings_patch_schema,
+    tls_settings_schema, AUTH_TYPE_VALUES, BODY_MODE_VALUES,
 };
 use super::read::{tool_endpoint_get, tool_endpoint_list, tool_endpoint_search};
 use super::write::{
@@ -156,11 +156,9 @@ string}, and it also replaces a Content-Type header you set; \"binary\" sends a 
                 },
                 "body_content": {
                     "type": "string",
-                    "description": "The request payload actually sent on the wire, interpreted according to \
+                    "description": "The request payload actually sent on the wire, framed according to \
 body_mode. This is the field for \"what to send when testing\"; the documented parameter definition \
-goes in body_schema. For \"form\" it is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \
-\"description\"?}]; for \"multipart\" it is a JSON array of parts; for \"binary\" it is a JSON \
-object describing one file."
+goes in body_schema."
                 },
                 "body_schema": {
                     "type": "string",
@@ -196,7 +194,8 @@ to send when testing goes in body_content, never here."
                     "type": "string",
                     "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set)."
                 },
-                "tls": tls_settings_schema()
+                "tls": tls_settings_schema(),
+                "responses": responses_schema()
             },
             "$defs": {
                 "keyValue": crate::mcp::key_value::key_value_schema(),
@@ -218,7 +217,7 @@ to send when testing goes in body_content, never here."
                 "endpoint_id": { "type": "string" },
                 "patch": {
                     "type": "object",
-                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script` and `tls` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
+                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script`, `tls` and `responses` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
                     "properties": {
                         "name": { "type": "string" },
                         "description": { "type": ["string", "null"] },
@@ -251,7 +250,7 @@ segments in `url`. They are substituted into the path itself, not appended to th
                                 "mode": { "type": "string", "enum": json!(BODY_MODE_VALUES) },
                                 "content": {
                                     "type": "string",
-                                    "description": "The request payload actually sent. For mode \"json\" this is a JSON instance with values, not a JSON Schema — the definition goes in `schema`. For mode \"form\" it is a JSON array of rows [{\"key\", \"value\", \"enabled\"?, \"description\"?}]; for mode \"multipart\" it is a JSON array of parts; for mode \"binary\" it is a JSON object describing one file."
+                                    "description": "The payload actually sent, framed by mode. For \"json\" it is a JSON instance with values, not a JSON Schema — the definition goes in `schema`."
                                 },
                                 "schema": {
                                     "type": ["string", "null"],
@@ -301,7 +300,8 @@ segments in `url`. They are substituted into the path itself, not appended to th
                             "type": ["string", "null"],
                             "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set). null clears it."
                         },
-                        "tls": tls_settings_patch_schema()
+                        "tls": tls_settings_patch_schema(),
+                        "responses": responses_patch_schema()
                     },
                     "additionalProperties": false
                 }

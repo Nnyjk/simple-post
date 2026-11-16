@@ -36,6 +36,14 @@ pub fn uid() -> String {
     format!("sp_{:x}{:x}", nanos, n)
 }
 
+/// 在 [`uid`] 前面换一个前缀，好让不同种类的行从主键上就分得开（`proj_`、`ep_`、`resp_`…）。
+///
+/// **绝不能用「前缀 + 毫秒时钟」**：同一毫秒内两次创建会得到同一个主键，第二次直接撞上
+/// 目标表的主键约束。唯一性完全来自 [`uid`] 的纳秒 + 进程内计数器。
+pub fn uid_with_prefix(prefix: &str) -> String {
+    uid().replacen("sp_", &format!("{prefix}_"), 1)
+}
+
 /// 在 `Option<T>` 上把 JSON 缺席与 `null` 解析成**不同**状态：
 ///   - 缺席     → `None` 外层（`patch.field` 未设 → 不碰该列）
 ///   - `null`   → `Some(None)`       → 向该列写 NULL

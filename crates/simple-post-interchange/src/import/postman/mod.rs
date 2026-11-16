@@ -92,7 +92,9 @@ pub fn parse(value: &Value) -> Result<ParsedExchange, AppError> {
                     let mut endpoints = Vec::new();
                     // 脚本挂在**条目**上，不在 `request` 里。
                     let scripts = parse_scripts(obj, &ptr, Place::Node, &mut ctx);
-                    if let Some(ep) = build_endpoint(req, item_name(obj), &ptr, scripts, &mut ctx) {
+                    if let Some(ep) =
+                        build_endpoint(obj, req, item_name(obj), &ptr, scripts, &mut ctx)
+                    {
                         endpoints.push(ep);
                     }
                     if endpoints.is_empty() {

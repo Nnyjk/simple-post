@@ -28,8 +28,9 @@ fn referenced_schema_name(doc: &Value, path: &str, verb: &str) -> String {
         .to_string()
 }
 
+/// 一条响应定义都没有的端点：`responses` 至少要有成员，于是合成 `200: OK`，且不编造 body。
 #[test]
-fn every_operation_gets_exactly_one_synthetic_200() {
+fn an_endpoint_without_response_definitions_gets_the_synthetic_200() {
     let ex = one_module(
         "m",
         vec![
@@ -41,11 +42,11 @@ fn every_operation_gets_exactly_one_synthetic_200() {
     let paths = doc["paths"].as_object().expect("paths 是对象");
     assert_eq!(paths.len(), 2);
     for (_, item) in paths {
-        let responses = item["get"]
+        let operation = item["get"]
             .as_object()
             .or_else(|| item["post"].as_object())
             .expect("path item 下有动词");
-        let responses = &responses["responses"];
+        let responses = &operation["responses"];
         let keys: Vec<&String> = responses
             .as_object()
             .expect("responses 是对象")
@@ -57,6 +58,106 @@ fn every_operation_gets_exactly_one_synthetic_200() {
         assert!(responses["200"].get("content").is_none());
     }
     assert!(doc["components"].get("schemas").is_none());
+}
+
+/// 端点自己写了响应定义时，导出用它们，不再合成。
+///
+/// 两种形状各一条：只有 `description` 的（没有 media type 就没有 `content` 块），
+/// 以及带 `schema` + `example` 的（`example` 能解析成 JSON 就写成值）。
+#[test]
+fn an_endpoint_exports_its_own_response_definitions() {
+    let mut endpoint = ep("a", HttpMethod::Get, "/users/{id}");
+    endpoint.responses = vec![
+        simple_post_core::domain::ResponseDefinition {
+            id: "r1".into(),
+            status: "200".into(),
+            description: "the user".into(),
+            content_type: "application/json".into(),
+            schema: Some(
+                json!({ "type": "object", "properties": { "id": { "type": "integer" } } }),
+            ),
+            example: Some("{\"id\":1}".into()),
+        },
+        simple_post_core::domain::ResponseDefinition {
+            id: "r2".into(),
+            status: "404".into(),
+            description: "no such user".into(),
+            content_type: String::new(),
+            schema: None,
+            example: None,
+        },
+    ];
+    let out = to_document(&one_module("m", vec![endpoint]), DocFormat::Json).expect("导出应成功");
+    assert!(
+        out.diagnostics.is_empty(),
+        "不该有诊断：{:?}",
+        out.diagnostics
+    );
+    let doc: Value = serde_json::from_str(&out.content).expect("合法 JSON");
+
+    let responses = &doc["paths"]["/users/{id}"]["get"]["responses"];
+    assert!(responses.get("default").is_none());
+    assert_eq!(responses["200"]["description"], "the user");
+    assert_eq!(
+        responses["200"]["content"]["application/json"]["schema"]["properties"]["id"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        responses["200"]["content"]["application/json"]["example"],
+        json!({ "id": 1 })
+    );
+    // 只有 description 的那条：没有 content 块。
+    assert_eq!(responses["404"], json!({ "description": "no such user" }));
+}
+
+/// 写不进文档的定义被跳过并落一条诊断 —— 宁可少写一条响应，也不产出一份过不了校验的文档。
+#[test]
+fn a_response_definition_that_cannot_be_written_is_skipped_and_diagnosed() {
+    let mut endpoint = ep("a", HttpMethod::Get, "/a");
+    let response = |status: &str, content_type: &str, schema: Option<Value>| {
+        simple_post_core::domain::ResponseDefinition {
+            id: format!("r_{status}"),
+            status: status.into(),
+            description: "d".into(),
+            content_type: content_type.into(),
+            schema,
+            example: None,
+        }
+    };
+    endpoint.responses = vec![
+        response("200", "application/json", None),
+        response("2OO", "application/json", None),
+        response("200", "application/json", None),
+        response("201", "application/json", Some(json!("not an object"))),
+        response("202", "json", None),
+        response("204", "", None),
+    ];
+    let out = to_document(&one_module("m", vec![endpoint]), DocFormat::Json).expect("导出应成功");
+    let doc: Value = serde_json::from_str(&out.content).expect("合法 JSON");
+
+    let keys: Vec<&String> = doc["paths"]["/a"]["get"]["responses"]
+        .as_object()
+        .expect("responses 是对象")
+        .keys()
+        .collect();
+    assert_eq!(keys, vec!["200", "204"], "只有写得进的留下");
+
+    let warns: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Warn)
+        .collect();
+    let infos: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Info)
+        .collect();
+    assert_eq!(
+        warns.len(),
+        3,
+        "status 拼错 / schema 不是对象 / contentType 不是 media type"
+    );
+    assert_eq!(infos.len(), 1, "重复的 status 只留第一条");
 }
 
 #[test]

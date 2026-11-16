@@ -37,8 +37,9 @@ pub use project::{
     Environment, EnvironmentPatch, ModuleBaseUrl, Project, ProjectPatch, RewriteRule,
 };
 pub use resource::{
-    EndpointDetail, EndpointDetailPatch, EndpointResource, ResourceNode, ResourceNodePatch,
-    ResourceNodeType,
+    ensure_response_ids, is_media_type, is_response_status, response_problems, EndpointDetail,
+    EndpointDetailPatch, EndpointResource, ResourceNode, ResourceNodePatch, ResourceNodeType,
+    ResponseDefinition, ResponseProblem, ResponseProblemKind,
 };
 pub use response::{
     ApiResponse, ResponseHistoryEntry, StoredRequestSnapshot, StoredResponse,
@@ -52,7 +53,9 @@ pub use settings::{
     is_loopback_host, McpHttpConfig, Permission, RequestSettings, TlsSettings, DEFAULT_MCP_HOST,
     DEFAULT_MCP_PATH,
 };
-pub use util::{default_project_color, double_option, json_scalar_to_text, now_ms, uid};
+pub use util::{
+    default_project_color, double_option, json_scalar_to_text, now_ms, uid, uid_with_prefix,
+};
 
 // 测试——跨 IPC 形状的往返序列化。
 

@@ -28,12 +28,12 @@ mod servers;
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
-use simple_post_core::domain::{parse_http_method, HttpMethod};
+use simple_post_core::domain::{parse_http_method, HttpMethod, ResponseDefinition};
 use simple_post_core::error::AppError;
 
 use crate::diagnostics::Diagnostic;
 use crate::ir::{Exchange, IrBaseUrl, IrEndpoint, IrModule, IrScripts};
-use crate::spec::{escape_pointer_token, PATH_METHODS};
+use crate::spec::{escape_pointer_token, normalize_media, PATH_METHODS};
 
 use self::auth::auth_of;
 use self::params::{parameters, request_body};
@@ -246,6 +246,7 @@ fn endpoint_of(
     let (params, path_params, headers) = parameters(ctx, view, item, operation, &key);
     let body = request_body(ctx, view, operation, &key);
     let auth = auth_of(ctx, view, operation, &key);
+    let responses = responses_of(view, operation, &key, ctx);
 
     IrEndpoint {
         key,
@@ -260,6 +261,7 @@ fn endpoint_of(
         headers,
         body,
         auth,
+        responses,
         docs: None,
         notes: None,
         tags,
@@ -268,6 +270,181 @@ fn endpoint_of(
 }
 
 // 小工具
+
+/// 一个 operation 的 `responses` → 响应定义，每个 status 键一条。
+///
+/// `$ref` 先展开：`components/responses` 里那一份就是一条完整的响应。表达不了的构造逐项
+/// 回诊断点名丢掉——`headers`、`links`、一个响应里的多个 media type、`examples` 里的多个
+/// 命名示例，本仓库的响应定义各只有一格，装不下它们。
+///
+/// `status` 键不认识（既不是三位状态码也不是 `2XX` / `default`）时整条丢弃：存进去之后既
+/// 导不回 OpenAPI，界面上也无从解释它是哪一种。
+fn responses_of(
+    view: &DocView,
+    operation: &Map<String, Value>,
+    pointer: &str,
+    ctx: &mut Ctx,
+) -> Vec<ResponseDefinition> {
+    let base = format!("{pointer}/responses");
+    let Some(declared) = operation.get("responses") else {
+        return Vec::new();
+    };
+    let Some(responses) = declared.as_object() else {
+        ctx.diagnostics.push(Diagnostic::warn(
+            &base,
+            "responses 不是对象，这一批响应定义全部丢弃",
+        ));
+        return Vec::new();
+    };
+    if responses.is_empty() {
+        ctx.diagnostics.push(Diagnostic::warn(
+            &base,
+            "responses 是空对象，规范要求至少有一个成员，故没有可导入的定义",
+        ));
+        return Vec::new();
+    }
+
+    let mut out = Vec::with_capacity(responses.len());
+    for (status, raw) in responses {
+        let slot = format!("{base}/{}", escape_pointer_token(status));
+        let Some(node) = refs::deref(ctx, view.root, raw, &slot) else {
+            continue;
+        };
+        let Some(response) = node.as_object() else {
+            ctx.diagnostics
+                .push(Diagnostic::warn(&slot, "响应定义不是对象，这一条被丢弃"));
+            continue;
+        };
+        if !simple_post_core::domain::is_response_status(status) {
+            ctx.diagnostics.push(
+                Diagnostic::warn(
+                    &slot,
+                    "status 键必须是三位状态码、`2XX` 这样的范围或 `default`，本仓库的响应定义只认这三种",
+                )
+                .dropping(status.clone()),
+            );
+            continue;
+        }
+        for (key, what) in [("headers", "响应头"), ("links", "响应链接")] {
+            if response.get(key).is_some_and(|v| !v.is_null()) {
+                ctx.diagnostics.push(
+                    Diagnostic::warn(
+                        format!("{slot}/{key}"),
+                        format!("OpenAPI 的{what}在本仓库的响应定义里没有对应字段，已丢弃"),
+                    )
+                    .dropping(serde_json::to_string(&response[key]).unwrap_or_default()),
+                );
+            }
+        }
+
+        let description = text(response, "description").unwrap_or_default();
+        if description.is_empty() {
+            ctx.diagnostics.push(Diagnostic::info(
+                format!("{slot}/description"),
+                "响应没有 description。规范要求必填，故导回去会是一句空串，界面上会提示补一句",
+            ));
+        }
+        let (content_type, schema, example) = response_content(response, &slot, ctx);
+        out.push(ResponseDefinition {
+            // id 由落库那一侧铸：导入只负责内容，与 endpoint 的 key 同一条约定。
+            id: String::new(),
+            status: status.clone(),
+            description,
+            content_type,
+            schema,
+            example,
+        });
+    }
+    out
+}
+
+/// 一条响应的 `content` → `(contentType, schema, example)`。
+///
+/// media type 的选择与 `requestBody` 同一条偏好序：一格里只放得下一个，其余的丢并点名。
+fn response_content(
+    response: &Map<String, Value>,
+    slot: &str,
+    ctx: &mut Ctx,
+) -> (String, Option<Value>, Option<String>) {
+    let Some(content) = response.get("content").and_then(Value::as_object) else {
+        return (String::new(), None, None);
+    };
+    let Some((raw_key, media)) = pick_media(content, ctx, slot) else {
+        return (String::new(), None, None);
+    };
+    let Some(media_object) = content.get(&raw_key).and_then(Value::as_object) else {
+        return (media, None, None);
+    };
+
+    let mut schema = None;
+    if let Some(declared) = media_object.get("schema") {
+        if declared.is_object() {
+            schema = Some(declared.clone());
+        } else {
+            ctx.diagnostics.push(Diagnostic::warn(
+                format!("{slot}/content/{raw_key}/schema"),
+                "schema 不是对象（一份 JSON Schema），已丢弃",
+            ));
+        }
+    }
+
+    let mut example = None;
+    if let Some(declared) = media_object.get("example") {
+        example = Some(scalar_text(declared));
+    } else if let Some(Value::Object(named)) = media_object.get("examples") {
+        match named.len() {
+            0 => {}
+            1 => {
+                example = named
+                    .values()
+                    .next()
+                    .and_then(|entry| entry.get("value"))
+                    .map(scalar_text);
+            }
+            _ => {
+                let names: Vec<&str> = named.keys().map(String::as_str).collect();
+                ctx.diagnostics.push(
+                    Diagnostic::warn(
+                        format!("{slot}/content/{raw_key}/examples"),
+                        "一个响应只带得下一份示例，这里有多份，全部丢弃",
+                    )
+                    .dropping(names.join(", ")),
+                );
+            }
+        }
+    }
+    (media, schema, example)
+}
+
+/// 留哪一个 media type：先按 `CONTENT_PREFERENCE`，都没有就取字典序第一个。
+///
+/// 返回值第一项是文档里原来的键（带参数的那个），第二项是归一后的值——存进响应定义的是
+/// 归一后的那一个，`charset` 之类的参数属于报文而不属于「这个响应是什么类型」。
+fn pick_media(content: &Map<String, Value>, ctx: &mut Ctx, slot: &str) -> Option<(String, String)> {
+    let mut chosen = CONTENT_PREFERENCE.iter().find_map(|want| {
+        content
+            .keys()
+            .find(|k| normalize_media(k) == *want)
+            .cloned()
+    });
+    if chosen.is_none() {
+        chosen = content.keys().next().cloned();
+    }
+    let raw_key = chosen?;
+    let media = normalize_media(&raw_key);
+    for key in content.keys() {
+        if normalize_media(key) != media {
+            ctx.diagnostics.push(
+                Diagnostic::warn(
+                    format!("{slot}/content"),
+                    "一个响应只带得下一份 content，其余 media type 已丢弃",
+                )
+                .dropping(key.clone()),
+            );
+        }
+    }
+    Some((raw_key, media))
+}
 
 pub(super) fn text(o: &Map<String, Value>, key: &str) -> Option<String> {
     o.get(key).and_then(Value::as_str).map(str::to_string)
@@ -291,15 +468,6 @@ pub(super) fn scalar_text(v: &Value) -> String {
         Value::String(s) => s.clone(),
         other => other.to_string(),
     }
-}
-
-/// media type 归一：`Application/JSON; charset=utf-8` 与 `application/json` 同一个。
-pub(super) fn normalize_media(raw: &str) -> String {
-    raw.split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase()
 }
 
 // 测试——$ref 展开、servers 拆分、多 media type 与诊断。

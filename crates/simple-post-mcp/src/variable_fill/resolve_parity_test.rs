@@ -101,6 +101,7 @@ fn detail(input: &Input) -> EndpointDetail {
         pre_request_script: None,
         test_script: None,
         tls: None,
+        responses: vec![],
     }
 }
 
