@@ -46,6 +46,40 @@ fn the_path_params_patch_distinguishes_absent_from_null() {
 }
 
 #[test]
+fn the_responses_patch_distinguishes_absent_from_null() {
+    // `responses` 缺席 → 一份都不改。
+    let p: EndpointDetailPatch = serde_json::from_value(json!({ "url": "/renamed" })).unwrap();
+    assert!(p.responses.is_none());
+
+    // `responses: null` → Some(None)：把整份定义清空。
+    let p: EndpointDetailPatch = serde_json::from_value(json!({ "responses": null })).unwrap();
+    assert_eq!(p.responses, Some(None));
+    assert!(!p.is_empty(), "clearing responses is a real write");
+
+    // 给一份 → Some(Some(..))：整体替换，不是逐条合并。
+    let p: EndpointDetailPatch = serde_json::from_value(json!({
+        "responses": [{
+            "id": "resp_1",
+            "status": "200",
+            "description": "用户资料",
+            "contentType": "application/json",
+            "schema": { "type": "object" },
+            "example": "{\"id\":42}"
+        }]
+    }))
+    .unwrap();
+    let rows = p.responses.clone().unwrap().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].content_type, "application/json");
+    assert_eq!(rows[0].example.as_deref(), Some("{\"id\":42}"));
+    // 写回去仍用 camelCase 的 `contentType`：TS 那一侧按这个名字读。
+    assert_eq!(
+        serde_json::to_value(&p).unwrap()["responses"][0]["contentType"],
+        serde_json::json!("application/json")
+    );
+}
+
+#[test]
 fn node_patch_distinguishes_absent_from_null() {
     // `parentId` 缺席 → 节点原地不动
     let p: ResourceNodePatch = serde_json::from_value(json!({ "name": "renamed" })).unwrap();
