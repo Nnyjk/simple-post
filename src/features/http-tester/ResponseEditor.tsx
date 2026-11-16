@@ -23,6 +23,7 @@ import {
   appendResponse,
   moveResponse,
   patchResponse,
+  rekeyRows,
   removeResponse,
 } from './model/responseDefinitions';
 
@@ -86,6 +87,26 @@ const BASIC_SETUP = {
 } as const;
 
 export function ResponseEditor({ value, onChange }: Props) {
+  // 每行的渲染键。删除与移动在这里同步挪动，卡片里的本地文本状态才跟着行一起走；
+  // 渲染期对齐是纯函数，不会额外渲染一次。
+  const keysRef = useRef<string[]>([]);
+  const keys = rekeyRows(keysRef.current, value);
+  keysRef.current = keys;
+
+  const handleRemove = (index: number) => {
+    keysRef.current = keysRef.current.filter((_, i) => i !== index);
+    onChange(removeResponse(value, index));
+  };
+
+  const handleMove = (index: number, delta: -1 | 1) => {
+    const next = moveResponse(value, index, delta);
+    if (next === value) return;
+    const swapped = [...keysRef.current];
+    [swapped[index], swapped[index + delta]] = [swapped[index + delta], swapped[index]];
+    keysRef.current = swapped;
+    onChange(next);
+  };
+
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
       <div className="flex items-start gap-3">
@@ -114,15 +135,15 @@ export function ResponseEditor({ value, onChange }: Props) {
         <div className="flex flex-col gap-3">
           {value.map((row, index) => (
             <ResponseCard
-              // 新行的 id 是空串（落盘时才由后端铸），故退回到位置做键。文本类状态都在
-              // 受控输入里，位置换掉不会把内容留在旧卡片上。
-              key={row.id || `new-${index}`}
+              // 键取自 `rekeyRows`：落盘前新行没有服务端 id，靠本地键保持身份，上下移动
+              // 后卡片里的本地文本状态不会留在旧位置。
+              key={keys[index]}
               row={row}
               index={index}
               total={value.length}
               onChange={(patch) => onChange(patchResponse(value, index, patch))}
-              onRemove={() => onChange(removeResponse(value, index))}
-              onMove={(delta) => onChange(moveResponse(value, index, delta))}
+              onRemove={() => handleRemove(index)}
+              onMove={(delta) => handleMove(index, delta)}
             />
           ))}
         </div>

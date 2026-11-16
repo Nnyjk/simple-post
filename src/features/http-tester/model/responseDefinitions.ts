@@ -50,3 +50,24 @@ export function moveResponse(
   next.splice(target, 0, row);
   return next;
 }
+
+/** 本地键的发号器。只在既有键用不上时（新行、换了一整份文档）才发一个。 */
+let rowKeySeed = 0;
+
+/**
+ * 渲染列表用的行键。服务端铸的 `id` 优先；没有 `id` 的行（刚新增、还没落盘）沿用它在
+ * `previous` 里的那个键，`previous` 缺位时才新发一个。
+ *
+ * 键必须跟着行走：每张卡片里都有本地文本状态（打到一半的 Schema JSON），按位置做键会让
+ * 那段文本在上下移动后留在旧位置，接着的输入就写到别人的定义上。故调用方在删除与移动时
+ * 同步挪动 `previous`，这里只负责对齐。
+ */
+export function rekeyRows(previous: string[], responses: ResponseDefinition[]): string[] {
+  return responses.map((row, index) => {
+    if (row.id) return row.id;
+    const inherited = previous[index];
+    if (inherited) return inherited;
+    rowKeySeed += 1;
+    return `row-${rowKeySeed}`;
+  });
+}

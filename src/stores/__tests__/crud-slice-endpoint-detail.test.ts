@@ -83,6 +83,27 @@ describe('crud-slice: updateEndpointDetail — T-2 optimistic + rollback', () =>
     );
   });
 
+  it('Tauri 形态的拒绝是 `{ code, message }` 对象，也要取到人话', async () => {
+    const original = makeDetail({ nodeId: 'ep-object-reject', url: '/widgets' });
+    const harness = makeCrudHarness({ 'ep-object-reject': original });
+
+    // Tauri 形态的 `invoke` 把 Rust 的 `AppError` 原样序列化后 reject，不是 `Error`。
+    // 若这里退回 `String(e)`，横幅会显示 `[object Object]`。
+    installIpcMock(async (cmd) => {
+      if (cmd === 'endpoint_detail_update') {
+        throw { code: 'VALIDATION', message: 'responses[0].status 不合法' };
+      }
+      throw new Error('unexpected cmd: ' + cmd);
+    });
+
+    const rejected = await harness.slice.updateEndpointDetail('ep-object-reject', {
+      responses: [],
+    });
+
+    assert.equal(rejected, 'responses[0].status 不合法', '取 message 字段而不是对象本身');
+    assert.equal(harness.bag.endpointDetails['ep-object-reject'], original, '被拒后仍回滚到原快照');
+  });
+
   it('未知 nodeId 不发 IPC — 没有 detail 行可乐观写入', async () => {
     const harness = makeCrudHarness({});
     const calls: CapturedInvoke[] = [];

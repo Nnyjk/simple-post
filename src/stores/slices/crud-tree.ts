@@ -27,6 +27,22 @@ import {
   tabKeysForSubtree,
 } from './crud-helpers';
 
+/**
+ * 把后端拒掉的调用翻成一句人话。
+ *
+ * 同一失败在两种形态里的样子不同：web 形态的 `invokeCmd` 抛 `Error`（消息里已拼上
+ * `[code] message`），Tauri 形态则把 Rust 的 `AppError` 原样序列化成 `{ code, message }`
+ * 对象 —— 后者套 `String()` 只会得到 `"[object Object]"`。
+ */
+function rejectionMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const { message } = error;
+    if (typeof message === 'string') return message;
+  }
+  return String(error);
+}
+
 /** 调用方在新建节点时可以设定什么。id 由我们铸造。 */
 export interface NewNodeInput {
   /** 所属项目。建 module 时必填；其余情况由父节点推导。 */
@@ -201,7 +217,7 @@ export const createTreeCrud: StateCreator<AppState, [], [], TreeCrudActions> = (
       // 不走 `invokeWithRollback`：它把错误吞成 `false`，而调用方要的是后端原话。
       console.error('[store] endpoint_detail_update failed', e);
       set((s) => ({ endpointDetails: { ...s.endpointDetails, [nodeId]: prev } }));
-      return e instanceof Error ? e.message : String(e);
+      return rejectionMessage(e);
     }
   },
 
