@@ -73,3 +73,82 @@ fn url_splits_into_path_params_and_the_module_cell() {
     assert_eq!(ex.diagnostics[0].severity, Severity::Warn);
     assert_eq!(ex.diagnostics[0].pointer, "/item/0/request/url");
 }
+
+/// 一份只有一条请求、响应用例由调用方给的集合。
+fn collection_with_responses(responses: serde_json::Value) -> serde_json::Value {
+    json!({
+        "info": {
+            "name": "演示",
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+        },
+        "item": [{
+            "name": "ping",
+            "request": {
+                "method": "GET",
+                "url": { "raw": "https://api.example.com/ping", "path": ["ping"] }
+            },
+            "response": responses
+        }]
+    })
+}
+
+#[test]
+fn saved_examples_become_response_definitions() {
+    let parsed = parse_ok(&collection_with_responses(json!([{
+        "name": "OK",
+        "code": 200,
+        "status": "OK",
+        "header": [{ "key": "Content-Type", "value": "application/json; charset=utf-8" }],
+        "body": "{\"id\":1}"
+    }])));
+    let ep = &parsed.exchange.modules[0].endpoints[0];
+    assert_eq!(ep.responses.len(), 1);
+    assert_eq!(ep.responses[0].status, "200");
+    assert_eq!(ep.responses[0].description, "OK");
+    // 参数属于这份报文，不属于「这个响应是什么类型」。
+    assert_eq!(ep.responses[0].content_type, "application/json");
+    assert_eq!(ep.responses[0].example.as_deref(), Some("{\"id\":1}"));
+    // Postman 没有响应 schema 这个构造，从正文反推就是猜。
+    assert!(ep.responses[0].schema.is_none());
+}
+
+#[test]
+fn a_repeated_code_keeps_one_definition_and_names_the_rest() {
+    let parsed = parse_ok(&collection_with_responses(json!([
+        { "name": "第一次", "code": 200, "status": "OK" },
+        { "name": "第二次", "code": 200, "status": "OK" }
+    ])));
+    let ep = &parsed.exchange.modules[0].endpoints[0];
+    // 状态码重复会让落库校验拒绝整次导入，故导入时就收成一条。
+    assert_eq!(ep.responses.len(), 1);
+    assert!(
+        parsed
+            .exchange
+            .diagnostics
+            .iter()
+            .any(|d| { d.severity == Severity::Warn && d.dropped.as_deref() == Some("200") }),
+        "丢掉的重复状态码要点名：{:?}",
+        parsed.exchange.diagnostics
+    );
+}
+
+#[test]
+fn a_content_type_that_is_not_a_media_type_is_dropped_and_diagnosed() {
+    let parsed = parse_ok(&collection_with_responses(json!([{
+        "code": 200,
+        "status": "OK",
+        "header": [{ "key": "Content-Type", "value": "invalid" }]
+    }])));
+    let ep = &parsed.exchange.modules[0].endpoints[0];
+    assert_eq!(ep.responses[0].content_type, "");
+    assert!(
+        parsed
+            .exchange
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Warn
+                && d.dropped.as_deref() == Some("Content-Type: invalid")),
+        "丢掉的值要点名：{:?}",
+        parsed.exchange.diagnostics
+    );
+}

@@ -663,3 +663,110 @@ async fn endpoint_create_rejects_a_pasted_certificate_body_without_leaving_colle
         "校验失败不许在树上留下集合，got: {names:?}"
     );
 }
+
+/// 响应定义不合法时必须在**建集合之前**就报错：否则「集合建好了、定义被拒、端点没建成」
+/// 会留下一串没人要的集合与一份打不开的树。
+#[tokio::test]
+async fn endpoint_create_rejects_a_bad_response_definition_before_writing_anything() {
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(c, &bare_project("p_rj", "RJ"))?;
+        nodes::create(
+            c,
+            &node("p_rj", "m_rj", ResourceNodeType::Module, None),
+            None,
+        )?;
+        permissions::set(c, "p_rj", Permission::Full)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_rj",
+            "collection_path": "订单/明细",
+            "name": "n",
+            "method": "GET",
+            "url": "/x",
+            "responses": [
+                { "status": "200", "description": "成" },
+                { "status": "2OO", "description": "键写坏了" },
+                { "status": "200", "description": "重复" },
+                { "status": "201", "description": "x", "schema": "not an object" },
+                { "status": "202", "description": "x", "contentType": "json" }
+            ]
+        }),
+    )
+    .await;
+    let message = match res {
+        Err(AppError::Validation(message)) => message,
+        other => panic!("expected a validation error, got {other:?}"),
+    };
+    assert!(message.contains("responses[1].status"), "got {message}");
+    assert!(message.contains("responses[2].status"), "got {message}");
+    assert!(message.contains("responses[3].schema"), "got {message}");
+    assert!(
+        message.contains("responses[4].contentType"),
+        "got {message}"
+    );
+
+    // `collection_path` 上的两级集合一个都不该留下来。
+    let children =
+        simple_post_core::db::with_conn(&st.pool, |c| nodes::list_children(c, "m_rj", None))
+            .expect("children");
+    assert!(
+        children.is_empty(),
+        "a rejected create must not leave collections behind: {children:?}"
+    );
+}
+
+#[tokio::test]
+async fn endpoint_create_mints_ids_for_response_definitions() {
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(c, &bare_project("p_rs", "RS"))?;
+        nodes::create(
+            c,
+            &node("p_rs", "m_rs", ResourceNodeType::Module, None),
+            None,
+        )?;
+        permissions::set(c, "p_rs", Permission::Full)?;
+        Ok(())
+    })
+    .unwrap();
+
+    let res = tool_endpoint_create(
+        &st,
+        serde_json::json!({
+            "module_id": "m_rs",
+            "name": "n",
+            "method": "GET",
+            "url": "/x",
+            "responses": [
+                { "status": "2XX", "description": "成", "contentType": "application/json",
+                  "schema": { "type": "object" }, "example": "{\"id\":1}" },
+                { "id": "resp_kept", "status": "default", "description": "兜底" }
+            ]
+        }),
+    )
+    .await
+    .expect("definitions that pass the rules must be stored");
+
+    let crate::mcp::CallToolContent::Text { text } = &res.content[0];
+    let created: serde_json::Value = serde_json::from_str(text).expect("json result");
+    let id = created["id"].as_str().expect("id").to_string();
+
+    let d = detail_of(&st, &id);
+    assert_eq!(d.responses.len(), 2);
+    // 范围与 `default` 都收；缺 id 的那条铸成 `resp_` 前缀。
+    assert_eq!(d.responses[0].status, "2XX");
+    assert!(
+        d.responses[0].id.starts_with("resp_"),
+        "got {}",
+        d.responses[0].id
+    );
+    assert_eq!(d.responses[1].id, "resp_kept");
+    assert_eq!(d.responses[0].content_type, "application/json");
+    assert_eq!(d.responses[0].example.as_deref(), Some("{\"id\":1}"));
+}

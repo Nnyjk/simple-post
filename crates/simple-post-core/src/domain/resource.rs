@@ -282,10 +282,12 @@ pub fn is_response_status(status: &str) -> bool {
         return true;
     }
     match status.as_bytes() {
-        [first, rest, last] => {
-            (b'1'..=b'5').contains(first) && rest.is_ascii_digit() && last.is_ascii_digit()
+        // 守卫必须写在模式里：写在分支体里时 `[first, rest, last]` 已经匹配上了三字节的形状，
+        // 后面那条 `2XX` 分支永远轮不到，`2XX` 就被判成非法。
+        [first, rest, last] if rest.is_ascii_digit() && last.is_ascii_digit() => {
+            (b'1'..=b'5').contains(first)
         }
-        [first, rest, b'X', b'X'] => (b'1'..=b'5').contains(first) && rest.is_ascii_digit(),
+        [first, b'X', b'X'] => (b'1'..=b'5').contains(first),
         _ => false,
     }
 }
