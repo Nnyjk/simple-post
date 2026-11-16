@@ -39,6 +39,8 @@ docker compose --project-directory . -f docker/docker-compose.yml up -d simple-p
 SP_IMAGE=ghcr.io/nnyjk/simple-post:latest
 ```
 
+**旧部署先核对项目名。** 如果之前是不带 `--project-directory .` 起的（比如在 `docker/` 目录里跑 `docker compose -f docker-compose.yml up -d`），`docker compose ls` 里的项目名是 `docker`，数据在 `docker_simple-post-data` 卷里。直接跑上面两条会按项目名 `simple-post` 建容器：`container_name: simple-post` 是固定的，旧容器还在就撞名起不来；旧容器先停掉再起，新卷 `simple-post_simple-post-data` 是空的。先 `docker compose -p docker --project-directory . -f docker/docker-compose.yml down`，再用 `-p docker` 执行上面两条，沿用旧项目名与旧卷；之后每次更新都要带 `-p docker`，除非把旧卷里的数据迁到新卷后改用不带 `-p` 的命令。
+
 数据在命名卷里，换镜像不动数据。Portainer 建栈时对应动作是改栈文件里的 `image` 行再 Update the stack。
 
 **可选的就地执行。** 在 `.env` 里写 `SP_UPDATE_COMMAND`（对应容器里的 `SIMPLE_POST_UPDATE_COMMAND`），对话框才会出现「立即执行更新」：

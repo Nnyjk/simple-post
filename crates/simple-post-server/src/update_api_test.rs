@@ -128,6 +128,21 @@ async fn docker_shape_is_reported_when_declared() {
 }
 
 #[test]
+fn docker_command_reads_the_compose_file_from_the_repository_root() {
+    // 与 README.md 的 compose 一节、docker/README.md 的「更新」一节逐字一致：缺
+    // `--project-directory .` 时 Compose 把 docker/ 当项目目录、读不到根目录 .env，
+    // 缺 `-f docker/docker-compose.yml` 时在仓库根执行会报找不到配置文件。
+    assert_eq!(
+        DOCKER_COMMAND,
+        concat!(
+            "docker compose --project-directory . -f docker/docker-compose.yml pull simple-post",
+            " && ",
+            "docker compose --project-directory . -f docker/docker-compose.yml up -d simple-post",
+        )
+    );
+}
+
+#[test]
 fn error_codes_are_stable() {
     assert_eq!(ApplyError::Disabled.code(), "update_disabled");
     assert_eq!(ApplyError::Busy.code(), "update_in_progress");
@@ -141,4 +156,10 @@ fn output_is_clamped_on_a_char_boundary() {
 
     let long = vec![b'a'; OUTPUT_LIMIT_BYTES + 100];
     assert_eq!(clamp(&long).len(), OUTPUT_LIMIT_BYTES);
+
+    // OUTPUT_LIMIT_BYTES 不是 3 的倍数：按字节硬切会把「中」劈成两半，截断点要退到 8190。
+    let multibyte = "中".repeat(OUTPUT_LIMIT_BYTES);
+    let clamped = clamp(multibyte.as_bytes());
+    assert_eq!(clamped.len(), OUTPUT_LIMIT_BYTES - OUTPUT_LIMIT_BYTES % 3);
+    assert!(clamped.chars().all(|ch| ch == '中'));
 }

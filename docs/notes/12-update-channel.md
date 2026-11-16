@@ -2,7 +2,7 @@
 
 - 适用范围：版本提示从哪来、桌面端怎么自动装、「立即执行更新」在什么部署里成立、离线时界面显示什么。
 - 权威来源：`crates/simple-post-core/src/update/{version,check}.rs`、`crates/simple-post-server/src/update_api.rs`、`crates/simple-post-server/src/web_api/routes/update.rs`、`src-tauri/src/commands/update.rs`、`src-tauri/tauri.conf.json`、`.github/workflows/release.yml`、`src/stores/update-slice.ts`、`src/features/update/`、`docker/Dockerfile`、`docker/*.yml`。
-- 最后核对：2026-11-13（v0.1.34）
+- 最后核对：2026-11-16（v0.1.34）
 - 前置阅读：01-overview.md、02-architecture.md（双传输不变量）、09-engineering-process.md（发布与部署）
 
 ## 结论
@@ -72,7 +72,7 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 
 | 部署形态 | 界面给什么 | 实际动作 |
 |---|---|---|
-| 容器 | `GET /api/update/deployment` 返回 `shape: "docker"`、镜像 `ghcr.io/nnyjk/simple-post:latest`、命令 `docker compose pull simple-post && docker compose up -d simple-post` | 在**宿主**改 `.env` 的 `SP_IMAGE` 并执行 pull / up。`pull` 拉的是 `SP_IMAGE` 指向的名字，默认 `simple-post:local` 是本机构建标签，pull 它什么也拉不到 |
+| 容器 | `GET /api/update/deployment` 返回 `shape: "docker"`、镜像 `ghcr.io/nnyjk/simple-post:latest`、命令 `docker compose --project-directory . -f docker/docker-compose.yml pull simple-post && docker compose --project-directory . -f docker/docker-compose.yml up -d simple-post` | 在**宿主**改 `.env` 的 `SP_IMAGE` 并执行 pull / up。`pull` 拉的是 `SP_IMAGE` 指向的名字，默认 `simple-post:local` 是本机构建标签，pull 它什么也拉不到 |
 | 源码 / 二进制 | `shape: "binary"`，`image` 与 `command` 都是 `null` | 拉代码重新 `cargo build --release -p simple-post-server`（或换二进制），重启 `serve-web` 进程 |
 
 `shape` 的判定在 `crates/simple-post-server/src/update_api.rs` 的 `is_docker`：存在 `/.dockerenv`，或 `SIMPLE_POST_DEPLOYMENT` 被设成 `docker`（供没有 `/.dockerenv` 的运行时使用）。

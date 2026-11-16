@@ -23,6 +23,7 @@ npm run check
   - `Web — format, lint, typecheck, test, build`
   - `Rust — fmt, clippy, test`
   - `Docker — image build + container smoke test`
+- **合并前必须触发机器人评审，并逐条回复它的意见。** 仓库 star 数不足时 CodeRabbit 不会自动评审，在 PR 上评论 `@coderabbitai review` 手动触发；它的意见以行内评论给出（通常在十几分钟内，三项检查结算后还没出现就再等一轮），逐条在那条行内评论下回复「改了什么」或「为何不成立」，处理完把对话标记为已解决。它拒绝评审（例如 PR 已合并）或评审额度用尽（评论里写 "0 remain"）时，在 PR 正文里如实记录，不要写成「已评审」。
 
 ## 红线
 
