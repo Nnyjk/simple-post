@@ -134,6 +134,11 @@ export function useDocsShare(): DocsShareController {
         generatedAt,
         environment,
       });
+      // 弹窗开着的时候用户可能在别处删了接口、或切了项目：那时模型会是空的，
+      // 生成一份「0 个接口」的快照只会让人以为工具坏了。
+      if (model.endpointCount === 0) {
+        throw new Error('选中的接口已经不在当前项目里了，请重新选择。');
+      }
       // 渲染器牵着 `marked`，故**在这里**才动态取：文档功能没被点开时，
       // 项目树那条常驻路径上不该出现 Markdown 解析器。
       const { renderApiDocHtml } = await import('@/lib/doc/render');

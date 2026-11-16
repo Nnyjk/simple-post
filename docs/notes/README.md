@@ -20,7 +20,7 @@
 | [04-request-pipeline.md](04-request-pipeline.md) | 从草稿到落历史的一条序列（脚本插在哪一步）、两条装配路径、七种请求体形态、鉴权与 multipart、历史快照 | 改请求行为、改预览、查「界面与实发不一致」的人 |
 | [05-mcp.md](05-mcp.md) | JSON-RPC 派发、48 个工具、两道授权门、daemon 端口与 `mcp.port`、stdio 桥 | 改 MCP 工具、接 AI 客户端的人 |
 | [06-dynamic-and-scripts.md](06-dynamic-and-scripts.md) | 动态变量引擎（合并/缓存/single-flight）与 QuickJS 脚本沙箱、脚本链与回滚 | 改变量取值、写脚本、调沙箱的人 |
-| [07-frontend.md](07-frontend.md) | Zustand 切片、三个 surface、两层 `bootstrap()`、标签与草稿、首屏分包 | 改 React 界面的人 |
+| [07-frontend.md](07-frontend.md) | Zustand 切片、三个 surface、两层 `bootstrap()`、标签与草稿、首屏分包、接口文档快照 | 改 React 界面的人 |
 | [08-interchange-and-parity.md](08-interchange-and-parity.md) | IR 的三条边与诊断、导入导出编排、`fixtures/` 的跨语言回归网 | 改导入导出、改 parity 规则的人 |
 | [09-engineering-process.md](09-engineering-process.md) | 本地门禁与 CI 三个 job、测试放置与源码级哨兵、版本发布、worktree 与数据目录 | 提 PR、发版、配环境的人 |
 | [10-glossary.md](10-glossary.md) | 中英术语表 + 关键不变量速查卡 | 所有人（卡住时回查） |
