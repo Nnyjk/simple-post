@@ -26,10 +26,11 @@ pub use simple_post_core::update::UpdateCheck;
 /// 钉着这一条。
 pub const DOCKER_IMAGE: &str = "ghcr.io/nnyjk/simple-post:latest";
 
-/// 容器形态给出的一行更新命令。它读的是同一份 compose 文件，故服务名与镜像标签必须与
-/// 部署文档一致。
-pub const DOCKER_COMMAND: &str =
-    "docker compose pull simple-post && docker compose up -d simple-post";
+/// 容器形态给出的一行更新命令，在仓库根执行。`--project-directory .` 与
+/// `-f docker/docker-compose.yml` 都不能省：compose 文件在 `docker/` 下，缺了前者的
+/// Compose 把 `docker/` 当项目目录、读不到根目录 `.env`，缺了后者则连配置文件都找不到。
+/// 这两个参数与 `README.md` 的 compose 一节、`docker/README.md` 的「更新」一节逐字一致。
+pub const DOCKER_COMMAND: &str = "docker compose --project-directory . -f docker/docker-compose.yml pull simple-post && docker compose --project-directory . -f docker/docker-compose.yml up -d simple-post";
 
 /// 运维声明「这台机器上怎么更新」的环境变量。为空 = 未声明，`applyEnabled` 为 `false`。
 pub const UPDATE_COMMAND_ENV: &str = "SIMPLE_POST_UPDATE_COMMAND";

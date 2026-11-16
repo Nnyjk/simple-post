@@ -258,7 +258,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             ) : (
               <p className="text-[11px] leading-relaxed text-muted-foreground">
                 {deployment?.applyEnabled
-                  ? '点「立即执行更新」会在服务端拉取新镜像并下发重启；也可以自己执行上面的命令。'
+                  ? '点「立即执行更新」会在容器内执行运维声明的更新命令；也可以自己执行上面的命令。'
                   : '当前部署没有开启就地更新：请到部署侧执行上面的命令，或按文档拉取新镜像并重启。'}
               </p>
             )}
