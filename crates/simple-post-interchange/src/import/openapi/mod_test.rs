@@ -178,3 +178,56 @@ paths:
     assert_eq!(from_yaml.modules[0].base_url, from_json.modules[0].base_url);
     assert_eq!(from_yaml.project_name, from_json.project_name);
 }
+
+#[test]
+fn response_definitions_come_from_the_document() {
+    let ex = ir_of(
+        r#"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "paths": { "/u": { "get": { "responses": {
+            "2XX": { "description": "成" },
+            "404": {
+              "description": "没",
+              "content": { "application/json; charset=utf-8": {
+                "schema": { "type": "object" },
+                "example": "123"
+              } }
+            },
+            "4OX": { "description": "键写坏了" }
+          } } } }
+        }"#,
+    );
+    let ep = first_endpoint(&ex);
+    assert_eq!(ep.responses.len(), 2, "坏 status 键那条要落诊断、不进定义");
+    assert_eq!(ep.responses[0].status, "2XX");
+    assert_eq!(ep.responses[1].status, "404");
+    // 参数属于报文，不属于「这个响应是什么类型」。
+    assert_eq!(ep.responses[1].content_type, "application/json");
+    // 示例存的是 JSON 文本：字符串 `"123"` 带引号，导出时才不会变成数字。
+    assert_eq!(ep.responses[1].example.as_deref(), Some("\"123\""));
+    assert!(dropped(&ex).contains(&"4OX"));
+}
+
+#[test]
+fn a_content_key_that_is_not_a_media_type_is_dropped_and_diagnosed() {
+    let ex = ir_of(
+        r#"{
+          "openapi": "3.0.3",
+          "info": { "title": "demo" },
+          "paths": { "/u": { "get": { "responses": {
+            "200": { "description": "成", "content": { "invalid": { "schema": { "type": "object" } } } }
+          } } } }
+        }"#,
+    );
+    let ep = first_endpoint(&ex);
+    assert_eq!(ep.responses.len(), 1, "响应本身要留下");
+    // content 键过不了 media type 判定 → 整块 content 丢掉，落库那一步才不会拒绝这次导入。
+    assert_eq!(ep.responses[0].content_type, "");
+    assert!(ep.responses[0].schema.is_none());
+    assert!(
+        dropped(&ex).contains(&"invalid"),
+        "丢掉的值要点名：{:?}",
+        dropped(&ex)
+    );
+}

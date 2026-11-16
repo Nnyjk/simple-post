@@ -84,7 +84,8 @@ fn responses_of(item: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> Vec<Resp
     let Some(Value::Array(list)) = item.get("response") else {
         return Vec::new();
     };
-    let mut out = Vec::new();
+    let mut out: Vec<ResponseDefinition> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
     for (i, entry) in list.iter().enumerate() {
         let slot = format!("{ptr}/response/{i}");
         let Some(response) = entry.as_object() else {
@@ -113,6 +114,17 @@ fn responses_of(item: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> Vec<Resp
             );
             continue;
         }
+        if seen.contains(&status) {
+            ctx.diagnostics.push(
+                Diagnostic::warn(
+                    &slot,
+                    "同一个状态码在这里出现第二次。一份定义里每个状态码只留一条，这条示例已跳过",
+                )
+                .dropping(status.clone()),
+            );
+            continue;
+        }
+        seen.push(status.clone());
 
         let mut content_type = String::new();
         if let Some(Value::Array(headers)) = response.get("header") {
@@ -130,7 +142,18 @@ fn responses_of(item: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> Vec<Resp
                     .unwrap_or_default();
                 if key.eq_ignore_ascii_case("content-type") && content_type.is_empty() {
                     // 参数（`; charset=utf-8`）属于这份报文，不属于「这个响应是什么类型」。
-                    content_type = normalize_media(value);
+                    let media = normalize_media(value);
+                    if simple_post_core::domain::is_media_type(&media) {
+                        content_type = media;
+                    } else {
+                        ctx.diagnostics.push(
+                            Diagnostic::warn(
+                                format!("{slot}/header/{j}"),
+                                "Content-Type 不是合法的 media type（要写成 `type/subtype`），这一格留空",
+                            )
+                            .dropping(format!("{key}: {value}")),
+                        );
+                    }
                 } else {
                     ctx.diagnostics.push(
                         Diagnostic::warn(

@@ -159,3 +159,82 @@ fn may_under_is_the_whole_parent_child_matrix() {
     assert!(Endpoint.may_under(Collection));
     assert!(!Endpoint.may_under(Endpoint));
 }
+
+#[test]
+fn response_statuses_accept_codes_ranges_and_default() {
+    // 具体码与整段：三位的第一位限定 1–5，`2XX` 这类范围是**三**个字节（一个数字 + 两个大写 X），
+    // 写成四字节的 `20XX` 会既不接受 `2XX`、又放过一个规范里没有的形状。
+    for ok in ["200", "404", "2XX", "1XX", "5XX", "default"] {
+        assert!(is_response_status(ok), "{ok} should be accepted");
+    }
+    for bad in [
+        "", "20", "2000", "2xx", "0XX", "6XX", "XX2", "OK", "2X ", " 200",
+    ] {
+        assert!(!is_response_status(bad), "{bad} should be rejected");
+    }
+}
+
+#[test]
+fn response_problems_names_each_field_it_rejects() {
+    let row =
+        |status: &str, content_type: &str, schema: Option<serde_json::Value>| ResponseDefinition {
+            id: "resp_1".into(),
+            status: status.into(),
+            description: "说明".into(),
+            content_type: content_type.into(),
+            schema,
+            example: None,
+        };
+
+    // 合法的一份：具体码、范围与 `default` 混用不冲突。
+    let ok = vec![
+        row("200", "application/json", Some(json!({"type": "object"}))),
+        row("4XX", "", None),
+        row("default", "application/*", None),
+    ];
+    assert!(response_problems(&ok).is_empty());
+
+    let broken = vec![
+        row("2OO", "application/json", None),
+        row("200", "application/json", Some(json!({"type": "object"}))),
+        row("200", "application/json", None),
+        row("201", "application/json", Some(json!("not an object"))),
+        row("202", "json", None),
+    ];
+    let problems = response_problems(&broken);
+    let fields: Vec<String> = problems.iter().map(|p| p.field_path()).collect();
+    assert_eq!(
+        fields,
+        vec![
+            "responses[0].status",
+            "responses[2].status",
+            "responses[3].schema",
+            "responses[4].contentType",
+        ]
+    );
+}
+
+#[test]
+fn response_ids_are_minted_only_where_they_are_missing() {
+    let rows = ensure_response_ids(vec![
+        ResponseDefinition {
+            id: String::new(),
+            status: "200".into(),
+            description: String::new(),
+            content_type: String::new(),
+            schema: None,
+            example: None,
+        },
+        ResponseDefinition {
+            id: "resp_kept".into(),
+            status: "404".into(),
+            description: String::new(),
+            content_type: String::new(),
+            schema: None,
+            example: None,
+        },
+    ]);
+    assert!(rows[0].id.starts_with("resp_"), "got {}", rows[0].id);
+    assert_eq!(rows[1].id, "resp_kept");
+    assert_ne!(rows[0].id, rows[1].id);
+}

@@ -390,7 +390,7 @@ fn response_content(
 
     let mut example = None;
     if let Some(declared) = media_object.get("example") {
-        example = Some(scalar_text(declared));
+        example = Some(example_text(declared));
     } else if let Some(Value::Object(named)) = media_object.get("examples") {
         match named.len() {
             0 => {}
@@ -399,7 +399,7 @@ fn response_content(
                     .values()
                     .next()
                     .and_then(|entry| entry.get("value"))
-                    .map(scalar_text);
+                    .map(example_text);
             }
             _ => {
                 let names: Vec<&str> = named.keys().map(String::as_str).collect();
@@ -432,6 +432,16 @@ fn pick_media(content: &Map<String, Value>, ctx: &mut Ctx, slot: &str) -> Option
     }
     let raw_key = chosen?;
     let media = normalize_media(&raw_key);
+    if !simple_post_core::domain::is_media_type(&media) {
+        ctx.diagnostics.push(
+            Diagnostic::warn(
+                format!("{slot}/content"),
+                "content 的键不是合法的 media type（要写成 `type/subtype`），这一条响应的 content 被丢弃",
+            )
+            .dropping(raw_key.clone()),
+        );
+        return None;
+    }
     for key in content.keys() {
         if normalize_media(key) != media {
             ctx.diagnostics.push(
@@ -468,6 +478,15 @@ pub(super) fn scalar_text(v: &Value) -> String {
         Value::String(s) => s.clone(),
         other => other.to_string(),
     }
+}
+
+/// 示例原文按 JSON 写法存，**字符串保留引号**。
+///
+/// 导出侧把这段文本 `serde_json::from_str` 回成值写进 `example`，故存的必须是带类型的 JSON
+/// 文本：存成裸的 `123` / `true` / `null` 会在下一次导出时变成数字、布尔与 null，把一份
+/// 字符串示例静默改型。对象与数组两种写法相同，故这里不需要分支。
+fn example_text(v: &Value) -> String {
+    serde_json::to_string(v).unwrap_or_default()
 }
 
 // 测试——$ref 展开、servers 拆分、多 media type 与诊断。

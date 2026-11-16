@@ -142,6 +142,21 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         t.validate()?;
     }
 
+    // 响应定义同样在**建集合之前**校验，理由与 TLS 那条一样：路径上的集合逐级单独提交，
+    // 校验留到写 `endpoint_details` 时才做就会留下残局。判据只有 `response_problems`
+    // 一份（REST / spec 走的是同一条 DB 路径），这里只是把它提前。
+    let responses = coerce_responses(std::mem::take(&mut a.responses).unwrap_or_default());
+    let problems = simple_post_core::domain::response_problems(&responses);
+    if !problems.is_empty() {
+        return Err(AppError::Validation(
+            problems
+                .iter()
+                .map(|p| format!("{}: {}", p.field_path(), p.message))
+                .collect::<Vec<_>>()
+                .join("; "),
+        ));
+    }
+
     // 归属项目从「锚点」读 —— 锚点是只读的，过门之后才允许建路径上的集合。
     let anchor = anchor_of(&a)?;
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -216,9 +231,9 @@ pub(in crate::mcp::project_ops) async fn tool_endpoint_create(
         headers: coerce_key_values(a.headers.unwrap_or_default()),
         body,
         auth,
-        // 响应定义是文档，不参与发送。缺 id 的在这里铸，与 params / headers 的
-        // coercion 同一条路；校验在 `db::endpoint_details::create` 里统一做一次。
-        responses: coerce_responses(a.responses.unwrap_or_default()),
+        // 响应定义是文档，不参与发送。上面已经校验过，缺 id 的由
+        // `db::endpoint_details::create` 铸（与 params / headers 的 coercion 同一条路）。
+        responses,
         docs: a.docs,
         notes: a.notes,
         tags: a.tags.unwrap_or_default(),
