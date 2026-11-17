@@ -82,7 +82,16 @@ const scratch = mkdtempSync(join(tmpdir(), 'web-basepath-'));
 console.log(`[test:web-basepath] scratch = ${scratch}`);
 const proc = spawnTracked(
   exe,
-  ['serve-web', '--bind=127.0.0.1', '--port=4173', '--public-base-path', PREFIX],
+  // 只验 HTTP/SPA 面，不需要 MCP 守护进程：关掉它，脚本收尾才不会留下孤儿子进程
+  // （父进程被硬杀时 kill_on_drop 不生效，那个常驻 daemon 会握着管道与临时目录）。
+  [
+    'serve-web',
+    '--bind=127.0.0.1',
+    '--port=4173',
+    '--mcp-auto-start=false',
+    '--public-base-path',
+    PREFIX,
+  ],
   {
     env: { ...process.env, SIMPLE_POST_DATA_DIR: scratch, RUST_LOG: 'warn' },
     stdio: ['ignore', 'pipe', 'pipe'],
