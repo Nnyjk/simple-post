@@ -1,7 +1,13 @@
 //! 两侧薄壳必须调共享层 —— 这一层存在的全部意义就在这里。
 //!
 //! 有人把编排抄回某一侧时，两条 transport 就有了两个答案，而没有一处会提醒它们分叉了。
-//! 故这里直接看源码：四个薄壳入口都得调 `project_api`，也都不得再自己拼那一段落库。
+//! 故这里直接看源码：薄壳入口都得调共享层，也都不得再自己拼那一段落库。
+//!
+//! 三张表各管一段：
+//! - `SHELLS`：项目与节点创建 → `project_api`。
+//! - `ENV_SHELLS`：环境创建 → `environment_api`（结构体的缺省值只有那一处，REST 侧经
+//!   `serde` 缺字段是**静默**的，桌面侧是字面量、会编译失败，故这一对照样要人守）。
+//! - `CELL_SHELLS`：（环境 × 模块）那一格的写 → `db::environments::set_module_base_url`。
 //!
 //! 源码级而非行为级，是刻意的：这一条断言的正是「两边调的是同一个函数」这件事本身，
 //! 它在行为上等价（同一个函数自然有同一个行为），只有源码才说得清「谁调了谁」。
@@ -56,6 +62,47 @@ fn both_transports_call_the_shared_layer() {
             assert!(
                 !text.contains(snippet),
                 "{path} 又自己拼了 `{snippet}`，编排必须住在 project_api 里"
+            );
+        }
+    }
+}
+
+/// 建环境的两个薄壳：源码路径、源码本身、它必须调的片段、它不得再出现的字面构造。
+///
+/// 这一对的病在**结构体缺省值**上：桌面侧若自己写字段初始化，新增字段时编译器会红；
+/// REST 侧走 `serde`，缺的字段静默取默认值，两边就悄悄长得不一样了。所以只留
+/// `environment_api::create_environment` 一处拼这个结构体，两侧都只是把线上形状翻成入参。
+///
+/// 「不得再出现」的那个字面构造带左花括号：只看类型名会把 `-> Environment` 这类签名
+/// 也算成一处构造。
+const ENV_SHELLS: &[(&str, &str, &[&str], &[&str])] = &[
+    (
+        "src-tauri/src/commands/environments.rs",
+        include_str!("../../../src-tauri/src/commands/environments.rs"),
+        &["create_environment("],
+        &["Environment {"],
+    ),
+    (
+        "web_api/routes/environments.rs",
+        include_str!("web_api/routes/environments.rs"),
+        &["create_environment("],
+        &["Environment {"],
+    ),
+];
+
+#[test]
+fn both_transports_create_environments_through_the_shared_function() {
+    for (path, text, required, forbidden) in ENV_SHELLS {
+        for snippet in *required {
+            assert!(
+                text.contains(snippet),
+                "{path} 这个薄壳没有调 `{snippet}`，建环境的结构体缺省值就有两个出处了"
+            );
+        }
+        for snippet in *forbidden {
+            assert!(
+                !text.contains(snippet),
+                "{path} 又自己拼了 `{snippet}`，建环境必须住在 environment_api 里"
             );
         }
     }
