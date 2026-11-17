@@ -112,7 +112,7 @@ export function ResponseEditor({ value, onChange }: Props) {
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium">响应定义</p>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-nano text-muted-foreground">
             这里填的是文档用的响应定义，发送请求时不读它 —— 它不做断言，也不会替你发一次请求。
           </p>
         </div>
@@ -182,7 +182,7 @@ function ResponseCard({
   return (
     <div className="rounded-md border border-border p-3">
       <div className="mb-2 flex items-center gap-1">
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="text-nano uppercase tracking-wide text-muted-foreground">
           响应 {index + 1}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
@@ -220,7 +220,7 @@ function ResponseCard({
 
       <div className="mb-2 grid grid-cols-[9rem_minmax(0,1fr)] gap-2">
         <label className="block">
-          <span className="mb-1 block text-[10px] text-muted-foreground">状态码</span>
+          <span className="mb-1 block text-nano text-muted-foreground">状态码</span>
           <Input
             value={row.status}
             onChange={(e) => onChange({ status: e.target.value })}
@@ -232,7 +232,7 @@ function ResponseCard({
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-[10px] text-muted-foreground">Content-Type</span>
+          <span className="mb-1 block text-nano text-muted-foreground">Content-Type</span>
           <Input
             value={row.contentType}
             onChange={(e) => onChange({ contentType: e.target.value })}
@@ -242,14 +242,12 @@ function ResponseCard({
             className="h-7 font-mono text-xs"
             aria-label="响应 Content-Type"
           />
-          <span className="mt-1 block text-[10px] text-muted-foreground">
-            留空 = 不写 content 块
-          </span>
+          <span className="mt-1 block text-nano text-muted-foreground">留空 = 不写 content 块</span>
         </label>
       </div>
 
       <label className="mb-2 block">
-        <span className="mb-1 block text-[10px] text-muted-foreground">说明</span>
+        <span className="mb-1 block text-nano text-muted-foreground">说明</span>
         <Input
           value={row.description}
           onChange={(e) => onChange({ description: e.target.value })}
@@ -259,7 +257,7 @@ function ResponseCard({
         />
       </label>
       {!row.description.trim() && (
-        <p className="mb-2 text-[10px] text-warning-foreground">
+        <p className="mb-2 text-nano text-warning-foreground">
           OpenAPI 把说明列为必填，空着也能保存；导出时这一条会写成空说明。
         </p>
       )}
@@ -337,7 +335,7 @@ function JsonObjectField({
 
   return (
     <div className="mb-2">
-      <div className="mb-1 flex items-baseline gap-2 text-[10px] text-muted-foreground">
+      <div className="mb-1 flex items-baseline gap-2 text-nano text-muted-foreground">
         <span className="font-medium text-foreground">{label}</span>
         <span>{hint}</span>
       </div>
@@ -354,7 +352,7 @@ function JsonObjectField({
         />
       </div>
       {error && (
-        <p role="status" aria-live="polite" className="mt-1 text-[10px] text-destructive">
+        <p role="status" aria-live="polite" className="mt-1 text-nano text-destructive">
           Schema JSON 有误：{error}（改对之前不会写进定义）
         </p>
       )}
@@ -376,7 +374,7 @@ function ExampleField({
   const isDark = useIsDark();
   return (
     <div>
-      <div className="mb-1 flex items-baseline gap-2 text-[10px] text-muted-foreground">
+      <div className="mb-1 flex items-baseline gap-2 text-nano text-muted-foreground">
         <span className="font-medium text-foreground">示例</span>
         <span>能解析成 JSON 就写成 JSON 值，否则写成纯文本</span>
       </div>

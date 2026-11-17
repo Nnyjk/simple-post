@@ -6,8 +6,8 @@
  * 树、顶栏、HTTP tester、设置面板与 CodeMirror 编辑器，都要等用户真的进入项目才取。这与
  * `bootstrap-slice.ts` 里的两层 `bootstrap()` 配套。
  *
- * 这里刻意不挂载 `ProjectTree`：它只在项目激活时渲染，而没有项目时它只有「尚未选择项目」
- * 一列占位 —— 一条死掉的 256px 面板，外加一个搜索框、一个必然失败的「新建」按钮。
+ * `ProjectTree` 只在项目激活后挂载：没有项目时它只有「尚未选择项目」一列占位——一条
+ * 死掉的 256px 面板，外加一个搜索框、一个必然失败的「新建」按钮。
  *
  * 没有项目时也要能到设置面板这件事由 `App.tsx` 负责（`features/settings/SettingsSurface.tsx`），
  * 本外壳因此不必在没有树的情况下渲染设置。两个宿主挂载的是同一个 `SettingsPanel`。

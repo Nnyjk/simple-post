@@ -87,7 +87,7 @@ export function VariableTable({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                  className="h-7 w-7 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
                   onClick={() => setEnvironmentVarDisabled(env.id, name, !isDisabled)}
                 >
                   {isDisabled ? (
@@ -101,7 +101,7 @@ export function VariableTable({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
+                  className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
                   onClick={() => setEnvironmentVar(env.id, name, null)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />

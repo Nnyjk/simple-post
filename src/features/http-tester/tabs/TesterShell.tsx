@@ -211,7 +211,7 @@ export function TesterShell({
           value={tab}
           onChange={(id) => onTabChange(id as TesterTabId)}
         />
-        <div className="ml-auto text-[10px] text-muted-foreground">
+        <div className="ml-auto text-nano text-muted-foreground">
           <span className="kbd">Ctrl</span> + <span className="kbd">Enter</span> 发送
         </div>
       </div>

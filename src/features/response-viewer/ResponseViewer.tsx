@@ -14,7 +14,14 @@ import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
-import { formatBytes, formatDuration, statusColorVar, cn, tryFormatJson } from '@/lib/utils';
+import {
+  formatBytes,
+  formatDuration,
+  statusColorVar,
+  statusTextClass,
+  cn,
+  tryFormatJson,
+} from '@/lib/utils';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { ResponseHistory } from './ResponseHistory';
 import { PrettyView } from './PrettyView';
@@ -173,6 +180,8 @@ export function ResponseViewer() {
     );
   }
 
+  // 图标是块色（固定色相，两档同值），状态码文字走语义档 —— 固定色相在浅色 card 上只有
+  // 2.3:1，见 `statusTextClass`。
   const statusColor = statusColorVar(response.status);
   const isError = response.status >= 400;
 
@@ -186,7 +195,7 @@ export function ResponseViewer() {
           ) : (
             <CheckCircle2 className="h-4 w-4" style={{ color: statusColor }} />
           )}
-          <span className="text-sm font-semibold" style={{ color: statusColor }}>
+          <span className={cn('text-sm font-semibold', statusTextClass(response.status))}>
             {response.status}
           </span>
           <span className="text-sm text-muted-foreground">{response.statusText}</span>
@@ -361,7 +370,7 @@ function EmptyState() {
         <CheckCircle2 className="h-6 w-6 text-muted-foreground/50" />
       </div>
       <p className="mt-3 text-sm text-muted-foreground">点击「Send」发起请求</p>
-      <p className="mt-1 text-[11px] text-muted-foreground/70">响应会显示在这里</p>
+      <p className="mt-1 text-micro text-faint">响应会显示在这里</p>
     </section>
   );
 }

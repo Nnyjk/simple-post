@@ -169,7 +169,7 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
             size="xs"
             variant="solid"
             title={`HTTP ${d.method}`}
-            className="!h-3.5 !w-3.5 !text-[9px]"
+            className="!h-3.5 !w-3.5 !text-nano"
           />
         ),
         iconColor: 'text-muted-foreground',
@@ -196,7 +196,7 @@ export function useTabDescriptors(tabs: OpenTab[]): TabDescriptor[] {
           size="xs"
           variant="solid"
           title={`HTTP ${eDetail.method}`}
-          className="!h-3.5 !w-3.5 !text-[9px]"
+          className="!h-3.5 !w-3.5 !text-nano"
         />
       ),
       iconColor: 'text-muted-foreground',

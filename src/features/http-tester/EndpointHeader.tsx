@@ -44,7 +44,7 @@ export function EndpointHeader({
             className="max-w-md text-sm font-semibold"
             display={() => (
               <h1
-                className="cursor-text truncate rounded-sm px-1 py-0.5 text-sm font-semibold hover:bg-accent/60"
+                className="cursor-text truncate rounded-sm px-1 py-0.5 text-sm font-semibold hover:bg-overlay-hover"
                 title="双击重命名"
               >
                 {endpoint.name}
@@ -71,8 +71,8 @@ export function EndpointHeader({
             <p
               className={cn(
                 'mt-0.5 cursor-text truncate rounded-sm px-1 text-xs text-muted-foreground',
-                'hover:bg-accent/60',
-                !endpoint.description && 'italic text-muted-foreground/50',
+                'hover:bg-overlay-hover',
+                !endpoint.description && 'italic text-faint',
               )}
               title="双击编辑描述"
             >

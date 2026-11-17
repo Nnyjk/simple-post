@@ -15,17 +15,25 @@
  *   rect **推导**，见下方「Active-tab indicator」。
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { X, ScrollText } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { TabJoinCorners } from '@/components/ui/tabs';
 import { Tooltip } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { cn, focusRingInset } from '@/lib/utils';
 import { Flip, gsap } from '@/lib/gsap';
 import { useTabDescriptors } from './useTabDescriptors';
 import { scrollTargetForActiveTab } from './tab-scroll';
+import { nextTabFocusIndex } from './tab-keyboard';
 import { TabContextMenu } from './TabContextMenu';
 
 /**
@@ -375,6 +383,20 @@ export function WorkspaceTabs() {
     return () => el.removeEventListener('wheel', onWheel);
   }, [scheduleFlipStateRefresh]);
 
+  // 方向键在标签之间移动**焦点**，不激活 —— 激活是标签自己的 Enter/Space，好让键盘用
+  // 户能先看清落到哪个标签上（自动激活会在方向键连按时逐个拉取/渲染面板）。
+  // 焦点落在标签内的关闭按钮上时 `closest` 同样命中，故从那里按方向键也能继续走。
+  const onStripKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const strip = stripRef.current;
+    const current = (e.target as HTMLElement).closest<HTMLElement>('[data-tab-id]');
+    if (!strip || !current) return;
+    const all = Array.from(strip.querySelectorAll<HTMLElement>('[data-tab-id]'));
+    const next = nextTabFocusIndex(e.key, all.indexOf(current), all.length);
+    if (next < 0) return;
+    e.preventDefault();
+    all[next]?.focus();
+  };
+
   if (descriptors.length === 0) return null;
 
   return (
@@ -382,6 +404,7 @@ export function WorkspaceTabs() {
       ref={stripRef}
       role="tablist"
       aria-label="工作区标签"
+      onKeyDown={onStripKeyDown}
       className={cn(
         // 这条标签条不用 `border-b`：分隔线是子元素（`below`）而不是边框。本条按
         // padding box 裁剪，自带边框会落在裁剪之外，激活标签就无法与下方面板融合。
@@ -411,6 +434,19 @@ export function WorkspaceTabs() {
             data-tab-id={d.tab.id}
             role="tab"
             aria-selected={active}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              // 从标签内关闭按钮冒上来的 Enter 属于那个按钮，不能同时激活标签。
+              if (e.target !== e.currentTarget) return;
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setActiveTab(d.tab.id);
+              } else if (e.key === 'Delete') {
+                // 与中键同义：关闭，但不激活。
+                e.preventDefault();
+                requestCloseTab(d.tab.id);
+              }
+            }}
             onMouseDown={(e) => {
               // 中键关闭标签（浏览器惯例）。
               if (e.button === 1) {
@@ -438,6 +474,7 @@ export function WorkspaceTabs() {
               // 两者各管一半时，CSS 过渡会把 Flip 逐帧写下的 inline width 再过渡一次，
               // 标签在动画结束后还要慢慢收回去 —— 与位置补间对不上账。
               'group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs',
+              focusRingInset,
               isCompact ? 'w-[92px]' : 'w-[160px]',
               active
                 ? 'border-border bg-background text-foreground'
@@ -494,7 +531,7 @@ export function WorkspaceTabs() {
               )}
               {d.hint && !isCompact && (
                 <Tooltip content={d.path || d.hint} side="bottom">
-                  <span className="max-w-[40px] truncate text-[10px] text-faint">{d.hint}</span>
+                  <span className="max-w-[40px] truncate text-nano text-faint">{d.hint}</span>
                 </Tooltip>
               )}
               <Tooltip content="关闭" side="bottom">
@@ -508,8 +545,11 @@ export function WorkspaceTabs() {
                   }}
                   className={cn(
                     'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-faint hover:bg-overlay-hover hover:text-foreground',
-                    // hover 时始终显示，但激活标签上保持可见。
-                    active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                    // hover 时始终显示，但激活标签上保持可见；`group-focus-within` 让键盘
+                    // 落到标签上时 × 也现形，否则它是个不可见的焦点目标。
+                    active
+                      ? 'opacity-100'
+                      : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
                   )}
                 >
                   <X className="h-3 w-3" />

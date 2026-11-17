@@ -59,7 +59,7 @@ export function CreateProjectDialog() {
       <Field label="颜色">
         <ColorPicker value={draft.color} onChange={setNewItemColor} />
       </Field>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
+      <p className="text-micro leading-relaxed text-muted-foreground">
         新项目会带一个环境「{DEFAULT_ENVIRONMENT_NAME}
         」和一个模块「{DEFAULT_MODULE_NAME}
         」，都可以就地改名。各模块的地址与路径改写规则在「设置 · 环境变量」里配置。

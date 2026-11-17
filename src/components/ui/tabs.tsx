@@ -96,7 +96,7 @@ export function Tabs({ items, value, onChange, className, size = 'sm', ...rest }
                       // 好让那条线从它们身上连续穿过
                       active
                         ? 'z-10 bg-background text-foreground'
-                        : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                        : 'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
                     )
                   : cn(
                       'border-b-2',

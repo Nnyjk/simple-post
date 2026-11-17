@@ -83,7 +83,7 @@ export function McpLogPanel() {
           )}
           日志
           {daemonLogs && !daemonLogs.capturing && (
-            <span className="text-[11px] font-normal text-muted-foreground">
+            <span className="text-micro font-normal text-muted-foreground">
               （本 daemon 由外部启动，无日志捕获）
             </span>
           )}
@@ -94,7 +94,7 @@ export function McpLogPanel() {
               type="button"
               variant="ghost"
               size="sm"
-              className="h-6 gap-1 px-1.5 text-[11px]"
+              className="h-6 gap-1 px-1.5 text-micro"
               onClick={() => {
                 void handleCopy();
               }}
@@ -107,7 +107,7 @@ export function McpLogPanel() {
               type="button"
               variant="ghost"
               size="sm"
-              className="h-6 gap-1 px-1.5 text-[11px]"
+              className="h-6 gap-1 px-1.5 text-micro"
               onClick={() => setHiddenFrom(lines.length)}
               disabled={visible.length === 0}
               title="清掉当前显示；服务端的环形缓冲不动"
@@ -122,7 +122,7 @@ export function McpLogPanel() {
       {open && (
         <div className="px-3 pb-3">
           {startedAt !== null && (
-            <div className="mb-1.5 text-[11px] text-muted-foreground">
+            <div className="mb-1.5 text-micro text-muted-foreground">
               本次启动于 {new Date(startedAt).toLocaleString()}
               {daemonLogs?.truncated && ' · 更早的日志已超出缓冲被丢弃'}
             </div>
@@ -131,7 +131,7 @@ export function McpLogPanel() {
             ref={scrollRef}
             className={cn(
               'max-h-64 overflow-auto rounded-md border border-border/70 bg-muted/30',
-              'p-2 font-mono text-[11px] leading-relaxed text-foreground/80',
+              'p-2 font-mono text-micro leading-relaxed text-foreground/80',
             )}
           >
             {visible.length === 0 ? (

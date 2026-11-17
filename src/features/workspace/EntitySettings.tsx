@@ -76,7 +76,7 @@ function EntitySection({
     <section className="px-6 pb-1 pt-5">
       <div className="mb-3">
         <h2 className="label-caps-strong">{title}</h2>
-        {hint && <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>}
+        {hint && <p className="mt-0.5 text-micro text-muted-foreground">{hint}</p>}
       </div>
       {children}
     </section>

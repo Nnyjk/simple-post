@@ -150,7 +150,7 @@ export function AppearanceSection() {
                     style={{ background: opt.preview.accent }}
                   />
                 </div>
-                <p className="text-[11px] text-muted-foreground">{opt.hint}</p>
+                <p className="text-micro text-muted-foreground">{opt.hint}</p>
               </button>
             );
           })}
@@ -177,7 +177,7 @@ export function AppearanceSection() {
         hideDivider
       >
         {filteredShortcuts.length === 0 ? (
-          <EmptyHint className="border-transparent px-4 py-6 text-[11px]">
+          <EmptyHint className="border-transparent px-4 py-6 text-micro">
             没有匹配的快捷键
           </EmptyHint>
         ) : (

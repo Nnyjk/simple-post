@@ -33,7 +33,7 @@ export function UpdatePill() {
           data-testid="update-available"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
-          <span className="font-mono text-[11px]">v{latest}</span>
+          <span className="font-mono text-micro">v{latest}</span>
         </Button>
       </Tooltip>
       <UpdateDialog open={open} onOpenChange={setOpen} />

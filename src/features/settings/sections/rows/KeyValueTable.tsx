@@ -43,7 +43,7 @@ export function KeyValueTable<T>({
     <button
       type="button"
       onClick={onAdd}
-      className="flex items-center gap-2 border-t border-border/60 px-4 py-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+      className="flex items-center gap-2 border-t border-border/60 px-4 py-2 text-micro text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground"
     >
       <Plus className="h-3.5 w-3.5" />
       {addText}
@@ -53,7 +53,7 @@ export function KeyValueTable<T>({
   if (items.length === 0) {
     return (
       <div className="flex flex-col">
-        <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">{emptyText}</div>
+        <div className="px-4 py-6 text-center text-micro text-muted-foreground">{emptyText}</div>
         {addControl}
       </div>
     );

@@ -96,7 +96,7 @@ export function DirtyCloseDialog() {
       description={position}
       footer={
         <div className="flex w-full items-center justify-between gap-2">
-          <div className="text-[10px] text-muted-foreground">
+          <div className="text-nano text-muted-foreground">
             {total > 1 ? `共 ${total} 个未保存标签` : null}
           </div>
           <div className="flex items-center gap-2">

@@ -159,7 +159,7 @@ export function DynamicVariableForm({
   return (
     <div className="rounded-md border border-border p-3">
       <h3 className="text-xs font-medium">{variable ? '编辑定义' : '新建定义'}</h3>
-      <p className="mt-1 text-[11px] text-muted-foreground">
+      <p className="mt-1 text-micro text-muted-foreground">
         归属项目：{projects.find((p) => p.id === ownerProjectId)?.name ?? '（未知）'}
         。变量名在这个项目里唯一。
       </p>
@@ -172,7 +172,7 @@ export function DynamicVariableForm({
             placeholder="sns"
             className="font-mono"
           />
-          <span className="text-[11px] text-muted-foreground">只能用字母、数字与下划线。</span>
+          <span className="text-micro text-muted-foreground">只能用字母、数字与下划线。</span>
         </label>
 
         <label className="flex items-center gap-2 text-xs">
@@ -197,13 +197,13 @@ export function DynamicVariableForm({
                 <option value="inline">内联请求</option>
               </select>
               {usesEndpoint && sourceEndpointId && (
-                <span className="truncate text-[11px] text-muted-foreground">
+                <span className="truncate text-micro text-muted-foreground">
                   已选接口 {sourceEndpointName || sourceEndpointId}
                 </span>
               )}
             </div>
             {sourceDeleted && (
-              <p className="text-[11px] text-destructive">
+              <p className="text-micro text-destructive">
                 这条定义引用的接口已被删除，故它现在没有数据源。挑一个接口替上它即可救回这条定义。
               </p>
             )}
@@ -240,7 +240,7 @@ export function DynamicVariableForm({
                   </option>
                 ))}
               </select>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 决定取数时用哪个环境的模块地址与变量。
               </span>
             </label>
@@ -255,7 +255,7 @@ export function DynamicVariableForm({
             placeholder="$"
             className="font-mono"
           />
-          <span className="text-[11px] text-muted-foreground">JSONPath；`$` 表示整段响应。</span>
+          <span className="text-micro text-muted-foreground">JSONPath；`$` 表示整段响应。</span>
         </label>
 
         <div className="flex items-start gap-2 text-xs">
@@ -268,7 +268,7 @@ export function DynamicVariableForm({
               placeholder={'return pm.data.items.map((x) => x.code).join(",")'}
               className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
             />
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-micro text-muted-foreground">
               可选。抽取之后跑，用来做 JSONPath 表达不了的加工。脚本拿得到抽取结果（
               <code className="font-mono">pm.data</code>）与原始响应（
               <code className="font-mono">pm.response</code>），用
@@ -288,7 +288,7 @@ export function DynamicVariableForm({
             <option value="json">json</option>
             <option value="text">text</option>
           </select>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">
             auto 与 text 输出相同；json 会给标量加引号。
           </span>
         </label>
@@ -302,7 +302,7 @@ export function DynamicVariableForm({
             onChange={(e) => setTtlSeconds(e.target.value)}
             className="w-24"
           />
-          <span className="text-[11px] text-muted-foreground">秒。</span>
+          <span className="text-micro text-muted-foreground">秒。</span>
         </label>
 
         <label className="flex items-center gap-2 text-xs">

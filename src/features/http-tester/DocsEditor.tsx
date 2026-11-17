@@ -56,7 +56,7 @@ export function DocsEditor({ value, onChange }: Props) {
               <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                 <FileText className="h-8 w-8 opacity-40" />
                 <p>暂无文档</p>
-                <p className="text-[11px]">在左侧编辑 Markdown</p>
+                <p className="text-micro">在左侧编辑 Markdown</p>
               </div>
             )}
           </div>

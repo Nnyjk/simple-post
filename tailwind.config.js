@@ -141,6 +141,14 @@ export default {
         base: ['1rem', { lineHeight: '1.5rem' }], // 16px (unchanged)
         lg: ['1.125rem', { lineHeight: '1.625rem' }], // 18px — section titles
         '2xl': ['1.75rem', { lineHeight: '2rem' }], // 28px — welcome hero
+        // 11px / 10px。全仓 219 处手写 `text-[11px]` / `text-[10px]` 已迁到这两个名字
+        // 上，「任意字号」由 `src/lib/__tests__/style-guards.test.ts` 禁止 —— 再要新档位
+        // 先加在这里，别在组件里发明 `text-[9px]`（中文字形在那之下糊成一片）。
+        // `lib/utils.ts` 的 `cn()` 已把这两个名字登记进 tailwind-merge 的 font-size 组，
+        // 否则 `cn('text-xs', 'text-nano')` 会留下两个类、样式表顺序说了算。
+        // 例外只在 `src/styles/globals.css` 的 `@apply` 里（prose 与表单内部样式）。
+        micro: ['0.6875rem', { lineHeight: '1rem' }], // 11px
+        nano: ['0.625rem', { lineHeight: '0.875rem' }], // 10px
       },
       fontFamily: {
         sans: [

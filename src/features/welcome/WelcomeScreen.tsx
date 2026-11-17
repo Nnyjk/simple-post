@@ -116,7 +116,7 @@ export function WelcomeScreen() {
           <div className="space-y-3">
             <div
               data-welcome-stagger
-              className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br from-primary to-hue-project shadow-lg"
+              className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-linear-to-br from-primary to-hue-project shadow-lg"
             >
               <AppIcon className="h-7 w-7" />
             </div>
@@ -154,7 +154,7 @@ export function WelcomeScreen() {
                     // 用户在比较的是名字，故卡片围绕它构造：整宽一行、名字突出、颜色条降级
                     // 为前导强调、描述作为下方次级文字。
                     'group flex w-full items-center gap-3.5 rounded-lg border border-border bg-card/40 px-4 py-3.5 text-left transition-colors',
-                    'hover:border-primary hover:bg-accent/40',
+                    'hover:border-primary hover:bg-overlay-hover',
                     focusRing,
                   )}
                 >
@@ -184,7 +184,7 @@ export function WelcomeScreen() {
                   </span>
                   {/* 这是便利性提示而非数据 —— 卡片全部职责就是「进入这个」。 */}
                   <ArrowRight
-                    className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+                    className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
                     aria-hidden
                   />
                 </button>
@@ -199,7 +199,7 @@ export function WelcomeScreen() {
               type="button"
               onClick={() => openSettingsTab()}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground',
+                'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-overlay-hover hover:text-foreground',
                 focusRing,
               )}
             >
@@ -208,7 +208,7 @@ export function WelcomeScreen() {
             </button>
             {/* 动态变量挂在项目里（变量名项目内唯一），故没有项目时它开不了 ——
                 这里只说明它在哪，不给一个点了没反应的按钮。 */}
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card/20 px-3 py-1.5 text-xs text-muted-foreground/70">
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card/20 px-3 py-1.5 text-xs text-faint">
               <Braces className="h-3.5 w-3.5" />
               动态变量在项目内维护，打开项目后从顶栏进入
             </span>
@@ -216,7 +216,7 @@ export function WelcomeScreen() {
               type="button"
               onClick={handleDocs}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent/40 hover:text-foreground',
+                'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-overlay-hover hover:text-foreground',
                 focusRing,
               )}
             >
@@ -228,7 +228,7 @@ export function WelcomeScreen() {
           {/* 页脚，显示当前主题 */}
           <div
             data-welcome-stagger
-            className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground/70"
+            className="flex items-center justify-center gap-1.5 text-micro text-faint"
           >
             <span>当前主题：</span>
             <span className="font-mono">
@@ -282,7 +282,7 @@ function NewProjectCard({ onClick, primary }: { onClick: () => void; primary?: b
         focusRing,
         primary
           ? 'border-primary/50 bg-primary/5 hover:border-primary hover:bg-primary/10'
-          : 'border-dashed border-border bg-card/20 hover:border-primary/50 hover:bg-accent/40',
+          : 'border-dashed border-border bg-card/20 hover:border-primary/50 hover:bg-overlay-hover',
       )}
     >
       <span

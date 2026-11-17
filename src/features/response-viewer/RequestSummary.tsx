@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { Globe } from 'lucide-react';
 import type { ApiResponse, StoredRequestSnapshot } from '@/types/domain';
-import { cn, formatBytes, formatDuration, methodColorVar, tryFormatJson } from '@/lib/utils';
+import { MethodPill } from '@/components/ui/method-pill';
+import { cn, formatBytes, formatDuration, tryFormatJson } from '@/lib/utils';
 import { base64ToBytes, utf8Bytes } from '@/lib/base64';
 
 /**
@@ -29,7 +30,7 @@ export function RequestSummary({
             <Globe className="h-5 w-5 text-muted-foreground/50" />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">这次调用没有请求记录</p>
-          <p className="mt-1 text-[11px] text-muted-foreground/70">
+          <p className="mt-1 text-micro text-faint">
             发送一次请求后，这里会显示它实际发出去的地址、请求头与请求体
           </p>
         </div>
@@ -40,8 +41,8 @@ export function RequestSummary({
   return (
     <div className="flex flex-col gap-4 px-3 py-3">
       <div className="flex items-center gap-1.5">
-        <span className="label-caps text-muted-foreground/70">请求详情</span>
-        <span className="text-[10px] text-muted-foreground/70">这一次实际发出去的内容</span>
+        <span className="label-caps">请求详情</span>
+        <span className="text-nano text-faint">这一次实际发出去的内容</span>
       </div>
 
       <GeneralSection request={request} response={response ?? null} />
@@ -82,32 +83,27 @@ function GeneralSection({
     <Section title="常规">
       <div className="flex flex-col gap-0.5">
         <Pair label="请求方法">
-          <span
-            className="inline-flex h-5 shrink-0 items-center justify-center rounded px-1.5 font-mono text-[10px] font-semibold text-white"
-            style={{ backgroundColor: methodColorVar(request.method) }}
-          >
-            {request.method}
-          </span>
+          <MethodPill method={request.method} variant="solid" className="h-5" />
         </Pair>
         <Pair label="请求 URL">
-          <span className="font-mono text-[11px] leading-relaxed text-foreground/90 break-all">
+          <span className="font-mono text-micro leading-relaxed text-foreground/90 break-all">
             {request.url}
           </span>
         </Pair>
         {response && (
           <>
             <Pair label="状态码">
-              <span className="font-mono text-[11px] text-foreground/90">
+              <span className="font-mono text-micro text-foreground/90">
                 {response.status} {response.statusText}
               </span>
             </Pair>
             <Pair label="耗时">
-              <span className="font-mono text-[11px] text-foreground/90">
+              <span className="font-mono text-micro text-foreground/90">
                 {formatDuration(response.durationMs)}
               </span>
             </Pair>
             <Pair label="响应大小">
-              <span className="font-mono text-[11px] text-foreground/90">
+              <span className="font-mono text-micro text-foreground/90">
                 {formatBytes(response.sizeBytes)}
               </span>
             </Pair>
@@ -115,14 +111,14 @@ function GeneralSection({
         )}
         {request.body !== null && (
           <Pair label="请求体大小">
-            <span className="font-mono text-[11px] text-foreground/90">
+            <span className="font-mono text-micro text-foreground/90">
               {formatBytes(bodyBytes)}
             </span>
           </Pair>
         )}
         {request.body === null && request.bodyBase64 && (
           <Pair label="请求体大小">
-            <span className="font-mono text-[11px] text-foreground/90">
+            <span className="font-mono text-micro text-foreground/90">
               {formatBytes(bodyBytes)}
             </span>
           </Pair>
@@ -206,7 +202,7 @@ function BodySection({
   if (bodyBase64) {
     return (
       <Section title="请求体">
-        <div className="rounded bg-muted/30 px-2 py-1.5 text-[11px] text-muted-foreground">
+        <div className="rounded bg-muted/30 px-2 py-1.5 text-micro text-muted-foreground">
           二进制请求体，共 {formatBytes(base64ToBytes(bodyBase64).length)}，不按文本显示
         </div>
       </Section>
@@ -225,7 +221,7 @@ function BodySection({
 
   return (
     <Section title="请求体">
-      <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/30 p-2 font-mono text-[11px] leading-relaxed text-foreground/85">
+      <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/30 p-2 font-mono text-micro leading-relaxed text-foreground/85">
         {text}
       </pre>
     </Section>
@@ -236,7 +232,7 @@ function BodySection({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="label-caps mb-1 text-muted-foreground/70">{title}</div>
+      <div className="label-caps mb-1">{title}</div>
       <div className="min-w-0">{children}</div>
     </div>
   );
@@ -245,8 +241,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 /** 常规信息里的一行：左边是名字，右边是值。 */
 function Pair({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 items-baseline gap-2 text-[11px]">
-      <span className="w-20 shrink-0 text-muted-foreground/70">{label}</span>
+    <div className="flex min-w-0 items-baseline gap-2 text-micro">
+      <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 flex-1">{children}</span>
     </div>
   );
@@ -264,9 +260,9 @@ function Table({
 }) {
   return (
     <div className="overflow-hidden rounded border border-border/60">
-      <table className="w-full table-fixed border-collapse text-[11px]">
+      <table className="w-full table-fixed border-collapse text-micro">
         <thead>
-          <tr className="bg-muted/30 text-left text-muted-foreground/70">
+          <tr className="bg-muted/30 text-left text-faint">
             <th className="w-1/3 truncate border-b border-border/60 px-2 py-1 font-normal">
               {nameHeader}
             </th>

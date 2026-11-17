@@ -37,7 +37,7 @@ export function ScriptPanel({
           value={tab}
           onChange={(id) => setTab(id as ScriptTab)}
         />
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-nano text-muted-foreground">
           {tab === 'pre' ? '变量替换之后、请求发出之前' : '响应回来之后'}
         </span>
       </div>
@@ -56,7 +56,7 @@ export function ScriptPanel({
         />
       )}
 
-      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+      <p className="mt-2 text-micro leading-relaxed text-muted-foreground">
         脚本在受限沙箱里跑：可用 pm.request / pm.environment / pm.response / pm.test / pm.expect /
         console.log；够不到文件、网络与进程，超时会被打断。脚本失败不影响这次请求的成败。
       </p>

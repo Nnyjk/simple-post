@@ -97,8 +97,8 @@ export function InlineNameCell({
         type="button"
         onClick={begin}
         className={cn(
-          'group/cell flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left transition-colors hover:bg-accent/40',
-          !value && 'text-muted-foreground/60 italic',
+          'group/cell flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left transition-colors hover:bg-overlay-hover',
+          !value && 'text-faint italic',
           className,
         )}
       >
@@ -130,7 +130,7 @@ export function InlineNameCell({
         }}
         className="h-7 font-mono text-xs"
       />
-      {error && <div className="px-1 text-[10px] text-destructive">{error}</div>}
+      {error && <div className="px-1 text-nano text-destructive">{error}</div>}
     </div>
   );
 }

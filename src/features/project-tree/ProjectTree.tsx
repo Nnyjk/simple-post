@@ -374,7 +374,7 @@ export function ProjectTree() {
         ) : nodesError ? (
           <div className="space-y-2 px-2 py-6 text-center">
             <p className="text-xs text-destructive">项目内容加载失败</p>
-            <p className="text-[11px] text-muted-foreground" title={nodesError}>
+            <p className="text-micro text-muted-foreground" title={nodesError}>
               {nodesError}
             </p>
           </div>
@@ -408,7 +408,7 @@ export function ProjectTree() {
               <button
                 type="button"
                 onClick={() => openNewItemWithIntent({ type: 'module' })}
-                className="mb-0.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                className="mb-0.5 flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground"
                 data-testid="tree-add-module-btn"
               >
                 <Plus className="h-3 w-3 shrink-0" />

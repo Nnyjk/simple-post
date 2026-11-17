@@ -21,7 +21,7 @@ export function GroupHeader({
       <div className="min-w-0">
         <div className="label-caps-strong">{title}</div>
         {description && (
-          <div className="mt-0.5 text-[10px] text-muted-foreground">
+          <div className="mt-0.5 text-nano text-muted-foreground">
             {description}
             {meta ? (
               <>

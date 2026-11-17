@@ -111,25 +111,23 @@ export function VarHintPicker({
             onClick={() => onSelect(e.key)}
             className={cn(
               'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs',
-              active ? 'bg-primary/15 text-foreground' : 'hover:bg-accent/60',
+              active ? 'bg-primary/15 text-foreground' : 'hover:bg-overlay-hover',
             )}
           >
             <span className="shrink-0 font-mono text-primary">{`{{${e.key}}}`}</span>
             {e.origin && (
-              <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">
+              <span className="shrink-0 rounded bg-muted px-1 text-nano text-muted-foreground">
                 {e.origin === 'dynamic' ? '动态' : '环境'}
               </span>
             )}
             <span className="min-w-0 flex-1 truncate text-muted-foreground">
               {truncate(e.value, 60)}
             </span>
-            {e.hint && (
-              <span className="shrink-0 text-[10px] text-muted-foreground/80">{e.hint}</span>
-            )}
+            {e.hint && <span className="shrink-0 text-nano text-faint">{e.hint}</span>}
           </button>
         );
       })}
-      <div className="flex items-center gap-3 border-t border-border bg-card/40 px-2 py-1 text-[10px] text-muted-foreground">
+      <div className="flex items-center gap-3 border-t border-border bg-card/40 px-2 py-1 text-nano text-muted-foreground">
         <span>↑↓ 选择</span>
         <span>Tab/Enter 插入</span>
         <span>Esc 关闭</span>

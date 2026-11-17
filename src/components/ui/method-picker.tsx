@@ -116,7 +116,7 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
         onClick={() => setOpen((o) => !o)}
         className={cn(
           'flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-1.5 font-mono text-xs transition-colors',
-          'hover:bg-accent/40',
+          'hover:bg-overlay-hover',
           focusRing,
         )}
       >
@@ -154,8 +154,8 @@ export function MethodPicker({ value, onChange, className }: MethodPickerProps) 
                   onMouseEnter={() => setActiveIndex(idx)}
                   className={cn(
                     'flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs outline-none transition-colors',
-                    'hover:bg-accent',
-                    'focus:bg-accent',
+                    'hover:bg-overlay-hover',
+                    'focus:bg-overlay-hover',
                     // 选中行与键盘 active 行用同一个 accent 底色，与触发器的控件感一致
                     (isActive || isSelected) && 'bg-accent',
                   )}

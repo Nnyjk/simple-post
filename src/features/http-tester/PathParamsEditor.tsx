@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import type { KeyValue } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import { applyPathParamValue, pathPlaceholders } from '@/lib/path-params';
 
 /**
@@ -62,7 +63,7 @@ export function PathParamsEditor({
       role="status"
       aria-live="polite"
       data-testid="path-params-error"
-      className="mb-2 rounded-md border border-destructive bg-destructive px-2.5 py-1.5 text-[11px] text-destructive-foreground"
+      className="mb-2 rounded-md border border-destructive bg-destructive px-2.5 py-1.5 text-micro text-destructive-foreground"
     >
       {error}
     </div>
@@ -72,10 +73,10 @@ export function PathParamsEditor({
     return (
       <div className="px-4 py-3">
         {errorBanner}
-        <div className="flex h-24 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+        <EmptyHint className="flex h-24 items-center justify-center text-sm">
           URL 里没有 {'{占位符}'}，因此没有路径参数
-        </div>
-        <p className="mt-2 text-[11px] text-muted-foreground">
+        </EmptyHint>
+        <p className="mt-2 text-micro text-muted-foreground">
           把地址写成 /users/{'{id}'} 这样的形式，占位符就会出现在这里。
         </p>
       </div>
@@ -88,7 +89,7 @@ export function PathParamsEditor({
 
       <table className="w-full table-fixed border-collapse text-sm">
         <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <tr className="text-nano uppercase tracking-wider text-muted-foreground">
             <th className="w-[30%] px-2 pb-1.5 text-left font-medium">占位符</th>
             <th className="w-[45%] px-2 pb-1.5 text-left font-medium">值</th>
             <th className="px-2 pb-1.5 text-left font-medium">说明</th>
@@ -118,7 +119,7 @@ export function PathParamsEditor({
                     data-testid={`path-param-${name}`}
                   />
                 </td>
-                <td className="px-2 py-1 text-[11px]">
+                <td className="px-2 py-1 text-micro">
                   {missing ? (
                     <span className="text-destructive">必填，填了才能发送</span>
                   ) : disabled ? (
@@ -137,7 +138,7 @@ export function PathParamsEditor({
 
       {orphans.length > 0 && (
         <div className="mt-4">
-          <p className="mb-1 text-[11px] text-muted-foreground">
+          <p className="mb-1 text-micro text-muted-foreground">
             下面这些路径参数在当前 URL 里没有对应的占位符，它们不会进入请求。
           </p>
           <table className="w-full table-fixed border-collapse text-sm">
@@ -159,12 +160,12 @@ export function PathParamsEditor({
                       className="h-7 font-mono text-xs"
                     />
                   </td>
-                  <td className="px-2 py-1 text-[11px] text-muted-foreground">未被 URL 使用</td>
+                  <td className="px-2 py-1 text-micro text-muted-foreground">未被 URL 使用</td>
                   <td className="w-8 px-1 py-1 text-right">
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                      className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
                       onClick={() => removeOrphan(it.id)}
                     >
                       <Trash2 className="h-3 w-3 text-muted-foreground" />

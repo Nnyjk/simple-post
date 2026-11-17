@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { History, ChevronDown, Star } from 'lucide-react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { DRAFT_ID_PREFIX } from '@/stores/store-types';
-import type { ResponseHistoryEntry } from '@/types/domain';
+import type { HttpMethod, ResponseHistoryEntry } from '@/types/domain';
 import { Button } from '@/components/ui/button';
-import { formatDuration, methodColorVar, statusColorVar, cn } from '@/lib/utils';
+import { MethodPill } from '@/components/ui/method-pill';
+import { formatDuration, statusTextClass, cn } from '@/lib/utils';
 
 /**
  * 响应查看器底部的可折叠「历史（n）」条。各行来自 store 的 `responseHistory`，由
@@ -93,7 +94,7 @@ export function ResponseHistory() {
           onClick={() => setOpen((v) => !v)}
           className={cn(
             'flex flex-1 items-center gap-2 px-4 py-1.5 text-left text-xs text-muted-foreground',
-            'hover:bg-accent/30 transition-colors',
+            'hover:bg-overlay-hover transition-colors',
           )}
           aria-expanded={open}
           data-testid="response-history-toggle"
@@ -103,7 +104,7 @@ export function ResponseHistory() {
           />
           <History className="h-3.5 w-3.5" />
           <span className="font-medium">历史</span>
-          <span className="rounded bg-muted px-1 text-[10px] tabular-nums">{count}</span>
+          <span className="rounded bg-muted px-1 text-nano tabular-nums">{count}</span>
         </button>
         {/* 是切换器的兄弟而非子元素：把按钮嵌进切换器既是无效 HTML，也会让每次清空都
             顺带展开面板。`count > 0`：空条没什么可清，这个便利性只会是噪声。 */}
@@ -124,7 +125,7 @@ export function ResponseHistory() {
       {open && (
         <div className="max-h-56 overflow-y-auto border-t border-border/60">
           {ordered.length === 0 ? (
-            <div className="px-4 py-3 text-center text-xs text-muted-foreground/70">
+            <div className="px-4 py-3 text-center text-xs text-muted-foreground">
               暂无历史 — 发送请求后会出现在这里
             </div>
           ) : (
@@ -172,7 +173,7 @@ interface HistoryRowProps {
 function HistoryRow({ entry, now, onPick, onToggleFavorite }: HistoryRowProps) {
   // method / url 不属于最初的 ApiResponse 契约，而是发送方填的可选字段。后端若忘了填，
   // 回落到占位值。
-  const method = (entry.response.method ?? 'GET') as string;
+  const method = (entry.response.method ?? 'GET') as HttpMethod;
   const url = entry.response.url ?? '';
   const status = entry.response.status;
   const truncated = url.length > 60 ? `${url.slice(0, 57)}…` : url;
@@ -191,7 +192,7 @@ function HistoryRow({ entry, now, onPick, onToggleFavorite }: HistoryRowProps) {
         aria-label={entry.isFavorite ? '取消收藏' : '收藏'}
         className={cn(
           'flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors',
-          'hover:bg-accent/40',
+          'hover:bg-overlay-hover',
           entry.isFavorite ? 'text-warning-foreground' : 'text-muted-foreground/40',
         )}
         data-testid="response-history-favorite"
@@ -204,17 +205,12 @@ function HistoryRow({ entry, now, onPick, onToggleFavorite }: HistoryRowProps) {
         onClick={() => onPick(entry)}
         className={cn(
           'h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-2 py-1.5 text-xs font-normal',
-          'hover:bg-accent/40',
+          'hover:bg-overlay-hover',
         )}
         data-testid="response-history-item"
       >
-        <span
-          className="inline-flex h-5 w-12 shrink-0 items-center justify-center rounded font-mono text-[10px] font-semibold text-white"
-          style={{ backgroundColor: methodColorVar(method) }}
-        >
-          {method}
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/80">
+        <MethodPill method={method} variant="solid" className="h-5" />
+        <span className="min-w-0 flex-1 truncate font-mono text-micro text-foreground/80">
           {truncated || '(无 URL)'}
         </span>
         {/* 服务端在 256 KiB 处截断了这个 body 并连同 `bodyJson` 一起丢弃，故查看器会
@@ -223,7 +219,7 @@ function HistoryRow({ entry, now, onPick, onToggleFavorite }: HistoryRowProps) {
             的语义色配对说明；把 `-foreground` 色标配到浅色*表面*上才是陷阱。 */}
         {entry.bodyTruncated && (
           <span
-            className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning-foreground"
+            className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-nano text-warning-foreground"
             title="响应体超过 256 KiB，已截断存储"
             data-testid="response-history-truncated"
           >
@@ -231,8 +227,10 @@ function HistoryRow({ entry, now, onPick, onToggleFavorite }: HistoryRowProps) {
           </span>
         )}
         <span
-          className="shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] tabular-nums"
-          style={{ color: statusColorVar(status) }}
+          className={cn(
+            'shrink-0 rounded px-1.5 py-0.5 font-mono text-nano tabular-nums',
+            statusTextClass(status),
+          )}
         >
           {status}
         </span>

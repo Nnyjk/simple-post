@@ -64,7 +64,7 @@ export function EndpointRow({
       badge={
         multiSelect &&
         selected && (
-          <span className="shrink-0 rounded bg-primary/20 px-1.5 text-[11px] font-medium text-primary">
+          <span className="shrink-0 rounded bg-primary/20 px-1.5 text-micro font-medium text-primary">
             已选
           </span>
         )

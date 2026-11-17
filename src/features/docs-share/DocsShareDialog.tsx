@@ -66,7 +66,7 @@ export function DocsShareDialog({ controller }: { controller: DocsShareControlle
       }
     >
       {error && (
-        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
+        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-micro text-destructive">
           {error}
         </p>
       )}
@@ -89,14 +89,14 @@ function PickStep({ controller }: { controller: DocsShareController }) {
         <ToolbarButton onClick={controller.selectAll}>全选</ToolbarButton>
         <ToolbarButton onClick={controller.selectNone}>全不选</ToolbarButton>
         <ToolbarButton onClick={controller.invert}>反选</ToolbarButton>
-        <span className="ml-1 text-[11px] tabular-nums text-muted-foreground">
+        <span className="ml-1 text-micro tabular-nums text-muted-foreground">
           已选 {chosen} / {total}
         </span>
       </div>
 
       <div className="max-h-[52vh] overflow-y-auto rounded-md border border-border bg-background/40">
         {total === 0 ? (
-          <p className="px-3 py-6 text-center text-[11px] text-muted-foreground">
+          <p className="px-3 py-6 text-center text-micro text-muted-foreground">
             这个模块里还没有已保存的接口。
           </p>
         ) : (
@@ -109,7 +109,7 @@ function PickStep({ controller }: { controller: DocsShareController }) {
         )}
       </div>
 
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
+      <p className="text-micro leading-relaxed text-muted-foreground">
         文档只写名字、说明与结构：请求头 / 查询参数 / 路径参数 / 鉴权 / 环境变量都
         <span className="font-medium text-foreground">不会输出取值</span>
         ，响应里你写的
@@ -127,7 +127,7 @@ function PreviewStep({ controller }: { controller: DocsShareController }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="muted">{doc.endpoints} 个接口</Badge>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">
           {doc.fileName}
         </span>
       </div>
@@ -137,12 +137,14 @@ function PreviewStep({ controller }: { controller: DocsShareController }) {
         // 空 sandbox = 最严：脚本、表单、同源全部关掉。产物本身也不含脚本，这里是第二道锁。
         sandbox=""
         srcDoc={doc.html}
-        className="h-[52vh] w-full rounded-md border border-border bg-white"
+        // 产物自带 `color-scheme: light dark` 与自己的底色，故这圈像素只在本体绘制前可见；
+        // 用 `bg-background` 而不是 `bg-white`：深色档下白框会闪一下并沿边留白。
+        className="h-[52vh] w-full rounded-md border border-border bg-background"
       />
 
       <p
         className={cn(
-          'text-[11px] leading-relaxed',
+          'text-micro leading-relaxed',
           savedName ? 'text-foreground' : 'text-muted-foreground',
         )}
       >
@@ -161,7 +163,7 @@ function ToolbarButton({ children, onClick }: { children: React.ReactNode; onCli
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+        'rounded-sm px-1.5 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground',
         focusRingBare,
       )}
     >

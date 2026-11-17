@@ -121,7 +121,7 @@ function GroupRow({
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {node.name}
         </span>
-        <span className="shrink-0 text-[10px] tabular-nums text-faint">
+        <span className="shrink-0 text-nano tabular-nums text-faint">
           {node.endpointTotal} 个接口
         </span>
       </div>
@@ -162,7 +162,7 @@ function EndpointRow({
           <Badge variant="muted">已存在</Badge>
         </Tooltip>
       )}
-      <span className="w-40 shrink-0 truncate text-right font-mono text-[11px] text-faint">
+      <span className="w-40 shrink-0 truncate text-right font-mono text-micro text-faint">
         {endpoint.path}
       </span>
     </div>
@@ -199,7 +199,7 @@ export function TransferTree({
 }: TransferTreeProps) {
   if (groups.length === 0) {
     return (
-      <p className="px-2 py-6 text-center text-[11px] text-muted-foreground">
+      <p className="px-2 py-6 text-center text-micro text-muted-foreground">
         这份文件里没有任何可导入的请求。
       </p>
     );

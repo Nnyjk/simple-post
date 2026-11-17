@@ -5,6 +5,7 @@ import { xml } from '@codemirror/lang-xml';
 import { oneDark } from '@codemirror/theme-one-dark';
 import type { BodyMode, RequestBody } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Wand2 } from 'lucide-react';
 import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
@@ -110,7 +111,7 @@ export function BodyEditor({
             格式化
           </Button>
         </div>
-        <p className="text-[10px] text-muted-foreground">{contentTypeText(value.mode)}</p>
+        <p className="text-nano text-muted-foreground">{contentTypeText(value.mode)}</p>
         {value.mode === 'none' ? (
           <NoBodyHint />
         ) : value.mode === 'form' ? (
@@ -171,9 +172,7 @@ function contentTypeText(mode: BodyMode): string {
 /** 左栏在 none 模式下的提示。 */
 function NoBodyHint() {
   return (
-    <div className="flex h-32 items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
-      此请求无 body
-    </div>
+    <EmptyHint className="flex h-32 items-center justify-center text-sm">此请求无 body</EmptyHint>
   );
 }
 
@@ -403,7 +402,7 @@ function BodyContent({
           aria-live="polite"
           className={cn(
             'absolute right-2 top-2 z-10 flex max-w-[min(420px,60%)] items-center gap-1.5',
-            'rounded-full border px-2.5 py-1 text-[11px] shadow-md',
+            'rounded-full border px-2.5 py-1 text-micro shadow-md',
             // 实心 destructive，不用浅色底：`--destructive-foreground` 两个主题都是近白，
             // 配 `bg-background/85` 那种浅底就是白字白底。
             'border-destructive bg-destructive text-destructive-foreground',
@@ -490,7 +489,7 @@ function SchemaSection({ value, onChange }: { value: string; onChange: (v: strin
         data-testid="body-schema-toggle"
       >
         Schema（文档定义，不参与发送）
-        <span className="text-[10px] font-normal text-muted-foreground">
+        <span className="text-nano font-normal text-muted-foreground">
           这份接口接受什么参数，只用于文档与导出
         </span>
       </div>
@@ -508,7 +507,7 @@ function SchemaSection({ value, onChange }: { value: string; onChange: (v: strin
             setView(id as SchemaViewMode);
           }}
         />
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-nano text-muted-foreground">
           {view === 'structure' ? '按字段列出这份定义' : '直接编辑这段 JSON'}
         </span>
       </div>
@@ -548,7 +547,7 @@ function SchemaSection({ value, onChange }: { value: string; onChange: (v: strin
               aria-live="polite"
               className={cn(
                 'absolute right-2 top-2 z-10 flex max-w-[min(420px,60%)] items-center gap-1.5',
-                'rounded-full border px-2.5 py-1 text-[11px] shadow-md',
+                'rounded-full border px-2.5 py-1 text-micro shadow-md',
                 'border-destructive bg-destructive text-destructive-foreground',
               )}
               title={error}

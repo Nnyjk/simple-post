@@ -4,15 +4,15 @@
  * - `xs` → 16×16 单字母小片，用在资源树 endpoint 条目这类紧凑行里，只显示动词首字母。
  * - `sm` → 正常标签尺寸的药丸，放得下完整动词，用在 HttpTester 的 URL 栏、下拉行等处。
  *
- * 两种视觉口味：`solid` 是满色底 + 白字，用于 URL 栏里当前动词；`tinted` 是该色以 15%
- * alpha 作底 + 同色文字，用在下拉行与树行。
+ * 两种视觉口味：`solid` 是满色底 + 按底色亮度选的近黑/白字，用于 URL 栏里当前动词；
+ * `tinted` 是该色以 15% alpha 作底 + 同色文字，用在下拉行与树行。
  *
  * 同一个 method 在任何尺寸 / 口味下都是同一个色相。HSL → alpha-15 的映射放在
  * `methodTint()` 里，好让邻近代码复用而不必重新实现。
  */
 
 import type { HttpMethod } from '@/types/domain';
-import { cn, methodColorVar } from '@/lib/utils';
+import { cn, methodColorVar, readableInk } from '@/lib/utils';
 
 export type MethodPillSize = 'xs' | 'sm';
 export type MethodPillVariant = 'solid' | 'tinted';
@@ -33,8 +33,8 @@ export interface MethodPillProps {
   title?: string;
 }
 
-const SIZE_XS = 'h-4 w-4 rounded text-[10px]';
-const SIZE_SM = 'h-6 min-w-[3.25rem] rounded-md px-1.5 text-[10px] tracking-wider';
+const SIZE_XS = 'h-4 w-4 rounded text-nano';
+const SIZE_SM = 'h-6 min-w-[3.25rem] rounded-md px-1.5 text-nano tracking-wider';
 
 const VARIANT_TINTED = 'border';
 
@@ -49,12 +49,13 @@ export function MethodPill({
 }: MethodPillProps) {
   const text = label ?? (size === 'xs' ? method.charAt(0).toUpperCase() : method);
 
-  // solid 变体把颜色直接当背景配白字；tinted 变体用该色 15% alpha 作底、满饱和作
-  // 字色——见下方 `methodTint`
+  // solid 变体把颜色当背景；文字色不能写死 white —— method 色相不随主题变化，白字压
+  // 中高明度色相只有 2~3:1（见 `readableInk`），故按底色亮度选近黑/白。tinted 变体用该色
+  // 15% alpha 作底、满饱和作字色——见下方 `methodTint`
   const style =
     variant === 'tinted'
       ? methodTint(method)
-      : { backgroundColor: methodColorVar(method), color: 'white' };
+      : { backgroundColor: methodColorVar(method), color: readableInk(methodColorVar(method)) };
 
   return (
     <span

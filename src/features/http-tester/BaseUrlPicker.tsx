@@ -118,7 +118,7 @@ export function BaseUrlPicker({
           // 卡片式触发器 —— 与 SettingsRow 的描边一致。嵌一个图标容器，使这个便利性读起来
           // 是「这是 baseUrl 选择器」而非「这是一个带箭头的下拉」。
           'flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-2 text-xs transition-colors',
-          'hover:bg-accent/40',
+          'hover:bg-overlay-hover',
           TRIGGER_WIDTH,
           !resolvedBaseUrl && selection.kind === 'module' && 'text-muted-foreground',
           focusRing,
@@ -128,7 +128,7 @@ export function BaseUrlPicker({
         <span className="min-w-0 flex-1 text-left leading-tight">
           <span className="block truncate font-medium">{triggerLabel}</span>
           {triggerSubLabel && (
-            <span className="block truncate font-mono text-[10px] text-muted-foreground/70 leading-tight">
+            <span className="block truncate font-mono text-nano text-faint leading-tight">
               {triggerSubLabel}
             </span>
           )}
@@ -229,7 +229,7 @@ function Row({ selected, onSelect, concept, icon, primary, secondary }: RowProps
         onClick={onSelect}
         className={cn(
           'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-          'hover:bg-accent hover:text-foreground',
+          'hover:bg-overlay-hover hover:text-foreground',
           selected && 'bg-accent text-foreground',
         )}
       >
@@ -237,7 +237,7 @@ function Row({ selected, onSelect, concept, icon, primary, secondary }: RowProps
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium leading-tight">{primary}</span>
           {secondary && (
-            <span className="block truncate font-mono text-[10px] text-muted-foreground/80 leading-tight">
+            <span className="block truncate font-mono text-nano text-faint leading-tight">
               {secondary}
             </span>
           )}

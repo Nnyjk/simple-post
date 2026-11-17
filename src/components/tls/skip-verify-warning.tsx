@@ -24,7 +24,7 @@ export function SkipVerifyWarning({
   return (
     <p
       className={cn(
-        'rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive',
+        'rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-micro text-destructive',
         className,
       )}
     >

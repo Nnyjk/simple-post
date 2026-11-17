@@ -90,7 +90,7 @@ export function TopBar() {
           aria-label="返回欢迎页"
           data-testid="back-to-welcome"
           className={cn(
-            'flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-accent/40',
+            'flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-overlay-hover',
             focusRing,
           )}
         >
@@ -154,7 +154,7 @@ export function TopBar() {
                   setProjOpen(false);
                 }}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent',
+                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-overlay-hover',
                   p.id === activeProject?.id && 'bg-accent',
                 )}
               >
@@ -162,9 +162,7 @@ export function TopBar() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate">{p.name}</div>
                   {p.description && (
-                    <div className="truncate text-[11px] text-muted-foreground">
-                      {p.description}
-                    </div>
+                    <div className="truncate text-micro text-muted-foreground">{p.description}</div>
                   )}
                 </div>
               </button>
@@ -177,7 +175,7 @@ export function TopBar() {
                   setProjOpen(false);
                   openNewItem({ type: 'project' });
                 }}
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
               >
                 <span className="text-base leading-none">+</span>
                 新建项目
@@ -200,7 +198,7 @@ export function TopBar() {
             onClick={() => setEnvOpen((v) => !v)}
             className="gap-1.5"
           >
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">env</span>
+            <span className="text-nano uppercase tracking-wider text-muted-foreground">env</span>
             {/* 固定宽度而非 `max-w`：标题栏不得因当前环境名长短变化而改变尺寸。`max-w`
               只封顶长名，短名反而会把整个控件收窄，切换环境时把它右侧的一切推来推去。
               `truncate` 仍会在固定宽度内把过长名字省略。 */}
@@ -228,7 +226,7 @@ export function TopBar() {
                         setEnvOpen(false);
                         openSettingsTab('env');
                       }}
-                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       新建环境
@@ -250,7 +248,7 @@ export function TopBar() {
                         setEnvOpen(false);
                       }}
                       className={cn(
-                        'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent',
+                        'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-overlay-hover',
                         env.id === activeEnv?.id && 'bg-accent',
                       )}
                     >
@@ -264,7 +262,7 @@ export function TopBar() {
                       />
                       <span className="font-mono text-xs">{env.name}</span>
                       {env.id === activeEnv?.id && (
-                        <span className="ml-auto text-[10px] text-success">active</span>
+                        <span className="ml-auto text-nano text-success">active</span>
                       )}
                     </button>
                   ))}
@@ -276,7 +274,7 @@ export function TopBar() {
                         setEnvOpen(false);
                         openSettingsTab('env');
                       }}
-                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
                     >
                       <Plus className="h-3.5 w-3.5" />
                       新建环境
@@ -308,16 +306,14 @@ export function TopBar() {
         type="button"
         onClick={() => setPaletteOpen(true)}
         className={cn(
-          'ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground/80',
+          'ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground/80',
           focusRing,
         )}
         data-testid="global-search"
         aria-label="打开命令面板"
       >
         <Search className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1 truncate text-sm text-muted-foreground/80">
-          搜索命令、接口、项目…
-        </span>
+        <span className="flex-1 truncate text-sm text-faint">搜索命令、接口、项目…</span>
         <span className="kbd shrink-0">Ctrl</span>
         <span className="kbd shrink-0">K</span>
       </button>
@@ -387,12 +383,12 @@ function McpStatusPill() {
           </div>
           {/* 传输方式写死 Streamable HTTP —— 药丸不能宣告它已不再说的传输。端口与连接页
               写进客户端配置的是同一个数字，故它是唯一值得额外呈现的信息。 */}
-          <div className="text-[10px] text-muted-foreground">
+          <div className="text-nano text-muted-foreground">
             Streamable HTTP
             {port !== null ? ` · :${port}` : ''}
             {pid !== null ? ` · PID ${pid}` : ''}
           </div>
-          <div className="text-[10px] text-muted-foreground/70">点击打开「设置 · 连接」</div>
+          <div className="text-nano text-faint">点击打开「设置 · 连接」</div>
         </div>
       }
       side="bottom"
@@ -403,7 +399,7 @@ function McpStatusPill() {
         onClick={() => openSettingsTab('connection')}
         aria-label="MCP 状态 — 打开连接设置"
         className={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs hover:bg-accent',
+          'inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-card px-2 text-xs hover:bg-overlay-hover',
           focusRing,
         )}
       >

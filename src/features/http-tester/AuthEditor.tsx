@@ -10,6 +10,7 @@ import {
   type OAuth2TokenLocation,
 } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
@@ -67,11 +68,7 @@ export function AuthEditor({ value, onChange, varEntries, envName, vars }: Props
         />
       </div>
 
-      {value.kind === 'none' && (
-        <div className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-          此请求不需要鉴权
-        </div>
-      )}
+      {value.kind === 'none' && <EmptyHint className="p-4 text-sm">此请求不需要鉴权</EmptyHint>}
 
       {value.kind === 'bearer' && (
         <div>
@@ -84,7 +81,7 @@ export function AuthEditor({ value, onChange, varEntries, envName, vars }: Props
             placeholder="eyJhbGciOi... 支持 {{var}}"
             className="font-mono text-sm"
           />
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
+          <p className="mt-1.5 text-micro text-muted-foreground">
             将以 <code className="rounded bg-muted px-1">Authorization: Bearer ...</code> 发送
           </p>
         </div>
@@ -361,7 +358,7 @@ function OAuth2Fields({
             placeholder="https://idp.example.com/oauth2/authorize"
             className="font-mono text-sm"
           />
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
+          <p className="mt-1.5 text-micro text-muted-foreground">
             本应用不打开浏览器，也不监听回环端口 —— 复制这个地址去登录，再把回调内容粘到下面
           </p>
         </div>
@@ -480,7 +477,7 @@ function OAuth2Fields({
           {pending ? '处理中…' : isImplicit ? '保存 Token' : '获取 Token'}
         </Button>
         {token && (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {token.expiresAt === null
               ? '过期时间未知'
               : `有效期至 ${new Date(token.expiresAt * 1000).toLocaleTimeString()}`}
@@ -488,7 +485,7 @@ function OAuth2Fields({
             {token.refreshed ? '刚获取' : '命中缓存'}
           </p>
         )}
-        {error && <p className="text-[11px] text-destructive">{error}</p>}
+        {error && <p className="text-micro text-destructive">{error}</p>}
       </div>
     </div>
   );

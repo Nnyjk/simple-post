@@ -204,7 +204,7 @@ export function StateSummary({ state }: { state: McpUiState | null }) {
     return (
       <span className="inline-flex items-center gap-2 text-muted-foreground">
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-        <span className="text-[11px]">连接中…</span>
+        <span className="text-micro">连接中…</span>
       </span>
     );
   }

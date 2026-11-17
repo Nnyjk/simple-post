@@ -9,10 +9,15 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: ButtonSize;
 }
 
+/** 悬停底色是 `bg-overlay-hover`（3.5% 黑 / 5% 白），与树行、标签页、菜单项同一族；
+ *  `bg-accent` 留给「已选中」。两档实测：浅色档 accent 91.8% 与 overlay 叠在白底上的
+ *  ~96.4% 相差一倍多，行列表里 accent 那档会把 30 行看成棋盘，故统一走轻的那一档 ——
+ *  悬停时文字颜色同时挪到 `accent-foreground`，可辨识度由字色承担。 */
 const variantClass: Record<ButtonVariant, string> = {
   default: 'bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm',
-  ghost: 'hover:bg-accent hover:text-accent-foreground',
-  outline: 'border border-border bg-transparent hover:bg-accent hover:text-accent-foreground',
+  ghost: 'hover:bg-overlay-hover hover:text-accent-foreground',
+  outline:
+    'border border-border bg-transparent hover:bg-overlay-hover hover:text-accent-foreground',
   secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
   destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
 };
