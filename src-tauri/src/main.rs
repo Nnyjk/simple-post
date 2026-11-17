@@ -110,10 +110,11 @@ enum Cmd {
         data_dir: Option<String>,
 
         /// Override the persisted `mcp.auto_start` preference for this
-        /// launch only. `--mcp-auto-start` forces the daemon to come up
-        /// (and updates the row); `--no-mcp-auto-start` forces it to
-        /// stay down. If neither flag is given, the persisted value is
-        /// honoured.
+        /// launch only. The flag takes a value, e.g.
+        /// `--mcp-auto-start=false` keeps the daemon down (and updates the
+        /// row), `--mcp-auto-start=true` brings it up. There is no
+        /// `--no-mcp-auto-start` spelling — the value form is the only one.
+        /// Without the flag the persisted value is honoured.
         #[arg(long)]
         mcp_auto_start: Option<bool>,
 
