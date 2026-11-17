@@ -135,7 +135,9 @@ const scratch1 = mkdtempSync(join(tmpdir(), 'web-auth-open-'));
 console.log(`[test:web-auth] phase 1 scratch = ${scratch1}`);
 const proc1 = spawnTracked(
   exe,
-  ['serve-web', '--bind=127.0.0.1', '--port=4173'],
+  // 只验 HTTP 面（鉴权两阶段 + SPA 资源 MIME），不需要 MCP 守护进程：关掉它，
+  // 脚本收尾才不会留下孤儿子进程握着管道与临时目录。
+  ['serve-web', '--bind=127.0.0.1', '--port=4173', '--mcp-auto-start=false'],
   {
     env: { ...process.env, SIMPLE_POST_DATA_DIR: scratch1, RUST_LOG: 'warn' },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -168,7 +170,9 @@ const scratch2 = mkdtempSync(join(tmpdir(), 'web-auth-locked-'));
 console.log(`[test:web-auth] phase 2 scratch = ${scratch2}`);
 const proc2 = spawnTracked(
   exe,
-  ['serve-web', '--bind=127.0.0.1', '--port=4173'],
+  // 只验 HTTP 面（鉴权两阶段 + SPA 资源 MIME），不需要 MCP 守护进程：关掉它，
+  // 脚本收尾才不会留下孤儿子进程握着管道与临时目录。
+  ['serve-web', '--bind=127.0.0.1', '--port=4173', '--mcp-auto-start=false'],
   {
     env: {
       ...process.env,
