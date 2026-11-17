@@ -269,3 +269,9 @@ pub fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
 }
+
+/// 四处注册表的差集。挂在 crate 根：它同时读前端两张表、`src-tauri/src/lib.rs` 与本 crate 的
+/// `web_api/router.rs`，不归任何单个模块管（`web_api/mod_test.rs` 只管 web_api 内部）。
+#[cfg(test)]
+#[path = "registry_parity_test.rs"]
+pub(crate) mod registry_parity_tests;

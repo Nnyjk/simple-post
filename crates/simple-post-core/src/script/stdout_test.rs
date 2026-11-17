@@ -17,7 +17,50 @@ const SOURCES: &[(&str, &str)] = &[
     ("script/run.rs", include_str!("run.rs")),
     ("script/chain.rs", include_str!("chain.rs")),
     ("script/send.rs", include_str!("send.rs")),
+    ("script/transform.rs", include_str!("transform.rs")),
 ];
+
+/// 本模块的测试文件后缀。它们不属于「要守的源码」——扫它们只会扫到本文件自己的说明。
+const TEST_SUFFIX: &str = "_test.rs";
+
+/// 目录里真实的源文件名（不含 `*_test.rs`）。
+///
+/// `include_str!` 是编译期的，拿不到运行时列表，所以清单只能手写；这个函数把「手写」
+/// 变成「可校验」：清单少一个文件时，下面那条测试会把缺的名字打出来。
+fn module_sources() -> Vec<String> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/script");
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("读不到 {}: {e}", dir.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".rs") && !name.ends_with(TEST_SUFFIX))
+        .collect();
+    names.sort();
+    names
+}
+
+/// 清单与目录必须一致——双向。
+///
+/// 单向（清单 ⊆ 目录）挡不住「新加了文件但忘了加进清单」，而漏登记正是这条哨兵唯一的
+/// 失效方式：新文件里的 `println!` 不扫就是绿的。
+#[test]
+fn every_module_source_file_is_guarded() {
+    let mut listed: Vec<String> = SOURCES
+        .iter()
+        .map(|(name, _)| name.rsplit('/').next().unwrap_or(name).to_owned())
+        .collect();
+    listed.sort();
+
+    let on_disk = module_sources();
+    let missing: Vec<&String> = on_disk.iter().filter(|n| !listed.contains(n)).collect();
+    assert!(
+        missing.is_empty(),
+        "script/ 下这些源文件不在 SOURCES 里（加进清单，否则它们的 println! 不会被扫）：{missing:?}"
+    );
+
+    let stale: Vec<&String> = listed.iter().filter(|n| !on_disk.contains(n)).collect();
+    assert!(stale.is_empty(), "SOURCES 里有已删/改名的文件：{stale:?}");
+}
 
 /// 这一行是不是注释。
 fn is_comment(line: &str) -> bool {

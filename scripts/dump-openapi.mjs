@@ -25,6 +25,11 @@
 //
 // Usage:
 //   node scripts/dump-openapi.mjs > openapi.yaml
+//   node scripts/dump-openapi.mjs --out target/openapi.yaml   # writes + asserts non-empty
+//
+// `--out` is what `npm run lint:openapi` uses: it writes the document outside
+// the repository (default `target/openapi.yaml`) and fails if the written file
+// has no `paths:` entries, so a table refactor cannot silently empty the gate.
 //
 // Caveat:
 //   - This dumper trusts the literal shape of the `RouteSpec` table —
@@ -33,9 +38,9 @@
 //   - The `summary` text is human-readable; the dumper does no
 //     schema synthesis.
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, basename, join } from 'node:path';
+import { dirname, basename, join, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -324,4 +329,43 @@ out.push(
 out.push('    `#[serde(rename_all = "camelCase")]`.');
 out.push('    Worked curl examples: see the README `serve-web` section.');
 
-process.stdout.write(out.join('\n') + '\n');
+const yaml = out.join('\n') + '\n';
+
+/**
+ * `--out <file>`：写文件并**断言写出来的东西不是空壳**。
+ *
+ * 加这个开关的原因是本脚本此前只在手动跑时才存在：`package.json` 的
+ * `lint:openapi` 跑的是 interchange 的 `export_sample`，两条产物谁也不看谁，
+ * 于是「表被重构 → 本脚本静默吐空 yaml」这条风险一直没人碰到。开关落在
+ * `lint:openapi` 里之后，空壳会让 `npm run check` 直接红。
+ *
+ * 目标路径按 cwd 解析（不是 `__dirname`），调用方决定写哪儿；仓库里的门禁写
+ * `target/openapi.yaml` —— `target/` 已被 git 忽略，产物不会进版本库。
+ */
+const argv = process.argv.slice(2);
+const outIdx = argv.findIndex((a) => a === '--out' || a === '-o');
+if (outIdx === -1) {
+  process.stdout.write(yaml);
+} else {
+  const target = argv[outIdx + 1];
+  if (!target) {
+    console.error('dump-openapi: --out requires a path');
+    process.exit(2);
+  }
+  const file = resolve(process.cwd(), target);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, yaml, 'utf8');
+
+  const written = readFileSync(file, 'utf8');
+  const lines = written.split(/\r?\n/);
+  const pathsAt = lines.indexOf('paths:');
+  const rows =
+    pathsAt === -1 ? 0 : lines.slice(pathsAt + 1).filter((l) => /^ {2}\/api\//.test(l)).length;
+  if (pathsAt === -1 || rows === 0) {
+    console.error(
+      `dump-openapi: ${target} 写出来了，但没有 paths（paths: 在第 ${pathsAt} 行，${rows} 条）—— RouteSpec 表的布局变了`,
+    );
+    process.exit(1);
+  }
+  console.error(`dump-openapi: ${target} — ${rows} 条路径`);
+}

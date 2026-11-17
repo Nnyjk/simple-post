@@ -27,3 +27,9 @@ pub use spec::{public_route_specs, RouteSpec};
 #[cfg(test)]
 #[path = "mod_test.rs"]
 mod tests;
+
+/// OpenAPI 表 ↔ `router.rs` 的对账。挂在 `web_api` 下：它只读本模块的两张表
+/// （`spec/**` 与 `router.rs`），不跨 crate。
+#[cfg(test)]
+#[path = "route_specs_test.rs"]
+mod route_specs_tests;
