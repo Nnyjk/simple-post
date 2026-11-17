@@ -2,7 +2,7 @@
  * web 形态的 REST 路由表。
  *
  * - 路由表对应 `crates/simple-post-server/src/web_api/` 里的 axum 路由树
- *   （`.route()` 注册在 `mod.rs::build_router`）。两侧不共享源码，靠
+ *   （`.route()` 注册在 `router.rs::build_router`）。两侧不共享源码，靠
  *   `scripts/mcp-integration.test.mjs` 的集成测试与 PR 时的手工复核保持一致。
  * - 新增 invoke 命令必须在**两处**都补上对应的 REST 条目。
  */

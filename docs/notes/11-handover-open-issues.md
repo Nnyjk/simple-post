@@ -37,6 +37,28 @@
 | 20 | `crates/simple-post-core/src/db/mod.rs:7-8`、`crates/simple-post-server/src/main.rs:50-54`、`crates/simple-post-core/src/port_file.rs:53-55`、`crates/simple-post-server/src/daemon_supervisor.rs:62-65` | 数据目录/`store.db` 落点四处说法不一：`db/mod.rs` 写 Windows 是 `%APPDATA%\store.db`（与默认落点一致，但没提 `--data-dir`）；`server/main.rs` 的 `--data-dir` 文档写默认 `dirs::data_dir()/simple-post`；`port_file.rs` 注释让调用方 `.join("com.simple-post")`，实际代码 join 的是 `"simple-post"`（`:61`）；`host_data_dir()` 返回 `dirs::data_dir()/simple-post` | `db/pool.rs:24-26` + 三个 `db::init` 调用点（`src-tauri/src/lib.rs:138`、`web_api/serve.rs:35`、`server/src/lib.rs:121`）：库 = 传入目录 + `store.db`；`mcp.port` = 同一基准目录 + `simple-post/mcp.port`（`port_file.rs:60-63`）。Windows 默认即 `%APPDATA%\store.db` 与 `%APPDATA%\simple-post\mcp.port` | 按 `%APPDATA%\simple-post` 找库会落空、按它删库会删错位置；`serve-web --data-dir` 只搬主进程的库，daemon 仍读环境变量/`%APPDATA%` | 改注释与文档（不动代码）· **确认** |
 | 21 | `AGENTS.md` §Key Directories（`:181` 起）、§Important Files（`:409` 起） | 文件地图缺条目：`docker-portainer.yml`（已随 Docker 文件迁入 `docker/`，并在 AGENTS 的 `docker/` 条目中列出）、`crates-guide.html`、`src/lib/error-text.ts`、`src/hooks/useLocalExpansion.ts`（§Key Directories 连 `src/hooks/` 整个目录都没提）、`.thinkrail/` | 仓库实际树：这五个路径都存在（`docker/docker-portainer.yml` 在 `docker/`，`crates-guide.html` 在根，另三个在 `src/`、`src/lib`、`src/hooks`） | 按地图找 Portainer 栈文件、错误文案或本地展开 hook 会空手；新文件不知道归到哪一类 | 改文档（补条目）· **确认** |
 
+## 修复记录（2026-11-17，注释/文档纠错 + 守卫收口）
+
+上表逐条核对过，其中这些已改掉；表内「现状说法」保留原样，作为当时那一版的事实记录。
+
+| # | 改成了什么 | 改动位置 |
+| --- | --- | --- |
+| 1 | 删掉 `/mcp` 代理半句，只写 `/api` proxy | `AGENTS.md` §Important Files（`vite.config.ts` 条目） |
+| 2 | 47-tool → 48-tool | `AGENTS.md` §Important Files（工具注册表一句） |
+| 3 | `simple-post-mcp-proxy` → `simple-post-mcp`，与真实 `[[bin]]` 一致 | `src-tauri/src/main.rs:31-33` |
+| 4 | endpoints (8) → (9)，合计 24 → 25 | `crates/simple-post-mcp/src/mcp/project_ops/mod.rs:54`、`endpoint/registry.rs:1` |
+| 5 | `body_mode` 补 `xml`、`binary`，按 `BODY_MODE_VALUES` 的顺序重排 | `crates/simple-post-mcp/src/mcp/resources.rs:153` |
+| 6 | fixtures 条目改为「mcp 的 `resolve_base_url` + core 的 `apply_rewrite`」 | `AGENTS.md` §Key Directories |
+| 8 | 补齐 `decide` 的完整顺序（覆盖值 / 新鲜缓存 / 重新取数 / 过期值回退） | `crates/simple-post-core/src/dynamic/mod.rs:30-32` |
+| 9 | 改成「`loaded` 为真时早退；不按 `loading` 去重」 | `src/main.tsx:30-32` |
+| 10 | 改成「`ProjectTree` 只在项目激活后挂载」 | `src/features/workspace/WorkspaceShell.tsx:9-10` |
+| 11 | 默认 `false` → 默认 `true`，与 `raw.unwrap_or(true)` 一致 | `crates/simple-post-core/src/db/preferences.rs:94-98,135-139` |
+| 14 | 补上 `domain/` 段 | `src/lib/__tests__/placement-parity.test.ts:5` |
+| 15 | 四个 parity 读取器补 `deny_unknown_fields` 与精确条数（32 / 5·15·11 / 13 / 2），TS 侧七处同样钉住条数 | `crates/simple-post-core/src/path_params_test.rs:50`、`dynamic/resolve_parity_test.rs:87`、`oauth2/inject_parity_test.rs:93`、`crates/simple-post-mcp/src/mcp/http_ops/multipart_parity_test.rs:126` |
+| 20 | `port_file.rs` 的后缀写作 `simple-post`（与 `port_file_path_at` 一致）；`mcp.port` 落在其下 | `crates/simple-post-core/src/port_file.rs:50-55` |
+
+仍未修：**#7**（桌面与 REST 路径缺 schema 拒收门）、**#12**、**#13**、**#16**（两份 fixture 仍缺 `$comment`）、**#17**、**#18**、**#19**、**#21**，以及 #20 里 `crates/simple-post-core/src/db/mod.rs:7-8` 与 `crates/simple-post-server/src/main.rs:50-54` 两处对默认数据目录的说法。
+
 ## 结构：接手后建议的核对顺序
 
 按「最可能真出事」排序。每条都写清期望结果；不期望时先怀疑什么。
@@ -49,7 +71,7 @@
    期望：全绿，且 `http-build-parity` / `body-parity` / `base-url-parity` 等各跑满样本条数。
    不期望时：多半是只改了两侧之一。想验证第 15 条的空转风险，可临时把某个 fixture 的键名改错一个字母，再跑**读它的那个读取器**——五个里有四个是 Rust 的（`cargo test -p simple-post-core <测试名>` / `-p simple-post-mcp <测试名>`），本步的 `npm test` 只收 `src/**/*.test.ts`，证明不了 Rust 侧；绿了就说明该读取器没有兜底，改回后再决定是否补校验。
 
-3. **两个数字**：工具数 = 48（`mcp/mod_test.rs` 的常量与 `tool_table().len()`），`COMMANDS` 与 `WEB_ROUTES` 各 59 条。
+3. **两个数字**：工具数 = 48（`mcp/mod_test.rs` 的常量与 `tool_table().len()`），`COMMANDS` 与 `WEB_ROUTES` 各 62 条。
    期望：三处都与实测一致。
    不期望时：先看是不是刚加了工具/命令没同步三处；这两个数字是本仓库最容易被抄错的地方（见第 2、4 条）。
 

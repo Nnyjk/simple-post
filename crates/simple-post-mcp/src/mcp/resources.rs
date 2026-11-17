@@ -150,7 +150,7 @@ fn guide() -> Value {
             "url": "<路径，如 /api/orders；host 在发送时由环境里那个模块的格子决定>",
             "params": [{ "key": "<参数名>", "value": "<值>", "enabled": true }],
             "headers": [{ "key": "<头名>", "value": "<值>", "enabled": true }],
-            "body_mode": "none | json | form | multipart | raw",
+            "body_mode": "none | json | form | multipart | xml | raw | binary",
             "body_content": "<这一次发出去的载荷；json 模式下是一份 JSON 实例>",
             "body_schema": "<这个接口接受哪些参数的文档定义（JSON Schema）；永远不上线>",
             "auth_type": "none | bearer | basic | apikey | oauth2",

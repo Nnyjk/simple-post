@@ -7,11 +7,11 @@
 
 ## 结论
 
-1. 本地只有一条总门禁：`npm run check`，它是七步串行链，不是并行聚合。
+1. 本地门禁分两档：`npm run check`（七步串行链，十几秒，编辑时跑）与 `npm run check:all`（= `check` + `cargo test --workspace`，推之前跑）。
 2. 前端用 Node 自带测试器（`tsx --test` + `node:assert/strict`），没有 Vitest/Jest/RTL；文件名必须是 `src/**/*.test.ts` 才会被收集。
 3. Rust 测试默认是「兄弟文件 + `#[path]`」，只有五个文件仍是 inline `mod tests`。
 4. 仓库里有十余个**读源码文本**的哨兵测试；改注释、改字符串字面量都可能让它们变红，这通常是契约真的变了的信号，不要先放宽判据。
-5. `scripts/` 下的辅助脚本既不在 `npm test` 的收集范围内，也不进 CI；删除路由/命令/MCP 工具后必须手工清扫。
+5. `scripts/` 下的辅助脚本不在 `npm test` 的收集范围内；可达性与它们写的 `/api/…` 字面量由 `src/lib/__tests__/scripts-manifest.test.ts` 静态守住，`test:web:auth` / `test:web:basepath` 已在 CI 的 rust job 里真跑，其余需要 daemon 端口的仍靠人跑。
 6. CI 三道必需闸（web / rust / docker），其中 docker 按变更范围跳过、但跳过被报告为成功。
 7. 容器运行阶段**不装任何包**，其前提是 `simple-post-server` 保持 Tauri-free。
 8. 发布是「四份版本号 + annotated tag + draft release 手填 notes + amd64 镜像」；`main` 受保护，版本提交必须走 PR 且用 rebase merge。
@@ -36,6 +36,8 @@
 | `fmt:check` | `cargo fmt --all --check` | 否 | 是（rust job 直跑 cargo） |
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` | 否 | 是（rust job 直跑 cargo） |
 | `check` | 七步链，见下 | 否 | 否（CI 拆成 job） |
+| `test:rust` | `cargo test --workspace` | 否 | 是（rust job 直跑 cargo） |
+| `check:all` | `check` + `test:rust`，推之前跑的那条 | 否 | 否（CI 的 web/rust 两闸合起来等价） |
 | `build:tests` | `scripts/run-mcp-tests.cjs`：预检产物后跑 MCP 集成，缺产物 exit 2 | **是** | 否 |
 | `e2e:preflight` | `scripts/e2e/preflight.mjs`：探测工作区二进制与 `--help` | **是** | 否 |
 | `preview` | `vite preview` | 否 | 否 |
@@ -59,7 +61,9 @@
 format:check → lint → typecheck → test → lint:openapi → fmt:check → clippy
 ```
 
-CI 额外跑三样本地不在 `check` 里的东西：`vite build`、`cargo test --workspace`、容器运行冒烟。
+`check` **故意**不含 `cargo test --workspace`（约 1400 条）：它是编辑过程中十几秒的快速层，把 Rust 测试并进去会让每次保存都变成一分钟。代价是「只改了 Rust」时 `check` 全绿而 Rust 断言已经 panic（本轮真实发生过：patch 类型加 `deny_unknown_fields` 后，`crates/simple-post-core/src/db/projects_test.rs` 的旧断言在 `unwrap` 处炸）。故分成两档：`check` 是快检，**推之前跑 `npm run check:all` = `check` + `cargo test --workspace`**。
+
+CI 额外跑三样本地两档都不含的东西：`vite build`、容器运行冒烟，以及两条 `test:web:*`（rust job 末尾，见 ci.yml）。
 
 ### 测试体系
 
@@ -75,7 +79,8 @@ CI 额外跑三样本地不在 `check` 里的东西：`vite build`、`cargo test
   仍用 inline `mod tests { … }` 的五个特例：`src-tauri/src/main.rs`、`crates/simple-post-server/src/{auth,main}.rs`、`crates/simple-post-server/src/web_api/static_files.rs`、`crates/simple-post-core/src/oauth2/http_client.rs`。
 - **DB 测试**：每个测试文件自带 `fresh_pool()`，在 `std::env::temp_dir()` 下用进程 id + 时间戳（+ 计数器）建唯一目录，避免并行测试抢同一个 `store.db`。
 - **集成测试前提**：`test:mcp` / `test:web:auth` / `test:web:basepath` / `build:tests` 都先经 `scripts/e2e/artifact-resolver.mjs` 找 `simple-post` 二进制（debug 或 release），找不到直接失败；`perf:bench` 则需要一个已经在跑的服务。
-- **覆盖盲区**：`scripts/_verify_store.mjs`、`mcp-integration.test.mjs`、`mcp-repl.mjs`、`dump-openapi.mjs`、`e2e/*` 都不在 `npm test` 与 CI 内。删改路由、命令或 MCP 工具后要手工过一遍这些脚本。
+- **覆盖盲区**：需要真进程、真端口或编译后二进制的脚本仍不在 `npm test` 与 CI 内 —— `scripts/_verify_store.mjs`、`mcp-integration.test.mjs`、`mcp-repl.mjs`、`test-web-auth.mjs`、`test-web-basepath.mjs`、`perf-bench.mjs`、`e2e/*`。删改路由、命令或 MCP 工具后要手工过一遍这些脚本。
+- **盲区的静态守卫**：`src/lib/__tests__/scripts-manifest.test.ts` 在 `npm test` 里跑，不 spawn 进程 —— 它查 `package.json` 里每个 `node scripts/…` 目标存在、`scripts/` 下每个 `.mjs`/`.cjs` 能从某个 npm script 顺着相对 import 走到（或登记进 `STANDALONE` 并写明为什么不给入口）、脚本里的 `/api/…` 字面量都是 `web-routes.ts` 的前缀。`scripts/dump-openapi.mjs` 已由 `npm run lint:openapi` 的 `--out target/openapi.yaml` 覆盖（`check` 会跑它），故不在盲区清单里。
 
 ### 源码级哨兵（读源码文本，不是行为）
 
@@ -155,6 +160,7 @@ MCP 专用端口必须是**独立的容器端口**（同一容器端口只能承
 ## 不变量
 
 - `npm run check` 必须本地全绿；CI 的 web/rust 两闸跑的就是同一批检查。
+- 动了任何 Rust 代码，推之前跑 `npm run check:all`（`check` 不含 `cargo test`，只靠它会漏掉 Rust 断言）。
 - 前端测试文件只能叫 `*.test.ts` 且位于 `src/` 下，否则 `npm test` 不会收。
 - Rust 新测试优先用兄弟文件 + `#[path]`，与本仓库主流一致。
 - 三个必需检查的 display name 不得随意改。

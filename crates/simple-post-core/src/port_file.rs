@@ -47,11 +47,12 @@ fn base_dir() -> Result<PathBuf, AppError> {
     })
 }
 
-/// 公开：daemon 写数据的目录（也是 `mcp.port` 文件所在处）。公开是因为 daemon 与
-/// GUI 需要在读它的一方将要打开的同一路径下打开 SQLite 池。
+/// 公开：daemon 写数据的目录（`store.db` 落在它下面；`mcp.port` 落在它下面的
+/// `simple-post/` 子目录）。公开是因为 daemon 与 GUI 需要在读它的一方将要打开的同一
+/// 路径下打开 SQLite 池。
 ///
 /// 设置 `SIMPLE_POST_DATA_DIR` 时原样返回它；否则回退 `dirs::data_dir()`，**不带**
-/// `com.simple-post` 段——需要该后缀的调用方自己 `.join("com.simple-post")`。
+/// 任何应用段——`port_file_path_at` 在其下自己 `.join("simple-post")`，再放 `mcp.port`。
 pub fn data_dir() -> Result<PathBuf, AppError> {
     base_dir()
 }

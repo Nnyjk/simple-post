@@ -9,18 +9,17 @@ use simple_post_core::domain::{BodyMode, HttpMethod, ResourceNodeType};
 use simple_post_core::error::AppError;
 use simple_post_core::permissions::Permission;
 // =========================================================================
-// 2. The "接口参数" build surface must be complete and writable
+// 2. 「接口参数」的写入面必须完整可写
 // =========================================================================
 
-/// The acceptance test for the whole point of the change: one agent can
-/// build an endpoint's complete request configuration through
-/// `endpoint_create` + `endpoint_update`, and every field is verified in
-/// the stored row rather than in the echoed response.
+/// 这条用例覆盖整次改动要解决的事：一个 agent 用 `endpoint_create` +
+/// `endpoint_update` 就能把端点完整的请求配置搭起来，并且每一项都在**存储行**里核对，
+/// 不是核对回显。
 #[tokio::test]
 async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
     let (st, id) = fixture();
 
-    // --- via endpoint_update: the full configuration surface ---------
+    // --- 经 endpoint_update 写入完整配置面 ---------
     tool_endpoint_update(
         &st,
         serde_json::json!({
@@ -61,10 +60,9 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
     assert_eq!(d.method, HttpMethod::Post);
     assert_eq!(d.url, "/api/users/{id}");
 
-    // Query 参数。这些行没写 `id`/`enabled`，正是 agent 会写出的形状 ——
-    // two fields `KeyValue` requires and an agent has no reason to know
-    // 转换器补铸前者、把后者默认成
-    // `true`（存成禁用的请求头就是一个永远发不出去的请求头）。
+    // Query 参数：这两行没写 `id` / `enabled`，正是 agent 会写出的形状。
+    // 转换器给前者补铸一个行 id、把后者默认成 `true`；存成禁用的请求头，
+    // 就是一个永远发不出去的请求头。
     assert_eq!(d.params.len(), 2);
     let page = d.params.iter().find(|kv| kv.key == "page").expect("page");
     assert_eq!(page.value, "1");
@@ -83,13 +81,12 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
         .iter()
         .any(|kv| kv.key == "Content-Type" && kv.value == "application/json"));
 
-    // Body：mode、content、schema 三项都要写，不能只前两个。
-    // `endpoint_create` could reach.
+    // Body：mode、content、schema 三项都写进去了，不是只有前两项。
     assert_eq!(d.body.mode, BodyMode::Json);
     assert_eq!(d.body.content, "{\"name\":\"ada\"}");
     assert_eq!(d.body.schema.as_deref(), Some("{\"name\":\"string\"}"));
 
-    // Auth: type + config.
+    // Auth：类型与配置。
     assert_eq!(
         d.auth.kind,
         simple_post_core::domain::AuthType::Bearer,
@@ -99,13 +96,13 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
 
     assert_eq!(d.tags, vec!["smoke".to_string(), "user".to_string()]);
 
-    // The endpoint's own base URL.
+    // 端点自己的 base URL。
     assert_eq!(
         d.base_url_override.as_deref(),
         Some("https://staging.example.com")
     );
 
-    // docs / notes 在旧 patch 构造器里被写死成 `None`，于是没有任何工具写得动它们。
+    // docs 与 notes 走 patch 写入：patch 里不带这两个字段，它们的值就一直是空。
 
     assert_eq!(d.docs.as_deref(), Some("Creates a user."));
     assert_eq!(d.notes.as_deref(), Some("checked by hand"));
@@ -114,9 +111,8 @@ async fn an_agent_can_build_every_piece_of_endpoint_request_config() {
     assert_eq!(n.name, "create user");
 }
 
-/// `Some(None)` must keep meaning "clear" for the `double_option`
-/// fields. A patch that could only ever *set* would make
-/// `base_url_override` / `notes` one-way.
+/// `double_option` 字段上 `Some(None)` 必须仍表示「清空」：patch 若只能设值，
+/// `base_url_override` / `notes` 就变成单向可写。
 #[tokio::test]
 async fn an_explicit_null_clears_a_nullable_patch_field() {
     let (st, id) = fixture();
@@ -152,8 +148,7 @@ async fn an_explicit_null_clears_a_nullable_patch_field() {
     assert_eq!(d.notes, None);
 }
 
-/// An omitted field must still mean "leave unchanged" — the property
-/// that made `.ok()` so tempting in the first place.
+/// 字段缺席必须仍表示「保持原值」；正是这条性质让解析失败时的 `.ok()` 看起来无害。
 #[tokio::test]
 async fn an_omitted_field_is_left_unchanged() {
     let (st, id) = fixture();
@@ -172,9 +167,8 @@ async fn an_omitted_field_is_left_unchanged() {
     assert!(d.params.is_empty(), "params must be untouched");
 }
 
-/// A round-trip through `endpoint_get` must preserve the client-supplied
-/// `id`, so an agent can read-modify-write a header list without
-/// orphaning rows.
+/// 经 `endpoint_get` 往返后，客户端给的 `id` 必须原样保留：agent 才能对表头列表做
+/// 读—改—写，而不让旧行变成孤儿。
 #[tokio::test]
 async fn a_supplied_row_id_is_preserved() {
     let (st, id) = fixture();
@@ -193,12 +187,11 @@ async fn a_supplied_row_id_is_preserved() {
 }
 
 // =========================================================================
-// 4. Endpoint id uniqueness
+// 4. 端点 id 唯一性
 // =========================================================================
 
-/// `endpoint_create` minted `format!("ep_{now}")` from a **millisecond**
-/// clock, so two creates in the same millisecond collided on the primary
-/// key. Minting a batch back-to-back is the reliable way to hit it.
+/// `endpoint_create` 的 id 取自毫秒时钟，连发两个创建就是撞主键最可靠的复现方式；
+/// 本用例要求两次创建拿到不同的 id，且都保留 `ep_` 前缀。
 #[tokio::test]
 async fn two_endpoint_creates_in_the_same_millisecond_get_distinct_ids() {
     let st = state();
@@ -315,10 +308,9 @@ async fn endpoint_update_can_patch_a_body_into_multipart() {
     assert_eq!(detail_of(&st, &id).body.mode, BodyMode::Multipart);
 }
 
-/// `endpoint_create` previously hardcoded `base_url_override`,
-/// `body_schema`, `docs`, `notes` and `description` to their defaults,
-/// so building a fully configured endpoint took a mandatory second
-/// `endpoint_update` call.
+/// `endpoint_create` 必须一次收下 `base_url_override`、`body_schema`、`docs`、
+/// `notes` 与 `description`：这些字段若只有 `endpoint_update` 能写，搭一个配好的端点
+/// 就得以两次调用收尾。
 #[tokio::test]
 async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
     let st = state();
@@ -381,9 +373,8 @@ async fn endpoint_create_accepts_the_full_configuration_in_one_call() {
     );
 }
 
-/// A typo'd `auth_config` must not be swallowed into an all-default
-/// `AuthConfig` via `unwrap_or_default()`, or the create succeeds and
-/// describes an endpoint whose bearer token does not exist.
+/// `auth_config` 写错时不许被 `unwrap_or_default()` 吞成全默认的 `AuthConfig`：
+/// 那样创建照样成功，却描述出一个 bearer token 根本不存在的端点。
 #[tokio::test]
 async fn endpoint_create_rejects_a_malformed_auth_config() {
     let st = state();

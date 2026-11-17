@@ -2,12 +2,11 @@
 
 use super::input::{parse_body_mode, AUTH_TYPE_VALUES, BODY_MODE_VALUES};
 // =========================================================================
-// 6. The JSON Schema is self-describing
+// 6. JSON Schema 必须自描述
 // =========================================================================
 
-/// An agent reading only `tools/list` cannot guess a nested shape. The
-/// schema is the contract it has, so the item shape and the enum values
-/// have to be in it.
+/// agent 只读 `tools/list`，猜不出嵌套形状；schema 就是它手里的契约，条目形状与
+/// 枚举取值都必须写进去。
 #[test]
 fn endpoint_create_schema_documents_the_item_shape_and_enums() {
     let descriptor = crate::mcp::tool_table()
@@ -17,10 +16,9 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
         .expect("endpoint_create must be registered");
     let props = &descriptor["properties"];
 
-    // `params` / `headers` share one `$defs` entry, so the item shape is
-    // 完整写出再被引用。关键在于它**可解析** —— 跟着 `$ref` 走的 agent 必须落到
-    // 一个真实携带字段名的定义上，而不是一个光秃秃的
-    // `{"type":"object"}`。
+    // `params` 与 `headers` 共用同一个 `$defs` 条目，条目形状写在那里被引用。
+    // 关键在于它**可解析**：跟着 `$ref` 走的 agent 必须落到一个真实携带字段名的
+    // 定义上，而不是一个光秃秃的 `{"type":"object"}`。
     let params_ref = props["params"]["items"]["$ref"]
         .as_str()
         .expect("params items must $ref the keyValue definition");
@@ -44,8 +42,7 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
         serde_json::json!(["key", "value"])
     );
 
-    // 枚举必须与解析器实际接受的完全一致。
-    // derived from `domain::BodyMode` / `domain::AuthType`.
+    // 枚举必须与 `domain::BodyMode` / `domain::AuthType` 导出的取值完全一致。
     assert_eq!(
         props["body_mode"]["enum"],
         serde_json::json!(BODY_MODE_VALUES)
@@ -66,10 +63,9 @@ fn endpoint_create_schema_documents_the_item_shape_and_enums() {
     }
 }
 
-/// An agent writing `body_content` has nothing but the enum and the prose.
-/// A mode the prose never names is one it will fill with the wrong shape —
-/// and a mode whose content is parsed rather than sent (multipart) then
-/// yields zero parts with no error, so nothing downstream complains.
+/// agent 写 `body_content` 时只有枚举与这段说明可依。说明里没点名的模式，它会填错
+/// 形状；而 multipart 这种内容被解析而不是原样发出去的模式，填错就得到零个部件且
+/// 不报错，下游也没有任何地方会抱怨。
 #[test]
 fn every_advertised_body_mode_is_described_in_prose() {
     let descriptor = crate::mcp::tool_table()
@@ -97,9 +93,8 @@ fn every_advertised_body_mode_is_described_in_prose() {
     }
 }
 
-/// `endpoint_update` is the tool an agent uses to build interface
-/// parameters, so its patch object must not be an untyped `{"type":
-/// "object"}` either.
+/// `endpoint_update` 是 agent 搭接口参数用的工具，它的 patch 对象同样不许是
+/// 无类型的 `{"type":"object"}`。
 #[test]
 fn endpoint_update_schema_documents_every_patchable_field() {
     let descriptor = crate::mcp::tool_table()
@@ -109,8 +104,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
         .expect("endpoint_update must be registered");
     let patch_props = &descriptor["properties"]["patch"]["properties"];
 
-    // Every field `tool_endpoint_update` accepts, and no field it does
-    // —— 两份列表一旦漂移，schema 就是在撒谎。
+    // 与 `tool_endpoint_update` 接受的字段一一对应：两份列表一旦漂移，schema 就在撒谎。
     let mut documented: Vec<&str> = patch_props
         .as_object()
         .expect("patch properties")
@@ -187,8 +181,7 @@ fn endpoint_update_schema_documents_every_patchable_field() {
         );
     }
     assert_eq!(oauth2["additionalProperties"], false);
-    // 可空字段必须写明 `null` 表示清空 ——
-    // three-state meaning is invisible on the wire otherwise.
+    // 可空字段必须写明 `null` 表示清空，否则线上看不出「未动 / 清空 / 设值」三档。
     assert_eq!(patch_props["base_url_override"]["type"][1], "null");
     // `responses` 同样三档：缺席 = 不动、`null` = 清空整份、数组 = 整体替换。
     assert_eq!(patch_props["responses"]["type"][0], "array");

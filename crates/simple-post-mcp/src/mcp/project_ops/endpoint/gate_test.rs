@@ -10,27 +10,19 @@ use simple_post_core::domain::ResourceNodeType;
 use simple_post_core::error::AppError;
 use simple_post_core::permissions::Permission;
 // =========================================================================
-// 3. Gate B — no fabricated "global" project id
+// 3. Gate B —— 归属项目由 root_id_of 解析，不接受编造的 global
 // =========================================================================
 
-/// A scope named as a `collection_id` must be resolved to its owning
-/// project.
+/// 以 `collection_id` 给出的范围必须解析到它所属的项目。
 ///
-/// The old code gated against `project_id.unwrap_or("global")`, so a
-/// collection-scoped list consulted a project that does not exist and
-/// fell back to the default permission — the owner's real row was never
-/// read. `Permission`'s floor is `Read` and `endpoint_list` requires
-/// `Read`, so a Read-tier tool can never be *denied*; the observable
-/// proof that the owner is resolved is therefore made through a tool
-/// that shares the same resolution path but sits above the floor —
-/// `endpoint_update`, which requires `Full`.
+/// `Permission` 的下限是 `Read`，`endpoint_list` 也只要求 `Read`，所以读档工具永远不会
+/// 被拒——归属是否解析成功在它身上看不出来。本用例因此改走 `endpoint_update`：它与
+/// `endpoint_list` 共用 `root_id_of` 这条解析路径，但要求 `Full`，高于下限。
 ///
-/// With the owner's row at the default (`ReadCall`, the value a project
-/// that was never configured has), a collection-scoped update must be
-/// denied. It passes only when the handler resolves `c_b → p_b` and
-/// reads `p_b`'s actual permission. Against the old fabricated `"global"`
-/// the lookup would also have hit the same default, so this test
-/// pins the resolution by *also* granting `p_b` and re-asserting.
+/// `p_b` 未配置权限时取默认的 `ReadCall`，低于 `Full`，故对 `c_b` 范围的更新必须被拒。
+/// 只有 handler 把 `c_b` 解析到 `p_b`、读 `p_b` 的真实权限行，这次拒绝才成立；若 handler
+/// 拿一个编造的 global 去过门，读到的是同一个默认值，所以断言不止于拒绝——随后给 `p_b`
+/// 授予 `Full` 并重试写入，写入成功才证明 handler 读的是 `p_b` 这一行。
 #[tokio::test]
 async fn a_collection_scope_resolves_to_its_owning_project() {
     let st = state();
@@ -49,13 +41,12 @@ async fn a_collection_scope_resolves_to_its_owning_project() {
             &node("p_b", "e_b", ResourceNodeType::Endpoint, Some("c_b")),
             Some(&bare_detail("e_b")),
         )?;
-        // Neither project is configured, so both sit at the default
-        // `ReadCall` — below the `Full` an update needs.
+        // 两个项目都没配置权限，都取默认的 `ReadCall`，低于更新需要的 `Full`。
         Ok(())
     })
     .unwrap();
 
-    // Denied: the owner p_b has not granted Full.
+    // 归属方 p_b 没有授予 `Full`，这次更新必须被拒。
     let denied = tool_endpoint_update(
         &st,
         serde_json::json!({ "endpoint_id": "e_b", "patch": { "url": "/y" } }),
@@ -66,9 +57,8 @@ async fn a_collection_scope_resolves_to_its_owning_project() {
         "an endpoint in an unconfigured project must not be writable; got {denied:?}"
     );
 
-    // Granted: `p_b` — the endpoint's REAL owner — is now Full. This is
-    // 这条断言会在 handler 拿一个编造的 id 过门时失败：
-    // 给真正的归属方授权将毫无作用。
+    // 给真正的归属方 `p_b` 授予 `Full` 之后更新必须成功：handler 若拿编造的 id
+    // 过门，这次授权对它的查找毫无作用，于是这里会失败。
     simple_post_core::db::with_tx(&st.pool, |c| permissions::set(c, "p_b", Permission::Full))
         .unwrap();
     tool_endpoint_update(
@@ -87,9 +77,8 @@ async fn a_collection_scope_resolves_to_its_owning_project() {
     );
 }
 
-/// `module_id` is the other node-shaped scope, and it reaches the same
-/// `root_id_of` resolution. Proven the same way, through a tool above
-/// the permission floor.
+/// `module_id` 是另一种节点型范围，走同一条 `root_id_of` 解析。验证方式相同：
+/// 用高于权限下限的 `endpoint_update` 观察，再用 `Read` 档的 list / search 收尾。
 #[tokio::test]
 async fn a_module_scope_resolves_to_its_owning_project() {
     let st = state();
@@ -137,10 +126,9 @@ async fn a_module_scope_resolves_to_its_owning_project() {
     );
 }
 
-/// An unscoped read spans every project, so the per-project gate has no
-/// single project to consult. Rather than fabricating an id — the exact
-/// bug being fixed — the call is refused with a message that tells the
-/// caller what to pass.
+/// 不带范围的读会跨所有项目，逐项目的那道门找不到可查的单一项目。`endpoint_list`
+/// 与 `endpoint_search` 此时拒绝调用，并在消息里告诉调用方要传什么范围，而不是编造
+/// 一个项目 id 去过门。
 #[tokio::test]
 async fn an_unscoped_read_is_refused_rather_than_gated_against_a_fake_project() {
     let st = state();
@@ -158,10 +146,8 @@ async fn an_unscoped_read_is_refused_rather_than_gated_against_a_fake_project() 
     }
 }
 
-/// `endpoint_search` previously gated under the tool name
-/// `"endpoint_list"`, so the permission decision was looked up against
-/// another tool's row — a substitution that is invisible until the two
-/// names' required tiers diverge.
+/// `endpoint_search` 必须按自己的工具名查权限行：若它借用 `endpoint_list` 的名字，
+/// 权限判定读的就是另一个工具的行，两个名字要求的档位一分叉就会露出来。
 #[tokio::test]
 async fn endpoint_search_gates_under_its_own_tool_name() {
     let st = state();
@@ -171,9 +157,8 @@ async fn endpoint_search_gates_under_its_own_tool_name() {
         Ok(())
     })
     .unwrap();
-    // 项目停在默认 `ReadCall`。搜索要求 Read，
-    // so it passes; what matters is that the *search* row was consulted,
-    // which is asserted structurally below.
+    // 项目停在默认 `ReadCall`，默认档满足搜索要求的 `Read`，所以这次搜索会通过；
+    // 真正要验的是权限判定读的是 `endpoint_search` 自己那一行，下面的断言按结构固定它。
     assert_eq!(
         simple_post_core::permissions::required_permission("endpoint_search"),
         Permission::Read

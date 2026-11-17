@@ -8,7 +8,7 @@ use crate::domain::{
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-// fixture
+// 夹具
 
 fn node(id: &str, kind: ResourceNodeType, root: &str, parent: Option<&str>) -> ResourceNode {
     ResourceNode {
@@ -515,7 +515,7 @@ fn list_by_endpoint_returns_that_endpoint_and_nothing_else() {
         "a sibling endpoint's rows must never appear in this list — the \
          renderer keys the map by `endpointId` without re-checking"
     );
-    // Newest first, which is what lets the strip drop its own reverse.
+    // 最新的在前：历史条读到就直接用，不必自己再反转一次。
     assert_eq!(rows[0].response.body, "boom");
     assert_eq!(rows[1].response.body, "one");
 }
@@ -525,11 +525,9 @@ fn an_endpoint_with_no_history_reads_as_empty_not_as_everybody_elses() {
     let (pool, _dir) = fresh_pool();
     db::with_tx(&pool, |c| append(c, "e1", &resp(200, "one"), None)).unwrap();
 
-    // The read this function replaced was project-scoped and returned
-    // every endpoint's rows. Asking an empty endpoint for its history is
-    // the single most common request the strip makes — every endpoint
-    // the user opens for the first time — so "empty" has to be a real
-    // answer rather than a fallback to something bigger.
+    // 按项目范围读历史会带回每个端点的行，对空端点就答不出「没有」。而「空端点没有
+    // 历史」是历史条最常见的一次请求——用户第一次打开任何一个端点——所以空必须是
+    // 真实答案，不能退到更大的结果集上。
     assert!(db::with_conn(&pool, |c| list_by_endpoint(c, "e2"))
         .unwrap()
         .is_empty());
@@ -539,19 +537,16 @@ fn an_endpoint_with_no_history_reads_as_empty_not_as_everybody_elses() {
 }
 
 // -------------------------------------------------------------------------
-// The draft-endpoint contract
+// 草稿端点的约定
 // -------------------------------------------------------------------------
 
 #[test]
 fn an_endpoint_that_is_not_a_row_cannot_be_stored() {
     let (pool, _dir) = fresh_pool();
-    // A renderer-only draft endpoint — `draft:<uid>` per
-    // `DRAFT_ID_PREFIX` in `src/stores/store-types.ts`. It has no
-    // `nodes` row, so the foreign key is what stops the write. This
-    // test pins that the database rejects it, because the renderer
-    // side of the rule ("skip persistence for drafts") is a silent
-    // branch: if it ever regresses, this is the error the user would
-    // otherwise only see as a vanished history row.
+    // 只存在于渲染进程的草稿端点，id 按 `src/stores/store-types.ts` 的
+    // `DRAFT_ID_PREFIX` 写成 `draft:<uid>`。它没有 `nodes` 行，所以外键拦住写入。
+    // 渲染侧那条「草稿不落库」是静默分支；本用例让数据库这一侧拒一次，那条分支哪天
+    // 退化，用户才不会只看到一条消失的历史行。
     let err = db::with_tx(&pool, |c| append(c, "draft:abc123", &resp(200, "hi"), None));
     assert!(
         err.is_err(),

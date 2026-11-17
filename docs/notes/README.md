@@ -26,6 +26,7 @@
 | [10-glossary.md](10-glossary.md) | 中英术语表 + 关键不变量速查卡 | 所有人（卡住时回查） |
 | [11-handover-open-issues.md](11-handover-open-issues.md) | 已核实的文档/实现矛盾总表 + 接手核对顺序 + 欠账候选 | 刚接手、要决定先查什么的人 |
 | [12-update-channel.md](12-update-channel.md) | 版本信息的来源与两条链路、`latest.json` 与 release 正文的分工、`apply` 的两道门、容器与源码的更新动作、离线降级 | 改更新流程、发版、排查「没有更新提示」的人 |
+| [13-code-review-2026-11.md](13-code-review-2026-11.md) | 2026-11 全量评审：已修 21 条按维度列出改动位置与测试、10 条残留的原因与下次入口、一条方法论教训、下轮五个起点 | 想知道这轮改了什么、下一轮先攻哪里的人 |
 
 ## 三条阅读路径
 

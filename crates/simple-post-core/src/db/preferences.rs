@@ -91,11 +91,11 @@ pub mod keys {
     /// `"ui.theme"` → string。允许："light" | "dark" | "system"。
     pub const THEME: &str = "ui.theme";
 
-    /// `"mcp.auto_start"` → bool。**默认 `false`。**
+    /// `"mcp.auto_start"` → bool。**默认 `true`。**
     ///
-    /// 守护进程是长驻后台进程，默认启动会让桌面应用的 Tauri `.setup()` 每次启动都拉起一个，
-    /// 背后没有任何用户意图。默认停止使「MCP 服务器在跑」成为显式 opt-in；该键由桌面与
-    /// `serve-web` 两种形态共用，故一个开关覆盖两者。
+    /// 偏好行缺失时 `mcp_auto_start()` 返回 `true`：MCP 进程是唯一的对外 MCP 端点，
+    /// 默认关掉就没有端点可连。用户显式写 `false` 之后，`.setup()` 与 `serve-web` 的
+    /// 启动路径都不再拉起守护进程；该键由桌面与 `serve-web` 两种形态共用。
     pub const MCP_AUTO_START: &str = "mcp.auto_start";
 
     /// `"mcp.policy"` → string。**默认 `read_only`。** 用户在设置面板里选定的全局 MCP 能力档位
@@ -132,11 +132,11 @@ pub mod keys {
 /// 而每一行都在用户的 `store.db` 里占着地方。
 pub const RESPONSE_HISTORY_KEEP_MAX: i64 = 500;
 
-/// 读 `mcp.auto_start` 偏好，取文档化的默认值（`true`）。桌面 `.setup()` 与 Web 服务端的
-/// 启动路径都用它，故两种形态对同一行达成一致。
+/// 读 `mcp.auto_start` 偏好，行缺失时返回 `true`。桌面 `.setup()` 与 Web 服务端的启动
+/// 路径都调它，故两种形态对同一行达成一致。
 ///
-/// 默认**开**：MCP 进程是 MCP 唯一的对外端点（主端口不再挂 `/mcp`），关掉它就没有任何
-/// MCP 端点可连。容器重启后 MCP 静默消失的坑正是这样来的——偏好行缺失时读出 `false`。
+/// 默认**开**：MCP 进程是唯一的对外 MCP 端点（主端口不挂 `/mcp`），关掉它就没有端点
+/// 可连。用户写 `false` 之后，启动与否才由用户意图决定。
 pub fn mcp_auto_start(conn: &mut Connection) -> Result<bool, AppError> {
     let raw: Option<bool> = get(conn, keys::MCP_AUTO_START)?;
     Ok(raw.unwrap_or(true))

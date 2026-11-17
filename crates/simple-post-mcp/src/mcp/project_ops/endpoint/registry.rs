@@ -1,4 +1,4 @@
-//! 8 个 `endpoint_*` 工具的 dispatch 登记与 JSON Schema。
+//! 9 个 `endpoint_*` 工具的 dispatch 登记与 JSON Schema。
 //!
 //! 登记表与 handler 分开放：handler 可以按读写职责各自搬走，而 `tools/list` 的顺序
 //! 与 schema 字面量一行都不动。
