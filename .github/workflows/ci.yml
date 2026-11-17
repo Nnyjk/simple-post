@@ -109,7 +109,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          cache-target: true
+          cache-targets: true
 
       - name: OpenAPI lint (Redocly, over a freshly generated document)
         run: npm run lint:openapi
@@ -137,8 +137,10 @@ jobs:
         with:
           # Registry deps alone are the coarse half: `fmt`, `clippy` and
           # `test` are three separate cargo invocations that would each
-          # cold-compile the same target/ from nothing.
-          cache-target: true
+          # cold-compile the same target/ from nothing. `cache-targets`
+          # (plural — `cache-target` is not an input of this action and was
+          # silently ignored) is what makes the cache cover `target/`.
+          cache-targets: true
 
       - name: cargo fmt (check only)
         run: cargo fmt --all --check
