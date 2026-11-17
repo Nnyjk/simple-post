@@ -124,9 +124,9 @@ jobs:
             Desktop API client with built-in MCP for AI collaboration.
 
             ### Install
-            - **macOS**: open the `.dmg`, drag `Simple Post.app` to Applications
-            - **Ubuntu**: `sudo dpkg -i simple-post_*_amd64.deb` or `chmod +x Simple_Post_*_amd64.AppImage && ./Simple_Post_*_amd64.AppImage`
-            - **Windows**: run the `Simple_Post_*_x64-setup.exe` NSIS installer
+            - **macOS**: open the `.dmg`, drag `simple-post.app` to Applications
+            - **Ubuntu**: `sudo dpkg -i simple-post_*_amd64.deb` or `chmod +x simple-post_*_amd64.AppImage && ./simple-post_*_amd64.AppImage`
+            - **Windows**: run the `simple-post_*_x64-setup.exe` NSIS installer
 
             ### Container image
             A matching `linux/amd64` image is published
