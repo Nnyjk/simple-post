@@ -165,6 +165,36 @@ fn a_patch_carrying_only_the_resource_identity_is_still_empty() {
     assert!(n.is_empty(), "身份字段不构成一次写入");
     let d: EndpointDetailPatch = serde_json::from_value(json!({ "nodeId": "n1" })).unwrap();
     assert!(d.is_empty(), "nodeId 不构成一次写入");
+
+    // 同理，每个可读资源整份 PATCH 回来时都会带上自己的身份字段：项目、环境、动态变量、
+    // 两段脚本各自认得它们，但不写它们。
+    let p: ProjectPatch = serde_json::from_value(json!({
+        "id": "p1",
+        "createdAt": 11,
+        "updatedAt": 22
+    }))
+    .unwrap();
+    assert!(p.is_empty(), "ProjectPatch 的身份字段不构成一次写入");
+    let e: EnvironmentPatch = serde_json::from_value(json!({
+        "id": "e1",
+        "projectId": "p1",
+        "createdAt": 33
+    }))
+    .unwrap();
+    assert!(e.is_empty(), "EnvironmentPatch 的身份字段不构成一次写入");
+    let v: DynamicVariablePatch = serde_json::from_value(json!({
+        "id": "d1",
+        "sourceEndpointName": "站点清单",
+        "createdAt": 1,
+        "updatedAt": 2
+    }))
+    .unwrap();
+    assert!(
+        v.is_empty(),
+        "DynamicVariablePatch 的身份字段不构成一次写入（sourceEndpointName 是联查出来的显示名，不是列）"
+    );
+    let s: NodeScriptsPatch = serde_json::from_value(json!({ "nodeId": "n1" })).unwrap();
+    assert!(s.is_empty(), "NodeScriptsPatch 的 nodeId 不构成一次写入");
 }
 
 #[test]
@@ -173,6 +203,10 @@ fn a_default_patch_is_empty() {
     assert!(EndpointDetailPatch::default().is_empty());
     assert!(ProjectPatch::default().is_empty());
     assert!(EnvironmentPatch::default().is_empty());
+    // 后两个的每个字段原先都缺 `skip_serializing_if`，默认值会序列化成 `"x": null`，
+    // 于是 `is_empty` 对一份什么都没改的补丁恒为 false——本次一并补上。
+    assert!(DynamicVariablePatch::default().is_empty());
+    assert!(NodeScriptsPatch::default().is_empty());
 }
 
 #[test]
@@ -303,6 +337,34 @@ fn every_patch_field_alone_makes_the_patch_non_empty() {
         ..Default::default()
     };
     assert!(!e.is_empty(), "EnvironmentPatch::name");
+
+    let v = DynamicVariablePatch {
+        project_id: Some("p1".into()),
+        ..Default::default()
+    };
+    assert!(!v.is_empty(), "DynamicVariablePatch::project_id");
+    let v = DynamicVariablePatch {
+        ttl_seconds: Some(5),
+        ..Default::default()
+    };
+    assert!(!v.is_empty(), "DynamicVariablePatch::ttl_seconds");
+    let v = DynamicVariablePatch {
+        source_endpoint_id: Some(None),
+        ..Default::default()
+    };
+    assert!(
+        !v.is_empty(),
+        "DynamicVariablePatch::source_endpoint_id（清空数据源是一次写入）"
+    );
+
+    let s = NodeScriptsPatch {
+        test_script: Some(None),
+        ..Default::default()
+    };
+    assert!(
+        !s.is_empty(),
+        "NodeScriptsPatch::test_script（删掉脚本是一次写入）"
+    );
 }
 
 #[test]
@@ -328,4 +390,115 @@ fn clearing_a_nullable_column_is_not_an_empty_patch() {
         serde_json::to_value(&d).unwrap()["baseUrlOverride"],
         serde_json::Value::Null
     );
+}
+
+#[test]
+fn every_patch_rejects_a_misspelled_field() {
+    // 写错键名必须是一个错误，而不是「这次不改」：静默丢掉未知键的话，调用方拿到 200 与
+    // 一行没动的库，而它以为改成功了。前两个类型原先就带 `deny_unknown_fields`，后四个是
+    // 本次补上的——它们各自有一条 REST 路由直接反序列化补丁。
+    let err = serde_json::from_value::<ProjectPatch>(json!({ "nmae": "x" })).unwrap_err();
+    assert!(err.to_string().contains("nmae"), "got {err}");
+
+    let err = serde_json::from_value::<EnvironmentPatch>(json!({
+        "moduleBaseUrl": { "m1": { "url": "https://air" } }
+    }))
+    .unwrap_err();
+    assert!(err.to_string().contains("moduleBaseUrl"), "got {err}");
+
+    let err =
+        serde_json::from_value::<DynamicVariablePatch>(json!({ "ttlSecond": 5 })).unwrap_err();
+    assert!(err.to_string().contains("ttlSecond"), "got {err}");
+
+    let err = serde_json::from_value::<NodeScriptsPatch>(json!({ "preRequestScriptt": "x" }))
+        .unwrap_err();
+    assert!(err.to_string().contains("preRequestScriptt"), "got {err}");
+}
+
+#[test]
+fn a_project_environment_variable_and_scripts_read_back_can_be_written_back_as_a_patch() {
+    // 同一个「取回再改再写回」契约的另外四个读者：把一个 GET 回来的对象整份 PATCH 回去，
+    // 一个键都不该被判成未知。它们各自认得自己的身份字段（见上一条测试），且这些字段
+    // 不构成一次写入。
+    let project = Project {
+        id: "p1".into(),
+        name: "站点".into(),
+        description: Some("说明".into()),
+        color: "#0f0".into(),
+        created_at: 11,
+        updated_at: 22,
+    };
+    let patch: ProjectPatch =
+        serde_json::from_value(serde_json::to_value(&project).unwrap()).unwrap();
+    assert_eq!(patch.name.as_deref(), Some("站点"));
+    assert_eq!(patch.color.as_deref(), Some("#0f0"));
+    assert_eq!(patch.id.as_deref(), Some("p1"), "id 被认得");
+    assert!(!patch.is_empty(), "name 是真实的写入目标");
+
+    let env = Environment {
+        id: "e1".into(),
+        project_id: "p1".into(),
+        name: "prod".into(),
+        module_base_urls: HashMap::from([(
+            "m1".to_string(),
+            ModuleBaseUrl {
+                url: "https://air".into(),
+                rewrite: None,
+            },
+        )]),
+        variables: HashMap::from([("token".to_string(), "t".to_string())]),
+        disabled_variables: vec!["token".into()],
+        created_at: 33,
+    };
+    let patch: EnvironmentPatch =
+        serde_json::from_value(serde_json::to_value(&env).unwrap()).unwrap();
+    assert_eq!(patch.name.as_deref(), Some("prod"));
+    assert_eq!(patch.disabled_variables, Some(vec!["token".to_string()]));
+    assert_eq!(
+        patch.module_base_urls.as_ref().unwrap()["m1"].url,
+        "https://air"
+    );
+    assert!(!patch.is_empty(), "name 是真实的写入目标");
+
+    let variable = DynamicVariable {
+        id: "d1".into(),
+        project_id: Some("p1".into()),
+        name: "sns".into(),
+        description: None,
+        source_endpoint_id: Some("n9".into()),
+        source_endpoint_name: Some("站点清单".into()),
+        source_inline_json: None,
+        source_environment_id: None,
+        extract_path: "$.data".into(),
+        transform_script: None,
+        value_mode: ValueMode::Auto,
+        ttl_seconds: 60,
+        stale_fallback: true,
+        enabled: true,
+        sort_order: 0,
+        created_at: 44,
+        updated_at: 55,
+    };
+    let patch: DynamicVariablePatch =
+        serde_json::from_value(serde_json::to_value(&variable).unwrap()).unwrap();
+    assert_eq!(patch.name.as_deref(), Some("sns"));
+    assert_eq!(patch.extract_path.as_deref(), Some("$.data"));
+    assert_eq!(patch.source_endpoint_name.as_deref(), Some("站点清单"));
+    assert_eq!(patch.value_mode, Some(ValueMode::Auto));
+    assert!(!patch.is_empty(), "extractPath 是真实的写入目标");
+
+    let scripts = NodeScripts {
+        node_id: "n1".into(),
+        pre_request_script: Some("pm.test('x', () => {});".into()),
+        test_script: None,
+    };
+    let patch: NodeScriptsPatch =
+        serde_json::from_value(serde_json::to_value(&scripts).unwrap()).unwrap();
+    assert_eq!(
+        patch.pre_request_script,
+        Some(Some("pm.test('x', () => {});".into()))
+    );
+    assert_eq!(patch.test_script, None, "缺席的脚本仍是「不动」");
+    assert_eq!(patch.node_id.as_deref(), Some("n1"));
+    assert!(!patch.is_empty(), "preRequestScript 是真实的写入目标");
 }

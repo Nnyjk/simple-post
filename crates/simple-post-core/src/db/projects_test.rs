@@ -268,18 +268,32 @@ fn create_with_defaults_seeds_the_environment_and_the_module_in_one_transaction(
 }
 
 #[test]
-fn update_ignores_a_payload_that_carries_a_retired_key() {
-    // `ProjectPatch` 不收陌生键，故旧客户端载荷里的 `baseUrl` 不会变成一条
-    // `no such column` 的数据库故障——它只是被丢掉。
+fn a_payload_carrying_a_retired_key_is_rejected_before_it_reaches_the_database() {
+    // `ProjectPatch` 带 `deny_unknown_fields`，故旧客户端载荷里的 `baseUrl` 在**反序列化**处
+    // 就被拒，永远走不到数据库：既不会变成一条 `no such column` 的数据库故障，也不会被静默
+    // 丢掉、让调用方以为那份载荷生效了。
+    let err = serde_json::from_str::<ProjectPatch>(r#"{"baseUrl": "http://ignored"}"#).unwrap_err();
+    assert!(err.to_string().contains("baseUrl"), "got {err}");
+}
+
+#[test]
+fn a_rename_patch_still_applies() {
     let pool = fresh_pool();
     let patched = db::with_tx(&pool, |c| {
         update(
             c,
             "p_demo",
-            serde_json::from_str(r#"{"baseUrl": "http://ignored"}"#).unwrap(),
+            ProjectPatch {
+                name: Some("Demo API 2".into()),
+                ..Default::default()
+            },
         )
     })
     .unwrap();
     assert_eq!(patched.id, "p_demo");
-    assert_eq!(patched.name, "Demo API");
+    assert_eq!(patched.name, "Demo API 2");
+    assert!(
+        patched.updated_at >= 2000,
+        "updated_at should bump on patch"
+    );
 }

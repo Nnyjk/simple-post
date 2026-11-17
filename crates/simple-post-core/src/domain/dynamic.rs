@@ -97,10 +97,12 @@ pub struct DynamicVariable {
 ///
 /// 三态语义：缺席 = 不动，`null` = 清除，有值 = 写入。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DynamicVariablePatch {
     /// 归属项目。有值 = 移到那个项目（也用来认领未归属的定义）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,15 +116,33 @@ pub struct DynamicVariablePatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_environment_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extract_path: Option<String>,
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transform_script: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_mode: Option<ValueMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_seconds: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_fallback: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort_order: Option<i64>,
+    /// 定义自己的身份字段：`id` / `sourceEndpointName` / `createdAt` / `updatedAt`。
+    ///
+    /// `sourceEndpointName` 是联查出来的显示名，不是列；`createdAt` / `updatedAt` 由写路径
+    /// 自己盖。理由同 `domain::resource::ResourceNodePatch`：认得整行才谈得上「取回再改再写回」。
+    #[serde(default, skip_serializing)]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub source_endpoint_name: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub created_at: Option<i64>,
+    #[serde(default, skip_serializing)]
+    pub updated_at: Option<i64>,
 }
 
 impl DynamicVariablePatch {

@@ -388,3 +388,92 @@ fn build_auth_handles_each_kind() {
     let unknown = super::endpoint::__test_build_auth(Some("magic"), None);
     assert!(unknown.is_err());
 }
+
+/// 字段名写错必须是能指名的错误，且一行都不许落库。
+#[tokio::test]
+async fn project_update_rejects_a_misspelled_key_and_leaves_the_row_alone() {
+    use simple_post_core::db::{permissions, projects};
+    use simple_post_core::domain::{Permission, Project};
+
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(
+            c,
+            &Project {
+                id: "p_patch".into(),
+                name: "orig".into(),
+                description: Some("keep".into()),
+                color: "#101010".into(),
+                created_at: 0,
+                updated_at: 0,
+            },
+        )?;
+        permissions::set(c, "p_patch", Permission::Full)
+    })
+    .unwrap();
+
+    let res = project::tool_project_update(
+        &st,
+        serde_json::json!({ "project_id": "p_patch", "patch": { "nmae": "renamed" } }),
+    )
+    .await;
+
+    match &res {
+        Err(AppError::Validation(msg)) => assert!(
+            msg.contains("nmae"),
+            "错误文案必须点出写错的键，实际是：{msg}"
+        ),
+        other => panic!("拼错的键必须被拒绝，而不是静默成功：{other:?}"),
+    }
+
+    let stored =
+        simple_post_core::db::with_conn(&st.pool, |c| projects::get(c, "p_patch")).unwrap();
+    assert_eq!(stored.name, "orig");
+    assert_eq!(stored.description.as_deref(), Some("keep"));
+    assert_eq!(stored.color, "#101010");
+}
+
+/// `project_get` 的结果改一个字段后整行传回：成功，未点名的字段保持原值。
+#[tokio::test]
+async fn project_update_accepts_a_row_that_was_read_back() {
+    use simple_post_core::db::{permissions, projects};
+    use simple_post_core::domain::{Permission, Project};
+
+    let st = state();
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        projects::create(
+            c,
+            &Project {
+                id: "p_round".into(),
+                name: "orig".into(),
+                description: Some("keep".into()),
+                color: "#202020".into(),
+                created_at: 0,
+                updated_at: 0,
+            },
+        )?;
+        permissions::set(c, "p_round", Permission::Full)
+    })
+    .unwrap();
+
+    let before =
+        simple_post_core::db::with_conn(&st.pool, |c| projects::get(c, "p_round")).unwrap();
+    let mut row = serde_json::to_value(&before).unwrap();
+    row["name"] = serde_json::json!("renamed");
+
+    project::tool_project_update(
+        &st,
+        serde_json::json!({ "project_id": "p_round", "patch": row }),
+    )
+    .await
+    .expect("整行回传必须成功");
+
+    let after = simple_post_core::db::with_conn(&st.pool, |c| projects::get(c, "p_round")).unwrap();
+    assert_eq!(after.name, "renamed");
+    assert_eq!(after.id, before.id);
+    assert_eq!(
+        after.description, before.description,
+        "未点名的字段必须保持原值"
+    );
+    assert_eq!(after.color, before.color, "未点名的字段必须保持原值");
+}

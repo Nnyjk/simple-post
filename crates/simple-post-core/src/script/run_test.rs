@@ -275,3 +275,95 @@ fn the_env_writes_of_the_whole_chain_are_collected() {
     let keys: Vec<&str> = outcome.env_writes.iter().map(|w| w.key.as_str()).collect();
     assert_eq!(keys, vec!["a", "b"]);
 }
+
+#[test]
+fn a_script_whose_state_cannot_be_snapshotted_is_not_run_at_all() {
+    // 拍不下快照就没有回滚的基准。此时**这段脚本一次都不执行**：照跑的话它写下的变量会留在
+    // 沙箱里，链上的下一段读到，并可能随它自己的写入落库——正是回滚要挡的那条路。
+    //
+    // 第一段把钩子删掉（它自己拍快照时钩子还在，故正常执行），第二段因此拍不下快照。
+    let units = vec![
+        unit(
+            "A",
+            Some("pm.environment.set('kept', 'yes'); delete globalThis.__SP_SNAPSHOT_STATE__;"),
+            None,
+        ),
+        unit(
+            "B",
+            Some("console.log('B ran'); pm.environment.set('b', '1');"),
+            None,
+        ),
+    ];
+
+    let mut request = request();
+    let outcome = run_phase(
+        ScriptPhase::Pre,
+        &units,
+        &mut request,
+        None,
+        &EnvSnapshot::default(),
+        &limits(),
+    );
+
+    // A 成功的写入照常被记下。
+    let keys: Vec<&str> = outcome.env_writes.iter().map(|w| w.key.as_str()).collect();
+    assert_eq!(keys, vec!["kept"]);
+    // B 什么都没做：没有日志、没有写入，失败指向它。
+    assert!(outcome.logs.is_empty(), "B 不该被执行：{:?}", outcome.logs);
+    assert_eq!(outcome.errors.len(), 1);
+    assert_eq!(outcome.errors[0].source, "B");
+    assert_eq!(outcome.errors[0].kind, ScriptErrorKind::Runtime);
+    assert!(
+        outcome.errors[0].message.contains("cannot snapshot"),
+        "got {}",
+        outcome.errors[0].message
+    );
+}
+
+#[test]
+fn a_failed_rollback_is_reported_in_the_logs_and_keeps_the_original_failure() {
+    // 回滚失败不能 panic（release 是 `panic = "abort"`，脚本路径上的 panic 会带走整个宿主），
+    // 也不能静默——那会让「沙箱里还留着失败脚本的值」无从发现。脚本自己的失败照原样返回。
+    let units = vec![unit(
+        "A",
+        Some(
+            "pm.environment.set('leaked', 'yes');\n\
+             delete globalThis.__SP_SET_REQUEST__;\n\
+             delete globalThis.__SP_RESTORE_STATE__;\n\
+             throw new Error('boom');",
+        ),
+        None,
+    )];
+
+    let mut request = request();
+    let outcome = run_phase(
+        ScriptPhase::Pre,
+        &units,
+        &mut request,
+        None,
+        &EnvSnapshot::default(),
+        &limits(),
+    );
+
+    assert_eq!(outcome.errors.len(), 1);
+    assert_eq!(outcome.errors[0].kind, ScriptErrorKind::Runtime);
+    assert!(
+        outcome.errors[0].message.contains("boom"),
+        "原始失败要原样保留，got {}",
+        outcome.errors[0].message
+    );
+    assert!(
+        outcome.env_writes.is_empty(),
+        "失败脚本的写入不该被记成产出"
+    );
+
+    let rollback: Vec<&str> = outcome
+        .logs
+        .iter()
+        .filter(|l| l.level == "error")
+        .map(|l| l.message.as_str())
+        .collect();
+    assert_eq!(rollback.len(), 2, "got {rollback:?}");
+    assert!(rollback[0].contains("request"), "got {}", rollback[0]);
+    assert!(rollback[1].contains("environment"), "got {}", rollback[1]);
+}

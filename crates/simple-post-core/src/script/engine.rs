@@ -163,7 +163,25 @@ impl Sandbox {
     /// 不会出现。
     pub fn run(&self, script: &str, request_before: &ScriptRequest) -> ScriptRun {
         // 先拍下环境与请求作用域变量：失败时要连同请求一起换回去。
-        let _ = self.snapshot_state();
+        //
+        // 拍不下来就没有回滚的基准。此时**一次都不执行这段脚本**：照跑的话，它写下的变量
+        // 会留在沙箱里，链上的下一段脚本读到并可能随它自己的写入落库——正是回滚要挡的那条路。
+        // 宁可这一段什么都没做，也不能让「回滚不了」降级成「照跑」。
+        if let Err(failure) = self.snapshot_state() {
+            return ScriptRun {
+                effects: ScriptEffects {
+                    request: request_before.clone(),
+                    ..ScriptEffects::default()
+                },
+                failure: Some(ScriptFailure {
+                    kind: failure.kind,
+                    message: format!(
+                        "the script was not run: cannot snapshot the environment for rollback ({})",
+                        failure.message
+                    ),
+                }),
+            };
+        }
         let outcome = self.eval(script);
         let drained = self.drain();
 
@@ -183,10 +201,17 @@ impl Sandbox {
                 // 失败脚本的副作用不落库：变量写入丢弃，诊断（日志 / 断言）保留。
                 effects.env_writes.clear();
                 // 引擎里的请求状态也要换回来，否则下一段脚本会看到失败脚本的改动。
-                let _ = self.restore_request(request_before);
+                // 换不回来不能 panic（release 是 `panic = "abort"`，脚本路径上的 panic 会
+                // 带走整个宿主），也不能静默：记一条 error 日志，让「沙箱里还留着失败脚本
+                // 的值」这件事在脚本日志里看得见。脚本本身的失败照原样返回。
+                if let Err(rollback) = self.restore_request(request_before) {
+                    effects.logs.push(rollback_log("request", &rollback));
+                }
                 // 环境与请求作用域变量同样要换回来：链上的脚本共用一个沙箱，
                 // 失败脚本留下的值会被下一段脚本读到，并可能随它的写入落库。
-                let _ = self.restore_state();
+                if let Err(rollback) = self.restore_state() {
+                    effects.logs.push(rollback_log("environment", &rollback));
+                }
                 Some(failure)
             }
         };
@@ -340,6 +365,20 @@ impl Sandbox {
         };
         // 读不出来意味着引擎状态不对；当作「这段脚本没产出」比 panic 好。
         serde_json::from_str::<Drained>(&text).unwrap_or_default()
+    }
+}
+
+/// 一次回滚失败的诊断日志。
+///
+/// 回滚失败不是脚本的错，故它不改写脚本的失败分类；但「沙箱里还留着失败脚本的值」必须
+/// 能被人看见，否则下一段脚本读到什么就全凭运气。
+fn rollback_log(target: &str, failure: &ScriptFailure) -> ScriptLog {
+    ScriptLog {
+        level: "error".to_string(),
+        message: format!(
+            "rollback failed: the sandbox still holds the failed script's {target} ({})",
+            failure.message
+        ),
     }
 }
 
