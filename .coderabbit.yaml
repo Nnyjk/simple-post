@@ -6,9 +6,9 @@
 # https://docs.coderabbit.ai/configuration/path-instructions
 reviews:
   path_filters:
-    - "!docs/**"
-    - "!AGENTS.md"
-    - "!**/*.md"
-    - "!Cargo.lock"
-    - "!package-lock.json"
-    - "!.scratch/**"
+    - '!docs/**'
+    - '!AGENTS.md'
+    - '!**/*.md'
+    - '!Cargo.lock'
+    - '!package-lock.json'
+    - '!.scratch/**'
