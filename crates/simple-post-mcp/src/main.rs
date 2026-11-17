@@ -75,7 +75,8 @@ async fn main() -> ExitCode {
     init_tracing(&cli.log_level);
 
     let cap_override = match cli.capability.as_deref() {
-        None => CapabilityOverride::FullAccess, // 本地不过滤，交后端裁决
+        // 不按档位收窄；能力表里没有的名字仍会被过滤掉（fail closed）。
+        None => CapabilityOverride::FullAccess,
         Some(s) => match CapabilityOverride::from_str(s) {
             Ok(c) => c,
             Err(e) => {

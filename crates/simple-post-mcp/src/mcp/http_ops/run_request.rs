@@ -39,13 +39,28 @@ pub(super) async fn tool_api_run_request(
 
     // `project_id` 的来源：环境属于项目，故给了环境 id 就知道项目。没给环境就没有
     // 项目归属，base URL 那一格也无从读。
+    //
+    // 点名的环境已被删掉时按「没有项目归属」处理，与下面 `resolve_env` 的降级一致；
+    // 其余查询失败照原样传播——把它吞成 `None` 会让下面那道按项目的门整道跳过。
     let project_id: Option<String> = match a.env_id.as_deref() {
-        Some(env_id) => simple_post_core::db::with_conn(&state.pool, |c| {
+        Some(env_id) => match simple_post_core::db::with_conn(&state.pool, |c| {
             simple_post_core::db::environments::lookup_project_id(c, env_id)
-        })
-        .ok(),
+        }) {
+            Ok(pid) => Some(pid),
+            Err(AppError::NotFound(_)) => None,
+            Err(e) => return Err(e),
+        },
         None => None,
     };
+
+    // 按项目的权限门。环境里可能有密钥，故项目被授予 `read` 时这一次请求不许发到外网；
+    // 同族的 `api_call_endpoint`、`api_run_collection` 也在这里过门。要求的档位由
+    // `simple_post_core::permissions::required_permission` 给出（`api_run_request` 是
+    // `ReadCall`）。
+    if let Some(pid) = project_id.as_deref() {
+        crate::mcp::check_permission(&state.pool, pid, "api_run_request").await?;
+    }
+    // 没有 `env_id` 的临时请求没有项目归属，只有 `dispatch` 里的全局档位在管。
 
     // 环境：给了 id 就用它。**没给就没有环境**，与 `api_call_endpoint` 不同 ——
     // 后者的项目归属来自端点所属的项目，故省略环境名时还能回落到那个项目的默认
