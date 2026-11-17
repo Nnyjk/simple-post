@@ -35,15 +35,25 @@ tokio = { version = "1", features = [
 ] }
 # Pinned to 0.12 on purpose — do not "unify" this to 0.13 to match Tauri.
 #
-# `Cargo.lock` does list reqwest 0.13.5, but Tauri 2.11.6 declares reqwest only
-# under a mobile-target cfg, so 0.13 is never compiled on Windows and costs
-# nothing. The two are not actually building duplicate HTTP stacks here.
+# `Cargo.lock` lists reqwest 0.13.5 and **it does get compiled on desktop**: the
+# dependency comes from `tauri-plugin-updater 2.14.1`, whose `[dependencies.reqwest]`
+# is unconditional (not optional, not target-gated) — verified in the crate's own
+# manifest, not inferred from the lock alone. Tauri 2.12.5 (the version actually in
+# `Cargo.lock`) declares reqwest only for android / non-macOS Apple targets, so that
+# one really is absent on Windows; the plugin is the one that puts 0.13 in the build.
+# So the desktop binary does carry two HTTP/TLS stacks after all — the cost is real,
+# it is just cheaper than giving up the bundled roots below.
 #
 # The blocker is TLS: reqwest 0.13 removed every webpki-roots feature, so
 # `rustls` and `rustls-no-provider` both force `rustls-platform-verifier`
 # (the OS cert store) as the only root source. As an API client that hits
 # arbitrary HTTPS endpoints, we want the deterministic, bundled Mozilla root
 # set that 0.12's `rustls-tls` provides. 0.13 also needs rust-version >= 1.85.
+# `http2` is a deliberate capability bit, not an accident: reqwest 0.12 gates
+# `h2` + `hyper/http2` behind it (see `reqwest/src/async_impl/client.rs`, the
+# `#[cfg(feature = "http2")]` blocks around the builder's http2 knobs). Under
+# `default-features = false` HTTP/2 is otherwise off, so dropping this line would
+# silently downgrade every HTTP/2-only endpoint we talk to. Keep it.
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "gzip",
@@ -55,6 +65,11 @@ reqwest = { version = "0.12", default-features = false, features = [
 clap = { version = "4", features = ["derive", "env"] }
 
 # SQLite (bundled, native-tls free)
+# Stays on 0.31 because `r2d2_sqlite 0.24` (next line) pins `rusqlite ^0.31`; the
+# two move together, and upgrading rusqlite means bumping r2d2_sqlite to the
+# matching release plus a `libsqlite3-sys` change — a separate, testable change,
+# not a drive-by edit. `bundled` is required: Docker and Windows must not depend
+# on a system libsqlite3.
 rusqlite = { version = "0.31", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.24"
@@ -75,12 +90,22 @@ serde_json_path = "0.7"
 # no-op，内存上限会静默失效，而那正是本项目对沙箱的硬承诺。
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 
-# 配置哈希（oauth2 token 缓存的主键）。已经因 Tauri 侧 `soup3` 的传递依赖进了
-# Cargo.lock 并在 Windows 上参与编译，故这里不会多拉一个新 crate。
-sha2 = "0.11"
+# 配置哈希（oauth2 token 缓存的主键）。用 0.10，不是因为「树里已经有」这句话本身，
+# 而是因为那份已经在树里的是 **0.10.9**：`oauth2 5.0.0`（本 crate 的直接依赖）与
+# `tauri-codegen` / `wry` 都用 0.10，故 `sha2 = "0.10"` 与它们共用同一个编译单元。
+# 反过来写 `"0.11"` 会新增一个 semver 主版本，`Cargo.lock` 里就会同时出现 0.10.9 与
+# 0.11.x 两条 —— 那才是「多拉一个新 crate」。API 面在 `Digest` / `Sha256` 上两边一致，
+# 唯一使用点是 `crates/simple-post-core/src/oauth2/store.rs`。
+sha2 = "0.10"
 
 # base64（`Authorization: Basic` 用）。已由 `reqwest` / `hyper-util` 传递依赖进来
 # 并参与编译，所以显式加依赖的边际成本是零 —— 不再手写两份编码器。
+#
+# 这条「边际成本为零」**只在桌面构建成立**：传递那一份是 0.22.1，而这里要的 0.23.1
+# 只因为 `plist` / `serde_with` / `tauri-codegen` / `tauri-plugin-updater` / `reqwest 0.13`
+# 才在同一棵树里。容器/headless 构建（`simple-post-server`）不编译那些，于是 0.23 是
+# 纯新增的一份（`Cargo.lock` 里 0.21.7 / 0.22.1 / 0.23.1 三条并存）。若哪天要收这一份，
+# 改 `"0.22"` 即可与 `reqwest 0.12` / `hyper-util` / `oauth2` 对齐。
 base64 = "0.23"
 
 # OAuth2 的 grant / refresh 请求构造（`grant_type`、client 凭据放置、PKCE、
@@ -99,7 +124,12 @@ dirs = "7"
 
 # HTTP server (serve-web)
 axum = "0.8"
-tower-http = { version = "0.7", features = ["fs", "trace"] }
+# 0.6, not 0.7: `reqwest` 0.12 already compiles `tower-http 0.6.11` for its own
+# middleware, so staying on 0.6 shares that build instead of adding a second copy.
+# The only API we touch is `tower_http::services::ServeDir` (same path in both
+# lines — `tower-http-0.6.11/src/services/mod.rs`), so nothing else moves.
+# `trace` was never enabled by any code: no `TraceLayer` anywhere, only `ServeDir`.
+tower-http = { version = "0.6", features = ["fs"] }
 mime_guess = "2"
 
 # Dev profile: keep `target/debug` from ballooning to tens of GB.
