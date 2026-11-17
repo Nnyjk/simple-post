@@ -149,6 +149,41 @@ jobs:
       - name: cargo test --workspace
         run: cargo test --workspace
 
+      # 两条 `serve-web` 集成脚本要**真的**起一个进程、打 HTTP：`test:web:auth`
+      # 验 bearer 两阶段，`test:web:basepath` 验反代前缀 `/sp`。它们长期只在本地
+      # 手工跑，代价是鉴权与 base path 这两块唯一的行为网没有被门禁守着。
+      #
+      # 放在这个 job 的原因：`cargo test --workspace` 已经把这棵依赖树编过了，
+      # 这里 `cargo build -p simple-post` 只剩链接；web job 要从零编 tauri 全家。
+      # 代价是本 job 多一次 npm ci + vite build —— 两条脚本断言的是真实 SPA 的
+      # 资源 MIME 与字节数（`assertSpaAssetsLoad`），没有 `dist/` 它们只会红。
+      - name: 'Setup Node (engines: >=20 <23; the web scripts only need node)'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend deps (dev deps included — vite/tsc live there)
+        run: npm ci --include=dev
+
+      - name: Build the SPA shell (dist/, asserted by test:web:auth)
+        run: npm run build
+
+      - name: Build the simple-post binary (serve-web under test)
+        run: cargo build -p simple-post
+
+      - name: Web auth integration (real serve-web, real HTTP, port 4173)
+        env:
+          # 脚本自己会改成 mkdtemp 目录；这里再兜一层，免得任何一步忘了设就与
+          # 别的 step 抢同一个 store.db。
+          SIMPLE_POST_DATA_DIR: ${{ runner.temp }}/sp-web-auth
+        run: npm run test:web:auth
+
+      - name: Web base-path integration (real serve-web behind /sp)
+        env:
+          SIMPLE_POST_DATA_DIR: ${{ runner.temp }}/sp-web-basepath
+        run: npm run test:web:basepath
+
   docker:
     # Container image + a smoke test against a *running* container.
     # Gated on change scope: a README-only PR does not change a single
