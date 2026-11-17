@@ -106,6 +106,20 @@ Rust 侧：`cargo build --release`（桌面应用与全部子命令）、`cargo 
 
 桌面应用用 `npm run tauri:dev` 开发运行，用 `npm run tauri:build` 产出 NSIS / dmg / deb 安装包。
 
+### 安装发布包
+
+GitHub Release 上的安装包按 `simple-post` 命名，安装路径同样不带空格：
+
+| 平台 | 安装包 | 装到哪里 |
+| --- | --- | --- |
+| Windows | `simple-post_<版本>_x64-setup.exe` | `%LOCALAPPDATA%\simple-post` |
+| Ubuntu | `simple-post_<版本>_amd64.deb` / `simple-post_<版本>_amd64.AppImage` | 由 dpkg 或 AppImage 自身决定 |
+| macOS | `.dmg`，拖 `simple-post.app` 进 Applications | `/Applications` |
+
+Windows 的卸载项与开始菜单快捷方式也用 `simple-post` 这个名字。
+
+从旧名字装过来的机器要**手动卸载旧版一次**：旧版在 `%LOCALAPPDATA%\Simple Post`，新版装进 `%LOCALAPPDATA%\simple-post`，两个目录与两个卸载项会并存，安装器不会代你迁移。卸载旧版后，后续升级恢复静默安装。
+
 MCP 桥接二进制 `simple-post-mcp` 只以编译产物的形式发布：GitHub Release 上只有桌面安装包，crates.io 上也没有这个 crate，所以要在仓库根目录执行 `cargo install --path crates/simple-post-mcp`。没有 npm 包。
 
 容器：

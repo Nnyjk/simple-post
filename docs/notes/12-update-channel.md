@@ -2,7 +2,7 @@
 
 - 适用范围：版本提示从哪来、桌面端怎么自动装、「立即执行更新」在什么部署里成立、离线时界面显示什么。
 - 权威来源：`crates/simple-post-core/src/update/{version,check}.rs`、`crates/simple-post-server/src/update_api.rs`、`crates/simple-post-server/src/web_api/routes/update.rs`、`src-tauri/src/commands/update.rs`、`src-tauri/tauri.conf.json`、`.github/workflows/release.yml`、`src/stores/update-slice.ts`、`src/features/update/`、`docker/Dockerfile`、`docker/*.yml`。
-- 最后核对：2026-11-16（v0.1.34）
+- 最后核对：2026-11-17（v0.1.35）
 - 前置阅读：01-overview.md、02-architecture.md（双传输不变量）、09-engineering-process.md（发布与部署）
 
 ## 结论
@@ -62,10 +62,14 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 - 参数由 `updater.rs::updater_parameters` 拼：`install_mode.nsis_args()` + `/UPDATE` + `/R`（`restart_after_install` 默认 true）。`src/config.rs` 里 `nsis_args` 是 `passive → /P`、`quiet → /S`、`basicUi → 无`。
 - `tauri-bundler-2.10.4/src/bundle/windows/nsis/installer.nsi`：`/UPDATE` 让 `PageLeaveReinstall` 直接 `Goto reinst_done`，**不调用旧版卸载器**——「卸载 → 安装」两步只在用户手动双击安装包（没有 `/UPDATE`）时出现。页面表里除 `PageReinstall` 外每一项都带 `SkipIfPassive`，而 `/S` 是 NSIS 内建静默，所有页面都不显示；`.onInstSuccess` 在静默下读 `/R`，用 `RunAsUser "$INSTDIR\<main binary>"` 重启。
 - 权限：`bundle.windows.nsis` 没有配置，bundler 默认 `currentUser` → `RequestExecutionLevel user`，静默安装不弹 UAC。
+- 安装位置与所有可见名字都取自 `productName`：`installer.nsi` 的 `currentUser` 分支写 `StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"`，`Name` / 卸载项 `DisplayName` / 开始菜单与桌面快捷方式 `${PRODUCTNAME}.lnk` 也用它；安装包文件名由 `nsis/mod.rs` 的 `format!("{}_{}_{}-setup", settings.product_name(), version, arch)` 拼出，deb / AppImage / macOS 同理。故 `productName` 是 `simple-post`，窗口标题与 release 标题才是 `Simple Post`。
+- 安装器不接收 `/D=<目录>`：`updater.rs::updater_parameters` 只拼 `/S /UPDATE /R`，升级时 `$INSTDIR` 仍按当前 `productName` 的默认值算，不读旧版的安装记录。
 - 会重新引入页面的配置项：`license`（许可证页）、`installMode: "both"`（安装模式选择页）、`displayLanguageSelector` 且 `languages` 多于一种（启动时的语言对话框）、自定义 `template` / `installerHooks`。四个都不要加。
 - `relaunch()` 在 Windows 上是兜底不到的死代码：安装器一启动，应用进程已经 `exit(0)`；重启由 NSIS 的参数完成。
 
 代价：静默安装失败时没有任何安装器界面可看——表现是「装完没回来」。下载进度仍在应用内（`updateProgress` / `updatePhase`），安装阶段只有一句「正在安装…」。
+
+改名的一次性代价：`productName` 从 `Simple Post` 改成 `simple-post` 后，`currentUser` 安装的 `$INSTDIR` 与卸载项（`${UNINSTKEY}` 以 `${PRODUCTNAME}` 为末段）都变成新的一项，而 `/UPDATE` 只跳过卸载页、不迁移目录。从旧版升上来的机器会同时留着 `%LOCALAPPDATA%\Simple Post` 与新版目录；这一版需要用户手动卸载旧版一次，之后 `quiet` 恢复静默。数据目录 `%APPDATA%\simple-post` 不变，库文件不受影响。
 
 ## 当前版本、比较规则与自动检查
 
