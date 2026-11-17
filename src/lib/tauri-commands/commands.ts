@@ -111,7 +111,7 @@ export const COMMANDS = {
    * 会留下旧进程，"重启"又收养了同一个进程。
    */
   mcpDaemonRestart: 'mcp_daemon_restart',
-  /** 持久化的 `mcp.auto_start` 偏好。默认 `false`；Tauri 与 `serve-web` 两种形态都认这一行。 */
+  /** 持久化的 `mcp.auto_start` 偏好。默认 `true`（行缺失时后端读出 true）；Tauri 与 `serve-web` 两种形态都认这一行。 */
   mcpAutoStartGet: 'mcp_auto_start_get',
   mcpAutoStartSet: 'mcp_auto_start_set',
 

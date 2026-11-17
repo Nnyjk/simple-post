@@ -9,6 +9,9 @@
  */
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 import { COMMANDS, TauriCommand, invokeCmd, readApiBase } from '../tauri-commands';
 import { calls, installFetchMock, resetCalls, restoreFetchMock } from './tauri-commands-fetch-mock';
@@ -44,8 +47,27 @@ describe('invokeCmd (web shape) — error path', () => {
     // 经 `unknown` 强转，因为没有任何公开字面量代表未映射的命令（否则 TypeScript
     // 会在调用点就报错）。
     const fakeCmd = 'this_command_does_not_exist' as unknown as TauriCommand;
-    await assert.rejects(() => invokeCmd(fakeCmd), /src\/lib\/tauri-commands\.ts/);
-    await assert.rejects(() => invokeCmd(fakeCmd), /src-tauri\/src\/web_api\//);
+    await assert.rejects(() => invokeCmd(fakeCmd), /src\/lib\/tauri-commands\/web-routes\.ts/);
+    await assert.rejects(
+      () => invokeCmd(fakeCmd),
+      /crates\/simple-post-server\/src\/web_api\/routes\//,
+    );
+    // 文案点到的每一段路径都要在仓库里真实存在：谁搬了目录，文案与这条断言一起红，
+    // 而不是文案悄悄指一个不存在的目录。
+    const message = await invokeCmd(fakeCmd).then(
+      () => assert.fail('expected invokeCmd to reject'),
+      (err: Error) => err.message,
+    );
+    const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+    const fragments = message.match(/(?:src|src-tauri|crates|scripts|docs)\/[\w./-]*[\w]/g) ?? [];
+    assert.ok(
+      fragments.length >= 2,
+      `expected the message to name at least two paths, got ${fragments.join(', ') || 'none'}`,
+    );
+    for (const fragment of fragments) {
+      const target = path.resolve(repoRoot, fragment.replace(/\/+$/, ''));
+      assert.ok(existsSync(target), `${fragment} is named in the message but does not exist`);
+    }
     // `fetch` 必须**没有**被调用——这次抛错要在任何网络动作之前短路，否则来自 404 的
     // 错误会误导人。
     assert.equal(calls.length, 0);

@@ -56,7 +56,7 @@ async function webInvokeCmd<T>(
   const spec = WEB_ROUTES[cmd];
   if (!spec) {
     throw new Error(
-      `Command "${cmd}" is not exposed in the web shape. Add a REST entry in src/lib/tauri-commands.ts + src-tauri/src/web_api/ to enable it.`,
+      `Command "${cmd}" is not exposed in the web shape. Add a REST entry in src/lib/tauri-commands/web-routes.ts + crates/simple-post-server/src/web_api/routes/ to enable it.`,
     );
   }
   // `mcpAutoStartGet` 保持 GET 后挑一行的形状，因为该端点返回整张 preferences map

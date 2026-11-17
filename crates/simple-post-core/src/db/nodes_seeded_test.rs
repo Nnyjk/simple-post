@@ -1,10 +1,8 @@
 // -------------------------------------------------------------------------
-// The seeded tree. `fixtures.json` ships exactly one nested collection
-// — `c_order_refund`, a child of `c_order_crud`, with an endpoint of
-// its own — so both halves of the recursive walk (collection ->
-// collection, collection -> endpoint) have a real example. Everything
-// else in this file builds its own tree, because the write path needs
-// isolating; these read the data a real user would see.
+// 播种数据的那棵树。`fixtures.json` 只带一个嵌套集合——`c_order_refund`，它是
+// `c_order_crud` 的孩子、自己带一个端点——递归遍历的两段边（集合→集合、集合→端点）
+// 因此各有一个真实样本。本文件其余用例自建树，因为写路径需要隔离；读播种数据的
+// 那三条只读真实用户会看到的内容。
 // -------------------------------------------------------------------------
 
 use super::nodes_fixtures::*;
@@ -39,9 +37,8 @@ fn every_seeded_endpoint_has_a_readable_detail_row() {
 
 #[test]
 fn seeded_nested_collection_sits_one_level_below_its_parent() {
-    // The two depths must be distinguishable: the nested collection is
-    // a child of the collection, never of the module it still names in
-    // the fixture file.
+    // 两层深度必须分得开：嵌套集合是那个集合的孩子，不是 `fixtures.json` 里
+    // 它所在模块的孩子。
     let (pool, _dir) = seeded_pool();
 
     let nested = db::with_conn(&pool, |c| list_children(c, "c_order_crud", None)).unwrap();
@@ -78,9 +75,8 @@ fn seeded_nested_collection_sits_one_level_below_its_parent() {
 
 #[test]
 fn seeded_nested_collection_and_its_endpoint_inherit_the_ancestors_root_id() {
-    // `root_id` is derived, and a future `root_id` trigger would have
-    // to re-derive it for the nested rows too. If any of the three
-    // disagree the subtree stops being one indexed read.
+    // `root_id` 是派生列：嵌套行也必须派生到同一个值，三行里只要有一个不一致，
+    // 这棵子树就不再是一次索引读能取到的整体。
     let (pool, _dir) = seeded_pool();
 
     let ancestor = db::with_conn(&pool, |c| root_id_of(c, "c_order_crud")).unwrap();
@@ -96,10 +92,9 @@ fn seeded_nested_collection_and_its_endpoint_inherit_the_ancestors_root_id() {
 
 #[test]
 fn seeded_nested_collection_is_not_top_level() {
-    // `list_by_root` is flat on purpose, so it must still return the
-    // nested row — and the `parent_id IS NULL` query the move path
-    // uses must not. A nested collection that leaked into the top-level
-    // run would be re-rooted on the next sibling renumber.
+    // `list_by_root` 刻意做成扁平读取，嵌套行照样返回；移动路径那句
+    // `parent_id IS NULL` 的查询则不许返回它：否则下次兄弟重排会把嵌套集合的根
+    // 改到别处。
     let (pool, _dir) = seeded_pool();
 
     let flat = db::with_conn(&pool, |c| list_by_root(c, "p_demo")).unwrap();
@@ -108,7 +103,7 @@ fn seeded_nested_collection_is_not_top_level() {
         "the flat project read must still carry the nested row"
     );
 
-    // Same shape as `move_many`'s top-level query, which is private.
+    // 与 `move_many` 里那句私有顶层查询同一个形状。
     let top_level: Vec<String> = db::with_conn(&pool, |c| {
         let mut stmt = c.prepare(
             "SELECT id FROM nodes WHERE root_id = ?1 AND parent_id IS NULL \
@@ -129,8 +124,7 @@ fn seeded_nested_collection_is_not_top_level() {
 
 #[test]
 fn seeded_recursive_walk_reaches_through_both_kinds_of_parent_edge() {
-    // The recursion has to cross a collection->collection edge and then
-    // a collection->endpoint one from a single root.
+    // 递归必须从同一个根穿过集合→集合、集合→端点两种父边。
     let (pool, _dir) = seeded_pool();
 
     let mut ids = db::with_conn(&pool, |c| subtree_ids(c, &["m_order".to_string()])).unwrap();
@@ -145,7 +139,7 @@ fn seeded_recursive_walk_reaches_through_both_kinds_of_parent_edge() {
             "e_order_create",
             "e_order_list",
             "e_refund_create",
-            // The root itself is part of the closure.
+            // 根本身也在闭包里。
             "m_order",
         ]
     );
@@ -153,9 +147,8 @@ fn seeded_recursive_walk_reaches_through_both_kinds_of_parent_edge() {
 
 #[test]
 fn deleting_a_seeded_parent_takes_the_nested_collection_and_its_endpoint() {
-    // Cascading is the schema's job (`parent_id` -> `nodes`, `node_id`
-    // -> `endpoint_details`); the assertion is that the seeded nested
-    // shape is actually covered by it, detail row included.
+    // 级联删除由 schema 的外键完成（`parent_id` → `nodes`，`node_id` →
+    // `endpoint_details`）；这里断言播种出来的嵌套形状确实被覆盖，配置行也算在内。
     let (pool, _dir) = seeded_pool();
 
     db::with_tx(&pool, |c| delete(c, "c_order_crud")).unwrap();

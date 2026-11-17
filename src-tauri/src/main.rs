@@ -30,7 +30,7 @@ enum Cmd {
     Mcp {
         /// Transport: `http` (default) or `stdio`. `stdio` here routes
         /// through the same HTTP server; use the separate
-        /// `simple-post-mcp-proxy` binary for stdio mode.
+        /// `simple-post-mcp` binary for real stdio mode.
         #[arg(long, default_value = "http")]
         transport: String,
 

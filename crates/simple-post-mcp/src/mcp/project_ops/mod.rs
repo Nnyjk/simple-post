@@ -52,8 +52,8 @@ pub(super) struct ModuleIdArgs {
 // =========================================================================
 
 /// 拼好的 dispatch 表，顺序固定：projects (5) → modules (5) → collections (5)
-/// → endpoints (8) → spec (1)。各子模块的 `register()` 只推自己那一段，
-/// 这里拼起来，调用方拿到含全部 24 条的单个 `table()`。
+/// → endpoints (9) → spec (1)。各子模块的 `register()` 只推自己那一段，
+/// 这里拼起来，调用方拿到含全部 25 条的单个 `table()`。
 pub(crate) fn table() -> Vec<ToolEntry> {
     let mut v = Vec::with_capacity(32);
 
@@ -66,7 +66,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
     // ---- collections (5) ----
     collection::register(&mut v);
 
-    // ---- endpoints (8) ----
+    // ---- endpoints (9) ----
     endpoint::register(&mut v);
 
     // ---- spec (1) ----

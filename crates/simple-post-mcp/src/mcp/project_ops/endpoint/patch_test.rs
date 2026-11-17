@@ -10,10 +10,9 @@ use simple_post_core::error::AppError;
 // 1. 畸形 patch 必须是响亮的错误，而不是静默的无操作
 // =========================================================================
 
-/// The headline defect. `{"k":"a","v":"1"}` is what an LLM writes first;
-/// under the old `.ok()` reader it deserialised to `None`, the patch
-/// serialised to an empty object, and the call returned a **success**
-/// with nothing written.
+/// `{"k":"a","v":"1"}` 是 agent 最先写出的形状。`params` 解析失败时若把错误
+/// `.ok()` 掉，得到的就是 `None`，patch 序列化成空对象，调用返回**成功**而一个
+/// 字段都没写。本用例要求这种载荷拿到 `Validation`。
 #[tokio::test]
 async fn endpoint_update_rejects_malformed_params_instead_of_ignoring_it() {
     let (st, id) = fixture();
@@ -30,21 +29,19 @@ async fn endpoint_update_rejects_malformed_params_instead_of_ignoring_it() {
         panic!("expected a Validation error, got {res:?}");
     };
     // 消息必须点名字段，否则 agent 分不清十五个 patch 字段里错的是哪一个。
-    // of its fifteen patch fields was wrong.
     assert!(
         msg.contains("'params'"),
         "error must name the offending field, got: {msg}"
     );
     // ……并且说清期望形状，这样不必去读工具的 Rust 源码就能重试。
-    // reading the tool's Rust source.
     assert!(
         msg.contains("key") && msg.contains("value"),
         "error must state the expected item shape, got: {msg}"
     );
 }
 
-/// A wrong-typed field (a string where an array belongs) must fail the
-/// same way. Both were `.ok()`-swallowed before.
+/// 类型写错的字段（该给数组的地方给了字符串）走同一条路：`serde` 报错，
+/// `tool_endpoint_update` 把它转成 `Validation`，两种形状都不许被吞成空 patch。
 #[tokio::test]
 async fn endpoint_update_rejects_wrong_typed_params() {
     let (st, id) = fixture();
@@ -62,8 +59,8 @@ async fn endpoint_update_rejects_wrong_typed_params() {
     assert!(msg.contains("'params'"), "got: {msg}");
 }
 
-/// `method` used `.and_then(|m| parse_http_method(m).ok())` — a second
-/// independent swallow on the same patch object.
+/// `method` 走 `parse_http_method`，非法动词必须报错：`.and_then(|m| …ok())`
+/// 会把解析失败变成 `None`，同一个 patch 对象上就有了第二处静默吞掉。
 #[tokio::test]
 async fn endpoint_update_rejects_a_non_verb_method() {
     let (st, id) = fixture();
@@ -81,12 +78,11 @@ async fn endpoint_update_rejects_a_non_verb_method() {
     assert!(msg.contains("'method'"), "got: {msg}");
 }
 
-/// An unknown `body.mode` and an unknown `auth.kind` must both be
-/// errors. These go through serde, which reports the variant list.
+/// 未知的 `body.mode` 与未知的 `auth.kind` 都必须报错：两者都过 `serde`，
+/// 报错文本里带出合法变体表，agent 据此改载荷。
 ///
-/// The payload is a name that never existed rather than `xml`: that one
-/// is a supported mode since the body-mode work, so reusing it here
-/// would leave the assertion testing nothing.
+/// 载荷故意用从未存在的名字（不是 `xml`）：`xml` 是本版本支持的取值，
+/// 拿它当反例，这条断言就验不到任何东西。
 #[tokio::test]
 async fn endpoint_update_rejects_an_unknown_body_mode() {
     let (st, id) = fixture();
@@ -104,12 +100,10 @@ async fn endpoint_update_rejects_an_unknown_body_mode() {
     assert!(msg.contains("'body'"), "got: {msg}");
 }
 
-/// An unknown `auth.kind` must be an error. These go through serde,
-/// which reports the variant list.
+/// 未知的 `auth.kind` 同样必须报错：它过 `serde`，报错文本里带出合法取值。
 ///
-/// The payload is a name that never existed rather than `oauth2`: that
-/// one is a supported kind since #2, so reusing it here would leave the
-/// assertion testing nothing.
+/// 载荷用从未存在的名字（不是 `oauth2`）：`oauth2` 是支持的取值，拿它当反例，
+/// 这条断言就验不到任何东西。
 #[tokio::test]
 async fn endpoint_update_rejects_an_unknown_auth_kind() {
     let (st, id) = fixture();
@@ -127,10 +121,9 @@ async fn endpoint_update_rejects_an_unknown_auth_kind() {
     assert!(msg.contains("'auth'"), "got: {msg}");
 }
 
-/// An `oauth2` payload with a malformed field aborts the **whole**
-/// patch. `grantType` goes through serde, so an invented flow must be
-/// reported rather than quietly defaulting to `authorization_code` and
-/// then failing against a real IdP much later.
+/// `oauth2` 载荷里有一个字段写坏，**整份** patch 都要被拒：`grantType` 过
+/// `serde`，编造的流程必须当场报出来，而不是悄悄取 `authorization_code`
+/// 然后等到真实 IdP 那一步才失败。
 #[tokio::test]
 async fn endpoint_update_rejects_a_malformed_oauth2_payload() {
     let (st, id) = fixture();
@@ -158,8 +151,8 @@ async fn endpoint_update_rejects_a_malformed_oauth2_payload() {
     );
 }
 
-/// The acceptance path: an agent writes a full oauth2 config and it
-/// lands in the stored row, not merely in the echoed response.
+/// 整条验收路径：agent 写一份完整的 oauth2 配置，它落进**存储行**，
+/// 不只是回显里那一份。
 #[tokio::test]
 async fn an_agent_can_store_a_complete_oauth2_config() {
     let (st, id) = fixture();
@@ -268,10 +261,8 @@ async fn endpoint_create_rejects_an_unknown_auth_type_and_lists_the_known_ones()
     assert!(msg.contains("oauth2"), "got: {msg}");
 }
 
-/// A malformed field must abort the **whole** patch, including the
-/// well-formed fields alongside it. Otherwise the agent sees a success,
-/// the valid half is written, and the invalid half is silently dropped —
-/// the same invisibility, one level down.
+/// 一个字段写坏就**整份** patch 都不落库，连同旁边那些写对的字段：
+/// 否则 agent 拿到成功，合法那半写进去了、非法那半被静默丢掉。
 #[tokio::test]
 async fn a_malformed_field_aborts_the_whole_patch() {
     let (st, id) = fixture();
@@ -360,8 +351,7 @@ async fn endpoint_update_leaves_the_path_parameters_alone_when_the_field_is_abse
     );
 }
 
-/// An empty patch must not be a silent success that writes nothing and
-/// returns the unchanged endpoint, which reads as "it worked".
+/// 空 patch 不许变成一次静默成功：它什么都不写、返回没变的端点，读起来像「改好了」。
 #[tokio::test]
 async fn endpoint_update_rejects_an_empty_patch() {
     let (st, id) = fixture();
