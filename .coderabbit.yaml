@@ -1,0 +1,14 @@
+# CodeRabbit 评审范围：只看代码，不看文档与锁文件。
+#
+# 起因：本 PR 变更 159 个文件，超过 CodeRabbit 单次评审的文件上限（100），
+# 直接 `Review skipped`。文档、笔记与锁文件占了其中 24 个，排除后剩下的才是
+# 需要按代码读的部分；glob 语义见
+# https://docs.coderabbit.ai/configuration/path-instructions
+reviews:
+  path_filters:
+    - "!docs/**"
+    - "!AGENTS.md"
+    - "!**/*.md"
+    - "!Cargo.lock"
+    - "!package-lock.json"
+    - "!.scratch/**"
