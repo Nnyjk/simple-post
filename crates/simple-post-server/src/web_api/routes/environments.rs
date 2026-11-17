@@ -35,17 +35,53 @@ pub(crate) async fn environments_list(
     ))
 }
 
+/// 建环境。这一侧只负责线格式：两种 body 形状的挑选、`projectId` 缺席时的报错、
+/// `ensure_server_id` 补 id。落库编排在 `crate::environment_api::create_environment`
+/// —— 与桌面命令调的是同一个函数，故两侧建出的环境必然同形。
+///
+/// 两种 body 形状：
+/// - `{ "projectId": …, "name": …, "opts": { variables } }` —— `invokeCmd(COMMANDS.environmentsCreate, …)`
+///   发的就是这个（`WEB_ROUTES.environmentsCreate` 没有 `body:` mapper，参数对象*就是* payload），
+///   与 Tauri 命令的参数名一一对应。
+/// - 打平的 `{ "projectId", "name", "variables"? , "id"? }` —— 文档化的公共 v1 形状，外部
+///   REST 客户端使用。
+///
+/// 其余 `Environment` 字段（`moduleBaseUrls` / `disabledVariables` / `createdAt`）不在创建时收：
+/// 它们是**编辑**面的形状，创建时给了也没人该信——模块地址要先在模块表里存在，创建时刻由
+/// `db::environments::create` 定。
 pub(crate) async fn environments_create(
     State(s): State<Arc<WebState>>,
     Json(mut body): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>), HttpErrorResponse> {
+    let opts: crate::dto::CreateEnvironmentOpts = match body.get("opts") {
+        Some(v) => serde_json::from_value(v.clone())
+            .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?,
+        // 打平形状：`variables` 就在顶层，缺席时 serde 把它读成 `None`。
+        None => serde_json::from_value(json!({ "variables": body.get("variables").cloned() }))
+            .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?,
+    };
+    let project_id = body
+        .get("projectId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            map_app_error(AppError::Validation(
+                "missing field 'projectId'".to_string(),
+            ))
+        })?;
+    let name = body
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| map_app_error(AppError::Validation("missing field 'name'".to_string())))?;
+
     ensure_server_id(&mut body);
-    let env: crate::domain::Environment = serde_json::from_value(body)
-        .map_err(|e| map_app_error(AppError::Validation(e.to_string())))?;
+    let id = body.get("id").and_then(Value::as_str).map(str::to_string);
+
     // 回传**落库之后**的那一行：创建时刻是它在库里认「默认环境」用的字段，回传 0
     // 的话界面手里的创建时刻与库里对不上，两侧会算出两个不同的默认环境。
-    let created =
-        db::with_tx(&s.pool, |c| db::environments::create(c, &env)).map_err(map_app_error)?;
+    let created = crate::environment_api::create_environment(&s.pool, id, project_id, name, opts)
+        .map_err(map_app_error)?;
     Ok((
         StatusCode::CREATED,
         Json(serde_json::to_value(&created).unwrap_or(Value::Null)),

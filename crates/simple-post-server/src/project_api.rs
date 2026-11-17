@@ -109,7 +109,10 @@ pub fn resolve_root_id(
 /// 调用方给的 id：非空就照用，空的与缺席都铸一个。
 ///
 /// 纯空白也算「给了」：项目 id 是调用方给的标识，它给什么就是什么。
-fn adopt_non_empty(id: Option<String>) -> String {
+///
+/// 铸的是不带前缀的 `domain::uid()`（`sp_…`）。`environment_api` 的建环境也走这一条
+/// —— 「id 归谁铸、空 id 算不算给了」在两条资源上必须是同一个答案。
+pub(crate) fn adopt_non_empty(id: Option<String>) -> String {
     match id {
         Some(id) if !id.is_empty() => id,
         _ => crate::domain::uid(),

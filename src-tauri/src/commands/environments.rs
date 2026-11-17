@@ -2,8 +2,6 @@
 // region: environments
 // ===========================================================================
 
-use std::collections::HashMap;
-
 use tauri::State;
 
 use crate::db::DbPool;
@@ -23,6 +21,9 @@ pub fn environments_list(
     })
 }
 
+/// 建环境。这一层只做线格式：`opts` 缺席时的缺省值。落库编排在
+/// `crate::environment_api::create_environment`（REST 路由调的是同一个函数），故两条
+/// transport 建出的环境必然同形 —— id 归谁铸、创建时刻由谁补，都只有那一处说了算。
 #[tauri::command]
 pub fn environments_create(
     state: State<DbPool>,
@@ -30,18 +31,14 @@ pub fn environments_create(
     name: String,
     opts: Option<CreateEnvironmentOpts>,
 ) -> Result<Environment, AppError> {
-    let opts = opts.unwrap_or_default();
-    let env = Environment {
-        id: uid(),
+    crate::environment_api::create_environment(
+        &state,
+        // 桌面命令没有 id 参数：id 由服务端铸，与 `projects_create` 同一条规矩。
+        None,
         project_id,
         name,
-        module_base_urls: HashMap::new(),
-        variables: opts.variables.unwrap_or_default(),
-        disabled_variables: Vec::new(),
-        // 创建时刻：`db::environments::create` 用它认定「默认环境」（最早创建的那个）。
-        created_at: now_ms(),
-    };
-    crate::db::with_tx(&state, |c| crate::db::environments::create(c, &env))
+        opts.unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
