@@ -130,7 +130,7 @@ pub fn required_capability(name: &str) -> Option<Capability> {
 /// 未设置策略时取 [`CapabilityPolicy::ReadOnly`]（safe-by-default）：没进过设置面板的用户只看到
 /// 只读清单。
 pub async fn tool_descriptors(state: &AppState) -> Vec<ToolDescriptor> {
-    let policy = resolve_capability(&state.pool, None)
+    let policy = resolve_capability(&state.pool)
         .await
         .unwrap_or(CapabilityPolicy::default());
     tool_table()

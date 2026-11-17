@@ -50,7 +50,7 @@ graph LR
 **Gate A —— 全局能力档**（`preferences` 的 `mcp.policy`，线格式 `read_only` / `safe_write` / `full_access`，缺行 = `read_only`）。
 
 - `tools/list` 侧：`registry::tool_descriptors` 按 `policy.satisfies(capability)` 过滤，未分类工具不出现。
-- `tools/call` 侧：`dispatch` 先用 `tool_table()` 找 handler（未知名字回 `NotFound`，**先于**能力门，否则会被掩盖成 `PermissionDenied`），再 `required_capability(name)` + `resolve_capability(pool, None)`（此处无项目维度），缺行一律拒绝。
+- `tools/call` 侧：`dispatch` 先用 `tool_table()` 找 handler（未知名字回 `NotFound`，**先于**能力门，否则会被掩盖成 `PermissionDenied`），再 `required_capability(name)` + `resolve_capability(pool)`（只读全局档，项目维度归 Gate B），缺行一律拒绝。
 - 排序：`Read < Create < Update < Delete`，`Send` 与 `Delete` 同级但**只有 `full_access` 覆盖 `Send`**——`safe_write` 不覆盖任何外发 HTTP。
 
 **Gate B —— 逐项目权限**（`agent_permissions`，`Read < ReadCall < Full`）。`mcp::permissions::check_permission` → `core::permissions::required_permission(tool)`：未知工具默认 `Full`；`api_run_request` / `api_call_endpoint` / `api_run_collection` / `dynamic_var_resolve` 是 `ReadCall`；只读工具显式列为 `Read`。**调用处必须 `?` 传播。**
@@ -70,7 +70,7 @@ graph LR
 
 ## `tools/list` 的体积预算
 
-`mcp/mod_test.rs::TOOLS_LIST_BUDGET_BYTES = 44_050`，量的是**紧凑序列化后的 UTF-8 字节**（与 axum `Json` 响应体一致），当前载荷 43 952 字节。token 数用真实分词器量（文档记 9_413 tokens）；测试里的 `len * 100 / 471` 只是估算（字符数 ÷ 3 会高估约六成）。报告的 ignored 测试把紧凑版与缩进版都写到 `target/`，**分词器只能量紧凑那份**。超限的做法是把长规则搬进 `simple-post://spec-authoring`，不是放宽预算。
+`mcp/mod_test.rs::TOOLS_LIST_BUDGET_BYTES = 45_200`，量的是**紧凑序列化后的 UTF-8 字节**（与 axum `Json` 响应体一致），当前载荷 45 116 字节（45 054 字符），余量 84 字节。token 数用真实分词器量：记录里的 9_413 tokens 是对上一版 43 952 字节载荷量的，这一版换了 `responses` 字段后没有重新分词，别按旧比例推算。测试里的 `len * 100 / 471` 只是估算（字符数 ÷ 3 会高估约六成）。报告的 ignored 测试把紧凑版与缩进版都写到 `target/`，**分词器只能量紧凑那份**。超限的做法是把长规则搬进 `simple-post://spec-authoring`，不是放宽预算。
 
 ## 资源：`simple-post://spec-authoring`
 
