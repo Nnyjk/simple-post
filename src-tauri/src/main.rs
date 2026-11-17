@@ -109,12 +109,13 @@ enum Cmd {
         #[arg(long)]
         data_dir: Option<String>,
 
-        /// Override the persisted `mcp.auto_start` preference for this
-        /// launch only. The flag takes a value, e.g.
-        /// `--mcp-auto-start=false` keeps the daemon down (and updates the
-        /// row), `--mcp-auto-start=true` brings it up. There is no
-        /// `--no-mcp-auto-start` spelling — the value form is the only one.
-        /// Without the flag the persisted value is honoured.
+        /// Override the persisted `mcp.auto_start` preference. The flag takes a
+        /// value: `--mcp-auto-start=false` disables automatic startup (a daemon
+        /// that is already running keeps running — stop it with
+        /// `POST /api/mcp/stop`), `--mcp-auto-start=true` starts it. Either value
+        /// is written back to `mcp.auto_start`, so later launches without the
+        /// flag see it too. There is no `--no-mcp-auto-start` spelling; the
+        /// value form is the only one.
         #[arg(long)]
         mcp_auto_start: Option<bool>,
 
