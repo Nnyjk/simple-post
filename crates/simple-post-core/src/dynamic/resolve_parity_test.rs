@@ -15,14 +15,19 @@ use crate::domain::{AuthConfig, KeyValue, RequestBody, ValueMode};
 const FIXTURE: &str = include_str!("../../../../fixtures/dynamic-parity.json");
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Fixture {
+    /// 夹具文件自带的人类说明，两侧读者都不用它；声明下来只是为了不让
+    /// `deny_unknown_fields` 把它当成夹具写错的键。
+    #[serde(rename = "$comment", default)]
+    _comment: Option<String>,
     merge_cases: Vec<MergeCase>,
     serialize_cases: Vec<SerializeCase>,
     scan_cases: Vec<ScanCase>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MergeCase {
     name: String,
     env: BTreeMap<String, String>,
@@ -34,6 +39,7 @@ struct MergeCase {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SerializeCase {
     name: String,
     mode: String,
@@ -42,6 +48,7 @@ struct SerializeCase {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ScanCase {
     name: String,
     parts: ScanParts,
@@ -49,7 +56,7 @@ struct ScanCase {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ScanParts {
     #[serde(default)]
     base_url: String,
@@ -75,9 +82,10 @@ fn fixture() -> Fixture {
 #[test]
 fn every_merge_case_merges_the_same_way() {
     let fixture = fixture();
-    assert!(
-        !fixture.merge_cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    assert_eq!(
+        fixture.merge_cases.len(),
+        5,
+        "合并规则样本必须恰好 5 条：条数变了说明夹具动了，两侧读取器都得跟着看"
     );
 
     for case in &fixture.merge_cases {
@@ -109,9 +117,10 @@ fn every_merge_case_merges_the_same_way() {
 #[test]
 fn every_serialize_case_produces_the_same_text() {
     let fixture = fixture();
-    assert!(
-        !fixture.serialize_cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    assert_eq!(
+        fixture.serialize_cases.len(),
+        15,
+        "序列化样本必须恰好 15 条：条数变了说明夹具动了，两侧读取器都得跟着看"
     );
 
     for case in &fixture.serialize_cases {
@@ -125,9 +134,10 @@ fn every_serialize_case_produces_the_same_text() {
 #[test]
 fn every_scan_case_finds_the_same_names() {
     let fixture = fixture();
-    assert!(
-        !fixture.scan_cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    assert_eq!(
+        fixture.scan_cases.len(),
+        11,
+        "名字扫描样本必须恰好 11 条：条数变了说明夹具动了，两侧读取器都得跟着看"
     );
 
     for case in &fixture.scan_cases {

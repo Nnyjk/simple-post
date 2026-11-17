@@ -22,11 +22,17 @@ const FIXTURE: &str = include_str!("../../../../../fixtures/multipart-parity.jso
 const BOUNDARY_PLACEHOLDER: &str = "<BOUNDARY>";
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Fixture {
+    /// 夹具文件自带的人类说明，两侧读者都不用它；声明下来只是为了不让
+    /// `deny_unknown_fields` 把它当成夹具写错的键。
+    #[serde(rename = "$comment", default)]
+    _comment: Option<String>,
     cases: Vec<Case>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Case {
     name: String,
     env: std::collections::BTreeMap<String, String>,
@@ -35,7 +41,7 @@ struct Case {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Input {
     method: String,
     url_path: String,
@@ -51,6 +57,7 @@ struct Input {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Expected {
     url: String,
     headers: Vec<(String, String)>,
@@ -114,9 +121,10 @@ fn normalize(text: &str, boundary: &str) -> String {
 #[test]
 fn every_multipart_parity_case_assembles_the_same_way() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("parity fixture");
-    assert!(
-        !fixture.cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    assert_eq!(
+        fixture.cases.len(),
+        2,
+        "multipart 样本必须恰好 2 条：条数变了说明夹具动了，两侧读取器都得跟着看"
     );
 
     for case in &fixture.cases {

@@ -51,8 +51,8 @@ function toNode(n: FixtureNode): ResourceNode {
 }
 
 describe('collectSubtreeEndpoints 与共享样本一致', () => {
-  it('样本本身不是空的 —— 空的样本钉不住任何东西', () => {
-    assert.ok(FIXTURE.cases.length > 0, '共享样本里至少要有一条用例');
+  it('样本恰好 8 条 —— 条数变了说明夹具动了，Rust 侧的读取器也得跟着看', () => {
+    assert.equal(FIXTURE.cases.length, 8);
   });
 
   for (const c of FIXTURE.cases) {

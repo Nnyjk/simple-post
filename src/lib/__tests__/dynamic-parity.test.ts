@@ -54,10 +54,22 @@ const FIXTURE: ParityFixture = JSON.parse(
 );
 
 describe('动态变量规则与 Rust 的 core::dynamic 产出一致', () => {
-  it('样本里每一组都有 case', () => {
-    assert.ok(FIXTURE.mergeCases.length > 0, '合并规则样本是空的');
-    assert.ok(FIXTURE.serializeCases.length > 0, '序列化样本是空的');
-    assert.ok(FIXTURE.scanCases.length > 0, '名字扫描样本是空的');
+  it('样本的条数钉住三个读取器', () => {
+    assert.equal(
+      FIXTURE.mergeCases.length,
+      5,
+      '合并规则样本必须恰好 5 条：条数变了说明夹具动了，两侧读取器都得跟着看',
+    );
+    assert.equal(
+      FIXTURE.serializeCases.length,
+      15,
+      '序列化样本必须恰好 15 条：条数变了说明夹具动了，两侧读取器都得跟着看',
+    );
+    assert.equal(
+      FIXTURE.scanCases.length,
+      11,
+      '名字扫描样本必须恰好 11 条：条数变了说明夹具动了，两侧读取器都得跟着看',
+    );
   });
 
   for (const testCase of FIXTURE.mergeCases) {

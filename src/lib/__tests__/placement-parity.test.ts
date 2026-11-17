@@ -2,7 +2,7 @@
  * 父子类型矩阵的一致性样本：TS 的 `src/lib/node-placement`（前端拖放与乐观更新）。
  *
  * 同一份样本也被 Rust 侧的
- * `crates/simple-post-core/src/placement_parity_test.rs` 读。两份实现各写一遍矩阵
+ * `crates/simple-post-core/src/domain/placement_parity_test.rs` 读。两份实现各写一遍矩阵
  * （后端在每一次写入时执行它，前端在拖放判定与乐观更新时读它），只有一份共享样本才能
  * 钉住它们没分叉。
  */

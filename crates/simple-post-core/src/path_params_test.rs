@@ -12,12 +12,17 @@ use super::{placeholders, substitute};
 const FIXTURE: &str = include_str!("../../../fixtures/path-params-parity.json");
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Fixture {
+    /// 夹具文件自带的人类说明，两侧读者都不用它；声明下来只是为了不让
+    /// `deny_unknown_fields` 把它当成夹具写错的键。
+    #[serde(rename = "$comment", default)]
+    _comment: Option<String>,
     cases: Vec<Case>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Case {
     name: String,
     url: String,
@@ -40,9 +45,10 @@ fn fixture() -> Fixture {
 #[test]
 fn every_case_matches_the_shared_sample() {
     let fixture = fixture();
-    assert!(
-        !fixture.cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    assert_eq!(
+        fixture.cases.len(),
+        32,
+        "路径占位符样本必须恰好 32 条：条数变了说明夹具动了，两侧读取器都得跟着看"
     );
 
     for case in &fixture.cases {

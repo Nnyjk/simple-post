@@ -18,12 +18,17 @@ use super::OAuth2Token;
 const FIXTURE: &str = include_str!("../../../../fixtures/oauth2-parity.json");
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Fixture {
+    /// 夹具文件自带的人类说明，两侧读者都不用它；声明下来只是为了不让
+    /// `deny_unknown_fields` 把它当成夹具写错的键。
+    #[serde(rename = "$comment", default)]
+    _comment: Option<String>,
     cases: Vec<Case>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Case {
     name: String,
     token_location: String,
@@ -35,14 +40,14 @@ struct Case {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TokenCase {
     access_token: String,
     token_type: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Expected {
     url: String,
     headers: Vec<(String, String)>,
@@ -83,9 +88,10 @@ fn token(case: &TokenCase) -> OAuth2Token {
 #[test]
 fn every_case_matches_the_shared_sample() {
     let fixture = fixture();
-    assert!(
-        !fixture.cases.is_empty(),
-        "样本里必须有 case，否则这条测试是空的"
+    assert_eq!(
+        fixture.cases.len(),
+        13,
+        "注入样本必须恰好 13 条：条数变了说明夹具动了，两侧读取器都得跟着看"
     );
 
     // 先把全部不符收集起来再一次性断言：`assert_eq!` 失败就 panic，后面的 case 就不再
