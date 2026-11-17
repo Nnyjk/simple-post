@@ -28,9 +28,7 @@ export function ScriptView({ outcome }: { outcome: ScriptOutcome | null }) {
                 className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5"
               >
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-[10px] uppercase text-destructive">
-                    {err.kind}
-                  </span>
+                  <span className="font-mono text-nano uppercase text-destructive">{err.kind}</span>
                   <span className="text-muted-foreground">
                     {err.phase === 'pre' ? '前置' : '测试'}阶段
                     {err.source ? ` · ${err.source}` : ''}
@@ -87,7 +85,7 @@ export function ScriptView({ outcome }: { outcome: ScriptOutcome | null }) {
       {outcome.logs.length > 0 && (
         <section>
           <h4 className="mb-1.5 font-medium">日志</h4>
-          <pre className="m-0 whitespace-pre-wrap break-all rounded border border-border/60 bg-muted/20 p-2 font-mono text-[11px] leading-relaxed">
+          <pre className="m-0 whitespace-pre-wrap break-all rounded border border-border/60 bg-muted/20 p-2 font-mono text-micro leading-relaxed">
             {outcome.logs.map((l) => `[${l.level}] ${l.message}`).join('\n')}
           </pre>
         </section>

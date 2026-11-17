@@ -80,7 +80,7 @@ export function CopyConfigTile({ icon, name, description, configJson }: CopyConf
       <div className="flex items-center gap-2">
         <span className="shrink-0 text-muted-foreground">{icon}</span>
         {name && <span className="shrink-0 text-xs font-semibold text-foreground">{name}</span>}
-        <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{description}</p>
+        <p className="min-w-0 flex-1 truncate text-micro text-muted-foreground">{description}</p>
         <Button
           variant={copyState === 'success' ? 'secondary' : 'outline'}
           size="xs"
@@ -105,7 +105,7 @@ export function CopyConfigTile({ icon, name, description, configJson }: CopyConf
           )}
         </Button>
       </div>
-      <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/50 p-2.5 font-mono text-[10px] leading-relaxed text-foreground/90">
+      <pre className="mt-2 max-h-32 overflow-auto rounded-md bg-muted/50 p-2.5 font-mono text-nano leading-relaxed text-foreground/90">
         {configJson}
       </pre>
     </div>

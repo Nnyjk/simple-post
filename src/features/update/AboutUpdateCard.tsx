@@ -80,7 +80,7 @@ export function AboutUpdateCard() {
             <span className="font-mono text-xs text-foreground">{currentVersion}</span>
           ) : (
             // 连应用自己都还没报出结论：写清楚下一步做什么，不留空白。
-            <span className="text-[11px] text-muted-foreground">未知，点检查更新</span>
+            <span className="text-micro text-muted-foreground">未知，点检查更新</span>
           )
         }
       />
@@ -106,9 +106,7 @@ export function AboutUpdateCard() {
           ) : undefined
         }
         control={
-          <span
-            className={cn('text-[11px]', failed ? 'text-destructive' : 'text-muted-foreground')}
-          >
+          <span className={cn('text-micro', failed ? 'text-destructive' : 'text-muted-foreground')}>
             {lastChecked ?? '尚未检查'}
           </span>
         }

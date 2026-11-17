@@ -76,7 +76,7 @@ export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
       {projectEnvs.length === 0 ? (
         <EmptyHint className="rounded-lg border-border bg-card/30 px-3 py-8 text-xs">
           <span className="block">该项目还没有环境</span>
-          <span className="mt-1 block text-muted-foreground/80">
+          <span className="mt-1 block text-faint">
             环境属于项目，先在项目标签里创建第一个，这里才会有可填的地址。
           </span>
           <Button variant="outline" size="sm" className="mt-3 h-7 text-xs" onClick={goToProject}>

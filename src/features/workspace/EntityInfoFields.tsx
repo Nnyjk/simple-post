@@ -130,7 +130,7 @@ export function AutoSaveTextarea({
       }}
       className={cn(
         'w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground',
-        'placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none',
+        'placeholder:text-faint focus:border-ring focus:outline-none',
         className,
       )}
     />
@@ -162,7 +162,7 @@ export function InfoField({
     <div className="flex items-start gap-6 py-3">
       <div className="w-40 shrink-0">
         <div className="text-xs font-medium text-foreground">{label}</div>
-        {hint && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{hint}</p>}
+        {hint && <p className="mt-1 text-micro leading-relaxed text-muted-foreground">{hint}</p>}
       </div>
       <div className="min-w-0 flex-1">{children}</div>
     </div>

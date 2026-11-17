@@ -5,7 +5,7 @@ import { MethodPicker } from '@/components/ui/method-picker';
 import { Tooltip } from '@/components/ui/tooltip';
 import { BaseUrlPicker, type BaseUrlSelection } from './BaseUrlPicker';
 import { VarHintInput, type VarEntry } from './var-hint';
-import { cn, methodColorVar } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import type { HttpMethod } from '@/types/domain';
 
 /**
@@ -98,12 +98,14 @@ export function RequestUrlBar({
           data-testid="url-input"
         />
       </div>
+      {/* 主操作不跟 method 色走：methodColorVar 的色相不随主题变化，配 Button 默认的
+          `text-primary-foreground` 会在浅色档变成白字压中高明度色相（POST 仅 2.1:1）。
+          动词色仍由左侧 MethodPicker 的药丸表达。 */}
       <Button
         ref={sendBtnRef}
         onClick={onSend}
         disabled={requestPending}
         className="h-9 gap-1.5 px-4"
-        style={{ backgroundColor: methodColorVar(method) }}
         data-testid="send-btn"
       >
         <span ref={playIconRef} className="inline-flex">

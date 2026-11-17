@@ -99,10 +99,10 @@ export function TreeContextMenu({ open, x, y, items, onClose }: TreeContextMenuP
             className={cn(
               'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs transition-colors',
               it.disabled
-                ? 'cursor-not-allowed text-muted-foreground/50'
+                ? 'cursor-not-allowed text-faint'
                 : it.danger
                   ? 'text-destructive hover:bg-destructive/10'
-                  : 'text-foreground hover:bg-accent',
+                  : 'text-foreground hover:bg-overlay-hover',
             )}
           >
             {it.icon && (

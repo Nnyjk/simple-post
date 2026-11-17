@@ -51,7 +51,7 @@ export function TransferDialog({ controller, environments, onClose }: TransferDi
       footer={<Footer controller={controller} isImport={isImport} />}
     >
       {error && (
-        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
+        <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-micro text-destructive">
           {error}
         </p>
       )}
@@ -105,7 +105,7 @@ function SourceStep({ controller }: { controller: TransferController }) {
           <FileInput className="h-3.5 w-3.5" />
           选择文件…
         </Button>
-        <span className="text-[11px] text-muted-foreground">或</span>
+        <span className="text-micro text-muted-foreground">或</span>
         <Input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -125,7 +125,7 @@ function SourceStep({ controller }: { controller: TransferController }) {
           拉取
         </Button>
       </div>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
+      <p className="text-micro leading-relaxed text-muted-foreground">
         支持 Postman 集合 v2.1（.json）与 OpenAPI 3.0 文档（.yaml / .yml / .json）。
         解析只在本地进行，不会修改项目里的任何内容——看完中间态、勾完才落库。
       </p>
@@ -188,14 +188,14 @@ function PreviewStep({
         <ToolbarButton onClick={controller.selectAll}>全选</ToolbarButton>
         <ToolbarButton onClick={controller.selectNone}>全不选</ToolbarButton>
         <ToolbarButton onClick={controller.invert}>反选</ToolbarButton>
-        <span className="ml-1 text-[11px] tabular-nums text-muted-foreground">
+        <span className="ml-1 text-micro tabular-nums text-muted-foreground">
           已选 {chosen} / {total}
         </span>
       </div>
 
       {!isImport && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground">环境</span>
+          <span className="text-micro text-muted-foreground">环境</span>
           <Select
             value={environmentId}
             onChange={(e) => void changeEnvironment(e.target.value)}
@@ -203,7 +203,7 @@ function PreviewStep({
               { value: '', label: '不选环境（不输出地址）' },
               ...environments.map((e) => ({ value: e.id, label: e.name })),
             ]}
-            className="h-7 text-[11px]"
+            className="h-7 text-micro"
           />
           <div className="flex-1" />
           <SegmentedControl value={format} onChange={setFormat} />
@@ -211,7 +211,7 @@ function PreviewStep({
       )}
 
       {!isImport && missingBaseUrls.length > 0 && (
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
+        <p className="text-micro leading-relaxed text-muted-foreground">
           <span className="text-warning-foreground">
             {missingEnvName ? `环境「${missingEnvName}」下没有配置地址` : '没有配置地址'}
           </span>
@@ -221,14 +221,14 @@ function PreviewStep({
 
       {proposedBaseUrls.length > 0 && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground">地址</span>
+          <span className="text-micro text-muted-foreground">地址</span>
           <Switch
             checked={applyBaseUrl}
             onCheckedChange={setApplyBaseUrl}
             aria-label="把文档里的地址写进模块格子"
           />
           {proposedBaseUrls.map((b) => (
-            <span key={b.url} className="truncate font-mono text-[10px] text-faint">
+            <span key={b.url} className="truncate font-mono text-nano text-faint">
               {b.url}
             </span>
           ))}
@@ -256,7 +256,7 @@ function PreviewStep({
             type="button"
             onClick={() => setShowInfo(!showInfo)}
             className={cn(
-              'flex w-full items-center gap-2 px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-overlay-hover',
+              'flex w-full items-center gap-2 px-2.5 py-1.5 text-micro text-muted-foreground transition-colors hover:bg-overlay-hover',
               focusRingBare,
             )}
           >
@@ -285,9 +285,9 @@ function DiagnosticRow({ d }: { d: TransferDiagnostic }) {
         {SEVERITY_LABEL[d.severity] ?? d.severity}
       </Badge>
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] text-foreground">{d.message}</p>
-        <p className="mt-0.5 font-mono text-[10px] text-faint">{d.pointer}</p>
-        {d.dropped && <p className="mt-0.5 text-[10px] text-faint">已丢弃：{d.dropped}</p>}
+        <p className="text-micro text-foreground">{d.message}</p>
+        <p className="mt-0.5 font-mono text-nano text-faint">{d.pointer}</p>
+        {d.dropped && <p className="mt-0.5 text-nano text-faint">已丢弃：{d.dropped}</p>}
       </div>
     </div>
   );
@@ -307,12 +307,12 @@ function DoneStep({ result }: { result: NonNullable<TransferController['result']
         。
       </p>
       {result.environmentsCreated.length > 0 && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-micro text-muted-foreground">
           新建环境：{result.environmentsCreated.join('、')}
         </p>
       )}
       {result.baseUrls && result.baseUrls.length > 0 && (
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
+        <p className="text-micro leading-relaxed text-muted-foreground">
           地址{' '}
           {result.baseUrls.map((b) => (
             <span key={`${b.moduleId}:${b.url}`} className="font-mono text-foreground">
@@ -394,7 +394,7 @@ function ToolbarButton({ children, onClick }: { children: React.ReactNode; onCli
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+        'rounded-sm px-1.5 py-0.5 text-micro text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground',
         focusRingBare,
       )}
     >
@@ -427,11 +427,11 @@ function SegmentedControl({
             aria-checked={active}
             onClick={() => onChange(f.value)}
             className={cn(
-              'inline-flex h-7 items-center rounded-sm px-3 text-[11px] font-medium transition-colors',
+              'inline-flex h-7 items-center rounded-sm px-3 text-micro font-medium transition-colors',
               focusRingBare,
               active
                 ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                : 'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
             )}
           >
             {f.label}

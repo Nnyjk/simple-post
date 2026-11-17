@@ -72,7 +72,7 @@ export function SettingsCategory({
               <h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
             )}
             {(description || meta) && (
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
+              <p className="mt-0.5 text-micro text-muted-foreground">
                 {description}
                 {description && meta ? ' · ' : ''}
                 {meta}
@@ -156,12 +156,12 @@ export function SettingRow({
           {badge && <span className="ml-2 align-middle">{badge}</span>}
         </div>
         {(description || hint) && (
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 text-micro text-muted-foreground">
             {description}
             {description && hint ? (
               <>
                 {' · '}
-                <span className="text-muted-foreground/80">{hint}</span>
+                <span className="text-faint">{hint}</span>
               </>
             ) : (
               hint

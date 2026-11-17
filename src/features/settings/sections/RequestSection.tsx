@@ -232,11 +232,11 @@ export function RequestSection() {
           />
         ))}
 
-        <p className="px-4 py-2 text-[11px] text-muted-foreground/80">{TLS_PATH_NOTE}</p>
+        <p className="px-4 py-2 text-micro text-faint">{TLS_PATH_NOTE}</p>
 
         {/* 同一张卡片内的页脚 —— 一句小提醒，说明这里的取值在当前管线中才真正起作用。
             让用户不至于跑去看文档也知道自己身在何处。 */}
-        <div className="flex items-center gap-2 border-t border-border/60 bg-muted/20 px-4 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 border-t border-border/60 bg-muted/20 px-4 py-2 text-micro text-muted-foreground">
           <Badge variant="muted" className="font-mono">
             v0.2
           </Badge>

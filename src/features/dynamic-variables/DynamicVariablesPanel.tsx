@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import type { DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import { DynamicVariableForm } from './DynamicVariableForm';
 
 export function DynamicVariablesPanel() {
@@ -96,10 +97,10 @@ export function DynamicVariablesPanel() {
         )}
 
         {variables.length === 0 && !creating && (
-          <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+          <EmptyHint className="py-6 text-xs">
             还没有动态变量。新建一条：给它一个名字、一个数据源（引用树里的接口，或一份内联请求）、
             一条 JSONPath 抽取规则与一个缓存时长。
-          </p>
+          </EmptyHint>
         )}
 
         {variables.map((variable) => (
@@ -188,7 +189,7 @@ function DynamicVariableCard({
     <article className="rounded-md border border-border p-3">
       <div className="flex items-center gap-2">
         <span className="font-mono text-sm">{variable.name}</span>
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-muted-foreground">
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro text-muted-foreground">
           {`{{${variable.name}}}`}
         </code>
         <StatusBadge source={variable.source} />
@@ -230,7 +231,7 @@ function DynamicVariableCard({
         {variable.transformScript && (
           <>
             <dt className="text-muted-foreground">处理脚本</dt>
-            <dd className="font-mono text-[11px]">抽取之后跑，用 `return` 给出最终值</dd>
+            <dd className="font-mono text-micro">抽取之后跑，用 `return` 给出最终值</dd>
           </>
         )}
         <dt className="text-muted-foreground">缓存时长</dt>
@@ -263,7 +264,7 @@ function DynamicVariableCard({
               <Button size="xs" onClick={() => void setDynamicOverride(variable.id, draft)}>
                 保存为覆盖值
               </Button>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 覆盖值优先于自动取回的值；过期时间默认沿用 TTL。
               </span>
             </div>
@@ -271,12 +272,12 @@ function DynamicVariableCard({
         )}
       </div>
 
-      <p className="mt-2 text-[11px] text-muted-foreground">
+      <p className="mt-2 text-micro text-muted-foreground">
         {variable.fetchedAt ? `取数于 ${formatTime(variable.fetchedAt)}` : '尚未取数'}
         {variable.expiresAt ? ` · 过期于 ${formatTime(variable.expiresAt)}` : ''}
       </p>
       {error && (
-        <p className="mt-1 text-[11px] text-destructive">{`${error.kind}：${error.message}`}</p>
+        <p className="mt-1 text-micro text-destructive">{`${error.kind}：${error.message}`}</p>
       )}
 
       {editing && (
@@ -303,9 +304,7 @@ function StatusBadge({ source }: { source: DynamicVariableView['source'] }) {
           ? '自动取回'
           : '没有值';
   return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
-      {label}
-    </span>
+    <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{label}</span>
   );
 }
 

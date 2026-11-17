@@ -109,7 +109,7 @@ export function TagInput({
       {value.map((tag, idx) => (
         <span
           key={`${tag}-${idx}`}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-[11px] font-medium text-foreground"
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/60 px-1.5 py-0.5 text-micro font-medium text-foreground"
         >
           {tag}
           {!disabled && (
@@ -119,7 +119,7 @@ export function TagInput({
                 e.stopPropagation();
                 removeAt(idx);
               }}
-              className="inline-flex h-3.5 w-3.5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="inline-flex h-3.5 w-3.5 items-center justify-center rounded text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
               aria-label={`删除标签 ${tag}`}
             >
               <X className="h-2.5 w-2.5" />
@@ -139,7 +139,7 @@ export function TagInput({
           if (draft.trim()) commit(draft);
         }}
         placeholder={value.length === 0 ? placeholder : ''}
-        className="min-w-[8ch] flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none disabled:cursor-not-allowed"
+        className="min-w-[8ch] flex-1 bg-transparent text-sm text-foreground placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
       />
     </div>
   );

@@ -50,7 +50,7 @@ export function ModuleBaseUrlTable({
     // 行集是 (环境 × 模块)，没有模块就无从配置 —— 每个格子都无法寻址。故直接指出修法，
     // 而不是渲染一张空网格。
     return (
-      <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
+      <div className="px-4 py-6 text-center text-micro text-muted-foreground">
         该项目还没有模块 · 先在左侧资源树新建模块，地址才有归属
       </div>
     );

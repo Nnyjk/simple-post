@@ -124,7 +124,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       label={{ ariaLabel: '命令面板' }}
       align="top"
       size="lg"
-      className="overflow-hidden rounded-xl bg-popover text-popover-foreground"
+      className="overflow-hidden rounded-lg bg-popover text-popover-foreground"
       onKeyDown={onKeyDown}
     >
       <div>
@@ -136,7 +136,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索命令、接口、项目…"
-            className="h-11 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+            className="h-11 flex-1 bg-transparent text-sm text-foreground placeholder:text-faint focus:outline-none"
             data-testid="command-palette-input"
             autoComplete="off"
             spellCheck={false}
@@ -144,7 +144,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
             aria-label="关闭"
           >
             <X className="h-3.5 w-3.5" />
@@ -178,12 +178,12 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                       'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm',
                       active
                         ? 'bg-primary/15 text-foreground'
-                        : 'text-foreground/90 hover:bg-accent/60',
+                        : 'text-foreground/90 hover:bg-overlay-hover',
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">{cmd.title}</span>
                     {cmd.hint && (
-                      <span className="ml-2 shrink-0 truncate text-[11px] text-muted-foreground">
+                      <span className="ml-2 shrink-0 truncate text-micro text-muted-foreground">
                         {cmd.hint}
                       </span>
                     )}
@@ -195,7 +195,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         </div>
 
         {/* 底部快捷键提示 */}
-        <div className="flex items-center gap-3 border-t border-border bg-card/40 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-3 border-t border-border bg-card/40 px-3 py-1.5 text-nano text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <CornerDownLeft className="h-3 w-3" /> 触发
           </span>

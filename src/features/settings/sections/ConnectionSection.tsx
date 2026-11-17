@@ -172,7 +172,7 @@ export function ConnectionSection() {
                   HTTP
                 </Badge>
               </div>
-              <div className="mt-1 text-[11px]">
+              <div className="mt-1 text-micro">
                 <StateSummary state={mcpStatus} />
               </div>
             </div>
@@ -185,7 +185,7 @@ export function ConnectionSection() {
         <div className="flex items-center justify-between gap-3 border-t border-border/60 p-3">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium text-foreground">随应用启动</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
+            <div className="mt-0.5 text-micro text-muted-foreground">
               关闭后 MCP 不会随应用启动，可在「MCP 进程」卡片里点「启动」手动拉起。
               关掉本开关不会掐断正在服务的 daemon —— 上面的「停止 / 启动」决定当前这次是否运行，
               这里只决定下次打开应用时。
@@ -208,7 +208,7 @@ export function ConnectionSection() {
             <IconTile className="mt-0.5" icon={<Activity className="h-3.5 w-3.5" />} />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">已注册工具</div>
-              <div className="mt-0.5 text-[11px] text-muted-foreground">
+              <div className="mt-0.5 text-micro text-muted-foreground">
                 MCP 标准接口，可被任何支持 MCP 的客户端调用
               </div>
             </div>
@@ -220,7 +220,7 @@ export function ConnectionSection() {
             <IconTile className="mt-0.5" icon={<FileJson className="h-3.5 w-3.5" />} />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-foreground">传输协议</div>
-              <div className="mt-0.5 text-[11px] text-muted-foreground">
+              <div className="mt-0.5 text-micro text-muted-foreground">
                 Streamable HTTP，默认只监听本机回环地址
               </div>
             </div>
@@ -284,7 +284,7 @@ export function ConnectionSection() {
             {capability !== null && (
               // 只报数量。名字在下方的卡片里已列过一次，在这里再抄前八个，只是把同一份
               // 清单换个格式重说一遍。
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-micro text-muted-foreground">
                 当前可见 {capabilityTools.length} 个工具
               </div>
             )}
@@ -294,7 +294,7 @@ export function ConnectionSection() {
         {/* 下位 —— 闸 B：agent 在某个项目上能做什么。 */}
         <PermissionLevel step={2} title="按项目授权" hint="只在上一层放行的范围内进一步收紧">
           <div className="space-y-3">
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-micro text-muted-foreground">
               即使全局策略选了「全部」，某个项目在这里保持默认的「读+调用」时，
               该项目上的写操作依然被拒。两层中更严格的一层决定最终结果。
             </div>
@@ -321,17 +321,15 @@ export function ConnectionSection() {
             {toolGroups.map((group) => (
               <div key={group.key}>
                 <div className="mb-1 flex items-baseline gap-2">
-                  <span className="text-[11px] font-medium text-foreground/80">{group.label}</span>
-                  <span className="text-[10px] tabular-nums text-muted-foreground/70">
-                    {group.items.length}
-                  </span>
+                  <span className="text-micro font-medium text-foreground/80">{group.label}</span>
+                  <span className="text-nano tabular-nums text-faint">{group.items.length}</span>
                 </div>
                 <div className="grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                   {group.items.map((name) => (
                     <span
                       key={name}
                       title={name}
-                      className="truncate rounded px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+                      className="truncate rounded px-1.5 py-0.5 font-mono text-micro text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground"
                     >
                       {name}
                     </span>
@@ -341,7 +339,7 @@ export function ConnectionSection() {
             ))}
           </div>
         ) : (
-          <p className="px-3 py-6 text-center text-[11px] text-muted-foreground">
+          <p className="px-3 py-6 text-center text-micro text-muted-foreground">
             daemon 未就绪 — 启动 MCP 后此处会列出全部已注册工具
           </p>
         )}
@@ -404,7 +402,7 @@ function PermissionLevel({
       <div className="flex items-start gap-3 p-3">
         <span
           className={cn(
-            'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
+            'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-nano font-semibold',
             subordinate ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground',
           )}
         >
@@ -420,9 +418,9 @@ function PermissionLevel({
             >
               {title}
             </span>
-            {meta && <span className="text-[10px] text-muted-foreground/80">{meta}</span>}
+            {meta && <span className="text-nano text-faint">{meta}</span>}
           </div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>
+          <div className="mt-0.5 text-micro text-muted-foreground">{hint}</div>
         </div>
       </div>
       {/* `pb-3` 两级都要：step 1 免得控件紧贴分隔线，step 2 是卡片底边所需。 */}
@@ -478,12 +476,12 @@ function CapabilityRadioGroup({
               disabled={disabled}
               onClick={() => onChange(opt.value)}
               className={cn(
-                'inline-flex h-7 items-center rounded-sm px-3 text-[11px] font-medium transition-colors',
+                'inline-flex h-7 items-center rounded-sm px-3 text-micro font-medium transition-colors',
                 focusRing,
                 'disabled:cursor-not-allowed',
                 active
                   ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                  : 'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
               )}
             >
               {opt.label}
@@ -491,7 +489,7 @@ function CapabilityRadioGroup({
           );
         })}
       </div>
-      <div className="text-[11px] text-muted-foreground">
+      <div className="text-micro text-muted-foreground">
         {value ? CAPABILITY_OPTIONS.find((o) => o.value === value)?.hint : '正在读取当前策略…'}
       </div>
     </div>

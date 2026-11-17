@@ -203,12 +203,12 @@ export function BatchRunDialog({
                   const isRunning = runningIndex === index;
                   return (
                     <tr key={item.endpointId} className="border-b border-border/60 last:border-0">
-                      <td className="w-16 px-2 py-1.5 font-mono text-[10px] text-muted-foreground">
+                      <td className="w-16 px-2 py-1.5 font-mono text-nano text-muted-foreground">
                         {item.method}
                       </td>
                       <td className="px-2 py-1.5">
                         <div className="truncate text-foreground">{item.name}</div>
-                        <div className="truncate font-mono text-[10px] text-muted-foreground">
+                        <div className="truncate font-mono text-nano text-muted-foreground">
                           {item.url}
                         </div>
                       </td>

@@ -144,7 +144,7 @@ export function SettingsPanel() {
       {/* 左栏 —— 分区条目的竖排列表。视觉分量对齐项目树，让设置标签读起来像又一个导航
           语境，而不是一个弹窗。 */}
       <aside className="flex w-48 shrink-0 flex-col gap-0.5 border-r border-border bg-card/40 p-2">
-        <div className="label-caps px-2 pb-2 pt-1 text-muted-foreground/70">分组</div>
+        <div className="label-caps px-2 pb-2 pt-1">分组</div>
         <nav className="flex flex-col gap-0.5" role="tablist" aria-label="设置分组">
           {RAIL_ITEMS.map((item) => {
             const active = item.id === activeSection;
@@ -177,8 +177,8 @@ export function SettingsPanel() {
                   <span className="block truncate font-medium">{item.label}</span>
                   <span
                     className={cn(
-                      'block truncate text-[10px]',
-                      active ? 'text-muted-foreground' : 'text-muted-foreground/70',
+                      'block truncate text-nano',
+                      active ? 'text-muted-foreground' : 'text-faint',
                     )}
                   >
                     {item.hint}
@@ -190,7 +190,7 @@ export function SettingsPanel() {
         </nav>
 
         {/* 钉在底部的小提示卡 —— 说明改动会立刻保存、哪些项要重启才生效。 */}
-        <div className="mt-auto rounded-md border border-dashed border-border/70 bg-background/30 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">
+        <div className="mt-auto rounded-md border border-dashed border-border/70 bg-background/30 px-2.5 py-2 text-micro leading-relaxed text-muted-foreground">
           设置改动会立即保存。重启 MCP 进程后部分项生效。
         </div>
       </aside>
@@ -202,7 +202,7 @@ export function SettingsPanel() {
         className="min-w-0 flex-1 overflow-y-auto"
         data-settings-active={activeSection}
       >
-        <div className="flex items-center gap-1.5 px-12 pb-1 pt-5 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-1.5 px-12 pb-1 pt-5 text-micro text-muted-foreground">
           <span>设置</span>
           <ChevronRight className="h-3 w-3 text-muted-foreground/60" />
           <span className="text-foreground">{meta.title}</span>

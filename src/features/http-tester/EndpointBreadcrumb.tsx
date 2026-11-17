@@ -20,7 +20,7 @@ export function EndpointBreadcrumb({
   return (
     <nav
       aria-label="接口所属路径"
-      className="flex shrink-0 items-center gap-1 px-4 pt-5 text-[11px] text-muted-foreground"
+      className="flex shrink-0 items-center gap-1 px-4 pt-5 text-micro text-muted-foreground"
     >
       {project && ancestors.length > 0 ? (
         <>

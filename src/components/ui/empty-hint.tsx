@@ -12,7 +12,7 @@ export function EmptyHint({ children, className }: { children: ReactNode; classN
   return (
     <div
       className={cn(
-        'rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-[11px] text-muted-foreground',
+        'rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-micro text-muted-foreground',
         className,
       )}
     >

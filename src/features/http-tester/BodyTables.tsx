@@ -58,7 +58,7 @@ export function FormFieldsEditor({
     <div className="rounded-md border border-border">
       <table className="w-full table-fixed border-collapse text-sm">
         <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <tr className="text-nano uppercase tracking-wider text-muted-foreground">
             <th className="w-8 px-1 pb-1.5 text-left font-medium"></th>
             <th className="w-[32%] px-2 pb-1.5 text-left font-medium">参数名</th>
             <th className="w-[38%] px-2 pb-1.5 text-left font-medium">参数值</th>
@@ -109,7 +109,7 @@ export function FormFieldsEditor({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                  className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
                   onClick={() => remove(index)}
                   aria-label="删掉这一行"
                 >
@@ -161,7 +161,7 @@ export function MultipartPartsEditor({
     <div className="rounded-md border border-border">
       <table className="w-full table-fixed border-collapse text-sm">
         <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <tr className="text-nano uppercase tracking-wider text-muted-foreground">
             <th className="w-8 px-1 pb-1.5 text-left font-medium"></th>
             <th className="w-[24%] px-2 pb-1.5 text-left font-medium">参数名</th>
             <th className="w-[18%] px-2 pb-1.5 text-left font-medium">类型</th>
@@ -291,7 +291,7 @@ function MultipartRow({
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+          className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
           onClick={() => onRemove(index)}
           aria-label="删掉这一分片"
         >
@@ -336,7 +336,7 @@ function FileCell({
       />
       {filename ? (
         <>
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/80">
+          <span className="min-w-0 flex-1 truncate font-mono text-micro text-foreground/80">
             {filename}
           </span>
           <Button
@@ -427,8 +427,8 @@ export function BinaryBodyEditor({
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground/85">
             {file.name}
           </span>
-          <span className="text-[11px] text-muted-foreground">{formatBytes(file.size)}</span>
-          <span className="text-[11px] text-muted-foreground">{file.contentType}</span>
+          <span className="text-micro text-muted-foreground">{formatBytes(file.size)}</span>
+          <span className="text-micro text-muted-foreground">{file.contentType}</span>
           <Button
             variant="outline"
             size="sm"

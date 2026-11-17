@@ -84,14 +84,14 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
   if (!loaded) {
     return (
       <div className="space-y-2">
-        <p className="text-[11px] text-muted-foreground">读取 agent 权限…</p>
+        <p className="text-micro text-muted-foreground">读取 agent 权限…</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-micro text-muted-foreground">
         控制 AI agent 对每个项目可执行的操作范围。
         {/* `text-warning` 是琥珀色阶的*边框*档（38 92% 45%），压在卡片自身表面上，
             亮色主题下约 3.3:1，11px 文字撑不住。`--warning-foreground` 才是文字档
@@ -144,11 +144,11 @@ export function AgentPermissionsTable({ projects }: AgentPermissionsTableProps) 
                           void handleChange(project.id, mode);
                         }}
                         className={cn(
-                          'inline-flex h-7 items-center rounded-sm px-3 text-[11px] font-medium transition-colors',
+                          'inline-flex h-7 items-center rounded-sm px-3 text-micro font-medium transition-colors',
                           focusRingBare,
                           active
                             ? 'bg-primary text-primary-foreground'
-                            : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                            : 'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
                         )}
                       >
                         {MODE_LABELS[mode].label}

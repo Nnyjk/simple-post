@@ -140,7 +140,7 @@ export function McpHttpConfigSection() {
       {/* ----- 监听 ------------------------------------------- */}
       <div className="space-y-3 p-3">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[11px] font-medium text-muted-foreground">监听配置</div>
+          <div className="text-micro font-medium text-muted-foreground">监听配置</div>
           {loadError && (
             <Button
               type="button"
@@ -188,24 +188,24 @@ export function McpHttpConfigSection() {
             />
           </Field>
         </div>
-        <p className="text-[11px] text-muted-foreground/80">
+        <p className="text-micro text-faint">
           MCP 的端点只有一处：后台守护进程自己的监听端口，主端口不再提供 MCP。端口写 0 时由
           系统分配，客户端配置里的地址会随重启变化；写一个具体端口时，守护进程就监听那个
           端口，地址固定不变。监听地址写 127.0.0.1 时只有本机能连；写 0.0.0.0 时局域网里的
           其他机器也能连，那种情况要开「允许远程访问」并把 Host 与 Origin 白名单填上。
         </p>
         <div className="rounded-md border border-border/60 bg-muted/30 px-2.5 py-2">
-          <div className="text-[11px] font-medium text-foreground">对外暴露的 MCP 端点</div>
+          <div className="text-micro font-medium text-foreground">对外暴露的 MCP 端点</div>
           {exposedEndpoint ? (
-            <div className="mt-0.5 font-mono text-[11px] text-foreground/90 break-all">
+            <div className="mt-0.5 font-mono text-micro text-foreground/90 break-all">
               {exposedEndpoint}
             </div>
           ) : (
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
+            <div className="mt-0.5 text-micro text-muted-foreground">
               {unavailableReason(endpointFacts)}
             </div>
           )}
-          <div className="mt-1 text-[10px] text-muted-foreground/80">
+          <div className="mt-1 text-nano text-faint">
             {saved && saved.port > 0
               ? `配置里写的端口是 ${saved.port}；守护进程重启之后才真的监听它。` +
                 (IS_TAURI_SHELL ? '' : '部署侧还要把这个端口发布出来，外部客户端才连得上。')
@@ -219,7 +219,7 @@ export function McpHttpConfigSection() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium text-foreground">允许远程访问</div>
-            <div className="mt-0.5 text-[11px] text-muted-foreground">
+            <div className="mt-0.5 text-micro text-muted-foreground">
               仅当监听地址为非 127.0.0.1 或 ::1 时需要开启。保持监听地址为回环地址时，
               请求只可能来自本机，开关与白名单都不参与判断。
             </div>
@@ -232,7 +232,7 @@ export function McpHttpConfigSection() {
         </div>
 
         {remoteRedundant && (
-          <p className="text-[11px] text-muted-foreground/80">
+          <p className="text-micro text-faint">
             监听地址是回环地址，远程访问开关与白名单目前都不参与判断。
           </p>
         )}
@@ -263,7 +263,7 @@ export function McpHttpConfigSection() {
 
       {/* ----- 保存 --------------------------------------------- */}
       <div className="flex items-center justify-between gap-3 border-t border-border/60 p-3">
-        <div className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+        <div className="min-w-0 flex-1 text-micro text-muted-foreground">
           {saveError ? (
             <span className="text-destructive">{saveError}</span>
           ) : error ? (
@@ -294,8 +294,8 @@ export function McpHttpConfigSection() {
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block min-w-0">
-      <span className="block text-[11px] font-medium text-foreground">{label}</span>
-      {hint && <span className="block text-[10px] text-muted-foreground/80">{hint}</span>}
+      <span className="block text-micro font-medium text-foreground">{label}</span>
+      {hint && <span className="block text-nano text-faint">{hint}</span>}
       <span className="mt-1 block">{children}</span>
     </label>
   );
@@ -329,7 +329,7 @@ function ListTextarea({
       rows={3}
       className={cn(
         'flex w-full resize-y rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-xs',
-        'placeholder:font-sans placeholder:text-muted-foreground/60',
+        'placeholder:font-sans placeholder:text-faint',
         focusRing,
         'disabled:cursor-not-allowed disabled:opacity-50',
       )}

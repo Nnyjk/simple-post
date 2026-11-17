@@ -61,7 +61,7 @@ function CommandLine({ command }: { command: string }) {
 
   return (
     <div className="flex items-start gap-2">
-      <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted/60 px-2 py-1.5 font-mono text-[11px] leading-relaxed">
+      <pre className="min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-muted/60 px-2 py-1.5 font-mono text-micro leading-relaxed">
         {command}
       </pre>
       <Button
@@ -88,7 +88,7 @@ function DownloadProgress({
 }) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between text-micro text-muted-foreground">
         <span>{phase === 'install' ? '正在安装…' : '正在下载更新包'}</span>
         {phase === 'download' && percent !== null && <span className="font-mono">{percent}%</span>}
       </div>
@@ -127,14 +127,14 @@ function ApplyResultBlock({ result }: { result: UpdateApplyResult | null }) {
       )}
     >
       <div
-        className={cn('text-[11px] font-medium', failed ? 'text-destructive' : 'text-foreground')}
+        className={cn('text-micro font-medium', failed ? 'text-destructive' : 'text-foreground')}
       >
         {failed ? `更新命令失败（退出码 ${result.exitCode}）` : '更新命令已执行'}
       </div>
-      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted/50 px-2 py-1.5 font-mono text-[10px] leading-relaxed">
+      <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted/50 px-2 py-1.5 font-mono text-nano leading-relaxed">
         {output || '（没有输出）'}
       </pre>
-      {!failed && <p className="text-[11px] text-muted-foreground">更新已下发，重启完成后生效。</p>}
+      {!failed && <p className="text-micro text-muted-foreground">更新已下发，重启完成后生效。</p>}
     </section>
   );
 }
@@ -186,7 +186,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           >
             {installing ? '正在安装…' : '下载并安装'}
           </Button>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">
             安装包在后台静默运行，装完自动重启，不需要卸载或再点下一步。
           </span>
         </div>
@@ -225,7 +225,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           <span className="font-mono text-muted-foreground">{info?.current || '—'}</span>
           <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
           <span className="font-mono text-sm font-semibold text-foreground">{latest ?? '—'}</span>
-          <span className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="ml-auto flex items-center gap-2 text-micro text-muted-foreground">
             {published && <span>发布于 {published}</span>}
             {checked && <span>检查于 {checked}</span>}
           </span>
@@ -236,7 +236,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
             href={info.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-[11px] text-primary underline-offset-2 hover:underline"
+            className="inline-flex items-center gap-1 text-micro text-primary underline-offset-2 hover:underline"
           >
             在 GitHub 查看
             <ExternalLink className="h-3 w-3" />
@@ -245,11 +245,11 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
 
         {/* 发布说明 = 这个版本的新特性。空说明不空着，写清楚它没填。 */}
         <section className="rounded-md border border-border/70 bg-background/40 p-3">
-          <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">发布说明</div>
+          <div className="mb-1.5 text-micro font-medium text-muted-foreground">发布说明</div>
           {info?.notes ? (
             <ReleaseNotes notes={info.notes} />
           ) : (
-            <p className="text-[11px] text-muted-foreground">该版本未填写发布说明</p>
+            <p className="text-micro text-muted-foreground">该版本未填写发布说明</p>
           )}
         </section>
 
@@ -257,11 +257,11 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           <section className="space-y-2">
             {deployment?.command && <CommandLine command={deployment.command} />}
             {binary ? (
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
+              <p className="text-micro leading-relaxed text-muted-foreground">
                 当前以源码 / 二进制方式运行，请按部署文档拉取新版本并重启。
               </p>
             ) : (
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
+              <p className="text-micro leading-relaxed text-muted-foreground">
                 {deployment?.applyEnabled
                   ? '点「立即执行更新」会在容器内执行运维声明的更新命令；也可以自己在仓库根目录执行上面的命令。'
                   : '当前部署没有开启就地更新：请到部署侧的仓库根目录执行上面的命令，或按文档拉取新镜像并重启。'}
@@ -275,7 +275,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
         <ApplyResultBlock result={applyResult} />
 
         {error && (
-          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-micro text-destructive">
             {error}
           </p>
         )}

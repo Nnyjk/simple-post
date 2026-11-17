@@ -2,7 +2,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { cn, focusRingBare } from '@/lib/utils';
 import { IconTile } from '@/components/ui/icon-tile';
 import type { Environment } from '@/types/domain';
 import { envIcon } from '../env-utils';
@@ -85,7 +85,7 @@ export function EnvSwitcher({
               // 紫 = 类生产）。`envIcon` 按环境名自动挑，用户不必逐个打标。
               isSelected
                 ? 'border-primary/40 bg-primary/10 text-foreground shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.25)]'
-                : 'border-border bg-card/30 text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+                : 'border-border bg-card/30 text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
             )}
           >
             <IconTile
@@ -115,14 +115,24 @@ export function EnvSwitcher({
                 <span
                   role="button"
                   aria-label={`删除环境 ${env.name}`}
-                  tabIndex={-1}
+                  // 0 而非 -1：删环境只靠 hover 才可达，键盘用户原先完全够不到它。
+                  // 行本身是「切到该环境」，故这个 span 必须是独立 Tab 停靠点。
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onRequestDelete(env);
+                    }
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
                     onRequestDelete(env);
                   }}
                   className={cn(
                     'ml-0.5 inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded text-muted-foreground/60 opacity-0 hover:bg-destructive/20 hover:text-destructive',
-                    'group-hover:opacity-100',
+                    'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+                    focusRingBare,
                     isSelected && 'opacity-100',
                   )}
                 >

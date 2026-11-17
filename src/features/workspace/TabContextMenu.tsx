@@ -164,13 +164,12 @@ function MenuItem({
         // 实心 `bg-accent` 的 hover 在新阶梯上是空操作。
         'hover:bg-overlay-hover hover:text-foreground',
         'focus:bg-overlay-hover focus:text-foreground focus:outline-none',
-        disabled &&
-          'cursor-not-allowed text-muted-foreground/50 hover:bg-transparent hover:text-muted-foreground/50',
+        disabled && 'cursor-not-allowed text-faint hover:bg-transparent hover:text-faint',
       )}
     >
       <span className="shrink-0 text-muted-foreground">{icon}</span>
       <span className="flex-1">{label}</span>
-      {shortcut && <span className="shrink-0 text-[10px] text-faint">{shortcut}</span>}
+      {shortcut && <span className="shrink-0 text-nano text-faint">{shortcut}</span>}
     </button>
   );
 }

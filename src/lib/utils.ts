@@ -1,5 +1,13 @@
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
+
+/** `micro`(11px) / `nano`(10px) 是 `tailwind.config.js` 里自定义的字号档，
+ *  `tailwind-merge` 默认不认识 —— 不认识就当成「互相不冲突的类」，
+ *  `cn('text-xs', 'text-micro')` 会把两个都留下，胜负由样式表顺序决定而不是参数顺序。
+ *  登记进 `font-size` 组后，它就是普通字号，后写的照样压过前面的。 */
+const twMerge = extendTailwindMerge({
+  extend: { classGroups: { 'font-size': [{ text: ['micro', 'nano'] }] } },
+});
 
 /** 条件 className 拼接 —— 先用 `clsx` 合并真值入参，再用 `tailwind-merge`
  *  让后面的工具类压过前面的（如 `cn('px-4', false && 'px-2')` → `'px-4'`）。 */
@@ -24,6 +32,13 @@ export const focusRing =
  */
 export const focusRingBare =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+/**
+ * 同上，但环朝内。给被父容器 `overflow-hidden` 裁掉外侧的控件用 —— 目前只有标签条的
+ * 标签（条高 36px、标签 `h-full`，外侧的 2px 环连同 1px 偏移都会被条裁没）。
+ */
+export const focusRingInset =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
 
 export function formatBytes(bytes: number): string {
   if (!bytes) return '0 B';
@@ -68,6 +83,46 @@ export function statusColorVar(status: number): string {
   if (status >= 300) return 'hsl(217 91% 60%)';
   if (status >= 200) return 'hsl(142 71% 45%)';
   return 'hsl(220 14% 46%)';
+}
+
+/**
+ * 状态码的**文字**色档。`statusColorVar` 是块色（给图标用），文字不能跟着用：那些色相
+ * 不随主题变化，浅色 card 上绿字只有 2.3:1。`-foreground` 才是主题换极性的文字档。
+ */
+export function statusTextClass(status: number): string {
+  if (status >= 500) return 'text-destructive';
+  if (status >= 400) return 'text-warning-foreground';
+  if (status >= 300) return 'text-muted-foreground';
+  if (status >= 200) return 'text-success-foreground';
+  return 'text-muted-foreground';
+}
+
+/**
+ * 固定色相实色底上的可读文字色。`methodColorVar` 这类色相不随主题变化，因此配不上会换
+ * 极性的 `-foreground` token；改为按 WCAG 相对亮度在近黑/白之间选对比度更高的那个
+ * （`hsl(38 92% 50%)` 上白字 2.1:1、近黑字 9.8:1）。解析失败时退回白字。
+ */
+export function readableInk(hslColor: string): string {
+  const m = /hsl\(([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\)/.exec(hslColor);
+  if (!m) return 'hsl(0 0% 100%)';
+  const h = Number(m[1]) / 360;
+  const s = Number(m[2]) / 100;
+  const l = Number(m[3]) / 100;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const channel = (t: number) => {
+    const x = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
+    if (x < 1 / 6) return p + (q - p) * 6 * x;
+    if (x < 1 / 2) return q;
+    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
+    return p;
+  };
+  const linear = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance =
+    0.2126 * linear(channel(h + 1 / 3)) +
+    0.7152 * linear(channel(h)) +
+    0.0722 * linear(channel(h - 1 / 3));
+  return luminance > 0.179 ? 'hsl(0 0% 10%)' : 'hsl(0 0% 100%)';
 }
 
 export function uid(): string {

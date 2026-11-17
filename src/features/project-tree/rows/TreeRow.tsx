@@ -306,7 +306,7 @@ export function TreeRow({
                 onClick={onPlusClick}
                 onDoubleClick={(e) => e.stopPropagation()}
                 aria-label="新建"
-                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
               >
                 <Plus className="h-3 w-3" />
               </button>

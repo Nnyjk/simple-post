@@ -21,7 +21,7 @@ import { cn, focusRingBare } from '@/lib/utils';
  */
 const WIN_BTN =
   'flex h-7 w-8 items-center justify-center rounded text-muted-foreground ' +
-  'transition-colors hover:bg-accent hover:text-foreground';
+  'transition-colors hover:bg-overlay-hover hover:text-foreground';
 
 /**
  * 包一层，让同一份组件代码能在普通浏览器里跑而不抛异常。在 Tauri shell 内

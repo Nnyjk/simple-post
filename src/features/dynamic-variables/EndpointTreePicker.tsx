@@ -208,13 +208,13 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
                     type="button"
                     onClick={() => onSelect(hit.node.id, hit.node.rootId, hit.node.name)}
                     className={cn(
-                      'flex w-full flex-col items-start gap-0.5 px-2 py-1.5 text-left transition-colors hover:bg-accent',
+                      'flex w-full flex-col items-start gap-0.5 px-2 py-1.5 text-left transition-colors hover:bg-overlay-hover',
                       focusRing,
                       value === hit.node.id && 'bg-accent',
                     )}
                   >
                     <span className="w-full truncate text-xs font-medium">{hit.node.name}</span>
-                    <span className="w-full truncate text-[11px] text-muted-foreground">
+                    <span className="w-full truncate text-micro text-muted-foreground">
                       {hit.path.join(' / ')}
                     </span>
                   </button>
@@ -249,7 +249,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
                           )
                         }
                         className={cn(
-                          'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-faint transition-colors hover:bg-accent hover:text-foreground',
+                          'flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-faint transition-colors hover:bg-overlay-hover hover:text-foreground',
                           focusRing,
                         )}
                         aria-label={open ? '收起' : '展开'}
@@ -270,7 +270,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
                         type="button"
                         onClick={() => onSelect(row.id, row.projectId, row.name)}
                         className={cn(
-                          'min-w-0 flex-1 truncate rounded-sm px-1 py-0.5 text-left transition-colors hover:bg-accent',
+                          'min-w-0 flex-1 truncate rounded-sm px-1 py-0.5 text-left transition-colors hover:bg-overlay-hover',
                           focusRing,
                           value === row.id && 'bg-accent font-medium',
                         )}
@@ -283,7 +283,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
                       </span>
                     )}
                     {open && kids && kids.length === 0 && (
-                      <span className="pr-1 text-[11px] text-faint">（空）</span>
+                      <span className="pr-1 text-micro text-faint">（空）</span>
                     )}
                   </div>
                 </li>
@@ -293,7 +293,7 @@ export function EndpointTreePicker({ value, onSelect }: EndpointTreePickerProps)
         )}
       </div>
 
-      <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+      <p className="flex items-center gap-1 text-micro text-muted-foreground">
         <FolderTree className="h-3 w-3" />
         {value === ''
           ? '还没选接口。展开一个项目，逐层找到要取数的那条接口。'

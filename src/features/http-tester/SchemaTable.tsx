@@ -11,6 +11,7 @@
 import { Fragment } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
+import { EmptyHint } from '@/components/ui/empty-hint';
 import type { SchemaField, SchemaViewResult } from '@/lib/schema-view';
 import { useLocalExpansion } from '@/hooks/useLocalExpansion';
 
@@ -36,20 +37,20 @@ export function SchemaTable({ result }: { result: SchemaViewResult }) {
 
   if (view.empty) {
     return (
-      <div className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+      <EmptyHint className="text-xs">
         还没有写 Schema 定义。切到「JSON」视图填写这份接口接受的参数结构。
-      </div>
+      </EmptyHint>
     );
   }
 
   if (!view.fields.length) {
     return (
-      <div className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+      <EmptyHint className="py-3 text-xs">
         <p>这份定义没有列出字段。</p>
         {view.type ? <p className="mt-1">根节点类型：{view.type}</p> : null}
         {view.description ? <p className="mt-1">说明：{view.description}</p> : null}
         {view.note ? <p className="mt-1">{view.note}</p> : null}
-      </div>
+      </EmptyHint>
     );
   }
 
@@ -65,7 +66,7 @@ export function SchemaTable({ result }: { result: SchemaViewResult }) {
           <col className="w-[24%]" />
         </colgroup>
         <thead>
-          <tr className="border-b border-border bg-muted/40 text-[11px] text-muted-foreground">
+          <tr className="border-b border-border bg-muted/40 text-micro text-muted-foreground">
             <th scope="col" className="px-2 py-1.5 text-left font-medium">
               字段名
             </th>
@@ -145,23 +146,23 @@ function SchemaRows({ fields, depth, pathPrefix, isExpanded, onToggle }: RowsPro
                   ) : (
                     <span className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
                   )}
-                  <span className="font-mono text-[11px] break-all">{field.name}</span>
+                  <span className="font-mono text-micro break-all">{field.name}</span>
                 </div>
               </td>
               <td className="px-2 py-1.5">
-                <span className="font-mono text-[11px] break-all">{field.type}</span>
+                <span className="font-mono text-micro break-all">{field.type}</span>
                 {field.format ? (
-                  <span className="ml-1 text-[10px] text-muted-foreground">{field.format}</span>
+                  <span className="ml-1 text-nano text-muted-foreground">{field.format}</span>
                 ) : null}
               </td>
               <td className="px-2 py-1.5">
                 {/* 必填与否同时用文字写出来：只靠颜色区分，浅色主题下读不出来。 */}
                 {field.required ? (
-                  <span className="inline-block rounded bg-muted px-1 py-0.5 text-[10px] font-semibold text-foreground">
+                  <span className="inline-block rounded bg-muted px-1 py-0.5 text-nano font-semibold text-foreground">
                     必填
                   </span>
                 ) : (
-                  <span className="text-[10px] text-muted-foreground">可选</span>
+                  <span className="text-nano text-muted-foreground">可选</span>
                 )}
               </td>
               <td className="px-2 py-1.5">
@@ -169,9 +170,7 @@ function SchemaRows({ fields, depth, pathPrefix, isExpanded, onToggle }: RowsPro
                   <p className="break-words text-muted-foreground">{field.description}</p>
                 ) : null}
                 {field.note ? (
-                  <p className="mt-0.5 break-words text-[10px] text-muted-foreground">
-                    {field.note}
-                  </p>
+                  <p className="mt-0.5 break-words text-nano text-muted-foreground">{field.note}</p>
                 ) : null}
                 {!field.description && !field.note ? (
                   <span className="text-muted-foreground">—</span>
@@ -183,7 +182,7 @@ function SchemaRows({ fields, depth, pathPrefix, isExpanded, onToggle }: RowsPro
                     {field.enumValues.map((value, index) => (
                       <span
                         key={`${value}-${index}`}
-                        className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]"
+                        className="rounded bg-muted px-1 py-0.5 font-mono text-nano"
                       >
                         {value}
                       </span>
@@ -191,7 +190,7 @@ function SchemaRows({ fields, depth, pathPrefix, isExpanded, onToggle }: RowsPro
                   </div>
                 ) : null}
                 {field.defaultValue !== undefined ? (
-                  <p className="mt-1 text-[10px] text-muted-foreground">
+                  <p className="mt-1 text-nano text-muted-foreground">
                     默认 <span className="font-mono">{field.defaultValue}</span>
                   </p>
                 ) : null}

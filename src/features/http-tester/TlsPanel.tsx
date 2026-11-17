@@ -63,7 +63,7 @@ export function TlsPanel({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium text-foreground">继承全局设置</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 text-micro text-muted-foreground">
             打开时这个接口用设置面板里的全局默认；关掉后这个接口改用自己的那一份，且整体顶掉全局默认
           </div>
         </div>
@@ -73,7 +73,7 @@ export function TlsPanel({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium text-foreground">{TLS_SKIP_VERIFY.label}</div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 text-micro text-muted-foreground">
             {TLS_SKIP_VERIFY.description}
           </div>
         </div>
@@ -99,11 +99,11 @@ export function TlsPanel({
             aria-label={field.label}
             className="font-mono text-sm"
           />
-          <p className="mt-1 text-[11px] text-muted-foreground">{field.description}</p>
+          <p className="mt-1 text-micro text-muted-foreground">{field.description}</p>
         </div>
       ))}
 
-      <p className="text-[11px] text-muted-foreground/80">{TLS_PATH_NOTE}</p>
+      <p className="text-micro text-faint">{TLS_PATH_NOTE}</p>
     </div>
   );
 }

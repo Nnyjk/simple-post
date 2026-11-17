@@ -62,7 +62,7 @@ export function KeyValueEditor({
     <div className="px-4 py-3">
       <table className="w-full table-fixed border-collapse text-sm">
         <thead>
-          <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <tr className="text-nano uppercase tracking-wider text-muted-foreground">
             <th className="w-8 px-1 pb-1.5 text-left font-medium"></th>
             <th className="w-[35%] px-2 pb-1.5 text-left font-medium">Key</th>
             <th className="w-[45%] px-2 pb-1.5 text-left font-medium">Value</th>
@@ -193,7 +193,7 @@ function KeyValueRow({
         <Button
           variant="ghost"
           size="icon"
-          className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+          className="h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100"
           onClick={remove}
         >
           <Trash2 className="h-3 w-3 text-muted-foreground" />

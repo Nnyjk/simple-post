@@ -39,31 +39,31 @@ export function buildTabItems(state: TabBadgeState): TabItem[] {
   return TABS.map((t) => {
     let badge: ReactNode = null;
     if (t.id === 'params' && state.params) {
-      badge = <span className="rounded bg-muted px-1 text-[10px]">{state.params}</span>;
+      badge = <span className="rounded bg-muted px-1 text-nano">{state.params}</span>;
     }
     if (t.id === 'path' && state.path) {
-      badge = <span className="rounded bg-muted px-1 text-[10px]">{state.path}</span>;
+      badge = <span className="rounded bg-muted px-1 text-nano">{state.path}</span>;
     }
     if (t.id === 'headers' && state.headers) {
-      badge = <span className="rounded bg-muted px-1 text-[10px]">{state.headers}</span>;
+      badge = <span className="rounded bg-muted px-1 text-nano">{state.headers}</span>;
     }
     if (t.id === 'body' && state.body) {
-      badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;
+      badge = <span className="rounded bg-primary/20 px-1 text-nano text-primary">●</span>;
     }
     if (t.id === 'auth' && state.auth) {
       badge = (
-        <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>
+        <span className="rounded bg-warning/20 px-1 text-nano text-warning-foreground">●</span>
       );
     }
     if (t.id === 'response' && state.response) {
-      badge = <span className="rounded bg-muted px-1 text-[10px]">{state.response}</span>;
+      badge = <span className="rounded bg-muted px-1 text-nano">{state.response}</span>;
     }
     if (t.id === 'script' && state.script) {
-      badge = <span className="rounded bg-primary/20 px-1 text-[10px] text-primary">●</span>;
+      badge = <span className="rounded bg-primary/20 px-1 text-nano text-primary">●</span>;
     }
     if (t.id === 'tls' && state.tls) {
       badge = (
-        <span className="rounded bg-warning/20 px-1 text-[10px] text-warning-foreground">●</span>
+        <span className="rounded bg-warning/20 px-1 text-nano text-warning-foreground">●</span>
       );
     }
     return { id: t.id, label: t.label, badge, disabled: t.disabled };
