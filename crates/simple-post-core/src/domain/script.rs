@@ -26,7 +26,7 @@ pub struct NodeScripts {
 
 /// 脚本的 patch：缺席 = 不动，`null` = 清除，设值 = 写入。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodeScriptsPatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,6 +34,11 @@ pub struct NodeScriptsPatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test_script: Option<Option<String>>,
+    /// 节点自己的身份字段。理由同 `domain::resource::ResourceNodePatch`：读出来的
+    /// [`NodeScripts`] 原样 PATCH 回来是公开契约，故 `nodeId` 被**认得**但不被写入
+    /// （身份由路径决定），也不构成一次写入（`is_empty()` 仍为 true）。
+    #[serde(default, skip_serializing)]
+    pub node_id: Option<String>,
 }
 
 impl NodeScriptsPatch {

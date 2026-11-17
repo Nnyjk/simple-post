@@ -84,6 +84,7 @@ fn patch(pre: Option<Option<String>>, test: Option<Option<String>>) -> NodeScrip
     NodeScriptsPatch {
         pre_request_script: pre,
         test_script: test,
+        node_id: None,
     }
 }
 

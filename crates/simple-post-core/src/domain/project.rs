@@ -39,7 +39,7 @@ impl Project {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -48,6 +48,20 @@ pub struct ProjectPatch {
     pub description: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// 项目自己的身份字段：`id` / `createdAt` / `updatedAt`。
+    ///
+    /// 「取回再改再写回」是公开契约（完整理由见 `domain::resource::ResourceNodePatch` 上
+    /// 的说明）：客户端 GET 一个项目，改一处，再把整个 body PATCH 回去。补丁类型带
+    /// `deny_unknown_fields`，故它必须认得项目自己的每一个字段名，否则这条往返从一个 400
+    /// 开始。这几个字段只被**接受**，不被写入：身份由路径里的 id 决定，创建与更新时间由
+    /// 写路径自己盖。用 `skip_serializing`（而非 `skip_serializing_if`）是因为它们不指向
+    /// 任何可写列，不该让 [`ProjectPatch::is_empty`] 读起来像「有东西要写」。
+    #[serde(default, skip_serializing)]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub created_at: Option<i64>,
+    #[serde(default, skip_serializing)]
+    pub updated_at: Option<i64>,
 }
 
 impl ProjectPatch {
@@ -123,7 +137,7 @@ pub struct ModuleBaseUrl {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnvironmentPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -137,6 +151,14 @@ pub struct EnvironmentPatch {
     /// `db::environments::set_var_disabled`：那是**一个**变量的一次原子写。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled_variables: Option<Vec<String>>,
+    /// 环境自己的身份字段：`id` / `projectId` / `createdAt`。理由同
+    /// [`ProjectPatch::id`]：认得，但不写。
+    #[serde(default, skip_serializing)]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub created_at: Option<i64>,
 }
 
 impl EnvironmentPatch {

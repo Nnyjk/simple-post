@@ -26,8 +26,11 @@ pub(super) struct ProjectCreateArgs {
 #[derive(Debug, Deserialize)]
 pub(super) struct ProjectUpdateArgs {
     pub project_id: String,
+    /// 直接反序列化成补丁类型：字段名写错会在这里报 `unknown field`，而不是被逐字段
+    /// `.get()` 静默忽略后返回「成功但什么都没改」。身份字段（`id` / `createdAt` /
+    /// `updatedAt`）在补丁类型里声明过，故「取回 → 改一处 → 整行传回」照旧走得通。
     #[serde(default)]
-    pub patch: Option<Value>,
+    pub patch: Option<ProjectPatch>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -169,28 +172,13 @@ pub(super) async fn tool_project_update(
     args: Value,
 ) -> Result<CallToolResult, AppError> {
     let a: ProjectUpdateArgs = serde_json::from_value(args)
-        .map_err(|e| AppError::Validation(format!("project_update args: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("project_update: {e}")))?;
     crate::mcp::check_permission(&state.pool, &a.project_id, "project_update").await?;
 
-    let patch = ProjectPatch {
-        name: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("name"))
-            .and_then(Value::as_str)
-            .map(String::from),
-        description: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("description"))
-            .map(|v| v.as_str().map(String::from)),
-        color: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("color"))
-            .and_then(Value::as_str)
-            .map(String::from),
-    };
+    // 缺键 = 不动，`null` = 清空（`description`），值 = 设成该值；这层语义住在
+    // `ProjectPatch` 上，handler 只负责把对象原样交下去。身份字段由写路径自己盖，
+    // 带上来也不写。
+    let patch = a.patch.unwrap_or_default();
     let p = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::projects::update(c, &a.project_id, patch)
     })?;

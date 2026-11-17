@@ -37,8 +37,11 @@ struct CreateEnvArgs {
 #[derive(Debug, Deserialize)]
 struct UpdateEnvArgs {
     env_id: String,
+    /// 直接反序列化成补丁类型：字段名写错会在这里报 `unknown field`，而不是被逐字段
+    /// `.get()` 静默忽略后返回「成功但什么都没改」。身份字段（`id` / `projectId` /
+    /// `createdAt`）在补丁类型里声明过，故「取回 → 改一处 → 整行传回」照旧走得通。
     #[serde(default)]
-    patch: Option<Value>,
+    patch: Option<EnvironmentPatch>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -245,7 +248,7 @@ async fn tool_env_create(state: &AppState, args: Value) -> Result<CallToolResult
 
 async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let a: UpdateEnvArgs = serde_json::from_value(args)
-        .map_err(|e| AppError::Validation(format!("env_update args: {e}")))?;
+        .map_err(|e| AppError::Validation(format!("env_update: {e}")))?;
     // 先查出所属项目，按项目那扇门才对得上键。写死字面量 "global" 会撞上默认的
     // `ReadCall` 档位，把每一次写都静默拒掉。
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
@@ -253,37 +256,18 @@ async fn tool_env_update(state: &AppState, args: Value) -> Result<CallToolResult
     })?;
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
-    // patch 里没点名的字段一律留 None，故 update 只写被点名的那些列。
-    let patch = EnvironmentPatch {
-        name: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("name"))
-            .and_then(Value::as_str)
-            .map(String::from),
-        // `moduleBaseUrls` 整张 map 替换：缺席 = 该列不动，给了 = 整张替换。
-        module_base_urls: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("moduleBaseUrls"))
-            .and_then(|v| serde_json::from_value(v.clone()).ok()),
-        variables: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("variables"))
-            .and_then(|v| serde_json::from_value(v.clone()).ok()),
-        disabled_variables: a
-            .patch
-            .as_ref()
-            .and_then(|p| p.get("disabledVariables"))
-            .and_then(|v| serde_json::from_value(v.clone()).ok()),
-    };
-
+    // 缺键 = 不动，值 = 整份替换；这层语义住在 `EnvironmentPatch` 上，handler 只负责
+    // 把对象原样交下去。身份字段由写路径自己盖，带上来也不写。
+    let patch = a.patch.unwrap_or_default();
     let env = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::environments::update(c, &a.env_id, patch)
     })?;
     Ok(CallToolResult::json(env))
 }
+
+#[cfg(test)]
+#[path = "env_ops_test.rs"]
+mod tests;
 
 async fn tool_env_delete(state: &AppState, args: Value) -> Result<CallToolResult, AppError> {
     let env_id = arg_str(&args, "env_id")?.to_string();

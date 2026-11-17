@@ -108,8 +108,13 @@ pub struct CreateEnvironmentOpts {
     pub variables: Option<std::collections::HashMap<String, String>>,
 }
 
+/// 请求设置的一次局部更新：缺席 = 不动。
+///
+/// `deny_unknown_fields`：写错键名（`timeoutMS`）必须报错，不能被当成「这次不改」而返回 200。
+/// 身份字段不需要——[`simple_post_core::domain::RequestSettings`] 的四个字段名与这里逐个一致，
+/// 故「读出来整份再 PATCH 回去」本来就认得每一个键。
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RequestSettingsPatch {
     pub timeout_ms: Option<u64>,
     pub follow_redirects: Option<bool>,
@@ -414,3 +419,8 @@ pub struct ExportDocumentOpts {
     /// `"json"` / `"yaml"`。认不出的值报 `AppError::Validation`，不静默回退成 JSON。
     pub format: String,
 }
+
+/// [`RequestSettingsPatch`] 的严格性与往返测试。
+#[cfg(test)]
+#[path = "dto_test.rs"]
+mod patch_tests;

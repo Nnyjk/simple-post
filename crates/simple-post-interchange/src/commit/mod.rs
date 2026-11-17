@@ -508,6 +508,7 @@ fn write_scripts(
         NodeScriptsPatch {
             pre_request_script: scripts.pre_request_script.clone().map(Some),
             test_script: scripts.test_script.clone().map(Some),
+            node_id: None,
         },
     )?;
     Ok(())

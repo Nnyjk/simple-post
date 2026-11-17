@@ -100,6 +100,7 @@ fn set_scripts(pool: &db::DbPool, node_id: &str, pre: &str, test: &str) {
             NodeScriptsPatch {
                 pre_request_script: Some(Some(pre.to_string())),
                 test_script: Some(Some(test.to_string())),
+                node_id: None,
             },
         )
     })
