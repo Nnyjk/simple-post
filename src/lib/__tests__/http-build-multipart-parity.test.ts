@@ -73,8 +73,12 @@ function normalize(text: string, boundary: string): string {
 }
 
 describe('prepareRequest 与 Rust 的 multipart 装配产出一致', () => {
-  it('样本里至少有一个 case', () => {
-    assert.ok(FIXTURE.cases.length > 0, '样本里必须有 case，否则这条测试是空的');
+  it('样本恰好 2 条', () => {
+    assert.equal(
+      FIXTURE.cases.length,
+      2,
+      'multipart 样本必须恰好 2 条：条数变了说明夹具动了，两侧读取器都得跟着看',
+    );
   });
 
   for (const testCase of FIXTURE.cases) {

@@ -423,9 +423,10 @@ struct CollectionOrderNode {
 fn ordered_subtree_endpoints_matches_the_shared_sample() {
     let fixture: CollectionOrderFixture = serde_json::from_str(COLLECTION_ORDER_FIXTURE)
         .expect("fixtures/collection-order-parity.json must parse");
-    assert!(
-        !fixture.cases.is_empty(),
-        "the shared sample must not be empty — an empty one pins nothing"
+    assert_eq!(
+        fixture.cases.len(),
+        8,
+        "the shared sample must hold exactly 8 cases — a count change means the fixture moved, and both readers must follow"
     );
     for case in &fixture.cases {
         let (pool, _dir) = fresh_pool();
