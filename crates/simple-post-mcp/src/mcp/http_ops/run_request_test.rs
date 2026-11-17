@@ -11,7 +11,8 @@ use serde_json::json;
 
 use super::tool_api_run_request;
 use crate::mcp::AppState;
-use simple_post_core::domain::{Environment, ModuleBaseUrl, Project, ResourceNodeType};
+use simple_post_core::domain::{Environment, ModuleBaseUrl, Permission, Project, ResourceNodeType};
+use simple_post_core::error::AppError;
 
 /// 回固定 200，把收到的原始请求记下来。
 async fn stub() -> (String, Arc<Mutex<Vec<String>>>) {
@@ -174,6 +175,35 @@ async fn a_stale_environment_id_degrades_instead_of_failing_the_call() {
     )
     .await;
     assert!(outcome.is_ok(), "环境已被删不该让整次调用失败：{outcome:?}");
+}
+
+/// 环境里可能有密钥，故项目被授予 `read` 时这个工具不许借它的变量把请求发出去。
+/// 全局档位（`api_run_request` 需要 `Capability::Send`）回答不了「这个具体项目可不可
+/// 用」，那道门必须单独问 `agent_permissions`。
+#[tokio::test]
+async fn a_read_tier_project_cannot_send_through_its_environment() {
+    let (api, seen) = stub().await;
+    let st = mcp_state("gate-read");
+    let (project_id, env_id, _module_id) = seed(&st, &api);
+    simple_post_core::db::with_tx(&st.pool, |c| {
+        simple_post_core::db::permissions::set(c, &project_id, Permission::Read)
+    })
+    .unwrap();
+
+    let outcome = tool_api_run_request(
+        &st,
+        json!({ "method": "GET", "url": format!("{api}/users"), "env_id": env_id }),
+    )
+    .await;
+
+    assert!(
+        matches!(outcome, Err(AppError::PermissionDenied(_))),
+        "read 档的项目不许借环境发请求：{outcome:?}"
+    );
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "被拒的调用不该已经发出请求"
+    );
 }
 
 /// 临时请求不点名环境，就**没有环境**——没有默认环境可回落。

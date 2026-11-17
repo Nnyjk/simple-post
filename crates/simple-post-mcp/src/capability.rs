@@ -3,19 +3,21 @@
 // `--capability`（及 `SIMPLE_POST_MCP_CAPABILITY`）在本地上再过滤一次
 // `tools/list`，后端已按 `mcp.policy` 过滤过一层。
 //
-// 后端的 `CapabilityPolicy` 在 `simple-post-core::permissions`，这里拿不到，
-// 于是镜像一份本地 enum：
+// 每个工具需要哪一档 `Capability`，由本 crate 的工具表
+// `crate::mcp::REQUIRED_CAPABILITY` 回答；档位比较交给
+// `simple_post_core::permissions::CapabilityPolicy::satisfies`，与后端
+// `tools/call` 预检是同一份实现（`Read < Create < Update < Delete`，`Send` 只由
+// `FullAccess` 覆盖）。故本地清单与后端裁决不会给出不一致的答案。
 //
-//   read_only   → 只留 `Capability::Read`。响应体里没有该元数据，只能按名字
-//                 里的 `_delete` / `_create` / `_update` / `_set_` /
-//                 `_move` / `_duplicate` 反推。
-//   safe_write  → read-only 之外放行安全改写（env_set_var、env_set_baseurl）。
-//   full_access → 不过滤，仍以后端策略为准。
+// 表里没有的工具名一律不放行：那种名字要么是未注册的，要么是注册表与能力表已经分叉，
+// 两种情况下后端的两道门也拒绝它。
 //
 // 这层只收窄、不放宽：真正的裁决权在后端，本地开关是给「服务端已放开但仍不想让
 // AI 看见破坏性工具」的用户用的。
 
 use std::str::FromStr;
+
+use simple_post_core::permissions::CapabilityPolicy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityOverride {
@@ -49,48 +51,23 @@ impl std::fmt::Display for CapabilityOverride {
     }
 }
 
-/// 破坏性工具的名字后缀。刻意不把后端的 `REQUIRED_CAPABILITY` 拉到客户端来，
-/// 新增工具时在同一个 commit 里补一行即可。
-const DESTRUCTIVE_SUFFIXES: &[&str] = &[
-    "_create",
-    "_update",
-    "_delete",
-    "_set_",
-    "_move",
-    "_duplicate",
-];
-
-/// `FullAccess` 在本地一律放行。
-pub fn filter_tools(name: &str, cap: CapabilityOverride) -> bool {
-    match cap {
-        CapabilityOverride::FullAccess => true,
-        CapabilityOverride::SafeWrite => !is_destructive(name),
-        CapabilityOverride::ReadOnly => {
-            // 会改状态或发外网的一律隐藏，只留安全的读。
-            !is_destructive(name)
-                && !name.contains("api_run_request")
-                && !name.contains("api_call_endpoint")
-                // `api_run_collection` 逐个调用端点，每个端点都是一次出站请求，故与
-                // `api_call_endpoint` 同等对待。它不以破坏性后缀结尾，也**不含**
-                // `api_call_endpoint` 字样，故必须显式排除——漏了它，read_only 档位下
-                // 这个会发外网的工具就会出现在清单里。
-                && !name.contains("api_run_collection")
-                && !name.contains("api_resolve_endpoint")
-                && !name.contains("api_validate_endpoint")
-                // `dynamic_var_resolve` 会真的发出站请求（去数据源取数），故与
-                // `api_call_endpoint` 同等对待。
-                && !name.contains("dynamic_var_resolve")
+impl CapabilityOverride {
+    /// 本地档位对应的后端策略。两者一一对应，故过滤只需要一张档位比较表。
+    fn policy(self) -> CapabilityPolicy {
+        match self {
+            Self::ReadOnly => CapabilityPolicy::ReadOnly,
+            Self::SafeWrite => CapabilityPolicy::SafeWrite,
+            Self::FullAccess => CapabilityPolicy::FullAccess,
         }
     }
 }
 
-fn is_destructive(name: &str) -> bool {
-    DESTRUCTIVE_SUFFIXES.iter().any(|s| name.ends_with(s))
-        || name == "api_diff_responses"
-        || name == "api_extract_jsonpath"
-        // `dynamic_var_set_override` 以 `_override` 结尾，匹配不到上面那张后缀表，
-        // 但它写的是状态，故显式列出来。
-        || name == "dynamic_var_set_override"
+/// 工具 `name` 在 `cap` 档位下是否对客户端可见。
+pub fn filter_tools(name: &str, cap: CapabilityOverride) -> bool {
+    match crate::mcp::required_capability(name) {
+        Some(required) => cap.policy().satisfies(required),
+        None => false,
+    }
 }
 
 #[cfg(test)]
