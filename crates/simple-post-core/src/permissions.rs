@@ -8,8 +8,11 @@
 //! 2. **逐项目 [`Permission`]**（Read / ReadCall / Full）——存在 `agent_permissions` 表里。
 //!    MCP 工具 handler 的 [`require`] 包装器在跑一个会改动的工具前查这张表。
 //!
-//! 新的代码应优先用全局 [`CapabilityPolicy`] 回答「这个工具该不该被 agent 看到/调用」，再落到
-//! 逐项目 [`Permission`] 回答「这个具体项目可不可写」。两侧都问时取更严的那一个。
+//! 两层各答各的问题，互不推演：全局 [`CapabilityPolicy`] 回答「这个工具该不该被 agent 看到 /
+//! 调用」（`tools/list` 的可见性与每次 `tools/call` 的预检，见 [`resolve_capability`]）；
+//! 逐项目 [`Permission`] 回答「这个具体项目可不可写」，由已经知道项目 id 的 handler 调
+//! [`require`]（MCP 侧包装成 `check_permission`）查 `agent_permissions` 表——项目级裁决
+//! 只发生在那里。
 //!
 //! [`Permission`] 枚举住在 `crate::domain`（镜像 `src/types/domain.ts`），本模块重导出它。
 //! [`CapabilityPolicy`] / [`Capability`] 住在这里，因为它们是 MCP 专属的。
@@ -178,77 +181,26 @@ fn rank(p: Permission) -> u8 {
     }
 }
 
-// resolve_capability——把全局策略与逐项目权限合并
+// 全局能力档——preferences 里存的那一档
 
-/// 解析应当给下一次 MCP 工具调用把关的**有效**能力策略。两个输入：全局的 `mcp.policy`
-/// 偏好（三档开关）与逐项目的 `permissions` 行。
+/// 读出下一次 MCP 工具调用要用的**全局**能力档（`preferences.mcp.policy`）。
 ///
-/// `project_id == None` ⇒ 只有全局偏好要紧（例如 `tools/list` 在不碰任何项目的前提下构建
-/// 用户可见的工具清单）。`project_id == Some(_)` ⇒ 两侧都问，取二者中**更严**的：全局档位是
-/// "ReadOnly" 而项目授予 `Full` 时，项目那份授予不能推翻用户「把 AI 写操作全局关掉」的选择。
+/// 这里只回答「用户的全局开关允许多大权限」，`tools/list` 的可见性与 `tools/call` 的预检
+/// 都用这同一个答案。项目级裁决不在这里：它由知道项目 id 的 handler 用 [`require`] 查
+/// `agent_permissions` 表完成。
 ///
-/// 存储失败（preferences 或 permissions 查询）时返回 `AppError::Db`。调用方应把该错误当作拒绝。
+/// 读库放进 `spawn_blocking`：`db::with_conn` 在库忙时会重试并等待，那段等待不该占住一个
+/// Tokio 工作线程。缺行或存了不认识的值 ⇒ [`CapabilityPolicy::default`]（ReadOnly）。
+/// 读取失败返回 `AppError::Db`，调用方应把该错误当作拒绝。
 pub async fn resolve_capability(
     pool: &crate::db::DbPool,
-    project_id: Option<&str>,
 ) -> Result<CapabilityPolicy, crate::error::AppError> {
-    // 1. 全局档位——取自 preferences（首次启动可能缺失，此时默认 = ReadOnly）。
     let pool_clone = pool.clone();
-    let global = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         crate::db::with_conn(&pool_clone, crate::db::preferences::mcp_policy)
     })
     .await
-    .map_err(|e| crate::error::AppError::Db(format!("preferences task: {e}")))??;
-
-    // 2. 逐项目权限——只在有项目在范围内时才问。把逐项目 `Permission` 映射到能力档位，
-    //    使两层可组合：
-    //      Permission::Read       → ReadOnly
-    //      Permission::ReadCall   → SafeWrite（ReadCall 可以经 api_* 工具发外站 HTTP）
-    //      Permission::Full       → FullAccess
-    let project_policy = match project_id {
-        Some(pid) => {
-            let pid = pid.to_string();
-            let pool_clone = pool.clone();
-            let perm = tokio::task::spawn_blocking(move || {
-                crate::db::with_conn(&pool_clone, |c| crate::db::permissions::get(c, &pid))
-            })
-            .await
-            .map_err(|e| crate::error::AppError::Db(format!("permissions task: {e}")))??;
-            Some(permission_to_capability(perm))
-        }
-        None => None,
-    };
-
-    // 3. 保守取严——更严的一侧胜出。
-    Ok(match project_policy {
-        None => global,
-        Some(pp) => stricter(global, pp),
-    })
-}
-
-/// 逐项目 `Permission` → 最接近的 `CapabilityPolicy`。
-fn permission_to_capability(p: Permission) -> CapabilityPolicy {
-    match p {
-        Permission::Read => CapabilityPolicy::ReadOnly,
-        Permission::ReadCall => CapabilityPolicy::SafeWrite,
-        Permission::Full => CapabilityPolicy::FullAccess,
-    }
-}
-
-/// 取两个策略中更严的一个。同一变体即该变体；否则按能力上限排名取**低**的那个——
-/// 保守胜出。把全局策略设成 `ReadOnly` 的用户不希望某个逐项目的 `Full` 静默重新打开写入，
-/// 反之亦然。
-fn stricter(a: CapabilityPolicy, b: CapabilityPolicy) -> CapabilityPolicy {
-    let rank = |p: CapabilityPolicy| match p {
-        CapabilityPolicy::ReadOnly => 0,
-        CapabilityPolicy::SafeWrite => 1,
-        CapabilityPolicy::FullAccess => 2,
-    };
-    if rank(a) <= rank(b) {
-        a
-    } else {
-        b
-    }
+    .map_err(|e| crate::error::AppError::Db(format!("preferences task: {e}")))?
 }
 
 #[cfg(test)]

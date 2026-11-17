@@ -33,7 +33,7 @@ pub async fn dispatch(
     // 无法改动任何东西。缺行 = 拒绝：缺行永远是注册表 bug，不是隐式放行。
     match required_capability(name) {
         Some(req) => {
-            let policy = resolve_capability(&state.pool, None).await?;
+            let policy = resolve_capability(&state.pool).await?;
             if !policy.satisfies(req) {
                 return Err(simple_post_core::error::AppError::PermissionDenied(
                     format!(

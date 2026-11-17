@@ -66,12 +66,12 @@ fn required_permission_read_call_class() {
 
 #[test]
 fn required_permission_defaults_unknown_to_full() {
-    // Write tools — keep them out of the match so they fall here.
+    // 写工具不进 `required_permission` 的匹配分支，靠默认值落到 `Full`。
     assert_eq!(required_permission("projects_create"), Permission::Full);
     assert_eq!(required_permission("projects_update"), Permission::Full);
     assert_eq!(required_permission("projects_delete"), Permission::Full);
     assert_eq!(required_permission("endpoints_create"), Permission::Full);
-    // Genuinely unknown name also defaults to Full (safe side).
+    // 真不存在的名字也取 `Full`：默认偏向安全一侧。
     assert_eq!(required_permission("not_a_real_tool"), Permission::Full);
 }
 
@@ -87,9 +87,8 @@ fn permission_string_roundtrip() {
 
 #[test]
 fn permission_string_rejects_garbage() {
-    // `parse` is the domain-layer helper; my code only depends on
-    // `Permission::as_str` being round-trippable, so the same cases
-    // exercise the wrong-direction failure we care about.
+    // `parse` 是领域层的辅助函数；调用方依赖的性质是 `Permission::as_str` 能往返，
+    // 下面几个用例固定反方向的失败行为。
     assert_eq!(Permission::parse("Read"), None); // wrong case
     assert_eq!(Permission::parse("admin"), None);
     assert_eq!(Permission::parse(""), None);
@@ -98,19 +97,18 @@ fn permission_string_rejects_garbage() {
 
 #[test]
 fn ranks_form_total_order() {
-    // Sanity: ranks must be strictly increasing.
+    // 等级必须严格递增。
     assert!(rank(Permission::Read) < rank(Permission::ReadCall));
     assert!(rank(Permission::ReadCall) < rank(Permission::Full));
 }
 
 // ============================================================
-// CapabilityPolicy — global MCP gate
+// CapabilityPolicy —— 全局 MCP 闸门
 // ============================================================
 
 #[test]
 fn capability_policy_default_is_read_only() {
-    // Safe-by-default: an unclassified or unknown tool must never be
-    // treated as permitted.
+    // 默认取最严的一档：没分类或叫不出名字的工具，都不许被当成允许。
     assert_eq!(CapabilityPolicy::default(), CapabilityPolicy::ReadOnly);
 }
 
@@ -126,28 +124,28 @@ fn capability_policy_round_trip() {
     }
     assert_eq!(CapabilityPolicy::parse("nope"), None);
     assert_eq!(CapabilityPolicy::parse(""), None);
-    // Wrong case — wire format is snake_case and case-sensitive.
+    // 大小写写错就解析失败：线上格式是区分大小写的 snake_case。
     assert_eq!(CapabilityPolicy::parse("Read_Only"), None);
     assert_eq!(CapabilityPolicy::parse("READ_ONLY"), None);
 }
 
 #[test]
 fn capability_policy_satisfies_matrix() {
-    // ReadOnly — covers Read only.
+    // ReadOnly 只覆盖 Read。
     assert!(CapabilityPolicy::ReadOnly.satisfies(Capability::Read));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Create));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Update));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Delete));
     assert!(!CapabilityPolicy::ReadOnly.satisfies(Capability::Send));
 
-    // SafeWrite — covers Read/Create/Update but NOT Delete/Send.
+    // SafeWrite 覆盖 Read/Create/Update，不覆盖 Delete/Send。
     assert!(CapabilityPolicy::SafeWrite.satisfies(Capability::Read));
     assert!(CapabilityPolicy::SafeWrite.satisfies(Capability::Create));
     assert!(CapabilityPolicy::SafeWrite.satisfies(Capability::Update));
     assert!(!CapabilityPolicy::SafeWrite.satisfies(Capability::Delete));
     assert!(!CapabilityPolicy::SafeWrite.satisfies(Capability::Send));
 
-    // FullAccess — covers everything.
+    // FullAccess 覆盖全部。
     assert!(CapabilityPolicy::FullAccess.satisfies(Capability::Read));
     assert!(CapabilityPolicy::FullAccess.satisfies(Capability::Create));
     assert!(CapabilityPolicy::FullAccess.satisfies(Capability::Update));
@@ -157,8 +155,7 @@ fn capability_policy_satisfies_matrix() {
 
 #[test]
 fn capability_policy_serializes_to_snake_case_wire() {
-    // Wire form the renderer reads back must stay snake_case even
-    // though Rust's default serializer would emit "ReadOnly".
+    // 渲染进程读回的线上格式必须是 snake_case，而 Rust 默认序列化器会写出 "ReadOnly"。
     assert_eq!(
         serde_json::to_string(&CapabilityPolicy::ReadOnly).unwrap(),
         "\"read_only\""
@@ -181,15 +178,15 @@ fn capability_policy_deserializes_from_snake_case_wire() {
     assert_eq!(sw, CapabilityPolicy::SafeWrite);
     let fa: CapabilityPolicy = serde_json::from_str("\"full_access\"").unwrap();
     assert_eq!(fa, CapabilityPolicy::FullAccess);
-    // Wrong-case must NOT round-trip — locks down the wire form.
+    // 大小写不一致不许往返成功：这条断言固定线上格式。
     assert!(serde_json::from_str::<CapabilityPolicy>("\"Read_Only\"").is_err());
 }
 
 // ============================================================
-// resolve_capability — global × per-project conservative merge
+// resolve_capability —— 全局能力档
 // ============================================================
 
-/// 建一个位于临时目录的新连接池。镜像 `db::preferences::tests` 里的辅助函数。
+/// 建一个位于临时目录的新连接池，行为与 `db::preferences::tests` 里的同名辅助函数一致。
 fn fresh_pool() -> crate::db::DbPool {
     let dir = std::env::temp_dir().join(format!(
         "simple-post-cap-test-{}-{}",
@@ -203,12 +200,12 @@ fn fresh_pool() -> crate::db::DbPool {
 #[tokio::test]
 async fn resolve_capability_global_default_is_read_only() {
     let pool = fresh_pool();
-    let cap = resolve_capability(&pool, None).await.unwrap();
+    let cap = resolve_capability(&pool).await.unwrap();
     assert_eq!(cap, CapabilityPolicy::ReadOnly);
 }
 
 #[tokio::test]
-async fn resolve_capability_global_preference_takes_when_no_project() {
+async fn resolve_capability_returns_the_stored_global_policy() {
     let pool = fresh_pool();
     crate::db::with_tx(&pool, |c| {
         crate::db::preferences::set(
@@ -218,136 +215,22 @@ async fn resolve_capability_global_preference_takes_when_no_project() {
         )
     })
     .unwrap();
-    let cap = resolve_capability(&pool, None).await.unwrap();
+    let cap = resolve_capability(&pool).await.unwrap();
     assert_eq!(cap, CapabilityPolicy::FullAccess);
 }
 
 #[tokio::test]
-async fn resolve_capability_takes_stricter_side_when_project_permits_more() {
-    // global = ReadOnly, project = Full ⇒ effective: ReadOnly
-    // (user's choice to globally block wins over per-project grant)
+async fn resolve_capability_treats_an_unrecognised_stored_value_as_read_only() {
+    // 手工写进去的未知档位不能被当成「放行」：解析失败回退到默认的 ReadOnly。
     let pool = fresh_pool();
-    // FK requires the project to exist before permissions.set.
-    let now = crate::domain::now_ms();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::projects::create(
-            c,
-            &crate::domain::Project {
-                id: "p_full".to_string(),
-                name: "p_full".to_string(),
-                description: None,
-                color: crate::domain::default_project_color(),
-                created_at: now,
-                updated_at: now,
-            },
-        )
-    })
-    .unwrap();
     crate::db::with_tx(&pool, |c| {
         crate::db::preferences::set(
             c,
             crate::db::preferences::keys::MCP_POLICY,
-            &"read_only".to_string(),
+            &"yolo".to_string(),
         )
     })
     .unwrap();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::permissions::set(c, "p_full", Permission::Full)
-    })
-    .unwrap();
-    let cap = resolve_capability(&pool, Some("p_full")).await.unwrap();
+    let cap = resolve_capability(&pool).await.unwrap();
     assert_eq!(cap, CapabilityPolicy::ReadOnly);
-}
-
-#[tokio::test]
-async fn resolve_capability_takes_stricter_side_when_global_permits_more() {
-    // global = FullAccess, project = ReadCall ⇒ effective: SafeWrite
-    // (per-project restrictive grant wins even when global is open)
-    let pool = fresh_pool();
-    // FK requires the project to exist before permissions.set.
-    let now = crate::domain::now_ms();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::projects::create(
-            c,
-            &crate::domain::Project {
-                id: "p_readcall".to_string(),
-                name: "p_readcall".to_string(),
-                description: None,
-                color: crate::domain::default_project_color(),
-                created_at: now,
-                updated_at: now,
-            },
-        )
-    })
-    .unwrap();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::preferences::set(
-            c,
-            crate::db::preferences::keys::MCP_POLICY,
-            &"full_access".to_string(),
-        )
-    })
-    .unwrap();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::permissions::set(c, "p_readcall", Permission::ReadCall)
-    })
-    .unwrap();
-    let cap = resolve_capability(&pool, Some("p_readcall")).await.unwrap();
-    assert_eq!(cap, CapabilityPolicy::SafeWrite);
-}
-
-#[tokio::test]
-async fn resolve_capability_agree() {
-    // both sides agree ⇒ that tier
-    let pool = fresh_pool();
-    // FK requires the project to exist before permissions.set.
-    let now = crate::domain::now_ms();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::projects::create(
-            c,
-            &crate::domain::Project {
-                id: "p_match".to_string(),
-                name: "p_match".to_string(),
-                description: None,
-                color: crate::domain::default_project_color(),
-                created_at: now,
-                updated_at: now,
-            },
-        )
-    })
-    .unwrap();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::preferences::set(
-            c,
-            crate::db::preferences::keys::MCP_POLICY,
-            &"safe_write".to_string(),
-        )
-    })
-    .unwrap();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::permissions::set(c, "p_match", Permission::ReadCall)
-    })
-    .unwrap();
-    let cap = resolve_capability(&pool, Some("p_match")).await.unwrap();
-    assert_eq!(cap, CapabilityPolicy::SafeWrite);
-}
-
-#[tokio::test]
-async fn resolve_capability_missing_project_id_falls_back_to_global() {
-    // resolve_capability(Some("nonexistent")) — the per-project
-    // lookup reads `default()` (ReadCall) when no row exists. So
-    // global=FullAccess + missing project ⇒ effective: SafeWrite.
-    let pool = fresh_pool();
-    crate::db::with_tx(&pool, |c| {
-        crate::db::preferences::set(
-            c,
-            crate::db::preferences::keys::MCP_POLICY,
-            &"full_access".to_string(),
-        )
-    })
-    .unwrap();
-    let cap = resolve_capability(&pool, Some("nonexistent"))
-        .await
-        .unwrap();
-    assert_eq!(cap, CapabilityPolicy::SafeWrite);
 }
