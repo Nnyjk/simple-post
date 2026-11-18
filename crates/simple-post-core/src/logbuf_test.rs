@@ -1,9 +1,23 @@
 //! 环形缓冲的行为用例。
 //!
-//! 缓冲区是进程级全局状态，测试文件内多条用例并发写同一个 `BUF` —— 故每条用例都用
-//! 自己独有的 `target` 认自己的那几条，不断言总条数。
+//! 缓冲区是进程级全局状态：`cargo test` 默认按用例并行跑，同一进程里的用例写的是同一个
+//! `BUF`。只靠「每条用例用自己独有的 `target` 认自己的记录」还不够 —— 容量那条要塞进
+//! `LOG_CAPACITY + 5` 条，会把同进程其它用例刚写下的记录整个挤掉，于是它们间歇性找不到
+//! 自己的那几条。故凡是碰缓冲的用例都先拿 [`TEST_LOCK`] 串行执行，`target` 唯一只作为
+//! 第二层保险（别的测试二进制共享不了这把锁）。
+
+use std::sync::{Mutex, MutexGuard};
 
 use crate::logbuf::{self, LogLevel, LOG_CAPACITY, MESSAGE_LIMIT_BYTES};
+
+/// 串行化本文件里所有读写 `logbuf::BUF` 的用例。
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// 拿锁。中毒也继续：一条用例 panic 之后其余用例仍该能跑，否则真正的失败会被一串
+/// `PoisonError` 淹掉。
+fn serialize() -> MutexGuard<'static, ()> {
+    TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 #[test]
 fn level_labels_are_uppercase_and_parse_case_insensitively() {
@@ -31,6 +45,7 @@ fn warn_and_above_are_problems() {
 
 #[test]
 fn snapshot_filters_by_level_and_keeps_order() {
+    let _g = serialize();
     logbuf::record(LogLevel::Info, "test::filter", "first");
     logbuf::record(LogLevel::Error, "test::filter", "second");
 
@@ -52,6 +67,7 @@ fn snapshot_filters_by_level_and_keeps_order() {
 
 #[test]
 fn render_writes_one_line_per_record_without_a_trailing_newline() {
+    let _g = serialize();
     // 直接验格式：`snapshot` 是全局的，故这里对一条已知记录的渲染结果做断言。
     let rec = logbuf::LogRecord {
         at_ms: 1_763_465_349_123,
@@ -70,6 +86,7 @@ fn render_writes_one_line_per_record_without_a_trailing_newline() {
 
 #[test]
 fn render_is_empty_when_nothing_matches() {
+    let _g = serialize();
     // 没有任何 `Warn` 以上的 `target` 能保证为空 —— 缓冲区全局，故只验「空串不带换行」的形状。
     let text = logbuf::render(true);
     assert!(!text.contains("\n\n"), "渲染不得产生连续空行");
@@ -77,6 +94,7 @@ fn render_is_empty_when_nothing_matches() {
 
 #[test]
 fn overlong_messages_are_clamped_on_a_char_boundary() {
+    let _g = serialize();
     let big = "日".repeat(MESSAGE_LIMIT_BYTES); // 每个字符 3 字节，远超上限
     logbuf::record(LogLevel::Info, "test::clamp", big);
 
@@ -90,6 +108,7 @@ fn overlong_messages_are_clamped_on_a_char_boundary() {
 
 #[test]
 fn the_buffer_evicts_the_oldest_entry_at_capacity() {
+    let _g = serialize();
     for i in 0..(LOG_CAPACITY + 5) {
         logbuf::record(LogLevel::Trace, "test::capacity", format!("entry-{i}"));
     }

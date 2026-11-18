@@ -53,7 +53,7 @@ export function Dialog({
       className={cn('bg-card text-card-foreground', className)}
       disableBackdropClose={disableBackdropClose}
     >
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0 flex-1">
           <h2 id={titleId} className="text-sm font-semibold leading-5">
             {title}
@@ -76,7 +76,7 @@ export function Dialog({
       </div>
       {children && <div className={cn('px-4 py-3', bodyClassName)}>{children}</div>}
       {footer && (
-        <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-3">
           {footer}
         </div>
       )}

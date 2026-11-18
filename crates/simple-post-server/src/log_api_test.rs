@@ -5,7 +5,7 @@
 
 use simple_post_core::logbuf::{self, LogLevel};
 
-use crate::log_api::{append_client_event, export, CLIENT_FIELD_LIMIT_CHARS};
+use crate::log_api::{append_client_event, export, redact_credentials, CLIENT_FIELD_LIMIT_CHARS};
 
 /// 文件名形如 `simple-post-logs-20261118-112909.txt`：前缀固定，中间 15 个字符的时间戳，
 /// 后缀 `.txt`。
@@ -118,4 +118,87 @@ fn a_long_multibyte_message_is_cut_on_a_char_boundary() {
         logbuf::MESSAGE_LIMIT_BYTES / '字'.len_utf8()
     );
     assert!(!hit.message.contains('\u{FFFD}'));
+}
+
+/// `source` 进的是记录的 target —— 不截它，一条上报就能把缓冲区吃满。
+#[test]
+fn an_overlong_source_is_clamped_by_chars() {
+    let huge = "s".repeat(CLIENT_FIELD_LIMIT_CHARS * 2);
+    append_client_event("info", &huge, "short body", None).expect("超长 source 仍应写入");
+
+    let hit = logbuf::snapshot(false)
+        .into_iter()
+        .find(|r| r.target.starts_with("webview:ssss"))
+        .expect("应当写进缓冲区");
+    let source = hit
+        .target
+        .strip_prefix("webview:")
+        .expect("target 形如 webview:<source>");
+    assert_eq!(source.chars().count(), CLIENT_FIELD_LIMIT_CHARS);
+}
+
+/// 导出的文件是给人看的：能拿来直接调接口的凭据不该原样躺在里面。
+#[test]
+fn credentials_are_redacted_in_both_forms() {
+    let cases = [
+        // header 全写，scheme 大小写不敏感。
+        (
+            "Authorization: Bearer abcd1234",
+            "Authorization: Bearer [redacted]",
+        ),
+        (
+            "authorization: basic dXNlcjpwYXNz",
+            "authorization: basic [redacted]",
+        ),
+        // 裸 scheme：正文里粘一段 curl 就是这样。
+        ("curl -H 'Bearer sk-live-42'", "curl -H 'Bearer [redacted]'"),
+        ("scheme Basic Zm9vYmFy", "scheme Basic [redacted]"),
+        // 带引号的 JSON 字段，键名大小写不敏感。
+        (r#"{"token": "abc123"}"#, r#"{"token": "[redacted]"}"#),
+        (
+            r#"{"authToken": "xyz-789", "ok": true}"#,
+            r#"{"authToken": "[redacted]", "ok": true}"#,
+        ),
+        (
+            r#"{"AUTHTOKEN":"no-space"}"#,
+            r#"{"AUTHTOKEN":"[redacted]"}"#,
+        ),
+    ];
+    for (input, want) in cases {
+        assert_eq!(redact_credentials(input), want, "输入：{input}");
+    }
+}
+
+/// 普通文本必须原样通过：脱敏不该改写日志内容。
+#[test]
+fn plain_text_is_left_untouched() {
+    for text in [
+        "render failed: TypeError: x is not a function",
+        "GET /api/requests 200 in 12ms",
+        r#"{"level":"error","code":"E1001"}"#,
+        "",
+    ] {
+        assert_eq!(redact_credentials(text), text, "输入：{text}");
+    }
+}
+
+/// 上报路径也要脱敏 —— 只在导出侧抹是把凭据先存进了内存缓冲。
+#[test]
+fn a_client_event_redacts_message_and_detail() {
+    append_client_event(
+        "error",
+        "smoke-redact",
+        "request failed with Authorization: Bearer top-secret",
+        Some(r#"body {"authToken": "also-secret"}"#),
+    )
+    .expect("客户端上报不因内容失败");
+
+    let hit = logbuf::snapshot(false)
+        .into_iter()
+        .find(|r| r.target == "webview:smoke-redact")
+        .expect("应当写进缓冲区");
+    assert!(!hit.message.contains("top-secret"), "{}", hit.message);
+    assert!(!hit.message.contains("also-secret"), "{}", hit.message);
+    assert!(hit.message.contains("Authorization: Bearer [redacted]"));
+    assert!(hit.message.contains(r#"{"authToken": "[redacted]"}"#));
 }
