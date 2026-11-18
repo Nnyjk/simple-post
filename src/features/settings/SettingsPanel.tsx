@@ -1,5 +1,5 @@
 /**
- * SettingsPanel —— （单例）设置标签的内容。布局：左侧一条窄栏放四个分类按钮，右侧是可滚动
+ * SettingsPanel —— （单例）设置标签的内容。布局：左侧一条窄栏放五个分类按钮，右侧是可滚动
  * 的主区显示当前分区。标签本身住在工作区标签条里（kind: 'settings'，id: '__settings__'），
  * 故本组件只是正文 —— 没有抽屉外框、没有页眉、没有关闭 X（用标签自己的 X）。
  *
@@ -19,6 +19,7 @@ import { ConnectionSection } from './sections/ConnectionSection';
 import { AppearanceSection } from './sections/AppearanceSection';
 import { RequestSection } from './sections/RequestSection';
 import { AboutUpdateCard } from '@/features/update/AboutUpdateCard';
+import { UpdateDot } from '@/features/update/UpdateDot';
 import { cn } from '@/lib/utils';
 import type { HueConcept } from '@/lib/hue';
 import { IconTile } from '@/components/ui/icon-tile';
@@ -71,9 +72,9 @@ const RAIL_ITEMS: {
   },
   {
     id: 'about',
-    label: '关于与更新',
+    label: '关于',
     icon: <Info className="h-4 w-4" />,
-    hint: '版本 / 检查更新',
+    hint: '版本 / 更新 / 镜像 / 日志',
   },
 ];
 
@@ -102,8 +103,8 @@ const SECTION_META: Record<
     icon: <Send className="h-3.5 w-3.5" />,
   },
   about: {
-    title: '关于与更新',
-    description: '版本号、更新检查与更新方式',
+    title: '关于',
+    description: '版本、更新方式、GitHub 镜像与日志导出',
     icon: <Info className="h-3.5 w-3.5" />,
   },
 };
@@ -113,6 +114,8 @@ export function SettingsPanel() {
   // 在标签首次打开时就能切到正确的分区。
   const activeSection = useAppStore((s) => s.activeSettingsSection);
   const setActiveSection = useAppStore((s) => s.setActiveSettingsSection);
+  // 左栏「关于」项的红点：判据与「可更新」行一致。点「稍后再说」不清它。
+  const updateAvailable = useAppStore((s) => s.updateInfo?.available === true);
 
   // `SettingsPanel` 不再读别的。环境分区的 store 接线 —— 哪些环境属于当前项目、哪些模块是
   // 模块地址表的行轴，以及那几组环境动作 —— 住在 `ProjectEnvSection`，因为项目标签挂载的
@@ -148,6 +151,7 @@ export function SettingsPanel() {
         <nav className="flex flex-col gap-0.5" role="tablist" aria-label="设置分组">
           {RAIL_ITEMS.map((item) => {
             const active = item.id === activeSection;
+            const dotted = item.id === 'about' && updateAvailable;
             return (
               <button
                 type="button"
@@ -155,6 +159,7 @@ export function SettingsPanel() {
                 role="tab"
                 aria-selected={active}
                 onClick={() => setActiveSection(item.id)}
+                title={dotted ? `${item.label}（有新版本）` : undefined}
                 className={cn(
                   // 激活 = 中性填充 + 前缘 3px 强调条。描边读作「这是个盒子」，
                   // 而强调条读作「你在这里」。
@@ -164,15 +169,19 @@ export function SettingsPanel() {
                     : 'hover:bg-overlay-hover',
                 )}
               >
-                <IconTile
-                  size="xs"
-                  icon={item.icon}
-                  className={cn(
-                    'transition-colors',
-                    !active && 'bg-muted text-faint group-hover:text-muted-foreground',
-                  )}
-                  concept={active ? item.concept : undefined}
-                />
+                {/* `IconTile` 自己不是定位盒，红点需要一个 `relative` 的父级来贴右上角。 */}
+                <span className="relative inline-flex shrink-0">
+                  <IconTile
+                    size="xs"
+                    icon={item.icon}
+                    className={cn(
+                      'transition-colors',
+                      !active && 'bg-muted text-faint group-hover:text-muted-foreground',
+                    )}
+                    concept={active ? item.concept : undefined}
+                  />
+                  {dotted && <UpdateDot />}
+                </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{item.label}</span>
                   <span

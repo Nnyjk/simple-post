@@ -2,12 +2,15 @@
  * 更新对话框 —— 版本对照、发布说明、以及按宿主分流的主操作。
  *
  * 三条通道的差别不在长相，而在「点下去以后谁去搬新版本」：
- * - 桌面壳：updater 插件在后台跑安装包，装完由安装器重启进程，界面只报进度。
- * - 容器（`serve-web` 跑在镜像里）：更新由平台侧下发，这里能给的只有 `docker pull`
- *   那一条命令；服务端允许就地执行时才能点「立即执行更新」。
- * - 源码 / 二进制：没有可代跑的东西，说明文字 + 命令，用户按部署文档来。
+ * - 桌面壳（`IS_TAURI_SHELL`）：**一键** —— 下载安装包、安装器接管、自动安装、自动重启。
+ *   `tauri dev` 没有签名产物，updater 跑不了，但按钮仍然是「下载并安装」，只是禁用并说明
+ *   原因；桌面里绝不退回「去 GitHub 下载」，那不是这条链路，也完全偏离一键的承诺。
+ * - 容器（`serve-web` 跑在镜像里）：只有运维在部署侧开了就地执行才有「立即执行更新」；
+ *   没开时页脚只剩「稍后再说」，正文给 `docker pull` 命令与发布页链接。
+ * - 源码 / 二进制：没有可代跑的东西，正文给命令与发布页链接，页脚同样没有动作。
  *
- * 主操作按宿主分流是刻意的：桌面上不可能执行 docker 命令，容器里也没有 updater 插件。
+ * 浏览器里没有可安装的进程，页脚放一个「去下载」只会被读成一键更新 —— 所以除了桌面壳与
+ * 开了就地执行的容器，页脚不给任何主操作。
  */
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, Copy, ExternalLink } from 'lucide-react';
@@ -16,6 +19,8 @@ import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/stores/app-store';
 import type { UpdateApplyResult } from '@/types/update';
 import { isUpdaterAvailable } from '@/lib/updater';
+import { IS_TAURI_SHELL } from '@/lib/tauri-commands';
+import { mirrorGithubUrl } from '@/lib/github-mirror';
 import { formatDate, relativeTime } from '@/lib/update/time';
 import { cn } from '@/lib/utils';
 import { ReleaseNotes } from './ReleaseNotes-lazy';
@@ -152,14 +157,18 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const applyUpdate = useAppStore((s) => s.applyUpdate);
   const dismissUpdate = useAppStore((s) => s.dismissUpdate);
   const runDesktopInstall = useAppStore((s) => s.runDesktopInstall);
+  const mirror = useAppStore((s) => s.githubMirror);
 
-  const desktop = isUpdaterAvailable();
+  // 桌面壳是「一键更新」唯一的宿主；`updaterReady` 另算，因为 `tauri dev` 里壳还在、
+  // 签名产物却不在，那一种是「按钮禁用 + 说明」，不是「换一条更新通道」。
+  const shell = IS_TAURI_SHELL;
+  const updaterReady = isUpdaterAvailable();
 
   // 部署形态只在需要它的那条通道上问：桌面壳没有 docker / binary 之分。
   useEffect(() => {
-    if (!open || desktop || deployment) return;
+    if (!open || shell || deployment) return;
     void loadDeployment();
-  }, [open, desktop, deployment, loadDeployment]);
+  }, [open, shell, deployment, loadDeployment]);
 
   const latest = info?.latest ?? null;
   const published = formatDate(releaseDate);
@@ -171,35 +180,43 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     onOpenChange(false);
   };
 
-  const docker = !desktop && deployment?.shape === 'docker';
-  const binary = !desktop && !docker;
+  const docker = !shell && deployment?.shape === 'docker';
+  const binary = !shell && !docker;
 
   const primary = (() => {
-    if (desktop) {
+    // 桌面壳：一键。壳在但 updater 不可用（`tauri dev`）时按钮保留、禁用、讲清原因，
+    // 因为这里换任何别的通道都违背「点了就自动装完重启」这一条承诺。
+    if (shell) {
       return (
         <div className="flex flex-col items-end gap-1">
           <Button
             size="sm"
             onClick={() => void runDesktopInstall()}
-            disabled={busy}
+            disabled={!updaterReady || busy}
+            title={
+              updaterReady ? undefined : '开发构建不含签名产物：应用内一键更新只在打包版本可用'
+            }
             className="gap-1.5"
           >
             {installing ? '正在安装…' : '下载并安装'}
           </Button>
           <span className="text-micro text-muted-foreground">
-            安装包在后台静默运行，装完自动重启，不需要卸载或再点下一步。
+            {updaterReady
+              ? '安装包在后台静默运行，装完自动重启，不需要卸载或再点下一步。'
+              : '打包版本里点这里会下载安装包、自动安装并重启。'}
           </span>
         </div>
       );
     }
-    if (docker) {
-      if (deployment?.applyEnabled !== true) return null;
+    // 容器：只有运维在部署侧打开了就地更新，这里才能真正替用户执行。
+    if (docker && deployment?.applyEnabled === true) {
       return (
         <Button size="sm" onClick={() => void applyUpdate()} disabled={busy} className="gap-1.5">
           {busy ? '正在执行…' : '立即执行更新'}
         </Button>
       );
     }
+    // 浏览器里没有可安装的进程：页脚不给动作，说明与发布页链接都在正文里。
     return null;
   })();
 
@@ -209,7 +226,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       onOpenChange={onOpenChange}
       title={latest ? `发现新版本 v${latest}` : '更新'}
       description="查看这个版本带来什么，再决定什么时候更新"
-      className="w-[560px] max-w-[92vw]"
+      className="w-[560px] max-w-[92vw] max-h-[86vh]"
+      bodyClassName="max-h-[62vh] overflow-y-auto overscroll-contain"
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={dismiss}>
@@ -233,7 +251,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
 
         {info?.url && (
           <a
-            href={info.url}
+            href={mirrorGithubUrl(info.url, mirror)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-micro text-primary underline-offset-2 hover:underline"
@@ -247,18 +265,19 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
         <section className="rounded-md border border-border/70 bg-background/40 p-3">
           <div className="mb-1.5 text-micro font-medium text-muted-foreground">发布说明</div>
           {info?.notes ? (
-            <ReleaseNotes notes={info.notes} />
+            <ReleaseNotes notes={info.notes} mirror={mirror} />
           ) : (
             <p className="text-micro text-muted-foreground">该版本未填写发布说明</p>
           )}
         </section>
 
-        {!desktop && (
+        {!shell && (
           <section className="space-y-2">
             {deployment?.command && <CommandLine command={deployment.command} />}
             {binary ? (
               <p className="text-micro leading-relaxed text-muted-foreground">
-                当前以源码 / 二进制方式运行，请按部署文档拉取新版本并重启。
+                当前以源码 / 二进制方式运行：按部署文档拉取新版本并重启；新版本的发布页在上面的「在
+                GitHub 查看」里。
               </p>
             ) : (
               <p className="text-micro leading-relaxed text-muted-foreground">

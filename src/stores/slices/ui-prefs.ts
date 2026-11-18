@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand';
 import themeBoot from '@/lib/theme-boot';
+import { resolveGithubMirror, type GithubMirrorId } from '@/lib/github-mirror';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
 import type { RequestSettings, Theme } from '../store-types';
@@ -43,6 +44,8 @@ interface StorePrefs {
   currentVersion?: string;
   /** 启动后是否自动检查更新。缺省（键不存在）为 `true`。 */
   autoCheckUpdates?: boolean;
+  /** GitHub 镜像 id（`GithubMirrorId` 的原始取值，**未经校验**）。 */
+  githubMirror?: string;
 }
 
 function loadPrefs(): StorePrefs {
@@ -183,6 +186,22 @@ export function saveAutoCheckUpdates(enabled: boolean): void {
   savePrefs(prefs);
 }
 
+/** 读出 GitHub 镜像。存下来的取值要过 `resolveGithubMirror`，非法值回落直连。 */
+export function readGithubMirror(): GithubMirrorId {
+  return resolveGithubMirror(loadPrefs().githubMirror);
+}
+
+/** 记住 GitHub 镜像。直连是缺省，故它删键而不是存一个 `'direct'`。 */
+export function saveGithubMirror(id: GithubMirrorId): void {
+  const prefs = loadPrefs();
+  if (id === 'direct') {
+    delete prefs.githubMirror;
+  } else {
+    prefs.githubMirror = id;
+  }
+  savePrefs(prefs);
+}
+
 /**
  * 请求旋钮的默认值。**与后端 `RequestSettings::default()` 相同**（超时 30 秒、跟随重定向、
  * 最大响应 5120 KB，TLS 四项全为缺省）——两侧的缺省值必须是同一个数。
@@ -207,6 +226,11 @@ export interface UiPrefsState {
    * （`response_history.keep` 行）：库里裁历史时读的是同一份，故界面上改成 50，库里也留 50 条。
    */
   responseHistoryKeep: number;
+  /**
+   * 发布页与发布说明里的 GitHub 链接走哪个镜像。检查更新不受影响（它直连
+   * `api.github.com`）——镜像只改写用户点开去读的链接。
+   */
+  githubMirror: GithubMirrorId;
 }
 
 export interface UiPrefsActions {
@@ -214,6 +238,7 @@ export interface UiPrefsActions {
   updateRequestSettings: (patch: Partial<RequestSettings>) => void;
   /** 改保留条数。服务端会立刻按新条数裁一遍库里的行，本地列表也随之裁。 */
   updateResponseHistoryKeep: (keep: number) => void;
+  setGithubMirror: (id: GithubMirrorId) => void;
 }
 
 export type UiPrefs = UiPrefsState & UiPrefsActions;
@@ -271,6 +296,7 @@ export const createUiPrefs: StateCreator<AppState, [], [], UiPrefs> = (set, get)
   theme: initialTheme,
   requestSettings: REQUEST_SETTINGS_DEFAULTS,
   responseHistoryKeep: RESPONSE_HISTORY_KEEP_DEFAULT,
+  githubMirror: readGithubMirror(),
 
   /**
    * 换主题。只写 localStorage——主题是渲染层的事，后端读不到也不需要。
@@ -281,6 +307,11 @@ export const createUiPrefs: StateCreator<AppState, [], [], UiPrefs> = (set, get)
   setTheme: (t) => {
     set({ theme: t });
     savePrefs({ ...loadPrefs(), theme: t });
+  },
+  /** 换 GitHub 镜像。合并写回偏好，`direct` 时删键。 */
+  setGithubMirror: (id) => {
+    set({ githubMirror: id });
+    saveGithubMirror(id);
   },
   /**
    * 改请求旋钮。本地副本立刻更新（界面不等 IPC），同时把**完整设置**写进后端——web 形态的

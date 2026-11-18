@@ -38,7 +38,7 @@ export type DesktopCheckResult =
 
 /**
  * 检查更新。非桌面形态与「确实没有新版」都返回 `none`；插件出错返回 `failed` 并带上原始
- * 原因，由设置 →「关于与更新」的卡片翻译成中文，不抛给调用方。
+ * 原因，由设置 →「关于」的卡片翻译成中文，不抛给调用方。
  */
 export async function checkDesktopUpdate(): Promise<DesktopCheckResult> {
   if (!isUpdaterAvailable()) return { status: 'none' };

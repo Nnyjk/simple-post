@@ -18,7 +18,7 @@ export function UpdatePill() {
 
   const latest = info?.latest ?? null;
   // 三件事同时成立才是一个值得打断的入口：真的查到了新版本、版本号可读、用户没说过「稍后」。
-  // 检查失败时顶栏不出入口——原因写在设置 →「关于与更新」，一次失败不该占用顶栏。
+  // 检查失败时顶栏不出入口——原因写在设置 →「关于」，一次失败不该占用顶栏。
   if (error || !info?.available || !latest || latest === dismissedVersion) return null;
 
   return (

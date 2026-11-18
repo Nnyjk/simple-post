@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip } from '@/components/ui/tooltip';
 import { CommandPalette } from '@/features/command-palette/CommandPalette-lazy';
 import { UpdatePill } from '@/features/update/UpdatePill';
+import { UpdateDot } from '@/features/update/UpdateDot';
 import { cn, focusRing } from '@/lib/utils';
 import { LAYER } from '@/components/ui/layers';
 import { WindowControls } from '@/components/ui/window-controls';
@@ -37,6 +38,8 @@ export function TopBar() {
   const openDynamicVariablesTab = useAppStore((s) => s.openDynamicVariablesTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
   const leaveProject = useAppStore((s) => s.leaveProject);
+  // 设置入口上的红点：与「关于」页的「可更新」行同一判据，boolean 选择器不会引发重渲染。
+  const updateAvailable = useAppStore((s) => s.updateInfo?.available === true);
 
   const envs = useMemo(
     () => environments.filter((e) => e.projectId === activeProjectId),
@@ -328,8 +331,11 @@ export function TopBar() {
             size="icon"
             onClick={() => openSettingsTab()}
             aria-label="设置"
+            title={updateAvailable ? '设置（有新版本）' : undefined}
+            className="relative"
           >
             <Settings2 className="h-4 w-4" />
+            {updateAvailable && <UpdateDot />}
           </Button>
         </Tooltip>
       </div>

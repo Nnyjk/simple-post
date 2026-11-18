@@ -14,7 +14,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CornerDownLeft, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { buildCommands, type Command } from './command-registry';
 import { cn } from '@/lib/utils';
+import { useAppStore } from '@/stores/app-store';
+import { UpdateDot } from '@/features/update/UpdateDot';
 import { ModalSurface } from '@/components/ui/modal-surface';
+
+/** 命令注册表里「打开设置」的 id（见 `command-registry.ts`）。 */
+const SETTINGS_COMMAND_ID = 'cmd:open-settings';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -45,6 +50,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const updateAvailable = useAppStore((s) => s.updateInfo?.available === true);
 
   // 命令快照 —— 每次打开重建，好让新建的接口立刻出现在面板里。
   const allCommands = useMemo<Command[]>(() => (open ? buildCommands() : []), [open]);
@@ -182,6 +188,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">{cmd.title}</span>
+                    {/* 面板里的「打开设置」是同一入口的第二个落点：红点跟着它，否则
+                        一个知道「有新版本」的用户从 Ctrl+K 进去会看到一枚干净的命令行。 */}
+                    {cmd.id === SETTINGS_COMMAND_ID && updateAvailable && (
+                      <UpdateDot className="static ml-1 shrink-0" />
+                    )}
                     {cmd.hint && (
                       <span className="ml-2 shrink-0 truncate text-micro text-muted-foreground">
                         {cmd.hint}
