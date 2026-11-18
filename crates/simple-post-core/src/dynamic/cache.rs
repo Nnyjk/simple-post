@@ -9,8 +9,8 @@ pub enum Decision {
     UseOverride { value_json: String },
     /// 用缓存值（自动取回来的，还在有效期内）。
     UseCache { value_json: String },
-    /// 重新取数。`stale_fallback` 是取数失败时可以用的过期值。
-    Fetch { stale_fallback: Option<String> },
+    /// 重新取数。
+    Fetch,
 }
 
 /// 决定这一次解析走哪条路。
@@ -20,10 +20,13 @@ pub enum Decision {
 /// | 没有数据源 | 重新取数；自动值既不读也不当回退候选，覆盖值照旧生效 |
 /// | `force` 为真 | 重新取数，跳过缓存里的一切（包括手动指定的值） |
 /// | 有覆盖值且没过期 | 用覆盖值 |
-/// | 有覆盖值但已过期 | 重新取数；过期值留作取数失败时的回退候选（定义允许时） |
+/// | 有覆盖值但已过期 | 重新取数 |
 /// | 无覆盖值，缓存没过期 | 用缓存值 |
-/// | 无覆盖值，缓存过期了 | 重新取数；过期值留作取数失败时的回退候选（定义允许时） |
+/// | 无覆盖值，缓存过期了 | 重新取数 |
 /// | 没有缓存行 | 重新取数 |
+///
+/// 取数失败时还能不能拿一份过期值顶上，由**失败那一刻**另行判定（`fallback_value`）：
+/// 一次取数可能跨过那一行的过期点，开始还新鲜、失败时已经过期，故候选不能在这里预先算好。
 pub fn decide(
     def: &DynamicVariable,
     entry: Option<&DynamicCacheEntry>,
@@ -31,9 +34,7 @@ pub fn decide(
     force: bool,
 ) -> Decision {
     let Some(entry) = entry else {
-        return Decision::Fetch {
-            stale_fallback: None,
-        };
+        return Decision::Fetch;
     };
     // 没有数据源的定义取不到值：数据源接口被删掉之后，它过去写下的自动值已经没有数据源
     // 支撑，故既不读它，也不拿它当取数失败的回退候选——按缺失处理。覆盖值是人手写的，
@@ -43,16 +44,7 @@ pub fn decide(
         // `force` 为真时：跳过缓存里的**一切**——包括用户手动指定的值——重新取数。
         // 一个叫「刷新」却什么都不做的按钮比它丢掉的那份手动值更糟；丢掉的动作是可见的
         // （来源徽标从「手动改的」变回「自动取回」），且用户可以再写一次。
-        return Decision::Fetch {
-            // 回退候选只认**已经过期**的那一行：`force` 不看有效期，一份刚由别的解析写下的
-            // 新鲜值也会走到这里，它不是过期值，取数失败时按缺失处理才对。
-            // 覆盖值过期后留下的候选仍是人手写的值；自动值只在有数据源时才算数。
-            stale_fallback: if (has_source || entry.is_override) && is_expired(entry, now) {
-                stale_candidate(def, entry)
-            } else {
-                None
-            },
-        };
+        return Decision::Fetch;
     }
     if entry.is_override {
         let alive = !is_expired(entry, now);
@@ -63,9 +55,7 @@ pub fn decide(
                 };
             }
         }
-        return Decision::Fetch {
-            stale_fallback: stale_candidate(def, entry),
-        };
+        return Decision::Fetch;
     }
     if has_source && entry.expires_at > now {
         if let Some(value_json) = &entry.value_json {
@@ -74,13 +64,7 @@ pub fn decide(
             };
         }
     }
-    Decision::Fetch {
-        stale_fallback: if has_source {
-            stale_candidate(def, entry)
-        } else {
-            None
-        },
-    }
+    Decision::Fetch
 }
 
 /// 这一行过期了吗：覆盖值看到期时刻（没写到期时刻的永久覆盖值永不过期），自动值看 TTL。
@@ -97,9 +81,18 @@ pub(super) fn is_expired(entry: &DynamicCacheEntry, now: i64) -> bool {
     }
 }
 
-/// 过期值的回退候选：定义允许时才给。
-fn stale_candidate(def: &DynamicVariable, entry: &DynamicCacheEntry) -> Option<String> {
-    if !def.stale_fallback {
+/// 取数失败时能顶上的过期值：定义允许回退，且这一行**此刻**已经过期。
+///
+/// 时刻由调用方给，故调用方要在读到那一行之后取时刻：开始还新鲜、失败时已经过期的一行，
+/// 正是它该顶上的时刻；开始就过期、中途被换成新鲜值的一行，此刻不该再当回退值。
+/// 自动值只在有数据源时才算数（没有数据源支撑的值不该被这样翻出来）；覆盖值是人手写的，
+/// 与数据源无关，仍可回退。
+pub(super) fn fallback_value(
+    def: &DynamicVariable,
+    entry: &DynamicCacheEntry,
+    now: i64,
+) -> Option<String> {
+    if !def.stale_fallback || !(def.has_source() || entry.is_override) || !is_expired(entry, now) {
         return None;
     }
     entry.value_json.clone()

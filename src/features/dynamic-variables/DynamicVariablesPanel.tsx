@@ -17,11 +17,8 @@ import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/do
 import { Button } from '@/components/ui/button';
 import { EmptyHint } from '@/components/ui/empty-hint';
 import { DynamicVariableForm } from './DynamicVariableForm';
-import {
-  dynamicListMatchesEnvironment,
-  dynamicValueScope,
-  type DynamicVariableDraft,
-} from '@/stores/dynamic-slice';
+import { overrideEditor } from './override-editor';
+import { dynamicValueScope, type DynamicVariableDraft } from '@/stores/dynamic-slice';
 
 export function DynamicVariablesPanel() {
   const projectId = useAppStore((s) => s.activeProjectId);
@@ -189,16 +186,22 @@ function DynamicVariableCard({
   // 这批「当前值」是不是当前这个环境拉到的。切换环境的那一刻列表还在路上，内容仍是上一个
   // 环境的：此刻打开覆盖值编辑器，复制进框里的是 A 的值，保存却会写进 B。
   const listScope = useAppStore((s) => s.dynamicVariablesScope);
-  const valuesFromCurrentEnvironment = dynamicListMatchesEnvironment(
-    listScope,
-    projectId,
-    activeEnvironmentId || null,
-  );
+  const editor = overrideEditor(listScope, projectId, activeEnvironmentId || null, variable.value);
 
-  /** 打开编辑器时把草稿重置成当前值——否则上一次没保存的编辑会留在框里。 */
+  /** 打开编辑器：每次都把框里的内容重置成列表给出的那个值。 */
   const openEditor = () => {
-    setDraft(variable.value ?? '');
+    setDraft(editor.initialValue);
     setExpanded(true);
+  };
+
+  // 两条入口（「编辑」按钮与「当前值」那行摘要）都走 `openEditor`：摘要那行若只切展开态，
+  // 框里留的还是这个组件挂载时的那份文本——切过环境之后它就是 A 的值。
+  const toggleEditor = () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    openEditor();
   };
 
   // 数据源。两个来源字段都为空只有一个成因：引用的接口被删了（外键把它置成 NULL）——
@@ -233,7 +236,17 @@ function DynamicVariableCard({
             刷新
           </Button>
           {variable.isOverride && (
-            <Button variant="ghost" size="xs" onClick={onClearOverride}>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={onClearOverride}
+              disabled={!editor.editable}
+              title={
+                editor.editable
+                  ? '删掉这条手工指定的值，回到自动取数'
+                  : '列表还在换成当前环境的值：此刻恢复自动获取，删掉的是另一个环境的覆盖值'
+              }
+            >
               恢复自动获取
             </Button>
           )}
@@ -276,28 +289,23 @@ function DynamicVariableCard({
           <button
             type="button"
             className="truncate font-mono text-muted-foreground hover:text-foreground"
-            onClick={() => setExpanded((v) => !v)}
+            onClick={toggleEditor}
+            disabled={!editor.editable}
           >
             {variable.value ? summarize(variable.value) : '（没有值）'}
           </button>
           <Button
             variant="ghost"
             size="xs"
-            onClick={openEditor}
-            disabled={!valuesFromCurrentEnvironment}
-            title={
-              valuesFromCurrentEnvironment
-                ? undefined
-                : '列表还在换成当前环境的值，此刻不该照着它写覆盖值'
-            }
+            onClick={toggleEditor}
+            disabled={!editor.editable}
+            title={editor.editable ? undefined : '列表还在换成当前环境的值，此刻不该照着它写覆盖值'}
           >
             {expanded ? '收起' : '编辑'}
           </Button>
-          {!valuesFromCurrentEnvironment && (
-            <span className="text-nano text-faint">正在切换环境…</span>
-          )}
+          {!editor.editable && <span className="text-nano text-faint">正在切换环境…</span>}
         </div>
-        {expanded && (
+        {expanded && editor.editable && (
           <div className="mt-2 flex flex-col gap-2">
             <textarea
               className="min-h-24 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"

@@ -34,6 +34,34 @@ pub fn get(
     }
 }
 
+/// 一条定义在所有环境键上仍然生效的覆盖值，最近的在前。
+///
+/// 数据源接口被删掉之后定义算不出环境（缓存键退化成空键），而覆盖值当初是按它那时生效的
+/// 环境键写下的——故这时要横跨键去找，而不是只读空键那一行。只返回覆盖值：没有数据源支撑
+/// 的自动值不该被这样翻出来。
+///
+/// 顺序定死：保存时刻最近的在前，同一时刻按环境键升序——SQLite 的自然行序不是契约。
+pub fn live_overrides_for_definition(
+    conn: &mut Connection,
+    definition_id: &str,
+    now: i64,
+) -> Result<Vec<DynamicCacheEntry>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT definition_id, environment_id, value_json, fetched_at, expires_at, \
+                is_override, override_expires_at \
+         FROM dynamic_variable_cache \
+         WHERE definition_id = ?1 AND is_override = 1 AND value_json IS NOT NULL \
+           AND (override_expires_at IS NULL OR override_expires_at > ?2) \
+         ORDER BY fetched_at DESC, environment_id ASC",
+    )?;
+    let mut rows = stmt.query(params![definition_id, now])?;
+    let mut found = Vec::new();
+    while let Some(row) = rows.next()? {
+        found.push(row_to_entry(row).map_err(AppError::Sqlite)?);
+    }
+    Ok(found)
+}
+
 /// 写一行缓存。同一（定义 × 环境）已有行时整行覆盖。
 pub fn upsert(conn: &mut Connection, entry: &DynamicCacheEntry) -> Result<(), AppError> {
     conn.execute(

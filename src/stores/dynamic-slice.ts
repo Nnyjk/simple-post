@@ -775,8 +775,12 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         // 覆盖值在手就不用再取数，上一次取数失败的原因随之作废。
         const definition = get().dynamicVariables.find((v) => v.id === id);
         const name = definition?.name;
-        const scope = dynamicValueScope(definition?.projectId ?? '', environmentId);
+        const projectId = definition?.projectId ?? '';
+        const scope = dynamicValueScope(projectId, environmentId);
         if (name) {
+          // 手上这份覆盖值盖住的正是这个名字的所有格子：之前发起的刷新还没回来，它带的是
+          // 自动取回的值，落进桶里就会把手写的这份顶掉（徽标写着「手动指定」，值却是自动的）。
+          invalidateName(projectId, name);
           set((s) => {
             const errors = { ...(s.dynamicErrors[scope] ?? {}) };
             delete errors[name];

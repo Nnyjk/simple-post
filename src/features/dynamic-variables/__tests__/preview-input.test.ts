@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 
 import {
   previewExpectedEnvironment,
+  previewFailureKey,
   previewFailureMessage,
   previewFingerprint,
   previewPayload,
@@ -188,22 +189,38 @@ describe('previewExpectedEnvironment', () => {
 });
 
 describe('previewFailureMessage', () => {
-  it('指纹一致才显示：那条错误属于这份输入', () => {
-    assert.equal(
-      previewFailureMessage({ fingerprint: 'fp-1', message: '连接被拒绝' }, 'fp-1'),
-      '连接被拒绝',
-    );
+  it('键一致才显示：那条错误属于这份输入的这个环境', () => {
+    const key = previewFailureKey('fp-1', 'env-1');
+    assert.equal(previewFailureMessage({ key, message: '连接被拒绝' }, key), '连接被拒绝');
   });
 
   it('指纹对不上就当这份草稿还没有结果', () => {
     // URL A 的失败不该显示在改后的 B 名下。
     assert.equal(
-      previewFailureMessage({ fingerprint: 'fp-a', message: '连接被拒绝' }, 'fp-b'),
+      previewFailureMessage(
+        { key: previewFailureKey('fp-a', 'env-1'), message: '连接被拒绝' },
+        previewFailureKey('fp-b', 'env-1'),
+      ),
       null,
     );
   });
 
+  it('同一份输入换了环境，就不再是同一个失败', () => {
+    // 失败只带一句原因，看不出它属于哪个环境：A 的连接被拒绝，不该挂在 B 名下。
+    assert.equal(
+      previewFailureMessage(
+        { key: previewFailureKey('fp-1', 'env-1'), message: '连接被拒绝' },
+        previewFailureKey('fp-1', 'env-2'),
+      ),
+      null,
+    );
+  });
+
+  it('算不出会生效的环境时按空串记，仍然与「有环境」分开', () => {
+    assert.notEqual(previewFailureKey('fp-1', null), previewFailureKey('fp-1', 'env-1'));
+  });
+
   it('没有失败时什么也不显示', () => {
-    assert.equal(previewFailureMessage(null, 'fp-1'), null);
+    assert.equal(previewFailureMessage(null, previewFailureKey('fp-1', 'env-1')), null);
   });
 });

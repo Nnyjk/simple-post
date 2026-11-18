@@ -75,3 +75,15 @@ export function buildEditPatch(
 
   return patch;
 }
+
+/**
+ * 这份 patch 落到这条定义上之后，还留着一个数据源吗。
+ *
+ * 判的必须是**将要提交的那份 patch**，不是「定义此刻有没有来源」：别的客户端刚把删掉的接口
+ * 补回来时，本地只改名字的编辑也该放行——它提交的 patch 里根本没有来源那两格。反过来，把
+ * 两个来源都清空的 patch 一定要被挡下（那样的定义永远解析不出值）。
+ */
+export function keepsSource(initial: DynamicVariable, patch: Partial<DynamicVariable>): boolean {
+  const after = { ...initial, ...patch };
+  return !!(after.sourceEndpointId || after.sourceInlineJson);
+}

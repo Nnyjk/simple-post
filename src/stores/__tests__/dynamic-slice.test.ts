@@ -801,4 +801,33 @@ describe('dynamic slice', () => {
     assert.equal(bag.dynamicError, null, '旧项目那次失败不该盖到新那一屏上');
     assert.equal(bag.dynamicVariables[0]?.projectId, 'p2', '留下的是后发那次的结果');
   });
+
+  it('写覆盖值时把之前发起的刷新作废：它回来不许盖掉手写的值', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('c')];
+    let release: (() => void) | null = null;
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_refresh') {
+        return new Promise((resolve) => {
+          release = () =>
+            resolve({ name: 'c', value: '[auto]', source: 'auto', isOverride: false, error: null });
+        });
+      }
+      if (cmd === 'dynamic_variables_set_override') return null;
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const refreshing = bag.refreshDynamicVariable('d-c');
+    // 刷新还在路上，用户把手写的值存了下去。
+    await bag.setDynamicOverride('d-c', '[mine]');
+    release!();
+    await refreshing;
+
+    assert.equal(
+      bag.dynamicValues[scope1]?.c,
+      undefined,
+      '自动取回的值不许盖掉刚写下的覆盖值（徽标写着「手动指定」，值却是自动的）',
+    );
+  });
 });

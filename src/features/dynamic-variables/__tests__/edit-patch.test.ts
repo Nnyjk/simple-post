@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import type { DynamicVariable } from '@/types/domain';
 import type { DynamicVariableDraft } from '@/stores/dynamic-slice';
 
-import { buildEditPatch, ttlSecondsOf } from '../edit-patch';
+import { buildEditPatch, keepsSource, ttlSecondsOf } from '../edit-patch';
 
 /** 一条引用接口的定义。 */
 function definition(over: Partial<DynamicVariable> = {}): DynamicVariable {
@@ -177,5 +177,40 @@ describe('buildEditPatch', () => {
     const patch = buildEditPatch(initial, draftOf(initial, { transformScript: '   ' }));
 
     assert.deepEqual(patch, { transformScript: null });
+  });
+});
+
+describe('keepsSource', () => {
+  it('只改名字的编辑：patch 没提来源，定义里那个接口还在，放行', () => {
+    // 别的客户端刚把删掉的接口补回来：本地这份列表还没有来源，但这次提交不会清空它。
+    const initial = definition({ sourceEndpointId: 'ep-1', sourceInlineJson: null });
+
+    assert.equal(
+      keepsSource(initial, buildEditPatch(initial, draftOf(initial, { name: 'p' }))),
+      true,
+    );
+  });
+
+  it('把两个来源都清空：挡下', () => {
+    const initial = definition({
+      sourceEndpointId: null,
+      sourceInlineJson: '{"method":"GET","url":"https://example.test/a"}',
+    });
+    const patch = buildEditPatch(initial, draftOf(initial, { sourceInlineJson: '  ' }));
+
+    assert.equal(keepsSource(initial, patch), false, '清空来源的定义永远解析不出值');
+  });
+
+  it('从引用接口换成一条内联请求：来源仍在，放行', () => {
+    const initial = definition({ sourceEndpointId: 'ep-1', sourceInlineJson: null });
+    const patch = buildEditPatch(
+      initial,
+      draftOf(initial, {
+        sourceKind: 'inline',
+        sourceInlineJson: '{"method":"GET","url":"https://example.test/b"}',
+      }),
+    );
+
+    assert.equal(keepsSource(initial, patch), true);
   });
 });

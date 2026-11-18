@@ -119,9 +119,7 @@ pub fn list(
                 }
             };
         let env_key = source.environment_id.clone().unwrap_or_default();
-        let entry = db::with_conn(pool, |c| {
-            db::dynamic_variable_cache::get(c, &definition.id, &env_key)
-        })?;
+        let entry = cache_entry(pool, &definition, &env_key)?;
         out.push(view_of(definition, &source, entry.as_ref(), now));
     }
     Ok(out)
@@ -146,10 +144,31 @@ pub fn get(
         }
     };
     let env_key = source.environment_id.clone().unwrap_or_default();
-    let entry = db::with_conn(pool, |c| {
-        db::dynamic_variable_cache::get(c, definition_id, &env_key)
-    })?;
+    let entry = cache_entry(pool, &definition, &env_key)?;
     Ok(view_of(definition, &source, entry.as_ref(), now_ms()))
+}
+
+/// 这一行定义该看哪一格缓存。
+///
+/// 有数据源时就是（定义 × 实际生效环境）那一行。没有数据源时定义算不出环境（键退化成空键），
+/// 而人手写的覆盖值当初是按那时生效的环境键写下的，故横跨所有环境键找仍然生效的那一份——
+/// 与解析侧同一条规则，否则面板说「缺失」、发送却用上了那个值。自动值不在其列。
+fn cache_entry(
+    pool: &DbPool,
+    definition: &DynamicVariable,
+    env_key: &str,
+) -> Result<Option<DynamicCacheEntry>, AppError> {
+    if definition.has_source() {
+        return db::with_conn(pool, |c| {
+            db::dynamic_variable_cache::get(c, &definition.id, env_key)
+        });
+    }
+    let scanned_at = now_ms();
+    Ok(db::with_conn(pool, |c| {
+        db::dynamic_variable_cache::live_overrides_for_definition(c, &definition.id, scanned_at)
+    })?
+    .into_iter()
+    .next())
 }
 
 /// 新建一条定义。

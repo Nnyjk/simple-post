@@ -30,7 +30,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EndpointTreePicker } from './EndpointTreePicker';
 import { ExtractPreview } from './ExtractPreview';
-import { buildEditPatch, ttlSecondsOf } from './edit-patch';
+import { buildEditPatch, keepsSource, ttlSecondsOf } from './edit-patch';
 
 export interface DynamicVariableFormProps {
   /** 传了就走编辑模式，不传就是新建。 */
@@ -140,13 +140,11 @@ export function DynamicVariableForm({
   // 没有数据源的定义永远解析不出值，故新建时不让人存：引用形态要选了接口，内联形态要填了
   // 请求。
   //
-  // 编辑一份「数据源接口已被删除」的定义是例外：它此刻本来就没有来源，用户改的可能是名字、
-  // 抽取规则或缓存时长。按现状存下去不会弄丢任何来源，故放行——否则这条记录会因为一段自己
-  // 修不好的历史而永远存不下去。补一个接口当然也行。
+  // 编辑时判的是**将要提交的那份 patch 会不会把来源清空**，不是「定义此刻有没有来源」：
+  // 别的客户端把删掉的接口补回来之后，本地只改名字的编辑不该因为「我这边的列表还没有来源」
+  // 就被禁掉——那份 patch 里根本没有来源那两格，存下去不弄丢任何来源。反过来，把两个来源
+  // 都清空的那份 patch 必须挡下。
   const hasSource = usesEndpoint ? sourceEndpointId !== '' : sourceInlineJson.trim() !== '';
-  const definitionHadSource =
-    !!variable && !!(variable.sourceEndpointId || variable.sourceInlineJson);
-  const sourceIsAcceptable = hasSource || (variable !== undefined && !definitionHadSource);
 
   /**
    * 差量比对以**打开表单时那份定义的快照**为准，不以「此刻的 `variable`」为准。
@@ -156,6 +154,9 @@ export function DynamicVariableForm({
    * 判成「我改的」再写回去——两个窗口各改一格时互相覆盖。
    */
   const openedWith = draft.openedWith;
+  const baseline = openedWith ?? variable;
+  const sourceIsAcceptable =
+    hasSource || (baseline !== undefined && keepsSource(baseline, buildEditPatch(baseline, draft)));
 
   const handleSubmit = async () => {
     setBusy(true);
@@ -165,10 +166,9 @@ export function DynamicVariableForm({
       // 发出去的那份 patch：收尾时按它决定推进基线的哪几格（没提到的格保持原基线）。
       let patch: Partial<DynamicVariable> = {};
       if (variable) {
-        // 兜底用此刻这条定义：草稿是被 `patchDynamicVariableDraft` 凭空垫出来的那种极端情形，
-        // 也不能把「编辑」错走成「新建」。
-        const baseline = openedWith ?? variable;
-        patch = buildEditPatch(baseline, draft);
+        // `baseline` 兜底用此刻这条定义：草稿是被 `patchDynamicVariableDraft` 凭空垫出来的那种
+        // 极端情形，也不能把「编辑」错走成「新建」。
+        patch = buildEditPatch(baseline ?? variable, draft);
         saved = await updateDynamicVariable(variable.id, patch);
         // 保存失败时表单留着：用户填的内容不丢。
         if (!saved) return;
