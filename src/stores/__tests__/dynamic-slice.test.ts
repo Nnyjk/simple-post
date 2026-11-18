@@ -490,4 +490,78 @@ describe('dynamic slice', () => {
 
     assert.deepEqual(bag.dynamicValues, {}, '每一格都要清：清的时候不一定站在当初取数的那一格上');
   });
+  it('被顶掉的那次解析不写 store，但把自己那份结果照给调用方', async () => {
+    // 发送路径要拿这次解析的值去替换占位符：丢掉返回值等于让用户发出一条带 `{{sns}}` 的请求。
+    const bag = makeHarness();
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd !== 'dynamic_variables_resolve') return null;
+      return new Promise((resolve) => {
+        pending.push(resolve);
+      });
+    });
+
+    const first = bag.resolveDynamicVariables(['sns'], 'p1');
+    const second = bag.resolveDynamicVariables(['sns'], 'p1');
+    pending[1](resolution(['sns'], { sns: '[new]' }));
+    await second;
+    pending[0](resolution(['sns'], { sns: '[old]' }));
+    const stale = await first;
+
+    assert.equal(bag.dynamicValues[scope1]?.sns?.value, '[new]', 'store 只认最后一次');
+    assert.equal(stale.values.sns, '[old]', '调用方拿到的是它自己那一次的结果');
+  });
+
+  it('同格另一个变量点刷新，不挡成批解析里其它变量的结果', async () => {
+    // 世代号按「格 × 变量名」记：按整格记的话，一条刷新就能让整批结果作废，
+    // 那几个变量在变量池里就缺了。
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('a'), view('b'), view('c')];
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      if (cmd === 'dynamic_variables_refresh') {
+        return { name: 'c', value: '[c-fresh]', source: 'auto', isOverride: false, error: null };
+      }
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const batch = bag.resolveDynamicVariables(['a', 'b'], 'p1');
+    await bag.refreshDynamicVariable('d-c');
+    assert.equal(pending.length, 1);
+    pending[0](resolution(['a', 'b'], { a: '[a]', b: '[b]' }));
+    await batch;
+
+    assert.equal(bag.dynamicValues[scope1]?.a?.value, '[a]', 'a 的结果要落地');
+    assert.equal(bag.dynamicValues[scope1]?.b?.value, '[b]', 'b 的结果也要落地');
+  });
+
+  it('解析在飞时改了定义：回来的旧规则结果不落进桶里', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('sns')];
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      if (cmd === 'dynamic_variables_update') return definition('sns');
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const inFlight = bag.resolveDynamicVariables(['sns'], 'p1');
+    await bag.updateDynamicVariable('d-sns', { extractPath: '$.other' });
+    pending[0](resolution(['sns'], { sns: '[old-rule]' }));
+    const stale = await inFlight;
+
+    assert.equal(bag.dynamicValues[scope1]?.sns, undefined, '按旧抽取规则取到的值不许留在桶里');
+    assert.equal(stale.values.sns, '[old-rule]', '调用方仍拿到它自己那一次的结果');
+  });
 });

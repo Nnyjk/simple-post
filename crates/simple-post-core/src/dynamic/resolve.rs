@@ -173,6 +173,16 @@ impl OneOutcome {
     }
 }
 
+/// 决定「取数」这条路时，前面几步留下的两件事。
+///
+/// `stale_fallback` 是取数失败时可以顶上的过期值；`had_live_override` 记的是取数**开始前**
+/// 那一行是不是仍然生效的覆盖值——写回时要靠它区分「刷新该换掉的手工值」与「取数途中别人
+/// 新写下的手工值」。
+struct FetchPlan {
+    stale_fallback: Option<String>,
+    had_live_override: bool,
+}
+
 /// 解析一条定义。
 async fn resolve_one(
     ctx: &ResolveContext,
@@ -186,6 +196,14 @@ async fn resolve_one(
     let entry = db::with_conn(&ctx.pool, |c| {
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
+
+    // 取数开始前**已经有**有效覆盖值时，只有 `force` 这条路会走到这里（见 `decide`）：
+    // 刷新要的就是把那份手工值换掉，故写回时不再保护它。取数途中新写下的覆盖值才算别人
+    // 的手工值，见 `fetch_one` 的写回段。
+    let had_live_override = entry
+        .as_ref()
+        .map(|e| live_override(e, now))
+        .unwrap_or(false);
 
     match decide(def, entry.as_ref(), now, force) {
         Decision::UseOverride { value_json } => {
@@ -211,7 +229,11 @@ async fn resolve_one(
             })
         }
         Decision::Fetch { stale_fallback } => {
-            fetch_one(ctx, def, source, now, force, stale_fallback, fetcher).await
+            let plan = FetchPlan {
+                stale_fallback,
+                had_live_override,
+            };
+            fetch_one(ctx, def, source, now, force, plan, fetcher).await
         }
     }
 }
@@ -226,9 +248,13 @@ async fn fetch_one(
     source: &SourceContext,
     now: i64,
     force: bool,
-    stale_fallback: Option<String>,
+    plan: FetchPlan,
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
+    let FetchPlan {
+        stale_fallback,
+        had_live_override,
+    } = plan;
     // 缓存键的环境段取自取数上下文——**实际生效**的那个环境（指定模式是定义点名的那个，
     // 继承模式是调用方选中的那个）。它随调用方切环境而变，故切环境不会读到上一个环境的值。
     let env_key = source.environment_id.clone().unwrap_or_default();
@@ -340,6 +366,11 @@ async fn fetch_one(
     // 变了，写路径那时已经把这条定义的缓存行删掉。这次 fetch 用的是开始那份定义，故比对与
     // 写入放在**同一个事务**里——中间插不进另一次修改；定义不再是开始那一份就跳过写入。
     // 值照常返回给这次调用方：它只是不进缓存，下一次解析会按新定义重新取数。
+    //
+    // 同一个事务里还要看一眼当前的缓存行：用户在取数途中点了「保存为覆盖值」，那一行是他
+    // 在这个环境上亲手钉住的，而这次取数只是「本该这样算」，不该盖过人手写的值。
+    // 只在**取数开始前还没有**有效覆盖值时才保护——开始前就有的话，这次取数只可能是刷新
+    // 走上来的（`cache::decide` 的 `force` 特意跳过覆盖值），刷新要的就是把那份手工值换掉。
     let stored = db::with_tx(&ctx.pool, |c| {
         let current = match db::dynamic_variables::get(c, &def.id) {
             Ok(current) => current,
@@ -349,6 +380,13 @@ async fn fetch_one(
         };
         if !same_fetch_inputs(&current, def) {
             return Ok(false);
+        }
+        if !had_live_override {
+            if let Some(existing) = db::dynamic_variable_cache::get(c, &def.id, &env_key)? {
+                if live_override(&existing, crate::domain::now_ms()) {
+                    return Ok(false);
+                }
+            }
         }
         db::dynamic_variable_cache::upsert(c, &entry)?;
         Ok(true)
@@ -392,6 +430,17 @@ async fn fetch_one(
         is_override: false,
         error: None,
     })
+}
+
+/// 这一行是**仍然生效**的覆盖值吗：人手写的，且没有到期或还没到。
+///
+/// 「仍然生效」按调用方给的时刻算，故取数开始与写回两处可以用不同的时刻各判一次。
+fn live_override(entry: &DynamicCacheEntry, now: i64) -> bool {
+    entry.is_override
+        && entry
+            .override_expires_at
+            .map(|deadline| deadline > now)
+            .unwrap_or(true)
 }
 
 /// 这两份定义算出来的值会一样吗：数据源、取数环境、抽取规则、处理脚本。

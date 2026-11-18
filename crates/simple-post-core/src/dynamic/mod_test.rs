@@ -1284,3 +1284,192 @@ async fn a_definition_changed_during_the_fetch_is_not_cached_with_the_old_value(
     assert_eq!(again.calls(), 1, "缓存里没有值，故重新取数");
     assert_eq!(second.values.get("sns").map(String::as_str), Some("A001"));
 }
+
+/// 取数器：发请求时先报一声，然后挂在半路等放行——好让测试在「请求已发出、还没回来」
+/// 这段窗口里做别的事。
+struct GatedFetcher {
+    calls: AtomicUsize,
+    reached: tokio::sync::mpsc::Sender<()>,
+    release: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<()>>,
+    body: String,
+}
+
+impl SourceFetcher for GatedFetcher {
+    fn fetch<'a>(
+        &'a self,
+        _def: &'a DynamicVariable,
+        _ctx: &'a ResolveContext,
+        _source: &'a SourceContext,
+    ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let _ = self.reached.send(()).await;
+            let mut release = self.release.lock().await;
+            let _ = release.recv().await;
+            Ok(RawSource {
+                status: 200,
+                content_type: "application/json".into(),
+                body: self.body.clone(),
+                truncated: false,
+                body_base64: None,
+                headers: vec![],
+                duration_ms: 0,
+            })
+        })
+    }
+}
+
+/// 取数在飞时写下的覆盖值不被这次写回冲掉。
+///
+/// 覆盖值是用户在那个环境上亲手钉住的，取数只是「本该这样算」，不该盖过它。故写回事务里
+/// 看见仍然生效的覆盖值就跳过写入：这次的值照常交给调用方（它只是不进缓存），手工值留在
+/// 缓存行里，下一次解析读到的仍是它。
+#[tokio::test]
+async fn an_override_written_while_the_fetch_is_in_flight_survives_the_write_back() {
+    let (pool, _dir) = seeded_pool();
+    let definition = db::with_conn(&pool, |c| db::dynamic_variables::get(c, "d1")).expect("定义");
+    let (reached_tx, mut reached_rx) = tokio::sync::mpsc::channel(1);
+    let (release_tx, release_rx) = tokio::sync::mpsc::channel(1);
+    let fetcher = Arc::new(GatedFetcher {
+        calls: AtomicUsize::new(0),
+        reached: reached_tx,
+        release: tokio::sync::Mutex::new(release_rx),
+        body: "\"取回\"".to_string(),
+    });
+
+    let task = tokio::spawn({
+        let pool = pool.clone();
+        let fetcher = Arc::clone(&fetcher);
+        async move {
+            resolve_definition(&context(&pool), &definition, true, fetcher.as_ref())
+                .await
+                .expect("解析")
+        }
+    });
+
+    // 请求已经发出、还没回来：这时用户在另一个连接上把它存成覆盖值。
+    reached_rx.recv().await.expect("取数器收到请求");
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: String::new(),
+                value_json: Some("\"手写\"".into()),
+                fetched_at: 1,
+                expires_at: 1,
+                is_override: true,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("写覆盖值");
+
+    release_tx.send(()).await.expect("放行取数器");
+    let out = task.await.expect("任务");
+    assert_eq!(out.value.as_deref(), Some("取回"), "这次请求的值照常返回");
+    assert!(
+        out.expires_at.is_none(),
+        "没有写缓存就没有到期时间：{:?}",
+        out.expires_at
+    );
+
+    // 缓存行仍是覆盖值。
+    let cached = db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", ""))
+        .expect("读缓存")
+        .expect("覆盖行还在");
+    assert!(cached.is_override, "覆盖值没被自动取回的值顶掉");
+    assert_eq!(cached.value_json.as_deref(), Some("\"手写\""));
+
+    // 再解析一次：读到手工值，且不再取数。
+    let again = CountingFetcher::new("\"不该取数\"");
+    let second = resolve_names(
+        &context(&pool),
+        Some("p1"),
+        &["sns".to_string()],
+        false,
+        &again,
+    )
+    .await
+    .expect("解析");
+    assert_eq!(again.calls(), 0, "覆盖值生效时不该取数");
+    assert_eq!(second.values.get("sns").map(String::as_str), Some("手写"));
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst), 1);
+}
+
+/// 刷新要能换掉取数开始前就有的覆盖值。
+///
+/// 只有 `force` 会在一片有效覆盖值上开始取数（`cache::decide` 特意跳过它），而那个跳过是
+/// 可见的：来源徽标从「手动改的」变回「自动取回」。写回侧的守卫若连这份值也保护，刷新就
+/// 变成「取回了新值但库里还是手工值」，重载一次界面又变回手工值。
+#[tokio::test]
+async fn a_refresh_replaces_the_override_that_was_there_before_the_fetch() {
+    let (pool, _dir) = seeded_pool();
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: String::new(),
+                value_json: Some("\"手写\"".into()),
+                fetched_at: 1,
+                expires_at: 1,
+                is_override: true,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("写覆盖值");
+
+    // 普通解析先确认：覆盖值生效，取数器不该被叫。
+    let idle = CountingFetcher::new("\"取回\"");
+    let before = resolve_names(
+        &context(&pool),
+        Some("p1"),
+        &["sns".to_string()],
+        false,
+        &idle,
+    )
+    .await
+    .expect("解析");
+    assert_eq!(idle.calls(), 0, "覆盖值生效时不取数");
+    assert_eq!(before.values.get("sns").map(String::as_str), Some("手写"));
+
+    let definition = db::with_conn(&pool, |c| db::dynamic_variables::get(c, "d1")).expect("定义");
+    let fetcher = CountingFetcher::new("\"取回\"");
+    let refreshed = resolve_definition(&context(&pool), &definition, true, &fetcher)
+        .await
+        .expect("刷新");
+    assert_eq!(fetcher.calls(), 1, "刷新要真的取数");
+    assert_eq!(
+        refreshed.value.as_deref(),
+        Some("取回"),
+        "刷新拿到的是取回的新值"
+    );
+    assert!(
+        refreshed.expires_at.is_some(),
+        "写进缓存了就该有到期时间：{:?}",
+        refreshed.expires_at
+    );
+
+    // 库里那份手工值被换成了取回值。
+    let cached = db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", ""))
+        .expect("读缓存")
+        .expect("有缓存行");
+    assert!(!cached.is_override, "覆盖值已被刷新替换");
+    assert_eq!(cached.value_json.as_deref(), Some("\"取回\""));
+
+    // 再普通解析一次：读到取回值，而不是手工值。
+    let again = CountingFetcher::new("\"不该取数\"");
+    let after = resolve_names(
+        &context(&pool),
+        Some("p1"),
+        &["sns".to_string()],
+        false,
+        &again,
+    )
+    .await
+    .expect("解析");
+    assert_eq!(again.calls(), 0, "缓存新鲜时不再取数");
+    assert_eq!(after.values.get("sns").map(String::as_str), Some("取回"));
+}

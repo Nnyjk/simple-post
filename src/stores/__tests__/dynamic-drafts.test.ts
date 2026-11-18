@@ -361,4 +361,101 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
       '标签没了，脏标记也不该留着',
     );
   });
+  it('保存完成只清「提交的那一份」：期间又敲了内容就留着', () => {
+    actions().beginEditDynamicVariableDraft(view());
+    const submitted = draftOf('p1');
+    // 保存请求还在路上时用户又改了一格：草稿换成了新对象。
+    actions().patchDynamicVariableDraft('p1', { name: 'sns2' });
+
+    actions().finishDynamicVariableSave('p1', submitted);
+
+    assert.equal(draftOf('p1')?.name, 'sns2', '新敲的内容不许被这次保存的收尾抹掉');
+    assert.equal(
+      useAppStore.getState().dirtyTabIds.has(dynamicTabId('p1')),
+      true,
+      '还有没保存的内容，标签继续算脏',
+    );
+  });
+
+  it('保存完成时草稿没变，就清掉并摘脏', () => {
+    actions().beginEditDynamicVariableDraft(view());
+    const submitted = draftOf('p1');
+
+    actions().finishDynamicVariableSave('p1', submitted);
+
+    assert.equal(draftOf('p1'), undefined);
+    assert.equal(useAppStore.getState().dirtyTabIds.has(dynamicTabId('p1')), false);
+  });
+
+  it('暂存标签的脏标记不被别的项目那次清扫抹掉', () => {
+    const p1Tab = dynamicTabId('p1');
+    // 标签条上还挂着一个底层实体已经没了的标签：有它，这一轮清扫才会真的动到 `dirtyTabIds`。
+    useAppStore.setState({
+      openTabs: [
+        { id: p1Tab, kind: 'dynamic-variables' },
+        { id: 'ep-gone', kind: 'endpoint' },
+      ],
+      activeTabId: p1Tab,
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+    assert.equal(useAppStore.getState().dirtyTabIds.has(p1Tab), true);
+
+    // 切到 p2：p1 的标签进了 `projectTabs`，脏标记按 id 记着。
+    actions().switchProjectTabs('p2');
+    useAppStore.setState({ activeProjectId: 'p2' });
+    // p2 里发生一次清扫：它看不到 p1 的标签，但没理由把那条标记一起删了。
+    actions().pruneStaleTabs();
+    assert.equal(
+      useAppStore.getState().dirtyTabIds.has(p1Tab),
+      true,
+      'pruneStaleTabs 只减被退役的',
+    );
+
+    // 先切标签再改活动项目：`switchProjectTabs` 以「当前项目」为准做暂存。
+    actions().switchProjectTabs('p1');
+    useAppStore.setState({ activeProjectId: 'p1' });
+
+    assert.equal(useAppStore.getState().dirtyTabIds.has(p1Tab), true, '切回来那份半表单仍然是脏的');
+    actions().closeSavedTabs();
+    assert.equal(
+      useAppStore.getState().openTabs.some((t) => t.id === p1Tab),
+      true,
+      '脏标签不许被「关闭已保存」带走',
+    );
+    assert.ok(draftOf('p1'));
+  });
+
+  it('「关闭全部」只摘真正被关掉的那些脏标记', () => {
+    const p1Tab = dynamicTabId('p1');
+    const p2Tab = dynamicTabId('p2');
+    useAppStore.setState({
+      openTabs: [
+        { id: p1Tab, kind: 'dynamic-variables' },
+        { id: p2Tab, kind: 'dynamic-variables' },
+      ],
+      activeTabId: p1Tab,
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+    actions().beginCreateDynamicVariableDraft('p2');
+    actions().switchProjectTabs('p2');
+    useAppStore.setState({ activeProjectId: 'p2' });
+    // p1 的标签与标记都进了暂存区，此刻标签条上只剩 p2 的。
+    actions().closeAllTabs();
+
+    const dirty = useAppStore.getState().dirtyTabIds;
+    assert.equal(dirty.has(p2Tab), false, '关掉的标签不再脏');
+    assert.equal(dirty.has(p1Tab), true, '暂存中的标签仍算开着');
+
+    // 先切标签再改活动项目：`switchProjectTabs` 以「当前项目」为准做暂存。
+    actions().switchProjectTabs('p1');
+    useAppStore.setState({ activeProjectId: 'p1' });
+
+    actions().closeSavedTabs();
+    assert.equal(
+      useAppStore.getState().openTabs.some((t) => t.id === p1Tab),
+      true,
+      '切回来仍是脏的，不该被关掉',
+    );
+    assert.ok(draftOf('p1'));
+  });
 });

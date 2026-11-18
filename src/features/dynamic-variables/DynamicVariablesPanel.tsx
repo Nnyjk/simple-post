@@ -17,7 +17,7 @@ import type { DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { EmptyHint } from '@/components/ui/empty-hint';
 import { DynamicVariableForm } from './DynamicVariableForm';
-import { dynamicValueScope } from '@/stores/dynamic-slice';
+import { dynamicValueScope, type DynamicVariableDraft } from '@/stores/dynamic-slice';
 
 export function DynamicVariablesPanel() {
   const projectId = useAppStore((s) => s.activeProjectId);
@@ -38,6 +38,7 @@ export function DynamicVariablesPanel() {
   const beginCreate = useAppStore((s) => s.beginCreateDynamicVariableDraft);
   const beginEdit = useAppStore((s) => s.beginEditDynamicVariableDraft);
   const clearDraft = useAppStore((s) => s.clearDynamicVariableDraft);
+  const finishSave = useAppStore((s) => s.finishDynamicVariableSave);
 
   const creating = draft?.creating ?? false;
   const editingId = draft?.editingId ?? null;
@@ -107,13 +108,17 @@ export function DynamicVariablesPanel() {
 
         {variables.map((variable) => (
           <DynamicVariableCard
-            key={variable.id}
+            // 卡片自带覆盖值编辑器的状态，而值是 (定义 × 取数环境) 的一格：换环境就是另一格，
+            // 卡片必须跟着重挂，否则 A 环境那行文本会跟着写进 B 环境。切环境时整个面板都重载了
+            // 列表，重挂这一次不额外付代价。
+            key={`${variable.id}:${activeEnvironmentId}`}
             variable={variable}
             projectId={projectId}
             resolving={resolving}
             editing={editingId === variable.id}
             onEdit={() => beginEdit(variable)}
             onCancelEdit={() => clearDraft(projectId)}
+            onFinishEdit={(submitted) => finishSave(projectId, submitted)}
             onRefresh={() => void handleRefresh(variable)}
             onClearOverride={() => void handleClearOverride(variable)}
             onDelete={() => void deleteDynamicVariable(variable.id)}
@@ -124,7 +129,7 @@ export function DynamicVariablesPanel() {
           <DynamicVariableForm
             projectId={projectId}
             onCancel={() => clearDraft(projectId)}
-            onDone={() => clearDraft(projectId)}
+            onDone={(submitted) => finishSave(projectId, submitted)}
           />
         )}
       </div>
@@ -141,6 +146,8 @@ interface DynamicVariableCardProps {
   editing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
+  /** 编辑表保存成功：草稿的快照交回去，调用方据此决定清不清。 */
+  onFinishEdit: (submitted: DynamicVariableDraft) => void;
   onRefresh: () => void;
   onClearOverride: () => void;
   onDelete: () => void;
@@ -153,6 +160,7 @@ function DynamicVariableCard({
   editing,
   onEdit,
   onCancelEdit,
+  onFinishEdit,
   onRefresh,
   onClearOverride,
   onDelete,
@@ -291,7 +299,7 @@ function DynamicVariableCard({
           variable={variable}
           projectId={projectId}
           onCancel={onCancelEdit}
-          onDone={onCancelEdit}
+          onDone={onFinishEdit}
         />
       )}
     </article>

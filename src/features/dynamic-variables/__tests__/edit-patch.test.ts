@@ -160,4 +160,21 @@ describe('buildEditPatch', () => {
 
     assert.deepEqual(patch, {});
   });
+  it('定义的脚本原本只有空白：只改名字时不发 transformScript', () => {
+    // 两边不过同一个归一时，「空白」与「null」不等，只改个名字也会把脚本一起清成 null。
+    const initial = definition({ transformScript: '   ' });
+    const patch = buildEditPatch(
+      initial,
+      draftOf(initial, { name: 'points', transformScript: '  ' }),
+    );
+
+    assert.deepEqual(patch, { name: 'points' });
+  });
+
+  it('把一段非空的脚本清掉：发 null', () => {
+    const initial = definition({ transformScript: 'return pm.data;' });
+    const patch = buildEditPatch(initial, draftOf(initial, { transformScript: '   ' }));
+
+    assert.deepEqual(patch, { transformScript: null });
+  });
 });
