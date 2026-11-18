@@ -21,7 +21,8 @@ import { installBrowserShim, clearIpcMock, installIpcMock } from './_browser-shi
 
 import { useAppStore } from '../app-store';
 import { dynamicTabId } from '../store-types';
-import type { DynamicVariableView, Project } from '@/types/domain';
+import { buildEditPatch } from '@/features/dynamic-variables/edit-patch';
+import type { DynamicVariable, DynamicVariableView, Project } from '@/types/domain';
 
 function project(id: string): Project {
   return { id, name: id, color: '#000000', createdAt: 0, updatedAt: 0 };
@@ -368,7 +369,10 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     // 保存请求还在路上时用户又改了一格：草稿换成了新对象。
     actions().patchDynamicVariableDraft('p1', { name: 'sns2' });
 
-    actions().finishDynamicVariableSave('p1', submitted, view({ name: 'sns1' }));
+    // 这次提交只改了名字：基线也只会推进 name 这一格。
+    actions().finishDynamicVariableSave('p1', submitted, view({ name: 'sns1' }), {
+      name: submitted!.name,
+    });
 
     assert.equal(draftOf('p1')?.name, 'sns2', '新敲的内容不许被这次保存的收尾抹掉');
     assert.equal(
@@ -384,7 +388,7 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     actions().beginEditDynamicVariableDraft(view());
     const submitted = draftOf('p1');
 
-    actions().finishDynamicVariableSave('p1', submitted, view());
+    actions().finishDynamicVariableSave('p1', submitted, view(), {});
 
     assert.equal(draftOf('p1'), undefined);
     assert.equal(useAppStore.getState().dirtyTabIds.has(dynamicTabId('p1')), false);
@@ -473,7 +477,8 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     // 请求还在路上，用户又补了一句说明：草稿换成新对象。
     actions().patchDynamicVariableDraft('p1', { description: '后来补的' });
 
-    actions().finishDynamicVariableSave('p1', submitted!, view({ id: 'd-new', name: 'sns' }));
+    // 新建：没有旧基线可留，落库的那一份就是新基线。
+    actions().finishDynamicVariableSave('p1', submitted!, view({ id: 'd-new', name: 'sns' }), {});
 
     const draft = draftOf('p1');
     assert.equal(draft?.creating, false, '落库之后就是编辑态');
@@ -492,7 +497,7 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     const submitted = draftOf('p1');
     actions().clearDynamicVariableDraft('p1');
 
-    actions().finishDynamicVariableSave('p1', submitted!, view());
+    actions().finishDynamicVariableSave('p1', submitted!, view(), {});
 
     assert.equal(draftOf('p1'), undefined, '取消之后又被一次迟到的保存叫回来，就是幽灵表单');
   });
@@ -504,7 +509,8 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     useAppStore.setState({
       openTabs: [{ id: 'ep-gone', kind: 'endpoint' }],
       activeTabId: 'ep-gone',
-      endpointDrafts: { [stashed]: { url: '/kept' } } as never,
+      // 被清扫的那个标签也带一份草稿：不种它，「清扫什么都不做」也能让下面那条断言通过。
+      endpointDrafts: { [stashed]: { url: '/kept' }, 'ep-gone': { url: '/gone' } } as never,
       dirtyTabIds: new Set([stashed, 'ep-gone']),
       projectTabs: {
         p2: { tabs: [{ id: stashed, kind: 'endpoint-draft' }], activeTabId: stashed },
@@ -544,12 +550,67 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     // 保存还在路上，用户点开了另一条定义的表单。
     actions().beginEditDynamicVariableDraft(view({ id: 'd-b', name: 'b' }));
 
-    actions().finishDynamicVariableSave('p1', submitted!, view({ id: 'd-a', name: 'a' }));
+    actions().finishDynamicVariableSave('p1', submitted!, view({ id: 'd-a', name: 'a' }), {});
 
     const draft = draftOf('p1');
     assert.equal(draft?.editingId, 'd-b', '另一条定义的表单不许被上一条的保存收尾劫走');
     assert.equal(draft?.name, 'b');
   });
+  it('保存期间取消并另开新建表：那次收尾不劫走新会话', () => {
+    // 新表单的 `editingId` 也是 null，跟「存 A 时那份草稿」长得一样；只比内容就会把 A 的完成
+    // 回调套到这张新表上，把它改写成「正在编辑 A」，下一次保存直接覆盖 A。
+    actions().beginEditDynamicVariableDraft(view({ id: 'd-a', name: 'a' }));
+    const submitted = draftOf('p1')!;
+    actions().clearDynamicVariableDraft('p1');
+    actions().beginCreateDynamicVariableDraft('p1');
+    actions().patchDynamicVariableDraft('p1', { name: 'fresh' });
+
+    actions().finishDynamicVariableSave('p1', submitted, view({ id: 'd-a', name: 'a' }), {
+      name: 'a',
+    });
+
+    const draft = draftOf('p1');
+    assert.equal(draft?.creating, true, '新表还是新建');
+    assert.equal(draft?.editingId, null, '不许被改写成「正在编辑 A」');
+    assert.equal(draft?.name, 'fresh', '也不许动用户已经敲的内容');
+  });
+
+  it('基线只推进这次 patch 碰过的字段：别人改的说明不会被下一次保存带回去', async () => {
+    const server = view({ id: 'd-sns', name: 'sns', description: null });
+    useAppStore.setState({ dynamicVariables: [server] });
+    actions().beginEditDynamicVariableDraft(server);
+    const submitted = draftOf('p1')!;
+    // 表单里只改了名字。
+    actions().patchDynamicVariableDraft('p1', { name: 'sns2' });
+
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_update') {
+        // 别的客户端刚把说明改成 B，这次响应把它一起带回来。
+        return { ...server, ...(args.patch as object), description: 'B' };
+      }
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const inFlight = actions().updateDynamicVariable('d-sns', { name: 'sns2' });
+    // 请求还在路上，用户又改了抽取规则：草稿留下来，收尾要推进基线。
+    actions().patchDynamicVariableDraft('p1', { extractPath: '$.rows' });
+    const saved = await inFlight;
+
+    actions().finishDynamicVariableSave('p1', submitted, saved as DynamicVariable, {
+      name: 'sns2',
+    });
+
+    const draft = draftOf('p1')!;
+    assert.equal(draft.openedWith?.description, null, '说明没被这次提交碰到，基线就该留着旧值');
+    assert.equal(
+      'description' in buildEditPatch(draft.openedWith!, draft),
+      false,
+      '下一次保存不许把别人改的说明覆盖回去',
+    );
+    assert.equal(draft.openedWith?.name, 'sns2', '碰到了的字段才推进');
+  });
+
   it('「关闭已保存」也只带走标签条上那些 endpoint 草稿', () => {
     // 暂存标签的草稿若被抹掉，它那条脏标记还在——于是「脏而无草稿」，再也存不回去。
     const clean = 'ep-clean';

@@ -17,7 +17,11 @@ import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/do
 import { Button } from '@/components/ui/button';
 import { EmptyHint } from '@/components/ui/empty-hint';
 import { DynamicVariableForm } from './DynamicVariableForm';
-import { dynamicValueScope, type DynamicVariableDraft } from '@/stores/dynamic-slice';
+import {
+  dynamicListMatchesEnvironment,
+  dynamicValueScope,
+  type DynamicVariableDraft,
+} from '@/stores/dynamic-slice';
 
 export function DynamicVariablesPanel() {
   const projectId = useAppStore((s) => s.activeProjectId);
@@ -118,7 +122,9 @@ export function DynamicVariablesPanel() {
             editing={editingId === variable.id}
             onEdit={() => beginEdit(variable)}
             onCancelEdit={() => clearDraft(projectId)}
-            onFinishEdit={(submitted, saved) => finishSave(projectId, submitted, saved)}
+            onFinishEdit={(submitted, saved, patch) =>
+              finishSave(projectId, submitted, saved, patch)
+            }
             onRefresh={() => void handleRefresh(variable)}
             onClearOverride={() => void handleClearOverride(variable)}
             onDelete={() => void deleteDynamicVariable(variable.id)}
@@ -129,7 +135,7 @@ export function DynamicVariablesPanel() {
           <DynamicVariableForm
             projectId={projectId}
             onCancel={() => clearDraft(projectId)}
-            onDone={(submitted, saved) => finishSave(projectId, submitted, saved)}
+            onDone={(submitted, saved, patch) => finishSave(projectId, submitted, saved, patch)}
           />
         )}
       </div>
@@ -147,7 +153,11 @@ interface DynamicVariableCardProps {
   onEdit: () => void;
   onCancelEdit: () => void;
   /** 编辑表保存成功：提交的那份草稿与落库的那份定义一起交回去。 */
-  onFinishEdit: (submitted: DynamicVariableDraft, saved: DynamicVariable) => void;
+  onFinishEdit: (
+    submitted: DynamicVariableDraft,
+    saved: DynamicVariable,
+    patch: Partial<DynamicVariable>,
+  ) => void;
   onRefresh: () => void;
   onClearOverride: () => void;
   onDelete: () => void;
@@ -176,6 +186,14 @@ function DynamicVariableCard({
       s.dynamicErrors[dynamicValueScope(projectId, activeEnvironmentId || null)]?.[variable.name],
   );
   const error = variable.error ?? dynamicError;
+  // 这批「当前值」是不是当前这个环境拉到的。切换环境的那一刻列表还在路上，内容仍是上一个
+  // 环境的：此刻打开覆盖值编辑器，复制进框里的是 A 的值，保存却会写进 B。
+  const listScope = useAppStore((s) => s.dynamicVariablesScope);
+  const valuesFromCurrentEnvironment = dynamicListMatchesEnvironment(
+    listScope,
+    projectId,
+    activeEnvironmentId || null,
+  );
 
   /** 打开编辑器时把草稿重置成当前值——否则上一次没保存的编辑会留在框里。 */
   const openEditor = () => {
@@ -262,9 +280,22 @@ function DynamicVariableCard({
           >
             {variable.value ? summarize(variable.value) : '（没有值）'}
           </button>
-          <Button variant="ghost" size="xs" onClick={openEditor}>
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={openEditor}
+            disabled={!valuesFromCurrentEnvironment}
+            title={
+              valuesFromCurrentEnvironment
+                ? undefined
+                : '列表还在换成当前环境的值，此刻不该照着它写覆盖值'
+            }
+          >
             {expanded ? '收起' : '编辑'}
           </Button>
+          {!valuesFromCurrentEnvironment && (
+            <span className="text-nano text-faint">正在切换环境…</span>
+          )}
         </div>
         {expanded && (
           <div className="mt-2 flex flex-col gap-2">

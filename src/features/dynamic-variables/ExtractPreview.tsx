@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { buildScriptSnippet, shouldConfirmOverwrite } from './extract-path';
 import {
+  previewExpectedEnvironment,
   previewFailureMessage,
   previewFingerprint,
   previewPayload,
@@ -123,8 +124,12 @@ export function ExtractPreview({
     activeEnvironmentId: activeEnvironmentId || null,
   };
   const currentFingerprint = previewFingerprint(currentInput);
-  // 与快照不同就说明结果已经不对应眼前这份草稿了。
+  // 与快照不同就说明结果已经不对应眼前这份草稿了（来源、抽取规则、脚本正文变了）。
   const draftChanged = snapshot !== null && snapshot.fingerprint !== currentFingerprint;
+  // 这份响应是在另一个环境下取到的（换了点名环境，或这边切了调用方环境）。指纹不认环境，
+  // 故这一档单独说一句：结果旁边就写着「环境：X」，用户不会误以为它是当前环境下取到的。
+  const environmentMoved =
+    result !== null && (result.environmentId ?? null) !== previewExpectedEnvironment(currentInput);
   // 失败也一样：指纹对不上就当这份草稿还没有结果，别把上一份输入的失败摆在它名下。
   const error = previewFailureMessage(failure, currentFingerprint);
   /** 预览请求的世代号：连点两次时，先发的那一次可能后回来，它的结果不能盖掉后发的。 */
@@ -240,6 +245,12 @@ export function ExtractPreview({
           {draftChanged && (
             <p className="text-micro text-warning">
               这份结果对应的是旧输入：下面这份响应来自上面这份草稿的上一版，改完点「预览取数」再重取一次。
+            </p>
+          )}
+          {environmentMoved && (
+            <p className="text-micro text-muted-foreground">
+              这份结果取自{snapshot.environment === null ? '「没有环境」' : snapshot.environment}
+              ：草稿现在会按另一个环境取数，重取一次才是那个环境下的响应。
             </p>
           )}
           {result.truncated && (

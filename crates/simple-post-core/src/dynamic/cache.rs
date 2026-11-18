@@ -44,8 +44,10 @@ pub fn decide(
         // 一个叫「刷新」却什么都不做的按钮比它丢掉的那份手动值更糟；丢掉的动作是可见的
         // （来源徽标从「手动改的」变回「自动取回」），且用户可以再写一次。
         return Decision::Fetch {
+            // 回退候选只认**已经过期**的那一行：`force` 不看有效期，一份刚由别的解析写下的
+            // 新鲜值也会走到这里，它不是过期值，取数失败时按缺失处理才对。
             // 覆盖值过期后留下的候选仍是人手写的值；自动值只在有数据源时才算数。
-            stale_fallback: if has_source || entry.is_override {
+            stale_fallback: if (has_source || entry.is_override) && is_expired(entry, now) {
                 stale_candidate(def, entry)
             } else {
                 None
@@ -53,7 +55,7 @@ pub fn decide(
         };
     }
     if entry.is_override {
-        let alive = entry.override_expires_at.map(|t| t > now).unwrap_or(true);
+        let alive = !is_expired(entry, now);
         if alive {
             if let Some(value_json) = &entry.value_json {
                 return Decision::UseOverride {
@@ -78,6 +80,20 @@ pub fn decide(
         } else {
             None
         },
+    }
+}
+
+/// 这一行过期了吗：覆盖值看到期时刻（没写到期时刻的永久覆盖值永不过期），自动值看 TTL。
+///
+/// 判活的时刻由调用方给，故调用方要在读到那一行**之后**再取时刻。
+pub(super) fn is_expired(entry: &DynamicCacheEntry, now: i64) -> bool {
+    if entry.is_override {
+        entry
+            .override_expires_at
+            .map(|deadline| deadline <= now)
+            .unwrap_or(false)
+    } else {
+        entry.expires_at <= now
     }
 }
 

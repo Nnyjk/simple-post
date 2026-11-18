@@ -15,6 +15,12 @@ pub struct ResolveContext {
     /// 没有环境（MCP 不点名、或那个环境不属于数据源端点所属的项目——后一条由
     /// `dynamic::source_context` 判定）。它不参与「指定的环境」：那条由定义自己决定。
     pub environment_id: Option<String>,
+    /// 测试用：解析在排队等单飞行锁之前往这里报一声。
+    ///
+    /// 等锁这件事本身不可观测，而固定时长的等待证明不了「对方已经算完进门那一次、正排在锁
+    /// 上」。只在测试构建里存在，故生产构造点不受影响。
+    #[cfg(test)]
+    pub lock_wait: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 /// 数据源取回来的原始响应。

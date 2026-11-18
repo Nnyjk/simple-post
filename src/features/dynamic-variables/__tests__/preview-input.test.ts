@@ -2,13 +2,18 @@
  * 预览结果的指纹：改哪一格，手上的旧结果就不再是「当前草稿」的结果。
  *
  * 这条判断决定了界面会不会把上一份响应说成「当前草稿」。旧的实现只比抽取规则与「有没有
- * 脚本」，于是换掉内联 URL、换一个引用接口、换取数环境、改脚本正文之后，上一份响应仍被
- * 标成当前的。指纹序列化的是**实际发给预览命令的那份参数**，故两边不可能走偏。
+ * 脚本」，于是换掉内联 URL、换一个引用接口、改脚本正文之后，上一份响应仍被标成当前的。
+ *
+ * **环境不进指纹**：一份响应最终在哪个环境下取到，只有后端说得准（定义点名 / 继承调用方 /
+ * 回落到数据源接口所属项目的默认环境）。前端按调用方环境算，本项目里切一下环境就会把同一份
+ * 结果标成「对应旧输入」，还诱导用户再点一次预览（非幂等接口就是对端生效两次）。环境那一路
+ * 由 `previewExpectedEnvironment` 单独回答，界面据此在结果旁补一句「这份结果取自 X」。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  previewExpectedEnvironment,
   previewFailureMessage,
   previewFingerprint,
   previewPayload,
@@ -97,36 +102,36 @@ describe('previewFingerprint', () => {
     );
   });
 
-  it('改取数环境（定义点名的那一格）就是另一份输入', () => {
-    const asEndpoint = base({ usesEndpoint: true, sourceEndpointId: 'ep-1' });
-    const other = { ...asEndpoint, environmentId: 'env-2' };
-    assert.notEqual(previewFingerprint(asEndpoint), previewFingerprint(other));
-  });
-
-  it('只有继承环境的草稿才受调用方环境影响', () => {
+  it('环境不进指纹：换调用方环境、换点名环境都还是同一份输入', () => {
     const inheriting = base({ usesEndpoint: true, sourceEndpointId: 'ep-1' });
-    assert.notEqual(
+    assert.equal(
       previewFingerprint(inheriting),
       previewFingerprint({ ...inheriting, activeEnvironmentId: 'env-2' }),
-      '继承的定义按调用方环境取数，换环境就是另一份输入',
+      '切一下调用方环境不该把手上这份响应标成「旧输入」',
     );
-    assert.notEqual(
+    assert.equal(
       previewFingerprint(inheriting),
       previewFingerprint({ ...inheriting, activeEnvironmentId: null }),
     );
 
-    // 点名了取数环境：这一次取数不会因为调用方换了环境而不同，指纹也不该变——变了就会误报
-    // 「这份结果对应旧输入」，让用户白白再打一次请求（非幂等接口就是对端生效两次）。
     const pinned = base({ usesEndpoint: true, sourceEndpointId: 'ep-1', environmentId: 'env-9' });
     assert.equal(
       previewFingerprint(pinned),
-      previewFingerprint({ ...pinned, activeEnvironmentId: 'env-2' }),
+      previewFingerprint({ ...pinned, environmentId: 'env-10' }),
+      '点名环境由后端的回落规则兜底，前端复刻只会误标',
     );
 
     // 内联请求根本用不到环境。
     assert.equal(
       previewFingerprint(base()),
       previewFingerprint(base({ activeEnvironmentId: 'env-2' })),
+    );
+  });
+
+  it('改抽取规则就是另一份输入', () => {
+    assert.notEqual(
+      previewFingerprint(base()),
+      previewFingerprint(base({ extractPath: '$.rows' })),
     );
   });
 
@@ -150,6 +155,35 @@ describe('previewFingerprint', () => {
     const left = base({ extractPath: '$.a', transformScript: 'b' });
     const right = base({ extractPath: '$.ab', transformScript: '' });
     assert.notEqual(previewFingerprint(left), previewFingerprint(right));
+  });
+});
+
+describe('previewExpectedEnvironment', () => {
+  it('定义点名了取数环境就用它', () => {
+    assert.equal(
+      previewExpectedEnvironment(
+        base({ usesEndpoint: true, sourceEndpointId: 'ep-1', environmentId: 'env-9' }),
+      ),
+      'env-9',
+    );
+  });
+
+  it('没点名时用调用方此刻选中的那个', () => {
+    assert.equal(
+      previewExpectedEnvironment(base({ usesEndpoint: true, sourceEndpointId: 'ep-1' })),
+      'env-1',
+    );
+    assert.equal(
+      previewExpectedEnvironment(
+        base({ usesEndpoint: true, sourceEndpointId: 'ep-1', activeEnvironmentId: null }),
+      ),
+      null,
+      '调用方也没有可用环境时，这一档算不出来',
+    );
+  });
+
+  it('内联请求用不到环境', () => {
+    assert.equal(previewExpectedEnvironment(base()), null);
   });
 });
 

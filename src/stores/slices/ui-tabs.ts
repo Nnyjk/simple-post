@@ -286,8 +286,7 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         nextActive = valid[valid.length - 1]?.id ?? null;
       }
       // 只减不重建：脏标记按 id 记，暂存进 `projectTabs` 的那些标签此刻不在 `openTabs` 里
-      // 却不该被判成干净——重建会把它们（以及动态变量草稿那一条）抹掉，切回来「关闭已保存」
-      // 就把半张表单一起关掉了。
+      // 却不该被判成干净——重建会把它们抹掉，切回来「关闭已保存」就把半张表单一起关掉了。
       const removedIds = s.openTabs
         .filter((t) => !valid.some((v) => v.id === t.id))
         .map((t) => t.id);

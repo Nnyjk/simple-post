@@ -55,6 +55,30 @@ function scopeProjectId(scope: string): string {
   return cut < 0 ? scope : scope.slice(0, cut);
 }
 
+/**
+ * 这份列表是不是当前这个 (项目 × 取数环境) 拉到的。
+ *
+ * 切换环境的那一刻列表内容还是上一个环境的：面板此刻若让用户去改「当前值」，改的是 A 环境
+ * 那一格的值，保存却会写进 B 环境。故面板拿这个判定要不要让值相关的操作可用。
+ */
+export function dynamicListMatchesEnvironment(
+  listScope: string | null,
+  projectId: string,
+  environmentId: string | null,
+): boolean {
+  return listScope !== null && listScope === dynamicValueScope(projectId, environmentId);
+}
+
+/**
+ * 「这个项目正在新建定义」的保存中标志键。
+ *
+ * 新建时还没有定义 id 可作键，故按项目记：同一项目的两次新建是同一件事的两个请求，第二次
+ * 必须被挡住——否则会落成两条定义，撞项目内名字唯一约束。
+ */
+export function creatingDraftKey(projectId: string): string {
+  return `new:${projectId}`;
+}
+
 /** 新建一条定义时要填的字段。 */
 export interface CreateDynamicVariableInput {
   /** 归属项目。定义挂在项目里，故它必填。 */
@@ -96,6 +120,15 @@ export interface DynamicVariableDraft {
   /** 正在编辑哪条定义；`null` = 没在编辑。 */
   editingId: string | null;
   /**
+   * 这会话的号。每个项目各自自增，`beginCreateDynamicVariableDraft` 与
+   * `beginEditDynamicVariableDraft` 各推进一次。
+   *
+   * 收尾要比对的是**归属**而不是内容：存 A 的 PATCH 还在路上时，用户可以取消并另开一张新建
+   * 表——新草稿的 `editingId` 也是 `null`，跟「存 A 时那份草稿」长得一样。只比内容就会把 A
+   * 的完成回调套到这张新表单上，把它改写成「正在编辑 A」，下一次保存直接覆盖 A。
+   */
+  draftSession: number;
+  /**
    * 打开表单那一刻这条定义的样子：编辑时差量比对以它为基线（见 `features/dynamic-variables/edit-patch.ts`）。
    *
    * 不用「此刻的列表项」当基线：列表在表单开着的期间会被刷新（切环境、别处保存都会重载），
@@ -124,7 +157,7 @@ export interface DynamicVariableDraft {
 /** 表单逐格写的那部分。`creating` / `editingId` / `openedWith` 由面板的两个按钮决定，表单不碰。 */
 export type DynamicVariableDraftFields = Omit<
   DynamicVariableDraft,
-  'creating' | 'editingId' | 'openedWith'
+  'creating' | 'editingId' | 'draftSession' | 'openedWith'
 >;
 
 /** 一份空白的新建草稿。 */
@@ -132,6 +165,7 @@ export function emptyDynamicVariableDraft(): DynamicVariableDraft {
   return {
     creating: true,
     editingId: null,
+    draftSession: 0,
     openedWith: null,
     name: '',
     description: '',
@@ -161,6 +195,7 @@ export function draftFromDefinition(variable: DynamicVariableView): DynamicVaria
   return {
     creating: false,
     editingId: variable.id,
+    draftSession: 0,
     openedWith: variable,
     name: variable.name,
     description: variable.description ?? '',
@@ -179,6 +214,24 @@ export function draftFromDefinition(variable: DynamicVariableView): DynamicVaria
   };
 }
 
+/**
+ * 把「打开表单时的基线」推进到刚保存的那一份，但**只推进这次提交碰过的字段**。
+ *
+ * 没被这次 patch 提到的字段保持原基线：客户端 A 只改了名字，客户端 B 刚把说明改成 B，服务端
+ * 响应里带着 B；整份换成响应，A 的草稿还写着旧说明，下一次保存就把 B 覆盖回去了。
+ */
+function advanceDraftBaseline(
+  openedWith: DynamicVariable,
+  saved: DynamicVariable,
+  patch: Partial<DynamicVariable>,
+): DynamicVariable {
+  const next: DynamicVariable = { ...openedWith };
+  for (const key of Object.keys(patch) as (keyof DynamicVariable)[]) {
+    (next as unknown as Record<string, unknown>)[key] = saved[key];
+  }
+  return next;
+}
+
 /** 状态部分。 */
 export interface DynamicSliceState {
   /** 已加载的定义（带当前值与缓存状态）。每条自带归属项目，读者按项目过滤。 */
@@ -188,6 +241,15 @@ export interface DynamicSliceState {
    * 那条标签被关掉时才清（清理点见 `DynamicSliceActions.clearDynamicVariableDraft`）。
    */
   dynamicDrafts: Record<string, DynamicVariableDraft>;
+  /**
+   * `dynamicVariables` 是在哪个 (项目 × 取数环境) 下拉到的（键见 `dynamicValueScope`）；
+   * 还没载过时是 `null`。
+   *
+   * 列表里的「当前值」属于某个环境。切环境的那一刻列表还在路上，内容仍是上一个环境的；
+   * 面板据此判断要不要让「写覆盖值」这类依赖值的操作可用（判定见
+   * `dynamicListMatchesEnvironment`）。
+   */
+  dynamicVariablesScope: string | null;
   /** (项目 × 取数环境) → 变量名 → 当前值。键见 `dynamicValueScope`。 */
   dynamicValues: Record<string, Record<string, DynamicValueStatus>>;
   /** (项目 × 取数环境) → 变量名 → 最近一次取数失败的原因。取数成功时该条目被清掉。 */
@@ -199,7 +261,13 @@ export interface DynamicSliceState {
    * 可点——那一批还没跑完。
    */
   dynamicInFlight: number;
-  /** 正在保存的定义 id（`updateDynamicVariable` 在飞期间）。表单据此禁用保存按钮。 */
+  /**
+   * 正在保存的东西（请求在路上）：已存定义用它的 id，新建用 `creatingDraftKey(projectId)`。
+   *
+   * 放在 store 而不是表单的 `useState` 里：切走标签表单就卸载，`busy` 随之归零，用户切回来
+   * 还能再点一次保存——编辑会多发一个 PATCH，新建会落成两条定义。标志在 store 里就跟请求
+   * 同寿，切回来仍是「保存中」，按钮仍然禁用。
+   */
   savingDynamicVariableIds: Set<string>;
   /** 最近一次取数或写操作失败的原因。 */
   dynamicError: string | null;
@@ -231,13 +299,20 @@ export interface DynamicSliceActions {
    * 保存成功后收尾。
    *
    * 当前草稿仍是**提交的那一份**就清掉；保存请求在路上时用户又敲了一格，那一格属于下一份
-   * 草稿，于是留着它，但把身份与基准换成刚落地的那一份（`saved`）：不换，再点保存要么以
-   * 旧基线算 patch 而漏发，要么还是 `creating` 状态、再创建一条撞上项目内的名字唯一约束。
+   * 草稿，于是留着它，但把身份换成刚落地的那一份（`saved`）：不换，再点保存要么以旧基线算
+   * patch 而漏发，要么还是 `creating` 状态、再创建一条撞上项目内的名字唯一约束。
+   *
+   * 归属按 `draftSession` 认，不按内容认：存 A 的请求在路上时取消并另开新建表，新草稿的
+   * `editingId` 也是 `null`。不是发起这次保存的那个会话，这里什么都不动。
+   *
+   * 基线（`openedWith`）只推进 `patch` 碰过的字段：别的客户端刚改了说明，本地这次只存了
+   * 名字，整份推进基线会让下次保存把旧的说明发回去，悄悄回滚别人的改动。
    */
   finishDynamicVariableSave: (
     projectId: string,
     submitted: DynamicVariableDraft,
     saved: DynamicVariable,
+    patch: Partial<DynamicVariable>,
   ) => void;
   /**
    * 载入定义。
@@ -334,6 +409,21 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
   };
 
   /**
+   * 每个项目的草稿会话号，`beginCreate…` / `beginEdit…` 各推进一格。
+   *
+   * 只放在闭包里：它唯一的作用是给「这份草稿归谁」一个能比的号，界面不看它，故不进 state，
+   * 也不会被快照回滚搅乱。
+   */
+  const draftSessions = new Map<string, number>();
+
+  /** 给这个项目开一个新会话并返回它的号。 */
+  const issueDraftSession = (projectId: string): number => {
+    const session = (draftSessions.get(projectId) ?? 0) + 1;
+    draftSessions.set(projectId, session);
+    return session;
+  };
+
+  /**
    * 草稿在不在，就决定这个项目的动态变量标签脏不脏。
    *
    * 标签上的草稿是**唯一**一份未保存内容（表单自己不留 state），故「有草稿」与「有未保存
@@ -367,6 +457,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 
   return {
     dynamicVariables: [],
+    dynamicVariablesScope: null,
     dynamicDrafts: {},
     dynamicValues: {},
     dynamicErrors: {},
@@ -380,7 +471,13 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         const draft = s.dynamicDrafts[projectId];
         if (draft?.creating) return {};
         return {
-          dynamicDrafts: { ...s.dynamicDrafts, [projectId]: emptyDynamicVariableDraft() },
+          dynamicDrafts: {
+            ...s.dynamicDrafts,
+            [projectId]: {
+              ...emptyDynamicVariableDraft(),
+              draftSession: issueDraftSession(projectId),
+            },
+          },
           dirtyTabIds: dirtyForDraft(projectId, true) ?? s.dirtyTabIds,
         };
       }),
@@ -391,7 +488,13 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         // 正在编辑的就是这一条：保留用户改了一半的内容。
         if (s.dynamicDrafts[projectId]?.editingId === variable.id) return {};
         return {
-          dynamicDrafts: { ...s.dynamicDrafts, [projectId]: draftFromDefinition(variable) },
+          dynamicDrafts: {
+            ...s.dynamicDrafts,
+            [projectId]: {
+              ...draftFromDefinition(variable),
+              draftSession: issueDraftSession(projectId),
+            },
+          },
           dirtyTabIds: dirtyForDraft(projectId, true) ?? s.dirtyTabIds,
         };
       }),
@@ -416,17 +519,26 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 
     clearDynamicVariableDraft: (projectId) => set((s) => clearedDrafts(s, projectId) ?? {}),
 
-    finishDynamicVariableSave: (projectId, submitted, saved) =>
+    finishDynamicVariableSave: (projectId, submitted, saved, patch) =>
       set((s) => {
         const current = s.dynamicDrafts[projectId];
         // 草稿已经被别处清掉了（取消、关标签）：没什么要收的。
         if (current === undefined) return {};
+        // 不是发起这次保存的那个会话：用户已经取消并另开了表单（新建表也长得像「没在编辑」），
+        // 这份草稿不归这次保存管，连基线都不许推——推了就是把新表单改写成上一条的编辑态。
+        if (current.draftSession !== submitted.draftSession) return {};
         // 还是提交的那一份：内容都落了库，草稿可以走。
         if (current === submitted) return clearedDrafts(s, projectId) ?? {};
-        // 保存期间用户已经点开另一条定义的表单：这份草稿不归这次保存管，别把它改写成上一条。
-        if (current.editingId !== null && current.editingId !== saved.id) return {};
         // 保存期间又敲了内容：留着这一份，但把它改写成「正在编辑刚落地的那条」。
         // 不改写的话 `creating` 还挂着，再点保存就是第二次创建。
+        //
+        // 基线只推进这次 patch 碰过的字段：别的客户端刚把说明改成 B，本地这次只存了名字，
+        // 整份换成响应会让下一次保存把草稿里的旧说明发回去。
+        const openedWith = advanceDraftBaseline(
+          submitted.creating ? saved : (current.openedWith ?? saved),
+          saved,
+          patch,
+        );
         return {
           dynamicDrafts: {
             ...s.dynamicDrafts,
@@ -434,7 +546,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
               ...current,
               creating: false,
               editingId: saved.id,
-              openedWith: saved,
+              openedWith,
             },
           },
         };
@@ -468,17 +580,25 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 
     loadDynamicVariables: async (projectId) => {
       // 号在**发请求之前**取：两次调用各持一个号，回来时只有最后一次的结果上屏。
+      // 环境也在发请求之前取定：结果属于**请求时**那个环境，戳就得记那一个，不是回来时
+      // 用户碰巧站着的那个。
+      const environmentId = callerEnvironmentId(get());
       const seq = ++listSeq;
       try {
         const views = await invokeCmd<DynamicVariableView[]>(COMMANDS.dynamicVariablesList, {
           // 空串与缺席同义：不点名项目就是跨项目那一路（列出全部）。
           projectId: projectId || null,
           // 列表带回的当前值是「在某个环境下的值」，故要看哪一格缓存得说清是哪个环境。
-          environmentId: callerEnvironmentId(get()),
+          environmentId,
         });
         // 期间又发过一次列表请求：这一份对应的是旧项目或旧环境下的当前值，丢掉。
         if (seq !== listSeq) return;
-        set({ dynamicVariables: views, dynamicError: null });
+        // 环境戳与结果同一次写入：面板据此判断「这批当前值还是不是这个环境的」。
+        set({
+          dynamicVariables: views,
+          dynamicVariablesScope: dynamicValueScope(projectId ?? '', environmentId),
+          dynamicError: null,
+        });
       } catch (e) {
         console.error('[store] dynamic_variables_list failed', e);
         // 期间又发过一次：这一份的失败属于旧项目或旧环境，别把它盖到新的那一屏上。
@@ -488,6 +608,13 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     },
 
     createDynamicVariable: async (input) => {
+      // 同一项目一次只发一个 POST：新建时还没有定义 id 可挡，故按项目记。用户在请求在路上时
+      // 切走标签再切回来，表单的 `busy` 已归零，靠这个标志仍然拦住第二次（否则落成两条定义）。
+      const savingKey = creatingDraftKey(input.projectId);
+      if (get().savingDynamicVariableIds.has(savingKey)) return null;
+      set((s) => ({
+        savingDynamicVariableIds: new Set(s.savingDynamicVariableIds).add(savingKey),
+      }));
       try {
         const created = await invokeCmd<DynamicVariable>(COMMANDS.dynamicVariablesCreate, {
           projectId: input.projectId,
@@ -511,6 +638,12 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         console.error('[store] dynamic_variables_create failed', e);
         set({ dynamicError: errorText(e) });
         return null;
+      } finally {
+        set((s) => {
+          const next = new Set(s.savingDynamicVariableIds);
+          next.delete(savingKey);
+          return { savingDynamicVariableIds: next };
+        });
       }
     },
 

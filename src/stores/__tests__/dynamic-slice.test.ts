@@ -20,7 +20,12 @@ import assert from 'node:assert/strict';
 
 import { installBrowserShim, installIpcMock, clearIpcMock } from './_browser-shim';
 
-import { createDynamicSlice, dynamicValueScope } from '../dynamic-slice';
+import {
+  creatingDraftKey,
+  createDynamicSlice,
+  dynamicListMatchesEnvironment,
+  dynamicValueScope,
+} from '../dynamic-slice';
 import type {
   DynamicError,
   DynamicValueStatus,
@@ -39,6 +44,7 @@ function makeHarness() {
     dynamicInFlight: 0,
     savingDynamicVariableIds: new Set<string>(),
     dynamicDrafts: {} as Record<string, unknown>,
+    dynamicVariablesScope: null as string | null,
     dirtyTabIds: new Set<string>(),
     dynamicError: null as string | null,
     activeProjectId: 'p1',
@@ -567,9 +573,17 @@ describe('dynamic slice', () => {
     assert.equal(bag.dynamicValues[scope1]?.sns, undefined, '按旧抽取规则取到的值不许留在桶里');
     assert.equal(stale.values.sns, '[old-rule]', '调用方仍拿到它自己那一次的结果');
   });
-  it('刷新把取到的那份值写进对应格子的桶里', async () => {
+  it('刷新把取到的那份值写进对应格子的桶里，且只清这条定义自己的失败原因', async () => {
     const bag = makeHarness();
     bag.dynamicVariables = [view('c')];
+    // 先种两条失败原因：这条定义自己那条要被清掉，别的变量那条不许动。桶本来是空的，
+    // 「刷新顺手清空整桶」也会让断言通过。
+    bag.dynamicErrors = {
+      [scope1]: {
+        c: { name: 'c', kind: 'network', message: '断了' } as DynamicError,
+        other: { name: 'other', kind: 'timeout', message: '超时' } as DynamicError,
+      },
+    };
     installIpcMock((cmd) => {
       if (cmd === 'dynamic_variables_refresh') {
         return { name: 'c', value: '[c-fresh]', source: 'auto', isOverride: false, error: null };
@@ -582,6 +596,7 @@ describe('dynamic slice', () => {
 
     assert.equal(bag.dynamicValues[scope1]?.c?.value, '[c-fresh]', '面板要立刻显示这次重取的值');
     assert.equal(bag.dynamicErrors[scope1]?.c, undefined, '重取成功要清掉上一次的失败原因');
+    assert.equal(bag.dynamicErrors[scope1]?.other?.message, '超时', '别的变量的原因不归这次刷新管');
   });
 
   it('同一条定义在保存中时再提交被挡回，且标志随请求结束清掉', async () => {
@@ -673,6 +688,71 @@ describe('dynamic slice', () => {
     await inFlight;
 
     assert.equal(bag.dynamicValues[scope1]?.sns, undefined, '定义没了，迟到的值不许回来');
+  });
+
+  it('列表带上它是在哪个环境下拉到的，被顶掉的那一次不写环境戳', async () => {
+    const bag = makeHarness();
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_list') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      return null;
+    });
+
+    const first = bag.loadDynamicVariables('p1');
+    assert.equal(bag.dynamicVariablesScope, null, '还没载到就先别声称对得上');
+
+    // 切了环境：面板又发一次。回来的顺序可能反过来。
+    bag.activeEnvironmentId = 'env2';
+    const second = bag.loadDynamicVariables('p1');
+
+    pending[1]([]);
+    await second;
+    assert.equal(bag.dynamicVariablesScope, dynamicValueScope('p1', 'env2'));
+
+    // 旧环境那一次晚回来：它带的是 env1 的值，戳不许改回去。
+    pending[0]([]);
+    await first;
+    assert.equal(
+      bag.dynamicVariablesScope,
+      dynamicValueScope('p1', 'env2'),
+      '被顶掉的列表不能把环境戳改回旧环境',
+    );
+    assert.equal(
+      dynamicListMatchesEnvironment(bag.dynamicVariablesScope, 'p1', 'env1'),
+      false,
+      '戳不一致时面板不该让用户照着一份旧环境的值写覆盖值',
+    );
+    assert.equal(dynamicListMatchesEnvironment(bag.dynamicVariablesScope, 'p1', 'env2'), true);
+  });
+
+  it('新建在飞时标志按项目记，第二次创建被挡回，结束就放开', async () => {
+    // 新建时还没有定义 id；这个标志要能跨表单卸载存活，否则切走标签再回来能再点一次保存。
+    const bag = makeHarness();
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_create') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const first = bag.createDynamicVariable({ projectId: 'p1', name: 'sns' });
+    assert.equal(bag.savingDynamicVariableIds.has(creatingDraftKey('p1')), true);
+    const second = bag.createDynamicVariable({ projectId: 'p1', name: 'sns' });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pending.length, 1, '同一个项目的第二次新建不该再发 POST');
+    assert.equal(await second, null, '第二次新建直接挡回');
+
+    pending[0](definition('sns'));
+    await first;
+    assert.equal(bag.savingDynamicVariableIds.has(creatingDraftKey('p1')), false);
   });
 
   it('两个值请求并发时，先回来的那个不把「正在取数」摘掉', async () => {
