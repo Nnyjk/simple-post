@@ -40,11 +40,31 @@ function element(name: string): string {
 }
 
 describe('请求体 json 载荷区：树 / Raw 两档', () => {
-  it('树只读：JsonTreeView 只吃文本与换行开关', () => {
+  it('树只读：JsonTreeView 只吃解析好的树与换行开关', () => {
     const tree = element('JsonTreeView');
-    assert.ok(tree.includes('text={value.content}'), '树要展示当前载荷');
+    // 解析在调用方做一次、结果传给树：树自己再解析一遍就是同一份文本解析两次。
+    assert.ok(tree.includes('root={treeRoot}'), '树要展示当前载荷解析出来的那棵树');
     assert.ok(tree.includes('wrap={wrap}'), '树要跟随同一个换行开关');
+    assert.ok(tree.includes("active={view === 'tree'}"), '树要知道自己被切到了哪一档');
     assert.ok(!tree.includes('onChange'), '树一旦能写回，载荷就有两个写入口');
+  });
+
+  it('一份载荷只解析一次，合法判定与树根同源', () => {
+    // 分成两次 `parseJsonTree(value.content)` 的话，同一份文本在每次按键上解析两遍。
+    assert.ok(
+      /const parsed = useMemo\(\(\) => parseJsonTree\(value\.content\), \[value\.content\]\);/.test(
+        CODE,
+      ),
+      '解析结果要 memo 成一份',
+    );
+    assert.ok(/const valid = parsed\.ok;/.test(CODE), '是否合法取自同一份解析结果');
+    assert.ok(/const treeRoot = parsed\.ok \? parsed\.root : null;/.test(CODE), '树根也取自它');
+  });
+
+  it('剪贴板没回话时复制按钮禁用', () => {
+    // 连点会排起一串写入，最后落到哪个结果上取决于完成先后。
+    assert.ok(/disabled: copyState === 'busy'/.test(CODE), 'busy 期间要挡住重复点击');
+    assert.ok(/if \(copyState === 'busy'\) return;/.test(CODE), '回调自己也要挡住');
   });
 
   it('默认视图由载荷能否解析成 JSON 决定', () => {
@@ -92,7 +112,9 @@ describe('请求体 json 载荷区：树 / Raw 两档', () => {
     // 开标签（-1）时同样成立。
     const openAt = CODE.lastIndexOf('<EmptyHint', messageAt);
     assert.notEqual(openAt, -1, '那句说明要渲染在 EmptyHint 里');
-    const closeAt = CODE.indexOf('</EmptyHint>', messageAt);
+    // 闭合标签从开标签处往后找：从消息处找会把后面的另一个 `</EmptyHint>` 当成这一个
+    // 的闭合，消息落在两个无关标签之间也能过。
+    const closeAt = CODE.indexOf('</EmptyHint>', openAt);
     assert.notEqual(closeAt, -1, 'EmptyHint 必须闭合');
     assert.ok(openAt < messageAt && messageAt < closeAt, '那句说明要落在 EmptyHint 的开闭标签之间');
   });

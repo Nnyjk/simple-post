@@ -22,14 +22,18 @@ function code(source: string): string {
   return source.replace(/\{\s*\/\*[^\n]*?\*\/\s*\}/g, '').replace(/^\s*\/\/.*$/gm, '');
 }
 
-/** 源码里每个 `<PrettyView … />` 的属性文本，从开标签到自闭合的 `/>`。 */
-function prettyViewBlocks(source: string): string[] {
-  const blocks: string[] = [];
+/**
+ * 源码里每个 `<PrettyView … />` 的属性文本，从开标签到自闭合的 `/>`，连同它在源码里的
+ * 起始位置。位置要一起带出来：只靠文本去找位置的话，两个一模一样的挂载点会都映射到
+ * 第一处，于是两个分支的断言其实在证明同一件事。
+ */
+function prettyViewBlocks(source: string): { at: number; text: string }[] {
+  const blocks: { at: number; text: string }[] = [];
   let at = source.indexOf('<PrettyView');
   while (at !== -1) {
     const end = source.indexOf('/>', at);
     assert.notEqual(end, -1, '<PrettyView> 必须自闭合');
-    blocks.push(source.slice(at, end));
+    blocks.push({ at, text: source.slice(at, end) });
     at = source.indexOf('<PrettyView', end);
   }
   return blocks;
@@ -48,28 +52,38 @@ describe('ResponseViewer: pretty/raw 两态都交给 PrettyView', () => {
     assert.equal(blocks.length, 4, 'pretty/raw 两页的 json 与 text 分支都应渲染 PrettyView');
     // 每个挂载点都要对着它自己的分支断言：只数总次数的话，把 expectJson 从 text 挪到 json
     // 仍然通过，而纯文本响应会重新长出一条「格式化」警告。
-    const branches = blocks.map((text) => {
+    const branches = blocks.map(({ at, text }) => {
       // 挂载点属于哪个分支，看它之前最近的那个 `kind === '…'`：pretty 组的 json 分支在最前，
       // 它之前没有 text 分支（`textAt` 为 -1），最近的那个仍然正确地是 json。
-      const before = body.slice(0, body.indexOf(text));
+      const before = body.slice(0, at);
       const jsonAt = before.lastIndexOf("kind === 'json'");
       const textAt = before.lastIndexOf("kind === 'text'");
       assert.notEqual(jsonAt, -1, '找不到挂载点所属的分支');
+      // 页签也照同一套办法从最近的分支标记推出，再要求挂载点写的 view 与之一致 —— 若直接
+      // 从挂载点自己的 `view="…"` 反推，标签与被断言的内容同源，写错也照样「一致」。
+      const prettyAt = before.lastIndexOf("view === 'pretty'");
+      const rawAt = before.lastIndexOf("view === 'raw'");
+      assert.ok(prettyAt !== -1 || rawAt !== -1, '找不到挂载点所属的页签');
       return {
         text,
         kind: jsonAt > textAt ? 'json' : 'text',
-        view: text.includes('view="pretty"') ? 'pretty' : 'raw',
+        tab: prettyAt > rawAt ? 'pretty' : 'raw',
       };
     });
     for (const branch of branches) {
       assert.equal(
+        branch.text.includes(`view="${branch.tab}"`),
+        true,
+        `${branch.tab} 页签下的 ${branch.kind} 分支挂载点写错了 view`,
+      );
+      assert.equal(
         branch.text.includes('expectJson={false}'),
         branch.kind === 'text',
-        `${branch.view} 的 ${branch.kind} 分支${branch.kind === 'text' ? '必须' : '不该'}传 expectJson={false}`,
+        `${branch.tab} 的 ${branch.kind} 分支${branch.kind === 'text' ? '必须' : '不该'}传 expectJson={false}`,
       );
     }
     // 四种组合各一份，否则上面的断言可能对着重复的两个分支证明同一件事。
-    assert.deepEqual([...new Set(branches.map((b) => `${b.view}/${b.kind}`))].sort(), [
+    assert.deepEqual([...new Set(branches.map((b) => `${b.tab}/${b.kind}`))].sort(), [
       'pretty/json',
       'pretty/text',
       'raw/json',
